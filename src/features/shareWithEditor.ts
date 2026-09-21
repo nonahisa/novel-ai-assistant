@@ -20,6 +20,7 @@ import {
   SHARED_FILES,
 } from "../core/editingRepo";
 import { isNestedLocation } from "../core/locationCompare";
+import { pickNewFolderParent } from "./pickFolder";
 import { RECOVERY_DIRECTORY_NAME } from "../core/atomicWrite";
 import { logFailure, useLogFile } from "../core/logger";
 import { withProgress } from "../views/progress";
@@ -195,14 +196,18 @@ export async function shareWithEditor(work: WorkEntry): Promise<void> {
 
 /** 置き場所を聞く。**作品フォルダーの中には置かせない**（入れ子のリポジトリになる） */
 async function chooseDestination(work: WorkEntry): Promise<string | undefined> {
-  const parent = await vscode.window.showOpenDialog({
-    canSelectFolders: true,
-    canSelectFiles: false,
-    canSelectMany: false,
+  // **既定の場所を明示する**（設計書6.97.6）。渡さないとVS Codeは
+  // 「最後に使った場所」を開く。見出しで「書庫の外を勧めます」と書いておいて、
+  // 窓が作品フォルダーの中で開くのでは案内になっていない。
+  //
+  // **渡すのはこの作品だけ。** `shareWithEditor` は登録簿を受け取らないので、
+  // ほかの作品の場所は見ていない。この作品の書庫の1つ上が既定になる
+  const parentPath = await pickNewFolderParent({
+    purpose: "編集用フォルダーを置く場所を選択（書庫の外を勧めます）",
     openLabel: "ここに置く",
-    title: "編集用フォルダーを置く場所を選択（書庫の外を勧めます）",
+    works: [work],
   });
-  if (!parent || parent.length === 0) return undefined;
+  if (!parentPath) return undefined;
 
   const name = await askText({
     title: "編集用フォルダーの名前",
@@ -220,7 +225,7 @@ async function chooseDestination(work: WorkEntry): Promise<string | undefined> {
   });
   if (!name) return undefined;
 
-  const destination = path.join(parent[0].fsPath, name.trim());
+  const destination = path.join(parentPath, name.trim());
 
   // 作品フォルダーの中へ置くと、書庫のリポジトリに入れ子で入ってしまう。
   // **判定は `isNestedLocation` に任せる**——以前はここで独自に比べており、

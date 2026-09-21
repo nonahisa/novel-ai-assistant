@@ -36,13 +36,14 @@ function runner(
   responses: Array<Partial<GitCommandResult>> = []
 ): GitCommandRunner & { calls: string[][] } {
   const calls: string[][] = [];
-  const run = (async (args: string[]) => {
+  const run: GitCommandRunner = async (args) => {
     calls.push(args);
     const next = responses.shift() ?? {};
     return { code: next.code ?? 0, stdout: next.stdout ?? "", stderr: next.stderr ?? "" };
-  }) as GitCommandRunner & { calls: string[][] };
-  run.calls = calls;
-  return run;
+  };
+  // 記録は関数そのものへ持たせる（どのgitコマンドが呼ばれたかを覗くため）。
+  // `as` で型を付け替えると、実体に `calls` が無いまま通ってしまう
+  return Object.assign(run, { calls });
 }
 
 describe("リポジトリを作る", () => {
@@ -266,14 +267,21 @@ describe("状態に応じた次の一手", () => {
   });
 
   test("リモートが無ければ、つなぐ操作を出す", () => {
-    expect(nextSetupStep({ kind: "no_remote", root: "C:/w" })?.label).toContain(
-      "GitHubのリポジトリとつなぐ"
-    );
+    expect(
+      nextSetupStep({ kind: "no_remote", root: "C:/w", dirty: 0, dirtyHere: 0 })
+        ?.label
+    ).toContain("GitHubのリポジトリとつなぐ");
   });
 
   test("上流が無ければ、はじめての送信を出す", () => {
     expect(
-      nextSetupStep({ kind: "no_upstream", root: "C:/w", branch: "main" })?.label
+      nextSetupStep({
+        kind: "no_upstream",
+        root: "C:/w",
+        branch: "main",
+        dirty: 0,
+        dirtyHere: 0,
+      })?.label
     ).toContain("はじめて送信する");
   });
 
@@ -286,7 +294,10 @@ describe("状態に応じた次の一手", () => {
         upstream: "origin/main",
         behind: 0,
         ahead: 0,
+        behindHere: 0,
+        aheadHere: 0,
         dirty: 0,
+        dirtyHere: 0,
         unmerged: 0,
       })
     ).toBeUndefined();
@@ -321,8 +332,10 @@ describe("VS Codeのアカウントでリポジトリを作る", () => {
   });
 
   test("成功したら clone 用のURLを返す", async () => {
+    // 送り先と本文を覗くので、引数の型を明かした偽のfetchにする。
+    // 製品側はGitHub APIへPOSTするため、init を必ず渡す
     const fetchImpl = vi.fn(
-      async () =>
+      async (_url: Parameters<typeof fetch>[0], _init: RequestInit) =>
         new Response(
           JSON.stringify({ clone_url: "https://github.com/x/y.git" }),
           { status: 201 }
@@ -382,7 +395,9 @@ describe("VS Codeのアカウントでリポジトリを作る", () => {
 
 describe("変更を記録できる状態か", () => {
   test("送り先が無くても記録できる（GitHubを使わない作者のため）", () => {
-    expect(canRecordChanges({ kind: "no_remote", root: "C:/w" })).toBe(true);
+    expect(
+      canRecordChanges({ kind: "no_remote", root: "C:/w", dirty: 0, dirtyHere: 0 })
+    ).toBe(true);
   });
 
   test("まだリポジトリでなければ記録できない", () => {

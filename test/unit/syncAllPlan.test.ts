@@ -30,14 +30,23 @@ function work(id: string, title: string, folderPath: string): WorkEntry {
 function tracked(
   over: Partial<Extract<GitSyncStatus, { kind: "tracked" }>> = {}
 ): GitSyncStatus {
+  // 置き場に作品が1つだけの想定なので、その作品ぶんの数（`〜Here`）は
+  // 置き場ぜんぶの数と同じにする。**食い違う組み合わせを作らない**ために、
+  // 渡された値から写す
+  const behind = over.behind ?? 0;
+  const ahead = over.ahead ?? 0;
+  const dirty = over.dirty ?? 0;
   return {
     kind: "tracked",
     root: "C:/書庫",
     branch: "main",
     upstream: "origin/main",
-    behind: 0,
-    ahead: 0,
-    dirty: 0,
+    behind,
+    ahead,
+    dirty,
+    behindHere: behind,
+    aheadHere: ahead,
+    dirtyHere: dirty,
     unmerged: 0,
     ...over,
   };
@@ -114,7 +123,11 @@ describe("置き場ごとの手順", () => {
   /** 送り先が無くても、履歴には残せる */
   test("送り先が未設定でも、記録はする", () => {
     const plan = planSyncTarget(
-      state({ trackable: 2, status: { kind: "no_remote", root: "C:/書庫" } })
+      state({
+        trackable: 2,
+        // 記録していない2件は、gitから見ても変更として立っている
+        status: { kind: "no_remote", root: "C:/書庫", dirty: 2, dirtyHere: 2 },
+      })
     );
     expect(plan.commit).toBe(true);
     expect(plan.push).toBe(false);
@@ -124,7 +137,13 @@ describe("置き場ごとの手順", () => {
     const plan = planSyncTarget(
       state({
         trackable: 1,
-        status: { kind: "no_upstream", root: "C:/書庫", branch: "main" },
+        status: {
+          kind: "no_upstream",
+          root: "C:/書庫",
+          branch: "main",
+          dirty: 1,
+          dirtyHere: 1,
+        },
       })
     );
     expect(plan.commit).toBe(true);

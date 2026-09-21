@@ -22,6 +22,20 @@ function resolveSmokeModel(override) {
   return SAKURA_AI_SMOKE_MODEL;
 }
 
+/**
+ * さくらのAIへ1回だけ問い合わせて疎通を確かめる。
+ *
+ * 既定値を持たない `log` と `model` は、JSの推論では必須扱いになってしまうため、
+ * 任意であることをJSDocで明示している（実際は省いて呼べる）。
+ *
+ * @param {{
+ *   token: string,
+ *   fetchImpl?: typeof globalThis.fetch,
+ *   log?: (line: string) => void,
+ *   model?: string,
+ * }} options
+ * @returns {Promise<{ model: string, contentLength: number }>}
+ */
 export async function runSakuraAiSmoke({
   token,
   fetchImpl = globalThis.fetch,

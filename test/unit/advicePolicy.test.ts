@@ -375,7 +375,7 @@ describe("操作ログに残す行", () => {
     const before = profile({ scores: scores(3, 3, 3) });
     const after = applyProfileSignals(
       before,
-      { reader: 1, receptivity: "low", confidence: "high" },
+      { reader: 1, acceptance: "low", confidence: "high" },
       now
     );
     const line = describeAdvicePolicyUpdate(before, after) ?? "";

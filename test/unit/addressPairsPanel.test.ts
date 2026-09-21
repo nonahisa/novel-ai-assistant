@@ -53,9 +53,7 @@ function person(
   options: { chapters?: number[]; terms?: AddressTerm[] } = {}
 ): Character {
   return {
-    ...emptyCharacter(),
-    id,
-    name,
+    ...emptyCharacter(id, name),
     appearedChapters: options.chapters ?? [],
     addressTerms: options.terms ?? [],
   };

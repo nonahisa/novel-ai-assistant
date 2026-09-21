@@ -6,8 +6,14 @@ import {
   isQuoteStillPresent,
   parseRecheckAnswer,
   recheckProposal,
+  type RecheckRequest,
 } from "../../src/features/recheckProposal";
-import { AIError, type GenerateParams, type GenerateResult } from "../../src/ai/types";
+import {
+  AIError,
+  type AIProvider,
+  type GenerateParams,
+  type GenerateResult,
+} from "../../src/ai/types";
 
 /**
  * 指摘の再チェック（P-23）。
@@ -257,14 +263,19 @@ describe("1件を確かめる", () => {
     };
   }
 
-  function request(content: string, provider: { generate: typeof replying }) {
+  /**
+   * 作り物のプロバイダ。`replying` / `throwing` が返すのはこの形で、
+   * 製品が求めるのも `generate` と `id` だけ（`RecheckRequest.provider`）。
+   * **ここで型を確定させておくと、呼び出し側で `as any` が要らなくなる**
+   */
+  type FakeProvider = Pick<AIProvider, "generate">;
+
+  function request(content: string, provider: FakeProvider): RecheckRequest {
     return {
       // `id` は出力上限の台帳を引くのに要る（`ai/outputLimit.ts`）。
       // 偽物なので、台帳に無い名前でよい——設定値がそのまま使われる
       provider: {
-        ...(provider as unknown as {
-          generate: (p: GenerateParams) => Promise<GenerateResult>;
-        }),
+        ...provider,
         id: "ollama",
       },
       model: "gemma4:e4b",
@@ -279,10 +290,7 @@ describe("1件を確かめる", () => {
   /** **直し忘れは、その場で分かるのがいちばん役に立つ。** 課金しない */
   test("本文が変わっていなければ、AIを呼ばない", async () => {
     const provider = replying('{"resolved": true, "reason": ""}');
-    const outcome = await recheckProposal(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      request(BEFORE, provider as any)
-    );
+    const outcome = await recheckProposal(request(BEFORE, provider));
 
     expect(outcome.kind).toBe("unchanged");
     expect(calls).toHaveLength(0);
@@ -290,10 +298,7 @@ describe("1件を確かめる", () => {
 
   test("書き直されていれば、AIに1回だけ聞く", async () => {
     const provider = replying('{"resolved": true, "reason": "駆けたに直っています"}');
-    const outcome = await recheckProposal(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      request(AFTER, provider as any)
-    );
+    const outcome = await recheckProposal(request(AFTER, provider));
 
     expect(calls).toHaveLength(1);
     expect(outcome).toEqual({
@@ -304,10 +309,7 @@ describe("1件を確かめる", () => {
 
   test("まだ当てはまるなら、理由を添えて残す", async () => {
     const provider = replying('{"resolved": false, "reason": "促音がまだ抜けています"}');
-    const outcome = await recheckProposal(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      request(AFTER, provider as any)
-    );
+    const outcome = await recheckProposal(request(AFTER, provider));
 
     expect(outcome).toEqual({
       kind: "unresolved",
@@ -321,20 +323,14 @@ describe("1件を確かめる", () => {
    */
   test("AIが落ちたら失敗として返す（解消にしない）", async () => {
     const provider = throwing(new AIError("接続できません", "not_running"));
-    const outcome = await recheckProposal(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      request(AFTER, provider as any)
-    );
+    const outcome = await recheckProposal(request(AFTER, provider));
 
     expect(outcome.kind).toBe("failed");
   });
 
   test("取りやめたことは、失敗と分けて伝える", async () => {
     const provider = throwing(new AIError("中止", "aborted"));
-    const outcome = await recheckProposal(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      request(AFTER, provider as any)
-    );
+    const outcome = await recheckProposal(request(AFTER, provider));
 
     expect(outcome).toMatchObject({ kind: "failed" });
     expect(outcome.kind === "failed" && outcome.reason).toContain("取りやめ");
@@ -342,10 +338,7 @@ describe("1件を確かめる", () => {
 
   test("答えが読めなければ失敗として返す", async () => {
     const provider = replying("たぶん直っていると思います");
-    const outcome = await recheckProposal(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      request(AFTER, provider as any)
-    );
+    const outcome = await recheckProposal(request(AFTER, provider));
 
     expect(outcome.kind).toBe("failed");
     // **エラーの本文を捨てない**（CLAUDE.md）。原因にたどり着けなくなる
@@ -354,18 +347,14 @@ describe("1件を確かめる", () => {
 
   test("答えが途中で切れていたら失敗として返す", async () => {
     const provider = replying('{"resolved": tr', { truncated: true });
-    const outcome = await recheckProposal(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      request(AFTER, provider as any)
-    );
+    const outcome = await recheckProposal(request(AFTER, provider));
 
     expect(outcome.kind).toBe("failed");
   });
 
   test("送信量の記録は、再チェックとして数える", async () => {
     const provider = replying('{"resolved": true, "reason": ""}');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await recheckProposal(request(AFTER, provider as any));
+    await recheckProposal(request(AFTER, provider));
 
     expect(calls[0].meta).toEqual({
       feature: "recheck",
@@ -379,8 +368,7 @@ describe("1件を確かめる", () => {
    */
   test("コンテキスト長を決め打ちしない", async () => {
     const provider = replying('{"resolved": true, "reason": ""}');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await recheckProposal(request(AFTER, provider as any));
+    await recheckProposal(request(AFTER, provider));
 
     expect(calls[0].numCtx).toBeUndefined();
     // 判断であって創作ではないので、揺らさない
@@ -394,8 +382,7 @@ describe("1件を確かめる", () => {
   test("修正案が無い指摘でも確かめられる", async () => {
     const provider = replying('{"resolved": true, "reason": "二文に分かれています"}');
     const outcome = await recheckProposal({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...(request(AFTER, provider as any) as any),
+      ...request(AFTER, provider),
       category: "推敲",
       item: { ...ITEM, suggestion: "" },
     });
@@ -407,8 +394,7 @@ describe("1件を確かめる", () => {
 
   test("修正案があれば、参考として添える", async () => {
     const provider = replying('{"resolved": true, "reason": ""}');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await recheckProposal(request(AFTER, provider as any));
+    await recheckProposal(request(AFTER, provider));
 
     expect(calls[0].userPrompt).toContain("そのときの修正案");
     expect(calls[0].userPrompt).toContain("走った");

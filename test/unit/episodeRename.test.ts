@@ -19,7 +19,9 @@ function file(overrides: Partial<EpisodeFile> = {}): EpisodeFile {
     subtitle: null,
     kind: "本編",
     isInitialName: true,
-    counts: { gross: 0, net: 0, lines: 0, paragraphs: 0 },
+    // 字数はこのテストの検査対象ではない（見るのはファイル名だけ）ので、
+    // 項目どうしが食い違わないよう全部 0 で揃える。
+    counts: { gross: 0, net: 0, lines: 0, paragraphs: 0, manuscriptLines: 0 },
     hasMetadata: false,
     metaTitle: null,
     declaredCharCount: null,

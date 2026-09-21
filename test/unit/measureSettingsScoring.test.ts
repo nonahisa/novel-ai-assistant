@@ -102,7 +102,8 @@ interface CharactersPart {
 function chunkResult(
   file: string,
   characters: CharactersPart,
-  settings: SettingsPart,
+  // 人物だけを差し替える呼び方が多いので、設定資料側は省ける（既定は空）
+  settings: SettingsPart = {},
   index = 0
 ): Record<string, unknown> {
   return {
@@ -623,7 +624,8 @@ describe("指標の表", () => {
       rejected: 0,
       failures: 0,
     });
-    expect(detail.settingsFound["人物"]).toEqual({ found: 5, total: 5 });
+    // `detail` は機能ごとに中身が変わる袋なので、設定資料のときだけ入る項目は `?.` で引く
+    expect(detail.settingsFound?.["人物"]).toEqual({ found: 5, total: 5 });
 
     const lines = formatSpreadLines(spreadOfRuns([{ metrics }]));
     expect(lines[0]).toBe(

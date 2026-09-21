@@ -8,6 +8,26 @@ import {
 } from "./support/importGraph";
 
 /**
+ * コメントと文字列を落とす（2026-09-21）。
+ *
+ * **禁じ手の名前は、コメントに書けなければならない。** 「`vscode.Uri.file()` を
+ * 直に呼ばない」と理由を添えたファイルが、その注意書きごと咎められた
+ * （`features/pickFolder.ts`。実際の呼び出しは `toUri()` で正しかった）。
+ *
+ * **ここで落とすのは行コメント・ブロックコメント・文字列の3つだけ**である。
+ * 構文解析まではしない——**この検査は「素朴に探して当たったら疑う」ためのもの**で、
+ * 取りこぼしよりも空振りのほうが害が大きい。
+ */
+function withoutComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ")
+    .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
+    .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
+    .replace(/`(?:[^`\\]|\\.)*`/g, "``");
+}
+
+/**
  * ブラウザ版で起動した瞬間に落ちる形になっていないか（設計書5.8、CLAUDE.md 規則7）。
  *
  * **「ビルドが通った」は「動く」ではない。** `esbuild.js` はブラウザ束で
@@ -71,7 +91,11 @@ describe("ブラウザ版で起動した瞬間に落ちないか", () => {
   test("`vscode.Uri.file()` を直接呼んでいない（`paths.toUri` を通す）", () => {
     const offenders = relativeNames(reached.files).filter((name) => {
       if (name === "core/paths.ts") return false;
-      return /vscode\.Uri\.file\(/.test(fs.readFileSync(path.join(SRC, name), "utf8"));
+      const source = fs.readFileSync(path.join(SRC, name), "utf8");
+      // **コメントは数えない**（2026-09-21）。「`vscode.Uri.file()` を直に呼ばない」と
+      // 注意書きを添えたファイルが、そのまま咎められた（`features/pickFolder.ts`）。
+      // **禁じ手の名前をコメントへ書けないと、なぜそう書くのかを残せない。**
+      return /vscode\.Uri\.file\(/.test(withoutComments(source));
     });
     expect(offenders).toEqual([]);
   });

@@ -120,7 +120,7 @@ import {
   type ProposalViewItem,
   type RecordUpdateViewItem,
 } from "../../src/features/proposalPanel";
-import { FACT_CONTRADICTION_CATEGORY } from "../../src/core/factContradiction";
+import type { AcceptedContradiction } from "../../src/core/contradictionValidation";
 import type { WorkEntry } from "../../src/models/types";
 import type { FindingLine } from "../../src/models/finding";
 
@@ -148,7 +148,8 @@ function issue() {
 }
 
 /** 矛盾の1件（同じ行を指す） */
-function contradiction() {
+// 返す形を名乗っておく（製品側の項目が増えたら、この作り物で気づける）
+function contradiction(): AcceptedContradiction {
   return {
     filePath: FILE,
     chunkHash: "h1",
@@ -158,6 +159,7 @@ function contradiction() {
     settingSays: "彼女は必ず振り返る",
     textSays: "振り返らなかった",
     note: "",
+    severity: "medium" as const,
     confidence: "medium" as const,
   };
 }

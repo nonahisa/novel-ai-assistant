@@ -225,8 +225,13 @@ describe("話の挿入・削除", () => {
   test("挿入：訊くのはサブタイトルだけで、番号は挿入位置から決まる（A-6）", async () => {
     window.showWarningMessage = async () => "付け替える";
     let seenPrompt = "";
-    window.showInputBox = async (options?: { prompt?: string }) => {
-      seenPrompt = options?.prompt ?? "";
+    // スタブの署名（任意の項目を持つ入れ物）に合わせる。prompt は
+    // unknown で届くので、文字列のときだけ受け取る
+    window.showInputBox = async (options?: {
+      [key: string]: unknown;
+      value?: string;
+    }) => {
+      seenPrompt = typeof options?.prompt === "string" ? options.prompt : "";
       return "湖畔の誓い";
     };
     const episodes = [1, 2, 3, 4, 5].map((n) =>

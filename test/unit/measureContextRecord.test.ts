@@ -140,7 +140,7 @@ describe("測った結果が台帳へ入ったかどうか", () => {
     await useMemoryTuningStore({ [KEY]: { ...LEDGER_2026_09_13 } });
     answerWith("設定に反映");
 
-    await measureContext(registry, "default", undefined, "context");
+    await measureContext(registry, "default", undefined, "input");
 
     const entry = tuningStoreContents()[KEY] as Record<string, unknown>;
     // **今回の測定で置き換わること。** 09-13 の値が残っているなら、
@@ -162,7 +162,7 @@ describe("測った結果が台帳へ入ったかどうか", () => {
     await useBrokenTuningStore();
     answerWith("設定に反映");
 
-    await measureContext(registry, "default", undefined, "context");
+    await measureContext(registry, "default", undefined, "input");
 
     expect(messagesWith("覚えました")).toEqual([]);
     // 書けなかったことと、そのせいで測った値が残っていないことを言う
@@ -185,7 +185,7 @@ describe("測った結果が台帳へ入ったかどうか", () => {
     fs.rename = async (): Promise<void> => undefined;
     answerWith("設定に反映");
 
-    await measureContext(registry, "default", undefined, "context");
+    await measureContext(registry, "default", undefined, "input");
     fs.rename = original;
 
     expect(messagesWith("覚えました")).toEqual([]);
@@ -208,7 +208,7 @@ describe("測った結果が台帳へ入ったかどうか", () => {
     await useMemoryTuningStore({ [KEY]: { ...LEDGER_2026_09_13 } });
     answerWith("そのままにする");
 
-    await measureContext(registry, "default", undefined, "context");
+    await measureContext(registry, "default", undefined, "input");
 
     const confirm = messagesWith("そのままにする").concat(
       shown.filter((message) => message.includes("反映するのは"))

@@ -94,7 +94,8 @@ describe("作品の登録の仕方は、分類の並びに関わらない（A-21
       new ActionListProvider(registryWith(count))
         .getChildren()
         .map((group) => [
-          group.type === "group" ? group.label ?? group.group.label : "",
+          // 分類の名前は節点そのものではなく、包んでいる ActionGroup が持つ
+          group.type === "group" ? group.group.label : "",
           new ActionListProvider(registryWith(count)).getChildren(group).length,
         ]);
 

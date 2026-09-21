@@ -398,6 +398,8 @@ describe("同期状態の判定", () => {
       upstream: "origin/main",
       behind: 0,
       ahead: 0,
+      behindHere: 0,
+      aheadHere: 0,
       dirty: 1,
       dirtyHere: 1,
       unmerged: 1,
@@ -414,6 +416,8 @@ describe("同期状態の判定", () => {
       upstream: "origin/main",
       behind: 0,
       ahead: 0,
+      behindHere: 0,
+      aheadHere: 0,
       dirty: 1,
       dirtyHere: 1,
       unmerged: 2,
@@ -534,7 +538,12 @@ describe("状態の説明文", () => {
       upstream: "origin/main",
       behind: 3,
       ahead: 0,
+      // 作品が1つだけの置き場を想定しているので、その作品ぶんの数は
+      // 置き場ぜんぶの数と同じになる
+      behindHere: 3,
+      aheadHere: 0,
       dirty: 0,
+      dirtyHere: 0,
       unmerged: 0,
     });
 
@@ -551,7 +560,10 @@ describe("状態の説明文", () => {
       upstream: "origin/main",
       behind: 3,
       ahead: 2,
+      behindHere: 3,
+      aheadHere: 2,
       dirty: 0,
+      dirtyHere: 0,
       unmerged: 0,
       conflicts: { settings: [], manuscripts: [], autoWritten: [], appendOnly: [] },
     });

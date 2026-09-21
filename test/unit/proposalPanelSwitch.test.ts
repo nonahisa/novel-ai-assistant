@@ -22,7 +22,18 @@ import { readFileSync } from "node:fs";
  * 分類ごとに置き場を持ち、出すのは1つだけにする（設計書6.11.3）。
  */
 
-const posted: Array<{ category: string; items: unknown[] }> = [];
+/**
+ * 画面へ送られた便り。
+ *
+ * `workTitle` を含めているのは、**どの作品の結果が映っているかを
+ * このテストが見張っている**ためである（別の作品の結果が届いても
+ * 画面を奪わない、という取り決め。`IssuesMessage` が実際に送っている）。
+ */
+const posted: Array<{
+  workTitle: string;
+  category: string;
+  items: unknown[];
+}> = [];
 /** 通知に出た文言。**画面を奪わない代わりに、ここで届いたことを伝える** */
 const notified: string[] = [];
 /** その通知に作者が何と答えるか。既定は「答えない」（×で閉じたのと同じ） */
@@ -81,7 +92,11 @@ function fakeView() {
       html: "",
       cspSource: "vscode-webview:",
       onDidReceiveMessage: () => ({ dispose: () => undefined }),
-      postMessage: (message: { category: string; items: unknown[] }) => {
+      postMessage: (message: {
+        workTitle: string;
+        category: string;
+        items: unknown[];
+      }) => {
         posted.push(message);
         return Promise.resolve(true);
       },

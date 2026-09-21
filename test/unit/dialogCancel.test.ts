@@ -1,12 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import * as path from "node:path";
-import {
-  CANCEL_HINT,
-  cancelItem,
-  isCancelItem,
-  withCancelHint,
-} from "../../src/views/dialogs";
+import { askText, cancelItem, isCancelItem } from "../../src/views/dialogs";
+import { window } from "./support/vscodeStub";
 
 /**
  * 取りやめ方が分かること（設計書6.17.2、作者の指摘 2026-08-16）。
@@ -15,6 +11,11 @@ import {
  * `Esc` か外側のクリックだけで、この拡張機能は入力を失わせないために
  * `ignoreFocusOut: true` を多用している（外側をクリックしても閉じない）。
  * **つまり `Esc` が唯一の出口なのに、それを書いていなかった。**
+ *
+ * **入力欄の案内は2026-09-21に製品側から外した。** VS Code 自身が
+ * 「'Escape' を押して取り消します」を出しており、同じことを2回言う画面に
+ * なっていた（実機で判明）。選択画面には VS Code の案内が出ないので、
+ * `cancelItem` はそのまま残す。
  */
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
@@ -26,26 +27,54 @@ function sourceFiles(dir: string): string[] {
   return out;
 }
 
+/** askText が VS Code へ渡す内容のうち、ここで見るぶんだけ */
+interface AskedOptions {
+  readonly prompt?: string;
+  readonly ignoreFocusOut?: boolean;
+}
+
 describe("入力欄", () => {
-  test("説明の末尾に、取りやめ方を書く", () => {
-    expect(withCancelHint("作品名を入力してください")).toBe(
-      `作品名を入力してください${CANCEL_HINT}`
-    );
+  test("取りやめ方を、製品からは書かない", async () => {
+    // **VS Code 自身が「'Escape' を押して取り消します」を出す。**
+    // 製品側でも書いていたので、同じことを2回言う画面になっていた
+    // （2026-09-21、実機で判明）
+    let passed: AskedOptions | undefined;
+    const original = window.showInputBox;
+    window.showInputBox = async (options?: unknown) => {
+      passed = options as AskedOptions;
+      return undefined;
+    };
+    try {
+      await askText({ prompt: "リポジトリのURLを貼り付けてください" });
+    } finally {
+      window.showInputBox = original;
+    }
+
+    expect(passed?.prompt).toBe("リポジトリのURLを貼り付けてください");
+    expect(passed?.prompt).not.toContain("Esc");
   });
 
-  test("二重に付けない", () => {
-    const once = withCancelHint("説明");
-    expect(withCancelHint(once)).toBe(once);
-  });
+  test("外側をクリックしても閉じない（出口は Esc だけ）", async () => {
+    // `ignoreFocusOut` を外すと、別のウィンドウへ目を移した拍子に
+    // 入力が消える（設計書6.4.1）
+    let passed: AskedOptions | undefined;
+    const original = window.showInputBox;
+    window.showInputBox = async (options?: unknown) => {
+      passed = options as AskedOptions;
+      return undefined;
+    };
+    try {
+      await askText({ prompt: "作品名" });
+    } finally {
+      window.showInputBox = original;
+    }
 
-  test("説明が無くても案内は出す", () => {
-    // 見出しだけの入力欄でも、出口は要る
-    expect(withCancelHint(undefined)).toContain("Escキー");
-    expect(withCancelHint("")).toContain("Escキー");
+    expect(passed?.ignoreFocusOut).toBe(true);
   });
 
   test("`showInputBox` を直接呼ばない", () => {
-    // **付け忘れが起きる。** 21か所あり、手で足すと必ずどれかを飛ばす
+    // **`ignoreFocusOut` の付け忘れが起きる。** 数十か所あり、
+    // 手で足すと必ずどれかを飛ばす（入力が消える画面が1つだけ残る）
     const offenders = sourceFiles("src")
       .filter((file) => !file.endsWith(path.join("views", "dialogs.ts")))
       .filter((file) =>

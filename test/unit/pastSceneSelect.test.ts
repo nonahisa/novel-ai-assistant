@@ -20,9 +20,16 @@ import type { ExcerptSource } from "../../src/core/mentionExcerpts";
  *   無関係な本文はノイズにしかならない。空にしない工夫はしない
  */
 
+/**
+ * 出典を1つ作る。
+ *
+ * `chapter` に `undefined` も取るのは、`ExcerptSource.chapter` が
+ * 「読み取れなければ null／未設定」の両方を許す任意の項目だからで、
+ * 下のテストは**その両方**が場面にならないことを確かめている。
+ */
 function source(
   label: string,
-  chapter: number | null,
+  chapter: number | null | undefined,
   text: string
 ): ExcerptSource {
   return { label, chapter, text };

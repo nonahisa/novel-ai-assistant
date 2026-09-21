@@ -18,7 +18,21 @@ function apply(original: string, target: string, suggestion: string): string {
   return original.slice(0, at) + suggestion + original.slice(at + target.length);
 }
 
-const 実際に壊れた4件 = [
+/**
+ * 1件の写し。
+ *
+ * `line` は**本文のその行そのもの**で、抜粋（`original`）と違うときだけ書く
+ * ——検査は行に対して行うが、下の事例はどれも行がそのまま抜粋になっている。
+ */
+interface 事例 {
+  name: string;
+  line?: string;
+  original: string;
+  target: string;
+  suggestion: string;
+}
+
+const 実際に壊れた4件: 事例[] = [
   {
     name: "第9話 48行目",
     original: "「あんたが望むなら、夢で会わすぐらいのことはできるんだがね」",
@@ -69,7 +83,7 @@ describe("実際に原稿を壊した4件を弾く", () => {
 });
 
 describe("まっとうな修正案は通す", () => {
-  const 通すべき = [
+  const 通すべき: 事例[] = [
     {
       name: "同音異義語の直し",
       original: "それは意外な結末だった。",

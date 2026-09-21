@@ -35,6 +35,7 @@ function finding(overrides: Partial<Finding> = {}): Finding {
     after: "　窓の外で鐘が鳴る。",
     message: "送り仮名",
     category: "typo",
+    label: "誤字脱字",
   };
   return { ...base, ...overrides };
 }

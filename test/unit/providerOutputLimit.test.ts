@@ -9,6 +9,7 @@ import { GeminiProvider } from "../../src/ai/geminiProvider";
 import { LmStudioProvider } from "../../src/ai/lmstudioProvider";
 import { SakuraProvider } from "../../src/ai/sakuraProvider";
 import { DEFAULT_MAX_OUTPUT_TOKENS } from "../../src/ai/outputLimit";
+import type { AIProvider } from "../../src/ai/types";
 import { workspace } from "./support/vscodeStub";
 
 /**
@@ -123,7 +124,7 @@ function stubFetch(reply: () => unknown): Array<Record<string, unknown>> {
   const bodies: Array<Record<string, unknown>> = [];
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.includes("/v1/models/")) return jsonResponse(claudeModel);
       if (url.includes("/api/v0/models")) return jsonResponse({ data: [] });
@@ -360,7 +361,7 @@ describe("Ollamaが確保する長さ（設計書6.77）", () => {
     let numCtx = 0;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
         const url = input instanceof Request ? input.url : String(input);
         if (url.endsWith("/api/show")) {
           return jsonResponse({
@@ -408,13 +409,18 @@ describe("Ollamaが確保する長さ（設計書6.77）", () => {
     expect(new OllamaProvider().capsOutput).toBe(false);
   });
 
-  test.each([
+  // `capsOutput` は `AIProvider` の**任意の項目**で、掛ける側のクラスは
+  // 持たない。見たいのは「約束（インターフェース）として空である」ことなので、
+  // 作る関数の戻りを `AIProvider` として受ける
+  const cappingProviders: Array<[string, () => AIProvider]> = [
     ["Claude", () => new ClaudeProvider(fakeContext())],
     ["ChatGPT", () => new OpenAIProvider(fakeContext())],
     ["LM Studio", () => new LmStudioProvider()],
     ["さくらのAI", () => new SakuraProvider(fakeContext())],
     ["Gemini", () => new GeminiProvider(fakeContext())],
-  ])("%s は上限を掛ける側（印を持たない＝既定のまま）", (_name, make) => {
+  ];
+
+  test.each(cappingProviders)("%s は上限を掛ける側（印を持たない＝既定のまま）", (_name, make) => {
     expect(make().capsOutput).toBeUndefined();
   });
 
@@ -424,7 +430,7 @@ describe("Ollamaが確保する長さ（設計書6.77）", () => {
     let body: Record<string, unknown> = {};
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
         const url = input instanceof Request ? input.url : String(input);
         if (url.endsWith("/api/show")) {
           return jsonResponse({

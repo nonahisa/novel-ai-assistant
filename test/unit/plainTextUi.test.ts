@@ -213,13 +213,13 @@ describe("画面に出す文字列にMarkdownの記号を混ぜない", () => {
 
 describe("diffLinesForPanel", () => {
   const diff: CharacterDiff = {
+    id: "char_001",
     name: "佐藤",
-    filePath: "characters/sato.json",
     changes: [
-      { field: "age", label: "年齢", before: "17", after: "18" },
-      { field: "role", label: "役割", before: "", after: "主人公" },
+      { label: "年齢", before: "17", after: "18" },
+      { label: "役割", before: "", after: "主人公" },
     ],
-  } as CharacterDiff;
+  };
 
   it("Markdownの記号を含まない", () => {
     for (const line of diffLinesForPanel(diff)) {

@@ -1,9 +1,7 @@
 import { describe, expect, test } from "vitest";
-import {
-  rebaseline,
-  sameBaseline,
-  type DeviceWritingStats,
-} from "../../src/core/writingStats";
+import { rebaseline, sameBaseline } from "../../src/core/writingStats";
+// 型そのものは models 側にある（core は使うだけで再輸出していない）
+import type { DeviceWritingStats } from "../../src/models/writingStats";
 import {
   bodyChangePaths,
   isBodyChangePath,
@@ -35,7 +33,8 @@ import {
 const BASE: DeviceWritingStats = {
   schemaVersion: "1",
   deviceId: "test-device",
-  daily: [],
+  // 日ごとの記録は空（ここで見るのは基準＝`baseline` の置き直しだけ）
+  days: [],
   baseline: {
     net: 18198,
     gross: 18499,

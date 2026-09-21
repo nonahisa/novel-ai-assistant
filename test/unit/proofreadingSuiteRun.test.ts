@@ -5,7 +5,6 @@ import {
   runProofreadingSuite,
   type SelectionMemento,
 } from "../../src/features/proofreadingSuite";
-import { PROOFREADING_SUITE_SELECTION_KEY } from "../../src/core/proofreadingSuite";
 
 /**
  * 校正のまとめ実行（設計書6.80）の走らせ方。

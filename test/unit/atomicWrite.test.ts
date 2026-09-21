@@ -1,5 +1,5 @@
 import * as crypto from "crypto";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi, type Mock } from "vitest";
 import { atomicWriteFile } from "../../src/core/atomicWrite";
 import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
 
@@ -14,12 +14,45 @@ describe("原稿の原子的な保存", () => {
   const files = new Map<string, Uint8Array>();
   const directories = new Set<string>();
   const deletedPaths: string[] = [];
+  /**
+   * 付け替え・読み取りの代役を、**引数の型を持ったまま控えておく**控え。
+   * `workspace.fs` は形を決めない受け皿（引数が `never`）なので、そこから
+   * 取り出した関数は呼び戻せない。差し替える試験が「元の動き」を呼ぶときに使う。
+   */
+  let renameBase: Mock<
+    (
+      from: { fsPath: string },
+      to: { fsPath: string },
+      options?: { overwrite?: boolean }
+    ) => Promise<void>
+  >;
+  let readFileBase: Mock<(uri: { fsPath: string }) => Promise<Uint8Array>>;
 
   beforeEach(() => {
     files.clear();
     directories.clear();
     directories.add("c:\\novels");
     deletedPaths.length = 0;
+    renameBase = vi.fn(
+      async (
+        from: { fsPath: string },
+        to: { fsPath: string },
+        options?: { overwrite?: boolean }
+      ) => {
+        const bytes = files.get(from.fsPath);
+        if (!bytes) throw new Error("一時ファイルがありません");
+        if (!options?.overwrite && files.has(to.fsPath)) {
+          throw new FileSystemError("exists", "FileExists");
+        }
+        files.set(to.fsPath, bytes);
+        files.delete(from.fsPath);
+      }
+    );
+    readFileBase = vi.fn(async (uri: { fsPath: string }) => {
+      const bytes = files.get(uri.fsPath);
+      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+      return bytes;
+    });
     workspace.fs = {
       createDirectory: vi.fn(async (uri: { fsPath: string }) => {
         directories.add(uri.fsPath);
@@ -35,26 +68,8 @@ describe("原稿の原子的な保存", () => {
       writeFile: vi.fn(async (uri: { fsPath: string }, bytes: Uint8Array) => {
         files.set(uri.fsPath, bytes);
       }),
-      readFile: vi.fn(async (uri: { fsPath: string }) => {
-        const bytes = files.get(uri.fsPath);
-        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-        return bytes;
-      }),
-      rename: vi.fn(
-        async (
-          from: { fsPath: string },
-          to: { fsPath: string },
-          options?: { overwrite?: boolean }
-        ) => {
-          const bytes = files.get(from.fsPath);
-          if (!bytes) throw new Error("一時ファイルがありません");
-          if (!options?.overwrite && files.has(to.fsPath)) {
-            throw new FileSystemError("exists", "FileExists");
-          }
-          files.set(to.fsPath, bytes);
-          files.delete(from.fsPath);
-        }
-      ),
+      readFile: readFileBase,
+      rename: renameBase,
       delete: vi.fn(async (uri: { fsPath: string }) => {
         deletedPaths.push(uri.fsPath);
         files.delete(uri.fsPath);
@@ -122,7 +137,7 @@ describe("原稿の原子的な保存", () => {
     const original = new Uint8Array([0x51, 0x52]);
     const replacement = new Uint8Array([0x53, 0x54]);
     files.set(destinationPath, original);
-    const baseRename = workspace.fs.rename;
+    const baseRename = renameBase;
     workspace.fs.rename = vi.fn(async (from, to, options) => {
       if (to.fsPath.endsWith(".bak")) {
         throw new FileSystemError("recovery denied", "NoPermissions");
@@ -203,7 +218,7 @@ describe("原稿の原子的な保存", () => {
     const changedByAuthor = new Uint8Array([0x83, 0x84]);
     const replacement = new Uint8Array([0x85, 0x86]);
     files.set(destinationPath, original);
-    const baseReadFile = workspace.fs.readFile;
+    const baseReadFile = readFileBase;
     let destinationReads = 0;
     workspace.fs.readFile = vi.fn(async (uri: { fsPath: string }) => {
       const bytes = await baseReadFile(uri);

@@ -14,6 +14,7 @@ import type { WorkRegistry } from "../core/workRegistry";
 import { withProgress } from "../views/progress";
 import { askText } from "../views/dialogs";
 import { tryRegisterAsCollection } from "./addCollection";
+import { pickNewFolderParent } from "./pickFolder";
 import { notifyDone } from "../views/notify";
 
 /**
@@ -49,14 +50,15 @@ export async function addWorkFromGithub(
   });
   if (!url) return [];
 
-  const parent = await vscode.window.showOpenDialog({
-    canSelectFolders: true,
-    canSelectFiles: false,
-    canSelectMany: false,
+  // **既定の場所を明示する**（設計書6.97.6）。渡さないとVS Codeは
+  // 「最後に使った場所」を開き、直前に原稿を触っていれば**作品フォルダーの中**
+  // が開いた状態で立ち上がる。そのまま押せば、原稿の中に別の書庫が入る
+  const parentPath = await pickNewFolderParent({
+    purpose: "作品フォルダを置く場所を選択",
     openLabel: "ここに取り寄せる",
-    title: "作品フォルダを置く場所を選択",
+    works: registry.list(),
   });
-  if (!parent || parent.length === 0) return [];
+  if (!parentPath) return [];
 
   const suggested = folderNameFromUrl(url);
   const folderName = await askText({
@@ -75,7 +77,7 @@ export async function addWorkFromGithub(
   });
   if (!folderName) return [];
 
-  const destination = path.join(parent[0].fsPath, folderName.trim());
+  const destination = path.join(parentPath, folderName.trim());
   if (await pathExists(destination)) {
     vscode.window.showErrorMessage(
       `「${destination}」はすでに存在します。` +

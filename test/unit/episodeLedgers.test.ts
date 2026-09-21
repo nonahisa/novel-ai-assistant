@@ -14,7 +14,6 @@ import { createAbilityStore } from "../../src/core/abilityStore";
 import { createForeshadowStore } from "../../src/core/foreshadowStore";
 import { SynopsisStore } from "../../src/core/synopsisStore";
 import { PostingStore } from "../../src/core/postingStore";
-import { defaultBookConfig } from "../../src/models/book";
 import { emptyCharacter } from "../../src/models/character";
 import { emptyAbility } from "../../src/models/ability";
 import { emptyForeshadow } from "../../src/models/foreshadow";

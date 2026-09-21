@@ -615,7 +615,7 @@ describe("AIプロバイダ境界", () => {
     let modelSignal: AbortSignal | undefined;
     let modelCalls = 0;
     let messageCalls = 0;
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    vi.stubGlobal("fetch", vi.fn((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.includes("/v1/models/")) {
         modelCalls += 1;
@@ -647,7 +647,7 @@ describe("AIプロバイダ境界", () => {
   });
 
   test("Claudeはrefusalをbad_responseとして返す", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.includes("/v1/models/")) {
         return jsonResponse(claudeModel);
@@ -661,7 +661,7 @@ describe("AIプロバイダ境界", () => {
   });
 
   test("Claudeは空白だけの応答をbad_responseとして返す", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.includes("/v1/models/")) {
         return jsonResponse(claudeModel);
@@ -680,7 +680,7 @@ describe("AIプロバイダ境界", () => {
     ["stop_reasonがない成功応答", { ...claudeMessage("ok"), stop_reason: undefined }],
     ["stop_reasonが未対応の成功応答", { ...claudeMessage("ok"), stop_reason: "unknown" }],
   ])("Claudeは%sをbad_responseとして返す", async (_label, body) => {
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input instanceof Request ? input.url : String(input);
       return url.includes("/v1/models/") ? jsonResponse(claudeModel) : jsonResponse(body);
     }));
@@ -694,7 +694,7 @@ describe("AIプロバイダ境界", () => {
     ["空のJSON HTTP本文", ""],
     ["壊れたJSON HTTP本文", "{"],
   ])("Claudeは%sのSDKデコード失敗をbad_responseとして返す", async (_label, body) => {
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.includes("/v1/models/")) {
         return jsonResponse(claudeModel);
@@ -714,7 +714,7 @@ describe("AIプロバイダ境界", () => {
     ["end_turn", claudeMessage("ok", "end_turn")],
     ["null", claudeMessage("ok", null)],
   ])("Claudeは有効なstop_reason %sを受け入れる", async (_label, body) => {
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input instanceof Request ? input.url : String(input);
       return url.includes("/v1/models/") ? jsonResponse(claudeModel) : jsonResponse(body);
     }));
@@ -726,7 +726,7 @@ describe("AIプロバイダ境界", () => {
 
   test("Claudeはthinking拒否時だけ1回だけ再試行する", async () => {
     let messageCalls = 0;
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.includes("/v1/models/")) {
         return jsonResponse(claudeModel);
@@ -752,7 +752,7 @@ describe("AIプロバイダ境界", () => {
 
   test("Claudeはthinking以外の失敗を再試行しない", async () => {
     let messageCalls = 0;
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.includes("/v1/models/")) {
         return jsonResponse(claudeModel);
@@ -780,7 +780,7 @@ describe("AIプロバイダ境界", () => {
     // **送っていない指定は外す候補にしない**（外しても意味がないうえ、
     // 「非対応」と覚えてしまうと、次に必要になったとき使えなくなる）
     let messageCalls = 0;
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.includes("/v1/models/")) {
         return jsonResponse(claudeModel);
@@ -806,7 +806,7 @@ describe("AIプロバイダ境界", () => {
     // Anthropicは残高不足も400 invalid_request_error で返す。
     // 機能を外しても直らないうえ、外し続けると対応機能を失う
     let messageCalls = 0;
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.includes("/v1/models/")) {
         return jsonResponse(claudeModel);
@@ -840,7 +840,7 @@ describe("AIプロバイダ境界", () => {
     // 支払ったあとも対応機能を使わなくなる
     const context = claudeContext();
     let failing = true;
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.includes("/v1/models/")) {
         return jsonResponse(claudeModel);
@@ -871,7 +871,7 @@ describe("AIプロバイダ境界", () => {
 
   test("拒否された理由を捨てずにログへ残せる形にする", async () => {
     // 以前はステータスだけを詳細にしており、原因にたどり着けなかった
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.includes("/v1/models/")) {
         return jsonResponse(claudeModel);
@@ -1024,7 +1024,7 @@ describe("AIプロバイダ境界", () => {
       };
       vi.stubGlobal(
         "fetch",
-        vi.fn(async (input: RequestInfo | URL) => {
+        vi.fn(async (input: Parameters<typeof fetch>[0]) => {
           const url = input instanceof Request ? input.url : String(input);
           return url.includes("/v1/models/")
             ? jsonResponse(claudeModel)
@@ -1043,7 +1043,7 @@ describe("AIプロバイダ境界", () => {
       // いまは `cache_control` を送っていないので、これが通常の応答である
       vi.stubGlobal(
         "fetch",
-        vi.fn(async (input: RequestInfo | URL) => {
+        vi.fn(async (input: Parameters<typeof fetch>[0]) => {
           const url = input instanceof Request ? input.url : String(input);
           return url.includes("/v1/models/")
             ? jsonResponse(claudeModel)
@@ -1105,7 +1105,7 @@ describe("AIプロバイダ境界", () => {
       native: unknown[] | undefined,
       ids: string[]
     ): ReturnType<typeof vi.fn> {
-      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
         const url = input instanceof Request ? input.url : String(input);
         if (url.endsWith("/api/v0/models")) {
           return native === undefined

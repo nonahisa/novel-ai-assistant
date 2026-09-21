@@ -16,7 +16,9 @@ import {
   REQUIRES_WORK_HINT,
   restoreExpandedGroups,
   visibleGroups,
+  type ActionItem,
   type ActionNode,
+  type ActionSection,
   type GroupStateStore,
 } from "../../src/views/actionList";
 import {
@@ -1106,7 +1108,8 @@ describe("ブラウザ版でだけ出す操作", () => {
   test("小分類は絞り込みで消えない", () => {
     // 中身が空になっても見出しは残す（`visibleEntries` は action だけを見る）
     const entries = [
-      { kind: "section" as const, label: "小分類", items: [] },
+      // `icon` は ActionSection の必須項目（画面が codicon を引く）
+      { kind: "section" as const, label: "小分類", icon: "folder", items: [] },
       {
         kind: "action" as const,
         command: "novelai.diagnoseWeb",
@@ -1166,11 +1169,11 @@ describe("相談の項目は、木に残して画面から隠す", () => {
 
   test("「執筆AI支援」を描画すると、この項目だけが落ちる", () => {
     const group = ACTION_TREE.find((entry) => entry.label === "執筆AI支援");
-    const has = (entries: readonly { kind: string }[]) =>
+    // 木の型そのままで受けると、`kind` で絞り込むだけで command が読める
+    const has = (entries: readonly (ActionItem | ActionSection)[]) =>
       entries.some(
         (entry) =>
-          entry.kind === "action" &&
-          (entry as { command: string }).command === "novelai.openChatPanel"
+          entry.kind === "action" && entry.command === "novelai.openChatPanel"
       );
 
     // 画面（getChildren）が使うのは shownEntries のほう

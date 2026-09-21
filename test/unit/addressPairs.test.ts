@@ -35,9 +35,7 @@ function person(
   } = {}
 ): Character {
   return {
-    ...emptyCharacter(),
-    id,
-    name,
+    ...emptyCharacter(id, name),
     aliases: options.aliases ?? [],
     appearedChapters: options.chapters ?? [],
     addressTerms: options.terms ?? [],

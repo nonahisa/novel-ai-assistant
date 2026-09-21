@@ -401,9 +401,17 @@ describe("両方まとめて測る", () => {
     expect(inputCalls().length).toBeGreaterThan(0);
     expect(outputCalls().length).toBeGreaterThan(0);
     // 順番も変えない（先に合言葉、あとから数字）
-    const lastInput = state.calls.findLastIndex((call) =>
-      call.userPrompt.includes("合言葉")
-    );
+    //
+    // 合言葉は何度も投げるので、**後ろから探して最後の1回**を見る。
+    // `Array.findLastIndex` は ES2023 の追加で、この製品の `lib`（ES2022）には
+    // 無いため、後ろへ向かう素直な繰り返しで書いている
+    const lastIndexOfPrompt = (needle: string): number => {
+      for (let i = state.calls.length - 1; i >= 0; i--) {
+        if (state.calls[i].userPrompt.includes(needle)) return i;
+      }
+      return -1;
+    };
+    const lastInput = lastIndexOfPrompt("合言葉");
     const firstOutput = state.calls.findIndex((call) =>
       call.userPrompt.includes("4桁の数字")
     );

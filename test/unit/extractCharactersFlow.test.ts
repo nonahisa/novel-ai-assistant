@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { commands, window, workspace } from "./support/vscodeStub";
+import {
+  commands,
+  window,
+  workspace,
+  type StubMessage,
+} from "./support/vscodeStub";
 import type { AIRegistry } from "../../src/ai/registry";
 import { splitIntoChunks, type Chunk } from "../../src/core/chunker";
 import type { WorkEntry } from "../../src/models/types";
@@ -119,12 +124,17 @@ vi.mock("../../src/core/textFile", () => ({
   hashText: (text: string) => `hash-${text.length}-${text.slice(0, 1)}`,
 }));
 
+// `startLine`（元ファイルの何行目から始まるか。0始まり）は、人物抽出では
+// 使われない——AIに行番号を言わせるのは誤字脱字と推敲だけである。
+// ただしチャンクの型としては必須なので、**1チャンク＝1行として辻褄の合う値**
+// （連番と一致させた行番号）を置いておく
 const chunks: Chunk[] = [
   {
     filePath: "001.txt",
     index: 0,
     text: "灯が歩いた。",
     hash: "chunk-1",
+    startLine: 0,
     chapterStart: 1,
     chapterEnd: 1,
   },
@@ -133,6 +143,7 @@ const chunks: Chunk[] = [
     index: 1,
     text: "澪が歩いた。",
     hash: "chunk-2",
+    startLine: 1,
     chapterStart: 1,
     chapterEnd: 1,
   },
@@ -145,6 +156,8 @@ function chunkFixture(count: number): Chunk[] {
     index,
     text: `本文${index + 1}。`,
     hash: `chunk-${index + 1}`,
+    // 上の固定チャンクと同じく、1チャンク＝1行として連番に合わせる
+    startLine: index,
     chapterStart: 1,
     chapterEnd: 1,
   }));
@@ -386,7 +399,11 @@ describe("人物抽出フロー", () => {
       getText: () => "未保存本文",
       save,
     }];
-    const showWarningMessage = vi.fn(async () => "保存して実行");
+    // 通知の代役には、**本当の呼ばれ方**（`(文言, ...押せる操作)`）の型を
+    // 付ける（`StubMessage`）。引数なしの関数として書くと mock.calls の
+    // 中身が空の組になり、「何番目の引数に何を渡したか」を見る
+    // このファイルの検査がどれも型で引けなくなる
+    const showWarningMessage = vi.fn<StubMessage>(async () => "保存して実行");
     Object.assign(window, { showWarningMessage });
 
     await expect(saveDirtyDocumentsBeforeExtraction(work)).resolves.toBe(false);
@@ -416,7 +433,7 @@ describe("人物抽出フロー", () => {
   });
 
   test("モデル情報を取得できないまま既定値で分割せず中止する", async () => {
-    const showWarningMessage = vi.fn(async () => "中止");
+    const showWarningMessage = vi.fn<StubMessage>(async () => "中止");
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
       showWarningMessage,
@@ -474,8 +491,8 @@ describe("人物抽出フロー", () => {
   });
 
   test("AIへ接続できないときはAIを呼ばずに警告して中止する", async () => {
-    const showWarningMessage = vi.fn(async () => "中止");
-    const showInformationMessage = vi.fn(async () => "実行");
+    const showWarningMessage = vi.fn<StubMessage>(async () => "中止");
+    const showInformationMessage = vi.fn<StubMessage>(async () => "実行");
     Object.assign(window, {
       showInformationMessage,
       showWarningMessage,
@@ -514,7 +531,7 @@ describe("人物抽出フロー", () => {
   });
 
   test("ローカルOllamaが落ちているときは起動ボタンを提示する", async () => {
-    const showWarningMessage = vi.fn(async () => "中止");
+    const showWarningMessage = vi.fn<StubMessage>(async () => "中止");
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
       showWarningMessage,
@@ -548,7 +565,7 @@ describe("人物抽出フロー", () => {
   });
 
   test("別マシンのOllamaには起動ボタンを出さない", async () => {
-    const showWarningMessage = vi.fn(async () => "中止");
+    const showWarningMessage = vi.fn<StubMessage>(async () => "中止");
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
       showWarningMessage,
@@ -582,7 +599,7 @@ describe("人物抽出フロー", () => {
   });
 
   test("Claudeには起動ボタンを出さない", async () => {
-    const showWarningMessage = vi.fn(async () => "中止");
+    const showWarningMessage = vi.fn<StubMessage>(async () => "中止");
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
       showWarningMessage,
@@ -663,7 +680,7 @@ describe("人物抽出フロー", () => {
 
   test("実行中に接続が連続で切れたら残りを試さず中断を伝える", async () => {
     state.chunks = chunkFixture(10);
-    const showWarningMessage = vi.fn(async () => undefined);
+    const showWarningMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
       showWarningMessage,
@@ -705,7 +722,7 @@ describe("人物抽出フロー", () => {
       chapterEnd: 1,
     }));
 
-    const showWarningMessage = vi.fn(async () => undefined);
+    const showWarningMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
       showWarningMessage,
@@ -883,7 +900,7 @@ describe("人物抽出フロー", () => {
   test("1回のAI応答から人物・能力・場所をまとめて保存する", async () => {
     // 種別ごとにAIを呼ぶと同じ本文を3回読ませることになるため、
     // 1チャンク1回の応答を3種類に振り分ける。
-    const showInformationMessage = vi.fn(async () => "実行");
+    const showInformationMessage = vi.fn<StubMessage>(async () => "実行");
     Object.assign(window, {
       showInformationMessage,
       showWarningMessage: vi.fn(async () => undefined),
@@ -929,7 +946,7 @@ describe("人物抽出フロー", () => {
   });
 
   test("能力・場所が無い作品では該当行を出さない", async () => {
-    const showInformationMessage = vi.fn(async () => "実行");
+    const showInformationMessage = vi.fn<StubMessage>(async () => "実行");
     Object.assign(window, {
       showInformationMessage,
       showWarningMessage: vi.fn(async () => undefined),
@@ -963,7 +980,7 @@ describe("人物抽出フロー", () => {
   });
 
   test("切り詰め応答を保存せず出力上限かチャンク縮小を案内する", async () => {
-    const showWarningMessage = vi.fn(async () => undefined);
+    const showWarningMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
       showWarningMessage,
@@ -990,7 +1007,7 @@ describe("人物抽出フロー", () => {
   });
 
   test("人物JSONに未保存変更がある場合はAI処理を開始しない", async () => {
-    const showWarningMessage = vi.fn(async () => undefined);
+    const showWarningMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {
       showWarningMessage,
       showInformationMessage: vi.fn(async () => "実行"),
@@ -1009,7 +1026,7 @@ describe("人物抽出フロー", () => {
   });
 
   test("AI処理中に人物JSONがdirtyになった場合は保存直前に再検査して拒否する", async () => {
-    const showWarningMessage = vi.fn(async () => undefined);
+    const showWarningMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
       showWarningMessage,
@@ -1036,7 +1053,7 @@ describe("人物抽出フロー", () => {
   });
 
   test("キャッシュ保存失敗を警告して有効な人物結果の保存を続ける", async () => {
-    const showWarningMessage = vi.fn(async () => undefined);
+    const showWarningMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {
       showInformationMessage: vi.fn(
         async (_message: string, ...actions: string[]) =>
@@ -1083,7 +1100,7 @@ describe("人物抽出フロー", () => {
     ],
     ["aborted", "必要なら抽出をもう一度実行してください。"],
   ] as const)("%s を失敗チャンクとして復旧案内する", async (kind, recovery) => {
-    const showWarningMessage = vi.fn(async () => undefined);
+    const showWarningMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
       showWarningMessage,
@@ -1109,7 +1126,7 @@ describe("人物抽出フロー", () => {
     ["空応答", "", "AIの応答が空でした"],
     ["不正JSON", "not-json", "応答をJSONとして解析できませんでした"],
   ])("%s を保存せず安全な復旧案内を表示する", async (_label, text, expected) => {
-    const showWarningMessage = vi.fn(async () => undefined);
+    const showWarningMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
       showWarningMessage,
@@ -1134,7 +1151,7 @@ describe("人物抽出フロー", () => {
   });
 
   test("最終サマリーに新規・更新・除外・競合・失敗・保存競合未保存の全件数を示す", async () => {
-    const showWarningMessage = vi.fn(async () => undefined);
+    const showWarningMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
       showWarningMessage,
@@ -1178,7 +1195,7 @@ describe("人物抽出フロー", () => {
   ] as const)(
     "saveAll の %s では作者変更を保護し抽出結果を全件未保存と報告する",
     async (kind, classification) => {
-      const showErrorMessage = vi.fn(async () => undefined);
+      const showErrorMessage = vi.fn<StubMessage>(async () => undefined);
       Object.assign(window, {
         showInformationMessage: vi.fn(async () => "実行"),
         showWarningMessage: vi.fn(async () => undefined),
@@ -1219,7 +1236,7 @@ describe("人物抽出フロー", () => {
   );
 
   test("後続保存競合では先に完了した件数だけを保存済みと報告する", async () => {
-    const showErrorMessage = vi.fn(async () => undefined);
+    const showErrorMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
       showWarningMessage: vi.fn(async () => undefined),
@@ -1255,7 +1272,7 @@ describe("人物抽出フロー", () => {
   });
 
   test("重複IDが含まれても未分類の未保存人数を水増ししない", async () => {
-    const showErrorMessage = vi.fn(async () => undefined);
+    const showErrorMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
       showWarningMessage: vi.fn(async () => undefined),
@@ -1297,7 +1314,7 @@ describe("人物抽出フロー", () => {
   });
 
   test("配置後の退避失敗は保存済みとも未保存とも数えず手動照合を促す", async () => {
-    const showErrorMessage = vi.fn(async () => undefined);
+    const showErrorMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
       showWarningMessage: vi.fn(async () => undefined),
@@ -1402,7 +1419,7 @@ describe("人物抽出フロー", () => {
     expectedAction
   ) => {
     state.providerId = "claude";
-    const showWarningMessage = vi.fn(async () => undefined);
+    const showWarningMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
       showWarningMessage,
@@ -1563,9 +1580,9 @@ describe("人物抽出フロー", () => {
 
   test("セットアップのキャンセルは通知を増やさず何も保存しない", async () => {
     state.configured = false;
-    const showInformationMessage = vi.fn(async () => undefined);
-    const showWarningMessage = vi.fn(async () => undefined);
-    const showErrorMessage = vi.fn(async () => undefined);
+    const showInformationMessage = vi.fn<StubMessage>(async () => undefined);
+    const showWarningMessage = vi.fn<StubMessage>(async () => undefined);
+    const showErrorMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {
       showInformationMessage,
       showWarningMessage,
@@ -1582,7 +1599,7 @@ describe("人物抽出フロー", () => {
   });
 
   test("失敗チャンクを自動再試行せず別プロバイダへフォールバックしない", async () => {
-    const showWarningMessage = vi.fn(async () => undefined);
+    const showWarningMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "実行"),
       showWarningMessage,
@@ -1784,7 +1801,7 @@ describe("人物抽出フロー", () => {
       ],
     });
     state.cachedResults.set("chunk-2", { characters: [] });
-    const showInformationMessage = vi.fn(async () => undefined);
+    const showInformationMessage = vi.fn<StubMessage>(async () => undefined);
     Object.assign(window, {
       showInformationMessage,
       showWarningMessage: vi.fn(async () => undefined),

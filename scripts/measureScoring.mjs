@@ -8,6 +8,20 @@
 // 製品の検算（`core/proofreadValidation.ts`）は束の中で通っており、ここは
 // 「通ったあとの結果を、答え合わせする」係である。
 
+/**
+ * 数え方でくり返し使う入れものの形。
+ *
+ * **JSで `{ byKind: {} }` と書くと「鍵を1つも持たない型」に推論され、
+ * あとから足した鍵を名前で引けなくなる**（型検査が `byKind["人物"]` を断る）。
+ * ここで形に名前を付けておき、各集計の頭で `@type` として貼る。
+ * 中身の検査（`checkJs`）は入れていないので、これは**呼ぶ側のための説明**である。
+ *
+ * @typedef {{ found: number, total: number }} FoundTotal
+ * @typedef {{ found: number, total: number, byKind: Record<string, FoundTotal> }} SeedTally
+ * @typedef {{ count: number, byFile: Record<string, number> }} FalsePositiveByFile
+ * @typedef {{ found: number, total: number, noSuggestion: number }} OpenWordTally
+ */
+
 /** 漢字ひらきの札。**答え付きの台はこの理由だけを見る** */
 export const KANJI_REASON = "漢字ひらき";
 
@@ -264,8 +278,11 @@ export function acceptedByFile(results) {
 export function scoreProofread(answers, results) {
   const byFile = acceptedByFile(results);
 
+  /** @type {OpenWordTally & { byWord: Record<string, OpenWordTally> }} */
   const ateji = { found: 0, total: 0, noSuggestion: 0, byWord: {} };
+  /** @type {OpenWordTally & { byWord: Record<string, OpenWordTally> }} */
   const mustOpen = { found: 0, total: 0, noSuggestion: 0, byWord: {} };
+  /** @type {{ count: number, byWord: Record<string, number> }} */
   const falsePositives = { count: 0, byWord: {} };
 
   for (const episode of answers?.episodes ?? []) {
@@ -395,8 +412,11 @@ export function scoreDeviation(answers, results) {
     (answers?.mustNotFlag ?? []).map((file) => normalizePath(file))
   );
 
+  /** @type {SeedTally} */
   const seeds = { found: 0, total: 0, byKind: {} };
+  /** @type {Array<{ file: string, kind: string, where: string }>} */
   const missed = [];
+  /** @type {FalsePositiveByFile} */
   const falsePositives = { count: 0, byFile: {} };
   let kindMismatch = 0;
   let otherFlags = 0;
@@ -510,8 +530,11 @@ export function scoreContradiction(answers, results) {
     trapsByFile.set(file, list);
   }
 
+  /** @type {SeedTally} */
   const seeds = { found: 0, total: 0, byKind: {} };
+  /** @type {Array<{ file: string, kind: string, where: string }>} */
   const missed = [];
+  /** @type {FalsePositiveByFile} */
   const falsePositives = { count: 0, byFile: {} };
   let kindMismatch = 0;
   let otherFlags = 0;
@@ -627,9 +650,25 @@ export function applyTypoFix(issue) {
 export function scoreTypo(answers, results) {
   const byFile = acceptedByFile(results);
 
+  /** @type {SeedTally} */
   const seeds = { found: 0, total: 0, byKind: {} };
+  /** @type {Array<{ file: string, kind: string, wrong: string, note: string }>} */
   const missed = [];
+  /**
+   * @type {{
+   *   count: number,
+   *   items: Array<{ file: string, kind: string, wrong: string, suggestion: string }>,
+   * }}
+   */
   const wrongFix = { count: 0, items: [] };
+  /**
+   * @type {{
+   *   count: number,
+   *   byWord: Record<string, number>,
+   *   byKind: Record<string, number>,
+   *   items: Array<{ file: string, kind: string, word: string, target: string, suggestion: string }>,
+   * }}
+   */
   const falsePositives = { count: 0, byWord: {}, byKind: {}, items: [] };
   let otherFlags = 0;
 
@@ -947,8 +986,11 @@ export function scoreSettings(answers, results) {
   const ledger = settingsLedgerOf(results);
   const expected = answers?.expected ?? {};
 
+  /** @type {SeedTally} */
   const entities = { found: 0, total: 0, byKind: {} };
+  /** @type {Array<{ kind: string, name: string }>} */
   const missed = [];
+  /** @type {{ found: number, total: number, missed: Array<{ name: string, alias: string }> }} */
   const aliases = { found: 0, total: 0, missed: [] };
   /** 当てた項目 → そのレコード（誤統合・誤分割の判定に使い回す） */
   const matched = new Map();
@@ -1015,6 +1057,7 @@ export function scoreSettings(answers, results) {
   entities.byKind["世界観"] = worldBucket;
 
   /* ── でっち上げ（出てはいけないものが出た） ── */
+  /** @type {{ count: number, items: Array<{ kind: string, name: string, alias?: string }> }} */
   const fabricated = { count: 0, items: [] };
   const forbidden = answers?.mustNotAppear ?? {};
   for (const [kind, label] of SETTINGS_NAMED_KINDS) {
@@ -1361,6 +1404,21 @@ export function countGeneric(results) {
  * @param run `{ results, failures, elapsedMs, plans, maxIssuesPer1000Chars }`。
  *   `plans` は測ったチャンクの `{ chunkId, chars, maxIssues }`（`novel.prompt`
  *   が返すもの）。**あれば指摘の上限を出す**——無ければ上限の行は出さない
+ *
+ * `detail` は**機能ごとに中身が入れ替わる袋**なので、鍵を並べ切らずに
+ * 「名前→中身」の表として返す。どの機能でも必ず入る2つ（落とした理由・失敗）と、
+ * 名前で引いて確かめている2つだけを、形まで書いてある。
+ *
+ * @returns {{
+ *   metrics: Record<string, number>,
+ *   detail: {
+ *     rejectedReasons: Record<string, number>,
+ *     failures: Array<{ chunkId?: string, reason?: string }>,
+ *     packedItems?: Array<{ file: string, original: string, words: string[] }>,
+ *     settingsFound?: Record<string, FoundTotal>,
+ *     [key: string]: unknown,
+ *   },
+ * }}
  */
 export function metricsOfRun(feature, answers, run) {
   const results = run?.results ?? [];
@@ -1524,12 +1582,20 @@ export function metricsOfRun(feature, answers, run) {
  *
  * **ある回に出なかった指標は 0 として数える**——`rejected.over_budget` が
  * 1回だけ出たとき、「1〜1」ではなく「0〜1」が本当のところである。
+ *
+ * @param {Array<{ metrics?: Record<string, number | undefined> }>} runs
+ *   回ごとに出る指標が違うので、値が欠けている（`undefined`）ことを型でも認める
+ *   ——欠けた回を 0 として数えるのが、この関数の仕事そのものである
+ * @returns {Record<string, { values: number[], min: number, max: number }>}
+ *   指標の名前は機能ごとに増えるので、鍵を並べずに「名前→幅」の表として返す。
  */
 export function spreadOfRuns(runs) {
+  /** @type {Set<string>} */
   const keys = new Set();
   for (const run of runs) {
     for (const key of Object.keys(run?.metrics ?? {})) keys.add(key);
   }
+  /** @type {Record<string, { values: number[], min: number, max: number }>} */
   const spread = {};
   for (const key of keys) {
     const values = runs.map((run) => Number(run?.metrics?.[key] ?? 0));

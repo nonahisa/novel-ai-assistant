@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { window } from "./support/vscodeStub";
+import { window, type StubMessage } from "./support/vscodeStub";
 import { confirmPaidUsage } from "../../src/features/aiConnectivity";
 import type { AIProvider } from "../../src/ai/types";
 
@@ -7,14 +7,28 @@ function provider(isPaid: boolean, displayName = "Claude API"): AIProvider {
   return { isPaid, displayName } as unknown as AIProvider;
 }
 
+/**
+ * モーダルの設定から説明文だけを取り出す。
+ *
+ * **形が違えば「無かった」と扱う。** ここで決めつけると、
+ * 呼び出し側が引数の並びを変えたときに黙って通ってしまう
+ */
+function detailOf(option: unknown): string | undefined {
+  if (typeof option !== "object" || option === null) return undefined;
+  if (!("detail" in option)) return undefined;
+  return typeof option.detail === "string" ? option.detail : undefined;
+}
+
 describe("有料AIを使う前の確認", () => {
   let shown: Array<{ message: string; detail?: string }>;
 
   beforeEach(() => {
     shown = [];
-    window.showInformationMessage = vi.fn(
-      async (message: string, options?: { detail?: string }) => {
-        shown.push({ message, detail: options?.detail });
+    // 画面の知らせは「文言＋何でも受ける残りの引数」という形（`StubMessage`）。
+    // 2つ目がモーダルの設定（`{ modal, detail }`）、3つ目以降がボタンである
+    window.showInformationMessage = vi.fn<StubMessage>(
+      async (message, ...items) => {
+        shown.push({ message, detail: detailOf(items[0]) });
         return "実行";
       }
     );

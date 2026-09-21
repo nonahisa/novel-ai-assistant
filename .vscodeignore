@@ -44,6 +44,7 @@ dist/core-bundle.mjs
 .mcp.json
 tsconfig.json
 tsconfig.test.json
+tsconfig.tests-typecheck.json
 esbuild.js
 vitest*.config.*
 package-lock.json

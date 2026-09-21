@@ -64,12 +64,14 @@ describe("無視した指摘のキー", () => {
    * 鍵が変わり、**見送ったはずの指摘がまた出てきた**。
    */
   test("行が動いてもキーは変わらない（古い不具合の再現）", () => {
-    expect(dismissKey("a.txt", issue)).toBe(
-      dismissKey("a.txt", { ...issue, line: 6 })
-    );
-    expect(dismissKey("a.txt", issue)).toBe(
-      dismissKey("a.txt", { ...issue, line: 999 })
-    );
+    // 鍵を作る側は語と修正案しか受け取らない形になったので、行を書いた
+    // まま直に渡すと型で弾かれる。**指摘そのものは行を持ち続ける**ので、
+    // 行を持った指摘を組んでから渡して、鍵が行を見ないことを見る
+    const movedALittle = { ...issue, line: 6 };
+    const movedFar = { ...issue, line: 999 };
+
+    expect(dismissKey("a.txt", issue)).toBe(dismissKey("a.txt", movedALittle));
+    expect(dismissKey("a.txt", issue)).toBe(dismissKey("a.txt", movedFar));
   });
 });
 

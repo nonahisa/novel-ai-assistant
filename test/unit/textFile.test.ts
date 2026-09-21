@@ -1,5 +1,5 @@
 import iconv from "iconv-lite";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi, type Mock } from "vitest";
 import {
   currentFileHash,
   decodeBytes,
@@ -26,7 +26,23 @@ describe("本文形式を保持した保存", () => {
   const files = new Map<string, Uint8Array>();
   const directories = new Set<string>();
   let savedBytes: Uint8Array | undefined;
-  let rename: ReturnType<typeof vi.fn>;
+  // 何を渡して呼ばれたかを見るので、引数の形まで名乗っておく
+  // （`ReturnType<typeof vi.fn>` だと引数が決まらず、`workspace.fs` へ入らない）
+  let rename: Mock<
+    (
+      from: { fsPath: string },
+      to: { fsPath: string },
+      options?: { overwrite?: boolean }
+    ) => Promise<void>
+  >;
+  /**
+   * 書き込みの代役を、**引数の型を持ったまま控えておく**控え。
+   * `workspace.fs` は形を決めない受け皿（引数が `never`）なので、そこから
+   * 取り出した関数は呼び戻せない。差し替える試験が「元の動き」を呼ぶときに使う。
+   */
+  let writeFileBase: Mock<
+    (uri: { fsPath: string }, bytes: Uint8Array) => Promise<void>
+  >;
 
   beforeEach(() => {
     files.clear();
@@ -50,6 +66,9 @@ describe("本文形式を保持した保存", () => {
         files.delete(fileKey(from.fsPath));
       }
     );
+    writeFileBase = vi.fn(async (uri: { fsPath: string }, bytes: Uint8Array) => {
+      files.set(fileKey(uri.fsPath), bytes);
+    });
     workspace.fs = {
       createDirectory: vi.fn(async (uri: { fsPath: string }) => {
         directories.add(fileKey(uri.fsPath));
@@ -68,9 +87,7 @@ describe("本文形式を保持した保存", () => {
         if (!bytes) throw new FileSystemError("missing", "FileNotFound");
         return bytes;
       }),
-      writeFile: vi.fn(async (uri: { fsPath: string }, bytes: Uint8Array) => {
-        files.set(fileKey(uri.fsPath), bytes);
-      }),
+      writeFile: writeFileBase,
       rename,
       delete: vi.fn(async (uri: { fsPath: string }) => {
         files.delete(fileKey(uri.fsPath));
@@ -500,7 +517,7 @@ describe("本文形式を保持した保存", () => {
     const original = decodeBytes(originalBytes);
     files.set(fileKey(path), originalBytes);
     // 回復先へのコピーは通し、元のパスへの書き戻し（配置）だけを失敗させる
-    const baseWriteFile = workspace.fs.writeFile;
+    const baseWriteFile = writeFileBase;
     workspace.fs.writeFile = vi.fn(
       async (uri: { fsPath: string }, bytes: Uint8Array) => {
         if (uri.fsPath.includes(".novelai-recovery")) {

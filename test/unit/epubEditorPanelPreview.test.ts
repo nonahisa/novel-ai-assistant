@@ -36,6 +36,11 @@ interface PreviewPage {
 
 interface PreviewPayload {
   pages: PreviewPage[];
+  /**
+   * 画面の枠へ閉じ込めた、書き出しと同じCSS（設計書6.65.11）。
+   * 綴じ方向や同梱書体が画面へ届いているかを、ここで見る。
+   */
+  css: string;
   /** 本の並びの行（設計書6.65.15の段C） */
   blocks: Array<{
     type: string;

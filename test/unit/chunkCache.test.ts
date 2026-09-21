@@ -1,5 +1,5 @@
 import * as path from "path";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi, type Mock } from "vitest";
 
 // 掃除の件数はログにだけ出る（通知には出さない）ので、記録の中身を見るために差し替える
 vi.mock("../../src/core/logger", () => ({ logLine: vi.fn() }));
@@ -42,7 +42,17 @@ function utf8(value: string): Uint8Array {
 describe("チャンク処理キャッシュ", () => {
   const disk = new Map<string, Uint8Array>();
   const directories = new Set<string>();
-  let rename: ReturnType<typeof vi.fn>;
+  /**
+   * 名前替え（`workspace.fs.rename`）。**呼ばれ方まで型で書いておく**
+   * ——`vi.fn()` のままだと「何でも受ける関数」になり、スタブの
+   * `workspace.fs`（`(...args: never[]) => unknown` の並び）へ入らない
+   */
+  type RenameFn = (
+    from: { fsPath: string },
+    to: { fsPath: string },
+    options?: { overwrite?: boolean }
+  ) => Promise<void>;
+  let rename: Mock<RenameFn>;
 
   /** 書き出されたJSONを読む。`lastUsedAt` はファイルにどう残るかが要点なので生で見る */
   function entriesOnDisk(): Array<{
@@ -60,12 +70,8 @@ describe("チャンク処理キャッシュ", () => {
     disk.clear();
     directories.clear();
     vi.mocked(logLine).mockClear();
-    rename = vi.fn(
-      async (
-        from: { fsPath: string },
-        to: { fsPath: string },
-        options?: { overwrite?: boolean }
-      ) => {
+    rename = vi.fn<RenameFn>(
+      async (from, to, options) => {
         const bytes = disk.get(from.fsPath);
         if (!bytes) throw new FileSystemError("missing", "FileNotFound");
         if (!options?.overwrite && disk.has(to.fsPath)) {

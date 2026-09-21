@@ -132,16 +132,18 @@ describe("ほかの測定結果を消さない", () => {
     await useMemoryTuningStore({ "別の窓/モデル": { memo: "先客" } });
 
     const { workspace } = await import("vscode");
-    const fs = workspace.fs as { rename: (...args: never[]) => Promise<void> };
-    const original = fs.rename;
+    const fs = workspace.fs;
+    // 本物の `rename` の形のまま包む（`as` で別の形に見せかけると、
+    // 引数の食い違いに気づけない）
+    const original = fs.rename.bind(fs);
     let swallowed = false;
-    fs.rename = async (...args: never[]): Promise<void> => {
+    fs.rename = async (source, target, options): Promise<void> => {
       // 1回目だけ、置き換えが起きなかったことにする（＝別の窓の中身が残る）
       if (!swallowed) {
         swallowed = true;
         return;
       }
-      await original(...args);
+      await original(source, target, options);
     };
 
     await saveModelTuning("ollama", "a", { measuredChars: 1 });

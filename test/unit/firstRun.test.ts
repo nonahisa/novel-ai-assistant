@@ -54,7 +54,10 @@ describe("案内の流れ", () => {
 
   test("いきなり選択画面を出さない", async () => {
     // **何のための画面か分からないまま一覧を見せられても選べない**
-    const notify = vi.fn(async () => "AIを選ぶ");
+    // **本当の呼ばれ方（message, action の2引数）で型を付ける。**
+    // 引数なしの関数として書くと mock.calls の中身が空の組になり、
+    // 「1つめの引数に何を渡したか」を見るこのテストが型で引けない
+    const notify = vi.fn<FirstRunDeps["notify"]>(async () => "AIを選ぶ");
     await offerFirstRunSetup(deps({ notify }));
 
     expect(notify).toHaveBeenCalled();

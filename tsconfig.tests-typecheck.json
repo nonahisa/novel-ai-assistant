@@ -1,0 +1,49 @@
+{
+  // **テストコードを型検査するためだけの設定**（2026-09-21）。
+  //
+  // `tsconfig.json`（本番ビルド）も `tsconfig.test.json`（VS Code統合テストの
+  // コンパイル）も `include` が `src/**/*.ts` だけで、**`test/` は一度も
+  // 型検査に掛かっていなかった**。vitest は esbuild で変換するので型を見ない。
+  // つまり `npm run check` が緑でも、テストの型崩れは誰も見ていなかった。
+  // 実際に足してみると、**本物の型の食い違いが226件**隠れていた
+  // （暗黙の `any`、型に項目が増えたのに古いままの作り物、
+  // 単数と複数の取り違え、区分の値の取り違えなど）。設計書6.105。
+  //
+  // **既存の2つはいじらない。** 本番のビルドとVS Code統合テストが
+  // ぶら下がっているので、振る舞いを変えると別のところが壊れる。
+  //
+  // **`module` / `moduleResolution` を親から上書きしている。**
+  // 親は `Node16` だが、これは「CommonJSとして出力する」前提なので、
+  // vitest が実際に動かしている形（Vite ＝ ESM ＋ バンドラ解決）と食い違い、
+  // 実害の無いエラーが大量に出る（TS1309 top-level await 不可・
+  // TS2835 相対importに `.js` を付けろ・TS1470 `import.meta` 不可）。
+  // `Preserve` ＋ `Bundler` は「バンドラが解決する ESM」を表す組み合わせで、
+  // まさに vitest／esbuild の実態に一致する。拡張子なしの相対importも
+  // `import.meta` も top-level await も通り、**残るのは本物の型エラーだけ**になる。
+  //
+  // **`ESNext` ではなく `Preserve` なのは**、`src` に残る
+  // `import iconv = require("iconv-lite")`（`textFile.ts`・`imeDictionary.ts`）が
+  // `ESNext` では TS1202 になるため。esbuild は両方の書き方を受けるので、
+  // 「どちらの書き方も残す」`Preserve` のほうが実態に近い。
+  //
+  // **`noEmit` で型を見るだけ。** 出力は本番ビルド（esbuild）と
+  // `tsconfig.test.json` が作るので、ここからは何も出さない。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    // `scripts/*.mjs`（リリース用の道具）を読むテストがある。
+    // **型定義ファイルは書かない**——素のJavaScriptから推論させたほうが、
+    // 実物とずれない。`checkJs` は付けない（道具の中身まで検査すると、
+    // テストの型を見るという目的から外れる）
+    "allowJs": true,
+    // テストは Node の API（`node:fs` など）と `vscode` の両方を触る。
+    // `vscode` の実体は vitest が差し替えたスタブだが、型は本物を見る
+    "types": ["node", "vscode"]
+  },
+  // `src` も入れているのは、テストから辿り着かないファイルも
+  // この設定（ESM）で矛盾しないことを見ておきたいため
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules", "dist", "out"]
+}

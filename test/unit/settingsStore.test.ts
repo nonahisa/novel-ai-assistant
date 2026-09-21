@@ -1,5 +1,5 @@
 import * as path from "path";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 import { SettingsStoreError } from "../../src/core/settingsStore";
 import {
   createAbilityStore,

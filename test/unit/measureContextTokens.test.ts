@@ -271,7 +271,9 @@ async function measure(options?: {
   );
   // **失敗として報せたかも見る。** 「結果は出せたのに失敗と言った」
   // 「失敗なのに結果らしきものを見せた」のどちらも起こしてはいけない
-  const showErrorMessage = vi.fn(async () => undefined);
+  // 文面を受け取る形で作る（引数を書かないと、記録された呼び出しから
+  // 1つめ＝作者が読んだ文を取り出せない）
+  const showErrorMessage = vi.fn(async (_message: string) => undefined);
   Object.assign(window, {
     showInformationMessage,
     showWarningMessage: vi.fn(async () => undefined),

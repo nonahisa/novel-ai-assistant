@@ -341,7 +341,8 @@ describe("「原稿を読み上げる（音読推敲）」の入口", () => {
     expect(manuscriptViewTypeFor(undefined)).toBe(
       MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
     );
-    expect(manuscriptViewTypeFor("novel")).toBe(
+    // 形式の鍵に "novel" は無い。小説（続きもの）は "long"（長編）
+    expect(manuscriptViewTypeFor("long")).toBe(
       MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
     );
   });

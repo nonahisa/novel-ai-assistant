@@ -1,7 +1,16 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { zipSync } from "fflate";
 import iconv from "iconv-lite";
-import { FileSystemError, Uri, window, workspace } from "vscode";
+// **差し替え口はスタブから直に取る**（ほかのテストと同じ形）。`"vscode"` から
+// 取ると型は本物の宣言になり、`workspace.fs` は読み取り専用・
+// `FileSystemError` は引数1つまでなので、覚え書きのファイルシステムを
+// 差し込めない。実体は vitest の別名でどちらも同じこのファイルである
+import {
+  FileSystemError,
+  Uri,
+  window,
+  workspace,
+} from "./support/vscodeStub";
 import { importWorkFromZip } from "../../src/features/importWorkFromZip";
 // **期待する場所は、製品と同じ組み立て方で作る。** 区切り文字を手で
 // 書くと、動かす環境（Windows と そうでないもの）で試験だけが落ちる
@@ -913,12 +922,17 @@ describe("完了のお知らせは短く、詳しい話は記録へ", () => {
     const sjis = new Uint8Array(iconv.encode(ALPHAPOLIS_TEXT, "shift_jis"));
     const fs = new MemoryFs({ [ALPHAPOLIS_PATH]: sjis });
     fs.install();
-    const writable = workspace.fs.writeFile;
+    // スタブの `fs` はどんな関数でも入る形（`(...args: never[]) => unknown`）
+    // なので、呼ぶ側で本来の引数の形に戻してから包む
+    const writable = workspace.fs.writeFile as (
+      uri: { fsPath: string },
+      bytes: Uint8Array
+    ) => Promise<void>;
     workspace.fs = {
       ...workspace.fs,
       writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
         if (uri.fsPath.includes("generated")) throw new Error("書けません");
-        await writable(uri as never, bytes);
+        await writable(uri, bytes);
       },
     } as unknown as typeof workspace.fs;
     stubWindow(ALPHAPOLIS_PATH);

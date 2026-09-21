@@ -282,6 +282,8 @@ describe("さくらで測るときの温度", () => {
         chunks: [{ chunkId: "c1", userPrompt: "u" }],
       },
       baseArgs: { folder: "f", feature: "proofread" },
+      // **ここで測りたいのは「温度を渡さなければ製品の値が使われる」こと**なので、
+      // `temperature` は書かずに省く（`runSakuraChunks` の JSDoc が任意と書いている）
       ask: async (params: { temperature: number }) => {
         seen.push(params.temperature);
         return { text: "{}" };

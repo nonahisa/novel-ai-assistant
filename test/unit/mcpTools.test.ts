@@ -649,6 +649,9 @@ describe("ollama.generate", () => {
         systemPrompt: "s",
         userPrompt: "u",
         numCtx: 4096,
+        // **温度は省略できない**（`OllamaGenerateInput`）。ここで測るのは
+        // 宛先の判定なので、揺れない 0 を置く
+        temperature: 0,
       })
     ).rejects.toThrow(/allowRemote/);
   });
@@ -706,6 +709,7 @@ describe("ollama.generate", () => {
         systemPrompt: "s",
         userPrompt: "u",
         numCtx: 4096,
+        temperature: 0,
       });
       expect(result.text).toBe('{"facts":[]}');
       // **`num_ctx` は必ず明示する**（CLAUDE.md 規則6）。流す形でも変わらない
@@ -724,6 +728,7 @@ describe("ollama.generate", () => {
         systemPrompt: "s",
         userPrompt: "u",
         numCtx: 4096,
+        temperature: 0,
       });
       expect(result.text).toBe("{}");
     });
@@ -737,6 +742,7 @@ describe("ollama.generate", () => {
           systemPrompt: "s",
           userPrompt: "u",
           numCtx: 4096,
+          temperature: 0,
         })
       ).rejects.toThrow(/model not found/);
     });

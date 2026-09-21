@@ -17,33 +17,38 @@ import * as vscode from "vscode";
  *
  * 選択画面には**「取りやめる」を項目として置ける**ので、そちらは
  * 目に見える形にする（`cancelItem`）。
+ *
+ * ## 入力欄の案内は、VS Code が出す（2026-09-21に取りやめた）
+ *
+ * **入力欄（`showInputBox`）には、VS Code 自身が取りやめ方を書く。**
+ * 説明があれば「〜（『Enter』を押して確定するか 'Escape' を押して
+ * 取り消します）」、説明が無ければ同じ意味の一文だけが出る。
+ *
+ * ここに作った当時はそれを見落としており、**同じことを2回言う画面**に
+ * なっていた（実機で判明。「リポジトリのURLを貼り付けてください
+ * （Escキーで取りやめられます）」の直後に VS Code の案内が続く）。
+ * **製品側の括弧書きを外す。** 出口が書かれていないわけではない——
+ * 書いているのが VS Code だというだけである。
+ *
+ * **選択画面（`showQuickPick`）は別である。** あちらに VS Code の案内は
+ * 出ないので、`cancelItem` は残す。
  */
-
-/** 入力欄の説明の末尾に必ず付ける案内 */
-export const CANCEL_HINT = "（Escキーで取りやめられます）";
 
 /**
  * 文字を入力してもらう。
  *
- * **`showInputBox` を直接呼ばないこと。** 案内の付け忘れを防ぐため、
- * `test/unit/dialogCancel.test.ts` が直接呼び出しを見張っている。
+ * **`showInputBox` を直接呼ばないこと。** `ignoreFocusOut` の付け忘れを
+ * 防ぐため、`test/unit/dialogCancel.test.ts` が直接呼び出しを見張っている。
  */
 export async function askText(
   options: vscode.InputBoxOptions
 ): Promise<string | undefined> {
   return vscode.window.showInputBox({
     ...options,
-    prompt: withCancelHint(options.prompt),
-    // 入力の取りこぼしを防ぐ。そのぶん Esc の案内が要る
+    // 入力の取りこぼしを防ぐ。**外側をクリックしても閉じない**ので、
+    // 出口は `Esc` だけになる（その案内は VS Code が出す。上の説明）
     ignoreFocusOut: options.ignoreFocusOut ?? true,
   });
-}
-
-/** 説明に案内を足す。既に入っていれば二重にしない */
-export function withCancelHint(prompt: string | undefined): string {
-  const body = prompt?.trim() ?? "";
-  if (body.includes(CANCEL_HINT)) return body;
-  return body ? `${body}${CANCEL_HINT}` : CANCEL_HINT.replace(/^（|）$/g, "");
 }
 
 /**

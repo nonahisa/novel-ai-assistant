@@ -9,6 +9,9 @@ import {
   describeChosenScope,
   type ScopeFeature,
 } from "../../src/features/typoCheckScope";
+// 差し替える相手（`views/notify`）の項目の型だけ借りる。
+// 型は消えるので、`vi.mock` の差し替えとはぶつからない
+import type { MemorablePick } from "../../src/views/notify";
 
 /**
  * `chooseScope` が並べる項目をのぞくための差し替え。
@@ -19,7 +22,17 @@ import {
  * 選択画面そのものの動きは `notify.test.ts` で見ている。
  */
 const notifyMocks = vi.hoisted(() => ({
-  pickWithMemory: vi.fn(async () => undefined),
+  // **本物の `pickWithMemory` と同じ引数の形で型を付ける。**
+  // 引数なしの関数として書くと mock.calls の中身が空の組になり、
+  // 「どんな項目が並んだか」を覗くというこのテストの目的が型で引けない
+  pickWithMemory: vi.fn<
+    (params: {
+      items: readonly MemorablePick<string>[];
+      title: string;
+      placeHolder?: string;
+      remember?: { id: string };
+    }) => Promise<string | undefined>
+  >(async () => undefined),
   confirmRun: vi.fn(async () => true),
 }));
 vi.mock("../../src/views/notify", () => ({
@@ -184,11 +197,7 @@ describe("「はじめの10話だけ（試す）」には noRemember が付く",
     }
 
     expect(notifyMocks.pickWithMemory).toHaveBeenCalledTimes(1);
-    const passedItems = notifyMocks.pickWithMemory.mock.calls[0][0].items as Array<{
-      label: string;
-      value?: string;
-      noRemember?: boolean;
-    }>;
+    const passedItems = notifyMocks.pickWithMemory.mock.calls[0][0].items;
 
     // 並びには「取りやめる」（`value` を持たない）も混ざる（設計書6.17.2）。
     // ここで見たいのは選べる3つだけなので、それは除く

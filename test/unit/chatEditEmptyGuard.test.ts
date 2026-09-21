@@ -29,7 +29,12 @@ describe("各話あらすじは、空へ戻せない", () => {
     await expect(
       applyChatEdit(
         work,
-        { target: { kind: "episodeSynopsis", chapter: 3 }, content: "" },
+        {
+          target: { kind: "episodeSynopsis", chapter: 3 },
+          content: "",
+          // ボタンに出す説明。ここで見たいのは関門なので中身は問わない
+          label: "第3話のあらすじ",
+        },
         // **取り消しの経路**（ここが立つのは戻すときだけ）
         { allowEmpty: true }
       )
@@ -42,7 +47,11 @@ describe("各話あらすじは、空へ戻せない", () => {
     await expect(
       applyChatEdit(
         work,
-        { target: { kind: "episodeSynopsis", chapter: 12 }, content: "" },
+        {
+          target: { kind: "episodeSynopsis", chapter: 12 },
+          content: "",
+          label: "第12話のあらすじ",
+        },
         { allowEmpty: true }
       )
     ).rejects.toThrow(/第12話.*台帳が読めなくなる.*手で書き換えて/s);
@@ -55,6 +64,7 @@ describe("各話あらすじは、空へ戻せない", () => {
       applyChatEdit(work, {
         target: { kind: "episodeSynopsis", chapter: 1 },
         content: "",
+        label: "第1話のあらすじ",
       })
     ).rejects.toThrow("空にできません");
   });

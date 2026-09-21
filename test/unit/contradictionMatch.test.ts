@@ -24,7 +24,6 @@ import type {
 
 function fact(overrides: Partial<StoryFact> & { id: string }): StoryFact {
   return {
-    id: overrides.id,
     chapter: 1,
     lineRange: [1, 1],
     subject: "char_001",

@@ -18,10 +18,11 @@ function ajan(): Character {
     {
       field: "role",
       value: "族長",
-      chapter: 5,
-      period: null,
+      chapters: [5],
+      timepointId: null,
       evidence: null,
       note: null,
+      source: "author",
     },
   ];
   character.authorNotes = "作者メモ";

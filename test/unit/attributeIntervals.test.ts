@@ -16,7 +16,6 @@ import type { StoryFact } from "../../src/models/storyFact";
 
 function fact(overrides: Partial<StoryFact> & { id: string }): StoryFact {
   return {
-    id: overrides.id,
     chapter: 1,
     lineRange: [1, 1],
     subject: "char_001",

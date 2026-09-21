@@ -218,7 +218,9 @@ describe("編集部向け", () => {
     const data = baseData();
     const existing = buildCharacterMarkdown(data.characters as Character[], {
       workTitle: "灯の塔",
-      customFields: data.customFields,
+      // 書き出しの側は読み取り専用で持ち、既存の全部入りは書き換えられる
+      // 配列を受け取る。**複製して渡す**——型を偽らずに済ませる
+      customFields: [...(data.customFields ?? [])],
     });
     const labels = [...existing.matchAll(/- \*\*(.+?)\*\*:/g)].map((m) => m[1]);
 

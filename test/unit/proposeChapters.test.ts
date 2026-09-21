@@ -328,9 +328,11 @@ describe("章立ての材料（合本は中の話を1話ずつ並べる）", () 
   });
 
   const inner: CollectedEpisode[] = [
-    { order: 1, chapter: 1, title: "転生", body: "", part: null },
-    { order: 2, chapter: 2, title: "出立", body: "", part: null },
-    { order: 3, chapter: 3, title: "王都", body: "", part: null },
+    // reaction（読者の反応）は章立ての提案に使わないので、取り込み元に
+    // 【リアクション】が無かったときと同じ null で揃える。
+    { order: 1, chapter: 1, title: "転生", body: "", part: null, reaction: null },
+    { order: 2, chapter: 2, title: "出立", body: "", part: null, reaction: null },
+    { order: 3, chapter: 3, title: "王都", body: "", part: null, reaction: null },
   ];
 
   function build() {
@@ -401,7 +403,14 @@ describe("章立ての材料（合本は中の話を1話ずつ並べる）", () 
         {
           file: collectedFile,
           collected: [
-            { order: 1, chapter: null, title: "プロローグ", body: "", part: null },
+            {
+              order: 1,
+              chapter: null,
+              title: "プロローグ",
+              body: "",
+              part: null,
+              reaction: null,
+            },
             ...inner.slice(1),
           ],
         },
@@ -504,9 +513,11 @@ describe("章の範囲（合本の中の話も入る）", () => {
     subtitle: "帰還",
   });
   const inner: CollectedEpisode[] = [
-    { order: 1, chapter: 1, title: "転生", body: "", part: null },
-    { order: 2, chapter: 2, title: "出立", body: "", part: null },
-    { order: 3, chapter: 3, title: "王都", body: "", part: null },
+    // reaction（読者の反応）は章立ての提案に使わないので、取り込み元に
+    // 【リアクション】が無かったときと同じ null で揃える。
+    { order: 1, chapter: 1, title: "転生", body: "", part: null, reaction: null },
+    { order: 2, chapter: 2, title: "出立", body: "", part: null, reaction: null },
+    { order: 3, chapter: 3, title: "王都", body: "", part: null, reaction: null },
   ];
 
   test("合本の先頭から始まる章に、合本の3話と続く単話が全部入る", () => {

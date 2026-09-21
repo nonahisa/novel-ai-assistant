@@ -39,13 +39,21 @@ describe("取りに行ける作品かの判定", () => {
 
   test("リモートが無い作品でも取りに行かない", () => {
     // ローカルだけで履歴を取っている作品。fetchは必ず失敗する
-    expect(canFetch({ kind: "no_remote", root: "/work" })).toBe(false);
+    expect(
+      canFetch({ kind: "no_remote", root: "/work", dirty: 0, dirtyHere: 0 })
+    ).toBe(false);
   });
 
   test("上流が未設定でも、リモートがあるなら取りに行く", () => {
     // push -u がまだなだけで、別の環境の分は取得できる
     expect(
-      canFetch({ kind: "no_upstream", root: "/work", branch: "main" })
+      canFetch({
+        kind: "no_upstream",
+        root: "/work",
+        branch: "main",
+        dirty: 0,
+        dirtyHere: 0,
+      })
     ).toBe(true);
   });
 
@@ -58,7 +66,10 @@ describe("取りに行ける作品かの判定", () => {
         upstream: "origin/main",
         behind: 0,
         ahead: 0,
+        behindHere: 0,
+        aheadHere: 0,
         dirty: 0,
+        dirtyHere: 0,
         unmerged: 0,
       })
     ).toBe(true);
@@ -373,7 +384,10 @@ describe("分かれているときの状態の文", () => {
     manuscripts: string[];
     autoWritten: string[];
     appendOnly: string[];
-  }): GitSyncStatus => ({
+    // 追跡できている枝だけを返すと明かす。`GitSyncStatus`（union）のままだと、
+    // 下で `{ ...diverged(), ahead: 0 }` と一部だけ差し替えたときに、
+    // ほかの枝（git_missing など）へ ahead が生えた形だと見なされてしまう
+  }): Extract<GitSyncStatus, { kind: "tracked" }> => ({
     kind: "tracked",
     root: "C:/書庫",
     branch: "main",

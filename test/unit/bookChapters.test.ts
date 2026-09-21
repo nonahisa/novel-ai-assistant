@@ -24,7 +24,9 @@ function episode(overrides: Partial<EpisodeFile> = {}): EpisodeFile {
     subtitle: null,
     kind: "不明",
     isInitialName: false,
-    counts: { total: 0, net: 0, noSpace: 0 },
+    // total / noSpace は今の CharCounts に無い古い名前だった。
+    // 章の切り分けは字数を見ないので、全部 0 で揃える。
+    counts: { gross: 0, net: 0, lines: 0, paragraphs: 0, manuscriptLines: 0 },
     hasMetadata: false,
     metaTitle: null,
     declaredCharCount: null,

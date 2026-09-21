@@ -10,7 +10,7 @@ import {
 import { scanCollection } from "../core/workCollection";
 import { withProgress } from "../views/progress";
 import { cancelItem, isCancelItem } from "../views/dialogs";
-import { pickFolder } from "./pickFolder";
+import { pickNewFolderParent } from "./pickFolder";
 
 /**
  * 新しい作品を作る場所を決める画面（設計書6.97.2）。
@@ -53,7 +53,7 @@ export async function resolveNewWorkHome(
     }
   }
 
-  return createLibraryHome();
+  return createLibraryHome(works);
 }
 
 /**
@@ -101,11 +101,17 @@ async function chooseLibrary(
  * 作品フォルダーを作るときで、ここでは場所を決めるだけ**——途中で
  * 取りやめられたときに、空のフォルダーだけが残らないようにするため。
  */
-async function createLibraryHome(): Promise<NewWorkHome | undefined> {
-  const parentPath = await pickFolder(
-    "作品を置く場所を選択",
-    "ここに作品を置く"
-  );
+async function createLibraryHome(
+  works: readonly WorkLocation[]
+): Promise<NewWorkHome | undefined> {
+  // **既定の場所を明示する**（設計書6.97.6）。ここへ来るのは、書庫がまだ
+  // 無いときと、書庫はあるが「ほかの場所にする」を押したとき。後者では
+  // 作品が登録されているので、渡さないと**作品フォルダーの中**で窓が開く
+  const parentPath = await pickNewFolderParent({
+    purpose: "作品を置く場所を選択",
+    openLabel: "ここに作品を置く",
+    works,
+  });
   if (!parentPath) return undefined;
 
   const scan = await withProgress("フォルダーの中を見ています…", () =>

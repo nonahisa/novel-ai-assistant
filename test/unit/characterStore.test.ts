@@ -1,5 +1,5 @@
 import * as path from "path";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi, type Mock } from "vitest";
 import {
   CharacterStore,
   CharacterStoreError,
@@ -51,8 +51,30 @@ function fixedCharacter(id: string, name: string): Character {
 describe("人物ファイル保存", () => {
   const disk = new Map<string, Uint8Array>();
   const directories = new Set<string>();
-  let rename: ReturnType<typeof vi.fn>;
-  let remove: ReturnType<typeof vi.fn>;
+  // 何を渡して呼ばれたかを見るので、引数の形まで名乗っておく
+  // （`ReturnType<typeof vi.fn>` だと引数が決まらず、`workspace.fs` へ入らない）
+  let rename: Mock<
+    (
+      from: { fsPath: string },
+      to: { fsPath: string },
+      options?: { overwrite?: boolean }
+    ) => Promise<void>
+  >;
+  let remove: Mock<(uri: { fsPath: string }) => Promise<void>>;
+  /**
+   * 代役のファイル操作を、**引数の型を持ったまま控えておく**控え。
+   *
+   * `workspace.fs` は形を決めない受け皿（引数が `never`）なので、そこから
+   * 取り出した関数は呼び戻せない。差し替える試験が「元の動き」を呼ぶときは
+   * こちらを通す。`workspace.fs` へは複製を入れるので、試験中の差し替えが
+   * この控えを汚さない。
+   */
+  let baseFs: {
+    createDirectory: (uri: { fsPath: string }) => Promise<void>;
+    readFile: (uri: { fsPath: string }) => Promise<Uint8Array>;
+    readDirectory: (uri: { fsPath: string }) => Promise<Array<[string, FileType]>>;
+    writeFile: (uri: { fsPath: string }, bytes: Uint8Array) => Promise<void>;
+  };
 
   beforeEach(() => {
     disk.clear();
@@ -81,7 +103,7 @@ describe("人物ファイル保存", () => {
       }
     });
 
-    workspace.fs = {
+    baseFs = {
       createDirectory: async (uri: { fsPath: string }) => {
         directories.add(uri.fsPath);
       },
@@ -101,6 +123,9 @@ describe("人物ファイル保存", () => {
       writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
         disk.set(uri.fsPath, bytes);
       },
+    };
+    workspace.fs = {
+      ...baseFs,
       rename,
       delete: remove,
     };
@@ -260,7 +285,7 @@ describe("人物ファイル保存", () => {
     const createdByAuthor = utf8('{"作者":"同時に作成"}\n');
     const store = new CharacterStore(work);
     await store.loadAll();
-    const originalWriteFile = workspace.fs.writeFile;
+    const originalWriteFile = baseFs.writeFile;
     workspace.fs.writeFile = vi.fn(
       async (uri: { fsPath: string }, bytes: Uint8Array) => {
         await originalWriteFile(uri, bytes);
@@ -289,7 +314,7 @@ describe("人物ファイル保存", () => {
     const second = fixedCharacter("char_002", "澪");
     const firstPath = diskPath(path.join(characterDir, characterFileName(first)));
     const secondPath = diskPath(path.join(characterDir, characterFileName(second)));
-    const baseWriteFile = workspace.fs.writeFile;
+    const baseWriteFile = baseFs.writeFile;
     workspace.fs.writeFile = vi.fn(async (uri, bytes) => {
       if (uri.fsPath.startsWith(`${secondPath}.novelai-`)) {
         throw new FileSystemError("staging denied", "NoPermissions");
@@ -475,7 +500,7 @@ describe("人物ファイル保存", () => {
     disk.set(oldPath, bytesFor(original));
     const store = new CharacterStore(work);
     await store.loadAll();
-    const originalReadFile = workspace.fs.readFile;
+    const originalReadFile = baseFs.readFile;
     let changedAfterCheck = false;
     workspace.fs.readFile = vi.fn(async (uri: { fsPath: string }) => {
       const bytes = await originalReadFile(uri);
@@ -596,7 +621,7 @@ describe("人物ファイル保存", () => {
     disk.set(oldPath, bytesFor(original));
     const store = new CharacterStore(work);
     await store.loadAll();
-    const baseReadFile = workspace.fs.readFile;
+    const baseReadFile = baseFs.readFile;
     workspace.fs.readFile = vi.fn(async (uri: { fsPath: string }) => {
       if (uri.fsPath === oldPath && disk.has(newPath)) {
         throw new FileSystemError("old path denied", "NoPermissions");
@@ -806,7 +831,8 @@ describe("人物ファイル保存", () => {
       const store = new CharacterStore(work);
       await store.loadAll();
       workspace.textDocuments = [
-        { uri: Uri.file(characterPath), isDirty: true },
+        // 未保存かどうかしか見ないので、中身は空でよい
+        { uri: Uri.file(characterPath), isDirty: true, getText: () => "" },
       ];
 
       await expect(store.retire("char_001")).rejects.toMatchObject({

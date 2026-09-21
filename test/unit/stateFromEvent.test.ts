@@ -13,7 +13,6 @@ import type { StoryFact } from "../../src/models/storyFact";
  */
 function event(overrides: Partial<StoryFact> & { id: string }): StoryFact {
   return {
-    id: overrides.id,
     chapter: 4,
     lineRange: [1, 1],
     subject: "char_0001",

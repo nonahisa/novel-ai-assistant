@@ -1,6 +1,9 @@
 import * as vscode from "vscode";
-import { fromUri } from "../core/paths";
+import { fromUri, toUri } from "../core/paths";
 import { canRunProcesses } from "../core/runtime";
+import { pathExists } from "../core/fileSystem";
+import type { WorkLocation } from "../core/libraryHome";
+import { newFolderHomeCandidates } from "../core/newFolderHome";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 
 /**
@@ -46,10 +49,12 @@ const NO_FOLDER_HINT =
 /**
  * @param purpose 選択画面の見出しに出す目的（「作品フォルダを選択」など）
  * @param openLabel ダイアログのボタン文言（手元のVS Codeでのみ使う）
+ * @param defaultPath 窓を最初に開く場所。渡さなければVS Codeに任せる
  */
 export async function pickFolder(
   purpose: string,
-  openLabel: string
+  openLabel: string,
+  defaultPath?: string
 ): Promise<string | undefined> {
   if (canRunProcesses()) {
     const picked = await vscode.window.showOpenDialog({
@@ -58,12 +63,63 @@ export async function pickFolder(
       canSelectMany: false,
       openLabel,
       title: purpose,
+      // **`vscode.Uri.file()` を直に呼ばない**（実装ルール7）
+      defaultUri: defaultPath ? toUri(defaultPath) : undefined,
     });
     if (!picked || picked.length === 0) return undefined;
     return fromUri(picked[0]);
   }
 
   return pickFromWorkspaceFolders(purpose);
+}
+
+/**
+ * 「新しい置き場を作る」ときのフォルダー選択（設計書6.97.6）。
+ *
+ * **既存の作品を選ばせる `pickFolder` とは、窓を開く場所が違う。**
+ * 既にあるものを選ぶなら「最後に使った場所」が親切だが、新しく作るなら
+ * そこは危ない——直前に原稿を触っていれば、**作者の作品フォルダーの中**が
+ * 開いた状態で立ち上がり、そのまま押せば原稿の中に書庫が入る
+ * （2026-09-21、実機で判明）。
+ *
+ * どこを開くかの判断は `core/newFolderHome.ts` にある。ここは**実際に
+ * あるかどうかだけを確かめる**——登録した作品を作者が移していると、
+ * 候補の場所がもう無いことがある。
+ */
+export async function pickNewFolderParent(options: {
+  readonly purpose: string;
+  readonly openLabel: string;
+  /** 登録済みの作品。**この中は既定にしない** */
+  readonly works: readonly WorkLocation[];
+}): Promise<string | undefined> {
+  return pickFolder(
+    options.purpose,
+    options.openLabel,
+    await defaultParentForNewFolder(options.works)
+  );
+}
+
+/** 新しいフォルダーを作る場所の既定。無ければ `undefined`（VS Codeに任せる） */
+export async function defaultParentForNewFolder(
+  works: readonly WorkLocation[]
+): Promise<string | undefined> {
+  const workspaceFolders = (vscode.workspace.workspaceFolders ?? []).map(
+    (folder) => fromUri(folder.uri)
+  );
+  for (const candidate of newFolderHomeCandidates({
+    works,
+    workspaceFolders,
+  })) {
+    // **確かめられなくても窓は開く。** 既定はあくまで親切であって、
+    // 外したドライブや権限のないフォルダーのせいで
+    // 「フォルダーを選べない」になってはいけない
+    try {
+      if (await pathExists(candidate)) return candidate;
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
 }
 
 /**

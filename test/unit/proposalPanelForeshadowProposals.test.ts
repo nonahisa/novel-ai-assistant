@@ -57,15 +57,25 @@ vi.mock("vscode", () => {
   };
 });
 
-const addForeshadow = vi.fn(async () => ({}));
-const saveOrUpdateForeshadow = vi.fn(async () => ({}));
+// **本物と同じ引数の形で型を付ける**（何番目に何を渡したかを見るため）。
+// 戻り値だけは `unknown` にしてある——製品側は `await` するだけで中身を
+// 使わないので、作り物の伏線レコードを1件こしらえても確かめるものが増えない
+const addForeshadow = vi.fn<
+  (work: WorkEntry, draft: ForeshadowDraft) => Promise<unknown>
+>(async () => ({}));
+const saveOrUpdateForeshadow = vi.fn<
+  (work: WorkEntry, id: string, change: ForeshadowStatusChange) => Promise<unknown>
+>(async () => ({}));
 
 // **台帳の口が呼ばれたかを見る。** ここを写して自前で書き込む実装にすると、
-// IDの採番とハッシュ照合（既存ファイルを壊さない仕掛け）を落とす
+// IDの採番とハッシュ照合（既存ファイルを壊さない仕掛け）を落とす。
+// 包みを挟んでいるのは、差し替えの中身が読まれる時点では
+// 上の `const` がまだ用意できていないため（引数はそのまま渡す）
 vi.mock("../../src/core/foreshadowStore", () => ({
-  addForeshadow: (...args: unknown[]) => addForeshadow(...(args as [])),
-  saveOrUpdateForeshadow: (...args: unknown[]) =>
-    saveOrUpdateForeshadow(...(args as [])),
+  addForeshadow: (...args: Parameters<typeof addForeshadow>) =>
+    addForeshadow(...args),
+  saveOrUpdateForeshadow: (...args: Parameters<typeof saveOrUpdateForeshadow>) =>
+    saveOrUpdateForeshadow(...args),
   createForeshadowStore: vi.fn(),
 }));
 
@@ -78,6 +88,11 @@ import { ProposalPanel } from "../../src/features/proposalPanel";
 import type { WorkEntry } from "../../src/models/types";
 import type { AcceptedForeshadowCandidate } from "../../src/core/foreshadowValidation";
 import type { Foreshadow } from "../../src/models/foreshadow";
+// 差し替える相手の引数の型だけ借りる（型は消えるので差し替えとぶつからない）
+import type {
+  ForeshadowDraft,
+  ForeshadowStatusChange,
+} from "../../src/core/foreshadowStore";
 
 const work: WorkEntry = {
   id: "w1",

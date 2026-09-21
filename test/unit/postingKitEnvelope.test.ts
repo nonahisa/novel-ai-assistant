@@ -46,12 +46,16 @@ const episode: EpisodeFile = {
   subtitle: "邂逅",
   kind: "本編",
   isInitialName: false,
-  counts: { gross: 0, net: 0, paragraphs: 0, manuscriptLines: 0 },
+  // 字数は貼り込み係の検査対象ではないので、項目どうしが食い違わないよう
+  // 全部 0 で揃える（lines が欠けていた）。
+  counts: { gross: 0, net: 0, lines: 0, paragraphs: 0, manuscriptLines: 0 },
   hasMetadata: false,
   metaTitle: null,
   declaredCharCount: null,
   metaUpdatedAt: null,
   hasConflictMarkers: false,
+  // 1話ぶんのファイルなので合本ではない
+  collectedCount: null,
 };
 
 interface PickItem {

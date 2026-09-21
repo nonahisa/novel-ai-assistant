@@ -151,7 +151,8 @@ describe("合本の中の1話の見出し（collectedChapterLabel）", () => {
 
   it("小説では「第3話」", () => {
     expect(collectedChapterLabel(inside, "ファイル名.txt")).toBe("第3話");
-    expect(collectedChapterLabel(inside, "ファイル名.txt", "novel")).toBe(
+    // 形式の鍵に "novel" は無い。続きものの小説は "long"（長編）
+    expect(collectedChapterLabel(inside, "ファイル名.txt", "long")).toBe(
       "第3話"
     );
   });

@@ -19,9 +19,14 @@ const state = vi.hoisted(() => ({
   pendingErrors: [] as unknown[],
   characters: [] as unknown[],
   loadErrors: [] as unknown[],
-  saveOrUpdate: vi.fn(async () => undefined),
-  save: vi.fn(async () => undefined),
-  discard: vi.fn(async () => undefined),
+  // **本当の呼ばれ方で型を付ける**（`CharacterStore` / `PendingUpdateStore`
+  // と同じ形）。引数なしの関数として書くと mock.calls の中身が空の組になり、
+  // 「どの人物を渡して保存したか」を見るテストが型で引けない
+  saveOrUpdate: vi.fn<(character: Character) => Promise<void>>(
+    async () => undefined
+  ),
+  save: vi.fn<(character: Character) => Promise<void>>(async () => undefined),
+  discard: vi.fn<(filePath: string) => Promise<void>>(async () => undefined),
 }));
 
 vi.mock("../../src/core/characterStore", () => ({
@@ -166,7 +171,7 @@ describe("承認待ちの反映（既存の振る舞い）", () => {
     expect(state.saveOrUpdate).toHaveBeenCalledTimes(1);
     // **`save` を直に呼ばない**（既存ファイルは上書きできない）
     expect(state.save).not.toHaveBeenCalled();
-    const saved = state.saveOrUpdate.mock.calls[0][0] as unknown as Character;
+    const saved = state.saveOrUpdate.mock.calls[0][0];
     expect(saved.id).toBe("char_001");
     expect(saved.summary).toBe("主人公。幽霊が見える。");
     expect(state.discard).toHaveBeenCalledWith("pending/char_001.json");
@@ -287,7 +292,7 @@ describe("プロットからの新規の人物案（設計書6.4.9）", () => {
     expect(result.ok).toBe(true);
     expect(state.saveOrUpdate).toHaveBeenCalledTimes(1);
     expect(state.save).not.toHaveBeenCalled();
-    const created = state.saveOrUpdate.mock.calls[0][0] as unknown as Character;
+    const created = state.saveOrUpdate.mock.calls[0][0];
     // 仮のIDのままでは、次に作った人物と衝突する
     expect(created.id).toBe("char_002");
     expect(created.name).toBe("澪");
@@ -307,7 +312,7 @@ describe("プロットからの新規の人物案（設計書6.4.9）", () => {
     await captured.apply!("pending/new_太志.json");
 
     const ids = state.saveOrUpdate.mock.calls.map(
-      (call) => (call[0] as unknown as Character).id
+      (call) => call[0].id
     );
     expect(ids).toEqual(["char_002", "char_003"]);
   });

@@ -11,7 +11,6 @@ import {
   X_WEIGHTED_LIMIT,
   xPostWithUrl,
   xWeightedLength,
-  splitXBodyLines,
 } from "../../src/core/announcement";
 import {
   X_POST_MAX_CHARS,

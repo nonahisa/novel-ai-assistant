@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 import {
   decideChatter,
   IDLE_THRESHOLD_MS,
+  type Chatter,
+  type ChatterDecision,
   type ChatterState,
 } from "../../src/core/chatter";
 
@@ -26,17 +28,33 @@ function state(overrides: Partial<ChatterState> = {}): ChatterState {
 
 const idle = IDLE_THRESHOLD_MS + 1;
 
+/**
+ * 文面のある発言として受け取る。
+ *
+ * `decideChatter` が返すのは「文面のある発言（`Chatter`）」と
+ * 「感想を取りに行く印（`ChatterCommentRequest`）」の合併型で、
+ * 後者は `text` も `run` も持たない。**取り違えたらその場で落とす**
+ * ため、枝を確かめてから返す（黙っていたときも落ちる）。
+ */
+function spoken(decision: ChatterDecision | undefined): Chatter {
+  if (!decision) throw new Error("何か言うはずのところで黙った");
+  if (decision.kind === "commentRequest") {
+    throw new Error("文面のある発言を期待したが、感想を取りに行く印だった");
+  }
+  return decision;
+}
+
 describe("黙るべきとき", () => {
   test("何も無ければ黙る", () => {
     expect(decideChatter(state())).toBeUndefined();
   });
 
   test("同じことを2度言わない", () => {
-    const first = decideChatter(state({ writtenToday: 1_200 }));
-    expect(first?.text).toContain("1,000文字");
+    const first = spoken(decideChatter(state({ writtenToday: 1_200 })));
+    expect(first.text).toContain("1,000文字");
 
     const again = decideChatter(
-      state({ writtenToday: 1_200, saidToday: new Set([first!.key]) })
+      state({ writtenToday: 1_200, saidToday: new Set([first.key]) })
     );
     expect(again).toBeUndefined();
   });
@@ -90,10 +108,10 @@ describe("祝う", () => {
 
   test("節目は、越えたうちのいちばん大きいものだけ言う", () => {
     // 一気に5,000字書いた人へ、1,000・3,000・5,000と3回続けて言わない
-    const result = decideChatter(state({ writtenToday: 5_200 }));
+    const result = spoken(decideChatter(state({ writtenToday: 5_200 })));
 
-    expect(result?.text).toContain("5,000文字");
-    expect(result?.key).toBe("milestone:5000");
+    expect(result.text).toContain("5,000文字");
+    expect(result.key).toBe("milestone:5000");
   });
 
   test("節目に届いていなければ言わない", () => {
@@ -108,25 +126,29 @@ describe("祝う", () => {
 
 describe("手伝いを申し出る", () => {
   test("承認待ちがあれば、設定資料集を開く口を添える", () => {
-    const result = decideChatter(state({ pendingUpdates: 4, idleMs: idle }));
+    const result = spoken(
+      decideChatter(state({ pendingUpdates: 4, idleMs: idle }))
+    );
 
-    expect(result?.text).toContain("4件");
-    expect(result?.run?.kind).toBe("openSettingsPanel");
+    expect(result.text).toContain("4件");
+    expect(result.run?.kind).toBe("openSettingsPanel");
   });
 
   test("重複があれば、まとめる口を添える", () => {
-    const result = decideChatter(state({ mergeCandidates: 2, idleMs: idle }));
+    const result = spoken(
+      decideChatter(state({ mergeCandidates: 2, idleMs: idle }))
+    );
 
-    expect(result?.run?.kind).toBe("unifyCharacters");
+    expect(result.run?.kind).toBe("unifyCharacters");
   });
 
   test("未抽出の話があれば、抽出を申し出る", () => {
-    const result = decideChatter(
-      state({ unextractedEpisodes: 3, idleMs: idle })
+    const result = spoken(
+      decideChatter(state({ unextractedEpisodes: 3, idleMs: idle }))
     );
 
-    expect(result?.text).toContain("資料抽出やっておきましょうか");
-    expect(result?.run?.kind).toBe("extractSettings");
+    expect(result.text).toContain("資料抽出やっておきましょうか");
+    expect(result.run?.kind).toBe("extractSettings");
   });
 
   test("未抽出の話数が分からなければ抽出を申し出ない", () => {

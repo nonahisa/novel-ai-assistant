@@ -29,7 +29,18 @@ const manifest = JSON.parse(
 ) as {
   contributes: {
     configuration: {
-      properties: Record<string, { scope?: string }>;
+      // 見張っているのはスコープだけではない——F-96 は「設定画面に出るか」を
+      // 見るので、型・既定・説明文も読む
+      properties: Record<
+        string,
+        {
+          scope?: string;
+          type?: string;
+          default?: unknown;
+          description?: string;
+          markdownDescription?: string;
+        }
+      >;
     };
   };
   capabilities?: {

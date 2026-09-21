@@ -538,9 +538,13 @@ describe("⑧年表の空の見出し", () => {
         rows: [
           {
             chapter: 1,
+            chapterEnd: 1,
             chapterLabel: "第1話",
             title: null,
             filePath: "001.txt",
+            fileName: "001.txt",
+            workPath: "本文/001.txt",
+            chars: 0,
             synopsis: null,
             timepoint: null,
             line: null,

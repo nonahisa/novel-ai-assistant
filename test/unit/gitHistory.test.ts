@@ -18,13 +18,14 @@ function fakeGit(
 ): GitCommandRunner & { calls: string[][] } {
   const calls: string[][] = [];
   let index = 0;
-  const run = (async (args: string[]) => {
+  const run: GitCommandRunner = async (args) => {
     calls.push(args);
     const answer = answers[Math.min(index++, answers.length - 1)] ?? {};
     return { code: 0, stdout: "", stderr: "", ...answer };
-  }) as GitCommandRunner & { calls: string[][] };
-  run.calls = calls;
-  return run;
+  };
+  // 記録は関数そのものへ持たせる（`as` で型を付け替えると、
+  // 実体に `calls` が無いまま通ってしまう）
+  return Object.assign(run, { calls });
 }
 
 describe("履歴を読む", () => {

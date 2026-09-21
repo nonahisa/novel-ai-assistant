@@ -31,13 +31,14 @@ function runner(
   responses: Array<Partial<GitCommandResult>>
 ): GitCommandRunner & { calls: string[][] } {
   const calls: string[][] = [];
-  const run = (async (args: string[]) => {
+  const run: GitCommandRunner = async (args) => {
     calls.push(args);
     const next = responses.shift() ?? { code: 0, stdout: "", stderr: "" };
     return { code: next.code ?? 0, stdout: next.stdout ?? "", stderr: next.stderr ?? "" };
-  }) as GitCommandRunner & { calls: string[][] };
-  run.calls = calls;
-  return run;
+  };
+  // 記録は関数そのものへ持たせる（`as` で型を付け替えると、
+  // 実体に `calls` が無いまま通ってしまう）
+  return Object.assign(run, { calls });
 }
 
 function rename(fromFileName: string, toFileName: string): EpisodeRename {

@@ -176,6 +176,25 @@ async function postOnce({ body, token, endpoint, fetchImpl, timeoutMs }) {
  * **断られた指定だけを外して出し直す**（実装ルール5）。どれが駄目かを
  * エラー文から当てにいかず、`response_format` を1つ外して試すだけにする
  * ——形式の強制が効かなくても、製品の解析器はコードフェンス付きの応答も読める。
+ *
+ * 既定値を持たない項目（`log` など）はJSの推論では必須扱いになるため、
+ * 任意かどうかをJSDocで書き分ける。`temperature` は**本当に必須**で、
+ * 省くと実行時に止まる（製品と違う条件で測らせないため。6.87.16）。
+ *
+ * @param {{
+ *   token: string,
+ *   model: string,
+ *   systemPrompt: string,
+ *   userPrompt: string,
+ *   schema?: unknown,
+ *   temperature: number,
+ *   endpoint?: string,
+ *   fetchImpl?: typeof globalThis.fetch,
+ *   timeoutMs?: number,
+ *   maxOutputTokens?: number,
+ *   log?: (line: string) => void,
+ * }} options
+ * @returns {Promise<{ text: string, usage: unknown, droppedResponseFormat: boolean }>}
  */
 export async function askSakura({
   token,
@@ -327,10 +346,35 @@ export function resultsOfValidated(validated, label) {
  * 残して次のチャンクへ進む——ここで止めると、1つのタイムアウトで
  * 測定が丸ごと消える。
  *
- * @param promptResponse `novel.prompt` の返り値
- * @param baseArgs その対象を指す引数（`folder`・`feature`・`filePath` など）
- * @param ask さくらへ投げる関数（試験では偽物を渡す）
- * @param validate `novel.validate` を呼ぶ関数
+ * `promptResponse` の項目をすべて任意にしてあるのは、**機能によって形が違う**
+ * ため（チャンクに切る機能は `chunks[]`、話を丸ごと見る機能は `userPrompt`）。
+ * 足りないときは `promptChunksOf` が理由を添えて止める。
+ *
+ * 一方 `ask` へ渡す `temperature` は**必ず数**として書いてある。温度は
+ * 「製品と同じ条件で測る」ための約束で、欠けたまま測ってはいけないものだから
+ * ——万一欠けたら `askSakura` がその場で止める（6.87.16）。
+ *
+ * @param {{
+ *   promptResponse: {
+ *     systemPrompt?: string,
+ *     schema?: unknown,
+ *     temperature?: number,
+ *     userPrompt?: string,
+ *     chunks?: Array<{ chunkId?: string, userPrompt?: string, chapterLabel?: string }>,
+ *   },
+ *   baseArgs: Record<string, unknown>,
+ *   temperature?: number,
+ *   ask: (args: {
+ *     systemPrompt?: string,
+ *     userPrompt: string,
+ *     schema?: unknown,
+ *     temperature: number,
+ *   }) => Promise<{ text: string, usage?: unknown, droppedResponseFormat?: boolean }>,
+ *   validate: (args: Record<string, unknown>) => Promise<unknown>,
+ *   log?: (line: string) => void,
+ * }} options `promptResponse` は `novel.prompt` の返り値、`baseArgs` はその対象を
+ *   指す引数（`folder`・`feature`・`filePath` など）、`ask` はさくらへ投げる関数
+ *   （試験では偽物を渡す）、`validate` は `novel.validate` を呼ぶ関数。
  */
 export async function runSakuraChunks({
   promptResponse,

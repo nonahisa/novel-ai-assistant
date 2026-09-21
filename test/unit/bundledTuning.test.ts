@@ -75,7 +75,9 @@ describe("同梱する実測の一覧", () => {
    */
   it("速度・待ち時間を、どの行にも載せていない", () => {
     for (const key of bundledTuningKeys()) {
-      const seed = bundledTuningByKey(key) as Record<string, unknown>;
+      // 「載せていない項目」を見たいので、**型に無い名前も引ける形**で受ける。
+      // 写しを作れば、型を偽らずに（`as` を使わずに）名前で引ける
+      const seed: Record<string, unknown> = { ...bundledTuningByKey(key) };
       expect(seed.outputTokensPerSecond).toBeUndefined();
       expect(seed.timeoutSeconds).toBeUndefined();
       expect(seed.speedSource).toBeUndefined();
@@ -92,7 +94,7 @@ describe("同梱する実測の一覧", () => {
       expect(key.startsWith("gemini/")).toBe(false);
     }
     for (const key of bundledTuningKeys()) {
-      const seed = bundledTuningByKey(key) as Record<string, unknown>;
+      const seed: Record<string, unknown> = { ...bundledTuningByKey(key) };
       expect(seed.contextLimitedByRate).toBeUndefined();
     }
   });

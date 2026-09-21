@@ -80,7 +80,7 @@ describe("手元のAIは、依頼のあいだ仕事中の印を立てる", () =>
     let busyDuringCall: boolean | undefined;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
+      vi.fn(async (input: Parameters<typeof fetch>[0]) => {
         const url = input instanceof Request ? input.url : String(input);
         if (url.includes("/api/v0/models")) {
           return new Response(JSON.stringify({ data: [] }), { status: 200 });

@@ -68,9 +68,19 @@ const episode: EpisodeFile = {
   chapterStart: 2,
   chapterEnd: 2,
   subtitle: null,
-  kind: "本文",
+  // 置き場所のフォルダー名は「本文」だが、`EpisodeKind` の値は「本編」である
+  // （プロローグ・エピローグ・幕間と並ぶ区分）。ここは取り違えていた
+  kind: "本編",
   isInitialName: true,
-  counts: { net: 2000, gross: 2100, manuscriptLines: 50 },
+  // このテストが見るのは「どの画面でどのファイルを開くか」だけなので、
+  // 字数は辻褄の合う埋め草でよい。ただし `CharCounts` の項目は欠かさない
+  counts: {
+    net: 2000,
+    gross: 2100,
+    lines: 60,
+    paragraphs: 30,
+    manuscriptLines: 50,
+  },
   hasMetadata: false,
   metaTitle: null,
   declaredCharCount: null,

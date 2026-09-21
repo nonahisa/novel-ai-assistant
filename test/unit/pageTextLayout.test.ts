@@ -168,7 +168,9 @@ describe("何も選んでいない面（回帰）", () => {
       '<div class="colophon">'
     );
     expect(
-      buildTocFragment([], { pattern: "vertical", ornament: "none" })
+      // 並べ方は既定の一覧で見る（`vertical` は0.55.xまでの綴りで、
+      // いまは読み込みのときに `list` へ読み替えられる。設計書6.65.6）
+      buildTocFragment([], { pattern: "list", ornament: "none" })
     ).toContain('<nav epub:type="toc" id="toc">');
     expect(buildCharacterPageFragment([])).toContain(
       '<section class="characters">'
@@ -236,7 +238,8 @@ describe("選んだ体裁が本へ出る", () => {
     );
     expect(
       buildTocFragment([], {
-        pattern: "vertical",
+        // 見たいのは面のクラスなので、並べ方は既定の一覧でよい
+        pattern: "list",
         ornament: "none",
         pageLayouts: chosen().pageLayouts,
       })

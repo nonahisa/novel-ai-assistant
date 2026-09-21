@@ -22,6 +22,9 @@ describe("AI設定ウィザード", () => {
     const provider: AIProvider = {
       id: "ollama",
       displayName: "Ollama",
+      // 手元で動く Ollama は呼んでも課金されない。ここで測るのは設定の
+      // 手順そのものなので、実行前の費用の確認へは入らない値にしておく
+      isPaid: false,
       isConfigured: vi.fn(async () => true),
       testConnection: vi.fn(async () => ({
         ok: true,
@@ -66,6 +69,7 @@ describe("AI設定ウィザード", () => {
     const provider: AIProvider = {
       id: "ollama",
       displayName: "Ollama",
+      isPaid: false,
       isConfigured: vi.fn(async () => true),
       testConnection: vi.fn(async () => ({
         ok: false,
@@ -98,6 +102,7 @@ describe("AI設定ウィザード", () => {
     const provider: AIProvider = {
       id: "ollama",
       displayName: "Ollama",
+      isPaid: false,
       isConfigured: vi.fn(async () => true),
       testConnection: vi.fn(async () => ({
         ok: true,

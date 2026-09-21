@@ -390,7 +390,8 @@ describe("1件に複数語を詰めた指摘", () => {
       elapsedMs: 1_000,
     });
     expect(metrics.packedItems).toBe(1);
-    expect(detail.packedItems[0].original).toBe("然し丁度そのとき");
+    // `detail` は機能ごとに中身が変わる袋なので、推敲のときだけ入る項目は `?.` で引く
+    expect(detail.packedItems?.[0].original).toBe("然し丁度そのとき");
     const lines = formatSpreadLines(spreadOfRuns([{ metrics }]));
     expect(lines).toContain("1件に複数語を詰めた指摘: 1件");
     expect(
