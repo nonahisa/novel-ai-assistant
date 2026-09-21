@@ -50,7 +50,11 @@ import {
 //      話題の見分けは `core/chatTopic.ts`。目次を渡さない回は、代わりに
 //      「操作のことでしたら、もう一度そう言ってお尋ねください」と聞き返させる
 //      （`features/featureGuide.ts` の NO_INDEX_NOTICE）
-export const WORK_CHAT_VERSION = "3.10";
+// 3.11: edit の説明を実態へ合わせた（作者の裁定、2026-09-21「頼んでいるの
+//      だから、書き込みはした上で次へ行くべきでは？」）。押されるまで待つ形を
+//      やめたので、**「作者がボタンを押したときだけ反映されます」は嘘になった。**
+//      AIへ渡す前提が違うと、気軽に edit を付けかねない
+export const WORK_CHAT_VERSION = "3.11";
 
 /**
  * 送るときの温度。相談は考えを広げる場なので、抽出よりは揺らす。
@@ -143,9 +147,10 @@ needFiles にそのパスを入れてください（作品フォルダからの�
 - 例: ["設定/plot.md", "episode_0003.txt"]
 - 見なくても答えられるときは needFiles を空配列にしてください。無駄に読みません。
 
-【書き込みを提案するとき】
+【書き込みを頼まれたとき】
 作者が「直してほしい」「書いておいて」と求めた場合、edit に書き込む内容を入れてください。
-**あなたが書き込むのではなく、作者がボタンを押したときだけ反映されます。**
+**edit を付けると、その内容はそのまま作者のファイルへ書き込まれます。**
+作者は結果を見て取り消せますが、確認は出ません。**頼まれていないのに付けないでください。**
 - target は次のいずれか
   - "plot.logline" "plot.theme" "plot.motif" "plot.worldview" "plot.setting"
     "plot.narrativePerson" "plot.protagonistMotive" "plot.outline" "plot.mainCharacters" "plot.title"

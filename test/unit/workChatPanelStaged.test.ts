@@ -43,12 +43,30 @@ describe("作業の提案は既定で畳む", () => {
     expect(HTML).toContain("body.hidden = !body.hidden;");
   });
 
-  test("書き込み・機能の起動・読み直しの3つを畳む側へ入れる", () => {
+  test("機能の起動・読み直しを畳む側へ入れる", () => {
     const staged = HTML.slice(HTML.indexOf("function appendStagedActions"));
     const body = staged.slice(0, staged.indexOf("\n}"));
-    for (const call of ["appendEdit(host", "appendRun(host", "appendReload(host"]) {
+    for (const call of ["appendRun(host", "appendReload(host"]) {
       expect(body, call).toContain(call);
     }
+  });
+
+  test("書き込みは畳まない（頼まれた作業なので、その場で書いて結果を出す）", () => {
+    /*
+      作者の裁定（2026-09-21）「頼んでいるのだから、書き込みはした上で
+      次へ行くべきでは？ もう一度書き込むかどうか聞くのは意味がわからない」。
+
+      畳む側へ戻すと、**開いて押して、さらに確認へ答える**という
+      実機で嫌われた形に戻る。
+    */
+    const staged = HTML.slice(HTML.indexOf("function appendStagedActions"));
+    const body = staged.slice(0, staged.indexOf("\n}"));
+    expect(body).not.toContain("message.edit");
+
+    // 代わりに、書き終えた結果として出す（取り消しの口つき）
+    expect(HTML).toContain("message.type === 'editDone'");
+    expect(HTML).toContain("appendEditDone(message)");
+    expect(HTML).toContain("type: 'undoEdit'");
   });
 
   test("「そこを見せて」は畳まない（作業ではなく参照）", () => {

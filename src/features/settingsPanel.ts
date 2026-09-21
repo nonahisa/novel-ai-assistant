@@ -55,7 +55,9 @@ import {
 } from "../core/settingsMarkdown";
 import {
   applyPromotion,
+  changeEntryKey,
   changesOfField,
+  dropChanges,
   promoteConflictToChanges,
 } from "../core/recordChanges";
 import type {
@@ -99,6 +101,9 @@ import {
 } from "../ai/registry";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { prepareRetrieval, search, type RetrievalContext } from "./vectorSearch";
+// 誤った変化を落としたあと、編集部へ渡す資料（`設定/characters.md`）を
+// 作り直すために呼ぶ。パネルの保存経路は資料を作り直さない
+import { generateSettingsDocs } from "./generateSettingsDocs";
 import {
   buildSearchQuery,
   buildSearchTermsPrompt,
@@ -264,10 +269,19 @@ interface DetailView {
     label: string;
     value: string;
     /**
-     * その行に添える操作。今は食い違いを「作中の変化」として
-     * 確定させるものだけ（設計書6.18）。
+     * その行に添える操作（設計書6.18）。2種類ある。
+     * - `promoteConflict`：食い違いを「作中の変化」として確定させる
+     * - `dropChanges`：記録された変化から、誤って入ったものを落とす
+     *
+     * **どちらの操作かは画面側で判断させない。** `kind` をそのまま
+     * メッセージの種別として送らせる（行の見出しから当てさせると、
+     * 項目名に「変化」を含む作者の独自項目で取り違える）。
      */
-    action?: { label: string; field: string };
+    action?: {
+      label: string;
+      field: string;
+      kind: "promoteConflict" | "dropChanges";
+    };
   }>;
   /**
    * 別人として切り出せる呼び名（設計書6.5.8）。**人物のときだけ入る。**
@@ -1040,6 +1054,9 @@ export class SettingsPanel {
         case "promoteConflict":
           await this.handlePromoteConflict(message.id, message.field);
           return;
+        case "dropChanges":
+          await this.handleDropChanges(message.id, message.field);
+          return;
         case "retire":
           await this.handleRetire(message.kind, message.id);
           return;
@@ -1187,6 +1204,84 @@ export class SettingsPanel {
       "character",
       id,
       `「${field}」を作中の変化として記録しました。`
+    );
+  }
+
+  /**
+   * 記録された変化から、誤って入ったものを落とす（作者の裁定、2026-09-21）。
+   *
+   * 抽出は話者を取り違えることがある。実データでは、呼びかけられた側の
+   * 名前を話し手と読み、女性の人物の第1話に「リーダー格の男性。」という
+   * 変化が3項目ぶん残った。レコード本体は作者が直せても、**変化の記録を
+   * 消す手段がどこにも無かった**——MCP（`novel.propose`）では `changes` が
+   * 白名簿の外で、この画面にも落とす口が無かった。
+   *
+   * **落とすものは作者に選ばせる。** どれが取り違えかはAIには決められない
+   * （設計書6.18と同じ立場）。行は1行に連結したまま、押した先で選ばせる。
+   *
+   * **レコード本体の項目は触らない。** 変化を落としたついでに書き換えると、
+   * 作者がすでに直した値を押し流す（CLAUDE.md 規則2）。
+   */
+  private async handleDropChanges(id: string, field: string): Promise<void> {
+    const character = this.characters.find((entry) => entry.id === id);
+    if (!character) {
+      this.post({ type: "error", message: "選択した設定が見つかりません。" });
+      return;
+    }
+
+    const picks = changeDropPicks(changesOfField(character.changes, field));
+    if (picks.length === 0) {
+      // 別の窓で先に処理された場合など。読み直して今の状態を見せる
+      await this.reloadAfterSave(
+        "character",
+        id,
+        `「${field}」に、落とせる変化の記録はありません。`
+      );
+      return;
+    }
+
+    const chosen = await vscode.window.showQuickPick(picks, {
+      // **まとめて選ばせる。** 1度の取り違えが同じ話に何件も残るので
+      // （実データでは第1話に3項目）、1件ずつ確認を繰り返させない
+      canPickMany: true,
+      title: `「${field}」の変化から、誤って入ったものを落とす`,
+      placeHolder:
+        "落とす記録を選んでください（複数選べます）。選ばなかったものは残ります。",
+      // 選んでいる途中でパネルへ目を移すと消える。選択が消えると
+      // どれを落とすつもりだったか分からなくなる
+      ignoreFocusOut: true,
+    });
+    // 何も選ばずに閉じたなら、何もしない（取り消しと同じ）
+    if (!chosen || chosen.length === 0) return;
+
+    const { changes, dropped } = dropChanges(
+      character.changes,
+      chosen.map((pick) => pick.key)
+    );
+    if (dropped === 0) {
+      await this.reloadAfterSave(
+        "character",
+        id,
+        "その記録は、すでに落とされています。"
+      );
+      return;
+    }
+
+    await this.persist("character", { ...character, changes });
+
+    // **設定JSONを書くだけでは、編集部へ渡す資料は直らない。**
+    // `設定/characters.md` は「設定資料集を出力」で作られる生成物で、
+    // パネルの保存経路は作り直していない。誤りが出るのはその資料なので、
+    // ここだけは明示的に作り直す（人物のぶんだけでよい）
+    await generateSettingsDocs(this.work, {
+      kinds: ["characters"],
+      silent: true,
+    });
+
+    await this.reloadAfterSave(
+      "character",
+      id,
+      `「${field}」の変化を${dropped}件落とし、設定資料集を作り直しました。`
     );
   }
 
@@ -2369,6 +2464,19 @@ function referenceLines(
       value: `${describeChangeValues(
         changesOfField(changes ?? [], significance.field)
       )}［${describeInvolvement(significance)}］`,
+      // **行は1行のまま、操作だけを足す**（作者の裁定、2026-09-21）。
+      // 抽出は話者を取り違えることがあり、誤って入った変化を消す手段が
+      // どこにも無かった。変化ごとに行を割ると見慣れた並びが崩れるので、
+      // どれを落とすかは押した先で選ばせる
+      ...(changes
+        ? {
+            action: {
+              label: "誤りを落とす",
+              field: significance.field,
+              kind: "dropChanges" as const,
+            },
+          }
+        : {}),
     })),
     ...conflicts.map((conflict) => ({
       label: `変化かもしれない（${conflict.field}）`,
@@ -2376,11 +2484,58 @@ function referenceLines(
         .filter((part) => part)
         .join(" — "),
       ...(changes
-        ? { action: { label: "作中の変化として記録", field: conflict.field } }
+        ? {
+            action: {
+              label: "作中の変化として記録",
+              field: conflict.field,
+              kind: "promoteConflict" as const,
+            },
+          }
         : {}),
     })),
     { label: "抽出根拠", value: evidence ?? "" },
   ].filter((entry) => entry.value);
+}
+
+interface ChangeDropPick extends vscode.QuickPickItem {
+  /** どの記録を落とすか。文字列として分解せず、鍵のまま渡す */
+  key: string;
+}
+
+/**
+ * 「どれを落とすか」の選択肢を組み立てる。
+ *
+ * **画面の1行と同じものを並べる。** 行は「A（第1話）→ B（第7話）」と
+ * 連結されているので、選ぶときも同じ順・同じ単位でないと、どれを押した
+ * のか分からなくなる。同じ話の同じ値が二重に記録されていることがあり
+ * （`describeChangeValues` はそれを畳んで見せている）、ここでも畳む。
+ *
+ * **抽出根拠を添える。** 取り違えに気づく手掛かりはそこにしかない
+ * （実データでは、根拠が呼びかけの台詞だったので誤りと分かった）。
+ */
+function changeDropPicks(entries: RecordChange[]): ChangeDropPick[] {
+  const picks = new Map<string, ChangeDropPick>();
+  for (const change of entries) {
+    const key = changeEntryKey(change);
+    if (picks.has(key)) continue;
+    picks.set(key, {
+      label: change.value,
+      description: [
+        // 話数の無い記録は「気づく前からあった値」（表示側と同じ言い方）
+        change.chapters.length > 0
+          ? formatChapters(change.chapters)
+          : "それ以前",
+        // 作者が書いた記録は、落とす前に気づけるようにする。
+        // 止めはしない——落とすと決めたのは作者自身である
+        change.source === "author" ? "作者が記録" : "",
+      ]
+        .filter((part) => part)
+        .join(" / "),
+      detail: change.evidence ?? change.note ?? undefined,
+      key,
+    });
+  }
+  return [...picks.values()];
 }
 
 /** AIの応答をJSONとして読む。前後に余計な文字が付くことがある */
@@ -2533,6 +2688,14 @@ type PanelMessage =
       kind: SettingsKind;
       id: string;
       /** どの項目の食い違いを変化として確定させるか */
+      field: string;
+    }
+  /** 記録された変化から、誤って入ったものを落とす（設計書6.18） */
+  | {
+      type: "dropChanges";
+      kind: SettingsKind;
+      id: string;
+      /** どの項目の変化を見直すか。落とすものは押した先で選ばせる */
       field: string;
     };
 

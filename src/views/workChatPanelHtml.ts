@@ -482,41 +482,52 @@ function appendOptions(turn, options) {
 }
 
 /**
- * 書き込みの提案を出す。
+ * **書き終えた結果**を出す（作者の裁定、2026-09-21）。
  *
- * **押すまで何も起きない。** 何をどこへ書くかと、書く中身を先に見せる。
- * 中身を見ずに押せる作りにすると、作者は自分の文書に何が入るのか
- * 分からないまま同意することになる。
+ * 以前はここで「書き込みの提案」を出し、押されてから書いていた。
+ * 実機で通したところ、作者が「これで書いてください」と頼んだあとに
+ * 畳まれたボタンを開いて押し、さらに確認へ答える形になっていた。
+ * 「頼んでいるのだから、書き込みはした上で次へ行くべきでは？」
+ *
+ * **押させるのは「取り消す」のほうである。** 訊かずに書くのだから、
+ * 何が入ったのかと、戻す道を同じ場所に出す。
  */
-function appendEdit(host, edit) {
+function appendEditDone(message) {
   const box = document.createElement('div');
   box.className = 'edit';
+  box.dataset.editId = message.id;
 
   const what = document.createElement('div');
   what.className = 'what';
-  what.textContent = edit.label;
+  what.textContent = message.label;
   box.appendChild(what);
 
+  // **入った中身は全文を出す。** 訊かずに書くのだから、
+  // 何が入ったのかを読めないままにはしない
   const preview = document.createElement('div');
   preview.className = 'preview';
-  preview.textContent = edit.preview;
+  preview.textContent = message.preview;
   box.appendChild(preview);
+
+  const done = document.createElement('div');
+  done.className = 'done';
+  done.textContent = message.message;
+  box.appendChild(done);
 
   const row = document.createElement('div');
   row.className = 'options';
-  const apply = document.createElement('button');
-  apply.className = 'option';
-  apply.innerHTML = '<span class="mark">✓</span><span>' + escapeHtml(edit.label) + '</span>';
-  apply.addEventListener('click', () => {
+  const undo = document.createElement('button');
+  undo.className = 'option';
+  undo.innerHTML = '<span class="mark">↺</span><span>取り消す</span>';
+  undo.addEventListener('click', () => {
     if (busy) return;
-    apply.disabled = true;
-    vscode.postMessage({ type: 'applyEdit', id: edit.id });
+    undo.disabled = true;
+    vscode.postMessage({ type: 'undoEdit', id: message.id });
   });
-  row.appendChild(apply);
+  row.appendChild(undo);
   box.appendChild(row);
 
-  box.dataset.editId = edit.id;
-  host.appendChild(box);
+  logEl.appendChild(box);
 }
 
 /**
@@ -608,7 +619,8 @@ function appendReload(host, reload) {
  */
 function appendStagedActions(turn, message) {
   const adders = [];
-  if (message.edit) adders.push((host) => appendEdit(host, message.edit));
+  // **書き込み（edit）はここへ入れない**（2026-09-21の裁定）。頼まれた
+  // 作業なので、押させずにその場で書き、結果を editDone で出す
   if (message.run) adders.push((host) => appendRun(host, message.run));
   if (message.reload) adders.push((host) => appendReload(host, message.reload));
   if (adders.length === 0) return;
@@ -916,23 +928,22 @@ window.addEventListener('message', (event) => {
     scrollToBottom();
     return;
   }
-  if (message.type === 'editApplied') {
+  // 頼まれた書き込みが済んだ。中身と結果、そして「取り消す」を出す
+  if (message.type === 'editDone') {
+    appendEditDone(message);
+    scrollToBottom();
+    return;
+  }
+  if (message.type === 'undoDone') {
     markEdit(message.id, message.message, true);
     scrollToBottom();
     return;
   }
-  if (message.type === 'editFailed') {
+  // 取り消せなかったとき（書いたあとに変わっている等）。
+  // **押せる状態へは戻さない**——もう一度押しても結果は変わらない
+  if (message.type === 'undoFailed') {
     markEdit(message.id, message.message, false);
     scrollToBottom();
-    return;
-  }
-  // 確認で「キャンセル」を選んだとき。**提案は消さず、押せる状態へ戻す**
-  // （中身を読んで考え直しただけかもしれない）
-  if (message.type === 'editCancelled') {
-    const box = document.querySelector('[data-edit-id="' + message.id + '"]');
-    if (box) {
-      box.querySelectorAll('button').forEach((el) => { el.disabled = false; });
-    }
     return;
   }
   if (message.type === 'runDone') {

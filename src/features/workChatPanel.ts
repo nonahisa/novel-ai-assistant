@@ -47,7 +47,7 @@ import type { WriterProfileStore } from "../core/writerProfileStore";
 import { readerTypeChatLogLines } from "../core/readerTarget";
 import { ReaderTargetStore } from "../core/readerTargetStore";
 import type { ReaderProfile } from "../models/readerProfile";
-import { confirmRun, notifyDone } from "../views/notify";
+import { notifyDone } from "../views/notify";
 import { buildAdvicePolicyPrompt } from "../prompts/advicePolicy";
 import { buildWriterStylePrompt } from "../prompts/writerStyle";
 import { buildReaderTypePrompt } from "../prompts/readerTarget";
@@ -101,7 +101,7 @@ import {
 import type { Chatter } from "../core/chatter";
 import { detectRunIntent } from "../core/chatIntent";
 import { findTextRange } from "../core/textLocate";
-import { applyChatEdit } from "./applyChatEdit";
+import { applyChatEdit, readChatEditTarget } from "./applyChatEdit";
 import {
   applyChatToSettings,
   type ChatSettingsSyncResult,
@@ -156,6 +156,17 @@ import { cancelItem } from "../views/dialogs";
 
 export const WORK_CHAT_VIEW_ID = "novelai.chatView";
 
+/**
+ * 相談パネルが現れるのを待つ上限（`ensureChatVisible`）。
+ *
+ * ビューを出すコマンドが返っても、VS Code が `resolveWebviewView` を
+ * 呼ぶのはそのあとである。**待たないと「開いたのに送り先が無い」まま
+ * 進む。** 3秒は、開かないと分かるまでに作者を待たせてよい上限として
+ * 取った（普段は数十ミリ秒で現れるので、ここまで待つのは
+ * 開けなかったときだけ）。
+ */
+const HOST_WAIT_MS = 3_000;
+
 /** 一度に渡す抜粋の上限。長い本文（73万字のファイルがある）を丸ごと渡せない */
 const EXCERPT_CHARS = 4_000;
 
@@ -200,7 +211,13 @@ type Incoming =
   | { type: "ready" }
   | { type: "ask"; question: string }
   | { type: "clear" }
-  | { type: "applyEdit"; id: string }
+  /**
+   * 書いたものを取り消す（2026-09-21の裁定で、確認を外した代わりに置いた）。
+   *
+   * **押させるのは「書く」ではなく「戻す」のほうである。** 頼んだ作業を
+   * もう一度訊かれるのは意味が無いが、戻せないのは怖い。
+   */
+  | { type: "undoEdit"; id: string }
   | { type: "run"; id: string }
   | { type: "locate"; id: string }
   | { type: "reload"; id: string }
@@ -299,14 +316,29 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   private plotInterviewWork: WorkEntry | undefined;
 
   /**
-   * 押されるのを待っている書き込みの提案。
+   * 解釈が済んだ書き込み。
    *
-   * 会話の中身ではなくここに持つのは、**押した瞬間の内容で書くため**。
+   * 会話の中身ではなくここに持つのは、**書く瞬間の内容で書くため**。
    * 画面の文字列から読み直すと、表示の都合で変わった内容を書きかねない。
+   *
+   * **押されるのを待つ場所ではなくなった**（2026-09-21の裁定）。答えを
+   * 出したらすぐ書くので、ここに入るのは一瞬である。
    */
   private readonly pendingEdits = new Map<
     string,
     { edit: ChatEdit; work: WorkEntry }
+  >();
+  /**
+   * 取り消せる書き込み（設計書6.4.7・2026-09-21）。
+   *
+   * **書く前の値を控えておく。** 確認を出さずに書くようになったので、
+   * 控えが無いと「元が何だったか」を誰も知らないまま上書きすることになる。
+   * `applied` は書いた内容——**いま入っている値がこれと違えば、作者が
+   * あとから手で直している**ので取り消さない（実装ルール2）。
+   */
+  private readonly pendingUndos = new Map<
+    string,
+    { edit: ChatEdit; work: WorkEntry; before: string; applied: string }
   >();
   /** 押されるのを待っている機能起動の提案 */
   private readonly pendingRuns = new Map<
@@ -660,6 +692,61 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     return found;
   }
 
+  /**
+   * 画面が現れるのを待っている人たち（`ensureChatVisible`）。
+   *
+   * **画面ができた側から起こす。** ビューを出すコマンドが返った時点では
+   * まだ `resolveWebviewView` が呼ばれていないことがあり、繰り返し
+   * 覗きに行く（ポーリング）と、間隔の取り方次第で取りこぼす。
+   */
+  private hostWaiters: Array<() => void> = [];
+
+  /** 画面ができたことを、待っている人へ知らせる */
+  private notifyHostReady(): void {
+    const waiting = this.hostWaiters;
+    this.hostWaiters = [];
+    for (const wake of waiting) wake();
+  }
+
+  /**
+   * 送り先の画面を用意する（2026-09-21の実機確認で見つけた不具合）。
+   *
+   * **黙って戻らない。** 相談パネルを開かずに「対話でプロットを作る」を
+   * 押すと、送り先（`hosts()`）が無いまま処理だけが進み、画面にも通知にも
+   * 何も出なかった。作者からは壊れているようにしか見えない。
+   *
+   * 送り先はあるのに**畳まれている**ときも開き直す。見えていないのは、
+   * 作者にとって「何も起きない」と同じである。
+   *
+   * @returns 送り先を用意できたか
+   */
+  private async ensureChatVisible(): Promise<boolean> {
+    if (this.hosts().length > 0 && this.isVisible()) return true;
+
+    /*
+      **コマンドを通す**（`showInSub` と同じ理由）。コマンド側は開く前に
+      「いま開いている本文」を覚えさせており、ビューの `focus` を直に
+      呼ぶとその一手間だけが抜けた別経路が増える。
+    */
+    await vscode.commands.executeCommand("novelai.openChat");
+    if (this.hosts().length > 0) return true;
+
+    return await new Promise<boolean>((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const wake = (): void => {
+        if (timer) clearTimeout(timer);
+        resolve(true);
+      };
+      this.hostWaiters.push(wake);
+      timer = setTimeout(() => {
+        // 待ち人を片付けてから返す。残すと、次に画面が開いたときに
+        // もう誰も見ていない約束を起こすことになる
+        this.hostWaiters = this.hostWaiters.filter((each) => each !== wake);
+        resolve(this.hosts().length > 0);
+      }, HOST_WAIT_MS);
+    });
+  }
+
   /** 開いているすべての画面へ送る */
   private postAll(message: unknown): void {
     for (const webview of this.hosts()) void webview.postMessage(message);
@@ -713,6 +800,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // 閉じたものへ送り続けない
       if (this.panel === panel) this.panel = undefined;
     });
+    // 大きい画面でも送り先はできる。待っている操作を起こす
+    this.notifyHostReady();
   }
 
   /** エディターが変わったら覚え直す。拡張機能側から呼ぶ */
@@ -733,6 +822,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     webviewView.webview.onDidReceiveMessage((message: unknown) => {
       void this.handle(message as Incoming, webviewView.webview);
     });
+    // 画面ができるのを待っている操作（`ensureChatVisible`）を起こす
+    this.notifyHostReady();
   }
 
   /**
@@ -830,8 +921,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       this.panel?.dispose();
       return;
     }
-    if (message.type === "applyEdit") {
-      await this.applyEdit(message.id);
+    if (message.type === "undoEdit") {
+      await this.undoEdit(message.id);
       return;
     }
     if (message.type === "run") {
@@ -1184,14 +1275,27 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         });
       }
 
+      /*
+        **書き込みだけは、答えと一緒に押させない**（作者の裁定、2026-09-21
+        「頼んでいるのだから、書き込みはした上で次へ行くべきでは？
+        もう一度書き込むかどうか聞くのは意味がわからない」）。
+
+        `edit` が付いて返るのは**作業を頼まれたとき**だけである
+        （`prompts/workChat.ts` が「頼まれていない作業を勧めない」と
+        歯止めを掛けている）。答えの下に畳んで置くと、開いて押して、
+        さらに確認へ答えて、とようやく書かれる。
+      */
+      const { edit, ...others } = staged;
       this.postAll({
         type: "answer",
         reply: answer.reply,
         // AIはMarkdownで返してくる。記号のまま見せない
         html: renderMarkdownLite(answer.reply),
         options: answer.options,
-        ...staged,
+        ...others,
       });
+      // 答えを見せてから書く。書き込みで手間取っても、返事は先に読める
+      if (edit) await this.applyStagedEdit(edit.id);
 
       // **答えを見せたあとに反映する。** 保存の失敗で相談の答えが
       // 消えないよう、順番を先にしない（推定は次回に持ち越せる）
@@ -1204,7 +1308,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           : error instanceof Error
             ? error.message
             : String(error);
-      logFailure("相談", { 内容: message });
+      // **手掛かりは記録にだけ足す**（通知は今までどおり短いまま）
+      logFailure("相談", { 内容: message, 詳細: failureDetail(error) });
       // 失敗も残す。**うまくいった回だけ記録すると、
       // 何が起きて答えが返らなかったのかを後から追えない**
       if (context) {
@@ -1422,7 +1527,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logFailure("相談からの再読込", { 内容: message });
+      logFailure("相談からの再読込", {
+        内容: message,
+        詳細: failureDetail(error),
+      });
       this.postAll({
         type: "reloadFailed",
         id,
@@ -1688,7 +1796,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logFailure("相談からの機能起動", { 内容: message });
+      logFailure("相談からの機能起動", {
+        内容: message,
+        詳細: failureDetail(error),
+      });
       this.postAll({
         type: "runFailed",
         id,
@@ -1697,44 +1808,48 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
   }
 
-  /** 作者がボタンを押したときだけ、ここで実際に書き込む */
-  private async applyEdit(id: string): Promise<void> {
+  /**
+   * 頼まれた書き込みを、その場で行う（作者の裁定、2026-09-21）。
+   *
+   * **確認を出さない。** 以前は「何がどこへ入るか」をモーダルで見せてから
+   * 書いていた（2026-09-07の指摘への対応）が、実機で通したところ
+   * **作者が「これで書いてください」と頼んだあとに、畳まれたボタンを開いて
+   * 押し、さらに確認へ答える**という形になっていた。作者の言葉は
+   * 「頼んでいるのだから、書き込みはした上で次へ行くべきでは？」。
+   *
+   * **外したのは作者へ訊く確認だけである。** 書き込み自体の安全
+   * （本文は対象外・退避してから新規作成・上限字数）は `parseChatEdit` と
+   * `applyChatEdit` がこれまでどおり守る。
+   *
+   * 代わりに**取り消せる道をその場へ出す**。書く前の値を控え、画面には
+   * 「取り消す」を添える（`undoEdit`）。
+   */
+  private async applyStagedEdit(id: string): Promise<void> {
     const staged = this.pendingEdits.get(id);
     if (!staged) {
-      this.postError("この提案はもう使えません。もう一度聞いてください。");
+      this.postError("この書き込みはもう使えません。もう一度聞いてください。");
       return;
     }
+    this.pendingEdits.delete(id);
 
-    /*
-      **書く前にもう一度、何がどこへ入るかを見せて確かめる**（作者の指摘、
-      2026-09-07）。
-
-      実機では「テーマの明確化」というボタンを押しただけで、`設定/plot.md`
-      の「## テーマ」へ**助言の文まで混ざった段落**が入った。作者の作品
-      ファイルへ書く操作としては、ボタン1つは軽すぎる。**中身を添える**のは、
-      パネルに並んでいる中身を読まないまま押せてしまうためである。
-    */
     const where = describeChatEditDestination(staged.edit.target);
-    const ok = await confirmRun(
-      `${where.file} の「${where.item}」を書き換えます。\n\n` +
-        `これから入る内容：\n${previewForConfirm(staged.edit.content)}`,
-      "書き込む",
-      // 作者の文書を置き換える操作なので、警告の顔で出す
-      { kind: "warning" }
-    );
-    if (!ok) {
-      // **提案は捨てない。** 中身を読んで考え直しただけかもしれないので、
-      // ボタンは押せる状態に戻す
-      this.postAll({ type: "editCancelled", id });
-      return;
-    }
-
     try {
+      // **書く前に控える。** 書いたあとでは元の値がもう読めない
+      const before = await readChatEditTarget(staged.work, staged.edit.target);
       const written = await applyChatEdit(staged.work, staged.edit);
-      this.pendingEdits.delete(id);
+      this.pendingUndos.set(id, {
+        edit: staged.edit,
+        work: staged.work,
+        before,
+        applied: staged.edit.content,
+      });
       this.postAll({
-        type: "editApplied",
+        type: "editDone",
         id,
+        label: staged.edit.label,
+        // 何が入ったのかを、その場で読める形で出す。訊かずに書くぶん、
+        // **入った中身は必ず見せる**
+        preview: staged.edit.content,
         message: `${written} の「${where.item}」を書き換えました。`,
       });
       // 対話でプロットを埋めている最中なら、次の項目を尋ねる
@@ -1746,11 +1861,71 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logFailure("相談からの書き込み", { 内容: message });
+      logFailure("相談からの書き込み", {
+        内容: message,
+        詳細: failureDetail(error),
+      });
+      // 押されたボタンが無いので、会話の場へ赤い文字で出す
+      this.postError(
+        `${where.file} の「${where.item}」を書き込めませんでした: ${message}`
+      );
+    }
+  }
+
+  /**
+   * 書いたものを元へ戻す（設計書6.4.7）。
+   *
+   * **作者が手で直したあとは戻さない。** いま入っている値がこちらの書いた
+   * ものと違えば、取り消しは作者の書いたものを消すことになる
+   * （実装ルール2「作者が書いたデータを上書きしない」）。
+   *
+   * 戻し方は書き込みと同じ経路（`applyChatEdit`）を通す。**別の書き込みの
+   * 道を作らない**——退避や上限の扱いが2通りになると、片方だけ直る日が来る。
+   */
+  private async undoEdit(id: string): Promise<void> {
+    const undo = this.pendingUndos.get(id);
+    if (!undo) {
+      this.postError("この書き込みはもう取り消せません。");
+      return;
+    }
+
+    const where = describeChatEditDestination(undo.edit.target);
+    try {
+      const current = await readChatEditTarget(undo.work, undo.edit.target);
+      if (current !== undo.applied) {
+        this.postAll({
+          type: "undoFailed",
+          id,
+          message:
+            `${where.file} の「${where.item}」は、書いたあとに変わっています。` +
+            "取り消すと、そちらの変更が消えてしまうので止めました。",
+        });
+        return;
+      }
+
+      const written = await applyChatEdit(undo.work, {
+        ...undo.edit,
+        content: undo.before,
+      });
+      this.pendingUndos.delete(id);
       this.postAll({
-        type: "editFailed",
+        type: "undoDone",
         id,
-        message: `書き込めませんでした: ${message}`,
+        message:
+          undo.before === ""
+            ? `${written} の「${where.item}」を、書く前（未記入）へ戻しました。`
+            : `${written} の「${where.item}」を書く前へ戻しました。`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logFailure("相談からの書き込みの取り消し", {
+        内容: message,
+        詳細: failureDetail(error),
+      });
+      this.postAll({
+        type: "undoFailed",
+        id,
+        message: `取り消せませんでした: ${message}`,
       });
     }
   }
@@ -1891,7 +2066,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logFailure("相談の「できること」からの機能起動", { 内容: message });
+      logFailure("相談の「できること」からの機能起動", {
+        内容: message,
+        詳細: failureDetail(error),
+      });
       this.postError(`実行できませんでした: ${message}`);
     }
   }
@@ -2023,7 +2201,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       this.postAll({ type: "note", message: describeChatSync(result) });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logFailure("相談から資料への反映", { 内容: message });
+      logFailure("相談から資料への反映", {
+        内容: message,
+        詳細: failureDetail(error),
+      });
       this.postError(`資料へ反映できませんでした: ${message}`);
     } finally {
       this.applyingToSettings = false;
@@ -2150,8 +2331,20 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * いちばん待たされたくないところで数十秒待たせることになる。
    */
   async startPlotAdvice(work: WorkEntry): Promise<void> {
+    /*
+      **送り先を先に用意する**（`startPlotInterview` と同じ穴。2026-09-21）。
+      呼び出し側（`extension.ts`）は相談ビューを前へ出してから呼ぶが、
+      **その時点で `resolveWebviewView` が済んでいる保証はない。**
+      間に合わなければ、作品を作ったのに最初の一言が出ない。
+    */
+    if (!(await this.ensureChatVisible())) {
+      void vscode.window.showInformationMessage(
+        "相談パネルを開けませんでした。左の「AIに相談」を開くと、" +
+          "プロットの相談を始められます。"
+      );
+      return;
+    }
     await this.focusWork(work);
-    if (this.hosts().length === 0) return;
 
     this.postAll({
       type: "chatter",
@@ -2176,8 +2369,20 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * ボタンを押したときだけ。
    */
   async startPlotInterview(work: WorkEntry): Promise<void> {
+    /*
+      **先に送り先を用意する**（2026-09-21の実機確認）。`focusWork()` は
+      どの作品の話かを覚えて画面へ知らせるだけで、パネルは開かない。
+      開いていないまま進むと以降の投稿がすべてどこにも届かず、
+      「押しても何も起きない」になっていた。
+    */
+    if (!(await this.ensureChatVisible())) {
+      void vscode.window.showInformationMessage(
+        "相談パネルを開けませんでした。左の「AIに相談」を開いてから、" +
+          "もう一度「対話でプロットを作る」を押してください。"
+      );
+      return;
+    }
     await this.focusWork(work);
-    if (this.hosts().length === 0) return;
 
     const sections = await this.readPlotSections(work);
     if (!sections) {
@@ -2458,6 +2663,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     } catch (error) {
       logFailure("検索語の作成に失敗（質問文のまま検索）", {
         理由: error instanceof Error ? error.message : String(error),
+        // ここもAIを呼ぶ。空の応答なら理由（finish_reason）が要る
+        詳細: failureDetail(error),
       });
       return [];
     }
@@ -2606,20 +2813,28 @@ interface ResolvedContext {
   reference: string[];
 }
 
-/** 確認のモーダルに添える中身の上限。長い提案でも押す前に読み切れる長さ */
-const CONFIRM_PREVIEW_CHARS = 300;
-
 /**
- * 書き込む中身を、確認のモーダルに載る長さへ切り詰める。
+ * 記録に残す、失敗の**手掛かり**（実装ルール5「エラーの本文を捨てない」）。
  *
- * **切ったことを隠さない。** 切った印が無いと、作者は「これで全部だ」と
- * 思って押す。
+ * `AIError` の `detail` には `finish_reason=length` のような、通知へ出すには
+ * 長いが原因にたどり着くには要るものが入っている。受け取る側が `message`
+ * しか読んでおらず、実機では「AIから空の応答が返りました。」の一文しか
+ * 残らなかった（2026-09-21）。
+ *
+ * **通知には足さない。** 作者に見せる文が長くなるほうが困る。
+ * `detail` は作者に見せてよい文（`ai/types.ts`）なので、伏せ字は生成側で
+ * 済んでおり、ここでは何もしない。`logFailure` は空の欄を捨てるため、
+ * そのまま渡してよい。
  */
-function previewForConfirm(content: string): string {
-  return content.length > CONFIRM_PREVIEW_CHARS
-    ? `${content.slice(0, CONFIRM_PREVIEW_CHARS)}…`
-    : content;
+function failureDetail(error: unknown): string | undefined {
+  return error instanceof AIError ? error.detail : undefined;
 }
+
+/*
+  書き込みの確認モーダル（`previewForConfirm` と `CONFIRM_PREVIEW_CHARS`）は
+  2026-09-21の裁定で無くなった。**入った中身は、確認ではなく結果として
+  会話の場へ全文を出す**（`editDone` の `preview`）ので、切り詰めも要らない。
+*/
 
 /**
  * 押されるのを待っている提案を、記録用の短い行にする。

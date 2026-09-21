@@ -4,6 +4,7 @@ import type { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { atomicWriteFile, createManagedRecoveryPath } from "../core/atomicWrite";
 import {
+  parsePlotMarkdown,
   updatePlotMarkdown,
   type PlotSections,
 } from "../core/plotDoc";
@@ -16,7 +17,7 @@ import { buildSynopsisListMarkdown } from "../core/synopsisMarkdown";
 import { loadSynopsisChapterMarks } from "../core/synopsisChapters";
 import { buildEmotionCurveMarkdown } from "../core/emotionCurve";
 import { SynopsisStore } from "../core/synopsisStore";
-import type { ChatEdit } from "../core/chatEdit";
+import type { ChatEdit, ChatEditTarget } from "../core/chatEdit";
 
 /**
  * 相談パネルからの加筆修正を、実際に書き込む。
@@ -51,6 +52,48 @@ export async function applyChatEdit(
       }));
     case "episodeSynopsis":
       return applyToEpisodeSynopsis(work, edit.target.chapter, edit.content);
+  }
+}
+
+/**
+ * いま入っている値を読む（取り消しのために控える）。
+ *
+ * **書く前に控えておく。** 頼まれた書き込みは確認を出さずに行うように
+ * なった（設計書6.4.7・2026-09-21の作者の裁定）ので、**戻せる道を
+ * その場に出す**必要がある。控えが無ければ、書いたあとに「元は何だったか」を
+ * 誰も知らない。
+ *
+ * 読めない・まだ書かれていないときは空文字を返す。「書かれていなかった」
+ * ことも、戻すべき状態である。
+ */
+export async function readChatEditTarget(
+  work: WorkEntry,
+  target: ChatEditTarget
+): Promise<string> {
+  switch (target.kind) {
+    case "plot": {
+      const text = await readText(await settingsFile(work, "plot.md"));
+      return text ? (parsePlotMarkdown(text).sections[target.section] ?? "") : "";
+    }
+    case "blurb":
+    case "catchphrase": {
+      const text = await readText(await settingsFile(work, "synopsis.md"));
+      if (!text) return "";
+      const doc = parseSynopsisMarkdown(text);
+      return target.kind === "blurb" ? doc.blurb : (doc.catchphrase ?? "");
+    }
+    case "episodeSynopsis": {
+      try {
+        const set = await new SynopsisStore(work).load();
+        const found = set.episodes.find(
+          (item) => item.chapter === target.chapter
+        );
+        return found?.synopsis ?? "";
+      } catch {
+        // 台帳がまだ無い。書けば作られるので、控えは空でよい
+        return "";
+      }
+    }
   }
 }
 

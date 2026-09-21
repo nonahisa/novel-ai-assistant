@@ -1,8 +1,10 @@
 import { describe, expect, test } from "vitest";
 import {
   applyPromotion,
+  changeEntryKey,
   changedFields,
   changesOfField,
+  dropChanges,
   isFoldableConflict,
   promoteConflictToChanges,
 } from "../../src/core/recordChanges";
@@ -424,6 +426,146 @@ describe("表示", () => {
     expect(describeCharacter(updated)).toContain(
       "変化（appearance）: 黒髪（第1〜3話）→ 銀髪（第7話）"
     );
+  });
+});
+
+/**
+ * 誤って記録された変化を落とす（作者の裁定、2026-09-21）。
+ *
+ * 実データ（『教科書チート』のターナ先生）で、抽出が話者を取り違えた。
+ * 「**ターナ先生**。魔物の数がちょっと多いようなので…」は呼びかけであり、
+ * 話し手は別人である。それを読み違えて、女性の人物の第1話に
+ * 「リーダー格の男性。」という変化が3項目ぶん残った。
+ * レコード本体は直せても、変化の記録を消す手段がどこにも無かった。
+ */
+describe("誤って記録された変化を落とす", () => {
+  /** ターナ先生の実データと同じ形。第1話が取り違え、第7話が正しい */
+  function misreadChanges(): RecordChange[] {
+    return [
+      change("summary", "リーダー格の男性。仲間を指揮し、リナ救出を依頼する。", [1]),
+      change("summary", "学院の教師。生徒を導く。", [7]),
+    ];
+  }
+
+  test("選んだ変化だけが消え、ほかはそのまま残る", () => {
+    const before = misreadChanges();
+    const { changes, dropped } = dropChanges(before, [
+      changeEntryKey(before[0]),
+    ]);
+
+    expect(dropped).toBe(1);
+    expect(changes.map((entry) => entry.value)).toEqual([
+      "学院の教師。生徒を導く。",
+    ]);
+    // 元の配列は書き換えない（呼び出し側が保存に失敗しても壊れない）
+    expect(before).toHaveLength(2);
+  });
+
+  test("落とす対象が無ければ、何も壊さずそのまま返す", () => {
+    const before = misreadChanges();
+    const { changes, dropped } = dropChanges(before, []);
+
+    expect(dropped).toBe(0);
+    expect(changes).toBe(before);
+  });
+
+  test("当たらない鍵を渡しても、1件も消えない", () => {
+    const before = misreadChanges();
+    const { changes, dropped } = dropChanges(before, [
+      changeEntryKey(change("summary", "別の作品の値", [1])),
+    ]);
+
+    expect(dropped).toBe(0);
+    expect(changes).toBe(before);
+  });
+
+  test("項目が違えば、同じ値でも落ちない", () => {
+    const before = [
+      change("role", "リーダー格の男性", [1]),
+      change("summary", "リーダー格の男性", [1]),
+    ];
+    const { changes, dropped } = dropChanges(before, [
+      changeEntryKey(before[1]),
+    ]);
+
+    expect(dropped).toBe(1);
+    expect(changes).toEqual([before[0]]);
+  });
+
+  test("同じ値でも、話が違えば落ちない", () => {
+    const before = [
+      change("appearance", "黒髪", [1]),
+      change("appearance", "黒髪", [9]),
+    ];
+    const { changes, dropped } = dropChanges(before, [
+      changeEntryKey(before[0]),
+    ]);
+
+    expect(dropped).toBe(1);
+    expect(changes).toEqual([before[1]]);
+  });
+
+  test("話数の並びが違っても、同じ記録として引き当てる", () => {
+    const before = [change("appearance", "黒髪", [3, 1, 2])];
+    const { dropped } = dropChanges(before, [
+      changeEntryKey(change("appearance", "黒髪", [1, 2, 3])),
+    ]);
+
+    expect(dropped).toBe(1);
+  });
+
+  /**
+   * 値に区切り文字が紛れても取り違えない。
+   * 鍵を文字列として分解しない理由がこれである（`dropDiffEntries` と同じ）
+   */
+  test("値に読点や数字が入っていても、別の記録を巻き込まない", () => {
+    const before = [
+      change("summary", "村の少女", [1]),
+      change("summary", "村の少女 1", [1]),
+    ];
+    const { changes, dropped } = dropChanges(before, [
+      changeEntryKey(before[1]),
+    ]);
+
+    expect(dropped).toBe(1);
+    expect(changes).toEqual([before[0]]);
+  });
+
+  test("同じ話・同じ値が二重に記録されていたら、まとめて落ちる", () => {
+    // 画面では1行に畳んで見せている（`describeChangeValues`）。
+    // 片方だけ残ると、押したのに消えていないように見える
+    const before = [
+      change("summary", "村の少女", [1]),
+      change("summary", "村の少女", [1]),
+      change("summary", "町の少女", [7]),
+    ];
+    const { changes, dropped } = dropChanges(before, [
+      changeEntryKey(before[0]),
+    ]);
+
+    expect(dropped).toBe(2);
+    expect(changes).toEqual([before[2]]);
+  });
+
+  test("その項目の変化を全部落とすこともできる", () => {
+    const before = misreadChanges();
+    const { changes, dropped } = dropChanges(
+      before,
+      before.map((entry) => changeEntryKey(entry))
+    );
+
+    expect(dropped).toBe(2);
+    expect(changes).toEqual([]);
+  });
+
+  test("作者が書いた変化も、作者自身の操作なので落とせる", () => {
+    const authored: RecordChange = {
+      ...change("summary", "作者が書いた値", [1]),
+      source: "author",
+    };
+    const { dropped } = dropChanges([authored], [changeEntryKey(authored)]);
+
+    expect(dropped).toBe(1);
   });
 });
 

@@ -301,6 +301,66 @@ export function changesOfField(
 }
 
 /**
+ * 変化の記録を1件ずつ見分ける鍵（作者の裁定、2026-09-21）。
+ *
+ * **鍵は文字列として分解しない**（`dropDiffEntries` と同じ考え方）。
+ * レコード側からこの関数で組み立て、集合に入っているかだけを見る。
+ * 分解すると、値に区切り文字が入ったときに引き当てを外す。
+ *
+ * 区切りのNULは、値にも項目名にも現れない文字だから選んだ。
+ * **エスケープで書く**——生の制御文字を置くと、gitやgrepが
+ * このファイルをバイナリとして扱う（`sourceHygiene.test.ts`）。
+ */
+export function changeEntryKey(change: RecordChange): string {
+  return `${change.field}\u0000${change.value}\u0000${[...change.chapters]
+    .sort((left, right) => left - right)
+    .join(",")}`;
+}
+
+export interface DropChangesResult {
+  changes: RecordChange[];
+  /**
+   * 実際に落とした件数。
+   *
+   * **黙って落としたことにしない**（CLAUDE.md 規則2）。作者へ
+   * 「◯件を落としました」と伝えるために数える。
+   */
+  dropped: number;
+}
+
+/**
+ * 誤って記録された変化を落とす（作者の裁定、2026-09-21）。
+ *
+ * 抽出は話者を取り違えることがある。実データでは、呼びかけられた側の
+ * 名前を話し手と読み、女性の人物の第1話に「リーダー格の男性。」という
+ * 変化が3項目ぶん残った。レコード本体は直せても、**変化の記録だけは
+ * 消す手段がどこにも無かった**——MCP（`novel.propose`）では `changes` が
+ * 白名簿の外で、画面にも落とす口が無かった。
+ *
+ * **落とすのは作者が選んだものだけ。** どれが取り違えかはAIには決められ
+ * ないので、判断は必ず人が下す（設計書6.18と同じ立場）。
+ *
+ * **レコード本体（`summary` などの項目）には触らない。** 本体は作者が
+ * すでに直していることがあり、変化を落としたついでに書き換えると、
+ * 作者が書いた値を押し流す（CLAUDE.md 規則2）。
+ */
+export function dropChanges(
+  changes: RecordChange[],
+  keys: readonly string[]
+): DropChangesResult {
+  if (keys.length === 0) return { changes, dropped: 0 };
+
+  const drop = new Set(keys);
+  const remaining = changes.filter(
+    (change) => !drop.has(changeEntryKey(change))
+  );
+  const dropped = changes.length - remaining.length;
+  // 1件も当たらなかったなら、写しを作らずそのまま返す
+  if (dropped === 0) return { changes, dropped: 0 };
+  return { changes: remaining, dropped };
+}
+
+/**
  * 実際に変わった項目を返す。
  *
  * **値が1件しか記録されていない項目は含めない。** 空欄を埋めたときにも

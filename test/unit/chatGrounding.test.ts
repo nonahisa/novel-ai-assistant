@@ -145,7 +145,9 @@ describe("抽出は厳しいままにする", () => {
 describe("版", () => {
   test("プロンプトを変えたら版も上がっている", () => {
     // 版を止めたままだと、古い応答がキャッシュから返る
-    expect(WORK_CHAT_VERSION).toBe("3.10");
+    // 3.11（2026-09-21）：頼まれた書き込みを確認なしで行う裁定に伴い、
+    // 【書き込みを頼まれたとき】の説明を実態へ合わせた（P-21の経過）
+    expect(WORK_CHAT_VERSION).toBe("3.11");
     expect(SETTINGS_CHAT_VERSION).toBe("3.0");
   });
 });
