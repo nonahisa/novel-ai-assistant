@@ -87,6 +87,15 @@ const WITHOUT_WORK: Array<{ file: string; command: string; why: string }> = [
       "意味検索の準備は作品によらない設定なので、`setupVectorSearch()` は" +
       "作品を持たない。索引を作る作品は、ここで初めて選ぶ",
   },
+  {
+    file: "src/features/handoffSync.ts",
+    command: "novelai.resolveDivergence",
+    why:
+      "開いたときの点検（設計書6.15.1）は**置き場（リポジトリ）ごと**に回る。" +
+      "分かれているのは置き場の性質で、そこに何作品入っているかは決まらない" +
+      "（書庫では11作品）。どの作品を代表にするかをこちらで選ぶと、" +
+      "作者から見て関係のない作品名が出る",
+  },
 ];
 
 describe("作品が決まっているなら、選び直させない", () => {

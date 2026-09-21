@@ -1027,7 +1027,36 @@ export async function activate(
     )
   );
 
+  /**
+   * 機械を行き来するときの土台（設計書6.15.1）。
+   *
+   * **`features/handoffSync.ts` は `core/git.ts`（`node:child_process`）を
+   * 静的importする**ので、ここでは型も値も直に持たず、使う場面で
+   * 動的importして渡す（設計書5.8.5）。
+   */
+  const handoffDeps = () => ({
+    registry,
+    monitor: gitSync,
+    // 「送らずに閉じた」印は作品をまたいで1つ。作品設定ではなく globalState
+    storage: context.globalState,
+    pauseSettingsWatch: () => settingsWatcher.pause(),
+    batchFileNotices: gitSync.beginBatchedFileNotices?.bind(gitSync),
+  });
+
   context.subscriptions.push(
+    // **1押しで 保存 → 記録 → 送信**（設計書6.15.1の②）。既存の「GitHubと
+    // 同期」との違いは、**先に未保存を保存する**ところだけである
+    // （あちらは未保存があると保存を促して止まる。設計書6.15の手順1）
+    registerCommand("novelai.saveAndSync", async () => {
+      if (!canRunProcesses()) {
+        vscode.window.showWarningMessage(
+          describeProcessesBlocked("novelai.saveAndSync")
+        );
+        return;
+      }
+      const { saveAndSyncAll } = await import("./features/handoffSync.js");
+      await saveAndSyncAll(handoffDeps());
+    }),
     registerCommand("novelai.syncAllWorks", async () => {
       const { syncAllWorks } = await import("./features/syncAllWorks.js");
       // 同期の最中は、設定資料の見張りとファイル更新の知らせをまとめる
@@ -5459,10 +5488,44 @@ export async function activate(
     })
   );
 
-  // 起動時に一度だけ全作品の同期状態を確かめる（設計書5.5.1）。
-  // await しないのは、回線が遅い環境で拡張機能の起動を待たせないため。
-  // fetchは取得のみなので、途中で終わってもローカルには何も起きない
-  void gitSync.refreshAll({ fetch: true });
+  /*
+    **VS Code を開いた時点で点検する**（設計書6.15.1の①）。
+
+    これまでは「取得だけ」だった（`refreshAll({ fetch: true })`）。作者の
+    指示（2026-09-21）で、**溜まっていれば送り、リモートだけ進んでいれば
+    取り、両方に動きがあってもファイルが重ならなければ揃える**ところまで行う。
+    重なっていたら手を止めて訊く。
+
+    await しないのは、回線が遅い環境で拡張機能の起動を待たせないため。
+
+    **ブラウザ版ではgitの子プロセスを起こせない**ので、これまでどおり
+    代役の `refreshAll`（何もしない）で済ませる（設計書5.8.5）。
+  */
+  if (canRunProcesses()) {
+    void (async () => {
+      const handoff = await import("./features/handoffSync.js");
+      const deps = handoffDeps();
+
+      // **印は、状態が変わるたびに付け直す**（設計書6.15.1）。`deactivate()`
+      // は待たれないので、そこで書こうとすると印まで残らないことがある。
+      // 消えるのは送り残しが無くなったとき＝送信が通ったときだけである
+      context.subscriptions.push(
+        gitSync.onDidChange(() => void handoff.refreshUnsentMark(deps))
+      );
+      // **閉じる前の問いは、ここで仕込む。** `deactivate()` は同期関数で
+      // 動的importを待てないので、読み込み済みの関数を掴んでおく
+      beforeClose = () => handoff.noticeBeforeClose(deps);
+
+      await handoff.runStartupHandoff(deps);
+    })().catch((error) => {
+      // 点検で落ちても拡張機能の起動は止めない
+      logFailure("開いたときの点検", {
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    });
+  } else {
+    void gitSync.refreshAll({ fetch: true });
+  }
 
   /*
     **はじめて開いたときの声かけは、2つを続けて出す**（設計書6.90.3）。
@@ -5498,7 +5561,37 @@ export async function activate(
   };
 }
 
+/**
+ * 閉じる前に、未送信を問う仕掛け（設計書6.15.1の④）。
+ *
+ * **`deactivate()` は同期関数で、動的importを待てない。** 起動時に
+ * `features/handoffSync.ts` を読み込んだ時点で、ここへ関数を掴んでおく。
+ * ブラウザ版では読み込まないので `undefined` のまま（gitが無いので問う相手もいない）。
+ */
+let beforeClose: (() => void) | undefined;
+
 export function deactivate(): void {
+  /*
+    **閉じる前に未送信を問う**（設計書6.15.1、作者の裁定 2026-09-21）。
+
+    **これは確実には動かない。** VS Code は `deactivate()` の非同期の完了を
+    待ち切らないので、問いが出ないまま閉じることがある。**通信や電池が
+    切れる場面と同じ形の危なさである。**
+
+    だから**これを唯一の守りにしていない**——出なかったときの受け皿が
+    「送らずに閉じた」印（`globalState`）と、次に開いたときの点検である。
+
+    **ここで落ちても後片付けは続ける。** 問いのために閉じ際の始末を
+    落とすほうが重い
+  */
+  try {
+    beforeClose?.();
+  } catch (error) {
+    logFailure("閉じる前の未送信の確認", {
+      詳細: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   // 後片付けは context.subscriptions に任せる。
   // ログだけは遅延生成でsubscriptionsに載っていないので個別に閉じる
   disposeLog();

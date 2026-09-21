@@ -981,7 +981,12 @@ ${reason}`
   /**
    * ステータスバーの表示を作り直す。
    *
-   * **同期が取れているときは何も出さない。** 常に出していると、
+   * **送っていないものが1つでもあれば、出しっぱなしにする**（設計書6.15.1）。
+   * 作者の指示（2026-09-21）：閉じる前に目に入るようにするため。
+   * 「送っていない」には**記録していない変更**も含む——記録も送信もして
+   * いない原稿は、別の機械からは存在しないのと同じである。
+   *
+   * 何も残っていないときは何も出さない。常に出していると、
    * 出ていること自体が普通になり、警告として働かなくなる。
    */
   private updateStatusBar(): void {
@@ -999,13 +1004,19 @@ ${reason}`
       return;
     }
 
-    const behind = sumTracked(warnings, (status) => status.behind);
-    const ahead = sumTracked(warnings, (status) => status.ahead);
-    const unmerged = sumTracked(warnings, (status) => status.unmerged);
+    // **置き場ごとに1回だけ数える。** `behind`／`ahead`／`dirty` は
+    // 置き場ぜんぶの数なので（設計書5.5.1）、作品ごとに足すと書庫では
+    // 11倍になる。一覧の印で同じ失敗をしている（全行に「送信待ち13」）
+    const perRoot = uniqueByRoot(warnings);
+    const behind = sumTracked(perRoot, (status) => status.behind);
+    const ahead = sumTracked(perRoot, (status) => status.ahead);
+    const dirty = sumTracked(perRoot, (status) => status.dirty);
+    const unmerged = sumTracked(perRoot, (status) => status.unmerged);
 
     const parts: string[] = [];
     if (behind > 0) parts.push(`未取得 ${behind}`);
     if (ahead > 0) parts.push(`未送信 ${ahead}`);
+    if (dirty > 0) parts.push(`未記録 ${dirty}`);
     if (unmerged > 0) parts.push(`競合 ${unmerged}`);
 
     this.statusBar.text = `$(git-branch) ${parts.join(" / ")}`;
@@ -1033,10 +1044,42 @@ ${reason}`
   }
 }
 
-/** 警告として出すべき状態か */
+/**
+ * 警告として出すべき状態か。
+ *
+ * **記録していない変更も数える**（設計書6.15.1。作者の指示、2026-09-21）。
+ * 記録も送信もしていない原稿は、別の機械からは存在しないのと同じなので、
+ * 「送っていないもの」として同じ扱いにする。
+ */
 export function isWarning(status: GitSyncStatus): boolean {
   if (status.kind !== "tracked") return false;
-  return status.behind > 0 || status.ahead > 0 || status.unmerged > 0;
+  return (
+    status.behind > 0 ||
+    status.ahead > 0 ||
+    status.dirty > 0 ||
+    status.unmerged > 0
+  );
+}
+
+/**
+ * 同じ置き場を1回だけにする（設計書5.7.9）。
+ *
+ * 書庫では1つのリポジトリに11作品が入る。`ahead` などは置き場ぜんぶの数
+ * なので、作品ごとに足すと11倍になる。
+ */
+function uniqueByRoot(
+  entries: readonly { work: WorkEntry; status: GitSyncStatus }[]
+): Array<{ status: GitSyncStatus }> {
+  const seen = new Set<string>();
+  const out: Array<{ status: GitSyncStatus }> = [];
+  for (const entry of entries) {
+    const status = entry.status;
+    if (!("root" in status)) continue;
+    if (seen.has(status.root)) continue;
+    seen.add(status.root);
+    out.push({ status });
+  }
+  return out;
 }
 
 /**
@@ -1135,6 +1178,9 @@ function describeForTooltip(work: WorkEntry, status: GitSyncStatus): string {
     if (status.behind > 0) parts.push(`別の環境の変更が未取得 ${status.behind}件`);
     if (status.ahead > 0) parts.push(`この環境の変更が未送信 ${status.ahead}件`);
   }
+  // **記録していない変更も出す**（設計書6.15.1）。記録も送信もしていない
+  // 原稿は、別の機械からは存在しないのと同じである
+  if (status.dirty > 0) parts.push(`まだ記録していない変更 ${status.dirty}件`);
   if (status.unmerged > 0) parts.push(`未解決の競合 ${status.unmerged}件`);
   return `- **${work.title}**（${status.branch}）: ${parts.join(" / ")}`;
 }

@@ -1,0 +1,213 @@
+import { describe, expect, test } from "vitest";
+import {
+  PROCEDURE_MIN_HITS,
+  PROCEDURES,
+  selectProcedure,
+} from "../../src/core/procedures";
+import { MIN_EVIDENCE_HITS } from "../../src/core/guideSelect";
+
+/**
+ * 相談から手順書きが選ばれるか——**取りこぼしの見張り**（設計書6.104）。
+ *
+ * ## なぜ別のテストにするのか
+ *
+ * `procedures.test.ts` は「1本だけ選ばれる」「合わなければ渡さない」という
+ * **筋**を守るテストである。ここで測るのは**成績**——作者が実際に言いそうな
+ * 聞き方を並べ、何件当たり、何件取りこぼし、何件を余計に拾うかを数える。
+ *
+ * ## 「当たってほしくないもの」を必ず数える
+ *
+ * 見逃しだけを測ると、**何でも選ぶ実装が満点になる**（CLAUDE.md の失敗2）。
+ * 創作の相談に手順書きが付くのは、付かないのと同じくらい困る——順路の紙は
+ * 毎回の送信量を食ううえ、AIの答えを操作の案内へ引き寄せる。
+ *
+ * ## いまの形（2026-09-21に作者が裁定）
+ *
+ * **しきい値は1**（`PROCEDURE_MIN_HITS`）。1組みで通すぶん、**「どんなときに
+ * 読むか」の文の書き方がそのまま成績になる**ので、文を書き足したら必ず
+ * ここで測り直すこと。
+ */
+
+/** 作者が実際に言いそうな聞き方と、当たってほしい手順 */
+const CASES: [string, string | null][] = [
+  // 推敲して仕上げる
+  ["誤字を直したい", "推敲して仕上げる"],
+  ["誤字をなおしたい", "推敲して仕上げる"],
+  ["誤字脱字を直したい", "推敲して仕上げる"],
+  ["推敲したい", "推敲して仕上げる"],
+  ["表記ゆれを直したい", "推敲して仕上げる"],
+  ["人に見せる前に直したい", "推敲して仕上げる"],
+  ["冒頭を診断してほしい", "推敲して仕上げる"],
+  // 矛盾を洗う
+  ["矛盾を洗いたい", "矛盾を洗う"],
+  ["矛盾がないか見たい", "矛盾を洗う"],
+  ["設定と本文が食い違っていないか", "矛盾を洗う"],
+  ["伏線の回収漏れを確かめたい", "矛盾を洗う"],
+  ["プロットから外れていないか", "矛盾を洗う"],
+  // 投稿の準備をする
+  ["投稿の準備をしたい", "投稿の準備をする"],
+  ["新話を投稿したい", "投稿の準備をする"],
+  ["紹介文を整えたい", "投稿の準備をする"],
+  ["キャッチコピーを作りたい", "投稿の準備をする"],
+  // 新しい作品を始める
+  ["新しい作品を始めたい", "新しい作品を始める"],
+  ["新作を書き始めたい", "新しい作品を始める"],
+  ["プロットを立てたい", "新しい作品を始める"],
+  // 書いてある作品を登録して整える
+  ["書いた原稿を登録したい", "書いてある作品を登録して整える"],
+  ["設定資料を抽出したい", "書いてある作品を登録して整える"],
+  ["人物の重複を整えたい", "書いてある作品を登録して整える"],
+  // 当たってほしくないもの（誤検出を見る）
+  ["今日はいい天気ですね", null],
+  ["この場面、説明が多すぎない？", null],
+  ["この人物の動機がぼやけている気がする", null],
+  ["ありがとう", null],
+];
+
+interface Score {
+  /** 当たってほしい手順が選ばれた */
+  readonly hit: string[];
+  /** 何も選ばれなかった（当たってほしかったのに） */
+  readonly miss: string[];
+  /** 別の手順が選ばれた。見逃しより悪い——間違った順路を案内する */
+  readonly wrong: string[];
+  /** 当たってほしくないのに選ばれた */
+  readonly falsePositive: string[];
+}
+
+/** `minHits` を省くと製品と同じ既定（1）で測る */
+function measure(minHits?: number): Score {
+  const score: Score = { hit: [], miss: [], wrong: [], falsePositive: [] };
+  const rules = minHits === undefined ? undefined : { minHits };
+  for (const [question, expected] of CASES) {
+    const picked = selectProcedure({ question, rules })?.title;
+    if (expected === null) {
+      if (picked) score.falsePositive.push(`${question} → ${picked}`);
+      continue;
+    }
+    if (picked === expected) score.hit.push(question);
+    else if (!picked) score.miss.push(question);
+    else score.wrong.push(`${question} → ${picked}（欲しいのは${expected}）`);
+  }
+  return score;
+}
+
+/** 表に出す数字だけの形 */
+function counts(score: Score): Record<string, number> {
+  return {
+    当たり: score.hit.length,
+    見逃し: score.miss.length,
+    取り違え: score.wrong.length,
+    誤検出: score.falsePositive.length,
+  };
+}
+
+describe("成績（2026-09-21に測った値）", () => {
+  /*
+    ここに固定してあるのは**測った結果**であって、目標ではない。
+    規則や「どんなときに読むか」の文を触ったら、この数字が動いて落ちる。
+    **落ちたら数字を書き換える前に、増えた誤検出と減った当たりを見ること。**
+  */
+
+  test("いま：当たり18・見逃し4・取り違え0・誤検出0", () => {
+    expect(counts(measure())).toEqual({
+      当たり: 18,
+      見逃し: 4,
+      取り違え: 0,
+      誤検出: 0,
+    });
+  });
+
+  test("しきい値を2へ戻すと、当たりが18→9へ落ちる", () => {
+    /*
+      **緩めたことで何が変わったかを、毎回並べて見せる列である。**
+      束選び（`MIN_EVIDENCE_HITS` ＝ 2）と同じ厳しさを手順書きにも課すと、
+      **題とほぼ同じ言い方が半分以上落ちる**——これが緩めた理由そのもの。
+      あちらは束が何十もあるので 2 のままにしてある。
+    */
+    expect(counts(measure(MIN_EVIDENCE_HITS))).toEqual({
+      当たり: 9,
+      見逃し: 13,
+      取り違え: 0,
+      誤検出: 0,
+    });
+  });
+
+  test("既定のしきい値は1", () => {
+    expect(PROCEDURE_MIN_HITS).toBe(1);
+    // 束選びの側を巻き込んでいないこと。緩めると関係の薄い説明が大量に付く
+    expect(MIN_EVIDENCE_HITS).toBe(2);
+  });
+});
+
+describe("どこを取りこぼすか", () => {
+  test("残る4件は、質問の側に証拠の組みが1つも無いもの", () => {
+    /*
+      漢字が1文字ずつしか並ばないか（「人に見せる前に直したい」）、
+      カタカナである（「プロット」「キャッチコピー」）。`isEvidenceGram` が
+      カタカナを捨てるのは、作品の相談に説明が付いてしまった経緯の結果
+      （`guideSelect.ts`）なので、**しきい値では救えない。**
+      救うなら証拠の採り方の話になる——別の作業である。
+    */
+    expect(measure().miss).toEqual([
+      "人に見せる前に直したい",
+      "プロットから外れていないか",
+      "キャッチコピーを作りたい",
+      "プロットを立てたい",
+    ]);
+  });
+
+  test("誤検出も取り違えも、いまは0件", () => {
+    expect(measure().falsePositive).toEqual([]);
+    expect(measure().wrong).toEqual([]);
+  });
+});
+
+describe("「どんなときに読むか」の文が、そのまま成績になる", () => {
+  /*
+    しきい値が1なので、**そこへ書いた熟語が1つ当たるだけで手順書きが付く**。
+    下の2つは、書き直して誤検出と取り違えを消したときの決め手なので、
+    戻されたら気づけるようにしておく（数字のテストでも落ちるが、
+    ここが落ちれば**なぜ落ちたか**まで分かる）。
+  */
+
+  test("どの手順も「人物」と書かない", () => {
+    // 「この人物の動機がぼやけている気がする」を引き当てていた。
+    // 作品の相談で最もよく出る熟語のひとつなので、順路の文には置かない
+    for (const procedure of PROCEDURES) {
+      expect(procedure.whenToRead, procedure.key).not.toContain("人物");
+    }
+  });
+
+  test("「書いてある作品を登録して整える」は「本文」と書かない", () => {
+    /*
+      「設定と本文が食い違っていないか」が、この手順と「矛盾を洗う」に
+      **同じ点で当たり、並びが先のこちらが勝っていた**（取り違え）。
+      抽出のもとは原稿なので「原稿」と書けば、意味を変えずに点が下がる。
+
+      「本文」そのものは禁句ではない——`polish`（書いた本文を直す）と
+      `posting`（本文を投稿サイトの形に直す）は持っていてよい。
+      **同点で競る相手がこの1組だった**というだけである。
+    */
+    const importWork = PROCEDURES.find(
+      (procedure) => procedure.key === "importWork"
+    );
+
+    expect(importWork?.whenToRead).not.toContain("本文");
+    expect(importWork?.whenToRead).toContain("原稿");
+  });
+});
+
+describe("規則を変えても崩してはいけないこと", () => {
+  test("緩めた先でも、創作の相談には手順書きを渡さない", () => {
+    // `procedures.test.ts` が見張っている4件。**緩めた先でも守れているか**
+    for (const question of [
+      "主人公の動機が弱い気がします",
+      "この段落は冗長ですか",
+      "第12話の終わり方が唐突でしょうか",
+      "タイトルはこれでいいと思う？",
+    ]) {
+      expect(selectProcedure({ question }), question).toBeUndefined();
+    }
+  });
+});

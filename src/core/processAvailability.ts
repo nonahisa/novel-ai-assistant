@@ -39,6 +39,9 @@ const REQUIRES_PROCESSES = new Set<string>([
   // 1作品ずつの `novelai.gitSync` と違い、ソース管理へ案内して代わりに
   // させる形にできない（置き場ごとに記録・取り込み・送信を順に行うため）
   "novelai.syncAllWorks",
+  // **保存して同期も、中で「作品をすべて同期」を回す**（設計書6.15.1）ので、
+  // 同じ理由でブラウザでは動かせない。保存だけできても、送るところで詰まる
+  "novelai.saveAndSync",
   // **分岐を合わせるのもgitコマンドを直に打つ**（設計書5.5.16）。
   // ソース管理へ案内して代わりにさせる形にはできない
   "novelai.resolveDivergence",
@@ -101,6 +104,12 @@ export function describeProcessesBlocked(command: string): string {
     return (
       "ブラウザ版のVS Codeでは、Ollamaの導入や外部プロセスの起動ができません。" +
       "クラウドのAI（Gemini・OpenAI・さくらのAI Engine・Claude）をお使いください。"
+    );
+  }
+  if (command === "novelai.saveAndSync") {
+    return (
+      "ブラウザ版では、保存と同期をまとめて行えません（gitコマンドを起動できないためです）。" +
+      "保存は Ctrl+S で、送信は「作品管理」→「GitHubと同期」の案内からお願いします。"
     );
   }
   if (command === "novelai.gitRestore") {

@@ -34,6 +34,9 @@ export interface ExclusiveCommand {
 export const EXCLUSIVE_COMMANDS: readonly ExclusiveCommand[] = [
   // 同期の系。同じ置き場へ同じ git の操作を2本走らせない
   { id: "novelai.syncAllWorks", label: "作品をすべて同期" },
+  // 保存して同期は、中で「作品をすべて同期」を回す（設計書6.15.1）。
+  // 2本走れば同じ置き場へ git を2本走らせることになる
+  { id: "novelai.saveAndSync", label: "保存して同期" },
   { id: "novelai.gitSync", label: "GitHubと同期" },
   { id: "novelai.resolveConflicts", label: "競合解決" },
   { id: "novelai.resolveDivergence", label: "分かれた分を合わせる" },

@@ -1,8 +1,6 @@
-import {
-  countGramHits,
-  evidenceGrams,
-  MIN_EVIDENCE_HITS,
-} from "./guideSelect";
+// `MIN_EVIDENCE_HITS`（束選びのしきい値）はここでは使わない。手順書きは
+// 1組みで通す（`PROCEDURE_MIN_HITS`）。理由はその定数の説明にある
+import { countGramHits, evidenceGrams } from "./guideSelect";
 
 /**
  * 手順書き——よくある仕事の「順番と判断」（作者の指示、2026-09-18）。
@@ -90,9 +88,13 @@ export const PROCEDURES: readonly Procedure[] = [
     key: "newWork",
     title: "新しい作品を始める",
     // ステップ1（作品登録）→ 2（新作構想）→ 3（執筆の場）の道
+    // 「登場人物の名前の重なり」と書いていたが、**「人物」1組みで
+    // 『この人物の動機がぼやけている』のような作品の相談を引き当てた**
+    // （しきい値を1にしたときの唯一の誤検出。2026-09-21）。
+    // 点検しているのは名前の響きなので、そちらへ寄せて意味は変えない
     whenToRead:
       "新規作品の登録から、プロットの作成・形式とジャンルの決定・" +
-      "登場人物の名前の重なりの点検まで、新作の構想を立てて書き始めるとき",
+      "名前の響きの重なりの点検まで、新作の構想を立てて書き始めるとき",
     steps: [
       {
         command: "novelai.createWorkWithPlot",
@@ -125,9 +127,19 @@ export const PROCEDURES: readonly Procedure[] = [
     key: "importWork",
     title: "書いてある作品を登録して整える",
     // ステップ1（作品登録）→ 3（資料生成）の道
+    /*
+      **「本文」と「人物」を、わざと書いていない**（2026-09-21）。
+
+      - 「本文」：『設定と本文が食い違っていないか』が、ここと「矛盾を洗う」に
+        同じ点で当たり、**並びが先のこちらが勝っていた**。抽出のもとは原稿
+        なので、そう書けば意味を変えずに取り違えが消える
+      - 「人物」：作品の相談（『この人物の動機が…』）を引き当てるので、
+        「登場する相手」にした。**「重複」は残す**——ここを外すと
+        『人物の重複を整えたい』が当たらなくなる
+    */
     whenToRead:
-      "すでに原稿のあるフォルダーを作品として登録し、本文から設定資料を抽出して、" +
-      "人物の重複を整えるとき",
+      "すでに書いてある原稿のフォルダーを作品として登録し、そこから設定資料を" +
+      "抽出して、登場する相手の重複を整えるとき",
     steps: [
       {
         command: "novelai.addWork",
@@ -277,6 +289,43 @@ export type ProcedureActionLookup = (
 ) => ProcedureActionInfo | undefined;
 
 /**
+ * 手順書きが当たったと見なすのに要る、2文字組みの数（設計書6.104）。
+ *
+ * ## なぜ束選び（`MIN_EVIDENCE_HITS` ＝ 2）と違うのか
+ *
+ * 日本語の自然な聞き方には、**漢字の熟語が1つしか入らないことが多い**。
+ * 「矛盾を洗いたい」から証拠に数える組みは「矛盾」だけである（「を洗」は
+ * かな混じりなので数えない。`guideSelect.ts` の `isEvidenceGram`）。
+ * それなのに束選びと同じ「2組み以上」を課していたため、**題とほぼ同じ
+ * 言い方でも選べなかった**——26件で測って当たり9・見逃し12・取り違え1・
+ * **誤検出0**。誤検出が0ということは、**締めすぎ**である（2026-09-21）。
+ *
+ * 1へ下げると当たりが9→17へ増える。作者の裁定で**こちらを採った**
+ * （題に当たったら通す案も測ったが、当たりが13までしか伸びず、
+ * **1へ下げたときに通るものの部分集合**だったので落とした）。
+ *
+ * ## 束選びを一緒に緩めてはいけない
+ *
+ * `selectGuideBundles` は**束が何十もある**ので、1で採ると点が同じ束が
+ * メニュー順に上限まで詰め込まれる（作品の相談に3,000字近い説明が付いた
+ * 実績がある）。手順書きは5本しか無く、多くても1本しか渡さないので、
+ * 事情が違う。**あちらの `MIN_EVIDENCE_HITS` は 2 のままである。**
+ */
+export const PROCEDURE_MIN_HITS = 1;
+
+/**
+ * 手順書きの通し方。
+ *
+ * **残してあるのは測り直しのため**（`test/unit/procedureSelect.test.ts` が
+ * しきい値2へ戻した列を並べて、緩めたことで何件増えたかを毎回示す）。
+ * 製品はどこからも渡さないが、**テストが両方の値を通るので腐らない**。
+ */
+export interface ProcedureSelectRules {
+  /** 当たりに要る組みの数。既定は `PROCEDURE_MIN_HITS` */
+  readonly minHits?: number;
+}
+
+/**
  * 質問に合う手順書きを選ぶ。
  *
  * ## 多くても1本
@@ -286,9 +335,15 @@ export type ProcedureActionLookup = (
  *
  * ## 合うものが無ければ渡さない
  *
- * 当たりが `MIN_EVIDENCE_HITS` に満たなければ `undefined` を返す。
+ * 当たりが `PROCEDURE_MIN_HITS` に満たなければ `undefined` を返す。
  * 関係の薄い手順書きを毎回付けるくらいなら、これまでどおり説明だけで
  * 答えさせるほうがよい。
+ *
+ * ## 1組みで通すぶん、「どんなときに読むか」の文が効く
+ *
+ * しきい値が1なので、**そこへ書いた熟語が1つ当たるだけで手順書きが付く**。
+ * どの手順にも入りそうな言葉（人物・本文）を書くと、作品の相談へ順路の紙が
+ * 割り込む。文を書き足すときは `procedureSelect.test.ts` で誤検出を測り直す。
  *
  * ## AIに判定させない
  *
@@ -301,8 +356,11 @@ export function selectProcedure(input: {
   recentAuthorTurns?: string[];
   /** 差し替え用。既定は `PROCEDURES` */
   procedures?: readonly Procedure[];
+  /** 通し方。既定は `PROCEDURE_MIN_HITS`（測り直し用の口） */
+  rules?: ProcedureSelectRules;
 }): Procedure | undefined {
   const procedures = input.procedures ?? PROCEDURES;
+  const minHits = input.rules?.minHits ?? PROCEDURE_MIN_HITS;
   const grams = evidenceGrams([
     input.question,
     ...(input.recentAuthorTurns ?? []),
@@ -317,7 +375,7 @@ export function selectProcedure(input: {
       `${procedure.title}\n${procedure.whenToRead}`,
       grams
     );
-    if (score < MIN_EVIDENCE_HITS) continue;
+    if (score < minHits) continue;
     // 同点は先に並んでいるほうを残す（`>` にしてあるのはそのため）
     if (!best || score > best.score) best = { procedure, score };
   }

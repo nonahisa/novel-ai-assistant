@@ -570,6 +570,49 @@ export async function changedFilesBetween(
   return result.stdout.split("\0").filter((name) => name !== "");
 }
 
+/**
+ * 分かれたあと、**それぞれの側で変わったファイル**（設計書6.15.1）。
+ *
+ * 機械を行き来したときに「自動で揃えてよいか」を決めるのに使う。
+ * **重なりはファイル単位で見る**——行単位で見て自動で混ぜると、
+ * どちらの文章が消えたか作者が気づけない（設計書6.15）。
+ *
+ * 3点（`...`）で訊くと、gitが分かれ目（merge-base）を自分で見つけてくれる。
+ * 分かれ目を別に訊かずに済むので、往復が1回減る。
+ *
+ * **ローカルだけで完結する**（取得済みの上流を見るだけ）。読めなければ
+ * 両側とも空で返す——呼び出し側は「調べられなかった」を
+ * **重なっている側へ倒して**扱うこと。
+ */
+export async function changedFilesEachSide(
+  cwd: string,
+  upstream: string,
+  run: GitCommandRunner = runGit
+): Promise<{ ok: boolean; local: string[]; remote: string[] }> {
+  const local = await run(
+    ["diff", "--name-only", "-z", `${upstream}...HEAD`],
+    cwd,
+    LOCAL_TIMEOUT_MS
+  );
+  if (local.code !== 0) return { ok: false, local: [], remote: [] };
+  const remote = await run(
+    ["diff", "--name-only", "-z", `HEAD...${upstream}`],
+    cwd,
+    LOCAL_TIMEOUT_MS
+  );
+  if (remote.code !== 0) return { ok: false, local: [], remote: [] };
+  return {
+    ok: true,
+    local: splitNulPaths(local.stdout),
+    remote: splitNulPaths(remote.stdout),
+  };
+}
+
+/** NUL区切りのパス一覧をほどく。**区切りはエスケープで書く**（生の制御文字を置かない） */
+function splitNulPaths(stdout: string): string[] {
+  return stdout.split("\0").filter((name) => name !== "");
+}
+
 /** 送信する。**必ず作者の操作を起点に呼ぶこと。** */
 export async function push(
   cwd: string,

@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
   changedFilesBetween,
+  changedFilesEachSide,
   checkoutSide,
   fetchRemote,
   headCommit,
@@ -111,6 +112,41 @@ describe("作業ツリーの状態の解析", () => {
   });
 });
 
+/**
+ * 分かれたあと、それぞれの側で変わったファイル（設計書6.15.1）。
+ *
+ * **左右を取り違えると、自動で揃えてよいかの判断が逆になる。**
+ * `<upstream>...HEAD` がこちら側、`HEAD...<upstream>` が向こう側である。
+ */
+describe("分かれた両側の変更", () => {
+  test("こちら側と向こう側を取り違えない", async () => {
+    const run = fakeGit({
+      "diff --name-only -z origin/main...HEAD": {
+        stdout: "本文/008.txt\0",
+      },
+      "diff --name-only -z HEAD...origin/main": {
+        stdout: "本文/009.txt\0設定/人物/主人公.json\0",
+      },
+    });
+
+    const sides = await changedFilesEachSide("/work", "origin/main", run);
+
+    expect(sides.ok).toBe(true);
+    expect(sides.local).toEqual(["本文/008.txt"]);
+    expect(sides.remote).toEqual(["本文/009.txt", "設定/人物/主人公.json"]);
+  });
+
+  test("読めなければ、失敗として返す（呼び出し側が安全な側へ倒す）", async () => {
+    const run = fakeGit({ "diff --name-only -z": { code: 128 } });
+
+    expect(await changedFilesEachSide("/work", "origin/main", run)).toEqual({
+      ok: false,
+      local: [],
+      remote: [],
+    });
+  });
+});
+
 describe("同期状態の判定", () => {
   test("Gitリポジトリでなければ、その旨だけを返す", async () => {
     // Gitを使わずに書いている作品は異常ではない。
@@ -192,6 +228,38 @@ describe("同期状態の判定", () => {
 
     expect(isWarning(status)).toBe(false);
     expect(describeSyncBadge(status)).toBeUndefined();
+  });
+
+  /**
+   * **送っていないものが1つでもあれば、ステータスバーに出しっぱなしにする**
+   * （設計書6.15.1。作者の指示、2026-09-21「閉じる前に目に入るように」）。
+   *
+   * 記録も送信もしていない原稿は、**別の機械からは存在しないのと同じ**なので、
+   * 未送信のコミットと同じ扱いにする。
+   */
+  test("記録していない変更だけでも、警告として出す", async () => {
+    const run = fakeGit({
+      ...TRACKED_BASE,
+      "status --porcelain": { stdout: " M 本文/008.txt\n" },
+    });
+
+    const status = await readSyncStatus("/work", run);
+
+    expect(status).toMatchObject({ kind: "tracked", ahead: 0, behind: 0, dirty: 1 });
+    expect(isWarning(status)).toBe(true);
+    // ホバーにも出す。「記録待ち」が何を指すかは印だけでは伝わらない
+    expect(describeSyncTooltip(status).join("\n")).toContain("記録待ち");
+  });
+
+  test("執筆量の記録しか変わっていなければ、警告にしない", async () => {
+    // 拡張機能が保存のたびに書き換えるので、数えると常に1件出る（設計書5.5.13）。
+    // **常に出ていると、警告として働かなくなる**
+    const run = fakeGit({
+      ...TRACKED_BASE,
+      "status --porcelain": { stdout: " M .aiwriter/stats/desktop-a1b2.json\n" },
+    });
+
+    expect(isWarning(await readSyncStatus("/work", run))).toBe(false);
   });
 
   /**

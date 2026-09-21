@@ -189,6 +189,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.gitPull": "allTypes",
   "novelai.gitPush": "allTypes",
   "novelai.syncAllWorks": "allTypes",
+  "novelai.saveAndSync": "allTypes",
   "novelai.resolveDivergence": "allTypes",
   "novelai.resolveConflicts": "allTypes",
   "novelai.gitRestore": "allTypes",
