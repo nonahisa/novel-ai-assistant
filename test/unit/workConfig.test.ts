@@ -296,16 +296,95 @@ describe("作品設定", () => {
         },
       };
 
-      await new workRegistry.WorkRegistry(context as never).initialize();
-      await new workRegistry.WorkRegistry(context as never).initialize();
+      // **登録簿は、整備を待たずに読める**（設計書6.107）。作品一覧を
+      // 描くのに要るのはこちらだけなので、起動の道からは整備を外した
+      const registry = new workRegistry.WorkRegistry(context as never);
+      expect(registry.list().map((w) => w.title)).toEqual(["登録済み作品"]);
+
+      const first = await registry.maintainWorks();
+      await new workRegistry.WorkRegistry(context as never).maintainWorks();
 
       const migrated = new Uint8Array(await readHostFile(gitignorePath));
       expect(migrated.slice(0, authorBytes.length)).toEqual(authorBytes);
       const text = new TextDecoder().decode(migrated);
       expect(text.match(/^\.novelai-recovery\/$/gm)).toHaveLength(1);
       expect(update).not.toHaveBeenCalled();
+
+      /*
+        **何に費やしたかの内訳**（設計書6.107）。`stat` が重いのか
+        `.gitignore` が重いのかで、次に疑う先が変わる。どちらも
+        測り漏らしていないこと（合計が最長の1件を下回らないこと）を見る
+      */
+      expect(first.statMs).toBeGreaterThanOrEqual(0);
+      expect(first.ignoreMs).toBeGreaterThanOrEqual(0);
+      expect(first.statMs + first.ignoreMs).toBeGreaterThanOrEqual(
+        first.slowestMs - 1
+      );
+
+      /*
+        **作品ごとの内訳も、回った順に持つ**（設計書6.107）。3回の計測で
+        遅い作品が毎回入れ替わったので、最長の1件だけでは「1件目だから
+        遅い」のかが分からない。順番と題を全部残す
+      */
+      expect(first.works).toHaveLength(1);
+      expect(first.works[0].order).toBe(1);
+      expect(first.works[0].title).toBe("登録済み作品");
+      expect(first.slowestOrder).toBe(1);
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("整備の内訳は、登録簿の順に全作品ぶん並ぶ", async () => {
+    /*
+      **1回の計測で見分けたい**（設計書6.107）。ノートPCで3回測ると
+      遅い作品が毎回入れ替わり、どれか1件が必ず8.7秒前後だった
+      （2026-09-21）。番号・題・`stat`・`.gitignore` を全作品ぶん並べれば、
+      次の起動と突き合わせるだけで「1件目だから遅い」のかが決まる。
+    */
+    const registered = ["う作品", "あ作品", "い作品"].map((title, index) => ({
+      id: `work_${index}`,
+      title,
+      folderPath: `C:\\novels\\${index}`,
+      registeredAt: "2026-09-01T00:00:00.000Z",
+    }));
+    const previousFs = workspace.fs;
+    const previousWarn = window.showWarningMessage;
+    try {
+      workspace.fs = {
+        stat: async () => ({ type: FileType.Directory }),
+        // `.gitignore` は既に整っている扱い（追記の経路には入らない）
+        readFile: async () =>
+          new TextEncoder().encode(
+            `${workRegistry
+              .missingIgnoreRules(new Uint8Array())
+              .join("\n")}\n`
+          ),
+      };
+      window.showWarningMessage = (async () =>
+        undefined) as typeof window.showWarningMessage;
+
+      const report = await new workRegistry.WorkRegistry({
+        globalState: {
+          get: <T>(_key: string, _defaultValue: T): T => registered as T,
+          update: vi.fn(async () => undefined),
+        },
+      } as never).maintainWorks();
+
+      // **並びは `list()` と同じ**（題の順）。番号は1始まりで飛ばない
+      expect(report.works.map((w) => [w.order, w.title])).toEqual([
+        [1, "あ作品"],
+        [2, "い作品"],
+        [3, "う作品"],
+      ]);
+      expect(report.count).toBe(3);
+      for (const item of report.works) {
+        expect(item.statMs).toBeGreaterThanOrEqual(0);
+        expect(item.ignoreMs).toBeGreaterThanOrEqual(0);
+      }
+    } finally {
+      workspace.fs = previousFs;
+      window.showWarningMessage = previousWarn;
     }
   });
 
@@ -383,9 +462,16 @@ describe("作品設定", () => {
 
       let report;
       try {
-        report = await new workRegistry.WorkRegistry(
-          context as never
-        ).initialize();
+        const registry = new workRegistry.WorkRegistry(context as never);
+        /*
+          **知らせを出すのは整備のほう**（設計書6.107）。登録簿を作った
+          だけでは何も言わない——起動の道から外したので、作品一覧は
+          この知らせより先に出る
+        */
+        expect(registry.list()).toHaveLength(1);
+        expect(warnings).toHaveLength(0);
+
+        report = await registry.maintainWorks();
       } finally {
         window.showWarningMessage = previousWarn;
       }

@@ -9,6 +9,7 @@ import {
   scaffoldWorkFolder,
   workPaths,
 } from "./core/workRegistry";
+import type { WorkRegistryInitReport } from "./core/workRegistry";
 import { checkDictionaryFreshness } from "./core/imeDictionaryStatus";
 import {
   WorkTreeProvider,
@@ -785,42 +786,50 @@ export async function activate(
   startupTiming.mark("ビューの表示");
 
   const registry = new WorkRegistry(context);
+
+  /**
+   * 作品一覧のビュー。**走査中の件数を見出しの右へ出す**ために持つ。
+   *
+   * 作られるのはもっと下（コマンドの登録のあと）なので、それまでは
+   * `undefined`。**走査が始まるのはビューが作られたあと**なので、
+   * 数が出ないまま終わることはない。
+   */
+  let worksView: vscode.TreeView<TreeNode> | undefined;
+
+  /**
+   * 作品一覧を走査しているあいだ、案内文を差し替える印（設計書6.1.2）。
+   *
+   * **「まだ作品が登録されていません」は、走査中にも出てしまう。**
+   * `getChildren` が返るまでツリーは空で、VS Code は空のツリーに
+   * `viewsWelcome` を出すためである。16作品のノートPCでは34秒のあいだ
+   * それが出ていた（2026-09-21の計測）。登録ボタンが4つ並ぶので、
+   * **作者から見ると作品が消えたのと区別がつかない。**
+   *
+   * **件数は案内文へは入れられない**（`viewsWelcome` の文言は
+   * `package.json` に固定で、差し込みの仕組みが無い）。そこで
+   * ビューの見出しの右（`description`）に出す。
+   */
+  const setWorksLoading = (loading: boolean, count: number): void => {
+    void vscode.commands.executeCommand(
+      "setContext",
+      "novelai.worksLoading",
+      loading
+    );
+    if (worksView) {
+      worksView.description = loading ? `${count}作品を読み込み中` : undefined;
+    }
+  };
+
   /*
-    **書庫にあるのに登録されていない作品を、1行だけ知らせる**（設計書6.97.4）。
-    知らせるのは `features` の仕事なので、`core` の登録簿へは口だけを渡す。
-    動的に読むのは、起動の道に載せないため（押されたときに要るものである）。
+    **印は、起動のいちばん手前で立てる**（設計書6.1.2）。登録簿は
+    globalState を読むだけなので、`list()` はここで既に使える——
+    作品ごとの整備（`maintainWorks()`）を待つ必要は無い。以前はその
+    整備のあとに立てており、**ノートPCでは20秒のあいだ「まだ作品が
+    登録されていません」が出ていた**（2026-09-21の計測）。
+
+    **0件なら立てない**——そのときは従来の案内がそのまま正しい。
   */
-  // 開始の印も打つ（設計書6.107）。ここまでが速いのか、ここが遅いのかは、
-  // 前後の2点が無いと切り分けられない
-  startupTiming.mark("登録簿 開始");
-  const registryReport = await registry.initialize((works) => {
-    void (async () => {
-      try {
-        const { noticeUnregisteredWorksSafely } = await import(
-          "./features/collectUnregisteredWorks.js"
-        );
-        noticeUnregisteredWorksSafely(context, works);
-      } catch (error) {
-        logFailure("書庫の未登録作品の確認", {
-          詳細: error instanceof Error ? error.message : String(error),
-        });
-      }
-    })();
-  });
-  /*
-    **いちばん遅かった作品を添える**（設計書6.107）。登録簿は作品ごとに
-    `stat` と `.gitignore` を回すので、遅い置き場に1件載っているだけで
-    全体が引っ張られる。合計だけでは、16件が一様に遅いのか、1件だけが
-    突出しているのかが読めない。
-  */
-  startupTiming.mark(
-    "登録簿",
-    registryReport.slowestTitle
-      ? `最長 ${registryReport.slowestTitle} ${formatStartupMillis(
-          registryReport.slowestMs
-        )}ms`
-      : undefined
-  );
+  setWorksLoading(registry.list().length > 0, registry.list().length);
 
   // GitHub同期の見張り。自動で走るのはfetch（取得のみ）だけで、
   // 取り込み・送信は作者がボタンを押したときにしか実行しない（設計書5.5.1）。
@@ -915,47 +924,6 @@ export async function activate(
       });
     }
   };
-
-  /**
-   * 作品一覧のビュー。**走査中の件数を見出しの右へ出す**ために持つ。
-   *
-   * 作られるのはもう少し下（コマンドの登録のあと）なので、それまでは
-   * `undefined`。**走査が始まるのはビューが作られたあと**なので、
-   * 数が出ないまま終わることはない。
-   */
-  let worksView: vscode.TreeView<TreeNode> | undefined;
-
-  /**
-   * 作品一覧を走査しているあいだ、案内文を差し替える印（設計書6.1.2）。
-   *
-   * **「まだ作品が登録されていません」は、走査中にも出てしまう。**
-   * `getChildren` が返るまでツリーは空で、VS Code は空のツリーに
-   * `viewsWelcome` を出すためである。16作品のノートPCでは34秒のあいだ
-   * それが出ていた（2026-09-21の計測）。登録ボタンが4つ並ぶので、
-   * **作者から見ると作品が消えたのと区別がつかない。**
-   *
-   * **件数は案内文へは入れられない**（`viewsWelcome` の文言は
-   * `package.json` に固定で、差し込みの仕組みが無い）。そこで
-   * ビューの見出しの右（`description`）に出す。
-   */
-  const setWorksLoading = (loading: boolean, count: number): void => {
-    void vscode.commands.executeCommand(
-      "setContext",
-      "novelai.worksLoading",
-      loading
-    );
-    if (worksView) {
-      worksView.description = loading ? `${count}作品を読み込み中` : undefined;
-    }
-  };
-
-  /*
-    **走査が始まる前に印を立てておく。** ビューが作られてから最初の
-    `getChildren` が走るまでのあいだにも案内文は出るので、そこで
-    「登録されていません」を見せない。**0件なら最初から偽**——
-    そのときは従来の案内がそのまま正しい。
-  */
-  setWorksLoading(registry.list().length > 0, registry.list().length);
 
   const treeProvider = new WorkTreeProvider(
     registry,
@@ -5837,6 +5805,66 @@ export async function activate(
     await offerFirstRunSetupInVsCode(context, aiRegistry);
   })();
 
+  /*
+    **作品ごとの整備は、起動の道から外す**（設計書6.107）。
+
+    整備がしているのは (a) フォルダーが在るかの確認と (b) `.gitignore` の
+    移行だけで、**どちらも作品一覧を描く前に終わっている必要が無い。**
+    ノートPCの16作品では `stat` と `.gitignore` の往復だけで15.2秒かかり、
+    そのあいだ一覧は空のまま「まだ作品が登録されていません」を出していた
+    （2026-09-21の計測）。**作者から見ると作品が消えたのと区別がつかない。**
+
+    知らせ（フォルダーが見つからない／除外設定を更新できない／書庫の
+    未登録作品）はこれまでどおり出す。**出る時刻が一覧の後になるだけ**で、
+    どれも押さなければ何も起きない知らせである。
+  */
+  startupTiming.mark("整備 開始");
+  const maintainStartedAt = performance.now();
+  void registry
+    .maintainWorks((works) => {
+      /*
+        **書庫にあるのに登録されていない作品を、1行だけ知らせる**（設計書6.97.4）。
+        知らせるのは `features` の仕事なので、`core` の登録簿へは口だけを渡す。
+        動的に読むのは、起動の道に載せないため（押されたときに要るものである）。
+      */
+      void (async () => {
+        try {
+          const { noticeUnregisteredWorksSafely } = await import(
+            "./features/collectUnregisteredWorks.js"
+          );
+          noticeUnregisteredWorksSafely(context, works);
+        } catch (error) {
+          logFailure("書庫の未登録作品の確認", {
+            詳細: error instanceof Error ? error.message : String(error),
+          });
+        }
+      })();
+    })
+    .then((report) => {
+      const note = describeMaintainReport(report);
+      startupTiming.mark("整備", note);
+      /*
+        **もう1行、単独でも書く**（設計書6.107）。整備は一覧の描画より
+        後に終わることがあり、そのときは起動の1行（`report()`）が
+        先に書き出されていて「整備」の印が載らない。**1行目の
+        「整備 開始」に、この行の時間を足せば**、整備がいつ終わったかが
+        分かる。
+      */
+      useLogFile(undefined);
+      const order = describeMaintainOrder(report);
+      logStep(
+        `整備の所要時間：${formatStartupMillis(
+          performance.now() - maintainStartedAt
+        )}ms（作品 ${report.count}／${note}）` + (order ? ` ${order}` : "")
+      );
+    })
+    .catch((error) => {
+      // 整備で落ちても、起動も一覧も止めない
+      logFailure("作品フォルダーの整備", {
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    });
+
   // ここまでが `activate` 本体（設計書6.107）。**画面が出るのはこのあと**
   // ——VS Code が作品一覧の `getChildren` を呼ぶのは、ここを抜けてからである
   startupTiming.mark("activate 終了");
@@ -5849,6 +5877,55 @@ export async function activate(
       return extendMarkdownItWithRuby(md);
     },
   };
+}
+
+/**
+ * 作品ごとの整備に何ミリ秒かかったかを、1つの注記にまとめる（設計書6.107）。
+ *
+ * **合計だけでは、何を疑えばよいかが決まらない。** `stat`（フォルダーが
+ * 在るかを訊くだけ）が重いならクラウドの取り寄せ、`.gitignore` が重いなら
+ * 書き込みの遅さを疑う。16件が一様に遅いのか1件だけが突出しているのかは、
+ * 最長の1件を並べれば読める。
+ *
+ * 数字の区切りは `formatStartupMillis` に揃える（同じ1行の中で書き方が
+ * 混ざらないように）。
+ */
+function describeMaintainReport(report: WorkRegistryInitReport): string {
+  return [
+    `stat 合計 ${formatStartupMillis(report.statMs)}ms`,
+    `.gitignore 合計 ${formatStartupMillis(report.ignoreMs)}ms`,
+    ...(report.slowestTitle
+      ? [
+          // **何番目かを添える。** 遅い作品が毎回入れ替わったので、
+          // 「1件目だから遅い」のかを1行で見分けられるようにする
+          `最長 ${report.slowestOrder}番目 ${
+            report.slowestTitle
+          } ${formatStartupMillis(report.slowestMs)}ms`,
+        ]
+      : []),
+  ].join("／");
+}
+
+/**
+ * 整備に回った作品を、回った順に全部並べる（設計書6.107）。
+ *
+ * **最長の1件だけでは、1回の計測で見分けがつかない。** ノートPCで3回
+ * 測ると遅い作品が毎回入れ替わり、どれか1件が必ず8.7秒前後だった
+ * （2026-09-21）。**1件目だから遅いのか、その作品が遅い置き場にあるのか**は、
+ * 順番と題と数字を全部並べて、次の起動と突き合わせれば決まる。
+ *
+ * 16作品なら1行が長くなるが、**ログなので構わない**（通知には出さない）。
+ * 0件なら空文字を返し、呼び出し側が行ごと落とす。
+ */
+function describeMaintainOrder(report: WorkRegistryInitReport): string {
+  if (report.works.length === 0) return "";
+  const parts = report.works.map(
+    (item) =>
+      `${item.order} ${item.title} stat ${formatStartupMillis(
+        item.statMs
+      )}／ignore ${formatStartupMillis(item.ignoreMs)}`
+  );
+  return `順に：${parts.join(" → ")}`;
 }
 
 /**

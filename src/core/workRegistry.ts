@@ -22,13 +22,17 @@ import { AI_INSTRUCTION_TARGETS } from "./aiInstructions";
 const STORAGE_KEY = "novelai.works";
 
 /**
- * `initialize()` が何にどれだけかかったか（設計書6.107）。
+ * `maintainWorks()` が何にどれだけかかったか（設計書6.107）。
  *
- * **累積の数字だけでは、登録簿が重い理由が分からない。** 作品ごとに
+ * **累積の数字だけでは、整備が重い理由が分からない。** 作品ごとに
  * `stat` と `.gitignore` の読み書きを回しているので、遅い置き場に
  * 1件だけ載っている作品が全体を引っ張ることがある（ネットワーク
  * ドライブ・OneDrive の取り寄せ）。**いちばん遅かった1件の題**が
  * 分かれば、次にどこを見ればよいかがその場で決まる。
+ *
+ * **`stat` と `.gitignore` を分けて数える。** 前者はフォルダーが在るかを
+ * 訊くだけ、後者は読んで足りなければ書く。どちらが重いかで、疑う先が
+ * 変わる（取り寄せの遅さなのか、書き込みの遅さなのか）。
  *
  * **ここでは何も書き出さない。** `core` は `vscode` の通知にもログにも
  * 触らず、数字を返すだけにする（印を打つのは `extension.ts` 側）。
@@ -40,11 +44,42 @@ export interface WorkRegistryInitReport {
   readonly slowestMs: number;
   /** その作品の題。0件なら `undefined` */
   readonly slowestTitle?: string;
+  /** その作品が登録簿の何番目だったか（1始まり）。0件なら `undefined` */
+  readonly slowestOrder?: number;
+  /** フォルダーの有無の確認（`stat`）に費やした合計ミリ秒 */
+  readonly statMs: number;
+  /** `.gitignore` の読み書きに費やした合計ミリ秒 */
+  readonly ignoreMs: number;
+  /**
+   * **作品ごとの内訳**（回った順＝登録簿の順）。
+   *
+   * ノートPCで3回測ったところ、**遅い作品が毎回入れ替わり、どれか1件が
+   * 必ず8.7秒前後**だった（2026-09-21）。最長の1件だけでは、
+   * 「1件目だから遅い」（最初の1回だけ効く何か）のか「その作品が
+   * たまたま遅い置き場にある」のかが**1回の計測では見分けられない**。
+   * 全部を順に並べれば、次の起動と突き合わせるだけで決まる。
+   */
+  readonly works: readonly WorkMaintainTiming[];
+}
+
+/** 作品1件ぶんの内訳（`WorkRegistryInitReport.works`） */
+export interface WorkMaintainTiming {
+  /** 登録簿の何番目か（1始まり） */
+  readonly order: number;
+  readonly title: string;
+  /** フォルダーの有無の確認（`stat`）にかかったミリ秒 */
+  readonly statMs: number;
+  /** `.gitignore` の読み書きにかかったミリ秒。飛ばしたなら 0 */
+  readonly ignoreMs: number;
 }
 
 /**
  * 登録済み作品の一覧を保持する。
  * 実体は VSCode の globalState（ワークスペースをまたいで保持される）。
+ *
+ * **読むのに下ごしらえは要らない。** `list()` は globalState をその場で
+ * 読むだけなので、作ってすぐ使える。作品ごとの整備（`maintainWorks()`）は
+ * **一覧を出してから**でよく、起動の道には載せない（設計書6.107）。
  */
 export class WorkRegistry {
   private readonly _onDidChange = new vscode.EventEmitter<void>();
@@ -53,18 +88,28 @@ export class WorkRegistry {
   constructor(private readonly context: vscode.ExtensionContext) {}
 
   /**
-   * 旧版ですでに登録済みの作品にも、起動時の安全な冪等migrationを適用する。
+   * 旧版ですでに登録済みの作品にも、安全な冪等migrationを適用する。
+   *
+   * **起動の道から外して呼ぶ**（設計書6.107）。ここがしているのは
+   * (a) フォルダーが在るかの確認と (b) `.gitignore` の移行だけで、
+   * **どちらも作品一覧を描く前に終わっている必要が無い。** 作者の
+   * ノートPCでは16作品の往復に15.2秒かかっており、そのあいだ一覧は
+   * 空のままだった（2026-09-21の計測）。登録簿そのものは globalState を
+   * 読むだけなので、`list()` はこれを待たずに使える。
+   *
+   * 名前が `initialize` でないのはそのためである——「これを済ませないと
+   * 登録簿が使えない」という読み方をされると、また起動の道へ戻る。
    *
    * @param noticeUnregistered 整備のあとに呼ぶ。**書庫にあるのに登録されて
    *   いない作品を知らせる口**（設計書6.97.4）。すぐ下の「フォルダーが
    *   見つかりません」のちょうど裏返しなので隣に置いてあるが、**画面を出すのは
    *   `features` の仕事**なので、`core` から呼ばずに外から渡してもらう
    *   （依存の向きを逆流させない）。
-   * @returns 作品ごとの所要時間の最大とその題（設計書6.107）。
-   *   **戻り値は使わなくてよい**——起動の数字を出さない呼び手は
-   *   これまでどおり `await` するだけでよい。
+   * @returns 作品ごとの所要時間の最大とその題、`stat` と `.gitignore` の
+   *   合計（設計書6.107）。**戻り値は使わなくてよい**——起動の数字を
+   *   出さない呼び手は、そのまま捨ててよい。
    */
-  async initialize(
+  async maintainWorks(
     noticeUnregistered?: (works: readonly WorkEntry[]) => void
   ): Promise<WorkRegistryInitReport> {
     const failedTitles: string[] = [];
@@ -73,11 +118,17 @@ export class WorkRegistry {
     // 時計合わせで巻き戻ると経過時間が負になるため
     let slowestMs = 0;
     let slowestTitle: string | undefined;
+    let slowestOrder: number | undefined;
+    // 何に費やしたかの内訳（設計書6.107）
+    let statMs = 0;
+    let ignoreMs = 0;
+    // 作品ごとの内訳。回った順にそのまま積む（設計書6.107）
+    const timings: WorkMaintainTiming[] = [];
     // キャッシュを同期するかは設定で変えられる。起動のたびに突き合わせ、
     // 切り替えられていれば `.gitignore` へ打ち消し行を足す（設計書5.5.7）
     const syncCache = isCacheSyncEnabled();
     const works = this.list();
-    for (const work of works) {
+    for (const [index, work] of works.entries()) {
       const startedAt = performance.now();
       /*
         **フォルダーが無い作品は、触らずに飛ばす。**
@@ -94,17 +145,33 @@ export class WorkRegistry {
         登録簿からは**消さない**。外付けドライブが繋がっていないだけ、
         同期がまだ終わっていないだけ、ということがある。判断は作者に委ねる。
       */
+      const statStartedAt = performance.now();
       const present = await isDirectory(work.folderPath);
+      const workStatMs = performance.now() - statStartedAt;
+      statMs += workStatMs;
+      let workIgnoreMs = 0;
       if (!present) {
         missingTitles.push(work.title);
       } else {
+        const ignoreStartedAt = performance.now();
         try {
           await ensureRecoveryIgnoreRule(work.folderPath, { syncCache });
         } catch {
           // 作品登録や起動を壊さず、次回起動でも同じmigrationを再試行する。
           failedTitles.push(work.title);
+        } finally {
+          // **失敗した時間も数える。** 遅い置き場では「待たされた末に
+          // 失敗する」ことがあり、そこを外すと合計が実感と合わなくなる
+          workIgnoreMs = performance.now() - ignoreStartedAt;
+          ignoreMs += workIgnoreMs;
         }
       }
+      timings.push({
+        order: index + 1,
+        title: work.title,
+        statMs: workStatMs,
+        ignoreMs: workIgnoreMs,
+      });
       /*
         **飛ばした作品も測る**（設計書6.107）。繋がっていないドライブや
         取り寄せ中のクラウドでは、`stat` ひとつが何秒も返らないことがある。
@@ -114,6 +181,9 @@ export class WorkRegistry {
       if (elapsed > slowestMs) {
         slowestMs = elapsed;
         slowestTitle = work.title;
+        // **何番目かも覚える。** 3回の計測で遅い作品が入れ替わったので、
+        // 「1件目だから遅い」のかを見分けるのに順番が要る（設計書6.107）
+        slowestOrder = index + 1;
       }
     }
     if (missingTitles.length > 0) {
@@ -140,7 +210,15 @@ export class WorkRegistry {
     */
     noticeUnregistered?.(this.list());
 
-    return { count: works.length, slowestMs, slowestTitle };
+    return {
+      count: works.length,
+      slowestMs,
+      slowestTitle,
+      slowestOrder,
+      statMs,
+      ignoreMs,
+      works: timings,
+    };
   }
 
   list(): WorkEntry[] {
