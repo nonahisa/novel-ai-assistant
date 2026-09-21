@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { atomicWriteFile } from "./atomicWrite";
+import { fileReader } from "./fileRead";
 import { logLine } from "./logger";
 import * as path from "./paths";
 
@@ -213,7 +214,11 @@ async function readTuningFile(): Promise<Record<string, unknown> | undefined> {
 
   let text: string;
   try {
-    const bytes = await vscode.workspace.fs.readFile(path.toUri(file));
+    // **読むだけなので、手元では Node の `fs` を通る**（`core/fileRead.ts`、
+    // 設計書6.107）。台帳は起動直後に読まれ、`vscode.workspace.fs` の
+    // 列に並ぶと一覧が出るのを後ろへずらす。**書き込みは `atomicWriteFile`
+    // のまま**——退避と照合の道は速さのために迂回しない
+    const bytes = await (await fileReader()).readFile(file);
     text = new TextDecoder().decode(bytes);
   } catch {
     // まだ無いだけ（初回）か、読めない置き場か。どちらも「空」として扱う
@@ -495,7 +500,8 @@ async function loadOrMigrate(): Promise<Record<string, unknown> | undefined> {
   const file = storeFile();
   if (file === undefined) return {};
   try {
-    await vscode.workspace.fs.stat(path.toUri(file));
+    // 有無を訊くだけ（読むだけの道）。上と同じ理由で `core/fileRead.ts` を通す
+    await (await fileReader()).stat(file);
   } catch {
     // まだ無い＝この機械で初めて動いた。設定に中身があれば写す
     return migrateFromSettings();

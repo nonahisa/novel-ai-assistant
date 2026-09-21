@@ -16,7 +16,7 @@ import { buildPlotTemplate } from "./plotTemplate";
 import { canRegisterWork, describeWorkLimit } from "./editorMode";
 import { currentMode } from "./actorContext";
 import { parseSeriesConfig } from "./seriesLink";
-import { isDirectory } from "./fileSystem";
+import { fileReader, isNotFound } from "./fileRead";
 import { AI_INSTRUCTION_TARGETS } from "./aiInstructions";
 
 const STORAGE_KEY = "novelai.works";
@@ -146,7 +146,7 @@ export class WorkRegistry {
         同期がまだ終わっていないだけ、ということがある。判断は作者に委ねる。
       */
       const statStartedAt = performance.now();
-      const present = await isDirectory(work.folderPath);
+      const present = await isWorkFolderPresent(work.folderPath);
       const workStatMs = performance.now() - statStartedAt;
       statMs += workStatMs;
       let workIgnoreMs = 0;
@@ -481,6 +481,26 @@ export function lastCacheDirective(
 }
 
 /**
+ * 作品のフォルダーが今そこに在るか（`fileSystem.ts` の `isDirectory` と同じ判断）。
+ *
+ * **読むだけなので、手元では Node の `fs` で訊く**（`core/fileRead.ts`、設計書6.107）。
+ * 起動直後の `vscode.workspace.fs` は要求が列に並び、**16作品ぶんで
+ * 1番目が13.6秒**かかっていた（Node なら16件で合計13ms）。ここは
+ * 起動の道のいちばん手前なので、後ろの全部がその列に付き合わされる。
+ *
+ * 見つからない・読めないは、これまでどおり「無い」に倒す。繋がっていない
+ * ドライブや取り寄せ中のクラウドと、消えた作品は見分けられない。
+ */
+async function isWorkFolderPresent(folderPath: string): Promise<boolean> {
+  try {
+    const reader = await fileReader();
+    return (await reader.stat(folderPath)).type === "directory";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 既存の作者記述をバイト単位で保ったまま、足りない除外規則だけを追記する。
  *
  * 承認待ちの更新案（`.aiwriter/pending-characters/`）と設定資料・IME辞書は
@@ -494,9 +514,13 @@ async function ensureRecoveryIgnoreRule(
   const uri = path.toUri(gitignorePath);
   let existing: Uint8Array;
   try {
-    existing = await vscode.workspace.fs.readFile(uri);
+    // **読むだけなので、手元では Node の `fs` を通る**（設計書6.107）。
+    // 16作品ぶんのこの読みで、1件目だけで11.3秒かかっていた
+    existing = await (await fileReader()).readFile(gitignorePath);
   } catch (error) {
-    if (!(error instanceof vscode.FileSystemError) || error.code !== "FileNotFound") {
+    // **「見つからない」の形は経路で違う**（Node は `ENOENT`、
+    // VS Code は `FileNotFound`）。見分けは `fileRead.ts` の1か所に置く
+    if (!isNotFound(error)) {
       throw error;
     }
     const initial = missingIgnoreRules(new Uint8Array(), options);

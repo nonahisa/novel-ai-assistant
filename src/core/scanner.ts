@@ -16,6 +16,7 @@ import { isWorkInfoFile } from "./workInfoFile";
 import { parseCollectedFile, type CollectedEpisode } from "./collectedFile";
 import { memoBadgeText, parseMemos } from "./sceneMemo";
 import { pathExists } from "./fileSystem";
+import { fileReader, type FileReader } from "./fileRead";
 import { detectEol } from "./eolAudit";
 import type { Eol } from "../models/types";
 
@@ -42,7 +43,14 @@ export async function scanWork(work: WorkEntry): Promise<{
   const p = workPaths(work, config);
 
   const targetDir = (await pathExists(p.manuscript)) ? p.manuscript : p.root;
-  const files = await collectTextFiles(targetDir);
+  /*
+    **ここだけ読み口を切り替える**（設計書6.107）。走査は573ファイルを
+    1つずつ読むので、`vscode.workspace.fs` の列に全部が並ぶと一覧が出るまで
+    26〜35秒かかっていた。**読むだけ**の道なので、手元では Node の `fs` で
+    読む（`core/fileRead.ts`）。書き込みは1つもここに無い。
+  */
+  const reader = await fileReader();
+  const files = await collectTextFiles(targetDir, reader);
 
   const episodes: EpisodeFile[] = [];
   const workInfoFiles: string[] = [];
@@ -74,9 +82,7 @@ export async function scanWork(work: WorkEntry): Promise<{
       updatedAt: null as string | null,
     };
     try {
-      const bytes = await vscode.workspace.fs.readFile(
-        path.toUri(filePath)
-      );
+      const bytes = await reader.readFile(filePath);
       const text = decodeText(bytes);
 
       // **作品情報（`about.txt`）はここで抜ける。** 中身を見ないと
@@ -234,28 +240,29 @@ function compareEpisodes(a: EpisodeFile, b: EpisodeFile): number {
 }
 
 /** 対象ディレクトリ配下のtxt/mdを再帰的に集める */
-async function collectTextFiles(dir: string): Promise<string[]> {
+async function collectTextFiles(
+  dir: string,
+  reader: FileReader
+): Promise<string[]> {
   const result: string[] = [];
   const skipDirs = new Set([".aiwriter", ".git", "node_modules", "exports", "設定"]);
 
   async function walk(current: string, depth: number): Promise<void> {
     // 想定外の深い階層で無限に走査しないよう上限を設ける
     if (depth > 5) return;
-    let entries: [string, vscode.FileType][];
+    let entries: Array<[string, "file" | "directory" | "other"]>;
     try {
-      entries = await vscode.workspace.fs.readDirectory(
-        path.toUri(current)
-      );
+      entries = await reader.readDirectory(current);
     } catch {
       return;
     }
     for (const [name, type] of entries) {
       if (name.startsWith(".")) continue;
       const full = path.join(current, name);
-      if (type === vscode.FileType.Directory) {
+      if (type === "directory") {
         if (skipDirs.has(name)) continue;
         await walk(full, depth + 1);
-      } else if (type === vscode.FileType.File) {
+      } else if (type === "file") {
         // 競合を「両方を残す」で解決したときの退避ファイルは原稿ではない。
         // 拾うと同じ話数の本文が2つある状態になる
         if (isConflictSideFile(name)) continue;
