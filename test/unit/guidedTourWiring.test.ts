@@ -69,6 +69,27 @@ describe("押す場所を引けること", () => {
     expect(steps.findActionNode("novelai.存在しない操作")).toBeUndefined();
     expect(actions.findActionNode("novelai.存在しない操作")).toBeUndefined();
   });
+
+  test("簡単ステップメニューに無い操作は、詳細メニューのほうで引ける", () => {
+    /*
+      「投稿の準備をする」の最後の段（新話を投稿する）は、**簡単ステップ
+      メニューには置いていない**（設計書6.104）。片方に無いことを知らずに
+      片方だけ探すと、**光らせる場所が無いまま案内が進む**——作者から見ると
+      「案内しますと言ったのに、どこも光らない」になる。
+
+      上の総当たりは「どちらかで引ける」しか見ていないので、**どちらで
+      引けるのか**をここで名指しにしておく。
+    */
+    const { actions, steps } = providers();
+    expect(
+      steps.findActionNode("novelai.postNewEpisode"),
+      "簡単ステップメニューに入った（この前提が変わった）"
+    ).toBeUndefined();
+    expect(
+      actions.findActionNode("novelai.postNewEpisode"),
+      "詳細メニューからも引けない（案内が行き止まる）"
+    ).toBeDefined();
+  });
 });
 
 describe("親をたどれること（reveal の前提）", () => {

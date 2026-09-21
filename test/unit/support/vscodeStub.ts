@@ -16,6 +16,14 @@ export const workspace = {
   applyEdit: (async (_edit: unknown) => true) as (
     edit: unknown
   ) => Promise<boolean>,
+  /**
+   * 開いている原稿をまとめて保存する。**既定は「全部保存できた」**——
+   * 保存しきれなかったときの道（「保存して同期」が確認を挟む）を見る
+   * テストは、false を返す形へ差し替える。
+   */
+  saveAll: (async (_includeUntitled?: boolean) => true) as (
+    includeUntitled?: boolean
+  ) => Promise<boolean>,
 };
 
 /** 文書の改行コード（本物と同じ値。1がLF、2がCRLF） */

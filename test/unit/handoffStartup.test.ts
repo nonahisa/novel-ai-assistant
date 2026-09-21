@@ -330,3 +330,92 @@ describe("「送らずに閉じた」印", () => {
     expect(notice).toBeUndefined();
   });
 });
+
+/**
+ * 知らせの中身（設計書6.15.1）。
+ *
+ * **点検は黙って原稿を動かす。** 何をしたかが1行で出なければ、作者は
+ * 「別の機械で書いたはずの続きが、いつの間にか入っている」状態に置かれる。
+ * **押せる口（分かれた分を合わせる）まで出るか**も、ここで見る——
+ * 止めておきながら次の手を出さないと、作者は行き止まりに立つ。
+ */
+describe("点検のあとの知らせ", () => {
+  /** 知らせに並んだボタン */
+  let buttons: string[] = [];
+
+  beforeEach(() => {
+    buttons = [];
+    window.showWarningMessage = (async (
+      message: string,
+      ...rest: unknown[]
+    ) => {
+      notice = message;
+      buttons = rest.filter((one): one is string => typeof one === "string");
+      return undefined;
+    }) as typeof window.showWarningMessage;
+  });
+
+  test("取り込んだら、そのことを知らせる", async () => {
+    await runStartupHandoff({
+      registry,
+      monitor: monitorWith(tracked({ behind: 2 })),
+      storage: memoryStorage(),
+      run: fakeRepo({ behind: 2 }),
+    });
+
+    expect(notice).toContain("取り込み 1か所");
+  });
+
+  test("送ったら、そのことを知らせる", async () => {
+    await runStartupHandoff({
+      registry,
+      monitor: monitorWith(tracked({ ahead: 3 })),
+      storage: memoryStorage(),
+      run: fakeRepo({ ahead: 3 }),
+    });
+
+    expect(notice).toContain("送信 1か所");
+  });
+
+  test("重なって止めたときは、「分かれた分を合わせる」へ進める口を出す", async () => {
+    await runStartupHandoff({
+      registry,
+      monitor: monitorWith(tracked({ behind: 2, ahead: 2 })),
+      storage: memoryStorage(),
+      run: fakeRepo({
+        behind: 2,
+        ahead: 2,
+        localFiles: ["本文/008.txt"],
+        remoteFiles: ["本文/008.txt"],
+      }),
+    });
+
+    expect(buttons).toContain("分かれた分を合わせる");
+  });
+
+  test("止まっていないときの口は「同期する」", async () => {
+    // **合わせる口は、合わせるものがあるときだけ。** いつも出していると
+    // 押してよいものか分からなくなる
+    await runStartupHandoff({
+      registry,
+      monitor: monitorWith(tracked({ ahead: 3 })),
+      storage: memoryStorage(),
+      run: fakeRepo({ ahead: 3 }),
+    });
+
+    expect(buttons).toContain("同期する");
+    expect(buttons).not.toContain("分かれた分を合わせる");
+  });
+
+  test("何も起きなければ、何も出さない", async () => {
+    // 開くたびに知らせが出ると読まれなくなる
+    await runStartupHandoff({
+      registry,
+      monitor: monitorWith(tracked()),
+      storage: memoryStorage(),
+      run: fakeRepo({}),
+    });
+
+    expect(notice).toBeUndefined();
+  });
+});

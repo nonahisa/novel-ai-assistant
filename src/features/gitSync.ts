@@ -42,7 +42,7 @@ export {
   describeSyncBadge,
   describeSyncTooltip,
 } from "../core/gitSyncStatusText";
-import { divergenceLine } from "../core/gitSyncStatusText";
+import { describeSyncStatusBar, divergenceLine } from "../core/gitSyncStatusText";
 import { cancelItem } from "../views/dialogs";
 import {
   canRecordChanges,
@@ -999,27 +999,16 @@ ${reason}`
       )
       .filter(({ status }) => isWarning(status));
 
-    if (warnings.length === 0) {
+    // **文言の組み立ては `core/gitSyncStatusText.ts` に置いた**（2026-09-21）。
+    // 置き場ごとに1回だけ数える所を、テストで見張れるようにするため。
+    // ここに残すのは、画面へ当てる（色・ホバー・出す／隠す）ところだけ
+    const text = describeSyncStatusBar(warnings);
+    if (!text) {
       this.statusBar.hide();
       return;
     }
 
-    // **置き場ごとに1回だけ数える。** `behind`／`ahead`／`dirty` は
-    // 置き場ぜんぶの数なので（設計書5.5.1）、作品ごとに足すと書庫では
-    // 11倍になる。一覧の印で同じ失敗をしている（全行に「送信待ち13」）
-    const perRoot = uniqueByRoot(warnings);
-    const behind = sumTracked(perRoot, (status) => status.behind);
-    const ahead = sumTracked(perRoot, (status) => status.ahead);
-    const dirty = sumTracked(perRoot, (status) => status.dirty);
-    const unmerged = sumTracked(perRoot, (status) => status.unmerged);
-
-    const parts: string[] = [];
-    if (behind > 0) parts.push(`未取得 ${behind}`);
-    if (ahead > 0) parts.push(`未送信 ${ahead}`);
-    if (dirty > 0) parts.push(`未記録 ${dirty}`);
-    if (unmerged > 0) parts.push(`競合 ${unmerged}`);
-
-    this.statusBar.text = `$(git-branch) ${parts.join(" / ")}`;
+    this.statusBar.text = text;
     this.statusBar.backgroundColor = new vscode.ThemeColor(
       "statusBarItem.warningBackground"
     );
@@ -1059,27 +1048,6 @@ export function isWarning(status: GitSyncStatus): boolean {
     status.dirty > 0 ||
     status.unmerged > 0
   );
-}
-
-/**
- * 同じ置き場を1回だけにする（設計書5.7.9）。
- *
- * 書庫では1つのリポジトリに11作品が入る。`ahead` などは置き場ぜんぶの数
- * なので、作品ごとに足すと11倍になる。
- */
-function uniqueByRoot(
-  entries: readonly { work: WorkEntry; status: GitSyncStatus }[]
-): Array<{ status: GitSyncStatus }> {
-  const seen = new Set<string>();
-  const out: Array<{ status: GitSyncStatus }> = [];
-  for (const entry of entries) {
-    const status = entry.status;
-    if (!("root" in status)) continue;
-    if (seen.has(status.root)) continue;
-    seen.add(status.root);
-    out.push({ status });
-  }
-  return out;
 }
 
 /**
@@ -1155,17 +1123,6 @@ async function pickWork(
     { title: "設定資料を抽出する作品", placeHolder: "作品を選んでください" }
   );
   return picked && "work" in picked ? picked.work : undefined;
-}
-
-function sumTracked(
-  entries: Array<{ status: GitSyncStatus }>,
-  pick: (status: Extract<GitSyncStatus, { kind: "tracked" }>) => number
-): number {
-  return entries.reduce(
-    (total, { status }) =>
-      status.kind === "tracked" ? total + pick(status) : total,
-    0
-  );
 }
 
 function describeForTooltip(work: WorkEntry, status: GitSyncStatus): string {
