@@ -112,7 +112,10 @@ describe("半角の縦中横", () => {
   });
 
   test("&amp; のような逃がし済みの文字は壊さない", () => {
-    expect(applyTateChuYoko("A &amp; B")).toBe("A &amp; B");
+    // 「A」「B」は英数字1文字なので立つ（2026-09-21 の裁定）。&amp; の中の amp は寝たまま
+    expect(applyTateChuYoko("A &amp; B")).toBe(
+      '<span class="tcy">A</span> &amp; <span class="tcy">B</span>'
+    );
   });
 
   /**
@@ -131,9 +134,18 @@ describe("半角の縦中横", () => {
     expect(escapeDisplayText("12", false)).toBe("12");
   });
 
+  test("原稿エディタの規則と同じ並びで寝る（作者の裁定、2026-09-21「EPUB も揃える」）", () => {
+    expect(applyTateChuYoko("R4")).toBe('<span class="tcy">R4</span>');
+    expect(applyTateChuYoko("OK")).toBe('<span class="tcy">OK</span>');
+    expect(applyTateChuYoko("A-13")).toBe("A-13");
+    expect(applyTateChuYoko("No.1")).toBe("No.1");
+    expect(applyTateChuYoko("abc")).toBe("abc");
+    expect(applyTateChuYoko("&lt;tag&gt;")).toBe("&lt;tag&gt;");
+  });
+
   test("縦書きでは escapeDisplayText が escape と tcy を両方通す", () => {
     expect(escapeDisplayText("A & 12", true)).toBe(
-      'A &amp; <span class="tcy">12</span>'
+      '<span class="tcy">A</span> &amp; <span class="tcy">12</span>'
     );
   });
 

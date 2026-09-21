@@ -814,8 +814,9 @@ describe("組み立てたDOMの形", () => {
     expect(tcy.childNodes[0].nodeValue).toBe("12");
   });
 
-  it("3文字以上と型番は包まない（現行どおり横倒し）", () => {
-    for (const value of ["2026年", "F5", "A-13"]) {
+  it("3文字以上と記号で繋がった並びは包まない（現行どおり横倒し）", () => {
+    // 「F5」は 0.74.8（作者の裁定、2026-09-21）から立つ側。ここは寝る側だけを見る
+    for (const value of ["2026年", "abc", "A-13", "No.1"]) {
       const line = build(value).childNodes[0];
       // 平文のテキストノード1つだけ。span は作らない
       expect(line.childNodes, value).toHaveLength(1);

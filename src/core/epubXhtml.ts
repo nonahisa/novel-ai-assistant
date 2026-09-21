@@ -81,7 +81,7 @@ const FORBIDDEN_CONTROL_CHARS = buildForbiddenControlChars();
 /**
  * 半角の縦中横（設計書6.65.15の2）。
  *
- * 縦書きの本で、半角の数字・「!」「?」が1〜2文字だけ連続していたら
+ * 縦書きの本で、半角の英数字・「!」「?」が1〜2文字だけ連続していたら
  * `<span class="tcy">` で包む。CSS側（`epubPackage.ts` の `buildEpubCss`）
  * が `text-combine-upright: all` を当て、縦の行の中で横向きに寝かせず
  * 1文字ぶんの幅へ収める。**3文字以上は従来どおり横倒しのまま**——作者の
@@ -95,10 +95,17 @@ const FORBIDDEN_CONTROL_CHARS = buildForbiddenControlChars();
  * 続く形）の中の数字は包まない。**直前が `&` か `#` の数字run**は対象から
  * 外す——包むと、実体参照の意味を持つ数字の並びが縦中横のspanで割れて
  * リーダーによっては元の記号として読めなくなる。
+ *
+ * **原稿エディタの規則（`tateChuYoko.ts` の `TCY_RUN_PATTERN`）に揃えてある**
+ * （作者の裁定、2026-09-21「EPUB も揃える」）：英字も立てる／**直前・直後が
+ * 半角文字なら立てない**（`A-13`・`No.1`・`&amp;` の中の `amp` は寝たまま）。
+ * 違うのは「!」「?」も立てる点だけ。写しを置きたくないが、EPUB は「!?」を
+ * 含めるので同じ文字列にはならない——**文字の組だけが違う**ことを、
+ * `epubXhtml.test.ts` の「原稿エディタの規則と同じ並びで寝る」で見張る。
  */
 export function applyTateChuYoko(escaped: string): string {
   return escaped.replace(
-    /[0-9!?]+/g,
+    /(?<![!-~｡-ﾟ])[0-9A-Za-z!?]{1,2}(?![!-~｡-ﾟ])/g,
     (run: string, offset: number, whole: string) => {
       if (run.length > 2) return run;
       const before = offset > 0 ? whole[offset - 1] : "";

@@ -29,8 +29,16 @@ describe("縦中横にする半角数字の run", () => {
     expect(runsOf("12月")).toEqual(["12"]);
   });
 
-  test("「F5」は立てない（型番の数字だけが立つと読めない）", () => {
-    expect(runsOf("F5")).toEqual([]);
+  test("「F5」「R4」「OK」は丸ごと立てる（作者の裁定、2026-09-21「半角2文字は縦中横」）", () => {
+    expect(runsOf("F5")).toEqual(["F5"]);
+    expect(runsOf("R4")).toEqual(["R4"]);
+    expect(runsOf("OK")).toEqual(["OK"]);
+    expect(runsOf("列R4を")).toEqual(["R4"]);
+  });
+
+  test("英字でも3文字以上は立てない（「abc」「PDF」）", () => {
+    expect(runsOf("abc")).toEqual([]);
+    expect(runsOf("PDF")).toEqual([]);
   });
 
   test("「A-13」も立てない（ハイフンで繋いだ型番）", () => {
@@ -100,11 +108,15 @@ describe("半角文字に挟まれた数字は立てない（作者の指定、2
     expect(runsOf("(5)")).toEqual([]);
   });
 
-  test("「#1」「No.1」「[2]」「v2」も立てない", () => {
+  test("「#1」「No.1」「[2]」「v2.0」は立てない（記号で繋がった並び）", () => {
     expect(runsOf("#1")).toEqual([]);
     expect(runsOf("No.1")).toEqual([]);
     expect(runsOf("[2]")).toEqual([]);
-    expect(runsOf("v2")).toEqual([]);
+    expect(runsOf("v2.0")).toEqual([]);
+  });
+
+  test("「v2」は英数字2文字なので立てる（2026-09-21 の裁定で変わった）", () => {
+    expect(runsOf("v2")).toEqual(["v2"]);
   });
 
   test("半角カナに接していても立てない", () => {
