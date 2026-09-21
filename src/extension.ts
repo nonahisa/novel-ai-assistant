@@ -202,6 +202,7 @@ import { canRunProcesses } from "./core/runtime";
 import { describeProcessesBlocked } from "./core/processAvailability";
 import { exclusiveLabelOf } from "./core/exclusiveCommands";
 import { beginCommand, endCommand } from "./core/runningCommands";
+import { isStaleBundleError } from "./core/staleBundle";
 // nextSetupStep, runSetupStep も core/git.ts 経由。動的importする
 
 import { resolveDeviceId } from "./core/device";
@@ -644,6 +645,38 @@ export async function activate(
           })
         );
         return returned;
+      } catch (error) {
+        /*
+          **拡張機能が裏で入れ替わったときだけ、受け止めて案内する**
+          （設計書6.106）。
+
+          VS Code が更新すると古い版のフォルダーが消えるのに、開いている
+          ウィンドウは古い版を動かし続ける。この拡張機能はコマンドの本体を
+          押されたときに読む作りなので、押した瞬間に「もう無いフォルダー」を
+          探しに行って落ちる。作者の画面には素の「システム エラー」しか
+          出ていなかった。
+
+          **それ以外の失敗はそのまま投げ直す**（いまの振る舞いを変えない）。
+        */
+        if (!isStaleBundleError(error, context.extensionPath)) throw error;
+
+        logFailure("拡張機能の更新", {
+          操作: command,
+          詳細: error instanceof Error ? error.message : String(error),
+        });
+        void vscode.window
+          .showErrorMessage(
+            "拡張機能が更新されています。ウィンドウを再読み込みしてください。",
+            "再読み込み"
+          )
+          .then((choice) => {
+            if (choice === "再読み込み") {
+              void vscode.commands.executeCommand(
+                "workbench.action.reloadWindow"
+              );
+            }
+          });
+        return undefined;
       } finally {
         // **失敗しても、途中で止めても必ず解く。** 解き忘れると、その操作が
         // 二度と押せなくなる（重複起動より重い壊れ方）
