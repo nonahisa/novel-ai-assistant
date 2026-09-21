@@ -42,6 +42,7 @@ import { WorkFolderWatchers } from "./features/workFolderWatch";
 import { setStreamingSettingReader } from "./ai/ollamaStream";
 import { findLatestEpisode } from "./core/latestEpisode";
 import { scanWork, type ScanTiming } from "./core/scanner";
+import { createMaintenanceTrigger } from "./core/maintenanceTrigger";
 import { SUPPORTED_EXTENSIONS, WorkEntry } from "./models/types";
 import {
   AIRegistry,
@@ -873,12 +874,22 @@ export async function activate(
    *
    * 印（「整備 開始」「整備」）はそのまま。**位置が後ろへ動くだけ**で、
    * 知らせ（無い作品・除外設定・未登録作品）も今までどおり出す。
+   *
+   * @param startNote 印へ添える一言。合図を待ちきって起こしたときだけ入る
+   *   （`core/maintenanceTrigger.ts`）。下の「整備」の印に添える `note`
+   *   （内訳）とは**別物**なので、名前を分けてある
    */
   let workMaintenanceStarted = false;
-  const startWorkMaintenance = (): void => {
+  const startWorkMaintenance = (startNote?: string): void => {
+    /*
+      **「一度だけ」を2か所で守る。** いつ起こすかの判断は
+      `core/maintenanceTrigger.ts`（試験で守る）が持つが、起こす側にも
+      印を残す。整備が2回走ると `.gitignore` の書き込みと知らせが
+      二重になるので、ここは最後の砦である。
+    */
     if (workMaintenanceStarted) return;
     workMaintenanceStarted = true;
-    startupTiming.mark("整備 開始");
+    startupTiming.mark("整備 開始", startNote);
     const maintainStartedAt = performance.now();
     void registry
       .maintainWorks((works) => {
@@ -925,6 +936,24 @@ export async function activate(
         });
       });
   };
+
+  /*
+    **合図が来ないときの保険**（設計書6.107。0.74.9）。
+
+    VS Code が作品一覧の `getChildren` を呼ぶのは**ビューが見えたとき**
+    なので、作者がサイドバーを一度も開かない起動では合図が来ない。
+    そのままでは `.gitignore` の移行も「作品フォルダーが見つかりません」の
+    知らせも、そのセッションでは出ない。**順番の問題ではなく抜け落ちである。**
+
+    判断（一度だけ・上限で起こす）は `core/maintenanceTrigger.ts` にある
+    ——`activate` は単体で動かせないので、試験で守れる形へ出してある。
+  */
+  const maintenanceTrigger = createMaintenanceTrigger((startNote) =>
+    startWorkMaintenance(startNote)
+  );
+  context.subscriptions.push({
+    dispose: () => maintenanceTrigger.dispose(),
+  });
 
   /*
     **起動の数字を書き出す仕掛け**（設計書6.107）。
@@ -994,8 +1023,9 @@ export async function activate(
 
         `finally` に置くのは、**計測が落ちても整備は起こすため**。
         上の `try` には早い `return` があるので、その道でも通る。
+        上限の見張りが先に起こしていれば、ここは何もしない。
       */
-      startWorkMaintenance();
+      maintenanceTrigger.signal();
     }
   };
 
@@ -5880,17 +5910,20 @@ export async function activate(
   })();
 
   /*
-    **登録簿が0件なら、ここで整備を起こす**（設計書6.107。0.74.9）。
+    **整備をいつ起こすか、ここで決める**（設計書6.107。0.74.9）。
 
-    ふだんは「作品一覧の初回描画」のあとに起こす（`startWorkMaintenance`）。
-    整備の `await` と一覧の走査が同じスレッドで取り合い、整備が
-    バラバラの位置で何秒も詰まっていたためである。
+    ふだんは「作品一覧の初回描画」のあとに起こす。整備の `await` と
+    一覧の走査が同じスレッドで取り合い、整備がバラバラの位置で何秒も
+    詰まっていたためである。
 
-    **0件のときは、その合図が当てにならない。** 作品が無ければ走査も
-    描画も起きないので、いままでどおり `activate` の末尾で起こす。
-    整備そのものは0件でも走り、除外設定の知らせだけが出る道になる。
+    - **0件なら、その場で起こす。** 作品が無ければ走査も描画も起きないので、
+      合図が当てにならない。整備そのものは0件でも走り、除外設定の知らせ
+      だけが出る道になる
+    - **1件以上なら、合図を待つ。ただし上限つき**（60秒）。サイドバーを
+      一度も開かない起動では合図が来ないので、待ちきったら自分で起こす
   */
-  if (registry.list().length === 0) startWorkMaintenance();
+  if (registry.list().length === 0) maintenanceTrigger.signal();
+  else maintenanceTrigger.arm();
 
   // ここまでが `activate` 本体（設計書6.107）。**画面が出るのはこのあと**
   // ——VS Code が作品一覧の `getChildren` を呼ぶのは、ここを抜けてからである
