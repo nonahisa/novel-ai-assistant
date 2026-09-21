@@ -768,13 +768,14 @@ describe("組み立てたDOMの形", () => {
    * 提案を作者が承認したときだけである。
    */
   it("ダッシュは、字をそのままにした素の span", () => {
-    const line = build("あ" + DASH_EM + DASH_BAR + "い").childNodes[0];
-    expect(line.childNodes).toHaveLength(4);
+    // 1本だけのダッシュ。字はそのまま、飾りは付けない
+    const line = build("あ" + DASH_EM + "い" + DASH_BAR + "う").childNodes[0];
+    expect(line.childNodes).toHaveLength(5);
 
     // 入っていた順に、入っていた字のまま
     for (const [index, char] of [
       [1, DASH_EM],
-      [2, DASH_BAR],
+      [3, DASH_BAR],
     ] as const) {
       const dash = line.childNodes[index];
       expect(dash.nodeName).toBe("SPAN");
@@ -786,6 +787,55 @@ describe("組み立てたDOMの形", () => {
     }
   });
 
+  /**
+   * 続くダッシュを1つの印にまとめる（作者の実機報告、2026-09-22
+   * 「『――』は繋がったが『――――』は真ん中に切れ目」）。
+   *
+   * 1文字ずつ包んでいたときは、ダッシュ1本ごとに別のインライン箱になり、
+   * **繋がるかどうかが「箱の置き場所の丸め」任せ**だった。字送りに端数が
+   * あると、累積した端数が半分を越えたところで箱が1ピクセル右へずれる
+   * ——2本なら境目が1つしか無くて出ないが、4本なら真ん中あたりで出る。
+   * 1つの span へ入れれば**箱の境目が中に無くなる**ので、何本でも同じに見える。
+   */
+  it("続くダッシュは1つの印にまとめる（何本でも1本に見せる）", () => {
+    const run = DASH_BAR + DASH_BAR + DASH_BAR + DASH_BAR;
+    const line = build("あ" + run + "い").childNodes[0];
+    // 「あ」／印／「い」の3つ。印は4つに割れない
+    expect(line.childNodes).toHaveLength(3);
+
+    const dash = line.childNodes[1];
+    expect(dash.nodeName).toBe("SPAN");
+    expect(dash.getAttribute?.("class")).toBe("dash");
+    // かたまりにはしない（中の字は直せるまま）
+    expect(dash.getAttribute?.("contenteditable")).toBeNull();
+    expect(dash.getAttribute?.("data-src")).toBeNull();
+    // **中の文字は4つとも残る**（数も並びも変えない）
+    expect(dash.childNodes).toHaveLength(1);
+    expect(dash.childNodes[0].nodeValue).toBe(run);
+
+    // 直列化すれば元の本文へ戻る
+    expect(round("あ" + run + "い")).toBe("あ" + run + "い");
+  });
+
+  it("まとめても、2つの文字が混ざった並びはそのまま残る", () => {
+    // U+2014 と U+2015 は別の文字。**片方へ寄せない**（寄せると、
+    // 面を開いただけで本文が書き換わる）
+    const run = DASH_EM + DASH_BAR + DASH_EM;
+    const line = build(run).childNodes[0];
+    expect(line.childNodes).toHaveLength(1);
+    expect(line.childNodes[0].childNodes[0].nodeValue).toBe(run);
+    expect(round(run)).toBe(run);
+  });
+
+  it("三点リーダはまとめない（1em角へ入れて回すので中心がずれる）", () => {
+    const line = build("……").childNodes[0];
+    expect(line.childNodes).toHaveLength(2);
+    for (const dots of line.childNodes) {
+      expect(dots.getAttribute?.("class")).toBe("ellipsis");
+      expect(dots.childNodes[0].nodeValue).toBe("…");
+    }
+  });
+
   it("ダッシュも平文として数える（かたまりは1つも作らない）", () => {
     const atoms = api.composeAtoms(build("あ" + DASH_EM + DASH_BAR + "い"));
     expect(atoms.filter((atom) => atom.kind === "chunk")).toEqual([]);
@@ -793,8 +843,8 @@ describe("組み立てたDOMの形", () => {
       atoms.map((atom) => [atom.kind, atom.text, atom.start, atom.end])
     ).toEqual([
       ["text", "あ", 0, 1],
-      ["text", DASH_EM, 1, 2],
-      ["text", DASH_BAR, 2, 3],
+      // 続きは1つの印なので、平文としても1つのまとまりで届く
+      ["text", DASH_EM + DASH_BAR, 1, 3],
       ["text", "い", 3, 4],
     ]);
   });
@@ -1350,6 +1400,9 @@ describe("画面の約束", () => {
     expect(block("#compose .dash")).toContain('"Yu Mincho"');
     // 縦書き向けの規則そのものを置かない
     expect(html).not.toContain("body.vertical #compose .dash");
+    // **字送りを広げない**（続きは1つの span なので、letter-spacing が
+    // 効くと印の中で隙間が開く。作者の実機報告、2026-09-22）
+    expect(block("#compose .dash")).toContain("letter-spacing: 0");
   });
 
   /**
@@ -1908,7 +1961,20 @@ describe("規則から外れた印を見つける", () => {
     expect(api.composeMarkIsStale("dash", EM_DASH)).toBe(false);
     expect(api.composeMarkIsStale("dash", BAR)).toBe(false);
     expect(api.composeMarkIsStale("dash", BAR + "あ")).toBe(true);
-    expect(api.composeMarkIsStale("dash", BAR + BAR)).toBe(true);
+    expect(api.composeMarkIsStale("dash", "あ" + BAR)).toBe(true);
+    expect(api.composeMarkIsStale("dash", "")).toBe(true);
+  });
+
+  /**
+   * **続きは1つの印**（0.75.1）。以前は「1文字でなければ外す」だったので、
+   * 4本続きの印を組んだ端から外していた（組み直すたびに1文字ずつへ戻る）。
+   */
+  it("ダッシュの続きは、何本でもそのまま残す", () => {
+    expect(api.composeMarkIsStale("dash", BAR + BAR)).toBe(false);
+    expect(api.composeMarkIsStale("dash", BAR + BAR + BAR + BAR)).toBe(false);
+    expect(api.composeMarkIsStale("dash", EM_DASH + BAR)).toBe(false);
+    // 途中にダッシュでない字が入ったら外す（打った字を巻き込んでいる）
+    expect(api.composeMarkIsStale("dash", BAR + "あ" + BAR)).toBe(true);
   });
 
   /** かたまり（ルビ・傍点）や行の印には関わらない */

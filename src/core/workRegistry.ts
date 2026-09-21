@@ -823,15 +823,25 @@ function resolveInsideWork(root: string, subdir: string, key: string): string {
 export async function readWorkConfig(
   work: WorkEntry
 ): Promise<WorkConfig | undefined> {
-  const uri = path.toUri(workPaths(work).configFile);
+  /*
+    **読み口を通す**（設計書6.107。0.75.1）。ここは
+    `vscode.workspace.fs.readFile` を直に叩いていた。走査の下ごしらえで
+    作品ごとに1回呼ばれるので、混んだ拡張機能ホストでは16作品ぶんの往復が
+    そのまま待ち時間になる（本文の読みを一括にしたあと、**下ごしらえだけで
+    46秒**残っていた。作者の実機、0.75.0 の計測）。
+    **読むだけ**なので、手元では Node の `fs` で読んでよい。
+  */
+  const configFile = workPaths(work).configFile;
   try {
-    const bytes = await vscode.workspace.fs.readFile(uri);
+    const reader = await fileReader();
+    const bytes = await reader.readFile(configFile);
     const raw: unknown = JSON.parse(new TextDecoder().decode(bytes));
     const config = parseWorkConfig(raw);
     workPaths(work, config);
     return config;
   } catch (error) {
-    if (error instanceof vscode.FileSystemError && error.code === "FileNotFound") {
+    // 「まだ無い」は両方の経路で形が違う（`isNotFound` が吸収する）
+    if (isNotFound(error)) {
       return undefined;
     }
     const detail = error instanceof Error ? error.message : String(error);

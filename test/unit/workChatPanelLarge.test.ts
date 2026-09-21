@@ -387,3 +387,58 @@ describe("本文の右クリックから開く相談", () => {
     expect(body).not.toContain("openLargePanel");
   });
 });
+
+/**
+ * 聞き方の例（作者の要望、2026-09-22
+ * 「AI相談の例に『この作品を好む読者はどんな層？』を追加しましょうか」）。
+ *
+ * **押すと入力欄に入るだけ。送らない。** そのまま送ると、直す気の無い
+ * 言い回しでAIを呼ぶことになり（クラウドならそのまま料金になる）、
+ * 自分の作品の言葉へ書き換える隙も無くなる。
+ *
+ * 並びそのものは `core/chatExamples.ts` が持ち、`chatExamples.test.ts` が
+ * 「どれも手順書きに当たる」を見る。ここで見るのは画面の組み立てだけ。
+ */
+describe("聞き方の例", () => {
+  for (const [name, html] of [
+    ["大きい画面", LARGE],
+    ["横のパネル", SIDEBAR],
+  ] as const) {
+    test(`${name}に、入力欄の上の入れ物がある`, () => {
+      // **両方の面に出す**——横の細いパネルでこそ、何を聞けるか分からない
+      expect(html).toContain('<div id="examples"></div>');
+      // 入力欄より前に置く（上に出す）
+      expect(html.indexOf('id="examples"')).toBeLessThan(
+        html.indexOf('id="input"')
+      );
+    });
+
+    test(`${name}が、届いた例で札を作り直す`, () => {
+      const code = script(html);
+      expect(code).toContain("message.examples");
+      expect(code).toContain("renderExamples()");
+    });
+  }
+
+  test("押しても送らない（入力欄へ入れて焦点を渡すだけ）", () => {
+    const code = script(LARGE);
+    const at = code.indexOf("function renderExamples()");
+    expect(at, "renderExamples が無い").toBeGreaterThan(0);
+    const body = code.slice(at, code.indexOf("\n}", at));
+
+    // 入力欄へ入れる
+    expect(body).toContain("inputEl.value = text");
+    expect(body).toContain("inputEl.focus()");
+    // **送らない。** send も postMessage も呼ばない
+    expect(body).not.toContain("send(");
+    expect(body).not.toContain("postMessage");
+  });
+
+  test("例の札は、実行の色を使わない", () => {
+    // 押しても送らないので、実行のボタン（button.action）と同じ顔にしない
+    expect(LARGE).toContain(".example {");
+    const at = LARGE.indexOf(".example {");
+    const block = LARGE.slice(at, LARGE.indexOf("}", at));
+    expect(block).toContain("background: transparent");
+  });
+});

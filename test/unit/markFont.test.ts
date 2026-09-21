@@ -76,10 +76,58 @@ describe("困らない書体は、作者の書体のまま", () => {
     }
   });
 
-  test("空（既定にまかせる）は空のまま", () => {
+  test("実効の書体が取れないときだけ、空のまま", () => {
     // 変数を立てない。CSS側の逃げ先（var の第2引数）がこれまでどおり効く
     expect(markFontFor("")).toBe("");
     expect(markFontFor("   ")).toBe("");
+    expect(markFontFor("", "   ")).toBe("");
+  });
+});
+
+/**
+ * 「既定」（作者が書体を選んでいない）ときの判定（作者の裁定、2026-09-22）。
+ *
+ * **作者のノートの既定は切れる書体だった。** 選んでいないときだけ隙間が
+ * 出ていたので、VS Code の実効の書体を同じ判定にかける。
+ */
+describe("既定のときは、実効の書体で判定する", () => {
+  test("実効が等幅なら、ゴシックの列へ倒す", () => {
+    // VS Code の既定の編集用フォント（Windows／macOS／Linux でよくある綴り）
+    expect(markFontFor("", "Consolas, 'Courier New', monospace")).toBe(
+      MARK_FONT_GOTHIC
+    );
+    expect(markFontFor("", "'Cascadia Mono', monospace")).toBe(
+      MARK_FONT_GOTHIC
+    );
+    expect(markFontFor("", '"Courier New", monospace')).toBe(MARK_FONT_GOTHIC);
+  });
+
+  test("実効が游明朝・ＭＳ 明朝なら、明朝の列へ倒す", () => {
+    expect(markFontFor("", '"Yu Mincho", serif')).toBe(MARK_FONT_MINCHO);
+    expect(markFontFor("", "ＭＳ 明朝")).toBe(MARK_FONT_MINCHO);
+  });
+
+  test("実効がＭＳ ゴシック・游ゴシックなら、ゴシックの列へ倒す", () => {
+    expect(markFontFor("", '"MS Gothic", monospace')).toBe(MARK_FONT_GOTHIC);
+    expect(markFontFor("", "ＭＳ ゴシック")).toBe(MARK_FONT_GOTHIC);
+    expect(markFontFor("", '"Yu Gothic"')).toBe(MARK_FONT_GOTHIC);
+  });
+
+  test("実効が困らない書体なら、空のまま（書体名を返さない）", () => {
+    // ここで実効の書体名を返すと、本文（既定）と印だけ別の書体になる
+    // ——0.64.4 で直した「そこだけ書体が変わって見える」が戻る
+    expect(markFontFor("", '"Noto Serif JP", serif')).toBe("");
+    expect(markFontFor("", "Meiryo")).toBe("");
+  });
+
+  test("作者が選んでいるときは、実効の書体を見ない", () => {
+    // 選んだ書体で描かれるので、既定が何であっても関係しない
+    expect(markFontFor('"Noto Sans JP", sans-serif', "Consolas")).toBe(
+      '"Noto Sans JP", sans-serif'
+    );
+    expect(markFontFor('"Yu Mincho", serif', "Meiryo")).toBe(
+      MARK_FONT_MINCHO
+    );
   });
 });
 

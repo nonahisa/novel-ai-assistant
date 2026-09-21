@@ -2732,9 +2732,19 @@ function readAppearance(): {
   const fontFamily = config
     .get<string>("manuscriptEditor.fontFamily", "")
     .trim();
+  /*
+    作者が書体を選んでいないときに、**実際に描かれる書体**（作者の裁定、
+    2026-09-22）。作者のノートの既定は切れる書体（等幅）で、選んでいない
+    ときだけ隙間が出ていた。VS Code の編集用フォントが画面の既定になるので、
+    その設定値をそのまま渡す——先頭を取り出して判定するのは
+    `core/markFont.ts` の仕事なので、ここで切り分けない
+  */
+  const editorFontFamily = vscode.workspace
+    .getConfiguration("editor")
+    .get<string>("fontFamily", "");
   return {
     fontFamily,
-    markFontFamily: markFontFor(fontFamily),
+    markFontFamily: markFontFor(fontFamily, editorFontFamily),
     readAloudRate: clampReadAloudRate(
       config.get<number>("manuscriptEditor.readAloudRate", 1)
     ),

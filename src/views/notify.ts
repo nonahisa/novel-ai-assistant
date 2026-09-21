@@ -329,14 +329,30 @@ export async function pickWithMemory<T extends string>(params: {
 }
 
 /**
+ * ログを開くボタンの名前。**これ以外は渡せない。**
+ *
+ * 既存の文言が「ログを見る」と「ログを表示」に割れており、そろえると
+ * 作者が覚えている言葉が変わるので、2つとも残してある。
+ *
+ * **ただの `string` にしておくと、ここへエラー本文が入る**
+ * （実際に `readerTargetDiagnosis.ts` の4か所が入れていた。2026-09-22）。
+ * 第2引数は「ボタンの名前」なので、入れた文字がそのままボタンの字になり、
+ * **エラー文が書かれたボタンが出て、押してもログが開かない**——
+ * 答えと突き合わせる文字列が既定の「ログを見る」ではなくなるためである。
+ * 型で塞いでおけば、同じ取り違えは書いた時点で止まる。
+ */
+export type LogLabel = "ログを見る" | "ログを表示";
+
+/**
  * 警告と、ログへの入口をまとめて出す。
  *
- * **ボタンの名前は呼び出し側が渡す。** 既存の文言が「ログを見る」と
- * 「ログを表示」に割れており、そろえると作者が覚えている言葉が変わる。
+ * **第2引数はボタンの名前であって、エラーの中身ではない。**
+ * 原因の文字列は `logFailure` へ渡し、作者に見せてよい一文だけを
+ * `message` に混ぜること。
  */
 export async function warnWithLog(
   message: string,
-  logLabel = "ログを見る"
+  logLabel: LogLabel = "ログを見る"
 ): Promise<void> {
   const answer = await vscode.window.showWarningMessage(message, logLabel);
   if (answer === logLabel) showLog();
@@ -345,7 +361,7 @@ export async function warnWithLog(
 /** `warnWithLog` のエラー版。出す先が違うだけで扱いは同じ */
 export async function errorWithLog(
   message: string,
-  logLabel = "ログを見る"
+  logLabel: LogLabel = "ログを見る"
 ): Promise<void> {
   const answer = await vscode.window.showErrorMessage(message, logLabel);
   if (answer === logLabel) showLog();

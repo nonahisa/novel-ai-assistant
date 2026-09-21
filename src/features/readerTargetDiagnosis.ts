@@ -111,7 +111,10 @@ export async function runReaderTargetDiagnosis(
     profile = await store.load();
   } catch (error) {
     if (error instanceof ReaderTargetStoreError) {
-      await warnWithLog("読者像を読めませんでした", error.message);
+      // **理由は本文へ混ぜる。** `warnWithLog` の第2引数はボタンの名前で、
+      // ここへエラー文を渡すと、エラー文の書かれたボタンが出て押しても
+      // ログが開かなかった（0.75.1で直した）
+      await warnWithLog(`読者像を読めませんでした。${error.message}`);
       return CHECK_FAILED;
     }
     throw error;
@@ -164,7 +167,10 @@ export async function runReaderTargetDiagnosis(
   } catch (error) {
     const detail =
       error instanceof Error ? error.message : String(error);
-    await warnWithLog("読者像を保存できませんでした", detail);
+    // **原因はログへ、作者にはひとことだけ。** 保存の失敗はファイル側の
+    // 文言（権限・パス）がそのまま出るので、通知へ載せても読み解けない
+    logFailure("読者像を保存できませんでした", { 詳細: detail });
+    await warnWithLog("読者像を保存できませんでした。");
     // **保存できなくても紙は見せる。** 作者が答えた手間を無駄にしない
   }
 
@@ -393,8 +399,8 @@ async function readFromWork(
       応答: responseExcerptForLog(responseText),
     });
     await warnWithLog(
-      "読者像を読み取れませんでした",
-      "AIの返した形が読めませんでした。もう一度お試しください。"
+      "読者像を読み取れませんでした。AIの返した形が読めませんでした。" +
+        "もう一度お試しください。"
     );
     return undefined;
   }
@@ -404,8 +410,8 @@ async function readFromWork(
 
   if (!isReadingUsable(reading)) {
     await warnWithLog(
-      "読者像を読み取れませんでした",
-      "3つの軸のどれも読み取れませんでした。話数が増えてからお試しください。"
+      "読者像を読み取れませんでした。3つの軸のどれも読み取れませんでした。" +
+        "話数が増えてからお試しください。"
     );
     return undefined;
   }

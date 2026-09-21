@@ -15,8 +15,7 @@ import { isConflictSideFile } from "./conflictFile";
 import { isWorkInfoFile } from "./workInfoFile";
 import { parseCollectedFile, type CollectedEpisode } from "./collectedFile";
 import { memoBadgeText, parseMemos } from "./sceneMemo";
-import { pathExists } from "./fileSystem";
-import { fileReader } from "./fileRead";
+import { fileReader, isNotFound } from "./fileRead";
 import { detectEol } from "./eolAudit";
 import type { Eol } from "../models/types";
 
@@ -111,7 +110,6 @@ export async function scanWork(work: WorkEntry): Promise<{
   const config = await readWorkConfig(work);
   const p = workPaths(work, config);
 
-  const targetDir = (await pathExists(p.manuscript)) ? p.manuscript : p.root;
   /*
     **ここだけ読み口を切り替える**（設計書6.107）。走査は576ファイルを
     読むので、`vscode.workspace.fs` の列に全部が並ぶと一覧が出るまで
@@ -119,6 +117,28 @@ export async function scanWork(work: WorkEntry): Promise<{
     読む（`core/fileRead.ts`）。書き込みは1つもここに無い。
   */
   const reader = await fileReader();
+
+  /*
+    **本文フォルダーの有無も、読み口で確かめる**（設計書6.107。0.75.1）。
+
+    ここは `pathExists`（`core/fileSystem.ts`）を呼んでいた。あれは
+    `vscode.workspace.fs.stat` を直に叩くので、**読み口を通らない。**
+    1作品につき1回の往復が16作品ぶん並び、混んだ拡張機能ホストでは
+    本文の読みが1.1秒に落ちたあとも**下ごしらえだけで46秒**かかっていた
+    （作者の実機、0.75.0 の計測）。読み口を先に用意して、同じ口で訊く。
+
+    **フォルダーのときだけ本文フォルダーを見る。** 同じ名前のファイルが
+    あっても、その中は歩けない。
+  */
+  let targetDir = p.root;
+  try {
+    const manuscriptStat = await reader.stat(p.manuscript);
+    if (manuscriptStat.type === "directory") targetDir = p.manuscript;
+  } catch (error) {
+    // 無ければ作品の根を読む（これまでどおり）。**それ以外の失敗は投げる**
+    // ——`pathExists` もそうしていた。読めない事情を握りつぶさない
+    if (!isNotFound(error)) throw error;
+  }
   /*
     **下ごしらえは、本文の読みとは別に数える**（設計書6.107。0.74.11）。
     作品設定の読み込み・本文フォルダーの有無・読み口の用意は、どれも

@@ -46,7 +46,8 @@ import {
 import type { WriterProfileStore } from "../core/writerProfileStore";
 import { readerTypeChatLogLines } from "../core/readerTarget";
 import { ReaderTargetStore } from "../core/readerTargetStore";
-import type { ReaderProfile } from "../models/readerProfile";
+import { hasReaderProfile, type ReaderProfile } from "../models/readerProfile";
+import { chatExamplesFor } from "../core/chatExamples";
 import { notifyDone } from "../views/notify";
 import { buildAdvicePolicyPrompt } from "../prompts/advicePolicy";
 import { buildWriterStylePrompt } from "../prompts/writerStyle";
@@ -1056,6 +1057,18 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     const context = await this.resolveContext();
     // 画面に出すエンジン名は、この画面から実際に送るAI（相談の割当）にする
     const resolved = this.ai.resolve("chat");
+    /*
+      聞き方の例（作者の要望、2026-09-22）。**読者像が決まっていれば
+      「読者型を決めたい」は出さない**——済んだ仕事を勧めない。
+      作品が決まっていない（ファイルも作品も開いていない）ときは、
+      決まっていない扱いでよい。札が1つ増えるだけで、押さなければ何も起きない。
+    */
+    const profile = context
+      ? await this.readerProfileFor(context.work)
+      : undefined;
+    const examples = chatExamplesFor({
+      readerTargetDiagnosed: profile !== undefined && hasReaderProfile(profile),
+    });
     this.postAll({
       type: "context",
       label: context ? context.label : "作品のファイルを開いてください",
@@ -1068,6 +1081,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // 大きい画面の「できること」に並べる。**実装の一覧をそのまま渡す**ので、
       // 機能を足しても画面側を直さなくてよい
       quickRuns: runnableFeatures(),
+      // 入力欄の上に並べる聞き方の例。**両方の面に出す**
+      examples,
     });
   }
 

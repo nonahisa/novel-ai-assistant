@@ -191,6 +191,34 @@ textarea:focus { outline: 1px solid var(--vscode-focusBorder); }
   font-size: 11px;
   color: var(--vscode-descriptionForeground);
 }
+/*
+ * 聞き方の例（作者の要望、2026-09-22）。
+ *
+ * **入力欄のすぐ上に、小さく横並びで置く。** 空の入力欄の前では、
+ * 何を打てば何が返るのかが分からない。**押しても送らない**ので、
+ * 実行の色（button.action）は使わず、控えめな枠だけにする。
+ * 横の細いパネルでも折り返して全部見せる。
+ */
+#examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.example {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 10px;
+  padding: 2px 10px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+}
+.example:hover {
+  color: var(--vscode-foreground);
+  border-color: var(--vscode-focusBorder);
+}
 button.action {
   border: none;
   border-radius: 2px;
@@ -340,6 +368,9 @@ ${large ? TOOLBAR_HTML : ""}
 </div>
 <div id="thinking" hidden>考えています…</div>
 <div id="composer">
+  <!-- 聞き方の例。中身は拡張機能側から届いたものをその都度作り直す
+       （読者像が決まっていれば札が1つ減る）ので、入れ物だけ置く -->
+  <div id="examples"></div>
   <textarea id="input" placeholder="聞きたいことを書いてください（Ctrl+Enterで送信）"></textarea>
   <div class="row">
     ${
@@ -371,6 +402,8 @@ const chooseWorkEl = document.getElementById('choose-work');
 const saveNoteEl = document.getElementById('save-note');
 const openManualEl = document.getElementById('open-manual');
 const quickRunListEl = document.getElementById('quickrun-list');
+// 聞き方の例。**両方の面に出す**（横のパネルでこそ、何を聞けるか分からない）
+const examplesEl = document.getElementById('examples');
 // 面を移るボタンは、いま居ない側のぶんが1つだけ在る。
 // **どちらの面でも同じ書き方で扱う**ので、片方は必ず null になる
 const toMainEl = document.getElementById('to-main');
@@ -383,6 +416,8 @@ const applyToSettingsEl = document.getElementById('apply-settings');
 let currentOptions = [];
 /** 「できること」に並べる機能。拡張機能側から届く */
 let quickRuns = [];
+/** 聞き方の例。拡張機能側から届く（core/chatExamples.ts） */
+let examples = [];
 let busy = false;
 /**
  * これまでに返ってきた答えの数（設計書6.72）。
@@ -472,6 +507,36 @@ function renderQuickRuns() {
       vscode.postMessage({ type: 'quickRun', kind: run.kind });
     });
     quickRunListEl.appendChild(button);
+  });
+}
+
+/**
+ * 聞き方の例を作り直す（作者の要望、2026-09-22）。
+ *
+ * **押しても送らない。** 入力欄へ入れて、焦点を移すだけである。
+ * そのまま送ると、直す気の無い言い回しでAIを呼ぶことになり
+ * （クラウドならそのまま料金になる）、自分の作品の言葉へ書き換える
+ * 隙も無くなる。
+ *
+ * **一覧は拡張機能側から届いたものだけを出す**（「できること」と同じ）。
+ * 画面へ書き写すと、当たらない言い方になったときに気づけない
+ * ——どの例も手順書きに当たることは core/chatExamples.ts の試験が見る。
+ */
+function renderExamples() {
+  if (!examplesEl) return;
+  examplesEl.replaceChildren();
+  examples.forEach((text) => {
+    const button = document.createElement('button');
+    button.className = 'example';
+    button.textContent = text;
+    button.title = '入力欄に入れます（送りません）';
+    button.addEventListener('click', () => {
+      inputEl.value = text;
+      // 書き換えてから送れるように、焦点は入力欄へ渡す
+      inputEl.focus();
+      updateHint();
+    });
+    examplesEl.appendChild(button);
   });
 }
 
@@ -967,6 +1032,9 @@ window.addEventListener('message', (event) => {
     // 起動できる機能は、届くたびに作り直す（機能が増減しても写しが残らない）
     quickRuns = message.quickRuns || [];
     renderQuickRuns();
+    // 聞き方の例も届くたびに作り直す（読者像を決めたら札が1つ減る）
+    examples = message.examples || [];
+    renderExamples();
     return;
   }
   if (message.type === 'history') {

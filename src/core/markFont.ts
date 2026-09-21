@@ -25,6 +25,15 @@
  * 等幅なら ゴシックの列で、字面の系統は変えない。それ以外の書体では
  * **作者の書体をそのまま返す**（0.64.4 の形のまま）。
  *
+ * ## 「既定」も判定にかける（作者の裁定、2026-09-22）
+ *
+ * 作者が書体を選んでいない（設定が空の）ときは、これまで空文字を返して
+ * 既定にまかせていた。ところが**作者のノートの既定は切れる書体だった**
+ * ので、選んでいないときだけ隙間が出ていた。そこで、VS Code の
+ * `editor.fontFamily` の先頭の書体名を**実効の書体**として受け取り、
+ * 同じ判定を通す。倒す必要が無ければ、これまでどおり空文字を返す
+ * ——実効の書体名を返すと、本文（既定）と印だけ別の書体になる。
+ *
  * ## ここに `vscode` を持ち込まない
  *
  * 判定は設定の文字列だけで決まる。画面にも設定にも触らないので、
@@ -90,19 +99,13 @@ export const MARK_FONT_GOTHIC =
   '"BIZ UDGothic", "Noto Sans JP", "Noto Sans CJK JP", "Meiryo", sans-serif';
 
 /**
- * 作者の書体から、印（ダッシュ・三点リーダ）に当てる書体を決める。
+ * 隙間の出る書体なら、倒し先の列を返す。困らない書体なら `undefined`。
  *
- * @param authorFont 設定 `novelai.manuscriptEditor.fontFamily` の値。
- *   空文字は「既定にまかせる」なので、**空文字のまま返す**
- *   （CSS側の `var(--novelai-mark-font, …)` の逃げ先が効く）
- * @returns 印に当てる font-family。作者の書体で困らないときは、
- *   受け取った値をそのまま返す
+ * 作者の書体のときも、既定にまかせたときの実効の書体のときも、
+ * **同じ判定を通す**ための取り出し。
  */
-export function markFontFor(authorFont: string): string {
-  const trimmed = authorFont.trim();
-  if (trimmed === "") return "";
-
-  const head = firstFamily(trimmed);
+function gappedReplacement(fontFamily: string): string | undefined {
+  const head = firstFamily(fontFamily);
   if (GAPPED_MINCHO.has(head)) return MARK_FONT_MINCHO;
   if (GAPPED_GOTHIC.has(head)) return MARK_FONT_GOTHIC;
   // 一覧に無い等幅（作者が設定へ手で書いたもの）も、名前で拾ってゴシックへ。
@@ -110,5 +113,33 @@ export function markFontFor(authorFont: string): string {
   if (MONOSPACE_HINTS.some((hint) => head.includes(hint))) {
     return MARK_FONT_GOTHIC;
   }
-  return trimmed;
+  return undefined;
+}
+
+/**
+ * 作者の書体から、印（ダッシュ・三点リーダ）に当てる書体を決める。
+ *
+ * @param authorFont 設定 `novelai.manuscriptEditor.fontFamily` の値。
+ *   空文字は「既定にまかせる」なので、`effectiveFont` のほうで判定する
+ * @param effectiveFont 作者が書体を選んでいないときに、**実際に描かれる**
+ *   書体（VS Code の `editor.fontFamily`）。作者の裁定、2026-09-22
+ *   ——ノートの既定が切れる書体（等幅）だったため、選んでいないときだけ
+ *   隙間が出ていた。取れなければ空文字でよい
+ * @returns 印に当てる font-family。**倒す必要が無ければ**、作者が選んで
+ *   いるときは受け取った値をそのまま、選んでいないときは空文字を返す
+ */
+export function markFontFor(
+  authorFont: string,
+  effectiveFont = ""
+): string {
+  const trimmed = authorFont.trim();
+  if (trimmed !== "") return gappedReplacement(trimmed) ?? trimmed;
+
+  // ここから先は「作者が書体を選んでいない」場合。
+  // **倒す必要が無ければ空文字のまま返す。** 実効の書体名を返してしまうと、
+  // 本文（既定にまかせたまま）と印だけ別の書体になり、0.64.4 で直した
+  // 「そこだけ書体が変わって見える」が戻る
+  const effective = effectiveFont.trim();
+  if (effective === "") return "";
+  return gappedReplacement(effective) ?? "";
 }

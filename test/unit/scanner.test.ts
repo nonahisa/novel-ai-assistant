@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { FileSystemError, FileType, Uri, workspace } from "./support/vscodeStub";
 import { scanWork } from "../../src/core/scanner";
+import {
+  setFileReaderForTests,
+  vscodeFileReaderForTests,
+} from "../../src/core/fileRead";
 import type { WorkEntry } from "../../src/models/types";
 
 const work: WorkEntry = {
@@ -425,5 +429,93 @@ describe("走査の計測をまとめる", () => {
     expect(summary.files).toBe(0);
     expect(summary.totalMs).toBe(0);
     expect(summary.slowestFile).toBeUndefined();
+  });
+});
+
+/**
+ * 走査の下ごしらえも読み口を通す（設計書6.107。0.75.1）。
+ *
+ * ノートの実測（0.75.0）では、本文の読みが46秒→1.1秒に落ちたあとも
+ * **下ごしらえだけで46秒**残っていた。犯人は `pathExists`
+ * （`core/fileSystem.ts`）で、`vscode.workspace.fs.stat` を直に叩くため
+ * **読み口を通らない**。1作品につき1回の往復が16作品ぶん並んでいた。
+ *
+ * ここで見るのは「読み口の `stat` で決めているか」だけである。
+ * 速さそのものは実機でしか測れない。
+ */
+describe("下ごしらえも読み口で読む", () => {
+  /** 既定の本文フォルダー（作品設定が無いときの `workPaths().manuscript`） */
+  const MANUSCRIPT_DIR = `${work.folderPath}\\本文`;
+
+  beforeEach(() => {
+    workspace.getConfiguration = () => ({
+      get: <T>(_key: string, defaultValue: T): T => defaultValue,
+    });
+  });
+
+  /**
+   * 差し込む読み口。**`vscode.workspace.fs` を1回も呼ばない。**
+   *
+   * 呼ばれた場所を記録しておき、下ごしらえがこちらを通ったことを見る。
+   */
+  function fakeReader(manuscript: "directory" | "missing") {
+    const statted: string[] = [];
+    const walked: string[] = [];
+    const reader = {
+      async readFile(filePath: string): Promise<Uint8Array> {
+        // 作品設定（.aiwriter/config.json）は無い状態にする
+        throw new FileSystemError(`${filePath} は無い`, "FileNotFound");
+      },
+      async stat(filePath: string) {
+        statted.push(filePath);
+        if (manuscript === "missing") {
+          throw new FileSystemError("本文フォルダーなし", "FileNotFound");
+        }
+        return { type: "directory" as const, size: 0, mtime: 0 };
+      },
+      async readDirectory(): Promise<Array<[string, "file" | "directory"]>> {
+        return [];
+      },
+      async readTextTree(dirPath: string) {
+        walked.push(dirPath);
+        return [];
+      },
+    };
+    return { reader, statted, walked };
+  }
+
+  test("本文フォルダーがあればそこを読む（読み口の stat で決める）", async () => {
+    const { reader, statted, walked } = fakeReader("directory");
+    const statSpy = vi.fn();
+    workspace.fs = { readFile: vi.fn(), stat: statSpy, readDirectory: vi.fn() };
+    setFileReaderForTests(reader);
+    try {
+      const result = await scanWork(work);
+      expect(result.manuscriptDir).toBe(MANUSCRIPT_DIR);
+      expect(walked).toEqual([MANUSCRIPT_DIR]);
+    } finally {
+      setFileReaderForTests(vscodeFileReaderForTests());
+    }
+
+    // 読み口へ訊いている
+    expect(statted).toEqual([MANUSCRIPT_DIR]);
+    // **`vscode.workspace.fs` は1回も通らない**（ここが46秒の正体だった）
+    expect(statSpy).not.toHaveBeenCalled();
+  });
+
+  test("本文フォルダーが無ければ作品の根を読む", async () => {
+    const { reader, walked } = fakeReader("missing");
+    const statSpy = vi.fn();
+    workspace.fs = { readFile: vi.fn(), stat: statSpy, readDirectory: vi.fn() };
+    setFileReaderForTests(reader);
+    try {
+      const result = await scanWork(work);
+      expect(result.manuscriptDir).toBe(work.folderPath);
+      expect(walked).toEqual([work.folderPath]);
+    } finally {
+      setFileReaderForTests(vscodeFileReaderForTests());
+    }
+
+    expect(statSpy).not.toHaveBeenCalled();
   });
 });

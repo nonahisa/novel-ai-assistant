@@ -507,11 +507,17 @@ body.vertical #compose .ellipsis {
    2026-09-21。0.74.12で直した）。書体を替えて「――」を見たところ、
    **游明朝・ＭＳ 明朝・游ゴシックだけ隙間が出た**——この3つは縦用の
    ダッシュが字送りより短い。字は持っているので、ここを作者の書体のままに
-   していると後ろへ落ちない。倒し先は core/markFont.ts が決める。 */
+   していると後ろへ落ちない。倒し先は core/markFont.ts が決める。
+
+   **字送りを広げない**（作者の実機報告、2026-09-22「――――」が真ん中で
+   切れる）。続くダッシュは**1つの span にまとめて**あるので、ここで
+   letter-spacing が効くと span の中で隙間が開く。テーマや上位の指定が
+   値を持ち込んでも、印の中だけは 0 に留める。 */
 #compose .dash {
   font-family: var(--novelai-mark-font, var(--novelai-font, "Yu Mincho")),
     var(--novelai-font, "Yu Mincho"), "Yu Mincho", "YuMincho",
     "Hiragino Mincho ProN", "MS Mincho", serif;
+  letter-spacing: 0;
 }
 /* **半角数字の縦中横**（作者の依頼、2026-09-12
    「半角数字1、2文字は縦書き時縦中横にしてほしい。3文字以降は現行通り」）。
@@ -2726,14 +2732,25 @@ ruby > rt {
    * 字を揃えるのは、作法チェック（core/writingStyleCheck.ts）の提案を
    * 作者が承認したときだけである。
    *
-   * 三点リーダと同じく、**1文字ずつ包んだ素の span** にする
-   * （composeBuildEllipsis の但し書きがそのまま当てはまる）。
+   * **続くダッシュは、まとめて1つの span へ入れる**（作者の実機報告、
+   * 2026-09-22「『――』は繋がったが『――――』は真ん中に切れ目」）。
+   * 1文字ずつ包んでいたときは、ダッシュ1本ごとに別のインライン箱になり、
+   * **線が繋がるかどうかが「箱の置き場所の丸め」任せ**になっていた。
+   * 字送りに端数があると、箱の左端は累積した端数を丸めた位置に置かれる
+   * ので、端数が半分を越えたところで1ピクセル右へずれる——2本なら境目が
+   * 1つしか無くて出ないが、4本なら真ん中あたりの境目でずれが表に出る。
+   * 1つの span に入れてしまえば**箱の境目が中に無くなる**ので、
+   * 何本並べても同じに見える。
+   *
+   * **かたまりにはしない**（contenteditable も data-src も付けない。
+   * composeBuildEllipsis の但し書きがそのまま当てはまる）。中の字はそのまま
+   * 残すので、直列化すれば元の並びへ戻る。
    */
-  function composeBuildDash(doc, char) {
+  function composeBuildDash(doc, run) {
     const span = doc.createElement("span");
     span.setAttribute("class", "dash");
     // data-src は付けない（三点リーダと同じ。中の文字を拾う経路で元へ戻る）
-    span.appendChild(doc.createTextNode(char));
+    span.appendChild(doc.createTextNode(run));
     return span;
   }
 
@@ -2808,9 +2825,15 @@ ruby > rt {
     if (name === "tcy") return !COMPOSE_TCY_EXACT.test(value);
     if (name === "ellipsis") return value !== "…";
     // ダッシュは2つの文字（U+2014 / U+2015）のどちらでもよい。
-    // 入っていた字はそのまま残す決まりなので、片方へ寄せて判定しない
+    // 入っていた字はそのまま残す決まりなので、片方へ寄せて判定しない。
+    // **続きはまとめて1つの印**なので、長さでは測らない——中身が
+    // ダッシュだけで出来ていれば、何本でも正しい印である
     if (name === "dash") {
-      return value.length !== 1 || DASH_CHARS.indexOf(value) < 0;
+      if (value.length === 0) return true;
+      for (let i = 0; i < value.length; i++) {
+        if (DASH_CHARS.indexOf(value[i]) < 0) return true;
+      }
+      return false;
     }
     return false;
   }
@@ -2846,10 +2869,20 @@ ruby > rt {
       const isDash = DASH_CHARS.indexOf(char) >= 0;
       if (!isEllipsis && !isDash) continue;
       if (i > last) parent.appendChild(doc.createTextNode(value.slice(last, i)));
-      parent.appendChild(
-        isEllipsis ? composeBuildEllipsis(doc) : composeBuildDash(doc, char)
-      );
-      last = i + 1;
+      if (isEllipsis) {
+        parent.appendChild(composeBuildEllipsis(doc));
+        last = i + 1;
+        continue;
+      }
+      // **続くダッシュは1つの印にまとめる**（composeBuildDash の但し書き）。
+      // 三点リーダは1文字ずつのまま——あちらは1em角へ入れて回すので、
+      // まとめると回転の中心がずれる
+      let end = i + 1;
+      while (end < value.length && DASH_CHARS.indexOf(value[end]) >= 0) end++;
+      parent.appendChild(composeBuildDash(doc, value.slice(i, end)));
+      last = end;
+      // 次の回は run の直後から見る（for の i++ と合わせて end になる）
+      i = end - 1;
     }
     if (last < value.length) {
       parent.appendChild(doc.createTextNode(value.slice(last)));
