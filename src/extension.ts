@@ -17,6 +17,7 @@ import {
   ChapterNode,
   MemoFolderNode,
   MemoFileNode,
+  type TreeNode,
 } from "./views/workTree";
 import {
   countChars,
@@ -199,7 +200,10 @@ import {
 } from "./core/gitSyncStatusText";
 import { NullGitSyncMonitor, type GitSyncMonitorLike } from "./features/gitSyncStub";
 import { canRunProcesses } from "./core/runtime";
-import { beginStartupTiming } from "./core/startupTiming";
+import {
+  beginStartupTiming,
+  formatStartupMillis,
+} from "./core/startupTiming";
 import { describeProcessesBlocked } from "./core/processAvailability";
 import { exclusiveLabelOf } from "./core/exclusiveCommands";
 import { beginCommand, endCommand } from "./core/runningCommands";
@@ -434,6 +438,20 @@ import { setTuningStoreRoot } from "./core/modelTuningStore";
 import { formatDayTime } from "./core/timestampedFileName";
 import { notifyDone } from "./views/notify";
 
+/**
+ * **この束を読み終えた時刻**（設計書6.107）。
+ *
+ * ここより上の `import` は、`activate` が呼ばれるより前に**全部**走る
+ * （静的importは呼ばれなくても実行される。実装ルール7）。束の評価に
+ * 何秒もかかっていると、`activate` の中をいくら刻んでも1つも印が
+ * 付かないまま時間が過ぎる。**入口より前は入口からは測れない**ので、
+ * ここで時刻を取っておき、入口で差を取る。
+ *
+ * `Date.now()` ではなく `performance.now()` を使うのは、時計合わせで
+ * 巻き戻ると経過時間が負になるため（`core/startupTiming.ts` と同じ）。
+ */
+const MODULE_LOADED_AT = performance.now();
+
 /** 操作メニューで開いている分類の記憶先 */
 const ACTION_GROUPS_KEY = "novelai.actions.expandedGroups";
 
@@ -532,8 +550,14 @@ export async function activate(
    * 作者の機械ではメニューや作品一覧が出るまでに10秒以上かかるが、
    * 母艦でデータ量を測っても説明がつかない。**当てずっぽうで直さず、
    * 作者の機械で計る。** ここは入口なので、いちばん最初に作る。
+   *
+   * **束の読み込みにかかった時間も渡す。** ここへ来るまでに静的importが
+   * 全部走っており、その時間は入口からの累積には入らない。
    */
-  const startupTiming = beginStartupTiming();
+  const startupTiming = beginStartupTiming(
+    undefined,
+    performance.now() - MODULE_LOADED_AT
+  );
 
   /**
    * いま走っている操作（設計書6.17.4の末尾）。
@@ -740,6 +764,7 @@ export async function activate(
    * 効かないことになる。読むのは小さなJSONひとつである。
    */
   await setTuningStoreRoot(context.globalStorageUri);
+  startupTiming.mark("調整の台帳");
 
   /*
     **左のビューを、素の状態から始める**（作者の報告、2026-09-03
@@ -757,6 +782,7 @@ export async function activate(
   await resetViewVisibility((key, value) =>
     vscode.commands.executeCommand("setContext", key, value)
   );
+  startupTiming.mark("ビューの表示");
 
   const registry = new WorkRegistry(context);
   /*
@@ -764,7 +790,10 @@ export async function activate(
     知らせるのは `features` の仕事なので、`core` の登録簿へは口だけを渡す。
     動的に読むのは、起動の道に載せないため（押されたときに要るものである）。
   */
-  await registry.initialize((works) => {
+  // 開始の印も打つ（設計書6.107）。ここまでが速いのか、ここが遅いのかは、
+  // 前後の2点が無いと切り分けられない
+  startupTiming.mark("登録簿 開始");
+  const registryReport = await registry.initialize((works) => {
     void (async () => {
       try {
         const { noticeUnregisteredWorksSafely } = await import(
@@ -778,7 +807,20 @@ export async function activate(
       }
     })();
   });
-  startupTiming.mark("登録簿");
+  /*
+    **いちばん遅かった作品を添える**（設計書6.107）。登録簿は作品ごとに
+    `stat` と `.gitignore` を回すので、遅い置き場に1件載っているだけで
+    全体が引っ張られる。合計だけでは、16件が一様に遅いのか、1件だけが
+    突出しているのかが読めない。
+  */
+  startupTiming.mark(
+    "登録簿",
+    registryReport.slowestTitle
+      ? `最長 ${registryReport.slowestTitle} ${formatStartupMillis(
+          registryReport.slowestMs
+        )}ms`
+      : undefined
+  );
 
   // GitHub同期の見張り。自動で走るのはfetch（取得のみ）だけで、
   // 取り込み・送信は作者がボタンを押したときにしか実行しない（設計書5.5.1）。
@@ -874,11 +916,53 @@ export async function activate(
     }
   };
 
+  /**
+   * 作品一覧のビュー。**走査中の件数を見出しの右へ出す**ために持つ。
+   *
+   * 作られるのはもう少し下（コマンドの登録のあと）なので、それまでは
+   * `undefined`。**走査が始まるのはビューが作られたあと**なので、
+   * 数が出ないまま終わることはない。
+   */
+  let worksView: vscode.TreeView<TreeNode> | undefined;
+
+  /**
+   * 作品一覧を走査しているあいだ、案内文を差し替える印（設計書6.1.2）。
+   *
+   * **「まだ作品が登録されていません」は、走査中にも出てしまう。**
+   * `getChildren` が返るまでツリーは空で、VS Code は空のツリーに
+   * `viewsWelcome` を出すためである。16作品のノートPCでは34秒のあいだ
+   * それが出ていた（2026-09-21の計測）。登録ボタンが4つ並ぶので、
+   * **作者から見ると作品が消えたのと区別がつかない。**
+   *
+   * **件数は案内文へは入れられない**（`viewsWelcome` の文言は
+   * `package.json` に固定で、差し込みの仕組みが無い）。そこで
+   * ビューの見出しの右（`description`）に出す。
+   */
+  const setWorksLoading = (loading: boolean, count: number): void => {
+    void vscode.commands.executeCommand(
+      "setContext",
+      "novelai.worksLoading",
+      loading
+    );
+    if (worksView) {
+      worksView.description = loading ? `${count}作品を読み込み中` : undefined;
+    }
+  };
+
+  /*
+    **走査が始まる前に印を立てておく。** ビューが作られてから最初の
+    `getChildren` が走るまでのあいだにも案内文は出るので、そこで
+    「登録されていません」を見せない。**0件なら最初から偽**——
+    そのときは従来の案内がそのまま正しい。
+  */
+  setWorksLoading(registry.list().length > 0, registry.list().length);
+
   const treeProvider = new WorkTreeProvider(
     registry,
     (workId) => describeSyncBadge(gitSync.statusFor(workId)),
     (workId) => describeSyncTooltip(gitSync.statusFor(workId)),
-    noteFirstWorkListRender
+    noteFirstWorkListRender,
+    setWorksLoading
   );
   // 同期状態が変わっても本文は変わらないので、再走査はせず描き直すだけにする
   gitSync.onDidChange(() => treeProvider.redraw());
@@ -1288,6 +1372,8 @@ export async function activate(
     treeDataProvider: treeProvider,
     showCollapseAll: true,
   });
+  // 走査中の件数を見出しへ出すために控える（設計書6.1.2）
+  worksView = treeView;
   context.subscriptions.push(treeView);
 
   // 操作の末尾に出す印（「AI」と未反映の件数）。

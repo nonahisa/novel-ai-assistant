@@ -381,11 +381,23 @@ describe("作品設定", () => {
         },
       };
 
+      let report;
       try {
-        await new workRegistry.WorkRegistry(context as never).initialize();
+        report = await new workRegistry.WorkRegistry(
+          context as never
+        ).initialize();
       } finally {
         window.showWarningMessage = previousWarn;
       }
+
+      /*
+        **起動の数字に添える控え**（設計書6.107）。飛ばした作品も
+        数と時間に入れる——繋がっていないドライブでは `stat` ひとつが
+        何秒も返らないことがあり、「無かったから速い」とは限らない。
+      */
+      expect(report.count).toBe(1);
+      expect(report.slowestTitle).toBe("消えた作品");
+      expect(report.slowestMs).toBeGreaterThanOrEqual(0);
 
       // **作り直していないこと。** ここが本題である
       const { access } = await import("node:fs/promises");

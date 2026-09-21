@@ -69,6 +69,68 @@ describe("起動の所要時間", () => {
     expect(timing.report()).toBe("起動の所要時間：登録簿 120ms");
   });
 
+  it("印に注記を添えられる（いちばん遅かった1件を書く）", () => {
+    // 累積だけでは、16件が一様に遅いのか1件が突出しているのかが読めない
+    const timing = beginStartupTiming(fakeClock([0, 17339]));
+    timing.mark("登録簿", "最長 教科書チート 2,100ms");
+
+    expect(timing.report()).toBe(
+      "起動の所要時間：登録簿 17,339ms（最長 教科書チート 2,100ms）"
+    );
+  });
+
+  it("注記が無い印は、これまでどおり括弧を付けない", () => {
+    const timing = beginStartupTiming(fakeClock([0, 120, 340]));
+    timing.mark("調整の台帳");
+    timing.mark("登録簿", "");
+
+    // 空文字を渡しても、括弧だけが残らない
+    expect(timing.report()).toBe(
+      "起動の所要時間：調整の台帳 120ms → 登録簿 340ms"
+    );
+  });
+
+  it("同じ印を2回打ったとき、注記も最初の1回だけ残る", () => {
+    const timing = beginStartupTiming(fakeClock([0, 100, 200]));
+    timing.mark("登録簿", "最長 あ 10ms");
+    timing.mark("登録簿", "最長 い 99ms");
+
+    expect(timing.report()).toBe(
+      "起動の所要時間：登録簿 100ms（最長 あ 10ms）"
+    );
+  });
+
+  it("束の読み込みから入口までを、行の先頭に添える", () => {
+    /*
+      静的importは `activate` より前に全部走る。ここが重いと、
+      入口からの印をいくら刻んでも1つも付かないまま時間が過ぎる
+    */
+    const timing = beginStartupTiming(fakeClock([0, 120, 340]), 4820);
+    timing.mark("調整の台帳");
+    timing.mark("ビューの表示");
+
+    expect(timing.report()).toBe(
+      "起動の所要時間：束の読み込みから入口まで 4,820ms → 調整の台帳 120ms → ビューの表示 340ms"
+    );
+  });
+
+  it("入口までの時間を渡さなければ、これまでどおり印だけを並べる", () => {
+    const timing = beginStartupTiming(fakeClock([0, 120]));
+    timing.mark("調整の台帳");
+
+    expect(timing.report()).toBe("起動の所要時間：調整の台帳 120ms");
+  });
+
+  it("入口までが0msでも、省かずに書く", () => {
+    // 「速かった」と「測っていない」は別のことなので、0でも1項目として残す
+    const timing = beginStartupTiming(fakeClock([0, 120]), 0);
+    timing.mark("調整の台帳");
+
+    expect(timing.report()).toBe(
+      "起動の所要時間：束の読み込みから入口まで 0ms → 調整の台帳 120ms"
+    );
+  });
+
   it("印が1つも無ければ、記録が無いことを書く", () => {
     // 空行を残しても、読んだ人は「書き損ねた」のか「早かった」のか分からない
     const timing = beginStartupTiming(fakeClock([0]));

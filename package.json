@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを引き受けるVSCode拡張機能で、AIは提案するだけで原稿は書き換えません（無料の手元AIだけでも使えます）。※現在テスト中です。",
-  "version": "0.74.3",
+  "version": "0.74.4",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -135,7 +135,13 @@
     "viewsWelcome": [
       {
         "view": "novelai.works",
-        "contents": "まだ作品が登録されていません。\n投稿サイト（カクヨム・なろう・アルファポリス）のバックアップは、そのまま作品にできます。\n[バックアップから作品を取り込む](command:novelai.importWorkFromZip)\n[フォルダから作品を追加](command:novelai.addWork)\n[新規作品を作成](command:novelai.createWork)\n[GitHubから作品を追加](command:novelai.addWorkFromGithub)"
+        "contents": "作品を読み込んでいます…\n（件数は見出しの右に出ます）",
+        "when": "novelai.worksLoading"
+      },
+      {
+        "view": "novelai.works",
+        "contents": "まだ作品が登録されていません。\n投稿サイト（カクヨム・なろう・アルファポリス）のバックアップは、そのまま作品にできます。\n[バックアップから作品を取り込む](command:novelai.importWorkFromZip)\n[フォルダから作品を追加](command:novelai.addWork)\n[新規作品を作成](command:novelai.createWork)\n[GitHubから作品を追加](command:novelai.addWorkFromGithub)",
+        "when": "!novelai.worksLoading"
       }
     ],
     "commands": [

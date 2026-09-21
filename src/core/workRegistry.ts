@@ -22,6 +22,27 @@ import { AI_INSTRUCTION_TARGETS } from "./aiInstructions";
 const STORAGE_KEY = "novelai.works";
 
 /**
+ * `initialize()` が何にどれだけかかったか（設計書6.107）。
+ *
+ * **累積の数字だけでは、登録簿が重い理由が分からない。** 作品ごとに
+ * `stat` と `.gitignore` の読み書きを回しているので、遅い置き場に
+ * 1件だけ載っている作品が全体を引っ張ることがある（ネットワーク
+ * ドライブ・OneDrive の取り寄せ）。**いちばん遅かった1件の題**が
+ * 分かれば、次にどこを見ればよいかがその場で決まる。
+ *
+ * **ここでは何も書き出さない。** `core` は `vscode` の通知にもログにも
+ * 触らず、数字を返すだけにする（印を打つのは `extension.ts` 側）。
+ */
+export interface WorkRegistryInitReport {
+  /** 見た作品の数（登録簿の件数） */
+  readonly count: number;
+  /** いちばん時間のかかった作品にかかったミリ秒。0件なら 0 */
+  readonly slowestMs: number;
+  /** その作品の題。0件なら `undefined` */
+  readonly slowestTitle?: string;
+}
+
+/**
  * 登録済み作品の一覧を保持する。
  * 実体は VSCode の globalState（ワークスペースをまたいで保持される）。
  */
@@ -39,16 +60,25 @@ export class WorkRegistry {
    *   見つかりません」のちょうど裏返しなので隣に置いてあるが、**画面を出すのは
    *   `features` の仕事**なので、`core` から呼ばずに外から渡してもらう
    *   （依存の向きを逆流させない）。
+   * @returns 作品ごとの所要時間の最大とその題（設計書6.107）。
+   *   **戻り値は使わなくてよい**——起動の数字を出さない呼び手は
+   *   これまでどおり `await` するだけでよい。
    */
   async initialize(
     noticeUnregistered?: (works: readonly WorkEntry[]) => void
-  ): Promise<void> {
+  ): Promise<WorkRegistryInitReport> {
     const failedTitles: string[] = [];
     const missingTitles: string[] = [];
+    // いちばん遅かった1件（設計書6.107）。`Date.now()` を使わないのは、
+    // 時計合わせで巻き戻ると経過時間が負になるため
+    let slowestMs = 0;
+    let slowestTitle: string | undefined;
     // キャッシュを同期するかは設定で変えられる。起動のたびに突き合わせ、
     // 切り替えられていれば `.gitignore` へ打ち消し行を足す（設計書5.5.7）
     const syncCache = isCacheSyncEnabled();
-    for (const work of this.list()) {
+    const works = this.list();
+    for (const work of works) {
+      const startedAt = performance.now();
       /*
         **フォルダーが無い作品は、触らずに飛ばす。**
 
@@ -64,15 +94,26 @@ export class WorkRegistry {
         登録簿からは**消さない**。外付けドライブが繋がっていないだけ、
         同期がまだ終わっていないだけ、ということがある。判断は作者に委ねる。
       */
-      if (!(await isDirectory(work.folderPath))) {
+      const present = await isDirectory(work.folderPath);
+      if (!present) {
         missingTitles.push(work.title);
-        continue;
+      } else {
+        try {
+          await ensureRecoveryIgnoreRule(work.folderPath, { syncCache });
+        } catch {
+          // 作品登録や起動を壊さず、次回起動でも同じmigrationを再試行する。
+          failedTitles.push(work.title);
+        }
       }
-      try {
-        await ensureRecoveryIgnoreRule(work.folderPath, { syncCache });
-      } catch {
-        // 作品登録や起動を壊さず、次回起動でも同じmigrationを再試行する。
-        failedTitles.push(work.title);
+      /*
+        **飛ばした作品も測る**（設計書6.107）。繋がっていないドライブや
+        取り寄せ中のクラウドでは、`stat` ひとつが何秒も返らないことがある。
+        「無かったから速い」とは限らない。
+      */
+      const elapsed = performance.now() - startedAt;
+      if (elapsed > slowestMs) {
+        slowestMs = elapsed;
+        slowestTitle = work.title;
       }
     }
     if (missingTitles.length > 0) {
@@ -98,6 +139,8 @@ export class WorkRegistry {
       ので、遅れて出ても困らない
     */
     noticeUnregistered?.(this.list());
+
+    return { count: works.length, slowestMs, slowestTitle };
   }
 
   list(): WorkEntry[] {

@@ -39,6 +39,19 @@ import {
   countModeLabel,
 } from "../core/countSettings";
 
+/**
+ * 作品一覧の走査を同時に走らせる数（設計書6.1.2）。
+ *
+ * **1件ずつだと、待ち時間が作品の数だけ積み上がる。** `scanWork` は
+ * ファイルを1つずつ読むので、作品16件・573ファイルのノートPCでは
+ * 一覧が出るまで17秒かかっていた（2026-09-21の計測）。
+ *
+ * **4にしたのは控えめにするため。** 読み先が OneDrive やネットワーク
+ * ドライブのとき、同時の要求を増やすと相手側で詰まって却って遅くなる。
+ * 増やすかどうかは、この形で測り直してから決める。
+ */
+const SCAN_CONCURRENCY = 4;
+
 export type TreeNode =
   | WorkNode
   | ChapterNode
@@ -195,15 +208,38 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
    *   起動の所要時間を計るために要る（設計書6.107）。**`core` へ
    *   `vscode` を持ち込めない**ので、印を打つのは `extension.ts` 側にし、
    *   ここは「描き終わった」ことだけを知らせる
+   * @param onLoadingChanged 作品の走査を**始めたとき `true`・終えたとき
+   *   `false`** を1回ずつ知らせる（設計書6.1.2）。走査が終わるまで
+   *   `getChildren` は返らず、そのあいだツリーは空なので、VS Code は
+   *   「まだ作品が登録されていません」の案内を出してしまう。**登録済みの
+   *   作品があるのに「登録されていません」と出るのは、作者から見れば
+   *   作品が消えたのと同じ**なので、走査中はそちらを出さないための印
+   *   （`setContext`）を付け外しする。**`views` から `setContext` を
+   *   直接呼ばない**（`onFirstRender` と同じ理由）ので、口だけを渡してもらう。
+   *   第2引数は走査する作品の数（案内に添える）
    */
   constructor(
     private readonly registry: WorkRegistry,
     private readonly syncBadge?: (workId: string) => string | undefined,
     private readonly syncTooltip?: (workId: string) => string[],
-    private readonly onFirstRender?: () => void
+    private readonly onFirstRender?: () => void,
+    private readonly onLoadingChanged?: (
+      loading: boolean,
+      count: number
+    ) => void
   ) {
     registry.onDidChange(() => this.refresh());
   }
+
+  /**
+   * いま走っている作品一覧の走査の数。
+   *
+   * VS Code は描き直しを重ねて `getChildren(undefined)` を**前のものが
+   * 返る前にもう一度**呼ぶことがある。数えずに付け外しすると、
+   * 後から始まったほうが終わった時点で印が落ち、まだ走っている走査の
+   * あいだに「登録されていません」が出てしまう。
+   */
+  private scanningCount = 0;
 
   /**
    * 初回の描画を知らせ終えたか。
@@ -558,51 +594,44 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   async getChildren(node?: TreeNode): Promise<TreeNode[]> {
     if (!node) {
       const works = this.registry.list();
-      const nodes: TreeNode[] = [];
-      for (const w of works) {
-        // **1件の失敗で一覧全体を消さない。**
-        //
-        // 以前はここで `await` した走査が1つでも失敗すると、`getChildren`
-        // ごと失敗し、**登録済みの作品が1件も出ない**（VS Codeは空の
-        // ツリーと見なして「まだ作品が登録されていません」を出す）。
-        // 登録は済んでいるのに何も出ない、という原因の分からない
-        // 見え方になっていた（2026-08-22、作者のブラウザ版で発生）
-        try {
-          const result = await this.load(w);
-          // タイプは右クリックの絞り込みに要る（設計書6.70.1）。
-          // 読み取り自体は `workFormatStore` が作品ごとに覚えているので、
-          // 一覧を描き直すたびにプロットを読み直すことにはならない
-          nodes.push(
-            new WorkNode(w, result.stats, undefined, await this.formatOf(w))
-          );
-        } catch (error) {
-          nodes.push(
-            new WorkNode(
-              w,
-              { fileCount: 0, totals: emptyCounts(), conflictedCount: 0 },
-              error instanceof Error ? error.message : String(error)
-            )
-          );
-        }
-      }
       /*
-        **初回の描画が終わったことを、1回だけ知らせる**（設計書6.107）。
+        **走査のあいだ、案内を「読み込んでいます」に差し替える**（設計書6.1.2）。
 
-        `return` の直前に置く——作品ごとの走査（`load`）が終わって
-        ノードが揃った時点が「作品一覧が出るまで」に当たる。
+        `getChildren` は全作品を読み終えるまで返らず、そのあいだツリーは
+        空なので、VS Code は `viewsWelcome`（「まだ作品が登録されていません」＋
+        登録ボタン4つ）を出す。**16作品の環境では34秒ものあいだ、登録済みの
+        作品があるのに「登録されていません」と出ていた**（2026-09-21、
+        作者のノートPCの計測）。作者から見れば作品が消えたのと同じである。
 
-        **計測のために一覧を壊さない。** 知らせ先が落ちても、
-        起動の数字が1行残らないだけで、作品一覧は出す。
+        **0件なら知らせない。** そのときは従来の案内がそのまま正しい。
       */
-      if (!this.firstRenderNotified) {
-        this.firstRenderNotified = true;
-        try {
-          this.onFirstRender?.();
-        } catch {
-          // 知らせ先（extension.ts）で記録済み。ここでは一覧を優先する
+      const scanning = works.length > 0;
+      if (scanning) this.noteLoading(true, works.length);
+      try {
+        const nodes = await this.scanAll(works);
+        /*
+          **初回の描画が終わったことを、1回だけ知らせる**（設計書6.107）。
+
+          `return` の直前に置く——作品ごとの走査（`load`）が終わって
+          ノードが揃った時点が「作品一覧が出るまで」に当たる。
+
+          **計測のために一覧を壊さない。** 知らせ先が落ちても、
+          起動の数字が1行残らないだけで、作品一覧は出す。
+        */
+        if (!this.firstRenderNotified) {
+          this.firstRenderNotified = true;
+          try {
+            this.onFirstRender?.();
+          } catch {
+            // 知らせ先（extension.ts）で記録済み。ここでは一覧を優先する
+          }
         }
+        return nodes;
+      } finally {
+        // **途中で失敗しても印を落とす。** 落とし忘れると、
+        // 作品が0件になったあとも「読み込んでいます」が出たままになる
+        if (scanning) this.noteLoading(false, works.length);
       }
-      return nodes;
     }
 
     if (node.type === "work") {
@@ -819,6 +848,92 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     if (!byKey) return undefined;
     // 合本は1ファイルに複数話が入るので、話数だけでは引けない
     return byKey.get(synopsisKey(episode.fileName, episode.chapterStart));
+  }
+
+  /**
+   * 走査中であることを外へ知らせる（設計書6.1.2）。
+   *
+   * **走っている数を数える。** 描き直しが重なると `getChildren(undefined)`
+   * は前のものが返る前にもう一度呼ばれる。数えずに付け外しすると、
+   * あとから始まったほうが終わった時点で印が落ちてしまう。
+   *
+   * **知らせ先が落ちても一覧は出す**（`onFirstRender` と同じ扱い）。
+   * 案内文が切り替わらないだけで、作品は並ぶ。
+   */
+  private noteLoading(loading: boolean, count: number): void {
+    const before = this.scanningCount;
+    this.scanningCount = Math.max(0, before + (loading ? 1 : -1));
+    // 0↔1 をまたいだときだけ知らせる（true→false が1回ずつになる）
+    if ((before === 0) === (this.scanningCount === 0)) return;
+    try {
+      this.onLoadingChanged?.(this.scanningCount > 0, count);
+    } catch {
+      // 知らせ先（extension.ts）で記録済み。ここでは一覧を優先する
+    }
+  }
+
+  /**
+   * 作品一覧の走査を**同時に4つまで**でまとめて行う（設計書6.1.2）。
+   *
+   * 以前は作品を1件ずつ順番に `await` していた。`scanWork` は
+   * `vscode.workspace.fs` でファイルを1つずつ読むので、**待ち時間が
+   * 作品の数だけ積み上がる**——作者のノートPC（16作品・573ファイル）では
+   * 一覧が出るまで **17秒** かかっていた（2026-09-21の計測）。
+   *
+   * **並びは登録簿の順のまま返す。** 先に終わった作品から詰めると、
+   * 一覧の並びが起動のたびに変わってしまう。
+   *
+   * **同時に走らせる数は4**。多くすれば速くなるとは限らない——読み先が
+   * OneDrive やネットワークドライブのとき、要求を増やすと相手側で
+   * 詰まる。**走査そのもの（`core/scanner.ts`）は触っていない**ので、
+   * 増やすかどうかは次の計測を見てから決める。
+   */
+  private async scanAll(works: readonly WorkEntry[]): Promise<TreeNode[]> {
+    const nodes: TreeNode[] = new Array<TreeNode>(works.length);
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const index = next++;
+        if (index >= works.length) return;
+        const w = works[index];
+        /*
+          **1件の失敗で一覧全体を消さない。**
+
+          以前はここで `await` した走査が1つでも失敗すると、`getChildren`
+          ごと失敗し、**登録済みの作品が1件も出ない**（VS Codeは空の
+          ツリーと見なして「まだ作品が登録されていません」を出す）。
+          登録は済んでいるのに何も出ない、という原因の分からない
+          見え方になっていた（2026-08-22、作者のブラウザ版で発生）。
+
+          **並列にしても同じ。** `Promise.all` は1件の拒否で全体を捨てる
+          ので、失敗はここで受け止めてノードに変える。
+        */
+        try {
+          const result = await this.load(w);
+          // タイプは右クリックの絞り込みに要る（設計書6.70.1）。
+          // 読み取り自体は `workFormatStore` が作品ごとに覚えているので、
+          // 一覧を描き直すたびにプロットを読み直すことにはならない
+          nodes[index] = new WorkNode(
+            w,
+            result.stats,
+            undefined,
+            await this.formatOf(w)
+          );
+        } catch (error) {
+          nodes[index] = new WorkNode(
+            w,
+            { fileCount: 0, totals: emptyCounts(), conflictedCount: 0 },
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(SCAN_CONCURRENCY, works.length) }, () =>
+        worker()
+      )
+    );
+    return nodes;
   }
 
   private async load(work: WorkEntry) {
