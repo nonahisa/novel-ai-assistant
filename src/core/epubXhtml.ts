@@ -4,6 +4,7 @@ import {
   type NotationMode,
 } from "./manuscriptRender";
 import { stripMemoLines } from "./sceneMemo";
+import { TCY_RUN_PATTERN } from "./tateChuYoko";
 
 /**
  * 話1つぶんの XHTML を組む（設計書6.65.4の第1段。挿絵とページ分割は6.65.10）。
@@ -99,13 +100,12 @@ const FORBIDDEN_CONTROL_CHARS = buildForbiddenControlChars();
  * **原稿エディタの規則（`tateChuYoko.ts` の `TCY_RUN_PATTERN`）に揃えてある**
  * （作者の裁定、2026-09-21「EPUB も揃える」）：英字も立てる／**直前・直後が
  * 半角文字なら立てない**（`A-13`・`No.1`・`&amp;` の中の `amp` は寝たまま）。
- * 違うのは「!」「?」も立てる点だけ。写しを置きたくないが、EPUB は「!?」を
- * 含めるので同じ文字列にはならない——**文字の組だけが違う**ことを、
- * `epubXhtml.test.ts` の「原稿エディタの規則と同じ並びで寝る」で見張る。
+ * 「!」「?」も原稿エディタが立てるようになった（作者の報告、2026-09-21）ので、
+ * **規則の文字列は `TCY_RUN_PATTERN` をそのまま使う**（写しを置かない）。
  */
 export function applyTateChuYoko(escaped: string): string {
   return escaped.replace(
-    /(?<![!-~｡-ﾟ])[0-9A-Za-z!?]{1,2}(?![!-~｡-ﾟ])/g,
+    new RegExp(TCY_RUN_PATTERN, "g"),
     (run: string, offset: number, whole: string) => {
       if (run.length > 2) return run;
       const before = offset > 0 ? whole[offset - 1] : "";
