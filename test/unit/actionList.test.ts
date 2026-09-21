@@ -1226,6 +1226,24 @@ describe("相談の項目は、木に残して画面から隠す", () => {
     expect(chooseWork, "相談する作品を選ぶが見当たらない").toBeTruthy();
     expect(chooseWork?.hiddenFromActionList).toBeFalsy();
   });
+
+  /**
+   * 「作者／編集者を切り替える」は `novelai.mode` の設定から切り替える運用にした
+   * （作者の指示、2026-08-31）。詳細メニューに項目があると二重の入口になるので
+   * 隠すが、**コマンドは残す**（簡単ステップメニューの「編集部校正・校閲」が
+   * このコマンドIDを参照している）。
+   */
+  test("「作者／編集者を切り替える」は、木に残したまま画面から隠す", () => {
+    const action = allActions().find(
+      (entry) => entry.command === "novelai.switchMode"
+    );
+
+    expect(action, "木から消すと簡単ステップメニューが壊れる").toBeTruthy();
+    expect(action?.hiddenFromActionList).toBe(true);
+    expect(isItemShownInActionList(action!, true)).toBe(false);
+    // 隠すのは画面だけ。動く環境かどうかの判定には混ぜない
+    expect(isItemVisibleInRuntime(action!, true)).toBe(true);
+  });
 });
 
 /**
