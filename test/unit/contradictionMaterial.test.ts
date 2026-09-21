@@ -6,6 +6,7 @@ import {
   describeMissedCharacters,
   mergeMissedCharactersByEpisode,
   promptVersionWithCarryOver,
+  CARRY_OVER_DEFAULT_CHAPTERS,
   CARRY_OVER_MAX_CHAPTERS,
 } from "../../src/core/contradictionMaterial";
 import {
@@ -343,8 +344,9 @@ describe("過去の場面を引く語（設計書6.74）", () => {
   作者の219話で44話（20%）がこの形だった。落ちた44話のうち33話は直前の話に
   載っていたので、**前の話の本文も一緒に索引へかければ拾える**見込みがある。
 
-  **これは測るための口である。** 既定（引き継がない）の動きは1文字も
-  変わらないことを、ここで見張る。
+  **測ってから、0.73.3 で既定にした**（作者の裁定）。ただし既定を決めるのは
+  呼ぶ側（`features` と MCP）で、**ここは渡されたものだけを見る**——引き継ぐ
+  本文を渡さなければ、これまでと1文字も変わらないことをここで見張る。
 */
 describe("前の話に出た人物を引き継ぐ（設計書6.10.6）", () => {
   const haruto = person({
@@ -356,7 +358,7 @@ describe("前の話に出た人物を引き継ぐ（設計書6.10.6）", () => {
   /** 一人称の地の文だけの話。**主人公の名前が1度も出ない** */
   const narration = "俺は左の足首をかばいながら、坂を下りた。";
 
-  test("既定（引き継がない）では、これまでと1文字も変わらない", () => {
+  test("引き継ぐ本文を渡さなければ、これまでと1文字も変わらない", () => {
     const built = material({ people: [haruto] });
 
     const before = built.relevantFor(narration, 4);
@@ -476,6 +478,19 @@ describe("引き継ぐ本文の選び方（`carryOverBodyText`）", () => {
     expect(CARRY_OVER_MAX_CHAPTERS).toBe(5);
   });
 
+  /*
+    **既定は2話ぶん**（0.73.3、作者の裁定）。作者の219話で実測した唯一の値で、
+    効果（主人公が載るチャンク 80%→99%）も代償（プロンプト＋16%）も
+    副作用（罠4件の台で誤検出0）も、2話ぶんで測ってある。**測っていない値を
+    既定にしない**（6.102「測ってから言う」）。
+  */
+  test("既定は2話ぶん引き継ぐ", () => {
+    expect(CARRY_OVER_DEFAULT_CHAPTERS).toBe(2);
+    expect(CARRY_OVER_DEFAULT_CHAPTERS).toBeLessThanOrEqual(
+      CARRY_OVER_MAX_CHAPTERS
+    );
+  });
+
   test("知らない値（NaN・Infinity）でも落ちない", () => {
     expect(
       carryOverBodyText({ bodies, chapter: 4, chapters: Number.NaN }).text
@@ -564,6 +579,12 @@ describe("引き継ぎをキャッシュの鍵へ混ぜる", () => {
   材料に載るのは本文に名前が出た人物だけなので、一人称で語る話では主人公が
   落ちる。**穴は塞がない。塞がずに、落としたことを言うだけ**である——
   `characters` も `hasAnything` も、ここでは1文字も変わらない。
+
+  **誰を「落とした」と呼ぶかは、登場話数の記録で決める**（0.73.3）。もとは
+  「直前の1話に名前が出ているのに載らなかった人」だけを挙げていたが、
+  引き継ぎ（`carryOver`）が既定になると**その人は必ず材料へ載る**ので、
+  その手がかりだけでは二度と何も言わなくなる。**引き継ぎで塞ぎきれずに
+  残った話を言う**のがこの断りの役目なので、手がかりを登場話数へ広げた。
 */
 describe("落とした人物を数える（設計書6.10.6）", () => {
   const haruto = person({
@@ -600,7 +621,9 @@ describe("落とした人物を数える（設計書6.10.6）", () => {
     );
 
     expect(relevant.characters).toBe(describeCharacter(haruto, []));
-    expect(relevant.missedCharacters).toEqual([]);
+    // 名前が出た主人公は落ちていない。**同じ話に居るはずの如月は落ちている**
+    // ——本文にも直前の話にも名前が無いので、断りに出るのが正しい
+    expect(relevant.missedCharacters).toEqual(["如月 玲"]);
   });
 
   /*
@@ -643,13 +666,92 @@ describe("落とした人物を数える（設計書6.10.6）", () => {
     expect(relevant.missedCharacters).toEqual([]);
   });
 
-  test("直前の話を渡さなければ、何も言わない（既定の呼び方）", () => {
-    const relevant = material({ people: [haruto] }).relevantFor(
+  /*
+    **登場話数の記録は、直前の話の本文より確かな手がかりである。**
+    設定資料の抽出は本文を読んで「誰が出たか」を記録するので、名前が
+    出ていない回の主人公も拾えている——材料の絞り込み（名前の索引）とは
+    別の目で見た記録なので、**索引が落とした人をここで捕まえられる。**
+  */
+  test("登場話数にこの話がある人物は、直前の話を渡さなくても数える", () => {
+    const relevant = material({ people: [haruto, rei] }).relevantFor(
       "俺は窓口の椅子に座っていた。",
       4
     );
 
+    // 材料は1文字も変わらない（塞がずに、言うだけ）
+    expect(relevant.characters).toBe("");
+    expect(relevant.missedCharacters).toEqual(["相沢 春人", "如月 玲"]);
+  });
+
+  test("登場話数にこの話が無ければ、何も言わない", () => {
+    // その話に居ない人まで並べると、40人いる作品では毎回37人が並ぶ
+    const away = person({
+      id: "char_004",
+      name: "蓬田 吾一",
+      role: "局長",
+      chapters: [1, 2, 3],
+    });
+
+    expect(
+      material({ people: [away] }).relevantFor("俺は窓口の椅子に座っていた。", 4)
+        .missedCharacters
+    ).toEqual([]);
+  });
+
+  /*
+    **記録が無ければ黙る側へ倒す**（`hasAppearedBy` とは逆向きである）。
+    材料へ載せるかどうかは「分からないなら落とさない」でよいが、
+    断りは「分からないなら言わない」——登場話数を持たない古い資料の作品で
+    全員が毎回並ぶと、この断りは読まれなくなる。
+  */
+  test("登場話数の記録が無い人物は、何も言わない", () => {
+    const unknown = person({ id: "char_005", name: "月島 灯", role: "客" });
+
+    expect(
+      material({ people: [unknown] }).relevantFor(
+        "俺は窓口の椅子に座っていた。",
+        4
+      ).missedCharacters
+    ).toEqual([]);
+  });
+
+  test("話数の読めないチャンクでは、何も言わない", () => {
+    // どの話の一部かを決められないので、「この話に居るはず」も決められない
+    expect(
+      material({ people: [haruto] }).relevantFor(
+        "俺は窓口の椅子に座っていた。",
+        null
+      ).missedCharacters
+    ).toEqual([]);
+  });
+
+  /*
+    **引き継ぎで塞いだ回では、やはり黙る。** 「穴を塞いだ」と「落としたと
+    言う」が二重に出ないことを、登場話数の側でも見張る。
+  */
+  test("引き継ぎで載った人物は、登場話数にあっても言わない", () => {
+    const relevant = material({ people: [haruto] }).relevantFor(
+      "俺は窓口の椅子に座っていた。",
+      4,
+      { carryOverText: "相沢は坂を下りた。" }
+    );
+
+    expect(relevant.characters).toBe(describeCharacter(haruto, []));
     expect(relevant.missedCharacters).toEqual([]);
+  });
+
+  test("直前の話を渡さず、登場話数にも無ければ、何も言わない", () => {
+    const other = person({
+      id: "char_006",
+      name: "黒瀬 澪",
+      role: "転校生",
+      chapters: [1, 2],
+    });
+
+    expect(
+      material({ people: [other] }).relevantFor("俺は窓口の椅子に座っていた。", 4)
+        .missedCharacters
+    ).toEqual([]);
   });
 });
 

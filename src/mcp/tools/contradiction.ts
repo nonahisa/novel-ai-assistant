@@ -19,6 +19,7 @@ import {
   buildContradictionTermIndex,
   carryOverBodyText,
   createContradictionMaterial,
+  CARRY_OVER_DEFAULT_CHAPTERS,
   CARRY_OVER_MAX_CHAPTERS,
   type CarryOverResult,
   type ContradictionMaterial,
@@ -194,8 +195,12 @@ function categoriesOf(
 /**
  * 前の話を何話ぶん引き継ぐか（設計書6.10.6）。
  *
- * **既定は0＝いままでどおり引き継がない。** これは**測るための口**で、
- * 効くと分かってから既定を決める（6.102「測ってから言う」）。
+ * **既定は製品と同じ2話**（`CARRY_OVER_DEFAULT_CHAPTERS`。0.73.3）。
+ * 0.70.5 では0＝引き継がないだったが、測ってから作者が既定にした
+ * （6.102「測ってから言う」）。**MCP の既定を製品と揃えておかないと、
+ * `novel.prompt` で覗いたものと画面が実際に送るものが別物になる**
+ * ——外部AIに「製品と同じ経路で測る」と言えなくなる。引き継がない動きは
+ * `carryOver: 0` と明示して指す。
  *
  * **文字列でも受ける。** 測定の台本（`scripts/measure.mjs`）は
  * `--option carryOver=2` の値を**文字列のまま**渡す——数だけを受けると、
@@ -205,7 +210,7 @@ function categoriesOf(
  * 打ち間違いに気づかないまま「その話数で測った」記録が残る。
  */
 function carryOverOf(choice: number | string | undefined): number {
-  if (choice === undefined) return 0;
+  if (choice === undefined) return CARRY_OVER_DEFAULT_CHAPTERS;
   const value = typeof choice === "number" ? choice : Number(String(choice).trim());
   if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
     throw new McpToolError(

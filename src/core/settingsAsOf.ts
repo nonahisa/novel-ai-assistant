@@ -78,6 +78,29 @@ export function hasAppearedBy(
   return Math.min(...known) <= chapter;
 }
 
+/**
+ * その記録は、**まさに第N話に登場する**と記録されているか
+ * （設計書6.10.6「落としたことを言う」）。
+ *
+ * **`hasAppearedBy` とは向きが逆である。** あちらは「この話までに出て
+ * いるか」＝突き合わせる相手になりうるか、こちらは「この話に居るはずか」
+ * ＝載らなかったときに断るべきか、を見る。
+ *
+ * **記録が無ければ `false`（黙る側へ倒す）。** `hasAppearedBy` が空を
+ * 通すのは「作者の書いたものを消さない」ためだが、断りの方は逆で、
+ * 登場話数を持たない古い資料の作品で**全員が毎回並ぶ**と読まれなくなる。
+ *
+ * **話数が読めないとき（`null`）も `false`。** どの話の一部かを決められ
+ * ないものに「この話に居るはず」は言えない。
+ */
+export function appearsIn(
+  appearedChapters: readonly number[],
+  chapter: number | null
+): boolean {
+  if (chapter === null) return false;
+  return appearedChapters.some((at) => Number.isFinite(at) && at === chapter);
+}
+
 /** 巻き戻しの対象にする項目 */
 export type AsOfField = string;
 

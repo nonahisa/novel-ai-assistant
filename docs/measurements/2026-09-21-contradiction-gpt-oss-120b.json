@@ -1,0 +1,927 @@
+{
+  "measuredAt": "2026-09-21T05:35:12.769Z",
+  "feature": "contradiction",
+  "runner": "sakura",
+  "tool": "novel.prompt → novel.validate",
+  "model": "gpt-oss-120b",
+  "numCtx": 32768,
+  "numCtxDecision": {
+    "numCtx": 32768,
+    "source": "本文の切り方（クラウドへ num_ctx は送りません）"
+  },
+  "temperature": 0,
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": null,
+  "warmup": null,
+  "endpoint": "https://api.ai.sakura.ad.jp/v1/chat/completions",
+  "options": {},
+  "repeat": 3,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.73.1",
+    "stale": true,
+    "reason": "束は 0.73.1、リポジトリは 0.73.2",
+    "staleDuringRun": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+  },
+  "promptVersion": "1.6",
+  "verifyPromptVersion": null,
+  "plans": [
+    {
+      "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+      "chars": 1235,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\002_十月三日の坂.txt#2-0@8027",
+      "chars": 1218,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\003_窓口の椅子.txt#3-0@8027",
+      "chars": 1211,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+      "chars": 1249,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\005_初雪の窓口.txt#5-0@8027",
+      "chars": 1268,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\contradiction-four",
+    "targets": [
+      "本文\\001_九月の終わりの坂.txt",
+      "本文\\002_十月三日の坂.txt",
+      "本文\\003_窓口の椅子.txt",
+      "本文\\004_ギプスが外れた日.txt",
+      "本文\\005_初雪の窓口.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-assistant\\test\\fixtures\\seeded\\contradiction-four\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 88104,
+      "temperature": 0,
+      "staleNote": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください",
+      "metrics": {
+        "seededContradictions": 6,
+        "seededContradictionsTotal": 6,
+        "missedContradictions": 0,
+        "falseFlagsContradiction": 1,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 1,
+        "accepted": 8,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 88104
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "seededContradictions": {
+          "人物": {
+            "found": 3,
+            "total": 3
+          },
+          "状態": {
+            "found": 1,
+            "total": 1
+          },
+          "時系列": {
+            "found": 2,
+            "total": 2
+          }
+        },
+        "missedContradictions": [],
+        "falseFlagsContradiction": {
+          "本文/005_初雪の窓口.txt": 1
+        }
+      },
+      "raw": [
+        {
+          "target": "本文\\001_九月の終わりの坂.txt",
+          "chunks": [
+            {
+              "target": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+              "aiText": "{\n  \"contradictions\": []\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 3115,
+                "total_tokens": 7216,
+                "completion_tokens": 4101,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": [],
+                "bundleStale": true,
+                "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\002_十月三日の坂.txt",
+          "chunks": [
+            {
+              "target": "本文\\002_十月三日の坂.txt#2-0@8027",
+              "aiText": "{\n  \"contradictions\": [\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"low\",\n      \"excerpt\": \"「蓬田さん、相沢くんはどうしたって聞いてた」\",\n      \"line\": 46,\n      \"note\": \"名前が言及されているが、実際に姿が描写されていないため、登場とみなすかは解釈次第。意図的に言及だけで登場扱いしない可能性もある。\",\n      \"settingSays\": \"設定では蓬田は第1、3〜5話に登場するとされている。\",\n      \"severity\": \"low\",\n      \"textSays\": \"本文第2話の46行で蓬田さんが言及され、実質的に登場している。\"\n    }\n  ]\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 3056,
+                "total_tokens": 9628,
+                "completion_tokens": 6572,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\002_十月三日の坂.txt#2-0@8027",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "line": 46,
+                    "excerpt": "「蓬田さん、相沢くんはどうしたって聞いてた」",
+                    "category": "人物",
+                    "settingSays": "設定では蓬田は第1、3〜5話に登場するとされている。",
+                    "textSays": "本文第2話の46行で蓬田さんが言及され、実質的に登場している。",
+                    "note": "名前が言及されているが、実際に姿が描写されていないため、登場とみなすかは解釈次第。意図的に言及だけで登場扱いしない可能性もある。",
+                    "severity": "low",
+                    "confidence": "low",
+                    "filePath": "本文\\002_十月三日の坂.txt",
+                    "chunkHash": "5312595c9a7fbd6b5e5b5c7e98c1535bf1ff84854c2927d86df29fc2f5c7ee41"
+                  }
+                ],
+                "rejected": [],
+                "bundleStale": true,
+                "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\003_窓口の椅子.txt",
+          "chunks": [
+            {
+              "target": "本文\\003_窓口の椅子.txt#3-0@8027",
+              "aiText": "{\n  \"contradictions\": [\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"medium\",\n      \"excerpt\": \"僕は判子を押す手を止めた。\",\n      \"line\": 39,\n      \"note\": \"設定上は一人称は「俺」と定義されているが、本文では「僕」が使用されている。意図的な口調変化の可能性もある。\",\n      \"settingSays\": \"設定では相沢春人の一人称は「俺」とされている。\",\n      \"severity\": \"low\",\n      \"textSays\": \"本文では相沢春人が「僕」を一人称として使用している。\"\n    }\n  ]\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 3195,
+                "total_tokens": 8003,
+                "completion_tokens": 4808,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\003_窓口の椅子.txt#3-0@8027",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 39,
+                    "excerpt": "僕は判子を押す手を止めた。",
+                    "category": "人物",
+                    "settingSays": "設定では相沢春人の一人称は「俺」とされている。",
+                    "textSays": "本文では相沢春人が「僕」を一人称として使用している。",
+                    "note": "設定上は一人称は「俺」と定義されているが、本文では「僕」が使用されている。意図的な口調変化の可能性もある。",
+                    "severity": "low",
+                    "confidence": "medium",
+                    "filePath": "本文\\003_窓口の椅子.txt",
+                    "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                  }
+                ],
+                "rejected": [],
+                "bundleStale": true,
+                "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\004_ギプスが外れた日.txt",
+          "chunks": [
+            {
+              "target": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+              "aiText": "{\n  \"contradictions\": [\n    {\n      \"category\": \"状態\",\n      \"confidence\": \"medium\",\n      \"excerpt\": \"右足のギプスが外れたのは、十一月の最初の月曜だった。\",\n      \"line\": 1,\n      \"note\": \"意図的に別の足を負傷した可能性はあるが、前話（第2話）で左足の足首を骨折し、ギプスは左足に装着されたと明示されているため、矛盾の可能性が高い。\",\n      \"settingSays\": \"第2話では左足の足首を骨折し、ギプスは左足に装着されたとされている。\",\n      \"severity\": \"high\",\n      \"textSays\": \"本文では右足のギプスが外れたと記述されている。\"\n    }\n  ]\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 3359,
+                "total_tokens": 7124,
+                "completion_tokens": 3765,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+                "chapterLabel": "第4話",
+                "accepted": [
+                  {
+                    "line": 1,
+                    "excerpt": "右足のギプスが外れたのは、十一月の最初の月曜だった。",
+                    "category": "状態",
+                    "settingSays": "第2話では左足の足首を骨折し、ギプスは左足に装着されたとされている。",
+                    "textSays": "本文では右足のギプスが外れたと記述されている。",
+                    "note": "意図的に別の足を負傷した可能性はあるが、前話（第2話）で左足の足首を骨折し、ギプスは左足に装着されたと明示されているため、矛盾の可能性が高い。",
+                    "severity": "high",
+                    "confidence": "medium",
+                    "filePath": "本文\\004_ギプスが外れた日.txt",
+                    "chunkHash": "0887666d7471eac41e81f35ad8069b22c48b36bd26f8dcf30ac044134b32fef7"
+                  }
+                ],
+                "rejected": [],
+                "bundleStale": true,
+                "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\005_初雪の窓口.txt",
+          "chunks": [
+            {
+              "target": "本文\\005_初雪の窓口.txt#5-0@8027",
+              "aiText": "{\n  \"contradictions\": [\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"左目の下のほくろが、鏡の中で滲んだ。\",\n      \"line\": 7,\n      \"note\": \"\",\n      \"settingSays\": \"右目の下に小さなほくろがある。\",\n      \"severity\": \"high\",\n      \"textSays\": \"左目の下にほくろがある。\"\n    },\n    {\n      \"category\": \"時系列\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"足を折ってから、ちょうど二週間が過ぎた。\",\n      \"line\": 11,\n      \"note\": \"\",\n      \"settingSays\": \"足を折ったのは10月3日。第5話は12月8日で、約2か月が経過している。\",\n      \"severity\": \"high\",\n      \"textSays\": \"足を折ってから二週間が過ぎたと述べている。\"\n    },\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"low\",\n      \"excerpt\": \"客の顔を、まっすぐ見ていた。\",\n      \"line\": 28,\n      \"note\": \"成長により目を合わせられるようになった可能性がある。\",\n      \"settingSays\": \"人見知りで、窓口に立つと客と目を合わせられない。\",\n      \"severity\": \"medium\",\n      \"textSays\": \"客の顔をまっすぐ見ていた。\"\n    },\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"腰まで届く長い髪が、動きに合わせて\",\n      \"line\": 37,\n      \"note\": \"\",\n      \"settingSays\": \"髪は肩で切りそろえている。\",\n      \"severity\": \"high\",\n      \"textSays\": \"腰まで届く長い髪が描写されている。\"\n    },\n    {\n      \"category\": \"時系列\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"坂の下のどこかで、蝉がまだ鳴いていた。\",\n      \"line\": 65,\n      \"note\": \"\",\n      \"settingSays\": \"物語は9月末から12月初めまでで、冬季。蝉は夏の虫である。\",\n      \"severity\": \"high\",\n      \"textSays\": \"冬の12月に蝉が鳴いていると記述されている。\"\n    }\n  ]\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 3511,
+                "total_tokens": 7331,
+                "completion_tokens": 3820,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\005_初雪の窓口.txt#5-0@8027",
+                "chapterLabel": "第5話",
+                "accepted": [
+                  {
+                    "line": 7,
+                    "excerpt": "左目の下のほくろが、鏡の中で滲んだ。",
+                    "category": "人物",
+                    "settingSays": "右目の下に小さなほくろがある。",
+                    "textSays": "左目の下にほくろがある。",
+                    "note": "",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "db6f4fbb98be44af106328b8664a50e926f3eeaed379a9677df7e547d5f206e0"
+                  },
+                  {
+                    "line": 11,
+                    "excerpt": "足を折ってから、ちょうど二週間が過ぎた。",
+                    "category": "時系列",
+                    "settingSays": "足を折ったのは10月3日。第5話は12月8日で、約2か月が経過している。",
+                    "textSays": "足を折ってから二週間が過ぎたと述べている。",
+                    "note": "",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "db6f4fbb98be44af106328b8664a50e926f3eeaed379a9677df7e547d5f206e0"
+                  },
+                  {
+                    "line": 28,
+                    "excerpt": "客の顔を、まっすぐ見ていた。",
+                    "category": "人物",
+                    "settingSays": "人見知りで、窓口に立つと客と目を合わせられない。",
+                    "textSays": "客の顔をまっすぐ見ていた。",
+                    "note": "成長により目を合わせられるようになった可能性がある。",
+                    "severity": "medium",
+                    "confidence": "low",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "db6f4fbb98be44af106328b8664a50e926f3eeaed379a9677df7e547d5f206e0"
+                  },
+                  {
+                    "line": 37,
+                    "excerpt": "腰まで届く長い髪が、動きに合わせて",
+                    "category": "人物",
+                    "settingSays": "髪は肩で切りそろえている。",
+                    "textSays": "腰まで届く長い髪が描写されている。",
+                    "note": "",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "db6f4fbb98be44af106328b8664a50e926f3eeaed379a9677df7e547d5f206e0"
+                  },
+                  {
+                    "line": 65,
+                    "excerpt": "坂の下のどこかで、蝉がまだ鳴いていた。",
+                    "category": "時系列",
+                    "settingSays": "物語は9月末から12月初めまでで、冬季。蝉は夏の虫である。",
+                    "textSays": "冬の12月に蝉が鳴いていると記述されている。",
+                    "note": "",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "db6f4fbb98be44af106328b8664a50e926f3eeaed379a9677df7e547d5f206e0"
+                  }
+                ],
+                "rejected": [],
+                "bundleStale": true,
+                "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "elapsedMs": 74534,
+      "temperature": 0,
+      "staleNote": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください",
+      "metrics": {
+        "seededContradictions": 5,
+        "seededContradictionsTotal": 6,
+        "missedContradictions": 1,
+        "falseFlagsContradiction": 1,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 0,
+        "accepted": 6,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 74534
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "seededContradictions": {
+          "人物": {
+            "found": 2,
+            "total": 3
+          },
+          "状態": {
+            "found": 1,
+            "total": 1
+          },
+          "時系列": {
+            "found": 2,
+            "total": 2
+          }
+        },
+        "missedContradictions": [
+          {
+            "file": "本文/003_窓口の椅子.txt",
+            "kind": "人物",
+            "where": "僕は判子を押す手を止めた"
+          }
+        ],
+        "falseFlagsContradiction": {
+          "本文/005_初雪の窓口.txt": 1
+        }
+      },
+      "raw": [
+        {
+          "target": "本文\\001_九月の終わりの坂.txt",
+          "chunks": [
+            {
+              "target": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+              "aiText": "{\n  \"contradictions\": []\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 3115,
+                "total_tokens": 5827,
+                "completion_tokens": 2712,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": [],
+                "bundleStale": true,
+                "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\002_十月三日の坂.txt",
+          "chunks": [
+            {
+              "target": "本文\\002_十月三日の坂.txt#2-0@8027",
+              "aiText": "{\n  \"contradictions\": []\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 3056,
+                "total_tokens": 7847,
+                "completion_tokens": 4791,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\002_十月三日の坂.txt#2-0@8027",
+                "chapterLabel": "第2話",
+                "accepted": [],
+                "rejected": [],
+                "bundleStale": true,
+                "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\003_窓口の椅子.txt",
+          "chunks": [
+            {
+              "target": "本文\\003_窓口の椅子.txt#3-0@8027",
+              "aiText": "{\n  \"contradictions\": []\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 3195,
+                "total_tokens": 8380,
+                "completion_tokens": 5185,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\003_窓口の椅子.txt#3-0@8027",
+                "chapterLabel": "第3話",
+                "accepted": [],
+                "rejected": [],
+                "bundleStale": true,
+                "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\004_ギプスが外れた日.txt",
+          "chunks": [
+            {
+              "target": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+              "aiText": "{\n  \"contradictions\": [\n    {\n      \"category\": \"状態\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"右足のギプスが外れたのは、十一月の最初の月曜だった。\",\n      \"line\": 1,\n      \"note\": \"設定側の誤り、または本文の記述ミスの可能性があるが、意図的な変化とは考えにくい。\",\n      \"settingSays\": \"第2話の設定では、春人は左足首を骨折し、左足にギプスを装着している。\",\n      \"severity\": \"high\",\n      \"textSays\": \"本文では、右足のギプスが外れたと記述されている。\"\n    }\n  ]\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 3359,
+                "total_tokens": 6803,
+                "completion_tokens": 3444,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+                "chapterLabel": "第4話",
+                "accepted": [
+                  {
+                    "line": 1,
+                    "excerpt": "右足のギプスが外れたのは、十一月の最初の月曜だった。",
+                    "category": "状態",
+                    "settingSays": "第2話の設定では、春人は左足首を骨折し、左足にギプスを装着している。",
+                    "textSays": "本文では、右足のギプスが外れたと記述されている。",
+                    "note": "設定側の誤り、または本文の記述ミスの可能性があるが、意図的な変化とは考えにくい。",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\004_ギプスが外れた日.txt",
+                    "chunkHash": "0887666d7471eac41e81f35ad8069b22c48b36bd26f8dcf30ac044134b32fef7"
+                  }
+                ],
+                "rejected": [],
+                "bundleStale": true,
+                "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\005_初雪の窓口.txt",
+          "chunks": [
+            {
+              "target": "本文\\005_初雪の窓口.txt#5-0@8027",
+              "aiText": "{\n  \"contradictions\": [\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"左目の下のほくろが、鏡の中で滲んだ。\",\n      \"line\": 7,\n      \"note\": \"\",\n      \"settingSays\": \"右目の下に小さなほくろがある（相沢春人）\",\n      \"severity\": \"high\",\n      \"textSays\": \"左目の下にほくろがあると描写されている\"\n    },\n    {\n      \"category\": \"時系列\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"足を折ってから、ちょうど二週間が過ぎた。\",\n      \"line\": 11,\n      \"note\": \"\",\n      \"settingSays\": \"足を折ったのは10月3日で、現在は12月8日である\",\n      \"severity\": \"high\",\n      \"textSays\": \"足を折ってから二週間しか経っていないと述べている\"\n    },\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"客の顔を、まっすぐ見ていた。\",\n      \"line\": 28,\n      \"note\": \"意図的に性格が変化した可能性がある\",\n      \"settingSays\": \"人見知りで窓口に立つと客と目を合わせられない（相沢春人）\",\n      \"severity\": \"medium\",\n      \"textSays\": \"客の顔をまっすぐ見ていると描写されている\"\n    },\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"腰まで届く長い髪が、動きに合わせて椅子の背から流れ落ちた。\",\n      \"line\": 37,\n      \"note\": \"\",\n      \"settingSays\": \"髪を肩で切りそろえている（黒瀬千夏）\",\n      \"severity\": \"medium\",\n      \"textSays\": \"腰まで届く長い髪と描写されている\"\n    },\n    {\n      \"category\": \"時系列\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"坂の下のどこかで、蝉がまだ鳴いていた。\",\n      \"line\": 65,\n      \"note\": \"\",\n      \"settingSays\": \"物語は12月初めで、季節は冬である（蝉は夏に鳴く）\",\n      \"severity\": \"medium\",\n      \"textSays\": \"冬の情景にもかかわらず蝉が鳴いていると描写されている\"\n    }\n  ]\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 3511,
+                "total_tokens": 7414,
+                "completion_tokens": 3903,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\005_初雪の窓口.txt#5-0@8027",
+                "chapterLabel": "第5話",
+                "accepted": [
+                  {
+                    "line": 7,
+                    "excerpt": "左目の下のほくろが、鏡の中で滲んだ。",
+                    "category": "人物",
+                    "settingSays": "右目の下に小さなほくろがある（相沢春人）",
+                    "textSays": "左目の下にほくろがあると描写されている",
+                    "note": "",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "db6f4fbb98be44af106328b8664a50e926f3eeaed379a9677df7e547d5f206e0"
+                  },
+                  {
+                    "line": 11,
+                    "excerpt": "足を折ってから、ちょうど二週間が過ぎた。",
+                    "category": "時系列",
+                    "settingSays": "足を折ったのは10月3日で、現在は12月8日である",
+                    "textSays": "足を折ってから二週間しか経っていないと述べている",
+                    "note": "",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "db6f4fbb98be44af106328b8664a50e926f3eeaed379a9677df7e547d5f206e0"
+                  },
+                  {
+                    "line": 28,
+                    "excerpt": "客の顔を、まっすぐ見ていた。",
+                    "category": "人物",
+                    "settingSays": "人見知りで窓口に立つと客と目を合わせられない（相沢春人）",
+                    "textSays": "客の顔をまっすぐ見ていると描写されている",
+                    "note": "意図的に性格が変化した可能性がある",
+                    "severity": "medium",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "db6f4fbb98be44af106328b8664a50e926f3eeaed379a9677df7e547d5f206e0"
+                  },
+                  {
+                    "line": 37,
+                    "excerpt": "腰まで届く長い髪が、動きに合わせて椅子の背から流れ落ちた。",
+                    "category": "人物",
+                    "settingSays": "髪を肩で切りそろえている（黒瀬千夏）",
+                    "textSays": "腰まで届く長い髪と描写されている",
+                    "note": "",
+                    "severity": "medium",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "db6f4fbb98be44af106328b8664a50e926f3eeaed379a9677df7e547d5f206e0"
+                  },
+                  {
+                    "line": 65,
+                    "excerpt": "坂の下のどこかで、蝉がまだ鳴いていた。",
+                    "category": "時系列",
+                    "settingSays": "物語は12月初めで、季節は冬である（蝉は夏に鳴く）",
+                    "textSays": "冬の情景にもかかわらず蝉が鳴いていると描写されている",
+                    "note": "",
+                    "severity": "medium",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "db6f4fbb98be44af106328b8664a50e926f3eeaed379a9677df7e547d5f206e0"
+                  }
+                ],
+                "rejected": [],
+                "bundleStale": true,
+                "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "round": 3,
+      "elapsedMs": 74373,
+      "temperature": 0,
+      "staleNote": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください",
+      "metrics": {
+        "seededContradictions": 6,
+        "seededContradictionsTotal": 6,
+        "missedContradictions": 0,
+        "falseFlagsContradiction": 1,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 0,
+        "accepted": 7,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 74373
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "seededContradictions": {
+          "人物": {
+            "found": 3,
+            "total": 3
+          },
+          "状態": {
+            "found": 1,
+            "total": 1
+          },
+          "時系列": {
+            "found": 2,
+            "total": 2
+          }
+        },
+        "missedContradictions": [],
+        "falseFlagsContradiction": {
+          "本文/005_初雪の窓口.txt": 1
+        }
+      },
+      "raw": [
+        {
+          "target": "本文\\001_九月の終わりの坂.txt",
+          "chunks": [
+            {
+              "target": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+              "aiText": "{\n  \"contradictions\": []\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 3115,
+                "total_tokens": 5827,
+                "completion_tokens": 2712,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": [],
+                "bundleStale": true,
+                "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\002_十月三日の坂.txt",
+          "chunks": [
+            {
+              "target": "本文\\002_十月三日の坂.txt#2-0@8027",
+              "aiText": "{\n  \"contradictions\": []\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 3056,
+                "total_tokens": 7847,
+                "completion_tokens": 4791,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\002_十月三日の坂.txt#2-0@8027",
+                "chapterLabel": "第2話",
+                "accepted": [],
+                "rejected": [],
+                "bundleStale": true,
+                "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\003_窓口の椅子.txt",
+          "chunks": [
+            {
+              "target": "本文\\003_窓口の椅子.txt#3-0@8027",
+              "aiText": "{\n  \"contradictions\": [\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"medium\",\n      \"excerpt\": \"僕は判子を押す手を止めた。\",\n      \"line\": 39,\n      \"note\": \"設定上は一人称は「俺」と定義されているが、本文では「僕」が使用されている。意図的な口調変化の可能性もある。\",\n      \"settingSays\": \"設定では相沢春人の一人称は「俺」とされている。\",\n      \"severity\": \"low\",\n      \"textSays\": \"本文では相沢春人が「僕」を一人称として使用している。\"\n    }\n  ]\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 3195,
+                "total_tokens": 8003,
+                "completion_tokens": 4808,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\003_窓口の椅子.txt#3-0@8027",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 39,
+                    "excerpt": "僕は判子を押す手を止めた。",
+                    "category": "人物",
+                    "settingSays": "設定では相沢春人の一人称は「俺」とされている。",
+                    "textSays": "本文では相沢春人が「僕」を一人称として使用している。",
+                    "note": "設定上は一人称は「俺」と定義されているが、本文では「僕」が使用されている。意図的な口調変化の可能性もある。",
+                    "severity": "low",
+                    "confidence": "medium",
+                    "filePath": "本文\\003_窓口の椅子.txt",
+                    "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                  }
+                ],
+                "rejected": [],
+                "bundleStale": true,
+                "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\004_ギプスが外れた日.txt",
+          "chunks": [
+            {
+              "target": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+              "aiText": "{\n  \"contradictions\": [\n    {\n      \"category\": \"状態\",\n      \"confidence\": \"medium\",\n      \"excerpt\": \"右足のギプスが外れたのは、十一月の最初の月曜だった。\",\n      \"line\": 1,\n      \"note\": \"意図的に別の足を負傷した可能性はあるが、前話（第2話）で左足の足首を骨折し、ギプスは左足に装着されたと明示されているため、矛盾の可能性が高い。\",\n      \"settingSays\": \"第2話では左足の足首を骨折し、ギプスは左足に装着されたとされている。\",\n      \"severity\": \"high\",\n      \"textSays\": \"本文では右足のギプスが外れたと記述されている。\"\n    }\n  ]\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 3359,
+                "total_tokens": 7124,
+                "completion_tokens": 3765,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+                "chapterLabel": "第4話",
+                "accepted": [
+                  {
+                    "line": 1,
+                    "excerpt": "右足のギプスが外れたのは、十一月の最初の月曜だった。",
+                    "category": "状態",
+                    "settingSays": "第2話では左足の足首を骨折し、ギプスは左足に装着されたとされている。",
+                    "textSays": "本文では右足のギプスが外れたと記述されている。",
+                    "note": "意図的に別の足を負傷した可能性はあるが、前話（第2話）で左足の足首を骨折し、ギプスは左足に装着されたと明示されているため、矛盾の可能性が高い。",
+                    "severity": "high",
+                    "confidence": "medium",
+                    "filePath": "本文\\004_ギプスが外れた日.txt",
+                    "chunkHash": "0887666d7471eac41e81f35ad8069b22c48b36bd26f8dcf30ac044134b32fef7"
+                  }
+                ],
+                "rejected": [],
+                "bundleStale": true,
+                "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+              }
+            }
+          ]
+        },
+        {
+          "target": "本文\\005_初雪の窓口.txt",
+          "chunks": [
+            {
+              "target": "本文\\005_初雪の窓口.txt#5-0@8027",
+              "aiText": "{\n  \"contradictions\": [\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"左目の下のほくろが、鏡の中で滲んだ。\",\n      \"line\": 7,\n      \"note\": \"\",\n      \"settingSays\": \"右目の下に小さなほくろがある。\",\n      \"severity\": \"high\",\n      \"textSays\": \"左目の下にほくろがある。\"\n    },\n    {\n      \"category\": \"時系列\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"足を折ってから、ちょうど二週間が過ぎた。\",\n      \"line\": 11,\n      \"note\": \"\",\n      \"settingSays\": \"足を折ったのは10月3日。第5話は12月8日で、約2か月が経過している。\",\n      \"severity\": \"high\",\n      \"textSays\": \"足を折ってから二週間が過ぎたと述べている。\"\n    },\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"low\",\n      \"excerpt\": \"客の顔を、まっすぐ見ていた。\",\n      \"line\": 28,\n      \"note\": \"成長により目を合わせられるようになった可能性がある。\",\n      \"settingSays\": \"人見知りで、窓口に立つと客と目を合わせられない。\",\n      \"severity\": \"medium\",\n      \"textSays\": \"客の顔をまっすぐ見ていた。\"\n    },\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"腰まで届く長い髪が、動きに合わせて\",\n      \"line\": 37,\n      \"note\": \"\",\n      \"settingSays\": \"髪は肩で切りそろえている。\",\n      \"severity\": \"high\",\n      \"textSays\": \"腰まで届く長い髪が描写されている。\"\n    },\n    {\n      \"category\": \"時系列\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"坂の下のどこかで、蝉がまだ鳴いていた。\",\n      \"line\": 65,\n      \"note\": \"\",\n      \"settingSays\": \"物語は9月末から12月初めまでで、冬季。蝉は夏の虫である。\",\n      \"severity\": \"high\",\n      \"textSays\": \"冬の12月に蝉が鳴いていると記述されている。\"\n    }\n  ]\n}",
+              "droppedResponseFormat": false,
+              "usage": {
+                "prompt_tokens": 3511,
+                "total_tokens": 7331,
+                "completion_tokens": 3820,
+                "prompt_tokens_details": null
+              },
+              "validated": {
+                "chunkId": "本文\\005_初雪の窓口.txt#5-0@8027",
+                "chapterLabel": "第5話",
+                "accepted": [
+                  {
+                    "line": 7,
+                    "excerpt": "左目の下のほくろが、鏡の中で滲んだ。",
+                    "category": "人物",
+                    "settingSays": "右目の下に小さなほくろがある。",
+                    "textSays": "左目の下にほくろがある。",
+                    "note": "",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "db6f4fbb98be44af106328b8664a50e926f3eeaed379a9677df7e547d5f206e0"
+                  },
+                  {
+                    "line": 11,
+                    "excerpt": "足を折ってから、ちょうど二週間が過ぎた。",
+                    "category": "時系列",
+                    "settingSays": "足を折ったのは10月3日。第5話は12月8日で、約2か月が経過している。",
+                    "textSays": "足を折ってから二週間が過ぎたと述べている。",
+                    "note": "",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "db6f4fbb98be44af106328b8664a50e926f3eeaed379a9677df7e547d5f206e0"
+                  },
+                  {
+                    "line": 28,
+                    "excerpt": "客の顔を、まっすぐ見ていた。",
+                    "category": "人物",
+                    "settingSays": "人見知りで、窓口に立つと客と目を合わせられない。",
+                    "textSays": "客の顔をまっすぐ見ていた。",
+                    "note": "成長により目を合わせられるようになった可能性がある。",
+                    "severity": "medium",
+                    "confidence": "low",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "db6f4fbb98be44af106328b8664a50e926f3eeaed379a9677df7e547d5f206e0"
+                  },
+                  {
+                    "line": 37,
+                    "excerpt": "腰まで届く長い髪が、動きに合わせて",
+                    "category": "人物",
+                    "settingSays": "髪は肩で切りそろえている。",
+                    "textSays": "腰まで届く長い髪が描写されている。",
+                    "note": "",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "db6f4fbb98be44af106328b8664a50e926f3eeaed379a9677df7e547d5f206e0"
+                  },
+                  {
+                    "line": 65,
+                    "excerpt": "坂の下のどこかで、蝉がまだ鳴いていた。",
+                    "category": "時系列",
+                    "settingSays": "物語は9月末から12月初めまでで、冬季。蝉は夏の虫である。",
+                    "textSays": "冬の12月に蝉が鳴いていると記述されている。",
+                    "note": "",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "db6f4fbb98be44af106328b8664a50e926f3eeaed379a9677df7e547d5f206e0"
+                  }
+                ],
+                "rejected": [],
+                "bundleStale": true,
+                "note": "【束が古い】この MCP サーバーの束（dist/mcp-server.mjs）が古くなっています（束は 0.73.1、リポジトリは 0.73.2）。Claude Code を開き直して、新しい束で繋ぎ直してください"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seededContradictions": {
+      "values": [
+        6,
+        5,
+        6
+      ],
+      "min": 5,
+      "max": 6
+    },
+    "seededContradictionsTotal": {
+      "values": [
+        6,
+        6,
+        6
+      ],
+      "min": 6,
+      "max": 6
+    },
+    "missedContradictions": {
+      "values": [
+        0,
+        1,
+        0
+      ],
+      "min": 0,
+      "max": 1
+    },
+    "falseFlagsContradiction": {
+      "values": [
+        1,
+        1,
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "categoryMismatch": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "otherFlagsContradiction": {
+      "values": [
+        1,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 1
+    },
+    "accepted": {
+      "values": [
+        8,
+        6,
+        7
+      ],
+      "min": 6,
+      "max": 8
+    },
+    "rejected": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "failures": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        88104,
+        74534,
+        74373
+      ],
+      "min": 74373,
+      "max": 88104
+    }
+  },
+  "lines": [
+    "仕込んだ矛盾を拾えた: 5/6〜6/6（各回：6/6、5/6、6/6）",
+    "見逃し（拾えなかった仕込み）: 0〜1（各回：0、1、0）",
+    "誤検出（罠と、矛盾の無い話に付いた指摘）: 1（各回：1、1、1）",
+    "区分ちがい（場所は当てたが 人物／状態／時系列 を取り違えた）: 0（各回：0、0、0）",
+    "仕込み以外の箇所への指摘: 0〜1（各回：1、0、0）",
+    "指摘（検算を通ったもの）: 6〜8（各回：8、6、7）",
+    "落とした（検算で弾いたもの）: 0（各回：0、0、0）",
+    "失敗（チャンクごと通らなかったもの）: 0（各回：0、0、0）",
+    "所要時間: 74.4秒〜88.1秒（各回：88.1秒、74.5秒、74.4秒）",
+    "本文の切り方: 32768（本文の切り方（クラウドへ num_ctx は送りません））",
+    "temperature: 0（製品と同じ（束が返した値））"
+  ]
+}

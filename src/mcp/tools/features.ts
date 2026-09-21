@@ -220,7 +220,8 @@ const OPTIONS_TABLE =
   "foreshadow: mode（detect＝配置を拾う〈既定〉／resolve＝回収を見る）。" +
   "contradiction: categories（light〈既定〉／all／区分名そのもの。" +
   "「状態」「人物,時系列」のように1つでも並びでも指せる）・" +
-  "carryOver（前の話を何話ぶん引き継いで人物を探すか。0〈既定〉〜5）・" +
+  "carryOver（前の話を何話ぶん引き継いで人物を探すか。0〜5。既定は2＝" +
+  "製品と同じ。0で引き継がない）・" +
   "suppression（loose〈既定〉＝疑わしい箇所も挙げさせる／" +
   "strict＝確信の持てないものは挙げさせない）。" +
   "notation: group※（novel.detect が返した組の1件）・limit（detect の上限）。" +

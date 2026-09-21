@@ -37,6 +37,7 @@ import {
   describeMissedCharacters,
   mergeMissedCharactersByEpisode,
   promptVersionWithCarryOver,
+  CARRY_OVER_DEFAULT_CHAPTERS,
   CHARACTER_AS_OF_FIELDS,
   type CarryOverBody,
   type CarryOverResult,
@@ -209,11 +210,11 @@ export interface CheckContradictionsOptions extends SuiteAwareOptions {
   /**
    * 前の話を何話ぶん引き継いで人物を探すか（設計書6.10.6）。
    *
-   * **既定は0＝引き継がない。** 一人称で語る主人公は自分の名前を言わない
-   * ので、その話では主人公の設定が材料に1つも載らない——直前の話の本文も
-   * 索引にかければ拾える見込みがある。ただし**効くと分かるまで既定は
-   * 変えない**（6.102「測ってから言う」）。いまは画面からの口を作らず、
-   * MCP の `options.carryOver` で測る。
+   * **既定は `CARRY_OVER_DEFAULT_CHAPTERS`（2話）。** 一人称で語る主人公は
+   * 自分の名前を言わないので、その話では主人公の設定が材料に1つも載らない
+   * ——直前の話の本文も索引にかければ拾える。0.70.5 で測るための口として
+   * 足し、**測ってから 0.73.3 で既定にした**（6.102「測ってから言う」）。
+   * 値を変える口は MCP の `options.carryOver`。
    */
   carryOverChapters?: number;
 }
@@ -387,8 +388,8 @@ export async function checkContradictions(
   /*
     **前の話の本文**（設計書6.10.6）。2つの用途で使う。
 
-    1. 引き継ぎ（`carryOverChapters`）——**材料へ人物を足す**。既定は0で、
-       いまの既定の動きは1文字も変えない
+    1. 引き継ぎ（`carryOverChapters`）——**材料へ人物を足す**。既定は2話
+       （0.73.3。作者の裁定）
     2. **落としたことを言う**——直前の1話だけを見て、「物語の流れでは居る
        はずなのに、この話の材料から落ちた人物」を数える。**材料は変えない**
 
@@ -396,7 +397,8 @@ export async function checkContradictions(
     `collectPastScenes` と同じものを見るので、分けて読むと話数ぶんの
     ファイルを二度読むことになる。
   */
-  const carryOverChapters = options.carryOverChapters ?? 0;
+  const carryOverChapters =
+    options.carryOverChapters ?? CARRY_OVER_DEFAULT_CHAPTERS;
   const carryOverBodies = carryOverBodiesOf(episodeSources);
   /** チャンクごとの引き継ぎ。鍵を決めるときと送るときで、同じものを使う */
   const carryOverByChunk = new Map<string, CarryOverResult>();
@@ -527,13 +529,18 @@ export async function checkContradictions(
     **AIを呼ぶ前に、全チャンクぶんを数える。** 処理済み（キャッシュ）の
     チャンクでも落ちていることは変わらないので、送るチャンクだけを見ると
     「2回目だけ何も言わない」ことになる。
+
+    **引き継ぎ（既定2話）で塞げた回は、ここに出ない。** 出るのは引き継いで
+    なお落ちた回だけ——作者の219話では2話ぶんにあたる。
   */
   const missedByEpisode = missedCharactersByEpisode();
   for (const entry of missedByEpisode) {
     logStep(
-      `矛盾検知：${entry.label}は「${entry.names.join("」「")}」を` +
-        "突き合わせていません（直前の話には出ています。" +
-        "本文に名前が無いため材料に載りませんでした）"
+      // **手がかりの名前（登場話数・直前の話）を作者向けの文へ出さない。**
+      // どちらで拾ったかは内部の都合で、作者に要るのは「見ていない」事実
+      `矛盾検知：${entry.label}は「${entry.names.join("」「")}」の設定を` +
+        "突き合わせていません（その話に登場するはずですが、" +
+        "本文に名前が出ないため材料に載りませんでした）"
     );
   }
   // 完了の知らせへ出す1行。**落ちた話が0なら空**（毎回出る断りは読まれない）

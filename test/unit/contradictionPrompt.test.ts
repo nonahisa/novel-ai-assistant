@@ -478,8 +478,11 @@ describe("矛盾の区分を、名前で指す", () => {
   載らず、仕込んだ「左足を折ったのに右足のギプスが外れた」を5モデル15回で
   一度も拾えなかった。
 
-  **既定は引き継がない。** 効くと分かってから既定を決めるので（6.102）、
-  ここでは「指定しなければこれまでどおり」も一緒に見張る。
+  **測ってから、0.73.3 で既定にした**（作者の裁定）。既定は2話ぶん——
+  作者の219話で主人公が材料に載るチャンクが 80%→99% になり、代償は
+  プロンプト＋16%、罠4件の台で誤検出は3回とも0だった。**MCP の既定も
+  製品と揃える**（揃えないと、`novel.prompt` で覗いたものと実際に送る
+  ものが別物になる）。引き継がない動きは `carryOver: 0` で指せる。
 */
 describe("前の話に出た人物を引き継ぐ（設計書6.10.6）", () => {
   const folder = "test/fixtures/seeded/contradiction";
@@ -495,13 +498,20 @@ describe("前の話に出た人物を引き継ぐ（設計書6.10.6）", () => {
     }).chunks[0];
   }
 
-  test("指定しなければ、第4話には主人公が載らないまま（これまでどおり）", () => {
+  test("指定しなければ、既定の2話ぶんを引き継ぐ", () => {
     const chunk = materialFor();
+
+    expect(chunk.characterDetails).toContain("相沢 春人");
+    expect(chunk.carriedOverChapters).toEqual([2, 3]);
+    // 2 と指定したときと、指定しないときは同じ
+    expect(materialFor(2)).toEqual(chunk);
+  });
+
+  test("0 と指定すれば、第4話には主人公が載らないまま（以前の動き）", () => {
+    const chunk = materialFor(0);
 
     expect(chunk.characterDetails).not.toContain("相沢 春人");
     expect(chunk.carriedOverChapters).toEqual([]);
-    // 0 と指定したときも、指定しないときと同じ
-    expect(materialFor(0)).toEqual(chunk);
   });
 
   test("carryOver: 2 で、第4話にも主人公の設定が載る", () => {
@@ -533,7 +543,7 @@ describe("前の話に出た人物を引き継ぐ（設計書6.10.6）", () => {
 
   test("過去の場面を引く語（names）は、引き継がない", () => {
     // 検索語は「この本文に出た名前」であって、前の話に出た名前ではない
-    expect(materialFor(2).names).toEqual(materialFor().names);
+    expect(materialFor(2).names).toEqual(materialFor(0).names);
   });
 
   /*
@@ -569,6 +579,10 @@ describe("前の話に出た人物を引き継ぐ（設計書6.10.6）", () => {
 
   答え付きの台（`seeded/contradiction`）の第4話がまさにその形で、
   地の文が全部「俺」のため主人公「相沢 春人」だけが落ちる。
+
+  **この台は、引き継ぎ（既定2話）で穴が塞がる形である。** だから既定では
+  黙り、`carryOver: 0` と指されたときだけ落ちたと言う——**塞げた回まで
+  「見ていません」と言ったら、断りそのものが信用されなくなる。**
 */
 describe("落とした人物を言う（設計書6.10.6）", () => {
   const folder = "test/fixtures/seeded/contradiction";
@@ -582,33 +596,35 @@ describe("落とした人物を言う（設計書6.10.6）", () => {
     }).chunks[0].missedCharacters;
   }
 
-  test("第4話では、主人公だけが落ちたと言う", () => {
-    // 直前（第3話）の本文には名前が出ているのに、第4話には1度も出ない
-    expect(missedIn("004_ギプスが外れた日.txt")).toEqual(["相沢 春人"]);
+  test("引き継がない指定（0）なら、第4話では主人公が落ちたと言う", () => {
+    // 第4話には主人公の名前が1度も出ない（地の文は全部「俺」）
+    expect(missedIn("004_ギプスが外れた日.txt", 0)).toEqual(["相沢 春人"]);
   });
 
   /*
     **材料に載らなかった人物を全部挙げてはいけない。** 登場人物が40人いれば
     1話に出るのは数人なので、毎回37人が並んで騒がしくなる。挙げるのは
-    「直前の1話には名前が出ているのに、この話では落ちた人」だけである。
+    「その話に登場すると記録されているのに、材料へ載らなかった人」だけである。
   */
   test("名前が本文に出ている話では、何も言わない", () => {
-    expect(missedIn("003_窓口の椅子.txt")).toEqual([]);
-    expect(missedIn("005_初雪の窓口.txt")).toEqual([]);
+    expect(missedIn("003_窓口の椅子.txt", 0)).toEqual([]);
+    expect(missedIn("005_初雪の窓口.txt", 0)).toEqual([]);
   });
 
-  test("第1話には直前の話が無いので、何も言わない", () => {
-    expect(missedIn("001_九月の終わりの坂.txt")).toEqual([]);
+  test("第1話でも、名前が出ていれば何も言わない", () => {
+    expect(missedIn("001_九月の終わりの坂.txt", 0)).toEqual([]);
   });
 
   /*
     **引き継ぎ（`carryOver`）が効いている回では空になる。** 引き継いだ人物は
     材料に載るので、落ちていない——「穴を塞いだ」と「落としたと言う」が
-    二重に出ないことを見張る。
+    二重に出ないことを見張る。**既定（2話）でも同じ**であることを、
+    指定なしでも確かめる。
   */
   test("carryOver を効かせると、第4話でも空になる", () => {
     expect(missedIn("004_ギプスが外れた日.txt", 1)).toEqual([]);
     expect(missedIn("004_ギプスが外れた日.txt", 2)).toEqual([]);
+    expect(missedIn("004_ギプスが外れた日.txt")).toEqual([]);
   });
 
   test("prompt の返り値に出る", () => {
@@ -616,6 +632,7 @@ describe("落とした人物を言う（設計書6.10.6）", () => {
       folder,
       filePath: "本文/004_ギプスが外れた日.txt",
       numCtx: 16384,
+      carryOver: 0,
     });
 
     expect(built.chunks[0].missedCharacters).toEqual(["相沢 春人"]);
@@ -633,6 +650,7 @@ describe("落とした人物を言う（設計書6.10.6）", () => {
       filePath: "本文/004_ギプスが外れた日.txt",
       numCtx: 16384,
       runner: "claude",
+      carryOver: 0,
     });
 
     expect(outcome.missed).toEqual([
@@ -654,5 +672,28 @@ describe("落とした人物を言う（設計書6.10.6）", () => {
     });
 
     expect(outcome.missed).toEqual([]);
+  });
+
+  /*
+    **既定（2話引き継ぐ）では、この台は1話も落ちない。** 引き継ぎで塞げた
+    ことを、断りが出ないことで確かめる——毎回出る断りは読まれなくなる。
+  */
+  test("既定では、台の5話すべてで何も言わない", async () => {
+    for (const file of [
+      "001_九月の終わりの坂.txt",
+      "002_十月三日の坂.txt",
+      "003_窓口の椅子.txt",
+      "004_ギプスが外れた日.txt",
+      "005_初雪の窓口.txt",
+    ]) {
+      const outcome = await contradictionRun({
+        folder,
+        filePath: `本文/${file}`,
+        numCtx: 16384,
+        runner: "claude",
+      });
+
+      expect(outcome.missed).toEqual([]);
+    }
   });
 });

@@ -2,7 +2,12 @@ import type { Character } from "../models/character";
 import type { Location } from "../models/location";
 import type { WorldItem } from "../models/world";
 import { sha1Text } from "./hash";
-import { hasAppearedBy, isEmptyAfterRollback, recordAsOf } from "./settingsAsOf";
+import {
+  appearsIn,
+  hasAppearedBy,
+  isEmptyAfterRollback,
+  recordAsOf,
+} from "./settingsAsOf";
 import {
   describeCharacter,
   describeLocation,
@@ -61,7 +66,7 @@ export interface RelevantSettings {
    */
   hasAnything: boolean;
   /**
-   * **直前の話の本文には名前が出ているのに、この材料に載らなかった人物**
+   * **その話に居るはずなのに、この材料へ載らなかった人物**
    * （設計書6.10.6「落としたことを言う」）。正式名称で返す。
    *
    * **穴は塞がない。塞がずに、落としたことを言うためだけの欄**である
@@ -69,8 +74,19 @@ export interface RelevantSettings {
    * でも変わるとキャッシュが飛び、測り直しになる）。
    *
    * **材料に載らなかった人物を全部挙げはしない。** 登場人物が40人いれば、
-   * 1話に出るのは数人なので、毎回37人が並んで騒がしくなる。**物語の流れ
-   * では居るはずなのに落ちた人**＝直前の1話に名前が出ている人だけを挙げる。
+   * 1話に出るのは数人なので、毎回37人が並んで騒がしくなる。「居るはず」と
+   * 言える手がかりは2つで、**どちらかに当たった人だけ**を挙げる。
+   *
+   * 1. **登場話数にこの話がある**（`appearsIn`）。設定資料の抽出が本文を
+   *    読んで記録したもので、**名前の索引とは別の目**である——索引が
+   *    落とした語り手を、こちらは拾えている
+   * 2. **直前の1話の本文に名前が出ている**（`previousBodyText`）。登場話数を
+   *    持たない古い資料でも効く、物語の流れからの手がかり
+   *
+   * **2 だけでは足りない**（0.73.3）。引き継ぎ（`carryOverChapters`）が
+   * 既定になると、直前の話に名前が出ている人は**必ず材料へ載る**ので、
+   * 2 だけを見ていると**二度と何も言わなくなる**。引き継ぎで塞ぎきれずに
+   * 残った回を言うのがこの欄の役目なので、1 を足した。
    *
    * **話数で外れた人は入れない**（6.10.3）。その話の時点でまだ分かって
    * いないから外したのであって、名前が出ないせいで落ちたのではない。
@@ -253,28 +269,50 @@ export function createContradictionMaterial(options: {
         材料の選び方はここまでで終わっており、以下は**数えるだけ**である
         ——`characterText` も `hasAnything` も、もう変わらない。
 
-        挙げるのは「直前の1話には名前が出ているのに、この話の材料に載らな
-        かった人物」だけ。**引き継ぎ（`carryOverText`）が効いている回では
+        挙げるのは「**その話に居るはず**なのに、材料に載らなかった人物」
+        だけ。**引き継ぎ（`carryOverText`）が効いている回では
         `seenCharacters` に入っているので、当然ここは空になる。**
+
+        「居るはず」の手がかりは2つある（どちらかに当たればよい）。
+
+        1. **登場話数にこの話がある**——設定資料の抽出が本文を読んで
+           記録したもので、材料の絞り込み（名前の索引）とは**別の目**である
+        2. **直前の1話に名前が出ている**——登場話数を持たない古い資料でも
+           効く、物語の流れからの手がかり
+
+        **2 だけでは足りない**（0.73.3）。引き継ぎが既定になると、直前の話に
+        名前が出ている人は必ず 1 つ上の `seenCharacters` に入るので、
+        2 だけを見ていると**二度と何も言わなくなる**。
       */
-      const missedCharacters: string[] = [];
       const previousBodyText = relevantOptions?.previousBodyText ?? "";
+      /** 直前の1話の本文に名前が出た人物（手がかり2） */
+      const inPreviousBody = new Set<string>();
       if (previousBodyText) {
         for (const match of index.find(previousBodyText)) {
           if (match.entry.kind !== "character") continue;
-          // 本文に名前が出ているなら落ちていない（時系列で外れた人は下で落ちる）
-          if (seenCharacters.has(match.entry.id)) continue;
-          const record = characterById.get(match.entry.id);
-          if (!record) continue;
-          // **話数で外した人は「落とした」と言わない**（6.10.3）。その話の
-          // 時点でまだ分かっていないから外したのであって、名前のせいではない
-          if (!hasAppearedBy(record.appearedChapters, chapter)) continue;
-          const asOf = recordAsOf(record, CHARACTER_AS_OF_FIELDS, chapter);
-          if (isEmptyAfterRollback(asOf, CHARACTER_AS_OF_FIELDS)) continue;
-          // 別名で何度も当たるので、正式名称で1回だけ
-          if (missedCharacters.includes(record.name)) continue;
-          missedCharacters.push(record.name);
+          inPreviousBody.add(match.entry.id);
         }
+      }
+      const missedCharacters: string[] = [];
+      // **並びは資料の順のまま。** 索引に当たった順に並べると、本文の
+      // 書き換えで断りの並びが揺れる（同じ入力から同じ文字列を返す原則）
+      for (const record of people) {
+        // 材料に載っているなら落ちていない（引き継ぎで載った人もここで抜ける）
+        if (seenCharacters.has(record.id)) continue;
+        if (
+          !appearsIn(record.appearedChapters, chapter) &&
+          !inPreviousBody.has(record.id)
+        ) {
+          continue;
+        }
+        // **話数で外した人は「落とした」と言わない**（6.10.3）。その話の
+        // 時点でまだ分かっていないから外したのであって、名前のせいではない
+        if (!hasAppearedBy(record.appearedChapters, chapter)) continue;
+        const asOf = recordAsOf(record, CHARACTER_AS_OF_FIELDS, chapter);
+        if (isEmptyAfterRollback(asOf, CHARACTER_AS_OF_FIELDS)) continue;
+        // 同じ名前の資料が2件あっても、断りには1回だけ出す
+        if (missedCharacters.includes(record.name)) continue;
+        missedCharacters.push(record.name);
       }
       const locationText = [...seenLocations]
         .map((id) => locationById.get(id))
@@ -407,7 +445,7 @@ export function describeMissedCharacters(
   // 合本では隣り合う話が同じ札を名乗ることがあるので、なお札の数で数える
   const labels = new Set(entries.map((entry) => entry.label));
   return (
-    `${labels.size}話で、直前の話に出ていた人物を突き合わせていません` +
+    `${labels.size}話で、その話に登場するはずの人物を突き合わせていません` +
     "（本文に名前が出ないため）。" +
     "本文に名前が1度でも出れば、その回でも突き合わせます。" +
     "詳しくは出力をご覧ください。"
@@ -423,6 +461,29 @@ export function describeMissedCharacters(
  * おり、連続して落ちるのは最長3話**だったので、5話あれば足りる。
  */
 export const CARRY_OVER_MAX_CHAPTERS = 5;
+
+/**
+ * 前の話を引き継ぐ既定の話数（設計書6.10.6）。
+ *
+ * **0.70.5 では0（引き継がない）だった。測ってから、0.73.3 で2にした**
+ * ——作者の裁定である（6.102「測ってから言う」）。
+ *
+ * | | |
+ * |---|---|
+ * | 効果 | 主人公が材料に載るチャンクが **80%→99%**（落ちる話が44話→2話） |
+ * | 代償 | 1チャンクあたりの人物 12.4人→18.5人、プロンプト**＋16%** |
+ * | 副作用 | **無し**（罠4件の台で誤検出は3回とも0） |
+ *
+ * **なぜ1ではなく2か。** 実測で効果も代償も副作用も揃って測ってあるのは
+ * 2話ぶんだけで、1話ぶんは「44話→11話」という見込みしか無い。**測って
+ * いない値を既定にしない。** しかも1話では20話に1話が無検査のまま残り、
+ * 穴を半分しか塞げない——字数の節約はせいぜい1割で、割に合わない。
+ * 実測の「連続して落ちるのは最長3話、ほとんどは1〜2話」も2話を支持する。
+ *
+ * **これは既定であって上限ではない。** 呼ぶ側（画面・MCP の `carryOver`）は
+ * 0〜`CARRY_OVER_MAX_CHAPTERS` を指せる。
+ */
+export const CARRY_OVER_DEFAULT_CHAPTERS = 2;
 
 /** 引き継ぎのもとになる本文（話数の順に並べて渡す） */
 export interface CarryOverBody {
