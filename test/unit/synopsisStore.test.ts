@@ -118,4 +118,26 @@ describe("あらすじの読み込み時の自己修復（重複の統合）", (
     const set = await new SynopsisStore(work).load();
     expect(set.episodes).toEqual([]);
   });
+
+  test("空のあらすじを保存すると、次に読めなくなる（だから空を書かせない）", async () => {
+    /*
+      相談パネルの「取り消す」は、書く前が未記入なら空を書き戻す
+      （設計書6.4.7）。plot.md と同じつもりでここへ空を書くと、**保存は
+      通るのに次の読み込みで台帳ごと読めなくなる**——あらすじは非空を
+      前提に検証しているためである（plot.md の「黙って効かない」より悪い）。
+
+      **だから `applyChatEdit` は各話あらすじを空にしない**（その場で断る）。
+      ここはその理由を記録する試験である。
+    */
+    seed([episode({ chapter: 1, synopsis: "書いたあらすじ" })]);
+    const store = new SynopsisStore(work);
+    const set = await store.load();
+
+    await store.save({
+      ...set,
+      episodes: set.episodes.map((item) => ({ ...item, synopsis: "" })),
+    });
+
+    await expect(store.load()).rejects.toThrow(/synopsis/);
+  });
 });

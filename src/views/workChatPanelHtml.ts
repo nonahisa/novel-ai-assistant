@@ -253,6 +253,41 @@ button.secondary {
 }
 .more-toggle:hover { text-decoration: underline; }
 /*
+ * 画面で指しながらの案内（設計書6.104）。
+ *
+ * **1段につき1枚の札を積む。** 差し替えにすると、どこまで進んだかが
+ * 会話から消える。済んだ札は色を落として押せなくする（同じ札が2枚
+ * 押せる状態で並ぶと、どちらを押したのか分からなくなる）。
+ *
+ * 枠の色は「書き終えた結果」（.edit）と分ける。**あちらは済んだこと、
+ * こちらはこれから押すこと**なので、同じ見た目にすると混ざる。
+ */
+.tour {
+  margin-top: 8px;
+  border: 1px solid var(--vscode-textLink-foreground);
+  border-left-width: 3px;
+  border-radius: 3px;
+  padding: 8px;
+}
+.tour .position {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 4px;
+}
+.tour .what { font-weight: 600; margin-bottom: 4px; }
+.tour .why, .tour .check, .tour .needs, .tour .where {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--vscode-foreground);
+}
+.tour .where, .tour .needs {
+  color: var(--vscode-descriptionForeground);
+  margin-top: 4px;
+}
+.tour .row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+/* 済んだ札。**消さずに残す**——どこを通ってきたかが会話に残る */
+.tour.sealed { opacity: 0.55; border-left-color: var(--vscode-panel-border); }
+/*
  * 本文の領域に大きく開いたとき。
  *
  * **画面いっぱいの幅で文章を流さない。** 横に長い行は目が戻る場所を
@@ -672,6 +707,119 @@ function appendLocate(turn, locate) {
   turn.appendChild(box);
 }
 
+/*
+  画面で指しながらの案内（設計書6.104）。
+
+  **誘うところと、案内そのものを分ける。** 答えのすぐ下に出るのは
+  「案内しましょうか」の1行だけで、押されて初めて段の札が出る。
+  聞いただけの回にサイドバーが動くと、作者の手元を横取りすることになる。
+*/
+function appendTourOffer(turn, tour) {
+  const box = document.createElement('div');
+  box.className = 'options';
+  const button = document.createElement('button');
+  button.className = 'option';
+  button.innerHTML =
+    '<span class="mark">▶</span><span>画面で案内してもらう：' +
+    escapeHtml(tour.title) +
+    '（' + tour.steps + '手順）</span>';
+  button.addEventListener('click', () => {
+    if (busy) return;
+    button.disabled = true;
+    vscode.postMessage({ type: 'startTour', key: tour.key });
+  });
+  box.appendChild(button);
+  turn.appendChild(box);
+}
+
+/**
+ * 済んだ札を押せなくする。
+ *
+ * **消さない。** どこを通ってきたかが会話に残るほうが、あとで
+ * 同じことをするときに役に立つ。
+ */
+function sealTourCards() {
+  document.querySelectorAll('.tour:not(.sealed)').forEach((box) => {
+    box.classList.add('sealed');
+    box.querySelectorAll('button').forEach((el) => { el.disabled = true; });
+  });
+}
+
+/**
+ * 案内の1段を出す。
+ *
+ * 出すのは5つ——**いま何番目か／何をするか／次へ進む前に何を見るか／
+ * 代わりに押して／やめる**。「やめる」を毎段に置くのは、
+ * **途中でいつでも抜けられること**が見えていないと、始めるのが怖いからである。
+ */
+function appendTourStep(step, where) {
+  sealTourCards();
+  emptyEl.hidden = true;
+
+  const box = document.createElement('div');
+  box.className = 'tour';
+
+  const position = document.createElement('div');
+  position.className = 'position';
+  position.textContent = step.title + '｜' + step.position;
+  box.appendChild(position);
+
+  const what = document.createElement('div');
+  what.className = 'what';
+  what.textContent = step.number + '. ' + step.label;
+  box.appendChild(what);
+
+  const why = document.createElement('div');
+  why.className = 'why';
+  why.textContent = step.why;
+  box.appendChild(why);
+
+  const check = document.createElement('div');
+  check.className = 'check';
+  check.textContent = '次へ進む前に：' + step.check;
+  box.appendChild(check);
+
+  // 前提（「先に『設定資料』が要ります。」）は、押す直前に読めないと意味がない
+  if (step.prerequisiteNote) {
+    const needs = document.createElement('div');
+    needs.className = 'needs';
+    needs.textContent = step.prerequisiteNote;
+    box.appendChild(needs);
+  }
+
+  // **光らせられたかを正直に出す。** 見つからなかったのに黙っていると、
+  // 作者は画面のどこにも無いものを探すことになる
+  const whereLine = document.createElement('div');
+  whereLine.className = 'where';
+  whereLine.textContent = where;
+  box.appendChild(whereLine);
+
+  const row = document.createElement('div');
+  row.className = 'row';
+
+  // **既定は作者が押す。** これは急ぐ人のための道であって、
+  // 押しても押さなくても次の段へは同じように進む
+  const run = document.createElement('button');
+  run.className = 'action secondary';
+  run.textContent = '代わりに押して';
+  run.addEventListener('click', () => {
+    run.disabled = true;
+    vscode.postMessage({ type: 'tourRun' });
+  });
+  row.appendChild(run);
+
+  const stop = document.createElement('button');
+  stop.className = 'action secondary';
+  stop.textContent = 'やめる';
+  stop.addEventListener('click', () => {
+    vscode.postMessage({ type: 'tourStop' });
+  });
+  row.appendChild(stop);
+
+  box.appendChild(row);
+  logEl.appendChild(box);
+}
+
 function markEdit(id, message, ok) {
   const box = document.querySelector('[data-edit-id="' + id + '"]');
   if (!box) return;
@@ -899,6 +1047,9 @@ window.addEventListener('message', (event) => {
     // 参照（そこを見せて）はそのまま出し、作業の提案は畳んで置く
     if (message.locate) appendLocate(turn, message.locate);
     appendStagedActions(turn, message);
+    // 案内の誘い（設計書6.104）。**選択肢より先に置く**——
+    // 「どの順でやるか」は、言い直しの候補より先に読みたい
+    if (message.tour) appendTourOffer(turn, message.tour);
     appendOptions(turn, message.options || []);
     scrollToBottom();
     return;
@@ -918,6 +1069,31 @@ window.addEventListener('message', (event) => {
     // 成否にかかわらず、押せる状態へ戻す。結果は通知と note が伝える
     applying = false;
     updateApplyState();
+    return;
+  }
+  // 画面で指しながらの案内（設計書6.104）
+  if (message.type === 'tourStep') {
+    appendTourStep(message.step, message.where);
+    scrollToBottom();
+    return;
+  }
+  if (message.type === 'tourEnded') {
+    // 終わった案内の札は押せなくする。**消さない**（通った道が残る）
+    sealTourCards();
+    const note = document.createElement('div');
+    note.className = 'note';
+    note.textContent = message.message;
+    logEl.appendChild(note);
+    scrollToBottom();
+    return;
+  }
+  // 「代わりに押して」が起こせなかったとき。**案内は続ける**
+  if (message.type === 'tourNote') {
+    const note = document.createElement('div');
+    note.className = 'note';
+    note.textContent = message.message;
+    logEl.appendChild(note);
+    scrollToBottom();
     return;
   }
   if (message.type === 'note') {

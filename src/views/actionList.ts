@@ -2565,6 +2565,68 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
     return counter && this.counts ? this.counts(counter) : 0;
   }
 
+  /**
+   * 親をたどる（設計書6.104）。
+   *
+   * **`TreeView.reveal()` を使うために要る。** VS Code は最上位から順に
+   * 開きながら目当ての行へたどり着くので、親を答えられないツリーでは
+   * 分類の中の操作を光らせられない。
+   *
+   * 親は**画面に並んでいるものから探す**（`listChildren` と同じ絞り方）。
+   * 隠れている項目を親として返すと、開けない行を開こうとして空振りする。
+   */
+  getParent(node: ActionNode): ActionNode | undefined {
+    if (node.type === "group") return undefined;
+
+    const groups = visibleGroups(this.registry.list().length > 0);
+    if (node.type === "section") {
+      const group = groups.find((entry) => entry.label === node.groupLabel);
+      return group ? { type: "group", group } : undefined;
+    }
+
+    const runtimeAllowsProcesses = canRunProcesses();
+    for (const group of groups) {
+      for (const entry of shownEntries(group.entries, runtimeAllowsProcesses)) {
+        if (entry.kind === "action") {
+          if (entry.command === node.item.command) {
+            return { type: "group", group };
+          }
+          continue;
+        }
+        const inSection = shownEntries(entry.items, runtimeAllowsProcesses).some(
+          (item) => item.command === node.item.command
+        );
+        if (inSection) {
+          return { type: "section", section: entry, groupLabel: group.label };
+        }
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * コマンドIDから、画面に並んでいる操作の節点を引く。
+   *
+   * **見つからなければ undefined。** 案内（設計書6.104）は、光らせられ
+   * なかったことを黙って成功にしないために、ここで分かる必要がある。
+   */
+  findActionNode(command: string): ActionNode | undefined {
+    const runtimeAllowsProcesses = canRunProcesses();
+    for (const group of visibleGroups(this.registry.list().length > 0)) {
+      for (const entry of shownEntries(group.entries, runtimeAllowsProcesses)) {
+        if (entry.kind === "action") {
+          if (entry.command === command) return { type: "action", item: entry };
+          continue;
+        }
+        const found = shownEntries(entry.items, runtimeAllowsProcesses).find(
+          (item) => item.command === command
+        );
+        if (found) return { type: "action", item: found };
+      }
+    }
+    return undefined;
+  }
+
   getChildren(node?: ActionNode): ActionNode[] {
     try {
       return this.listChildren(node);

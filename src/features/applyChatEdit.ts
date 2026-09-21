@@ -35,11 +35,27 @@ import type { ChatEdit, ChatEditTarget } from "../core/chatEdit";
  */
 export async function applyChatEdit(
   work: WorkEntry,
-  edit: ChatEdit
+  edit: ChatEdit,
+  options: {
+    /**
+     * 空の中身も書く（**取り消し専用**。設計書6.4.7）。
+     *
+     * **AIには渡させない。** `ChatEdit` の中ではなく呼び出しの引数に
+     * 置いてあるのは、AIが返した値からこの印が立つ余地を残さないためである。
+     * 普通の書き込みでは `parseChatEdit` が空の `content` を弾くので、
+     * ここが立つのは「書く前の値（空かもしれない）へ戻す」ときだけになる。
+     */
+    allowEmpty?: boolean;
+  } = {}
 ): Promise<string> {
   switch (edit.target.kind) {
     case "plot":
-      return applyToPlot(work, edit.target.section, edit.content);
+      return applyToPlot(
+        work,
+        edit.target.section,
+        edit.content,
+        options.allowEmpty ?? false
+      );
     case "blurb":
       return applyToSynopsisDoc(work, (current) => ({
         ...current,
@@ -100,7 +116,8 @@ export async function readChatEditTarget(
 async function applyToPlot(
   work: WorkEntry,
   section: keyof PlotSections,
-  content: string
+  content: string,
+  allowEmpty: boolean
 ): Promise<string> {
   const target = await settingsFile(work, "plot.md");
   const current = await readText(target);
@@ -109,7 +126,7 @@ async function applyToPlot(
   const body = updatePlotMarkdown(
     current ?? "",
     { [section]: content },
-    { workTitle: work.title }
+    { workTitle: work.title, allowEmpty }
   );
 
   await replaceFile(target, body);
@@ -156,6 +173,19 @@ async function applyToEpisodeSynopsis(
   chapter: number,
   content: string
 ): Promise<string> {
+  /*
+    **空にはできない**（2026-09-21）。台帳は非空を前提に検証しているので、
+    空を書くと**保存は通るのに次の読み込みで台帳ごと読めなくなる**
+    （`test/unit/synopsisStore.test.ts`）。取り消しで空が来たときのために
+    ここで断る——`plot.md` のように「空へ戻す」はできない対象である。
+  */
+  if (content === "") {
+    throw new Error(
+      `第${chapter}話のあらすじは空にできません（台帳が読めなくなるため）。` +
+        "手で書き換えてください。"
+    );
+  }
+
   const store = new SynopsisStore(work);
   const set = await store.load();
 

@@ -18,23 +18,41 @@ import type { WorkEntry } from "../../src/models/types";
  */
 
 const applied = vi.hoisted(
-  () => [] as Array<{ workId: string; target: unknown; content: string }>
+  () =>
+    [] as Array<{
+      workId: string;
+      target: unknown;
+      content: string;
+      allowEmpty: boolean;
+    }>
 );
 /** 書き込み先にいま入っている値（取り消しの照合に使う） */
 const currentValue = vi.hoisted(() => ({ text: "" }));
+/** 書き込みが効かない状況を作る（実機で起きた「戻っていないのに戻した」） */
+const behavior = vi.hoisted(() => ({ ignoreWrites: false }));
 const confirmed = vi.hoisted(() => [] as string[]);
 
 vi.mock("../../src/features/applyChatEdit", () => ({
   applyChatEdit: async (
     work: { id: string },
-    edit: { target: unknown; content: string }
+    edit: { target: unknown; content: string },
+    options?: { allowEmpty?: boolean }
   ) => {
     applied.push({
       workId: work.id,
       target: edit.target,
       content: edit.content,
+      allowEmpty: options?.allowEmpty === true,
     });
-    // 書けば、いま入っている値は書いた中身になる
+    /*
+      **本物と同じく、空では書かない**（`updatePlotMarkdown` は空の更新を
+      捨てる。作者の文がAIの空応答で消えるのを防ぐ守り）。取り消しだけが
+      `allowEmpty` を立てて空にできる。
+    */
+    if (behavior.ignoreWrites) return "設定/plot.md";
+    if (edit.content === "" && options?.allowEmpty !== true) {
+      return "設定/plot.md";
+    }
     currentValue.text = edit.content;
     return "設定/plot.md";
   },
@@ -176,6 +194,7 @@ function find(posted: Posted[], type: string): Posted | undefined {
 beforeEach(() => {
   applied.length = 0;
   confirmed.length = 0;
+  behavior.ignoreWrites = false;
   currentValue.text = "（まだ書かれていません）";
 });
 
@@ -187,7 +206,14 @@ describe("頼んだ書き込みは、訊かずに書く", () => {
 
     expect(confirmed, "確認を出している").toEqual([]);
     expect(applied).toEqual([
-      { workId: "w_a", target: { kind: "plot", section: "logline" }, content: WRITTEN },
+      {
+        workId: "w_a",
+        target: { kind: "plot", section: "logline" },
+        content: WRITTEN,
+        // **普通の書き込みは空を許さない**。ここが立つと、AIの空応答で
+        // 作者の文が消える道ができる
+        allowEmpty: false,
+      },
     ]);
   });
 
@@ -230,8 +256,50 @@ describe("取り消し", () => {
       workId: "w_a",
       target: { kind: "plot", section: "logline" },
       content: "（まだ書かれていません）",
+      allowEmpty: true,
     });
     expect(find(h.posted, "undoDone")).toBeTruthy();
+  });
+
+  test("もともと未記入だった項目は、未記入へ戻る", async () => {
+    /*
+      **実機で落ちたのはここである**（2026-09-21）。書く前が空だと、
+      取り消しは空文字を書き戻すことになる。`updatePlotMarkdown` は
+      空の更新を捨てるので、**更新時刻だけ変わって中身は残ったまま**
+      なのに「書く前（未記入）へ戻しました」と出ていた。
+    */
+    currentValue.text = "";
+    const h = harness();
+    await ask(h, "ログラインはこれで書いてください");
+    const id = find(h.posted, "editDone")!.id!;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (h.panel as any).undoEdit(id);
+
+    expect(applied[1].content).toBe("");
+    // 空を書けるのは取り消しだけ
+    expect(applied[1].allowEmpty, "取り消しなのに空を許していない").toBe(true);
+    expect(currentValue.text, "戻っていない").toBe("");
+    const done = find(h.posted, "undoDone");
+    expect(done, "戻したと伝えていない").toBeTruthy();
+    expect(done!.message).toContain("未記入");
+  });
+
+  test("戻っていないのに「戻しました」と言わない", async () => {
+    const h = harness();
+    await ask(h, "ログラインはこれで書いてください");
+    const id = find(h.posted, "editDone")!.id!;
+
+    // 何らかの理由で書き戻しが効かなかった状況
+    behavior.ignoreWrites = true;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (h.panel as any).undoEdit(id);
+
+    // **結果を確かめてから文面を出す。** ここを見ずに「戻しました」と
+    // 言ったのが、実機でいちばん悪かった点である
+    expect(find(h.posted, "undoDone"), "戻っていないのに戻したと言った").toBeFalsy();
+    expect(find(h.posted, "undoFailed"), "失敗を伝えていない").toBeTruthy();
   });
 
   test("作者が手で直したあとなら、戻さない", async () => {

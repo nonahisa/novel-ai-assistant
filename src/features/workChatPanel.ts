@@ -107,7 +107,11 @@ import {
   type ChatSettingsSyncResult,
 } from "./chatSettingsSync";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
-import { buildFeatureGuideForQuestion } from "./featureGuide";
+import {
+  buildFeatureGuideForQuestion,
+  procedureActionLookup,
+} from "./featureGuide";
+import { startTourByKey } from "../core/guidedTour";
 import {
   prepareRetrieval,
   search,
@@ -131,6 +135,8 @@ import { logFailure, logStep, useLogFile } from "../core/logger";
 import { renderMarkdownLite } from "../core/markdownLite";
 import { buildWorkChatPanelHtml } from "../views/workChatPanelHtml";
 import { cancelItem } from "../views/dialogs";
+import { GuidedTourHost } from "./guidedTour";
+import type { ActionSpotlight } from "./actionSpotlight";
 
 /**
  * 相談パネル（P-21）。
@@ -262,7 +268,19 @@ type Incoming =
    * 「戻す」なので**大きい画面は残さない**。両方に同じ会話が並んだまま
    * 場所だけ増えると、どちらを見ればよいのか分からなくなる。
    */
-  | { type: "showInSub" };
+  | { type: "showInSub" }
+  /**
+   * 画面で指しながらの案内を始める（設計書6.104）。
+   *
+   * **鍵しか渡さない。** 手順の中身は `core/procedures.ts` にあるものを
+   * 引き直す——画面から届いた文字列がそのまま手順になる道は作らない
+   * （「できること」の札と同じ関門）。
+   */
+  | { type: "startTour"; key: string }
+  /** 案内の「代わりに押して」（作者の裁定、2026-09-21） */
+  | { type: "tourRun" }
+  /** 案内の「やめる」。途中でいつでも抜けられる */
+  | { type: "tourStop" };
 
 /**
  * 標準機能を起動する口。
@@ -472,6 +490,55 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     this.selectionListener = this.ai.onDidChangeSelection(
       () => void this.postContext()
     );
+    // 画面で指しながらの案内（設計書6.104）。**札はこのパネルの中に出す**
+    // ——相談から始まる流れなので、専用のパネルを新しく作らない
+    this.tour = new GuidedTourHost({
+      ensureVisible: () => this.ensureChatVisible(),
+      post: (message) => this.postAll(message),
+    });
+  }
+
+  /**
+   * 画面で指しながらの案内（設計書6.104）。
+   *
+   * **判断は `core/guidedTour.ts` にあり、ここは持たない。** パネルは
+   * 札を出す場所を貸しているだけである。
+   */
+  private readonly tour: GuidedTourHost;
+
+  /** 光らせる先（3つのツリー）を渡す。拡張機能の起動時に一度だけ呼ぶ */
+  setTourSpotlight(spotlight: ActionSpotlight): void {
+    this.tour.setSpotlight(spotlight);
+  }
+
+  /**
+   * 答えに添える「画面で案内しましょうか」の誘い（設計書6.104）。
+   *
+   * **組めない手順は誘わない。** ここで一度組んでみて、段が1つも
+   * 残らないなら誘いを出さない——押しても始まらない札を出すと、
+   * 作者は壊れていると思う。
+   *
+   * すでに案内している最中も誘わない（札が二重になる）。
+   */
+  private tourOffer(
+    key: string | undefined
+  ): { tour: { key: string; title: string; steps: number } } | undefined {
+    if (!key || this.tour.isActive()) return undefined;
+    const state = startTourByKey(key, procedureActionLookup);
+    if (!state) return undefined;
+    return {
+      tour: { key: state.key, title: state.title, steps: state.steps.length },
+    };
+  }
+
+  /**
+   * 操作が実行されたことを知らせる（`extension.ts` の `registerCommand`）。
+   *
+   * **自分で押しても、「代わりに押して」でも、同じここを通る。**
+   * どちらを選んでも進み方が同じである、という約束はこれで守られる。
+   */
+  notifyCommandRun(command: string): void {
+    this.tour.notifyCommand(command);
   }
 
   /**
@@ -868,6 +935,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // 読者像の控えも捨てる。**診断し直した直後に、それが効く道を残す**
       // （開いたままのパネルで一度読んだきりだと、古い読者像で助言し続ける）
       this.readerProfileCache = undefined;
+      // **案内も畳む**（設計書6.104）。会話を消すと案内の札も画面から
+      // 消えるので、続けたままにすると「押しても進まない案内」が
+      // 見えないところに残る
+      this.tour.stop();
       // もう片方の画面にも、消えたことを伝える
       this.postOthers(source, { type: "cleared" });
       return;
@@ -880,6 +951,18 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
     if (message.type === "chooseWork") {
       await this.chooseWork();
+      return;
+    }
+    if (message.type === "startTour") {
+      await this.tour.start(message.key);
+      return;
+    }
+    if (message.type === "tourRun") {
+      await this.tour.runCurrent();
+      return;
+    }
+    if (message.type === "tourStop") {
+      this.tour.stop();
       return;
     }
     if (message.type === "quickRun") {
@@ -1288,6 +1371,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       const { edit, ...others } = staged;
       this.postAll({
         type: "answer",
+        // **案内は誘うだけ。勝手には始めない**（設計書6.104）。
+        // 始めるとサイドバーが動いて選択が移るので、聞いただけの回に
+        // それをやると、作者の手元を横取りすることになる
+        ...(this.tourOffer(guide.procedureKey) ?? {}),
         reply: answer.reply,
         // AIはMarkdownで返してくる。記号のまま見せない
         html: renderMarkdownLite(answer.reply),
@@ -1903,10 +1990,36 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         return;
       }
 
-      const written = await applyChatEdit(undo.work, {
-        ...undo.edit,
-        content: undo.before,
-      });
+      const written = await applyChatEdit(
+        undo.work,
+        { ...undo.edit, content: undo.before },
+        // **空でも書く。** 書く前が未記入だったなら、未記入へ戻すのが
+        // 「取り消し」である（設計書6.4.7。普通の書き込みでは空を弾く）
+        { allowEmpty: true }
+      );
+
+      /*
+        **戻ったことを確かめてから言う**（実機、2026-09-21）。
+        `updatePlotMarkdown` が空の更新を捨てていたため、**中身は元のまま
+        なのに「書く前（未記入）へ戻しました」と出た**。書き込みが通った
+        ことと、狙った値になったことは別である。
+      */
+      const after = await readChatEditTarget(undo.work, undo.edit.target);
+      if (after !== undo.before) {
+        logFailure("相談からの書き込みの取り消し", {
+          内容: "書き戻したが、値が元へ戻っていない",
+          場所: `${where.file} / ${where.item}`,
+        });
+        this.postAll({
+          type: "undoFailed",
+          id,
+          message:
+            `${where.file} の「${where.item}」を元へ戻せませんでした。` +
+            "ファイルを開いて確かめてください。",
+        });
+        return;
+      }
+
       this.pendingUndos.delete(id);
       this.postAll({
         type: "undoDone",

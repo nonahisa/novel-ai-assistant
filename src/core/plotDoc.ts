@@ -235,16 +235,38 @@ export function writtenPlotSections(
  *
  * @param text いまのファイルの中身。空なら新しく組み立てる
  * @param updates 書き足す節だけを入れる
+ * @param options `allowEmpty` は**取り消し専用**。下の説明を読むこと
  */
 export function updatePlotMarkdown(
   text: string,
   updates: Partial<PlotSections>,
-  options: { workTitle: string }
+  options: {
+    workTitle: string;
+    /**
+     * 空の中身も書く（**取り消しのときだけ**立てる。設計書6.4.7）。
+     *
+     * 既定では空の更新を捨てる。**AIの空応答や取り違えで、作者の書いた文が
+     * 消えるのを防ぐ守りである**（実装ルール2）——ここを常に開けてはいけない。
+     *
+     * ただし相談パネルの「取り消す」は、**書く前が未記入だったなら未記入へ
+     * 戻す**のが正しい。実機では守りに弾かれ、**更新時刻だけ変わって中身は
+     * 残ったまま**なのに「書く前（未記入）へ戻しました」と出た（2026-09-21）。
+     *
+     * **消すのは中身だけで、見出しは残す。** ひな形や作者が立てた見出しまで
+     * 消しかねないためで、空の見出しは読み戻すと「未記入」になる
+     * （`isBlankPlotSection`）ので噛み合う。**見出しが無い節へ空を書けとは
+     * 言われても足さない**（未記入のままであり、空の見出しを作る意味が無い）。
+     */
+    allowEmpty?: boolean;
+  }
 ): string {
+  const allowEmpty = options.allowEmpty ?? false;
   const wanted = new Map<PlotSectionKey, string>();
   for (const section of PLOT_SECTIONS) {
     const value = updates[section.key]?.trim();
-    if (value) wanted.set(section.key, value);
+    if (value === undefined) continue;
+    if (value === "" && !allowEmpty) continue;
+    wanted.set(section.key, value);
   }
   if (wanted.size === 0) return text;
 
@@ -280,9 +302,14 @@ export function updatePlotMarkdown(
     out.push(line);
   }
 
-  // 見出しが無かったものは末尾へ足す
+  // 見出しが無かったものは末尾へ足す。
+  // **空の節は足さない**（取り消しで空を渡されたとき。見出しが無いなら
+  // もともと未記入であり、空の見出しを作っても読み手には同じである）
   const appended = PLOT_SECTIONS.filter(
-    (section) => wanted.has(section.key) && !applied.has(section.key)
+    (section) =>
+      wanted.has(section.key) &&
+      !applied.has(section.key) &&
+      wanted.get(section.key) !== ""
   );
   if (appended.length > 0) {
     // 中身が空のファイル（`"".split` は空行1つになる）は、題から組み立てる

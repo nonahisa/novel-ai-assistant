@@ -40,6 +40,31 @@ describe("synopsis.md の組み立てと読み取り", () => {
     );
   });
 
+  test("空へ戻したものは、空として読み戻せる", () => {
+    /*
+      相談パネルの「取り消す」は、書く前が未記入なら空を書き戻す
+      （設計書6.4.7）。**plot.md では空の更新が捨てられており、戻って
+      いないのに「戻しました」と出た**（2026-09-21）。こちらにも同じ穴が
+      無いかを見る——`synopsis.md` は毎回組み立て直すので空も通る。
+    */
+    const cleared = parseSynopsisMarkdown(
+      buildSynopsisMarkdown("作品", { catchphrase: "", blurb: "" })
+    );
+
+    expect(cleared.blurb).toBe("");
+    // 空のキャッチコピーは行ごと落ちる。読み戻すと null（＝未記入）で、
+    // 取り消し側の「空」と噛み合う
+    expect(cleared.catchphrase).toBeNull();
+  });
+
+  test("片方を空へ戻しても、もう片方は残る", () => {
+    const kept = parseSynopsisMarkdown(
+      buildSynopsisMarkdown("作品", { catchphrase: "コピー", blurb: "" })
+    );
+
+    expect(kept).toEqual({ catchphrase: "コピー", blurb: "" });
+  });
+
   test("キャッチコピーが無くても読める", () => {
     expect(parseSynopsisMarkdown("# 作品\n\n紹介文だけ。\n")).toEqual({
       catchphrase: null,

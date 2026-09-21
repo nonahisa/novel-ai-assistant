@@ -218,6 +218,54 @@ describe("書き足しても、作者の文書の形を変えない", () => {
     expect(updatePlotMarkdown(before, {}, { workTitle: "作品" })).toBe(before);
   });
 
+  test("空で上書きしない（既定）", () => {
+    // **AIの空応答や取り違えで、作者の書いた文が消えるのを防ぐ守り**。
+    // ここは外さない（実装ルール2）
+    const before = "# 作品\n\n## テーマ\n制度と現場のギャップ。\n";
+
+    expect(updatePlotMarkdown(before, { theme: "" }, { workTitle: "作品" })).toBe(
+      before
+    );
+  });
+
+  test("取り消しのときだけ、空へ戻せる", () => {
+    /*
+      **実機で「戻しました」と出たのに戻っていなかった**（2026-09-21）。
+      相談パネルの書き込みは確認なしで行うようになり（設計書6.4.7）、
+      代わりに「取り消す」を置いた。その取り消しが空文字を渡すため、
+      上の守りに弾かれて**更新時刻だけが変わっていた**。
+
+      **見出しは残す。** ひな形や作者が立てた見出しまで消しかねないので、
+      中身だけを空にする（読み戻すと「未記入」になる）。
+    */
+    const before = "# 作品\n\n## テーマ\n制度と現場のギャップ。\n\n## 舞台\n北の港町\n";
+
+    const after = updatePlotMarkdown(
+      before,
+      { theme: "" },
+      { workTitle: "作品", allowEmpty: true }
+    );
+
+    expect(parsePlotMarkdown(after).sections.theme).toBe("");
+    // 見出しは残り、触っていない節は1文字も変わらない
+    expect(after).toContain("## テーマ");
+    expect(parsePlotMarkdown(after).sections.setting).toBe("北の港町");
+  });
+
+  test("空へ戻しても、見出しの無い節を作らない", () => {
+    // 元から見出しが無い節へ「空を書け」と言われても、空の見出しを
+    // 足す意味は無い（未記入のままである）
+    const before = "# 作品\n\n## テーマ\n旧\n";
+
+    const after = updatePlotMarkdown(
+      before,
+      { motif: "" },
+      { workTitle: "作品", allowEmpty: true }
+    );
+
+    expect(after).not.toContain("## モチーフ");
+  });
+
   test("改行コードを変えない", () => {
     // 作者の環境や外部ツールが決めたものを、書き足しのついでに揃えない
     const before = "# 作品\r\n\r\n## テーマ\r\n旧\r\n";

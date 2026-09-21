@@ -768,6 +768,59 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
     return this.actionItem(node.item);
   }
 
+  /**
+   * 親をたどる（設計書6.104）。
+   *
+   * **`TreeView.reveal()` を使うために要る**（詳細メニューと同じ理由）。
+   * 探すのは `visibleSteps()` の中だけ——作品のタイプで消えている段を
+   * 親として返すと、画面に無い行を開こうとして空振りする。
+   */
+  getParent(node: StepNode): StepNode | undefined {
+    if (node.type === "selector" || node.type === "step") return undefined;
+    if (node.type === "section" || node.type === "placeholder") {
+      const step = this.visibleSteps().find(
+        (entry) => entry.label === node.stepLabel
+      );
+      return step ? { type: "step", step } : undefined;
+    }
+
+    for (const step of this.visibleSteps()) {
+      for (const entry of step.entries) {
+        if (entry.kind === "action") {
+          if (entry.command === node.item.command) return { type: "step", step };
+          continue;
+        }
+        if (entry.kind !== "section") continue;
+        if (entry.items.some((item) => item.command === node.item.command)) {
+          return { type: "section", section: entry, stepLabel: step.label };
+        }
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * コマンドIDから、いま並んでいる操作の節点を引く。
+   *
+   * **無ければ undefined。** 簡単ステップメニューに置いていない操作
+   * （投稿の「新話を投稿」など）があるので、案内（設計書6.104）は
+   * ここで空振りを知って詳細メニューへ回る。
+   */
+  findActionNode(command: string): StepNode | undefined {
+    for (const step of this.visibleSteps()) {
+      for (const entry of step.entries) {
+        if (entry.kind === "action") {
+          if (entry.command === command) return { type: "action", item: entry };
+          continue;
+        }
+        if (entry.kind !== "section") continue;
+        const found = entry.items.find((item) => item.command === command);
+        if (found) return { type: "action", item: found };
+      }
+    }
+    return undefined;
+  }
+
   getChildren(node?: StepNode): StepNode[] {
     if (!node) {
       // **最上段は作品選択窓。** 下に並ぶものが何に効くのかを、

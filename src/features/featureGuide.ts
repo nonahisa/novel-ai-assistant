@@ -390,6 +390,13 @@ export function buildFeatureGuideForQuestion(input: {
   topic: ChatTopic;
   /** 渡した手順書きの題。渡さなかった回は undefined（記録用） */
   procedure?: string;
+  /**
+   * 渡した手順書きの鍵（設計書6.104）。
+   *
+   * **題とは別に返す。** 画面で案内するときに引き直すのは鍵のほうで、
+   * 題を鍵の代わりに使うと、題を書き直した日に案内だけが始まらなくなる。
+   */
+  procedureKey?: string;
 } {
   const bundles = buildGuideBundles();
   // 束選びをもう一度走らせることになるが、**判定の規則は1か所に置く**ほうが
@@ -462,7 +469,9 @@ export function buildFeatureGuideForQuestion(input: {
     selected: selection.selected.map((bundle) => bundle.label),
     reason: selection.reason,
     topic,
-    ...(procedureText && procedure ? { procedure: procedure.title } : {}),
+    ...(procedureText && procedure
+      ? { procedure: procedure.title, procedureKey: procedure.key }
+      : {}),
   };
 }
 
@@ -477,7 +486,7 @@ export function buildFeatureGuideForQuestion(input: {
  * 絞る規則と揃える——手順書きだけが、探しても見つからない操作を
  * 案内してしまうことのないように。
  */
-function procedureActionLookup(
+export function procedureActionLookup(
   command: string
 ): ProcedureActionInfo | undefined {
   const action = findAction(command);

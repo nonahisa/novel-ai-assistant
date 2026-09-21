@@ -229,6 +229,8 @@ import { generatePlot } from "./features/generatePlot";
 import { openPlotMode, refreshPlotMode } from "./features/plotModePanel";
 import { syncPlotCharacters } from "./features/plotCharacterSync";
 import { WORK_CHAT_VIEW_ID, WorkChatPanel } from "./features/workChatPanel";
+// 押すべき項目をサイドバーで光らせる（設計書6.104）
+import { createActionSpotlight } from "./features/actionSpotlight";
 import { ChatterService } from "./features/chatterService";
 import { requestChatterComment } from "./features/chatterComment";
 import { setPlotBasics } from "./features/setPlotBasics";
@@ -587,6 +589,18 @@ export async function activate(
    *
    * さらに、**前提の関門をここで通す**（上の `guardPrerequisites`）。
    */
+  /**
+   * 操作が済んだことを知りたい人（設計書6.104）。
+   *
+   * **登録の口が1つであることに相乗りする。** 画面で指しながらの案内は、
+   * 作者が自分で押したときにも次の段へ進む必要があるが、80か所の
+   * コマンドへ1行ずつ足して回るのは、足し忘れが必ず出る。
+   *
+   * 相談パネルはこの包みより後で組み立てるので、後から差し込める形に
+   * してある（案内していないあいだは、呼ばれても最初の1行で戻る）。
+   */
+  let onCommandFinished: ((command: string) => void) | undefined;
+
   const registerCommand: typeof vscode.commands.registerCommand = (
     command,
     callback,
@@ -605,7 +619,24 @@ export async function activate(
         return undefined;
       }
       try {
-        return await callback.apply(thisArg, args);
+        const returned = await callback.apply(thisArg, args);
+        /*
+          **成功して返ったときだけ知らせる**（設計書6.104）。
+
+          前提の関門で止まった回（上で return 済み）と、例外で落ちた回を
+          数えると、やっていない段が「済んだ」ことになる。
+          知らせる相手の都合で操作そのものを止めない——ここで投げると、
+          案内の不具合が普通の操作を壊すことになる。
+        */
+        try {
+          onCommandFinished?.(command);
+        } catch (error) {
+          logFailure("操作の通知", {
+            操作: command,
+            理由: error instanceof Error ? error.message : String(error),
+          });
+        }
+        return returned;
       } finally {
         // **失敗しても、途中で止めても必ず解く。** 解き忘れると、その操作が
         // 二度と押せなくなる（重複起動より重い壊れ方）
@@ -1584,6 +1615,24 @@ export async function activate(
       await panel.reloadRecordFromChat(kind, recordId, notes);
     },
   }, advicePolicies, writerProfiles);
+  /*
+    画面で指しながらの案内（設計書6.104。第1段）。
+
+    **光らせる先は、ここでしか渡せない。** 3つのツリーは
+    `createTreeView` の戻り値で、拡張機能の起動の途中にしか無い。
+    押されたことを拾う口も、コマンド登録の包みに相乗りする形でここで繋ぐ
+    ——案内していないあいだは何も起きない。
+  */
+  workChatPanel.setTourSpotlight(
+    createActionSpotlight({
+      stepView,
+      stepProvider,
+      actionView,
+      actionProvider,
+    })
+  );
+  onCommandFinished = (command) => workChatPanel.notifyCommandRun(command);
+
   context.subscriptions.push(
     workChatPanel,
     vscode.window.registerWebviewViewProvider(WORK_CHAT_VIEW_ID, workChatPanel, {
