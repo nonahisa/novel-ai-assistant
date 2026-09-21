@@ -116,21 +116,27 @@ describe("原稿エディタの字数", () => {
  * 動かせない。**通っている道を、書いてあるコードの形で見る。**
  */
 describe("投稿サイト用のコピー", () => {
-  test("原稿エディタも sourceForPostingCopy を通す（全文を渡さない）", () => {
+  test("原稿エディタも postingCopySource を通す（全文を渡さない）", () => {
     const source = readFileSync(
       path.join(__dirname, "..", "..", "src", "features", "manuscriptEditor.ts"),
       "utf8"
     );
-    // 0.37.4：シーンメモを落とすのは変換の側（convertForPosting）に移った。
-    // ここでは「全文を渡さず、頭書きを除いた本文を渡す」ことだけを見る
-    const call = source.match(/const source = sourceForPostingCopy\([\s\S]*?\);/);
+    /*
+      0.37.4：シーンメモを落とすのは変換の側（convertForPosting）に移った。
+      0.48.1：合本なら、カーソルの居る1話だけを渡す（設計書6.12.1）。
+      0.74.12：**選んだところがあればそこだけ**（設計書6.12.8）。
+      判断そのものは `core/episodeCopy.ts` の `postingCopySource` へ移し、
+      **中身は `episodeCopy` 側のテストで測る**（画面を跨がずに済む）。
+      ここで見るのは「原稿エディタがその道を通っていること」だけ。
+    */
+    const call = source.match(/const \{ source[\s\S]*?postingCopySource\([\s\S]*?\);/);
 
     expect(call).not.toBeNull();
-    expect(call?.[0]).toContain("document.getText()");
-    // 0.48.1：合本なら、カーソルの居る1話だけを渡す（設計書6.12.1）。
-    // **この画面は選択を渡す道が無い**ので、手で1話ぶんを選ぶ逃げ道も無い
-    expect(call?.[0]).toContain("collected?.body");
-    expect(source).toContain("collectedEpisodeAt(document.getText(), caretLine)");
+    expect(call?.[0]).toContain("whole");
+    expect(call?.[0]).toContain("caretLine");
+    // 選んだところ（LF空間の位置を、文書の位置へ直してから切る）
+    expect(call?.[0]).toContain("picked");
+    expect(source).toContain("fromLfOffset(whole, selection.start)");
     expect(source).toContain("convertForPosting(source, target)");
   });
 });

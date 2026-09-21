@@ -4935,14 +4935,16 @@ export async function activate(
       "novelai.runReaderTargetDiagnosis",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        // **結末を名乗って返す**（0.74.12）。手順書きの段になったので、
+        // 「画面で案内してもらう」が次へ進んでよいかを判断できる必要がある
+        if (!work) return CHECK_CANCELLED;
 
         const { runReaderTargetDiagnosis } = await import(
           "./features/readerTargetDiagnosis.js"
         );
         // 作者自身の読者タイプ（6.101）を渡す。**未診断なら undefined** で、
         // そのときは紙の突き合わせの節がまるごと出ない（推測で埋めない）
-        await runReaderTargetDiagnosis(
+        return runReaderTargetDiagnosis(
           work,
           aiRegistry,
           authorReaderTypes.get()

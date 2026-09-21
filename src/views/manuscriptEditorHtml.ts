@@ -462,8 +462,15 @@ body.vertical #compose .memo::before {
      作者には「最終行に打ち足した文字だけ書体が違う」と見えた。
      書体の引き当ては、持っていない字だけ次へ落ちる仕組みなので、
      **作者の書体が「…」を持っていればそれで描かれ、持っていなければ
-     和文明朝へ落ちる。** 名指しの固定より、この順のほうが両方を満たす */
-  font-family: var(--novelai-font, "Yu Mincho"), "Yu Mincho", "YuMincho",
+     和文明朝へ落ちる。** 名指しの固定より、この順のほうが両方を満たす
+
+     **先頭は印だけの書体（--novelai-mark-font）にする**（実機の報告、
+     2026-09-21。0.74.12で直した）。字を持ってはいるのに形が合わない書体
+     （游明朝・ＭＳ 明朝・游ゴシック・VS Codeの等幅）があり、CSSの引き当ては
+     そこで後ろへ落ちてくれない。**どの書体を印に使うかは拡張機能側が決め**
+     （core/markFont.ts）、困らない書体のときは作者の書体そのものが入る */
+  font-family: var(--novelai-mark-font, var(--novelai-font, "Yu Mincho")),
+    var(--novelai-font, "Yu Mincho"), "Yu Mincho", "YuMincho",
     "Hiragino Mincho ProN", "MS Mincho", serif;
 }
 /* **箱を1em角の正方形に固定する**（実機の報告、2026-08-28）。
@@ -494,9 +501,16 @@ body.vertical #compose .ellipsis {
 
    **縦書きの回転も1em角の固定も付けない**（三点リーダとはここが違う）。
    和文書体はダッシュの縦用の字形を持っているので、縦書きでは何もしなくても
-   正しく立つ。回すと、かえって字が切れる。 */
+   正しく立つ。回すと、かえって字が切れる。
+
+   **先頭は印だけの書体（--novelai-mark-font）にする**（作者の実機報告、
+   2026-09-21。0.74.12で直した）。書体を替えて「――」を見たところ、
+   **游明朝・ＭＳ 明朝・游ゴシックだけ隙間が出た**——この3つは縦用の
+   ダッシュが字送りより短い。字は持っているので、ここを作者の書体のままに
+   していると後ろへ落ちない。倒し先は core/markFont.ts が決める。 */
 #compose .dash {
-  font-family: var(--novelai-font, "Yu Mincho"), "Yu Mincho", "YuMincho",
+  font-family: var(--novelai-mark-font, var(--novelai-font, "Yu Mincho")),
+    var(--novelai-font, "Yu Mincho"), "Yu Mincho", "YuMincho",
     "Hiragino Mincho ProN", "MS Mincho", serif;
 }
 /* **半角数字の縦中横**（作者の依頼、2026-09-12
@@ -1924,8 +1938,26 @@ ruby > rt {
     add("投稿サイト用にコピー", function () {
       // **品書きから使う行を渡す。** 組んで書く面では、押した瞬間には
       // 選択が外れている（設計書6.12.1）
-      vscode.postMessage({ type: "copyForPosting", line: menuCaretLine() });
+      //
+      // **選んでいれば、その範囲だけ**（作者の裁定、2026-09-21）。
+      // 選ばずに押せば、これまでどおり話ぜんぶ。全体は品書きから消さない
+      // ——押す場所はメニューとツールバーにもある
+      const at = menuSelection();
+      vscode.postMessage({
+        type: "copyForPosting",
+        line: menuCaretLine(),
+        start: at ? at.start : -1,
+        end: at ? at.end : -1
+      });
     });
+    // **記法のままコピー**（作者に確かめていない仮置き。設計書6.12.8）。
+    // 普通のコピー（Ctrl+C）は貼り先に合わせて形が変わるので、素の
+    // VS Code エディタへ貼ると字だけになる。記法で貼りたいときの逃げ道
+    add("記法のままコピー", function () {
+      const text = menuSelectedNotation();
+      if (!text) return;
+      vscode.postMessage({ type: "copyNotation", text: text });
+    }, hasSelection);
     add("選んだところをAIに相談", function () {
       // 組んで書く面では、品書きを開いた時点の選択を使う。
       // **押した瞬間には選択が消えている**（画面の他所を押すと外れる）ので、
@@ -2072,6 +2104,32 @@ ruby > rt {
       return at ? lineOfOffset(composeTextNow(), at.start) : 0;
     }
     return lineOfOffset(write.value, write.selectionStart);
+  }
+
+  /**
+   * 品書きを開いた時点の選択（LF空間）。選んでいなければ null。
+   *
+   * **組んで書く面では、押した瞬間には選択が外れている**（設計書6.12.1）。
+   * 品書きを開いたときに控えた 「composeMenuAt」 を使う。
+   */
+  function menuSelection() {
+    if (composeOn) {
+      const at = composeMenuAt;
+      return at && at.end > at.start ? at : null;
+    }
+    const start = write.selectionStart;
+    const end = write.selectionEnd;
+    if (typeof start !== "number" || typeof end !== "number") return null;
+    return end > start ? { start: start, end: end } : null;
+  }
+
+  /** 選んだところを、**記法のまま**取り出す。選んでいなければ空文字 */
+  function menuSelectedNotation() {
+    const at = menuSelection();
+    if (!at) return "";
+    // 打つ面の値はもともと記法そのもの。組んで書く面は数え直して取る
+    const text = composeOn ? composeTextNow() : write.value;
+    return text.slice(at.start, at.end);
   }
 
   /*
@@ -2230,6 +2288,19 @@ ruby > rt {
           "--novelai-font",
           message.fontFamily
         );
+      }
+      /* **印（ダッシュ・三点リーダ）の書体は別に受ける**（設計書6.34）。
+         空で届くことがある（既定にまかせる設定）ので、そのときは変数ごと
+         外す——残したままにすると、前の書体が印にだけ残り続ける */
+      if (typeof message.markFontFamily === "string") {
+        if (message.markFontFamily) {
+          document.documentElement.style.setProperty(
+            "--novelai-mark-font",
+            message.markFontFamily
+          );
+        } else {
+          document.documentElement.style.removeProperty("--novelai-mark-font");
+        }
       }
       if (message.colors) {
         for (const key of Object.keys(message.colors)) {
@@ -3312,6 +3383,93 @@ ruby > rt {
 
     return composeTermForOffset(atoms, offset, spans);
   }
+
+  /* ── 写す・貼る（設計書6.12.8） ────────────────── */
+
+  /**
+   * 自前のクリップボードの形。**記法をそのまま載せる箱**である。
+   *
+   * 貼り先がこの形を読めるのは、この画面（と、同じ拡張機能の別の窓）だけ。
+   * ほかの場所へ貼ると、その場所が読める形（字だけ／HTML）が使われる。
+   */
+  const COMPOSE_NOTATION_FLAVOR = "application/x-novelai-notation";
+
+  /** HTMLへ載せる前に、記号を逃がす（& を先にしないと二重に逃げる） */
+  function composeEscapeHtml(text) {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  /**
+   * 写すときの3つの形（作者の裁定、2026-09-21）。
+   *
+   * 作者の言葉：「通常のコピー」＝「text とルビ等を持ったコピーで、
+   * メモにコピーしたら字だけ、ルビが可能なエディターに貼り付けたら
+   * ルビごと」。**貼り先が選べるように、3つ同時に載せる。**
+   *
+   * - plain（text/plain）……**字だけ。** 読み仮名も記法の記号も落とす。
+   *   メモ帳・チャット・素のエディタへ貼ったときに、本文だけが入る
+   * - html（text/html）……ruby 要素と em.emphasis。
+   *   ルビを組めるエディタ（Word・note など）へ貼ると、ルビごと入る
+   * - notation（自前の形）……記法のまま。この面へ貼り戻すと元に戻る
+   *
+   * **投稿サイトの記法（.txt）でも同じ。** どちらの記法で書かれていても
+   * 「字だけ」は字だけになる——記法の切り分けは 「composeParts」に任せ、
+   * ここでは写しを持たない。
+   *
+   * @param notation 選んだ範囲の**記法のままの文字列**
+   * @param mode "curly"（.md）か "site"（.txt）
+   */
+  function composeCopyPayloads(notation, mode) {
+    const source = composeNormalizeNewlines(notation);
+    const plain = [];
+    const html = [];
+    for (const line of source.split("\\n")) {
+      let bare = "";
+      let rich = "";
+      for (const part of composeParts(line, mode)) {
+        if (part.kind === "ruby") {
+          bare += part.base;
+          rich +=
+            "<ruby>" + composeEscapeHtml(part.base) +
+            "<rt>" + composeEscapeHtml(part.reading) + "</rt></ruby>";
+        } else if (part.kind === "emphasis") {
+          bare += part.base;
+          rich +=
+            '<em class="emphasis">' + composeEscapeHtml(part.base) + "</em>";
+        } else {
+          // **書きかけの記法は、字だけの側にも記法のまま残す。**
+          // composeParts が平文へ落とすのは「読み仮名が空のルビ」などで、
+          // 本文を消さないための扱いである。ここで畳むと字が減る
+          bare += part.src;
+          rich += composeEscapeHtml(part.src);
+        }
+      }
+      plain.push(bare);
+      html.push(rich);
+    }
+    return {
+      plain: plain.join("\\n"),
+      html: html.join("<br>"),
+      notation: source
+    };
+  }
+
+  /**
+   * 貼り付けで使う文字列を選ぶ。
+   *
+   * **自前の形を先に読む**（記法が戻る）。無ければ今までどおり字だけ。
+   * 外から来たものは記法を持っていないので、平文として入る。
+   */
+  function composePastePick(data) {
+    if (!data) return "";
+    // getData は、その形が無ければ空文字を返す（例外は投げない）
+    const own = data.getData(COMPOSE_NOTATION_FLAVOR);
+    if (own) return own;
+    return data.getData("text/plain");
+  }
   /* compose:end */
 
   /**
@@ -3757,22 +3915,27 @@ ruby > rt {
 
   compose.addEventListener("paste", function (event) {
     event.preventDefault();
-    const data = event.clipboardData;
-    composeInsertPlain(data ? data.getData("text/plain") : "");
+    // **自前の形（記法）があればそれを入れる**（設計書6.12.8）。
+    // この面から写したものを貼り戻すと、ルビと傍点が記法のまま戻る
+    composeInsertPlain(composePastePick(event.clipboardData));
   });
   compose.addEventListener("drop", function (event) {
     // 落とされたものも同じ（HTMLのまま入れない）
     event.preventDefault();
-    const data = event.dataTransfer;
-    composeInsertPlain(data ? data.getData("text/plain") : "");
+    composeInsertPlain(composePastePick(event.dataTransfer));
   });
 
   /**
-   * **写すときは、記法で写す。**
+   * **写すときは、3つの形を同時に載せる**（設計書6.12.8）。
    *
    * 見えている字をそのまま写すと、ルビは「親文字＋読み仮名」の並びになる
    * （組んで見せているだけで、間に区切りが無い）。それを貼り戻すと
    * **読み仮名が本文へ混ざる**。かたまりは記法（data-src）で写す。
+   *
+   * かつては記法だけを text/plain へ載せていた。作者の裁定
+   * （2026-09-21）で「通常のコピー」＝**貼り先に合わせて変わるコピー**に
+   * 改めた——メモへ貼れば字だけ、ルビの組めるエディタへ貼ればルビごと、
+   * この面へ貼り戻せば記法のまま。どれを使うかは貼り先が選ぶ。
    */
   function composeCopyNotation(event, andDelete) {
     const at = composeSelectionNow();
@@ -3782,7 +3945,13 @@ ruby > rt {
     event.preventDefault();
     let text = "";
     for (const atom of composeCurrentAtoms()) text += atom.text;
-    data.setData("text/plain", text.slice(at.start, at.end));
+    const payloads = composeCopyPayloads(
+      text.slice(at.start, at.end),
+      composeNotation
+    );
+    data.setData("text/plain", payloads.plain);
+    data.setData("text/html", payloads.html);
+    data.setData(COMPOSE_NOTATION_FLAVOR, payloads.notation);
     if (!andDelete) return;
     try {
       // 消すのはブラウザに任せる（自前で消すと取り消し履歴から外れる）

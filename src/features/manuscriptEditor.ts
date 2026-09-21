@@ -3,6 +3,7 @@ import {
   describeCurrentFont,
   listChoices,
 } from "../core/manuscriptFonts";
+import { markFontFor } from "../core/markFont";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import * as paths from "../core/paths";
 import { fromUri } from "../core/paths";
@@ -63,10 +64,7 @@ import {
   validateEmphasis,
   validateRuby,
 } from "../core/ruby";
-import {
-  collectedEpisodeAt,
-  sourceForPostingCopy,
-} from "../core/episodeCopy";
+import { postingCopySource } from "../core/episodeCopy";
 // 合本の見出しの作り方は1か所に置く（写しを作らない）
 import { collectedEpisodeLabel } from "./pickCollectedEpisode";
 // 貼り付け先ごとの分岐は、入口ではなく変換の側に置く（設計書6.84）
@@ -800,7 +798,22 @@ type Incoming =
        * コピーするのかがカーソルの位置でしか分からない（設計書6.12.1）。
        */
       line?: number;
+      /**
+       * 選んだ範囲（LF空間の位置）。選んでいなければ -1。
+       *
+       * **選んでいればその範囲だけを変換する**（作者の裁定、2026-09-21）。
+       * 右クリックからは話ぜんぶしか写せず、部分を選んでも全文が入っていた。
+       */
+      start?: number;
+      end?: number;
     }
+  /**
+   * 選んだところを**記法のまま**クリップボードへ（設計書6.12.8）。
+   *
+   * 普通のコピー（Ctrl+C）は貼り先に合わせて形が変わるので、素の
+   * VS Code エディタへ貼ると字だけになる。記法で貼りたいときの逃げ道。
+   */
+  | { type: "copyNotation"; text: string }
   | { type: "openTerm"; id: string; kind: TermKind }
   /**
    * 右クリックの時点で、**開いている**資料パネルへ該当項目を出す
@@ -1473,8 +1486,23 @@ export class ManuscriptEditorProvider
           break;
 
         case "copyForPosting":
-          await this.copyForPosting(document, message.line ?? 0);
+          await this.copyForPosting(document, message.line ?? 0, {
+            start: message.start ?? -1,
+            end: message.end ?? -1,
+          });
           break;
+
+        case "copyNotation": {
+          // **記法をそのまま写すだけ。** 変換も検証もしない
+          // （投稿サイト用の変換は `copyForPosting` の仕事）
+          if (message.text.length === 0) break;
+          await vscode.env.clipboard.writeText(message.text);
+          notifyDone(
+            `選んだ${message.text.length.toLocaleString("ja-JP")}字を、` +
+              "ルビと傍点の記法のままクリップボードへ入れました。"
+          );
+          break;
+        }
 
         case "openTerm": {
           const found = await this.deps.highlighter.indexFor(
@@ -2525,10 +2553,14 @@ export class ManuscriptEditorProvider
    *
    * @param caretLine 画面のカーソル行（1始まり。読めなければ0）。
    *   **合本のときだけ使う**——どの話をコピーするのかは位置でしか分からない
+   * @param selection 選んだ範囲（LF空間。選んでいなければ `start` が負）。
+   *   **選んでいればその範囲だけ**を変換する（作者の裁定、2026-09-21）。
+   *   右クリックからは話ぜんぶしか写せず、部分を選んでも全文が入っていた
    */
   private async copyForPosting(
     document: vscode.TextDocument,
-    caretLine = 0
+    caretLine = 0,
+    selection: { start: number; end: number } = { start: -1, end: -1 }
   ): Promise<void> {
     /*
       **訊き方は普通のエディタと同じものを使う**（`features/ruby.ts`）。
@@ -2553,22 +2585,30 @@ export class ManuscriptEditorProvider
     if (!target) return;
 
     /*
-      **合本（1ファイルに全話）なら、カーソルの居る話だけ**（設計書6.12.1）。
-      この画面には選択を渡す道が無いので、全話が区切り行と頭書きごと
-      クリップボードへ入っていた——手で1話ぶんを選ぶ逃げ道も無かった。
-      いま居る話の決め方は「← 前の話」「次の話 →」と同じ規則を通る
-      （`collectedEpisodeAt` → `collectedEpisodeIndexAt`）。
+      **選んだところがあれば、そこだけ**（作者の裁定、2026-09-21。
+      設計書6.12.8）。作者の報告：「部分選択でコピーして右クリックも
+      ページ全体」。頭書きも合本の切り分けも通さない——選んだ範囲が
+      そのまま作者の言う「ここ」である。
     */
-    const collected = collectedEpisodeAt(document.getText(), caretLine);
+    const whole = document.getText();
+    const picked =
+      selection.start >= 0 && selection.end > selection.start
+        ? // 画面の位置はLF空間。CRLF の原稿でもずれないよう直してから切る
+          whole.slice(
+            fromLfOffset(whole, selection.start),
+            fromLfOffset(whole, selection.end)
+          )
+        : undefined;
 
-    // **頭書き（【タイトル】〜【本文】）は外す**（`sourceForPostingCopy`、
-    // 設計書6.12.1）。全文をそのまま渡していたので、投稿欄へ貼ると題名の
-    // 行から二重に入っていた。**普通のエディタ側（`features/ruby.ts`）と
-    // 同じ経路を通す**——切り方を写すと、片方だけが直る日が来る
-    const source = sourceForPostingCopy(
-      document.getText(),
-      undefined,
-      collected?.body
+    /*
+      **どこを写すかの判断は `core/episodeCopy.ts` が持つ**（設計書6.12.8）。
+      選んだところ → 合本のカーソルの居る話 → 頭書きを外した本文、の順。
+      画面を持ち込まずに測れるよう、判断だけを外へ出してある。
+    */
+    const { source, selected, collected } = postingCopySource(
+      whole,
+      caretLine,
+      picked
     );
 
     /*
@@ -2589,13 +2629,18 @@ export class ManuscriptEditorProvider
       その場で気づけるよう、話が分かる言い方にする。**合本でないときの
       文言は変えない**——覚えている言葉を一緒に変えない。
     */
-    const scope = collected
-      ? `${collectedEpisodeLabel(
-          collected,
-          // 作品が引けないことはある。そのときは既定の数え方になるだけ
-          work ? await readWorkFormat(work) : undefined
-        )}（${conversion.text.length.toLocaleString("ja-JP")}字）`
-      : "本文全体";
+    const length = conversion.text.length.toLocaleString("ja-JP");
+    const scope = selected
+      ? // 選んだところだけを写したことを、はっきり言う。黙って一部だけを
+        // 写すと、作者は全文が入ったつもりで貼る
+        `選んだところ（${length}字）`
+      : collected
+        ? `${collectedEpisodeLabel(
+            collected,
+            // 作品が引けないことはある。そのときは既定の数え方になるだけ
+            work ? await readWorkFormat(work) : undefined
+          )}（${length}字）`
+        : "本文全体";
     await showPostingCopyNotice({
       conversion,
       sourcePath: fromUri(document.uri),
@@ -2671,12 +2716,25 @@ async function pickFont(installed?: string[]): Promise<void> {
  */
 function readAppearance(): {
   fontFamily: string;
+  /**
+   * ダッシュ「――」と三点リーダ「……」だけに当てる書体（設計書6.34）。
+   *
+   * **本文の書体と分けて送る。** 游明朝・ＭＳ 明朝・游ゴシックのダッシュは
+   * 字送りより線が短く、2本並べても繋がらない（作者の実機、2026-09-21）。
+   * 字を持ってはいるので、CSSの引き当てでは後ろへ落ちてくれない
+   * ——判定は `core/markFont.ts` が持つ
+   */
+  markFontFamily: string;
   /** 読み上げの速さの既定（設計書6.42）。列で変えたぶんは書き戻さない */
   readAloudRate: number;
 } {
   const config = vscode.workspace.getConfiguration("novelai");
+  const fontFamily = config
+    .get<string>("manuscriptEditor.fontFamily", "")
+    .trim();
   return {
-    fontFamily: config.get<string>("manuscriptEditor.fontFamily", "").trim(),
+    fontFamily,
+    markFontFamily: markFontFor(fontFamily),
     readAloudRate: clampReadAloudRate(
       config.get<number>("manuscriptEditor.readAloudRate", 1)
     ),

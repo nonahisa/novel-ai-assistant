@@ -103,6 +103,51 @@ export function sourceForPostingCopy(
   return extractEpisodeParts(fullText, null).body;
 }
 
+/**
+ * 原稿エディタの「投稿サイト用にコピー」で、変換にかける元を決める
+ * （設計書6.12.8。0.74.12）。
+ *
+ * **選んだところがあれば、そこだけ。** 作者の報告（2026-09-21）：
+ * 「部分選択でコピーして右クリックもページ全体」。右クリックからは
+ * 話ぜんぶしか写せず、部分を選んでも全文が入っていた。裁定は
+ * 「右クリックに全体コピーは不要です。メニューにあるので」——
+ * **右クリックは選んだ範囲だけ**にする。
+ *
+ * **選んだときは、合本の切り分けも頭書き外しも通さない。** 選んだ範囲が
+ * そのまま作者の言う「ここ」である（`sourceForPostingCopy` が選択を
+ * いちばん強く採るのと同じ考え方）。
+ *
+ * ここに置いてあるのは、**画面（vscode）を持ち込まずに測れるようにする**
+ * ためである。原稿エディタは選択の位置を受け取って、この判断へ渡すだけ。
+ *
+ * @param selectedText 選んだところの文字列。選んでいなければ渡さない
+ * @param caretLine カーソルの行（1始まり。読めなければ0）
+ */
+export function postingCopySource(
+  fullText: string,
+  caretLine: number,
+  selectedText?: string
+): {
+  /** 変換にかける元 */
+  source: string;
+  /** 選んだところを写すのか（知らせの文言が変わる） */
+  selected: boolean;
+  /** 合本から取り出した1話。選んだときと、合本でないときは undefined */
+  collected: CollectedEpisode | undefined;
+} {
+  const picked =
+    selectedText !== undefined && selectedText !== "" ? selectedText : undefined;
+  // 選んだときは合本を数えない。どの話かを決める必要そのものが無い
+  const collected = picked ? undefined : collectedEpisodeAt(fullText, caretLine);
+  return {
+    // **切り方は `sourceForPostingCopy` の1か所を通す**（写すと、片方だけが
+    // 直る日が来る）。選択・合本・頭書き外しの優先順はあちらが持つ
+    source: sourceForPostingCopy(fullText, picked, collected?.body),
+    selected: picked !== undefined,
+    collected,
+  };
+}
+
 /*
  * **本文を投稿サイトの形にする関数は、ここには無い**（0.37.5に移した）。
  *

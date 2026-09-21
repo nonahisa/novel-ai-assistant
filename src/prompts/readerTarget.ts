@@ -314,7 +314,14 @@ export function buildReaderTypeGlossary(): string {
  * 一覧は `buildReaderTypeGlossaryPrompt` のほうが持つ）。
  */
 export function buildReaderTypeUnknownPrompt(): string {
-  return `【この作品の読者】まだ決めていません。「${READER_TARGET_DIAGNOSIS_TITLE}」で決められます。`;
+  // **どこを押すのかまで書く**（作者の実機報告、2026-09-21。0.74.12）。
+  // 操作の名前だけを渡していたら、作者が「実行して」と頼み、AIが実行した
+  // ふりをして答えた。**押すのは作者**なので、押す場所が要る
+  return (
+    `【この作品の読者】まだ決めていません。「${READER_TARGET_DIAGNOSIS_TITLE}」` +
+    "（詳細メニュー → 執筆AI支援 → 校正・校閲）で決められます。" +
+    "相談の答えの下の「画面で案内してもらう」からも押せます。"
+  );
 }
 
 /**

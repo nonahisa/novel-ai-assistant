@@ -190,6 +190,17 @@ interface ComposeApi {
     spans: MenuSpan[],
     atoms?: ComposeAtom[]
   ): MenuSpan | null;
+  /** 自前のクリップボードの形の名前（記法をそのまま載せる箱） */
+  COMPOSE_NOTATION_FLAVOR: string;
+  /** 写すときの3つの形（設計書6.12.8。0.74.12） */
+  composeCopyPayloads(
+    notation: string,
+    mode?: Mode
+  ): { plain: string; html: string; notation: string };
+  /** 貼り付けで使う文字列を選ぶ（自前の形を先に読む） */
+  composePastePick(data: {
+    getData(flavor: string): string;
+  } | null): string;
   /** シーンメモ（設計書6.40.3） */
   memoIsLine(line: string): boolean;
   memoPartsOf(line: string): { tag: string; text: string };
@@ -223,6 +234,7 @@ const api = new Function(
     " composeChunkIsRuby, composeChunkAt, composeChunkBaseNode," +
     " composeChunkBaseRange, composeChunkCovering, composeSpanPoints," +
     " composeTermForOffset, pickMenuTerm," +
+    " composeCopyPayloads, composePastePick, COMPOSE_NOTATION_FLAVOR," +
     " memoIsLine, memoPartsOf, memoClassFor, composeMarkIsStale," +
     " composeComposingSpan };"
 )() as ComposeApi;
@@ -1139,12 +1151,21 @@ describe("画面の約束", () => {
     expect(enter.slice(0, 900)).toContain('type: "log"');
   });
 
-  /** 外のHTMLがDOMへ入ると、直列化が壊れる */
-  it("貼り付けは平文だけを入れる", () => {
+  /**
+   * 外のHTMLがDOMへ入ると、直列化が壊れる。
+   *
+   * **0.74.12で、入れる文字列の選び方だけが変わった**（設計書6.12.8）。
+   * 自前の形（記法）があればそれ、無ければこれまでどおり平文
+   * ——どちらも**文字列として**入れるので、HTMLがDOMへ入らないことは
+   * 変わらない（選び方は composePastePick が持ち、上で測ってある）。
+   */
+  it("貼り付けは、文字列だけを入れる（HTMLを入れない）", () => {
     const paste = code.slice(code.indexOf('compose.addEventListener("paste"'));
     expect(paste.slice(0, 300)).toContain("event.preventDefault();");
-    expect(paste.slice(0, 300)).toContain('getData("text/plain")');
+    expect(paste.slice(0, 300)).toContain("composeInsertPlain(composePastePick(");
     expect(code).toContain('compose.addEventListener("drop"');
+    // getData("text/html") をDOMへ入れる道が、どこにも無いこと
+    expect(code).not.toContain('getData("text/html")');
   });
 
   /**
@@ -2075,5 +2096,104 @@ describe("巻き込まれた印を、打ったあとに外す", () => {
     expect(body).toContain("const at = composeSelectionNow();");
     expect(body).toContain("composeRestoreCaret(at);");
     expect(body).toContain("composeInvalidate();");
+  });
+});
+
+/**
+ * 写す・貼る（設計書6.12.8。0.74.12）。
+ *
+ * 作者の裁定（2026-09-21）：「通常のコピー」＝「text とルビ等を持った
+ * コピーで、メモにコピーしたら字だけ、ルビが可能なエディターに貼り付けたら
+ * ルビごと」。**クリップボードに3つ同時に載せ、貼り先が選ぶ。**
+ *
+ * かつては記法だけを text/plain へ載せていたので、メモ帳へ貼ると
+ * `{漢字|かんじ}` がそのまま入っていた。
+ */
+describe("写すときの3つの形", () => {
+  const line = "　{灯|あかり}は{{確かに}}見た。";
+
+  it("字だけ・HTML・記法の3つが、同時に載る", () => {
+    const payloads = api.composeCopyPayloads(line);
+
+    // ① 字だけ。読み仮名も記法の記号も落ちる（メモ帳・チャットへ貼る形）
+    expect(payloads.plain).toBe("　灯は確かに見た。");
+    // ② HTML。ルビを組めるエディタへ貼ると、ルビごと入る
+    expect(payloads.html).toBe(
+      "　<ruby>灯<rt>あかり</rt></ruby>は" +
+        '<em class="emphasis">確かに</em>見た。'
+    );
+    // ③ 記法。この面へ貼り戻すと、元どおりになる
+    expect(payloads.notation).toBe(line);
+  });
+
+  it("読み仮名は、字だけの側から必ず落ちる", () => {
+    // ここが残ると、メモへ貼った本文に読み仮名が混ざる（貼り戻すと壊れる）
+    expect(api.composeCopyPayloads("{雪|ゆき}").plain).toBe("雪");
+    expect(api.composeCopyPayloads("{雪|ゆき}").plain).not.toContain("ゆき");
+  });
+
+  it("投稿サイトの記法（.txt）でも、字だけになる", () => {
+    // 記法の切り分けは composeParts に任せている。写しを持たないので、
+    // モードを渡すだけで両方に効く
+    const site = "　｜灯《あかり》は《《確かに》》見た。";
+    const payloads = api.composeCopyPayloads(site, "site");
+
+    expect(payloads.plain).toBe("　灯は確かに見た。");
+    expect(payloads.html).toContain("<ruby>灯<rt>あかり</rt></ruby>");
+    expect(payloads.notation).toBe(site);
+  });
+
+  it("複数行でも、行がずれない", () => {
+    const value = "一行目。\n{二|に}行目。\n";
+    const payloads = api.composeCopyPayloads(value);
+
+    expect(payloads.plain).toBe("一行目。\n二行目。\n");
+    // HTMLの側は、行の区切りを br にする（貼り先で1行に潰れない）
+    expect(payloads.html.split("<br>")).toHaveLength(3);
+    expect(payloads.notation).toBe(value);
+  });
+
+  it("HTMLへ載せるとき、記号を逃がす", () => {
+    // 本文に < や & が出るのは珍しくない。逃がさないと、貼り先で
+    // 本文の一部がタグとして読まれる
+    const payloads = api.composeCopyPayloads("a<b & c>d");
+
+    expect(payloads.html).toBe("a&lt;b &amp; c&gt;d");
+    // 字だけの側は本文そのまま（逃がさない）
+    expect(payloads.plain).toBe("a<b & c>d");
+  });
+
+  it("書きかけの記法は、字だけの側にも記法のまま残る", () => {
+    // 読み仮名が空のルビ。**字を減らさない**（composeParts と同じ扱い）
+    expect(api.composeCopyPayloads("{漢字|}").plain).toBe("{漢字|}");
+  });
+});
+
+describe("貼り付けは、自前の形を先に読む", () => {
+  /** クリップボードの偽物。持っていない形には空文字を返す */
+  const clipboard = (held: Record<string, string>) => ({
+    getData: (flavor: string) => held[flavor] ?? "",
+  });
+
+  it("自前の形があれば、記法が戻る", () => {
+    const picked = api.composePastePick(
+      clipboard({
+        [api.COMPOSE_NOTATION_FLAVOR]: "{灯|あかり}",
+        "text/plain": "灯",
+      })
+    );
+
+    expect(picked).toBe("{灯|あかり}");
+  });
+
+  it("自前の形が無ければ、これまでどおり平文", () => {
+    // 外から来たものは記法を持っていない。平文として入る
+    expect(api.composePastePick(clipboard({ "text/plain": "ふつうの字" }))).toBe(
+      "ふつうの字"
+    );
+  });
+
+  it("クリップボードが読めないときは空文字（本文を壊さない）", () => {
+    expect(api.composePastePick(null)).toBe("");
   });
 });

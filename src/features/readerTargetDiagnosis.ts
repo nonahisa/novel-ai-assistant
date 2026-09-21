@@ -38,6 +38,12 @@ import {
   type ReaderProfile,
 } from "../models/readerProfile";
 import type { AuthorReaderProfile } from "../core/authorReaderType";
+import {
+  CHECK_CANCELLED,
+  CHECK_COMPLETED,
+  CHECK_FAILED,
+  type CheckCommandOutcome,
+} from "../core/proofreadingSuite";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import { openGeneratedMarkdown } from "../views/openDocument";
 import { withCancellableProgress } from "../views/progress";
@@ -90,7 +96,13 @@ export async function runReaderTargetDiagnosis(
    * ——紙の突き合わせの節がまるごと出なくなるだけである。
    */
   authorReader?: AuthorReaderProfile
-): Promise<void> {
+  /*
+    **結末を名乗って返す**（0.74.12）。手順書き（設計書6.104）の段になった
+    ので、「画面で案内してもらう」が次へ進むかどうかを決められないと
+    ——取りやめたのに案内だけが先へ行く。返す印は校正のまとめ実行と同じ
+    ものを使う（`core/proofreadingSuite.ts`。印を2組みにしない）。
+  */
+): Promise<CheckCommandOutcome> {
   useLogFile(work.folderPath);
 
   const store = new ReaderTargetStore(work);
@@ -100,20 +112,20 @@ export async function runReaderTargetDiagnosis(
   } catch (error) {
     if (error instanceof ReaderTargetStoreError) {
       await warnWithLog("読者像を読めませんでした", error.message);
-      return;
+      return CHECK_FAILED;
     }
     throw error;
   }
 
   const step = await chooseStep(work, profile);
-  if (!step) return;
+  if (!step) return CHECK_CANCELLED;
 
   let next: ReaderProfile = { ...profile };
   let unmeasured: readonly string[] = [];
 
   if (step === "declare" || step === "both") {
     const answers = await askReaderQuestions(profile.declared?.answers);
-    if (!answers) return;
+    if (!answers) return CHECK_CANCELLED;
     next = {
       ...next,
       declared: {
@@ -126,7 +138,7 @@ export async function runReaderTargetDiagnosis(
 
   if (step === "read" || step === "both") {
     const read = await readFromWork(work, registry);
-    if (read === "cancelled") return;
+    if (read === "cancelled") return CHECK_CANCELLED;
     if (read) {
       next = {
         ...next,
@@ -144,7 +156,8 @@ export async function runReaderTargetDiagnosis(
     // （AIの失敗で、作者の9問の答えを捨てない）
   }
 
-  if (!hasReaderProfile(next)) return;
+  // 何も決まらなかった（読めず、答えもしていない）。済んだとは言えない
+  if (!hasReaderProfile(next)) return CHECK_CANCELLED;
 
   try {
     await store.save(next);
@@ -166,6 +179,7 @@ export async function runReaderTargetDiagnosis(
     { preview: false },
     { work }
   );
+  return CHECK_COMPLETED;
 }
 
 /**

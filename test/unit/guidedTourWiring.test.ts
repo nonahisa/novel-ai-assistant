@@ -572,6 +572,9 @@ describe("取りやめを名乗れる段が、行き渡っていること", () =
       "novelai.addWork",
       // `checkOpening.ts` が印を組み立てて返す
       "novelai.checkOpening",
+      // `readerTargetDiagnosis.ts` が印を返す（0.74.12。手順書きの段に
+      // なったので、取りやめ・済んだを名乗るようにした）
+      "novelai.runReaderTargetDiagnosis",
     ]);
     const silent = [...new Set(PROCEDURE_REFERENCED_COMMANDS)].filter(
       (command) =>

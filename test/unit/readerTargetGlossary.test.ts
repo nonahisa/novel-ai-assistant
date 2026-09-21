@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { READER_TYPES, type ReaderTypeId } from "../../src/core/readerTarget";
+import { ACTION_TREE } from "../../src/views/actionList";
 import {
   READER_TARGET_DIAGNOSIS_TITLE,
   buildReaderTypeGlossary,
@@ -29,6 +30,27 @@ import {
  * そのまま答えへ混ざって返ってくることはある（この作品で繰り返し起きた
  * 失敗の3番目）。ここで確かめられるのは、渡す側だけである。
  */
+/**
+ * 詳細メニューで、その操作へたどり着くまでに押す名前を並べる。
+ *
+ * **写さずに `ACTION_TREE` から引く。** メニューを組み替えた日に、
+ * 案内の文だけが古くなるのを止めるためである。
+ */
+function menuPathOf(command: string): string[] {
+  for (const group of ACTION_TREE) {
+    for (const entry of group.entries) {
+      if (entry.kind === "action" && entry.command === command) {
+        return [group.label];
+      }
+      if (entry.kind !== "section") continue;
+      if (entry.items.some((item) => item.command === command)) {
+        return [group.label, entry.label];
+      }
+    }
+  }
+  return [];
+}
+
 describe("読者の区分の一覧", () => {
   const ids = Object.keys(READER_TYPES) as ReaderTypeId[];
 
@@ -79,6 +101,38 @@ describe("読者像が決まっていない作品", () => {
     expect(buildReaderTypeUnknownPrompt()).toContain(
       READER_TARGET_DIAGNOSIS_TITLE
     );
+  });
+
+  /**
+   * **押す場所まで書く**（作者の実機報告、2026-09-21。0.74.12）。
+   *
+   * 名前だけを渡していたら、作者が相談で「実行して」と頼み、AIが
+   * 実行したふりをして答えた。**押すのは作者**なので、押す場所が要る。
+   *
+   * 道筋は `ACTION_TREE` から引いて突き合わせる——書き写すと、
+   * メニューを組み替えた日に案内だけが古くなる。
+   */
+  test("押す場所（詳細メニューの道筋）が、実際の並びと一致する", () => {
+    const prompt = buildReaderTypeUnknownPrompt();
+    const path = menuPathOf("novelai.runReaderTargetDiagnosis");
+
+    expect(path.length).toBeGreaterThan(0);
+    for (const label of path) {
+      expect(prompt, label).toContain(label);
+    }
+  });
+
+  test("もう1つの押し口（画面で案内してもらう）も添える", () => {
+    // 相談の答えの下に出るボタンである（`views/workChatPanelHtml.ts`）。
+    // 手順書きが当たらないと出ないので、`core/procedures.ts` に
+    // 「ターゲット読者を決める」を足してある
+    const panel = readFileSync(
+      resolve("src/views/workChatPanelHtml.ts"),
+      "utf8"
+    );
+
+    expect(buildReaderTypeUnknownPrompt()).toContain("画面で案内してもらう");
+    expect(panel).toContain("画面で案内してもらう");
   });
 
   /**

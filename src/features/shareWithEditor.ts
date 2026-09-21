@@ -183,11 +183,13 @@ export async function shareWithEditor(work: WorkEntry): Promise<void> {
     sharedAt: new Date().toISOString(),
   });
 
+  // **結末で知らせを分ける**（0.74.12）。`ok` だけを見て一律に
+  // 「編集部を招いてください」と出していたため、`gh` が無くて送れて
+  // いないときにも招けと言い、［GitHubで開く］は何もしないボタンだった
+  const notice = shareNoticeFor(result.outcome ?? "pushed", work.title);
   const next = await vscode.window.showInformationMessage(
-    `「${work.title}」を編集部へ渡せる形にしました。` +
-      "GitHubの「Settings」→「Collaborators」から編集部を招いてください。",
-    "GitHubで開く",
-    "閉じる"
+    notice.message,
+    ...notice.actions
   );
   if (next === "GitHubで開く" && result.repositoryUrl) {
     await vscode.env.openExternal(vscode.Uri.parse(result.repositoryUrl));
@@ -364,22 +366,64 @@ async function mergeProposalsInto(
   return merged.added;
 }
 
+/**
+ * うまくいったときの**結末**。3つに分かれる（0.74.12）。
+ *
+ * **`ok` だけでは足りない。** かつては3つとも `{ ok: true }` で返しており、
+ * 受け取る側は必ず「GitHubのSettings→Collaboratorsから編集部を招いて
+ * ください」＋［GitHubで開く］を出していた。`gh` が無くて送っていないとき
+ * も、名前の入力を取りやめたときも、**リポジトリが無いのに招けと言い、
+ * ボタンは押しても何も起きない**（作者の実機報告、2026-09-21）。
+ *
+ * - `pushed`    … GitHubへ送るところまで通った
+ * - `noGh`      … フォルダーは用意したが、`gh` が無いので送っていない
+ * - `cancelled` … リポジトリ名の入力を作者が取りやめた
+ */
+export type ShareOutcome = "pushed" | "noGh" | "cancelled";
+
 interface PushOutcome {
   ok: boolean;
   detail: string;
+  /** うまくいったとき（`ok`）の結末。失敗のときは無い */
+  outcome?: ShareOutcome;
   repositoryUrl?: string;
+}
+
+/**
+ * `setUpAndPush` が外から差し替えられるもの。**試験のためだけにある。**
+ *
+ * 製品の呼び出しは何も渡さない（既定が本物である）。
+ */
+export interface SetUpAndPushDeps {
+  run?: GitCommandRunner;
+  /** GitHub CLI が使えるか */
+  ghAvailable?: () => Promise<boolean>;
+  /** リポジトリ名を聞く。取りやめたら `undefined` */
+  askRepositoryName?: (workTitle: string) => Promise<string | undefined>;
+  /** GitHubに非公開のリポジトリを作る */
+  createRepository?: (
+    cwd: string,
+    name: string
+  ) => Promise<{ ok: boolean; detail?: string }>;
 }
 
 /**
  * 編集用フォルダーをGitリポジトリにして送る。
  *
  * 初回は `gh` で非公開のリポジトリを作る。2回目以降は記録して送るだけ。
+ *
+ * 外へ出してあるのは試験のため（`shareWithEditor.test.ts`）。
  */
-async function setUpAndPush(
+export async function setUpAndPush(
   work: WorkEntry,
   destination: string,
-  run: GitCommandRunner = runGit
+  deps: SetUpAndPushDeps = {}
 ): Promise<PushOutcome> {
+  const run = deps.run ?? runGit;
+  const hasGh = deps.ghAvailable ?? ghAvailable;
+  const askName = deps.askRepositoryName ?? askRepositoryName;
+  const createRepository = deps.createRepository ?? ghCreateRepository;
+
   const isRepo = await exists(path.join(destination, ".git"));
   if (!isRepo) {
     const initialized = await initRepository(destination, run);
@@ -403,19 +447,16 @@ async function setUpAndPush(
   const branch = await currentBranch(destination, run);
 
   if (!isRepo) {
-    if (!(await ghAvailable())) {
-      return {
-        ok: true,
-        detail: "",
-        repositoryUrl: undefined,
-      };
+    if (!(await hasGh())) {
+      // フォルダーはできている。**送れていないことを、そう名乗る**
+      return { ok: true, detail: "", outcome: "noGh" };
     }
-    const name = await askRepositoryName(work.title);
+    const name = await askName(work.title);
     if (!name) {
       // 送るのはやめても、フォルダーはできている。あとから送れる
-      return { ok: true, detail: "" };
+      return { ok: true, detail: "", outcome: "cancelled" };
     }
-    const created = await ghCreateRepository(destination, name);
+    const created = await createRepository(destination, name);
     if (!created.ok) {
       return { ok: false, detail: created.detail ?? "GitHubに作れませんでした" };
     }
@@ -425,7 +466,58 @@ async function setUpAndPush(
   if (!pushed.ok) {
     return { ok: false, detail: pushed.detail ?? "送信できませんでした" };
   }
-  return { ok: true, detail: "", repositoryUrl: await remoteUrl(destination, run) };
+  return {
+    ok: true,
+    detail: "",
+    outcome: "pushed",
+    repositoryUrl: await remoteUrl(destination, run),
+  };
+}
+
+/** 渡し終わったときに出す知らせ */
+export interface ShareNotice {
+  message: string;
+  /** 押せるボタン。並びのまま出す */
+  actions: string[];
+}
+
+/**
+ * 結末ごとの知らせを組む。
+ *
+ * **［GitHubで開く］は、送れたときだけ出す。** 送っていないのに出すと、
+ * 押しても何も起きないボタンになる（開く先が無い）。
+ *
+ * 外へ出してあるのは試験のため。文言を写して測ると、直したときに
+ * テストだけが古くなる。
+ */
+export function shareNoticeFor(
+  outcome: ShareOutcome,
+  workTitle: string
+): ShareNotice {
+  switch (outcome) {
+    case "pushed":
+      return {
+        message:
+          `「${workTitle}」を編集部へ渡せる形にしました。` +
+          "GitHubの「Settings」→「Collaborators」から編集部を招いてください。",
+        actions: ["GitHubで開く", "閉じる"],
+      };
+    case "noGh":
+      return {
+        message:
+          `「${workTitle}」の編集用フォルダーは用意しました。` +
+          "GitHubへ送るには `gh`（GitHub CLI）が要ります。" +
+          "入れてから「編集部へ渡す」をもう一度押してください。",
+        actions: ["閉じる"],
+      };
+    case "cancelled":
+      return {
+        message:
+          `「${workTitle}」の編集用フォルダーは用意しました。` +
+          "あとから「編集部へ渡す」で送れます。",
+        actions: ["閉じる"],
+      };
+  }
 }
 
 /**

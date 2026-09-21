@@ -3,7 +3,11 @@ import * as nodePath from "node:path";
 import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { FileType, workspace } from "./support/vscodeStub";
-import { copyForEditor } from "../../src/features/shareWithEditor";
+import {
+  copyForEditor,
+  setUpAndPush,
+  shareNoticeFor,
+} from "../../src/features/shareWithEditor";
 import { isNestedLocation, isSameLocation } from "../../src/core/locationCompare";
 import { RECOVERY_DIRECTORY_NAME } from "../../src/core/atomicWrite";
 import { workPaths } from "../../src/core/workRegistry";
@@ -296,4 +300,101 @@ describe("copyForEditor", () => {
     expect(await readCopied(nodePath.join("設定", "plot.md"))).toBe(lf);
   });
 
+});
+
+/**
+ * 渡し終わったときの知らせ（0.74.12。作者の実機報告、2026-09-21）。
+ *
+ * かつては3つの結末をすべて `{ ok: true }` で返しており、受け取る側は
+ * 必ず「GitHubのSettings→Collaboratorsから編集部を招いてください」＋
+ * ［GitHubで開く］を出していた。**リポジトリが無いのに招けと言い、
+ * ボタンは押しても何も起きない。** 結末を3つに分けて、それぞれの
+ * 文言とボタンが変わることをここで見張る。
+ */
+describe("渡し終わったときの結末", () => {
+  const work: WorkEntry = {
+    id: "work_share",
+    title: "氷の街",
+    folderPath: "C:\Novels\氷の街",
+    registeredAt: "2026-09-21T00:00:00.000Z",
+  };
+  const destination = "C:\Novels\氷の街-編集用";
+
+  /** gitはすべて成功したことにする（測るのは結末の分かれ方だけ） */
+  const okGit = async () => ({ code: 0, stdout: "", stderr: "" });
+
+  beforeEach(() => {
+    // `.git` が無い＝初回の共有。**ここを通らないと gh を見に行かない**
+    workspace.fs = {
+      stat: async () => {
+        throw new Error("無い");
+      },
+    } as unknown as typeof workspace.fs;
+  });
+
+  afterEach(() => {
+    workspace.fs = {} as typeof workspace.fs;
+  });
+
+  test("送信まで通ったときは、これまでどおり招く案内を出す", async () => {
+    const result = await setUpAndPush(work, destination, {
+      run: okGit,
+      ghAvailable: async () => true,
+      askRepositoryName: async () => "ice-town-editing",
+      createRepository: async () => ({ ok: true }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.outcome).toBe("pushed");
+
+    const notice = shareNoticeFor("pushed", work.title);
+    expect(notice.message).toContain("Collaborators");
+    expect(notice.actions).toContain("GitHubで開く");
+  });
+
+  test("`gh` が無いときは、招けと言わない。［GitHubで開く］も出さない", async () => {
+    const result = await setUpAndPush(work, destination, {
+      run: okGit,
+      ghAvailable: async () => false,
+      askRepositoryName: async () => {
+        throw new Error("gh が無ければ名前は聞かない");
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.outcome).toBe("noGh");
+
+    const notice = shareNoticeFor("noGh", work.title);
+    // 送れていないので、招く先が無い
+    expect(notice.message).not.toContain("Collaborators");
+    // 何が足りないのか・次に何をすればよいのかを書く
+    expect(notice.message).toContain("gh");
+    expect(notice.message).toContain("編集部へ渡す");
+    expect(notice.actions).not.toContain("GitHubで開く");
+  });
+
+  test("名前の入力を取りやめたときは、あとから送れると伝える", async () => {
+    const result = await setUpAndPush(work, destination, {
+      run: okGit,
+      ghAvailable: async () => true,
+      askRepositoryName: async () => undefined,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.outcome).toBe("cancelled");
+
+    const notice = shareNoticeFor("cancelled", work.title);
+    expect(notice.message).not.toContain("Collaborators");
+    expect(notice.message).toContain("あとから");
+    expect(notice.actions).not.toContain("GitHubで開く");
+  });
+
+  test("どの結末でも、フォルダーが用意できたことは伝える", () => {
+    // 「何も起きなかった」と読まれると、作者は同じ操作を繰り返す
+    for (const outcome of ["noGh", "cancelled"] as const) {
+      expect(shareNoticeFor(outcome, work.title).message, outcome).toContain(
+        "用意しました"
+      );
+    }
+  });
 });
