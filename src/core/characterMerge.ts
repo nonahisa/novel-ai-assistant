@@ -475,10 +475,22 @@ function applyExtracted(
     changed = true;
   }
 
+  // **抽出が示した根拠を、変化の記録へ持ち越す**（設計書6.18）。
+  // 取り違えに気づく手掛かりはここにしかない——実データでは、根拠が
+  // 「ターナ先生。魔物の数が……」という**呼びかけの台詞**だったので、
+  // 話し手を取り違えたのだと分かった。渡していなかったため、
+  // 設定資料パネルの「抽出根拠」は実データでは常に空だった。
+  //
+  // **この根拠はレコード単位である**（P-01 のスキーマ）。項目ごとの根拠では
+  // ないので、「外見」に付く引用がその人物の存在を示す一節であることもある。
+  // それでも、どの一節からこの人物を読んだのかは分かる
+  const evidence = ex.evidence?.trim() || null;
+
   // 読みはカタカナならコード側で確実に作る。
   // 漢字を含む名前だけAIの推定（ex.reading）に委ねる
   changed =
-    fillOrConflict(target, "reading", ex.reading, validChapters, conflicts) || changed;
+    fillOrConflict(target, "reading", ex.reading, validChapters, conflicts, evidence) ||
+    changed;
   const derived = fillReading(target.reading, target.name);
   if (derived !== target.reading) {
     target.reading = derived;
@@ -488,23 +500,39 @@ function applyExtracted(
   // 紹介文は長さをコード側で確かめてから入れる。
   // プロンプトで字数を指示しても、モデルは平気で超えてくる
   changed =
-    fillOrConflict(target, "summary", clampSummary(ex.summary), validChapters, conflicts) ||
-    changed;
+    fillOrConflict(
+      target,
+      "summary",
+      clampSummary(ex.summary),
+      validChapters,
+      conflicts,
+      evidence
+    ) || changed;
   changed =
-    fillOrConflict(target, "affiliation", ex.affiliation, validChapters, conflicts) || changed;
+    fillOrConflict(target, "affiliation", ex.affiliation, validChapters, conflicts, evidence) ||
+    changed;
 
   // 性別はAIが本文の言い方のまま返してくるので、ここで「男性」「女性」に揃える。
   // 揃えないと、同じ人物が話ごとに「男」「男性」と揺れて食い違い扱いになる
   changed =
-    fillOrConflict(target, "gender", normalizeGender(ex.gender), validChapters, conflicts) ||
-    changed;
+    fillOrConflict(
+      target,
+      "gender",
+      normalizeGender(ex.gender),
+      validChapters,
+      conflicts,
+      evidence
+    ) || changed;
 
   // 単純なテキスト項目: 空なら埋める。既にあれば食い違いを記録し、上書きしない
-  changed = fillOrConflict(target, "role", ex.role, validChapters, conflicts) || changed;
   changed =
-    fillOrConflict(target, "personality", ex.personality, validChapters, conflicts) || changed;
+    fillOrConflict(target, "role", ex.role, validChapters, conflicts, evidence) || changed;
   changed =
-    fillOrConflict(target, "appearance", ex.appearance, validChapters, conflicts) || changed;
+    fillOrConflict(target, "personality", ex.personality, validChapters, conflicts, evidence) ||
+    changed;
+  changed =
+    fillOrConflict(target, "appearance", ex.appearance, validChapters, conflicts, evidence) ||
+    changed;
 
   // 一人称
   if (ex.firstPerson) {
@@ -711,7 +739,15 @@ function fillOrConflict(
   incoming: string | null | undefined,
   /** この値が出てきた話数。食い違いを『変化』として読めるようにする */
   chapters: number[],
-  conflicts: MergeResult["conflicts"]
+  conflicts: MergeResult["conflicts"],
+  /**
+   * 抽出が示した本文の引用（P-01 の `evidence`）。
+   *
+   * **変化の記録へそのまま持ち越す。** 作者が「この変化は取り違えだ」と
+   * 見抜けるのは、どの一節から読んだのかが分かるときだけである。
+   * 手で入れる経路（`insertFieldValue`）には根拠が無いので既定は null
+   */
+  evidence: string | null = null
 ): boolean {
   const value = incoming?.trim();
   if (!value) return false;
@@ -731,7 +767,7 @@ function fillOrConflict(
     // **空欄を埋めるときにも話数を残す。** 残さないと、次に違う値が来たときに
     // 「作中で変わった」のか「同じ話で矛盾した」のかを見分けられない。
     // 変わらない項目では、そもそも変化として並べないので残さない
-    if (foldable) recordValue(target.changes, field, value, chapters);
+    if (foldable) recordValue(target.changes, field, value, chapters, evidence);
     return true;
   }
 
@@ -748,7 +784,7 @@ function fillOrConflict(
     if (recorded) return recordObservation(recorded, value, chapters);
     // 変わらない項目は変化として並べないので、履歴も作らない
     if (!foldable) return false;
-    return recordValue(target.changes, field, value, chapters);
+    return recordValue(target.changes, field, value, chapters, evidence);
   }
 
   // 短い記述が長い記述に含まれる場合は、詳細な方を採用する。
@@ -773,7 +809,7 @@ function fillOrConflict(
     chapters.length &&
     !overlaps(currentChapters, chapters)
   ) {
-    recordValue(target.changes, field, value, chapters);
+    recordValue(target.changes, field, value, chapters, evidence);
     adoptLatest(target, field);
     return true;
   }

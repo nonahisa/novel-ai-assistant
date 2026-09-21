@@ -35,6 +35,8 @@ import {
   type SubtitleSuggestion,
 } from "../prompts/synopsis";
 import { CharacterStore } from "../core/characterStore";
+import { ReaderTargetStore } from "../core/readerTargetStore";
+import type { ReaderProfile } from "../models/readerProfile";
 import { withAiTurnProgress } from "./aiTurn";
 import {
   logFailure,
@@ -155,6 +157,24 @@ export async function generateSynopses(
     .filter((character) => !character.isMob)
     .map((character) => character.name);
 
+  /*
+    **サブタイトルは宛先を見て選ばせる**（作者の依頼、2026-09-22
+    「サブタイトルの提案に、ターゲット読者を考慮させるようにしてください」）。
+    同じ話でも、回遊層に効く題と考察層に効く題は違う。
+
+    **診断していなければ渡さない**（一般論のまま）。読めなくても止めない
+    ——題の選び方が今までどおりに戻るだけで、あらすじは作れる。
+  */
+  let readerProfile: ReaderProfile | undefined;
+  try {
+    readerProfile = await new ReaderTargetStore(work).load();
+  } catch (error) {
+    logFailure("あらすじ生成: 読者像の台帳を読めませんでした", {
+      作品: work.title,
+      詳細: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   // **応答の見込みに実測を使う**（設計書6.65.16の2、6.77の第2段）。
   // あらすじは1話ぶんで短いが、渡さないとOllamaの `num_ctx` が
   // 既定の8,192で確保される
@@ -211,6 +231,8 @@ export async function generateSynopses(
               previousSynopses: previousSynopsesFor(set, episode),
               characterNames: characterNames.slice(0, 100),
               needsSubtitle: needsSubtitle(episode),
+              // サブタイトルを出させる回だけ、プロンプト側で使われる
+              readerProfile,
             }),
             model: resolved.model,
             // あらすじは事実を並べるだけなので、揺らす必要がない

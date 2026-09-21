@@ -1,3 +1,6 @@
+import { buildReaderTypePrompt } from "./readerTarget";
+import type { ReaderProfile } from "../models/readerProfile";
+
 /**
  * P-07 各話あらすじ生成＋サブタイトル提案
  *
@@ -9,10 +12,21 @@
  * 後の矛盾検知・プロット逸脱検知でも文脈として使うため、
  * 事実だけが入っている必要がある。
  *
+ * **サブタイトルだけは、宛先（ターゲット読者）を見て選ばせる**（作者の依頼、
+ * 2026-09-22「サブタイトルの提案に、ターゲット読者を考慮させるように
+ * してください」）。同じ話でも、回遊層に効く題と考察層に効く題は違う。
+ * **あらすじの側へは渡さない**——あらすじは「何が起きたか」を書くところで、
+ * 宛先を混ぜると向き先に引かれて事実が歪む。
+ *
  * プロンプトを変更したら version を上げること。
  * 生成済みのあらすじはこの版と本文のハッシュで作り直しを判断する。
  */
-export const SYNOPSIS_VERSION = "2.0";
+/**
+ * 変更履歴（要点だけ。詳しくはプロンプト設計書 P-07）
+ * - 2.1: サブタイトル案に、作品の読者像（P-38の塊）を添えるようにした
+ *   （0.75.2）。診断していない作品では今までどおり渡さない
+ */
+export const SYNOPSIS_VERSION = "2.1";
 
 /**
  * 送るときの温度。あらすじは事実を並べるだけなので、揺らす必要がない。
@@ -25,6 +39,16 @@ export const SYNOPSIS_TEMPERATURE = 0.3;
 export const SYNOPSIS_MAX_CHARS = 150;
 /** サブタイトルの上限。ファイル名になるので厳守する */
 export const SUBTITLE_MAX_CHARS = 15;
+
+/**
+ * 読者像を渡す回だけ足す、案の条件の1行。
+ *
+ * **ほかの条件と同じ書き方（行として）で持つ。** 1行の文字列にすると、
+ * 画面文言の見張り（`plainTextUi.test.ts`）に「画面へ出す強調」と
+ * 見なされる——ここはAIへ送るプロンプトなので、強調は正しい。
+ */
+const READER_SUBTITLE_RULE = `- **【この作品の読者】に書かれた読者層が引かれる言い方を選ぶこと。**
+`;
 
 export const SYNOPSIS_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援する編集アシスタントです。
 
@@ -45,6 +69,12 @@ export interface SynopsisPromptInput {
   characterNames: string[];
   /** サブタイトル案も出させるか。ファイル名が初期状態のときだけ true */
   needsSubtitle: boolean;
+  /**
+   * 作品の読者像（設計書6.91）。**診断していなければ渡さない**
+   * ——無いときに「読者層に合わせて」とだけ言うと、AIが宛先を
+   * 勝手に決めて題を選ぶ（一般論のままのほうが害が小さい）
+   */
+  readerProfile?: ReaderProfile;
 }
 
 export function buildSynopsisPrompt(input: SynopsisPromptInput): string {
@@ -56,6 +86,18 @@ export function buildSynopsisPrompt(input: SynopsisPromptInput): string {
     input.characterNames.length > 0
       ? input.characterNames.join("、")
       : "（まだ登録されていません）";
+
+  /*
+    **読者像は、サブタイトルを出させる回にだけ渡す。** あらすじは
+    「何が起きたか」だけを書くところなので、宛先を混ぜると事実が歪む。
+    **未診断なら渡さない**（buildReaderTypePrompt が undefined を返す）
+    ——一般論のままにしておくほうが、AIに宛先を推測させるより安全である。
+  */
+  const readerBlock = input.needsSubtitle
+    ? buildReaderTypePrompt(input.readerProfile)
+    : undefined;
+  const readerLine = readerBlock ? READER_SUBTITLE_RULE : "";
+  const readerNote = readerBlock ? `\n${readerBlock}\n` : "";
 
   const subtitleSection = input.needsSubtitle
     ? `
@@ -69,7 +111,7 @@ export function buildSynopsisPrompt(input: SynopsisPromptInput): string {
   案2：象徴的な語句型（この話を表す物・場所・言葉）
   案3：台詞・心情型（印象に残る一言や心の動き）
 - 案ごとに「なぜこの案か」を30字以内で添えること
-`
+${readerLine}${readerNote}`
     : `
 【サブタイトル案】
 このファイルには既にサブタイトルが付いています。subtitles は空配列にしてください。

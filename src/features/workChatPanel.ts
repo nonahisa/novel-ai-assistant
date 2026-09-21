@@ -44,7 +44,11 @@ import {
   type WriterStyleSignals,
 } from "../core/writerStyle";
 import type { WriterProfileStore } from "../core/writerProfileStore";
-import { readerTypeChatLogLines } from "../core/readerTarget";
+import {
+  readerTypeChatLogLines,
+  readerTypeGlossaryEntries,
+  type ReaderTypeGlossaryEntry,
+} from "../core/readerTarget";
 import { ReaderTargetStore } from "../core/readerTargetStore";
 import { hasReaderProfile, type ReaderProfile } from "../models/readerProfile";
 import { chatExamplesFor } from "../core/chatExamples";
@@ -571,6 +575,25 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * （助言方針が未診断のときに何も足さないのと同じ扱い）。
    * 原因は操作ログにだけ残す（作者の画面には出さない）。
    */
+  /**
+   * 答えの下に出す「読者タイプの区分」の一覧（設計書6.91.9.2）。
+   *
+   * **AIへ一覧を添えた回にだけ出す**（絞り方は buildPrompt と同じ
+   * ——作品があり、読者の話をしている回）。読者の話でない回にまで
+   * 11行の一覧が並ぶと、答えが押し下げられる。
+   *
+   * **中身はAIに書かせない。** 区分はこの拡張機能が持っている決まりで、
+   * AIに並べさせると聞くたびに名前も件数も揺れる。
+   */
+  private async readerGlossaryFor(
+    work: WorkEntry | undefined,
+    question: string
+  ): Promise<ReaderTypeGlossaryEntry[] | undefined> {
+    if (!work || !questionMentionsReader(question)) return undefined;
+    // 診断済みなら印を付けたいので、台帳を読む（同じ作品なら控えが効く）
+    return readerTypeGlossaryEntries(await this.readerProfileFor(work));
+  }
+
   private async readerProfileFor(
     work: WorkEntry
   ): Promise<ReaderProfile | undefined> {
@@ -1413,6 +1436,16 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         歯止めを掛けている）。答えの下に畳んで置くと、開いて押して、
         さらに確認へ答えて、とようやく書かれる。
       */
+      /*
+        **AIへ添えた回は、作者にも同じ一覧を見せる**（作者の実機報告、
+        2026-09-22「相談で読者タイプの一覧が添えられていません」）。
+        添えていたのはプロンプトの中なので、記録を開かないと分からなかった。
+      */
+      const readerGlossary = await this.readerGlossaryFor(
+        context?.work,
+        question
+      );
+
       const { edit, ...others } = staged;
       this.postAll({
         type: "answer",
@@ -1424,6 +1457,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         // AIはMarkdownで返してくる。記号のまま見せない
         html: renderMarkdownLite(answer.reply),
         options: answer.options,
+        ...(readerGlossary ? { readerGlossary } : {}),
         ...others,
       });
       // 答えを見せてから書く。書き込みで手間取っても、返事は先に読める

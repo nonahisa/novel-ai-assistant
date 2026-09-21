@@ -1,7 +1,16 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { READER_TYPES, type ReaderTypeId } from "../../src/core/readerTarget";
+import {
+  READER_TYPES,
+  readerTypeGlossaryEntries,
+  resolveReaderType,
+  type ReaderTypeId,
+} from "../../src/core/readerTarget";
+import {
+  READER_PROFILE_SCHEMA_VERSION,
+  type ReaderProfile,
+} from "../../src/models/readerProfile";
 import { ACTION_TREE } from "../../src/views/actionList";
 import {
   READER_TARGET_DIAGNOSIS_TITLE,
@@ -244,5 +253,109 @@ describe("相談の画面に繋がっている", () => {
   test("足したことを記録に残す", () => {
     expect(panel).toContain("相談: 読者タイプは未診断");
     expect(panel).toContain("相談: 読者タイプの区分一覧を添えた");
+  });
+});
+
+/**
+ * 一覧が**作者の目にも入る**か（作者の実機報告、2026-09-22
+ * 「相談で読者タイプの一覧が添えられていません」）。
+ *
+ * 2026-09-21 の手当てで一覧はAIへ渡るようになっていたが、渡していたのは
+ * プロンプトの中だけで、**作者は記録を開かないと分からなかった。**
+ * 答えの下に、同じ区分を畳んだ枠で置く。
+ *
+ * **中身はAIに頼まない。** 区分はこの拡張機能が持っている決まりなので、
+ * 製品が `READER_TYPES` から並べる（AIに書かせると、聞くたびに名前も
+ * 件数も揺れる）。
+ */
+describe("読者タイプの区分を、作者にも見せる", () => {
+  const panel = readFileSync(
+    resolve(__dirname, "../../src/features/workChatPanel.ts"),
+    "utf8"
+  );
+  const face = readFileSync(
+    resolve(__dirname, "../../src/views/workChatPanelHtml.ts"),
+    "utf8"
+  );
+
+  /** 点数から区分を決めるので、宣言の点数を持った台帳を作る */
+  function profileWith(scores: {
+    familiarity: number;
+    posture: number;
+    craving: number;
+  }): ReaderProfile {
+    return {
+      schemaVersion: READER_PROFILE_SCHEMA_VERSION,
+      declared: {
+        scores,
+        answers: [],
+        updatedAt: "2026-09-22T00:00:00.000Z",
+      },
+    };
+  }
+
+  test("一覧は READER_TYPES から並ぶ（写しを持たない）", () => {
+    const entries = readerTypeGlossaryEntries(undefined);
+    const ids = Object.keys(READER_TYPES) as ReaderTypeId[];
+
+    expect(entries).toHaveLength(ids.length);
+    for (const id of ids) {
+      const found = entries.find(
+        (entry) => entry.label === READER_TYPES[id].label
+      );
+      expect(found, READER_TYPES[id].label + " が無い").toBeDefined();
+      expect(found?.summary).toBe(READER_TYPES[id].summary);
+    }
+  });
+
+  test("未診断なら、どれにも印を付けない", () => {
+    const entries = readerTypeGlossaryEntries(undefined);
+    expect(entries.filter((entry) => entry.mine)).toHaveLength(0);
+  });
+
+  test("診断済みなら、その作品の区分にだけ印が付く", () => {
+    const scores = { familiarity: 6, posture: 1, craving: 1 };
+    const entries = readerTypeGlossaryEntries(profileWith(scores));
+    const mine = entries.filter((entry) => entry.mine);
+
+    expect(mine).toHaveLength(1);
+    // 印の付く先は、判定（resolveReaderType）と必ず同じ区分である
+    expect(mine[0].label).toBe(READER_TYPES[resolveReaderType(scores)].label);
+  });
+
+  /**
+   * **出す回は、AIへ添える回とまったく同じ**（作者の裁定、2026-09-21 の
+   * 絞り方をそのまま使う）。読者の話でない回にまで11行が並ぶと、
+   * 答えそのものが押し下げられる。
+   */
+  test("出すのは、一覧を添えた回だけ（同じ絞り方）", () => {
+    const block = panel.slice(panel.indexOf("private async readerGlossaryFor("));
+    const body = block.slice(0, 900);
+
+    expect(body).toContain("!work || !questionMentionsReader(question)");
+    expect(body).toContain("readerTypeGlossaryEntries(");
+    // 答えと一緒に送る（別便にすると、どの回の一覧か分からなくなる）
+    expect(panel).toContain("const readerGlossary = await this.readerGlossaryFor(");
+    expect(panel).toContain("...(readerGlossary ? { readerGlossary } : {})");
+  });
+
+  test("添えない回には、枠が付かない", () => {
+    // 送られてこなければ何も描かない（枠だけが空で残らない）
+    const add = face.slice(face.indexOf("function appendReaderGlossary("));
+    expect(add.slice(0, 200)).toContain(
+      "if (!entries || entries.length === 0) return;"
+    );
+  });
+
+  test("答えの下に、畳んだ枠で出る", () => {
+    expect(face).toContain("appendReaderGlossary(turn, message.readerGlossary)");
+
+    const add = face.slice(face.indexOf("function appendReaderGlossary("));
+    const body = add.slice(0, 1200);
+    // 畳んである（details）。開くまでは1行
+    expect(body).toContain("createElement('details')");
+    expect(body).toContain("'読者タイプの区分（' + entries.length + '）'");
+    // 診断済みの区分が、ひと目で分かる
+    expect(body).toContain("' ← この作品'");
   });
 });

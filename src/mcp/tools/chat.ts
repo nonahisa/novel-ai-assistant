@@ -21,16 +21,13 @@ import {
 // `vscode` を引くので、外から呼ぶ束には持ち込めない。設計書6.87.3）
 import { hashText } from "../../core/hash";
 import { buildWriterStyle } from "../../core/writerStyle";
-import { parseReaderProfile } from "../../core/readerProfileParse";
-import { READER_PROFILE_FILE } from "../../models/readerProfile";
-import type { ReaderProfile } from "../../models/readerProfile";
 import { parseCharacter } from "../../models/character";
 import { parseLocation } from "../../models/location";
 import {
   McpToolError,
   SETTINGS_SUBDIRS,
   readBody,
-  readSettingsFile,
+  readReaderProfile,
   readSettingsRecords,
 } from "./shared";
 import { ollamaGenerate } from "./ollama";
@@ -152,22 +149,6 @@ export interface ChatPromptInput {
   adviceAnswers?: number[];
   writerStyle?: Record<string, unknown>;
   featureIndex?: boolean;
-}
-
-/**
- * 作品の `設定/読者像.json` を読む。
- *
- * **壊れていたら足さない（止めない）。** 相談そのものは診断が無くても
- * できる。読めない台帳のせいで問いに答えられなくなるほうが困る。
- */
-function readReaderProfile(folder: string): ReaderProfile | undefined {
-  const raw = readSettingsFile(folder, READER_PROFILE_FILE);
-  if (raw === undefined) return undefined;
-  try {
-    return parseReaderProfile(raw);
-  } catch {
-    return undefined;
-  }
 }
 
 /**

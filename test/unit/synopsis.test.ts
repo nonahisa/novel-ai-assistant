@@ -12,6 +12,11 @@ import {
   type ChapterSynopsis,
 } from "../../src/models/synopsis";
 import { buildSynopsisPrompt } from "../../src/prompts/synopsis";
+import { buildReaderTypePrompt } from "../../src/prompts/readerTarget";
+import {
+  READER_PROFILE_SCHEMA_VERSION,
+  type ReaderProfile,
+} from "../../src/models/readerProfile";
 
 function episode(overrides: Partial<ChapterSynopsis> = {}): ChapterSynopsis {
   return {
@@ -303,5 +308,69 @@ describe("あらすじのプロンプト", () => {
 
     expect(prompt).toContain("ここから出来事を持ち込まないこと");
     expect(prompt).toContain("第6話のあらすじ");
+  });
+
+  /**
+   * サブタイトルに宛先を効かせる（作者の依頼、2026-09-22
+   * 「サブタイトルの提案に、ターゲット読者を考慮させるようにしてください」）。
+   *
+   * 同じ話でも、回遊層に効く題と考察層に効く題は違う。
+   * **未診断なら渡さない**——無いときに「読者層に合わせて」とだけ言うと、
+   * AIが宛先を勝手に決めて題を選ぶ（一般論のままのほうが害が小さい）。
+   */
+  describe("サブタイトルは、作品の読者像を見て選ばせる", () => {
+    /** 宣言だけを持つ台帳（点数から区分はコード側が決める） */
+    const profile: ReaderProfile = {
+      schemaVersion: READER_PROFILE_SCHEMA_VERSION,
+      declared: {
+        scores: { familiarity: 6, posture: 1, craving: 1 },
+        answers: [],
+        updatedAt: "2026-09-22T00:00:00.000Z",
+      },
+    };
+
+    function promptWith(
+      needsSubtitle: boolean,
+      readerProfile?: ReaderProfile
+    ): string {
+      return buildSynopsisPrompt({
+        chapterLabel: "第7話",
+        chapterText: "本文",
+        previousSynopses: [],
+        characterNames: [],
+        needsSubtitle,
+        readerProfile,
+      });
+    }
+
+    test("読者像があれば、区分と「その読者が引かれる言い方」を渡す", () => {
+      const prompt = promptWith(true, profile);
+
+      // 読者像の塊そのもの（P-38 と同じ作り。ここに写しを持たない）
+      expect(prompt).toContain(buildReaderTypePrompt(profile) as string);
+      expect(prompt).toContain(
+        "【この作品の読者】に書かれた読者層が引かれる言い方を選ぶこと。"
+      );
+    });
+
+    test("未診断なら渡さない（一般論のまま）", () => {
+      const prompt = promptWith(true, undefined);
+
+      expect(prompt).not.toContain("【この作品の読者】");
+      expect(prompt).not.toContain("引かれる言い方");
+      // サブタイトルの指示そのものは今までどおり出る
+      expect(prompt).toContain("3案提案してください");
+    });
+
+    /**
+     * **あらすじの側へは渡さない。** あらすじは「何が起きたか」だけを
+     * 書くところで、宛先を混ぜると向き先に引かれて事実が歪む
+     */
+    test("サブタイトルを出させない回には、読者像を渡さない", () => {
+      const prompt = promptWith(false, profile);
+
+      expect(prompt).not.toContain("【この作品の読者】");
+      expect(prompt).toContain("subtitles は空配列");
+    });
   });
 });

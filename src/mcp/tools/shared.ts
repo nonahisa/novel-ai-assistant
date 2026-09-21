@@ -10,6 +10,11 @@ import { goesOutside } from "../../core/pathText";
 import { decodeBytes } from "../../core/textDecode";
 import { parseEpisodeFileName } from "../../core/episodeParser";
 import { isWorkInfoFile } from "../../core/workInfoFile";
+import { parseReaderProfile } from "../../core/readerProfileParse";
+import {
+  READER_PROFILE_FILE,
+  type ReaderProfile,
+} from "../../models/readerProfile";
 import {
   chunksOfSources,
   episodeBodySources,
@@ -339,6 +344,25 @@ export function readSettingsFile(
   const file = nodePath.join(settings, fileName);
   if (!fs.existsSync(file)) return undefined;
   return readJson(file);
+}
+
+/**
+ * 作品の `設定/読者像.json` を読む（設計書6.91）。
+ *
+ * **壊れていたら足さない（止めない）。** 読者像はどの機能でも「あれば
+ * 足す」材料なので、読めない台帳のせいで本来の仕事が止まるほうが困る。
+ *
+ * **ここに1つだけ置く。** 相談（chat）とあらすじ（episode）の両方が
+ * 読むので、それぞれに写しを持つと、片方だけが直る日が来る。
+ */
+export function readReaderProfile(folder: string): ReaderProfile | undefined {
+  const raw = readSettingsFile(folder, READER_PROFILE_FILE);
+  if (raw === undefined) return undefined;
+  try {
+    return parseReaderProfile(raw);
+  } catch {
+    return undefined;
+  }
 }
 
 /** `設定/plot.md` の中身。無ければ undefined */

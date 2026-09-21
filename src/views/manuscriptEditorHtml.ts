@@ -3503,6 +3503,92 @@ ruby > rt {
     if (own) return own;
     return data.getData("text/plain");
   }
+
+  /**
+   * 字を揃えるための印（縦中横・三点リーダ・ダッシュ）のうち、その節点が
+   * 入っているものが占める範囲（記法の位置）を返す。入っていなければ null。
+   *
+   * **親をたどらずに atom から探す。** 印は素の span なので、中の文字は
+   * text の atom として数えられ、その atom は親（＝印の span）を覚えている。
+   * 親をたどる版（composeEllipsisAncestor）は本物の DOM でしか動かないが、
+   * こちらは位置の一覧だけで決まるので、そのまま測れる。
+   */
+  function composeMarkRangeOf(atoms, node) {
+    let span = null;
+    for (const atom of atoms) {
+      if (atom.kind !== "text" || atom.node !== node) continue;
+      const parent = atom.parent;
+      const name =
+        parent && parent.getAttribute ? parent.getAttribute("class") : null;
+      if (name !== "ellipsis" && name !== "dash" && name !== "tcy") return null;
+      span = parent;
+      break;
+    }
+    if (span === null) return null;
+    /*
+      **印の中が複数の節点に割れていることがある**（中で打った直後など）。
+      端の境目を知りたいので、同じ印に属する atom を全部見て外側を取る
+    */
+    let start = null;
+    let end = null;
+    for (const atom of atoms) {
+      if (atom.parent !== span) continue;
+      if (start === null || atom.start < start) start = atom.start;
+      if (end === null || atom.end > end) end = atom.end;
+    }
+    return start === null ? null : { start: start, end: end };
+  }
+
+  /**
+   * その矢印が、本文の流れの**先**へ進む向きか。
+   *
+   * **縦書きでは左右が入れ替わる**（行は右から左へ積むので、左が次の行）。
+   * 上下はどちらの向きでも変わらない（下が先）。
+   *
+   * これは**動いた向きが測れなかったときの当て**でしかない
+   * （composeEscapeAfterArrow は、まず動く前と後の位置を比べる）。
+   */
+  function composeArrowGoesForward(key, vertical) {
+    if (key === "ArrowDown") return true;
+    if (key === "ArrowUp") return false;
+    if (vertical) return key === "ArrowLeft";
+    return key === "ArrowRight";
+  }
+
+  /**
+   * 矢印で動いたあと、カーソルが**字を揃えるための印**の中に入って
+   * しまっていたら、印を丸ごと跨いでどちら側へ出すかを返す。
+   * 出す必要がなければ null。
+   *
+   * **なぜ要るか**（作者の実機報告、2026-09-22）——「原稿エディター縦書きで
+   * 矢印でカーソル移動をしている際、縦中横の文字を通ると、縦移動と横移動が
+   * 変わります。下を押しているのに左に動きます」。span.tcy は
+   * text-combine-upright で中が**横組み**になるので、カーソルがその中へ
+   * 入った瞬間、ブラウザは次の矢印を横書きとして解釈する。
+   *
+   * **向きは、押した鍵ではなく動いた実績で決める。** 縦書きでの矢印の
+   * 解釈はブラウザ任せなので、自前で真似すると必ずどこかで食い違う。
+   * 動く前と後の位置を比べれば、どちらへ進んでいたかは確かに分かる。
+   * 比べられないとき（動けなかったとき）だけ、鍵から当てる。
+   *
+   * @param atoms composeAtoms(compose)
+   * @param at { node, offset, before, key, vertical }
+   *   node/offset … 動いた**あと**のカーソル（Shift つきなら focus 側）
+   *   before … 動く**前**の記法の位置（数えられなければ null）
+   * @returns "before"（手前の境目へ）／"after"（後ろの境目へ）／null
+   */
+  function composeEscapeAfterArrow(atoms, at) {
+    if (!at || !at.node) return null;
+    const mark = composeMarkRangeOf(atoms, at.node);
+    if (mark === null) return null;
+    const now = composePointToOffset(atoms, at.node, at.offset);
+    const before = at.before;
+    const forward =
+      typeof before === "number" && before !== now
+        ? before < now
+        : composeArrowGoesForward(at.key, at.vertical === true);
+    return forward ? "after" : "before";
+  }
   /* compose:end */
 
   /**
@@ -3909,6 +3995,88 @@ ruby > rt {
     selection.removeAllRanges();
     selection.addRange(moved);
   }
+
+  /**
+   * 矢印で**字を揃えるための印**の中へ入ってしまったカーソルを、外へ出す。
+   *
+   * 打つ前の逃がし（composeEscapeEllipsis）は beforeinput の打鍵しか
+   * 見ていないので、矢印では呼ばれない。そのため縦中横（span.tcy）の中で
+   * カーソルが止まり、**そこから先の矢印が横書きとして解釈される**
+   * ——作者の実機報告、2026-09-22「下を押しているのに左に動きます」。
+   *
+   * **既定の動きを止めない。** 縦書きでの矢印の解釈を自前で作り直すと、
+   * 行を跨ぐときや折り返しで必ず食い違う。ブラウザに動かさせてから、
+   * 入り込んでいたら置き直す（setTimeout(0) は、既定の移動が済んだあと）。
+   *
+   * @param before 動く前の記法の位置
+   * @param key 押された矢印
+   * @param extend Shift つきか（選んだ範囲を伸ばす）
+   */
+  function composeEscapeArrowNow(before, key, extend) {
+    // **変換中は触らない**（選択を動かすと変換そのものが壊れる）
+    if (composing) return;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const node = selection.focusNode;
+    if (!node || !compose.contains(node)) return;
+    const side = composeEscapeAfterArrow(composeCurrentAtoms(), {
+      node: node,
+      offset: selection.focusOffset,
+      before: before,
+      key: key,
+      vertical: document.body.classList.contains("vertical"),
+    });
+    if (side === null) return;
+    /*
+      **出す先は DOM の境目で取る**（記法の位置から引き直さない）。
+      印が行の終わりにあると、記法の位置からは印の中の末尾しか作れず、
+      外へ出たことにならない
+    */
+    const span = composeEllipsisAncestor(node);
+    if (!span || !span.parentNode) return;
+    const moved = document.createRange();
+    if (side === "before") moved.setStartBefore(span);
+    else moved.setStartAfter(span);
+    moved.collapse(true);
+    try {
+      if (extend) {
+        // **選び直さない。** anchor（選び始め）は据え置き、focus だけ動かす
+        selection.extend(moved.startContainer, moved.startOffset);
+        return;
+      }
+      selection.removeAllRanges();
+      selection.addRange(moved);
+    } catch (error) {
+      /* 置けなければ諦める（最善努力。本文は壊れない） */
+    }
+  }
+
+  /** 見張る矢印。修飾つき（Ctrl+→ の語送りなど）でも入り込みは起きる */
+  const COMPOSE_ARROW_KEYS = {
+    ArrowUp: true,
+    ArrowDown: true,
+    ArrowLeft: true,
+    ArrowRight: true,
+  };
+
+  compose.addEventListener("keydown", function (event) {
+    if (composing) return;
+    if (COMPOSE_ARROW_KEYS[event.key] !== true) return;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    if (!selection.focusNode || !compose.contains(selection.focusNode)) return;
+    // 動く前の位置を控える（どちらへ進んだかは、あとで比べて決める）
+    const before = composePointToOffset(
+      composeCurrentAtoms(),
+      selection.focusNode,
+      selection.focusOffset
+    );
+    const key = event.key;
+    const extend = event.shiftKey === true;
+    setTimeout(function () {
+      composeEscapeArrowNow(before, key, extend);
+    }, 0);
+  });
 
   /**
    * **装飾のコマンドは通さない。** Ctrl+B などは記法に無いものを

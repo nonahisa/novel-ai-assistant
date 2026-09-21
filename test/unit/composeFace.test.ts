@@ -216,6 +216,22 @@ interface ComposeApi {
     start: { node: FakeNode; offset: number };
     end: { node: FakeNode; offset: number };
   } | null;
+  /** 印が占める範囲（作者の実機報告、2026-09-22。設計書6.34.5） */
+  composeMarkRangeOf(
+    atoms: ComposeAtom[],
+    node: FakeNode
+  ): { start: number; end: number } | null;
+  /** 矢印で印の中へ入ったカーソルを、どちら側へ出すか */
+  composeEscapeAfterArrow(
+    atoms: ComposeAtom[],
+    at: {
+      node: FakeNode;
+      offset: number;
+      before: number | null;
+      key: string;
+      vertical?: boolean;
+    }
+  ): "before" | "after" | null;
 }
 
 /** 用語の位置（`collectTermSpans` が渡してくるもののうち、判定が見る分だけ） */
@@ -236,7 +252,7 @@ const api = new Function(
     " composeTermForOffset, pickMenuTerm," +
     " composeCopyPayloads, composePastePick, COMPOSE_NOTATION_FLAVOR," +
     " memoIsLine, memoPartsOf, memoClassFor, composeMarkIsStale," +
-    " composeComposingSpan };"
+    " composeComposingSpan, composeMarkRangeOf, composeEscapeAfterArrow };"
 )() as ComposeApi;
 
 /** 記法から組み立てたDOM（偽） */
@@ -1457,6 +1473,132 @@ describe("画面の約束", () => {
       code.indexOf('compose.addEventListener("beforeinput"')
     );
     expect(before.slice(0, 400)).toContain("composeEscapeEllipsis(kind)");
+  });
+
+  /**
+   * 矢印で印を通ると向きが入れ替わる（作者の実機報告、2026-09-22
+   * 「原稿エディター縦書きで矢印でカーソル移動をしている際、縦中横の文字を
+   * 通ると、縦移動と横移動が変わります。下を押しているのに左に動きます」）。
+   *
+   * span.tcy は text-combine-upright で中が横組みになるので、カーソルが
+   * その中に止まると、そこから先の矢印が**横書きとして**解釈される。
+   * 打つ前の逃がし（composeEscapeEllipsis）は打鍵しか見ていないため、
+   * 矢印では呼ばれない。
+   *
+   * **向きは動いた実績で決める。** 縦書きでの矢印の解釈を自前で真似すると
+   * 折り返しや行跨ぎで必ず食い違うので、動く前と後の位置を比べる。
+   */
+  describe("矢印で印の中へ入ったカーソルを外へ出す", () => {
+    /** 「あ12い」の「12」は縦中横の印。記法の位置では 1〜3 を占める */
+    function tcyFace(): { atoms: ComposeAtom[]; inside: FakeNode; plain: FakeNode } {
+      const fragment = build("あ12い");
+      const line = fragment.childNodes[0];
+      return {
+        atoms: api.composeAtoms(fragment),
+        inside: line.childNodes[1].childNodes[0],
+        plain: line.childNodes[0],
+      };
+    }
+
+    it("印の範囲は、印の中の節点から引ける", () => {
+      const face = tcyFace();
+      expect(api.composeMarkRangeOf(face.atoms, face.inside)).toEqual({
+        start: 1,
+        end: 3,
+      });
+      // 印の外の字からは引けない（＝逃がす相手ではない）
+      expect(api.composeMarkRangeOf(face.atoms, face.plain)).toBeNull();
+    });
+
+    it("印の中なら、進んでいた向きの境目へ出す", () => {
+      const face = tcyFace();
+      // 「1」と「2」の間（記法では 2）。手前（1）から進んできた＝先へ
+      expect(
+        api.composeEscapeAfterArrow(face.atoms, {
+          node: face.inside,
+          offset: 1,
+          before: 1,
+          key: "ArrowDown",
+        })
+      ).toBe("after");
+      // 後ろ（3）から戻ってきた＝手前へ
+      expect(
+        api.composeEscapeAfterArrow(face.atoms, {
+          node: face.inside,
+          offset: 1,
+          before: 3,
+          key: "ArrowUp",
+        })
+      ).toBe("before");
+    });
+
+    it("印の外なら、何もしない", () => {
+      const face = tcyFace();
+      expect(
+        api.composeEscapeAfterArrow(face.atoms, {
+          node: face.plain,
+          offset: 0,
+          before: 1,
+          key: "ArrowDown",
+        })
+      ).toBeNull();
+    });
+
+    /**
+     * 動けなかったとき（前と後が同じ位置）だけ、押した鍵から当てる。
+     * **縦書きでは左右が入れ替わる**——行は右から左へ積むので、左が次の行。
+     */
+    it("動いた向きが測れなければ、鍵から当てる（縦書きは左右が逆）", () => {
+      const face = tcyFace();
+      function side(key: string, vertical: boolean) {
+        return api.composeEscapeAfterArrow(face.atoms, {
+          node: face.inside,
+          offset: 1,
+          before: 2,
+          key,
+          vertical,
+        });
+      }
+      expect(side("ArrowLeft", true)).toBe("after");
+      expect(side("ArrowRight", true)).toBe("before");
+      expect(side("ArrowRight", false)).toBe("after");
+      expect(side("ArrowLeft", false)).toBe("before");
+      // 上下はどちらの向きでも変わらない（下が先）
+      expect(side("ArrowDown", true)).toBe("after");
+      expect(side("ArrowUp", false)).toBe("before");
+    });
+
+    it("既定の動きを止めず、動いたあとに直す", () => {
+      const keydown = code.slice(
+        code.indexOf('compose.addEventListener("keydown"')
+      );
+      const body = keydown.slice(0, 900);
+      // **変換中は触らない**（選択を動かすと変換そのものが壊れる）
+      expect(body).toContain("if (composing) return;");
+      expect(body).toContain("COMPOSE_ARROW_KEYS[event.key] !== true");
+      // 既定の移動を止めない（preventDefault を呼ばない）
+      expect(body).not.toContain("preventDefault");
+      // 済んでから直す
+      expect(body).toContain("setTimeout(");
+      expect(body).toContain("composeEscapeArrowNow(before, key, extend)");
+    });
+
+    /**
+     * Shift つきは**選び始め（anchor）を動かさない。** 選び直すと、
+     * 伸ばしている途中の範囲が印のところで崩れる。
+     */
+    it("Shift つきは anchor を動かさず、focus だけ動かす", () => {
+      const now = code.slice(code.indexOf("function composeEscapeArrowNow("));
+      const body = now.slice(0, 1600);
+      expect(body).toContain("if (composing) return;");
+      expect(body).toContain("selection.extend(");
+      expect(body).toContain("setStartBefore(span)");
+      expect(body).toContain("setStartAfter(span)");
+      // Shift つきのときは選び直さない（removeAllRanges の手前で戻る）
+      expect(body.indexOf("selection.extend(")).toBeLessThan(
+        body.indexOf("selection.removeAllRanges()")
+      );
+    });
   });
 
   it("面の状態を覚える", () => {

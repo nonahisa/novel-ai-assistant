@@ -281,6 +281,21 @@ button.secondary {
 }
 .more-toggle:hover { text-decoration: underline; }
 /*
+ * 読者タイプの区分（設計書6.91.9.2）。
+ *
+ * **畳んで置く。** AIへ添えた回にだけ出るとはいえ、11行の一覧が
+ * 答えの下に開いたまま並ぶと、答えそのものが押し下げられる。
+ */
+.glossary { margin-top: 8px; font-size: 12px; }
+.glossary summary {
+  cursor: pointer;
+  color: var(--vscode-textLink-foreground);
+}
+.glossary ul { margin: 6px 0 0; padding-left: 18px; }
+.glossary li { margin-bottom: 4px; }
+/* この作品の区分だけ、目で拾えるようにする（色だけに頼らない） */
+.glossary li.mine { font-weight: 600; }
+/*
  * 画面で指しながらの案内（設計書6.104）。
  *
  * **1段につき1枚の札を積む。** 差し替えにすると、どこまで進んだかが
@@ -752,6 +767,38 @@ function appendStagedActions(turn, message) {
   turn.appendChild(box);
 }
 
+/**
+ * 読者タイプの区分の一覧を、答えの下に**畳んで**置く（設計書6.91.9.2）。
+ *
+ * 作者の実機報告、2026-09-22「相談で読者タイプの一覧が添えられていません」
+ * ——AIへは渡していた（questionMentionsReader）が、**作者の目には
+ * 見えていなかった。** 一覧はこの拡張機能が持っている決まりなので、
+ * AIに書かせず、拡張機能側が READER_TYPES から並べて送ってくる。
+ *
+ * 診断済みなら、その作品の区分に印を付ける（どれが自分か分からないと、
+ * 並べただけでは比べられない）。
+ */
+function appendReaderGlossary(turn, entries) {
+  if (!entries || entries.length === 0) return;
+  const box = document.createElement('details');
+  box.className = 'glossary';
+
+  const head = document.createElement('summary');
+  head.textContent = '読者タイプの区分（' + entries.length + '）';
+  box.appendChild(head);
+
+  const list = document.createElement('ul');
+  entries.forEach((entry) => {
+    const item = document.createElement('li');
+    if (entry.mine) item.className = 'mine';
+    item.textContent =
+      entry.label + '……' + entry.summary + (entry.mine ? ' ← この作品' : '');
+    list.appendChild(item);
+  });
+  box.appendChild(list);
+  turn.appendChild(box);
+}
+
 /** 「そこを見せて」。押すとファイルを開き、該当箇所を光らせる */
 function appendLocate(turn, locate) {
   const box = document.createElement('div');
@@ -1114,6 +1161,8 @@ window.addEventListener('message', (event) => {
     const turn = appendTurn('AI', message.reply, undefined, message.html);
     // 参照（そこを見せて）はそのまま出し、作業の提案は畳んで置く
     if (message.locate) appendLocate(turn, message.locate);
+    // 読者の話をした回だけ、AIへ添えたのと同じ区分の一覧を作者にも見せる
+    appendReaderGlossary(turn, message.readerGlossary);
     appendStagedActions(turn, message);
     // 案内の誘い（設計書6.104）。**選択肢より先に置く**——
     // 「どの順でやるか」は、言い直しの候補より先に読みたい

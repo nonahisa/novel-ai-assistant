@@ -514,3 +514,39 @@ export function describeReaderGap(gap: ReaderGap): string {
     `本文は「${toward}」の側に寄っています。`
   );
 }
+
+/* ───────────────────────────────────────────────────────────────
+   区分の一覧を、相談の画面へ出す（設計書6.91.9.2）
+   ─────────────────────────────────────────────────────────────── */
+
+/** 相談の画面に畳んで出す、区分1件 */
+export interface ReaderTypeGlossaryEntry {
+  label: string;
+  summary: string;
+  /** この作品の区分か（診断済みのときだけ、1件に付く） */
+  mine: boolean;
+}
+
+/**
+ * 読者タイプの区分の一覧（画面用）。
+ *
+ * **AIには頼まない。** 一覧はこの拡張機能が持っている決まりなので、
+ * 製品が `READER_TYPES` から並べる。AIに書かせると、聞くたびに
+ * 名前も件数も揺れる（作者の実機報告、2026-09-22「相談で読者タイプの
+ * 一覧が添えられていません」——AIへは渡していたが、作者の目には
+ * 見えていなかった）。
+ *
+ * 診断済みなら、その作品の区分に印を付ける（どれが自分かが分からないと、
+ * 並べただけでは比べられない）。
+ */
+export function readerTypeGlossaryEntries(
+  profile: ReaderProfile | undefined
+): ReaderTypeGlossaryEntry[] {
+  const basis = chatReaderBasis(profile);
+  const mine = basis ? resolveReaderType(basis.scores) : null;
+  return (Object.keys(READER_TYPES) as ReaderTypeId[]).map((id) => ({
+    label: READER_TYPES[id].label,
+    summary: READER_TYPES[id].summary,
+    mine: id === mine,
+  }));
+}

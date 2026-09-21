@@ -53,6 +53,7 @@ import {
   SYNOPSES_FILE,
   readBody,
   readPlotMarkdown,
+  readReaderProfile,
   readSettingsFile,
   readSettingsRecords,
   resolveInsideFolder,
@@ -200,6 +201,9 @@ export function synopsisPrompt(input: EpisodePromptInput) {
       previousSynopses: previous,
       characterNames: readCharacterNames(input.folder),
       needsSubtitle: input.needsSubtitle === true,
+      // **測る側も製品と同じ材料で組む**（サブタイトルは宛先を見る。
+      // ここだけ渡さないと、製品に無い差で測ったことになる）
+      readerProfile: readReaderProfile(input.folder),
     }),
   };
 }
