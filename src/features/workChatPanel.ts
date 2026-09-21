@@ -50,7 +50,12 @@ import type { ReaderProfile } from "../models/readerProfile";
 import { notifyDone } from "../views/notify";
 import { buildAdvicePolicyPrompt } from "../prompts/advicePolicy";
 import { buildWriterStylePrompt } from "../prompts/writerStyle";
-import { buildReaderTypePrompt } from "../prompts/readerTarget";
+import {
+  buildReaderTypeGlossaryPrompt,
+  buildReaderTypePrompt,
+  buildReaderTypeUnknownPrompt,
+  questionMentionsReader,
+} from "../prompts/readerTarget";
 import {
   buildExcerpt,
   classifyChatContext,
@@ -607,7 +612,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    */
   private async buildSystemPrompt(
     work: WorkEntry | undefined,
-    featureIndex: boolean
+    featureIndex: boolean,
+    /**
+     * 作者のいまの質問。**読者の区分の一覧を添えるかどうか**にだけ使う
+     * （設計書6.91.9）。話題で出し分けるのはここ1か所だけで、
+     * 人柄・やり方・宛先は話題に関わらず送る
+     */
+    question: string
   ): Promise<string> {
     const base = buildWorkChatSystemPrompt({ featureIndex });
     const blocks: string[] = [];
@@ -639,14 +650,32 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       blocks.push(buildWriterStylePrompt(writerProfile));
     }
 
-    // ターゲット読者（設計書6.91.9）。**作品ごとのファイルにあるので
-    // 非同期**。読めなければ何も足さない
+    /*
+      ターゲット読者（設計書6.91.9）。**作品ごとのファイルにあるので非同期。**
+
+      **決めていない作品でも、決めていないことだけは渡す**（作者の実機報告、
+      2026-09-21）。以前は診断していなければ何も足さなかったので、
+      相談で「読者型はわかりませんか？」と聞くと、AIはこの拡張機能の区分を
+      知らないまま年齢・性別の一般論で答えていた。
+
+      **区分の一覧は、読者の話をしている回にだけ添える**（作者の裁定、
+      2026-09-21）。決めていてもいなくても絞り方は同じ——読者の話でない回に
+      まで一覧が乗ると、助言の向きが11の区分のあいだで揺れる。
+    */
     if (work) {
       const readerProfile = await this.readerProfileFor(work);
       const readerBlock = buildReaderTypePrompt(readerProfile);
       if (readerBlock) {
         for (const line of readerTypeChatLogLines(readerProfile)) logStep(line);
         blocks.push(readerBlock);
+      } else {
+        logStep("相談: 読者タイプは未診断（決めていないことだけを渡した）");
+        blocks.push(buildReaderTypeUnknownPrompt());
+      }
+      // 読者の話をしている回だけ、隣の区分と比べられるように一覧を添える
+      if (questionMentionsReader(question)) {
+        logStep("相談: 読者タイプの区分一覧を添えた（読者の話のため）");
+        blocks.push(buildReaderTypeGlossaryPrompt());
       }
     }
 
@@ -1159,7 +1188,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // 控えを使い回すので、読むのは作品ごとに1回きり）
       const systemPrompt = await this.buildSystemPrompt(
         context?.work,
-        withFeatureIndex
+        withFeatureIndex,
+        question
       );
 
       // **上限と、その出どころを一度に取る。** 切り詰められたときの案内は

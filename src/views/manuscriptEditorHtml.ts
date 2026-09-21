@@ -535,6 +535,23 @@ body.vertical .tcy { text-combine-upright: all; }
 ::highlight(novelai-reading) {
   background-color: rgba(64, 160, 255, 0.28);
 }
+/* **変換中（IME）の字**（作者の実機報告、2026-09-21「変換中左側に線がでます」）。
+
+   縦書きで変換中に出る下線を引いているのは日本語入力の層で、本文の下線とは
+   別の道を通る。だから text-underline-position: right では動かせない
+   （0.19.3 で確かめてある。#surface の但し書きを参照）。**線は消せない**ので、
+   代わりに**どこを変換しているのかを背景で見せる。**
+
+   置き方は用語・読み上げと同じ CSS Custom Highlight API にする。
+   **変換中に DOM を触ると変換そのものが壊れる**（設計書6.34）ので、
+   DOMを変えずに色を置けるこの仕掛け以外は使えない。
+
+   色は薄い黄。用語は文字色、シーンメモは蛍光ペン、読み上げは水色なので、
+   4つが同時に載っても取り違えない。**横書きでも同じに効く**（縦書きだけに
+   絞る理由が無く、どこを変換中かは横でも分かったほうがよい） */
+::highlight(novelai-composing) {
+  background-color: rgba(255, 200, 0, 0.35);
+}
 
 /* ── SNS記事のnote風（設計書6.69） ─────────────────
    **ここから下は、すべて body.note / body.notepv の中に閉じ込める。**
@@ -2684,6 +2701,42 @@ ruby > rt {
   }
 
   /**
+   * 縦中横に**ちょうど当たる**中身か（前後の文脈が無い状態での判定）。
+   *
+   * TCY_RUN_PATTERN は前後を見る言明（「直前・直後が半角文字なら立てない」）を
+   * 持っているが、**文字列の端では必ず通る**ので、両端を留めればそのまま
+   * 「この中身だけで規則に当たるか」の判定になる。写しの正規表現は書かない。
+   */
+  const COMPOSE_TCY_EXACT = new RegExp("^(?:" + TCY_RUN_PATTERN + ")$");
+
+  /**
+   * 字を揃えるための印（三点リーダ・ダッシュ・縦中横）の中身が、
+   * **もう規則に合わなくなっているか**。
+   *
+   * 作者の実機報告（2026-09-21）「11の前に『あ』を入力したら縦中横への
+   * 巻き込みが発生しました」。打つ前にカーソルを印の外へ逃がしている
+   * （composeEscapeEllipsis）が、**印のすぐ手前の境目では Chromium が
+   * 結局 span の中へ字を入れる。** その結果「あ11」が1文字ぶんの幅へ
+   * 詰め込まれて読めなくなる。
+   *
+   * 逃がしきれない以上、**打ったあとに外す**しかない。外す相手を決めるのが
+   * この判定で、画面の外から試せるように純粋な関数にしてある。
+   *
+   * **本文は変わらない**（直列化は素の span の中身をそのまま拾う）。
+   * これは見た目だけの手当てで、面を組み直せばどのみち正しい印が付く。
+   */
+  function composeMarkIsStale(name, value) {
+    if (name === "tcy") return !COMPOSE_TCY_EXACT.test(value);
+    if (name === "ellipsis") return value !== "…";
+    // ダッシュは2つの文字（U+2014 / U+2015）のどちらでもよい。
+    // 入っていた字はそのまま残す決まりなので、片方へ寄せて判定しない
+    if (name === "dash") {
+      return value.length !== 1 || DASH_CHARS.indexOf(value) < 0;
+    }
+    return false;
+  }
+
+  /**
    * 平文を段落へ入れる。
    *
    * **三点リーダ・ダッシュ・半角数字（縦中横）は、揃えるための印で包む。**
@@ -3414,10 +3467,67 @@ ruby > rt {
     composeInvalidate();
     // **変換中は送らない**（確定前の文字を本文へ入れると二重に入る）
     if (composing) return;
+    // 打った字が、字を揃えるための印の中へ入ってしまっていたら外す
+    composeUnwrapStaleMarks();
     composeSend();
     composeScheduleHighlight();
     composeRepaintMemos();
   });
+
+  /**
+   * 中身が規則に合わなくなった印（縦中横・三点リーダ・ダッシュ）を外す。
+   *
+   * **打つ前に逃がすだけでは足りなかった**（composeEscapeEllipsis）。
+   * 印のすぐ手前の境目にカーソルがあるとき、外へ出したつもりでも
+   * Chromium は打った字を span の中へ入れる——作者の実機報告、2026-09-21
+   * 「11の前に『あ』を入力したら縦中横への巻き込みが発生しました」。
+   * 「あ11」が縦中横のかたまりとして1文字ぶんの幅へ詰め込まれ、読めなくなる。
+   *
+   * そこで**打ったあとに直す。** どれを外すかは composeMarkIsStale が決める。
+   *
+   * **本文は変わらない。** 直列化（composeDomToNotation）は素の span の
+   * 中身をそのまま拾うので、印が付いていてもいなくても同じ文字列になる。
+   * これは見た目だけの手当てで、面を組み直せば正しい印が付き直る。
+   *
+   * **かたまり（ルビ・傍点）には触らない**（data-src を持つ別物で、
+   * そもそも中へカーソルが入らない）。
+   */
+  function composeUnwrapStaleMarks() {
+    // **変換中は DOM を触らない。** 触ると変換そのものが壊れる（設計書6.34）
+    if (composing) return;
+    const marks = compose.querySelectorAll("span.tcy, span.ellipsis, span.dash");
+    const stale = [];
+    for (const span of marks) {
+      const name = span.getAttribute("class");
+      if (composeMarkIsStale(name, span.textContent || "")) stale.push(span);
+    }
+    if (stale.length === 0) return;
+    /*
+      外すと DOM が変わるので、**位置は記法で覚えて、記法で戻す。**
+      印は本文の字数を1文字も占めないため、外す前後で記法の位置は動かない
+      ——つまりカーソルは打った字の直後に残る
+    */
+    // 位置の一覧は、いまの DOM から数え直す（確定直後は古い控えが残る）
+    composeInvalidate();
+    const at = composeSelectionNow();
+    const touched = [];
+    for (const span of stale) {
+      const parent = span.parentNode;
+      if (!parent) continue;
+      while (span.firstChild) parent.insertBefore(span.firstChild, span);
+      parent.removeChild(span);
+      touched.push(parent);
+    }
+    /*
+      隣り合ったテキストノードを1つにまとめる。並んだまま残すと、
+      次に打つ字がどちらのノードへ入るかで位置の数え方が変わる
+    */
+    for (const parent of touched) {
+      if (parent.normalize) parent.normalize();
+    }
+    composeInvalidate();
+    composeRestoreCaret(at);
+  }
 
   /**
    * 行の付箋らしさ（設計書6.40.3）と、脚本の行の種別（設計書6.70）を
@@ -3446,13 +3556,25 @@ ruby > rt {
     }
   }
 
-  compose.addEventListener("compositionstart", function () {
+  compose.addEventListener("compositionstart", function (event) {
     composing = true;
+    composeMarkComposing(event.data);
+  });
+  /*
+    **変換中の字が動くたびに、塗る範囲を置き直す。** 変換中は DOM を
+    触れないので、色は CSS Custom Highlight API で置く（DOMを変えない）
+  */
+  compose.addEventListener("compositionupdate", function (event) {
+    composeMarkComposing(event.data);
   });
   compose.addEventListener("compositionend", function () {
     composing = false;
+    // 変換が終われば塗る範囲は無い（確定した字は普通の本文）
+    composeClearComposing();
     // 確定ぶんが入るのは、この直後のことがある（打つ面と同じ理由）
     setTimeout(function () {
+      // **確定した字が印の中へ入っていたら、ここで外す**（変換中は触れない）
+      composeUnwrapStaleMarks();
       composeSend();
       const waiting = composePending;
       composePending = null;
@@ -3719,6 +3841,72 @@ ruby > rt {
       for (const kind of COMPOSE_HIGHLIGHTS) {
         CSS.highlights.delete("novelai-term-" + kind);
       }
+    } catch (error) {
+      /* 消せなくても入力は動く */
+    }
+    // 変換中の塗りも同じ仕掛けで置いている。面を閉じるときに残さない
+    composeClearComposing();
+  }
+
+  /* ── 変換中（IME）の字を塗る（作者の実機報告、2026-09-21） ── */
+
+  /**
+   * 変換中の範囲へ色を置く。
+   *
+   * 作者の報告「変換中左側に線がでます」。縦書きで変換中に出る下線は
+   * **日本語入力の層が描いている**ので、CSS（text-underline-position）では
+   * 動かせない（0.19.3 で確かめた）。線は消せないが、**どこを変換中かは
+   * 背景で見せられる。**
+   *
+   * **DOM は書き換えない。** 変換の途中で DOM を触ると変換そのものが
+   * 壊れる（設計書6.34。この面の既存の決まり）。用語の色付けと同じ
+   * CSS Custom Highlight API なら、色を置いても DOM は変わらない。
+   *
+   * 範囲は「いまのカーソルから、変換中の字の長さだけ手前」で作る。
+   * compositionupdate の event.data が変換中の字そのものなので、
+   * 長さはそこから取れる。**節点をまたぐ範囲は作らない**——変換中の字は
+   * 1つのテキストノードに入るので、またいでいたら諦めて色を消す
+   * （ずれた色は、無い色より分かりにくい）。
+   */
+  function composeMarkComposing(data) {
+    if (!composeHighlightsUsable()) return;
+    try {
+      const length = data ? data.length : 0;
+      if (length === 0) {
+        composeClearComposing();
+        return;
+      }
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) {
+        composeClearComposing();
+        return;
+      }
+      const caret = selection.getRangeAt(0);
+      const node = caret.endContainer;
+      if (node.nodeType !== 3 || !compose.contains(node)) {
+        composeClearComposing();
+        return;
+      }
+      const end = caret.endOffset;
+      const start = end - length;
+      if (start < 0 || start >= end) {
+        composeClearComposing();
+        return;
+      }
+      const range = document.createRange();
+      range.setStart(node, start);
+      range.setEnd(node, end);
+      CSS.highlights.set("novelai-composing", new Highlight(range));
+    } catch (error) {
+      // **色が出ないだけで、変換は動く。** ここで止めない
+      composeClearComposing();
+    }
+  }
+
+  function composeClearComposing() {
+    if (!composeHighlightsUsable()) return;
+    try {
+      CSS.highlights.delete("novelai-composing");
     } catch (error) {
       /* 消せなくても入力は動く */
     }

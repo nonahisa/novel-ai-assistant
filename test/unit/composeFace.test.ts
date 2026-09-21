@@ -194,6 +194,8 @@ interface ComposeApi {
   memoIsLine(line: string): boolean;
   memoPartsOf(line: string): { tag: string; text: string };
   memoClassFor(line: string): string;
+  /** 字を揃えるための印が、規則から外れたか（作者の実機報告、2026-09-21） */
+  composeMarkIsStale(name: string, value: string): boolean;
 }
 
 /** 用語の位置（`collectTermSpans` が渡してくるもののうち、判定が見る分だけ） */
@@ -212,7 +214,7 @@ const api = new Function(
     " composeChunkIsRuby, composeChunkAt, composeChunkBaseNode," +
     " composeChunkBaseRange, composeChunkCovering, composeSpanPoints," +
     " composeTermForOffset, pickMenuTerm," +
-    " memoIsLine, memoPartsOf, memoClassFor };"
+    " memoIsLine, memoPartsOf, memoClassFor, composeMarkIsStale };"
 )() as ComposeApi;
 
 /** 記法から組み立てたDOM（偽） */
@@ -1829,5 +1831,144 @@ describe("脚本の行（組んで書く面）", () => {
     expect(
       buildManuscriptEditorHtml("NONCE123", "vscode-resource:", "long")
     ).toBe(html);
+  });
+});
+
+/**
+ * 字を揃えるための印への巻き込み（作者の実機報告、2026-09-21
+ * 「11の前に『あ』を入力したら縦中横への巻き込みが発生しました」）。
+ *
+ * 打つ前にカーソルを印の外へ逃がしていても、印のすぐ手前の境目では
+ * Chromium が打った字を span の中へ入れる。**打ったあとに外す**しかなく、
+ * どれを外すかを決めるのがこの判定である。
+ */
+describe("規則から外れた印を見つける", () => {
+  const EM_DASH = String.fromCodePoint(0x2014);
+  const BAR = String.fromCodePoint(0x2015);
+
+  it("縦中横は、1〜2文字の半角のままなら外さない", () => {
+    expect(api.composeMarkIsStale("tcy", "1")).toBe(false);
+    expect(api.composeMarkIsStale("tcy", "11")).toBe(false);
+    expect(api.composeMarkIsStale("tcy", "A5")).toBe(false);
+  });
+
+  it("**手前に字が巻き込まれたら外す**", () => {
+    expect(api.composeMarkIsStale("tcy", "あ11")).toBe(true);
+    expect(api.composeMarkIsStale("tcy", "11あ")).toBe(true);
+  });
+
+  it("3文字になったら外す（そもそも立てない長さ）", () => {
+    expect(api.composeMarkIsStale("tcy", "123")).toBe(true);
+  });
+
+  it("空になっても外す", () => {
+    expect(api.composeMarkIsStale("tcy", "")).toBe(true);
+  });
+
+  it("三点リーダは「…」1文字のときだけ残す", () => {
+    expect(api.composeMarkIsStale("ellipsis", "…")).toBe(false);
+    expect(api.composeMarkIsStale("ellipsis", "…あ")).toBe(true);
+    expect(api.composeMarkIsStale("ellipsis", "あ…")).toBe(true);
+    expect(api.composeMarkIsStale("ellipsis", "……")).toBe(true);
+  });
+
+  /** **2つの文字のどちらでもよい**（入っていた字をそのまま残す決まり） */
+  it("ダッシュは U+2014 でも U+2015 でも残す", () => {
+    expect(api.composeMarkIsStale("dash", EM_DASH)).toBe(false);
+    expect(api.composeMarkIsStale("dash", BAR)).toBe(false);
+    expect(api.composeMarkIsStale("dash", BAR + "あ")).toBe(true);
+    expect(api.composeMarkIsStale("dash", BAR + BAR)).toBe(true);
+  });
+
+  /** かたまり（ルビ・傍点）や行の印には関わらない */
+  it("知らない印には手を出さない", () => {
+    expect(api.composeMarkIsStale("emphasis", "あ")).toBe(false);
+    expect(api.composeMarkIsStale("line", "あ")).toBe(false);
+  });
+
+  it("規則の写しを作らず、TCY_RUN_PATTERN から組む", () => {
+    expect(source).toContain('new RegExp("^(?:" + TCY_RUN_PATTERN + ")$")');
+  });
+});
+
+/**
+ * 変換中（IME）の字を背景で見せる（作者の実機報告、2026-09-21
+ * 「変換中左側に線がでます」）。
+ *
+ * 線を引いているのは日本語入力の層なので消せない。**代わりに、どこを
+ * 変換しているのかを背景で見せる。**
+ */
+describe("変換中の字に背景色を置く", () => {
+  it("薄い黄の塗りが定義してある", () => {
+    expect(html).toContain("::highlight(novelai-composing)");
+    expect(html).toContain("background-color: rgba(255, 200, 0, 0.35);");
+  });
+
+  it("変換の始まり・途中・終わりの3つに繋いである", () => {
+    expect(html).toContain(
+      'compose.addEventListener("compositionstart", function (event) {'
+    );
+    expect(html).toContain(
+      'compose.addEventListener("compositionupdate", function (event) {'
+    );
+    expect(html).toContain("composeMarkComposing(event.data);");
+  });
+
+  it("変換が終われば消す", () => {
+    const end = html.slice(
+      html.indexOf('compose.addEventListener("compositionend"')
+    );
+    expect(end.slice(0, 400)).toContain("composeClearComposing();");
+  });
+
+  /** 面を閉じるときに塗りを残さない */
+  it("まとめて消す道にも入っている", () => {
+    const clear = html.slice(html.indexOf("function composeClearHighlights("));
+    expect(clear.slice(0, 500)).toContain("composeClearComposing();");
+  });
+
+  /**
+   * **DOM を触らない**のがこの手当ての肝である（変換中に DOM を書き換えると
+   * 変換そのものが壊れる）。CSS Custom Highlight API だけで置く
+   */
+  it("**変換中にDOMを書き換えない**", () => {
+    const paint = html.slice(html.indexOf("function composeMarkComposing("));
+    const body = paint.slice(0, paint.indexOf("function composeClearComposing("));
+    expect(body).toContain('CSS.highlights.set("novelai-composing"');
+    expect(body).not.toContain("appendChild");
+    expect(body).not.toContain("insertBefore");
+    expect(body).not.toContain("removeChild");
+    expect(body).not.toContain("setAttribute");
+  });
+});
+
+/** 巻き込まれた印を外す道が、打鍵と確定の両方に繋がっているか */
+describe("巻き込まれた印を、打ったあとに外す", () => {
+  it("打たれたら外す（変換中を除く）", () => {
+    const listener = html.slice(
+      html.indexOf('compose.addEventListener("input", function () {')
+    );
+    const body = listener.slice(0, 400);
+    expect(body).toContain("if (composing) return;");
+    expect(body).toContain("composeUnwrapStaleMarks();");
+    // 変換中に触らないことは、関数の側でも念を押してある
+    const unwrap = html.slice(html.indexOf("function composeUnwrapStaleMarks("));
+    expect(unwrap.slice(0, 400)).toContain("if (composing) return;");
+  });
+
+  it("確定したあとにも1回やる", () => {
+    const end = html.slice(
+      html.indexOf('compose.addEventListener("compositionend"')
+    );
+    expect(end.slice(0, 700)).toContain("composeUnwrapStaleMarks();");
+  });
+
+  /** 外すと DOM が変わる。**カーソルは記法の位置で覚えて、位置で戻す** */
+  it("カーソルを覚えてから外し、戻す", () => {
+    const unwrap = html.slice(html.indexOf("function composeUnwrapStaleMarks("));
+    const body = unwrap.slice(0, 1800);
+    expect(body).toContain("const at = composeSelectionNow();");
+    expect(body).toContain("composeRestoreCaret(at);");
+    expect(body).toContain("composeInvalidate();");
   });
 });
