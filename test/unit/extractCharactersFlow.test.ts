@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   commands,
+  FileSystemError,
   window,
   workspace,
   type StubMessage,
@@ -30,6 +31,11 @@ const state = vi.hoisted(() => ({
   savedWorldItems: [] as unknown[],
   /** 既定のチャンク列を上書きしたいテストだけが設定する */
   chunks: undefined as unknown[] | undefined,
+  /**
+   * `CharacterStore.loadAll` が返す既存の人物。既定は空（新規のみのテストが多い）。
+   * 「承認待ちがあるとき」を確かめるテストだけが、既存人物を積む。
+   */
+  loadedCharacters: [] as unknown[],
   CharacterStoreError: class CharacterStoreError extends Error {
     readonly batchProgress:
       | {
@@ -195,7 +201,7 @@ vi.mock("../../src/core/characterStore", () => ({
   CharacterStoreError: state.CharacterStoreError,
   CharacterStore: class {
     async loadAll() {
-      return { characters: [], errors: [] };
+      return { characters: state.loadedCharacters, errors: [] };
     }
     async dirtyDocumentPaths() {
       return state.dirtyDocumentPaths();
@@ -381,6 +387,7 @@ describe("人物抽出フロー", () => {
     state.savedLocations.length = 0;
     state.savedOrganizations.length = 0;
     state.savedWorldItems.length = 0;
+    state.loadedCharacters = [];
     // 既定では疎通できている状態にする。接続断は個別テストで再現する
     state.testConnection
       .mockReset()
@@ -389,6 +396,9 @@ describe("人物抽出フロー", () => {
       get: <T>(_key: string, defaultValue: T): T => defaultValue,
     });
     workspace.textDocuments = [];
+    // 既定は空（`PendingUpdateStore` を使わないテストがほとんど）。
+    // 承認待ちを確かめるテストだけが、下で偽ディスクへ差し替える
+    workspace.fs = {} as unknown as typeof workspace.fs;
   });
 
   test("保存に失敗した文書がある場合はunsafe continueを提示せず中止する", async () => {
@@ -1999,6 +2009,101 @@ describe("人物抽出フロー", () => {
       expect(line).toContain("資料は増えていません");
       // 出ないことの確認。増えていないのに「できました」とは書かない
       expect(line).not.toContain("できました");
+    });
+  });
+
+  /*
+    **承認待ちがあるなら、完了の知らせの先頭ボタンが「提案を見る」になる**
+    （`extractCharacters.ts`、作者の指摘、2026-09-01）。
+
+    抽出のあとに作者が決めるのは「全部反映するか、1件ずつ選ぶか」で、それを
+    引き受けるのは提案パネルである。以前は `proposalPanel` を渡し忘れており、
+    このボタンが無いままダイアログを閉じるとパネルへ辿り着けなかった。
+
+    ある場合・無い場合の両方を見る——片方だけでは「常に出る／出ない」
+    実装でも満点になってしまう。
+  */
+  describe("承認待ちがあるときの完了の知らせ", () => {
+    const disk = new Map<string, Uint8Array>();
+
+    beforeEach(() => {
+      // `PendingUpdateStore.stage` が実際に書き込めるよう、偽ディスクを敷く
+      // （`pendingUpdateSource.test.ts` と同じ形）
+      disk.clear();
+      workspace.fs = {
+        createDirectory: async () => undefined,
+        readFile: async (uri: { fsPath: string }) => {
+          const bytes = disk.get(uri.fsPath);
+          if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+          return bytes;
+        },
+        writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
+          disk.set(uri.fsPath, bytes);
+        },
+        rename: async (from: { fsPath: string }, to: { fsPath: string }) => {
+          const bytes = disk.get(from.fsPath);
+          if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+          disk.set(to.fsPath, bytes);
+          disk.delete(from.fsPath);
+        },
+        delete: async (uri: { fsPath: string }) => {
+          disk.delete(uri.fsPath);
+        },
+      } as unknown as typeof workspace.fs;
+    });
+
+    function installWindow(): { showInformationMessage: ReturnType<typeof vi.fn> } {
+      const showInformationMessage = vi.fn<StubMessage>(
+        async (_message: string, ...actions: unknown[]) =>
+          actions.includes("実行") ? "実行" : undefined
+      );
+      Object.assign(window, {
+        showInformationMessage,
+        showWarningMessage: vi.fn(async () => undefined),
+        showErrorMessage: vi.fn(async () => undefined),
+        withProgress: vi.fn(async (_options, task) =>
+          task(
+            { report: vi.fn() },
+            { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+          )
+        ),
+      });
+      return { showInformationMessage };
+    }
+
+    test("既存人物への更新が承認待ちに回ったら、先頭が「提案を見る」になる", async () => {
+      // 「灯」は既存の人物。抽出結果がその更新として扱われるようにする
+      state.loadedCharacters = [emptyCharacter("char_001", "灯")];
+      state.mergeResult = {
+        characters: [
+          { ...emptyCharacter("char_001", "灯"), summary: "新しい要約" },
+        ],
+        added: [],
+        updated: ["灯"],
+        changedIds: ["char_001"],
+        conflicts: [],
+        folded: [],
+      };
+      const { showInformationMessage } = installWindow();
+      state.generate.mockResolvedValue(successfulResult("灯"));
+
+      await extractCharacters(work, testRegistry());
+
+      // 完了の知らせは最後に呼ばれたもの。その先頭ボタンを見る
+      const completion = showInformationMessage.mock.calls.at(-1);
+      expect(completion?.slice(1)[0]).toBe("提案を見る");
+    });
+
+    test("承認待ちが無ければ、「提案を見る」は出ない", async () => {
+      // 既存人物が無いので、抽出結果はすべて新規として扱われる
+      // （承認待ちへ回るのは「既存人物への更新」だけ）
+      const { showInformationMessage } = installWindow();
+      state.generate.mockResolvedValue(successfulResult("灯"));
+
+      await extractCharacters(work, testRegistry());
+
+      const completion = showInformationMessage.mock.calls.at(-1);
+      expect(completion?.slice(1)).not.toContain("提案を見る");
     });
   });
 });

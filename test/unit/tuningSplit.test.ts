@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { window, workspace } from "./support/vscodeStub";
 import type { AIRegistry } from "../../src/ai/registry";
+import { AIError } from "../../src/ai/types";
 import type {
   GenerateParams,
   GenerateResult,
@@ -43,6 +44,13 @@ const state = vi.hoisted(() => ({
   trueLimit: 9999,
   /** `generate` が受け取った引数を、送った順に残す */
   calls: [] as GenerateParams[],
+  /**
+   * 出力の測定で、次の1回だけ時間切れにする。
+   *
+   * 「時間切れの回が混じったら、測った値を上限には使わないと言う」
+   * （`measureContext.ts` の `measureOutputLimit`）を確かめるために使う。
+   */
+  timeoutOnNextOutputCall: false,
 }));
 
 const log = vi.hoisted(() => ({
@@ -73,6 +81,10 @@ vi.mock("../../src/ai/registry", () => ({
         // 出力の測定：頼まれた行数まで（ただし本当に書ける量まで）返す
         const asked = /0001 から順に (\d+) 行/.exec(params.userPrompt)?.[1];
         if (asked !== undefined) {
+          if (state.timeoutOnNextOutputCall) {
+            state.timeoutOnNextOutputCall = false;
+            throw new AIError("応答がタイムアウトしました。", "timeout");
+          }
           const lines = Math.min(Number(asked), state.trueLimit);
           return {
             text: perfect(lines),
@@ -192,6 +204,7 @@ beforeEach(async () => {
   state.providerId = "ollama";
   state.trueLimit = 9999;
   state.calls = [];
+  state.timeoutOnNextOutputCall = false;
   log.steps = [];
   // 台帳は 0.66.6 で保管庫のファイルへ移った。**毎回、空から始める**
   await useMemoryTuningStore({});
@@ -349,6 +362,44 @@ describe("書ける長さだけ測る", () => {
 
     expect(state.calls).toEqual([]);
     expect(noticeText(showInformationMessage)).toContain("手元のAI");
+  });
+});
+
+/**
+ * 時間切れの回が混じった実測は、上限として送ってはいけない
+ * （`ai/outputLimit.ts` の `resolveOutputLimitForSend`）。**遅いだけの
+ * モデルでは、実際には書けるのに小さい実測が出る**ためで、その値を
+ * ハード上限にすると「測っただけで以後すべての応答が切られる」。
+ *
+ * 分岐に入る条件（時間切れが混じった）と入らない条件（一度も無い）の
+ * 両方を見る——片方だけでは「常にこの文言が出る／出ない」実装でも
+ * 満点になってしまう。
+ */
+describe("書ける長さの時間切れ", () => {
+  test("時間切れが混じったら、その値を上限には使わないと言う", async () => {
+    installSettings({});
+    state.timeoutOnNextOutputCall = true;
+    const showInformationMessage = answerWith("そのままにする");
+
+    await measureContext(registry, "default", undefined, "output");
+
+    // 時間切れの回があっても、探索そのものは続いて結果が出る
+    expect(outputCalls().length).toBeGreaterThan(1);
+    const text = noticeText(showInformationMessage);
+    expect(text).toContain("書けたのは");
+    expect(text).toContain("上限としては使いません");
+  });
+
+  test("時間切れが一度も無ければ、上限に使わないとは言わない", async () => {
+    installSettings({});
+    const showInformationMessage = answerWith("そのままにする");
+
+    await measureContext(registry, "default", undefined, "output");
+
+    expect(outputCalls().length).toBeGreaterThan(0);
+    const text = noticeText(showInformationMessage);
+    expect(text).toContain("書けたのは");
+    expect(text).not.toContain("上限としては使いません");
   });
 });
 

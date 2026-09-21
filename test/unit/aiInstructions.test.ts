@@ -668,6 +668,16 @@ describe("作品へ書き出す", () => {
 
       expect(await exists(".mcp.json")).toBe(false);
       expect(reportDetail()).not.toContain(REGISTRATION_IS_LOCAL_NOTE);
+      /*
+        **登録ファイルが無くても、場所そのものは本文に書かれる**（0.70.2）。
+        既存のこの試験は「登録ファイルを作らない」「同期の注記を出さない」
+        しか見ておらず、肝心の「場所が本文に書かれる」ことを確かめていなかった。
+        束（`dist/mcp-server.mjs`）は同梱されているので、登録ファイルを
+        書く置き先が無くても `resolveRegistration` は静かに見つけている
+        （`writeAiInstructions.ts` の `resolveRegistration`）。
+      */
+      const plain = await read(findAiInstructionTarget("plain").instructionPath);
+      expect(plain).toContain("道具（MCPサーバー）の場所");
     });
 
     /*
