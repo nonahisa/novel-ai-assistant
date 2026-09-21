@@ -12,7 +12,11 @@ import { workTypeContextValue } from "../core/workTypeVisibility";
 import { abbreviateTitle } from "../core/abbreviateTitle";
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
-import { scanWork } from "../core/scanner";
+import {
+  scanWork,
+  summarizeScanTimings,
+  type ScanTiming,
+} from "../core/scanner";
 import type { Chapter } from "../models/chapter";
 import { ChapterStore } from "../core/chapterStore";
 import {
@@ -207,7 +211,11 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
    * @param onFirstRender 作品一覧を**初めて描き終えた**ときに1回だけ呼ぶ。
    *   起動の所要時間を計るために要る（設計書6.107）。**`core` へ
    *   `vscode` を持ち込めない**ので、印を打つのは `extension.ts` 側にし、
-   *   ここは「描き終わった」ことだけを知らせる
+   *   ここは「描き終わった」ことだけを知らせる。
+   *   引数は**そこまでに走った走査の計測をまとめたもの**（0.74.9）。
+   *   読み（I/O）と数え・解析（CPU）のどちらが重いのかは、走査の中を
+   *   刻まないと分からない——0.74.7 で読み口を Node の `fs` へ替えても
+   *   一覧は25.1秒のままだった
    * @param onLoadingChanged 作品の走査を**始めたとき `true`・終えたとき
    *   `false`** を1回ずつ知らせる（設計書6.1.2）。走査が終わるまで
    *   `getChildren` は返らず、そのあいだツリーは空なので、VS Code は
@@ -222,7 +230,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     private readonly registry: WorkRegistry,
     private readonly syncBadge?: (workId: string) => string | undefined,
     private readonly syncTooltip?: (workId: string) => string[],
-    private readonly onFirstRender?: () => void,
+    private readonly onFirstRender?: (summary: ScanTiming) => void,
     private readonly onLoadingChanged?: (
       loading: boolean,
       count: number
@@ -248,6 +256,14 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
    * **2回目以降は知らせない**（知らせると「初回」が上書きされる）。
    */
   private firstRenderNotified = false;
+
+  /**
+   * 初回の描画までに走った走査の計測（設計書6.107）。
+   *
+   * **初回の描画まで**しか集めない。そのあとは作品を開くたびに
+   * 走査が走るので、持ち続けると際限なく溜まる。知らせ終えたら捨てる。
+   */
+  private scanTimings: ScanTiming[] = [];
 
   refresh(workId?: string): void {
     if (workId) {
@@ -621,10 +637,13 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         if (!this.firstRenderNotified) {
           this.firstRenderNotified = true;
           try {
-            this.onFirstRender?.();
+            // **走査の内訳も一緒に渡す**（設計書6.107）。一覧が出るまでの
+            // 時間のうち、読みと数え・解析がどれだけを占めたかが分かる
+            this.onFirstRender?.(summarizeScanTimings(this.scanTimings));
           } catch {
             // 知らせ先（extension.ts）で記録済み。ここでは一覧を優先する
           }
+          this.scanTimings = [];
         }
         return nodes;
       } finally {
@@ -940,6 +959,9 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     const cached = this.cache.get(work.id);
     if (cached) return cached;
     const result = await scanWork(work);
+    // **初回の描画までに走ったものだけ控える**（設計書6.107）。
+    // キャッシュに載せないのは、計測が走査1回ごとの値だからである
+    if (!this.firstRenderNotified) this.scanTimings.push(result.timing);
     const value = { episodes: result.episodes, stats: result.stats };
     this.cache.set(work.id, value);
     return value;

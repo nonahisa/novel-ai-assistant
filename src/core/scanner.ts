@@ -21,6 +21,44 @@ import { detectEol } from "./eolAudit";
 import type { Eol } from "../models/types";
 
 /**
+ * 走査1回ぶんの計測（設計書6.107）。
+ *
+ * **I/O ではなく計算そのものが重い、という疑いを確かめるために要る。**
+ * 0.74.7 で読み口を Node の `fs` へ替えたところ、登録簿の整備は
+ * 15.2秒→43ms になったのに、**作品一覧の初回描画は25.1秒のまま**だった。
+ * 整備の待ちがバラバラの位置で詰まっていたことから、**同じスレッドで
+ * 走っている走査が CPU を握っている**疑いが残った。読み（I/O）と
+ * 数え・解析（CPU）を分けて測れば、どちらかが決まる。
+ *
+ * **計測は `performance.now()` の差を足すだけ**で、走査の結果
+ * （`episodes`・`stats`）は1バイトも変えない。
+ */
+export interface ScanTiming {
+  /** 走査したファイルの数（作品情報のファイルも含む） */
+  readonly files: number;
+  /**
+   * 読み口に費やしたミリ秒。
+   *
+   * **バイトを本文にするまでを含める**（`readFile` と `decodeText`）。
+   * フォルダーの読み出し（`readDirectory`）と作品設定の読み込みも、
+   * 同じ読み口なのでここへ入れる。
+   */
+  readonly readMs: number;
+  /** 字数・ルビ・空白の数えに費やしたミリ秒（シーンメモの印も含む） */
+  readonly countMs: number;
+  /** 合本の分割・メタデータ・改行の判定・競合の検出に費やしたミリ秒 */
+  readonly parseMs: number;
+  /** 上のどれでもない残り（話の組み立て・並べ替え・合計）。差で求める */
+  readonly otherMs: number;
+  /** 走査ぜんたいにかかったミリ秒 */
+  readonly totalMs: number;
+  /** いちばん時間のかかったファイルの名前。1つも読まなければ `undefined` */
+  readonly slowestFile?: string;
+  /** その1ファイルにかかったミリ秒 */
+  readonly slowestMs: number;
+}
+
+/**
  * 作品の本文ファイルを走査し、話数解析と文字数計測を行う。
  *
  * 本文フォルダが存在しない場合は、作品フォルダ直下を対象にする。
@@ -38,7 +76,20 @@ export async function scanWork(work: WorkEntry): Promise<{
    * 使う側の判断だが、**黙って消したことにはしない。**
    */
   workInfoFiles: string[];
+  /** 何にどれだけかかったか（設計書6.107）。**使わなくてよい** */
+  timing: ScanTiming;
 }> {
+  const scanStartedAt = performance.now();
+  /*
+    **計測は数えるだけ**（設計書6.107）。`performance.now()` の差を
+    足す以外のことはせず、走査の結果には触らない。
+  */
+  let readMs = 0;
+  let countMs = 0;
+  let parseMs = 0;
+  let slowestMs = 0;
+  let slowestFile: string | undefined;
+
   const config = await readWorkConfig(work);
   const p = workPaths(work, config);
 
@@ -51,6 +102,9 @@ export async function scanWork(work: WorkEntry): Promise<{
   */
   const reader = await fileReader();
   const files = await collectTextFiles(targetDir, reader);
+  // **下ごしらえも読み口**（設計書6.107）。作品設定の読み込み・本文
+  // フォルダーの有無・フォルダーの読み出しは、すべてファイルへの往復である
+  readMs += performance.now() - scanStartedAt;
 
   const episodes: EpisodeFile[] = [];
   const workInfoFiles: string[] = [];
@@ -58,7 +112,23 @@ export async function scanWork(work: WorkEntry): Promise<{
     .getConfiguration("novelai")
     .get<boolean>("excludeRubyFromCount", true);
 
+  /**
+   * 1ファイルぶんの計測を締める（設計書6.107）。
+   *
+   * **ループから抜ける所すべてで呼ぶ。** いまは2つある——作品情報の
+   * ファイルで `continue` する道と、話として積む道。増やすときは
+   * ここを呼ぶのを忘れないこと（漏らすと「最長」がそのぶん軽く出る）。
+   */
+  const noteFile = (name: string, startedAt: number): void => {
+    const elapsed = performance.now() - startedAt;
+    if (elapsed > slowestMs) {
+      slowestMs = elapsed;
+      slowestFile = name;
+    }
+  };
+
   for (const filePath of files) {
+    const fileStartedAt = performance.now();
     const fileName = path.basename(filePath);
     const ext = path.extname(fileName).toLowerCase();
     const parsed = parseEpisodeFileName(fileName);
@@ -82,16 +152,20 @@ export async function scanWork(work: WorkEntry): Promise<{
       updatedAt: null as string | null,
     };
     try {
+      const readStartedAt = performance.now();
       const bytes = await reader.readFile(filePath);
       const text = decodeText(bytes);
+      readMs += performance.now() - readStartedAt;
 
       // **作品情報（`about.txt`）はここで抜ける。** 中身を見ないと
       // 見分けられないので、読んだ直後のこの位置にしか置けない
       if (isWorkInfoFile(fileName, text)) {
         workInfoFiles.push(filePath);
+        noteFile(fileName, fileStartedAt);
         continue;
       }
 
+      const parseStartedAt = performance.now();
       // **改行の判定は正規化前の本文で行う**（`decodeText` は改行を
       // そのまま残す）。LFへ揃えたあとでは、もう見分けられない
       ({ eol, hasMixedEol } = detectEol(text));
@@ -113,7 +187,10 @@ export async function scanWork(work: WorkEntry): Promise<{
       collected = parseCollectedFile(text);
 
       hasConflictMarkers = containsConflictMarkers(text);
+      parseMs += performance.now() - parseStartedAt;
+
       if (!hasConflictMarkers) {
+        const countStartedAt = performance.now();
         // **数え方は `core/episodeCharCount.ts` の1か所に集めてある。**
         // 原稿エディタの「このファイル ◯字」も同じ関数を通る（写しを作らない）。
         // 既に読み解いたもの（合本の割り・頭書きの除去）を渡すのは、
@@ -126,6 +203,9 @@ export async function scanWork(work: WorkEntry): Promise<{
         // **ここで数えるのは、既に読んだ本文をもう一度読まないため**である。
         // 一覧の印のためだけに、全話をもう一巡することになる
         memoBadge = memoBadgeText(parseMemos(body));
+        // **シーンメモの印も「数え」に入れる**（設計書6.107）。同じ本文を
+        // 一度で済ませるために、ここへ並べて置いてあるものである
+        countMs += performance.now() - countStartedAt;
       }
       // 競合マーカーを含む場合は数えない。両方の版とマーカーが混ざったまま
       // 数えると、実際より多い字数を本当の進捗として見せてしまう
@@ -167,6 +247,7 @@ export async function scanWork(work: WorkEntry): Promise<{
       eol,
       hasMixedEol,
     });
+    noteFile(fileName, fileStartedAt);
   }
 
   episodes.sort(compareEpisodes);
@@ -181,11 +262,68 @@ export async function scanWork(work: WorkEntry): Promise<{
     totals = addCounts(totals, e.counts);
   }
 
+  const totalMs = performance.now() - scanStartedAt;
   return {
     episodes,
     stats: { fileCount: episodes.length, totals, conflictedCount },
     manuscriptDir: targetDir,
     workInfoFiles,
+    timing: {
+      files: files.length,
+      readMs,
+      countMs,
+      parseMs,
+      // **残りは引き算で出す。** 足し忘れた区間があっても、合計と
+      // 内訳の食い違いとしてではなく「その他が大きい」として現れる
+      otherMs: Math.max(0, totalMs - readMs - countMs - parseMs),
+      totalMs,
+      slowestFile,
+      slowestMs,
+    },
+  };
+}
+
+/**
+ * 作品ごとの計測を1つにまとめる（設計書6.107）。
+ *
+ * **合計は実際の経過時間を超える。** 走査は同時に4つまで走るので、
+ * 4本ぶんの時間が足し合わされる。**それでよい**——ここで読みたいのは
+ * 「壁時計で何秒か」ではなく「どの作業がどれだけ CPU を食ったか」である。
+ *
+ * 0件なら、すべて0の計測を返す（呼び出し側で場合分けさせない）。
+ */
+export function summarizeScanTimings(
+  timings: readonly ScanTiming[]
+): ScanTiming {
+  let files = 0;
+  let readMs = 0;
+  let countMs = 0;
+  let parseMs = 0;
+  let otherMs = 0;
+  let totalMs = 0;
+  let slowestMs = 0;
+  let slowestFile: string | undefined;
+  for (const t of timings) {
+    files += t.files;
+    readMs += t.readMs;
+    countMs += t.countMs;
+    parseMs += t.parseMs;
+    otherMs += t.otherMs;
+    totalMs += t.totalMs;
+    if (t.slowestMs > slowestMs) {
+      slowestMs = t.slowestMs;
+      slowestFile = t.slowestFile;
+    }
+  }
+  return {
+    files,
+    readMs,
+    countMs,
+    parseMs,
+    otherMs,
+    totalMs,
+    slowestFile,
+    slowestMs,
   };
 }
 

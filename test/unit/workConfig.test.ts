@@ -381,7 +381,24 @@ describe("作品設定", () => {
       for (const item of report.works) {
         expect(item.statMs).toBeGreaterThanOrEqual(0);
         expect(item.ignoreMs).toBeGreaterThanOrEqual(0);
+        expect(item.yieldMs).toBeGreaterThanOrEqual(0);
       }
+
+      /*
+        **順番待ちは I/O と分けて数える**（設計書6.107。0.74.9）。
+
+        0.74.7 のあと、整備は「4番目 8.8秒、6番目 2.1秒」とバラバラの
+        位置で詰まり、速い作品は4〜33msで終わった。**遅いのはファイル
+        ではなく、`await` が再開できないこと**の疑いがある。`stat` の
+        直前でいったん列の後ろへ回り、戻るまでの時間をここへ積む。
+        **`statMs`・`ignoreMs` には混ぜない**（混ぜると、待たされただけ
+        なのに I/O が遅いと読めてしまう）。
+      */
+      expect(report.yieldMs).toBeGreaterThanOrEqual(0);
+      expect(report.yieldMs).toBeCloseTo(
+        report.works.reduce((sum, item) => sum + item.yieldMs, 0),
+        5
+      );
     } finally {
       workspace.fs = previousFs;
       window.showWarningMessage = previousWarn;

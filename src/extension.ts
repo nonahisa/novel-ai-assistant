@@ -41,7 +41,7 @@ import { nextEpisodeFileNameLike } from "./core/episodeRenumber";
 import { WorkFolderWatchers } from "./features/workFolderWatch";
 import { setStreamingSettingReader } from "./ai/ollamaStream";
 import { findLatestEpisode } from "./core/latestEpisode";
-import { scanWork } from "./core/scanner";
+import { scanWork, type ScanTiming } from "./core/scanner";
 import { SUPPORTED_EXTENSIONS, WorkEntry } from "./models/types";
 import {
   AIRegistry,
@@ -860,6 +860,72 @@ export async function activate(
     return status?.kind === "tracked" ? status : undefined;
   };
 
+  /**
+   * 作品フォルダーの整備を起こす（設計書6.107）。**1回しか起こさない。**
+   *
+   * **起こす場所は「作品一覧の初回描画のあと」**（0.74.9）。0.74.5 で
+   * `activate` の末尾へ移したが、整備の `await` と作品一覧の走査は
+   * **同じスレッドで取り合う**。0.74.7 で読み口を Node の `fs` へ替えても
+   * 一覧は25.1秒のままで、整備のほうは「4番目 8.8秒、6番目 2.1秒」と
+   * バラバラの位置で詰まった——走査が CPU を握っているあいだ、整備の
+   * `await` が再開できずにいた形である。**一覧が出てから始めれば、
+   * 取り合いそのものが起きない。**
+   *
+   * 印（「整備 開始」「整備」）はそのまま。**位置が後ろへ動くだけ**で、
+   * 知らせ（無い作品・除外設定・未登録作品）も今までどおり出す。
+   */
+  let workMaintenanceStarted = false;
+  const startWorkMaintenance = (): void => {
+    if (workMaintenanceStarted) return;
+    workMaintenanceStarted = true;
+    startupTiming.mark("整備 開始");
+    const maintainStartedAt = performance.now();
+    void registry
+      .maintainWorks((works) => {
+        /*
+          **書庫にあるのに登録されていない作品を、1行だけ知らせる**（設計書6.97.4）。
+          知らせるのは `features` の仕事なので、`core` の登録簿へは口だけを渡す。
+          動的に読むのは、起動の道に載せないため（押されたときに要るものである）。
+        */
+        void (async () => {
+          try {
+            const { noticeUnregisteredWorksSafely } = await import(
+              "./features/collectUnregisteredWorks.js"
+            );
+            noticeUnregisteredWorksSafely(context, works);
+          } catch (error) {
+            logFailure("書庫の未登録作品の確認", {
+              詳細: error instanceof Error ? error.message : String(error),
+            });
+          }
+        })();
+      })
+      .then((report) => {
+        const note = describeMaintainReport(report);
+        startupTiming.mark("整備", note);
+        /*
+          **もう1行、単独でも書く**（設計書6.107）。整備は一覧の描画より
+          後に終わることがあり、そのときは起動の1行（`report()`）が
+          先に書き出されていて「整備」の印が載らない。**1行目の
+          「整備 開始」に、この行の時間を足せば**、整備がいつ終わったかが
+          分かる。
+        */
+        useLogFile(undefined);
+        const order = describeMaintainOrder(report);
+        logStep(
+          `整備の所要時間：${formatStartupMillis(
+            performance.now() - maintainStartedAt
+          )}ms（作品 ${report.count}／${note}）` + (order ? ` ${order}` : "")
+        );
+      })
+      .catch((error) => {
+        // 整備で落ちても、起動も一覧も止めない
+        logFailure("作品フォルダーの整備", {
+          詳細: error instanceof Error ? error.message : String(error),
+        });
+      });
+  };
+
   /*
     **起動の数字を書き出す仕掛け**（設計書6.107）。
 
@@ -895,9 +961,9 @@ export async function activate(
     if (firstRenderDone) writeStartupTiming();
   };
 
-  const noteFirstWorkListRender = (): void => {
+  const noteFirstWorkListRender = (summary: ScanTiming): void => {
     try {
-      startupTiming.mark("作品一覧の初回描画");
+      startupTiming.mark("作品一覧の初回描画", describeScanSummary(summary));
       firstRenderDone = true;
       if (!handoffPending) {
         writeStartupTiming();
@@ -922,6 +988,14 @@ export async function activate(
       logFailure("起動の所要時間の記録", {
         詳細: error instanceof Error ? error.message : String(error),
       });
+    } finally {
+      /*
+        **一覧が出てから、作品フォルダーの整備を始める**（設計書6.107）。
+
+        `finally` に置くのは、**計測が落ちても整備は起こすため**。
+        上の `try` には早い `return` があるので、その道でも通る。
+      */
+      startWorkMaintenance();
     }
   };
 
@@ -5806,64 +5880,17 @@ export async function activate(
   })();
 
   /*
-    **作品ごとの整備は、起動の道から外す**（設計書6.107）。
+    **登録簿が0件なら、ここで整備を起こす**（設計書6.107。0.74.9）。
 
-    整備がしているのは (a) フォルダーが在るかの確認と (b) `.gitignore` の
-    移行だけで、**どちらも作品一覧を描く前に終わっている必要が無い。**
-    ノートPCの16作品では `stat` と `.gitignore` の往復だけで15.2秒かかり、
-    そのあいだ一覧は空のまま「まだ作品が登録されていません」を出していた
-    （2026-09-21の計測）。**作者から見ると作品が消えたのと区別がつかない。**
+    ふだんは「作品一覧の初回描画」のあとに起こす（`startWorkMaintenance`）。
+    整備の `await` と一覧の走査が同じスレッドで取り合い、整備が
+    バラバラの位置で何秒も詰まっていたためである。
 
-    知らせ（フォルダーが見つからない／除外設定を更新できない／書庫の
-    未登録作品）はこれまでどおり出す。**出る時刻が一覧の後になるだけ**で、
-    どれも押さなければ何も起きない知らせである。
+    **0件のときは、その合図が当てにならない。** 作品が無ければ走査も
+    描画も起きないので、いままでどおり `activate` の末尾で起こす。
+    整備そのものは0件でも走り、除外設定の知らせだけが出る道になる。
   */
-  startupTiming.mark("整備 開始");
-  const maintainStartedAt = performance.now();
-  void registry
-    .maintainWorks((works) => {
-      /*
-        **書庫にあるのに登録されていない作品を、1行だけ知らせる**（設計書6.97.4）。
-        知らせるのは `features` の仕事なので、`core` の登録簿へは口だけを渡す。
-        動的に読むのは、起動の道に載せないため（押されたときに要るものである）。
-      */
-      void (async () => {
-        try {
-          const { noticeUnregisteredWorksSafely } = await import(
-            "./features/collectUnregisteredWorks.js"
-          );
-          noticeUnregisteredWorksSafely(context, works);
-        } catch (error) {
-          logFailure("書庫の未登録作品の確認", {
-            詳細: error instanceof Error ? error.message : String(error),
-          });
-        }
-      })();
-    })
-    .then((report) => {
-      const note = describeMaintainReport(report);
-      startupTiming.mark("整備", note);
-      /*
-        **もう1行、単独でも書く**（設計書6.107）。整備は一覧の描画より
-        後に終わることがあり、そのときは起動の1行（`report()`）が
-        先に書き出されていて「整備」の印が載らない。**1行目の
-        「整備 開始」に、この行の時間を足せば**、整備がいつ終わったかが
-        分かる。
-      */
-      useLogFile(undefined);
-      const order = describeMaintainOrder(report);
-      logStep(
-        `整備の所要時間：${formatStartupMillis(
-          performance.now() - maintainStartedAt
-        )}ms（作品 ${report.count}／${note}）` + (order ? ` ${order}` : "")
-      );
-    })
-    .catch((error) => {
-      // 整備で落ちても、起動も一覧も止めない
-      logFailure("作品フォルダーの整備", {
-        詳細: error instanceof Error ? error.message : String(error),
-      });
-    });
+  if (registry.list().length === 0) startWorkMaintenance();
 
   // ここまでが `activate` 本体（設計書6.107）。**画面が出るのはこのあと**
   // ——VS Code が作品一覧の `getChildren` を呼ぶのは、ここを抜けてからである
@@ -5892,6 +5919,9 @@ export async function activate(
  */
 function describeMaintainReport(report: WorkRegistryInitReport): string {
   return [
+    // **順番待ちを先に出す**（設計書6.107。0.74.9）。ここが大きければ
+    // 待たされていただけで、`stat` や `.gitignore` を疑っても始まらない
+    `yield 合計 ${formatStartupMillis(report.yieldMs)}ms`,
     `stat 合計 ${formatStartupMillis(report.statMs)}ms`,
     `.gitignore 合計 ${formatStartupMillis(report.ignoreMs)}ms`,
     ...(report.slowestTitle
@@ -5921,11 +5951,46 @@ function describeMaintainOrder(report: WorkRegistryInitReport): string {
   if (report.works.length === 0) return "";
   const parts = report.works.map(
     (item) =>
-      `${item.order} ${item.title} stat ${formatStartupMillis(
-        item.statMs
-      )}／ignore ${formatStartupMillis(item.ignoreMs)}`
+      `${item.order} ${item.title} yield ${formatStartupMillis(
+        item.yieldMs
+      )}／stat ${formatStartupMillis(item.statMs)}／ignore ${formatStartupMillis(
+        item.ignoreMs
+      )}`
   );
   return `順に：${parts.join(" → ")}`;
+}
+
+/**
+ * 作品一覧の走査に何ミリ秒かかったかを、1つの注記にまとめる（設計書6.107）。
+ *
+ * **「一覧が出るまで25秒」だけでは、次に何を直せばよいか決まらない。**
+ * 0.74.7 で読み口を Node の `fs` へ替えても一覧の時間は動かなかったので、
+ * **I/O ではなく計算そのもの**が残っている疑いがある。読み・数え・解析を
+ * 分けて出せば、次に刻む場所がその場で決まる。
+ *
+ * 合計は**同時に走った4本ぶんの足し算**なので、壁時計の時間より大きくなる。
+ * それでよい——読みたいのは「どの作業がどれだけ CPU を食ったか」である。
+ *
+ * ファイルを1つも読んでいなければ注記を付けない（`undefined` を返すと、
+ * `mark` 側が括弧ごと落とす）。
+ */
+function describeScanSummary(summary: ScanTiming): string | undefined {
+  if (summary.files === 0) return undefined;
+  return [
+    `走査 合計 ${formatStartupMillis(summary.totalMs)}ms（読み ${
+      formatStartupMillis(summary.readMs)
+    }／数え ${formatStartupMillis(summary.countMs)}／解析 ${
+      formatStartupMillis(summary.parseMs)
+    }）`,
+    ...(summary.slowestFile
+      ? [
+          `最長 ${summary.slowestFile} ${formatStartupMillis(
+            summary.slowestMs
+          )}ms`,
+        ]
+      : []),
+    `ファイル ${summary.files}`,
+  ].join("／");
 }
 
 /**

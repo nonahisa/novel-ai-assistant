@@ -185,3 +185,170 @@ describe("本文フォルダの選択", () => {
     }
   );
 });
+
+/**
+ * **走査の中を刻む**（設計書6.107）。
+ *
+ * 0.74.7 で読み口を Node の `fs` へ替えたところ、登録簿の整備は
+ * 15.2秒→43ms になったのに**作品一覧の初回描画は25.1秒のまま**だった。
+ * I/O ではなく計算そのものが残っている疑いを確かめるために、読み・
+ * 数え・解析を分けて測る。**測るだけで、走査の結果は変えない。**
+ */
+describe("走査の計測", () => {
+  beforeEach(() => {
+    workspace.getConfiguration = () => ({
+      get: <T>(_key: string, defaultValue: T): T => defaultValue,
+    });
+  });
+
+  /** 本文2つと作品情報1つを置いた作品を読ませる */
+  function stubThreeFiles(): void {
+    const about = [
+      "【キャッチコピー】",
+      "　夜を歩く。",
+      "",
+      "【紹介文（1行）】",
+      "　夜の川べりを歩く話です。",
+      "",
+    ].join("\n");
+    workspace.fs = {
+      readFile: vi.fn(async (uri: { fsPath: string }) => {
+        if (uri.fsPath.endsWith(".json")) {
+          throw new FileSystemError("設定なし", "FileNotFound");
+        }
+        if (uri.fsPath.endsWith("about.txt")) {
+          return new TextEncoder().encode(about);
+        }
+        return new TextEncoder().encode("灯が歩いた。\n夜が明けた。\n");
+      }),
+      stat: vi.fn(async () => {
+        throw new FileSystemError("本文なし", "FileNotFound");
+      }),
+      readDirectory: vi.fn(async () => [
+        ["about.txt", FileType.File],
+        ["001.txt", FileType.File],
+        ["002.txt", FileType.File],
+      ]),
+    };
+  }
+
+  test("計測が結果に乗り、どの値も負にならない", async () => {
+    stubThreeFiles();
+
+    const { timing } = await scanWork(work);
+
+    for (const [name, value] of Object.entries({
+      readMs: timing.readMs,
+      countMs: timing.countMs,
+      parseMs: timing.parseMs,
+      otherMs: timing.otherMs,
+      totalMs: timing.totalMs,
+      slowestMs: timing.slowestMs,
+    })) {
+      // **負の値は測り方の誤り**（引き算の向きを間違えるとこうなる）
+      expect(`${name}=${value >= 0}`).toBe(`${name}=true`);
+    }
+  });
+
+  test("内訳の合計は、ぜんたいの時間と釣り合う", async () => {
+    // `otherMs` は引き算で出すので、4つ足せば必ず合計になる。
+    // ずれていれば、どこかの区間を二重に数えている
+    stubThreeFiles();
+
+    const { timing } = await scanWork(work);
+
+    expect(
+      timing.readMs + timing.countMs + timing.parseMs + timing.otherMs
+    ).toBeCloseTo(timing.totalMs, 5);
+  });
+
+  test("`files` は、話と作品情報を合わせた数と一致する", async () => {
+    // **作品情報のファイルも読んでいる。** 話に数えないからといって
+    // 走査の手間から外すと、「573ファイル」の573が実態と合わなくなる
+    stubThreeFiles();
+
+    const result = await scanWork(work);
+
+    expect(result.timing.files).toBe(
+      result.episodes.length + result.workInfoFiles.length
+    );
+    expect(result.timing.files).toBe(3);
+  });
+
+  test("いちばん遅かったファイルの名前が残る", async () => {
+    stubThreeFiles();
+
+    const { timing } = await scanWork(work);
+
+    // 3つのうちどれかであること（速さは機械しだいなので名指ししない）
+    expect(["about.txt", "001.txt", "002.txt"]).toContain(timing.slowestFile);
+  });
+
+  test("1つも読まなければ、最長は空のまま", async () => {
+    workspace.fs = {
+      readFile: vi.fn(async () => {
+        throw new FileSystemError("設定なし", "FileNotFound");
+      }),
+      stat: vi.fn(async () => {
+        throw new FileSystemError("本文なし", "FileNotFound");
+      }),
+      readDirectory: vi.fn(async () => []),
+    };
+
+    const { timing } = await scanWork(work);
+
+    expect(timing.files).toBe(0);
+    expect(timing.slowestFile).toBeUndefined();
+    expect(timing.slowestMs).toBe(0);
+  });
+});
+
+describe("走査の計測をまとめる", () => {
+  test("作品ごとの計測を足し合わせ、最長は全体から選ぶ", async () => {
+    const { summarizeScanTimings } = await import("../../src/core/scanner");
+
+    const summary = summarizeScanTimings([
+      {
+        files: 10,
+        readMs: 100,
+        countMs: 200,
+        parseMs: 50,
+        otherMs: 10,
+        totalMs: 360,
+        slowestFile: "001.txt",
+        slowestMs: 40,
+      },
+      {
+        files: 3,
+        readMs: 1,
+        countMs: 2,
+        parseMs: 3,
+        otherMs: 4,
+        totalMs: 10,
+        slowestFile: "巨大な合本.txt",
+        slowestMs: 900,
+      },
+    ]);
+
+    expect(summary.files).toBe(13);
+    expect(summary.readMs).toBe(101);
+    expect(summary.countMs).toBe(202);
+    expect(summary.parseMs).toBe(53);
+    expect(summary.otherMs).toBe(14);
+    expect(summary.totalMs).toBe(370);
+    // **最長は作品をまたいで選ぶ。** どの作品の何というファイルが
+    // いちばん重いのかを、1行で言い当てられるようにする
+    expect(summary.slowestFile).toBe("巨大な合本.txt");
+    expect(summary.slowestMs).toBe(900);
+  });
+
+  test("0件でも、すべて0の計測を返す（呼び出し側で場合分けさせない）", async () => {
+    const { summarizeScanTimings } = await import("../../src/core/scanner");
+
+    const summary = summarizeScanTimings([]);
+
+    expect(summary.files).toBe(0);
+    expect(summary.totalMs).toBe(0);
+    expect(summary.slowestFile).toBeUndefined();
+  });
+});

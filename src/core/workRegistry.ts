@@ -51,6 +51,20 @@ export interface WorkRegistryInitReport {
   /** `.gitignore` の読み書きに費やした合計ミリ秒 */
   readonly ignoreMs: number;
   /**
+   * **順番待ちに費やした合計ミリ秒**（設計書6.107。0.74.9）。
+   *
+   * 0.74.7 で読み口を Node の `fs` へ替えたあと、整備は「4番目 8.8秒、
+   * 6番目 2.1秒、15番目 1.3秒」とバラバラの位置で詰まり、速い作品は
+   * 4〜33ms で終わった。**遅いのはファイルではなく、`await` が
+   * 再開できないこと**の疑いが強い——同じスレッドで走っている作品一覧の
+   * 走査が CPU を握っていれば、こうなる。
+   *
+   * そこで `stat` の直前で**いったん列の後ろへ回り**、戻ってくるまでに
+   * 何ミリ秒かかったかを測る。**ここが大きければ順番待ち、`statMs` や
+   * `ignoreMs` が大きければ I/O** と読める。
+   */
+  readonly yieldMs: number;
+  /**
    * **作品ごとの内訳**（回った順＝登録簿の順）。
    *
    * ノートPCで3回測ったところ、**遅い作品が毎回入れ替わり、どれか1件が
@@ -67,10 +81,32 @@ export interface WorkMaintainTiming {
   /** 登録簿の何番目か（1始まり） */
   readonly order: number;
   readonly title: string;
+  /**
+   * この作品の番が回ってくるまでの待ち（設計書6.107）。
+   * **`statMs`・`ignoreMs` には含めない**（順番待ちと I/O を分けるため）
+   */
+  readonly yieldMs: number;
   /** フォルダーの有無の確認（`stat`）にかかったミリ秒 */
   readonly statMs: number;
   /** `.gitignore` の読み書きにかかったミリ秒。飛ばしたなら 0 */
   readonly ignoreMs: number;
+}
+
+/**
+ * いったん列の後ろへ回る（設計書6.107）。
+ *
+ * **順番待ちを I/O と切り分けるために挟む。** ここで待たされた時間は、
+ * 同じスレッドで走っている別の処理（作品一覧の走査）が CPU を
+ * 握っていた時間である。
+ *
+ * `setImmediate` は Node のグローバルなので `node:` の import は要らない。
+ * **ブラウザ版には無い**ので、そのときは `setTimeout(0)` へ倒す（規則7）。
+ */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (typeof setImmediate === "function") setImmediate(() => resolve());
+    else setTimeout(() => resolve(), 0);
+  });
 }
 
 /**
@@ -122,6 +158,8 @@ export class WorkRegistry {
     // 何に費やしたかの内訳（設計書6.107）
     let statMs = 0;
     let ignoreMs = 0;
+    // 順番待ち（0.74.9）。I/O と切り分けるために別で数える
+    let yieldMs = 0;
     // 作品ごとの内訳。回った順にそのまま積む（設計書6.107）
     const timings: WorkMaintainTiming[] = [];
     // キャッシュを同期するかは設定で変えられる。起動のたびに突き合わせ、
@@ -129,6 +167,19 @@ export class WorkRegistry {
     const syncCache = isCacheSyncEnabled();
     const works = this.list();
     for (const [index, work] of works.entries()) {
+      /*
+        **`stat` の直前で、いったん列の後ろへ回る**（設計書6.107。0.74.9）。
+
+        戻ってくるまでにかかった時間が、そのまま「順番待ち」である。
+        **`startedAt` はこの待ちのあとに取る**——待ちを混ぜると、
+        「最長の1件」が I/O の重さではなく待ち時間で決まってしまい、
+        いままで読んできた数字と意味が変わる。
+      */
+      const yieldStartedAt = performance.now();
+      await yieldToEventLoop();
+      const workYieldMs = performance.now() - yieldStartedAt;
+      yieldMs += workYieldMs;
+
       const startedAt = performance.now();
       /*
         **フォルダーが無い作品は、触らずに飛ばす。**
@@ -169,6 +220,7 @@ export class WorkRegistry {
       timings.push({
         order: index + 1,
         title: work.title,
+        yieldMs: workYieldMs,
         statMs: workStatMs,
         ignoreMs: workIgnoreMs,
       });
@@ -217,6 +269,7 @@ export class WorkRegistry {
       slowestOrder,
       statMs,
       ignoreMs,
+      yieldMs,
       works: timings,
     };
   }

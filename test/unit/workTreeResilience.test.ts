@@ -39,9 +39,19 @@ vi.mock("vscode", () => ({
 }));
 
 const scanWork = vi.fn();
-vi.mock("../../src/core/scanner", () => ({
-  scanWork: (...args: unknown[]) => scanWork(...args),
-}));
+/*
+  **走査だけを差し替える。** 計測のまとめ（`summarizeScanTimings`）は
+  本物を使う——ここで写しを作ると、足し算の仕方が2か所に分かれる。
+  差し替えで消してしまい、初回描画の合図がまるごと出なかった実績がある
+  （知らせ先の失敗は一覧を守るために握り潰される。設計書6.107）。
+*/
+vi.mock("../../src/core/scanner", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../src/core/scanner")>(
+      "../../src/core/scanner"
+    );
+  return { ...actual, scanWork: (...args: unknown[]) => scanWork(...args) };
+});
 
 import { WorkTreeProvider, WorkNode } from "../../src/views/workTree";
 import type { WorkEntry } from "../../src/models/types";
@@ -365,5 +375,111 @@ describe("読み込み中の合図", () => {
     const nodes = await provider.getChildren();
 
     expect(nodes).toHaveLength(2);
+  });
+});
+
+/**
+ * **初回の描画の合図に、走査の内訳を乗せる**（設計書6.107。0.74.9）。
+ *
+ * 0.74.7 で読み口を Node の `fs` へ替えても、一覧の初回描画は25.1秒の
+ * まま動かなかった。**I/O ではなく計算そのもの**が残っている疑いを
+ * 確かめるには、読み・数え・解析を分けた数字が要る。
+ */
+describe("初回の描画に走査の集計を添える", () => {
+  /** 1ファイルぶんの計測。値は作り物でよい（足し算だけを見る） */
+  function timing(files: number, readMs: number, countMs: number, slowest: string) {
+    return {
+      files,
+      readMs,
+      countMs,
+      parseMs: 5,
+      otherMs: 1,
+      totalMs: readMs + countMs + 6,
+      slowestFile: slowest,
+      slowestMs: readMs,
+    };
+  }
+
+  function makeProviderForRender(
+    entries: WorkEntry[],
+    onFirstRender: (summary: unknown) => void
+  ): WorkTreeProvider {
+    const registry = {
+      list: () => entries,
+      onDidChange: () => ({ dispose() {} }),
+    } as unknown as WorkRegistry;
+    return new WorkTreeProvider(
+      registry,
+      undefined,
+      undefined,
+      onFirstRender as never
+    );
+  }
+
+  test("作品ごとの計測が足し合わされ、最長は全体から選ばれる", async () => {
+    scanWork.mockImplementation(async (work: WorkEntry) => ({
+      episodes: [],
+      stats: {
+        fileCount: 1,
+        totals: { net: 0, gross: 0, manuscriptLines: 0 },
+        conflictedCount: 0,
+      },
+      manuscriptDir: "本文",
+      timing:
+        work.id === "w1"
+          ? timing(500, 900, 40, "巨大な合本.txt")
+          : timing(20, 3, 4, "001.txt"),
+    }));
+    const seen: Array<Record<string, unknown>> = [];
+    const provider = makeProviderForRender(manyWorks(3), (summary) =>
+      seen.push(summary as Record<string, unknown>)
+    );
+
+    await provider.getChildren();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].files).toBe(540);
+    expect(seen[0].readMs).toBe(906);
+    // **最長は作品をまたいで選ぶ**（どのファイルが重いのかを言い当てる）
+    expect(seen[0].slowestFile).toBe("巨大な合本.txt");
+    expect(seen[0].slowestMs).toBe(900);
+  });
+
+  test("2回目の描画では知らせない（初回の数字を上書きしない）", async () => {
+    scanWork.mockResolvedValue({
+      episodes: [],
+      stats: {
+        fileCount: 1,
+        totals: { net: 0, gross: 0, manuscriptLines: 0 },
+        conflictedCount: 0,
+      },
+      manuscriptDir: "本文",
+      timing: timing(10, 1, 1, "001.txt"),
+    });
+    const seen: unknown[] = [];
+    const provider = makeProviderForRender(manyWorks(2), (summary) =>
+      seen.push(summary)
+    );
+
+    await provider.getChildren();
+    provider.refresh();
+    await provider.getChildren();
+
+    expect(seen).toHaveLength(1);
+  });
+
+  test("走査が全部失敗しても、合図は来る（集計は0件ぶん）", async () => {
+    // 計測が取れなくても一覧は出る。**数字が空なだけ**に留めること
+    scanWork.mockRejectedValue(new Error("読めません"));
+    const seen: Array<Record<string, unknown>> = [];
+    const provider = makeProviderForRender(manyWorks(2), (summary) =>
+      seen.push(summary as Record<string, unknown>)
+    );
+
+    const nodes = await provider.getChildren();
+
+    expect(nodes).toHaveLength(2);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].files).toBe(0);
   });
 });
