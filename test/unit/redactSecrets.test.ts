@@ -21,7 +21,7 @@ describe("接頭辞での伏せ字", () => {
   test("知っている形式は伏せる", () => {
     expect(redactSecrets("key=sk-ant-api03-abcdefgh1234")).toBe("key=sk-***");
     expect(redactSecrets("key=AIzaSyABCDEFGH1234")).toBe("key=AIza***");
-    expect(redactSecrets("key=AQ.Ab8RN6JuQEwhj-nHcg")).toBe("key=AQ.***");
+    expect(redactSecrets("key=AQ.AbEXAMPLE_not_a_real_key_for_tests_only_0123456789")).toBe("key=AQ.***");
   });
 
   test("知らない形式は伏せられない（だから値でも消す）", () => {

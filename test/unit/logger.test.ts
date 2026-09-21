@@ -22,7 +22,7 @@ describe("ログの伏せ字", () => {
   test.each([
     ["sk-proj-abcdefghijklmnop", "sk-***"],
     ["AIzaSyABCDEFGHIJKLMNOP", "AIza***"],
-    ["AQ.Ab8RN6JuQEwhj-nHcgmJ6ArXecZZxy", "AQ.***"],
+    ["AQ.AbEXAMPLE_not_a_real_key_for_tests_only_0123456789", "AQ.***"],
   ])("APIキーらしき文字列を伏せる: %s", (secret, expected) => {
     // 作者がログを貼って助けを求めることを考えると、
     // 万一キーが混ざったときの被害が大きい

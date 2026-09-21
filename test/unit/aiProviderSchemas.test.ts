@@ -229,7 +229,7 @@ describe("HTTPステータスの種別分け", () => {
 describe("APIキーの検査", () => {
   test.each([
     // Google AI Studio が新しく発行する形式。以前は AIza だった
-    "AQ.Ab8RN6JuQEwhj-nHcgmJ6ArXecZZxy6OynqOGvTrd2tZlEUYvw",
+    "AQ.AbEXAMPLE_not_a_real_key_for_tests_only_0123456789",
     // OpenAI のプロジェクトキー
     "sk-proj-abcdef123456",
     "sk-ant-api03-abcdef",
