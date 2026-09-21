@@ -23,6 +23,21 @@ function script(): string {
   return found![1];
 }
 
+/**
+ * ある選択子（例: "#tabs"）の規則の塊だけを切り出す。
+ *
+ * `HTML.toContain("flex-wrap: wrap")` のような検査は、その字が同じ
+ * ファイルの中の無関係な規則（`.chips` など）に残っているだけでも通って
+ * しまう。見たい選択子の `{ … }` の中だけを見る形にする。
+ * （test/unit/scriptLines.test.ts の ruleBody() と同じ考え方）
+ */
+function ruleBody(selector: string): string {
+  const escaped = selector.replace(/[.#[\]]/g, "\\$&");
+  const match = HTML.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));
+  expect(match, `${selector} の規則が見つからない`).toBeTruthy();
+  return match![1];
+}
+
 describe("画面の組み立て", () => {
   test("スクリプトがJavaScriptとして読める", () => {
     // 文字列で組み立てているので、ここが壊れるとパネルが真っ白になる
@@ -75,7 +90,11 @@ describe("一覧を畳める", () => {
 
 describe("タブが詰まらない", () => {
   test("折り返す", () => {
-    expect(HTML).toContain("flex-wrap: wrap");
+    // もとは HTML 全体から "flex-wrap: wrap" を探していた。この字は
+    // #tabs 以外にも3か所（.chips など無関係な規則）にあり、#tabs の
+    // flex-wrap: wrap を消しても他の3か所が残るので通ってしまう形だった。
+    // #tabs の規則の塊だけを切り出してから確かめる。
+    expect(ruleBody("#tabs")).toContain("flex-wrap: wrap");
   });
 
   test("1つあたりの幅を確保する", () => {
@@ -84,7 +103,10 @@ describe("タブが詰まらない", () => {
   });
 
   test("語の途中で折り返さない", () => {
-    expect(HTML).toContain("white-space: nowrap");
+    // もとは HTML 全体から "white-space: nowrap" を探していた。この字は
+    // #tabs button 以外にも別の規則にあり、本題の規則を消しても通って
+    // しまう形だった。#tabs button の規則の塊だけを切り出してから確かめる。
+    expect(ruleBody("#tabs button")).toContain("white-space: nowrap");
   });
 });
 
