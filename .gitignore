@@ -29,9 +29,13 @@ _peek*
 /logs/
 
 # Claude Code の個人設定（エージェント定義 .claude/agents/ と手順書 .claude/skills/ は共有する）
+# settings.json と hooks も共有する——**機械を行き来するので、git pull の忘れを機械に見張らせる**
+# （2026-09-21。settings.local.json は機械ごとの許可なので、いままでどおり共有しない）
 .claude/*
 !.claude/agents/
 !.claude/skills/
+!.claude/settings.json
+!.claude/hooks/
 
 # 外部AIの利用許可の印（設計書6.87.10）。**その機械で作者が与えるもの**なので
 # 同期しない。測定用の台（test/fixtures/seeded/*）にも同じ規則を効かせる
