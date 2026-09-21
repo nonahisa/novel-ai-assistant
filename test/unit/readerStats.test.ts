@@ -136,6 +136,49 @@ describe("読者の反応の台帳", () => {
     expect(latestReaderStats(ledger, "alphapolis")).toBeUndefined();
   });
 
+  /*
+    **話ごとの記録が混ざっていても、新しい順は崩れない**（2026-09-22 に足した）。
+
+    **なぜ要るか**：「3つの輪」の `collectReactions`（`features/threeCircles.ts`）は
+    `readerStatsForSite(...).find((r) => r.scope === "work")` と書いている。
+    **「新しい順に並んでいる」前提の上で、最初に見つかった作品全体の行を採る**
+    作りである。ここが**話ごとの記録で乱される**と、**古い作品全体の記録**を
+    掴んでしまい、紙に古い数字が出る。
+
+    上の「サイトごとに、新しい順で取り出せる」は**作品全体の行だけ**で組んで
+    いるので、この筋道が抜けていた。`collectReactions` は export されていない
+    ので直接は測れないが、**その前提だけならここで留められる。**
+  */
+  test("話ごとの記録が混ざっても、新しい順は崩れない（作品全体の最新を取り違えない）", () => {
+    let ledger = registered();
+    ledger = withReaderStats(
+      ledger,
+      record({ readAt: "2026-09-01T00:00:00.000Z", metrics: { pv: 1 } })
+    );
+    // **いちばん新しいのは話ごとの記録**。作品全体の最新はこの下の 7 である
+    ledger = withReaderStats(
+      ledger,
+      record({
+        readAt: "2026-09-09T00:00:00.000Z",
+        scope: "episode",
+        metrics: { pv: 9 },
+      })
+    );
+    ledger = withReaderStats(
+      ledger,
+      record({ readAt: "2026-09-07T00:00:00.000Z", metrics: { pv: 7 } })
+    );
+
+    const forSite = readerStatsForSite(ledger, "kakuyomu");
+
+    // 並びは、種類によらず新しい順
+    expect(forSite.map((entry) => entry.metrics.pv)).toEqual([9, 7, 1]);
+    // **利用側と同じ取り方**をしたとき、作品全体の最新（7）が来る
+    expect(
+      forSite.find((entry) => entry.scope === "work")?.metrics.pv
+    ).toBe(7);
+  });
+
   test("この欄が無い台帳（旧形式）は、空として読む", () => {
     const ledger = parsePostingLedger({
       schemaVersion: "1",
