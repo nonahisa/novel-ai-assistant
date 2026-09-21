@@ -21,6 +21,20 @@ import type { DeviceWritingStats, WritingBaseline } from "../../src/models/writi
  * **数え方をここで作り直さない。** 製品の関数（`countEpisodeChars` /
  * `countChars`）をそのまま呼ぶ。写しを置くと、製品が壊れたときに
  * 試験も同じように壊れて、合ってしまう。
+ *
+ * ## 台帳は「今」ではなく「最後に記録した時点」である（2026-09-21に踏んだ）
+ *
+ * `baseline` は **`baseline.at` の時点の記録**であって、いまのファイルの
+ * 姿ではない。**その差こそが「未記録」**——作者がそのあと書いた分である。
+ * 最初に書いたときは全部一致したが、作者が13ファイルで `。」` を `」` へ
+ * 直した直後に走らせたら、**製品は何も壊れていないのに14字ぶん落ちた。**
+ * 「実データと合う」試験が、**作者が推敲するたびに落ちる**ことになる。
+ *
+ * そこで、**`baseline.at` より後に触られたファイルは突き合わせない**
+ * （未記録として数え、報告にだけ出す）。作品ごとの合計を台帳と比べるのも、
+ * **未記録が1件も無いときだけ**にする——1件でもあれば合計は当然ずれる。
+ * 飛ばしすぎて何も確かめないまま通ることが無いよう、**突き合わせた
+ * ファイルが1件も無ければ落とす。**
  */
 const ROOT = process.env.NOVELAI_WORKS?.trim();
 
@@ -87,6 +101,8 @@ describe.skipIf(!ROOT)("実データの字数を台帳と突き合わせる（�
     const report: string[] = [];
     const problems: string[] = [];
     let checked = 0;
+    /** 突き合わせたファイルの総数。0件のまま通らせない */
+    let comparedFiles = 0;
 
     for (const work of works) {
       const statsDir = path.join(work, ".aiwriter", "stats");
@@ -101,6 +117,9 @@ describe.skipIf(!ROOT)("実データの字数を台帳と突き合わせる（�
       let net = 0;
       let gross = 0;
       let counted = 0;
+      /** `baseline.at` より後に触られたファイル（＝未記録）の件数 */
+      let unrecorded = 0;
+      const recordedAt = Date.parse(baseline.at);
 
       for (const [key, recorded] of Object.entries(files)) {
         const file = path.join(work, ...key.split("/"));
@@ -110,6 +129,14 @@ describe.skipIf(!ROOT)("実データの字数を台帳と突き合わせる（�
           problems.push(`${workName}/${key}: 台帳にあるがファイルが無い`);
           continue;
         }
+        // 記録したあとで書かれたファイルは、**ずれていて当たり前**。
+        // 更新時刻は取り寄せ（git の checkout）でも新しくなるので、
+        // 飛ばしすぎることはあっても、見落とす側には倒れない
+        if (Number.isFinite(recordedAt) && fs.statSync(file).mtimeMs > recordedAt) {
+          unrecorded++;
+          continue;
+        }
+
         const text = decodeText(fs.readFileSync(file));
         const ext = path.extname(file).toLowerCase();
         const counts = countEpisodeChars(text, { ext, excludeRuby: EXCLUDE_RUBY });
@@ -128,38 +155,51 @@ describe.skipIf(!ROOT)("実データの字数を台帳と突き合わせる（�
         counted++;
       }
 
-      // 台帳の `fileCount` は競合を含む話も数えているが、内訳には載らない
-      // （直った瞬間に「数万字書いた」ことになるため。`toMeasurement`）
-      const expectedFileCount = baseline.fileCount - baseline.conflictedCount;
-      if (counted !== expectedFileCount) {
-        problems.push(
-          `${workName}: ファイル数 ${counted}件（台帳 ${expectedFileCount}件）`
-        );
-      }
-      if (net !== baseline.net) {
-        problems.push(
-          `${workName}: 純文字数の合計 ${net}字（台帳 ${baseline.net}字・差 ${
-            net - baseline.net
-          }字）`
-        );
-      }
-      if (gross !== baseline.gross) {
-        problems.push(
-          `${workName}: 総文字数の合計 ${gross}字（台帳 ${baseline.gross}字・差 ${
-            gross - baseline.gross
-          }字）`
-        );
+      // **未記録が1件でもあれば、合計は当然ずれる。** 作品ごとの合計を
+      // 台帳と比べられるのは、記録のあと1ファイルも触られていないときだけ
+      if (unrecorded === 0) {
+        // 台帳の `fileCount` は競合を含む話も数えているが、内訳には載らない
+        // （直った瞬間に「数万字書いた」ことになるため。`toMeasurement`）
+        const expectedFileCount = baseline.fileCount - baseline.conflictedCount;
+        if (counted !== expectedFileCount) {
+          problems.push(
+            `${workName}: ファイル数 ${counted}件（台帳 ${expectedFileCount}件）`
+          );
+        }
+        if (net !== baseline.net) {
+          problems.push(
+            `${workName}: 純文字数の合計 ${net}字（台帳 ${baseline.net}字・差 ${
+              net - baseline.net
+            }字）`
+          );
+        }
+        if (gross !== baseline.gross) {
+          problems.push(
+            `${workName}: 総文字数の合計 ${gross}字（台帳 ${baseline.gross}字・差 ${
+              gross - baseline.gross
+            }字）`
+          );
+        }
       }
 
       report.push(
         `${workName}: ${counted}ファイル 純${net}字 総${gross}字` +
+          (unrecorded > 0
+            ? `／未記録 ${unrecorded}件は突き合わせていない（合計の照合も見送り）`
+            : "／未記録なし（合計も台帳と照合した）") +
           `（台帳 ${baseline.at} / 端末 ${found.deviceId}）`
       );
+      comparedFiles += counted;
       checked++;
     }
 
     console.log("\n" + report.join("\n"));
     expect(checked, "台帳のある作品が1つも見つからない").toBeGreaterThan(0);
+    // 未記録ばかりで全部飛ばすと、何も確かめないまま通ってしまう
+    expect(
+      comparedFiles,
+      "突き合わせたファイルが1件も無い（全部が未記録。台帳を書き直してから測ること）"
+    ).toBeGreaterThan(0);
     expect(problems.join("\n"), "台帳と食い違った").toBe("");
   });
 });
