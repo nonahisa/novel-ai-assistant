@@ -282,6 +282,58 @@ function stubConfirmMemory(initial: Record<string, string>): {
 }
 
 /**
+ * `confirmRun` に `rememberId` を渡したときの動き。
+ *
+ * 記憶する側（`rememberConfirmAnswer` が書く）と読み出す側
+ * （`rememberedAnswer`）はそれぞれ単体テストがあるが、**`confirmRun`
+ * 自身が「覚えがあれば窓を出さずに通す」ところを確かめるテストが
+ * 無かった**（既存の「実行前の確認」「確認の顔つき」はどれも
+ * `rememberId` を渡していない）。
+ */
+describe("confirmRun：rememberId を渡したとき", () => {
+  test("覚えがまだ無ければ、これまでどおり窓を出す", async () => {
+    const memory = stubConfirmMemory({});
+    const calls: unknown[][] = [];
+    const original = window.showInformationMessage;
+    window.showInformationMessage = async (message, ...items) => {
+      calls.push([message, ...items]);
+      return "実行";
+    };
+    try {
+      const result = await confirmRun("19話をAIで確認します。", "実行", {
+        remember: { id: "ai.run.checkTypos" },
+      });
+      expect(result).toBe(true);
+      expect(calls).toHaveLength(1);
+    } finally {
+      window.showInformationMessage = original;
+      memory.restore();
+    }
+  });
+
+  test("「以降は訊かない」を覚えていれば、窓を出さずに実行したことにする（proceed相当）", async () => {
+    const memory = stubConfirmMemory({ "ai.run.checkTypos": "実行" });
+    const calls: unknown[][] = [];
+    const original = window.showInformationMessage;
+    window.showInformationMessage = async (message, ...items) => {
+      calls.push([message, ...items]);
+      return "実行";
+    };
+    try {
+      const result = await confirmRun("19話をAIで確認します。", "実行", {
+        remember: { id: "ai.run.checkTypos" },
+      });
+      expect(result).toBe(true);
+      // 窓を出していれば1件積まれるはず。出さずに通したことの証
+      expect(calls).toEqual([]);
+    } finally {
+      window.showInformationMessage = original;
+      memory.restore();
+    }
+  });
+});
+
+/**
  * 「はじめの10話だけ試す」は覚えない（`noRemember`、設計書6.8.7）。
  *
  * 覚えると、以後すべての実行が黙って10話だけになり、見ていない話が
