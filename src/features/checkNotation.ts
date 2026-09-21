@@ -16,6 +16,8 @@ import {
   createOrganizationStore,
 } from "../core/abilityStore";
 import { loadSeriesTerms } from "../core/seriesSettings";
+import { KeepWordStore } from "../core/keepWordStore";
+import { isKeptWord, type KeepWord } from "../models/keepWord";
 import { isDismissed, TypoDismissedHistory } from "../core/typoIssueHistory";
 import {
   DIGIT_WIDTH_FULL,
@@ -76,8 +78,16 @@ export interface NotationCheckRunResult {
   groupCount: number;
   /** 作者が「揃える」を選んだ組の数 */
   unifiedCount: number;
-  /** 無視の記録により除いた指摘の数 */
+  /** 「無視」の記録（`TypoDismissedHistory`）により除いた指摘の数 */
   dismissedCount: number;
+  /**
+   * 「今後直さない」（`設定/keep_words.json`）に登録済みで、
+   * 組ごと外した数。
+   *
+   * **`dismissedCount` と混ぜない。** 置き場も、作者が取り消す場所も違う
+   * （こちらは「指摘対象外を管理」、あちらは操作ログ）。
+   */
+  keptGroupCount: number;
   cancelled: boolean;
   /** 作者が選んだ組の数。0件だったときに理由を伝えるために持つ */
   selectedCount?: number;
@@ -148,7 +158,13 @@ export async function checkNotation(
       ` / 指摘 ${result?.issues.length ?? 0}件` +
       ` / 見つけた組 ${result?.groupCount ?? 0}組` +
       ` / 揃える組 ${result?.unifiedCount ?? 0}組` +
-      (result?.dismissedCount ? ` / 今後直さないで除いた ${result.dismissedCount}件` : "") +
+      // **2つの置き場を混ぜない。** 「無視」は操作ログ、「今後直さない」は
+      // `設定/keep_words.json`。ログで取り違えると、原因を追うときに
+      // 見に行く先を間違える
+      (result?.dismissedCount ? ` / 無視で除いた ${result.dismissedCount}件` : "") +
+      (result?.keptGroupCount
+        ? ` / 今後直さないで除いた ${result.keptGroupCount}組`
+        : "") +
       (result === undefined ? " / 取りやめ" : "") +
       (result?.cancelled ? " / 中止された" : "") +
       (result?.stoppedEarly ? " / 途中で閉じた" : "") +
@@ -220,18 +236,40 @@ async function runNotationCheck(
   }
 
   const properNouns = await loadProperNouns(work);
-  const groups = detectNotationVariants(sources, { properNouns });
+  const detected = detectNotationVariants(sources, { properNouns });
+
+  // **作者が「今後直さない」と決めた語は、組ごと出さない**（0.75.3）。
+  // 誤字脱字（`checkTypos`）・推敲（`checkProofread`）は読んでいたのに
+  // 表記ゆれだけが読んでおらず、ボタンを押しても同じ組が出続けていた
+  const { groups, keptGroupCount } = dropKeptGroups(
+    detected,
+    await new KeepWordStore(work).loadWords()
+  );
 
   if (groups.length === 0) {
     vscode.window.showInformationMessage(
-      `表記ゆれは見つかりませんでした。${NOTATION_SCOPE_NOTE}`
+      describeNoGroups(keptGroupCount) + NOTATION_SCOPE_NOTE
     );
-    return { issues: [], groupCount: 0, unifiedCount: 0, dismissedCount: 0, cancelled: false };
+    return {
+      issues: [],
+      groupCount: 0,
+      unifiedCount: 0,
+      dismissedCount: 0,
+      keptGroupCount,
+      cancelled: false,
+    };
   }
 
   const selection = readGroupSelection(await pickGroups(groups));
   if (selection.kind === "cancelled") {
-    return { issues: [], groupCount: groups.length, unifiedCount: 0, dismissedCount: 0, cancelled: true };
+    return {
+      issues: [],
+      groupCount: groups.length,
+      unifiedCount: 0,
+      dismissedCount: 0,
+      keptGroupCount,
+      cancelled: true,
+    };
   }
   if (selection.kind === "none") {
     // **0組のまま確定は「今回は揃えない」。** 止める意思ではないので、
@@ -241,6 +279,7 @@ async function runNotationCheck(
       groupCount: groups.length,
       unifiedCount: 0,
       dismissedCount: 0,
+      keptGroupCount,
       cancelled: false,
       selectedCount: 0,
       noGroupsChosen: true,
@@ -257,6 +296,7 @@ async function runNotationCheck(
       groupCount: groups.length,
       unifiedCount: 0,
       dismissedCount: 0,
+      keptGroupCount,
       cancelled: true,
     };
   }
@@ -301,10 +341,58 @@ async function runNotationCheck(
     groupCount: groups.length,
     unifiedCount,
     dismissedCount,
+    keptGroupCount,
     cancelled: false,
     selectedCount: picked.length,
     stoppedEarly,
   };
+}
+
+/**
+ * 「今後直さない」に登録済みの語を含む組を落とす（0.75.3）。
+ *
+ * **除くのは組ごとである。** 「良い ↔ よい」で「よい」を守ると決めた作者に、
+ * 「良い」側の書き換えだけを出しても意味がない——揃える先が無くなるだけで、
+ * 同じ組がまた並ぶ。どちらかの表記が登録されていれば、その組を出さない。
+ *
+ * 判定は誤字脱字・推敲と同じ `isKeptWord`（部分一致）を使う。方言は活用する
+ * ので完全一致では取りこぼす、という理由もそのまま当てはまる。
+ *
+ * **ボタン側（`proposalPanelHtml.canKeep`）は触らない。** あちらが分類を見ず
+ * 語の長さだけで「今後直さない」を出すのは、方言や口癖がどの検知からでも
+ * 登録できるようにするためである。効かせる側をここで揃える。
+ */
+export function dropKeptGroups(
+  groups: readonly NotationVariantGroup[],
+  keepWords: KeepWord[]
+): { groups: NotationVariantGroup[]; keptGroupCount: number } {
+  if (keepWords.length === 0) {
+    return { groups: [...groups], keptGroupCount: 0 };
+  }
+  const remaining = groups.filter(
+    (group) => !group.forms.some((form) => isKeptWord(form.surface, keepWords))
+  );
+  return {
+    groups: remaining,
+    keptGroupCount: groups.length - remaining.length,
+  };
+}
+
+/**
+ * 1組も出せなかったときの書き出し（0.75.3）。
+ *
+ * **「見つかりませんでした」で済ませない。** 見つけたうえで「今後直さない」
+ * により外した場合、作者には見つからなかったのと区別が付かない。
+ */
+export function describeNoGroups(keptGroupCount: number): string {
+  if (keptGroupCount > 0) {
+    return (
+      `表記ゆれは見つかりましたが、${keptGroupCount}組はすべて` +
+      "「今後直さない」に登録済みの語を含んでいたため出していません" +
+      "（「指摘対象外を管理」から外せます）。"
+    );
+  }
+  return "表記ゆれは見つかりませんでした。";
 }
 
 /**
@@ -635,7 +723,7 @@ export function describeNotationResult(
   shown: IncomingCount
 ): string {
   if (result.groupCount === 0) {
-    return "表記ゆれは見つかりませんでした。";
+    return describeNoGroups(result.keptGroupCount);
   }
 
   if (result.issues.length > 0) {
@@ -654,6 +742,12 @@ export function describeNotationResult(
     ];
     if (result.dismissedCount > 0) {
       parts.push(`（無視した分 ${result.dismissedCount}件は除いています）`);
+    }
+    // **2つの置き場を混ぜない。** 外し方が違うので、別の文にして名指しする
+    if (result.keptGroupCount > 0) {
+      parts.push(
+        `（「今後直さない」に登録済みの組 ${result.keptGroupCount}組は除いています）`
+      );
     }
     if (result.stoppedEarly) {
       parts.push("途中で閉じたので、そこから先の組は見ていません。");
@@ -675,11 +769,20 @@ export function describeNotationResult(
     );
   }
   if (result.dismissedCount > 0) {
-    return (
+    // **`dismissedCount` は「無視」ボタンの記録**（`TypoDismissedHistory`）で
+    // あって、「今後直さない」（`設定/keep_words.json`）ではない。外す場所も
+    // 違うので、「指摘対象外を管理」へ案内すると作者はそこで何も見つけられない
+    const parts = [
       `${result.unifiedCount}組を揃えることにしましたが、` +
-      `${result.dismissedCount}件はすべて「今後直さない」に登録済みでした。` +
-      "「指摘対象外を管理」から外せます。"
-    );
+        `${result.dismissedCount}件はすべて以前「無視」にしたものでした。`,
+    ];
+    if (result.keptGroupCount > 0) {
+      parts.push(
+        `（「今後直さない」に登録済みの組 ${result.keptGroupCount}組も除いています。` +
+          "「指摘対象外を管理」から外せます）"
+      );
+    }
+    return parts.join("");
   }
   return "指摘は作られませんでした。選んだ組では書き換える箇所がありませんでした。";
 }

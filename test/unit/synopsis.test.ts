@@ -11,8 +11,13 @@ import {
   upsertSynopsis,
   type ChapterSynopsis,
 } from "../../src/models/synopsis";
-import { buildSynopsisPrompt } from "../../src/prompts/synopsis";
+import {
+  buildSynopsisPrompt,
+  synopsisPromptVersion,
+  SYNOPSIS_VERSION,
+} from "../../src/prompts/synopsis";
 import { buildReaderTypePrompt } from "../../src/prompts/readerTarget";
+import { readerTypeCacheMark } from "../../src/core/readerTarget";
 import {
   READER_PROFILE_SCHEMA_VERSION,
   type ReaderProfile,
@@ -371,6 +376,53 @@ describe("あらすじのプロンプト", () => {
 
       expect(prompt).not.toContain("【この作品の読者】");
       expect(prompt).toContain("subtitles は空配列");
+    });
+
+    /*
+      **プロンプトへ入れたものは、作り直しの鍵にも入れる**（0.75.3、
+      CLAUDE.md 規則4）。2.1 で読者像を渡すようにしたのに鍵は
+      「本文ハッシュ＋プロバイダ＋モデル＋`SYNOPSIS_VERSION`」のままで、
+      **診断をやり直しても本文が同じ話は再提案されなかった。**
+    */
+    describe("作り直しの判断に使う版", () => {
+      /** 別の区分に落ちる点数。区分の決め方はコード側が持つ */
+      const other: ReaderProfile = {
+        schemaVersion: READER_PROFILE_SCHEMA_VERSION,
+        declared: {
+          scores: { familiarity: 1, posture: 6, craving: 6 },
+          answers: [],
+          updatedAt: "2026-09-22T00:00:00.000Z",
+        },
+      };
+
+      function versionFor(
+        needsSubtitle: boolean,
+        readerProfile?: ReaderProfile
+      ): string {
+        return synopsisPromptVersion({
+          needsSubtitle,
+          readerTypeMark: readerTypeCacheMark(readerProfile),
+        });
+      }
+
+      test("読者の型が変われば版も変わる（本文が同じでも作り直す）", () => {
+        expect(readerTypeCacheMark(profile)).not.toBe(
+          readerTypeCacheMark(other)
+        );
+        expect(versionFor(true, profile)).not.toBe(versionFor(true, other));
+      });
+
+      test("型が同じなら版も同じ（無駄に作り直さない）", () => {
+        expect(versionFor(true, profile)).toBe(versionFor(true, profile));
+        // 未診断どうしも揃う。空文字にすると区切りが潰れて見分けが付かない
+        expect(versionFor(true, undefined)).toContain("reader:none");
+      });
+
+      test("サブタイトルの要らない回は、読者像で版が動かない", () => {
+        // そちらのプロンプトに読者像は入らない。混ぜると診断のたびに全話を作り直す
+        expect(versionFor(false, profile)).toBe(SYNOPSIS_VERSION);
+        expect(versionFor(false, other)).toBe(SYNOPSIS_VERSION);
+      });
     });
   });
 });

@@ -142,16 +142,52 @@ export function isBlank(value: string): boolean {
   return body.length === 0;
 }
 
-/** まだ書かれていない項目を、尋ねる順に並べる */
-export function pendingQuestions(sections: PlotSections): PlotQuestion[] {
-  return PLOT_QUESTIONS.filter((question) => isBlank(sections[question.key]));
+/**
+ * 「この項目は飛ばす」の文言（設計書6.4.7）。
+ *
+ * **問いに添える側と、受け取る側で同じものを見る。** 写しを置くと、
+ * 片方だけ言い回しを直したときに、押しても何も起きない札になる
+ * （0.75.2 までは受け取る側が無く、まさにその状態だった）。
+ */
+export const PLOT_SKIP_OPTION = "この項目は飛ばす";
+
+/**
+ * 作者の返事が「飛ばす」か。
+ *
+ * 画面は番号で打っても選択肢の文言をそのまま送ってくる
+ * （`workChatPanelHtml` の `currentOptions`）ので、見るのは文言だけでよい。
+ * ただし**手で打たれることもある**ので、前後の空白と鉤括弧は落とす。
+ *
+ * **ゆるく当てない。** 「飛ばす」を含むだけで拾うと、
+ * 「この話は時間を飛ばす構成です」という答えが飛ばしになる。
+ */
+export function isPlotSkipReply(text: string): boolean {
+  const body = text.trim().replace(/^[「『]|[」』]$/gu, "").trim();
+  return body === PLOT_SKIP_OPTION;
 }
 
-/** 次に尋ねる項目。全部埋まっていれば undefined */
+/**
+ * まだ書かれていない項目を、尋ねる順に並べる。
+ *
+ * `skipped` は作者が「この項目は飛ばす」と答えた節。**空のままなので、
+ * 除かないと同じ問いを永久に出し続ける。**
+ */
+export function pendingQuestions(
+  sections: PlotSections,
+  skipped: ReadonlySet<PlotSectionKey> = new Set()
+): PlotQuestion[] {
+  return PLOT_QUESTIONS.filter(
+    (question) =>
+      !skipped.has(question.key) && isBlank(sections[question.key])
+  );
+}
+
+/** 次に尋ねる項目。全部埋まっている（か飛ばされた）なら undefined */
 export function nextQuestion(
-  sections: PlotSections
+  sections: PlotSections,
+  skipped: ReadonlySet<PlotSectionKey> = new Set()
 ): PlotQuestion | undefined {
-  return pendingQuestions(sections)[0];
+  return pendingQuestions(sections, skipped)[0];
 }
 
 /**

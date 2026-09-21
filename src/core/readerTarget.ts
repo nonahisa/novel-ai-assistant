@@ -435,6 +435,28 @@ export function chatReaderBasis(
 }
 
 /**
+ * 読者像を「材料の印」1つにする（0.75.3）。
+ *
+ * **キャッシュの鍵に混ぜるためのもの**（CLAUDE.md 規則4）。サブタイトルの
+ * 提案は 0.75.2 から読者像を見るようになったが、鍵は
+ * 「本文ハッシュ＋プロバイダ＋モデル＋プロンプト版」だけだったので、
+ * **診断をやり直しても本文が同じ話は作り直されなかった**。
+ *
+ * 印に使うのは読者タイプのIDだけでよい。プロンプトへ入るのは
+ * `READER_TYPE_PROMPTS[型]` の文章で、点数そのものは入らないためである
+ * （点数を鍵にすると、文章が変わらないのに作り直すことになる）。
+ *
+ * 未診断は `none`。**空文字にしない**——鍵の中で区切りが潰れて、
+ * 「診断していない」と「型が空」を見分けられなくなる。
+ */
+export function readerTypeCacheMark(
+  profile: ReaderProfile | undefined
+): string {
+  const basis = chatReaderBasis(profile);
+  return basis ? resolveReaderType(basis.scores) : "none";
+}
+
+/**
  * 相談へ渡した読者タイプを、操作ログの1行にする。
  *
  * **文言をここに置くのは `advicePolicyLogLines` と同じ理由**——

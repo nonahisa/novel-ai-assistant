@@ -1,7 +1,16 @@
-import { parsePlotMarkdown, type PlotSections } from "../core/plotDoc";
+import {
+  parsePlotMarkdown,
+  type PlotSectionKey,
+  type PlotSections,
+} from "../core/plotDoc";
 import { fromUri } from "../core/paths";
 import { readPlotText } from "../core/plotFile";
-import { describeProgress, nextQuestion } from "../core/plotInterview";
+import {
+  describeProgress,
+  isPlotSkipReply,
+  nextQuestion,
+  PLOT_SKIP_OPTION,
+} from "../core/plotInterview";
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
@@ -342,6 +351,16 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     | undefined;
   /** 対話の相手になっている作品。次の項目へ進むときに要る */
   private plotInterviewWork: WorkEntry | undefined;
+  /** いま尋ねている項目の鍵。「飛ばす」と言われたときに控えるのに要る */
+  private plotFocusKey: PlotSectionKey | undefined;
+  /**
+   * 作者が「この項目は飛ばす」と答えた項目（設計書6.4.7）。
+   *
+   * **空のままなので、覚えておかないと同じ問いがまた出る。**
+   * `plot.md` へは何も書かない——飛ばしたことを本文に残すと、
+   * 作者が後から書き足すときに消す手間が増える。
+   */
+  private plotSkipped = new Set<PlotSectionKey>();
 
   /**
    * 解釈が済んだ書き込み。
@@ -1111,6 +1130,11 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
   private async ask(question: string): Promise<void> {
     if (this.hosts().length === 0) return;
+
+    // **飛ばすだけならAIは要らない**（0.75.3）。書き込みも起きないので、
+    // 繋がるかの確認より前に抜ける——止まっているAIのせいで
+    // 「飛ばす」すら押せない、という形にしない
+    if (await this.skipPlotQuestion(question)) return;
 
     const resolved = this.ai.resolve("chat");
     if (!resolved) {
@@ -2590,7 +2614,52 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
 
     this.plotInterviewWork = work;
+    // **始め直したら、飛ばした項目も聞き直す。** 前回飛ばしたのは
+    // 「そのとき決まっていなかった」からで、今日も決まっていないとは限らない
+    this.plotSkipped.clear();
     await this.askNextPlotQuestion(sections, true);
+  }
+
+  /**
+   * 「この項目は飛ばす」と答えられたときに、次の項目へ進む（0.75.3）。
+   *
+   * **0.75.2 までは、この言葉を受け取る処理が無かった。** 問いの選択肢に
+   * 足してはいたが、次へ進む道は `advancePlotInterview` だけで、そちらは
+   * **AIの提案を実際に書き込めたときにしか呼ばれない。** 押しても普通の
+   * 相談としてAIへ送られ、面談はその項目で止まったままだった。
+   *
+   * @returns 飛ばしとして扱ったら true（呼び出し側はAIを呼ばない）
+   */
+  private async skipPlotQuestion(reply: string): Promise<boolean> {
+    if (!this.plotInterviewWork || !this.plotFocus || !this.plotFocusKey) {
+      return false;
+    }
+    if (!isPlotSkipReply(reply)) return false;
+
+    const heading = this.plotFocus.heading;
+    this.plotSkipped.add(this.plotFocusKey);
+
+    // **送っていないので、入力を待ち状態から戻す**（料金の確認で
+    // 取りやめたときと同じ道。ここを送らないと入力欄が固まる）
+    this.postAll({ type: "cancelled" });
+    this.postAll({
+      type: "chatter",
+      who: "AI",
+      text:
+        `【${heading}】は飛ばします。空のままにしておくので、` +
+        "決まったらいつでも書き足せます。",
+    });
+
+    const sections = await this.readPlotSections(this.plotInterviewWork);
+    // 読めなくなっていたら、面談だけを閉じる（書き込みは一切していない）
+    if (!sections) {
+      this.plotFocus = undefined;
+      this.plotFocusKey = undefined;
+      this.plotInterviewWork = undefined;
+      return true;
+    }
+    await this.askNextPlotQuestion(sections, false);
+    return true;
   }
 
   /** まだ書かれていない項目を1つ尋ねる。全部埋まっていれば終わりを告げる */
@@ -2599,10 +2668,12 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     first: boolean
   ): Promise<void> {
     if (this.hosts().length === 0) return;
-    const question = nextQuestion(sections);
+    // 飛ばした項目は空のままなので、除かないと同じ問いがまた出る
+    const question = nextQuestion(sections, this.plotSkipped);
 
     if (!question) {
       this.plotFocus = undefined;
+      this.plotFocusKey = undefined;
       this.plotInterviewWork = undefined;
       this.postAll({
         type: "chatter",
@@ -2619,6 +2690,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       target: `plot.${question.key}`,
       purpose: question.purpose,
     };
+    this.plotFocusKey = question.key;
 
     const progress = describeProgress(sections);
     this.postAll({
@@ -2628,8 +2700,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         (first ? `プロットを一緒に埋めていきましょう。${progress}。\n\n` : "") +
         `【${question.heading}】\n${question.question}`,
       // **飛ばせるようにする。** 決まっていない項目で止まると、
-      // 作者はそこで対話ごとやめてしまう
-      options: [...question.options, "この項目は飛ばす"],
+      // 作者はそこで対話ごとやめてしまう。受け取るのは `skipPlotQuestion`
+      options: [...question.options, PLOT_SKIP_OPTION],
     });
   }
 

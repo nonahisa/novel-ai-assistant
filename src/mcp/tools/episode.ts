@@ -4,9 +4,10 @@ import {
   SYNOPSIS_SCHEMA,
   SYNOPSIS_SYSTEM_PROMPT,
   SYNOPSIS_TEMPERATURE,
-  SYNOPSIS_VERSION,
   buildSynopsisPrompt,
+  synopsisPromptVersion,
 } from "../../prompts/synopsis";
+import { readerTypeCacheMark } from "../../core/readerTarget";
 import {
   parseSynopsisResult,
   validateSynopsisResult,
@@ -171,6 +172,12 @@ export interface EpisodePromptInput {
 export function synopsisPrompt(input: EpisodePromptInput) {
   const episode = readEpisode(input.folder, input.filePath, input.chapter);
   const synopses = readSynopses(input.folder);
+  // **版も製品と同じ組み立てにする**（0.75.3）。サブタイトルの回だけ
+  // 読者像がプロンプトへ入るので、版にもその印が要る。ここだけ素の
+  // `SYNOPSIS_VERSION` を返すと、測った結果を製品のキャッシュへ当てたとき
+  // 版が合わず、作り直しの判断が食い違う
+  const readerProfile = readReaderProfile(input.folder);
+  const needsSubtitle = input.needsSubtitle === true;
 
   // **前の話までのあらすじだけ渡す。** 先の話を渡すと、まだ書いていない
   // ことを踏まえた要約になる
@@ -188,7 +195,10 @@ export function synopsisPrompt(input: EpisodePromptInput) {
     );
 
   return {
-    promptVersion: SYNOPSIS_VERSION,
+    promptVersion: synopsisPromptVersion({
+      needsSubtitle,
+      readerTypeMark: readerTypeCacheMark(readerProfile),
+    }),
     systemPrompt: SYNOPSIS_SYSTEM_PROMPT,
     schema: SYNOPSIS_SCHEMA,
     temperature: SYNOPSIS_TEMPERATURE,
@@ -200,10 +210,10 @@ export function synopsisPrompt(input: EpisodePromptInput) {
       chapterText: episode.body,
       previousSynopses: previous,
       characterNames: readCharacterNames(input.folder),
-      needsSubtitle: input.needsSubtitle === true,
+      needsSubtitle,
       // **測る側も製品と同じ材料で組む**（サブタイトルは宛先を見る。
       // ここだけ渡さないと、製品に無い差で測ったことになる）
-      readerProfile: readReaderProfile(input.folder),
+      readerProfile,
     }),
   };
 }

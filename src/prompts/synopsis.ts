@@ -29,6 +29,30 @@ import type { ReaderProfile } from "../models/readerProfile";
 export const SYNOPSIS_VERSION = "2.1";
 
 /**
+ * 作り直しの判断に使う版（0.75.3）。
+ *
+ * **サブタイトルを出させる回だけ、読者像の型を版へ混ぜる**
+ * （CLAUDE.md 規則4「鍵にはプロンプト版を含める」）。2.1 で読者像を
+ * プロンプトへ入れたのに版は本文ハッシュ・モデル・`SYNOPSIS_VERSION`
+ * だけを見ていたため、**診断をやり直しても本文が同じ話は再提案されなかった。**
+ *
+ * **サブタイトルの要らない話には混ぜない。** そちらのプロンプトには
+ * 読者像が入らないので、混ぜると診断のたびに全話を作り直すことになる
+ * （規則4は「節約する」でもある）。
+ *
+ * 形は `mcp/tools/contradiction.ts` の `promptVersionWithSuppression` に
+ * 倣う——版の文字列へ印を1つ足すだけで、鍵の組み立てを増やさない。
+ */
+export function synopsisPromptVersion(input: {
+  needsSubtitle: boolean;
+  /** `readerTypeCacheMark()` の返り値（未診断なら "none"） */
+  readerTypeMark: string;
+}): string {
+  if (!input.needsSubtitle) return SYNOPSIS_VERSION;
+  return `${SYNOPSIS_VERSION}|reader:${input.readerTypeMark}`;
+}
+
+/**
  * 送るときの温度。あらすじは事実を並べるだけなので、揺らす必要がない。
  *
  * **製品も測定台もここを見る**（プロンプトと温度は一対なので、版と同じ場所に置く）。

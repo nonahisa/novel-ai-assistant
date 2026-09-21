@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import { SettingsPanel } from "../../src/features/settingsPanel";
 import { emptyCharacter, type Character } from "../../src/models/character";
 import type { RecordChange } from "../../src/models/jsonValidation";
+import { mergeExtractedCharacters } from "../../src/core/characterMerge";
 
 /**
  * 誤って記録された変化を、設定資料パネルから落とす（作者の裁定、2026-09-21）。
@@ -65,6 +66,47 @@ function misread(): Character {
       change("学院の教師。生徒を導く。", [7]),
     ],
   };
+}
+
+/** 第1話の取り違えの根拠。呼びかけの台詞で、話し手は別人である */
+const MISREAD_EVIDENCE = "ターナ先生。魔物の数がちょっと多いようなので……";
+
+/**
+ * **抽出の出力から、実データと同じ道で作る**（0.75.3）。
+ *
+ * 手で `evidence` を入れたレコードで確かめていたため、
+ * **`characterMerge` が根拠を `recordValue` へ渡していない**ことに
+ * 気づけなかった。実データでは抽出根拠がいつも空で、取り違えに気づく
+ * 手掛かりがどこにも出ていなかった。
+ *
+ * 通す道：抽出結果（AIの出力の形）→ `mergeExtractedCharacters`
+ * → `recordValue`（`recordChanges`）→ パネルの選択肢。
+ */
+function misreadFromExtraction(): Character {
+  const merged = mergeExtractedCharacters(
+    [],
+    [
+      {
+        data: {
+          name: "ターナ先生",
+          gender: "女性",
+          summary: "リーダー格の男性。仲間を指揮し、リナ救出を依頼する。",
+          evidence: MISREAD_EVIDENCE,
+        },
+        chapters: [1],
+      },
+      {
+        data: {
+          name: "ターナ先生",
+          gender: "女性",
+          summary: "学院の教師。生徒を導く。",
+          evidence: "ターナ先生は教壇に立ち、生徒たちを見渡した。",
+        },
+        chapters: [7],
+      },
+    ]
+  );
+  return merged.characters[0];
 }
 
 interface PanelInnards {
@@ -144,7 +186,7 @@ describe("誤って記録された変化を落とす（設定資料パネル）"
     expect(generated).toEqual([{ kinds: ["characters"], silent: true }]);
   });
 
-  test("選択肢には、値・話数・抽出根拠が並ぶ", async () => {
+  test("選択肢には、値・話数・抽出根拠が並ぶ（手で作ったレコード）", async () => {
     const { inner } = panelWith(misread());
     const shown = choosing(() => undefined);
 
@@ -156,6 +198,32 @@ describe("誤って記録された変化を落とす（設定資料パネル）"
     ]);
     expect(shown[0][0].description).toContain("第1話");
     // 取り違えに気づく手掛かりは根拠にしかない（呼びかけの台詞だった）
+    expect(shown[0][0].detail).toContain("ターナ先生。魔物の数が");
+  });
+
+  /*
+    **こちらが本命である**（0.75.3）。作り物のレコードでは通っていたのに、
+    抽出→マージ→記録→パネルの一本道では根拠がいつも空だった。
+    `characterMerge` が `recordValue` へ根拠を渡していなかったためである。
+  */
+  test("抽出→マージ→記録の道を通しても、抽出根拠が選択肢に出る", async () => {
+    const character = misreadFromExtraction();
+    // まずマージの出口で根拠が残っていること（ここが空なら画面にも出ない）
+    const first = character.changes.find(
+      (entry) => entry.field === "summary" && entry.chapters.includes(1)
+    );
+    expect(first?.evidence).toBe(MISREAD_EVIDENCE);
+
+    const { inner } = panelWith(character);
+    const shown = choosing(() => undefined);
+
+    await inner.handleDropChanges(character.id, "summary");
+
+    expect(shown[0].map((item) => item.label)).toEqual([
+      "リーダー格の男性。仲間を指揮し、リナ救出を依頼する。",
+      "学院の教師。生徒を導く。",
+    ]);
+    expect(shown[0][0].description).toContain("第1話");
     expect(shown[0][0].detail).toContain("ターナ先生。魔物の数が");
   });
 
