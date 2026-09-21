@@ -165,4 +165,39 @@ describe("組み方の指定（SCRIPT_LINE_CSS）", () => {
       "serifu",
     ]);
   });
+
+  /**
+   * ここから先は、**値そのもの**を見る。
+   *
+   * 実機確認リストが指す形（柱が太字で前が1行空く、ト書きが約3字下がる）は、
+   * セレクタが在るだけでは留まらない——`bold` という字がファイルの
+   * どこかにあれば通ってしまう検査では、値を書き換えても気づけない。
+   * セレクタごとに規則の塊を切り出してから、その中だけを調べる。
+   */
+  function ruleBody(selector: string): string {
+    const escaped = selector.replace(/\./g, "\\.");
+    const match = SCRIPT_LINE_CSS.match(
+      new RegExp(`${escaped}\\s*\\{([^}]*)\\}`)
+    );
+    if (!match) {
+      throw new Error(`${selector} の規則が SCRIPT_LINE_CSS に見つからない`);
+    }
+    return match[1];
+  }
+
+  it("柱は太字（実機確認リストの「柱が太字」）", () => {
+    expect(ruleBody(".script-hashira")).toMatch(/font-weight:\s*bold;/);
+  });
+
+  it("柱は前が1行空く（padding-block-start: 1em）", () => {
+    expect(ruleBody(".script-hashira")).toMatch(
+      /padding-block-start:\s*1em;/
+    );
+  });
+
+  it("ト書きは、本文の全角空白1字＋2em で約3字ぶん下がる", () => {
+    expect(ruleBody(".script-togaki")).toMatch(
+      /padding-inline-start:\s*2em;/
+    );
+  });
 });

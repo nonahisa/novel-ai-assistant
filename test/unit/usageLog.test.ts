@@ -244,3 +244,62 @@ describe("内訳の組み立て", () => {
     expect(parts.指示).toBe(0);
   });
 });
+
+describe("「過去場面」は列にしない（内訳のセルにまとめる）", () => {
+  // 実機確認リストは「過去場面 N が内訳セルの中に『・』区切りで並ぶ
+  // （列ではない）」と言っている。仕組み（formatParts が1セルへ詰めること）は
+  // 上の describe で見ているが、「列を増やさない」という主張そのものは
+  // まだ確かめていなかった
+
+  test("見出しの列に「過去場面」は無く、列数は固定である", () => {
+    const header = usageLogHeader("C:/works/わたしの小説");
+    const headerLine = header
+      .split("\n")
+      .find((line) => line.startsWith("| 時刻"));
+    expect(headerLine).toBeDefined();
+
+    expect(headerLine).not.toContain("過去場面");
+    // 今のソースにある列数（時刻・機能・モデル・指示＋本文・スキーマ・
+    // 本文%・内訳・確保・入力tok・出力tok・秒・備考・キャッシュ）の13列
+    expect(headerLine).toBe(
+      "| 時刻 | 機能 | モデル | 指示＋本文 | スキーマ | 本文% | 内訳 | 確保 | 入力tok | 出力tok | 秒 | 備考 | キャッシュ |"
+    );
+  });
+
+  test("過去場面を含む内訳は、1つのセルに「・」区切りで並ぶ（多い順のまま）", () => {
+    const row = renderUsageRow(
+      entry({
+        parts: { 本文: 5_000, "過去場面 1": 1_200, "過去場面 2": 900 },
+      }),
+      AT
+    );
+
+    expect(row).toContain(
+      "本文 5,000・過去場面 1 1,200・過去場面 2 900"
+    );
+  });
+
+  test("過去場面が増えても、行の列数（｜の数）は見出しと変わらない", () => {
+    // 列が増えていれば、ここで見出しとずれて表が崩れる
+    const header = usageLogHeader("C:/works/わたしの小説");
+    const headerLine = header
+      .split("\n")
+      .find((line) => line.startsWith("| 時刻"));
+    const headerPipes = (headerLine ?? "").split("|").length;
+
+    const row = renderUsageRow(
+      entry({
+        parts: {
+          本文: 5_000,
+          "過去場面 1": 1_200,
+          "過去場面 2": 900,
+          "過去場面 3": 300,
+        },
+      }),
+      AT
+    );
+    const rowPipes = row.split("|").length;
+
+    expect(rowPipes).toBe(headerPipes);
+  });
+});
