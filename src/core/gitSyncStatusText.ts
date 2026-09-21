@@ -113,6 +113,76 @@ export function describeSyncTooltip(
 }
 
 /**
+ * ステータスバーに出す一文を作る（設計書6.15.1）。
+ *
+ * **`features/gitSync.ts` の `updateStatusBar` から切り出した**（2026-09-21）。
+ * あちらは `vscode.ThemeColor` や `show()`／`hide()` と混ざっていて、
+ * テストで確かめられなかった。**11倍の数え違いが、ここだけ見張られていない
+ * まま残っていた。**
+ *
+ * ## 置き場ごとに1回だけ数える
+ *
+ * `behind`／`ahead`／`dirty`／`unmerged` は**置き場ぜんぶの数**である
+ * （設計書5.5.1）。書庫では1つのリポジトリに11作品が入るので、
+ * 作品ごとに足すと**11倍になる**。置き場（`root`）で畳んでから足す。
+ * 同じ守りは印の側（`unsentMark.ts` の `summarizeUnsent`）にもある。
+ *
+ * 渡すのは `isWarning` で絞ったもの。出すものが無ければ `undefined`
+ * （＝ステータスバーを隠す）。**常に出していると、出ていること自体が
+ * 普通になり、警告として働かなくなる。**
+ */
+export function describeSyncStatusBar(
+  entries: readonly { status: GitSyncStatus }[]
+): string | undefined {
+  const perRoot = uniqueByRoot(entries);
+  const behind = sumTracked(perRoot, (status) => status.behind);
+  const ahead = sumTracked(perRoot, (status) => status.ahead);
+  const dirty = sumTracked(perRoot, (status) => status.dirty);
+  const unmerged = sumTracked(perRoot, (status) => status.unmerged);
+
+  const parts: string[] = [];
+  if (behind > 0) parts.push(`未取得 ${behind}`);
+  if (ahead > 0) parts.push(`未送信 ${ahead}`);
+  if (dirty > 0) parts.push(`未記録 ${dirty}`);
+  if (unmerged > 0) parts.push(`競合 ${unmerged}`);
+
+  if (parts.length === 0) return undefined;
+  return `$(git-branch) ${parts.join(" / ")}`;
+}
+
+/**
+ * 同じ置き場を1回だけにする（設計書5.7.9）。
+ *
+ * 書庫では1つのリポジトリに11作品が入る。`ahead` などは置き場ぜんぶの数
+ * なので、作品ごとに足すと11倍になる。
+ */
+function uniqueByRoot(
+  entries: readonly { status: GitSyncStatus }[]
+): Array<{ status: GitSyncStatus }> {
+  const seen = new Set<string>();
+  const out: Array<{ status: GitSyncStatus }> = [];
+  for (const entry of entries) {
+    const status = entry.status;
+    if (!("root" in status)) continue;
+    if (seen.has(status.root)) continue;
+    seen.add(status.root);
+    out.push({ status });
+  }
+  return out;
+}
+
+function sumTracked(
+  entries: readonly { status: GitSyncStatus }[],
+  pick: (status: Extract<GitSyncStatus, { kind: "tracked" }>) => number
+): number {
+  return entries.reduce(
+    (total, { status }) =>
+      status.kind === "tracked" ? total + pick(status) : total,
+    0
+  );
+}
+
+/**
  * 分かれていることを1行で書く（設計書5.5.18）。
  *
  * 作者の指摘（2026-09-10）：「競合解決があるかないかわからない。件数が出ない」。
