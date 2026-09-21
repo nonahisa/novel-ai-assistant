@@ -3,6 +3,7 @@ import {
   type Procedure,
   type ProcedureActionLookup,
 } from "./procedures";
+import { outcomeKindOf } from "./proofreadingSuite";
 
 /**
  * 画面で指しながら案内する——その「いまどこか」の判断（設計書6.104）。
@@ -75,6 +76,66 @@ export interface TourState {
   readonly index: number;
   /** 手順に無い操作を押した回数。案内は消さないが、数えておく */
   readonly strayCount: number;
+}
+
+/**
+ * その実行を「済んだ」と数えてよいか（設計書6.104。2026-09-21に足した）。
+ *
+ * **取りやめた回を数えていた。** コマンド登録の包みは `await callback` の
+ * 戻り値を見ずに知らせていたので、作品選択の窓を閉じて取りやめても
+ * 「正常に返った」ことだけで済んだ扱いになり、**やっていない段が進んだ**。
+ *
+ * **判定は `outcomeKindOf` に相乗りする。** 戻り値の形を知っているのは
+ * まとめ実行なので、ここに写しを作ると、片方だけが古くなったときに
+ * **どちらが正しいのか分からなくなる**。
+ *
+ * **進むのは `completed` だけである**（作者の裁定、2026-09-21）。
+ *
+ * | 返ってきたもの | 進むか | なぜ |
+ * |---|---|---|
+ * | `completed`（何も返さない操作を含む） | **進む** | 本当に済んだ |
+ * | `cancelled` | 留まる | 作者が取りやめた |
+ * | `failed` | 留まる | 走ったが結果が出ていない |
+ * | `skipped` | 留まる | 前提が足りず走らせていない |
+ *
+ * **`failed` と `skipped` は、最初は進めていた**（2026-09-21に反転した）。
+ * 走って失敗した段も、前提が足りず飛ばした段も、作者から見れば
+ * **「やっていないのに進んだ」**にしか見えない。進むのは本当に済んだ
+ * ときだけにする。
+ *
+ * **戻り値を持たない操作は、済んだものとして数える**（`outcomeKindOf` が
+ * `completed` を返す）。80か所の大半は何も返さない（`Promise<void>`）ので、
+ * ここを「分からないから進めない」にすると**案内がどこにも進まなくなる**。
+ */
+export function countsAsDone(returned: unknown): boolean {
+  return outcomeKindOf(returned) === "completed";
+}
+
+/**
+ * コマンドが返ったあと、済んだことを知らせる（コマンド登録の包みが呼ぶ）。
+ *
+ * **判断をここに集める。** 呼ぶ側（`extension.ts` の包み）に条件を書くと、
+ * 80か所すべてが通る道の中に案内の都合が散らばり、しかも**単体で
+ * 確かめられない**（`activate` は単体では動かせない）。
+ *
+ * **知らせる相手の都合で操作そのものを止めない。** ここで投げると、
+ * 案内の不具合が普通の操作を壊すことになる。だから記録して握る
+ * （握りつぶさないよう、記録の口は呼ぶ側から必ず渡してもらう）。
+ */
+export function announceCommandFinished(
+  command: string,
+  returned: unknown,
+  notify: ((command: string) => void) | undefined,
+  onError: (error: unknown) => void
+): void {
+  // 案内していないあいだは、ここで戻る（80か所すべてが通る道なので軽く保つ）
+  if (!notify) return;
+  if (!countsAsDone(returned)) return;
+  try {
+    notify(command);
+  } catch (error) {
+    onError(error);
+  }
 }
 
 /** 押された操作をどう扱ったか */

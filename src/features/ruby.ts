@@ -289,6 +289,10 @@ export async function addRuby(): Promise<void> {
  *
  * **原稿には触らない。** 貼り付ける先はサイトの投稿欄であって、
  * 手元の原稿を投稿サイト記法へ変えてしまうと、次に書くときに困る。
+ *
+ * @returns クリップボードへ入れたか。**取りやめたら `false`**（原稿が
+ *   開いていない・貼り付け先の窓を閉じた）。画面で指しながらの案内が、
+ *   押しただけの回を「済んだ」と数えないために要る（設計書6.104）
  */
 export async function copyForPosting(
   /**
@@ -298,13 +302,13 @@ export async function copyForPosting(
   registered: readonly PostingSiteId[] = [],
   /** 見出しの数え方（「第◯話」「◯本目」）。引けなければ渡さない */
   format?: WorkFormatKey
-): Promise<void> {
+): Promise<boolean> {
   // **読むだけなので .txt も通す**（0.64.6）。原稿には触らない
   const editor = await requireManuscript();
-  if (!editor) return;
+  if (!editor) return false;
 
   const target = await pickPostingTarget(registered);
-  if (!target) return;
+  if (!target) return false;
 
   const selection = editor.selection;
   /*
@@ -362,6 +366,7 @@ export async function copyForPosting(
           "クリップボードへ入れました。原稿はそのままです。"
       ),
   });
+  return true;
 }
 
 /**

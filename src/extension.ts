@@ -327,6 +327,8 @@ import {
 import {
   CHECK_CANCELLED,
   CHECK_COMPLETED,
+  // 走ろうとして失敗した回を、取りやめと呼ばないために要る（設計書6.104）
+  CHECK_FAILED,
   PROOFREADING_SUITE_COMMAND,
   checkSkipped,
   isSuiteConfirmed,
@@ -334,6 +336,9 @@ import {
   type CheckCommandOutcome,
   type CheckRunOptions,
 } from "./core/proofreadingSuite";
+// 画面で指しながらの案内（設計書6.104）。ここで要るのは「済んだと数えて
+// よいか」の判断だけで、案内そのものは相談パネルの側が持つ
+import { announceCommandFinished } from "./core/guidedTour";
 // 新しい作品を、ひと通り仕上げる。**まとめ実行と同じ決まり**で作ってあり、
 // ここでも処理は持たない（走らせるのは既にあるコマンド）
 import {
@@ -625,17 +630,19 @@ export async function activate(
 
           前提の関門で止まった回（上で return 済み）と、例外で落ちた回を
           数えると、やっていない段が「済んだ」ことになる。
-          知らせる相手の都合で操作そのものを止めない——ここで投げると、
-          案内の不具合が普通の操作を壊すことになる。
+
+          **戻り値も見る**（2026-09-21）。ここを見ずに知らせていたので、
+          作品選択を閉じて取りやめても「正常に返った」だけで済んだ扱いに
+          なり、案内が次の段へ進んでいた。判断は `core/guidedTour.ts` に
+          置いてある——`activate` は単体で動かせないので、ここに条件を
+          書くと確かめられないまま腐る。
         */
-        try {
-          onCommandFinished?.(command);
-        } catch (error) {
+        announceCommandFinished(command, returned, onCommandFinished, (error) =>
           logFailure("操作の通知", {
             操作: command,
             理由: error instanceof Error ? error.message : String(error),
-          });
-        }
+          })
+        );
         return returned;
       } finally {
         // **失敗しても、途中で止めても必ず解く。** 解き忘れると、その操作が
@@ -2196,8 +2203,13 @@ export async function activate(
       const folderPath =
         given?.folderPath ??
         (await pickFolder("作品フォルダを選択", "この作品フォルダを登録"));
-      if (!folderPath) return undefined;
-      // 登録できた作品を返す。呼んだ側（テスト）が結果を確かめられる
+      // **フォルダー選びを閉じたら「取りやめ」と名乗る**（設計書6.104）。
+      // 黙って戻ると、画面の案内が済んだものとして次の段へ行く
+      if (!folderPath) return CHECK_CANCELLED;
+      // 登録できた作品を返す。呼んだ側（テスト）が結果を確かめられる。
+      // **ここは形を変えない**——ブラウザ版の実動テストが作品を受け取る。
+      // `undefined` のときは「書庫としてまとめて登録した（成功）」と
+      // 「作品名を閉じた（取りやめ）」が混ざっており、見分けが付かない
       return await registerFolderAsWork(folderPath, given?.title);
     })
   );
@@ -2239,7 +2251,8 @@ export async function activate(
 
   context.subscriptions.push(
     registerCommand("novelai.createWork", async () => {
-      await createNewWork();
+      // **取りやめ・失敗・完走をそのまま通す**（設計書6.104）
+      return await createNewWork();
     })
   );
 
@@ -2248,12 +2261,12 @@ export async function activate(
   // 訊き返すのは失礼である
   context.subscriptions.push(
     registerCommand("novelai.createWorkWithPlot", async () => {
-      await createNewWork("plot");
+      return await createNewWork("plot");
     }),
     registerCommand(
       "novelai.createWorkFromManuscript",
       async () => {
-        await createNewWork("manuscript");
+        return await createNewWork("manuscript");
       }
     )
   );
@@ -2264,7 +2277,9 @@ export async function activate(
    * @param mode 始め方。渡されなければ作者に選んでもらう
    *   （コマンドパレットの「新規作品を作成」から来た場合）
    */
-  async function createNewWork(mode?: WorkStartMode): Promise<void> {
+  async function createNewWork(
+    mode?: WorkStartMode
+  ): Promise<CheckCommandOutcome> {
     /*
       **行き先は書庫にする**（設計書6.97.2）。「書庫を作りますか」とは
       訊かない——初めて使う人は、書庫が何の役に立つのかをまだ知らない。
@@ -2276,7 +2291,7 @@ export async function activate(
     */
     const { resolveNewWorkHome } = await import("./features/newWorkHome.js");
     const home = await resolveNewWorkHome(registry.list());
-    if (!home) return;
+    if (!home) return CHECK_CANCELLED;
     const parentPath = home.folderPath;
 
     const title = await askText({
@@ -2289,12 +2304,12 @@ export async function activate(
         return null;
       },
     });
-    if (!title) return;
+    if (!title) return CHECK_CANCELLED;
 
     // **タイプも始め方も、フォルダーを作る前に訊く。** 作ったあとで
     // 取り消されると、中身の無い作品フォルダーだけが残る
     const workType = await chooseWorkType(title.trim());
-    if (!workType) return;
+    if (!workType) return CHECK_CANCELLED;
     const format =
       workType === "unset" ? undefined : (workType.key as WorkFormatKey);
 
@@ -2306,7 +2321,7 @@ export async function activate(
     const startMode = skipsStartModeQuestion(format)
       ? "manuscript"
       : (mode ?? (await chooseWorkStartMode(title.trim())));
-    if (!startMode) return;
+    if (!startMode) return CHECK_CANCELLED;
 
     const folderPath = path.join(parentPath, title.trim());
     try {
@@ -2317,11 +2332,13 @@ export async function activate(
       vscode.window.showErrorMessage(
         `作品フォルダの作成に失敗しました: ${String(e)}`
       );
-      return;
+      // **取りやめではなく失敗である。** 作者は押しており、止めたのは
+      // こちらの都合なので、そう名乗る（まとめ実行は失敗では止まらない）
+      return CHECK_FAILED;
     }
 
     const entry = await registry.add(folderPath, title.trim());
-    if (!entry) return;
+    if (!entry) return CHECK_FAILED;
 
     /*
       **タイプの在り処はプロットの `## 形式` ひとつ**（設計書6.4.5・6.70）。
@@ -2359,6 +2376,7 @@ export async function activate(
         format
       );
     }
+    return CHECK_COMPLETED;
   }
 
   /**
@@ -2405,15 +2423,16 @@ export async function activate(
       "novelai.plotInterview",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
         await workChatPanel.startPlotInterview(work);
+        return CHECK_COMPLETED;
       }
     ),
     registerCommand(
       "novelai.setPlotBasics",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
         await setPlotBasics(work);
         /*
           **ここが「作品タイプを後から変える」入口である**（設計書6.70）。
@@ -2426,6 +2445,7 @@ export async function activate(
         invalidateWorkFormat(work.id);
         treeProvider.refresh(work.id);
         stepProvider.invalidateFormats(work.id);
+        return CHECK_COMPLETED;
       }
     ),
     registerCommand(
@@ -3025,8 +3045,9 @@ export async function activate(
   context.subscriptions.push(
     registerCommand("novelai.createEpisodePlot", async (node?: WorkNode) => {
       const work = await resolveWork(node, registry);
-      if (!work) return;
+      if (!work) return CHECK_CANCELLED;
       await createEpisodePlot(work);
+      return CHECK_COMPLETED;
     })
   );
 
@@ -3345,13 +3366,14 @@ export async function activate(
             };
           },
         });
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
         await applyPendingCharacterUpdates(work, proposalPanel);
         treeProvider.refresh(work.id);
         // 名前や別名が変われば、本文で光る範囲も変わる
         highlighter.invalidate();
         // 承認待ちが減ったので、操作メニューの件数を数え直す
         refreshActionBadges();
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -3388,7 +3410,7 @@ export async function activate(
             };
           },
         });
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
         await unifyCharacterRecords(work);
         treeProvider.refresh(work.id);
         // まとめた側の名前は別名になる。索引を作り直さないと光らないままになる
@@ -3397,6 +3419,7 @@ export async function activate(
         // 消えたはずの人物が一覧に残り続ける
         await findOpenSettingsPanel(work.id)?.refreshFromDisk();
         refreshActionBadges();
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -3424,8 +3447,11 @@ export async function activate(
       "novelai.openSettingsPanel",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
+        // **戻り値（画面そのもの）は結果ではない。** 開けたかどうかしか
+        // 分からないので、済んだこととして返す
         await openSettingsPanel(context, work, aiRegistry);
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -3657,9 +3683,12 @@ export async function activate(
       "novelai.extractSettings",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
 
-        if (!(await saveDirtyDocumentsBeforeExtraction(work))) return;
+        // 保存の確認で「やめる」を選んだ回も取りやめである
+        if (!(await saveDirtyDocumentsBeforeExtraction(work))) {
+          return CHECK_CANCELLED;
+        }
 
         const extracted = await extractCharacters(work, aiRegistry, {
           // 抽出後の「提案を見る」を提案パネルへ通す（設計書6.57.1）
@@ -3677,7 +3706,16 @@ export async function activate(
         // 抽出結果の要約はすでに出しているので、成功は再通知しない。
         if (extracted) {
           await generateSettingsDocs(work, { silent: true });
+          return CHECK_COMPLETED;
         }
+        /*
+          **抽出できなかった回を「済んだ」と言わない。** `extractCharacters`
+          が返すのは真偽だけで、AIが未設定だったのか・確認で取りやめたのか・
+          走って失敗したのかを見分けられない。**失敗と名乗る**——
+          まとめ実行は失敗では止まらないので、残りの段はこれまでどおり走る。
+          見分けが付くようにするのは、あちらの戻り値を変える別の作業である。
+        */
+        return CHECK_FAILED;
       }
     )
   );
@@ -3687,8 +3725,9 @@ export async function activate(
       "novelai.manageKeepWords",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
         await manageKeepWords(work);
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -3877,14 +3916,19 @@ export async function activate(
     registerCommand(
       "novelai.checkForeshadowResolution",
       async (node?: WorkNode) => {
+        /*
+          **対になる `novelai.checkForeshadows` と流儀を揃えてある**
+          （2026-09-21）。隣り合う機能なのにこちらだけ何も返さず、
+          取りやめたことが呼んだ側へ伝わらなかった（設計書6.104）。
+        */
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文で回収を判定してしまう
         if (
           !(await saveDirtyDocumentsBeforeExtraction(work, "伏線の回収の確認"))
         ) {
-          return;
+          return CHECK_CANCELLED;
         }
 
         const result = await withPanelProgress(
@@ -3894,7 +3938,7 @@ export async function activate(
             checkForeshadowResolution(work, aiRegistry, { onProgress }),
           "か所"
         );
-        if (!result || result.cancelled) return;
+        if (!result || result.cancelled) return CHECK_CANCELLED;
 
         showForeshadowResolutions(proposalPanel, work, result.proposals);
 
@@ -3919,6 +3963,7 @@ export async function activate(
               ? "台帳はまだ変えていません。 「提案」パネルで確かめてから決めてください。"
               : "",
         });
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -3935,7 +3980,7 @@ export async function activate(
       PROOFREADING_SUITE_COMMAND,
       async (node?: WorkRef) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
         await runProofreadingSuite(work, {
           memento: context.globalState,
           // 内訳は提案パネルの残り件数から数える（設計書6.37.3）。
@@ -3945,6 +3990,13 @@ export async function activate(
           // ここで失敗しても呼び出し側は止まらない
           estimate: (checks) => collectSuiteEstimate(work, aiRegistry, checks),
         });
+        /*
+          **まとめ実行そのものは、走り切ったことしか名乗れない。**
+          中の1つ1つが取りやめられたかは `runProofreadingSuite` が
+          内訳として作者へ出しており、戻り値では返ってこない。
+          ここで作り直すと数え方が2通りになる（設計書6.80）。
+        */
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -4120,7 +4172,7 @@ export async function activate(
   context.subscriptions.push(
     registerCommand("novelai.checkNames", async (node?: WorkNode) => {
       const work = await resolveWork(node, registry);
-      if (!work) return;
+      if (!work) return CHECK_CANCELLED;
       await openNameCheckPanel(context, work, {
         registry: aiRegistry,
         // 「登場箇所」は提案パネルの「本文を見る」と同じ道を通す
@@ -4129,6 +4181,7 @@ export async function activate(
         startRename: (target, characterId, suggested) =>
           runRenameFlow(target, characterId, suggested),
       });
+      return CHECK_COMPLETED;
     })
   );
 
@@ -4843,10 +4896,13 @@ export async function activate(
       "novelai.generateSynopses",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
 
-        // 未保存のまま読むと、画面と違う本文からあらすじを作ってしまう
-        if (!(await saveDirtyDocumentsBeforeExtraction(work))) return;
+        // 未保存のまま読むと、画面と違う本文からあらすじを作ってしまう。
+        // 保存の確認で「やめる」を選んだ回も取りやめである
+        if (!(await saveDirtyDocumentsBeforeExtraction(work))) {
+          return CHECK_CANCELLED;
+        }
 
         const generated = await generateSynopses(work, aiRegistry);
         // サブタイトルの承認でファイル名が変わることがある
@@ -4855,7 +4911,12 @@ export async function activate(
         // JSONのままでは作者が読めない。読める資料まで作って初めて完成する
         if (generated) {
           await generateSettingsDocs(work, { silent: true });
+          return CHECK_COMPLETED;
         }
+        // **作れなかった回を「済んだ」と言わない。** `generateSynopses` が
+        // 返すのは真偽だけで、形式が合わなかったのか・AIが未設定だったのか・
+        // 走って失敗したのかを見分けられない（`extractSettings` と同じ）
+        return CHECK_FAILED;
       }
     )
   );
@@ -4965,8 +5026,9 @@ export async function activate(
       "novelai.generateWorkBlurb",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
         await generateWorkBlurb(work, aiRegistry);
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -4976,8 +5038,9 @@ export async function activate(
       "novelai.generateCatchphrases",
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
-        if (!work) return;
+        if (!work) return CHECK_CANCELLED;
         await generateCatchphrases(work, aiRegistry);
+        return CHECK_COMPLETED;
       }
     )
   );
@@ -5011,12 +5074,15 @@ export async function activate(
     // 先頭に並べたいが、画面側は作品を知らないので、どの作品かはここで引く
     registerCommand("novelai.copyForPosting", async () => {
       const work = activePostingCopyWork(registry);
-      await copyForPosting(
+      const copied = await copyForPosting(
         await registeredPostingSites(work),
         // 合本の1話をコピーしたときの見出しに使う（「第3話」「3本目」）。
         // 作品が引けないことはある——そのときは既定の数え方になるだけ
         work ? await readWorkFormat(work) : undefined
       );
+      // **原稿が開いていない回と、貼り付け先を閉じた回を数えない**
+      // （設計書6.104）。どちらもクリップボードには何も入っていない
+      return copied ? CHECK_COMPLETED : CHECK_CANCELLED;
     }),
     registerCommand("novelai.importRuby", importRuby),
     /*
@@ -5279,11 +5345,19 @@ export async function activate(
   context.subscriptions.push(
     registerCommand("novelai.postNewEpisode", async (node?: WorkNode) => {
       const work = await resolveWork(node, registry);
-      if (!work) return;
-      if (!(await saveDirtyDocumentsBeforeExtraction(work, "投稿の準備"))) return;
+      if (!work) return CHECK_CANCELLED;
+      if (!(await saveDirtyDocumentsBeforeExtraction(work, "投稿の準備"))) {
+        return CHECK_CANCELLED;
+      }
       const result = await postNewEpisode(work, aiRegistry);
       // 未投稿の印が変わるので、記録したときだけ一覧を作り直す
       if (result.changed) treeProvider.refresh(work.id);
+      /*
+        **捨てていた戻り値を拾う**（設計書6.104）。台帳が変わらなかった
+        回は、途中の窓を閉じたか台帳を読めなかったかで、**投稿の記録は
+        残っていない**。済んだことにすると案内が先へ行ってしまう。
+      */
+      return result.changed ? CHECK_COMPLETED : CHECK_CANCELLED;
     }),
     registerCommand("novelai.postThisEpisode", async (node?: EpisodeNode) => {
       if (!node) return;
