@@ -388,6 +388,9 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.manageConfirmSkips": "allTypes",
   "novelai.setupVectorSearch": "allTypes",
   "novelai.runReaderTargetDiagnosis": "allTypes",
+  // ターゲットシート（設計書6.108）。狙いと実態の突き合わせは、
+  // 連載でも短編でも同じように要る
+  "novelai.openTargetSheet": "allTypes",
   // 3つの輪（設計書6.101）。読者から見た姿はどの形の作品にもある
   "novelai.showThreeCircles": "allTypes",
   "novelai.buildVectorIndex": "allTypes",

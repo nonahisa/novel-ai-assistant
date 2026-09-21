@@ -16,7 +16,7 @@ import { isWorkInfoFile } from "./workInfoFile";
 import { parseCollectedFile, type CollectedEpisode } from "./collectedFile";
 import { memoBadgeText, parseMemos } from "./sceneMemo";
 import { pathExists } from "./fileSystem";
-import { fileReader, type FileReader } from "./fileRead";
+import { fileReader } from "./fileRead";
 import { detectEol } from "./eolAudit";
 import type { Eol } from "../models/types";
 
@@ -39,8 +39,10 @@ export interface ScanTiming {
   /**
    * 下ごしらえに費やしたミリ秒（0.74.11）。
    *
-   * 作品設定の読み込み・本文フォルダーの有無・読み口の用意・フォルダーの
-   * 読み出し（`collectTextFiles`）まで。**1ファイルも読む前の時間**である。
+   * 作品設定の読み込み・本文フォルダーの有無・読み口の用意まで。
+   * **1ファイルも読む前の時間**である。**拾う本文が1つも無かった回は、
+   * 一括読み（フォルダー歩き）の時間もここへ入る**——歩いただけで
+   * 読んでいないので、「読み」に数字を出すと嘘になる。
    *
    * **`readMs` から割った。** 0.74.9 の計測は「読み 58,191ms」で、
    * これが**573回の `readFile` なのか、その手前のフォルダー歩きなのか**が
@@ -48,10 +50,10 @@ export interface ScanTiming {
    */
   readonly prepMs: number;
   /**
-   * 1ファイルずつ読むのに費やしたミリ秒。
+   * 本文を読むのに費やしたミリ秒。
    *
-   * **バイトを本文にするまでを含める**（`readFile` と `decodeText`）。
-   * 下ごしらえ（`prepMs`）は**入らない**。
+   * **バイトを本文にするまでを含める**（一括読み `readTextTree` と
+   * `decodeText`）。下ごしらえ（`prepMs`）は**入らない**。
    */
   readonly readMs: number;
   /** 字数・ルビ・空白の数えに費やしたミリ秒（シーンメモの印も含む） */
@@ -62,7 +64,12 @@ export interface ScanTiming {
   readonly otherMs: number;
   /** 走査ぜんたいにかかったミリ秒 */
   readonly totalMs: number;
-  /** いちばん時間のかかったファイルの名前。1つも読まなければ `undefined` */
+  /**
+   * いちばん時間のかかったファイルの名前。1つも読まなければ `undefined`。
+   *
+   * **読みは入らない**（一括読みに替えたので、ファイル単位では測れない）。
+   * ここが言うのは「解いて数えるのに重かった本文」である
+   */
   readonly slowestFile?: string;
   /** その1ファイルにかかったミリ秒 */
   readonly slowestMs: number;
@@ -106,20 +113,40 @@ export async function scanWork(work: WorkEntry): Promise<{
 
   const targetDir = (await pathExists(p.manuscript)) ? p.manuscript : p.root;
   /*
-    **ここだけ読み口を切り替える**（設計書6.107）。走査は573ファイルを
-    1つずつ読むので、`vscode.workspace.fs` の列に全部が並ぶと一覧が出るまで
+    **ここだけ読み口を切り替える**（設計書6.107）。走査は576ファイルを
+    読むので、`vscode.workspace.fs` の列に全部が並ぶと一覧が出るまで
     26〜35秒かかっていた。**読むだけ**の道なので、手元では Node の `fs` で
     読む（`core/fileRead.ts`）。書き込みは1つもここに無い。
   */
   const reader = await fileReader();
-  const files = await collectTextFiles(targetDir, reader);
   /*
-    **下ごしらえは、1ファイルずつの読みとは別に数える**（設計書6.107。0.74.11）。
-    作品設定の読み込み・本文フォルダーの有無・読み口の用意・フォルダーの
-    読み出しは、どれも「本文を読む前」の往復である。**直す場所が違う**ので、
-    573回の `readFile` と同じ袋に入れてしまうと、どちらが重いのか決まらない。
+    **下ごしらえは、本文の読みとは別に数える**（設計書6.107。0.74.11）。
+    作品設定の読み込み・本文フォルダーの有無・読み口の用意は、どれも
+    「本文を読む前」の往復である。**直す場所が違う**ので、本文の読みと
+    同じ袋に入れてしまうと、どちらが重いのか決まらない。
   */
   prepMs += performance.now() - scanStartedAt;
+
+  /*
+    **1作品を一度に読む**（設計書6.107）。576ファイルを1つずつ
+    `await reader.readFile()` していたころは、混んだ拡張機能ホストで
+    **`await` から戻るたびに数十ms 待たされて**いた（自分の CPU は5%）。
+    読む中身も順番も前と同じで、変わるのは `await` の回数だけである。
+  */
+  const bulkStartedAt = performance.now();
+  const files = await reader.readTextTree(targetDir, acceptForScan);
+  const bulkMs = performance.now() - bulkStartedAt;
+  /*
+    **1ファイルも読まなければ「読み」は0のまま**（0.74.11 で割った境目）。
+    一括読みはフォルダー歩きと本文読みが1つになっているので、拾う本文が
+    無かった回はまるごと下ごしらえ側へ入れる。ここを緩めると、読んでいない
+    のに「読み」に数字が出て、次に何を直すかが決まらなくなる。
+  */
+  if (files.length > 0) {
+    readMs += bulkMs;
+  } else {
+    prepMs += bulkMs;
+  }
 
   const episodes: EpisodeFile[] = [];
   const workInfoFiles: string[] = [];
@@ -142,8 +169,9 @@ export async function scanWork(work: WorkEntry): Promise<{
     }
   };
 
-  for (const filePath of files) {
+  for (const file of files) {
     const fileStartedAt = performance.now();
+    const filePath = file.path;
     const fileName = path.basename(filePath);
     const ext = path.extname(fileName).toLowerCase();
     const parsed = parseEpisodeFileName(fileName);
@@ -167,9 +195,15 @@ export async function scanWork(work: WorkEntry): Promise<{
       updatedAt: null as string | null,
     };
     try {
+      // **読めなかったファイルは0字として扱い、走査は止めない。**
+      // 一括読みは読めないファイルも印（`unreadable`）を付けて残すので、
+      // 一覧から黙って消えることはない（`core/fileRead.ts`）
+      if (file.unreadable) throw new Error("読めなかった");
+
+      // **バイトを本文にするところまでを「読み」に数える**（前と同じ）。
+      // 一括読みへ替えても、この境目は動かしていない
       const readStartedAt = performance.now();
-      const bytes = await reader.readFile(filePath);
-      const text = decodeText(bytes);
+      const text = decodeText(file.bytes);
       readMs += performance.now() - readStartedAt;
 
       // **作品情報（`about.txt`）はここで抜ける。** 中身を見ないと
@@ -396,43 +430,27 @@ function compareEpisodes(a: EpisodeFile, b: EpisodeFile): number {
   return a.fileName.localeCompare(b.fileName, "ja");
 }
 
-/** 対象ディレクトリ配下のtxt/mdを再帰的に集める */
-async function collectTextFiles(
-  dir: string,
-  reader: FileReader
-): Promise<string[]> {
-  const result: string[] = [];
-  const skipDirs = new Set([".aiwriter", ".git", "node_modules", "exports", "設定"]);
+/**
+ * 原稿として拾うフォルダー・ファイルか（`reader.readTextTree` へ渡す）。
+ *
+ * **歩き方は読み口が持ち、何を拾うかはここが決める**（設計書6.107）。
+ * `.` で始まる名前と深さの上限は読み口の側で落ちる。
+ */
+const SKIP_DIRS = new Set([
+  ".aiwriter",
+  ".git",
+  "node_modules",
+  "exports",
+  "設定",
+]);
 
-  async function walk(current: string, depth: number): Promise<void> {
-    // 想定外の深い階層で無限に走査しないよう上限を設ける
-    if (depth > 5) return;
-    let entries: Array<[string, "file" | "directory" | "other"]>;
-    try {
-      entries = await reader.readDirectory(current);
-    } catch {
-      return;
-    }
-    for (const [name, type] of entries) {
-      if (name.startsWith(".")) continue;
-      const full = path.join(current, name);
-      if (type === "directory") {
-        if (skipDirs.has(name)) continue;
-        await walk(full, depth + 1);
-      } else if (type === "file") {
-        // 競合を「両方を残す」で解決したときの退避ファイルは原稿ではない。
-        // 拾うと同じ話数の本文が2つある状態になる
-        if (isConflictSideFile(name)) continue;
-        const ext = path.extname(name).toLowerCase();
-        if ((SUPPORTED_EXTENSIONS as readonly string[]).includes(ext)) {
-          result.push(full);
-        }
-      }
-    }
-  }
-
-  await walk(dir, 0);
-  return result;
+function acceptForScan(name: string, kind: "file" | "directory"): boolean {
+  if (kind === "directory") return !SKIP_DIRS.has(name);
+  // 競合を「両方を残す」で解決したときの退避ファイルは原稿ではない。
+  // 拾うと同じ話数の本文が2つある状態になる
+  if (isConflictSideFile(name)) return false;
+  const ext = path.extname(name).toLowerCase();
+  return (SUPPORTED_EXTENSIONS as readonly string[]).includes(ext);
 }
 
 /**

@@ -60,9 +60,6 @@ const CENTER_HIGH = 6;
 const CENTER_MID = 3;
 const CENTER_LOW = 0;
 
-/** 副軸が無いことを表す鍵の後半（`READER_TYPE_TABLE` と同じ言葉） */
-const NO_SUB = "none";
-
 /** 段階の重み。距離を測るためだけの数 */
 const LEVEL_RANK: Record<ThreeAxisLevel, number> = { low: 0, mid: 1, high: 2 };
 
@@ -86,10 +83,12 @@ export const READER_TYPE_CENTERS: Readonly<Record<ReaderTypeId, ReaderScores>> =
       const [mainKey, subKey] = key.split(":");
       const scores = {} as ReaderScores;
       for (const axis of READER_AXIS_ORDER) {
+        // 副軸が無い型の鍵は `...:none` で、軸の名前と一致しない。
+        // そのまま比べれば、残りの軸と同じ「下限」に落ちる
         scores[axis] =
           axis === mainKey
             ? CENTER_HIGH
-            : axis === subKey && subKey !== NO_SUB
+            : axis === subKey
               ? CENTER_MID
               : CENTER_LOW;
       }
@@ -330,9 +329,29 @@ export function targetSheetFor(input: TargetSheetInput): TargetSheet {
     actual: { scores, top, ranking },
     aims,
     expand: expandDirection(scores, top),
-    // 狙いが無ければ、いちばん高い型そのものへ寄せる
-    converge: convergeDirection(scores, aim[0] ?? top, top),
+    converge: convergeDirection(scores, convergeTarget(aims, top), top),
   };
+}
+
+/**
+ * 収束の行き先を、狙いの中から1つ選ぶ。
+ *
+ * **一致度がいちばん低い狙い**を採る（同率なら作者が先に書いたほう）。
+ * 狙いを2つ書ける以上、片方はもう届いていることがある——そちらへ
+ * 「寄せましょう」と言っても空振りで、**まだ届いていない狙いこそが、
+ * 絞るという言葉の中身**である。
+ *
+ * 狙いが無ければ、いちばん高い型そのもの（＝動かす必要が無いので、
+ * 「すでに寄っています」と出る）。
+ */
+function convergeTarget(
+  aims: readonly TargetSheetAim[],
+  top: ReaderTypeId
+): ReaderTypeId {
+  if (aims.length === 0) return top;
+  return aims.reduce((lowest, aim) =>
+    aim.affinity < lowest.affinity ? aim : lowest
+  ).type;
 }
 
 /**

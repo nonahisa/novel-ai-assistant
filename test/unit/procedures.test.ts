@@ -41,11 +41,15 @@ const lookup = (command: string) => {
 };
 
 describe("手順書きの中身", () => {
-  test("まず4〜6本だけを持つ", () => {
+  test("まず4〜7本だけを持つ", () => {
     // 増やすときは、本当に繰り返し通る仕事かを確かめる。
-    // 選ばれてしまえば毎回払う
+    // 選ばれてしまえば毎回払う。
+    //
+    // 7本目は「狙いと実態のずれを見る」（設計書6.108）。読者の手順書きを
+    // 2本に分けたのは、**決める仕事と、決めたあとの仕事**が別だからである
+    // （1本にまとめると600字に収まらず、当たりの文も混ざる）
     expect(PROCEDURES.length).toBeGreaterThanOrEqual(4);
-    expect(PROCEDURES.length).toBeLessThanOrEqual(6);
+    expect(PROCEDURES.length).toBeLessThanOrEqual(7);
   });
 
   test("段が指す操作は、すべて詳細メニューに実在する", () => {

@@ -48,10 +48,79 @@ export interface FileStatLite {
   readonly mtime: number;
 }
 
+/** 一括読み（`readTextTree`）が返す1ファイル */
+export interface TreeFile {
+  /** 絶対パス（`paths.join` で組んだもの） */
+  readonly path: string;
+  /** 中身。読めなかったときは空で、`unreadable` が立つ */
+  readonly bytes: Uint8Array;
+  /**
+   * 読めなかった（中身は空）。
+   *
+   * **落とさずに残す。** 1ファイルずつ読んでいたころ、読めないファイルは
+   * 「0字の話」として一覧に残っていた（`scanner.ts` の `catch`）。
+   * 一括読みで黙って捨てると、**権限のないファイルが一覧から消える**という
+   * 別の振る舞いになる
+   */
+  readonly unreadable?: boolean;
+}
+
+/**
+ * 名前で選り分ける。フォルダーなら「中へ入るか」、ファイルなら「読むか」。
+ *
+ * **フォルダーも同じ口で決める。** 走査は `設定/`・`node_modules`・`exports` へ
+ * 入らない（`scanner.ts`）。読み口の側に作品の都合を持ち込まないために、
+ * 判断はすべて呼び手へ返す
+ */
+export type TreeAccept = (name: string, kind: "file" | "directory") => boolean;
+
+/** 潜る深さの上限。想定外の深い階層で無限に走査しないため（走査の元の値） */
+const DEFAULT_TREE_DEPTH = 5;
+
 export interface FileReader {
   readFile(filePath: string): Promise<Uint8Array>;
   stat(filePath: string): Promise<FileStatLite>;
   readDirectory(dirPath: string): Promise<Array<[name: string, type: FileKind]>>;
+  /**
+   * フォルダーの下を再帰し、**選んだファイルを中身ごと一度に返す**
+   * （設計書6.107。`await` の回数を減らすために足した）。
+   *
+   * **なぜ要るのか。** 走査は576ファイルを1つずつ `await reader.readFile()` で
+   * 読んでいた。混んだ拡張機能ホスト（他の拡張機能の読み込み・本体・ネイティブが
+   * CPU を握っている）では、**`await` から戻ってくるまでに毎回数十ms 待たされる**。
+   * 自分の CPU は5%しか使っていないのに一覧が出るまで19〜22秒かかったのは、
+   * 「読むのが遅い」のではなく**再開の順番が回ってこない**ためである。
+   * ノートの実測では、作品ごとに1回の同期読みへ替えると `await` が
+   * 576回→22回、合計0.47秒（いちばん長い塊 0.09秒）になった。
+   *
+   * - **Node 側は同期で読む**（`readdirSync`＋`readFileSync`）。中で1回も
+   *   `await` しないので、**1作品ぶんを読み切るまで手放さない**。
+   *   いちばん大きい作品でも0.1秒なので、画面が固まるほどではない
+   * - **ブラウザ版は今までどおり非同期**（`readDirectory`＋`readFile`）。
+   *   `node:fs` が無いので、ここだけは回数を減らせない
+   * - `.` で始まる名前は飛ばす（`.git`・`.aiwriter`。両方の経路で同じ）
+   * - **並びは名前順**。経路や OS で一覧の順が変わらないようにする
+   * - 読めなかったファイルは `unreadable` を立てて残す（捨てない）
+   */
+  readTextTree(
+    dirPath: string,
+    accept: TreeAccept,
+    maxDepth?: number
+  ): Promise<TreeFile[]>;
+}
+
+/**
+ * 名前順にそろえる。
+ *
+ * **経路ごとの「フォルダーが返してくる順」に結果を預けない。** Node の
+ * `readdir` と `vscode.workspace.fs.readDirectory` は同じ順とは限らず、
+ * OS やファイルシステムでも変わる。並べ替えてから返せば、どこで動かしても
+ * 一覧の順が同じになる
+ */
+function byName(
+  entries: Array<[string, FileKind]>
+): Array<[string, FileKind]> {
+  return [...entries].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 }
 
 /**
@@ -109,11 +178,47 @@ const vscodeReader: FileReader = {
       return [name, kind] as [string, FileKind];
     });
   },
+  async readTextTree(dirPath, accept, maxDepth = DEFAULT_TREE_DEPTH) {
+    const result: TreeFile[] = [];
+    const walk = async (current: string, depth: number): Promise<void> => {
+      if (depth > maxDepth) return;
+      let entries: Array<[string, FileKind]>;
+      try {
+        entries = await vscodeReader.readDirectory(current);
+      } catch {
+        // 読めないフォルダーで走査を止めない（元の `collectTextFiles` と同じ）
+        return;
+      }
+      for (const [name, kind] of byName(entries)) {
+        if (name.startsWith(".")) continue;
+        const full = path.join(current, name);
+        if (kind === "directory") {
+          if (!accept(name, "directory")) continue;
+          await walk(full, depth + 1);
+        } else if (kind === "file") {
+          if (!accept(name, "file")) continue;
+          try {
+            result.push({ path: full, bytes: await vscodeReader.readFile(full) });
+          } catch {
+            result.push({ path: full, bytes: EMPTY_BYTES, unreadable: true });
+          }
+        }
+      }
+    };
+    await walk(dirPath, 0);
+    return result;
+  },
 };
+
+/** 読めなかったファイルの中身。**毎回作らない**（1つを使い回す） */
+const EMPTY_BYTES = new Uint8Array(0);
 
 /** `node:fs/promises` で読む。**`node:` は動的 import でしか触らない**（規則7） */
 async function createNodeReader(): Promise<FileReader> {
   const { readFile, stat, readdir } = await import("node:fs/promises");
+  // **同期の口も一緒に取っておく**（`readTextTree` のため）。ここで取れば、
+  // 一括読みの中では import の `await` すら発生しない
+  const { readdirSync, readFileSync } = await import("node:fs");
   return {
     async readFile(filePath) {
       // `Buffer` は `Uint8Array` を継承しているので、そのまま渡してよい
@@ -138,6 +243,51 @@ async function createNodeReader(): Promise<FileReader> {
         return [entry.name, kind] as [string, FileKind];
       });
     },
+    /**
+     * **1回も `await` を挟まずに読み切る**（設計書6.107）。
+     *
+     * `async` を付けてあるので呼び手からは約束に見えるが、**中は同期**である。
+     * 混んだ拡張機能ホストでは `await` から戻るまでが待ち時間なので、
+     * 回数そのものを減らすことに意味がある（1作品＝1回）。
+     */
+    async readTextTree(dirPath, accept, maxDepth = DEFAULT_TREE_DEPTH) {
+      const result: TreeFile[] = [];
+      const walk = (current: string, depth: number): void => {
+        if (depth > maxDepth) return;
+        let entries: Array<[string, FileKind]>;
+        try {
+          entries = readdirSync(current, { withFileTypes: true }).map((entry) => {
+            const kind: FileKind = entry.isDirectory()
+              ? "directory"
+              : entry.isFile()
+                ? "file"
+                : "other";
+            return [entry.name, kind] as [string, FileKind];
+          });
+        } catch {
+          // 読めないフォルダーで走査を止めない（元の `collectTextFiles` と同じ）
+          return;
+        }
+        for (const [name, kind] of byName(entries)) {
+          if (name.startsWith(".")) continue;
+          const full = path.join(current, name);
+          if (kind === "directory") {
+            if (!accept(name, "directory")) continue;
+            walk(full, depth + 1);
+          } else if (kind === "file") {
+            if (!accept(name, "file")) continue;
+            try {
+              // `Buffer` は `Uint8Array` を継承しているので、そのまま渡してよい
+              result.push({ path: full, bytes: readFileSync(full) });
+            } catch {
+              result.push({ path: full, bytes: EMPTY_BYTES, unreadable: true });
+            }
+          }
+        }
+      };
+      walk(dirPath, 0);
+      return result;
+    },
   };
 }
 
@@ -155,6 +305,8 @@ function createDispatchingReader(node: FileReader): FileReader {
     readFile: (filePath) => pick(filePath).readFile(filePath),
     stat: (filePath) => pick(filePath).stat(filePath),
     readDirectory: (dirPath) => pick(dirPath).readDirectory(dirPath),
+    readTextTree: (dirPath, accept, maxDepth) =>
+      pick(dirPath).readTextTree(dirPath, accept, maxDepth),
   };
 }
 

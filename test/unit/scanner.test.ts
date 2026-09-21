@@ -165,6 +165,47 @@ describe("本文フォルダの選択", () => {
     expect(result.workInfoFiles[0].endsWith("about.txt")).toBe(true);
   });
 
+  test("読めない本文は0字の話として残る（一括読みでも消さない）", async () => {
+    /*
+      **一括読みへ替えても、ここは変えない**（設計書6.107）。1ファイルずつ
+      読んでいたころ、読めないファイルは `catch` で0字として一覧に残った。
+      一括読みで黙って捨てると、**権限のないファイルが一覧から消える**という
+      別の振る舞いになる（読み口が `unreadable` の印を付けて残す）。
+    */
+    workspace.fs = {
+      readFile: vi.fn(async (uri: { fsPath: string }) => {
+        if (uri.fsPath.endsWith(".json")) {
+          throw new FileSystemError("設定なし", "FileNotFound");
+        }
+        if (uri.fsPath.endsWith("002.txt")) {
+          throw new FileSystemError("読めません", "NoPermissions");
+        }
+        return new TextEncoder().encode("灯が歩いた。");
+      }),
+      stat: vi.fn(async () => {
+        throw new FileSystemError("本文なし", "FileNotFound");
+      }),
+      readDirectory: vi.fn(async () => [
+        ["001.txt", FileType.File],
+        ["002.txt", FileType.File],
+      ]),
+    };
+
+    const result = await scanWork(work);
+
+    expect(result.episodes.map((episode) => episode.fileName)).toEqual([
+      "001.txt",
+      "002.txt",
+    ]);
+    const broken = result.episodes.find(
+      (episode) => episode.fileName === "002.txt"
+    );
+    expect(broken?.counts.net).toBe(0);
+    // 読めなかっただけなので、競合マーカー扱いにはしない
+    expect(broken?.hasConflictMarkers).toBe(false);
+    expect(result.stats.totals.net).toBe("灯が歩いた。".length);
+  });
+
   test.each(["NoPermissions", "Unknown"])(
     "本文フォルダのstatが%sなら作品ルートへフォールバックせず伝播する",
     async (code) => {

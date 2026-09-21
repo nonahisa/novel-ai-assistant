@@ -4954,6 +4954,25 @@ export async function activate(
   );
 
   /*
+    ターゲットシート（設計書6.108）。**AIを呼ばない**——狙い（作者が
+    手で書く欄）と、読者像の台帳にある点数だけで組む。
+
+    **結末を名乗って返す**——手順書きの段（`core/procedures.ts`）なので、
+    読者像が無くて止めたときに「画面で案内してもらう」が先へ進むと、
+    作ってもいない紙を案内することになる。
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.openTargetSheet", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return CHECK_CANCELLED;
+
+      const { openTargetSheet } = await import("./features/targetSheet.js");
+      const opened = await openTargetSheet(work);
+      return opened ? CHECK_COMPLETED : CHECK_CANCELLED;
+    })
+  );
+
+  /*
     3つの輪（設計書6.101）。**AIを呼ばない**——材料はどれも既にある
     台帳と実績から取る。**原稿も台帳も書き換えない**（書くのは
     `.aiwriter/generated/` の紙1枚だけ）。
