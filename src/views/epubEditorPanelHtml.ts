@@ -1839,6 +1839,16 @@ function setStatus(text, isError) {
 
 /* ---- 合成 ---------------------------------------------------------- */
 
+/*
+ * ここから cover:end までは、**画面の外から切り出して動かせる**ように
+ * 印で挟んである（test/unit/coverCompose.test.ts）。合成の計算は
+ * canvas を持たない環境では確かめられないので、印の中の関数を
+ * new Function で取り出し、偽の canvas で測る——core/ へ写さないのは、
+ * 写した側と画面側の片方だけが直る日が必ず来るからである
+ * （組んで書く面の compose:start と同じ流儀）。
+ */
+/* cover:start */
+
 /** 読み終えた元絵。面を組み直しても捨てないよう、外に持つ */
 const images = { front: null, back: null };
 /** いま読んでいる元絵の在りか。変わったときだけ読み直す */
@@ -1847,9 +1857,34 @@ const sources = { front: null, back: null };
 const fromData = { front: false, back: false };
 /** 押されたまま待っている合成 */
 const pending = { front: false, back: false };
+/**
+ * 画面に出さずに焼くための canvas（作者の裁定、2026-09-21）。
+ *
+ * **焼いた画像があるあいだ、プレビューは合成の canvas ではなくその画像を
+ * 出す**（設計書6.65.13の3。見えているもの＝本に入るもの）。焼く相手を
+ * 画面の canvas だけに求めていたので、焼いたあとは［焼く］のボタンが黙って
+ * 何もしなかった——注記は「焼き直してください」と言うのに、先に
+ * ［焼いた画像を消す］を押すまで焼き直せない、という食い違いになっていた。
+ * 見えていないときは、ここに持つ canvas へ同じ関数で描いて焼く。
+ */
+const offscreen = { front: null, back: null };
 
 /** 字の大きさは、絵の短い辺からの割合で決める（寸法が作品ごとに違うため） */
 const SIZE_RATIO = { large: 0.1, medium: 0.065, small: 0.045 };
+/**
+ * 枠に収めるために縮めてよい下限（短い辺に対する割合。作者の裁定、2026-09-21）。
+ *
+ * **小説の本の顔は題名が読めることがすべてなので、切れるよりは小さいほうが
+ * まし**である。ただし小さすぎても読めない。一番小さい「小」が0.045
+ * なので、そのおよそ8割にあたる0.035を下限にした——書店の一覧に並ぶ
+ * 大きさ（横200px前後）に置き直すと7px で、ここから下は字の形が潰れる。
+ * これを下回るくらい長い題名は、縮めずに折り返す。
+ */
+const MIN_SIZE_RATIO = 0.035;
+/** 行送り（字の大きさに対する倍率）。横書きは下へ、縦書きは左へ積む */
+const LINE_PITCH = 1.2;
+/** 縦書きで、1つの列の中の字の送り */
+const CHAR_PITCH = 1.05;
 /**
  * 合成の面の枠（設計書6.65.15の3、2026-09-03に作者の指示で4:3から変更）。
  *
@@ -1897,8 +1932,9 @@ function loadImage(side, src, retried) {
  * なっていた。ここからは、枠の中へ**はみ出させず縮めて中央に納め**、
  * 余った部分を frameBackground の色で塗る（作者の色選びの既定は黒）。
  */
-function drawCover(side) {
-  const canvas = document.getElementById('canvas-' + side);
+function drawCover(side, target) {
+  // 焼くときは画面に出ていない canvas を渡してくる（下の bakeCanvas）
+  const canvas = target || document.getElementById('canvas-' + side);
   if (!canvas) return;
   const image = images[side];
   if (!image) return;
@@ -1925,8 +1961,91 @@ function drawCover(side) {
 }
 
 /**
+ * その大きさで並べたときの、**書く向きの長さ**。
+ *
+ * 横書きは canvas の実測（欧文が混ざると字ごとに幅が違う）、縦書きは
+ * 字数×字の送り（1文字ずつ同じ幅で積んでいるので、数えれば出る）。
+ */
+function measureAlong(ctx, text, size, vertical) {
+  if (vertical) return Array.from(text).length * size * CHAR_PITCH;
+  ctx.font = size + 'px ' + FONT_STACK;
+  return ctx.measureText(text).width;
+}
+
+/**
+ * 1つの文字列を、枠に収まる大きさと行に割る（設計書6.65.9。作者の裁定、2026-09-21）。
+ *
+ * 実機で「いじめられっ子_確認用」（11文字）を横向きに焼くと、題名の幅が
+ * 約1885px、枠の幅が1714px で、墨が左右の端から出て切れていた。**題名が
+ * 読めることがすべてなので、切れるよりは小さいほうがまし**である。
+ *
+ * 1. そのままで収まるなら、何もしない（**焼き上がりを変えない**）
+ * 2. 収まらなければ、1行のまま縮める（幅は大きさに比例するので一度に出る）
+ * 3. 下限（MIN_SIZE_RATIO）を下回るほど縮めることになるなら、**縮めずに
+ *    作者が選んだ大きさのまま折り返す**。下限まで縮めてから折り返すと、
+ *    折り返す余地があるのに読めない小ささの題名になる
+ * 4. 折り返しても逆向き（横書きなら縦）に溢れるときだけ、そのぶん縮める
+ *    ——ここだけは下限を割ることがある。枠から溢れた題名は、読めない以前に
+ *    本の顔が壊れるため
+ *
+ * measure は「その大きさで並べたときの書く向きの長さ」を返す関数で、
+ * 縦横どちらも呼び出し側が渡す。**この関数は canvas を知らない**ので、
+ * 実際に描かずに測れる。
+ */
+function fitCoverBlock(text, fontSize, minFontSize, limit, crossLimit, measure) {
+  const chars = Array.from(text);
+  if (chars.length === 0) return { fontSize: fontSize, lines: [] };
+  // 余白のほうが枠より広い、という置き方はしていないが、念のため
+  if (!(limit > 0)) return { fontSize: fontSize, lines: [text] };
+
+  const full = measure(text, fontSize);
+  if (full <= limit) return { fontSize: fontSize, lines: [text] };
+
+  const floorSize = Math.min(minFontSize, fontSize);
+  const shrunk = trimSize(fontSize * (limit / full));
+  if (shrunk >= floorSize) return { fontSize: shrunk, lines: [text] };
+
+  let size = fontSize;
+  let lines = wrapCoverText(chars, size, limit, measure);
+  // 縮めれば1行に入る字が増えるので、行数は減りこそすれ増えない。
+  // ふつうは1度で収まるが、端数で1行だけ溢れることがあるので数回見る
+  for (let guard = 0; guard < 4; guard++) {
+    const cross = lines.length * size * LINE_PITCH;
+    if (!(crossLimit > 0) || cross <= crossLimit) break;
+    size = trimSize(size * (crossLimit / cross));
+    lines = wrapCoverText(chars, size, limit, measure);
+  }
+  return { fontSize: size, lines: lines };
+}
+
+/** 枠の長さに収まるところで折り返す。1文字でも入らないときは1文字ずつ */
+function wrapCoverText(chars, size, limit, measure) {
+  const lines = [];
+  let current = '';
+  chars.forEach(function (character) {
+    const candidate = current + character;
+    if (current !== '' && measure(candidate, size) > limit) {
+      lines.push(current);
+      current = character;
+    } else {
+      current = candidate;
+    }
+  });
+  if (current !== '') lines.push(current);
+  return lines;
+}
+
+/** 端数は切り捨てる。切り上げると、測り直したときに1pxだけはみ出す */
+function trimSize(value) {
+  return Math.max(1, Math.floor(value * 100) / 100);
+}
+
+/**
  * 文字を重ねる。置き場所は9つのプリセットで、座標は持たない。
  * 同じ場所に2つ置かれたら、重ねずに順にずらす。
+ *
+ * **枠からはみ出す長さの文字は、縮めるか折り返してから置く**
+ * （fitCoverBlock）。縦書き・横書きのどちらでも同じ手当てが要る。
  */
 function drawTexts(ctx, canvas, layout) {
   const base = Math.min(canvas.width, canvas.height);
@@ -1939,13 +2058,40 @@ function drawTexts(ctx, canvas, layout) {
     const text = field(ELEMENT_FIELDS[key]).value.trim();
     if (!text) return;
 
-    const fontSize = base * (SIZE_RATIO[style.size] || SIZE_RATIO.medium);
+    const measure = function (value, size) {
+      return measureAlong(ctx, value, size, style.vertical);
+    };
+    // 書く向きの余裕と、それと直交する向きの余裕（どちらも余白の内側）
+    const alongLimit =
+      (style.vertical ? canvas.height : canvas.width) - margin * 2;
+    const crossLimit =
+      (style.vertical ? canvas.width : canvas.height) - margin * 2;
+    const fitted = fitCoverBlock(
+      text,
+      base * (SIZE_RATIO[style.size] || SIZE_RATIO.medium),
+      base * MIN_SIZE_RATIO,
+      alongLimit,
+      crossLimit,
+      measure
+    );
+    const fontSize = fitted.fontSize;
+    const lines = fitted.lines;
+
     ctx.font = fontSize + 'px ' + FONT_STACK;
     ctx.fillStyle = style.color;
 
-    const chars = Array.from(text);
-    const blockW = style.vertical ? fontSize * 1.2 : ctx.measureText(text).width;
-    const blockH = style.vertical ? chars.length * fontSize * 1.05 : fontSize * 1.2;
+    let longest = 0;
+    lines.forEach(function (line) {
+      longest = Math.max(longest, measure(line, fontSize));
+    });
+    // 何行に割れても、塊の外寸は「いちばん長い行×行数」で決まる。
+    // 1行のときの値は、これまでと同じである（fontSize * 1.2 と字数×1.05）
+    const blockW = style.vertical
+      ? lines.length * fontSize * LINE_PITCH
+      : longest;
+    const blockH = style.vertical
+      ? longest
+      : lines.length * fontSize * LINE_PITCH;
 
     const parts = String(style.anchor || 'top-center').split('-');
     const row = parts[0];
@@ -1968,19 +2114,46 @@ function drawTexts(ctx, canvas, layout) {
     ctx.textBaseline = 'top';
     if (style.vertical) {
       ctx.textAlign = 'center';
-      chars.forEach(function (character, index) {
-        ctx.fillText(character, x + blockW / 2, y + index * fontSize * 1.05);
+      const pitch = fontSize * LINE_PITCH;
+      lines.forEach(function (line, lineIndex) {
+        // 縦書きは右の列から左へ送る（日本語の並び）
+        const columnX = x + blockW - (lineIndex + 1) * pitch;
+        Array.from(line).forEach(function (character, index) {
+          ctx.fillText(
+            character,
+            columnX + pitch / 2,
+            y + index * fontSize * CHAR_PITCH
+          );
+        });
       });
     } else {
       ctx.textAlign = 'left';
-      ctx.fillText(text, x, y);
+      lines.forEach(function (line, lineIndex) {
+        // 行ごとに長さが違うので、塊の中で寄せ方に合わせて置き直す
+        const lineW = measure(line, fontSize);
+        const lineX = column === 'left'
+          ? x
+          : (column === 'right' ? x + blockW - lineW : x + (blockW - lineW) / 2);
+        ctx.fillText(line, lineX, y + lineIndex * fontSize * LINE_PITCH);
+      });
     }
   });
 }
 
+/**
+ * 焼く先の canvas。**画面に出ていれば、それをそのまま使う**
+ * （見えているものと焼けたものを別々に描かない。設計書6.65.9の1）。
+ * 焼いた画像を出しているあいだは画面に canvas が無いので、そのときだけ
+ * 見えない canvas を1枚持ち、使い回す。
+ */
+function bakeCanvas(side) {
+  const shown = document.getElementById('canvas-' + side);
+  if (shown) return shown;
+  if (!offscreen[side]) offscreen[side] = document.createElement('canvas');
+  return offscreen[side];
+}
+
 function bake(side) {
-  const canvas = document.getElementById('canvas-' + side);
-  if (!canvas) return;
   if (!images[side]) {
     // 元絵をまだ読めていない。読めたら続きをやる
     pending[side] = true;
@@ -1988,7 +2161,8 @@ function bake(side) {
     return;
   }
 
-  drawCover(side);
+  const canvas = bakeCanvas(side);
+  drawCover(side, canvas);
   let dataUrl = null;
   try {
     dataUrl = canvas.toDataURL('image/png');
@@ -2004,6 +2178,8 @@ function bake(side) {
   }
   post('bake', { side: side, dataUrl: dataUrl, config: readForm() });
 }
+
+/* cover:end */
 
 function applyCompose(data) {
   SIDES.forEach(function (side) {
