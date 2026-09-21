@@ -24,7 +24,76 @@ export const workspace = {
   saveAll: (async (_includeUntitled?: boolean) => true) as (
     includeUntitled?: boolean
   ) => Promise<boolean>,
+  /**
+   * ファイルの見張り。作るたびに `fileSystemWatchers` へ積む
+   * （下の `StubFileSystemWatcher`）。
+   */
+  createFileSystemWatcher,
 };
+
+/**
+ * `vscode.RelativePattern` の代役。
+ *
+ * **本物と同じく、基点にUriを取れる形にしてある。** 基点を覗けないと、
+ * 見張りがどのフォルダーを見ているかをテストから確かめられない。
+ */
+export class RelativePattern {
+  constructor(
+    readonly base: unknown,
+    readonly pattern: string
+  ) {}
+}
+
+/**
+ * ファイルの見張り（`createFileSystemWatcher`）の代役。
+ *
+ * **本物は実際のファイルを見ているので、テストからは起こせない。**
+ * テスト側が `fireChange` / `fireCreate` / `fireDelete` を呼んで、
+ * 「外で変わった」ことにする。
+ */
+export class StubFileSystemWatcher {
+  disposed = false;
+  private readonly changeEmitter = new StubEmitter<unknown>();
+  private readonly createEmitter = new StubEmitter<unknown>();
+  private readonly deleteEmitter = new StubEmitter<unknown>();
+
+  constructor(readonly pattern: unknown) {}
+
+  onDidChange = this.changeEmitter.event;
+  onDidCreate = this.createEmitter.event;
+  onDidDelete = this.deleteEmitter.event;
+
+  dispose(): void {
+    this.disposed = true;
+  }
+
+  /** テスト側から「このファイルが書き換わった」ことにする */
+  fireChange(fsPath: string): void {
+    this.changeEmitter.fire(Uri.file(fsPath));
+  }
+  fireCreate(fsPath: string): void {
+    this.createEmitter.fire(Uri.file(fsPath));
+  }
+  fireDelete(fsPath: string): void {
+    this.deleteEmitter.fire(Uri.file(fsPath));
+  }
+}
+
+/**
+ * これまでに作られた見張り。**前のテストの分を拾わないよう、
+ * 各テストで `resetFileSystemWatchers` を呼んで空にする。**
+ */
+export const fileSystemWatchers: StubFileSystemWatcher[] = [];
+
+export function resetFileSystemWatchers(): void {
+  fileSystemWatchers.length = 0;
+}
+
+function createFileSystemWatcher(pattern: unknown): StubFileSystemWatcher {
+  const watcher = new StubFileSystemWatcher(pattern);
+  fileSystemWatchers.push(watcher);
+  return watcher;
+}
 
 /** 文書の改行コード（本物と同じ値。1がLF、2がCRLF） */
 export enum EndOfLine {
@@ -362,6 +431,13 @@ export class EventEmitter<T> {
   };
   fire(value?: T): void {
     for (const listener of [...this.listeners]) listener(value as T);
+  }
+  /**
+   * 後始末。**本物も持っている。** 無いままだと、持ち主の `dispose()` を
+   * 通るテストが「本物なら通る所」で落ちる（`gitSyncWatch.test.ts`）。
+   */
+  dispose(): void {
+    this.listeners.clear();
   }
 }
 

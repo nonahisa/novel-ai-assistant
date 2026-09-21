@@ -192,6 +192,28 @@ const DEFAULT_AUTO_FETCH_INTERVAL_MINUTES = 10;
  */
 const FILE_CHANGE_NOTICE_THRESHOLD = 5;
 
+/**
+ * 作品フォルダーの変化を見てから、状態を作り直すまでの待ち（設計書6.15.1）。
+ *
+ * **続けて保存しても1回にまとめる。** 原稿エディタは保存のたびに書くので、
+ * 1文字ごとに `git status` を走らせると、書いている最中に負荷がかかる。
+ */
+const FOLDER_REFRESH_DEBOUNCE_MS = 2000;
+
+/**
+ * その変化で「送っていないもの」の数が変わりうるか（設計書6.15.1）。
+ *
+ * **記録と統計は保存のたびに書かれる。** そこで作り直しを回すと、
+ * 作り直しが自分でログを書いて自分を起こす堂々巡りになる。
+ * `.git/` の中もgit自身が書き換えるので見ない。
+ */
+export function affectsSyncStatus(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, "/");
+  return !/(^|\/)(\.git|\.aiwriter\/logs|\.aiwriter\/stats)(\/|$)/.test(
+    normalized
+  );
+}
+
 export interface GitSyncOptions {
   /** テスト用。実際のgit実行を差し替える */
   run?: GitCommandRunner;
@@ -245,6 +267,25 @@ export class GitSyncMonitor implements vscode.Disposable {
   private settingsPause: SettingsWatchPause | undefined;
 
   /**
+   * 作品フォルダーの見張り（設計書6.15.1）。作品ごとに1本ずつ持つ。
+   *
+   * **置き場全体を1本で見張れない。** 作品フォルダーはワークスペースに
+   * 入っていないことがあり、そのときワークスペース基準の見張りは何も拾わない。
+   */
+  private readonly folderWatchers = new Map<
+    string,
+    { watcher: vscode.FileSystemWatcher; timer?: ReturnType<typeof setTimeout> }
+  >();
+
+  /**
+   * いま状態を作り直している作品。
+   *
+   * 取り込みや送信の最中にもファイルは入れ替わるので、見張りが同じ作品の
+   * 作り直しを重ねて走らせないための印。重なりそうなら待ち直す。
+   */
+  private readonly refreshing = new Set<string>();
+
+  /**
    * すべて同期のあいだ、ファイル更新の知らせをためる場所。
    *
    * **置き場ごとに出すと、11作品ぶん同じ問いが並ぶ。** ためて最後に1回出す
@@ -285,12 +326,95 @@ export class GitSyncMonitor implements vscode.Disposable {
         void this.refresh(work, { fetch: true, notify: true });
       })
     );
+
+    // **保存しただけでも印を更新する**（設計書6.15.1。実機確認 2026-09-21）。
+    // 以前の契機は起動時・同期の操作のあと・エディタの切り替えだけだった。
+    // 自前の原稿エディタはWebViewで、保存は `workspace.fs.writeFile` なので
+    // `onDidSaveTextDocument` も `onDidChangeActiveTextEditor` も飛ばない。
+    // その結果、1文字書いて保存しても「未記録 N」は次に起動するまで増えず、
+    // 「送っていないものがあれば出しっぱなし」という約束が守れていなかった。
+    this.syncFolderWatchers();
+    this.disposables.push(
+      this.registry.onDidChange(() => this.syncFolderWatchers())
+    );
   }
 
   dispose(): void {
     for (const disposable of this.disposables) disposable.dispose();
+    for (const entry of this.folderWatchers.values()) {
+      entry.watcher.dispose();
+      if (entry.timer) clearTimeout(entry.timer);
+    }
+    this.folderWatchers.clear();
     this.changed.dispose();
     this.filesChanged.dispose();
+  }
+
+  /**
+   * 登録されている作品に合わせて、フォルダーの見張りを増減させる。
+   *
+   * 作り方は `workFolderWatch.ts` に合わせてある（`RelativePattern` には
+   * 文字列ではなくUriを渡す。文字列だとブラウザ版で無い場所を見張る。規則7）。
+   */
+  private syncFolderWatchers(): void {
+    const wanted = new Map(
+      this.registry
+        .list()
+        .map((work) => [path.normalizeForComparison(work.folderPath), work])
+    );
+    for (const [key, entry] of this.folderWatchers) {
+      if (wanted.has(key)) continue;
+      entry.watcher.dispose();
+      if (entry.timer) clearTimeout(entry.timer);
+      this.folderWatchers.delete(key);
+    }
+    for (const [key, work] of wanted) {
+      if (this.folderWatchers.has(key)) continue;
+      let watcher: vscode.FileSystemWatcher;
+      try {
+        watcher = vscode.workspace.createFileSystemWatcher(
+          new vscode.RelativePattern(path.toUri(work.folderPath), "**/*")
+        );
+      } catch {
+        // 見張りを張れない環境では、これまでどおりの契機（起動時・同期後・
+        // エディタの切り替え）だけで動く。印が遅れるだけで壊れはしない
+        continue;
+      }
+      const entry: {
+        watcher: vscode.FileSystemWatcher;
+        timer?: ReturnType<typeof setTimeout>;
+      } = { watcher };
+      const schedule = (uri: vscode.Uri) => {
+        if (!affectsSyncStatus(path.fromUri(uri))) return;
+        this.scheduleFolderRefresh(work.id, entry);
+      };
+      watcher.onDidChange(schedule);
+      watcher.onDidCreate(schedule);
+      watcher.onDidDelete(schedule);
+      this.folderWatchers.set(key, entry);
+    }
+  }
+
+  /** ファイルの変化を受けて、少し待ってから状態を作り直す */
+  private scheduleFolderRefresh(
+    workId: string,
+    entry: { timer?: ReturnType<typeof setTimeout> }
+  ): void {
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.timer = setTimeout(() => {
+      entry.timer = undefined;
+      // 登録簿から取り直す。題や場所が変わっていれば新しいほうで見る
+      const work = this.registry.get(workId);
+      if (!work) return;
+      // 取り込みや送信の最中なら重ねず、もう一度待ち直す。
+      // **この見張りはネットへ出ないし、知らせも出さない**——
+      // 印が変わるだけなので、作者の操作を邪魔しない
+      if (this.refreshing.has(workId)) {
+        this.scheduleFolderRefresh(workId, entry);
+        return;
+      }
+      void this.refresh(work, { fetch: false, notify: false });
+    }, FOLDER_REFRESH_DEBOUNCE_MS);
   }
 
   statusFor(workId: string): GitSyncStatus | undefined {
@@ -322,6 +446,21 @@ export class GitSyncMonitor implements vscode.Disposable {
    * 回線の遅い環境で操作が重くなる。
    */
   async refresh(
+    work: WorkEntry,
+    options: { fetch: boolean; notify: boolean }
+  ): Promise<GitSyncStatus> {
+    // **走行中の印を立てる**（設計書6.15.1）。フォルダーの見張りは、
+    // 取り込みの最中に入れ替わるファイルでも起きるので、重ならないよう
+    // 見張り側がこの印を見て待ち直す
+    this.refreshing.add(work.id);
+    try {
+      return await this.runRefresh(work, options);
+    } finally {
+      this.refreshing.delete(work.id);
+    }
+  }
+
+  private async runRefresh(
     work: WorkEntry,
     options: { fetch: boolean; notify: boolean }
   ): Promise<GitSyncStatus> {
