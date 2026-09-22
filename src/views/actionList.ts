@@ -2375,6 +2375,21 @@ export function findAction(command: string): ActionItem | undefined {
 }
 
 /**
+ * ラベルとコマンドIDだけの一覧（設計書6.104。0.75.6）。
+ *
+ * AI の答えの中で名指しされた項目を拾う（`core/menuMentions.ts`）ときの
+ * 照合先である。**この木だけで足りる**——簡単ステップメニューは操作の実体を
+ * 持たず、コマンドIDでここを参照している（`stepMenu.ts` の `actionIndex`）ので、
+ * **どちらのメニューに出る項目も、すべてここに居る。**
+ */
+export function menuEntries(): { label: string; command: string }[] {
+  return allActions().map((item) => ({
+    label: item.label,
+    command: item.command,
+  }));
+}
+
+/**
  * 前提の1行（相談・マニュアル・画面で同じ文を使う）。
  *
  * **代わりの道の名前は、木から引く。** ここで書き写すと、あちらの名前を

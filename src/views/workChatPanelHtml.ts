@@ -799,6 +799,33 @@ function appendReaderGlossary(turn, entries) {
   turn.appendChild(box);
 }
 
+/*
+  答えの中で名指しされたメニュー項目の札（設計書6.104。0.75.6。
+  作者の指示、2026-09-22「AIからの回答で点滅すると良い」）。
+
+  **何度でも押せる。** 目を離している間にツリーの選択が動くので、
+  無効化すると見失ったときに戻れなくなる（「もう一度光らせる」と同じ考え）。
+  **押しても操作は走らない**——光るだけである。
+*/
+function appendSpotlight(turn, entries) {
+  if (!entries || entries.length === 0) return;
+  const box = document.createElement('div');
+  box.className = 'options';
+  entries.forEach((entry) => {
+    const button = document.createElement('button');
+    button.className = 'option';
+    button.innerHTML =
+      '<span class="mark">▶</span><span>光らせる：' +
+      escapeHtml(entry.label) +
+      '</span>';
+    button.addEventListener('click', () => {
+      vscode.postMessage({ type: 'spotlight', command: entry.command });
+    });
+    box.appendChild(button);
+  });
+  turn.appendChild(box);
+}
+
 /** 「そこを見せて」。押すとファイルを開き、該当箇所を光らせる */
 function appendLocate(turn, locate) {
   const box = document.createElement('div');
@@ -1174,6 +1201,9 @@ window.addEventListener('message', (event) => {
     // 読者の話をした回だけ、AIへ添えたのと同じ区分の一覧を作者にも見せる
     appendReaderGlossary(turn, message.readerGlossary);
     appendStagedActions(turn, message);
+    // 答えで名指しされた項目の「光らせる」（0.75.6）。
+    // **最初の1件はもう光っている**ので、これは押し直すための札である
+    appendSpotlight(turn, message.spotlight);
     // 案内の誘い（設計書6.104）。**選択肢より先に置く**——
     // 「どの順でやるか」は、言い直しの候補より先に読みたい
     if (message.tour) appendTourOffer(turn, message.tour);

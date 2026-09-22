@@ -155,7 +155,9 @@ import { renderMarkdownLite } from "../core/markdownLite";
 import { buildWorkChatPanelHtml } from "../views/workChatPanelHtml";
 import { cancelItem } from "../views/dialogs";
 import { GuidedTourHost } from "./guidedTour";
-import type { ActionSpotlight } from "./actionSpotlight";
+import { describeSpotlight, type ActionSpotlight } from "./actionSpotlight";
+import { findMenuMentions, type MenuEntry } from "../core/menuMentions";
+import { menuEntries } from "../views/actionList";
 
 /**
  * 相談パネル（P-21）。
@@ -304,6 +306,15 @@ type Incoming =
    * **進めない。** 同じ段をもう一度指すだけである
    */
   | { type: "tourAgain" }
+  /**
+   * 答えの下の「▶ 光らせる：〈ラベル〉」（作者の指示、2026-09-22。0.75.6）。
+   *
+   * **光らせるだけで、押さない。** コマンドIDは画面から届くが、
+   * `executeCommand` へは渡さない——**メニューに実在するかを確かめてから、
+   * ツリーの項目を選んで瞬かせるだけ**である（画面から届いた文字列が
+   * そのままコマンドになる道は、ここにも作らない）。
+   */
+  | { type: "spotlight"; command: string }
   /** 案内の「やめる」。途中でいつでも抜けられる */
   | { type: "tourStop" };
 
@@ -541,8 +552,18 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    */
   private readonly tour: GuidedTourHost;
 
+  /**
+   * 光らせる先。**案内（`tour`）だけのものではなくなった**（0.75.6）。
+   *
+   * AI の答えの中で名指しされた項目も、ここを通して光らせる
+   * ——**同じ関数を通す**（`ActionSpotlight.show`）。写しを作ると、
+   * 案内では瞬くのに答えからは瞬かない、という食い違いが出る。
+   */
+  private spotlight: ActionSpotlight | undefined;
+
   /** 光らせる先（3つのツリー）を渡す。拡張機能の起動時に一度だけ呼ぶ */
   setTourSpotlight(spotlight: ActionSpotlight): void {
+    this.spotlight = spotlight;
     this.tour.setSpotlight(spotlight);
   }
 
@@ -564,6 +585,58 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     return {
       tour: { key: state.key, title: state.title, steps: state.steps.length },
     };
+  }
+
+  /**
+   * 答えの中で名指しされたメニュー項目を光らせる（設計書6.104。0.75.6）。
+   *
+   * **作者の指示（2026-09-22）**：「AIからの回答で点滅すると良い」。
+   *
+   * **自動で光らせるのは最初の1件だけ**で、残りは札にして作者に押させる。
+   * 答えが3つの操作に触れた回に3つとも光らせることはできない
+   * （光るのは画面の1か所）し、順に光らせると最後の1つしか残らない。
+   *
+   * **案内（`tour`）が動いている回は、自動では光らせない。** 段の案内が
+   * すでに「いま押すべき1つ」を指しているので、答えのほうから別の項目を
+   * 指すと、印が奪い合いになって作者はどちらを押せばよいか分からなくなる。
+   *
+   * @returns 答えに添える札の一覧（空なら札を出さない）
+   */
+  private async spotlightMentions(reply: string): Promise<MenuEntry[]> {
+    const mentions = findMenuMentions(reply, menuEntries());
+    if (mentions.length === 0 || !this.spotlight) return mentions;
+    if (this.tour.isActive()) return mentions;
+
+    const result = await this.spotlight.show(mentions[0].command);
+    /*
+      **どちらのメニューにも無かった項目は、札にもしない**
+      （`describeSpotlight` が「見当たりません」と言う状態）。押しても
+      光らない札を出すと、作者は壊れていると思う。**確かめられたのは
+      いま光らせた1件だけ**なので、落とすのもその1件に限る。
+    */
+    return result.shown ? mentions : mentions.slice(1);
+  }
+
+  /**
+   * 「▶ 光らせる」を押された（0.75.6）。
+   *
+   * **メニューに実在するコマンドだけを通す。** 画面から届いた文字列を
+   * そのまま扱わない、という決まりはここでも同じである
+   * （もっとも `show` は光らせるだけで、操作は起こさない）。
+   */
+  private async spotlightCommand(command: string): Promise<void> {
+    if (!this.spotlight) return;
+    if (!menuEntries().some((entry) => entry.command === command)) {
+      logStep(`相談から知らない操作を光らせようとしました（${command}）`);
+      return;
+    }
+    const result = await this.spotlight.show(command);
+    if (!result.shown) {
+      this.postAll({
+        type: "note",
+        message: describeSpotlight(result),
+      });
+    }
   }
 
   /**
@@ -1043,6 +1116,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       await this.tour.showAgain();
       return;
     }
+    if (message.type === "spotlight") {
+      await this.spotlightCommand(message.command);
+      return;
+    }
     if (message.type === "tourStop") {
       this.tour.stop();
       return;
@@ -1480,6 +1557,14 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         question
       );
 
+      /*
+        **答えで名指しされた項目を光らせる**（設計書6.104。0.75.6。
+        作者の指示、2026-09-22）。**答えを送る前に光らせる**——先に
+        札を出すと、読んでいる間にサイドバーが動いて、どの行が光ったのか
+        目で追えない（案内の段（`showCurrent`）と同じ理由）。
+      */
+      const spotlight = await this.spotlightMentions(answer.reply);
+
       const { edit, ...others } = staged;
       this.postAll({
         type: "answer",
@@ -1492,6 +1577,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         html: renderMarkdownLite(answer.reply),
         options: answer.options,
         ...(readerGlossary ? { readerGlossary } : {}),
+        // **何度でも押せる札**（0.75.6）。目を離している間に選択が動く
+        ...(spotlight.length > 0 ? { spotlight } : {}),
         ...others,
       });
       // 答えを見せてから書く。書き込みで手間取っても、返事は先に読める

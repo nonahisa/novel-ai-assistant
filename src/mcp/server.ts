@@ -45,6 +45,11 @@ import {
   novelNotice,
   type NoticeInput,
 } from "./tools/notice";
+import {
+  GUIDE_SPOTLIGHT_INPUT,
+  guideSpotlight,
+  type SpotlightRequestInput,
+} from "./tools/spotlight";
 
 /**
  * Claude Code から、製品のプロンプトと検算をツールとして呼ぶ（設計書6.87.8）。
@@ -53,7 +58,8 @@ import {
  * そちらを直に呼ぶ（`test/unit/mcpTools.test.ts`）。混ぜると、
  * ツールの中身を確かめるのに stdio を立てなければならなくなる。
  *
- * **道具は11本**（0.72.0 で `novel.notice` を足した。0.66.7 の時点では10本）。
+ * **道具は12本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight` を
+ * 足した。0.66.7 の時点では10本）。
  * 56本あったものを
  * `feature` を引数に取る形へ束ねた——**AI は繋いだ瞬間にこの一覧を読む**ので、
  * 一覧そのものが会話のたびに払う費用だった（44,882字）。
@@ -297,6 +303,22 @@ server.registerTool(
     inputSchema: NOVEL_NOTICE_INPUT,
   },
   tool("novel.notice", (args: NoticeInput) => novelNotice(args))
+);
+
+server.registerTool(
+  "guide.spotlight",
+  {
+    title: "画面のメニュー項目を光らせる",
+    description:
+      "作者の VS Code のサイドバーで、その操作の項目を**2回点滅**させます" +
+      "（簡単ステップメニュー → 詳細メニューの順に探します）。" +
+      "**押すのは作者です——この道具は操作を実行しません。** " +
+      "原稿も設定資料も台帳も1文字も触りません。" +
+      "command（コマンドID）か label（表示名）のどちらかを渡してください。" +
+      "VS Code が閉じていれば、次に開いたときに光ります。",
+    inputSchema: GUIDE_SPOTLIGHT_INPUT,
+  },
+  tool("guide.spotlight", (args: SpotlightRequestInput) => guideSpotlight(args))
 );
 
 server.registerTool(

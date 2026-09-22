@@ -64,12 +64,15 @@ export function exposureOf(
     呼び出し元が持ち込んだ内容を置くだけで、こちらから本文も資料も返さない。
     `novel.notice`（0.72.0）も同じで、**渡された申告から断りを組むだけ**
     ——作品フォルダーは許可の鍵としてしか使わず、ファイルを1つも開かない。
+    `guide.spotlight`（0.75.6、設計書6.104）も**画面を光らせる依頼を1行
+    置くだけ**で、原稿も設定資料も読まないし、操作も実行しない。
   */
   if (
     tool === "mcp.version" ||
     tool === "ollama.models" ||
     tool === "novel.propose" ||
-    tool === "novel.notice"
+    tool === "novel.notice" ||
+    tool === "guide.spotlight"
   ) {
     return "none";
   }
@@ -146,6 +149,18 @@ function detailOf(
   if (tool === "novel.propose") {
     const name = typeof args?.name === "string" ? args.name : "";
     return name ? `承認待ちへ置いた（${name}）` : "承認待ちへ置いた";
+  }
+  /*
+    画面を指した回（0.75.6）。**何を指したかを残す**——`feature` を
+    取らない道具なので、ここを書かないと記録が「guide.spotlight」だけになり、
+    作者にはどの項目を光らせようとしたのか分からない。
+  */
+  if (tool === "guide.spotlight") {
+    const pointed =
+      (typeof args?.command === "string" && args.command) ||
+      (typeof args?.label === "string" && args.label) ||
+      "";
+    return pointed ? `画面で指した（${pointed}）` : "画面で指した";
   }
   const parts: string[] = [];
   /*

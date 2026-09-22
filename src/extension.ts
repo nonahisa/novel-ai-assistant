@@ -386,6 +386,7 @@ import { registeredPostingSites } from "./features/postingCopyRegistered";
 import { showEditHistory } from "./features/editHistoryPanel";
 import { toggleExternalAccessPermission } from "./features/externalAccessPermission";
 import { ExternalAccessWatcher } from "./features/externalAccessWatcher";
+import { SpotlightRequestWatcher } from "./features/spotlightRequestWatcher";
 import {
   refreshStableBundle,
   writeAiInstructions,
@@ -2014,18 +2015,37 @@ export async function activate(
     押されたことを拾う口も、コマンド登録の包みに相乗りする形でここで繋ぐ
     ——案内していないあいだは何も起きない。
   */
-  workChatPanel.setTourSpotlight(
-    createActionSpotlight({
-      stepView,
-      stepProvider,
-      actionView,
-      actionProvider,
-      // 選ぶだけでは薄くて気づけなかった（作者の報告、2026-09-22）。
-      // 指している項目に「▶」の印を残す先を渡す
-      marker: actionDecorations,
-    })
-  );
+  const actionSpotlight = createActionSpotlight({
+    stepView,
+    stepProvider,
+    actionView,
+    actionProvider,
+    // 選ぶだけでは薄くて気づけなかった（作者の報告、2026-09-22）。
+    // 指している項目に「▶」の印を残す先を渡す
+    marker: actionDecorations,
+  });
+  workChatPanel.setTourSpotlight(actionSpotlight);
   onCommandFinished = (command) => workChatPanel.notifyCommandRun(command);
+
+  /*
+    **外部AI（MCP）からの「この項目を光らせて」を拾う**（設計書6.104。
+    0.75.6。作者の指示、2026-09-22「内部と外部のAIからメニュー操作して
+    2回点滅を出せるようにしてください」）。
+
+    ノックの見張り（6.87.14）と同じ形——別プロセスのMCPサーバーが
+    `.aiwriter/history/spotlight.jsonl` へ1行書き、こちらが見張る。
+    **光らせるだけで、命令は実行しない。**
+  */
+  const spotlightRequests = new SpotlightRequestWatcher(
+    context,
+    () => registry.list(),
+    actionSpotlight
+  );
+  spotlightRequests.refresh();
+  context.subscriptions.push(
+    spotlightRequests,
+    registry.onDidChange(() => spotlightRequests.refresh())
+  );
 
   /*
     **画面で指している作品を、作品を訊く場面の当てどころにする**（0.75.4。

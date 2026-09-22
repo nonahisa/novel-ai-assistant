@@ -122,6 +122,14 @@ const MARKDOWN_ALLOWED = new Set([
     ので、そちらはこの検査の網に掛かったままである。
   */
   "src/core/aiInstructions.ts",
+  /*
+    AI の答えから、メニュー項目の名前を拾う（設計書6.104。0.75.6）。
+
+    **Markdown の記号を「出す」のではなく「読む」側である。** 囲みの組
+    （`「」`・`**`・バッククォート）を持っているのは、囲まれていれば短い語でも
+    項目名として拾ってよい、と決めているからで、**画面に出す文言は1つも無い。**
+  */
+  "src/core/menuMentions.ts",
 ]);
 
 function collectSources(dir: string, out: string[] = []): string[] {
