@@ -19,6 +19,13 @@ import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { AIRegistry } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
 import {
+  MAX_TIMEOUT_SECONDS,
+  resolveTimeoutSeconds,
+  saveModelTuning,
+  timeoutSettingKey,
+  tunedTimeoutSeconds,
+} from "../core/modelTuning";
+import {
   resolveOutputLimitForSend,
   resolveOutputTokensForPlanning,
   resolveOutputTokensForSend,
@@ -245,6 +252,15 @@ type Incoming =
    * もう一度訊かれるのは意味が無いが、戻せないのは怖い。
    */
   | { type: "undoEdit"; id: string }
+  /**
+   * エラーの下に出した札を押した（設計書6.27。実装ルール5「次に取れる
+   * 操作を1つ示す」）。
+   *
+   * **届くのは鍵だけ。** 何をどう直すかは拡張機能側が覚えている
+   * （`pendingErrorActions`）。画面から届いた文字列がそのまま設定名や
+   * コマンド名になる道は作らない——ほかの札（`run`・`locate`）と同じ流儀。
+   */
+  | { type: "errorAction"; command: string }
   | { type: "run"; id: string }
   | { type: "locate"; id: string }
   | { type: "reload"; id: string }
@@ -428,6 +444,22 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       recordId: string;
       name: string;
       notes?: string;
+    }
+  >();
+  /**
+   * 押されるのを待っている「エラーの直し方」の札。
+   *
+   * **勝手には直さない。** 押されたときだけ設定を書く（実装ルール5の
+   * 「次に取れる操作を1つ示す」を、文章ではなくボタンで出す形）。
+   */
+  private readonly pendingErrorActions = new Map<
+    string,
+    {
+      kind: "raiseTimeout";
+      providerId: string;
+      providerName: string;
+      model: string;
+      seconds: number;
     }
   >();
   private editSeq = 0;
@@ -1167,6 +1199,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       await this.undoEdit(message.id);
       return;
     }
+    if (message.type === "errorAction") {
+      await this.runErrorAction(message.command);
+      return;
+    }
     if (message.type === "run") {
       await this.runFeature(message.id);
       return;
@@ -1482,10 +1518,18 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         // **切り詰めは、切り詰めとして伝える**（設計書6.77の第2段。
         // あらすじ生成と同じ文言）。「返事が空でした」だけだと、作者からは
         // 出力上限が足りないのかAIの気まぐれなのか区別が付かない
+        //
+        // **読み取れなかったJSONも、ここへ来る**（2026-09-23）。
+        // `parseWorkChatAnswer` がJSONらしい生テキストの `reply` を空に
+        // するようになったため——以前はここを素通りして、作者の画面に
+        // `"needFiles": [],` がそのまま並んでいた
         this.postError(
           result.truncated
             ? truncatedOutputAdvice(outputLimit)
-            : "返事が空でした。もう一度お試しください。"
+            : answer.source === "raw"
+              ? "AIの返事を読み取れませんでした（形式が崩れています）。" +
+                truncatedOutputAdvice(outputLimit)
+              : "返事が空でした。もう一度お試しください。"
         );
         return;
       }
@@ -1581,6 +1625,23 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         ...(spotlight.length > 0 ? { spotlight } : {}),
         ...others,
       });
+      /*
+        **救った回は、救ったと言う**（2026-09-23）。閉じ括弧を足して
+        読めたということは、**返事はそこで切れている**——続きがあったのに
+        出ていない。黙って出すと、作者は「AIが途中で話をやめた」と読む。
+
+        直し方は `truncatedOutputAdvice` に任せる。**上限の出どころで
+        言うべきことが変わる**（実測で頭打ちなのに「設定を大きくして」と
+        言うのは嘘になる。0.66.6で踏んだ）ので、文言をここに写さない。
+      */
+      if (answer.source === "salvaged") {
+        this.postAll({
+          type: "note",
+          message:
+            "この返事は途中で切れています（読み取れたところまでを出しました）。" +
+            truncatedOutputAdvice(outputLimit),
+        });
+      }
       // 答えを見せてから書く。書き込みで手間取っても、返事は先に読める
       if (edit) await this.applyStagedEdit(edit.id);
 
@@ -1616,13 +1677,114 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           error: message,
         });
       }
-      this.postError(message);
+      /*
+        **タイムアウトだけは、その場で直せる札を添える**（2026-09-23）。
+        `recoveryForAIError` が「設定で秒数を延ばしてください」と案内して
+        いるが、作者はプログラマではなく、設定画面まで辿り着けていなかった。
+        押されたときだけ書く（`runErrorAction`）。
+      */
+      const actions =
+        error instanceof AIError && error.kind === "timeout"
+          ? this.timeoutAction(resolved.provider, resolved.model)
+          : undefined;
+      this.postError(message, actions ? [actions] : undefined);
     }
   }
 
 
-  private postError(message: string): void {
-    this.postAll({ type: "error", message });
+  /**
+   * 赤い文字でエラーを出す。`actions` を渡すと、その下に押せる札が並ぶ。
+   *
+   * **札は「次に取れる操作」を実際に押せるようにするためのもの**である
+   * （実装ルール5）。作者はプログラマではないので、設定の場所を文章で
+   * 説明しても辿り着けない——実際、Ollamaの待ち時間は900秒に延ばして
+   * あるのに、さくらのAIは既定のままで180秒で切れ続けていた（2026-09-23）。
+   */
+  private postError(
+    message: string,
+    actions?: Array<{ label: string; command: string }>
+  ): void {
+    this.postAll({
+      type: "error",
+      message,
+      ...(actions && actions.length > 0 ? { actions } : {}),
+    });
+  }
+
+  /**
+   * タイムアウトで失敗したときに出す「その場で直す」札。
+   *
+   * **いまの値の倍まで**（上限は `MAX_TIMEOUT_SECONDS`）。すでに上限なら
+   * 札を出さない——押しても何も変わらない札は、直し方を探す邪魔になる。
+   */
+  private timeoutAction(
+    provider: { id: string; displayName: string },
+    model: string
+  ): { label: string; command: string } | undefined {
+    const current = resolveTimeoutSeconds(provider.id, model);
+    if (!Number.isFinite(current) || current >= MAX_TIMEOUT_SECONDS) {
+      return undefined;
+    }
+    const seconds = Math.min(MAX_TIMEOUT_SECONDS, Math.round(current) * 2);
+    if (seconds <= current) return undefined;
+    const command = `timeout-${++this.editSeq}`;
+    this.pendingErrorActions.set(command, {
+      kind: "raiseTimeout",
+      providerId: provider.id,
+      providerName: provider.displayName,
+      model,
+      seconds,
+    });
+    return { label: `タイムアウトを${seconds}秒にする`, command };
+  }
+
+  /** エラーの下の札が押された。**押されたときだけ設定を書く** */
+  private async runErrorAction(command: string): Promise<void> {
+    const action = this.pendingErrorActions.get(command);
+    if (!action) {
+      this.postError("この操作はもう使えません。もう一度お試しください。");
+      return;
+    }
+    // 一度きり。二度押しで同じ値をもう一度書かない
+    this.pendingErrorActions.delete(command);
+    try {
+      /*
+        **書き先は、いま効いているほうへ。** 待ち時間は
+        「AIチューニングの台帳 → プロバイダごとの設定」の順に読まれる
+        （`resolveTimeoutSeconds`）ので、台帳に値があるときに設定だけ
+        書いても**1秒も変わらない**。押したのに何も起きない札にしない。
+      */
+      if (tunedTimeoutSeconds(action.providerId, action.model) !== undefined) {
+        const outcome = await saveModelTuning(action.providerId, action.model, {
+          timeoutSeconds: action.seconds,
+        });
+        if (outcome !== "written") {
+          this.postError(
+            "待ち時間を書き込めませんでした。" +
+              "詳細メニューの「AIチューニング」から設定してください。"
+          );
+          return;
+        }
+      } else {
+        await vscode.workspace
+          .getConfiguration("novelai")
+          .update(
+            timeoutSettingKey(action.providerId),
+            action.seconds,
+            vscode.ConfigurationTarget.Global
+          );
+      }
+      this.postAll({
+        type: "note",
+        message:
+          `${action.providerName}のタイムアウトを${action.seconds}秒にしました。` +
+          "もう一度お尋ねください。",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logFailure("相談の待ち時間の設定", { 内容: message });
+      this.postError(`待ち時間を設定できませんでした: ${message}`);
+    }
   }
 
   /**

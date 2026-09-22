@@ -515,6 +515,22 @@ export const WORK_CHAT_SCHEMA = {
   ],
 } as const;
 
+/**
+ * 応答をどう読み取れたか。
+ *
+ * **救ったことを呼ぶ側へ伝えるために足した**（作者の実機報告、2026-09-23
+ * 「返答におかしな記号が混ざります」）。返答が出力上限で切り詰められると
+ * 閉じ波括弧が付かず、3通りとも読み取りに失敗して**生の本文が
+ * そのまま `reply` に入っていた**。画面には `"needFiles": [],` のような
+ * JSONが並び、しかも `reply` が空でないので「切り詰められました」の
+ * 案内にも入らなかった。どう読めたかが分かれば、両方とも直せる。
+ *
+ * - `json` …… そのまま読めた
+ * - `salvaged` …… 閉じていないものを閉じて読めた（**途中で切れている**）
+ * - `raw` …… 読めなかった。本文をそのまま返事として扱う
+ */
+export type WorkChatAnswerSource = "json" | "salvaged" | "raw";
+
 export interface WorkChatAnswer {
   reply: string;
   options: string[];
@@ -547,6 +563,8 @@ export interface WorkChatAnswer {
    * 返ってきた値を通してはいけない。
    */
   writerStyleSignals: WriterStyleSignals | undefined;
+  /** どう読み取れたか。呼ぶ側の案内が変わる（`WorkChatAnswerSource`） */
+  source: WorkChatAnswerSource;
 }
 
 /**
@@ -563,50 +581,34 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
   ];
 
   for (const candidate of attempts) {
-    if (!candidate) continue;
-    try {
-      const parsed: unknown = JSON.parse(candidate.trim());
-      if (
-        typeof parsed === "object" &&
-        parsed !== null &&
-        typeof (parsed as { reply?: unknown }).reply === "string"
-      ) {
-        const record = parsed as {
-          reply: string;
-          options?: unknown;
-          needFiles?: unknown;
-          edit?: unknown;
-          run?: unknown;
-          locate?: unknown;
-          reloadRecord?: unknown;
-          profileSignals?: unknown;
-          writerStyleSignals?: unknown;
-        };
-        return {
-          reply: record.reply.trim(),
-          options: Array.isArray(record.options)
-            ? record.options
-                .filter((item): item is string => typeof item === "string")
-                .map(cleanOption)
-                .filter(Boolean)
-                .slice(0, 4)
-            : [],
-          needFiles: record.needFiles,
-          edit: record.edit,
-          run: record.run,
-          locate: record.locate,
-          reloadRecord: record.reloadRecord,
-          profileSignals: parseProfileSignals(record.profileSignals),
-          writerStyleSignals: parseWriterStyleSignals(record.writerStyleSignals),
-        };
-      }
-    } catch {
-      // 次の候補を試す
-    }
+    const answer = readAnswer(candidate, "json");
+    if (answer) return answer;
+  }
+
+  /*
+    **4つ目：閉じていないものを閉じてから読む**（作者の実機報告、2026-09-23）。
+
+    出力上限で切り詰められた応答には `}` が1つも無い（`options` は配列で、
+    ほかは文字列か null なので入れ子の `}` すら出てこない）。上の
+    `extractBraces` は `lastIndexOf("}")` で終わりを探すので、この形では
+    必ずあきらめる。実機のログでは**閉じ波括弧を1つ足すだけで中身は全部
+    救えた**ので、あきらめる前にここを通す。
+  */
+  for (const candidate of closeTruncatedJson(text)) {
+    const answer = readAnswer(candidate, "salvaged");
+    if (answer) return answer;
   }
 
   return {
-    reply: text.trim(),
+    /*
+      **生のJSONを作者に見せない。** ここへ落ちた本文がJSONらしいなら、
+      そのまま出しても記号が並ぶだけで読めない。空にしておけば、呼ぶ側の
+      「返事が空なら切り詰めを伝える」分岐へ正しく入る（`workChatPanel.ts`）。
+
+      **素の文章で答えてきた回は、これまでどおりそのまま見せる。**
+      AIが形式を無視して普通に答えること自体は珍しくないので、そこは潰さない。
+    */
+    reply: looksLikeJson(text) ? "" : text.trim(),
     options: [],
     needFiles: undefined,
     edit: undefined,
@@ -615,7 +617,181 @@ export function parseWorkChatAnswer(text: string): WorkChatAnswer {
     reloadRecord: undefined,
     profileSignals: undefined,
     writerStyleSignals: undefined,
+    source: "raw",
   };
+}
+
+/** 候補をJSONとして読み、相談の答えの形になっていれば返す */
+function readAnswer(
+  candidate: string | null,
+  source: WorkChatAnswerSource
+): WorkChatAnswer | undefined {
+  if (!candidate) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(candidate.trim());
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const record = parsed as {
+    reply?: unknown;
+    options?: unknown;
+    needFiles?: unknown;
+    edit?: unknown;
+    run?: unknown;
+    locate?: unknown;
+    reloadRecord?: unknown;
+    profileSignals?: unknown;
+    writerStyleSignals?: unknown;
+  };
+  if (typeof record.reply !== "string") return undefined;
+  return {
+    reply: record.reply.trim(),
+    options: Array.isArray(record.options)
+      ? record.options
+          .filter((item): item is string => typeof item === "string")
+          .map(cleanOption)
+          .filter(Boolean)
+          .slice(0, 4)
+      : [],
+    needFiles: record.needFiles,
+    edit: record.edit,
+    run: record.run,
+    locate: record.locate,
+    reloadRecord: record.reloadRecord,
+    profileSignals: parseProfileSignals(record.profileSignals),
+    writerStyleSignals: parseWriterStyleSignals(record.writerStyleSignals),
+    source,
+  };
+}
+
+/**
+ * 読めなかった本文が、JSONのなれの果てか。
+ *
+ * **この判定だけで「作者に見せない」を決める**ので、広く取らない。
+ * `{` で始まり、この形式の鍵が入っていることを両方求める。
+ */
+function looksLikeJson(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{")) return false;
+  return trimmed.includes('"reply"') || trimmed.includes('"needFiles"');
+}
+
+/** 「ここまでなら値が完結している」位置と、そのときに開いていた括弧 */
+interface SafePoint {
+  end: number;
+  stack: string[];
+}
+
+/**
+ * 途中で切れたJSONを、閉じて読める形にした候補を作る（新しい順に2つまで）。
+ *
+ * **候補を2つ返すのは、切れ方が2通りあるからである。**
+ * ①いまの位置のまま閉じる……切れた文字列の中身まで残る。**途中で切れた
+ * `reply` こそ作者が読みたいもの**なので、こちらを先に試す。
+ * ②値が完結しているところまで切り戻して閉じる……数値や `true` の途中で
+ * 切れていて①が読めないときの受け皿。
+ *
+ * 救えないと分かったら**空を返す**（呼ぶ側は生の本文の扱いへ落ちる）。
+ * ここで無理に形を作ると、中身の違うJSONを「読めた」ことにしてしまう。
+ */
+function closeTruncatedJson(text: string): string[] {
+  const start = text.indexOf("{");
+  if (start === -1) return [];
+  let body = text.slice(start);
+  // 後ろにコードフェンスが残っていたら落とす（前は `{` から取っている）
+  const fence = body.indexOf("```");
+  if (fence !== -1) body = body.slice(0, fence);
+
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  let safe: SafePoint | undefined;
+  /** いま読んでいる文字列が始まる直前の安全点（鍵だったときに戻す先） */
+  let beforeString: SafePoint | undefined;
+
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+        safe = { end: i + 1, stack: [...stack] };
+      }
+      continue;
+    }
+    if (ch === '"') {
+      beforeString = safe;
+      inString = true;
+      continue;
+    }
+    if (ch === "{" || ch === "[") {
+      stack.push(ch);
+      continue;
+    }
+    if (ch === "}" || ch === "]") {
+      // 閉じすぎている＝そもそも形が読めない。作り直さない
+      if (stack.length === 0) return [];
+      stack.pop();
+      safe = { end: i + 1, stack: [...stack] };
+      continue;
+    }
+    // 鍵の直後のコロン。**直前の文字列は値ではなく鍵だった**ので、安全点を
+    // その文字列の前まで戻す（`{"reply"` で切り戻しても読めない）
+    if (ch === ":") safe = beforeString;
+  }
+
+  // 閉じているなら、上の3通りで読めなかった理由はここには無い
+  if (stack.length === 0 && !inString) return [];
+
+  const candidates: string[] = [];
+  const head = inString
+    ? `${dropDanglingEscape(body)}"`
+    : // 末尾の中途半端な区切り（`,` や空白）は落としてから閉じる
+      body.replace(/[\s,]+$/, "");
+  candidates.push(head + closingFor(stack));
+  if (safe && safe.end > 0) {
+    candidates.push(body.slice(0, safe.end) + closingFor(safe.stack));
+  }
+  return candidates;
+}
+
+/** 開いたままの括弧を、逆順に閉じる文字列 */
+function closingFor(stack: string[]): string {
+  return [...stack]
+    .reverse()
+    .map((open) => (open === "{" ? "}" : "]"))
+    .join("");
+}
+
+/**
+ * 文字列がエスケープの途中で切れていたら、その頭を落とす。
+ *
+ * 落とさずに `"` を足すと `"…\"` となって**閉じたことにならない**。
+ */
+function dropDanglingEscape(text: string): string {
+  // 末尾の連続した逆斜線を数える。奇数なら最後の1本がエスケープの頭
+  let slashes = 0;
+  for (let i = text.length - 1; i >= 0 && text[i] === "\\"; i--) slashes++;
+  if (slashes % 2 === 1) return text.slice(0, -1);
+  // `\u00` のようにUnicodeエスケープの途中で切れた形
+  const unicode = text.match(/\\u[0-9a-fA-F]{0,3}$/);
+  if (unicode) {
+    const at = text.length - unicode[0].length;
+    // その逆斜線自身がエスケープされているなら（`\\u12`）、ただの文字
+    let back = 0;
+    for (let i = at - 1; i >= 0 && text[i] === "\\"; i--) back++;
+    if (back % 2 === 0) return text.slice(0, at);
+  }
+  return text;
 }
 
 /**

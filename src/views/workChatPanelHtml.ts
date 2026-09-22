@@ -574,6 +574,33 @@ function appendTurn(who, text, kind, html) {
   return turn;
 }
 
+/**
+ * エラーの下に「直し方」の札を並べる（2026-09-23）。
+ *
+ * **文章で設定の場所を説明しても、作者は辿り着けていなかった。**
+ * 実際、待ち時間を延ばしてあるAIと既定のままのAIが混ざっていた。
+ * 押すと拡張機能側が設定を書く——**押されるまでは何も変わらない。**
+ */
+function appendErrorActions(turn, actions) {
+  if (!actions.length) return;
+  const box = document.createElement('div');
+  box.className = 'options';
+  actions.forEach((action) => {
+    const button = document.createElement('button');
+    button.className = 'option';
+    button.innerHTML =
+      '<span class="mark">設定</span>' +
+      '<span>' + escapeHtml(action.label) + '</span>';
+    button.addEventListener('click', () => {
+      // 一度きり。二度押しで同じ設定をもう一度書かせない
+      button.disabled = true;
+      vscode.postMessage({ type: 'errorAction', command: action.command });
+    });
+    box.appendChild(button);
+  });
+  turn.appendChild(box);
+}
+
 function appendOptions(turn, options) {
   currentOptions = options;
   if (options.length === 0) return;
@@ -1312,7 +1339,10 @@ window.addEventListener('message', (event) => {
   if (message.type === 'error') {
     setBusy(false);
     thinkingEl.textContent = '考えています…';
-    appendTurn('エラー', message.message, 'error');
+    const turn = appendTurn('エラー', message.message, 'error');
+    // **直し方を押せる形で出す**（タイムアウトの秒数など）。
+    // 送り返すのは鍵だけで、何をするかは拡張機能側が覚えている
+    appendErrorActions(turn, message.actions || []);
     scrollToBottom();
   }
 });
