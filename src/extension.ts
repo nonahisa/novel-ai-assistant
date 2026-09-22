@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { pickFolder } from "./features/pickFolder";
-import { fromUri } from "./core/paths";
+import { fromUri, storageRootFrom } from "./core/paths";
 import * as path from "./core/paths";
 import { describeSyncTarget } from "./core/syncTarget";
 import { menuVersionLabel } from "./core/versionLabel";
@@ -597,13 +597,10 @@ export async function activate(
    *
    * **入口で決める。** 渡すのは下の `setFallbackLogRoot` だが、起動の
    * プロファイル（下）も同じ場所へ書くので、値だけ先に作っておく。
-   * `vscode-userdata:` を OS のパスへ倒す理由は `setGeneratedStorageRoot`
-   * と同じ（拡張機能開発ホストではこの仕組みで渡ってくる）。
+   * `vscode-userdata:` を手元だけ OS のパスへ倒す判定は `storageRootFrom`
+   * にある（手元とブラウザで扱いが逆になる。生成文書の置き場と同じ判定）。
    */
-  const fallbackLogRoot =
-    context.globalStorageUri.scheme === "vscode-userdata"
-      ? context.globalStorageUri.fsPath
-      : fromUri(context.globalStorageUri);
+  const fallbackLogRoot = storageRootFrom(context.globalStorageUri);
 
   /**
    * 起動のプロファイル（設計書6.107。0.74.11）。
@@ -815,9 +812,8 @@ export async function activate(
     通知が消えた時点で失われている。
 
     値そのものは `activate` の入口で作ってある（起動のプロファイルも
-    同じ場所へ書くため）。`vscode-userdata:` を OS のパスへ倒すのは
-    `setGeneratedStorageRoot` と同じ理由（拡張機能開発ホストでは
-    この仕組みで渡ってくる）。
+    同じ場所へ書くため）。`vscode-userdata:` を手元だけ OS のパスへ
+    倒すのは `storageRootFrom`（生成文書の置き場と同じ判定）。
   */
   setFallbackLogRoot(fallbackLogRoot);
 

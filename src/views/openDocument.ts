@@ -53,14 +53,11 @@ export async function openInDefaultEditor(
 let generatedStorageRoot: string | undefined;
 
 export function setGeneratedStorageRoot(root: vscode.Uri): void {
-  // **`vscode-userdata:` は手元の実体があるので OS のパスへ倒す。**
-  // 拡張機能開発ホストでは `globalStorageUri` がこの仕組みで渡ってくる。
-  // `fromUri` の一般規則（`file:` 以外は URI の文字列）に任せると
-  // `mkdir "C:\vscode-userdata:"` になって落ち、生成文書がすべて
-  // 無題文書へ落ちていた（実機で発見、2026-09-05）。ブラウザ版の
-  // `vscode-vfs:` などは実体が無いので、これまでどおり文字列のまま
-  generatedStorageRoot =
-    root.scheme === "vscode-userdata" ? root.fsPath : path.fromUri(root);
+  // **`vscode-userdata:` は手元だけ OS のパスへ倒す**（`storageRootFrom`）。
+  // 手元で倒さないと `mkdir "C:\vscode-userdata:"` で落ち（2026-09-05）、
+  // ブラウザ版で倒すと——ブラウザの保管庫も `vscode-userdata:` で来る——
+  // `\User\…` という無い道になって落ちる（2026-09-23）
+  generatedStorageRoot = path.storageRootFrom(root);
 }
 
 /**

@@ -120,14 +120,9 @@ let broken = false;
  * この件と関係のないところまで書き換えることになる。
  */
 export async function setTuningStoreRoot(root: vscode.Uri): Promise<void> {
-  // **`vscode-userdata:` は手元に実体があるので OS のパスへ倒す。**
-  // 拡張機能開発ホストでは `globalStorageUri` がこの仕組みで渡ってくる。
-  // `fromUri` の一般規則（`file:` 以外は URI の文字列）に任せると
-  // `C:\vscode-userdata:\…` という無い場所を指して落ちる
-  // （生成文書で実際に踏んだ穴。2026-09-05）。ブラウザ版の `vscode-vfs:`
-  // などは実体が無いので、これまでどおり文字列のまま
-  storeRoot =
-    root.scheme === "vscode-userdata" ? root.fsPath : path.fromUri(root);
+  // **`vscode-userdata:` は手元だけ OS のパスへ倒す**（`storageRootFrom`。
+  // 手元とブラウザで扱いが逆になる理由はそちらに書いてある）
+  storeRoot = path.storageRootFrom(root);
   cachedTable = {};
   loadedAt = 0;
   broken = false;

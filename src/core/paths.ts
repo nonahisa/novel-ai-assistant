@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { isUriString } from "./pathText";
+import { canRunProcesses } from "./runtime";
 
 /**
  * 手元のファイルと、ブラウザ上の作品を、同じ書き方で扱う（設計書5.8）。
@@ -59,4 +60,38 @@ export function toUri(location: string): vscode.Uri {
 export function fromUri(uri: vscode.Uri): string {
   if (uri.scheme && uri.scheme !== "file") return uri.toString();
   return uri.fsPath;
+}
+
+/**
+ * 拡張機能の保管庫（`globalStorageUri`）を、持ち回る文字列にする。
+ *
+ * **同じ `vscode-userdata:` でも、手元とブラウザで扱いが逆になる。**
+ * 片方だけ見て直すと、もう片方を壊す（実際に2度踏んだ）。
+ *
+ * - **手元（デスクトップ）では OS のパスへ倒す。** 拡張機能開発ホストは
+ *   `globalStorageUri` を `vscode-userdata:` で渡すが、実体は手元のディスクに
+ *   ある。`fromUri` の一般規則（`file:` 以外は URI の文字列）に任せると
+ *   `mkdir "C:\vscode-userdata:"` になって落ち、生成文書がすべて無題文書へ
+ *   落ちていた（実機で発見、2026-09-05）
+ * - **ブラウザ版では URI の文字列のまま持ち回る。** ブラウザでも保管庫は
+ *   `vscode-userdata:/User/…` で来るが、実体のディスクは無い。倒すと
+ *   `\User\globalStorage\…` という無い道になり、
+ *   `No file system handle registered (\User)` で落ちた（2026-09-23）。
+ *   文字列のまま `join` などで伸ばせることは `pathUserData.test.ts` が確かめている
+ *
+ * **判定はここだけに置く。** 以前は生成文書・ログ・AIチューニングの台帳・
+ * 保管庫の文字列の4か所に写してあり、どれも「ブラウザ版は `vscode-vfs:`
+ * などで来る」と思い込んだまま同じ穴を抱えていた（`storageRoot.test.ts`
+ * がほかへ写すのを止める）。
+ *
+ * `desktop` は試験のための口。テストは Node で動くので、`canRunProcesses()`
+ * は常に true になり、ブラウザの道を確かめられない。
+ */
+export function storageRootFrom(
+  uri: vscode.Uri,
+  desktop: boolean = canRunProcesses()
+): string {
+  return uri.scheme === "vscode-userdata" && desktop
+    ? uri.fsPath
+    : fromUri(uri);
 }
