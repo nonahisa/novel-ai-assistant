@@ -451,6 +451,7 @@ import { GENERATED_DIR } from "./core/generatedFiles";
 import { setTuningStoreRoot } from "./core/modelTuningStore";
 import { formatDayTime } from "./core/timestampedFileName";
 import { notifyDone } from "./views/notify";
+import { initBackupPickFolder } from "./features/backupPickFolder";
 
 /**
  * **この束を読み終えた時刻**（設計書6.107）。
@@ -1961,6 +1962,9 @@ export async function activate(
   // 執筆スタイル（6.90）も相談へ渡す。渡すのは段取り（S1）と直す時期（S2）
   // だけで、資料の置き場・出し先は渡さない（作者の裁定、2026-09-14）。
   // ターゲット読者（6.91）は作品ごとのファイルにあるので、パネルが自分で読む
+  // バックアップを選ぶ画面が、前に選んだフォルダーを覚えておく先
+  // （相談パネルとメニューの取り込みで共有する。`backupPickFolder.ts`）
+  initBackupPickFolder(context.globalState);
   const workChatPanel = new WorkChatPanel(registry, aiRegistry, {
     run: async (work, kind, filePath) => {
       // 既にコマンドとして登録されているものへ渡す。

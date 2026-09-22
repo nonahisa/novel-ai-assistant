@@ -141,7 +141,43 @@ describe("題で照らす", () => {
       work("a", NAROU.title, [{ site: "narou", workId: "n1111ir" }]),
     ]);
 
-    expect(match).toEqual({ kind: "none", differentId: ["a"] });
+    expect(match).toEqual({
+      kind: "none",
+      differentId: [{ workId: "a", by: "title" }],
+    });
+  });
+
+  /*
+    実機（2026-09-23、0.75.13）：題がまったく違う「照合試験_無関係」を
+    落としたのに、「『教科書チート』は題が同じですが、…作品IDが違うため」と
+    出た。**題を比べる前に**、台帳に別のIDを持つ作品を全部集めていたため、
+    作者の環境ではどのなろうのバックアップでも同じ一言が出ていた。
+  */
+  it("**題が当たらない作品は、IDが違っても「外した」と言わない**", () => {
+    const match = matchBackupToWorks(
+      { site: "narou", workId: "n0000zy", title: "照合試験_無関係" },
+      [
+        work("a", "教科書チート", [{ site: "narou", workId: "n2600go" }]),
+        work("b", "教科書チート_確認用", [{ site: "narou", workId: "n2600go" }]),
+      ]
+    );
+
+    expect(match).toEqual({ kind: "none", differentId: [] });
+  });
+
+  it("題の一部だけが合ってIDが違う作品は、「一部が合った」として外したと言う", () => {
+    const match = matchBackupToWorks(
+      { site: "narou", workId: "n0000zy", title: "教科書チート〜別視点バージョン〜" },
+      [
+        work("a", "教科書チート", [{ site: "narou", workId: "n2600go" }]),
+        work("b", "肉片とラジオと心霊現象", [{ site: "narou", workId: "n4190fx" }]),
+      ]
+    );
+
+    expect(match).toEqual({
+      kind: "none",
+      differentId: [{ workId: "a", by: "partial" }],
+    });
   });
 
   it("どれにも当たらなければ none", () => {

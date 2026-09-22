@@ -7,6 +7,8 @@ import {
   workTitleFromBackupFileName,
 } from "../../src/core/workZip";
 import { parseCollectedFile } from "../../src/core/collectedFile";
+import { backupIdentityOf } from "../../src/core/backupMatch";
+import { backupEpisodesOf } from "../../src/core/backupMerge";
 
 /**
  * `.txt` 直のバックアップ（アルファポリス）の取り込みと、
@@ -253,5 +255,179 @@ describe("Shift_JIS で読んだことを伝える", () => {
       shiftJis: false,
       questionMarks: 0,
     });
+  });
+});
+
+/**
+ * なろうの合本を展開した `.txt`（2026-09-23、ノートPCの実機、0.75.13）。
+ *
+ * 作者は、なろうのバックアップ ZIP を展開して `.txt` のまま保存している
+ * （何作ぶんも）。`.txt` をアルファポリスとしてしか読まなかったため、
+ * 「ZIP のまま選んでください」で弾かれていた。**中身は ZIP の中と同じ
+ * ファイルそのもの**なので、ZIP で渡したときと同じ結果になるのが正しい。
+ */
+describe("なろうの合本を展開した .txt も受ける", () => {
+  /** 実物（`N4190FX`）と同じ形。頭は【ユーザ情報】から始まる */
+  const NAROU = [
+    "【ユーザ情報】",
+    "ユーザID: 1125969",
+    "ユーザ名: hisa",
+    "",
+    "【Nコード】",
+    "N4190FX",
+    "",
+    "【タイトル】",
+    "肉片とラジオと心霊現象",
+    "",
+    "【作者名】",
+    "hisa",
+    "",
+    "【ジャンル】",
+    "ホラー〔文芸〕",
+    "",
+    "【キーワード】",
+    "怪談 実体験 飛び降り",
+    "",
+    "【あらすじ】",
+    "筆者が中学３年生の頃に体験した実体験です。",
+    "",
+    "【評価】",
+    "総合評価ポイント: 2pt",
+    "評価者数: 0人",
+    "お気に入り登録: 1件",
+    "",
+    "------------------------- エピソード1開始 -------------------------",
+    "【エピソードタイトル】",
+    "１　自殺の後始末",
+    "",
+    "【本文】",
+    "　あれは、確か中学３年生の頃? いや。",
+    "",
+    "【リアクション】",
+    "0件",
+    "",
+    "------------------------- エピソード2開始 -------------------------",
+    "【エピソードタイトル】",
+    "２　ラジオ",
+    "",
+    "【本文】",
+    "　その夜、ラジオが鳴った。",
+    "",
+    "【リアクション】",
+    "3件",
+    "",
+    "【免責事項】",
+    "本作品の著作権は作者に帰属します。",
+    "",
+  ].join("\r\n");
+
+  /** 比べる項目。**ZIP で渡したときと1つも違わない**ことを見る */
+  function comparable(result: ReturnType<typeof inspectWorkBackup>) {
+    return {
+      title: result.title,
+      titleSource: result.titleSource,
+      site: result.site,
+      info: result.info,
+      narou: result.narou,
+      episodeCount: result.episodeCount,
+      collected: result.collected,
+      totalChars: result.totalChars,
+      episodeNumbers: result.episodeNumbers,
+      encodingNotice: result.encodingNotice,
+      dropped: result.dropped,
+      skipped: result.skipped,
+      files: result.files.map((file) => ({
+        name: file.name,
+        text: new TextDecoder().decode(file.bytes),
+        encoding: file.encoding,
+        isWorkInfo: file.isWorkInfo,
+        charCount: file.charCount,
+      })),
+    };
+  }
+
+  it("UTF-8 の .txt を、ZIP で渡したときと同じに読む", () => {
+    const bytes = utf8(NAROU);
+    const fromText = inspectWorkBackup(bytes, "N4190FX.txt");
+    const fromZip = inspectWorkBackup(
+      zipSync({ "N4190FX.txt": bytes }),
+      "N4190FX.zip"
+    );
+
+    expect(comparable(fromText)).toEqual(comparable(fromZip));
+    // 念のため中身も見る（両方そろって壊れていても、上は通ってしまう）
+    expect(fromText.site).toBe("narou");
+    expect(fromText.title).toBe("肉片とラジオと心霊現象");
+    expect(fromText.titleSource).toBe("about");
+    expect(fromText.narou?.header.ncode).toBe("n4190fx");
+    expect(fromText.narou?.episodeCount).toBe(2);
+    expect(fromText.episodeCount).toBe(2);
+    expect(fromText.collected).toBe(true);
+    expect(fromText.info?.tags.length).toBeGreaterThan(0);
+  });
+
+  it("Shift_JIS の .txt も、ZIP の中身を読むときと同じ扱いにする", () => {
+    const bytes = new Uint8Array(iconv.encode(NAROU, "shift_jis"));
+    const fromText = inspectWorkBackup(bytes, "N4190FX.txt");
+    const fromZip = inspectWorkBackup(
+      zipSync({ "N4190FX.txt": bytes }),
+      "N4190FX.zip"
+    );
+
+    expect(comparable(fromText)).toEqual(comparable(fromZip));
+    expect(fromText.files[0].encoding).toBe("shift_jis");
+    expect(fromText.encodingNotice).toEqual({ shiftJis: true, questionMarks: 1 });
+  });
+
+  it("ファイル名が Nコードでなくても、中身でなろうと見分ける", () => {
+    const result = inspectWorkBackup(utf8(NAROU), "肉片とラジオ (2).txt");
+
+    expect(result.site).toBe("narou");
+    expect(result.title).toBe("肉片とラジオと心霊現象");
+  });
+
+  it("相談パネルの照合でも、Nコードで作品を見分けられる", () => {
+    const identity = backupIdentityOf(inspectWorkBackup(utf8(NAROU), "N4190FX.txt"));
+
+    expect(identity).toEqual({
+      site: "narou",
+      workId: "n4190fx",
+      title: "肉片とラジオと心霊現象",
+    });
+  });
+
+  it("取り込みの突き合わせでも、ZIP と同じ話が出てくる", () => {
+    const bytes = utf8(NAROU);
+    const fromText = backupEpisodesOf(inspectWorkBackup(bytes, "N4190FX.txt"));
+    const fromZip = backupEpisodesOf(
+      inspectWorkBackup(zipSync({ "N4190FX.txt": bytes }), "N4190FX.zip")
+    );
+
+    expect(fromText).toEqual(fromZip);
+    expect(fromText).toHaveLength(2);
+  });
+
+  it("アルファポリスの .txt は、これまでどおりアルファポリスとして読む", () => {
+    const result = inspectWorkBackup(utf8(ALPHAPOLIS), "作品.txt");
+
+    expect(result.site).toBe("alphapolis");
+    expect(result.narou).toBeNull();
+  });
+
+  it("どちらでもない .txt を断るとき、受けられる形を正しく言う", () => {
+    let caught: unknown;
+    try {
+      inspectWorkBackup(utf8("　夜が更けていく。\n"), "原稿.txt");
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(WorkZipError);
+    const detail = (caught as WorkZipError).detail ?? "";
+    // なろうの .txt は受けられるようになったので、「ZIP のまま」とは言わない
+    expect(detail).not.toMatch(/なろう[^\n]*ZIP のまま/);
+    expect(detail).toContain("小説家になろう");
+    expect(detail).toContain("アルファポリス");
+    expect(detail).toContain("カクヨム");
   });
 });

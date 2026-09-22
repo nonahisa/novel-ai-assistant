@@ -168,8 +168,10 @@ export interface WorkZipInspection {
  *
  * - カクヨム・なろう：**ZIP**（`inspectWorkZip`）
  * - アルファポリス：**`.txt` 直**（`inspectWorkTextBackup`）
+ * - なろうの ZIP を**展開した `.txt`**（合本そのもの）：`.txt` の道で受け、
+ *   中身は ZIP と同じ読み方をする（2026-09-23）
  *
- * どちらの道も同じ `WorkZipInspection` を返すので、取り込む側
+ * どの道も同じ `WorkZipInspection` を返すので、取り込む側
  * （`features/importWorkFromZip.ts`）は入れ物の違いを知らなくてよい。
  *
  * @param bytes 選ばれたファイルそのもの
@@ -185,7 +187,26 @@ export function inspectWorkBackup(
 }
 
 /**
- * `.txt` 直のバックアップ（アルファポリス）を読む（0.69.10）。
+ * `.txt` 直のバックアップを読む（アルファポリス 0.69.10、なろうの展開済み合本 2026-09-23）。
+ *
+ * ## なろうの印を先に見る
+ *
+ * 作者は、なろうのバックアップ ZIP を**展開して `.txt` のまま保存している**
+ * （何作ぶんも。2026-09-23、ノートPCの実機）。はじめはここをアルファポリス
+ * 専用にしていたので、ZIP の中身そのものを渡しても「ZIP のまま選んで
+ * ください」で弾いていた。
+ *
+ * 見分けは **`parseNarouBackup` そのもの**（【Nコード】が N＋4桁＋英字2文字で
+ * 読めること）を使う。印を写して別に判定すると、ZIP の道と `.txt` の道で
+ * 「なろうと読むかどうか」が食い違いうる。読めたら、**ZIP の中の1ファイルと
+ * まったく同じ道**（`readTextEntry` → `inspectTextFiles`）へ流す——文字コード
+ * （Shift_JIS なら UTF-8 へ直す）も、題・話数・点検も、ZIP で渡したときと
+ * 1つも違わない。相談パネルの照合（`backupMatch.ts`）と取り込み
+ * （`backupMerge.ts`）は `WorkZipInspection` しか見ないので、ここ1か所で揃う。
+ *
+ * **なろうを先に見る**のは、なろうの頭（【ユーザ情報】…）はアルファポリスの
+ * 形（1行目が章題か話の見出し）には当たらないが、逆の順だとアルファポリスの
+ * 読み方が将来ゆるんだときに、なろうの合本を取り違えうるからである。
  *
  * ## 丸ごと復号してから判定する
  *
@@ -204,14 +225,20 @@ export function inspectWorkTextBackup(
   fileName: string
 ): WorkZipInspection {
   const decoded = decodeBytes(bytes);
+  if (parseNarouBackup(decoded.text)) {
+    return inspectNarouTextBackup(bytes, fileName);
+  }
+
   const backup = parseAlphapolisBackup(decoded.text);
   if (!backup) {
     throw new WorkZipError(
       "このファイルは、取り込める形のバックアップではありませんでした。",
       [
-        "アルファポリスの書き出し（章と話の見出しで区切られた .txt）として読めませんでした。",
+        "テキストのまま受けられるのは、次の2つです。",
+        "・小説家になろうのバックアップを展開した .txt（先頭に【Nコード】の欄があるもの）",
+        "・アルファポリスの書き出し（章と話の見出しで区切られた .txt）",
         "",
-        "カクヨム・小説家になろうのバックアップは ZIP のまま選んでください。",
+        "カクヨムのバックアップは ZIP のまま選んでください。",
       ].join("\n")
     );
   }
@@ -347,6 +374,40 @@ export function inspectWorkZip(
     );
   }
 
+  return inspectTextFiles(files, skipped, zipFileName);
+}
+
+/**
+ * なろうの ZIP を展開した `.txt`（合本そのもの）を読む（2026-09-23）。
+ *
+ * **ZIP の中に1ファイルだけ入っていたのと同じ形にして、同じ道へ流す。**
+ * 名前は選ばれたファイルの名前から採る（フォルダーを落とし、ダウンロードの
+ * 印 `(2)` も落とす）——展開しただけのファイルなら `N4190FX.txt` で、
+ * ZIP の中の名前と同じになる。
+ */
+function inspectNarouTextBackup(
+  bytes: Uint8Array,
+  fileName: string
+): WorkZipInspection {
+  const ext = hasTextExtension(fileName) ? extensionOf(fileName) : ".txt";
+  const name = `${workTitleFromBackupFileName(fileName)}${ext}`;
+  return inspectTextFiles([readTextEntry(name, bytes)], [], fileName);
+}
+
+/**
+ * 取り出したテキストのファイルを、取り込める形にまとめる。
+ *
+ * **ZIP の道と、なろうの展開済み `.txt` の道が共有する。** ここを分けて
+ * 写すと、同じ合本を ZIP で渡したときと `.txt` で渡したときで、題や話数や
+ * 点検の結果が食い違う。
+ *
+ * @param zipFileName 選ばれたファイルの名前（題の予備と、出どころの手がかり）
+ */
+function inspectTextFiles(
+  files: ZipTextFile[],
+  skipped: string[],
+  zipFileName: string
+): WorkZipInspection {
   const aboutFile = files.find((file) => file.isWorkInfo);
   const workInfoText = aboutFile ? decodeBytes(aboutFile.bytes).text : null;
   const narou = findNarouBackup(files);

@@ -9,6 +9,7 @@ import {
   type BackupMatch,
   type BackupMatchBy,
   type BackupMatchCandidate,
+  type DifferentIdWork,
 } from "../core/backupMatch";
 import {
   BACKUP_DIFF_RECORD_KIND,
@@ -97,6 +98,18 @@ export async function receiveBackup(
 ): Promise<BackupDropResult | undefined> {
   // **編集部は取り込まない**（設計書5.6）。「バックアップから取り込む」は
   // 編集者モードで使えない操作なので、持ち込みの口からも開かない
+  /*
+    **作品が決まるまでは、拡張機能の保管庫の記録へ書く**（2026-09-23、実機）。
+
+    書き先は `useLogFile` で切り替わるまで直前のままなので、切り替えずに
+    照合を書くと、**直前に触った関係の無い作品の記録へ紛れる**。実機では
+    確認用の作品へ取り込んだ回の照合が、作者の本物の作品（教科書チート）の
+    記録に入り、取り込んだ先には何も残っていなかった。
+    取り込み先が決まったら `mergeIntoWork` がその作品へ切り替え、照合の
+    結果もそちらへ書き直す。
+  */
+  useLogFile(undefined);
+
   if (isEditorMode()) {
     return {
       message:
@@ -136,15 +149,20 @@ export async function receiveBackup(
   const identity = backupIdentityOf(inspection);
   const candidates = await matchCandidates(deps.works);
   const match = matchBackupToWorks(identity, candidates);
-  logStep(`相談パネル：バックアップの照合 ${describeMatchForLog(match)}`);
+  const matchNote = `「${path.basename(source.fileName)}」の照合：${describeMatchForLog(match)}`;
+  logStep(`相談パネル：バックアップ${matchNote}`);
 
   const picked: PickedBackup = { fileName: source.fileName, inspection };
   const target = await chooseTarget(match, identity, inspection, deps.works);
-  if (target === undefined) return undefined;
+  if (target === undefined) {
+    logStep("相談パネル：バックアップの取り込みを取りやめました（取り込み先を決める前）");
+    return undefined;
+  }
   if (target === "new") {
+    logStep("相談パネル：バックアップを新しい作品として取り込む道へ回しました");
     return importAsNewWork(picked, deps.importAsNew);
   }
-  return mergeIntoWork(target.work, target.by, identity, picked);
+  return mergeIntoWork(target.work, target.by, identity, picked, matchNote);
 }
 
 /* ── どの作品に当たるか ───────────────────────────────── */
@@ -233,20 +251,37 @@ async function chooseTarget(
   return undefined;
 }
 
-/** 題は同じだが作品IDが違った作品について、一言添える */
+/**
+ * 題では当たったが作品IDが違った作品について、一言添える。
+ *
+ * **一致の種類で言い分ける**（2026-09-23、実機）。題の一部しか合っていない
+ * 作品に「題が同じですが」と言うと、作者は「同じ題の作品なんてあったか」と
+ * 探しにいく。
+ */
 function describeDifferentId(
-  ids: readonly string[],
+  differs: readonly DifferentIdWork[],
   byId: ReadonlyMap<string, WorkEntry>,
   identity: BackupIdentity
 ): string {
-  const titles = ids
-    .map((id) => byId.get(id)?.title)
-    .filter((title): title is string => title !== undefined);
-  if (titles.length === 0) return "";
-  return (
-    `「${titles.join("」「")}」は題が同じですが、投稿状態に書いてある作品IDが` +
-    `このバックアップ（${identity.workId?.toUpperCase() ?? ""}）と違うため、別の作品と見ました。`
-  );
+  const titlesBy = (by: DifferentIdWork["by"]): string[] =>
+    differs
+      .filter((entry) => entry.by === by)
+      .map((entry) => byId.get(entry.workId)?.title)
+      .filter((title): title is string => title !== undefined);
+  const reason =
+    `投稿状態に書いてある作品IDがこのバックアップ（${
+      identity.workId?.toUpperCase() ?? ""
+    }）と違うため、別の作品と見ました。`;
+  const lines: string[] = [];
+  const same = titlesBy("title");
+  if (same.length > 0) {
+    lines.push(`「${same.join("」「")}」は題が同じですが、${reason}`);
+  }
+  const partial = titlesBy("partial");
+  if (partial.length > 0) {
+    lines.push(`「${partial.join("」「")}」は題の一部が同じですが、${reason}`);
+  }
+  return lines.join("\n");
 }
 
 /**
@@ -315,9 +350,18 @@ async function mergeIntoWork(
   work: WorkEntry,
   by: BackupMatchBy | "chosen",
   identity: BackupIdentity,
-  picked: PickedBackup
+  picked: PickedBackup,
+  /** 照合の結果（保管庫の記録へ書いたものと同じ一文）。取り込み先の記録にも残す */
+  matchNote: string
 ): Promise<BackupDropResult | undefined> {
   useLogFile(work.folderPath);
+  // **取り込み先の記録だけで経緯が追えるようにする。** 照合の一文は作品が
+  // 決まる前に保管庫へ書いたので、ここでもう一度書く
+  logStep(
+    `相談パネル：バックアップ${matchNote} → 取り込み先「${work.title}」（${
+      by === "chosen" ? "作者が選んだ" : describeMatchBy(by, identity)
+    }）`
+  );
 
   const chapterStore = new ChapterStore(work);
   let chapterSet: ChapterSet | null = null;
@@ -365,6 +409,7 @@ async function mergeIntoWork(
       modal: true,
       detail: ["足すものはありませんでした。", "", ...describeMergePlan(plan)].join("\n"),
     });
+    logStep(`相談パネル：「${work.title}」に足すものはありませんでした`);
     return { message: `「${work.title}」に足すものはありませんでした。` };
   }
 
@@ -380,7 +425,10 @@ async function mergeIntoWork(
     },
     "取り込む"
   );
-  if (answer !== "取り込む") return undefined;
+  if (answer !== "取り込む") {
+    logStep(`相談パネル：「${work.title}」への取り込みを取りやめました（確かめの画面で押さなかった）`);
+    return undefined;
+  }
 
   return applyMergePlan(work, picked, plan, {
     chapterStore,
@@ -488,6 +536,24 @@ async function applyMergePlan(
     );
     if (!recordPath) failures.push("本文の違いの記録");
   }
+
+  /*
+    **取り込み先の記録に、何を足したかを残す**（2026-09-23、実機）。
+    以前は照合の1行しか書かず、しかもそれが別の作品の記録へ落ちていたので、
+    取り込んだ先には成功したことも足したものも残っていなかった。
+  */
+  const wroteProfile = plan.profile !== null && !failures.includes("読者の反応");
+  logStep(
+    `相談パネル：「${path.basename(picked.fileName)}」を「${work.title}」へ取り込みました：` +
+    [
+      `章${chapters}`,
+      `いいね${stats.episodes}話ぶん`,
+      `作品全体の評価${stats.work ? "あり" : "なし"}`,
+      `作品ID${wroteProfile ? "を書いた" : "は書かず"}`,
+      `本文の違い${plan.bodyDiffs.length}話${recordPath ? `（記録：${recordPath}）` : ""}`,
+      ...(failures.length > 0 ? [`書けなかったもの：${failures.join("・")}`] : []),
+    ].join("・")
+  );
 
   const summary = summarizeMergeResult({
     workTitle: work.title,

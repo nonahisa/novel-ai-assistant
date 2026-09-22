@@ -62,23 +62,36 @@ export interface BackupMatchCandidate {
 /** 何で当たったか。作者への説明に使う */
 export type BackupMatchBy = "id" | "title" | "partial";
 
+/**
+ * 題では当たったが、作品IDが違うので外した作品。
+ *
+ * **題で当たったものだけを入れる**（2026-09-23、実機）。はじめは題を比べる
+ * 前に「台帳に別のIDを持つ作品」を全部入れていたので、題のまったく違う
+ * バックアップでも「『教科書チート』は題が同じですが…」と出た。
+ * `by` は作者への一言を「題が同じ」「題の一部が同じ」と言い分けるために持つ。
+ */
+export interface DifferentIdWork {
+  readonly workId: string;
+  readonly by: "title" | "partial";
+}
+
 export type BackupMatch =
   /** 1つに決まった。**それでも取り込む前に作者へ見せる** */
   | {
       readonly kind: "matched";
       readonly by: Exclude<BackupMatchBy, "partial">;
       readonly workId: string;
-      readonly differentId: readonly string[];
+      readonly differentId: readonly DifferentIdWork[];
     }
   /** 候補が2つ以上ある、または部分一致しかない。作者に選ばせる */
   | {
       readonly kind: "ambiguous";
       readonly by: BackupMatchBy;
       readonly workIds: readonly string[];
-      readonly differentId: readonly string[];
+      readonly differentId: readonly DifferentIdWork[];
     }
   /** どれにも当たらない。新しい作品として取り込むかを作者に訊く */
-  | { readonly kind: "none"; readonly differentId: readonly string[] };
+  | { readonly kind: "none"; readonly differentId: readonly DifferentIdWork[] };
 
 /**
  * 部分一致を候補にする、短いほうの題の長さの下限（そろえたあとの文字数）。
@@ -161,27 +174,37 @@ export function matchBackupToWorks(
     }
   }
 
-  /*
-    2. 題で照らす。**IDが食い違う作品は外す**——台帳にそのサイトの別の
-    作品IDが書いてあるなら、題が同じでも別の作品である。
-  */
-  const differentId: string[] = [];
-  const eligible = works.filter((work) => {
-    const recorded = idOf(work);
-    if (backupId && recorded && recorded !== backupId) {
-      differentId.push(work.id);
-      return false;
-    }
-    return true;
-  });
-
   const key = normalizeWorkTitle(identity.title);
-  if (key === "") return { kind: "none", differentId };
+  if (key === "") return { kind: "none", differentId: [] };
 
   const namesOf = (work: BackupMatchCandidate): string[] =>
     [work.title, work.folderName]
       .map(normalizeWorkTitle)
       .filter((name) => name !== "");
+
+  /*
+    2. 題で照らす。**IDが食い違う作品は外す**——台帳にそのサイトの別の
+    作品IDが書いてあるなら、題が同じでも別の作品である。
+
+    **外したと言うのは、題で当たった作品だけ**（2026-09-23、実機）。
+    題の違う作品は、IDを見るまでもなく候補ではない——そこまで「外した」と
+    言うと、作者の環境ではどのなろうのバックアップでも同じ作品の名前が
+    「題が同じですが」と出る。
+  */
+  const differentId: DifferentIdWork[] = [];
+  const eligible = works.filter((work) => {
+    const recorded = idOf(work);
+    if (backupId && recorded && recorded !== backupId) {
+      const names = namesOf(work);
+      if (names.includes(key)) {
+        differentId.push({ workId: work.id, by: "title" });
+      } else if (names.some((name) => overlaps(name, key))) {
+        differentId.push({ workId: work.id, by: "partial" });
+      }
+      return false;
+    }
+    return true;
+  });
 
   const exact = eligible.filter((work) => namesOf(work).includes(key));
   if (exact.length === 1) {

@@ -39,6 +39,7 @@ import {
   type WorkZipInspection,
 } from "../core/workZip";
 import { describeBackupEncoding } from "../core/backupEncoding";
+import { showBackupOpenDialog } from "./backupPickFolder";
 import { describeEpisodeNumbers } from "../core/episodeNumberCheck";
 import type { WorkInfo } from "../core/workInfoParse";
 import { DEFAULT_MANUSCRIPT_DIR, type WorkEntry } from "../models/types";
@@ -120,6 +121,10 @@ export async function importWorkFromZip(
   /** 相談パネルから渡されたとき。無ければ、これまでどおりファイルを選ばせる */
   picked?: PickedBackup
 ): Promise<void> {
+  // **作品フォルダーが決まるまでは、保管庫の記録へ書く。** 切り替えないと、
+  // 読み取りの失敗が直前に触った関係の無い作品の記録へ紛れる
+  // （相談パネルの取り込みで実際に起きた。2026-09-23）
+  useLogFile(undefined);
   const source = picked ?? (await pickAndInspect());
   if (!source) return;
   const { inspection } = source;
@@ -210,7 +215,9 @@ async function pickAndInspect(): Promise<PickedBackup | undefined> {
  * 作者のファイルが選ぶ画面にそもそも出てこない。
  */
 async function pickZipFile(): Promise<string | undefined> {
-  const picked = await vscode.window.showOpenDialog({
+  // **前に選んだフォルダーから開く**（`backupPickFolder.ts`）。展開した
+  // バックアップを何作ぶんも続けて渡すとき、毎回辿り直さずに済む
+  const picked = await showBackupOpenDialog({
     canSelectFiles: true,
     canSelectFolders: false,
     canSelectMany: false,
@@ -218,8 +225,8 @@ async function pickZipFile(): Promise<string | undefined> {
     title: "取り込むバックアップを選ぶ（ZIP／テキスト）",
     filters: { "バックアップ（ZIP／テキスト）": [...BACKUP_FILE_EXTENSIONS] },
   });
-  if (!picked || picked.length === 0) return undefined;
-  return path.fromUri(picked[0]);
+  if (!picked) return undefined;
+  return path.fromUri(picked);
 }
 
 /** 読んで確かめる。**この時点では1文字も書かない** */

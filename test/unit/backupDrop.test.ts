@@ -7,6 +7,7 @@ import {
   workspace,
 } from "./support/vscodeStub";
 import * as paths from "../../src/core/paths";
+import { setFallbackLogRoot, useLogFile } from "../../src/core/logger";
 import type { EpisodeFile, WorkEntry } from "../../src/models/types";
 import type { PickedBackup } from "../../src/features/importWorkFromZip";
 
@@ -452,5 +453,139 @@ describe("受け取れないもの", () => {
 
     expect(result?.message).toContain("ZIPファイルとして読めませんでした");
     expect(disk.size).toBe(0);
+  });
+});
+
+/*
+  実機（2026-09-23、0.75.13）：確認用の作品へ取り込んだ回の照合の1行が、
+  **関係の無い作品（教科書チート）の記録**へ入り、取り込んだ先の作品には
+  何も残っていなかった。照合の `logStep` が、書き先を切り替える
+  `useLogFile(work)` より前にあり、直前に触った作品の記録へ落ちていた。
+*/
+describe("記録（ログ）の書き先", () => {
+  const FALLBACK = paths.normalize("c:/保管庫");
+  const logOf = (folder: string) =>
+    text(paths.join(folder, ".aiwriter", "logs", "actions.log"));
+  /** 記録は順番待ちの列で書かれるので、書き終わるまで待つ */
+  const settle = async () => {
+    for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 0));
+  };
+
+  beforeEach(() => {
+    setFallbackLogRoot(FALLBACK);
+    // 直前に、関係の無い作品を触っていた（書き先がそこに残っている）
+    useLogFile(OTHER.folderPath);
+  });
+
+  it("取り込んだときは、取り込んだ先の作品の記録に照合と足したものが残る", async () => {
+    putSplitManuscript();
+    putNcodeLedger();
+
+    await receiveBackup(
+      { fileName: "N5078JI.zip", bytes: narouZip() },
+      { works: [OTHER, WORK] }
+    );
+    await settle();
+
+    expect(logOf(OTHER.folderPath)).toBeUndefined();
+    const log = logOf(WORK_FOLDER) ?? "";
+    expect(log).toContain("N5078JI.zip");
+    expect(log).toContain("Nコード（N5078JI）が一致");
+    expect(log).toContain("章2");
+    expect(log).toContain("いいね3話");
+    expect(log).toContain("本文の違い0話");
+  });
+
+  it("確かめで取りやめたときも、取り込み先の記録に取りやめたことが残る", async () => {
+    putSplitManuscript();
+    putNcodeLedger();
+    modalAnswer = () => undefined;
+
+    await receiveBackup(
+      { fileName: "N5078JI.zip", bytes: narouZip() },
+      { works: [OTHER, WORK] }
+    );
+    await settle();
+
+    expect(logOf(OTHER.folderPath)).toBeUndefined();
+    expect(logOf(WORK_FOLDER) ?? "").toContain("取りやめ");
+  });
+
+  it("当たらずに新しい作品へ回したときは、関係の無い作品の記録へ書かない", async () => {
+    await receiveBackup(
+      { fileName: "N9999ZZ.zip", bytes: narouZip(SPECS, "まったく新しい話") },
+      { works: [OTHER], importAsNew: async () => undefined }
+    );
+    await settle();
+
+    expect(logOf(OTHER.folderPath)).toBeUndefined();
+    // 作品が決まっていない段の照合は、拡張機能の保管庫の記録へ
+    expect(logOf(FALLBACK) ?? "").toContain("照合");
+  });
+
+  it("当たらずに取りやめたときも、関係の無い作品の記録へ書かない", async () => {
+    modalAnswer = () => undefined;
+
+    await receiveBackup(
+      { fileName: "N9999ZZ.zip", bytes: narouZip(SPECS, "まったく新しい話") },
+      { works: [OTHER] }
+    );
+    await settle();
+
+    expect(logOf(OTHER.folderPath)).toBeUndefined();
+  });
+});
+
+/*
+  実機（2026-09-23、0.75.13）：題が「照合試験_無関係」のバックアップで、
+  「『教科書チート』『教科書チート_確認用』は題が同じですが、…」と出た。
+*/
+describe("見当たらないときの一言", () => {
+  const ledgerWith = (folder: string, ncode: string) =>
+    put(
+      paths.join(folder, "設定", "投稿状態.json"),
+      JSON.stringify({
+        schemaVersion: "1",
+        sites: [],
+        siteProfiles: [{ site: "narou", workId: ncode }],
+        posts: [],
+        rankings: [],
+        readerStats: [],
+      })
+    );
+
+  it("題の違う作品については、IDが違っても何も言わない", async () => {
+    ledgerWith(OTHER.folderPath, "n2600go");
+    modalAnswer = () => undefined;
+
+    await receiveBackup(
+      { fileName: "N0000ZY.zip", bytes: narouZip(SPECS, "照合試験_無関係") },
+      { works: [OTHER] }
+    );
+
+    expect(modals[0].detail).not.toContain("教科書チート");
+    expect(modals[0].detail).not.toContain("題が同じ");
+  });
+
+  it("題が同じでIDが違う作品は「題が同じ」、一部だけなら「題の一部が同じ」と言い分ける", async () => {
+    const partner: WorkEntry = {
+      ...OTHER,
+      id: "w-variant",
+      title: "教科書チート〜別視点バージョン〜",
+      folderPath: paths.join(LIBRARY, "教科書チート〜別視点バージョン〜"),
+    };
+    ledgerWith(OTHER.folderPath, "n2600go");
+    ledgerWith(partner.folderPath, "n2600gp");
+    modalAnswer = () => undefined;
+
+    await receiveBackup(
+      { fileName: "N0000ZY.zip", bytes: narouZip(SPECS, "教科書チート") },
+      { works: [OTHER, partner] }
+    );
+
+    expect(modals[0].detail).toContain("「教科書チート」は題が同じですが");
+    expect(modals[0].detail).toContain(
+      "「教科書チート〜別視点バージョン〜」は題の一部が同じですが"
+    );
   });
 });

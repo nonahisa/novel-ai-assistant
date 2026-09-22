@@ -174,6 +174,7 @@ import {
   tooLargeMessage,
 } from "../core/backupFileKinds";
 import type { ImportAsNewWork } from "./backupDrop";
+import { showBackupOpenDialog } from "./backupPickFolder";
 
 /**
  * 相談パネル（P-21）。
@@ -1425,6 +1426,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * `receiveBackup` の側でも確かめる。
    */
   private async receiveBackupUri(raw: unknown): Promise<void> {
+    // バックアップは、どの作品のものかがまだ決まっていない。直前に相談した
+    // 作品の記録へ紛れないよう、保管庫の記録へ向けてから書く（`backupDrop.ts`）
+    useLogFile(undefined);
     let uri: vscode.Uri;
     try {
       if (typeof raw !== "string" || raw.trim() === "") throw new Error("空です");
@@ -1446,7 +1450,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
   /** 「バックアップを渡す」。落とせない環境（ブラウザ版など）の入口 */
   private async pickBackup(): Promise<void> {
-    const picked = await vscode.window.showOpenDialog({
+    // 前に選んだフォルダーから開く（メニューの取り込みと同じ覚え方。
+    // `backupPickFolder.ts`）
+    const picked = await showBackupOpenDialog({
       canSelectFiles: true,
       canSelectFolders: false,
       canSelectMany: false,
@@ -1454,11 +1460,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       title: "相談パネルへ渡すバックアップを選ぶ（ZIP／テキスト）",
       filters: { "バックアップ（ZIP／テキスト）": [...BACKUP_FILE_EXTENSIONS] },
     });
-    if (!picked || picked.length === 0) return;
-    await this.readAndHandleBackup(picked[0]);
+    if (!picked) return;
+    await this.readAndHandleBackup(picked);
   }
 
   private async readAndHandleBackup(uri: vscode.Uri): Promise<void> {
+    // 読めなかったときの記録も、関係の無い作品へ落とさない（上と同じ理由）
+    useLogFile(undefined);
     const fileName = path.basename(fromUri(uri));
     let bytes: Uint8Array;
     try {
