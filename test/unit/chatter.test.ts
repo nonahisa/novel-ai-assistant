@@ -76,8 +76,19 @@ describe("黙るべきとき", () => {
     expect(decideChatter(state({ writtenToday: 500, dailyGoal: 0 }))).toBeUndefined();
   });
 
-  test("一度に1つしか言わない", () => {
-    // まとめて出すと、独り言ではなくお知らせの一覧になる
+  test("いくつも当てはまるときは、祝いが1つだけ返る", () => {
+    // まとめて出すと、独り言ではなくお知らせの一覧になる。
+    //
+    // 元の形は `toBeDefined()` と `Array.isArray(...) === false` しか
+    // 見ていなかった。後者は戻り値の型（`ChatterDecision | undefined`）に
+    // そもそも配列が無いので、何をどう壊しても偽にしかならない。前者も、
+    // `writtenToday` が `dailyGoal` を超えているので祝いの候補が必ず立ち、
+    // 候補の並び順をどう入れ替えても「何か」が返る。
+    // **「1つだけ」も「どれが優先か」もまったく見ていなかった。**
+    //
+    // ここでは、祝い・節目・連続日数・手伝いの申し出のすべてが同時に
+    // 真になる状態を作り、**いちばん優先されるべき「祝い」が1つだけ**
+    // 返ることを見る（設計書6.21のとおり、祝いは手伝いより先）。
     const many = state({
       writtenToday: 5_000,
       dailyGoal: 1_000,
@@ -87,9 +98,7 @@ describe("黙るべきとき", () => {
       idleMs: idle,
     });
 
-    expect(decideChatter(many)).toBeDefined();
-    // 返り値は単数。配列ではないことを型と併せて固定する
-    expect(Array.isArray(decideChatter(many))).toBe(false);
+    expect(decideChatter(many)?.kind).toBe("goalReached");
   });
 });
 

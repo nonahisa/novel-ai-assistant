@@ -86,7 +86,12 @@ describe("形式に合わない機能への断り", () => {
     expect(formatWarningFor("episodeSynopses", "short")?.detail).toContain(
       "1話で完結"
     );
-    expect(formatWarningFor("emotionCurve", "short")).toBeDefined();
+    // `toBeDefined()` だけでは、`emotionCurve` の断り文が空や無関係な
+    // 文言になっても通ってしまう。感情曲線固有の理由
+    // （点が1つでは線にならない）まで見る
+    expect(formatWarningFor("emotionCurve", "short")?.detail).toContain(
+      "感情曲線も点が1つでは線になりません"
+    );
   });
 
   test("短編集・SNS記事では、プロット逆算の前提が合わないと言う", () => {

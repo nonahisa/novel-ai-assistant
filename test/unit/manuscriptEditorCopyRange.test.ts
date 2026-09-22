@@ -72,11 +72,19 @@ describe("選んでいなければ、これまでどおり", () => {
   });
 
   test("空文字の選択は「選んでいない」と同じに扱う", () => {
-    // 画面は選んでいないとき -1 を送るが、0字の範囲が来ても壊れないこと
+    // 画面は選んでいないとき -1 を送るが、0字の範囲が来ても壊れないこと。
+    //
+    // `result.selected` と `result.collected` が定義済みであることしか
+    // 見ていなかった（兄弟の「合本なら、カーソルの居る話だけ」は
+    // `result.source` の中身まで見ている）。それでは、空文字のときに
+    // 別の話（1話目）の本文を詰めて返しても通ってしまう。
+    // カーソルは2話目（行9）にあるので、2話目の本文であることを見る
     const result = postingCopySource(COLLECTED, 9, "");
 
     expect(result.selected).toBe(false);
     expect(result.collected).toBeDefined();
+    expect(result.source).toContain("二話目の本文");
+    expect(result.source).not.toContain("一話目の本文");
   });
 });
 

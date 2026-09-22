@@ -16,10 +16,19 @@ import {
  */
 
 describe("同梱する実測の一覧", () => {
-  it("鍵は `providerId/model` の形（台帳と同じ）", () => {
+  it("鍵は `providerId/model` の形（台帳と同じ）で、引いたものは台帳の実物である", () => {
     for (const key of bundledTuningKeys()) {
       expect(key).toMatch(/^[^/]+\/.+$/);
-      expect(bundledTuningByKey(key)).toBeDefined();
+
+      // `expect(bundledTuningByKey(key)).toBeDefined()` だけでは、
+      // 中身が正しいかに関係なく（極端には空のオブジェクトを返しても）
+      // 常に真になる。**鍵から引く関数（`bundledTuningByKey`）と
+      // providerId/model から引く関数（`bundledTuning`）が、同じ要素を
+      // 指していること**を見て、中身の取り違えを検査する。
+      const slash = key.indexOf("/");
+      const providerId = key.slice(0, slash);
+      const model = key.slice(slash + 1);
+      expect(bundledTuningByKey(key)).toBe(bundledTuning(providerId, model));
     }
   });
 
