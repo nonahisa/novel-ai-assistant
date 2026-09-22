@@ -121,6 +121,12 @@ svg { display: block; }
 .bar.negative { fill: var(--vscode-charts-red, #f14c4c); }
 .bar.today { fill: var(--vscode-charts-green, #89d185); }
 .goal-line { stroke: var(--vscode-charts-orange, #d18616); stroke-dasharray: 4 3; stroke-width: 1; }
+/* 読者の反応のグラフ（2026-09-23）。棒は執筆量と同じ .bar、基準の話だけ色を変える */
+.bar.mark { fill: var(--vscode-charts-orange, #d18616); }
+.line { fill: none; stroke: var(--vscode-charts-blue, #3794ff); stroke-width: 1.5; }
+.dot { fill: var(--vscode-charts-blue, #3794ff); }
+/* 率の表は3行しかない。画面幅いっぱいに広げると、率と式が左右に離れて読みにくい */
+table.reader-rates { width: auto; }
 .tick { fill: var(--vscode-descriptionForeground); font-size: 10px; }
 table { border-collapse: collapse; width: 100%; }
 th, td { padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--vscode-panel-border); }
@@ -568,6 +574,8 @@ function renderSiteRecords() {
       （どの欄が読めたか・どの列が要るかの判断は core 側が持つ）。
     */
     const reader = renderReaderLatest(record.readerLatest) +
+      renderReaderRates(record.readerRates) +
+      renderReaderCharts(record.readerCharts) +
       renderReaderStatsTable(record.readerWork, '読者の反応', true) +
       renderReaderEpisodes(record.readerEpisodes);
 
@@ -614,6 +622,211 @@ function renderReaderLatest(latest) {
     head.join(' ') + '（' + escapeHtml(formatWhen(latest.readAt)) + '・' +
     escapeHtml(latest.source) + '）</div>' +
     '<div class="reader-values">' + values.join('') + '</div></div>';
+}
+
+/**
+ * 離脱率・ブックマーク率・評価率（作者の依頼、2026-09-23）。
+ *
+ * **式と実際の数を一緒に出す**（「611 ÷ 23,299 = 2.6%」）。率だけだと、
+ * どの数を割ったのかを作者が確かめられない。**出せない率は理由を言う**
+ * ——0% と出すと、読めなかったのか本当に0なのか区別が付かない。
+ *
+ * 計算は core 側（readerRates.ts）が済ませてある。ここは並べるだけ。
+ */
+function renderReaderRates(rates) {
+  if (!rates) return '';
+  const rows = [rates.dropout, rates.bookmark, rates.rating].map((rate) => {
+    const value = rate.percent ? escapeHtml(rate.percent) : '—';
+    const detail = rate.expression
+      ? escapeHtml(rate.expression)
+      : escapeHtml(rate.missing || '');
+    // 話ごとと違う回の数を使ったときだけ、いつの数かを添える
+    const when = (rate.operands || [])
+      .filter((operand) => operand.readAt)
+      .map((operand) =>
+        escapeHtml(operand.label) + 'は ' +
+        escapeHtml(formatWhen(operand.readAt)) + ' の取り込み'
+      );
+    return '<tr><td>' + escapeHtml(rate.label) + '</td>' +
+      '<td class="num">' + value + '</td>' +
+      '<td>' + detail +
+      '<div class="site-meta">' + escapeHtml(rate.formula) +
+      (when.length > 0 ? '（' + when.join('、') + '）' : '') +
+      '</div></td></tr>';
+  });
+
+  const foot = [];
+  if (rates.base) {
+    foot.push('離脱率の基準は第' + formatCount(rates.base.episode) + '話（' +
+      escapeHtml(formatWhen(rates.base.updatedAt)) +
+      ' 更新。更新から3日以上たった話のうち、いちばん新しい話）。');
+  } else if (rates.baseMissing) {
+    foot.push('離脱率の基準の話を決められません：' +
+      escapeHtml(rates.baseMissing) + '。');
+  }
+  if (rates.episodeReadAt) {
+    foot.push('話ごとの数は ' + escapeHtml(formatWhen(rates.episodeReadAt)) +
+      ' の取り込み。');
+  }
+  return '<div class="site-sub">率</div>' +
+    '<table class="reader-rates"><tbody>' + rows.join('') + '</tbody></table>' +
+    (foot.length > 0 ? '<div class="site-foot">' + foot.join('') + '</div>' : '');
+}
+
+/**
+ * PVのグラフ（作者の依頼、2026-09-23）。**材料のあるグラフだけを出す。**
+ *
+ * どれも無ければ見出しごと出さない（空の枠を並べない）。年ごとはカクヨムが
+ * 出さないので、ふつうは出ない。
+ */
+function renderReaderCharts(charts) {
+  if (!charts) return '';
+  const blocks = [];
+  if (charts.episodes) {
+    const marked = charts.episodes.points.some((point) => point.marked);
+    blocks.push(readerChartBlock('話ごとのPV（最新の取り込み。横は話数）',
+      readerBarChart(charts.episodes.points),
+      marked ? '色の違う棒が、離脱率の基準の話。' : ''));
+  }
+  if (charts.day) {
+    blocks.push(readerChartBlock('日ごとのPV（作品全体）', readerBarChart(charts.day.points), ''));
+  }
+  if (charts.month) {
+    blocks.push(readerChartBlock('月ごとのPV（作品全体）', readerBarChart(charts.month.points), ''));
+  }
+  if (charts.year) {
+    blocks.push(readerChartBlock('年ごとのPV（作品全体）', readerBarChart(charts.year.points), ''));
+  }
+  if (charts.total) {
+    blocks.push(readerChartBlock('作品全体のPV（取り込みごとの累計）',
+      readerLineChart(charts.total.points), ''));
+  }
+  return blocks.join('');
+}
+
+function readerChartBlock(title, svgHtml, note) {
+  return '<div class="site-sub">' + escapeHtml(title) + '</div>' + svgHtml +
+    (note ? '<div class="site-foot">' + escapeHtml(note) + '</div>' : '');
+}
+
+/**
+ * 目盛りを出す位置。**執筆量のグラフ（renderChart）と同じ間引き方**
+ * ——本数とラベルの幅の両方で決め、右端（いちばん新しい点）から数える。
+ */
+function readerTickIndices(points, slot) {
+  const maxLabelWidth = Math.max(1, ...points.map((point) => estimateLabelWidth(point.label)));
+  const step = Math.max(
+    Math.ceil(points.length / 12),
+    Math.ceil((maxLabelWidth + 8) / slot),
+    1
+  );
+  const shown = new Set();
+  for (let i = points.length - 1; i >= 0; i -= step) shown.add(i);
+  return shown;
+}
+
+/**
+ * 棒グラフ。**執筆量のグラフと同じ作り**（.chart-wrap・.bar・.axis・.tick）。
+ *
+ * 話ごとは219本になることがあるので、本数が多いときは棒を細くする
+ * （はみ出たぶんは .chart-wrap が横に送れる）。
+ */
+function readerBarChart(points) {
+  const count = points.length;
+  const barWidth = count > 60 ? 4 : count > 30 ? 10 : 26;
+  const gap = count > 60 ? 1 : count > 30 ? 3 : 6;
+  const slot = barWidth + gap;
+  const padLeft = 56;
+  const padRight = 12;
+  const padTop = 16;
+  const padBottom = 34;
+  const plotHeight = 140;
+  const width = padLeft + padRight + count * slot;
+  const height = padTop + plotHeight + padBottom;
+  const maxValue = Math.max(1, ...points.map((point) => point.value));
+  const baseY = padTop + plotHeight;
+
+  const parts = [];
+  parts.push('<line class="axis" x1="' + padLeft + '" y1="' + baseY + '" x2="' + width + '" y2="' + baseY + '" />');
+  parts.push('<text class="tick" x="4" y="' + (padTop + 8) + '">' + formatCount(maxValue) + '</text>');
+  parts.push('<text class="tick" x="4" y="' + (baseY + 3) + '">0</text>');
+
+  const shown = readerTickIndices(points, slot);
+  points.forEach((point, index) => {
+    const x = padLeft + index * slot;
+    const barHeight = Math.max(point.value === 0 ? 0 : 1, (point.value / maxValue) * plotHeight);
+    const y = baseY - barHeight;
+    parts.push(
+      '<rect class="bar' + (point.marked ? ' mark' : '') + '" x="' + x + '" y="' + y +
+      '" width="' + barWidth + '" height="' + barHeight + '" rx="1">' +
+      '<title>' + escapeHtml(point.label + '  ' + formatCount(point.value) + ' PV') + '</title>' +
+      '</rect>'
+    );
+    // 基準の話は、目盛りの間引きに関係なく棒の上へ名前を出す
+    if (point.marked) {
+      parts.push(
+        '<text class="tick" x="' + (x + barWidth / 2) + '" y="' + Math.max(10, y - 3) +
+        '" text-anchor="middle">' + escapeHtml(point.label) + '</text>'
+      );
+    }
+    if (shown.has(index)) {
+      parts.push(
+        '<text class="tick" x="' + (x + barWidth / 2) + '" y="' + (baseY + 16) +
+        '" text-anchor="middle">' + escapeHtml(point.label) + '</text>'
+      );
+    }
+  });
+  return '<div class="chart-wrap"><svg width="' + width + '" height="' + height +
+    '" viewBox="0 0 ' + width + ' ' + height + '">' + parts.join('') + '</svg></div>';
+}
+
+/**
+ * 折れ線（作品全体のPVの伸び）。**縦軸は最小から最大まで**を使う——累計は
+ * 0から引くと、伸びがほとんど平らに見える。上下の端に実際の数を書く。
+ */
+function readerLineChart(points) {
+  const slot = 32;
+  const padLeft = 72;
+  const padRight = 12;
+  const padTop = 12;
+  const padBottom = 34;
+  const plotHeight = 140;
+  const width = padLeft + padRight + points.length * slot;
+  const height = padTop + plotHeight + padBottom;
+  const values = points.map((point) => point.value);
+  const maxValue = Math.max(...values);
+  const minValue = Math.min(...values);
+  const span = maxValue - minValue || 1;
+  const baseY = padTop + plotHeight;
+  const xOf = (index) => padLeft + index * slot + slot / 2;
+  const yOf = (value) => baseY - ((value - minValue) / span) * plotHeight;
+
+  const parts = [];
+  parts.push('<line class="axis" x1="' + padLeft + '" y1="' + baseY + '" x2="' + width + '" y2="' + baseY + '" />');
+  parts.push('<text class="tick" x="4" y="' + (padTop + 8) + '">' + formatCount(maxValue) + '</text>');
+  if (minValue !== maxValue) {
+    parts.push('<text class="tick" x="4" y="' + (baseY + 3) + '">' + formatCount(minValue) + '</text>');
+  }
+  if (points.length > 1) {
+    parts.push('<polyline class="line" points="' +
+      points.map((point, index) => xOf(index) + ',' + yOf(point.value)).join(' ') + '" />');
+  }
+  const shown = readerTickIndices(points, slot);
+  points.forEach((point, index) => {
+    parts.push(
+      '<circle class="dot" cx="' + xOf(index) + '" cy="' + yOf(point.value) + '" r="3">' +
+      '<title>' + escapeHtml(formatWhen(point.key) + '  ' + formatCount(point.value) + ' PV') + '</title>' +
+      '</circle>'
+    );
+    if (shown.has(index)) {
+      parts.push(
+        '<text class="tick" x="' + xOf(index) + '" y="' + (baseY + 16) +
+        '" text-anchor="middle">' + escapeHtml(point.label) + '</text>'
+      );
+    }
+  });
+  return '<div class="chart-wrap"><svg width="' + width + '" height="' + height +
+    '" viewBox="0 0 ' + width + ' ' + height + '">' + parts.join('') + '</svg></div>';
 }
 
 /** ラベル（小さく薄く）と数字の組。ラベルが空なら数字だけ置く */

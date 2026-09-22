@@ -3,6 +3,7 @@ import {
   hasReaderStatsMetrics,
   isKnownPostingSite,
   isReaderStatsPeriodKey,
+  isReaderStatsUpdatedAt,
   postingSiteInfo,
   POSTING_SITES,
   READER_STATS_PERIODS,
@@ -51,6 +52,14 @@ export interface ReaderStatsEnvelopeEntry {
   period?: ReaderStatsPeriod;
   periodKey?: string;
   metrics: ReaderStatsMetrics;
+  /**
+   * その話のサイト上の最終更新（ISO 8601、時差つき）。話ごとの行にだけ入る。
+   *
+   * **省いてよい欄**なので封筒の版数は上げない（約束 v1b、2026-09-23）。
+   * これを知らない古い母艦は、この欄を読み飛ばして残りを受け取る
+   * （`parseEntry` は知っている欄だけを拾う作り）。
+   */
+  updatedAt?: string;
 }
 
 export interface ReaderStatsEnvelope {
@@ -290,6 +299,28 @@ function parseEntry(raw: unknown): ReaderStatsEnvelopeEntry | undefined {
   const metrics = parseMetrics(value.metrics);
   if (!metrics) return undefined;
 
+  /*
+    最終更新（約束 v1b）。**null と空文字は「欄なし」**（期間の見出しと同じ
+    扱い）——読めなかった日時を空で書くのは素直な書き方で、そこで断ると
+    数字の正しい封筒まで丸ごと落ちる。
+
+    **書いてあるのに日時として読めなければ、封筒ごと断る。** 直し方は
+    こちらには分からないし、読めない日時で「基準の話」を選ぶと率が化ける。
+    作品全体の行に付いていたら、どの話の日時か決められないので同じく断る。
+  */
+  const rawUpdatedAt = absent(value.updatedAt) ? undefined : value.updatedAt;
+  if (rawUpdatedAt !== undefined && typeof rawUpdatedAt !== "string") {
+    return undefined;
+  }
+  const updatedAt =
+    rawUpdatedAt === undefined || rawUpdatedAt.trim() === ""
+      ? undefined
+      : rawUpdatedAt.trim();
+  if (updatedAt !== undefined) {
+    if (scope !== "episode") return undefined;
+    if (!isReaderStatsUpdatedAt(updatedAt)) return undefined;
+  }
+
   return {
     scope,
     ...(episode === undefined ? {} : { episode: episode as number }),
@@ -298,6 +329,7 @@ function parseEntry(raw: unknown): ReaderStatsEnvelopeEntry | undefined {
       ? {}
       : { periodKey: (periodKey as string).trim() }),
     metrics,
+    ...(updatedAt === undefined ? {} : { updatedAt }),
   };
 }
 

@@ -12,6 +12,8 @@ import {
   type ReaderStatsRecord,
   type ReaderStatsSource,
 } from "../models/posting";
+import { computeReaderRates, type ReaderRates } from "./readerRates";
+import { buildReaderCharts, type ReaderCharts } from "./readerStatsCharts";
 
 /**
  * 執筆量パネルに出す「サイトの記録」（設計書6.68.5）。
@@ -74,6 +76,15 @@ export interface PostingSiteRecord {
    * 1件も無ければ null（節ごと出さない）。
    */
   readerEpisodes: ReaderStatsTable | null;
+  /**
+   * 離脱率・ブックマーク率・評価率（作者の依頼、2026-09-23）。
+   *
+   * **3つとも第1話のPVを分母にする**ので、話ごとの記録が1件も無ければ
+   * null（節ごと出さない）。出せない率は、中で理由を持つ。
+   */
+  readerRates: ReaderRates | null;
+  /** PVのグラフ（各話・日・月・年・合計）。材料の無いグラフは null */
+  readerCharts: ReaderCharts;
 }
 
 /**
@@ -212,6 +223,15 @@ export function buildPostingSiteRecords(
         .slice(0, READER_STATS_HISTORY_LIMIT)
     );
     const readerEpisodes = readerStatsTable(latestEpisodeRows(grouped));
+    /*
+      率とグラフは**台帳に書かれた順**で渡す（`readerStatsForSite` は新しい順に
+      並べ替える）。同じ日時に同じ話が2件あるとき、あとから足したほうを
+      採るには、足した順が要る。
+    */
+    const inLedgerOrder = (ledger.readerStats ?? []).filter(
+      (entry) => entry.site === info.id
+    );
+    const rates = computeReaderRates(inLedgerOrder);
     // 出すのは「作品情報がある」か「順位がある」か「反応がある」ときだけ。
     // 登録しただけのサイトは、まだ見せるものが無い（空の行を増やさない）
     if (!profile && history.length === 0 && grouped.length === 0) {
@@ -238,6 +258,11 @@ export function buildPostingSiteRecords(
       readerLatest: readerWork?.rows[0] ?? readerEpisodes?.rows[0] ?? null,
       readerWork,
       readerEpisodes,
+      readerRates: rates.episodeReadAt === null ? null : rates,
+      readerCharts: buildReaderCharts(
+        inLedgerOrder,
+        rates.base?.episode ?? null
+      ),
     });
   }
 

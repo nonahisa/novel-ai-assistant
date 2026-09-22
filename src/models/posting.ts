@@ -432,6 +432,17 @@ export interface ReaderStatsRecord {
   source: ReaderStatsSource;
   /** 作者のメモ（任意） */
   note?: string;
+  /**
+   * その話の**サイト上の最終更新の日時**（ISO 8601。時差つき）。
+   * 話ごとの記録（`scope: "episode"`）にだけ入りうる。
+   *
+   * 離脱率・ブックマーク率・評価率の「基準の話」を選ぶのに使う
+   * （`core/readerRates.ts`）。更新した直後の話はまだ読まれ切っていないので、
+   * 読み取りの72時間以上前に更新された話だけを基準にする。
+   *
+   * **読めなければ欄ごと持たない**（空文字にしない）。
+   */
+  updatedAt?: string;
 }
 
 export interface PostingRecord {
@@ -789,7 +800,12 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
         requireNonEmptyString(entry.readAt, `${entryPath}.readAt`);
         optionalString(entry.periodKey, `${entryPath}.periodKey`);
         optionalString(entry.note, `${entryPath}.note`);
+        optionalString(entry.updatedAt, `${entryPath}.updatedAt`);
         const note = ((entry.note as string | undefined) ?? "").trim();
+        // 空文字は「欄なし」と同じ（空の欄は持たせない）
+        const updatedAt = (
+          (entry.updatedAt as string | undefined) ?? ""
+        ).trim();
         const read = parseReaderStatsMetrics(
           entry.metrics,
           `${entryPath}.metrics`
@@ -830,6 +846,7 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
           metrics: read.metrics,
           source: entry.source as ReaderStatsSource,
           ...(note ? { note } : {}),
+          ...(updatedAt ? { updatedAt } : {}),
         };
         assertReaderStatsRecord(record, entryPath);
         return record;
@@ -1542,6 +1559,36 @@ export function assertReaderStatsRecord(
   if (!READER_STATS_SOURCES.includes(record.source)) {
     invalid(`${path}.source`);
   }
+  if (record.updatedAt !== undefined) {
+    // **最終更新は話にしか無い**（作品全体の行に付いていたら、どの話の
+    // 日時なのか決められない。話数と同じ扱い）
+    if (record.scope !== "episode") invalid(`${path}.updatedAt`);
+    if (!isReaderStatsUpdatedAt(record.updatedAt)) {
+      invalid(`${path}.updatedAt`);
+    }
+  }
+}
+
+/**
+ * 最終更新の日時として読める書き方か（ISO 8601、**時差つき**）。
+ *
+ * **時差を必須にする。** 基準の話は「読み取りの72時間以上前に更新された話」
+ * で選ぶので、時差の無い日時は手元の時計しだいで最大半日ずれ、境目の話の
+ * 扱いが機械ごとに変わる。貼り込み係は `+09:00` を付けて書く約束である。
+ *
+ * 見るのは形と、日時として読めることだけ（期間の見出しと同じく、読む側を
+ * 厳しくしすぎると、1行の打ち間違いで台帳ぜんぶが読めなくなる）。
+ */
+export function isReaderStatsUpdatedAt(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(
+      value
+    )
+  ) {
+    return false;
+  }
+  return !Number.isNaN(Date.parse(value));
 }
 
 /** 台帳ぜんぶの記録を確かめる（保存の関所が使う） */
@@ -1564,6 +1611,7 @@ export function withReaderStats(
   record: ReaderStatsRecord
 ): PostingLedger {
   const note = (record.note ?? "").trim();
+  const updatedAt = (record.updatedAt ?? "").trim();
   const metrics: ReaderStatsMetrics = {};
   // **知っている欄だけを写す**（呼ぶ側が足した見覚えのない欄は持ち歩かない）
   for (const info of ALL_READER_STATS_METRICS) {
@@ -1582,6 +1630,7 @@ export function withReaderStats(
     metrics,
     source: record.source,
     ...(note ? { note } : {}),
+    ...(updatedAt ? { updatedAt } : {}),
   };
   assertReaderStatsRecord(next);
 
