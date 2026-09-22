@@ -400,6 +400,7 @@ import {
   importAdviceProfileMirror,
   refreshAdviceProfileMirror,
 } from "./features/adviceProfileMirror";
+import { startWindowCard } from "./features/windowCard";
 import {
   reviewProposals,
   toggleReviewLock,
@@ -2221,6 +2222,16 @@ export async function activate(
   // 判定2が拾って「開き直してください」と出る。
   // 失敗しても何も言わない（次に指示書を置くときに写し直される）
   void refreshStableBundle(context).catch(() => undefined);
+
+  // ─── 窓の札（MCP の windows.list。作者の依頼 2026-09-22） ───
+  // 2台で実機確認をするとき、どの窓がどの版で動いているかを
+  // 外のセッションが聞けるように、保管庫へ札を書く。5分ごとに打ち直し、
+  // 閉じるときに消す（`deactivate`）。ブラウザ版では書かない（読む相手が居ない）
+  const windowCard = startWindowCard(context);
+  if (windowCard) {
+    context.subscriptions.push(windowCard);
+    closeWindowCard = windowCard.close;
+  }
 
   // ─── 助言方針の控え（設計書6.86.7） ───
   // **取り込んでから書き出す。** 外部AI経由の相談で動いた推定は
@@ -6229,7 +6240,16 @@ function describeScanSummary(
  */
 let beforeClose: (() => void) | undefined;
 
-export function deactivate(): void {
+/**
+ * 窓の札を消す（MCP の windows.list）。起動時に掴んでおく。
+ *
+ * **消すのは非同期なので、`deactivate()` から約束を返して待ってもらう。**
+ * 待ち切られないこともあるが、そのときは札の `updatedAt` が古くなり、
+ * MCP が「たぶん閉じた」と印を付ける（それが受け皿）。
+ */
+let closeWindowCard: (() => Promise<void>) | undefined;
+
+export function deactivate(): Promise<void> | undefined {
   /*
     **閉じる前に未送信を問う**（設計書6.15.1、作者の裁定 2026-09-21）。
 
@@ -6254,6 +6274,9 @@ export function deactivate(): void {
   // 後片付けは context.subscriptions に任せる。
   // ログだけは遅延生成でsubscriptionsに載っていないので個別に閉じる
   disposeLog();
+
+  // 札は最後に消す（上の問いやログの片づけを、札の消去の待ちで遅らせない）
+  return closeWindowCard?.().catch(() => undefined);
 }
 
 /**

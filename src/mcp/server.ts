@@ -50,6 +50,7 @@ import {
   guideSpotlight,
   type SpotlightRequestInput,
 } from "./tools/spotlight";
+import { windowsList } from "./tools/windows";
 
 /**
  * Claude Code から、製品のプロンプトと検算をツールとして呼ぶ（設計書6.87.8）。
@@ -58,8 +59,8 @@ import {
  * そちらを直に呼ぶ（`test/unit/mcpTools.test.ts`）。混ぜると、
  * ツールの中身を確かめるのに stdio を立てなければならなくなる。
  *
- * **道具は12本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight` を
- * 足した。0.66.7 の時点では10本）。
+ * **道具は13本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
+ * 0.75.x で `windows.list` を足した。0.66.7 の時点では10本）。
  * 56本あったものを
  * `feature` を引数に取る形へ束ねた——**AI は繋いだ瞬間にこの一覧を読む**ので、
  * 一覧そのものが会話のたびに払う費用だった（44,882字）。
@@ -196,6 +197,22 @@ server.registerTool(
       "novel.detect / novel.material に feature（typo・proofread など）を渡す形です。" +
       "作者が置いた古い名前の許可は、そのまま効きます。",
   }))
+);
+
+server.registerTool(
+  "windows.list",
+  {
+    title: "開いている VS Code の窓と、その版",
+    description:
+      "この機械で拡張機能が動いている窓の一覧を返します（拡張機能の版・VS Code の版・" +
+      "窓の名前・開発ホストか・開いているフォルダー・最後に打ち直した時刻）。" +
+      "**読むだけで、作品の中身は読みません。** mcp.version はこのサーバー（束）の版です。",
+  },
+  /*
+    **引数を渡さない。** `folder` を取らないので許可の対象外（`mcp.version` と
+    同じ）で、`now` を外から差し込めるのは試験のためだけである。
+  */
+  tool("windows.list", () => windowsList())
 );
 
 server.registerTool(

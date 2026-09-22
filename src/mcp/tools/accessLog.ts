@@ -66,9 +66,12 @@ export function exposureOf(
     ——作品フォルダーは許可の鍵としてしか使わず、ファイルを1つも開かない。
     `guide.spotlight`（0.75.6、設計書6.104）も**画面を光らせる依頼を1行
     置くだけ**で、原稿も設定資料も読まないし、操作も実行しない。
+    `windows.list`（0.75.x）は**保管庫の窓の札を読むだけ**で、作品フォルダーを
+    1つも開かない（`mcp.version` と同じ）。
   */
   if (
     tool === "mcp.version" ||
+    tool === "windows.list" ||
     tool === "ollama.models" ||
     tool === "novel.propose" ||
     tool === "novel.notice" ||

@@ -15,6 +15,7 @@ import {
   type AdviceMirrorEntry,
   type AdviceMirrorFile,
 } from "../core/adviceProfileMirror";
+import { GLOBAL_STORAGE_ENV, mcpGlobalStorageRoot } from "./globalStorage";
 
 /**
  * 助言方針の控えを、MCP サーバー側から読み書きする（設計書6.86.7・6.87.15）。
@@ -47,28 +48,16 @@ import {
  * 持ち込まない。
  */
 
-/** 控えの置き場を明示する環境変数。**指定があればこちらが勝つ** */
-export const ADVICE_STORAGE_ENV = "NOVELAI_GLOBAL_STORAGE";
-
 /**
- * 控えの置き場。
+ * 控えの置き場を明示する環境変数。**指定があればこちらが勝つ**
  *
- * **毎回調べ直す。** 走っている間に変わるものではないが、値を抱え込むと
- * 試験が環境変数を差し替えられない（`staleness.ts` が `process.argv` を
- * 引数で受けているのと同じ理由）。
+ * 決め方そのものは `globalStorage.ts` へ出した（窓の札も同じ保管庫を読む
+ * ため。0.75.x）。ここの名前は、既存の試験が指しているので残す。
  */
-function storageRoot(): string | undefined {
-  const explicit = process.env[ADVICE_STORAGE_ENV];
-  if (explicit && explicit.trim()) return nodePath.resolve(explicit.trim());
-
-  // 束の居場所＝控えの置き場（上の断り書き）。読めなければ諦める
-  const bundle = process.argv[1];
-  if (!bundle) return undefined;
-  return nodePath.dirname(nodePath.resolve(bundle));
-}
+export const ADVICE_STORAGE_ENV = GLOBAL_STORAGE_ENV;
 
 function mirrorPath(): string | undefined {
-  const root = storageRoot();
+  const root = mcpGlobalStorageRoot();
   return root ? nodePath.join(root, ADVICE_MIRROR_FILE) : undefined;
 }
 
