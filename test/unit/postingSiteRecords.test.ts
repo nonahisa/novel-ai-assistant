@@ -3,6 +3,9 @@ import {
   buildPostingSiteRecords,
   isOpenableWorkUrl,
   narouAnalysisUrl,
+  readerStatsColumns,
+  type GroupedReaderStatsRow,
+  type ReaderStatsTable,
 } from "../../src/core/postingSiteRecords";
 import {
   emptyPostingLedger,
@@ -286,6 +289,33 @@ describe("読者の反応の行", () => {
     });
   }
 
+  /**
+   * **貼り込み係の封筒が1回で書き足すもの**（実物。作者の教科書チート）。
+   * 「その時点」「日」「月」の3件が、同じ日時で台帳へ入る。
+   */
+  function threeAtOnce(ledger: PostingLedger, readAt: string): PostingLedger {
+    const day = readAt.slice(0, 10);
+    let next = withStats(ledger, {
+      readAt,
+      source: "helper",
+      metrics: { pv: 1053339, points: 1612 },
+    });
+    next = withStats(next, {
+      readAt,
+      source: "helper",
+      period: "day",
+      periodKey: day,
+      metrics: { pv: 1 },
+    });
+    return withStats(next, {
+      readAt,
+      source: "helper",
+      period: "month",
+      periodKey: day.slice(0, 7),
+      metrics: { pv: 667 },
+    });
+  }
+
   test("記録が無ければ、反応の欄は空のまま", () => {
     const ledger = withSiteProfile(registered(), "kakuyomu", {
       workId: "1177354054892",
@@ -293,7 +323,8 @@ describe("読者の反応の行", () => {
     const record = buildPostingSiteRecords(ledger)[0];
 
     expect(record.readerLatest).toBeNull();
-    expect(record.readerHistory).toEqual([]);
+    expect(record.readerWork).toBeNull();
+    expect(record.readerEpisodes).toBeNull();
   });
 
   test("反応だけがあるサイトも、行として出す", () => {
@@ -301,9 +332,9 @@ describe("読者の反応の行", () => {
 
     expect(record.site).toBe("kakuyomu");
     // あるものだけを並べる（読めなかった欄は出さない）
-    expect(record.readerLatest?.metrics).toBe("PV 1,234");
+    expect(record.readerLatest?.snapshot).toBe("PV 1,234");
     expect(record.readerLatest?.scope).toBe("作品全体");
-    expect(record.readerLatest?.period).toBe("その時点");
+    expect(record.readerLatest?.isEpisode).toBe(false);
     expect(record.readerLatest?.source).toBe("手入力");
   });
 
@@ -314,47 +345,223 @@ describe("読者の反応の行", () => {
       })
     )[0];
 
-    expect(record.readerLatest?.metrics).toBe(
+    expect(record.readerLatest?.snapshot).toBe(
       "PV 1,234／ブックマーク 56／評価 789pt／いいね 12"
     );
+    // **ラベルと数字は分けても渡す**（表の外で大きく見せるため）
+    expect(record.readerLatest?.snapshotValues).toEqual([
+      { label: "PV", value: "1,234", unit: "" },
+      { label: "ブックマーク", value: "56", unit: "" },
+      { label: "評価", value: "789", unit: "pt" },
+      { label: "いいね", value: "12", unit: "" },
+    ]);
   });
 
-  test("履歴は新しい順で、範囲と粒度が読める", () => {
+  /**
+   * **1回の取り込みが1行になる**（作者の言葉「サイトの記録が読みにくいです」、
+   * 2026-09-22）。台帳は粒度ごとに1件ずつ書き足すので、ボタンを1回押すと
+   * 「その時点」「日」「月」の3件が並び、押したのは2回なのに6行あった。
+   */
+  test("同じ取り込みの3件が1行になり、粒度は列になる", () => {
+    const ledger = threeAtOnce(registered(), "2026-09-22T12:00:00.000Z");
+    const record = buildPostingSiteRecords(ledger)[0];
+    const rows = record.readerWork?.rows ?? [];
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].snapshot).toBe("PV 1,053,339／評価 1,612pt");
+    expect(rows[0].day).toBe("PV 1");
+    expect(rows[0].month).toBe("PV 667");
+    // 畳んだ元の件数は残す（台帳から1件も捨てていないことを数で言えるように）
+    expect(rows[0].count).toBe(3);
+  });
+
+  test("日時が違えば分かれる。台帳の件数は変わらない", () => {
+    let ledger = threeAtOnce(registered(), "2026-09-22T12:00:00.000Z");
+    ledger = threeAtOnce(ledger, "2026-09-22T11:45:00.000Z");
+
+    const rows = buildPostingSiteRecords(ledger)[0].readerWork?.rows ?? [];
+    expect(rows).toHaveLength(2);
+    // 新しい順のまま
+    expect(rows[0].readAt).toBe("2026-09-22T12:00:00.000Z");
+    // **台帳は1件も捨てない**（畳むのは見せ方だけ）
+    expect(ledger.readerStats).toHaveLength(6);
+    expect(rows.reduce((sum, row) => sum + row.count, 0)).toBe(6);
+  });
+
+  test("出どころが違えば畳まない（意味が違う数字を混ぜない）", () => {
     let ledger = withStats(registered(), {
-      readAt: "2026-09-01T00:00:00.000Z",
-      period: "month",
-      periodKey: "2026-08",
+      readAt: "2026-09-22T12:00:00.000Z",
+      source: "helper",
     });
     ledger = withStats(ledger, {
-      readAt: "2026-09-05T00:00:00.000Z",
+      readAt: "2026-09-22T12:00:00.000Z",
+      source: "backup",
+      metrics: { pv: 9 },
+    });
+
+    const rows = buildPostingSiteRecords(ledger)[0].readerWork?.rows ?? [];
+    expect(rows.map((row) => row.source)).toEqual(["貼り付け", "バックアップ"]);
+  });
+
+  /**
+   * **粒度の日付は、ずれているときだけ添える。** ほとんどは取り込んだ日と
+   * 同じ日・同じ月なので、毎行「日 2026-09-22」と書くと同じ字を何度も読む。
+   */
+  test("日付がずれている粒度にだけ、日付を添える", () => {
+    let ledger = withStats(registered(), {
+      readAt: "2026-09-22T12:00:00.000Z",
+      period: "day",
+      periodKey: "2026-09-21",
+      metrics: { pv: 5 },
+    });
+    ledger = withStats(ledger, {
+      readAt: "2026-09-22T12:00:00.000Z",
+      period: "month",
+      periodKey: "2026-08",
+      metrics: { pv: 400 },
+    });
+
+    const rows = buildPostingSiteRecords(ledger)[0].readerWork?.rows ?? [];
+    expect(rows[0].day).toBe("PV 5（9/21）");
+    expect(rows[0].month).toBe("PV 400（2026/08）");
+  });
+
+  test("年と累計は、専用の列が無くても捨てない", () => {
+    const ledger = withStats(registered(), {
+      readAt: "2026-09-22T12:00:00.000Z",
+      period: "total",
+      metrics: { pv: 42 },
+    });
+
+    const table = buildPostingSiteRecords(ledger)[0].readerWork;
+    expect(table?.rows[0].other).toBe("累計 PV 42");
+    expect(table?.columns.other).toBe(true);
+  });
+
+  /**
+   * **話ごとの記録は、作品全体と混ぜない**（設計書6.79.7）。アクセス数の
+   * ページは1回で50話ぶん入るので、混ざると作品全体の行が埋もれる。
+   */
+  test("話ごとの記録は別の表で、最新の1回ぶんだけを番号順に出す", () => {
+    let ledger = withStats(registered(), {
+      readAt: "2026-09-22T12:00:00.000Z",
+      metrics: { pv: 1000 },
+    });
+    for (const episode of [3, 1]) {
+      ledger = withStats(ledger, {
+        readAt: "2026-09-22T12:00:00.000Z",
+        scope: "episode",
+        episode,
+        metrics: { pv: episode * 10 },
+        source: "helper",
+      });
+    }
+    // 前の回の話ごとの記録。**画面には出さないが、台帳には残る**
+    ledger = withStats(ledger, {
+      readAt: "2026-09-21T12:00:00.000Z",
       scope: "episode",
-      episode: 3,
-      metrics: { pv: 120 },
+      episode: 1,
+      metrics: { pv: 5 },
       source: "helper",
     });
 
     const record = buildPostingSiteRecords(ledger)[0];
-    expect(record.readerHistory.map((row) => row.scope)).toEqual([
-      "第3話",
+    // 作品全体の表に、話ごとの行は入らない
+    expect(record.readerWork?.rows.map((row) => row.scope)).toEqual([
       "作品全体",
     ]);
-    expect(record.readerHistory[0].source).toBe("貼り付け");
-    expect(record.readerHistory[1].period).toBe("月 2026-08");
+    expect(record.readerEpisodes?.rows.map((row) => row.scope)).toEqual([
+      "第1話",
+      "第3話",
+    ]);
+    expect(ledger.readerStats).toHaveLength(4);
   });
 
-  test("履歴は20行までにする（画面が履歴で埋まらないように）", () => {
+  test("話ごとが1件も無ければ、その表は作らない（節ごと出さない）", () => {
+    const record = buildPostingSiteRecords(withStats(registered(), {}))[0];
+    expect(record.readerEpisodes).toBeNull();
+  });
+
+  test("履歴は20回までにする（画面が履歴で埋まらないように）", () => {
     let ledger = registered();
     for (let index = 0; index < 25; index++) {
       ledger = withStats(ledger, {
-        readAt: `2026-09-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+        readAt: `2026-09-${String(index + 1).padStart(2, "0")}T03:00:00.000Z`,
         metrics: { pv: index + 1 },
       });
     }
 
     const record = buildPostingSiteRecords(ledger)[0];
-    expect(record.readerHistory).toHaveLength(20);
+    expect(record.readerWork?.rows).toHaveLength(20);
     // 落とすのは古いほうから（新しい順の先頭は残る）
-    expect(record.readerHistory[0].metrics).toBe("PV 25");
+    expect(record.readerWork?.rows[0].snapshot).toBe("PV 25");
+  });
+});
+
+/** 畳んだあとの1行。検査ごとに、要るところだけ差し替える */
+function groupedRow(
+  patch: Partial<GroupedReaderStatsRow> = {}
+): GroupedReaderStatsRow {
+  return {
+    readAt: "2026-09-22T12:00:00.000Z",
+    scope: "作品全体",
+    episode: null,
+    isEpisode: false,
+    snapshot: "PV 1,234",
+    snapshotValues: [{ label: "PV", value: "1,234", unit: "" }],
+    day: "",
+    month: "",
+    other: "",
+    source: "貼り付け",
+    note: "",
+    count: 1,
+    ...patch,
+  };
+}
+
+/** 画面へ渡す表1つぶん。**列の判断は製品と同じ関数に通す** */
+function groupedTable(rows: GroupedReaderStatsRow[]): ReaderStatsTable {
+  return { rows, columns: readerStatsColumns(rows) };
+}
+
+/**
+ * 出す列の決め方（設計書6.79.7）。**中身が1種類しかない列は出さない。**
+ *
+ * 実物では「範囲」が全行「作品全体」、「出どころ」が全行「貼り付け」で
+ * 折り返し、「メモ」は1件も入っていないのに見出しが「メ／モ」と縦に潰れていた。
+ */
+describe("反応の表に出す列", () => {
+  const base = groupedRow();
+
+  test("メモが1件でもあれば出し、1件も無ければ出さない", () => {
+    expect(readerStatsColumns([base]).note).toBe(false);
+    expect(
+      readerStatsColumns([base, { ...base, note: "更新直後" }]).note
+    ).toBe(true);
+  });
+
+  test("範囲は、1種類しかなければ出さない", () => {
+    expect(readerStatsColumns([base, { ...base }]).scope).toBe(false);
+    expect(
+      readerStatsColumns([base, { ...base, scope: "第3話", isEpisode: true }])
+        .scope
+    ).toBe(true);
+  });
+
+  test("出どころは、全行が同じなら列にせず注記へ回す", () => {
+    const one = readerStatsColumns([base, { ...base }]);
+    expect(one.source).toBe(false);
+    expect(one.onlySource).toBe("貼り付け");
+
+    const two = readerStatsColumns([base, { ...base, source: "手入力" }]);
+    expect(two.source).toBe(true);
+    expect(two.onlySource).toBeNull();
+  });
+
+  test("今日・今月の列は、中身のある行があるときだけ出す", () => {
+    expect(readerStatsColumns([base]).day).toBe(false);
+    expect(readerStatsColumns([{ ...base, day: "PV 1" }]).day).toBe(true);
+    expect(readerStatsColumns([{ ...base, month: "PV 667" }]).month).toBe(true);
   });
 });
 
@@ -397,51 +604,84 @@ function panelFunction<T>(name: string, needs: string[] = []): T {
 }
 
 describe("執筆量パネルの側", () => {
+  type RenderTable = (
+    table: ReaderStatsTable | null,
+    title: string,
+    fold: boolean
+  ) => string;
+
+  function renderTable(): RenderTable {
+    return panelFunction<RenderTable>("renderReaderStatsTable", [
+      "escapeHtml",
+      "formatWhen",
+      "formatCount",
+      "readerTableOf",
+    ]);
+  }
+
   /**
-   * **反応の表にもメモの列を出す**（0.33.9のレビュー、L2）。
-   *
-   * 順位の表にはメモの列があるのに、反応の表には無かった。手入力でも封筒でも
-   * メモは台帳に入るので、書いたのに二度と読めない欄になっていた。
+   * **要る列だけを出す**（作者の言葉「サイトの記録が読みにくいです」、
+   * 2026-09-22）。メモは1件も入っていないのに幅を食い、見出しが「メ／モ」と
+   * 縦に潰れていた。**消すのではなく、要るときだけ出す。**
    */
-  test("反応の表に、メモの列がある", () => {
-    const render = panelFunction<
-      (
-        rows: Array<{
-          readAt: string;
-          scope: string;
-          period: string;
-          metrics: string;
-          source: string;
-          note: string | null;
-        }>
-      ) => string
-    >("renderReaderStatsTable", ["escapeHtml", "formatWhen"]);
+  test("メモは、入っている行があるときだけ列にする", () => {
+    const render = renderTable();
 
-    const html = render([
-      {
-        readAt: "2026-09-05T00:00:00.000Z",
-        scope: "作品全体",
-        period: "その時点",
-        metrics: "PV 1,234",
-        source: "手入力",
-        note: "更新直後",
-      },
-    ]);
+    const withNote = render(
+      groupedTable([groupedRow({ note: "更新直後" })]),
+      "読者の反応",
+      true
+    );
+    expect(withNote).toContain("<th>メモ</th>");
+    expect(withNote).toContain("更新直後");
 
-    expect(html).toContain("<th>メモ</th>");
-    expect(html).toContain("更新直後");
-    // メモの無い行でも列は消えない（表がずれる）
-    const noNote = render([
-      {
-        readAt: "2026-09-05T00:00:00.000Z",
-        scope: "作品全体",
-        period: "その時点",
-        metrics: "PV 1,234",
-        source: "手入力",
-        note: null,
-      },
-    ]);
-    expect(noNote).toContain("<td></td>");
+    const noNote = render(groupedTable([groupedRow()]), "読者の反応", true);
+    expect(noNote).not.toContain("<th>メモ</th>");
+  });
+
+  test("出どころが1種類なら、列にせず表の下に1回だけ書く", () => {
+    const render = renderTable();
+
+    const one = render(groupedTable([groupedRow()]), "読者の反応", true);
+    expect(one).not.toContain("<th>出どころ</th>");
+    expect(one).toContain("すべて貼り付けで取り込んだものです。");
+
+    const two = render(
+      groupedTable([groupedRow(), groupedRow({ source: "手入力" })]),
+      "読者の反応",
+      true
+    );
+    expect(two).toContain("<th>出どころ</th>");
+    expect(two).not.toContain("すべて貼り付けで");
+  });
+
+  test("粒度は列になり、「その時点」は見出しに1回だけ書く", () => {
+    const html = renderTable()(
+      groupedTable([groupedRow({ day: "PV 1", month: "PV 667" })]),
+      "読者の反応",
+      true
+    );
+
+    expect(html).toContain("<th>反応（その時点）</th>");
+    expect(html).toContain("<th>今日</th>");
+    expect(html).toContain("<th>今月</th>");
+    // 粒度の列は無くなったので、行ごとに「その時点」とは書かない
+    expect(html).not.toContain("<th>粒度</th>");
+  });
+
+  /**
+   * **古い記録は畳む。** 表に出すのは新しい3回ぶんで、残りは開けば読める
+   * （台帳からは1件も捨てていない）。
+   */
+  test("4回ぶんあれば、3行だけ出して残りは畳む", () => {
+    const rows = ["09-22", "09-21", "09-20", "09-19"].map((day) =>
+      groupedRow({ readAt: `2026-${day}T12:00:00.000Z` })
+    );
+    const html = renderTable()(groupedTable(rows), "読者の反応", true);
+
+    expect(html).toContain("これまでの記録（あと 1 件）");
+    // 畳んだぶんも、開けば読める（消していない）
+    expect(html).toContain("2026/09/19");
   });
 
   /**
@@ -455,23 +695,84 @@ describe("執筆量パネルの側", () => {
       (
         records: Array<{
           history: unknown[];
-          readerHistory: unknown[];
+          readerLatest: unknown;
           analysisUrl: string | null;
         }>
       ) => string
     >("siteRecordsNote");
 
     const readerOnly = note([
-      { history: [], readerHistory: [{}], analysisUrl: null },
+      { history: [], readerLatest: {}, analysisUrl: null },
     ]);
     expect(readerOnly.startsWith("順位は")).toBe(false);
     expect(readerOnly).toContain("読者の反応は");
 
     // 順位があるときは、これまでどおり順位の但し書きから始める
     const withRank = note([
-      { history: [{}], readerHistory: [], analysisUrl: null },
+      { history: [{}], readerLatest: null, analysisUrl: null },
     ]);
     expect(withRank.startsWith("順位は")).toBe(true);
+  });
+
+  /**
+   * **話ごとの記録は、別の表にして既定で畳む**（設計書6.79.7）。
+   * アクセス数のページは1回で50話ぶん入るので、作品全体の行と混ざると読めない。
+   */
+  test("話ごとの節は、記録が無ければ出ない", () => {
+    const render = panelFunction<(table: ReaderStatsTable | null) => string>(
+      "renderReaderEpisodes",
+      [
+        "escapeHtml",
+        "formatWhen",
+        "formatCount",
+        "readerTableOf",
+        "renderReaderStatsTable",
+      ]
+    );
+
+    expect(render(null)).toBe("");
+    expect(render(groupedTable([]))).toBe("");
+
+    const html = render(
+      groupedTable([
+        groupedRow({ scope: "第1話", episode: 1, isEpisode: true }),
+        groupedRow({ scope: "第3話", episode: 3, isEpisode: true }),
+      ])
+    );
+    expect(html).toContain("話ごとの記録（2話・最新 2026/09/22");
+    // 既定では閉じている（open を付けない）
+    expect(html).not.toContain("<details class=\"fold\" open>");
+  });
+
+  /**
+   * **最新の1回は、表の外で大きく見せる**（作者の言葉、2026-09-22）。
+   * ラベルと数字を分けて並べる——1本の長い文字列は読む気にならない。
+   */
+  test("最新の反応は、ラベルと数字を分けて並べる", () => {
+    const render = panelFunction<
+      (latest: GroupedReaderStatsRow | null) => string
+    >("renderReaderLatest", ["escapeHtml", "formatWhen", "readerValue"]);
+
+    expect(render(null)).toBe("");
+
+    const html = render(
+      groupedRow({
+        snapshotValues: [
+          { label: "PV", value: "1,053,339", unit: "" },
+          { label: "評価", value: "1,612", unit: "pt" },
+        ],
+        day: "PV 1",
+        month: "PV 667",
+      })
+    );
+    expect(html).toContain("最新の反応（2026/09/22");
+    expect(html).toContain("貼り付け");
+    expect(html).toContain('<span class="k">PV</span>');
+    expect(html).toContain("1,053,339");
+    expect(html).toContain("1,612pt");
+    // 今日・今月も同じ塊に入れる（以前は表の別の行に散っていた）
+    expect(html).toContain('<span class="k">今日</span>');
+    expect(html).toContain('<span class="k">今月</span>');
   });
 
   /**
@@ -501,7 +802,8 @@ describe("執筆量パネルの側", () => {
     const html = buildWritingStatsPanelHtml("nonce", "vscode-resource:");
 
     expect(html).toContain("readerLatest");
-    expect(html).toContain("readerHistory");
+    expect(html).toContain("readerWork");
+    expect(html).toContain("readerEpisodes");
     expect(html).toContain("読者の反応");
   });
 });

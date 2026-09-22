@@ -1,3 +1,5 @@
+import { READER_STATS_VISIBLE_ROWS } from "../core/postingSiteRecords";
+
 /**
  * 執筆量パネルの中身（設計書6.3）。
  *
@@ -140,6 +142,26 @@ tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
 .site-latest { font-size: 12px; }
 /* 順位の表と読者の反応の表を見分けるための小見出し（設計書6.79.7） */
 .site-sub { font-size: 12px; color: var(--vscode-descriptionForeground); margin: 10px 0 2px; }
+/*
+  最新の反応（設計書6.79.7）。**数字を先に読めるように**、ラベルは小さく薄く、
+  数字は通常の大きさで並べる。1本の長い文字列だと読む気にならない
+  （作者の言葉「サイトの記録が読みにくいです」、2026-09-22）
+*/
+.reader-latest { margin: 8px 0 2px; }
+.reader-latest-head { font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 3px; }
+/* 折り返しは flex に任せる。狭い画面では縦に積むだけで読める */
+.reader-values { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.reader-value { display: flex; align-items: baseline; gap: 5px; font-variant-numeric: tabular-nums; }
+.reader-value > .k { font-size: 11px; color: var(--vscode-descriptionForeground); }
+/* 古い記録・話ごとの記録は畳んでおく（開いた状態は覚えない） */
+details.fold { margin: 4px 0 0; }
+details.fold > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  padding: 4px 0;
+}
+.site-foot { font-size: 12px; color: var(--vscode-descriptionForeground); margin: 4px 0 0; }
 a, .link {
   color: var(--vscode-textLink-foreground);
   cursor: pointer;
@@ -530,20 +552,6 @@ function renderSiteRecords() {
         '（' + escapeHtml(formatWhen(record.latest.recordedAt)) + '）</div>'
       );
     }
-    /*
-      読者の反応（設計書6.79.7）。**あるものだけが並んだ文字列**が届く
-      （どの欄が読めたかの判断は core 側が持つ）。
-    */
-    if (record.readerLatest) {
-      head.push(
-        '<div class="site-latest">最新の反応 ' +
-        escapeHtml(record.readerLatest.metrics) +
-        '（' + escapeHtml(record.readerLatest.scope) + '・' +
-        escapeHtml(record.readerLatest.period) + '　' +
-        escapeHtml(formatWhen(record.readerLatest.readAt)) + '）</div>'
-      );
-    }
-
     const rows = record.history.map((row) =>
       '<tr><td>' + escapeHtml(formatWhen(row.recordedAt)) + '</td>' +
       '<td>' + escapeHtml(row.board) + '</td>' +
@@ -555,10 +563,16 @@ function renderSiteRecords() {
         '<th>メモ</th></tr></thead><tbody>' + rows.join('') + '</tbody></table>'
       : '';
 
-    const readerTable = renderReaderStatsTable(record.readerHistory || []);
+    /*
+      読者の反応（設計書6.79.7）。**あるものだけが並んだ値**が届く
+      （どの欄が読めたか・どの列が要るかの判断は core 側が持つ）。
+    */
+    const reader = renderReaderLatest(record.readerLatest) +
+      renderReaderStatsTable(record.readerWork, '読者の反応', true) +
+      renderReaderEpisodes(record.readerEpisodes);
 
     return '<div class="site"><div class="site-head">' + head.join('') + '</div>' +
-      table + readerTable + '</div>';
+      table + reader + '</div>';
   });
 
   const note = siteRecordsNote(records);
@@ -575,29 +589,110 @@ function renderSiteRecords() {
 }
 
 /**
- * 読者の反応の表（設計書6.79.7）。
+ * 最新の反応を、表の外で大きく見せる（設計書6.79.7）。
+ *
+ * **数字を先に読めるようにする。** 以前は「最新の反応 PV 1,053,339／
+ * ブックマーク 2,814／…（作品全体・その時点 2026/09/22 12:20）」の1行で、
+ * 長すぎて読む気にならなかった（作者の言葉、2026-09-22）。
+ */
+function renderReaderLatest(latest) {
+  if (!latest) return '';
+  const values = (latest.snapshotValues || []).map((value) =>
+    readerValue(value.label, escapeHtml(value.value) + escapeHtml(value.unit || ''))
+  );
+  // **今日・今月は同じ塊に入れる**（以前は表の別の行に散っていた）
+  if (latest.day) values.push(readerValue('今日', escapeHtml(latest.day)));
+  if (latest.month) values.push(readerValue('今月', escapeHtml(latest.month)));
+  // 年・累計は粒度の名前がすでに入っているので、ラベルを重ねない
+  if (latest.other) values.push(readerValue('', escapeHtml(latest.other)));
+  if (values.length === 0) return '';
+
+  const head = ['最新の反応'];
+  // 範囲は、話ごとのときだけ言う（作品全体は既定なので書かない）
+  if (latest.isEpisode) head.push(escapeHtml(latest.scope));
+  return '<div class="reader-latest"><div class="reader-latest-head">' +
+    head.join(' ') + '（' + escapeHtml(formatWhen(latest.readAt)) + '・' +
+    escapeHtml(latest.source) + '）</div>' +
+    '<div class="reader-values">' + values.join('') + '</div></div>';
+}
+
+/** ラベル（小さく薄く）と数字の組。ラベルが空なら数字だけ置く */
+function readerValue(label, valueHtml) {
+  return '<div class="reader-value">' +
+    (label ? '<span class="k">' + escapeHtml(label) + '</span>' : '') +
+    '<span class="v">' + valueHtml + '</span></div>';
+}
+
+/**
+ * 読者の反応の表（設計書6.79.7）。**1回の取り込み＝1行。**
  *
  * **見出しを付ける。** 順位の表と2つ並ぶので、どちらの数字なのかが
  * 列名だけでは分からない。
  *
- * **メモの列も出す**（0.33.9のレビュー）。手入力でも封筒でもメモは台帳に
- * 入るのに、ここに列が無かったので、書いたのに二度と読めない欄になっていた
- * （順位の表と同じ形にする）。
+ * **出す列は core 側が決める**（readerStatsColumns）。全行が同じ値の列は
+ * 幅を食うだけで何も伝えず、表を折り返させていた。
+ *
+ * @param fold 古い記録を畳むか。話ごとの表は1回ぶんしか無いので畳まない
  */
-function renderReaderStatsTable(rows) {
-  const body = (rows || []).map((row) =>
-    '<tr><td>' + escapeHtml(formatWhen(row.readAt)) + '</td>' +
-    '<td>' + escapeHtml(row.scope) + '</td>' +
-    '<td>' + escapeHtml(row.period) + '</td>' +
-    '<td>' + escapeHtml(row.metrics) + '</td>' +
-    '<td>' + escapeHtml(row.source) + '</td>' +
-    '<td>' + escapeHtml(row.note || '') + '</td></tr>'
-  );
-  if (body.length === 0) return '';
-  return '<div class="site-sub">読者の反応</div>' +
-    '<table><thead><tr><th>日時</th><th>範囲</th><th>粒度</th>' +
-    '<th>反応</th><th>出どころ</th><th>メモ</th></tr></thead><tbody>' +
+function renderReaderStatsTable(table, title, fold) {
+  if (!table || !table.rows || table.rows.length === 0) return '';
+  const columns = table.columns || {};
+  const head = ['<th>日時</th>'];
+  if (columns.scope) head.push('<th>範囲</th>');
+  // 粒度の列を無くしたので、「その時点」は見出しに1回だけ書く
+  if (columns.snapshot) head.push('<th>反応（その時点）</th>');
+  if (columns.day) head.push('<th>今日</th>');
+  if (columns.month) head.push('<th>今月</th>');
+  if (columns.other) head.push('<th>その他</th>');
+  if (columns.source) head.push('<th>出どころ</th>');
+  if (columns.note) head.push('<th>メモ</th>');
+
+  const body = table.rows.map((row) => {
+    const cells = ['<td>' + escapeHtml(formatWhen(row.readAt)) + '</td>'];
+    if (columns.scope) cells.push('<td>' + escapeHtml(row.scope) + '</td>');
+    if (columns.snapshot) cells.push('<td>' + escapeHtml(row.snapshot) + '</td>');
+    if (columns.day) cells.push('<td>' + escapeHtml(row.day) + '</td>');
+    if (columns.month) cells.push('<td>' + escapeHtml(row.month) + '</td>');
+    if (columns.other) cells.push('<td>' + escapeHtml(row.other) + '</td>');
+    if (columns.source) cells.push('<td>' + escapeHtml(row.source) + '</td>');
+    if (columns.note) cells.push('<td>' + escapeHtml(row.note) + '</td>');
+    return '<tr>' + cells.join('') + '</tr>';
+  });
+
+  const shown = fold ? body.slice(0, ${READER_STATS_VISIBLE_ROWS}) : body;
+  const rest = fold ? body.slice(${READER_STATS_VISIBLE_ROWS}) : [];
+  let html = title ? '<div class="site-sub">' + escapeHtml(title) + '</div>' : '';
+  html += readerTableOf(head, shown);
+  if (rest.length > 0) {
+    html += '<details class="fold"><summary>これまでの記録（あと ' +
+      formatCount(rest.length) + ' 件）</summary>' +
+      readerTableOf(head, rest) + '</details>';
+  }
+  // 出どころが1種類なら、列にせず表の下へ1回だけ書く
+  if (columns.onlySource) {
+    html += '<div class="site-foot">すべて' + escapeHtml(columns.onlySource) +
+      'で取り込んだものです。</div>';
+  }
+  return html;
+}
+
+function readerTableOf(head, body) {
+  return '<table><thead><tr>' + head.join('') + '</tr></thead><tbody>' +
     body.join('') + '</tbody></table>';
+}
+
+/**
+ * 話ごとの記録（設計書6.79.7）。**作品全体とは別の表にして、既定で畳む。**
+ *
+ * アクセス数のページは1回で50話ぶん入る（219話なら250行）ので、作品全体の
+ * 行と混ぜると読めなくなる。**まだ1件も無ければ、この節ごと出さない。**
+ */
+function renderReaderEpisodes(table) {
+  if (!table || !table.rows || table.rows.length === 0) return '';
+  return '<details class="fold"><summary>話ごとの記録（' +
+    formatCount(table.rows.length) + '話・最新 ' +
+    escapeHtml(formatWhen(table.rows[0].readAt)) + '）</summary>' +
+    renderReaderStatsTable(table, '', false) + '</details>';
 }
 
 /**
@@ -613,7 +708,7 @@ function siteRecordsNote(records) {
     notes.push('順位は「ランキングを記録する」で書き足した値です。' +
       'サイトから自動で取ってくることはありません。');
   }
-  if (records.some((record) => (record.readerHistory || []).length > 0)) {
+  if (records.some((record) => record.readerLatest)) {
     notes.push('読者の反応は、手入力か、ご自身で開いた管理画面から' +
       '貼り付けたものだけです。');
   }
