@@ -12,6 +12,7 @@ import {
   type ReaderStatsRecord,
   type ReaderStatsSource,
 } from "../models/posting";
+import { buildReaderAdvice, type ReaderAdvice } from "./readerAdvice";
 import { computeReaderRates, type ReaderRates } from "./readerRates";
 import { buildReaderCharts, type ReaderCharts } from "./readerStatsCharts";
 
@@ -83,6 +84,11 @@ export interface PostingSiteRecord {
    * null（節ごと出さない）。出せない率は、中で理由を持つ。
    */
   readerRates: ReaderRates | null;
+  /**
+   * 率とPVから、記事の目安に沿った助言（残課題 B9。設計書6.79.7.3）。
+   * 率と同じく、話ごとの記録が1件も無ければ null（節ごと出さない）。
+   */
+  readerAdvice: ReaderAdvice | null;
   /** PVのグラフ（各話・日・月・年・合計）。材料の無いグラフは null */
   readerCharts: ReaderCharts;
 }
@@ -259,6 +265,10 @@ export function buildPostingSiteRecords(
       readerWork,
       readerEpisodes,
       readerRates: rates.episodeReadAt === null ? null : rates,
+      readerAdvice:
+        rates.episodeReadAt === null
+          ? null
+          : buildReaderAdvice(rates, inLedgerOrder),
       readerCharts: buildReaderCharts(
         inLedgerOrder,
         rates.base?.episode ?? null

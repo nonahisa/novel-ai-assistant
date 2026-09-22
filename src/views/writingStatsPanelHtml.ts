@@ -168,6 +168,10 @@ details.fold > summary {
   padding: 4px 0;
 }
 .site-foot { font-size: 12px; color: var(--vscode-descriptionForeground); margin: 4px 0 0; }
+/* 読者の反応の助言（設計書6.79.7.3）。1件ずつ左に線を引いて、率の表と見分ける */
+.advice-item { margin: 6px 0 8px; padding-left: 8px; border-left: 2px solid var(--vscode-panel-border); line-height: 1.6; }
+.advice-title { font-weight: 600; font-size: 12px; }
+ul.advice-list { margin: 2px 0; padding-left: 18px; }
 a, .link {
   color: var(--vscode-textLink-foreground);
   cursor: pointer;
@@ -575,6 +579,7 @@ function renderSiteRecords() {
     */
     const reader = renderReaderLatest(record.readerLatest) +
       renderReaderRates(record.readerRates) +
+      renderReaderAdvice(record.readerAdvice) +
       renderReaderCharts(record.readerCharts) +
       renderReaderStatsTable(record.readerWork, '読者の反応', true) +
       renderReaderEpisodes(record.readerEpisodes);
@@ -671,6 +676,69 @@ function renderReaderRates(rates) {
   return '<div class="site-sub">率</div>' +
     '<table class="reader-rates"><tbody>' + rows.join('') + '</tbody></table>' +
     (foot.length > 0 ? '<div class="site-foot">' + foot.join('') + '</div>' : '');
+}
+
+/**
+ * 読者の反応の助言（残課題 B9。設計書6.79.7.3）。**率のすぐ下に置く**
+ * ——助言は率の値から出ているので、離れた場所に置くと何の話か分からない。
+ *
+ * 判定も文面も core 側（readerAdvice.ts）が済ませてある。ここは並べるだけ。
+ * **出どころは必ず添える**（どの記事の目安で言っているかを作者が確かめられる
+ * ように）。記事は作者のブラウザで開く（data-url。サイトの記録のリンクと同じ口）。
+ *
+ * 出さなかった助言の理由と、数字の読み方の注意は、読み終えたあとの補足なので
+ * 小さく薄く・畳んで置く。
+ */
+function renderReaderAdvice(advice) {
+  if (!advice) return '';
+  const blocks = (advice.items || []).map((item) => {
+    const parts = [];
+    parts.push('<div class="advice-title">' + escapeHtml(item.title) + '</div>');
+    parts.push('<div>' + escapeHtml(item.text) + '</div>');
+    if (item.drops && item.drops.length > 0) {
+      parts.push('<ul class="advice-list">' + item.drops.map((drop) =>
+        '<li>第' + formatCount(drop.episode) + '話 ' + formatCount(drop.pv) +
+        '（それまでの最少は第' + formatCount(drop.fromEpisode) + '話の ' +
+        formatCount(drop.fromPv) + '。−' + escapeHtml(drop.percent) + '）</li>'
+      ).join('') + '</ul>');
+    }
+    if (item.suggestions && item.suggestions.length > 0) {
+      parts.push('<div class="site-meta">記事が挙げている手</div>' +
+        '<ul class="advice-list">' + item.suggestions.map((suggestion) =>
+          '<li>' + escapeHtml(suggestion) + '</li>'
+        ).join('') + '</ul>');
+    }
+    parts.push(readerAdviceSources(item.sources));
+    return '<div class="advice-item">' + parts.join('') + '</div>';
+  });
+
+  const withheld = (advice.withheld || []).map((note) =>
+    '<li>' + escapeHtml(note.text) + readerAdviceSources(note.sources) + '</li>'
+  );
+  const cautions = (advice.cautions || []).map((note) =>
+    '<li>' + escapeHtml(note.text) + readerAdviceSources(note.sources) + '</li>'
+  );
+
+  return '<div class="site-sub">助言（記事の目安から）</div>' +
+    (blocks.length > 0
+      ? blocks.join('')
+      : '<div class="site-foot">記事の目安に当たるものはありません。</div>') +
+    (withheld.length > 0
+      ? '<div class="site-foot"><ul class="advice-list">' + withheld.join('') + '</ul></div>'
+      : '') +
+    (cautions.length > 0
+      ? '<details class="fold"><summary>数字の読み方の注意（' + cautions.length + '件）</summary>' +
+        '<div class="site-foot"><ul class="advice-list">' + cautions.join('') + '</ul></div></details>'
+      : '');
+}
+
+/** 出どころ（記事の題と日付）。開けるリンクにする */
+function readerAdviceSources(sources) {
+  if (!sources || sources.length === 0) return '';
+  return '<div class="site-meta">出どころ：' + sources.map((source) =>
+    '<span class="link" data-url="' + escapeHtml(source.url) + '">' +
+    escapeHtml(source.label) + '</span>'
+  ).join('、') + '</div>';
 }
 
 /**
