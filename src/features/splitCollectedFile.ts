@@ -11,6 +11,14 @@ import { encodeForNewFile, readTextFile } from "../core/textFile";
 import { atomicWriteFile, createManagedRecoveryPath } from "../core/atomicWrite";
 import { logFailure, useLogFile } from "../core/logger";
 import { recordEdit } from "../core/actorContext";
+import { ChapterStore, ChapterStoreError } from "../core/chapterStore";
+import { episodePathFor } from "../core/bookStore";
+import {
+  describeSplitSections,
+  planSplitSections,
+  type SplitSectionPlan,
+} from "../core/collectedSections";
+import type { Chapter, ChapterSet } from "../models/chapter";
 
 /**
  * 1ファイルに全話が入ったファイルを、話ごとに分ける（設計書6.2.2）。
@@ -90,7 +98,28 @@ export async function splitCollectedFile(
     return;
   }
 
-  if (!(await confirm(filePath, plan))) return;
+  /*
+    **合本の中の章の見出し（【第N章】）から、章を立てる**（作者の問い、
+    2026-09-23「バックアップから章立ては読み取れませんでしたか？」）。
+
+    章の台帳はファイルしか指せないので、合本のままでは2章目以降を置けない
+    （6.66.4）。**分けたあとなら始まりの話が実在のファイルになる**ので、
+    ここが章を立てられる機会になる。
+
+    **押す前に決めて、確認画面に出す。** 台帳もこの時点で読んでおく——
+    確認のあいだに外で台帳が変わったら、保存の照合（ChapterStore）が止める。
+  */
+  const sectionStore = new ChapterStore(work);
+  const sections = await planSectionsForSplit(
+    sectionStore,
+    work,
+    directory,
+    plan
+  );
+
+  if (!(await confirm(filePath, plan, describeSplitSections(sections.plan)))) {
+    return;
+  }
 
   const created: string[] = [];
   try {
@@ -124,6 +153,10 @@ export async function splitCollectedFile(
     return;
   }
 
+  // **章は、分けたファイルが揃ってから立てる。** 指す先が無い章を
+  // 先に書くと、途中で失敗したとき「開始の話が見つからない章」が残る
+  const sectionNote = await saveSections(sectionStore, work, sections);
+
   // **元のファイルは消さない。回復先へ退避する。**
   // 残したままだと、同じ本文を二重に数えることになる
   let recovery: string | undefined;
@@ -138,7 +171,8 @@ export async function splitCollectedFile(
     void vscode.window.showWarningMessage(
       `${created.length}件へ分けましたが、元のファイルを退避できませんでした。` +
         "このままだと同じ本文を二重に数えます。 " +
-        `${path.basename(filePath)} を手で移動してください。`
+        `${path.basename(filePath)} を手で移動してください。` +
+        (sectionNote ? ` ${sectionNote}` : "")
     );
     useLogFile(work.folderPath);
     logFailure("合本の退避に失敗", {
@@ -157,6 +191,7 @@ export async function splitCollectedFile(
 
   const unnumbered = unnumberedCount(plan);
   const notes = [`${created.length}件に分けました。`];
+  if (sectionNote) notes.push(sectionNote);
   if (unnumbered > 0) {
     notes.push(
       `${unnumbered}件は話数を読み取れず、並び順で番号を付けました。` +
@@ -180,7 +215,12 @@ export async function splitCollectedFile(
   }
 }
 
-async function confirm(filePath: string, plan: SplitPlan): Promise<boolean> {
+async function confirm(
+  filePath: string,
+  plan: SplitPlan,
+  /** 章をどうするかの一文。章の見出しが無い合本では null（何も足さない） */
+  sectionLine: string | null
+): Promise<boolean> {
   const preview = plan.parts
     .slice(0, 5)
     .map((part) => `・${part.fileName}`)
@@ -199,9 +239,97 @@ async function confirm(filePath: string, plan: SplitPlan): Promise<boolean> {
         "元のファイルは消さず、回復用の場所へ移します。\n" +
         (unnumbered > 0
           ? `\n${unnumbered}件は話数を読み取れないため、並び順で番号を付けます。`
-          : ""),
+          : "") +
+        (sectionLine ? `\n${sectionLine}` : ""),
     },
     "分ける"
   );
   return answer === "分ける";
+}
+
+/** 分けるときの章の扱いと、保存に使う台帳の中身 */
+interface SectionsForSplit {
+  plan: SplitSectionPlan;
+  /** 読み込んだ台帳。**読めなかった・読んでいないときは null** */
+  set: ChapterSet | null;
+}
+
+/**
+ * 分けたあとで立てる章を決める。**まだ何も書かない。**
+ *
+ * **章の見出しが無い合本では台帳を読みに行かない。** 読んで壊れていたときの
+ * 記録が、章と関係のない分割のたびに残ってしまう。
+ */
+async function planSectionsForSplit(
+  store: ChapterStore,
+  work: WorkEntry,
+  directory: string,
+  plan: SplitPlan
+): Promise<SectionsForSplit> {
+  const startPathOf = (fileName: string) =>
+    episodePathFor(work.folderPath, path.join(directory, fileName));
+
+  const probe = planSplitSections({
+    parts: plan.parts,
+    existingChapters: [],
+    startPathOf,
+  });
+  if (probe.kind === "none") return { plan: probe, set: null };
+
+  let set: ChapterSet | null = null;
+  try {
+    set = await store.load();
+  } catch (error) {
+    // **読めない台帳には書かない**（壊れたJSONを直さない。実装ルール2）。
+    // 分割そのものは台帳と関係なく進められるので、止めずに記録だけ残す。
+    // 作者には確認画面の一文（「章の台帳を読めなかったため…」）で伝わる
+    useLogFile(work.folderPath);
+    logFailure("合本の分割で章の台帳を読めなかった", {
+      作品: work.title,
+      種類: error instanceof ChapterStoreError ? error.kind : "unknown",
+      内容: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  return {
+    plan: planSplitSections({
+      parts: plan.parts,
+      existingChapters: set ? set.chapters : null,
+      startPathOf,
+    }),
+    set,
+  };
+}
+
+/**
+ * 決めておいた章を台帳へ書く。戻りは作者への一言（書くものが無ければ null）。
+ *
+ * **書けなくても分割は成り立っている**ので、止めずに伝える。章は
+ * あとから作品一覧の右クリック（「ここから章を始める」）で付けられる。
+ */
+async function saveSections(
+  store: ChapterStore,
+  work: WorkEntry,
+  sections: SectionsForSplit
+): Promise<string | null> {
+  const { plan, set } = sections;
+  if (plan.kind !== "create" || !set) return null;
+
+  const chapters: Chapter[] = [...plan.chapters];
+  try {
+    await store.save({ ...set, chapters });
+    return (
+      `章を${chapters.length}個立てました（「${chapters[0].name}」` +
+      `${chapters.length > 1 ? "ほか" : ""}）。`
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    useLogFile(work.folderPath);
+    logFailure("合本の分割で章を立てられなかった", {
+      作品: work.title,
+      種類: error instanceof ChapterStoreError ? error.kind : "unknown",
+      内容: detail,
+    });
+    return `章は立てられませんでした（${detail}）。`;
+  }
 }
