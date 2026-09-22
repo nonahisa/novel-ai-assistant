@@ -32,6 +32,7 @@ import { createAbilityStore } from "../core/abilityStore";
 import { emptyAbility } from "../models/ability";
 import type { WorkEntry } from "../models/types";
 import { CHARACTER_EXTRACT_VERSION } from "../prompts/characterExtract";
+import { assertFetchPatch, describeFetchPatch, probeFetchPatch } from "./fetchPatch";
 
 const COMMANDS = [
   "novelai.addWork",
@@ -693,6 +694,17 @@ export async function run(): Promise<void> {
       } finally {
         await fs.rm(temporaryRoot, { recursive: true, force: true });
       }
+    }
+  );
+
+  await runCase(
+    "手元のAIの待ち時間は、VS Code の通信の差し替えを越えて届く",
+    failures,
+    async () => {
+      const report = await probeFetchPatch();
+      // 通っても結果を残す。版ごとの振る舞い（差し替えの有無）の記録になる
+      console.log(describeFetchPatch(report));
+      assertFetchPatch(report);
     }
   );
 

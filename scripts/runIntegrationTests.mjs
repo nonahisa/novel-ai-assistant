@@ -22,8 +22,25 @@ const temporaryRoot = await mkdtemp(
  * ここで外しておかないと統合テストが常に失敗する（実際に踏んだ）。
  * 他のVSCODE_* も、親のウィンドウへ繋ぎに行かせないために落とす。
  */
+/**
+ * どの版の VS Code で回すか。**既定は対応の下限の 1.90.0**（package.json の engines）。
+ *
+ * 新しい版でも回す（`npm run test:integration:latest` ＝ `--vscode=stable`）。
+ * 1.90 には無い仕組みがあるため——新しい VS Code は拡張機能の中の
+ * `globalThis.fetch` を差し替え、渡した待ち時間を捨てる（設計書6.63）。
+ * 1.90 だけで回すと、差し替えに負ける形でも偽って通る。
+ *
+ * 引数 `--vscode=<版>` を環境変数 `VSCODE_TEST_VERSION` より優先する
+ * （npm の script は Windows の cmd でも動かすので、`VAR=x cmd` の形が使えない）。
+ * 取り寄せた VS Code は `.vscode-test/` に版ごとに溜まる（.gitignore 済み）。
+ */
+const versionArg = process.argv
+  .slice(2)
+  .find((arg) => arg.startsWith("--vscode="))
+  ?.slice("--vscode=".length);
 // 消す前に控える。VSCODE_TEST_VERSION も下の削除に巻き込まれるため
-const requestedVersion = process.env.VSCODE_TEST_VERSION ?? "1.90.0";
+const requestedVersion = versionArg || process.env.VSCODE_TEST_VERSION || "1.90.0";
+console.log(`統合テストを VS Code ${requestedVersion} で回します`);
 
 // `extensionTestsEnv` は process.env へ**上書きマージ**されるだけで、
 // 変数を消すことはできない。起動する側の環境から直接落とす。

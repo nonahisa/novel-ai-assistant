@@ -87,8 +87,16 @@ import { workspace } from "./support/vscodeStub";
 /** 作者の設定：Ollama の待ち時間を900秒へ延ばしてある（ノートPCと同じ） */
 const CONFIGURED_SECONDS = 900;
 
-/** `/slow` が応答の頭を返すまで黙る長さ */
-const SLOW_HEADERS_MS = 1500;
+/**
+ * `/slow` が応答の頭を返すまで黙る長さ。
+ *
+ * **undici の頭待ちの時計は刻みが約1秒**（`setFastTimeout`）なので、0.2秒を
+ * 頼んでも切れるのは約1秒後になる。1.5秒だと差が0.5秒しかなく、重い機械
+ * では揺れうる（統合テスト `src/test/fetchPatch.ts` の実測、2026-09-23）
+ */
+const SLOW_HEADERS_MS = 3000;
+/** `/slow` を使う試験の制限時間。既定の5秒だと黙る長さに近すぎる */
+const SLOW_TEST_TIMEOUT_MS = 15_000;
 /** `/slow` へ投げるときの待ち時間。黙る長さより短くして、切れるかを見る */
 const SHORT_WAIT_MS = 200;
 
@@ -300,7 +308,7 @@ describe("手元の口では、こちらの待ち時間が本当に効く", () =
 
     expect(isFetchTimeout(failure)).toBe(true);
     expect(patchedCalls).toEqual([]);
-  });
+  }, SLOW_TEST_TIMEOUT_MS);
 
   test("cloudFetch：差し替えを通ると、渡した上限は捨てられて届いてしまう", async () => {
     const response = await fetchTimeouts.cloudFetch(
@@ -312,7 +320,7 @@ describe("手元の口では、こちらの待ち時間が本当に効く", () =
     expect(response.status).toBe(200);
     // 渡してはいた。捨てられただけ——字面の網が見逃した形
     expect(patchedCalls).toEqual([{ url: `${base}/slow`, hadDispatcher: true }]);
-  });
+  }, SLOW_TEST_TIMEOUT_MS);
 });
 
 describe("クラウドのAIは、VS Code の fetch を通る（プロキシと社内証明書を保つ）", () => {
