@@ -195,6 +195,55 @@ describe("メインとサブを行き来する", () => {
 });
 
 /**
+ * 番号の案内（「番号（1〜3）を打って選ぶこともできます」）を、ボタンの行へ
+ * 入れない（ノートPCの実機、2026-09-23）。
+ *
+ * 横の細いパネルで、案内の文が1〜2文字ずつ縦に折り返され、ボタンの間に
+ * 細い柱のように割り込んでいた。ボタンの行は折り返す並び（flex）で、案内は
+ * 残りの幅を取る設定だったため、**ボタンが幅を使い切ると残りが0になり、
+ * 文字が1つずつ折られた。** 案内は自分の行に置く。
+ */
+describe("番号の案内はボタンの行の外に置く", () => {
+  function composerRow(html: string): string {
+    const found = html.match(
+      /<div id="composer">[\s\S]*?<div class="row">([\s\S]*?)<\/div>/
+    );
+    expect(found, "入力欄の下の並びが見つからない").toBeTruthy();
+    return found![1];
+  }
+
+  for (const [name, html] of [
+    ["横のパネル", SIDEBAR],
+    ["大きい画面", LARGE],
+  ] as const) {
+    test(`${name}：案内はボタンの行の子ではない`, () => {
+      expect(composerRow(html)).not.toContain('id="hint"');
+    });
+
+    test(`${name}：案内は入力欄の区画の中に、自分の行として在る`, () => {
+      const composer = html.slice(
+        html.indexOf('<div id="composer">'),
+        html.indexOf("<script")
+      );
+      expect(composer).toMatch(/<div class="hint" id="hint"><\/div>/);
+    });
+  }
+
+  test("案内に「残りの幅を取る」設定を残さない", () => {
+    // flex: 1 のまま行の外へ出しても害は無いが、行へ戻されたときに
+    // 同じ壊れ方をする。**幅0へ縮む指定そのものを持たせない**
+    const rule = SIDEBAR.match(/#composer \.hint \{([^}]*)\}/);
+    expect(rule, "案内の見た目の指定が見つからない").toBeTruthy();
+    expect(rule![1]).not.toContain("flex: 1");
+  });
+
+  test("案内が空のときは場所を取らない", () => {
+    // 選択肢の無い答えのあとに、空の行が1つ空くと入力欄との間が開く
+    expect(SIDEBAR).toContain("#composer .hint:empty { display: none; }");
+  });
+});
+
+/**
  * 相談を資料へ反映する（設計書6.72）。
  *
  * **入口はこのボタンだけ**である（コマンドは作らない）。横のパネルで

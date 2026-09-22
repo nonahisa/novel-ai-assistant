@@ -392,6 +392,36 @@ export interface ChatRunner {
   ): Promise<void>;
 }
 
+/** 「画面で案内してもらう」の誘い（`tourOffer` の戻り値の中身） */
+interface ChatTourOffer {
+  key: string;
+  title: string;
+  steps: number;
+}
+
+/**
+ * 答えの下に並ぶもののうち、**後から開いた画面でも付け直すもの**。
+ *
+ * 押されるのを待つ提案（書き込み・起動・読み直し・「そこを見せて」）は
+ * 入れない。出た側の画面に残っており、2つの画面に同じものが並ぶと
+ * どちらを押したのか分からなくなる（`history` を送るところの説明）。
+ */
+interface ChatAnswerExtras {
+  options: string[];
+  tour?: ChatTourOffer;
+  readerGlossary?: ReaderTypeGlossaryEntry[];
+  spotlight?: MenuEntry[];
+}
+
+/** 最後の問いが失敗したときの赤字（`postError` が送るものと同じ形） */
+interface ChatFailure {
+  /** 失敗した問い。AIを通さずに返した失敗（未設定など）でも持つ */
+  question?: string;
+  message: string;
+  actions?: Array<{ label: string; command: string }>;
+  tour?: ChatTourOffer;
+}
+
 export class WorkChatPanel implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   /**
@@ -405,6 +435,27 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    */
   private panel: vscode.WebviewPanel | undefined;
   private history: WorkChatTurn[] = [];
+  /**
+   * 会話の「いまの端」——**履歴（`history`）に積まれない**が、画面には
+   * 出ているもの（ノートPCの実機、2026-09-23）。
+   *
+   * 後から開いた画面へ送る履歴が発言の文字だけだったため、［メインに表示］
+   * で移すと答えの下の選択肢が消え、考えている途中なら問いも消えていた。
+   * **どれも会話の状態なので、画面ではなくここに1つだけ持つ**（`history`
+   * と同じ考え方）。画面ごとに違ってよいもの（開いた・閉じた、押した札の
+   * 押せなさ）は持たない。
+   *
+   * - `lastAnswer`：最後の答えの下に並んだもの。次の問いを送ったら捨てる
+   *   （画面側も送った瞬間に古い選択肢を消している）
+   * - `failure`：最後の問いが失敗した赤字と、その問い（失敗した問いは
+   *   `history` に積まれない）
+   * - `pending`：送ったまま、答えを待っている問い
+   */
+  private tail: {
+    lastAnswer?: ChatAnswerExtras;
+    failure?: ChatFailure;
+    pending?: { question: string };
+  } = {};
   /**
    * 対話で埋めようとしているプロットの項目（設計書6.4.7）。
    *
@@ -1169,7 +1220,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // 送るのは読み込んだ画面だけ（既に出ている側へ送ると二重になる）。
       // 押されるのを待っている提案のボタンは作り直さない——提案は出た側の
       // 画面に残っており、同じものが2つ並ぶと、どちらを押したのか分からない
-      if (this.history.length > 0) {
+      //
+      // **会話の端（`tail`）も一緒に送る**（ノートPCの実機、2026-09-23）。
+      // 発言の文字だけを送っていたため、移った先では答えの下の選択肢が消え、
+      // 考えている途中なら問いも「考えています…」も無い初期画面になっていた。
+      // **発言がまだ1つも無くても、考えている途中・失敗の直後なら送る**
+      const { lastAnswer, failure, pending } = this.tail;
+      if (this.history.length > 0 || failure || pending) {
         void source.postMessage({
           type: "history",
           turns: this.history.map((turn) => ({
@@ -1181,6 +1238,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
                 ? renderMarkdownLite(turn.text)
                 : undefined,
           })),
+          ...(lastAnswer ? { lastAnswer: this.withoutStaleTour(lastAnswer) } : {}),
+          ...(failure ? { failure: this.withoutStaleTour(failure) } : {}),
+          ...(pending ? { pending } : {}),
         });
       }
       return;
@@ -1198,6 +1258,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // 消えるので、続けたままにすると「押しても進まない案内」が
       // 見えないところに残る
       this.tour.stop();
+      // 会話の端も捨てる。残すと、開き直した画面に消したはずの選択肢が出る
+      this.tail = {};
       // もう片方の画面にも、消えたことを伝える
       this.postOthers(source, { type: "cleared" });
       return;
@@ -1205,7 +1267,22 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     if (message.type === "ask") {
       // 押した側は自分で表示済み。**もう片方にも積んで待ち状態にする**
       this.postOthers(source, { type: "asked", question: message.question });
-      await this.ask(message.question);
+      /*
+        **答えを待っている問いを覚える**（ノートPCの実機、2026-09-23）。
+        考えている途中に開いた画面へ、問いと待ち状態を出すため。
+        前の答えの選択肢と前の赤字は、ここで捨てる——画面側も送った瞬間に
+        消しており、移った先にだけ古いボタンが残るとどの返事への選択か
+        分からなくなる。
+      */
+      const pending = { question: message.question };
+      this.tail = { pending };
+      try {
+        await this.ask(message.question);
+      } finally {
+        // 答えが出た時点で外してある（`ask` の中）。取りやめ・失敗・
+        // 「飛ばす」の道はここで外す
+        if (this.tail.pending === pending) this.tail.pending = undefined;
+      }
       return;
     }
     if (message.type === "chooseWork") {
@@ -1885,19 +1962,30 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       const spotlight = await this.spotlightMentions(answer.reply);
 
       const { edit, ...others } = staged;
-      this.postAll({
-        type: "answer",
+      /*
+        答えの下に並ぶもの。**画面へ送るのと同じものを会話の端に覚える**
+        （ノートPCの実機、2026-09-23）——後から開いた画面へ付け直すため。
+        別々に組み立てると、片方にだけ足したものが移った先で消える。
+      */
+      const extras: ChatAnswerExtras = {
         // **案内は誘うだけ。勝手には始めない**（設計書6.104）。
         // 始めるとサイドバーが動いて選択が移るので、聞いただけの回に
         // それをやると、作者の手元を横取りすることになる
         ...(this.tourOffer(guide.procedureKey) ?? {}),
-        reply: answer.reply,
-        // AIはMarkdownで返してくる。記号のまま見せない
-        html: renderMarkdownLite(answer.reply),
         options: answer.options,
         ...(readerGlossary ? { readerGlossary } : {}),
         // **何度でも押せる札**（0.75.6）。目を離している間に選択が動く
         ...(spotlight.length > 0 ? { spotlight } : {}),
+      };
+      // 答えが出たので、もう待っていない（このあとの書き込みは「考えている」
+      // 途中ではない。開き直した画面に「考えています…」を出さない）
+      this.tail = { lastAnswer: extras };
+      this.postAll({
+        type: "answer",
+        ...extras,
+        reply: answer.reply,
+        // AIはMarkdownで返してくる。記号のまま見せない
+        html: renderMarkdownLite(answer.reply),
         ...others,
       });
       /*
@@ -2016,14 +2104,41 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     message: string,
     actions?: Array<{ label: string; command: string }>,
     /** 「画面で案内してもらう」の誘い（`tourOffer` の戻り値をそのまま渡す） */
-    offer?: { tour: { key: string; title: string; steps: number } }
+    offer?: { tour: ChatTourOffer }
   ): void {
-    this.postAll({
-      type: "error",
+    const failure: ChatFailure = {
       message,
       ...(actions && actions.length > 0 ? { actions } : {}),
       ...(offer ?? {}),
-    });
+    };
+    /*
+      **答えを待っている最中の赤字は、その問いの失敗として覚える**
+      （ノートPCの実機、2026-09-23）。後から開いた画面へ、問いごと出すため
+      ——失敗した問いは `history` に積まれないので、覚えておかないと
+      移った先では何を聞いて失敗したのかが消える。画面側も赤字で待ちを
+      解いているので、ここで待ちも外す。
+
+      待っていないときの赤字（書き込みの取り消しに失敗した等）は覚えない。
+      会話の端ではなく、その場の出来事である（`note` と同じ扱い）。
+    */
+    const pending = this.tail.pending;
+    if (pending) {
+      this.tail = { failure: { question: pending.question, ...failure } };
+    }
+    this.postAll({ type: "error", ...failure });
+  }
+
+  /**
+   * 会話の端を送り直すとき、**もう始まっている案内の誘いは外す**。
+   *
+   * 誘いは出した時点で案内が動いていないときだけ付く（`tourOffer`）。
+   * そのあと片方の画面で案内が始まっていれば、開き直した画面に
+   * 「案内してもらう」がもう一度並ぶと、始め直すのか続きなのか分からない。
+   */
+  private withoutStaleTour<T extends { tour?: ChatTourOffer }>(value: T): T {
+    if (!value.tour || !this.tour.isActive()) return value;
+    const { tour: _stale, ...rest } = value;
+    return rest as T;
   }
 
   /**

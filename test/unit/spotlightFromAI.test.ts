@@ -60,7 +60,8 @@ describe("内部（相談パネル）の繋ぎ目", () => {
   test("画面が「光らせる」を送り、相談パネルが受けている", () => {
     expect(html, "光らせる札を送っていない").toContain("type: 'spotlight'");
     expect(html, "答えに札を出していない").toContain(
-      "appendSpotlight(turn, message.spotlight)"
+      // 答えの下に付くものは `appendAnswerExtras` にまとまっている（2026-09-23）
+      "appendSpotlight(turn, extras.spotlight)"
     );
     expect(panel, "相談パネルが受けていない").toContain(
       'message.type === "spotlight"'

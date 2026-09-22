@@ -437,7 +437,13 @@ describe("失敗の回にも、画面の案内を誘う", () => {
     // 送っても描かなければ作者には見えない。**描く側の配線**を見る
     const fs = await import("node:fs");
     const html = fs.readFileSync("src/views/workChatPanelHtml.ts", "utf8");
+    // 赤字は `showError` が描く（後から開いた画面の履歴からも同じ関数を
+    // 通すため、2026-09-23 に切り出した）。受け口がそこへ渡し、そこが誘いを描く
     const errorBranch = html.slice(html.indexOf("if (message.type === 'error')"));
-    expect(errorBranch).toContain("if (message.tour) appendTourOffer(turn, message.tour);");
+    expect(errorBranch).toContain("showError(message);");
+    const showError = html.slice(html.indexOf("function showError("));
+    expect(showError.slice(0, showError.indexOf("\n}"))).toContain(
+      "if (failure.tour) appendTourOffer(turn, failure.tour);"
+    );
   });
 });
