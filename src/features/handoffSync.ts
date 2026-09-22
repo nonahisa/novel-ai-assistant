@@ -550,15 +550,6 @@ function hasUnsavedInside(root: string): boolean {
     if (!document.isDirty) return false;
     // 名前のないもの（未保存の新規タブ）は、どの置き場にも属さない
     if (document.uri.scheme !== "file") return false;
-    return isPathInside(root, document.uri.fsPath);
+    return path.isPathInside(root, document.uri.fsPath);
   });
-}
-
-function isPathInside(parentPath: string, candidatePath: string): boolean {
-  // 比べ方は `paths.normalizeForComparison` の1か所に任せる（2026-09-23。
-  // 以前はここに同じ正規化の写しがあった）
-  const parent = path.normalizeForComparison(parentPath);
-  const candidate = path.normalizeForComparison(candidatePath);
-  const relative = path.relative(parent, candidate);
-  return relative.length > 0 && !path.goesOutside(parent, relative);
 }

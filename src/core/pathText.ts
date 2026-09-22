@@ -182,3 +182,29 @@ export function goesOutside(base: string, relative: string): boolean {
     isAbsolute(relative)
   );
 }
+
+/**
+ * `candidate` が `parent` の**中**にあるか。**同じ場所は false**（中身ではなく、そのもの）。
+ *
+ * **この判定の写しが7か所あった**（2026-09-23 に寄せた）。正規化は
+ * `normalizeForComparison` へ寄せ終えていたが、判定は別々のままで、
+ * そのうち2か所は `relative.startsWith("..")` で外かどうかを決めていた。
+ * **それだと `..下書き` のように「..」で始まる名前のフォルダーを、
+ * 中にあるのに外と誤判定する。** 区切りまで見る `goesOutside` を通す。
+ *
+ * - **前方一致では足りない**——`いじめられっ子2` は `いじめられっ子` の中ではない
+ * - 大文字小文字は、Windows のときだけ同一視する（`normalizeForComparison`）
+ * - 仕組みや場所の違う URI、別のドライブは、相対で表せないので「外」
+ * - **空文字はどちらでも false。** 空の道は `normalize` で `.`（いまの場所）に
+ *   化け、たまたま中と答えうる。場所が分からないものを中とは言わない
+ *
+ * **ここへ写しを作らない。** `test/unit/pathInside.test.ts` が、`src` の中で
+ * 自前の判定（`function isPathInside` / `function isInside`）を定義していたら落とす。
+ */
+export function isPathInside(parent: string, candidate: string): boolean {
+  if (!parent || !candidate) return false;
+  const base = normalizeForComparison(parent);
+  const target = normalizeForComparison(candidate);
+  const rel = relative(base, target);
+  return rel.length > 0 && !goesOutside(base, rel);
+}

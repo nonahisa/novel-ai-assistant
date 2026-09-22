@@ -58,11 +58,11 @@ export function planMerge(
       plan.blocked = "この作品そのものを書庫に選んでいます";
       return plan;
     }
-    if (isInside(library, source)) {
+    if (path.isPathInside(library, source)) {
       plan.blocked = "すでにこの書庫の中にあります";
       return plan;
     }
-    if (isInside(source, library)) {
+    if (path.isPathInside(source, library)) {
       // 自分の中へ自分を写すと、際限なく入れ子になる
       plan.blocked = "書庫がこの作品の中にあります";
       return plan;
@@ -79,11 +79,6 @@ export function planMerge(
     claimed.add(key);
     return plan;
   });
-}
-
-function isInside(parent: string, candidate: string): boolean {
-  const relative = path.relative(parent, candidate);
-  return relative.length > 0 && !path.goesOutside(parent, relative);
 }
 
 /** 写さないもの。再び作れるものと、リポジトリそのもの */

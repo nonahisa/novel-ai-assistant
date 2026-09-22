@@ -100,15 +100,17 @@ export async function toggleReviewLock(work: WorkEntry): Promise<void> {
     return;
   }
 
-  const relative = normalizeFile(
-    path.relative(work.folderPath, fromUri(editor.document.uri))
-  );
-  if (relative.startsWith("..")) {
+  const filePath = fromUri(editor.document.uri);
+  // 「中にあるか」は共通の判定に任せる（2026-09-23）。`startsWith("..")` の
+  // 写しは、`..下書き` のようなフォルダーを外と誤り、別のドライブのファイル
+  // （`relative` が絶対の場所を返す）を中と誤っていた
+  if (!path.isPathInside(work.folderPath, filePath)) {
     void vscode.window.showWarningMessage(
       "この作品のファイルではありません。"
     );
     return;
   }
+  const relative = normalizeFile(path.relative(work.folderPath, filePath));
 
   const store = new FileLockStore(work);
   const current = await store.lockFor(relative);

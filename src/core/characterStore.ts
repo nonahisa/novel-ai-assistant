@@ -166,7 +166,7 @@ export class CharacterStore {
         const filePath = fromUri(document.uri);
         return document.isDirty &&
           path.extname(filePath).toLowerCase() === ".json" &&
-          isPathInside(characterDir, filePath);
+          path.isPathInside(characterDir, filePath);
       })
       .map((document) => fromUri(document.uri));
   }
@@ -596,13 +596,6 @@ function isGuardedSamePathSave(prepared: PreparedCharacterSave): boolean {
 // 人物の保存が `process is not defined` で落ちていた
 function samePath(left: string, right: string): boolean {
   return path.normalizeForComparison(left) === path.normalizeForComparison(right);
-}
-
-function isPathInside(parentPath: string, candidatePath: string): boolean {
-  const normalizedParent = path.normalizeForComparison(parentPath);
-  const normalizedCandidate = path.normalizeForComparison(candidatePath);
-  const relative = path.relative(normalizedParent, normalizedCandidate);
-  return relative.length > 0 && !path.goesOutside(normalizedParent, relative);
 }
 
 function asCharacterStoreError(error: unknown): CharacterStoreError {

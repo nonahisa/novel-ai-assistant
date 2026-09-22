@@ -483,7 +483,7 @@ export class GitSyncMonitor implements vscode.Disposable {
       // まだ状態が無い作品は、その置き場の下にあれば仲間とみなす
       return (
         normalizeForComparison(work.folderPath) === key ||
-        isPathInside(key, work.folderPath)
+        path.isPathInside(key, work.folderPath)
       );
     });
     if (works.length > 0) return works;
@@ -1243,7 +1243,7 @@ ${reason}`
     // 深い作品フォルダを先に見て、入れ子の場合に内側を選ぶ
     return [...this.registry.list()]
       .sort((a, b) => b.folderPath.length - a.folderPath.length)
-      .find((work) => isPathInside(work.folderPath, filePath));
+      .find((work) => path.isPathInside(work.folderPath, filePath));
   }
 }
 
@@ -1510,11 +1510,4 @@ export async function showGitSyncActions(
       )}`
     );
   } else if (picked.action === "log") showLog();
-}
-
-function isPathInside(parentPath: string, candidatePath: string): boolean {
-  const parent = normalizeForComparison(parentPath);
-  const candidate = normalizeForComparison(candidatePath);
-  const relative = path.relative(parent, candidate);
-  return relative.length > 0 && !path.goesOutside(parent, relative);
 }

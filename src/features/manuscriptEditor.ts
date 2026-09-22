@@ -497,19 +497,16 @@ export async function openManuscriptForReading(work: WorkEntry): Promise<void> {
  * 原稿エディタの台帳は作品をまたいで覚えているし、素のエディタで開いている
  * ファイルは拡張子しか見ていない。濾さないと、READMEや設計書を読み上げる。
  *
- * 比べ方は、この作品がほかの場所で使っているもの（`characterStore.ts` の
- * `isPathInside`）と揃える。**前方一致では足りない**——`いじめられっ子2` は
+ * 比べ方は共通の `paths.isPathInside` に任せる（2026-09-23。以前はここに
+ * 同じ判定の写しがあった）。**前方一致では足りない**——`いじめられっ子2` は
  * `いじめられっ子` の中ではない。
  *
  * **同じ道（作品フォルダーそのもの）は false。** 読む対象は本文であって、
- * フォルダーではない。
+ * フォルダーではない。名前を残したのは、呼ぶ側（`extension.ts`）で
+ * 「作品の中か」という問いがそのまま読めるようにするため。
  */
 export function isInsideWork(folderPath: string, filePath: string): boolean {
-  if (!folderPath || !filePath) return false;
-  const parent = paths.normalizeForComparison(folderPath);
-  const candidate = paths.normalizeForComparison(filePath);
-  const relative = paths.relative(parent, candidate);
-  return relative.length > 0 && !paths.goesOutside(parent, relative);
+  return paths.isPathInside(folderPath, filePath);
 }
 
 /** 読み上げる原稿を決める（上の3つの順で探す）。見つからなければ undefined */

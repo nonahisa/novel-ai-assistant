@@ -185,7 +185,7 @@ export class SettingsStore<T extends StorableRecord> {
         return (
           document.isDirty &&
           path.extname(filePath).toLowerCase() === ".json" &&
-          isPathInside(directory, filePath)
+          path.isPathInside(directory, filePath)
         );
       })
       .map((document) => fromUri(document.uri));
@@ -380,21 +380,6 @@ export class SettingsStore<T extends StorableRecord> {
       );
     }
   }
-}
-
-function isPathInside(parentPath: string, candidatePath: string): boolean {
-  // 比べ方は `paths.normalizeForComparison` の1か所に任せる（2026-09-23）。
-  // 以前の写しは `process.platform` を素で読み、ブラウザ版で落ちていた。
-  // 写しは `resolve` で揃えていたが、`relative` が両方を解いてから比べるので、
-  // 渡すのが絶対の場所である限り結果は変わらない
-  const parent = path.normalizeForComparison(parentPath);
-  const candidate = path.normalizeForComparison(candidatePath);
-  const relative = path.relative(parent, candidate);
-  return (
-    relative.length > 0 &&
-    !relative.startsWith("..") &&
-    !path.isAbsolute(relative)
-  );
 }
 
 /**
