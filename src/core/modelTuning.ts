@@ -186,6 +186,34 @@ export interface ModelTuning {
   /** その速度がどこから来たか。**推定値を実測と並べない**ための札 */
   readonly speedSource?: SpeedSource;
   /**
+   * 本文の**読み込み**の速さ（トークン/秒。小数1桁。設計書6.8.19）。
+   *
+   * **CPUだけの機械では、これが所要時間の大半になる**（ノートPCの実機、
+   * 2026-09-23）。gemma4:e2b は読み込み25〜28・書き出し6〜7トークン/秒で、
+   * 1万字のチャンクは読むだけで数分かかる。押す前の目安が書き出しの
+   * 決め打ちだけで作られていたため、「目安 2 分」が実際は31分になった。
+   *
+   * **書き手は普段の呼び出しの関所だけ**（`ai/meteredProvider.ts`）。AIが
+   * 読み込みにかかった時間を**自分で申告した回**からしか採らない（いまは
+   * Ollama の `prompt_eval_duration`）。所要時間の全体から割り出すと、
+   * 書き出しの時間と切り分けられない。読める長さの測定
+   * （`features/measureContext.ts`）も同じ関所を通るので、長い入力を
+   * 送るあの測定からも採れる。
+   *
+   * **同梱しない**（実装ルール6の例外の外）。機械の地力で決まる値で、
+   * トークナイザの性質ではない。**作者自身の実測だけが入る。**
+   *
+   * **平均しない。直近の実測をそのまま入れる**（`outputTokensPerSecond` と
+   * 同じ流儀）。**見積もり以外には使わない**——送り方は変えない。
+   */
+  readonly inputTokensPerSecond?: number;
+  /**
+   * 読み込みの速さを採った時刻（ISO 8601）。**`speedMeasuredAt` と混ぜない**
+   * ——短い応答の回は読み込みの速さだけが採れる（書き出しの速さは採れない）
+   * ので、2つの時刻は別々に動く。
+   */
+  readonly inputSpeedMeasuredAt?: string;
+  /**
    * 実測の字/トークン（小数3桁。設計書6.77）。
    *
    * **速度（`outputTokensPerSecond`）とまったく同じ流儀**である——普段の
@@ -459,6 +487,9 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
     // 直せないので、読んでしまうと生の値が表に出る
     const speedSource = SPEED_SOURCES.find((id) => id === entry.speedSource);
     const speedMeasuredAt = nonEmptyText(entry.speedMeasuredAt);
+    // **0は読まない**（出力の速さと同じ理由）。0で割ると見積もりが無限大になる
+    const inputTokensPerSecond = positiveNumber(entry.inputTokensPerSecond);
+    const inputSpeedMeasuredAt = nonEmptyText(entry.inputSpeedMeasuredAt);
     // **0は読まない**（速度と同じ理由）。「0字/トークン」は測れていないのと
     // 同じ意味だが、そのまま読むと換算が無限大になる
     const charsPerToken = positiveNumber(entry.charsPerToken);
@@ -522,6 +553,8 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
       ...(outputTokensPerSecond !== undefined ? { outputTokensPerSecond } : {}),
       ...(speedSource !== undefined ? { speedSource } : {}),
       ...(speedMeasuredAt !== undefined ? { speedMeasuredAt } : {}),
+      ...(inputTokensPerSecond !== undefined ? { inputTokensPerSecond } : {}),
+      ...(inputSpeedMeasuredAt !== undefined ? { inputSpeedMeasuredAt } : {}),
       ...(charsPerToken !== undefined ? { charsPerToken } : {}),
       ...(charsPerTokenSamples !== undefined ? { charsPerTokenSamples } : {}),
       ...(outputMeasureTimedOut !== undefined ? { outputMeasureTimedOut } : {}),

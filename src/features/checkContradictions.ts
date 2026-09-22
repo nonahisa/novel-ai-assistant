@@ -462,6 +462,8 @@ export async function checkContradictions(
         model: resolved.model,
         feature: "contradiction_check",
         count: pending.length,
+        // 送る本文の量。読み込みの時間を足す（設計書6.8.19）
+        inputChars: pending.map((chunk) => chunk.text.length),
       }),
       `材料: 人物${material.characterCount}人 / 場所${material.locationCount}件 / ` +
         `世界観${material.worldCount}件`,

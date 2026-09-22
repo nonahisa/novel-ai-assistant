@@ -287,6 +287,8 @@ export async function checkFactContradictions(
         // 台帳の鍵は `meta.feature` と同じものでなければ引けない
         feature: "story_fact_extract",
         count: pending.length,
+        // 送る本文の量。読み込みの時間を足す（設計書6.8.19）
+        inputChars: pending.map((chunk) => chunk.text.length),
       }),
       table.entries.length > 0
         ? `人物 ${table.entries.length}人の対応表を渡します。`

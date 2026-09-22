@@ -77,6 +77,12 @@ export interface StreamedChat {
   /** 最後の1件に入っている統計。取れなければ undefined */
   promptEvalCount?: number;
   evalCount?: number;
+  /**
+   * 読み込み・書き出しにかかった時間（**ナノ秒**。Ollama の単位のまま）。
+   * 押す前の目安に使う読み込みの速さを、ここから測る（設計書6.8.19）
+   */
+  promptEvalDuration?: number;
+  evalDuration?: number;
   /** 出力の上限で打ち切られたか */
   truncated: boolean;
   /** Ollamaが返したエラー文（あれば） */
@@ -90,6 +96,8 @@ interface StreamLine {
   error?: unknown;
   eval_count?: unknown;
   prompt_eval_count?: unknown;
+  eval_duration?: unknown;
+  prompt_eval_duration?: unknown;
 }
 
 /**
@@ -129,6 +137,12 @@ export function applyStreamLine(
   if (typeof parsed.eval_count === "number") into.evalCount = parsed.eval_count;
   if (typeof parsed.prompt_eval_count === "number") {
     into.promptEvalCount = parsed.prompt_eval_count;
+  }
+  if (typeof parsed.eval_duration === "number") {
+    into.evalDuration = parsed.eval_duration;
+  }
+  if (typeof parsed.prompt_eval_duration === "number") {
+    into.promptEvalDuration = parsed.prompt_eval_duration;
   }
   // **`length` は出力上限で切られた印**（`stream:false` の `done_reason` と同じ）
   if (parsed.done_reason === "length") into.truncated = true;

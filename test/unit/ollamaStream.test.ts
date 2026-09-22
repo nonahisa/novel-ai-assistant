@@ -32,6 +32,17 @@ describe("流れてきた行の取り込み", () => {
     expect(state.promptEvalCount).toBe(456);
   });
 
+  it("最後の1件から、読み込み・書き出しの時間（ナノ秒）も拾う", () => {
+    // 押す前の目安に、読み込みの速さを測るため（設計書6.8.19）
+    const state = emptyStreamedChat();
+    applyStreamLine(
+      state,
+      '{"done":true,"prompt_eval_count":456,"prompt_eval_duration":17000000000,"eval_count":123,"eval_duration":19000000000}'
+    );
+    expect(state.promptEvalDuration).toBe(17_000_000_000);
+    expect(state.evalDuration).toBe(19_000_000_000);
+  });
+
   it("出力上限で切られた印を拾う", () => {
     const state = emptyStreamedChat();
     applyStreamLine(state, '{"done":true,"done_reason":"length"}');

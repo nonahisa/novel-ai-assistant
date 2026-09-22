@@ -228,6 +228,21 @@ export interface GenerateResult {
      * 効かせる工夫の前後を比べられない。
      */
     cachedInputTokens?: number;
+    /**
+     * AI自身が申告した、**入力の読み込みにかかった時間**（ミリ秒）。
+     *
+     * **申告するAIだけが入れる**（いまは Ollama の `prompt_eval_duration`）。
+     * 所要時間（`elapsedMs`）の全体からは、読み込みと書き出しを切り分け
+     * られない。CPUだけの機械では読み込みが時間の大半になるので
+     * （ノートPCの実機、2026-09-23）、押す前の目安にはこの内訳が要る
+     * （`ai/meteredProvider.ts` が読み込みの速さとして台帳へ残す）。
+     */
+    inputDurationMs?: number;
+    /**
+     * AI自身が申告した、**書き出しにかかった時間**（ミリ秒。Ollama の
+     * `eval_duration`）。これがあれば、出力の速さを読み込みの時間抜きで測れる。
+     */
+    outputDurationMs?: number;
   };
   /** 応答が長さ上限で打ち切られた場合 true */
   truncated: boolean;

@@ -33,7 +33,7 @@
 
 import {
   PROOFREADING_CHECKS,
-  SECONDS_PER_CHUNK,
+  describeSuiteRunTime,
   type ProofreadingCheckId,
   type SuiteEstimate,
 } from "./proofreadingSuite";
@@ -314,10 +314,10 @@ export function buildFinishConfirm(
     } else {
       // 無料のAI（Ollama・LM Studio）では料金の話をしない。
       // 作者が知りたいのは「どれくらい待つか」だけである
+      // 目安の出し方は校正のまとめ実行と同じ関数（速さの実測があれば
+      // 送る量と速さから、無ければ決め打ち。設計書6.8.19）
       lines.push(
-        `目安 ${Math.ceil(
-          (total * SECONDS_PER_CHUNK) / 60
-        )}分程度（処理済みのぶんだけ短くなります）。`
+        `${describeSuiteRunTime(total, estimate)}。処理済みのぶんだけ短くなります。`
       );
     }
   } else if (scanning.length > 0) {

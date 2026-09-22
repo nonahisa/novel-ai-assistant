@@ -89,6 +89,17 @@ import {
   type SettingsPersistResult,
 } from "./extractSettings";
 import { confirmRun, notifyDone, suggestAction } from "../views/notify";
+import { estimateCallsTimeFor } from "../ai/runTimeEstimate";
+import { describeCallTimeEstimate } from "../core/etaEstimate";
+
+/**
+ * 速さを測っていないときの、1チャンクあたりの決め打ちの秒数（設計書6.8.19）。
+ *
+ * **これまでの目安の値そのもの**である。速さの実測が台帳に入れば、送る量と
+ * 速さから出した目安に替わる（`ai/runTimeEstimate.ts`）。ここで遅めの値へ
+ * 変えると、測っていない機械すべてに当てずっぽうの数字が出る。
+ */
+const EXTRACT_FALLBACK_SECONDS_PER_CHUNK = 20;
 
 interface ExtractionFailure {
   chunk: Chunk;
@@ -473,7 +484,35 @@ export async function extractCharacters(
       return false;
     }
 
-    const estimateMinutes = Math.ceil((pending.length * 20) / 60);
+    /*
+      **目安は送る量と速さから出す**（設計書6.8.19。ノートPCの実機、
+      2026-09-23）。「1チャンク20秒」の決め打ちだけだった頃、CPUだけの
+      Ollama で5チャンクが「目安 2 分」と出て、実際は約31分かかった。
+      CPUだけの機械では本文の読み込みが時間の大半になる。
+
+      送る字数は料金の目安（`buildExtractionCostNotice`）と同じ組み方で
+      数える——指示・本文・既知の人物名。速さを測っていなければ、
+      これまでの20秒へ落ちる（遅い値を勝手に仮定しない）。
+    */
+    const knownNamesForEstimate = buildKnownCharacterNamesForPrompt(
+      loaded.characters,
+      []
+    );
+    const timeEstimate = estimateCallsTimeFor({
+      providerId: resolved.provider.id,
+      model: resolved.model,
+      feature: "character_extract",
+      inputChars: pending.map(
+        (chunk) =>
+          BASE_SYSTEM_PROMPT.length +
+          buildCharacterExtractPrompt({
+            chunkText: chunk.text,
+            chapterLabel: describeChunk(chunk),
+            knownCharacterNames: knownNamesForEstimate,
+          }).length
+      ),
+      fallbackSecondsPerCall: EXTRACT_FALLBACK_SECONDS_PER_CHUNK,
+    });
     // 表示する上限と、実際に送る上限を同じ値にする。
     // 金額に関わる表示なので、送っていない上限を目安として出さない
     const configuredMaxOutputTokens = resolveMaxOutputTokens();
@@ -489,7 +528,11 @@ export async function extractCharacters(
     const confirmed = await confirmRun(
       `${chunks.length} チャンク中 ${pending.length} 件を処理します` +
         `（処理済み ${chunks.length - pending.length} 件はスキップ）。\n` +
-        `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度\n` +
+        `モデル: ${resolved.model} / ` +
+        (timeEstimate
+          ? describeCallTimeEstimate(timeEstimate)
+          : "目安は出せません") +
+        "\n" +
         costNotice,
       "実行",
       { remember: { id: "ai.run.extractCharacters" } }

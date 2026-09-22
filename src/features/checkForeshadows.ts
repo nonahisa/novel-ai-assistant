@@ -240,6 +240,8 @@ export async function checkForeshadows(
         model: resolved.model,
         feature: "foreshadow_detect",
         count: pending.length,
+        // 送る本文の量。読み込みの時間を足す（設計書6.8.19）
+        inputChars: pending.map((chunk) => chunk.text.length),
       }),
       `既に登録されている伏線: ${ledger.records.length}件`,
       "",

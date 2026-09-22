@@ -298,9 +298,28 @@ describe("先に出す確認", () => {
     expect(confirm?.detail).toContain("およそ 8×12＝96チャンク");
     expect(confirm?.detail).toContain("分かれて数が増えることがあります");
     expect(confirm?.detail).not.toContain("最大");
-    expect(confirm?.detail).toContain("目安 24分程度");
+    expect(confirm?.detail).toContain("目安 24 分程度");
+    // 速さを測っていない（見積もりに `chunkTime` が無い）ので、決め打ちだと名乗る
+    expect(confirm?.detail).toContain("決め打ち");
     expect(confirm?.detail).toContain("残りの4段は、1回ずつの短い呼び出しです。");
     expect(confirm?.detail).toContain("使うAI：Ollama");
+  });
+
+  test("速さの実測があれば、1チャンクぶんの見積もりから目安を出す（設計書6.8.19）", () => {
+    // CPUだけの機械で、1チャンクに5分かかる見積もり。決め打ちの15秒なら
+    // 96チャンクで24分だが、実測からは 96 × 5 ＝ 480分になる
+    const confirm = buildFinishConfirm({
+      workTitle: "試しの作品",
+      plan: planFinish([]),
+      estimate: {
+        ...estimate,
+        chunkTime: { ms: 5 * 60_000, source: "measured" },
+      },
+    });
+
+    // 1時間を超えたら「およそ◯時間」で言う（「目安 480 分程度」は割り算させる数字）
+    expect(confirm?.detail).toContain("目安 およそ8時間（これまでの実測から）");
+    expect(confirm?.detail).not.toContain("決め打ち");
   });
 
   test("有料のAIなら、課金されることを書く", () => {

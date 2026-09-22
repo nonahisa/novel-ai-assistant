@@ -305,3 +305,147 @@ describe("出力トークン数を返さないAI", () => {
     );
   });
 });
+
+/**
+ * **読み込みの速さも覚える**（設計書6.8.19。ノートPCの実機、2026-09-23）。
+ *
+ * CPUだけの Ollama（gemma4:e2b）では、読み込み25〜28・書き出し6〜7
+ * トークン/秒で、**1万字のチャンクは読むだけで数分かかる。** 押す前の
+ * 目安がそこを見ていなかったため、「目安 2 分」が実際は31分になった。
+ *
+ * Ollama は応答に読み込みと書き出しの時間（`prompt_eval_duration`・
+ * `eval_duration`）を別々に返す。それを使えば切り分けられる。
+ */
+describe("AIが申告した内訳から、読み込みと書き出しの速さを別々に採る", () => {
+  /** ノートPCの1チャンクに近い応答（読み込み9,400トークン・書き出し800トークン） */
+  function laptopChunk(overrides: Partial<GenerateResult> = {}): GenerateResult {
+    return {
+      text: "{}",
+      truncated: false,
+      // 全体 ＝ 読み込み 361.5秒 ＋ 書き出し 123秒
+      elapsedMs: 484_500,
+      usage: {
+        inputTokens: 9_400,
+        outputTokens: 800,
+        inputDurationMs: 361_500,
+        outputDurationMs: 123_000,
+      },
+      ...overrides,
+    };
+  }
+
+  test("読み込みの速さを台帳へ書き、書き出しの速さは書き出しの時間だけで割る", async () => {
+    const provider = new MeteredProvider(fakeProvider(() => laptopChunk()));
+
+    await provider.generate(params());
+
+    expect(saved).toHaveLength(1);
+    // 9,400 ÷ 361.5 ≒ 26.0
+    expect(saved[0].tuning.inputTokensPerSecond).toBe(26);
+    expect(saved[0].tuning.inputSpeedMeasuredAt).toBe(
+      new Date(clockMs).toISOString()
+    );
+    // 800 ÷ 123 ≒ 6.5。**全体（484.5秒）で割った 1.7 ではない**——
+    // そちらは読み込みの時間まで書く遅さとして数えている
+    expect(saved[0].tuning.outputTokensPerSecond).toBe(6.5);
+    expect(saved[0].tuning.speedSource).toBe("call");
+  });
+
+  test("内訳を申告しないAIでは、読み込みの速さを作らない（推定で埋めない）", async () => {
+    const provider = new MeteredProvider(fakeProvider(() => ok(300, 3_000)));
+
+    await provider.generate(params());
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0].tuning.outputTokensPerSecond).toBe(100);
+    // 欄ごと渡さない。`undefined` を渡すと台帳の前の実測が消える
+    expect("inputTokensPerSecond" in saved[0].tuning).toBe(false);
+    expect("inputSpeedMeasuredAt" in saved[0].tuning).toBe(false);
+  });
+
+  test("書き出しが短い回でも、読み込みの速さは採る（出力の欄には触らない）", async () => {
+    // 読める長さの測定は、長い入力に合言葉2つだけを返させる。書き出しの
+    // 速さにはならないが、読み込みの速さを測るにはいちばん良い回である
+    const provider = new MeteredProvider(
+      fakeProvider(() =>
+        laptopChunk({
+          usage: {
+            inputTokens: 9_400,
+            outputTokens: 10,
+            inputDurationMs: 361_500,
+            outputDurationMs: 1_500,
+          },
+        })
+      )
+    );
+
+    await provider.generate(params());
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0].tuning.inputTokensPerSecond).toBe(26);
+    expect("outputTokensPerSecond" in saved[0].tuning).toBe(false);
+    expect("speedSource" in saved[0].tuning).toBe(false);
+  });
+
+  test("切り詰められた回でも、読み込みは済んでいるので読み込みの速さは採る", async () => {
+    const provider = new MeteredProvider(
+      fakeProvider(() => laptopChunk({ truncated: true }))
+    );
+
+    await provider.generate(params());
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0].tuning.inputTokensPerSecond).toBe(26);
+    // 書き出しの速さは採らない（その速さで書き切れたことにならない）
+    expect("outputTokensPerSecond" in saved[0].tuning).toBe(false);
+  });
+
+  test("読み直しが少ない回（キャッシュが効いた回）からは採らない", async () => {
+    const provider = new MeteredProvider(
+      fakeProvider(() =>
+        laptopChunk({
+          usage: {
+            inputTokens: 40,
+            outputTokens: 800,
+            inputDurationMs: 1_500,
+            outputDurationMs: 123_000,
+          },
+        })
+      )
+    );
+
+    await provider.generate(params());
+
+    expect(saved).toHaveLength(1);
+    expect("inputTokensPerSecond" in saved[0].tuning).toBe(false);
+    expect(saved[0].tuning.outputTokensPerSecond).toBe(6.5);
+  });
+
+  test("失敗した回からは何も覚えない", async () => {
+    const provider = new MeteredProvider(
+      fakeProvider(() => {
+        throw new AIError("残高がありません。", "insufficient_credit");
+      })
+    );
+
+    await expect(provider.generate(params())).rejects.toThrow();
+
+    expect(saved).toHaveLength(0);
+  });
+
+  test("前回に無かった読み込みの速さが採れたら、間隔を待たずに書く", async () => {
+    let result: GenerateResult = ok(300, 3_000);
+    const provider = new MeteredProvider(fakeProvider(() => result));
+
+    await provider.generate(params());
+    expect(saved).toHaveLength(1);
+
+    // 30秒後（60秒の間隔より前）に、内訳を申告する応答が来た
+    advance(30_000);
+    result = laptopChunk();
+    await provider.generate(params());
+
+    expect(saved).toHaveLength(2);
+    expect(saved[1].tuning.inputTokensPerSecond).toBe(26);
+  });
+});

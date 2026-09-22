@@ -209,6 +209,8 @@ export async function checkProofread(
         model: resolved.model,
         feature: "proofread",
         count: pending.length,
+        // 送る本文の量。読み込みの時間を足す（設計書6.8.19）
+        inputChars: pending.map((chunk) => chunk.text.length),
       }),
       // **まとめ方を変えると、キャッシュが総入れ替えになる。** 何も
       // 変えていないのに全件が対象になると、作者は不具合だと思う

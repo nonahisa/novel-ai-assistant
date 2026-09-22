@@ -256,6 +256,8 @@ export async function checkDeviations(
         model: resolved.model,
         feature: "deviation_check",
         count: pending.length,
+        // 1話ごとに本文とプロットを送る。読み込みの時間を足す（設計書6.8.19）
+        inputChars: pending.map((episode) => episode.text.length + plotText.length),
         unit: "話",
       }),
       "",

@@ -40,6 +40,26 @@ const MIN_SPEED_SAMPLE_TOKENS = 64;
 const MIN_SPEED_SAMPLE_MS = 1_000;
 
 /**
+ * これに満たない入力からは、読み込みの速さを採らない（トークン。設計書6.8.19）。
+ *
+ * **Ollama は前の回と同じ頭の部分を読み直さない**（キャッシュが効く）。
+ * そのぶんは `prompt_eval_count` にも時間にも入らないので速さの計算は
+ * 崩れないが、読み直したのが数十トークンだけの回は、立ち上がりの固定費を
+ * 測ったことになる。実際の機能は指示だけで数千字あるので、この線は越える。
+ */
+const MIN_INPUT_SPEED_SAMPLE_TOKENS = 256;
+
+/**
+ * これに満たない読み込み時間の回も採らない（ミリ秒）。
+ *
+ * **出力（1秒）より短くしてある。** 読み込みは速い機械では数百ミリ秒で
+ * 終わる——そういう機械では読み込みが目安にほとんど効かないので、採れ
+ * なくても困らないが、1秒で切ると GPU の機械では一度も採れない。
+ * Ollama はナノ秒で申告するので、短くても時計の粗さで崩れない。
+ */
+const MIN_INPUT_SPEED_SAMPLE_MS = 100;
+
+/**
  * 同じモデルの速度を書き直すまでの間隔（ミリ秒）。
  *
  * 台帳はVS Codeの**設定ファイル**なので、書けばディスクへ書き込みが走る。
@@ -349,22 +369,25 @@ export class MeteredProvider implements AIProvider {
    * 実際の鍵は `プロバイダID:モデル名` と同じになる。
    *
    * 覚えているのは書き込みを抑えるためだけで、**値は平均しない**
-   * （直近の実測をそのまま台帳へ入れる）。
+   * （直近の実測をそのまま台帳へ入れる）。読み込みの速さ（設計書6.8.19）も
+   * 同じ札に並べる——片方だけ採れた回があるので、どちらも省略できる。
    */
   private readonly lastSpeed = new Map<
     string,
-    { at: number; tokensPerSecond: number }
+    { at: number; output?: number; input?: number }
   >();
 
   /** 台帳へ書けなかったことを言うのは、同じモデルで一度だけ */
   private readonly loggedSpeedFailure = new Set<string>();
 
   /**
-   * 応答から出力の速さを採って、台帳へ残す（設計書6.65.14）。
+   * 応答から出力の速さ（と読み込みの速さ）を採って、台帳へ残す
+   * （設計書6.65.14・6.8.19）。
    *
    * **採れる回は限られる。** 短い応答・切り詰められた応答は、
    * 「そのモデルが書く速さ」を表していない（上の2つの定数に理由）。
    * 失敗と中止の回はそもそもここへ来ない（呼ぶのは成功したときだけ）。
+   * **覚えるのは通った回からだけ**（実装ルール5の考え方）。
    *
    * **記録に `meta` は要らない。** 送信量のログと違って、これは作品では
    * なく**モデルの性質**なので、作品に属さない呼び出しから採ってもよい。
@@ -373,49 +396,43 @@ export class MeteredProvider implements AIProvider {
     model: string,
     result: GenerateResult
   ): Promise<void> {
-    // 途中で切られた応答は「その速さで書き切れた」ことにならない
-    if (result.truncated) return;
-
-    const measured = result.usage?.outputTokens;
-    const useMeasured =
-      typeof measured === "number" && Number.isFinite(measured) && measured > 0;
-    /*
-      **申告が無ければ字数から見積もる。**
-
-      換算は `core/sizeBudget.ts` の係数を借りる（新しい係数を作らない。
-      同じ意味の数を2か所目に書くのが、これまでの食い違いの原因だった）。
-
-      思考モードの出力も足す。**あれも時間を使って書かれている**ので、
-      本文だけで割ると、考えてから答えるモデルほど遅く見えてしまう。
-    */
-    const tokens = useMeasured
-      ? measured
-      : Math.round(
-          (result.text.length + (result.thinking?.length ?? 0)) *
-            TOKENS_PER_CHAR
-        );
-    const source: SpeedSource = useMeasured ? "call" : "estimated";
-
-    if (tokens < MIN_SPEED_SAMPLE_TOKENS) return;
-    if (result.elapsedMs < MIN_SPEED_SAMPLE_MS) return;
-
-    // 式は一覧側と共用する（`core/tuningStats.ts`）。写すと片方だけ直る
-    const tokensPerSecond = outputTokensPerSecond(tokens, result.elapsedMs);
-    if (tokensPerSecond === undefined) return;
+    const output = outputSpeedSample(result);
+    const input = inputSpeedSample(result);
+    if (output === undefined && input === undefined) return;
 
     const now = Date.now();
-    if (!this.shouldWriteSpeed(model, now, tokensPerSecond)) return;
+    if (!this.shouldWriteSpeed(model, now, output?.tokensPerSecond, input)) {
+      return;
+    }
 
+    // 時計は `Date.now` の1か所から取る（試験で止められるように）
+    const at = new Date(now).toISOString();
     try {
       await saveModelTuning(this.inner.id, model, {
-        outputTokensPerSecond: tokensPerSecond,
-        speedSource: source,
-        // 時計は `Date.now` の1か所から取る（試験で止められるように）
-        speedMeasuredAt: new Date(now).toISOString(),
+        /*
+          **採れた側だけを書く。** 台帳は `undefined` の欄を消すので、
+          採れなかった側を `undefined` で渡すと、前の実測まで消える
+          （短い応答の回は読み込みの速さしか採れない）。
+        */
+        ...(output !== undefined
+          ? {
+              outputTokensPerSecond: output.tokensPerSecond,
+              speedSource: output.source,
+              speedMeasuredAt: at,
+            }
+          : {}),
+        ...(input !== undefined
+          ? { inputTokensPerSecond: input, inputSpeedMeasuredAt: at }
+          : {}),
       });
       // **書けたときだけ覚える。** 書けていないのに覚えると、次の回が
       // 「もう書いた」と判断して台帳に速度が入らないままになる
-      this.lastSpeed.set(model, { at: now, tokensPerSecond });
+      const previous = this.lastSpeed.get(model);
+      this.lastSpeed.set(model, {
+        at: now,
+        output: output?.tokensPerSecond ?? previous?.output,
+        input: input ?? previous?.input,
+      });
     } catch (error) {
       // **速度が残せなかっただけで、AIの応答は返す**（見せるための参考値）。
       // ただしエラーの本文は捨てない（CLAUDE.md 規則5）
@@ -432,21 +449,24 @@ export class MeteredProvider implements AIProvider {
    * いま書くべきか。**書き込みを抑えるための判断**（設計書6.65.14）。
    *
    * 初めてなら書く。そうでなければ「前回から間隔が空いた」か
-   * 「値が大きく変わった」ときだけ書く。
+   * 「値が大きく変わった」ときだけ書く。**前回に無かった値が採れたのも
+   * 「大きく変わった」に数える**——読み込みの速さを初めて採れた回を、
+   * 60秒の間隔で捨てない。
    */
   private shouldWriteSpeed(
     model: string,
     now: number,
-    tokensPerSecond: number
+    outputTokensPerSecond: number | undefined,
+    inputTokensPerSecond: number | undefined
   ): boolean {
     const previous = this.lastSpeed.get(model);
     if (!previous) return true;
     if (now - previous.at >= SPEED_WRITE_INTERVAL_MS) return true;
     if (now - previous.at < SPEED_WRITE_CHANGE_MIN_INTERVAL_MS) return false;
-    const change =
-      Math.abs(tokensPerSecond - previous.tokensPerSecond) /
-      previous.tokensPerSecond;
-    return change >= SPEED_WRITE_CHANGE_RATIO;
+    return (
+      changedEnough(previous.output, outputTokensPerSecond) ||
+      changedEnough(previous.input, inputTokensPerSecond)
+    );
   }
 
   /** 字/トークンを台帳へ書けなかったことを言うのは、同じモデルで一度だけ */
@@ -639,6 +659,94 @@ export class MeteredProvider implements AIProvider {
       ...outcome,
     });
   }
+}
+
+/**
+ * 応答から、出力の速さを採る（設計書6.65.14）。採れない回は `undefined`。
+ *
+ * **AIが書き出しの時間を申告したら、それで割る**（設計書6.8.19。ノートPCの
+ * 実機、2026-09-23）。所要時間の全体で割ると、読み込みの時間まで「書く遅さ」
+ * として数える。CPUだけの機械では読み込みが時間の大半なので、1万字の
+ * チャンクを送った回の速さは実際の書き出しの数分の1に出ていた。読み込みの
+ * 速さを別に覚えるようになったので、ここで混ぜると見積もりで二重に数える。
+ *
+ * **申告しないAI（クラウド・LM Studio）は、これまでどおり全体で割る。**
+ * その値は読み込みの時間を含んだ「1回ぶんの速さ」なので、見積もりの側は
+ * 読み込みを足さない（読み込みの速さが台帳に入らないため、自然にそうなる）。
+ */
+function outputSpeedSample(
+  result: GenerateResult
+): { tokensPerSecond: number; source: SpeedSource } | undefined {
+  // 途中で切られた応答は「その速さで書き切れた」ことにならない
+  if (result.truncated) return undefined;
+
+  const measured = result.usage?.outputTokens;
+  const useMeasured =
+    typeof measured === "number" && Number.isFinite(measured) && measured > 0;
+  /*
+    **申告が無ければ字数から見積もる。**
+
+    換算は `core/sizeBudget.ts` の係数を借りる（新しい係数を作らない。
+    同じ意味の数を2か所目に書くのが、これまでの食い違いの原因だった）。
+
+    思考モードの出力も足す。**あれも時間を使って書かれている**ので、
+    本文だけで割ると、考えてから答えるモデルほど遅く見えてしまう。
+  */
+  const tokens = useMeasured
+    ? measured
+    : Math.round(
+        (result.text.length + (result.thinking?.length ?? 0)) *
+          TOKENS_PER_CHAR
+      );
+  const source: SpeedSource = useMeasured ? "call" : "estimated";
+
+  // 書き出しの時間の申告は、トークン数の申告と対でしか意味を持たない
+  const declared = result.usage?.outputDurationMs;
+  const elapsedMs =
+    useMeasured &&
+    typeof declared === "number" &&
+    Number.isFinite(declared) &&
+    declared > 0
+      ? declared
+      : result.elapsedMs;
+
+  if (tokens < MIN_SPEED_SAMPLE_TOKENS) return undefined;
+  if (elapsedMs < MIN_SPEED_SAMPLE_MS) return undefined;
+
+  // 式は一覧側と共用する（`core/tuningStats.ts`）。写すと片方だけ直る
+  const tokensPerSecond = outputTokensPerSecond(tokens, elapsedMs);
+  return tokensPerSecond === undefined ? undefined : { tokensPerSecond, source };
+}
+
+/**
+ * 応答から、読み込みの速さ（トークン/秒）を採る（設計書6.8.19）。
+ *
+ * **AIが読み込みの時間を申告した回だけ**（いまは Ollama）。所要時間の全体
+ * からは書き出しと切り分けられないので、申告の無いAIでは採らない——
+ * 推定で埋めると、見積もりが書き出しの時間を二重に数える。
+ *
+ * **切り詰められた回からも採る。** 途中で切られるのは書き出しのほうで、
+ * 読み込みは最後まで済んでいる（成功して返った回であることは変わらない）。
+ */
+function inputSpeedSample(result: GenerateResult): number | undefined {
+  const tokens = result.usage?.inputTokens;
+  const ms = result.usage?.inputDurationMs;
+  if (typeof tokens !== "number" || !Number.isFinite(tokens)) return undefined;
+  if (typeof ms !== "number" || !Number.isFinite(ms)) return undefined;
+  if (tokens < MIN_INPUT_SPEED_SAMPLE_TOKENS) return undefined;
+  if (ms < MIN_INPUT_SPEED_SAMPLE_MS) return undefined;
+  // 丸め方は出力の速さと同じ式を使う（小数1桁）
+  return outputTokensPerSecond(tokens, ms);
+}
+
+/** 前回の値から2割以上動いたか。**前回に無かった値が採れたら、動いたと数える** */
+function changedEnough(
+  previous: number | undefined,
+  current: number | undefined
+): boolean {
+  if (current === undefined) return false;
+  if (previous === undefined) return true;
+  return Math.abs(current - previous) / previous >= SPEED_WRITE_CHANGE_RATIO;
 }
 
 /**

@@ -172,6 +172,76 @@ describe("AIプロバイダ境界", () => {
   });
 
   /**
+   * 読み込みと書き出しの時間の内訳を拾う（設計書6.8.19。ノートPCの実機、
+   * 2026-09-23）。CPUだけの機械では読み込みが時間の大半で、押す前の目安に
+   * 要る。Ollama は**ナノ秒**で返すので、ミリ秒へ直して渡す。
+   */
+  test("Ollamaが申告した読み込み・書き出しの時間を、ミリ秒で拾う", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              message: { content: '{"characters":[]}' },
+              done_reason: "stop",
+              prompt_eval_count: 9_400,
+              eval_count: 800,
+              prompt_eval_duration: 361_500_000_000,
+              eval_duration: 123_000_000_000,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          )
+      )
+    );
+
+    const result = await new OllamaProvider().generate({
+      systemPrompt: "system",
+      userPrompt: "user",
+      model: "test-model",
+      temperature: 0.2,
+      numCtx: 16384,
+    });
+
+    expect(result.usage).toEqual({
+      inputTokens: 9_400,
+      outputTokens: 800,
+      inputDurationMs: 361_500,
+      outputDurationMs: 123_000,
+    });
+  });
+
+  test("時間の欄が壊れていても、応答は捨てない（内訳を置かないだけ）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              message: { content: '{"characters":[]}' },
+              done_reason: "stop",
+              prompt_eval_count: 100,
+              eval_count: 20,
+              prompt_eval_duration: "速い",
+              eval_duration: 0,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          )
+      )
+    );
+
+    const result = await new OllamaProvider().generate({
+      systemPrompt: "system",
+      userPrompt: "user",
+      model: "test-model",
+      temperature: 0.2,
+      numCtx: 16384,
+    });
+
+    expect(result.usage).toEqual({ inputTokens: 100, outputTokens: 20 });
+  });
+
+  /**
    * 宛先の設定は、以前はワークスペース（作品リポジトリ）からも書けた。
    * `machine` スコープにして塞いだうえで、**万一差し替えられていたら
    * 作者の目に触れる**ようにしておく（保険）。

@@ -119,6 +119,141 @@ export function estimateRunMs(
 }
 
 /**
+ * 押す前の見積もりが、どこまで実測から来ているか（設計書6.8.19）。
+ *
+ * - `measured`……速さも書く量も、この機械での実測から出した
+ * - `partial`……読み込みの速さは実測だが、書く側は決め打ちの秒数で埋めた
+ * - `fixed`……速さを測っていないので、機能ごとの決め打ちの秒数だけで出した
+ */
+export type CallTimeSource = "measured" | "partial" | "fixed";
+
+/** 押す前の見積もり。**出どころを必ず連れて歩く**（数字だけを渡さない） */
+export interface CallTimeEstimate {
+  readonly ms: number;
+  readonly source: CallTimeSource;
+}
+
+/**
+ * 押す前の所要時間を、**送る量と速さから**見積もる（設計書6.8.19）。
+ *
+ * ## なぜ送る量を見るか（ノートPCの実機、2026-09-23）
+ *
+ * CPUだけの Ollama（gemma4:e2b）で人物抽出を5チャンクに掛けると、確認画面は
+ * 「目安 2 分程度」、**実際は約31分**だった（15倍）。目安は「1チャンク20秒」の
+ * 決め打ちで、送る量をまったく見ていなかった。**CPUだけの機械では本文の
+ * 読み込み（25〜28トークン/秒）が時間の大半**で、1万字のチャンクなら
+ * 読むだけで数分かかる。
+ *
+ * ## 式
+ *
+ * 送る字数 × 字→トークン ÷ 読み込みの速さ ＋ 1回に書く量 ÷ 書き出しの速さ
+ * を、回数ぶん足す。
+ *
+ * ## 速さが分からないとき
+ *
+ * - **読み込みの速さが無い**（クラウド・LM Studio・まだ測っていない）……
+ *   書き出しの側だけで見る。普段の呼び出しで採る出力の速さは、応答全体の
+ *   所要時間で割ったもので、**読み込みの時間を既に含んでいる**
+ *   （`ai/meteredProvider.ts`）。足し直すと二重に数える
+ * - **書き出しの側が分からない**……`fallbackSecondsPerCall` があれば
+ *   その回数ぶんを足す（読み込みの実測があれば `partial`、無ければ `fixed`）
+ * - **決め打ちも渡されない**……数字を作らない（`undefined`）。当てずっぽう
+ *   が実測の顔をして並ぶのを避ける（`estimateRunMs` と同じ約束）
+ *
+ * **勝手に遅い値を仮定しない。** 分からないときに落ちる先は、これまで
+ * 各機能が使っていた決め打ちの秒数そのものである。
+ *
+ * VS Code API に依存しない。台帳を引くのは呼び出し側
+ * （`ai/runTimeEstimate.ts` の `estimateCallsTimeFor`）。
+ */
+export function estimateCallsTime(params: {
+  /** 1回ごとに送る字数（指示や資料を含む、送るぶんそのもの）。長さが回数 */
+  readonly inputChars: readonly number[];
+  /** 1字あたりのトークン数（`core/sizeBudget.ts` の `resolveTokensPerChar`） */
+  readonly tokensPerChar: number;
+  /** 読み込みの速さ（トークン/秒）。AIが読み込みの時間を返したときだけ測れる */
+  readonly inputTokensPerSecond?: number;
+  /** 書き出しの速さ（トークン/秒。台帳の `outputTokensPerSecond`） */
+  readonly outputTokensPerSecond?: number;
+  /** その機能が1回に書くトークン数（機能ごとの実測） */
+  readonly outputTokensPerCall?: number;
+  /** 分からないときの、1回あたりの決め打ちの秒数。無ければ数字を作らない */
+  readonly fallbackSecondsPerCall?: number;
+}): CallTimeEstimate | undefined {
+  const count = params.inputChars.length;
+  if (count === 0) return undefined;
+
+  const inputSpeed = positiveOrUndefined(params.inputTokensPerSecond);
+  const outputSpeed = positiveOrUndefined(params.outputTokensPerSecond);
+  const perCall = positiveOrUndefined(params.outputTokensPerCall);
+  const tokensPerChar = positiveOrUndefined(params.tokensPerChar);
+  const fallback = positiveOrUndefined(params.fallbackSecondsPerCall);
+
+  const inputKnown = inputSpeed !== undefined && tokensPerChar !== undefined;
+  const outputKnown = outputSpeed !== undefined && perCall !== undefined;
+
+  if (!inputKnown && !outputKnown) {
+    return fallback === undefined
+      ? undefined
+      : { ms: count * fallback * 1000, source: "fixed" };
+  }
+
+  let inputMs = 0;
+  if (inputKnown) {
+    // 字数の壊れた要素（負・NaN）は0字として数える。1件のせいで全体を捨てない
+    const chars = params.inputChars.reduce(
+      (total, value) =>
+        total + (Number.isFinite(value) && value > 0 ? value : 0),
+      0
+    );
+    inputMs = ((chars * tokensPerChar) / inputSpeed) * 1000;
+  }
+
+  if (outputKnown) {
+    const outputMs = (perCall / outputSpeed) * count * 1000;
+    return { ms: inputMs + outputMs, source: "measured" };
+  }
+  // 読み込みは分かるが、書く側が分からない。決め打ちで埋めるか、作らないか
+  if (fallback === undefined) return undefined;
+  return { ms: inputMs + count * fallback * 1000, source: "partial" };
+}
+
+/**
+ * 押す前の目安を、確認画面の言い方（「目安 ◯ 分程度」）で言う。
+ *
+ * **分は切り上げる**（これまでの `Math.ceil(秒 / 60)` と同じ）。1分に
+ * 満たない見積もりを「0分」と言わないため。
+ *
+ * **出どころを必ず添える**（実装ルール6の例外条件3と同じ流儀）。決め打ちの
+ * 数字に、実測と同じ顔をさせない——ノートPCの実機では、決め打ちの
+ * 「2分」をそのまま信じて31分待たされた。
+ */
+export function describeCallTimeEstimate(estimate: CallTimeEstimate): string {
+  const minutes = Math.max(1, Math.ceil(estimate.ms / 60_000));
+  const label = CALL_TIME_SOURCE_LABEL[estimate.source];
+  // 1時間を超えたら、進み具合の表示と同じ言い方（「およそ8時間」）にそろえる。
+  // 実測の速さで見積もると、CPUだけの機械では何百分にもなる——
+  // 「目安 480 分程度」は、読んでから割り算させる数字になる
+  if (minutes >= 60) {
+    return `目安 ${describeDuration(estimate.ms)}（${label}）`;
+  }
+  return `目安 ${minutes} 分程度（${label}）`;
+}
+
+/** 出どころごとの名乗り。**決め打ちが混ざったなら、必ずそう言う** */
+const CALL_TIME_SOURCE_LABEL: Readonly<Record<CallTimeSource, string>> = {
+  measured: "これまでの実測から",
+  partial: "読み込みは実測、書き出しはまだ測っていないので決め打ちの見込みです",
+  fixed: "この機械ではまだ速さを測っていないので、決め打ちの見込みです",
+};
+
+function positiveOrUndefined(value: number | undefined): number | undefined {
+  return value !== undefined && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
+}
+
+/**
  * 見積もりに使った、1回あたりの出力量の出どころ。
  *
  * **「同梱かどうか」ではなく「最大か平均か」で分ける**（0.71.5）。

@@ -187,7 +187,35 @@ interface ChatResponse {
   done_reason?: string;
   prompt_eval_count?: number;
   eval_count?: number;
+  /*
+    読み込み・書き出しにかかった時間（ナノ秒）。**型を検めずに `unknown` の
+    まま持つ**——見積もりに使う参考値なので、変な値が来ても応答そのものを
+    「形式が不正」として捨てない。読む側（`durationUsage`）が数だけ拾う
+  */
+  prompt_eval_duration?: unknown;
+  eval_duration?: unknown;
   error?: string;
+}
+
+/**
+ * Ollama が申告した読み込み・書き出しの時間を、ミリ秒で `usage` へ足す形にする
+ * （設計書6.8.19）。**正の数のときだけ入れる**——欄が無い・0・壊れた値は
+ * 「測れていない」なので、欄ごと置かない（`usage` の形を変えない）。
+ */
+function durationUsage(res: {
+  prompt_eval_duration?: unknown;
+  eval_duration?: unknown;
+}): { inputDurationMs?: number; outputDurationMs?: number } {
+  const toMs = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) && value > 0
+      ? value / 1_000_000
+      : undefined;
+  const inputDurationMs = toMs(res.prompt_eval_duration);
+  const outputDurationMs = toMs(res.eval_duration);
+  return {
+    ...(inputDurationMs !== undefined ? { inputDurationMs } : {}),
+    ...(outputDurationMs !== undefined ? { outputDurationMs } : {}),
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -595,6 +623,8 @@ export class OllamaProvider implements AIProvider {
       usage: {
         inputTokens: res.prompt_eval_count ?? 0,
         outputTokens: res.eval_count ?? 0,
+        // 読み込みと書き出しの内訳。押す前の目安に使う（設計書6.8.19）
+        ...durationUsage(res),
       },
       truncated: res.done_reason === "length",
       elapsedMs: Date.now() - started,
@@ -716,6 +746,8 @@ export class OllamaProvider implements AIProvider {
         error: state.error,
         eval_count: state.evalCount,
         prompt_eval_count: state.promptEvalCount,
+        eval_duration: state.evalDuration,
+        prompt_eval_duration: state.promptEvalDuration,
       } as ChatResponse;
     } catch (error) {
       if (error instanceof AIError) throw error;

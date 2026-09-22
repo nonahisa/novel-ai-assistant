@@ -48,6 +48,14 @@ import {
 import { renameEpisodeFile } from "../core/episodeRename";
 import { confirmFormatFit } from "./formatFitPrompt";
 import { cancelItem, isCancelItem } from "../views/dialogs";
+import { estimateCallsTimeFor } from "../ai/runTimeEstimate";
+import { describeCallTimeEstimate } from "../core/etaEstimate";
+
+/**
+ * 速さを測っていないときの、1話あたりの決め打ちの秒数（設計書6.8.19）。
+ * **これまでの目安の値そのもの**（`features/extractCharacters.ts` と同じ考え方）。
+ */
+const SYNOPSIS_FALLBACK_SECONDS_PER_EPISODE = 15;
 import { confirmRun, notifyDone, warnWithLog } from "../views/notify";
 
 /**
@@ -167,14 +175,44 @@ export async function generateSynopses(
     return false;
   }
 
-  const estimateMinutes = Math.ceil((pending.length * 15) / 60);
+  /*
+    **目安は送る量と速さから出す**（設計書6.8.19。ノートPCの実機、
+    2026-09-23。人物抽出で「目安 2 分」が実際は31分だった）。CPUだけの
+    機械では本文の読み込みが時間の大半なので、1話の長さが効く。
+
+    送る字数は実際の組み方で数える。人物名の一覧だけは確認のあとで読む
+    ので入れていない（100人ぶんでも数百字）。速さを測っていなければ、
+    これまでの15秒へ落ちる。
+  */
+  const timeEstimate = estimateCallsTimeFor({
+    providerId: resolved.provider.id,
+    model: resolved.model,
+    feature: "synopsis",
+    inputChars: pending.map(
+      (episode) =>
+        SYNOPSIS_SYSTEM_PROMPT.length +
+        buildSynopsisPrompt({
+          chapterLabel: episodeBodyLabel(episode),
+          chapterText: episode.body,
+          previousSynopses: previousSynopsesFor(set, episode),
+          characterNames: [],
+          needsSubtitle: needsSubtitle(episode),
+          readerProfile,
+        }).length
+    ),
+    fallbackSecondsPerCall: SYNOPSIS_FALLBACK_SECONDS_PER_EPISODE,
+  });
   const costNotice = resolved.provider.isPaid
     ? `\n${resolved.provider.displayName} は呼び出すたびに課金されます。`
     : "";
   const confirmed = await confirmRun(
     `${loaded.bodies.length} 話中 ${pending.length} 話のあらすじを作ります` +
       `（変わっていない ${loaded.bodies.length - pending.length} 話はスキップ）。\n` +
-      `モデル: ${resolved.model} / 目安 ${estimateMinutes} 分程度${costNotice}`,
+      `モデル: ${resolved.model} / ` +
+      (timeEstimate
+        ? describeCallTimeEstimate(timeEstimate)
+        : "目安は出せません") +
+      costNotice,
     "実行",
     { remember: { id: "ai.run.generateSynopses" } }
   );

@@ -163,6 +163,31 @@ describe("台帳の読み取り", () => {
     });
   });
 
+  test("読み込みの速さと、それを採った時刻を読む（設計書6.8.19）", () => {
+    const table = parseModelTuning({
+      "ollama/gemma4:e2b": {
+        outputTokensPerSecond: 6.5,
+        inputTokensPerSecond: 26,
+        inputSpeedMeasuredAt: "2026-09-23T01:00:00.000Z",
+      },
+      // 0・文字列・空の時刻は、その欄だけ捨てる（速度と同じ扱い）
+      "ollama/a": { outputTokensPerSecond: 6.5, inputTokensPerSecond: 0 },
+      "ollama/b": {
+        outputTokensPerSecond: 6.5,
+        inputTokensPerSecond: "26",
+        inputSpeedMeasuredAt: " ",
+      },
+    });
+
+    expect(table.get("ollama/gemma4:e2b")).toEqual({
+      outputTokensPerSecond: 6.5,
+      inputTokensPerSecond: 26,
+      inputSpeedMeasuredAt: "2026-09-23T01:00:00.000Z",
+    });
+    expect(table.get("ollama/a")).toEqual({ outputTokensPerSecond: 6.5 });
+    expect(table.get("ollama/b")).toEqual({ outputTokensPerSecond: 6.5 });
+  });
+
   test("速度が数でなければ、その欄だけ捨てる", () => {
     // 「0トークン/秒」は測れていないのと同じで、速い順に並べるときに
     // 「測っていない」と区別が付かなくなる

@@ -427,6 +427,8 @@ export async function checkTypos(
       model: resolved.model,
       feature: "typo_check",
       count: pending.length,
+      // 送る本文の量。読み込みの時間を足す（設計書6.8.19）
+      inputChars: pending.map((chunk) => chunk.text.length),
     });
     const costNotice = buildTypoCheckCostNotice(
       resolved.provider.id,

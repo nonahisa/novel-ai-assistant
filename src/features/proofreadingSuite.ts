@@ -11,6 +11,7 @@ import {
 } from "../core/runLog";
 import {
   PROOFREADING_CHECKS,
+  SECONDS_PER_CHUNK,
   PROOFREADING_SUITE_SELECTION_KEY,
   buildSuiteConfirm,
   describeStep,
@@ -30,6 +31,8 @@ import {
 import { scanWork } from "../core/scanner";
 import { readChunkSettings } from "./chunkSettings";
 import type { AIRegistry, AssignableFeature } from "../ai/registry";
+import { estimateCallsTimeFor } from "../ai/runTimeEstimate";
+import type { CallTimeEstimate } from "../core/etaEstimate";
 
 /**
  * 校正をまとめて実行する（設計書6.80）。
@@ -440,5 +443,70 @@ export async function collectEstimateForFeatures(
     chunkCount: Math.max(1, Math.ceil(totalChars / perChunk)),
     providerNames,
     isPaid,
+    chunkTime: averageChunkTime(registry, features, perChunk),
   };
+}
+
+/**
+ * 割当の機能が、出力量の実測を記録している名前（`meta.feature`）。
+ *
+ * **1チャンクぶんの目安に、その機能が1回に書く量の実測を使うため**
+ * （設計書6.8.19）。割当の粒度（`AssignableFeature`）は `meta.feature` より
+ * 粗いので、本文を丸ごと読む本体の呼び出しの名前を選ぶ。**載っていない
+ * 機能は、書く量を決め打ちで埋める**（あらすじ等の「生成」は1回ずつの
+ * 短い呼び出しで、チャンク数を掛ける対象でもない）。
+ */
+const OUTPUT_FEATURE_OF: Partial<Record<AssignableFeature, string>> = {
+  extract: "character_extract",
+  typo: "typo_check",
+  proofread: "proofread",
+  deviation: "deviation_check",
+  contradiction: "contradiction_check",
+  foreshadow: "foreshadow_detect",
+  factExtract: "story_fact_extract",
+};
+
+/**
+ * 1チャンクぶんの所要時間の見積もりを、**割当の機能ぶん平均する**
+ * （設計書6.8.19。ノートPCの実機、2026-09-23）。
+ *
+ * 機能ごとに別のAIを割り当てられるので、速さも機能ごとに引く。確認に出す
+ * のは「◯×◯＝◯チャンク」の目安であって、機能ごとの内訳ではない——
+ * **平均で足りる**（チャンク数そのものも先頭の機能のモデルで測った桁の感覚）。
+ *
+ * **速さを測っていない機能は、これまでの決め打ち（`SECONDS_PER_CHUNK`）で
+ * 数える。** 出どころは、全部が実測なら実測、全部が決め打ちなら決め打ち、
+ * 混ざれば「一部が決め打ち」と名乗る。
+ */
+function averageChunkTime(
+  registry: AIRegistry,
+  features: readonly AssignableFeature[],
+  perChunkChars: number
+): CallTimeEstimate | undefined {
+  const estimates: CallTimeEstimate[] = [];
+  for (const feature of features) {
+    const resolved = registry.resolve(feature);
+    if (!resolved) continue;
+    const estimate = estimateCallsTimeFor({
+      providerId: resolved.provider.id,
+      model: resolved.model,
+      feature: OUTPUT_FEATURE_OF[feature],
+      // 送る字数は本文の1チャンクぶん。指示や資料のぶんは機能ごとに
+      // 違うので入れていない（目安は短めに出る側へ寄る）
+      inputChars: [perChunkChars],
+      fallbackSecondsPerCall: SECONDS_PER_CHUNK,
+    });
+    if (estimate) estimates.push(estimate);
+  }
+  if (estimates.length === 0) return undefined;
+
+  const ms =
+    estimates.reduce((total, estimate) => total + estimate.ms, 0) /
+    estimates.length;
+  const source = estimates.every((estimate) => estimate.source === "measured")
+    ? "measured"
+    : estimates.every((estimate) => estimate.source === "fixed")
+      ? "fixed"
+      : "partial";
+  return { ms, source };
 }

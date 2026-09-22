@@ -13,6 +13,11 @@
  * VS Code APIに依存しない。
  */
 
+import {
+  describeCallTimeEstimate,
+  type CallTimeEstimate,
+} from "./etaEstimate";
+
 export type ProofreadingCheckId =
   | "notation"
   | "typos"
@@ -381,11 +386,16 @@ export function suiteContextOf(
 }
 
 /**
- * 1チャンクにかかるおおよその秒数。
+ * 1チャンクにかかるおおよその秒数。**速さを測っていないときだけ使う**
+ * （設計書6.8.19）。
  *
  * 誤字脱字検知が前から使っている見込み（`checkTypos.ts` の `estimateMinutes`）
  * と同じ値である。**新しい換算を作らない**——ここだけ別の数字にすると、
  * 単独で走らせたときとまとめ実行で目安が食い違う。
+ *
+ * 速さが台帳に入っていれば、送る量と速さから出した1チャンクぶんの見積もり
+ * （`SuiteEstimate.chunkTime`）に替わる。CPUだけの機械ではこの15秒が
+ * 何倍も外れる（ノートPCの実機、2026-09-23。人物抽出で15倍）。
  */
 export const SECONDS_PER_CHUNK = 15;
 
@@ -399,6 +409,33 @@ export interface SuiteEstimate {
   readonly providerNames: readonly string[];
   /** 1つでも有料なら真 */
   readonly isPaid: boolean;
+  /**
+   * 1チャンクぶんの所要時間の見積もり（設計書6.8.19）。**機能ごとの割当の
+   * 速さを平均したもの**（`features/proofreadingSuite.ts` の
+   * `collectEstimateForFeatures`）。無ければ `SECONDS_PER_CHUNK` の決め打ち。
+   */
+  readonly chunkTime?: CallTimeEstimate;
+}
+
+/**
+ * まとめ実行の確認に出す、所要時間の目安（「目安 ◯ 分程度（出どころ）」）。
+ *
+ * **2つの確認（校正のまとめ実行・新作の仕上げ）で同じ関数を使う。** 言い方は
+ * 単独の機能の確認と同じ部品（`describeCallTimeEstimate`）に寄せ、
+ * 決め打ちなら決め打ちだと名乗らせる。
+ */
+export function describeSuiteRunTime(
+  totalChunks: number,
+  estimate: SuiteEstimate
+): string {
+  const perChunk: CallTimeEstimate = estimate.chunkTime ?? {
+    ms: SECONDS_PER_CHUNK * 1000,
+    source: "fixed",
+  };
+  return describeCallTimeEstimate({
+    ms: perChunk.ms * totalChunks,
+    source: perChunk.source,
+  });
 }
 
 /** 確認の文面が要るのは、名前とAIを使うかの2つだけ */
@@ -488,7 +525,7 @@ export function buildSuiteConfirm(
       // 無料のAI（Ollama・LM Studio）では料金の話をしない。
       // 作者が知りたいのは「どれくらい待つか」だけである
       lines.push(
-        `目安 ${Math.ceil((total * SECONDS_PER_CHUNK) / 60)}分程度（処理済みのぶんだけ短くなります）。`
+        `${describeSuiteRunTime(total, estimate)}。処理済みのぶんだけ短くなります。`
       );
     }
   } else {
