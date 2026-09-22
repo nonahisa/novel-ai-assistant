@@ -705,17 +705,19 @@ function renderReaderEpisodes(table) {
 function siteRecordsNote(records) {
   const notes = [];
   if (records.some((record) => (record.history || []).length > 0)) {
-    notes.push('順位は「ランキングを記録する」で書き足した値です。' +
-      'サイトから自動で取ってくることはありません。');
+    // 名前はメニューの字面に揃える（0.75.8）。メニューで探すときに
+    // 見つからない名前を案内に書くと、押す場所が分からなくなる
+    notes.push('順位は「ランキングを記録」で書き足した値。' +
+      'サイトから自動で取ってこない。');
   }
   if (records.some((record) => record.readerLatest)) {
     notes.push('読者の反応は、手入力か、ご自身で開いた管理画面から' +
-      '貼り付けたものだけです。');
+      '貼り付けたものだけ。');
   }
   // 分析リンクも「開くだけ」であることを、その場で言う（6.79.7）
   if (records.some((record) => record.analysisUrl)) {
-    notes.push('分析（Narou.fun）はブラウザで開くだけで、' +
-      '中身を読み取ることもしません。');
+    notes.push('分析（Narou.fun）はブラウザで開くだけ。' +
+      '中身は読み取らない。');
   }
   return notes.join('');
 }

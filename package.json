@@ -140,7 +140,7 @@
       },
       {
         "view": "novelai.works",
-        "contents": "まだ作品が登録されていません。\n投稿サイト（カクヨム・なろう・アルファポリス）のバックアップは、そのまま作品にできます。\n[バックアップから作品を取り込む](command:novelai.importWorkFromZip)\n[フォルダから作品を追加](command:novelai.addWork)\n[新規作品を作成](command:novelai.createWork)\n[GitHubから作品を追加](command:novelai.addWorkFromGithub)",
+        "contents": "まだ作品が登録されていません。\n投稿サイト（カクヨム・なろう・アルファポリス）のバックアップは、そのまま作品にできる。\n[バックアップから取り込む](command:novelai.importWorkFromZip)\n[フォルダから追加](command:novelai.addWork)\n[新規作品を作成](command:novelai.createWork)\n[GitHubから追加](command:novelai.addWorkFromGithub)",
         "when": "!novelai.worksLoading"
       }
     ],
@@ -1613,7 +1613,7 @@
           "type": "object",
           "default": {},
           "scope": "machine",
-          "markdownDescription": "「以降は訊かない」にした確認と、そのときの答えです。[訊かないことにした確認を見直す](command:novelai.manageConfirmSkips)（ここで直接消すこともできます）。\n\n**GitHubへの送信・まとめて同期・人物の統合・削除のような、取り返しのつかない操作は覚えません。**"
+          "markdownDescription": "「以降は訊かない」にした確認と、そのときの答え。\n\n・ここで直接消せる\n・取り返しのつかない操作は覚えない（GitHubへの送信・まとめて同期・人物の統合・削除）\n\n[訊かない確認の見直し](command:novelai.manageConfirmSkips)"
         },
         "novelai.countMode": {
           "type": "string",
@@ -1626,75 +1626,75 @@
             "総文字数（改行を除き、空白を含む）"
           ],
           "default": "net",
-          "description": "文字数の数え方。ステータスバーと作品一覧に効きます（執筆量の記録と目標は、過去の記録と地続きにするため純文字数で固定です）。"
+          "description": "文字数の数え方。ステータスバーと作品一覧に効く（執筆量の記録と目標は純文字数で固定）。"
         },
         "novelai.excludeRubyFromCount": {
           "type": "boolean",
           "default": true,
-          "description": "Markdownのルビ記法 {漢字|かんじ} のルビ部分を文字数から除外する（.txt には効きません）。"
+          "description": "Markdownのルビ記法 {漢字|かんじ} のルビを文字数から除く（.txt には効かない）。"
         },
         "novelai.manuscriptEditor.vertical": {
           "type": "boolean",
           "default": true,
-          "description": "「縦書きで開く」で開いた原稿を、はじめから縦書きにする。画面の上のボタンでいつでも切り替えられます（切り替えた状態はその原稿ごとに覚えます）。"
+          "description": "「縦書きで開く」で開いた原稿を、はじめから縦書きにする（画面の上のボタンで切り替え。原稿ごとに覚える）。"
         },
         "novelai.manuscriptEditor.fontFamily": {
           "type": "string",
           "default": "",
-          "markdownDescription": "原稿の画面で使う書体です。**原稿の画面の「書体」ボタンから選べます**（この端末に入っている書体だけが選べる形で並びます）。空にすると明朝体（游明朝→ヒラギノ明朝→MS明朝の順で、入っているものを使います）。ここへ直接書くこともできます（例：`\"Noto Serif JP\", serif`）。"
+          "markdownDescription": "原稿の画面で使う書体。\n\n・原稿の画面の「書体」ボタンから選べる（この端末に入っているものだけ並ぶ）\n・空なら明朝体（游明朝→ヒラギノ明朝→MS明朝の順）\n・ここへ直接書ける（例：`\"Noto Serif JP\", serif`）"
         },
         "novelai.manuscriptEditor.readAloudRate": {
           "type": "number",
           "default": 1,
           "minimum": 0.5,
           "maximum": 2,
-          "description": "読み上げの速さ。1が標準です（原稿の画面の「読み上げ」の列でも、その場だけ変えられます）。"
+          "description": "読み上げの速さ。1が標準（原稿の画面の「読み上げ」でも、その場だけ変えられる）。"
         },
         "novelai.logs.retentionDays": {
           "type": "number",
           "default": 7,
           "minimum": 0,
-          "markdownDescription": "ログ（`.aiwriter/logs/`）に残す日数です。これより古い行は、VS Codeを起動したときに自動で消えます。**ログには原稿の一部が入ります**（相談の内容、AIの応答）。`0` にすると消しません。"
+          "markdownDescription": "ログ（`.aiwriter/logs/`）に残す日数。\n\n・これより古い行は、VS Codeの起動時に消える\n・原稿の一部が入る（相談の内容、AIの応答）\n・`0` で消さない"
         },
         "novelai.findings.retentionDays": {
           "type": "number",
           "default": 3,
           "minimum": 0,
-          "markdownDescription": "AIの指摘（`.aiwriter/findings.jsonl`）を並べ続ける日数です。これより古い指摘は**表示から外れるだけで、ファイルからは消えません**（消えるのは「古い指摘を片づける」を押したときだけです）。`0` にすると、いつまでも並べます。"
+          "markdownDescription": "AIの指摘（`.aiwriter/findings.jsonl`）を並べる日数。\n\n・古い指摘は表示から外れるだけ（ファイルからは消えない）\n・消えるのは「古い指摘を片づける」を押したときだけ\n・`0` でいつまでも並べる"
         },
         "novelai.chatter.enabled": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "書いている最中に、AIが「AIに相談」パネルへひとこと差し込みます（「本日の執筆文字数が1,000文字を超えました！」「空き時間に資料抽出やっておきましょうか？」など）。**ポップアップは出ません。**手が20秒ほど止まっているときだけ話しかけ、同じことは1日1回までです。\n\n**無料の手元AI（Ollama・LM Studioなど、課金されないAI）を使っているときだけ動きます。**有料のAIでは、頼まれていない発言に料金がかかるため動きません。"
+          "markdownDescription": "書いている最中に、AIがひとことを「AIに相談」パネルへ差し込む。\n\n・ポップアップは出ない\n・手が20秒ほど止まっているときだけ\n・同じことは1日1回まで\n\n無料の手元AI（Ollama・LM Studio）のときだけ動く。"
         },
         "novelai.stats.enabled": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "本文を保存したときに、前回からの増減をその日の執筆量として記録します。記録は作品フォルダーの `.aiwriter/stats/<環境名>.json` に残り、「執筆統計を表示」で日次・週次・月次・年次のグラフになります。**環境ごとに別のファイルへ書くため、複数のPCで書いても競合しません**（読むときに合算します）。"
+          "markdownDescription": "保存のたびに、前回からの増減をその日の執筆量として記録。\n\n・記録先は作品フォルダーの `.aiwriter/stats/<環境名>.json`\n・「執筆統計」で日次・週次・月次・年次のグラフになる\n・環境ごとに別のファイル（複数のPCで書いても競合しない）"
         },
         "novelai.stats.showInStatusBar": {
           "type": "boolean",
           "default": true,
-          "description": "ステータスバーの文字数の隣に、今日の執筆量（目標を設定していれば達成状況）を表示します。"
+          "description": "ステータスバーの文字数の隣に、今日の執筆量を出す（目標があれば達成状況も）。"
         },
         "novelai.stats.dailyGoal": {
           "type": "number",
           "default": 0,
           "minimum": 0,
-          "markdownDescription": "1日の目標字数。**0で目標なし**。設定するとステータスバーに「今日 560/1,000字」と出て、執筆量グラフに目標線が引かれます。"
+          "markdownDescription": "1日の目標字数。`0` で目標なし。\n\n・ステータスバーに「今日 560/1,000字」\n・執筆量グラフに目標線"
         },
         "novelai.stats.monthlyGoal": {
           "type": "number",
           "default": 0,
           "minimum": 0,
-          "markdownDescription": "1か月の目標字数。**0で目標なし**。設定すると、達成率と「残りの日で1日あたり何字書けばよいか」を執筆量パネルに表示します。"
+          "markdownDescription": "1か月の目標字数。`0` で目標なし。\n\n・執筆量パネルに達成率\n・残りの日で1日あたり何字書けばよいか"
         },
         "novelai.stats.dayBoundaryHour": {
           "type": "number",
           "default": 4,
           "minimum": 0,
           "maximum": 12,
-          "markdownDescription": "1日の区切りとする時刻（0〜12時）。**深夜0時で切ると、夜中に書いた分が翌日に付きます。** 既定の4時なら、午前3時に書いた分は前日の執筆量になります。"
+          "markdownDescription": "1日の区切りとする時刻（0〜12時）。\n\n・既定の4時なら、午前3時に書いた分は前日\n・`0`（深夜0時）にすると、夜中に書いた分は翌日"
         },
         "novelai.stats.weekStart": {
           "type": "string",
@@ -1729,126 +1729,126 @@
           "type": "string",
           "scope": "machine",
           "default": "http://localhost:11434",
-          "markdownDescription": "OllamaのエンドポイントURL\n\n[Ollamaのセットアップ…](command:novelai.setupOllama)"
+          "markdownDescription": "OllamaのエンドポイントURL。\n\n[Ollamaの導入…](command:novelai.setupOllama)"
         },
         "novelai.ollama.executablePath": {
           "type": "string",
           "scope": "machine",
           "default": "",
-          "markdownDescription": "`ollama` 実行ファイルの場所。**空なら自動検出**します（PATHと既定のインストール先を探索）。拡張機能からOllamaを起動するときにだけ使います。自動検出に失敗する場合のみ指定してください。\n\n[ファイルを選択…](command:novelai.selectOllamaExecutable)"
+          "markdownDescription": "`ollama` 実行ファイルの場所。\n\n・空なら自動検出（PATHと既定のインストール先）\n・拡張機能からOllamaを起動するときだけ使う\n・指定するのは自動検出に失敗したときだけ\n\n[ファイルを選択…](command:novelai.selectOllamaExecutable)"
         },
         "novelai.ollama.numCtx": {
           "type": "number",
           "default": 0,
           "minimum": 0,
-          "markdownDescription": "AIへ渡すコンテキスト長（トークン）。**0で自動**（モデルの上限と16384の小さい方）。Ollamaは既定値が小さく、指定しないと入力が切り捨てられます。大きくするとメモリ消費が増えます。"
+          "markdownDescription": "AIへ渡すコンテキスト長（トークン）。\n\n・`0` で自動（モデルの上限と16384の小さい方）\n・Ollamaは既定値が小さく、指定しないと入力が切り捨てられる\n・大きくするとメモリ消費が増える"
         },
         "novelai.ollama.streaming": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Ollama の応答を**流しながら**受け取り、相談パネルの「考えています…」に考えている中身を流します。切ると、生成が終わってからまとめて受け取ります（長い生成は通信の待ち時間で切られることがあります）。"
+          "markdownDescription": "Ollamaの応答を流しながら受け取る。\n\n・相談パネルの「考えています…」に中身が流れる\n・切ると、生成が終わってからまとめて受け取る\n・切ると、長い生成は通信の待ち時間で切られることがある"
         },
         "novelai.ollama.timeoutSeconds": {
           "type": "number",
           "default": 300,
           "minimum": 10,
-          "description": "1回のAI呼び出しのタイムアウト（秒）。非力なマシンのCPU実行でも1回を切らないよう既定を300秒にしています。大きいモデルではさらに延ばしてください。"
+          "description": "Ollamaの1回の呼び出しのタイムアウト（秒）。既定は300秒。大きいモデルではさらに長く。"
         },
         "novelai.modelTuning": {
           "type": "object",
           "default": {},
           "scope": "machine",
-          "markdownDescription": "AIチューニングで測った、モデルごとの上限と待ち時間。\n\n**0.66.6 から、測った値は拡張機能の保管庫のファイルに入ります。ここに値が残っていても使われません**（初回の引っ越しの材料としてだけ読みました）。記録を消すには、詳細メニューの「AIチューニングの記録を消す」を使ってください。\n\n**AIの用意**\n\n[セットアップ（必要なものを入れる）…](command:novelai.runFullSetup)\n\n[機能ごとにAIを割り当てる…](command:novelai.assignFeatureAI)"
+          "markdownDescription": "AIチューニングで測った、モデルごとの上限と待ち時間。\n\n・測った値は拡張機能の保管庫にある。ここに残っていても使われない\n・消すときは詳細メニューの「AIチューニングの記録を消す」\n\n[セットアップ（必要なものを入れる）…](command:novelai.runFullSetup)\n\n[機能ごとのAI割当…](command:novelai.assignFeatureAI)"
         },
         "novelai.mergeChunkChars": {
           "type": "number",
           "default": 6000,
           "minimum": 0,
-          "markdownDescription": "短い話をまとめて1回で送るときの目安の文字数。**「Chunk Size Mode」を「文字数を指定する」にしたときだけ使います**（「モデルによって可変」のときは、モデルが受けられる量まで詰めます）。`0` にするとまとめません。\n\n**1回の呼び出しごとに、本文とは別に約5,600字の指示を必ず送っています。** 1話2,000字の作品では指示のほうが大きく、19話なら同じ指示を19回送り直すことになります。まとめると呼び出し回数と送信量（＝クラウドAIの料金）が減り、処理も速くなります。\n\n実データでの効果（19話・約4万字の作品）：\n\n| 設定 | 呼び出し | 送信量 |\n|---|---|---|\n| `0`（まとめない） | 19回 | 144,000字 |\n| `4000` | 14回 | 19%減 |\n| `6000`（既定） | 8回 | 43%減 |\n| `8000` | 6回 | 51%減 |\n\n大きくしすぎると、1回の応答に収まらず切り詰められることがあります（その場合は自動で話ごとに分け直して処理し直します）。また、1話を書き直したときに再処理される範囲も広くなります。"
+          "markdownDescription": "短い話をまとめて1回で送るときの目安の文字数。\n\n・「Chunk Size Mode」を「文字数を指定する」にしたときだけ使う\n・「モデルによって可変」のときは、モデルが受けられる量まで詰める\n・`0` にするとまとめない\n・1回の呼び出しごとに、本文とは別に約5,600字の指示を送る\n・まとめると呼び出し回数と送信量（＝クラウドAIの料金）が減る\n\n実データでの効果（19話・約4万字の作品）：\n\n| 設定 | 呼び出し | 送信量 |\n|---|---|---|\n| `0`（まとめない） | 19回 | 144,000字 |\n| `4000` | 14回 | 19%減 |\n| `6000`（既定） | 8回 | 43%減 |\n| `8000` | 6回 | 51%減 |\n\n大きすぎると1回の応答に収まらず、自動で話ごとに分け直す。1話を書き直したときに再処理される範囲も広くなる。"
         },
         "novelai.claude.timeoutSeconds": {
           "type": "number",
           "default": 300,
           "minimum": 10,
-          "markdownDescription": "Claudeの1回のAI呼び出しのタイムアウト（秒）。\n\n新しいモデルは既定で思考しながら答えるため、1話ぶんの本文では3分を超えることがあります。短すぎると、応答が返る直前で打ち切って**そのチャンクを丸ごと失います**（実データで発生）。"
+          "markdownDescription": "Claudeの1回の呼び出しのタイムアウト（秒）。\n\n・思考しながら答えるモデルは、1話ぶんで3分を超えることがある\n・短すぎると、そのチャンクを丸ごと失う"
         },
         "novelai.maxOutputTokens": {
           "type": "number",
           "default": 16384,
           "minimum": 1024,
-          "markdownDescription": "1回の応答で受け取る最大トークン数。Claude・ChatGPT・Geminiへはこの値をそのまま送ります。**出力トークンは入力より単価が高い**ため、必要以上に大きくしないでください。モデルの上限を超える場合は上限に丸められます。\n\n小さすぎると応答が途中で切れ、**そのチャンクの結果は丸ごと捨てられます**（部分的なJSONは解析できないため）。呼び出し1回分が無駄になるので、節約しすぎないでください。\n\nOllamaへは送りませんが、**確保するコンテキスト長の計算には使われます**（応答用に空けておく分）。ここを小さくするとOllamaでも応答が切れやすくなります。コンテキスト長を直接決めたい場合は `novelai.ollama.numCtx` を使ってください。"
+          "markdownDescription": "1回の応答で受け取る最大トークン数。\n\n・Claude・ChatGPT・Geminiへはこの値をそのまま送る\n・モデルの上限を超えると上限に丸められる\n・出力トークンは入力より単価が高い\n・小さすぎると応答が途中で切れ、そのチャンクの結果は丸ごと捨てられる\n・Ollamaへは送らないが、確保するコンテキスト長の計算に使う\n\nコンテキスト長を直接決めるなら `novelai.ollama.numCtx`。"
         },
         "novelai.claude.maxOutputTokens": {
           "type": "number",
           "minimum": 1024,
-          "markdownDescription": "Claude専用だった旧設定。`novelai.maxOutputTokens` を使ってください。",
-          "deprecationMessage": "novelai.maxOutputTokens に統合されました。値を設定している場合はそちらが優先されます。"
+          "markdownDescription": "Claude専用だった旧設定。`novelai.maxOutputTokens` を使う。",
+          "deprecationMessage": "novelai.maxOutputTokens に統合。値を設定していれば、そちらが優先。"
         },
         "novelai.openai.endpoint": {
           "type": "string",
           "scope": "machine",
           "default": "https://api.openai.com/v1",
-          "description": "ChatGPT（OpenAI API）のエンドポイントURL。互換サービスを使う場合のみ変更してください。"
+          "description": "ChatGPT（OpenAI API）のエンドポイントURL。変えるのは互換サービスを使うときだけ。"
         },
         "novelai.openai.timeoutSeconds": {
           "type": "number",
           "default": 180,
           "minimum": 10,
-          "description": "ChatGPTの1回のAI呼び出しのタイムアウト（秒）。"
+          "description": "ChatGPTの1回の呼び出しのタイムアウト（秒）。"
         },
         "novelai.openai.contextWindow": {
           "type": "number",
           "default": 128000,
           "minimum": 1024,
-          "markdownDescription": "ChatGPTのモデルのコンテキスト長（トークン）。**OpenAIのモデル一覧APIはこの値を返さない**ため、設定で指定します。本文の分割単位を決めるのに使うので、実際より大きいと入力が黙って切り捨てられます。使用するモデルの仕様に合わせてください。\n\nこの値を変更すると分割単位が変わり、処理済みチャンクのキャッシュが使えなくなります。"
+          "markdownDescription": "ChatGPTのモデルのコンテキスト長（トークン）。\n\n・OpenAIのモデル一覧APIはこの値を返さないので、ここで指定する\n・本文の分割単位を決める\n・実際より大きいと入力が黙って切り捨てられる\n・変えると分割単位が変わり、処理済みチャンクのキャッシュが使えなくなる"
         },
         "novelai.gemini.endpoint": {
           "type": "string",
           "scope": "machine",
           "default": "https://generativelanguage.googleapis.com/v1beta",
-          "description": "GeminiのエンドポイントURL。通常は変更不要です。"
+          "description": "GeminiのエンドポイントURL。通常は変えない。"
         },
         "novelai.gemini.timeoutSeconds": {
           "type": "number",
           "default": 180,
           "minimum": 10,
-          "description": "Geminiの1回のAI呼び出しのタイムアウト（秒）。"
+          "description": "Geminiの1回の呼び出しのタイムアウト（秒）。"
         },
         "novelai.lmstudio.endpoint": {
           "type": "string",
           "scope": "machine",
           "default": "http://localhost:1234/v1",
-          "markdownDescription": "LM StudioのローカルサーバーのURL。LM Studioの「Developer」画面でサーバーを開始したときに表示される値に合わせます。通常は変更不要です。\n\n[LM Studioのセットアップ…](command:novelai.setupLmStudio)"
+          "markdownDescription": "LM StudioのローカルサーバーのURL。\n\n・LM Studioの「Developer」画面に出る値に合わせる\n・通常は変えない\n\n[LM Studioの導入…](command:novelai.setupLmStudio)"
         },
         "novelai.lmstudio.contextWindow": {
           "type": "number",
           "default": 8192,
           "minimum": 512,
-          "markdownDescription": "LM Studioのコンテキスト長。**LM Studioが実際に読み込んだ長さを自動で読み取れる場合は、そちらを優先します。** この設定は、読み取れない古い版のための予備です。使われる場合、実際より大きいと入力が黙って切り捨てられるため、LM Studioでモデルを読み込んだときに指定した長さに合わせてください。"
+          "markdownDescription": "LM Studioのコンテキスト長。\n\n・実際に読み込んだ長さを読み取れるときは、そちらが優先\n・読み取れない古い版のための予備\n・実際より大きいと入力が黙って切り捨てられる"
         },
         "novelai.lmstudio.timeoutSeconds": {
           "type": "number",
           "default": 300,
           "minimum": 10,
-          "description": "LM Studioの1回の呼び出しのタイムアウト（秒）。手元のPCで動かすため、非力なマシンのCPU実行でも1回を切らないよう既定を300秒にしています。大きなモデルではさらに長めに必要です。"
+          "description": "LM Studioの1回の呼び出しのタイムアウト（秒）。既定は300秒。大きなモデルではさらに長く。"
         },
         "novelai.lmstudio.cliPath": {
           "type": "string",
           "scope": "machine",
           "default": "",
-          "markdownDescription": "LM Studio のコマンド（lms）の場所。空なら `~/.lmstudio/bin` と PATH を探します。"
+          "markdownDescription": "LM Studioのコマンド（lms）の場所。空なら `~/.lmstudio/bin` と PATH を探す。"
         },
         "novelai.lmstudio.loadContextLength": {
           "type": "number",
           "default": 0,
           "minimum": 0,
-          "markdownDescription": "拡張機能がモデルを読み込むときに指定する文脈の長さ。**0 ならモデルの最大**まで使います。大きいほどメモリを使います。"
+          "markdownDescription": "モデルを読み込むときに指定する文脈の長さ。\n\n・`0` でモデルの最大\n・大きいほどメモリを使う"
         },
         "novelai.epub.ornamentFolder": {
           "type": "string",
           "scope": "machine",
           "default": "",
-          "markdownDescription": "EPUBの飾り（目次・中表紙・奥付）を追加で読み込むフォルダーの絶対パス。この中の `*.svg` が、すべての作品の「飾り」の選択肢に出ます。作品ごとに足すときは `設定/書籍/飾り/` に置いてください（そちらはGitで同期されます）。\n\n組み込みの飾りと同じ名前のファイルは使いません（組み込みは上書きできません）。取り込めないSVG（`<script>`・外部参照など）は理由を添えて外します。"
+          "markdownDescription": "EPUBの飾り（目次・中表紙・奥付）を追加で読み込むフォルダーの絶対パス。\n\n・この中の `*.svg` が、すべての作品の「飾り」の選択肢に出る\n・作品ごとに足すなら `設定/書籍/飾り/`（そちらはGitで同期される）\n・組み込みと同じ名前のファイルは使わない\n・取り込めないSVG（`<script>`・外部参照など）は理由を添えて外す"
         },
         "novelai.chunkSizeMode": {
           "type": "string",
@@ -1858,75 +1858,75 @@
           ],
           "default": "モデルによって可変",
           "enumDescriptions": [
-            "使うAIのコンテキスト長から、1回に送る量を自動で決めます。長く受けられるモデルほどまとめて送るので、呼び出し回数が減ります。",
-            "下の「Chunk Chars」で指定した文字数を使います。"
+            "使うAIのコンテキスト長から、1回に送る量を自動で決める。長く受けられるモデルほどまとめて送るので、呼び出し回数が減る。",
+            "下の「Chunk Chars」で指定した文字数を使う。"
           ],
-          "markdownDescription": "AIへ1回に送る本文の量の決め方です。**既定は「モデルによって可変」**で、使うAIに合わせて自動で決めます。誤字脱字・推敲・矛盾検知・設定資料の抽出のすべてに効きます。"
+          "markdownDescription": "AIへ1回に送る本文の量の決め方。\n\n・既定は「モデルによって可変」（使うAIに合わせて自動）\n・誤字脱字・推敲・矛盾検知・設定資料の抽出のすべてに効く"
         },
         "novelai.chunkChars": {
           "type": "number",
           "default": 0,
           "minimum": 0,
-          "markdownDescription": "1チャンクの文字数。**「Chunk Size Mode」を「文字数を指定する」にしたときだけ使います。** 0のままだと、指定なしとしてモデルから自動決定します。"
+          "markdownDescription": "1チャンクの文字数。\n\n・「Chunk Size Mode」を「文字数を指定する」にしたときだけ使う\n・`0` のままなら、指定なしとしてモデルから自動で決まる"
         },
         "novelai.git.autoFetch": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "作品フォルダーがGitリポジトリのとき、起動時と本文を開いたときに `git fetch` を実行し、別の環境の変更が未取得かどうかを確認します。**fetchは取得のみで、原稿にもブランチにも触れません。** 取り込み（pull）と送信（push）は、この設定に関わらず自動では実行しません。"
+          "markdownDescription": "作品フォルダーがGitリポジトリのとき、起動時と本文を開いたときに `git fetch` する。\n\n・別の環境の変更が未取得かどうかを確かめる\n・fetchは取得のみ。原稿にもブランチにも触れない\n・取り込み（pull）と送信（push）は自動では行わない"
         },
         "novelai.git.syncCache": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "AIの処理済みキャッシュ（`.aiwriter/cache/`）をGitで同期します。**複数の環境を渡り歩いて執筆する場合は有効にしてください。** 無効のままだと、別のPCで作業を始めたときに全チャンクをAIで処理し直すことになります。キャッシュのキーには内容ハッシュ・モデル名・プロンプト版が含まれるので、条件が違う結果を再利用することはありません。切り替えると次回起動時に `.gitignore` へ規則を追記します（作者が書いた行は変更しません）。"
+          "markdownDescription": "AIの処理済みキャッシュ（`.aiwriter/cache/`）をGitで同期する。\n\n・複数の環境を渡り歩いて書くときに入にする\n・切ったままだと、別のPCで全チャンクを処理し直す\n・キーに内容ハッシュ・モデル名・プロンプト版が入る（条件が違う結果は再利用しない）\n・切り替えると次回起動時に `.gitignore` へ規則を追記（作者が書いた行は変えない）"
         },
         "novelai.git.autoFetchIntervalMinutes": {
           "type": "number",
           "default": 10,
           "minimum": 1,
-          "description": "自動fetchの最小間隔（分）。本文を開くたびにネットワークへ出ると、回線の遅い環境で操作が重くなるため、前回からこの時間が経つまでは取りに行きません。"
+          "description": "自動fetchの最小間隔（分）。前回からこの時間が経つまでは取りに行かない。"
         },
         "novelai.vectorSearch.enabled": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "相談で使う「意味検索」（ベクトルDB）を使います。切っていても、質問を使って場面を探すこと自体は行われます（語句一致）。入にすると言い換えでの質問にも当たりやすくなりますが、埋め込みモデルの取得（約1.2GB）と、作品ごとの索引づくりが必要になります。非力な機械では切ったままをおすすめします。\n\n[意味検索の準備…](command:novelai.setupVectorSearch)\n\n[検索用の索引を作る・更新する…](command:novelai.buildVectorIndex)\n\n[検索用の索引を削除する…](command:novelai.clearVectorIndex)"
+          "markdownDescription": "相談で使う「意味検索」（ベクトルDB）。\n\n・切っていても、語句一致で場面は探す\n・入にすると言い換えの質問にも当たりやすい\n・埋め込みモデルの取得（約1.2GB）と、作品ごとの索引づくりが要る\n・非力な機械では切ったままでよい\n\n[意味検索の準備…](command:novelai.setupVectorSearch)\n\n[検索用の索引を作る・更新する…](command:novelai.buildVectorIndex)\n\n[検索用の索引を削除する…](command:novelai.clearVectorIndex)"
         },
         "novelai.vectorSearch.model": {
           "type": "string",
           "default": "bge-m3",
-          "description": "意味検索に使う埋め込みモデル（Ollama）。日本語を含む多言語向けの bge-m3 を既定にしています。変更すると索引は作り直しになります。"
+          "description": "意味検索に使う埋め込みモデル（Ollama）。既定は多言語向けの bge-m3。変えると索引は作り直し。"
         },
         "novelai.vectorSearch.autoUpdate": {
           "type": "boolean",
           "default": true,
-          "description": "相談を始めるときに、本文の変更ぶんだけ索引を自動で追加します（変わっていない場面は作り直しません）。切ると、作者が「検索用の索引を作る」を実行するまで更新されません。"
+          "description": "相談を始めるときに、本文の変更ぶんだけ索引へ足す。切ると「検索用の索引を作る・更新する」まで更新しない。"
         },
         "novelai.chatLog.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "AIとの相談のやり取りを 設定フォルダーの .aiwriter/logs/chat.md に残します。何を材料にAIが何を答えたのかを後から確かめられます。**原稿の一部を含みます。** この場所はGitHubへ送られませんが、残したくない場合は切ってください。"
+          "markdownDescription": "AIとの相談のやり取りを `.aiwriter/logs/chat.md` に残す。\n\n・何を材料にAIが何を答えたのかを後から確かめられる\n・原稿の一部を含む\n・この場所はGitHubへ送られない"
         },
         "novelai.usageLog.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "AIへ1回送るごとに、送った量を .aiwriter/logs/usage.md に1行ずつ残します。どの機能が重いか、本文が何割を占めているかを後から確かめられます。**本文そのものは記録しません**（字数だけです）。この場所はGitHubへ送られません。"
+          "markdownDescription": "AIへ1回送るごとに、送った量を `.aiwriter/logs/usage.md` へ1行ずつ残す。\n\n・どの機能が重いか、本文が何割かを後から確かめられる\n・本文そのものは記録しない（字数だけ）\n・この場所はGitHubへ送られない"
         },
         "novelai.sakura.endpoint": {
           "type": "string",
           "scope": "machine",
           "default": "https://api.ai.sakura.ad.jp/v1",
-          "description": "さくらのAI EngineのAPIの宛先。OpenAI互換の口を使います。通常は変える必要がありません。"
+          "description": "さくらのAI EngineのAPIの宛先（OpenAI互換の口）。通常は変えない。"
         },
         "novelai.sakura.timeoutSeconds": {
           "type": "number",
           "default": 180,
           "minimum": 10,
-          "description": "さくらのAI Engineへの1回の要求を、何秒まで待つか。長い本文を送ると時間がかかります。"
+          "description": "さくらのAI Engineの1回の呼び出しのタイムアウト（秒）。"
         },
         "novelai.sakura.contextWindow": {
           "type": "number",
           "default": 32000,
           "minimum": 1024,
-          "description": "さくらのAI Engineのモデルが受け取れる長さ（トークン）。本文をどこで区切るかの基準になります。実際より大きくすると、入力が黙って切り捨てられます。"
+          "description": "さくらのAI Engineのコンテキスト長（トークン）。本文の分割単位を決める。大きすぎると入力が切り捨てられる。"
         },
         "novelai.mode": {
           "type": "string",
@@ -1936,11 +1936,11 @@
             "editor"
           ],
           "enumDescriptions": [
-            "作者：すべての機能を使えます",
-            "編集者：本文の校正・校閲だけを行えます。設定資料や執筆の機能は使えません"
+            "作者：すべての機能を使える",
+            "編集者：本文の校正・校閲だけ。設定資料や執筆の機能は使えない"
           ],
           "default": "author",
-          "markdownDescription": "この環境をどちらとして使うか。編集部の方は「editor」にしてください。操作の記録に残る種別も変わります。\n\n[作者／編集者を切り替える…](command:novelai.switchMode)"
+          "markdownDescription": "この環境を作者と編集者のどちらとして使うか。\n\n・編集部の方は「editor」\n・操作の記録に残る種別も変わる\n\n[作者／編集者の切り替え…](command:novelai.switchMode)"
         }
       }
     },

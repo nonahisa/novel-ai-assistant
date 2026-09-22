@@ -869,8 +869,10 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
           new vscode.ThemeIcon("chevron-down");
     item.tooltip = new vscode.MarkdownString(
       works.length === 0
-        ? "**まだ作品が登録されていません。**\n\n" +
-          "「1. 作品登録」から登録すると、下の操作が使えるようになる。"
+        ? // 1行目は `package.json` の `viewsWelcome` と同じ字面にしておく。
+          // 片方だけ言い換えると、2つの画面が同じ状態を別の言葉で言い出す
+          "まだ作品が登録されていません。\n\n" +
+          "・「1. 作品登録」から登録すると、下の操作が使える"
         : // 切った題の全文はここに出す（切りっぱなしにしない）
           (view.fullTitle ? `**${view.fullTitle}**\n\n` : "") +
             "下に並ぶ操作は、ここで選んだ作品にだけ効く\n\n" +
