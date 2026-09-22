@@ -138,7 +138,8 @@ describe("サイトごとの作品IDの入力案内", () => {
         if (round === 1) return items;
         // 2回目：作品情報も入れるか→入れる
         if (round === 2) return items.find((item) => "detailed" in item);
-        // 3回目：基準線の引き直し→しない
+        // 3回目以降（基準線）は取りやめる。記録がまだ無い台帳なので
+        // 2択は挟まれず、話の一覧が直接出る（`postingKitBaseline.test.ts`）
         return undefined;
       },
     });
@@ -328,5 +329,134 @@ describe("作品情報を訊く流れ", () => {
       "https://ncode.syosetu.com/n9999zz/",
       "恋愛",
     ]);
+  });
+});
+
+/**
+ * 投稿ページのURLから作品IDと作品ページを埋める（作者の指摘、2026-09-22）。
+ *
+ * **同じ数字を2度打たせない。** 「作品ID・作品ページ・ジャンルを入れる」で
+ * 訊く3つのうち、**2つは直前に貼ってもらったURLに書いてある**——作者の言葉は
+ * 「ジャンル以外は更新用URLから抽出できます」である。
+ *
+ * 導き方そのものは `postingSiteUrls.test.ts` で確かめる。ここで見るのは
+ * **画面の初期値に出ること**と、**作者が入れた値のほうが勝つこと**。
+ */
+describe("投稿ページのURLから初期値を埋める", () => {
+  /** 入力欄に出た初期値を、題ごとに拾う */
+  let initial: Map<string, string | undefined>;
+
+  beforeEach(() => {
+    // **前のテストが書いた台帳を持ち越さない**（作品情報が残っていると、
+    // 導いた値ではなくそちらが初期値に出る＝この describe の題そのもの）
+    disk.clear();
+    disk.set(
+      ledgerPath,
+      utf8(
+        JSON.stringify({
+          schemaVersion: "1",
+          sites: [],
+          siteProfiles: [],
+          posts: [],
+          rankings: [],
+        })
+      )
+    );
+  });
+
+  function stub(url: string, label: string): void {
+    initial = new Map();
+    let round = 0;
+    Object.assign(window, {
+      showInformationMessage: async () => undefined,
+      showWarningMessage: async () => undefined,
+      showErrorMessage: async () => undefined,
+      showQuickPick: async (items: Array<Record<string, unknown>>) => {
+        round += 1;
+        if (round === 1) {
+          return items.filter((item) =>
+            String(item.label ?? "").includes(label)
+          );
+        }
+        if (round === 2) return items.find((item) => "detailed" in item);
+        return undefined;
+      },
+      showInputBox: async (options: { title?: string; value?: string }) => {
+        const title = options.title ?? "";
+        if (title.includes("新規エピソード投稿ページ")) return url;
+        initial.set(title, options.value);
+        return options.value ?? "";
+      },
+    });
+  }
+
+  test("カクヨム：作品IDと作品ページが埋まっている（作者の実機の値）", async () => {
+    // 2026-09-22 に作者の台帳へ実際に入った値
+    stub(
+      "https://kakuyomu.jp/my/works/1177354054934574437/episodes/new",
+      "カクヨム"
+    );
+
+    await configurePostingSites(work);
+
+    expect(initial.get("カクヨム での作品ID")).toBe("1177354054934574437");
+    expect(initial.get("カクヨム の作品ページのURL")).toBe(
+      "https://kakuyomu.jp/works/1177354054934574437"
+    );
+    // **ジャンルは導けない**ので、今までどおり空で訊く
+    expect(initial.get("カクヨム でのジャンル") || "").toBe("");
+  });
+
+  test("なろう：Nコードと作品トップが埋まっている", async () => {
+    stub(newEpisodeUrl["小説家になろう"], "小説家になろう");
+
+    await configurePostingSites(work);
+
+    expect(initial.get("小説家になろう での作品ID")).toBe("n1234ab");
+    expect(initial.get("小説家になろう の作品ページのURL")).toBe(
+      "https://ncode.syosetu.com/n1234ab/"
+    );
+  });
+
+  test("アルファポリスは埋めない（投稿画面のURLの形が実機で未確認）", async () => {
+    stub(newEpisodeUrl["アルファポリス"], "アルファポリス");
+
+    await configurePostingSites(work);
+
+    // 片方だけの番号を入れると、作品を指せないIDが台帳に残る
+    expect(initial.get("アルファポリス での作品ID") || "").toBe("");
+    expect(initial.get("アルファポリス の作品ページのURL") || "").toBe("");
+  });
+
+  test("作者が入れた値のほうが勝つ（導いた値で上書きしない）", async () => {
+    disk.set(
+      ledgerPath,
+      utf8(
+        JSON.stringify({
+          schemaVersion: "1",
+          sites: [],
+          siteProfiles: [
+            {
+              site: "kakuyomu",
+              workId: "9999999999",
+              workUrl: "https://kakuyomu.jp/works/9999999999",
+            },
+          ],
+          posts: [],
+          rankings: [],
+        })
+      )
+    );
+    stub(
+      "https://kakuyomu.jp/my/works/1177354054934574437/episodes/new",
+      "カクヨム"
+    );
+
+    await configurePostingSites(work);
+
+    expect(initial.get("カクヨム での作品ID")).toBe("9999999999");
+    expect(initial.get("カクヨム の作品ページのURL")).toBe(
+      "https://kakuyomu.jp/works/9999999999"
+    );
   });
 });

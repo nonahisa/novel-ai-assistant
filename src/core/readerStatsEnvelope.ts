@@ -80,10 +80,24 @@ export interface ReaderStatsEnvelope {
  */
 export type ReaderStatsEnvelopeResult =
   | { readonly ok: true; readonly envelope: ReaderStatsEnvelope }
-  | { readonly ok: false; readonly reason: string };
+  | {
+      readonly ok: false;
+      readonly reason: string;
+      /**
+       * **そもそも封筒が入っていなかったのか**を見分ける印。
+       *
+       * ここだけは「作者がまだコピーしていない」だけのことが多いので、
+       * 呼ぶ側が管理画面を開く道を添えられる（設計書6.79.7）。ほかの断り
+       * （版違い・対応していないサイト）は、管理画面を開いても直らない。
+       */
+      readonly kind?: "notEnvelope";
+    };
 
-function reject(reason: string): ReaderStatsEnvelopeResult {
-  return { ok: false, reason };
+function reject(
+  reason: string,
+  kind?: "notEnvelope"
+): ReaderStatsEnvelopeResult {
+  return { ok: false, reason, ...(kind ? { kind } : {}) };
 }
 
 /**
@@ -132,20 +146,20 @@ export function parseReaderStatsEnvelope(
   const notEnvelope =
     "クリップボードに、読者の反応の封筒が入っていませんでした。" +
     "管理画面で貼り込み係の「読者の反応をコピー」を押してから、もう一度お試しください。";
-  if (!trimmed) return reject(notEnvelope);
+  if (!trimmed) return reject(notEnvelope, "notEnvelope");
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(trimmed);
   } catch {
-    return reject(notEnvelope);
+    return reject(notEnvelope, "notEnvelope");
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return reject(notEnvelope);
+    return reject(notEnvelope, "notEnvelope");
   }
 
   const value = parsed as Record<string, unknown>;
-  if (value[MARKER] === undefined) return reject(notEnvelope);
+  if (value[MARKER] === undefined) return reject(notEnvelope, "notEnvelope");
   // **知らない版数は読まない。** 欄の意味が変わったものを読むと、数字が化ける
   if (value[MARKER] !== READER_STATS_ENVELOPE_VERSION) {
     return reject(

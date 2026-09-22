@@ -7,6 +7,7 @@ import {
   parseReaderStatsValue,
   postingSiteInfo,
   readerStatsMetricsFor,
+  siteProfile,
   validateReaderStatsEpisode,
   validateReaderStatsValue,
   validateReaderStatsPeriodKey,
@@ -22,6 +23,8 @@ import {
   matchReaderStatsEnvelope,
   parseReaderStatsEnvelope,
 } from "../core/readerStatsEnvelope";
+// 管理画面のURLを組むのは core（画面を出さずに確かめられるようにする）
+import { readerStatsPageUrl } from "../core/postingSiteUrls";
 import { formatReaderStatsMetrics } from "../core/postingSiteRecords";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { logFailure, useLogFile } from "../core/logger";
@@ -72,10 +75,43 @@ export async function importReaderStats(
   const ledger = await load(store, work);
   if (!ledger) return UNCHANGED;
 
-  const raw = await vscode.env.clipboard.readText();
-  const parsed = parseReaderStatsEnvelope(raw);
+  let parsed = parseReaderStatsEnvelope(await vscode.env.clipboard.readText());
+
+  /*
+    **封筒が入っていないときだけ、管理画面への道を出す**（作者の要望、
+    2026-09-22。「該当ページのリンクを開かせるってできないんでしょうか？」）。
+
+    ほかの断り方（版違い・読み取りに対応しないサイト）は、管理画面を開いても
+    直らない——そこでボタンを出すと、押した先で手詰まりになる。
+
+    **封筒が入っていれば2択は出さない。** もうコピーしてある作者に、
+    ここで1手増やす理由が無い。
+  */
+  const page = parsed.ok ? undefined : adminPage(ledger);
+  if (!parsed.ok && parsed.kind === "notEnvelope" && page) {
+    const answer = await askAdminPage(work, page);
+    if (answer === "cancel") return UNCHANGED;
+    if (answer === "open") {
+      await openAdminPage(page);
+      return UNCHANGED;
+    }
+    // **もう一度クリップボードを読む。** 2択を出している間に貼り込み係で
+    // コピーしてきていることがある（そのときに読み直さないと、押しても
+    // 何も起きないのと同じになる）
+    parsed = parseReaderStatsEnvelope(await vscode.env.clipboard.readText());
+  }
+
   if (!parsed.ok) {
-    void vscode.window.showWarningMessage(parsed.reason);
+    // 封筒が無いままなら、断りの文言に管理画面への道を添える
+    if (parsed.kind === "notEnvelope" && page) {
+      const answer = await vscode.window.showWarningMessage(
+        parsed.reason,
+        openAdminLabel(page)
+      );
+      if (answer) await openAdminPage(page);
+    } else {
+      void vscode.window.showWarningMessage(parsed.reason);
+    }
     return UNCHANGED;
   }
 
@@ -112,6 +148,94 @@ export async function importReaderStats(
       "執筆量パネルの「サイトの記録」で履歴を見られます。"
   );
   return { changed: true };
+}
+
+/** 開ける管理画面。**どのサイトのものかを一緒に持つ**（文言に出すため） */
+interface AdminPage {
+  label: string;
+  url: string;
+}
+
+/**
+ * 台帳から、開ける管理画面を1つ選ぶ（設計書6.79.7）。
+ *
+ * 見るのは**登録した投稿先だけではない**（`knownPostingSites`）。ZIPから
+ * 取り込んだ作品は `siteProfiles` にしか印が無い。
+ *
+ * **組めるサイトが無ければ undefined。** そのときはボタンを出さない——
+ * 押した先が存在しないページになるくらいなら、ボタンが無いほうがよい。
+ */
+function adminPage(ledger: PostingLedger): AdminPage | undefined {
+  for (const site of knownPostingSites(ledger)) {
+    const url = readerStatsPageUrl(
+      site,
+      siteProfile(ledger, site),
+      ledger.sites.find((entry) => entry.site === site)?.newEpisodeUrl
+    );
+    if (url) return { label: postingSiteInfo(site).label, url };
+  }
+  return undefined;
+}
+
+/**
+ * 管理画面を開くボタンの文言。
+ *
+ * **「Chrome」と書かない。** 開くのは `openExternal`＝**作者の既定の
+ * ブラウザ**であって、こちらがブラウザを選ぶわけではない（決め打ちで
+ * サービス名を書かない、という線は実装ルール5と同じ）。
+ */
+function openAdminLabel(page: AdminPage): string {
+  return `${page.label}の管理画面をブラウザで開く`;
+}
+
+/**
+ * 「管理画面を開く」か「クリップボードから取り込む」かを訊く。
+ *
+ * **封筒が入っていなかったときだけ出る。** 入っていれば黙って取り込む
+ * （もうコピーしてある作者に、1手増やす理由が無い）。
+ */
+async function askAdminPage(
+  work: WorkEntry,
+  page: AdminPage
+): Promise<"open" | "clipboard" | "cancel"> {
+  const picked = await vscode.window.showQuickPick(
+    [
+      {
+        label: `$(link-external) ${openAdminLabel(page)}`,
+        detail:
+          "貼り込み係の「読者の反応をコピー」を押してから、もう一度ここへ戻ってください",
+        open: true,
+      },
+      {
+        label: "$(clippy) クリップボードから取り込む",
+        detail: "もうコピーしてある場合はこちら",
+        open: false,
+      },
+      // 出口を目に見える形で置く（`views/dialogs.ts`。Esc を知らない作者にも）
+      cancelItem("取り込まずに終わる"),
+    ],
+    {
+      // **一覧から選ぶ画面だと、題にも書く**（placeHolder は打つと消える）
+      title: `${work.title} の読者の反応（一覧から選びます）`,
+      placeHolder:
+        "クリップボードに読者の反応の封筒が入っていません。どちらにしますか",
+      ignoreFocusOut: true,
+    }
+  );
+  if (!picked || isCancelItem(picked) || !("open" in picked)) return "cancel";
+  return picked.open ? "open" : "clipboard";
+}
+
+/**
+ * 管理画面を開く。**開くだけで、読みにはいかない**（6.68.1の線の内側）。
+ *
+ * 数字を拾うのは貼り込み係（ブラウザ拡張）であり、母艦はその結果を封筒で
+ * 受けるだけである。ここからHTTPは発しない。
+ */
+async function openAdminPage(page: AdminPage): Promise<void> {
+  // `Uri.parse` を使う——`paths.toUri()` は手元のファイル用で、
+  // ここで開くのは http(s) のURLである（実装ルール7の対象外）
+  await vscode.env.openExternal(vscode.Uri.parse(page.url));
 }
 
 /**

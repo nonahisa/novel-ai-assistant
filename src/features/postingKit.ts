@@ -35,6 +35,8 @@ import {
   buildPostingEnvelope,
   supportsPasteHelper,
 } from "../core/postingEnvelope";
+// 同じ数字を2度打たせない——投稿ページのURLから作品IDと作品ページを導く
+import { deriveSiteProfile } from "../core/postingSiteUrls";
 import { hasEmphasis } from "../core/ruby";
 // 合本の中の話の呼び方は1か所に置く（作品ごとの数え方を通す）
 import {
@@ -477,22 +479,39 @@ export async function configurePostingSites(
   // **基準線は、続けて引き直せるようにする**（サイトを足した直後は、
   // その新しいサイトだけ全話が未投稿になっている）
   if (chosen.length > 0) {
-    const picked = await vscode.window.showQuickPick(
-      [
-        cancelItem("引き直さずに終わる"),
+    /*
+      **まだ1件も記録が無いなら、2択を挟まずに話の一覧を出す**
+      （作者の実機の指摘、2026-09-22）。
+
+      「投稿済みの基準線」の2択を**数字を打つ欄**と読んだ作者が「219」と
+      打ち、絞り込みで2つとも消えて Enter が効かなくなった。初回は
+      「引き直すかどうか」を訊く意味が無い（引き直す前の線が無い）ので、
+      そのまま選ばせる。**2択を挟むのは、引き直しになるときだけ。**
+    */
+    const redoing = withNewSites.posts.length > 0;
+    let goAhead = !redoing;
+    if (redoing) {
+      const picked = await vscode.window.showQuickPick(
+        [
+          cancelItem("引き直さずに終わる"),
+          {
+            label: "$(history) 投稿済みの基準線を引き直す",
+            detail:
+              "「どの話まで出したか」を選び直します（記録は増えるだけです）",
+            redo: true,
+          },
+        ],
         {
-          label: "$(history) 投稿済みの基準線を引き直す",
-          detail: "「どの話まで出したか」を選び直します（記録は増えるだけです）",
-          redo: true,
-        },
-      ],
-      {
-        title: `${work.title} の投稿済みの基準線`,
-        placeHolder: "どの話まで投稿済みかを、いま決め直しますか",
-        ignoreFocusOut: true,
-      }
-    );
-    if (picked && !isCancelItem(picked) && "redo" in picked) {
+          // **一覧から選ぶ画面だと、題にも書く**（打った瞬間に消える
+          // placeHolder と違い、題は絞り込んでも残る）
+          title: `${work.title} の投稿済みの基準線（一覧から選びます）`,
+          placeHolder: "下の2つから選んでください（数字を打つ欄ではありません）",
+          ignoreFocusOut: true,
+        }
+      );
+      goAhead = Boolean(picked && !isCancelItem(picked) && "redo" in picked);
+    }
+    if (goAhead) {
       const format = await readWorkFormat(work);
       const { episodes } = await scanWork(work);
       await applyBaseline(store, work, withNewSites, episodes, format);
@@ -615,6 +634,15 @@ async function askSiteProfiles(
     // 既に入っている値を初期値に出す。**外して再登録しても残っている**
     // （作品情報はサイトの登録と別に持つので、外した間も消えていない）
     const current = siteProfile(next, entry.site);
+    /*
+      **同じ数字を2度打たせない**（作者の指摘、2026-09-22）。直前に貼って
+      もらった投稿ページのURLに作品IDが書いてあるので、そこから導いて
+      初期値に出す——「ジャンル以外は更新用URLから抽出できます」。
+
+      **作者が入れた値が勝つ**（`current` が先）。導けるのは形の確かめられた
+      サイトだけで、それ以外は今までどおり空で訊く（`postingSiteUrls.ts`）。
+    */
+    const derived = deriveSiteProfile(entry.site, entry.newEpisodeUrl);
 
     const workId = await askText({
       title: `${info.label} での作品ID`,
@@ -627,7 +655,7 @@ async function askSiteProfiles(
       prompt:
         `${info.label}のこの作品のIDを入れてください。` +
         "分からなければ空のままで構いません",
-      value: current?.workId,
+      value: current?.workId || derived.workId,
       placeHolder: info.workIdExample,
       ignoreFocusOut: true,
     });
@@ -640,7 +668,7 @@ async function askSiteProfiles(
       prompt:
         "読者が見る作品ページのURLを貼ってください（空のままで構いません）。" +
         "執筆量パネルからここを開けるようになります",
-      value: current?.workUrl,
+      value: current?.workUrl || derived.pageUrl,
       placeHolder: `https://${info.domain}/`,
       ignoreFocusOut: true,
       // **確かめるのはドメインだけ**（6.68.1）。ページは読みにいかない
@@ -876,8 +904,16 @@ async function applyBaseline(
     ],
     {
       title: `${work.title} は、どの話まで投稿済みですか`,
+      /*
+        **数字を打つ欄ではないことを、先に言う**（作者の実機の指摘、
+        2026-09-22。話数を打つ欄だと読んで「219」と入れられた）。
+
+        何が起きるかの説明は後ろへ回すが、**落とさない**——登録したサイト
+        すべてへ入ることは、選ぶ前に知っていないと困る。
+      */
       placeHolder:
-        "選んだ話までを、登録したサイトすべてへ投稿済みとして記録します（あとから変えられます）",
+        "一覧から選んでください（数字を打つと絞り込めます）。" +
+        "選んだ話までを、登録したサイトすべてへ投稿済みとして記録します",
       ignoreFocusOut: true,
     }
   );

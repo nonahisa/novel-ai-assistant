@@ -125,6 +125,8 @@ beforeEach(() => {
   informed.length = 0;
   warned.length = 0;
   env.clipboard.text = "";
+  // 開いたURLも毎回まっさらにする（前のテストの分を数えない）
+  env.opened.length = 0;
   workspace.textDocuments = [];
   workspace.fs = {
     createDirectory: async () => undefined,
@@ -384,6 +386,8 @@ describe("読者の反応を貼り付けて取り込む", () => {
   test("クリップボードが封筒でなければ、何も書かずに知らせる", async () => {
     bothSites();
     env.clipboard.text = "きょうは雨が降っていた。";
+    // 2択で「クリップボードから取り込む」を選ぶ（下の describe で詳しく見る）
+    stubQuickPick([(items) => items.find((item) => item.open === false)]);
 
     const result = await importReaderStats(work);
 
@@ -435,5 +439,99 @@ describe("読者の反応を貼り付けて取り込む", () => {
     expect(result.changed).toBe(false);
     expect(readLedger().readerStats).toBeUndefined();
     expect(warned.join("")).toContain("手入力");
+  });
+
+  /**
+   * 管理画面を開く道（作者の要望、2026-09-22。
+   * 「該当ページのリンクを開かせるってできないんでしょうか？」）。
+   *
+   * **開くだけで、読みにはいかない**（6.68.1の線の内側）。数字を拾うのは
+   * 貼り込み係の仕事で、母艦はその結果を封筒で受けるだけである。
+   */
+  describe("管理画面を開く", () => {
+    test("封筒が入っていれば2択を出さず、そのまま取り込む（手数を増やさない）", async () => {
+      bothSites();
+      env.clipboard.text = envelope();
+      const picks = stubQuickPick([]);
+
+      const result = await importReaderStats(work);
+
+      expect(result.changed).toBe(true);
+      expect(picks).toHaveLength(0);
+      expect(env.opened).toEqual([]);
+    });
+
+    test("封筒が無ければ2択を出し、選べば既定のブラウザで管理画面を開く", async () => {
+      bothSites();
+      env.clipboard.text = "";
+      const picks = stubQuickPick([
+        (items) => items.find((item) => item.open === true),
+      ]);
+
+      const result = await importReaderStats(work);
+
+      expect(result.changed).toBe(false);
+      expect(picks).toHaveLength(1);
+      const labels = picks[0].map((item) => item.label).join("");
+      // **ブラウザを決め打ちしない**（openExternal は作者の既定のブラウザ）
+      expect(labels).toContain("ブラウザ");
+      expect(labels).not.toContain("Chrome");
+      // 出口も見える形で置く（`views/dialogs.ts` の決まり）
+      expect(picks[0].some((item) => "__cancel" in item)).toBe(true);
+      // カクヨムの作品管理。作品IDは投稿ページのURLから取れている
+      expect(env.opened).toEqual([
+        "https://kakuyomu.jp/my/works/1177354054892",
+      ]);
+      // 開いただけで、台帳は触らない
+      expect(readLedger().readerStats).toBeUndefined();
+    });
+
+    test("2択の間にコピーしてくれば、戻ってきた1回で取り込める", async () => {
+      bothSites();
+      env.clipboard.text = "";
+      stubQuickPick([
+        (items) => {
+          // 管理画面を見ている間に貼り込み係でコピーした、という筋書き
+          env.clipboard.text = envelope();
+          return items.find((item) => item.open === false);
+        },
+      ]);
+
+      const result = await importReaderStats(work);
+
+      expect(result.changed).toBe(true);
+      expect(readLedger().readerStats).toHaveLength(2);
+    });
+
+    test("2択でEscすれば、何も書かず、何も開かない", async () => {
+      bothSites();
+      env.clipboard.text = "";
+      stubQuickPick([]);
+
+      const result = await importReaderStats(work);
+
+      expect(result.changed).toBe(false);
+      expect(env.opened).toEqual([]);
+      expect(readLedger().readerStats).toBeUndefined();
+    });
+
+    test("管理画面のURLを組めなければ、2択もボタンも出さずに断る", async () => {
+      // なろうだけ。読み取りに対応しておらず、管理画面を開いても始まらない
+      writeLedger({
+        schemaVersion: "1",
+        sites: [{ site: "narou", newEpisodeUrl: narouUrl }],
+        posts: [],
+      });
+      env.clipboard.text = "きょうは雨が降っていた。";
+      const picks = stubQuickPick([]);
+
+      const result = await importReaderStats(work);
+
+      expect(result.changed).toBe(false);
+      expect(picks).toHaveLength(0);
+      expect(env.opened).toEqual([]);
+      // **黙って終わらない**（押したのに何も起きない、を作らない）
+      expect(warned.join("")).toContain("封筒");
+    });
   });
 });
