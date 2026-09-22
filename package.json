@@ -1074,6 +1074,12 @@
         "category": "小説執筆"
       },
       {
+        "command": "novelai.chaptersFromHeadings",
+        "title": "話の見出しから章を立てる",
+        "icon": "$(list-tree)",
+        "category": "小説執筆"
+      },
+      {
         "command": "novelai.suggestChapterName",
         "title": "この章の名前の案を出す",
         "icon": "$(sparkle)",
@@ -1227,6 +1233,11 @@
         },
         {
           "command": "novelai.proposeChapters",
+          "when": "view == novelai.works && viewItem =~ /^work-(novel|script|unset)$/",
+          "group": "1_stats@6"
+        },
+        {
+          "command": "novelai.chaptersFromHeadings",
           "when": "view == novelai.works && viewItem =~ /^work-(novel|script|unset)$/",
           "group": "1_stats@6"
         },

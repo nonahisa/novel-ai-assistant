@@ -435,6 +435,7 @@ import {
   proposeChapters,
   suggestChapterName,
 } from "./features/proposeChapters";
+import { chaptersFromHeadings } from "./features/chaptersFromHeadings";
 import { countUnextractedEpisodes } from "./features/extractionFreshness";
 import {
   describeChosenScope,
@@ -5962,6 +5963,16 @@ export async function activate(
         onChaptersChanged: () => treeProvider.refresh(work.id),
       });
     }),
+    // 分け済みの話ごとのファイルの頭にある【第N章】から章を立てる。
+    // AIは呼ばず、台帳が空のときだけ書く（features/chaptersFromHeadings.ts）
+    registerCommand(
+      "novelai.chaptersFromHeadings",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        if (await chaptersFromHeadings(work)) treeProvider.refresh(work.id);
+      }
+    ),
     registerCommand(
       "novelai.suggestChapterName",
       async (node?: ChapterNode) => {

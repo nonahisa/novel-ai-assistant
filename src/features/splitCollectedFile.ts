@@ -16,7 +16,7 @@ import { episodePathFor } from "../core/bookStore";
 import {
   describeSplitSections,
   planSplitSections,
-  type SplitSectionPlan,
+  type SectionPlan,
 } from "../core/collectedSections";
 import type { Chapter, ChapterSet } from "../models/chapter";
 
@@ -249,7 +249,7 @@ async function confirm(
 
 /** 分けるときの章の扱いと、保存に使う台帳の中身 */
 interface SectionsForSplit {
-  plan: SplitSectionPlan;
+  plan: SectionPlan;
   /** 読み込んだ台帳。**読めなかった・読んでいないときは null** */
   set: ChapterSet | null;
 }
