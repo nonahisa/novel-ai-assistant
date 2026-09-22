@@ -165,6 +165,15 @@ import { GuidedTourHost } from "./guidedTour";
 import { describeSpotlight, type ActionSpotlight } from "./actionSpotlight";
 import { findMenuMentions, type MenuEntry } from "../core/menuMentions";
 import { menuEntries } from "../views/actionList";
+import { openInDefaultEditor } from "../views/openDocument";
+// **受け口の確かめだけを静的に読む。** 取り込みの本体（ZIPの展開など）は
+// 落とされたときに初めて読む（`handleBackup` の動的 import）
+import {
+  BACKUP_DROP_MAX_BYTES,
+  BACKUP_FILE_EXTENSIONS,
+  tooLargeMessage,
+} from "../core/backupFileKinds";
+import type { ImportAsNewWork } from "./backupDrop";
 
 /**
  * 相談パネル（P-21）。
@@ -332,7 +341,30 @@ type Incoming =
    */
   | { type: "spotlight"; command: string }
   /** 案内の「やめる」。途中でいつでも抜けられる */
-  | { type: "tourStop" };
+  | { type: "tourStop" }
+  /**
+   * バックアップのファイルが落とされた（作者の依頼、2026-09-23）。
+   *
+   * **中身はバイト列のまま届く**（`Uint8Array`。VS Code の postMessage は
+   * 型付き配列を写し取らずに渡せる）。文字列や数の配列へ直すと、2MBの合本が
+   * 何倍にも膨らんで画面が固まる。**形は受け取った側で確かめる**——画面から
+   * 届いたものを型の宣言だけで信じない。
+   */
+  | { type: "backupFile"; name: string; bytes: unknown }
+  /**
+   * エクスプローラーからファイルが落とされた。**届くのは場所だけ**で、
+   * 中身は拡張機能側が読む（画面はそのファイルを読めない）。
+   */
+  | { type: "backupUri"; uri: string }
+  /** 「バックアップを渡す」ボタン（落とせない環境のための入口） */
+  | { type: "pickBackup" }
+  /**
+   * 大きすぎて画面の側で止めた。**中身は送られてこない**（送る前に止めるのが
+   * 柵の意味なので）。言い方は拡張機能側の1か所（`tooLargeMessage`）が持つ
+   */
+  | { type: "backupTooLarge"; name: string }
+  /** 結果の「違いを見る」。開く先は拡張機能側が覚えている */
+  | { type: "openBackupRecord" };
 
 /**
  * 標準機能を起動する口。
@@ -598,6 +630,24 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     this.spotlight = spotlight;
     this.tour.setSpotlight(spotlight);
   }
+
+  /**
+   * 持ち込まれたバックアップを、新しい作品として取り込む口（2026-09-23）。
+   *
+   * **登録の道は `extension.ts` が持っている**ので、ここでは受け取るだけにする
+   * （`setTourSpotlight` と同じ形）。渡されていないあいだは、メニューの
+   * 「バックアップから取り込む」を開いて、同じファイルをもう一度選んでもらう。
+   */
+  private backupImporter: ImportAsNewWork | undefined;
+
+  setBackupImporter(importer: ImportAsNewWork): void {
+    this.backupImporter = importer;
+  }
+
+  /** バックアップを捌いている最中か。**2つ同時に落とされても1つずつ** */
+  private receivingBackup = false;
+  /** 直近の「バックアップとの違い」の記録。「違いを見る」で開く */
+  private lastBackupRecord: string | undefined;
 
   /**
    * 答えに添える「画面で案内しましょうか」の誘い（設計書6.104）。
@@ -1239,6 +1289,178 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
     if (message.type === "reload") {
       await this.reloadRecord(message.id);
+      return;
+    }
+    if (message.type === "backupFile") {
+      await this.receiveBackupBytes(message.name, message.bytes);
+      return;
+    }
+    if (message.type === "backupUri") {
+      await this.receiveBackupUri(message.uri);
+      return;
+    }
+    if (message.type === "pickBackup") {
+      await this.pickBackup();
+      return;
+    }
+    if (message.type === "backupTooLarge") {
+      const name = typeof message.name === "string" ? message.name : "そのファイル";
+      this.postAll({ type: "note", message: tooLargeMessage(name) });
+      return;
+    }
+    if (message.type === "openBackupRecord") {
+      if (this.lastBackupRecord) await openInDefaultEditor(this.lastBackupRecord);
+    }
+  }
+
+  /* ── バックアップの持ち込み（作者の依頼、2026-09-23） ───── */
+
+  /**
+   * 画面に落とされたファイルの中身を受け取る。
+   *
+   * **形を確かめてから使う。** 届くはずなのは `Uint8Array` だが、古い
+   * VS Code や別の経路では `ArrayBuffer` のこともある。それ以外（数の配列の
+   * JSONなど）は、読み違えて原稿を壊すより断るほうがよい。
+   */
+  private async receiveBackupBytes(name: unknown, bytes: unknown): Promise<void> {
+    const fileName = typeof name === "string" ? name.trim() : "";
+    const data =
+      bytes instanceof Uint8Array
+        ? bytes
+        : bytes instanceof ArrayBuffer
+          ? new Uint8Array(bytes)
+          : undefined;
+    if (!fileName || !data) {
+      logStep("相談パネル：落とされたファイルの中身を受け取れませんでした");
+      this.postAll({
+        type: "note",
+        message:
+          "落とされたファイルの中身を受け取れませんでした。「バックアップを渡す」から選んでください。",
+      });
+      return;
+    }
+    await this.handleBackup(fileName, data);
+  }
+
+  /**
+   * エクスプローラーから落とされたファイルを読む。**場所は作者のワークスペースの
+   * もの**だが、画面から届いた文字列なので、形（ファイルかどうか・拡張子）は
+   * `receiveBackup` の側でも確かめる。
+   */
+  private async receiveBackupUri(raw: unknown): Promise<void> {
+    let uri: vscode.Uri;
+    try {
+      if (typeof raw !== "string" || raw.trim() === "") throw new Error("空です");
+      uri = vscode.Uri.parse(raw.trim(), true);
+    } catch (error) {
+      logStep(
+        `相談パネル：落とされた場所を読めませんでした（${
+          error instanceof Error ? error.message : String(error)
+        }）`
+      );
+      this.postAll({
+        type: "note",
+        message: "落とされたファイルの場所を読めませんでした。「バックアップを渡す」から選んでください。",
+      });
+      return;
+    }
+    await this.readAndHandleBackup(uri);
+  }
+
+  /** 「バックアップを渡す」。落とせない環境（ブラウザ版など）の入口 */
+  private async pickBackup(): Promise<void> {
+    const picked = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: false,
+      openLabel: "これを渡す",
+      title: "相談パネルへ渡すバックアップを選ぶ（ZIP／テキスト）",
+      filters: { "バックアップ（ZIP／テキスト）": [...BACKUP_FILE_EXTENSIONS] },
+    });
+    if (!picked || picked.length === 0) return;
+    await this.readAndHandleBackup(picked[0]);
+  }
+
+  private async readAndHandleBackup(uri: vscode.Uri): Promise<void> {
+    const fileName = path.basename(fromUri(uri));
+    let bytes: Uint8Array;
+    try {
+      const stat = await vscode.workspace.fs.stat(uri);
+      if (stat.type & vscode.FileType.Directory) {
+        this.postAll({
+          type: "note",
+          message: `「${fileName}」はフォルダーです。バックアップのファイル（ZIP／テキスト）を渡してください。`,
+        });
+        return;
+      }
+      if (stat.size > BACKUP_DROP_MAX_BYTES) {
+        this.postAll({ type: "note", message: tooLargeMessage(fileName) });
+        return;
+      }
+      bytes = await vscode.workspace.fs.readFile(uri);
+    } catch (error) {
+      logFailure("相談パネル：渡されたバックアップを読めなかった", {
+        場所: uri.toString(),
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+      this.postAll({
+        type: "note",
+        message: `「${fileName}」を読めませんでした。`,
+      });
+      return;
+    }
+    await this.handleBackup(fileName, bytes);
+  }
+
+  /**
+   * 受け取ったバックアップを捌き、結果を会話の中に短く出す。
+   *
+   * **判断は `backupDrop.ts` が持つ**（このパネルは受け口と結果の表示だけ）。
+   * 取り込みの部品（ZIPの展開など）は大きいので、落とされたときに初めて読む
+   * ——相談パネルを開くたびに読み込む必要は無い。
+   */
+  private async handleBackup(fileName: string, bytes: Uint8Array): Promise<void> {
+    if (this.receivingBackup) {
+      this.postAll({
+        type: "note",
+        message: "ひとつ前のバックアップを確かめている最中です。終わってからもう一度渡してください。",
+      });
+      return;
+    }
+    this.receivingBackup = true;
+    try {
+      this.postAll({
+        type: "note",
+        message: `「${fileName}」を受け取りました。どの作品のものか確かめています…`,
+      });
+      const { receiveBackup } = await import("./backupDrop.js");
+      const result = await receiveBackup(
+        { fileName, bytes },
+        { works: this.registry.list(), importAsNew: this.backupImporter }
+      );
+      if (!result) {
+        this.postAll({ type: "note", message: "バックアップの取り込みを取りやめました。" });
+        return;
+      }
+      if (result.recordPath) this.lastBackupRecord = result.recordPath;
+      this.postAll({
+        type: "backupResult",
+        message: result.message,
+        canOpenRecord: result.recordPath !== undefined,
+      });
+    } catch (error) {
+      logFailure("相談パネル：バックアップの取り込み", {
+        ファイル: fileName,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+      this.postAll({
+        type: "note",
+        message: `バックアップを取り込めませんでした：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      });
+    } finally {
+      this.receivingBackup = false;
     }
   }
 

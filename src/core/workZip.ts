@@ -63,12 +63,11 @@ import type { Eol } from "../models/types";
 const TEXT_EXTENSIONS = [".txt", ".md"];
 
 /**
- * 取り込める入れ物の拡張子（作者にファイルを選ばせるときの絞り込み）。
- *
- * **アルファポリスは ZIP ではなく `.txt` 直で降りてくる**（0.69.10）。
- * ここを `zip` だけにしておくと、選ぶ画面にそもそも出てこない。
+ * 取り込める入れ物の拡張子。**置き場は `backupFileKinds.ts`**（相談パネルの
+ * 受け口が、ZIPの展開の部品を読み込まずに使えるように分けた）。ここからも
+ * これまでどおり取れるよう、出し直しておく。
  */
-export const BACKUP_FILE_EXTENSIONS = ["zip", "txt", "md"];
+export { BACKUP_FILE_EXTENSIONS } from "./backupFileKinds";
 
 export class WorkZipError extends Error {
   constructor(

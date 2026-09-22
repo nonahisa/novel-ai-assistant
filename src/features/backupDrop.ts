@@ -1,0 +1,524 @@
+import * as vscode from "vscode";
+import * as path from "../core/paths";
+import { isEditorMode } from "../core/actorContext";
+import {
+  backupIdentityOf,
+  describeMatchBy,
+  matchBackupToWorks,
+  type BackupIdentity,
+  type BackupMatch,
+  type BackupMatchBy,
+  type BackupMatchCandidate,
+} from "../core/backupMatch";
+import {
+  BACKUP_DIFF_RECORD_KIND,
+  buildBackupDiffRecord,
+  describeMergePlan,
+  describeReaderStatsCounts,
+  isEmptyMergePlan,
+  planBackupMerge,
+  summarizeMergeResult,
+  type BackupMergePlan,
+  type LocalManuscriptSource,
+} from "../core/backupMerge";
+import { episodePathFor } from "../core/bookStore";
+import { ChapterStore } from "../core/chapterStore";
+import { logFailure, logStep, useLogFile } from "../core/logger";
+import { PostingStore } from "../core/postingStore";
+import { scanWork } from "../core/scanner";
+import { readTextFile } from "../core/textFile";
+import {
+  inspectWorkBackup,
+  WorkZipError,
+  type WorkZipInspection,
+} from "../core/workZip";
+import {
+  BACKUP_DROP_MAX_BYTES,
+  isBackupFileName,
+  tooLargeMessage,
+} from "../core/backupFileKinds";
+import type { ChapterSet } from "../models/chapter";
+import {
+  withReaderStats,
+  withSiteProfile,
+  type PostingLedger,
+} from "../models/posting";
+import type { WorkEntry } from "../models/types";
+import { cancelItem, isCancelItem } from "../views/dialogs";
+import { saveGeneratedMarkdown } from "../views/openDocument";
+import { withProgress } from "../views/progress";
+import type { PickedBackup } from "./importWorkFromZip";
+
+/**
+ * 相談パネルへ持ち込まれたバックアップを受け取る（作者の依頼、2026-09-23）。
+ *
+ * 「製品の相談パネルにバックアップファイルを放り込んだら、既存作品に該当
+ * （タイトルなど）がないか確認して、あれば章やいいねやコメントや修正部分の
+ * 取り込みだけ。なさそうなら作者に確認の上取り込み処理を走らせてください」
+ *
+ * ## 流れ
+ *
+ * 1. 読んで確かめる（`inspectWorkBackup`。**この時点では1文字も書かない**）
+ * 2. どの作品のものかを決める（`core/backupMatch.ts`。作品ID→題→部分一致）
+ * 3. **当たったと決めつけない。** 当たった作品と、足すものの一覧を見せて確かめる
+ * 4. 当たらなければ、作者に確かめてから「バックアップから取り込む」と同じ
+ *    処理で新しい作品にする（`importWorkFromZip`。写しを作らない）
+ *
+ * ## 原稿は書き換えない
+ *
+ * 本文の違いは数えて、**違いを記録に書き出すだけ**である（理由は
+ * `core/backupMerge.ts`）。書き込むのは章立ての台帳と投稿状態の台帳だけで、
+ * どちらもハッシュ照合つきの保存口（`ChapterStore`・`PostingStore`）を通す。
+ */
+
+/** 新しい作品として取り込む口（`extension.ts` の登録の道を持っている側が渡す） */
+export type ImportAsNewWork = (picked: PickedBackup) => Promise<void>;
+
+/** 相談パネルに出す結果 */
+export interface BackupDropResult {
+  /** 短い一文 */
+  readonly message: string;
+  /** 本文の違いの記録を書き出せたら、その場所 */
+  readonly recordPath?: string;
+}
+
+/**
+ * 受け取ったバックアップを捌く。
+ *
+ * @returns 相談パネルに出す結果。**作者が取りやめたら undefined**（何も出さない）
+ */
+export async function receiveBackup(
+  source: { readonly fileName: string; readonly bytes: Uint8Array },
+  deps: {
+    readonly works: readonly WorkEntry[];
+    /** 新しい作品として取り込む口。渡されなければメニューの取り込みを開く */
+    readonly importAsNew?: ImportAsNewWork;
+  }
+): Promise<BackupDropResult | undefined> {
+  // **編集部は取り込まない**（設計書5.6）。「バックアップから取り込む」は
+  // 編集者モードで使えない操作なので、持ち込みの口からも開かない
+  if (isEditorMode()) {
+    return {
+      message:
+        "編集者モードでは、バックアップの取り込みはできません（作者の環境で行ってください）。",
+    };
+  }
+
+  if (!isBackupFileName(source.fileName)) {
+    return {
+      message:
+        `「${source.fileName}」はバックアップとして読めません。` +
+        "投稿サイトからダウンロードした ZIP か .txt を渡してください。",
+    };
+  }
+  if (source.bytes.byteLength > BACKUP_DROP_MAX_BYTES) {
+    return { message: tooLargeMessage(source.fileName) };
+  }
+
+  let inspection: WorkZipInspection;
+  try {
+    inspection = await withProgress("バックアップの中を見ています…", async () =>
+      inspectWorkBackup(source.bytes, source.fileName)
+    );
+  } catch (error) {
+    if (error instanceof WorkZipError) {
+      return {
+        message: [error.message, error.detail ?? ""].filter(Boolean).join(" "),
+      };
+    }
+    logFailure("相談パネル：バックアップの読み取り", {
+      ファイル: source.fileName,
+      詳細: messageOf(error),
+    });
+    return { message: `バックアップを読めませんでした：${messageOf(error)}` };
+  }
+
+  const identity = backupIdentityOf(inspection);
+  const candidates = await matchCandidates(deps.works);
+  const match = matchBackupToWorks(identity, candidates);
+  logStep(`相談パネル：バックアップの照合 ${describeMatchForLog(match)}`);
+
+  const picked: PickedBackup = { fileName: source.fileName, inspection };
+  const target = await chooseTarget(match, identity, inspection, deps.works);
+  if (target === undefined) return undefined;
+  if (target === "new") {
+    return importAsNewWork(picked, deps.importAsNew);
+  }
+  return mergeIntoWork(target.work, target.by, identity, picked);
+}
+
+/* ── どの作品に当たるか ───────────────────────────────── */
+
+/**
+ * 照らす相手の一覧を作る。**台帳を読めなかった作品も、題では照らす**
+ * （作品IDが無いだけで、候補から外す理由にはならない）。
+ */
+async function matchCandidates(
+  works: readonly WorkEntry[]
+): Promise<BackupMatchCandidate[]> {
+  const candidates: BackupMatchCandidate[] = [];
+  for (const work of works) {
+    let siteIds: BackupMatchCandidate["siteIds"] = [];
+    try {
+      const ledger = await new PostingStore(work).load();
+      siteIds = (ledger.siteProfiles ?? [])
+        .filter((entry) => typeof entry.workId === "string" && entry.workId !== "")
+        .map((entry) => ({ site: entry.site, workId: entry.workId as string }));
+    } catch (error) {
+      logStep(
+        `相談パネル：「${work.title}」の投稿状態を読めなかったため、題だけで照らします（${messageOf(error)}）`
+      );
+    }
+    candidates.push({
+      id: work.id,
+      title: work.title,
+      folderName: path.basename(work.folderPath),
+      siteIds,
+    });
+  }
+  return candidates;
+}
+
+type Target = { work: WorkEntry; by: BackupMatchBy | "chosen" } | "new";
+
+/**
+ * 取り込み先を決める。**どの道でも作者に確かめる。**
+ *
+ * @returns 作者が取りやめたら undefined
+ */
+async function chooseTarget(
+  match: BackupMatch,
+  identity: BackupIdentity,
+  inspection: WorkZipInspection,
+  works: readonly WorkEntry[]
+): Promise<Target | undefined> {
+  const byId = new Map(works.map((work) => [work.id, work]));
+
+  if (match.kind === "matched") {
+    const work = byId.get(match.workId);
+    // 当たった作品は、このあと足すものの一覧と一緒に確かめる（`mergeIntoWork`）
+    if (work) return { work, by: match.by };
+  }
+
+  if (match.kind === "ambiguous") {
+    return pickWork(
+      match.workIds
+        .map((id) => byId.get(id))
+        .filter((work): work is WorkEntry => work !== undefined),
+      works,
+      `「${identity.title}」に当たりそうな作品が${match.workIds.length}つあります（${describeMatchBy(match.by, identity)}）。どれへ取り込みますか？`
+    );
+  }
+
+  // どれにも当たらない。**新しい作品にする前に、必ず確かめる**
+  const differs = describeDifferentId(match.differentId, byId, identity);
+  const answer = await vscode.window.showInformationMessage(
+    `「${identity.title}」は、登録済みの作品には見当たりませんでした。新しい作品として取り込みますか？`,
+    {
+      modal: true,
+      detail: [
+        `話の数：${inspection.episodeCount}話`,
+        ...(differs ? ["", differs] : []),
+        "",
+        "既にある作品のバックアップなら「既にある作品を選ぶ」から選べます。",
+      ].join("\n"),
+    },
+    "新しい作品として取り込む",
+    "既にある作品を選ぶ"
+  );
+  if (answer === "新しい作品として取り込む") return "new";
+  if (answer === "既にある作品を選ぶ") {
+    return pickWork([], works, "どの作品のバックアップですか？");
+  }
+  return undefined;
+}
+
+/** 題は同じだが作品IDが違った作品について、一言添える */
+function describeDifferentId(
+  ids: readonly string[],
+  byId: ReadonlyMap<string, WorkEntry>,
+  identity: BackupIdentity
+): string {
+  const titles = ids
+    .map((id) => byId.get(id)?.title)
+    .filter((title): title is string => title !== undefined);
+  if (titles.length === 0) return "";
+  return (
+    `「${titles.join("」「")}」は題が同じですが、投稿状態に書いてある作品IDが` +
+    `このバックアップ（${identity.workId?.toUpperCase() ?? ""}）と違うため、別の作品と見ました。`
+  );
+}
+
+/**
+ * 作品を選ばせる。候補を先に、その下に残りの作品と「新しい作品として」を並べる。
+ *
+ * **全部の作品を出す。** 候補の読み違いで正しい作品が漏れていても、
+ * 作者がここで拾えるようにしておく。
+ */
+async function pickWork(
+  candidates: readonly WorkEntry[],
+  works: readonly WorkEntry[],
+  title: string
+): Promise<Target | undefined> {
+  type Item = vscode.QuickPickItem & { work?: WorkEntry; isNew?: boolean };
+  const candidateIds = new Set(candidates.map((work) => work.id));
+  const items: Item[] = [
+    ...candidates.map((work) => ({
+      label: work.title,
+      description: "候補",
+      detail: work.folderPath,
+      work,
+    })),
+    ...works
+      .filter((work) => !candidateIds.has(work.id))
+      .map((work) => ({ label: work.title, detail: work.folderPath, work })),
+    { label: "$(add) 新しい作品として取り込む", isNew: true },
+  ];
+  // 閉じる道は呼び出しの中で足す（`quickPickCancel.test.ts` が呼び出しごとに見る）
+  const picked = await vscode.window.showQuickPick<Item>([...items, cancelItem()], {
+    title,
+    placeHolder: "取り込み先の作品を選んでください",
+    matchOnDetail: true,
+  });
+  if (!picked || isCancelItem(picked)) return undefined;
+  if (picked.isNew) return "new";
+  return picked.work ? { work: picked.work, by: "chosen" } : undefined;
+}
+
+/* ── 当たらなかった：新しい作品として ─────────────────── */
+
+async function importAsNewWork(
+  picked: PickedBackup,
+  importer: ImportAsNewWork | undefined
+): Promise<BackupDropResult> {
+  if (importer) {
+    // 確かめ・置き場・題・展開・登録は、すべて取り込みの道が持っている
+    await importer(picked);
+    return { message: `「${picked.inspection.title}」の取り込みを進めました。` };
+  }
+  /*
+    **取り込みの道がまだ繋がっていないとき。** 登録の道は `extension.ts` が
+    持っており、相談パネルからは直に呼べない。メニューの「バックアップから
+    取り込む」を開き、同じファイルをもう一度選んでもらう（写しを作るより、
+    ひと手間のほうが安全である）。
+  */
+  await vscode.commands.executeCommand("novelai.importWorkFromZip");
+  return {
+    message:
+      "「バックアップから取り込む」を開きました。同じファイルをもう一度選んでください。",
+  };
+}
+
+/* ── 当たった：足すものだけ足す ───────────────────────── */
+
+async function mergeIntoWork(
+  work: WorkEntry,
+  by: BackupMatchBy | "chosen",
+  identity: BackupIdentity,
+  picked: PickedBackup
+): Promise<BackupDropResult | undefined> {
+  useLogFile(work.folderPath);
+
+  const chapterStore = new ChapterStore(work);
+  let chapterSet: ChapterSet | null = null;
+  try {
+    chapterSet = await chapterStore.load();
+  } catch (error) {
+    logFailure("相談パネル：バックアップの取り込みで章立てを読めなかった", {
+      作品: work.title,
+      詳細: messageOf(error),
+    });
+  }
+
+  const postingStore = new PostingStore(work);
+  let ledger: PostingLedger | null = null;
+  try {
+    ledger = await postingStore.load();
+  } catch (error) {
+    logFailure("相談パネル：バックアップの取り込みで投稿状態を読めなかった", {
+      作品: work.title,
+      詳細: messageOf(error),
+    });
+  }
+
+  const local = await withProgress("手元の原稿と比べています…", () =>
+    readLocalSources(work)
+  );
+
+  const plan = planBackupMerge({
+    inspection: picked.inspection,
+    local,
+    existingChapters: chapterSet ? chapterSet.chapters : null,
+    ledger,
+    readAt: new Date().toISOString(),
+  });
+
+  const heading =
+    by === "chosen"
+      ? `「${work.title}」へ取り込みますか？`
+      : `「${work.title}」に当たりました（${describeMatchBy(by, identity)}）。取り込みますか？`;
+
+  if (isEmptyMergePlan(plan)) {
+    // 足すものが無くても、**当たった作品は見せる**（違う作品に当たっていないか
+    // 作者が確かめられるように）。押すものは無いので、知らせるだけにする
+    void vscode.window.showInformationMessage(heading.replace("取り込みますか？", ""), {
+      modal: true,
+      detail: ["足すものはありませんでした。", "", ...describeMergePlan(plan)].join("\n"),
+    });
+    return { message: `「${work.title}」に足すものはありませんでした。` };
+  }
+
+  const answer = await vscode.window.showInformationMessage(
+    heading,
+    {
+      modal: true,
+      detail: [
+        `取り込む元：${path.basename(picked.fileName)}`,
+        "",
+        ...describeMergePlan(plan),
+      ].join("\n"),
+    },
+    "取り込む"
+  );
+  if (answer !== "取り込む") return undefined;
+
+  return applyMergePlan(work, picked, plan, {
+    chapterStore,
+    chapterSet,
+    postingStore,
+    ledger,
+  });
+}
+
+/**
+ * 手元の原稿を読む。**読めないファイルがあっても止めない**（その話だけ比べない）。
+ */
+async function readLocalSources(
+  work: WorkEntry
+): Promise<LocalManuscriptSource[]> {
+  const scan = await scanWork(work);
+  const sources: LocalManuscriptSource[] = [];
+  for (const episode of scan.episodes) {
+    let text: string | null = null;
+    try {
+      text = (await readTextFile(episode.filePath)).text;
+    } catch (error) {
+      logFailure("相談パネル：バックアップと比べる原稿を読めなかった", {
+        ファイル: episode.filePath,
+        詳細: messageOf(error),
+      });
+    }
+    sources.push({
+      relPath: episodePathFor(work.folderPath, episode.filePath),
+      manuscriptName: path
+        .relative(scan.manuscriptDir, episode.filePath)
+        .replace(/\\/g, "/"),
+      text,
+    });
+  }
+  return sources;
+}
+
+/**
+ * 決めたものを書く。**1つ失敗しても残りは続ける**（章が書けなくても、
+ * いいねは足せる）。失敗したものは結果の一文に入れる。
+ */
+async function applyMergePlan(
+  work: WorkEntry,
+  picked: PickedBackup,
+  plan: BackupMergePlan,
+  stores: {
+    chapterStore: ChapterStore;
+    chapterSet: ChapterSet | null;
+    postingStore: PostingStore;
+    ledger: PostingLedger | null;
+  }
+): Promise<BackupDropResult> {
+  const failures: string[] = [];
+
+  let chapters = 0;
+  if (plan.chapters.kind === "create" && stores.chapterSet) {
+    try {
+      // 確認のあいだに外で台帳が変わっていれば、保存の照合が止める
+      await stores.chapterStore.save({
+        ...stores.chapterSet,
+        chapters: [...plan.chapters.chapters],
+      });
+      chapters = plan.chapters.chapters.length;
+    } catch (error) {
+      failures.push("章");
+      logFailure("相談パネル：バックアップの章を書けなかった", {
+        作品: work.title,
+        詳細: messageOf(error),
+      });
+    }
+  }
+
+  let stats = { work: false, episodes: 0 };
+  if (stores.ledger && (plan.readerStats.length > 0 || plan.profile)) {
+    try {
+      let next = stores.ledger;
+      if (plan.profile) {
+        next = withSiteProfile(next, plan.profile.site, plan.profile.value);
+      }
+      for (const record of plan.readerStats) {
+        next = withReaderStats(next, record);
+      }
+      await stores.postingStore.save(next);
+      stats = describeReaderStatsCounts(plan.readerStats);
+    } catch (error) {
+      failures.push("読者の反応");
+      logFailure("相談パネル：バックアップの読者の反応を書けなかった", {
+        作品: work.title,
+        詳細: messageOf(error),
+      });
+    }
+  }
+
+  let recordPath: string | undefined;
+  if (plan.bodyDiffs.length > 0) {
+    recordPath = await saveGeneratedMarkdown(
+      BACKUP_DIFF_RECORD_KIND,
+      buildBackupDiffRecord({
+        workTitle: work.title,
+        sourceName: path.basename(picked.fileName),
+        diffs: plan.bodyDiffs,
+      }),
+      work
+    );
+    if (!recordPath) failures.push("本文の違いの記録");
+  }
+
+  const summary = summarizeMergeResult({
+    workTitle: work.title,
+    chapters,
+    likesEpisodes: stats.episodes,
+    workStats: stats.work,
+    bodyDiffs: plan.bodyDiffs.length,
+    recorded: recordPath !== undefined,
+  });
+  return {
+    message:
+      failures.length > 0
+        ? `${summary}（${failures.join("・")}は書けませんでした。詳しくは記録（ログ）をご覧ください）`
+        : summary,
+    recordPath,
+  };
+}
+
+/* ── 小物 ─────────────────────────────────────────────── */
+
+function describeMatchForLog(match: BackupMatch): string {
+  switch (match.kind) {
+    case "matched":
+      return `当たり（${match.by}）`;
+    case "ambiguous":
+      return `候補${match.workIds.length}件（${match.by}）`;
+    case "none":
+      return "当たりなし";
+  }
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

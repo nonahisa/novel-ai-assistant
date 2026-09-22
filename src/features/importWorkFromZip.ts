@@ -100,15 +100,30 @@ export type RegisterWork = (
   options: CollectionOptions
 ) => Promise<WorkEntry | undefined>;
 
+/**
+ * 選び終わって読み終わったバックアップ（相談パネルへ持ち込まれたもの）。
+ *
+ * **もう一度選ばせない。** 相談パネルに落としたファイルを、取り込みの道で
+ * もう一度ダイアログから選ばせると、作者には同じことを2度頼まれたように
+ * 見える（`features/backupDrop.ts`）。
+ */
+export interface PickedBackup {
+  /** 拡張子まで含むファイル名。確認の画面と取り込みの記録に出す */
+  readonly fileName: string;
+  /** 点検済みの中身（`inspectWorkBackup` の結果） */
+  readonly inspection: WorkZipInspection;
+}
+
 export async function importWorkFromZip(
   works: readonly WorkLocation[],
-  register: RegisterWork
+  register: RegisterWork,
+  /** 相談パネルから渡されたとき。無ければ、これまでどおりファイルを選ばせる */
+  picked?: PickedBackup
 ): Promise<void> {
-  const zipPath = await pickZipFile();
-  if (!zipPath) return;
-
-  const inspection = await inspectPickedZip(zipPath);
-  if (!inspection) return;
+  const source = picked ?? (await pickAndInspect());
+  if (!source) return;
+  const { inspection } = source;
+  const zipPath = source.fileName;
 
   if (!(await confirmImport(zipPath, inspection))) return;
 
@@ -170,6 +185,16 @@ export async function importWorkFromZip(
     : NOTHING_RECORDED;
 
   await reportResult(entry, zipPath, inspection, placed, recorded);
+}
+
+/** ファイルを選ばせて、読んで確かめる（メニューから始めたときの道） */
+async function pickAndInspect(): Promise<PickedBackup | undefined> {
+  const zipPath = await pickZipFile();
+  if (!zipPath) return undefined;
+  const inspection = await inspectPickedZip(zipPath);
+  if (!inspection) return undefined;
+  // 以降は名前しか使わない（確認の画面と記録は `basename` を出す）
+  return { fileName: zipPath, inspection };
 }
 
 /**

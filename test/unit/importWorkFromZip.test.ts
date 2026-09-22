@@ -12,6 +12,7 @@ import {
   workspace,
 } from "./support/vscodeStub";
 import { importWorkFromZip } from "../../src/features/importWorkFromZip";
+import { inspectWorkBackup } from "../../src/core/workZip";
 // **期待する場所は、製品と同じ組み立て方で作る。** 区切り文字を手で
 // 書くと、動かす環境（Windows と そうでないもの）で試験だけが落ちる
 import * as paths from "../../src/core/paths";
@@ -611,6 +612,28 @@ describe("ZIPから作品を取り込む", () => {
     expect(registered, "登録まで進んではいけない").toBe(0);
     // ZIPのほかには1件も置いていない
     expect(fs.placed()).toEqual([ZIP_PATH]);
+  });
+
+  it("相談パネルから渡されたときは、ファイルを選び直させずに同じ道で取り込む", async () => {
+    // 作者の依頼（2026-09-23）：落としたファイルを、もう一度選ばせない
+    const fs = new MemoryFs({});
+    fs.install();
+    stubWindow();
+    let dialogs = 0;
+    window.showOpenDialog = async () => {
+      dialogs++;
+      return undefined;
+    };
+
+    await importWorkFromZip(WORKS, async () => workEntry(), {
+      fileName: "星を継ぐ者たち_20260919.zip",
+      inspection: inspectWorkBackup(ZIP_BYTES, "星を継ぐ者たち_20260919.zip"),
+    });
+
+    expect(dialogs).toBe(0);
+    expect(fs.text(paths.join(MANUSCRIPT, "episode_0001.txt"))).toBe(EPISODE_TEXT);
+    // 確認の画面にも、渡されたファイルの名前が出る
+    expect(notices[0].detail).toContain("取り込む元：星を継ぐ者たち_20260919.zip");
   });
 
   it("ZIPを選ばずに閉じたら、何も起きない", async () => {

@@ -28,6 +28,8 @@
  * 1つだけ出す（横なら「メインに表示」、大きい画面なら「サブに戻す」）。
  * 両方に両方を出すと、どちらが今の面なのか読めなくなる。
  */
+import { BACKUP_DROP_MAX_BYTES } from "../core/backupFileKinds";
+
 /**
  * 大きく開いたときだけ出すツールバー。
  *
@@ -40,6 +42,7 @@ const TOOLBAR_HTML = `<div id="toolbar">
     <button class="action secondary" id="choose-work">作品を選ぶ</button>
     <button class="action secondary" id="save-note">会話をメモに保存</button>
     <button class="action secondary" id="open-manual">使い方を開く</button>
+    <button class="action secondary" id="pick-backup-toolbar">バックアップを渡す</button>
   </div>
   <details>
     <summary>できること</summary>
@@ -365,6 +368,31 @@ body.large textarea { min-height: 72px; }
 #quickrun-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 /* 一覧の札は横に並べる（.option は縦積みで幅いっぱいになる） */
 .quickrun { width: auto; }
+/*
+ * バックアップを落とすときの受け皿（作者の依頼、2026-09-23）。
+ *
+ * **引きずっているあいだだけ出す。** 普段から枠を出しておくと、会話の場が
+ * 狭くなるうえ、何の枠なのか分からない。
+ */
+#drop-overlay {
+  display: none;
+  position: fixed;
+  inset: 6px;
+  z-index: 10;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px;
+  border: 2px dashed var(--vscode-focusBorder);
+  border-radius: 4px;
+  background: var(--vscode-editor-background);
+  opacity: 0.94;
+  line-height: 1.7;
+  pointer-events: none;
+}
+body.dragging #drop-overlay { display: flex; }
+.backup-hint { margin-top: 10px; font-size: 12px; color: var(--vscode-descriptionForeground); }
+.backup-hint button { margin-top: 4px; }
 </style>
 </head>
 <body${large ? ` class="large"` : ""}>
@@ -379,8 +407,14 @@ ${large ? TOOLBAR_HTML : ""}
       <li>この場面、説明が多すぎない？</li>
       <li>この人物の動機がぼやけている気がする</li>
     </ul>
+    <div class="backup-hint">
+      投稿サイトのバックアップ（ZIP／テキスト）をここへ落とすと、どの作品のものかを確かめて取り込みます。<br>
+      うまく落とせないときは、Shiftを押しながら落とすか、下のボタンから選んでください。<br>
+      <button class="action secondary" id="pick-backup">バックアップを渡す</button>
+    </div>
   </div>
 </div>
+<div id="drop-overlay">ここに落とすと、バックアップを取り込みます<br>（どの作品のものかを確かめてから、何を足すかをお見せします）</div>
 <div id="thinking" hidden>考えています…</div>
 <div id="composer">
   <!-- 聞き方の例。中身は拡張機能側から届いたものをその都度作り直す
@@ -1106,6 +1140,118 @@ if (applyToSettingsEl) {
   });
 }
 
+/*
+  バックアップの持ち込み（作者の依頼、2026-09-23）。
+
+  **中身はバイト列のまま送る**（Uint8Array）。VS Code の postMessage は
+  型付き配列を写し取らずに渡せる。文字列や数の配列に直すと、2MBの合本が
+  何倍にも膨らんで画面が固まる。
+
+  **大きすぎるものは送る前に止める。** 上限は拡張機能側と同じ値
+  （core/backupFileKinds.ts）を組み立てのときに埋め込む。
+*/
+const MAX_BACKUP_BYTES = ${BACKUP_DROP_MAX_BYTES};
+const BACKUP_NAME_PATTERN = /\\.(zip|txt|md)$/i;
+let dragDepth = 0;
+
+function appendNote(text) {
+  const note = document.createElement('div');
+  note.className = 'note';
+  note.textContent = text;
+  logEl.appendChild(note);
+  scrollToBottom();
+  return note;
+}
+
+function carriesFiles(event) {
+  const types = event.dataTransfer ? Array.from(event.dataTransfer.types || []) : [];
+  return (
+    types.includes('Files') ||
+    types.includes('text/uri-list') ||
+    types.includes('application/vnd.code.uri-list')
+  );
+}
+
+function sendBackupFile(file) {
+  if (file.size > MAX_BACKUP_BYTES) {
+    vscode.postMessage({ type: 'backupTooLarge', name: file.name });
+    return;
+  }
+  file.arrayBuffer().then(
+    (buffer) => {
+      vscode.postMessage({
+        type: 'backupFile',
+        name: file.name,
+        bytes: new Uint8Array(buffer),
+      });
+    },
+    () => {
+      appendNote('「' + file.name + '」を読めませんでした。「バックアップを渡す」から選んでください。');
+    }
+  );
+}
+
+document.addEventListener('dragenter', (event) => {
+  if (!carriesFiles(event)) return;
+  event.preventDefault();
+  dragDepth++;
+  document.body.classList.add('dragging');
+});
+document.addEventListener('dragover', (event) => {
+  if (!carriesFiles(event)) return;
+  // 落とせる場所だと知らせないと、drop が起きない
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+});
+document.addEventListener('dragleave', (event) => {
+  if (!carriesFiles(event)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) document.body.classList.remove('dragging');
+});
+document.addEventListener('drop', (event) => {
+  dragDepth = 0;
+  document.body.classList.remove('dragging');
+  const transfer = event.dataTransfer;
+  if (!transfer) return;
+
+  // OS（エクスプローラー等）から：中身をこちらで読んで送る
+  const files = transfer.files;
+  if (files && files.length > 0) {
+    event.preventDefault();
+    if (files.length > 1) {
+      appendNote('バックアップは1つずつ受け取ります。最初の「' + files[0].name + '」だけを確かめます。');
+    }
+    sendBackupFile(files[0]);
+    return;
+  }
+
+  /*
+    VS Code のエクスプローラーから：届くのは場所だけ。中身は拡張機能側が読む。
+    **バックアップらしい名前のときだけ受け取る。** それ以外は入力欄への
+    ふつうの貼り付け（場所の文字）に任せる。
+  */
+  const list =
+    transfer.getData('application/vnd.code.uri-list') ||
+    transfer.getData('text/uri-list') ||
+    '';
+  const first = list
+    .split(/\\r?\\n/)
+    .map((line) => line.trim())
+    .find((line) => line !== '' && !line.startsWith('#'));
+  if (first && BACKUP_NAME_PATTERN.test(first)) {
+    event.preventDefault();
+    vscode.postMessage({ type: 'backupUri', uri: first });
+  }
+});
+
+['pick-backup', 'pick-backup-toolbar'].forEach((id) => {
+  const button = document.getElementById(id);
+  if (!button) return;
+  button.addEventListener('click', () => {
+    vscode.postMessage({ type: 'pickBackup' });
+  });
+});
+
 inputEl.addEventListener('keydown', (event) => {
   // Ctrl+Enter で送る。Enterだけだと改行が打てない
   if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
@@ -1285,6 +1431,22 @@ window.addEventListener('message', (event) => {
     note.className = 'note';
     note.textContent = message.message;
     logEl.appendChild(note);
+    scrollToBottom();
+    return;
+  }
+  // バックアップを取り込んだ結果。本文の違いを書き出せたら「違いを見る」を添える
+  if (message.type === 'backupResult') {
+    const note = appendNote(message.message);
+    if (message.canOpenRecord) {
+      const open = document.createElement('button');
+      open.className = 'action secondary';
+      open.textContent = '違いを見る';
+      open.addEventListener('click', () => {
+        vscode.postMessage({ type: 'openBackupRecord' });
+      });
+      note.appendChild(document.createElement('br'));
+      note.appendChild(open);
+    }
     scrollToBottom();
     return;
   }

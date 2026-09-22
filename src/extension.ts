@@ -2021,6 +2021,20 @@ export async function activate(
       await panel.reloadRecordFromChat(kind, recordId, notes);
     },
   }, advicePolicies, writerProfiles);
+  // 相談パネルへ落とされたバックアップが、どの作品にも当たらなかったとき
+  // （B13）。**メニューの「バックアップから取り込む」と同じ道へ渡す**——
+  // 渡さないと、作者に同じファイルをもう一度選び直させることになる
+  workChatPanel.setBackupImporter(async (picked) => {
+    const { importWorkFromZip } = await import(
+      "./features/importWorkFromZip.js"
+    );
+    await importWorkFromZip(
+      registry.list(),
+      (folderPath, title, options) =>
+        registerFolderAsWork(folderPath, title, options),
+      picked
+    );
+  });
   /*
     画面で指しながらの案内（設計書6.104。第1段）。
 
