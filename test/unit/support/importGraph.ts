@@ -70,6 +70,28 @@ export interface StaticReach {
  * 直す場所を取り違える**ため。
  */
 export function walkStaticImports(entries: string[]): StaticReach {
+  return walkImports(entries, false);
+}
+
+/**
+ * 動的 import（`await import("./x.js")`）もたどる。
+ *
+ * **「拡張機能の中で動きうるファイル」を数えるときに使う**（2026-09-23、
+ * `browserReach.test.ts` の素の `process` の検査）。静的な到達だけだと、
+ * 押したときに初めて読まれるファイル（`handoffSync.ts` など）が数に入らない。
+ * 逆に、ここにも入らないファイルは拡張機能からは読まれない
+ * （MCPサーバーの束だけが使うもの）。
+ *
+ * 行の途中の `import(` も拾うので、コメントに書いた指定まで拾うことがある。
+ * **数えすぎる側へ倒れるだけ**なので、そのままにしてある。
+ */
+export function walkAllImports(entries: string[]): StaticReach {
+  return walkImports(entries, true);
+}
+
+const DYNAMIC_IMPORT = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
+
+function walkImports(entries: string[], dynamic: boolean): StaticReach {
   const files = new Set<string>(entries);
   const bare: BareImport[] = [];
   const cameFrom = new Map<string, string>();
@@ -78,9 +100,15 @@ export function walkStaticImports(entries: string[]): StaticReach {
   while (queue.length > 0) {
     const file = queue.shift()!;
     const source = fs.readFileSync(file, "utf8");
+    const specs: string[] = [];
     for (const match of source.matchAll(STATIC_IMPORT)) {
       const spec = match[2] ?? match[3] ?? match[4];
-      if (!spec) continue;
+      if (spec) specs.push(spec);
+    }
+    if (dynamic) {
+      for (const match of source.matchAll(DYNAMIC_IMPORT)) specs.push(match[1]);
+    }
+    for (const spec of specs) {
       if (!spec.startsWith(".")) {
         bare.push({ file, spec });
         continue;

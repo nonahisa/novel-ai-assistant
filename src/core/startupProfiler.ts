@@ -1,5 +1,5 @@
 import { join } from "./pathText";
-import { canRunProcesses } from "./runtime";
+import { environmentVariable } from "./runtime";
 
 /**
  * 起動のあいだ、**誰が CPU を握っていたか**を自分で採る（設計書6.107）。
@@ -44,15 +44,14 @@ export const STARTUP_PROFILE_LIMIT_MS = 60_000;
 /**
  * 採取を頼まれているか。
  *
- * **`typeof process` で見る**（`core/runtime.ts` と同じ）。ブラウザ版には
- * `process` が無いので、触った瞬間に落ちる。
+ * **`core/runtime.ts` の読み口を通す。** ブラウザ版には `process` が無いので、
+ * 素で触ると落ちる（読み口はそのとき undefined を返す）。
  *
  * 値は「空でなく `0` でもない」なら立っているとみなす。`=1` だけを見ると、
  * `=true` と書いた人が黙って何も採れないことになる。
  */
 export function isStartupProfileRequested(): boolean {
-  if (!canRunProcesses()) return false;
-  const value = process.env[STARTUP_PROFILE_ENV];
+  const value = environmentVariable(STARTUP_PROFILE_ENV);
   return value !== undefined && value !== "" && value !== "0";
 }
 

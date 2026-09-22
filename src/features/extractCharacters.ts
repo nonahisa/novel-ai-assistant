@@ -1728,15 +1728,12 @@ function dirtyDocumentsInside(folderPath: string): vscode.TextDocument[] {
 }
 
 function isPathInside(parentPath: string, candidatePath: string): boolean {
-  const parent = normalizePathForComparison(parentPath);
-  const candidate = normalizePathForComparison(candidatePath);
+  // 比べ方は `paths.normalizeForComparison` の1か所に任せる（2026-09-23）。
+  // 以前の写しは `process.platform` を素で読み、ブラウザ版で落ちていた
+  const parent = path.normalizeForComparison(parentPath);
+  const candidate = path.normalizeForComparison(candidatePath);
   const relative = path.relative(parent, candidate);
   return relative.length > 0 && !path.goesOutside(parent, relative);
-}
-
-function normalizePathForComparison(filePath: string): string {
-  const normalized = path.normalize(filePath);
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 /** 課金の説明に出すサービス名 */

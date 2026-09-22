@@ -34,6 +34,36 @@ export function canRunProcesses(): boolean {
 }
 
 /**
+ * 手元の OS の名前（`win32`・`darwin`・`linux` など）。**ブラウザ版では undefined。**
+ *
+ * **`process` を読むのはこのファイルだけにする**（2026-09-23）。ほかの所で
+ * `process.platform` を素で読むと、ブラウザ版では押した瞬間に
+ * `process is not defined` で落ちる。実機で「動作を診断」（生成文書が
+ * 置けなかった）と「バージョンを確認」（窓が出て落ちた）の2つを踏んだ。
+ * 根は、場所の比べ方を8か所に書き写し、写すときに分け方を落としたこと。
+ * `browserReach.test.ts` がほかでの素の `process` を止める。
+ */
+export function hostPlatform(): NodeJS.Platform | undefined {
+  return isWebRuntime() ? undefined : process.platform;
+}
+
+/**
+ * Windows の上で動いているか。
+ *
+ * **分からないとき（ブラウザ版）は false。** 場所の比べ方で大文字小文字を
+ * 区別する側へ倒す（`paths.normalizeForComparison`・`locationCompare.ts` が
+ * 以前から取っていた判断をそのまま引き継ぐ）。
+ */
+export function isWindowsHost(): boolean {
+  return hostPlatform() === "win32";
+}
+
+/** 環境変数。**ブラウザ版には環境変数が無い**ので、常に undefined */
+export function environmentVariable(name: string): string | undefined {
+  return isWebRuntime() ? undefined : process.env[name];
+}
+
+/**
  * 重ならない一意な文字列。
  *
  * `crypto.randomUUID()` は Node にもブラウザにもある（ブラウザでは

@@ -591,24 +591,18 @@ function isGuardedSamePathSave(prepared: PreparedCharacterSave): boolean {
   return sourcePath !== undefined && samePath(sourcePath, prepared.destinationPath);
 }
 
+// 比べ方は `paths.normalizeForComparison` の1か所に任せる（2026-09-23）。
+// ここに写しがあり、`process.platform` を素で読んでいたので、ブラウザ版では
+// 人物の保存が `process is not defined` で落ちていた
 function samePath(left: string, right: string): boolean {
-  const normalizedLeft = path.normalize(left);
-  const normalizedRight = path.normalize(right);
-  return process.platform === "win32"
-    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
-    : normalizedLeft === normalizedRight;
+  return path.normalizeForComparison(left) === path.normalizeForComparison(right);
 }
 
 function isPathInside(parentPath: string, candidatePath: string): boolean {
-  const normalizedParent = normalizePathForComparison(parentPath);
-  const normalizedCandidate = normalizePathForComparison(candidatePath);
+  const normalizedParent = path.normalizeForComparison(parentPath);
+  const normalizedCandidate = path.normalizeForComparison(candidatePath);
   const relative = path.relative(normalizedParent, normalizedCandidate);
   return relative.length > 0 && !path.goesOutside(normalizedParent, relative);
-}
-
-function normalizePathForComparison(filePath: string): string {
-  const normalized = path.normalize(filePath);
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 function asCharacterStoreError(error: unknown): CharacterStoreError {

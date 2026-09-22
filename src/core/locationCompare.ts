@@ -1,3 +1,5 @@
+import { isWindowsHost } from "./runtime";
+
 /**
  * 場所どうしの比べ方（設計書5.6）。
  *
@@ -20,13 +22,11 @@
  * `C:\Novels\...` とも `c:\novels\...` とも書けるためである。
  * ブラウザ版には `process` が無く、有ってもWindowsか判定できる保証は
  * 無いので、無ければ区別する側へ倒す（`paths.normalizeForComparison`
- * と同じ判断）。
+ * と同じ判断。判定そのものは `runtime.ts` の1か所にある）。
  */
 function normalize(value: string): string {
   const unified = value.replace(/[\u005C]/g, "/").replace(/[/]+$/, "");
-  const isWindows =
-    typeof process !== "undefined" && process.platform === "win32";
-  return isWindows ? unified.toLowerCase() : unified;
+  return isWindowsHost() ? unified.toLowerCase() : unified;
 }
 
 /** 同じ場所を指しているか。Windowsでは大文字小文字を同じものとして見る */

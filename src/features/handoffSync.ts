@@ -555,13 +555,10 @@ function hasUnsavedInside(root: string): boolean {
 }
 
 function isPathInside(parentPath: string, candidatePath: string): boolean {
-  const parent = normalizeForComparison(parentPath);
-  const candidate = normalizeForComparison(candidatePath);
+  // 比べ方は `paths.normalizeForComparison` の1か所に任せる（2026-09-23。
+  // 以前はここに同じ正規化の写しがあった）
+  const parent = path.normalizeForComparison(parentPath);
+  const candidate = path.normalizeForComparison(candidatePath);
   const relative = path.relative(parent, candidate);
   return relative.length > 0 && !path.goesOutside(parent, relative);
-}
-
-function normalizeForComparison(filePath: string): string {
-  const normalized = path.normalize(filePath);
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }

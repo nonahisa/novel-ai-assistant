@@ -6342,10 +6342,10 @@ function findWorkForPath(
   registry: WorkRegistry,
   filePath: string
 ): WorkEntry | undefined {
-  const normalize = (value: string) => {
-    const normalized = path.normalize(value);
-    return process.platform === "win32" ? normalized.toLowerCase() : normalized;
-  };
+  // 比べ方は `paths.normalizeForComparison` の1か所に任せる（2026-09-23）。
+  // 以前はここに写しがあり、`process.platform` を素で読んでいたので、
+  // ブラウザ版では作品の見分けが `process is not defined` で落ちた
+  const normalize = path.normalizeForComparison;
   return [...registry.list()]
     .sort((a, b) => b.folderPath.length - a.folderPath.length)
     .find((work) => {

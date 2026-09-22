@@ -118,8 +118,16 @@ export function kindOfSettingsFile(
   return DIRECTORY_KINDS.find(([directory]) => directory === parent)?.[1];
 }
 
-/** Windowsの区切りと大文字小文字を吸収する */
+/**
+ * Windowsの区切りと大文字小文字を吸収する。
+ *
+ * **大文字小文字の扱いは `paths.normalizeForComparison` に任せる**（2026-09-23）。
+ * 以前はここに写しがあり、`process.platform` を素で読んでいた。書き込み口
+ * （`atomicWriteFile`）は書く前に必ず `markWriting` を呼ぶので、ブラウザ版では
+ * **すべての書き込みがここで `process is not defined` になって落ちていた**
+ * （実機で「動作を診断」の生成文書が置けずに発覚）。区切りを `/` に揃えるのは
+ * ここだけの仕事なので残す。
+ */
 function normalize(filePath: string): string {
-  const normalized = path.normalize(filePath).split(path.sep).join("/");
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  return path.normalizeForComparison(filePath).split(path.sep).join("/");
 }

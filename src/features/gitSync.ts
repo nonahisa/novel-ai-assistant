@@ -1,5 +1,8 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
+// 場所の比べ方は `paths` の1か所に任せる（2026-09-23。以前はこのファイルの
+// 末尾に同じ正規化の写しがあり、`process.platform` を素で読んでいた）
+import { normalizeForComparison } from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
 import { bodyChangePaths } from "../core/manuscriptChangePaths";
@@ -1514,9 +1517,4 @@ function isPathInside(parentPath: string, candidatePath: string): boolean {
   const candidate = normalizeForComparison(candidatePath);
   const relative = path.relative(parent, candidate);
   return relative.length > 0 && !path.goesOutside(parent, relative);
-}
-
-function normalizeForComparison(filePath: string): string {
-  const normalized = path.normalize(filePath);
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }

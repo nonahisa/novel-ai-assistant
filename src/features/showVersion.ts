@@ -4,6 +4,7 @@ import * as path from "../core/paths";
 import { AIRegistry } from "../ai/registry";
 import { isVectorSearchEnabled } from "./vectorSearch";
 import { notifyDone } from "../views/notify";
+import { hostPlatform } from "../core/runtime";
 
 /**
  * 拡張機能の版と、いまの環境を出す。
@@ -50,6 +51,18 @@ export function buildVersionReport(info: VersionInfo): string {
   return lines.join("\n");
 }
 
+/**
+ * 「OS:」の欄に出す名前。
+ *
+ * **ブラウザ版には OS の名前が無い**（`process` が無い）。以前は
+ * `process.platform` を素で読んでいて、ブラウザ版で押すと
+ * `process is not defined` の窓が出て落ちた（2026-09-23、実機）。
+ * 不具合を伝えるための表示なので、「ブラウザ版で動いている」こと自体が要る情報になる。
+ */
+export function platformLabel(platform: string | undefined): string {
+  return platform ?? "ブラウザ版";
+}
+
 export async function showVersion(
   context: vscode.ExtensionContext,
   registry: AIRegistry
@@ -65,7 +78,7 @@ export async function showVersion(
     displayName: packageJson.displayName ?? "統合小説執筆環境",
     version: packageJson.version ?? "（不明）",
     vscodeVersion: vscode.version,
-    platform: process.platform,
+    platform: platformLabel(hostPlatform()),
     ai: resolved
       ? {
           provider: resolved.provider.displayName,

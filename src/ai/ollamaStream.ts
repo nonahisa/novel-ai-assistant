@@ -1,3 +1,5 @@
+import { environmentVariable } from "../core/runtime";
+
 /**
  * Ollamaの応答を**流しながら**受け取る（設計書6.63.1）。
  *
@@ -46,12 +48,12 @@ export function setStreamingSettingReader(
   settingReader = reader;
 }
 
-/** 環境変数の旗。**ブラウザ版には `process` が無い**ので、無ければ切 */
+/**
+ * 環境変数の旗。**ブラウザ版には `process` が無い**ので、無ければ切。
+ * 読むのは `runtime.ts` の1か所（`process` を素で読む所を増やさない）
+ */
 function streamingFromEnvironment(): boolean {
-  return (
-    typeof process !== "undefined" &&
-    process.env?.NOVELAI_OLLAMA_STREAM === "1"
-  );
+  return environmentVariable("NOVELAI_OLLAMA_STREAM") === "1";
 }
 
 /**

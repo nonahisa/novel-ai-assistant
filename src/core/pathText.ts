@@ -1,4 +1,5 @@
 import * as nodePath from "path";
+import { isWindowsHost } from "./runtime";
 
 /**
  * 場所の文字列だけを扱う部分（`paths.ts` の中身のうち、`vscode` が要らないもの）。
@@ -157,10 +158,10 @@ export const sep = nodePath.sep;
 export function normalizeForComparison(location: string): string {
   const normalized = normalize(location);
   // **ブラウザ版には `process` が無い。** 有ってもWindowsか判定できる
-  // 保証は無いので、無ければ大文字小文字を区別する側へ倒す
-  const isWindows =
-    typeof process !== "undefined" && process.platform === "win32";
-  return isWindows ? normalized.toLowerCase() : normalized;
+  // 保証は無いので、無ければ大文字小文字を区別する側へ倒す（判定は
+  // `runtime.ts` の1か所。**この正規化をほかへ書き写さない**——写しが
+  // 8か所あり、どれも分け方を落としてブラウザ版で落ちた。2026-09-23）
+  return isWindowsHost() ? normalized.toLowerCase() : normalized;
 }
 
 /**
