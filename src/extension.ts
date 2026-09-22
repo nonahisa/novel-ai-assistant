@@ -2020,6 +2020,9 @@ export async function activate(
       stepProvider,
       actionView,
       actionProvider,
+      // 選ぶだけでは薄くて気づけなかった（作者の報告、2026-09-22）。
+      // 指している項目に「▶」の印を残す先を渡す
+      marker: actionDecorations,
     })
   );
   onCommandFinished = (command) => workChatPanel.notifyCommandRun(command);

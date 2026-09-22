@@ -32,10 +32,28 @@ import {
  *
  * どちらの数字を出すかは、目印のURI（`actionTargetFromUri`）が決める。
  * 同じ鍵にすると同じ数字が出るので、簡単ステップメニュー側は作品IDを混ぜる。
+ *
+ * ## 3種類目——いま案内が指している項目（設計書6.104。作者の報告、2026-09-22）
+ *
+ * 作者「相談で光らせるが目立ちません」。`TreeView.reveal()` でできるのは
+ * **選ぶ**ところまでで、選択の色はテーマによっては薄い。そこで、
+ * 案内が指している項目にだけ**「▶」の印と色**を残す。
+ * **印は消えずに残る**ので、目を離して戻ってきても、どれを押すのかが分かる。
+ *
+ * **1つの項目に出せる印は1つだけ**なので、案内の印を**いちばん優先**する。
+ * 案内の最中は「いま押すべき1つ」がすべてに勝つ——そのために出している印だからである。
  */
 
 /** 印は2文字までしか出せない。3桁以上は 99 で止める */
 const MAX_BADGE_COUNT = 99;
+
+/**
+ * 案内が指している項目の印。
+ *
+ * **相談パネルの「画面で案内してもらう」の札と同じ形**にしてある。
+ * 押した札と、光った行が同じ記号で結びつく。
+ */
+const SPOTLIGHT_BADGE = "▶";
 
 /**
  * 件数の説明。**種類ごとに変える。**
@@ -90,6 +108,15 @@ export class ActionDecorationProvider
    * 選んだ作品を数え直す（`refreshWork`）。
    */
   private readonly workCounts = new Map<string, Map<ActionCounter, number>>();
+
+  /**
+   * いま案内（設計書6.104）が指している操作のコマンドID。
+   *
+   * **鍵は2つのメニューで共通**（`actionTargetFromUri` が返す `key` は
+   * どちらもコマンドID）なので、1つ持てば簡単ステップメニューと
+   * 詳細メニューの両方に印が出る。
+   */
+  private spotlighted: string | undefined;
 
   /**
    * @param load 件数を数える。数え方そのものはここに持たない
@@ -148,6 +175,18 @@ export class ActionDecorationProvider
     if (changed) this._onDidChange.fire(undefined);
   }
 
+  /**
+   * 案内が指している項目を差し替える（`undefined` で印を外す）。
+   *
+   * **同じものなら描き直させない。** 印の描き直しはツリー全体に及ぶので、
+   * 段が変わっていないのに毎回起こすと、読んでいる最中の画面がちらつく。
+   */
+  setSpotlight(command: string | undefined): void {
+    if (this.spotlighted === command) return;
+    this.spotlighted = command;
+    this._onDidChange.fire(undefined);
+  }
+
   countOf(counter: ActionCounter): number {
     return this.counts.get(counter) ?? 0;
   }
@@ -164,6 +203,18 @@ export class ActionDecorationProvider
     const target = actionTargetFromUri(uri);
     if (target === undefined) return undefined;
     const key = target.key;
+
+    // **案内の印を最優先で出す**（設計書6.104）。件数やAIの印より、
+    // 「いま押すのはここ」のほうが強くなければ、光らせた意味が無い
+    if (this.spotlighted !== undefined && key === this.spotlighted) {
+      return {
+        badge: SPOTLIGHT_BADGE,
+        tooltip: "案内：ここを押してください",
+        // 既定の選択色は薄くて気づけなかった（作者の報告、2026-09-22）。
+        // 警告の色は明るいテーマでも濃く出るので、色そのものが目印になる
+        color: new vscode.ThemeColor("list.warningForeground"),
+      };
+    }
 
     const counter = counterFor(key);
     if (counter) {

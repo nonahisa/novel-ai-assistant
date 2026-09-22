@@ -860,8 +860,8 @@ function sealTourCards() {
 /**
  * 案内の1段を出す。
  *
- * 出すのは5つ——**いま何番目か／何をするか／次へ進む前に何を見るか／
- * 代わりに押して／やめる**。「やめる」を毎段に置くのは、
+ * 出すのは6つ——**いま何番目か／何をするか／次へ進む前に何を見るか／
+ * 代わりに押して／もう一度光らせる／やめる**。「やめる」を毎段に置くのは、
  * **途中でいつでも抜けられること**が見えていないと、始めるのが怖いからである。
  */
 function appendTourStep(step, where) {
@@ -919,6 +919,16 @@ function appendTourStep(step, where) {
     vscode.postMessage({ type: 'tourRun' });
   });
   row.appendChild(run);
+
+  // **押せるままにしておく**（作者の報告、2026-09-22「もう一度光らせる
+  // とかいるかも」）。目を離している間に選択が動くので、何度でも呼べる
+  const again = document.createElement('button');
+  again.className = 'action secondary';
+  again.textContent = 'もう一度光らせる';
+  again.addEventListener('click', () => {
+    vscode.postMessage({ type: 'tourAgain' });
+  });
+  row.appendChild(again);
 
   const stop = document.createElement('button');
   stop.className = 'action secondary';

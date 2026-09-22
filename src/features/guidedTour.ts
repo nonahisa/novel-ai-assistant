@@ -154,6 +154,31 @@ export class GuidedTourHost {
     void this.showCurrent();
   }
 
+  /**
+   * 「もう一度光らせる」（作者の報告、2026-09-22）。
+   *
+   * **進めない。** 同じ段をもう一度指すだけである——目を離している間に
+   * 選択が動いたり、印を見失ったりしたときのための道で、
+   * 押したことが進み具合に関わってはいけない。
+   *
+   * **札は積み増さない。** 同じ段の札が何枚も並ぶと、どれが生きている
+   * のか分からなくなる。代わりに、どこを光らせたかの1行だけを出す
+   * （**光らせられなかったことも隠さない**）。
+   */
+  async showAgain(): Promise<void> {
+    const state = this.state;
+    const step = state ? currentStep(state) : undefined;
+    if (!state || !step) return;
+
+    const result: SpotlightResult = this.spotlight
+      ? await this.spotlight.show(step.command)
+      : { shown: false };
+    this.screen.post({
+      type: "tourNote",
+      message: describeSpotlight(result),
+    });
+  }
+
   /** いまの段を、光らせて札に出す */
   private async showCurrent(): Promise<void> {
     const state = this.state;
@@ -181,6 +206,9 @@ export class GuidedTourHost {
     const state = this.state;
     if (!state) return;
     this.state = undefined;
+    // **印を外す**（設計書6.104）。案内が終わったのに「▶」が残ると、
+    // 押す約束だけがサイドバーに居座る
+    this.spotlight?.clear();
     const message = describeTourEnd(state, reason);
     logStep(`画面案内: ${message}（寄り道 ${state.strayCount}回）`);
     this.screen.post({ type: "tourEnded", message });

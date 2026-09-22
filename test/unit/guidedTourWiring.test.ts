@@ -18,7 +18,11 @@ import {
   type GroupStateStore,
 } from "../../src/views/actionList";
 import { StepMenuProvider, type StepNode } from "../../src/views/stepMenu";
-import { describeSpotlight } from "../../src/features/actionSpotlight";
+import {
+  describeSpotlight,
+  type ActionSpotlight,
+  type SpotlightResult,
+} from "../../src/features/actionSpotlight";
 import type { WorkEntry } from "../../src/models/types";
 import type { WorkRegistry } from "../../src/core/workRegistry";
 
@@ -208,19 +212,31 @@ describe("相談パネルの画面", () => {
       );
     }
     // 画面 → 拡張機能
-    for (const kind of ["startTour", "tourRun", "tourStop"]) {
+    for (const kind of ["startTour", "tourRun", "tourAgain", "tourStop"]) {
       expect(html, `${kind} を送っていない`).toContain(`type: '${kind}'`);
     }
   });
 
   test("1段につき出すものが揃っている", () => {
-    // いま何番目か・何をするか・次に何を見るか・代わりに押して・やめる
+    // いま何番目か・何をするか・次に何を見るか・代わりに押して・
+    // もう一度光らせる・やめる
     expect(html).toContain("step.position");
     expect(html).toContain("step.label");
     expect(html).toContain("step.why");
     expect(html).toContain("step.check");
     expect(html).toContain("代わりに押して");
+    // 光らせても目立たなかった（作者の報告、2026-09-22）。
+    // **何度でも呼べる道**が札に無いと、見失ったら終わりになる
+    expect(html, "「もう一度光らせる」の札が無い").toContain(
+      "もう一度光らせる"
+    );
     expect(html).toContain("やめる");
+  });
+
+  test("相談パネルが「もう一度光らせる」を受けている", () => {
+    const panel = readFileSync("src/features/workChatPanel.ts", "utf8");
+    expect(panel).toContain('message.type === "tourAgain"');
+    expect(panel).toContain("this.tour.showAgain()");
   });
 });
 
@@ -586,5 +602,100 @@ describe("取りやめを名乗れる段が、行き渡っていること", () =
         )
     );
     expect(silent, "済んだことを名乗らない段").toEqual([]);
+  });
+});
+
+/**
+ * **「もう一度光らせる」**（設計書6.104。作者の報告、2026-09-22
+ * 「相談で光らせるが目立ちません。もう一度光らせるとかいるかも」）。
+ *
+ * 押しても**進まない**ことが要である——進み具合に関わると、
+ * 見失って押し直しただけで案内が先へ行ってしまう。
+ */
+class FakeSpotlight implements ActionSpotlight {
+  readonly shown: string[] = [];
+  cleared = 0;
+  async show(command: string): Promise<SpotlightResult> {
+    this.shown.push(command);
+    return { shown: true, view: "steps" };
+  }
+  clear(): void {
+    this.cleared += 1;
+  }
+}
+
+async function withSpotlight(): Promise<{
+  screen: FakeScreen;
+  host: GuidedTourHost;
+  spotlight: FakeSpotlight;
+}> {
+  const screen = new FakeScreen();
+  const host = new GuidedTourHost(screen);
+  const spotlight = new FakeSpotlight();
+  host.setSpotlight(spotlight);
+  await host.start("consistency");
+  return { screen, host, spotlight };
+}
+
+describe("もう一度光らせる", () => {
+  test("同じ段をもう一度指すだけで、段は動かない", async () => {
+    const { screen, host, spotlight } = await withSpotlight();
+    const now = screen.step.step;
+    expect(spotlight.shown, "始めたときに光らせていない").toEqual([
+      now.command,
+    ]);
+
+    await host.showAgain();
+
+    expect(spotlight.shown, "もう一度指していない").toEqual([
+      now.command,
+      now.command,
+    ]);
+    expect(screen.step.step.number, "押しただけで進んだ").toBe(now.number);
+    expect(screen.ended, "押しただけで案内が畳まれた").toBeUndefined();
+  });
+
+  test("札は積み増さず、どこを光らせたかの1行だけ出す", async () => {
+    const { screen, host } = await withSpotlight();
+    await host.showAgain();
+
+    // 同じ段の札が2枚並ぶと、どちらが生きているのか分からなくなる
+    expect(
+      screen.posts.filter((post) => post.type === "tourStep"),
+      "同じ段の札が積み増された"
+    ).toHaveLength(1);
+    const notes = screen.posts.filter((post) => post.type === "tourNote");
+    expect(notes, "どこを光らせたかが出ていない").toHaveLength(1);
+    expect(notes[0]?.message).toContain("簡単ステップメニュー");
+  });
+
+  test("案内していなければ何も起きない", async () => {
+    const screen = new FakeScreen();
+    const host = new GuidedTourHost(screen);
+    const spotlight = new FakeSpotlight();
+    host.setSpotlight(spotlight);
+
+    await host.showAgain();
+
+    expect(spotlight.shown).toEqual([]);
+    expect(screen.posts).toEqual([]);
+  });
+});
+
+describe("案内が終わったら印を外す", () => {
+  test("やめたとき", async () => {
+    const { host, spotlight } = await withSpotlight();
+    host.stop();
+    expect(spotlight.cleared, "「▶」が居座る").toBe(1);
+  });
+
+  test("最後まで進んだとき", async () => {
+    const { screen, host, spotlight } = await withSpotlight();
+    for (let i = 0; i < 12 && !screen.ended; i++) {
+      finished(host, screen.step.step.command, CHECK_COMPLETED);
+      await settle();
+    }
+    expect(screen.ended, "最後まで進んでいない").toBeDefined();
+    expect(spotlight.cleared, "「▶」が居座る").toBe(1);
   });
 });

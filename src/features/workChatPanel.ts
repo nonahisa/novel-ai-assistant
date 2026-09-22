@@ -298,6 +298,12 @@ type Incoming =
   | { type: "startTour"; key: string }
   /** 案内の「代わりに押して」（作者の裁定、2026-09-21） */
   | { type: "tourRun" }
+  /**
+   * 案内の「もう一度光らせる」（作者の報告、2026-09-22）。
+   *
+   * **進めない。** 同じ段をもう一度指すだけである
+   */
+  | { type: "tourAgain" }
   /** 案内の「やめる」。途中でいつでも抜けられる */
   | { type: "tourStop" };
 
@@ -1031,6 +1037,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
     if (message.type === "tourRun") {
       await this.tour.runCurrent();
+      return;
+    }
+    if (message.type === "tourAgain") {
+      await this.tour.showAgain();
       return;
     }
     if (message.type === "tourStop") {
