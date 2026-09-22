@@ -88,7 +88,8 @@ describe("知らないものが書いてあっても、台帳ごと死なせな�
 describe("サイトごとの指標（なろうの評価者数・評価ポイント・評価平均）", () => {
   test("表はサイトごとに引ける", () => {
     const narou = SITE_READER_STATS_METRICS.narou.map((info) => info.label);
-    expect(narou).toEqual(["評価者数", "評価ポイント", "評価平均"]);
+    // 週間読者は Narou.fun から入る（残課題 B11、2026-09-23）
+    expect(narou).toEqual(["評価者数", "評価ポイント", "評価平均", "週間読者"]);
     // 共通の7つは、どのサイトでも先に並ぶ（サイトをまたいで比べる軸）
     const forNarou = readerStatsMetricsFor("narou").map((info) => info.key);
     expect(forNarou.slice(0, 7)).toEqual([
@@ -100,7 +101,7 @@ describe("サイトごとの指標（なろうの評価者数・評価ポイン�
       "comments",
       "reviews",
     ]);
-    expect(forNarou).toHaveLength(10);
+    expect(forNarou).toHaveLength(11);
   });
 
   test("小数の指標（評価平均）を台帳へ入れられる", () => {

@@ -329,6 +329,14 @@ export const SITE_READER_STATS_METRICS: Readonly<
       // 「0pt」とも「4.50pt」とも書かれる（実データ、2026-09-19）
       fractionDigits: 2,
     },
+    /*
+      Narou.fun の作品頁にある「週間読者」（残課題 B11、2026-09-23）。
+      **直近1週間の窓の人数**で、累計のユニーク（共通の `unique`）とは別物
+      ——共通の欄へ当てはめると、カクヨムの累計と同じ軸に見えてしまう。
+      母艦の粒度に週は無い（day／month／year／total）ので、期間ではなく
+      **その時点の値**として持ち、窓の長さは名前が言う。
+    */
+    { key: "narou_weeklyReaders", label: "週間読者", unit: "人", example: "111" },
   ],
   kakuyomu: [],
   alphapolis: [],

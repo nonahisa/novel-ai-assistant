@@ -6,6 +6,8 @@ import type { ReaderStatsRecord } from "../models/posting";
  * - **離脱率** = 1 − 基準の話のPV ÷ 第1話のPV
  * - **ブックマーク率** = 作品全体のブックマーク ÷ 第1話のPV
  * - **評価率** = 作品全体のレビュー（評価した人数）÷ 第1話のPV
+ *   （なろうは評価者数で割る——なろうの「レビュー」は書かれたレビューの件数。
+ *   `ratingMetricFor`）
  *
  * **分母は第1話の読者**である（作者の訂正「ブックマーク率等は第一話読者
  * でした」、2026-09-23）。読みはじめた人のうち、何割がブックマーク・評価まで
@@ -242,15 +244,16 @@ export function computeReaderRates(
           `1 − ${count(basePv.value)} ÷ ${count(firstPv.value)}`
         );
 
+  const labels = workLabelsFor(records);
   const workOperand = (
     kind: "bookmark" | "rating"
   ): ReaderRateOperand | undefined => {
     const work = newestWorkMetric(
       records,
-      kind === "bookmark" ? "bookmarks" : "reviews"
+      kind === "bookmark" ? "bookmarks" : ratingMetricFor(records)
     );
     return work
-      ? { label: WORK_LABELS[kind], value: work.value, ...stamp(work.readAt) }
+      ? { label: labels[kind], value: work.value, ...stamp(work.readAt) }
       : undefined;
   };
 
@@ -260,9 +263,34 @@ export function computeReaderRates(
     base,
     ...(baseResult.missing ? { baseMissing: baseResult.missing } : {}),
     dropout,
-    bookmark: ratioRate("bookmark", workOperand("bookmark"), firstPv, firstProblem),
-    rating: ratioRate("rating", workOperand("rating"), firstPv, firstProblem),
+    bookmark: ratioRate("bookmark", labels, workOperand("bookmark"), firstPv, firstProblem),
+    rating: ratioRate("rating", labels, workOperand("rating"), firstPv, firstProblem),
   };
+}
+
+/**
+ * 評価率の分子にする欄（「評価した人数」）。**サイトで違う**（残課題 B11）。
+ *
+ * カクヨムではレビュー人数（★を付けた人数）が評価した人数に当たるが、
+ * なろうの「レビュー」は**書かれたレビューの件数**で、評価した人数は
+ * 「評価者数」（`narou_raters`）である。Narou.fun からレビュー 0 が入ると、
+ * レビューで割ったなろうの評価率は 0% になり、助言が「目安に届いていない」と言う。
+ *
+ * 1回の呼び出しに渡るのは**1つのサイトの**記録なので、最初の行のサイトで決める。
+ */
+function ratingMetricFor(
+  records: readonly ReaderStatsRecord[]
+): "reviews" | "narou_raters" {
+  return records[0]?.site === "narou" ? "narou_raters" : "reviews";
+}
+
+/** 作品全体の数の呼び名。評価率の分子だけがサイトで変わる */
+function workLabelsFor(
+  records: readonly ReaderStatsRecord[]
+): Record<"bookmark" | "rating", string> {
+  return ratingMetricFor(records) === "narou_raters"
+    ? { ...WORK_LABELS, rating: "作品全体の評価者数（評価した人数）" }
+    : WORK_LABELS;
 }
 
 type RateKind = "dropout" | "bookmark" | "rating";
@@ -280,24 +308,29 @@ const WORK_LABELS: Record<"bookmark" | "rating", string> = {
 };
 
 /** 式を言葉で。基準の話が決まっていなければ「基準の話」と書く */
-function formulaOf(kind: RateKind, baseEpisode: number | undefined): string {
+function formulaOf(
+  kind: RateKind,
+  baseEpisode: number | undefined,
+  labels: Record<"bookmark" | "rating", string> = WORK_LABELS
+): string {
   if (kind === "dropout") {
     const base =
       baseEpisode === undefined ? "基準の話のPV" : `第${baseEpisode}話のPV`;
     return `1 − ${base} ÷ 第1話のPV`;
   }
-  return `${WORK_LABELS[kind]} ÷ 第1話のPV`;
+  return `${labels[kind]} ÷ 第1話のPV`;
 }
 
 function missingRate(
   kind: RateKind,
   baseEpisode: number | undefined,
   operands: ReaderRateOperand[],
-  missing: string
+  missing: string,
+  labels: Record<"bookmark" | "rating", string> = WORK_LABELS
 ): ReaderRate {
   return {
     label: RATE_LABELS[kind],
-    formula: formulaOf(kind, baseEpisode),
+    formula: formulaOf(kind, baseEpisode, labels),
     operands,
     missing,
   };
@@ -308,12 +341,13 @@ function doneRate(
   baseEpisode: number | undefined,
   operands: ReaderRateOperand[],
   value: number,
-  left: string
+  left: string,
+  labels: Record<"bookmark" | "rating", string> = WORK_LABELS
 ): ReaderRate {
   const percent = formatPercent(value);
   return {
     label: RATE_LABELS[kind],
-    formula: formulaOf(kind, baseEpisode),
+    formula: formulaOf(kind, baseEpisode, labels),
     value,
     percent,
     expression: `${left} = ${percent}`,
@@ -324,22 +358,30 @@ function doneRate(
 /** ブックマーク率・評価率（作品全体の数 ÷ 第1話のPV） */
 function ratioRate(
   kind: "bookmark" | "rating",
+  labels: Record<"bookmark" | "rating", string>,
   workOperand: ReaderRateOperand | undefined,
   firstPv: ReaderRateOperand | undefined,
   firstProblem: string | undefined
 ): ReaderRate {
   const operands = [workOperand, firstPv].filter(isOperand);
   const problem =
-    workOperand === undefined ? `${WORK_LABELS[kind]}がありません` : firstProblem;
+    workOperand === undefined ? `${labels[kind]}がありません` : firstProblem;
   if (problem !== undefined || !workOperand || !firstPv) {
-    return missingRate(kind, undefined, operands, problem ?? "材料が足りません");
+    return missingRate(
+      kind,
+      undefined,
+      operands,
+      problem ?? "材料が足りません",
+      labels
+    );
   }
   return doneRate(
     kind,
     undefined,
     operands,
     workOperand.value / firstPv.value,
-    `${count(workOperand.value)} ÷ ${count(firstPv.value)}`
+    `${count(workOperand.value)} ÷ ${count(firstPv.value)}`,
+    labels
   );
 }
 
@@ -391,7 +433,7 @@ function pickBaseEpisode(latest: LatestEpisodeValues): {
  */
 function newestWorkMetric(
   records: readonly ReaderStatsRecord[],
-  key: "bookmarks" | "reviews"
+  key: "bookmarks" | "reviews" | "narou_raters"
 ): { value: number; readAt: string } | undefined {
   let newest: { value: number; readAt: string; time: number } | undefined;
   for (const record of records) {

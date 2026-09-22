@@ -22,6 +22,7 @@ import { PostingStore, PostingStoreError } from "../core/postingStore";
 import {
   matchReaderStatsEnvelope,
   parseReaderStatsEnvelope,
+  readerStatsSourceLabel,
 } from "../core/readerStatsEnvelope";
 // 管理画面のURLを組むのは core（画面を出さずに確かめられるようにする）
 import { readerStatsPageUrl } from "../core/postingSiteUrls";
@@ -44,7 +45,9 @@ import { configurePostingSites } from "./postingKit";
  *
  * ## 手入力の口を必ず残す
  *
- * なろう・pixiv・ハーメルン・noteは規約の判断から**読み取りに対応しない**。
+ * なろう・pixiv・ハーメルン・noteは規約の判断から**読み取りに対応しない**
+ * （なろうの数は、作者が開いた分析サイト Narou.fun の頁からなら封筒で受ける。
+ * 断っているのは、なろう本体を機械で読むことである。残課題 B11）。
  * 手入力があれば、対応しないサイトでも記録は残せる——「対応していないから
  * 何もできない」を作らないための口である。
  *
@@ -124,6 +127,15 @@ export async function importReaderStats(
   }
 
   const info = postingSiteInfo(parsed.envelope.site);
+  const sourceLabel = readerStatsSourceLabel(parsed.envelope.source);
+  /*
+    **どこで読んだかをメモに残す**（残課題 B11）。台帳の出どころ（`source`）は
+    「貼り付け」のままにする——一覧を増やすと、それを知らない古い版が台帳ごと
+    読めなくなる（`READER_STATS_SOURCES` の注記）。だが Narou.fun の数は
+    なろう本体の画面より遅れて集計されることがあり、あとから見た作者が
+    「なろうの管理画面の数」と取り違えないよう、履歴の表のメモ列で見えるようにする。
+  */
+  const note = sourceLabel ? `${sourceLabel}から読み取り` : undefined;
   let next = ledger;
   try {
     for (const entry of parsed.envelope.entries) {
@@ -133,6 +145,7 @@ export async function importReaderStats(
         readAt: parsed.envelope.readAt,
         ...entry,
         source: "helper",
+        ...(note ? { note } : {}),
       });
     }
   } catch (error) {
@@ -144,7 +157,8 @@ export async function importReaderStats(
   if (!(await save(store, work, next))) return UNCHANGED;
 
   void vscode.window.showInformationMessage(
-    `${info.label} の読者の反応を ${parsed.envelope.entries.length}件 取り込みました。` +
+    `${info.label} の読者の反応を ${parsed.envelope.entries.length}件 取り込みました` +
+      (sourceLabel ? `（${sourceLabel}から）。` : "。") +
       "執筆量パネルの「サイトの記録」で履歴を見られます。"
   );
   return { changed: true };

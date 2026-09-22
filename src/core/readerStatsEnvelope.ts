@@ -15,6 +15,8 @@ import {
   type ReaderStatsScope,
 } from "../models/posting";
 import { supportsPasteHelper } from "./postingEnvelope";
+import { narouNcode } from "./postingSiteRecords";
+import { deriveSiteProfile } from "./postingSiteUrls";
 
 /**
  * 読者の反応の封筒（設計書6.79.7の3）。**向きが逆の封筒である。**
@@ -62,9 +64,60 @@ export interface ReaderStatsEnvelopeEntry {
   updatedAt?: string;
 }
 
+/**
+ * 封筒の出どころ（残課題 B11、2026-09-23）。**欄が無ければ、そのサイトの
+ * 管理画面そのもの**（カクヨムの作品管理など。これまでの封筒はすべてこれ）。
+ *
+ * ## なぜ出どころを分けるのか
+ *
+ * なろうの封筒は「規約の判断により」断っている（6.79.7）。**その判断は、
+ * なろう本体（syosetu.com）を機械で読むことについて**である。作者が自分で
+ * 開いた分析サイト Narou.fun の頁は別のサイトで、そこから読んだ封筒まで
+ * 同じ理由で断る筋は無い——サイト（どの作品の数か）と出どころ（どこで
+ * 読んだか）は別の問いなので、欄を分ける。
+ *
+ * **一覧はここ1つだけが持つ。** 知らない出どころは推測で読まずに断る
+ * （版数と同じ流儀——意味の分からない欄を読むと、数字が化ける）。
+ */
+export const READER_STATS_ENVELOPE_SOURCES = {
+  "narou.fun": {
+    /** 画面に出す名前（サイトの呼び方のまま） */
+    label: "Narou.fun",
+    /** この出どころが持ってこられるのは、このサイトの数だけ */
+    site: "narou",
+  },
+} as const satisfies Record<string, { label: string; site: PostingSiteId }>;
+
+export type ReaderStatsEnvelopeSource = keyof typeof READER_STATS_ENVELOPE_SOURCES;
+
+function isReaderStatsEnvelopeSource(
+  value: unknown
+): value is ReaderStatsEnvelopeSource {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(READER_STATS_ENVELOPE_SOURCES, value)
+  );
+}
+
+/** 出どころの表示名（「Narou.fun」）。出どころの無い封筒は undefined */
+export function readerStatsSourceLabel(
+  source: ReaderStatsEnvelopeSource | undefined
+): string | undefined {
+  return source === undefined
+    ? undefined
+    : READER_STATS_ENVELOPE_SOURCES[source].label;
+}
+
 export interface ReaderStatsEnvelope {
   [MARKER]: typeof READER_STATS_ENVELOPE_VERSION;
   site: PostingSiteId;
+  /**
+   * どこで読んだか（`READER_STATS_ENVELOPE_SOURCES`）。**無ければそのサイトの
+   * 管理画面そのもの**。省いてよい欄なので封筒の版数は上げない——ただし
+   * これを知らない古い母艦は、`site: "narou"` を見てなろうとして断る
+   * （受けるのはこの欄を知っている版だけ。断る向きに倒れるので安全）。
+   */
+  source?: ReaderStatsEnvelopeSource;
   /**
    * 管理画面のURLから読めた作品ID。**入っていれば照合する**（6.79.6の2）。
    *
@@ -118,8 +171,18 @@ function reject(
  *
  * **写しを作らない。** ここに別の一覧を置くと、貼り込みだけ解禁したときに
  * 読み取りが取り残される（あるいはその逆）。解禁はヘルパー側と同時に行う。
+ *
+ * **出どころがあれば、出どころの表が決める**（残課題 B11）。Narou.fun は
+ * なろうの数を持ってくるが、なろう本体の管理画面を読むわけではない。
+ * 出どころを渡さなければ（これまでの呼び方）、答えは変わらない。
  */
-export function supportsReaderStatsHelper(site: PostingSiteId): boolean {
+export function supportsReaderStatsHelper(
+  site: PostingSiteId,
+  source?: ReaderStatsEnvelopeSource
+): boolean {
+  if (source !== undefined) {
+    return READER_STATS_ENVELOPE_SOURCES[source].site === site;
+  }
   return supportsPasteHelper(site);
 }
 
@@ -132,6 +195,7 @@ export function supportsReaderStatsHelper(site: PostingSiteId): boolean {
  */
 export function buildReaderStatsEnvelope(input: {
   site: PostingSiteId;
+  source?: ReaderStatsEnvelopeSource;
   workId?: string | null;
   readAt: string;
   entries: readonly ReaderStatsEnvelopeEntry[];
@@ -140,6 +204,7 @@ export function buildReaderStatsEnvelope(input: {
   return JSON.stringify({
     [MARKER]: READER_STATS_ENVELOPE_VERSION,
     site: input.site,
+    ...(input.source ? { source: input.source } : {}),
     ...(workId ? { workId } : {}),
     readAt: input.readAt,
     entries: input.entries,
@@ -183,7 +248,29 @@ export function parseReaderStatsEnvelope(
       ? POSTING_SITES.find((info) => info.id === site)
       : undefined;
   if (!known) return reject("封筒に書かれたサイトが分かりませんでした。");
-  if (!supportsReaderStatsHelper(known.id)) {
+
+  /*
+    出どころ（残課題 B11）。**`null` は「欄なし」**（ほかの欄と同じ扱い）。
+    書いてあるのに知らない出どころなら、推測せずに断る——サイトの判定より
+    先に見るのは、知らない出どころの封筒を「なろうだから」で断ると、
+    貼り込み係が新しいのに母艦が古い、という本当の理由が伝わらないため。
+  */
+  const rawSource = absent(value.source) ? undefined : value.source;
+  if (rawSource !== undefined && !isReaderStatsEnvelopeSource(rawSource)) {
+    return reject(
+      "封筒に書かれた読み取り元が分かりませんでした（貼り込み係と拡張機能の版が" +
+        "食い違っているかもしれません）。どちらかを更新してからお試しください。"
+    );
+  }
+  const source = rawSource;
+  if (source !== undefined && !supportsReaderStatsHelper(known.id, source)) {
+    // Narou.fun の封筒が「カクヨム」を名乗っている、のような食い違い。直し方はこちらに分からない
+    return reject(
+      `${READER_STATS_ENVELOPE_SOURCES[source].label}から読んだ封筒に、` +
+        `${known.label}の数が入っていました。取り込みを中止しました。`
+    );
+  }
+  if (source === undefined && !supportsReaderStatsHelper(known.id)) {
     // **仕様として断る**（6.79.7）。故障と読まれないよう、道があることまで言う
     return reject(
       `${known.label}の読者の反応は、貼り付けでは取り込みません` +
@@ -220,11 +307,25 @@ export function parseReaderStatsEnvelope(
   }
 
   const trimmedWorkId = (workId ?? "").trim();
+  /*
+    **出どころのある封筒は、作品IDが無ければ受けない**（残課題 B11）。
+    Narou.fun は**誰の作品の頁でも開ける**ので、作者の作品かどうかは
+    作品ID（Nコード）でしか確かめられない。管理画面の封筒は「作品IDが無くても
+    通す」が、それは管理画面が作者本人にしか開けないからである。
+  */
+  if (source !== undefined && !trimmedWorkId) {
+    return reject(
+      `${READER_STATS_ENVELOPE_SOURCES[source].label}から読んだ封筒に、` +
+        "作品ID（Nコード）が入っていませんでした。どの作品の数か確かめられないため、" +
+        "取り込みません。"
+    );
+  }
   return {
     ok: true,
     envelope: {
       [MARKER]: READER_STATS_ENVELOPE_VERSION,
       site: known.id,
+      ...(source !== undefined ? { source } : {}),
       ...(trimmedWorkId ? { workId: trimmedWorkId } : {}),
       readAt: readAt.trim(),
       entries: parsedEntries,
@@ -394,6 +495,10 @@ export function matchReaderStatsEnvelope(
     );
   }
 
+  if (envelope.source !== undefined) {
+    return matchBySourceWorkId(envelope, ledger);
+  }
+
   const known = siteProfile(ledger, envelope.site)?.workId?.trim();
   // **台帳に作品IDが無ければ通す。** 入れていない作品も多く、ここで
   // 断ると「登録するまで使えない」機能になる（照合できないとは言える）
@@ -403,6 +508,50 @@ export function matchReaderStatsEnvelope(
       `封筒の作品ID（${envelope.workId}）が、この作品に登録された` +
       `${info.label}の作品ID（${known}）と違います。` +
       "別の作品の管理画面を読んでいないかご確認ください。"
+    );
+  }
+  return null;
+}
+
+/**
+ * 出どころのある封筒（Narou.fun）の照合（残課題 B11）。
+ *
+ * **台帳に作品IDが無ければ通さない**——管理画面の封筒と逆である。Narou.fun は
+ * 誰の作品の頁でも開けるので、貼り込み係には作者の作品かどうかが分からない。
+ * 作品ID（Nコード）で照合できて初めて「作者の作品の数」と言える。
+ *
+ * 台帳のNコードは、作者が入れた作品ID → 作品ページのURL → 投稿ページのURL
+ * の順に探す（`narouNcode` と `deriveSiteProfile`。分析リンクを組むときと
+ * 同じ導き）。比べるときは**大文字・小文字を問わない**（Narou.fun のURLは
+ * 大文字、なろうのURLとバックアップは小文字）。
+ */
+function matchBySourceWorkId(
+  envelope: ReaderStatsEnvelope,
+  ledger: PostingLedger
+): string | null {
+  const info = postingSiteInfo(envelope.site);
+  const sourceLabel = readerStatsSourceLabel(envelope.source) ?? info.label;
+  const profile = siteProfile(ledger, envelope.site);
+  const postUrl = ledger.sites.find(
+    (entry) => entry.site === envelope.site
+  )?.newEpisodeUrl;
+  // いまの出どころは Narou.fun（なろう）だけ。増えたら、ここでサイトごとの導きを足す
+  const known =
+    narouNcode(profile?.workId, profile?.workUrl) ??
+    narouNcode(deriveSiteProfile(envelope.site, postUrl).workId);
+  if (!known) {
+    return (
+      `この作品に、${info.label}の作品ID（Nコード）が登録されていません。` +
+      `${sourceLabel}の頁はどの作品のものでも開けるため、作品IDと照合できないときは` +
+      "取り込みません。「投稿サイトの設定」でNコードを登録してから取り込んでください。"
+    );
+  }
+  const received = narouNcode(envelope.workId);
+  if (received !== known) {
+    return (
+      `封筒の作品ID（${envelope.workId ?? ""}）が、この作品に登録された` +
+      `${info.label}の作品ID（${known.toUpperCase()}）と違います。` +
+      `${sourceLabel}でほかの作品の頁を読んでいないかご確認ください。`
     );
   }
   return null;
