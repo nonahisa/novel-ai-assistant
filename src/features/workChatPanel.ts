@@ -1596,6 +1596,14 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       無かったため、ノートPC（CPUだけの Ollama）では一度も出なかった。
     */
     let procedureKey: string | undefined;
+    /*
+      **最後に送った量**（2026-09-23）。時間切れの案内に添えるため、
+      try の外に置く。量が分からないまま「減らして」と言っても、作者は
+      何をどれだけ減らせばよいか判断できない。履歴のぶんを別に持つのは、
+      「最初から」で実際に減るのがそこだけだから（抜粋・全体像・近い場面は
+      毎回組み直されて、作者の操作では減らない）。
+    */
+    let sent: { total: number; history: number } | undefined;
 
     try {
       logStep(`相談: v${WORK_CHAT_VERSION} / ${resolved.model}`);
@@ -1686,6 +1694,14 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           question,
           featureGuide: guide.text,
         });
+        const historyChars = this.history
+          .slice(-HISTORY_TURNS)
+          .reduce((sum, turn) => sum + turn.text.length, 0);
+        // 材料を求められた2回目は、1回目より長い。**切れたほうの量を出す**
+        sent = {
+          total: systemPrompt.length + userPrompt.length,
+          history: historyChars,
+        };
 
         return resolved.provider.generate({
           systemPrompt,
@@ -1725,9 +1741,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
                   (sum, block) => sum + block.length,
                   0
                 ),
-                履歴: this.history
-                  .slice(-HISTORY_TURNS)
-                  .reduce((sum, turn) => sum + turn.text.length, 0),
+                履歴: historyChars,
                 目次と説明: guide.text.length,
                 人物名: referenceChars(CHARACTER_NAMES_HEADING),
               }),
@@ -1911,9 +1925,43 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       await this.updateAdvicePolicy(context?.work, answer.profileSignals);
       await this.updateWriterStyle(answer.writerStyleSignals);
     } catch (error) {
+      /*
+        **タイムアウトだけは、その場で直せる札を添える**（2026-09-23）。
+        `recoveryForAIError` が「設定で秒数を延ばしてください」と案内して
+        いるが、作者はプログラマではなく、設定画面まで辿り着けていなかった。
+        押されたときだけ書く（`runErrorAction`）。
+
+        **文言より先に決める。** 札が出るかどうかで、赤字に書くこと
+        （「下の札で延ばせます」か「もう延ばせません」か）が変わる。
+      */
+      const timedOut = error instanceof AIError && error.kind === "timeout";
+      const actions = timedOut
+        ? this.timeoutAction(resolved.provider, resolved.model)
+        : undefined;
+      /*
+        **相談の時間切れは、相談向けの案内にする**（ノートPCの実機、
+        2026-09-23）。共通の案内（`recoveryForAIError`）は「秒数を延ばす」
+        「1チャンクの文字数を小さく」を勧めるが、待ち時間が既に上限なら
+        延ばせず、相談はチャンクに分けないので後者は何も変えない。
+        **案内どおりにしても何も変わらない**のは実装ルール5に反する。
+        ほかの画面の案内は変えない（そちらではチャンクが効く）。
+      */
       const message =
         error instanceof AIError
-          ? `${error.message} ${recoveryForAIError(error)}`
+          ? `${error.message} ${
+              timedOut
+                ? workChatTimeoutAdvice({
+                    currentSeconds: resolveTimeoutSeconds(
+                      resolved.provider.id,
+                      resolved.model
+                    ),
+                    maxSeconds: MAX_TIMEOUT_SECONDS,
+                    canRaise: actions !== undefined,
+                    sentChars: sent?.total,
+                    historyChars: sent?.history,
+                  })
+                : recoveryForAIError(error)
+            }`
           : error instanceof Error
             ? error.message
             : String(error);
@@ -1938,16 +1986,6 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           error: message,
         });
       }
-      /*
-        **タイムアウトだけは、その場で直せる札を添える**（2026-09-23）。
-        `recoveryForAIError` が「設定で秒数を延ばしてください」と案内して
-        いるが、作者はプログラマではなく、設定画面まで辿り着けていなかった。
-        押されたときだけ書く（`runErrorAction`）。
-      */
-      const actions =
-        error instanceof AIError && error.kind === "timeout"
-          ? this.timeoutAction(resolved.provider, resolved.model)
-          : undefined;
       /*
         **画面の案内の誘いも、失敗の赤字の下に出す**（2026-09-23。実装ルール5
         「作者が次に取れる操作を1つ示す」）。
@@ -3652,6 +3690,82 @@ interface ResolvedContext {
  */
 function failureDetail(error: unknown): string | undefined {
   return error instanceof AIError ? error.detail : undefined;
+}
+
+/**
+ * 「最初から」を勧めるのは、これまでのやり取りが送った量のこの割合以上の
+ * ときだけ。**相談で作者の操作によって減るのは履歴だけ**である——抜粋
+ * （開いている画面の前後、4,000字まで）・作品の全体像・質問に近い場面
+ * （8,000字まで）は、毎回組み直されて減らせない。履歴が数百字のときに
+ * 「最初から」を勧めても、読み込みの時間はほとんど変わらない。
+ *
+ * 4分の1にしたのは、実機（約620秒で600秒の上限に当たった）のような
+ * 「少し足りない」回なら、それだけ減れば上限の内に収まる見込みがあるため。
+ */
+const HISTORY_SHARE_FOR_CLEAR = 0.25;
+
+/**
+ * 相談の時間切れの案内（ノートPCの実機、2026-09-23）。
+ *
+ * 共通の案内（`recoveryForAIError`）を使わない理由は2つ。
+ * 1. 待ち時間が既に上限（`MAX_TIMEOUT_SECONDS`）なら、延ばせない
+ * 2. 相談はチャンクに分けないので、「1チャンクの文字数」は効かない
+ *
+ * **実際に効く操作を1つだけ言う**（実装ルール5）。上限未満なら延ばす
+ * （札は `timeoutAction` が出す）。上限なら、履歴が重いときは「最初から」、
+ * そうでなければ別のAIを選ぶ。サービス名は書かない。
+ */
+export function workChatTimeoutAdvice(input: {
+  /** いま効いている待ち時間（`resolveTimeoutSeconds`。上限で抑えた後の値） */
+  currentSeconds: number;
+  maxSeconds: number;
+  /** 延ばす札が出ているか */
+  canRaise: boolean;
+  /** 切れた回に送った量（システムプロンプト＋本体）。分からなければ省く */
+  sentChars?: number;
+  /** そのうち、これまでのやり取りの字数 */
+  historyChars?: number;
+}): string {
+  const atCeiling =
+    Number.isFinite(input.currentSeconds) &&
+    input.currentSeconds >= input.maxSeconds;
+
+  if (!atCeiling) {
+    return input.canRaise
+      ? "待ち時間を延ばすと届くことがあります。下の札を押すと延ばせます。"
+      : "拡張機能の設定で、お使いのAIの「タイムアウト」の秒数を延ばしてください。";
+  }
+
+  const sentChars = input.sentChars;
+  const historyChars = input.historyChars ?? 0;
+  const head =
+    `待ち時間はすでに上限（${input.maxSeconds}秒）で、これ以上は延ばせません` +
+    (sentChars !== undefined && sentChars > 0
+      ? `（この相談で送った量は${formatChars(sentChars)}字）。`
+      : "。");
+
+  if (
+    sentChars !== undefined &&
+    sentChars > 0 &&
+    historyChars / sentChars >= HISTORY_SHARE_FOR_CLEAR
+  ) {
+    return (
+      head +
+      `そのうち${formatChars(historyChars)}字はこれまでのやり取りです。` +
+      "「最初から」を押して会話を空にすると、そのぶんを送らずに済みます。"
+    );
+  }
+  return (
+    head +
+    "このAIでは、この量の相談が上限の時間内に終わりません。" +
+    "より速いAIを選んでください（パネルの上に出ているAIの名前を押すと、" +
+    "AIの設定を開けます）。"
+  );
+}
+
+/** 24209 → 「24,209」。作者が読む数なので桁を区切る */
+function formatChars(value: number): string {
+  return Math.round(value).toLocaleString("ja-JP");
 }
 
 /*
