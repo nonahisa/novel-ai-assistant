@@ -3,6 +3,7 @@ import { pickFolder } from "./features/pickFolder";
 import { fromUri } from "./core/paths";
 import * as path from "./core/paths";
 import { describeSyncTarget } from "./core/syncTarget";
+import { menuVersionLabel } from "./core/versionLabel";
 import {
   WorkRegistry,
   readWorkConfig,
@@ -1595,6 +1596,17 @@ export async function activate(
   });
   context.subscriptions.push(actionView);
 
+  // **開いた瞬間に版が分かるように、見出しの右へ薄く出す**（作者の依頼、
+  // 2026-09-22「開いたときにバージョンがわかるようどこか邪魔にならない
+  // ところにバージョンを入れてください」）。タイトルバーは VS Code が
+  // 拡張機能に貸さないので、2026-09-21 に一度取り下げた望みだが、
+  // `TreeView.description` なら押す物も項目も増やさずに出せる。
+  // **版は package.json から読む**——写しを置くと、上げ忘れた日に嘘をつく
+  {
+    const { version } = context.extension.packageJSON as { version?: string };
+    actionView.description = menuVersionLabel(version);
+  }
+
   // 作品づくりの流れ（1.作品登録 → … → 7.電子出版等）に沿った入口。
   // **操作の実体は詳細メニューの定義を参照するだけ**で、ここには持たない。
   // 最上段で選んだ作品を引数に載せて渡すので、押すたびに作品を訊かれない
@@ -2758,7 +2770,9 @@ export async function activate(
         // タイプを書けなくても作品は作れている。**作業を止めない**
         vscode.window.showWarningMessage(
           `作品タイプをプロットへ書けませんでした（${String(e)}）。` +
-            "「形式とジャンルを決める」からやり直せます。"
+            // 詳細メニューの名前と揃える（`actionList.ts` の label）。
+            // 画面の案内が、実際に押す項目と違う名前を言わないように
+            "「形式とジャンル」からやり直せます。"
         );
       }
     }
@@ -3018,8 +3032,8 @@ export async function activate(
           // 無いことと、切ってあることを区別して伝える。
           // 「まだ相談していない」のか「記録していない」のかで対処が違う
           const message = isChatLogEnabled()
-            ? "相談のログはまだありません。AIに相談すると作られます。"
-            : "相談のログは残さない設定になっています（novelai.chatLog.enabled）。";
+            ? "相談のログはまだない。「AIに相談」すると作られる。"
+            : "相談のログを残さない設定（novelai.chatLog.enabled）。";
           vscode.window.showInformationMessage(message);
           return;
         }
