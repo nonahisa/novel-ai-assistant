@@ -1,5 +1,5 @@
 import type { ReaderStatsPeriod, ReaderStatsRecord } from "../models/posting";
-import { latestEpisodeImport } from "./readerRates";
+import { latestEpisodeValues } from "./readerRates";
 
 /**
  * 執筆量パネルの「サイトの記録」に出すPVのグラフ（作者の依頼、2026-09-23）。
@@ -35,7 +35,10 @@ export interface ReaderChart {
 }
 
 export interface ReaderCharts {
-  /** 最新の取り込みの、話ごとのPV（横＝話数） */
+  /**
+   * 話ごとのPV（横＝話数）。**各話の、その話の最新の記録**（率と同じ拾い方。
+   * アクセス数ページは50話ずつなので、1回の取り込みが全話を持つとは限らない）
+   */
   episodes: ReaderChart | null;
   day: ReaderChart | null;
   month: ReaderChart | null;
@@ -68,15 +71,14 @@ function episodeChart(
   records: readonly ReaderStatsRecord[],
   baseEpisode: number | null
 ): ReaderChart | null {
-  const latest = latestEpisodeImport(records);
-  if (!latest) return null;
-  const points: ReaderChartPoint[] = [...latest.episodes.entries()]
-    .filter(([, record]) => record.metrics.pv !== undefined)
+  const points: ReaderChartPoint[] = [
+    ...latestEpisodeValues(records).pv.entries(),
+  ]
     .sort(([left], [right]) => left - right)
-    .map(([episode, record]) => ({
+    .map(([episode, entry]) => ({
       key: String(episode),
       label: String(episode),
-      value: record.metrics.pv as number,
+      value: entry.value,
       ...(episode === baseEpisode ? { marked: true } : {}),
     }));
   if (points.length === 0) return null;

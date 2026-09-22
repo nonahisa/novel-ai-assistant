@@ -11,10 +11,10 @@ import type { ReaderStatsRecord } from "../models/posting";
  * でした」、2026-09-23）。読みはじめた人のうち、何割がブックマーク・評価まで
  * 来たかを見る。
  *
- * **基準の話を使うのは離脱率だけ。** 基準の話は、最終更新（`updatedAt`）が
- * 読み取りの72時間以上前の話のうち、話数がいちばん大きい話である。更新した
- * 直後の話はまだ読まれ切っていないので、そこを使うと離脱率が実際より高く
- * 見える。ブックマーク率・評価率は更新日が無くても出せる。
+ * **基準の話を使うのは離脱率だけ。** 基準の話は、最終更新（`updatedAt`）から
+ * 読んだ時点までに72時間以上たっていた話のうち、話数がいちばん大きい話である。
+ * 更新した直後の話はまだ読まれ切っていないので、そこを使うと離脱率が実際より
+ * 高く見える。ブックマーク率・評価率は更新日が無くても出せる。
  *
  * ## 数を作らない
  *
@@ -22,11 +22,23 @@ import type { ReaderStatsRecord } from "../models/posting";
  * 1つでも欠ければ、その率は出さずに**欠けた理由**を返す——「0%」と出すと、
  * 読めなかったのか本当に0だったのか区別が付かない。
  *
- * ## 台帳には触らない
+ * ## 話ごとに、その話のいちばん新しい記録を拾う
  *
- * 台帳は追記だけなので、同じ話が何度も入っている。**いちばん新しい取り込み
- * 1回ぶん**（話ごとの記録のうち、読み取り日時がいちばん新しいもの）だけで
- * 計算する。古い回を混ぜると、時点の違う数どうしを割ることになる。
+ * 台帳は追記だけなので、同じ話が何度も入っている。しかも**1回の取り込みが
+ * 全話を持つとは限らない**——作品管理ページは全話ぶん（更新日つき）だが、
+ * アクセス数ページは50話ずつ（更新日なし）で、手入力なら1話だけのこともある。
+ * 「いちばん新しい取り込み1回ぶん」で計算すると、あとからアクセス数ページを
+ * 取り込んだだけで率が出なくなる（2026-09-23 の見直し）。
+ *
+ * そこで**話ごとに**拾う。
+ *
+ * - PV：その話の、PVを持つ記録のうち最新
+ * - 最終更新：その話の、`updatedAt` を持つ記録のうち最新（PVと別の回でもよい）
+ * - 3日の境目は、**その `updatedAt` と、それを持つ記録の `readAt`** で見る
+ *   ——「サイトで最後に更新されてから、読んだ時点までに何日たっていたか」
+ *
+ * 話ごとの数が複数の取り込みにまたがったときは、どの話がいつの数かを
+ * `episodeSources` で画面へ渡す（黙って混ぜない）。
  *
  * VS Code API には依存しない。
  */
@@ -40,8 +52,8 @@ export interface ReaderRateOperand {
   label: string;
   value: number;
   /**
-   * その数を読み取った日時。**話ごとの取り込みと違う回の数を使ったときだけ**
-   * 入る（作品全体の数が、話ごとと同じ回に無かったとき）。
+   * その数を読み取った日時。**話ごとのいちばん新しい取り込み
+   * （`episodeReadAt`）と違う回の数を使ったときだけ**入る。
    */
   readAt?: string;
 }
@@ -66,23 +78,100 @@ export interface ReaderRate {
 /** 基準の話（離脱率にだけ使う） */
 export interface ReaderRateBase {
   episode: number;
-  /** その話のPV。記録に無ければ undefined */
+  /** その話のPV（その話の最新の記録）。記録に無ければ undefined */
   pv?: number;
   updatedAt: string;
+  /** その `updatedAt` を持つ記録を読み取った日時（3日の境目はこれで見た） */
+  updatedReadAt: string;
+}
+
+/** 話ごとの数が、どの取り込みから来たか（新しい順） */
+export interface ReaderEpisodeSource {
+  readAt: string;
+  /** 「第1〜50話、第52話」 */
+  episodes: string;
 }
 
 export interface ReaderRates {
   /**
-   * 計算に使った話ごとの取り込みの日時。**話ごとの記録が1件も無ければ null**
-   * （そのときは画面が節ごと出さない）。
+   * 話ごとの記録のうち、いちばん新しい取り込みの日時。**話ごとの記録が
+   * 1件も無ければ null**（そのときは画面が節ごと出さない）。
    */
   episodeReadAt: string | null;
+  /**
+   * 話ごとのPVが、どの取り込みから来たか（新しい順）。1回ぶんだけなら
+   * 1件。画面はこれで「いつの数か」を言う。
+   */
+  episodeSources: ReaderEpisodeSource[];
   base: ReaderRateBase | null;
   /** 基準の話を決められなかった理由 */
   baseMissing?: string;
   dropout: ReaderRate;
   bookmark: ReaderRate;
   rating: ReaderRate;
+}
+
+/** 話ごとに拾った、その話の最新の記録 */
+export interface LatestEpisodeValues {
+  /** 話ごとの記録（粒度なし）のうち、いちばん新しい日時。無ければ undefined */
+  newest?: { readAt: string; time: number };
+  /** 話数 → その話の、PVを持つ最新の記録 */
+  pv: Map<number, { value: number; readAt: string; time: number }>;
+  /** 話数 → その話の、`updatedAt` を持つ最新の記録 */
+  updated: Map<
+    number,
+    { updatedAt: string; updatedTime: number; readAt: string; time: number }
+  >;
+}
+
+/**
+ * 話ごとに、その話のいちばん新しい記録を拾う。
+ *
+ * **同じ日時に同じ話が2件あれば、あとから足したほう**を採る（台帳は追記
+ * なので、あとにあるほうが新しい）。そのため `records` は台帳に書かれた順で
+ * 受け取り、比べるときは `>=` にする。
+ *
+ * 日時の読めない行（手で書き換えた跡）は、前後を決められないので使わない。
+ * 話数の読めない行は、どの話か分からないので使わない。
+ */
+export function latestEpisodeValues(
+  records: readonly ReaderStatsRecord[]
+): LatestEpisodeValues {
+  const result: LatestEpisodeValues = { pv: new Map(), updated: new Map() };
+  for (const record of records) {
+    if (record.scope !== "episode" || record.period !== undefined) continue;
+    const time = Date.parse(record.readAt);
+    if (Number.isNaN(time)) continue;
+    if (!result.newest || time > result.newest.time) {
+      result.newest = { readAt: record.readAt, time };
+    }
+    const episode = record.episode;
+    if (episode === undefined) continue;
+
+    const pv = record.metrics.pv;
+    if (pv !== undefined) {
+      const found = result.pv.get(episode);
+      if (!found || time >= found.time) {
+        result.pv.set(episode, { value: pv, readAt: record.readAt, time });
+      }
+    }
+
+    if (record.updatedAt !== undefined) {
+      const updatedTime = Date.parse(record.updatedAt);
+      if (!Number.isNaN(updatedTime)) {
+        const found = result.updated.get(episode);
+        if (!found || time >= found.time) {
+          result.updated.set(episode, {
+            updatedAt: record.updatedAt,
+            updatedTime,
+            readAt: record.readAt,
+            time,
+          });
+        }
+      }
+    }
+  }
+  return result;
 }
 
 /**
@@ -94,15 +183,18 @@ export interface ReaderRates {
 export function computeReaderRates(
   records: readonly ReaderStatsRecord[]
 ): ReaderRates {
-  const latest = latestEpisodeImport(records);
+  const latest = latestEpisodeValues(records);
+  const newest = latest.newest;
+  // 「話ごとのいちばん新しい取り込み」と違う回の数にだけ、日時を添える
+  const stamp = (readAt: string): { readAt?: string } =>
+    newest && Date.parse(readAt) !== newest.time ? { readAt } : {};
 
   // ---- 第1話のPV（3つの率すべての分母） ----
-  const first = latest?.episodes.get(1);
-  const firstPv: ReaderRateOperand | undefined =
-    first?.metrics.pv !== undefined
-      ? { label: "第1話のPV", value: first.metrics.pv }
-      : undefined;
-  const firstProblem = !latest
+  const first = latest.pv.get(1);
+  const firstPv: ReaderRateOperand | undefined = first
+    ? { label: "第1話のPV", value: first.value, ...stamp(first.readAt) }
+    : undefined;
+  const firstProblem = !newest
     ? "話ごとの記録がありません"
     : firstPv === undefined
       ? "第1話のPVがありません"
@@ -111,13 +203,18 @@ export function computeReaderRates(
         : undefined;
 
   // ---- 基準の話（離脱率だけが使う） ----
-  const baseResult = latest
-    ? pickBaseEpisode(latest.episodes, latest.time)
+  const baseResult = newest
+    ? pickBaseEpisode(latest)
     : { base: null, missing: "話ごとの記録がありません" };
   const base = baseResult.base;
+  const baseRecord = base ? latest.pv.get(base.episode) : undefined;
   const basePv: ReaderRateOperand | undefined =
-    base && base.pv !== undefined
-      ? { label: `第${base.episode}話のPV`, value: base.pv }
+    base && baseRecord
+      ? {
+          label: `第${base.episode}話のPV`,
+          value: baseRecord.value,
+          ...stamp(baseRecord.readAt),
+        }
       : undefined;
   const baseProblem = !base
     ? baseResult.missing
@@ -145,23 +242,26 @@ export function computeReaderRates(
           `1 − ${count(basePv.value)} ÷ ${count(firstPv.value)}`
         );
 
+  const workOperand = (
+    kind: "bookmark" | "rating"
+  ): ReaderRateOperand | undefined => {
+    const work = newestWorkMetric(
+      records,
+      kind === "bookmark" ? "bookmarks" : "reviews"
+    );
+    return work
+      ? { label: WORK_LABELS[kind], value: work.value, ...stamp(work.readAt) }
+      : undefined;
+  };
+
   return {
-    episodeReadAt: latest?.readAt ?? null,
+    episodeReadAt: newest?.readAt ?? null,
+    episodeSources: episodeSources(latest),
     base,
     ...(baseResult.missing ? { baseMissing: baseResult.missing } : {}),
     dropout,
-    bookmark: ratioRate(
-      "bookmark",
-      workMetric(records, "bookmarks", latest?.readAt),
-      firstPv,
-      firstProblem
-    ),
-    rating: ratioRate(
-      "rating",
-      workMetric(records, "reviews", latest?.readAt),
-      firstPv,
-      firstProblem
-    ),
+    bookmark: ratioRate("bookmark", workOperand("bookmark"), firstPv, firstProblem),
+    rating: ratioRate("rating", workOperand("rating"), firstPv, firstProblem),
   };
 }
 
@@ -224,18 +324,10 @@ function doneRate(
 /** ブックマーク率・評価率（作品全体の数 ÷ 第1話のPV） */
 function ratioRate(
   kind: "bookmark" | "rating",
-  work: { value: number; readAt: string; sameImport: boolean } | undefined,
+  workOperand: ReaderRateOperand | undefined,
   firstPv: ReaderRateOperand | undefined,
   firstProblem: string | undefined
 ): ReaderRate {
-  const workOperand: ReaderRateOperand | undefined = work
-    ? {
-        label: WORK_LABELS[kind],
-        value: work.value,
-        // 話ごとと違う回の数を使ったときだけ、いつの数かを添える
-        ...(work.sameImport ? {} : { readAt: work.readAt }),
-      }
-    : undefined;
   const operands = [workOperand, firstPv].filter(isOperand);
   const problem =
     workOperand === undefined ? `${WORK_LABELS[kind]}がありません` : firstProblem;
@@ -258,98 +350,49 @@ function isOperand(
 }
 
 /**
- * 話ごとの記録（粒度なし）のうち、いちばん新しい取り込み1回ぶん。
- *
- * 1回の取り込みの中に同じ話が2件あれば、**あとから足したほう**を採る
- * （台帳は追記なので、あとにあるほうが新しい）。
+ * 基準の話を選ぶ。**更新から、それを読んだ時点までに72時間以上たっていた
+ * 話のうち、話数が最大のもの。**
  */
-export function latestEpisodeImport(
-  records: readonly ReaderStatsRecord[]
-):
-  | {
-      readAt: string;
-      time: number;
-      episodes: Map<number, ReaderStatsRecord>;
-    }
-  | undefined {
-  let newest: { readAt: string; time: number } | undefined;
-  for (const record of records) {
-    if (!isEpisodeSnapshot(record)) continue;
-    const time = Date.parse(record.readAt);
-    // 日時の読めない行（手で書き換えた跡）は、前後を決められないので使わない
-    if (Number.isNaN(time)) continue;
-    if (!newest || time > newest.time) {
-      newest = { readAt: record.readAt, time };
-    }
-  }
-  if (!newest) return undefined;
-
-  const episodes = new Map<number, ReaderStatsRecord>();
-  for (const record of records) {
-    if (!isEpisodeSnapshot(record)) continue;
-    if (Date.parse(record.readAt) !== newest.time) continue;
-    // 話数の読めない行は、どの話か分からないので率にもグラフにも使えない
-    if (record.episode === undefined) continue;
-    episodes.set(record.episode, record);
-  }
-  return { ...newest, episodes };
-}
-
-function isEpisodeSnapshot(record: ReaderStatsRecord): boolean {
-  return record.scope === "episode" && record.period === undefined;
-}
-
-/**
- * 基準の話を選ぶ。**更新から72時間以上たった話のうち、話数が最大のもの。**
- */
-function pickBaseEpisode(
-  episodes: ReadonlyMap<number, ReaderStatsRecord>,
-  readTime: number
-): { base: ReaderRateBase | null; missing?: string } {
+function pickBaseEpisode(latest: LatestEpisodeValues): {
+  base: ReaderRateBase | null;
+  missing?: string;
+} {
   const settleMs = READER_RATE_SETTLE_HOURS * 60 * 60 * 1000;
-  let sawUpdatedAt = false;
-  let best: { episode: number; record: ReaderStatsRecord } | undefined;
-  for (const [episode, record] of episodes) {
-    if (record.updatedAt === undefined) continue;
-    const updated = Date.parse(record.updatedAt);
-    if (Number.isNaN(updated)) continue;
-    sawUpdatedAt = true;
-    if (readTime - updated < settleMs) continue;
-    if (!best || episode > best.episode) best = { episode, record };
+  let best: number | undefined;
+  for (const [episode, entry] of latest.updated) {
+    if (entry.time - entry.updatedTime < settleMs) continue;
+    if (best === undefined || episode > best) best = episode;
   }
-  if (!best || best.record.updatedAt === undefined) {
+  if (best === undefined) {
     return {
       base: null,
-      missing: sawUpdatedAt
-        ? `更新から${READER_RATE_SETTLE_HOURS / 24}日以上たった話がありません`
-        : "更新日の分かる話がありません",
+      missing:
+        latest.updated.size > 0
+          ? `更新から${READER_RATE_SETTLE_HOURS / 24}日以上たった話がありません`
+          : "更新日の分かる話がありません",
     };
   }
-  const pv = best.record.metrics.pv;
+  const updated = latest.updated.get(best);
+  const pv = latest.pv.get(best);
+  if (!updated) return { base: null, missing: "更新日の分かる話がありません" };
   return {
     base: {
-      episode: best.episode,
-      ...(pv === undefined ? {} : { pv }),
-      updatedAt: best.record.updatedAt,
+      episode: best,
+      ...(pv === undefined ? {} : { pv: pv.value }),
+      updatedAt: updated.updatedAt,
+      updatedReadAt: updated.readAt,
     },
   };
 }
 
 /**
- * 作品全体の数（その時点の値）。
- *
- * **話ごとと同じ回の取り込みにあれば、それを使う**（同じ時点の数どうしを
- * 割るため）。無ければ、その欄を持つ作品全体の記録のうち**いちばん新しい
- * もの**を使い、いつの数かを画面へ添える。
+ * 作品全体の数（その時点の値）。**その欄を持つ記録のうち最新。**
+ * 同じ日時に2件あれば、あとから足したほう。
  */
-function workMetric(
+function newestWorkMetric(
   records: readonly ReaderStatsRecord[],
-  key: "bookmarks" | "reviews",
-  episodeReadAt: string | undefined
-): { value: number; readAt: string; sameImport: boolean } | undefined {
-  const episodeTime =
-    episodeReadAt === undefined ? Number.NaN : Date.parse(episodeReadAt);
-  let same: { value: number; readAt: string } | undefined;
+  key: "bookmarks" | "reviews"
+): { value: number; readAt: string } | undefined {
   let newest: { value: number; readAt: string; time: number } | undefined;
   for (const record of records) {
     if (record.scope !== "work" || record.period !== undefined) continue;
@@ -357,16 +400,59 @@ function workMetric(
     if (value === undefined) continue;
     const time = Date.parse(record.readAt);
     if (Number.isNaN(time)) continue;
-    // 同じ日時に2件あれば、あとから足したほう
-    if (time === episodeTime) same = { value, readAt: record.readAt };
     if (!newest || time >= newest.time) {
       newest = { value, readAt: record.readAt, time };
     }
   }
-  if (same) return { ...same, sameImport: true };
-  return newest
-    ? { value: newest.value, readAt: newest.readAt, sameImport: false }
-    : undefined;
+  return newest ? { value: newest.value, readAt: newest.readAt } : undefined;
+}
+
+/**
+ * 話ごとのPVが、どの取り込みから来たかをまとめる（新しい順）。
+ *
+ * 取り込みごとに、その回から拾った話数を「第1〜50話、第52話」の形に畳む。
+ */
+function episodeSources(latest: LatestEpisodeValues): ReaderEpisodeSource[] {
+  const byTime = new Map<number, { readAt: string; episodes: number[] }>();
+  for (const [episode, entry] of latest.pv) {
+    const found = byTime.get(entry.time);
+    if (found) {
+      found.episodes.push(episode);
+    } else {
+      byTime.set(entry.time, { readAt: entry.readAt, episodes: [episode] });
+    }
+  }
+  return [...byTime.entries()]
+    .sort(([left], [right]) => right - left)
+    .map(([, entry]) => ({
+      readAt: entry.readAt,
+      episodes: episodeRanges(entry.episodes),
+    }));
+}
+
+/** [1,2,3,5] → 「第1〜3話、第5話」 */
+export function episodeRanges(episodes: readonly number[]): string {
+  const sorted = [...episodes].sort((left, right) => left - right);
+  const parts: string[] = [];
+  let start = sorted[0];
+  let previous = sorted[0];
+  const flush = () => {
+    if (start === undefined) return;
+    parts.push(
+      start === previous ? `第${start}話` : `第${start}〜${previous}話`
+    );
+  };
+  for (const episode of sorted.slice(1)) {
+    if (episode === previous + 1) {
+      previous = episode;
+      continue;
+    }
+    flush();
+    start = episode;
+    previous = episode;
+  }
+  flush();
+  return parts.join("、");
 }
 
 /** 3桁区切り（サイトの画面と同じ読み方） */

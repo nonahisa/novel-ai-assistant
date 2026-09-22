@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   computeReaderRates,
+  episodeRanges,
   formatPercent,
   type ReaderRates,
 } from "../../src/core/readerRates";
@@ -208,7 +209,7 @@ describe("材料が欠けたら、0%にせず理由を返す", () => {
 });
 
 describe("同じ話が何度も入っているとき", () => {
-  test("いちばん新しい取り込みで計算する", () => {
+  test("各話の、その話のいちばん新しい記録で計算する", () => {
     const older = "2026-09-20T03:00:00.000Z";
     const rates = computeReaderRates([
       // 新しい回を先に足してあっても、日時で選ぶ
@@ -248,15 +249,17 @@ describe("同じ話が何度も入っているとき", () => {
 });
 
 describe("グラフの点", () => {
-  test("各話：最新の取り込みを話数順に、基準の話に印", () => {
+  test("各話：各話の最新の記録を話数順に、基準の話に印", () => {
     const records = [
       episode(3, 30, { readAt: "2026-09-20T03:00:00.000Z" }),
       ...textbook(),
     ];
     const charts = buildReaderCharts(records, 219);
+    // 3話は前の回にしか無いが、その話の最新の記録として並ぶ
     expect(charts.episodes?.points.map((point) => point.key)).toEqual([
-      "1", "2", "219", "220",
+      "1", "2", "3", "219", "220",
     ]);
+    expect(charts.episodes?.points[0].value).toBe(23299);
     expect(
       charts.episodes?.points.filter((point) => point.marked).map((p) => p.key)
     ).toEqual(["219"]);
@@ -422,6 +425,7 @@ describe("画面：率", () => {
       "escapeHtml",
       "formatCount",
       "formatWhen",
+      "readerEpisodeSourcesText",
     ]);
 
   test("率と、実際の数を入れた式と、言葉の式が出る", () => {
@@ -455,5 +459,144 @@ describe("画面：率", () => {
     expect(record.readerCharts.episodes?.points).toHaveLength(4);
     // 台帳は1件も捨てていない
     expect(ledger.readerStats).toHaveLength(5);
+  });
+});
+
+/**
+ * **あとから別の取り込みが入っても、率が消えない**（2026-09-23 の見直し）。
+ *
+ * 作品管理ページは全話ぶん（更新日つき）、アクセス数ページは50話ずつ
+ * （更新日なし）。以前の「いちばん新しい取り込み1回ぶん」では、アクセス数
+ * ページをあとから取り込んだだけで基準の話が消えていた。
+ */
+describe("話ごとに、その話の最新の記録を拾う", () => {
+  const later = new Date(Date.parse(readAt) + HOUR).toISOString();
+
+  /** アクセス数ページの1ページ目（1〜50話、更新日なし）。数は同じ時点のもの */
+  function accessPage(at: string): ReaderStatsRecord[] {
+    const pages: ReaderStatsRecord[] = [];
+    for (let number = 1; number <= 50; number++) {
+      const pv = number === 1 ? 23299 : number === 2 ? 15000 : 1000 + number;
+      pages.push(episode(number, pv, { readAt: at }));
+    }
+    return pages;
+  }
+
+  test("アクセス数ページをあとから取り込んでも、作品管理で決まる率は変わらない", () => {
+    const before = computeReaderRates(textbook());
+    const after = computeReaderRates([...textbook(), ...accessPage(later)]);
+
+    expect(after.base?.episode).toBe(219);
+    expect(after.dropout.expression).toBe(before.dropout.expression);
+    expect(after.bookmark.expression).toBe(before.bookmark.expression);
+    expect(after.rating.expression).toBe(before.rating.expression);
+    expect(after.dropout.percent).toBe("94.0%");
+    expect(after.bookmark.percent).toBe("12.1%");
+    expect(after.rating.percent).toBe("2.6%");
+  });
+
+  test("話ごとの数が複数の取り込みにまたがれば、どの話がいつの数かを持つ", () => {
+    const rates = computeReaderRates([...textbook(), ...accessPage(later)]);
+    expect(rates.episodeSources).toEqual([
+      { readAt: later, episodes: "第1〜50話" },
+      { readAt, episodes: "第219〜220話" },
+    ]);
+    // 第219話のPVは前の回の数なので、いつの数かを添える
+    expect(rates.dropout.operands[0]).toEqual({
+      label: "第219話のPV",
+      value: 1398,
+      readAt,
+    });
+
+    const html = panelFunction<(rates: ReaderRates | null) => string>(
+      "renderReaderRates",
+      ["escapeHtml", "formatCount", "formatWhen", "readerEpisodeSourcesText"]
+    )(rates);
+    expect(html).toContain("最新の取り込み（");
+    expect(html).toContain("第1〜50話");
+    expect(html).toContain("それ以前（");
+    expect(html).toContain("第219〜220話");
+  });
+
+  test("1回ぶんだけなら、その日時だけを言う", () => {
+    const rates = computeReaderRates(textbook());
+    expect(rates.episodeSources).toHaveLength(1);
+  });
+
+  test("最終更新とPVが別の回でも、基準の話が決まる", () => {
+    const rates = computeReaderRates([
+      // 作品管理（古い回）：更新日だけ・PVなし
+      episode(1, undefined, { updatedAt: "2021-01-10T12:00:00+09:00" }),
+      episode(9, undefined, { updatedAt: "2024-07-31T08:13:00+09:00" }),
+      // アクセス数（新しい回）：PVだけ
+      episode(1, 500, { readAt: later }),
+      episode(9, 100, { readAt: later }),
+    ]);
+    expect(rates.base?.episode).toBe(9);
+    expect(rates.base?.updatedReadAt).toBe(readAt);
+    expect(rates.dropout.expression).toBe("1 − 100 ÷ 500 = 80.0%");
+  });
+
+  test("3日の境目は、更新日を読んだ時点で見る（あとの取り込みの日時では見ない）", () => {
+    const updated = new Date(Date.parse(readAt) - 24 * HOUR).toISOString();
+    const fiveDaysLater = new Date(
+      Date.parse(readAt) + 5 * 24 * HOUR
+    ).toISOString();
+    const rates = computeReaderRates([
+      episode(1, 100, { updatedAt: "2021-01-10T12:00:00+09:00" }),
+      // 更新の1日後に読んだ——このときはまだ読まれ切っていない
+      episode(5, 40, { updatedAt: updated }),
+      // 5日後にアクセス数ページで読み直した（更新日は持たない）
+      episode(5, 60, { readAt: fiveDaysLater }),
+    ]);
+    expect(rates.base?.episode).toBe(1);
+  });
+
+  test("話数の範囲の言い方", () => {
+    expect(episodeRanges([5, 1, 2, 3])).toBe("第1〜3話、第5話");
+    expect(episodeRanges([7])).toBe("第7話");
+  });
+});
+
+/**
+ * **「今日」の欄は、読み取った日の記録だけ**（2026-09-23）。貼り込み係 0.5.0 は
+ * 日ごとのPVを30日ぶん送ってくるので、全部を並べると今日の欄が30日ぶんになる。
+ */
+describe("今日の欄", () => {
+  // 正午（UTC）にしておけば、どの時間帯でも手元の日付は 9/23 になる
+  const noon = "2026-09-23T12:00:00.000Z";
+
+  function withDays(days: string[]): ReturnType<typeof buildPostingSiteRecords> {
+    let ledger = emptyPostingLedger();
+    ledger = withReaderStats(ledger, work({ pv: 1053339 }, { readAt: noon }));
+    days.forEach((key, index) => {
+      ledger = withReaderStats(
+        ledger,
+        work(
+          { pv: index + 1 },
+          { readAt: noon, period: "day", periodKey: key }
+        )
+      );
+    });
+    return buildPostingSiteRecords(ledger);
+  }
+
+  test("30日ぶん入っていても、今日の1日ぶんだけを出す", () => {
+    const days: string[] = [];
+    for (let day = 25; day <= 31; day++) days.push(`2026-08-${day}`);
+    for (let day = 1; day <= 23; day++) {
+      days.push(`2026-09-${String(day).padStart(2, "0")}`);
+    }
+    const [record] = withDays(days);
+    // 9/23 は30件目
+    expect(record.readerLatest?.day).toBe("PV 30");
+    expect(record.readerWork?.rows[0].day).toBe("PV 30");
+    // ほかの日はグラフの材料として残っている
+    expect(record.readerCharts.day?.points).toHaveLength(30);
+  });
+
+  test("今日の記録が無い回は、いちばん新しい日を1件だけ日付つきで出す", () => {
+    const [record] = withDays(["2026-09-20", "2026-09-22", "2026-09-21"]);
+    expect(record.readerLatest?.day).toBe("PV 2（9/22）");
   });
 });

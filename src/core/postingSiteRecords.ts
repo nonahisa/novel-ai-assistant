@@ -332,7 +332,7 @@ export function groupReaderStatsRows(
 
 function toGroupedRow(records: ReaderStatsRecord[]): GroupedReaderStatsRow {
   const head = records[0];
-  const days: string[] = [];
+  const days: ReaderStatsRecord[] = [];
   const months: string[] = [];
   const others: string[] = [];
   const notes: string[] = [];
@@ -344,7 +344,8 @@ function toGroupedRow(records: ReaderStatsRecord[]): GroupedReaderStatsRow {
     const metrics = formatReaderStatsMetrics(record.metrics);
     switch (record.period) {
       case "day":
-        days.push(metrics + periodKeyHint(record));
+        // 1つに絞るのはあとで（`todayRecord`）。ここでは集めるだけ
+        days.push(record);
         break;
       case "month":
         months.push(metrics + periodKeyHint(record));
@@ -368,7 +369,7 @@ function toGroupedRow(records: ReaderStatsRecord[]): GroupedReaderStatsRow {
     isEpisode: head.scope === "episode",
     snapshot: snapshot ? formatReaderStatsMetrics(snapshot) : "",
     snapshotValues: snapshot ? readerStatsValues(snapshot) : [],
-    day: days.join("／"),
+    day: dayText(days),
     month: months.join("／"),
     other: others.join("／"),
     source: READER_SOURCE_LABELS[head.source] ?? "手入力",
@@ -425,6 +426,47 @@ export function readerStatsColumns(
     note: rows.some((row) => row.note !== ""),
     onlySource: sources.size === 1 ? [...sources][0] : null,
   };
+}
+
+/**
+ * 「今日」の欄に出す1件（2026-09-23）。
+ *
+ * **読み取った日の記録だけを出す。** 貼り込み係 0.5.0 は作品管理ページの
+ * グラフから**日ごとのPVを30日ぶん**送ってくる。全部を並べると、今日の欄に
+ * 30日ぶんが1行で並ぶ——ほかの日は「日ごとのPV」のグラフの材料であって、
+ * 今日の欄の中身ではない（台帳には全部残っている）。
+ *
+ * **読み取った日の記録が無い回は、いちばん新しい日を1件だけ、日付を添えて
+ * 出す**（「PV 5（9/21）」）。作者が前の日の数を手で打った回を、表から
+ * 消さないため——その回に入っているのがその1件だけなら、消すと行が空になる。
+ */
+function dayText(records: readonly ReaderStatsRecord[]): string {
+  const picked = todayRecord(records);
+  return picked
+    ? formatReaderStatsMetrics(picked.metrics) + periodKeyHint(picked)
+    : "";
+}
+
+function todayRecord(
+  records: readonly ReaderStatsRecord[]
+): ReaderStatsRecord | undefined {
+  let today: ReaderStatsRecord | undefined;
+  let newest: ReaderStatsRecord | undefined;
+  for (const record of records) {
+    // 同じ日が2件あれば、あとにあるほう（台帳は追記なので新しい）
+    if (record.periodKey !== undefined) {
+      if (record.periodKey === localDateKey(record.readAt)) today = record;
+      if (
+        newest?.periodKey === undefined ||
+        record.periodKey >= newest.periodKey
+      ) {
+        newest = record;
+      }
+    } else if (!newest) {
+      newest = record;
+    }
+  }
+  return today ?? newest;
 }
 
 /**

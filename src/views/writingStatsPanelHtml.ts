@@ -657,20 +657,40 @@ function renderReaderRates(rates) {
 
   const foot = [];
   if (rates.base) {
+    // 3日の境目は「更新から、読んだ時点まで」で見ている。読んだ時点も言う
     foot.push('離脱率の基準は第' + formatCount(rates.base.episode) + '話（' +
-      escapeHtml(formatWhen(rates.base.updatedAt)) +
-      ' 更新。更新から3日以上たった話のうち、いちばん新しい話）。');
+      escapeHtml(formatWhen(rates.base.updatedAt)) + ' 更新。' +
+      escapeHtml(formatWhen(rates.base.updatedReadAt)) +
+      ' に読んだ時点で更新から3日以上たっていた話のうち、いちばん新しい話）。');
   } else if (rates.baseMissing) {
     foot.push('離脱率の基準の話を決められません：' +
       escapeHtml(rates.baseMissing) + '。');
   }
-  if (rates.episodeReadAt) {
-    foot.push('話ごとの数は ' + escapeHtml(formatWhen(rates.episodeReadAt)) +
-      ' の取り込み。');
-  }
+  const sourcesText = readerEpisodeSourcesText(rates.episodeSources || []);
+  if (sourcesText) foot.push(sourcesText);
   return '<div class="site-sub">率</div>' +
     '<table class="reader-rates"><tbody>' + rows.join('') + '</tbody></table>' +
     (foot.length > 0 ? '<div class="site-foot">' + foot.join('') + '</div>' : '');
+}
+
+/**
+ * 話ごとの数が、いつの取り込みのものか（2026-09-23）。
+ *
+ * 話ごとの数は**各話の最新の記録**から拾うので、アクセス数ページ（50話ずつ）を
+ * あとから取り込むと、話によって取り込みの回が違う。**黙って混ぜない**——
+ * 1回ぶんならその日時だけ、複数回にまたがるなら「最新の取り込み（第1〜50話）、
+ * それ以前（第51〜219話）」のように、どの話がいつの数かを言う。
+ */
+function readerEpisodeSourcesText(sources) {
+  if (sources.length === 0) return '';
+  if (sources.length === 1) {
+    return '話ごとの数は ' + escapeHtml(formatWhen(sources[0].readAt)) + ' の取り込み。';
+  }
+  const parts = sources.map((source, index) =>
+    (index === 0 ? '最新の取り込み' : 'それ以前') + '（' +
+    escapeHtml(formatWhen(source.readAt)) + '。' + escapeHtml(source.episodes) + '）'
+  );
+  return '話ごとの数は、' + parts.join('、') + ' のものです。';
 }
 
 /**
@@ -684,7 +704,7 @@ function renderReaderCharts(charts) {
   const blocks = [];
   if (charts.episodes) {
     const marked = charts.episodes.points.some((point) => point.marked);
-    blocks.push(readerChartBlock('話ごとのPV（最新の取り込み。横は話数）',
+    blocks.push(readerChartBlock('話ごとのPV（各話の最新の記録。横は話数）',
       readerBarChart(charts.episodes.points),
       marked ? '色の違う棒が、離脱率の基準の話。' : ''));
   }
