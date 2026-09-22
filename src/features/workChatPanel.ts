@@ -608,6 +608,32 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    *
    * すでに案内している最中も誘わない（札が二重になる）。
    */
+  /**
+   * 質問に当てる使い方の説明と、当たった手順書きの鍵。
+   *
+   * **1か所で組む**（2026-09-23）。相談を送る道と、AIに接続できずに
+   * 送らなかった道の両方が手順の鍵を要る。別々に組むと、話題の判定の
+   * 材料（直前の作者の発言）が片方だけ変わる日に、案内の誘いが出る・
+   * 出ないが道ごとに食い違う。
+   *
+   * 話題は追い質問（「それはどこ？」）だと直前の発言が持っているので、
+   * 作者の最後の発言も選ぶ材料にする。**AIは呼ばない**（字面の照合だけ）。
+   */
+  private featureGuideFor(question: string) {
+    const lastAuthorTurn = [...this.history]
+      .reverse()
+      .find((turn) => turn.role === "author");
+    return buildFeatureGuideForQuestion({
+      question,
+      recentAuthorTurns: lastAuthorTurn ? [lastAuthorTurn.text] : [],
+    });
+  }
+
+  /** 当たった手順書きの鍵だけ（AIに接続できなかった道で使う） */
+  private procedureKeyFor(question: string): string | undefined {
+    return this.featureGuideFor(question).procedureKey;
+  }
+
   private tourOffer(
     key: string | undefined
   ): { tour: { key: string; title: string; steps: number } } | undefined {
@@ -1291,9 +1317,16 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     ) {
       // **黙って戻らない。** 送ったのに何も起きない画面がいちばん困る。
       // 失敗と同じ経路（赤い文字）で伝えると、入力の待ち状態も戻る
+      //
+      // **画面の案内の誘いも添える**（2026-09-23）。手順の当たりは質問の
+      // 字面の照合で決まり、AIに依らない。**AIが止まっている機械でこそ、
+      // 画面で指す案内が要る**のに、ここは手順の判定より前で抜けていたので
+      // 一度も出なかった（失敗の道に誘いを足した 0.75.12 の積み残し）
       this.postError(
         "AIに接続できないため、相談を送りませんでした。" +
-          "AIを起動してから、もう一度お試しください。"
+          "AIを起動してから、もう一度お試しください。",
+        undefined,
+        this.tourOffer(this.procedureKeyFor(question))
       );
       return;
     }
@@ -1349,13 +1382,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // 全文を毎回渡していたが、機能を足すたびに伸びて6,169字になっていた。
       // 話題は追い質問（「それはどこ？」）だと直前の発言が持っているので、
       // 作者の最後の発言も選ぶ材料にする
-      const lastAuthorTurn = [...this.history]
-        .reverse()
-        .find((turn) => turn.role === "author");
-      const guide = buildFeatureGuideForQuestion({
-        question,
-        recentAuthorTurns: lastAuthorTurn ? [lastAuthorTurn.text] : [],
-      });
+      const guide = this.featureGuideFor(question);
       procedureKey = guide.procedureKey;
       // 何を渡したかを残す。答えがおかしいときに、説明が届いていたのかを
       // 後から確かめられないと切り分けられない

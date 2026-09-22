@@ -33,8 +33,11 @@ vi.mock("../../src/core/logger", () => ({
   useLogFile: () => undefined,
 }));
 
+/** AIに届くか。**接続できない道**の試験だけ false にする（既定は届く） */
+const connectivity = { reachable: true };
+
 vi.mock("../../src/features/aiConnectivity", () => ({
-  confirmProviderReachable: async () => true,
+  confirmProviderReachable: async () => connectivity.reachable,
   confirmPaidUsage: async () => true,
 }));
 
@@ -393,6 +396,41 @@ describe("失敗の回にも、画面の案内を誘う", () => {
     const error = h.posted.find((m) => m.type === "error");
     expect(error, "失敗の案内が出ていない").toBeTruthy();
     expect(error?.tour).toBeUndefined();
+  });
+
+  /*
+    **AIに接続できず、相談を送らなかった回**（2026-09-23）。ここは手順の判定より
+    前で抜けていたので、誘いが一度も出なかった。**AIが止まっている機械でこそ、
+    画面で指す案内が要る。** 見逃しと誤検出の両方を見る。
+  */
+  test("AIに接続できなかった回にも、手順が当たれば誘いが出る", async () => {
+    connectivity.reachable = false;
+    try {
+      const h = harness("ollama", "gemma4:e2b");
+
+      await ask(h, "誤字脱字を直したい");
+
+      const error = h.posted.find((m) => m.type === "error");
+      expect(error?.message).toContain("AIに接続できないため");
+      expect(error?.tour?.key, "接続できない回に誘いが出ていない").toBe("polish");
+    } finally {
+      connectivity.reachable = true;
+    }
+  });
+
+  test("AIに接続できなかった回でも、手順が当たらなければ誘いは出さない", async () => {
+    connectivity.reachable = false;
+    try {
+      const h = harness();
+
+      await ask(h, "第12話の視点はどうですか");
+
+      const error = h.posted.find((m) => m.type === "error");
+      expect(error?.message).toContain("AIに接続できないため");
+      expect(error?.tour).toBeUndefined();
+    } finally {
+      connectivity.reachable = true;
+    }
   });
 
   test("画面は、失敗の赤字の下にも誘いを描く", async () => {
