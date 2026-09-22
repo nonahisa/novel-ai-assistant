@@ -108,7 +108,11 @@ import {
   primeSavedFindings,
 } from "./features/primeFindings";
 // 古い指摘を片づける（設計書6.96.4）。**findings.jsonl を書き直す唯一の道**
-import { pruneFindings } from "./features/pruneFindings";
+import {
+  chooseFindingsTarget,
+  pruneFindings,
+  pruneFindingsAcrossWorks,
+} from "./features/pruneFindings";
 import { renameWork } from "./features/renameWork";
 import { exportImeDictionary } from "./features/exportImeDictionary";
 import { exportPdf } from "./features/exportPdf";
@@ -3908,9 +3912,25 @@ export async function activate(
       久しぶりに開いたときに、**作者が見る前に消える**のを防ぐため。
     */
     registerCommand("novelai.pruneFindings", async (node?: WorkNode) => {
-      const work = await resolveWork(node, registry);
-      if (!work) return;
-      await pruneFindings(work);
+      // 作品の右クリックからは、その作品だけ
+      if (node && node.type === "work") return pruneFindings(node.work);
+      const works = registry.list();
+      if (works.length === 0) {
+        vscode.window.showInformationMessage("作品が登録されていません。");
+        return;
+      }
+      if (works.length === 1) return pruneFindings(works[0]);
+      /*
+        **メニューから押したときは、必ず訊く**（作者の依頼、2026-09-23
+        「全作品を選択できるようにしてください」）。`resolveWork` は画面で
+        指している作品があれば訊かずにそれを使うので、そのままでは
+        「すべての作品」を選ぶ機会が来ない。消す操作なので、黙って
+        1作品に決めないほうが安全でもある。
+      */
+      const target = await chooseFindingsTarget(works);
+      if (!target) return;
+      if (target === "all") return pruneFindingsAcrossWorks(works);
+      return pruneFindings(target);
     }),
     registerCommand("novelai.nextSceneMemo", async (node?: WorkNode) => {
       const work = await resolveWork(node, registry);
