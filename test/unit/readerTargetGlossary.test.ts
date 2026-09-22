@@ -348,7 +348,9 @@ describe("読者タイプの区分を、作者にも見せる", () => {
   });
 
   test("答えの下に、畳んだ枠で出る", () => {
-    expect(face).toContain("appendReaderGlossary(turn, message.readerGlossary)");
+    // 答えの下に付くものは `appendAnswerExtras` にまとまっている
+    // （後から開いた画面の履歴からも同じ関数を通す。2026-09-23）
+    expect(face).toContain("appendReaderGlossary(turn, extras.readerGlossary)");
 
     const add = face.slice(face.indexOf("function appendReaderGlossary("));
     const body = add.slice(0, 1200);

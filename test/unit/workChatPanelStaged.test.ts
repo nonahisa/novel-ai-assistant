@@ -78,7 +78,10 @@ describe("作業の提案は既定で畳む", () => {
 
   test("選択肢（作者の次の一言）は畳まない", () => {
     // 押すだけで話が進む道。ここまで隠すと会話が止まる
-    expect(HTML).toContain("appendOptions(turn, message.options || []);");
+    // 答えの下に付くものは、届いた答えと後から開いた画面の履歴で
+    // 同じ関数を通る（2026-09-23）。選択肢はその関数の中で畳まずに出す
+    expect(HTML).toContain("appendOptions(turn, extras.options || []);");
+    expect(HTML).toContain("appendAnswerExtras(turn, message,");
   });
 
   test("答えの中で、畳んだ枠を直に出していない", () => {

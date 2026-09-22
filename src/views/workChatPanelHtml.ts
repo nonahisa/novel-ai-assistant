@@ -189,11 +189,21 @@ textarea:focus { outline: 1px solid var(--vscode-focusBorder); }
   /* 横の細いパネルではボタンが収まらない。折り返して全部見せる */
   flex-wrap: wrap;
 }
+/*
+ * 番号の案内は**ボタンの行の外**に、自分の行として置く（ノートPCの実機、
+ * 2026-09-23）。以前はボタンの行の中で「残りの幅を取る」（flex: 1）に
+ * していたため、細いパネルでボタンが幅を使い切ると残りが0になり、
+ * 案内が1〜2文字ずつ縦に折られて、ボタンの間へ柱のように割り込んだ。
+ */
 #composer .hint {
-  flex: 1;
+  margin-top: 4px;
   font-size: 11px;
   color: var(--vscode-descriptionForeground);
 }
+/* 選択肢の無い答えのあとに、空の行を1つ空けない */
+#composer .hint:empty { display: none; }
+/* 「最初から」「送る」を右へ寄せる詰め物。以前は案内がこの役を兼ねていた */
+#composer .row .spacer { flex: 1; }
 /*
  * 聞き方の例（作者の要望、2026-09-22）。
  *
@@ -421,6 +431,7 @@ ${large ? TOOLBAR_HTML : ""}
        （読者像が決まっていれば札が1つ減る）ので、入れ物だけ置く -->
   <div id="examples"></div>
   <textarea id="input" placeholder="聞きたいことを書いてください（Ctrl+Enterで送信）"></textarea>
+  <div class="hint" id="hint"></div>
   <div class="row">
     ${
       large
@@ -428,7 +439,7 @@ ${large ? TOOLBAR_HTML : ""}
         : `<button class="action secondary" id="to-main">メインに表示</button>`
     }
     <button class="action secondary" id="apply-settings" disabled>相談を資料へ反映</button>
-    <span class="hint" id="hint"></span>
+    <span class="spacer"></span>
     <button class="action secondary" id="clear">最初から</button>
     <button class="action" id="send">送る</button>
   </div>
@@ -1040,6 +1051,59 @@ function markEdit(id, message, ok) {
   box.appendChild(line);
 }
 
+/**
+ * 答えの下に付くもの（読者タイプの一覧・光らせる札・案内の誘い・選択肢）を
+ * 並べる。
+ *
+ * **届いた答え（answer）と、後から開いた画面へ届く履歴（history）の両方が
+ * ここを通る**（ノートPCの実機、2026-09-23）。並べ方を2か所に書くと、
+ * 片方にだけ足したものが移った先で消える——実際に、履歴の側には選択肢を
+ * 出す処理が無かった。
+ *
+ * \`between\` は読者タイプの一覧のあとに挟むもの。届いた答えでだけ、
+ * 作業の提案をここへ入れる（履歴では作り直さない。上の history を参照）。
+ */
+function appendAnswerExtras(turn, extras, between) {
+  // 読者の話をした回だけ、AIへ添えたのと同じ区分の一覧を作者にも見せる
+  appendReaderGlossary(turn, extras.readerGlossary);
+  if (between) between();
+  // 答えで名指しされた項目の「光らせる」（0.75.6）。
+  // **最初の1件はもう光っている**ので、これは押し直すための札である
+  appendSpotlight(turn, extras.spotlight);
+  // 案内の誘い（設計書6.104）。**選択肢より先に置く**——
+  // 「どの順でやるか」は、言い直しの候補より先に読みたい
+  if (extras.tour) appendTourOffer(turn, extras.tour);
+  appendOptions(turn, extras.options || []);
+}
+
+/**
+ * 失敗の赤字と、その下の札を出す。届いた失敗（error）と、後から開いた
+ * 画面へ届く履歴の両方から呼ぶ（\`appendAnswerExtras\` と同じ理由）。
+ */
+function showError(failure) {
+  setBusy(false);
+  thinkingEl.textContent = '考えています…';
+  const turn = appendTurn('エラー', failure.message, 'error');
+  // **直し方を押せる形で出す**（タイムアウトの秒数など）。
+  // 送り返すのは鍵だけで、何をするかは拡張機能側が覚えている
+  appendErrorActions(turn, failure.actions || []);
+  // 画面の案内の誘い（2026-09-23）。手順の当たりはAIの成否に依らない。
+  // **AIが遅い機械ほど要る**ので、失敗の回にも直し方の札と並べて出す
+  if (failure.tour) appendTourOffer(turn, failure.tour);
+}
+
+/**
+ * 別の画面で送られた問いを積み、答えを待つ状態にする。もう片方で
+ * 送られたとき（asked）と、考えている途中に開かれたとき（history）の両方。
+ */
+function showAsked(question) {
+  appendTurn('あなた', question, 'author');
+  document.querySelectorAll('.options').forEach((el) => el.remove());
+  currentOptions = [];
+  updateHint();
+  setBusy(true);
+}
+
 function updateHint() {
   hintEl.textContent =
     currentOptions.length > 0
@@ -1298,26 +1362,45 @@ window.addEventListener('message', (event) => {
     // 後から開いた画面にも、これまでの会話を積む。
     // **押されるのを待っているボタンは作り直さない。** 提案は出た側の画面に
     // 残っており、同じものが2つ並ぶと、どちらを押したのか分からなくなる
+    let lastAnswerTurn = null;
     (message.turns || []).forEach((turn) => {
       if (turn.role === 'author') {
         appendTurn('あなた', turn.text, 'author');
+        lastAnswerTurn = null;
       } else {
-        appendTurn('AI', turn.text, undefined, turn.html);
+        lastAnswerTurn = appendTurn('AI', turn.text, undefined, turn.html);
         // 後から開いた画面でも「相談を資料へ反映」を押せるようにする
         exchanges++;
       }
     });
+    /*
+      **最後の答えの下にあったもの**（選択肢・案内の誘い・光らせる札・
+      読者タイプの一覧）も付け直す（ノートPCの実機、2026-09-23）。
+      これが無く、移った先では答えの本文だけが残っていた。どれも
+      何度押しても害が無いか、押した時点で問いとして送り直すもので、
+      押されるのを待つ提案（書き込み・起動・読み直し）とは違う。
+    */
+    if (lastAnswerTurn && message.lastAnswer) {
+      appendAnswerExtras(lastAnswerTurn, message.lastAnswer);
+    }
+    // 失敗した問いは履歴に積まれない。問いごと出さないと、何を聞いて
+    // 失敗したのかが移った先で分からない
+    if (message.failure) {
+      if (message.failure.question) {
+        appendTurn('あなた', message.failure.question, 'author');
+      }
+      showError(message.failure);
+    }
+    // 考えている途中に開かれた。**問いと「考えています…」を出す**——
+    // 初期画面のままだと、送った問いが消えて止まったように見える
+    if (message.pending) showAsked(message.pending.question);
     updateApplyState();
     scrollToBottom();
     return;
   }
   if (message.type === 'asked') {
     // もう片方の画面から質問が送られた。こちらにも積んで、待ち状態にする
-    appendTurn('あなた', message.question, 'author');
-    document.querySelectorAll('.options').forEach((el) => el.remove());
-    currentOptions = [];
-    updateHint();
-    setBusy(true);
+    showAsked(message.question);
     scrollToBottom();
     return;
   }
@@ -1371,16 +1454,8 @@ window.addEventListener('message', (event) => {
     const turn = appendTurn('AI', message.reply, undefined, message.html);
     // 参照（そこを見せて）はそのまま出し、作業の提案は畳んで置く
     if (message.locate) appendLocate(turn, message.locate);
-    // 読者の話をした回だけ、AIへ添えたのと同じ区分の一覧を作者にも見せる
-    appendReaderGlossary(turn, message.readerGlossary);
-    appendStagedActions(turn, message);
-    // 答えで名指しされた項目の「光らせる」（0.75.6）。
-    // **最初の1件はもう光っている**ので、これは押し直すための札である
-    appendSpotlight(turn, message.spotlight);
-    // 案内の誘い（設計書6.104）。**選択肢より先に置く**——
-    // 「どの順でやるか」は、言い直しの候補より先に読みたい
-    if (message.tour) appendTourOffer(turn, message.tour);
-    appendOptions(turn, message.options || []);
+    // 作業の提案は、読者タイプの一覧のあと・光らせる札の前に挟む
+    appendAnswerExtras(turn, message, () => appendStagedActions(turn, message));
     scrollToBottom();
     return;
   }
@@ -1499,15 +1574,7 @@ window.addEventListener('message', (event) => {
     return;
   }
   if (message.type === 'error') {
-    setBusy(false);
-    thinkingEl.textContent = '考えています…';
-    const turn = appendTurn('エラー', message.message, 'error');
-    // **直し方を押せる形で出す**（タイムアウトの秒数など）。
-    // 送り返すのは鍵だけで、何をするかは拡張機能側が覚えている
-    appendErrorActions(turn, message.actions || []);
-    // 画面の案内の誘い（2026-09-23）。手順の当たりはAIの成否に依らない。
-    // **AIが遅い機械ほど要る**ので、失敗の回にも直し方の札と並べて出す
-    if (message.tour) appendTourOffer(turn, message.tour);
+    showError(message);
     scrollToBottom();
   }
 });
