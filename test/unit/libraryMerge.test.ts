@@ -87,7 +87,9 @@ describe("まとめる先を決める", () => {
       "C:/小説/いじめられっ子",
       none
     );
-    expect(plans[0].blocked).toBeDefined();
+    // `toBeDefined()` だけでは、隣の分岐（「すでに書庫の中にある」）の
+    // 理由文を取り違えて返しても通ってしまう。理由の文面まで見る
+    expect(plans[0].blocked).toContain("作品そのもの");
   });
 
   /** 自分の中へ自分を写すと、際限なく入れ子になる */

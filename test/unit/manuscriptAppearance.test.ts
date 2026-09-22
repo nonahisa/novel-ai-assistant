@@ -159,7 +159,15 @@ describe("画面と拡張機能の結び", () => {
   });
 
   it("画面は、決まった見た目を受け取って当てる", () => {
-    expect(html).toContain("message.initialAppearance");
+    // もとは「message.initialAppearance」の1行だけを見ていた。この字は
+    // 見張りの条件と、中の3つの参照（vertical/size/compose を取り出す行）の
+    // あわせて4か所にあるので、見張りの条件（一度だけ当てるための印
+    // appearanceApplied を && で繋いでいる箇所）を消して「覚えていた値を
+    // 条件抜きで押し流す」形にしても、中の参照が残るので通ってしまう形
+    // だった。見張りの条件そのものを見る。
+    expect(html).toContain(
+      "if (message.initialAppearance && !appearanceApplied) {"
+    );
   });
 
   it("画面は、見た目の決め方を写し持たない", () => {

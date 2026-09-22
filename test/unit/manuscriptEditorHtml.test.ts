@@ -16,6 +16,20 @@ import {
 
 const html = buildManuscriptEditorHtml("NONCE123", "vscode-resource:");
 
+/**
+ * `<style>` の中身だけを、CSSコメントを取り除いてから返す。
+ *
+ * 「◯◯という指定が入っている」という検査を HTML 全体に対して行うと、
+ * その字がコメント（説明文の中）に残っているだけでも通ってしまう。
+ * **コメントを先に落とす**のが肝で、あとでコメント内の言及を足しても
+ * 検査には影響しない。
+ */
+function styleWithoutComments(): string {
+  const match = html.match(/<style nonce="NONCE123">([\s\S]*?)<\/style>/);
+  expect(match, "styleが見つからない").toBeTruthy();
+  return match![1].replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
 describe("原稿エディタのHTML", () => {
   it("スクリプトとスタイルにnonceが入っている", () => {
     expect(html).toContain('<style nonce="NONCE123">');
@@ -57,7 +71,12 @@ describe("原稿エディタのHTML", () => {
   /** 英数字が1文字ずつ縦に積まれないようにする */
   /** 縦書きの日本語では、傍線（下線）は行の右に引く。変換中の線も同じ */
   it("縦書きの傍線は右に引く", () => {
-    expect(html).toContain("text-underline-position: right");
+    // もとは HTML 全体から text-underline-position: right の1行を探していた。
+    // この字は本物のCSS（355行）のほかに、CSSコメント（561行。「だから
+    // text-underline-position: right では動かせない」という説明文）にも
+    // 入っている。本物を消してもコメントが残るので通ってしまう形だった。
+    // style の中だけを切り出し、コメントを取り除いてから確かめる。
+    expect(styleWithoutComments()).toContain("text-underline-position: right");
   });
 
   it("文字の向きは mixed にしてある", () => {
