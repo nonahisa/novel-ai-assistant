@@ -5,6 +5,7 @@ import {
   emptyStreamedChat,
   takeCompleteLines,
 } from "../../ai/ollamaStream";
+import { timeoutDispatcher } from "../../ai/fetchTimeouts";
 import { McpToolError, describeError } from "./shared";
 
 /**
@@ -32,6 +33,16 @@ import { McpToolError, describeError } from "./shared";
  */
 
 export const DEFAULT_ENDPOINT = "http://localhost:11434";
+
+/**
+ * この道具が Ollama の応答を待つ上限（30分）。
+ *
+ * この道具は自分で打ち切る仕組みを持たない（止めるのは呼ぶ側）。
+ * それでも Node の通信部品は既定300秒で勝手に諦めるので、そこだけは
+ * **製品で作者が選びうる長さ（台帳で1800秒の実例がある）より短くしない。**
+ * 無期限にしないのは、落ちた Ollama を永久に待たないため。
+ */
+export const MCP_OLLAMA_WAIT_MS = 30 * 60 * 1000;
 
 /** 手元とみなす宛先。ここ以外は `allowRemote` が要る */
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
@@ -123,7 +134,17 @@ export async function ollamaGenerate(
   const startedAt = Date.now();
   let response: Response;
   try {
+    /*
+      **Node の待ち時間（既定300秒）をこちらへ揃える**（設計書6.63。2026-09-23）。
+
+      下の注記のとおり流す形にしたが、それで避けられるのは「生成の間」だけで
+      ある。Ollama は**本文を読み終えて1字目を出すまで**応答の頭を返さないので、
+      CPUだけの機械で長い本文を読むと、流していても300秒で切られる。
+    */
+    const dispatcher = await timeoutDispatcher(MCP_OLLAMA_WAIT_MS);
     response = await fetch(`${endpoint}/api/chat`, {
+      // 型には無い（Node独自の拡張）。ブラウザでは undefined になり無視される
+      ...(dispatcher ? { dispatcher } : {}),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -159,7 +180,7 @@ export async function ollamaGenerate(
           { role: "user", content: input.userPrompt },
         ],
       }),
-    });
+    } as RequestInit);
   } catch (error) {
     throw new McpToolError(
       `Ollama へ繋がりませんでした（${endpoint}）: ${describeError(error)}`

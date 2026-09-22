@@ -3,6 +3,7 @@ import {
   EmbeddingError,
   type EmbeddingProvider,
 } from "./embeddingProvider";
+import { timeoutDispatcher } from "./fetchTimeouts";
 
 /**
  * Ollamaの `/api/embed` を使った埋め込み。
@@ -115,12 +116,18 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      // **Node の通信部品にも、こちらの待ち時間を渡す**（設計書6.63）。
+      // 埋め込みも、全部を計算し終えてから応答の頭を返す。非力な機械で
+      // 大きな束を投げると、渡さない限り既定300秒で切られる
+      const dispatcher = await timeoutDispatcher(timeoutMs);
       const response = await fetch(`${this.endpoint}${path}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
         signal: controller.signal,
-      });
+        // 型には無い（Node独自の拡張）。ブラウザでは undefined になり無視される
+        ...(dispatcher ? { dispatcher } : {}),
+      } as RequestInit);
       if (!response.ok) {
         const detail = await response.text().catch(() => "");
         if (response.status === 404) {

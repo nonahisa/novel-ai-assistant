@@ -12,6 +12,7 @@ import { countByteFallback, decodeByteFallback } from "../core/byteFallback";
 import { readExpertCounts, type ModelExperts } from "../core/modelExperts";
 import { contextSizeForPrompt } from "../core/chunker";
 import { describeFetchFailure, isFetchTimeout } from "./httpClient";
+import { timeoutDispatcher } from "./fetchTimeouts";
 import {
   applyStreamLine,
   emptyStreamedChat,
@@ -638,12 +639,24 @@ export class OllamaProvider implements AIProvider {
 
     const started = Date.now();
     try {
+      /*
+        **流す道でも Node の待ち時間を揃える**（設計書6.63。2026-09-23）。
+
+        「流せばヘッダーは即座に届く」は、生成が始まってからの話である。
+        Ollama は**本文を読み終えて1字目を出すまで**応答の頭を返さないので、
+        CPUで長い本文を読むと、ここでも既定300秒の上限に当たる。
+        `bodyTimeout` も同じ値になるので、断片の間があいたときの上限も
+        こちらの待ち時間（`bump` と同じ長さ）に揃う。
+      */
+      const dispatcher = await timeoutDispatcher(timeoutMs);
       const response = await fetch(`${this.endpoint}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...body, stream: true }),
         signal: controller.signal,
-      });
+        // 型には無い（Node独自の拡張）。ブラウザでは undefined になり無視される
+        ...(dispatcher ? { dispatcher } : {}),
+      } as RequestInit);
       if (!response.ok || !response.body) {
         throw new AIError(
           `Ollamaがエラーを返しました (HTTP ${response.status})。`,
@@ -745,12 +758,26 @@ export class OllamaProvider implements AIProvider {
     }
 
     try {
+      /*
+        **Node の通信部品にも、こちらの待ち時間を渡す**（設計書6.63。2026-09-23）。
+
+        まとめて受け取る道では、**応答の頭は生成が全部終わってから届く。**
+        渡さないと undici の「頭を待つ上限」（既定300秒）が先に効き、
+        台帳や設定で待ち時間を延ばしても約300秒で `UND_ERR_HEADERS_TIMEOUT`
+        になる（ノートPCの実機、0.75.9。`httpClient.ts` にだけ入っていた）。
+
+        `/api/tags`・`/api/show` もこの口を通るが、渡しても害は無い
+        （こちらの `AbortController` が同じ長さで先に切るので、動きは変わらない）。
+      */
+      const dispatcher = await timeoutDispatcher(timeoutMs);
       const response = await fetch(`${this.endpoint}${path}`, {
         method: body === undefined ? "GET" : "POST",
         headers: { "Content-Type": "application/json" },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: controller.signal,
-      });
+        // 型には無い（Node独自の拡張）。ブラウザでは undefined になり無視される
+        ...(dispatcher ? { dispatcher } : {}),
+      } as RequestInit);
 
       if (!response.ok) {
         const detail = await response.text().catch(() => "");

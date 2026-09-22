@@ -1333,6 +1333,14 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       ? await this.findRelated(context.work, question)
       : { reference: [], searchTerms: [], materials: [] };
     const started = Date.now();
+    /*
+      当たった手順書きの鍵。**失敗の道でも使うので try の外に置く**（2026-09-23）。
+
+      手順の当たりは質問の字面の照合で決まり、AIの成否に依らない。
+      **AIが遅い機械ほど画面の案内が要る**のに、誘いが成功の道にしか
+      無かったため、ノートPC（CPUだけの Ollama）では一度も出なかった。
+    */
+    let procedureKey: string | undefined;
 
     try {
       logStep(`相談: v${WORK_CHAT_VERSION} / ${resolved.model}`);
@@ -1348,6 +1356,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         question,
         recentAuthorTurns: lastAuthorTurn ? [lastAuthorTurn.text] : [],
       });
+      procedureKey = guide.procedureKey;
       // 何を渡したかを残す。答えがおかしいときに、説明が届いていたのかを
       // 後から確かめられないと切り分けられない
       // 話題（創作か操作か）も残す。目次を落とした回に「そんな機能はない」と
@@ -1529,7 +1538,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
             : answer.source === "raw"
               ? "AIの返事を読み取れませんでした（形式が崩れています）。" +
                 truncatedOutputAdvice(outputLimit)
-              : "返事が空でした。もう一度お試しください。"
+              : "返事が空でした。もう一度お試しください。",
+          undefined,
+          // 答えが無くても、手順の当たりは生きている（下の catch と同じ理由）
+          this.tourOffer(procedureKey)
         );
         return;
       }
@@ -1687,7 +1699,20 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         error instanceof AIError && error.kind === "timeout"
           ? this.timeoutAction(resolved.provider, resolved.model)
           : undefined;
-      this.postError(message, actions ? [actions] : undefined);
+      /*
+        **画面の案内の誘いも、失敗の赤字の下に出す**（2026-09-23。実装ルール5
+        「作者が次に取れる操作を1つ示す」）。
+
+        手順の当たりは質問の字面の照合で決まる——AIが答えられなかった
+        ことと関係が無い。**AIが遅い機械ほど、画面で指してもらうほうが
+        早い**のに、誘いが成功の道にしか無かった（ノートPC、0.75.9）。
+        手順が当たっていない回には出ない（`tourOffer` が undefined を返す）。
+      */
+      this.postError(
+        message,
+        actions ? [actions] : undefined,
+        this.tourOffer(procedureKey)
+      );
     }
   }
 
@@ -1702,12 +1727,15 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    */
   private postError(
     message: string,
-    actions?: Array<{ label: string; command: string }>
+    actions?: Array<{ label: string; command: string }>,
+    /** 「画面で案内してもらう」の誘い（`tourOffer` の戻り値をそのまま渡す） */
+    offer?: { tour: { key: string; title: string; steps: number } }
   ): void {
     this.postAll({
       type: "error",
       message,
       ...(actions && actions.length > 0 ? { actions } : {}),
+      ...(offer ?? {}),
     });
   }
 

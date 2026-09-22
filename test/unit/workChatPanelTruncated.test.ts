@@ -59,6 +59,7 @@ interface Posted {
   message?: string;
   reply?: string;
   actions?: Array<{ label: string; command: string }>;
+  tour?: { key: string; title: string; steps: number };
 }
 
 function fakeView(posted: Posted[]) {
@@ -334,5 +335,71 @@ describe("タイムアウトは、その場で直せる", () => {
         }
       ).timeoutSeconds
     ).toBe(400);
+  });
+});
+
+/*
+  **失敗の回にも「画面で案内してもらう」を誘う**（2026-09-23。ノートPCの実機）。
+
+  手順の当たりは質問の字面の照合で決まり、AIの成否に依らない。
+  CPUだけの Ollama で相談が時間切れになると、誘いが成功の道にしか
+  無かったため一度も出なかった——**AIが遅い機械ほど、画面の案内が要る。**
+  見逃し（当たっているのに出ない）と誤検出（当たっていないのに出る）の
+  両方を見る。
+
+  質問は「誤字脱字を直したい」にしてある。「誤字を直したい」は創作の
+  相談と読まれ、手順書きそのものが渡らない（`chatTopic.ts` の判定）。
+*/
+describe("失敗の回にも、画面の案内を誘う", () => {
+  test("時間切れの赤字に、直し方の札と並べて誘いが出る", async () => {
+    response.error = new AIError("応答がありませんでした。", "timeout");
+    const h = harness("ollama", "gemma4:e2b");
+
+    await ask(h, "誤字脱字を直したい");
+
+    const error = h.posted.find((m) => m.type === "error");
+    expect(error?.tour?.key, "誘いが出ていない").toBe("polish");
+    expect(error?.tour?.title).toBe("推敲して仕上げる");
+    // **並べて出す。** 誘いのせいで直し方の札が消えてはいけない
+    expect(error?.actions?.[0].label).toBe("タイムアウトを360秒にする");
+  });
+
+  test("時間切れ以外の失敗でも出る（当たりはAIの失敗の種類に依らない）", async () => {
+    response.error = new AIError("APIキーが違います。", "authentication_failed");
+    const h = harness();
+
+    await ask(h, "誤字脱字を直したい");
+
+    expect(h.posted.find((m) => m.type === "error")?.tour?.key).toBe("polish");
+  });
+
+  test("返事が空だった回にも出る", async () => {
+    response.text = JSON.stringify({ reply: "", options: [] });
+    const h = harness();
+
+    await ask(h, "誤字脱字を直したい");
+
+    const error = h.posted.find((m) => m.type === "error");
+    expect(error, "空の返事の案内が出ていない").toBeTruthy();
+    expect(error?.tour?.key).toBe("polish");
+  });
+
+  test("手順が当たっていない相談の失敗には出さない", async () => {
+    response.error = new AIError("応答がありませんでした。", "timeout");
+    const h = harness();
+
+    await ask(h, "第12話の視点はどうですか");
+
+    const error = h.posted.find((m) => m.type === "error");
+    expect(error, "失敗の案内が出ていない").toBeTruthy();
+    expect(error?.tour).toBeUndefined();
+  });
+
+  test("画面は、失敗の赤字の下にも誘いを描く", async () => {
+    // 送っても描かなければ作者には見えない。**描く側の配線**を見る
+    const fs = await import("node:fs");
+    const html = fs.readFileSync("src/views/workChatPanelHtml.ts", "utf8");
+    const errorBranch = html.slice(html.indexOf("if (message.type === 'error')"));
+    expect(errorBranch).toContain("if (message.tour) appendTourOffer(turn, message.tour);");
   });
 });

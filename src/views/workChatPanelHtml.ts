@@ -1343,6 +1343,9 @@ window.addEventListener('message', (event) => {
     // **直し方を押せる形で出す**（タイムアウトの秒数など）。
     // 送り返すのは鍵だけで、何をするかは拡張機能側が覚えている
     appendErrorActions(turn, message.actions || []);
+    // 画面の案内の誘い（2026-09-23）。手順の当たりはAIの成否に依らない。
+    // **AIが遅い機械ほど要る**ので、失敗の回にも直し方の札と並べて出す
+    if (message.tour) appendTourOffer(turn, message.tour);
     scrollToBottom();
   }
 });
