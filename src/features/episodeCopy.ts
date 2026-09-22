@@ -112,11 +112,13 @@ export async function copyBodyForPosting(
   await showPostingCopyNotice({
     conversion,
     sourcePath: episode.filePath,
-    otherwise: () =>
-      void vscode.window.showInformationMessage(
-        `${what}（${conversion.text.length.toLocaleString("ja-JP")}字）を` +
-          `${target.label}の書き方でコピーしました。原稿はそのままです。`
-      ),
+    site: target.site,
+    work,
+    summary:
+      `${what}（${conversion.text.length.toLocaleString("ja-JP")}字）を` +
+      `${target.label}の書き方でコピーしました。原稿はそのままです。`,
+    // この入口は以前から通知で出していた（出し方を変えない）
+    withoutButtons: "popup",
   });
 }
 

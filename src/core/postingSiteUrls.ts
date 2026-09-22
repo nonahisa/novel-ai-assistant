@@ -123,6 +123,55 @@ export function readerStatsPageUrl(
 }
 
 /**
+ * 「投稿サイト用に変換してコピー」のあとに開く、そのサイトの投稿ページ
+ * （作者の依頼、2026-09-23）。
+ *
+ * ## 決め方
+ *
+ * 1. **台帳の投稿ページのURL（`sites[].newEpisodeUrl`）があれば、それ。**
+ *    作者が「投稿サイトの設定」で自分の画面から貼った値で、いちばん確か
+ * 2. 無ければ、**形が実機で確かめられたサイトだけ**作品IDから組み立てる。
+ *    いまはカクヨムだけ（`/my/works/{作品ID}/episodes/new`。作者の台帳に
+ *    実際に入った値と同じ形。`deriveSiteProfile` が読んでいるのもこの形）
+ * 3. どちらも無ければ `undefined`（呼ぶ側はボタンを出さない）
+ *
+ * ## 組み立てないサイト
+ *
+ * **推測のURLを開かせない。** 違うページが開くと、作者はそこが投稿欄だと
+ * 思って**別の作品へ貼る**恐れがある。空振りより悪い。
+ *
+ * - **なろう**：新しい話を書く画面は、Nコードではなく**サイト内部の番号**で
+ *   作品を指すはずで、Nコードからは組み立てられない
+ * - **アルファポリス**：作品IDが2部構成か1つの数字かで、資料と貼り込み係の
+ *   当てている形が食い違っている（`deriveSiteProfile` の説明を参照）
+ * - **note**：作品の単位が無い（記事とマガジン）
+ *
+ * **開くだけ**で、書き込みも読み取りもしない（6.68.1）。
+ *
+ * @param site 貼り付け先のサイト
+ * @param newEpisodeUrl 台帳の投稿ページのURL（登録していなければ渡さない）
+ * @param profile 台帳にあるそのサイトの作品情報
+ */
+export function postingPageUrl(
+  site: PostingSiteId,
+  newEpisodeUrl: string | null | undefined,
+  profile: PostingSiteProfile | undefined
+): string | undefined {
+  // **開く直前にも形を確かめる。** 台帳は作者が手で直せるファイルで、
+  // `javascript:` や別のサイトのURLが入っていることがありうる。
+  // 読み込みでも弾いているが、ここを通さずに届く道を作らない
+  const stored = siteUrl(site, newEpisodeUrl);
+  if (stored) return (newEpisodeUrl ?? "").trim();
+
+  if (site !== "kakuyomu") return undefined;
+  const workId = (profile?.workId ?? "").trim();
+  // 作品IDの欄は自由入力なので、数字だけのときに限る（`readerStatsPageUrl` と同じ用心）
+  return /^\d+$/.test(workId)
+    ? `https://kakuyomu.jp/my/works/${workId}/episodes/new`
+    : undefined;
+}
+
+/**
  * そのサイトのURLとして読めるかを確かめて返す。
  *
  * 確かめるのは**プロトコルとドメインだけ**（6.68.1）。台帳は作者が手で

@@ -1,6 +1,7 @@
 import { PostingStore } from "../core/postingStore";
 import { logFailure, useLogFile } from "../core/logger";
-import type { PostingSiteId } from "../models/posting";
+import { postingPageUrl } from "../core/postingSiteUrls";
+import { siteProfile, type PostingSiteId } from "../models/posting";
 import type { WorkEntry } from "../models/types";
 
 /**
@@ -34,5 +35,41 @@ export async function registeredPostingSites(
       error,
     });
     return [];
+  }
+}
+
+/**
+ * コピーのあとに開く、そのサイトの投稿ページ（作者の依頼、2026-09-23）。
+ *
+ * 決め方は `core/postingSiteUrls.ts` の `postingPageUrl`。ここは台帳を
+ * 読んで渡すだけにする——**3つの入口が同じものを通る**のは
+ * `registeredPostingSites` と同じ理由。
+ *
+ * @returns 開けるURL。作品・サイトが分からない、台帳が読めない、
+ *   組み立てられないときは undefined（ボタンを出さない）
+ */
+export async function postingPageUrlFor(
+  work: WorkEntry | undefined,
+  /** 記法だけで決まる書き出し先（別記法・HTML）はサイトを持たない */
+  site: PostingSiteId | undefined
+): Promise<string | undefined> {
+  if (!work || !site) return undefined;
+
+  try {
+    const ledger = await new PostingStore(work).load();
+    return postingPageUrl(
+      site,
+      ledger.sites.find((entry) => entry.site === site)?.newEpisodeUrl,
+      siteProfile(ledger, site)
+    );
+  } catch (error) {
+    // **読めなくてもコピーの知らせは出す。** 無いのはボタン1つだけで、
+    // 台帳が壊れているときに知らせまで消えると、コピーできたかが分からない
+    useLogFile(work.folderPath);
+    logFailure("投稿サイト用のコピー：投稿ページのURLの読み込み", {
+      work: work.title,
+      error,
+    });
+    return undefined;
   }
 }

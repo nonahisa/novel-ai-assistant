@@ -59,11 +59,6 @@ const CASES: ReadonlyArray<{
     fragment: "解消を確認しました",
   },
   {
-    label: "投稿サイト用に変換してコピーした",
-    file: "features/ruby.ts",
-    fragment: "クリップボードへ入れました",
-  },
-  {
     label: "LM Studioのコンテキスト長を決めた",
     file: "features/setupLmStudio.ts",
     fragment: "コンテキスト長を ",
@@ -85,6 +80,35 @@ describe("その場限りの完了の行き先", () => {
       ).toBe(false);
     });
   }
+
+  /**
+   * 「投稿サイト用に変換してコピーした」は、**出し方を知らせの関数が決める**
+   * （2026-09-23）。投稿ページを開くボタンが付くときは、ボタンを押せる
+   * 通知で出す（規則3：次の操作を伴う）。**ボタンが無ければステータスバー**
+   * のまま——ここが崩れると、読み捨ててよい報告が通知センターへ積み上がる。
+   */
+  test("投稿サイト用に変換してコピーした → ボタンが無ければステータスバー", () => {
+    // 文言は入口（features/ruby.ts）に残す（**文言は変えない**決まり）
+    const ruby = read("features/ruby.ts");
+    expect(ruby).toContain("クリップボードへ入れました");
+    expect(
+      infoCalls(ruby).some((call) => call.includes("クリップボードへ入れました"))
+    ).toBe(false);
+
+    const notice = read("features/postingCopyNotice.ts");
+    expect(
+      doneCalls(notice).some((call) => call.trim() === "input.summary")
+    ).toBe(true);
+    // 通知で出すのは、ボタンを添えるときと、以前から通知だった入口だけ
+    const shown = notice.match(/showInformationMessage\(input\.summary[^)]*\)/g);
+    expect(shown?.sort()).toEqual([
+      "showInformationMessage(input.summary)",
+      "showInformationMessage(input.summary, openPage)",
+    ]);
+    expect(notice).toMatch(
+      /if \(input\.withoutButtons === "popup"\) \{\s*void vscode\.window\.showInformationMessage\(input\.summary\);/
+    );
+  });
 });
 
 /**

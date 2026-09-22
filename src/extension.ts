@@ -5542,7 +5542,9 @@ export async function activate(
         await registeredPostingSites(work),
         // 合本の1話をコピーしたときの見出しに使う（「第3話」「3本目」）。
         // 作品が引けないことはある——そのときは既定の数え方になるだけ
-        work ? await readWorkFormat(work) : undefined
+        work ? await readWorkFormat(work) : undefined,
+        // コピーのあとに投稿ページを開くボタンのため（台帳のURL）
+        work
       );
       // **原稿が開いていない回と、貼り付け先を閉じた回を数えない**
       // （設計書6.104）。どちらもクリップボードには何も入っていない

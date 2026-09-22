@@ -25,11 +25,11 @@ import {
 // 合本の見出しの作り方は1か所に置く（写しを作らない）
 import { collectedEpisodeLabel } from "./pickCollectedEpisode";
 import type { WorkFormatKey } from "../core/workFormat";
+import type { WorkEntry } from "../models/types";
 // 貼り付け先ごとの分岐は、入口ではなく変換の側に置く（設計書6.84）
 import { convertForPosting } from "../core/postingConvert";
 import { showPostingCopyNotice } from "./postingCopyNotice";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
-import { notifyDone } from "../views/notify";
 // 「本文が見つからない」ときの文言は1か所に置く（`extension.ts` と共用）
 import { warnManuscriptNotOpen } from "./manuscriptTab";
 
@@ -301,7 +301,12 @@ export async function copyForPosting(
    */
   registered: readonly PostingSiteId[] = [],
   /** 見出しの数え方（「第◯話」「◯本目」）。引けなければ渡さない */
-  format?: WorkFormatKey
+  format?: WorkFormatKey,
+  /**
+   * どの作品か。**コピーのあとに投稿ページを開くボタンのため**に使う
+   * （台帳の投稿ページのURL）。引けなければ渡さない——ボタンが出ないだけ
+   */
+  work?: WorkEntry
 ): Promise<boolean> {
   // **読むだけなので .txt も通す**（0.64.6）。原稿には触らない
   const editor = await requireManuscript();
@@ -360,11 +365,11 @@ export async function copyForPosting(
   await showPostingCopyNotice({
     conversion,
     sourcePath: fromUri(editor.document.uri),
-    otherwise: () =>
-      notifyDone(
-        `${scope}を${target.label}の書き方に変換して、` +
-          "クリップボードへ入れました。原稿はそのままです。"
-      ),
+    site: target.site,
+    work,
+    summary:
+      `${scope}を${target.label}の書き方に変換して、` +
+      "クリップボードへ入れました。原稿はそのままです。",
   });
   return true;
 }

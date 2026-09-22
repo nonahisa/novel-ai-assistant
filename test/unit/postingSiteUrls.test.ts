@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   deriveSiteProfile,
+  postingPageUrl,
   readerStatsPageUrl,
 } from "../../src/core/postingSiteUrls";
 
@@ -130,5 +131,95 @@ describe("管理画面のURL", () => {
       readerStatsPageUrl("alphapolis", { workId: "123456/7890123" })
     ).toBeUndefined();
     expect(readerStatsPageUrl("note", { workId: "1" })).toBeUndefined();
+  });
+});
+
+/**
+ * コピーのあとに開く投稿ページ（作者の依頼、2026-09-23）。
+ *
+ * **推測のURLを開かせない。** 違うページが開くと、作者はそこが投稿欄だと
+ * 思って別の作品へ貼る恐れがある。組み立てるのは、形を実機で確かめた
+ * カクヨムだけ。
+ */
+describe("コピーのあとに開く投稿ページ", () => {
+  test("台帳の投稿ページのURLが、作品IDからの組み立てに勝つ", () => {
+    // 作者が自分の画面から貼った値がいちばん確か
+    expect(
+      postingPageUrl("kakuyomu", 実機.newEpisodeUrl, { workId: "999" })
+    ).toBe(実機.newEpisodeUrl);
+  });
+
+  test("前後の空白は落として返す", () => {
+    expect(
+      postingPageUrl("kakuyomu", `  ${実機.newEpisodeUrl}\n`, undefined)
+    ).toBe(実機.newEpisodeUrl);
+  });
+
+  test("カクヨム：投稿ページが無ければ、作品IDから組み立てる", () => {
+    expect(
+      postingPageUrl("kakuyomu", undefined, { workId: 実機.workId })
+    ).toBe(実機.newEpisodeUrl);
+  });
+
+  test("カクヨム：作品IDが数字だけでなければ組み立てない", () => {
+    // 作品IDの欄は自由入力。作品名やURLの断片が入っていることがある
+    expect(
+      postingPageUrl("kakuyomu", undefined, { workId: "氷の街" })
+    ).toBeUndefined();
+    expect(
+      postingPageUrl("kakuyomu", undefined, { workId: 実機.workUrl })
+    ).toBeUndefined();
+  });
+
+  test("なろう：Nコードがあっても組み立てない（新しい話の画面は内部の番号で指す）", () => {
+    expect(
+      postingPageUrl("narou", undefined, { workId: "n1234ab" })
+    ).toBeUndefined();
+  });
+
+  test("アルファポリス：作品IDがあっても組み立てない（IDの形が確かでない）", () => {
+    expect(
+      postingPageUrl("alphapolis", undefined, { workId: "123456789" })
+    ).toBeUndefined();
+    expect(
+      postingPageUrl("alphapolis", undefined, { workId: "000000/0000" })
+    ).toBeUndefined();
+  });
+
+  test("note：組み立てない（作品の単位が無い）", () => {
+    expect(postingPageUrl("note", undefined, { workId: "123" })).toBeUndefined();
+  });
+
+  test("組み立てないサイトでも、台帳にあればそれを開く", () => {
+    const narou = "https://syosetu.com/usernovelmanage/top/";
+    expect(postingPageUrl("narou", narou, undefined)).toBe(narou);
+    const alphapolis = "https://www.alphapolis.co.jp/novel/manage/000000/0000";
+    expect(postingPageUrl("alphapolis", alphapolis, undefined)).toBe(alphapolis);
+  });
+
+  test("何も無ければ undefined（ボタンを出さない）", () => {
+    for (const site of ["narou", "kakuyomu", "alphapolis", "note"] as const) {
+      expect(postingPageUrl(site, undefined, undefined)).toBeUndefined();
+      expect(postingPageUrl(site, "", {})).toBeUndefined();
+    }
+  });
+
+  /**
+   * **台帳は作者が手で直せる。** 開く直前にも確かめる——別のサイトや
+   * `javascript:` のURLを、そのまま既定のブラウザへ渡さない。
+   */
+  test("別のサイトのURLや http(s) でないものは開かない", () => {
+    expect(
+      postingPageUrl("narou", "https://example.com/syosetu.com/", undefined)
+    ).toBeUndefined();
+    expect(
+      postingPageUrl("narou", "javascript:alert(1)", undefined)
+    ).toBeUndefined();
+    // カクヨムは台帳の値を捨てて、作品IDからの組み立てへ戻る
+    expect(
+      postingPageUrl("kakuyomu", "https://evil.example/kakuyomu.jp", {
+        workId: 実機.workId,
+      })
+    ).toBe(実機.newEpisodeUrl);
   });
 });

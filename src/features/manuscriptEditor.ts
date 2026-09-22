@@ -2675,11 +2675,11 @@ export class ManuscriptEditorProvider
     await showPostingCopyNotice({
       conversion,
       sourcePath: fromUri(document.uri),
-      otherwise: () =>
-        notifyDone(
-          `${scope}を${target.label}の書き方に変換して、` +
-            "クリップボードへ入れました。原稿はそのままです。"
-        ),
+      site: target.site,
+      work,
+      summary:
+        `${scope}を${target.label}の書き方に変換して、` +
+        "クリップボードへ入れました。原稿はそのままです。",
     });
   }
 }

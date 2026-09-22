@@ -223,6 +223,14 @@ describe("どの入口も、同じ変換を通る", () => {
       // 入口ごとに文面を書くと、「画像は入りません」を言い忘れる口ができる
       expect(bodyOf(file, signature)).toContain("showPostingCopyNotice(");
     });
+
+    it(`${name}：投稿ページを開くボタンのため、サイトと作品を渡す`, () => {
+      // 渡し忘れた入口だけボタンが出ない、という食い違いを作らない
+      // （作者の依頼、2026-09-23）
+      const body = bodyOf(file, signature);
+      expect(body).toContain("site: target.site,");
+      expect(body).toMatch(/\n\s*work,\n/);
+    });
   }
 });
 
