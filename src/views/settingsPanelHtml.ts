@@ -864,7 +864,7 @@ button.danger:hover {
   /**
    * 作品情報の中身。**読むだけにする。**
    *
-   * 紹介文は「作品紹介文を生成」、あらすじは「各話あらすじを生成」が
+   * 紹介文は「作品紹介文」、あらすじは「各話あらすじ」が
    * 真実の在り処を持っている。ここで書き換えられると、
    * どちらが正しいのか分からなくなる。
    */
@@ -990,7 +990,7 @@ button.danger:hover {
     if (item.id === "episodes") {
       const episodes = workInfo.episodes || [];
       if (episodes.length === 0) {
-        body.appendChild(missingNote("各話あらすじを生成"));
+        body.appendChild(missingNote("各話あらすじ"));
       } else {
         for (const episode of episodes) {
           const heading = document.createElement("h3");
@@ -1005,7 +1005,7 @@ button.danger:hover {
       const value = item.id === "blurb" ? workInfo.blurb : workInfo.catchphrase;
       if (!value) {
         body.appendChild(
-          missingNote(item.id === "blurb" ? "作品紹介文を生成" : "キャッチコピー案を作る")
+          missingNote(item.id === "blurb" ? "作品紹介文" : "キャッチコピー案")
         );
       } else {
         const text = document.createElement("p");

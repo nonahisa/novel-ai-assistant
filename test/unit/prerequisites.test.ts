@@ -179,11 +179,11 @@ describe("足りないときだけ、道を出す", () => {
 
     const labels = seen.labels();
     expect(labels).toHaveLength(2);
-    expect(labels[0]).toContain("プロットをつくる");
+    expect(labels[0]).toContain("プロットを作る");
     expect(labels[1]).toContain("取りやめる");
     // 見出しは事実だけ。選べる道が1つしか無い場面で問いを強めない
     expect(seen.title()).toBe(
-      "「プロットからの逸脱を検知」には「プロット」が要ります"
+      "「プロットからの逸脱」には「プロット」が要ります"
     );
   });
 

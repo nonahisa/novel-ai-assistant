@@ -851,7 +851,7 @@ function keepWritingAdvice(style: WriterStyle): TutorialAdvice {
   const steps: TutorialStep[] = [
     {
       command: "novelai.resumeWriting",
-      label: "執筆を再開する（前回どこまで書いたか）",
+      label: "執筆を再開（前回どこまで書いたか）",
       why: "前の話の終わりと、次に書くことの候補をまとめて出します",
     },
   ];
@@ -881,7 +881,7 @@ function keepWritingAdvice(style: WriterStyle): TutorialAdvice {
   }
   return {
     advice:
-      "まず「執筆を再開する」から見てください。" +
+      "まず「執筆を再開」から見てください。" +
       "前の話がどこで終わったか、次に書くことの候補、" +
       "張ったままの伏線が1枚にまとまって出ます。" +
       "書き始める前に思い出す手間が、ここで済みます。",
@@ -1002,7 +1002,7 @@ function publishAdvice(style: WriterStyle): TutorialAdvice {
 function unstickAdvice(style: WriterStyle): TutorialAdvice {
   const talk: TutorialStep = {
     command: "novelai.openChatPanel",
-    label: "AIに相談する",
+    label: "AIに相談",
     why:
       "「何を書けばいいか分からない」を、そのまま書いて構いません。" +
       "診断で決めた言い方で応じます（9問に答えていれば、その言い分けも効きます）",
@@ -1034,7 +1034,7 @@ function unstickAdvice(style: WriterStyle): TutorialAdvice {
   const steps: TutorialStep[] = [
     {
       command: "novelai.resumeWriting",
-      label: "執筆を再開する（前回どこまで書いたか）",
+      label: "執筆を再開（前回どこまで書いたか）",
       why:
         "前の話の終わり・次に書くことの候補・張ったままの伏線が1枚に出ます。" +
         "思い出す手間が、ここで済みます",
@@ -1090,7 +1090,7 @@ function reviewAdvice(): TutorialAdvice {
     steps: [
       {
         command: "novelai.switchMode",
-        label: "作者／編集者を切り替える",
+        label: "作者／編集者の切り替え",
         why: "見る側で使うと答えていただいたためです",
       },
       {

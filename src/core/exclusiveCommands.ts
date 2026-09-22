@@ -44,11 +44,11 @@ export const EXCLUSIVE_COMMANDS: readonly ExclusiveCommand[] = [
   // AIを長く回す系。2回ぶん送れば2回ぶん待ち、クラウドAIなら2回ぶん課金される
   { id: "novelai.checkTypos", label: "誤字脱字を検知" },
   { id: "novelai.checkNotation", label: "表記ゆれを検知" },
-  { id: "novelai.checkProofread", label: "推敲する" },
+  { id: "novelai.checkProofread", label: "推敲" },
   { id: "novelai.checkContradictions", label: "矛盾を検知" },
   { id: "novelai.checkFactContradictions", label: "矛盾検知（事実の照合）" },
-  { id: "novelai.checkDeviations", label: "プロットからの逸脱を検知" },
-  { id: "novelai.checkForeshadows", label: "伏線を検知する" },
+  { id: "novelai.checkDeviations", label: "プロットからの逸脱" },
+  { id: "novelai.checkForeshadows", label: "伏線を検知" },
   { id: "novelai.checkForeshadowResolution", label: "伏線の回収を確かめる" },
   { id: "novelai.checkEpisodePlot", label: "単話プロットを検査" },
   { id: "novelai.checkOpening", label: "冒頭を診断" },
@@ -61,8 +61,8 @@ export const EXCLUSIVE_COMMANDS: readonly ExclusiveCommand[] = [
   { id: "novelai.extractWorldOnly", label: "世界観を抽出" },
   { id: "novelai.extractSettings", label: "設定資料をまとめて抽出" },
   { id: "novelai.runProofreadingSuite", label: "校正をまとめて実行" },
-  { id: "novelai.generateSynopses", label: "各話あらすじを生成" },
-  { id: "novelai.proposeChapters", label: "章立てをAIに提案させる" },
+  { id: "novelai.generateSynopses", label: "各話あらすじ" },
+  { id: "novelai.proposeChapters", label: "章立てを提案させる" },
   { id: "novelai.measureContext", label: "AIチューニング" },
 
   // 本文をまとめて書き換える系。同じファイルを2本が同時に書きに行く
@@ -73,8 +73,8 @@ export const EXCLUSIVE_COMMANDS: readonly ExclusiveCommand[] = [
   // 取り寄せ・下ごしらえ。同じ場所へ2本が同時に入れに行く
   { id: "novelai.addWorkFromGithub", label: "GitHubから作品を追加" },
   { id: "novelai.runFullSetup", label: "セットアップ" },
-  { id: "novelai.setupOllama", label: "Ollamaのセットアップ" },
-  { id: "novelai.setupLmStudio", label: "LM Studioのセットアップ" },
+  { id: "novelai.setupOllama", label: "Ollamaの導入" },
+  { id: "novelai.setupLmStudio", label: "LM Studioの導入" },
   /*
     **意味検索の準備（`novelai.setupVectorSearch`）は、ここへ入れない。**
 

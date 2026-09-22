@@ -217,15 +217,15 @@ export type ChatRunKind =
   | "unifyCharacters"
   /** 承認待ちの更新を反映 */
   | "applyPendingUpdates"
-  /** 各話あらすじを生成 */
+  /** 各話あらすじ */
   | "generateSynopses"
-  /** 作品紹介文を生成 */
+  /** 作品紹介文 */
   | "generateWorkBlurb"
   /** キャッチコピー案 */
   | "generateCatchphrases"
   /** 紹介文・あらすじを開く */
   | "openSynopsisDocs"
-  /** 本文からプロットを起こす */
+  /** 本文からプロットを逆算 */
   | "generatePlot";
 
 export interface ChatRun {
@@ -274,7 +274,9 @@ const RUNNABLE: ReadonlyMap<string, { kind: ChatRunKind } & Omit<ChatRun, "kind"
         ["generateWorkBlurb", "作品紹介文を作る", true],
         ["generateCatchphrases", "キャッチコピー案を作る", true],
         ["openSynopsisDocs", "紹介文・あらすじを開く", false],
-        ["generatePlot", "本文からプロットを起こす", true],
+        // メニューは「本文からプロットを逆算」。ここは相談の中で押す札なので、
+        // この表の言い回し（「〜する」）に揃えたまま、比喩だけ名前に合わせる
+        ["generatePlot", "本文からプロットを逆算する", true],
       ] as Array<[ChatRunKind, string, boolean]>
     ).map(([kind, label, usesAI]) => [
       kind.toLowerCase(),

@@ -45,27 +45,27 @@ describe("段ごとの1行", () => {
     // 「指摘が無かった」と読めてしまう
     expect(
       describeRunStep({
-        runLabel: "新しい作品を、ひと通り仕上げる",
+        runLabel: "新作をひと通り仕上げる",
         done: 3,
         total: 12,
         step: { label: "作品紹介文を生成" },
       })
     ).toBe(
-      "新しい作品を、ひと通り仕上げる 3/12 作品紹介文を生成 → " +
+      "新作をひと通り仕上げる 3/12 作品紹介文を生成 → " +
         "できました（結果は別の文書に出しました）"
     );
   });
 
   test("飛ばした段は理由を書き、「できました」とは書かない", () => {
     const line = describeRunStep({
-      runLabel: "新しい作品を、ひと通り仕上げる",
+      runLabel: "新作をひと通り仕上げる",
       done: 5,
       total: 12,
       step: { label: "プロット逆算", skipped: true, reason: "プロットが既にあるため" },
     });
 
     expect(line).toBe(
-      "新しい作品を、ひと通り仕上げる 5/12 プロット逆算 → " +
+      "新作をひと通り仕上げる 5/12 プロット逆算 → " +
         "飛ばしました（プロットが既にあるため）"
     );
     // **出ないことの確認。** 飛ばした段が「できました」と記録されると、
@@ -404,17 +404,17 @@ describe("ひと通り仕上げるは、段ごとに記録へ残す", () => {
 
     const total = FINISH_STEPS.length;
     expect(logged.steps[0]).toBe(
-      `新しい作品を、ひと通り仕上げる 開始 試しの作品 ${total}段`
+      `新作をひと通り仕上げる 開始 試しの作品 ${total}段`
     );
     expect(
       logged.steps.some((line) =>
         line.startsWith(
-          `新しい作品を、ひと通り仕上げる 1/${total} ${FINISH_STEPS[0].label} → できました`
+          `新作をひと通り仕上げる 1/${total} ${FINISH_STEPS[0].label} → できました`
         )
       )
     ).toBe(true);
     expect(logged.steps.at(-1)).toBe(
-      `新しい作品を、ひと通り仕上げる 終了 → できました ${total}段`
+      `新作をひと通り仕上げる 終了 → できました ${total}段`
     );
     // **作品のログへ向けている**（向けないと出力パネルにしか残らない）
     expect(logged.targets).toContain(work.folderPath);
@@ -446,7 +446,7 @@ describe("ひと通り仕上げるは、段ごとに記録へ残す", () => {
     await runFinishNewWork(work, { remainingIn: () => 0 });
 
     expect(logged.steps).toContain(
-      `新しい作品を、ひと通り仕上げる 1/${FINISH_STEPS.length} ${step.label} → ` +
+      `新作をひと通り仕上げる 1/${FINISH_STEPS.length} ${step.label} → ` +
         "飛ばしました（設定資料がまだ無いため）"
     );
   });
@@ -463,7 +463,7 @@ describe("ひと通り仕上げるは、段ごとに記録へ残す", () => {
     await runFinishNewWork(work, { remainingIn: () => 0 });
 
     expect(logged.steps).toContain(
-      `新しい作品を、ひと通り仕上げる 1/${FINISH_STEPS.length} ${step.label} → ` +
+      `新作をひと通り仕上げる 1/${FINISH_STEPS.length} ${step.label} → ` +
         "失敗しました（AIへ接続できません）"
     );
   });

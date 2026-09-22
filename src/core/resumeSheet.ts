@@ -265,7 +265,7 @@ function synopsisSection(synopses: readonly ResumeSynopsis[]): string[] {
   if (synopses.length === 0) {
     // **メニューにある名前で案内する。** 言い換えると、探しても見つからない
     lines.push(
-      "まだありません（「各話あらすじを生成」で作れます）。",
+      "まだありません（「各話あらすじ」で作れます）。",
       ""
     );
     return lines;

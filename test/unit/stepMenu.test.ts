@@ -906,3 +906,32 @@ describe("開いていないと断られる操作を、簡単ステップメニ�
     expect(findAction("novelai.openVertical")).toBeDefined();
   });
 });
+
+/**
+ * 段の説明も、詳細メニューと同じ二段組みに揃える（0.75.7）。
+ *
+ * **網は詳細メニュー側（`actionList.test.ts`）と同じ形にする。** 片方だけ
+ * 縛ると、もう片方だけがまた口語体へ戻る。
+ */
+describe("段の説明の長さ", () => {
+  test("説明の1行目は40字以内", () => {
+    const tooLong = STEP_MENU.map((step) => ({
+      label: step.label,
+      head: step.detail.split("\n")[0],
+    }))
+      .filter((entry) => entry.head.length > 40)
+      .map((entry) => `${entry.label}（${entry.head.length}字）：${entry.head}`);
+
+    expect(tooLong, "要約は1行に収める。詳しいことは「・」の事柄へ").toEqual([]);
+  });
+
+  test("強調の印を置かない", () => {
+    // 段の説明は `plainTextUi.test.ts` の見張る範囲にある。記号がそのまま
+    // 画面へ出る先（案内・選択肢）へ回ったときに読めなくなる
+    const withEmphasis = STEP_MENU.filter((step) =>
+      step.detail.includes("*".repeat(2))
+    ).map((step) => step.label);
+
+    expect(withEmphasis, "強調ではなく、行を分けて示す").toEqual([]);
+  });
+});

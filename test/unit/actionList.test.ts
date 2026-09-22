@@ -711,6 +711,62 @@ describe("メニュー名は短く、補足はツールチップへ", () => {
 });
 
 /**
+ * **文言がまた長くならないための網**（作者の指示、2026-09-22
+ * 「メニューや設定が口語体すぎるので、もっとメニューっぽく簡潔に」）。
+ *
+ * 説明文は**二段組み**に揃えてある。
+ *
+ * ```
+ * 要約の1行（体言止め。30字ほど）
+ *
+ * ・事柄（20字ほど）
+ * ・事柄
+ *
+ * 安全の約束（1行。あれば）
+ * ```
+ *
+ * 見張るのは**先頭の1行と名前の長さ**だけにする。全体の長さを縛ると、
+ * 事柄の多い操作（EPUBエディター・校正をまとめて実行）を無理に削ることに
+ * なり、**知りたいことが消える**。1行目が短ければ、一覧で読む分には足りる。
+ *
+ * 40字・14字は、書き換えた時点の実測（1行目の最長38字、名前の最長14字）に
+ * 少しだけ余裕を持たせた値である。**超えたら、削るか事柄へ回す。**
+ */
+describe("メニューの文言の長さ", () => {
+  test("説明の1行目は40字以内", () => {
+    const tooLong = allActions()
+      .map((action) => ({
+        command: action.command,
+        head: action.detail.split("\n")[0],
+      }))
+      .filter((entry) => entry.head.length > 40)
+      .map((entry) => `${entry.command}（${entry.head.length}字）：${entry.head}`);
+
+    expect(tooLong, "要約は1行に収める。詳しいことは「・」の事柄へ").toEqual([]);
+  });
+
+  test("名前は14字以内", () => {
+    const tooLong = allActions()
+      .filter((action) => action.label.length > 14)
+      .map((action) => `${action.command}（${action.label.length}字）：${action.label}`);
+
+    expect(tooLong, "ビューは幅が狭い。補足は note か description へ").toEqual(
+      []
+    );
+  });
+
+  test("事柄は「・」で始め、説明の途中に強調の印を置かない", () => {
+    // 強調（`**`）は相談へ渡すときも、マニュアルへ載せるときも落とす手間に
+    // なる。二段組みにしたので、目立たせたいことは行を分ければ足りる
+    const withEmphasis = allActions()
+      .filter((action) => action.detail.includes("*".repeat(2)))
+      .map((action) => action.command);
+
+    expect(withEmphasis, "強調ではなく、行を分けて示す").toEqual([]);
+  });
+});
+
+/**
  * メニューの名前と、コマンドパレットの名前（`package.json` の `title`）。
  *
  * **同じ操作が2つの名前で呼ばれていると、作者は別物だと思う。** 実際、
@@ -1154,7 +1210,7 @@ describe("相談の項目は、木に残して画面から隠す", () => {
 
     expect(action, "木から消すと簡単ステップメニューが壊れる").toBeTruthy();
     // 補足（「大きく開く」）は note へ移した（2026-09-06）
-    expect(action?.label).toBe("AIに相談する");
+    expect(action?.label).toBe("AIに相談");
     expect(action?.note).toBe("大きく開く");
     // 隠すのは画面だけ。動く環境かどうかの判定には混ぜない
     expect(isItemVisibleInRuntime(action!, true)).toBe(true);

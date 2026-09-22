@@ -25,7 +25,7 @@ import { openInDefaultEditor } from "../views/openDocument";
  * もう片方には最初の一歩が見えない。作るときに選んでもらう。
  *
  * 選ばなかったほうへは、あとからでも移れる。プロットは
- * 「プロットをつくる」で足せるし、本文は「新規話数ファイルを追加」で作れる。
+ * 「プロットを作る」で足せるし、本文は「新規話数ファイルを追加」で作れる。
  */
 
 export type WorkStartMode = "plot" | "manuscript";
@@ -48,7 +48,7 @@ export function skipsStartModeQuestion(format?: WorkFormatKey): boolean {
  *
  * **選ばなくてもよい。** 「決めない」を選べば、これまでどおり
  * 形式の書かれていない作品として始まる（あとから
- * 「形式とジャンルを決める」で決められる）。
+ * 「形式とジャンル」で決められる）。
  *
  * @returns 選んだタイプ。「決めない」なら `"unset"`、
  *   取りやめ（Esc）なら `undefined`
@@ -66,7 +66,7 @@ export async function chooseWorkType(
       {
         label: "$(circle-slash) いまは決めない",
         detail:
-          "あとから「形式とジャンルを決める」で決められます。" +
+          "あとから「形式とジャンル」で決められます。" +
           "決めるまでは、これまでどおりすべての操作が出ます。",
         format: undefined,
       },
@@ -107,7 +107,7 @@ export async function chooseWorkStartMode(
         label: "$(edit) 本文から書き始める",
         detail:
           "プロットは作りません。第1話のファイルを作って開きます。" +
-          "プロットはあとから「プロットをつくる」で足せます。",
+          "プロットはあとから「プロットを作る」で足せます。",
         mode: "manuscript" as const,
       },
       // Escでも閉じられるが、それを知らない人には出口が無いように見える

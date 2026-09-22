@@ -84,7 +84,7 @@ export function blurbConfirmMessage(input: {
   const hint =
     input.synopsisCount === 0
       ? "\n各話あらすじがまだありません。無くても作れますが、本筋を外した紹介文になることがあります。" +
-        "先に「各話あらすじを生成」を済ませてから作るのがおすすめです。"
+        "先に「各話あらすじ」を済ませてから作るのがおすすめです。"
       : "";
   return `作品紹介文を作ります（AIの呼び出しは1回）。\nモデル: ${input.model}${input.costNotice}${hint}`;
 }

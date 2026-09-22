@@ -170,7 +170,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.addWorkFromGithub": "allTypes",
   // ZIPの取り込み（設計書6.98）。中身を見るまでタイプは分からない
   "novelai.importWorkFromZip": "allTypes",
-  // 書庫から未登録の作品を拾う（設計書6.97.4）。こちらも中身を見るまで
+  // 未登録の作品を探す（設計書6.97.4）。こちらも中身を見るまで
   // タイプは分からないうえ、登録する前の操作である
   "novelai.collectUnregisteredWorks": "allTypes",
   // 呼び名を変えるだけの操作。中身が何であっても要る（設計書6.1.1）
@@ -273,7 +273,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.editTimeline": "story",
 
   /*
-    新しい作品を、ひと通り仕上げる（作者の指示、2026-09-19）。
+    新作をひと通り仕上げる（作者の指示、2026-09-19）。
 
     **まとめ実行と違って「story」に置く。** 走らせる段に各話あらすじ・
     プロットの逆算・章立て・プロット逸脱が入っており、話の連なりが無い

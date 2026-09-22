@@ -53,7 +53,7 @@ export const FEATURE_COMMANDS: Readonly<Partial<Record<FeatureName, string>>> =
     factContradiction: "novelai.checkFactContradictions",
     deviation: "novelai.checkDeviations",
     episodePlot: "novelai.checkEpisodePlot",
-    // 「本文からプロットを起こす」＝プロット逆算（P-02）
+    // 「本文からプロットを逆算」＝プロット逆算（P-02）
     plotReverse: "novelai.generatePlot",
   };
 

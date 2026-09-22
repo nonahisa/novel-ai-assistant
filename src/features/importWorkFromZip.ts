@@ -55,7 +55,7 @@ import { withProgress } from "../views/progress";
 import { resolveNewWorkHome } from "./newWorkHome";
 
 /**
- * バックアップから作品を取り込む（設計書6.99）。
+ * バックアップから取り込む（設計書6.99）。
  *
  * 作者の指示（2026-09-19）：「初心者が初めて使うところを魅せたい」。
  * カクヨム・なろう・アルファポリスからダウンロードしたバックアップを

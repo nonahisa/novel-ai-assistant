@@ -89,7 +89,7 @@ export async function convertDocxToMarkdown(
   // **中止できるようにする。** 何十話ぶんもある作品では数十秒かかり、
   // そのあいだ画面が動かないままだと「固まった」としか見えない
   await withCancellableProgress(
-    "Word の原稿を .md にする",
+    "Word 原稿の変換",
     async (progress, token) => {
       for (const [index, name] of docx.entries()) {
         if (token.isCancellationRequested) {

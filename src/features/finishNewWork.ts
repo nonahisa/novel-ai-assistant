@@ -40,7 +40,7 @@ import {
 } from "./proofreadingSuite";
 
 /**
- * 新しい作品を、ひと通り仕上げる（作者の指示、2026-09-19）。
+ * 新作をひと通り仕上げる（作者の指示、2026-09-19）。
  *
  * 取り込んだばかりの作品に対して、**AIでできることを順に全部走らせ、
  * 最後に「何ができたか」を1枚にまとめて見せる**操作である。
@@ -85,7 +85,7 @@ interface FinishWorkRef {
  * **画面に出す題（`withProgress` の見出し）と同じ文字にする。** 別の
  * 言い回しにすると、作者が見た画面とログの行が結びつかない。
  */
-const FINISH_LOG_LABEL = "新しい作品を、ひと通り仕上げる";
+const FINISH_LOG_LABEL = "新作をひと通り仕上げる";
 
 export interface FinishNewWorkDeps {
   /** その分類で、提案パネルにまだ手を付けていない件数（設計書6.37.3） */
@@ -204,7 +204,7 @@ export async function runFinishNewWork(
   let stoppedAt = -1;
 
   try {
-    await withProgress("新しい作品を、ひと通り仕上げる", async (progress) => {
+    await withProgress("新作をひと通り仕上げる", async (progress) => {
       for (const [index, step] of steps.entries()) {
         progress.report({
           message: describeFinishStep(index + 1, steps.length, step.label),

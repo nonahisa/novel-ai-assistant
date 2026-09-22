@@ -501,7 +501,7 @@ describe("入口を1回通す", () => {
     await runFinishNewWork(work, deps);
 
     expect(state.executed).toEqual(FINISH_STEPS.map((step) => step.command));
-    expect(state.report).toContain("| 各話あらすじを生成 | 失敗しました |");
+    expect(state.report).toContain("| 各話あらすじ | 失敗しました |");
   });
 
   test("前提が足りずに飛ばした段は、失敗と呼ばない", async () => {
@@ -532,7 +532,7 @@ describe("入口を1回通す", () => {
     ]);
     // 止めたところから先は、紙の上でも「走らせていません」と分かる
     expect(state.report).toContain(
-      "| 本文からプロットを起こす | 走らせていません（途中で中止したため） |"
+      "| 本文からプロットを逆算 | 走らせていません（途中で中止したため） |"
     );
   });
 

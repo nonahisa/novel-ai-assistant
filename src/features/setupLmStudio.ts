@@ -127,7 +127,7 @@ type StartAttempt = "started" | "not_installed" | "failed" | "unavailable";
  * `lms server start` でサーバーを起こしてみる。
  *
  * **勝手には起こさない**という方針は崩していない。ここは作者が
- * 「LM Studioのセットアップ」を選んで始めた案内の中である。
+ * 「LM Studioの導入」を選んで始めた案内の中である。
  */
 async function tryStartServer(): Promise<StartAttempt> {
   const endpoint = lmstudioEndpoint();

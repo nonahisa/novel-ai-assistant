@@ -192,7 +192,7 @@ async function applyToEpisodeSynopsis(
   const index = set.episodes.findIndex((item) => item.chapter === chapter);
   if (index < 0) {
     throw new Error(
-      `第${chapter}話のあらすじが見つかりません。先に「各話あらすじを生成」を実行してください。`
+      `第${chapter}話のあらすじが見つかりません。先に「各話あらすじ」を実行してください。`
     );
   }
 

@@ -120,8 +120,11 @@ describe("質問の数の言い方", () => {
     const at = menu.indexOf('command: "novelai.runWriterDiagnosis"');
     expect(at).toBeGreaterThan(0);
     const entry = menu.slice(at, at + 500);
-    expect(entry).toContain("いくつかお答えいただくと");
+    // 文言は 0.75.7 で「いくつかお答えいただくと」から言い切りへ短くした。
+    // **見張っているのは数を約束しないことだけ**なので、狙いは変わらない
+    expect(entry).toContain("いくつか答えると");
     expect(entry).not.toContain("5問お答え");
+    expect(entry).not.toContain("9問お答え");
   });
 
   test("**区切りでは数を言ってよい**（そこは事実の報告である）", () => {

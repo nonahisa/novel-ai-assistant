@@ -17,7 +17,7 @@ describe("作品紹介文の実行前の確認（0.45.3）", () => {
       synopsisCount: 0,
     });
     expect(text).toContain("各話あらすじがまだありません");
-    expect(text).toContain("先に「各話あらすじを生成」");
+    expect(text).toContain("先に「各話あらすじ」");
     // 止めはしない。文面は「作ります」のまま
     expect(text).toContain("作品紹介文を作ります");
   });

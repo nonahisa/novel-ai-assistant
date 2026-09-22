@@ -200,25 +200,73 @@ describe("使い方の説明（目次と束）", () => {
     expect(index).not.toContain("*".repeat(2));
   });
 
-  test("何ができるかの1文目は、そのまま入る", () => {
-    // 言い換えると意味が変わる。**機械的に切るだけ**にする（2026-08-27）
+  test("何ができるかの要約は、そのまま入る", () => {
+    // 言い換えると意味が変わる。**機械的に切るだけ**にする（2026-08-27）。
+    // 説明文が二段組みになったので（0.75.7）、切るのは「1文目」ではなく
+    // **1行目**である——箇条書きには句点が無く、句点で切ると全部つながる
     const action = allActions().find(
       (entry) => entry.command === "novelai.checkNotation"
     );
-    const first =
-      action!.detail.split("。")[0].split("*".repeat(2)).join("") + "。";
+    const first = action!.detail.split("\n")[0].split("*".repeat(2)).join("");
 
-    expect(bundleText).toContain(first);
+    expect(bundleText).toContain(`${first}。`);
   });
 
-  test("「〜ません」の断りは落とさない", () => {
+  test("しないことの断りは落とさない", () => {
     /*
       **毎回送る量を減らすために、説明を短くした**（8,111字→5,097字）。
-      だが「AIは使いません」「原稿は書き換えません」を落とすと、
+      だが「AIは呼ばない」「原稿は書き換えない」を落とすと、
       **AIが逆を答えかねない。** しないことの断りは、作者がいちばん
       知りたいことである。
+
+      文体は 0.75.7 で「〜ません」から言い切りへ変えた。`shorten` は
+      語尾ではなく**形**（箇条書きかどうか）で断りを見分けるので、
+      文体を変えても落ちない。
     */
-    expect(bundleText).toContain("AIは使いません。");
+    expect(bundleText).toContain("AIは呼ばない。");
+    expect(bundleText).toContain("原稿は書き換えない。");
+  });
+
+  /*
+    **見分けが壊れたら、ここで落ちる**（0.75.7）。
+
+    `shorten` は一度「〜ません」で終わる文だけを断りとして残していた。
+    文体を言い切りへ変えたとき、その見分けは**何も言わずに全部の断りを
+    落とす**——例外も警告も出ないので、AIが「書き換えます」と答えるように
+    なるまで誰も気づけない。
+
+    数で見張る。1件ずつ名指しすると、その1件だけ通る抜け道が残る。
+  */
+  test("断りの行を持つ説明は、どれも断りごと渡っている", () => {
+    /** 説明の最後にある、箇条書きでない行（＝しないことの断り） */
+    const closingLineOf = (detail: string): string | undefined => {
+      const lines = detail
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+      if (lines.length < 2) return undefined;
+      const last = lines[lines.length - 1];
+      return last.startsWith("・") ? undefined : last;
+    };
+
+    const withClosing = visibleActions()
+      .map((action) => ({
+        command: action.command,
+        closing: closingLineOf(action.detail),
+      }))
+      .filter(
+        (entry): entry is { command: string; closing: string } =>
+          entry.closing !== undefined
+      );
+
+    // 断りを持つ操作が数十件ある前提の試験である。0件なら形が変わった合図
+    expect(withClosing.length).toBeGreaterThan(20);
+
+    const dropped = withClosing
+      .filter((entry) => !bundleText.includes(entry.closing))
+      .map((entry) => `${entry.command}：${entry.closing}`);
+
+    expect(dropped, "shorten が断りを落としている").toEqual([]);
   });
 
   test("但し書きまでは入れない（説明は短い版だけ）", () => {
@@ -367,14 +415,14 @@ describe("説明の束", () => {
     // 文の直し
     expect(proofread).toContain("誤字脱字を検知");
     expect(proofread).toContain("表記ゆれを検知");
-    expect(proofread).toContain("推敲する");
+    expect(proofread).toContain("推敲");
     // 表に載せていない操作は、割る前と同じ側（校正）に残る
-    expect(proofread).toContain("編集部からの提案を見る");
+    expect(proofread).toContain("編集部からの提案");
 
     // 話の整合
     expect(consistency).toContain("矛盾を検知");
-    expect(consistency).toContain("プロットからの逸脱を検知");
-    expect(consistency).toContain("伏線を検知する");
+    expect(consistency).toContain("プロットからの逸脱");
+    expect(consistency).toContain("伏線を検知");
     expect(consistency).toContain("伏線の回収を確かめる");
     expect(consistency).toContain("単話プロットを検査");
   });

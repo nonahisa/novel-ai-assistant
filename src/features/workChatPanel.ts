@@ -2728,7 +2728,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         who: "AI",
         text:
           `「${work.title}」にはまだプロットがありません。\n` +
-          "「プロットをつくる」を先に実行すると、書く場所ができます。",
+          "「プロットを作る」を先に実行すると、書く場所ができます。",
         run: "createPlot",
       });
       return;

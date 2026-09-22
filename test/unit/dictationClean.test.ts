@@ -509,7 +509,7 @@ describe("口述の整文の入口", () => {
     const action = allActions().find((entry) => entry.command === COMMAND);
 
     expect(action, "詳細メニューに口述の整文がない").toBeTruthy();
-    expect(action?.label).toBe("口述で入れた文を整える");
+    expect(action?.label).toBe("口述した文を整える");
     expect(action?.usesAI).toBe(true);
     // 開いているファイルに対して働くので、作品の登録は要らない
     expect(action?.requiresWork).toBeFalsy();
@@ -523,7 +523,7 @@ describe("口述の整文の入口", () => {
       (entry) => entry.command === COMMAND
     );
 
-    expect(declared?.title).toBe("口述で入れた文を整える");
+    expect(declared?.title).toBe("口述した文を整える");
     // 声で書くことに、作品のタイプは関わらない
     expect(COMMAND_FEATURES[COMMAND]).toBe("allTypes");
   });

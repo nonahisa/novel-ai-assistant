@@ -148,7 +148,7 @@ describe("材料が無いとき", () => {
     const sheet = buildResumeSheet(input({ synopses: [] }));
 
     // 言い換えると、探しても見つからない
-    expect(sheet).toContain("「各話あらすじを生成」で作れます");
+    expect(sheet).toContain("「各話あらすじ」で作れます");
   });
 
   test("伏線が0件なら、節ごと出さない", () => {

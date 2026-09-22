@@ -27,7 +27,7 @@ import type { WorkEntry } from "../models/types";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 
 /**
- * 提供先を選んで設定資料を書き出す（設計書6.75）。
+ * 提供先を選んで書き出す（設計書6.75）。
  *
  * **AIは呼ばない。** 抽出済みのJSONから、提供先の型に合った項目だけを
  * 選んで1つのMarkdownにまとめる。何を出すかの判断は

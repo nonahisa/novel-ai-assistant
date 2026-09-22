@@ -99,9 +99,10 @@ const STEP_DEFS: readonly StepDef[] = [
     label: "1. 作品登録",
     icon: "folder-opened",
     detail:
-      "書く作品を、この拡張機能に覚えさせる段階です。" +
-      "これから書く作品でも、すでに原稿があるフォルダーでも、" +
-      "別のPCで書いている作品でも、ここから始められます。",
+      "書く作品を、この拡張機能に覚えさせる段階\n\n" +
+      "・これから書く作品\n\n" +
+      "・すでに原稿があるフォルダー\n\n" +
+      "・別のPCで書いている作品",
     /*
       **作品の入口を、ここへ寄せる**（設計書6.97.4）。詳細メニューの
       「新しく書き始める／すでにある原稿を入れる／別の環境から取り寄せる」と
@@ -131,8 +132,8 @@ const STEP_DEFS: readonly StepDef[] = [
     label: "2. 新作構想",
     icon: "list-tree",
     detail:
-      "何を書くかを決める段階です。" +
-      "ログライン・テーマ・世界観・あらすじをプロットに書き留めます。",
+      "何を書くかを決める段階\n\n" +
+      "・ログライン・テーマ・世界観・あらすじをプロットに書き留める",
     entries: [
       // 新規作成（プロットから開始）は「1. 作品登録」へ移した（設計書6.97.4）
       "novelai.createPlot",
@@ -150,15 +151,17 @@ const STEP_DEFS: readonly StepDef[] = [
     label: "3. 作品執筆",
     icon: "edit",
     detail:
-      "本文を書き進める段階です。" +
-      "書く場・設定資料づくり・入力の手間を減らす操作を分けて並べています。",
+      "本文を書き進める段階\n\n" +
+      "・執筆の場\n\n" +
+      "・資料生成\n\n" +
+      "・入力を楽に",
     entries: [
       {
         kind: "section",
         label: "執筆の場",
         icon: "book",
         commands: [
-          // **先頭は「執筆を再開する」**（設計書6.36.4）。
+          // **先頭は「執筆を再開」**（設計書6.36.4）。
           // 続きを書く日に最初に押すもので、AIを呼ばずにその場で出る
           "novelai.resumeWriting",
           "novelai.createEpisodePlot",
@@ -212,8 +215,9 @@ const STEP_DEFS: readonly StepDef[] = [
     // `plainTextUi.test.ts` が見張る範囲にあり、Markdownとして読まれる先
     // （ホバー）以外へ回ったときに記号がそのまま画面に出る
     detail:
-      "書いた本文を、人に見せる前に自分で見直す段階です。" +
-      "本文は勝手に書き換わりません。指摘を1件ずつ見て決めます。",
+      "書いた本文を、人に見せる前に自分で見直す段階\n\n" +
+      "・指摘を1件ずつ見て決める\n\n" +
+      "本文は勝手に書き換わらない。",
     entries: [
       // まとめて走らせる入口を先頭に置く（設計書6.80）
       "novelai.runProofreadingSuite",
@@ -240,8 +244,9 @@ const STEP_DEFS: readonly StepDef[] = [
     label: "5. 投稿脱稿",
     icon: "rocket",
     detail:
-      "投稿サイトへ出す段階です。" +
-      "あらすじ・紹介文・キャッチコピーを整えて、本文を投稿サイトの形に直します。",
+      "投稿サイトへ出す段階\n\n" +
+      "・あらすじ・紹介文・キャッチコピーを整える\n\n" +
+      "・本文を投稿サイトの形に直す",
     entries: [
       "novelai.generateSynopses",
       "novelai.generateWorkBlurb",
@@ -254,8 +259,8 @@ const STEP_DEFS: readonly StepDef[] = [
         label: "WEB投稿支援（準備中）",
         icon: "globe",
         detail:
-          "ブラウザ内蔵の投稿支援を予定しています。" +
-          "いまは「投稿サイト用に変換してコピー」で各サイトへ貼り付けてください。",
+          "ブラウザ内蔵の投稿支援（予定）\n\n" +
+          "・いまは「投稿サイト用に変換してコピー」で各サイトへ貼り付け",
       },
     ],
   },
@@ -263,8 +268,8 @@ const STEP_DEFS: readonly StepDef[] = [
     label: "6. 編集部校正・校閲",
     icon: "organization",
     detail:
-      "編集部と一緒に仕上げる段階です。" +
-      "編集部は本文を書き換えず、提案として置きます。",
+      "編集部と一緒に仕上げる段階\n\n" +
+      "編集部は本文を書き換えず、提案として置く。",
     entries: [
       "novelai.switchMode",
       "novelai.toggleReviewLock",
@@ -277,9 +282,9 @@ const STEP_DEFS: readonly StepDef[] = [
     label: "7. 電子出版等",
     icon: "package",
     detail:
-      "書き上げた作品を、紙や電子書籍の形にして出す段階です。" +
-      "PDF（印刷用）とEPUB（電子書籍）が作れます。" +
-      "本の見た目はEPUBエディターで確かめながら決められます。",
+      "書き上げた作品を、紙や電子書籍の形にして出す段階\n\n" +
+      "・PDF（印刷用）とEPUB（電子書籍）\n\n" +
+      "・本の見た目はEPUBエディターで確かめながら決める",
     // **「EPUB出力（予定）」の枠は外した**（作者の指定、2026-09-03）。
     // 設計書6.65が実装できたので、枠ではなく実物を載せる
     // **「EPUBへ書き出す」はここに置かない**（作者の指定、2026-09-04）。
@@ -294,8 +299,8 @@ const STEP_DEFS: readonly StepDef[] = [
     label: "ヘルプ",
     icon: "question",
     detail:
-      "使い方が分からなくなったときや、うまく動かないときに開く場所です。" +
-      "作品を選んでいなくても使えます。",
+      "使い方が分からないとき、うまく動かないときに開く場所\n\n" +
+      "・作品を選んでいなくても使える",
     // 並びは詳細メニューの「ヘルプ」分類に合わせる（使い方 → ログ → 版）。
     // 「動作を診断」はブラウザ版だけの操作なので、ここには置かない
     entries: [
@@ -460,10 +465,10 @@ export const STEP_WORK_COMMAND = "novelai.chooseStepWork";
 
 /** 作品が1つも登録されていないときの、最上段の表示 */
 export const STEP_NO_WORK_LABEL = "未登録";
-export const STEP_NO_WORK_HINT = "作品登録（ステップ1）から始めてください";
+export const STEP_NO_WORK_HINT = "作品登録（ステップ1）から";
 
 /** 作品は登録されているが、まだ選んでいないときの、最上段の表示 */
-export const STEP_CHOOSE_WORK_LABEL = "作品を選んでください";
+export const STEP_CHOOSE_WORK_LABEL = "作品を選ぶ";
 
 /**
  * 作品を選んでいないために押せないときの理由。
@@ -865,11 +870,11 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
     item.tooltip = new vscode.MarkdownString(
       works.length === 0
         ? "**まだ作品が登録されていません。**\n\n" +
-          "「1. 作品登録」から登録すると、下の操作が使えるようになります。"
+          "「1. 作品登録」から登録すると、下の操作が使えるようになる。"
         : // 切った題の全文はここに出す（切りっぱなしにしない）
           (view.fullTitle ? `**${view.fullTitle}**\n\n` : "") +
-            "**下に並ぶ操作は、ここで選んだ作品にだけ効きます。**\n\n" +
-            "押すと、登録している作品から選び直せます。"
+            "下に並ぶ操作は、ここで選んだ作品にだけ効く\n\n" +
+            "・押すと、登録している作品から選び直せる"
     );
     // 作品が無いときは押しても選ぶものが無い。押せなくして理由を description に出す
     if (works.length > 0) {
@@ -948,8 +953,9 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
     item.tooltip = new vscode.MarkdownString(
       [
         enabled ? "" : `**${hint}。** ${nextStepFor(action, hint)}\n\n`,
+        // **段落で切る**（詳細メニューと同じ理由。説明文が二段組みになった）
         action.usesAI
-          ? "**AIを使います**（クラウドのAIは実行のたびに課金されます）\n"
+          ? "**AIを使う**（クラウドのAIは実行のたびに課金）\n\n"
           : "",
         action.detail,
         count > 0 ? `\n\n未反映: ${count} 件` : "",
@@ -1033,7 +1039,7 @@ function placeholderItem(placeholder: StepPlaceholder): vscode.TreeItem {
 /** 押せない理由に、次に取れる手を添える */
 function nextStepFor(action: ActionItem, hint: string | undefined): string {
   if (hint === STEP_SELECT_HINT) {
-    return "最上段の作品選択を押して、対象の作品を選んでください。";
+    return "最上段の作品選択を押して、対象の作品を選ぶ。";
   }
   return explainDisabled(action, hint);
 }

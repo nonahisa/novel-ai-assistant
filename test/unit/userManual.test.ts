@@ -116,7 +116,7 @@ describe("メニューから作る（手で書き写さない）", () => {
     // 簡単ステップメニューではなく、横のパネルのボタン**である。
     // 「簡単ステップメニューから」とだけ書くと、いちばん近い道を隠す
     const line = MANUAL.split("\n").find((entry) =>
-      entry.startsWith("- AIに相談する（大きく開く）")
+      entry.startsWith("- AIに相談（大きく開く）")
     );
 
     expect(line, "マニュアルに項目が無い").toBeTruthy();

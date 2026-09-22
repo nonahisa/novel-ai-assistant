@@ -132,7 +132,7 @@ async function askAdvicePart(deps: WriterDiagnosisDeps): Promise<boolean> {
       {
         label: `$(check) ${SKIP}`,
         detail:
-          "ここまでの5問で、次にすることの案内はできます。あとから「相談の助言方針を決める」でいつでも答えられます",
+          "ここまでの5問で、次にすることの案内はできます。あとから「相談の助言方針」でいつでも答えられます",
         go: false,
       },
       cancelItem(),

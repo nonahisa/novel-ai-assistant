@@ -179,7 +179,7 @@ export function parseReaderStatsEnvelope(
     return reject(
       `${known.label}の読者の反応は、貼り付けでは取り込みません` +
         "（規約の判断により、読み取りに対応していません）。" +
-        "「読者の反応を手入力する」からご記入ください。"
+        "「読者の反応を手入力」からご記入ください。"
     );
   }
 

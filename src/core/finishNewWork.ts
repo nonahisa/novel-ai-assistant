@@ -1,5 +1,5 @@
 /**
- * 「新しい作品を、ひと通り仕上げる」の、段の並びと文面だけを持つ部品。
+ * 「新作をひと通り仕上げる」の、段の並びと文面だけを持つ部品。
  *
  * 作者の指示（2026-09-19）「初心者が初めて使うところを魅せたい。可能な
  * ことをすべて一気に行ってほしい」。取り込んだばかりの作品に対して、
@@ -123,14 +123,14 @@ export const FINISH_STEPS: readonly FinishStep[] = [
   },
   {
     /*
-      **前提の台帳が指す「プロットをつくる」ではない。** あちらは
+      **前提の台帳が指す「プロットを作る」ではない。** あちらは
       設定/plot.md を開くだけの操作で、AIは何も書かない。一気に仕上げる
-      道でやりたいのは、**既にある本文からプロットを起こすこと**である
+      道でやりたいのは、**既にある本文からプロットを逆算すること**である
       （`novelai.generatePlot`）。前提として数えるものは同じなので、
       `produces` は "plot" のままでよい。
     */
     id: "plot",
-    label: "本文からプロットを起こす",
+    label: "本文からプロットを逆算",
     command: "novelai.generatePlot",
     usesAI: true,
     produces: "plot",
@@ -138,14 +138,14 @@ export const FINISH_STEPS: readonly FinishStep[] = [
   },
   {
     id: "blurb",
-    label: "作品紹介文を生成",
+    label: "作品紹介文",
     command: "novelai.generateWorkBlurb",
     usesAI: true,
     scansWholeText: false,
   },
   {
     id: "catchphrase",
-    label: "キャッチコピー案を作る",
+    label: "キャッチコピー案",
     command: "novelai.generateCatchphrases",
     usesAI: true,
     scansWholeText: false,
@@ -176,7 +176,7 @@ export const FINISH_STEPS: readonly FinishStep[] = [
       あらすじやプロットとして整理されたあとのほうが当たる。
     */
     id: "chapters",
-    label: "章立てをAIに提案させる",
+    label: "章立てを提案させる",
     command: "novelai.proposeChapters",
     usesAI: true,
     category: CHAPTER_CATEGORY,
@@ -398,7 +398,7 @@ export function describeFinishHalted(summary: FinishRunSummary): string {
   );
 }
 
-/** 進み具合の文字（「2/13：各話あらすじを生成」） */
+/** 進み具合の文字（「2/13：各話あらすじ」） */
 export function describeFinishStep(
   done: number,
   total: number,

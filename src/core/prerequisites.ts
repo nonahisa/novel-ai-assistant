@@ -116,7 +116,7 @@ export const PREREQUISITES: Readonly<Record<Prerequisite, PrerequisiteInfo>> = {
     kind: "synopsis",
     label: "各話あらすじ",
     makeCommand: "novelai.generateSynopses",
-    makeLabel: "各話あらすじを生成",
+    makeLabel: "各話あらすじ",
     // `generatePlot.ts` の `collectMaterial`：あらすじが0件なら
     // 「各話あらすじを作る／中止」を出して `undefined` を返す。
     // 冒頭だけで中盤以降を推測させないための、意図した打ち切りである
@@ -126,7 +126,7 @@ export const PREREQUISITES: Readonly<Record<Prerequisite, PrerequisiteInfo>> = {
     kind: "plot",
     label: "プロット",
     makeCommand: "novelai.createPlot",
-    makeLabel: "プロットをつくる",
+    makeLabel: "プロットを作る",
     // `checkDeviations.ts` の `loadPlot`：プロットが無ければ案内を出して
     // `undefined` を返す
     severity: "blocking",
