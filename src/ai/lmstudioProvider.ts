@@ -270,6 +270,8 @@ export class LmStudioProvider implements AIProvider {
       url: `${this.endpoint}/models`,
       timeoutMs: 15000,
       label: LABEL,
+      // 手元のAIは VS Code の差し替えた fetch を通さない（`fetchTimeouts.ts`）
+      local: true,
     });
     // 読み込んだ長さと種別は、OpenAI互換の口では返らない。別の口で補う
     const native = await this.readNativeModels();
@@ -382,6 +384,7 @@ export class LmStudioProvider implements AIProvider {
         // `/v1/models` と同じ。手元のサーバなので、待つとしても一瞬
         timeoutMs: 15000,
         label: LABEL,
+        local: true,
       });
       const byId = new Map<string, NativeModelEntry>();
       for (const entry of response.data ?? []) {
@@ -564,6 +567,12 @@ export class LmStudioProvider implements AIProvider {
       timeoutMs: this.requestTimeoutMs(model),
       signal,
       label: LABEL,
+      /*
+        **手元の口で投げる**（設計書6.63。2026-09-23）。まとめて受け取る形なので、
+        応答の頭は生成が全部終わってから届く。VS Code の差し替えた fetch を
+        通すと、延ばした待ち時間が捨てられて300秒で切られる（`fetchTimeouts.ts`）
+      */
+      local: true,
     });
   }
 }

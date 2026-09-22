@@ -12,7 +12,7 @@ import { countByteFallback, decodeByteFallback } from "../core/byteFallback";
 import { readExpertCounts, type ModelExperts } from "../core/modelExperts";
 import { contextSizeForPrompt } from "../core/chunker";
 import { describeFetchFailure, isFetchTimeout } from "./httpClient";
-import { timeoutDispatcher } from "./fetchTimeouts";
+import { localFetch } from "./fetchTimeouts";
 import {
   applyStreamLine,
   emptyStreamedChat,
@@ -647,16 +647,20 @@ export class OllamaProvider implements AIProvider {
         CPUで長い本文を読むと、ここでも既定300秒の上限に当たる。
         `bodyTimeout` も同じ値になるので、断片の間があいたときの上限も
         こちらの待ち時間（`bump` と同じ長さ）に揃う。
+
+        **手元の口（`localFetch`）で投げる。** VS Code が差し替えた
+        `globalThis.fetch` は、渡した待ち時間を捨てる（`fetchTimeouts.ts`）。
       */
-      const dispatcher = await timeoutDispatcher(timeoutMs);
-      const response = await fetch(`${this.endpoint}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...body, stream: true }),
-        signal: controller.signal,
-        // 型には無い（Node独自の拡張）。ブラウザでは undefined になり無視される
-        ...(dispatcher ? { dispatcher } : {}),
-      } as RequestInit);
+      const response = await localFetch(
+        `${this.endpoint}/api/chat`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...body, stream: true }),
+          signal: controller.signal,
+        },
+        timeoutMs
+      );
       if (!response.ok || !response.body) {
         throw new AIError(
           `Ollamaがエラーを返しました (HTTP ${response.status})。`,
@@ -768,16 +772,21 @@ export class OllamaProvider implements AIProvider {
 
         `/api/tags`・`/api/show` もこの口を通るが、渡しても害は無い
         （こちらの `AbortController` が同じ長さで先に切るので、動きは変わらない）。
+
+        **渡すだけでは届かない。** VS Code が差し替えた `globalThis.fetch` は
+        渡した待ち時間を捨てる（1.138 で実測）。手元の口（`localFetch`）は
+        npm の undici で直接投げる（`fetchTimeouts.ts`）。
       */
-      const dispatcher = await timeoutDispatcher(timeoutMs);
-      const response = await fetch(`${this.endpoint}${path}`, {
-        method: body === undefined ? "GET" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: controller.signal,
-        // 型には無い（Node独自の拡張）。ブラウザでは undefined になり無視される
-        ...(dispatcher ? { dispatcher } : {}),
-      } as RequestInit);
+      const response = await localFetch(
+        `${this.endpoint}${path}`,
+        {
+          method: body === undefined ? "GET" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: body === undefined ? undefined : JSON.stringify(body),
+          signal: controller.signal,
+        },
+        timeoutMs
+      );
 
       if (!response.ok) {
         const detail = await response.text().catch(() => "");

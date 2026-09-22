@@ -5,7 +5,7 @@ import {
   emptyStreamedChat,
   takeCompleteLines,
 } from "../../ai/ollamaStream";
-import { timeoutDispatcher } from "../../ai/fetchTimeouts";
+import { localFetch } from "../../ai/fetchTimeouts";
 import { McpToolError, describeError } from "./shared";
 
 /**
@@ -140,11 +140,12 @@ export async function ollamaGenerate(
       下の注記のとおり流す形にしたが、それで避けられるのは「生成の間」だけで
       ある。Ollama は**本文を読み終えて1字目を出すまで**応答の頭を返さないので、
       CPUだけの機械で長い本文を読むと、流していても300秒で切られる。
+
+      **手元の口（`localFetch`）で投げる**のは製品と揃えるため。この道具は
+      MCPサーバー（素の Node）で動くので VS Code の差し替えは無いが、
+      渡し方を2通りに書き分けない（`fetchTimeouts.ts`）。
     */
-    const dispatcher = await timeoutDispatcher(MCP_OLLAMA_WAIT_MS);
-    response = await fetch(`${endpoint}/api/chat`, {
-      // 型には無い（Node独自の拡張）。ブラウザでは undefined になり無視される
-      ...(dispatcher ? { dispatcher } : {}),
+    response = await localFetch(`${endpoint}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -180,7 +181,7 @@ export async function ollamaGenerate(
           { role: "user", content: input.userPrompt },
         ],
       }),
-    } as RequestInit);
+    }, MCP_OLLAMA_WAIT_MS);
   } catch (error) {
     throw new McpToolError(
       `Ollama へ繋がりませんでした（${endpoint}）: ${describeError(error)}`

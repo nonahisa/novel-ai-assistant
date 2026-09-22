@@ -25,11 +25,50 @@
  * `canRunProcesses()` で確かめてから `await import()` する。
  *
  * ブラウザの `fetch` にはこの制限が無いので、**渡せなくても実害は無い**。
+ *
+ * ## 渡しただけでは届かなかった（2026-09-23）
+ *
+ * VS Code（1.138 で確認）は、拡張機能の中の `globalThis.fetch` を
+ * `@vscode/proxy-agent` の `createFetchPatch` で差し替えている。証明書を
+ * 足す設定（addCertificatesV1/V2、既定で入）が効いていると、差し替えた
+ * fetch は `init.dispatcher` を**自分で作る新しい `undici.Agent` に置き換える**
+ * ——こちらの `headersTimeout`/`bodyTimeout` は捨てられ、300秒に戻る。
+ *
+ * ノートPCの実測（VS Code 1.138.0、310秒黙る模擬サーバー、同じ Agent）：
+ * `globalThis.fetch`＋Agent は306秒で `UND_ERR_HEADERS_TIMEOUT`、
+ * **npm の `undici` の `fetch`＋同じ Agent は311秒で 200。**
+ *
+ * そこで口を2つに分ける。
+ *
+ * - **手元のAI（Ollama・LM Studio）は `localFetch`**：npm の undici の
+ *   fetch を直接呼ぶ。VS Code のプロキシと社内証明書の対応は失うが、
+ *   宛先は手元（localhost）なので困らない。CPUだけの機械では、応答の頭が
+ *   300秒を越えるのはこちらである
+ * - **クラウドのAIは `cloudFetch`**：`globalThis.fetch` のまま。プロキシと
+ *   証明書を保つ。dispatcher も渡すが、差し替えのある VS Code では
+ *   捨てられる（差し替えの無い環境——古い VS Code・MCPサーバー——でだけ効く）。
+ *   クラウドの応答の頭は300秒を越えないので、いまは実害が無い
  */
 import { canRunProcesses } from "../core/runtime";
 
 /** 作った待ち受け役を使い回す。毎回作ると接続が使い回されない */
 const cache = new Map<number, unknown>();
+
+/** 型だけを取る（値の import は動的に行う。ブラウザ版で落ちるため） */
+type UndiciModule = typeof import("undici");
+
+/**
+ * npm の undici を読み込む。ブラウザ版・読み込めない環境では undefined。
+ *
+ * **1回だけ読む。** 待ち受け役と fetch の両方がここを通るので、
+ * 読み込みの失敗も1回で覚える（毎回投げ直させない）。
+ */
+let undiciLoading: Promise<UndiciModule | undefined> | undefined;
+function loadUndici(): Promise<UndiciModule | undefined> {
+  if (!canRunProcesses()) return Promise.resolve(undefined);
+  undiciLoading ??= import("undici").catch(() => undefined);
+  return undiciLoading;
+}
 
 /**
  * `fetch` へ渡す `dispatcher`。用意できなければ undefined（従来どおり）。
@@ -45,8 +84,8 @@ export async function timeoutDispatcher(
   const cached = cache.get(timeoutMs);
   if (cached) return cached;
   try {
-    // **`.js` を付ける**（CLAUDE.md 規則7）。付けないと解決できない
-    const undici = await import("undici");
+    const undici = await loadUndici();
+    if (!undici) return undefined;
     const agent = new undici.Agent({
       // ヘッダーが来るまでの上限。**ここが本題**
       headersTimeout: timeoutMs,
@@ -64,4 +103,78 @@ export async function timeoutDispatcher(
 /** テストから、覚えた待ち受け役を捨てる */
 export function clearDispatcherCache(): void {
   cache.clear();
+}
+
+/** `localFetch`・`cloudFetch` が受け取る形。`globalThis.fetch` と同じ */
+export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
+
+/** 単体テストが手元の口を差し替えるための入れ物（`setLocalFetchForTests`） */
+let localFetchForTests: FetchLike | undefined;
+
+/**
+ * **手元のAI（Ollama・LM Studio）へ投げる口。**
+ *
+ * npm の undici の `fetch` を、こちらの待ち時間で作った待ち受け役を付けて
+ * 直接呼ぶ。`globalThis.fetch` は VS Code が差し替えており、渡した
+ * 待ち受け役を捨てるため（冒頭の「渡しただけでは届かなかった」）。
+ *
+ * **ブラウザ版では `globalThis.fetch` へ落ちる。** undici が無く、
+ * そもそもブラウザから手元のAIには届かないので実害は無い。
+ *
+ * 返す `Response` は undici のものだが、製品が使う読み方
+ * （`ok`・`status`・`json()`・`text()`・`body.getReader()`）は同じに動く。
+ */
+export async function localFetch(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const dispatcher = await timeoutDispatcher(timeoutMs);
+  const withDispatcher = withTimeoutDispatcher(init, dispatcher);
+  if (localFetchForTests) return localFetchForTests(url, withDispatcher);
+  const undici = await loadUndici();
+  if (!undici) return globalThis.fetch(url, withDispatcher);
+  // 型は undici 独自の Request/Response だが、中身は WHATWG の fetch と同じ
+  const response = await undici.fetch(
+    url,
+    withDispatcher as unknown as Parameters<UndiciModule["fetch"]>[1]
+  );
+  return response as unknown as Response;
+}
+
+/**
+ * **クラウドのAIへ投げる口。** `globalThis.fetch` のまま投げる。
+ *
+ * VS Code の差し替えを通すので、**プロキシと社内証明書の対応を保つ**。
+ * 待ち受け役も渡すが、差し替えのある VS Code では捨てられる
+ * （差し替えの無い環境でだけ効く）。クラウドの応答の頭は300秒を越えない。
+ */
+export async function cloudFetch(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const dispatcher = await timeoutDispatcher(timeoutMs);
+  return globalThis.fetch(url, withTimeoutDispatcher(init, dispatcher));
+}
+
+/**
+ * `dispatcher` は `RequestInit` の型には無い（Node 独自の拡張）。
+ * 付け方を1か所にまとめる——呼ぶ側に書き散らすと、付け忘れが字面で見えない
+ */
+function withTimeoutDispatcher(init: RequestInit, dispatcher: unknown): RequestInit {
+  return dispatcher ? ({ ...init, dispatcher } as RequestInit) : init;
+}
+
+/**
+ * 単体テストから、手元の口の行き先を差し替える。`undefined` で製品の道へ戻す。
+ *
+ * **単体テストの下ごしらえ（`test/unit/support/setup.ts`）が
+ * `globalThis.fetch` へ回している。** 手元のAIの試験の多くは
+ * `vi.stubGlobal("fetch", …)` で応答を作っており、製品の道（undici）の
+ * ままだと本物の通信へ出てしまうため。製品の道そのものは
+ * `localFetchBypassesPatch.test.ts` が本物の HTTP サーバーで見る。
+ */
+export function setLocalFetchForTests(impl: FetchLike | undefined): void {
+  localFetchForTests = impl;
 }

@@ -25,4 +25,20 @@ beforeEach(async () => {
     "../../../src/core/fileRead"
   );
   setFileReaderForTests(vscodeFileReaderForTests());
+
+  /*
+    **手元のAI（Ollama・LM Studio）の口を `globalThis.fetch` へ回す**
+    （`ai/fetchTimeouts.ts` の `localFetch`。2026-09-23）。
+
+    製品では手元のAIは npm の undici の fetch で直接投げる（VS Code が
+    差し替えた `globalThis.fetch` は、渡した待ち時間を捨てるため）。
+    ところが手元のAIの試験の多くは `vi.stubGlobal("fetch", …)` で応答を
+    作っており、製品の道のままだと**本物の通信へ出てしまう**。
+
+    **呼ぶたびに `globalThis.fetch` を引く**（差し替えた後の値を見るため）。
+    製品の道そのものは `localFetchBypassesPatch.test.ts` が、ここを
+    `undefined` へ戻して本物の HTTP サーバーで見る。
+  */
+  const { setLocalFetchForTests } = await import("../../../src/ai/fetchTimeouts");
+  setLocalFetchForTests((url, init) => globalThis.fetch(url, init));
 });

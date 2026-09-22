@@ -1,4 +1,4 @@
-import { timeoutDispatcher } from "./fetchTimeouts";
+import { cloudFetch, localFetch } from "./fetchTimeouts";
 import { AIError } from "./types";
 
 /**
@@ -70,6 +70,15 @@ export interface JsonRequest {
   signal?: AbortSignal;
   /** エラーメッセージに出すサービス名（「ChatGPT」など） */
   label: string;
+  /**
+   * 手元のAI（LM Studio）への呼び出しか。**クラウドは付けない。**
+   *
+   * 付けると `localFetch`（npm の undici）で投げ、VS Code が差し替えた
+   * `globalThis.fetch` を通らない——差し替えは渡した待ち時間を捨てるので、
+   * CPUで長い本文を読む手元のAIは300秒で切られる（`fetchTimeouts.ts`）。
+   * クラウドに付けると、VS Code のプロキシと社内証明書の対応を失う。
+   */
+  local?: boolean;
 }
 
 export async function fetchJson<T>(request: JsonRequest): Promise<T> {
@@ -94,19 +103,22 @@ export async function fetchJson<T>(request: JsonRequest): Promise<T> {
   try {
     // **Nodeの通信部品にも、こちらの待ち時間を渡す**（設計書6.63）。
     // 渡さないと、応答ヘッダーを待つ上限（既定300秒）が先に効いてしまい、
-    // 設定した待ち時間の出番が来ない
-    const dispatcher = await timeoutDispatcher(request.timeoutMs);
-    const response = await fetch(request.url, {
-      method: request.method ?? (request.body === undefined ? "GET" : "POST"),
-      headers: {
-        "Content-Type": "application/json",
-        ...(request.headers ?? {}),
+    // 設定した待ち時間の出番が来ない。**どちらの口で投げるか**は
+    // `local` で分ける（手元は VS Code の差し替えを通さない。`fetchTimeouts.ts`）
+    const send = request.local ? localFetch : cloudFetch;
+    const response = await send(
+      request.url,
+      {
+        method: request.method ?? (request.body === undefined ? "GET" : "POST"),
+        headers: {
+          "Content-Type": "application/json",
+          ...(request.headers ?? {}),
+        },
+        body: request.body === undefined ? undefined : JSON.stringify(request.body),
+        signal: controller.signal,
       },
-      body: request.body === undefined ? undefined : JSON.stringify(request.body),
-      signal: controller.signal,
-      // 型には無い（Node独自の拡張）。ブラウザでは undefined になり無視される
-      ...(dispatcher ? { dispatcher } : {}),
-    } as RequestInit);
+      request.timeoutMs
+    );
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
