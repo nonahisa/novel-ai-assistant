@@ -96,8 +96,10 @@ section.page.active { display: block; }
   margin-top: 6px;
   overflow: hidden;
 }
-.bar-inner { height: 100%; background: var(--vscode-charts-blue, #3794ff); }
-.bar-inner.achieved { background: var(--vscode-testing-iconPassed, #4caf50); }
+/* 棒の中身は SVG（meterSvg）。style 属性の幅は CSP に捨てられるため */
+.meter { display: block; }
+.meter-fill { fill: var(--vscode-charts-blue, #3794ff); }
+.meter-fill.achieved { fill: var(--vscode-testing-iconPassed, #4caf50); }
 .controls { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; }
 button {
   background: var(--vscode-button-secondaryBackground);
@@ -137,8 +139,7 @@ tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
 .flag { font-size: 11px; border-radius: 10px; padding: 0 8px; border: 1px solid var(--vscode-panel-border); }
 .flag.short { border-color: var(--vscode-editorWarning-foreground, #cca700); }
 .flag.long { border-color: var(--vscode-charts-blue, #3794ff); }
-.mini { position: relative; height: 8px; background: var(--vscode-panel-border); border-radius: 4px; min-width: 60px; }
-.mini > span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--vscode-charts-blue, #3794ff); }
+.mini { height: 8px; background: var(--vscode-panel-border); border-radius: 4px; min-width: 60px; overflow: hidden; }
 .note { color: var(--vscode-descriptionForeground); font-size: 12px; margin: 12px 0; line-height: 1.6; }
 /* サイトの記録（設計書6.68.5）。作品情報の1行と、その下に順位の履歴 */
 .site { margin-bottom: 18px; }
@@ -456,11 +457,32 @@ function renderCards() {
   });
 }
 
+/**
+ * 割合の棒（0〜100）。**幅を SVG の属性で持たせる。**
+ *
+ * この画面の CSP は style-src が nonce だけなので、HTML に書いた
+ * style 属性（幅の指定）は捨てられる。0.83.4 まではそのせいで、今日の欄の棒が
+ * 割合に関係なくいつも満杯の青に描かれ、話ごとの一覧の棒は何も出ていなかった
+ * （ノートPCの実機確認、2026-09-23〜24。今日0字・あと10字で満杯）。
+ * SVG の width 属性は CSP の対象外なので、呼ぶ側が後から幅を付け直す
+ * 必要も無い（付け忘れれば同じ不具合に戻る）。
+ *
+ * @param percent 塗る割合。0未満は0、100超は100で止める
+ * @param extraClass 塗りに足す class（達成の色など）
+ */
+function meterSvg(percent, extraClass) {
+  const value = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
+  return (
+    '<svg class="meter" viewBox="0 0 100 1" preserveAspectRatio="none" width="100%" height="100%">' +
+    '<rect class="meter-fill' + (extraClass ? ' ' + extraClass : '') +
+    '" x="0" y="0" width="' + value + '" height="1"></rect></svg>'
+  );
+}
+
 function card(label, value, sub, progress) {
   const achieved = progress && progress.achieved;
   const bar = progress && progress.goal > 0
-    ? '<div class="bar-outer"><div class="bar-inner' + (achieved ? ' achieved' : '') +
-      '" style="width:' + Math.max(0, Math.min(100, progress.rate)) + '%"></div></div>'
+    ? '<div class="bar-outer">' + meterSvg(progress.rate, achieved ? 'achieved' : '') + '</div>'
     : '';
   return (
     '<div class="card' + (achieved ? ' achieved' : '') + '">' +
@@ -470,6 +492,31 @@ function card(label, value, sub, progress) {
     bar +
     '</div>'
   );
+}
+
+/**
+ * 目標の線の札（「目標 10」）をどこに置くか。
+ *
+ * 左の縦軸の位置が既定だが、**縦軸の数字と同じ高さに来ると重なって読めない**
+ * （ノートPCの実機確認、2026-09-23〜24。目標10字で、どの日も10字未満だと
+ * 目標の線がいちばん上になり、「目標 10」と「10字」が重なった）。
+ * 目標が小さく0の線に近いときも同じことが起きる。
+ * そのときと、札が左の余白に収まらない長さのときは、**右端へ寄せて線の上に
+ * 載せる**（線の下だと、棒の頭と重なりやすい）。
+ *
+ * @param input.goalY 目標の線の高さ
+ * @param input.occupiedYs 左に既に置いてある数字の高さ（文字の下端）
+ * @param input.padLeft 左の余白（縦軸の数字の置き場）
+ * @param input.width グラフ全体の幅
+ * @param input.labelWidth 札の幅の見積もり（estimateLabelWidth）
+ */
+function goalLabelPlacement(input) {
+  const leftY = input.goalY + 3;
+  // 目盛りの字は10px。上下12px以内なら重なって見える
+  const collides = input.occupiedYs.some((y) => Math.abs(y - leftY) < 12);
+  const fits = 4 + input.labelWidth <= input.padLeft - 2;
+  if (!collides && fits) return { x: 4, y: leftY, anchor: 'start' };
+  return { x: input.width - 4, y: input.goalY - 3, anchor: 'end' };
 }
 
 function renderChart() {
@@ -501,13 +548,14 @@ function renderChart() {
   // 0の線。消した日を下向きに出すため、上端固定にはしない
   parts.push('<line class="axis" x1="' + padLeft + '" y1="' + zeroY + '" x2="' + width + '" y2="' + zeroY + '" />');
 
+  const topLabelY = padTop + 8;
+  const zeroLabelY = zeroY + 3;
+  const goalY = goal > 0 ? padTop + ((maxValue - goal) / span) * plotHeight : 0;
   if (goal > 0) {
-    const goalY = padTop + ((maxValue - goal) / span) * plotHeight;
     parts.push('<line class="goal-line" x1="' + padLeft + '" y1="' + goalY + '" x2="' + width + '" y2="' + goalY + '" />');
-    parts.push('<text class="tick" x="4" y="' + (goalY + 3) + '">目標 ' + formatCount(goal) + '</text>');
   }
-  parts.push('<text class="tick" x="4" y="' + (padTop + 8) + '">' + formatCount(maxValue) + '字</text>');
-  parts.push('<text class="tick" x="4" y="' + (zeroY + 3) + '">0</text>');
+  parts.push('<text class="tick" x="4" y="' + topLabelY + '">' + formatCount(maxValue) + '字</text>');
+  parts.push('<text class="tick" x="4" y="' + zeroLabelY + '">0</text>');
 
   // 目盛りが詰まると読めない。本数に応じて間引くだけでなく、
   // ラベルの実際の幅（「2025年10月」のような全角混じりの文字列）も
@@ -545,6 +593,22 @@ function renderChart() {
       );
     }
   });
+
+  // 目標の札は**棒のあとに描く**。右端へ寄せたとき、棒に隠れないように
+  if (goal > 0) {
+    const goalText = '目標 ' + formatCount(goal);
+    const spot = goalLabelPlacement({
+      goalY: goalY,
+      occupiedYs: [topLabelY, zeroLabelY],
+      padLeft: padLeft,
+      width: width,
+      labelWidth: estimateLabelWidth(goalText),
+    });
+    parts.push(
+      '<text class="tick goal-label" x="' + spot.x + '" y="' + spot.y +
+      '" text-anchor="' + spot.anchor + '">目標 ' + formatCount(goal) + '</text>'
+    );
+  }
 
   svg.setAttribute('width', String(width));
   svg.setAttribute('height', String(height));
@@ -1241,8 +1305,8 @@ function renderEpisodes() {
         '<td class="num">' + formatCount(row.net) + '</td>' +
         '<td class="num">約' + formatCount(row.pages) + '枚</td>' +
         '<td class="num">' + Math.round(row.ratio * 100) + '%</td>' +
-        '<td><div class="mini"><span style="width:' +
-        Math.round((row.net / maxNet) * 100) + '%"></span></div>' + flag + '</td></tr>';
+        '<td><div class="mini">' + meterSvg(Math.round((row.net / maxNet) * 100), '') +
+        '</div>' + flag + '</td></tr>';
     }).join('') +
     '</tbody></table>';
 
