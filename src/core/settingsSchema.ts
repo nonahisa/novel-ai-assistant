@@ -98,6 +98,10 @@ function commonProperties(idPattern: string): Record<string, unknown> {
               properties: {
                 value: { type: "string" },
                 chapters: { type: "array", items: { type: "integer" } },
+                evidence: {
+                  type: ["string", "null"],
+                  description: "その値を読み取った本文の引用。無いこともある",
+                },
               },
               required: ["value"],
             },
@@ -219,6 +223,12 @@ export function characterSchema(): Record<string, unknown> {
           note: { type: ["string", "null"] },
           evidence: { type: ["string", "null"] },
           source: { type: "string", enum: ["extracted", "author"] },
+          confirmed: {
+            type: "boolean",
+            description:
+              "作者が正しいと認めた変化。根拠（evidence）の無い変化は、これが立つまで本体の値を動かさない。" +
+              "**作者の判断なので、AIは立てないこと**",
+          },
         },
         required: ["field", "value"],
       },

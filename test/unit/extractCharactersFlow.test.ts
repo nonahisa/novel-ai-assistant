@@ -1302,6 +1302,7 @@ describe("人物抽出フロー", () => {
       changedIds: ["char_001"],
       conflicts: [],
       folded: [],
+      heldChanges: [],
     };
     state.generate
       .mockResolvedValueOnce(successfulResult("灯"))
@@ -2210,6 +2211,7 @@ describe("人物抽出フロー", () => {
         changedIds: ["char_001"],
         conflicts: [],
         folded: [],
+        heldChanges: [],
       };
       const { showInformationMessage } = installWindow();
       state.generate.mockResolvedValue(successfulResult("灯"));
