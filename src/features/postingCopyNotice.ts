@@ -51,6 +51,9 @@ export async function showPostingCopyNotice(input: {
   /** 台帳を読むための作品。引けなければ渡さない（ボタンが出ないだけ） */
   work?: WorkEntry;
 }): Promise<void> {
+  // **済んだ記録（`notifyDone`）を、コピーした作品のログへ**（0.81.4）。
+  // 作品が引けないときは向け直さない（呼ぶ側が向けた先を残す）
+  if (input.work) useLogFile(input.work.folderPath);
   const pageUrl = await postingPageUrlFor(input.work, input.site);
   const openPage =
     pageUrl && input.site
@@ -101,6 +104,9 @@ export async function showPostingCopyNotice(input: {
         // **本文を上書きする。** 題名欄へ入れるのは本文を貼ったあとなので、
         // ここで持ち替えるのがいちばん手数が少ない
         await vscode.env.clipboard.writeText(note.title);
+        // 押されるのは知らせが沈んだあとのことが多い。**その間にほかの操作が
+        // 書き先を変えている**ので、記録の直前に向け直す（0.81.4）
+        if (input.work) useLogFile(input.work.folderPath);
         notifyDone(`題名「${note.title}」をクリップボードへ入れました。`);
         return;
       }

@@ -83,6 +83,8 @@ export async function removeWorkMemo(
     return false;
   }
 
+  // 済んだ記録も、この作品のログへ（直前に触った作品へ流さない。0.81.4）
+  useLogFile(work.folderPath);
   notifyDone(
     `メモ「${memo.title}」を削除しました。`
   );

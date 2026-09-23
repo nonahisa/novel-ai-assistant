@@ -58,6 +58,8 @@ export async function startChapterAt(
   );
   if (!saved) return false;
 
+  // 済んだ記録も、この作品のログへ（直前に触った作品へ流さない。0.81.4）
+  useLogFile(work.folderPath);
   notifyDone(
     existing
       ? `章の名前を「${name}」に変えました。`
@@ -101,6 +103,8 @@ export async function renameChapter(
   });
   if (!saved) return false;
 
+  // 済んだ記録も、この作品のログへ（直前に触った作品へ流さない。0.81.4）
+  useLogFile(work.folderPath);
   notifyDone(`章の名前を「${name}」に変えました。`);
   return true;
 }
@@ -145,6 +149,8 @@ export async function removeChapter(
   });
   if (!saved) return false;
 
+  // 済んだ記録も、この作品のログへ（直前に触った作品へ流さない。0.81.4）
+  useLogFile(work.folderPath);
   notifyDone(
     `章「${chapter.name}」を外しました。話はそのまま残っています。`
   );

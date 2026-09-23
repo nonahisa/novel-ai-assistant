@@ -7018,7 +7018,28 @@ function chapterOfPath(filePath: string): number | null {
   return parseEpisodeFileName(path.basename(filePath)).chapterStart;
 }
 
+/**
+ * コマンドの対象の作品を決める。**決まったら、ログの書き先もその作品へ向ける**
+ * （0.81.4）。
+ *
+ * ログの書き先は `useLogFile` で切り替える1つの共有の値で、向け直さないと
+ * **直前に触った作品のログ**へ書く。実機では「教科書チート_確認用 の投稿先を
+ * カクヨム にしました。」が、関係の無い `いじめられっ子_確認用` のログに
+ * 入っていた。90余りのコマンドがここを通るので、入口で1度向けておく
+ * （機能の側でも、記録の直前に向け直す。`logTargetBeforeNotifyDone.test.ts`）。
+ */
 async function resolveWork(
+  node: WorkRef | undefined,
+  registry: WorkRegistry,
+  options: ResolveWorkOptions = {}
+): Promise<WorkEntry | undefined> {
+  const work = await resolveWorkUnrouted(node, registry, options);
+  // 取りやめたときは向け直さない（何も起きていないので、記録も無い）
+  if (work) useLogFile(work.folderPath);
+  return work;
+}
+
+async function resolveWorkUnrouted(
   node: WorkRef | undefined,
   registry: WorkRegistry,
   options: ResolveWorkOptions = {}

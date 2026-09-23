@@ -15,6 +15,7 @@ import {
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import type { ProposalPanel, ProposalViewItem } from "./proposalPanel";
 import { notifyDone } from "../views/notify";
+import { useLogFile } from "../core/logger";
 
 /**
  * 編集部からの提案を、作者が見て決める（設計書5.6）。
@@ -133,6 +134,8 @@ export async function toggleReviewLock(work: WorkEntry): Promise<void> {
         ? `${current.holder} が押さえていたものを外しました`
         : "",
     });
+    // 済んだ記録も、この作品のログへ（直前に触った作品へ流さない。0.81.4）
+    useLogFile(work.folderPath);
     notifyDone(
       `${path.basename(relative)} のロックを外しました。`
     );

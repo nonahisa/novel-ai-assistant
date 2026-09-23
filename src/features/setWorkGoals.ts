@@ -8,6 +8,7 @@ import { asOfLabel } from "../core/contestInbox";
 import { isOpenableWorkUrl } from "../core/postingSiteRecords";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { notifyDone } from "../views/notify";
+import { useLogFile } from "../core/logger";
 import { reportContest } from "./contestGoalReport";
 import {
   chooseContestForWork,
@@ -137,6 +138,8 @@ export async function setWorkGoals(
   }
   if (picked.action === "clearContest") {
     await save(work, { ...goals, contest: null });
+    // 済んだ記録も、この作品のログへ（直前に触った作品へ流さない。0.81.4）
+    useLogFile(work.folderPath);
     notifyDone("応募先の情報を消しました。");
     return;
   }

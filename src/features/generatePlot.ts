@@ -346,6 +346,8 @@ async function applyPlot(
   }
 
   if (filled.length === 0 && replaced.length === 0) {
+    // 済んだ記録も、この作品のログへ（直前に触った作品へ流さない。0.81.4）
+    useLogFile(work.folderPath);
     notifyDone("プロットは変更しませんでした。");
     return;
   }

@@ -6,6 +6,7 @@ import { clearSeriesCache } from "../core/seriesSettings";
 import { isPlainFolderName } from "../core/seriesLink";
 import { askText } from "../views/dialogs";
 import { notifyDone } from "../views/notify";
+import { useLogFile } from "../core/logger";
 
 /**
  * シリーズ作品を、設定資料でゆるくつなぐ（設計書6.95）。
@@ -70,6 +71,8 @@ export async function setSeries(work: WorkEntry): Promise<boolean> {
   if (picked.length === 0) {
     if (!config.series) return false;
     await writeSeries(work, config, undefined);
+    // 済んだ記録も、この作品のログへ（直前に触った作品へ流さない。0.81.4）
+    useLogFile(work.folderPath);
     notifyDone(`「${work.title}」のシリーズのつながりを解きました。`);
     return true;
   }
@@ -90,6 +93,8 @@ export async function setSeries(work: WorkEntry): Promise<boolean> {
     related: picked.map((item) => item.label),
   });
 
+  // 済んだ記録も、この作品のログへ（直前に触った作品へ流さない。0.81.4）
+  useLogFile(work.folderPath);
   notifyDone(
     `「${work.title}」を${trimmed}としてつなぎました` +
       `（${picked.map((item) => item.label).join("、")}）。`,

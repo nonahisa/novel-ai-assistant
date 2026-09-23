@@ -68,6 +68,8 @@ export async function renameWork(
   const message = `作品名を「${oldTitle}」から「${newTitle}」に変えました。`;
   if (notes.length === 0) {
     // 件数も保存先も伴わない完了なので、ステータスバーで足りる（notify.ts）
+    // 済んだ記録も、この作品のログへ（直前に触った作品へ流さない。0.81.4）
+    useLogFile(work.folderPath);
     notifyDone(message);
   } else {
     // 断りが付くものは消えると困る。通知に出したうえでログにも残す

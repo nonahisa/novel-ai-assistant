@@ -1060,6 +1060,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     // **何がどう動いたかを残す。** 受容度・自信度は出さない
     // （作者に見せないと決めたものを、ログから漏らさない）
     const updated = describeAdvicePolicyUpdate(before, after);
+    // 相談の答えを待つ間に書き先が変わりうる。記録の直前に、この作品へ（0.81.4）
+    useLogFile(work.folderPath);
     if (updated) logStep(updated);
 
     // **タイプが変わったら、その場で作者に見せる。** 黙って変えると、

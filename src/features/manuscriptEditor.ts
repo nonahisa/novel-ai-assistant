@@ -2604,6 +2604,8 @@ export class ManuscriptEditorProvider
       paths.toUri(filePath),
       new TextEncoder().encode("")
     );
+    // 作った話の作品のログへ（前面の作品や直前の作品へ流さない。0.81.4）
+    useLogFile(work.folderPath);
     logLine(`原稿エディタ：${fileName} を作成`);
     // **執筆量の基準を置き直す**（設計書6.3.2）。ここで入れておかないと、
     // このあと作者が書いて保存した回が「ファイル数が変わった」に当たり、

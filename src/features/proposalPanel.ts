@@ -3073,6 +3073,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     }
   ): Promise<void> {
     const note = describeRecheckNote(outcome);
+    // **AIの答えを待つ間に、ほかの操作が書き先を変えている**ことがある。
+    // 記録（失敗・解消・作業記録）の直前に、この作品へ向け直す（0.81.4）
+    useLogFile(work.folderPath);
 
     if (outcome.kind === "unchanged") {
       // ここに来るのは、AIを呼ばずに済んだ場合である（引用がそのまま残って

@@ -472,6 +472,12 @@ export async function configurePostingSites(
   if (!(await save(store, work, withNewSites, "投稿先の設定"))) {
     return { changed: false };
   }
+  /*
+    **済んだ記録も、設定した作品のログへ向けてから書く**（0.81.4。実機）。
+    向けるのが失敗の道（`report`）だけだったので、「投稿先を〜にしました」が
+    直前に触った**関係の無い作品**のログへ入っていた
+  */
+  useLogFile(work.folderPath);
   notifyDone(
     chosen.length === 0
       ? `${work.title} の投稿先をすべて外しました（記録は残っています）。`

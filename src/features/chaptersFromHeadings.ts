@@ -136,6 +136,8 @@ export async function chaptersFromHeadings(work: WorkEntry): Promise<boolean> {
     return false;
   }
 
+  // 済んだ記録も、この作品のログへ（直前に触った作品へ流さない。0.81.4）
+  useLogFile(work.folderPath);
   notifyDone(
     `章を${chapters.length}個立てました（「${chapters[0].name}」` +
       `${chapters.length > 1 ? "ほか" : ""}）。`
