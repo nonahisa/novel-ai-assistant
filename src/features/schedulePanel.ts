@@ -32,6 +32,8 @@ import { openInDefaultEditor } from "../views/openDocument";
 import { buildSchedulePanelHtml } from "../views/schedulePanelHtml";
 import { columnForLocation, wideViewColumn } from "./editorColumn";
 import { loadScheduleBoard, scheduleToday } from "./scheduleData";
+import { importHolidays, loadHolidays } from "./holidayImport";
+import { exportScheduleIcs } from "./scheduleCalendarExport";
 
 /**
  * スケジュールの画面（設計書6.111）。**全作品を1枚に並べる**（縦が時間、横が作品）。
@@ -47,6 +49,8 @@ import { loadScheduleBoard, scheduleToday } from "./scheduleData";
 
 let panel: vscode.WebviewPanel | undefined;
 let showFinished = false;
+/** 祝日の控え（保管庫）を読むのに要る。画面を開いたときに受け取る */
+let panelContext: vscode.ExtensionContext | undefined;
 
 export interface SchedulePanelDeps {
   readonly registry: WorkRegistry;
@@ -61,6 +65,7 @@ export async function openSchedulePanel(
     void vscode.window.showInformationMessage("作品が登録されていません。");
     return;
   }
+  panelContext = context;
   if (panel) {
     panel.reveal();
     await postBoard(deps);
@@ -99,8 +104,11 @@ async function postBoard(
   deps: SchedulePanelDeps,
   select?: { workId: string; scheduleId: string; stepId: string | null }
 ): Promise<void> {
-  if (!panel) return;
-  const board = await loadScheduleBoard(deps.registry, deps.deviceId, { showFinished });
+  if (!panel || !panelContext) return;
+  const board = await loadScheduleBoard(deps.registry, deps.deviceId, {
+    showFinished,
+    holidays: await loadHolidays(panelContext),
+  });
   void panel.webview.postMessage({ type: "board", board, select });
 }
 
@@ -198,7 +206,25 @@ async function handleMessage(message: ScheduleMessage, deps: SchedulePanelDeps):
       await postBoard(deps, { workId: work.id, scheduleId: message.scheduleId, stepId: null });
       return;
     }
+    case "exportIcs":
+      if (panelContext) await exportScheduleIcs(panelContext, deps.registry);
+      return;
+    case "importHolidays":
+      if (panelContext && (await importHolidays(panelContext))) await postBoard(deps);
+      return;
+    case "openWorkloadSettings":
+      await vscode.commands.executeCommand("workbench.action.openSettings", "novelai.schedule");
+      return;
   }
+}
+
+/** 設定の作業量の割合・重なりの損が変わったら描き直す（extension.ts が呼ぶ） */
+export function watchWorkloadSettings(context: vscode.ExtensionContext, deps: SchedulePanelDeps): void {
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (panel && event.affectsConfiguration("novelai.schedule")) void postBoard(deps).catch(reportError);
+    })
+  );
 }
 
 /**

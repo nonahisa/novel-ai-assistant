@@ -28,6 +28,27 @@ describe("スケジュールの画面", () => {
     expect(html).toContain("＋ スケジュールを足す");
   });
 
+  test("埋め込みのスクリプトは JavaScript として読める（崩れた文で画面が真っ白にならない）", () => {
+    const start = html.indexOf(">", html.indexOf("<script")) + 1;
+    const script = html.slice(start, html.indexOf("</script>"));
+    expect(() => new Function(script)).not.toThrow();
+  });
+
+  test("カレンダーへの書き出し・祝日の取り込み・作業量の設定、並行と担い手の欄がある（6.111.12〜15）", () => {
+    for (const text of [
+      "カレンダーへ書き出す",
+      "祝日を取り込む",
+      "作業量の設定",
+      "前の段が終わってから",
+      "と同時に進められる",
+      "人に頼む",
+      "自分で進める",
+    ]) {
+      expect(html).toContain(text);
+    }
+    for (const type of ["exportIcs", "importHolidays", "openWorkloadSettings"]) expect(html).toContain(`"${type}"`);
+  });
+
   test("連載の点は色だけでなく記号でも分ける", () => {
     for (const symbol of ["●", "◐", "○", "×"]) expect(html).toContain(symbol);
   });

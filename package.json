@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを引き受けるVSCode拡張機能で、AIは提案するだけで原稿は書き換えません（無料の手元AIだけでも使えます）。※現在テスト中です。",
-  "version": "0.83.5",
+  "version": "0.83.6",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -421,6 +421,18 @@
         "title": "スケジュール",
         "category": "小説執筆",
         "icon": "$(calendar)"
+      },
+      {
+        "command": "novelai.importHolidays",
+        "title": "祝日を取り込む",
+        "category": "小説執筆",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "novelai.exportScheduleIcs",
+        "title": "スケジュールをカレンダーへ書き出す（.ics）",
+        "category": "小説執筆",
+        "icon": "$(export)"
       },
       {
         "command": "novelai.suggestContests",
@@ -1912,6 +1924,49 @@
           "default": true,
           "markdownDescription": "スケジュールの段の開始・期日、締切・発売日・連載開始が近づいたら知らせる（1日1回だけ）。\n\n・起動の少しあとと、日が替わったときに確かめる\n・間に合わない予定・書き溜めが尽きそうな連載も"
         },
+        "novelai.schedule.weekdayWeight": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0,
+          "maximum": 10,
+          "markdownDescription": "スケジュールの逆算で、**平日**にどれだけ進むか（割合。`0` は休み）。\n\n・お勤めがあって平日は少し、休日に多く書く人は、平日を小さく・土日祝を大きく（例：平日 `1`・土日 `3`・祝日 `3`）\n・割合は比べるための値で、合計は直近30日の執筆の速さに合わせて割り戻す（見積もりが速くも遅くもならない）"
+        },
+        "novelai.schedule.weekendWeight": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0,
+          "maximum": 10,
+          "markdownDescription": "スケジュールの逆算で、**土日**にどれだけ進むか（割合。`0` は休み）。\n\n・休日に多く書く人は大きく、休日は家の用事で書かない人は `0`"
+        },
+        "novelai.schedule.holidayWeight": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0,
+          "maximum": 10,
+          "markdownDescription": "スケジュールの逆算で、**祝日**（振替休日を含む）にどれだけ進むか（割合。`0` は休み）。\n\n・土日と重なる祝日も、この割合を使う\n・副業で書いている人は、祝日のほうが書ける日かもしれない\n・祝日の一覧は拡張機能に入っている。新しくするには「祝日を取り込む」"
+        },
+        "novelai.schedule.weekdayOverrides": {
+          "type": "object",
+          "default": {},
+          "properties": {
+            "sun": { "type": "number", "minimum": 0, "maximum": 10, "description": "日曜の割合" },
+            "mon": { "type": "number", "minimum": 0, "maximum": 10, "description": "月曜の割合" },
+            "tue": { "type": "number", "minimum": 0, "maximum": 10, "description": "火曜の割合" },
+            "wed": { "type": "number", "minimum": 0, "maximum": 10, "description": "水曜の割合" },
+            "thu": { "type": "number", "minimum": 0, "maximum": 10, "description": "木曜の割合" },
+            "fri": { "type": "number", "minimum": 0, "maximum": 10, "description": "金曜の割合" },
+            "sat": { "type": "number", "minimum": 0, "maximum": 10, "description": "土曜の割合" }
+          },
+          "additionalProperties": false,
+          "markdownDescription": "曜日ごとに、平日・土日の割合を上書きする（例：水曜は書かない → `{ \"wed\": 0 }`）。\n\n・書いていない曜日は、平日・土日の割合のまま\n・祝日は、曜日にかかわらず祝日の割合"
+        },
+        "novelai.schedule.overlapPenalty": {
+          "type": "number",
+          "default": 0.1,
+          "minimum": 0,
+          "maximum": 0.9,
+          "markdownDescription": "自分で進める作業が同じ日に重なったときの、切り替えの損（重なり1つごとに落ちる割合）。\n\n・重なった作業は1日の作業量を分け合い、さらにこの割合ずつ遅くなる（既定 `0.1` で、2つ重なると1つあたり約4.5割の速さ）\n・人に頼む段（表紙・審査・校正など）は重なりに数えない"
+        },
         "novelai.stats.dayBoundaryHour": {
           "type": "number",
           "default": 4,
@@ -2227,7 +2282,8 @@
     "ci": "npm run check:deps && npm run typecheck && npm run typecheck:tests && npm run test:unit && npm run test:quality && npm run test:coverage && npm run build && npm run test:integration && npm audit --audit-level=moderate",
     "test:integration:patched": "node scripts/runIntegrationTests.mjs --vscode=1.138.0",
     "check:release": "npm run check && npm run bundle:core && npm run test:integration && npm run test:integration:patched && npm run test:web && npm audit --audit-level=moderate",
-    "prepackage:vsix": "npm run check:release",
+    "prepackage:vsix": "node scripts/updateHolidays.mjs --check && npm run check:release",
+    "holidays": "node scripts/updateHolidays.mjs",
     "package:vsix": "node scripts/packageVsix.mjs",
     "verify:vsix": "node scripts/verifyVsix.mjs",
     "release:github": "node scripts/releaseGithub.mjs",

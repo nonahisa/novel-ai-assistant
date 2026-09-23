@@ -78,7 +78,12 @@ export function exposureOf(
     tool === "ollama.models" ||
     tool === "novel.propose" ||
     tool === "novel.notice" ||
-    tool === "guide.spotlight"
+    tool === "guide.spotlight" ||
+    /*
+      `schedule.milestones`（設計書6.111.15）は**スケジュールの日付と名前だけ**を返し、
+      本文も設定資料も開かない（`設定/スケジュール.json` と作品目標設定だけを読む）。
+    */
+    tool === "schedule.milestones"
   ) {
     return "none";
   }
@@ -168,6 +173,7 @@ function detailOf(
       "";
     return pointed ? `画面で指した（${pointed}）` : "画面で指した";
   }
+  if (tool === "schedule.milestones") return "締切・発売日などの日付を読んだ";
   const parts: string[] = [];
   /*
     **どの機能だったかを残す**（0.66.7）。道具の名前は `novel.run` の1つに

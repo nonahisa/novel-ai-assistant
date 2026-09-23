@@ -3,6 +3,7 @@ import type { WorkRegistry } from "../core/workRegistry";
 import { collectScheduleNotices, scheduleNoticeText } from "../core/scheduleNotice";
 import { logFailure, useLogFile } from "../core/logger";
 import { loadScheduleBoard, scheduleToday } from "./scheduleData";
+import { loadHolidays } from "./holidayImport";
 
 /**
  * スケジュールの知らせ（設計書6.111.9）。**1日1回だけ**、まとめて1つ出す。
@@ -31,7 +32,10 @@ export function startScheduleNotices(
     if (!vscode.workspace.getConfiguration("novelai").get<boolean>("schedule.notify", true)) return;
     if (context.globalState.get<string>(LAST_NOTICE_KEY) === today) return;
     try {
-      const board = await loadScheduleBoard(registry, deviceId, { showFinished: false });
+      const board = await loadScheduleBoard(registry, deviceId, {
+        showFinished: false,
+        holidays: await loadHolidays(context),
+      });
       const text = scheduleNoticeText(collectScheduleNotices(board.columns, board.today));
       // 何も無い日も「確かめた」と残す（あとから開いたウィンドウが走査し直さない）
       await context.globalState.update(LAST_NOTICE_KEY, today);

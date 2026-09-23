@@ -17,7 +17,9 @@ import { episodePathFor } from "../core/bookStore";
 import { episodePlotFileName, episodePlotTitleFromText } from "../core/resumeSheet";
 import { buildEpisodeFacts } from "../core/scheduleEpisodes";
 import { buildScheduleBoard, type ScheduleBoard, type WorkScheduleInput } from "../core/scheduleBoard";
-import type { EpisodeFact, PlanContext } from "../core/schedulePlan";
+import type { EpisodeFact, GoalsContestRef, PlanContext } from "../core/schedulePlan";
+import { buildWorkCalendar, normalizeWorkload, type WorkloadSettings } from "../core/workCalendar";
+import type { HolidaySet } from "../core/holidays";
 import { logFailure, useLogFile } from "../core/logger";
 import { boundaryHour } from "./writingProgress";
 import { episodePlotsDirOf, listEpisodePlotChapters } from "./episodePlotNav";
@@ -34,13 +36,30 @@ export function scheduleToday(): string {
   return statsDayKey(new Date(), boundaryHour());
 }
 
+/**
+ * 作業量の割合（設計書6.111.12）を設定から読む。読めない値は既定に戻し、
+ * 戻したことを画面の上に出す（黙って使わない）。
+ */
+export function readWorkloadSettings(): { settings: WorkloadSettings; problems: string[] } {
+  const config = vscode.workspace.getConfiguration("novelai.schedule");
+  return normalizeWorkload({
+    weekday: config.get<unknown>("weekdayWeight"),
+    weekend: config.get<unknown>("weekendWeight"),
+    holiday: config.get<unknown>("holidayWeight"),
+    weekdayOverrides: config.get<unknown>("weekdayOverrides"),
+    overlapPenalty: config.get<unknown>("overlapPenalty"),
+  });
+}
+
 export async function loadScheduleBoard(
   registry: WorkRegistry,
   deviceId: string,
-  options: { showFinished: boolean }
+  options: { showFinished: boolean; holidays: HolidaySet }
 ): Promise<ScheduleBoard> {
   const today = scheduleToday();
   const works = registry.list();
+  const workload = readWorkloadSettings();
+  const calendar = buildWorkCalendar(workload.settings, options.holidays, today);
 
   // 巡航速度は、作品の記録が少なければ全作品の記録で測る（6.3.6.3）。全作品を1度だけ読む
   const statsByWork = new Map<string, DeviceWritingStats[]>();
@@ -55,7 +74,20 @@ export async function loadScheduleBoard(
   const inputs = await Promise.all(
     works.map((work) => workInput(work, today, statsByWork.get(work.id) ?? [], allDays))
   );
-  return buildScheduleBoard(inputs, { today, now: new Date().toISOString(), showFinished: options.showFinished });
+  return buildScheduleBoard(inputs, {
+    today,
+    now: new Date().toISOString(),
+    showFinished: options.showFinished,
+    calendar,
+    notes: workload.problems,
+  });
+}
+
+/** 作品目標設定の応募先を、スケジュールの公募の形にする（画面と .ics の書き出しで同じもの） */
+export function goalsContestOf(goals: Awaited<ReturnType<typeof readWorkGoalsOrEmpty>>): GoalsContestRef | null {
+  return goals.contest
+    ? { name: goals.contest.name, deadline: goals.contest.deadline, targetChars: targetCharsOf(goals.contest) }
+    : null;
 }
 
 async function workInput(
@@ -87,9 +119,7 @@ async function workInput(
   }
 
   const goals = await readWorkGoalsOrEmpty(work);
-  const goalsContest = goals.contest
-    ? { name: goals.contest.name, deadline: goals.contest.deadline, targetChars: targetCharsOf(goals.contest) }
-    : null;
+  const goalsContest = goalsContestOf(goals);
   if (file.schedules.length === 0 && goalsContest === null) {
     return { workId: work.id, title: work.title, file: emptyScheduleFile(), error: null, context: bare };
   }

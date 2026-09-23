@@ -335,7 +335,9 @@ import {
   openAllWorksWritingStatsPanel,
   refreshAllWorksWritingStatsPanel,
 } from "./features/allWorksWritingStatsPanel";
-import { openSchedulePanel, refreshSchedulePanel } from "./features/schedulePanel";
+import { openSchedulePanel, refreshSchedulePanel, watchWorkloadSettings } from "./features/schedulePanel";
+import { importHolidays } from "./features/holidayImport";
+import { exportScheduleIcs } from "./features/scheduleCalendarExport";
 import { startScheduleNotices } from "./features/scheduleNotify";
 import {
   createEpisodePlot,
@@ -3709,8 +3711,18 @@ export async function activate(
   context.subscriptions.push(
     registerCommand("novelai.openSchedule", async () => {
       await openSchedulePanel(context, { registry, deviceId });
+    }),
+    // 祝日の一覧（6.111.12）。ふだんは同梱の一覧。押したときだけ取りに行く
+    registerCommand("novelai.importHolidays", async () => {
+      if (await importHolidays(context)) await refreshSchedulePanel({ registry, deviceId });
+    }),
+    // 大きなマイルストーンを .ics へ（6.111.15）。押したときだけ。置き場は作品の外
+    registerCommand("novelai.exportScheduleIcs", async () => {
+      await exportScheduleIcs(context, registry);
     })
   );
+  // 作業量の割合・重なりの損を変えたら、開いている画面を描き直す
+  watchWorkloadSettings(context, { registry, deviceId });
   // 段の開始・期日が近づいたら1日1回だけ知らせる（設定で切れる。起動の20秒後から）
   startScheduleNotices(context, registry, deviceId);
 

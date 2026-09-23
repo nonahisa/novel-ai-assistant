@@ -6,7 +6,7 @@
 
 > **※現在テスト中です。** 動作の確認（実機テスト）が済んでいない機能が含まれます。大切な原稿は、必ずバックアップ（GitHub同期など）を取ったうえでお使いください。
 
-このリポジトリの版：**0.83.5**（Marketplace に出ている版は **0.82.6**）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**0.83.6**（Marketplace に出ている版は **0.82.6**）。Marketplace に出ている版はこれより遅れることがあります。
 
 - 原稿を書き換えるAIはいません。提案を適用するのは、いつもあなたです。
 - 手元AI（Ollama / LM Studio）なら無料で使えます。クラウドAIも、鍵を入れれば機能ごとに選べます。
@@ -339,10 +339,16 @@ code --install-extension ".\novel-ai-assistant-$($v.TrimStart('v')).vsix" --forc
 | `novelai.stats.dayBoundaryHour` | `4` | 1日の区切りとする時刻 |
 | `novelai.stats.weekStart` | `monday` | 週次グラフで週の始まりとする曜日 |
 | `novelai.schedule.notify` | `true` | スケジュールの段の開始・期日、締切・発売日・連載開始が近づいたら1日1回知らせる |
+| `novelai.schedule.weekdayWeight` | `1` | スケジュールの逆算で、平日にどれだけ進むか（`0` は休み）。お勤めがあって平日は少し、休日に多く書く人は、平日を小さく・土日祝を大きく |
+| `novelai.schedule.weekendWeight` | `1` | 土日にどれだけ進むか（`0` は休み） |
+| `novelai.schedule.holidayWeight` | `1` | 祝日にどれだけ進むか（`0` は休み。土日と重なる祝日もこの割合） |
+| `novelai.schedule.overlapPenalty` | `0.1` | 自分で進める作業が同じ日に重なったときの、重なり1つごとに落ちる速さの割合 |
 | `novelai.celebrations.enabled` | `true` | 目標に届いたら、執筆統計に風船（大きな目標は花火も）、原稿エディターの下の欄に一言 |
 | `novelai.readerStats.importOnFocus` | `true` | VS Code に戻ったとき、統合小説執筆環境ヘルパーがコピーした読者の反応を取り込むか訊く |
 | `novelai.epub.ornamentFolder` | `""`（指していない） | EPUBの飾り（`*.svg`）を追加で読み込むフォルダーの絶対パス |
 | `novelai.mode` | `author` | この環境を作者（`author`）と編集者（`editor`）のどちらとして使うか |
+
+曜日ごとに割合を変えたいときは `novelai.schedule.weekdayOverrides` に書きます（例：水曜は書かない → `{ "wed": 0 }`。書いていない曜日は平日・土日の割合のまま）。
 
 ### AI
 

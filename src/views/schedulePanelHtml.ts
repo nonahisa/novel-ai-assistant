@@ -6,6 +6,9 @@
  * - WEB連載は投稿予定日を点で縦に並べ、投稿済み・書き溜め・未執筆・過ぎて未投稿を
  *   **色と記号（●◐○×）の両方で**分ける（色が分からなくても区別できるように。編集履歴と同じ）
  * - 段を押すと右に詳細を出して直せる。作品の見出しを押すと作品を開く
+ * - **並行の段は、同じレーンの中で横に並べる**（帯を組の数で細く分ける。6.111.13）。
+ *   人に頼む段は帯を点線で縁取る。作業が重なる段は「重なり」の印（6.111.14）
+ * - 日付の軸に**祝日の名前**、休み（割合0）の日は薄い帯（6.111.12）
  *
  * **描くのは絶対位置の要素だけ**で、日ごとの行は作らない。3年分でも要素は段と投稿日と
  * 月の線だけ（数百個）なので、見えている範囲だけ描く仕組みは入れていない。
@@ -26,7 +29,7 @@ export function buildSchedulePanelHtml(nonce: string, cspSource: string): string
 <style>
 :root {
   --head-h: 96px;
-  --axis-w: 76px;
+  --axis-w: 124px;
   --lane-w: 124px;
   --serial-w: 150px;
   --todo: var(--vscode-charts-blue, #3794ff);
@@ -109,6 +112,12 @@ header h1 { font-size: 14px; margin: 0 8px 0 0; }
 .bar.overlap { outline: 1px dashed var(--warn); }
 .bar.zero { background: none; border-left: none; border-top: 2px dotted var(--done); height: 2px; padding: 0; }
 .bar.selected { outline: 2px solid var(--vscode-focusBorder); }
+.bar.others { border-left-style: dashed; background: color-mix(in srgb, var(--todo) 14%, transparent); }
+.bar.loaded { box-shadow: inset 0 0 0 1px var(--warn); }
+.rest-band { position: absolute; left: 0; right: 0; background: color-mix(in srgb, var(--vscode-descriptionForeground, #888) 12%, transparent); pointer-events: none; }
+.axis-label.holiday { color: var(--late); left: 70px; right: 2px; font-size: 10px; overflow: hidden; text-overflow: ellipsis; }
+.notes { width: 100%; color: var(--warn); }
+.workload { color: var(--vscode-descriptionForeground); }
 .serial .bar { right: auto; width: 66px; }
 .milestone {
   position: absolute; left: 2px; right: 2px; height: 14px; line-height: 14px;
@@ -154,13 +163,19 @@ header h1 { font-size: 14px; margin: 0 8px 0 0; }
   </span>
   <button id="toToday">今日へ</button>
   <label><input type="checkbox" id="showFinished"> 済んだ作品も見る</label>
+  <button id="exportIcs" title="締切・発売日・連載開始日と、手で入れた期日だけを .ics に書き出します（Google カレンダーへ取り込めます）">カレンダーへ書き出す</button>
+  <button id="importHolidays" title="押したときだけ祝日の一覧を取りに行きます。ふだんは拡張機能に入っている一覧を使います">祝日を取り込む</button>
+  <button id="workloadSettings" title="平日・土日・祝日にどれだけ進むか、作業が重なったときの損">作業量の設定</button>
+  <span class="workload" id="workload"></span>
   <span class="legend">
     <span><span class="sym" style="color:var(--done)">●</span>投稿済み</span>
     <span><span class="sym" style="color:var(--stock)">◐</span>書き溜め</span>
     <span><span class="sym">○</span>未執筆</span>
     <span><span class="sym" style="color:var(--late)">×</span>過ぎて未投稿</span>
     <span>◆ 締切・発売日・連載開始</span>
+    <span>┆ 人に頼む段</span>
   </span>
+  <div class="notes" id="notes"></div>
 </header>
 <div id="empty"></div>
 <div id="scroller"><div id="grid"></div></div>
@@ -198,6 +213,36 @@ header h1 { font-size: 14px; margin: 0 8px 0 0; }
   function post(message) { vscode.postMessage(message); }
 
   document.getElementById("add").addEventListener("click", function () { post({ type: "addSchedule", workId: null }); });
+  document.getElementById("exportIcs").addEventListener("click", function () { post({ type: "exportIcs" }); });
+  document.getElementById("importHolidays").addEventListener("click", function () { post({ type: "importHolidays" }); });
+  document.getElementById("workloadSettings").addEventListener("click", function () { post({ type: "openWorkloadSettings" }); });
+  var ACTOR = { self: "自分で進める", others: "人に頼む" };
+
+  // 見出しの行は、ボタンと断りの数で折り返して高さが変わる。下の画面をその分だけ縮める
+  function fitLayout() {
+    var header = document.querySelector("header");
+    var h = header ? header.offsetHeight : 44;
+    document.getElementById("scroller").style.height = "calc(100vh - " + h + "px)";
+    document.getElementById("detail").style.top = h + "px";
+  }
+  window.addEventListener("resize", fitLayout);
+
+  function renderHeaderInfo() {
+    var workload = document.getElementById("workload");
+    var notes = document.getElementById("notes");
+    workload.textContent = ""; notes.textContent = "";
+    if (!board) return;
+    var w = board.workload;
+    if (w && !w.uniform) {
+      var parts = ["平日 " + w.weekday, "土日 " + w.weekend, "祝日 " + w.holiday];
+      for (var d = 0; d < 7; d++) {
+        if (w.byWeekday[d] !== null && w.byWeekday[d] !== undefined) parts.push(KIND_DAYS[d] + "曜 " + w.byWeekday[d]);
+      }
+      workload.textContent = "作業量の割合：" + parts.join("・");
+    }
+    (board.notes || []).forEach(function (text) { notes.appendChild(el("div", "", text)); });
+    fitLayout();
+  }
   document.getElementById("toToday").addEventListener("click", scrollToToday);
   var finished = document.getElementById("showFinished");
   finished.checked = state.showFinished;
@@ -241,6 +286,27 @@ header h1 { font-size: 14px; margin: 0 8px 0 0; }
   }
 
   function drawLines(body, withLabels) {
+    // 休み（割合0）の日は薄い帯。続く休みは1本にまとめる（要素を増やしすぎない）
+    var rest = board.restDays || [];
+    for (var i = 0; i < rest.length; i++) {
+      var first = rest[i]; var last = first;
+      while (i + 1 < rest.length && rest[i + 1] === addDays(last, 1)) { i++; last = rest[i]; }
+      var band = el("div", "rest-band");
+      band.style.top = yOf(first) + "px";
+      band.style.height = (dayIndex(last) - dayIndex(first) + 1) * px() + "px";
+      body.appendChild(band);
+    }
+    if (withLabels) {
+      (board.holidays || []).forEach(function (holiday) {
+        // 年の縮尺では文字が重なるので、名前は出さずに印だけ
+        var mark = el("div", "axis-label holiday", px() >= 8 ? "祝 " + holiday.name : "祝");
+        // 週の縮尺では1日の高さに2行入るので、日付の下の行へ名前を全部出す
+        if (px() >= 24) { mark.style.top = (yOf(holiday.date) + 11) + "px"; mark.style.left = "4px"; }
+        else mark.style.top = yOf(holiday.date) + "px";
+        mark.title = md(holiday.date) + " " + holiday.name;
+        body.appendChild(mark);
+      });
+    }
     monthStarts().forEach(function (key) {
       var line = el("div", "month-line"); line.style.top = yOf(key) + "px"; body.appendChild(line);
       if (withLabels) {
@@ -269,6 +335,7 @@ header h1 { font-size: 14px; margin: 0 8px 0 0; }
   function render() {
     markScale();
     if (!board) return;
+    renderHeaderInfo();
     var grid = document.getElementById("grid");
     var empty = document.getElementById("empty");
     var scroller = document.getElementById("scroller");
@@ -374,6 +441,17 @@ header h1 { font-size: 14px; margin: 0 8px 0 0; }
       var bar = el("div", "bar " + step.status);
       if (planned.lateDays > 0) bar.classList.add("late");
       if (planned.overlapDays > 0) bar.classList.add("overlap");
+      if (planned.actor === "others") bar.classList.add("others");
+      if (planned.peakLoad > 1 && step.status !== "done") bar.classList.add("loaded");
+      // 並行の段は、レーンの幅を組の数で分けて横に並べる
+      var tracks = planned.tracks || 1;
+      if (tracks > 1 && plan.schedule.kind !== "webSerial") {
+        var inner = width - 8;
+        var each = inner / tracks;
+        bar.style.left = (4 + each * planned.track) + "px";
+        bar.style.right = "auto";
+        bar.style.width = Math.max(6, each - 2) + "px";
+      }
       if (selection && selection.stepId === step.id && selection.scheduleId === plan.schedule.id && selection.workId === column.workId) bar.classList.add("selected");
       var top; var h;
       if (planned.days === 0 && step.status !== "done") {
@@ -435,10 +513,12 @@ header h1 { font-size: 14px; margin: 0 8px 0 0; }
     var step = planned.step;
     if (step.status === "done") return step.label + "　済み（" + md(planned.end) + "）";
     var range = planned.days === 0 ? "字数に届いています" : md(planned.start) + "〜" + md(planned.end) + "（" + planned.days + "日）";
-    var parts = [step.label + "　" + range, STATUS[step.status]];
+    var parts = [step.label + "　" + range, STATUS[step.status] + "・" + ACTOR[planned.actor || "self"]];
     if (step.due) parts.push("期日 " + md(step.due) + "（手で入れた日付）");
     if (planned.lateDays > 0) parts.push("あと" + planned.lateDays + "日足りない");
     if (planned.overlapDays > 0) parts.push("あとの段と" + planned.overlapDays + "日重なる");
+    if ((planned.tracks || 1) > 1) parts.push("ほかの段と同時に進める");
+    if (plan.overlapNotes && plan.overlapNotes[step.id]) parts.push(plan.overlapNotes[step.id]);
     return parts.join("\\n");
   }
 
@@ -520,11 +600,28 @@ header h1 { font-size: 14px; margin: 0 8px 0 0; }
     var days = field(detail, pace ? "仮の日数（直近30日の執筆の記録か予定の字数が無いときに使います）" : "日数", input("number", step.days));
     days.min = "1"; days.max = "3650";
     if (pace) detail.appendChild(el("div", "note", planned.daysSource === "pace" ? "いまは字数と直近30日の平均から " + planned.days + "日 と出しています。" : "いまは仮の日数を使っています。"));
+    // 並行：同じスケジュールのほかの段から選ぶ（6.111.13）
+    var parallel = document.createElement("select");
+    var none = el("option", "", "前の段が終わってから"); none.value = ""; parallel.appendChild(none);
+    plan.schedule.steps.forEach(function (other) {
+      if (other.id === step.id) return;
+      var option = el("option", "", "「" + other.label + "」と同時に進められる");
+      option.value = other.id;
+      if (step.parallelWith === other.id) option.selected = true;
+      parallel.appendChild(option);
+    });
+    field(detail, "始める時期", parallel);
+    // 誰が動かすか（6.111.14）
+    var actor = document.createElement("select");
+    ["self", "others"].forEach(function (key) {
+      var option = el("option", "", ACTOR[key]); option.value = key; if (key === (planned.actor || "self")) option.selected = true; actor.appendChild(option);
+    });
+    field(detail, "誰が進めるか（人に頼む段は休む日・作業の重なりに数えません）", actor);
     var note = document.createElement("textarea"); note.value = step.note || "";
     field(detail, "メモ", note);
     var buttons = el("div", "buttons");
     buttons.appendChild(button("保存", "primary", function () {
-      var patch = { label: label.value, status: status.value, due: due.value || null, note: note.value, days: numberOrNull(days.value) };
+      var patch = { label: label.value, status: status.value, due: due.value || null, note: note.value, days: numberOrNull(days.value), parallelWith: parallel.value || null, actor: actor.value };
       if (patch.days === null) delete patch.days;
       post(Object.assign({ type: "updateStep", stepId: step.id, patch: patch }, ids(column, plan)));
     }));

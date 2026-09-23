@@ -272,6 +272,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.showAllWorksWritingStats": "allTypes",
   // スケジュール（設計書6.111）。締切や発売日は作品の種類を問わない
   "novelai.openSchedule": "allTypes",
+  "novelai.importHolidays": "allTypes",
+  "novelai.exportScheduleIcs": "allTypes",
   "novelai.showEditHistory": "allTypes",
   // 外部AIの利用許可（設計書6.87.10）。**どのタイプの作品でも要る**——
   // 外から読まれうることに、作品の種類は関係ない

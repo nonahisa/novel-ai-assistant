@@ -57,6 +57,10 @@ import {
   type SetupRequestInput,
 } from "./tools/setupRequest";
 import {
+  SCHEDULE_MILESTONES_INPUT,
+  scheduleMilestones,
+} from "./tools/scheduleMilestones";
+import {
   SETUP_PROMPT_DESCRIPTION,
   SETUP_PROMPT_NAME,
   SETUP_PROMPT_TITLE,
@@ -70,8 +74,9 @@ import {
  * そちらを直に呼ぶ（`test/unit/mcp/mcpTools.test.ts`）。混ぜると、
  * ツールの中身を確かめるのに stdio を立てなければならなくなる。
  *
- * **道具は14本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
- * 0.75.x で `windows.list`、0.82.1 で `setup.request` を足した。0.66.7 の時点では10本）。
+ * **道具は15本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
+ * 0.75.x で `windows.list`、0.82.1 で `setup.request`、0.83.x で `schedule.milestones`
+ * を足した。0.66.7 の時点では10本）。
  * ほかに**プロンプトが1つ**（`setup`。Claude Code では `/` から選べる。6.87.18）。
  * 56本あったものを
  * `feature` を引数に取る形へ束ねた——**AI は繋いだ瞬間にこの一覧を読む**ので、
@@ -414,6 +419,25 @@ server.registerTool(
     inputSchema: SETUP_REQUEST_INPUT,
   },
   tool("setup.request", (args: SetupRequestInput) => setupRequest(args))
+);
+
+server.registerTool(
+  "schedule.milestones",
+  {
+    title: "全作品の大きなマイルストーン（締切・発売日・連載開始）",
+    description:
+      "スケジュールの締切・発売日・連載開始日と、作者が段に手で入れた期日を、" +
+      "終日の予定として返します（uid・日付・タイトル）。**読むだけ**で、カレンダーへ書くのは呼び出し元です。" +
+      "uid は日付が変わっても同じなので、同じ uid の予定を書き換えてください（拡張機能の .ics 書き出しと同じ）。" +
+      "作品ごとに許可を確かめ、**許可の無い作品は出しません**（denied に並べます）。" +
+      "folders には作品フォルダーか書庫のフォルダーを渡します。",
+    inputSchema: SCHEDULE_MILESTONES_INPUT,
+  },
+  /*
+    **`folder` を取らない**ので、転送層の許可の確かめは素通りする。
+    代わりに道具の中で**作品ごとに**確かめ、記録も作品ごとに残す（設計書6.111.15）。
+  */
+  tool("schedule.milestones", (args: { folders: string[] }) => scheduleMilestones(args))
 );
 
 /*
