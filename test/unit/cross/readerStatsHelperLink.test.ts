@@ -4,20 +4,20 @@ import {
   ReaderStatsHelperLink,
   SEEN_FINGERPRINTS_KEY,
   type FingerprintMemory,
-} from "../../src/features/readerStatsHelperLink";
+} from "../../../src/features/readerStatsHelperLink";
 import {
   pickReaderStatsWork,
   readerStatsAlreadyImported,
   readerStatsUriAction,
   rememberFingerprint,
   uriPathForLog,
-} from "../../src/core/readerStatsHelperLink";
+} from "../../../src/core/readerStatsHelperLink";
 import {
   buildReaderStatsEnvelope,
   parseReaderStatsEnvelope,
   readerStatsRecordsFromEnvelope,
   type ReaderStatsEnvelope,
-} from "../../src/core/readerStatsEnvelope";
+} from "../../../src/core/readerStatsEnvelope";
 import {
   emptyPostingLedger,
   readPostingLedger,
@@ -25,9 +25,9 @@ import {
   withSiteProfile,
   withSites,
   type PostingLedger,
-} from "../../src/models/posting";
-import type { WorkEntry } from "../../src/models/types";
-import { env, FileSystemError, Uri, window, workspace } from "./support/vscodeStub";
+} from "../../../src/models/posting";
+import type { WorkEntry } from "../../../src/models/types";
+import { env, FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
 
 /**
  * ヘルパーからの受け口（設計書6.79.7「ヘルパーからの受け口」）。
