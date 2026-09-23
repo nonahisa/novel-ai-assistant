@@ -195,7 +195,10 @@ describe("作品を推し量る所は、どれも印を付けて返す", () => {
   );
 
   test("resolveWork：作品一覧・相談の対象から決めたら印を付ける（1作品だけのときは付けない）", () => {
-    const start = source.indexOf("async function resolveWork(");
+    // 0.81.4 で、入口（resolveWork）はログの書き先を向けるだけの包みになり、
+    // 作品を決める中身は resolveWorkUnrouted へ移った
+    const start = source.indexOf("async function resolveWorkUnrouted(");
+    expect(start).toBeGreaterThan(-1);
     const body = source.slice(start, source.indexOf("\n}\n", start));
     expect(body).toMatch(/markInferredWork\(\s*found,\s*hinted\.source\s*\)/);
     expect(body).toContain('hinted.source === "single"');
