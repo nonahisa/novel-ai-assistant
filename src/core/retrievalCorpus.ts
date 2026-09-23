@@ -65,25 +65,46 @@ export interface RetrievalItem {
    * （作者の裁定、2026-09-23。残課題 A6）。1つに収まった話・設定資料・
    * あらすじには無い。
    *
-   * 記録の札（`describeRetrievedItem`）に「（2/4）」と添えるために持つ。
-   * 無いと、同じ話の別の場面が「本文・第12話」の同じ札で並び、
-   * **重複して渡したように読める**。
+   * 話の中のどの場面かを後から追うために持つ。**記録の札の連番には
+   * 使わない**——札は「その一覧に同じ札が何回並んだか」で数える
+   * （`describeRetrievedItems`。作者の例「4回並ぶ → （1/4）」に合わせた）。
    */
   part?: { index: number; total: number };
 }
 
 /**
- * 記録に出す札。「本文・第12話（2/4）」「設定資料・登場人物: 太志」。
- *
- * **札の作り方はここ1か所に置く**（相談パネルと設定資料パネルの両方が使う）。
- * 同じ話が複数の場面に分かれたときだけ（何番目/いくつ中）を添え、
- * 1つに収まった話には付けない——付けると「（1/1）」が全部の札に並んで読みにくい。
+ * 1件ぶんの札（連番なし）。「本文・第12話」「設定資料・登場人物: 太志」。
+ * 一覧に並べるときは `describeRetrievedItems` を通す（連番はそちらが付ける）。
  *
  * AIへ渡す出典（`label`）は変えない。これは作者が記録を読むための札である。
  */
 export function describeRetrievedItem(item: RetrievalItem): string {
-  const part = item.part ? `（${item.part.index}/${item.part.total}）` : "";
-  return `${item.source}・${item.label}${part}`;
+  return `${item.source}・${item.label}`;
+}
+
+/**
+ * 並べた一覧の札。**同じ札が2回以上並ぶときだけ、その一覧の中で何番目か／
+ * いくつ並んだかを添える**（「本文・第12話（1/4）」）。
+ *
+ * **分母は「その一覧に並んだ回数」**（作者の裁定の例：「本文・第12話」が
+ * 4回並ぶ → （1/4）、2026-09-23。残課題 A6）。話の中の場面の数（`part`）
+ * ではない——作者が読むのは記録の一行で、「同じ話がいくつ並んだか」が
+ * 分かれば、重複して渡したのではないと読める。
+ */
+export function describeRetrievedItems(
+  items: readonly RetrievalItem[]
+): string[] {
+  const bases = items.map(describeRetrievedItem);
+  const totals = new Map<string, number>();
+  for (const base of bases) totals.set(base, (totals.get(base) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  return bases.map((base) => {
+    const total = totals.get(base) ?? 1;
+    if (total < 2) return base;
+    const index = (seen.get(base) ?? 0) + 1;
+    seen.set(base, index);
+    return `${base}（${index}/${total}）`;
+  });
 }
 
 /**

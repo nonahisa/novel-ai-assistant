@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
   describeRetrievedItem,
+  describeRetrievedItems,
   manuscriptItems,
   type RetrievalItem,
 } from "../../src/core/retrievalCorpus";
@@ -57,28 +58,46 @@ describe("記録に出す札", () => {
     authorWritten: false,
   };
 
-  test("分かれた話には（何番目/いくつ中）を付ける", () => {
-    expect(describeRetrievedItem({ ...base, part: { index: 1, total: 4 } })).toBe(
-      "本文・第12話（1/4）"
-    );
+  test("同じ話が4回並べば（1/4）〜（4/4）——分母は一覧に並んだ回数（作者の例）", () => {
+    // 話の中の場面の数（part.total＝9）ではなく、並んだ回数（4）で数える
+    const four = [1, 3, 5, 7].map((index) => ({
+      ...base,
+      id: `本文:第12話#${index}`,
+      part: { index, total: 9 },
+    }));
+    expect(describeRetrievedItems(four)).toEqual([
+      "本文・第12話（1/4）",
+      "本文・第12話（2/4）",
+      "本文・第12話（3/4）",
+      "本文・第12話（4/4）",
+    ]);
   });
 
-  test("分かれていない話・設定資料・あらすじには付けない", () => {
-    expect(describeRetrievedItem(base)).toBe("本文・第12話");
+  test("1回だけ並んだ札・設定資料・あらすじには付けない", () => {
+    const setting: RetrievalItem = {
+      ...base,
+      source: "設定資料",
+      label: "登場人物: 太志",
+    };
+    const other: RetrievalItem = { ...base, label: "第3話" };
     expect(
-      describeRetrievedItem({
-        ...base,
-        source: "設定資料",
-        label: "登場人物: 太志",
-      })
-    ).toBe("設定資料・登場人物: 太志");
+      describeRetrievedItems([base, setting, other, { ...base, id: "本文:第12話#2" }])
+    ).toEqual([
+      "本文・第12話（1/2）",
+      "設定資料・登場人物: 太志",
+      "本文・第3話",
+      "本文・第12話（2/2）",
+    ]);
+    expect(describeRetrievedItem({ ...base, part: { index: 2, total: 9 } })).toBe(
+      "本文・第12話"
+    );
   });
 
   test("札を作る所は、この1か所を通す（写しを作らない）", () => {
     for (const file of ["features/workChatPanel.ts", "features/settingsPanel.ts"]) {
       const source = readFileSync(resolve(__dirname, "../../src", file), "utf8");
       expect(source, file).not.toContain("${candidate.item.source}・${candidate.item.label}");
-      expect(source, file).toContain("describeRetrievedItem(candidate.item)");
+      expect(source, file).toContain("describeRetrievedItems(");
     }
   });
 });

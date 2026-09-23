@@ -146,7 +146,7 @@ import {
   type RetrievalContext,
 } from "./vectorSearch";
 import { describeRetrieval, formatForPrompt } from "../core/retrieval";
-import { describeRetrievedItem } from "../core/retrievalCorpus";
+import { describeRetrievedItems } from "../core/retrievalCorpus";
 import {
   appendChatLog,
   summarizeMaterials,
@@ -3606,13 +3606,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         件数で足りることのほうが多い。追う必要が出たときのために、
         ログには名前を置く。
       */
-      logStep(
-        `相談: ${retrieval}（` +
-          found
-            .map((candidate) => describeRetrievedItem(candidate.item))
-            .join("、") +
-          "）"
+      const foundLabels = describeRetrievedItems(
+        found.map((candidate) => candidate.item)
       );
+      logStep(`相談: ${retrieval}（` + foundLabels.join("、") + "）");
 
       return {
         reference: [
@@ -3624,8 +3621,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         searchTerms: terms,
         retrieval,
         materials: summarizeMaterials(
-          found.map((candidate) => ({
-            label: describeRetrievedItem(candidate.item),
+          found.map((candidate, index) => ({
+            label: foundLabels[index] ?? "",
             text: candidate.item.text,
           }))
         ),
