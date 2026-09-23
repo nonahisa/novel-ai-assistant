@@ -290,6 +290,38 @@ export class AIRegistry {
     return { provider: this.meter(provider), model };
   }
 
+  /**
+   * 割当を通さず、**名指しのプロバイダとモデル**を解決する（A3④、2026-09-23）。
+   *
+   * 使うのは「この大きいモデルの速さを一度測ってみますか」だけ——割当を
+   * 変える前に測りたいので、`resolve(feature)` は使えない。測るまえに割当を
+   * 変えると、遅すぎて使えないと分かったときに作者が戻す手間を負う。
+   *
+   * **返すのは `resolve` と同じ記録の包み**（速さは包みが台帳へ書く）。
+   * この環境で使えないプロバイダなら undefined。
+   */
+  resolveExact(
+    providerId: ProviderId,
+    model: string
+  ): { provider: AIProvider; model: string } | undefined {
+    const provider = this.providers.get(providerId);
+    if (!provider || !this.isUsableHere(provider)) return undefined;
+    return { provider: this.meter(provider), model };
+  }
+
+  /** 名指しのモデルの詳細（`resolveExact` と対で使う） */
+  async modelInfoFor(
+    providerId: ProviderId,
+    model: string
+  ): Promise<ModelInfo | undefined> {
+    const resolved = this.resolveExact(providerId, model);
+    if (!resolved) return undefined;
+    const p = resolved.provider;
+    if (p.getModel) return p.getModel(model);
+    const all = await p.listModels();
+    return all.find((m) => m.id === model);
+  }
+
   /** この実行環境で選べるプロバイダか（ブラウザ版では手元のAIが使えない） */
   private isUsableHere(provider: AIProvider): boolean {
     return (

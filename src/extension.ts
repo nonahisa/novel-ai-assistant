@@ -3629,8 +3629,8 @@ export async function activate(
     // **機能キーを受け取る。** 時間切れの通知から呼ばれたときは、その機能の
     // 割当先（設計書6.28.9）を測らないと、測ったAIと切れたAIが別物になる。
     // コマンドパレットからは引数なしで来るので、そのときは既定を測る
-    registerCommand("novelai.measureContext", async (feature?: unknown) => {
-      const { askTuningScope, measureContext } = await import(
+    registerCommand("novelai.measureContext", async (feature?: unknown, target?: unknown) => {
+      const { askTuningScope, isMeasureTarget, measureContext } = await import(
         "./features/measureContext.js"
       );
       // **何を測るかを先に訊く**（作者の依頼、2026-09-13）。読める長さは
@@ -3663,7 +3663,10 @@ export async function activate(
           aiRegistry,
           isAssignableFeature(feature) ? feature : "default",
           logFolder,
-          scope
+          scope,
+          // 確認画面の「この大きいモデルの速さを測る」から来たときだけ名指しがある
+          // （A3④）。割当を変える前に測るため
+          isMeasureTarget(target) ? target : undefined
         );
       } finally {
         useLogFile(logFolder);

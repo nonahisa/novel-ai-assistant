@@ -116,7 +116,8 @@ import {
 // 落とした理由の内訳は、通知ではなく操作ログへ残す（設計書6.8）
 import { summarizeReasons } from "../core/checkRunCounts";
 import { hashText } from "../core/textFile";
-import { confirmRun } from "../views/notify";
+import { confirmRunOrChoose } from "../views/notify";
+import { findLargerModelOffer } from "./largerModelOffer";
 
 /**
  * 矛盾検知（P-12、設計書6.10.1）。
@@ -523,12 +524,41 @@ export async function checkContradictions(
       // 足したことは、この確認の中にしか書かれていない
       logStep(`矛盾検知：まとめ実行のため確認を省略\n${detail}`);
     } else {
-      const confirmed = await confirmRun(
+      /*
+        **この機械で上限内に終わる、もっと大きいモデルがあれば案内する**
+        （A3④、2026-09-23）。矛盾検知は大きさで当たりが最も変わる機能
+        （e4b 0/4・26b 4/4）。まとめ実行では確認を出さないので案内もしない。
+      */
+      const offer = await findLargerModelOffer({
+        registry,
+        feature: "contradiction",
+        provider: resolved.provider,
+        model: resolved.model,
+        parameterSize: info.parameterSize,
+        speedFeature: "contradiction_check",
+        promptVersion: CONTRADICTION_CHECK_VERSION,
+        inputChars: sendChars,
+        workFolder: work.folderPath,
+      });
+      const answer = await confirmRunOrChoose(
         `${work.title} の矛盾を検知します。`,
         "実行",
-        { detail, remember: { id: "ai.run.checkContradictions" } }
+        {
+          detail: offer ? `${detail}\n\n${offer.detail}` : detail,
+          remember: { id: "ai.run.checkContradictions" },
+          choices: offer?.choices,
+        }
       );
-      if (!confirmed) return undefined;
+      if (!answer) return undefined;
+      if (answer.kind === "choice") {
+        // 割当を変えたら最初からやり直す——モデルが変われば、分け方も
+        // 資料の量も抑制の強さも変わるので、ここまでの準備は使えない
+        const next = await offer?.handle(answer.label);
+        return next === "rerun"
+          ? checkContradictions(work, registry, options)
+          : undefined;
+      }
+      if (offer) logStep(offer.logText);
     }
   }
 

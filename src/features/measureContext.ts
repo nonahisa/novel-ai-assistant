@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import {
   AIRegistry,
   ensureConfigured,
+  prepareLmStudioModel,
   type AssignableFeature,
 } from "../ai/registry";
 import {
@@ -500,6 +501,55 @@ export async function askTuningScope(): Promise<TuningScope | undefined> {
   return picked.scope;
 }
 
+/** 名指しで測るモデル（A3④） */
+export interface MeasureTarget {
+  readonly providerId: ProviderId;
+  readonly model: string;
+}
+
+/**
+ * コマンドの引数として来たものが、名指しで測るモデルか。
+ *
+ * **コマンドは外から任意の値で叩ける**ので、形の合わないものは
+ * 「名指し無し（割当先を測る）」に落とす。
+ */
+export function isMeasureTarget(value: unknown): value is MeasureTarget {
+  if (typeof value !== "object" || value === null) return false;
+  const entry = value as Record<string, unknown>;
+  return (
+    typeof entry.providerId === "string" &&
+    entry.providerId.length > 0 &&
+    typeof entry.model === "string" &&
+    entry.model.length > 0
+  );
+}
+
+/**
+ * 名指しのモデルを解決する。**割当は変えない。**
+ *
+ * LM Studio は、測る前に読み込ませる（`ensureConfigured` と同じ理由——
+ * 読み込まれていない文脈長で測ると、申告を小さく見積もる）。
+ */
+async function resolveMeasureTarget(
+  registry: AIRegistry,
+  target: MeasureTarget,
+  feature: AssignableFeature | "default"
+): Promise<{ provider: AIProvider; model: string } | undefined> {
+  const resolved = registry.resolveExact(target.providerId, target.model);
+  if (!resolved) {
+    void vscode.window.showWarningMessage(
+      `${target.model} を測れません（この環境では使えないAIです）。`
+    );
+    return undefined;
+  }
+  if (resolved.provider.id === "lmstudio") {
+    if (!(await prepareLmStudioModel(resolved.model, undefined, feature))) {
+      return undefined;
+    }
+  }
+  return resolved;
+}
+
 /**
  * AIチューニングの入口。
  *
@@ -531,7 +581,15 @@ export async function measureContext(
    * 省略したときに画面を出すと、時間切れの通知から呼ばれた経路や検査が
    * 勝手に選択画面を開くことになる。
    */
-  scope: TuningScope = "both"
+  scope: TuningScope = "both",
+  /**
+   * **割当を通さず、名指しのモデルを測る**（A3④、2026-09-23）。
+   *
+   * 確認画面の「この大きいモデルの速さを測る」から来る。割当を変える前に
+   * 測りたいので、`feature` の割当先ではなくこちらを測る。渡さなければ
+   * これまでどおり割当先を測る。
+   */
+  target?: MeasureTarget
 ): Promise<void> {
   // **ここで先に決める。** 中で失敗しても、その失敗がファイルに残る
   if (workFolderPath) useLogFile(workFolderPath);
@@ -552,7 +610,7 @@ export async function measureContext(
   */
   const restoreTimeoutCeiling = raiseTimeoutCeilingForProbe();
   try {
-    await runMeasurement(registry, feature, cleanup, scope);
+    await runMeasurement(registry, feature, cleanup, scope, target);
   } catch (error) {
     // 測定そのものの失敗は `runMeasurement` が中で捌く。ここへ来るのは
     // 通知や設定の書き込みが投げたとき——黙って消さず、ログと通知へ出す
@@ -582,9 +640,13 @@ async function runMeasurement(
   /** 延ばした待ち時間を戻す手を、外側（`measureContext`）へ預ける入れ物 */
   cleanup: TuningCleanup,
   /** 何を測るか。「両方」のときの道筋は、これまでと同じである */
-  scope: TuningScope
+  scope: TuningScope,
+  /** 名指しで測るモデル。無ければ割当先（`measureContext` の説明） */
+  target?: MeasureTarget
 ): Promise<void> {
-  const resolved = await ensureConfigured(registry, feature);
+  const resolved = target
+    ? await resolveMeasureTarget(registry, target, feature)
+    : await ensureConfigured(registry, feature);
   if (!resolved) return;
 
   /*
@@ -612,7 +674,9 @@ async function runMeasurement(
     return;
   }
 
-  const modelInfo = await registry.resolveModelInfo(feature);
+  const modelInfo = target
+    ? await registry.modelInfoFor(target.providerId, target.model)
+    : await registry.resolveModelInfo(feature);
   const declaredTokens = modelInfo?.contextWindow;
 
   /*

@@ -87,7 +87,8 @@ import {
   readNarrativePerson,
 } from "../core/workStyle";
 import type { KeepWord } from "../models/keepWord";
-import { confirmRun, notifyDone, suggestAction } from "../views/notify";
+import { confirmRunOrChoose, notifyDone, suggestAction } from "../views/notify";
+import { findLargerModelOffer } from "./largerModelOffer";
 
 /**
  * 誤字脱字検知（P-09）のオーケストレーション。
@@ -403,6 +404,8 @@ export async function checkTypos(
   };
 
   const pending = chunks.filter((c) => !cache.get(c.hash, cacheKeyBase));
+  /** 確認に添えた「大きいモデルの案内」。「開始」と一緒に記録へ残す（A3④） */
+  let pendingOfferLog = "";
 
   if (pending.length > 0) {
     if (
@@ -452,12 +455,39 @@ export async function checkTypos(
       // 突き合わせられないと、料金の問い合わせに答えられない
       logStep(`誤字脱字検知：まとめ実行のため確認を省略\n${notice}`);
     } else {
-      const confirmed = await confirmRun(notice, "実行", {
-        remember: { id: "ai.run.checkTypos" },
-        // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
-        workTitle: work.title,
+      /*
+        **この機械で上限内に終わる、もっと大きいモデルがあれば案内する**
+        （A3④、2026-09-23）。誤字脱字は 26b で 8/12（同梱の測定）。
+        見積もりは上の目安と同じ字数で出す（写しを作らない）。
+      */
+      const offer = await findLargerModelOffer({
+        registry,
+        feature: "typo",
+        provider: resolved.provider,
+        model: resolved.model,
+        parameterSize: modelInfo.parameterSize,
+        speedFeature: "typo_check",
+        promptVersion: TYPO_CHECK_VERSION,
+        inputChars: pending.map((chunk) => chunk.text.length),
+        workFolder: work.folderPath,
       });
-      if (!confirmed) return undefined;
+      const answer = await confirmRunOrChoose(
+        offer ? `${notice}\n\n${offer.detail}` : notice,
+        "実行",
+        {
+          remember: { id: "ai.run.checkTypos" },
+          // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
+          workTitle: work.title,
+          choices: offer?.choices,
+        }
+      );
+      if (!answer) return undefined;
+      if (answer.kind === "choice") {
+        // 割当を変えたら最初からやり直す（分け方も辞書の見込みも変わる）
+        const next = await offer?.handle(answer.label);
+        return next === "rerun" ? checkTypos(work, registry, options) : undefined;
+      }
+      if (offer) pendingOfferLog = offer.logText;
     }
   } else if (chunks.length > 0) {
     vscode.window.showInformationMessage(
@@ -473,6 +503,7 @@ export async function checkTypos(
       `${resolved.model} / ${chunks.length}チャンク / ` +
       `${describeChunkSettings(chunkSettings)} / v${TYPO_CHECK_VERSION}`
   );
+  if (pendingOfferLog) logStep(pendingOfferLog);
 
   let rejectedCount = 0;
   /**
