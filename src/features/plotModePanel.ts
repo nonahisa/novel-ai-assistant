@@ -61,6 +61,7 @@ import { createEpisodePlot } from "./resumeWriting";
 import type { EpisodePlotCheckRef } from "./checkEpisodePlot";
 import { syncPlotCharacters } from "./plotCharacterSync";
 import { EpisodePlotFolderWatcher } from "./episodePlotWatch";
+import { sharedFolderWatchHub } from "./folderWatchHub";
 import {
   renameEpisodePlotFile,
   renumberEpisodePlotHeadings,
@@ -210,7 +211,9 @@ class PlotModePanel {
         内容: `単話プロットの外からの変更で読み直せませんでした：${messageOf(error)}`,
       });
     });
-  });
+    // 作品フォルダーの見張り（本文・同期・設定資料が分け合う1本）から
+    // 受け取る。新しく張らない（残課題 C2、0.84.4）
+  }, sharedFolderWatchHub());
 
   constructor(
     context: vscode.ExtensionContext,

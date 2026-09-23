@@ -1,7 +1,11 @@
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import * as path from "../core/paths";
-import { fromUri } from "../core/paths";
+import { isUnderFolderWithExtension } from "../core/folderWatchMatch";
+import { FolderWatchHub } from "./folderWatchHub";
+
+// 本文の拡張子。以前の見張りの glob `**/*.{txt,md}` と同じ結果になる
+const MANUSCRIPT_EXTENSIONS = ["txt", "md"] as const;
 
 /**
  * 作品フォルダーの本文（.txt/.md）を見張り、外で変わったら作品一覧を
@@ -15,14 +19,23 @@ import { fromUri } from "../core/paths";
  * 監視は**作品フォルダーごとに1本**。登録簿が変わるたびに `sync` で
  * 増減させる。知らせは 500ms まとめてから数え直す（同期で何十話も一度に
  * 変わることがある）。`.aiwriter` と退避フォルダーの中は本文ではないので飛ばす。
+ *
+ * **見張りそのものは `FolderWatchHub` が持つ**（残課題 C2、0.84.4）。同期・
+ * 設定資料の見張りと、同じ作品フォルダーの1本を分け合う。製品では
+ * `extension.ts` が共有の1つを渡す。渡さないときの自前の1つは試験のため。
  */
 export class WorkFolderWatchers implements vscode.Disposable {
-  private readonly watchers = new Map<
-    string,
-    { watcher: vscode.FileSystemWatcher; timer?: ReturnType<typeof setTimeout> }
-  >();
+  private readonly watchers = new Map<string, WatchEntry>();
+  private readonly ownsHub: boolean;
+  private readonly hub: FolderWatchHub;
 
-  constructor(private readonly onChanged: (work: WorkEntry) => void) {}
+  constructor(
+    private readonly onChanged: (work: WorkEntry) => void,
+    hub?: FolderWatchHub
+  ) {
+    this.ownsHub = !hub;
+    this.hub = hub ?? new FolderWatchHub();
+  }
 
   /** 登録されている作品に合わせて、監視を増減させる */
   sync(works: readonly WorkEntry[]): void {
@@ -31,46 +44,51 @@ export class WorkFolderWatchers implements vscode.Disposable {
     );
     for (const [key, entry] of this.watchers) {
       if (!wanted.has(key)) {
-        entry.watcher.dispose();
+        entry.subscription.dispose();
         if (entry.timer) clearTimeout(entry.timer);
         this.watchers.delete(key);
       }
     }
     for (const [key, work] of wanted) {
       if (this.watchers.has(key)) continue;
-      let watcher: vscode.FileSystemWatcher;
-      try {
-        watcher = vscode.workspace.createFileSystemWatcher(
-          new vscode.RelativePattern(path.toUri(work.folderPath), "**/*.{txt,md}")
-        );
-      } catch {
-        // 監視を張れない環境（古い VS Code・試験の代役）では、これまでどおり
-        // 保存のときだけ数え直す
-        continue;
-      }
-      const entry: { watcher: vscode.FileSystemWatcher; timer?: ReturnType<typeof setTimeout> } = { watcher };
-      const schedule = (uri: vscode.Uri) => {
-        if (!isManuscriptPath(fromUri(uri))) return;
+      const entry: WatchEntry = { subscription: { dispose: () => undefined } };
+      const schedule = (filePath: string) => {
+        if (!isManuscriptPath(filePath)) return;
         if (entry.timer) clearTimeout(entry.timer);
         entry.timer = setTimeout(() => {
           entry.timer = undefined;
           this.onChanged(work);
         }, 500);
       };
-      watcher.onDidChange(schedule);
-      watcher.onDidCreate(schedule);
-      watcher.onDidDelete(schedule);
+      // 監視を張れない環境（古い VS Code・試験の代役）では、ハブが何も
+      // 配らない。これまでどおり保存のときだけ数え直す
+      entry.subscription = this.hub.subscribe({
+        root: work.folderPath,
+        accepts: (filePath) =>
+          isUnderFolderWithExtension(
+            work.folderPath,
+            filePath,
+            MANUSCRIPT_EXTENSIONS
+          ),
+        onEvent: (_kind, _uri, filePath) => schedule(filePath),
+      });
       this.watchers.set(key, entry);
     }
   }
 
   dispose(): void {
     for (const entry of this.watchers.values()) {
-      entry.watcher.dispose();
+      entry.subscription.dispose();
       if (entry.timer) clearTimeout(entry.timer);
     }
     this.watchers.clear();
+    if (this.ownsHub) this.hub.dispose();
   }
+}
+
+interface WatchEntry {
+  subscription: vscode.Disposable;
+  timer?: ReturnType<typeof setTimeout>;
 }
 
 /** 本文の場所か（拡張機能の作業フォルダーと退避の中は数えない） */

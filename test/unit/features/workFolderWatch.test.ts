@@ -46,6 +46,7 @@ vi.mock("vscode", () => {
 });
 
 import { WorkFolderWatchers, isManuscriptPath } from "../../../src/features/workFolderWatch";
+import { FolderWatchHub } from "../../../src/features/folderWatchHub";
 import type { WorkEntry } from "../../../src/models/types";
 
 const work = (id: string, folder: string): WorkEntry => ({
@@ -65,7 +66,9 @@ describe("作品フォルダーの監視", () => {
     const watchers = new WorkFolderWatchers(() => undefined);
     watchers.sync([work("a", "C:/小説/A"), work("b", "C:/小説/B")]);
     expect(created.map((entry) => entry.base)).toEqual(["C:/小説/A", "C:/小説/B"]);
-    expect(created[0].pattern).toBe("**/*.{txt,md}");
+    // 見張りは作品フォルダーの下すべてを見る1本（同期・設定資料と分け合う。
+    // 残課題 C2）。本文かどうかはコードで絞る（下の「本文以外は数えない」）
+    expect(created[0].pattern).toBe("**/*");
 
     watchers.sync([work("b", "C:/小説/B")]);
     expect(created[0].disposed).toBe(true);
@@ -95,6 +98,36 @@ describe("作品フォルダーの監視", () => {
     created[0].fire("change", "C:/小説/A/.novelai-recovery/y.md");
     vi.advanceTimersByTime(600);
     expect(changed).toEqual([]);
+  });
+
+  test("本文以外（.txt/.md でないもの）は数えない（以前の glob と同じ絞り込み）", () => {
+    const changed: string[] = [];
+    const watchers = new WorkFolderWatchers((w) => changed.push(w.id));
+    watchers.sync([work("a", "C:/小説/A")]);
+    created[0].fire("change", "C:/小説/A/設定/characters/c1.json");
+    created[0].fire("change", "C:/小説/A/表紙.png");
+    vi.advanceTimersByTime(600);
+    expect(changed).toEqual([]);
+
+    // 深い階層の本文は数える（`**` は何段でも）
+    created[0].fire("change", "C:/小説/A/本文/第1章/episode_0001.txt");
+    vi.advanceTimersByTime(600);
+    expect(changed).toEqual(["a"]);
+  });
+
+  test("ほかの機能と同じハブを渡すと、同じ作品フォルダーに2本目を張らない", () => {
+    const hub = new FolderWatchHub();
+    const first = new WorkFolderWatchers(() => undefined, hub);
+    const second = new WorkFolderWatchers(() => undefined, hub);
+    first.sync([work("a", "C:/小説/A")]);
+    second.sync([work("a", "C:/小説/A")]);
+    expect(created).toHaveLength(1);
+
+    // 片方が手を引いても、もう片方が使っている間は外さない
+    first.dispose();
+    expect(created[0].disposed).toBe(false);
+    second.dispose();
+    expect(created[0].disposed).toBe(true);
   });
 
   test("本文の場所の判定", () => {

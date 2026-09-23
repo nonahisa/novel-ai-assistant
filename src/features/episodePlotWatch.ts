@@ -1,5 +1,7 @@
 import * as vscode from "vscode";
 import * as paths from "../core/paths";
+import { isDirectChildWithExtension } from "../core/folderWatchMatch";
+import { FolderWatchHub } from "./folderWatchHub";
 
 /** 続けて変わったときに、まとめて1回にする待ち時間 */
 const SETTLE_MS = 300;
@@ -19,14 +21,30 @@ const SETTLE_MS = 300;
  * - 続けて変わったら**少し待って1回だけ**知らせる（同期で何話ぶんも一度に
  *   変わる。そのたびに作品を走査しない）
  * - 見張るのはパネルが開いているあいだだけ。閉じたら `dispose` で捨てる
+ * - **見張りそのものは `FolderWatchHub` が持つ**（残課題 C2、0.84.4）。置き場の
+ *   1つ上は作品フォルダーの中なので、作品フォルダーの見張り（本文・同期・
+ *   設定資料が分け合う1本）があれば、新しく張らずにそこから受け取る。
+ *   以前の glob「置き場の名前／*.md」と同じ条件（直下の .md）を `accepts` で見る
  */
 export class EpisodePlotFolderWatcher implements vscode.Disposable {
-  private watcher: vscode.FileSystemWatcher | undefined;
+  private subscription: vscode.Disposable | undefined;
   private watchedKey = "";
   private timer: ReturnType<typeof setTimeout> | undefined;
   private disposed = false;
+  private readonly hub: FolderWatchHub;
+  private readonly ownsHub: boolean;
 
-  constructor(private readonly onChanged: () => void) {}
+  /**
+   * @param hub 作品フォルダーの見張りを分け合う先。製品ではプロットモードの
+   *   パネルが共有の1つ（`sharedFolderWatchHub()`）を渡す。省くと自前の1つ（試験用）
+   */
+  constructor(
+    private readonly onChanged: () => void,
+    hub?: FolderWatchHub
+  ) {
+    this.ownsHub = !hub;
+    this.hub = hub ?? new FolderWatchHub();
+  }
 
   /**
    * その置き場を見張る。**同じ置き場なら張り直さない**（一覧を作り直す
@@ -37,22 +55,9 @@ export class EpisodePlotFolderWatcher implements vscode.Disposable {
     // その読み込みの終わりにここが呼ばれ、誰も捨てない見張りが残る
     if (this.disposed) return;
     const key = paths.normalizeForComparison(episodePlotsDir);
-    if (key === this.watchedKey && this.watcher) return;
+    if (key === this.watchedKey && this.subscription) return;
     this.stop();
     this.watchedKey = key;
-    try {
-      this.watcher = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(
-          paths.toUri(paths.dirname(episodePlotsDir)),
-          `${paths.basename(episodePlotsDir)}/*.md`
-        )
-      );
-    } catch {
-      // 見張りを張れない環境（古い VS Code・試験の代役）では、
-      // これまでどおり保存のときだけ作り直す
-      this.watcher = undefined;
-      return;
-    }
     const schedule = (): void => {
       if (this.timer) clearTimeout(this.timer);
       this.timer = setTimeout(() => {
@@ -60,20 +65,26 @@ export class EpisodePlotFolderWatcher implements vscode.Disposable {
         this.onChanged();
       }, SETTLE_MS);
     };
-    this.watcher.onDidCreate(schedule);
-    this.watcher.onDidChange(schedule);
-    this.watcher.onDidDelete(schedule);
+    // 見張りを張れない環境（古い VS Code・試験の代役）では、ハブが何も
+    // 配らない。これまでどおり保存のときだけ作り直す
+    this.subscription = this.hub.subscribe({
+      root: paths.dirname(episodePlotsDir),
+      accepts: (filePath) =>
+        isDirectChildWithExtension(episodePlotsDir, filePath, ["md"]),
+      onEvent: schedule,
+    });
   }
 
   dispose(): void {
     this.disposed = true;
     this.stop();
     this.watchedKey = "";
+    if (this.ownsHub) this.hub.dispose();
   }
 
   private stop(): void {
-    this.watcher?.dispose();
-    this.watcher = undefined;
+    this.subscription?.dispose();
+    this.subscription = undefined;
     // 捨てたあとに作り直しが走ると、閉じたパネルへ書きに行く
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;

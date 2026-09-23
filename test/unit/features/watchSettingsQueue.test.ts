@@ -40,6 +40,10 @@ vi.mock("vscode", () => ({
       onDidCreate: (handler: (uri: { fsPath: string }) => void) => {
         handlers.push(handler);
       },
+      // 削除は設定資料の見張りでは扱わないので、受け口へは足さない。
+      // 見張りは作品フォルダーごとの1本を分け合う形になり（残課題 C2）、
+      // 本物と同じく3つの口が揃っている必要がある
+      onDidDelete: () => undefined,
       dispose() {},
     }),
     getConfiguration: () => ({ get: () => undefined }),

@@ -36,6 +36,7 @@ import {
 import { manuscriptViewTypeFor } from "./core/manuscriptViewTypes";
 import { nextEpisodeFileNameLike } from "./core/episodeRenumber";
 import { WorkFolderWatchers } from "./features/workFolderWatch";
+import { sharedFolderWatchHub } from "./features/folderWatchHub";
 import { setStreamingSettingReader } from "./ai/ollamaStream";
 import { findLatestEpisode } from "./core/latestEpisode";
 import {
@@ -1007,8 +1008,19 @@ export async function activate(
   // GitHub同期の見張り。自動で走るのはfetch（取得のみ）だけで、
   // 取り込み・送信は作者がボタンを押したときにしか実行しない（設計書5.5.1）。
   // ブラウザ版（gitコマンドを起動できない）では、何もしない代役を使う（設計書5.8.5）
+  //
+  // **作品フォルダーの見張りは、フォルダーごとに1本へ束ねる**（残課題 C2、
+  // 0.84.4。`features/folderWatchHub.ts`）。同期・本文・設定資料・単話プロットの
+  // 見張りが同じ1本を分け合う。開いているフォルダーの外に再帰の見張りを
+  // 張るたびに VS Code 本体がログへ警告を出すので、本数を作品数まで減らす。
+  // **各機能へ必ずこの1つを渡す**（渡し忘れると、その機能だけ自前で張り、
+  // 本数が元に戻る）
+  const folderWatchHub = sharedFolderWatchHub();
+  context.subscriptions.push(folderWatchHub);
   const gitSync: GitSyncMonitorLike = canRunProcesses()
-    ? new (await import("./features/gitSync.js")).GitSyncMonitor(registry)
+    ? new (await import("./features/gitSync.js")).GitSyncMonitor(registry, {
+        folderWatchHub,
+      })
     : new NullGitSyncMonitor();
   context.subscriptions.push(gitSync);
 
@@ -1336,7 +1348,9 @@ export async function activate(
         },
         reload: () => reloadAfterExternalChange(work),
       });
-    }
+    },
+    // 作品フォルダーの1本を分け合う（残課題 C2）
+    folderWatchHub
   );
   context.subscriptions.push(settingsWatcher);
 
@@ -1916,7 +1930,7 @@ export async function activate(
   // 同期・別のエディタでの書き換えが開き直すまで一覧に出なかった）
   const folderWatchers = new WorkFolderWatchers((work) => {
     treeProvider.refresh(work.id);
-  });
+  }, folderWatchHub);
   folderWatchers.sync(registry.list());
   context.subscriptions.push(
     folderWatchers,

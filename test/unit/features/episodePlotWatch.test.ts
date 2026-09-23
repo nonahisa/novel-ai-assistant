@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { EpisodePlotFolderWatcher } from "../../../src/features/episodePlotWatch";
+import { FolderWatchHub } from "../../../src/features/folderWatchHub";
 import {
   fileSystemWatchers,
   resetFileSystemWatchers,
@@ -79,7 +80,55 @@ describe("単話プロットの置き場の見張り", () => {
     expect(
       isSameLocation((pattern.base as { fsPath: string }).fsPath, SETTINGS)
     ).toBe(true);
-    expect(pattern.pattern).toBe("episode-plots/*.md");
+    // 見張りは下すべてを見る1本（残課題 C2。作品フォルダーの見張りがあれば
+    // そちらを分け合う）。置き場の直下の .md だけを、コードで絞る
+    expect(pattern.pattern).toBe("**/*");
+  });
+
+  it("置き場の直下の .md だけを拾う（以前の glob「置き場／*.md」と同じ）", () => {
+    let reloads = 0;
+    const watcher = new EpisodePlotFolderWatcher(() => {
+      reloads++;
+    });
+    watcher.watch(PLOTS);
+    const stub = fileSystemWatchers[0];
+
+    stub.fireChange(`${SETTINGS}/characters/c1.json`);
+    stub.fireChange(`${PLOTS}/メモ.txt`);
+    stub.fireChange(`${PLOTS}/古い/第1話.md`);
+    vi.runAllTimers();
+    expect(reloads).toBe(0);
+
+    stub.fireChange(`${PLOTS}/第1話.md`);
+    vi.runAllTimers();
+    expect(reloads).toBe(1);
+  });
+
+  it("作品フォルダーの見張りがあれば、新しく張らずにそこから受け取る", () => {
+    const hub = new FolderWatchHub();
+    const body = hub.subscribe({
+      root: "C:/小説/作品",
+      accepts: () => true,
+      onEvent: () => undefined,
+    });
+    expect(fileSystemWatchers).toHaveLength(1);
+
+    let reloads = 0;
+    const watcher = new EpisodePlotFolderWatcher(() => {
+      reloads++;
+    }, hub);
+    watcher.watch(PLOTS);
+    expect(fileSystemWatchers).toHaveLength(1);
+
+    fileSystemWatchers[0].fireCreate(`${PLOTS}/第2話.md`);
+    vi.runAllTimers();
+    expect(reloads).toBe(1);
+
+    // パネルを閉じても、作品フォルダーの見張りは残る
+    watcher.dispose();
+    expect(fileSystemWatchers[0].disposed).toBe(false);
+    body.dispose();
+    expect(fileSystemWatchers[0].disposed).toBe(true);
   });
 
   it("同じ置き場なら張り直さず、変わったら古い見張りを捨てる", () => {

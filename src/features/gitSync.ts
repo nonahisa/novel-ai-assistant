@@ -54,6 +54,8 @@ import {
   runSetupStep,
 } from "./gitOnboarding";
 import { confirmRun, notifyDone, whenNoticePicked } from "../views/notify";
+import { FolderWatchHub } from "./folderWatchHub";
+import { isUnderFolder } from "../core/folderWatchMatch";
 
 /**
  * 取りに行ける作品か。
@@ -220,6 +222,11 @@ export function affectsSyncStatus(filePath: string): boolean {
 export interface GitSyncOptions {
   /** テスト用。実際のgit実行を差し替える */
   run?: GitCommandRunner;
+  /**
+   * 作品フォルダーの見張りを分け合う先（残課題 C2、0.84.4）。製品では
+   * `extension.ts` が共有の1つを渡す。省くと自前の1つを持つ（試験用）
+   */
+  folderWatchHub?: FolderWatchHub;
 }
 
 /**
@@ -270,15 +277,17 @@ export class GitSyncMonitor implements vscode.Disposable {
   private settingsPause: SettingsWatchPause | undefined;
 
   /**
-   * 作品フォルダーの見張り（設計書6.15.1）。作品ごとに1本ずつ持つ。
+   * 作品フォルダーの見張りの受け取り口（設計書6.15.1）。作品ごとに1つずつ持つ。
    *
    * **置き場全体を1本で見張れない。** 作品フォルダーはワークスペースに
    * 入っていないことがあり、そのときワークスペース基準の見張りは何も拾わない。
+   *
+   * 見張りそのものは `FolderWatchHub` が作品フォルダーごとに1本だけ張り、
+   * 本文・設定資料の見張りと分け合う（残課題 C2、0.84.4）。
    */
-  private readonly folderWatchers = new Map<
-    string,
-    vscode.FileSystemWatcher
-  >();
+  private readonly folderWatchers = new Map<string, vscode.Disposable>();
+  private readonly folderWatchHub: FolderWatchHub;
+  private readonly ownsFolderWatchHub: boolean;
 
   /**
    * 作り直しを待っているタイマー。**置き場ごとに1本**（設計書6.15.1）。
@@ -323,6 +332,9 @@ export class GitSyncMonitor implements vscode.Disposable {
     private readonly registry: WorkRegistry,
     private readonly options: GitSyncOptions = {}
   ) {
+    this.ownsFolderWatchHub = !options.folderWatchHub;
+    this.folderWatchHub = options.folderWatchHub ?? new FolderWatchHub();
+
     // 設計書は「エディタ上部に警告バーを常時表示」としているが、
     // 拡張機能からエディタ上部へバーを出すAPIは無い。
     // 通知は消えてしまうので、消えずに残る場所としてステータスバーを使う
@@ -361,6 +373,7 @@ export class GitSyncMonitor implements vscode.Disposable {
     for (const disposable of this.disposables) disposable.dispose();
     for (const watcher of this.folderWatchers.values()) watcher.dispose();
     this.folderWatchers.clear();
+    if (this.ownsFolderWatchHub) this.folderWatchHub.dispose();
     for (const timer of this.folderRefreshTimers.values()) clearTimeout(timer);
     this.folderRefreshTimers.clear();
     this.changed.dispose();
@@ -370,8 +383,9 @@ export class GitSyncMonitor implements vscode.Disposable {
   /**
    * 登録されている作品に合わせて、フォルダーの見張りを増減させる。
    *
-   * 作り方は `workFolderWatch.ts` に合わせてある（`RelativePattern` には
-   * 文字列ではなくUriを渡す。文字列だとブラウザ版で無い場所を見張る。規則7）。
+   * 見張りは `FolderWatchHub` が張る（`workFolderWatch.ts` と同じ1本を
+   * 分け合う）。以前の glob は `**` と `/` と `*` を続けた「下のすべて」で、
+   * ハブは根の下のものしか配らないので、条件は「すべて受け取る」でよい。
    */
   private syncFolderWatchers(): void {
     const wanted = new Map(
@@ -390,24 +404,18 @@ export class GitSyncMonitor implements vscode.Disposable {
     }
     for (const [key, work] of wanted) {
       if (this.folderWatchers.has(key)) continue;
-      let watcher: vscode.FileSystemWatcher;
-      try {
-        watcher = vscode.workspace.createFileSystemWatcher(
-          new vscode.RelativePattern(path.toUri(work.folderPath), "**/*")
-        );
-      } catch {
-        // 見張りを張れない環境では、これまでどおりの契機（起動時・同期後・
-        // エディタの切り替え）だけで動く。印が遅れるだけで壊れはしない
-        continue;
-      }
-      const schedule = (uri: vscode.Uri) => {
-        if (!affectsSyncStatus(path.fromUri(uri))) return;
-        this.scheduleFolderRefresh(work.id);
-      };
-      watcher.onDidChange(schedule);
-      watcher.onDidCreate(schedule);
-      watcher.onDidDelete(schedule);
-      this.folderWatchers.set(key, watcher);
+      // 見張りを張れない環境では、ハブが何も配らない。これまでどおりの
+      // 契機（起動時・同期後・エディタの切り替え）だけで動く。印が遅れる
+      // だけで壊れはしない
+      const subscription = this.folderWatchHub.subscribe({
+        root: work.folderPath,
+        accepts: (filePath) => isUnderFolder(work.folderPath, filePath),
+        onEvent: (_kind, _uri, filePath) => {
+          if (!affectsSyncStatus(filePath)) return;
+          this.scheduleFolderRefresh(work.id);
+        },
+      });
+      this.folderWatchers.set(key, subscription);
     }
   }
 

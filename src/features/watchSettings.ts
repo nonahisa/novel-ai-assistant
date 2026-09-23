@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
-import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
+import { isUnderFolderWithExtension } from "../core/folderWatchMatch";
+import { FolderWatchHub } from "./folderWatchHub";
 import type { WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
@@ -42,10 +43,14 @@ const IGNORE_AFTER_RESUME_MS = 3000;
 const ALL_WORKS = "*";
 
 export class SettingsWatcher implements vscode.Disposable {
-  private readonly watchers = new Map<string, vscode.FileSystemWatcher>();
+  /** 作品ごとの見張りの受け取り口（見張りそのものは `FolderWatchHub` が持つ） */
+  private readonly watchers = new Map<string, vscode.Disposable>();
   private readonly changed = new Set<string>();
   private settleTimer: NodeJS.Timeout | undefined;
   private readonly disposables: vscode.Disposable[] = [];
+  private readonly hub: FolderWatchHub;
+  private readonly ownsHub: boolean;
+  private disposed = false;
 
   constructor(
     private readonly registry: WorkRegistry,
@@ -55,8 +60,15 @@ export class SettingsWatcher implements vscode.Disposable {
     private readonly onExternalChange: (
       work: WorkEntry,
       files: string[]
-    ) => void
+    ) => void,
+    /**
+     * 作品フォルダーの見張りを分け合う先（残課題 C2、0.84.4）。製品では
+     * `extension.ts` が共有の1つを渡す。省くと自前の1つを持つ（試験用）
+     */
+    hub?: FolderWatchHub
   ) {
+    this.ownsHub = !hub;
+    this.hub = hub ?? new FolderWatchHub();
     this.disposables.push(
       registry.onDidChange(() => void this.sync())
     );
@@ -77,13 +89,20 @@ export class SettingsWatcher implements vscode.Disposable {
     for (const work of works) {
       if (this.watchers.has(work.id)) continue;
       const watcher = await this.createWatcher(work);
-      if (watcher) this.watchers.set(work.id, watcher);
+      if (!watcher) continue;
+      // 設定を読んでいる間に捨てられた・同じ作品を先に張り終えていたら、
+      // 受け取り口を残さない（残すと誰も外さない）
+      if (this.disposed || this.watchers.has(work.id)) {
+        watcher.dispose();
+        continue;
+      }
+      this.watchers.set(work.id, watcher);
     }
   }
 
   private async createWatcher(
     work: WorkEntry
-  ): Promise<vscode.FileSystemWatcher | undefined> {
+  ): Promise<vscode.Disposable | undefined> {
     let settingsDir: string;
     try {
       const config = await readWorkConfig(work);
@@ -93,21 +112,23 @@ export class SettingsWatcher implements vscode.Disposable {
       return undefined;
     }
 
-    const watcher = vscode.workspace.createFileSystemWatcher(
-      // **文字列を直に渡さない。** `RelativePattern` は文字列を受けると
-      // 中で `Uri.file()` を呼ぶので、ブラウザ版では
-      // `file:///vscode-test-web%3A//mount/設定` という無い場所を見張り、
-      // 外部の書き換えに気づけなくなる（`npm run test:web` のコンソールに
-      // 出ていた。設計書5.8.13、CLAUDE.md 規則7）。
-      // `workFolderWatch.ts` と `manuscriptEditor.ts` も `toUri` を通している
-      new vscode.RelativePattern(path.toUri(settingsDir), "**/*.json")
-    );
-    const handle = (uri: vscode.Uri) => this.record(work, fromUri(uri));
-    watcher.onDidChange(handle);
-    watcher.onDidCreate(handle);
-    // 削除は扱わない。消えたファイルの中身は比べようがなく、
-    // 復元するとAIの意図した削除を巻き戻すことになる
-    return watcher;
+    // **根は作品フォルダーにする**（残課題 C2、0.84.4）。本文・同期の見張りと
+    // 同じ1本を分け合うため。設定資料の置き場は必ず作品フォルダーの中にある
+    // （`workPaths` の `resolveInsideWork`）。以前の glob は設定資料の置き場を
+    // 基点にした「下のどこかの .json」で、同じ条件を `accepts` で見る。
+    // 見張りを張る側（ハブ）は `paths.toUri()` を通す（規則7。文字列を渡すと
+    // ブラウザ版で無い場所を見張る。設計書5.8.13）
+    return this.hub.subscribe({
+      root: work.folderPath,
+      accepts: (filePath) =>
+        isUnderFolderWithExtension(settingsDir, filePath, ["json"]),
+      onEvent: (kind, _uri, filePath) => {
+        // 削除は扱わない。消えたファイルの中身は比べようがなく、
+        // 復元するとAIの意図した削除を巻き戻すことになる
+        if (kind === "delete") return;
+        this.record(work, filePath);
+      },
+    });
   }
 
   /**
@@ -194,9 +215,12 @@ export class SettingsWatcher implements vscode.Disposable {
   }
 
   dispose(): void {
+    this.disposed = true;
     if (this.settleTimer) clearTimeout(this.settleTimer);
     for (const watcher of this.watchers.values()) watcher.dispose();
+    this.watchers.clear();
     for (const disposable of this.disposables) disposable.dispose();
+    if (this.ownsHub) this.hub.dispose();
   }
 }
 
