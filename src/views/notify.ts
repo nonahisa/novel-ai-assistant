@@ -186,6 +186,31 @@ export async function confirmRun(
   runLabel = "実行",
   options: ConfirmOptions = {}
 ): Promise<boolean> {
+  const answer = await confirmRunOrChoose(message, runLabel, options);
+  return answer?.kind === "run";
+}
+
+/** `confirmRunOrChoose` の答え。**閉じられたら undefined** */
+export type ConfirmOrChoice =
+  | { readonly kind: "run" }
+  | { readonly kind: "choice"; readonly label: string };
+
+/**
+ * `confirmRun` に、**実行の代わりに選べる別の道**を並べる（A3④、2026-09-23）。
+ *
+ * 使うのは「この機械ならもっと大きいモデルが使えます」の案内だけ——
+ * 確認と同じ窓に出さないと、作者は同じことを2回訊かれる。
+ *
+ * **覚えた「以降は訊かない」は、別の道があっても守る。** 作者が自分で
+ * 訊かないと決めた確認を、こちらの都合で出し直さない（案内は呼ぶ側が
+ * ログへ残す）。**別の道は覚えない**——覚えるのは実行だけ（`confirmRun`
+ * と同じ約束）。
+ */
+export async function confirmRunOrChoose(
+  message: string,
+  runLabel = "実行",
+  options: ConfirmOptions & { choices?: readonly string[] } = {}
+): Promise<ConfirmOrChoice | undefined> {
   const rememberId = options.remember?.id;
   const workTitle = options.work?.title;
   const inferred = inferredWorkSource(options.work);
@@ -211,7 +236,7 @@ export async function confirmRun(
           `確認を省略（以降は訊かない）: ${rememberId} / ${runLabel}` +
             (workTitle ? ` / ${workTitle}` : "")
         );
-        return true;
+        return { kind: "run" };
       }
       overridingMemory = true;
       logStep(
@@ -221,12 +246,18 @@ export async function confirmRun(
     }
   }
 
+  // 実行の言葉と重なる別の道は並べない（押したものを取り違えないため）
+  const choices = (options.choices ?? []).filter(
+    (label) => label !== runLabel && label !== rememberLabel(runLabel)
+  );
   // 覚えてある回に「以降は訊かない」を並べても、押して何も変わらない。
   // 並べるのは、まだ覚えていないときだけにする
-  const buttons =
-    rememberId && isRememberable(rememberId) && !overridingMemory
+  const buttons = [
+    ...(rememberId && isRememberable(rememberId) && !overridingMemory
       ? [runLabel, rememberLabel(runLabel)]
-      : [runLabel];
+      : [runLabel]),
+    ...choices,
+  ];
   const shownMessage = withWorkTitle(
     message,
     workTitle,
@@ -247,12 +278,15 @@ export async function confirmRun(
           ...buttons
         );
 
-  if (answer === runLabel) return true;
+  if (answer === runLabel) return { kind: "run" };
   if (rememberId && answer === rememberLabel(runLabel)) {
     await rememberConfirmAnswer(rememberId, runLabel);
-    return true;
+    return { kind: "run" };
   }
-  return false;
+  if (answer !== undefined && choices.includes(answer)) {
+    return { kind: "choice", label: answer };
+  }
+  return undefined;
 }
 
 /**

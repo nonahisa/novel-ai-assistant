@@ -260,7 +260,10 @@ import type { WorkFormatKey } from "./core/workFormat";
 import { writePlotSections } from "./core/plotFile";
 import { statsDayKey } from "./core/writingStats";
 import { setWorkGoals } from "./features/setWorkGoals";
-import { checkContradictions } from "./features/checkContradictions";
+import {
+  checkContradictions,
+  pickContradictionReadMode,
+} from "./features/checkContradictions";
 // 矛盾検知のもう1つの道（設計書6.88）。P-12 としばらく並行させる
 import { checkFactContradictions } from "./features/checkFactContradictions";
 import { checkProofread } from "./features/checkProofread";
@@ -3632,8 +3635,8 @@ export async function activate(
     // **機能キーを受け取る。** 時間切れの通知から呼ばれたときは、その機能の
     // 割当先（設計書6.28.9）を測らないと、測ったAIと切れたAIが別物になる。
     // コマンドパレットからは引数なしで来るので、そのときは既定を測る
-    registerCommand("novelai.measureContext", async (feature?: unknown) => {
-      const { askTuningScope, measureContext } = await import(
+    registerCommand("novelai.measureContext", async (feature?: unknown, target?: unknown) => {
+      const { askTuningScope, isMeasureTarget, measureContext } = await import(
         "./features/measureContext.js"
       );
       // **何を測るかを先に訊く**（作者の依頼、2026-09-13）。読める長さは
@@ -3666,7 +3669,10 @@ export async function activate(
           aiRegistry,
           isAssignableFeature(feature) ? feature : "default",
           logFolder,
-          scope
+          scope,
+          // 確認画面の「この大きいモデルの速さを測る」から来たときだけ名指しがある
+          // （A3④）。割当を変える前に測るため
+          isMeasureTarget(target) ? target : undefined
         );
       } finally {
         useLogFile(logFolder);
@@ -5162,12 +5168,22 @@ export async function activate(
           suiteConfirmed,
         });
         if (!scope) return CHECK_CANCELLED;
+        /*
+          **読み方を選ぶ**（作者の裁定 A3⑤、2026-09-23）。分けて読む矛盾検知は
+          そのまま残り、まるごと読むのは並ぶ別の選択肢。**まとめ実行では訊かない**
+          （これまでどおり分けて読む。画面を離れた作者を待たせない）
+        */
+        const readMode = suiteConfirmed
+          ? "chunked"
+          : await pickContradictionReadMode();
+        if (!readMode) return CHECK_CANCELLED;
         const result = await withPanelProgress(
           work,
           "矛盾を検知",
           (onProgress, stage) =>
             checkContradictions(work, aiRegistry, {
               filePaths: scope.filePaths,
+              readMode,
               onProgress,
               // 検証はAIを1件ずつ呼ぶので、別の札で件数を流す
               onVerifyProgress: stage("検出した矛盾を検証", "件"),

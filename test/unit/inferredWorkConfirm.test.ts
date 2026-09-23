@@ -280,11 +280,16 @@ function callArguments(source: string, openParen: number): string {
 describe("作品に対する確認は、作品そのものを渡す", () => {
   test.each(WORK_CONFIRMS)("%s（%s）", (file, id) => {
     const text = readFileSync(join(FEATURES, file), "utf8");
-    const calls = [...text.matchAll(/\b(confirmRun|confirmPaidUsage)\(/g)]
+    // 大きいモデルの案内を並べる確認（A3④）は confirmRunOrChoose を通る。
+    // まるごと読むときは覚えない（`remember: wholeRead ? undefined : { id }`）ので、
+    // id の書き方は `{ id: "…" }` の部分で拾う
+    const calls = [
+      ...text.matchAll(/\b(confirmRun|confirmRunOrChoose|confirmPaidUsage)\(/g),
+    ]
       .map((match) =>
         callArguments(text, (match.index ?? 0) + match[0].length - 1)
       )
-      .filter((args) => args.includes(`remember: { id: "${id}" }`));
+      .filter((args) => args.includes(`{ id: "${id}" }`));
     expect(calls, `${file} に ${id} の確認が無い`).toHaveLength(1);
     // `work` か `work: request.work` のように、作品そのものを渡している
     expect(calls[0]).toMatch(/(^|[\s{,])work(: [\w.?]+)?\s*[,}]/);

@@ -12,11 +12,17 @@ import {
 } from "../ai/outputLimit";
 import {
   describeChunkScope,
+  halveMergedChunk,
   locateChunkLine,
   splitMergedChunk,
   withLineNumbers,
   type Chunk,
 } from "../core/chunker";
+import { isLocalProviderId } from "../core/localProviders";
+import {
+  describeWholeReadConsent,
+  WHOLE_READ_CONSENT_LABEL,
+} from "../core/wholeReadConsent";
 import { linesAround } from "../core/factContradiction";
 import { ChunkCache, type CacheKeyBase } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
@@ -102,7 +108,8 @@ import {
   withCancellableProgress,
   type CheckProgress,
 } from "../views/progress";
-import { estimateRunTimeText } from "../ai/runTimeEstimate";
+import { estimateRunTimeText, lookupCallSpeeds } from "../ai/runTimeEstimate";
+import { describeSendVolume } from "../core/sendVolume";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurn } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
@@ -115,7 +122,9 @@ import {
 // 落とした理由の内訳は、通知ではなく操作ログへ残す（設計書6.8）
 import { summarizeReasons } from "../core/checkRunCounts";
 import { hashText } from "../core/textFile";
-import { confirmRun } from "../views/notify";
+import { confirmRunOrChoose } from "../views/notify";
+import { findLargerModelOffer } from "./largerModelOffer";
+import { cancelItem } from "../views/dialogs";
 
 /**
  * 矛盾検知（P-12、設計書6.10.1）。
@@ -217,6 +226,67 @@ export interface CheckContradictionsOptions extends SuiteAwareOptions {
    * 値を変える口は MCP の `options.carryOver`。
    */
   carryOverChapters?: number;
+  /**
+   * 読み方（作者の裁定 A3⑤、2026-09-23。設計書6.10.7）。**既定は分けて読む**
+   * （これまでどおり）。まるごと読むのは、押したときに作者が選んだときだけ
+   * （`pickContradictionReadMode`）。まとめ実行からは来ない。
+   */
+  readMode?: ContradictionReadMode;
+}
+
+/** 矛盾検知の読み方 */
+export type ContradictionReadMode = "chunked" | "whole";
+
+/**
+ * 押したときに出す、読み方の選択肢（A3⑤）。**先頭は分けて読む**——これまで
+ * どおりの形を、何も考えずに選べる位置に置く。
+ *
+ * 作者の問い「全量読み込みの同意がなくても実行可能な状態になるということ
+ * でしょうか？」への答えが、この2つが**並んでいる**ことである——分けて読む
+ * 矛盾検知はそのまま残り、まるごと読むのは別の選択肢。
+ */
+export const CONTRADICTION_READ_MODE_CHOICES: ReadonlyArray<{
+  readonly mode: ContradictionReadMode;
+  readonly label: string;
+  readonly detail: string;
+}> = [
+  {
+    mode: "chunked",
+    label: "分けて読む（これまでどおり）",
+    detail: "話ごと・チャンクごとに、設定資料と突き合わせます。",
+  },
+  {
+    mode: "whole",
+    label: "まるごと読む",
+    detail:
+      "作品を文脈長と出力の上限まで詰めて、話をまたいで読ませます。" +
+      "長い作品は区切ります。クラウドのAIでは本文がまるごと外へ出るので、毎回確かめます。",
+  },
+];
+
+/**
+ * 読み方を訊く（A4 の裁定どおり、画面上部の選択窓で）。取りやめたら undefined。
+ */
+export async function pickContradictionReadMode(): Promise<
+  ContradictionReadMode | undefined
+> {
+  const picked = await vscode.window.showQuickPick(
+    [
+      ...CONTRADICTION_READ_MODE_CHOICES.map((choice) => ({
+        label: choice.label,
+        detail: choice.detail,
+        mode: choice.mode,
+      })),
+      cancelItem("取りやめる"),
+    ],
+    {
+      title: "矛盾検知：読み方を選ぶ",
+      placeHolder: "どちらで読みますか",
+      ignoreFocusOut: true,
+    }
+  );
+  if (!picked || !("mode" in picked)) return undefined;
+  return picked.mode;
 }
 
 export async function checkContradictions(
@@ -228,6 +298,8 @@ export async function checkContradictions(
 
   const resolved = await ensureConfigured(registry, "contradiction");
   if (!resolved) return undefined;
+  /** まるごと読むか（A3⑤）。区切り方と確認と、切り詰められたときの戻し方が変わる */
+  const wholeRead = options.readMode === "whole";
 
   // **モデルの情報を先に1回だけ引く。** チャンクの大きさも、観点の絞りも、
   // 世界観に回してよい字数も、すべてここから決まる（設計書6.27.10）。
@@ -357,6 +429,16 @@ export async function checkContradictions(
     // 機能名を添えると、待ち時間の上限に収まる大きさにもする（2026-09-23）
     outputTuning: { ...outputTuning, feature: "contradiction_check" },
     logLabel: "矛盾検知",
+    /*
+      **まるごと読むときは、文脈長と出力の上限から区切る**（A3⑤）。
+
+      区切りは話の切れ目に落ちる。**区切りのあいだで持ち越すのは、分けて
+      読むときと同じ材料だけ**——前の話までのあらすじ（【これまでの経緯】）、
+      名前の出る過去の場面の抜粋（6.74）、直前2話の人物（6.10.6）、その時点の
+      設定資料。**前の区切りで出た指摘は持ち越さない**（検証を通る前の指摘を
+      次の前提にすると、誤りが連鎖する）。
+    */
+    wholeRead,
   });
   const { chunks, chapterLabelByFile, chunkNote, unreadableEpisodes } = tasks;
   if (chunks.length === 0) {
@@ -453,6 +535,22 @@ export async function checkContradictions(
     ) {
       return undefined;
     }
+    /*
+      **実際に送るぶんで数える**（A3①、2026-09-23）。
+
+      本文の字数だけで見積もっていたので、引き継ぎ（`carryOver`。既定2話）で
+      増えた人物の設定（＋16%）が時間にも量にも出ていなかった。送るときと
+      同じ組み立て（`promptFor`）でプロンプトを組み、指示も含めて数える。
+      照らし合わせる相手が無いチャンクは送らないので0字にする。
+    */
+    const sendChars = pending.map((chunk) => {
+      const built = promptFor(chunk, "settled");
+      return built ? systemPrompt.length + built.userPrompt.length : 0;
+    });
+    const sendVolume = describeSendVolume({
+      totalChars: sendChars.reduce((total, chars) => total + chars, 0),
+      bodyChars: pending.reduce((total, chunk) => total + chunk.text.length, 0),
+    });
     const detail = [
       `${chunks.length}チャンク中 ${pending.length}件を処理します` +
         `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
@@ -463,9 +561,10 @@ export async function checkContradictions(
         model: resolved.model,
         feature: "contradiction_check",
         count: pending.length,
-        // 送る本文の量。読み込みの時間を足す（設計書6.8.19）
-        inputChars: pending.map((chunk) => chunk.text.length),
+        // 送るぶんそのもの（指示・設定資料・本文）。読み込みの時間を足す（設計書6.8.19）
+        inputChars: sendChars,
       }),
+      sendVolume,
       `材料: 人物${material.characterCount}人 / 場所${material.locationCount}件 / ` +
         `世界観${material.worldCount}件`,
       // **送る量が増えることを黙らない**（設計書6.74）。過去の本文を
@@ -499,18 +598,94 @@ export async function checkContradictions(
       .filter(Boolean)
       .join("\n");
 
-    if (options.suiteConfirmed) {
+    /*
+      **まるごと読むときの確認**（A3⑤、2026-09-23。設計書6.10.7）。
+
+      - **クラウドなら毎回同意を取る。** 作品が丸ごと1つのサービスへ渡る。
+        「以降は訊かない」を出さず、まとめ実行から来ても飛ばさない
+      - **手元なら同意は取らない**（原稿が外へ出ない）。確認は時間の目安の
+        ために出すが、分けて読むときの「以降は訊かない」は持ち込まない
+        ——同じ id にすると、分けて読むほうで覚えた答えで黙って走る
+    */
+    const cloudWhole = wholeRead && !isLocalProviderId(resolved.provider.id);
+    let wholeNote = "";
+    if (cloudWhole) {
+      // **2回目の突き合わせ（あとで判明する事実）も足す**——同じ本文を
+      // もう一度送るので、量の目安は上限寄りにする
+      const totalChars =
+        sendChars.reduce((total, chars) => total + chars, 0) +
+        pending.reduce((total, chunk) => total + futureSendChars(chunk), 0);
+      const tokensPerChar = lookupCallSpeeds(
+        resolved.provider.id,
+        resolved.model,
+        "contradiction_check"
+      ).tokensPerChar;
+      wholeNote = describeWholeReadConsent({
+        // **サービス名を決め打ちしない**（規則5）。プロバイダの表示名を使う
+        serviceName: resolved.provider.displayName,
+        bodyChars: pending.reduce((total, chunk) => total + chunk.text.length, 0),
+        totalChars,
+        calls: pending.length,
+        inputTokens: Math.ceil(totalChars * tokensPerChar),
+        maxOutputTokens: sendOutputTokens * pending.length,
+      });
+    } else if (wholeRead) {
+      wholeNote =
+        "手元のAIで読むので、原稿は外へ出ません。" +
+        "作品を文脈長と出力の上限まで詰めて、話をまたいで読ませます。";
+    }
+
+    if (options.suiteConfirmed && !cloudWhole) {
       // まとめ実行が先に1回だけ確認している（設計書6.80）。
       // **飛ばした中身はログへ残す**——観点を絞ったことや、過去の場面を
       // 足したことは、この確認の中にしか書かれていない
       logStep(`矛盾検知：まとめ実行のため確認を省略\n${detail}`);
     } else {
-      const confirmed = await confirmRun(
-        `${work.title} の矛盾を検知します。`,
-        "実行",
-        { detail, remember: { id: "ai.run.checkContradictions" }, work }
+      /*
+        **この機械で上限内に終わる、もっと大きいモデルがあれば案内する**
+        （A3④、2026-09-23）。矛盾検知は大きさで当たりが最も変わる機能
+        （e4b 0/4・26b 4/4）。まとめ実行では確認を出さないので案内もしない。
+        クラウドでは出ない（`findLargerModelOffer` が手元だけを見る）。
+      */
+      const offer = await findLargerModelOffer({
+        registry,
+        feature: "contradiction",
+        provider: resolved.provider,
+        model: resolved.model,
+        parameterSize: info.parameterSize,
+        speedFeature: "contradiction_check",
+        promptVersion: CONTRADICTION_CHECK_VERSION,
+        inputChars: sendChars,
+        workFolder: work.folderPath,
+      });
+      const answer = await confirmRunOrChoose(
+        cloudWhole
+          ? `${work.title} の本文を、まるごと ${resolved.provider.displayName} へ送って矛盾を検知します。`
+          : wholeRead
+            ? `${work.title} の矛盾を、まるごと読んで検知します。`
+            : `${work.title} の矛盾を検知します。`,
+        cloudWhole ? WHOLE_READ_CONSENT_LABEL : "実行",
+        {
+          kind: cloudWhole ? "warning" : undefined,
+          detail: [wholeNote, detail, offer?.detail ?? ""]
+            .filter(Boolean)
+            .join("\n\n"),
+          remember: wholeRead ? undefined : { id: "ai.run.checkContradictions" },
+          // 推し量った作品なら「訊かない」を覚えていても訊く
+          work,
+          choices: offer?.choices,
+        }
       );
-      if (!confirmed) return undefined;
+      if (!answer) return undefined;
+      if (answer.kind === "choice") {
+        // 割当を変えたら最初からやり直す——モデルが変われば、分け方も
+        // 資料の量も抑制の強さも変わるので、ここまでの準備は使えない
+        const next = await offer?.handle(answer.label);
+        return next === "rerun"
+          ? checkContradictions(work, registry, options)
+          : undefined;
+      }
+      if (offer) logStep(offer.logText);
     }
   }
 
@@ -650,12 +825,17 @@ export async function checkContradictions(
           }
 
           if (raw === RETRY_SMALLER) {
-            const parts = splitMergedChunk(chunk);
+            // **まるごと読むときは半分ずつに戻す**（A3⑤）。1話ずつまで戻すと
+            // 30話の区切りが30回の「分けて読む」になり、選んだ意味が消える。
+            // 半分でも切り詰められれば、次の周でもう一度ここを通る
+            const parts = wholeRead ? halveMergedChunk(chunk) : splitMergedChunk(chunk);
             if (parts.length > 1) {
               queue.splice(cursor + 1, 0, ...parts);
               chunksTotal += parts.length;
               logStep(
-                `切り詰められたため ${parts.length} 話に分けて試し直します: ${chunk.hash}`
+                wholeRead
+                  ? `切り詰められたため ${parts.length} つの区切りに分けて試し直します: ${chunk.hash}`
+                  : `切り詰められたため ${parts.length} 話に分けて試し直します: ${chunk.hash}`
               );
             } else {
               failedChunks++;
@@ -718,42 +898,19 @@ export async function checkContradictions(
           mode: "settled" | "future",
           futureFacts = ""
         ): Promise<unknown | undefined> {
-          // **まとめたチャンクでは、いちばん前の話に合わせる。**
-          // うしろに合わせると、前半の話にとって「まだ分かっていないこと」を
-          // 材料に渡すことになる（設計書6.10.3）
-          //
-          // **引き継ぎは人物を索引で見つけるためだけ**（設計書6.10.6）。
-          // 引き継いだ本文そのものはプロンプトへ入らない
-          const relevant = settings.relevantFor(chunk.text, chunk.chapterStart, {
-            carryOverText: carryOverFor(chunk).text,
-          });
           // **照らし合わせる相手が無いチャンクは飛ばす。**
           // 材料なしで問うと、本文だけを見て矛盾を作り出す
-          if (!relevant.hasAnything) return undefined;
+          const built = promptFor(chunk, mode, futureFacts);
+          if (!built) return undefined;
 
           try {
-            const bodyWithLines = withLineNumbers(chunk);
-            const previousSynopses = settings.synopsesBefore(chunk.chapterStart);
-            // **「あとで判明する事実」の向きには渡さない**（設計書6.74）。
-            // あちらは本命（settled）が通ったチャンクの補足で、既に実データで
-            // 測ってある。入力を増やすと、測った結果と別のものになる
-            const pastScenes = mode === "future" ? "" : pastScenesFor(chunk);
-            const userPrompt = buildContradictionCheckPrompt({
-              // **まとめたチャンクは、話が1つとは限らない。**
-              // 1つ目の話の名前だけを渡すと、2話目以降の本文を
-              // 1話目だと言って読ませることになる
-              chapterLabel: describeChunkScope(chunk, (filePath) =>
-                chapterLabelByFile.get(filePath)
-              ),
-              chunkTextWithLineNumbers: bodyWithLines,
-              characterDetails: relevant.characters,
-              locationDetails: relevant.locations,
-              worldviewSummary: relevant.worldview,
+            const {
+              userPrompt,
+              relevant,
+              bodyWithLines,
               previousSynopses,
-              categories,
-              futureFacts,
               pastScenes,
-            });
+            } = built;
 
             const response = await provider.generate({
               systemPrompt,
@@ -956,6 +1113,77 @@ export async function checkContradictions(
     verifyNote,
     missedNote,
   };
+
+  /**
+   * そのチャンクへ送るプロンプトを組む。**照らし合わせる相手が無ければ undefined**
+   * （送らない）。
+   *
+   * **送るときと、押す前に送る量を数えるときの両方がここを通る**（A3①、
+   * 2026-09-23）。数える側に別の組み立てを書くと、引き継ぎ（`carryOver`）で
+   * 増えた人物のような「送るものにだけ効く差」が見積もりから抜ける。
+   */
+  function promptFor(
+    chunk: Chunk,
+    mode: "settled" | "future",
+    futureFacts = ""
+  ):
+    | {
+        userPrompt: string;
+        relevant: RelevantSettings;
+        bodyWithLines: string;
+        previousSynopses: string;
+        pastScenes: string;
+      }
+    | undefined {
+    // **まとめたチャンクでは、いちばん前の話に合わせる。**
+    // うしろに合わせると、前半の話にとって「まだ分かっていないこと」を
+    // 材料に渡すことになる（設計書6.10.3）
+    //
+    // **引き継ぎは人物を索引で見つけるためだけ**（設計書6.10.6）。
+    // 引き継いだ本文そのものはプロンプトへ入らない
+    const relevant = settings.relevantFor(chunk.text, chunk.chapterStart, {
+      carryOverText: carryOverFor(chunk).text,
+    });
+    if (!relevant.hasAnything) return undefined;
+
+    const bodyWithLines = withLineNumbers(chunk);
+    const previousSynopses = settings.synopsesBefore(chunk.chapterStart);
+    // **「あとで判明する事実」の向きには渡さない**（設計書6.74）。
+    // あちらは本命（settled）が通ったチャンクの補足で、既に実データで
+    // 測ってある。入力を増やすと、測った結果と別のものになる
+    const pastScenes = mode === "future" ? "" : pastScenesFor(chunk);
+    const userPrompt = buildContradictionCheckPrompt({
+      // **まとめたチャンクは、話が1つとは限らない。**
+      // 1つ目の話の名前だけを渡すと、2話目以降の本文を
+      // 1話目だと言って読ませることになる
+      chapterLabel: describeChunkScope(chunk, (filePath) =>
+        chapterLabelByFile.get(filePath)
+      ),
+      chunkTextWithLineNumbers: bodyWithLines,
+      characterDetails: relevant.characters,
+      locationDetails: relevant.locations,
+      worldviewSummary: relevant.worldview,
+      previousSynopses,
+      categories,
+      futureFacts,
+      pastScenes,
+    });
+    return { userPrompt, relevant, bodyWithLines, previousSynopses, pastScenes };
+  }
+
+  /**
+   * 「あとで判明する事実」の向き（設計書6.10.4）で送るぶんの字数。送らない
+   * （事実が無い・照らし合わせる相手が無い）なら0。
+   *
+   * まるごと読むときの同意（A3⑤）で、送る量を上限寄りに言うためだけに使う
+   * ——本命が通ったチャンクでしか送らないので、実際はこれ以下になる。
+   */
+  function futureSendChars(chunk: Chunk): number {
+    const facts = settings.futureFactsFor(chunk.text, chunk.chapterStart);
+    if (!facts) return 0;
+    const built = promptFor(chunk, "future", facts);
+    return built ? systemPrompt.length + built.userPrompt.length : 0;
+  }
 
   /**
    * そのチャンクへ渡す、過去の関連場面（設計書6.74）。無ければ空文字。

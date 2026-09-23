@@ -70,7 +70,11 @@ function callArguments(source: string, openParen: number): string {
 
 function confirmCalls(source: string): string[] {
   const calls: string[] = [];
-  for (const match of source.matchAll(/\b(confirmRun|confirmPaidUsage)\(/g)) {
+  // `confirmRunOrChoose` は、確認に別の道（大きいモデルへの切り替え）を
+  // 並べる形（A3④）。確認であることに変わりはないので同じ約束を見る
+  for (const match of source.matchAll(
+    /\b(confirmRun|confirmRunOrChoose|confirmPaidUsage)\(/g
+  )) {
     if (match.index === undefined) continue;
     // 宣言（`function confirmRun(`）は呼び出しではない
     const before = source.slice(Math.max(0, match.index - 20), match.index);
@@ -130,7 +134,7 @@ describe("「開始」の記録は確認のあとに書く", () => {
       );
       const between = source.slice(head, at);
       expect(between, `${file}: ${source.slice(at - 20, at + 10)}`).toMatch(
-        /confirmRun\(|confirmPaidUsage\(/
+        /confirmRun\(|confirmRunOrChoose\(|confirmPaidUsage\(/
       );
     }
   });
