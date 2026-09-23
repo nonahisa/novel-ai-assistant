@@ -172,6 +172,15 @@ describe("ボタンと済みの条件は、実在するコマンドを指す", (
     expect(ids).toContain("novelai");
   });
 
+  // 押しただけで済みにすると、フォルダー選びを取りやめても印が付いた（2026-09-24）。
+  // 済みの鍵を package.json にだけ書いて、拡張機能が立てていなければ永遠に済みにならない
+  test("「作品を用意する」は作品が1つ以上あるときに済みになり、その鍵を拡張機能が立てている", () => {
+    const step = walkthrough().steps.find((s) => s.id === "prepareWork");
+    expect(step?.completionEvents).toEqual(["onContext:novelai.hasWorks"]);
+    const source = readFileSync("src/extension.ts", "utf8");
+    expect(source).toMatch(/"setContext",\s*"novelai\.hasWorks"/);
+  });
+
   test("原稿エディターの段は、実在する画面の種類で済みになる", () => {
     const viewTypes = manifest.contributes.customEditors.map((e) => e.viewType);
     const contexts = walkthrough()

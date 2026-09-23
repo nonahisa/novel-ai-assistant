@@ -1942,6 +1942,22 @@ export async function activate(
   );
 
   /*
+    **道案内の「作品を用意する」は、作品が実際に1つ以上あるときに済みにする**
+    （`package.json` の walkthroughs の `onContext:novelai.hasWorks`）。
+    押しただけで済みにすると、フォルダー選びを取りやめても印が付いた
+    （2026-09-24、ブラウザ版で見つけた）。
+  */
+  const setHasWorks = (): void => {
+    void vscode.commands.executeCommand(
+      "setContext",
+      "novelai.hasWorks",
+      registry.list().length > 0
+    );
+  };
+  setHasWorks();
+  context.subscriptions.push(registry.onDidChange(setHasWorks));
+
+  /*
     **外部AIのノックを見つけて、その場で作者に尋ねる**（設計書6.87.14。
     作者の指示、2026-09-16「MCP承認を検知した場合は、拡張機能の画面上に
     ポップアップさせてください」）。
