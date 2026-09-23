@@ -50,6 +50,12 @@ const EGO_CANVAS = { width: 840, height: 840 };
 /** 書き出し先。PDF出力と同じ置き場（`.gitignore` で除外済み） */
 const EXPORT_DIR = "exports";
 
+/**
+ * 人物のファイルの変化が落ち着くまで待つ時間。保存は「退避 → 新規作成」で
+ * 知らせが2つ続き、承認をまとめて反映すると何人分も続けて来る
+ */
+const RELOAD_SETTLE_MS = 500;
+
 export interface RelationGraphDeps {
   /**
    * 「設定資料を開く」。実体は `extension.ts` が繋ぐ。
@@ -197,7 +203,10 @@ class RelationGraphPanel {
       { enableScripts: true, retainContextWhenHidden: true }
     );
     context.subscriptions.push(this.panel);
-    this.panel.onDidDispose(() => openPanels.delete(work.id));
+    this.panel.onDidDispose(() => {
+      openPanels.delete(work.id);
+      this.stopWatching();
+    });
 
     this.panel.webview.html = buildRelationGraphPanelHtml(
       createNonce(),
@@ -210,6 +219,64 @@ class RelationGraphPanel {
 
   async initialize(): Promise<void> {
     await this.load();
+    await this.watchCharacters();
+  }
+
+  /** 人物の置き場の見張り。開いている間だけ張る */
+  private watcher: vscode.FileSystemWatcher | undefined;
+  private reloadTimer: ReturnType<typeof setTimeout> | undefined;
+  private disposed = false;
+
+  /**
+   * 人物のファイルが変わったら読み直す（作者の依頼「B3」、2026-09-22 未明）。
+   *
+   * **関係を直す道が3つある**——設定資料パネルの保存、承認待ちの反映
+   * （外部AIの `novel.propose` を含む）、外での書き換え（同期・別のAI）。
+   * パネルの保存は `extension.ts` が `refreshRelationGraph` で知らせるが、
+   * 残りの2つは知らせる口が無く、開きっぱなしの図が直す前の言葉を
+   * 描き続けていた。**置き場そのものを見張れば、道の数に依らない。**
+   *
+   * - 見張るのは `設定/characters/*.json` だけ（**再帰しない**。再帰の見張りを
+   *   開いているフォルダーの外へ張ると VS Code 本体が警告を出す。6.87.17）
+   * - 人物の保存は「退避 → 新規作成」で消えて現れるので、知らせが続けて来る。
+   *   **落ち着いてから1回だけ**読み直す
+   * - 場所は `paths.toUri()` で渡す（`RelativePattern` に文字列を渡すと中で
+   *   `Uri.file()` を呼び、ブラウザ版で無い場所を見張る。`watchSettings.ts` と同じ）
+   * - 見張れなくても図は出す（読み直しが効かないだけ。理由はログへ）
+   */
+  private async watchCharacters(): Promise<void> {
+    try {
+      const config = await readWorkConfig(this.work);
+      const directory = path.join(workPaths(this.work, config).settings, "characters");
+      if (this.disposed) return;
+      const watcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(path.toUri(directory), "*.json")
+      );
+      const schedule = (): void => {
+        if (this.reloadTimer) clearTimeout(this.reloadTimer);
+        this.reloadTimer = setTimeout(() => {
+          this.reloadTimer = undefined;
+          if (!this.disposed) void this.load();
+        }, RELOAD_SETTLE_MS);
+      };
+      watcher.onDidChange(schedule);
+      watcher.onDidCreate(schedule);
+      watcher.onDidDelete(schedule);
+      this.watcher = watcher;
+    } catch (error) {
+      logStep(
+        "人物相関図：人物の置き場を見張れませんでした（資料を直しても図は開き直すまで古いままです）：" +
+          (error instanceof Error ? error.message : String(error))
+      );
+    }
+  }
+
+  private stopWatching(): void {
+    this.disposed = true;
+    if (this.reloadTimer) clearTimeout(this.reloadTimer);
+    this.reloadTimer = undefined;
+    this.watcher?.dispose();
+    this.watcher = undefined;
   }
 
   /** 資料が外で変わったときに読み直す。表示の状態（中心・絞り込み）は保つ */

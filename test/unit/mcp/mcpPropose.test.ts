@@ -19,6 +19,7 @@ import {
   unwrapPendingCharacter,
 } from "../../../src/core/pendingUpdateFormat";
 import { parseCharacter } from "../../../src/models/character";
+import { diffCharacter } from "../../../src/core/characterDiff";
 
 /**
  * 設定資料の更新案を承認待ちへ置く道具（設計書6.87.16）。
@@ -278,6 +279,136 @@ describe("novel.propose——断りどころ", () => {
       unwrapPendingCharacter(readPending(folder, "char_0001.json"))
     );
     expect(character.summary).toBe("最初の案");
+  });
+});
+
+/**
+ * 関係（`relations`）の提案（作者の依頼「B3」、2026-09-22 未明）。
+ *
+ * 作者の作品で、マイナの関係に「ターナ＝父の娘」（正しくは母）が入っていたが、
+ * 外部AIが気づいても置く口が無かった。**相手ごとの差し替え**にする——
+ * 足すだけにすると、誤った「父の娘」が消せず、直す提案にならない。
+ * 書いていない相手の関係は残す（外からの提案1回で、作者が足した関係を
+ * まとめて消させない）。
+ */
+describe("novel.propose——関係（relations）", () => {
+  /** 作り物の人物に関係を持たせる（写した一時フォルダーの中だけで） */
+  function giveRelations(
+    folder: string,
+    relations: Array<{ name: string; relation: string }>
+  ): void {
+    const file = nodePath.join(folder, "設定", "characters", "char_0001.json");
+    const record = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+    record.relations = relations;
+    fs.writeFileSync(file, JSON.stringify(record, null, 2), "utf8");
+  }
+
+  it("書いた相手の関係だけを差し替える。ほかの相手の関係は残る。台帳は変わらない", () => {
+    const folder = workCopy();
+    giveRelations(folder, [
+      { name: "ターナ", relation: "父の娘" },
+      { name: "リナ", relation: "友人" },
+    ]);
+    const before = ledgerFingerprint(folder);
+
+    const result = settingsPropose({
+      folder,
+      name: "少年",
+      changes: { relations: [{ name: "ターナ", relation: "母" }] },
+      reason: "第3話で「お母さん」と呼んでいるため。",
+    });
+
+    expect(ledgerFingerprint(folder)).toBe(before);
+    expect(result.changedFields).toEqual(["relations"]);
+    const character = parseCharacter(
+      unwrapPendingCharacter(readPending(folder, "char_0001.json"))
+    );
+    // 差し替えた相手は元の位置に入る（並びが崩れると、差分が読みにくい）
+    expect(character.relations).toEqual([
+      { name: "ターナ", relation: "母" },
+      { name: "リナ", relation: "友人" },
+    ]);
+  });
+
+  it("まだ無い相手の関係は、末尾へ足す", () => {
+    const folder = workCopy();
+    giveRelations(folder, [{ name: "リナ", relation: "友人" }]);
+    settingsPropose({
+      folder,
+      name: "少年",
+      changes: { relations: [{ name: "灯台守", relation: "恩人" }] },
+      reason: "第4話で船の話を教わっているため。",
+    });
+    const character = parseCharacter(
+      unwrapPendingCharacter(readPending(folder, "char_0001.json"))
+    );
+    expect(character.relations).toEqual([
+      { name: "リナ", relation: "友人" },
+      { name: "灯台守", relation: "恩人" },
+    ]);
+  });
+
+  it("中身が同じなら、変えた欄に数えない", () => {
+    const folder = workCopy();
+    giveRelations(folder, [{ name: "リナ", relation: "友人" }]);
+    const result = settingsPropose({
+      folder,
+      name: "少年",
+      changes: {
+        relations: [{ name: "リナ", relation: "友人" }],
+        role: "灯台の当番",
+      },
+      reason: "第4話の描写から。",
+    });
+    expect(result.changedFields).toEqual(["role"]);
+  });
+
+  it("関係を空で消させない・形の違うものは断る", () => {
+    const folder = workCopy();
+    const call = (relations: unknown) => () =>
+      settingsPropose({
+        folder,
+        name: "少年",
+        changes: { relations },
+        reason: "理由はある",
+      });
+    // 空の関係＝その相手の関係を消す提案。消すのは作者の操作
+    expect(call([{ name: "ターナ", relation: "  " }])).toThrow(/relations/);
+    expect(call([{ name: "", relation: "母" }])).toThrow(/relations/);
+    expect(call([])).toThrow(/relations/);
+    expect(call("ターナ=母")).toThrow(/relations/);
+    expect(call([{ name: "ターナ" }])).toThrow(/relations/);
+    expect(fs.existsSync(pendingDir(folder))).toBe(false);
+  });
+
+  it("承認の画面は、消える関係と入る関係を1つずつ見せる", () => {
+    // 承認は製品の差分（`characterDiff` の葉）を通る。誤りの「父の娘」が
+    // 消えることが、作者に見えていなければならない
+    const folder = workCopy();
+    giveRelations(folder, [{ name: "ターナ", relation: "父の娘" }]);
+    settingsPropose({
+      folder,
+      name: "少年",
+      changes: { relations: [{ name: "ターナ", relation: "母" }] },
+      reason: "第3話から。",
+    });
+    const current = parseCharacter(
+      JSON.parse(
+        fs.readFileSync(
+          nodePath.join(folder, "設定", "characters", "char_0001.json"),
+          "utf8"
+        )
+      )
+    );
+    const proposed = parseCharacter(
+      unwrapPendingCharacter(readPending(folder, "char_0001.json"))
+    );
+    const diff = diffCharacter(current, proposed);
+    const relationChange = diff.changes.find((change) => change.label === "関係");
+    expect(relationChange?.entries).toEqual([
+      { key: "relation:ターナ:母", text: "ターナ=母", state: "added" },
+      { key: "relation:ターナ:父の娘", text: "ターナ=父の娘", state: "removed" },
+    ]);
   });
 });
 

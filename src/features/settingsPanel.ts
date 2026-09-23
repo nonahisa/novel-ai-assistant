@@ -32,6 +32,8 @@ import {
   applyOrganizationEdits,
   applyWorldItemEdits,
   appendAiNote,
+  describeRelationEditHint,
+  formatRelationsForEdit,
   removeAiNote,
   toRecordEdits,
   CUSTOM_FIELD_PREFIX,
@@ -39,6 +41,7 @@ import {
   type EditOptions,
   type RecordEdits,
 } from "../core/settingsEdit";
+import { incomingRelations } from "../core/relationGraph";
 import {
   describeAbility,
   describeCharacter,
@@ -889,6 +892,21 @@ export class SettingsPanel {
           field("role", "役割", character.role),
           field("personality", "性格", character.personality, true),
           field("appearance", "外見", character.appearance, true),
+          // 関係（作者の依頼「B3」、2026-09-22 未明）。**それまで画面に欄が無く**、
+          // 抽出が入れた誤り（「ターナ=父の娘」）を直す手段がどこにも無かった。
+          // 相手側の記録は説明に並べるだけで、こちらからは書き換えない
+          {
+            ...field(
+              "relations",
+              "関係（1行に1つ「相手=関係」）",
+              formatRelationsForEdit(character.relations),
+              true
+            ),
+            hint: describeRelationEditHint(
+              character.name,
+              incomingRelations(this.characters, id)
+            ),
+          },
           // AIの判定を作者が直せるようにする。外れていると、その人物は
           // 一覧の下へ回り、用語ハイライトとIME辞書からも消えたままになる
           checkField(

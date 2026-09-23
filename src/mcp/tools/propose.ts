@@ -51,6 +51,12 @@ import {
  *
  * `appearance`（外見）を足してあるのは、`CHARACTER_TEXT_FIELDS` の中で
  * `summary`・`role`・`personality` と同じ「作者が読んで判断できる文章」だから。
+ *
+ * `relations`（関係）は 0.83.2 で足した（作者の依頼「B3」）。抽出の誤り
+ * （「ターナ=父の娘」）を外部AIが見つけても置く口が無かった。**相手ごとの
+ * 差し替え**で、承認の画面には消える関係と入る関係が1つずつ並ぶ（`applyRelations`）。
+ * 呼称（`addressTerms`）と違って作者が固定する印（`authorLocked`）を持たない
+ * 構造なので、規則2には触れない。
  */
 const CHANGES_SCHEMA = z.looseObject({
   summary: z
@@ -68,6 +74,13 @@ const CHANGES_SCHEMA = z.looseObject({
   role: z.string().optional().describe("作中での役どころ"),
   personality: z.string().optional().describe("性格"),
   appearance: z.string().optional().describe("外見"),
+  relations: z
+    .array(z.object({ name: z.string(), relation: z.string() }))
+    .optional()
+    .describe(
+      "関係（{name: 相手, relation: この人物から見た相手の続柄・立場}）。" +
+        "書いた相手の関係は、いまの記録を置き換えます（ほかの相手の関係は残ります）。関係を消すだけの提案は受け付けません"
+    ),
 });
 
 /** 白名簿。**ここに無い鍵は断る**（黙って落とさない） */
@@ -79,6 +92,7 @@ const ALLOWED_FIELDS = [
   "role",
   "personality",
   "appearance",
+  "relations",
 ] as const;
 
 type AllowedField = (typeof ALLOWED_FIELDS)[number];
@@ -275,6 +289,11 @@ function applyChanges(
     const value = changes[field];
     if (value === undefined) continue;
 
+    if (field === "relations") {
+      if (applyRelations(target, value)) changed.push("relations");
+      continue;
+    }
+
     if (field === "aliases") {
       if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
         throw new McpToolError("aliases は文字列の配列で渡してください。");
@@ -310,6 +329,82 @@ function applyChanges(
   }
 
   return changed;
+}
+
+/**
+ * 関係の提案を、**相手ごとの差し替え**として当てる（作者の依頼「B3」、2026-09-22 未明）。
+ * 返すのは中身が変わったか。
+ *
+ * - **書いた相手の関係は、いまの記録を置き換える。** 足すだけにすると、
+ *   抽出が入れた誤り（「ターナ=父の娘」）が消せず、直す提案にならない
+ * - **書いていない相手の関係は残す。** 外からの提案1回で、作者が足した関係を
+ *   まとめて消させない（`aliases` を足すだけにしたのと同じ考え）
+ * - 差し替えた関係は**元の位置**に入れる（並びが崩れると、承認の差分が読みにくい）。
+ *   まだ無い相手は末尾へ
+ * - 相手の引き当ては**名前の完全一致だけ**（前後の空白は落とす）。敬称や別名の
+ *   揺れまで寄せると、別人の関係を消しうる——迷ったら消さない。揺れた名前で
+ *   来れば、元の関係は残り、承認の差分に両方が並ぶ
+ * - **空の相手・空の関係は断る。** 関係を消すのは作者の操作である
+ *
+ * 承認の画面は製品の差分（`characterDiff` の葉）なので、消える関係と入る関係が
+ * 1つずつ並び、入る側は ✕ で落とせる。マージはここと製品のコードが行い、AIには
+ * させない（規則3）。
+ */
+function applyRelations(target: Character, value: unknown): boolean {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new McpToolError(
+      "relations は {name, relation} の配列で、1件以上渡してください。"
+    );
+  }
+  const proposed: Array<{ name: string; relation: string }> = [];
+  for (const entry of value as unknown[]) {
+    const record =
+      typeof entry === "object" && entry !== null
+        ? (entry as Record<string, unknown>)
+        : {};
+    const name = typeof record.name === "string" ? record.name.trim() : "";
+    const relation =
+      typeof record.relation === "string" ? record.relation.trim() : "";
+    if (!name || !relation) {
+      throw new McpToolError(
+        "relations の各件には、空でない name（相手）と relation（関係）が要ります。" +
+          "関係を消す提案は受け付けません（消すのは作者の操作です）。"
+      );
+    }
+    if (proposed.some((item) => item.name === name && item.relation === relation)) {
+      continue;
+    }
+    proposed.push({ name, relation });
+  }
+
+  const targets = new Set(proposed.map((item) => item.name));
+  const next: Array<{ name: string; relation: string }> = [];
+  const placed = new Set<string>();
+  for (const current of target.relations) {
+    const name = current.name.trim();
+    if (!targets.has(name)) {
+      next.push(current);
+      continue;
+    }
+    // その相手の最初の位置に、提案の関係をまとめて入れる
+    if (placed.has(name)) continue;
+    placed.add(name);
+    next.push(...proposed.filter((item) => item.name === name));
+  }
+  for (const item of proposed) {
+    if (!placed.has(item.name)) next.push(item);
+  }
+
+  const same =
+    next.length === target.relations.length &&
+    next.every(
+      (item, index) =>
+        item.name === target.relations[index].name &&
+        item.relation === target.relations[index].relation
+    );
+  if (same) return false;
+  target.relations = next;
+  return true;
 }
 
 /** 作品フォルダーからの相対。区切りは読みやすいほうへ揃える */

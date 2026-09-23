@@ -208,6 +208,34 @@ export function buildRelationGraph(characters: Character[]): RelationGraph {
   return { nodes, edges: sortEdges([...edges.values()]), unresolved };
 }
 
+/**
+ * ほかの人物のレコードに書かれた、この人物への関係（作者の依頼「B3」、2026-09-22 未明）。
+ *
+ * 設定資料パネルの関係欄の下に「相手側の記録」として見せる。関係は人物ごとの
+ * レコードに片側ずつ書かれているので、片側だけ直すと向かい側の誤りが残る。
+ *
+ * **名前の引き当ては相関図と同じ `createNameResolver`**——パネルで「相手側」に
+ * 出る関係と、相関図でこの人物へ引かれる線が食い違わないように。同じ名前の
+ * 人物が複数居て決められないもの（`ambiguous`）は入れない（図にも線が無い）。
+ */
+export function incomingRelations(
+  characters: readonly Character[],
+  targetId: string
+): Array<{ fromId: string; fromName: string; relation: string }> {
+  const resolve = createNameResolver(characters);
+  const result: Array<{ fromId: string; fromName: string; relation: string }> = [];
+  for (const character of characters) {
+    if (character.id === targetId) continue;
+    for (const relation of character.relations ?? []) {
+      const text = (relation.relation ?? "").trim();
+      if (!text) continue;
+      if (resolve(relation.name ?? "").id !== targetId) continue;
+      result.push({ fromId: character.id, fromName: character.name, relation: text });
+    }
+  }
+  return result;
+}
+
 /** 名前を引いた結果。結べなかったときは、その理由を添える */
 
 /** どの環に居るか。0が中心、1が1次、2が2次 */

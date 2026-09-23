@@ -1882,6 +1882,10 @@ export async function activate(
     highlighter.invalidate();
     treeProvider.refresh(work.id);
     refreshActionBadges();
+    // 開いている相関図も読み直す（関係欄を直したら線の言葉が変わる。作者の依頼「B3」）。
+    // 開いていなければ何もしない。承認待ちの反映や外での書き換えは、
+    // 相関図の側の見張りが拾う（`relationGraphPanel.ts`）
+    void refreshRelationGraph(work.id);
   });
   context.subscriptions.push({
     dispose: () => setSettingsChangeObserver(undefined),

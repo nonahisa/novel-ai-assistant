@@ -266,8 +266,8 @@ h3 {
   color: var(--vscode-focusBorder);
   margin-left: 4px;
 }
-/* 項目の下に添える短い説明 */
-.hint { font-size: 11px; opacity: 0.7; margin: 3px 0 0; }
+/* 項目の下に添える短い説明。改行を活かす（関係欄の「相手側の記録」は1件1行） */
+.hint { font-size: 11px; opacity: 0.7; margin: 3px 0 0; white-space: pre-line; }
 /*
   別名を選ぶ札（設計書6.5.6）。
   **datalist はChromiumでは何の印も出ない**ので、作者からは
