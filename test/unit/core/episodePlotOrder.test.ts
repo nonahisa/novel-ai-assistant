@@ -4,12 +4,18 @@ import {
   chapterAtManuscriptLine,
   episodePlotOrder,
   EPISODE_PLOT_MOVING_PREFIX,
+  EPISODE_PLOT_RETIRED_PREFIX,
   neighborEpisodeChapter,
+  planEpisodePlotShift,
   planPlannedEpisodeInsert,
   planPlannedEpisodeStep,
+  retiredEpisodePlotNameCandidates,
   type EpisodePlotRename,
 } from "../../../src/core/episodePlotOrder";
-import { episodePlotFileName } from "../../../src/core/resumeSheet";
+import {
+  episodePlotChapterFromFileName,
+  episodePlotFileName,
+} from "../../../src/core/resumeSheet";
 
 /**
  * 単話プロットの並び（設計書6.36・6.4.8。作者の依頼、2026-09-23
@@ -299,5 +305,144 @@ describe("原稿のその行は何話か", () => {
 
   test("合本でなければ undefined（ファイル名で決める）", () => {
     expect(chapterAtManuscriptLine("ただの本文", 1)).toBeUndefined();
+  });
+});
+
+/*
+  本文の話の差し込み・削除に、単話プロットを付いて行かせる計画
+  （作者の裁定、2026-09-23）。本文のある話は「実際に動いた話」だけを追い、
+  予定の話は付け替えが最後まで済んだときだけずらす。
+*/
+describe("planEpisodePlotShift", () => {
+  const moves = (...pairs: Array<[number, number]>) => new Map(pairs);
+
+  test("差し込み：書いた話は動いた話数へ、予定の話は1つ後ろへ", () => {
+    const plan = planEpisodePlotShift({
+      episodes: written(1, 2, 3, 4, 5),
+      plotChapters: [2, 3, 4, 7],
+      moved: moves([5, 6], [4, 5], [3, 4]),
+      delta: 1,
+      pivot: 3,
+      completed: true,
+    });
+    expect(plan.renames).toEqual([
+      { from: 3, to: 4 },
+      { from: 4, to: 5 },
+      { from: 7, to: 8 },
+    ]);
+    expect(plan.collisions).toEqual([]);
+    expect(plan.retire).toBeUndefined();
+  });
+
+  test("削除：消した話は退け、後ろ（予定の話を含む）を詰める", () => {
+    const plan = planEpisodePlotShift({
+      episodes: written(1, 2, 3, 4, 5),
+      plotChapters: [3, 4, 7],
+      moved: moves([4, 3], [5, 4]),
+      delta: -1,
+      pivot: 3,
+      completed: true,
+    });
+    expect(plan.retire).toBe(3);
+    expect(plan.renames).toEqual([
+      { from: 4, to: 3 },
+      { from: 7, to: 6 },
+    ]);
+    expect(plan.collisions).toEqual([]);
+  });
+
+  test("削除：消した話にだけ単話プロットがあれば、退けるだけ", () => {
+    const plan = planEpisodePlotShift({
+      episodes: written(1, 2, 3),
+      plotChapters: [3],
+      moved: moves(),
+      delta: -1,
+      pivot: 3,
+      completed: true,
+    });
+    expect(plan.retire).toBe(3);
+    expect(plan.renames).toEqual([]);
+  });
+
+  test("途中で止まったら、予定の話は動かさない（動いた書いた話だけ追う）", () => {
+    // 差し込みは後ろから動かす。第5話→第6話は済み、第4話で止まった
+    const plan = planEpisodePlotShift({
+      episodes: written(1, 2, 3, 4, 5),
+      plotChapters: [4, 5, 8],
+      moved: moves([5, 6]),
+      delta: 1,
+      pivot: 3,
+      completed: false,
+    });
+    expect(plan.renames).toEqual([{ from: 5, to: 6 }]);
+    expect(plan.collisions).toEqual([]);
+  });
+
+  test("途中で止まり、動いた話が動かない予定の話へ乗り上げるなら、ぶつかりにする", () => {
+    const plan = planEpisodePlotShift({
+      episodes: written(1, 2, 3, 4, 5),
+      plotChapters: [5, 6],
+      moved: moves([5, 6]),
+      delta: 1,
+      pivot: 3,
+      completed: false,
+    });
+    expect(plan.collisions).toEqual([{ from: 5, to: 6 }]);
+  });
+
+  test("合本（動かなかった話）の単話プロットは動かさず、そこへ乗り上げるならぶつかりにする", () => {
+    // 第3〜5話の合本は付け替えで動かない。第6話は第5話へ詰まる
+    const plan = planEpisodePlotShift({
+      episodes: written(1, 2, [3, 5], 6),
+      plotChapters: [5, 6],
+      moved: moves([6, 5]),
+      delta: -1,
+      pivot: 2,
+      completed: true,
+    });
+    expect(plan.renames).toEqual([{ from: 6, to: 5 }]);
+    expect(plan.collisions).toEqual([{ from: 6, to: 5 }]);
+  });
+
+  test("予定の話が、動かなかった本文の話数へ乗るならぶつかりにする", () => {
+    // 第2話は名前が読めず動かなかった。予定の第3話を詰めると第2話（本文あり）になる
+    const plan = planEpisodePlotShift({
+      episodes: written(1, 2),
+      plotChapters: [3],
+      moved: moves(),
+      delta: -1,
+      pivot: 1,
+      completed: true,
+    });
+    expect(plan.collisions).toEqual([{ from: 3, to: 2 }]);
+  });
+
+  test("差し込み位置より前の単話プロットは動かさない", () => {
+    const plan = planEpisodePlotShift({
+      episodes: written(1, 2, 3),
+      plotChapters: [1, 2],
+      moved: moves([3, 4]),
+      delta: 1,
+      pivot: 3,
+      completed: true,
+    });
+    expect(plan.renames).toEqual([]);
+  });
+});
+
+describe("retiredEpisodePlotNameCandidates", () => {
+  test("「削除した話_第N話_日時.md」の形で、話数としては拾われない", () => {
+    const names = retiredEpisodePlotNameCandidates(
+      3,
+      new Date(2026, 8, 23, 14, 30, 5)
+    );
+    expect(names[0]).toBe("削除した話_第3話_2026-09-23_1430.md");
+    expect(names[1]).toBe("削除した話_第3話_2026-09-23_143005.md");
+    expect(new Set(names).size).toBe(names.length);
+    for (const name of names) {
+      expect(name.startsWith(EPISODE_PLOT_RETIRED_PREFIX)).toBe(true);
+      // 予定の話として一覧に出てこない
+      expect(episodePlotChapterFromFileName(name)).toBeNull();
+    }
   });
 });

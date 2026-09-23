@@ -4,6 +4,10 @@ import {
   parseCollectedFile,
 } from "./collectedFile";
 import { episodePlotFileName } from "./resumeSheet";
+import {
+  TIMESTAMPED_NAME_TRIES,
+  timestampedFileNameCandidates,
+} from "./timestampedFileName";
 
 /**
  * 単話プロットの並び（設計書6.36・6.4.8。作者の依頼、2026-09-23
@@ -318,6 +322,138 @@ export async function applyEpisodePlotRenames(
     }
   }
   return { ok: true, renames: [...renames] };
+}
+
+/**
+ * 本文の話の差し込み・削除に、単話プロットの話数を付いて行かせる計画
+ * （設計書6.36・6.67.3。作者の裁定、2026-09-23）。
+ *
+ * 本文の話を差し込む・消すと、後ろの話の話数が1つずれる。単話プロットが
+ * 元の話数のまま残ると、**別の話のプロットを開く**ことになる。
+ *
+ * 話数の決め方は2通りに分ける。
+ *
+ * - **本文のある話**：本文の付け替えで**実際に動いた話**（`moved`）だけを
+ *   追う。台帳の追従（`EpisodeShift.moved`）と同じ考え方で、途中で止まった
+ *   付け替えや、動かせなかった話（合本・名前の読めない話）の単話プロットは
+ *   動かさない——本文が動いていないのに、プロットだけ別の話数へ行く
+ * - **予定の話**（本文の無い話数の単話プロット）：付け替えが**最後まで
+ *   済んだときだけ**、差し込み（+1）なら基準の話数以降を、削除（−1）なら
+ *   基準より後ろを1つずらす。途中で止まったときは、どこまでを「後ろ」と
+ *   見るかが決まらないので動かさない（本文が半端な状態で、プロットまで
+ *   推測で動かさない）
+ *
+ * **削除した話の単話プロットは消さない**（`retire` で返す）。呼ぶ側が
+ * 別の名前へ退け、どうするかを作者に訊く。
+ *
+ * **ぶつかるなら1件も動かさない**（`collisions`）。動かない単話プロットの
+ * 話数、または付け替え後に本文のある話数へ予定の話が乗り上げる場合で、
+ * 一部だけ動かすと、どれがどの話か分からない状態を作る。
+ */
+export interface EpisodePlotShiftPlan {
+  /** 話数の付け替え（`applyEpisodePlotRenames` へそのまま渡す） */
+  renames: EpisodePlotRename[];
+  /** 削除した話の話数。その単話プロットがあれば「削除した話」として退ける */
+  retire?: number;
+  /** ぶつかる付け替え。1件でもあれば `renames` は実行しない */
+  collisions: EpisodePlotRename[];
+}
+
+export function planEpisodePlotShift(input: {
+  /** 付け替え**前**の、作品の本文の話（すべてのフォルダー。削除する話も含める） */
+  episodes: readonly EpisodeChapterSpan[];
+  /** 置き場にある単話プロットの話数 */
+  plotChapters: Iterable<number>;
+  /** 本文で実際に動いた話数（旧 → 新） */
+  moved: ReadonlyMap<number, number>;
+  /** +1 が差し込み、−1 が削除 */
+  delta: 1 | -1;
+  /** 差し込む位置の話数／削除した話の話数 */
+  pivot: number;
+  /** 本文の付け替えが最後まで済んだか */
+  completed: boolean;
+}): EpisodePlotShiftPlan {
+  const written = writtenChapterSet(input.episodes);
+  const removed = input.delta < 0 ? input.pivot : undefined;
+  const affects = (chapter: number) =>
+    input.delta > 0 ? chapter >= input.pivot : chapter > input.pivot;
+
+  const plots = [...new Set(input.plotChapters)].sort((a, b) => a - b);
+  const renames: EpisodePlotRename[] = [];
+  let retire: number | undefined;
+  for (const chapter of plots) {
+    if (chapter === removed) {
+      retire = chapter;
+      continue;
+    }
+    if (written.has(chapter)) {
+      const to = input.moved.get(chapter);
+      if (to !== undefined && to !== chapter) renames.push({ from: chapter, to });
+      continue;
+    }
+    if (input.completed && affects(chapter)) {
+      renames.push({ from: chapter, to: chapter + input.delta });
+    }
+  }
+
+  // 付け替え後に本文のある話数。予定の話がここへ乗ると「書いた話の
+  // プロット」に化けるので、ぶつかりとして止める
+  const writtenAfter = new Set<number>();
+  for (const chapter of written) {
+    if (chapter === removed) continue;
+    writtenAfter.add(input.moved.get(chapter) ?? chapter);
+  }
+
+  const movingFrom = new Set(renames.map((entry) => entry.from));
+  const stationary = new Set(
+    plots.filter((chapter) => chapter !== retire && !movingFrom.has(chapter))
+  );
+  const targetCount = new Map<number, number>();
+  for (const entry of renames) {
+    targetCount.set(entry.to, (targetCount.get(entry.to) ?? 0) + 1);
+  }
+  const collisions = renames.filter(
+    (entry) =>
+      entry.to < 1 ||
+      stationary.has(entry.to) ||
+      (targetCount.get(entry.to) ?? 0) > 1 ||
+      (!written.has(entry.from) && writtenAfter.has(entry.to))
+  );
+
+  return {
+    renames,
+    ...(retire === undefined ? {} : { retire }),
+    collisions,
+  };
+}
+
+/**
+ * 削除した話の単話プロットを退ける名前の頭（作者の裁定、2026-09-23）。
+ *
+ * `第N話.md` の形から外すので、`episodePlotChapterFromFileName` は話数として
+ * 拾わない——**予定の話として一覧に出てこない**（`並べ替え中_` と同じ作り）。
+ */
+export const EPISODE_PLOT_RETIRED_PREFIX = "削除した話_";
+
+/**
+ * 削除した話の単話プロットの退け先の名前（試す順）。
+ *
+ * **上書きしない**ので、同じ分に同じ話数を2度消しても名前がぶつからない
+ * よう、時刻の付いた別名を並べる（`timestampedFileNameCandidates`。
+ * 区切りは `_`——名前の頭で機械が種類を見分けられるように）。
+ * 例：`削除した話_第3話_2026-09-23_1430.md`
+ */
+export function retiredEpisodePlotNameCandidates(
+  chapter: number,
+  at: Date
+): string[] {
+  return timestampedFileNameCandidates(
+    `${EPISODE_PLOT_RETIRED_PREFIX}第${chapter}話`,
+    at,
+    ".md",
+    TIMESTAMPED_NAME_TRIES,
+    "_"
+  );
 }
 
 /**

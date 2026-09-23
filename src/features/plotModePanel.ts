@@ -22,10 +22,7 @@ import {
   type PlotEpisodeRow,
 } from "../core/plotMode";
 import { SUPPORTED_EXTENSIONS } from "../models/types";
-import {
-  readTextFile,
-  writeTextFilePreservingFormat,
-} from "../core/textFile";
+import { readTextFile } from "../core/textFile";
 import { computeMinimalEdit } from "../core/textEdit";
 import { scanWork } from "../core/scanner";
 import { ChapterStore } from "../core/chapterStore";
@@ -37,7 +34,6 @@ import {
   episodePlotChapterFromFileName,
   episodePlotFileName,
   episodePlotTitleFromText,
-  renumberEpisodePlotHeading,
 } from "../core/resumeSheet";
 import {
   applyEpisodePlotRenames,
@@ -64,6 +60,10 @@ import { ensurePlotFile } from "./startWork";
 import { createEpisodePlot } from "./resumeWriting";
 import type { EpisodePlotCheckRef } from "./checkEpisodePlot";
 import { syncPlotCharacters } from "./plotCharacterSync";
+import {
+  renameEpisodePlotFile,
+  renumberEpisodePlotHeadings,
+} from "./episodePlotFiles";
 
 /**
  * プロットモードの画面（設計書6.4.8）。
@@ -684,57 +684,16 @@ class PlotModePanel {
     );
   }
 
-  /**
-   * 置き場の中で名前を変える。**上書きしない**（既にあれば失敗させる）。
-   *
-   * `WorkspaceEdit` の名前変更を通すのは、開いているタブも新しい名前へ
-   * ついて行かせるため（`workspace.fs.rename` だと、開いていたタブが
-   * 「削除済み」のまま残る）。
-   */
+  /** 置き場の中で名前を変える（口は `episodePlotFiles.ts` の1本。上書きしない） */
   private async renamePlotFile(fromName: string, toName: string): Promise<void> {
-    const edit = new vscode.WorkspaceEdit();
-    edit.renameFile(
-      paths.toUri(paths.join(this.episodePlotsDir, fromName)),
-      paths.toUri(paths.join(this.episodePlotsDir, toName)),
-      { overwrite: false }
-    );
-    if (!(await vscode.workspace.applyEdit(edit))) {
-      throw new Error(`${fromName} の名前を ${toName} に変えられませんでした`);
-    }
+    await renameEpisodePlotFile(this.episodePlotsDir, fromName, toName);
   }
 
   /** 見出しの話数を合わせる。直せなかったファイル名を返す */
   private async renumberHeadings(
     renames: readonly EpisodePlotRename[]
   ): Promise<string[]> {
-    const failures: string[] = [];
-    for (const entry of renames) {
-      const filePath = paths.join(
-        this.episodePlotsDir,
-        episodePlotFileName(entry.to)
-      );
-      try {
-        const content = await readTextFile(filePath);
-        const next = renumberEpisodePlotHeading(content.text, entry.to);
-        // 作者が見出しを書き換えていれば、そのまま（推測で作り直さない）
-        if (next === content.text) continue;
-        const result = await writeTextFilePreservingFormat(
-          filePath,
-          next,
-          content,
-          content.hash
-        );
-        if (!result.ok) failures.push(paths.basename(filePath));
-      } catch (error) {
-        useLogFile(this.work.folderPath);
-        logFailure("単話プロットの見出しの付け替えに失敗", {
-          置き場: filePath,
-          内容: messageOf(error),
-        });
-        failures.push(paths.basename(filePath));
-      }
-    }
-    return failures;
+    return renumberEpisodePlotHeadings(this.work, this.episodePlotsDir, renames);
   }
 
   /** その場所の文書を、保存していない変更つきで開いているか */

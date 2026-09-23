@@ -432,4 +432,168 @@ describe("話の挿入・削除", () => {
     expect(asked).toBe(false);
     expect(disk.has(diskPath("本文", "002.txt"))).toBe(true); // 消えていない
   });
+
+  /*
+    単話プロットも話数をずらす（作者の裁定、2026-09-23）。
+    本文の話を差し込む・消すと後ろの話数が1つずれる。単話プロット
+    （`設定/episode-plots/第N話.md`。本文の無い予定の話を含む）が
+    元の話数のまま残ると、別の話のプロットを開くことになる。
+  */
+  describe("単話プロットの追従", () => {
+    const plotPath = (name: string) =>
+      diskPath("設定", "episode-plots", name);
+    const plotText = (chapter: number, title = "") =>
+      new TextEncoder().encode(
+        (title
+          ? `# 第${chapter}話「${title}」の単話プロット`
+          : `# 第${chapter}話の単話プロット`) + "\n\n## この話の目標\n目標" + chapter + "\n"
+      );
+    const readPlot = (name: string) =>
+      new TextDecoder().decode(disk.get(plotPath(name)));
+    const plotNames = () =>
+      [...disk.keys()]
+        .filter((filePath) => path.dirname(filePath) === path.dirname(plotPath("x.md")))
+        .map((filePath) => path.basename(filePath))
+        .sort();
+
+    beforeEach(() => {
+      // 名前の変更（WorkspaceEdit.renameFile）をディスクへ当てる
+      workspace.applyEdit = async (edit: unknown) => {
+        const renames =
+          (edit as {
+            renames?: Array<{
+              from: { fsPath: string };
+              to: { fsPath: string };
+              options?: { overwrite?: boolean };
+            }>;
+          }).renames ?? [];
+        for (const entry of renames) {
+          const bytes = disk.get(entry.from.fsPath);
+          if (!bytes) return false;
+          if (!entry.options?.overwrite && disk.has(entry.to.fsPath)) return false;
+          disk.set(entry.to.fsPath, bytes);
+          disk.delete(entry.from.fsPath);
+        }
+        return true;
+      };
+      // 書いた話（第3〜4話）と、本文の無い予定の話（第7話）
+      disk.set(plotPath("第3話.md"), plotText(3));
+      disk.set(plotPath("第4話.md"), plotText(4));
+      disk.set(plotPath("第7話.md"), plotText(7, "決戦"));
+    });
+
+    test("挿入：単話プロットも後ろへずれる（予定の話も、見出しも）", async () => {
+      window.showWarningMessage = async () => "付け替える";
+      window.showInputBox = async () => "";
+      const episodes = [1, 2, 3, 4, 5].map((n) =>
+        episode(`${String(n).padStart(3, "0")}.txt`)
+      );
+
+      await insertEpisodeBefore(work, episode("003.txt"), episodes);
+
+      expect(plotNames()).toEqual(["第4話.md", "第5話.md", "第8話.md"]);
+      // 中身は元の第3話のもの。見出しの話数だけが新しい話数になる
+      expect(readPlot("第4話.md")).toContain("# 第4話の単話プロット");
+      expect(readPlot("第4話.md")).toContain("目標3");
+      expect(readPlot("第8話.md")).toContain("# 第8話「決戦」の単話プロット");
+    });
+
+    test("挿入：確認の文に、単話プロットもずらすことが出る", async () => {
+      let detail = "";
+      window.showWarningMessage = async (_message: string, options?: unknown) => {
+        detail = (options as { detail?: string })?.detail ?? "";
+        return undefined;
+      };
+      const episodes = [1, 2, 3, 4, 5].map((n) =>
+        episode(`${String(n).padStart(3, "0")}.txt`)
+      );
+
+      await insertEpisodeBefore(work, episode("003.txt"), episodes);
+
+      expect(detail).toContain("単話プロット 3 件も話数をずらします");
+      // 取りやめたら何も動かない
+      expect(plotNames()).toEqual(["第3話.md", "第4話.md", "第7話.md"]);
+    });
+
+    test("削除：消した話の単話プロットは消さずに「削除した話」として残し、後ろが詰まる", async () => {
+      window.showWarningMessage = async () => "削除する";
+      const notices: Array<{ message: string; items: unknown[] }> = [];
+      window.showInformationMessage = async (message: string, ...items: unknown[]) => {
+        notices.push({ message, items });
+        return undefined;
+      };
+      const episodes = [1, 2, 3, 4, 5].map((n) =>
+        episode(`${String(n).padStart(3, "0")}.txt`)
+      );
+
+      await removeEpisodeAndRenumber(work, episode("003.txt"), episodes);
+
+      const names = plotNames();
+      const retired = names.filter((name) => name.startsWith("削除した話_第3話_"));
+      expect(retired).toHaveLength(1);
+      // 残したものは元の第3話の中身のまま（1文字も変えない）
+      expect(readPlot(retired[0])).toContain("# 第3話の単話プロット");
+      expect(readPlot(retired[0])).toContain("目標3");
+      // 元の第4話が第3話へ、予定の第7話が第6話へ
+      expect(names.filter((name) => !name.startsWith("削除した話_"))).toEqual([
+        "第3話.md",
+        "第6話.md",
+      ]);
+      expect(readPlot("第3話.md")).toContain("目標4");
+      expect(readPlot("第6話.md")).toContain("# 第6話「決戦」の単話プロット");
+      // どうするかを訊く（消す選択肢は出さない）
+      const notice = notices.find((entry) => entry.message.includes(retired[0]));
+      expect(notice?.items).toEqual(["残す", "開いて確かめる"]);
+    });
+
+    test("削除：確認の文に、単話プロットを残すことと、ずらす件数が出る", async () => {
+      let detail = "";
+      window.showWarningMessage = async (_message: string, options?: unknown) => {
+        detail = (options as { detail?: string })?.detail ?? "";
+        return undefined;
+      };
+      const episodes = [1, 2, 3, 4, 5].map((n) =>
+        episode(`${String(n).padStart(3, "0")}.txt`)
+      );
+
+      await removeEpisodeAndRenumber(work, episode("003.txt"), episodes);
+
+      expect(detail).toContain("単話プロット 2 件も話数をずらします");
+      expect(detail).toContain("削除した話");
+    });
+
+    test("削除：単話プロットを保存せずに開いていれば、始めない", async () => {
+      let asked = false;
+      window.showWarningMessage = async () => {
+        asked = true;
+        return "削除する";
+      };
+      let errorMessage = "";
+      window.showErrorMessage = async (message: string) => {
+        errorMessage = message;
+        return undefined;
+      };
+      workspace.textDocuments = [
+        {
+          uri: { fsPath: plotPath("第4話.md") },
+          isDirty: true,
+          getText: () => "",
+        },
+      ];
+      const episodes = [1, 2, 3, 4, 5].map((n) =>
+        episode(`${String(n).padStart(3, "0")}.txt`)
+      );
+
+      const result = await removeEpisodeAndRenumber(
+        work,
+        episode("003.txt"),
+        episodes
+      );
+
+      expect(result.changed).toBe(false);
+      expect(asked).toBe(false);
+      expect(errorMessage).toContain("第4話.md");
+      expect(disk.has(diskPath("本文", "003.txt"))).toBe(true);
+    });
+  });
 });

@@ -115,6 +115,25 @@ export class WorkspaceEdit {
   replace(uri: unknown, range: unknown, text: string): void {
     this.replacements.push({ uri, range, text });
   }
+
+  /**
+   * 名前の変更。**積むだけで、当て込み（`applyEdit`）はしない**——
+   * ディスクへの反映は、テスト側が `applyEdit` を差し替えて行う
+   * （単話プロットの付け替え、`features/episodePlotFiles.ts`）。
+   */
+  readonly renames: Array<{
+    from: { fsPath: string };
+    to: { fsPath: string };
+    options?: { overwrite?: boolean };
+  }> = [];
+
+  renameFile(
+    from: { fsPath: string },
+    to: { fsPath: string },
+    options?: { overwrite?: boolean }
+  ): void {
+    this.renames.push({ from, to, options });
+  }
 }
 
 /** 画面に出た知らせを覗くための形。テスト側で差し替えて使う */

@@ -37,8 +37,27 @@ describe("予定の話を動かす", () => {
   const move = bodyOf("plotModePanel.ts", "private async movePlanned(");
   const insert = bodyOf("plotModePanel.ts", "private async insertPlanned(");
   const apply = bodyOf("plotModePanel.ts", "private async applyMovePlan(");
-  const rename = bodyOf("plotModePanel.ts", "private async renamePlotFile(");
-  const headings = bodyOf("plotModePanel.ts", "private async renumberHeadings(");
+  /*
+    名前の変更と見出しの書き直しの口は `episodePlotFiles.ts` の1本
+    （本文の話の差し込み・削除と共用。0.77.1）。パネルの側は、その口へ
+    置き場を渡して呼ぶだけ——**パネルの側に写しを作らない**。
+  */
+  const panelRename = bodyOf("plotModePanel.ts", "private async renamePlotFile(");
+  const panelHeadings = bodyOf("plotModePanel.ts", "private async renumberHeadings(");
+  const rename = bodyOf("episodePlotFiles.ts", "export async function renameEpisodePlotFile(");
+  const headings = bodyOf(
+    "episodePlotFiles.ts",
+    "export async function renumberEpisodePlotHeadings("
+  );
+
+  it("パネルは共用の口を置き場を渡して呼ぶだけ", () => {
+    expect(panelRename).toContain("renameEpisodePlotFile(this.episodePlotsDir");
+    expect(panelHeadings).toContain("renumberEpisodePlotHeadings(");
+    expect(panelHeadings).toContain("this.episodePlotsDir");
+    for (const body of [panelRename, panelHeadings]) {
+      expect(body).not.toMatch(/applyEdit|writeTextFilePreservingFormat/);
+    }
+  });
 
   it("計画は core の関数だけが立てる（本文のある話数の判断を写さない）", () => {
     expect(move).toContain("planPlannedEpisodeStep(");
@@ -73,7 +92,9 @@ describe("予定の話を動かす", () => {
 
   it("名前の付け替えは上書きしない（置き場の中だけ）", () => {
     expect(rename).toContain("overwrite: false");
-    expect(rename).toContain("this.episodePlotsDir");
+    // 置き場（directory）の中の名前どうしで変える
+    expect(rename).toContain("paths.join(directory, fromName)");
+    expect(rename).toContain("paths.join(directory, toName)");
   });
 
   it("見出しの書き直しは、退避つきの書き戻しの口だけを通る", () => {

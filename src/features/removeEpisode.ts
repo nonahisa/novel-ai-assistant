@@ -3,9 +3,18 @@ import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import {
   applyRenumberPlan,
+  episodeNumberMoves,
   planRemoval,
+  type RenumberPlan,
 } from "../core/episodeRenumber";
 import { followEpisodeLedgers, type RemovedEpisode } from "./episodeLedgers";
+import {
+  describeEpisodePlotShiftPreview,
+  followEpisodePlots,
+  offerRetiredEpisodePlot,
+  previewEpisodePlotShift,
+  type EpisodePlotShiftPreview,
+} from "./episodePlotFiles";
 import {
   describeRenumberTargets,
   findConflictedEpisodes,
@@ -82,9 +91,29 @@ export async function removeEpisodeAndRenumber(
     return { changed: false };
   }
 
+  /*
+    単話プロットも一緒に詰め、消した話の単話プロットは消さずに
+    「削除した話」として残す（作者の裁定、2026-09-23）。**未保存で開いて
+    いれば始めない**（本文と同じ理由。名前を変えたあとに保存されると、
+    元の話数の名前で作り直される）。
+  */
+  const plotPreview = await previewPlotShift(work, episodes, plan);
+  const unsavedPlots = plotPreview
+    ? findUnsavedEpisodes(plotPreview.touchedPaths)
+    : [];
+  if (unsavedPlots.length > 0) {
+    void vscode.window.showErrorMessage(
+      `未保存の変更がある単話プロット（${unsavedPlots.join("、")}）の話数も付け替えることになります。` +
+        "保存してからやり直してください。"
+    );
+    return { changed: false };
+  }
+
+  const plotDetail = plotPreview ? describeEpisodePlotShiftPreview(plotPreview) : "";
   const detail =
     "ごみ箱に移動します。元に戻すことができます。\n" +
-    describeRenumberTargets(work, plan);
+    describeRenumberTargets(work, plan) +
+    (plotDetail ? `\n${plotDetail}` : "");
 
   const answer = await vscode.window.showWarningMessage(
     `「${episode.fileName}」を削除し、第${plan.pivot}話以降の${plan.renames.length}件の話数を詰めます。`,
@@ -120,6 +149,15 @@ export async function removeEpisodeAndRenumber(
     number: plan.pivot,
     next: nextEpisodeAfter(episodes, plan, outcome),
   });
+  const plots = await followEpisodePlots(work, {
+    episodes,
+    moved: episodeNumberMoves(outcome.done),
+    delta: -1,
+    pivot: plan.pivot,
+    completed: !outcome.stoppedAt,
+  });
+  summary.episodePlots = plots.shifted;
+  summary.failures.push(...plots.failures);
 
   reportRenumberOutcome({
     action: "削除",
@@ -131,6 +169,7 @@ export async function removeEpisodeAndRenumber(
         ? "動かせる話が無かったため付け替えなし"
         : "後ろに話が無いため付け替えなし",
   });
+  if (plots.retired) offerRetiredEpisodePlot(plots.retired);
 
   // **削除そのものはコミットに含めない。** 名前だけの独立コミットは
   // 「話数の調整」だけを表すもの（設計書6.67.1）。削除は内容の変更なので、
@@ -142,6 +181,28 @@ export async function removeEpisodeAndRenumber(
   );
 
   return { changed: true };
+}
+
+/**
+ * 単話プロットの見込み。**読めなくても本文の削除は止めない**
+ * （`insertEpisode.ts` の同名の関数と同じ判断。読めなかったことは、
+ * 付け替えのあとの追従が失敗として知らせる）。
+ */
+async function previewPlotShift(
+  work: WorkEntry,
+  episodes: readonly EpisodeFile[],
+  plan: RenumberPlan
+): Promise<EpisodePlotShiftPreview | undefined> {
+  try {
+    return await previewEpisodePlotShift(work, {
+      episodes,
+      moved: new Map(plan.renames.map((r) => [r.oldNumber, r.newNumber])),
+      delta: -1,
+      pivot: plan.pivot,
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 /**

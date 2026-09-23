@@ -85,6 +85,12 @@ export interface LedgerFollowSummary {
   posting: number;
   /** 消えた話を指していたので外した投稿の記録。**黙って外さない**ために数える */
   postingDropped: number;
+  /**
+   * 話数をずらした単話プロット（作者の裁定、2026-09-23）。数えるのは
+   * `followEpisodePlots`（`episodePlotFiles.ts`）で、台帳の追従とは別に呼ぶ
+   * ——予定の話の扱いに、付け替えの計画（基準の話数・最後まで済んだか）が要る
+   */
+  episodePlots: number;
   /** 台帳ごとの失敗。「台帳名：理由」の形。原稿の付け替えは失敗しても戻さない */
   failures: string[];
 }
@@ -108,6 +114,7 @@ export function emptyLedgerFollowSummary(): LedgerFollowSummary {
     pendingCharacterUpdates: 0,
     posting: 0,
     postingDropped: 0,
+    episodePlots: 0,
     failures: [],
   };
 }
@@ -503,6 +510,7 @@ export function describeLedgerFollowSummary(summary: LedgerFollowSummary): strin
   if (summary.pendingCharacterUpdates > 0)
     parts.push(`保留中の人物更新案${summary.pendingCharacterUpdates}件`);
   if (summary.posting > 0) parts.push(`投稿状態${summary.posting}件`);
+  if (summary.episodePlots > 0) parts.push(`単話プロット${summary.episodePlots}件`);
 
   const notes: string[] = [];
   // **章の開始が動いたことは、件数ではなく章の名前で伝える**（作者は

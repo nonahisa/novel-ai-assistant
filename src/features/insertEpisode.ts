@@ -3,11 +3,19 @@ import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import {
   applyRenumberPlan,
+  episodeNumberMoves,
   episodeNumberOf,
   insertedEpisodeFileName,
   planInsertion,
+  type RenumberPlan,
 } from "../core/episodeRenumber";
 import { followEpisodeLedgers } from "./episodeLedgers";
+import {
+  describeEpisodePlotShiftPreview,
+  followEpisodePlots,
+  previewEpisodePlotShift,
+  type EpisodePlotShiftPreview,
+} from "./episodePlotFiles";
 import {
   describeRenumberTargets,
   findConflictedEpisodes,
@@ -99,12 +107,35 @@ export async function insertEpisodeBefore(
     return { changed: false };
   }
 
+  /*
+    単話プロットも一緒にずらす（作者の裁定、2026-09-23）。**未保存で開いて
+    いれば始めない**——名前を変えたあとに保存されると、元の話数の名前で
+    作り直され、同じ話のプロットが2つになる（本文と同じ理由）。
+  */
+  const plotPreview = await previewPlotShift(work, episodes, plan, pivot);
+  const unsavedPlots = plotPreview
+    ? findUnsavedEpisodes(plotPreview.touchedPaths)
+    : [];
+  if (unsavedPlots.length > 0) {
+    void vscode.window.showErrorMessage(
+      `未保存の変更がある単話プロット（${unsavedPlots.join("、")}）の話数も付け替えることになります。` +
+        "保存してからやり直してください。"
+    );
+    return { changed: false };
+  }
+
   const fileName = await askNewEpisodeFileName(pivot, episode.fileName);
   if (!fileName) return { changed: false };
 
+  const plotDetail = plotPreview ? describeEpisodePlotShiftPreview(plotPreview) : "";
   const answer = await vscode.window.showWarningMessage(
     `第${pivot}話以降の${plan.renames.length}件の話数を付け替えます。`,
-    { modal: true, detail: describeRenumberTargets(work, plan) },
+    {
+      modal: true,
+      detail: [describeRenumberTargets(work, plan), plotDetail]
+        .filter((line) => line.length > 0)
+        .join("\n"),
+    },
     "付け替える"
   );
   if (answer !== "付け替える") return { changed: false };
@@ -118,6 +149,15 @@ export async function insertEpisodeBefore(
   // **台帳は「実際に動いた話」だけを追う**（設計書6.67.3）。途中で止まった
   // 分まで動かすと、原稿と台帳が食い違う
   const summary = await followEpisodeLedgers(work, outcome.done);
+  const plots = await followEpisodePlots(work, {
+    episodes,
+    moved: episodeNumberMoves(outcome.done),
+    delta: 1,
+    pivot,
+    completed: !outcome.stoppedAt,
+  });
+  summary.episodePlots = plots.shifted;
+  summary.failures.push(...plots.failures);
 
   reportRenumberOutcome({
     action: "挿入",
@@ -150,6 +190,30 @@ export async function insertEpisodeBefore(
   );
 
   return { changed: true, newFilePath: created ? newFilePath : undefined };
+}
+
+/**
+ * 単話プロットの見込み。**読めなくても本文の差し込みは止めない**——
+ * 単話プロットは本文に従うもので、置き場の都合で本文を止める理由は無い。
+ * 読めなかったことは、付け替えのあとの追従（`followEpisodePlots`）が
+ * 失敗として知らせる。
+ */
+async function previewPlotShift(
+  work: WorkEntry,
+  episodes: readonly EpisodeFile[],
+  plan: RenumberPlan,
+  pivot: number
+): Promise<EpisodePlotShiftPreview | undefined> {
+  try {
+    return await previewEpisodePlotShift(work, {
+      episodes,
+      moved: new Map(plan.renames.map((r) => [r.oldNumber, r.newNumber])),
+      delta: 1,
+      pivot,
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 /**
