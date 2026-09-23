@@ -305,11 +305,25 @@ describe("まだ見せていない祝い", () => {
   });
 
   test("古すぎる達成は、あとから風船を上げない", () => {
-    const old = record({ id: "old", day: "2026-08-01" });
-    const recent = record({ id: "new", day: "2026-09-20" });
+    const old = record({ id: "old", kind: "monthly", day: "2026-08-01" });
+    const recent = record({ id: "new", kind: "monthly", day: "2026-09-20" });
     const pending = pendingCelebrations([old, recent], new Set(), "2026-09-23");
     expect(pending.map((entry) => entry.id)).toEqual(["new"]);
-    expect(ACHIEVEMENT_WINDOW_DAYS).toBeGreaterThan(0);
+  });
+
+  test("あとから上げるのは7日前まで（作者の裁定、2026-09-23）", () => {
+    expect(ACHIEVEMENT_WINDOW_DAYS).toBe(7);
+    const edge = record({ id: "edge", kind: "work", day: "2026-09-16" });
+    const over = record({ id: "over", kind: "work", day: "2026-09-15" });
+    const pending = pendingCelebrations([edge, over], new Set(), "2026-09-23");
+    expect(pending.map((entry) => entry.id)).toEqual(["edge"]);
+  });
+
+  test("1日の目標は当日だけ上げる。前の日の分は記録にだけ残す（作者の裁定、2026-09-23）", () => {
+    const today = record({ id: "today", kind: "daily", day: "2026-09-23" });
+    const yesterday = record({ id: "yesterday", kind: "daily", day: "2026-09-22" });
+    const pending = pendingCelebrations([today, yesterday], new Set(), "2026-09-23");
+    expect(pending.map((entry) => entry.id)).toEqual(["today"]);
   });
 });
 

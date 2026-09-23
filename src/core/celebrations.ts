@@ -220,9 +220,12 @@ export function footCheer(
  *
  * **閉じていたら次に開いたときに一度だけ**上げるが、ひと月前の1日の目標で
  * 今さら風船が上がっても、何のことか分からない。記録（達成の印）は残るので、
- * 古いものは印だけにする。
+ * 古いものは印だけにする。**7日**（作者の裁定、2026-09-23）。
+ *
+ * **1日の目標は当日だけ**（同じ裁定）。1日の目標は毎日あるので、前の日の分を
+ * 翌日に祝うと、今日の分と混ざって何を祝われたのか分からない。記録には残す。
  */
-export const ACHIEVEMENT_WINDOW_DAYS = 14;
+export const ACHIEVEMENT_WINDOW_DAYS = 7;
 
 export function pendingCelebrations(
   records: readonly Achievement[],
@@ -230,9 +233,11 @@ export function pendingCelebrations(
   today: string
 ): Achievement[] {
   const oldest = addDays(today, -ACHIEVEMENT_WINDOW_DAYS);
-  return records.filter(
-    (entry) => !shown.has(entry.id) && entry.day >= oldest
-  );
+  return records.filter((entry) => {
+    if (shown.has(entry.id)) return false;
+    if (entry.kind === "daily") return entry.day === today;
+    return entry.day >= oldest;
+  });
 }
 
 /** 記録に持つ件数の上限。毎日届けば1年で365件になる */
