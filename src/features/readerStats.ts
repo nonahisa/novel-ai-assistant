@@ -7,6 +7,7 @@ import {
   parseReaderStatsValue,
   postingSiteInfo,
   readerStatsMetricsFor,
+  repeatsReaderStats,
   siteProfile,
   validateReaderStatsEpisode,
   validateReaderStatsValue,
@@ -23,6 +24,7 @@ import {
   matchReaderStatsEnvelope,
   parseReaderStatsEnvelope,
   readerStatsSourceLabel,
+  type ReaderStatsReadAtBasis,
 } from "../core/readerStatsEnvelope";
 // 管理画面のURLを組むのは core（画面を出さずに確かめられるようにする）
 import { readerStatsPageUrl } from "../core/postingSiteUrls";
@@ -135,18 +137,33 @@ export async function importReaderStats(
     なろう本体の画面より遅れて集計されることがあり、あとから見た作者が
     「なろうの管理画面の数」と取り違えないよう、履歴の表のメモ列で見えるようにする。
   */
-  const note = sourceLabel ? `${sourceLabel}から読み取り` : undefined;
+  const note = sourceLabel
+    ? `${sourceLabel}から読み取り${readAtNote(sourceLabel, parsed.envelope.readAtBasis)}`
+    : undefined;
   let next = ledger;
+  /*
+    **同じ数の繰り返しは積まない**（残課題 B11 の続き、作者の裁定「同じ表を2度
+    取り込んでも二重に積まない」）。Narou.fun の日ごとの表は直近30日なので、
+    毎日取り込むと29日ぶんが前の回と重なる。どれを積まなかったかは件数で言う
+    （黙って減らさない）。
+  */
+  let repeated = 0;
   try {
     for (const entry of parsed.envelope.entries) {
-      next = withReaderStats(next, {
+      const record = {
         site: parsed.envelope.site,
-        // **封筒の読み取り時刻を使う。** いま取り込んだ時刻ではない
+        // **封筒の読み取り時刻を使う。** いま取り込んだ時刻ではない。
+        // Narou.fun の封筒は「最終取得日時」（readAtBasis が fetched のとき）
         readAt: parsed.envelope.readAt,
         ...entry,
-        source: "helper",
+        source: "helper" as const,
         ...(note ? { note } : {}),
-      });
+      };
+      if (repeatsReaderStats(next, record)) {
+        repeated++;
+        continue;
+      }
+      next = withReaderStats(next, record);
     }
   } catch (error) {
     // 封筒の検証を通っていれば来ないが、黙って落とさない
@@ -154,14 +171,44 @@ export async function importReaderStats(
     return UNCHANGED;
   }
 
+  const added = parsed.envelope.entries.length - repeated;
+  if (added === 0) {
+    // 何も書かない（保存もしない）。押したのに何も起きない、にならないよう理由を言う
+    void vscode.window.showInformationMessage(
+      `${info.label} の読者の反応は、すでに取り込んだ数と同じでした（${repeated}件）。` +
+        "台帳は変えていません。"
+    );
+    return UNCHANGED;
+  }
+
   if (!(await save(store, work, next))) return UNCHANGED;
 
   void vscode.window.showInformationMessage(
-    `${info.label} の読者の反応を ${parsed.envelope.entries.length}件 取り込みました` +
-      (sourceLabel ? `（${sourceLabel}から）。` : "。") +
-      "執筆量パネルの「サイトの記録」で履歴を見られます。"
+    `${info.label} の読者の反応を ${added}件 取り込みました` +
+      (sourceLabel ? `（${sourceLabel}から）` : "") +
+      (repeated > 0
+        ? `（${repeated}件は、取り込み済みの数と同じだったので積んでいません）`
+        : "") +
+      "。執筆量パネルの「サイトの記録」で履歴を見られます。"
   );
   return { changed: true };
+}
+
+/**
+ * メモに添える「記録の日時は何の日時か」（残課題 B11 の続き、作者の裁定 2026-09-23）。
+ *
+ * 出どころのある封筒（Narou.fun）の記録の日時は、ふつう**そのサイトが数を取って
+ * きた日時**（最終取得日時）である。読めなかった封筒は押した時刻へ落ちている
+ * ——履歴の表では同じ日時の列に並ぶので、**どちらなのかをメモで見分けられる**
+ * ようにする（印が無い封筒は、貼り込み係 0.6.0 までの「押した時刻」）。
+ */
+function readAtNote(
+  sourceLabel: string,
+  basis: ReaderStatsReadAtBasis | undefined
+): string {
+  return basis === "fetched"
+    ? `（日時は${sourceLabel}の最終取得日時）`
+    : `（日時は押した時刻。${sourceLabel}の最終取得日時は読めず）`;
 }
 
 /** 開ける管理画面。**どのサイトのものかを一緒に持つ**（文言に出すため） */
