@@ -353,7 +353,7 @@ class ChroniclePanel {
           section.kind === "alternate"
             ? "本編ではない筋です。本編の資料には混ぜていません。"
             : section.kind === "unassigned"
-              ? "時期を決めていない話です。「時期・系統を編集」から決められます。"
+              ? "時期を決めていない話です。「時期・系統編集」から決められます。"
               : "",
         // 時期の見出しで切るのは時系列順のときだけ。話数順で切ると、
         // せっかく並べた話数の流れが見出しで途切れる
@@ -394,7 +394,7 @@ class ChroniclePanel {
       notes.push(`${this.timelineError} 時系列順は使えません。`);
     } else if (!this.canTimeline()) {
       notes.push(
-        "作中の時期がまだ1つもありません。「時期・系統を編集」から作れます。"
+        "作中の時期がまだ1つもありません。「時期・系統編集」から作れます。"
       );
     }
     notes.push(...this.loadWarnings);

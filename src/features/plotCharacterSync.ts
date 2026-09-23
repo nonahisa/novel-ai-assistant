@@ -167,7 +167,7 @@ function announce(result: PlotCharacterSyncResult, force: boolean): void {
           : `案（新規${created}件・更新${result.staged}件）`;
     parts.push(
       `プロットから人物${total}件の${detail}を積みました` +
-        "（「更新分を反映」で確認できます）。"
+        "（「設定資料更新分反映」で確認できます）。"
     );
   }
 

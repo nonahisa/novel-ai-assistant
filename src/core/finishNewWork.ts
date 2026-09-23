@@ -130,7 +130,7 @@ export const FINISH_STEPS: readonly FinishStep[] = [
       `produces` は "plot" のままでよい。
     */
     id: "plot",
-    label: "本文からプロットを逆算",
+    label: "プロット逆算",
     command: "novelai.generatePlot",
     usesAI: true,
     produces: "plot",
@@ -176,7 +176,7 @@ export const FINISH_STEPS: readonly FinishStep[] = [
       あらすじやプロットとして整理されたあとのほうが当たる。
     */
     id: "chapters",
-    label: "章立てを提案させる",
+    label: "章立て提案",
     command: "novelai.proposeChapters",
     usesAI: true,
     category: CHAPTER_CATEGORY,

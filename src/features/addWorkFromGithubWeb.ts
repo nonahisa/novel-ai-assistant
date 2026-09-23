@@ -81,7 +81,7 @@ async function offerAlternatives(ref: GithubRepoRef): Promise<void> {
     [
       {
         label: "$(link-external) 新しいタブで開く",
-        detail: `${vscodeDevUrl(ref)} を開きます。開いたら「フォルダから作品を追加」で登録できます`,
+        detail: `${vscodeDevUrl(ref)} を開きます。開いたら「フォルダー登録」で登録できます`,
         choice: "open" as const,
       },
       {
@@ -129,7 +129,7 @@ async function addToWorkspace(ref: GithubRepoRef): Promise<void> {
       detail: [
         "VS Codeがいったん読み込み直します（書きかけのものは保存してください）。",
         "",
-        "読み込みが終わったら、「フォルダから作品を追加」で登録できます。",
+        "読み込みが終わったら、「フォルダー登録」で登録できます。",
       ].join("\n"),
     },
     "足す"

@@ -113,7 +113,7 @@ describe("「以降は訊かない」の設定が、設定画面に出る（実�
     expect(text.length).toBeGreaterThan(40);
     // 見直しの入口は、詳細メニューと同じ名前で書く（0.75.8）。
     // 案内の名前とメニューの名前が違うと、探しても見つからない
-    expect(text).toContain("訊かない確認の見直し");
+    expect(text).toContain("確認省略解除");
   });
 });
 

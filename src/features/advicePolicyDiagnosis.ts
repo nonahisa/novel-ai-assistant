@@ -12,6 +12,11 @@ import {
   type AdviceProfile,
 } from "../core/advicePolicy";
 import { cancelItem, isCancelItem } from "../views/dialogs";
+import {
+  orderWithShared,
+  sharedForAdvice,
+  type SharedAnswer,
+} from "../core/sharedDiagnosisQuestion";
 
 /**
  * 相談の助言方針の診断（設計書6.86）。
@@ -28,7 +33,12 @@ import { cancelItem, isCancelItem } from "../views/dialogs";
 
 export async function setAdvicePolicy(
   work: WorkEntry,
-  store: AdvicePolicyStore
+  store: AdvicePolicyStore,
+  /**
+   * 作者自身の読者タイプの記録（似た1問の答えを写すため。作者の裁定、
+   * 2026-09-23）。渡されなければ写さない
+   */
+  authorReader?: { answers?: readonly number[]; updatedAt: string }
 ): Promise<void> {
   const existing = store.get(work.id);
 
@@ -46,7 +56,10 @@ export async function setAdvicePolicy(
   }
 
   // 「全部やり直す」と、まだ一度も答えていない場合
-  const answers = await askAdviceQuestions(existing?.answers);
+  const answers = await askAdviceQuestions(
+    existing?.answers,
+    sharedForAdvice(authorReader, existing)
+  );
   if (!answers) return;
 
   const scores = scoreAnswers(answers);
@@ -122,20 +135,30 @@ async function chooseAction(
  * 2か所に分かれ、片方だけ直る日が来る。
  */
 export async function askAdviceQuestions(
-  previous?: number[]
+  previous?: number[],
+  /**
+   * 「読者としての好み」で答えた似た1問（`core/sharedDiagnosisQuestion.ts`）。
+   * その問いでは、写した答えを選んだ状態（いちばん上）で出す
+   */
+  shared?: SharedAnswer
 ): Promise<number[] | undefined> {
   const answers: number[] = [];
 
   for (const [index, question] of ADVICE_QUESTIONS.entries()) {
     const before = previous?.[index];
+    const sharedChoice = shared?.index === index ? shared.choice : undefined;
     const picked = await vscode.window.showQuickPick(
       [
-        ...question.choices.map((choice, choiceIndex) => ({
-          label: choice.label,
-          description:
-            choiceIndex === before ? "$(check) 前回の答え" : undefined,
-          value: choiceIndex,
-        })),
+        ...orderWithShared(question.choices.length, sharedChoice).map(
+          (choiceIndex) => ({
+            label: question.choices[choiceIndex].label,
+            description: describeChoiceMarks(
+              choiceIndex === before,
+              choiceIndex === sharedChoice ? shared?.from : undefined
+            ),
+            value: choiceIndex,
+          })
+        ),
         // 9問の途中でやめられることを見える形にする。Esc も効く
         cancelItem("診断をやめる"),
       ],
@@ -152,6 +175,24 @@ export async function askAdviceQuestions(
   }
 
   return answers;
+}
+
+/**
+ * 選択肢の右に出す印（前回の答え・もう片方の診断で答えたもの）。
+ *
+ * **読者タイプの9問と同じ出し方にする**ので外へ出してある
+ * （`authorReaderTypeDiagnosis.ts` も使う）。写しを作ると、片方だけ
+ * 言い回しが変わる日が来る。
+ */
+export function describeChoiceMarks(
+  isPrevious: boolean,
+  sharedFrom: string | undefined
+): string | undefined {
+  const marks = [
+    isPrevious ? "前回の答え" : "",
+    sharedFrom ? `「${sharedFrom}」で答えたもの` : "",
+  ].filter(Boolean);
+  return marks.length > 0 ? `$(check) ${marks.join("・")}` : undefined;
 }
 
 async function clearPolicy(

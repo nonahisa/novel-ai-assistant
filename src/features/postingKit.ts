@@ -723,10 +723,10 @@ export async function recordRanking(
   if (ledger.sites.length === 0) {
     const answer = await vscode.window.showWarningMessage(
       `${work.title} には投稿サイトが登録されていません。` +
-        "「投稿サイトの設定」でサイトを登録すると、そのサイトの順位を記録できます。",
-      "投稿サイトの設定"
+        "「投稿サイト設定」でサイトを登録すると、そのサイトの順位を記録できます。",
+      "投稿サイト設定"
     );
-    if (answer === "投稿サイトの設定") return await configurePostingSites(work);
+    if (answer === "投稿サイト設定") return await configurePostingSites(work);
     return { changed: false };
   }
 

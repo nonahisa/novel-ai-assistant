@@ -378,7 +378,7 @@ async function explainNoWork(
   const siteLabel = postingSiteInfo(envelope.site).label;
   void vscode.window.showWarningMessage(
     `${siteLabel}の読者の反応を取り込める作品が見つかりませんでした。` +
-      `取り込みたい作品の「投稿サイトの設定」で、${siteLabel}と作品IDが` +
+      `取り込みたい作品の「投稿サイト設定」で、${siteLabel}と作品IDが` +
       "登録されているかご確認ください。"
   );
 }

@@ -159,7 +159,7 @@ describe("伏線の一覧のMarkdown", () => {
     expect(guide).toContain("# 伏線の一覧");
     expect(guide).toContain("まだ伏線が登録されていません。");
     expect(guide).toContain("伏線として登録");
-    expect(guide).toContain("伏線を手で追加");
+    expect(guide).toContain("伏線手動追加");
   });
 
   test("作者メモは書いてあれば必ず出す", () => {

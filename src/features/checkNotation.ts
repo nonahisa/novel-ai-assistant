@@ -389,7 +389,7 @@ export function describeNoGroups(keptGroupCount: number): string {
     return (
       `表記ゆれは見つかりましたが、${keptGroupCount}組はすべて` +
       "「今後直さない」に登録済みの語を含んでいたため出していません" +
-      "（「指摘対象外を管理」から外せます）。"
+      "（「指摘対象外管理」から外せます）。"
     );
   }
   return "表記ゆれは見つかりませんでした。";
@@ -779,7 +779,7 @@ export function describeNotationResult(
     if (result.keptGroupCount > 0) {
       parts.push(
         `（「今後直さない」に登録済みの組 ${result.keptGroupCount}組も除いています。` +
-          "「指摘対象外を管理」から外せます）"
+          "「指摘対象外管理」から外せます）"
       );
     }
     return parts.join("");

@@ -377,7 +377,7 @@ describe("点検のあとの知らせ", () => {
     expect(notice).toContain("送信 1か所");
   });
 
-  test("重なって止めたときは、「分かれた分を合わせる」へ進める口を出す", async () => {
+  test("重なって止めたときは、「分岐合流」へ進める口を出す", async () => {
     await runStartupHandoff({
       registry,
       monitor: monitorWith(tracked({ behind: 2, ahead: 2 })),
@@ -390,7 +390,8 @@ describe("点検のあとの知らせ", () => {
       }),
     });
 
-    expect(buttons).toContain("分かれた分を合わせる");
+    // ボタンの名前はメニューと同じ「分岐合流」（2026-09-23。旧「分かれた分を合わせる」）
+    expect(buttons).toContain("分岐合流");
   });
 
   test("止まっていないときの口は「同期する」", async () => {
@@ -404,7 +405,7 @@ describe("点検のあとの知らせ", () => {
     });
 
     expect(buttons).toContain("同期する");
-    expect(buttons).not.toContain("分かれた分を合わせる");
+    expect(buttons).not.toContain("分岐合流");
   });
 
   test("何も起きなければ、何も出さない", async () => {

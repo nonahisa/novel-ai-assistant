@@ -297,7 +297,7 @@ describe("ボタンと文", () => {
       featureLabel: "矛盾検知",
     });
     expect(text).toContain("「矛盾検知」の割当が gemma4:26b になり");
-    expect(text).toContain("機能ごとのAI割当");
+    expect(text).toContain("機能別AI割当");
     expect(text).toContain("これまでの実測から");
   });
 });

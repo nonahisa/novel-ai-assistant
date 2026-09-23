@@ -159,7 +159,7 @@ describe("ランキングを記録する", () => {
     const result = await recordRanking(work);
 
     expect(result.changed).toBe(false);
-    expect(warned.join("")).toContain("投稿サイトの設定");
+    expect(warned.join("")).toContain("投稿サイト設定");
     // サイトを訊く画面すら出さない（答えようのない質問をしない）
     expect(picks).toHaveLength(0);
     expect(disk.has(ledgerPath)).toBe(false);

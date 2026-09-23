@@ -341,7 +341,7 @@ describe("知らせ（1つにまとめる）", () => {
     expect(notice.message).toContain(
       "取り込めなかったもの（1画面）：カクヨム 作品ID 9999：この作品IDを登録した作品が見つかりませんでした。"
     );
-    expect(notice.message).toContain("「投稿サイトの設定」で作品IDを登録");
+    expect(notice.message).toContain("「投稿サイト設定」で作品IDを登録");
     expect(notice.message).toContain("「もう一度渡す」");
   });
 
@@ -351,7 +351,7 @@ describe("知らせ（1つにまとめる）", () => {
       failures: [{ label: "2件目", reason: "数として読めない値がありました。", fixByWorkId: false }],
     });
     expect(notice.message.startsWith("読者の反応を取り込めませんでした。")).toBe(true);
-    expect(notice.message).not.toContain("投稿サイトの設定");
+    expect(notice.message).not.toContain("投稿サイト設定");
     expect(notice.message).not.toContain("サイトの記録");
   });
 

@@ -236,10 +236,10 @@ async function pickChapter(work: WorkEntry): Promise<number | undefined> {
   if (chapters.length === 0) {
     const answer = await vscode.window.showInformationMessage(
       "単話プロットがまだ1つもありません。",
-      { modal: true, detail: "先に「単話プロットを作る」で、視点・目標・展開を書いてください。" },
-      "単話プロットを作る"
+      { modal: true, detail: "先に「単話プロット作成」で、視点・目標・展開を書いてください。" },
+      "単話プロット作成"
     );
-    if (answer === "単話プロットを作る") {
+    if (answer === "単話プロット作成") {
       await vscode.commands.executeCommand("novelai.createEpisodePlot", {
         type: "work",
         work,
@@ -688,9 +688,9 @@ async function loadEpisodePlot(
           "無いまま実行すると、AIは何も無いところから" +
           "「緩んでいそうなこと」を作り出します。",
       },
-      "単話プロットを作る"
+      "単話プロット作成"
     );
-    if (answer === "単話プロットを作る") {
+    if (answer === "単話プロット作成") {
       await vscode.commands.executeCommand("novelai.createEpisodePlot", {
         type: "work",
         work,

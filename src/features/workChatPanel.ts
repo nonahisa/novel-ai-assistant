@@ -3053,7 +3053,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     const context = await this.resolveContext();
     if (!context) {
       this.postError(
-        "作品のファイルを開くか、「相談する作品を選ぶ」で作品を決めてください。"
+        "作品のファイルを開くか、「相談作品選択」で作品を決めてください。"
       );
       return;
     }
@@ -3110,7 +3110,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     const context = await this.resolveContext();
     if (!context) {
       this.postError(
-        "作品のファイルを開くか、「相談する作品を選ぶ」で作品を決めてください。"
+        "作品のファイルを開くか、「相談作品選択」で作品を決めてください。"
       );
       return;
     }
@@ -3193,7 +3193,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     const context = await this.resolveContext();
     if (!context) {
       this.postError(
-        "作品のファイルを開くか、「相談する作品を選ぶ」で作品を決めてください。"
+        "作品のファイルを開くか、「相談作品選択」で作品を決めてください。"
       );
       this.postAll({ type: "applyToSettingsDone" });
       return;
@@ -3391,7 +3391,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     if (!(await this.ensureChatVisible())) {
       void vscode.window.showInformationMessage(
         "相談パネルを開けませんでした。左の「AIに相談」を開いてから、" +
-          "もう一度「対話でプロットを作る」を押してください。"
+          "もう一度「対話式プロット作成」を押してください。"
       );
       return;
     }
@@ -3404,7 +3404,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         who: "AI",
         text:
           `「${work.title}」にはまだプロットがありません。\n` +
-          "「プロットを作る」を先に実行すると、書く場所ができます。",
+          "「プロット自力作成」を先に実行すると、書く場所ができます。",
         run: "createPlot",
       });
       return;
@@ -4015,7 +4015,7 @@ function describeChatSync(result: ChatSettingsSyncResult): string {
   return (
     `相談から人物${total}件の更新案を積みました` +
     `（新規${result.creations.length}件・更新${result.staged}件）。` +
-    "「更新分を反映」で確認できます。"
+    "「設定資料更新分反映」で確認できます。"
   );
 }
 

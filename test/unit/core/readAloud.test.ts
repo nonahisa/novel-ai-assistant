@@ -330,7 +330,8 @@ describe("「原稿を読み上げる（音読推敲）」の入口", () => {
   };
 
   it("詳細メニューに、AIを使わない操作として並ぶ（実機確認リスト F-49 の代わり）", () => {
-    expect(entry().label).toBe("原稿を読み上げる");
+    // 2026-09-23 に「原稿を読み上げる」から改名
+    expect(entry().label).toBe("原稿読み上げ");
     expect(entry().note).toBe("音読推敲");
     // OSの声で読むので、料金はかからないし原稿も外へ出ない
     expect(entry().usesAI).toBe(false);

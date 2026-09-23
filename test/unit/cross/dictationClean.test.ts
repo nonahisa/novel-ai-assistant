@@ -505,11 +505,15 @@ describe("口述モードの画面（原稿エディタ）", () => {
 });
 
 describe("口述の整文の入口", () => {
-  test("詳細メニューの「原稿づくり」にある（AIの印つき）", () => {
+  test("操作の木の「原稿整備」にある（AIの印つき。画面には出さない）", () => {
+    // 2026-09-23 に「口述文整形」へ改名し、詳細メニューの画面からは外した
+    // （原稿エディターの下段「口述」→「整える」が同じ入口。作者の裁定 問5 A）。
+    // 木には残すので、コマンドパレットの名前と説明はここから引かれる
     const action = allActions().find((entry) => entry.command === COMMAND);
 
-    expect(action, "詳細メニューに口述の整文がない").toBeTruthy();
-    expect(action?.label).toBe("口述した文を整える");
+    expect(action, "操作の木に口述の整文がない").toBeTruthy();
+    expect(action?.label).toBe("口述文整形");
+    expect(action?.hiddenFromActionList).toBe(true);
     expect(action?.usesAI).toBe(true);
     // 開いているファイルに対して働くので、作品の登録は要らない
     expect(action?.requiresWork).toBeFalsy();
@@ -523,7 +527,7 @@ describe("口述の整文の入口", () => {
       (entry) => entry.command === COMMAND
     );
 
-    expect(declared?.title).toBe("口述した文を整える");
+    expect(declared?.title).toBe("口述文整形");
     // 声で書くことに、作品のタイプは関わらない
     expect(COMMAND_FEATURES[COMMAND]).toBe("allTypes");
   });

@@ -29,6 +29,13 @@ import { ACTION_TREE, shownEntries } from "../../../src/views/actionList";
 function visibleMenu(): string[] {
   const out: string[] = [];
   for (const group of ACTION_TREE) {
+    // 見出しを挟まない分類（相談パネルを開く）は、操作がそのまま最上位に出る
+    if (group.standalone) {
+      for (const entry of shownEntries(group.entries, true)) {
+        out.push(entry.label);
+      }
+      continue;
+    }
     out.push(group.label);
     for (const entry of shownEntries(group.entries, true)) {
       if (entry.kind === "section") {
@@ -45,90 +52,179 @@ function visibleMenu(): string[] {
 }
 
 describe("画面に出る詳細メニュー（道順を書く人はここを読む）", () => {
-  test("分類は6つで、この順に並ぶ", () => {
+  /**
+   * **2026-09-23 の組み直しの最終形**（作者に見せた組み直し案と14問の答え、
+   * 会話での追加の裁定）。名前は作者の確定表どおり。
+   *
+   * 1行ずつ意味がある並びなので、丸ごと写す。1行でもずれたら落ちる。
+   */
+  test("組み直した並びを、丸ごと写す（2026-09-23）", () => {
+    expect(visibleMenu()).toEqual([
+      "執筆データ",
+      "  全作品執筆統計",
+      "  執筆統計",
+      "  作品目標設定",
+      "  年表",
+      "  時期・系統編集",
+      "  編集履歴",
+      "作品管理",
+      "  作品名変更",
+      "  シリーズ連結",
+      "  メモ追加",
+      "  新規執筆開始",
+      "    プロット起点",
+      "    本文起点",
+      "  既存原稿登録",
+      "    未登録作品検索",
+      "    フォルダー登録",
+      "    バックアップ取込",
+      "    Word 原稿変換",
+      "  クラウド取得",
+      "    GitHubから追加",
+      "  GitHub作品管理",
+      "    GitHub初期設定",
+      "    書庫集約",
+      "    保存・同期",
+      "    全作品同期",
+      "    分岐合流",
+      "    同期",
+      "    競合解決",
+      "    復元",
+      "  編集部連携",
+      "    作者／編集者切替",
+      "    編集部共有",
+      "    校閲開始／終了",
+      "    編集部提案取込",
+      "    編集部提案確認",
+      "  作品別設定",
+      "    形式・ジャンル",
+      "    設定資料項目追加",
+      "    SNS告知設定",
+      "    外部AI許可／取消",
+      "    外部AI指示書設置",
+      "執筆支援",
+      "  支援機能全工程実行",
+      "  プロット",
+      "    プロット自力作成",
+      "    プロットモード",
+      "    対話式プロット作成",
+      "    プロット逆算",
+      "    単話プロット作成",
+      "  相談・助言",
+      "    相談作品選択",
+      "    作家タイプ診断",
+      "  原稿整備",
+      "    執筆再開用資料生成",
+      "    章立て提案",
+      "    章見出しから章立て",
+      "    本文 .md 化",
+      "    改行コード統一",
+      "  校正・校閲",
+      "    校正一括実行",
+      "    誤字脱字検知",
+      "    指摘対象外管理",
+      "    表記ゆれ検知",
+      "    推敲",
+      "    プロット逸脱検知",
+      "    単話プロット検査",
+      "    矛盾検知",
+      "    伏線検知",
+      "    伏線手動追加",
+      "    伏線状態変更",
+      "    伏線回収確認",
+      "    伏線一覧",
+      "    期限切れ指摘消去",
+      "  読者診断",
+      "    冒頭診断",
+      "    ターゲット読者診断",
+      "    ターゲットシート",
+      "    3つの輪",
+      "  広報支援",
+      "    キャッチコピー案",
+      "    作品紹介文",
+      "    更新SNS告知文作成",
+      "  投稿・出力",
+      "    新話投稿",
+      "    投稿サイト設定",
+      "    ランキング記録",
+      "    読者反応自動取込",
+      "    読者反応手動入力",
+      "    投稿サイトルビ取込",
+      "    設定資料集出力",
+      "    提供先別出力",
+      "    PDF出力",
+      "    EPUBエディター",
+      "    IME辞書出力",
+      "資料管理",
+      "  資料抽出",
+      "    一括抽出",
+      "    人物抽出",
+      "    場所抽出",
+      "    スキル抽出",
+      "    組織抽出",
+      "    世界観抽出",
+      "    各話あらすじ",
+      "    人物重複統合",
+      "    設定資料更新分反映",
+      "  資料閲覧",
+      "    設定資料集閲覧",
+      "    人物相関図",
+      "    紹介文・あらすじ閲覧",
+      "  人物名",
+      "    名前点検",
+      "    人物名変更",
+      "    人物名変更の資料反映",
+      "統合小説執筆環境設定",
+      "  設定管理",
+      "  AI",
+      "    AI設定",
+      "    AI接続確認",
+      "    AIチューニング",
+      "    AIチューニング実測一覧",
+      // 台帳を保管庫のファイルへ移したぶん、設定画面からは消せなくなった
+      // （0.66.6）。消す口はここにしかない
+      "    AIチューニング記録削除",
+      "ヘルプ",
+      "  使い方",
+      "  ログ表示",
+      "  相談ログ",
+      "  バージョン確認",
+      // **いちばん下に単独で**（作者の指定、2026-09-23）。どの束にも入れない
+      "相談パネルを開く",
+    ]);
+  });
+
+  test("分類は7つで、この順に並ぶ（最後の1つは見出しを挟まない）", () => {
     expect(ACTION_TREE.map((group) => group.label)).toEqual([
       "執筆データ",
       "作品管理",
-      "執筆AI支援",
+      "執筆支援",
       "資料管理",
-      "拡張機能の設定",
+      "統合小説執筆環境設定",
       "ヘルプ",
+      "相談パネルを開く",
+    ]);
+    expect(ACTION_TREE.filter((group) => group.standalone).map((g) => g.label)).toEqual([
+      "相談パネルを開く",
     ]);
   });
 
-  test("**「拡張機能の設定」に出るのは3つだけ**", () => {
-    // 「作者／編集者の切り替え」「セットアップを開始」「AI相談の強化」は
-    // 設定管理へ移したので出ない（設計書6.56.3、作者の指示 2026-08-31）。
-    // 「訊かないことにした確認を見直す」も同じ扱いにした
-    // （作者の指定 2026-09-13）——押す機会がめったに無い後始末である。
-    // どれもコマンドパレットからは今までどおり呼べる
-    const group = ACTION_TREE.find((g) => g.label === "拡張機能の設定");
-    expect(group).toBeDefined();
-
-    expect(shownEntries(group!.entries, true).map((e) => e.label)).toEqual([
-      "設定管理",
-      "作品ごとの設定",
-      "AI",
-    ]);
+  test("見出しを挟まない分類は、中身がちょうど1つの操作", () => {
+    for (const group of ACTION_TREE.filter((g) => g.standalone)) {
+      expect(group.entries, group.label).toHaveLength(1);
+      expect(group.entries[0].kind, group.label).toBe("action");
+    }
   });
 
-  test("**「AI」に出るのは5つだけ**", () => {
-    // 「機能ごとのAI割当」「Ollamaの実行ファイル」は出ない
-    const group = ACTION_TREE.find((g) => g.label === "拡張機能の設定");
-    const section = shownEntries(group!.entries, true).find(
-      (e) => e.kind === "section" && e.label === "AI"
-    );
-    expect(section?.kind).toBe("section");
-    if (section?.kind !== "section") return;
-
-    expect(shownEntries(section.items, true).map((i) => i.label)).toEqual([
-      "AI設定",
-      "AI接続の確認",
-      "AIチューニング",
-      "AIチューニングの実測一覧",
-      // 台帳を保管庫のファイルへ移したぶん、設定画面からは消せなくなった
-      // （0.66.6）。消す口はここにしかない
-      "AIチューニングの記録を消す",
-    ]);
-  });
-
-  test("「作品ごとの設定」は6つ", () => {
-    const group = ACTION_TREE.find((g) => g.label === "拡張機能の設定");
-    const section = shownEntries(group!.entries, true).find(
-      (e) => e.kind === "section" && e.label === "作品ごとの設定"
-    );
-    if (section?.kind !== "section") throw new Error("見つからない");
-
-    expect(shownEntries(section.items, true).map((i) => i.label)).toEqual([
-      // **「執筆データ」から移した**（0.66.2。作者が探して見つけられなかった）。
-      // 許可は作品ごとに決めるものなので、ここが正しい置き場所である
-      "外部AIの許可と取り消し",
-      // 指示書（設計書6.87.15 柱5）は許可の隣。**置くことと、読ませてよいと
-      // 決めることは別**なので、並べておかないと取り違えられる
-      "AI用の指示書を作品に置く",
-      "この作品の目標",
-      "形式とジャンル",
-      "一覧に項目を増やす",
-      "告知の設定",
-    ]);
-  });
-
-  test("**「ヘルプ」の一番上は「作家タイプ診断」**（設計書6.90）", () => {
-    // はじめて開いた人が知りたいのは「全部の機能」ではなく
-    // 「自分は何から始めればよいか」である。マニュアルはその次
+  test("「ヘルプ」に「動作診断」は出ない（ブラウザ版からも外した）", () => {
     const group = ACTION_TREE.find((g) => g.label === "ヘルプ");
-    const labels = shownEntries(group!.entries, true).map((e) => e.label);
-
-    expect(labels[0]).toBe("作家タイプ診断");
-    expect(labels[1]).toBe("使い方");
-  });
-
-  test("「ヘルプ」に「動作を診断」は出ない（ブラウザ版だけ）", () => {
-    const group = ACTION_TREE.find((g) => g.label === "ヘルプ");
-    const labels = shownEntries(group!.entries, true).map((e) => e.label);
-
-    expect(labels).not.toContain("動作を診断");
-    expect(labels).toContain("使い方");
+    for (const runtimeAllowsProcesses of [true, false]) {
+      const labels = shownEntries(group!.entries, runtimeAllowsProcesses).map(
+        (e) => e.label
+      );
+      expect(labels).not.toContain("動作診断");
+      expect(labels).toContain("使い方");
+    }
   });
 
   test("**隠した項目が、画面のどこにも出ていない**", () => {
@@ -137,16 +233,28 @@ describe("画面に出る詳細メニュー（道順を書く人はここを読�
     const shown = new Set(visibleMenu().map((line) => line.trim()));
 
     for (const label of [
-      "作者／編集者を切り替える",
-      "セットアップを開始",
+      // 設定管理へしまったもの（設計書6.56.3）
+      "セットアップ開始",
       "セットアップ",
-      "Ollamaのセットアップ",
-      "LM Studioのセットアップ",
-      "AI相談の強化",
-      "機能ごとにAIを割り当てる",
-      "Ollamaの実行ファイル位置を指定",
-      "意味検索の準備",
-      "訊かないことにした確認を見直す",
+      "Ollama導入",
+      "LM Studio導入",
+      "AI相談強化",
+      "機能別AI割当",
+      "Ollama実行ファイル位置",
+      "ベクトル検索準備",
+      "確認省略解除",
+      // 2026-09-23 に外したもの（原稿エディター・作家タイプ診断・矛盾検知へ寄せた）
+      "シーンメモ一覧",
+      "縦書き表示",
+      "原稿読み上げ",
+      "口述文整形",
+      "ルビ付与",
+      "傍点付与",
+      "投稿用変換・コピー",
+      "助言方針",
+      "あなた自身の読者タイプ",
+      "AI相談",
+      "EPUB出力",
     ]) {
       expect(shown.has(label), label).toBe(false);
     }

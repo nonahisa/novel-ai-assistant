@@ -307,7 +307,7 @@ export function readerStatsBundleNotice(outcome: ReaderStatsBundleOutcome): {
     );
     if (outcome.failures.some((failure) => failure.fixByWorkId)) {
       parts.push(
-        "取り込みたい作品の「投稿サイトの設定」で作品IDを登録してから、" +
+        "取り込みたい作品の「投稿サイト設定」で作品IDを登録してから、" +
           "ヘルパーの「もう一度渡す」で渡し直すと取り込めます（取り込み済みの数は二重に積みません）。"
       );
     }

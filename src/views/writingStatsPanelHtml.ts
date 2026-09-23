@@ -1136,7 +1136,7 @@ function siteRecordsNote(records) {
   if (records.some((record) => (record.history || []).length > 0)) {
     // 名前はメニューの字面に揃える（0.75.8）。メニューで探すときに
     // 見つからない名前を案内に書くと、押す場所が分からなくなる
-    notes.push('順位は「ランキングを記録」で書き足した値。' +
+    notes.push('順位は「ランキング記録」で書き足した値。' +
       'サイトから自動で取ってこない。');
   }
   if (records.some((record) => record.readerLatest)) {

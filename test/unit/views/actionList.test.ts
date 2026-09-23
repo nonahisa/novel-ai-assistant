@@ -100,10 +100,14 @@ describe("操作メニューの構成", () => {
     expect(ACTION_TREE.map((group) => group.label)).toEqual([
       "執筆データ",
       "作品管理",
-      "執筆AI支援",
+      // 2026-09-23 に「執筆AI支援」から改名（作者の裁定）
+      "執筆支援",
       "資料管理",
-      "拡張機能の設定",
+      // 2026-09-23 に「拡張機能の設定」から改名（作者の裁定）
+      "統合小説執筆環境設定",
       "ヘルプ",
+      // いちばん下に単独で置く（見出しを挟まない。作者の指定、2026-09-23）
+      "相談パネルを開く",
       // 0.45.0 までは最下段に「テスト中」（実機確認リストからの写し）が
       // 並んでいた。F5の道具ごと撤去した（作者の指示、2026-09-10）
     ]);
@@ -287,15 +291,17 @@ describe("操作メニューの構成", () => {
     // 初めて開いた人がまず目を落とすのは分類の先頭で、そこに入口が
     // 無ければ「まず何をするのか」が分からない。
     //
-    // 「編集部とやり取り」は作者の指示で末尾のまま（2026-08-31）。
+    // 「編集部連携」は作者の指示で末尾寄り（2026-08-31）。
     // 編集部と組まない作者には出番が無く、毎日使う入口より上にあると
-    // 目が滑る
+    // 目が滑る。「作品別設定」は2026-09-23に「統合小説執筆環境設定」から
+    // 移した（作品ごとの決めごとなので）
     expect(sections.map((section) => section.label)).toEqual([
-      "新しく書き始める",
-      "すでにある原稿を入れる",
-      "別の環境から取り寄せる",
-      "GitHubで作品管理",
-      "編集部とやり取り",
+      "新規執筆開始",
+      "既存原稿登録",
+      "クラウド取得",
+      "GitHub作品管理",
+      "編集部連携",
+      "作品別設定",
     ]);
   });
 
@@ -322,7 +328,7 @@ describe("操作メニューの構成", () => {
 
     // **コマンドIDは変えない。** 変えると、作者のキーバインド・手順書き
     // （`core/procedures.ts`）・相談の案内が一斉にずれる
-    expect(commandsIn("新しく書き始める")).toEqual([
+    expect(commandsIn("新規執筆開始")).toEqual([
       "novelai.createWorkWithPlot",
       "novelai.createWorkFromManuscript",
     ]);
@@ -331,13 +337,17 @@ describe("操作メニューの構成", () => {
     //
     // **先頭は「書庫から未登録の作品を拾う」**（設計書6.97.4）。OSの
     // フォルダー選びを開かない道なので、こちらを既定にする。
-    // 「フォルダから追加」は書庫の外から入れる道として残す
-    expect(commandsIn("すでにある原稿を入れる")).toEqual([
+    // 「フォルダー登録」は書庫の外から入れる道として残す。
+    //
+    // **Word 原稿変換もここ**（作者の裁定 B6、2026-09-23）。作品の外にある
+    // .docx も変換でき、原稿を外から入れる側の操作である
+    expect(commandsIn("既存原稿登録")).toEqual([
       "novelai.collectUnregisteredWorks",
       "novelai.addWork",
       "novelai.importWorkFromZip",
+      "novelai.convertDocxToMarkdown",
     ]);
-    expect(commandsIn("別の環境から取り寄せる")).toEqual([
+    expect(commandsIn("クラウド取得")).toEqual([
       "novelai.addWorkFromGithub",
     ]);
   });
@@ -399,6 +409,10 @@ describe("AIの印", () => {
         // 相談のメニューの入口は「大きく開く」だけ（横の細いパネルは
         // 本文の右クリックのみ。0.29.23で項目を消した——作者の指定）
         "novelai.openChatPanel",
+        // 詳細メニューのいちばん下の「相談パネルを開く」（横の細いパネル。
+        // 作者の指定、2026-09-23）。開いた先の相談でAIを呼ぶので、
+        // 大きく開くほうと同じく印を付ける
+        "novelai.openChat",
         // 読める長さの測定（設計書6.27.11）。作品の本文は送らないが、
         // **AIを何度も呼ぶ**ので有料AIでは料金が出る。印は要る
         "novelai.measureContext",
@@ -493,7 +507,7 @@ describe("件数の印", () => {
 
     expect(
       provider.provideFileDecoration(
-        actionResourceUri(sectionNode("執筆AI支援", "校正・校閲"))
+        actionResourceUri(sectionNode("執筆支援", "校正・校閲"))
       )
     ).toBeUndefined();
   });
@@ -567,7 +581,7 @@ describe("開閉を覚える", () => {
     // 全部開くと40項目近くが縦に並び、作品一覧の場所が押し出される
     const provider = new ActionListProvider(fakeRegistry(), memoryStore());
 
-    for (const group of ACTION_TREE) {
+    for (const group of ACTION_TREE.filter((g) => !g.standalone)) {
       expect(collapsibleOf(provider, groupNode(group.label))).toBe(
         TreeItemCollapsibleState.Collapsed
       );
@@ -590,15 +604,15 @@ describe("開閉を覚える", () => {
   });
 
   test("小分類も分類とは別に覚える", () => {
-    // 「作品管理」を開いても「新しく書き始める」まで開いた状態にはしない
+    // 「作品管理」を開いても「新規執筆開始」まで開いた状態にはしない
     const store = memoryStore();
     const provider = new ActionListProvider(fakeRegistry(), store);
 
-    provider.setExpanded("作品管理/新しく書き始める", true);
+    provider.setExpanded("作品管理/新規執筆開始", true);
 
-    expect(store.saved).toEqual(["作品管理/新しく書き始める"]);
+    expect(store.saved).toEqual(["作品管理/新規執筆開始"]);
     expect([...restoreExpandedGroups(store.saved)]).toEqual([
-      "作品管理/新しく書き始める",
+      "作品管理/新規執筆開始",
     ]);
   });
 
@@ -803,24 +817,20 @@ describe("メニュー名とコマンドパレットの名前", () => {
    *
    * **足すときは理由を書く。** 理由の書けないずれは、ただの直し忘れである。
    */
+  /*
+    2026-09-23 のメニューの組み直しで、名前を変えた項目は**コマンドパレットの
+    名前も同じにした**（計画 G：名前を変えると title も同じ名前に変える）。
+    それで例外が7件消えた（プロット起点・本文起点・フォルダー登録・
+    GitHub初期設定・一括抽出・ベクトル検索準備・設定資料集出力）。
+    残るのは、名前を変えなかった項目と、右クリックにも出る1件だけである。
+  */
   const EXCEPTIONS: Record<string, string> = {
-    "novelai.setupGithub":
-      "「セットアップ」を避けた言い換え。小分類「GitHubで作品管理」の下なので、何のことかは文脈で分かる",
-    "novelai.gitSync": "小分類「GitHubで作品管理」の下。「GitHubと」は文脈で分かる",
-    "novelai.gitRestore": "小分類「GitHubで作品管理」の下。並びの短さを揃えている",
-    "novelai.createWorkWithPlot":
-      "小分類「新しく書き始める」の下で「〜から開始」と揃えてある",
-    "novelai.createWorkFromManuscript":
-      "小分類「新しく書き始める」の下で「〜から開始」と揃えてある",
-    "novelai.addWork": "小分類「すでにある原稿を入れる」の下で「〜から追加」と揃えてある",
+    "novelai.gitSync": "小分類「GitHub作品管理」の下。「GitHubと」は文脈で分かる",
+    "novelai.gitRestore": "小分類「GitHub作品管理」の下。並びの短さを揃えている",
     "novelai.addWorkFromGithub":
-      "小分類「別の環境から取り寄せる」の下で「〜から追加」と揃えてある",
-    "novelai.extractSettings":
-      "小分類「資料抽出」の下。「設定資料を」は文脈で分かる",
-    "novelai.setupVectorSearch":
-      "括弧が名前の途中に入る形（「意味検索（ベクトルDB）の準備」）で、label＋（note）では表せない",
-    "novelai.generateSettingsDocs":
-      "括弧の中身（AIを使わない）は description に出している。note へ写すと画面に二重に出る",
+      "小分類「クラウド取得」の下。パレットには小分類が無いので「作品を」を残す",
+    "novelai.openChat":
+      "同じ title が本文の右クリックにも出る。そこでは動作を言う「AIに相談する」のほうが通じる（範囲を選んで訊く入口）",
   };
 
   test("label＋（note）が package.json の title と一致する", () => {
@@ -884,54 +894,102 @@ describe("操作メニューの印の色", () => {
 });
 
 /**
- * 校正・校閲の並び（作者の指示、2026-08-22）。
+ * 校正・校閲の並び。
  *
- * 「『編集部からの提案を見る』を一番下、『校閲を始める／終える』をその上に
- * 配置してください」。
+ * 2026-08-22 の作者の指示は「編集部とのやり取りは校正・校閲のいちばん下に」
+ * だった。**2026-09-23 の裁定（問4 A）でこれを置き換えた**——校閲開始／終了・
+ * 編集部提案確認は、作者／編集者切替と一緒に作品管理の「編集部連携」へ移した。
+ * 作者が1人で回す検知と、相手のいる作業を分けるという元の狙いは、
+ * 別の小分類にすることでよりはっきり果たせる。
  *
  * **並びは作者が決めたものなので、機械で留める。** 項目を足すときに、
  * うっかり末尾へ差し込むと崩れる——崩れても動きは変わらないので、
  * 実機で気づくまで分からない。
  */
 describe("校正・校閲の並び", () => {
-  function proofreadingSection() {
+  function sectionOf(label: string) {
     for (const group of ACTION_TREE) {
       for (const entry of group.entries) {
-        if (entry.kind === "section" && entry.label === "校正・校閲") {
-          return entry;
+        if (entry.kind === "section" && entry.label === label) {
+          return { group: group.label, section: entry };
         }
       }
     }
-    throw new Error("「校正・校閲」が見つかりません");
+    throw new Error(`「${label}」が見つかりません`);
   }
 
-  test("編集部とのやり取りは、いちばん下の2つに置く", () => {
-    const commands = proofreadingSection().items.map((item) => item.command);
+  test("編集部とのやり取りは、作品管理の「編集部連携」に集める", () => {
+    const found = sectionOf("編集部連携");
+    expect(found.group).toBe("作品管理");
+    // 並びは作業の順：切替 → 渡す → 札を掛ける → 取り寄せる → 1件ずつ決める
+    expect(found.section.items.map((item) => item.command)).toEqual([
+      "novelai.switchMode",
+      "novelai.shareWithEditor",
+      "novelai.toggleReviewLock",
+      "novelai.collectEditorProposals",
+      "novelai.reviewProposals",
+    ]);
 
-    expect(commands[commands.length - 1]).toBe("novelai.reviewProposals");
-    expect(commands[commands.length - 2]).toBe("novelai.toggleReviewLock");
+    const proofreading = sectionOf("校正・校閲").section.items.map(
+      (item) => item.command
+    );
+    expect(proofreading).not.toContain("novelai.toggleReviewLock");
+    expect(proofreading).not.toContain("novelai.reviewProposals");
   });
 
-  test("作者が1人で回す作業が、その上に並ぶ", () => {
-    // 毎日通るのは上のほう。相手のいる作業を上に置くと、そこを通り抜ける
-    const commands = proofreadingSection().items.map((item) => item.command);
+  test("校正・校閲には、作者が1人で回す検知が並ぶ", () => {
+    const commands = sectionOf("校正・校閲").section.items.map(
+      (item) => item.command
+    );
 
     // 先頭はまとめ実行（設計書6.80）。1つずつ押して回る分類なので、
     // まとめて走らせる入口を最初に見せる
     expect(commands[0]).toBe("novelai.runProofreadingSuite");
     expect(commands[1]).toBe("novelai.checkTypos");
     expect(commands).toContain("novelai.checkProofread");
-    // 校閲ロックより前に、検知の類がすべて並んでいる
-    const lockAt = commands.indexOf("novelai.toggleReviewLock");
-    for (const command of [
-      "novelai.checkTypos",
-      "novelai.checkNotation",
-      "novelai.checkProofread",
-      "novelai.checkDeviations",
-      "novelai.checkContradictions",
-    ]) {
-      expect(commands.indexOf(command), command).toBeLessThan(lockAt);
-    }
+    // 片づけは検知の並びのいちばん後ろ（設計書6.96.4）
+    expect(commands[commands.length - 1]).toBe("novelai.pruneFindings");
+  });
+
+  test("伏線の並びは、検知 → 手動追加 → 状態変更 → 回収確認 → 一覧", () => {
+    // 作者の裁定（2026-09-23）。簡単ステップメニューの4段と同じ順
+    const commands = sectionOf("校正・校閲")
+      .section.items.map((item) => item.command)
+      .filter((command) => /Foreshadow/.test(command));
+
+    expect(commands).toEqual([
+      "novelai.checkForeshadows",
+      "novelai.addForeshadow",
+      "novelai.setForeshadowStatus",
+      "novelai.checkForeshadowResolution",
+      "novelai.openForeshadows",
+    ]);
+  });
+
+  test("診断の類は、校正・校閲のすぐ下の「読者診断」に置く", () => {
+    const writing = ACTION_TREE.find((group) => group.label === "執筆支援");
+    const sections = (writing?.entries ?? [])
+      .filter((entry) => entry.kind === "section")
+      .map((entry) => entry.label);
+
+    // 工程の順（作者の裁定、2026-09-23 問1 A）
+    expect(sections).toEqual([
+      "プロット",
+      "相談・助言",
+      "原稿整備",
+      "校正・校閲",
+      "読者診断",
+      "広報支援",
+      "投稿・出力",
+    ]);
+    expect(
+      sectionOf("読者診断").section.items.map((item) => item.command)
+    ).toEqual([
+      "novelai.checkOpening",
+      "novelai.runReaderTargetDiagnosis",
+      "novelai.openTargetSheet",
+      "novelai.showThreeCircles",
+    ]);
   });
 });
 
@@ -966,19 +1024,20 @@ describe("告知の入口の場所（実機確認 F-48）", () => {
     throw new Error(`操作「${command}」がどの小分類にもありません`);
   }
 
-  test("「更新告知文を作る」は 執筆AI支援 → 広報支援", () => {
+  test("「更新SNS告知文作成」は 執筆支援 → 広報支援", () => {
     expect(placeOf("novelai.generateAnnouncement")).toEqual({
-      group: "執筆AI支援",
+      group: "執筆支援",
       section: "広報支援",
     });
   });
 
-  test("**「告知の設定」は 拡張機能の設定 → 作品ごとの設定**（広報支援ではない）", () => {
+  test("**「SNS告知設定」は 作品管理 → 作品別設定**（広報支援ではない）", () => {
     // 一度決めればしばらく変えないものを集めた先（設計書6.56）。
+    // 2026-09-23 に小分類ごと作品管理へ移した（作品ごとの決めごとなので）。
     // 広報支援へ戻すなら、リストの項目文とこのテストの両方を直すこと
     expect(placeOf("novelai.configureAnnouncement")).toEqual({
-      group: "拡張機能の設定",
-      section: "作品ごとの設定",
+      group: "作品管理",
+      section: "作品別設定",
     });
   });
 });
@@ -986,15 +1045,15 @@ describe("告知の入口の場所（実機確認 F-48）", () => {
 describe("投稿キットの入口", () => {
   function otherSupport() {
     // 0.33.8で「その他支援」を2つに割った（下の describe に理由）。
-    // 投稿まわりは「投稿・書き出し」の側に揃っている
+    // 投稿まわりは「投稿・出力」（旧「投稿・書き出し」）の側に揃っている
     for (const group of ACTION_TREE) {
       for (const entry of group.entries) {
-        if (entry.kind === "section" && entry.label === "投稿・書き出し") {
+        if (entry.kind === "section" && entry.label === "投稿・出力") {
           return entry;
         }
       }
     }
-    throw new Error("「投稿・書き出し」が見つかりません");
+    throw new Error("「投稿・出力」が見つかりません");
   }
 
   test("「新話を投稿する」と「投稿サイトの設定」が同じ小分類に並ぶ", () => {
@@ -1047,16 +1106,29 @@ describe("投稿キットの入口", () => {
  * 同じ日でも違う時間に押す。「その他」という名前で1つに積んでいたのは、
  * 分ける理由が無かったからではなく、**分ける手が入っていなかっただけ**である。
  */
-describe("原稿づくりと投稿・書き出し", () => {
-  function writingSupport() {
+describe("原稿整備と投稿・出力", () => {
+  /** 小分類の中身（画面に出ないものも含む） */
+  function sectionCommands(label: string): string[] {
     for (const group of ACTION_TREE) {
       for (const entry of group.entries) {
-        if (entry.kind === "section" && entry.label === "原稿づくり") {
-          return entry;
+        if (entry.kind === "section" && entry.label === label) {
+          return entry.items.map((item) => item.command);
         }
       }
     }
-    throw new Error("「原稿づくり」が見つかりません");
+    throw new Error(`「${label}」が見つかりません`);
+  }
+
+  /** 小分類の中で、画面に出るもの */
+  function shownCommands(label: string): string[] {
+    for (const group of ACTION_TREE) {
+      for (const entry of group.entries) {
+        if (entry.kind === "section" && entry.label === label) {
+          return shownEntries(entry.items, true).map((item) => item.command);
+        }
+      }
+    }
+    throw new Error(`「${label}」が見つかりません`);
   }
 
   test("「その他支援」はもう無い", () => {
@@ -1067,28 +1139,44 @@ describe("原稿づくりと投稿・書き出し", () => {
     expect(sections.map((section) => section.label)).not.toContain("その他支援");
   });
 
-  test("原稿づくりには、書く・整える操作だけが並ぶ", () => {
-    const commands = writingSupport().items.map((item) => item.command);
-
-    // **書き始めの2つを先頭に置く**（設計書6.36.4）。割ってもここは動かさない
-    expect(commands[0]).toBe("novelai.resumeWriting");
-    expect(commands[1]).toBe("novelai.createEpisodePlot");
-    // 整える側（ルビ・傍点）まで、同じ小分類に残す
-    expect(commands).toContain("novelai.addRuby");
-    expect(commands).toContain("novelai.addEmphasis");
+  test("原稿整備には、書く・整える操作だけが並ぶ", () => {
+    // 2026-09-23 に「原稿づくり」から改名し、校正・校閲の上へ移した
+    // （作者の裁定）。単話プロット作成は「プロット」の小分類へ移した
+    expect(shownCommands("原稿整備")).toEqual([
+      // **書き始めの操作を先頭に置く**（設計書6.36.4）
+      "novelai.resumeWriting",
+      "novelai.proposeChapters",
+      "novelai.chaptersFromHeadings",
+      "novelai.convertToMarkdown",
+      "novelai.unifyEol",
+    ]);
+    // 原稿エディターにもある操作は画面から外したが、木には残す
+    // （作者の裁定、2026-09-23 問5 A。コマンドパレットと簡単ステップメニューが引く）
+    const all = sectionCommands("原稿整備");
+    for (const command of [
+      "novelai.openSceneMemos",
+      "novelai.openVertical",
+      "novelai.readManuscriptAloud",
+      "novelai.dictationClean",
+      "novelai.addRuby",
+      "novelai.addEmphasis",
+    ]) {
+      expect(all, command).toContain(command);
+    }
     // 外へ出す操作は入れない
-    expect(commands).not.toContain("novelai.copyForPosting");
-    expect(commands).not.toContain("novelai.exportEpub");
+    expect(all).not.toContain("novelai.copyForPosting");
+    expect(all).not.toContain("novelai.exportEpub");
   });
 
-  test("投稿・書き出しには、外へ出す操作だけが並ぶ", () => {
-    const commands = otherSupportCommands();
+  test("投稿・出力には、外へ出す操作だけが並ぶ", () => {
+    const commands = shownCommands("投稿・出力");
 
-    // 投稿サイト用の変換が先頭。ここから「出す」場面に変わる
-    expect(commands[0]).toBe("novelai.copyForPosting");
+    // 投稿の案内が先頭。「投稿用変換・コピー」は画面から外した（問5 A）が、
+    // 木には残り、原稿エディターと簡単ステップメニューから使う
+    expect(commands[0]).toBe("novelai.postNewEpisode");
+    expect(sectionCommands("投稿・出力")).toContain("novelai.copyForPosting");
     for (const command of [
       "novelai.exportPdf",
-      "novelai.exportEpub",
       "novelai.generateSettingsDocs",
       "novelai.exportImeDictionary",
     ]) {
@@ -1102,29 +1190,23 @@ describe("原稿づくりと投稿・書き出し", () => {
    * **印は、その操作が入っている小分類に付ける。** 割ったときに置き去りに
    * すると、閉じたままの小分類の中で古びていることに気づけない。
    */
-  test("IME辞書の印は、投稿・書き出しの側に付く", () => {
+  test("IME辞書の印は、投稿・出力の側に付く", () => {
     const section = ACTION_TREE.flatMap((group) =>
       group.entries.filter(
-        (entry) => entry.kind === "section" && entry.label === "投稿・書き出し"
+        (entry) => entry.kind === "section" && entry.label === "投稿・出力"
+      )
+    )[0];
+    const writing = ACTION_TREE.flatMap((group) =>
+      group.entries.filter(
+        (entry) => entry.kind === "section" && entry.label === "原稿整備"
       )
     )[0];
 
     expect(section?.kind === "section" ? section.counter : undefined).toBe(
       "staleImeDictionary"
     );
-    expect(writingSupport().counter).toBeUndefined();
+    expect(writing?.kind === "section" ? writing.counter : "無い").toBeUndefined();
   });
-
-  function otherSupportCommands(): string[] {
-    for (const group of ACTION_TREE) {
-      for (const entry of group.entries) {
-        if (entry.kind === "section" && entry.label === "投稿・書き出し") {
-          return entry.items.map((item) => item.command);
-        }
-      }
-    }
-    throw new Error("「投稿・書き出し」が見つかりません");
-  }
 });
 
 describe("ブラウザ版でだけ出す操作", () => {
@@ -1144,12 +1226,16 @@ describe("ブラウザ版でだけ出す操作", () => {
     expect(isItemVisibleInRuntime(item!, true)).toBe(false);
   });
 
-  test("ブラウザ版では出す", () => {
+  test("ブラウザ版では、相談へ渡す一覧には出る（詳細メニューの画面には出さない）", () => {
+    // 作者の書き込み「削除で」（2026-09-23）で、ブラウザ版の詳細メニューからも
+    // 外した。**環境で動くかどうか**（isItemVisibleInRuntime）は変えない——
+    // 相談へ渡す機能の一覧は、ブラウザ版ではこの操作を知っているべきである
     const item = allActions().find(
       (action) => action.command === "novelai.diagnoseWeb"
     );
 
     expect(isItemVisibleInRuntime(item!, false)).toBe(true);
+    expect(isItemShownInActionList(item!, false)).toBe(false);
   });
 
   test("印の無い操作は、どちらでも出す", () => {
@@ -1209,8 +1295,9 @@ describe("相談の項目は、木に残して画面から隠す", () => {
     const action = chatPanelAction();
 
     expect(action, "木から消すと簡単ステップメニューが壊れる").toBeTruthy();
-    // 補足（「大きく開く」）は note へ移した（2026-09-06）
-    expect(action?.label).toBe("AIに相談");
+    // 補足（「大きく開く」）は note へ移した（2026-09-06）。
+    // 名前は 2026-09-23 に「AIに相談」から「AI相談」へ
+    expect(action?.label).toBe("AI相談");
     expect(action?.note).toBe("大きく開く");
     // 隠すのは画面だけ。動く環境かどうかの判定には混ぜない
     expect(isItemVisibleInRuntime(action!, true)).toBe(true);
@@ -1223,8 +1310,12 @@ describe("相談の項目は、木に残して画面から隠す", () => {
     expect(isItemShownInActionList(action!, true)).toBe(false);
   });
 
-  test("「執筆AI支援」を描画すると、この項目だけが落ちる", () => {
-    const group = ACTION_TREE.find((entry) => entry.label === "執筆AI支援");
+  test("「執筆支援 › 相談・助言」を描画すると、この項目だけが落ちる", () => {
+    const group = ACTION_TREE.find((entry) => entry.label === "執筆支援");
+    const section = group?.entries.find(
+      (entry) => entry.kind === "section" && entry.label === "相談・助言"
+    );
+    if (section?.kind !== "section") throw new Error("相談・助言が無い");
     // 木の型そのままで受けると、`kind` で絞り込むだけで command が読める
     const has = (entries: readonly (ActionItem | ActionSection)[]) =>
       entries.some(
@@ -1233,11 +1324,50 @@ describe("相談の項目は、木に残して画面から隠す", () => {
       );
 
     // 画面（getChildren）が使うのは shownEntries のほう
-    expect(has(shownEntries(group!.entries, true))).toBe(false);
+    expect(has(shownEntries(section.items, true))).toBe(false);
     // AIへ渡す機能の一覧・実機確認リストが使うほうには残る
-    expect(has(visibleEntries(group!.entries, true))).toBe(true);
+    expect(has(visibleEntries(section.items, true))).toBe(true);
     // 見出しごと畳まれてはいない（ほかの操作が残っている）
-    expect(shownEntries(group!.entries, true).length).toBeGreaterThan(0);
+    expect(shownEntries(section.items, true).length).toBeGreaterThan(0);
+  });
+
+  /**
+   * **横の細いパネルを開く入口を、いちばん下に単独で置く**（作者の指定、
+   * 2026-09-23「相談パネルを開く」）。見出しを挟まないので、分類を開かず
+   * に押せる。
+   */
+  test("「相談パネルを開く」は、最上位の最後の行として出る", () => {
+    const provider = new ActionListProvider(fakeRegistry(), memoryStore());
+    const top = provider.getChildren();
+    const last = top[top.length - 1];
+
+    expect(last.type).toBe("action");
+    if (last.type !== "action") return;
+    expect(last.item.command).toBe("novelai.openChat");
+    expect(last.item.label).toBe("相談パネルを開く");
+    // 押せる行である（折りたためない・コマンドを持つ）
+    const item = provider.getTreeItem(last);
+    expect(item.collapsibleState).toBe(TreeItemCollapsibleState.None);
+    expect(item.command?.command).toBe("novelai.openChat");
+    // 親は無い（最上位）。光らせる案内（reveal）が親をたどって迷わない
+    expect(provider.getParent(last)).toBeUndefined();
+  });
+
+  /**
+   * 助言方針・あなた自身の読者タイプは、作家タイプ診断へ入口をまとめた
+   * （作者の裁定、2026-09-23）。**コマンドは残す**——コマンドパレットと、
+   * 相談の中の案内から今までどおり呼べる。
+   */
+  test("助言方針と読者タイプは、木に残したまま画面から隠す", () => {
+    for (const command of [
+      "novelai.setAdvicePolicy",
+      "novelai.setAuthorReaderType",
+    ]) {
+      const action = allActions().find((entry) => entry.command === command);
+      expect(action, command).toBeTruthy();
+      expect(isItemShownInActionList(action!, true), command).toBe(false);
+      expect(isItemVisibleInRuntime(action!, true), command).toBe(true);
+    }
   });
 
   /**
@@ -1274,31 +1404,29 @@ describe("相談の項目は、木に残して画面から隠す", () => {
     expect(hidden).toContain("novelai.exportEpub");
   });
 
-  test("「相談する作品を選ぶ」はそのまま出す", () => {
+  test("「相談作品選択」はそのまま出す", () => {
     const chooseWork = allActions().find(
       (action) => action.command === "novelai.chooseChatWork"
     );
 
-    expect(chooseWork, "相談する作品を選ぶが見当たらない").toBeTruthy();
+    expect(chooseWork, "相談作品選択が見当たらない").toBeTruthy();
     expect(chooseWork?.hiddenFromActionList).toBeFalsy();
   });
 
   /**
-   * 「作者／編集者を切り替える」は `novelai.mode` の設定から切り替える運用にした
-   * （作者の指示、2026-08-31）。詳細メニューに項目があると二重の入口になるので
-   * 隠すが、**コマンドは残す**（簡単ステップメニューの「編集部校正・校閲」が
-   * このコマンドIDを参照している）。
+   * 「作者／編集者切替」は 2026-08-31 に詳細メニューから隠し、`novelai.mode` の
+   * 設定から切り替える運用にしていた。**2026-09-23 にまた出した**（作者の
+   * 裁定 問4 A）——編集部と組む操作を作品管理の「編集部連携」へ集めたので、
+   * その先頭に置く。設定管理からも今までどおり切り替えられる。
    */
-  test("「作者／編集者を切り替える」は、木に残したまま画面から隠す", () => {
+  test("「作者／編集者切替」は、編集部連携の先頭に出す", () => {
     const action = allActions().find(
       (entry) => entry.command === "novelai.switchMode"
     );
 
-    expect(action, "木から消すと簡単ステップメニューが壊れる").toBeTruthy();
-    expect(action?.hiddenFromActionList).toBe(true);
-    expect(isItemShownInActionList(action!, true)).toBe(false);
-    // 隠すのは画面だけ。動く環境かどうかの判定には混ぜない
-    expect(isItemVisibleInRuntime(action!, true)).toBe(true);
+    expect(action?.label).toBe("作者／編集者切替");
+    expect(action?.hiddenFromActionList).toBeFalsy();
+    expect(isItemShownInActionList(action!, true)).toBe(true);
   });
 });
 
@@ -1319,8 +1447,9 @@ describe("撤去した開発用の操作", () => {
 /**
  * 更新告知文の置き場所（実機確認リスト F-48）。
  *
- * **「告知の設定」は広報支援に無い。** 0.29.7 で「拡張機能の設定」→
- * 「作品ごとの設定」へ集約した（設計書6.56）。項目文のほうが古い。
+ * **「SNS告知設定」（旧「告知の設定」）は広報支援に無い。** 0.29.7 で
+ * 「拡張機能の設定」→「作品ごとの設定」へ集約し（設計書6.56）、2026-09-23 に
+ * 小分類ごと「作品管理 → 作品別設定」へ移した。項目文のほうが古い。
  */
 describe("更新告知文の置き場所", () => {
   /** 分類→小分類の中に並ぶコマンド */
@@ -1334,18 +1463,18 @@ describe("更新告知文の置き場所", () => {
       : [];
   }
 
-  test("「執筆AI支援 → 広報支援」に「更新告知文を作る」が並ぶ（実機確認リスト F-48 の代わり）", () => {
-    expect(itemsIn("執筆AI支援", "広報支援")).toContain(
+  test("「執筆支援 → 広報支援」に「更新SNS告知文作成」が並ぶ（実機確認リスト F-48 の代わり）", () => {
+    expect(itemsIn("執筆支援", "広報支援")).toContain(
       "novelai.generateAnnouncement"
     );
   });
 
-  test("「告知の設定」は「拡張機能の設定 → 作品ごとの設定」にある（実機確認リスト F-48 の代わり）", () => {
-    expect(itemsIn("拡張機能の設定", "作品ごとの設定")).toContain(
+  test("「SNS告知設定」は「作品管理 → 作品別設定」にある（実機確認リスト F-48 の代わり）", () => {
+    expect(itemsIn("作品管理", "作品別設定")).toContain(
       "novelai.configureAnnouncement"
     );
     // 広報支援からは外してある（同じものを2か所に置かない）
-    expect(itemsIn("執筆AI支援", "広報支援")).not.toContain(
+    expect(itemsIn("執筆支援", "広報支援")).not.toContain(
       "novelai.configureAnnouncement"
     );
   });
@@ -1371,7 +1500,7 @@ describe("分類の出し分けは環境で変わらない", () => {
       .map((node) => (node.type === "group" ? node.group.label : ""));
 
     expect(labels).not.toContain("テスト中");
-    for (const label of ["執筆データ", "作品管理", "執筆AI支援", "ヘルプ"]) {
+    for (const label of ["執筆データ", "作品管理", "執筆支援", "ヘルプ"]) {
       expect(labels, label).toContain(label);
     }
   });

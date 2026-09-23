@@ -424,7 +424,7 @@ async function confirmScope(
   if (scanned.issues.length === 0) {
     vscode.window.showInformationMessage(
       `本文に「${oldName}」は見つかりませんでした。` +
-        "資料だけを直すなら「名前の付け替えを資料にも反映」を実行してください。"
+        "資料だけを直すなら「人物名変更の資料反映」を実行してください。"
     );
     // 本文が0件でも資料は直せる。待ちは残したいので、進んだことにする
     return true;

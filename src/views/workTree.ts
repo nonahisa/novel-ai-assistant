@@ -425,7 +425,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
           "この作品のためのメモです。",
           "話数・文字数・あらすじ・投稿・校正のどれにも入りません。",
           "",
-          "右クリックの「メモを追加」から増やせます。",
+          "右クリックの「メモ追加」から増やせます。",
         ].join("\n")
       );
       return item;

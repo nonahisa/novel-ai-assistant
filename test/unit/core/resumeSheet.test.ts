@@ -116,7 +116,7 @@ describe("再開の1枚（材料が揃っているとき）", () => {
     // 保存していないMarkdownは素のテキストで開くことがあり、
     // command: のリンクはそこで文字列のまま残る
     expect(sheet).not.toContain("command:");
-    expect(sheet).toContain("「単話プロットを作る」");
+    expect(sheet).toContain("「単話プロット作成」");
   });
 });
 
@@ -167,7 +167,7 @@ describe("材料が無いとき", () => {
     );
 
     expect(sheet).toContain(
-      "「単話プロットを作る」で 設定/episode-plots/第19話.md に雛形を作れます"
+      "「単話プロット作成」で 設定/episode-plots/第19話.md に雛形を作れます"
     );
   });
 

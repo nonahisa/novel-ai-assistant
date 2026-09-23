@@ -30,7 +30,8 @@ describe("執筆統計の画面の題", () => {
   test("全作品の画面は、メニューと同じ名前で開く", () => {
     const name = screenName("novelai.showAllWorksWritingStats");
 
-    expect(name).toBe("全作品の執筆統計");
+    // 2026-09-23 のメニューの組み直しで「全作品執筆統計」になった
+    expect(name).toBe("全作品執筆統計");
     // VS Code のタブの題と、画面の中の見出しの両方
     expect(allWorks.split(`"${name}"`).length - 1).toBe(2);
   });

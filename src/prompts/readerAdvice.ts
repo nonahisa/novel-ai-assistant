@@ -35,8 +35,11 @@ import { ADVICE_STATE_PROMPTS, ADVICE_TYPE_PROMPTS } from "./advicePolicy";
  * 出てくる話数と百分率は `core/readerAdviceValidation.ts` が照合する。
  *
  * プロンプトを変更したら version を上げること。
+ *
+ * 1.1（2026-09-23）：案内するメニュー名を「読者反応自動取込」へ直した
+ * （メニューの組み直し。旧「読者の反応を取り込む」）。
  */
-export const READER_ADVICE_VERSION = "1.0";
+export const READER_ADVICE_VERSION = "1.1";
 
 /**
  * 送るときの温度。数字の読み方に幅を持たせたいが、材料から離れてほしくない。
@@ -406,7 +409,7 @@ export function buildReaderReactionChatBlock(
   if (materials.length === 0) {
     return `${head}
 この作品には、話ごとの読者の反応の記録がまだありません。PVや離脱率の数字を推測で作らないでください。
-取り込むには、作品のメニューの「読者の反応を取り込む」を使います、と案内して構いません。
+取り込むには、作品のメニューの「読者反応自動取込」を使います、と案内して構いません。
 
 ${READER_ADVICE_GUIDELINES}`;
   }

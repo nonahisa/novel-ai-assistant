@@ -771,7 +771,7 @@ function bringInAdvice(style: WriterStyle): TutorialAdvice {
   if (style.situation === "posted") {
     steps.push({
       command: "novelai.importRuby",
-      label: "投稿サイトのルビを取り込む",
+      label: "投稿サイトルビ取込",
       why:
         "カクヨム・なろうの記法を、この拡張機能の書き方へ読み替えます。" +
         "件数を先に出すので、見てから決められます",
@@ -881,7 +881,7 @@ function keepWritingAdvice(style: WriterStyle): TutorialAdvice {
   }
   return {
     advice:
-      "まず「執筆を再開」から見てください。" +
+      "まず「執筆再開用資料生成」から見てください。" +
       "前の話がどこで終わったか、次に書くことの候補、" +
       "張ったままの伏線が1枚にまとまって出ます。" +
       "書き始める前に思い出す手間が、ここで済みます。",
@@ -971,7 +971,7 @@ function publishAdvice(style: WriterStyle): TutorialAdvice {
   if (style.outlet === "serial") {
     steps.push({
       command: "novelai.generateAnnouncement",
-      label: "更新告知文を作る",
+      label: "更新SNS告知文作成",
       why: "連載すると答えていただいたためです（AIを使います）",
     });
   }
@@ -1002,7 +1002,7 @@ function publishAdvice(style: WriterStyle): TutorialAdvice {
 function unstickAdvice(style: WriterStyle): TutorialAdvice {
   const talk: TutorialStep = {
     command: "novelai.openChatPanel",
-    label: "AIに相談",
+    label: "AI相談",
     why:
       "「何を書けばいいか分からない」を、そのまま書いて構いません。" +
       "診断で決めた言い方で応じます（9問に答えていれば、その言い分けも効きます）",
@@ -1041,7 +1041,7 @@ function unstickAdvice(style: WriterStyle): TutorialAdvice {
     },
     {
       command: "novelai.readManuscriptAloud",
-      label: "原稿を読み上げる",
+      label: "原稿読み上げ",
       why:
         "書く手が止まっているときは、読むほうが戻りやすいことがあります。" +
         "OSの声が読み、引っかかったところに付箋を置けます（AIも通信も使いません）",
@@ -1090,7 +1090,7 @@ function reviewAdvice(): TutorialAdvice {
     steps: [
       {
         command: "novelai.switchMode",
-        label: "作者／編集者の切り替え",
+        label: "作者／編集者切替",
         why: "見る側で使うと答えていただいたためです",
       },
       {

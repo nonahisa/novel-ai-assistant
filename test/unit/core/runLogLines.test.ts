@@ -404,17 +404,17 @@ describe("ひと通り仕上げるは、段ごとに記録へ残す", () => {
 
     const total = FINISH_STEPS.length;
     expect(logged.steps[0]).toBe(
-      `新作をひと通り仕上げる 開始 試しの作品 ${total}段`
+      `支援機能全工程実行 開始 試しの作品 ${total}段`
     );
     expect(
       logged.steps.some((line) =>
         line.startsWith(
-          `新作をひと通り仕上げる 1/${total} ${FINISH_STEPS[0].label} → できました`
+          `支援機能全工程実行 1/${total} ${FINISH_STEPS[0].label} → できました`
         )
       )
     ).toBe(true);
     expect(logged.steps.at(-1)).toBe(
-      `新作をひと通り仕上げる 終了 → できました ${total}段`
+      `支援機能全工程実行 終了 → できました ${total}段`
     );
     // **作品のログへ向けている**（向けないと出力パネルにしか残らない）
     expect(logged.targets).toContain(work.folderPath);
@@ -446,7 +446,7 @@ describe("ひと通り仕上げるは、段ごとに記録へ残す", () => {
     await runFinishNewWork(work, { remainingIn: () => 0 });
 
     expect(logged.steps).toContain(
-      `新作をひと通り仕上げる 1/${FINISH_STEPS.length} ${step.label} → ` +
+      `支援機能全工程実行 1/${FINISH_STEPS.length} ${step.label} → ` +
         "飛ばしました（設定資料がまだ無いため）"
     );
   });
@@ -463,7 +463,7 @@ describe("ひと通り仕上げるは、段ごとに記録へ残す", () => {
     await runFinishNewWork(work, { remainingIn: () => 0 });
 
     expect(logged.steps).toContain(
-      `新作をひと通り仕上げる 1/${FINISH_STEPS.length} ${step.label} → ` +
+      `支援機能全工程実行 1/${FINISH_STEPS.length} ${step.label} → ` +
         "失敗しました（AIへ接続できません）"
     );
   });
@@ -494,11 +494,11 @@ describe("校正のまとめ実行も、段ごとに記録へ残す", () => {
 
     await runSuite(["typos", "proofread"]);
 
-    expect(logged.steps[0]).toBe("校正をまとめて実行 開始 試しの作品 2段");
+    expect(logged.steps[0]).toBe("校正一括実行 開始 試しの作品 2段");
     expect(logged.steps).toContain(
-      `校正をまとめて実行 1/2 ${checks[0].label} → できました（指摘 3件）`
+      `校正一括実行 1/2 ${checks[0].label} → できました（指摘 3件）`
     );
-    expect(logged.steps.at(-1)).toBe("校正をまとめて実行 終了 → できました 2段");
+    expect(logged.steps.at(-1)).toBe("校正一括実行 終了 → できました 2段");
     expect(logged.targets).toContain(work.folderPath);
   });
 
@@ -510,7 +510,7 @@ describe("校正のまとめ実行も、段ごとに記録へ残す", () => {
 
     const line = logged.steps.find((entry) => entry.includes(" → 飛ばしました"));
     expect(line).toBe(
-      `校正をまとめて実行 1/1 ${checks[0].label} → 飛ばしました（プロットがまだ無いため）`
+      `校正一括実行 1/1 ${checks[0].label} → 飛ばしました（プロットがまだ無いため）`
     );
     // 出ないことの確認
     expect(line).not.toContain("できました");

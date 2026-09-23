@@ -55,10 +55,11 @@ interface PrerequisiteBase {
   /**
    * その操作を、案内の文の中で呼ぶときの名前。
    *
-   * **画面の名前をそのまま使えないことがある。** 設定資料の抽出は
-   * 小分類「資料抽出」の中にいるので、画面では「まとめて抽出」としか
-   * 出ていない。案内の文はその小分類の外で読まれるため、既にある
-   * ダイアログと同じ「設定資料をまとめて抽出」と呼ぶ。
+   * かつては画面の名前と分けていた（小分類「資料抽出」の中の
+   * 「まとめて抽出」を、案内では「設定資料をまとめて抽出」と呼んだ）。
+   * 2026-09-23 のメニューの組み直しで、メニュー・コマンドパレット・
+   * 案内の名前を1つに揃えた（「一括抽出」）。**案内だけ別の名前だと、
+   * 作者がメニューで探せない。**
    */
   readonly makeLabel: string;
 }
@@ -107,7 +108,10 @@ export const PREREQUISITES: Readonly<Record<Prerequisite, PrerequisiteInfo>> = {
     kind: "settings",
     label: "設定資料",
     makeCommand: "novelai.extractSettings",
-    makeLabel: "設定資料をまとめて抽出",
+    // メニューの名前と同じ「一括抽出」（2026-09-23 の組み直しで、
+    // コマンドパレットの名前も同じになった）。案内の文だけ別の名前だと、
+    // 作者がメニューで探せない
+    makeLabel: "一括抽出",
     // `checkContradictions.ts` の `collectSettings`：人物・場所・世界観が
     // どれも無いと、案内を出して `undefined` を返し、そこで終わる
     severity: "blocking",
@@ -126,7 +130,7 @@ export const PREREQUISITES: Readonly<Record<Prerequisite, PrerequisiteInfo>> = {
     kind: "plot",
     label: "プロット",
     makeCommand: "novelai.createPlot",
-    makeLabel: "プロットを作る",
+    makeLabel: "プロット自力作成",
     // `checkDeviations.ts` の `loadPlot`：プロットが無ければ案内を出して
     // `undefined` を返す
     severity: "blocking",
@@ -135,7 +139,7 @@ export const PREREQUISITES: Readonly<Record<Prerequisite, PrerequisiteInfo>> = {
     kind: "episodePlot",
     label: "単話プロット",
     makeCommand: "novelai.createEpisodePlot",
-    makeLabel: "単話プロットを作る",
+    makeLabel: "単話プロット作成",
     // `checkEpisodePlot.ts` の話選び：単話プロットが1つも無ければ
     // 「単話プロットがまだ1つもありません。」を出して終わる
     severity: "blocking",
@@ -204,16 +208,21 @@ export const ACTION_PREREQUISITES: Readonly<
   "novelai.generatePlot": { needs: ["synopsis"] },
   // 根拠は説明文の「先にプロットを書いておいてください」
   "novelai.checkDeviations": { needs: ["plot"] },
-  // 根拠は説明文の「先に『単話プロットを作る』で展開を書いて…」
+  // 根拠は説明文の「先に『単話プロット作成』で展開を書いて…」
   "novelai.checkEpisodePlot": { needs: ["episodePlot"] },
   "novelai.checkContradictions": {
-    // 根拠は説明文の「先に設定資料を抽出しておいてください」
+    // 根拠は説明文の「設定資料が無ければ、押す前に知らせて話どうしだけ
+    // 走らせる」（1つ目の道＝設定との照合が、設定資料を要る）
     needs: ["settings"],
     // **代わりの道が実際にある唯一の組**（設計書6.88）。「矛盾検知
-    // （事実の照合）」は、説明文に「設定資料が無くても実行できます」とある
+    // （事実の照合）」は、説明文に「設定資料が無くても使える」とある。
+    //
+    // 文言は作者の裁定 A7（2026-09-23）のとおり：設定資料が無ければ、
+    // 押す前に「設定との食い違いは見られない。話どうしの照合だけ走る」と
+    // 知らせる。関門（`features/prerequisiteGate.ts`）がこの一文を出す
     insteadOf: {
       command: "novelai.checkFactContradictions",
-      why: "設定資料が無くても、本文どうしの食い違いを見られます。",
+      why: "設定資料が無いので、設定との食い違いは見られません。話どうしの照合だけ走ります。",
     },
   },
 };

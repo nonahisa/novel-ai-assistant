@@ -369,7 +369,7 @@ describe("渡し終わったときの結末", () => {
     expect(notice.message).not.toContain("Collaborators");
     // 何が足りないのか・次に何をすればよいのかを書く
     expect(notice.message).toContain("gh");
-    expect(notice.message).toContain("編集部へ渡す");
+    expect(notice.message).toContain("編集部共有");
     expect(notice.actions).not.toContain("GitHubで開く");
   });
 

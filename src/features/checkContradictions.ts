@@ -297,6 +297,70 @@ export async function pickContradictionReadMode(): Promise<
   return picked.mode;
 }
 
+/**
+ * 矛盾検知で、何と何を突き合わせるか（作者の裁定 A7・計画 C1、2026-09-23）。
+ *
+ * - `both`：設定との照合（P-12）のあと、話どうしの照合（6.88）
+ * - `settings`：設定資料と本文の照合だけ
+ * - `facts`：本文から取り出した事実どうしの照合だけ
+ */
+export type ContradictionRoute = "both" | "settings" | "facts";
+
+/**
+ * 押したときに出す、突き合わせ方の選択肢。**先頭は両方**——入口を1つに
+ * まとめた目的が「どちらを押せばよいか作者に決めさせない」ことなので、
+ * 何も考えずに選べる位置に両方を置く。
+ *
+ * **確認が2回出ることを先に言う。** 両方はAIを2回に分けて呼び、それぞれ
+ * 走る前に処理量の確認が出る。時間と料金は2つの足し算になる。
+ */
+export const CONTRADICTION_ROUTE_CHOICES: ReadonlyArray<{
+  readonly route: ContradictionRoute;
+  readonly label: string;
+  readonly detail: string;
+}> = [
+  {
+    route: "both",
+    label: "両方（設定との照合 → 話どうしの照合）",
+    detail:
+      "AIを2回に分けて呼びます。時間と料金は2つの足し算で、それぞれ走る前に処理量の確認が出ます。",
+  },
+  {
+    route: "settings",
+    label: "設定との照合だけ",
+    detail: "設定資料と本文を突き合わせ、「設定ではこう／本文ではこう」を並べます。",
+  },
+  {
+    route: "facts",
+    label: "話どうしの照合だけ",
+    detail:
+      "本文から取り出した事実どうしを機械で突き合わせ、候補だけをAIが確かめます。設定資料は使いません。",
+  },
+];
+
+/** 突き合わせ方を訊く。取りやめたら undefined */
+export async function pickContradictionRoute(): Promise<
+  ContradictionRoute | undefined
+> {
+  const picked = await vscode.window.showQuickPick(
+    [
+      ...CONTRADICTION_ROUTE_CHOICES.map((choice) => ({
+        label: choice.label,
+        detail: choice.detail,
+        route: choice.route,
+      })),
+      cancelItem("取りやめる"),
+    ],
+    {
+      title: "矛盾検知：何と何を突き合わせるか",
+      placeHolder: "どれを走らせますか",
+      ignoreFocusOut: true,
+    }
+  );
+  if (!picked || !("route" in picked)) return undefined;
+  return picked.route;
+}
+
 export async function checkContradictions(
   work: WorkEntry,
   registry: AIRegistry,

@@ -113,7 +113,7 @@ describe("使い方の説明（目次と束）", () => {
     // 料金がかかることを答えられないと、案内として役に立たない
     const line = bundleText
       .split("\n")
-      .find((entry) => entry.includes("誤字脱字を検知"));
+      .find((entry) => entry.includes("誤字脱字検知"));
 
     expect(line).toContain("（AIを使う）");
   });
@@ -121,8 +121,9 @@ describe("使い方の説明（目次と束）", () => {
   test("AIを使わない操作には印を付けない", () => {
     const line = bundleText
       .split("\n")
-      .find((entry) => entry.includes("表記ゆれを検知"));
+      .find((entry) => entry.includes("表記ゆれ検知"));
 
+    expect(line).toBeDefined();
     expect(line).not.toContain("（AIを使う）");
   });
 
@@ -366,11 +367,12 @@ describe("説明の束", () => {
     操作のあいだである。どちらも作者が別の場面で使う——書いている最中と、
     投稿・出版の段——ので、詳細メニューの見た目としても筋が通る。
   */
-  test("「その他支援」は、原稿づくりと投稿・書き出しに割ってある", () => {
+  test("「その他支援」は、原稿整備と投稿・出力に割ってある", () => {
+    // 名前は 2026-09-23 に「執筆AI支援 → 原稿づくり／投稿・書き出し」から改名
     const labels = bundles.map((bundle) => bundle.label);
 
-    expect(labels).toContain("執筆AI支援 → 原稿づくり");
-    expect(labels).toContain("執筆AI支援 → 投稿・書き出し");
+    expect(labels).toContain("執筆支援 → 原稿整備");
+    expect(labels).toContain("執筆支援 → 投稿・出力");
     expect(labels.some((label) => label.includes("その他支援"))).toBe(false);
   });
 
@@ -400,8 +402,8 @@ describe("説明の束", () => {
   test("「校正・校閲」は、校正と伏線・矛盾に割ってある", () => {
     const labels = bundles.map((bundle) => bundle.label);
 
-    expect(labels).toContain("執筆AI支援 → 校正");
-    expect(labels).toContain("執筆AI支援 → 伏線・矛盾");
+    expect(labels).toContain("執筆支援 → 校正");
+    expect(labels).toContain("執筆支援 → 伏線・矛盾");
     expect(labels.some((label) => label.includes("校正・校閲"))).toBe(false);
   });
 
@@ -409,22 +411,22 @@ describe("説明の束", () => {
     const find = (label: string) =>
       bundles.find((bundle) => bundle.label === label)?.text ?? "";
 
-    const proofread = find("執筆AI支援 → 校正");
-    const consistency = find("執筆AI支援 → 伏線・矛盾");
+    const proofread = find("執筆支援 → 校正");
+    const consistency = find("執筆支援 → 伏線・矛盾");
 
     // 文の直し
-    expect(proofread).toContain("誤字脱字を検知");
-    expect(proofread).toContain("表記ゆれを検知");
+    expect(proofread).toContain("誤字脱字検知");
+    expect(proofread).toContain("表記ゆれ検知");
     expect(proofread).toContain("推敲");
     // 表に載せていない操作は、割る前と同じ側（校正）に残る
-    expect(proofread).toContain("編集部からの提案");
+    expect(proofread).toContain("期限切れ指摘消去");
 
     // 話の整合
-    expect(consistency).toContain("矛盾を検知");
-    expect(consistency).toContain("プロットからの逸脱");
-    expect(consistency).toContain("伏線を検知");
-    expect(consistency).toContain("伏線の回収を確かめる");
-    expect(consistency).toContain("単話プロットを検査");
+    expect(consistency).toContain("矛盾検知");
+    expect(consistency).toContain("プロット逸脱検知");
+    expect(consistency).toContain("伏線検知");
+    expect(consistency).toContain("伏線回収確認");
+    expect(consistency).toContain("単話プロット検査");
   });
 
   test("割った2つの束は、どちらも1,100字未満（足す余地を残す）", () => {
@@ -526,9 +528,9 @@ describe("相談1回ぶんの組み立て", () => {
     });
 
     // 束は「校正」と「伏線・矛盾」に割ってある（0.33.10）。誤字脱字は前者
-    expect(built.selected).toContain("執筆AI支援 → 校正");
+    expect(built.selected).toContain("執筆支援 → 校正");
     // 目次は落とさない。説明のある操作だけが全部だと読まれては困る
-    expect(built.text).toContain("表記ゆれを検知");
+    expect(built.text).toContain("表記ゆれ検知");
   });
 
   /*
@@ -551,7 +553,7 @@ describe("相談1回ぶんの組み立て", () => {
       question: "縦書きで原稿を開きたい",
     });
 
-    expect(built.selected[0]).toBe("執筆AI支援 → 原稿づくり");
+    expect(built.selected[0]).toBe("執筆支援 → 原稿整備");
   });
 
   test("投稿の質問では、投稿・書き出しだけが選ばれる", () => {
@@ -559,8 +561,8 @@ describe("相談1回ぶんの組み立て", () => {
       question: "新話を投稿するにはどうしますか",
     });
 
-    expect(built.selected).toContain("執筆AI支援 → 投稿・書き出し");
-    expect(built.selected).not.toContain("執筆AI支援 → 原稿づくり");
+    expect(built.selected).toContain("執筆支援 → 投稿・出力");
+    expect(built.selected).not.toContain("執筆支援 → 原稿整備");
   });
 });
 

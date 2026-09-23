@@ -96,7 +96,7 @@ export async function collectUnregisteredWorks(
     // 「ありません」で片付けると、作者は探し方が悪いのだと思ってしまう
     await vscode.window.showInformationMessage(
       "まだ作品が登録されていないため、書庫の場所が分かりません。" +
-        "「フォルダから追加」で1作品を登録すると、次からは書庫の中を探せます。"
+        "「フォルダー登録」で1作品を登録すると、次からは書庫の中を探せます。"
     );
     return;
   }

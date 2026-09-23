@@ -255,7 +255,8 @@ describe("簡単ステップメニューの構成", () => {
     expect(sections).toEqual([
       "3. 作品執筆/執筆の場",
       "3. 作品執筆/資料生成",
-      "3. 作品執筆/入力を楽に",
+      // 2026-09-23 に「入力を楽に」から改名
+      "3. 作品執筆/入力補助",
     ]);
   });
 
@@ -544,8 +545,19 @@ describe("準備中の項目", () => {
       memoryWorkStore()
     );
 
-    expect(stepPlaceholders().length).toBeGreaterThan(0);
-    for (const placeholder of stepPlaceholders()) {
+    // 2026-09-23 に最後の枠（WEB投稿支援）を実物へ置き換えたので、いまは
+    // 枠が1つも無い。**枠の仕組みは残す**——次に予定を置くときの形なので、
+    // 作り物の枠で、押しても何も起きないことを確かめる
+    const samples = [
+      ...stepPlaceholders(),
+      {
+        kind: "placeholder" as const,
+        label: "ためしの枠（準備中）",
+        icon: "globe",
+        detail: "ためしの説明",
+      },
+    ];
+    for (const placeholder of samples) {
       const item = provider.getTreeItem({
         type: "placeholder",
         placeholder,
@@ -557,12 +569,20 @@ describe("準備中の項目", () => {
     }
   });
 
-  test("いま何で代われるかまで書く", () => {
-    const posting = stepPlaceholders().find((entry) =>
-      entry.label.includes("WEB投稿支援")
-    );
+  /**
+   * 「WEB投稿支援（準備中）」を実物に置き換えた（作者の裁定、2026-09-23
+   * 問14 A）。予定していた「ブラウザで投稿を助ける」は、新話投稿と
+   * 読者反応自動取込が別の道からでき上がっていた。
+   */
+  test("5段には、枠の代わりに新話投稿と読者反応自動取込が並ぶ", () => {
+    const step5 = STEP_MENU.find((step) => step.label === "5. 投稿脱稿");
+    const ids = commandsOf(step5);
 
-    expect(posting?.detail).toContain("投稿サイト用に変換してコピー");
+    expect(ids).toContain("novelai.postNewEpisode");
+    expect(ids).toContain("novelai.importReaderStats");
+    expect(ids.indexOf("novelai.importReaderStats")).toBe(
+      ids.indexOf("novelai.postNewEpisode") + 1
+    );
   });
 
   test("実装できたものは、枠を外して実物に置き換える", () => {
@@ -572,7 +592,7 @@ describe("準備中の項目", () => {
     expect(
       stepPlaceholders().map((entry) => entry.label),
       "実装済みの枠が残っている"
-    ).toEqual(["WEB投稿支援（準備中）"]);
+    ).toEqual([]);
   });
 });
 
@@ -862,21 +882,18 @@ describe("ステップ4の伏線の入口（実機確認 F-29）", () => {
     expect(commandsOf(step4)).toContain("novelai.addForeshadow");
   });
 
-  test("**伏線の3つが、検知 → 一覧 → 手で追加 → 状態の順で並ぶ**", () => {
-    // 並びが崩れると、作者は「足す」より先に「状態を変える」を踏む
-    const ids = commandsOf(step4);
-    const at = (id: string) => ids.indexOf(id);
+  test("**伏線の5つが、検知 → 手動追加 → 状態変更 → 回収確認 → 一覧の順で並ぶ**", () => {
+    // 作者の裁定（2026-09-23）。詳細メニューの「校正・校閲」と同じ順。
+    // 見つける・足す・決め直すを先に置き、確かめる・眺めるを後ろへ回す
+    const ids = commandsOf(step4).filter((id) => /Foreshadow/.test(id));
 
-    expect(at("novelai.checkForeshadows")).toBeGreaterThan(-1);
-    expect(at("novelai.openForeshadows")).toBeGreaterThan(
-      at("novelai.checkForeshadows")
-    );
-    expect(at("novelai.addForeshadow")).toBeGreaterThan(
-      at("novelai.openForeshadows")
-    );
-    expect(at("novelai.setForeshadowStatus")).toBeGreaterThan(
-      at("novelai.addForeshadow")
-    );
+    expect(ids).toEqual([
+      "novelai.checkForeshadows",
+      "novelai.addForeshadow",
+      "novelai.setForeshadowStatus",
+      "novelai.checkForeshadowResolution",
+      "novelai.openForeshadows",
+    ]);
   });
 });
 

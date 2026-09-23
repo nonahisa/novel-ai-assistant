@@ -496,7 +496,7 @@ describe("読者の反応の封筒", () => {
       );
       expect(result.ok, site).toBe(false);
       if (result.ok) continue;
-      expect(result.reason).toContain("手入力");
+      expect(result.reason).toContain("読者反応手動入力");
     }
   });
 

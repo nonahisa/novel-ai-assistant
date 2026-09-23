@@ -119,7 +119,7 @@ describe("novel.propose——既存人物への更新案", () => {
     expect(result.characterId).toBe("char_0001");
     expect(result.changedFields).toEqual(["summary"]);
     expect(result.file).toBe(".aiwriter/pending-characters/char_0001.json");
-    expect(result.nextStep).toContain("更新分を反映");
+    expect(result.nextStep).toContain("設定資料更新分反映");
     expect(result.note).toContain("台帳");
 
     const payload = readPending(folder, "char_0001.json") as Record<

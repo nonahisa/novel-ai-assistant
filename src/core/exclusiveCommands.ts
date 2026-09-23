@@ -33,48 +33,48 @@ export interface ExclusiveCommand {
 
 export const EXCLUSIVE_COMMANDS: readonly ExclusiveCommand[] = [
   // 同期の系。同じ置き場へ同じ git の操作を2本走らせない
-  { id: "novelai.syncAllWorks", label: "作品をすべて同期" },
-  // 保存して同期は、中で「作品をすべて同期」を回す（設計書6.15.1）。
+  { id: "novelai.syncAllWorks", label: "全作品同期" },
+  // 保存・同期は、中で「全作品同期」を回す（設計書6.15.1）。
   // 2本走れば同じ置き場へ git を2本走らせることになる
-  { id: "novelai.saveAndSync", label: "保存して同期" },
+  { id: "novelai.saveAndSync", label: "保存・同期" },
   { id: "novelai.gitSync", label: "GitHubと同期" },
   { id: "novelai.resolveConflicts", label: "競合解決" },
-  { id: "novelai.resolveDivergence", label: "分かれた分を合わせる" },
+  { id: "novelai.resolveDivergence", label: "分岐合流" },
 
   // AIを長く回す系。2回ぶん送れば2回ぶん待ち、クラウドAIなら2回ぶん課金される
-  { id: "novelai.checkTypos", label: "誤字脱字を検知" },
-  { id: "novelai.checkNotation", label: "表記ゆれを検知" },
+  { id: "novelai.checkTypos", label: "誤字脱字検知" },
+  { id: "novelai.checkNotation", label: "表記ゆれ検知" },
   { id: "novelai.checkProofread", label: "推敲" },
-  { id: "novelai.checkContradictions", label: "矛盾を検知" },
+  { id: "novelai.checkContradictions", label: "矛盾検知" },
   { id: "novelai.checkFactContradictions", label: "矛盾検知（事実の照合）" },
-  { id: "novelai.checkDeviations", label: "プロットからの逸脱" },
-  { id: "novelai.checkForeshadows", label: "伏線を検知" },
-  { id: "novelai.checkForeshadowResolution", label: "伏線の回収を確かめる" },
-  { id: "novelai.checkEpisodePlot", label: "単話プロットを検査" },
-  { id: "novelai.checkOpening", label: "冒頭を診断" },
+  { id: "novelai.checkDeviations", label: "プロット逸脱検知" },
+  { id: "novelai.checkForeshadows", label: "伏線検知" },
+  { id: "novelai.checkForeshadowResolution", label: "伏線回収確認" },
+  { id: "novelai.checkEpisodePlot", label: "単話プロット検査" },
+  { id: "novelai.checkOpening", label: "冒頭診断" },
   // 指示の `novelai.extractCharacters` は実在しない。人物の抽出は
   // 種別ごとに分かれており（6.17.2）、その人物のぶんがこれである
-  { id: "novelai.extractCharactersOnly", label: "人物を抽出" },
-  { id: "novelai.extractLocationsOnly", label: "場所を抽出" },
-  { id: "novelai.extractAbilitiesOnly", label: "能力を抽出" },
-  { id: "novelai.extractOrganizationsOnly", label: "組織を抽出" },
-  { id: "novelai.extractWorldOnly", label: "世界観を抽出" },
-  { id: "novelai.extractSettings", label: "設定資料をまとめて抽出" },
-  { id: "novelai.runProofreadingSuite", label: "校正をまとめて実行" },
+  { id: "novelai.extractCharactersOnly", label: "人物抽出" },
+  { id: "novelai.extractLocationsOnly", label: "場所抽出" },
+  { id: "novelai.extractAbilitiesOnly", label: "スキル抽出" },
+  { id: "novelai.extractOrganizationsOnly", label: "組織抽出" },
+  { id: "novelai.extractWorldOnly", label: "世界観抽出" },
+  { id: "novelai.extractSettings", label: "一括抽出" },
+  { id: "novelai.runProofreadingSuite", label: "校正一括実行" },
   { id: "novelai.generateSynopses", label: "各話あらすじ" },
-  { id: "novelai.proposeChapters", label: "章立てを提案させる" },
+  { id: "novelai.proposeChapters", label: "章立て提案" },
   { id: "novelai.measureContext", label: "AIチューニング" },
 
   // 本文をまとめて書き換える系。同じファイルを2本が同時に書きに行く
-  { id: "novelai.unifyEol", label: "改行コードを揃える" },
-  { id: "novelai.applyPendingUpdates", label: "更新分を反映" },
-  { id: "novelai.unifyCharacters", label: "重複をまとめる" },
+  { id: "novelai.unifyEol", label: "改行コード統一" },
+  { id: "novelai.applyPendingUpdates", label: "設定資料更新分反映" },
+  { id: "novelai.unifyCharacters", label: "人物重複統合" },
 
   // 取り寄せ・下ごしらえ。同じ場所へ2本が同時に入れに行く
   { id: "novelai.addWorkFromGithub", label: "GitHubから作品を追加" },
   { id: "novelai.runFullSetup", label: "セットアップ" },
-  { id: "novelai.setupOllama", label: "Ollamaの導入" },
-  { id: "novelai.setupLmStudio", label: "LM Studioの導入" },
+  { id: "novelai.setupOllama", label: "Ollama導入" },
+  { id: "novelai.setupLmStudio", label: "LM Studio導入" },
   /*
     **意味検索の準備（`novelai.setupVectorSearch`）は、ここへ入れない。**
 
@@ -86,7 +86,7 @@ export const EXCLUSIVE_COMMANDS: readonly ExclusiveCommand[] = [
 
     重いのは索引づくりのほうで、そちらは下で塞いである。
   */
-  { id: "novelai.buildVectorIndex", label: "検索用の索引を作る・更新する" },
+  { id: "novelai.buildVectorIndex", label: "検索索引作成／更新" },
 ];
 
 /** 引き当て用の索引。一覧は固定なので、読み込み時に一度だけ組む */

@@ -15,6 +15,12 @@ import { compareAuthorReader } from "../core/authorReaderGap";
 import { READER_TYPES, resolveReaderType } from "../core/readerTarget";
 import { ReaderTargetStore } from "../core/readerTargetStore";
 import { cancelItem, isCancelItem } from "../views/dialogs";
+import {
+  orderWithShared,
+  sharedForReader,
+  type SharedAnswer,
+} from "../core/sharedDiagnosisQuestion";
+import { describeChoiceMarks } from "./advicePolicyDiagnosis";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 
 /**
@@ -40,7 +46,12 @@ import { logFailure, logStep, useLogFile } from "../core/logger";
 
 export async function setAuthorReaderType(
   store: AuthorReaderTypeStore,
-  work?: WorkEntry
+  work?: WorkEntry,
+  /**
+   * 助言の受け方（6.86）の記録（似た1問の答えを写すため。作者の裁定、
+   * 2026-09-23）。渡されなければ写さない
+   */
+  advice?: { answers?: readonly number[]; updatedAt: string }
 ): Promise<void> {
   // **作品が分かるときは、その作品のログへ向ける。** 分からないときは
   // 出力チャンネルに残る——ここで答えるのは作者ごとの答えなので、
@@ -53,7 +64,7 @@ export async function setAuthorReaderType(
     const action = await chooseAction(existing);
     if (!action) return;
     if (action === "show") {
-      await showResult(existing, "いまの読者タイプ", work);
+      await showAuthorReaderResult(existing, "いまの読者タイプ", work);
       return;
     }
     if (action === "clear") {
@@ -62,7 +73,10 @@ export async function setAuthorReaderType(
     }
   }
 
-  const answers = await askAuthorReaderQuestions(existing?.answers);
+  const answers = await askAuthorReaderQuestions(
+    existing?.answers,
+    sharedForReader(advice, existing)
+  );
   if (!answers) return;
 
   const profile = authorReaderProfileFromAnswers(
@@ -73,7 +87,7 @@ export async function setAuthorReaderType(
   await store.set(profile);
   logStep(`自分の読者タイプ: ${authorReaderTypeLabel(profile)}`);
 
-  await showResult(profile, "あなた自身の読者タイプ", work, existing);
+  await showAuthorReaderResult(profile, "あなた自身の読者タイプ", work, existing);
 }
 
 type TypeAction = "redo" | "show" | "clear";
@@ -125,20 +139,30 @@ async function chooseAction(
  * 次に開いたときに「前回の答え」として半端な値が出てくる。
  */
 export async function askAuthorReaderQuestions(
-  previous?: number[]
+  previous?: number[],
+  /**
+   * 「助言の受け方」で答えた似た1問（`core/sharedDiagnosisQuestion.ts`）。
+   * その問いでは、写した答えを選んだ状態（いちばん上）で出す
+   */
+  shared?: SharedAnswer
 ): Promise<number[] | undefined> {
   const answers: number[] = [];
 
   for (const [index, question] of AUTHOR_READER_QUESTIONS.entries()) {
     const before = previous?.[index];
+    const sharedChoice = shared?.index === index ? shared.choice : undefined;
     const picked = await vscode.window.showQuickPick(
       [
-        ...question.choices.map((choice, choiceIndex) => ({
-          label: choice.label,
-          description:
-            choiceIndex === before ? "$(check) 前回の答え" : undefined,
-          value: choiceIndex,
-        })),
+        ...orderWithShared(question.choices.length, sharedChoice).map(
+          (choiceIndex) => ({
+            label: question.choices[choiceIndex].label,
+            description: describeChoiceMarks(
+              choiceIndex === before,
+              choiceIndex === sharedChoice ? shared?.from : undefined
+            ),
+            value: choiceIndex,
+          })
+        ),
         cancelItem("診断をやめる"),
       ],
       {
@@ -185,8 +209,11 @@ async function clearType(store: AuthorReaderTypeStore): Promise<void> {
  *
  * 作品が分かるときは、その作品のターゲット読者との突き合わせも添える。
  * **材料が無ければ何も足さない**（推測で埋めない）。
+ *
+ * 作家タイプ診断の「読者としての好み」からも呼ぶので外へ出してある
+ * （`writerDiagnosis.ts`）。写しを作ると、見せ方が2か所に分かれる。
  */
-async function showResult(
+export async function showAuthorReaderResult(
   profile: AuthorReaderProfile,
   title: string,
   work?: WorkEntry,

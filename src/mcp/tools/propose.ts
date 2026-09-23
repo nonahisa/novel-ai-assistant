@@ -190,7 +190,7 @@ export function settingsPropose(
   if (fs.existsSync(target)) {
     throw new McpToolError(
       `${name} には、作者がまだ判断していない案があります（${relativeTo(input.folder, target)}）。` +
-        "上書きすると作者が見る前の案が消えるので、置きませんでした。作者が「更新分を反映」で採否を決めてから、もう一度提案してください。"
+        "上書きすると作者が見る前の案が消えるので、置きませんでした。作者が「設定資料更新分反映」で採否を決めてから、もう一度提案してください。"
     );
   }
 
@@ -222,7 +222,7 @@ export function settingsPropose(
     name: validated.name,
     changedFields,
     nextStep:
-      "VS Code の詳細メニュー「更新分を反映」で採否を決めます。作者が採るまで反映されません。",
+      "VS Code の詳細メニュー「設定資料更新分反映」で採否を決めます。作者が採るまで反映されません。",
     note: "台帳（設定/characters）は書き換えていません。",
   };
 }

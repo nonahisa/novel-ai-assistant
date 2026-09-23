@@ -281,6 +281,6 @@ describe("対話でプロットを作る（入口の分岐）", () => {
     expect(last.run).toBe("createPlot");
     expect(last.text).toContain("氷の街");
     expect(last.text).toContain("プロットがありません");
-    expect(last.text).toContain("プロットを作る");
+    expect(last.text).toContain("プロット自力作成");
   });
 });

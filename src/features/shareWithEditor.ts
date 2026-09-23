@@ -507,14 +507,14 @@ export function shareNoticeFor(
         message:
           `「${workTitle}」の編集用フォルダーは用意しました。` +
           "GitHubへ送るには `gh`（GitHub CLI）が要ります。" +
-          "入れてから「編集部へ渡す」をもう一度押してください。",
+          "入れてから「編集部共有」をもう一度押してください。",
         actions: ["閉じる"],
       };
     case "cancelled":
       return {
         message:
           `「${workTitle}」の編集用フォルダーは用意しました。` +
-          "あとから「編集部へ渡す」で送れます。",
+          "あとから「編集部共有」で送れます。",
         actions: ["閉じる"],
       };
   }
@@ -573,7 +573,7 @@ export async function collectEditorProposals(work: WorkEntry): Promise<void> {
   if (!pointer || !(await exists(pointer.folderPath))) {
     void vscode.window.showInformationMessage(
       `「${work.title}」はまだ編集部へ渡していません。` +
-        "先に「編集部へ渡す」を実行してください。"
+        "先に「編集部共有」を実行してください。"
     );
     return;
   }

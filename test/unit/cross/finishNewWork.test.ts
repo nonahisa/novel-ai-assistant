@@ -342,7 +342,7 @@ describe("先に出す確認", () => {
     });
 
     expect(confirm?.detail).toContain(
-      "飛ばす段：設定資料をまとめて抽出（設定資料が既にあるため）"
+      "飛ばす段：一括抽出（設定資料が既にあるため）"
     );
     expect(confirm?.message).toBe(
       "試しの作品 を、ひと通り仕上げます（12段）。"
@@ -389,7 +389,7 @@ describe("結果の1枚", () => {
     const report = describeFinishReport({
       workTitle: "試しの作品",
       done: [
-        { label: "設定資料をまとめて抽出", skipped: true, reason: "設定資料が既にあるため" },
+        { label: "一括抽出", skipped: true, reason: "設定資料が既にあるため" },
         { label: "各話あらすじを生成" },
         { label: "誤字脱字", count: 12 },
         { label: "推敲", failed: true },
@@ -400,7 +400,7 @@ describe("結果の1枚", () => {
 
     expect(report).toContain("# ひと通り仕上げました：試しの作品");
     expect(report).toContain(
-      "| 設定資料をまとめて抽出 | 飛ばしました（設定資料が既にあるため） |"
+      "| 一括抽出 | 飛ばしました（設定資料が既にあるため） |"
     );
     expect(report).toContain("| 各話あらすじを生成 | できました |");
     expect(report).toContain("| 誤字脱字 | できました（指摘 12件） |");
@@ -509,7 +509,7 @@ describe("入口を1回通す", () => {
 
     expect(state.executed).not.toContain("novelai.extractSettings");
     expect(state.report).toContain(
-      "| 設定資料をまとめて抽出 | 飛ばしました（設定資料が既にあるため） |"
+      "| 一括抽出 | 飛ばしました（設定資料が既にあるため） |"
     );
   });
 
@@ -551,7 +551,7 @@ describe("入口を1回通す", () => {
     ]);
     // 止めたところから先は、紙の上でも「走らせていません」と分かる
     expect(state.report).toContain(
-      "| 本文からプロットを逆算 | 走らせていません（途中で中止したため） |"
+      "| プロット逆算 | 走らせていません（途中で中止したため） |"
     );
   });
 

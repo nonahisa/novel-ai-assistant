@@ -87,23 +87,29 @@ describe("押す場所を引けること", () => {
 
   test("簡単ステップメニューに無い操作は、詳細メニューのほうで引ける", () => {
     /*
-      「投稿の準備をする」の最後の段（新話を投稿する）は、**簡単ステップ
-      メニューには置いていない**（設計書6.104）。片方に無いことを知らずに
-      片方だけ探すと、**光らせる場所が無いまま案内が進む**——作者から見ると
-      「案内しますと言ったのに、どこも光らない」になる。
+      片方のメニューにしか無い操作がある（設計書6.104）。片方に無いことを
+      知らずに片方だけ探すと、**光らせる場所が無いまま案内が進む**——作者から
+      見ると「案内しますと言ったのに、どこも光らない」になる。
+
+      以前は「新話を投稿」がその例だったが、2026-09-23 に簡単ステップ
+      メニューの「5. 投稿脱稿」へ入った（作者の裁定 問14 A）。いまの例は
+      「ランキング記録」（詳細メニューの「投稿・出力」にだけある）。
 
       上の総当たりは「どちらかで引ける」しか見ていないので、**どちらで
       引けるのか**をここで名指しにしておく。
     */
     const { actions, steps } = providers();
     expect(
-      steps.findActionNode("novelai.postNewEpisode"),
+      steps.findActionNode("novelai.recordRanking"),
       "簡単ステップメニューに入った（この前提が変わった）"
     ).toBeUndefined();
     expect(
-      actions.findActionNode("novelai.postNewEpisode"),
+      actions.findActionNode("novelai.recordRanking"),
       "詳細メニューからも引けない（案内が行き止まる）"
     ).toBeDefined();
+    // 新話投稿は、いまは両方で引ける
+    expect(steps.findActionNode("novelai.postNewEpisode")).toBeDefined();
+    expect(actions.findActionNode("novelai.postNewEpisode")).toBeDefined();
   });
 });
 

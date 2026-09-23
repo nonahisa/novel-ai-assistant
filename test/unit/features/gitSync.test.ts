@@ -506,7 +506,7 @@ describe("分かれている作品の印", () => {
  * **どれか1つでも欠けると、分岐したときの行き止まりが戻ってくる。**
  * 階層をたどって実際に押せることは実機に残る。
  */
-describe("「分かれた分を合わせる」の入口", () => {
+describe("「分岐合流」（旧「分かれた分を合わせる」）の入口", () => {
   test("詳細メニューの「GitHubで作品管理」に並ぶ（実機確認リスト A-17 の代わり）", () => {
     const group = ACTION_TREE.find((one) => one.label === "作品管理");
     const section = group?.entries.find(
@@ -519,7 +519,7 @@ describe("「分かれた分を合わせる」の入口", () => {
     const item = section.items.find(
       (one) => one.command === "novelai.resolveDivergence"
     );
-    expect(item?.label).toBe("分かれた分を合わせる");
+    expect(item?.label).toBe("分岐合流");
     // 作品を選ばなくても押せる（分岐したかどうかを、こちらで調べる）
     expect(item?.requiresWork).toBe(false);
   });

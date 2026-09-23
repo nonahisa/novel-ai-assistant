@@ -1147,7 +1147,7 @@ export class SettingsPanel {
     if (!relationGraphOpener) {
       void vscode.window.showInformationMessage(
         "人物相関図を開けませんでした。詳細メニューの" +
-          "「資料管理 → 設定資料閲覧 → 人物相関図」からお試しください。"
+          "「資料管理 → 資料閲覧 → 人物相関図」からお試しください。"
       );
       return;
     }

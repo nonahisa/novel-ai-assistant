@@ -43,7 +43,7 @@ export async function setSeries(work: WorkEntry): Promise<boolean> {
         modal: true,
         detail:
           "つなげられるのは、同じフォルダーに並んでいる作品だけです。" +
-          "「作品を書庫にまとめる」で1つのフォルダーへ寄せてから、" +
+          "「書庫集約」で1つのフォルダーへ寄せてから、" +
           "もう一度お試しください。",
       }
     );

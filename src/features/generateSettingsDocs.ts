@@ -38,7 +38,7 @@ import { whenNoticePicked } from "../views/notify";
 
 /** 生成物である印。既にあるファイルを上書きしてよいかの判断に使う */
 export const GENERATED_MARKER =
-  "このファイルは「設定資料集を出力」で自動生成されます。";
+  "このファイルは「設定資料集出力」で自動生成されます。";
 
 const GENERATED_NOTICE =
   `<!-- ${GENERATED_MARKER}\n` +
@@ -423,7 +423,7 @@ async function openGeneratedDoc(
     await vscode.workspace.fs.stat(uri);
   } catch {
     vscode.window.showWarningMessage(
-      `${target} が見つかりませんでした。もう一度「設定資料集を出力」をお試しください。`
+      `${target} が見つかりませんでした。もう一度「設定資料集出力」をお試しください。`
     );
     return;
   }

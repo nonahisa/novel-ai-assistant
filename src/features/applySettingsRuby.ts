@@ -62,11 +62,11 @@ async function pickScope(
         modal: true,
         detail:
           "ルビはMarkdown（.md）でしか使えません。\n" +
-          "「本文を .md にする」で変換してから、もう一度お試しください。",
+          "「本文 .md 化」で変換してから、もう一度お試しください。",
       },
-      "本文を .md にする"
+      "本文 .md 化"
     );
-    if (answer === "本文を .md にする") {
+    if (answer === "本文 .md 化") {
       // この作品の .txt を変える話をしている。引数無しだと作品選択へ戻す
       await vscode.commands.executeCommand("novelai.convertToMarkdown", {
         type: "work",

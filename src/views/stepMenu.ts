@@ -105,8 +105,9 @@ const STEP_DEFS: readonly StepDef[] = [
       "・別のPCで書いている作品",
     /*
       **作品の入口を、ここへ寄せる**（設計書6.97.4）。詳細メニューの
-      「新しく書き始める／すでにある原稿を入れる／別の環境から取り寄せる」と
-      同じ5つを、同じ順で並べる。
+      「新規執筆開始／既存原稿登録／クラウド取得」（2026-09-23 に改名）と
+      同じ5つを並べる（既存原稿登録の「未登録作品検索」「Word 原稿変換」は
+      ステップには置かない）。
 
       新規作成の2つは、以前は「2. 新作構想」と「3. 作品執筆」に散っていた。
       だが**作品を作るのは登録そのもの**であり、構想を練る前・書き始める前に
@@ -154,7 +155,7 @@ const STEP_DEFS: readonly StepDef[] = [
       "本文を書き進める段階\n\n" +
       "・執筆の場\n\n" +
       "・資料生成\n\n" +
-      "・入力を楽に",
+      "・入力補助",
     entries: [
       {
         kind: "section",
@@ -197,14 +198,13 @@ const STEP_DEFS: readonly StepDef[] = [
       },
       {
         kind: "section",
-        label: "入力を楽に",
+        // 名前は「入力補助」（作者の裁定、2026-09-23。旧「入力を楽に」）
+        label: "入力補助",
         icon: "symbol-keyword",
-        commands: [
-          "novelai.convertToMarkdown",
-          "novelai.addRuby",
-          "novelai.addEmphasis",
-          "novelai.exportImeDictionary",
-        ],
+        // **ルビ付与・傍点付与は置かない**（作者の裁定、2026-09-23 問8 A）。
+        // 原稿エディターの上のバーと右クリックに同じ道があり、「不要」との
+        // 書き込みは詳細メニューだけでなくここにも当たる
+        commands: ["novelai.convertToMarkdown", "novelai.exportImeDictionary"],
       },
     ],
   },
@@ -227,17 +227,22 @@ const STEP_DEFS: readonly StepDef[] = [
       "novelai.checkProofread",
       "novelai.checkOpening",
       "novelai.checkDeviations",
+      // 矛盾検知は入口1つ（設定との照合と話どうしの照合を、押してから選ぶ。
+      // 作者の裁定、2026-09-23）
       "novelai.checkContradictions",
       // 伏線は矛盾の次に置く。矛盾検知の指摘から
       // 「伏線として登録」で飛んでくるため（設計書6.35.4）
-      "novelai.checkForeshadows",
-      "novelai.checkForeshadowResolution",
-      "novelai.openForeshadows",
-      // **手で足す入口も置く**（作者の裁定、2026-09-12）。伏線は検知で拾うより
+      //
+      // **並びは詳細メニューと同じ**（作者の裁定、2026-09-23）：
+      // 検知 → 手動追加 → 状態変更 → 回収確認 → 一覧。
+      // 手で足す入口は2026-09-12 の裁定で置いた——伏線は検知で拾うより
       // 書いた本人が「これは伏線」と足すのが入口として自然で、詳細メニューにしか
       // 無いと、ステップから入った人には「登録は AI 任せ」に見える
+      "novelai.checkForeshadows",
       "novelai.addForeshadow",
       "novelai.setForeshadowStatus",
+      "novelai.checkForeshadowResolution",
+      "novelai.openForeshadows",
     ],
   },
   {
@@ -254,14 +259,15 @@ const STEP_DEFS: readonly StepDef[] = [
       "novelai.openSynopsisDocs",
       "novelai.copyForPosting",
       "novelai.shareWithEditor",
-      {
-        kind: "placeholder",
-        label: "WEB投稿支援（準備中）",
-        icon: "globe",
-        detail:
-          "ブラウザ内蔵の投稿支援（予定）\n\n" +
-          "・いまは「投稿サイト用に変換してコピー」で各サイトへ貼り付け",
-      },
+      /*
+        **「WEB投稿支援（準備中）」の枠を、実物に置き換えた**（作者の裁定、
+        2026-09-23 問14 A）。予定していた「ブラウザで投稿を助ける」は、
+        新話投稿（変換→コピー→投稿ページ→記録の案内。ヘルパーへ渡す形でも
+        コピーできる）と、ヘルパーが読んだ数字の取り込みで、別の道から
+        でき上がっていた。
+      */
+      "novelai.postNewEpisode",
+      "novelai.importReaderStats",
     ],
   },
   {
@@ -467,8 +473,11 @@ export const STEP_WORK_COMMAND = "novelai.chooseStepWork";
 export const STEP_NO_WORK_LABEL = "未登録";
 export const STEP_NO_WORK_HINT = "作品登録（ステップ1）から";
 
-/** 作品は登録されているが、まだ選んでいないときの、最上段の表示 */
-export const STEP_CHOOSE_WORK_LABEL = "作品を選ぶ";
+/**
+ * 作品は登録されているが、まだ選んでいないときの、最上段の表示。
+ * 名前は「作品選択」（作者の裁定、2026-09-23。旧「作品を選ぶ」）
+ */
+export const STEP_CHOOSE_WORK_LABEL = "作品選択";
 
 /**
  * 作品を選んでいないために押せないときの理由。

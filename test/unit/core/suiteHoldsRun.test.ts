@@ -32,7 +32,7 @@ describe("札は、まとめ実行が丸ごと持つ", () => {
   test("**まとめ実行が札を取る**", () => {
     const source = read("features/proofreadingSuite.ts");
     expect(source).toContain('from "./aiTurn"');
-    expect(source).toContain('label: "校正をまとめて実行"');
+    expect(source).toContain('label: "校正一括実行"');
   });
 
   test("**各機能へ「札はこちらが持っている」と伝える**", () => {

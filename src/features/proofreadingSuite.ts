@@ -100,7 +100,7 @@ interface CheckPick extends vscode.QuickPickItem {
  * **画面に出す題（`withProgress` の見出し）と同じ文字にする。** 別の
  * 言い回しにすると、作者が見た画面とログの行が結びつかない。
  */
-const SUITE_LOG_LABEL = "校正をまとめて実行";
+const SUITE_LOG_LABEL = "校正一括実行";
 
 /**
  * コマンドへ「この作品で」と伝える最小の形（`extension.ts` の `WorkRef`）。
@@ -245,9 +245,9 @@ export async function runProofreadingSuite(
       まとめ実行の最中でも今までどおり割り込める。
     */
     await withAiTurn(
-      { label: "校正をまとめて実行", onCancelled: () => (stoppedAt = 0) },
+      { label: "校正一括実行", onCancelled: () => (stoppedAt = 0) },
       async () =>
-        await withProgress("校正をまとめて実行", async (progress) => {
+        await withProgress("校正一括実行", async (progress) => {
       for (const [index, check] of checks.entries()) {
         progress.report({
           message: describeStep(index + 1, checks.length, check.label),

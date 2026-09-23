@@ -410,7 +410,7 @@ async function report(
     "",
     ...describeOriginalsNote(losing),
     "",
-    "この書庫をGitHubへ載せるには、「GitHubに置く（はじめて）」をお使いください。",
+    "この書庫をGitHubへ載せるには、「GitHub初期設定」をお使いください。",
   ].join("\n");
 
   await vscode.window.showInformationMessage(

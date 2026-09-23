@@ -539,10 +539,10 @@ export async function recordReaderStats(
   if (sites.length === 0) {
     const answer = await vscode.window.showWarningMessage(
       `${work.title} には投稿サイトが登録されていません。` +
-        "「投稿サイトの設定」でサイトを登録すると、そのサイトの反応を記録できます。",
-      "投稿サイトの設定"
+        "「投稿サイト設定」でサイトを登録すると、そのサイトの反応を記録できます。",
+      "投稿サイト設定"
     );
-    if (answer === "投稿サイトの設定") {
+    if (answer === "投稿サイト設定") {
       const result = await configurePostingSites(work);
       return { changed: result.changed };
     }

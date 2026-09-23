@@ -235,7 +235,7 @@ function latestSection(latest: ResumeLatestEpisode | null): string[] {
   const lines = ["## 前回どこまで", ""];
   if (!latest) {
     lines.push(
-      "まだ本文がありません。「本文から開始」で第1話を作れます。",
+      "まだ本文がありません。「本文起点」で第1話を作れます。",
       ""
     );
     return lines;
@@ -352,7 +352,7 @@ function episodePlotSection(plot: ResumeEpisodePlot): string[] {
 
   if (plot.kind === "missing") {
     lines.push(
-      `まだありません。「単話プロットを作る」で ${plot.path} に雛形を作れます。`,
+      `まだありません。「単話プロット作成」で ${plot.path} に雛形を作れます。`,
       ""
     );
     return lines;
@@ -375,8 +375,8 @@ function nextStepsSection(): string[] {
   return [
     "## 次にすること",
     "",
-    "- 続きを書く：本文を開いてから「縦書きで開く」。画面の下段に「最新話を書く」があります。",
-    "- 単話プロットを作る／開く：操作メニューの「単話プロットを作る」。",
+    "- 続きを書く：本文を開く（原稿エディターの上のバーで縦書き／横書きを切り替えられます）。画面の下段に「最新話を書く」があります。",
+    "- 単話プロットを作る／開く：詳細メニューの「単話プロット作成」。",
     "",
   ];
 }

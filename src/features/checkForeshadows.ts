@@ -607,7 +607,7 @@ export async function checkForeshadowResolution(
   if (open.length === 0) {
     vscode.window.showInformationMessage(
       "未回収の伏線がありません。" +
-        "「伏線を検知」や「伏線を手で追加」で登録してから実行してください。"
+        "「伏線検知」や「伏線手動追加」で登録してから実行してください。"
     );
     return undefined;
   }

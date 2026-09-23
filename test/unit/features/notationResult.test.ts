@@ -151,7 +151,7 @@ describe("0件のとき、理由を言い分ける", () => {
     expect(text).not.toContain("見つかりませんでした");
     expect(text).toContain("3組");
     expect(text).toContain("今後直さない");
-    expect(text).toContain("指摘対象外を管理");
+    expect(text).toContain("指摘対象外管理");
   });
 
   it("揃える表記を選ぶ前に閉じた", () => {
@@ -186,7 +186,7 @@ describe("0件のとき、理由を言い分ける", () => {
     );
     expect(text).toContain("30件");
     expect(text).toContain("無視");
-    expect(text).not.toContain("指摘対象外を管理");
+    expect(text).not.toContain("指摘対象外管理");
   });
 
   it("「今後直さない」で外した組は、無視とは別に名指しする", () => {
@@ -199,7 +199,7 @@ describe("0件のとき、理由を言い分ける", () => {
     expect(text).toContain("4組");
     expect(text).toContain("今後直さない");
     // 外す場所を案内してよいのは「今後直さない」の側だけ
-    expect(text).toContain("指摘対象外を管理");
+    expect(text).toContain("指摘対象外管理");
   });
 
   it("どの理由にも当てはまらなくても、黙らない", () => {
@@ -267,7 +267,7 @@ describe("1組も出せなかったときの書き出し", () => {
     const text = describeNoGroups(2);
     expect(text).toContain("2組");
     expect(text).toContain("今後直さない");
-    expect(text).toContain("指摘対象外を管理");
+    expect(text).toContain("指摘対象外管理");
   });
 });
 

@@ -28,7 +28,23 @@ import {
   scoreAnswers,
   type AdviceProfile,
 } from "../core/advicePolicy";
+import {
+  AUTHOR_READER_QUESTIONS,
+  authorReaderProfileFromAnswers,
+  authorReaderTypeLabel,
+  type AuthorReaderProfile,
+} from "../core/authorReaderType";
+import {
+  sharedForAdvice,
+  sharedForReader,
+  sharedFromJustAnsweredAdvice,
+  type SharedAnswer,
+} from "../core/sharedDiagnosisQuestion";
 import { askAdviceQuestions } from "./advicePolicyDiagnosis";
+import {
+  askAuthorReaderQuestions,
+  showAuthorReaderResult,
+} from "./authorReaderTypeDiagnosis";
 
 /**
  * 作家タイプ診断と、はじめの案内（設計書6.90）。
@@ -64,7 +80,28 @@ export interface WriterDiagnosisDeps {
     get(): AdviceProfile | undefined;
     set(profile: AdviceProfile): Promise<void>;
   };
+  /**
+   * 6.101 の作者自身の読者タイプ（作者ごとに1つ）。
+   *
+   * **作家タイプ診断に入口をまとめた**（作者の裁定、2026-09-23）ので、
+   * 「読者としての好み（9問）」をここからも答えられるようにする。
+   */
+  authorReader: {
+    get(): AuthorReaderProfile | undefined;
+    set(profile: AuthorReaderProfile): Promise<void>;
+  };
 }
+
+/**
+ * 押したときに選ぶもの（作者の裁定、2026-09-23）。
+ *
+ * **入口を1つにした。** 以前は「作家タイプ診断」「相談の助言方針」
+ * 「あなた自身の読者タイプ」が詳細メニューの別々の場所にあり、どれも
+ * 作者自身について答える診断なのに、別物に見えていた。
+ */
+export type DiagnosisPart = "style" | "advice" | "reader" | "all";
+
+type DiagnosisChoice = DiagnosisPart | "guide" | "clear";
 
 export async function runWriterDiagnosis(
   deps: WriterDiagnosisDeps,
@@ -72,85 +109,193 @@ export async function runWriterDiagnosis(
 ): Promise<void> {
   const existing = deps.profiles.get();
 
-  if (existing && !options.skipIntro) {
-    const action = await chooseAction(existing.style);
-    if (!action) return;
-    if (action === "guide") {
-      await runTutorial(deps, existing.style);
-      return;
-    }
-    if (action === "clear") {
-      await deps.profiles.clear();
-      logStep("作家タイプ診断：答えを消した");
-      void vscode.window.showInformationMessage(
-        "診断の答えを消しました（作品や設定資料には影響しません）。" +
-          "次にこの画面を開き直したとき、はじめての声かけがもう一度出ます。"
-      );
-      return;
-    }
+  /*
+    **はじめての声かけから来たときは、選ばせない**（設計書6.90.3）。
+    はじめての人に4つの選択肢を出しても、どれが自分に要るのか決められない。
+    これまでどおり書き方の5問から入り、そのあと9問を続けるか訊く。
+  */
+  if (options.skipIntro) {
+    await runStylePart(deps, existing?.style, { offerAdvice: true });
+    return;
   }
 
+  const choice = await choosePart(deps);
+  if (!choice) return;
+
+  if (choice === "guide" && existing) {
+    await runTutorial(deps, existing.style);
+    return;
+  }
+  if (choice === "clear") {
+    await deps.profiles.clear();
+    logStep("作家タイプ診断：書き方の答えを消した");
+    void vscode.window.showInformationMessage(
+      "書き方の答えを消しました（作品や設定資料には影響しません）。" +
+        "次にこの画面を開き直したとき、はじめての声かけがもう一度出ます。"
+    );
+    return;
+  }
+  if (choice === "style") {
+    await runStylePart(deps, existing?.style, { offerAdvice: false });
+    return;
+  }
+  if (choice === "advice") {
+    const answers = await runAdviceAnswers(deps, undefined);
+    if (answers) announceAdvice(deps);
+    return;
+  }
+  if (choice === "reader") {
+    await runReaderAnswers(deps, undefined, { showResult: true });
+    return;
+  }
+
+  // 全部やる：書き方 → 助言の受け方 → 読者としての好み → はじめの案内。
+  // **途中でやめたら、そこまでの答えは残して止まる**（それぞれ保存済み）
   const style = await askStyle(existing?.style);
   if (!style) return;
+  await saveStyle(deps, style);
 
-  await deps.profiles.set(style);
-  await deps.profiles.setWelcomeState("done");
-  logStep(`作家タイプ診断：${describeWriterStyle(style)}`);
+  const adviceAnswers = await runAdviceAnswers(deps, undefined);
+  if (!adviceAnswers) return;
 
-  // **6.86 の9問も、ここで聞く**（作者の指摘、2026-09-13
-  // 「診断に11タイプは入ってないということですか？」）。
-  // 断ってもここまでの5問は残る
-  if (!(await askAdvicePart(deps))) return;
+  // **似た1問は、いま答えたものを選んだ状態で出す**（作者の裁定、2026-09-23）
+  const reader = await runReaderAnswers(
+    deps,
+    sharedFromJustAnsweredAdvice(adviceAnswers),
+    { showResult: false }
+  );
+  if (!reader) return;
+  void vscode.window.showInformationMessage(
+    `読者としての好み：${authorReaderTypeLabel(reader)}としてお預かりしました。`
+  );
 
   await runTutorial(deps, style);
 }
 
 /**
- * 相談の助言方針（6.86）の9問。**断れるようにする。**
+ * 何を答えるかを選ぶ。
  *
- * 5問の時点で一区切りついているので、ここから先は「もっと合わせたい人」
- * 向けである。**何のための9問かを先に言ってから聞く**（作者の指摘、
- * 2026-09-13「アドバイスしてから選択肢を表示してください」）。
- *
- * **答えは作者ごとの既定へ置く。** 使用開始時にはまだ作品が無いので、
- * 作品ごとの置き場には書けない。作品ができたら、相談がここから始まる
- * （`AdvicePolicyStore.getEffective`）。
+ * **数を先に言う**（「書き方（5問）」）。押す前に数を約束しないのは
+ * はじめての声かけの話で（下の `offerWriterDiagnosis`）、ここは作者が
+ * 自分で開いた画面なので、何問あるかを見て選べるほうがよい。
  */
-async function askAdvicePart(deps: WriterDiagnosisDeps): Promise<boolean> {
-  const existing = deps.adviceDefault.get();
+async function choosePart(
+  deps: WriterDiagnosisDeps
+): Promise<DiagnosisChoice | undefined> {
+  const style = deps.profiles.get()?.style;
+  const advice = deps.adviceDefault.get();
+  const reader = deps.authorReader.get();
+  const total =
+    WRITER_QUESTIONS.length + ADVICE_QUESTIONS.length + AUTHOR_READER_QUESTIONS.length;
 
-  const GO = `続けて答える（${ADVICE_QUESTIONS.length}問）`;
-  const SKIP = "ここで終える";
   const picked = await vscode.window.showQuickPick(
     [
       {
-        label: `$(comment-discussion) ${GO}`,
-        detail:
-          "同じ助言でも、書き手によって正反対の意味で届きます。「もっと読者を意識して」は、読者を見ていない人には気づきになりますが、題材そのものが目的の人には「別人になれ」と聞こえます。その言い分けをするための9問です",
-        go: true,
+        label: `$(edit) 書き方（${WRITER_QUESTIONS.length}問）`,
+        description: style
+          ? `いま：${WRITER_PLAN_TYPES[style.plan].label}`
+          : undefined,
+        detail: "書き方に合わせて、次にすることを理由つきで案内します",
+        choice: "style" as const,
       },
       {
-        label: `$(check) ${SKIP}`,
+        label: `$(comment-discussion) 助言の受け方（${ADVICE_QUESTIONS.length}問）`,
+        description: advice
+          ? `いま：${ADVICE_TYPES[resolveAdviceType(advice.scores)].label}`
+          : undefined,
         detail:
-          "ここまでの5問で、次にすることの案内はできます。あとから「相談の助言方針」でいつでも答えられます",
-        go: false,
+          "同じ助言でも、書き手によって正反対の意味で届きます。相談でのAIの言い方の出発点を決めます",
+        choice: "advice" as const,
       },
+      {
+        label: `$(book) 読者としての好み（${AUTHOR_READER_QUESTIONS.length}問）`,
+        description: reader ? `いま：${authorReaderTypeLabel(reader)}` : undefined,
+        detail:
+          "作品の宛先ではなく、あなた自身が読むときに求めるもの。作品のターゲット読者との違いが見えます",
+        choice: "reader" as const,
+      },
+      {
+        label: `$(checklist) 全部やる（${total}問）`,
+        detail:
+          "書き方 → 助言の受け方 → 読者としての好みの順。似た1問は、前で答えたものを選んだ状態で出します",
+        choice: "all" as const,
+      },
+      ...(style
+        ? [
+            {
+              label: "$(compass) はじめの案内をもう一度見る",
+              detail: "いまの書き方の答えのまま、次に何をするとよいかを案内します",
+              choice: "guide" as const,
+            },
+            {
+              label: "$(trash) 書き方の答えを消す",
+              detail:
+                "はじめて使うときの状態に戻します。開き直すと、また声をかけます" +
+                "（作品や設定資料には影響しません）",
+              choice: "clear" as const,
+            },
+          ]
+        : []),
       cancelItem(),
     ],
     {
-      title: "作家タイプ診断（ここまで5問）",
-      placeHolder: "AIの言い方も、あなたに合わせますか",
+      title: "作家タイプ診断",
+      placeHolder: "どれに答えますか（前回の答えには印が付きます）",
       ignoreFocusOut: true,
     }
   );
-  // **3つの道を分けておく。** 「ここで終える」は案内まで進む、
-  // 「取りやめる」と Esc は閉じる。5問の答えはどちらでも残る
-  if (!picked || isCancelItem(picked)) return false;
-  if (!("go" in picked) || !picked.go) return true;
+  if (!picked || isCancelItem(picked)) return undefined;
+  return "choice" in picked ? picked.choice : undefined;
+}
 
-  const answers = await askAdviceQuestions(existing?.answers);
-  // 9問の途中でやめても、5問の案内までは出す
-  if (!answers) return true;
+/** 書き方の5問を保存する（はじめての声かけは、ここで済んだことにする） */
+async function saveStyle(
+  deps: WriterDiagnosisDeps,
+  style: WriterStyle
+): Promise<void> {
+  await deps.profiles.set(style);
+  await deps.profiles.setWelcomeState("done");
+  logStep(`作家タイプ診断：${describeWriterStyle(style)}`);
+}
+
+/**
+ * 書き方の5問 → （はじめての声かけからなら9問を続けるか訊く）→ 案内。
+ */
+async function runStylePart(
+  deps: WriterDiagnosisDeps,
+  previous: WriterStyle | undefined,
+  options: { offerAdvice: boolean }
+): Promise<void> {
+  const style = await askStyle(previous);
+  if (!style) return;
+  await saveStyle(deps, style);
+
+  // **6.86 の9問も、ここで聞く**（作者の指摘、2026-09-13
+  // 「診断に11タイプは入ってないということですか？」）。
+  // 断ってもここまでの5問は残る。作者が「書き方」だけを選んで開いたときは
+  // 訊かない——選んだものだけを答えたい人である
+  if (options.offerAdvice && !(await askAdvicePart(deps))) return;
+
+  await runTutorial(deps, style);
+}
+
+/**
+ * 助言の受け方の9問を聞いて、作者ごとの既定へ置く。
+ *
+ * @param shared 似た1問に写す答え。渡さなければ、読者タイプの記録から
+ *   （そちらのほうが新しいときだけ）写す
+ * @returns 答え。やめたら undefined（何も保存しない）
+ */
+async function runAdviceAnswers(
+  deps: WriterDiagnosisDeps,
+  shared: SharedAnswer | undefined
+): Promise<number[] | undefined> {
+  const existing = deps.adviceDefault.get();
+  const answers = await askAdviceQuestions(
+    existing?.answers,
+    shared ?? sharedForAdvice(deps.authorReader.get(), existing)
+  );
+  if (!answers) return undefined;
 
   const scores = scoreAnswers(answers);
   const fresh: AdviceProfile = {
@@ -167,44 +312,95 @@ async function askAdvicePart(deps: WriterDiagnosisDeps): Promise<boolean> {
     `作家タイプ診断：相談の助言方針は` +
       `${ADVICE_TYPES[resolveAdviceType(scores)].label}`
   );
-  return true;
+  return answers;
 }
 
-type DiagnosisAction = "redo" | "guide" | "clear";
+/** 助言の受け方だけを答えたときの知らせ（何が変わるのかまで言う） */
+function announceAdvice(deps: WriterDiagnosisDeps): void {
+  const profile = deps.adviceDefault.get();
+  if (!profile) return;
+  const type = ADVICE_TYPES[resolveAdviceType(profile.scores)];
+  void vscode.window.showInformationMessage(
+    `助言の受け方：${type.label}。${type.summary}` +
+      "（相談のたびに、このタイプ向けの方針だけをAIに渡します。作品ごとに決めた方針があれば、そちらが先です）"
+  );
+}
 
-async function chooseAction(
-  style: WriterStyle
-): Promise<DiagnosisAction | undefined> {
-  const plan = WRITER_PLAN_TYPES[style.plan];
+/**
+ * 読者としての好みの9問を聞いて保存する。
+ *
+ * @returns 保存した記録。やめたら undefined（何も保存しない）
+ */
+async function runReaderAnswers(
+  deps: WriterDiagnosisDeps,
+  shared: SharedAnswer | undefined,
+  options: { showResult: boolean }
+): Promise<AuthorReaderProfile | undefined> {
+  const existing = deps.authorReader.get();
+  const answers = await askAuthorReaderQuestions(
+    existing?.answers,
+    shared ?? sharedForReader(deps.adviceDefault.get(), existing)
+  );
+  if (!answers) return undefined;
+
+  const profile = authorReaderProfileFromAnswers(answers, new Date(), existing);
+  await deps.authorReader.set(profile);
+  logStep(`作家タイプ診断：自分の読者タイプは${authorReaderTypeLabel(profile)}`);
+  if (options.showResult) {
+    await showAuthorReaderResult(
+      profile,
+      "あなた自身の読者タイプ",
+      undefined,
+      existing
+    );
+  }
+  return profile;
+}
+
+/**
+ * 相談の助言方針（6.86）の9問。**断れるようにする。**
+ *
+ * 5問の時点で一区切りついているので、ここから先は「もっと合わせたい人」
+ * 向けである。**何のための9問かを先に言ってから聞く**（作者の指摘、
+ * 2026-09-13「アドバイスしてから選択肢を表示してください」）。
+ *
+ * **答えは作者ごとの既定へ置く。** 使用開始時にはまだ作品が無いので、
+ * 作品ごとの置き場には書けない。作品ができたら、相談がここから始まる
+ * （`AdvicePolicyStore.getEffective`）。
+ */
+async function askAdvicePart(deps: WriterDiagnosisDeps): Promise<boolean> {
+  const GO = `続けて答える（${ADVICE_QUESTIONS.length}問）`;
+  const SKIP = "ここで終える";
   const picked = await vscode.window.showQuickPick(
     [
       {
-        label: "$(compass) はじめの案内をもう一度見る",
-        detail: "いまの答えのまま、次に何をするとよいかを案内します",
-        action: "guide" as const,
-      },
-      {
-        label: "$(refresh) 答え直す",
-        detail: "前回の答えに印が付きます。書き方が変わったときに",
-        action: "redo" as const,
-      },
-      {
-        label: "$(trash) 答えを消す",
+        label: `$(comment-discussion) ${GO}`,
         detail:
-          "はじめて使うときの状態に戻します。開き直すと、また声をかけます" +
-          "（作品や設定資料には影響しません）",
-        action: "clear" as const,
+          "同じ助言でも、書き手によって正反対の意味で届きます。「もっと読者を意識して」は、読者を見ていない人には気づきになりますが、題材そのものが目的の人には「別人になれ」と聞こえます。その言い分けをするための9問です",
+        go: true,
+      },
+      {
+        label: `$(check) ${SKIP}`,
+        detail:
+          "ここまでの5問で、次にすることの案内はできます。あとから「作家タイプ診断」の「助言の受け方」でいつでも答えられます",
+        go: false,
       },
       cancelItem(),
     ],
     {
-      title: "作家タイプ診断",
-      placeHolder: `いまは「${plan.label}」として案内しています（${describeWriterStyle(style)}）`,
+      title: "作家タイプ診断（ここまで5問）",
+      placeHolder: "AIの言い方も、あなたに合わせますか",
       ignoreFocusOut: true,
     }
   );
-  if (!picked || isCancelItem(picked)) return undefined;
-  return "action" in picked ? picked.action : undefined;
+  // **3つの道を分けておく。** 「ここで終える」は案内まで進む、
+  // 「取りやめる」と Esc は閉じる。5問の答えはどちらでも残る
+  if (!picked || isCancelItem(picked)) return false;
+  if (!("go" in picked) || !picked.go) return true;
+
+  // 9問の途中でやめても、5問の案内までは出す（答えは保存しない）
+  await runAdviceAnswers(deps, undefined);
+  return true;
 }
 
 /**

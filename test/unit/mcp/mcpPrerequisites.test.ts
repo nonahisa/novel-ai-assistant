@@ -67,7 +67,7 @@ describe("novel.scan が前提の姿を返す", () => {
       "単話プロット",
     ]);
     // **作る操作の名前も返す。** 外部AIは実行できないが、作者へ伝えられる
-    expect(result.prerequisites[0].makeLabel).toBe("設定資料をまとめて抽出");
+    expect(result.prerequisites[0].makeLabel).toBe("一括抽出");
     // その前提が無いと通せない feature（表から引く。写しではない）
     expect(result.prerequisites[0].blocks).toEqual(["contradiction"]);
     expect(result.prerequisites[2].blocks).toEqual(["deviation"]);
@@ -112,7 +112,7 @@ describe("前提の足りない feature は、実行せずに断る", () => {
       // ①足りないもの
       expect(message).toContain("「設定資料」");
       // ②それを作る操作の名前と、**作者が画面で行うこと**
-      expect(message).toContain("「設定資料をまとめて抽出」");
+      expect(message).toContain("「一括抽出」");
       expect(message).toContain("作者が画面で行います");
       // ③代わりの feature の名前（外部AIがそのまま呼べる）
       expect(message).toContain("feature: factContradiction");

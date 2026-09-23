@@ -254,7 +254,7 @@ export function describeLargerModelAdvice(
     if (accuracy) lines.push(accuracy);
     lines.push(
       `切り替えると「${params.featureLabel}」の割当が ${fits.id} になり、` +
-        "もう一度この確認を出します（割当は「機能ごとのAI割当」で戻せます）。"
+        "もう一度この確認を出します（割当は「機能別AI割当」で戻せます）。"
     );
   }
   if (advice.unmeasured) {

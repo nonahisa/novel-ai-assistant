@@ -259,8 +259,10 @@ import { setWorkGoals } from "./features/setWorkGoals";
 import {
   checkContradictions,
   pickContradictionReadMode,
+  pickContradictionRoute,
 } from "./features/checkContradictions";
-// 矛盾検知のもう1つの道（設計書6.88）。P-12 としばらく並行させる
+// 矛盾検知のもう1つの道（設計書6.88）。入口は「矛盾検知」1つで、
+// 押したときに選ぶ（2026-09-23）。コマンドはパレットと関門の代わりの道に残す
 import { checkFactContradictions } from "./features/checkFactContradictions";
 import { checkProofread } from "./features/checkProofread";
 import { checkDeviations } from "./features/checkDeviations";
@@ -331,6 +333,7 @@ import { manageConfirmSkips } from "./features/manageConfirmSkips";
 import { AdvicePolicyStore } from "./core/advicePolicyStore";
 import { WriterProfileStore } from "./core/writerProfileStore";
 import type { AdviceProfile } from "./core/advicePolicy";
+import type { AuthorReaderProfile } from "./core/authorReaderType";
 import { setAdvicePolicy } from "./features/advicePolicyDiagnosis";
 import { AuthorReaderTypeStore } from "./core/authorReaderTypeStore";
 import {
@@ -2891,7 +2894,7 @@ export async function activate(
           `作品タイプをプロットへ書けませんでした（${String(e)}）。` +
             // 詳細メニューの名前と揃える（`actionList.ts` の label）。
             // 画面の案内が、実際に押す項目と違う名前を言わないように
-            "「形式とジャンル」からやり直せます。"
+            "「形式・ジャンル」からやり直せます。"
         );
       }
     }
@@ -4401,6 +4404,12 @@ export async function activate(
         get: () => advicePolicies.getDefault(),
         set: (profile: AdviceProfile) => advicePolicies.setDefault(profile),
       },
+      // **読者としての好み（6.101）も、作家タイプ診断から答えられる**
+      // （作者の裁定、2026-09-23。診断の入口を1つにした）
+      authorReader: {
+        get: () => authorReaderTypes.get(),
+        set: (profile: AuthorReaderProfile) => authorReaderTypes.set(profile),
+      },
     };
   }
 
@@ -4412,7 +4421,8 @@ export async function activate(
       async (node?: WorkRef) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
-        await setAdvicePolicy(work, advicePolicies);
+        // 読者タイプの記録を渡す——似た1問の答えを写すため（2026-09-23）
+        await setAdvicePolicy(work, advicePolicies, authorReaderTypes.get());
       }
     )
   );
@@ -4440,7 +4450,13 @@ export async function activate(
         const { setAuthorReaderType } = await import(
           "./features/authorReaderTypeDiagnosis.js"
         );
-        await setAuthorReaderType(authorReaderTypes, work);
+        // 助言の受け方の記録を渡す——似た1問の答えを写すため（2026-09-23）。
+        // 作品が定まればその作品の方針、無ければ作者ごとの既定
+        await setAuthorReaderType(
+          authorReaderTypes,
+          work,
+          work ? advicePolicies.getEffective(work.id) : advicePolicies.getDefault()
+        );
       }
     )
   );
@@ -4777,7 +4793,7 @@ export async function activate(
             `この待ちは ${describeCreatedAt(waiting.createdAt)} に作りました。\n` +
             "新しい付け替えを作り終えると、この対応表は置き換わります" +
             "（前の付け替えは、資料に反映できなくなります）。\n" +
-            "先に「名前の付け替えを資料にも反映」を実行することもできます。\n" +
+            "先に「人物名変更の資料反映」を実行することもできます。\n" +
             "ここで取りやめれば、いまの待ちはそのまま残ります。",
         },
         "破棄して新しく始める"
@@ -4841,7 +4857,7 @@ export async function activate(
         const pending = loadPendingRename(context.workspaceState, work.id);
         if (!pending) {
           vscode.window.showInformationMessage(
-            "待っている付け替えがありません。先に「名前を付け替える」を実行してください。"
+            "待っている付け替えがありません。先に「人物名変更」を実行してください。"
           );
           return;
         }
@@ -4890,7 +4906,7 @@ export async function activate(
         vscode.window.showInformationMessage(
           describeRenameRecordsResult(pending, result) +
             (result.failures.length > 0
-              ? " 直してから、もう一度「名前の付け替えを資料にも反映」を" +
+              ? " 直してから、もう一度「人物名変更の資料反映」を" +
                 "実行してください（対応表は預かったままにしてあります）。"
               : "")
         );
@@ -5300,6 +5316,27 @@ export async function activate(
     )
   );
 
+  /*
+    **矛盾検知の入口は1つ**（作者の裁定 A7・計画 C1、2026-09-23）。
+
+    以前は「矛盾を検知」（設定資料と本文の照合、P-12）と「矛盾検知
+    （事実の照合）」（話どうしの照合、設計書6.88）が詳細メニューに並び、
+    どちらを押せばよいかを作者に決めさせていた。押した入口で
+    「両方／設定との照合だけ／話どうしだけ」を選ぶ形にまとめた。
+
+    - **設定資料が無いとき**は、押した時点で前提の関門
+      （`features/prerequisiteGate.ts`）が「設定との食い違いは見られません。
+      話どうしの照合だけ走ります」と知らせ、話どうしの照合へ進める
+      （`core/prerequisites.ts` の代わりの道）。ここまで来るのは設定資料が
+      あるときだけである
+    - **まとめ実行では訊かない。** これまでどおり設定との照合だけを走らせる
+      ——まとめ実行の選択肢の並び（`core/proofreadingSuite.ts`）は変えない
+    - **両方を選んだら、1つずつ走らせる。** それぞれ走る前に処理量の確認が
+      出る（2つを1枚の見込みに合わせるのは、確認の作りを2つとも組み替える
+      別の作業）。選ぶ画面で「確認は2回出る」ことを先に言う
+    - **1つ目を取りやめたら、2つ目も走らせない。** 取りやめた作者に、続けて
+      別の確認を出すと「止めたのに止まらない」に見える
+  */
   context.subscriptions.push(
     registerCommand(
       "novelai.checkContradictions",
@@ -5307,110 +5344,139 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return CHECK_CANCELLED;
 
-        // 未保存のまま読むと、画面と違う本文を突き合わせてしまう
-        const unsaved = await saveBeforeCheck(work, "矛盾検知");
-        if (unsaved) return unsaved;
-
-        // **前提が無くて走れなかった理由を受ける**（設計書6.80）。まとめ実行
-        // では警告のダイアログを出す場が無いので、理由を持ち帰って最後の
-        // まとめへ並べる。この口を足すのはコマンドの側である
-        let missing = "";
-        let missingReason = "";
-        const suiteConfirmed = isSuiteConfirmed(options);
-        // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
-        const suiteHoldsRun = isSuiteHoldingRun(options);
-        // **範囲を選べるのは誤字脱字だけではない**（設計書6.8.7）。
-        // 219話で6時間かかる検知こそ、「まず10話だけ試す」が要る
-        const scope = await resolveCheckScope(work, "contradiction", {
-          suiteConfirmed,
-        });
-        if (!scope) return CHECK_CANCELLED;
-        /*
-          **読み方を選ぶ**（作者の裁定 A3⑤、2026-09-23）。分けて読む矛盾検知は
-          そのまま残り、まるごと読むのは並ぶ別の選択肢。**まとめ実行では訊かない**
-          （これまでどおり分けて読む。画面を離れた作者を待たせない）
-        */
-        const readMode = suiteConfirmed
-          ? "chunked"
-          : await pickContradictionReadMode();
-        if (!readMode) return CHECK_CANCELLED;
-        const result = await withPanelProgress(
-          work,
-          "矛盾を検知",
-          (onProgress, stage) =>
-            checkContradictions(work, aiRegistry, {
-              filePaths: scope.filePaths,
-              readMode,
-              onProgress,
-              // 検証はAIを1件ずつ呼ぶので、別の札で件数を流す
-              onVerifyProgress: stage("検出した矛盾を検証", "件"),
-              suiteConfirmed,
-              suiteHoldsRun,
-              noteMissing: (note, reason) => {
-                missing = note;
-                missingReason = reason ?? "";
-              },
-            })
-        );
-        // **中止ではなく「飛ばした」にする。** 残りの検知はこの前提を
-        // 要らないので、ここで列を止めると関係のない機能まで走らずに終わる。
-        // 「失敗」とも言わない——壊れてはおらず、設定資料を足せば走る
-        if (missing) return checkSkipped(missingReason, missing);
-        if (!result || result.cancelled) return CHECK_CANCELLED;
-
-        // 矛盾が実は伏線だったときの逃げ道を添える（設計書6.35.4）
-        const shown = proposalPanel.showContradictions(
-          work,
-          result.issues,
-          (source) => registerForeshadowFromContradiction(work, source)
-        );
-
-        // **誤字脱字と同じ数え方にする**（設計書6.8）。捨てたぶんは、
-        // すぐ下に元からある言い方（「本文と合わない指摘」）をそのまま使う
-        const parts = describeCheckRunCounts({
-          shown: shown.remaining,
-          alreadyHandled: shown.handled,
-          rejected: 0,
-        });
-        if (result.rejectedCount > 0) {
-          // 本文に無い箇所を「引用」してくることがある。黙って捨てない
-          parts.push(`本文と合わない指摘 ${result.rejectedCount}件を除外`);
+        if (isSuiteConfirmed(options)) {
+          return await runSettingsContradictions(work, options);
         }
-        // **検証で消したことを黙らない**（設計書6.10.5）。内訳が見えないと、
-        // 指摘が少ないのが「本当に無い」のか「消しすぎ」なのか分からない
-        if (result.verifyNote) parts.push(result.verifyNote);
-        if (result.failedChunks > 0) {
-          parts.push(`読み取れなかった ${result.failedChunks}件`);
-        }
-        // **本文を開けなかった話は黙らない。** その話だけ検知の対象から
-        // 抜けているのに、作者には「何も無かった」と見える
-        if (result.unreadableEpisodes > 0) {
-          parts.push(`読めなかった話 ${result.unreadableEpisodes}件（ログ参照）`);
-        }
-        // **絞って見たときも「検知した」と記録する。** 記録しないと、
-        // 次回また同じ話が「前回から書いた分」に出る
-        await recordCheck(work, "contradiction");
+        const route = await pickContradictionRoute();
+        if (!route) return CHECK_CANCELLED;
 
-        notifyRunCompletion({
-          headline: `矛盾検知${describeChosenScope(scope.kind)}`,
-          parts,
-          failedCount: result.failedChunks,
-          // **突き合わせなかった人物があることを黙らない**（設計書6.10.6）。
-          // 結果は「矛盾なし」と出るので、これが無いと作者には
-          // 「見て問題が無かった」と区別が付かない。落ちた話が0なら空文字
-          tail: [
-            result.missedNote,
-            result.issues.length > 0
-              ? "本文は書き換えていません。 設定と本文のどちらを直すかは作者が決めてください。"
-              : "",
-          ]
-            .filter(Boolean)
-            .join(" "),
-        });
-        return CHECK_COMPLETED;
+        const runFacts = () =>
+          vscode.commands.executeCommand<CheckCommandOutcome | undefined>(
+            "novelai.checkFactContradictions",
+            { type: "work", work } satisfies WorkRef
+          );
+        if (route === "facts") return (await runFacts()) ?? CHECK_CANCELLED;
+
+        const settingsOutcome = await runSettingsContradictions(work, options);
+        if (route === "settings" || settingsOutcome === CHECK_CANCELLED) {
+          return settingsOutcome;
+        }
+        await runFacts();
+        return settingsOutcome;
       }
     )
   );
+
+  /**
+   * 設定資料と本文の照合（P-12）。上の「矛盾検知」の1つ目の道で、
+   * まとめ実行からはこれだけが走る。
+   */
+  async function runSettingsContradictions(
+    work: WorkEntry,
+    options?: CheckRunOptions
+  ): Promise<CheckCommandOutcome> {
+    // 未保存のまま読むと、画面と違う本文を突き合わせてしまう
+    const unsaved = await saveBeforeCheck(work, "矛盾検知");
+    if (unsaved) return unsaved;
+
+    // **前提が無くて走れなかった理由を受ける**（設計書6.80）。まとめ実行
+    // では警告のダイアログを出す場が無いので、理由を持ち帰って最後の
+    // まとめへ並べる。この口を足すのはコマンドの側である
+    let missing = "";
+    let missingReason = "";
+    const suiteConfirmed = isSuiteConfirmed(options);
+    // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
+    const suiteHoldsRun = isSuiteHoldingRun(options);
+    // **範囲を選べるのは誤字脱字だけではない**（設計書6.8.7）。
+    // 219話で6時間かかる検知こそ、「まず10話だけ試す」が要る
+    const scope = await resolveCheckScope(work, "contradiction", {
+      suiteConfirmed,
+    });
+    if (!scope) return CHECK_CANCELLED;
+    /*
+      **読み方を選ぶ**（作者の裁定 A3⑤、2026-09-23）。分けて読む矛盾検知は
+      そのまま残り、まるごと読むのは並ぶ別の選択肢。**まとめ実行では訊かない**
+      （これまでどおり分けて読む。画面を離れた作者を待たせない）
+    */
+    const readMode = suiteConfirmed
+      ? "chunked"
+      : await pickContradictionReadMode();
+    if (!readMode) return CHECK_CANCELLED;
+    const result = await withPanelProgress(
+      work,
+      "矛盾を検知",
+      (onProgress, stage) =>
+        checkContradictions(work, aiRegistry, {
+          filePaths: scope.filePaths,
+          readMode,
+          onProgress,
+          // 検証はAIを1件ずつ呼ぶので、別の札で件数を流す
+          onVerifyProgress: stage("検出した矛盾を検証", "件"),
+          suiteConfirmed,
+          suiteHoldsRun,
+          noteMissing: (note, reason) => {
+            missing = note;
+            missingReason = reason ?? "";
+          },
+        })
+    );
+    // **中止ではなく「飛ばした」にする。** 残りの検知はこの前提を
+    // 要らないので、ここで列を止めると関係のない機能まで走らずに終わる。
+    // 「失敗」とも言わない——壊れてはおらず、設定資料を足せば走る
+    if (missing) return checkSkipped(missingReason, missing);
+    if (!result || result.cancelled) return CHECK_CANCELLED;
+
+    // 矛盾が実は伏線だったときの逃げ道を添える（設計書6.35.4）
+    const shown = proposalPanel.showContradictions(
+      work,
+      result.issues,
+      (source) => registerForeshadowFromContradiction(work, source)
+    );
+
+    // **誤字脱字と同じ数え方にする**（設計書6.8）。捨てたぶんは、
+    // すぐ下に元からある言い方（「本文と合わない指摘」）をそのまま使う
+    const parts = describeCheckRunCounts({
+      shown: shown.remaining,
+      alreadyHandled: shown.handled,
+      rejected: 0,
+    });
+    if (result.rejectedCount > 0) {
+      // 本文に無い箇所を「引用」してくることがある。黙って捨てない
+      parts.push(`本文と合わない指摘 ${result.rejectedCount}件を除外`);
+    }
+    // **検証で消したことを黙らない**（設計書6.10.5）。内訳が見えないと、
+    // 指摘が少ないのが「本当に無い」のか「消しすぎ」なのか分からない
+    if (result.verifyNote) parts.push(result.verifyNote);
+    if (result.failedChunks > 0) {
+      parts.push(`読み取れなかった ${result.failedChunks}件`);
+    }
+    // **本文を開けなかった話は黙らない。** その話だけ検知の対象から
+    // 抜けているのに、作者には「何も無かった」と見える
+    if (result.unreadableEpisodes > 0) {
+      parts.push(`読めなかった話 ${result.unreadableEpisodes}件（ログ参照）`);
+    }
+    // **絞って見たときも「検知した」と記録する。** 記録しないと、
+    // 次回また同じ話が「前回から書いた分」に出る
+    await recordCheck(work, "contradiction");
+
+    notifyRunCompletion({
+      headline: `矛盾検知${describeChosenScope(scope.kind)}`,
+      parts,
+      failedCount: result.failedChunks,
+      // **突き合わせなかった人物があることを黙らない**（設計書6.10.6）。
+      // 結果は「矛盾なし」と出るので、これが無いと作者には
+      // 「見て問題が無かった」と区別が付かない。落ちた話が0なら空文字
+      tail: [
+        result.missedNote,
+        result.issues.length > 0
+          ? "本文は書き換えていません。 設定と本文のどちらを直すかは作者が決めてください。"
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    });
+    return CHECK_COMPLETED;
+  }
 
   /*
     矛盾検知（事実の照合。設計書6.88の第4段）。

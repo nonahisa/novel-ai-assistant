@@ -93,7 +93,7 @@ describe("出どころで分ける", () => {
       const result = parseReaderStatsEnvelope(narouFunEnvelope({ source }));
       expect(result.ok, String(source)).toBe(false);
       if (result.ok) continue;
-      expect(result.reason).toContain("手入力");
+      expect(result.reason).toContain("読者反応手動入力");
     }
   });
 
@@ -417,7 +417,7 @@ describe("Narou.fun の封筒を取り込む", () => {
     const result = await importReaderStats(work);
 
     expect(result.changed).toBe(false);
-    expect(warned.join("\n")).toContain("手入力");
+    expect(warned.join("\n")).toContain("読者反応手動入力");
     expect(storedLedger().readerStats).toHaveLength(0);
   });
 });

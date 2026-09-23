@@ -59,7 +59,7 @@ describe("二重起動を塞ぐ一覧", () => {
   });
 
   test("作者が報告した「まとめて同期」は塞ぐ", () => {
-    expect(exclusiveLabelOf("novelai.syncAllWorks")).toBe("作品をすべて同期");
+    expect(exclusiveLabelOf("novelai.syncAllWorks")).toBe("全作品同期");
   });
 });
 

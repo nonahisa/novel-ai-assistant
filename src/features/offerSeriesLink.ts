@@ -23,7 +23,7 @@ import type { WorkEntry } from "../models/types";
 export const SERIES_OFFERED_KEY = "novelai.series.linkOffered";
 
 /** ボタンの文言。ここ1か所に置く */
-export const SERIES_ACTION_LABEL = "シリーズとしてつなぐ";
+export const SERIES_ACTION_LABEL = "シリーズ連結";
 
 export interface SeriesLinkOfferDeps {
   /** 登録し終えたあとの、すべての作品 */

@@ -263,7 +263,7 @@ describe("URI で呼ばれたとき", () => {
     expect(warned).toHaveLength(1);
     expect(warned[0]).toContain("読者の反応を取り込みました：「作品A」2画面・「作品B」1画面");
     expect(warned[0]).toContain("取り込めなかったもの（1画面）：カクヨム 作品ID 9999");
-    expect(warned[0]).toContain("「投稿サイトの設定」で作品IDを登録");
+    expect(warned[0]).toContain("「投稿サイト設定」で作品IDを登録");
     expect(refreshed).toEqual(["wa", "wb"]);
   });
 

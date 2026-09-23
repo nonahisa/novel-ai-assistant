@@ -371,7 +371,7 @@ async function importAsNewWork(
   await vscode.commands.executeCommand("novelai.importWorkFromZip");
   return {
     message:
-      "「バックアップから取り込む」を開きました。同じファイルをもう一度選んでください。",
+      "「バックアップ取込」を開きました。同じファイルをもう一度選んでください。",
   };
 }
 

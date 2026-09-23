@@ -45,8 +45,9 @@ describe("詳細メニューは、印の計算が投げても分類を欠けさ�
 
     const groups = provider.getChildren();
 
+    // 見出しを挟まない分類（相談パネルを開く）は、操作がそのまま最上位に出る
     expect(groups.map((node) => node.type)).toEqual(
-      ACTION_TREE.map(() => "group")
+      ACTION_TREE.map((group) => (group.standalone ? "action" : "group"))
     );
   });
 
@@ -74,6 +75,8 @@ describe("詳細メニューは、印の計算が投げても分類を欠けさ�
     );
 
     for (const group of provider.getChildren()) {
+      // 最上位に単独で置いた操作（相談パネルを開く）は、中身を持たない
+      if (group.type !== "group") continue;
       expect(provider.getChildren(group).length).toBeGreaterThan(0);
     }
   });

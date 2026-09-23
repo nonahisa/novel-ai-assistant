@@ -358,13 +358,13 @@ async function reportStartup(
 
   const needsFold = outcomes.some((one) => one.action.kind === "ask");
   const buttons = needsFold
-    ? ["分かれた分を合わせる", "ログを表示"]
+    ? ["分岐合流", "ログを表示"]
     : ["同期する", "ログを表示"];
   const answer = await vscode.window.showWarningMessage(
     lines.join("\n"),
     ...buttons
   );
-  if (answer === "分かれた分を合わせる") {
+  if (answer === "分岐合流") {
     await vscode.commands.executeCommand("novelai.resolveDivergence");
   } else if (answer === "同期する") {
     await vscode.commands.executeCommand("novelai.saveAndSync");
@@ -401,13 +401,13 @@ function describeStopped(outcome: HandoffOutcome): string {
       case "unsaved":
         return (
           `「${outcome.label}」に保存していない原稿があるので、同期していません。` +
-          "保存してから「保存して同期」をお使いください。"
+          "保存してから「保存・同期」をお使いください。"
         );
       case "dirty":
         return (
           `「${outcome.label}」に記録していない変更が ${action.dirty}件あります` +
           (action.behind > 0 ? `（別の環境の変更 ${action.behind}件も未取得です）` : "") +
-          "。「保存して同期」で記録して送れます。"
+          "。「保存・同期」で記録して送れます。"
         );
     }
   }
@@ -508,9 +508,9 @@ export function noticeBeforeClose(deps: HandoffDeps): void {
   void writeUnsentMark(deps.storage, summary);
   void vscode.window.showWarningMessage(
     `${describeUnsentMark(summary)}このまま閉じると、別の機械からは見えません。`,
-    "保存して同期"
+    "保存・同期"
   ).then((answer) => {
-    if (answer === "保存して同期") {
+    if (answer === "保存・同期") {
       void vscode.commands.executeCommand("novelai.saveAndSync");
     }
   });

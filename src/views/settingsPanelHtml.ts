@@ -1041,7 +1041,7 @@ button.danger:hover {
     if (item.id === "episodes") {
       const episodes = workInfo.episodes || [];
       if (episodes.length === 0) {
-        body.appendChild(missingNote("各話あらすじ"));
+        body.appendChild(missingNote("資料管理 → 資料抽出 → 各話あらすじ"));
       } else {
         for (const episode of episodes) {
           const heading = document.createElement("h3");
@@ -1056,7 +1056,10 @@ button.danger:hover {
       const value = item.id === "blurb" ? workInfo.blurb : workInfo.catchphrase;
       if (!value) {
         body.appendChild(
-          missingNote(item.id === "blurb" ? "作品紹介文" : "キャッチコピー案")
+          missingNote(
+            "執筆支援 → 広報支援 → " +
+              (item.id === "blurb" ? "作品紹介文" : "キャッチコピー案")
+          )
         );
       } else {
         const text = document.createElement("p");
@@ -1077,7 +1080,7 @@ button.danger:hover {
     const note = document.createElement("div");
     note.className = "empty";
     note.textContent =
-      "まだありません。詳細メニューの「執筆AI支援 → " + action + "」で作れます。";
+      "まだありません。詳細メニューの「" + action + "」で作れます。";
     return note;
   }
 

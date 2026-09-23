@@ -460,14 +460,14 @@ async function report(
   // 分岐で止まったものがあるなら、**その場から次の手へ行けるようにする**
   const diverged = failed.filter((one) => one.diverged);
   const buttons =
-    diverged.length > 0 ? ["分かれた分を合わせる", "ログを表示"] : ["ログを表示"];
+    diverged.length > 0 ? ["分岐合流", "ログを表示"] : ["ログを表示"];
   const action = await vscode.window.showWarningMessage(
     summary,
     { modal: true, detail },
     ...buttons
   );
   if (action === "ログを表示") showLog();
-  if (action === "分かれた分を合わせる") {
+  if (action === "分岐合流") {
     const work = diverged[0]?.plan.target.works[0];
     await vscode.commands.executeCommand(
       "novelai.resolveDivergence",

@@ -187,7 +187,7 @@ describe("読者の反応を手入力する", () => {
     const result = await recordReaderStats(work);
 
     expect(result.changed).toBe(false);
-    expect(warned.join("")).toContain("投稿サイトの設定");
+    expect(warned.join("")).toContain("投稿サイト設定");
     expect(picks).toHaveLength(0);
     expect(disk.has(ledgerPath)).toBe(false);
   });
@@ -439,7 +439,7 @@ describe("読者の反応を貼り付けて取り込む", () => {
 
     expect(result.changed).toBe(false);
     expect(readLedger().readerStats).toBeUndefined();
-    expect(warned.join("")).toContain("手入力");
+    expect(warned.join("")).toContain("読者反応手動入力");
   });
 
   /**

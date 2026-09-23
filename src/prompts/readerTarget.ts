@@ -48,8 +48,10 @@ import type { ReaderProfile } from "../models/readerProfile";
 /**
  * 変更履歴（要点だけ。詳しくはプロンプト設計書 P-38）
  * - 1.0: 初版（0.54.0）。実データでは未確認——作者の作品で測ってから調整する
+ * - 1.1: 未診断のときの1行（`buildReaderTypeUnknownPrompt`）が案内する道順を、
+ *   2026-09-23 のメニューの組み直しに合わせた（執筆支援 → 読者診断）
  */
-export const READER_TARGET_VERSION = "1.0";
+export const READER_TARGET_VERSION = "1.1";
 
 export const READER_TARGET_SYSTEM_PROMPT = `あなたは日本語の小説を読んで、「この作品は、どういう読者に向いた書き方をされているか」だけを答える装置です。
 
@@ -319,7 +321,7 @@ export function buildReaderTypeUnknownPrompt(): string {
   // ふりをして答えた。**押すのは作者**なので、押す場所が要る
   return (
     `【この作品の読者】まだ決めていません。「${READER_TARGET_DIAGNOSIS_TITLE}」` +
-    "（詳細メニュー → 執筆AI支援 → 校正・校閲）で決められます。" +
+    "（詳細メニュー → 執筆支援 → 読者診断）で決められます。" +
     "相談の答えの下の「画面で案内してもらう」からも押せます。"
   );
 }

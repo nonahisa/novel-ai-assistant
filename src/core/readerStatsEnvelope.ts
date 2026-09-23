@@ -329,7 +329,7 @@ function readEnvelopeValue(value: Record<string, unknown>): ReaderStatsEnvelopeR
     return reject(
       `${known.label}の読者の反応は、貼り付けでは取り込みません` +
         "（規約の判断により、読み取りに対応していません）。" +
-        "「読者の反応を手入力」からご記入ください。"
+        "「読者反応手動入力」からご記入ください。"
     );
   }
 
@@ -763,7 +763,7 @@ export function matchReaderStatsEnvelope(
   if (!isKnownPostingSite(ledger, envelope.site)) {
     return (
       `この作品は${info.label}に載っていることが分かっていません。` +
-      "「投稿サイトの設定」で登録してから取り込んでください。"
+      "「投稿サイト設定」で登録してから取り込んでください。"
     );
   }
 
@@ -815,7 +815,7 @@ function matchBySourceWorkId(
     return (
       `この作品に、${info.label}の作品ID（Nコード）が登録されていません。` +
       `${sourceLabel}の頁はどの作品のものでも開けるため、作品IDと照合できないときは` +
-      "取り込みません。「投稿サイトの設定」でNコードを登録してから取り込んでください。"
+      "取り込みません。「投稿サイト設定」でNコードを登録してから取り込んでください。"
     );
   }
   const received = narouNcode(envelope.workId);

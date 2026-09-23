@@ -131,7 +131,7 @@ describe("目次を渡すかどうか", () => {
       expect(built.topic, question).toBe("craft");
       // 目次の中身（分類の見出し・操作の名前）が1つも入っていないこと
       expect(built.text, question).not.toContain("詳細メニューの操作");
-      expect(built.text, question).not.toContain("誤字脱字を検知");
+      expect(built.text, question).not.toContain("誤字脱字検知");
       expect(built.text, question).toBe(NO_INDEX_NOTICE);
     }
   });
@@ -142,7 +142,7 @@ describe("目次を渡すかどうか", () => {
 
       expect(built.topic, question).toBe("howto");
       expect(built.text, question).toContain("詳細メニューの操作");
-      expect(built.text, question).toContain("誤字脱字を検知");
+      expect(built.text, question).toContain("誤字脱字検知");
     }
   });
 
@@ -221,9 +221,13 @@ describe("使い方の節も、目次と一緒に外す", () => {
     （`runnableFeatureList`）の1件を詳細メニューの名前へ合わせたぶん
     （「起こす」→「逆算する」で1字）増えている。**プロンプト本文ではなく、
     そこへ埋め込む一覧が動いた側**の更新である。
+
+    **6,992字へ更新した（2026-09-23・v3.15）。** 道順の例に出すメニュー名を
+    組み直しに合わせたぶん（「執筆AI支援」→「執筆支援」で2字、
+    「誤字脱字を検知」→「誤字脱字検知」で1字）減っている。
   */
   test("目次を渡す回のシステム指示は、割る前と同じ長さ", () => {
-    expect(WORK_CHAT_SYSTEM_PROMPT.length).toBe(6995);
+    expect(WORK_CHAT_SYSTEM_PROMPT.length).toBe(6992);
   });
 
   test("外れるのは、使い方の節だけ", () => {

@@ -143,7 +143,7 @@ describe("足りないときだけ、道を出す", () => {
 
     const labels = seen.labels();
     expect(labels).toHaveLength(3);
-    expect(labels[0]).toContain("設定資料をまとめて抽出");
+    expect(labels[0]).toContain("一括抽出");
     expect(labels[1]).toContain("矛盾検知（事実の照合）");
     // 閉じる道は画面に出す（`quickPickCancel.test.ts` と同じ決まり）
     expect(labels[2]).toContain("取りやめる");
@@ -179,11 +179,11 @@ describe("足りないときだけ、道を出す", () => {
 
     const labels = seen.labels();
     expect(labels).toHaveLength(2);
-    expect(labels[0]).toContain("プロットを作る");
+    expect(labels[0]).toContain("プロット自力作成");
     expect(labels[1]).toContain("取りやめる");
     // 見出しは事実だけ。選べる道が1つしか無い場面で問いを強めない
     expect(seen.title()).toBe(
-      "「プロットからの逸脱」には「プロット」が要ります"
+      "「プロット逸脱検知」には「プロット」が要ります"
     );
   });
 

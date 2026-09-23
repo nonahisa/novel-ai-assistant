@@ -1454,7 +1454,7 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
     // 既存人物への変更は承認待ちに回る。件数を出さないと、
     // 作者は「更新0名」を見て何も増えなかったと思ってしまう
     (counts.pendingUpdates > 0
-      ? `\n既存人物への更新 ${counts.pendingUpdates}名は承認待ちです（「更新分を反映」から確認できます）`
+      ? `\n既存人物への更新 ${counts.pendingUpdates}名は承認待ちです（「設定資料更新分反映」から確認できます）`
       : "")
   );
 }

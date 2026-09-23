@@ -66,7 +66,7 @@ export async function chooseWorkType(
       {
         label: "$(circle-slash) いまは決めない",
         detail:
-          "あとから「形式とジャンル」で決められます。" +
+          "あとから「形式・ジャンル」で決められます。" +
           "決めるまでは、これまでどおりすべての操作が出ます。",
         format: undefined,
       },
@@ -107,7 +107,7 @@ export async function chooseWorkStartMode(
         label: "$(edit) 本文から書き始める",
         detail:
           "プロットは作りません。第1話のファイルを作って開きます。" +
-          "プロットはあとから「プロットを作る」で足せます。",
+          "プロットはあとから「プロット自力作成」で足せます。",
         mode: "manuscript" as const,
       },
       // Escでも閉じられるが、それを知らない人には出口が無いように見える

@@ -2080,7 +2080,7 @@ export class ManuscriptEditorProvider
     if (document.isDirty && !(await document.save())) {
       void vscode.window.showWarningMessage(
         "保存できなかったため、.md にしませんでした。" +
-          "保存してから、詳細メニューの「本文を .md にする」でお試しください。"
+          "保存してから、詳細メニューの「本文 .md 化」でお試しください。"
       );
       return;
     }
@@ -2219,7 +2219,7 @@ export class ManuscriptEditorProvider
             // ここは「中身は1文字も変わりません」と言っていたが、MD化は
             // 投稿サイトの書き方のルビ・傍点を直す（設計書6.12.4）。
             // 言い方は `core/markdownConversion.ts` の促しと揃える
-            "詳細メニューの「執筆AI支援 → 原稿づくり → 本文を .md にする」で" +
+            "詳細メニューの「執筆支援 → 原稿整備 → 本文 .md 化」で" +
             "変えられます（変わるのは読み仮名の書き方だけで、" +
             "本文の言葉は1文字も変わりません）。",
         }

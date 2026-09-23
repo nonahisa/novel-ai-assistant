@@ -273,7 +273,7 @@ function describeImported(
     notes.push(
       `${failed.length}件は中の記法を直せませんでした（${
         failed[0].reason ?? "理由なし"
-      }）。「投稿サイトのルビを取り込む」からやり直せます。`
+      }）。「投稿サイトルビ取込」からやり直せます。`
     );
   }
   return notes.length > 0 ? ` ${notes.join(" ")}` : "";

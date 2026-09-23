@@ -163,7 +163,7 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
   whenNoticePicked(
     vscode.window.showInformationMessage(
       `「${unified.name}」にまとめました。` +
-        "「設定資料集を出力」を実行すると一覧にも反映されます。",
+        "「設定資料集出力」を実行すると一覧にも反映されます。",
       "退避先を開く"
     ),
     async (action) => {
