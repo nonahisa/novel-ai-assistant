@@ -510,6 +510,7 @@ export const COMMAND_KIND_FEATURES: Readonly<Record<string, KindFeature>> = {
   "novelai.removeChapter": "anyKind",
   "novelai.proposeChapters": "anyKind",
   "novelai.chaptersFromHeadings": "anyKind",
+  "novelai.importChaptersFromBackup": "anyKind",
   "novelai.suggestChapterName": "anyKind",
 
   // ── プロット。エッセイ・歌詞にも書き出しの見出しがある（6.109.3） ──

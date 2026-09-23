@@ -1434,7 +1434,7 @@
         },
         {
           "command": "novelai.importChaptersFromBackup",
-          "when": "view == novelai.works && viewItem =~ /^work-(novel|script|unset)$/",
+          "when": "view == novelai.works && viewItem =~ /^work-(novel|script|unset)(-(essay|lyrics))?$/",
           "group": "1_stats@6"
         },
         {
