@@ -103,6 +103,7 @@ import {
   type CheckProgress,
 } from "../views/progress";
 import { estimateRunTimeText } from "../ai/runTimeEstimate";
+import { describeSendVolume } from "../core/sendVolume";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurn } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
@@ -453,6 +454,22 @@ export async function checkContradictions(
     ) {
       return undefined;
     }
+    /*
+      **実際に送るぶんで数える**（A3①、2026-09-23）。
+
+      本文の字数だけで見積もっていたので、引き継ぎ（`carryOver`。既定2話）で
+      増えた人物の設定（＋16%）が時間にも量にも出ていなかった。送るときと
+      同じ組み立て（`promptFor`）でプロンプトを組み、指示も含めて数える。
+      照らし合わせる相手が無いチャンクは送らないので0字にする。
+    */
+    const sendChars = pending.map((chunk) => {
+      const built = promptFor(chunk, "settled");
+      return built ? systemPrompt.length + built.userPrompt.length : 0;
+    });
+    const sendVolume = describeSendVolume({
+      totalChars: sendChars.reduce((total, chars) => total + chars, 0),
+      bodyChars: pending.reduce((total, chunk) => total + chunk.text.length, 0),
+    });
     const detail = [
       `${chunks.length}チャンク中 ${pending.length}件を処理します` +
         `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
@@ -463,9 +480,10 @@ export async function checkContradictions(
         model: resolved.model,
         feature: "contradiction_check",
         count: pending.length,
-        // 送る本文の量。読み込みの時間を足す（設計書6.8.19）
-        inputChars: pending.map((chunk) => chunk.text.length),
+        // 送るぶんそのもの（指示・設定資料・本文）。読み込みの時間を足す（設計書6.8.19）
+        inputChars: sendChars,
       }),
+      sendVolume,
       `材料: 人物${material.characterCount}人 / 場所${material.locationCount}件 / ` +
         `世界観${material.worldCount}件`,
       // **送る量が増えることを黙らない**（設計書6.74）。過去の本文を
@@ -718,42 +736,19 @@ export async function checkContradictions(
           mode: "settled" | "future",
           futureFacts = ""
         ): Promise<unknown | undefined> {
-          // **まとめたチャンクでは、いちばん前の話に合わせる。**
-          // うしろに合わせると、前半の話にとって「まだ分かっていないこと」を
-          // 材料に渡すことになる（設計書6.10.3）
-          //
-          // **引き継ぎは人物を索引で見つけるためだけ**（設計書6.10.6）。
-          // 引き継いだ本文そのものはプロンプトへ入らない
-          const relevant = settings.relevantFor(chunk.text, chunk.chapterStart, {
-            carryOverText: carryOverFor(chunk).text,
-          });
           // **照らし合わせる相手が無いチャンクは飛ばす。**
           // 材料なしで問うと、本文だけを見て矛盾を作り出す
-          if (!relevant.hasAnything) return undefined;
+          const built = promptFor(chunk, mode, futureFacts);
+          if (!built) return undefined;
 
           try {
-            const bodyWithLines = withLineNumbers(chunk);
-            const previousSynopses = settings.synopsesBefore(chunk.chapterStart);
-            // **「あとで判明する事実」の向きには渡さない**（設計書6.74）。
-            // あちらは本命（settled）が通ったチャンクの補足で、既に実データで
-            // 測ってある。入力を増やすと、測った結果と別のものになる
-            const pastScenes = mode === "future" ? "" : pastScenesFor(chunk);
-            const userPrompt = buildContradictionCheckPrompt({
-              // **まとめたチャンクは、話が1つとは限らない。**
-              // 1つ目の話の名前だけを渡すと、2話目以降の本文を
-              // 1話目だと言って読ませることになる
-              chapterLabel: describeChunkScope(chunk, (filePath) =>
-                chapterLabelByFile.get(filePath)
-              ),
-              chunkTextWithLineNumbers: bodyWithLines,
-              characterDetails: relevant.characters,
-              locationDetails: relevant.locations,
-              worldviewSummary: relevant.worldview,
+            const {
+              userPrompt,
+              relevant,
+              bodyWithLines,
               previousSynopses,
-              categories,
-              futureFacts,
               pastScenes,
-            });
+            } = built;
 
             const response = await provider.generate({
               systemPrompt,
@@ -956,6 +951,63 @@ export async function checkContradictions(
     verifyNote,
     missedNote,
   };
+
+  /**
+   * そのチャンクへ送るプロンプトを組む。**照らし合わせる相手が無ければ undefined**
+   * （送らない）。
+   *
+   * **送るときと、押す前に送る量を数えるときの両方がここを通る**（A3①、
+   * 2026-09-23）。数える側に別の組み立てを書くと、引き継ぎ（`carryOver`）で
+   * 増えた人物のような「送るものにだけ効く差」が見積もりから抜ける。
+   */
+  function promptFor(
+    chunk: Chunk,
+    mode: "settled" | "future",
+    futureFacts = ""
+  ):
+    | {
+        userPrompt: string;
+        relevant: RelevantSettings;
+        bodyWithLines: string;
+        previousSynopses: string;
+        pastScenes: string;
+      }
+    | undefined {
+    // **まとめたチャンクでは、いちばん前の話に合わせる。**
+    // うしろに合わせると、前半の話にとって「まだ分かっていないこと」を
+    // 材料に渡すことになる（設計書6.10.3）
+    //
+    // **引き継ぎは人物を索引で見つけるためだけ**（設計書6.10.6）。
+    // 引き継いだ本文そのものはプロンプトへ入らない
+    const relevant = settings.relevantFor(chunk.text, chunk.chapterStart, {
+      carryOverText: carryOverFor(chunk).text,
+    });
+    if (!relevant.hasAnything) return undefined;
+
+    const bodyWithLines = withLineNumbers(chunk);
+    const previousSynopses = settings.synopsesBefore(chunk.chapterStart);
+    // **「あとで判明する事実」の向きには渡さない**（設計書6.74）。
+    // あちらは本命（settled）が通ったチャンクの補足で、既に実データで
+    // 測ってある。入力を増やすと、測った結果と別のものになる
+    const pastScenes = mode === "future" ? "" : pastScenesFor(chunk);
+    const userPrompt = buildContradictionCheckPrompt({
+      // **まとめたチャンクは、話が1つとは限らない。**
+      // 1つ目の話の名前だけを渡すと、2話目以降の本文を
+      // 1話目だと言って読ませることになる
+      chapterLabel: describeChunkScope(chunk, (filePath) =>
+        chapterLabelByFile.get(filePath)
+      ),
+      chunkTextWithLineNumbers: bodyWithLines,
+      characterDetails: relevant.characters,
+      locationDetails: relevant.locations,
+      worldviewSummary: relevant.worldview,
+      previousSynopses,
+      categories,
+      futureFacts,
+      pastScenes,
+    });
+    return { userPrompt, relevant, bodyWithLines, previousSynopses, pastScenes };
+  }
 
   /**
    * そのチャンクへ渡す、過去の関連場面（設計書6.74）。無ければ空文字。
