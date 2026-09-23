@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを引き受けるVSCode拡張機能で、AIは提案するだけで原稿は書き換えません（無料の手元AIだけでも使えます）。※現在テスト中です。",
-  "version": "0.82.7",
+  "version": "0.83.0",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -317,6 +317,12 @@
         "title": "作品目標設定",
         "category": "小説執筆",
         "icon": "$(target)"
+      },
+      {
+        "command": "novelai.openSchedule",
+        "title": "スケジュール",
+        "category": "小説執筆",
+        "icon": "$(calendar)"
       },
       {
         "command": "novelai.suggestContests",
@@ -1790,6 +1796,11 @@
           "default": 0,
           "minimum": 0,
           "markdownDescription": "1か月の目標字数。`0` で目標なし。\n\n・執筆量パネルに達成率\n・残りの日で1日あたり何字書けばよいか"
+        },
+        "novelai.schedule.notify": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "スケジュールの段の開始・期日、締切・発売日・連載開始が近づいたら知らせる（1日1回だけ）。\n\n・起動の少しあとと、日が替わったときに確かめる\n・間に合わない予定・書き溜めが尽きそうな連載も"
         },
         "novelai.stats.dayBoundaryHour": {
           "type": "number",

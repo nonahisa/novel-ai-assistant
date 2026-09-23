@@ -7,6 +7,7 @@ import {
   type StepStatus,
 } from "../models/schedule";
 import { isDateKey } from "../models/workGoals";
+import { POSTING_SITES } from "../models/posting";
 import { goalsContestSchedule, GOALS_CONTEST_SCHEDULE_ID, type IdMaker } from "./scheduleTemplates";
 
 /**
@@ -42,7 +43,9 @@ export interface SchedulePatch {
  */
 export function materializeGoalsSchedule(file: ScheduleFile, scheduleId: string, now: string): ScheduleFile {
   if (scheduleId !== GOALS_CONTEST_SCHEDULE_ID) return file;
-  if (file.schedules.some((schedule) => schedule.id === scheduleId)) return file;
+  // 既に下ろしてある・別の機器が応募先に従う公募を作っていたら、足さない
+  // （2つ目を作ると二重に持つことになる。古い画面からの操作は「見つかりません」で止まる）
+  if (file.schedules.some((schedule) => schedule.id === scheduleId || schedule.followsGoals)) return file;
   return { ...file, schedules: [goalsContestSchedule(now), ...file.schedules] };
 }
 
@@ -239,6 +242,9 @@ function checkSerial(rule: SerialRule): SerialRule {
   }
   if (!Number.isInteger(rule.firstEpisode) || rule.firstEpisode < 1) {
     throw new Error("始めの話数は1以上の整数で入れてください。");
+  }
+  if (rule.site !== null && !POSTING_SITES.some((site) => site.id === rule.site)) {
+    throw new Error("投稿先が一覧にありません。");
   }
   const endEpisode = checkCount(rule.endEpisode, "完結予定の話数");
   if (endEpisode !== null && endEpisode < rule.firstEpisode) {

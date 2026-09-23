@@ -225,6 +225,23 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           "・入れると執筆量パネルに「あと何日・あと何字・1日あたり何字」\n\n" +
           "・設定の1日・1月の目標は全作品で共有",
       },
+      /*
+        スケジュール（設計書6.111）。**作品目標設定のすぐ下**——応募先の締切が
+        そのまま公募のスケジュールのマイルストーンになるので、決める場所の隣に置く。
+      */
+      {
+        kind: "action",
+        command: "novelai.openSchedule",
+        label: "スケジュール",
+        icon: "calendar",
+        requiresWork: true,
+        detail:
+          "締切・発売日・連載開始から段取りを逆算して並べる\n\n" +
+          "・公募・自費出版・出版社・WEB連載。1つの作品にいくつでも\n\n" +
+          "・縦が時間、横が作品。作業のある作品だけ並ぶ\n\n" +
+          "・間に合わないときは「あと○日足りない」\n\n" +
+          "・設定フォルダーに入るので同期で機器間を行き来する",
+      },
       {
         kind: "action",
         command: "novelai.showEditHistory",

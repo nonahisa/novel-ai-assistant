@@ -37,6 +37,8 @@ const OVERWRITE_ALLOWED: Record<string, string> = {
   "bookStore.ts": "assertSaveAllowed を持つ（未保存の下書きだけ別に控える）",
   "chapterStore.ts": "assertSaveAllowed を持つ（未保存の編集も断る）",
   "postingStore.ts": "読み込み時の控えと突き合わせる",
+  // スケジュール（設計書6.111.8）。投稿状態の台帳と同じ約束
+  "scheduleStore.ts": "読み込み時の控えと突き合わせる（未保存の編集も断る）",
   "readerTargetStore.ts": "assertSaveAllowed を持つ（未保存の編集も断る）",
 
   // 作り直せる（消えても作者の書いたものは失われない）
@@ -112,6 +114,7 @@ describe("設定と台帳を書く経路", () => {
       "chapterStore.ts",
       "postingStore.ts",
       "readerTargetStore.ts",
+      "scheduleStore.ts",
     ]) {
       const source = readFileSync(resolve(CORE, name), "utf8");
       expect(source, name).toContain("hashBytes");

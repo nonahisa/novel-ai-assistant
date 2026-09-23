@@ -146,6 +146,15 @@ export async function setWorkGoals(
           ]
         : []),
       {
+        // 応募先の締切は、そのまま公募のスケジュールのマイルストーンになる（設計書6.111.6）
+        label: "$(calendar) スケジュールを開く",
+        description: goals.contest ? `${goals.contest.name}の締切から逆算` : "",
+        detail:
+          "締切・発売日・連載開始から段取り（執筆・推敲・見直しなど）を逆算して並べます。" +
+          "応募先を入れていれば、公募のスケジュールが出ます。",
+        action: "schedule" as const,
+      },
+      {
         label: "$(target) 1日・1か月の目標（全作品共通）",
         description: commonGoalsDescription(common.daily, common.monthly),
         detail:
@@ -203,6 +212,10 @@ export async function setWorkGoals(
   }
   if (picked.action === "forecastContests" && contests && options.deviceId) {
     await chooseContestByForecast(work, { ...contests, deviceId: options.deviceId });
+    return;
+  }
+  if (picked.action === "schedule") {
+    await vscode.commands.executeCommand("novelai.openSchedule");
     return;
   }
   if (picked.action === "commonGoals") {

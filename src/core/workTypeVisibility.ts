@@ -270,6 +270,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   // ── 執筆量・記録 ──
   "novelai.showWritingStats": "allTypes",
   "novelai.showAllWorksWritingStats": "allTypes",
+  // スケジュール（設計書6.111）。締切や発売日は作品の種類を問わない
+  "novelai.openSchedule": "allTypes",
   "novelai.showEditHistory": "allTypes",
   // 外部AIの利用許可（設計書6.87.10）。**どのタイプの作品でも要る**——
   // 外から読まれうることに、作品の種類は関係ない

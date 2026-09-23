@@ -333,6 +333,8 @@ import {
   openAllWorksWritingStatsPanel,
   refreshAllWorksWritingStatsPanel,
 } from "./features/allWorksWritingStatsPanel";
+import { openSchedulePanel, refreshSchedulePanel } from "./features/schedulePanel";
+import { startScheduleNotices } from "./features/scheduleNotify";
 import {
   createEpisodePlot,
   resumeWriting,
@@ -3075,6 +3077,8 @@ export async function activate(
         await setWorkGoals(work, { contests: contestDeps, deviceId });
         // 目標を変えたら、開いているパネルの「あと何字」を出し直す
         await refreshWritingStatsPanel(work, deviceId);
+        // 応募先はスケジュールの公募のマイルストーンでもある（設計書6.111.6）
+        await refreshSchedulePanel({ registry, deviceId });
       }
     ),
     /*
@@ -3689,6 +3693,15 @@ export async function activate(
       await openAllWorksWritingStatsPanel(context, registry, deviceId);
     })
   );
+
+  // スケジュール（設計書6.111）。全作品を1枚に並べる（縦が時間、横が作品）。AIは使わない
+  context.subscriptions.push(
+    registerCommand("novelai.openSchedule", async () => {
+      await openSchedulePanel(context, { registry, deviceId });
+    })
+  );
+  // 段の開始・期日が近づいたら1日1回だけ知らせる（設定で切れる。起動の20秒後から）
+  startScheduleNotices(context, registry, deviceId);
 
   // 執筆再開支援と単話プロット（設計書6.36）。**どちらもAIを呼ばない**。
   // 再開の1枚は読むだけ、単話プロットは新規作成だけ（上書きしない）
