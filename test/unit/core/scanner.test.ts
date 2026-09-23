@@ -527,9 +527,10 @@ describe("下ごしらえも読み口で読む", () => {
  *
  * 1話だけの試験用フォルダーを作品として登録すると「17ファイル／22字」と
  * 出た（本文は3ファイル）。本文フォルダーが無いと作品の根を丸ごと歩くので、
- * 根の README・メモと、名前が既定と違う設定フォルダーの中身が話に数えられて
- * いた。**既存の作品の話数は変えない**——本文フォルダーの無い作品・根に
- * 話を並べた作品の両方を、ここで押さえる。
+ * 根の README と、名前が既定と違う設定フォルダーの中身が話に数えられて
+ * いた。**外すのは、はっきり原稿でないと分かる名前だけ**——話数が読めない
+ * ことを理由には外さない（作者の作品には、根に `続き.txt` の本文がある）。
+ * 既存の作品の話数が変わらないことを、作者の作品の形を写した作り物で押さえる。
  */
 describe("作品の根を歩くとき", () => {
   const ROOT = "c:/novels/work";
@@ -602,18 +603,23 @@ describe("作品の根を歩くとき", () => {
     });
   }
 
-  const names = (result: Awaited<ReturnType<typeof scanWork>>): string[] =>
-    result.episodes.map((episode) => episode.fileName);
 
-  test("根に1話＋設定の雛形＋README＋メモ：話は1つだけ", async () => {
+  const names = (result: Awaited<ReturnType<typeof scanWork>>): string[] =>
+    result.episodes.map((episode) => episode.fileName).sort();
+  const skipped = (result: Awaited<ReturnType<typeof scanWork>>): string[] =>
+    result.nonEpisodeFiles.map((file) => file.split(/[\\/]/).pop() ?? "").sort();
+
+  test("根の README・LICENSE・AIへの指示書は話に数えず、数えなかったことを返す", async () => {
     stubWorkTree({
       ".aiwriter/config.json": configJson("設定"),
       "001.txt": "灯が歩いた。",
       "README.md": "# 試験用の作品\n\nこのフォルダーは確認用です。\n",
-      "メモ.md": "- 次の話で川を渡らせる\n",
-      "登場人物の雛形.md": "## 名前\n\n## 年齢\n",
+      "LICENSE.txt": "All rights reserved.\n",
+      "CHANGELOG.md": "## 1.0\n",
+      "AGENTS.md": "# この作品について答えるとき\n",
+      "GEMINI.md": "# この作品について答えるとき\n",
       "設定/人物.md": "## 灯\n",
-      "設定/世界観.md": "## 川の町\n",
+      "設定/plot.md": "## 起\n",
     });
 
     const result = await scanWork(work);
@@ -621,10 +627,21 @@ describe("作品の根を歩くとき", () => {
     expect(names(result)).toEqual(["001.txt"]);
     expect(result.stats.fileCount).toBe(1);
     expect(result.stats.totals.net).toBe("灯が歩いた。".length);
-    // **落としたことは返す**（作品情報と同じ。黙って消したことにしない）
-    expect(
-      result.nonEpisodeFiles.map((file) => file.split(/[\\/]/).pop()).sort()
-    ).toEqual(["README.md", "メモ.md", "登場人物の雛形.md"].sort());
+    expect(skipped(result)).toEqual(
+      ["AGENTS.md", "CHANGELOG.md", "GEMINI.md", "LICENSE.txt", "README.md"].sort()
+    );
+  });
+
+  test("README.md＋001.txt：1話と、数えなかった1件", async () => {
+    stubWorkTree({
+      "README.md": "# 作品\n",
+      "001.txt": "一。",
+    });
+
+    const result = await scanWork(work);
+
+    expect(result.stats.fileCount).toBe(1);
+    expect(skipped(result)).toEqual(["README.md"]);
   });
 
   test("設定フォルダーの名前が既定と違っても、その中は歩かない", async () => {
@@ -645,9 +662,8 @@ describe("作品の根を歩くとき", () => {
     ).not.toContain("資料");
   });
 
-  test("本文フォルダーの中の設定フォルダーも、場所で外す", async () => {
-    // 設定フォルダーを本文フォルダーの中に置いた作品（settingsDir を
-    // 「原稿/資料」にした形）でも、設定の中身が話に混ざらないこと
+  test("設定フォルダーを本文フォルダーの中に置いても、場所で外す", async () => {
+    // settingsDir を「原稿/資料」にした形
     stubWorkTree({
       ".aiwriter/config.json": JSON.stringify({
         schemaVersion: "1",
@@ -665,89 +681,134 @@ describe("作品の根を歩くとき", () => {
     expect(names(result)).toEqual(["001.txt"]);
   });
 
-  // ─── ここから下は、既存の作品の話数が変わらないことを守る ───
-
-  test("根に話を並べた作品：話数の読める名前は、形を問わずすべて話", async () => {
+  test("設定フォルダーを作品の根にした作品：拡張機能が作るファイルだけを外す", async () => {
+    // settingsDir を「.」にした形。プロット・紹介文・ターゲットシートは
+    // 根に置かれるが、作者の書いた「メモ.md」は原稿かもしれないので残す
     stubWorkTree({
+      ".aiwriter/config.json": configJson("."),
       "001.txt": "一。",
-      "002_湖畔の誓い.txt": "二。",
-      "第3話 再会.md": "三。",
-      "episode_0004.txt": "四。",
-      "005-006_合本.txt": "五六。",
-      "プロローグ.txt": "序。",
-      "幕間1.txt": "間。",
-      "エピローグ.txt": "終。",
-      "2026-08-16.txt": "下書き。",
+      "plot.md": "## 起\n",
+      "synopsis.md": "川の話。\n",
+      "ターゲットシート.md": "## 読者\n",
+      "メモ.md": "- 川を渡らせる\n",
     });
 
     const result = await scanWork(work);
 
-    expect(result.stats.fileCount).toBe(9);
-    expect(result.nonEpisodeFiles).toEqual([]);
-  });
-
-  test("話数の読めない名前でも、投稿サイトの頭書きや合本の形なら話", async () => {
-    // 名前だけで落とさない（`workInfoFile.ts` と同じ用心）。
-    // DLしたファイルの名前を作者が付け替えていることはある
-    stubWorkTree({
-      "001.txt": "一。",
-      "灯.txt": "【タイトル】\n第2話　灯\n\n【本文（1行）】\n灯が歩いた。\n",
-      "作品まるごと.txt": [
-        "------ エピソード 3 開始 ------",
-        "【エピソードタイトル】",
-        "第3話　川",
-        "【本文】",
-        "川を渡った。",
-        "",
-      ].join("\n"),
-    });
-
-    const result = await scanWork(work);
-
-    expect(names(result).sort()).toEqual(
-      ["001.txt", "灯.txt", "作品まるごと.txt"].sort()
+    expect(names(result)).toEqual(["001.txt", "メモ.md"].sort());
+    expect(skipped(result)).toEqual(
+      ["plot.md", "synopsis.md", "ターゲットシート.md"].sort()
     );
   });
 
-  test("根に話数の読める名前が1つも無ければ、これまでどおり全部を話とみなす", async () => {
-    // 題だけで名付けた作品は、README と見分けが付かない。
-    // **迷ったら本文として扱う**——原稿を1つ落とすほうが困る
+  // ─── ここから下は、既存の作品の話数が変わらないことを守る ───
+  // 作者の作品の形を写した作り物（名前だけ。中身は作り物）
+
+  test("話数の名前と並んだ「続き.txt」も話（『じいちゃんの自分史』の形）", async () => {
     stubWorkTree({
-      "出会い.txt": "出会った。",
-      "別れ.txt": "別れた。",
-      "README.md": "# 作品\n",
+      "episode_0001_生まれた村.txt": "一。",
+      "episode_0002_町へ出る.txt": "二。",
+      "続き.txt": "三。",
     });
 
     const result = await scanWork(work);
 
     expect(result.stats.fileCount).toBe(3);
-    expect(result.nonEpisodeFiles).toEqual([]);
+    expect(skipped(result)).toEqual([]);
   });
 
-  test("根の下の章フォルダーは、これまでどおり中の全部を話とみなす", async () => {
+  test("about.txt と話数の名前の話が並ぶ作品は3話（『たゆたう鉛』の形）", async () => {
+    // 作品情報の見出しを持たない about.txt は、名前が何であれ本文
+    stubWorkTree({
+      "about.txt": "川べりで拾った鉛の話。\n",
+      "episode_0001.md": "一。",
+      "episode_0002.txt": "二。",
+    });
+
+    const result = await scanWork(work);
+
+    expect(result.stats.fileCount).toBe(3);
+    expect(skipped(result)).toEqual([]);
+  });
+
+  test("合本の頭書きを持つファイル＋「エピソード32.txt」：話数は今のまま", async () => {
+    stubWorkTree({
+      "N5078JI.txt": [
+        "------ エピソード 1 開始 ------",
+        "【エピソードタイトル】",
+        "第1話　川",
+        "【本文】",
+        "川を渡った。",
+        "------ エピソード 2 開始 ------",
+        "【エピソードタイトル】",
+        "第2話　橋",
+        "【本文】",
+        "橋を架けた。",
+        "",
+      ].join("\n"),
+      "エピソード32.txt": "三十二。",
+    });
+
+    const result = await scanWork(work);
+
+    expect(names(result)).toEqual(["N5078JI.txt", "エピソード32.txt"].sort());
+    expect(result.stats.fileCount).toBe(2);
+  });
+
+  test("メモ・あとがき・番外編・日付の下書きも、これまでどおり話", async () => {
     stubWorkTree({
       "001.txt": "一。",
-      "第2章/002.txt": "二。",
-      "第2章/番外編.txt": "番外。",
+      "メモ.md": "- 川を渡らせる\n",
+      "あとがき.txt": "読んでくださって。\n",
+      "番外編.txt": "番外。",
+      "2026-08-16.txt": "下書き。",
+      "出会い.txt": "出会った。",
     });
 
     const result = await scanWork(work);
 
-    expect(result.stats.fileCount).toBe(3);
+    expect(result.stats.fileCount).toBe(6);
+    expect(skipped(result)).toEqual([]);
   });
 
-  test("本文フォルダーがあれば、その中は名前で選り分けない", async () => {
-    // 本文フォルダーは作者が「ここが原稿」と決めた場所なので、
-    // 話数の読めない名前（番外編・あとがき）も話のまま
+  test("章フォルダーと本文フォルダーの中は、README の名前でも外さない", async () => {
+    // 作者が「ここが原稿」と決めた場所の中は、名前で判断しない
     stubWorkTree({
       "本文/001.txt": "一。",
-      "本文/番外編.txt": "番外。",
+      "本文/README.md": "あらすじ代わりの一話。\n",
       "README.md": "# 作品\n",
     });
 
     const result = await scanWork(work);
 
-    expect(names(result).sort()).toEqual(["001.txt", "番外編.txt"].sort());
-    expect(result.nonEpisodeFiles).toEqual([]);
+    expect(names(result)).toEqual(["001.txt", "README.md"].sort());
+    expect(skipped(result)).toEqual([]);
+  });
+});
+
+describe("数えなかったファイルの知らせ", () => {
+  test("1件なら名前だけ、2件以上なら「ほか」を添える", async () => {
+    const { describeSkippedFiles } = await import("../../../src/core/scanner");
+
+    expect(
+      describeSkippedFiles({
+        nonEpisodeFiles: ["C:\\novels\\work\\README.md"],
+        workInfoFiles: [],
+      })
+    ).toBe("本文として数えなかったファイル：1件（README.md）");
+    expect(
+      describeSkippedFiles({
+        nonEpisodeFiles: ["C:\\novels\\work\\README.md"],
+        workInfoFiles: ["C:\\novels\\work\\about.txt"],
+      })
+    ).toBe("本文として数えなかったファイル：2件（README.md ほか）");
+  });
+
+  test("1件も無ければ空文字（知らせに何も足さない）", async () => {
+    const { describeSkippedFiles } = await import("../../../src/core/scanner");
+
+    expect(
+      describeSkippedFiles({ nonEpisodeFiles: [], workInfoFiles: [] })
+    ).toBe("");
   });
 });

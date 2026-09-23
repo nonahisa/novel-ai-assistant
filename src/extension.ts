@@ -38,7 +38,11 @@ import { nextEpisodeFileNameLike } from "./core/episodeRenumber";
 import { WorkFolderWatchers } from "./features/workFolderWatch";
 import { setStreamingSettingReader } from "./ai/ollamaStream";
 import { findLatestEpisode } from "./core/latestEpisode";
-import { scanWork, type ScanTiming } from "./core/scanner";
+import {
+  describeSkippedFiles,
+  scanWork,
+  type ScanTiming,
+} from "./core/scanner";
 import { createMaintenanceTrigger } from "./core/maintenanceTrigger";
 import { SUPPORTED_EXTENSIONS, WorkEntry } from "./models/types";
 import {
@@ -2676,10 +2680,13 @@ export async function activate(
     // （2026-08-22、作者の環境で判明）
     try {
       const result = await scanWork(entry);
+      // **数えなかったファイルがあれば一言添える**（0.81.1）。README などを
+      // 黙って外すと、作者の思う話数と違ったときに確かめようがない
+      const skipped = describeSkippedFiles(result);
       vscode.window.showInformationMessage(
         `「${entry.title}」を登録しました（${result.stats.fileCount}ファイル / ${formatCount(
           result.stats.totals.net
-        )}字）`
+        )}字）${skipped ? `。${skipped}` : ""}`
       );
     } catch (error) {
       logFailure("登録後の集計", {

@@ -1,13 +1,13 @@
 import * as path from "./paths";
 import * as vscode from "vscode";
 import { isDirectory, listDirectory, pathExists } from "./fileSystem";
-// 名前の見分けは作品の走査（`scanner.ts`）と共用する。写しを作らない
-import { isEpisodeFileName } from "./episodeParser";
+import { parseEpisodeFileName } from "./episodeParser";
 import {
   AIWRITER_DIR,
   CONFIG_FILE,
   DEFAULT_MANUSCRIPT_DIR,
   DEFAULT_SETTINGS_DIR,
+  type EpisodeKind,
 } from "../models/types";
 
 /**
@@ -140,6 +140,27 @@ async function hasEpisodeFiles(folderPath: string): Promise<boolean> {
   }
   return false;
 }
+
+/**
+ * その名前が本文（話数のファイル）に見えるか。
+ *
+ * **「本編以外」で通してはいけない。** 読み取れなかったものは `不明` に
+ * なるので、`README.md` や `プロンプト雛形.txt` まで本文として数えて
+ * しまい、**書庫そのものを作品と誤認する**（テストが捕まえた）。
+ */
+function isEpisodeFileName(name: string): boolean {
+  const extension = path.extname(name).toLowerCase();
+  if (extension !== ".txt" && extension !== ".md") return false;
+  const parsed = parseEpisodeFileName(name);
+
+  // 話数が読めれば本文
+  if (parsed.chapterStart !== null) return true;
+  // 話数は無くても、種別が読めれば本文（`プロローグ.txt` など）
+  return NAMED_KINDS.has(parsed.kind);
+}
+
+/** 話数が無くても本文と分かる種別。`不明` と `本編` は含めない */
+const NAMED_KINDS = new Set<EpisodeKind>(["プロローグ", "エピローグ", "幕間"]);
 
 /**
  * その作品フォルダーに、本文のファイルがいくつあるか。

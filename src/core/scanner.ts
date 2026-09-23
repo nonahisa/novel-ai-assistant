@@ -9,8 +9,11 @@ import {
 } from "../models/types";
 import { addCounts, emptyCounts } from "./charCount";
 import { countEpisodeChars, episodeBodyForCount } from "./episodeCharCount";
-import { isEpisodeFileName, parseEpisodeFileName } from "./episodeParser";
-import { readWorkConfig, workPaths } from "./workRegistry";
+import { parseEpisodeFileName } from "./episodeParser";
+import { PLOT_FILE, readWorkConfig, workPaths } from "./workRegistry";
+import { AI_INSTRUCTION_TARGETS } from "./aiInstructions";
+import { SYNOPSIS_FILE } from "./synopsisDoc";
+import { TARGET_SHEET_FILE } from "./targetSheetDoc";
 import { parseEpisodeMetadata } from "./metadataParser";
 import { isConflictSideFile } from "./conflictFile";
 import { isWorkInfoFile } from "./workInfoFile";
@@ -94,10 +97,11 @@ export async function scanWork(work: WorkEntry): Promise<{
    */
   workInfoFiles: string[];
   /**
-   * 作品の根に置かれた、話ではないファイル（README・メモなど。絶対パス）。
+   * **はっきり原稿でないと分かる名前**なので話に数えなかったファイル（絶対パス）。
    *
-   * **本文フォルダーが無く、作品の根を歩いたときだけ**埋まる
-   * （`sortsByName` の条件）。作品情報と同じく、落としたことが分かるように返す。
+   * README・LICENSE・AIへの指示書（AGENTS.md など）と、設定フォルダーに
+   * この拡張機能が作るファイル（plot.md など）。一覧は `isKnownNonManuscript`。
+   * 作品情報と同じく、落としたことが分かるように返す（登録の知らせに出す）。
    */
   nonEpisodeFiles: string[];
   /** 何にどれだけかかったか（設計書6.107）。**使わなくてよい** */
@@ -191,25 +195,17 @@ export async function scanWork(work: WorkEntry): Promise<{
   const workInfoFiles: string[] = [];
   const nonEpisodeFiles: string[] = [];
   /*
-    **作品の根を歩いたときだけ、根のファイルを名前で選り分ける**（0.81.1）。
-    本文フォルダーが無いと根を丸ごと歩くので、README やメモまで話に
-    数えていた（1話だけの試験用フォルダーが「17ファイル」と出た。
+    **作品の根を歩いたとき、はっきり原稿でないと分かる名前だけを外す**
+    （0.81.1）。本文フォルダーが無いと根を丸ごと歩くので、README まで
+    話に数えていた（1話だけの試験用フォルダーが「17ファイル」と出た。
     ノートPCの実機確認、2026-09-23）。
 
-    **根に話数の読める名前が1つも無ければ選り分けない。** 題だけで
-    名付けた作品は README と見分けが付かず、そこで落とすと原稿が消えた
-    ように見える（`workInfoFile.ts` と同じ「迷ったら本文」）。見分けは
-    書庫の判定（`workCollection.ts` の「直下に話数として読めるファイルが
-    あるか」）と同じ `isEpisodeFileName` に、日付の名前を足したもの。
+    **話数が読めないことを理由には外さない。** 作者の作品には、
+    `episode_0001_….txt` と並んで `続き.txt`（本文）を置いたものがある。
+    「メモ」「about」「あとがき」「番外編」のような名前も原稿でありうる。
+    原稿を黙って数えから外すほうが、README を1つ余計に数えるより困る。
   */
   const rootDir = targetDir === p.root ? targetDir : undefined;
-  const sortsByName =
-    rootDir !== undefined &&
-    files.some(
-      (file) =>
-        isDirectChild(rootDir, file.path) &&
-        readsAsEpisodeName(path.basename(file.path))
-    );
   const excludeRuby = vscode.workspace
     .getConfiguration("novelai")
     .get<boolean>("excludeRubyFromCount", true);
@@ -217,8 +213,8 @@ export async function scanWork(work: WorkEntry): Promise<{
   /**
    * 1ファイルぶんの計測を締める（設計書6.107）。
    *
-   * **ループから抜ける所すべてで呼ぶ。** いまは3つある——作品情報の
-   * ファイルで `continue` する道、根の話ではないファイルで `continue` する
+   * **ループから抜ける所すべてで呼ぶ。** いまは3つある——原稿でないと
+   * 分かる名前で `continue` する道、作品情報のファイルで `continue` する
    * 道、話として積む道。増やすときは
    * ここを呼ぶのを忘れないこと（漏らすと「最長」がそのぶん軽く出る）。
    */
@@ -235,6 +231,14 @@ export async function scanWork(work: WorkEntry): Promise<{
     const filePath = file.path;
     const fileName = path.basename(filePath);
     const ext = path.extname(fileName).toLowerCase();
+
+    // **名前だけで決まるので、中身を解く前に抜ける**
+    if (isKnownNonManuscript(filePath, rootDir, p.settings)) {
+      nonEpisodeFiles.push(filePath);
+      noteFile(fileName, fileStartedAt);
+      continue;
+    }
+
     const parsed = parseEpisodeFileName(fileName);
 
     let counts = emptyCounts();
@@ -298,22 +302,6 @@ export async function scanWork(work: WorkEntry): Promise<{
 
       hasConflictMarkers = containsConflictMarkers(text);
       parseMs += performance.now() - parseStartedAt;
-
-      // **根の話ではないファイルは、中身を見てから落とす。** 投稿サイトの
-      // 頭書きか合本の区切りがあれば、名前が何であれ話である（DLした
-      // ファイルの名前を作者が付け替えていることはある）
-      if (
-        sortsByName &&
-        rootDir !== undefined &&
-        isDirectChild(rootDir, filePath) &&
-        !readsAsEpisodeName(fileName) &&
-        !parsedMeta.hasMetadata &&
-        collected === null
-      ) {
-        nonEpisodeFiles.push(filePath);
-        noteFile(fileName, fileStartedAt);
-        continue;
-      }
 
       if (!hasConflictMarkers) {
         const countStartedAt = performance.now();
@@ -410,6 +398,28 @@ export async function scanWork(work: WorkEntry): Promise<{
       slowestMs,
     },
   };
+}
+
+/**
+ * 本文として数えなかったファイルを、知らせの一言にする（0.81.1）。
+ *
+ * **黙って外さない。** 走査が外すのは「はっきり原稿でないと分かる名前」と
+ * 作品情報（`about.txt`）だけだが、それでも作者の思っていた話数と違えば、
+ * 何が外れたのかが分からないと確かめようがない。1件目の名前を添える。
+ *
+ * 1件も無ければ空文字（呼び出し側はそのまま繋げてよい）。
+ */
+export function describeSkippedFiles(
+  result: Pick<
+    Awaited<ReturnType<typeof scanWork>>,
+    "nonEpisodeFiles" | "workInfoFiles"
+  >
+): string {
+  const skipped = [...result.nonEpisodeFiles, ...result.workInfoFiles];
+  if (skipped.length === 0) return "";
+  const first = path.basename(skipped[0]);
+  const more = skipped.length > 1 ? " ほか" : "";
+  return `本文として数えなかったファイル：${skipped.length}件（${first}${more}）`;
 }
 
 /**
@@ -562,16 +572,70 @@ function isDirectChild(dir: string, filePath: string): boolean {
 }
 
 /**
- * 名前が話に見えるか（作品の根で選り分けるとき）。
+ * リポジトリの決まりもののファイル（`README.md`・`LICENSE.txt`・`CHANGELOG.md`）。
  *
- * 書庫の見分けと同じ `isEpisodeFileName` に、**日付の名前を足す。**
- * 日付で書く下書き（SNS記事。設計書6.4.6）は、根に並べる運用がある。
- * 書庫の見分けのほうは日付を見ないが、あちらは「作品か」を決めるだけで、
- * ここで落とすと原稿が一覧から消える。
+ * GitHub で作品を管理すると作品の根に置かれる。**名前の頭だけで決める**
+ * （`README_ja.md`・`LICENSE-CC.txt` のような変わり種も同じもの）。
  */
-function readsAsEpisodeName(fileName: string): boolean {
-  if (isEpisodeFileName(fileName)) return true;
-  return parseEpisodeFileName(fileName).date !== null;
+const REPOSITORY_FILE = /^(?:readme|license|licence|changelog)(?:[._-]|$)/i;
+
+/**
+ * AIへの指示書のうち、作品の根に置かれるもの（`AGENTS.md`・`GEMINI.md`）。
+ *
+ * **置き先の表（`AI_INSTRUCTION_TARGETS`）から作る。** 名前を写すと、
+ * 置き先が増えたときにここだけ取り残される。フォルダーの中に置くもの
+ * （`.claude/skills/…`・`.aiwriter/…`）は、`.` 始まりで元から歩かない。
+ */
+const ROOT_INSTRUCTION_FILES = new Set(
+  AI_INSTRUCTION_TARGETS.map((target) => target.instructionPath)
+    .filter((instructionPath) => !/[\\/]/.test(instructionPath))
+    .map((name) => name.toLowerCase())
+);
+
+/**
+ * 設定フォルダーの直下にこの拡張機能が作るファイル（プロット・紹介文・
+ * ターゲットシート）。**定数から作る**（名前を写さない）。
+ *
+ * 設定フォルダーはふつう丸ごと歩かない（`acceptForScan`）ので、これが
+ * 効くのは**設定フォルダーを本文と同じ場所にした作品**（`settingsDir` を
+ * 「.」や本文フォルダーにした形）だけである。
+ */
+const SETTINGS_GENERATED_FILES = new Set(
+  [PLOT_FILE, SYNOPSIS_FILE, TARGET_SHEET_FILE].map((name) =>
+    name.toLowerCase()
+  )
+);
+
+/**
+ * はっきり原稿でないと分かるファイルか（0.81.1）。
+ *
+ * **話数が読めないことを理由には外さない。** 作者の作品には、話数の名前と
+ * 並んで `続き.txt`（本文）を根に置いたものがある。外すのは
+ * 「作者の原稿ではありえない名前」の短い一覧だけで、「メモ」「about」
+ * 「あとがき」「番外編」「続き」は**外さない**（原稿かもしれない）。
+ *
+ * - 作品の根を歩いたとき、根の直下の README・LICENSE・CHANGELOG と AIへの指示書
+ * - 設定フォルダーの直下の、この拡張機能が作るファイル
+ *
+ * 本文フォルダーの中と章フォルダーの中は、名前で外さない。作者が
+ * 「ここが原稿」と決めた場所である。
+ *
+ * @param rootDir 作品の根を歩いているときだけ、その根。本文フォルダーを歩くときは undefined
+ */
+function isKnownNonManuscript(
+  filePath: string,
+  rootDir: string | undefined,
+  settingsDir: string
+): boolean {
+  const name = path.basename(filePath);
+  const lower = name.toLowerCase();
+  if (rootDir !== undefined && isDirectChild(rootDir, filePath)) {
+    if (REPOSITORY_FILE.test(name)) return true;
+    if (ROOT_INSTRUCTION_FILES.has(lower)) return true;
+  }
+  return (
+    SETTINGS_GENERATED_FILES.has(lower) && isDirectChild(settingsDir, filePath)
+  );
 }
 
 /**
