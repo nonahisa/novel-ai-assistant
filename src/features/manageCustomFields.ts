@@ -132,6 +132,7 @@ async function pickKind(set: CustomFieldSet): Promise<KindChoice | undefined> {
     {
       title: "どの資料に項目を足しますか",
       placeHolder: "種類を選んでください",
+      ignoreFocusOut: true,
     }
   );
   if (!picked || isCancelItem(picked)) return undefined;
@@ -167,6 +168,7 @@ async function pickAction(
   const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
     title: `${choice.label}の項目　現在: ${current}`,
     placeHolder: "何をしますか？",
+    ignoreFocusOut: true,
   });
   if (!picked || isCancelItem(picked)) return undefined;
   return "action" in picked ? picked.action : undefined;
@@ -216,6 +218,9 @@ async function addField(
     {
       title: `「${trimmedLabel}」の長さ`,
       placeHolder: "入力欄の高さに使います",
+      // 説明を Enter した直後に横のパネルへ焦点が戻ると、閉じない設定が無い
+      // この画面だけ一瞬で閉じ、項目が黙って保存されなかった（ノートPC、2026-09-23）
+      ignoreFocusOut: true,
     }
   );
   if (!length || !("multiline" in length)) return undefined;
@@ -246,6 +251,7 @@ async function removeField(
     {
       title: "外す項目",
       placeHolder: "入力済みの内容は消えません。表示されなくなるだけです",
+      ignoreFocusOut: true,
     }
   );
   if (!picked || !("key" in picked)) return undefined;
