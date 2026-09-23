@@ -1959,6 +1959,133 @@ describe("人物抽出フロー", () => {
     expect(confirmation).not.toContain("Anthropic");
   });
 
+  /*
+    **ノートPCの実機で見つかった3件**（2026-09-23、0.75.17）。
+
+    詳細メニューの「場所を抽出」が、作品一覧で誤って選ばれていた**作者の
+    本物の作品**で確認画面まで進んだ。①確認画面に作品名が無く、件数の
+    違いでやっと気づいた。②キャンセルしたのに、その作品のログに「抽出を
+    開始」が残った。③完了の知らせを閉じるまで、同じ抽出を押しても
+    「いま動いています」と断られた。
+  */
+  describe("実機で見つかった確認と記録と完了の知らせ", () => {
+    const realTitle = "こちら冒険者ギルド生活保護課!!";
+    const realWork: WorkEntry = { ...work, title: realTitle };
+
+    function installWindow(
+      answerConfirm: string | undefined,
+      completion: () => Promise<string | undefined> = async () => undefined
+    ): { showInformationMessage: ReturnType<typeof vi.fn<StubMessage>> } {
+      const showInformationMessage = vi.fn<StubMessage>(
+        async (_message: string, ...actions: unknown[]) =>
+          // 確認はモーダル（第2引数が { modal: true }）。それ以外は完了の知らせ
+          typeof actions[0] === "object" && actions[0] !== null
+            ? answerConfirm
+            : completion()
+      );
+      Object.assign(window, {
+        showInformationMessage,
+        showWarningMessage: vi.fn<StubMessage>(async () => completion()),
+        showErrorMessage: vi.fn(async () => undefined),
+        withProgress: vi.fn(async (_options, task) =>
+          task(
+            { report: vi.fn() },
+            { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+          )
+        ),
+      });
+      return { showInformationMessage };
+    }
+
+    function confirmationOf(
+      showInformationMessage: ReturnType<typeof vi.fn<StubMessage>>
+    ): string | undefined {
+      const call = showInformationMessage.mock.calls.find(
+        (args) => typeof args[1] === "object" && args[1] !== null
+      );
+      return call?.[0];
+    }
+
+    test("確認画面の文に作品名が入る", async () => {
+      const { showInformationMessage } = installWindow(undefined);
+
+      await extractCharacters(realWork, testRegistry());
+
+      expect(confirmationOf(showInformationMessage)).toContain(realTitle);
+    });
+
+    test("確認でキャンセルしたら、作品のログに「開始」を書かない", async () => {
+      loggedSteps.lines = [];
+      installWindow(undefined);
+
+      await expect(extractCharacters(realWork, testRegistry())).resolves.toBe(
+        false
+      );
+
+      expect(
+        loggedSteps.lines.filter((line) => line.includes("抽出を開始"))
+      ).toEqual([]);
+    });
+
+    test("実行を押したときは「開始」を書く（書かない実装で満点にしない）", async () => {
+      loggedSteps.lines = [];
+      installWindow("実行");
+      state.generate.mockResolvedValue(successfulResult("灯"));
+
+      await extractCharacters(realWork, testRegistry());
+
+      expect(
+        loggedSteps.lines.some(
+          (line) => line.includes("抽出を開始") && line.includes(realTitle)
+        )
+      ).toBe(true);
+    });
+
+    test("完了の知らせのボタンを押さないままでも、抽出は戻る（動いている札が外れる）", async () => {
+      // ボタンが押されない知らせ＝いつまでも返事が来ない
+      installWindow("実行", () => new Promise<string | undefined>(() => {}));
+      state.generate.mockResolvedValue(successfulResult("灯"));
+
+      const outcome = await Promise.race([
+        extractCharacters(realWork, testRegistry()),
+        new Promise<"待ったまま">((resolve) =>
+          setTimeout(() => resolve("待ったまま"), 2000)
+        ),
+      ]);
+
+      expect(outcome).toBe(true);
+    });
+
+    test("戻ったあとで押されたボタンも、ちゃんと効く", async () => {
+      let press: (label: string | undefined) => void = () => undefined;
+      const pressed = new Promise<string | undefined>((resolve) => {
+        press = resolve;
+      });
+      installWindow("実行", () => pressed);
+      state.generate.mockResolvedValue(successfulResult("灯"));
+      const executeCommand = vi.fn(async () => undefined);
+      const original = commands.executeCommand;
+      commands.executeCommand = executeCommand;
+      try {
+        await extractCharacters(realWork, testRegistry());
+        expect(executeCommand).not.toHaveBeenCalledWith(
+          "novelai.openSettingsPanel",
+          expect.anything()
+        );
+
+        press("設定資料を見る");
+        await vi.waitFor(() =>
+          expect(executeCommand).toHaveBeenCalledWith(
+            "novelai.openSettingsPanel",
+            { type: "work", work: realWork }
+          )
+        );
+      } finally {
+        commands.executeCommand = original;
+      }
+    });
+  });
+
   describe("終わったことと件数の内訳を、記録にも残す", () => {
     /** 抽出をひと通り走らせる。返すのは記録に出た「設定資料の抽出」の行 */
     async function runAndReadLog(): Promise<string | undefined> {

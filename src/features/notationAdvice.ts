@@ -118,6 +118,8 @@ export async function askNotationAdvice(
   const ok = await confirmPaidUsage(resolved.provider, {
     actionLabel: ACTION_LABEL,
     remember: { id: "ai.paid.notationAdvice" },
+    // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
+    workTitle: request.work.title,
     model: resolved.model,
     calls: 1,
     detail:

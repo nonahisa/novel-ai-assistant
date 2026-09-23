@@ -25,6 +25,7 @@ import { emptySynopsisSet } from "../models/synopsis";
 import { refreshSynopsisDoc } from "./generateBlurb";
 import { buildSchemaFiles, SCHEMA_DIR } from "../core/settingsSchema";
 import { logFailure, useLogFile } from "../core/logger";
+import { whenNoticePicked } from "../views/notify";
 
 /**
  * 設定資料のMarkdownを生成する。
@@ -356,13 +357,21 @@ export async function generateSettingsDocs(
 
   const skippedNote =
     skipped.length > 0 ? `（${skipped.join("・")}は該当なし）` : "";
-  const action = await vscode.window.showInformationMessage(
-    `${written.join("・")}の一覧を生成しました。${skippedNote}`,
-    "開く"
+  // **「開く」が押されるのを待たない**（ノートPCの実機、2026-09-23）。
+  // 種別ごとの抽出はこのあとで終わるので、ここで待つと、知らせを閉じる
+  // まで抽出の「動いている」札を持ったままになる（`whenNoticePicked`）
+  whenNoticePicked(
+    vscode.window.showInformationMessage(
+      `${written.join("・")}の一覧を生成しました。${skippedNote}`,
+      "開く"
+    ),
+    async (action) => {
+      if (action === "開く") {
+        await openGeneratedDoc(settingsDir, writtenFiles);
+      }
+    },
+    { label: "設定資料の一覧の生成", workFolder: work.folderPath }
   );
-  if (action === "開く") {
-    await openGeneratedDoc(settingsDir, writtenFiles);
-  }
 }
 
 /**

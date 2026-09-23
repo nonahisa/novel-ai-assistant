@@ -450,7 +450,7 @@ import {
 import { GENERATED_DIR } from "./core/generatedFiles";
 import { setTuningStoreRoot } from "./core/modelTuningStore";
 import { formatDayTime } from "./core/timestampedFileName";
-import { notifyDone } from "./views/notify";
+import { notifyDone, whenNoticePicked } from "./views/notify";
 import { initBackupPickFolder } from "./features/backupPickFolder";
 
 /**
@@ -3150,13 +3150,21 @@ export async function activate(
         if (!work) return;
         if (!isVectorSearchEnabled()) {
           const open = "準備を開く";
-          const picked = await vscode.window.showInformationMessage(
-            "意味検索が「切」になっています。切のままでも相談は語句一致で場面を探すので、索引は要りません。",
-            open
+          // **ボタンが押されるのを待たない**（ノートPCの実機、2026-09-23。
+          // 抽出の完了の知らせと同じ直し）。待つと、知らせを閉じるまで
+          // 索引づくりの「動いている」札を持ったままになる
+          whenNoticePicked(
+            vscode.window.showInformationMessage(
+              "意味検索が「切」になっています。切のままでも相談は語句一致で場面を探すので、索引は要りません。",
+              open
+            ),
+            async (picked) => {
+              if (picked === open) {
+                await vscode.commands.executeCommand("novelai.setupVectorSearch");
+              }
+            },
+            { label: "検索用の索引", workFolder: work.folderPath }
           );
-          if (picked === open) {
-            await vscode.commands.executeCommand("novelai.setupVectorSearch");
-          }
           return;
         }
         const result = await buildVectorIndex(work);

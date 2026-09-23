@@ -56,7 +56,12 @@ import { describeCallTimeEstimate } from "../core/etaEstimate";
  * **これまでの目安の値そのもの**（`features/extractCharacters.ts` と同じ考え方）。
  */
 const SYNOPSIS_FALLBACK_SECONDS_PER_EPISODE = 15;
-import { confirmRun, notifyDone, warnWithLog } from "../views/notify";
+import {
+  confirmRun,
+  notifyDone,
+  warnWithLog,
+  whenNoticePicked,
+} from "../views/notify";
 
 /**
  * 各話あらすじの生成（P-07）と、サブタイトルの提案・リネーム。
@@ -214,7 +219,8 @@ export async function generateSynopses(
         : "目安は出せません") +
       costNotice,
     "実行",
-    { remember: { id: "ai.run.generateSynopses" } }
+    // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
+    { remember: { id: "ai.run.generateSynopses" }, workTitle: work.title }
   );
   if (!confirmed) return false;
 
@@ -375,7 +381,7 @@ export async function generateSynopses(
   }
 
   if (subtitleCandidates.length > 0 && !cancelled) {
-    await proposeSubtitles(subtitleCandidates);
+    proposeSubtitles(subtitleCandidates, work.folderPath);
   }
 
   reportResult({
@@ -457,16 +463,33 @@ function previousSynopsesFor(
  * **まとめて自動でリネームしない。** ファイル名は作者の作品の一部であり、
  * 外部ツールやGitの履歴にも影響する。1話ずつ選ばせる。
  */
-async function proposeSubtitles(
+function proposeSubtitles(
+  candidates: Array<{ episode: EpisodeBody; suggestions: SubtitleSuggestion[] }>,
+  workFolder: string
+): void {
+  /*
+    **「確認する」が押されるのを待たない**（ノートPCの実機、2026-09-23）。
+    ここで待つと、知らせを閉じるまで各話あらすじの「動いている」札を持った
+    ままになり、結果の知らせ（何話作ったか）も閉じるまで出なかった。
+    押されたら、そこから1話ずつ選ばせる。
+  */
+  whenNoticePicked(
+    vscode.window.showInformationMessage(
+      `サブタイトルの案が ${candidates.length} 話ぶんあります。確認しますか？`,
+      "確認する",
+      "あとで"
+    ),
+    async (start) => {
+      if (start === "確認する") await reviewSubtitles(candidates);
+    },
+    { label: "サブタイトルの案", workFolder }
+  );
+}
+
+/** サブタイトル案を1話ずつ選ばせ、選ばれたらファイル名を変える */
+async function reviewSubtitles(
   candidates: Array<{ episode: EpisodeBody; suggestions: SubtitleSuggestion[] }>
 ): Promise<void> {
-  const start = await vscode.window.showInformationMessage(
-    `サブタイトルの案が ${candidates.length} 話ぶんあります。確認しますか？`,
-    "確認する",
-    "あとで"
-  );
-  if (start !== "確認する") return;
-
   for (const { episode, suggestions } of candidates) {
     const picked = await vscode.window.showQuickPick(
       [

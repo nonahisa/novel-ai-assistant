@@ -260,6 +260,8 @@ export async function confirmPaidUsage(
      * （`core/confirmMemory.ts`。渡さなければ訊き方は今までどおり）
      */
     remember?: { id: string };
+    /** どの作品に対する実行か。確認の文の1行目に出す（`confirmRun` の `workTitle`） */
+    workTitle?: string;
   }
 ): Promise<boolean> {
   if (!provider.isPaid) return true;
@@ -285,5 +287,6 @@ export async function confirmPaidUsage(
   return confirmRun(`${options.actionLabel}を実行しますか`, "実行", {
     detail: lines.join("\n"),
     remember: options.remember,
+    workTitle: options.workTitle,
   });
 }

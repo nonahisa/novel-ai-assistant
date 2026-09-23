@@ -132,6 +132,8 @@ export async function checkOpening(
     const ok = await confirmPaidUsage(resolved.provider, {
       actionLabel: "冒頭診断",
       remember: { id: "ai.paid.checkOpening" },
+      // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
+      workTitle: work.title,
       model: resolved.model,
       calls: 1,
       detail,

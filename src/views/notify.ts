@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { logStep, showLog } from "../core/logger";
+import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
 import { isRememberable, rememberedAnswer, withRemembered } from "../core/confirmMemory";
 import {
   readConfirmMemory,
@@ -103,6 +103,28 @@ export interface ConfirmOptions {
    * 渡さないこと（一覧に無い id は覚えないので、渡しても固定はされない）。
    */
   remember?: { id: string };
+  /**
+   * どの作品に対する実行か。**渡すと、確認の文の1行目に作品名を出す。**
+   *
+   * きっかけはノートPCの実機（2026-09-23）。詳細メニューの抽出は、作品一覧で
+   * 選ばれている作品へ訊かずに進む。一覧の行を誤ってクリックしていたため、
+   * 「場所を抽出」が**作者の本物の作品**で確認画面（15チャンク・1時間30分）
+   * まで進み、件数が違うことでやっと気づいた。**確認画面に作品名があれば、
+   * 押す前に分かる。**
+   *
+   * 文の頭に置くのは、モーダルでいちばん目に入る場所だからである
+   * （件数や目安より先に「どの作品か」を読ませたい）。
+   */
+  workTitle?: string;
+}
+
+/**
+ * 確認の文に作品名を添える。**文言の組み立てはここだけ**に置く——
+ * 呼び出し側がそれぞれ書くと、言い方が機能ごとにずれる。
+ */
+export function withWorkTitle(message: string, workTitle?: string): string {
+  if (!workTitle) return message;
+  return `作品：${workTitle}\n${message}`;
 }
 
 /** 「以降は訊かない」を選ぶボタンの言い方。**実行の言葉に足す形にする** */
@@ -133,7 +155,11 @@ export async function confirmRun(
   // 文言を変えた確認は、古い答えで勝手に走らせない
   if (rememberId && isRememberable(rememberId)) {
     if (rememberedAnswer(readConfirmMemory(), rememberId) === runLabel) {
-      logStep(`確認を省略（以降は訊かない）: ${rememberId} / ${runLabel}`);
+      // 画面を出さないぶん、**どの作品で走らせたかは記録に残す**
+      logStep(
+        `確認を省略（以降は訊かない）: ${rememberId} / ${runLabel}` +
+          (options.workTitle ? ` / ${options.workTitle}` : "")
+      );
       return true;
     }
   }
@@ -142,6 +168,7 @@ export async function confirmRun(
     rememberId && isRememberable(rememberId)
       ? [runLabel, rememberLabel(runLabel)]
       : [runLabel];
+  const shownMessage = withWorkTitle(message, options.workTitle);
 
   // 顔つきが違うだけで、訊き方（モーダル）は同じにする。
   // 揃えておかないと、警告のときだけ操作の手順が変わって見える。
@@ -150,8 +177,12 @@ export async function confirmRun(
   const modal = { modal: true, detail: options.detail };
   const answer =
     options.kind === "warning"
-      ? await vscode.window.showWarningMessage(message, modal, ...buttons)
-      : await vscode.window.showInformationMessage(message, modal, ...buttons);
+      ? await vscode.window.showWarningMessage(shownMessage, modal, ...buttons)
+      : await vscode.window.showInformationMessage(
+          shownMessage,
+          modal,
+          ...buttons
+        );
 
   if (answer === runLabel) return true;
   if (rememberId && answer === rememberLabel(runLabel)) {
@@ -159,6 +190,48 @@ export async function confirmRun(
     return true;
   }
   return false;
+}
+
+/**
+ * 終わりの知らせのボタンが押されたら動かす。**押されるのを待たずに戻る。**
+ *
+ * ボタン付きの通知は、閉じられるまで返事が来ない（通知センターへ沈んだ
+ * だけでは来ない）。これを `await` したまま処理を終えずにいると、
+ * **押した操作の「動いている」札を持ち続ける**（`extension.ts` の
+ * `registerCommand`）。ノートPCの実機（2026-09-23）では、抽出の完了の
+ * 知らせを閉じるまで同じ抽出を押しても「いま動いています」と断られ、
+ * 閉じた瞬間に次の知らせ（一覧を生成しました）が続けて出た。
+ *
+ * 前例は投稿サイト用のコピー（`postingCopyNotice.ts` の `whenPicked`。
+ * 0.75.12）。**待たない代わりに、失敗を握りつぶさない**——呼んだ側は
+ * もう戻っているので、ここで記録して作者に伝える。
+ *
+ * **問いかけ（押されるまで先へ進めないもの）には使わない。** 使うのは、
+ * 処理が済んだあとの「見る」「開く」のような、押さなくてもよい次の一手だけ。
+ */
+export function whenNoticePicked<T extends string>(
+  shown: Thenable<T | undefined>,
+  act: (picked: T | undefined) => unknown,
+  failure: {
+    /** 記録に出す操作の名前（「設定資料の抽出」など） */
+    label: string;
+    /** 記録の書き先の作品フォルダー。分からなければ保管庫へ */
+    workFolder?: string;
+  }
+): void {
+  void Promise.resolve(shown)
+    .then(act)
+    .catch((error: unknown) => {
+      // **記録の直前に書き先を向ける**——待っているあいだに、別の作品の
+      // 操作が書き先を変えていることがある
+      useLogFile(failure.workFolder);
+      logFailure(`${failure.label}：知らせのボタン`, {
+        理由: error instanceof Error ? error.message : String(error),
+      });
+      void vscode.window.showWarningMessage(
+        "ボタンの操作をやり遂げられませんでした。詳しくはログを見てください。"
+      );
+    });
 }
 
 /**

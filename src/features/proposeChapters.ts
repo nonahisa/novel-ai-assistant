@@ -428,7 +428,8 @@ export async function suggestChapterName(
     `章「${chapter.name}」の名前の案を出します（AIの呼び出しは1回）。\n` +
       `対象は ${range.length}話。モデル: ${resolved.model}${costNotice}`,
     "実行",
-    { remember: { id: "ai.run.proposeChapterName" } }
+    // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
+    { remember: { id: "ai.run.proposeChapterName" }, workTitle: work.title }
   );
   if (!confirmed) return false;
 

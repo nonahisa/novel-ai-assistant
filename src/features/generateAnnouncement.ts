@@ -119,7 +119,8 @@ export async function generateAnnouncement(
   const confirmed = await confirmRun(
     `更新告知文を作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`,
     "実行",
-    { remember: { id: "ai.run.generateAnnouncement" } }
+    // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
+    { remember: { id: "ai.run.generateAnnouncement" }, workTitle: work.title }
   );
   if (!confirmed) return;
 

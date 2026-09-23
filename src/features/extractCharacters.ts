@@ -88,7 +88,12 @@ import {
   SettingsExtractionAccumulator,
   type SettingsPersistResult,
 } from "./extractSettings";
-import { confirmRun, notifyDone, suggestAction } from "../views/notify";
+import {
+  confirmRun,
+  notifyDone,
+  suggestAction,
+  whenNoticePicked,
+} from "../views/notify";
 import { estimateCallsTimeFor } from "../ai/runTimeEstimate";
 import { describeCallTimeEstimate } from "../core/etaEstimate";
 
@@ -437,12 +442,9 @@ export async function extractCharacters(
     return false;
   }
 
-  // 止まったときに後から追えるよう、ここからのログをファイルにも残す
+  // 書き先はここで作品へ向けておく。接続の確認で止まったときの記録は
+  // この作品のものである（書き先を向けるだけで、まだ何も書かない）
   useLogFile(work.folderPath);
-  logStep(
-    `抽出を開始: ${work.title} / ${resolved.provider.displayName} / ` +
-      `${resolved.model} / ${chunks.length}チャンク / v${CHARACTER_EXTRACT_VERSION}`
-  );
 
   const cache = new ChunkCache(work);
   await cache.load();
@@ -535,10 +537,33 @@ export async function extractCharacters(
         "\n" +
         costNotice,
       "実行",
-      { remember: { id: "ai.run.extractCharacters" } }
+      {
+        remember: { id: "ai.run.extractCharacters" },
+        // **どの作品かを確認画面に出す**（ノートPCの実機、2026-09-23）。
+        // 詳細メニューの抽出は作品一覧の選択へ訊かずに進むので、一覧の
+        // 行を誤ってクリックしていると、別の作品で確認まで進む
+        workTitle: work.title,
+      }
     );
     if (!confirmed) return false;
   }
+
+  /*
+    **「開始」は、確認で「実行」が押されたあとに書く**（ノートPCの実機、
+    2026-09-23）。確認より前に書いていたので、キャンセルした回にも
+    作品のログへ「抽出を開始」の1行が残った——しかも誤って選ばれていた
+    **作者の本物の作品**のログに。キャンセルした回は、その作品のログに
+    何も書かない（何も始めていない）。
+
+    止まったときに後から追えるよう、ここからのログをファイルにも残す
+    （書き先は上で向けてある。確認のあいだに別の操作が向け直していても
+    困らないよう、書く直前にもう一度向ける）。
+  */
+  useLogFile(work.folderPath);
+  logStep(
+    `抽出を開始: ${work.title} / ${resolved.provider.displayName} / ` +
+      `${resolved.model} / ${chunks.length}チャンク / v${CHARACTER_EXTRACT_VERSION}`
+  );
 
   const extractedAll: Array<{
     data: ExtractedCharacter;
@@ -1163,19 +1188,82 @@ export async function extractCharacters(
     ...(hasSettingsFailure ? ["設定を開く"] : []),
     ...(merged ? ["設定資料を見る"] : []),
   ];
-  const action =
+  /*
+    **完了の知らせは待たない**（ノートPCの実機、2026-09-23）。
+
+    ボタン付きの知らせは、閉じられるまで返事が来ない。ここで待っていると
+    抽出の「動いている」札を持ったままになり、知らせを閉じるまで同じ抽出を
+    押しても「いま動いています」と断られた。そのあとに続く一覧の生成
+    （`generateSettingsDocs`）も、閉じるまで始まらなかった。
+
+    ボタンが押されたときの処理は、押されたときに走らせる（`whenNoticePicked`）。
+  */
+  const shown =
     failures.length > 0 ||
     cacheWarnings > 0 ||
     connectivityLost ||
     rateLimitGaveUp ||
     !merged
-      ? await vscode.window.showWarningMessage(message, ...actions)
-      : await vscode.window.showInformationMessage(message, ...actions);
+      ? vscode.window.showWarningMessage(message, ...actions)
+      : vscode.window.showInformationMessage(message, ...actions);
+  whenNoticePicked(
+    shown,
+    (action) =>
+      handleCompletionAction(action, {
+        work,
+        failures,
+        providerId: resolved.provider.id,
+        proposalPanel: options.proposalPanel,
+      }),
+    { label: "設定資料の抽出", workFolder: work.folderPath }
+  );
 
+  // **取り込んだ話を書き留める**（設計書6.21.3）。
+  // 独り言が「あと何話ぶん残っているか」を数えるための記録である。
+  //
+  // **失敗した話があるときは書かない。** 取り込めていない話を
+  // 「取り込んだ」と記録すると、そのまま黙ってしまう。
+  //
+  // **ここで転んでも、抽出の結果は捨てない。** 資料そのものは保存済みで、
+  // これは数えるためだけの記録である
+  if (failures.length === 0) {
+    try {
+      await writeExtractedIndex(work, await readEpisodeContents(work));
+    } catch (error) {
+      logLine(
+        `取り込んだ話の記録を書けませんでした: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  // ここまで来ていれば人物・能力・場所の保存を試みている。
+  // 保存件数が0でも、既存の設定から資料は作り直せる
+  return true;
+}
+
+/**
+ * 抽出の完了の知らせで押されたボタンの処理。
+ *
+ * **知らせを待たずに抽出を終えるため、ここへ切り出した**（上の
+ * `whenNoticePicked`）。押されるのは抽出が戻ったあとなので、要るものは
+ * 引数で受け取る。
+ */
+async function handleCompletionAction(
+  action: string | undefined,
+  context: {
+    work: WorkEntry;
+    failures: ExtractionFailure[];
+    providerId: string;
+    proposalPanel?: ProposalPanel;
+  }
+): Promise<void> {
+  const { work, failures } = context;
   if (action === "提案を見る") {
     // **提案パネルへ渡す**（設計書5.6）。渡さないとダイアログの道へ落ち、
     // 本文の直しと設定資料の更新で窓口が2つに分かれる
-    await applyPendingCharacterUpdates(work, options.proposalPanel);
+    await applyPendingCharacterUpdates(work, context.proposalPanel);
   } else if (action === "詳細を表示") {
     await showFailureDetails(failures);
   } else if (action === "ログを表示") {
@@ -1183,7 +1271,7 @@ export async function extractCharacters(
   } else if (action === "設定を開く") {
     await vscode.commands.executeCommand(
       "workbench.action.openSettings",
-      `novelai.${resolved.provider.id}`
+      `novelai.${context.providerId}`
     );
   } else if (action === "設定資料を見る") {
     /*
@@ -1210,30 +1298,6 @@ export async function extractCharacters(
       work,
     });
   }
-
-  // **取り込んだ話を書き留める**（設計書6.21.3）。
-  // 独り言が「あと何話ぶん残っているか」を数えるための記録である。
-  //
-  // **失敗した話があるときは書かない。** 取り込めていない話を
-  // 「取り込んだ」と記録すると、そのまま黙ってしまう。
-  //
-  // **ここで転んでも、抽出の結果は捨てない。** 資料そのものは保存済みで、
-  // これは数えるためだけの記録である
-  if (failures.length === 0) {
-    try {
-      await writeExtractedIndex(work, await readEpisodeContents(work));
-    } catch (error) {
-      logLine(
-        `取り込んだ話の記録を書けませんでした: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
-  }
-
-  // ここまで来ていれば人物・能力・場所の保存を試みている。
-  // 保存件数が0でも、既存の設定から資料は作り直せる
-  return true;
 }
 
 /**

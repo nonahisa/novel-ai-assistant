@@ -53,7 +53,7 @@ import {
   recordChanges,
   runSetupStep,
 } from "./gitOnboarding";
-import { confirmRun, notifyDone } from "../views/notify";
+import { confirmRun, notifyDone, whenNoticePicked } from "../views/notify";
 
 /**
  * 取りに行ける作品か。
@@ -704,21 +704,28 @@ export class GitSyncMonitor implements vscode.Disposable {
     // まとめて入れ替わったときだけ、資料の作り直しを勧める
     if (files.length < FILE_CHANGE_NOTICE_THRESHOLD) return;
 
-    const action = await vscode.window.showInformationMessage(
-      `「${work.title}」で ${files.length} 件のファイルが更新されました。` +
-        "設定資料の抽出をやり直すと、増えた内容を取り込めます。",
-      "設定資料を抽出",
-      "後で"
+    // **ボタンが押されるのを待たない**（ノートPCの実機、2026-09-23。
+    // 抽出の完了の知らせと同じ直し）。取り込みの最中に出るので、待つと
+    // 知らせを閉じるまで同期の「動いている」札を持ったままになる
+    whenNoticePicked(
+      vscode.window.showInformationMessage(
+        `「${work.title}」で ${files.length} 件のファイルが更新されました。` +
+          "設定資料の抽出をやり直すと、増えた内容を取り込めます。",
+        "設定資料を抽出",
+        "後で"
+      ),
+      async (action) => {
+        if (action !== "設定資料を抽出") return;
+        // **どの作品かは、この知らせが既に名指ししている**（作者の報告、
+        // 2026-08-30）。引数無しで呼ぶと作品選択からやり直させることになり、
+        // 「〈作品名〉で更新されました」と言った直後に同じことを訊ねる形になる
+        await vscode.commands.executeCommand("novelai.extractSettings", {
+          type: "work",
+          work,
+        });
+      },
+      { label: "同期のあとの資料の案内", workFolder: work.folderPath }
     );
-    if (action === "設定資料を抽出") {
-      // **どの作品かは、この知らせが既に名指ししている**（作者の報告、
-      // 2026-08-30）。引数無しで呼ぶと作品選択からやり直させることになり、
-      // 「〈作品名〉で更新されました」と言った直後に同じことを訊ねる形になる
-      await vscode.commands.executeCommand("novelai.extractSettings", {
-        type: "work",
-        work,
-      });
-    }
   }
 
   /** 自動fetchしてよいか。設定と最小間隔で決める */
@@ -1305,24 +1312,33 @@ async function showBatchedFileChanges(
   const message = describeBatchedFileChanges(entries);
   if (!message) return;
 
-  const action = await vscode.window.showInformationMessage(
-    message,
-    "設定資料を抽出",
-    // **「すべてあとで」を置く**（作者の指示、2026-09-10）。
-    // 1つずつ閉じさせない
-    "すべてあとで"
-  );
-  if (action !== "設定資料を抽出") return;
+  // **ボタンが押されるのを待たない**（ノートPCの実機、2026-09-23）。
+  // すべて同期の終わりに出るので、待つと知らせを閉じるまで
+  // 「作品をすべて同期」の「動いている」札を持ったままになる
+  whenNoticePicked(
+    vscode.window.showInformationMessage(
+      message,
+      "設定資料を抽出",
+      // **「すべてあとで」を置く**（作者の指示、2026-09-10）。
+      // 1つずつ閉じさせない
+      "すべてあとで"
+    ),
+    async (action) => {
+      if (action !== "設定資料を抽出") return;
 
-  const works = [
-    ...new Map(entries.map((one) => [one.work.id, one.work])).values(),
-  ];
-  const work = works.length === 1 ? works[0] : await pickWork(works);
-  if (!work) return;
-  await vscode.commands.executeCommand("novelai.extractSettings", {
-    type: "work",
-    work,
-  });
+      const works = [
+        ...new Map(entries.map((one) => [one.work.id, one.work])).values(),
+      ];
+      const work = works.length === 1 ? works[0] : await pickWork(works);
+      if (!work) return;
+      await vscode.commands.executeCommand("novelai.extractSettings", {
+        type: "work",
+        work,
+      });
+    },
+    // 複数の作品にまたがる知らせなので、失敗の記録は保管庫へ
+    { label: "同期のあとの資料の案内" }
+  );
 }
 
 /** 更新のあった作品から1つ選ばせる。**取りやめる道を必ず置く**（6.17.2） */

@@ -355,6 +355,8 @@ async function suggestNames(
   const ok = await confirmPaidUsage(resolved.provider, {
     actionLabel: "名前の候補",
     remember: { id: "ai.paid.nameCheck" },
+    // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
+    workTitle: work.title,
     model: resolved.model,
     calls: 1,
     detail:

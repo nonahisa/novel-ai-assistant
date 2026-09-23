@@ -10,7 +10,7 @@ import {
 import { unifyCharacters } from "../core/characterUnify";
 import { logFailure, useLogFile } from "../core/logger";
 import { cancelItem } from "../views/dialogs";
-import { confirmRun } from "../views/notify";
+import { confirmRun, whenNoticePicked } from "../views/notify";
 
 /**
  * 同一人物として登録されてしまった組を、作者の確認のうえで1件にまとめる。
@@ -157,14 +157,20 @@ export async function unifyCharacterRecords(work: WorkEntry): Promise<void> {
     return;
   }
 
-  const action = await vscode.window.showInformationMessage(
-    `「${unified.name}」にまとめました。` +
-      "「設定資料集を出力」を実行すると一覧にも反映されます。",
-    "退避先を開く"
+  // **「退避先を開く」が押されるのを待たない**（ノートPCの実機、
+  // 2026-09-23。抽出の完了の知らせと同じ直し）。待つと、知らせを閉じる
+  // まで「重複をまとめる」の「動いている」札を持ったままになる
+  whenNoticePicked(
+    vscode.window.showInformationMessage(
+      `「${unified.name}」にまとめました。` +
+        "「設定資料集を出力」を実行すると一覧にも反映されます。",
+      "退避先を開く"
+    ),
+    async (action) => {
+      if (action === "退避先を開く") await revealFolder(absorbRecoveryPath);
+    },
+    { label: "人物のまとめ", workFolder: work.folderPath }
   );
-  if (action === "退避先を開く") {
-    await revealFolder(absorbRecoveryPath);
-  }
 }
 
 async function reportFailure(context: string, error: unknown): Promise<void> {

@@ -6,6 +6,8 @@ import {
   notifyDone,
   pickWithMemory,
   warnWithLog,
+  whenNoticePicked,
+  withWorkTitle,
 } from "../../src/views/notify";
 import {
   lastQuickPick,
@@ -98,6 +100,86 @@ describe("実行前の確認", () => {
       expect(calls[0]?.[2]).toBe("まとめる");
     } finally {
       window.showInformationMessage = original;
+    }
+  });
+
+  /*
+    **作品名を渡せば、文の1行目に出す**（ノートPCの実機、2026-09-23）。
+    詳細メニューの抽出が、作品一覧で誤って選ばれていた作者の本物の作品で
+    確認画面まで進み、件数の違いでやっと気づいた。
+  */
+  test("作品名を渡すと、確認の文の1行目に出る", async () => {
+    const calls: unknown[][] = [];
+    const original = window.showInformationMessage;
+    window.showInformationMessage = async (message, ...items) => {
+      calls.push([message, ...items]);
+      return undefined;
+    };
+    try {
+      await confirmRun("15 チャンク中 15 件を処理します。", "実行", {
+        workTitle: "こちら冒険者ギルド生活保護課!!",
+      });
+      expect(calls[0]?.[0]).toBe(
+        "作品：こちら冒険者ギルド生活保護課!!\n15 チャンク中 15 件を処理します。"
+      );
+    } finally {
+      window.showInformationMessage = original;
+    }
+  });
+
+  test("作品名を渡さなければ、文は1文字も変わらない", async () => {
+    expect(withWorkTitle("19話をAIで確認します。")).toBe(
+      "19話をAIで確認します。"
+    );
+  });
+});
+
+describe("終わりの知らせのボタンを待たない", () => {
+  test("押されるのを待たずに戻り、押されたら処理が走る", async () => {
+    let press: (label: string | undefined) => void = () => undefined;
+    const shown = new Promise<string | undefined>((resolve) => {
+      press = resolve;
+    });
+    const act = vi.fn(async () => undefined);
+
+    // 戻り値が無い（void）＝待たせようがない
+    expect(whenNoticePicked(shown, act, { label: "試し" })).toBeUndefined();
+    expect(act).not.toHaveBeenCalled();
+
+    press("開く");
+    await vi.waitFor(() => expect(act).toHaveBeenCalledWith("開く"));
+  });
+
+  test("押したあとの処理が転んだら、握りつぶさずに記録して知らせる", async () => {
+    const logFailure = vi
+      .spyOn(logger, "logFailure")
+      .mockImplementation(() => {});
+    const useLogFile = vi
+      .spyOn(logger, "useLogFile")
+      .mockImplementation(() => {});
+    const warned: unknown[] = [];
+    const original = window.showWarningMessage;
+    window.showWarningMessage = async (message) => {
+      warned.push(message);
+      return undefined;
+    };
+    try {
+      whenNoticePicked(
+        Promise.resolve("開く"),
+        async () => {
+          throw new Error("開けなかった");
+        },
+        { label: "試し", workFolder: "C:/works/試し" }
+      );
+      await vi.waitFor(() => expect(warned).toHaveLength(1));
+      expect(useLogFile).toHaveBeenCalledWith("C:/works/試し");
+      expect(logFailure).toHaveBeenCalledWith("試し：知らせのボタン", {
+        理由: "開けなかった",
+      });
+    } finally {
+      window.showWarningMessage = original;
+      logFailure.mockRestore();
+      useLogFile.mockRestore();
     }
   });
 });

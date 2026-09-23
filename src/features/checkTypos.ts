@@ -387,12 +387,10 @@ export async function checkTypos(
     }
   }
 
+  // 書き先はここで作品へ向けておく（まだ何も書かない）。「開始」は確認の
+  // あとに書く——下の確認でキャンセルした回に、作品のログへ「開始」が
+  // 残らないように（ノートPCの実機、2026-09-23。抽出で起きた）
   useLogFile(work.folderPath);
-  logStep(
-    `誤字脱字検知を開始: ${work.title} / ${resolved.provider.displayName} / ` +
-      `${resolved.model} / ${chunks.length}チャンク / ` +
-      `${describeChunkSettings(chunkSettings)} / v${TYPO_CHECK_VERSION}`
-  );
 
   const cache = new ChunkCache(work);
   await cache.load();
@@ -455,6 +453,8 @@ export async function checkTypos(
     } else {
       const confirmed = await confirmRun(notice, "実行", {
         remember: { id: "ai.run.checkTypos" },
+        // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
+        workTitle: work.title,
       });
       if (!confirmed) return undefined;
     }
@@ -463,6 +463,15 @@ export async function checkTypos(
       "AIでの検知はすべてのチャンクが処理済みです。キャッシュから結果を再表示します。"
     );
   }
+
+  // 「開始」は確認で「実行」が押されたあと（上の書き先の説明を参照）。
+  // 確認の間に別の操作が書き先を向け直していても困らないよう、もう一度向ける
+  useLogFile(work.folderPath);
+  logStep(
+    `誤字脱字検知を開始: ${work.title} / ${resolved.provider.displayName} / ` +
+      `${resolved.model} / ${chunks.length}チャンク / ` +
+      `${describeChunkSettings(chunkSettings)} / v${TYPO_CHECK_VERSION}`
+  );
 
   let rejectedCount = 0;
   /**

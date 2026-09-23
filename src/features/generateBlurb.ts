@@ -124,7 +124,8 @@ export async function generateWorkBlurb(
       synopsisCount: material.chapterSynopses.length,
     }),
     "実行",
-    { remember: { id: "ai.run.generateBlurb" } }
+    // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
+    { remember: { id: "ai.run.generateBlurb" }, workTitle: work.title }
   );
   if (!confirmed) return;
 
@@ -288,7 +289,7 @@ export async function generateCatchphrases(
   const confirmed = await confirmRun(
     `キャッチコピーを3案作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`,
     "実行",
-    { remember: { id: "ai.run.generateCatchphrase" } }
+    { remember: { id: "ai.run.generateCatchphrase" }, workTitle: work.title }
   );
   if (!confirmed) return;
 

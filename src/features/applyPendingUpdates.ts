@@ -24,6 +24,7 @@ import { dropDiffEntries } from "../core/dropDiffEntries";
 import { CustomFieldStore } from "../core/customFieldStore";
 import { logFailure, useLogFile } from "../core/logger";
 import { openGeneratedMarkdown } from "../views/openDocument";
+import { whenNoticePicked } from "../views/notify";
 import type { ProposalPanel, RecordUpdateViewItem } from "./proposalPanel";
 
 /**
@@ -477,7 +478,7 @@ export async function applyPendingCharacterUpdates(
     return;
   }
 
-  await applyAll(targets, characterStore, pendingStore, known);
+  await applyAll(targets, characterStore, pendingStore, known, work.folderPath);
 }
 
 async function applyAll(
@@ -485,7 +486,9 @@ async function applyAll(
   characterStore: CharacterStore,
   pendingStore: PendingUpdateStore,
   /** 採番に使う顔ぶれ。作ったぶんはここへ足される */
-  known: Character[]
+  known: Character[],
+  /** 失敗の記録の書き先（作品フォルダー） */
+  workFolder: string
 ): Promise<void> {
   const applied: string[] = [];
   const failed: Array<{ name: string; message: string }> = [];
@@ -527,20 +530,27 @@ async function applyAll(
     return;
   }
 
-  const action = await vscode.window.showWarningMessage(
-    `${applied.length} 人を更新し、${failed.length} 人は反映できませんでした。` +
-      "反映できなかった更新案は残してあります。",
-    "詳細を表示"
+  // **「詳細を表示」が押されるのを待たない**（ノートPCの実機、2026-09-23。
+  // 抽出の完了の知らせと同じ直し）。待つと、知らせを閉じるまで
+  // 「更新分を反映」の「動いている」札を持ったままになる
+  whenNoticePicked(
+    vscode.window.showWarningMessage(
+      `${applied.length} 人を更新し、${failed.length} 人は反映できませんでした。` +
+        "反映できなかった更新案は残してあります。",
+      "詳細を表示"
+    ),
+    async (action) => {
+      if (action !== "詳細を表示") return;
+      const document = await vscode.workspace.openTextDocument({
+        content: failed
+          .map((entry) => `${entry.name}: ${entry.message}`)
+          .join("\n"),
+        language: "text",
+      });
+      await vscode.window.showTextDocument(document);
+    },
+    { label: "更新分の反映", workFolder }
   );
-  if (action === "詳細を表示") {
-    const document = await vscode.workspace.openTextDocument({
-      content: failed
-        .map((entry) => `${entry.name}: ${entry.message}`)
-        .join("\n"),
-      language: "text",
-    });
-    await vscode.window.showTextDocument(document);
-  }
 }
 
 /** 何が変わるのかを読める形で出す。JSONを見比べさせない */

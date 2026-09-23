@@ -328,6 +328,8 @@ export async function checkEpisodePlotDesign(
             : undefined,
         }),
         remember: { id: "ai.run.checkEpisodePlotDesign" },
+        // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
+        workTitle: work.title,
       }
     );
     if (!confirmed) return undefined;
@@ -536,6 +538,7 @@ export async function contrastEpisodePlot(
             : undefined,
         }),
         remember: { id: "ai.run.checkEpisodePlotContrast" },
+        workTitle: work.title,
       }
     );
     if (!confirmed) return undefined;
