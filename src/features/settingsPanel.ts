@@ -222,6 +222,16 @@ export function findOpenSettingsPanel(
   return openPanels.get(workId);
 }
 
+/**
+ * 設定資料パネルが1つでも開いているか。
+ *
+ * 本文のカーソルは打鍵のたびに動く。パネルが1つも無いときに、そのたびに
+ * 用語を探すのは無駄なので、まずここで見切る（作者の報告、2026-09-23）
+ */
+export function hasOpenSettingsPanel(): boolean {
+  return openPanels.size > 0;
+}
+
 interface DetailField {
   /** 作者が足した項目は `custom:` を付けて区別する */
   key: string;

@@ -18,6 +18,7 @@ import {
 import { TERM_COLORS } from "../core/termColors";
 import { clearSeriesCache, loadSeriesTerms } from "../core/seriesSettings";
 import { TERM_LABELS } from "../core/manuscriptRender";
+import { TypingPause } from "../core/typingPause";
 import { SUPPORTED_EXTENSIONS, type WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
 import type { Ability } from "../models/ability";
@@ -47,6 +48,29 @@ interface WorkSettings {
   abilityTerm: string;
 }
 
+/**
+ * **打鍵が止まってから付け直すまでの待ち時間**（作者の報告、2026-09-23）。
+ *
+ * 標準エディターでは日本語の変換中の文字も打鍵ごとに本文へ入る。以前は
+ * 150ms 後に本文の装飾を付け直しており、変換候補を選んでいる最中に
+ * 割り込んで「入力が飛ぶ」ことがあった。800ms は、変換中の打鍵の間隔
+ * （ふつう 100〜300ms）より十分長く、打ち終えてから色が付くまでを
+ * 待たされたと感じにくい長さとして選んだ。
+ */
+export const HIGHLIGHT_TYPING_PAUSE_MS = 800;
+
+/**
+ * 打鍵以外（タブの切り替え・スクロール・設定の保存）で付け直すまでの待ち時間。
+ * 本文は変わっていないので、変換に割り込む心配は無い。早く色が付くほうがよい
+ */
+export const HIGHLIGHT_VIEW_DELAY_MS = 150;
+
+/** 装飾1種類ぶんの「付けるもの」と、前回と比べるための控え */
+interface KindDecorations {
+  options: vscode.DecorationOptions[];
+  keys: string[];
+}
+
 export class TermHighlighter implements vscode.Disposable {
   private readonly decorations = new Map<
     TermKind,
@@ -55,7 +79,22 @@ export class TermHighlighter implements vscode.Disposable {
   /** 作品ごとの索引。作品を切り替えるたびに読み直さない */
   private readonly cache = new Map<string, WorkSettings>();
   private readonly disposables: vscode.Disposable[] = [];
-  private refreshTimer: NodeJS.Timeout | undefined;
+  private readonly pause = new TypingPause(() => {
+    void this.refresh();
+  });
+  /**
+   * **最後に付けた装飾の控え。** 同じものをもう一度付けない。
+   *
+   * `setDecorations` は、中身が同じでも VS Code 側の描き直しを起こす。
+   * 作品の外のファイル（作者が入力飛びを見たのは、作品の外の長い
+   * Markdown だった）では、以前は打鍵のたびに「空の装飾」を付け直していた。
+   * 控えは1つのエディターぶんだけ持ち、エディターが替わったら捨てる
+   * （隠れたエディターの装飾が残っているかは VS Code 次第なので、
+   * 替わったら一度は必ず付け直す）。
+   */
+  private applied:
+    | { editor: vscode.TextEditor; signatures: Map<TermKind, string> }
+    | undefined;
 
   constructor(private readonly registry: WorkRegistry) {
     for (const [kind, color] of Object.entries(TERM_COLORS)) {
@@ -69,20 +108,27 @@ export class TermHighlighter implements vscode.Disposable {
     }
 
     this.disposables.push(
-      vscode.window.onDidChangeActiveTextEditor(() => this.scheduleRefresh()),
+      vscode.window.onDidChangeActiveTextEditor(() => {
+        this.applied = undefined;
+        this.pause.schedule(HIGHLIGHT_VIEW_DELAY_MS);
+      }),
+      // スクロール。**打鍵中に届いたものは、打鍵が止まるまで待つ**
+      // （最後の行で打つと画面が送られて、この知らせも一緒に来る）
       vscode.window.onDidChangeTextEditorVisibleRanges(() =>
-        this.scheduleRefresh()
+        this.pause.schedule(HIGHLIGHT_VIEW_DELAY_MS)
       ),
       vscode.workspace.onDidChangeTextDocument((event) => {
         if (event.document === vscode.window.activeTextEditor?.document) {
-          this.scheduleRefresh();
+          this.pause.typed(HIGHLIGHT_TYPING_PAUSE_MS);
         }
       }),
       // 設定JSONが保存されたら索引を作り直す
       vscode.workspace.onDidSaveTextDocument((document) => {
         if (path.extname(document.fileName).toLowerCase() === ".json") {
           this.cache.clear();
-          this.scheduleRefresh();
+          // ホバーの紹介文も変わりうるので、範囲が同じでも付け直す
+          this.applied = undefined;
+          this.pause.schedule(HIGHLIGHT_VIEW_DELAY_MS);
         }
       })
     );
@@ -93,17 +139,8 @@ export class TermHighlighter implements vscode.Disposable {
     this.cache.clear();
     // つないだ作品から借りた語も控えてあるので、一緒に捨てる（設計書6.95）
     clearSeriesCache();
-    this.scheduleRefresh();
-  }
-
-  /**
-   * 入力のたびに走らせると重いので少し待ってからまとめて処理する。
-   */
-  private scheduleRefresh(): void {
-    if (this.refreshTimer) clearTimeout(this.refreshTimer);
-    this.refreshTimer = setTimeout(() => {
-      void this.refresh();
-    }, 150);
+    this.applied = undefined;
+    this.pause.schedule(HIGHLIGHT_VIEW_DELAY_MS);
   }
 
   async refresh(): Promise<void> {
@@ -130,8 +167,10 @@ export class TermHighlighter implements vscode.Disposable {
 
     // 画面に出ている範囲だけを装飾する。
     // 73万字の作品全体を毎回走査するとスクロールが引っかかる。
-    const ranges = new Map<TermKind, vscode.DecorationOptions[]>();
-    for (const kind of this.decorations.keys()) ranges.set(kind, []);
+    const ranges = new Map<TermKind, KindDecorations>();
+    for (const kind of this.decorations.keys()) {
+      ranges.set(kind, { options: [], keys: [] });
+    }
 
     for (const visible of editor.visibleRanges) {
       // 前後に余白を取り、スクロール直後の未装飾を減らす
@@ -151,16 +190,44 @@ export class TermHighlighter implements vscode.Disposable {
           editor.document.positionAt(offset + match.start),
           editor.document.positionAt(offset + match.end)
         );
-        ranges.get(match.entry.kind)?.push({
+        const bucket = ranges.get(match.entry.kind);
+        if (!bucket) continue;
+        bucket.options.push({
           range,
           hoverMessage: buildHover(match.entry, settings),
         });
+        // 同じ位置でも、別の人・別の呼び方ならホバーが変わるので控えに含める
+        bucket.keys.push(
+          `${range.start.line}:${range.start.character}-${range.end.line}:${range.end.character}:${match.entry.id}:${match.entry.text}`
+        );
       }
     }
 
+    this.apply(editor, ranges);
+  }
+
+  /**
+   * 装飾を付ける。**前回と同じ種類は付け直さない**（作者の報告、2026-09-23）。
+   *
+   * 打鍵が止まってから付け直すようにしても、変換候補を眺めて手が止まれば
+   * 付け直しは走る。そのとき中身が変わっていなければ、VS Code に何も
+   * 渡さないのがいちばん割り込まない。
+   */
+  private apply(
+    editor: vscode.TextEditor,
+    ranges: Map<TermKind, KindDecorations>
+  ): void {
+    const previous =
+      this.applied?.editor === editor ? this.applied.signatures : undefined;
+    const signatures = new Map<TermKind, string>();
     for (const [kind, decoration] of this.decorations) {
-      editor.setDecorations(decoration, ranges.get(kind) ?? []);
+      const bucket = ranges.get(kind) ?? { options: [], keys: [] };
+      const signature = bucket.keys.join("\n");
+      signatures.set(kind, signature);
+      if (previous?.get(kind) === signature) continue;
+      editor.setDecorations(decoration, bucket.options);
     }
+    this.applied = { editor, signatures };
   }
 
   /**
@@ -195,10 +262,12 @@ export class TermHighlighter implements vscode.Disposable {
     return undefined;
   }
 
+  /**
+   * 装飾を外す。**既に外してあれば何もしない**——作品の外のファイルでは、
+   * 最初に一度外したあとは、打鍵しても VS Code に何も渡さない
+   */
   private clear(editor: vscode.TextEditor): void {
-    for (const decoration of this.decorations.values()) {
-      editor.setDecorations(decoration, []);
-    }
+    this.apply(editor, new Map());
   }
 
   /** 開いているファイルが属する作品を探す */
@@ -337,7 +406,7 @@ export class TermHighlighter implements vscode.Disposable {
   }
 
   dispose(): void {
-    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.pause.dispose();
     for (const decoration of this.decorations.values()) decoration.dispose();
     for (const disposable of this.disposables) disposable.dispose();
   }

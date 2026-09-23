@@ -53,8 +53,9 @@ describe("数え方の源は1つ", () => {
       // 話の字数の唯一の入り口
       "src/core/episodeCharCount.ts",
       // ステータスバー。**開いている文書そのもの**を数える（話の本文とは限らず、
-      // プロットやメモでも出す）ので、頭書きを外す処理は通さない
-      "src/extension.ts",
+      // プロットやメモでも出す）ので、頭書きを外す処理は通さない。
+      // 打鍵が止まってから数えるために extension.ts から切り出した（2026-09-23）
+      "src/features/charCountStatusBar.ts",
       // 競合の解決。どちらの版が長いかを見せるだけで、進捗には足さない
       "src/features/resolveConflicts.ts",
     ]);
