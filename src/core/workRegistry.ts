@@ -18,6 +18,7 @@ import { currentMode } from "./actorContext";
 import { parseSeriesConfig } from "./seriesLink";
 import { fileReader, isNotFound } from "./fileRead";
 import { AI_INSTRUCTION_TARGETS } from "./aiInstructions";
+import { logFailure } from "./logger";
 
 const STORAGE_KEY = "novelai.works";
 
@@ -149,7 +150,7 @@ export class WorkRegistry {
     noticeUnregistered?: (works: readonly WorkEntry[]) => void
   ): Promise<WorkRegistryInitReport> {
     const failedTitles: string[] = [];
-    const missingTitles: string[] = [];
+    const missingWorks: WorkEntry[] = [];
     // いちばん遅かった1件（設計書6.107）。`Date.now()` を使わないのは、
     // 時計合わせで巻き戻ると経過時間が負になるため
     let slowestMs = 0;
@@ -202,7 +203,7 @@ export class WorkRegistry {
       statMs += workStatMs;
       let workIgnoreMs = 0;
       if (!present) {
-        missingTitles.push(work.title);
+        missingWorks.push(work);
       } else {
         const ignoreStartedAt = performance.now();
         try {
@@ -238,12 +239,18 @@ export class WorkRegistry {
         slowestOrder = index + 1;
       }
     }
-    if (missingTitles.length > 0) {
-      void vscode.window.showWarningMessage(
-        `作品フォルダーが見つかりません: ${missingTitles.join("、")}。` +
-          `移動・改名されたか、ドライブが繋がっていない可能性があります。` +
-          `登録はそのまま残してあります（フォルダーを作り直してはいません）。`
-      );
+    if (missingWorks.length > 0) {
+      /*
+        **ボタンの答えを待たない**（設計書5.7.8。2026-09-23）。作者が
+        知らせを放っておいても、後ろ（未登録の作品の知らせ・起動の数字）は
+        先へ進む。答えは後から受け、途中で投げたものはログへ残す
+        （握りつぶすと、外せなかった理由を誰も追えない）。
+      */
+      void offerToUnregisterMissingWorks(this, missingWorks).catch((error) => {
+        logFailure("見つからない作品の登録解除", {
+          詳細: error instanceof Error ? error.message : String(error),
+        });
+      });
     }
     if (failedTitles.length > 0) {
       await vscode.window.showWarningMessage(
@@ -419,6 +426,116 @@ export class WorkRegistry {
   refresh(): void {
     this._onDidChange.fire();
   }
+}
+
+/** 見つからない作品の知らせと、確認のダイアログに出すボタン（作品一覧の右クリックと同じ語） */
+const UNREGISTER_LABEL = "登録を解除";
+
+/**
+ * 「作品フォルダーが見つかりません」を知らせ、押されたら登録だけを外す
+ * （設計書5.7.8。作者の裁定、2026-09-23）。
+ *
+ * 作者の実機で、取り込みの試しで作って後で消した作品の登録が残り、
+ * **起動のたびに**この知らせが出た。外す手段は作品一覧の右クリックにしか
+ * 無く、知らせからは辿れなかった。
+ *
+ * - **押した時点で、もう一度フォルダーを確かめる。** 知らせは起動直後に
+ *   出るが、作者が押すのはドライブを繋ぎ直した・同期が終わった後かもしれない。
+ *   戻っていた作品は外さず、戻っていたことを短く知らせる
+ * - **1件なら確認、複数なら選ばせる。** 確認の文面は作品一覧の
+ *   「作品の登録を解除」（`novelai.removeWork`）と同じにする——同じ操作が
+ *   入口で違う言い方をすると、別のことが起きるのかと身構えさせる。
+ *   複数のときは**既定で何も選ばない**（戻ってくる作品を巻き込まないため、
+ *   外すものを作者が1つずつ指す）
+ * - **登録だけを外す。** ここは登録簿（globalState）しか触らない。
+ *   フォルダーもファイルも消さない
+ *
+ * 作品一覧は `WorkRegistry.remove` が鳴らす `onDidChange` で追随する
+ * （登録・解除・改題と同じ流儀。`core` から `views` を呼ばない）。
+ *
+ * @param isPresent 押した時点の確かめ方。試験から差し替える
+ * @returns 登録を外した作品の id
+ */
+export async function offerToUnregisterMissingWorks(
+  registry: Pick<WorkRegistry, "get" | "remove">,
+  missing: readonly WorkEntry[],
+  isPresent: (folderPath: string) => Promise<boolean> = isWorkFolderPresent
+): Promise<readonly string[]> {
+  if (missing.length === 0) return [];
+
+  const choice = await vscode.window.showWarningMessage(
+    `作品フォルダーが見つかりません: ${missing.map((w) => w.title).join("、")}。` +
+      `移動・改名されたか、ドライブが繋がっていない可能性があります。` +
+      `登録はそのまま残してあります（フォルダーを作り直してはいません）。` +
+      `もう使わない作品なら「${UNREGISTER_LABEL}」で一覧から外せます（フォルダーとファイルは消しません）。`,
+    UNREGISTER_LABEL
+  );
+  if (choice !== UNREGISTER_LABEL) return [];
+
+  // 押すまでのあいだに状況が変わっていることがある。1件ずつ確かめ直す
+  const returned: WorkEntry[] = [];
+  const stillMissing: WorkEntry[] = [];
+  for (const work of missing) {
+    // 作品一覧の右クリックで先に外した、などで、もう登録に無い
+    const current = registry.get(work.id);
+    if (!current) continue;
+    if (await isPresent(current.folderPath)) returned.push(current);
+    else stillMissing.push(current);
+  }
+
+  if (returned.length > 0) {
+    void vscode.window.showInformationMessage(
+      `作品フォルダーが見つかるようになっていたので、登録はそのままにしました: ` +
+        returned.map((w) => w.title).join("、")
+    );
+  }
+  if (stillMissing.length === 0) return [];
+
+  let targets: readonly WorkEntry[];
+  let confirmMessage: string;
+  if (stillMissing.length === 1) {
+    targets = stillMissing;
+    confirmMessage =
+      `「${stillMissing[0].title}」の登録を解除しますか？\n` +
+      `フォルダとファイルは削除されません。`;
+  } else {
+    const picked = await vscode.window.showQuickPick(
+      stillMissing.map((work) => ({
+        label: work.title,
+        description: work.folderPath,
+        // 既定では何も選ばない（外すものは作者が指す）
+        picked: false,
+        work,
+      })),
+      {
+        canPickMany: true,
+        title: "登録を解除する作品を選ぶ",
+        placeHolder:
+          "登録を解除する作品に印を付けてください（フォルダーとファイルは削除されません）",
+        ignoreFocusOut: true,
+      }
+    );
+    if (!picked || picked.length === 0) return [];
+    targets = picked.map((item) => item.work);
+    confirmMessage =
+      `次の${targets.length}作品の登録を解除しますか？\n` +
+      targets.map((w) => `「${w.title}」`).join("、") +
+      `\nフォルダとファイルは削除されません。`;
+  }
+
+  const confirmed = await vscode.window.showWarningMessage(
+    confirmMessage,
+    { modal: true },
+    UNREGISTER_LABEL
+  );
+  if (confirmed !== UNREGISTER_LABEL) return [];
+
+  const removed: string[] = [];
+  for (const work of targets) {
+    await registry.remove(work.id);
+    removed.push(work.id);
+  }
+  return removed;
 }
 
 /**
