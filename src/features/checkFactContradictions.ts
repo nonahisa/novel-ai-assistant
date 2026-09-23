@@ -266,6 +266,15 @@ export async function checkFactContradictions(
   };
 
   const pending = chunks.filter((chunk) => !cache.get(chunk.hash, extractKeyBase));
+  /**
+   * AIへ送る前の確認を、この回に通ったか（2026-09-23）。
+   *
+   * **確認を通らずに送る道があってはならない**（作者の決まり）。取り出しが
+   * 全部処理済みでも、判定（1件ずつの問い直し）は別のキャッシュなので残って
+   * いることがある。そのときは判定の前に確認を出すため、ここで覚えておく。
+   * まとめ実行から来たときは、まとめ実行が先に確認している（設計書6.80）
+   */
+  let confirmedToSend = options.suiteConfirmed === true;
   if (pending.length > 0) {
     // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
     // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）
@@ -321,6 +330,7 @@ export async function checkFactContradictions(
       );
       if (!confirmed) return undefined;
     }
+    confirmedToSend = true;
   }
 
   logStep(
@@ -602,6 +612,58 @@ export async function checkFactContradictions(
         }
         verifyUndecided = issues.length;
         return;
+      }
+
+      /*
+        **取り出しが全部処理済みで、判定だけを送る回も確認を通す**（2026-09-23）。
+
+        確認は「取り出しが処理済みでない区切り」があるときにしか出して
+        いなかったので、判定だけが残っている状態——前回判定の途中で中止した、
+        判定の応答が切り詰められた（決めかねた答えは覚えない）、人物の設定
+        資料を直して新しい候補が出た——では、確認を出さないまま判定のAIを
+        呼んでいた。判定は別の割当（`contradiction`）で動くので、有料の
+        クラウドでもありうる。
+
+        **候補は取り出しのあとでしか分からない**ので、確認はここで出す
+        （札を持ったまま訊くことになるが、送らずに済ませる道はこれしかない）。
+      */
+      if (!confirmedToSend) {
+        const unverified = candidates.filter(
+          (candidate) => cache.get(candidate.fingerprint, verifyKeyBase) === undefined
+        ).length;
+        if (unverified > 0) {
+          if (
+            !(await confirmProviderReachable(
+              verifier.provider,
+              "矛盾検知（事実の照合）",
+              verifier.model
+            ))
+          ) {
+            cancelled = true;
+            return;
+          }
+          const detail = [
+            `本文から事実を取り出す段は処理済みです（${chunks.length}チャンク）。`,
+            `見つかった候補 ${unverified}件を、矛盾検知に割り当てたAI` +
+              `（${verifier.provider.displayName} / ${verifier.model}）が1件ずつ確かめます。`,
+            "送るのは候補の前後の数行だけです。本文は書き換えません。",
+            verifier.provider.isPaid
+              ? `\n${verifier.provider.displayName} は1件ごとに課金されます。`
+              : "",
+          ]
+            .filter(Boolean)
+            .join("\n");
+          const confirmed = await confirmRun(
+            `${work.title} の事実の照合で見つかった候補を確かめます。`,
+            "実行",
+            // 取り出しから始まる回と同じ id——「以降は訊かない」の答えを揃える
+            { detail, remember: { id: "ai.run.checkFactContradictions" }, work }
+          );
+          if (!confirmed) {
+            cancelled = true;
+            return;
+          }
+        }
       }
 
       await withCancellableProgress(

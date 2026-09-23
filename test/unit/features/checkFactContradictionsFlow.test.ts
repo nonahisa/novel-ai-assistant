@@ -44,6 +44,11 @@ const state = vi.hoisted(() => ({
    * テストが隠してしまう。送られた本文（行番号つき）から語を探す。
    */
   extractNeedles: null as Array<{ needle: string; value: string }> | null,
+  /**
+   * 事実の取り出しが処理済み（キャッシュにある）か。判定の答えは覚えていない
+   * ——前回、判定の途中で中止したときの形
+   */
+  extractCached: false,
 }));
 
 vi.mock("../../../src/ai/registry", () => ({
@@ -190,8 +195,11 @@ vi.mock("../../../src/core/characterStore", () => ({
 vi.mock("../../../src/core/chunkCache", () => ({
   ChunkCache: class {
     async load() {}
-    get() {
-      return undefined;
+    get(_hash: string, key: { feature: string }) {
+      // 取り出しだけを覚えている（判定は覚えていない）
+      return state.extractCached && key.feature === "story_fact_extract"
+        ? JSON.parse(state.extractResponse)
+        : undefined;
     }
     async set() {}
     async save() {}
@@ -259,6 +267,7 @@ beforeEach(() => {
   state.episodes = PLAIN_EPISODES;
   state.source = SOURCE;
   state.extractNeedles = null;
+  state.extractCached = false;
   state.extractResponse = TWO_FACTS;
   state.verifyResponse = JSON.stringify({
     verdict: "採用",
@@ -475,5 +484,56 @@ describe("合本（全話が1ファイル）", () => {
     expect(issue.excerpt).toBe("黒髪が揺れた。");
     const lines = COLLECTED.replace(/\r\n?/g, "\n").split("\n");
     expect(lines[issue.line - 1]).toBe("　黒髪が揺れた。");
+  });
+});
+
+/**
+ * **確認を通らずに送る道を塞ぐ**（2026-09-23）。
+ *
+ * 確認を出すかどうかを「取り出しが処理済みでない区切りの数」で決めていたので、
+ * 取り出しが全部処理済みで判定だけが残っている状態（前回、判定の途中で
+ * 中止した・判定の応答が切り詰められた・人物の設定資料を直して新しい候補が
+ * 出た）では、確認を出さないまま判定のAIを呼んでいた。判定は別の割当
+ * （`contradiction`）で動くので、有料のクラウドでもありうる。
+ */
+describe("取り出しが処理済みで、判定だけが残っているとき", () => {
+  beforeEach(() => {
+    state.extractCached = true;
+  });
+
+  function verifySends() {
+    return state.sent.filter((entry) => entry.feature === "fact_contradiction_verify");
+  }
+
+  test("判定を送る前に確認を出す。取りやめたら送らない", async () => {
+    Object.assign(window, { showInformationMessage: vi.fn(async () => undefined) });
+
+    const result = await checkFactContradictions(work, registry());
+
+    expect(window.showInformationMessage).toHaveBeenCalled();
+    expect(state.sent).toEqual([]);
+    expect(result?.cancelled).toBe(true);
+  });
+
+  test("確認で「実行」を押せば、判定だけを送る", async () => {
+    const result = await checkFactContradictions(work, registry());
+
+    const calls = (window.showInformationMessage as ReturnType<typeof vi.fn>).mock
+      .calls as unknown[][];
+    expect(calls).toHaveLength(1);
+    expect(String(calls[0][0])).toContain("確かめます");
+    expect(verifySends()).toHaveLength(1);
+    // 取り出しは処理済みなので送らない
+    expect(
+      state.sent.filter((entry) => entry.feature === "story_fact_extract")
+    ).toEqual([]);
+    expect(result?.issues).toHaveLength(1);
+  });
+
+  test("まとめ実行が先に確認していれば、ここでは訊かない", async () => {
+    await checkFactContradictions(work, registry(), { suiteConfirmed: true });
+
+    expect(window.showInformationMessage).not.toHaveBeenCalled();
+    expect(verifySends()).toHaveLength(1);
   });
 });

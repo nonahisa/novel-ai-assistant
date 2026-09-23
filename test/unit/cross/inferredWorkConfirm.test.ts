@@ -290,10 +290,14 @@ describe("作品に対する確認は、作品そのものを渡す", () => {
         callArguments(text, (match.index ?? 0) + match[0].length - 1)
       )
       .filter((args) => args.includes(`{ id: "${id}" }`));
-    expect(calls, `${file} に ${id} の確認が無い`).toHaveLength(1);
-    // `work` か `work: request.work` のように、作品そのものを渡している
-    expect(calls[0]).toMatch(/(^|[\s{,])work(: [\w.?]+)?\s*[,}]/);
-    // 題名だけの渡し方（`workTitle:`）は残っていない
-    expect(calls[0]).not.toMatch(/workTitle:/);
+    expect(calls.length, `${file} に ${id} の確認が無い`).toBeGreaterThanOrEqual(1);
+    // 同じ id の確認が2か所にあることがある（事実の照合は、取り出しから始まる
+    // 回と、判定だけが残っている回の2つ。2026-09-23）。**どれも**作品を渡す
+    for (const call of calls) {
+      // `work` か `work: request.work` のように、作品そのものを渡している
+      expect(call).toMatch(/(^|[\s{,])work(: [\w.?]+)?\s*[,}]/);
+      // 題名だけの渡し方（`workTitle:`）は残っていない
+      expect(call).not.toMatch(/workTitle:/);
+    }
   });
 });

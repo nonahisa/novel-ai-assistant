@@ -119,17 +119,20 @@ describe("矛盾検知への配線（書き方で押さえる）", () => {
   });
 
   test("あとで判明する事実の突き合わせも、送る予定に積む", () => {
-    const plan = SOURCE.slice(
-      SOURCE.indexOf("const plannedSends"),
-      SOURCE.indexOf("sumPlannedSends(plannedSends)")
-    );
+    // 送る予定の一覧は `planContradictionSends`（core）が組む（2026-09-23。
+    // 確認を出すかどうかも同じ一覧で決めるようにしたとき、core へ出した）
+    const start = SOURCE.indexOf("planContradictionSends(chunks");
+    expect(start).toBeGreaterThan(0);
+    const plan = SOURCE.slice(start, SOURCE.indexOf("countPendingVerifies()", start));
     expect(plan).toMatch(/promptFor\(chunk,\s*"settled"\)/);
     expect(plan).toMatch(/promptFor\(chunk,\s*"future",/);
   });
 
-  test("同意の文面は、確認と同じ合計（plannedTotal）から組む", () => {
+  test("同意の文面は、確認と同じ合計（送る予定の一覧の合計）から組む", () => {
     const consent = SOURCE.slice(SOURCE.indexOf("describeWholeReadConsent({"));
-    expect(consent.slice(0, 600)).toMatch(/volume:\s*plannedTotal/);
+    expect(consent.slice(0, 900)).toMatch(/volume:\s*sendPlan\.total/);
+    // 確認の本体の「送る量」も同じ合計
+    expect(SOURCE).toMatch(/plannedTotal\s*=\s*sendPlan\.sends\.length\s*>\s*0\s*\?\s*sendPlan\.total/);
     // 別の数え方（本命＋future を別に足し直す）を置かない
     expect(SOURCE).not.toMatch(/futureSendChars\(/);
   });

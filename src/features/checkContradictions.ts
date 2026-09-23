@@ -112,10 +112,12 @@ import { estimateRunTimeText, lookupCallSpeeds } from "../ai/runTimeEstimate";
 import {
   describeSendVolume,
   describeSentAgainstPlanned,
-  sumPlannedSends,
-  type PlannedSend,
   type PlannedSendTotal,
 } from "../core/sendVolume";
+import {
+  mustConfirmBeforeSending,
+  planContradictionSends,
+} from "../core/contradictionSendPlan";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurn } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
@@ -537,9 +539,63 @@ export async function checkContradictions(
   /** 実際に送った字数と回数（検出の段。検証の段は別に数えない） */
   let sentChars = 0;
   let sentCalls = 0;
-  /** まるごと読み、しかもクラウドへ送るか（同意を取る） */
-  const cloudWhole = wholeRead && !isLocalProviderId(resolved.provider.id);
-  if (pending.length > 0) {
+
+  /*
+    **送る予定の一覧を、確認の前に作る**（A3①、2026-09-23）。
+
+    本文と一緒に送る設定資料や、引き継ぎ（`carryOver`。既定2話）で増えた
+    人物も含めて数えるため、送るときと同じ組み立て（`promptFor`）で
+    プロンプトを組んで字数を取る。照らし合わせる相手が無い区切りは送らない。
+
+    **「あとで判明する事実」との突き合わせも積む**（ノートPCの実機、
+    0.76.1、2026-09-23）。同じ本文をもう一度送る2回目の呼び出しで、
+    ここを本命だけで数えていたので、まるごと読むときの同意画面に
+    「送る量: 約63,420字」（本命だけ）と、同意の文面が自分で足した
+    「約127,986字」（2回ぶん）が並んだ。**確認に出す量は、時間の見積もりも
+    同意の文面も、すべてこの一覧から数える。**
+
+    **確認を出すかどうかも、この一覧で決める**（2026-09-23）。以前は
+    「処理済みでない本命の件数」で決めていたので、本命が全部処理済みで
+    2回目だけが残っている状態（前回2回目の途中で中止したときなど）では、
+    確認もクラウドの同意も出さないまま2回目を送っていた。作者の決まり
+    ——**確認を通らずに送る道があってはならない**。
+  */
+  const sendPlan = planContradictionSends(chunks, {
+    // 輪の中の `cached ?? ask(...)` と同じ判定にする（null も「無い」扱い）
+    settledCached: (chunk) =>
+      cache.get(chunk.hash, keyWithPastScenes(cacheKeyBase, chunk)) != null,
+    futureCached: (chunk) => cache.get(chunk.hash, futureKeyBase) != null,
+    settledChars: (chunk) => {
+      const built = promptFor(chunk, "settled");
+      return built ? sendCharsOf(built) : undefined;
+    },
+    futureChars: (chunk) => {
+      const facts = settings.futureFactsFor(chunk.text, chunk.chapterStart);
+      if (!facts) return undefined;
+      const built = promptFor(chunk, "future", facts);
+      return built ? sendCharsOf(built) : undefined;
+    },
+  });
+  /*
+    **検証だけが残っている指摘も数える**（同じ穴の別の口、2026-09-23）。
+
+    検証（1件ずつの問い直し。設計書6.10.5）も別のキャッシュを持つ。本文を
+    読む段が全部処理済みでも、前回検証の途中で中止した・検証の応答が
+    切り詰められた（決めかねた答えは覚えない）ときは、今回その指摘の検証を
+    送る。これも確認を通す。
+  */
+  const pendingVerifies = countPendingVerifies();
+  /**
+   * まるごと読み、しかもクラウドへ**本文を**送るか（同意を取る）。
+   *
+   * 本文を読む段を1回も送らず、検証だけを送る回は同意を取らない——検証が
+   * 送るのは指摘の前後の数行で、本文はまるごと出ない。それでも確認は出す
+   */
+  const cloudWhole =
+    wholeRead &&
+    !isLocalProviderId(resolved.provider.id) &&
+    sendPlan.sends.length > 0;
+  if (mustConfirmBeforeSending(sendPlan, pendingVerifies)) {
     // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
     // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）
     if (
@@ -551,64 +607,41 @@ export async function checkContradictions(
     ) {
       return undefined;
     }
-    /*
-      **実際に送るぶんで数える**（A3①、2026-09-23）。
-
-      本文の字数だけで見積もっていたので、引き継ぎ（`carryOver`。既定2話）で
-      増えた人物の設定（＋16%）が時間にも量にも出ていなかった。送るときと
-      同じ組み立て（`promptFor`）でプロンプトを組み、指示も含めて数える。
-      照らし合わせる相手が無いチャンクは送らない（予定に積まない）。
-
-      **「あとで判明する事実」との突き合わせも積む**（ノートPCの実機、
-      0.76.1、2026-09-23）。同じ本文をもう一度送る2回目の呼び出しで、
-      ここを本命だけで数えていたので、まるごと読むときの同意画面に
-      「送る量: 約63,420字」（本命だけ）と、同意の文面が自分で足した
-      「約127,986字」（2回ぶん）が並んだ。**確認に出す量は、時間の見積もりも
-      同意の文面も、すべてこの一覧から数える。**
-
-      2回目は下の輪と同じ条件で積む——本命が送られるか処理済みのチャンクで、
-      事実があり、2回目がまだ処理済みでないもの。本命が失敗すれば2回目は
-      送らないので、実際はこれ以下になる（上限寄り）。
-    */
-    const plannedSends: PlannedSend[] = [];
-    const pendingHashes = new Set(pending.map((chunk) => chunk.hash));
-    const settledSent = new Set<string>();
-    for (const chunk of pending) {
-      const built = promptFor(chunk, "settled");
-      if (!built) continue;
-      settledSent.add(chunk.hash);
-      plannedSends.push({ chars: sendCharsOf(built), bodyChars: chunk.text.length });
-    }
-    for (const chunk of chunks) {
-      // 本命を送らないチャンク（照らし合わせる相手が無い）は、2回目も送らない
-      if (pendingHashes.has(chunk.hash) && !settledSent.has(chunk.hash)) continue;
-      if (cache.get(chunk.hash, futureKeyBase)) continue;
-      const facts = settings.futureFactsFor(chunk.text, chunk.chapterStart);
-      if (!facts) continue;
-      const built = promptFor(chunk, "future", facts);
-      if (!built) continue;
-      plannedSends.push({ chars: sendCharsOf(built), bodyChars: chunk.text.length });
-    }
-    plannedTotal = sumPlannedSends(plannedSends);
-    const sendChars = plannedSends.map((send) => send.chars);
-    const sendVolume = describeSendVolume(plannedTotal);
+    // 本文を読む段を送らない回（検証だけ）は、送る量の合計を出さない
+    // （0字と並べると、何も送らないように読める）
+    plannedTotal = sendPlan.sends.length > 0 ? sendPlan.total : undefined;
+    const sendChars = sendPlan.sends.map((send) => send.chars);
+    const futureOnly = sendPlan.chunkCount - sendPlan.settled.length;
     const detail = [
-      `${chunks.length}チャンク中 ${pending.length}件を処理します` +
-        `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
+      sendPlan.chunkCount > 0
+        ? `${chunks.length}チャンク中 ${sendPlan.chunkCount}件を処理します` +
+          `（処理済み ${chunks.length - sendPlan.chunkCount}件はスキップ）。`
+        : `${chunks.length}チャンクとも、本文を読む段は処理済みです。`,
+      // **本命が処理済みで、2回目だけを送る区切りがあることを黙らない。**
+      // 「処理済み」と数えた区切りの本文が、もう一度送られる
+      futureOnly > 0
+        ? `うち${futureOnly}件は、「あとで判明する事実」との突き合わせだけを送ります。`
+        : "",
+      pendingVerifies > 0
+        ? `処理済みの区切りで見つかっていた指摘${pendingVerifies}件の検証も行います` +
+          "（1件ずつ、前後の数行を送ります）。"
+        : "",
       // **どれくらいかかるかを先に出す**（設計書6.8.19）。219話では
       // 6時間規模になるので、「夜に回すか、いま回すか」を決める材料が要る
-      estimateRunTimeText({
-        providerId: resolved.provider.id,
-        model: resolved.model,
-        feature: "contradiction_check",
-        // **呼ぶ回数で数える**（2回目の突き合わせを含む）。送る量と同じ一覧
-        count: sendChars.length,
-        // 送るぶんそのもの（指示・設定資料・本文）。読み込みの時間を足す（設計書6.8.19）
-        inputChars: sendChars,
-      }),
+      sendChars.length > 0
+        ? estimateRunTimeText({
+            providerId: resolved.provider.id,
+            model: resolved.model,
+            feature: "contradiction_check",
+            // **呼ぶ回数で数える**（2回目の突き合わせを含む）。送る量と同じ一覧
+            count: sendChars.length,
+            // 送るぶんそのもの（指示・設定資料・本文）。読み込みの時間を足す（設計書6.8.19）
+            inputChars: sendChars,
+          })
+        : "",
       // クラウドでまるごと読むときは、同意の文面が送る量を言う（同じ画面に
       // 2度書かない）
-      cloudWhole ? "" : sendVolume,
+      cloudWhole || !plannedTotal ? "" : describeSendVolume(plannedTotal),
       `材料: 人物${material.characterCount}人 / 場所${material.locationCount}件 / ` +
         `世界観${material.worldCount}件`,
       // **送る量が増えることを黙らない**（設計書6.74）。過去の本文を
@@ -661,11 +694,14 @@ export async function checkContradictions(
       wholeNote = describeWholeReadConsent({
         // **サービス名を決め打ちしない**（規則5）。プロバイダの表示名を使う
         serviceName: resolved.provider.displayName,
-        bodyChars: pending.reduce((total, chunk) => total + chunk.text.length, 0),
-        pieces: pending.length,
+        // **本文の量と区切りの数も、送る予定の一覧から数える。** 処理済みで
+        // ない本命（`pending`）で数えると、2回目だけを送る回に「0字・0回」と
+        // 言いながら本文を送ることになる
+        bodyChars: sendPlan.distinctBodyChars,
+        pieces: sendPlan.chunkCount,
         // **確認の本体と同じ合計を渡す。** ここで足し直すと、同じ画面に
         // 違う数が2つ並ぶ（0.76.1 の実機で起きた）
-        volume: plannedTotal,
+        volume: sendPlan.total,
         tokensPerChar,
         maxOutputTokensPerCall: sendOutputTokens,
       });
@@ -1361,15 +1397,56 @@ export async function checkContradictions(
     };
   }
 
+  /**
+   * 検証の答えを覚えておく鍵。**確認の前に数えるときと、検証するときの
+   * 両方がここを通る**（片方だけ変わると、数えた件数と送る件数がずれる）
+   */
+  function verifyCacheKey(issue: AcceptedContradiction, chunk: Chunk): string {
+    return hashText(
+      `${chunk.hash}:${issue.line}:${issue.excerpt}:${issue.settingSays}`
+    );
+  }
+
+  /**
+   * 本文を読む段では送らない（処理済みの答えを引く）区切りから出る指摘の
+   * うち、**検証がまだのもの**の数（2026-09-23）。
+   *
+   * 本文を読む段を1回も送らなくても、この数が1以上なら検証を送る。確認を
+   * 出すかどうかを決めるのに要る。**今回送る区切りの指摘は数えない**——
+   * AIの答えが返るまで何件出るか分からない（その回は本文を読む段の確認が
+   * 必ず出る）。
+   */
+  function countPendingVerifies(): number {
+    const sentSettled = new Set(sendPlan.settled.map((chunk) => chunk.hash));
+    const sentFuture = new Set(sendPlan.future.map((chunk) => chunk.hash));
+    const keys = new Set<string>();
+    const add = (raw: unknown, chunk: Chunk): void => {
+      for (const issue of validateContradictions(raw, chunk).accepted) {
+        const key = verifyCacheKey(issue, chunk);
+        if (cache.get(key, verifyKeyBase) === undefined) keys.add(key);
+      }
+    };
+    for (const chunk of chunks) {
+      if (sentSettled.has(chunk.hash)) continue;
+      // 輪と同じく、本命の答えが無ければ2回目へ進まない
+      const settledRaw = cache.get(chunk.hash, keyWithPastScenes(cacheKeyBase, chunk));
+      if (settledRaw == null) continue;
+      add(settledRaw, chunk);
+      if (sentFuture.has(chunk.hash)) continue;
+      if (!settings.futureFactsFor(chunk.text, chunk.chapterStart)) continue;
+      const futureRaw = cache.get(chunk.hash, futureKeyBase);
+      if (futureRaw != null) add(futureRaw, chunk);
+    }
+    return keys.size;
+  }
+
   /** 1件だけを見て、本当に矛盾かを問い直す */
   async function verify(
     issue: AcceptedContradiction,
     chunk: Chunk,
     controller: AbortController
   ): Promise<VerifyOutcome> {
-    const key = hashText(
-      `${chunk.hash}:${issue.line}:${issue.excerpt}:${issue.settingSays}`
-    );
+    const key = verifyCacheKey(issue, chunk);
     const cached = cache.get(key, verifyKeyBase);
     if (cached !== undefined) {
       return parseVerifyOutcome(
