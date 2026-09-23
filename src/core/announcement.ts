@@ -9,6 +9,7 @@ import {
   X_POST_MAX_CHARS,
   type AnnounceResult,
 } from "../prompts/announce";
+import { findReaderTypeLabels, readerLeakNote } from "./publicityReader";
 
 /**
  * 更新告知文（P-30）の組み立てと検査。**純粋関数だけを置く。**
@@ -383,6 +384,13 @@ export function validateAnnouncement(
         );
       }
     }
+    // **層の呼び名も、材料として渡した言葉である**（0.82.5。狙いの読者を
+    // 添えるようになった）。「没入層の皆さま」のまま貼られると、読者には
+    // 意味の分からない呼びかけになる。捨てずに注意だけ出す
+    const labels = findReaderTypeLabels(text);
+    if (labels.length > 0) {
+      warnings.push(`${label}に、${readerLeakNote(labels)}`);
+    }
   }
 
   return warnings;
@@ -436,6 +444,11 @@ export interface AnnouncementMarkdownInput {
   afterword: string;
   spoilerCheck: string | null;
   warnings: string[];
+  /**
+   * 何に向けて書いたかの1行（`publicityReaderNotice`。設計書6.41.2）。
+   * 渡さなければ出さない（前の版の呼び出しと同じ見た目）
+   */
+  readerNote?: string;
 }
 
 export function buildAnnouncementMarkdown(
@@ -447,6 +460,8 @@ export function buildAnnouncementMarkdown(
     `${input.workTitle}　${input.episodeLabel}`,
     "",
   ];
+  // 見出しのすぐ下に置く。狙いを変えたあと作り直すかの判断に要る
+  if (input.readerNote) lines.push(input.readerNote, "");
 
   // **注意は冒頭に置く。** 末尾に置くと、上から読んでコピーした作者は
   // 気づかないまま貼ってしまう

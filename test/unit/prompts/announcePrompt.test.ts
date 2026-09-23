@@ -87,11 +87,11 @@ describe("更新告知のスキーマ", () => {
     expect(ANNOUNCE_SCHEMA.additionalProperties).toBe(false);
   });
 
-  test("版は文書と揃えて 1.0", () => {
+  test("版は文書と揃えて 1.1（0.82.5 で狙いの読者を添えた）", () => {
     // プロンプトを直したら上げること。**この機能はチャンクキャッシュを
     // 通らない**（1回呼びで、話ごとに材料が変わる）ので、版が効くのは
     // プロンプト設計書のP-30と実装を対応させるためである
-    expect(ANNOUNCE_VERSION).toBe("1.0");
+    expect(ANNOUNCE_VERSION).toBe("1.1");
   });
 });
 

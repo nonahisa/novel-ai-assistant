@@ -1,3 +1,6 @@
+import type { PublicityReader } from "../core/publicityReader";
+import { publicityReaderSections } from "./publicityReader";
+
 /**
  * P-06 作品紹介文生成／P-08 キャッチコピー3案提案
  *
@@ -10,7 +13,23 @@
 // 1.1: 「最初の1文（キャッチコピーは最初の数語）に作品の核を置く」を足した。
 //      投稿サイトの一覧では後半が省略されて表示されるため、後半に核があると
 //      読者に届かない（作者の創作論「WEB小説再入門7」のタッチポイント分析より）
-export const BLURB_VERSION = "1.1";
+// 1.2: 狙いの読者（ターゲット読者の「狙い」、無ければ読者像）を添えるようにした
+//      （0.82.5。作者の問い、2026-09-23）。材料が無ければ今までどおり添えない
+export const BLURB_VERSION = "1.2";
+
+/**
+ * 作り直しの判断・測った結果の照合に使う版（0.82.5）。
+ *
+ * **読者の印を混ぜる**（CLAUDE.md 規則4。P-07 の `synopsisPromptVersion` と
+ * 同じ流儀）。狙いを変えればプロンプトの文面が変わるので、同じ版を名乗ると
+ * 古い狙いで作った結果を新しい狙いのものとして扱うことになる。
+ * 紹介文とキャッチコピーは同じ版を共有する（材料も同じ読者である）。
+ *
+ * @param readerMark `publicityReaderMark()` の返り値（無ければ "none"）
+ */
+export function blurbPromptVersion(readerMark: string): string {
+  return `${BLURB_VERSION}|reader:${readerMark}`;
+}
 
 /**
  * 送るときの温度。紹介文は読ませる文章なので、抽出より少し揺らす。
@@ -52,9 +71,15 @@ export interface BlurbPromptInput {
   openingExcerpt: string;
   /** 各話あらすじ。多いので前半だけ渡す */
   chapterSynopses: string[];
+  /**
+   * 狙いの読者（設計書6.6.5）。**無ければ渡さない**——無いときに
+   * 「読者層に合わせて」とだけ言うと、AIが宛先を勝手に決める
+   */
+  reader?: PublicityReader;
 }
 
 export function buildBlurbPrompt(input: BlurbPromptInput): string {
+  const reader = publicityReaderSections(input.reader);
   return `以下の情報をもとに、小説投稿サイトに掲載する作品紹介文を作成してください。
 
 【作品タイトル】
@@ -81,7 +106,7 @@ ${input.chapterSynopses.length > 0 ? input.chapterSynopses.join("\n") : "（ま�
 - 作者の文体・作品の雰囲気に合わせること。
   シリアスな作品に軽薄な煽り文句を付けない。
 - 「感動必至！」「衝撃のラスト！」のような、**中身の無い煽り文句を使わない**。
-
+${reader.rule}${reader.block}
 【出力形式】
 指定されたJSON形式のみを出力してください。
 spoilerCheck には、ネタバレを避けるために意図的に伏せた要素を書いてください。
@@ -113,9 +138,12 @@ export interface CatchphrasePromptInput {
   openingExcerpt: string;
   /** 前に出して採用されなかった案。同じものを出させないために渡す */
   rejected: string[];
+  /** 狙いの読者（紹介文と同じ）。無ければ渡さない */
+  reader?: PublicityReader;
 }
 
 export function buildCatchphrasePrompt(input: CatchphrasePromptInput): string {
+  const reader = publicityReaderSections(input.reader);
   return `以下の小説について、読者が読みたくなるキャッチコピーを${CATCHPHRASE_COUNT}案提案してください。
 
 【作品タイトル】
@@ -145,7 +173,7 @@ ${input.rejected.length > 0 ? input.rejected.join("\n") : "（まだありませ
 - 作品の雰囲気（文体、深刻さ）に合った言葉を選ぶこと。
 - 前に出して採用されなかった案と、実質的に同じものを出さないこと。
 - 案ごとに「なぜ読者の興味を引くか」を40字以内で書くこと。
-
+${reader.rule}${reader.block}
 【出力形式】
 指定されたJSON形式のみを出力してください。`;
 }

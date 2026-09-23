@@ -67,6 +67,11 @@ import {
 } from "../core/logger";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { confirmRun, warnWithLog } from "../views/notify";
+import {
+  publicityReaderNotice,
+  type PublicityReader,
+} from "../core/publicityReader";
+import { loadPublicityReader } from "./publicityReader";
 
 /**
  * 更新告知文（P-30、設計書6.41）。
@@ -245,6 +250,7 @@ export async function generateAnnouncement(
     afterword: parsed.afterword,
     spoilerCheck: parsed.spoilerCheck,
     warnings,
+    readerNote: publicityReaderNotice(material.prompt.reader),
   });
   await openGeneratedMarkdown("更新告知文", markdown, undefined, { work });
 
@@ -617,6 +623,8 @@ interface AnnounceMaterial {
     blurb: string;
     previousSynopsis: string;
     pastAnnouncements: string[];
+    /** 狙いの読者。無ければ undefined（添えない） */
+    reader: PublicityReader | undefined;
   };
 }
 
@@ -638,6 +646,9 @@ async function collectMaterial(
       blurb: doc.blurb,
       previousSynopsis: await readPreviousSynopsis(work, episode.chapter),
       pastAnnouncements: await new AnnouncementHistory(work).load(),
+      // 狙いの読者（設計書6.41.2）。読めなくても止めない（添えないだけ）。
+      // 本文の予算は、これを含めたプロンプトの字数から決まる
+      reader: await loadPublicityReader(work, "更新告知文"),
     },
   };
 }

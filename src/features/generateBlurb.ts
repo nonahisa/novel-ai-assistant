@@ -38,9 +38,20 @@ import { withCancellableProgress } from "../views/progress";
 import { reportAIError } from "./reportAIError";
 import {
   logFailure,
+  logStep,
   responseExcerptForLog,
   useLogFile,
 } from "../core/logger";
+import {
+  publicityReaderNotice,
+  type PublicityReader,
+} from "../core/publicityReader";
+import {
+  blurbReaderLeakNote,
+  READER_LEAK_REASON_HEAD,
+  screenCatchphrases,
+} from "../core/blurbValidation";
+import { loadPublicityReader } from "./publicityReader";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { confirmRun, warnWithLog } from "../views/notify";
 
@@ -97,7 +108,7 @@ export async function generateWorkBlurb(
   const resolved = await ensureConfigured(registry, "generate");
   if (!resolved) return;
 
-  const material = await collectMaterial(work);
+  const material = await collectMaterial(work, "作品紹介文");
   if (!material) return;
 
   // **繋がるかを、費用の確認より先に確かめる**（設計書6.51）。
@@ -169,6 +180,7 @@ export async function generateWorkBlurb(
             plot: material.plot,
             openingExcerpt: material.openingExcerpt,
             chapterSynopses: material.chapterSynopses,
+            reader: material.reader,
           }),
           model: resolved.model,
           // 紹介文は読ませる文章なので、抽出より少し揺らす
@@ -212,6 +224,9 @@ export async function generateWorkBlurb(
 
   // 字数はコード側で数え直す。長すぎるものは切らずに、そのまま見せて判断させる
   const overLength = parsed.blurb.length > BLURB_MAX_CHARS;
+  // **層の呼び名が出ていないかも見る**（プロンプトへ書いて渡すので、そのまま
+  // 返ってくる前提。CLAUDE.md の失敗3）。字数と同じく捨てずに知らせる
+  const readerLeak = blurbReaderLeakNote(parsed.blurb);
 
   // **案を見せるのに無題のエディターを開かない。** 以前は開いて閉じていたが、
   // 無題の文書は常に「未保存」なので、閉じる際にVS Codeが保存先を尋ね、
@@ -225,6 +240,9 @@ export async function generateWorkBlurb(
         parsed.blurb,
         parsed.spoilerCheck ? `\n伏せた要素: ${parsed.spoilerCheck}` : "",
         overLength ? `\n目安の${BLURB_MAX_CHARS}字を超えています。` : "",
+        readerLeak ? `\n${readerLeak}` : "",
+        // 何に向けて書いたか（狙いを変えたら作り直すかの判断に要る）
+        `\n${publicityReaderNotice(material.reader)}`,
         "\n採用すると 設定/synopsis.md に書き込みます。",
       ]
         .filter(Boolean)
@@ -248,7 +266,7 @@ export async function generateCatchphrases(
   const resolved = await ensureConfigured(registry, "generate");
   if (!resolved) return;
 
-  const material = await collectMaterial(work);
+  const material = await collectMaterial(work, "キャッチコピー");
   if (!material) return;
 
   // **繋がるかを、費用の確認より先に確かめる**（設計書6.51）。
@@ -311,6 +329,7 @@ export async function generateCatchphrases(
               blurb: material.currentDoc.blurb,
               openingExcerpt: material.openingExcerpt,
               rejected,
+              reader: material.reader,
             }),
             model: resolved.model,
             // 案を出させるので、いちばん揺らす
@@ -331,11 +350,20 @@ export async function generateCatchphrases(
     if (!response) return;
 
     const candidates = parseCatchphraseResponse(response.text);
-    const valid = candidates.filter(
-      (candidate) =>
-        candidate.text.length > 0 &&
-        candidate.text.length <= CATCHPHRASE_MAX_CHARS
+    // **振り分けは MCP と同じ関数**（字数・空・層の呼び名。写しを作らない）。
+    // 層の呼び名（「すきま層」）が入った案は貼れないので落とす
+    const screened = screenCatchphrases(candidates);
+    const valid = screened.kept;
+    const leaked = screened.dropped.filter((entry) =>
+      entry.reason.startsWith(READER_LEAK_REASON_HEAD)
     );
+    if (leaked.length > 0) {
+      logStep(
+        `キャッチコピー: 読者層の呼び名が入った案を${leaked.length}件落としました（${leaked
+          .map((entry) => entry.candidate.text)
+          .join("／")}）`
+      );
+    }
     if (valid.length === 0) {
       /*
         **切り詰めは、切り詰めとして伝える**（紹介文と同じ扱い、0.33.9）。
@@ -352,7 +380,9 @@ export async function generateCatchphrases(
       const retry = await vscode.window.showWarningMessage(
         truncated
           ? truncatedOutputAdvice(outputLimit)
-          : `${CATCHPHRASE_MAX_CHARS}字以内の案が返りませんでした。`,
+          : leaked.length > 0
+            ? "使える案が返りませんでした（読者層の呼び名がそのまま入った案は落としました）。"
+            : `${CATCHPHRASE_MAX_CHARS}字以内の案が返りませんでした。`,
         "もう一度",
         "やめる"
       );
@@ -386,7 +416,8 @@ export async function generateCatchphrases(
       ],
       {
         title: `${material.workTitle} のキャッチコピー`,
-        placeHolder: "採用する案を選んでください",
+        // 何に向けて書いたかを添える（狙いを変えたら出し直すかの判断に要る）
+        placeHolder: `採用する案を選んでください。${publicityReaderNotice(material.reader)}`,
         ignoreFocusOut: true,
       }
     );
@@ -434,11 +465,18 @@ interface BlurbMaterial {
   openingExcerpt: string;
   chapterSynopses: string[];
   currentDoc: SynopsisDoc;
+  /** 狙いの読者（設計書6.6.5）。無ければ undefined（添えない） */
+  reader: PublicityReader | undefined;
 }
 
-/** 紹介文・キャッチコピーの材料を集める */
+/**
+ * 紹介文・キャッチコピーの材料を集める。
+ *
+ * @param action ログに書く機能の名前
+ */
 async function collectMaterial(
-  work: WorkEntry
+  work: WorkEntry,
+  action: string
 ): Promise<BlurbMaterial | undefined> {
   const scan = await scanWork(work);
   if (scan.episodes.length === 0) {
@@ -480,6 +518,8 @@ async function collectMaterial(
     openingExcerpt,
     chapterSynopses,
     currentDoc: await readSynopsisDoc(work),
+    // **確認より先に読む**（サブタイトルと同じ）。読めなくても止めない
+    reader: await loadPublicityReader(work, action),
   };
 }
 

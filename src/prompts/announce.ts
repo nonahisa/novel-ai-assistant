@@ -1,3 +1,6 @@
+import type { PublicityReader } from "../core/publicityReader";
+import { publicityReaderSections } from "./publicityReader";
+
 /**
  * P-30 更新告知文（X用・活動報告用・後書き用）
  *
@@ -13,7 +16,24 @@
  *
  * プロンプトを変更したら version を上げること。
  */
-export const ANNOUNCE_VERSION = "1.0";
+/*
+  変更履歴（要点だけ。詳しくはプロンプト設計書 P-30）
+  - 1.1: 狙いの読者（ターゲット読者の「狙い」、無ければ読者像）を添えるように
+    した（0.82.5。作者の問い、2026-09-23「告知文もですね」）。材料が無ければ
+    今までどおり添えない。**塊は P-06 と同じ部品で組む**（下の「P-06 の定数を
+    import しない」は4原則の話で、読者の塊は3つの文章で同じでなければ困る）
+*/
+export const ANNOUNCE_VERSION = "1.1";
+
+/**
+ * 測った結果の照合に使う版（0.82.5）。読者の印を混ぜる（規則4。
+ * P-06 の `blurbPromptVersion` と同じ流儀）。
+ *
+ * @param readerMark `publicityReaderMark()` の返り値（無ければ "none"）
+ */
+export function announcePromptVersion(readerMark: string): string {
+  return `${ANNOUNCE_VERSION}|reader:${readerMark}`;
+}
 
 /** X用の本文の上限。定型句・ハッシュタグ・URLはコード側で足すので、その分は含まない */
 export const X_POST_MAX_CHARS = 100;
@@ -74,9 +94,15 @@ export interface AnnouncePromptInput {
   bodyExcerpt: string;
   /** 前に出した告知。同じ言い回しを避けるために渡す */
   pastAnnouncements: string[];
+  /**
+   * 狙いの読者（設計書6.41.2）。**無ければ渡さない**（紹介文と同じ。
+   * 無いときに「読者層に合わせて」とだけ言うと、AIが宛先を勝手に決める）
+   */
+  reader?: PublicityReader;
 }
 
 export function buildAnnouncePrompt(input: AnnouncePromptInput): string {
+  const reader = publicityReaderSections(input.reader);
   // **無いものに「（まだありません）」と書かない。** 前の話のあらすじは
   // 「前回までのあらすじ」として告知文に写されやすい位置にあり、
   // 空の印を置くとその言葉ごと写して返ってくる。節ごと落とせば写しようがない
@@ -123,7 +149,7 @@ ${input.pastAnnouncements.length > 0 ? input.pastAnnouncements.join("\n") : NO_M
 - 作品の雰囲気（文体、深刻さ）に合わせること。
   シリアスな作品に軽薄な煽り文句を付けない。
 - 前に出した告知と、実質的に同じ言い回しを避けること。
-
+${reader.rule}${reader.block}
 【出力形式】
 指定されたJSON形式のみを出力してください。
 spoilerCheck には、ネタバレを避けるために意図的に伏せた要素を書いてください。

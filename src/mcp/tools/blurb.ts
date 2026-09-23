@@ -4,27 +4,41 @@ import {
   BLURB_SCHEMA,
   BLURB_SYSTEM_PROMPT,
   BLURB_TEMPERATURE,
-  BLURB_VERSION,
   CATCHPHRASE_COUNT,
   CATCHPHRASE_MAX_CHARS,
   CATCHPHRASE_SCHEMA,
   CATCHPHRASE_TEMPERATURE,
+  blurbPromptVersion,
   buildBlurbPrompt,
   buildCatchphrasePrompt,
 } from "../../prompts/blurb";
+import * as fs from "node:fs";
+import * as nodePath from "node:path";
 import {
+  blurbReaderLeakNote,
   measureBlurb,
   parseBlurbResponse,
   parseCatchphraseResponse,
   screenCatchphrases,
 } from "../../core/blurbValidation";
 import { parseSynopsisSet } from "../../models/synopsis";
+import { decodeBytes } from "../../core/textDecode";
+import { TARGET_SHEET_FILE } from "../../core/targetSheetDoc";
+import {
+  findReaderTypeLabels,
+  publicityReaderFromSheet,
+  publicityReaderMark,
+  publicityReaderNotice,
+  type PublicityReader,
+} from "../../core/publicityReader";
 import {
   McpToolError,
   SYNOPSES_FILE,
   orderedEpisodeBodies,
   readPlotMarkdown,
+  readReaderProfile,
   readSettingsFile,
+  settingsDirOf,
   workTitleOf,
 } from "./shared";
 import {
@@ -98,10 +112,42 @@ function readSynopses(folder: string): string[] {
   }
 }
 
+/**
+ * 狙いの読者（0.82.5。設計書6.6.5）。**製品と同じ優先順位**で決める
+ * ——ターゲットシートの狙い → 読者像 → 無し。ここだけ添えないと、
+ * 測った紹介文が製品と違う材料で作られたことになる（CLAUDE.md の失敗5）。
+ *
+ * **読めなければ添えない（止めない）。** 読者はどの機能でも「あれば足す」材料で、
+ * 読めないシートのせいで紹介文が作れなくなるほうが困る（`readReaderProfile` と同じ）。
+ */
+function readPublicityReader(folder: string): PublicityReader | undefined {
+  return publicityReaderFromSheet(
+    readTargetSheetText(folder),
+    readReaderProfile(folder)
+  );
+}
+
+/** `設定/ターゲットシート.md` の中身。無ければ（読めなければ）undefined */
+function readTargetSheetText(folder: string): string | undefined {
+  const settings = settingsDirOf(folder);
+  if (!settings) return undefined;
+  const file = nodePath.join(settings, TARGET_SHEET_FILE);
+  if (!fs.existsSync(file)) return undefined;
+  try {
+    return decodeBytes(fs.readFileSync(file)).text;
+  } catch {
+    return undefined;
+  }
+}
+
 export function blurbPrompt(input: BlurbPromptInput) {
   const synopses = readSynopses(input.folder);
+  const reader = readPublicityReader(input.folder);
   return {
-    promptVersion: BLURB_VERSION,
+    // **版も製品と同じ組み立て**（読者の印が混ざる。規則4）
+    promptVersion: blurbPromptVersion(publicityReaderMark(reader)),
+    /** 何に向けて書かせたか（製品の画面に出る1行と同じ） */
+    readerNote: publicityReaderNotice(reader),
     systemPrompt: BLURB_SYSTEM_PROMPT,
     schema: BLURB_SCHEMA,
     temperature: BLURB_TEMPERATURE,
@@ -114,6 +160,7 @@ export function blurbPrompt(input: BlurbPromptInput) {
       plot: readPlotMarkdown(input.folder) ?? "",
       openingExcerpt: readOpeningExcerpt(input.folder),
       chapterSynopses: synopses,
+      reader,
     }),
   };
 }
@@ -126,6 +173,13 @@ export function blurbValidate(input: { response: string }) {
     );
   }
   const measured = measureBlurb(parsed.blurb);
+  // **層の呼び名が出ていないかを見る**（プロンプトへ書いて渡すので、
+  // そのまま返ってくる前提。CLAUDE.md の失敗3）。捨てずに伝える
+  const readerLeak = blurbReaderLeakNote(parsed.blurb);
+  const lengthNote =
+    measured.tooShort || measured.tooLong
+      ? `目安（${BLURB_MIN_CHARS}〜${BLURB_MAX_CHARS}字）から外れています（${measured.chars}字）。捨てずに返しています——投稿サイトによって上限が違うためです。何も書き換えていません。`
+      : "何も書き換えていません（どれを使うかは作者が決めます）。";
   return {
     blurb: parsed.blurb,
     /** 伏せた要素についてのAIの申告。**そのまま信じる材料ではない** */
@@ -138,10 +192,9 @@ export function blurbValidate(input: { response: string }) {
     tooShort: measured.tooShort,
     tooLong: measured.tooLong,
     targetChars: { min: BLURB_MIN_CHARS, max: BLURB_MAX_CHARS },
-    note:
-      measured.tooShort || measured.tooLong
-        ? `目安（${BLURB_MIN_CHARS}〜${BLURB_MAX_CHARS}字）から外れています（${measured.chars}字）。捨てずに返しています——投稿サイトによって上限が違うためです。何も書き換えていません。`
-        : "何も書き換えていません（どれを使うかは作者が決めます）。",
+    /** 紹介文に出ていた層の呼び名（無ければ空） */
+    readerLabels: findReaderTypeLabels(parsed.blurb),
+    note: readerLeak ? `${readerLeak}${lengthNote}` : lengthNote,
   };
 }
 
@@ -152,8 +205,10 @@ export async function blurbRun(input: BlurbPromptInput & RunnerInput) {
 }
 
 export function catchphrasePrompt(input: CatchphrasePromptInput) {
+  const reader = readPublicityReader(input.folder);
   return {
-    promptVersion: BLURB_VERSION,
+    promptVersion: blurbPromptVersion(publicityReaderMark(reader)),
+    readerNote: publicityReaderNotice(reader),
     systemPrompt: BLURB_SYSTEM_PROMPT,
     schema: CATCHPHRASE_SCHEMA,
     temperature: CATCHPHRASE_TEMPERATURE,
@@ -166,6 +221,7 @@ export function catchphrasePrompt(input: CatchphrasePromptInput) {
       blurb: input.blurb ?? "",
       openingExcerpt: readOpeningExcerpt(input.folder),
       rejected: input.rejected ?? [],
+      reader,
     }),
   };
 }
@@ -189,7 +245,7 @@ export function catchphraseValidate(input: { response: string }) {
     asked: CATCHPHRASE_COUNT,
     maxChars: CATCHPHRASE_MAX_CHARS,
     note:
-      `${CATCHPHRASE_MAX_CHARS}字に収まる案だけを残しました。` +
+      `${CATCHPHRASE_MAX_CHARS}字に収まり、読者層の呼び名を含まない案だけを残しました。` +
       "何も書き換えていません（どれを使うかは作者が決めます）。",
   };
 }

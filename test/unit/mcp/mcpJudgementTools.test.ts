@@ -16,8 +16,14 @@ import { chapterPrompt, chapterValidate } from "../../../src/mcp/tools/chapter";
 import {
   blurbPrompt,
   blurbValidate,
+  catchphrasePrompt,
   catchphraseValidate,
 } from "../../../src/mcp/tools/blurb";
+import {
+  AUTHOR_BLOCK_BEGIN,
+  AUTHOR_BLOCK_END,
+  TARGET_SHEET_MARKER,
+} from "../../../src/core/targetSheetDoc";
 
 /**
  * 外から呼べるようにした5つの「判断」（0.66.0。設計書6.87.13）。
@@ -295,6 +301,64 @@ describe("作品紹介文（P-06）とキャッチコピー（P-08）", () => {
     expect(result.candidates).toHaveLength(1);
     expect(result.dropped).toHaveLength(1);
     expect(result.dropped[0].reason).toContain("上限");
+  });
+
+  /**
+   * **狙いの読者を、製品と同じ優先順位で添える**（作者の問い、2026-09-23）。
+   * ここだけ添えないと、測った紹介文が製品と違う材料で作られたことになる
+   * （CLAUDE.md の失敗5）。
+   */
+  test("ターゲットシートに狙いがあれば、狙いの層を添えて版にも混ぜる", () => {
+    const folder = copiedWork();
+    fs.writeFileSync(
+      nodePath.join(folder, "設定", "ターゲットシート.md"),
+      [
+        "# ターゲットシート",
+        "",
+        `<!-- ${TARGET_SHEET_MARKER} -->`,
+        AUTHOR_BLOCK_BEGIN,
+        "狙い：すきま層",
+        "理由：通勤中に読める話にしたい",
+        AUTHOR_BLOCK_END,
+        "",
+      ].join("\n"),
+      "utf8"
+    );
+
+    const prompt = blurbPrompt({ folder });
+    expect(prompt.userPrompt).toContain("すきま層");
+    expect(prompt.userPrompt).toContain("通勤中に読める話にしたい");
+    expect(prompt.promptVersion).toContain("aim:light");
+    expect(prompt.readerNote).toContain("狙いの読者（すきま層）");
+
+    const catchphrase = catchphrasePrompt({ folder });
+    expect(catchphrase.userPrompt).toContain("すきま層");
+    expect(catchphrase.promptVersion).toBe(prompt.promptVersion);
+  });
+
+  test("狙いが無ければ読者像（読者像.json）を添える", () => {
+    const prompt = blurbPrompt({ folder: WORK });
+    expect(prompt.userPrompt).toContain("【この作品の読者】");
+    expect(prompt.promptVersion).not.toContain("reader:none");
+  });
+
+  test("どちらも無ければ添えない（版は reader:none）", () => {
+    const folder = copiedWork();
+    fs.rmSync(nodePath.join(folder, "設定", "読者像.json"));
+
+    const prompt = blurbPrompt({ folder });
+    expect(prompt.userPrompt).not.toContain("【この作品の読者】");
+    expect(prompt.promptVersion).toContain("reader:none");
+    expect(prompt.readerNote).toContain("「ターゲット読者」");
+  });
+
+  test("紹介文に層の呼び名が出たら、捨てずに注意する", () => {
+    const result = blurbValidate({
+      response: JSON.stringify({ blurb: "考察層に贈る物語。" }),
+    });
+    expect(result.blurb).toBe("考察層に贈る物語。");
+    expect(result.readerLabels).toEqual(["考察層"]);
+    expect(result.note).toContain("考察層");
   });
 
   test("読み取れない応答は断る", () => {
