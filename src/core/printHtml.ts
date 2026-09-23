@@ -6,6 +6,7 @@ import {
 import { stripMemoLines } from "./sceneMemo";
 import { kindLineClass, kindLineCss } from "./kindLines";
 import type { WorkKindKey } from "./workKind";
+import { PRINT_PAGINATE_SCRIPT } from "./printPaginate";
 
 /**
  * 印刷用に組版したHTMLを作る（PDF出力のもと）。
@@ -153,17 +154,66 @@ export function buildPrintHtml(input: PrintHtmlInput): string {
     buildStyle(preset, input.kind),
     "</style>",
     "</head>",
-    "<body>",
-    '<div class="sheet">',
+    // 縦書きかどうかは、面に割るスクリプトが「どちらへはみ出したか」を
+    // 測るのに使う（縦書きは左へ、横書きは下へはみ出す）
+    `<body data-vertical="${preset.vertical ? "1" : "0"}">`,
+    buildGuide(preset),
+    // 紙1枚ずつの面は、ここへスクリプトが並べる（設計書6.33.5 の1）
+    '<div id="print-pages"></div>',
+    // 流し込みの本文。面に割るもとであり、スクリプトが動かなかったときの
+    // 紙でもある（そのときは以前と同じ刷り上がりになる）
+    '<div class="sheet" id="print-source">',
     // 1ページ目は題だけの扉。ここで改ページして本文へ移る
     `<section class="cover"><h1 class="cover-title">${title}</h1></section>`,
     ...input.episodes.map((episode) => renderEpisode(episode, input.kind)),
     "</div>",
+    // 本文のあとに置く。先に置くと、割る相手がまだ読み込まれていない
+    "<script>",
+    PRINT_PAGINATE_SCRIPT,
+    "</script>",
     "</body>",
     "</html>",
     "",
   ].join("\n");
 }
+
+/**
+ * 画面の上に出す、印刷のしかたの案内（紙には刷らない）。
+ *
+ * **ブラウザの「ヘッダーとフッター」を外させる。** 入れたままだと、
+ * 日付とファイルの場所（`file:///C:/Users/…`）が紙の端に刷られる。
+ * 作者の「不安になる」の一因がここにある（設計書6.33.5 の2）。
+ *
+ * 紙の大きさを書くのは、印刷の画面の「用紙サイズ」と突き合わせられるように
+ * するため（Firefox は `@page` の大きさを見ないので、手で合わせることになる）。
+ */
+function buildGuide(preset: PrintPresetInfo): string {
+  const [width, height] = paperSize(preset);
+  return [
+    '<div class="print-guide">',
+    `<p class="print-guide-lead">この画面の白い面が、そのまま紙1枚ずつになります（<span id="print-page-count">面に分けています…</span>）。` +
+      `紙：${escapeHtml(preset.label)}（${width} × ${height}）</p>`,
+    "<p>Ctrl+P で印刷の画面を開き、送信先を「PDF に保存」にしてください。" +
+      "「詳細設定」の「ヘッダーとフッター」のチェックを外してください（入れたままだと、日付とファイルの場所が紙の端に刷られます）。" +
+      "用紙サイズ・余白・倍率は「既定」のままにしてください。</p>",
+    "</div>",
+  ].join("\n");
+}
+
+/** `@page` の `size`（幅 高さ）を、幅と高さに分ける */
+function paperSize(preset: PrintPresetInfo): [string, string] {
+  const [width = "", height = ""] = preset.size.split(/\s+/);
+  return [width, height];
+}
+
+/**
+ * 面の余白（紙の端から本文までの空き）。
+ *
+ * **以前の `@page` の余白と同じ値にしてある。** 面に割れなかったときの紙
+ * （`@page` の余白で組む）と、面に割れたときの紙で、本文の載る範囲が
+ * 変わらないようにするため。
+ */
+const PAGE_MARGIN = "15mm";
 
 /** 1話ぶん。**話ごとに改ページする**（本の体裁に合わせる） */
 function renderEpisode(
@@ -254,9 +304,21 @@ function buildStyle(
   preset: PrintPresetInfo,
   kind: WorkKindKey | undefined
 ): string {
+  /*
+    **縦に組むのは本文だけ。** 以前は html・body ごと縦書きにしていたが、
+    それでは紙1枚ずつの面が右から左へ横に並び、画面を横へ送らないと
+    次の面が見えない。面は上から下へ積み、面の中と流し込みの本文だけを
+    縦に組む。頭と足（ヘッダー・フッター）は横書きのまま
+  */
   const vertical = preset.vertical
-    ? ["html, body { writing-mode: vertical-rl; }"]
+    ? [
+        "#print-source { writing-mode: vertical-rl; }",
+        ".page-body { writing-mode: vertical-rl; }",
+        ".page-head, .page-foot { writing-mode: horizontal-tb; }",
+      ]
     : [];
+  const [width, height] = paperSize(preset);
+  const margin = PAGE_MARGIN;
   /*
     種類ごとの組み方（設計書6.70・6.109）。**値は原稿エディタと同じものを
     埋め込む**——`core/kindLines.ts` の1か所にあり、こちらへ写しは置かない。
@@ -266,7 +328,9 @@ function buildStyle(
   const script = kindCss ? [kindCss] : [];
 
   return [
-    `@page { size: ${preset.size}; margin: 15mm; }`,
+    // 面に割れたら、スクリプトが余白を0にする（面の中に余白を持つため）。
+    // ここに書いた余白は、割れなかったときの流し込みの紙のためのもの
+    `@page { size: ${preset.size}; margin: ${margin}; }`,
     "html, body { margin: 0; padding: 0; }",
     "body {",
     // 明朝を先に置く。ゴシックで組んだ小説は、紙にすると読み疲れる
@@ -281,12 +345,15 @@ function buildStyle(
     "h1, h2, p { margin: 0; padding: 0; font-weight: normal; }",
     // 扉。`text-align` は行の向きに沿って効くので、縦書きなら上下の中央、
     // 横書きなら左右の中央へ題が寄る（1つの指定で両方に効く）
-    ".cover { break-after: page; page-break-after: always; text-align: center; }",
+    // **改ページの指定は流し込みの本文にだけ当てる。** 面の中へ写した札に
+    // 付いていると、面の途中で紙が切れて白紙が挟まる
+    "#print-source .cover { break-after: page; page-break-after: always; }",
+    ".cover, .page-cover .page-body { text-align: center; }",
     // もう一方の向きは、余白で真ん中へ寄せる。**割合で書く。**
     // 割合の余白は紙の「行の長さ」を基準に決まるので、文庫でもA4でも
     // だいたい同じ位置に落ちる（`em` で書くと紙ごとにずれる）
     ".cover-title { font-size: 2em; letter-spacing: 0.25em; margin-block-start: 25%; }",
-    ".episode { break-before: page; page-break-before: always; }",
+    "#print-source .episode { break-before: page; page-break-before: always; }",
     ".episode-heading { font-size: 1.3em; letter-spacing: 0.1em; margin-block-end: 2.5em; }",
     // 段落のあいだは空けない。字下げ（全角空白）で見分けるのが日本語の組み方
     "p { margin: 0; }",
@@ -297,11 +364,36 @@ function buildStyle(
     // 傍点は圏点（ゴマ点）で出す。位置の指定は既定のまま
     // （縦書きなら右、横書きなら上へ、ブラウザが振り分ける）
     ".emphasis { text-emphasis: filled sesame; -webkit-text-emphasis: filled sesame; }",
-    // 画面で見たときに、紙らしく見えるようにする。
-    // **ページの枠までは作らない**（印刷したときに正しければよい）
+    /*
+      紙1枚ずつの面（設計書6.33.5 の1）。**紙と同じ寸法の箱**で、余白の内側に
+      本文の箱を置く。印刷のときは `@page` の余白が0になり、箱1つが紙1枚に
+      刷られる。箱の外へははみ出させない（はみ出したら次の面へ送ってある）
+    */
+    `.page { position: relative; box-sizing: border-box; width: ${width}; height: ${height}; overflow: hidden; background: #fff; break-after: page; page-break-after: always; }`,
+    ".page:last-child { break-after: auto; page-break-after: auto; }",
+    `.page-body { position: absolute; top: ${margin}; right: ${margin}; bottom: ${margin}; left: ${margin}; overflow: hidden; }`,
+    // 頭と足（ヘッダー・フッター）は上下の余白の中ほどに置く
+    `.page-head, .page-foot { position: absolute; left: ${margin}; right: ${margin}; height: ${margin}; display: flex; align-items: center; justify-content: center; font-size: 0.8em; line-height: 1; white-space: nowrap; overflow: hidden; }`,
+    ".page-head { top: 0; }",
+    ".page-foot { bottom: 0; }",
+    // 段落が面をまたいだとき、続きの頭には場面転換の空きを付けない
+    "p.cont { margin-block-start: 0; }",
+    ".paginating #print-source, .paginated #print-source { display: none; }",
+    // 画面で見たときだけ：面を灰色の机に並べ、本文の載る範囲を薄い線で見せる
+    // （余白がどれだけあるかが分かる）。**紙には刷らない**
     "@media screen {",
-    "  body { background: #d8d4cc; padding: 24px; }",
-    "  .sheet { background: #fff; padding: 24px 32px; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2); }",
+    "  body { background: #d8d4cc; }",
+    '  .print-guide { position: sticky; top: 0; z-index: 1; margin: 0; padding: 10px 16px; background: #fff8dc; border-bottom: 1px solid #c8b560; font-family: "Yu Gothic UI", "Meiryo", sans-serif; font-size: 14px; line-height: 1.6; }',
+    "  .print-guide p { margin: 0; }",
+    "  .print-guide-lead { font-weight: bold; }",
+    "  #print-pages { padding: 24px 16px; }",
+    "  .page { margin: 0 auto 24px; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25); }",
+    "  .page-body { outline: 1px dashed rgba(0, 0, 0, 0.15); }",
+    "  #print-source { margin: 24px; background: #fff; padding: 24px 32px; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2); }",
+    "}",
+    "@media print {",
+    "  .print-guide { display: none; }",
+    "  body { background: #fff; }",
     "}",
   ].join("\n");
 }

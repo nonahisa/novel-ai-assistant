@@ -8,6 +8,7 @@ import {
 import { timestampedFileNameCandidates } from "../../../src/core/timestampedFileName";
 import type { NotationMode } from "../../../src/core/manuscriptRender";
 import { SCRIPT_LINE_CSS } from "../../../src/core/scriptLines";
+import { PRINT_PAGINATE_SCRIPT } from "../../../src/core/printPaginate";
 
 /**
  * 印刷用HTML（PDF出力のもと）。
@@ -57,8 +58,10 @@ describe("作者の本文を、そのまま文字として出す", () => {
   test("作品名も逃がす", () => {
     const out = html("本文", "bunko-vertical", "<script>alert(1)</script>");
 
-    expect(out).not.toContain("<script>");
+    expect(out).not.toContain("<script>alert");
     expect(out).toContain("&lt;script&gt;");
+    // 札としての <script> は、面に割るためにこちらが置いた1つだけ
+    expect([...out.matchAll(/<script>/g)]).toHaveLength(1);
   });
 });
 
@@ -192,10 +195,11 @@ describe("紙の形", () => {
   });
 
   test("外のものを一切読み込まない", () => {
-    // 書き出したファイルを別のPCへ写しても、同じ組み上がりで開けること
+    // 書き出したファイルを別のPCへ写しても、同じ組み上がりで開けること。
+    // 面に割るスクリプト（0.84.0〜）はファイルの中に埋め込む
     const out = html("本文");
 
-    expect(out).not.toContain("<script");
+    expect(out).not.toMatch(/<script[^>]*\ssrc=/);
     expect(out).not.toContain("http://");
     expect(out).not.toContain("https://");
     expect(out).not.toContain("<link");
@@ -207,6 +211,90 @@ describe("紙の形", () => {
     expect(out).toContain('<html lang="ja">');
     expect(out).toContain('<meta charset="utf-8">');
     expect(out).toContain("<title>銀の航路</title>");
+  });
+});
+
+/**
+ * 印刷に近いプレビュー（設計書6.33.5 の1、0.84.0）。
+ *
+ * 作者の報告：「ブラウザが開いたときに不安になります」。流し込みの1枚の
+ * 紙では、どこで切れるのかも余白も見えなかった。**紙と同じ寸法の面を
+ * 並べ、面1つを紙1枚に刷る。**
+ */
+describe("印刷に近いプレビュー", () => {
+  test("面は紙と同じ寸法で、余白の内側に本文を置く", () => {
+    const out = html("本文", "bunko-vertical");
+
+    expect(out).toContain("width: 105mm; height: 148mm;");
+    expect(out).toMatch(/\.page-body \{[^}]*top: 15mm; right: 15mm; bottom: 15mm; left: 15mm;/);
+  });
+
+  test("用紙ごとに面の寸法が変わる", () => {
+    expect(html("本文", "a5-vertical")).toContain("width: 148mm; height: 210mm;");
+    expect(html("本文", "a4-horizontal")).toContain("width: 210mm; height: 297mm;");
+  });
+
+  test("面1つが紙1枚になる（面ごとに改ページ）", () => {
+    const out = html("本文");
+
+    expect(out).toMatch(/\.page \{[^}]*break-after: page; page-break-after: always;/);
+    // 最後の面のあとに白紙を出さない
+    expect(out).toContain(".page:last-child { break-after: auto; page-break-after: auto; }");
+  });
+
+  test("面を並べる場所と、面に割るスクリプトがある", () => {
+    const out = html("本文");
+
+    expect(out).toContain('<div id="print-pages"></div>');
+    expect(out).toContain('<div class="sheet" id="print-source">');
+    expect(out).toContain(PRINT_PAGINATE_SCRIPT);
+    // スクリプトは本文のあと（先に置くと、割る相手がまだ無い）
+    expect(out.indexOf("<script>")).toBeGreaterThan(out.indexOf('id="print-source"'));
+  });
+
+  test("縦書きかどうかをスクリプトへ伝える", () => {
+    expect(html("本文", "bunko-vertical")).toContain('<body data-vertical="1">');
+    expect(html("本文", "a4-horizontal")).toContain('<body data-vertical="0">');
+  });
+
+  test("縦書きでも、面そのものは上から下へ並ぶ（縦に組むのは面の中だけ）", () => {
+    const out = html("本文", "bunko-vertical");
+
+    expect(out).not.toContain("html, body { writing-mode: vertical-rl; }");
+    expect(out).toContain(".page-body { writing-mode: vertical-rl; }");
+  });
+
+  test("面に割れたら、流し込みの本文は隠す", () => {
+    expect(html("本文")).toContain(
+      ".paginating #print-source, .paginated #print-source { display: none; }"
+    );
+  });
+
+  test("画面の上に、印刷のしかたの案内帯を出す", () => {
+    const out = html("本文");
+
+    expect(out).toContain('<div class="print-guide">');
+    expect(out).toContain("Ctrl+P");
+    expect(out).toContain("「PDF に保存」");
+    // ブラウザが刷る URL と日付が「不安」の一因。外させる
+    expect(out).toContain("「ヘッダーとフッター」のチェックを外してください");
+    expect(out).toContain('<span id="print-page-count">');
+  });
+
+  test("案内帯は紙に刷らない", () => {
+    expect(html("本文")).toMatch(/@media print \{[^@]*\.print-guide \{ display: none; \}/);
+  });
+
+  test("案内帯に紙の大きさを出す（印刷の画面と突き合わせられるように）", () => {
+    expect(html("本文", "bunko-vertical")).toContain("文庫サイズ・縦書き（105mm × 148mm）");
+  });
+
+  test("流し込みの扉と話の改ページは、面に割れなかったときのためだけに残す", () => {
+    // 面の中へ写した札に改ページの指定が付いていると、面の途中で紙が切れる
+    const out = html("本文");
+
+    expect(out).toContain("#print-source .cover { break-after: page;");
+    expect(out).toContain("#print-source .episode { break-before: page;");
   });
 });
 

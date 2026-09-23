@@ -176,8 +176,9 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
   }
 
   const action = await vscode.window.showInformationMessage(
-    "ブラウザで開きました。印刷（Ctrl+P）で送信先を「PDFに保存」にするとPDFになります。" +
-      "用紙サイズと余白は「既定」のままにしてください。" +
+    "ブラウザで開きました。画面に並んだ白い面が、そのまま紙1枚ずつになります。" +
+      "印刷（Ctrl+P）で送信先を「PDFに保存」にするとPDFになります。" +
+      "用紙サイズと余白は「既定」のままにし、「ヘッダーとフッター」のチェックは外してください。" +
       droppedNote,
     "フォルダーを開く"
   );
