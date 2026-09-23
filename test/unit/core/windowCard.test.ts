@@ -11,12 +11,14 @@ import {
   describeWindowCards,
   parseWindowCard,
   serializeWindowCard,
+  shortMachineName,
   windowCardFileName,
+  worksOpenInWindow,
   type WindowCard,
 } from "../../../src/core/windowCard";
 import { GLOBAL_STORAGE_ENV, mcpGlobalStorageRoot } from "../../../src/mcp/globalStorage";
 import { ADVICE_STORAGE_ENV } from "../../../src/mcp/adviceProfileMirror";
-import { windowsList } from "../../../src/mcp/tools/windows";
+import { mcpMachineName, windowsList } from "../../../src/mcp/tools/windows";
 import { exposureOf } from "../../../src/mcp/tools/accessLog";
 import { assertExternalAccessAllowed } from "../../../src/mcp/tools/permission";
 
@@ -74,6 +76,9 @@ describe("札の組み立て（buildWindowCard）", () => {
       workspaceName: null,
       developmentHost: true,
       folders: ["C:/a", "C:/b"],
+      // 渡さなければ「取れなかった」「作品を開いていない」
+      machineName: null,
+      works: [],
       startedAt: "2026-09-23T09:00:00.000Z",
       updatedAt: "2026-09-23T10:00:00.000Z",
     });
@@ -315,5 +320,145 @@ describe("道具の数を書いた文書が、登録と揃っている", () => {
     // （全部の道具を突き合わせないのは、`ollama.generate` が早見表に
     // 無いのが意図かどうかをここでは決めないため）
     expect(skill).toContain("`windows.list`");
+  });
+});
+
+/**
+ * 機械の名前と、窓で開いている作品（作者の依頼、2026-09-22 未明「B2」）。
+ *
+ * 2台（デスクトップとノートPC）で作業していて、**どの窓がどの機械の
+ * どの作品を開いているか**を、機械（MCP のクライアント）が見分けたい。
+ * 版と開発ホストかは札に既にあった。足りなかったのは次の2つ。
+ *
+ * - **機械の名前**（`os.hostname()` の短い形）。ドメインは落とし、
+ *   ユーザー名やパスは足さない
+ * - **開いている作品の名前**。フォルダーの場所（`folders`）だけでは、
+ *   書庫を開いた窓でどの作品かが読めない
+ *
+ * **古い版が書いた札も読めること**を見張る。2台で版がずれていると、
+ * 片方の窓は新しい項目の無い札を書く——それを「壊れた札」にすると、
+ * 版を確かめたいまさにその窓が一覧から消える。
+ */
+describe("機械の名前（shortMachineName）", () => {
+  it("ドメインを落とし、前後の空白を削る", () => {
+    expect(shortMachineName("DESKTOP-AB12CD")).toBe("DESKTOP-AB12CD");
+    expect(shortMachineName("  note-pc.local ")).toBe("note-pc");
+    expect(shortMachineName("太郎のPC")).toBe("太郎のPC");
+  });
+
+  it("取れない・空なら null（空文字を名乗らない）", () => {
+    expect(shortMachineName(undefined)).toBeNull();
+    expect(shortMachineName("")).toBeNull();
+    expect(shortMachineName("   ")).toBeNull();
+    expect(shortMachineName(".local")).toBeNull();
+  });
+
+  it("長すぎる名前は切る（札が名前で膨れない）", () => {
+    expect(shortMachineName("a".repeat(200))).toHaveLength(63);
+  });
+});
+
+describe("窓で開いている作品（worksOpenInWindow）", () => {
+  const works = [
+    { title: "教科書チート", folderPath: "C:/書庫/教科書チート" },
+    { title: "灯台の子", folderPath: "C:/書庫/灯台の子" },
+    { title: "別の置き場", folderPath: "D:/ほか/別の置き場" },
+  ];
+
+  it("書庫を開いた窓では、その中の作品を全部挙げる", () => {
+    expect(worksOpenInWindow(works, ["C:/書庫"])).toEqual([
+      "教科書チート",
+      "灯台の子",
+    ]);
+  });
+
+  it("作品フォルダーそのもの・作品の中のフォルダーを開いた窓も、その作品", () => {
+    expect(worksOpenInWindow(works, ["C:/書庫/灯台の子"])).toEqual(["灯台の子"]);
+    expect(worksOpenInWindow(works, ["C:/書庫/教科書チート/本文"])).toEqual([
+      "教科書チート",
+    ]);
+  });
+
+  it("名前が前方一致するだけの別フォルダーは含めない", () => {
+    expect(
+      worksOpenInWindow(
+        [{ title: "灯台", folderPath: "C:/書庫/灯台" }],
+        ["C:/書庫/灯台の子"]
+      )
+    ).toEqual([]);
+  });
+
+  it("フォルダーを開いていない窓は空", () => {
+    expect(worksOpenInWindow(works, [])).toEqual([]);
+  });
+});
+
+describe("札の新しい項目（machineName・works）", () => {
+  it("組み立てると入る", () => {
+    const built = buildWindowCard({
+      pid: 7,
+      extensionVersion: "0.83.1",
+      vscodeVersion: "1.138.0",
+      appName: "Visual Studio Code",
+      workspaceName: "書庫",
+      developmentHost: false,
+      folders: ["C:/書庫"],
+      machineName: "DESKTOP-AB12CD",
+      works: ["教科書チート"],
+      startedAt: new Date("2026-09-23T09:00:00.000Z"),
+      now: NOW,
+    });
+    expect(built.machineName).toBe("DESKTOP-AB12CD");
+    expect(built.works).toEqual(["教科書チート"]);
+    expect(parseWindowCard(serializeWindowCard(built))).toEqual(built);
+  });
+
+  it("古い版が書いた札（項目が無い）も読める。無いものは null と空で埋める", () => {
+    const old = JSON.parse(serializeWindowCard(card())) as Record<string, unknown>;
+    delete old.machineName;
+    delete old.works;
+    const parsed = parseWindowCard(JSON.stringify(old));
+    expect(parsed).toBeDefined();
+    expect(parsed?.machineName).toBeNull();
+    expect(parsed?.works).toEqual([]);
+  });
+
+  it("型が違えば壊れた札として扱う", () => {
+    expect(
+      parseWindowCard(JSON.stringify({ ...card(), machineName: 12 }))
+    ).toBeUndefined();
+    expect(
+      parseWindowCard(JSON.stringify({ ...card(), works: "教科書チート" }))
+    ).toBeUndefined();
+  });
+
+  it("札にユーザー名や家のフォルダーの場所を足していない", () => {
+    // 足したのは機械の名前と作品の名前だけ。`os.userInfo()` や
+    // `os.homedir()` を札へ入れる道を作らない
+    const source = fs.readFileSync(
+      nodePath.join(__dirname, "../../../src/features/windowCard.ts"),
+      "utf8"
+    );
+    expect(source).not.toMatch(/userInfo|homedir/);
+  });
+});
+
+describe("windows.list と mcp.version が機械の名前を返す", () => {
+  it("windows.list の返事に、この機械の名前が入る", () => {
+    const result = windowsList(NOW);
+    expect(result.machineName).toBe(shortMachineName(os.hostname()));
+  });
+
+  it("mcp.version もこの機械の名前を返す（同じ関数を通す）", () => {
+    expect(mcpMachineName()).toBe(shortMachineName(os.hostname()));
+    const server = fs.readFileSync(
+      nodePath.join(__dirname, "../../../src/mcp/server.ts"),
+      "utf8"
+    );
+    const versionTool = server.slice(
+      server.indexOf('tool("mcp.version"'),
+      server.indexOf('"windows.list"')
+    );
+    expect(versionTool).toContain("machineName: mcpMachineName()");
   });
 });

@@ -54,6 +54,70 @@ describe("バージョンの表示", () => {
   });
 });
 
+/**
+ * 窓の名前と機械の名前（作者の依頼、2026-09-22 未明「B2」）。
+ *
+ * MCP の `windows.list` と**同じ中身**を、作者が自分の目でも見られるように
+ * する。2台で作業していると、画面の「バージョンを確認」と機械の返事を
+ * 突き合わせたくなる——片方にしか無い項目があると突き合わせられない。
+ */
+describe("バージョンの表示——窓と機械", () => {
+  test("窓の名前・開いている作品・機械の名前を出す", () => {
+    const report = buildVersionReport(
+      info({
+        window: {
+          name: "書庫",
+          works: ["教科書チート", "灯台の子"],
+          machineName: "DESKTOP-AB12CD",
+          developmentHost: false,
+        },
+      })
+    );
+    expect(report).toContain("窓: 書庫（作品: 教科書チート・灯台の子）");
+    expect(report).toContain("機械: DESKTOP-AB12CD");
+    // 普段の窓では、開発ホストの行を出さない（読む行を増やさない）
+    expect(report).not.toContain("開発ホスト");
+  });
+
+  test("拡張機能開発ホストなら、そう書く（手元のソースで動いている）", () => {
+    const report = buildVersionReport(
+      info({
+        window: {
+          name: "書庫",
+          works: [],
+          machineName: "note-pc",
+          developmentHost: true,
+        },
+      })
+    );
+    expect(report).toContain("拡張機能開発ホスト");
+    // 作品が無ければ括弧を付けない
+    expect(report).toContain("窓: 書庫\n");
+  });
+
+  test("フォルダーを開いていない窓・機械の名前が取れない環境でも壊れない", () => {
+    const report = buildVersionReport(
+      info({
+        window: {
+          name: null,
+          works: [],
+          machineName: null,
+          developmentHost: false,
+        },
+      })
+    );
+    expect(report).toContain("窓: （フォルダーを開いていない窓）");
+    // 取れない名前を空で名乗らない
+    expect(report).not.toContain("機械:");
+  });
+
+  test("窓の情報を渡さなければ、これまでどおりの表示", () => {
+    const report = buildVersionReport(info());
+    expect(report).not.toContain("窓:");
+    expect(report).not.toContain("機械:");
+  });
+});
+
 describe("版の出どころ", () => {
   test("package.json の版とCHANGELOGの見出しが一致する", () => {
     // ここがずれると、直したはずの不具合が直っていないと誤解される。

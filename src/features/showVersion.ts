@@ -5,6 +5,8 @@ import { AIRegistry } from "../ai/registry";
 import { isVectorSearchEnabled } from "./vectorSearch";
 import { notifyDone } from "../views/notify";
 import { hostPlatform } from "../core/runtime";
+import type { WorkEntry } from "../models/types";
+import { readWindowIdentity, type WindowIdentity } from "./windowCard";
 
 /**
  * 拡張機能の版と、いまの環境を出す。
@@ -30,6 +32,13 @@ export interface VersionInfo {
   /** 選ばれているAI。未設定なら undefined */
   ai?: { provider: string; model: string; paid: boolean };
   vectorSearch: boolean;
+  /**
+   * どの窓・どの機械か（作者の依頼「B2」、2026-09-22 未明）。
+   *
+   * MCP の `windows.list` の札と**同じ中身**を出す——2台で作業するとき、
+   * 画面の表示と機械の返事を突き合わせられるように。省略すると出さない。
+   */
+  window?: WindowIdentity;
 }
 
 /**
@@ -41,6 +50,7 @@ export function buildVersionReport(info: VersionInfo): string {
   const lines = [
     `${info.displayName} ${info.version}`,
     "",
+    ...windowLines(info.window),
     `VS Code: ${info.vscodeVersion}`,
     `OS: ${info.platform}`,
     info.ai
@@ -49,6 +59,25 @@ export function buildVersionReport(info: VersionInfo): string {
     `意味検索: ${info.vectorSearch ? "入" : "切"}`,
   ];
   return lines.join("\n");
+}
+
+/**
+ * 窓と機械の行。**版のすぐ下に置く**——2台で見比べるときに最初に要るのは
+ * 「どの窓か」で、AIや意味検索の行はその次である。
+ *
+ * - 取れない機械の名前は**空で名乗らない**（行ごと出さない）
+ * - 開発ホストの行は**そうであるときだけ**出す。普段の窓で「いいえ」を
+ *   毎回読ませる必要は無い
+ */
+function windowLines(window: WindowIdentity | undefined): string[] {
+  if (!window) return [];
+  const works = window.works.length > 0 ? `（作品: ${window.works.join("・")}）` : "";
+  const lines = [`窓: ${window.name ?? "（フォルダーを開いていない窓）"}${works}`];
+  if (window.machineName) lines.push(`機械: ${window.machineName}`);
+  if (window.developmentHost) {
+    lines.push("拡張機能開発ホスト: はい（手元のソースで動いています）");
+  }
+  return lines;
 }
 
 /**
@@ -65,7 +94,9 @@ export function platformLabel(platform: string | undefined): string {
 
 export async function showVersion(
   context: vscode.ExtensionContext,
-  registry: AIRegistry
+  registry: AIRegistry,
+  /** 登録簿の作品。窓で開いている作品の名前を引く（省略すると作品を添えない） */
+  listWorks: () => readonly WorkEntry[] = () => []
 ): Promise<void> {
   // 版の表示は「いま何を既定にしているか」を見せるだけなので、割当を見ない
   const resolved = registry.resolve("default");
@@ -87,6 +118,7 @@ export async function showVersion(
         }
       : undefined,
     vectorSearch: isVectorSearchEnabled(),
+    window: await readWindowIdentity(context, listWorks()),
   });
 
   const copy = "コピー";

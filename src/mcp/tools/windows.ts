@@ -1,10 +1,12 @@
 import fs from "node:fs";
+import os from "node:os";
 import nodePath from "node:path";
 import {
   WINDOW_CARD_DIRECTORY,
   WINDOW_CARD_STALE_AFTER_MS,
   describeWindowCards,
   parseWindowCard,
+  shortMachineName,
   type WindowCard,
   type WindowCardView,
 } from "../../core/windowCard";
@@ -29,6 +31,13 @@ import { mcpGlobalStorageRoot } from "../globalStorage";
  */
 
 export interface WindowsListResult {
+  /**
+   * このサーバーが走っている機械の名前（`shortMachineName`）。
+   *
+   * **一覧が「どの機械の窓か」を返事そのものに書く。** 札は機械ごとの
+   * 保管庫にあるので、ここに並ぶのは1台ぶんだけである（0.83.x、作者の依頼「B2」）。
+   */
+  machineName: string | null;
   /** 札を探した場所。**見つからないときに、どこを見たかを伝えるため** */
   storage: string | null;
   windows: WindowCardView[];
@@ -36,16 +45,33 @@ export interface WindowsListResult {
   note: string;
 }
 
+/**
+ * このサーバーが走っている機械の名前。`mcp.version` と `windows.list` が通す。
+ *
+ * 札を書く拡張機能と同じ `shortMachineName` で均す——片方だけ均し方が
+ * 違うと、同じ機械の名前が食い違って見える。**取れなくても失敗にしない**
+ * （版を訊いただけで落ちる道具にしない）。
+ */
+export function mcpMachineName(): string | null {
+  try {
+    return shortMachineName(os.hostname());
+  } catch {
+    return null;
+  }
+}
+
 export function windowsList(now: Date = new Date()): WindowsListResult {
   const root = mcpGlobalStorageRoot();
+  const machineName = mcpMachineName();
   const staleMinutes = Math.round(WINDOW_CARD_STALE_AFTER_MS / 60_000);
   const note =
     `probablyClosed は、札が ${staleMinutes} 分より長く打ち直されていない窓です` +
     "（閉じたときに札を消し損ねたもの。眠っていた窓は起きれば戻ります）。" +
-    "札はこの機械の保管庫にあるので、別の機械の窓は出ません。";
+    "札はこの機械の保管庫にあるので、別の機械の窓は出ません（machineName がこの機械）。";
 
   if (!root) {
     return {
+      machineName,
       storage: null,
       windows: [],
       unreadable: [],
@@ -63,6 +89,7 @@ export function windowsList(now: Date = new Date()): WindowsListResult {
   } catch {
     // まだ1つも札が無い（拡張機能を起動していない・古い版）。失敗にしない
     return {
+      machineName,
       storage: directory,
       windows: [],
       unreadable: [],
@@ -97,6 +124,7 @@ export function windowsList(now: Date = new Date()): WindowsListResult {
   }
 
   return {
+    machineName,
     storage: directory,
     windows: describeWindowCards(cards, now),
     unreadable,

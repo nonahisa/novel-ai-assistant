@@ -2460,7 +2460,11 @@ export async function activate(
   // 2台で実機確認をするとき、どの窓がどの版で動いているかを
   // 外のセッションが聞けるように、保管庫へ札を書く。5分ごとに打ち直し、
   // 閉じるときに消す（`deactivate`）。ブラウザ版では書かない（読む相手が居ない）
-  const windowCard = startWindowCard(context);
+  const windowCard = startWindowCard(context, {
+    // 札の「開いている作品」は登録簿から引く。作品を足し外ししたら書き直す
+    listWorks: () => registry.list(),
+    onDidChangeWorks: registry.onDidChange,
+  });
   if (windowCard) {
     context.subscriptions.push(windowCard);
     closeWindowCard = windowCard.close;
@@ -3291,7 +3295,8 @@ export async function activate(
 
   context.subscriptions.push(
     registerCommand("novelai.showVersion", async () => {
-      await showVersion(context, aiRegistry);
+      // 窓の名前に添える「開いている作品」は登録簿から引く（windows.list と同じ）
+      await showVersion(context, aiRegistry, () => registry.list());
     })
   );
 

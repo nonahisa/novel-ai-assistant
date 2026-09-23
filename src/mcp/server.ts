@@ -50,7 +50,7 @@ import {
   guideSpotlight,
   type SpotlightRequestInput,
 } from "./tools/spotlight";
-import { windowsList } from "./tools/windows";
+import { mcpMachineName, windowsList } from "./tools/windows";
 import {
   SETUP_REQUEST_INPUT,
   setupRequest,
@@ -173,12 +173,20 @@ server.registerTool(
   {
     title: "MCPサーバーの版",
     description:
-      "このMCPサーバーの版を返します。拡張機能の版とずれていたら、" +
-      "束ね直し（npm run build）が要ります。",
+      "このMCPサーバーの版と、走っている機械の名前（machineName）を返します。" +
+      "拡張機能の版とずれていたら、束ね直し（npm run build）が要ります。" +
+      "窓ごとの拡張機能の版は windows.list で見ます。",
   },
   tool("mcp.version", () => ({
     version: SERVER_VERSION,
     name: SERVER_NAME,
+    /*
+      **どの機械のサーバーか**（0.83.x、作者の依頼「B2」）。2台で作業すると、
+      クライアント（Claude Code）がどちらの機械に繋がっているかを返事から
+      読めない。`windows.list` の `machineName` と同じ関数で均す。
+      ユーザー名や家のフォルダーの場所は返さない。
+    */
+    machineName: mcpMachineName(),
     /*
       **呼んでいる相手が何をできるかを返す**（0.64.9）。
 
@@ -217,7 +225,7 @@ server.registerTool(
     title: "開いている VS Code の窓と、その版",
     description:
       "この機械で拡張機能が動いている窓の一覧を返します（拡張機能の版・VS Code の版・" +
-      "窓の名前・開発ホストか・開いているフォルダー・最後に打ち直した時刻）。" +
+      "窓の名前・開いている作品・機械の名前・開発ホストか・開いているフォルダー・最後に打ち直した時刻）。" +
       "**読むだけで、作品の中身は読みません。** mcp.version はこのサーバー（束）の版です。",
   },
   /*

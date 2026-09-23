@@ -2,12 +2,15 @@
 // 保管庫のログへ倒す（助言方針の控えと同じ扱い）
 import * as vscode from "vscode";
 import * as path from "../core/paths";
+import type { WorkEntry } from "../models/types";
 import {
   WINDOW_CARD_DIRECTORY,
   WINDOW_CARD_HEARTBEAT_MS,
   buildWindowCard,
   serializeWindowCard,
+  shortMachineName,
   windowCardFileName,
+  worksOpenInWindow,
 } from "../core/windowCard";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { canRunProcesses } from "../core/runtime";
@@ -41,8 +44,69 @@ export interface WindowCardHandle extends vscode.Disposable {
   close(): Promise<void>;
 }
 
+/**
+ * 札と「バージョンを確認」が添える、窓の名前（作者の依頼「B2」、2026-09-22 未明）。
+ *
+ * **2か所で同じものを出す。** MCP の `windows.list` と画面の「バージョンを確認」の
+ * 中身がずれると、2台で突き合わせるときに片方にしか無い項目ができる。
+ */
+export interface WindowIdentity {
+  /** `vscode.workspace.name`。フォルダーを開いていない窓は `null` */
+  name: string | null;
+  /** 開いている作品の名前（登録簿の `title`） */
+  works: string[];
+  /** 機械の名前（`shortMachineName`）。ブラウザ版・取れないときは `null` */
+  machineName: string | null;
+  /** 拡張機能開発ホスト（F5 で立ち上げた窓）か */
+  developmentHost: boolean;
+}
+
+/**
+ * 機械の名前。**ブラウザ版では `null`**（「どの機械か」という概念が無い）。
+ *
+ * `node:os` は**動的 import**で取る（CLAUDE.md 規則7）。静的に書くと、
+ * ブラウザ版は拡張機能を読み込んだ瞬間に落ちる。取れなくても失敗にしない
+ * ——名札が1つ欠けるだけで、版の表示を止める理由にはならない。
+ */
+export async function readMachineName(): Promise<string | null> {
+  if (!canRunProcesses()) return null;
+  try {
+    const os = await import("node:os");
+    return shortMachineName(os.hostname());
+  } catch {
+    return null;
+  }
+}
+
+/** いまの窓の名前・作品・機械を集める（札と「バージョンを確認」が通す） */
+export async function readWindowIdentity(
+  context: vscode.ExtensionContext,
+  works: readonly WorkEntry[]
+): Promise<WindowIdentity> {
+  const folders = (vscode.workspace.workspaceFolders ?? []).map((folder) =>
+    path.fromUri(folder.uri)
+  );
+  return {
+    name: vscode.workspace.name ?? null,
+    works: worksOpenInWindow(works, folders),
+    machineName: await readMachineName(),
+    developmentHost: context.extensionMode === vscode.ExtensionMode.Development,
+  };
+}
+
+export interface WindowCardOptions {
+  /**
+   * 登録簿の作品（札の `works` を決める）。**渡すのは関数**——
+   * 5分ごとの打ち直しのたびに、その時点の登録簿を読むため。
+   */
+  listWorks?: () => readonly WorkEntry[];
+  /** 登録簿が変わったとき。札の `works` が変わるので書き直す */
+  onDidChangeWorks?: vscode.Event<void>;
+}
+
 export function startWindowCard(
-  context: vscode.ExtensionContext
+  context: vscode.ExtensionContext,
+  options: WindowCardOptions = {}
 ): WindowCardHandle | undefined {
   if (!canRunProcesses()) return undefined;
 
@@ -61,17 +125,22 @@ export function startWindowCard(
     queue = queue.then(async () => {
       if (closed) return;
       try {
+        const identity = await readWindowIdentity(
+          context,
+          options.listWorks?.() ?? []
+        );
         const card = buildWindowCard({
           pid,
           extensionVersion,
           vscodeVersion: vscode.version,
           appName: vscode.env.appName,
-          workspaceName: vscode.workspace.name,
-          developmentHost:
-            context.extensionMode === vscode.ExtensionMode.Development,
+          workspaceName: identity.name ?? undefined,
+          developmentHost: identity.developmentHost,
           folders: (vscode.workspace.workspaceFolders ?? []).map((folder) =>
             path.fromUri(folder.uri)
           ),
+          machineName: identity.machineName,
+          works: identity.works,
           startedAt,
           now: new Date(),
         });
@@ -95,12 +164,14 @@ export function startWindowCard(
   const folderWatch = vscode.workspace.onDidChangeWorkspaceFolders(
     () => void write()
   );
+  const worksWatch = options.onDidChangeWorks?.(() => void write());
 
   const close = (): Promise<void> => {
     if (closed) return queue;
     closed = true;
     clearInterval(timer);
     folderWatch.dispose();
+    worksWatch?.dispose();
     queue = queue.then(async () => {
       try {
         await vscode.workspace.fs.delete(path.toUri(target), {

@@ -56,8 +56,8 @@
 | **実行前に画面へ出る断りを、走らせずに読む** | `novel.notice`（`feature` とモデルを渡す。**AIは呼ばず、本文も読まない**。0.72.0） |
 | **押す場所を作者の画面で光らせる** | `guide.spotlight`（`command` か `label`。**2回点滅するだけで、操作は実行しない**。0.75.6） |
 | 手元の Ollama のモデルを知る | `ollama.models` |
-| サーバーの版と、あなたの名乗り | `mcp.version` |
-| この機械で開いている VS Code の窓と、それぞれの拡張機能の版・開発ホストか | `windows.list`（**読むだけ**。`probablyClosed` は閉じたときに消し損ねた札） |
+| サーバーの版と、あなたの名乗り・どの機械のサーバーか | `mcp.version`（`machineName` が機械の名前） |
+| この機械で開いている VS Code の窓と、それぞれの拡張機能の版・開いている作品・開発ホストか | `windows.list`（**読むだけ**。`machineName` がどの機械の一覧か。別の機械の窓は出ない。`probablyClosed` は閉じたときに消し損ねた札） |
 | 初期設定の1段（AIの導入・作品の作成／登録など）を作者の画面に頼む | `setup.request`（**確認が出るだけで、押すのは作者**。手順はプロンプト `setup`。0.82.1） |
 
 feature ごとの追加の指定（`mode`・`group`・`plotPath`・`question`・`characterName` など）は `options` に入れる。**一覧は `novel.run` の説明にある。**

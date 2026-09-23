@@ -1,4 +1,7 @@
 import { AIWRITER_DIR } from "../models/types";
+// `paths.ts` ではなく純粋な部分を直に指す——ここは MCP の束からも読まれ、
+// `vscode` へ届いてはいけない（`mcpReach.test.ts` が見張る）
+import { isPathInside, normalizeForComparison } from "./pathText";
 
 /**
  * 窓の札（MCP の道具 `windows.list`。作者の依頼、2026-09-22）。
@@ -76,6 +79,27 @@ export interface WindowCard {
    * 同じ一覧を名乗ってしまい、窓の見分けに使えない。
    */
   folders: string[];
+  /**
+   * 機械の名前（`os.hostname()` の短い形。`shortMachineName`）。
+   * 取れなければ `null`（0.83.x で足した。作者の依頼「B2」、2026-09-22 未明）。
+   *
+   * **2台で作業するときに、どの機械の窓かを見分けるため。** 札は機械ごとの
+   * 保管庫にあるので、`windows.list` の一覧は1台ぶんしか出ない——
+   * どちらの機械の一覧を見ているかを、返事そのものに書いておく。
+   *
+   * **足すのは機械の名前だけ。** ユーザー名（`os.userInfo()`）や家の
+   * フォルダーの場所は、見分けに要らないので札へ入れない。
+   *
+   * **古い版の札には無い**（`parseWindowCard` が `null` で埋める）。
+   */
+  machineName: string | null;
+  /**
+   * この窓で開いている作品の名前（登録簿の `title`。`worksOpenInWindow`）。
+   *
+   * `folders` だけでは、書庫（複数作品の入ったフォルダー）を開いた窓で
+   * どの作品を相手にしているかが読めない。**古い版の札には無い**（空で埋める）。
+   */
+  works: string[];
   /** この窓で拡張機能が起動した時刻（ISO） */
   startedAt: string;
   /** 最後に札を打ち直した時刻（ISO）。**古さの判定はこれだけで決める** */
@@ -90,6 +114,10 @@ export interface WindowCardInput {
   workspaceName: string | undefined;
   developmentHost: boolean;
   folders: readonly string[];
+  /** 省略は「取れなかった」（`null`） */
+  machineName?: string | null;
+  /** 省略は「作品を開いていない」（空） */
+  works?: readonly string[];
   startedAt: Date;
   now: Date;
 }
@@ -105,9 +133,59 @@ export function buildWindowCard(input: WindowCardInput): WindowCard {
     workspaceName: input.workspaceName ?? null,
     developmentHost: input.developmentHost,
     folders: [...input.folders],
+    machineName: input.machineName ?? null,
+    works: [...(input.works ?? [])],
     startedAt: input.startedAt.toISOString(),
     updatedAt: input.now.toISOString(),
   };
+}
+
+/** 機械の名前の長さの上限。DNS の1段ぶん（63字）に揃える */
+const MACHINE_NAME_MAX = 63;
+
+/**
+ * 機械の名前を、見分けに使う短い形にする。取れない・空なら `null`。
+ *
+ * - **ドメインを落とす**（`note-pc.local` → `note-pc`）。同じ機械が
+ *   繋ぐ網によって名前の後ろを変えるので、残すと同じ機械が別に見える
+ * - **英数字へ均さない**（`device.ts` の `sanitizeHostname` とは用途が違う）。
+ *   あちらはファイル名に使うので均す必要があるが、ここは人が読む名札で、
+ *   「太郎のPC」を「pc」にすると見分けが付かなくなる
+ *
+ * **拡張機能（札を書く側）と MCP（`mcp.version`・`windows.list`）が同じ関数を
+ * 通す**——片方だけ均し方が違うと、同じ機械の名前が食い違って見える。
+ */
+export function shortMachineName(hostname: string | undefined | null): string | null {
+  const head = (hostname ?? "").trim().split(".")[0].trim();
+  if (!head) return null;
+  return head.slice(0, MACHINE_NAME_MAX);
+}
+
+/**
+ * 窓で開いているフォルダーに入っている作品の名前（登録簿の順）。
+ *
+ * 当てるのは3通り：作品フォルダーそのものを開いた／**書庫**（作品の入った
+ * フォルダー）を開いた／作品の中のフォルダー（`本文/` など）を開いた。
+ * **前方一致では当てない**（`灯台` は `灯台の子` の中ではない）——判定は
+ * `isPathInside` の1か所に寄せてある。
+ */
+export function worksOpenInWindow(
+  works: ReadonlyArray<{ title: string; folderPath: string }>,
+  folders: readonly string[]
+): string[] {
+  if (folders.length === 0) return [];
+  const same = (left: string, right: string): boolean =>
+    normalizeForComparison(left) === normalizeForComparison(right);
+  return works
+    .filter((work) =>
+      folders.some(
+        (folder) =>
+          same(folder, work.folderPath) ||
+          isPathInside(folder, work.folderPath) ||
+          isPathInside(work.folderPath, folder)
+      )
+    )
+    .map((work) => work.title);
 }
 
 /** 札のファイル名。**プロセス番号だけで決める**（1窓1ファイル） */
@@ -159,6 +237,17 @@ export function parseWindowCard(text: string): WindowCard | undefined {
     return undefined;
   }
   if (!isStringArray(value.folders)) return undefined;
+  // **0.83.x で足した2項目は、無ければ埋める**（古い版の札を壊れた札にしない。
+  // 2台で版がずれていると、確かめたい窓ほど古い札を書いている）。
+  // 有るのに型が違うものは、書き手が分からないので壊れた札として扱う
+  if (
+    value.machineName !== undefined &&
+    value.machineName !== null &&
+    typeof value.machineName !== "string"
+  ) {
+    return undefined;
+  }
+  if (value.works !== undefined && !isStringArray(value.works)) return undefined;
   return {
     schema: WINDOW_CARD_SCHEMA,
     pid: value.pid,
@@ -168,6 +257,8 @@ export function parseWindowCard(text: string): WindowCard | undefined {
     workspaceName: value.workspaceName,
     developmentHost: value.developmentHost,
     folders: value.folders,
+    machineName: typeof value.machineName === "string" ? value.machineName : null,
+    works: value.works ?? [],
     startedAt: value.startedAt,
     updatedAt: value.updatedAt,
   };
