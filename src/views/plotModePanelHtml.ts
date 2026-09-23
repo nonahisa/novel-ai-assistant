@@ -150,6 +150,15 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 .open-body:hover { text-decoration: underline; }
 .plot-btn { flex: 0 0 auto; font-size: 11px; padding: 2px 8px; }
+/* 予定の話（本文がまだ無い）。書いた話と見分けが付くように薄くする */
+.episode.planned .head { font-style: italic; opacity: 0.85; }
+.badge.planned {
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  border: 1px dashed var(--vscode-descriptionForeground);
+}
+#episodeActions { padding: 6px 12px 0; }
+#episodeActions:empty { display: none; }
 </style>
 </head>
 <body>
@@ -169,6 +178,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   <h2 id="episodesHeading">話の並び</h2>
   <div class="note" id="episodesNote"></div>
   <div id="episodes"></div>
+  <div id="episodeActions"></div>
 </div>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
@@ -188,6 +198,7 @@ const el = {
   episodes: document.getElementById("episodes"),
   episodesHeading: document.getElementById("episodesHeading"),
   episodesNote: document.getElementById("episodesNote"),
+  episodeActions: document.getElementById("episodeActions"),
 };
 
 function post(type, payload) {
@@ -257,6 +268,16 @@ el.episodes.addEventListener("click", function (event) {
   post("openEpisode", { filePath: target.dataset.path });
 });
 
+/**
+ * 予定の話を足す（設計書6.4.8）。押したことを返すだけで、何話目か・題は
+ * 拡張機能が訊き、書くのは単話プロットだけ（本文のファイルは作らない）
+ */
+el.episodeActions.addEventListener("click", function (event) {
+  const target = event.target.closest("[data-add-planned]");
+  if (!target) return;
+  post("addPlannedEpisode");
+});
+
 function renderHeadings() {
   const html = [];
   for (const entry of data.headings) {
@@ -302,9 +323,12 @@ function renderAiActions() {
 
 function renderEpisode(row) {
   const chapterAttr = row.chapter === null ? "" : String(row.chapter);
-  const plotBadge = row.hasEpisodePlot
-    ? '<span class="badge">単話プロット</span>'
-    : "";
+  // 予定の話は単話プロットそのものなので、「単話プロット」の印は重ねない
+  const plotBadge = row.planned
+    ? '<span class="badge planned">予定</span>'
+    : row.hasEpisodePlot
+      ? '<span class="badge">単話プロット</span>'
+      : "";
   const charsText = row.conflicted
     ? "競合あり（数えていません）"
     : row.hasManuscript
@@ -314,7 +338,9 @@ function renderEpisode(row) {
   if (row.synopsisHead) sub.push(escapeHtml(row.synopsisHead));
 
   let button = "";
-  if (row.hasEpisodePlot) {
+  if (row.planned) {
+    // 行そのものを押すと単話プロットが開くので、同じボタンを横に並べない
+  } else if (row.hasEpisodePlot) {
     button =
       '<button class="plot-btn open-plot" data-path="' + escapeHtml(row.filePath) +
       '" data-chapter="' + escapeHtml(chapterAttr) +
@@ -337,10 +363,15 @@ function renderEpisode(row) {
       escapeHtml(entry.label) + "</button>";
   }
 
-  return '<div class="episode">' +
+  // 予定の話は本文が無い。押すと単話プロットを開く（open-plot として返す）
+  const mainClass = row.planned ? "open-body open-plot" : "open-body";
+  const mainTitle = row.planned
+    ? "この話の単話プロットを開きます（本文はまだありません）"
+    : "この話を開きます";
+  return '<div class="episode' + (row.planned ? " planned" : "") + '">' +
     '<span class="main">' +
-      '<button class="open-body" data-path="' + escapeHtml(row.filePath) +
-        '" data-chapter="' + escapeHtml(chapterAttr) + '" title="この話を開きます">' +
+      '<button class="' + mainClass + '" data-path="' + escapeHtml(row.filePath) +
+        '" data-chapter="' + escapeHtml(chapterAttr) + '" title="' + mainTitle + '">' +
         '<span class="head">' + escapeHtml(row.label) +
           (row.title ? "　" + escapeHtml(row.title) : "") + plotBadge + "</span>" +
         '<span class="sub">' + sub.join("　") + "</span>" +
@@ -365,6 +396,11 @@ function renderEpisodes() {
   el.episodes.innerHTML =
     html.length > 0 ? html.join("") : '<div class="note">' +
       escapeHtml(data.emptyEpisodes) + "</div>";
+
+  el.episodeActions.innerHTML = data.addPlanned
+    ? '<button data-add-planned="1" title="' + escapeHtml(data.addPlanned.detail) +
+      '">' + escapeHtml(data.addPlanned.label) + "</button>"
+    : "";
 }
 
 function render() {

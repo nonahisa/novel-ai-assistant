@@ -98,6 +98,12 @@ export function parseEpisodePlot(text: string): EpisodePlotDoc {
     const heading = /^#{1,6}\s+(.+?)\s*$/.exec(line);
     if (heading) {
       const name = heading[1];
+      // **文書の題は節ではない。** 予定の話（設計書6.4.8）は題を見出しに
+      // 持つので、「視点の交代」のような題を視点の節と取り違えない
+      if (/^#\s/.test(line) && /の単話プロット$/.test(name)) {
+        current = null;
+        return;
+      }
       current =
         SECTION_MARKS.find((section) => section.mark.test(name))?.key ?? null;
       return;

@@ -10,7 +10,7 @@ import {
 } from "./plotDoc";
 import { groupEpisodesByChapter } from "./chapterGrouping";
 import { episodePathFor } from "./bookStore";
-import { episodeTitle, formatChapterLabel } from "./episodeLabel";
+import { episodeTitle, episodeUnit, formatChapterLabel } from "./episodeLabel";
 import type { WorkFormatKey } from "./workFormat";
 
 /**
@@ -158,6 +158,26 @@ export interface PlotEpisodeRow {
   episodePlotChecks: EpisodePlotCheckAction[];
   /** 各話あらすじの冒頭。無ければ空 */
   synopsisHead: string;
+  /**
+   * 予定の話か（設計書6.4.8）。本文のファイルが無く、単話プロットだけがある。
+   * このとき `filePath` は単話プロットの場所で、押すとプロットが開く
+   */
+  planned: boolean;
+}
+
+/**
+ * 予定の話1件（設計書6.4.8）。**単話プロットのファイルそのもの**である。
+ *
+ * 予定のための台帳は作らない。単話プロットは `第N話.md` という話数だけで
+ * 本文と結びつくので、本文の無い話数のプロットがそのまま「予定」になり、
+ * 作者がその話数の本文を作れば何もしなくても同じ行へ結びつく。
+ */
+export interface PlannedEpisodePlot {
+  chapter: number;
+  /** 見出しに書いた題（`episodePlotTitleFromText`）。無ければ空 */
+  title: string;
+  /** 単話プロットの場所 */
+  filePath: string;
 }
 
 /**
@@ -230,6 +250,97 @@ export interface PlotEpisodeRowsInput {
   synopses: readonly ChapterSynopsis[];
   /** 単話プロットが既にある話数 */
   episodePlotChapters: ReadonlySet<number>;
+  /**
+   * 予定の話（本文の無い話数の単話プロット）。**本文のある話数のものが
+   * 混じっていても捨てる**——読み込みと組み立てのあいだに本文ができたら、
+   * そちらの行へ結びつける
+   */
+  plannedEpisodes?: readonly PlannedEpisodePlot[];
+}
+
+/**
+ * その話数の本文があるか。
+ *
+ * **合本は範囲で見る。** 「第1〜10話」の合本があるのに第5話を予定として
+ * 並べると、同じ話が2か所に出る。
+ */
+function isChapterWritten(
+  episodes: readonly EpisodeFile[],
+  chapter: number
+): boolean {
+  return episodes.some((episode) => {
+    const start = episode.chapterStart;
+    if (start === null) return false;
+    const end = episode.chapterEnd ?? start;
+    return start <= chapter && chapter <= end;
+  });
+}
+
+/**
+ * 単話プロットのある話数のうち、本文がまだ無いもの（＝予定の話）。話数の順。
+ */
+export function plannedEpisodePlotChapters(
+  episodes: readonly EpisodeFile[],
+  plotChapters: Iterable<number>
+): number[] {
+  return [...new Set(plotChapters)]
+    .filter((chapter) => !isChapterWritten(episodes, chapter))
+    .sort((left, right) => left - right);
+}
+
+/**
+ * 予定の話を足すときの、既定の話数。
+ *
+ * **書いた話と予定の話の、最後の次。** 予定を続けて足すとき、毎回
+ * 同じ番号を勧めて「既にあります」と言われるのを避ける。
+ */
+export function nextPlannedEpisodeNumber(
+  episodes: readonly EpisodeFile[],
+  plotChapters: Iterable<number>
+): number {
+  let last = 0;
+  for (const episode of episodes) {
+    const end = episode.chapterEnd ?? episode.chapterStart;
+    if (end !== null && end > last) last = end;
+  }
+  for (const chapter of plotChapters) {
+    if (chapter > last) last = chapter;
+  }
+  return last + 1;
+}
+
+/**
+ * 作者が入れた話数を読む（予定の話を足すとき）。
+ *
+ * **本文のある話数・単話プロットが既にある話数は断る。** 前者は予定では
+ * なく、後者は作者の書いたプロットを雛形で潰す道になる（書き込み側も
+ * 新規作成でしか書かないが、押す前に言うほうが親切である）。
+ *
+ * 全角の数字と「第8話」という書き方は読む（打ちやすいように）。
+ */
+export function parsePlannedEpisodeNumber(
+  text: string,
+  episodes: readonly EpisodeFile[],
+  plotChapters: Iterable<number>
+): { chapter: number; problem?: undefined } | { chapter?: undefined; problem: string } {
+  const flat = text.normalize("NFKC").trim();
+  const matched = /^第?\s*(\d+)\s*話?$/.exec(flat);
+  if (!matched) return { problem: "話数を数字で入れてください（例：12）。" };
+  const chapter = Number(matched[1]);
+  if (!Number.isSafeInteger(chapter) || chapter < 1) {
+    return { problem: "話数は1以上の数字で入れてください。" };
+  }
+  if (isChapterWritten(episodes, chapter)) {
+    return {
+      problem: `第${chapter}話は本文があります。予定は、本文のまだ無い話数に足します。`,
+    };
+  }
+  if (new Set(plotChapters).has(chapter)) {
+    return {
+      problem: `第${chapter}話の単話プロットは既にあります。見取り図から開けます。`,
+    };
+  }
+  return { chapter };
 }
 
 /**
@@ -251,7 +362,7 @@ export function buildPlotEpisodeRows(
     synopses.set(synopsisKey(entry.fileName, entry.chapter), entry);
   }
 
-  return input.episodes.map((episode) => {
+  const writtenRows = input.episodes.map((episode) => {
     const chapter = episodePlotChapterOf(episode);
     const label = formatChapterLabel(episode, input.format) || episode.fileName;
     const state = {
@@ -275,8 +386,98 @@ export function buildPlotEpisodeRows(
       canCreateEpisodePlot: chapter !== null,
       episodePlotChecks: episodePlotChecksFor(state),
       synopsisHead: synopsisHead(findSynopsisFor(synopses, episode)?.synopsis ?? ""),
+      planned: false,
+      // 並べ込みの目印。画面へは出さない（下で落とす）
+      sortChapter: episode.chapterStart,
     };
   });
+
+  const planned = (input.plannedEpisodes ?? [])
+    .filter((entry) => !isChapterWritten(input.episodes, entry.chapter))
+    .sort((left, right) => left.chapter - right.chapter)
+    .map((entry) => plannedRow(entry, input, synopses));
+
+  return mergePlannedRows(writtenRows, planned).map(
+    ({ sortChapter: _sortChapter, ...row }) => row
+  );
+}
+
+type SortableRow = PlotEpisodeRow & { sortChapter: number | null };
+
+/**
+ * 予定の話の1行。**本文の行と同じ形**にして、画面の描き分けは
+ * `planned` の1つで済ませる（行の形を2つ持つと、片方だけ直す）。
+ */
+function plannedRow(
+  entry: PlannedEpisodePlot,
+  input: PlotEpisodeRowsInput,
+  synopses: ReadonlyMap<string, ChapterSynopsis>
+): SortableRow {
+  const state = { hasManuscript: false, conflicted: false, hasEpisodePlot: true };
+  const synopsis = synopses.get(synopsisKey("", entry.chapter));
+  return {
+    filePath: entry.filePath,
+    fileName: "",
+    label: episodeUnit(input.format).label(entry.chapter),
+    title: entry.title,
+    chapter: entry.chapter,
+    chapterName: "",
+    net: 0,
+    gross: 0,
+    ...state,
+    canCreateEpisodePlot: true,
+    episodePlotChecks: episodePlotChecksFor(state),
+    synopsisHead: synopsisHead(synopsis?.synopsis ?? ""),
+    planned: true,
+    sortChapter: entry.chapter,
+  };
+}
+
+/**
+ * 予定の話を、書いた話の並びへ差し込む。
+ *
+ * **書いた話の並びは動かさない**（走査の順。一覧・章立て・EPUBと同じ）。
+ * 予定の話は、自分より大きな話数の本文の直前へ入れる。どれより大きければ
+ * **最後の番号つきの話のあと**——あとがきのような話数の無い話は、
+ * 走査が末尾へ回すので、その前に置く。
+ *
+ * 章の名前は、**同じ章の話に挟まれたときだけ**受け継ぐ。最後の話のあとの
+ * 予定は、新しい章の始まりかもしれないので名前を付けない（捏造しない）。
+ */
+function mergePlannedRows(
+  written: readonly SortableRow[],
+  planned: readonly SortableRow[]
+): SortableRow[] {
+  if (planned.length === 0) return [...written];
+
+  const merged: SortableRow[] = [];
+  let rest = [...planned];
+  let lastNumbered = -1;
+  written.forEach((row, index) => {
+    if (row.sortChapter !== null) lastNumbered = index;
+  });
+
+  written.forEach((row, index) => {
+    if (row.sortChapter !== null) {
+      const before = rest.filter((entry) => (entry.sortChapter ?? 0) < (row.sortChapter ?? 0));
+      rest = rest.filter((entry) => !before.includes(entry));
+      const previous = merged[merged.length - 1];
+      const inherited =
+        previous && previous.chapterName === row.chapterName
+          ? row.chapterName
+          : "";
+      for (const entry of before) {
+        merged.push(previous ? { ...entry, chapterName: inherited } : entry);
+      }
+    }
+    merged.push(row);
+    if (index === lastNumbered) {
+      merged.push(...rest);
+      rest = [];
+    }
+  });
+  merged.push(...rest);
+  return merged;
 }
 
 /**
