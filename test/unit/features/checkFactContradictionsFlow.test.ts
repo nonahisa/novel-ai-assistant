@@ -49,18 +49,40 @@ const state = vi.hoisted(() => ({
    * ——前回、判定の途中で中止したときの形
    */
   extractCached: false,
+  /**
+   * 判定（`contradiction`）に割り当てたAI。null なら取り出しと同じ
+   * （ollama / test-model）。判定だけを別のAIにした形を作るのに使う
+   */
+  verifier: null as { id: string; model: string } | null,
+  /** 接続確認（`testConnection`）が呼ばれたAIの id の並び */
+  reached: [] as string[],
+  /** 接続できないことにするAIの id */
+  unreachable: [] as string[],
+  /**
+   * 覚えたものを本当に覚えるキャッシュを使うか。鍵（機能名・版・AI・モデル）
+   * ごとに別々に覚えるので、判定のAIを替えたときに当たらないことを確かめられる
+   */
+  realCache: false,
+  memory: new Map<string, unknown>(),
 }));
 
 vi.mock("../../../src/ai/registry", () => ({
   ensureConfigured: vi.fn(async (_registry: unknown, feature: string) => {
     state.features.push(feature);
+    const assigned =
+      feature === "contradiction" && state.verifier
+        ? state.verifier
+        : { id: "ollama", model: "test-model" };
     return {
       provider: {
-        id: "ollama",
-        displayName: "Ollama",
+        id: assigned.id,
+        displayName: assigned.id,
         isPaid: false,
         async testConnection() {
-          return { ok: true };
+          state.reached.push(assigned.id);
+          return state.unreachable.includes(assigned.id)
+            ? { ok: false, message: "つながりません" }
+            : { ok: true };
         },
         async generate(request: {
           userPrompt: string;
@@ -100,7 +122,7 @@ vi.mock("../../../src/ai/registry", () => ({
           return { text, truncated: false, elapsedMs: 1 };
         },
       },
-      model: "test-model",
+      model: assigned.model,
     };
   }),
 }));
@@ -195,13 +217,20 @@ vi.mock("../../../src/core/characterStore", () => ({
 vi.mock("../../../src/core/chunkCache", () => ({
   ChunkCache: class {
     async load() {}
-    get(_hash: string, key: { feature: string }) {
+    get(hash: string, key: { feature: string }) {
+      if (state.realCache) {
+        return state.memory.get(`${JSON.stringify(key)}|${hash}`);
+      }
       // 取り出しだけを覚えている（判定は覚えていない）
       return state.extractCached && key.feature === "story_fact_extract"
         ? JSON.parse(state.extractResponse)
         : undefined;
     }
-    async set() {}
+    async set(hash: string, key: object, value: unknown) {
+      if (state.realCache) {
+        state.memory.set(`${JSON.stringify(key)}|${hash}`, value);
+      }
+    }
     async save() {}
   },
 }));
@@ -268,6 +297,11 @@ beforeEach(() => {
   state.source = SOURCE;
   state.extractNeedles = null;
   state.extractCached = false;
+  state.verifier = null;
+  state.reached = [];
+  state.unreachable = [];
+  state.realCache = false;
+  state.memory = new Map();
   state.extractResponse = TWO_FACTS;
   state.verifyResponse = JSON.stringify({
     verdict: "採用",
@@ -535,5 +569,92 @@ describe("取り出しが処理済みで、判定だけが残っているとき"
 
     expect(window.showInformationMessage).not.toHaveBeenCalled();
     expect(verifySends()).toHaveLength(1);
+  });
+});
+
+/**
+ * **判定の覚えと接続の確認は、判定のAIのものでなければならない**（2026-09-23）。
+ *
+ * 判定の覚え（キャッシュ）の鍵に、取り出しのAI（`factExtract`）の id と
+ * モデル名を入れていたので、判定のAI（`contradiction`）を替えても前のAIの
+ * 判定がそのまま使われていた（実装ルール4：鍵は内容＋AI＋モデル＋版）。
+ * また、取り出しから始まる回は取り出しのAIにしか接続を確かめず、
+ * 別のAIの判定へ確かめないまま送っていた。
+ */
+describe("判定のAIが取り出しと別のとき", () => {
+  function verifySends() {
+    return state.sent.filter((entry) => entry.feature === "fact_contradiction_verify");
+  }
+
+  test("判定のAIを替えると、覚えていた判定を使わずにやり直す", async () => {
+    state.realCache = true;
+    state.verifier = { id: "gemini", model: "judge-a" };
+    await checkFactContradictions(work, registry());
+    expect(verifySends()).toHaveLength(1);
+
+    // 同じAIなら覚えた判定を使う（送らない）
+    state.sent = [];
+    await checkFactContradictions(work, registry());
+    expect(verifySends()).toEqual([]);
+
+    // モデルだけを替えても、やり直す
+    state.sent = [];
+    state.verifier = { id: "gemini", model: "judge-b" };
+    await checkFactContradictions(work, registry());
+    expect(verifySends()).toHaveLength(1);
+
+    // AIを替えても、やり直す（同名のモデルでも別のAIの答えは使わない）
+    state.sent = [];
+    state.verifier = { id: "sakura", model: "judge-b" };
+    await checkFactContradictions(work, registry());
+    expect(verifySends()).toHaveLength(1);
+  });
+
+  test("取り出しから始まる回でも、判定を送る前に判定のAIへ接続を確かめる", async () => {
+    state.verifier = { id: "gemini", model: "judge" };
+
+    await checkFactContradictions(work, registry());
+
+    expect(state.reached).toEqual(["ollama", "gemini"]);
+    expect(verifySends()).toHaveLength(1);
+  });
+
+  test("判定のAIに接続できなければ、判定を送らない", async () => {
+    state.verifier = { id: "gemini", model: "judge" };
+    state.unreachable = ["gemini"];
+
+    const result = await checkFactContradictions(work, registry());
+
+    expect(state.reached).toContain("gemini");
+    expect(verifySends()).toEqual([]);
+    expect(result?.cancelled).toBe(true);
+  });
+
+  test("取り出しと判定が同じAIなら、接続の確認は1回で足りる", async () => {
+    await checkFactContradictions(work, registry());
+
+    expect(state.reached).toEqual(["ollama"]);
+    expect(verifySends()).toHaveLength(1);
+  });
+
+  test("まとめ実行で取り出しが処理済みでも、判定のAIへ接続を確かめる", async () => {
+    state.extractCached = true;
+    state.verifier = { id: "gemini", model: "judge" };
+
+    await checkFactContradictions(work, registry(), { suiteConfirmed: true });
+
+    expect(state.reached).toEqual(["gemini"]);
+    expect(verifySends()).toHaveLength(1);
+  });
+
+  test("判定を全部覚えていれば、判定のAIへ接続を確かめない", async () => {
+    state.realCache = true;
+    state.verifier = { id: "gemini", model: "judge" };
+    await checkFactContradictions(work, registry());
+
+    state.reached = [];
+    await checkFactContradictions(work, registry());
+
+    expect(state.reached).toEqual([]);
   });
 });
