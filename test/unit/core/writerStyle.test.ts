@@ -215,6 +215,62 @@ describe("はじめの案内", () => {
     );
   });
 
+  /*
+    **段取りの説明文が約束する使い方を、押せる形で出す**（点検、2026-09-23）。
+    折衷派の説明は「書いたものからプロットを起こし直す使い方が向きます」、
+    設計派は「書いたものが筋から外れていないかを機械に見張らせる使い方」
+    なのに、続きを書く案内では折衷派が設計派と同じ道（単話プロットだけ）で、
+    どちらの約束も押せる操作になっていなかった。
+  */
+  test("続きを書く：折衷派にはプロット逆算、設計派には逸脱検知を出す", () => {
+    const base = {
+      situation: "have_files",
+      revise: "per_episode",
+      material: "documented",
+      outlet: "serial",
+    };
+    const commandsOf = (plan: string) => {
+      const style = buildWriterStyle({ ...base, plan });
+      if (!style) throw new Error("組み立てられない");
+      return tutorialAdvice(style, "keep_writing").steps.map(
+        (step) => step.command
+      );
+    };
+
+    expect(commandsOf("hybrid")).toContain("novelai.generatePlot");
+    expect(commandsOf("hybrid")).not.toContain("novelai.checkDeviations");
+    expect(commandsOf("designer")).toContain("novelai.checkDeviations");
+    expect(commandsOf("designer")).not.toContain("novelai.generatePlot");
+    // 即興派には、先に決めた筋を前提にする道具を出さない
+    expect(commandsOf("improviser")).not.toContain("novelai.generatePlot");
+    expect(commandsOf("improviser")).not.toContain("novelai.checkDeviations");
+    // どの段取りでも、最初は執筆再開
+    for (const plan of ["designer", "hybrid", "improviser"]) {
+      expect(commandsOf(plan)[0]).toBe("novelai.resumeWriting");
+    }
+  });
+
+  test("取り込み：設定が「頭の中」でも「メモ」でも、抽出の一言を添える", () => {
+    // 設計の表（6.90.5）は「設定は頭の中／メモ」の両方で抽出を案内する。
+    // 取り込みの案内だけ「頭の中」にしか出していなかった（点検、2026-09-23）
+    const base = {
+      situation: "have_files",
+      plan: "hybrid",
+      revise: "per_episode",
+      outlet: "serial",
+    };
+    const laterOf = (material: string) => {
+      const style = buildWriterStyle({ ...base, material });
+      if (!style) throw new Error("組み立てられない");
+      return tutorialAdvice(style, "bring_in").later.join("\n");
+    };
+
+    expect(laterOf("in_head")).toContain("資料をまとめて抽出");
+    expect(laterOf("memo")).toContain("資料をまとめて抽出");
+    // 資料にまとめてある人には出さない（もうある）
+    expect(laterOf("documented")).not.toContain("資料をまとめて抽出");
+  });
+
   test("書き終えてから直す人にはまとめて、区切りで直す人には1つずつ", () => {
     const base = {
       situation: "have_files",

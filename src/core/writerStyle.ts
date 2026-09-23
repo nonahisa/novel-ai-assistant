@@ -786,10 +786,13 @@ function bringInAdvice(style: WriterStyle): TutorialAdvice {
     steps,
     later: [
       "登録したあと、設定資料の抽出や校正が使えるようになります",
-      ...(style.material === "in_head"
+      // 「頭の中」と「メモ」の両方（設計書6.90.5 の表。続きを書く案内と
+      // 同じ条件）。以前は「頭の中」だけで、メモの人には出ていなかった
+      ...(style.material === "in_head" || style.material === "memo"
         ? [
-            "設定が頭の中にあるとのことなので、登録後の「資料をまとめて抽出」が" +
-              "いちばん効きます（本文から登場人物・場所・能力を起こします）",
+            `設定は「${WRITER_MATERIAL_LABELS[style.material]}」とのことなので、` +
+              "登録後の「資料をまとめて抽出」がいちばん効きます" +
+              "（本文から登場人物・場所・能力を起こします）",
           ]
         : []),
     ],
@@ -855,13 +858,39 @@ function keepWritingAdvice(style: WriterStyle): TutorialAdvice {
       why: "前の話の終わりと、次に書くことの候補をまとめて出します",
     },
   ];
+  /*
+    **段取りの説明文（`WRITER_PLAN_TYPES`）が約束した使い方を、押せる形で
+    出す**（点検、2026-09-23）。以前は折衷派も設計派と同じ道（単話プロット
+    だけ）で、折衷派の「書いたものからプロットを起こし直す」も、設計派の
+    「筋から外れていないかを見張らせる」も押せる操作になっていなかった。
+  */
+  if (style.plan === "hybrid") {
+    steps.push({
+      command: "novelai.generatePlot",
+      label: "プロット逆算（書いたところまでから筋を起こし直す）",
+      why:
+        "折衷派と答えていただいたためです。大筋と本文を行き来する方なので、" +
+        "書いたところまでの各話あらすじから筋を組み直すと、次の行き先が見えます" +
+        "（AIを使います。書いてある項目は、置き換えるかを選べます）",
+    });
+  }
   if (style.plan !== "improviser") {
     steps.push({
       command: "novelai.createEpisodePlot",
       label: "次の1話のプロットを作る",
       why: `${WRITER_PLAN_TYPES[style.plan].label}と答えていただいたためです`,
     });
-  } else {
+  }
+  if (style.plan === "designer") {
+    steps.push({
+      command: "novelai.checkDeviations",
+      label: "プロット逸脱検知（筋から外れていないか）",
+      why:
+        "設計派と答えていただいたためです。先に組んだプロットと本文の差を、" +
+        "機械に見張らせられます（AIを使います。本文は書き換えません）",
+    });
+  }
+  if (style.plan === "improviser") {
     steps.push({
       command: "novelai.openSceneMemos",
       label: "シーンメモを開く",
