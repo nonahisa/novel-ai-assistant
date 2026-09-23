@@ -5,6 +5,12 @@ import { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import { hashBytes } from "./textFile";
 import {
+  detectJsonFileFormat,
+  formatJsonForFile,
+  NEW_JSON_FILE_FORMAT,
+  type JsonFileFormat,
+} from "./jsonFileFormat";
+import {
   atomicWriteFile,
   AtomicWriteFileError,
   createManagedRecoveryPath,
@@ -212,20 +218,22 @@ export class SettingsStore<T extends StorableRecord> {
         unsaved
       );
     }
+    // **改行は元のファイルに合わせる**（0.81.1）。照合で読んだバイトから
+    // 拾う——Windows で git が CRLF にしたファイルを LF で書き直すと、
+    // 1項目の変更で全行が差分になる（ノートPCの実機確認、2026-09-23）
+    const formats = new Map<string, JsonFileFormat>();
     for (const record of records) {
-      await this.assertSaveAllowed(record);
+      formats.set(record.id, await this.assertSaveAllowed(record));
     }
 
     const directory = await this.ensureDir();
     for (const record of records) {
       const fileName = this.options.fileName(record);
       const target = path.join(directory, fileName);
-      const body =
-        JSON.stringify(
-          { ...record, updatedAt: new Date().toISOString() },
-          null,
-          2
-        ) + "\n";
+      const body = formatJsonForFile(
+        { ...record, updatedAt: new Date().toISOString() },
+        formats.get(record.id) ?? NEW_JSON_FILE_FORMAT
+      );
 
       try {
         await atomicWriteFile(target, new TextEncoder().encode(body));
@@ -345,10 +353,13 @@ export class SettingsStore<T extends StorableRecord> {
    * 読み込み後に外部から変更されていないか確認する。
    * AI応答には時間がかかり、その間に作者や他のツールが
    * ファイルを書き換えている可能性があるため。
+   *
+   * 通れば、照合したファイルの改行の形を返す（新規なら新規の形）。
    */
-  private async assertSaveAllowed(record: T): Promise<void> {
+  private async assertSaveAllowed(record: T): Promise<JsonFileFormat> {
     const snapshot = this.snapshots.get(record.id);
-    if (!snapshot) return; // 新規レコードは競合しようがない
+    // 新規レコードは競合しようがない
+    if (!snapshot) return NEW_JSON_FILE_FORMAT;
 
     let current: Uint8Array;
     try {
@@ -379,6 +390,7 @@ export class SettingsStore<T extends StorableRecord> {
         [snapshot.filePath]
       );
     }
+    return detectJsonFileFormat(current);
   }
 }
 

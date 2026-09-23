@@ -294,6 +294,93 @@ describe("能力・場所の保存", () => {
   });
 
   /**
+   * 改行コードを保持して書く（ノートPCの実機確認、2026-09-23）。
+   *
+   * Windows で git が CRLF にして取り出したファイルを、保存のたびに LF で
+   * 書き直していた。**1項目を直しただけで全行が差分になる。**
+   */
+  describe("改行コードの保持", () => {
+    const decode = (bytes: Uint8Array | undefined): string =>
+      new TextDecoder().decode(bytes);
+
+    test("CRLF のファイルは CRLF のまま書く（二度目の保存も通る）", async () => {
+      const original = fixedAbility("abil_001", "灯火");
+      const file = path.join(abilityDir, abilityFileName(original));
+      disk.set(
+        file,
+        utf8(`${JSON.stringify(original, null, 2)}\n`.replace(/\n/g, "\r\n"))
+      );
+
+      const store = createAbilityStore(work);
+      const loaded = await store.loadAll();
+      await store.saveAll([{ ...loaded.records[0], description: "灯す力" }]);
+
+      const first = decode(disk.get(file));
+      expect(first).toContain("灯す力");
+      // 裸の LF が1つも無い＝全行が CRLF
+      expect(/(?:^|[^\r])\n/.test(first)).toBe(false);
+      expect(first.endsWith("}\r\n")).toBe(true);
+
+      // **控えは実際に書いたバイトから取る。** LF の形で控えると、
+      // 次の保存が「読み込み後に変更された」で止まる
+      await store.saveAll([{ ...loaded.records[0], description: "灯す力2" }]);
+      const second = decode(disk.get(file));
+      expect(second).toContain("灯す力2");
+      expect(/(?:^|[^\r])\n/.test(second)).toBe(false);
+    });
+
+    test("末尾に改行の無いファイルは、無いまま書く", async () => {
+      const original = fixedLocation("loc_001", "図書塔");
+      const file = path.join(locationDir, "loc_001_図書塔.json");
+      disk.set(
+        file,
+        utf8(JSON.stringify(original, null, 2).replace(/\n/g, "\r\n"))
+      );
+
+      const store = createLocationStore(work);
+      const loaded = await store.loadAll();
+      await store.saveAll(loaded.records);
+
+      const written = decode(disk.get(file));
+      expect(written.endsWith("}")).toBe(true);
+      expect(written).toContain("\r\n");
+    });
+
+    test("名前が変わっても、元のファイルの改行コードで書く", async () => {
+      const original = fixedAbility("abil_001", "灯火");
+      const oldFile = path.join(abilityDir, abilityFileName(original));
+      disk.set(
+        oldFile,
+        utf8(`${JSON.stringify(original, null, 2)}\n`.replace(/\n/g, "\r\n"))
+      );
+
+      const store = createAbilityStore(work);
+      const loaded = await store.loadAll();
+      const renamed = { ...loaded.records[0], name: "大灯火" };
+      await store.saveAll([renamed]);
+
+      const written = decode(
+        disk.get(path.join(abilityDir, abilityFileName(renamed)))
+      );
+      expect(/(?:^|[^\r])\n/.test(written)).toBe(false);
+      expect(written.endsWith("}\r\n")).toBe(true);
+    });
+
+    test("新しく作る記録は、これまでどおり LF で末尾に改行を付ける", async () => {
+      const store = createAbilityStore(work);
+      await store.loadAll();
+      const fresh = fixedAbility("abil_002", "水脈");
+      await store.saveAll([fresh]);
+
+      const written = decode(
+        disk.get(path.join(abilityDir, abilityFileName(fresh)))
+      );
+      expect(written).not.toContain("\r");
+      expect(written.endsWith("}\n")).toBe(true);
+    });
+  });
+
+  /**
    * 取り下げ（設定資料パネルから記録を消す操作）。
    *
    * AIの抽出は誤った記録を作る。名前が文字列の「null」になった組織が

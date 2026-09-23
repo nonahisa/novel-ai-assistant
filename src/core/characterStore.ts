@@ -15,6 +15,12 @@ import {
   pruneManagedRecoveries,
 } from "./atomicWrite";
 import { hashBytes } from "./textFile";
+import {
+  detectJsonFileFormat,
+  formatJsonForFile,
+  NEW_JSON_FILE_FORMAT,
+  type JsonFileFormat,
+} from "./jsonFileFormat";
 
 interface CharacterSnapshot {
   filePath: string;
@@ -172,9 +178,24 @@ export class CharacterStore {
   }
 
   async save(character: Character): Promise<void> {
+    return this.saveInFormat(character, undefined);
+  }
+
+  /**
+   * 保存する。`inherited` は、書き換え（退避→作り直し）で退避した元の
+   * ファイルの改行の形（0.81.1）。
+   *
+   * **作り直す時点では、元のファイルはもう正規の場所に無い。** 保存前の
+   * 照合からは形を拾えないので、退避したときに読んだバイトから持ち越す。
+   * 渡さなければ新規作成と同じ形（LF・末尾に改行）になる。
+   */
+  private async saveInFormat(
+    character: Character,
+    inherited: JsonFileFormat | undefined
+  ): Promise<void> {
     const validated = parseCharacter(character);
     try {
-      const prepared = await this.prepareSave(validated);
+      const prepared = await this.prepareSave(validated, inherited);
       await this.ensureDir();
       await this.persist(prepared);
     } catch (error) {
@@ -259,6 +280,18 @@ export class CharacterStore {
    * 読み込み後に外部で変更されていないことだけ確認する。
    */
   async retire(id: string): Promise<string> {
+    return (await this.retireKeepingFormat(id)).recoveryPath;
+  }
+
+  /**
+   * 取り下げて、退避した元のファイルの改行の形も返す（0.81.1）。
+   *
+   * 書き換え（`update`）が作り直すときに、元と同じ改行で書くために使う。
+   * 形は**照合に通ったバイト**から読むので、読み込んだときの形と同じである。
+   */
+  private async retireKeepingFormat(
+    id: string
+  ): Promise<{ recoveryPath: string; format: JsonFileFormat }> {
     const snapshot = this.snapshots.get(id);
     if (!snapshot) {
       throw new CharacterStoreError(
@@ -301,7 +334,7 @@ export class CharacterStore {
     }
 
     this.snapshots.delete(id);
-    return recoveryPath;
+    return { recoveryPath, format: detectJsonFileFormat(current) };
   }
 
   /**
@@ -328,9 +361,12 @@ export class CharacterStore {
    */
   async update(character: Character): Promise<void> {
     const validated = parseCharacter(character);
-    const recoveryPath = await this.retire(validated.id);
+    const { recoveryPath, format } = await this.retireKeepingFormat(
+      validated.id
+    );
     try {
-      await this.save(validated);
+      // **元のファイルの改行で作り直す**（CRLF のファイルを LF にしない）
+      await this.saveInFormat(validated, format);
     } catch (error) {
       const detail = asCharacterStoreError(error);
       throw new CharacterStoreError(
@@ -345,23 +381,30 @@ export class CharacterStore {
   }
 
   private async prepareSave(
-    character: Character
+    character: Character,
+    inherited?: JsonFileFormat
   ): Promise<PreparedCharacterSave> {
     const d = await this.dir();
     const destinationPath = path.join(d, characterFileName(character));
     const snapshot = this.snapshots.get(character.id);
-    await this.assertSaveAllowed(character.id, destinationPath, snapshot);
+    const existing = await this.assertSaveAllowed(
+      character.id,
+      destinationPath,
+      snapshot
+    );
 
-    const body = JSON.stringify(
+    // **改行は元のファイルに合わせる**（0.81.1）。Windows で git が CRLF に
+    // したファイルを LF で書き直すと、1項目の変更で全行が差分になる。
+    // 控え（snapshots の hash）は `persist` がこの bytes から取る
+    const body = formatJsonForFile(
       { ...character, updatedAt: new Date().toISOString() },
-      null,
-      2
+      existing ?? inherited ?? NEW_JSON_FILE_FORMAT
     );
     return {
       character,
       destinationPath,
       snapshot,
-      bytes: new TextEncoder().encode(`${body}\n`),
+      bytes: new TextEncoder().encode(body),
     };
   }
 
@@ -481,11 +524,15 @@ export class CharacterStore {
     });
   }
 
+  /**
+   * 保存してよいかを確かめる。既存の人物なら、照合に通ったファイルの
+   * 改行の形を返す（新規なら undefined）。
+   */
   private async assertSaveAllowed(
     id: string,
     destinationPath: string,
     snapshot: CharacterSnapshot | undefined
-  ): Promise<void> {
+  ): Promise<JsonFileFormat | undefined> {
     const dirtyPaths = await this.dirtyDocumentPaths();
     if (dirtyPaths.length > 0) {
       throw new CharacterStoreError(
@@ -503,7 +550,7 @@ export class CharacterStore {
           "path_conflict"
         );
       }
-      return;
+      return undefined;
     }
 
     const currentBytes = await this.readFileIfExists(snapshot.filePath);
@@ -530,6 +577,7 @@ export class CharacterStore {
         "path_conflict"
       );
     }
+    return detectJsonFileFormat(currentBytes);
   }
 
   private async findFilesById(id: string): Promise<string[]> {

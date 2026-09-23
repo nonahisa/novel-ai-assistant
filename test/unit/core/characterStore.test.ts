@@ -926,6 +926,116 @@ describe("人物ファイル保存", () => {
       ).toHaveLength(1);
     });
   });
+
+  /**
+   * 改行コードを保持して書く（ノートPCの実機確認、2026-09-23）。
+   *
+   * Windows で git が CRLF にして取り出した人物ファイルを、保存のたびに
+   * LF で書き直していた。**書き換えは退避→作り直しなので、作り直す時点では
+   * 元のファイルはもう正規の場所に無い**——読み込んだときの形を持ち越す。
+   */
+  describe("改行コードの保持", () => {
+    const decode = (bytes: Uint8Array | undefined): string =>
+      new TextDecoder().decode(bytes);
+    const crlfBytesFor = (character: Character, finalNewline = true) =>
+      utf8(
+        `${JSON.stringify(character, null, 2)}${finalNewline ? "\n" : ""}`.replace(
+          /\n/g,
+          "\r\n"
+        )
+      );
+    const hasBareLf = (text: string): boolean => /(?:^|[^\r])\n/.test(text);
+
+    test("CRLF の人物を書き換えても CRLF のまま（二度目も通る）", async () => {
+      const original = fixedCharacter("char_001", "灯");
+      const characterPath = diskPath(
+        path.join(characterDir, characterFileName(original))
+      );
+      disk.set(characterPath, crlfBytesFor(original));
+
+      const store = new CharacterStore(work);
+      await store.loadAll();
+      await store.saveOrUpdate({ ...original, personality: "冷静" });
+
+      const first = decode(disk.get(characterPath));
+      expect(first).toContain("冷静");
+      expect(hasBareLf(first)).toBe(false);
+      expect(first.endsWith("}\r\n")).toBe(true);
+
+      // 控えは実際に書いたバイトから取る（LF で控えると次が止まる）
+      await store.saveOrUpdate({ ...original, personality: "沈着" });
+      const second = decode(disk.get(characterPath));
+      expect(second).toContain("沈着");
+      expect(hasBareLf(second)).toBe(false);
+    });
+
+    test("末尾に改行の無い人物は、無いまま書く", async () => {
+      const original = fixedCharacter("char_001", "灯");
+      const characterPath = diskPath(
+        path.join(characterDir, characterFileName(original))
+      );
+      disk.set(characterPath, crlfBytesFor(original, false));
+
+      const store = new CharacterStore(work);
+      await store.loadAll();
+      await store.saveOrUpdate({ ...original, personality: "冷静" });
+
+      const written = decode(disk.get(characterPath));
+      expect(written.endsWith("}")).toBe(true);
+      expect(hasBareLf(written)).toBe(false);
+    });
+
+    test("名前を変えて作り直しても、元の改行コードで書く", async () => {
+      const original = fixedCharacter("char_001", "灯");
+      disk.set(
+        diskPath(path.join(characterDir, characterFileName(original))),
+        crlfBytesFor(original)
+      );
+
+      const store = new CharacterStore(work);
+      await store.loadAll();
+      const renamed = { ...original, name: "月島灯" };
+      await store.saveOrUpdate(renamed);
+
+      const written = decode(
+        disk.get(diskPath(path.join(characterDir, characterFileName(renamed))))
+      );
+      expect(hasBareLf(written)).toBe(false);
+      expect(written.endsWith("}\r\n")).toBe(true);
+    });
+
+    test("まとめて保存（saveAll）の新しい保存先も、元の改行コードで書く", async () => {
+      // saveAll は退避を経ずに新しい名前の保存先を作る道を持つ
+      const original = fixedCharacter("char_001", "灯");
+      disk.set(
+        diskPath(path.join(characterDir, characterFileName(original))),
+        crlfBytesFor(original)
+      );
+
+      const store = new CharacterStore(work);
+      await store.loadAll();
+      const renamed = { ...original, name: "月島灯" };
+      await store.saveAll([renamed]);
+
+      const written = decode(
+        disk.get(diskPath(path.join(characterDir, characterFileName(renamed))))
+      );
+      expect(hasBareLf(written)).toBe(false);
+    });
+
+    test("新しく作る人物は、これまでどおり LF で末尾に改行を付ける", async () => {
+      const store = new CharacterStore(work);
+      await store.loadAll();
+      const created = fixedCharacter("char_002", "月");
+      await store.saveOrUpdate(created);
+
+      const written = decode(
+        disk.get(diskPath(path.join(characterDir, characterFileName(created))))
+      );
+      expect(written).not.toContain("\r");
+      expect(written.endsWith("}\n")).toBe(true);
+    });
+  });
 });
 
 describe("人物ファイル検証", () => {
