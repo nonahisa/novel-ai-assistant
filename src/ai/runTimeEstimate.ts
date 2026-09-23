@@ -1,6 +1,8 @@
 import {
   describeRunTimeEstimate,
+  describeRunTimeRange,
   estimateCallsTime,
+  inputReadMs,
   type CallTimeEstimate,
   type RunTimeEstimateBasis,
 } from "../core/etaEstimate";
@@ -65,6 +67,46 @@ export function estimateRunTimeText(params: {
     params.inputChars !== undefined && params.inputChars.length === params.count
       ? params.inputChars
       : undefined;
+
+  /*
+    **書く量の平均がまだ無く、読み込みだけが実測で分かるときは、最大を
+    1つの数字として出さない**（ノートPCの実機、0.76.1、2026-09-23）。
+
+    CPUだけの gemma4:e2b で誤字脱字5件が「およそ2時間（同梱の目安から）」と
+    出た。速さは測れていたが、誤字脱字の書く量はまだ測っておらず、同梱の
+    **最大**（8,753トークン）が時間の大半を占めていた。抽出の目安
+    （下の `estimateCallsTimeFor`）は時間に平均しか使わない——こちらも
+    そろえ、読み込みの時間を下限として言い、最大は長いほうの端に回す。
+
+    読み込みの速さが無い（クラウドなど）ときは下限が作れないので、
+    これまでどおり最大から「多めに見ています」と言う。
+  */
+  if (speeds.outputTokensAverage === undefined && inputs !== undefined) {
+    const readMs = inputReadMs(
+      inputs.reduce(
+        (total, value) => total + (Number.isFinite(value) && value > 0 ? value : 0),
+        0
+      ),
+      speeds.tokensPerChar,
+      speeds.inputTokensPerSecond
+    );
+    if (readMs !== undefined) {
+      // 長いほうの端は、読み込み＋最大ぶん書いた時間（式は1か所のまま）
+      const upper = estimateCallsTime({
+        inputChars: inputs,
+        tokensPerChar: speeds.tokensPerChar,
+        inputTokensPerSecond: speeds.inputTokensPerSecond,
+        outputTokensPerSecond: speeds.outputTokensPerSecond,
+        outputTokensPerCall: speeds.outputTokensPerCall,
+      });
+      return describeRunTimeRange({
+        count: params.count,
+        readMs,
+        upperMs: upper?.ms,
+        upperBasis: speeds.basis === "average" ? undefined : speeds.basis,
+      });
+    }
+  }
 
   const estimate = estimateCallsTime({
     // 字数が無いときは件数ぶんの0字を置き、読み込みの速さを渡さない
