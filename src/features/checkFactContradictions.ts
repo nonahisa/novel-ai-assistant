@@ -257,13 +257,29 @@ export async function checkFactContradictions(
   await cache.load();
   // **既知の topic は鍵に入れない**（`factExtractCacheKey` のコメント）
   const extractKeyBase = factExtractCacheKey({ providerId: provider.id, model });
-  // 判定は別のプロンプトなので、版も別に持つ
-  const verifyKeyBase = {
+  /*
+    判定の覚えの鍵。**判定のAI（`contradiction` の割当）の id とモデル名で組む**
+    （2026-09-23）。
+
+    以前は取り出しのAIの id とモデル名を入れていたので、判定のAIを替えても
+    前のAIの判定がそのまま使われていた（実装ルール4：鍵は内容＋AI＋モデル＋版）。
+    判定のAIは候補が出てから引くので、鍵もそのときに組む。判定は別の
+    プロンプトなので、版も別に持つ
+  */
+  const verifyKeyFor = (verifier: { provider: AIProvider; model: string }) => ({
     feature: "fact_contradiction_verify",
     promptVersion: CONTRADICTION_VERIFY_VERSION,
-    providerId: provider.id,
-    model,
-  };
+    providerId: verifier.provider.id,
+    model: verifier.model,
+  });
+  /**
+   * この回に接続を確かめたAIとモデル。判定のAIが同じなら、確かめ直さない。
+   *
+   * **モデルまで揃ったときだけ同じとみなす。** LM Studioは接続の確認の
+   * 流れで起こしたとき、渡したモデルを読み込む（`aiConnectivity.ts`）ので、
+   * モデルが違えば判定のモデルは読み込まれていない
+   */
+  let reached: { providerId: string; model: string } | undefined;
 
   const pending = chunks.filter((chunk) => !cache.get(chunk.hash, extractKeyBase));
   /**
@@ -287,6 +303,7 @@ export async function checkFactContradictions(
     ) {
       return undefined;
     }
+    reached = { providerId: provider.id, model };
     const detail = [
       `${chunks.length}チャンク中 ${pending.length}件から事実を取り出します` +
         `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
@@ -626,22 +643,34 @@ export async function checkFactContradictions(
 
         **候補は取り出しのあとでしか分からない**ので、確認はここで出す
         （札を持ったまま訊くことになるが、送らずに済ませる道はこれしかない）。
+
+        **接続の確認は、確認のダイアログとは別に判定のAIへ通す**（2026-09-23）。
+        取り出しから始まる回やまとめ実行の回は、確認のダイアログを済ませて
+        いても、接続を確かめたのは取り出しのAIだけである。判定のAIが別なら、
+        確かめないまま送ることになる。覚えた判定だけで済むなら送らないので
+        確かめない
       */
-      if (!confirmedToSend) {
-        const unverified = candidates.filter(
-          (candidate) => cache.get(candidate.fingerprint, verifyKeyBase) === undefined
-        ).length;
-        if (unverified > 0) {
-          if (
-            !(await confirmProviderReachable(
-              verifier.provider,
-              "矛盾検知（事実の照合）",
-              verifier.model
-            ))
-          ) {
-            cancelled = true;
-            return;
-          }
+      const verifyKeyBase = verifyKeyFor(verifier);
+      const unverified = candidates.filter(
+        (candidate) => cache.get(candidate.fingerprint, verifyKeyBase) === undefined
+      ).length;
+      if (unverified > 0) {
+        const alreadyReached =
+          reached !== undefined &&
+          reached.providerId === verifier.provider.id &&
+          reached.model === verifier.model;
+        if (
+          !alreadyReached &&
+          !(await confirmProviderReachable(
+            verifier.provider,
+            "矛盾検知（事実の照合）",
+            verifier.model
+          ))
+        ) {
+          cancelled = true;
+          return;
+        }
+        if (!confirmedToSend) {
           const detail = [
             `本文から事実を取り出す段は処理済みです（${chunks.length}チャンク）。`,
             `見つかった候補 ${unverified}件を、矛盾検知に割り当てたAI` +
@@ -705,6 +734,7 @@ export async function checkFactContradictions(
               knownAt:
                 sides.left.chapter !== null ? `第${sides.left.chapter}話` : "",
               fingerprint: candidate.fingerprint,
+              cacheKey: verifyKeyBase,
               controller,
             });
 
@@ -843,11 +873,13 @@ export async function checkFactContradictions(
     issue: ReturnType<typeof buildFactVerifyIssue>;
     knownAt: string;
     fingerprint: string;
+    /** 判定の覚えの鍵（`verifyKeyFor`。判定のAIのもの） */
+    cacheKey: ReturnType<typeof verifyKeyFor>;
     controller: AbortController;
   }): Promise<VerifyOutcome> {
     // 指紋は（型・主語・項目・両側の値）から作るので、同じ食い違いなら
     // 同じ値になる。判定をやり直さずに済む
-    const cached = cache.get(input.fingerprint, verifyKeyBase);
+    const cached = cache.get(input.fingerprint, input.cacheKey);
     if (cached !== undefined) {
       return parseVerifyOutcome(
         typeof cached === "string" ? cached : JSON.stringify(cached)
@@ -890,7 +922,7 @@ export async function checkFactContradictions(
       if (response.truncated || !response.text.trim()) {
         return undecidedOutcome("応答が切り詰められました");
       }
-      await cache.set(input.fingerprint, verifyKeyBase, response.text);
+      await cache.set(input.fingerprint, input.cacheKey, response.text);
       return parseVerifyOutcome(response.text);
     } catch (error) {
       if (error instanceof AIError && error.kind === "aborted") {
