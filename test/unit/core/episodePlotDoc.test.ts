@@ -69,6 +69,13 @@ describe("単話プロットの読み取り", () => {
     expect(isEpisodePlotWritten(doc)).toBe(false);
   });
 
+  test("視点の問いかけは、三人称でも答えられる形（作者の指摘、2026-09-23）", () => {
+    // 「誰の視点か」だけだと、三人称の作品では当たらない
+    const template = buildEpisodePlotTemplate(3);
+    expect(template).toContain("一人称なら語り手");
+    expect(template).toContain("三人称なら");
+  });
+
   test("展開だけ書かれていれば、検査はできる", () => {
     const doc = parseEpisodePlot(
       ["## 展開（箇条書き）", "- 兄の部屋を片付ける", "- 旅に出る"].join("\n")

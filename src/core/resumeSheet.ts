@@ -496,7 +496,7 @@ export function buildEpisodePlotTemplate(chapter: number, title = ""): string {
       : `# 第${chapter}話の単話プロット`,
     "",
     "## 視点",
-    "（この話は誰の視点で語りますか）",
+    "（一人称なら語り手は誰ですか。三人称なら、誰に寄り添って語りますか）",
     "",
     "## この話の目標",
     "（この話で何が変わりますか。読者に何を渡しますか）",
