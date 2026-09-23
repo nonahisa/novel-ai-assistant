@@ -242,7 +242,7 @@ export async function checkProofread(
       const confirmed = await confirmRun(
         `${work.title} の推敲を行います。`,
         "実行",
-        { detail, remember: { id: "ai.run.checkProofread" } }
+        { detail, remember: { id: "ai.run.checkProofread" }, work }
       );
       if (!confirmed) return undefined;
     }

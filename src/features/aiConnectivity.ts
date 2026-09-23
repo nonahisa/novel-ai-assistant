@@ -7,7 +7,7 @@ import { lmstudioEndpoint } from "../ai/lmstudioProvider";
 import { prepareLmStudioModel } from "../ai/registry";
 import { canRunProcesses } from "../core/runtime";
 import { withProgress } from "../views/progress";
-import { confirmRun, notifyDone } from "../views/notify";
+import { confirmRun, notifyDone, type ConfirmWork } from "../views/notify";
 
 /**
  * AIへの疎通確認と、手元で動くAI（Ollama・LM Studio）の起動導線。
@@ -260,8 +260,12 @@ export async function confirmPaidUsage(
      * （`core/confirmMemory.ts`。渡さなければ訊き方は今までどおり）
      */
     remember?: { id: string };
-    /** どの作品に対する実行か。確認の文の1行目に出す（`confirmRun` の `workTitle`） */
-    workTitle?: string;
+    /**
+     * どの作品に対する実行か。**作品そのもの**を渡す（`confirmRun` の `work`）。
+     * 確認の文の1行目に題名が出て、推し量った作品なら「以降は訊かない」を
+     * 覚えていても訊く
+     */
+    work?: ConfirmWork;
   }
 ): Promise<boolean> {
   if (!provider.isPaid) return true;
@@ -287,6 +291,6 @@ export async function confirmPaidUsage(
   return confirmRun(`${options.actionLabel}を実行しますか`, "実行", {
     detail: lines.join("\n"),
     remember: options.remember,
-    workTitle: options.workTitle,
+    work: options.work,
   });
 }

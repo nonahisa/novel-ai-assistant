@@ -454,7 +454,7 @@ export async function checkTypos(
       const confirmed = await confirmRun(notice, "実行", {
         remember: { id: "ai.run.checkTypos" },
         // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
-        workTitle: work.title,
+        work,
       });
       if (!confirmed) return undefined;
     }

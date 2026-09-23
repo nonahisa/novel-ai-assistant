@@ -316,7 +316,7 @@ export async function checkFactContradictions(
       const confirmed = await confirmRun(
         `${work.title} の事実を取り出して照合します。`,
         "実行",
-        { detail, remember: { id: "ai.run.checkFactContradictions" } }
+        { detail, remember: { id: "ai.run.checkFactContradictions" }, work }
       );
       if (!confirmed) return undefined;
     }

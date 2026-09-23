@@ -262,7 +262,7 @@ export async function checkForeshadows(
       const confirmed = await confirmRun(
         `${work.title} の伏線を検知します。`,
         "実行",
-        { detail, remember: { id: "ai.run.checkForeshadows" } }
+        { detail, remember: { id: "ai.run.checkForeshadows" }, work }
       );
       if (!confirmed) return undefined;
     }
@@ -716,6 +716,7 @@ export async function checkForeshadowResolution(
           .filter(Boolean)
           .join("\n"),
         remember: { id: "ai.run.checkForeshadowResolutions" },
+        work,
       }
     );
     if (!confirmed) return undefined;

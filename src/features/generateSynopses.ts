@@ -220,7 +220,7 @@ export async function generateSynopses(
       costNotice,
     "実行",
     // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
-    { remember: { id: "ai.run.generateSynopses" }, workTitle: work.title }
+    { remember: { id: "ai.run.generateSynopses" }, work }
   );
   if (!confirmed) return false;
 

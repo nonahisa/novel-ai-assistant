@@ -2,6 +2,11 @@ import * as vscode from "vscode";
 import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
 import { isRememberable, rememberedAnswer, withRemembered } from "../core/confirmMemory";
 import {
+  describeInferredWorkSource,
+  inferredWorkSource,
+  type InferredWorkSource,
+} from "../core/workTarget";
+import {
   readConfirmMemory,
   saveConfirmMemory,
 } from "../core/confirmMemoryStore";
@@ -104,27 +109,59 @@ export interface ConfirmOptions {
    */
   remember?: { id: string };
   /**
-   * どの作品に対する実行か。**渡すと、確認の文の1行目に作品名を出す。**
+   * どの作品に対する実行か。**作品そのもの**を渡す（題名だけでなく）。
    *
-   * きっかけはノートPCの実機（2026-09-23）。詳細メニューの抽出は、作品一覧で
-   * 選ばれている作品へ訊かずに進む。一覧の行を誤ってクリックしていたため、
-   * 「場所を抽出」が**作者の本物の作品**で確認画面（15チャンク・1時間30分）
-   * まで進み、件数が違うことでやっと気づいた。**確認画面に作品名があれば、
-   * 押す前に分かる。**
+   * 渡すと2つのことが起きる。
    *
-   * 文の頭に置くのは、モーダルでいちばん目に入る場所だからである
-   * （件数や目安より先に「どの作品か」を読ませたい）。
+   * 1. **確認の文の1行目に作品名を出す**（文にまだ題名が無いとき）。
+   *    きっかけはノートPCの実機（2026-09-23）。詳細メニューの抽出は、作品一覧で
+   *    選ばれている作品へ訊かずに進む。一覧の行を誤ってクリックしていたため、
+   *    「場所を抽出」が**作者の本物の作品**で確認画面（15チャンク・1時間30分）
+   *    まで進み、件数が違うことでやっと気づいた。**確認画面に作品名があれば、
+   *    押す前に分かる。** 文の頭に置くのは、モーダルでいちばん目に入る場所
+   *    だからである（件数や目安より先に「どの作品か」を読ませたい）
+   * 2. **作品を推し量って決めていたら、「以降は訊かない」を覚えていても訊く**
+   *    （作者の裁定、2026-09-23。`core/workTarget.ts` の `markInferredWork`）。
+   *    題名の文字列では、どう決めたかが運べないので、作品の入れ物ごと受け取る
    */
-  workTitle?: string;
+  work?: ConfirmWork;
+}
+
+/** 確認へ渡す作品。題名さえあればよい（`WorkEntry` はそのまま渡せる） */
+export interface ConfirmWork {
+  readonly title: string;
 }
 
 /**
  * 確認の文に作品名を添える。**文言の組み立てはここだけ**に置く——
  * 呼び出し側がそれぞれ書くと、言い方が機能ごとにずれる。
+ *
+ * **文にもう題名が入っていれば、重ねない**（`〇〇 の推敲を行います。`）。
+ * 同じ題名が2行続くと、かえって読み飛ばされる。
+ *
+ * `inferredNote` は「推し量ったので確かめている」一言。渡したときは、
+ * 文に題名があっても作品の行を必ず頭に置く——**いちばん作品名を
+ * 読ませたいのが、この場面だから**である。
  */
-export function withWorkTitle(message: string, workTitle?: string): string {
+export function withWorkTitle(
+  message: string,
+  workTitle?: string,
+  inferredNote?: string
+): string {
   if (!workTitle) return message;
+  if (inferredNote) return `作品：${workTitle}\n${inferredNote}\n${message}`;
+  if (message.includes(workTitle)) return message;
   return `作品：${workTitle}\n${message}`;
+}
+
+/**
+ * 推し量った作品で、覚えた答えを使わずに訊くときの一言。
+ *
+ * 「以降は訊かない」にしたのに訊かれると、作者は仕組みが壊れたと受け取る。
+ * **なぜ今回は訊いたのか**を、どこから決めたかと一緒に言う。
+ */
+export function inferredWorkNote(source: InferredWorkSource): string {
+  return `（${describeInferredWorkSource(source)}を対象にしました。作品を推し量ったので、確かめています）`;
 }
 
 /** 「以降は訊かない」を選ぶボタンの言い方。**実行の言葉に足す形にする** */
@@ -150,25 +187,51 @@ export async function confirmRun(
   options: ConfirmOptions = {}
 ): Promise<boolean> {
   const rememberId = options.remember?.id;
+  const workTitle = options.work?.title;
+  const inferred = inferredWorkSource(options.work);
+  /** 覚えていたが、作品を推し量ったので訊き直す回 */
+  let overridingMemory = false;
 
   // 覚えた答えが**いまのボタンの文言と同じ**ときだけ素通りさせる。
   // 文言を変えた確認は、古い答えで勝手に走らせない
   if (rememberId && isRememberable(rememberId)) {
     if (rememberedAnswer(readConfirmMemory(), rememberId) === runLabel) {
-      // 画面を出さないぶん、**どの作品で走らせたかは記録に残す**
+      /*
+        **作品を推し量ったときは、覚えていても訊く**（作者の裁定、2026-09-23）。
+        作品一覧の行を誤って選んでいただけで、1時間30分の抽出が別の作品で
+        黙って走りうる。名指し（右クリック・作品を選ぶ画面）なら取り違えは
+        無いので、これまでどおり素通りさせる。
+
+        **判断はここ1か所に置く。** 機能の側は作品を渡すだけで、
+        どう決めたかを知らなくてよい
+      */
+      if (!inferred) {
+        // 画面を出さないぶん、**どの作品で走らせたかは記録に残す**
+        logStep(
+          `確認を省略（以降は訊かない）: ${rememberId} / ${runLabel}` +
+            (workTitle ? ` / ${workTitle}` : "")
+        );
+        return true;
+      }
+      overridingMemory = true;
       logStep(
-        `確認を省略（以降は訊かない）: ${rememberId} / ${runLabel}` +
-          (options.workTitle ? ` / ${options.workTitle}` : "")
+        `作品を推し量ったので確認を出す（以降は訊かないを覚えていても）: ` +
+          `${rememberId} / ${workTitle ?? "（題名なし）"} / ${inferred}`
       );
-      return true;
     }
   }
 
+  // 覚えてある回に「以降は訊かない」を並べても、押して何も変わらない。
+  // 並べるのは、まだ覚えていないときだけにする
   const buttons =
-    rememberId && isRememberable(rememberId)
+    rememberId && isRememberable(rememberId) && !overridingMemory
       ? [runLabel, rememberLabel(runLabel)]
       : [runLabel];
-  const shownMessage = withWorkTitle(message, options.workTitle);
+  const shownMessage = withWorkTitle(
+    message,
+    workTitle,
+    overridingMemory && inferred ? inferredWorkNote(inferred) : undefined
+  );
 
   // 顔つきが違うだけで、訊き方（モーダル）は同じにする。
   // 揃えておかないと、警告のときだけ操作の手順が変わって見える。

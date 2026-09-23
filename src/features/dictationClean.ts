@@ -136,7 +136,7 @@ export async function runDictationClean(
     "実行",
     // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）。作品に
     // 属さない文書で呼ばれたときは出さない（名前が無い）
-    { remember: { id: "ai.run.dictationClean" }, workTitle: work?.title }
+    { remember: { id: "ai.run.dictationClean" }, work }
   );
   if (!confirmed) return;
 

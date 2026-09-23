@@ -120,7 +120,7 @@ export async function generateAnnouncement(
     `更新告知文を作ります（AIの呼び出しは1回）。\nモデル: ${resolved.model}${costNotice}`,
     "実行",
     // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
-    { remember: { id: "ai.run.generateAnnouncement" }, workTitle: work.title }
+    { remember: { id: "ai.run.generateAnnouncement" }, work }
   );
   if (!confirmed) return;
 
