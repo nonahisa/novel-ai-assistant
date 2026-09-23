@@ -331,6 +331,7 @@ code --install-extension ".\novel-ai-assistant-$($v.TrimStart('v')).vsix" --forc
 | `novelai.stats.monthlyGoal` | `0`（目標なし） | 1か月の目標字数 |
 | `novelai.stats.dayBoundaryHour` | `4` | 1日の区切りとする時刻 |
 | `novelai.stats.weekStart` | `monday` | 週次グラフで週の始まりとする曜日 |
+| `novelai.readerStats.importOnFocus` | `true` | VS Code に戻ったとき、統合小説執筆環境ヘルパーがコピーした読者の反応を取り込むか訊く |
 | `novelai.epub.ornamentFolder` | `""`（指していない） | EPUBの飾り（`*.svg`）を追加で読み込むフォルダーの絶対パス |
 | `novelai.mode` | `author` | この環境を作者（`author`）と編集者（`editor`）のどちらとして使うか |
 

@@ -33,7 +33,9 @@
     "writing",
     "Ollama"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onUri"
+  ],
   "main": "./dist/extension.js",
   "browser": "./dist/browser-extension.js",
   "capabilities": {
@@ -1719,6 +1721,11 @@
           ],
           "default": "monday",
           "description": "週次グラフで週の始まりとする曜日。"
+        },
+        "novelai.readerStats.importOnFocus": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "VS Code に戻ったとき、統合小説執筆環境ヘルパーがコピーした読者の反応がクリップボードにあれば、取り込むかを訊く。\n\n・同じデータでは1度しか訊かない（取り込み済みのものは訊かない）\n・読者の反応でないものは読み流す（記録にも残さない）\n・ブラウザ版では働かない"
         },
         "novelai.episodeFileExtension": {
           "type": "string",

@@ -316,7 +316,7 @@ async function walkSite(input: {
         ...(supportsPasteHelper(input.site)
           ? [
               {
-                label: "$(link-external) 貼り込み係へ渡す形でコピー",
+                label: "$(link-external) ヘルパーへ渡す形でコピー",
                 detail:
                   "題名と本文をまとめた形でコピーします。" +
                   "投稿画面でブラウザ拡張のボタンを押すと、欄が埋まります",
@@ -380,8 +380,8 @@ async function walkSite(input: {
         })
       );
       hint =
-        "貼り込み係へ渡す形でコピーしました。投稿画面を開いて、" +
-        "貼り込み係（ブラウザ拡張）のボタンを押してください。送信はご自身で";
+        "ヘルパーへ渡す形でコピーしました。投稿画面を開いて、" +
+        "統合小説執筆環境ヘルパー（ブラウザ拡張）のボタンを押してください。送信はご自身で";
       continue;
     }
     return picked.answer;

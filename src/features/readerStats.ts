@@ -23,8 +23,8 @@ import { PostingStore, PostingStoreError } from "../core/postingStore";
 import {
   matchReaderStatsEnvelope,
   parseReaderStatsEnvelope,
+  readerStatsRecordsFromEnvelope,
   readerStatsSourceLabel,
-  type ReaderStatsReadAtBasis,
 } from "../core/readerStatsEnvelope";
 // 管理画面のURLを組むのは core（画面を出さずに確かめられるようにする）
 import { readerStatsPageUrl } from "../core/postingSiteUrls";
@@ -66,6 +66,23 @@ export interface ReaderStatsResult {
 
 const UNCHANGED: ReaderStatsResult = { changed: false };
 
+/** 取り込みの呼び方の違い（設計書6.79.7。ヘルパーから呼ばれたとき） */
+export interface ImportReaderStatsOptions {
+  /**
+   * **確かめ済みのクリップボードの中身。** 渡されたらクリップボードを
+   * 読み直さない——ヘルパーからの呼び出し（`readerStatsHelperLink.ts`）は、
+   * 作品を選んでもらう前に中身を確かめている。選んでいる間に作者が別の
+   * ものをコピーしても、**訊いたときのデータ**を取り込む。
+   */
+  clipboardText?: string;
+  /**
+   * 知らせに作品名を添える。**作者が作品を選ばずに走ったとき**（ヘルパー
+   * から呼ばれて作品が1つに決まったとき）は、どの作品へ入ったかが画面の
+   * どこにも出ていない。
+   */
+  announceWork?: boolean;
+}
+
 /**
  * クリップボードの封筒から取り込む（設計書6.79.7）。
  *
@@ -74,13 +91,18 @@ const UNCHANGED: ReaderStatsResult = { changed: false };
  * 故障ではないので、そう言わないと伝わらない。
  */
 export async function importReaderStats(
-  work: WorkEntry
+  work: WorkEntry,
+  options: ImportReaderStatsOptions = {}
 ): Promise<ReaderStatsResult> {
   const store = new PostingStore(work);
   const ledger = await load(store, work);
   if (!ledger) return UNCHANGED;
+  const say = (message: string): string =>
+    options.announceWork ? `「${work.title}」：${message}` : message;
 
-  let parsed = parseReaderStatsEnvelope(await vscode.env.clipboard.readText());
+  let parsed = parseReaderStatsEnvelope(
+    options.clipboardText ?? (await vscode.env.clipboard.readText())
+  );
 
   /*
     **封筒が入っていないときだけ、管理画面への道を出す**（作者の要望、
@@ -124,22 +146,15 @@ export async function importReaderStats(
   // 別の作品の管理画面を開いたまま押すことは現実に起きる
   const mismatch = matchReaderStatsEnvelope(parsed.envelope, ledger);
   if (mismatch) {
-    void vscode.window.showWarningMessage(mismatch);
+    void vscode.window.showWarningMessage(say(mismatch));
     return UNCHANGED;
   }
 
   const info = postingSiteInfo(parsed.envelope.site);
   const sourceLabel = readerStatsSourceLabel(parsed.envelope.source);
-  /*
-    **どこで読んだかをメモに残す**（残課題 B11）。台帳の出どころ（`source`）は
-    「貼り付け」のままにする——一覧を増やすと、それを知らない古い版が台帳ごと
-    読めなくなる（`READER_STATS_SOURCES` の注記）。だが Narou.fun の数は
-    なろう本体の画面より遅れて集計されることがあり、あとから見た作者が
-    「なろうの管理画面の数」と取り違えないよう、履歴の表のメモ列で見えるようにする。
-  */
-  const note = sourceLabel
-    ? `${sourceLabel}から読み取り${readAtNote(sourceLabel, parsed.envelope.readAtBasis)}`
-    : undefined;
+  // 記録の組み方（メモの書き方を含む）は core が持つ。自動取り込みの
+  // 「もう取り込んだか」の見分けと同じ記録を見るため
+  const records = readerStatsRecordsFromEnvelope(parsed.envelope);
   let next = ledger;
   /*
     **同じ数の繰り返しは積まない**（残課題 B11 の続き、作者の裁定「同じ表を2度
@@ -149,16 +164,7 @@ export async function importReaderStats(
   */
   let repeated = 0;
   try {
-    for (const entry of parsed.envelope.entries) {
-      const record = {
-        site: parsed.envelope.site,
-        // **封筒の読み取り時刻を使う。** いま取り込んだ時刻ではない。
-        // Narou.fun の封筒は「最終取得日時」（readAtBasis が fetched のとき）
-        readAt: parsed.envelope.readAt,
-        ...entry,
-        source: "helper" as const,
-        ...(note ? { note } : {}),
-      };
+    for (const record of records) {
       if (repeatsReaderStats(next, record)) {
         repeated++;
         continue;
@@ -171,12 +177,14 @@ export async function importReaderStats(
     return UNCHANGED;
   }
 
-  const added = parsed.envelope.entries.length - repeated;
+  const added = records.length - repeated;
   if (added === 0) {
     // 何も書かない（保存もしない）。押したのに何も起きない、にならないよう理由を言う
     void vscode.window.showInformationMessage(
-      `${info.label} の読者の反応は、すでに取り込んだ数と同じでした（${repeated}件）。` +
-        "台帳は変えていません。"
+      say(
+        `${info.label} の読者の反応は、すでに取り込んだ数と同じでした（${repeated}件）。` +
+          "台帳は変えていません。"
+      )
     );
     return UNCHANGED;
   }
@@ -184,31 +192,16 @@ export async function importReaderStats(
   if (!(await save(store, work, next))) return UNCHANGED;
 
   void vscode.window.showInformationMessage(
-    `${info.label} の読者の反応を ${added}件 取り込みました` +
-      (sourceLabel ? `（${sourceLabel}から）` : "") +
-      (repeated > 0
-        ? `（${repeated}件は、取り込み済みの数と同じだったので積んでいません）`
-        : "") +
-      "。執筆量パネルの「サイトの記録」で履歴を見られます。"
+    say(
+      `${info.label} の読者の反応を ${added}件 取り込みました` +
+        (sourceLabel ? `（${sourceLabel}から）` : "") +
+        (repeated > 0
+          ? `（${repeated}件は、取り込み済みの数と同じだったので積んでいません）`
+          : "") +
+        "。執筆量パネルの「サイトの記録」で履歴を見られます。"
+    )
   );
   return { changed: true };
-}
-
-/**
- * メモに添える「記録の日時は何の日時か」（残課題 B11 の続き、作者の裁定 2026-09-23）。
- *
- * 出どころのある封筒（Narou.fun）の記録の日時は、ふつう**そのサイトが数を取って
- * きた日時**（最終取得日時）である。読めなかった封筒は押した時刻へ落ちている
- * ——履歴の表では同じ日時の列に並ぶので、**どちらなのかをメモで見分けられる**
- * ようにする（印が無い封筒は、貼り込み係 0.6.0 までの「押した時刻」）。
- */
-function readAtNote(
-  sourceLabel: string,
-  basis: ReaderStatsReadAtBasis | undefined
-): string {
-  return basis === "fetched"
-    ? `（日時は${sourceLabel}の最終取得日時）`
-    : `（日時は押した時刻。${sourceLabel}の最終取得日時は読めず）`;
 }
 
 /** 開ける管理画面。**どのサイトのものかを一緒に持つ**（文言に出すため） */
@@ -264,7 +257,7 @@ async function askAdminPage(
       {
         label: `$(link-external) ${openAdminLabel(page)}`,
         detail:
-          "貼り込み係の「読者の反応をコピー」を押してから、もう一度ここへ戻ってください",
+          "統合小説執筆環境ヘルパーの「読者の反応をコピー」を押してから、もう一度ここへ戻ってください",
         open: true,
       },
       {

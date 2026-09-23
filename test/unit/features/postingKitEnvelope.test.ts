@@ -202,7 +202,7 @@ describe("貼り込み係へ渡す形でコピー", () => {
     expect(result.changed).toBe(true);
 
     // カクヨムの画面には貼り込み係の項目がある
-    expect(byAnswer(picks[1].items, "envelope")?.label).toContain("貼り込み係");
+    expect(byAnswer(picks[1].items, "envelope")?.label).toContain("ヘルパー");
     /*
       **なろうとnoteには出さない**（6.79.1）。どちらも規約の判断が
       済んでおらず、貼り込み係の側も受け取らない——押せる形で置くと、
@@ -215,7 +215,7 @@ describe("貼り込み係へ渡す形でコピー", () => {
       言う（6.79.2の2）。ここを落とすと、貼り込み係が勝手に投稿すると
       読まれかねない
     */
-    expect(picks[2].placeHolder).toContain("貼り込み係");
+    expect(picks[2].placeHolder).toContain("統合小説執筆環境ヘルパー");
     expect(picks[2].placeHolder).toContain("送信はご自身で");
 
     // 記録は残る（貼り込み係へ渡しても、投稿したのは作者である）

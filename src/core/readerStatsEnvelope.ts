@@ -13,6 +13,7 @@ import {
   type PostingSiteId,
   type ReaderStatsMetrics,
   type ReaderStatsPeriod,
+  type ReaderStatsRecord,
   type ReaderStatsScope,
 } from "../models/posting";
 import { supportsPasteHelper } from "./postingEnvelope";
@@ -250,7 +251,7 @@ export function parseReaderStatsEnvelope(
   const trimmed = raw.trim();
   const notEnvelope =
     "クリップボードに、読者の反応の封筒が入っていませんでした。" +
-    "管理画面で貼り込み係の「読者の反応をコピー」を押してから、もう一度お試しください。";
+    "管理画面で統合小説執筆環境ヘルパーの「読者の反応をコピー」を押してから、もう一度お試しください。";
   if (!trimmed) return reject(notEnvelope, "notEnvelope");
 
   let parsed: unknown;
@@ -268,7 +269,7 @@ export function parseReaderStatsEnvelope(
   // **知らない版数は読まない。** 欄の意味が変わったものを読むと、数字が化ける
   if (value[MARKER] !== READER_STATS_ENVELOPE_VERSION) {
     return reject(
-      "読者の反応の封筒の形式が違います（貼り込み係と拡張機能の版が" +
+      "読者の反応の封筒の形式が違います（ヘルパーと拡張機能の版が" +
         "食い違っています）。どちらかを更新してからお試しください。"
     );
   }
@@ -289,7 +290,7 @@ export function parseReaderStatsEnvelope(
   const rawSource = absent(value.source) ? undefined : value.source;
   if (rawSource !== undefined && !isReaderStatsEnvelopeSource(rawSource)) {
     return reject(
-      "封筒に書かれた読み取り元が分かりませんでした（貼り込み係と拡張機能の版が" +
+      "封筒に書かれた読み取り元が分かりませんでした（ヘルパーと拡張機能の版が" +
         "食い違っているかもしれません）。どちらかを更新してからお試しください。"
     );
   }
@@ -324,7 +325,7 @@ export function parseReaderStatsEnvelope(
   const readAtBasis = absent(value.readAtBasis) ? undefined : value.readAtBasis;
   if (readAtBasis !== undefined && !isReaderStatsReadAtBasis(readAtBasis)) {
     return reject(
-      "封筒の読み取った日時の種類が分かりませんでした（貼り込み係と拡張機能の版が" +
+      "封筒の読み取った日時の種類が分かりませんでした（ヘルパーと拡張機能の版が" +
         "食い違っているかもしれません）。どちらかを更新してからお試しください。"
     );
   }
@@ -505,6 +506,56 @@ function parseMetrics(
   }
   // 中身の無い行は受け取らない（台帳の側と同じ基準）
   return hasReaderStatsMetrics(metrics) ? metrics : undefined;
+}
+
+/**
+ * 封筒から、台帳へ書く記録を組む（設計書6.79.7）。
+ *
+ * **組み方を1か所に置く。** 取り込み（`features/readerStats.ts`）と、
+ * 「もう取り込んだデータか」の見分け（`readerStatsHelperLink.ts`。VS Code に
+ * 戻ったときの自動取り込み）が同じ記録を見ないと、取り込み済みのものを
+ * 何度も訊くことになる——片方だけメモの書き方を変えると、そこで食い違う。
+ */
+export function readerStatsRecordsFromEnvelope(
+  envelope: ReaderStatsEnvelope
+): ReaderStatsRecord[] {
+  const sourceLabel = readerStatsSourceLabel(envelope.source);
+  /*
+    **どこで読んだかをメモに残す**（残課題 B11）。台帳の出どころ（`source`）は
+    「貼り付け」のままにする——一覧を増やすと、それを知らない古い版が台帳ごと
+    読めなくなる（`READER_STATS_SOURCES` の注記）。だが Narou.fun の数は
+    なろう本体の画面より遅れて集計されることがあり、あとから見た作者が
+    「なろうの管理画面の数」と取り違えないよう、履歴の表のメモ列で見えるようにする。
+  */
+  const note = sourceLabel
+    ? `${sourceLabel}から読み取り${readAtNote(sourceLabel, envelope.readAtBasis)}`
+    : undefined;
+  return envelope.entries.map((entry) => ({
+    site: envelope.site,
+    // **封筒の読み取り時刻を使う。** いま取り込んだ時刻ではない。
+    // Narou.fun の封筒は「最終取得日時」（readAtBasis が fetched のとき）
+    readAt: envelope.readAt,
+    ...entry,
+    source: "helper" as const,
+    ...(note ? { note } : {}),
+  }));
+}
+
+/**
+ * メモに添える「記録の日時は何の日時か」（残課題 B11 の続き、作者の裁定 2026-09-23）。
+ *
+ * 出どころのある封筒（Narou.fun）の記録の日時は、ふつう**そのサイトが数を取って
+ * きた日時**（最終取得日時）である。読めなかった封筒は押した時刻へ落ちている
+ * ——履歴の表では同じ日時の列に並ぶので、**どちらなのかをメモで見分けられる**
+ * ようにする（印が無い封筒は、ヘルパー 0.6.0 までの「押した時刻」）。
+ */
+function readAtNote(
+  sourceLabel: string,
+  basis: ReaderStatsReadAtBasis | undefined
+): string {
+  return basis === "fetched"
+    ? `（日時は${sourceLabel}の最終取得日時）`
+    : `（日時は押した時刻。${sourceLabel}の最終取得日時は読めず）`;
 }
 
 /**

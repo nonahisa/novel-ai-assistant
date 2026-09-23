@@ -435,6 +435,10 @@ import {
   recordReaderStats,
 } from "./features/readerStats";
 import {
+  ReaderStatsHelperLink,
+  registerReaderStatsHelperLink,
+} from "./features/readerStatsHelperLink";
+import {
   proposeChapters,
   suggestChapterName,
 } from "./features/proposeChapters";
@@ -5945,6 +5949,22 @@ export async function activate(
       const result = await recordReaderStats(work);
       if (result.changed) await refreshWritingStatsPanel(work, deviceId);
     })
+  );
+
+  /*
+    ヘルパーからの受け口（設計書6.79.7「ヘルパーからの受け口」）。ヘルパーが読者の反応を
+    クリップボードへ置いて `vscode://…/import-reader-stats` を開く呼び出しと、
+    VS Code に戻ったときの「取り込みますか」。**取り込み自体は上の
+    「貼り付けて取り込む」と同じ処理**（`importReaderStats`）を通る。
+  */
+  context.subscriptions.push(
+    ...registerReaderStatsHelperLink(
+      new ReaderStatsHelperLink({
+        listWorks: () => registry.list(),
+        memory: context.globalState,
+        afterImport: (work) => refreshWritingStatsPanel(work, deviceId),
+      })
+    )
   );
 
   /*
