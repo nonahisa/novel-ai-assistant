@@ -4,8 +4,8 @@ import {
   type NotationMode,
 } from "./manuscriptRender";
 import { stripMemoLines } from "./sceneMemo";
-import { SCRIPT_LINE_CSS, scriptLineClass } from "./scriptLines";
-import type { WorkFormatKey } from "./workFormat";
+import { kindLineClass, kindLineCss } from "./kindLines";
+import type { WorkKindKey } from "./workKind";
 
 /**
  * 印刷用に組版したHTMLを作る（PDF出力のもと）。
@@ -123,13 +123,13 @@ export interface PrintHtmlInput {
   episodes: readonly PrintEpisode[];
   preset: PrintPreset;
   /**
-   * 作品のタイプ（設計書6.70）。**脚本だけ組み方が変わる。**
+   * 作品の種類（設計書6.109。台本は 6.70 から）。**小説以外で組み方が変わる**
+   * （台本の柱・ト書き・台詞、漫画の原作のページ・コマ、エッセイの見出し、
+   * 歌詞の節の札）。
    *
-   * 省略できるようにしてあるのは、タイプを決めていない作品
-   * （プロットに `## 形式` が無い）があるためで、そのときは
-   * これまでどおりの組み方になる。
+   * 省略・小説なら、これまでどおりの組み方になる（1バイトも変わらない）。
    */
-  format?: WorkFormatKey;
+  kind?: WorkKindKey;
 }
 
 /**
@@ -150,14 +150,14 @@ export function buildPrintHtml(input: PrintHtmlInput): string {
     '<meta charset="utf-8">',
     `<title>${title}</title>`,
     "<style>",
-    buildStyle(preset, input.format),
+    buildStyle(preset, input.kind),
     "</style>",
     "</head>",
     "<body>",
     '<div class="sheet">',
     // 1ページ目は題だけの扉。ここで改ページして本文へ移る
     `<section class="cover"><h1 class="cover-title">${title}</h1></section>`,
-    ...input.episodes.map((episode) => renderEpisode(episode, input.format)),
+    ...input.episodes.map((episode) => renderEpisode(episode, input.kind)),
     "</div>",
     "</body>",
     "</html>",
@@ -168,13 +168,13 @@ export function buildPrintHtml(input: PrintHtmlInput): string {
 /** 1話ぶん。**話ごとに改ページする**（本の体裁に合わせる） */
 function renderEpisode(
   episode: PrintEpisode,
-  format: WorkFormatKey | undefined
+  kind: WorkKindKey | undefined
 ): string {
   const heading = escapeHtml(episode.heading.trim());
   return [
     '<section class="episode">',
     ...(heading ? [`<h2 class="episode-heading">${heading}</h2>`] : []),
-    ...renderBody(episode.body, episode.notation, format),
+    ...renderBody(episode.body, episode.notation, kind),
     "</section>",
   ].join("\n");
 }
@@ -189,14 +189,14 @@ function renderEpisode(
  * あいだを空けないので（字下げで見分ける）、空行を捨ててしまうと
  * 場面の切り替わりが消える。空行のあとの段落にだけ空きを付ける。
  *
- * **脚本のときだけ、行の種別を印として付ける**（設計書6.70）。
- * 判定も組み方も `core/scriptLines.ts` が持っており、原稿エディタと
+ * **小説以外の種類では、行の種別を印として付ける**（設計書6.70・6.109）。
+ * 判定も組み方も `core/kindLines.ts` が持っており、原稿エディタと
  * 同じものが当たる——画面で見た形のまま紙になる。
  */
 function renderBody(
   body: string,
   notation: NotationMode,
-  format?: WorkFormatKey
+  kind?: WorkKindKey
 ): string[] {
   const paragraphs: string[] = [];
   let afterBlank = false;
@@ -212,10 +212,8 @@ function renderBody(
     const names: string[] = [];
     // 先頭の空きは、扉との境目で既に付いている
     if (afterBlank && paragraphs.length > 0) names.push("gap");
-    if (format === "script") {
-      const kind = scriptLineClass(line);
-      if (kind) names.push(kind);
-    }
+    const lineClass = kindLineClass(kind, line);
+    if (lineClass) names.push(lineClass);
     const attr = names.length > 0 ? ` class="${names.join(" ")}"` : "";
     paragraphs.push(`<p${attr}>${renderInline(line, notation)}</p>`);
     afterBlank = false;
@@ -254,17 +252,18 @@ function renderInline(line: string, notation: NotationMode): string {
  */
 function buildStyle(
   preset: PrintPresetInfo,
-  format: WorkFormatKey | undefined
+  kind: WorkKindKey | undefined
 ): string {
   const vertical = preset.vertical
     ? ["html, body { writing-mode: vertical-rl; }"]
     : [];
   /*
-    脚本の組み方（設計書6.70）。**値は原稿エディタと同じものを埋め込む**
-    ——`core/scriptLines.ts` の1か所にあり、こちらへ写しは置かない。
-    脚本でない作品の紙は、これまでと1バイトも変わらない
+    種類ごとの組み方（設計書6.70・6.109）。**値は原稿エディタと同じものを
+    埋め込む**——`core/kindLines.ts` の1か所にあり、こちらへ写しは置かない。
+    小説の紙は、これまでと1バイトも変わらない
   */
-  const script = format === "script" ? [SCRIPT_LINE_CSS] : [];
+  const kindCss = kindLineCss(kind);
+  const script = kindCss ? [kindCss] : [];
 
   return [
     `@page { size: ${preset.size}; margin: 15mm; }`,

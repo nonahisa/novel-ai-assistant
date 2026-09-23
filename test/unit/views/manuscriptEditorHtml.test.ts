@@ -2,11 +2,8 @@ import { describe, expect, it } from "vitest";
 import { buildManuscriptEditorHtml } from "../../../src/views/manuscriptEditorHtml";
 import { MEMO_MARKER_COLOR } from "../../../src/core/sceneMemo";
 import { findAction } from "../../../src/views/actionList";
-import {
-  SCRIPT_LINE_CLASSES,
-  SCRIPT_LINE_CSS,
-  SCRIPT_LINE_RULES,
-} from "../../../src/core/scriptLines";
+import { SCRIPT_LINE_CSS } from "../../../src/core/scriptLines";
+import { kindLineCss, kindLineRules } from "../../../src/core/kindLines";
 
 /**
  * 原稿エディタの画面（設計書6.25）。
@@ -1120,17 +1117,29 @@ describe("脚本の組み方", () => {
     expect(html).not.toContain(SCRIPT_LINE_CSS);
   });
 
-  /** 判定の規則も写しではなく、そのまま埋め込まれている */
+  /**
+   * 判定の規則も写しではなく、そのまま埋め込まれている（0.81.0〜は
+   * `core/kindLines.ts` が台本の規則を class 付きの形で渡す。中身は
+   * `core/scriptLines.ts` の1か所のまま）
+   */
   it("行の見分け方も、写しではなく埋め込まれている", () => {
-    expect(script).toContain(JSON.stringify(SCRIPT_LINE_RULES));
-    expect(script).toContain(JSON.stringify(SCRIPT_LINE_CLASSES));
+    expect(script).toContain(JSON.stringify(kindLineRules("script")));
   });
 
-  /** タイプを渡さない画面（これまでの呼び方）は、脚本以外と同じ */
-  it("脚本以外では、これまでと同じ画面", () => {
-    expect(buildManuscriptEditorHtml("NONCE123", "vscode-resource:", "memo")).toBe(
+  /** 種類を渡さない画面（これまでの呼び方）は、小説と同じ */
+  it("小説では、これまでと同じ画面", () => {
+    expect(buildManuscriptEditorHtml("NONCE123", "vscode-resource:", "novel")).toBe(
       html
     );
+  });
+
+  /** 台本以外の種類にも、同じ仕組みで組み方が入る（設計書6.109） */
+  it("漫画の原作・歌詞でも、その種類の組み方と規則が入る", () => {
+    for (const kind of ["manga", "essay", "lyrics"] as const) {
+      const out = buildManuscriptEditorHtml("NONCE123", "vscode-resource:", kind);
+      expect(out, kind).toContain(kindLineCss(kind));
+      expect(out, kind).toContain(JSON.stringify(kindLineRules(kind)));
+    }
   });
 });
 

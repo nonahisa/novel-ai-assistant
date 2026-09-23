@@ -12,10 +12,12 @@ import {
 } from "../core/genre";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import {
+  selectableWorkFormats,
   suggestWorkFormat,
-  WORK_FORMATS,
   type WorkFormatDef,
 } from "../core/workFormat";
+import { matchWorkFormat } from "../core/workFormatStore";
+import { readConfiguredWorkKind, writeWorkKind } from "../core/workKindStore";
 
 /**
  * プロットの「形式」と「ジャンル」を決める（設計書6.4.4）。
@@ -37,6 +39,8 @@ export async function setPlotBasics(work: WorkEntry): Promise<void> {
   const genres = await pickGenres();
   if (!genres) return;
 
+  await keepScriptKind(work, current.sections);
+
   const updates: Partial<PlotSections> = { format: format.label };
   // ジャンルを決めないまま進むこともできる。**空で上書きしない。**
   // 決めなかったことを、既に書いてあるジャンルを消す指示と取らない
@@ -51,6 +55,31 @@ export async function setPlotBasics(work: WorkEntry): Promise<void> {
       ? `形式を「${format.label}」、ジャンルを${genres.length}件、プロットへ書きました。`
       : `形式を「${format.label}」としてプロットへ書きました。`
   );
+}
+
+/**
+ * 形式が「脚本」だった作品の種類を、形式を書き換える前に書き留める（設計書6.109）。
+ *
+ * 種類の軸ができる前は、脚本を形式の1つとして持っていた。そういう作品は
+ * 種類が書かれていなくても台本として読んでいる（`resolveWorkKind`）が、
+ * **形式を「長編」などへ書き換えた瞬間に、その読み替えの根拠が消える**
+ * ——長さを決めただけのつもりが、縦書きも台本の組み方も黙って外れる。
+ * それを防ぐため、書き換える前に「台本」を作品の設定へ移しておく。
+ *
+ * 種類が既に書かれていれば何もしない（作者が決めたものを上書きしない）。
+ * 書けなくても形式の決め直しは止めない（種類は「作品の種類」で直せる）。
+ */
+async function keepScriptKind(
+  work: WorkEntry,
+  sections: PlotSections
+): Promise<void> {
+  if (matchWorkFormat(sections.format) !== "script") return;
+  if (await readConfiguredWorkKind(work)) return;
+  try {
+    await writeWorkKind(work, "script");
+  } catch {
+    // 設定ファイルが無い・壊れている。形式の決め直しは続ける
+  }
 }
 
 /**
@@ -70,7 +99,8 @@ async function pickFormat(
   const written = sections.format.trim();
 
   const picked = await vscode.window.showQuickPick(
-    WORK_FORMATS.map((format) => ({
+    // 「脚本」は種類（台本）で選ぶので、ここには並べない（設計書6.109）
+    selectableWorkFormats().map((format) => ({
       label: format.label,
       description:
         written === format.label

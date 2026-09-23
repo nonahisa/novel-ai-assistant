@@ -269,7 +269,7 @@ describe("脚本の組版", () => {
       workTitle: "夜の駅",
       episodes: [{ heading: "第1話", body, notation: "curly" }],
       preset: "bunko-vertical",
-      format: "script",
+      kind: "script",
     });
   }
 
@@ -311,7 +311,7 @@ describe("脚本の組版", () => {
       workTitle: "夜の駅",
       episodes: [{ heading: "第1話", body: SCRIPT_BODY, notation: "curly" }],
       preset: "bunko-vertical",
-      format: "long",
+      kind: "novel",
     });
 
     expect(asLong).toBe(plain);

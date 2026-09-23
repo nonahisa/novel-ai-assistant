@@ -12,6 +12,8 @@ import { workTypeContextValue } from "../core/workTypeVisibility";
 import { abbreviateTitle } from "../core/abbreviateTitle";
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
+import { resolveWorkKind, type WorkKindKey } from "../core/workKind";
+import { measureKindCounts } from "../core/kindMeasure";
 import {
   scanWork,
   summarizeScanTimings,
@@ -83,7 +85,9 @@ export class WorkNode {
      * **描画（`getTreeItem`）は同期なので、ここで持たせておく**
      * （話・章のノードと同じ理由）。
      */
-    public readonly format?: WorkFormatKey
+    public readonly format?: WorkFormatKey,
+    /** 作品の種類（設計書6.109）。吹き出しの目安（台本の分数など）に使う */
+    public readonly kind?: WorkKindKey
   ) {}
 }
 
@@ -103,7 +107,9 @@ export class ChapterNode {
     /** 開始の話が作品の中に見つからない（改題・削除が典型） */
     public readonly missingStart: boolean,
     /** 作品の形式。話数の言い方が変わる（EpisodeNode と同じ理由で持たせる） */
-    public readonly format?: WorkFormatKey
+    public readonly format?: WorkFormatKey,
+    /** 作品の種類。章の中の話へ渡す（EpisodeNode と同じ理由） */
+    public readonly kind?: WorkKindKey
   ) {}
 }
 
@@ -118,7 +124,12 @@ export class EpisodeNode {
      * **描画（`getTreeItem`）は同期なので、ここで持たせておく。**
      * 描画のたびにプロットを読むと、1回の描画でファイルを何十回も読む
      */
-    public readonly format?: WorkFormatKey
+    public readonly format?: WorkFormatKey,
+    /**
+     * 作品の種類（設計書6.109）。**開く向き**（台本だけ縦書き）と
+     * 吹き出しの目安を決める。形式と同じ理由でここに持たせる
+     */
+    public readonly kind?: WorkKindKey
   ) {}
 }
 
@@ -163,7 +174,12 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   /** 走査結果のキャッシュ（作品ID -> 結果） */
   private cache = new Map<
     string,
-    { episodes: EpisodeFile[]; stats: WorkStats }
+    {
+      episodes: EpisodeFile[];
+      stats: WorkStats;
+      /** 設定ファイルに書かれた種類（設計書6.109。走査が読んだものを借りる） */
+      configuredKind?: WorkKindKey;
+    }
   >();
 
   /**
@@ -345,6 +361,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       // 別の環境へ移る前に気づけるかどうかが分かれ目になる（設計書5.5.1）。
       // **数はその作品のぶんだけ**——書庫では置き場ぜんぶの数が全部の行に並ぶ
       const badge = this.syncBadge?.(work.id);
+      const workMeasure = measureKindCounts(node.kind, stats.totals)?.detail;
       const syncNote = badge ? ` / ${badge}` : "";
       item.description = `${stats.fileCount}ファイル / ${modeLabel}${formatCount(
         pickCount(stats.totals, mode)
@@ -359,6 +376,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
             toManuscriptPages(stats.totals.manuscriptLines)
           )} 枚`,
           `- ファイル数: ${stats.fileCount}`,
+          // 種類ごとの目安（台本の分数・エッセイの読了時間。設計書6.109）
+          ...(workMeasure ? [`- ${workMeasure}`] : []),
           ...(this.syncTooltip?.(work.id) ?? []),
           stats.conflictedCount > 0
             ? `\n**未解決の競合が ${stats.conflictedCount} 件あります。**\n` +
@@ -478,17 +497,18 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       プロット・あらすじ・設定資料は素のエディタのままである（この行は
       episode の枝にしかない）。
 
-      **例外は脚本**（設計書6.70）。台本は縦書きで組むのが普通なので、
+      **例外は台本**（設計書6.70・6.109）。台本は縦書きで組むのが普通なので、
       向きの既定を `manuscriptViewTypeFor` に決めさせる（開く場所ごとに
       違う既定を持たない）。
     */
     item.command = {
       command: "vscode.openWith",
       title: "開く",
-      arguments: [toUri(ep.filePath), manuscriptViewTypeFor(node.format)],
+      arguments: [toUri(ep.filePath), manuscriptViewTypeFor(node.kind)],
     };
 
     const chapterLabel = formatChapterLabel(ep, node.format);
+    const episodeMeasure = measureKindCounts(node.kind, ep.counts)?.detail;
     const title = episodeTitle(ep, chapterLabel);
     // まだ出していないサイト（設計書6.68.2）。対象サイトを1つも登録して
     // いない作品では空になる＝印も出ない
@@ -589,6 +609,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         `- 純文字数: ${formatCount(ep.counts.net)} 字`,
         `- 総文字数: ${formatCount(ep.counts.gross)} 字`,
         `- 段落数: ${ep.counts.paragraphs}`,
+        // 種類ごとの目安（台本の分数・エッセイの読了時間。設計書6.109）
+        episodeMeasure ? `- ${episodeMeasure}` : null,
         // **どのサイトが遅れているかを、ここで読めるようにする**（6.68.2）
         unposted.length > 0
           ? `- まだ出していないサイト: ${postingSiteLabels(unposted)}`
@@ -672,6 +694,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         ];
       }
       const format = await this.formatOf(node.work);
+      const kind = resolveWorkKind(result.configuredKind, format);
       // メモの枝は話の後ろに置く（設計書6.71）。**原稿より前に来ない**
       const memos = await this.memoNodes(node.work, format);
 
@@ -703,7 +726,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
               error instanceof Error ? error.message : String(error)
             }`
           ),
-          ...result.episodes.map((e) => new EpisodeNode(node.work, e, format)),
+          ...result.episodes.map((e) => new EpisodeNode(node.work, e, format, kind)),
           ...memos,
         ];
       }
@@ -711,7 +734,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       // 章が1つも無ければ、いままでどおり作品の直下に話を並べる
       if (chapters.length === 0) {
         return [
-          ...result.episodes.map((e) => new EpisodeNode(node.work, e, format)),
+          ...result.episodes.map((e) => new EpisodeNode(node.work, e, format, kind)),
           ...memos,
         ];
       }
@@ -723,7 +746,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       );
       return [
         // 最初の章より前の話は、章ノードより前に並べる（6.66.1）
-        ...grouped.ungrouped.map((e) => new EpisodeNode(node.work, e, format)),
+        ...grouped.ungrouped.map((e) => new EpisodeNode(node.work, e, format, kind)),
         ...grouped.groups.map(
           (group) =>
             new ChapterNode(
@@ -731,7 +754,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
               group.chapter,
               group.episodes,
               group.missingStart,
-              format
+              format,
+              kind
             )
         ),
         ...memos,
@@ -740,7 +764,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
     if (node.type === "chapter") {
       return node.episodes.map(
-        (e) => new EpisodeNode(node.work, e, node.format)
+        (e) => new EpisodeNode(node.work, e, node.format, node.kind)
       );
     }
 
@@ -932,11 +956,14 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
           // タイプは右クリックの絞り込みに要る（設計書6.70.1）。
           // 読み取り自体は `workFormatStore` が作品ごとに覚えているので、
           // 一覧を描き直すたびにプロットを読み直すことにはならない
+          const format = await this.formatOf(w);
           nodes[index] = new WorkNode(
             w,
             result.stats,
             undefined,
-            await this.formatOf(w)
+            format,
+            // 種類は走査が読んだ設定ファイルから決める（読み直さない。6.109）
+            resolveWorkKind(result.configuredKind, format)
           );
         } catch (error) {
           nodes[index] = new WorkNode(
@@ -962,7 +989,11 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     // **初回の描画までに走ったものだけ控える**（設計書6.107）。
     // キャッシュに載せないのは、計測が走査1回ごとの値だからである
     if (!this.firstRenderNotified) this.scanTimings.push(result.timing);
-    const value = { episodes: result.episodes, stats: result.stats };
+    const value = {
+      episodes: result.episodes,
+      stats: result.stats,
+      configuredKind: result.configuredKind,
+    };
     this.cache.set(work.id, value);
     return value;
   }

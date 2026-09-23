@@ -6,6 +6,7 @@ import { readTextFile, type TextFileContent } from "../core/textFile";
 import { bookChaptersOf } from "../core/bookChapters";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
+import { readWorkKind } from "../core/workKindStore";
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
 import { bookHeading, episodeUnit } from "../core/episodeLabel";
@@ -52,6 +53,8 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
 
   const format = await readWorkFormat(work);
   const unit = episodeUnit(format);
+  // 組み方は種類で決まる（設計書6.109）。形式（長さ）とは別の軸
+  const kind = await readWorkKind(work);
 
   const selected = await pickEpisodes(scan.episodes, unit.noun, format);
   if (!selected || selected.length === 0) return;
@@ -125,10 +128,10 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
     workTitle: work.title,
     episodes: chapters,
     preset,
-    // **タイプで組み方が変わる**（設計書6.70。脚本は柱・ト書き・セリフ）。
+    // **種類で組み方が変わる**（設計書6.70・6.109。台本は柱・ト書き・台詞）。
     // 上で読んだものをそのまま渡す——ここで読み直すと、選んでいる間に
-    // プロットが書き換わったときに、見出しと組み方で別のタイプを指す
-    format,
+    // 設定が書き換わったときに、見出しと組み方で別の種類を指す
+    kind,
   });
 
   let target: string;

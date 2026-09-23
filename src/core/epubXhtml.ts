@@ -1,3 +1,5 @@
+import { kindLineClass } from "./kindLines";
+import type { WorkKindKey } from "./workKind";
 import {
   escapeHtml,
   tokenizeLine,
@@ -178,6 +180,12 @@ export interface EpubBodyOptions {
    * `<section class="chapter">` が出る。
    */
   sectionClass?: string;
+  /**
+   * 作品の種類（設計書6.109）。**小説以外で行の種別に印が付く**
+   * （台本の柱・ト書き・台詞など）。組み方は本のCSS（`buildEpubCss`）に
+   * 同じ種類を渡したときだけ効く。省略・小説なら、いままでと同じ本文が出る。
+   */
+  kind?: WorkKindKey;
 }
 
 /** 位置指定の種類。知らせの言い方をここで分ける */
@@ -597,8 +605,15 @@ function renderBody(
     // 空行から始まる（設計書6.65.10）
     const marked = starts && pendingBreak;
     if (marked) pendingBreak = false;
+    // 種類ごとの行の印（設計書6.109）。原稿エディタ・PDFと同じ規則
+    // （`core/kindLines.ts`）を当てる——画面で見た組み方のまま本になる
+    const lineClass = kindLineClass(options.kind, line);
+    const names = [
+      ...(marked ? [PAGE_BREAK_CLASS] : []),
+      ...(lineClass ? [lineClass] : []),
+    ];
     out.push(
-      `<p${marked ? ` class="${PAGE_BREAK_CLASS}"` : ""}>${renderInline(
+      `<p${names.length > 0 ? ` class="${names.join(" ")}"` : ""}>${renderInline(
         line,
         notation,
         vertical

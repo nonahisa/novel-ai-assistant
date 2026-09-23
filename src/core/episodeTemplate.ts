@@ -1,31 +1,22 @@
 import { formatChapterNumber, nextUntitledName } from "./episodeParser";
 import type { WorkFormatKey } from "./workFormat";
+import { kindEpisodeTemplate, type WorkKindKey } from "./workKind";
 
 /**
- * 新しい話（メモ・投稿）を作るときの、最初の中身（設計書6.70）。
+ * 新しい話（メモ・投稿）を作るときの、最初の中身（設計書6.70・6.109）。
  *
- * **空で作るのがこれまでの振る舞いで、そこは変えない。** 白紙に何かが
+ * **小説は空で作る。これまでの振る舞いで、そこは変えない。** 白紙に何かが
  * 書かれていると、作者はまずそれを消すところから始めることになる。
- * 例外は脚本で、**形そのものを知らせるほうが早い**——柱・ト書き・
- * セリフの3つが並んでいれば、どこに何を書くかが1画面で分かる。
+ * 台本・漫画の原作・エッセイ・歌詞は、**形そのものを知らせるほうが早い**
+ * ——柱・ト書き・台詞が並んでいれば、どこに何を書くかが1画面で分かる。
+ *
+ * **形式ではなく種類で決める**（0.81.0〜。雛形の中身は `core/workKind.ts`）。
  *
  * VS Code APIに依存しない（作る側＝`novelai.addEpisode` と
  * 新規作品の第1話が、同じ中身を使うために切り出してある）。
  */
-
-/**
- * 脚本の雛形。
- *
- * 柱は「○」で始め、ト書きは1字下げ、セリフは「役名「…」」の形にする
- * （日本語の台本で広く使われている書き方）。**行数は3つだけ**にする。
- * 手本を長くすると、書き始める前に消す手間が増える。
- */
-const SCRIPT_TEMPLATE = ["○シーン名", "", "　ト書き", "", "役名「セリフ」", ""].join(
-  "\n"
-);
-
-export function newEpisodeTemplate(format?: WorkFormatKey): string {
-  return format === "script" ? SCRIPT_TEMPLATE : "";
+export function newEpisodeTemplate(kind?: WorkKindKey): string {
+  return kindEpisodeTemplate(kind);
 }
 
 /**

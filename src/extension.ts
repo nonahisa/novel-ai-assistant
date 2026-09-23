@@ -54,6 +54,7 @@ import {
 // Node専用（node:child_process / node:path）。選ぶ操作の中で動的importする（設計書5.8.5）
 import {
   chooseWorkStartMode,
+  chooseWorkKind,
   chooseWorkType,
   createFirstEpisodeFile,
   openPlotFile,
@@ -247,10 +248,12 @@ import { createActionSpotlight } from "./features/actionSpotlight";
 import { ChatterService } from "./features/chatterService";
 import { requestChatterComment } from "./features/chatterComment";
 import { setPlotBasics } from "./features/setPlotBasics";
+import { setWorkKind } from "./features/setWorkKind";
 import {
   invalidateWorkFormat,
   readWorkFormat,
 } from "./core/workFormatStore";
+import { invalidateWorkKind, readWorkKind } from "./core/workKindStore";
 import type { WorkFormatKey } from "./core/workFormat";
 // 作品タイプの在り処はプロットの `## 形式` ひとつ（設計書6.70）
 import { writePlotSections } from "./core/plotFile";
@@ -2478,6 +2481,11 @@ export async function activate(
     }),
     vscode.workspace.onDidSaveTextDocument((document) => {
       updateStatusBar();
+      // 作品の設定（.aiwriter/config.json）を手で直したら、種類を読み直す
+      // （設計書6.109。覚えているのは設定ファイルに書かれた分だけ）
+      if (path.basename(document.fileName).toLowerCase() === "config.json") {
+        invalidateWorkKind();
+      }
       // プロットを書き換えたら形式を読み直す。作者が「## 形式」を
       // 直したのに一覧が「第3話」のままでは、直った気がしない
       if (path.basename(document.fileName).toLowerCase() === "plot.md") {
@@ -2844,8 +2852,13 @@ export async function activate(
     });
     if (!title) return CHECK_CANCELLED;
 
-    // **タイプも始め方も、フォルダーを作る前に訊く。** 作ったあとで
+    // **種類もタイプも始め方も、フォルダーを作る前に訊く。** 作ったあとで
     // 取り消されると、中身の無い作品フォルダーだけが残る
+    //
+    // 種類（何を書くか。設計書6.109）を先に訊く。先頭の「小説」を選べば
+    // これまでとまったく同じ作品になる
+    const kind = await chooseWorkKind(title.trim());
+    if (!kind) return CHECK_CANCELLED;
     const workType = await chooseWorkType(title.trim());
     if (!workType) return CHECK_CANCELLED;
     const format =
@@ -2865,6 +2878,9 @@ export async function activate(
     try {
       await scaffoldWorkFolder(folderPath, title.trim(), {
         withPlot: startMode === "plot",
+        // 種類は作品の設定（.aiwriter/config.json）へ書く（設計書6.109）。
+        // プロットの書き出しの見出しも種類で変わる
+        kind,
       });
     } catch (e) {
       vscode.window.showErrorMessage(
@@ -2913,7 +2929,8 @@ export async function activate(
       await createFirstEpisodeFile(
         entry,
         (work) => progress.rebaseline(work),
-        format
+        format,
+        kind
       );
     }
     return CHECK_COMPLETED;
@@ -2996,6 +3013,22 @@ export async function activate(
         invalidateWorkFormat(work.id);
         treeProvider.refresh(work.id);
         stepProvider.invalidateFormats(work.id);
+        return CHECK_COMPLETED;
+      }
+    ),
+    registerCommand(
+      "novelai.setWorkKind",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return CHECK_CANCELLED;
+        /*
+          **作品の種類をあとから変える入口**（設計書6.109）。本文は書き換えない。
+          覚えている種類は書いた側（`writeWorkKind`）が捨てている。一覧は
+          開く向き（台本だけ縦書き）と吹き出しの目安を種類から取るので描き直す
+        */
+        const changed = await setWorkKind(work);
+        if (!changed) return CHECK_CANCELLED;
+        treeProvider.refresh(work.id);
         return CHECK_COMPLETED;
       }
     ),
@@ -3761,10 +3794,12 @@ export async function activate(
           return;
         }
 
+        // 雛形と開く向きは種類で決まる（設計書6.109。台本は柱・ト書き・台詞の
+        // 雛形から始め、縦書きで開く）。形式（長さ）では決めない
+        const kind = await readWorkKind(work);
         await vscode.workspace.fs.writeFile(
           path.toUri(filePath),
-          // 脚本だけは柱・ト書き・セリフの雛形から始める（設計書6.70）
-          new TextEncoder().encode(newEpisodeTemplate(format))
+          new TextEncoder().encode(newEpisodeTemplate(kind))
         );
 
         treeProvider.refresh(work.id);
@@ -3773,11 +3808,11 @@ export async function activate(
         // 保存した回がその決まりに当たり「今日 +0字」になって消える
         await progress.rebaseline(work);
         // **本文は原稿エディタで開く**（作者の指定、2026-08-29。作品一覧の
-        // クリックと同じ既定に揃える）。向きはタイプで決まる（脚本は縦書き）
+        // クリックと同じ既定に揃える）。向きは種類で決まる（台本は縦書き）
         await vscode.commands.executeCommand(
           "vscode.openWith",
           path.toUri(filePath),
-          manuscriptViewTypeFor(format)
+          manuscriptViewTypeFor(kind)
         );
       }
     )

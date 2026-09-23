@@ -12,7 +12,7 @@
  * 一致していることは `test/unit/features/manuscriptEditorEntries.test.ts` が見る。
  */
 
-import type { WorkFormatKey } from "./workFormat";
+import { workKindDef, type WorkKindKey } from "./workKind";
 
 export const MANUSCRIPT_EDITOR_VIEW_TYPE = "novelai.manuscriptEditor";
 
@@ -26,17 +26,22 @@ export const MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE =
   "novelai.manuscriptEditorHorizontal";
 
 /**
- * そのタイプの本文を開くときの、既定の入口（設計書6.70）。
+ * その種類の本文を開くときの、既定の入口（設計書6.70・6.109）。
  *
- * **脚本だけ縦書きにする**（作者の指定、2026-09-04）。台本は縦書きで
+ * **台本だけ縦書きにする**（作者の指定、2026-09-04）。台本は縦書きで
  * 組むのが普通で、横書きで開くと書き出しの一行目から向きを直すことに
- * なる。ほかのタイプはこれまでどおり横書き。
+ * なる。ほかの種類はこれまでどおり横書き（向きは `core/workKind.ts` の
+ * `vertical` が持つ）。
+ *
+ * **形式ではなく種類で決める**（0.81.0〜）。形式が「脚本」の作品は、
+ * 種類を読む側（`resolveWorkKind`）が台本へ読み替えるので、ここへは
+ * 台本として届く。
  *
  * 型だけを見る関数にしてあるので、`views` からでも `features` からでも
  * 同じ答えを引ける（開く場所ごとに違う既定を持たせない）。
  */
-export function manuscriptViewTypeFor(format?: WorkFormatKey): string {
-  return format === "script"
+export function manuscriptViewTypeFor(kind?: WorkKindKey): string {
+  return kind && workKindDef(kind).vertical
     ? MANUSCRIPT_EDITOR_VIEW_TYPE
     : MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE;
 }

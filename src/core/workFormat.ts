@@ -31,6 +31,15 @@ export interface WorkFormatDef {
    * 作者へ「いまの字数ならこれでは」と勧めるためだけに使う
    */
   fromChars?: number;
+  /**
+   * 読めるが、もう選ばせない形式（設計書6.109）。
+   *
+   * 「脚本」は種類（`core/workKind.ts`）の軸ができる前に、形式の1つとして
+   * 持っていたもの。**プロットに「脚本」と書いてある作品は、これまでどおり
+   * 読めて台本として扱う**（`resolveWorkKind`）が、新しく選ぶ画面には出さない
+   * ——「台本」は種類で選び、長さは形式で選ぶ（2つの軸に同じものを並べない）。
+   */
+  legacy?: boolean;
 }
 
 /** この順に選択肢へ出す */
@@ -81,8 +90,14 @@ export const WORK_FORMATS: readonly WorkFormatDef[] = [
     description:
       "台本の形で書く作品。第◯話が1回ぶんの台本になる。" +
       "新しい話は柱・ト書き・セリフの雛形から始まり、縦書きで開く",
+    legacy: true,
   },
 ];
+
+/** 選ぶ画面に並べる形式（読めるだけの古い形式は除く） */
+export function selectableWorkFormats(): WorkFormatDef[] {
+  return WORK_FORMATS.filter((format) => !format.legacy);
+}
 
 export function workFormatLabels(): string[] {
   return WORK_FORMATS.map((format) => format.label);

@@ -41,12 +41,8 @@ import { MANUSCRIPT_FONTS } from "../core/manuscriptFonts";
 import { NOTATION_RULES } from "../core/manuscriptRender";
 import { MEMO_LINE_PATTERN, MEMO_TAG_CLASS_MAP } from "../core/sceneMemo";
 import { TCY_RUN_PATTERN } from "../core/tateChuYoko";
-import {
-  SCRIPT_LINE_CLASSES,
-  SCRIPT_LINE_CSS,
-  SCRIPT_LINE_RULES,
-} from "../core/scriptLines";
-import type { WorkFormatKey } from "../core/workFormat";
+import { kindLineCss, kindLineRules } from "../core/kindLines";
+import type { WorkKindKey } from "../core/workKind";
 import { findAction } from "./actionList";
 
 /**
@@ -77,26 +73,25 @@ export function buildManuscriptEditorHtml(
   nonce: string,
   cspSource: string,
   /**
-   * この原稿の作品タイプ（設計書6.70）。**脚本だけ組み方が変わる**
-   * （柱・ト書き・セリフ）。
+   * この原稿の作品の種類（設計書6.70・6.109）。**小説以外で組み方が変わる**
+   * （台本の柱・ト書き・台詞、漫画の原作のページ・コマ、エッセイの見出し、
+   * 歌詞の節の札）。
    *
-   * 省略できるようにしてあるのは、タイプを決めていない作品
-   * （プロットに `## 形式` が無い）と、作品を引けなかったときのためで、
-   * そのときはこれまでどおりの画面になる。**脚本以外では、出来上がる
+   * 省略できるようにしてあるのは、作品を引けなかったときのためで、
+   * そのときはこれまでどおりの画面になる。**小説では、出来上がる
    * HTMLが1バイトも変わらない**（test/unit/cross/composeFace.test.ts が見張る）。
    */
-  format?: WorkFormatKey
+  kind?: WorkKindKey
 ): string {
-  /** 脚本の作品か。埋め込む規則と組み方の指定は、これで決まる */
-  const isScript = format === "script";
   /**
-   * 脚本の組み方（設計書6.70）。**値は `core/scriptLines.ts` の1か所**
-   * から借りる（PDFも同じ文字列を埋め込む。写しを置かない）。
+   * 種類ごとの組み方。**値は `core/kindLines.ts` の1か所**から借りる
+   * （PDF・EPUBも同じ文字列を埋め込む。写しを置かない）。
    *
-   * 脚本でなければ空文字＝**規則が1つも増えない**。行頭の改行ごと
-   * 空にしてあるので、脚本以外のHTMLは以前と1文字も変わらない。
+   * 小説なら空文字＝**規則が1つも増えない**。行頭の改行ごと
+   * 空にしてあるので、小説のHTMLは以前と1文字も変わらない。
    */
-  const scriptCss = isScript ? `\n${SCRIPT_LINE_CSS}` : "";
+  const kindCss = kindLineCss(kind);
+  const scriptCss = kindCss ? `\n${kindCss}` : "";
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -1826,6 +1821,11 @@ ruby > rt {
   /** このファイルの字数（拡張機能が数えた値） */
   let footFile = null;
   /**
+   * 種類ごとの目安（設計書6.109。台本なら「約12分」）。**数えるのは
+   * 拡張機能側**で、字数と同じ知らせに乗って届く。小説では届かない
+   */
+  let footMeasure = "";
+  /**
    * 作品の合計。**開いたときと保存したときにしか測らない。**
    * 1打鍵ごとに全話を走査すると、打つ手が止まる。
    */
@@ -1849,7 +1849,11 @@ ruby > rt {
       parts.push("作品 " + groupDigits(footWorkTotal + grown) + "字");
     }
     if (footFile !== null) {
-      parts.push("このファイル " + groupDigits(footFile) + "字");
+      // 種類ごとの目安（台本の分数など。設計書6.109）は字数のすぐ後ろに添える
+      parts.push(
+        "このファイル " + groupDigits(footFile) + "字" +
+          (footMeasure ? "（" + footMeasure + "）" : "")
+      );
     }
     if (footToday !== null) {
       // 増えた日は符号を付ける（減った日は数字そのものに − が付く）
@@ -2409,6 +2413,7 @@ ${RESUME_WRITING_LABEL ? `
       // 下段だけが使う
       if (typeof message.value === "number") {
         footFile = message.value;
+        footMeasure = typeof message.measure === "string" ? message.measure : "";
         paintCounts();
       }
     } else if (message.type === "counts") {
@@ -2535,21 +2540,20 @@ ${RESUME_WRITING_LABEL ? `
   const MEMO_TAG_MAX = 12;
 
   /**
-   * 脚本の行の見分け方（設計書6.70）。
+   * 種類ごとの行の見分け方（設計書6.70・6.109。台本の柱・ト書き・台詞など）。
    *
-   * **定義は core/scriptLines.ts の1つだけ。** 記法・シーンメモと同じで、
-   * ここへはその規則がそのまま埋め込まれる（画面と紙で組み方が
-   * 食い違わないようにするため）。
+   * **定義は core/kindLines.ts の1つだけ**（台本の規則は core/scriptLines.ts）。
+   * 記法・シーンメモと同じで、ここへはその規則がそのまま埋め込まれる
+   * （画面と紙で組み方が食い違わないようにするため）。
    *
-   * **脚本でない作品では、規則は空**である。判定の道は残るが、
+   * **小説では、規則は空**である。判定の道は残るが、
    * どの行にも当たらないので印は付かない。
    */
-  const SCRIPT_LINE_RULES = ${JSON.stringify(isScript ? SCRIPT_LINE_RULES : [])};
-  const SCRIPT_LINE_CLASSES = ${JSON.stringify(SCRIPT_LINE_CLASSES)};
+  const KIND_LINE_RULES = ${JSON.stringify(kindLineRules(kind))};
 
   /** 行ごとに作り直さない（打つたびに全行を見るので、行数ぶん効く） */
-  const SCRIPT_LINE_MATCHERS = SCRIPT_LINE_RULES.map(function (rule) {
-    return { cls: SCRIPT_LINE_CLASSES[rule.kind], re: new RegExp(rule.pattern) };
+  const SCRIPT_LINE_MATCHERS = KIND_LINE_RULES.map(function (rule) {
+    return { cls: rule.cls, re: new RegExp(rule.pattern) };
   });
 
   /** その行に付ける種別の印。当たらなければ空文字 */

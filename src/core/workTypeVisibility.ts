@@ -239,6 +239,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   // **タイプを決める入口は、どのタイプでも要る。**
   // ここが消えると、間違えて選んだタイプから戻れなくなる
   "novelai.setPlotBasics": "allTypes",
+  // 種類（設計書6.109）も、消えると間違えた種類から戻れない。必ず全タイプ
+  "novelai.setWorkKind": "allTypes",
   "novelai.setWorkGoals": "allTypes",
 
   // ── 執筆の場 ──

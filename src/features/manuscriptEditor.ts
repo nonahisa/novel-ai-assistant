@@ -22,7 +22,6 @@ import {
   MANUSCRIPT_EDITOR_VIEW_TYPE,
   manuscriptViewTypeFor,
 } from "../core/manuscriptViewTypes";
-import type { WorkFormatKey } from "../core/workFormat";
 import {
   collectTermSpans,
   notationModeFor,
@@ -39,6 +38,9 @@ import type {
 import { isNoteStyleTarget } from "../core/noteStyle";
 import { renderNotePreview } from "../core/notePreview";
 import { readWorkFormat } from "../core/workFormatStore";
+import { readWorkKind } from "../core/workKindStore";
+import type { WorkKindKey } from "../core/workKind";
+import { measureKindText } from "../core/kindMeasure";
 import { TERM_COLORS } from "../core/termColors";
 import {
   computeDocumentEdit,
@@ -452,7 +454,7 @@ export async function openManuscriptForReading(work: WorkEntry): Promise<void> {
     paths.toUri(filePath),
     // 向きの既定はタイプが決める（設計書6.70。脚本だけ縦書き）。
     // **ここで別の決め方をしない**——作品一覧から開いたときと同じ入口にする
-    manuscriptViewTypeFor(await formatOf(work))
+    manuscriptViewTypeFor(await kindOf(work))
   );
   /*
     **台帳に載るまで待つ**（`revealLine` と同じ事情。開いた直後はまだ載らない）。
@@ -788,14 +790,14 @@ function activeManuscriptViewType(): string | undefined {
 }
 
 /**
- * その作品のタイプ（設計書6.70）。**読めなければ undefined。**
+ * その作品の種類（設計書6.70・6.109）。**読めなければ undefined。**
  *
- * プロットが無い・壊れている作品でも、開けなくなってはいけない。
- * そのときは「決めていない」と同じ扱いで、これまでどおり横書きになる。
+ * 設定が無い・壊れている作品でも、開けなくなってはいけない。
+ * そのときは小説と同じ扱いで、これまでどおり横書きになる。
  */
-async function formatOf(work: WorkEntry): Promise<WorkFormatKey | undefined> {
+async function kindOf(work: WorkEntry): Promise<WorkKindKey | undefined> {
   try {
-    return await readWorkFormat(work);
+    return await readWorkKind(work);
   } catch {
     return undefined;
   }
@@ -1133,18 +1135,18 @@ export class ManuscriptEditorProvider
   ) {}
 
   /**
-   * 開いた本文の作品タイプ（設計書6.70）。**引けなければ undefined。**
+   * 開いた本文の作品の種類（設計書6.70・6.109）。**引けなければ undefined。**
    *
    * 作品を探す道は、用語索引と同じもの（`indexFor`）を通す。**別の探し方を
    * 増やさない**——同じファイルに対して「色が付く作品」と「組み方を決める
    * 作品」が食い違うと、原因の分からない見た目の違いになる。
    */
-  private async formatOfDocument(
+  private async kindOfDocument(
     document: vscode.TextDocument
-  ): Promise<WorkFormatKey | undefined> {
+  ): Promise<WorkKindKey | undefined> {
     try {
       const found = await this.deps.highlighter.indexFor(fromUri(document.uri));
-      return found ? await formatOf(found.work) : undefined;
+      return found ? await kindOf(found.work) : undefined;
     } catch {
       // 索引を作れない作品（設定資料が壊れている等）でも、原稿は開ける
       return undefined;
@@ -1158,17 +1160,19 @@ export class ManuscriptEditorProvider
   ): Promise<void> {
     panel.webview.options = { enableScripts: true };
     /*
-      **作品タイプは、画面を組み立てる前に決める**（設計書6.70）。脚本は
-      柱・ト書き・セリフを組み分けるので、あとから知らせる形にすると
+      **作品の種類は、画面を組み立てる前に決める**（設計書6.70・6.109）。台本は
+      柱・ト書き・台詞を組み分けるので、あとから知らせる形にすると
       開いた直後だけ小説の組み方で出て、1拍おいて組み直ることになる。
 
-      引けなければ undefined＝これまでどおりの画面（タイプを決めていない
-      作品でも、作品の外のファイルでも、開けなくなってはいけない）。
+      引けなければ undefined＝これまでどおりの画面（作品の外のファイルでも、
+      開けなくなってはいけない）。下段の目安（台本の分数など）も同じ種類で出す
+      ——開いている間に種類を変えても、組み方と目安が別々の種類を指さない。
     */
+    const kind = await this.kindOfDocument(document);
     panel.webview.html = buildManuscriptEditorHtml(
       createNonce(),
       panel.webview.cspSource,
-      await this.formatOfDocument(document)
+      kind
     );
 
     /**
@@ -1272,7 +1276,7 @@ export class ManuscriptEditorProvider
       // 添えるのは最初の1回だけ（送り直すたびに当て直させない）
       initialAppearance = undefined;
       undoCaret = undefined;
-      await this.sendCount(panel, text, document);
+      await this.sendCount(panel, text, document, kind);
     };
 
     /**
@@ -1569,7 +1573,7 @@ export class ManuscriptEditorProvider
           break;
 
         case "count":
-          await this.sendCount(panel, message.text, document);
+          await this.sendCount(panel, message.text, document, kind);
           break;
 
         case "ruby":
@@ -1813,7 +1817,7 @@ export class ManuscriptEditorProvider
     const viewType =
       activeManuscriptViewType() ??
       (episodeWork
-        ? manuscriptViewTypeFor(await formatOf(episodeWork))
+        ? manuscriptViewTypeFor(await kindOf(episodeWork))
         : undefined);
     if (!viewType) {
       logLine(
@@ -1984,11 +1988,27 @@ export class ManuscriptEditorProvider
     panel: vscode.WebviewPanel,
     text: string,
     // 画面から届く本文にはファイル名が付いていないので、開いている文書から取る
-    document: vscode.TextDocument
+    document: vscode.TextDocument,
+    /** 作品の種類（設計書6.109）。小説・不明なら目安を添えない */
+    kind?: WorkKindKey
   ): Promise<void> {
-    const value = countForDisplay(text, extensionOf(document));
+    const ext = extensionOf(document);
+    const value = countForDisplay(text, ext);
+    /*
+      種類ごとの目安（台本の分数・漫画のページ数など）。**字数と同じ数え方の
+      本文**（頭書きを外し、ルビは .md のときだけ外す）から測る——字数と
+      目安が別の本文を見ていると、同じ話で数字が噛み合わなくなる
+    */
+    const measure = kind
+      ? measureKindText(
+          kind,
+          text,
+          countEpisodeChars(text, { ext, excludeRuby: excludeRubyFromCount() })
+        )?.short
+      : undefined;
     await panel.webview.postMessage({
       type: "count",
+      ...(measure ? { measure } : {}),
       // **下段の「このファイル」はこの数字を使う**（作者の指示、2026-08-29）。
       // 画面側で数え直すと、純／総の設定やルビの扱いが食い違う。
       // 上の帯にも同じ字数を出していたが、重複なので消した（同日の指示）

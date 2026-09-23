@@ -4,6 +4,7 @@ import {
   EpisodeFile,
   SUPPORTED_EXTENSIONS,
   WorkEntry,
+  WorkKindKey,
   WorkStats,
 } from "../models/types";
 import { addCounts, emptyCounts } from "./charCount";
@@ -94,6 +95,14 @@ export async function scanWork(work: WorkEntry): Promise<{
   workInfoFiles: string[];
   /** 何にどれだけかかったか（設計書6.107）。**使わなくてよい** */
   timing: ScanTiming;
+  /**
+   * 作品の設定に書かれた種類（設計書6.109）。書かれていなければ undefined。
+   *
+   * **設定ファイルは走査が既に読んでいる**ので、ここで渡す。作品一覧が
+   * 種類のためだけに設定ファイルを読み直すと、起動のたびに作品の数だけ
+   * 読みが増える（設計書6.107 で削った待ち時間を戻すことになる）。
+   */
+  configuredKind?: WorkKindKey;
 }> {
   const scanStartedAt = performance.now();
   /*
@@ -337,6 +346,7 @@ export async function scanWork(work: WorkEntry): Promise<{
     stats: { fileCount: episodes.length, totals, conflictedCount },
     manuscriptDir: targetDir,
     workInfoFiles,
+    ...(config?.kind ? { configuredKind: config.kind } : {}),
     timing: {
       files: files.length,
       prepMs,

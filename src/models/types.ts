@@ -177,7 +177,20 @@ export interface WorkConfig {
    * いま在るすべての `config.json` が読めなくなる。
    */
   series?: SeriesConfig;
+  /**
+   * 作品の種類（設計書6.109。小説・台本・漫画の原作・エッセイ・歌詞）。
+   * **省略できる**——無い作品は小説として扱う（これまでの振る舞い）。
+   * `announce` と同じ理由で任意にしてある。
+   */
+  kind?: WorkKindKey;
 }
+
+/**
+ * 作品の種類の鍵（設計書6.109）。**並びと意味は `core/workKind.ts` が持つ。**
+ * 型だけをここに置くのは、`WorkConfig` が持つのに `models` が `core` を
+ * 引けないため（`Eol` と同じ事情）。
+ */
+export type WorkKindKey = "novel" | "script" | "manga" | "essay" | "lyrics";
 
 export const CONFIG_SCHEMA_VERSION = "0.1";
 export const AIWRITER_DIR = ".aiwriter";

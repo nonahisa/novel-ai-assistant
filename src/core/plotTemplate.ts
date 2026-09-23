@@ -1,4 +1,5 @@
 import { PLOT_SECTIONS } from "./plotDoc";
+import { workKindDef, type WorkKindKey } from "./workKind";
 
 /**
  * プロット（`設定/plot.md`）の書き出し。
@@ -19,12 +20,17 @@ import { PLOT_SECTIONS } from "./plotDoc";
  * **消された見出しを復活させない。**
  */
 
-/** 書き出しに置く見出し。白紙よりは書き始めやすい程度に留める */
-const STARTERS = ["logline", "outline"] as const;
-
-export function buildPlotTemplate(title: string): string {
+/**
+ * @param kind 作品の種類（設計書6.109）。**書き出しに置く見出しだけが変わる**
+ *   （台本なら人物表と箱書き、歌詞なら語り手と構成）。小説・省略なら
+ *   これまでと1文字も変わらない。種類ならではの見出しは `PLOT_SECTIONS` に
+ *   無い名前なので、読むときは「作者が足した節」として残る（落ちない）。
+ */
+export function buildPlotTemplate(title: string, kind?: WorkKindKey): string {
+  // 書き出しに置く見出し。白紙よりは書き始めやすい程度に留める
+  const def = workKindDef(kind ?? "novel");
   const starters = PLOT_SECTIONS.filter((section) =>
-    (STARTERS as readonly string[]).includes(section.key)
+    def.plotStarters.includes(section.key)
   );
   const names = PLOT_SECTIONS.map((section) => section.heading).join("・");
 
@@ -49,6 +55,9 @@ export function buildPlotTemplate(title: string): string {
     if (section.hint) lines.push(`<!-- ${section.hint} -->`);
     if (section.list) lines.push("- ");
     lines.push("");
+  }
+  for (const extra of def.plotExtras) {
+    lines.push(`## ${extra.heading}`, `<!-- ${extra.hint} -->`, "");
   }
 
   return lines.join("\n");

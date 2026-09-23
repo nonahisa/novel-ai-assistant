@@ -70,6 +70,8 @@ import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import { bookChapterBodies, bookChaptersOf } from "../core/bookChapters";
 import { readWorkFormat } from "../core/workFormatStore";
+import { readWorkKind } from "../core/workKindStore";
+import type { WorkKindKey } from "../core/workKind";
 import type { WorkFormatKey } from "../core/workFormat";
 import {
   bookHeading,
@@ -190,6 +192,11 @@ interface PreviewSource {
   episodeFiles: EpisodeFile[];
   /** 話数の言い方を決める作品の形式（章の範囲「第1話〜第5話」に使う） */
   format: WorkFormatKey | undefined;
+  /**
+   * 作品の種類（設計書6.109）。本文の行の組み方（台本の柱・ト書き・台詞など）を
+   * **書き出しと同じに**画面へ当てるために持つ
+   */
+  kind: WorkKindKey | undefined;
   /**
    * 話と章の一覧（設計書6.65.15の段C）。
    *
@@ -1608,7 +1615,9 @@ async function previewData(state: PanelState) {
         },
         // 面ごとの体裁（作者の依頼、2026-09-13）。**書き出しと同じCSS**を
         // 通す——ここで渡し忘れると、選んだ体裁が画面にだけ出ない
-        state.current.pageLayouts ?? {}
+        state.current.pageLayouts ?? {},
+        // 種類ごとの行の組み方（設計書6.109）。同じ理由で書き出しと揃える
+        state.source.kind
       ),
       ".epub-page"
     ),
@@ -2431,6 +2440,7 @@ function bodyPage(state: PanelState, vertical: boolean): PreviewPage | null {
       // 画面は1枚の面なので実際には割れない。印だけ置く（6.65.10）
       markPageBreaks: true,
       vertical,
+      kind: source.kind,
     }),
     note:
       "1話目の冒頭だけを出しています（本には全話が入ります）。" +
@@ -2622,6 +2632,7 @@ function characterNotice(state: PanelState): string | null {
 async function collectSource(work: WorkEntry): Promise<PreviewSource> {
   const scan = await scanWork(work);
   const format = await readWorkFormat(work);
+  const kind = await readWorkKind(work);
   const ornaments = await collectOrnaments(work);
 
   if (scan.episodes.length === 0) {
@@ -2629,6 +2640,7 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
       episodes: [],
       episodeFiles: [],
       format,
+      kind,
       outline: [],
       firstChapter: null,
       firstChapterPath: null,
@@ -2674,6 +2686,7 @@ async function collectSource(work: WorkEntry): Promise<PreviewSource> {
     episodes,
     episodeFiles: [...scan.episodes],
     format,
+    kind,
     // 章立ては台帳から写す（下で組む。段Cの一覧に章の行が挟まる）
     outline: [],
     firstChapter: first.chapter,

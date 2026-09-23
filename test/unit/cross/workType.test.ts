@@ -19,6 +19,7 @@ import { skipsStartModeQuestion } from "../../../src/features/startWork";
 import { updatePlotMarkdown } from "../../../src/core/plotDoc";
 import { nextUntitledName } from "../../../src/core/episodeParser";
 import { WORK_FORMATS, type WorkFormatKey } from "../../../src/core/workFormat";
+import type { WorkKindKey } from "../../../src/core/workKind";
 import { matchWorkFormat } from "../../../src/core/workFormatStore";
 import { workTypeColumn } from "../../../src/core/workTypeVisibility";
 import type { EpisodeFile } from "../../../src/models/types";
@@ -39,9 +40,9 @@ function episode(
 }
 
 describe("タイプの保存と読み出し", () => {
-  test("選択肢に「創作メモ集」と「脚本」がある", () => {
-    // 保存先はプロットの `## 形式` ひとつ。選択肢に無いものは
-    // `setPlotBasics`（形式とジャンルを決める）からは選べない
+  test("形式の一覧に「創作メモ集」と「脚本」がある", () => {
+    // 「脚本」は 0.81.0 から**読めるだけ**の形式（選ぶ画面には出さない。
+    // 台本は種類で選ぶ——設計書6.109。test/unit/core/workKind.test.ts）
     const labels = WORK_FORMATS.map((format) => format.label);
 
     expect(labels).toContain("創作メモ集");
@@ -118,7 +119,12 @@ describe("新しいメモの名前", () => {
   });
 });
 
-describe("脚本の雛形", () => {
+/**
+ * 雛形と開く向きは、0.81.0 から**種類**（設計書6.109）で決める。
+ * 形式「脚本」の作品は、種類を読む側（`resolveWorkKind`）が台本へ
+ * 読み替えるので、ここへは "script"（台本）として届く。
+ */
+describe("台本の雛形", () => {
   test("柱・ト書き・セリフの形が入っている", () => {
     const body = newEpisodeTemplate("script");
 
@@ -129,17 +135,9 @@ describe("脚本の雛形", () => {
     expect(body).toMatch(/^.+「.+」$/m);
   });
 
-  test("他のタイプでは、これまでどおり空のファイルを作る", () => {
-    for (const format of [
-      "short",
-      "long",
-      "epic",
-      "shortCollection",
-      "sns",
-      "memo",
-      undefined,
-    ] as Array<WorkFormatKey | undefined>) {
-      expect(newEpisodeTemplate(format), String(format)).toBe("");
+  test("小説では、これまでどおり空のファイルを作る", () => {
+    for (const kind of ["novel", undefined] as Array<WorkKindKey | undefined>) {
+      expect(newEpisodeTemplate(kind), String(kind)).toBe("");
     }
   });
 });
@@ -196,16 +194,16 @@ describe("創作メモ集は、最初のメモから始める", () => {
   });
 });
 
-describe("脚本は縦書きで開く", () => {
-  test("脚本の本文は縦書きの入口で開く", () => {
+describe("台本は縦書きで開く", () => {
+  test("台本の本文は縦書きの入口で開く", () => {
     expect(manuscriptViewTypeFor("script")).toBe(MANUSCRIPT_EDITOR_VIEW_TYPE);
   });
 
-  test("他のタイプは、これまでどおり横書き", () => {
-    for (const format of ["long", "sns", "memo", undefined] as Array<
-      WorkFormatKey | undefined
+  test("他の種類は、これまでどおり横書き", () => {
+    for (const kind of ["novel", "manga", "essay", "lyrics", undefined] as Array<
+      WorkKindKey | undefined
     >) {
-      expect(manuscriptViewTypeFor(format), String(format)).toBe(
+      expect(manuscriptViewTypeFor(kind), String(kind)).toBe(
         MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
       );
     }

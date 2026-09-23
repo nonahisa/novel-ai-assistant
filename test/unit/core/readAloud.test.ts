@@ -338,12 +338,12 @@ describe("「原稿を読み上げる（音読推敲）」の入口", () => {
   });
 
   it("小説では、横書きの入口で開く（実機確認リスト F-49 の代わり）", () => {
-    // 縦書きで開くのは脚本だけ（設計書6.70）。作品一覧から開いたときと同じ
+    // 縦書きで開くのは台本だけ（設計書6.70・6.109）。作品一覧から開いたときと同じ
     expect(manuscriptViewTypeFor(undefined)).toBe(
       MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
     );
-    // 形式の鍵に "novel" は無い。小説（続きもの）は "long"（長編）
-    expect(manuscriptViewTypeFor("long")).toBe(
+    // 0.81.0〜は向きを種類で決める。小説の鍵は "novel"
+    expect(manuscriptViewTypeFor("novel")).toBe(
       MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
     );
   });

@@ -682,12 +682,26 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             icon: "tag",
             requiresWork: true,
             detail:
-              "短編・短編集・長編・大長編・SNS記事とジャンルの選択\n\n" +
+              "短編・短編集・長編・大長編・SNS記事・創作メモ集とジャンルの選択\n\n" +
               "・選んだ内容はプロットへ書く\n\n" +
               "・ジャンルにはどこの投稿先のものかを添える\n\n" +
               "・なろう20・カクヨム12・アルファポリス16・ネオページ59\n\n" +
               "・投稿先は複数選べる\n\n" +
               "プロットの他の部分には触らない。",
+          },
+          {
+            kind: "action",
+            command: "novelai.setWorkKind",
+            // 形式（長さ）の隣に置く。**形式とは別の軸**（設計書6.109）
+            label: "作品の種類",
+            note: "小説・台本など",
+            icon: "symbol-class",
+            requiresWork: true,
+            detail:
+              "小説・台本（脚本・シナリオ）・漫画の原作・エッセイ・歌詞の選択\n\n" +
+              "・変わるのは新しい話の雛形・字数の目安・原稿エディタとPDFの組み方\n\n" +
+              "・台本は400字詰めの枚数と分数の目安が出て、縦書きで開く\n\n" +
+              "本文は書き換えない。",
           },
           {
             kind: "action",

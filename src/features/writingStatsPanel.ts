@@ -37,6 +37,7 @@ import { logFailure, useLogFile } from "../core/logger";
 import { episodeUnit } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
 import { manuscriptViewTypeFor } from "../core/manuscriptViewTypes";
+import { readWorkKind } from "../core/workKindStore";
 import { readWorkGoalsOrEmpty } from "../core/workGoalsStore";
 import {
   buildContestProgress,
@@ -186,7 +187,8 @@ export async function openWritingStatsPanel(
       await vscode.commands.executeCommand(
         "vscode.openWith",
         path.toUri(parsed.filePath),
-        manuscriptViewTypeFor(format),
+        // 向きは種類で決まる（設計書6.109。台本だけ縦書き）
+        manuscriptViewTypeFor(await readWorkKind(work)),
         // 統計を見ながら本文を開くので、パネルの隣に出す（従来どおり）
         { viewColumn: vscode.ViewColumn.Beside }
       );

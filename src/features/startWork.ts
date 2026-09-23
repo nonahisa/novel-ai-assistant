@@ -10,10 +10,12 @@ import {
   newEpisodeTemplate,
 } from "../core/episodeTemplate";
 import {
-  WORK_FORMATS,
+  selectableWorkFormats,
   type WorkFormatDef,
   type WorkFormatKey,
 } from "../core/workFormat";
+import { WORK_KINDS, type WorkKindKey } from "../core/workKind";
+import { readWorkKind } from "../core/workKindStore";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import { openInDefaultEditor } from "../views/openDocument";
 
@@ -58,7 +60,8 @@ export async function chooseWorkType(
 ): Promise<WorkFormatDef | "unset" | undefined> {
   const picked = await vscode.window.showQuickPick(
     [
-      ...WORK_FORMATS.map((format) => ({
+      // 「脚本」は種類（台本）で選ぶので、ここには並べない（設計書6.109）
+      ...selectableWorkFormats().map((format) => ({
         label: format.label,
         detail: format.description,
         format: format as WorkFormatDef | undefined,
@@ -83,6 +86,40 @@ export async function chooseWorkType(
   );
   if (!picked || isCancelItem(picked)) return undefined;
   return picked.format ?? "unset";
+}
+
+/**
+ * 作るときに種類を選んでもらう（設計書6.109）。
+ *
+ * **先頭の「小説」を選べば、これまでとまったく同じ作品になる。** 種類で
+ * 変わるのは雛形・数え方の目安・原稿エディタの組み方・出力の組み方だけで、
+ * あとから「作品別設定」の「作品の種類」で変えられる（本文は書き換えない）。
+ *
+ * @returns 選んだ種類。取りやめ（Esc）なら `undefined`
+ */
+export async function chooseWorkKind(
+  title: string
+): Promise<WorkKindKey | undefined> {
+  const picked = await vscode.window.showQuickPick(
+    [
+      ...WORK_KINDS.map((kind) => ({
+        label: kind.label,
+        detail: kind.description,
+        // `kind` という名前は使えない——QuickPickItem の区切り線の指定と重なる
+        workKind: kind.key as WorkKindKey | undefined,
+      })),
+      // Escでも閉じられるが、それを知らない人には出口が無いように見える
+      { ...cancelItem(), workKind: undefined } as never,
+    ],
+    {
+      title: `「${title}」では何を書きますか？`,
+      placeHolder: "迷ったら「小説」（あとから変えられます）",
+      // 別のウィンドウへ目を移した拍子に消えると、作品名の入力からやり直しになる
+      ignoreFocusOut: true,
+    }
+  );
+  if (!picked || isCancelItem(picked)) return undefined;
+  return picked.workKind;
 }
 
 /**
@@ -155,7 +192,10 @@ export async function ensurePlotFile(work: WorkEntry): Promise<string> {
   await vscode.workspace.fs.createDirectory(path.toUri(settingsDir));
   await vscode.workspace.fs.writeFile(
     path.toUri(plotPath),
-    new TextEncoder().encode(buildPlotTemplate(work.title))
+    // 書き出しの見出しは種類で変わる（設計書6.109。台本なら人物表と箱書き）
+    new TextEncoder().encode(
+      buildPlotTemplate(work.title, await readWorkKind(work))
+    )
   );
   vscode.window.showInformationMessage(
     `「${work.title}」のプロット（${PLOT_FILE}）を作りました。`
@@ -182,10 +222,14 @@ export async function createFirstEpisodeFile(
    */
   onCreated?: (work: WorkEntry) => Promise<void>,
   /**
-   * 作品のタイプ（設計書6.70）。脚本なら雛形から始め、縦書きで開く。
-   * 決めていなければ、これまでどおり空のファイルを横書きで開く。
+   * 作品の形式（設計書6.70）。創作メモ集なら「無題.md」から始める。
    */
-  format?: WorkFormatKey
+  format?: WorkFormatKey,
+  /**
+   * 作品の種類（設計書6.109）。台本なら雛形から始め、縦書きで開く。
+   * 小説・省略なら、これまでどおり空のファイルを横書きで開く。
+   */
+  kind?: WorkKindKey
 ): Promise<string | undefined> {
   const config = await readWorkConfig(work);
   const p = workPaths(work, config);
@@ -205,19 +249,19 @@ export async function createFirstEpisodeFile(
   if (!(await pathExists(filePath))) {
     await vscode.workspace.fs.writeFile(
       path.toUri(filePath),
-      // 脚本だけは形（柱・ト書き・セリフ）を置いておく（設計書6.70）
-      new TextEncoder().encode(newEpisodeTemplate(format))
+      // 小説以外は形（台本なら柱・ト書き・台詞）を置いておく（設計書6.109）
+      new TextEncoder().encode(newEpisodeTemplate(kind))
     );
     // 作ったときだけ基準を置き直す。既にあったなら、記録はもう追えている
     await onCreated?.(work);
   }
 
   // **本文は原稿エディタで開く**（作者の指定、2026-08-29。作品一覧の
-  // クリックと同じ既定に揃える）。向きはタイプで決まる（脚本だけ縦書き）
+  // クリックと同じ既定に揃える）。向きは種類で決まる（台本だけ縦書き）
   await vscode.commands.executeCommand(
     "vscode.openWith",
     path.toUri(filePath),
-    manuscriptViewTypeFor(format)
+    manuscriptViewTypeFor(kind)
   );
   return filePath;
 }

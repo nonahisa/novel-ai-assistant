@@ -1,3 +1,5 @@
+import { kindLineCss } from "./kindLines";
+import type { WorkKindKey } from "./workKind";
 import { zipSync, type Zippable } from "fflate";
 import {
   BOOK_BLOCK_LABELS,
@@ -280,6 +282,12 @@ export interface EpubBook {
   identifier: string;
   /** `dcterms:modified`。`2026-09-03T00:00:00Z` の形（EPUB3で必須） */
   modified: string;
+  /**
+   * 作品の種類（設計書6.109）。**小説以外で本文の行の組み方が変わる**
+   * （台本の柱・ト書き・台詞など。原稿エディタ・PDFと同じ規則）。
+   * 省略・小説なら、いままでと1バイトも変わらない本になる。
+   */
+  kind?: WorkKindKey;
 }
 
 /**
@@ -430,7 +438,8 @@ export function buildEpub(book: EpubBook): Uint8Array {
           headingHref: fonts.heading?.packagedName ?? null,
         },
         // 面ごとの体裁（作者の依頼、2026-09-13）。選んでいなければ何も増えない
-        config.pageLayouts ?? {}
+        config.pageLayouts ?? {},
+        book.kind
       )
     ),
     // **`nav.xhtml` は並びに目次が無くても作る**（EPUB3で必須。第1段からの
@@ -554,6 +563,8 @@ export function buildEpub(book: EpubBook): Uint8Array {
           caption: item.caption,
         })),
         pageBreaks: chapter.pageBreaks,
+        // 行の印（設計書6.109）。本文の話だけ——あとがきは作者の地の文
+        kind: book.kind,
       })
     );
   }
@@ -1658,8 +1669,14 @@ export interface EpubCssFonts {
 export function buildEpubCss(
   vertical: boolean,
   fonts: EpubCssFonts = {},
-  pageLayouts: BookPageLayouts = {}
+  pageLayouts: BookPageLayouts = {},
+  /**
+   * 作品の種類（設計書6.109）。**値は原稿エディタ・PDFと同じ**
+   * （`core/kindLines.ts`）。小説・省略なら1行も増えない
+   */
+  kind?: WorkKindKey
 ): string {
+  const kindCss = kindLineCss(kind);
   const direction = vertical
     ? [
         "html {",
@@ -1718,6 +1735,9 @@ export function buildEpubCss(
     "  -webkit-text-combine: horizontal;",
     "  text-combine-upright: all;",
     "}",
+    // 種類ごとの行の組み方（設計書6.109。台本の柱・ト書き・台詞など）。
+    // **小説では1行も出さない**——これまでの本と1バイトも変えない
+    ...(kindCss ? [kindCss] : []),
     // 挿絵（設計書6.65.10）。本文の流れに入るので、面いっぱいには広げず
     // 前後に空きを取る。解説文は画像の直後（重ねない）
     "figure { margin: 0; padding: 0; }",

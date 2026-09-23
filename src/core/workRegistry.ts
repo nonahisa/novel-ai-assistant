@@ -10,9 +10,11 @@ import {
   WorkAnnounceConfig,
   WorkConfig,
   WorkEntry,
+  WorkKindKey,
 } from "../models/types";
 import { atomicWriteFile } from "./atomicWrite";
 import { buildPlotTemplate } from "./plotTemplate";
+import { parseWorkKind } from "./workKind";
 import { canRegisterWork, describeWorkLimit } from "./editorMode";
 import { currentMode } from "./actorContext";
 import { parseSeriesConfig } from "./seriesLink";
@@ -861,6 +863,9 @@ export function parseWorkConfig(raw: unknown): WorkConfig {
   // シリーズの連結（設計書6.95）。**壊れていても投げない**——`announce` と
   // 同じ理由で、手で書き間違えたせいで作品そのものが開けなくなるのは困る
   const series = parseSeriesConfig(value.series);
+  // 作品の種類（設計書6.109）。**知らない値は無かったことにする**（投げない）
+  // ——新しい版で種類が増えたあと古い版で開いても、作品は開ける
+  const kind = parseWorkKind(value.kind);
 
   return {
     schemaVersion: (value.schemaVersion as string).trim(),
@@ -872,6 +877,7 @@ export function parseWorkConfig(raw: unknown): WorkConfig {
     // 書き戻したJSONに欄が現れたり消えたりして、Gitの差分が毎回濁る
     ...(announce ? { announce } : {}),
     ...(series ? { series } : {}),
+    ...(kind ? { kind } : {}),
   };
 }
 
@@ -1001,7 +1007,14 @@ export async function writeWorkConfig(
 export async function scaffoldWorkFolder(
   folderPath: string,
   title: string,
-  options: { withPlot?: boolean } = {}
+  options: {
+    withPlot?: boolean;
+    /**
+     * 作品の種類（設計書6.109）。小説（または省略）なら何も書かない
+     * ——**これまでと1バイトも変わらない設定ファイル**になる。
+     */
+    kind?: WorkKindKey;
+  } = {}
 ): Promise<void> {
   const fs = vscode.workspace.fs;
   try {
@@ -1032,6 +1045,9 @@ export async function scaffoldWorkFolder(
     manuscriptDir: DEFAULT_MANUSCRIPT_DIR,
     settingsDir: DEFAULT_SETTINGS_DIR,
     createdAt: new Date().toISOString(),
+    // 小説は書かない。書かなくても小説として読まれるので、これまでの
+    // 作品と同じ形の設定ファイルにしておく（欄が増えるのは選んだときだけ）
+    ...(options.kind && options.kind !== "novel" ? { kind: options.kind } : {}),
   };
   await fs.writeFile(
     path.toUri(path.join(folderPath, AIWRITER_DIR, CONFIG_FILE)),
@@ -1052,7 +1068,7 @@ export async function scaffoldWorkFolder(
   if (options.withPlot ?? true) {
     await writeIfAbsent(
       path.join(folderPath, DEFAULT_SETTINGS_DIR, PLOT_FILE),
-      buildPlotTemplate(title)
+      buildPlotTemplate(title, options.kind)
     );
   }
 }

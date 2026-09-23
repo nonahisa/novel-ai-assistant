@@ -2053,9 +2053,9 @@ describe("脚本の行（組んで書く面）", () => {
     expect((node.attributes ?? {}).class ?? "").toBe("line");
   });
 
-  it("脚本以外の画面は、タイプを渡さないときと1バイトも変わらない", () => {
+  it("小説の画面は、種類を渡さないときと1バイトも変わらない", () => {
     expect(
-      buildManuscriptEditorHtml("NONCE123", "vscode-resource:", "long")
+      buildManuscriptEditorHtml("NONCE123", "vscode-resource:", "novel")
     ).toBe(html);
   });
 });

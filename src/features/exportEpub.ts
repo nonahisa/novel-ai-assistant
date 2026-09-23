@@ -17,6 +17,7 @@ import { readTextFile, type TextFileContent } from "../core/textFile";
 import { bookChaptersOf } from "../core/bookChapters";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
+import { readWorkKind } from "../core/workKindStore";
 import { readWorkFormat } from "../core/workFormatStore";
 import { bookHeading } from "../core/episodeLabel";
 import { episodeGroupLabels } from "../core/chapterGrouping";
@@ -343,6 +344,8 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       // 本を見分ける唯一の札。書き出すたびに新しい本として扱われる
       identifier: `urn:uuid:${randomUuid()}`,
       modified: isoSeconds(new Date()),
+      // 本文の行の組み方は種類で決まる（設計書6.109。台本は柱・ト書き・台詞）
+      kind: await readWorkKind(work),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
