@@ -38,7 +38,33 @@ export function tooLargeMessage(fileName: string): string {
 
 /** 拡張子（点なし・小文字）がバックアップとして受け取れるものか */
 export function isBackupFileName(fileName: string): boolean {
+  return BACKUP_FILE_EXTENSIONS.includes(extensionOf(fileName));
+}
+
+/**
+ * Word 原稿の拡張子（作者の裁定、2026-09-23：相談パネルへ落とせるように）。
+ *
+ * **古い形式の `.doc` は入れない。** 中身が別物（ZIPではない）で、既存の
+ * Word 変換（設計書6.85）も読めない。受け取ってから断るより、選ぶ画面に
+ * 出さないほうが迷わない（落とされたら、バックアップでも Word でもないと言う）。
+ */
+export const WORD_FILE_EXTENSIONS = ["docx"];
+
+/** 相談パネルへ落とせるものの拡張子（バックアップと Word 原稿） */
+export const DROP_FILE_EXTENSIONS = [...BACKUP_FILE_EXTENSIONS, ...WORD_FILE_EXTENSIONS];
+
+/** Word 原稿（.docx）か */
+export function isWordFileName(fileName: string): boolean {
+  return WORD_FILE_EXTENSIONS.includes(extensionOf(fileName));
+}
+
+/** 相談パネルへ落として受け取れるものか */
+export function isDroppableFileName(fileName: string): boolean {
+  return DROP_FILE_EXTENSIONS.includes(extensionOf(fileName));
+}
+
+/** 点なし・小文字の拡張子。無ければ空 */
+function extensionOf(fileName: string): string {
   const dot = fileName.lastIndexOf(".");
-  if (dot < 0) return false;
-  return BACKUP_FILE_EXTENSIONS.includes(fileName.slice(dot + 1).toLowerCase());
+  return dot < 0 ? "" : fileName.slice(dot + 1).toLowerCase();
 }

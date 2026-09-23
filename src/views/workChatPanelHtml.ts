@@ -28,7 +28,10 @@
  * 1つだけ出す（横なら「メインに表示」、大きい画面なら「サブに戻す」）。
  * 両方に両方を出すと、どちらが今の面なのか読めなくなる。
  */
-import { BACKUP_DROP_MAX_BYTES } from "../core/backupFileKinds";
+import {
+  BACKUP_DROP_MAX_BYTES,
+  DROP_FILE_EXTENSIONS,
+} from "../core/backupFileKinds";
 
 /**
  * 大きく開いたときだけ出すツールバー。
@@ -418,7 +421,7 @@ ${large ? TOOLBAR_HTML : ""}
       <li>この人物の動機がぼやけている気がする</li>
     </ul>
     <div class="backup-hint">
-      投稿サイトのバックアップ（ZIP／テキスト）をここへ落とすと、どの作品のものかを確かめて取り込みます。<br>
+      投稿サイトのバックアップ（ZIP／テキスト）や Word 原稿（.docx）をここへ落とすと、どの作品のものかを確かめて取り込みます。<br>
       うまく落とせないときは、Shiftを押しながら落とすか、下のボタンから選んでください。<br>
       <button class="action secondary" id="pick-backup">バックアップを渡す</button>
     </div>
@@ -1215,7 +1218,8 @@ if (applyToSettingsEl) {
   （core/backupFileKinds.ts）を組み立てのときに埋め込む。
 */
 const MAX_BACKUP_BYTES = ${BACKUP_DROP_MAX_BYTES};
-const BACKUP_NAME_PATTERN = /\\.(zip|txt|md)$/i;
+// 受け取れる拡張子も同じ値から組む（バックアップと Word 原稿。core/backupFileKinds.ts）
+const BACKUP_NAME_PATTERN = /\\.(${DROP_FILE_EXTENSIONS.join("|")})$/i;
 let dragDepth = 0;
 
 function appendNote(text) {

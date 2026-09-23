@@ -134,8 +134,11 @@ export interface WorkZipInspection {
   readonly site: PostingSiteId | null;
   /** 採った作品名 */
   readonly title: string;
-  /** 題をどこから採ったか。作者への説明に使う */
-  readonly titleSource: "about" | "zipName";
+  /**
+   * 題をどこから採ったか。作者への説明に使う。`fileName` は ZIP でない
+   * ファイル（相談パネルへ落とされた Word 原稿。`wordManuscript.ts`）の名前
+   */
+  readonly titleSource: "about" | "zipName" | "fileName";
   /**
    * 話番号の点検——重複と欠番（作者の指示、2026-09-19。0.69.10）。
    *

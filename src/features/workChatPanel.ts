@@ -174,6 +174,8 @@ import { openInDefaultEditor } from "../views/openDocument";
 import {
   BACKUP_DROP_MAX_BYTES,
   BACKUP_FILE_EXTENSIONS,
+  DROP_FILE_EXTENSIONS,
+  WORD_FILE_EXTENSIONS,
   tooLargeMessage,
 } from "../core/backupFileKinds";
 import type { ImportAsNewWork, ShowBackupProposals } from "./backupDrop";
@@ -1510,8 +1512,12 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       canSelectFolders: false,
       canSelectMany: false,
       openLabel: "これを渡す",
-      title: "相談パネルへ渡すバックアップを選ぶ（ZIP／テキスト）",
-      filters: { "バックアップ（ZIP／テキスト）": [...BACKUP_FILE_EXTENSIONS] },
+      title: "相談パネルへ渡すバックアップ・Word 原稿を選ぶ（ZIP／テキスト／.docx）",
+      filters: {
+        "バックアップ・Word 原稿": [...DROP_FILE_EXTENSIONS],
+        "バックアップ（ZIP／テキスト）": [...BACKUP_FILE_EXTENSIONS],
+        "Word 原稿（.docx）": [...WORD_FILE_EXTENSIONS],
+      },
     });
     if (!picked) return;
     await this.readAndHandleBackup(picked);
@@ -1547,7 +1553,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       });
       return;
     }
-    await this.handleBackup(fileName, bytes);
+    // 場所も渡す：Word 原稿が作品フォルダーの中にあれば、その作品の続きと見る手掛かり
+    await this.handleBackup(fileName, bytes, fromUri(uri));
   }
 
   /**
@@ -1557,7 +1564,12 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * 取り込みの部品（ZIPの展開など）は大きいので、落とされたときに初めて読む
    * ——相談パネルを開くたびに読み込む必要は無い。
    */
-  private async handleBackup(fileName: string, bytes: Uint8Array): Promise<void> {
+  private async handleBackup(
+    fileName: string,
+    bytes: Uint8Array,
+    /** 場所が分かるとき（エクスプローラー・選ぶ画面から）。Word 原稿の照合に使う */
+    sourcePath?: string
+  ): Promise<void> {
     if (this.receivingBackup) {
       this.postAll({
         type: "note",
@@ -1573,7 +1585,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       });
       const { receiveBackup } = await import("./backupDrop.js");
       const result = await receiveBackup(
-        { fileName, bytes },
+        { fileName, bytes, ...(sourcePath ? { sourcePath } : {}) },
         {
           works: this.registry.list(),
           importAsNew: this.backupImporter,

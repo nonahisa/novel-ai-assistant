@@ -27,18 +27,15 @@ import {
   missingEpisodeFiles,
   type MissingEpisodeFile,
 } from "../core/backupMissingEpisodes";
-import { AtomicWriteFileError, atomicWriteFile } from "../core/atomicWrite";
-import {
-  episodeNameStyleOf,
-  nextEpisodeFileNameLike,
-} from "../core/episodeRenumber";
-import { findLatestEpisode } from "../core/latestEpisode";
-import {
-  encodeForNewFile,
-  readTextFile,
-  type TextFileContent,
-} from "../core/textFile";
+import { readTextFile } from "../core/textFile";
 import type { Chapter } from "../models/chapter";
+import {
+  nameNewEpisodes,
+  writeNewEpisodes,
+  type EpisodeNotAdded,
+  type NamedEpisodeFile,
+  type WorkScan,
+} from "./addEpisodeFiles";
 import { episodePathFor } from "../core/bookStore";
 import { ChapterStore } from "../core/chapterStore";
 import { logFailure, logStep, useLogFile } from "../core/logger";
@@ -52,8 +49,10 @@ import {
 import {
   BACKUP_DROP_MAX_BYTES,
   isBackupFileName,
+  isWordFileName,
   tooLargeMessage,
 } from "../core/backupFileKinds";
+import { receiveWordManuscript } from "./wordDrop";
 import type { ChapterSet } from "../models/chapter";
 import {
   withReaderStats,
@@ -61,7 +60,7 @@ import {
   type PostingLedger,
 } from "../models/posting";
 import type { WorkEntry } from "../models/types";
-import { cancelItem, isCancelItem } from "../views/dialogs";
+import { pickDropTarget } from "./dropTargetPick";
 import { saveGeneratedMarkdown } from "../views/openDocument";
 import { withProgress } from "../views/progress";
 import type { PickedBackup } from "./importWorkFromZip";
@@ -132,9 +131,25 @@ export interface BackupDropResult {
  * @returns 相談パネルに出す結果。**作者が取りやめたら undefined**（何も出さない）
  */
 export async function receiveBackup(
-  source: { readonly fileName: string; readonly bytes: Uint8Array },
+  source: {
+    readonly fileName: string;
+    readonly bytes: Uint8Array;
+    /**
+     * 落とされたファイルの場所（エクスプローラーから落としたときだけ分かる）。
+     * Word 原稿が作品フォルダーの中にあれば、その作品の続きと見る手掛かりになる
+     */
+    readonly sourcePath?: string;
+  },
   deps: BackupDropDeps
 ): Promise<BackupDropResult | undefined> {
+  /*
+    **Word 原稿（.docx）は別の道へ**（作者の裁定、2026-09-23）。受け口は
+    バックアップと同じ1つにして、中で分ける——相談パネルの側は、落とされた
+    ものが何かを知らなくてよい。
+  */
+  if (isWordFileName(source.fileName)) {
+    return receiveWordManuscript(source, deps);
+  }
   // **編集部は取り込まない**（設計書5.6）。「バックアップから取り込む」は
   // 編集者モードで使えない操作なので、持ち込みの口からも開かない
   /*
@@ -160,7 +175,7 @@ export async function receiveBackup(
     return {
       message:
         `「${source.fileName}」はバックアップとして読めません。` +
-        "投稿サイトからダウンロードした ZIP か .txt を渡してください。",
+        "投稿サイトからダウンロードした ZIP か .txt、または Word 原稿（.docx）を渡してください。",
     };
   }
   if (source.bytes.byteLength > BACKUP_DROP_MAX_BYTES) {
@@ -324,39 +339,16 @@ function describeDifferentId(
 }
 
 /**
- * 作品を選ばせる。候補を先に、その下に残りの作品と「新しい作品として」を並べる。
- *
- * **全部の作品を出す。** 候補の読み違いで正しい作品が漏れていても、
- * 作者がここで拾えるようにしておく。
+ * 作品を選ばせる（選び方は Word 原稿と共有。`dropTargetPick.ts`）。
  */
 async function pickWork(
   candidates: readonly WorkEntry[],
   works: readonly WorkEntry[],
   title: string
 ): Promise<Target | undefined> {
-  type Item = vscode.QuickPickItem & { work?: WorkEntry; isNew?: boolean };
-  const candidateIds = new Set(candidates.map((work) => work.id));
-  const items: Item[] = [
-    ...candidates.map((work) => ({
-      label: work.title,
-      description: "候補",
-      detail: work.folderPath,
-      work,
-    })),
-    ...works
-      .filter((work) => !candidateIds.has(work.id))
-      .map((work) => ({ label: work.title, detail: work.folderPath, work })),
-    { label: "$(add) 新しい作品として取り込む", isNew: true },
-  ];
-  // 閉じる道は呼び出しの中で足す（`quickPickCancel.test.ts` が呼び出しごとに見る）
-  const picked = await vscode.window.showQuickPick<Item>([...items, cancelItem()], {
-    title,
-    placeHolder: "取り込み先の作品を選んでください",
-    matchOnDetail: true,
-  });
-  if (!picked || isCancelItem(picked)) return undefined;
-  if (picked.isNew) return "new";
-  return picked.work ? { work: picked.work, by: "chosen" } : undefined;
+  const picked = await pickDropTarget(candidates, works, title);
+  if (picked === undefined || picked === "new") return picked;
+  return { work: picked, by: "chosen" };
 }
 
 /* ── 当たらなかった：新しい作品として ─────────────────── */
@@ -465,7 +457,7 @@ async function mergeIntoWork(
     名前を決められなかった話・中身を用意できなかった話も、ここで言う。
   */
   const prepared = missingEpisodeFiles(picked.inspection, plan.missingEpisodes);
-  const naming = nameMissingEpisodes(
+  const naming = nameNewEpisodes(
     prepared.files,
     scan,
     local.map((source) => source.manuscriptName)
@@ -569,129 +561,6 @@ async function readLocalSources(
   return { sources, scan };
 }
 
-/** 走査の結果（使うのは話の一覧と本文フォルダーだけ） */
-type WorkScan = Awaited<ReturnType<typeof scanWork>>;
-
-/** 足す1話ぶん（名前が決まったもの） */
-interface NamedEpisodeFile {
-  readonly file: MissingEpisodeFile;
-  /** 本文フォルダーからの名前（`/` 区切り） */
-  readonly name: string;
-}
-
-/**
- * 手元に無い話の名前を決める（作者の裁定、2026-09-23）。
- *
- * **手元の話の名前の流儀に合わせる**——「新しい話を作る」
- * （`novelai.addEpisode`）と同じ `nextEpisodeFileNameLike` を通す。流儀が
- * 読めない作品（合本1つだけ等）では「合本を話ごとに分ける」と同じ名前にする。
- * カクヨムの話ごとのファイルは名前を変えない（次のバックアップと名前で照らす）。
- *
- * **既にある名前には置かない**（上書きしない。実装ルール2）。ぶつかったら
- * その話は足さず、理由を言う。
- */
-function nameMissingEpisodes(
-  files: readonly MissingEpisodeFile[],
-  scan: WorkScan,
-  existing: readonly string[]
-): { named: NamedEpisodeFile[]; skipped: { label: string; reason: string }[] } {
-  const latest = findLatestEpisode(scan.episodes);
-  const style = latest ? episodeNameStyleOf(latest.fileName) : null;
-  const used = new Set(existing.map((name) => name.toLowerCase()));
-  const named: NamedEpisodeFile[] = [];
-  const skipped: { label: string; reason: string }[] = [];
-  for (const file of files) {
-    const name =
-      file.renamable && latest && style
-        ? nextEpisodeFileNameLike({
-            latestFileName: latest.fileName,
-            number: file.number,
-            fallback: { digits: 4, extension: style.ext },
-          })
-        : file.defaultFileName;
-    if (used.has(name.toLowerCase())) {
-      skipped.push({
-        label: file.label,
-        reason: `同じ名前のファイル（${name}）が既にあります（上書きしません）`,
-      });
-      continue;
-    }
-    used.add(name.toLowerCase());
-    named.push({ file, name });
-  }
-  return { named, skipped };
-}
-
-/**
- * 手元に無い話を、新しいファイルとして足す。**`mode: "create"` だけ**
- * （既にあれば失敗する。実装ルール2の3経路の②）。
- *
- * 合本から切り出した話は**手元の原稿と同じ文字コード・改行**で書く
- * （`encodeForNewFile`。いちばん新しい話を手本にする）。手本が読めなければ
- * UTF-8・LF。カクヨムの話ごとのファイルはバックアップのバイト列のまま
- * （6.99 の新規取り込みと同じ）。
- *
- * @returns 足せた話（章を立てるのに使う）と、足せなかった話（理由つき）
- */
-async function writeMissingEpisodes(
-  work: WorkEntry,
-  scan: WorkScan,
-  files: readonly NamedEpisodeFile[]
-): Promise<{
-  added: { file: MissingEpisodeFile; path: string }[];
-  skipped: { label: string; reason: string }[];
-}> {
-  const added: { file: MissingEpisodeFile; path: string }[] = [];
-  const skipped: { label: string; reason: string }[] = [];
-  if (files.length === 0) return { added, skipped };
-
-  const latest = findLatestEpisode(scan.episodes);
-  let reference: TextFileContent | undefined;
-  if (latest) {
-    try {
-      reference = await readTextFile(latest.filePath);
-    } catch {
-      // 手本が読めなければ UTF-8・LF で書く（新しいファイルなので壊すものは無い）
-    }
-  }
-
-  for (const { file, name } of files) {
-    const target = path.join(scan.manuscriptDir, name);
-    const bytes =
-      file.content.kind === "bytes"
-        ? file.content.bytes
-        : reference
-          ? encodeForNewFile(file.content.text, reference)
-          : new TextEncoder().encode(file.content.text);
-    if (!bytes) {
-      skipped.push({
-        label: file.label,
-        reason: `手元の原稿の文字コード（${reference?.encoding ?? ""}）で書けない文字があります`,
-      });
-      continue;
-    }
-    try {
-      await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
-      await atomicWriteFile(target, bytes, { mode: "create" });
-      added.push({ file, path: target });
-    } catch (error) {
-      skipped.push({
-        label: file.label,
-        reason:
-          error instanceof AtomicWriteFileError && error.kind === "path_conflict"
-            ? `同じ名前のファイル（${name}）が既にあります（上書きしません）`
-            : messageOf(error),
-      });
-      logFailure("相談パネル：バックアップの話を新しいファイルとして足せなかった", {
-        作品: work.title,
-        ファイル: target,
-        詳細: messageOf(error),
-      });
-    }
-  }
-  return { added, skipped };
-}
-
 /**
  * 足した話から始まる章を、章の台帳の**末尾へ足す**。
  *
@@ -744,7 +613,7 @@ async function applyMergePlan(
     /** 足す話（作者が「話は足さずに」を選んだら空） */
     files: readonly NamedEpisodeFile[];
     /** 押す前から足せないと分かっていた話 */
-    notAdded: readonly { label: string; reason: string }[];
+    notAdded: readonly EpisodeNotAdded[];
   }
 ): Promise<BackupDropResult> {
   const failures: string[] = [];
@@ -793,7 +662,7 @@ async function applyMergePlan(
     既存の話には触らない（`mode: "create"` だけ）。章のある作品では、
     足した話から始まる章を台帳の末尾へ足す。
   */
-  const written = await writeMissingEpisodes(work, episodes.scan, episodes.files);
+  const written = await writeNewEpisodes(work, episodes.scan, episodes.files);
   const notAdded = [...episodes.notAdded, ...written.skipped];
   let appendedChapters = 0;
   if (written.added.length > 0) {
