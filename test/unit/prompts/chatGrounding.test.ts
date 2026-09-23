@@ -6,7 +6,10 @@ import {
 import {
   WORK_CHAT_SYSTEM_PROMPT,
   WORK_CHAT_VERSION,
+  parseWorkChatAnswer,
 } from "../../../src/prompts/workChat";
+import { applyWriterStyleSignals } from "../../../src/core/writerStyle";
+import type { WriterProfile } from "../../../src/core/writerProfileStore";
 import { BASE_SYSTEM_PROMPT } from "../../../src/prompts/characterExtract";
 
 /**
@@ -191,7 +194,51 @@ describe("版", () => {
     // 3.15（2026-09-23）：道順の例に出すメニュー名を組み直しに合わせた
     // 3.16（2026-09-23）：起動できる機能の札へ「応募先をAIに提案してもらう」を足した
     // （設計書6.3.6.5。詳細メニューに無い隠し機能で、相談が入口の1つ）
-    expect(WORK_CHAT_VERSION).toBe("3.16");
+    // 3.17（2026-09-23）：出力形式の例に "writerStyleSignals": null を足した
+    expect(WORK_CHAT_VERSION).toBe("3.17");
     expect(SETTINGS_CHAT_VERSION).toBe("3.0");
+  });
+});
+
+/**
+ * **出力形式の例が、そのまま答えとして返ってきても何も動かない**
+ * （2026-09-23・v3.16）。
+ *
+ * CLAUDE.md「繰り返し起きた失敗」3番——指示の言葉は答えの中身として
+ * 返ってくる。例に `"writerStyleSignals": null` を足したので、小さいモデルが
+ * 例の行を丸ごと写して返すことを前提に、**作者の書き方（直す時期）も
+ * 助言方針も1つも動かない**ことを確かめる。
+ */
+describe("出力形式の例が写されて返っても、書き方も方針も動かない", () => {
+  const example = WORK_CHAT_SYSTEM_PROMPT.split("\n").find((line) =>
+    line.startsWith('{"reply"')
+  );
+
+  test("例には writerStyleSignals と profileSignals の欄があり、どちらも null", () => {
+    expect(example).toBeDefined();
+    const raw = JSON.parse(example ?? "{}") as Record<string, unknown>;
+    expect(raw).toHaveProperty("writerStyleSignals", null);
+    expect(raw).toHaveProperty("profileSignals", null);
+  });
+
+  test("例の行を読み解くと、どちらの読み取りも「無し」になる", () => {
+    const answer = parseWorkChatAnswer(example ?? "");
+    expect(answer.writerStyleSignals).toBeUndefined();
+    expect(answer.profileSignals).toBeUndefined();
+
+    // 反映の関数にそのまま渡しても、同じ記録が返る（書き戻しが起きない）
+    const profile: WriterProfile = {
+      style: {
+        situation: "have_files",
+        plan: "hybrid",
+        revise: "per_episode",
+        material: "memo",
+        outlet: "serial",
+      },
+      updatedAt: "2026-09-13T00:00:00.000Z",
+    };
+    expect(applyWriterStyleSignals(profile, answer.writerStyleSignals)).toBe(
+      profile
+    );
   });
 });

@@ -74,7 +74,12 @@ import {
 // 3.16: 起動できる機能の札（`runnableFeatureList`）に「応募先をAIに提案して
 //       もらう」を足した（設計書6.3.6.5。詳細メニューに無い隠し機能で、相談が
 //       入口の1つ）。**指示の中身は変えていないが、送る本文が変わる**ので版を上げる
-export const WORK_CHAT_VERSION = "3.16";
+// 3.17: 【出力形式】の例に "writerStyleSignals": null を足し、「末尾に説明が
+//       あるときだけ」の断りを writerStyleSignals にも掛けた（点検、2026-09-23）。
+//       欄は 3.x からスキーマにあるのに例に無く、例だけ見て組む小さいモデルが
+//       欄を落とす・勝手な値を入れる余地があった。**例の null がそのまま返っても
+//       何も動かない**ことは `chatGrounding.test.ts` が見張る
+export const WORK_CHAT_VERSION = "3.17";
 
 /**
  * 送るときの温度。相談は考えを広げる場なので、抽出よりは揺らす。
@@ -281,9 +286,9 @@ const SYSTEM_PROMPT_TAIL = `【本文の場所を指すとき】
   提案として並び、作者が選んだものだけが反映されます
 
 【出力形式】JSONのみ。前置き・後書き・コードフェンスを含めないこと。
-{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "...", "locate": {"path": "...", "text": "...", "label": "..."}, "reloadRecord": {"kind": "character", "name": "${EXAMPLE_PERSON.fullName}", "notes": "他の登場人物『${EXAMPLE_OTHER.fullName}』の情報が混入しています。"}, "profileSignals": null}
+{"reply": "...", "options": ["...", "..."], "needFiles": [], "edit": {"target": "...", "content": "...", "label": "..."}, "run": "...", "locate": {"path": "...", "text": "...", "label": "..."}, "reloadRecord": {"kind": "character", "name": "${EXAMPLE_PERSON.fullName}", "notes": "他の登場人物『${EXAMPLE_OTHER.fullName}』の情報が混入しています。"}, "profileSignals": null, "writerStyleSignals": null}
 
-**profileSignals は、末尾に説明があるときだけ使ってください。** 説明が無ければ必ず null にしてください。`;
+**profileSignals と writerStyleSignals は、末尾に説明があるときだけ使ってください。** 説明が無ければ必ず null にしてください。`;
 
 /**
  * システムの指示を組み立てる。
