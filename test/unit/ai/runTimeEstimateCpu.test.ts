@@ -134,6 +134,7 @@ describe("CPUだけの機械でも、目安が実際の時間の桁に入る", (
     expect(estimate).toEqual({
       ms: LAPTOP_CHUNKS.length * OLD_SECONDS_PER_CHUNK * 1000,
       source: "fixed",
+      unmeasured: "both",
     });
     const text = describeCallTimeEstimate(estimate!);
     expect(text).toBe("目安 2 分程度（この機械ではまだ速さを測っていないので、決め打ちの見込みです）");
@@ -208,7 +209,8 @@ describe("見積もりの式（1か所だけに置く）", () => {
         outputTokensPerCall: 50,
         fallbackSecondsPerCall: 20,
       })
-    ).toEqual({ ms: 20_000, source: "fixed" });
+    // 書く量はあるので、欠けたのは書き出しの速さ（名乗りが名指しする）
+    ).toEqual({ ms: 20_000, source: "fixed", unmeasured: "speed" });
   });
 
   it("実測から出した目安は、実測からだと名乗る", () => {

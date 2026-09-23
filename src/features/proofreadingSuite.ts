@@ -32,7 +32,7 @@ import { scanWork } from "../core/scanner";
 import { readChunkSettings } from "./chunkSettings";
 import type { AIRegistry, AssignableFeature } from "../ai/registry";
 import { estimateCallsTimeFor } from "../ai/runTimeEstimate";
-import type { CallTimeEstimate } from "../core/etaEstimate";
+import { mergeCallTimeEstimates, type CallTimeEstimate } from "../core/etaEstimate";
 
 /**
  * 校正をまとめて実行する（設計書6.80）。
@@ -502,15 +502,6 @@ function averageChunkTime(
     });
     if (estimate) estimates.push(estimate);
   }
-  if (estimates.length === 0) return undefined;
-
-  const ms =
-    estimates.reduce((total, estimate) => total + estimate.ms, 0) /
-    estimates.length;
-  const source = estimates.every((estimate) => estimate.source === "measured")
-    ? "measured"
-    : estimates.every((estimate) => estimate.source === "fixed")
-      ? "fixed"
-      : "partial";
-  return { ms, source };
+  // 平均の取り方と、何を測っていないかの持ち越しは1か所（`core/etaEstimate.ts`）
+  return mergeCallTimeEstimates(estimates);
 }

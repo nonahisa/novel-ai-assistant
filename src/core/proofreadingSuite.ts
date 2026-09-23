@@ -435,6 +435,8 @@ export function describeSuiteRunTime(
   return describeCallTimeEstimate({
     ms: perChunk.ms * totalChunks,
     source: perChunk.source,
+    // 何を測っていないかも連れて歩く（名乗りがそれを名指しする）
+    unmeasured: perChunk.unmeasured,
   });
 }
 
