@@ -324,6 +324,56 @@ export function describeRunTimeEstimate(params: {
   return `${params.count}件 ≒ ${describeDuration(params.ms)}（${source}）`;
 }
 
+/**
+ * 書く量の平均がまだ無く、**読み込みの時間だけが実測で分かる**ときの言い方
+ * （ノートPCの実機、0.76.1、2026-09-23）。
+ *
+ * ## なぜ1つの数字にしないか
+ *
+ * CPUだけの gemma4:e2b で誤字脱字を5チャンクに掛けると、確認画面は
+ * 「5件 ≒ およそ2時間（同梱の目安から。多めに見ています）」だった。
+ * 台帳には読み込み・書き出しの速さの実測があったのに、**誤字脱字が1回に
+ * 書く量**はまだ測っておらず、同梱の表の**最大**（8,753トークン）を
+ * 6.7トークン/秒で割った1時間50分が、そのまま目安の顔をしていた。
+ *
+ * 抽出の目安（`estimateCallsTime` を通る側）は、時間には**平均しか使わない**。
+ * 最大は容量のための値で、時間に使えば必ず過大になる。こちらもそれに
+ * そろえ、**確かに分かっている読み込みの時間を下限として言い**、最大は
+ * 「長いほうの端」として添えるだけにする。どちらの端も実測か同梱の値で、
+ * **当てずっぽうの数字は作らない**（6.8.19 の約束のまま）。
+ */
+export function describeRunTimeRange(params: {
+  /** これからAIへ送る件数 */
+  readonly count: number;
+  /** 読み込みだけにかかる時間（実測の速さから）。**下限** */
+  readonly readMs: number;
+  /** 読み込み＋最大ぶん書いたときの時間。最大が無ければ `undefined` */
+  readonly upperMs?: number;
+  /** 長いほうの端の出どころ（`upperMs` があるときだけ意味を持つ） */
+  readonly upperBasis?: Exclude<RunTimeEstimateBasis, "average">;
+}): string {
+  const lower = describeDuration(params.readMs);
+  if (params.upperMs === undefined || params.upperBasis === undefined) {
+    return (
+      `${params.count}件 ≒ 読み込みだけで${lower}` +
+      "（読み込みは実測から。1回に書く量はまだ測っていないので、" +
+      "実際はこれより長くかかります）"
+    );
+  }
+  const source =
+    params.upperBasis === "bundled-max" ? "同梱の目安" : "これまでの実測の最大";
+  const note =
+    `読み込みは実測から。1回に書く量はまだ測っていないので、` +
+    `長いほうは${source}から多めに見ています`;
+  // 「およそ10分からおよそ2時間」とは言わない。後ろの「およそ」は落とす
+  const upper = describeDuration(params.upperMs).replace(/^およそ/, "");
+  // 丸めると両端が同じになる（書く量が読み込みに比べて小さい）ときは幅を出さない
+  if (describeDuration(params.upperMs) === lower) {
+    return `${params.count}件 ≒ ${lower}（${note}）`;
+  }
+  return `${params.count}件 ≒ ${lower}から${upper}ほど（${note}）`;
+}
+
 /** 出どころごとの名乗り。**最大を使ったなら、必ず「多め」と言う** */
 const RUN_TIME_BASIS_LABEL: Readonly<Record<RunTimeEstimateBasis, string>> = {
   average: "これまでの実測から",

@@ -79,7 +79,35 @@ export interface RetrievalItem {
  * AIへ渡す出典（`label`）は変えない。これは作者が記録を読むための札である。
  */
 export function describeRetrievedItem(item: RetrievalItem): string {
-  return `${item.source}・${item.label}`;
+  const label = item.source === "本文" ? withoutRepeatedChapter(item.label) : item.label;
+  return `${item.source}・${label}`;
+}
+
+/**
+ * 「第1話 第1話　薄皮の向こう側」→「第1話　薄皮の向こう側」。
+ *
+ * **題そのものが話数で始まる作品がある**（ノートPCの実機、0.76.1、2026-09-23。
+ * 相談の記録に「本文・第1話 第1話　薄皮の向こう側（1/11）」と出た）。
+ * 出典の名前は「話数 ＋ 半角空白 ＋ 題」で作られる
+ * （`core/manuscriptSources.ts` の `episodeLabel`・`collectedEpisodeLabel`）ので、
+ * 題が同じ話数で始まるときだけ、前の話数を落として題を残す。
+ *
+ * **記録の札だけで畳む。** AIへ渡す出典（`label`）を変えるとプロンプトの
+ * 中身が変わり、版とキャッシュに響く。
+ *
+ * 全角の数字（「第１話」）も同じ話数として見る（比べるときだけ揃え、残すのは
+ * 作者の書いた題のまま）。話数の後ろに数字が続くもの（「プロローグ1」と
+ * 「プロローグ12…」）は別の番号なので畳まない。
+ */
+function withoutRepeatedChapter(label: string): string {
+  const space = label.indexOf(" ");
+  if (space <= 0) return label;
+  const chapter = label.slice(0, space).normalize("NFKC");
+  const title = label.slice(space + 1);
+  const normalizedTitle = title.normalize("NFKC");
+  if (!normalizedTitle.startsWith(chapter)) return label;
+  if (/^[0-9]/.test(normalizedTitle.slice(chapter.length))) return label;
+  return title;
 }
 
 /**
