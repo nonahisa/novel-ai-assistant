@@ -50,6 +50,17 @@ vi.mock("../../../src/core/pendingUpdates", async (importOriginal) => ({
   },
 }));
 
+// 人物以外の承認待ち（2026-09-23〜）。ここでは人物の振る舞いだけを見るので、
+// 空の置き場として代役を立てる（本物の読み書きは pendingSettingsUpdates.test.ts）
+vi.mock("../../../src/core/pendingSettingsUpdates", () => ({
+  PendingSettingsUpdateStore: class {
+    async loadAll() {
+      return { updates: [], errors: [] };
+    }
+    async discard() {}
+  },
+}));
+
 vi.mock("../../../src/core/customFieldStore", () => ({
   CustomFieldStore: class {
     async loadFields() {

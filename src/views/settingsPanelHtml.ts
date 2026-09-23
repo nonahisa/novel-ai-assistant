@@ -187,6 +187,28 @@ textarea { resize: vertical; min-height: 32px; }
   font-size: inherit;
 }
 #apply-ruby:hover { background: var(--vscode-button-secondaryHoverBackground); }
+/* 反映待ちの更新の入口。hidden 属性を display で打ち消さないよう、出すときだけ flex にする */
+#pending-updates:not([hidden]) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--vscode-inputValidation-infoBackground, var(--vscode-editorWidget-background));
+  border: 1px solid var(--vscode-inputValidation-infoBorder, var(--vscode-focusBorder));
+}
+#pending-updates-open {
+  padding: 2px 8px;
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  font-size: inherit;
+}
+#pending-updates-open:hover { background: var(--vscode-button-hoverBackground); }
 #list .item {
   padding: 6px 10px;
   cursor: pointer;
@@ -457,6 +479,16 @@ button.danger:hover {
 <div id="layout">
   <div id="sidebar">
     <button id="sidebar-toggle" type="button" title="一覧を畳む">◀ 一覧を畳む</button>
+    <!--
+      **反映待ちの更新の入口**（作者の依頼、2026-09-23 ⑥）。タブの上に置くのは、
+      これが選んでいる1件ではなく資料ぜんぶに効く知らせだからである。
+      件数は拡張側が数えて文ごと送る。0件なら隠す（出しっぱなしの「0件」は読まれない）
+    -->
+    <div id="pending-updates" hidden>
+      <span id="pending-updates-text"></span>
+      <button id="pending-updates-open" type="button"
+        title="提案パネルで1件ずつ確かめて反映します">確かめて反映</button>
+    </div>
     <div id="tabs"></div>
     <input id="search" type="text" placeholder="名前で絞り込む">
     <div id="list"></div>
@@ -553,7 +585,26 @@ button.danger:hover {
     // **一覧の下の「ルビを追加」**（設計書6.12.5）。ここへ入れ忘れていたため、
     // ボタンとスタイルはあるのに押しても何も起きなかった（実機確認 2026-09-06）
     applyRuby: document.getElementById("apply-ruby"),
+    // 反映待ちの更新の入口（2026-09-23）。**クリックの登録まで対で書く**——
+    // 「ルビを追加」は要素を取り忘れて、押しても何も起きなかった
+    pendingUpdates: document.getElementById("pending-updates"),
+    pendingUpdatesText: document.getElementById("pending-updates-text"),
+    pendingUpdatesOpen: document.getElementById("pending-updates-open"),
   };
+
+  /**
+   * 反映待ちの件数を映す。文は拡張側が組んで送る（画面では数えない）。
+   * 空なら隠す。**知らせに件数が無い（古い形）ときは触らない**
+   */
+  function renderPendingUpdates(text) {
+    if (typeof text !== "string") return;
+    el.pendingUpdatesText.textContent = text;
+    el.pendingUpdates.hidden = text === "";
+  }
+
+  el.pendingUpdatesOpen.addEventListener("click", function () {
+    vscode.postMessage({ type: "openPendingUpdates" });
+  });
 
   /**
    * 一覧を畳む（作者の要望、2026-08-16）。
@@ -1868,6 +1919,7 @@ button.danger:hover {
         if (message.workInfo) workInfo = message.workInfo;
         renderTabs();
         renderList();
+        renderPendingUpdates(message.pendingUpdates);
         setStatus(message.notice || "");
         break;
       case "detail":
@@ -1979,6 +2031,7 @@ button.danger:hover {
         renderTabs();
         renderList();
         renderDetail();
+        renderPendingUpdates(message.pendingUpdates);
         setStatus(message.notice || "保存しました。");
         break;
       case "busy":

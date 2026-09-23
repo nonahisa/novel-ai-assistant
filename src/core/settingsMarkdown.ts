@@ -27,6 +27,28 @@ export interface SettingsMarkdownOptions {
   spoilerLevel?: "public" | "staff_only" | "author_only";
   /** 作者が足した項目の定義。人物一覧でのみ使う */
   customFields?: CustomFieldDefinition[];
+  /**
+   * 人物以外の追加項目の定義（2026-09-23〜）。種類ごと。
+   * 無ければ追加項目の行を出さない（これまでの資料と同じ）
+   */
+  customFieldsByKind?: Partial<
+    Record<"ability" | "organization" | "location" | "world", CustomFieldDefinition[]>
+  >;
+}
+
+/**
+ * 追加項目の行。定義された順に並べ、値の無いものは出さない（人物と同じ）。
+ */
+function customFieldLines(
+  values: Record<string, string> | undefined,
+  definitions: CustomFieldDefinition[] | undefined
+): string[] {
+  const lines: string[] = [];
+  for (const field of definitions ?? []) {
+    const value = values?.[field.key]?.trim();
+    if (value) lines.push(`- **${field.label}**: ${value}`);
+  }
+  return lines;
 }
 
 const SPOILER_ORDER: Record<string, number> = {
@@ -87,14 +109,20 @@ export function buildAbilityMarkdown(
   for (const [category, items] of groupByCategory(visible)) {
     lines.push(`## ${category}`, "");
     for (const ability of items) {
-      lines.push(...describeAbility(ability, term));
+      lines.push(
+        ...describeAbility(ability, term, options.customFieldsByKind?.ability)
+      );
     }
   }
 
   return lines.join("\n");
 }
 
-function describeAbility(ability: Ability, term: string): string[] {
+function describeAbility(
+  ability: Ability,
+  term: string,
+  customFields: CustomFieldDefinition[] = []
+): string[] {
   const lines: string[] = [];
   const reading = ability.reading ? `（${ability.reading}）` : "";
   lines.push(`### ${ability.name}${reading}`, "");
@@ -112,6 +140,7 @@ function describeAbility(ability: Ability, term: string): string[] {
   if (ability.userNames.length > 0) {
     lines.push(`- **使い手**: ${ability.userNames.join("、")}`);
   }
+  lines.push(...customFieldLines(ability.customFields, customFields));
   if (ability.appearedChapters.length > 0) {
     lines.push(`- **登場話**: ${formatChapters(ability.appearedChapters)}`);
   }
@@ -199,6 +228,12 @@ export function buildOrganizationMarkdown(
       if (members.length > 0) {
         lines.push(`- **所属する人物**: ${members.join("、")}`);
       }
+      lines.push(
+        ...customFieldLines(
+          organization.customFields,
+          options.customFieldsByKind?.organization
+        )
+      );
       if (organization.appearedChapters.length > 0) {
         lines.push(
           `- **登場話**: ${formatChapters(organization.appearedChapters)}`
@@ -286,6 +321,9 @@ export function buildWorldMarkdown(
       if (item.aliases.length > 0) {
         lines.push(`- **別の言い方**: ${item.aliases.join("、")}`);
       }
+      lines.push(
+        ...customFieldLines(item.customFields, options.customFieldsByKind?.world)
+      );
       if (item.appearedChapters.length > 0) {
         lines.push(`- **登場話**: ${formatChapters(item.appearedChapters)}`);
       }
@@ -334,6 +372,12 @@ export function buildLocationMarkdown(
       if (location.description) {
         lines.push(`- **説明**: ${location.description}`);
       }
+      lines.push(
+        ...customFieldLines(
+          location.customFields,
+          options.customFieldsByKind?.location
+        )
+      );
       if (location.appearedChapters.length > 0) {
         lines.push(`- **登場話**: ${formatChapters(location.appearedChapters)}`);
       }

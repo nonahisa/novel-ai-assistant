@@ -3,10 +3,12 @@ import * as path from "./paths";
 import type { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import {
-  CUSTOM_FIELD_SCHEMA_VERSION,
+  customFieldSetToJson,
   emptyCustomFieldSet,
+  fieldsFor,
   parseCustomFieldSet,
   type CustomFieldDefinition,
+  type CustomFieldKind,
   type CustomFieldSet,
 } from "../models/customField";
 import { atomicWriteFile, createManagedRecoveryPath } from "./atomicWrite";
@@ -73,12 +75,32 @@ export class CustomFieldStore {
     }
   }
 
-  /** 読めなければ空として扱う。表示だけの用途で、失敗させたくない場面で使う */
+  /**
+   * **人物の**項目の定義。読めなければ空として扱う。
+   * 表示だけの用途で、失敗させたくない場面で使う
+   */
   async loadFields(): Promise<CustomFieldDefinition[]> {
+    return this.loadFieldsFor("character");
+  }
+
+  /**
+   * その種類の項目の定義（2026-09-23〜、人物以外にも足せるようにした）。
+   * 読めなければ空として扱う（`loadFields` と同じ）
+   */
+  async loadFieldsFor(kind: CustomFieldKind): Promise<CustomFieldDefinition[]> {
     try {
-      return (await this.load()).fields;
+      return fieldsFor(await this.load(), kind);
     } catch {
       return [];
+    }
+  }
+
+  /** 全種類の定義。読めなければ空の集合（表示だけの用途） */
+  async loadOrEmpty(): Promise<CustomFieldSet> {
+    try {
+      return await this.load();
+    } catch {
+      return emptyCustomFieldSet();
     }
   }
 
@@ -91,11 +113,9 @@ export class CustomFieldStore {
    */
   async save(set: CustomFieldSet): Promise<void> {
     const target = await this.filePath();
-    const body = JSON.stringify(
-      { schemaVersion: CUSTOM_FIELD_SCHEMA_VERSION, fields: set.fields },
-      null,
-      2
-    );
+    // 人物以外の定義（byKind）は中身のあるときだけ書く。人物だけの作品では
+    // これまでと同じ形のファイルになる
+    const body = JSON.stringify(customFieldSetToJson(set), null, 2);
     const bytes = new TextEncoder().encode(`${body}\n`);
 
     await vscode.workspace.fs.createDirectory(

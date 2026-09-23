@@ -19,6 +19,7 @@ import {
   buildWorldMarkdown,
 } from "../core/settingsMarkdown";
 import { CustomFieldStore } from "../core/customFieldStore";
+import { fieldsFor } from "../models/customField";
 import { SynopsisStore } from "../core/synopsisStore";
 import { SYNOPSIS_FILE } from "../core/synopsisDoc";
 import { emptySynopsisSet } from "../models/synopsis";
@@ -170,7 +171,15 @@ export async function generateSettingsDocs(
 
   // 項目の定義が読めなくても資料は作る。追加項目の欄が出ないだけで、
   // 既定の項目まで書き出せなくなるほうが困る
-  const customFields = await new CustomFieldStore(work).loadFields();
+  const customFieldSet = await new CustomFieldStore(work).loadOrEmpty();
+  const customFields = fieldsFor(customFieldSet, "character");
+  // 人物以外の追加項目（2026-09-23〜）。種類ごとの資料にだけ出る
+  const customFieldsByKind = {
+    ability: fieldsFor(customFieldSet, "ability"),
+    organization: fieldsFor(customFieldSet, "organization"),
+    location: fieldsFor(customFieldSet, "location"),
+    world: fieldsFor(customFieldSet, "world"),
+  };
 
   // あらすじが読めなくても他の資料は作る。壊れたJSONで全部を止めない
   let synopses = emptySynopsisSet();
@@ -179,7 +188,11 @@ export async function generateSettingsDocs(
   } catch {
     // 生成できないのはあらすじの節だけ。理由は生成時に既に知らせている
   }
-  const markdownOptions = { workTitle: work.title, customFields };
+  const markdownOptions = {
+    workTitle: work.title,
+    customFields,
+    customFieldsByKind,
+  };
   const abilityTerm = abilitySystem.abilityTerm || "能力";
 
   const allDocs: GeneratedDoc[] = [

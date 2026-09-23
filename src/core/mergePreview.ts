@@ -60,7 +60,7 @@ export function mergeTreeArgs(ours: string, theirs: string): string[] {
  * | `.aiwriter/cache/` | 畳める | 作り直せる |
  * | `.aiwriter/config.json` | 畳める | 作品名と置き場の名前。食い違うのは登録した時刻ぐらいである |
  * | `.aiwriter/history/`・提案・ロック | **両方の行を残す** | 追記型なので、両方の行を残せば正しい記録になる（`editHistory.ts`）。見分けるのは `isAppendOnlyPath` |
- * | `.aiwriter/pending-characters/` | 畳める | **AIの提案で、まだ資料になっていない。** 再抽出で作り直せる（5.5.18） |
+ * | `.aiwriter/pending-characters/`・`pending-settings/` | 畳める | **AIの提案で、まだ資料になっていない。** 再抽出で作り直せる（5.5.18。`pending-settings/` は人物以外の承認待ち、2026-09-23〜） |
  * | `.aiwriter/extracted.json` | **畳めない** | 抽出済みの話の記録。正しくは両方の和集合で、片方を残すと再抽出が走る |
  * | `設定/_schema/` | 畳める | AI向けのスキーマ。次の生成で作り直される（`settingsConflictRule.ts` と同じ判断。0.45.1） |
  * | `設定/{abilities,characters,locations,organizations,world}.md` | 畳める | 設定資料集の書き出し先。次の書き出しで作り直される（0.45.1）。**名指しの5つだけ**——`synopsis.md` のようなあらすじは作者が手で直す |
@@ -86,6 +86,9 @@ export function isAutoWrittenPath(filePath: string): boolean {
     /(^|\/)\.aiwriter\/stats\//.test(normalized) ||
     /(^|\/)\.aiwriter\/cache\//.test(normalized) ||
     /(^|\/)\.aiwriter\/pending-characters\//.test(normalized) ||
+    // 人物以外の承認待ち（2026-09-23〜）。置き場を分けただけで、
+    // まだ資料になっていない提案であることは人物と同じ
+    /(^|\/)\.aiwriter\/pending-settings\//.test(normalized) ||
     /(^|\/)\.aiwriter\/config\.json$/.test(normalized) ||
     // 設定資料の生成物（0.45.1）。設定フォルダーの名前は変えられるので
     // フォルダー名では縛らず、生成物の側の名前で見る

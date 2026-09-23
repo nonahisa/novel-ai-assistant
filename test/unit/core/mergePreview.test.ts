@@ -137,6 +137,11 @@ describe("自動で書かれるファイルの見分け", () => {
     expect(
       isAutoWrittenPath("短編/.aiwriter/pending-characters/char_001.json")
     ).toBe(true);
+    // 人物以外の承認待ち（2026-09-23〜）も同じ扱い。置き場を分けただけで、
+    // まだ資料になっていないことは変わらない
+    expect(
+      isAutoWrittenPath("短編/.aiwriter/pending-settings/loc_001.json")
+    ).toBe(true);
   });
 
   test("原稿と設定資料は畳めない", () => {

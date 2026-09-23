@@ -131,6 +131,7 @@ import {
 } from "./views/viewVisibility";
 import { ActionDecorationProvider } from "./views/actionDecorations";
 import { PendingUpdateStore } from "./core/pendingUpdates";
+import { PendingSettingsUpdateStore } from "./core/pendingSettingsUpdates";
 // 作品を選ぶ場面で「未処理の提案が何件あるか」を出すために使う。
 // 提案パネル（features/proposalPanel）が既に読んでいるので、束は増えない
 import { ProposalStore } from "./core/proposalStore";
@@ -1681,6 +1682,9 @@ export async function activate(
       try {
         if (counter === "pendingUpdates") {
           total += await new PendingUpdateStore(work).count();
+          // 人物以外の承認待ち（2026-09-23〜）も同じ「更新分を反映」で扱う。
+          // 設定資料パネルの件数と同じ置き場を数える（食い違わせない）
+          total += await new PendingSettingsUpdateStore(work).count();
         } else if (counter === "staleImeDictionary") {
           // 書き出し済みの辞書より設定資料が新しい作品を数える。
           // 一度も書き出していない作品は数えない（催促にならないため）
@@ -1974,7 +1978,16 @@ export async function activate(
   // 「飛ぶ」は、原稿エディタで書いていればその画面のまま示す（0.24.7）
   const proposalPanel = new ProposalPanel(
     aiRegistry,
-    refreshActionBadges,
+    // 承認待ちを1件反映・見送りしたとき。**開いている設定資料パネルも読み直す**
+    // （2026-09-23）——反映で資料が変わり、パネルの「反映待ちの更新が N 件」も
+    // 減る。提案パネルは作品を教えてくれないので、開いているものを全部読み直す
+    // （開いていなければ何もしない）
+    () => {
+      refreshActionBadges();
+      for (const work of registry.list()) {
+        void findOpenSettingsPanel(work.id)?.refreshFromDisk();
+      }
+    },
     (filePath, line) => manuscriptProvider.revealLine(filePath, line),
     // 開いたときに、溜まっている承認待ちを読み込む（0.45.0）。
     // **登録している作品ぶん見る**——ツリーの印は全作品の合計なので、
@@ -3959,7 +3972,9 @@ export async function activate(
           annotate: async (candidate) => {
             let count = 0;
             try {
-              count = await new PendingUpdateStore(candidate).count();
+              count =
+                (await new PendingUpdateStore(candidate).count()) +
+                (await new PendingSettingsUpdateStore(candidate).count());
             } catch {
               // 読めない作品は0件として扱う。補足が出ないだけ
             }
@@ -3976,6 +3991,8 @@ export async function activate(
         highlighter.invalidate();
         // 承認待ちが減ったので、操作メニューの件数を数え直す
         refreshActionBadges();
+        // 古い案の片付けで件数が変わる。設定資料パネルの入口も数え直す
+        await findOpenSettingsPanel(work.id)?.refreshFromDisk();
         return CHECK_COMPLETED;
       }
     )

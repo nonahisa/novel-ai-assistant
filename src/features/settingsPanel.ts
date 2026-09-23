@@ -139,7 +139,14 @@ import {
 } from "../core/misattributedValues";
 import { isMeaningfulValue } from "../core/characterExtractionValidation";
 import { CustomFieldStore } from "../core/customFieldStore";
-import type { CustomFieldDefinition } from "../models/customField";
+import {
+  emptyCustomFieldSet,
+  fieldsFor,
+  type CustomFieldDefinition,
+  type CustomFieldSet,
+} from "../models/customField";
+import { PendingSettingsUpdateStore } from "../core/pendingSettingsUpdates";
+import { describePendingUpdateCounts } from "../core/pendingSettingsMerge";
 import { clampSummary, SUMMARY_MAX_CHARS } from "../core/summaryLimit";
 import {
   describeInvolvement,
@@ -408,7 +415,12 @@ export class SettingsPanel {
   private organizations: Organization[] = [];
   private worldItems: WorldItem[] = [];
   private abilitySystem: AbilitySystem | undefined;
+  /** 人物の追加項目。人物だけを見る処理（AIの再読込など）はこちらを使う */
   private customFields: CustomFieldDefinition[] = [];
+  /** 全種類の追加項目の定義（2026-09-23〜、人物以外にも足せる） */
+  private customFieldSet: CustomFieldSet = emptyCustomFieldSet();
+  /** 「反映待ちの更新が N 件あります」。0件なら空で、画面は入口を隠す */
+  private pendingUpdatesText = "";
   private loadErrors: Array<{ file: string; message: string }> = [];
 
   /** 本文は重いので一度読んだら使い回す。パネルを閉じるまで有効 */
@@ -700,8 +712,10 @@ export class SettingsPanel {
 
     // 項目の定義が読めなくても、既定の項目は編集できる。
     // 直し方は「一覧に項目を増やす」で伝えるので、ここでは黙って空にする
-    this.customFields = await this.customFieldStore.loadFields();
+    this.customFieldSet = await this.customFieldStore.loadOrEmpty();
+    this.customFields = fieldsFor(this.customFieldSet, "character");
     this.workInfo = await this.loadWorkInfo();
+    this.pendingUpdatesText = await this.countPendingUpdates();
 
     this.post({
       type: "init",
@@ -883,7 +897,7 @@ export class SettingsPanel {
             character.isMob
           ),
           // 作者が足した項目は、既定の項目のあと・メモの前に並べる
-          ...customFieldControls(character, this.customFields),
+          ...customFieldControls(character.customFields, this.customFields),
           field("authorNotes", "作者メモ", character.authorNotes, true),
           field("exportNote", "資料用の補足", character.exportNote, true),
         ],
@@ -924,6 +938,11 @@ export class SettingsPanel {
           field("description", "説明", ability.description, true),
           field("cost", "代償", ability.cost, true),
           field("limitation", "制約", ability.limitation, true),
+          // 作者が足した項目（2026-09-23〜）。人物と同じく、既定の項目のあと・メモの前
+          ...customFieldControls(
+            ability.customFields,
+            fieldsFor(this.customFieldSet, "ability")
+          ),
           field("authorNotes", "作者メモ", ability.authorNotes, true),
           field("exportNote", "資料用の補足", ability.exportNote, true),
         ],
@@ -965,6 +984,11 @@ export class SettingsPanel {
           field("category", "種別", organization.category),
           field("parent", "上位組織", organization.parent),
           field("description", "説明", organization.description, true),
+          // 作者が足した項目（2026-09-23〜）。人物と同じく、既定の項目のあと・メモの前
+          ...customFieldControls(
+            organization.customFields,
+            fieldsFor(this.customFieldSet, "organization")
+          ),
           field("authorNotes", "作者メモ", organization.authorNotes, true),
           field("exportNote", "資料用の補足", organization.exportNote, true),
         ],
@@ -997,6 +1021,11 @@ export class SettingsPanel {
             item.aliases.join("、")
           ),
           field("description", "内容", item.description, true),
+          // 作者が足した項目（2026-09-23〜）。人物と同じく、既定の項目のあと・メモの前
+          ...customFieldControls(
+            item.customFields,
+            fieldsFor(this.customFieldSet, "world")
+          ),
           field("authorNotes", "作者メモ", item.authorNotes, true),
           field("exportNote", "資料用の補足", item.exportNote, true),
         ],
@@ -1026,6 +1055,11 @@ export class SettingsPanel {
         field("aliases", "別名（読点区切り）", location.aliases.join("、")),
         field("region", "地域", location.region),
         field("description", "説明", location.description, true),
+        // 作者が足した項目（2026-09-23〜）。人物と同じく、既定の項目のあと・メモの前
+        ...customFieldControls(
+          location.customFields,
+          fieldsFor(this.customFieldSet, "location")
+        ),
         field("authorNotes", "作者メモ", location.authorNotes, true),
         field("exportNote", "資料用の補足", location.exportNote, true),
       ],
@@ -1092,6 +1126,9 @@ export class SettingsPanel {
           return;
         case "addressScope":
           this.handleAddressScope(message);
+          return;
+        case "openPendingUpdates":
+          await this.handleOpenPendingUpdates();
           return;
       }
     } catch (error) {
@@ -2385,7 +2422,58 @@ export class SettingsPanel {
   }
 
   private post(message: OutgoingMessage): void {
+    /*
+      **一覧を描き直す知らせには、反映待ちの件数を必ず添える**（作者の依頼、
+      2026-09-23 ⑥）。`init` と `saved` を送る場所は十か所近くあり、1つずつ
+      足すと必ずどこかで書き忘れて、入口が古い件数のまま残る。
+    */
+    if (message.type === "init" || message.type === "saved") {
+      void this.panel.webview.postMessage({
+        ...message,
+        pendingUpdates: this.pendingUpdatesText,
+      });
+      return;
+    }
     void this.panel.webview.postMessage(message);
+  }
+
+  /**
+   * 反映待ちの更新を数え直す（作者の依頼、2026-09-23 ⑥）。
+   *
+   * **読めなくても止めない。** 入口が出ないだけで、資料は読める。
+   * 数え方は詳細メニューの印（`extension.ts` の pendingUpdates）と同じ
+   * 置き場を見る——別の数え方をすると、印とパネルで件数が食い違う。
+   */
+  private async countPendingUpdates(): Promise<string> {
+    const counts: Partial<Record<SettingsKind, number>> = {};
+    try {
+      counts.character = await new PendingUpdateStore(this.work).count();
+    } catch {
+      // 読めない作品は0件として扱う（印と同じ）
+    }
+    try {
+      Object.assign(
+        counts,
+        await new PendingSettingsUpdateStore(this.work).countByKind()
+      );
+    } catch {
+      // 同上
+    }
+    return describePendingUpdateCounts(counts);
+  }
+
+  /**
+   * 反映待ちの更新を確かめる流れを開く（「更新分を反映」と同じコマンド）。
+   *
+   * **反映の流れを写さない。** 提案パネルへ出す組み立ても、採番も、
+   * 保存の約束も `applyPendingUpdates.ts` だけが持つ。作品は、このパネルの
+   * 作品をそのまま渡す（選び直させない）。
+   */
+  private async handleOpenPendingUpdates(): Promise<void> {
+    await vscode.commands.executeCommand("novelai.applyPendingUpdates", {
+      type: "work",
+      work: this.work,
+    });
   }
 }
 
@@ -2474,14 +2562,20 @@ function choiceField(
 }
 
 /** 作者が足した項目の入力欄 */
+/**
+ * 作者が足した項目の入力欄。
+ *
+ * 人物以外（2026-09-23〜）は値が無ければ `customFields` 自体を持たないので、
+ * 値の入れ物を直に受け取る（無ければ空として並べる）。
+ */
 function customFieldControls(
-  character: Character,
+  values: Record<string, string> | undefined,
   definitions: CustomFieldDefinition[]
 ): DetailField[] {
   return definitions.map((definition) => ({
     key: `${CUSTOM_FIELD_PREFIX}${definition.key}`,
     label: definition.label,
-    value: character.customFields[definition.key] ?? "",
+    value: values?.[definition.key] ?? "",
     multiline: definition.multiline,
   }));
 }
@@ -2774,6 +2868,8 @@ type PanelMessage =
   | { type: "separate"; kind: SettingsKind; id: string; alias: string }
   /** 資料の読み仮名を、本文のルビとして振る（設計書6.12.5） */
   | { type: "applyRuby" }
+  /** 反映待ちの更新を確かめる（「更新分を反映」を開く。2026-09-23） */
+  | { type: "openPendingUpdates" }
   /** その人物を中心にした人物相関図を開く（設計書6.38.3） */
   | { type: "relationGraph"; kind: SettingsKind; id: string }
   | {

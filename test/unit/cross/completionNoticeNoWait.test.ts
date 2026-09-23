@@ -38,7 +38,8 @@ const SITES: ReadonlyArray<{ file: string; phrase: string; why: string }> = [
   },
   {
     file: "features/applyPendingUpdates.ts",
-    phrase: "人は反映できませんでした。",
+    // 数える単位は「人」か「件」（人物以外の案が混じるとき。0.78.4）
+    phrase: "}は反映できませんでした。",
     why: "更新分を反映の終わりに出る",
   },
   {

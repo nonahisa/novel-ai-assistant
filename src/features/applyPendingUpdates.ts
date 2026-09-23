@@ -22,6 +22,29 @@ import {
 import { diffChars } from "../core/inlineDiff";
 import { dropDiffEntries } from "../core/dropDiffEntries";
 import { CustomFieldStore } from "../core/customFieldStore";
+import { fieldsFor } from "../models/customField";
+import {
+  PendingSettingsUpdateStore,
+  type PendingSettingsUpdate,
+} from "../core/pendingSettingsUpdates";
+import {
+  PENDING_KIND_SHORT_LABELS,
+  diffSettingsRecord,
+  mergePendingSettingsRecord,
+  type PendingSettingsKind,
+  type PendingSettingsRecord,
+} from "../core/pendingSettingsMerge";
+import {
+  createAbilityStore,
+  createLocationStore,
+  createOrganizationStore,
+  createWorldStore,
+} from "../core/abilityStore";
+import type { Ability } from "../models/ability";
+import type { Location } from "../models/location";
+import type { Organization } from "../models/organization";
+import type { WorldItem } from "../models/world";
+import type { PendingUpdateSource } from "../core/pendingUpdates";
 import { logFailure, useLogFile } from "../core/logger";
 import { openGeneratedMarkdown } from "../views/openDocument";
 import { whenNoticePicked } from "../views/notify";
@@ -65,15 +88,20 @@ const CONFIRM_PREVIEW_LIMIT = 5;
  * 数の整合は目で数えるしかなかったので、純粋関数にして機械に確かめさせる。
  */
 export function describePendingUpdatesConfirm(
-  entries: ReadonlyArray<{ name: string; change: string }>
+  entries: ReadonlyArray<{ name: string; change: string }>,
+  /**
+   * 数える単位。人物だけなら「人」、場所などが混じれば「件」
+   * （2026-09-23〜。「3 人の設定」に場所が入っていると読み違える）
+   */
+  unit: "人" | "件" = "人"
 ): string {
   const shown = entries.slice(0, CONFIRM_PREVIEW_LIMIT);
   const rest = entries.length - shown.length;
 
   return (
-    `${entries.length} 人の設定に更新があります。\n` +
+    `${entries.length} ${unit}の設定に更新があります。\n` +
     shown.map((entry) => `・${entry.name}: ${entry.change}`).join("\n") +
-    (rest > 0 ? `\n…ほか ${rest} 人` : "")
+    (rest > 0 ? `\n…ほか ${rest} ${unit}` : "")
   );
 }
 
@@ -280,58 +308,289 @@ export function recordUpdateViewItems(
 }
 
 /**
+ * 人物以外（能力・組織・場所・世界観）の更新案の1件（作者の裁定、2026-09-23 問11 B）。
+ *
+ * `merged` は**いまの台帳のレコードへ、コードで取り込んだ結果**である
+ * （`mergePendingSettingsRecord`）。更新案をそのまま保存すると、積んでから
+ * 承認までに作者が書いたものを古い写しで巻き戻すため。
+ */
+interface SettingsReviewItem {
+  update: PendingSettingsUpdate;
+  current: PendingSettingsRecord;
+  merged: PendingSettingsRecord;
+  diff: CharacterDiff;
+}
+
+/** 種類ごとの台帳の読み書き。`SettingsStore<T>` の型の違いをここで吸収する */
+interface SettingsLedger {
+  loadAll(): Promise<{
+    records: PendingSettingsRecord[];
+    errors: Array<{ file: string; message: string }>;
+  }>;
+  save(record: PendingSettingsRecord): Promise<void>;
+}
+
+/**
+ * 台帳を開く。**書き込みは `SettingsStore.saveAll` を通す**——読み込み時の
+ * ハッシュと照らし、読んだあとに外（作者・他のツール）で書き換えられて
+ * いたら保存しない（`assertSaveAllowed`。CLAUDE.md 規則2の①の経路）。
+ */
+function openLedger(work: WorkEntry, kind: PendingSettingsKind): SettingsLedger {
+  switch (kind) {
+    case "ability": {
+      const store = createAbilityStore(work);
+      return {
+        loadAll: () => store.loadAll(),
+        save: (record) => store.saveAll([record as Ability]),
+      };
+    }
+    case "organization": {
+      const store = createOrganizationStore(work);
+      return {
+        loadAll: () => store.loadAll(),
+        save: (record) => store.saveAll([record as Organization]),
+      };
+    }
+    case "location": {
+      const store = createLocationStore(work);
+      return {
+        loadAll: () => store.loadAll(),
+        save: (record) => store.saveAll([record as Location]),
+      };
+    }
+    case "world": {
+      const store = createWorldStore(work);
+      return {
+        loadAll: () => store.loadAll(),
+        save: (record) => store.saveAll([record as WorldItem]),
+      };
+    }
+  }
+}
+
+export interface PendingSettingsReview {
+  items: SettingsReviewItem[];
+  /** 反映の要らなくなった案（対象が消えた・取り込んでも何も変わらない） */
+  stale: PendingSettingsUpdate[];
+  totalPending: number;
+  /** 読めなかった更新案。**消さない**（壊れたJSONは直さない） */
+  pendingErrors: Array<{ file: string; message: string }>;
+  /**
+   * 読めなかった台帳のファイル。
+   *
+   * **その種類の案は組み立てず、片付けもしない。** 差分の相手が欠けたまま
+   * 並べると、居るはずの場所が「消えた」と読まれて案が捨てられる
+   * （人物で「1件でもあれば組み立てない」としているのと同じ理由）
+   */
+  ledgerErrors: Array<{ kind: PendingSettingsKind; file: string; message: string }>;
+  ledgers: Partial<Record<PendingSettingsKind, SettingsLedger>>;
+  pendingStore: PendingSettingsUpdateStore;
+}
+
+/**
+ * 人物以外の承認待ちを読み、確認できる形に組む。
+ *
+ * **ここでは何も書かない。** 片付け（`discard`）は呼び出し側が決める
+ * （開いただけでファイルを消してはいけない。人物の `reviewPendingCharacterUpdates` と同じ）。
+ */
+export async function reviewPendingSettingsUpdates(
+  work: WorkEntry
+): Promise<PendingSettingsReview> {
+  const pendingStore = new PendingSettingsUpdateStore(work);
+  const pending = await pendingStore.loadAll();
+  const review: PendingSettingsReview = {
+    items: [],
+    stale: [],
+    totalPending: pending.updates.length,
+    pendingErrors: pending.errors,
+    ledgerErrors: [],
+    ledgers: {},
+    pendingStore,
+  };
+  if (pending.updates.length === 0) return review;
+
+  // 追加項目の見出し。読めなくても差分はキーで出せるので、止めない
+  const customFields = await new CustomFieldStore(work).loadOrEmpty();
+
+  const kinds = [...new Set(pending.updates.map((update) => update.recordKind))];
+  const byKind = new Map<PendingSettingsKind, Map<string, PendingSettingsRecord>>();
+  for (const kind of kinds) {
+    const ledger = openLedger(work, kind);
+    const loaded = await ledger.loadAll();
+    if (loaded.errors.length > 0) {
+      review.ledgerErrors.push(
+        ...loaded.errors.map((error) => ({ kind, ...error }))
+      );
+      continue;
+    }
+    review.ledgers[kind] = ledger;
+    byKind.set(kind, new Map(loaded.records.map((record) => [record.id, record])));
+  }
+
+  for (const update of pending.updates) {
+    const records = byKind.get(update.recordKind);
+    // 台帳が読めなかった種類は、組み立てず片付けもしない（上の ledgerErrors を参照）
+    if (!records) continue;
+    const current = records.get(update.record.id);
+    if (!current) {
+      // 対象が消えている（取り下げた・まとめた）。反映しても復活させるだけ
+      review.stale.push(update);
+      continue;
+    }
+    const merged = mergePendingSettingsRecord(
+      update.recordKind,
+      current,
+      update.record
+    );
+    const diff = diffSettingsRecord(
+      update.recordKind,
+      current,
+      merged,
+      fieldsFor(customFields, update.recordKind)
+    );
+    if (diff.changes.length === 0) {
+      review.stale.push(update);
+      continue;
+    }
+    review.items.push({ update, current, merged, diff });
+  }
+
+  return review;
+}
+
+/** 人物以外の案の出どころの一行。種類を先に出す（人物と取り違えないため） */
+function describeSettingsChange(item: SettingsReviewItem): string {
+  const kind = PENDING_KIND_SHORT_LABELS[item.update.recordKind];
+  const label = pendingSourceLabel(item.update.source);
+  const base = `${label ? `${kind}・${label}` : kind}：${summarizeDiff(item.diff)}`;
+  const reason = item.update.reason?.trim();
+  return reason ? `${base}（理由：${clampReason(reason)}）` : base;
+}
+
+/** 提案パネルへ出す形（人物の `recordUpdateViewItems` と同じ組み立て） */
+export function settingsUpdateViewItems(
+  review: PendingSettingsReview
+): RecordUpdateViewItem[] {
+  return review.items.map((item) => ({
+    id: item.update.filePath,
+    name: item.diff.name,
+    changes: diffLinesForPanel(item.diff),
+    changeParts: item.diff.changes.map((change) => {
+      const before = change.before || "（未設定）";
+      const after = change.after || "（未設定）";
+      return { label: change.label, before, after, diff: diffChars(before, after) };
+    }),
+    source: describeSettingsChange(item),
+    status: "pending" as const,
+  }));
+}
+
+/**
+ * 反映の対象1件。人物の案と人物以外の案を、同じ手順で扱うための形。
+ *
+ * **保存の約束は作る側（下の2つの関数）が持つ。** パネルと確認の
+ * ダイアログは、どの台帳へどう書くかを知らなくてよい。
+ */
+interface ApplyTarget {
+  id: string;
+  name: string;
+  diff: CharacterDiff;
+  change: string;
+  source?: PendingUpdateSource;
+  reason?: string;
+  /** 反映する。落とした葉の数を返す（人物だけ。ほかは常に0） */
+  apply: (dropKeys: string[]) => Promise<number>;
+  /** 見送る（承認待ちから片付ける。レコードには触らない） */
+  discard: () => Promise<void>;
+}
+
+function characterTargets(review: PendingUpdateReview): ApplyTarget[] {
+  return review.items.map((item) => ({
+    id: item.update.filePath,
+    name: item.diff.name,
+    diff: item.diff,
+    change: describeChange(item),
+    source: item.update.source,
+    reason: item.update.reason,
+    apply: async (dropKeys) => {
+      // **作者が ✕ を付けた葉は、保存の直前に落とす**（設計書6.32）。
+      // 承認待ちのファイルは書き換えない——印はその1回の反映にだけ効く
+      const { character, dropped } = dropDiffEntries(
+        item.update.character,
+        dropKeys
+      );
+      // 既存ファイルは上書きできないので saveOrUpdate を通す
+      // （新規案はここでIDを採る。`applyItem` を参照）
+      await applyItem(item, review.characterStore, review.known, character);
+      await review.pendingStore.discard(item.update.filePath);
+      return dropped;
+    },
+    discard: () => review.pendingStore.discard(item.update.filePath),
+  }));
+}
+
+function settingsTargets(review: PendingSettingsReview): ApplyTarget[] {
+  return review.items.map((item) => ({
+    id: item.update.filePath,
+    name: item.diff.name,
+    diff: item.diff,
+    change: describeSettingsChange(item),
+    source: item.update.source,
+    reason: item.update.reason,
+    apply: async () => {
+      const ledger = review.ledgers[item.update.recordKind];
+      if (!ledger) throw new Error("台帳を開けませんでした。読み込み直してください。");
+      // 取り込み済みのレコードを書く。読んだあとに作者が書き換えていたら
+      // `SettingsStore` のハッシュ照合で止まり、承認待ちは残る
+      await ledger.save(item.merged);
+      await review.pendingStore.discard(item.update.filePath);
+      return 0;
+    },
+    discard: () => review.pendingStore.discard(item.update.filePath),
+  }));
+}
+
+/**
  * 組んだ更新案を提案パネルへ渡す。
  *
  * **反映と見送りの手順もここで作る。** パネルは保存の約束（既存ファイルは
- * 上書きできない・新規案はここで採番する）を知らなくてよい。
+ * 上書きできない・新規案はここで採番する・人物以外は取り込み済みを書く）を知らなくてよい。
  */
 function showInPanel(
   review: PendingUpdateReview,
+  settingsReview: PendingSettingsReview,
   work: WorkEntry,
   panel: ProposalPanel,
   options: { quiet?: boolean } = {}
 ): void {
-  const find = (id: string): ReviewItem | undefined =>
-    review.items.find((item) => item.update.filePath === id);
+  const targets = [...characterTargets(review), ...settingsTargets(settingsReview)];
+  const find = (id: string): ApplyTarget | undefined =>
+    targets.find((target) => target.id === id);
 
   panel.showRecordUpdates(
     work,
-    recordUpdateViewItems(review),
+    [...recordUpdateViewItems(review), ...settingsUpdateViewItems(settingsReview)],
     async (id, dropKeys) => {
       const target = find(id);
       if (!target) return { ok: false, reason: "対象が見つかりません。" };
       try {
-        // **作者が ✕ を付けた葉は、保存の直前に落とす**（設計書6.32）。
-        // 承認待ちのファイルは書き換えない——印はその1回の反映にだけ効く
-        const { character, dropped } = dropDiffEntries(
-          target.update.character,
-          dropKeys ?? []
-        );
-        // 既存ファイルは上書きできないので saveOrUpdate を通す
-        // （新規案はここでIDを採る。`applyItem` を参照）
-        await applyItem(target, review.characterStore, review.known, character);
-        await review.pendingStore.discard(target.update.filePath);
+        const dropped = await target.apply(dropKeys ?? []);
         // **黙って落としたことにしない**（CLAUDE.md 規則2）。
         // 何件が入らなかったのかを、その場で伝える
         if (dropped > 0) {
           void vscode.window.showInformationMessage(
-            `${target.diff.name}：${dropped} 件を落として反映しました。`
+            `${target.name}：${dropped} 件を落として反映しました。`
           );
         }
         // まとめて適用の完了の知らせが、合計を出せるように返す
         return { ok: true, dropped };
       } catch (error) {
-        const message =
-          error instanceof CharacterStoreError
-            ? error.message
-            : error instanceof Error
-              ? error.message
-              : String(error);
+        const message = errorText(error);
         // **記録の直前に書き先を向ける**（0.43.3 と同じ）。向けないと
         // 出力チャンネル止まりで、VS Code を閉じると消える
         useLogFile(work.folderPath);
         logFailure("更新の反映に失敗", {
-          人物: target.diff.name,
+          対象: target.name,
           詳細: message,
         });
         return { ok: false, reason: message };
@@ -344,13 +603,13 @@ function showInPanel(
       const target = find(id);
       if (!target) return { ok: false, reason: "対象が見つかりません。" };
       try {
-        await review.pendingStore.discard(target.update.filePath);
+        await target.discard();
         return { ok: true };
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = errorText(error);
         useLogFile(work.folderPath);
         logFailure("更新の見送りに失敗", {
-          人物: target.diff.name,
+          対象: target.name,
           詳細: message,
         });
         return { ok: false, reason: message };
@@ -359,6 +618,14 @@ function showInPanel(
     undefined,
     options
   );
+}
+
+function errorText(error: unknown): string {
+  return error instanceof CharacterStoreError
+    ? error.message
+    : error instanceof Error
+      ? error.message
+      : String(error);
 }
 
 /**
@@ -380,11 +647,19 @@ export async function primePendingRecordUpdates(
   panel: ProposalPanel
 ): Promise<number> {
   const review = await reviewPendingCharacterUpdates(work);
-  if (review.items.length === 0) return 0;
-  showInPanel(review, work, panel, { quiet: true });
-  return review.items.length;
+  const settingsReview = await reviewPendingSettingsUpdates(work);
+  const count = review.items.length + settingsReview.items.length;
+  if (count === 0) return 0;
+  showInPanel(review, settingsReview, work, panel, { quiet: true });
+  return count;
 }
 
+/**
+ * 承認待ちの更新を確かめて反映する（「更新分を反映」）。
+ *
+ * **人物以外の案も同じ流れで出す**（作者の裁定、2026-09-23 問11 B）。
+ * 名前は人物だけだったころのまま（呼び出し元が多いため）。
+ */
 export async function applyPendingCharacterUpdates(
   work: WorkEntry,
   /**
@@ -397,32 +672,61 @@ export async function applyPendingCharacterUpdates(
 ): Promise<void> {
   useLogFile(work.folderPath);
   const review = await reviewPendingCharacterUpdates(work);
-  const { items, characterStore, pendingStore, known } = review;
+  const settingsReview = await reviewPendingSettingsUpdates(work);
+  const { pendingStore } = review;
 
-  if (review.pendingErrors.length > 0) {
+  const pendingErrors = [...review.pendingErrors, ...settingsReview.pendingErrors];
+  if (pendingErrors.length > 0) {
     await vscode.window.showWarningMessage(
-      `読み込めない更新案が ${review.pendingErrors.length} 件あります（${review.pendingErrors
+      `読み込めない更新案が ${pendingErrors.length} 件あります（${pendingErrors
         .map((error) => error.file)
         .join("、")}）。残りだけを扱います。`
     );
   }
-  if (review.totalPending === 0) {
+  if (review.totalPending + settingsReview.totalPending === 0) {
     vscode.window.showInformationMessage("反映待ちの更新はありません。");
     return;
   }
-  if (review.characterErrors.length > 0) {
+
+  // 人物設定が読めないときは、人物の案は組み立てていない（差分の相手が欠ける）。
+  // **人物以外の案が無ければ、これまでどおりここで止める**
+  const characterBlocked = review.characterErrors.length > 0;
+  if (characterBlocked) {
+    const files = review.characterErrors.map((error) => error.file).join("、");
+    if (settingsReview.totalPending === 0) {
+      await vscode.window.showErrorMessage(
+        "読み込めない人物設定があるため、反映を中止しました。" + `（${files}）`
+      );
+      return;
+    }
     await vscode.window.showErrorMessage(
-      "読み込めない人物設定があるため、反映を中止しました。" +
-        `（${review.characterErrors.map((error) => error.file).join("、")}）`
+      "読み込めない人物設定があるため、人物の更新は見合わせました。" + `（${files}）`
     );
-    return;
+  }
+  if (settingsReview.ledgerErrors.length > 0) {
+    const kinds = [
+      ...new Set(
+        settingsReview.ledgerErrors.map(
+          (error) => PENDING_KIND_SHORT_LABELS[error.kind]
+        )
+      ),
+    ].join("・");
+    await vscode.window.showWarningMessage(
+      `読み込めない設定資料があるため、${kinds}の更新は見合わせました。` +
+        `（${settingsReview.ledgerErrors.map((error) => error.file).join("、")}）` +
+        "ファイルを直してから、もう一度お試しください。"
+    );
   }
 
   for (const stale of review.stale) {
     await pendingStore.discard(stale.filePath);
   }
+  for (const stale of settingsReview.stale) {
+    await settingsReview.pendingStore.discard(stale.filePath);
+  }
 
-  if (items.length === 0) {
+  const targets = [...characterTargets(review), ...settingsTargets(settingsReview)];
+  if (targets.length === 0) {
     vscode.window.showInformationMessage(
       "反映が必要な更新はありませんでした。古い更新案は片付けました。"
     );
@@ -433,16 +737,16 @@ export async function applyPendingCharacterUpdates(
   // 設定資料の更新は別のダイアログ、では作者が片方を見落とす。
   // **組み立ては開いたときと同じものを通す**（0.45.0。写しを作らない）
   if (panel) {
-    showInPanel(review, work, panel);
+    showInPanel(review, settingsReview, work, panel);
     return;
   }
 
+  // 人物だけなら「人」、場所などが混じれば「件」で数える
+  const unit = settingsReview.items.length > 0 ? "件" : "人";
   const choice = await vscode.window.showInformationMessage(
     describePendingUpdatesConfirm(
-      items.map((item) => ({
-        name: item.diff.name,
-        change: describeChange(item),
-      }))
+      targets.map((target) => ({ name: target.name, change: target.change })),
+      unit
     ),
     { modal: true },
     "内容を確認",
@@ -451,42 +755,42 @@ export async function applyPendingCharacterUpdates(
   );
 
   if (choice === "内容を確認") {
-    await showDiffDocument(work, items);
+    await showDiffDocument(work, targets);
     return;
   }
 
-  let targets: ReviewItem[];
+  let chosen: ApplyTarget[];
   if (choice === "すべて反映") {
-    targets = items;
+    chosen = targets;
   } else if (choice === "選んで反映") {
     const picked = await vscode.window.showQuickPick(
-      items.map((item) => ({
-        label: item.diff.name,
-        description: describeChange(item),
+      targets.map((target) => ({
+        label: target.name,
+        description: target.change,
         picked: true,
-        item,
+        target,
       })),
       {
-        title: "反映する人物を選んでください",
+        title:
+          unit === "人"
+            ? "反映する人物を選んでください"
+            : "反映するものを選んでください",
         canPickMany: true,
         ignoreFocusOut: true,
       }
     );
     if (!picked || picked.length === 0) return;
-    targets = picked.map((entry) => entry.item);
+    chosen = picked.map((entry) => entry.target);
   } else {
     return;
   }
 
-  await applyAll(targets, characterStore, pendingStore, known, work.folderPath);
+  await applyAll(chosen, unit, work.folderPath);
 }
 
 async function applyAll(
-  targets: ReviewItem[],
-  characterStore: CharacterStore,
-  pendingStore: PendingUpdateStore,
-  /** 採番に使う顔ぶれ。作ったぶんはここへ足される */
-  known: Character[],
+  targets: ApplyTarget[],
+  unit: "人" | "件",
   /** 失敗の記録の書き先（作品フォルダー） */
   workFolder: string
 ): Promise<void> {
@@ -498,25 +802,19 @@ async function applyAll(
     async (progress) => {
       for (const [index, target] of targets.entries()) {
         progress.report({
-          message: `${index + 1}/${targets.length} ${target.diff.name}`,
+          message: `${index + 1}/${targets.length} ${target.name}`,
         });
         try {
-          await applyItem(target, characterStore, known);
-          await pendingStore.discard(target.update.filePath);
-          applied.push(target.diff.name);
+          await target.apply([]);
+          applied.push(target.name);
         } catch (error) {
-          // 1人の失敗で全体を止めない。何が反映できなかったかを最後にまとめて出す
-          const message =
-            error instanceof CharacterStoreError
-              ? error.message
-              : error instanceof Error
-                ? error.message
-                : String(error);
+          // 1件の失敗で全体を止めない。何が反映できなかったかを最後にまとめて出す
+          const message = errorText(error);
           logFailure("更新の反映に失敗", {
-            人物: target.diff.name,
+            対象: target.name,
             詳細: message,
           });
-          failed.push({ name: target.diff.name, message });
+          failed.push({ name: target.name, message });
         }
       }
     }
@@ -524,7 +822,7 @@ async function applyAll(
 
   if (failed.length === 0) {
     vscode.window.showInformationMessage(
-      `${applied.length} 人の設定を更新しました。` +
+      `${applied.length} ${unit}の設定を更新しました。` +
         "「設定資料集を出力」を実行すると一覧にも反映されます。"
     );
     return;
@@ -535,7 +833,7 @@ async function applyAll(
   // 「更新分を反映」の「動いている」札を持ったままになる
   whenNoticePicked(
     vscode.window.showWarningMessage(
-      `${applied.length} 人を更新し、${failed.length} 人は反映できませんでした。` +
+      `${applied.length} ${unit}を更新し、${failed.length} ${unit}は反映できませんでした。` +
         "反映できなかった更新案は残してあります。",
       "詳細を表示"
     ),
@@ -556,7 +854,7 @@ async function applyAll(
 /** 何が変わるのかを読める形で出す。JSONを見比べさせない */
 async function showDiffDocument(
   work: WorkEntry,
-  items: ReviewItem[]
+  targets: ApplyTarget[]
 ): Promise<void> {
   const content = [
     "# 反映待ちの更新",
@@ -566,12 +864,12 @@ async function showDiffDocument(
     "",
     // 出どころは名前の見出しの直後に置く（設計書6.4.9）。
     // どこから来た提案かは、中身より先に知りたい
-    ...items.map((item) => {
-      const label = pendingSourceLabel(item.update.source);
+    ...targets.map((target) => {
+      const label = pendingSourceLabel(target.source);
       // 理由（設計書6.87.16）は**切らずに全部出す**。確認のダイアログは
       // 1行しか出せないので、判断の材料はこちらで読ませる
-      const reason = item.update.reason?.trim();
-      const body = formatDiff(item.diff);
+      const reason = target.reason?.trim();
+      const body = formatDiff(target.diff);
       if (!label && !reason) return body;
       const [heading, ...rest] = body.split("\n");
       const notes: string[] = [];

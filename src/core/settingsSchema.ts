@@ -126,7 +126,21 @@ function commonProperties(idPattern: string): Record<string, unknown> {
         required: ["id", "text"],
       },
     },
+    // 作者が足した項目（2026-09-23〜、人物以外にも足せるようにした）。
+    // 共通側へ置くのは、`additionalProperties: false` のスキーマに無い項目を
+    // 外部のAIが書くと、読み込みで落ちるうえ書いた側は成功したと思い込むため
+    customFields: customFieldsProperty(),
     updatedAt: { type: "string" },
+  };
+}
+
+function customFieldsProperty(): Record<string, unknown> {
+  return {
+    type: "object",
+    description:
+      "作者が定義した追加項目の値。キーは custom_fields.json の key に対応する" +
+      "（人物は fields、ほかの種類は byKind の中）。定義に無いキーを勝手に足さないこと",
+    additionalProperties: { type: "string" },
   };
 }
 
@@ -242,13 +256,7 @@ export function characterSchema(): Record<string, unknown> {
     romaji: { type: ["string", "null"] },
     icon: { type: ["string", "null"] },
     iconSource: { type: "string", enum: ["external", "generated", "none"] },
-    customFields: {
-      type: "object",
-      description:
-        "作者が定義した追加項目の値。キーは custom_fields.json の key に対応する。" +
-        "定義に無いキーを勝手に足さないこと",
-      additionalProperties: { type: "string" },
-    },
+    customFields: customFieldsProperty(),
   });
 }
 

@@ -12,6 +12,10 @@ import {
   requireNonEmptyString,
 } from "./jsonValidation";
 import { parseAiNotes, type AiNote } from "./aiNote";
+import {
+  parseOptionalCustomFieldValues,
+  withOptionalCustomFields,
+} from "./customField";
 
 /**
  * 場所のデータモデル。
@@ -49,6 +53,12 @@ export interface Location {
   conflicts: RecordConflict[];
   /** AIの掘り下げメモ。作者が承認したものだけが入る */
   aiNotes: AiNote[];
+  /**
+   * 作者が足した項目の値（2026-09-23〜。定義は `設定/custom_fields.json` の `byKind`）。
+   * **値が1つも無ければキーごと持たない**——これまでのファイルを、
+   * 保存のたびに書き換えないため（`withOptionalCustomFields`）。
+   */
+  customFields?: Record<string, string>;
   updatedAt: string;
 }
 
@@ -153,11 +163,16 @@ export function parseLocation(raw: unknown): Location {
 
   const conflicts = parseConflicts(value.conflicts);
 
-  return normalizeLocation({
-    ...value,
-    id: value.id as string,
-    name: value.name as string,
-    conflicts,
-    aiNotes: parseAiNotes(value.aiNotes),
-  } as Partial<Location>);
+  // 追加項目の値は検証してから持たせる。`...value` のまま通すと、
+  // 数値などの壊れた値が検証を素通りする
+  return withOptionalCustomFields(
+    normalizeLocation({
+      ...value,
+      id: value.id as string,
+      name: value.name as string,
+      conflicts,
+      aiNotes: parseAiNotes(value.aiNotes),
+    } as Partial<Location>),
+    parseOptionalCustomFieldValues(value.customFields)
+  );
 }

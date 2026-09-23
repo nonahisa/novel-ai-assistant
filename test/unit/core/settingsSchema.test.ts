@@ -70,6 +70,22 @@ const CASES = [
   },
 ];
 
+/**
+ * 値があるときだけレコードが持つ項目（2026-09-23〜）。
+ *
+ * 人物以外の `customFields` は、作者が項目を足して値を入れたときだけ
+ * キーごと現れる（空の `{}` を持たせると、これまでのファイルが保存のたびに
+ * 書き換わる）。空のレコードには無いので、「スキーマの項目がすべて
+ * レコードにある」の突き合わせからだけ外す。**名指しで外す**——
+ * まとめて緩めると、モデルから消した項目の取り残しを見逃す。
+ */
+const OPTIONAL_KEYS: Record<string, readonly string[]> = {
+  能力: ["customFields"],
+  組織: ["customFields"],
+  場所: ["customFields"],
+  世界観: ["customFields"],
+};
+
 describe("スキーマとデータ構造を突き合わせる", () => {
   for (const { label, schema, record } of CASES) {
     test(`${label}：レコードの項目がすべてスキーマにある`, () => {
@@ -90,7 +106,10 @@ describe("スキーマとデータ構造を突き合わせる", () => {
     });
 
     test(`${label}：スキーマの項目がすべてレコードにある`, () => {
-      const actual = new Set(Object.keys(record));
+      const actual = new Set([
+        ...Object.keys(record),
+        ...(OPTIONAL_KEYS[label] ?? []),
+      ]);
       const extra = propertyNames(schema).filter((key) => !actual.has(key));
 
       expect(
