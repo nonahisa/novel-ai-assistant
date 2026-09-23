@@ -66,6 +66,12 @@ export interface ContestListing {
   readonly eligibility: string | null;
   readonly fee: string | null;
   readonly charLimit: CharLimitReading;
+  /**
+   * 欄の前に書かれた説明の書き出し（「湖を舞台にした短編を募集します。」）。
+   * 応募先の提案（AI）と、作品との近さ（ベクトル検索）の材料にする（設計書6.3.6.4・6.3.6.5）。
+   * **前の版の置き場には無い**ので省略できる形にしてある
+   */
+  readonly summary?: string | null;
 }
 
 /** 1件ずつに分けた、読み取り前の形 */
@@ -83,6 +89,8 @@ export interface ContestCardInput extends ContestCardText {
 /** 名前・欄の長さの上限（長い文を流し込ませない。画面に出すのは要所だけ） */
 const MAX_NAME = 200;
 const MAX_FIELD = 500;
+/** 説明の書き出しの上限（AIへ渡す量を抑える。募集の狙いは書き出しに出る） */
+const MAX_SUMMARY = 300;
 const MAX_TEXT = 8000;
 /** 1回に受ける件数の上限 */
 export const MAX_CONTEST_ITEMS = 500;
@@ -160,7 +168,24 @@ export function parseContestCard(input: ContestCardInput): ContestListing | null
     eligibility: fields.get("eligibility") ?? null,
     fee: fields.get("fee") ?? null,
     charLimit: readCharLimit(charText),
+    summary: leadText(text, name),
   };
+}
+
+/**
+ * 欄の前に書かれた説明の書き出し。名前の行と「〆切：日付」の行（ツクリテミライの
+ * 1件の頭）は外す。**欄の名前の読み分けは `LABEL` と同じもの**を使う。
+ */
+function leadText(text: string, name: string): string | null {
+  const body = text
+    .split("\n")
+    .filter((line) => clean(line, MAX_NAME) !== name && !/^\s*[〆締]切[：:]\s*\d/u.test(line))
+    .join("\n");
+  LABEL.lastIndex = 0;
+  const first = LABEL.exec(body);
+  LABEL.lastIndex = 0;
+  const lead = clean(first ? body.slice(0, first.index) : body, MAX_SUMMARY);
+  return lead || null;
 }
 
 /** 欄を読む（同じ欄が2度出たら、最初のものを採る） */

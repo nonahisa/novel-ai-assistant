@@ -243,6 +243,7 @@ a:hover, .link:hover { text-decoration: underline; }
   <section class="page active" id="page-writing">
     <div id="contest"></div>
     <div class="cards" id="cards"></div>
+    <div class="note" id="goal-link"></div>
     <div id="achievements"></div>
     <div class="controls" id="granularity"></div>
     <div class="chart-wrap"><svg id="chart" width="100%" height="240"></svg></div>
@@ -438,6 +439,21 @@ function renderCards() {
   ));
 
   document.getElementById('cards').innerHTML = cards.join('');
+
+  // 1日・1か月の目標を決める入口（作者の指摘、2026-09-23。設定画面で探させない）。
+  // **拡張機能側へ頼んで開く**（画面の中で設定を書かない。書き先はユーザー全体の設定）
+  const hasGoal = today.progress.goal > 0 || month.progress.goal > 0;
+  const goalLink = document.getElementById('goal-link');
+  goalLink.innerHTML =
+    '<a href="#" data-common-goals="1">' +
+    (hasGoal ? '1日・1か月の目標を変える' : '目標を決める（1日・1か月）') +
+    '</a>（全作品共通）';
+  goalLink.querySelectorAll('[data-common-goals]').forEach((el) => {
+    el.addEventListener('click', (event) => {
+      event.preventDefault();
+      vscode.postMessage({ type: 'editCommonGoals' });
+    });
+  });
 }
 
 function card(label, value, sub, progress) {

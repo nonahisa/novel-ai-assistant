@@ -87,6 +87,13 @@ const RULES: Rule[] = [
   { kind: "generateCatchphrases", match: /キャッチ(コピー|フレーズ).{0,8}(作|生成|つく|考)/, priority: 80 },
   { kind: "generatePlot", match: /プロット.{0,10}(起こ|逆算|作|生成)/, priority: 80 },
   { kind: "openSynopsisDocs", match: /(紹介文|あらすじ).{0,6}(開|見せ|表示)/, priority: 50 },
+
+  // 応募先（設計書6.3.6.5。詳細メニューに無い隠し機能）
+  {
+    kind: "suggestContests",
+    match: /(応募先|公募|コンテスト|新人賞|文学賞).{0,10}(提案|選ん|選び|探し|探す|すすめ|勧め|薦め)/,
+    priority: 80,
+  },
 ];
 
 /**

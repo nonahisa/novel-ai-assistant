@@ -29,6 +29,7 @@ import {
   offerCelebration,
   streakSummaryFor,
 } from "./celebrations";
+import { COMMON_GOALS_MESSAGE, editCommonWritingGoals } from "./commonWritingGoals";
 
 /**
  * 全作品の執筆量パネル（作者の要望、2026-08-13）。
@@ -91,6 +92,18 @@ export async function openAllWorksWritingStatsPanel(
   created.webview.onDidReceiveMessage(async (message: unknown) => {
     if (await acceptCelebrated(message)) return;
     const parsed = message as { type?: string };
+    if (parsed.type === COMMON_GOALS_MESSAGE) {
+      // 1日・1か月の目標（全作品共通）を決める（作者の指摘、2026-09-23）。
+      // 全作品の合計で判定する目標なので、この画面からこそ押せてほしい
+      if (await editCommonWritingGoals()) {
+        created.webview.postMessage({
+          type: "stats",
+          data: await buildAllWorksStatsPanelData(registry, deviceId),
+        });
+        await offerCelebration(created, undefined);
+      }
+      return;
+    }
     if (parsed.type === "ready") {
       created.webview.postMessage({
         type: "stats",

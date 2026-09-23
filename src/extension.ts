@@ -3059,9 +3059,29 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
-        await setWorkGoals(work, { contests: contestDeps });
+        await setWorkGoals(work, { contests: contestDeps, deviceId });
         // 目標を変えたら、開いているパネルの「あと何字」を出し直す
         await refreshWritingStatsPanel(work, deviceId);
+      }
+    ),
+    /*
+      AIが応募先を提案する（設計書6.3.6.5、P-42）。**隠し機能**——詳細メニュー
+      （ACTION_TREE）には載せず、コマンドパレットと相談（「応募先を提案して」）
+      からだけ呼ぶ（作者の裁定、2026-09-23）。候補は完成予定から選び出したものに限る
+    */
+    registerCommand(
+      "novelai.suggestContests",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return CHECK_CANCELLED;
+        const { suggestContestsByAI } = await import("./features/contestSuggest.js");
+        const outcome = await suggestContestsByAI(work, {
+          ...contestDeps,
+          deviceId,
+          aiRegistry,
+        });
+        await refreshWritingStatsPanel(work, deviceId);
+        return outcome;
       }
     )
   );
@@ -7106,6 +7126,8 @@ const CHAT_RUN_COMMANDS: Partial<Record<ChatRunKind, string>> = {
   generateCatchphrases: "novelai.generateCatchphrases",
   openSynopsisDocs: "novelai.openSynopsisDocs",
   generatePlot: "novelai.generatePlot",
+  // 隠し機能（設計書6.3.6.5）。詳細メニューには無く、ここと コマンドパレットからだけ
+  suggestContests: "novelai.suggestContests",
 };
 
 /**

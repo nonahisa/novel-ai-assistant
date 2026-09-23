@@ -146,6 +146,8 @@ export function normalizeContestInbox(raw: unknown): StoredContest[] {
       eligibility: text(value.eligibility),
       fee: text(value.fee),
       charLimit: readCharLimit(charText),
+      // 前の版の置き場には無い（無ければ null。取り込み直せば入る）
+      summary: text(value.summary),
       importedAt: value.importedAt,
       sourcePage: link(value.sourcePage),
     });

@@ -8,6 +8,7 @@ import { logLine, useLogFile } from "../core/logger";
 import {
   CONTEST_SOURCE_LABELS,
   parseContestsClipboard,
+  type ContestListing,
 } from "../core/contestListing";
 import {
   asOfLabel,
@@ -132,9 +133,50 @@ export async function importContestsFromClipboard(
     return;
   }
 
+  await acceptContests(deps, parsed, trigger, work);
+}
+
+/** 読み取った公募の一覧（ヘルパーの封筒・貼り付けた文・RSS のどれから来たか） */
+export interface ParsedContests {
+  readonly from: "helper" | "text" | "rss";
+  readonly listings: readonly ContestListing[];
+  readonly skipped: number;
+  readonly pageUrl: string | null;
+  readonly readAt: string | null;
+}
+
+/**
+ * RSS で公募として読めなかったものがあったときの断り（設計書6.3.6.2）。
+ *
+ * 2026-09-23 に本物のフィードを製品の読み取りに通すと、**50件中18件が読めなかった。**
+ * フィードの説明（description）が**500字で切られて**おり、いちばん後ろにある
+ * 「〆切 :」の欄が切り落とされていた（読み取りの誤りではない）。一覧のページには
+ * 全文があるので、貼り付けの道を添える。
+ */
+export const RSS_SKIPPED_NOTE =
+  "RSS の説明は途中で切れていることがあり、締切が載っていないものは読めません。" +
+  "一覧のページを貼り付けて取り込むと読めることがあります。";
+
+const FROM_LABELS: Record<ParsedContests["from"], string> = {
+  helper: "ヘルパーから",
+  text: "貼り付け",
+  rss: "RSSから",
+};
+
+/**
+ * 読み取った一覧を置き場へ入れ、応募先を選ぶところまで進める。
+ * **3つの入り口（ヘルパー・貼り付け・RSS）で同じここを通す**——取り込み直しの
+ * 違いの知らせ・0件の扱い・件数の言い方を入り口ごとに持たない。
+ */
+export async function acceptContests(
+  deps: ContestImportDeps,
+  parsed: ParsedContests,
+  trigger: "uri" | "paste" | "rss",
+  work?: WorkEntry
+): Promise<void> {
   useLogFile(undefined);
   logLine(
-    `公募の一覧を取り込みます（${parsed.from === "helper" ? "ヘルパーから" : "貼り付け"}）：` +
+    `公募の一覧を取り込みます（${FROM_LABELS[parsed.from]}）：` +
       `読めた${parsed.listings.length}件・公募として読めなかった${parsed.skipped}件` +
       (parsed.pageUrl ? `（${parsed.pageUrl}）` : "")
   );
@@ -143,7 +185,9 @@ export async function importContestsFromClipboard(
   if (parsed.listings.length === 0) {
     void vscode.window.showWarningMessage(
       `公募を1件も読めませんでした（読めなかったもの ${parsed.skipped}件）。` +
-        "ページの作りが変わったのかもしれません。" +
+        (trigger === "rss"
+          ? "RSS の中身の書き方が変わったのかもしれません。ほかの道として、"
+          : "ページの作りが変わったのかもしれません。") +
         PASTE_GUIDE
     );
     return;
@@ -157,7 +201,9 @@ export async function importContestsFromClipboard(
   const merged = mergeContestInbox(loadContestInbox(deps.memory), incoming, today);
   await deps.memory.update(CONTEST_INBOX_KEY, merged.inbox);
 
-  const summary = importSummary(parsed.listings.length, parsed.skipped, incoming, merged.droppedPast);
+  const summary =
+    importSummary(parsed.listings.length, parsed.skipped, incoming, merged.droppedPast) +
+    (trigger === "rss" && parsed.skipped > 0 ? RSS_SKIPPED_NOTE : "");
 
   // 応募先に入れた公募が取り込み直されていれば、違いを知らせる（作者が選んで直す）
   await offerChangedGoals(deps, incoming, today);
@@ -430,8 +476,12 @@ export async function chooseContestForWork(
   return confirmAndSave(work, picked.ranked, deps);
 }
 
-/** 選んだ公募の中身を見せて、確かめてから入れる */
-async function confirmAndSave(
+/**
+ * 選んだ公募の中身を見せて、確かめてから入れる。
+ * 完成予定からの選び出し・AIの提案（設計書6.3.6.3・6.3.6.5）も、選んだあとはここを通す
+ * （応募先の入れ方を入り口ごとに持たない）。
+ */
+export async function confirmAndSave(
   work: WorkEntry,
   ranked: RankedContest,
   deps: ContestImportDeps

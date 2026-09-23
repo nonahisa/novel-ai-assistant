@@ -16,6 +16,13 @@ import {
   loadContestInbox,
   type ContestImportDeps,
 } from "./contestImport";
+import { importContestsFromRss } from "./contestRss";
+import { chooseContestByForecast } from "./contestForecast";
+import {
+  commonGoalsDescription,
+  currentCommonGoals,
+  editCommonWritingGoals,
+} from "./commonWritingGoals";
 
 /**
  * 作品ごとの目標を決める（設計書6.3.6）。
@@ -28,6 +35,7 @@ import {
  * 古い一覧を抱えるより、**作者が募集要項を見て入れる**ほうが確かである。
  * 探す場所は案内に書く。一覧のページを読んで選ぶこともできる（設計書6.3.6.1。
  * ヘルパーか、ページの文を貼り付けて取り込む）が、読むのは作者が開いたページだけである。
+ * ツクリテミライの RSS だけは、**作者が押したときにだけ**取りに行く（設計書6.3.6.2）。
  */
 
 /** 募集を探す場所。同梱する一覧の代わりに、行き先だけを示す */
@@ -43,6 +51,11 @@ const CONTEST_DIRECTORIES = [
 export interface SetWorkGoalsOptions {
   /** 公募の一覧から選ぶ・貼り付けて取り込む（設計書6.3.6.1）。無ければ出さない */
   readonly contests?: ContestImportDeps;
+  /**
+   * この端末の名前（執筆量の記録を読む）。渡されていれば「完成予定から公募を選ぶ」
+   * （設計書6.3.6.3）を出す
+   */
+  readonly deviceId?: string;
 }
 
 export async function setWorkGoals(
@@ -54,6 +67,7 @@ export async function setWorkGoals(
   const inboxCount = contests ? loadContestInbox(contests.memory).length : 0;
   const contestUrl =
     goals.contest?.url && isOpenableWorkUrl(goals.contest.url) ? goals.contest.url : null;
+  const common = currentCommonGoals();
 
   const picked = await vscode.window.showQuickPick(
     [
@@ -101,6 +115,26 @@ export async function setWorkGoals(
                 "いまの字数に合うもの・締切の近いものが上に並びます。",
               action: "pickContest" as const,
             },
+            ...(options.deviceId
+              ? [
+                  {
+                    label: "$(calendar) 完成予定から公募を選ぶ",
+                    description: inboxCount > 0 ? "締切に間に合うものを選び出します" : "先に公募を取り込んでください",
+                    detail:
+                      "直近30日の1日あたりの字数と予定の字数から完成予定日を出し、" +
+                      "締切に間に合って締切が近い公募を並べます。",
+                    action: "forecastContests" as const,
+                  },
+                ]
+              : []),
+            {
+              label: "$(rss) 公募を RSS から取り込む",
+              description: "ツクリテミライ",
+              detail:
+                "ツクリテミライの小説の公募一覧（RSS）を、押したときだけ取りに行きます。" +
+                "押すと、つなぐ先を確かめる画面が出ます。",
+              action: "rssContests" as const,
+            },
             {
               label: "$(clippy) 公募の一覧を貼り付けて取り込む",
               description: "ヘルパーを使わないとき",
@@ -111,6 +145,14 @@ export async function setWorkGoals(
             },
           ]
         : []),
+      {
+        label: "$(target) 1日・1か月の目標（全作品共通）",
+        description: commonGoalsDescription(common.daily, common.monthly),
+        detail:
+          "この作品だけでなく、全作品の合計で数える目標です。" +
+          "ステータスバーの「今日 ○/○字」と、目標に届いたときのお祝いに使います。",
+        action: "commonGoals" as const,
+      },
       ...(goals.contest
         ? [
             {
@@ -153,6 +195,18 @@ export async function setWorkGoals(
   }
   if (picked.action === "pasteContests" && contests) {
     await importContestsFromClipboard(contests, "paste", work);
+    return;
+  }
+  if (picked.action === "rssContests" && contests) {
+    await importContestsFromRss(contests, work);
+    return;
+  }
+  if (picked.action === "forecastContests" && contests && options.deviceId) {
+    await chooseContestByForecast(work, { ...contests, deviceId: options.deviceId });
+    return;
+  }
+  if (picked.action === "commonGoals") {
+    await editCommonWritingGoals();
     return;
   }
 

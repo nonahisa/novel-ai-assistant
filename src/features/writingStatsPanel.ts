@@ -44,6 +44,7 @@ import {
   describeContestProgress,
 } from "../core/contestProgress";
 import { asOfLabel } from "../core/contestInbox";
+import { COMMON_GOALS_MESSAGE, editCommonWritingGoals } from "./commonWritingGoals";
 import {
   boundaryHour,
   dailyGoal,
@@ -158,6 +159,18 @@ export async function openWritingStatsPanel(
       */
       if (!isOpenableWorkUrl(parsed.url)) return;
       await vscode.env.openExternal(vscode.Uri.parse(parsed.url));
+      return;
+    }
+    if (parsed.type === COMMON_GOALS_MESSAGE) {
+      // 1日・1か月の目標（全作品共通）を決める（作者の指摘、2026-09-23）。
+      // 決めたら、この画面の「あと何字」を出し直す
+      if (await editCommonWritingGoals()) {
+        panel.webview.postMessage({
+          type: "stats",
+          data: await buildStatsPanelData(work, deviceId),
+        });
+        await offerCelebration(panel, work);
+      }
       return;
     }
     if (parsed.type === "ready") {

@@ -226,7 +226,9 @@ export type ChatRunKind =
   /** 紹介文・あらすじを開く */
   | "openSynopsisDocs"
   /** 本文からプロットを逆算 */
-  | "generatePlot";
+  | "generatePlot"
+  /** 応募先をAIに提案してもらう（隠し機能。設計書6.3.6.5） */
+  | "suggestContests";
 
 export interface ChatRun {
   kind: ChatRunKind;
@@ -277,6 +279,9 @@ const RUNNABLE: ReadonlyMap<string, { kind: ChatRunKind } & Omit<ChatRun, "kind"
         // メニューは「本文からプロットを逆算」。ここは相談の中で押す札なので、
         // この表の言い回し（「〜する」）に揃えたまま、比喩だけ名前に合わせる
         ["generatePlot", "本文からプロットを逆算する", true],
+        // 応募先（設計書6.3.6.5）。**詳細メニューに無い隠し機能**で、入口は相談と
+        // コマンドパレットだけ（作者の裁定、2026-09-23）
+        ["suggestContests", "応募先をAIに提案してもらう", true],
       ] as Array<[ChatRunKind, string, boolean]>
     ).map(([kind, label, usesAI]) => [
       kind.toLowerCase(),

@@ -79,6 +79,23 @@ describe("出してはいけない場面", () => {
   });
 });
 
+/**
+ * 応募先の提案（設計書6.3.6.5）。**詳細メニューに無い隠し機能**で、相談からの
+ * 入口がここ（作者の裁定、2026-09-23：「応募先を提案して」）。
+ */
+describe("応募先の提案", () => {
+  test("「応募先を提案して」「公募を選んでください」でボタンを出す", () => {
+    expect(detectRunIntent("応募先を提案して")).toBe("suggestContests");
+    expect(detectRunIntent("この作品に合う公募を選んでください")).toBe("suggestContests");
+    expect(detectRunIntent("出せそうなコンテストを探してほしい")).toBe("suggestContests");
+  });
+
+  test("使い方を聞いているだけ・話題にしているだけなら出さない", () => {
+    expect(detectRunIntent("応募先の提案ってどうやるの？")).toBeUndefined();
+    expect(detectRunIntent("公募に出すか迷っています")).toBeUndefined();
+  });
+});
+
 describe("押すのは作者", () => {
   test("見分けても、返すのは機能の種別だけ", () => {
     // 実行はしない。ボタンを出すところまでが、作者から許可された範囲
