@@ -9,7 +9,15 @@ import {
   type ReaderTypeId,
 } from "./readerTarget";
 import type { ReaderProfile } from "../models/readerProfile";
-import type { TargetSheetCircles } from "./targetSheetCircles";
+import type {
+  TargetSheetBridge,
+  TargetSheetCircles,
+} from "./targetSheetCircles";
+import {
+  reactionRows,
+  writtenRows,
+  type TargetSheetWrittenRecord,
+} from "./targetSheetWritten";
 import { titleFitCandidates, type TitleFitRecord } from "./titleFit";
 import { READER_TYPE_IDS } from "./readerTypeNeighbors";
 import {
@@ -229,6 +237,11 @@ export interface TargetSheetDocInput {
   /** 3つの輪（作者の読者タイプ × 狙い × 実像）。渡されなければ節ごと出さない */
   readonly circles?: TargetSheetCircles;
   /**
+   * 書けたものの実績（話数・字数・書いた日・設定資料・文体と、届いている
+   * 反応）。渡されなければ節ごと出さない（古い呼び出し元のため）。
+   */
+  readonly written?: TargetSheetWrittenRecord;
+  /**
    * タイトルとサブタイトルの適合度（P-41）。**測っていなければ `undefined`**
    * ——その場合は測り方を案内する（空の表を出さない）。
    */
@@ -254,6 +267,8 @@ export function buildTargetSheetDoc(input: TargetSheetDocInput): string {
     ...evidenceSection(input.profile),
     ...directionSection(sheet),
     ...circlesSection(input.circles),
+    ...bridgeSection(input.circles?.bridge),
+    ...writtenSection(input.written),
     ...titleFitSection(input.titleFit),
     ...historySection(input.history ?? []),
     ...adviceSection(),
@@ -543,6 +558,78 @@ function circlesSection(circles: TargetSheetCircles | undefined): string[] {
     lines.push("");
   }
   // 単独の3つの輪の紙へは案内しない（2026-09-23。シートの中に一本化した）
+  return lines;
+}
+
+/**
+ * 近づける道（0.82.2 まで単独の3つの輪の紙にあった。2026-09-23 に移した）。
+ *
+ * 出す条件（辺が2本以上あり、どれも離れている）は `targetSheetCircles.ts`
+ * の `needsBridge` が決める。ここは並べるだけ。**どれも動かさない道も
+ * あると必ず書く**——手段の一覧が「直せ」という指示に読まれないように。
+ */
+function bridgeSection(bridge: TargetSheetBridge | undefined): string[] {
+  if (!bridge) return [];
+  return [
+    "## 近づける道",
+    "",
+    `いま突き合わせられた${bridge.edgeCount}本は、どれも離れています。` +
+      "動かせるところは、3つの輪のそれぞれにあります。",
+    "",
+    ...bridge.routes.map((route) => `- **${route.label}**　${route.text}`),
+    "",
+    "どれを動かすかは作者が決めることです。どれも動かさない、という選び方もあります。",
+    "",
+  ];
+}
+
+/**
+ * 書けたものの実績（0.82.2 まで単独の3つの輪の紙にあった。2026-09-23 に移した）。
+ *
+ * **「書けるもの」とは書かない**（作者の裁定、2026-09-19）。節の頭で、
+ * ここに無いものが書けないという意味ではないと断る。
+ *
+ * **材料の無いものは「まだ記録がありません」と書く**——0話・0字や空の表を
+ * 並べると、でっち上げの数字に見える。反応の台帳を**読めなかった**ときは
+ * 「まだ記録がありません」とは書かない（控えた数字が消えたように見える）。
+ */
+function writtenSection(record: TargetSheetWrittenRecord | undefined): string[] {
+  if (!record) return [];
+  const lines = [
+    "## 書けたものの実績",
+    "",
+    "ここに並ぶのは、原稿と作品の記録から**数えられたこと**だけです。" +
+      "ここに無いものが書けない、という意味ではありません。",
+    "",
+  ];
+
+  const rows = writtenRows(record.facts);
+  if (rows.length === 0) {
+    lines.push(
+      "まだ記録がありません。本文が増えると、ここに出ます。",
+      ""
+    );
+  } else {
+    for (const row of rows) lines.push(`- ${row}`);
+    lines.push("");
+  }
+
+  lines.push("### 届いている反応", "");
+  if (record.reactions === undefined) {
+    lines.push(
+      "投稿の記録を読めませんでした（下の「読めなかったもの」にあります）。",
+      ""
+    );
+  } else if (record.reactions.length === 0) {
+    lines.push(
+      "まだ記録がありません。投稿サイトの数字を「読者反応手動入力」か" +
+        "「読者反応自動取込」で控えると、サイトごとの最新がここに並びます。",
+      ""
+    );
+  } else {
+    for (const row of reactionRows(record.reactions)) lines.push(`- ${row}`);
+    lines.push("");
+  }
   return lines;
 }
 

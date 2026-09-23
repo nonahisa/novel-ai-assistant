@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { targetSheetCircles } from "../../../src/core/targetSheetCircles";
+import {
+  needsBridge,
+  targetSheetCircles,
+} from "../../../src/core/targetSheetCircles";
+import { READER_TYPES, resolveReaderType } from "../../../src/core/readerTarget";
+import { readerTypeNeighbors } from "../../../src/core/readerTypeNeighbors";
 import type { ReaderActual, ReaderScores } from "../../../src/models/readerProfile";
 
 /**
@@ -139,5 +144,109 @@ describe("材料の無い輪は、推測で埋めない", () => {
 
     expect(circles.edges).toEqual([]);
     expect(circles.missing).toHaveLength(3);
+  });
+});
+
+/**
+ * 近づける道（0.82.2 まで単独の3つの輪の紙にあった。作者の裁定、
+ * 2026-09-23 でシートへ移した）。前の紙のテストをここへ移してある。
+ *
+ * 1. **辺が2本以上あって、すべて離れているときだけ**出す。1本では
+ *    「重なりが空」と言い切れない
+ * 2. **「重なっていません」とは書かない**——判定ではなく手段を渡す
+ * 3. **いきなり遠くへ飛ばさない**（隣へ一歩の形で名指しする）
+ */
+describe("近づける道", () => {
+  /** 開拓層寄り（読み慣れと求めるものが高い） */
+  const LORE_CRAVE: ReaderScores = { familiarity: 6, posture: 0, craving: 6 };
+
+  test("辺が2本以上あって、すべて離れているときだけ出す", () => {
+    const circles = targetSheetCircles({
+      authorReader: { scores: LORE_DEEP },
+      aim: ["light"],
+      actual: actualOf(LORE_CRAVE),
+    });
+
+    expect(circles.edges).toHaveLength(3);
+    expect(circles.edges.every((edge) => edge.apart)).toBe(true);
+    expect(needsBridge(circles.edges)).toBe(true);
+    expect(circles.bridge?.edgeCount).toBe(3);
+  });
+
+  test("辺が1本しか無いときは出さない", () => {
+    const circles = targetSheetCircles({
+      authorReader: { scores: LORE_DEEP },
+      aim: ["light"],
+    });
+
+    expect(circles.edges).toHaveLength(1);
+    expect(circles.edges[0].apart).toBe(true);
+    expect(needsBridge(circles.edges)).toBe(false);
+    expect(circles.bridge).toBeUndefined();
+  });
+
+  test("1本でも離れていなければ出さない", () => {
+    const circles = targetSheetCircles({
+      authorReader: { scores: LORE_DEEP },
+      aim: ["lore_deep"],
+      actual: actualOf(LORE_CRAVE),
+    });
+
+    expect(circles.edges.length).toBeGreaterThanOrEqual(2);
+    expect(circles.edges.some((edge) => !edge.apart)).toBe(true);
+    expect(circles.bridge).toBeUndefined();
+  });
+
+  test("狙いが2つで、片方が重なっていれば出さない（重なりは空ではない）", () => {
+    const circles = targetSheetCircles({
+      authorReader: { scores: LORE_DEEP },
+      aim: ["light", "lore_deep"],
+      actual: actualOf(LORE_CRAVE),
+    });
+
+    expect(circles.bridge).toBeUndefined();
+  });
+
+  test("動かせるところを3つ、隣へ一歩の形で渡す", () => {
+    const bridge = targetSheetCircles({
+      authorReader: { scores: LORE_DEEP },
+      aim: ["light"],
+      actual: actualOf(LORE_CRAVE),
+    }).bridge;
+
+    expect(bridge?.routes.map((route) => route.circle)).toEqual([
+      "aim",
+      "actual",
+      "author",
+    ]);
+    const text = (bridge?.routes ?? [])
+      .map((route) => `${route.label} ${route.text}`)
+      .join("\n");
+    expect(text).toContain("読んでもらいたい読者を動かす");
+    expect(text).toContain("書けているものを動かす");
+    expect(text).toContain("書きたいものを動かす");
+    // 宛先は狙い（シートでは「読者が読みたいもの」の輪が狙いになった）
+    expect(text).toContain("いまの狙い「すきま層」の隣は");
+    // 名指しする（どこへ寄せるか分からない案内にしない）
+    expect(text).toMatch(/隣の「[^」]+」まで一歩|その隣です。一歩で届きます/);
+    // 「重なっていません」とは書かない。「書けるもの」とも書かない
+    expect(text).not.toContain("重なっていません");
+    expect(text).not.toContain("書けるもの");
+  });
+
+  test("狙いが実像のすぐ隣なら、「隣の狙いまで一歩」と同じ層を2度呼ばない", () => {
+    // 実像の層から見て、狙いが隣にある組を探す（隣の表に依らず測る）
+    const actualType = resolveReaderType(LORE_CRAVE);
+    const aim = readerTypeNeighbors(actualType)[0];
+    const circles = targetSheetCircles({
+      authorReader: { scores: { familiarity: 0, posture: 6, craving: 0 } },
+      aim: [aim],
+      actual: actualOf(LORE_CRAVE),
+    });
+    const route = circles.bridge?.routes.find((entry) => entry.circle === "actual");
+    expect(route).toBeDefined();
+    const label = READER_TYPES[aim].label;
+    expect(route?.text).not.toContain(`隣の「${label}」まで一歩`);
+    expect(route?.text).toContain("一歩で届きます");
   });
 });

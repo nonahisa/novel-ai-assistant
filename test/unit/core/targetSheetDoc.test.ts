@@ -15,6 +15,7 @@ import {
   targetSheetCircles,
   type TargetSheetCircles,
 } from "../../../src/core/targetSheetCircles";
+import type { TargetSheetWrittenRecord } from "../../../src/core/targetSheetWritten";
 import {
   TITLE_FIT_SCHEMA_VERSION,
   type TitleFitRecord,
@@ -191,6 +192,7 @@ describe("統合した1枚", () => {
     profile?: ReaderProfile;
     circles?: TargetSheetCircles;
     titleFit?: TitleFitRecord;
+    written?: TargetSheetWrittenRecord;
   }): string {
     const scores = input.profile?.actual?.scores ?? input.profile?.declared?.scores;
     return buildTargetSheetDoc({
@@ -203,6 +205,7 @@ describe("統合した1枚", () => {
       source: input.profile?.actual ? "actual" : scores ? "declared" : undefined,
       profile: input.profile,
       circles: input.circles,
+      written: input.written,
       titleFit: input.titleFit,
       generatedAt: AT,
     });
@@ -270,6 +273,140 @@ describe("統合した1枚", () => {
       circles,
     });
     expect(doc).not.toContain("3つの輪の紙");
+  });
+
+  /*
+    実績と近づける道（作者の裁定、2026-09-23）。単独の3つの輪の紙を
+    取り除いたときに、どこにも出なくなっていたものをシートへ移した。
+  */
+
+  /** 見出しから次の同じ深さの見出しまでを切り出す */
+  function section(doc: string, heading: string): string {
+    const lines = doc.split("\n");
+    const start = lines.findIndex((line) => line === `## ${heading}`);
+    expect(start, `節が無い: ${heading}`).toBeGreaterThanOrEqual(0);
+    const rest = lines.slice(start + 1);
+    const end = rest.findIndex((line) => line.startsWith("## "));
+    return (end === -1 ? rest : rest.slice(0, end)).join("\n");
+  }
+
+  /** 3本とも離れている輪（作者は考察層寄り・狙いはすきま層・実像は開拓層寄り） */
+  function apartCircles(): TargetSheetCircles {
+    return targetSheetCircles({
+      authorReader: { scores: { familiarity: 6, posture: 4, craving: 0 } },
+      aim: ["light"],
+      actual: {
+        scores: { familiarity: 6, posture: 0, craving: 6 },
+        evidence: [],
+        basis: "冒頭",
+        model: "test",
+        updatedAt: "2026-09-23T00:00:00.000Z",
+      },
+    });
+  }
+
+  const FILLED: TargetSheetWrittenRecord = {
+    facts: {
+      episodes: 19,
+      chars: 41000,
+      days: { active: 32, streak: 5 },
+    },
+    reactions: [
+      { site: "小説家になろう", metrics: "PV 1,234／ブックマーク 89", readAt: "2026-09-19" },
+    ],
+  };
+
+  test("実績の節は3つの輪の下にあり、数えられたことだけを並べる", () => {
+    const doc = buildFull({
+      authorBlock: "狙い：すきま層",
+      profile: PROFILE,
+      circles: apartCircles(),
+      written: FILLED,
+    });
+
+    const circlesAt = doc.indexOf("## 3つの輪");
+    expect(circlesAt).toBeGreaterThanOrEqual(0);
+    expect(doc.indexOf("## 近づける道")).toBeGreaterThan(circlesAt);
+    expect(doc.indexOf("## 書けたものの実績")).toBeGreaterThan(
+      doc.indexOf("## 近づける道")
+    );
+
+    const written = section(doc, "書けたものの実績");
+    expect(written).toContain("- 書き切ったのは19話、合計41,000字。");
+    expect(written).toContain("- 書いた日は32日。いまは5日続いています。");
+    expect(written).toContain(
+      "- 小説家になろう：PV 1,234／ブックマーク 89（2026-09-19 時点）"
+    );
+    // 限界の宣告にしない（作者の裁定、2026-09-19）
+    expect(written).toContain("ここに無いものが書けない、という意味ではありません");
+    expect(doc).not.toContain("書けるもの");
+  });
+
+  test("記録が無ければ「まだ記録がありません」と断る（0話・0字を並べない）", () => {
+    const written = section(
+      buildFull({
+        authorBlock: "狙い：考察層",
+        written: { facts: {}, reactions: [] },
+      }),
+      "書けたものの実績"
+    );
+
+    expect(written).toContain("まだ記録がありません。本文が増えると");
+    expect(written).toContain("まだ記録がありません。投稿サイトの数字を");
+    expect(written).not.toContain("0話");
+    expect(written).not.toContain("0字");
+    expect(written.split("\n").filter((line) => line.startsWith("- "))).toEqual([]);
+  });
+
+  test("反応の台帳を読めなかったときは、「まだ記録がありません」と言わない", () => {
+    const written = section(
+      buildFull({ authorBlock: "狙い：考察層", written: { facts: {} } }),
+      "書けたものの実績"
+    );
+    const reactions = written.slice(written.indexOf("### 届いている反応"));
+
+    expect(reactions).toContain("投稿の記録を読めませんでした");
+    expect(reactions).not.toContain("まだ記録がありません");
+  });
+
+  test("実績を渡さなければ、節ごと出さない（古い呼び出し元のため）", () => {
+    expect(buildFull({ authorBlock: "狙い：考察層" })).not.toContain(
+      "## 書けたものの実績"
+    );
+  });
+
+  test("近づける道は、どれを動かすかを作者に任せる形で並ぶ", () => {
+    const bridge = section(
+      buildFull({ authorBlock: "狙い：すきま層", circles: apartCircles() }),
+      "近づける道"
+    );
+
+    expect(bridge).toContain("いま突き合わせられた3本は、どれも離れています");
+    expect(bridge).toContain("- **読んでもらいたい読者を動かす（狙いを寄せる）**");
+    expect(bridge).toContain("- **書けているものを動かす（書ける範囲を広げる）**");
+    expect(bridge).toContain("- **書きたいものを動かす（題材を選び直す）**");
+    expect(bridge).toContain("どれも動かさない、という選び方もあります");
+    expect(bridge).not.toContain("重なっていません");
+  });
+
+  test("離れていない輪があれば、近づける道は出さない", () => {
+    const circles = targetSheetCircles({
+      aim: ["lore_deep"],
+      actual: PROFILE.actual,
+    });
+    expect(
+      buildFull({ authorBlock: "狙い：考察層", profile: PROFILE, circles })
+    ).not.toContain("## 近づける道");
+  });
+
+  test("実績と近づける道を足しても、作者の欄はそのまま運ばれる", () => {
+    const block = "狙い：すきま層\n\n理由：軽く読める話に\nメモ：第2部で見直す";
+    const doc = buildFull({
+      authorBlock: block,
+      circles: apartCircles(),
+      written: FILLED,
+    });
+    expect(extractAuthorBlock(doc)).toBe(block);
   });
 
   test("適合度をまだ測っていなければ、測り方を言う", () => {

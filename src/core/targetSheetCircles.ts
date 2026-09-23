@@ -5,6 +5,7 @@ import {
   type ReaderTypeId,
 } from "./readerTarget";
 import { compareAuthorReader } from "./authorReaderGap";
+import { neighborToward, readerTypeNeighbors } from "./readerTypeNeighbors";
 import { readerTypeAffinityOf, readerTypeGaps } from "./targetSheet";
 import {
   READER_PROFILE_SCHEMA_VERSION,
@@ -67,6 +68,26 @@ export interface TargetSheetCircles {
   readonly edges: readonly TargetSheetCircleEdge[];
   /** 足りない輪と、その埋め方（1行ずつ） */
   readonly missing: readonly string[];
+  /**
+   * 近づける道。**出す条件を満たさなければ `undefined`**
+   * （`needsBridge`。紙の側は節ごと出さない）。
+   */
+  readonly bridge?: TargetSheetBridge;
+}
+
+/** 近づける道の1つ（どの輪を動かすか） */
+export interface TargetSheetBridgeRoute {
+  /** 動かす輪。aim＝読んでもらいたい読者、actual＝書けているもの、author＝書きたいもの */
+  readonly circle: "aim" | "actual" | "author";
+  /** 「読んでもらいたい読者を動かす（狙いを寄せる）」など。強調は紙の側で付ける */
+  readonly label: string;
+  readonly text: string;
+}
+
+export interface TargetSheetBridge {
+  /** 突き合わせられた辺の数（どれも離れている） */
+  readonly edgeCount: number;
+  readonly routes: readonly TargetSheetBridgeRoute[];
 }
 
 export interface TargetSheetCirclesInput {
@@ -111,7 +132,116 @@ export function targetSheetCircles(
     edges.push(authorActualEdge(authorReader.scores, actual));
   }
 
-  return { edges, missing };
+  const bridge = needsBridge(edges)
+    ? targetSheetBridge(input, edges.length)
+    : undefined;
+  return bridge ? { edges, missing, bridge } : { edges, missing };
+}
+
+/**
+ * 「近づける道」を出す条件（設計書6.101、実装の順「4」。6.108.6 でシートへ移した）。
+ *
+ * **突き合わせられた辺が2本以上あり、そのすべてが離れているとき。**
+ * 1本しか出せないときは出さない——**「重なりが空」と言い切れない**
+ * からである。1本の食い違いだけで3つの輪の置き直しを勧めるのは、
+ * 判定として重すぎる。
+ *
+ * 狙いが2つのときも同じ物差しで見る。片方の狙いで1本でも重なって
+ * いれば、重なりは空ではない（その狙いが重なりの場所である）。
+ */
+export const TARGET_SHEET_BRIDGE_MIN_EDGES = 2;
+
+export function needsBridge(edges: readonly TargetSheetCircleEdge[]): boolean {
+  return (
+    edges.length >= TARGET_SHEET_BRIDGE_MIN_EDGES &&
+    edges.every((edge) => edge.apart)
+  );
+}
+
+/**
+ * 近づける道（0.82.2 まで在った単独の3つの輪の紙から移した。
+ * 作者の裁定、2026-09-23）。
+ *
+ * **「重なっていません」とは書かない**（作者の裁定、2026-09-19）。
+ * 空だと告げるのは酷だが、重なっていないのに「ここが狙い目」と言うのは
+ * 嘘である。**判定ではなく手段を渡す形**なら、どちらも避けられる。
+ *
+ * 前の紙は「読者が読みたいもの」を**宣言の点数**で見ていたが、シートでは
+ * その輪が**狙い**になった（冒頭の表）。道の組み方は同じで、宛先を狙いに
+ * 置き換えてある。狙いが2つなら狙いごとに道を出し、輪の種類の順に並べる。
+ *
+ * **名指しできない手段は、その項目ごと落とす。** 材料が無いまま
+ * 「隣へ寄せましょう」とだけ言っても、どこへ寄せるのか分からない。
+ */
+function targetSheetBridge(
+  input: TargetSheetCirclesInput,
+  edgeCount: number
+): TargetSheetBridge | undefined {
+  const authorType = input.authorReader
+    ? resolveReaderType(input.authorReader.scores)
+    : undefined;
+  const actualType = input.actual
+    ? resolveReaderType(input.actual.scores)
+    : undefined;
+
+  const aimRoutes: TargetSheetBridgeRoute[] = [];
+  const actualRoutes: TargetSheetBridgeRoute[] = [];
+  const authorRoutes: TargetSheetBridgeRoute[] = [];
+
+  for (const aim of input.aim) {
+    const aimInfo = READER_TYPES[aim];
+
+    // ① 読んでもらいたい読者を動かす（狙いを寄せる）
+    const neighbors = readerTypeNeighbors(aim);
+    if (authorType && neighbors.length > 0) {
+      const names = neighbors
+        .map((id) => `「${READER_TYPES[id].label}」`)
+        .join("・");
+      const nearest = neighborToward(aim, authorType);
+      const detail = nearest
+        ? `そのうち、読者としてのあなた（「${READER_TYPES[authorType].label}」）に` +
+          `いちばん近いのは「${READER_TYPES[nearest].label}」です。` +
+          `この層に効くのは、${READER_TYPES[nearest].works}`
+        : "";
+      aimRoutes.push({
+        circle: "aim",
+        label: "読んでもらいたい読者を動かす（狙いを寄せる）",
+        text: `いまの狙い「${aimInfo.label}」の隣は、${names}です。${detail}`,
+      });
+    }
+
+    // ② 書けているものを動かす（書ける範囲を広げる）。**いきなり飛ばさない**
+    const step = actualType ? neighborToward(actualType, aim) : undefined;
+    if (actualType && step) {
+      // 狙いがすでに隣にあるなら一歩で着く（「狙いへいきなり寄せず、
+      // 隣の狙いまで一歩」という、同じ層を2度呼ぶ言い方にしない）
+      const how =
+        step === aim
+          ? `狙いの「${aimInfo.label}」は、その隣です。一歩で届きます。`
+          : `狙いの「${aimInfo.label}」へいきなり寄せず、` +
+            `隣の「${READER_TYPES[step].label}」まで一歩。`;
+      actualRoutes.push({
+        circle: "actual",
+        label: "書けているものを動かす（書ける範囲を広げる）",
+        text:
+          `書けているものは「${READER_TYPES[actualType].label}」に向いています。${how}` +
+          `この層に効くのは、${READER_TYPES[step].works}`,
+      });
+    }
+
+    // ③ 書きたいものを動かす（題材を選び直す）
+    authorRoutes.push({
+      circle: "author",
+      label: "書きたいものを動かす（題材を選び直す）",
+      text:
+        `狙いの「${aimInfo.label}」に効くのは、${aimInfo.works}` +
+        `　離れるのは、${aimInfo.loses}` +
+        "　書きたいものの中で、これに当たる題材を選び直す道があります。",
+    });
+  }
+
+  const routes = [...aimRoutes, ...actualRoutes, ...authorRoutes];
+  return routes.length === 0 ? undefined : { edgeCount, routes };
 }
 
 /** 書きたいもの ↔ 読んでもらいたい読者 */

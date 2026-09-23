@@ -10,6 +10,7 @@ import {
 import { READER_QUESTIONS } from "../../../src/core/readerTarget";
 import { readAimReason, readAimTypes, extractAuthorBlock } from "../../../src/core/targetSheetDoc";
 import * as paths from "../../../src/core/paths";
+import { emptyPostingLedger, POSTING_FILE } from "../../../src/models/posting";
 import type { AIRegistry } from "../../../src/ai/registry";
 import type { WorkEntry } from "../../../src/models/types";
 
@@ -32,6 +33,7 @@ const SETTINGS = paths.join(WORK_FOLDER, "設定");
 const SHEET = paths.join(SETTINGS, "ターゲットシート.md");
 const PROFILE = paths.join(SETTINGS, "読者像.json");
 const HISTORY_DIR = paths.join(SETTINGS, "ターゲットシート", "履歴");
+const POSTING = paths.join(SETTINGS, POSTING_FILE);
 
 const WORK: WorkEntry = {
   id: "w1",
@@ -143,7 +145,7 @@ function choice(index: number): Answer {
 }
 
 const REGISTRY = {} as AIRegistry;
-const SOURCES = {};
+const SOURCES = { deviceId: "test-device" };
 
 beforeEach(() => {
   fs = new MemoryFs();
@@ -325,5 +327,84 @@ describe("3つの輪はシートの中だけ", () => {
     expect(labels.some((label) => label.includes("3つの輪"))).toBe(false);
     // シートを作り直す道は残る（3つの輪の節はそちらに入る）
     expect(labels).toContain("いまの材料でシートを作り直す");
+  });
+});
+
+/**
+ * **書けたものの実績は、シートへ移した**（作者の裁定、2026-09-23）。
+ * 単独の3つの輪の紙を取り除いたとき、実績（話数・字数・反応）がどこにも
+ * 出なくなっていた。記録の無い作品では「まだ記録がありません」と断る
+ * ——0話・0字を並べない。
+ */
+describe("書けたものの実績", () => {
+  it("記録の無い作品でも節は出て、数字をでっち上げない", async () => {
+    answers = [plan("1 狙い"), types("考察層")];
+    inputs = ["理由"];
+
+    const outcome = await runTargetReader(WORK, REGISTRY, SOURCES);
+
+    expect(outcome).toBe(CHECK_COMPLETED);
+    const sheet = fs.text(SHEET) ?? "";
+    expect(sheet).toContain("## 書けたものの実績");
+    expect(sheet).toContain("まだ記録がありません。本文が増えると");
+    expect(sheet).toContain("### 届いている反応");
+    expect(sheet).not.toContain("0話");
+    expect(sheet).not.toContain("0字");
+    // 実績を数えても、書くのはシートと控え（と操作の記録）だけ。
+    // 原稿も台帳も読むだけ
+    const logs = paths.join(WORK_FOLDER, ".aiwriter", "logs");
+    expect(
+      fs
+        .placed()
+        .filter(
+          (name) =>
+            name !== SHEET &&
+            !name.startsWith(HISTORY_DIR) &&
+            !name.startsWith(logs)
+        )
+    ).toEqual([]);
+    // 読めなかったものは無い（空の作品は「読めない」ではない）
+    expect(sheet).not.toContain("## 読めなかったもの");
+  });
+
+  it("届いている反応があれば、サイトごとの最新が並ぶ（台帳は書き換えない）", async () => {
+    const ledger = JSON.stringify({
+      ...emptyPostingLedger(),
+      readerStats: [
+        {
+          site: "kakuyomu",
+          readAt: "2026-09-20T00:00:00.000Z",
+          scope: "work",
+          metrics: { pv: 1234 },
+          source: "manual",
+        },
+      ],
+    });
+    fs.files.set(POSTING, new TextEncoder().encode(ledger));
+    answers = [plan("1 狙い"), types("考察層")];
+    inputs = ["理由"];
+
+    await runTargetReader(WORK, REGISTRY, SOURCES);
+
+    const sheet = fs.text(SHEET) ?? "";
+    expect(sheet).toMatch(/- カクヨム：.*1,234.*（2026-09-20 時点）/);
+    expect(fs.text(POSTING)).toBe(ledger);
+  });
+
+  it("投稿の台帳を読めなければ、「まだ記録がありません」とは書かない", async () => {
+    // 読めなかったのに「無い」と書くと、控えた数字が消えたように見える
+    fs.files.set(POSTING, new TextEncoder().encode("{ 壊れている"));
+    answers = [plan("1 狙い"), types("考察層")];
+    inputs = ["理由"];
+
+    await runTargetReader(WORK, REGISTRY, SOURCES);
+
+    const sheet = fs.text(SHEET) ?? "";
+    const reactions = sheet.slice(sheet.indexOf("### 届いている反応"));
+    expect(reactions.split("\n## ")[0]).toContain("投稿の記録を読めませんでした");
+    expect(reactions.split("\n## ")[0]).not.toContain("まだ記録がありません");
+    expect(sheet).toContain("## 読めなかったもの");
+    // 壊れた台帳は直さない
+    expect(fs.text(POSTING)).toBe("{ 壊れている");
   });
 });

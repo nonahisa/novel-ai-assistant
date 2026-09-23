@@ -36,6 +36,7 @@ import { warnWithLog } from "../views/notify";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import type { AuthorReaderProfile } from "../core/authorReaderType";
 import { targetSheetCircles } from "../core/targetSheetCircles";
+import { collectTargetSheetWritten } from "./targetSheetWritten";
 import { TARGET_READER_ENTRY_TITLE } from "../prompts/readerTarget";
 import {
   parseTitleFitRecord,
@@ -104,6 +105,11 @@ export interface OpenTargetSheetOptions {
   readonly authorBlock?: string;
   /** 作者自身の読者タイプ（3つの輪の1つ）。**未診断なら渡さない** */
   readonly authorReader?: AuthorReaderProfile;
+  /**
+   * この端末の識別子。執筆の記録（書いた日数）を読むのに使う
+   * （`WritingStatsStore`。読むのは全端末の記録を合わせたもの）。
+   */
+  readonly deviceId: string;
   /** 3段目で読み取れなかった軸の呼び名 */
   readonly unmeasured?: readonly string[];
   /**
@@ -118,7 +124,8 @@ export interface OpenTargetSheetOptions {
  *
  * **ここではAIを呼ばない。** 材料は読者像の台帳（`設定/読者像.json`）・
  * 作者の欄（狙いと理由）・作者自身の読者タイプ・タイトルの適合度の記録
- * （測ったときに残したもの）である。助言（第3段）は次の版。
+ * （測ったときに残したもの）、そして書けたものの実績（原稿・執筆の記録・
+ * 設定資料・投稿の台帳。読むだけ）である。助言（第3段）は次の版。
  *
  * ## 書くのは2つだけ
  *
@@ -136,7 +143,7 @@ export interface OpenTargetSheetOptions {
  */
 export async function openTargetSheet(
   work: WorkEntry,
-  options: OpenTargetSheetOptions = {}
+  options: OpenTargetSheetOptions
 ): Promise<boolean> {
   useLogFile(work.folderPath);
 
@@ -174,6 +181,21 @@ export async function openTargetSheet(
   const history = await recordHistory(historyDir, sheet, basis?.source, at, notices);
   const titleFit = await readTitleFitRecord(settings, notices);
 
+  /*
+    書けたものの実績（2026-09-23 に単独の3つの輪の紙から移した）。
+    **待たせうるのは文体を読むところだけ**（全話の本文を読む）。19話・
+    4万字なら一瞬だが、200話の合本では体感できる長さになりうるので、
+    進み具合を出す。**中止は付けない**——読むだけで、途中でやめても
+    得るものが無い（前の紙と同じ判断）。
+  */
+  const written = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: `${TARGET_SHEET_TITLE}：書けたものの実績を数えています`,
+    },
+    () => collectTargetSheetWritten(work, options.deviceId, notices)
+  );
+
   const doc = buildTargetSheetDoc({
     workTitle: work.title,
     sheet,
@@ -188,6 +210,7 @@ export async function openTargetSheet(
       aim,
       actual: profile.actual,
     }),
+    written,
     titleFit,
     generatedAt: at,
   });

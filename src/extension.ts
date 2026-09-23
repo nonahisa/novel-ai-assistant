@@ -5415,6 +5415,8 @@ export async function activate(
       const { runTargetReader } = await import("./features/targetReader.js");
       return runTargetReader(work, aiRegistry, {
         authorReader: authorReaderTypes.get(),
+        // シートの「書けたものの実績」（書いた日数）で執筆の記録を読む
+        deviceId,
       });
     })
   );

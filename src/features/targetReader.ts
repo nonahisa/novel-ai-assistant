@@ -92,6 +92,8 @@ const STAGES_OF: Record<Plan, readonly Stage[]> = {
 export interface TargetReaderSources {
   /** 作者自身の読者タイプ（3つの輪の1つ）。**未診断なら undefined** */
   readonly authorReader?: AuthorReaderProfile;
+  /** この端末の識別子（シートの「書けたものの実績」で執筆の記録を読む） */
+  readonly deviceId: string;
 }
 
 export async function runTargetReader(
@@ -129,7 +131,10 @@ export async function runTargetReader(
     const measured = await measureTitleFit(work, registry, reader, state.settings);
     if (measured === "cancelled") return CHECK_CANCELLED;
     if (measured === "failed") return CHECK_FAILED;
-    const opened = await openTargetSheet(work, { authorReader: sources.authorReader });
+    const opened = await openTargetSheet(work, {
+      authorReader: sources.authorReader,
+      deviceId: sources.deviceId,
+    });
     return opened ? CHECK_COMPLETED : CHECK_FAILED;
   }
 
@@ -211,6 +216,7 @@ export async function runTargetReader(
   const opened = await openTargetSheet(work, {
     authorBlock,
     authorReader: sources.authorReader,
+    deviceId: sources.deviceId,
     unmeasured,
     profile: next,
   });
