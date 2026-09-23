@@ -182,3 +182,125 @@ describe("ステータスバーの字数は、打鍵が止まってから数え�
     expect(countSpy).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * 種類の目安（設計書6.109.7）。原稿エディタの下段と同じ部品
+ * （`core/kindMeasure.ts`）で、素のエディタのステータスバーにも出す。
+ *
+ * **今日の執筆量と目安を1回で書く。** 別々に後から重ねると、2つの
+ * 非同期の書き込みが取り合い、遅れて届いたほうが片方を消す。
+ */
+describe("ステータスバーに、種類の目安を添える", () => {
+  const work = {
+    id: "w1",
+    title: "作品A",
+    folderPath: nodePath.resolve("kind-test-repo"),
+    registeredAt: "2026-09-24T00:00:00.000Z",
+  };
+  const summary = {
+    today: "2026-09-24",
+    todayProgress: { written: 120, goal: 0, remaining: 0, rate: 0, achieved: false },
+    monthProgress: { written: 800, goal: 0, remaining: 0, rate: 0, achieved: false },
+    monthActiveDays: 3,
+    streak: 2,
+  };
+
+  function tooltipText(): string {
+    const tooltip = state.item.tooltip as { value?: string } | undefined;
+    return tooltip?.value ?? "";
+  }
+
+  test("エッセイは読了の目安を字数の横に出す（1分＝約500字）", async () => {
+    const target = fakeEditor(
+      nodePath.resolve("kind-test-repo", "本文", "001.txt"),
+      "あ".repeat(600)
+    );
+    state.activeTextEditor = target.editor;
+    bar = new CharCountStatusBar({
+      findWork: () => work,
+      summary: async () => undefined,
+      kindOf: async () => "essay",
+    });
+    bar.refreshNow();
+    await vi.runAllTimersAsync();
+
+    expect(state.item.text).toContain("600字");
+    expect(state.item.text).toContain("読了 約2分");
+    expect(tooltipText()).toContain("読み終えるまでの目安");
+  });
+
+  test("歌詞は連と行を数える（中身を見て数える種類も出せる）", async () => {
+    const target = fakeEditor(
+      nodePath.resolve("kind-test-repo", "本文", "001.txt"),
+      ["【Aメロ】", "一行目", "二行目", "", "【サビ】", "三行目"].join("\n")
+    );
+    state.activeTextEditor = target.editor;
+    bar = new CharCountStatusBar({
+      findWork: () => work,
+      summary: async () => undefined,
+      kindOf: async () => "lyrics",
+    });
+    bar.refreshNow();
+    await vi.runAllTimersAsync();
+
+    expect(state.item.text).toContain("2連・3行");
+  });
+
+  test("今日の執筆量と目安の両方が残る（遅れて届いた側が片方を消さない）", async () => {
+    const target = fakeEditor(
+      nodePath.resolve("kind-test-repo", "本文", "001.txt"),
+      "あ".repeat(600)
+    );
+    state.activeTextEditor = target.editor;
+    bar = new CharCountStatusBar({
+      findWork: () => work,
+      // 執筆量のほうを遅らせる
+      summary: () =>
+        new Promise((resolve) => setTimeout(() => resolve(summary), 50)),
+      kindOf: async () => "essay",
+    });
+    bar.refreshNow();
+    await vi.runAllTimersAsync();
+
+    expect(state.item.text).toContain("読了 約2分");
+    expect(state.item.text).toContain("今日 +120字");
+    expect(tooltipText()).toContain("読み終えるまでの目安");
+    expect(tooltipText()).toContain("作品A");
+  });
+
+  test("小説では、何も足さない", async () => {
+    const target = fakeEditor(
+      nodePath.resolve("kind-test-repo", "本文", "001.txt"),
+      "あ".repeat(600)
+    );
+    state.activeTextEditor = target.editor;
+    bar = new CharCountStatusBar({
+      findWork: () => work,
+      summary: async () => undefined,
+      kindOf: async () => "novel",
+    });
+    bar.refreshNow();
+    await vi.runAllTimersAsync();
+
+    expect(state.item.text).toBe("$(book) 600字");
+  });
+
+  test("作品の外のファイルには、目安を出さない", async () => {
+    const target = fakeEditor(
+      nodePath.resolve("kind-test-repo", "docs", "メモ.md"),
+      "あ".repeat(600)
+    );
+    state.activeTextEditor = target.editor;
+    const kindOf = vi.fn(async () => "essay" as const);
+    bar = new CharCountStatusBar({
+      findWork: () => undefined,
+      summary: async () => undefined,
+      kindOf,
+    });
+    bar.refreshNow();
+    await vi.runAllTimersAsync();
+
+    expect(kindOf).not.toHaveBeenCalled();
+    expect(state.item.text).not.toContain("分");
+  });
+});

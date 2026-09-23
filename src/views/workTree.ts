@@ -171,6 +171,17 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
+  /**
+   * 作品を1つ読み終えるたびに、その作品IDを知らせる（設計書6.109.7）。
+   *
+   * 詳細メニューは、登録した作品が全部物語でない（エッセイ・歌詞）ときに
+   * 人物・伏線の操作を隠す。種類は走査が読んだ設定ファイルにあるので、
+   * **読み終えた合図**を受けて並べ直してもらう（詳細メニューが自分で
+   * 設定ファイルを読みに行くと、起動直後の読みが作品の数だけ増える。6.107）。
+   */
+  private readonly _onDidLoadWork = new vscode.EventEmitter<string>();
+  readonly onDidLoadWork = this._onDidLoadWork.event;
+
   /** 走査結果のキャッシュ（作品ID -> 結果） */
   private cache = new Map<
     string,
@@ -330,8 +341,9 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         abbreviateTitle(work.title),
         vscode.TreeItemCollapsibleState.Collapsed
       );
-      // タイプを織り込む（設計書6.70.1）。右クリックの `when` はこれを見る
-      item.contextValue = workTypeContextValue("work", node.format);
+      // タイプを織り込む（設計書6.70.1）。右クリックの `when` はこれを見る。
+      // 物語でない種類（エッセイ・歌詞）は後ろに種類も付く（6.109.7）
+      item.contextValue = workTypeContextValue("work", node.format, node.kind);
       item.iconPath = new vscode.ThemeIcon("book");
 
       // 走査に失敗した作品は、字数の代わりに理由を出す。
@@ -402,7 +414,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         label,
         vscode.TreeItemCollapsibleState.Collapsed
       );
-      item.contextValue = workTypeContextValue("chapter", node.format);
+      item.contextValue = workTypeContextValue("chapter", node.format, node.kind);
       // **IDに名前を入れない。** 折りたたみの開閉はVS CodeがIDで
       // 覚えるので、名前から作ると改名のたびに開き直しになる（6.66.3）
       item.id = chapterNodeId(node.work.id, node.chapter.startEpisodePath);
@@ -482,7 +494,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       ep.fileName,
       vscode.TreeItemCollapsibleState.None
     );
-    item.contextValue = workTypeContextValue("episode", node.format);
+    item.contextValue = workTypeContextValue("episode", node.format, node.kind);
     item.resourceUri = toUri(ep.filePath);
     /*
       **本文は原稿エディタ（横書き）で開く**（作者の指示、2026-08-29）。
@@ -995,7 +1007,18 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       configuredKind: result.configuredKind,
     };
     this.cache.set(work.id, value);
+    this._onDidLoadWork.fire(work.id);
     return value;
+  }
+
+  /**
+   * 走査で分かった、設定ファイルに書かれた種類（設計書6.109.7）。
+   * **まだ読んでいない作品と、書かれていない作品は undefined**——
+   * どちらも「隠さない」側に倒れる（書かれていなければ小説か台本で、
+   * どちらも物語である）。
+   */
+  scannedKindOf(workId: string): WorkKindKey | undefined {
+    return this.cache.get(workId)?.configuredKind;
   }
 
   /** 走査済みの話数情報を返す（コマンド側から利用） */

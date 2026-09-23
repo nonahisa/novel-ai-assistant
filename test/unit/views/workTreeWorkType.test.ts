@@ -135,6 +135,34 @@ describe("contextValue にタイプを織り込む", () => {
     expect(provider.getTreeItem(roots[0]).contextValue).toBe("work-unset");
     expect(provider.getTreeItem(episodes[0]).contextValue).toBe("episode-unset");
   });
+
+  test("物語でない種類（エッセイ）は、印の後ろに種類が付く（設計書6.109.7）", async () => {
+    readWorkFormat.mockResolvedValue("long");
+    scanWork.mockResolvedValue({
+      ...(await scanWork()),
+      configuredKind: "essay",
+    });
+    const provider = makeProvider();
+    const roots = await provider.getChildren();
+    const episodes = await provider.getChildren(roots[0]);
+
+    expect(provider.getTreeItem(roots[0]).contextValue).toBe("work-novel-essay");
+    expect(provider.getTreeItem(episodes[0]).contextValue).toBe(
+      "episode-novel-essay"
+    );
+  });
+
+  test("台本・漫画の原作は物語なので、印は変わらない", async () => {
+    readWorkFormat.mockResolvedValue("long");
+    scanWork.mockResolvedValue({
+      ...(await scanWork()),
+      configuredKind: "manga",
+    });
+    const provider = makeProvider();
+    const roots = await provider.getChildren();
+
+    expect(provider.getTreeItem(roots[0]).contextValue).toBe("work-novel");
+  });
 });
 
 describe("創作メモ集の見え方", () => {

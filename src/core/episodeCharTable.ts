@@ -1,5 +1,11 @@
-import type { EpisodeFile } from "../models/types";
-import { toManuscriptPages } from "./charCount";
+import type { CharCounts, EpisodeFile } from "../models/types";
+import { emptyCounts, toManuscriptPages } from "./charCount";
+import {
+  measureKindCounts,
+  measureKindText,
+  type KindMeasure,
+} from "./kindMeasure";
+import type { WorkKindKey } from "./workKind";
 import {
   episodeTitle,
   formatChapterLabel,
@@ -36,6 +42,11 @@ export interface EpisodeCountRow {
   collectedCount: number | null;
   /** 未解決の競合があり、字数を数えていない */
   conflicted: boolean;
+  /**
+   * 種類の目安（設計書6.109.7。「読了 約2分」「2ページ・3コマ」など）。
+   * **小説・競合のある話・中身を読めなかった話は null**
+   */
+  measure: string | null;
 }
 
 export interface EpisodeCountSummary {
@@ -66,6 +77,14 @@ export interface EpisodeCountSummary {
   medianNet: number;
   longest: EpisodeCountRow | null;
   shortest: EpisodeCountRow | null;
+  /**
+   * 作品ぜんたいの種類の目安（吹き出し向けの1行）。小説では null。
+   * 中身を見て数える種類（漫画の原作・歌詞）で、**読めなかった話が
+   * 1つでもあれば null**——読めた分だけで出すと、少なく見せてしまう
+   */
+  totalMeasure: string | null;
+  /** 同じ目安の短い形（カードの大きな数字に出す）。小説では null */
+  totalMeasureShort: string | null;
 }
 
 /**
@@ -92,12 +111,20 @@ export function buildEpisodeCountTable(
     format?: WorkFormatKey;
     /** 1話あたりの目標字数。決めていれば、これが偏りの基準になる */
     perEpisodeGoal?: number | null;
+    /** 作品の種類（設計書6.109.7）。小説・未指定なら目安を付けない */
+    kind?: WorkKindKey;
+    /**
+     * 話の本文（場所 → 本文）。**漫画の原作・歌詞のときだけ要る**
+     * （ページ・コマ・連は中身を見ないと数えられない）。字数から出せる
+     * 台本・エッセイでは渡さなくてよい
+     */
+    texts?: ReadonlyMap<string, string>;
   } = {}
 ): {
   rows: EpisodeCountRow[];
   summary: EpisodeCountSummary;
 } {
-  const { format, perEpisodeGoal } = options;
+  const { format, perEpisodeGoal, kind, texts } = options;
   const counted = episodes.filter((episode) => !episode.hasConflictMarkers);
   const totalNet = counted.reduce((sum, episode) => sum + episode.counts.net, 0);
 
@@ -152,10 +179,15 @@ export function buildEpisodeCountTable(
               : null,
       collectedCount: collected ? episode.collectedCount : null,
       conflicted: episode.hasConflictMarkers,
+      measure: episode.hasConflictMarkers
+        ? null
+        : (measureEpisode(kind, episode.counts, texts?.get(episode.filePath))
+            ?.short ?? null),
     };
   });
 
   const countedRows = rows.filter((row) => !row.conflicted);
+  const totalMeasure = measureTotal(kind, counted, texts);
   // 中央値と「いちばん長い／短い話」も、平均と同じ母集団から出す。
   // 73万字の合本を「いちばん長い話」と呼んでも、作者の役に立たない
   const sorted = countedRows
@@ -180,8 +212,62 @@ export function buildEpisodeCountTable(
       medianNet: median(sorted.map((row) => row.net)),
       longest: sorted.length > 0 ? sorted[sorted.length - 1] : null,
       shortest: sorted.length > 0 ? sorted[0] : null,
+      totalMeasure: totalMeasure?.detail ?? null,
+      totalMeasureShort: totalMeasure?.short ?? null,
     },
   };
+}
+
+/** 中身を見ないと数えられない種類（ページ・コマ・連） */
+function needsText(kind: WorkKindKey | undefined): boolean {
+  return kind === "manga" || kind === "lyrics";
+}
+
+/** 1話ぶんの目安。中身の要る種類で本文が無ければ出さない */
+function measureEpisode(
+  kind: WorkKindKey | undefined,
+  counts: CharCounts,
+  text: string | undefined
+): KindMeasure | undefined {
+  if (!kind) return undefined;
+  if (needsText(kind)) {
+    return text === undefined ? undefined : measureKindText(kind, text, counts);
+  }
+  return measureKindCounts(kind, counts);
+}
+
+/**
+ * 作品ぜんたいの目安。
+ *
+ * **字数を足してから測る。** 話ごとの分数・枚数を足すと、話ごとに
+ * 切り上げた端数が積み上がって実際より長くなる（原稿用紙の合算と同じ理由）。
+ * 中身を見る種類は、**話を空行で区切って**つないでから数える——
+ * つながないと、ある話の最後の連と次の話の最初の連が1連に数えられる。
+ */
+function measureTotal(
+  kind: WorkKindKey | undefined,
+  counted: readonly EpisodeFile[],
+  texts: ReadonlyMap<string, string> | undefined
+): KindMeasure | undefined {
+  if (!kind || counted.length === 0) return undefined;
+  const total = counted.reduce<CharCounts>(
+    (sum, episode) => ({
+      net: sum.net + episode.counts.net,
+      gross: sum.gross + episode.counts.gross,
+      lines: sum.lines + episode.counts.lines,
+      paragraphs: sum.paragraphs + episode.counts.paragraphs,
+      manuscriptLines: sum.manuscriptLines + episode.counts.manuscriptLines,
+    }),
+    emptyCounts()
+  );
+  if (!needsText(kind)) return measureKindCounts(kind, total);
+  const bodies: string[] = [];
+  for (const episode of counted) {
+    const text = texts?.get(episode.filePath);
+    if (text === undefined) return undefined;
+    bodies.push(text);
+  }
+  return measureKindText(kind, bodies.join("\n\n"), total);
 }
 
 /**

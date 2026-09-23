@@ -7,8 +7,11 @@ import { canRunProcesses } from "../core/runtime";
 import { abbreviateTitle, isAbbreviated } from "../core/abbreviateTitle";
 import type { WorkFormatKey } from "../core/workFormat";
 import { readWorkFormat } from "../core/workFormatStore";
+import type { WorkKindKey } from "../core/workKind";
+import { readWorkKind } from "../core/workKindStore";
 import {
   isCommandVisibleForColumn,
+  isCommandVisibleForKind,
   workTypeColumn,
   type WorkTypeColumn,
 } from "../core/workTypeVisibility";
@@ -408,17 +411,21 @@ export function resolveSteps(
  * 段ごと出さない（詳細メニューの `shownEntries` と同じ考え方——
  * 開いても何も無い行は、片づけたつもりで分かりにくくしているだけ）。
  *
- * @param column タイプの列。**undefined なら絞らない**
+ * @param column タイプの列。**undefined なら形式では絞らない**
  *   （タイプを決めていない作品と、作品を選んでいないとき）
+ * @param kind 作品の種類（設計書6.109.7）。**undefined なら種類では絞らない**。
+ *   形式と種類の**両方が「見せる」と言ったときだけ**残す
  */
 export function filterSteps(
   steps: readonly Step[],
-  column: WorkTypeColumn | undefined
+  column: WorkTypeColumn | undefined,
+  kind?: WorkKindKey
 ): Step[] {
-  if (!column) return [...steps];
+  if (!column && !kind) return [...steps];
 
   const visible = (command: string): boolean =>
-    isCommandVisibleForColumn(command, column);
+    (!column || isCommandVisibleForColumn(command, column)) &&
+    isCommandVisibleForKind(command, kind);
 
   const filtered: Step[] = [];
   for (const step of steps) {
@@ -678,6 +685,12 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
    */
   private readonly formats = new Map<string, WorkFormatKey | undefined>();
 
+  /**
+   * 作品ごとの種類（設計書6.109.7）。形式と同じ時に読み、同じ時に捨てる。
+   * **読めていないあいだは絞らない**（形式と同じ理由）。
+   */
+  private readonly kinds = new Map<string, WorkKindKey | undefined>();
+
   constructor(
     private readonly registry: WorkRegistry,
     private readonly workStore?: StepWorkStore,
@@ -689,7 +702,11 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
      */
     private readonly loadFormat: (
       work: WorkEntry
-    ) => Promise<WorkFormatKey | undefined> = readWorkFormat
+    ) => Promise<WorkFormatKey | undefined> = readWorkFormat,
+    /** 作品の種類を読む口（設計書6.109.7）。形式と同じく試験で差し替える */
+    private readonly loadKind: (
+      work: WorkEntry
+    ) => Promise<WorkKindKey | undefined> = readWorkKind
   ) {
     this.expanded = restoreExpandedSteps(groupStore?.get() ?? []);
     // 作品が増減すると、最上段の表示も押せる操作も変わる
@@ -713,6 +730,16 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
       // 読めなければ「決めていない」と同じ扱い。絞らずに全部出す
       format = undefined;
     }
+    let kind: WorkKindKey | undefined;
+    try {
+      kind = await this.loadKind(work);
+    } catch {
+      // 種類も、読めなければ絞らない
+      kind = undefined;
+    }
+    // **形式と種類を同じ時に置く。** 形式だけ先に置くと、その間の描画で
+    // 種類の絞り込みが抜けた並びが一瞬出る
+    this.kinds.set(work.id, kind);
     this.formats.set(work.id, format);
     this._onDidChangeTreeData.fire();
   }
@@ -731,7 +758,11 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
       void this.loadSelectedFormat();
       return STEP_MENU;
     }
-    return filterSteps(STEP_MENU, workTypeColumn(this.formats.get(work.id)));
+    return filterSteps(
+      STEP_MENU,
+      workTypeColumn(this.formats.get(work.id)),
+      this.kinds.get(work.id)
+    );
   }
 
   /** 画面で開閉したときに呼ぶ。次回起動時もこの状態で開く */
@@ -767,10 +798,14 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
    * （作品一覧が `invalidateWorkFormat` で読み直すのと同じ理由）。
    */
   invalidateFormats(workId?: string): void {
+    // 種類（設計書6.109.7）も一緒に捨てる。「作品の種類」で変えたときと、
+    // 設定ファイルを手で直して保存したときもここを通る
     if (workId) {
       this.formats.delete(workId);
+      this.kinds.delete(workId);
     } else {
       this.formats.clear();
+      this.kinds.clear();
     }
     this.refresh();
   }

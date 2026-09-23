@@ -211,3 +211,97 @@ describe("合本は平均に混ぜない（設計書6.3）", () => {
     expect(table.summary.countedFiles).toBe(4);
   });
 });
+
+/**
+ * 種類の目安（設計書6.109.7）。執筆量パネルの話ごとの一覧にも、
+ * 原稿エディタ・作品一覧と同じ部品（`core/kindMeasure.ts`）で出す。
+ */
+describe("話ごとの一覧に、種類の目安を添える", () => {
+  test("小説では目安を持たない（これまでどおり）", () => {
+    const table = buildEpisodeCountTable([episode("001.txt", 1_000)], {
+      kind: "novel",
+    });
+    expect(table.rows[0].measure).toBeNull();
+    expect(table.summary.totalMeasure).toBeNull();
+
+    const unknown = buildEpisodeCountTable([episode("001.txt", 1_000)]);
+    expect(unknown.rows[0].measure).toBeNull();
+    expect(unknown.summary.totalMeasure).toBeNull();
+  });
+
+  test("エッセイは話ごとと合計に読了の目安が付く（字数から出す）", () => {
+    const table = buildEpisodeCountTable(
+      [episode("001.txt", 1_000), episode("002.txt", 600)],
+      { kind: "essay" }
+    );
+    expect(table.rows.map((row) => row.measure)).toEqual([
+      "読了 約2分",
+      "読了 約2分",
+    ]);
+    // 合計は字数を足してから割る（話ごとに切り上げた分を積まない）
+    expect(table.summary.totalMeasure).toContain("約4分");
+  });
+
+  test("台本は400字詰めの枚数から分数を出す", () => {
+    const table = buildEpisodeCountTable([episode("001.txt", 1_000)], {
+      kind: "script",
+    });
+    // 1,000字＝50行（20字折り返し）＝3枚（20行で1枚、切り上げ）
+    expect(table.rows[0].measure).toBe("約3分");
+    expect(table.summary.totalMeasure).toContain("約3枚");
+  });
+
+  test("漫画の原作は本文を見て、ページとコマを数える", () => {
+    const texts = new Map([
+      ["C:/work/本文/001.txt", "■1ページ\n□コマ1\n□コマ2\n■2ページ\n□コマ1\n"],
+      ["C:/work/本文/002.txt", "■3ページ\n□コマ1\n"],
+    ]);
+    const table = buildEpisodeCountTable(
+      [episode("001.txt", 30), episode("002.txt", 10)],
+      { kind: "manga", texts }
+    );
+    expect(table.rows.map((row) => row.measure)).toEqual([
+      "2ページ・3コマ",
+      "1ページ・1コマ",
+    ]);
+    expect(table.summary.totalMeasure).toContain("3ページ・4コマ");
+  });
+
+  test("歌詞の合計は、話をまたいで連がつながらない", () => {
+    const texts = new Map([
+      ["C:/work/本文/001.txt", "一行目\n二行目"],
+      ["C:/work/本文/002.txt", "三行目"],
+    ]);
+    const table = buildEpisodeCountTable(
+      [episode("001.txt", 6), episode("002.txt", 3)],
+      { kind: "lyrics", texts }
+    );
+    expect(table.rows.map((row) => row.measure)).toEqual([
+      "1連・2行",
+      "1連・1行",
+    ]);
+    expect(table.summary.totalMeasure).toContain("2連・3行");
+  });
+
+  test("中身を読めなかった話があれば、合計の目安は出さない（少なく見せない）", () => {
+    const texts = new Map([["C:/work/本文/001.txt", "■1ページ\n"]]);
+    const table = buildEpisodeCountTable(
+      [episode("001.txt", 5), episode("002.txt", 5)],
+      { kind: "manga", texts }
+    );
+    expect(table.rows.map((row) => row.measure)).toEqual(["1ページ・0コマ", null]);
+    expect(table.summary.totalMeasure).toBeNull();
+  });
+
+  test("競合のある話は、目安も数えない", () => {
+    const table = buildEpisodeCountTable(
+      [
+        episode("001.txt", 1_000),
+        episode("002.txt", 5_000, { hasConflictMarkers: true }),
+      ],
+      { kind: "essay" }
+    );
+    expect(table.rows[1].measure).toBeNull();
+    expect(table.summary.totalMeasure).toContain("約2分");
+  });
+});

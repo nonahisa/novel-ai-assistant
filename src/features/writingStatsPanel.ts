@@ -38,6 +38,9 @@ import { episodeUnit } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
 import { manuscriptViewTypeFor } from "../core/manuscriptViewTypes";
 import { readWorkKind } from "../core/workKindStore";
+import type { WorkKindKey } from "../core/workKind";
+import { readTextFile } from "../core/textFile";
+import type { EpisodeFile } from "../models/types";
 import { readWorkGoalsOrEmpty } from "../core/workGoalsStore";
 import {
   buildContestProgress,
@@ -250,9 +253,13 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
   );
 
   const goals = await readWorkGoalsOrEmpty(work);
+  // 種類の目安（設計書6.109.7）。原稿エディタ・作品一覧と同じ部品で出す
+  const kind = await kindOrUndefined(work);
   const table = buildEpisodeCountTable(scanned.episodes, {
     format: await readWorkFormat(work),
     perEpisodeGoal: goals.perEpisodeChars,
+    kind,
+    texts: await episodeTextsFor(kind, scanned.episodes),
   });
   const contest = buildContestProgress(goals, scanned.stats.totals.net, today);
   const siteRecords = await readSiteRecords(work);
@@ -291,6 +298,8 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
       paragraphs: scanned.stats.totals.paragraphs,
       pages: toManuscriptPages(scanned.stats.totals.manuscriptLines),
       files: scanned.stats.fileCount,
+      // 種類の目安の短い形（小説では null。画面は何も足さない）
+      measure: table.summary.totalMeasureShort,
     },
     episodes: table,
     // サイトごとの作品情報と順位の履歴（設計書6.68.5）。
@@ -332,6 +341,45 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
         : "記録は本文を保存したときに増えます。ファイルの追加・削除や競合の解消は、" +
           "書いた量ではないので数えません。",
   };
+}
+
+/** 作品の種類。**読めなければ目安を出さないだけ**で、パネルは開く */
+async function kindOrUndefined(work: WorkEntry): Promise<WorkKindKey | undefined> {
+  try {
+    return await readWorkKind(work);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 話の本文（設計書6.109.7）。**漫画の原作と歌詞のときだけ読む。**
+ *
+ * ページ・コマ・連は中身を見ないと数えられない（走査は字数しか持って
+ * いない）。それ以外の種類は字数から出せるので、読みを増やさない——
+ * 小説の作品でパネルを開くたびに全話を読み直すことになる。
+ *
+ * 読めなかった話は入れない（その話の目安は出ず、合計も出さない。
+ * 読めた分だけの合計は、実際より少なく見える）。競合のある話も読まない。
+ */
+async function episodeTextsFor(
+  kind: WorkKindKey | undefined,
+  episodes: readonly EpisodeFile[]
+): Promise<Map<string, string> | undefined> {
+  if (kind !== "manga" && kind !== "lyrics") return undefined;
+  const texts = new Map<string, string>();
+  await Promise.all(
+    episodes
+      .filter((episode) => !episode.hasConflictMarkers)
+      .map(async (episode) => {
+        try {
+          texts.set(episode.filePath, (await readTextFile(episode.filePath)).text);
+        } catch {
+          // 読めない話は目安を出さないだけ（字数の一覧はそのまま出す）
+        }
+      })
+  );
+  return texts;
 }
 
 /** 「サイトの記録」の読み込み結果。読めなかったときは理由を持つ */

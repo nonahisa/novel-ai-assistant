@@ -22,6 +22,8 @@ import {
 } from "../core/prerequisites";
 // 上限の値は**定数から引く**（説明文に書き写すと、変えたときに画面だけ古くなる）
 import { MAX_ISSUES_PER_1000_CHARS } from "../prompts/proofread";
+import type { WorkKindKey } from "../models/types";
+import { commandsHiddenForWorks } from "../core/workTypeVisibility";
 
 /**
  * 操作メニュー。
@@ -2705,17 +2707,21 @@ export function visibleEntries<T extends ActionItem | ActionSection>(
  */
 export function shownEntries<T extends ActionItem | ActionSection>(
   entries: readonly T[],
-  runtimeAllowsProcesses: boolean
+  runtimeAllowsProcesses: boolean,
+  /**
+   * 作品の種類で隠す操作（設計書6.109.7）。**登録した作品が全部物語で
+   * ないとき**だけ中身が入る（`commandsHiddenForWorks`）
+   */
+  hiddenByKind?: ReadonlySet<string>
 ): T[] {
+  const shown = (item: ActionItem): boolean =>
+    isItemShownInActionList(item, runtimeAllowsProcesses) &&
+    !hiddenByKind?.has(item.command);
   return entries.filter((entry) => {
-    if (entry.kind === "action") {
-      return isItemShownInActionList(entry, runtimeAllowsProcesses);
-    }
+    if (entry.kind === "action") return shown(entry);
     // **中身が全部隠れた小分類は、見出しごと畳む。** 開いても何も無い行を
     // 残すと、片づけたはずのメニューがかえって分かりにくくなる
-    return entry.items.some((item) =>
-      isItemShownInActionList(item, runtimeAllowsProcesses)
-    );
+    return entry.items.some(shown);
   });
 }
 
@@ -2889,10 +2895,22 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
    */
   private readonly expanded: Set<string>;
 
+  /** 前回描いたときに種類で隠した操作（変わったときだけ描き直すため） */
+  private hiddenSignature = "";
+
   constructor(
     private readonly registry: WorkRegistry,
     private readonly store?: GroupStateStore,
-    private readonly counts?: ActionCounts
+    private readonly counts?: ActionCounts,
+    /**
+     * 登録した作品の種類（設計書6.109.7）。**分かっている分だけ**を返し、
+     * まだ分からない作品は undefined にする（分からなければ隠さない）。
+     *
+     * 描画は同期なので、読み終えた結果を持っている側（作品一覧の走査）から
+     * 借りる。ここで設定ファイルを読みに行くと、起動直後の混んだ読み口へ
+     * 作品の数だけ要求を足すことになる（設計書6.107）。
+     */
+    private readonly workKinds?: () => readonly (WorkKindKey | undefined)[]
   ) {
     this.expanded = restoreExpandedGroups(store?.get() ?? []);
     // 最初の作品を登録した時点で、作品向けの操作を出せるようになる
@@ -2916,6 +2934,26 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
 
   refresh(): void {
     this._onDidChangeTreeData.fire();
+  }
+
+  /**
+   * 作品の種類が分かった・変わったときに呼ぶ（設計書6.109.7）。
+   *
+   * **隠す操作の並びが変わったときだけ描き直す。** 作品一覧は作品を
+   * 1つ読むたびに知らせてくるので、毎回描き直すと起動直後に
+   * 詳細メニューが作品の数だけちらつく。
+   */
+  refreshKinds(): void {
+    const signature = [...this.hiddenByKind()].sort().join("|");
+    if (signature === this.hiddenSignature) return;
+    this.hiddenSignature = signature;
+    this._onDidChangeTreeData.fire();
+  }
+
+  /** いま種類で隠す操作。作品の種類を知る口が無ければ何も隠さない */
+  private hiddenByKind(): ReadonlySet<string> {
+    if (!this.workKinds) return new Set();
+    return commandsHiddenForWorks(this.workKinds());
   }
 
   /**
@@ -3054,8 +3092,9 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
     }
 
     const runtimeAllowsProcesses = canRunProcesses();
+    const hidden = this.hiddenByKind();
     for (const group of groups) {
-      for (const entry of shownEntries(group.entries, runtimeAllowsProcesses)) {
+      for (const entry of shownEntries(group.entries, runtimeAllowsProcesses, hidden)) {
         if (entry.kind === "action") {
           if (entry.command === node.item.command) {
             // 見出しを挟まない分類の操作は、それ自体が最上位にある
@@ -3063,7 +3102,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
           }
           continue;
         }
-        const inSection = shownEntries(entry.items, runtimeAllowsProcesses).some(
+        const inSection = shownEntries(entry.items, runtimeAllowsProcesses, hidden).some(
           (item) => item.command === node.item.command
         );
         if (inSection) {
@@ -3082,13 +3121,14 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
    */
   findActionNode(command: string): ActionNode | undefined {
     const runtimeAllowsProcesses = canRunProcesses();
+    const hidden = this.hiddenByKind();
     for (const group of visibleGroups(this.registry.list().length > 0)) {
-      for (const entry of shownEntries(group.entries, runtimeAllowsProcesses)) {
+      for (const entry of shownEntries(group.entries, runtimeAllowsProcesses, hidden)) {
         if (entry.kind === "action") {
           if (entry.command === command) return { type: "action", item: entry };
           continue;
         }
-        const found = shownEntries(entry.items, runtimeAllowsProcesses).find(
+        const found = shownEntries(entry.items, runtimeAllowsProcesses, hidden).find(
           (item) => item.command === command
         );
         if (found) return { type: "action", item: found };
@@ -3113,20 +3153,31 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
   private listChildren(node?: ActionNode): ActionNode[] {
     const hasWork = this.registry.list().length > 0;
     const groups = visibleGroups(hasWork);
+    const hidden = this.hiddenByKind();
 
     if (!node) {
       const runtimeAllowsProcesses = canRunProcesses();
       return groups.flatMap((group): ActionNode[] => {
-        if (!group.standalone) return [{ type: "group", group }];
+        if (!group.standalone) {
+          // 種類で中身が全部隠れた分類は、見出しごと出さない（設計書6.109.7）。
+          // **種類で隠すものが無いときは、いままでどおり必ず出す**
+          if (
+            hidden.size > 0 &&
+            shownEntries(group.entries, runtimeAllowsProcesses, hidden).length === 0
+          ) {
+            return [];
+          }
+          return [{ type: "group", group }];
+        }
         // **見出しを挟まず、操作をそのまま出す**（`ActionGroup.standalone`）
-        return shownEntries(group.entries, runtimeAllowsProcesses).flatMap(
+        return shownEntries(group.entries, runtimeAllowsProcesses, hidden).flatMap(
           (entry): ActionNode[] =>
             entry.kind === "action" ? [{ type: "action", item: entry }] : []
         );
       });
     }
     if (node.type === "group") {
-      return shownEntries(node.group.entries, canRunProcesses()).map((entry) =>
+      return shownEntries(node.group.entries, canRunProcesses(), hidden).map((entry) =>
         entry.kind === "section"
           ? {
               type: "section" as const,
@@ -3137,7 +3188,7 @@ export class ActionListProvider implements vscode.TreeDataProvider<ActionNode> {
       );
     }
     if (node.type === "section") {
-      return shownEntries(node.section.items, canRunProcesses()).map((item) => ({
+      return shownEntries(node.section.items, canRunProcesses(), hidden).map((item) => ({
         type: "action" as const,
         item,
       }));

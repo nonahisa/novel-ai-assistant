@@ -11,6 +11,7 @@ import type { ActionItem } from "../../../src/views/actionList";
 import type { WorkEntry } from "../../../src/models/types";
 import type { WorkRegistry } from "../../../src/core/workRegistry";
 import type { WorkFormatKey } from "../../../src/core/workFormat";
+import type { WorkKindKey } from "../../../src/core/workKind";
 
 /**
  * 簡単ステップメニューを、選んだ作品のタイプで絞る（設計書6.70.1）。
@@ -240,3 +241,93 @@ function action(command: string): ActionItem {
     detail: "",
   };
 }
+
+/**
+ * 種類の軸（設計書6.109.7）。エッセイ・歌詞では、人物・筋・伏線を扱う
+ * 操作をステップから外す。台本・漫画の原作は物語なので何も減らさない。
+ */
+describe("選んだ作品の種類で絞る", () => {
+  async function providerForKind(
+    format: WorkFormatKey | undefined,
+    kind: WorkKindKey | undefined
+  ): Promise<StepMenuProvider> {
+    const provider = new StepMenuProvider(
+      fakeRegistry([work("w1", "作品A")]),
+      memoryWorkStore(),
+      undefined,
+      undefined,
+      async () => format,
+      async () => kind
+    );
+    await provider.loadSelectedFormat();
+    return provider;
+  }
+
+  test("エッセイでは、矛盾・伏線・人物抽出・単話プロットが消える", async () => {
+    const shown = shownCommands(await providerForKind("long", "essay"));
+
+    for (const command of [
+      "novelai.checkContradictions",
+      "novelai.checkForeshadows",
+      "novelai.checkDeviations",
+      "novelai.extractSettings",
+      "novelai.openSettingsPanel",
+      "novelai.createEpisodePlot",
+    ]) {
+      expect(shown, command).not.toContain(command);
+    }
+  });
+
+  test("エッセイでも、プロット・校正・書き出しは残る", async () => {
+    const shown = shownCommands(await providerForKind("long", "essay"));
+
+    for (const command of [
+      "novelai.createPlot",
+      "novelai.checkTypos",
+      "novelai.checkProofread",
+      "novelai.showWritingStats",
+      "novelai.openPlotMode",
+      "novelai.generateSynopses",
+      "novelai.openEpubEditor",
+    ]) {
+      expect(shown, command).toContain(command);
+    }
+  });
+
+  test("漫画の原作・台本は物語なので、小説と同じものが並ぶ", async () => {
+    for (const kind of ["manga", "script", "novel"] as const) {
+      const shown = shownCommands(await providerForKind("long", kind));
+      expect(shown, kind).toEqual(commandsIn(STEP_MENU));
+    }
+  });
+
+  test("形式を決めていなくても、種類が歌詞なら絞る", async () => {
+    // 形式の「決めていない」は絞らない理由だが、種類は作者が決めた値である
+    const shown = shownCommands(await providerForKind(undefined, "lyrics"));
+    expect(shown).not.toContain("novelai.checkForeshadows");
+    expect(shown).toContain("novelai.checkTypos");
+  });
+
+  test("filterSteps は、形式と種類の両方が「見せる」ときだけ残す", () => {
+    const step: Step = {
+      kind: "step",
+      label: "試験用",
+      icon: "beaker",
+      detail: "",
+      entries: [action("novelai.checkForeshadows"), action("novelai.createPlot")],
+    };
+    const commands = (steps: Step[]): string[] => commandsIn(steps);
+
+    expect(commands(filterSteps([step], "novel", "essay"))).toEqual([
+      "novelai.createPlot",
+    ]);
+    expect(commands(filterSteps([step], undefined, "essay"))).toEqual([
+      "novelai.createPlot",
+    ]);
+    expect(commands(filterSteps([step], "memo", "novel"))).toEqual([]);
+    expect(commands(filterSteps([step], undefined, undefined))).toEqual([
+      "novelai.checkForeshadows",
+      "novelai.createPlot",
+    ]);
+  });
+});

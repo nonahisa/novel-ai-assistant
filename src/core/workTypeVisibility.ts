@@ -1,4 +1,5 @@
 import type { WorkFormatKey } from "./workFormat";
+import { WORK_KINDS, workKindDef, type WorkKindKey } from "./workKind";
 
 /**
  * タイプ×機能の対応表（設計書6.70.1）。
@@ -14,9 +15,11 @@ import type { WorkFormatKey } from "./workFormat";
  * 「ステップからは消えているのに右クリックには出る」が起き、
  * **画面を見比べるまで気づけない。**
  *
- * **詳細メニュー（`views/actionList.ts`）は絞らない。** 「全部はここに
- * ある」という受け皿を1か所残す。隠れた機能を探せなくなる事故を防ぎ、
+ * **詳細メニュー（`views/actionList.ts`）は形式では絞らない。** 「全部は
+ * ここにある」という受け皿を1か所残す。隠れた機能を探せなくなる事故を防ぎ、
  * 「メモ集から物語が生まれた」ような越境の道も塞がないためである。
+ * 種類の軸（下の後半、設計書6.109.7）だけは、**登録した作品が全部
+ * 物語でないとき**に限って詳細メニューからも外す（`isCommandVisibleForSomeWork`）。
  *
  * ## 迷ったら出す
  *
@@ -105,9 +108,13 @@ export function workTypeColumn(
  */
 export function workTypeContextValue(
   kind: WorkTreeNodeKind,
-  format?: WorkFormatKey
+  format?: WorkFormatKey,
+  /** 作品の種類（設計書6.109.7）。物語でない種類だけが印の後ろに付く */
+  workKind?: WorkKindKey
 ): string {
-  return `${kind}-${workTypeColumn(format) ?? WORK_TYPE_CONTEXT_UNSET}`;
+  const base = `${kind}-${workTypeColumn(format) ?? WORK_TYPE_CONTEXT_UNSET}`;
+  const suffix = kindContextSuffix(workKind);
+  return suffix ? `${base}-${suffix}` : base;
 }
 
 /**
@@ -464,4 +471,187 @@ export function isCommandVisibleForWorkType(
 ): boolean {
   const column = workTypeColumn(format);
   return column === undefined || isCommandVisibleForColumn(command, column);
+}
+
+/* ────────────────────────────────────────────────────────────
+   種類の軸（設計書6.109.7）
+   ──────────────────────────────────────────────────────────── */
+
+/**
+ * 種類（小説・台本・漫画の原作・エッセイ・歌詞）で見る、機能の分類。
+ *
+ * **形式の表（上）とは別に持つ。** 形式は「どう並べるか」、種類は
+ * 「何を書くか」で、別々の軸である（6.109.1）。1つの表に混ぜると、
+ * 形式×種類の組み合わせの数だけ列が要る。見せるかどうかは
+ * **両方の表が「見せる」と言ったときだけ**になる。
+ *
+ * - `anyKind`：どの種類でも使う（プロット・章立て・あらすじ・EPUB など。
+ *   エッセイにも「伝えたいこと・構成」のプロットがあり、随筆集・詩集も
+ *   章に分けて本にする）
+ * - `narrative`：物語の種類だけ（登場人物・筋・伏線・時系列を扱う操作）
+ */
+export type KindFeature = "anyKind" | "narrative";
+
+export const KIND_FEATURE_KINDS: Record<KindFeature, readonly WorkKindKey[]> = {
+  anyKind: WORK_KINDS.map((def) => def.key),
+  // 台本・漫画の原作は物語である。役名も筋も伏線もある
+  narrative: ["novel", "script", "manga"],
+};
+
+/**
+ * コマンドごとの種類の分類。**形式の表で `story` に置いた操作は全部載せる**
+ * （エッセイ・歌詞で要るかを1つずつ決めた跡を残す。漏れはテストが止める）。
+ * それ以外の操作は、載っていなければ `anyKind`。
+ */
+export const COMMAND_KIND_FEATURES: Readonly<Record<string, KindFeature>> = {
+  // ── 章立て。随筆集・詩集も章に分けて本にする ──
+  "novelai.startChapter": "anyKind",
+  "novelai.renameChapter": "anyKind",
+  "novelai.removeChapter": "anyKind",
+  "novelai.proposeChapters": "anyKind",
+  "novelai.chaptersFromHeadings": "anyKind",
+  "novelai.suggestChapterName": "anyKind",
+
+  // ── プロット。エッセイ・歌詞にも書き出しの見出しがある（6.109.3） ──
+  "novelai.createPlot": "anyKind",
+  "novelai.openPlotMode": "anyKind",
+  // 聞き取り（6.4.7）と逆算（P-02）は、登場人物と筋を組み立てる道具
+  "novelai.plotInterview": "narrative",
+  "novelai.generatePlot": "narrative",
+  // 単話プロット（6.36）は「この話で誰が何をするか」を書く
+  "novelai.createEpisodePlot": "narrative",
+  "novelai.episodePlotToPlotMode": "narrative",
+  "novelai.previousEpisodePlot": "narrative",
+  "novelai.nextEpisodePlot": "narrative",
+  "novelai.checkEpisodePlot": "narrative",
+
+  // ── 作中の時間。並べる筋が無い ──
+  "novelai.openChronicle": "narrative",
+  "novelai.editTimeline": "narrative",
+  // 仕上げの流れに逆算・逸脱検知が入っている
+  "novelai.finishNewWork": "narrative",
+
+  // ── 筋・設定と突き合わせる検知 ──
+  "novelai.checkDeviations": "narrative",
+  "novelai.checkContradictions": "narrative",
+  "novelai.checkFactContradictions": "narrative",
+  "novelai.checkForeshadows": "narrative",
+  "novelai.checkForeshadowResolution": "narrative",
+  "novelai.openForeshadows": "narrative",
+  "novelai.addForeshadow": "narrative",
+  "novelai.setForeshadowStatus": "narrative",
+
+  // ── 設定資料（登場人物・場所・能力・組織・世界観） ──
+  "novelai.extractSettings": "narrative",
+  "novelai.extractCharactersOnly": "narrative",
+  "novelai.extractLocationsOnly": "narrative",
+  "novelai.extractAbilitiesOnly": "narrative",
+  "novelai.extractOrganizationsOnly": "narrative",
+  "novelai.extractWorldOnly": "narrative",
+  "novelai.unifyCharacters": "narrative",
+  "novelai.applyPendingUpdates": "narrative",
+  "novelai.openSettingsPanel": "narrative",
+  "novelai.openRelationGraph": "narrative",
+  "novelai.showSettingsForTerm": "narrative",
+  "novelai.manageCustomFields": "narrative",
+  "novelai.generateSettingsDocs": "narrative",
+  "novelai.exportSettingsForAudience": "narrative",
+  "novelai.generateCharacterDocs": "narrative",
+  "novelai.generateLocationDocs": "narrative",
+  "novelai.generateAbilityDocs": "narrative",
+  "novelai.generateWorldDocs": "narrative",
+  "novelai.checkNames": "narrative",
+  "novelai.renameCharacter": "narrative",
+  "novelai.applyRenameToRecords": "narrative",
+
+  // ── あらすじ・広報・本。作品を紹介し、まとめることは種類を問わない ──
+  "novelai.generateSynopses": "anyKind",
+  "novelai.openSynopsisDocs": "anyKind",
+  "novelai.generateWorkBlurb": "anyKind",
+  "novelai.generateCatchphrases": "anyKind",
+  "novelai.exportEpub": "anyKind",
+  "novelai.openEpubEditor": "anyKind",
+};
+
+/** その操作の種類の分類。載っていなければ `anyKind` */
+export function kindFeatureOfCommand(command: string): KindFeature {
+  return COMMAND_KIND_FEATURES[command] ?? "anyKind";
+}
+
+/**
+ * その種類の作品で、その操作を見せるか。
+ *
+ * **種類が分からなければ隠さない**（形式の「決めていない」と同じ考え）。
+ */
+export function isCommandVisibleForKind(
+  command: string,
+  kind: WorkKindKey | undefined
+): boolean {
+  if (!kind) return true;
+  return KIND_FEATURE_KINDS[kindFeatureOfCommand(command)].includes(kind);
+}
+
+/**
+ * 右クリックの印（`contextValue`）の後ろに付ける種類。
+ *
+ * **物語の種類には付けない。** 付けると、`^work-(novel|script|unset)$` の
+ * ような既存の `when` がすべて外れ、小説の作品から項目が消える。
+ * 物語でない種類だけが印を持ち、`$` で閉じた物語向けの `when` から
+ * 自然に外れる——どの種類でも出す操作だけ、`when` に印を許す形を足す。
+ */
+export function kindContextSuffix(kind: WorkKindKey | undefined): string | undefined {
+  if (!kind) return undefined;
+  return KIND_FEATURE_KINDS.narrative.includes(kind) ? undefined : kind;
+}
+
+/** 印を持つ種類の一覧（`package.json` の `when` と突き合わせるテストが読む） */
+export const KIND_CONTEXT_SUFFIXES: readonly WorkKindKey[] = WORK_KINDS.map(
+  (def) => def.key
+).filter((kind) => kindContextSuffix(kind) !== undefined);
+
+/**
+ * 詳細メニュー（作品を選ばない画面）に出すか。
+ *
+ * **登録した作品のどれか1つでも使えるなら出す。** 詳細メニューは
+ * 「全部はここにある」受け皿（6.70.1）なので、形式では絞らない。
+ * 種類で隠すのは、**全部の作品が物語でないと分かっているときだけ**——
+ * 歌詞だけを書いている作者に、伏線や人物の操作を並べ続けないため。
+ *
+ * @param kinds 登録した作品の種類。まだ分からない作品は undefined
+ *   （走査が済んでいない）で、分からないものがあれば出す
+ */
+export function isCommandVisibleForSomeWork(
+  command: string,
+  kinds: readonly (WorkKindKey | undefined)[]
+): boolean {
+  if (kinds.length === 0) return true;
+  return kinds.some((kind) => isCommandVisibleForKind(command, kind));
+}
+
+/**
+ * 隠した操作をコマンドパレットから押されたときの断り。
+ *
+ * **理由と戻し方を1文で言う。** 「使えません」だけでは、壊れたのか
+ * 種類のせいなのかが分からない。
+ */
+export function kindMismatchMessage(label: string, kind: WorkKindKey): string {
+  return (
+    `「${label}」は、種類が「${workKindDef(kind).label}」の作品では使いません` +
+    "（登場人物や筋を扱う操作のため）。種類は「作品の種類」で変えられます。"
+  );
+}
+
+/**
+ * 登録した作品の種類から、詳細メニューで隠す操作を挙げる（設計書6.109.7）。
+ *
+ * 隠れうるのは種類の表に載った操作だけ（載っていなければ `anyKind`）。
+ */
+export function commandsHiddenForWorks(
+  kinds: readonly (WorkKindKey | undefined)[]
+): ReadonlySet<string> {
+  return new Set(
+    Object.keys(COMMAND_KIND_FEATURES).filter(
+      (command) => !isCommandVisibleForSomeWork(command, kinds)
+    )
+  );
 }

@@ -435,7 +435,9 @@ function renderCards() {
         : '') +
       (state.totals.paragraphs !== undefined
         ? ' / ' + formatCount(state.totals.paragraphs) + '段落'
-        : ''),
+        : '') +
+      // 種類の目安（設計書6.109.7。読了 約12分・2ページ・3コマなど）。小説では来ない
+      (state.totals.measure ? ' / ' + state.totals.measure : ''),
     null
   ));
 
@@ -1267,7 +1269,12 @@ function renderEpisodes() {
       summary.longest ? (summary.longest.chapterLabel || summary.longest.fileName) : '', null),
     card('いちばん短い話', summary.shortest ? formatCount(summary.shortest.net) + '字' : '—',
       summary.shortest ? (summary.shortest.chapterLabel || summary.shortest.fileName) : '', null),
-  ].join('');
+  ].concat(
+    // 種類の目安（設計書6.109.7）。小説では来ないので、カードは4枚のまま
+    summary.totalMeasureShort
+      ? [card('種類の目安', summary.totalMeasureShort, summary.totalMeasure || '', null)]
+      : []
+  ).join('');
 
   const rows = state.episodes.rows;
   const maxNet = rows.reduce((max, row) => Math.max(max, row.net), 0) || 1;
@@ -1283,16 +1290,20 @@ function renderEpisodes() {
       '件は、1話ぶんの長さではないため平均・中央値・長短の印から外しています' +
       '（合計字数には入っています）。</div>'
     : '';
+  // 種類の目安の列（設計書6.109.7）。**どの話にも目安が無ければ列ごと出さない**
+  // ——小説の一覧は、これまでと同じ列のまま
+  const hasMeasure = rows.some((row) => row.measure);
   table.innerHTML = collectedNote +
     '<table><thead><tr>' +
     '<th>話</th><th>タイトル</th><th class="num">純文字数</th><th class="num">原稿用紙</th>' +
+    (hasMeasure ? '<th class="num">目安</th>' : '') +
     '<th class="num">平均比</th><th>長さ</th></tr></thead><tbody>' +
     rows.map((row) => {
       if (row.conflicted) {
         return '<tr class="clickable" data-path="' + escapeHtml(row.filePath) + '">' +
           '<td>' + escapeHtml(row.chapterLabel || '—') + '</td>' +
           '<td>' + escapeHtml(row.title || row.fileName) + '</td>' +
-          '<td class="num conflicted" colspan="4">⚠ 未解決の競合（未集計）</td></tr>';
+          '<td class="num conflicted" colspan="' + (hasMeasure ? 5 : 4) + '">⚠ 未解決の競合（未集計）</td></tr>';
       }
       const flag = row.flag === 'short'
         ? '<span class="flag short">短い</span>'
@@ -1304,6 +1315,7 @@ function renderEpisodes() {
         '<td>' + escapeHtml(row.title || row.fileName) + collected + '</td>' +
         '<td class="num">' + formatCount(row.net) + '</td>' +
         '<td class="num">約' + formatCount(row.pages) + '枚</td>' +
+        (hasMeasure ? '<td class="num">' + escapeHtml(row.measure || '—') + '</td>' : '') +
         '<td class="num">' + Math.round(row.ratio * 100) + '%</td>' +
         '<td><div class="mini">' + meterSvg(Math.round((row.net / maxNet) * 100), '') +
         '</div>' + flag + '</td></tr>';

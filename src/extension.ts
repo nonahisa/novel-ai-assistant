@@ -262,6 +262,11 @@ import {
 } from "./core/workFormatStore";
 import { invalidateWorkKind, readWorkKind } from "./core/workKindStore";
 import {
+  isCommandVisibleForKind,
+  kindFeatureOfCommand,
+  kindMismatchMessage,
+} from "./core/workTypeVisibility";
+import {
   selectableWorkFormats,
   type WorkFormatDef,
   type WorkFormatKey,
@@ -691,6 +696,41 @@ export async function activate(
   const runningCommands = new Set<string>();
 
   /**
+   * 種類の関門（設計書6.109.7）。
+   *
+   * エッセイ・歌詞の作品では、人物・筋・伏線を扱う操作を右クリック・
+   * 詳細メニュー・ステップから隠している。**コマンドパレットからは呼べる**
+   * （消さずに隠す）ので、押されたらここで「この種類の作品では使いません」と
+   * 断る。黙って走らせると、人物のいない歌詞から人物を探して空の結果を返す。
+   *
+   * **作品が分からないときは断らない**（`"unknown"`）。作品を訊くのは
+   * 前提の関門かコマンド自身の役目で、ここで先回りして訊くと、これまで
+   * 出ていなかった問いが増える。前提の関門が作品を決めたあとで、もう一度見る。
+   * **コマンド自身が作品選択を出す操作では、選ばれたあとには断れない**
+   * （作品が複数あり、本文を開かずにパレットから押したときだけ。右クリック・
+   * ステップ・本文を開いての実行では作品が分かるので必ず断れる）。
+   */
+  const guardWorkKind = async (
+    command: string,
+    args: unknown[]
+  ): Promise<"run" | "stop" | "unknown"> => {
+    if (kindFeatureOfCommand(command) === "anyKind") return "run";
+    const work = workOfCommandArgs(registry, args);
+    if (!work) return "unknown";
+    let kind;
+    try {
+      kind = await readWorkKind(work);
+    } catch {
+      // 種類が読めないせいで操作を止めない（読めなければ小説と同じ扱い）
+      return "run";
+    }
+    if (isCommandVisibleForKind(command, kind)) return "run";
+    const label = findAction(command)?.label ?? command;
+    void vscode.window.showInformationMessage(kindMismatchMessage(label, kind));
+    return "stop";
+  };
+
+  /**
    * 前提（設定資料・あらすじ・プロット・単話プロット）の関門（設計書6.94）。
    *
    * **登録の口が1つなので、ここに置けば入口を選ばない。** 詳細メニュー・
@@ -778,9 +818,17 @@ export async function activate(
     thisArg
   ) =>
     vscode.commands.registerCommand(command, async (...args: unknown[]) => {
+      // 種類の関門（設計書6.109.7）は前提の関門より先に通す。歌詞の作品で
+      // 「先に人物を抽出しますか」と訊いても意味が無い
+      const kindGate = await guardWorkKind(command, args);
+      if (kindGate === "stop") return undefined;
       const gate = await guardPrerequisites(command, args);
       if (!gate.run) return undefined;
       args = gate.args;
+      // 前提の関門が作品を決めた（作品選択で選ばれた）なら、その作品で見直す
+      if (kindGate === "unknown" && (await guardWorkKind(command, args)) === "stop") {
+        return undefined;
+      }
 
       if (!beginCommand(runningCommands, command)) {
         const label = exclusiveLabelOf(command) ?? command;
@@ -1754,7 +1802,13 @@ export async function activate(
       get: () => context.globalState.get<string[]>(ACTION_GROUPS_KEY, []),
       set: (groups) => void context.globalState.update(ACTION_GROUPS_KEY, groups),
     },
-    (counter) => actionDecorations.countOf(counter)
+    (counter) => actionDecorations.countOf(counter),
+    // 登録した作品の種類（設計書6.109.7）。走査が読み終えた分だけを借りる
+    () => registry.list().map((work) => treeProvider.scannedKindOf(work.id))
+  );
+  // 作品を1つ読み終えるたびに、種類で隠すものが変わったかを見る
+  context.subscriptions.push(
+    treeProvider.onDidLoadWork(() => actionProvider.refreshKinds())
   );
   const actionView = vscode.window.createTreeView("novelai.actions", {
     treeDataProvider: actionProvider,
@@ -2503,6 +2557,9 @@ export async function activate(
   const charCountBar = new CharCountStatusBar({
     findWork: (filePath) => findWorkForPath(registry, filePath),
     summary: (work) => progress.summary(work),
+    // 種類の目安（設計書6.109.7）。原稿エディタの下段と同じ部品で出す。
+    // 種類は作品ごとに覚えてあるので、打鍵のたびに設定ファイルは読まない
+    kindOf: (work) => readWorkKind(work),
   });
   context.subscriptions.push(charCountBar);
   const updateStatusBar = (): void => charCountBar.refreshNow();
@@ -2527,6 +2584,8 @@ export async function activate(
       // （設計書6.109。覚えているのは設定ファイルに書かれた分だけ）
       if (path.basename(document.fileName).toLowerCase() === "config.json") {
         invalidateWorkKind();
+        // ステップの種類の絞り込みも読み直す（設計書6.109.7）
+        stepProvider.invalidateFormats();
       }
       // プロットを書き換えたら形式を読み直す。作者が「## 形式」を
       // 直したのに一覧が「第3話」のままでは、直った気がしない
@@ -3082,6 +3141,9 @@ export async function activate(
         const changed = await setWorkKind(work);
         if (!changed) return CHECK_CANCELLED;
         treeProvider.refresh(work.id);
+        // 種類で絞る並び（設計書6.109.7）も読み直す。詳細メニューは
+        // 作品一覧が読み直し終えた合図（onDidLoadWork）で並べ直す
+        stepProvider.invalidateFormats(work.id);
         return CHECK_COMPLETED;
       }
     ),
@@ -6952,6 +7014,45 @@ function findWorkForPath(
  * **ステータスバーや保存時の記録には使わない**——そちらは確認を出さないので
  * 印は要らず、`findWorkForPath` のままでよい。
  */
+/**
+ * コマンドの引数と開いている画面から、**訊かずに分かる**作品を引く
+ * （種類の関門、設計書6.109.7）。
+ *
+ * 右クリック・ステップは作品（`WorkRef` や一覧のノード）を、ファイルの
+ * 右クリックは場所（`Uri`）を渡す。どれも無ければ開いている本文の作品、
+ * 作品が1つしか無ければその作品。**それでも決まらなければ undefined**
+ * ——ここで作品を選ばせない（選ぶのは前提の関門かコマンド自身）。
+ */
+function workOfCommandArgs(
+  registry: WorkRegistry,
+  args: readonly unknown[]
+): WorkEntry | undefined {
+  const first = args[0];
+  if (first instanceof vscode.Uri) {
+    return findWorkForPath(registry, fromUri(first));
+  }
+  if (first && typeof first === "object" && "work" in first) {
+    const candidate = (first as { work?: unknown }).work;
+    if (
+      candidate &&
+      typeof candidate === "object" &&
+      typeof (candidate as WorkEntry).id === "string" &&
+      typeof (candidate as WorkEntry).folderPath === "string"
+    ) {
+      return candidate as WorkEntry;
+    }
+  }
+  // 原稿エディタ（WebView）で書いているときも、その作品を見る
+  // （`activeTextEditor` だけだと原稿エディタでは空になる）
+  const opened = activeManuscriptUri();
+  if (opened) {
+    const found = findWorkForPath(registry, fromUri(opened));
+    if (found) return found;
+  }
+  const works = registry.list();
+  return works.length === 1 ? works[0] : undefined;
+}
+
 function inferredWorkOfPath(
   registry: WorkRegistry,
   filePath: string

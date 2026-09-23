@@ -14,6 +14,8 @@ import {
 } from "../core/countSettings";
 import { TypingPause } from "../core/typingPause";
 import { SUPPORTED_EXTENSIONS, type WorkEntry } from "../models/types";
+import { measureKindText, type KindMeasure } from "../core/kindMeasure";
+import type { WorkKindKey } from "../core/workKind";
 import {
   describeStatusBarProgress,
   type WritingSummary,
@@ -35,6 +37,11 @@ export interface CharCountStatusBarDeps {
   findWork: (filePath: string) => WorkEntry | undefined;
   /** 今日の執筆量。読めなければ undefined */
   summary: (work: WorkEntry) => Promise<WritingSummary | undefined>;
+  /**
+   * 作品の種類（設計書6.109.7）。字数の横に種類の目安（エッセイの読了時間・
+   * 台本の分数など）を添える。**渡されなければ目安は出さない**
+   */
+  kindOf?: (work: WorkEntry) => Promise<WorkKindKey | undefined>;
 }
 
 /**
@@ -100,10 +107,9 @@ export class CharCountStatusBar implements vscode.Disposable {
     const mode = currentCountMode();
     const excludeRuby = excludeRubyFromCount();
 
-    const counts = countChars(
-      editor.document.getText(),
-      ext === ".md" ? excludeRuby : false
-    );
+    // 目安（設計書6.109.7）も同じ本文から測るので、1回だけ取り出す
+    const text = editor.document.getText();
+    const counts = countChars(text, ext === ".md" ? excludeRuby : false);
     const value = pickCount(counts, mode);
     const label = countModeLabel(mode);
 
@@ -119,17 +125,26 @@ export class CharCountStatusBar implements vscode.Disposable {
       selectionPart = ` (選択 ${formatCount(selValue)})`;
     }
 
-    const fileText = `$(book) ${label}${formatCount(value)}字${selectionPart}`;
-    const fileTooltip = [
+    /*
+      種類の目安（設計書6.109.7）は**字数のすぐ横**に添える（原稿エディタの
+      下段「このファイル 1,234字（約5分）」と同じ並び）。選択範囲の字数は
+      その後ろ——目安はファイルぜんたいの値で、選択の値ではない。
+    */
+    const fileTextWith = (measure?: KindMeasure): string =>
+      `$(book) ${label}${formatCount(value)}字${
+        measure ? `（${measure.short}）` : ""
+      }${selectionPart}`;
+    const fileTooltipWith = (measure?: KindMeasure): string[] => [
       `**${path.basename(editor.document.fileName)}**`,
       "",
       `- 純文字数: ${formatCount(counts.net)} 字`,
       `- 総文字数: ${formatCount(counts.gross)} 字`,
       `- 段落数: ${counts.paragraphs}`,
       `- 原稿用紙換算: 約 ${formatCount(toManuscriptPages(counts.manuscriptLines))} 枚`,
+      ...(measure ? [`- ${measure.detail}`] : []),
     ];
-    this.item.text = fileText;
-    this.item.tooltip = new vscode.MarkdownString(fileTooltip.join("\n"));
+    this.item.text = fileTextWith();
+    this.item.tooltip = new vscode.MarkdownString(fileTooltipWith().join("\n"));
     this.item.show();
 
     // 今日どれだけ進んだかは、開いているファイルの字数だけでは分からない。
@@ -137,15 +152,42 @@ export class CharCountStatusBar implements vscode.Disposable {
     const showProgress = vscode.workspace
       .getConfiguration("novelai")
       .get<boolean>("stats.showInStatusBar", true);
-    const work = showProgress
-      ? this.deps.findWork(fromUri(editor.document.uri))
-      : undefined;
+    const kindOf = this.deps.kindOf;
+    // 作品の外のファイル（作品一覧の外の .md）には、執筆量も目安も無い
+    const work =
+      showProgress || kindOf
+        ? this.deps.findWork(fromUri(editor.document.uri))
+        : undefined;
     if (!work) return;
 
-    void this.deps
-      .summary(work)
-      .then((summary) => {
-        if (!summary || generation !== this.generation) return;
+    /*
+      **執筆量と種類を両方待ってから、1回で書く**（設計書6.109.7）。
+
+      どちらも記録や設定を読んでから分かる。別々に後から重ねると、
+      先に届いた側の書き込みを遅れて届いた側が上書きして、目安か執筆量の
+      どちらかが消える（0.81.0 でステータスバーに目安を出さなかった理由）。
+      どちらが読めなくても、読めた側だけで書く。
+    */
+    void Promise.all([
+      showProgress
+        ? this.deps.summary(work).catch(() => undefined)
+        : Promise.resolve(undefined),
+      kindOf
+        ? kindOf(work).catch(() => undefined)
+        : Promise.resolve(undefined),
+    ])
+      .then(([summary, kind]) => {
+        if (generation !== this.generation) return;
+        // 小説では目安が undefined——これまでどおり何も足さない
+        const measure = kind ? measureKindText(kind, text, counts) : undefined;
+        if (!summary && !measure) return;
+        const fileText = fileTextWith(measure);
+        const fileTooltip = fileTooltipWith(measure);
+        if (!summary) {
+          this.item.text = fileText;
+          this.item.tooltip = new vscode.MarkdownString(fileTooltip.join("\n"));
+          return;
+        }
         this.item.text = `${fileText}  ${describeStatusBarProgress(summary)}`;
         this.item.tooltip = new vscode.MarkdownString(
           [

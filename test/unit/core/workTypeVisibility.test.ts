@@ -6,12 +6,18 @@ import {
   WORK_TREE_NODE_KINDS,
   WORK_TYPE_COLUMNS,
   WORK_TYPE_CONTEXT_UNSET,
+  COMMAND_KIND_FEATURES,
+  KIND_CONTEXT_SUFFIXES,
   featureOfCommand,
   isCommandVisibleForColumn,
+  isCommandVisibleForKind,
+  isCommandVisibleForSomeWork,
   isCommandVisibleForWorkType,
+  kindMismatchMessage,
   workTypeContextValue,
   type WorkTypeColumn,
 } from "../../../src/core/workTypeVisibility";
+import { WORK_KINDS } from "../../../src/core/workKind";
 import { allActions } from "../../../src/views/actionList";
 
 /**
@@ -63,9 +69,12 @@ function inTable(command: string): boolean {
  * 検査が素通りする。
  */
 function matchedContextValues(when: string): string[] {
+  // 種類の軸（設計書6.109.7）の印も候補へ入れる。物語でない種類だけが
+  // 後ろに `-essay` のような印を持つ
+  const kindSuffixes = ["", ...KIND_CONTEXT_SUFFIXES.map((kind) => `-${kind}`)];
   const candidates = WORK_TREE_NODE_KINDS.flatMap((kind) =>
-    [...WORK_TYPE_COLUMNS, WORK_TYPE_CONTEXT_UNSET].map(
-      (suffix) => `${kind}-${suffix}`
+    [...WORK_TYPE_COLUMNS, WORK_TYPE_CONTEXT_UNSET].flatMap((suffix) =>
+      kindSuffixes.map((kindSuffix) => `${kind}-${suffix}${kindSuffix}`)
     )
   );
   return candidates.filter((value) => matchesViewItem(when, value));
@@ -242,7 +251,9 @@ describe("タイプに合わない操作は出さない", () => {
     const entry = manifest.contributes.menus["view/item/context"].find(
       (item) => item.command === "novelai.transferMemoToWork"
     );
-    expect(entry?.when).toContain("/^episode-memo$/");
+    // 後ろの `(-(essay|lyrics))?` は種類の印（設計書6.109.7）。メモ集の
+    // エッセイでもメモは移せる
+    expect(entry?.when).toContain("/^episode-memo(-(essay|lyrics))?$/");
     expect(entry?.when).not.toContain("unset");
   });
 
@@ -292,13 +303,23 @@ describe("右クリック（package.json の when）が表と噛み合う", () =
       expect(kinds.size, `${entry.command} の when`).toBe(1);
       const kind = [...kinds][0];
 
-      const expected = [
+      const columns = [
         ...WORK_TYPE_COLUMNS.filter((column) =>
           isCommandVisibleForColumn(entry.command, column)
         ),
         // タイプを決めていない作品では絞り込まない（例外は上の一覧だけ）
         ...(UNSET_EXCLUDED.has(entry.command) ? [] : [WORK_TYPE_CONTEXT_UNSET]),
-      ].map((suffix) => `${kind}-${suffix}`);
+      ];
+      // 種類の軸（設計書6.109.7）。物語の種類は印を持たない（""）
+      const kindSuffixes = [
+        "",
+        ...KIND_CONTEXT_SUFFIXES.filter((kindKey) =>
+          isCommandVisibleForKind(entry.command, kindKey)
+        ).map((kindKey) => `-${kindKey}`),
+      ];
+      const expected = columns.flatMap((suffix) =>
+        kindSuffixes.map((kindSuffix) => `${kind}-${suffix}${kindSuffix}`)
+      );
 
       expect([...matched].sort(), entry.command).toEqual(expected.sort());
     }
@@ -328,5 +349,172 @@ describe("右クリック（package.json の when）が表と噛み合う", () =
     expect(
       values.filter((value) => matchesViewItem(insert?.when ?? "", value))
     ).toEqual(["episode-novel", "episode-script", "episode-unset"]);
+  });
+});
+
+/**
+ * 種類の軸（設計書6.109.7）。
+ *
+ * エッセイ・記事と歌詞・詩は物語ではないので、人物・筋・伏線を扱う操作に
+ * 意味が無い。**消さずに隠す**——右クリック・詳細メニュー・ステップからは
+ * 外すが、コマンドパレットからは呼べ、押せば「使いません」と断る。
+ * 台本・漫画の原作は物語なので、何も減らさない。
+ */
+describe("作品の種類で、物語向けの操作を隠す", () => {
+  const narrative = [
+    "novelai.checkContradictions",
+    "novelai.checkFactContradictions",
+    "novelai.checkForeshadows",
+    "novelai.openForeshadows",
+    "novelai.checkDeviations",
+    "novelai.createEpisodePlot",
+    "novelai.checkEpisodePlot",
+    "novelai.extractSettings",
+    "novelai.extractCharactersOnly",
+    "novelai.openSettingsPanel",
+    "novelai.openRelationGraph",
+    "novelai.openChronicle",
+    "novelai.finishNewWork",
+  ];
+
+  test("物語の種類（小説・台本・漫画の原作）では、人物・矛盾・伏線が残る", () => {
+    for (const kind of ["novel", "script", "manga"] as const) {
+      for (const command of narrative) {
+        expect(isCommandVisibleForKind(command, kind), `${command}/${kind}`).toBe(
+          true
+        );
+      }
+    }
+  });
+
+  test("エッセイ・記事と歌詞・詩では、物語向けの操作が隠れる", () => {
+    for (const kind of ["essay", "lyrics"] as const) {
+      for (const command of narrative) {
+        expect(isCommandVisibleForKind(command, kind), `${command}/${kind}`).toBe(
+          false
+        );
+      }
+    }
+  });
+
+  test("プロット・章立て・あらすじ・EPUB・校正は、どの種類でも残る", () => {
+    // エッセイにも「伝えたいこと・構成」のプロットがあり（6.109.3）、
+    // 随筆集・詩集も章に分けて本にする
+    for (const command of [
+      "novelai.createPlot",
+      "novelai.openPlotMode",
+      "novelai.startChapter",
+      "novelai.proposeChapters",
+      "novelai.generateSynopses",
+      "novelai.generateWorkBlurb",
+      "novelai.exportEpub",
+      "novelai.checkTypos",
+      "novelai.checkProofread",
+      "novelai.showWritingStats",
+      // 種類を変える入口が消えると、間違えた種類から戻れない
+      "novelai.setWorkKind",
+    ]) {
+      for (const kind of WORK_KINDS.map((def) => def.key)) {
+        expect(isCommandVisibleForKind(command, kind), `${command}/${kind}`).toBe(
+          true
+        );
+      }
+    }
+  });
+
+  test("種類が分からなければ隠さない", () => {
+    for (const command of narrative) {
+      expect(isCommandVisibleForKind(command, undefined), command).toBe(true);
+    }
+  });
+
+  test("小説では、種類の軸で何も減らない", () => {
+    for (const command of Object.keys(COMMAND_FEATURES)) {
+      expect(isCommandVisibleForKind(command, "novel"), command).toBe(true);
+    }
+  });
+
+  test("物語向け（story）の操作は、種類の表で1つずつ判断してある", () => {
+    // 形式の表で「物語向け」に入れた操作は、エッセイ・歌詞で要るかを
+    // 必ず決めておく。載せ忘れると、どちらとも決めないまま出続ける
+    const undecided = Object.entries(COMMAND_FEATURES)
+      .filter(([, feature]) => feature === "story")
+      .map(([command]) => command)
+      .filter((command) => !(command in COMMAND_KIND_FEATURES));
+    expect(undecided).toEqual([]);
+  });
+
+  test("種類の表に、実在しないコマンドが残っていない", () => {
+    const declared = new Set(
+      manifest.contributes.commands.map((entry) => entry.command)
+    );
+    expect(
+      Object.keys(COMMAND_KIND_FEATURES).filter((command) => !declared.has(command))
+    ).toEqual([]);
+  });
+
+  test("右クリックの印：物語でない種類だけが後ろに種類を持つ", () => {
+    expect(workTypeContextValue("work", "long", "essay")).toBe("work-novel-essay");
+    expect(workTypeContextValue("episode", "sns", "lyrics")).toBe(
+      "episode-sns-lyrics"
+    );
+    expect(workTypeContextValue("work", undefined, "lyrics")).toBe(
+      "work-unset-lyrics"
+    );
+    // 物語の種類は、いままでと同じ印（右クリックの when を変えずに済む）
+    expect(workTypeContextValue("work", "long", "novel")).toBe("work-novel");
+    expect(workTypeContextValue("work", "script", "script")).toBe("work-script");
+    expect(workTypeContextValue("episode", "long", "manga")).toBe("episode-novel");
+    expect([...KIND_CONTEXT_SUFFIXES].sort()).toEqual(["essay", "lyrics"]);
+  });
+
+  test("右クリック：エッセイの作品に、設定資料と人物の抽出は出ない", () => {
+    const contextMenu = manifest.contributes.menus["view/item/context"];
+    const whenOf = (command: string): string =>
+      contextMenu.find((entry) => entry.command === command)?.when ?? "";
+    expect(matchesViewItem(whenOf("novelai.extractSettings"), "work-novel-essay")).toBe(
+      false
+    );
+    expect(matchesViewItem(whenOf("novelai.openSettingsPanel"), "work-novel-essay")).toBe(
+      false
+    );
+    // プロットモード・章立て・字数は残る
+    expect(matchesViewItem(whenOf("novelai.openPlotMode"), "work-novel-essay")).toBe(
+      true
+    );
+    expect(matchesViewItem(whenOf("novelai.startChapter"), "episode-novel-lyrics")).toBe(
+      true
+    );
+    expect(matchesViewItem(whenOf("novelai.showWritingStats"), "work-novel-essay")).toBe(
+      true
+    );
+    // メモ集のエッセイでも、メモの移管は出る
+    expect(
+      matchesViewItem(whenOf("novelai.transferMemoToWork"), "episode-memo-essay")
+    ).toBe(true);
+  });
+
+  test("詳細メニュー：登録した作品のどれかで使えるなら出す", () => {
+    // 詳細メニューは作品を選ばない画面なので、**全作品が物語でないときだけ**隠す
+    expect(isCommandVisibleForSomeWork("novelai.checkForeshadows", [])).toBe(true);
+    expect(
+      isCommandVisibleForSomeWork("novelai.checkForeshadows", ["essay", "lyrics"])
+    ).toBe(false);
+    expect(
+      isCommandVisibleForSomeWork("novelai.checkForeshadows", ["essay", "novel"])
+    ).toBe(true);
+    // 種類がまだ分からない作品（走査前）があれば出す
+    expect(
+      isCommandVisibleForSomeWork("novelai.checkForeshadows", ["essay", undefined])
+    ).toBe(true);
+    expect(isCommandVisibleForSomeWork("novelai.checkTypos", ["essay"])).toBe(true);
+  });
+
+  test("押したときの断りに、操作の名前と種類の名前と、戻し方が入る", () => {
+    const message = kindMismatchMessage("伏線を検知", "lyrics");
+    expect(message).toContain("「伏線を検知」");
+    expect(message).toContain("歌詞・詩");
+    expect(message).toContain("使いません");
+    expect(message).toContain("作品の種類");
   });
 });
