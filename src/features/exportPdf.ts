@@ -13,12 +13,18 @@ import { bookHeading, episodeUnit } from "../core/episodeLabel";
 import { timestampedFileNameCandidates } from "../core/timestampedFileName";
 import {
   buildPrintHtml,
+  MARGIN_CONTENTS,
+  marginContentLabel,
   PRINT_PRESETS,
+  printPreset,
+  type HeaderFooter,
+  type MarginContent,
   type PrintEpisode,
   type PrintPreset,
 } from "../core/printHtml";
 import { notationModeFor } from "../core/manuscriptRender";
-import { cancelItem, isCancelItem } from "../views/dialogs";
+import { BookStore } from "../core/bookStore";
+import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { revealFolder } from "../views/openDocument";
 import { openInDefaultApp } from "../core/openExternalFile";
 import { logFailure, useLogFile } from "../core/logger";
@@ -61,6 +67,16 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
 
   const preset = await pickPreset();
   if (!preset) return;
+
+  // 上下の余白に刷るもの（設計書6.33.5 の2）。**書き出すときに選ぶだけで、
+  // どこにも保存しない**——紙の大きさと同じ持ち方にそろえた
+  const headerFooter = await pickHeaderFooter(preset);
+  if (!headerFooter) return;
+  let author: string | undefined;
+  if (headerFooter.top === "author" || headerFooter.bottom === "author") {
+    author = await askAuthorName(work);
+    if (author === undefined) return;
+  }
 
   const chapters: PrintEpisode[] = [];
   /** 競合マーカーが残っている話。組んでも読めない紙になるので外す */
@@ -132,6 +148,8 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
     // 上で読んだものをそのまま渡す——ここで読み直すと、選んでいる間に
     // 設定が書き換わったときに、見出しと組み方で別の種類を指す
     kind,
+    headerFooter,
+    author,
   });
 
   let target: string;
@@ -254,6 +272,101 @@ async function pickPreset(): Promise<PrintPreset | undefined> {
   );
   if (!picked || isCancelItem(picked) || !("id" in picked)) return undefined;
   return picked.id;
+}
+
+/**
+ * 上下の余白（ヘッダー・フッター）に刷るものを決める。
+ *
+ * **いちばん上は「この紙の既定のまま」。** 毎回2つ選ばせると、いちばん
+ * よく使う道が遠回りになる。既定の中身は項目の横に書いて見せる。
+ *
+ * ブラウザの印刷画面にも「ヘッダーとフッター」（日付とファイルの場所）が
+ * あり、名前が同じで紛らわしい。こちらは紙の余白に刷る中身で、あちらは
+ * 外すもの——と項目の説明で言い分ける。
+ */
+async function pickHeaderFooter(
+  preset: PrintPreset
+): Promise<HeaderFooter | undefined> {
+  const defaults = printPreset(preset).headerFooter;
+  const picked = await vscode.window.showQuickPick(
+    [
+      {
+        label: "この紙の既定のまま",
+        description: `上：${marginContentLabel(defaults.top)}／下：${marginContentLabel(
+          defaults.bottom
+        )}`,
+        detail:
+          "ブラウザの印刷画面の「ヘッダーとフッター」（日付とファイルの場所）とは別のものです。あちらは外してください",
+        margins: "default" as const,
+      },
+      {
+        label: "上と下を選ぶ",
+        detail: "題名・話の見出し・作者名・ページ番号・なし から選びます",
+        margins: "choose" as const,
+      },
+      cancelItem(),
+    ],
+    {
+      title: "ページの上と下の余白に何を刷るか選んでください",
+      ignoreFocusOut: true,
+    }
+  );
+  if (!picked || isCancelItem(picked) || !("margins" in picked)) return undefined;
+  if (picked.margins === "default") return defaults;
+
+  const top = await pickMargin("上の余白（ヘッダー）に刷るもの", defaults.top);
+  if (!top) return undefined;
+  const bottom = await pickMargin("下の余白（フッター）に刷るもの", defaults.bottom);
+  if (!bottom) return undefined;
+  return { top, bottom };
+}
+
+async function pickMargin(
+  title: string,
+  byDefault: MarginContent
+): Promise<MarginContent | undefined> {
+  const picked = await vscode.window.showQuickPick(
+    [
+      ...MARGIN_CONTENTS.map((item) => ({
+        label: item.label,
+        description: item.id === byDefault ? "この紙の既定" : undefined,
+        detail: item.detail,
+        margin: item.id,
+      })),
+      cancelItem(),
+    ],
+    { title, ignoreFocusOut: true }
+  );
+  if (!picked || isCancelItem(picked) || !("margin" in picked)) return undefined;
+  return picked.margin;
+}
+
+/**
+ * 余白に刷る作者名を尋ねる。取りやめたら undefined。
+ *
+ * **EPUBの設計図（`設定/書籍/book.json`）に筆名があれば、初めから入れて
+ * 見せる。** 同じ名前を二度打たせない。ただし**ここで入れた名前は設計図へ
+ * 書き込まない**——PDFの余白に刷る名前を変えただけで、本の奥付まで
+ * 変わってしまうのは、作者の思っていない書き換えになる。
+ *
+ * 設計図が壊れていて読めなくても止めない（ここは読むだけで、直すのは
+ * EPUBエディターの役目）。空欄から尋ねる。
+ */
+async function askAuthorName(work: WorkEntry): Promise<string | undefined> {
+  let known = "";
+  try {
+    known = (await new BookStore(work).load()).author;
+  } catch {
+    known = "";
+  }
+  const typed = await askText({
+    title: "余白に刷る作者名",
+    prompt:
+      "上下の余白に刷る作者名（筆名）を入れてください。この書き出しにだけ使い、どこにも保存しません。",
+    value: known,
+    placeHolder: "例：山田太郎",
+  });
+  return typed === undefined ? undefined : typed.trim();
 }
 
 /**

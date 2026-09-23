@@ -70,7 +70,49 @@ describe("面の切れ目の禁則", () => {
   });
 });
 
+/** ヘッダー・フッターの中身（設計書6.33.5 の2） */
+describe("上下の余白に刷る中身", () => {
+  type MarginText = (
+    slot: string,
+    info: { title: string; author: string; heading: string; number: number }
+  ) => string;
+  const marginText = new Function(
+    `${PAGINATE_HELPERS}\nreturn marginText;`
+  )() as MarginText;
+  const info = { title: "銀の航路", author: "山田", heading: "第2話　雨", number: 7 };
+
+  test.each([
+    ["title", "銀の航路"],
+    ["author", "山田"],
+    ["episode", "第2話　雨"],
+    ["page", "7"],
+    ["none", ""],
+  ])("%s → %s", (slot, expected) => {
+    expect(marginText(slot, info)).toBe(expected);
+  });
+
+  test("知らない指定は、何も刷らない", () => {
+    expect(marginText("date", info)).toBe("");
+  });
+
+  test("扉（番号0）にはページ番号を刷らない", () => {
+    expect(marginText("page", { ...info, number: 0 })).toBe("");
+  });
+});
+
 describe("スクリプトの形", () => {
+  test("面に割ったあとで、上下の余白を埋める", () => {
+    const paginateAt = PRINT_PAGINATE_SCRIPT.indexOf("paginate();");
+    const decorateAt = PRINT_PAGINATE_SCRIPT.indexOf("decorate();");
+    expect(decorateAt).toBeGreaterThan(paginateAt);
+  });
+
+  test("上下の余白は文字として入れる（札として読ませない）", () => {
+    // 題名や作者名に < があっても、紙に文字として出る
+    expect(PRINT_PAGINATE_SCRIPT).toContain("head.textContent = marginText(");
+    expect(PRINT_PAGINATE_SCRIPT).not.toContain("innerHTML");
+  });
+
   test("文として読める（構文の誤りで面が1枚も出ない、を防ぐ）", () => {
     expect(() => new Function(PRINT_PAGINATE_SCRIPT)).not.toThrow();
   });

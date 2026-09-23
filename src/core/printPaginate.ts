@@ -61,6 +61,14 @@ export const PAGINATE_HELPERS = [
   "  }",
   "  return cut;",
   "}",
+  // 上下の余白に刷る中身（設計書6.33.5 の2）。扉は番号0で、番号を刷らない
+  "function marginText(slot, info) {",
+  "  if (slot === 'title') return info.title;",
+  "  if (slot === 'author') return info.author;",
+  "  if (slot === 'episode') return info.heading;",
+  "  if (slot === 'page') return info.number > 0 ? String(info.number) : '';",
+  "  return '';",
+  "}",
 ].join("\n");
 
 /**
@@ -213,10 +221,32 @@ export const PRINT_PAGINATE_SCRIPT = [
   "  if (count) count.textContent = '全' + pages.length + 'ページ（扉を含む）';",
   "}",
   "",
+  // 上下の余白を埋める。**扉には何も刷らず、番号も数えない**
+  // （本文の1ページ目を1とする。本の数え方とは違うが、作者が数えやすい）
+  "function decorate() {",
+  "  var headSlot = body.getAttribute('data-head') || 'none';",
+  "  var footSlot = body.getAttribute('data-foot') || 'none';",
+  "  var base = {",
+  "    title: body.getAttribute('data-title') || '',",
+  "    author: body.getAttribute('data-author') || ''",
+  "  };",
+  "  var number = 0;",
+  "  Array.prototype.slice.call(root.querySelectorAll('.page')).forEach(function (page) {",
+  "    if (page.classList.contains('page-cover')) return;",
+  "    number += 1;",
+  "    var info = { title: base.title, author: base.author, heading: page.getAttribute('data-heading') || '', number: number };",
+  "    var head = page.querySelector('.page-head');",
+  "    var foot = page.querySelector('.page-foot');",
+  "    if (head) head.textContent = marginText(headSlot, info);",
+  "    if (foot) foot.textContent = marginText(footSlot, info);",
+  "  });",
+  "}",
+  "",
   "function run() {",
   "  body.classList.add('paginating');",
   "  try {",
   "    paginate();",
+  "    decorate();",
   // 面が出来てから、印刷の余白を0にする（面の中に余白を持っている）。
   // 失敗したときは付けない——流し込みの紙に余白が無くなる
   "    var style = doc.createElement('style');",

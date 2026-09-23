@@ -1,8 +1,10 @@
 import { describe, expect, test } from "vitest";
 import {
   buildPrintHtml,
+  MARGIN_CONTENTS,
   PRINT_PRESETS,
   printPreset,
+  type MarginContent,
   type PrintPreset,
 } from "../../../src/core/printHtml";
 import { timestampedFileNameCandidates } from "../../../src/core/timestampedFileName";
@@ -253,8 +255,8 @@ describe("印刷に近いプレビュー", () => {
   });
 
   test("縦書きかどうかをスクリプトへ伝える", () => {
-    expect(html("本文", "bunko-vertical")).toContain('<body data-vertical="1">');
-    expect(html("本文", "a4-horizontal")).toContain('<body data-vertical="0">');
+    expect(html("本文", "bunko-vertical")).toContain('<body data-vertical="1" ');
+    expect(html("本文", "a4-horizontal")).toContain('<body data-vertical="0" ');
   });
 
   test("縦書きでも、面そのものは上から下へ並ぶ（縦に組むのは面の中だけ）", () => {
@@ -295,6 +297,80 @@ describe("印刷に近いプレビュー", () => {
 
     expect(out).toContain("#print-source .cover { break-after: page;");
     expect(out).toContain("#print-source .episode { break-before: page;");
+  });
+});
+
+/**
+ * ヘッダーとフッター（設計書6.33.5 の2、0.84.1）。
+ *
+ * 上下の余白に何を刷るかを、題名・話の見出し・作者名・ページ番号・なし
+ * から選ぶ。既定は紙ごとに持つ。中身を入れるのは面に割るスクリプトで、
+ * ここは「どれを選んだか」と材料（題名・作者名）を渡すところまで。
+ */
+describe("ヘッダーとフッター", () => {
+  function withMargins(
+    headerFooter?: { top: MarginContent; bottom: MarginContent },
+    author?: string,
+    preset: PrintPreset = "bunko-vertical"
+  ): string {
+    return buildPrintHtml({
+      workTitle: "銀の航路",
+      episodes: [{ heading: "第1話", body: "本文", notation: "curly" }],
+      preset,
+      headerFooter,
+      author,
+    });
+  }
+
+  test("選べる中身は5つ", () => {
+    expect(MARGIN_CONTENTS.map((item) => item.label)).toEqual([
+      "題名",
+      "話の見出し",
+      "作者名",
+      "ページ番号",
+      "なし",
+    ]);
+  });
+
+  test("既定は紙ごとに持つ", () => {
+    expect(printPreset("bunko-vertical").headerFooter).toEqual({
+      top: "episode",
+      bottom: "page",
+    });
+    expect(printPreset("a5-vertical").headerFooter).toEqual({ top: "title", bottom: "page" });
+    expect(printPreset("a4-horizontal").headerFooter).toEqual({ top: "title", bottom: "page" });
+  });
+
+  test("選ばなければ、紙の既定をスクリプトへ伝える", () => {
+    expect(withMargins()).toContain('data-head="episode" data-foot="page"');
+    expect(withMargins(undefined, undefined, "a4-horizontal")).toContain(
+      'data-head="title" data-foot="page"'
+    );
+  });
+
+  test("選んだものを伝える", () => {
+    expect(withMargins({ top: "author", bottom: "none" }, "山田")).toContain(
+      'data-head="author" data-foot="none"'
+    );
+  });
+
+  test("題名と作者名は、逃がしてから渡す", () => {
+    const out = withMargins({ top: "author", bottom: "title" }, '"><script>');
+
+    expect(out).toContain('data-title="銀の航路"');
+    expect(out).toContain('data-author="&quot;&gt;&lt;script&gt;"');
+    expect([...out.matchAll(/<script>/g)]).toHaveLength(1);
+  });
+
+  test("作者名が無ければ空で渡す（上下に何も出ない）", () => {
+    expect(withMargins({ top: "author", bottom: "page" })).toContain('data-author=""');
+  });
+
+  test("案内帯に、上下の余白に何が刷られるかを出す", () => {
+    expect(withMargins()).toContain("上の余白：話の見出し／下の余白：ページ番号");
+    expect(withMargins({ top: "none", bottom: "none" })).toContain(
+      "上の余白：なし／下の余白：なし"
+    );
   });
 });
 

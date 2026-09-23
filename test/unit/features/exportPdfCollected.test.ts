@@ -117,7 +117,7 @@ function installDisk(): void {
 }
 
 /**
- * 2つの選択（範囲・紙の大きさ）に答える。
+ * 3つの選択（範囲・紙の大きさ・上下の余白）に答える。
  *
  * **項目の形で見分ける。** 順番で決め打ちすると、選択が1つ増えた
  * ときに黙って別の答えを返すことになる。
@@ -128,6 +128,9 @@ function answerQuickPicks(): void {
   ) => {
     const all = items.find((item) => item.all === true);
     if (all) return all;
+    // 上下の余白（0.84.1〜）は紙の既定のまま
+    const keep = items.find((item) => item.margins === "default");
+    if (keep) return keep;
     return items.find((item) => item.id === "bunko-vertical");
   };
 }
@@ -265,6 +268,134 @@ describe("合本は話ごとに章へ割る（設計書6.65.15）", () => {
     ].map((matched) => matched[1]);
 
     expect(headings).toEqual(["プロローグ", "第1話　転生"]);
+  });
+});
+
+/**
+ * 上下の余白（ヘッダー・フッター）を選ぶ（設計書6.33.5 の2、0.84.1）。
+ *
+ * **選ぶのは書き出すときだけ**で、どこにも保存しない（紙の大きさの選び方と
+ * 同じ持ち方）。作者名は EPUB の設計図に書いてあればそれを初めから入れて
+ * 見せ、無ければ尋ねる。**尋ねた名前を設計図へ書き込まない。**
+ */
+describe("上下の余白に刷るものを選ぶ", () => {
+  const picks: Array<{ title?: string; items: Array<Record<string, unknown>> }> = [];
+  const asked: Array<{ value?: string }> = [];
+
+  /** 範囲・紙は既定で答え、上下の余白は `top`・`bottom` を選ぶ */
+  function choose(top: string, bottom: string, typedAuthor?: string): void {
+    const marginAnswers = [top, bottom];
+    (window as unknown as Record<string, unknown>).showQuickPick = async (
+      items: Array<Record<string, unknown>>,
+      options?: { title?: string }
+    ) => {
+      picks.push({ title: options?.title, items });
+      const all = items.find((item) => item.all === true);
+      if (all) return all;
+      const preset = items.find((item) => item.id === "bunko-vertical");
+      if (preset) return preset;
+      const chooseItem = items.find((item) => item.margins === "choose");
+      if (chooseItem) return chooseItem;
+      const want = marginAnswers.shift();
+      return items.find((item) => item.margin === want);
+    };
+    (window as unknown as Record<string, unknown>).showInputBox = async (
+      options?: { value?: string }
+    ) => {
+      asked.push(options ?? {});
+      return typedAuthor;
+    };
+  }
+
+  beforeEach(() => {
+    picks.length = 0;
+    asked.length = 0;
+    put("本文/第1話 出会い.txt", "　朝が来た。");
+  });
+
+  test("既定のままなら、紙の既定（文庫：上は話の見出し・下はページ番号）", async () => {
+    await exportPdf(work);
+
+    expect(exportedHtml()).toContain('data-head="episode" data-foot="page"');
+  });
+
+  test("既定の項目に、何が刷られるかを書いて見せる", async () => {
+    choose("title", "page");
+    await exportPdf(work);
+
+    const marginPick = picks.find((pick) => pick.items.some((item) => item.margins));
+    const keep = marginPick?.items.find((item) => item.margins === "default");
+    expect(keep?.description).toBe("上：話の見出し／下：ページ番号");
+  });
+
+  test("上と下を選ぶと、選んだものが刷られる", async () => {
+    choose("title", "none");
+    await exportPdf(work);
+
+    expect(exportedHtml()).toContain('data-head="title" data-foot="none"');
+    // 作者名を選んでいないので、名前は尋ねない
+    expect(asked).toHaveLength(0);
+  });
+
+  test("上と下の選択肢は、題名・話の見出し・作者名・ページ番号・なし と取りやめる", async () => {
+    choose("title", "page");
+    await exportPdf(work);
+
+    const topPick = picks.find((pick) => pick.items.some((item) => item.margin));
+    expect(topPick?.items.map((item) => item.label)).toEqual([
+      "題名",
+      "話の見出し",
+      "作者名",
+      "ページ番号",
+      "なし",
+      "$(close) 取りやめる",
+    ]);
+  });
+
+  test("作者名を選び、設計図に名前が無ければ尋ねる。尋ねた名前は保存しない", async () => {
+    choose("author", "page", "山田太郎");
+    await exportPdf(work);
+
+    expect(asked).toHaveLength(1);
+    expect(exportedHtml()).toContain('data-author="山田太郎"');
+    // 書き出したのは印刷用のHTMLだけ（設計図を作っていない）
+    const written = [...disk.keys()].filter((name) => !name.includes("本文"));
+    expect(written).toHaveLength(1);
+    expect(written[0]).toMatch(/\.html$/);
+  });
+
+  test("EPUBの設計図に作者名があれば、初めから入れて見せる", async () => {
+    put("設定/書籍/book.json", JSON.stringify({ author: "筆名A" }));
+    choose("page", "author", "筆名A");
+    await exportPdf(work);
+
+    expect(asked[0]?.value).toBe("筆名A");
+    expect(exportedHtml()).toContain('data-author="筆名A"');
+  });
+
+  test("作者名を尋ねられて取りやめたら、書き出さない", async () => {
+    choose("author", "page", undefined);
+    await exportPdf(work);
+
+    expect([...disk.keys()].some((name) => name.endsWith(".html"))).toBe(false);
+  });
+
+  test("上下の余白の選択で取りやめたら、書き出さない", async () => {
+    (window as unknown as Record<string, unknown>).showQuickPick = async (
+      items: Array<Record<string, unknown>>
+    ) => {
+      const all = items.find((item) => item.all === true);
+      if (all) return all;
+      const preset = items.find((item) => item.id === "bunko-vertical");
+      if (preset) return preset;
+      // 「取りやめる」の項目を押す（Esc で閉じたのとは別の道）
+      const cancel = items.find((item) => item.__cancel === true);
+      expect(cancel).toBeDefined();
+      return cancel;
+    };
+    await exportPdf(work);
+
+    expect([...disk.keys()].some((name) => name.endsWith(".html"))).toBe(false);
   });
 });
 
@@ -420,6 +551,8 @@ describe(".mdと.txtが混ざっても両方組まれる（実機確認リスト
  * - 0.84.0（2026-09-24）：紙1枚ずつの面に割る組み方へ変えた（設計書6.33.5 の1）。
  *   案内帯・面を並べる場所・面に割るスクリプトが加わり、改ページの指定を
  *   流し込みの本文にだけ当てるようにした
+ * - 0.84.1（2026-09-24）：上下の余白に刷るもの（ヘッダー・フッター）を足した
+ *   （設計書6.33.5 の2）。body に選んだ中身と材料が付き、案内帯に何が刷られるかが出る
  */
 const GOLDEN =
-  "e14484aeb6ae1f55b0663fa75d96275d74b85999828146eb48cb61d164d52f17";
+  "f038e058d76a0525f567ca6099232423936cd49dd35c76fca50822b1654e8a66";

@@ -45,6 +45,36 @@ import { PRINT_PAGINATE_SCRIPT } from "./printPaginate";
 /** 紙の大きさと組み方の組み合わせ */
 export type PrintPreset = "bunko-vertical" | "a5-vertical" | "a4-horizontal";
 
+/**
+ * 上下の余白（ヘッダー・フッター）に刷るもの（設計書6.33.5 の2）。
+ *
+ * 中身を入れるのは面に割るスクリプト（`printPaginate.ts` の `marginText`）。
+ * ページ番号と「その面がどの話か」は面に割ってみないと決まらないため。
+ */
+export type MarginContent = "title" | "episode" | "author" | "page" | "none";
+
+/** 選ぶ画面に並べる順と名前 */
+export const MARGIN_CONTENTS: readonly {
+  id: MarginContent;
+  label: string;
+  detail: string;
+}[] = [
+  { id: "title", label: "題名", detail: "作品の題を、どのページにも刷ります" },
+  { id: "episode", label: "話の見出し", detail: "そのページが入っている話の見出し（「第3話　雨」など）" },
+  { id: "author", label: "作者名", detail: "筆名を刷ります。公募では名前を出さない決まりのこともあります" },
+  { id: "page", label: "ページ番号", detail: "扉を数えず、本文の1ページ目を1とします" },
+  { id: "none", label: "なし", detail: "何も刷りません" },
+];
+
+export interface HeaderFooter {
+  top: MarginContent;
+  bottom: MarginContent;
+}
+
+export function marginContentLabel(id: MarginContent): string {
+  return MARGIN_CONTENTS.find((item) => item.id === id)?.label ?? id;
+}
+
 export interface PrintPresetInfo {
   id: PrintPreset;
   /** 選ぶ画面に出す名前 */
@@ -62,6 +92,14 @@ export interface PrintPresetInfo {
    * 組むと、1行に10字ほどしか入らず、行替えだらけの紙になる。
    */
   fontSize: string;
+  /**
+   * 上下の余白に刷るものの既定（作者が選ばなかったとき）。
+   *
+   * **ページ番号は下に置く**（どの紙でも）。文庫は市販の本に倣って上に
+   * 話の見出し（柱）を、A5・A4 は手元で読み返すときに何の紙か分かるよう
+   * 題名を置く。
+   */
+  headerFooter: HeaderFooter;
 }
 
 /**
@@ -78,6 +116,7 @@ export const PRINT_PRESETS: readonly PrintPresetInfo[] = [
     size: "105mm 148mm",
     vertical: true,
     fontSize: "9pt",
+    headerFooter: { top: "episode", bottom: "page" },
   },
   {
     id: "a5-vertical",
@@ -86,6 +125,7 @@ export const PRINT_PRESETS: readonly PrintPresetInfo[] = [
     size: "148mm 210mm",
     vertical: true,
     fontSize: "10pt",
+    headerFooter: { top: "title", bottom: "page" },
   },
   {
     id: "a4-horizontal",
@@ -94,6 +134,7 @@ export const PRINT_PRESETS: readonly PrintPresetInfo[] = [
     size: "210mm 297mm",
     vertical: false,
     fontSize: "10.5pt",
+    headerFooter: { top: "title", bottom: "page" },
   },
 ];
 
@@ -131,6 +172,16 @@ export interface PrintHtmlInput {
    * 省略・小説なら、これまでどおりの組み方になる（1バイトも変わらない）。
    */
   kind?: WorkKindKey;
+  /**
+   * 上下の余白に刷るもの（設計書6.33.5 の2）。省略なら紙の既定
+   * （`PrintPresetInfo.headerFooter`）。
+   */
+  headerFooter?: HeaderFooter;
+  /**
+   * 作者名。上下のどちらかに「作者名」を選んだときだけ刷られる。
+   * 省略・空なら、そこは何も刷らない。
+   */
+  author?: string;
 }
 
 /**
@@ -143,6 +194,8 @@ export function buildPrintHtml(input: PrintHtmlInput): string {
   const preset = printPreset(input.preset);
   // 題が空の作品はふつう無いが、`<title>` が空だとタブが場所の文字列になる
   const title = escapeHtml(input.workTitle.trim() || "無題");
+  const margins = input.headerFooter ?? preset.headerFooter;
+  const author = escapeHtml((input.author ?? "").trim());
 
   return [
     "<!DOCTYPE html>",
@@ -156,8 +209,10 @@ export function buildPrintHtml(input: PrintHtmlInput): string {
     "</head>",
     // 縦書きかどうかは、面に割るスクリプトが「どちらへはみ出したか」を
     // 測るのに使う（縦書きは左へ、横書きは下へはみ出す）
-    `<body data-vertical="${preset.vertical ? "1" : "0"}">`,
-    buildGuide(preset),
+    // 上下の余白に何を刷るかと、その材料（題名・作者名）もスクリプトへ渡す。
+    // 中身を入れるのはスクリプト（ページ番号と話は面に割るまで決まらない）
+    `<body data-vertical="${preset.vertical ? "1" : "0"}" data-head="${margins.top}" data-foot="${margins.bottom}" data-title="${title}" data-author="${author}">`,
+    buildGuide(preset, margins),
     // 紙1枚ずつの面は、ここへスクリプトが並べる（設計書6.33.5 の1）
     '<div id="print-pages"></div>',
     // 流し込みの本文。面に割るもとであり、スクリプトが動かなかったときの
@@ -187,12 +242,13 @@ export function buildPrintHtml(input: PrintHtmlInput): string {
  * 紙の大きさを書くのは、印刷の画面の「用紙サイズ」と突き合わせられるように
  * するため（Firefox は `@page` の大きさを見ないので、手で合わせることになる）。
  */
-function buildGuide(preset: PrintPresetInfo): string {
+function buildGuide(preset: PrintPresetInfo, margins: HeaderFooter): string {
   const [width, height] = paperSize(preset);
   return [
     '<div class="print-guide">',
     `<p class="print-guide-lead">この画面の白い面が、そのまま紙1枚ずつになります（<span id="print-page-count">面に分けています…</span>）。` +
-      `紙：${escapeHtml(preset.label)}（${width} × ${height}）</p>`,
+      `紙：${escapeHtml(preset.label)}（${width} × ${height}）。` +
+      `上の余白：${marginContentLabel(margins.top)}／下の余白：${marginContentLabel(margins.bottom)}</p>`,
     "<p>Ctrl+P で印刷の画面を開き、送信先を「PDF に保存」にしてください。" +
       "「詳細設定」の「ヘッダーとフッター」のチェックを外してください（入れたままだと、日付とファイルの場所が紙の端に刷られます）。" +
       "用紙サイズ・余白・倍率は「既定」のままにしてください。</p>",
