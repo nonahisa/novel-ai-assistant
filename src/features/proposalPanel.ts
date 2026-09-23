@@ -78,6 +78,15 @@ import { relocateQuote } from "../core/relocateQuote";
 import { revealTextLocation } from "./revealLocation";
 import { openInDefaultEditor } from "../views/openDocument";
 import { notifyDone } from "../views/notify";
+// バックアップとの違い（設計書6.99.7）。分類名は記録の見出しと同じものを使う
+import { BACKUP_DIFF_RECORD_KIND } from "../core/backupMerge";
+import {
+  applyLineBlock,
+  invertLineBlock,
+  shiftedStartLine,
+  type BackupHunkProposal,
+  type LineBlock,
+} from "../core/backupHunks";
 
 /**
  * 提案パネル（誤字脱字）。
@@ -118,8 +127,18 @@ export const EPISODE_PLOT_CONTRAST_CATEGORY = "単話プロットと本文";
 function forView(item: ProposalViewItem): ProposalViewItem {
   const shown: ProposalViewItem = {
     ...item,
-    canRecheck: !item.proposalId,
+    // **バックアップとの違いは再チェックしない**（設計書6.99.7）。AIの指摘
+    // ではなく、2つの原稿の突き合わせなので、AIに訊き直すものが無い
+    canRecheck: !item.proposalId && !item.lineBlock,
   };
+  if (item.lineBlock) {
+    // 1行を1行へ置き換えるときだけ、違うところを塗る（字下げの違いなど）。
+    // 行の増減は、行ごと並べるほうが読める
+    const block = item.lineBlock;
+    return block.local.length === 1 && block.replacement.length === 1
+      ? { ...shown, diff: diffChars(block.local[0], block.replacement[0]) }
+      : shown;
+  }
   if (!item.suggestion) return shown;
   return { ...shown, diff: diffChars(item.target, item.suggestion) };
 }
@@ -242,6 +261,29 @@ export interface ProposalViewItem {
    * 書き込みに成功した時点で控える。
    */
   appliedAt?: number;
+  /**
+   * 複数行の置き換え（バックアップとの違い。設計書6.99.7、作者の裁定 2026-09-23）。
+   *
+   * **ほかの提案は「1行の中の `target` を `suggestion` へ」の形**で、段落の
+   * 増減を表せない。これを持つ提案だけは、ファイルの `startLine` 行目から
+   * `local` の行を `replacement` の行へ置き換える（`local` が空なら足すだけ、
+   * `replacement` が空なら消すだけ）。`target`／`suggestion` には表示と記録の
+   * ために行を改行で繋いだものを入れておくが、**適用はこちらだけを見る。**
+   *
+   * ## 提案を作ってから原稿が変わったら当てない
+   *
+   * `expectedHash` は提案を作ったときのファイルのハッシュで、当てる直前の
+   * ファイルと違えば止める（実装ルール1）。**同じファイルの別の箇所を
+   * この一覧から当てたときだけ**、書いた結果のハッシュへ付け替え、行の
+   * ずれも直す（`noteBlockWritten`）——そうしないと、1か所採った瞬間に
+   * 同じ話の残りが全部「原稿が変わった」で止まる。
+   */
+  lineBlock?: {
+    startLine: number;
+    local: string[];
+    replacement: string[];
+    expectedHash: string;
+  };
 }
 
 /**
@@ -1259,6 +1301,54 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   }
 
   /**
+   * バックアップとの本文の違いを、1か所ずつ提案として並べる（設計書6.99.7。
+   * 作者の裁定、2026-09-23）。
+   *
+   * **採るかどうかは作者が箇所ごとに選ぶ。** どちらが新しいかは機械には
+   * 分からないので、まとめて適用の口は出さない（`postItems`）。
+   *
+   * 番号は「ファイル・行・並び」から作る。同じバックアップをもう一度落として
+   * 同じ違いが届いたら、まだ手を付けていない行はそのまま入れ替わる
+   * （`mergeProposals`）。
+   *
+   * @param proposals ファイルは絶対パス（`backupDrop.ts` が作品フォルダーと繋ぐ）
+   */
+  showBackupDiffs(
+    work: WorkEntry,
+    proposals: ReadonlyArray<BackupHunkProposal & { readonly filePath: string }>
+  ): IncomingCount {
+    const items: ProposalViewItem[] = proposals.map((proposal, index) => {
+      const target = proposal.local.join("\n");
+      const suggestion = proposal.backup.join("\n");
+      return {
+        id: `b:${proposal.relPath}:${proposal.startLine}:${index}`,
+        filePath: proposal.filePath,
+        fileName: path.basename(proposal.filePath),
+        // チャンクの指紋は持たない（AIの検知ではない）
+        chunkHash: "",
+        line: proposal.startLine,
+        original: target,
+        target,
+        suggestion,
+        reason: proposal.episodeLabel,
+        detail: describeBlockKind(proposal.local.length, proposal.backup.length),
+        // **確信度は無い**（機械の見立てではなく、2つの原稿の違いそのもの）。
+        // 画面にも出さない。「低」にしないのは、まとめて適用の件数から
+        // 外れた理由を「確信度が低い」と言わないため（まとめて適用は別に止める）
+        confidence: "medium",
+        status: "pending",
+        lineBlock: {
+          startLine: proposal.startLine,
+          local: [...proposal.local],
+          replacement: [...proposal.backup],
+          expectedHash: proposal.fileHash,
+        },
+      };
+    });
+    return this.replaceContents(work, BACKUP_DIFF_RECORD_KIND, { items });
+  }
+
+  /**
    * 矛盾の結果を差し替えて表示する。
    *
    * **適用の口を持たせない。** 設定と本文のどちらが正しいかは
@@ -1725,7 +1815,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
           ? this.contradictions.map(contradictionForView)
           : this.items.map(forView),
       // 設定資料の更新は、まとめて反映できる（1件ずつだと19話ぶんで手が止まる）
-      canApplyAll: !contradictionMode,
+      // **バックアップとの違いには出さない**（設計書6.99.7）。1か所ずつ選ぶもの
+      canApplyAll:
+        !contradictionMode && !this.items.some((item) => item.lineBlock),
       // **1つしか無いときはタブを出さない。** 選ぶものが無いのに
       // 場所だけ取ると、下段の狭い画面がさらに狭くなる
       categories: summaries.length > 1 ? summaries : [],
@@ -2062,8 +2154,12 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         item.filePath,
         item.line,
         // 引用の在り処は種類で違う（推敲・誤字脱字は `original`、矛盾は
-        // `excerpt`）。どちらも「本文に実在する逐語引用」である
-        proposal?.original ?? contradiction?.excerpt ?? ""
+        // `excerpt`）。どちらも「本文に実在する逐語引用」である。
+        // **バックアップとの違いは探し直さない**——複数行の引用は1行ずつの
+        // 照合に掛からず、行はこの一覧で当てるたびに直してある
+        (proposal?.lineBlock ? "" : proposal?.original) ??
+          contradiction?.excerpt ??
+          ""
       ),
       this.revealInManuscript,
       "提案パネル",
@@ -2129,8 +2225,11 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
 
     const pending = this.items.filter((item) => item.status === "pending");
     const targets = pending.filter(
-      // **修正案の無い指摘は掴まない**（推敲）。適用しても何も起きない
-      (item) => item.confidence !== "low" && Boolean(item.suggestion)
+      // **修正案の無い指摘は掴まない**（推敲）。適用しても何も起きない。
+      // **バックアップとの違いも掴まない**（設計書6.99.7）——どちらが新しいかは
+      // 機械には分からないので、1か所ずつ作者が選ぶ（作者の裁定）
+      (item) =>
+        item.confidence !== "low" && Boolean(item.suggestion) && !item.lineBlock
     );
 
     // **黙って何もしない、をやめる。**
@@ -2178,10 +2277,20 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     if (pending.length === 0) {
       return "まとめて適用できる指摘がありません（未処理の指摘がありません）。";
     }
-    const low = pending.filter((item) => item.confidence === "low").length;
-    const noFix = pending.filter((item) => !item.suggestion).length;
+    const blocks = pending.filter((item) => item.lineBlock).length;
+    const low = pending.filter(
+      (item) => !item.lineBlock && item.confidence === "low"
+    ).length;
+    const noFix = pending.filter(
+      (item) => !item.lineBlock && !item.suggestion
+    ).length;
 
     const reasons: string[] = [];
+    if (blocks > 0) {
+      reasons.push(
+        `${blocks}件はバックアップとの違いです（どちらを採るかは1か所ずつ選んでください）`
+      );
+    }
     if (noFix > 0) {
       reasons.push(
         `${noFix}件は修正案がありません（直し方は作者が決めるものです）`
@@ -2302,6 +2411,12 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     if (item.status === "applied") return;
     const work = this.work;
 
+    // バックアップとの違い（複数行の置き換え。設計書6.99.7）は別の道を通る
+    if (item.lineBlock) {
+      await this.writeLineBlock(item, work, "apply");
+      return;
+    }
+
     // **編集者モードでは本文を書き換えない。提案として置く**（設計書5.6）。
     // 作者の意向に反して勝手に書き換えられることが、構造として起きない。
     // **競合も起きない。** 編集部が触るのは提案のファイルだけである
@@ -2411,6 +2526,145 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   }
 
   /**
+   * バックアップとの違い1か所を、原稿へ当てる／当てたのを戻す（設計書6.99.7）。
+   *
+   * ## 通す安全策（実装ルール1）
+   *
+   * - 書き込みは `writeTextFilePreservingFormat` だけ（退避 → 新規作成、
+   *   文字コードと改行の保持、変わった行だけの置き換え）
+   * - **提案を作ってから原稿が変わっていたら当てない**（ハッシュの照合）。
+   *   AIの指摘と違い、行の中の語を探し直して当てにいくことはしない——
+   *   段落ごと入れ替える提案を、ずれた場所へ当てると原稿が壊れる
+   * - 当てる直前に、その行が提案を作ったときの手元の行と同じかも見る
+   *   （`applyLineBlock`）
+   *
+   * 「戻す」は同じ道の逆向きで、条件も同じ（当てたあとで原稿が変わって
+   * いたら戻さない。回復先 `.novelai-recovery` には当てる前の原稿が残る）。
+   */
+  private async writeLineBlock(
+    item: ProposalViewItem,
+    work: WorkEntry,
+    direction: "apply" | "undo"
+  ): Promise<void> {
+    const block = item.lineBlock;
+    if (!block) return;
+    // 失敗しても、印は押す前のままにする（当てられなかった／戻せなかった）
+    const stay = direction === "apply" ? "failed" : "applied";
+
+    // **編集部は原稿を書き換えない**（設計書5.6）。取り込みの側で断っているが、
+    // 一覧が残ったまま編集者モードへ切り替えることはある
+    if (isEditorMode()) {
+      this.markStatus(
+        item.id,
+        stay,
+        "編集者モードでは、原稿を書き換えません（作者の環境で選んでください）。"
+      );
+      return;
+    }
+    if (!(await this.confirmNotLocked(item.filePath, work))) return;
+
+    let file;
+    try {
+      file = await readTextFile(item.filePath);
+    } catch {
+      this.markStatus(item.id, stay, "原稿を読み込めませんでした。");
+      return;
+    }
+
+    if (file.hash !== block.expectedHash) {
+      this.markStatus(
+        item.id,
+        stay,
+        direction === "apply"
+          ? "違いを並べたあとで原稿が変わっているため、当てませんでした。" +
+              "バックアップをもう一度相談パネルへ落とすと、いまの原稿と比べ直します。"
+          : "当てたあとで原稿が変わっているため、戻しませんでした。" +
+              "当てる前の原稿は回復用の場所（.novelai-recovery）に残っています。"
+      );
+      return;
+    }
+
+    const asBlock: LineBlock = {
+      startLine: block.startLine,
+      local: block.local,
+      replacement: block.replacement,
+    };
+    const step = direction === "apply" ? asBlock : invertLineBlock(asBlock);
+    const next = applyLineBlock(file.text, step);
+    if (next === null) {
+      this.markStatus(
+        item.id,
+        stay,
+        "原稿のその行が、違いを並べたときと合わないため、書き換えませんでした。"
+      );
+      return;
+    }
+
+    const result = await writeTextFilePreservingFormat(
+      item.filePath,
+      next,
+      file,
+      file.hash
+    );
+    if (!result.ok) {
+      this.markStatus(item.id, stay, describeWriteFailure(result));
+      return;
+    }
+
+    await revertIfOpen(item.filePath);
+    await this.noteBlockWritten(item, step, next);
+    this.markStatus(item.id, direction === "apply" ? "applied" : "pending");
+
+    // **同期される編集履歴にも残す**（設計書5.6）。AIの提案ではなく、
+    // 作者が2つの原稿から選んだものなので、種別は "author"
+    await recordEdit(work, {
+      actor: "author",
+      action:
+        direction === "apply"
+          ? "バックアップとの違いを採った"
+          : "バックアップとの違いを採ったのを戻した",
+      file: item.fileName,
+      detail:
+        `${item.reason} ${block.startLine}行目から` +
+        `（手元${block.local.length}行→バックアップ${block.replacement.length}行）`,
+    });
+  }
+
+  /**
+   * この一覧から1か所を書いたあと、同じファイルの残りの提案を直す。
+   *
+   * - **行のずれ**：後ろにある箇所は、増減した行の数だけずらす
+   * - **照合の相手**：書いた結果のハッシュへ付け替える。付け替えないと、
+   *   1か所採った瞬間に同じ話の残りが全部「原稿が変わった」で止まる
+   *
+   * **書いた直後に読み直し、中身が書いたものと同じときだけ付け替える。**
+   * そのあいだに外で書き換えられていたら、残りは照合で止まるほうが正しい。
+   */
+  private async noteBlockWritten(
+    written: ProposalViewItem,
+    step: LineBlock,
+    writtenText: string
+  ): Promise<void> {
+    let hash: string | undefined;
+    try {
+      const reread = await readTextFile(written.filePath);
+      const same = (text: string) => text.replace(/\n+$/, "");
+      if (same(reread.text) === same(writtenText)) hash = reread.hash;
+    } catch {
+      // 読み直せなければ付け替えない（残りは照合で止まる）
+    }
+    for (const other of this.items) {
+      const block = other.lineBlock;
+      if (!block || !sameFilePath(other.filePath, written.filePath)) continue;
+      if (other !== written) {
+        block.startLine = shiftedStartLine(block.startLine, step);
+        other.line = block.startLine;
+      }
+      if (hash) block.expectedHash = hash;
+    }
+  }
+
+  /**
    * 作者の判断を、数日残す置き場へ足す（設計書6.96.4）。
    *
    * **追記するだけで、本文にも台帳にも触らない。** 採る・退けるの中身は
@@ -2461,6 +2715,11 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     if (!item || !this.work) return;
     if (item.status !== "applied") return;
     const work = this.work;
+
+    if (item.lineBlock) {
+      await this.writeLineBlock(item, work, "undo");
+      return;
+    }
 
     // 編集部が校閲中のファイルは、作者も触らない（適用と同じ）
     if (!(await this.confirmNotLocked(item.filePath, work))) return;
@@ -2919,6 +3178,16 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     if (!item || !this.work) return;
     const work = this.work;
 
+    /*
+      **バックアップとの違いは、見送っても何も記録しない**（設計書6.99.7）。
+      誤字脱字の「無視」の記録（`TypoDismissedHistory`）へ入れると、
+      誤字脱字の検知が同じ語を二度と指摘しなくなる——関係の無い機能に効く。
+    */
+    if (item.lineBlock) {
+      this.markStatus(id, "dismissed");
+      return;
+    }
+
     if (item.proposalId) {
       // **提案を見送ったことは、編集部にも伝わる必要がある**
       await rejectProposal(work, item.proposalId, item.fileName);
@@ -3045,6 +3314,13 @@ function describeWriteFailure(
     default:
       return "適用に失敗しました。";
   }
+}
+
+/** バックアップとの違いの種類（行を足す・消す・置き換える）を短く言う */
+function describeBlockKind(localLines: number, backupLines: number): string {
+  if (localLines === 0) return `バックアップにだけある${backupLines}行を足します`;
+  if (backupLines === 0) return `手元にだけある${localLines}行を消します`;
+  return `手元の${localLines}行を、バックアップの${backupLines}行に置き換えます`;
 }
 
 /**

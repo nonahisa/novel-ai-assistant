@@ -23,6 +23,7 @@ vi.mock("../../src/core/logger", () => ({
 }));
 
 const received: Array<{ fileName: string; bytes: Uint8Array; works: number }> = [];
+let lastDeps: Record<string, unknown> | undefined;
 let result: { message: string; recordPath?: string } | undefined;
 vi.mock("../../src/features/backupDrop", () => ({
   receiveBackup: async (
@@ -30,6 +31,7 @@ vi.mock("../../src/features/backupDrop", () => ({
     deps: { works: readonly unknown[] }
   ) => {
     received.push({ ...source, works: deps.works.length });
+    lastDeps = deps as Record<string, unknown>;
     return result;
   },
 }));
@@ -101,6 +103,16 @@ describe("拡張機能の側", () => {
       message: "「氷の街」へ取り込みました：章2",
       canOpenRecord: false,
     });
+  });
+
+  test("**提案パネルへ並べる口を渡されたら、判断へそのまま渡す**（設計書6.99.7）", async () => {
+    const panel = makePanel();
+    const show = () => undefined;
+    panel.setBackupProposals(show);
+
+    await send(panel, { type: "backupFile", name: "N5078JI.zip", bytes: new Uint8Array([1]) });
+
+    expect(lastDeps?.showProposals).toBe(show);
   });
 
   test("ArrayBuffer で届いても受け取る", async () => {

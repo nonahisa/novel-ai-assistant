@@ -10,6 +10,7 @@ import {
   summarizeMergeResult,
   type LocalManuscriptSource,
 } from "../../src/core/backupMerge";
+import { countProposableHunks, hunkProposalsOf } from "../../src/core/backupHunks";
 import { inspectWorkBackup } from "../../src/core/workZip";
 import {
   emptyPostingLedger,
@@ -261,10 +262,90 @@ describe("本文の違い", () => {
         hunks: [
           { localLine: 1, local: ["　手元で直した検査の場面。"], backup: ["　検査が続く。"] },
         ],
+        // 区切り行・【エピソードタイトル】・題・空行・【本文】の5行の下から本文
+        bodyLineOffset: 5,
+        // 手元のハッシュを渡していない（読み手が渡す。無ければ提案にしない）
+        fileHash: null,
       },
     ]);
     expect(result.sameBodies).toBe(2);
     expect(describeMergePlan(result).join("\n")).toContain("原稿は書き換えません");
+  });
+
+  it("**違い1か所ずつを、ファイルの行番号つきの提案にできる**（作者の裁定、2026-09-23）", () => {
+    const local = EPISODES.map((spec) =>
+      spec.n === 1
+        ? // 字下げの違い（1行目）と、段落が1つ多い（手元にだけある）の2か所
+          { ...spec, body: ["目が覚めた。", "　白い天井だった。", "　手元で足した段落。"] }
+        : spec
+    );
+    const sources = splitSources(local).map((source) => ({ ...source, hash: "h-local" }));
+
+    const result = plan(sources);
+
+    expect(result.bodyDiffs).toHaveLength(1);
+    const proposals = hunkProposalsOf(result.bodyDiffs[0]);
+    expect(proposals).toEqual([
+      {
+        relPath: "本文/0001.txt",
+        episodeLabel: "1話　目覚め",
+        // 区切り行・【第1章】・章題・空行・【エピソードタイトル】・題・空行・【本文】の次
+        startLine: 9,
+        local: ["目が覚めた。"],
+        backup: ["　目が覚めた。"],
+        fileHash: "h-local",
+      },
+      {
+        relPath: "本文/0001.txt",
+        episodeLabel: "1話　目覚め",
+        startLine: 11,
+        local: ["　手元で足した段落。"],
+        backup: [],
+        fileHash: "h-local",
+      },
+    ]);
+    // ファイルのその行に、ほんとうに手元の行がある
+    const fileLines = (sources[0].text ?? "").split("\n");
+    expect(fileLines[8]).toBe("目が覚めた。");
+    expect(fileLines[10]).toBe("　手元で足した段落。");
+
+    expect(describeMergePlan(result, { proposals: true }).join("\n")).toContain(
+      "・本文の違い：1話（2か所）。提案パネルに並べます"
+    );
+  });
+
+  it("手元が合本でも、ファイルの中のその話の位置へ番号を直す", () => {
+    const local = EPISODES.map((spec) =>
+      spec.n === 3 ? { ...spec, body: ["　外は暗かった。"] } : spec
+    );
+    const sources = collectedSource(local).map((source) => ({ ...source, hash: "h" }));
+
+    const result = plan(sources);
+    const [proposal] = hunkProposalsOf(result.bodyDiffs[0]);
+
+    const fileLines = (sources[0].text ?? "").split("\n");
+    expect(fileLines[proposal.startLine - 1]).toBe("　外は暗かった。");
+    expect(proposal.backup).toEqual(["　外は明るかった。"]);
+  });
+
+  it("本文の在り処を1か所に決められなければ、提案にせず記録にだけ残すと言う", () => {
+    const local = EPISODES.map((spec) =>
+      spec.n === 2 ? { ...spec, body: ["　手元の文。"] } : spec
+    );
+    const sources = splitSources(local).map((source) =>
+      source.relPath === "本文/0002.txt"
+        ? // 同じ本文が2度書いてあるファイル（どちらを直すか決められない）
+          { ...source, text: `${source.text}\n【後書き】\n　手元の文。`, hash: "h" }
+        : { ...source, hash: "h" }
+    );
+
+    const result = plan(sources);
+
+    expect(result.bodyDiffs[0].bodyLineOffset).toBeNull();
+    expect(hunkProposalsOf(result.bodyDiffs[0])).toEqual([]);
+    const text = describeMergePlan(result, { proposals: true }).join("\n");
+    expect(text).not.toContain("提案パネルに並べます");
+    expect(text).toContain("違いを「バックアップとの違い」に書き出します");
   });
 
   it("手元が合本でも、話ごとに比べる", () => {
@@ -297,6 +378,8 @@ describe("本文の違い", () => {
     expect(result.conflicted).toEqual(["本文/0002.txt"]);
     expect(result.bodyDiffs).toEqual([]);
     expect(describeMergePlan(result).join("\n")).toContain("競合");
+    // **競合の印のあるファイルには提案を作らない**（違いとして数えないので、並ぶものが無い）
+    expect(countProposableHunks(result.bodyDiffs)).toBe(0);
   });
 
   it("同じ番号の話が手元に2つあれば、どちらとも比べない", () => {
@@ -368,13 +451,28 @@ describe("見せる言葉", () => {
     );
   });
 
+  it("提案パネルに並べたときは、並べた数と「まだ書き換えていない」を言う", () => {
+    expect(
+      summarizeMergeResult({
+        workTitle: "コールドスリープ",
+        chapters: 0,
+        likesEpisodes: 0,
+        workStats: false,
+        bodyDiffs: 2,
+        recorded: true,
+        proposals: 5,
+      })
+    ).toBe(
+      "「コールドスリープ」へ取り込みました：本文の違い2話（5か所を提案パネルに並べました。原稿はまだ書き換えていません）"
+    );
+  });
+
   it("違いの記録は、手元を -、バックアップを + で並べる", () => {
     const record = buildBackupDiffRecord({
       workTitle: "コールドスリープ",
       sourceName: "N5078JI.zip",
       diffs: [
         {
-          order: 2,
           label: "2話　検査",
           relPath: "本文/0002.txt",
           hunks: [{ localLine: 1, local: ["　手元"], backup: ["　サイト"] }],

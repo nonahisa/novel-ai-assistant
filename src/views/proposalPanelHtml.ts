@@ -269,6 +269,27 @@ body.show-low .issue.low { display: flex; }
 */
 .actions .keep-word { margin-inline-start: 16px; }
 .status-detail { font-size: 12px; color: var(--vscode-errorForeground); }
+/*
+  バックアップとの違い（設計書6.99.7）。**行ごと並べる。** 段落の増減が
+  あるので、1行の矢印では何が足されて何が消えるのかが見えない。
+  字下げ（行頭の全角空白）の違いも見えるよう、空白をそのまま出す
+*/
+.block-side { margin: 4px 0; font-size: 13px; }
+.block-side .side-label { font-size: 11px; color: var(--vscode-descriptionForeground); }
+.block-side .lines {
+  white-space: pre-wrap;
+  font-family: var(--vscode-editor-font-family, monospace);
+  border-left: 3px solid var(--vscode-panel-border);
+  padding-left: 8px;
+}
+.block-side.local .lines {
+  border-left-color: var(--vscode-diffEditor-removedTextBackground, rgba(255, 90, 90, 0.6));
+}
+.block-side.backup .lines {
+  border-left-color: var(--vscode-diffEditor-insertedTextBackground, rgba(76, 175, 80, 0.6));
+}
+.block-side .none { opacity: 0.7; font-style: italic; }
+.issue.applied .block-side { opacity: 0.55; }
 /* 矛盾。置き換えではなく食い違いを並べる */
 .contradiction .quote {
   font-size: 12px;
@@ -855,6 +876,8 @@ function renderDiff(item) {
 function renderItem(item) {
   // 矛盾は形が違う。並べるものが「置き換え」ではなく「食い違い」である
   if (item.excerpt !== undefined) return renderContradiction(item);
+  // バックアップとの違いも形が違う。1行の中の置き換えではなく、行ごとの置き換え
+  if (item.lineBlock) return renderBlock(item);
   // 設定資料の更新も形が違う。行と文字ではなくレコードと項目である
   if (item.changes !== undefined) return renderRecordUpdate(item);
 
@@ -952,6 +975,62 @@ function renderItem(item) {
     (item.status === 'applied'
       ? '<div class="actions">' +
         '<button class="secondary" data-action="undo" data-id="' + item.id + '" title="本文をこの指摘の前へ戻します">戻す</button>' +
+        '</div>'
+      : '') +
+    '</div>'
+  );
+}
+
+/**
+ * バックアップとの違い1か所（設計書6.99.7）。
+ *
+ * **確信度は出さない。** 機械の見立てではなく、2つの原稿の違いそのもので
+ * ある。押せるのは「バックアップを採る」「手元のまま」と、採ったあとの
+ * 「戻す」だけ（再チェックも「今後直さない」も、この形には意味が無い）。
+ */
+function renderBlock(item) {
+  const block = item.lineBlock;
+  const classes = ['issue', 'block'];
+  if (item.status === 'applied') classes.push('applied');
+  if (item.status === 'dismissed') classes.push('dismissed');
+  const canAct = item.status === 'pending' || item.status === 'failed';
+  const statusText = item.status === 'applied'
+    ? '<span class="reason">バックアップを採りました</span>'
+    : item.status === 'failed' ? '<span class="reason">' + STATUS_LABEL.failed + '</span>' : '';
+  const statusDetail = item.statusDetail
+    ? '<div class="status-detail">' + escapeHtml(item.statusDetail) + '</div>'
+    : '';
+  // 1行を1行へ置き換えるときだけ、違うところを塗る（拡張機能側で区間分け済み）
+  const single = item.diff && block.local.length === 1 && block.replacement.length === 1;
+  const side = (kind, label, lines, diffKind) =>
+    '<div class="block-side ' + kind + '"><div class="side-label">' + label + '</div>' +
+    '<div class="lines">' +
+    (lines.length === 0
+      ? '<span class="none">（行なし）</span>'
+      : single ? diffSide(item.diff, diffKind, lines[0])
+               : lines.map((line) => escapeHtml(line)).join('\\n')) +
+    '</div></div>';
+  return (
+    '<div class="' + classes.join(' ') + '">' +
+    '<div class="issue-head">' +
+    '<span class="location" data-action="jump" data-id="' + item.id + '">' +
+    escapeHtml(item.fileName) + ' ' + item.line + '行目</span>' +
+    '<span class="reason">' + escapeHtml(item.reason) + '</span>' +
+    statusText +
+    '</div>' +
+    side('local', '手元', block.local, 'from') +
+    side('backup', 'バックアップ', block.replacement, 'to') +
+    '<div class="reason">' + escapeHtml(item.detail || '') + '</div>' +
+    statusDetail +
+    (canAct
+      ? '<div class="actions">' +
+        '<button data-action="apply" data-id="' + item.id + '" title="この1か所だけ、原稿をバックアップの文にします">バックアップを採る</button>' +
+        '<button class="secondary" data-action="dismiss" data-id="' + item.id + '" title="原稿はこのままにします">手元のまま</button>' +
+        '</div>'
+      : '') +
+    (item.status === 'applied'
+      ? '<div class="actions">' +
+        '<button class="secondary" data-action="undo" data-id="' + item.id + '" title="原稿をこの1か所だけ手元の文へ戻します">戻す</button>' +
         '</div>'
       : '') +
     '</div>'

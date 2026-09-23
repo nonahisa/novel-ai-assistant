@@ -319,6 +319,41 @@ describe("既にある作品に当たったとき", () => {
     expect(manuscriptSnapshot()).toEqual(before);
   });
 
+  it("**提案パネルへの口があれば、違い1か所ずつを並べる（原稿はまだ書き換えない）**", async () => {
+    putSplitManuscript(
+      SPECS.map((spec) => (spec.n === 2 ? { ...spec, body: "　手元で直した場面。" } : spec))
+    );
+    putNcodeLedger();
+    const before = manuscriptSnapshot();
+    const shown: Array<{ work: WorkEntry; proposals: unknown[] }> = [];
+
+    const result = await receiveBackup(
+      { fileName: "N5078JI.zip", bytes: narouZip() },
+      {
+        works: [WORK],
+        showProposals: (work, proposals) => shown.push({ work, proposals: [...proposals] }),
+      }
+    );
+
+    expect(modals[0].detail).toContain("・本文の違い：1話（1か所）。提案パネルに並べます");
+    expect(shown).toHaveLength(1);
+    expect(shown[0].work).toBe(WORK);
+    expect(shown[0].proposals).toEqual([
+      expect.objectContaining({
+        filePath: paths.join(MANUSCRIPT, "0002.txt"),
+        episodeLabel: "2話　検査",
+        // 区切り行・【エピソードタイトル】・題・空行・【本文】の次（6行目）
+        startLine: 6,
+        local: ["　手元で直した場面。"],
+        backup: ["　検査が続く。"],
+      }),
+    ]);
+    expect(result?.message).toContain("1か所を提案パネルに並べました");
+    // 「違いを見る」の記録も残す
+    expect(result?.recordPath).toBeDefined();
+    expect(manuscriptSnapshot()).toEqual(before);
+  });
+
   it("押さなければ、台帳も記録も書かない", async () => {
     putSplitManuscript();
     putNcodeLedger();

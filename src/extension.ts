@@ -2042,6 +2042,12 @@ export async function activate(
       picked
     );
   });
+  // 相談パネルへ落とされたバックアップと原稿の違いを、1か所ずつ提案パネルへ
+  // 並べる（設計書6.99.7。作者の裁定、2026-09-23）。**提案パネルの実体は
+  // ここにしか無い**ので、取り込みの口と同じ形で渡す
+  workChatPanel.setBackupProposals((work, proposals) => {
+    proposalPanel.showBackupDiffs(work, proposals);
+  });
   /*
     画面で指しながらの案内（設計書6.104。第1段）。
 

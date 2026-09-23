@@ -176,7 +176,7 @@ import {
   BACKUP_FILE_EXTENSIONS,
   tooLargeMessage,
 } from "../core/backupFileKinds";
-import type { ImportAsNewWork } from "./backupDrop";
+import type { ImportAsNewWork, ShowBackupProposals } from "./backupDrop";
 import { showBackupOpenDialog } from "./backupPickFolder";
 
 /**
@@ -697,6 +697,20 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
   setBackupImporter(importer: ImportAsNewWork): void {
     this.backupImporter = importer;
+  }
+
+  /**
+   * バックアップとの本文の違いを、提案パネルへ並べる口（設計書6.99.7。
+   * 作者の裁定、2026-09-23）。
+   *
+   * **提案パネルの実体は `extension.ts` にしか無い**ので、`setBackupImporter`
+   * と同じ形で渡してもらう。渡されていないあいだは、違いを記録へ書き出して
+   * 「違いを見る」で開くだけ（これまでどおり）。
+   */
+  private backupProposals: ShowBackupProposals | undefined;
+
+  setBackupProposals(show: ShowBackupProposals): void {
+    this.backupProposals = show;
   }
 
   /** バックアップを捌いている最中か。**2つ同時に落とされても1つずつ** */
@@ -1549,7 +1563,11 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       const { receiveBackup } = await import("./backupDrop.js");
       const result = await receiveBackup(
         { fileName, bytes },
-        { works: this.registry.list(), importAsNew: this.backupImporter }
+        {
+          works: this.registry.list(),
+          importAsNew: this.backupImporter,
+          showProposals: this.backupProposals,
+        }
       );
       if (!result) {
         this.postAll({ type: "note", message: "バックアップの取り込みを取りやめました。" });

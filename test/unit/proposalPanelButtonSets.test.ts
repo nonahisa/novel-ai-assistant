@@ -66,6 +66,7 @@ const { renderItem } = ((): { renderItem: Render } => {
     extractFunction(html, "renderRecordUpdate"),
     extractFunction(html, "renderContradiction"),
     extractFunction(html, "canKeep"),
+    extractFunction(html, "renderBlock"),
     extractFunction(html, "renderItem"),
     "return { renderItem: renderItem };",
   ].join("\n");
@@ -166,6 +167,60 @@ describe("誤字脱字・推敲に出るボタン", () => {
 
   test("無視したあとは、押せるボタンが無い", () => {
     expect(buttonsOf(typoIssue({ status: "dismissed" }))).toEqual([]);
+  });
+});
+
+describe("バックアップとの違い（複数行の置き換え。設計書6.99.7）に出るボタン", () => {
+  function block(extra: Record<string, unknown> = {}) {
+    return {
+      id: "b1",
+      fileName: "0002.txt",
+      line: 8,
+      confidence: "medium",
+      status: "pending",
+      target: "　手元の段落。",
+      suggestion: "",
+      original: "　手元の段落。",
+      reason: "2話　検査",
+      detail: "手元にだけある1行を消します",
+      lineBlock: {
+        startLine: 8,
+        local: ["　手元の段落。"],
+        replacement: [],
+        expectedHash: "h",
+      },
+      ...extra,
+    };
+  }
+
+  test("バックアップを採る／手元のまま（再チェックも「今後直さない」も出さない）", () => {
+    // 修正案（suggestion）が空でも「本文を見る」にしない——行を消すのも1つの案である
+    expect(buttonsOf(block({ canRecheck: false }))).toEqual([
+      "バックアップを採る",
+      "手元のまま",
+    ]);
+  });
+
+  test("採ったあとは「戻す」だけ", () => {
+    expect(buttonsOf(block({ status: "applied" }))).toEqual(["戻す"]);
+  });
+
+  test("手元とバックアップの行を、行ごと並べる（行の無い側は「行なし」）", () => {
+    const rendered = renderItem(
+      block({
+        lineBlock: {
+          startLine: 8,
+          local: [],
+          replacement: ["　足す1行目。", "　足す2行目。"],
+          expectedHash: "h",
+        },
+      })
+    );
+
+    expect(rendered).toContain("（行なし）");
+    expect(rendered).toContain("　足す1行目。\n　足す2行目。");
+    // 確信度は出さない（機械の見立てではない）
+    expect(rendered).not.toContain("確信度");
   });
 });
 

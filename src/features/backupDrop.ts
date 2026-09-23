@@ -22,6 +22,7 @@ import {
   type BackupMergePlan,
   type LocalManuscriptSource,
 } from "../core/backupMerge";
+import { hunkProposalsOf, type BackupHunkProposal } from "../core/backupHunks";
 import { episodePathFor } from "../core/bookStore";
 import { ChapterStore } from "../core/chapterStore";
 import { logFailure, logStep, useLogFile } from "../core/logger";
@@ -67,13 +68,35 @@ import type { PickedBackup } from "./importWorkFromZip";
  *
  * ## 原稿は書き換えない
  *
- * 本文の違いは数えて、**違いを記録に書き出すだけ**である（理由は
- * `core/backupMerge.ts`）。書き込むのは章立ての台帳と投稿状態の台帳だけで、
- * どちらもハッシュ照合つきの保存口（`ChapterStore`・`PostingStore`）を通す。
+ * 本文の違いは数えて記録に書き出し、**違い1か所ずつを提案パネルへ並べる**
+ * （作者の裁定、2026-09-23。理由は `core/backupMerge.ts`）。採るかどうかは
+ * 提案パネルで作者が選び、書き込みもそちらが行う。ここで書き込むのは章立ての
+ * 台帳と投稿状態の台帳だけで、どちらもハッシュ照合つきの保存口
+ * （`ChapterStore`・`PostingStore`）を通す。
  */
 
 /** 新しい作品として取り込む口（`extension.ts` の登録の道を持っている側が渡す） */
 export type ImportAsNewWork = (picked: PickedBackup) => Promise<void>;
+
+/**
+ * 本文の違いを提案パネルへ並べる口（設計書6.99.7。作者の裁定、2026-09-23）。
+ *
+ * **提案パネルの実体は `extension.ts` にしか無い**ので、相談パネルからは
+ * 直に届かない。`ImportAsNewWork` と同じ形で、持っている側から渡してもらう。
+ */
+export type ShowBackupProposals = (
+  work: WorkEntry,
+  proposals: readonly (BackupHunkProposal & { readonly filePath: string })[]
+) => void;
+
+/** `receiveBackup` へ渡す、拡張機能の側の口 */
+export interface BackupDropDeps {
+  readonly works: readonly WorkEntry[];
+  /** 新しい作品として取り込む口。渡されなければメニューの取り込みを開く */
+  readonly importAsNew?: ImportAsNewWork;
+  /** 本文の違いを提案パネルへ並べる口。渡されなければ記録へ書き出すだけ */
+  readonly showProposals?: ShowBackupProposals;
+}
 
 /** 相談パネルに出す結果 */
 export interface BackupDropResult {
@@ -90,11 +113,7 @@ export interface BackupDropResult {
  */
 export async function receiveBackup(
   source: { readonly fileName: string; readonly bytes: Uint8Array },
-  deps: {
-    readonly works: readonly WorkEntry[];
-    /** 新しい作品として取り込む口。渡されなければメニューの取り込みを開く */
-    readonly importAsNew?: ImportAsNewWork;
-  }
+  deps: BackupDropDeps
 ): Promise<BackupDropResult | undefined> {
   // **編集部は取り込まない**（設計書5.6）。「バックアップから取り込む」は
   // 編集者モードで使えない操作なので、持ち込みの口からも開かない
@@ -162,7 +181,7 @@ export async function receiveBackup(
     logStep("相談パネル：バックアップを新しい作品として取り込む道へ回しました");
     return importAsNewWork(picked, deps.importAsNew);
   }
-  return mergeIntoWork(target.work, target.by, identity, picked, matchNote);
+  return mergeIntoWork(target.work, target.by, identity, picked, matchNote, deps);
 }
 
 /* ── どの作品に当たるか ───────────────────────────────── */
@@ -352,7 +371,8 @@ async function mergeIntoWork(
   identity: BackupIdentity,
   picked: PickedBackup,
   /** 照合の結果（保管庫の記録へ書いたものと同じ一文）。取り込み先の記録にも残す */
-  matchNote: string
+  matchNote: string,
+  deps: BackupDropDeps
 ): Promise<BackupDropResult | undefined> {
   useLogFile(work.folderPath);
   // **取り込み先の記録だけで経緯が追えるようにする。** 照合の一文は作品が
@@ -397,6 +417,7 @@ async function mergeIntoWork(
     readAt: new Date().toISOString(),
   });
 
+  const describeOptions = { proposals: deps.showProposals !== undefined };
   const heading =
     by === "chosen"
       ? `「${work.title}」へ取り込みますか？`
@@ -407,7 +428,11 @@ async function mergeIntoWork(
     // 作者が確かめられるように）。押すものは無いので、知らせるだけにする
     void vscode.window.showInformationMessage(heading.replace("取り込みますか？", ""), {
       modal: true,
-      detail: ["足すものはありませんでした。", "", ...describeMergePlan(plan)].join("\n"),
+      detail: [
+        "足すものはありませんでした。",
+        "",
+        ...describeMergePlan(plan, describeOptions),
+      ].join("\n"),
     });
     logStep(`相談パネル：「${work.title}」に足すものはありませんでした`);
     return { message: `「${work.title}」に足すものはありませんでした。` };
@@ -420,7 +445,7 @@ async function mergeIntoWork(
       detail: [
         `取り込む元：${path.basename(picked.fileName)}`,
         "",
-        ...describeMergePlan(plan),
+        ...describeMergePlan(plan, describeOptions),
       ].join("\n"),
     },
     "取り込む"
@@ -430,12 +455,18 @@ async function mergeIntoWork(
     return undefined;
   }
 
-  return applyMergePlan(work, picked, plan, {
-    chapterStore,
-    chapterSet,
-    postingStore,
-    ledger,
-  });
+  return applyMergePlan(
+    work,
+    picked,
+    plan,
+    {
+      chapterStore,
+      chapterSet,
+      postingStore,
+      ledger,
+    },
+    deps
+  );
 }
 
 /**
@@ -448,8 +479,13 @@ async function readLocalSources(
   const sources: LocalManuscriptSource[] = [];
   for (const episode of scan.episodes) {
     let text: string | null = null;
+    let hash: string | undefined;
     try {
-      text = (await readTextFile(episode.filePath)).text;
+      const file = await readTextFile(episode.filePath);
+      text = file.text;
+      // **読んだときのハッシュを持ち回る**（設計書6.99.7）。違いを提案にしたとき、
+      // 当てる直前にこれと照らす——並べてから原稿が変わっていたら当てない
+      hash = file.hash;
     } catch (error) {
       logFailure("相談パネル：バックアップと比べる原稿を読めなかった", {
         ファイル: episode.filePath,
@@ -462,6 +498,7 @@ async function readLocalSources(
         .relative(scan.manuscriptDir, episode.filePath)
         .replace(/\\/g, "/"),
       text,
+      ...(hash === undefined ? {} : { hash }),
     });
   }
   return sources;
@@ -480,7 +517,8 @@ async function applyMergePlan(
     chapterSet: ChapterSet | null;
     postingStore: PostingStore;
     ledger: PostingLedger | null;
-  }
+  },
+  deps: BackupDropDeps
 ): Promise<BackupDropResult> {
   const failures: string[] = [];
 
@@ -538,6 +576,34 @@ async function applyMergePlan(
   }
 
   /*
+    **違い1か所ずつを提案パネルに並べる**（作者の裁定、2026-09-23）。
+    ここでは原稿に1文字も触らない——採るかどうかは提案パネルで作者が
+    箇所ごとに選び、書き込みはそちら（ハッシュの照合つき）が行う。
+    位置を決められなかった違いは提案にしない（記録にだけ残る）。
+  */
+  let proposals = 0;
+  if (deps.showProposals && plan.bodyDiffs.length > 0) {
+    const hunks = plan.bodyDiffs.flatMap((diff) =>
+      hunkProposalsOf(diff).map((proposal) => ({
+        ...proposal,
+        filePath: path.join(work.folderPath, proposal.relPath),
+      }))
+    );
+    if (hunks.length > 0) {
+      try {
+        deps.showProposals(work, hunks);
+        proposals = hunks.length;
+      } catch (error) {
+        failures.push("提案パネルへの並べ");
+        logFailure("相談パネル：バックアップとの違いを提案パネルへ並べられなかった", {
+          作品: work.title,
+          詳細: messageOf(error),
+        });
+      }
+    }
+  }
+
+  /*
     **取り込み先の記録に、何を足したかを残す**（2026-09-23、実機）。
     以前は照合の1行しか書かず、しかもそれが別の作品の記録へ落ちていたので、
     取り込んだ先には成功したことも足したものも残っていなかった。
@@ -551,6 +617,7 @@ async function applyMergePlan(
       `作品全体の評価${stats.work ? "あり" : "なし"}`,
       `作品ID${wroteProfile ? "を書いた" : "は書かず"}`,
       `本文の違い${plan.bodyDiffs.length}話${recordPath ? `（記録：${recordPath}）` : ""}`,
+      `提案パネルへ${proposals}か所`,
       ...(failures.length > 0 ? [`書けなかったもの：${failures.join("・")}`] : []),
     ].join("・")
   );
@@ -562,6 +629,7 @@ async function applyMergePlan(
     workStats: stats.work,
     bodyDiffs: plan.bodyDiffs.length,
     recorded: recordPath !== undefined,
+    proposals,
   });
   return {
     message:
