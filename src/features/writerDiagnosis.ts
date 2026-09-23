@@ -81,6 +81,14 @@ export interface WriterDiagnosisDeps {
     set(profile: AdviceProfile): Promise<void>;
   };
   /**
+   * 相談でいま実際に使う助言方針（相談の対象の作品の `getEffective`）。
+   *
+   * **「いま：」はこちらで出す**（点検、2026-09-23）。既定を出していた頃は、
+   * 相談の推定で作品の値が動いていると、画面と相談で違うタイプが出ていた。
+   * 渡されなければ既定を出す（試験・作品が1つも無いとき）。
+   */
+  adviceInUse?(): AdviceProfile | undefined;
+  /**
    * 6.101 の作者自身の読者タイプ（作者ごとに1つ）。
    *
    * **作家タイプ診断に入口をまとめた**（作者の裁定、2026-09-23）ので、
@@ -173,6 +181,26 @@ export async function runWriterDiagnosis(
 }
 
 /**
+ * 助言の受け方の「いま：」。**相談で実際に使うタイプを出す。**
+ *
+ * 相談の推定で動いて、作者が答えたときのタイプと違っていれば、答えたときの
+ * タイプも添える——黙って推定のほうだけ出すと、「そう答えた覚えは無い」に
+ * なる。答え直せば相談にも届く（`effectiveAdviceProfile`）。
+ */
+function describeAdviceNow(
+  inUse: AdviceProfile | undefined,
+  answered: AdviceProfile | undefined
+): string | undefined {
+  if (!inUse) return undefined;
+  const now = ADVICE_TYPES[resolveAdviceType(inUse.scores)].label;
+  if (!answered) return `いま：${now}`;
+  const then = ADVICE_TYPES[resolveAdviceType(answered.scores)].label;
+  return now === then
+    ? `いま：${now}`
+    : `いま：${now}（相談の中で推定が動きました。答えたときは${then}）`;
+}
+
+/**
  * 何を答えるかを選ぶ。
  *
  * **数を先に言う**（「書き方（5問）」）。押す前に数を約束しないのは
@@ -200,9 +228,7 @@ async function choosePart(
       },
       {
         label: `$(comment-discussion) 助言の受け方（${ADVICE_QUESTIONS.length}問）`,
-        description: advice
-          ? `いま：${ADVICE_TYPES[resolveAdviceType(advice.scores)].label}`
-          : undefined,
+        description: describeAdviceNow(deps.adviceInUse?.() ?? advice, advice),
         detail:
           "同じ助言でも、書き手によって正反対の意味で届きます。相談でのAIの言い方の出発点を決めます",
         choice: "advice" as const,
@@ -322,7 +348,10 @@ function announceAdvice(deps: WriterDiagnosisDeps): void {
   const type = ADVICE_TYPES[resolveAdviceType(profile.scores)];
   void vscode.window.showInformationMessage(
     `助言の受け方：${type.label}。${type.summary}` +
-      "（相談のたびに、このタイプ向けの方針だけをAIに渡します。作品ごとに決めた方針があれば、そちらが先です）"
+      // **答え直しは、どの作品の相談にも届く**（2026-09-23）。以前は
+      // 「作品ごとに決めた方針があれば、そちらが先」で、相談の推定で
+      // 作品に写しができていると答え直しが届かなかった
+      "（相談のたびに、このタイプ向けの方針だけをAIに渡します。これまで作品ごとに持っていた方針や相談での推定より、いま答えたものが先になります）"
   );
 }
 

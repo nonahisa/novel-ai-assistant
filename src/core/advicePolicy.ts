@@ -491,6 +491,70 @@ export function isDiagnosisStale(updatedAt: string, now: Date): boolean {
 }
 
 /**
+ * 作品の方針と作者の既定のうち、相談で実際に使うもの（設計書6.90.2）。
+ *
+ * ## 答えた日の新しいほうが勝つ（点検、2026-09-23）
+ *
+ * 相談で推定が一度でも動くと、その作品に既定の写しができる
+ * （`workChatPanel.updateAdvicePolicy`）。以前は「作品に値があれば必ず
+ * そちら」だったので、**作者が既定を答え直しても、写しのある作品には
+ * 二度と届かなかった**——0.79.0 で作品ごとの入口を外したので、写しを
+ * 消す手段も作者からは見えない。
+ *
+ * そこで `updatedAt`（**作者が9問に答えた日**）を比べる。推定はこの日を
+ * 動かさないので、自動の写しは写した元の既定と同じ日付を持つ。
+ *
+ * - 既定のほうが**後に**答えられている → 既定を使う
+ * - 同じ日付（写しのあとに推定で動いただけ）・作品のほうが新しい → 作品を使う
+ * - どちらかの日付が読めない → 作品を使う（決められないときは手元を動かさない）
+ *
+ * ## 推定で動いた分は捨てる
+ *
+ * 既定が勝つとき、作品の値の**点数の動き（推定分）は乗せ直さない**。
+ * 6.86.8 の「やり直すと、推定で動いたぶんは自己申告の値に戻る（固定したい
+ * ときの手段でもある）」と同じ扱いで、作者がいま答えた値を出発点にする。
+ * 古い答えの上で積んだ推定を新しい答えへ足すと、いま答えたことが半分しか
+ * 効かない。
+ *
+ * **調子（受容度・自信度）だけは、新しいほうを引き継ぐ。** 調子は9問では
+ * 聞かない値で（6.86.2）、答え直しても分からない。既定の答え直し
+ * （`writerDiagnosis` の `runAdviceAnswers`）も前の調子を引き継いでいる。
+ * 捨てると、答え直した直後から「受け取れる人」扱いに戻ってしまう。
+ *
+ * **読むだけで、どちらも書き換えない。** 次に推定が届いたとき、勝ったほうを
+ * 元に作品の値が書き直される（そのとき写しは新しい既定の日付を持つ）。
+ */
+export function effectiveAdviceProfile(
+  own: AdviceProfile | undefined,
+  fallback: AdviceProfile | undefined,
+): AdviceProfile | undefined {
+  if (!own) return fallback;
+  if (!fallback) return own;
+  if (!isLaterDate(fallback.updatedAt, own.updatedAt)) return own;
+
+  const state = newerState(fallback.state, own.state);
+  return state === fallback.state ? fallback : { ...fallback, state };
+}
+
+/** `later` のほうが後か。**どちらかが読めなければ false** */
+function isLaterDate(later: string, earlier: string): boolean {
+  const a = Date.parse(later);
+  const b = Date.parse(earlier);
+  if (Number.isNaN(a) || Number.isNaN(b)) return false;
+  return a > b;
+}
+
+/** 新しいほうの調子。同じか決められなければ `primary` を残す */
+function newerState(
+  primary: AdviceState | undefined,
+  other: AdviceState | undefined,
+): AdviceState | undefined {
+  if (!other) return primary;
+  if (!primary) return other;
+  return isLaterDate(other.updatedAt, primary.updatedAt) ? other : primary;
+}
+
+/**
  * 診断した日（YYYY-MM-DD）。読めなければ undefined。
  *
  * **作者の時計の日付にする。** 以前は UTC の日付だったので、日本では

@@ -4503,6 +4503,21 @@ export async function activate(
         get: () => advicePolicies.getDefault(),
         set: (profile: AdviceProfile) => advicePolicies.setDefault(profile),
       },
+      /*
+        **「いま：」は相談で実際に使うものを出す**（点検、2026-09-23）。
+        相談の対象の作品（開いているファイル、無ければ相談で選んだ作品）、
+        それも無ければ登録が1作だけのときのその作品で引く。作品が決まらなければ
+        既定——相談も、作品が決まらないときは既定を使う
+      */
+      adviceInUse: () => {
+        const works = registry.list();
+        const id =
+          workChatPanel.currentWorkId() ??
+          (works.length === 1 ? works[0].id : undefined);
+        return id
+          ? advicePolicies.getEffective(id)
+          : advicePolicies.getDefault();
+      },
       // **読者としての好み（6.101）も、作家タイプ診断から答えられる**
       // （作者の裁定、2026-09-23。診断の入口を1つにした）
       authorReader: {

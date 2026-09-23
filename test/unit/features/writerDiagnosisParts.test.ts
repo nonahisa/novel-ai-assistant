@@ -3,7 +3,13 @@ import { runWriterDiagnosis } from "../../../src/features/writerDiagnosis";
 import { WriterProfileStore } from "../../../src/core/writerProfileStore";
 import { AdvicePolicyStore } from "../../../src/core/advicePolicyStore";
 import { AuthorReaderTypeStore } from "../../../src/core/authorReaderTypeStore";
-import { ADVICE_QUESTIONS } from "../../../src/core/advicePolicy";
+import {
+  ADVICE_QUESTIONS,
+  ADVICE_TYPES,
+  resolveAdviceType,
+  scoreAnswers,
+  type AdviceProfile,
+} from "../../../src/core/advicePolicy";
 import { WRITER_QUESTIONS } from "../../../src/core/writerStyle";
 import {
   AUTHOR_READER_QUESTIONS,
@@ -117,6 +123,54 @@ describe("押したときに選ぶもの", () => {
     expect(labels.some((label) => label.includes("もう一度"))).toBe(false);
     // 出口は見える形で置く
     expect(labels[labels.length - 1]).toContain("取りやめる");
+  });
+});
+
+/**
+ * **「いま：」は、相談で実際に使うタイプを出す**（点検、2026-09-23）。
+ *
+ * 以前は作者ごとの既定を出していたが、相談は作品の値（推定で動いたもの）を
+ * 使うことがあり、画面と相談で違うタイプが出ていた。
+ */
+describe("助言の受け方の「いま：」", () => {
+  const answered: AdviceProfile = {
+    scores: scoreAnswers([2, 2, 2, 0, 0, 0, 0, 0, 0]),
+    answers: [2, 2, 2, 0, 0, 0, 0, 0, 0],
+    updatedAt: "2026-09-13T00:00:00.000Z",
+  };
+  const labelOf = (profile: AdviceProfile) =>
+    ADVICE_TYPES[resolveAdviceType(profile.scores)].label;
+
+  test("相談で推定が動いていれば、そのタイプを出し、答えたときのタイプも添える", async () => {
+    const { deps: d, stores } = deps();
+    await stores.advice.setDefault(answered);
+    const inUse: AdviceProfile = {
+      ...answered,
+      scores: { ...answered.scores, taste: 5 },
+      baseScores: answered.scores,
+    };
+    expect(labelOf(inUse)).not.toBe(labelOf(answered));
+    answerWith(() => undefined);
+
+    await runWriterDiagnosis({ ...d, adviceInUse: () => inUse });
+
+    const description = String(
+      pickChoice(asked[0], "advice")?.description ?? ""
+    );
+    expect(description).toContain(`いま：${labelOf(inUse)}`);
+    expect(description).toContain(labelOf(answered));
+  });
+
+  test("相談で使うものが答えと同じタイプなら、1つだけ出す", async () => {
+    const { deps: d, stores } = deps();
+    await stores.advice.setDefault(answered);
+    answerWith(() => undefined);
+
+    await runWriterDiagnosis({ ...d, adviceInUse: () => answered });
+
+    expect(pickChoice(asked[0], "advice")?.description).toBe(
+      `いま：${labelOf(answered)}`
+    );
   });
 });
 

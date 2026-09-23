@@ -9,6 +9,7 @@ import {
   ADVICE_MIRROR_SCHEMA,
   adviceMirrorKey,
   adviceProfileFingerprint,
+  findAdviceMirrorEntry,
   isAdviceMirrorNewer,
   parseAdviceMirror,
   type AdviceMirrorFile,
@@ -201,6 +202,37 @@ describe("MCP は控えから読む", () => {
 
     expect(chatPrompt({ folder: work, question: "どう" }).diagnoses.advicePolicy).toBe(
       true
+    );
+  });
+
+  test("既定を答え直した控えは、それより古い作品の控えに勝つ（製品と同じ）", () => {
+    // 作品の控えは、相談の推定で既定から写されたもの（古い診断日のまま）。
+    // 既定を答え直したら、外部AI経由の相談にも答え直しが届く
+    const old = sampleProfile({ updatedAt: "2026-09-01T00:00:00.000Z" });
+    const again = sampleProfile({
+      scores: { reader: 0, self: 1, taste: 6 },
+      updatedAt: "2026-09-20T00:00:00.000Z",
+    });
+    writeMirror({
+      schema: ADVICE_MIRROR_SCHEMA,
+      entries: [
+        {
+          key: adviceMirrorKey(work),
+          folderPath: work,
+          updatedAt: new Date().toISOString(),
+          profile: old,
+        },
+        {
+          key: ADVICE_MIRROR_DEFAULT_KEY,
+          updatedAt: new Date().toISOString(),
+          profile: again,
+        },
+      ],
+    });
+
+    const file = readMirror();
+    expect(findAdviceMirrorEntry(file, work)?.profile.scores).toEqual(
+      again.scores
     );
   });
 

@@ -1,5 +1,5 @@
 import type * as vscode from "vscode";
-import type { AdviceProfile } from "./advicePolicy";
+import { effectiveAdviceProfile, type AdviceProfile } from "./advicePolicy";
 
 /**
  * 助言方針の保存先（設計書6.86）。
@@ -61,6 +61,8 @@ export class AdvicePolicyStore {
 
   /**
    * その作品で実際に使う方針。作品に無ければ**作者の既定**を使う。
+   * **既定のほうが後に答えられていれば、既定を使う**（2026-09-23。
+   * 選び方は `effectiveAdviceProfile`。MCP の控えも同じ関数を通る）。
    *
    * **読むだけでは書き写さない。** 相談が始まった時点で書き写すと、
    * 開いただけの作品にも方針が生えてしまう。書き写すのは
@@ -68,7 +70,7 @@ export class AdvicePolicyStore {
    * そこから先はその作品が自分の値として持つ。
    */
   getEffective(workId: string): AdviceProfile | undefined {
-    return this.get(workId) ?? this.getDefault();
+    return effectiveAdviceProfile(this.get(workId), this.getDefault());
   }
 
   async set(workId: string, profile: AdviceProfile): Promise<void> {

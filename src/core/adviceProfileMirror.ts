@@ -1,5 +1,6 @@
 import {
   ADVICE_TYPES,
+  effectiveAdviceProfile,
   type AdviceLevel,
   type AdviceProfile,
   type AdviceScores,
@@ -101,18 +102,29 @@ export function adviceMirrorKey(folderPath: string): string {
 /**
  * その作品の控え。作品のものが無ければ**作者の既定**を返す。
  *
- * 落ち方は製品の `AdvicePolicyStore.getEffective` と同じ——作品に無ければ
- * 既定を使い、既定も無ければ何も返さない。
+ * 選び方は製品の `AdvicePolicyStore.getEffective` と**同じ関数**
+ * （`effectiveAdviceProfile`）を通す——作品に無ければ既定、**既定のほうが
+ * 後に答えられていれば既定**（2026-09-23）、既定も無ければ何も返さない。
+ * 写しを書くと、外部AI経由の相談だけ答え直しが届かない日が来る。
+ *
+ * 既定が勝ったときは**既定の項目**を返す（中身の調子だけ作品のほうが新しい
+ * ことがある）。書き戻す側（`mcp/adviceProfileMirror.ts`）は、どの項目から
+ * 来ても作品の鍵で書く。
  */
 export function findAdviceMirrorEntry(
   file: AdviceMirrorFile,
   folderPath: string
 ): AdviceMirrorEntry | undefined {
   const key = adviceMirrorKey(folderPath);
-  return (
-    file.entries.find((entry) => entry.key === key) ??
-    file.entries.find((entry) => entry.key === ADVICE_MIRROR_DEFAULT_KEY)
+  const own = file.entries.find((entry) => entry.key === key);
+  const fallback = file.entries.find(
+    (entry) => entry.key === ADVICE_MIRROR_DEFAULT_KEY
   );
+  if (!own || !fallback) return own ?? fallback;
+
+  const picked = effectiveAdviceProfile(own.profile, fallback.profile);
+  if (!picked || picked === own.profile) return own;
+  return picked === fallback.profile ? fallback : { ...fallback, profile: picked };
 }
 
 /** 鍵そのもので引く（既定へは落ちない） */
