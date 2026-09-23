@@ -344,7 +344,9 @@ describe("走査の計測", () => {
     const result = await scanWork(work);
 
     expect(result.timing.files).toBe(
-      result.episodes.length + result.workInfoFiles.length
+      result.episodes.length +
+        result.workInfoFiles.length +
+        result.nonEpisodeFiles.length
     );
     expect(result.timing.files).toBe(3);
   });
@@ -517,5 +519,235 @@ describe("下ごしらえも読み口で読む", () => {
     }
 
     expect(statSpy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 作品の根を歩くときに、何を話として拾うか（ノートPCの実機確認、2026-09-23）。
+ *
+ * 1話だけの試験用フォルダーを作品として登録すると「17ファイル／22字」と
+ * 出た（本文は3ファイル）。本文フォルダーが無いと作品の根を丸ごと歩くので、
+ * 根の README・メモと、名前が既定と違う設定フォルダーの中身が話に数えられて
+ * いた。**既存の作品の話数は変えない**——本文フォルダーの無い作品・根に
+ * 話を並べた作品の両方を、ここで押さえる。
+ */
+describe("作品の根を歩くとき", () => {
+  const ROOT = "c:/novels/work";
+
+  beforeEach(() => {
+    workspace.getConfiguration = () => ({
+      get: <T>(_key: string, defaultValue: T): T => defaultValue,
+    });
+  });
+
+  /** 比べるための形（スタブの Uri はドライブ文字を小文字にする） */
+  function key(fsPath: string): string {
+    return fsPath.replace(/\\/g, "/").replace(/^[A-Z]:/, (d) => d.toLowerCase());
+  }
+
+  /**
+   * 作品フォルダーの中身を、相対パス→本文の表から組み立てる。
+   *
+   * **本物の読み口（`vscode.workspace.fs` 経由）で歩かせる。** 走査が
+   * どのフォルダーへ入るかを決めるのは読み口へ渡す選り分けなので、
+   * 歩き方を作り物に差し替えると、確かめたいところを素通りする。
+   */
+  function stubWorkTree(tree: Record<string, string>) {
+    const files = new Map<string, string>();
+    for (const [rel, text] of Object.entries(tree)) {
+      files.set(`${ROOT}/${rel}`, text);
+    }
+    const isDirectory = (at: string): boolean =>
+      [...files.keys()].some((file) => file.startsWith(`${at}/`));
+    const readDirectory = vi.fn(async (uri: { fsPath: string }) => {
+      const at = key(uri.fsPath);
+      const seen = new Map<string, FileType>();
+      for (const file of files.keys()) {
+        if (!file.startsWith(`${at}/`)) continue;
+        const rest = file.slice(at.length + 1);
+        const [head, ...tail] = rest.split("/");
+        seen.set(head, tail.length > 0 ? FileType.Directory : FileType.File);
+      }
+      return [...seen.entries()];
+    });
+    workspace.fs = {
+      readFile: vi.fn(async (uri: { fsPath: string }) => {
+        const text = files.get(key(uri.fsPath));
+        if (text === undefined) {
+          throw new FileSystemError(`${uri.fsPath} は無い`, "FileNotFound");
+        }
+        return new TextEncoder().encode(text);
+      }),
+      stat: vi.fn(async (uri: { fsPath: string }) => {
+        const at = key(uri.fsPath);
+        if (files.has(at)) return { type: FileType.File, size: 0, mtime: 0 };
+        if (isDirectory(at)) {
+          return { type: FileType.Directory, size: 0, mtime: 0 };
+        }
+        throw new FileSystemError(`${uri.fsPath} は無い`, "FileNotFound");
+      }),
+      readDirectory,
+    };
+    return { readDirectory };
+  }
+
+  /** 作品設定。**設定フォルダーの名前だけ**を変えられるようにする */
+  function configJson(settingsDir: string): string {
+    return JSON.stringify({
+      schemaVersion: "1",
+      workTitle: "作品",
+      manuscriptDir: "本文",
+      settingsDir,
+      createdAt: "2026-09-23T00:00:00.000Z",
+    });
+  }
+
+  const names = (result: Awaited<ReturnType<typeof scanWork>>): string[] =>
+    result.episodes.map((episode) => episode.fileName);
+
+  test("根に1話＋設定の雛形＋README＋メモ：話は1つだけ", async () => {
+    stubWorkTree({
+      ".aiwriter/config.json": configJson("設定"),
+      "001.txt": "灯が歩いた。",
+      "README.md": "# 試験用の作品\n\nこのフォルダーは確認用です。\n",
+      "メモ.md": "- 次の話で川を渡らせる\n",
+      "登場人物の雛形.md": "## 名前\n\n## 年齢\n",
+      "設定/人物.md": "## 灯\n",
+      "設定/世界観.md": "## 川の町\n",
+    });
+
+    const result = await scanWork(work);
+
+    expect(names(result)).toEqual(["001.txt"]);
+    expect(result.stats.fileCount).toBe(1);
+    expect(result.stats.totals.net).toBe("灯が歩いた。".length);
+    // **落としたことは返す**（作品情報と同じ。黙って消したことにしない）
+    expect(
+      result.nonEpisodeFiles.map((file) => file.split(/[\\/]/).pop()).sort()
+    ).toEqual(["README.md", "メモ.md", "登場人物の雛形.md"].sort());
+  });
+
+  test("設定フォルダーの名前が既定と違っても、その中は歩かない", async () => {
+    const { readDirectory } = stubWorkTree({
+      ".aiwriter/config.json": configJson("資料"),
+      "001.txt": "灯が歩いた。",
+      "資料/人物.md": "## 灯\n",
+      "資料/世界観.md": "## 川の町\n",
+      "資料/メモ/書き出しの案.md": "川から始める。\n",
+    });
+
+    const result = await scanWork(work);
+
+    expect(names(result)).toEqual(["001.txt"]);
+    // **名前ではなく場所で外す。** そもそも中を覗きにいかない
+    expect(
+      readDirectory.mock.calls.map(([uri]) => key(uri.fsPath)).join("|")
+    ).not.toContain("資料");
+  });
+
+  test("本文フォルダーの中の設定フォルダーも、場所で外す", async () => {
+    // 設定フォルダーを本文フォルダーの中に置いた作品（settingsDir を
+    // 「原稿/資料」にした形）でも、設定の中身が話に混ざらないこと
+    stubWorkTree({
+      ".aiwriter/config.json": JSON.stringify({
+        schemaVersion: "1",
+        workTitle: "作品",
+        manuscriptDir: "原稿",
+        settingsDir: "原稿/資料",
+        createdAt: "2026-09-23T00:00:00.000Z",
+      }),
+      "原稿/001.txt": "灯が歩いた。",
+      "原稿/資料/人物.md": "## 灯\n",
+    });
+
+    const result = await scanWork(work);
+
+    expect(names(result)).toEqual(["001.txt"]);
+  });
+
+  // ─── ここから下は、既存の作品の話数が変わらないことを守る ───
+
+  test("根に話を並べた作品：話数の読める名前は、形を問わずすべて話", async () => {
+    stubWorkTree({
+      "001.txt": "一。",
+      "002_湖畔の誓い.txt": "二。",
+      "第3話 再会.md": "三。",
+      "episode_0004.txt": "四。",
+      "005-006_合本.txt": "五六。",
+      "プロローグ.txt": "序。",
+      "幕間1.txt": "間。",
+      "エピローグ.txt": "終。",
+      "2026-08-16.txt": "下書き。",
+    });
+
+    const result = await scanWork(work);
+
+    expect(result.stats.fileCount).toBe(9);
+    expect(result.nonEpisodeFiles).toEqual([]);
+  });
+
+  test("話数の読めない名前でも、投稿サイトの頭書きや合本の形なら話", async () => {
+    // 名前だけで落とさない（`workInfoFile.ts` と同じ用心）。
+    // DLしたファイルの名前を作者が付け替えていることはある
+    stubWorkTree({
+      "001.txt": "一。",
+      "灯.txt": "【タイトル】\n第2話　灯\n\n【本文（1行）】\n灯が歩いた。\n",
+      "作品まるごと.txt": [
+        "------ エピソード 3 開始 ------",
+        "【エピソードタイトル】",
+        "第3話　川",
+        "【本文】",
+        "川を渡った。",
+        "",
+      ].join("\n"),
+    });
+
+    const result = await scanWork(work);
+
+    expect(names(result).sort()).toEqual(
+      ["001.txt", "灯.txt", "作品まるごと.txt"].sort()
+    );
+  });
+
+  test("根に話数の読める名前が1つも無ければ、これまでどおり全部を話とみなす", async () => {
+    // 題だけで名付けた作品は、README と見分けが付かない。
+    // **迷ったら本文として扱う**——原稿を1つ落とすほうが困る
+    stubWorkTree({
+      "出会い.txt": "出会った。",
+      "別れ.txt": "別れた。",
+      "README.md": "# 作品\n",
+    });
+
+    const result = await scanWork(work);
+
+    expect(result.stats.fileCount).toBe(3);
+    expect(result.nonEpisodeFiles).toEqual([]);
+  });
+
+  test("根の下の章フォルダーは、これまでどおり中の全部を話とみなす", async () => {
+    stubWorkTree({
+      "001.txt": "一。",
+      "第2章/002.txt": "二。",
+      "第2章/番外編.txt": "番外。",
+    });
+
+    const result = await scanWork(work);
+
+    expect(result.stats.fileCount).toBe(3);
+  });
+
+  test("本文フォルダーがあれば、その中は名前で選り分けない", async () => {
+    // 本文フォルダーは作者が「ここが原稿」と決めた場所なので、
+    // 話数の読めない名前（番外編・あとがき）も話のまま
+    stubWorkTree({
+      "本文/001.txt": "一。",
+      "本文/番外編.txt": "番外。",
+      "README.md": "# 作品\n",
+    });
+
+    const result = await scanWork(work);
+
+    expect(names(result).sort()).toEqual(["001.txt", "番外編.txt"].sort());
+    expect(result.nonEpisodeFiles).toEqual([]);
   });
 });

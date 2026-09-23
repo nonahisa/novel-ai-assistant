@@ -9,7 +9,7 @@ import {
 } from "../models/types";
 import { addCounts, emptyCounts } from "./charCount";
 import { countEpisodeChars, episodeBodyForCount } from "./episodeCharCount";
-import { parseEpisodeFileName } from "./episodeParser";
+import { isEpisodeFileName, parseEpisodeFileName } from "./episodeParser";
 import { readWorkConfig, workPaths } from "./workRegistry";
 import { parseEpisodeMetadata } from "./metadataParser";
 import { isConflictSideFile } from "./conflictFile";
@@ -34,7 +34,7 @@ import type { Eol } from "../models/types";
  * （`episodes`・`stats`）は1バイトも変えない。
  */
 export interface ScanTiming {
-  /** 走査したファイルの数（作品情報のファイルも含む） */
+  /** 走査したファイルの数（作品情報と、根の話ではないファイルも含む） */
   readonly files: number;
   /**
    * 下ごしらえに費やしたミリ秒（0.74.11）。
@@ -93,6 +93,13 @@ export async function scanWork(work: WorkEntry): Promise<{
    * 使う側の判断だが、**黙って消したことにはしない。**
    */
   workInfoFiles: string[];
+  /**
+   * 作品の根に置かれた、話ではないファイル（README・メモなど。絶対パス）。
+   *
+   * **本文フォルダーが無く、作品の根を歩いたときだけ**埋まる
+   * （`sortsByName` の条件）。作品情報と同じく、落としたことが分かるように返す。
+   */
+  nonEpisodeFiles: string[];
   /** 何にどれだけかかったか（設計書6.107）。**使わなくてよい** */
   timing: ScanTiming;
   /**
@@ -163,7 +170,10 @@ export async function scanWork(work: WorkEntry): Promise<{
     読む中身も順番も前と同じで、変わるのは `await` の回数だけである。
   */
   const bulkStartedAt = performance.now();
-  const files = await reader.readTextTree(targetDir, acceptForScan);
+  const files = await reader.readTextTree(
+    targetDir,
+    acceptForScan(p.settings)
+  );
   const bulkMs = performance.now() - bulkStartedAt;
   /*
     **1ファイルも読まなければ「読み」は0のまま**（0.74.11 で割った境目）。
@@ -179,6 +189,27 @@ export async function scanWork(work: WorkEntry): Promise<{
 
   const episodes: EpisodeFile[] = [];
   const workInfoFiles: string[] = [];
+  const nonEpisodeFiles: string[] = [];
+  /*
+    **作品の根を歩いたときだけ、根のファイルを名前で選り分ける**（0.81.1）。
+    本文フォルダーが無いと根を丸ごと歩くので、README やメモまで話に
+    数えていた（1話だけの試験用フォルダーが「17ファイル」と出た。
+    ノートPCの実機確認、2026-09-23）。
+
+    **根に話数の読める名前が1つも無ければ選り分けない。** 題だけで
+    名付けた作品は README と見分けが付かず、そこで落とすと原稿が消えた
+    ように見える（`workInfoFile.ts` と同じ「迷ったら本文」）。見分けは
+    書庫の判定（`workCollection.ts` の「直下に話数として読めるファイルが
+    あるか」）と同じ `isEpisodeFileName` に、日付の名前を足したもの。
+  */
+  const rootDir = targetDir === p.root ? targetDir : undefined;
+  const sortsByName =
+    rootDir !== undefined &&
+    files.some(
+      (file) =>
+        isDirectChild(rootDir, file.path) &&
+        readsAsEpisodeName(path.basename(file.path))
+    );
   const excludeRuby = vscode.workspace
     .getConfiguration("novelai")
     .get<boolean>("excludeRubyFromCount", true);
@@ -186,8 +217,9 @@ export async function scanWork(work: WorkEntry): Promise<{
   /**
    * 1ファイルぶんの計測を締める（設計書6.107）。
    *
-   * **ループから抜ける所すべてで呼ぶ。** いまは2つある——作品情報の
-   * ファイルで `continue` する道と、話として積む道。増やすときは
+   * **ループから抜ける所すべてで呼ぶ。** いまは3つある——作品情報の
+   * ファイルで `continue` する道、根の話ではないファイルで `continue` する
+   * 道、話として積む道。増やすときは
    * ここを呼ぶのを忘れないこと（漏らすと「最長」がそのぶん軽く出る）。
    */
   const noteFile = (name: string, startedAt: number): void => {
@@ -266,6 +298,22 @@ export async function scanWork(work: WorkEntry): Promise<{
 
       hasConflictMarkers = containsConflictMarkers(text);
       parseMs += performance.now() - parseStartedAt;
+
+      // **根の話ではないファイルは、中身を見てから落とす。** 投稿サイトの
+      // 頭書きか合本の区切りがあれば、名前が何であれ話である（DLした
+      // ファイルの名前を作者が付け替えていることはある）
+      if (
+        sortsByName &&
+        rootDir !== undefined &&
+        isDirectChild(rootDir, filePath) &&
+        !readsAsEpisodeName(fileName) &&
+        !parsedMeta.hasMetadata &&
+        collected === null
+      ) {
+        nonEpisodeFiles.push(filePath);
+        noteFile(fileName, fileStartedAt);
+        continue;
+      }
 
       if (!hasConflictMarkers) {
         const countStartedAt = performance.now();
@@ -346,6 +394,7 @@ export async function scanWork(work: WorkEntry): Promise<{
     stats: { fileCount: episodes.length, totals, conflictedCount },
     manuscriptDir: targetDir,
     workInfoFiles,
+    nonEpisodeFiles,
     ...(config?.kind ? { configuredKind: config.kind } : {}),
     timing: {
       files: files.length,
@@ -471,16 +520,58 @@ const SKIP_DIRS = new Set([
   ".git",
   "node_modules",
   "exports",
+  // **名前でも外したままにする。** 設定フォルダーを別の名前にした作品に
+  // 「設定」という名前のフォルダーが残っていても、これまで数えていなかった
+  // （外すのをやめると、その作品の話数が増える）
   "設定",
 ]);
 
-function acceptForScan(name: string, kind: "file" | "directory"): boolean {
-  if (kind === "directory") return !SKIP_DIRS.has(name);
-  // 競合を「両方を残す」で解決したときの退避ファイルは原稿ではない。
-  // 拾うと同じ話数の本文が2つある状態になる
-  if (isConflictSideFile(name)) return false;
-  const ext = path.extname(name).toLowerCase();
-  return (SUPPORTED_EXTENSIONS as readonly string[]).includes(ext);
+/**
+ * 原稿として拾う選り分けを、作品の設定フォルダーの場所から作る。
+ *
+ * **設定フォルダーは場所で外す**（0.81.1）。`config.json` の `settingsDir` で
+ * 名前を変えられるのに、名前の決め打ち（`設定`）でしか外していなかったため、
+ * 別の名前にした作品では人物・世界観・メモの .md がすべて話に数えられた
+ * （ノートPCの実機確認、2026-09-23）。
+ */
+function acceptForScan(settingsDir: string) {
+  const settingsKey = path.normalizeForComparison(settingsDir);
+  return (
+    name: string,
+    kind: "file" | "directory",
+    fullPath: string
+  ): boolean => {
+    if (kind === "directory") {
+      if (SKIP_DIRS.has(name)) return false;
+      return path.normalizeForComparison(fullPath) !== settingsKey;
+    }
+    // 競合を「両方を残す」で解決したときの退避ファイルは原稿ではない。
+    // 拾うと同じ話数の本文が2つある状態になる
+    if (isConflictSideFile(name)) return false;
+    const ext = path.extname(name).toLowerCase();
+    return (SUPPORTED_EXTENSIONS as readonly string[]).includes(ext);
+  };
+}
+
+/** `filePath` が `dir` の直下にあるか（章フォルダーの中は含めない） */
+function isDirectChild(dir: string, filePath: string): boolean {
+  return (
+    path.normalizeForComparison(path.dirname(filePath)) ===
+    path.normalizeForComparison(dir)
+  );
+}
+
+/**
+ * 名前が話に見えるか（作品の根で選り分けるとき）。
+ *
+ * 書庫の見分けと同じ `isEpisodeFileName` に、**日付の名前を足す。**
+ * 日付で書く下書き（SNS記事。設計書6.4.6）は、根に並べる運用がある。
+ * 書庫の見分けのほうは日付を見ないが、あちらは「作品か」を決めるだけで、
+ * ここで落とすと原稿が一覧から消える。
+ */
+function readsAsEpisodeName(fileName: string): boolean {
+  if (isEpisodeFileName(fileName)) return true;
+  return parseEpisodeFileName(fileName).date !== null;
 }
 
 /**

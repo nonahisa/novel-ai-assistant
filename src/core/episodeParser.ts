@@ -264,6 +264,33 @@ function detectKind(base: string): EpisodeKind {
 }
 
 /**
+ * その名前が本文（話数のファイル）に見えるか。
+ *
+ * **「本編以外」で通してはいけない。** 読み取れなかったものは `不明` に
+ * なるので、`README.md` や `プロンプト雛形.txt` まで本文として数えて
+ * しまい、**書庫そのものを作品と誤認する**（テストが捕まえた）。
+ *
+ * **日付の名前は含めない。** 書庫の見分け（`workCollection.ts`）が元から
+ * そうしており、ここへ移したときに振る舞いを変えないためである。日付の
+ * 下書きも話として見たい呼び手（`scanner.ts`）は、`date` を別に見る。
+ *
+ * 書庫の見分けと作品の走査の両方が使うので、ここに1つだけ置く（0.81.1）。
+ */
+export function isEpisodeFileName(name: string): boolean {
+  const extension = path.extname(name).toLowerCase();
+  if (extension !== ".txt" && extension !== ".md") return false;
+  const parsed = parseEpisodeFileName(name);
+
+  // 話数が読めれば本文
+  if (parsed.chapterStart !== null) return true;
+  // 話数は無くても、種別が読めれば本文（`プロローグ.txt` など）
+  return NAMED_KINDS.has(parsed.kind);
+}
+
+/** 話数が無くても本文と分かる種別。`不明` と `本編` は含めない */
+const NAMED_KINDS = new Set<EpisodeKind>(["プロローグ", "エピローグ", "幕間"]);
+
+/**
  * 既存ファイル群から、次に作成すべき話数を求める。
  * 本編の最大話数 + 1 を返す。1件もなければ 1。
  */

@@ -71,8 +71,17 @@ export interface TreeFile {
  * **フォルダーも同じ口で決める。** 走査は `設定/`・`node_modules`・`exports` へ
  * 入らない（`scanner.ts`）。読み口の側に作品の都合を持ち込まないために、
  * 判断はすべて呼び手へ返す
+ *
+ * **場所（`fullPath`）も渡す**（0.81.1）。作品の設定フォルダーは名前を
+ * 変えられる（`config.json` の `settingsDir`）ので、名前だけでは外せない。
+ * 名前の決め打ち（`設定`）では、別の名前にした作品の設定資料が話に
+ * 数えられていた（ノートPCの実機確認、2026-09-23）
  */
-export type TreeAccept = (name: string, kind: "file" | "directory") => boolean;
+export type TreeAccept = (
+  name: string,
+  kind: "file" | "directory",
+  fullPath: string
+) => boolean;
 
 /** 潜る深さの上限。想定外の深い階層で無限に走査しないため（走査の元の値） */
 const DEFAULT_TREE_DEPTH = 5;
@@ -193,10 +202,10 @@ const vscodeReader: FileReader = {
         if (name.startsWith(".")) continue;
         const full = path.join(current, name);
         if (kind === "directory") {
-          if (!accept(name, "directory")) continue;
+          if (!accept(name, "directory", full)) continue;
           await walk(full, depth + 1);
         } else if (kind === "file") {
-          if (!accept(name, "file")) continue;
+          if (!accept(name, "file", full)) continue;
           try {
             result.push({ path: full, bytes: await vscodeReader.readFile(full) });
           } catch {
@@ -272,10 +281,10 @@ async function createNodeReader(): Promise<FileReader> {
           if (name.startsWith(".")) continue;
           const full = path.join(current, name);
           if (kind === "directory") {
-            if (!accept(name, "directory")) continue;
+            if (!accept(name, "directory", full)) continue;
             walk(full, depth + 1);
           } else if (kind === "file") {
-            if (!accept(name, "file")) continue;
+            if (!accept(name, "file", full)) continue;
             try {
               // `Buffer` は `Uint8Array` を継承しているので、そのまま渡してよい
               result.push({ path: full, bytes: readFileSync(full) });
