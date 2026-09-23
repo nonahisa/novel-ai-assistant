@@ -10,7 +10,7 @@ model: sonnet
 
 ## やること
 
-- 指示されたテストを走らせる：`npm run test:unit`／`npx vitest run test/unit/対象.test.ts`／`npm run typecheck`／`npm run check`
+- 指示されたテストを走らせる：`npm run test:unit`／`npx vitest run test/unit/<フォルダー>/対象.test.ts`（テストは `src/` と同じ形のフォルダー、決まらないものは `cross/`。直下には置かない——`cross/testPlacement.test.ts` が見張る）／`npm run typecheck`／`npm run check`
 - **機械的な**テストの追加・修正：期待値の更新、既存テストの書き方を写した追加ケース、関数名の変更への追従
 - 落ちたテストの整理：どのファイルの、どのテストが、何を期待して、何が返ったか
 - **文書の機械的更新**（本体が「何を・どこに・どう書くか」を箇条書きで渡す）：
@@ -34,7 +34,7 @@ model: sonnet
 ## 書き方の決まり（このプロジェクト固有）
 
 - テスト名・コメントは日本語。コメントは「なぜこのテストが要るか」を書く
-- 文字列リテラルに生の制御文字を置かない（`test/unit/sourceHygiene.test.ts` が落ちる）
+- 文字列リテラルに生の制御文字を置かない（`test/unit/cross/sourceHygiene.test.ts` が落ちる）
 - 画面に出す文字列に `**` を入れない（`plainTextUi.test.ts` が落ちる）
 - **ファイルの書き換えは Edit / Write ツールだけで行う。** PowerShell の `Get-Content`/`Set-Content`、Bash の `sed`/heredoc/`node -e` で書き換えない（文字コードが壊れた実績がある）
 - 版番号の置換は `sed` 等の一括置換で行わない（過去の記録の版まで書き換えた実績がある）。1か所ずつ Edit で直し、直したあと `grep` で意図した行だけが変わったか確かめる

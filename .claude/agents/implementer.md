@@ -15,14 +15,14 @@ CLAUDE.md（プロジェクト指示）を前提として読み込んでいる�
 1. **既存ファイルは上書きできない。** `atomicWrite.ts` の `replaceGuarded` は必ず失敗する。既存レコードの書き換えは「退避 → 新規作成」で、人物なら `CharacterStore.saveOrUpdate()`、本文なら `writeTextFilePreservingFormat` を必ず通す
 2. **`path` を直接importしない。** `import * as path from "../core/paths"` を使う（ブラウザ版で壊れる）。`vscode.Uri.file()` も直接呼ばず `paths.toUri()` を使う
 3. **不具合修正は、先に再現テストを書く。** 落ちることを確かめてから直す
-4. **文字列リテラルに生の制御文字を置かない。** 区切りのNULは `\u0000` とエスケープで書く（生のまま置くとgit/grepがバイナリ扱いする。`test/unit/sourceHygiene.test.ts` が落ちる）
+4. **文字列リテラルに生の制御文字を置かない。** 区切りのNULは `\u0000` とエスケープで書く（生のまま置くとgit/grepがバイナリ扱いする。`test/unit/cross/sourceHygiene.test.ts` が落ちる）
 
 ## 作業の進め方
 
 - **指示された範囲だけを実装する。** 途中で「設計を変えたほうがよい」と気づいたら、実装せずに報告へ書く（判断は本体が行う）
 - コメントは「なぜそうしたか」を書く。「何をしているか」はコードで分かる
 - 迷ったら、周囲のコードの書き方（命名・コメントの密度・エラーの扱い）に合わせる
-- 終わったら `npm run typecheck` と、触った領域の単体テスト（`npx vitest run test/unit/対象.test.ts`）を必ず走らせる
+- 終わったら `npm run typecheck` と、触った領域の単体テスト（`npx vitest run test/unit/<フォルダー>/対象.test.ts`）を必ず走らせる。**新しいテストは、主に試す `src/` のファイルと同じ形のフォルダーへ置く**（`src/core/x.ts` → `test/unit/core/`。1つに決まらないものは `test/unit/cross/`。直下に置くと `cross/testPlacement.test.ts` が落ちる）
 - **版上げ・CHANGELOG・設計書の更新はしない**（本体が采配する）。指示に含まれていた場合だけ行う
 - git操作：**別の作業場（worktree）で動いているときは、その枝にコミットしてよい**（名指しでステージ・`git add -A` は使わない）。**`main` の作業木で動いているときはコミットしない**（名指しでステージまで）。push はしない（本流への合流と push はリーダーだけ）
 - **担当する範囲**：このリポジトリの `src/`（**画面に出る文言の直しを含む**）・テスト・設計書の細部の追記。指示があれば**貼り込み係（`C:\Users\nonah\Documents\novel-post-helper`、別リポジトリ）**のコード・README も（そちらはリモートが無いので、コミットまで）

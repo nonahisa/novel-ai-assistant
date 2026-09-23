@@ -159,3 +159,5 @@ src/
 ```
 
 **依存の方向**：`views` / `features` → `core` → `models`。逆流させない。`models` は VSCode API に依存させない（テストしやすくするため）。
+
+**単体テストの置き場所**（2026-09-23、残課題 A5）：`test/unit/` の下に **`src/` と同じ形のフォルダー**（`core`・`features`・`views`・`prompts`・`mcp`・`ai`・`models`）。主に試す `src/` のファイルと同じフォルダーへ置く。1つに決まらないもの（複数のフォルダーにまたがる・ソースや文書を走査する網のテスト）は `test/unit/cross/`。部品は `test/unit/support/`。**直下に置くと `cross/testPlacement.test.ts` が落ちる。**
