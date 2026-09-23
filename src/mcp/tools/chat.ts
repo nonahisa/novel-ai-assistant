@@ -15,12 +15,19 @@ import { buildReaderTypePrompt } from "../../prompts/readerTarget";
 import { scoreAnswers, type AdviceProfile } from "../../core/advicePolicy";
 import {
   readAdviceProfile,
+  readWriterProfile,
   updateAdviceProfile,
+  updateWriterProfile,
 } from "../adviceProfileMirror";
 // **指紋は `core/hash.ts` から取る**（`core/textFile.ts` の `hashText` は
 // `vscode` を引くので、外から呼ぶ束には持ち込めない。設計書6.87.3）
 import { hashText } from "../../core/hash";
-import { buildWriterStyle } from "../../core/writerStyle";
+import {
+  buildWriterStyle,
+  describeWriterStyleChange,
+  WRITER_REVISE_LABELS,
+  WRITER_REVISE_STREAK_NEEDED,
+} from "../../core/writerStyle";
 import { parseCharacter } from "../../models/character";
 import { parseLocation } from "../../models/location";
 import {
@@ -49,13 +56,14 @@ import {
  *
  * ---
  *
- * **3つの診断のうち、読めるのは1つだけである**（0.64.2に調べた）。
+ * **3つの診断のうち、作品フォルダーから読めるのは1つだけである**（0.64.2に
+ * 調べた。残り2つは拡張機能の控えから読む）。
  *
  * | 診断 | どこに在るか | MCPから |
  * |---|---|---|
  * | ターゲット読者（P-38） | 作品の `設定/読者像.json` | **読める**（製品と同じファイル） |
  * | 助言方針（P-21） | `globalState`（機械ごと） | **控えを読む**（下記）／答えを渡してもらう |
- * | 執筆スタイル（P-39） | `globalState`（機械ごと） | 読めない → **答えを渡してもらう** |
+ * | 執筆スタイル（P-39） | `globalState`（機械ごと） | **控えを読む**（2026-09-23。助言方針と同じ道）／答えを渡してもらう |
  *
  * `globalState` は VS Code の持ち物で、作品フォルダーの外にある。
  * **MCPが読むのは渡された `folder` の配下だけ**（設計書6.87.8の守り③）なので、
@@ -68,6 +76,10 @@ import {
  * 外。作者の目にも Git にも触れない）へ書き出した控えを
  * `mcp/adviceProfileMirror.ts` が読む。**渡された答えのほうが優先**で、
  * 控えも無ければこれまでどおり1字も送らない。
+ *
+ * **執筆スタイルも控えを読む**（2026-09-23）。以前は明示したときだけ乗り、
+ * 相談で読み取った直す時期（`writerStyleSignals`）も書き戻さなかった。
+ * 置き場は同じ保管庫の `writer-profile.json`（`core/writerProfileMirror.ts`）。
  *
  * **代わりに「作者が診断で答えたもの」を受け取る。** 内部の保存の形ではなく
  * 答えそのものを受け取り、**製品の関数**（`scoreAnswers`・`buildWriterStyle`）で
@@ -123,6 +135,8 @@ export interface ChatDiagnosisReport {
    */
   advicePolicySource?: "input" | "mirror";
   writerStyle: boolean;
+  /** 執筆スタイルをどこから取ったか（渡された答えか、拡張機能の控えか） */
+  writerStyleSource?: "input" | "mirror";
   readerType: boolean;
   /** 送らなかった軸と、その理由 */
   omitted: string[];
@@ -207,13 +221,25 @@ function buildDiagnosisBlocks(
         buildWriterStylePrompt({ style, updatedAt: now.toISOString() })
       );
       report.writerStyle = true;
+      report.writerStyleSource = "input";
     } else {
       // **知らない値は受け取らない**（`buildWriterStyle` の約束）。
       // 黙って既定へ倒さず、足さなかったことを言う
       omitted.push("執筆スタイル（選択肢に無い値が混ざっていました）");
     }
   } else {
-    omitted.push("執筆スタイル（writerStyle を渡すと足します）");
+    // **渡されなければ、拡張機能が書き出した控えを見る**（2026-09-23。
+    // 助言方針と同じ道）。以前は明示したときしか乗らなかった
+    const stored = readWriterProfile();
+    if (stored) {
+      blocks.push(buildWriterStylePrompt(stored));
+      report.writerStyle = true;
+      report.writerStyleSource = "mirror";
+    } else {
+      omitted.push(
+        "執筆スタイル（writerStyle を渡すか、拡張機能で作家タイプ診断をすると足します）"
+      );
+    }
   }
 
   const readerProfile = readReaderProfile(folder);
@@ -315,6 +341,15 @@ export interface ChatValidateResult {
    * MCP の返事から漏れては意味がない。
    */
   adviceProfileNote?: string;
+  /**
+   * 執筆スタイル（直す時期）の控えを書き戻したときの一言。
+   *
+   * **こちらは中身を言う。** 直す時期は作者自身が5問で答えた値で、
+   * 作者に見せている（受容度・自信度とは扱いが違う）。黙って書き換えると、
+   * 案内の並びが変わった理由が作者に分からない（設計書6.90.1「変わったら
+   * 必ず見せる」）。
+   */
+  writerStyleNote?: string;
 }
 
 /**
@@ -373,6 +408,36 @@ export function chatValidate(input: {
       // 二重取りの歯止めなのか、別の失敗なのかが呼ぶ側に分からない
       result.adviceProfileNote =
         "この答えの推定は反映済みです（同じ答えは二度効かせません）。";
+    }
+  }
+
+  /*
+    **直す時期の読み取り（`writerStyleSignals`）も書き戻す**（2026-09-23）。
+    製品は `workChatPanel.updateWriterStyle` で拾っており、ここが拾わないと
+    外部AI経由の相談だけ、作者の語った直し方が永久に反映されない。
+
+    歯止めは製品と同じ（2回続けて同じに読めたときだけ動く）。**変わったら
+    必ず見せる**——助言方針と違い、執筆スタイルは作者に見せている値なので、
+    何が何へ変わったか・どう戻すかまで返す（`describeWriterStyleChange`）。
+  */
+  if (input.folder && answer.writerStyleSignals) {
+    const update = updateWriterProfile(
+      answer.writerStyleSignals,
+      hashText(input.response)
+    );
+    if (update.outcome === "updated") {
+      result.writerStyleNote = describeWriterStyleChange(
+        update.before,
+        update.after
+      );
+    } else if (update.outcome === "counted" && update.after.reviseStreak) {
+      const streak = update.after.reviseStreak;
+      result.writerStyleNote =
+        `直す時期を「${WRITER_REVISE_LABELS[streak.value]}」と読み取りました` +
+        `（${streak.count}回目。${WRITER_REVISE_STREAK_NEEDED}回続けて読み取れたら反映します）。`;
+    } else if (update.outcome === "duplicate") {
+      result.writerStyleNote =
+        "この答えの直す時期の読み取りは反映済みです（同じ答えは二度効かせません）。";
     }
   }
 

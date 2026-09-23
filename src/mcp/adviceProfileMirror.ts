@@ -15,6 +15,17 @@ import {
   type AdviceMirrorEntry,
   type AdviceMirrorFile,
 } from "../core/adviceProfileMirror";
+import {
+  parseWriterMirror,
+  serializeWriterMirror,
+  WRITER_MIRROR_FILE,
+  type WriterMirrorFile,
+} from "../core/writerProfileMirror";
+import {
+  applyWriterStyleSignals,
+  type WriterStyleSignals,
+} from "../core/writerStyle";
+import type { WriterProfile } from "../core/writerProfileStore";
 import { GLOBAL_STORAGE_ENV, mcpGlobalStorageRoot } from "./globalStorage";
 
 /**
@@ -191,6 +202,94 @@ export function updateAdviceProfile(
   return writeMirror(mirror.path, next) ? "updated" : "absent";
 }
 
+/* ───────────────────────────────────────────────────────────────
+   執筆スタイル（作家タイプ診断の5問）の控え（2026-09-23）
+
+   **外部AI経由の相談に、段取りと直す時期を自動で乗せる。** 以前は
+   `writerStyle` を明示したときだけ乗り、相談で読み取った直す時期も
+   書き戻さなかった。控えの形は `core/writerProfileMirror.ts`。
+   ─────────────────────────────────────────────────────────────── */
+
+function writerMirrorPath(): string | undefined {
+  const root = mcpGlobalStorageRoot();
+  return root ? nodePath.join(root, WRITER_MIRROR_FILE) : undefined;
+}
+
+function readWriterMirror():
+  | { file: WriterMirrorFile; path: string }
+  | undefined {
+  const path = writerMirrorPath();
+  if (!path) return undefined;
+  let text: string;
+  try {
+    text = fs.readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+  const file = parseWriterMirror(text);
+  return file ? { file, path } : undefined;
+}
+
+/** 作者の執筆スタイル。**控えが無ければ `undefined`**（診断していない作者） */
+export function readWriterProfile(): WriterProfile | undefined {
+  return readWriterMirror()?.file.profile;
+}
+
+export type WriterProfileUpdate =
+  /** 直す時期が変わった（`before`・`after` を見れば何が何へ変わったか分かる） */
+  | { outcome: "updated"; before: WriterProfile; after: WriterProfile }
+  /** 読み取りを数えただけ（2回続けて同じに読めたら反映） */
+  | { outcome: "counted"; before: WriterProfile; after: WriterProfile }
+  | { outcome: "duplicate" }
+  | { outcome: "unchanged" }
+  | { outcome: "absent" };
+
+/**
+ * 相談の答えから読み取った直す時期を、控えへ書き戻す。
+ *
+ * **歯止めは製品のものをそのまま通す**（`applyWriterStyleSignals`：2回続けて
+ * 同じに読めたときだけ動く）。**同じ答えは二度効かせない**——撃ち直しで
+ * 「2回続けて」が1つの答えで成立してしまう（助言方針の `updateAdviceProfile`
+ * と同じ指紋と60秒の窓）。
+ *
+ * **診断していない作者の値は、推定で作らない**（`"absent"`。製品の
+ * `updateWriterStyle` と同じ）。
+ */
+export function updateWriterProfile(
+  signals: WriterStyleSignals,
+  responseHash?: string,
+  now: Date = new Date()
+): WriterProfileUpdate {
+  const mirror = readWriterMirror();
+  if (!mirror) return { outcome: "absent" };
+  const source = mirror.file;
+
+  if (
+    responseHash !== undefined &&
+    source.lastSignalHash === responseHash &&
+    withinDuplicateWindow(source.updatedAt, now)
+  ) {
+    return { outcome: "duplicate" };
+  }
+
+  const before = source.profile;
+  const after = applyWriterStyleSignals(before, signals);
+  if (after === before) return { outcome: "unchanged" };
+
+  const next: WriterMirrorFile = {
+    schema: source.schema,
+    updatedAt: now.toISOString(),
+    ...(responseHash ? { lastSignalHash: responseHash } : {}),
+    profile: after,
+  };
+  if (!writeText(mirror.path, serializeWriterMirror(next))) {
+    return { outcome: "absent" };
+  }
+  return before.style.revise === after.style.revise
+    ? { outcome: "counted", before, after }
+    : { outcome: "updated", before, after };
+}
+
 /**
  * 控えを書き戻す。
  *
@@ -202,10 +301,14 @@ export function updateAdviceProfile(
  * されないのは困るが、そのために作者が頼んだ相談を失敗させるのは本末転倒である。
  */
 function writeMirror(path: string, file: AdviceMirrorFile): boolean {
+  return writeText(path, serializeAdviceMirror(file));
+}
+
+function writeText(path: string, text: string): boolean {
   const temporary = `${path}.novelai-mcp.tmp`;
   try {
     fs.mkdirSync(nodePath.dirname(path), { recursive: true });
-    fs.writeFileSync(temporary, serializeAdviceMirror(file), "utf8");
+    fs.writeFileSync(temporary, text, "utf8");
     fs.renameSync(temporary, path);
     return true;
   } catch {

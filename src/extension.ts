@@ -432,7 +432,9 @@ import {
 } from "./features/writeAiInstructions";
 import {
   importAdviceProfileMirror,
+  importWriterProfileMirror,
   refreshAdviceProfileMirror,
+  refreshWriterProfileMirror,
 } from "./features/adviceProfileMirror";
 import { startWindowCard } from "./features/windowCard";
 import {
@@ -2136,7 +2138,13 @@ export async function activate(
   });
   // 作家タイプ診断（設計書6.90）。**作者ごとに1つ**——段取りや出し先は
   // 作品を変えても大きくは変わらない癖なので、作品ごとに聞き直さない
-  const writerProfiles = new WriterProfileStore(context.globalState);
+  // **答えが変わったら控えを書き直す**（2026-09-23）。外部AI経由の相談にも
+  // 段取りと直す時期を自動で乗せるため（助言方針の控えと同じ置き場・同じ道）
+  const writerProfiles = new WriterProfileStore(context.globalState, () => {
+    void refreshWriterProfileMirror(context, writerProfiles).catch(
+      () => undefined
+    );
+  });
   // 作者自身の読者タイプ（設計書6.101）。**作品ではなく作者ごとに1つ**——
   // 「この作品は誰に届けるか」（6.91、作品ごと）とは別物で、
   // こちらは「あなた自身が読者として何を求めるか」である
@@ -2463,6 +2471,9 @@ export async function activate(
   void (async () => {
     await importAdviceProfileMirror(context, advicePolicies, registry.list());
     await refreshAdviceProfileMirror(context, advicePolicies, registry.list());
+    // 執筆スタイルも同じ順（取り込んでから書き出す）
+    await importWriterProfileMirror(context, writerProfiles);
+    await refreshWriterProfileMirror(context, writerProfiles);
   })().catch(() => undefined);
 
   // ─── ステータスバー（現在開いているファイルの文字数） ───

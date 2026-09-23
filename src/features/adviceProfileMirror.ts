@@ -24,6 +24,16 @@ import {
 import { atomicWriteFile } from "../core/atomicWrite";
 import { logLine } from "../core/logger";
 import { globalStorageRoot } from "./globalStoragePath";
+import type { WriterProfileStore } from "../core/writerProfileStore";
+import {
+  parseWriterMirror,
+  serializeWriterMirror,
+  WRITER_MIRROR_FILE,
+  WRITER_MIRROR_SCHEMA,
+  writerProfileFingerprint,
+  type WriterMirrorFile,
+} from "../core/writerProfileMirror";
+import { describeWriterStyleChange } from "../core/writerStyle";
 
 /**
  * 助言方針の控えを、拡張機能の保管庫へ書き出す／取り込む
@@ -233,6 +243,133 @@ export async function refreshAdviceProfileMirror(
     logLine(
       "助言方針の控えを保管庫へ書き出せませんでした（外部AI経由の相談では、" +
         "方針と調子が効きません）：" +
+        (error instanceof Error ? error.message : String(error))
+    );
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────
+   執筆スタイル（作家タイプ診断の5問）の控え（2026-09-23）
+
+   **外部AI経由の相談に、段取りと直す時期を自動で乗せる**ために、助言方針と
+   同じ置き場へ書き出す。形は `core/writerProfileMirror.ts`。取り込み・
+   書き出しの約束は助言方針と同じ——
+
+   - **取り込むのは、控えのほうが新しいときだけ**（最後にこちらが読み書き
+     した時刻と比べる。決められなければ手元を残す）
+   - **中身が同じなら時刻を動かさない**（動かすと、MCP の書き戻しを
+     次の起動で「自分が書いたもの」と取り違える）
+   - **効かせた答えの指紋は引き継ぐ**（落とすと、撃ち直しで「2回続けて
+     読み取れたら反映」の歯止めが迂回できる）
+   ─────────────────────────────────────────────────────────────── */
+
+/** 最後に読み書きした執筆スタイルの控えの時刻 */
+const KEY_WRITER_MIRROR_AT = "novelai.writerProfileMirrorAt";
+
+function writerMirrorPath(context: vscode.ExtensionContext): string {
+  return path.join(globalStorageRoot(context), WRITER_MIRROR_FILE);
+}
+
+async function readWriterMirror(
+  context: vscode.ExtensionContext
+): Promise<WriterMirrorFile | undefined> {
+  try {
+    const bytes = await vscode.workspace.fs.readFile(
+      path.toUri(writerMirrorPath(context))
+    );
+    return parseWriterMirror(new TextDecoder().decode(bytes));
+  } catch {
+    // まだ無い（初回）・読めない。どちらも「控えが無い」として扱う
+    return undefined;
+  }
+}
+
+/**
+ * 控えから `globalState` へ取り込む（**起動時に1回**）。
+ *
+ * **直す時期が変わっていたら、作者に見せる**（設計書6.90.1「変わったら
+ * 必ず見せる」）。外部AI経由の相談で動いた値は、作者の目の前の相談パネルを
+ * 通っていない——黙って取り込むと、案内の並びが変わった理由が分からない。
+ */
+export async function importWriterProfileMirror(
+  context: vscode.ExtensionContext,
+  profiles: WriterProfileStore
+): Promise<void> {
+  const file = await readWriterMirror(context);
+  if (!file) return;
+  const known = context.globalState.get<string>(KEY_WRITER_MIRROR_AT);
+  if (!isAdviceMirrorNewer(file.updatedAt, known)) return;
+
+  const before = profiles.get();
+  // **`update` で書く（`set` ではない）。** `set` は診断日を今日にする
+  // ——外から来た推定の反映で「作者が答えた日」を動かさない
+  await profiles.update(file.profile);
+  await context.globalState.update(KEY_WRITER_MIRROR_AT, file.updatedAt);
+
+  logLine(
+    "相談: 外部AI経由の相談で動いた執筆スタイル（直す時期）の読み取りを取り込みました"
+  );
+  const message = before
+    ? describeWriterStyleChange(before, file.profile)
+    : undefined;
+  if (message) void vscode.window.showInformationMessage(message);
+}
+
+/**
+ * `globalState` から控えへ書き出す（**起動時と、答えが変わったとき**）。
+ *
+ * 作者が答えを消したら、控えも消す——残すと、消した答えで外部AIが
+ * 助言し続ける。
+ */
+export async function refreshWriterProfileMirror(
+  context: vscode.ExtensionContext,
+  profiles: WriterProfileStore
+): Promise<void> {
+  try {
+    const target = writerMirrorPath(context);
+    const before = await readWriterMirror(context);
+    const profile = profiles.get();
+
+    if (!profile) {
+      if (before) {
+        await vscode.workspace.fs.delete(path.toUri(target));
+        await context.globalState.update(KEY_WRITER_MIRROR_AT, undefined);
+      }
+      return;
+    }
+
+    const same =
+      before !== undefined &&
+      writerProfileFingerprint(before.profile) ===
+        writerProfileFingerprint(profile);
+    if (same) {
+      // 1バイトも触らない。時刻だけ覚え直す（取り込みの比べに使う）
+      await context.globalState.update(KEY_WRITER_MIRROR_AT, before.updatedAt);
+      return;
+    }
+
+    const next: WriterMirrorFile = {
+      schema: WRITER_MIRROR_SCHEMA,
+      updatedAt: new Date().toISOString(),
+      ...(before?.lastSignalHash
+        ? { lastSignalHash: before.lastSignalHash }
+        : {}),
+      profile,
+    };
+    await vscode.workspace.fs.createDirectory(
+      path.toUri(globalStorageRoot(context))
+    );
+    // **上書きの経路（指定なし）でよい。** 作者のデータではないので退避は不要
+    await atomicWriteFile(
+      target,
+      new TextEncoder().encode(serializeWriterMirror(next))
+    );
+    await context.globalState.update(KEY_WRITER_MIRROR_AT, next.updatedAt);
+  } catch (error) {
+    // **黙って失敗しない。** 効かない理由が、ここにしか残らない
+    logLine(
+      "執筆スタイルの控えを保管庫へ書き出せませんでした（外部AI経由の相談では、" +
+        "段取りと直す時期が自動では乗りません）：" +
         (error instanceof Error ? error.message : String(error))
     );
   }

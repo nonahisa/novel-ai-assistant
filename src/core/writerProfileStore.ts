@@ -50,7 +50,17 @@ export interface WriterProfile {
 }
 
 export class WriterProfileStore {
-  constructor(private readonly state: vscode.Memento) {}
+  /**
+   * @param onChange 答えが変わったら呼ぶ（保存のあと）。**控えの書き出しに使う**
+   *   （`features/adviceProfileMirror.ts` の `refreshWriterProfileMirror`。
+   *   2026-09-23）。書き出しを呼び出し側の各所へ足して回ると、足し忘れた道
+   *   からの変更だけが外部AIへ届かない——`AdvicePolicyStore` と同じ理由で
+   *   ここへ1か所置く。受け取る側で待たない
+   */
+  constructor(
+    private readonly state: vscode.Memento,
+    private readonly onChange?: () => void
+  ) {}
 
   /**
    * 診断の結果。まだなら `undefined`。
@@ -94,6 +104,7 @@ export class WriterProfileStore {
       updatedAt: new Date().toISOString(),
     };
     await this.state.update(WRITER_PROFILE_KEY, profile);
+    this.onChange?.();
   }
 
   /**
@@ -105,6 +116,7 @@ export class WriterProfileStore {
    */
   async update(profile: WriterProfile): Promise<void> {
     await this.state.update(WRITER_PROFILE_KEY, profile);
+    this.onChange?.();
   }
 
   /**
@@ -121,6 +133,8 @@ export class WriterProfileStore {
   async clear(): Promise<void> {
     await this.state.update(WRITER_PROFILE_KEY, undefined);
     await this.state.update(WRITER_WELCOME_KEY, undefined);
+    // 控えからも消す（残すと、消した答えで外部AIが助言し続ける）
+    this.onChange?.();
   }
 
   /** はじめの声かけを、もう出してよいか */
