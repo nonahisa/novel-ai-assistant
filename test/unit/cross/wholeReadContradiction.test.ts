@@ -51,10 +51,10 @@ describe("クラウドへまるごと送る前の同意", () => {
   const text = describeWholeReadConsent({
     serviceName: "Gemini",
     bodyChars: 112400,
-    totalChars: 131000,
-    calls: 2,
-    inputTokens: 95000,
-    maxOutputTokens: 20000,
+    pieces: 2,
+    volume: { totalChars: 131000, bodyChars: 112400, calls: 2 },
+    tokensPerChar: 0.7,
+    maxOutputTokensPerCall: 10000,
   });
 
   test("本文がまるごと、どのサービスへ出るかを言う（名前は渡されたもの）", () => {
@@ -77,10 +77,10 @@ describe("クラウドへまるごと送る前の同意", () => {
     const blank = describeWholeReadConsent({
       serviceName: " ",
       bodyChars: 1,
-      totalChars: 1,
-      calls: 1,
-      inputTokens: 1,
-      maxOutputTokens: 1,
+      pieces: 1,
+      volume: { totalChars: 1, bodyChars: 1, calls: 1 },
+      tokensPerChar: 1,
+      maxOutputTokensPerCall: 1,
     });
     expect(blank).toContain("利用中のAIサービス");
   });
