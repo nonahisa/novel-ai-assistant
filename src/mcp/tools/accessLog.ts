@@ -10,6 +10,10 @@ import {
   type ExternalExposure,
 } from "../../core/externalAccessLog";
 import { permissionKeyOf } from "../../core/externalAccessPermission";
+import {
+  PENDING_KIND_SHORT_LABELS,
+  type PendingSettingsKind,
+} from "../../core/pendingSettingsMerge";
 
 /**
  * 外部AIが作品を触ったことを1行残す（設計書6.87.9）。
@@ -159,7 +163,17 @@ function detailOf(
   */
   if (tool === "novel.propose") {
     const name = typeof args?.name === "string" ? args.name : "";
-    return name ? `承認待ちへ置いた（${name}）` : "承認待ちへ置いた";
+    /*
+      人物以外（0.83.10）は**種類を先に**書く（「場所：王都」）。
+      同じ名前の人物と場所があると、名前だけでは何を置いたか分からない。
+      人物（省略時）はこれまでの書き方のまま
+    */
+    const kind =
+      typeof args?.recordKind === "string" && args.recordKind !== "character"
+        ? PENDING_KIND_SHORT_LABELS[args.recordKind as PendingSettingsKind]
+        : undefined;
+    const target = kind && name ? `${kind}：${name}` : name;
+    return target ? `承認待ちへ置いた（${target}）` : "承認待ちへ置いた";
   }
   /*
     画面を指した回（0.75.6）。**何を指したかを残す**——`feature` を

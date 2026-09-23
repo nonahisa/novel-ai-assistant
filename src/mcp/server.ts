@@ -39,7 +39,7 @@ import {
   type OllamaGenerateInput,
   type OllamaModelsInput,
 } from "./tools/ollama";
-import { SETTINGS_PROPOSE_INPUT, settingsPropose } from "./tools/propose";
+import { SETTINGS_PROPOSE_INPUT, novelPropose } from "./tools/propose";
 import {
   NOVEL_NOTICE_INPUT,
   novelNotice,
@@ -366,17 +366,19 @@ server.registerTool(
 server.registerTool(
   "novel.propose",
   {
-    title: "人物の設定資料の更新案を、承認待ちへ置く",
+    title: "設定資料の更新案を、承認待ちへ置く",
     description:
-      "人物の設定資料の**更新案を承認待ちへ置きます**（`.aiwriter/pending-characters/`）。" +
-      "**台帳（設定/characters）は書き換えません。** 作者が VS Code の「設定資料更新分反映」で採ったときに、" +
-      "製品のマージ（話数の扱い・食い違いの記録）が走ります。" +
-      "name が台帳に居れば更新案、居なければ新規案になります（別名では引き当てません）。" +
-      "**同じ人物に作者がまだ判断していない案があれば断ります**（作者が見る前の案が消えるため）。" +
+      "設定資料の**更新案を承認待ちへ置きます**（人物は `.aiwriter/pending-characters/`、" +
+      "能力・組織・場所・世界観は `.aiwriter/pending-settings/`）。" +
+      "**台帳（設定/ の下）は書き換えません。** 作者が VS Code の「設定資料更新分反映」で採ったときに、" +
+      "製品のマージが走ります。recordKind を省くと人物です。" +
+      "人物は、name が台帳に居れば更新案、居なければ新規案になります（別名では引き当てません）。" +
+      "人物以外は台帳にある記録の更新案だけで、受け付けない欄は置かずに skipped で返します。" +
+      "**同じ記録に作者がまだ判断していない案があれば断ります**（作者が見る前の案が消えるため）。" +
       "**reason は省略できません**——作者が採否を決める材料です。",
     inputSchema: SETTINGS_PROPOSE_INPUT,
   },
-  tool("novel.propose", settingsPropose)
+  tool("novel.propose", novelPropose)
 );
 
 server.registerTool(

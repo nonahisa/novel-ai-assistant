@@ -20,9 +20,12 @@ import {
  * 作者が「更新分を反映」で中身を見て採ったものだけを入れる。
  * 形と取り込みの規則は `pendingSettingsMerge.ts` が持つ。
  *
- * **2026-09-23 の時点で、ここへ積む道はまだ無い。** 抽出は人物以外を
- * これまでどおりマージして直接保存する（`extractSettings.ts`）。
- * 出口（確かめて反映する側）を先に揃え、積む側は別に決める。
+ * **積む道は、いまは外部AIの提案（MCP `novel.propose`、0.83.10）だけ。**
+ * MCP の束は `vscode` を持てないので、この `stage` は通らず、Node の `fs` で
+ * 同じ形（`buildPendingSettingsPayload`）を書く（`mcp/tools/proposeRecord.ts`）。
+ * 抽出は人物以外をこれまでどおりマージして直接保存する（`extractSettings.ts`）。
+ * 相談からの反映（6.72）は人物だけ（P-32 が人物しか拾わない。設計書の
+ * 「人物以外の承認待ちも」の節）。
  */
 
 export interface PendingSettingsUpdate {

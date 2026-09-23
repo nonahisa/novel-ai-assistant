@@ -11,6 +11,11 @@ import {
 } from "../../core/pendingUpdateFormat";
 import { withoutRejectedRelations } from "../../core/rejectedRelations";
 import {
+  PENDING_SETTINGS_KINDS,
+  type PendingSettingsKind,
+} from "../../core/pendingSettingsMerge";
+import { recordPropose, type RecordProposeResult } from "./proposeRecord";
+import {
   FOLDER_INPUT,
   McpToolError,
   SETTINGS_SUBDIRS,
@@ -19,6 +24,9 @@ import {
 
 /**
  * 設定資料の更新案を、承認待ちへ置く（設計書6.87.16）。
+ *
+ * このファイルが持つのは**人物の道**と、種類で道を分ける入口（`novelPropose`）。
+ * 能力・組織・場所・世界観の道は `proposeRecord.ts`（0.83.10）。
  *
  * **台帳（`設定/characters/*.json`）には一切触れない。** 置くのは
  * `.aiwriter/pending-characters/` だけで、作者が製品の「更新分を反映」
@@ -83,6 +91,29 @@ const CHANGES_SCHEMA = z.looseObject({
         "書いた相手の関係は、いまの記録を置き換えます（ほかの相手の関係は残ります）。関係を消すだけの提案は受け付けません。" +
         "作者が退けた関係（人物の rejectedRelations）は足しません"
     ),
+  /*
+    **人物以外の欄**（0.83.10）。どの種類で受けるかは `proposeRecord.ts` の
+    `RECORD_PROPOSE_FIELDS` が決める（ここは外部AIへの説明だけ）。人物へ
+    渡せば、人物の白名簿が名前を挙げて断る。
+  */
+  description: z
+    .string()
+    .optional()
+    .describe("説明（能力・組織・場所）／内容（世界観）"),
+  category: z
+    .string()
+    .optional()
+    .describe(
+      "分類（能力）・種別（組織）・分類（世界観。genre・era・rule・society・culture・geography・term のどれか）"
+    ),
+  cost: z.string().optional().describe("代償（能力）"),
+  limitation: z.string().optional().describe("制約（能力）"),
+  userNames: z
+    .array(z.string())
+    .optional()
+    .describe("使い手の名前（能力）。足すだけで、いまの使い手は消えません"),
+  parent: z.string().optional().describe("上位組織（組織）"),
+  region: z.string().optional().describe("地域（場所）"),
 });
 
 /** 白名簿。**ここに無い鍵は断る**（黙って落とさない） */
@@ -101,10 +132,18 @@ type AllowedField = (typeof ALLOWED_FIELDS)[number];
 
 export const SETTINGS_PROPOSE_INPUT = {
   ...FOLDER_INPUT,
+  recordKind: z
+    .enum(["character", "ability", "organization", "location", "world"])
+    .optional()
+    .describe(
+      "どの台帳への提案か。省略すると人物（character）。" +
+        "能力（ability）・組織（organization）・場所（location）・世界観（world）は、" +
+        "台帳にある記録の更新案だけを置けます（新しく作る案は断ります）"
+    ),
   name: z
     .string()
     .describe(
-      "人物の名前。台帳にその名前の人物が居れば更新案、居なければ新規案になります（別名では引き当てません）"
+      "記録の名前（別名では引き当てません）。人物は、台帳に居れば更新案、居なければ新規案になります"
     ),
   changes: CHANGES_SCHEMA.describe(
     // 受け付ける欄は下に並んでいるので、ここでは繰り返さない（一覧を小さく保つ）
@@ -143,6 +182,37 @@ export interface SettingsProposeResult {
   /** 作者が次にすること */
   nextStep: string;
   note: string;
+}
+
+export interface NovelProposeInput extends SettingsProposeInput {
+  recordKind?: "character" | PendingSettingsKind;
+}
+
+/**
+ * `novel.propose` の入口。**種類で道を分けるだけ**で、判断は各道が持つ。
+ *
+ * 人物（省略時）はこれまでどおり `settingsPropose`（`pending-characters/`）。
+ * 人物以外は `recordPropose`（`pending-settings/`。0.83.10）。道を1本の
+ * 関数に混ぜないのは、人物の道に1文字も触らずに済ませるため——人物の
+ * 承認待ちは包みの形も置き場も違い、新規案・関係・退けた関係を持つ。
+ */
+export function novelPropose(
+  input: NovelProposeInput & { recordKind: PendingSettingsKind }
+): RecordProposeResult;
+export function novelPropose(
+  input: NovelProposeInput
+): SettingsProposeResult | RecordProposeResult;
+export function novelPropose(
+  input: NovelProposeInput
+): SettingsProposeResult | RecordProposeResult {
+  const kind = input.recordKind ?? "character";
+  if (kind === "character") return settingsPropose(input);
+  if (!(PENDING_SETTINGS_KINDS as readonly string[]).includes(kind)) {
+    throw new McpToolError(
+      `recordKind は character・${PENDING_SETTINGS_KINDS.join("・")} のどれかです: ${String(kind)}`
+    );
+  }
+  return recordPropose({ ...input, recordKind: kind });
 }
 
 export function settingsPropose(
