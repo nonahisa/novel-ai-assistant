@@ -49,6 +49,7 @@ import {
   toLfOffset,
 } from "../core/eolSpace";
 import { createEditQueue } from "../core/editQueue";
+import { createBurstGate } from "../core/burstGate";
 import {
   currentCountMode,
   excludeRubyFromCount,
@@ -1374,6 +1375,12 @@ export class ManuscriptEditorProvider
      * ふつうのエディタと同じで、**戻した箇所へカーソルが行く**のが正しい。
      */
     let undoCaret: number | undefined;
+    /*
+      外からの変更の記録は、**ひと続きの最初の1回だけ**書く（0.81.4）。
+      同じ原稿を普通のエディタでも開いて打つと、1文字ごとに1行入っていた。
+      5秒手が止まれば、ひと続きが終わったと見る
+    */
+    const externalChangeGate = createBurstGate(5000);
 
     subscriptions.push(
       vscode.workspace.onDidChangeTextDocument((event) => {
@@ -1403,10 +1410,18 @@ export class ManuscriptEditorProvider
         // 画面が捨てているのかを切り分ける手がかりが無かった。
         // 自分の applyEdit による変更は毎打鍵で起きるので残さない
         if (!selfEditing && !undone && event.contentChanges.length > 0) {
-          void this.logForDocument(
-            document,
-            `原稿エディタ：${paths.basename(fromUri(document.uri))} が外で変わったので画面へ送り直します（${event.contentChanges.length}か所）`
-          );
+          // **普通のエディタで打っている間は、ひと続きの最初の1回だけ**（0.81.4）。
+          // 前のひと続きで書かなかった回数を添える（黙って減らさない）
+          const burst = externalChangeGate.hit(Date.now());
+          if (burst) {
+            void this.logForDocument(
+              document,
+              `原稿エディタ：${paths.basename(fromUri(document.uri))} が外で変わったので画面へ送り直します（${event.contentChanges.length}か所）` +
+                (burst.skippedBefore > 0
+                  ? `。前の続けざまの変更${burst.skippedBefore}回は記録を省きました`
+                  : "")
+            );
+          }
         }
         scheduleSend();
       }),

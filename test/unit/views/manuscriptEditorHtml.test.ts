@@ -214,6 +214,42 @@ describe("日本語入力を壊さない", () => {
     expect(run.isOwnEcho("T3")).toBe(false);
   });
 
+  /**
+   * 0.81.4（既知の残り）：原稿エディタと普通のエディタで同じ原稿を開いて、
+   * **普通のエディタのほうで打つと、1文字ごとに操作ログへ1行入った**
+   * （「外から届いた本文で組み直します」）。この記録はカーソルが飛ぶ経路を
+   * 確かめるためのもので、飛んで困るのは**原稿エディタで打っているとき**だけ
+   * である。よそで打っている間の組み直しは起きて当然なので、書かない。
+   */
+  it("よそのエディタで打っている間（この画面に焦点が無い）は、組み直しを記録しない", () => {
+    const start = code.indexOf("const sentHistory = [];");
+    const end = code.indexOf("/** 変換中に外から届いた本文");
+    const block = code.slice(start, end);
+    const make = (focused: boolean) => {
+      const posted: unknown[] = [];
+      const run = new Function(
+        "vscode",
+        "document",
+        "let lastSent = null;" + block + "return { logRebuildFromIncoming };"
+      )(
+        { postMessage: (message: unknown) => posted.push(message) },
+        { hasFocus: () => focused }
+      ) as {
+        logRebuildFromIncoming: (where: string, text: string, length: number) => void;
+      };
+      return { run, posted };
+    };
+
+    const away = make(false);
+    for (let i = 0; i < 5; i++) away.run.logRebuildFromIncoming("打つ", `本文${i}`, 3);
+    expect(away.posted).toEqual([]);
+
+    // この画面で打っているときは、これまでどおり記録する（飛んだ経路を追う）
+    const here = make(true);
+    here.run.logRebuildFromIncoming("打つ", "本文", 0);
+    expect(here.posted).toHaveLength(1);
+  });
+
   it("外からの本文を受け入れるときは、返事の照合をやり直す（forgetSent）", () => {
     const take = code.slice(code.indexOf("function takeIncoming("));
     expect(take.slice(0, 500)).toContain("forgetSent();");

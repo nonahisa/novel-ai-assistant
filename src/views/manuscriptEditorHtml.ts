@@ -996,8 +996,15 @@ ruby > rt {
    * **控えが0件なら、isOwnEcho が捨てた直後**という筋が濃い
    * （上の断り書き）。届いた字数と画面の字数を添えるのは、
    * 「1打鍵ぶんの差」なのか「まったく別の本文」なのかを分けるためである。
+   *
+   * **この画面に焦点が無いときは書かない**（0.81.4）。同じ原稿を普通の
+   * エディタでも開き、そちらで打つと、**1文字ごとに**本文が届いて組み直す
+   * ——操作ログが1打鍵1行で埋まっていた。カーソルが飛んで困るのは、この
+   * 画面で打っているときだけである。よそで打っている間の組み直しは起きて
+   * 当然なので、手がかりにならない。
    */
   function logRebuildFromIncoming(where, text, currentLength) {
+    if (typeof document.hasFocus === "function" && !document.hasFocus()) return;
     vscode.postMessage({
       type: "log",
       text:
