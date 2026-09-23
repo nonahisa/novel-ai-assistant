@@ -377,14 +377,21 @@ const APPLY_RENAME_COMMAND = "novelai.applyRenameToRecords";
  * 片方だけ古くなる）。作品は付け替えた作品を指して渡す——引数なしで
  * 呼ぶと、作品が複数あるときに訊き直してしまう。
  */
-export function announceRenameProposals(work: WorkEntry, issueCount: number): void {
+export function announceRenameProposals(
+  work: WorkEntry,
+  issueCount: number,
+  /** 0件のとき、どの名前が本文に無かったのかを言うため（0.81.4） */
+  oldName?: string
+): void {
   const label = findAction(APPLY_RENAME_COMMAND)?.label ?? "資料にも反映";
+  const notFound = oldName
+    ? `本文に「${oldName}」は見つかりませんでした。`
+    : "本文に置き換えるところはありませんでした。";
   const message =
     issueCount > 0
       ? `本文の置き換え ${issueCount}件を提案パネルに出しました。` +
         `適用が済んだら「${label}」を押してください。`
-      : "本文に置き換えるところはありませんでした。" +
-        `「${label}」で資料だけ直せます。`;
+      : notFound + `「${label}」で資料だけ直せます。`;
   void vscode.window.showInformationMessage(message, label).then((answer) => {
     if (answer !== label) return;
     void vscode.commands.executeCommand(APPLY_RENAME_COMMAND, { type: "work", work });
@@ -416,17 +423,17 @@ export function describeRenameScope(
  * **取り消し方を必ず添える。** 何十話ぶんを書き換える操作なので、
  * 元へ戻せることが分かっていないと押せない。
  */
-async function confirmScope(
+export async function confirmScope(
   scanned: Omit<RenameCharacterResult, "pending">,
   oldName: string,
   newName: string
 ): Promise<boolean> {
   if (scanned.issues.length === 0) {
-    vscode.window.showInformationMessage(
-      `本文に「${oldName}」は見つかりませんでした。` +
-        "資料だけを直すなら「人物名変更の資料反映」を実行してください。"
-    );
-    // 本文が0件でも資料は直せる。待ちは残したいので、進んだことにする
+    // 本文が0件でも資料は直せる。待ちは残したいので、進んだことにする。
+    // **ここでは知らせを出さない**（0.81.4）。前はここで「見つかりませんでした…
+    // 実行してください」を出し、そのあと `announceRenameProposals` のボタン付きの
+    // 知らせも出て、同じことを2回言っていた。資料へ進むボタンが意味を持つのは
+    // 後者なので、そちらへまとめる
     return true;
   }
 

@@ -1,6 +1,9 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { announceRenameProposals } from "../../../src/features/nameRename";
+import {
+  announceRenameProposals,
+  confirmScope,
+} from "../../../src/features/nameRename";
 import { findAction } from "../../../src/views/actionList";
 import type { WorkEntry } from "../../../src/models/types";
 import { commands, window } from "../support/vscodeStub";
@@ -87,5 +90,28 @@ describe("付け替えの知らせから資料への反映へ", () => {
     const returned: unknown = announceRenameProposals(work, 2);
     expect(returned).toBeUndefined();
     expect(ran).toEqual([]);
+  });
+});
+
+describe("本文に当たりが無いときの知らせ（0.81.4）", () => {
+  /**
+   * 0.76.7 の報告：本文に当たりが0件だと、ボタンの無い「見つかりませんでした…
+   * 実行してください」が先に出て、そのあとボタン付きの知らせがもう1つ出た。
+   * 同じことを2回言われるうえ、先の1つはメニューを探させる古い言い方だった。
+   * **知らせは1つにまとめ、資料へ進むボタンの付いたほうだけを残す。**
+   */
+  test("走査の確認と完了の知らせを通しても、知らせは1つだけ", async () => {
+    const proceed = await confirmScope(
+      { issues: [], fileCount: 0, conflicted: [] },
+      "真田",
+      "源"
+    );
+    announceRenameProposals(work, 0, "真田");
+    expect(proceed).toBe(true);
+    expect(shown).toHaveLength(1);
+    // 残る1つは、資料への反映へ進めるボタン付き
+    expect(shown[0].items).toEqual([findAction(APPLY)?.label]);
+    // どの名前が無かったのかは、残る知らせで言う
+    expect(shown[0].message).toContain("「真田」");
   });
 });

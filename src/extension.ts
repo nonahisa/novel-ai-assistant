@@ -4884,7 +4884,7 @@ export async function activate(
       proposalPanel.showResults(work, result.issues, "名前の付け替え");
     }
     // 資料への反映へそのまま進めるボタンを付ける（押さなければ何もしない。待たない）
-    announceRenameProposals(work, result.issues.length);
+    announceRenameProposals(work, result.issues.length, result.pending.oldName);
   };
 
   context.subscriptions.push(
