@@ -259,6 +259,21 @@ export interface ReaderStatsMetricInfo {
    * なろうの「評価平均」だけが小数になるので、欄ごとに分ける。
    */
   fractionDigits?: number;
+  /**
+   * **日別の行では、その日の増減として負も受ける欄**（残課題 B11 の続き、
+   * 作者の裁定 2026-09-23）。
+   *
+   * Narou.fun の日ごとの表は累計で、貼り込み係が前の日との差を取って日別の
+   * 行にする。ブックマークは外されることがあるので、**減った日は負になる**
+   * ——作者の裁定は「マイナスとして残す」。
+   *
+   * **負を受けるのは、この印のある欄の、日別（`period: "day"`）の行だけ。**
+   * その時点の値・月別・年別・累計はこれまでどおり0以上。PVのように減りようの
+   * ない欄にも付けない（負が入れば、それは読み違いである）。整数だけなのも同じ。
+   * 手入力（`validateReaderStatsValue`）は緩めない——打ち間違いの「-」を黙って
+   * 入れないため。
+   */
+  dailyChange?: true;
 }
 
 /**
@@ -277,7 +292,8 @@ export const READER_STATS_METRICS: readonly (ReaderStatsMetricInfo & {
 })[] = [
   { key: "pv", label: "PV", example: "1234" },
   { key: "unique", label: "ユニーク", example: "567" },
-  { key: "bookmarks", label: "ブックマーク", example: "89" },
+  // 日別の行では増減（外された日は負。Narou.fun の日ごとの表から）
+  { key: "bookmarks", label: "ブックマーク", example: "89", dailyChange: true },
   { key: "points", label: "評価", unit: "pt", example: "780" },
   { key: "likes", label: "いいね", example: "42" },
   { key: "comments", label: "コメント", example: "3" },
@@ -320,7 +336,14 @@ export const SITE_READER_STATS_METRICS: Readonly<
 > = {
   narou: [
     { key: "narou_raters", label: "評価者数", unit: "人", example: "12" },
-    { key: "narou_ratingPoints", label: "評価ポイント", unit: "pt", example: "120" },
+    // 日別の行では増減（Narou.fun の日ごとの表の「評価」＝評価P。評価の取り消しで減りうる）
+    {
+      key: "narou_ratingPoints",
+      label: "評価ポイント",
+      unit: "pt",
+      example: "120",
+      dailyChange: true,
+    },
     {
       key: "narou_ratingAverage",
       label: "評価平均",
@@ -816,7 +839,9 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
         ).trim();
         const read = parseReaderStatsMetrics(
           entry.metrics,
-          `${entryPath}.metrics`
+          `${entryPath}.metrics`,
+          // 負を受けるかは粒度で決まる（日別の増減の欄だけ）
+          entry.period
         );
         /*
           **知らない指標しか無い行は、この行だけを読み飛ばす**（0.33.9）。
@@ -891,7 +916,8 @@ export function readPostingLedger(raw: unknown): PostingLedgerReadResult {
  */
 function parseReaderStatsMetrics(
   raw: unknown,
-  path: string
+  path: string,
+  period?: unknown
 ): { metrics: ReaderStatsMetrics; sawUnknown: boolean } {
   const value = objectValue(raw, path);
   const metrics: ReaderStatsMetrics = {};
@@ -899,7 +925,7 @@ function parseReaderStatsMetrics(
   for (const info of ALL_READER_STATS_METRICS) {
     const entry = value[info.key];
     if (entry === undefined) continue;
-    if (!isReaderStatsValue(entry, info)) invalid(`${path}.${info.key}`);
+    if (!isReaderStatsValue(entry, info, period)) invalid(`${path}.${info.key}`);
     metrics[info.key] = entry;
   }
   const known = new Set<string>(
@@ -1421,17 +1447,36 @@ export function validateRankInput(value: string): string | null {
  * **小数を受けるのは、小数の欄だけ**（`fractionDigits` を持つ欄）。
  * PVやブックマークまで緩めると、打ち間違いの「1.234」が黙って入る。
  * 0は「読んだが0だった」という意味を持つので受ける（順位の1以上とは違う）。
+ *
+ * **負を受けるのは、日別の増減の欄だけ**（`ReaderStatsMetricInfo.dailyChange`
+ * の欄の、`period: "day"` の行。作者の裁定 2026-09-23）。粒度を渡さない
+ * 呼び方では、これまでどおり0以上だけを受ける。
  */
-function isReaderStatsValue(
+export function isReaderStatsValue(
   value: unknown,
-  info: ReaderStatsMetricInfo
+  info: ReaderStatsMetricInfo,
+  period?: unknown
 ): value is number {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    return false;
-  }
+  if (typeof value !== "number" || !Number.isFinite(value)) return false;
+  if (value < 0 && !acceptsNegativeReaderStats(info, period)) return false;
+  // 負の小数は、小数の欄でも受けない（増減の欄はどれも整数の欄）
+  if (value < 0) return Number.isSafeInteger(value);
   if (info.fractionDigits === undefined) return Number.isSafeInteger(value);
   // 小数の欄でも、桁が溢れた値は「読めた」と言えない
   return value <= Number.MAX_SAFE_INTEGER;
+}
+
+/**
+ * その欄が、その粒度の行で負を受けるか（日別の増減の欄だけ）。
+ *
+ * 粒度は**読んだまま**（台帳の生の値かもしれない）受け、`"day"` のときだけ
+ * 認める——書き間違いの粒度で負が通る抜け道を作らない。
+ */
+export function acceptsNegativeReaderStats(
+  info: ReaderStatsMetricInfo,
+  period: unknown
+): boolean {
+  return info.dailyChange === true && period === "day";
 }
 
 /** 数値が1つでも入っているか（共通・サイト固有のどちらでもよい） */
@@ -1557,7 +1602,7 @@ export function assertReaderStatsRecord(
   }
   for (const info of ALL_READER_STATS_METRICS) {
     const value = record.metrics[info.key];
-    if (value !== undefined && !isReaderStatsValue(value, info)) {
+    if (value !== undefined && !isReaderStatsValue(value, info, record.period)) {
       invalid(`${path}.metrics.${info.key}`);
     }
   }
@@ -1646,6 +1691,82 @@ export function withReaderStats(
     ...ledger,
     readerStats: [...(ledger.readerStats ?? []), next],
   };
+}
+
+/**
+ * 取り込もうとしている記録が、**台帳に積んである数の繰り返し**か
+ * （残課題 B11 の続き、作者の裁定 2026-09-23「同じ表を2度取り込んでも二重に積まない」）。
+ *
+ * 台帳は追記だけで畳まない（`withReaderStats`）。ただし、次の2つは
+ * 「いつ何件だったか」の履歴に何も足さないので積まない：
+ *
+ * 1. **まったく同じ記録**（読み取り日時・範囲・粒度・期間・数・出どころが同じ）。
+ *    Narou.fun の封筒は記録の日時が「最終取得日時」なので、同じページを2度
+ *    押すと、作品全体の数まで同じ日時・同じ数で届く
+ * 2. **日別の増減の行で、その日の数がいま見えている数と同じ**もの。日ごとの表は
+ *    直近30日なので、毎日取り込むと29日ぶんが重なる——読み取り日時が違っても、
+ *    締まった日の増減は同じ数のまま届く。比べる相手は、グラフが採る記録
+ *    （その日の、読み取り日時がいちばん新しい記録）。**数が違えば積む**
+ *    （サイトが数え直した。グラフは新しいほうを採る＝日付で上書きに見える）
+ *
+ * 比べるときにメモは見ない（メモは取り込みの側が付ける説明で、数ではない）。
+ * バックアップの取り込み（`backupMerge.ts` の「直前と同じなら積まない」）と同じ考え方。
+ */
+export function repeatsReaderStats(
+  ledger: PostingLedger,
+  record: ReaderStatsRecord
+): boolean {
+  const rows = ledger.readerStats ?? [];
+  const sameKey = (row: ReaderStatsRecord): boolean =>
+    row.site === record.site &&
+    row.scope === record.scope &&
+    row.episode === record.episode &&
+    row.period === record.period &&
+    row.periodKey === record.periodKey &&
+    row.source === record.source;
+
+  if (
+    rows.some(
+      (row) =>
+        sameKey(row) &&
+        row.readAt === record.readAt &&
+        (row.updatedAt ?? "") === (record.updatedAt ?? "") &&
+        sameReaderStatsMetrics(row.metrics, record.metrics)
+    )
+  ) {
+    return true;
+  }
+
+  const isDailyChange =
+    record.scope === "work" &&
+    record.period === "day" &&
+    Object.keys(record.metrics).some(
+      (key) => readerStatsMetricInfo(key)?.dailyChange === true
+    );
+  if (!isDailyChange) return false;
+  let shown: { row: ReaderStatsRecord; time: number } | undefined;
+  for (const row of rows) {
+    if (!sameKey(row)) continue;
+    const time = Date.parse(row.readAt);
+    if (Number.isNaN(time)) continue;
+    // 同じ日時ならあとから足したほう（グラフの `periodChart` と同じ拾い方）
+    if (!shown || time >= shown.time) shown = { row, time };
+  }
+  return (
+    shown !== undefined && sameReaderStatsMetrics(shown.row.metrics, record.metrics)
+  );
+}
+
+/** 同じ欄に同じ数が入っているか（欄の有る無しも比べる） */
+function sameReaderStatsMetrics(
+  left: ReaderStatsMetrics,
+  right: ReaderStatsMetrics
+): boolean {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  for (const key of keys) {
+    if (left[key] !== right[key]) return false;
+  }
+  return true;
 }
 
 /** そのサイトの反応を、新しい順で返す（画面はこの順に並べる） */

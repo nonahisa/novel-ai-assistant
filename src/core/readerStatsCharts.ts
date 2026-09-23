@@ -1,4 +1,8 @@
-import type { ReaderStatsPeriod, ReaderStatsRecord } from "../models/posting";
+import {
+  ALL_READER_STATS_METRICS,
+  type ReaderStatsPeriod,
+  type ReaderStatsRecord,
+} from "../models/posting";
 import { latestEpisodeValues } from "./readerRates";
 
 /**
@@ -45,7 +49,40 @@ export interface ReaderCharts {
   year: ReaderChart | null;
   /** 作品全体のPV（その時点の値）を、取り込みの日時ごとに（累計の伸び） */
   total: ReaderChart | null;
+  /**
+   * 日・月・年ごとの**増減**（ブックマーク・評価ポイント。残課題 B11 の続き）。
+   * **材料のある組だけ**が、欄の順（台帳の表の順）・日→月→年の順に並ぶ。
+   * 値は負のこともある（ブックマークが外された日）。無ければ空の配列
+   */
+  changes: ReaderChangeChart[];
 }
+
+/** 増減のグラフ1つ（どの欄の、どの粒度か） */
+export interface ReaderChangeChart extends ReaderChart {
+  /** 台帳の欄の名前（`bookmarks`・`narou_ratingPoints`） */
+  metric: string;
+  /** 画面に出す欄の名前（「ブックマーク」。台帳の表のまま） */
+  label: string;
+  /** 数のあとに付ける単位（評価ポイントの「pt」）。無ければ空 */
+  unit: string;
+  period: Exclude<ReaderStatsPeriod, "total">;
+}
+
+/**
+ * 増減として描く欄（台帳の表で `dailyChange` の印がある欄）。
+ *
+ * **一覧を写さない。** 台帳の表（`ALL_READER_STATS_METRICS`）が唯一の置き場で、
+ * 負を受ける欄とグラフに描く欄が食い違わないようにする。
+ */
+const CHANGE_METRICS = ALL_READER_STATS_METRICS.filter(
+  (info) => info.dailyChange === true
+);
+
+const CHART_PERIODS: readonly Exclude<ReaderStatsPeriod, "total">[] = [
+  "day",
+  "month",
+  "year",
+];
 
 /**
  * そのサイトのグラフを組む。
@@ -64,6 +101,22 @@ export function buildReaderCharts(
     month: periodChart(records, "month"),
     year: periodChart(records, "year"),
     total: totalChart(records),
+    changes: CHANGE_METRICS.flatMap((info) =>
+      CHART_PERIODS.flatMap((period): ReaderChangeChart[] => {
+        const chart = periodChart(records, period, info.key);
+        return chart
+          ? [
+              {
+                ...chart,
+                metric: info.key,
+                label: info.label,
+                unit: info.unit ?? "",
+                period,
+              },
+            ]
+          : [];
+      })
+    ),
   };
 }
 
@@ -86,20 +139,26 @@ function episodeChart(
 }
 
 /**
- * 日・月・年の作品全体のPV。**同じ期間は、いちばん新しい取り込みの値**。
+ * 日・月・年の作品全体の数（既定はPV）。**同じ期間は、いちばん新しい取り込みの値**。
  *
  * 期間の見出しは「2026-09-05」の形に揃えてあるので、文字列の順に並べれば
  * 日付の順になる。
+ *
+ * **足し合わせない。** 増減（ブックマーク・評価ポイント）も同じ拾い方をする
+ * ——Narou.fun の日ごとの表は直近30日なので、毎日取り込むと同じ日が何度も
+ * 台帳に入る（数が同じなら取り込みの側で積まないが、サイトが数え直した日は
+ * 2件になる）。足すと同じ日の増減が二重に数えられる。
  */
 function periodChart(
   records: readonly ReaderStatsRecord[],
-  period: Exclude<ReaderStatsPeriod, "total">
+  period: Exclude<ReaderStatsPeriod, "total">,
+  metric = "pv"
 ): ReaderChart | null {
   const byKey = new Map<string, { value: number; time: number }>();
   for (const record of records) {
     if (record.scope !== "work" || record.period !== period) continue;
     const key = record.periodKey;
-    const value = record.metrics.pv;
+    const value = record.metrics[metric];
     if (key === undefined || value === undefined) continue;
     const time = Date.parse(record.readAt);
     // 日時の読めない行は、どちらが新しいか決められないので使わない

@@ -1,6 +1,7 @@
 import {
   ALL_READER_STATS_METRICS,
   hasReaderStatsMetrics,
+  isReaderStatsValue,
   isKnownPostingSite,
   isReaderStatsPeriodKey,
   isReaderStatsUpdatedAt,
@@ -90,6 +91,29 @@ export const READER_STATS_ENVELOPE_SOURCES = {
 
 export type ReaderStatsEnvelopeSource = keyof typeof READER_STATS_ENVELOPE_SOURCES;
 
+/**
+ * 封筒の記録の日時（`readAt`）が何の日時か（残課題 B11 の続き、作者の裁定 2026-09-23）。
+ *
+ * - `fetched`：**出どころのサイトが数を取ってきた日時**（Narou.fun の「最終取得日時」）
+ * - `clicked`：作者が貼り込み係のボタンを押した時刻（最終取得日時を読めなかったとき）
+ *
+ * **欄が無ければ「押した時刻」**（これまでの封筒はすべてこれ）。省いてよい欄なので
+ * 封筒の版数は上げない——知らない母艦は読み飛ばし、`readAt` を押した時刻として扱う
+ * （これまでと同じ）。**知らない値は推測で読まずに断る**（出どころと同じ流儀）。
+ */
+export const READER_STATS_READ_AT_BASES = ["fetched", "clicked"] as const;
+
+export type ReaderStatsReadAtBasis = (typeof READER_STATS_READ_AT_BASES)[number];
+
+function isReaderStatsReadAtBasis(
+  value: unknown
+): value is ReaderStatsReadAtBasis {
+  return (
+    typeof value === "string" &&
+    (READER_STATS_READ_AT_BASES as readonly string[]).includes(value)
+  );
+}
+
 function isReaderStatsEnvelopeSource(
   value: unknown
 ): value is ReaderStatsEnvelopeSource {
@@ -125,8 +149,13 @@ export interface ReaderStatsEnvelope {
    * として照合してしまう。
    */
   workId?: string;
-  /** 読み取った日時（ISO8601） */
+  /**
+   * 読み取った日時（ISO8601）。出どころのある封筒では、**出どころのサイトが
+   * 数を取ってきた日時**のことがある（`readAtBasis`）
+   */
   readAt: string;
+  /** `readAt` が何の日時か。無ければ押した時刻（これまでの封筒） */
+  readAtBasis?: ReaderStatsReadAtBasis;
   /** 1回の読み取りで拾えた行。**1件も無い封筒は受け取らない** */
   entries: ReaderStatsEnvelopeEntry[];
 }
@@ -198,6 +227,7 @@ export function buildReaderStatsEnvelope(input: {
   source?: ReaderStatsEnvelopeSource;
   workId?: string | null;
   readAt: string;
+  readAtBasis?: ReaderStatsReadAtBasis;
   entries: readonly ReaderStatsEnvelopeEntry[];
 }): string {
   const workId = (input.workId ?? "").trim();
@@ -207,6 +237,7 @@ export function buildReaderStatsEnvelope(input: {
     ...(input.source ? { source: input.source } : {}),
     ...(workId ? { workId } : {}),
     readAt: input.readAt,
+    ...(input.readAtBasis ? { readAtBasis: input.readAtBasis } : {}),
     entries: input.entries,
   });
 }
@@ -289,6 +320,14 @@ export function parseReaderStatsEnvelope(
   if (typeof readAt !== "string" || !readAt.trim()) {
     return reject("封筒に読み取った日時が入っていませんでした。");
   }
+  // 記録の日時の印（残課題 B11 の続き）。`null` は「欄なし」＝押した時刻
+  const readAtBasis = absent(value.readAtBasis) ? undefined : value.readAtBasis;
+  if (readAtBasis !== undefined && !isReaderStatsReadAtBasis(readAtBasis)) {
+    return reject(
+      "封筒の読み取った日時の種類が分かりませんでした（貼り込み係と拡張機能の版が" +
+        "食い違っているかもしれません）。どちらかを更新してからお試しください。"
+    );
+  }
   if (!Array.isArray(entries) || entries.length === 0) {
     return reject("封筒に読者の反応が1件も入っていませんでした。");
   }
@@ -328,6 +367,7 @@ export function parseReaderStatsEnvelope(
       ...(source !== undefined ? { source } : {}),
       ...(trimmedWorkId ? { workId: trimmedWorkId } : {}),
       readAt: readAt.trim(),
+      ...(readAtBasis !== undefined ? { readAtBasis } : {}),
       entries: parsedEntries,
     },
   };
@@ -397,7 +437,8 @@ function parseEntry(raw: unknown): ReaderStatsEnvelopeEntry | undefined {
     return undefined;
   }
 
-  const metrics = parseMetrics(value.metrics);
+  // 負を受けるかは粒度で決まる（日別の増減の欄だけ。台帳と同じ線）
+  const metrics = parseMetrics(value.metrics, period);
   if (!metrics) return undefined;
 
   /*
@@ -440,7 +481,10 @@ function parseEntry(raw: unknown): ReaderStatsEnvelopeEntry | undefined {
  * 「指示の言葉が答えの中身として返ってくる」のと同じことが、封筒でも起きうる
  * ——`"pv": "1,234"` のような文字列を数として書き込むと、台帳が壊れる。
  */
-function parseMetrics(raw: unknown): ReaderStatsMetrics | undefined {
+function parseMetrics(
+  raw: unknown,
+  period: unknown
+): ReaderStatsMetrics | undefined {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     return undefined;
   }
@@ -450,14 +494,13 @@ function parseMetrics(raw: unknown): ReaderStatsMetrics | undefined {
   for (const info of ALL_READER_STATS_METRICS) {
     const entry = value[info.key];
     if (entry === undefined) continue;
-    if (typeof entry !== "number" || !Number.isFinite(entry) || entry < 0) {
-      return undefined;
-    }
-    // **小数を受けるのは小数の欄だけ**（台帳の `isReaderStatsValue` と同じ線）
-    if (info.fractionDigits === undefined && !Number.isSafeInteger(entry)) {
-      return undefined;
-    }
-    if (entry > Number.MAX_SAFE_INTEGER) return undefined;
+    /*
+      **台帳と同じ関所を通す**（`isReaderStatsValue`）。小数を受けるのは小数の欄
+      だけ、負を受けるのは日別の増減の欄（ブックマーク・評価ポイント）の日別の行
+      だけ（残課題 B11 の続き）。ここで別の線を引くと、封筒は通ったのに台帳へ
+      書く段で例外になる（作者には理由の分からない失敗になる）。
+    */
+    if (!isReaderStatsValue(entry, info, period)) return undefined;
     metrics[info.key] = entry;
   }
   // 中身の無い行は受け取らない（台帳の側と同じ基準）

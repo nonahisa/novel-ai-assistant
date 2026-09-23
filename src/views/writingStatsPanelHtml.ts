@@ -832,7 +832,28 @@ function renderReaderCharts(charts) {
     blocks.push(readerChartBlock('作品全体のPV（取り込みごとの累計）',
       readerLineChart(charts.total.points), ''));
   }
+  /*
+    ブックマーク・評価ポイントの増減（残課題 B11 の続き。Narou.fun の日ごとの表から）。
+    **減った日は0の線より下へ、赤で描く**（執筆量のグラフの「削った日」と同じ描き方）。
+    数には符号を付ける——増減のグラフで「1」と書くと、増えたのか減ったのか読めない。
+  */
+  const periodNames = { day: '日', month: '月', year: '年' };
+  (charts.changes || []).forEach((chart) => {
+    const name = periodNames[chart.period] || '';
+    const suffix = chart.unit ? chart.unit : ' ' + chart.label;
+    const fell = chart.points.some((point) => point.value < 0);
+    blocks.push(readerChartBlock(name + 'ごとの' + chart.label + 'の増減（作品全体）',
+      readerBarChart(chart.points, suffix, true),
+      fell ? '0の線より下の赤い棒は、前の' + name + 'より減った' + name + '。' : ''));
+  });
   return blocks.join('');
+}
+
+/** 増減の数に符号を付ける（「+2」「−1」「0」）。負の記号は全角の幅で読みやすいマイナス */
+function readerSignedCount(value) {
+  if (value > 0) return '+' + formatCount(value);
+  if (value < 0) return '−' + formatCount(-value);
+  return '0';
 }
 
 function readerChartBlock(title, svgHtml, note) {
@@ -861,8 +882,15 @@ function readerTickIndices(points, slot) {
  *
  * 話ごとは219本になることがあるので、本数が多いときは棒を細くする
  * （はみ出たぶんは .chart-wrap が横に送れる）。
+ *
+ * **負の値も描ける**（残課題 B11 の続き。ブックマークの増減）。負の棒は0の線より
+ * 下へ、赤（.bar.negative）で描き、0の線はその分だけ上がる。負が無ければ0の線は
+ * 下端のままで、PVのグラフはこれまでと同じ見た目になる。
+ *
+ * @param suffix 数のあとに付ける文字（既定は「 PV」）
+ * @param signed 真なら数に符号を付ける（増減のグラフ）
  */
-function readerBarChart(points) {
+function readerBarChart(points, suffix, signed) {
   const count = points.length;
   const barWidth = count > 60 ? 4 : count > 30 ? 10 : 26;
   const gap = count > 60 ? 1 : count > 30 ? 3 : 6;
@@ -874,23 +902,37 @@ function readerBarChart(points) {
   const plotHeight = 140;
   const width = padLeft + padRight + count * slot;
   const height = padTop + plotHeight + padBottom;
-  const maxValue = Math.max(1, ...points.map((point) => point.value));
+  const values = points.map((point) => point.value);
+  const minValue = Math.min(0, ...values);
+  // 負の無いグラフは、これまでどおり上端を1以上にする（0だけの日に高さ0で割らない）
+  const maxValue = Math.max(minValue < 0 ? 0 : 1, ...values);
+  const span = maxValue - minValue || 1;
   const baseY = padTop + plotHeight;
+  // 0の線。負の日があれば、その分だけ上がる
+  const zeroY = padTop + (maxValue / span) * plotHeight;
+  const tail = suffix === undefined ? ' PV' : suffix;
+  const show = (value) => (signed ? readerSignedCount(value) : formatCount(value));
 
   const parts = [];
-  parts.push('<line class="axis" x1="' + padLeft + '" y1="' + baseY + '" x2="' + width + '" y2="' + baseY + '" />');
-  parts.push('<text class="tick" x="4" y="' + (padTop + 8) + '">' + formatCount(maxValue) + '</text>');
-  parts.push('<text class="tick" x="4" y="' + (baseY + 3) + '">0</text>');
+  parts.push('<line class="axis" x1="' + padLeft + '" y1="' + zeroY + '" x2="' + width + '" y2="' + zeroY + '" />');
+  if (maxValue > 0) {
+    parts.push('<text class="tick" x="4" y="' + (padTop + 8) + '">' + show(maxValue) + '</text>');
+  }
+  parts.push('<text class="tick" x="4" y="' + (zeroY + 3) + '">0</text>');
+  if (minValue < 0) {
+    parts.push('<text class="tick" x="4" y="' + (baseY + 3) + '">' + show(minValue) + '</text>');
+  }
 
   const shown = readerTickIndices(points, slot);
   points.forEach((point, index) => {
     const x = padLeft + index * slot;
-    const barHeight = Math.max(point.value === 0 ? 0 : 1, (point.value / maxValue) * plotHeight);
-    const y = baseY - barHeight;
+    const barHeight = Math.max(point.value === 0 ? 0 : 1, (Math.abs(point.value) / span) * plotHeight);
+    const y = point.value >= 0 ? zeroY - barHeight : zeroY;
     parts.push(
-      '<rect class="bar' + (point.marked ? ' mark' : '') + '" x="' + x + '" y="' + y +
+      '<rect class="bar' + (point.value < 0 ? ' negative' : '') + (point.marked ? ' mark' : '') +
+      '" x="' + x + '" y="' + y +
       '" width="' + barWidth + '" height="' + barHeight + '" rx="1">' +
-      '<title>' + escapeHtml(point.label + '  ' + formatCount(point.value) + ' PV') + '</title>' +
+      '<title>' + escapeHtml(point.label + '  ' + show(point.value) + tail) + '</title>' +
       '</rect>'
     );
     // 基準の話は、目盛りの間引きに関係なく棒の上へ名前を出す

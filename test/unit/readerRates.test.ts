@@ -323,6 +323,8 @@ describe("グラフの点", () => {
       month: null,
       year: null,
       total: null,
+      // 増減のグラフ（残課題 B11 の続き）も、材料が無ければ1つも無い
+      changes: [],
     });
   });
 });
