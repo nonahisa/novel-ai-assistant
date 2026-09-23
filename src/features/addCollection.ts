@@ -75,11 +75,16 @@ export async function tryRegisterAsCollection(
   // 編集者モードでは、複数作品を抱え込ませない
   if (isEditorMode()) return { handled: false };
 
+  // 比べ方は登録簿の重複の見方と同じにする（`folderKeyForComparison`。
+  // 2026-09-24）。`path.normalize` の完全一致では、ドライブ文字の大小が
+  // 違うだけの登録を「未登録」と数え、書庫ごと二重に登録できた
   const registered = new Set(
-    registry.list().map((w) => path.normalize(w.folderPath))
+    registry.list().map((w) => path.folderKeyForComparison(w.folderPath))
   );
   const scan = await withProgress("作品を探しています…", () =>
-    scanCollection(root, (folder) => registered.has(folder))
+    scanCollection(root, (folder) =>
+      registered.has(path.folderKeyForComparison(folder))
+    )
   );
 
   // **どちらとも取れるときは、作者に決めてもらう**（設計書5.7.6）。

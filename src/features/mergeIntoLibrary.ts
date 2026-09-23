@@ -65,10 +65,10 @@ export async function mergeIntoLibrary(
   if (!library) return false;
 
   const takenNames = await namesInside(library);
+  // 書庫に選んだフォルダーそのものが作品なら外す。比べ方は登録簿の
+  // 重複の見方と同じ（2026-09-24）
   const candidates = works.filter(
-    (work) =>
-      path.normalizeForComparison(work.folderPath) !==
-      path.normalizeForComparison(library)
+    (work) => !path.isSameFolder(work.folderPath, library)
   );
   const plans = planMerge(candidates, library, takenNames);
 

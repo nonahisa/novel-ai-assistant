@@ -1109,9 +1109,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * （実機、2026-09-07）。フォルダーなら同じ作品は必ず同じ場所へ落ちる
    */
   private keyOf(work: WorkEntry): string {
-    const folder = path.normalizeForComparison(work.folderPath);
+    // 比べ方は登録簿の重複の見方と同じ（`isSameFolder`。2026-09-24）
     for (const [key, entry] of this.buckets) {
-      if (path.normalizeForComparison(entry.work.folderPath) === folder) {
+      if (path.isSameFolder(entry.work.folderPath, work.folderPath)) {
         return key;
       }
     }

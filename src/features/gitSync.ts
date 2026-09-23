@@ -1513,8 +1513,10 @@ export async function showGitSyncActions(
     const target = await resolveSyncTarget(work, monitor.knownWorks());
     if (!target) return;
     // 置き場が作品フォルダーと違うなら、状態もそちらで見直す
+    // 同じ場所かは登録簿の重複の見方と同じ比べ方で見る（2026-09-24）。
+    // 文字列の完全一致だと、末尾の区切りだけ違う同じ場所で状態を読み直していた
     const scoped =
-      target.folderPath === work.folderPath
+      path.isSameFolder(target.folderPath, work.folderPath)
         ? status
         : await readSyncStatus(target.folderPath);
     // 1手進むごとに状態が変わるので、続けて次の一手を出す

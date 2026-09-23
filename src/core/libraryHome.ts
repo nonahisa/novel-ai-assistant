@@ -137,9 +137,9 @@ export function shouldOfferLibraryMerge(input: {
   // ちょうど2作目のときだけ。3作目以降は、もう勧める機会を過ぎている
   if (input.works.length !== 2) return false;
 
-  const added = path.normalizeForComparison(input.added.folderPath);
+  // 比べ方は登録簿の重複の見方と同じ（2026-09-24）
   const others = input.works.filter(
-    (work) => path.normalizeForComparison(work.folderPath) !== added
+    (work) => !path.isSameFolder(work.folderPath, input.added.folderPath)
   );
   if (others.length !== 1) return false;
 

@@ -312,17 +312,43 @@ export class WorkRegistry {
     return true;
   }
 
+  /**
+   * その場所に登録されている作品（2026-09-24）。
+   *
+   * **比べ方は `path.isSameFolder` の1か所に任せる**——ドライブ文字や
+   * フォルダー名の大小（Windows）、末尾の区切り、前後の空白が違っても
+   * 同じ作品を返す。以前は `path.normalize` の完全一致で、フォルダー選び
+   * （`c:\…`）で登録した作品に、アドレス欄から貼った `C:\…` を足すと
+   * 二重に登録できた（作者の報告）。
+   */
+  findByFolder(folderPath: string): WorkEntry | undefined {
+    return findWorkByFolder(
+      this.context.globalState.get<WorkEntry[]>(STORAGE_KEY, []),
+      folderPath
+    );
+  }
+
+  /**
+   * 登録済みなら、どの作品として登録済みかを添えて断る（2026-09-24）。
+   * 作品名が無いと、作者はどの登録と重なったのかを一覧から探すことになる。
+   */
+  private blockedAsDuplicate(works: WorkEntry[], folderPath: string): boolean {
+    const existing = findWorkByFolder(works, folderPath);
+    if (!existing) return false;
+    void vscode.window.showWarningMessage(
+      `このフォルダは「${existing.title}」としてすでに登録されています。`
+    );
+    return true;
+  }
+
   /** 既存フォルダを作品として登録する */
   async add(folderPath: string, title?: string): Promise<WorkEntry | undefined> {
     const works = this.context.globalState.get<WorkEntry[]>(STORAGE_KEY, []);
-    const normalized = path.normalize(folderPath);
+    // **保存する表記は、前後の空白と末尾の区切りだけを落とした形。**
+    // 大小は変えない（作者が見るフォルダー名と一覧の表記を揃えておく）
+    const normalized = path.tidyFolderPath(folderPath);
 
-    if (works.some((w) => path.normalize(w.folderPath) === normalized)) {
-      vscode.window.showWarningMessage(
-        "このフォルダはすでに作品として登録されています。"
-      );
-      return undefined;
-    }
+    if (this.blockedAsDuplicate(works, normalized)) return undefined;
     if (this.blockedByEditorLimit(works)) return undefined;
 
     const entry: WorkEntry = {
@@ -342,13 +368,9 @@ export class WorkRegistry {
     title?: string
   ): Promise<WorkEntry | undefined> {
     const works = this.context.globalState.get<WorkEntry[]>(STORAGE_KEY, []);
-    const normalized = path.normalize(folderPath);
-    if (works.some((w) => path.normalize(w.folderPath) === normalized)) {
-      vscode.window.showWarningMessage(
-        "このフォルダはすでに作品として登録されています。"
-      );
-      return undefined;
-    }
+    // 比べ方と保存する表記は `add` と同じ（2026-09-24）
+    const normalized = path.tidyFolderPath(folderPath);
+    if (this.blockedAsDuplicate(works, normalized)) return undefined;
     if (this.blockedByEditorLimit(works)) return undefined;
 
     const entry: WorkEntry = {
@@ -428,6 +450,21 @@ export class WorkRegistry {
   refresh(): void {
     this._onDidChange.fire();
   }
+}
+
+/**
+ * 作品の並びから、その場所の作品を引く（`WorkRegistry.findByFolder` の中身）。
+ *
+ * 登録簿そのものを持たない呼び手（登録簿の写しの一覧を受け取る所）も
+ * 同じ比べ方で引けるよう、関数として外に出してある。
+ */
+export function findWorkByFolder<T extends { folderPath: string }>(
+  works: readonly T[],
+  folderPath: string
+): T | undefined {
+  const key = path.folderKeyForComparison(folderPath);
+  if (!key) return undefined;
+  return works.find((work) => path.folderKeyForComparison(work.folderPath) === key);
 }
 
 /** 見つからない作品の知らせと、確認のダイアログに出すボタン（作品一覧の右クリックと同じ語） */

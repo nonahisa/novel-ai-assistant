@@ -225,12 +225,14 @@ export function findSiblingWorks<T extends { folderPath: string }>(
   works: readonly T[],
   self: { folderPath: string }
 ): T[] {
-  const normalizedSelf = path.normalize(self.folderPath);
-  const selfKey = path.normalizeForComparison(normalizedSelf);
+  // 自分かどうかは登録簿の重複の見方と同じ鍵で見る（2026-09-24）。
+  // 親も、前後の空白と末尾の区切りを落として整えた形から取る
+  const normalizedSelf = path.tidyFolderPath(self.folderPath);
+  const selfKey = path.folderKeyForComparison(normalizedSelf);
   const parentKey = path.normalizeForComparison(path.dirname(normalizedSelf));
   return works.filter((work) => {
-    const normalized = path.normalize(work.folderPath);
-    if (path.normalizeForComparison(normalized) === selfKey) return false;
+    const normalized = path.tidyFolderPath(work.folderPath);
+    if (path.folderKeyForComparison(normalized) === selfKey) return false;
     return path.normalizeForComparison(path.dirname(normalized)) === parentKey;
   });
 }

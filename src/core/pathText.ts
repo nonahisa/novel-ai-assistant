@@ -165,6 +165,76 @@ export function normalizeForComparison(location: string): string {
 }
 
 /**
+ * フォルダーの場所を、登録簿へ入れる形に整える（2026-09-24）。
+ *
+ * **前後の空白と末尾の区切りだけを落とす。** 大小は変えない——大小まで
+ * 畳むと、作者が見ているフォルダー名と作品一覧の表記が食い違う。
+ *
+ * 作者は、エクスプローラーのアドレス欄から場所を貼る。そのとき空白や
+ * 末尾の `\` が紛れ込み、`path.normalize` だけではどちらも残る。
+ *
+ * **根は区切りを残す**（`C:\`・`/`・`vscode-vfs://github/`）。`C:\` を
+ * `C:` にすると、Windows では「そのドライブの、いまの場所」という
+ * 別の意味に変わる。
+ */
+export function tidyFolderPath(location: string): string {
+  const trimmed = location.trim();
+  if (!trimmed) return "";
+  return stripTrailingSeparators(normalize(trimmed));
+}
+
+function stripTrailingSeparators(location: string): string {
+  if (isUriString(location)) {
+    const { head, body } = splitUri(location);
+    // 道は `/` から始まる。全部が斜線なら根なので `/` を1つ残す
+    return head + (body.replace(/\/+$/u, "") || "/");
+  }
+  const root = nodePath.parse(location).root;
+  let end = location.length;
+  // Windows の `path` は `/` も区切りとして読む。posix では `\` は名前の一部
+  while (
+    end > root.length &&
+    (location[end - 1] === nodePath.sep || location[end - 1] === "/")
+  ) {
+    end--;
+  }
+  return location.slice(0, end);
+}
+
+/**
+ * **フォルダーが同じ場所か**を比べるための鍵（2026-09-24）。
+ *
+ * `normalizeForComparison` に、前後の空白と末尾の区切りを落とすことを
+ * 足したもの。作品の登録簿の重複を `path.normalize` の完全一致で見ていたので、
+ * 次がすべて「別の場所」になり、**同じ作品を二重に登録できた**（作者の報告）。
+ *
+ * - ドライブ文字の大小（フォルダー選びは `c:`、アドレス欄から貼ると `C:`）
+ * - 末尾の `\`
+ * - フォルダー名の大小（Windows では同じフォルダー）
+ * - 前後の空白
+ *
+ * **登録簿の場所を比べる所は、すべてこれ（か `isSameFolder`）を通す。**
+ * 登録は断るのに探すと見つからない、というずれを作らないため。
+ * ファイルの場所を比べるなら `normalizeForComparison` のままでよい
+ * （ファイルの道に末尾の区切りは付かない）。
+ *
+ * 空（空白だけを含む）なら空文字を返す。
+ */
+export function folderKeyForComparison(location: string): string {
+  const tidy = tidyFolderPath(location);
+  return tidy ? normalizeForComparison(tidy) : "";
+}
+
+/**
+ * 2つのフォルダーが同じ場所か（`folderKeyForComparison` で比べる）。
+ * **どちらかが空なら false**——場所が分からないものを同じとは言わない。
+ */
+export function isSameFolder(left: string, right: string): boolean {
+  const a = folderKeyForComparison(left);
+  return a.length > 0 && a === folderKeyForComparison(right);
+}
+
+/**
  * `relative` が、`base` の外を指しているか。
  *
  * `relative(base, candidate)` の結果に対して使う。**`..${path.sep}` を

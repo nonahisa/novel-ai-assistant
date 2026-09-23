@@ -229,7 +229,9 @@ function checkValue(key: SetupArgKey, value: string): string | undefined {
 
   if (key === "title") return checkWorkTitle(value);
   if (key === "path") {
-    return isAbsolutePath(value)
+    // **前後の空白は落としてから見る**（2026-09-24）。エクスプローラーの
+    // アドレス欄から貼ると紛れ込み、` C:\…` は絶対パスに見えない
+    return isAbsolutePath(value.trim())
       ? undefined
       : "path は絶対パスで渡してください（例：C:\\Users\\…\\作品名）。";
   }
@@ -268,7 +270,7 @@ function isAbsolutePath(value: string): boolean {
 
 function assign(request: SetupRequest, key: SetupArgKey, value: string): void {
   if (key === "title") request.title = value.trim();
-  else if (key === "path") request.path = value;
+  else if (key === "path") request.path = value.trim();
   else if (key === "kind") request.kind = value as WorkKindKey;
   else if (key === "format") request.format = value as WorkFormatKey | "unset";
   else request.start = value as SetupStartMode;
@@ -314,6 +316,19 @@ export function describeSetupRequest(request: SetupRequest): string[] {
   }
   if (request.path !== undefined) lines.push(`場所：${request.path}`);
   return lines;
+}
+
+/**
+ * 「フォルダー登録」の段で、渡された場所が**もう登録済み**だったときの知らせ
+ * （作者の報告、2026-09-24）。
+ *
+ * **失敗や警告で止めない。** 作者が既にあるフォルダーを挙げるのは自然なことで、
+ * 登録済みならこの段は済んでいる。止めると、Claude Code は作者から
+ * 「うまくいかなかった」と聞いて同じ依頼を繰り返しかねない。作品名は
+ * 登録簿のもの（作者が一覧で見ている名前）を出す。
+ */
+export function alreadyRegisteredNotice(title: string): string {
+  return `このフォルダーは「${title}」としてすでに登録されています。登録はしないで次へ進めます。`;
 }
 
 /**

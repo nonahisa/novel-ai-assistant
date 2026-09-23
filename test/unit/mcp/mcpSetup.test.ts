@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import { describe, expect, test, vi } from "vitest";
-import { SETUP_STEPS } from "../../../src/core/setupRequest";
+import { SETUP_STEPS, alreadyRegisteredNotice } from "../../../src/core/setupRequest";
 import {
   SETUP_PROMPT_NAME,
   SETUP_PROMPT_TITLE,
@@ -77,6 +77,14 @@ describe("手順書", () => {
 
   test("1段ずつ作者の返事を待たせる", () => {
     expect(guide).toContain("返事を待");
+  });
+
+  test("登録済みと知らされたら、それで良いとして次の段へ進ませる（2026-09-24）", () => {
+    // 手順書が引く言葉は、拡張機能が実際に出す知らせの言葉と同じでなければ、
+    // Claude Code は作者から聞いた言葉と結び付けられない
+    expect(guide).toContain("すでに登録されています");
+    expect(alreadyRegisteredNotice("作品")).toContain("すでに登録されています");
+    expect(guide).toMatch(/すでに登録されています[^\n]*次の段へ/u);
   });
 });
 

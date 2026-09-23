@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   SETUP_STEPS,
   SETUP_URI_PATH,
+  alreadyRegisteredNotice,
   buildSetupUri,
   describeSetupRequest,
   parseSetupQuery,
@@ -84,6 +85,28 @@ describe("組んで読むと、同じ依頼に戻る", () => {
       ok: true,
       request,
     });
+  });
+
+  test("登録：アドレス欄から貼って紛れ込んだ前後の空白は落として受ける（2026-09-24）", () => {
+    // ` C:\…` は先頭が空白なので、落とさないと「絶対パスでない」と断っていた
+    const parsed = validateSetupRequest({
+      step: "register",
+      path: "  C:\\Users\\nonah\\Documents\\novels  ",
+    });
+    expect(parsed).toEqual({
+      ok: true,
+      request: { step: "register", path: "C:\\Users\\nonah\\Documents\\novels" },
+    });
+  });
+});
+
+describe("登録済みの場所が来たとき", () => {
+  test("失敗とは言わず、どの作品として登録済みかを添えて次へ進める", () => {
+    const notice = alreadyRegisteredNotice("たゆたう鉛");
+    expect(notice).toContain("「たゆたう鉛」");
+    expect(notice).toContain("すでに登録されています");
+    expect(notice).toContain("次へ進めます");
+    expect(notice).not.toMatch(/失敗|できませんでした/u);
   });
 });
 

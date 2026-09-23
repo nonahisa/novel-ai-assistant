@@ -92,7 +92,7 @@ export async function exportScheduleIcs(
   if (!picked) return;
   const target = paths.fromUri(picked);
   const inside = works.find(
-    (work) => paths.isPathInside(work.folderPath, target) || paths.normalizeForComparison(work.folderPath) === paths.normalizeForComparison(target)
+    (work) => paths.isPathInside(work.folderPath, target) || paths.isSameFolder(work.folderPath, target)
   );
   if (inside) {
     void vscode.window.showWarningMessage(

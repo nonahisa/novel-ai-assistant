@@ -67,18 +67,18 @@ async function countNeighbouringWorks(
   work: WorkEntry,
   allWorks: readonly WorkEntry[]
 ): Promise<number> {
+  // 登録簿の場所の比べ方は `folderKeyForComparison` にそろえる（2026-09-24）
   const registered = new Set(
-    allWorks.map((entry) => path.normalizeForComparison(entry.folderPath))
+    allWorks.map((entry) => path.folderKeyForComparison(entry.folderPath))
   );
   const scan = await scanCollection(parent, (folder) =>
-    registered.has(path.normalizeForComparison(folder))
+    registered.has(path.folderKeyForComparison(folder))
   );
   if (scan.kind !== "collection" && scan.kind !== "work_with_children") {
     return 0;
   }
-  const self = path.normalizeForComparison(work.folderPath);
   return scan.works.filter(
-    (candidate) => path.normalizeForComparison(candidate.folderPath) !== self
+    (candidate) => !path.isSameFolder(candidate.folderPath, work.folderPath)
   ).length;
 }
 

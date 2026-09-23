@@ -41,9 +41,11 @@ export function worksInside(
   works: readonly WorkEntry[],
   folderPath: string
 ): WorkEntry[] {
-  const parent = path.normalizeForComparison(folderPath);
+  // 同じ場所かは登録簿の重複の見方と同じ鍵で見る（末尾の区切り・前後の
+  // 空白の違いを同じとみなす。2026-09-24）
+  const parent = path.folderKeyForComparison(folderPath);
   return works.filter((work) => {
-    const candidate = path.normalizeForComparison(work.folderPath);
+    const candidate = path.folderKeyForComparison(work.folderPath);
     if (candidate === parent) return true;
     const relative = path.relative(parent, candidate);
     return relative.length > 0 && !path.goesOutside(parent, relative);
@@ -65,9 +67,7 @@ export function buildSyncTarget(
   return {
     folderPath,
     label:
-      inside.length === 1 &&
-      path.normalizeForComparison(inside[0].folderPath) ===
-        path.normalizeForComparison(folderPath)
+      inside.length === 1 && path.isSameFolder(inside[0].folderPath, folderPath)
         ? inside[0].title
         : folderName,
     works: inside,

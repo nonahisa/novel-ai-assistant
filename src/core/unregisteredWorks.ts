@@ -115,15 +115,17 @@ export async function findUnregisteredWorks(
 ): Promise<FoundWork[]> {
   if (works.length === 0) return [];
 
+  // 登録済みかは登録簿の重複の見方と同じ比べ方で見る（2026-09-24）。
+  // 末尾の区切り付きで登録された作品を「未登録」と数えない
   const registered = new Set(
-    works.map((work) => path.normalizeForComparison(work.folderPath))
+    works.map((work) => path.folderKeyForComparison(work.folderPath))
   );
   const roots = await libraryRootsOf(works, options.repoRootOf);
 
   const found = new Map<string, FoundWork>();
   for (const root of roots) {
     const scan = await scanCollection(root, (folder) =>
-      registered.has(path.normalizeForComparison(folder))
+      registered.has(path.folderKeyForComparison(folder))
     );
     // 作品そのもの・作品が無い・読めない、はどれも「拾うものが無い」。
     // 読めないことをここで騒いでも、作者に打つ手が無い
@@ -132,7 +134,7 @@ export async function findUnregisteredWorks(
     }
     for (const candidate of scan.works) {
       if (candidate.alreadyRegistered) continue;
-      const key = path.normalizeForComparison(candidate.folderPath);
+      const key = path.folderKeyForComparison(candidate.folderPath);
       // 書庫の根が複数あると、同じ作品が2度出てくることがある
       if (registered.has(key) || found.has(key)) continue;
       found.set(key, {

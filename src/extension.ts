@@ -272,7 +272,11 @@ import {
   type WorkFormatDef,
   type WorkFormatKey,
 } from "./core/workFormat";
-import { findSetupStep, type SetupRequest } from "./core/setupRequest";
+import {
+  alreadyRegisteredNotice,
+  findSetupStep,
+  type SetupRequest,
+} from "./core/setupRequest";
 import { handleSetupRequest } from "./features/setupRequestHandler";
 // 作品タイプの在り処はプロットの `## 形式` ひとつ（設計書6.70）
 import { writePlotSections } from "./core/plotFile";
@@ -326,7 +330,7 @@ import {
 import { pruneAllLogs } from "./features/pruneLogs";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
-import { hasUnsavedChanges, sameFilePath } from "./core/textFile";
+import { hasUnsavedChanges } from "./core/textFile";
 import { PROPOSALS_VIEW_ID, ProposalPanel } from "./features/proposalPanel";
 import {
   WritingProgressTracker,
@@ -6520,7 +6524,24 @@ export async function activate(
       return;
     }
     if (request.step === "register") {
-      const folderPath = request.path ?? "";
+      // 前後の空白は受け口（`setupRequest.ts`）で落としてあるが、ここでも落とす
+      // （MCP を通らない呼び手が来ても同じ形で比べる）
+      const folderPath = (request.path ?? "").trim();
+      /*
+        **登録済みなら、止めずに次へ進める**（作者の報告、2026-09-24）。
+        作者が既にあるフォルダーを挙げるのは自然なことで、登録済みなら
+        この段はもう済んでいる。警告で止めると「うまくいかなかった」に見え、
+        同じ依頼が繰り返される。比べ方は登録簿の重複の見方と同じ
+        （ドライブ文字・フォルダー名の大小、末尾の区切りの違いを同じとみなす）。
+        フォルダーが在るかより先に見る——登録簿を読むだけで済む
+      */
+      const registered = registry.findByFolder(folderPath);
+      if (registered) {
+        void vscode.window.showInformationMessage(
+          alreadyRegisteredNotice(registered.title)
+        );
+        return;
+      }
       try {
         await vscode.workspace.fs.stat(path.toUri(folderPath));
       } catch {
@@ -6536,9 +6557,8 @@ export async function activate(
       return;
     }
     if (request.step === "external-access") {
-      const work = registry
-        .list()
-        .find((entry) => sameFilePath(entry.folderPath, request.path ?? ""));
+      // 引き方は登録と同じ（末尾の区切りや大小の違いで「未登録」にしない）
+      const work = registry.findByFolder(request.path ?? "");
       if (!work) {
         void vscode.window.showWarningMessage(
           "外部AIの許可は、登録済みの作品にだけ設定できます。先に作品を登録してください。"
@@ -7002,7 +7022,8 @@ function parseAddWorkArgument(
     typeof candidate.title === "string" && candidate.title.trim().length > 0
       ? candidate.title.trim()
       : undefined;
-  return { folderPath: candidate.folderPath, title };
+  // 前後の空白は落として渡す（貼った場所に紛れ込む。2026-09-24）
+  return { folderPath: candidate.folderPath.trim(), title };
 }
 
 /**
