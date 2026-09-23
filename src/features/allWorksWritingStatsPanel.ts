@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { wideViewColumn } from "./editorColumn";
 import type { WorkRegistry } from "../core/workRegistry";
 import { toManuscriptPages } from "../core/charCount";
 import { scanWork } from "../core/scanner";
@@ -62,7 +63,7 @@ export async function openAllWorksWritingStatsPanel(
   const created = vscode.window.createWebviewPanel(
     "novelai.allWorksWritingStats",
     "全作品の執筆統計",
-    vscode.ViewColumn.Active,
+    wideViewColumn(),
     { enableScripts: true, retainContextWhenHidden: true }
   );
   panel = created;

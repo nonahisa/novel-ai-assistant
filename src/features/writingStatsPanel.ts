@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { wideViewColumn } from "./editorColumn";
 // ブラウザ版でも同じ場所を指すため、`node:path` ではなくこちらを使う
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
@@ -82,7 +83,7 @@ export async function openWritingStatsPanel(
   const panel = vscode.window.createWebviewPanel(
     "novelai.writingStats",
     `執筆統計: ${work.title}`,
-    vscode.ViewColumn.Active,
+    wideViewColumn(),
     { enableScripts: true, retainContextWhenHidden: true }
   );
   openPanels.set(work.id, panel);

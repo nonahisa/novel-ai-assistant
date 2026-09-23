@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { wideViewColumn } from "./editorColumn";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { CharacterStore } from "../core/characterStore";
@@ -192,7 +193,7 @@ class RelationGraphPanel {
     this.panel = vscode.window.createWebviewPanel(
       "novelai.relationGraph",
       `人物相関図: ${work.title}`,
-      vscode.ViewColumn.Active,
+      wideViewColumn(),
       { enableScripts: true, retainContextWhenHidden: true }
     );
     context.subscriptions.push(this.panel);

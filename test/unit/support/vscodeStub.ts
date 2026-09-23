@@ -326,6 +326,8 @@ export const window = {
   }),
   /** いま開いている本文。**既定は「開いていない」** */
   activeTextEditor: undefined as unknown,
+  /** 見えている本文のエディター。`viewColumn` だけを持たせれば足りる */
+  visibleTextEditors: [] as { viewColumn?: number }[],
 };
 export const commands = {
   /**

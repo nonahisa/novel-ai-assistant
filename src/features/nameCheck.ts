@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { wideViewColumn } from "./editorColumn";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
@@ -99,7 +100,7 @@ export async function openNameCheckPanel(
   const panel = vscode.window.createWebviewPanel(
     "novelai.nameCheck",
     `名前の点検: ${work.title}`,
-    vscode.ViewColumn.Active,
+    wideViewColumn(),
     { enableScripts: true, retainContextWhenHidden: true }
   );
   openPanels.set(work.id, panel);

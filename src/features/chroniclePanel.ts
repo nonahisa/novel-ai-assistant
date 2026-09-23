@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { wideViewColumn } from "./editorColumn";
 import type { WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
 import type { Foreshadow } from "../models/foreshadow";
@@ -115,7 +116,7 @@ class ChroniclePanel {
     this.panel = vscode.window.createWebviewPanel(
       "novelai.chronicle",
       `年表: ${work.title}`,
-      vscode.ViewColumn.Active,
+      wideViewColumn(),
       { enableScripts: true, retainContextWhenHidden: true }
     );
     context.subscriptions.push(this.panel);

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { wideViewColumn } from "./editorColumn";
 import type { WorkEntry } from "../models/types";
 import { EditHistory } from "../core/editHistory";
 import { ExternalAccessLog } from "../core/externalAccessStore";
@@ -31,7 +32,7 @@ export async function showEditHistory(
   const panel = vscode.window.createWebviewPanel(
     "novelai.editHistory",
     `編集履歴: ${work.title}`,
-    vscode.ViewColumn.Active,
+    wideViewColumn(),
     { enableScripts: true, retainContextWhenHidden: true }
   );
   openPanels.set(work.id, panel);

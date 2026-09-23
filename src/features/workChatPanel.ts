@@ -12,6 +12,7 @@ import {
   PLOT_SKIP_OPTION,
 } from "../core/plotInterview";
 import * as vscode from "vscode";
+import { wideViewColumn } from "./editorColumn";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
@@ -1213,7 +1214,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     const panel = vscode.window.createWebviewPanel(
       "novelai.chatPanel",
       "AIに相談",
-      vscode.ViewColumn.Active,
+      wideViewColumn(),
       {
         enableScripts: true,
         // 別のタブへ移って戻ったときに、会話が消えていては使い物にならない

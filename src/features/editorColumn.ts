@@ -15,6 +15,25 @@ import * as paths from "../core/paths";
  * エディタ（`manuscriptEditor.ts`）で別々に決めると、片方だけが直る日が来る。
  */
 
+/**
+ * **広く見る画面**（執筆統計・年表・相関図など）を開く列（作者の裁定、2026-09-23）。
+ *
+ * 「前面の列」（`ViewColumn.Active`）に開くと、提案パネルやシーンメモの
+ * 細い右の列が前面のときにそこへ開き、表やグラフが詰まった（ノートPCの実機で
+ * 執筆統計がそうなった）。作者「真ん中ですね」。
+ *
+ * **本文の列へ開く**：見えている本文のうちいちばん左の列、本文が無ければ1列目。
+ * 1列目に決め打ちしないのは、本文を2列目に置いている人がいるため（下の
+ * `columnForLocation` と同じ考え）。右の列のパネル（提案・シーンメモ）は
+ * `ViewColumn.Beside` のまま、この関数を使わない。
+ */
+export function wideViewColumn(): vscode.ViewColumn {
+  const columns = vscode.window.visibleTextEditors
+    .map((editor) => editor.viewColumn)
+    .filter((column): column is vscode.ViewColumn => column !== undefined && column > 0);
+  return columns.length > 0 ? Math.min(...columns) : vscode.ViewColumn.One;
+}
+
 /** 列を決めた結果。**理由まで返す**——降りた枝を呼び出し側が1行残せるように */
 export interface ColumnChoice {
   /** 開く列。`undefined` は「決めない」＝これまでどおり VS Code に任せる */

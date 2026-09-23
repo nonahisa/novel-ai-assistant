@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { wideViewColumn } from "./editorColumn";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
@@ -382,7 +383,7 @@ export async function openEpubEditorPanel(
   const panel = vscode.window.createWebviewPanel(
     "novelai.epubEditor",
     `EPUB: ${work.title}`,
-    vscode.ViewColumn.Active,
+    wideViewColumn(),
     {
       enableScripts: true,
       retainContextWhenHidden: true,
