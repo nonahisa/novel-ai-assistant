@@ -39,11 +39,23 @@ export interface FirstRunDeps {
   claudeCodeInstalled?: () => boolean;
   /** つなぐ（`novelai.connectClaudeCode`） */
   connectClaudeCode?: () => Promise<void>;
+  /**
+   * 初回の道案内（`contributes.walkthroughs`。設計書6.104 の入口2）を開く。
+   * 渡されたときだけ押し口を並べる
+   */
+  openWalkthrough?: () => Promise<void>;
 }
 
 /** 案内の押し口の名前 */
 const PICK_AI = "AIを選ぶ";
 export const CONNECT_CLAUDE_CODE = "Claude Code とつなぐ";
+export const OPEN_WALKTHROUGH = "道案内を見る";
+
+/**
+ * 初回の道案内の ID（`package.json` の `contributes.walkthroughs[].id`）。
+ * 開くときは「発行者.名前#ID」で指す。揃いは `firstRun.test.ts` が見る
+ */
+export const WALKTHROUGH_ID = "novelai.gettingStarted";
 
 /**
  * 出すべきかを決める。**VS Code APIに依存しないので単体で試せる。**
@@ -74,6 +86,16 @@ export async function offerFirstRunSetup(deps: FirstRunDeps): Promise<void> {
     入っていない人には出さない——何のことか分からない押し口は迷わせるだけ。
   */
   const offerConnect = Boolean(deps.claudeCodeInstalled?.() && deps.connectClaudeCode);
+  /*
+    **道案内は、この声かけから開ける形にした**（設計書6.104 入口2）。
+    VS Code は Marketplace から入れた直後に道案内を自動で開くことがあるが、
+    VSIX から入れた・設定の同期で入った・すぐ閉じた人には出ない。
+    声かけは1度しか出ないので、ここに押し口を置けば「最初の手順を
+    どこで見るか」が必ず1度は目に入る。**声かけ自体はやめない**——
+    道案内は見るだけで閉じられるが、AIを選ばないと半分が動かないことは
+    ここで言っておく必要がある。
+  */
+  const offerWalkthrough = Boolean(deps.openWalkthrough);
   const answer = await deps.notify(
     "小説執筆へようこそ。使うAIを選ぶと、設定資料の抽出や誤字脱字の検知が使えます。" +
       "（作品の管理と文字数の集計は、AIなしでも使えます）" +
@@ -81,10 +103,15 @@ export async function offerFirstRunSetup(deps: FirstRunDeps): Promise<void> {
         ? "Claude Code とつなぐと、Claude Code のチャットで会話しながらセットアップを進められます。"
         : ""),
     PICK_AI,
-    ...(offerConnect ? [CONNECT_CLAUDE_CODE] : [])
+    ...(offerConnect ? [CONNECT_CLAUDE_CODE] : []),
+    ...(offerWalkthrough ? [OPEN_WALKTHROUGH] : [])
   );
   if (answer === CONNECT_CLAUDE_CODE && deps.connectClaudeCode) {
     await deps.connectClaudeCode();
+    return;
+  }
+  if (answer === OPEN_WALKTHROUGH && deps.openWalkthrough) {
+    await deps.openWalkthrough();
     return;
   }
   if (answer !== PICK_AI) return;
@@ -115,6 +142,15 @@ export function offerFirstRunSetupInVsCode(
     // 中身はコマンド側（動的に読む。Node の部品を抱えているため）
     connectClaudeCode: async () => {
       await vscode.commands.executeCommand("novelai.connectClaudeCode");
+    },
+    // ブラウザ版でも同じ口で開ける（VS Code 本体のコマンド。第3引数 false で
+    // 横に開かず、いまの編集領域に出す）
+    openWalkthrough: async () => {
+      await vscode.commands.executeCommand(
+        "workbench.action.openWalkthrough",
+        `${context.extension.id}#${WALKTHROUGH_ID}`,
+        false
+      );
     },
   });
 }

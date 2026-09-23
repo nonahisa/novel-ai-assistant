@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを引き受けるVSCode拡張機能で、AIは提案するだけで原稿は書き換えません（無料の手元AIだけでも使えます）。※現在テスト中です。",
-  "version": "0.83.2",
+  "version": "0.83.3",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -145,6 +145,104 @@
         "view": "novelai.works",
         "contents": "まだ作品が登録されていません。\n投稿サイト（カクヨム・なろう・アルファポリス）のバックアップは、そのまま作品にできる。\n[バックアップ取込](command:novelai.importWorkFromZip)\n[フォルダー登録](command:novelai.addWork)\n[新規作品を作成](command:novelai.createWork)\n[GitHubから追加](command:novelai.addWorkFromGithub)",
         "when": "!novelai.worksLoading"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "novelai.gettingStarted",
+        "title": "統合小説執筆環境をはじめる",
+        "description": "書き方を知る・AIを決める・作品を用意する・原稿エディターで書く、の順に案内します。どの段も飛ばせます。",
+        "steps": [
+          {
+            "id": "diagnosis",
+            "title": "自分の書き方を知る",
+            "description": "いくつか答えると、書き方に合わせて次にすることを案内します。AIは使いません。\n[作家タイプ診断](command:novelai.runWriterDiagnosis)",
+            "media": {
+              "markdown": "media/walkthrough/diagnosis.md"
+            },
+            "completionEvents": [
+              "onCommand:novelai.runWriterDiagnosis"
+            ]
+          },
+          {
+            "id": "chooseAI",
+            "title": "使うAIを決める",
+            "description": "設定資料の抽出や誤字脱字の検知にはAIを使います。作品の管理と文字数の集計は、AIなしでも使えます。\n[AI設定](command:novelai.setupAI)",
+            "media": {
+              "markdown": "media/walkthrough/chooseAI.md"
+            },
+            "completionEvents": [
+              "onCommand:novelai.setupAI"
+            ]
+          },
+          {
+            "id": "localAI",
+            "title": "手元の無料AIを入れる（任意）",
+            "description": "鍵も課金も要らない手元のAI（Ollama など）を使うなら、足りないものを一覧で見せて、選んだものだけを入れます。\n[セットアップ](command:novelai.runFullSetup)",
+            "media": {
+              "markdown": "media/walkthrough/localAI.md"
+            },
+            "completionEvents": [
+              "onCommand:novelai.runFullSetup",
+              "onCommand:novelai.setupOllama",
+              "onCommand:novelai.setupLmStudio"
+            ],
+            "when": "!isWeb"
+          },
+          {
+            "id": "claudeCode",
+            "title": "Claude Code とつなぐ（任意）",
+            "description": "VS Code 版の Claude Code を使っているなら、つなぐと Claude Code のチャットで会話しながら最初の作品まで準備できます。\n[Claude Code接続](command:novelai.connectClaudeCode)",
+            "media": {
+              "markdown": "media/walkthrough/claudeCode.md"
+            },
+            "completionEvents": [
+              "onCommand:novelai.connectClaudeCode"
+            ],
+            "when": "!isWeb"
+          },
+          {
+            "id": "prepareWork",
+            "title": "作品を用意する",
+            "description": "これから書くなら新しく作り、もう原稿があるなら登録します。\n[プロット起点](command:novelai.createWorkWithPlot)\n[本文起点](command:novelai.createWorkFromManuscript)\n[バックアップ取込](command:novelai.importWorkFromZip)\n[フォルダー登録](command:novelai.addWork)\n[GitHubから追加](command:novelai.addWorkFromGithub)",
+            "media": {
+              "markdown": "media/walkthrough/prepareWork.md"
+            },
+            "completionEvents": [
+              "onCommand:novelai.createWorkWithPlot",
+              "onCommand:novelai.createWorkFromManuscript",
+              "onCommand:novelai.createWork",
+              "onCommand:novelai.importWorkFromZip",
+              "onCommand:novelai.addWork",
+              "onCommand:novelai.collectUnregisteredWorks",
+              "onCommand:novelai.addWorkFromGithub"
+            ]
+          },
+          {
+            "id": "write",
+            "title": "原稿エディターで書く",
+            "description": "作品一覧で話を押すと、原稿エディターで開きます。ルビと傍点は振り仮名と圏点で出て、用語は色分けされます。\n[作品一覧を開く](command:workbench.view.extension.novelai)",
+            "media": {
+              "markdown": "media/walkthrough/write.md"
+            },
+            "completionEvents": [
+              "onContext:activeCustomEditorId == 'novelai.manuscriptEditorHorizontal' || activeCustomEditorId == 'novelai.manuscriptEditor'"
+            ]
+          },
+          {
+            "id": "help",
+            "title": "困ったら",
+            "description": "場面を選ぶと、押す場所を順に光らせて案内します。やりたいことを言葉で訊くなら相談パネルへ。\n[場面別案内](command:novelai.openSceneGuide)\n[相談パネルを開く](command:novelai.openChat)\n[使い方](command:novelai.openManual)",
+            "media": {
+              "markdown": "media/walkthrough/help.md"
+            },
+            "completionEvents": [
+              "onCommand:novelai.openSceneGuide",
+              "onCommand:novelai.openChat",
+              "onCommand:novelai.openManual"
+            ]
+          }
+        ]
       }
     ],
     "commands": [

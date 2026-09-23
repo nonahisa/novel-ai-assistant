@@ -1,7 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
 import {
   offerFirstRunSetup,
+  OPEN_WALKTHROUGH,
   shouldOfferSetup,
+  WALKTHROUGH_ID,
   type FirstRunDeps,
 } from "../../../src/features/firstRun";
 import { readFileSync } from "node:fs";
@@ -118,6 +120,55 @@ describe("Claude Code が入っていれば「つなぐ」も出す（設計書6
     const notify = vi.fn<FirstRunDeps["notify"]>(async () => undefined);
     await offerFirstRunSetup(deps({ notify, claudeCodeInstalled: () => false }));
     expect(notify.mock.calls[0]).not.toContain("Claude Code とつなぐ");
+  });
+});
+
+describe("声かけから道案内を開ける（設計書6.104 入口2）", () => {
+  test("道案内を開く口があれば、押し口の最後に並べる", async () => {
+    const notify = vi.fn<FirstRunDeps["notify"]>(async () => undefined);
+    await offerFirstRunSetup(deps({ notify, openWalkthrough: async () => undefined }));
+    const actions = notify.mock.calls[0].slice(1);
+    expect(actions).toEqual(["AIを選ぶ", OPEN_WALKTHROUGH]);
+  });
+
+  test("Claude Code が入っていても、3つまで（AIを選ぶ・つなぐ・道案内）", async () => {
+    const notify = vi.fn<FirstRunDeps["notify"]>(async () => undefined);
+    await offerFirstRunSetup(
+      deps({
+        notify,
+        claudeCodeInstalled: () => true,
+        connectClaudeCode: async () => undefined,
+        openWalkthrough: async () => undefined,
+      })
+    );
+    expect(notify.mock.calls[0].slice(1)).toEqual([
+      "AIを選ぶ",
+      "Claude Code とつなぐ",
+      OPEN_WALKTHROUGH,
+    ]);
+  });
+
+  test("押されたら道案内を開く（AIの選択画面は開かない）", async () => {
+    const openWalkthrough = vi.fn(async () => undefined);
+    const runWizard = vi.fn(async () => true);
+    await offerFirstRunSetup(
+      deps({ notify: async () => OPEN_WALKTHROUGH, openWalkthrough, runWizard })
+    );
+    expect(openWalkthrough).toHaveBeenCalled();
+    expect(runWizard).not.toHaveBeenCalled();
+  });
+
+  test("道案内を開く口が無ければ出さない（これまでと同じ）", async () => {
+    const notify = vi.fn<FirstRunDeps["notify"]>(async () => undefined);
+    await offerFirstRunSetup(deps({ notify }));
+    expect(notify.mock.calls[0]).not.toContain(OPEN_WALKTHROUGH);
+  });
+
+  test("道案内の ID は package.json と一致する", () => {
+    const pkg = JSON.parse(readFileSync("package.json", "utf-8")) as {
+      contributes: { walkthroughs?: Array<{ id: string }> };
+    };
+    expect(pkg.contributes.walkthroughs?.map((w) => w.id)).toContain(WALKTHROUGH_ID);
   });
 });
 

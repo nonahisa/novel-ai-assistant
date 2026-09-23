@@ -22,6 +22,16 @@ export const EXPECTED_ARCHIVE_FILES = [
   // **入っていないと配布版では繋がらない**（2026-09-18 に同梱へ方針を変えた）
   "extension/dist/mcp-server.mjs",
   "extension/media/icon.svg",
+  // 初回の道案内（設計書6.104 入口2）の段ごとの説明。`package.json` の
+  // `contributes.walkthroughs` が指す。**入っていないと段の右側が空になる**
+  // （揃いは `walkthrough.test.ts` が見る）
+  "extension/media/walkthrough/chooseAI.md",
+  "extension/media/walkthrough/claudeCode.md",
+  "extension/media/walkthrough/diagnosis.md",
+  "extension/media/walkthrough/help.md",
+  "extension/media/walkthrough/localAI.md",
+  "extension/media/walkthrough/prepareWork.md",
+  "extension/media/walkthrough/write.md",
   // AI用の指示書の雛形（設計書6.87.15 柱5）。拡張機能が作品フォルダーへ
   // 書き出すときに読む。**`docs/` は丸ごと除外しているので、
   // `.vscodeignore` 側の `!` と対で見ること**
