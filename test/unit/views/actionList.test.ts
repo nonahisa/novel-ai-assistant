@@ -106,8 +106,8 @@ describe("操作メニューの構成", () => {
       // 2026-09-23 に「拡張機能の設定」から改名（作者の裁定）
       "統合小説執筆環境設定",
       "ヘルプ",
-      // いちばん下に単独で置く（見出しを挟まない。作者の指定、2026-09-23）
-      "相談パネルを開く",
+      // 「相談パネルを開く」は、いったん最上位のいちばん下に単独で置いたが、
+      // 相談・助言のいちばん下へ移した（作者の指定、2026-09-23）
       // 0.45.0 までは最下段に「テスト中」（実機確認リストからの写し）が
       // 並んでいた。F5の道具ごと撤去した（作者の指示、2026-09-10）
     ]);
@@ -1349,21 +1349,24 @@ describe("相談の項目は、木に残して画面から隠す", () => {
    * 2026-09-23「相談パネルを開く」）。見出しを挟まないので、分類を開かず
    * に押せる。
    */
-  test("「相談パネルを開く」は、最上位の最後の行として出る", () => {
+  test("「相談パネルを開く」は、相談・助言の見えている項目のいちばん下（作者の指定、2026-09-23）", () => {
+    const support = ACTION_TREE.find((group) => group.label === "執筆支援");
+    const section = support?.entries.find(
+      (entry) => entry.kind === "section" && entry.label === "相談・助言"
+    );
+    expect(section?.kind).toBe("section");
+    if (section?.kind !== "section") return;
+    const visible = section.items.filter(
+      (item) => item.kind === "action" && !item.hiddenFromActionList
+    );
+    const last = visible[visible.length - 1];
+    expect(last?.kind === "action" ? last.command : undefined).toBe("novelai.openChat");
+    expect(last?.kind === "action" ? last.label : undefined).toBe("相談パネルを開く");
+    // 最上位には、もう単独の行として出ない
     const provider = new ActionListProvider(fakeRegistry(), memoryStore());
     const top = provider.getChildren();
-    const last = top[top.length - 1];
-
-    expect(last.type).toBe("action");
-    if (last.type !== "action") return;
-    expect(last.item.command).toBe("novelai.openChat");
-    expect(last.item.label).toBe("相談パネルを開く");
-    // 押せる行である（折りたためない・コマンドを持つ）
-    const item = provider.getTreeItem(last);
-    expect(item.collapsibleState).toBe(TreeItemCollapsibleState.None);
-    expect(item.command?.command).toBe("novelai.openChat");
-    // 親は無い（最上位）。光らせる案内（reveal）が親をたどって迷わない
-    expect(provider.getParent(last)).toBeUndefined();
+    expect(top.some((node) => node.type === "action" && node.item.command === "novelai.openChat")).toBe(false);
+    expect(TreeItemCollapsibleState.None).toBeDefined();
   });
 
   /**

@@ -225,31 +225,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           "・入れると執筆量パネルに「あと何日・あと何字・1日あたり何字」\n\n" +
           "・設定の1日・1月の目標は全作品で共有",
       },
-      // 年表は執筆統計の隣に置く。どちらも「書いたものを別の軸で
-      //見直す」画面で、AIを呼ばずにその場で出る（設計書6.39）
-      {
-        kind: "action",
-        command: "novelai.openChronicle",
-        label: "年表",
-        icon: "list-ordered",
-        requiresWork: true,
-        detail:
-          "話数順と時系列順で並べた、話ごとの出来事\n\n" +
-          "・人物・変化・能力・呼称・伏線・あらすじを1枚に\n\n" +
-          "AIは呼ばない。",
-      },
-      {
-        kind: "action",
-        command: "novelai.editTimeline",
-        label: "時期・系統編集",
-        icon: "calendar",
-        requiresWork: true,
-        detail:
-          "作中の時期と、本編以外の筋の登録\n\n" +
-          "・時期は「十年前・火事の夜」など\n\n" +
-          "・筋はIF編・夢・劇中劇\n\n" +
-          "・年表を時系列順に並べるのに使う",
-      },
       {
         kind: "action",
         command: "novelai.showEditHistory",
@@ -1059,6 +1034,27 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・上下はない。効く相手が違うだけ\n\n" +
               "・いつでもやり直せる。消せる\n\n" +
               "答えは作者の手元にだけ残る。作品にもGitHubにも入らない。",
+          },
+          /*
+            **相談パネルを開くは、相談・助言のいちばん下**（作者の指定、2026-09-23。
+            いったんメニューのいちばん下に単独で置いたが、相談の束の中へ）
+          */
+          {
+            kind: "action",
+            command: "novelai.openChat",
+            label: "相談パネルを開く",
+            icon: "comment-discussion",
+            // 開くだけで作品は要らない（作品を選ぶのは相談の中）
+            requiresWork: false,
+            // 「AI相談（大きく開く）」と同じ扱い。開いた先の相談でAIを呼び、
+            // クラウドのAIなら料金が出るので、押す前に見分けられるようにする
+            usesAI: true,
+            detail:
+              "左の「AIに相談」パネルを開く\n\n" +
+              "・開いている本文について、横で相談する\n\n" +
+              "・範囲を選んでから本文の右クリックでも開ける\n\n" +
+              "・本文の領域に大きく開くのはパネルの「メインに表示」\n\n" +
+              "原稿は書き換えない。",
           },
         ],
       },
@@ -2095,6 +2091,31 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・材料は抽出済みの関係・呼称・所属だけ\n\n" +
               "AIは呼ばない。",
           },
+          // 年表と作中時期・別筋登録は資料閲覧に置く（作者の指定、2026-09-23。
+          // 「作品の年表は設定資料閲覧」。以前は執筆統計の隣だったが、書いた量の
+          // 記録ではなく作品の中身を見る画面である）
+          {
+            kind: "action",
+            command: "novelai.openChronicle",
+            label: "年表",
+            icon: "list-ordered",
+            requiresWork: true,
+            detail:
+              "話数順と時系列順で並べた、話ごとの出来事\n\n" +
+              "・人物・変化・能力・呼称・伏線・あらすじを1枚に\n\n" +
+              "AIは呼ばない。",
+          },
+          {
+            kind: "action",
+            command: "novelai.editTimeline",
+            label: "作中時期・別筋登録",
+            icon: "calendar",
+            requiresWork: true,
+            detail:
+              "年表を時系列順に並べるための、作中の時期と別の筋の登録\n\n" +
+              "・時期は「十年前・火事の夜」など\n\n" +
+              "・筋はIF編・夢・劇中劇",
+          },
           {
             kind: "action",
             command: "novelai.openSynopsisDocs",
@@ -2521,39 +2542,6 @@ export const ACTION_TREE: readonly ActionGroup[] = [
     ],
   },
 
-  /*
-    **相談パネルを開く入口を、メニューのいちばん下に単独で置く**
-    （作者の指定、2026-09-23。名前は作者の言葉のまま）。
-
-    どの束にも入れない。相談はどの工程からでも寄る場所で、束の中に
-    入れると「その工程の操作」に見える。`standalone` の分類は見出しを
-    挟まず、中の1つの操作をそのまま最上位に出す（`ActionListProvider`）。
-  */
-  {
-    kind: "group",
-    label: "相談パネルを開く",
-    icon: "comment-discussion",
-    standalone: true,
-    entries: [
-      {
-        kind: "action",
-        command: "novelai.openChat",
-        label: "相談パネルを開く",
-        icon: "comment-discussion",
-        // 開くだけで作品は要らない（作品を選ぶのは相談の中）
-        requiresWork: false,
-        // 「AI相談（大きく開く）」と同じ扱い。開いた先の相談でAIを呼び、
-        // クラウドのAIなら料金が出るので、押す前に見分けられるようにする
-        usesAI: true,
-        detail:
-          "左の「AIに相談」パネルを開く\n\n" +
-          "・開いている本文について、横で相談する\n\n" +
-          "・範囲を選んでから本文の右クリックでも開ける\n\n" +
-          "・本文の領域に大きく開くのはパネルの「メインに表示」\n\n" +
-          "原稿は書き換えない。",
-      },
-    ],
-  },
 ];
 
 
