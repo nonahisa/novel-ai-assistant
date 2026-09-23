@@ -12,6 +12,12 @@ import { groupEpisodesByChapter } from "./chapterGrouping";
 import { episodePathFor } from "./bookStore";
 import { episodeTitle, episodeUnit, formatChapterLabel } from "./episodeLabel";
 import type { WorkFormatKey } from "./workFormat";
+import { parseEpisodePlot } from "./episodePlotDoc";
+import {
+  sumForeshadowCounts,
+  ZERO_FORESHADOW_COUNTS,
+  type ForeshadowChapterCounts,
+} from "./foreshadowPlan";
 
 /**
  * プロットモードの画面の材料（設計書6.4.8）。
@@ -131,6 +137,24 @@ export function synopsisHead(text: string): string {
   return `${flat.slice(0, SYNOPSIS_HEAD_LENGTH)}…`;
 }
 
+/** 一覧に添える「この話の目標」の長さ。あらすじの冒頭より少し長く取る */
+export const EPISODE_PLOT_GOAL_HEAD_LENGTH = 30;
+
+/**
+ * 単話プロットの「この話の目標」を1行に畳む（設計書6.4.8。作者の依頼、
+ * 2026-09-23）。
+ *
+ * **読み方は `parseEpisodePlot` の1か所を通す**——問いかけのまま（丸ごと
+ * 括弧書き）や空なら空を返し、一覧に出さない。書かれていない欄に
+ * 問いかけの文を並べると、目標が書いてあるように見える。
+ * 切ったことは `…` で示す（`synopsisHead` と同じ）。
+ */
+export function episodePlotGoalHead(text: string): string {
+  const flat = parseEpisodePlot(text).goal.replace(/\s+/g, " ").trim();
+  if (flat.length <= EPISODE_PLOT_GOAL_HEAD_LENGTH) return flat;
+  return `${flat.slice(0, EPISODE_PLOT_GOAL_HEAD_LENGTH)}…`;
+}
+
 /** 見取り図の1行 */
 export interface PlotEpisodeRow {
   /** 行を1つに定める鍵。ファイルの場所をそのまま使う */
@@ -158,6 +182,13 @@ export interface PlotEpisodeRow {
   episodePlotChecks: EpisodePlotCheckAction[];
   /** 各話あらすじの冒頭。無ければ空 */
   synopsisHead: string;
+  /** 単話プロットの「この話の目標」の1行（`episodePlotGoalHead`）。無ければ空 */
+  goalHead: string;
+  /**
+   * この話で張った・回収した・回収予定の伏線の数（設計書6.35）。
+   * **0 は画面に出さない**（呼ぶ側が落とす）。合本は範囲を足し合わせる
+   */
+  foreshadowCounts: ForeshadowChapterCounts;
   /**
    * 予定の話か（設計書6.4.8）。本文のファイルが無く、単話プロットだけがある。
    * このとき `filePath` は単話プロットの場所で、押すとプロットが開く
@@ -178,6 +209,8 @@ export interface PlannedEpisodePlot {
   title: string;
   /** 単話プロットの場所 */
   filePath: string;
+  /** 「この話の目標」の1行（`episodePlotGoalHead`）。無ければ空・省略 */
+  goal?: string;
 }
 
 /**
@@ -256,6 +289,13 @@ export interface PlotEpisodeRowsInput {
    * そちらの行へ結びつける
    */
   plannedEpisodes?: readonly PlannedEpisodePlot[];
+  /**
+   * 書いた話の単話プロットの目標（話数 → 1行）。予定の話のものは
+   * `plannedEpisodes` の `goal` で渡す（設計書6.4.8）
+   */
+  episodePlotGoals?: ReadonlyMap<number, string>;
+  /** 話数ごとの伏線の数（`foreshadowCountsByChapter`。設計書6.35） */
+  foreshadowCounts?: ReadonlyMap<number, ForeshadowChapterCounts>;
 }
 
 /**
@@ -386,6 +426,15 @@ export function buildPlotEpisodeRows(
       canCreateEpisodePlot: chapter !== null,
       episodePlotChecks: episodePlotChecksFor(state),
       synopsisHead: synopsisHead(findSynopsisFor(synopses, episode)?.synopsis ?? ""),
+      goalHead:
+        chapter !== null && state.hasEpisodePlot
+          ? (input.episodePlotGoals?.get(chapter) ?? "")
+          : "",
+      foreshadowCounts: countsForSpan(
+        input.foreshadowCounts,
+        episode.chapterStart,
+        episode.chapterEnd ?? episode.chapterStart
+      ),
       planned: false,
       // 並べ込みの目印。画面へは出さない（下で落とす）
       sortChapter: episode.chapterStart,
@@ -428,9 +477,30 @@ function plannedRow(
     canCreateEpisodePlot: true,
     episodePlotChecks: episodePlotChecksFor(state),
     synopsisHead: synopsisHead(synopsis?.synopsis ?? ""),
+    goalHead: entry.goal ?? "",
+    foreshadowCounts: countsForSpan(
+      input.foreshadowCounts,
+      entry.chapter,
+      entry.chapter
+    ),
     planned: true,
     sortChapter: entry.chapter,
   };
+}
+
+/**
+ * その行の伏線の数。話数が読めない話は数えない（推測で埋めない）。
+ * **新しい器を返す**——共有の0を返すと、画面へ渡したあとで誰かが書き換えうる。
+ */
+function countsForSpan(
+  counts: ReadonlyMap<number, ForeshadowChapterCounts> | undefined,
+  from: number | null,
+  to: number | null
+): ForeshadowChapterCounts {
+  if (!counts || from === null || to === null) {
+    return { ...ZERO_FORESHADOW_COUNTS };
+  }
+  return sumForeshadowCounts(counts, from, to);
 }
 
 /**

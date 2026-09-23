@@ -310,6 +310,14 @@ import {
   createEpisodePlot,
   resumeWriting,
 } from "./features/resumeWriting";
+// 単話プロットへの行き来（設計書6.36・6.25）。前後の話・プロットモード・原稿の横
+import {
+  followManuscriptEpisode,
+  manuscriptEpisodePlotChapter,
+  openEpisodePlotBesideManuscript,
+  openNeighborEpisodePlot,
+  visibleEpisodePlotOf,
+} from "./features/episodePlotNav";
 import { askText, cancelItem } from "./views/dialogs";
 import { manageKeepWords } from "./features/manageKeepWords";
 import { manageConfirmSkips } from "./features/manageConfirmSkips";
@@ -1289,6 +1297,47 @@ export async function activate(
    * **中身は縦書きと横書きで同じものを使う**（6.25.4）。違うのは、
    * 開いたときの向きだけである。
    */
+  /**
+   * 原稿で話が変わったら、右に見えている単話プロットを追いつかせる（設計書6.36）。
+   *
+   * **単話プロットが見えていなければ、原稿を読みも走査もしない**
+   * （`visibleEpisodePlotOf` はタブの一覧を見るだけ）。カーソルが動くたびに
+   * 呼ばれるので、単話プロットを開いていない作者には手間をかけない。
+   * 失敗しても書く手は止めない（記録だけ残す）。
+   */
+  const followEpisodePlotOf = async (
+    filePath: string,
+    readText: () => string | undefined,
+    line: number
+  ): Promise<void> => {
+    const work = workOfPath(registry, filePath);
+    if (!work || !visibleEpisodePlotOf(work)) return;
+    try {
+      await followManuscriptEpisode(work, async () => {
+        const text = readText();
+        if (text === undefined) return null;
+        return manuscriptEpisodePlotChapter(
+          filePath,
+          text,
+          line,
+          await treeProvider.getEpisodes(work)
+        );
+      });
+    } catch (error) {
+      useLogFile(work.folderPath);
+      logFailure("単話プロットの追従", {
+        原稿: filePath,
+        内容: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+  /** 開いている文書の中身（原稿エディタが持っている、保存前のもの） */
+  const openDocumentText = (filePath: string): string | undefined => {
+    const key = path.normalizeForComparison(filePath);
+    return vscode.workspace.textDocuments
+      .find((document) => path.normalizeForComparison(fromUri(document.uri)) === key)
+      ?.getText();
+  };
   const manuscriptDeps = {
     highlighter,
     // **作品は登録簿で引く**（設計書6.68.2）。用語索引は設定資料が
@@ -1374,8 +1423,33 @@ export async function activate(
         work ? ({ type: "work", work } satisfies WorkRef) : undefined
       );
     },
-    // カーソルの追従は片方向。パネルが開いていなければ何も起きない
-    onCaretMoved: (filePath, line) => noteSceneMemoCaret(filePath, line),
+    // 単話プロットを右の列に開く（設計書6.36。作者の依頼、2026-09-23）。
+    // **繋ぐのはここだけ**（シーンメモと同じ理由）。作品は開いている原稿のもの、
+    // 走査は一覧の結果を借りる（`workEpisodes` と同じ）
+    openEpisodePlot: async (filePath, rawText, line) => {
+      const work = workOfPath(registry, filePath);
+      if (!work) {
+        void vscode.window.showWarningMessage(
+          "この原稿の作品が分かりませんでした。作品として登録されているかご確認ください。"
+        );
+        return;
+      }
+      const episodes = await treeProvider.getEpisodes(work);
+      await openEpisodePlotBesideManuscript(
+        work,
+        manuscriptEpisodePlotChapter(filePath, rawText, line, episodes)
+      );
+    },
+    // 原稿で別の話へ移ったら、右に見えている単話プロットも追いつく（片方向）
+    onManuscriptShown: (filePath, rawText, line) => {
+      void followEpisodePlotOf(filePath, () => rawText, line);
+    },
+    // カーソルの追従は片方向。パネルが開いていなければ何も起きない。
+    // **合本だけ**は、カーソルの行で話が変わるので単話プロットも追いつく
+    onCaretMoved: (filePath, line) => {
+      noteSceneMemoCaret(filePath, line);
+      void followEpisodePlotOf(filePath, () => openDocumentText(filePath), line);
+    },
     // 読み上げの声（設計書6.42）。**端末ごと**に覚える
     readAloudVoice: () => context.globalState.get<string>(READ_ALOUD_VOICE_KEY),
     saveReadAloudVoice: async (name) => {
@@ -3479,6 +3553,74 @@ export async function activate(
       if (!work) return CHECK_CANCELLED;
       await createEpisodePlot(work);
       return CHECK_COMPLETED;
+    })
+  );
+
+  /*
+    単話プロットからの行き来（設計書6.36。作者の依頼、2026-09-23「プロットモードと
+    単話プロットをうまくつないでくださいね」）。単話プロットを開いているときだけ、
+    エディタのタイトルバーにボタンが出る（package.json の editor/title）。
+    どの単話プロットかは、押されたタブ（引数の Uri）→前面のエディタ→前面のタブの順で見る。
+  */
+  const openedEpisodePlot = (
+    arg: unknown
+  ): { filePath: string; work: WorkEntry; column?: vscode.ViewColumn } | undefined => {
+    const tabInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    const uri =
+      arg instanceof vscode.Uri
+        ? arg
+        : (vscode.window.activeTextEditor?.document.uri ??
+          (tabInput instanceof vscode.TabInputText ||
+          tabInput instanceof vscode.TabInputCustom
+            ? tabInput.uri
+            : undefined));
+    const filePath = uri ? fromUri(uri) : undefined;
+    if (!filePath || episodePlotChapterOfPath(filePath) === null) {
+      void vscode.window.showInformationMessage(
+        "単話プロット（設定/episode-plots/第N話.md）を開いてから使ってください。"
+      );
+      return undefined;
+    }
+    const work = workOfPath(registry, filePath);
+    if (!work) {
+      void vscode.window.showWarningMessage(
+        "この単話プロットの作品が分かりませんでした。作品として登録されているかご確認ください。"
+      );
+      return undefined;
+    }
+    return {
+      filePath,
+      work,
+      column: vscode.window.tabGroups.activeTabGroup.viewColumn,
+    };
+  };
+  context.subscriptions.push(
+    registerCommand("novelai.episodePlotToPlotMode", async (arg?: unknown) => {
+      const target = openedEpisodePlot(arg);
+      if (!target) return;
+      await openPlotMode(context, target.work);
+    }),
+    registerCommand("novelai.previousEpisodePlot", async (arg?: unknown) => {
+      const target = openedEpisodePlot(arg);
+      if (!target) return;
+      await openNeighborEpisodePlot(
+        target.work,
+        await treeProvider.getEpisodes(target.work),
+        target.filePath,
+        "prev",
+        target.column
+      );
+    }),
+    registerCommand("novelai.nextEpisodePlot", async (arg?: unknown) => {
+      const target = openedEpisodePlot(arg);
+      if (!target) return;
+      await openNeighborEpisodePlot(
+        target.work,
+        await treeProvider.getEpisodes(target.work),
+        target.filePath,
+        "next",
+        target.column
+      );
     })
   );
 

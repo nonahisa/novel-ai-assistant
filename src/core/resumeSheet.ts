@@ -487,9 +487,23 @@ export function episodePlotChapterFromFileName(
  * 題を置く場所がほかに無い。台帳を別に作らずプロットの1行目に持たせる
  * ——ファイルを消せば予定ごと消え、作者が見出しを書き換えればそれが題になる。
  */
-export function buildEpisodePlotTemplate(chapter: number, title = ""): string {
+export function buildEpisodePlotTemplate(
+  chapter: number,
+  title = "",
+  /**
+   * plot.md の「人称」に作者が書いた文（`narrativePersonText`。作者の依頼、
+   * 2026-09-23「プロットモードと単話プロットをうまくつないで」）。
+   *
+   * 空でなければ、視点の問いかけの下へ「（作品の人称：…）」と添える。
+   * **丸ごと括弧書きの1行にする**——`parseEpisodePlot` はそういう行を空として
+   * 読むので、作者が消さずに残してもAIへ問いかけとして渡らない。
+   * 作品で決めた人称を思い出す手がかりであって、この話の視点の答えではない。
+   */
+  narration = ""
+): string {
   // 改行が入ると見出しが2行に割れ、2行目が本文として読まれる
   const flat = title.replace(/\s+/g, " ").trim();
+  const person = narration.replace(/\s+/g, " ").trim();
   return [
     flat
       ? `# 第${chapter}話「${flat}」の単話プロット`
@@ -497,6 +511,7 @@ export function buildEpisodePlotTemplate(chapter: number, title = ""): string {
     "",
     "## 視点",
     "（一人称なら語り手は誰ですか。三人称なら、誰に寄り添って語りますか）",
+    ...(person ? [`（作品の人称：${person}）`] : []),
     "",
     "## この話の目標",
     "（この話で何が変わりますか。読者に何を渡しますか）",
@@ -523,6 +538,28 @@ export function episodePlotTitleFromText(text: string): string {
   const first = body.split(/\r\n?|\n/, 1)[0] ?? "";
   const matched = /^#\s+第\d+話「(.+)」の単話プロット\s*$/.exec(first);
   return matched ? matched[1].trim() : "";
+}
+
+/**
+ * 見出しの話数だけを付け替える（予定の話の並べ替え、設計書6.4.8）。
+ *
+ * **題は保ち、見出しのほかは1文字も変えない**（BOM・改行コードも）。
+ * 見出しが雛形の形でなければ（作者が書き換えていれば）そのまま返す
+ * ——推測で見出しを作り直さない。`episodePlotTitleFromText` と同じく
+ * **作る側の隣に置く**（見出しの形を変えたときに片方だけ古くならないように）。
+ */
+export function renumberEpisodePlotHeading(
+  text: string,
+  chapter: number
+): string {
+  const bom = text.charCodeAt(0) === 0xfeff ? text.slice(0, 1) : "";
+  const body = bom ? text.slice(1) : text;
+  const end = body.search(/\r\n?|\n/);
+  const first = end === -1 ? body : body.slice(0, end);
+  const rest = end === -1 ? "" : body.slice(end);
+  const matched = /^(#\s+第)\d+(話(?:「.+」)?の単話プロット\s*)$/.exec(first);
+  if (!matched) return text;
+  return `${bom}${matched[1]}${chapter}${matched[2]}${rest}`;
 }
 
 /**

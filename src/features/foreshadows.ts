@@ -4,6 +4,7 @@ import {
   addForeshadow,
   createForeshadowStore,
   saveOrUpdateForeshadow,
+  setForeshadowPlannedResolve,
 } from "../core/foreshadowStore";
 import {
   buildEmptyForeshadowGuide,
@@ -192,6 +193,16 @@ export async function setForeshadowStatus(work: WorkEntry): Promise<void> {
         detail: choice.detail,
         status: choice.status,
       })),
+      // **回収予定の話は同じ流れから決める**（設計書6.35。作者の依頼、
+      // 2026-09-23「伏線とも連携させてください」）。メニューの項目は増やさない
+      // ——伏線を選ぶところまでは状態を変えるときと同じだからである
+      {
+        label: PLANNED_RESOLVE_LABEL,
+        description: `（いま：${plannedText(target.plannedResolveChapter)}）`,
+        detail:
+          "何話で回収するつもりかを書き留めます。プロットモードの一覧に数が出て、過ぎても未回収なら知らせます。",
+        plan: true as const,
+      },
       cancelItem(),
     ],
     {
@@ -199,9 +210,12 @@ export async function setForeshadowStatus(work: WorkEntry): Promise<void> {
       ignoreFocusOut: true,
     }
   );
-  if (!statusPick || isCancelItem(statusPick) || !("status" in statusPick)) {
+  if (!statusPick || isCancelItem(statusPick)) return;
+  if ("plan" in statusPick) {
+    await askPlannedResolve(work, target);
     return;
   }
+  if (!("status" in statusPick)) return;
 
   let resolvedChapter: number | null = null;
   if (statusPick.status === "resolved") {
@@ -250,6 +264,63 @@ export async function setForeshadowStatus(work: WorkEntry): Promise<void> {
   }
 }
 
+/** 状態の選択肢に並べる「回収予定」の名前 */
+const PLANNED_RESOLVE_LABEL = "回収予定の話を決める";
+
+function plannedText(chapter: number | null): string {
+  return chapter === null ? "未定" : `第${chapter}話`;
+}
+
+/**
+ * 回収予定の話を訊いて書く（設計書6.35）。
+ *
+ * **作者が決めたときだけ書く**（`setForeshadowPlannedResolve`）。空にすると
+ * 未定に戻る。回収済みの伏線でも決め直せる（選べなくはしない）が、
+ * 一覧・プロットモードで数えるのは未回収のものだけである。
+ */
+async function askPlannedResolve(
+  work: WorkEntry,
+  target: Foreshadow
+): Promise<void> {
+  const chapterText = await askText({
+    title: `「${target.label}」の回収予定の話`,
+    prompt: "何話で回収するつもりかを数字で入れてください（空にすると未定に戻します）",
+    value:
+      target.plannedResolveChapter === null
+        ? ""
+        : String(target.plannedResolveChapter),
+    ignoreFocusOut: true,
+    validateInput: (value) => {
+      const trimmed = value.trim();
+      if (trimmed.length === 0) return undefined;
+      return /^\d+$/.test(trimmed) && parseInt(trimmed, 10) >= 1
+        ? undefined
+        : "1以上の半角の数字で入れてください（未定なら空のままにしてください）。";
+    },
+  });
+  if (chapterText === undefined) return;
+  const chapter = chapterText.trim() ? parseInt(chapterText.trim(), 10) : null;
+
+  try {
+    await setForeshadowPlannedResolve(work, target.id, chapter);
+    notifyDone(
+      chapter === null
+        ? `「${target.label}」の回収予定を未定に戻しました。`
+        : `「${target.label}」を第${chapter}話で回収する予定にしました。`
+    );
+  } catch (error) {
+    const detail = messageOf(error);
+    useLogFile(work.folderPath);
+    logFailure("伏線の回収予定の変更に失敗", {
+      伏線: target.label,
+      詳細: detail,
+    });
+    void vscode.window.showErrorMessage(
+      `回収予定の話を決められませんでした：${detail}`
+    );
+  }
+}
+
 /** 変え終わったときの言い方。状態ごとに違う（「回収済みにしました」など） */
 const STATUS_DONE: Record<ForeshadowStatus, string> = {
   open: "未回収に戻しました",
@@ -273,7 +344,9 @@ function describeStatus(record: Foreshadow): string {
   if (record.status === "intentional") {
     return `意図して開けたまま／${planted}`;
   }
-  return `未回収／${planted}`;
+  return record.plannedResolveChapter === null
+    ? `未回収／${planted}`
+    : `未回収／${planted}／第${record.plannedResolveChapter}話で回収予定`;
 }
 
 /**

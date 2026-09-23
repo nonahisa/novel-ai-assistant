@@ -159,6 +159,38 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 #episodeActions { padding: 6px 12px 0; }
 #episodeActions:empty { display: none; }
+/* 単話プロットの「この話の目標」（設計書6.4.8）。1行で切る（拡張機能側でも切ってある） */
+.episode .goal {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 伏線の数（設計書6.35）。押すと伏線の一覧を開く */
+.fs-counts {
+  display: inline-block;
+  margin-top: 2px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+}
+.fs-counts:hover { text-decoration: underline; background: none; }
+/* 予定の話の並べ替え（↑↓・位置）。本文の行には出さない */
+.move-btn { flex: 0 0 auto; font-size: 11px; padding: 2px 6px; }
+/* 回収予定を過ぎた伏線。話の並びの上に1行だけ出す */
+#overdue { padding: 4px 12px 0; }
+#overdue:empty { display: none; }
+#overdue button {
+  background: none;
+  border: 1px solid var(--vscode-editorWarning-foreground, var(--vscode-descriptionForeground));
+  color: var(--vscode-editorWarning-foreground, inherit);
+  font-size: 12px;
+}
 </style>
 </head>
 <body>
@@ -177,6 +209,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   <div id="syncActions"></div>
   <h2 id="episodesHeading">話の並び</h2>
   <div class="note" id="episodesNote"></div>
+  <div id="overdue"></div>
   <div id="episodes"></div>
   <div id="episodeActions"></div>
 </div>
@@ -199,6 +232,7 @@ const el = {
   episodesHeading: document.getElementById("episodesHeading"),
   episodesNote: document.getElementById("episodesNote"),
   episodeActions: document.getElementById("episodeActions"),
+  overdue: document.getElementById("overdue"),
 };
 
 function post(type, payload) {
@@ -250,9 +284,31 @@ el.syncActions.addEventListener("click", function (event) {
 });
 
 el.episodes.addEventListener("click", function (event) {
+  // 伏線の数は、伏線の一覧を開く（行の本文を開く道より先に見る）
+  if (event.target.closest(".fs-counts")) {
+    post("openForeshadows");
+    return;
+  }
   const target = event.target.closest("[data-path]");
   if (!target) return;
   const chapter = target.dataset.chapter === "" ? null : Number(target.dataset.chapter);
+  /*
+    予定の話の並べ替え・差し込み（設計書6.4.8）。押したことを返すだけで、
+    どう付け替えるかは拡張機能が決め、確認を取ってから単話プロットの
+    名前だけを変える（本文のファイルには触れない）
+  */
+  if (target.classList.contains("move-up")) {
+    post("movePlanned", { chapter: chapter, direction: "up" });
+    return;
+  }
+  if (target.classList.contains("move-down")) {
+    post("movePlanned", { chapter: chapter, direction: "down" });
+    return;
+  }
+  if (target.classList.contains("move-to")) {
+    post("insertPlanned", { chapter: chapter });
+    return;
+  }
   if (target.classList.contains("create-plot")) {
     post("createEpisodePlot", { chapter: chapter });
     return;
@@ -272,6 +328,11 @@ el.episodes.addEventListener("click", function (event) {
  * 予定の話を足す（設計書6.4.8）。押したことを返すだけで、何話目か・題は
  * 拡張機能が訊き、書くのは単話プロットだけ（本文のファイルは作らない）
  */
+el.overdue.addEventListener("click", function (event) {
+  if (!event.target.closest("[data-overdue]")) return;
+  post("openForeshadows");
+});
+
 el.episodeActions.addEventListener("click", function (event) {
   const target = event.target.closest("[data-add-planned]");
   if (!target) return;
@@ -336,10 +397,35 @@ function renderEpisode(row) {
       : "本文はまだありません";
   const sub = [charsText];
   if (row.synopsisHead) sub.push(escapeHtml(row.synopsisHead));
+  // 単話プロットの「この話の目標」。空・問いかけのままなら届かない
+  const goal = row.goalHead
+    ? '<span class="goal" title="単話プロットの「この話の目標」">目標：' +
+      escapeHtml(row.goalHead) + "</span>"
+    : "";
+  // 伏線の数（設計書6.35）。**0 は出さない**
+  const counts = row.foreshadowCounts || {};
+  const fs = [];
+  if (counts.planted > 0) fs.push("張った伏線 " + counts.planted);
+  if (counts.resolved > 0) fs.push("回収した伏線 " + counts.resolved);
+  if (counts.planned > 0) fs.push("回収予定 " + counts.planned);
+  const fsLine = fs.length > 0
+    ? '<button class="fs-counts" title="伏線の一覧を開きます">' +
+      escapeHtml(fs.join("／")) + "</button>"
+    : "";
 
   let button = "";
   if (row.planned) {
-    // 行そのものを押すと単話プロットが開くので、同じボタンを横に並べない
+    // 行そのものを押すと単話プロットが開くので、同じボタンを横に並べない。
+    // 代わりに、予定の話だけ並べ替えの3つを置く（本文のある話は動かせない）
+    const attrs = ' data-path="' + escapeHtml(row.filePath) +
+      '" data-chapter="' + escapeHtml(chapterAttr) + '"';
+    button =
+      '<button class="move-btn move-up"' + attrs +
+        ' title="1つ前へ動かします（単話プロットの話数だけを付け替えます）">↑</button>' +
+      '<button class="move-btn move-down"' + attrs +
+        ' title="1つ後ろへ動かします（単話プロットの話数だけを付け替えます）">↓</button>' +
+      '<button class="move-btn move-to"' + attrs +
+        ' title="話数を指定して差し込みます（本文のある話数へは動かせません）">位置</button>';
   } else if (row.hasEpisodePlot) {
     button =
       '<button class="plot-btn open-plot" data-path="' + escapeHtml(row.filePath) +
@@ -375,7 +461,9 @@ function renderEpisode(row) {
         '<span class="head">' + escapeHtml(row.label) +
           (row.title ? "　" + escapeHtml(row.title) : "") + plotBadge + "</span>" +
         '<span class="sub">' + sub.join("　") + "</span>" +
+        goal +
       "</button>" +
+      fsLine +
     "</span>" +
     button +
   "</div>";
@@ -396,6 +484,11 @@ function renderEpisodes() {
   el.episodes.innerHTML =
     html.length > 0 ? html.join("") : '<div class="note">' +
       escapeHtml(data.emptyEpisodes) + "</div>";
+
+  el.overdue.innerHTML = data.overdue
+    ? '<button data-overdue="1" title="' + escapeHtml(data.overdue.detail) + '">' +
+      escapeHtml(data.overdue.label) + "</button>"
+    : "";
 
   el.episodeActions.innerHTML = data.addPlanned
     ? '<button data-add-planned="1" title="' + escapeHtml(data.addPlanned.detail) +

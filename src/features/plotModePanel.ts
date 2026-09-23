@@ -11,6 +11,7 @@ import {
   PLOT_MODE_AI_COMMANDS,
   appendPlotSection,
   buildPlotEpisodeRows,
+  episodePlotGoalHead,
   listPlotHeadings,
   nextPlannedEpisodeNumber,
   parsePlannedEpisodeNumber,
@@ -21,7 +22,10 @@ import {
   type PlotEpisodeRow,
 } from "../core/plotMode";
 import { SUPPORTED_EXTENSIONS } from "../models/types";
-import { readTextFile } from "../core/textFile";
+import {
+  readTextFile,
+  writeTextFilePreservingFormat,
+} from "../core/textFile";
 import { computeMinimalEdit } from "../core/textEdit";
 import { scanWork } from "../core/scanner";
 import { ChapterStore } from "../core/chapterStore";
@@ -33,7 +37,22 @@ import {
   episodePlotChapterFromFileName,
   episodePlotFileName,
   episodePlotTitleFromText,
+  renumberEpisodePlotHeading,
 } from "../core/resumeSheet";
+import {
+  applyEpisodePlotRenames,
+  planPlannedEpisodeInsert,
+  planPlannedEpisodeStep,
+  type EpisodePlotRename,
+  type PlannedEpisodeMovePlan,
+} from "../core/episodePlotOrder";
+import { createForeshadowStore } from "../core/foreshadowStore";
+import {
+  foreshadowCountsByChapter,
+  lastWrittenChapter,
+  overdueForeshadows,
+  type ForeshadowChapterCounts,
+} from "../core/foreshadowPlan";
 import { currentCountMode, pickCount } from "../core/countSettings";
 import { episodeUnit } from "../core/episodeLabel";
 import { logFailure, useLogFile } from "../core/logger";
@@ -151,7 +170,13 @@ type PanelMessage =
       type: "checkEpisodePlot";
       chapter: number | null;
       check: EpisodePlotCheckAction;
-    };
+    }
+  /** 予定の話を1つ上・下へ（設計書6.4.8。単話プロットの話数だけを動かす） */
+  | { type: "movePlanned"; chapter: number | null; direction: "up" | "down" }
+  /** 予定の話を、指定の話数へ差し込む */
+  | { type: "insertPlanned"; chapter: number | null }
+  /** 伏線の一覧を開く（一覧の数・回収予定を過ぎた知らせから） */
+  | { type: "openForeshadows" };
 
 class PlotModePanel {
   private readonly panel: vscode.WebviewPanel;
@@ -167,6 +192,8 @@ class PlotModePanel {
   private plotChapters: number[] = [];
   /** 本文を読めたか。読めないまま予定を足すと、本文のある話数と重なりうる */
   private episodesLoaded = false;
+  /** 回収予定を過ぎても未回収の伏線の数（設計書6.35）。一覧の上に出す */
+  private overdueCount = 0;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -281,7 +308,7 @@ class PlotModePanel {
           // 本文は作者が割り当てた画面で開く（原稿エディタを含む）。
           // **左へ出す**——パネルを覆ってしまっては並べた意味が無い
           await openInDefaultEditor(message.filePath, {
-            viewColumn: vscode.ViewColumn.One,
+            viewColumn: this.documentColumn(),
           });
           return;
         case "createEpisodePlot":
@@ -295,6 +322,19 @@ class PlotModePanel {
           return;
         case "checkEpisodePlot":
           await this.checkEpisodePlot(message.chapter, message.check);
+          return;
+        case "movePlanned":
+          await this.movePlanned(message.chapter, message.direction);
+          return;
+        case "insertPlanned":
+          await this.insertPlanned(message.chapter);
+          return;
+        case "openForeshadows":
+          // **既存のコマンドを呼ぶだけ**（一覧の作り方を写さない）
+          await vscode.commands.executeCommand("novelai.openForeshadows", {
+            type: "work",
+            work: this.work,
+          });
           return;
       }
     } catch (error) {
@@ -393,7 +433,7 @@ class PlotModePanel {
     // **既存の口をそのまま呼ぶ**（新規作成だけ・上書きしない、6.36.2）。
     // 開くのは左の面——押したのは右のパネルなので、既定のままだと重なる
     await createEpisodePlot(this.work, chapter, {
-      viewColumn: vscode.ViewColumn.One,
+      viewColumn: this.documentColumn(),
     });
     await this.load();
   }
@@ -445,7 +485,7 @@ class PlotModePanel {
     await createEpisodePlot(
       this.work,
       parsed.chapter,
-      { viewColumn: vscode.ViewColumn.One },
+      { viewColumn: this.documentColumn() },
       { title }
     );
     await this.load();
@@ -471,11 +511,247 @@ class PlotModePanel {
     await vscode.commands.executeCommand("novelai.checkEpisodePlot", ref);
   }
 
+  /**
+   * 本文・単話プロットを開く列。**パネルの列と重ならない列**にする
+   * （作者の依頼、2026-09-23）。パネルは既定で2列目に住むので1列目、
+   * 作者がパネルを1列目へ動かしていたら2列目へ開く。
+   */
+  private documentColumn(): vscode.ViewColumn {
+    return this.panel.viewColumn === vscode.ViewColumn.One
+      ? vscode.ViewColumn.Two
+      : vscode.ViewColumn.One;
+  }
+
+  /**
+   * 予定の話を1つ上・下へ動かす（設計書6.4.8。作者の依頼、2026-09-23）。
+   *
+   * **動かすのは予定の話の単話プロットの話数（ファイル名）だけ。** 本文の
+   * ファイルには一切触れない。本文のある話の話数を変えることになるなら、
+   * 計画（`core/episodePlotOrder.ts`）が理由を返し、ここで止める。
+   */
+  private async movePlanned(
+    chapter: number | null,
+    direction: "up" | "down"
+  ): Promise<void> {
+    if (chapter === null) return;
+    // 押す直前の状態で決める（開いたあとに本文が増えていることがある）
+    await this.load();
+    if (!this.episodesLoaded) {
+      void vscode.window.showWarningMessage(
+        "本文を読めなかったため、予定の話を動かせません。パネルの上の知らせを確かめてください。"
+      );
+      return;
+    }
+    await this.applyMovePlan(
+      planPlannedEpisodeStep(this.episodes, this.plotChapters, chapter, direction)
+    );
+  }
+
+  /** 予定の話を、指定の話数へ差し込む（設計書6.4.8） */
+  private async insertPlanned(chapter: number | null): Promise<void> {
+    if (chapter === null) return;
+    await this.load();
+    if (!this.episodesLoaded) {
+      void vscode.window.showWarningMessage(
+        "本文を読めなかったため、予定の話を動かせません。パネルの上の知らせを確かめてください。"
+      );
+      return;
+    }
+    const noun = this.unitNoun;
+    const text = await askText({
+      title: `第${chapter}${noun}（予定）を差し込む：何${noun}目へ動かしますか`,
+      prompt:
+        `予定の${noun}がいる${noun}数なら、そこから後ろの予定を1つずつずらします。` +
+        `本文のある${noun}数へは動かせません（本文のファイルには触れません）。`,
+      value: String(chapter),
+      validateInput: (value) => {
+        const flat = value.normalize("NFKC").trim();
+        const matched = /^第?\s*(\d+)\s*話?$/.exec(flat);
+        if (!matched) return "話数を数字で入れてください（例：12）。";
+        const plan = planPlannedEpisodeInsert(
+          this.episodes,
+          this.plotChapters,
+          chapter,
+          Number(matched[1])
+        );
+        // **打っているあいだに断る**（押してから止めるより早い）
+        return plan.kind === "blocked" ? plan.reason : null;
+      },
+    });
+    if (text === undefined) return;
+    const matched = /^第?\s*(\d+)\s*話?$/.exec(text.normalize("NFKC").trim());
+    if (!matched) return;
+    await this.applyMovePlan(
+      planPlannedEpisodeInsert(
+        this.episodes,
+        this.plotChapters,
+        chapter,
+        Number(matched[1])
+      )
+    );
+  }
+
+  /**
+   * 計画を確かめてから付け替える。
+   *
+   * 1. 止める計画なら理由を出す（押しても効かない不具合に見せない）
+   * 2. **書きかけの単話プロットがあれば止める**——名前を変えると、保存したときに
+   *    元の名前で作り直されて同じ話が2つになる
+   * 3. 何をどう付け替えるかを並べて確認を取る
+   * 4. 名前を付け替える（`applyEpisodePlotRenames`。一時名を通し、途中で
+   *    失敗したら戻す）。**上書きはしない**
+   * 5. 見出しの「第N話」を新しい話数に合わせる（題は保つ）。本文と同じ
+   *    書き戻しの口（`writeTextFilePreservingFormat`：退避→新規作成・
+   *    ハッシュ照合・文字コードと改行の保持）を通る
+   */
+  private async applyMovePlan(plan: PlannedEpisodeMovePlan): Promise<void> {
+    if (plan.kind === "blocked") {
+      void vscode.window.showWarningMessage(plan.reason);
+      return;
+    }
+    if (plan.kind === "noop") {
+      void vscode.window.showInformationMessage(plan.reason);
+      return;
+    }
+
+    const dirty = plan.renames
+      .map((entry) =>
+        paths.join(this.episodePlotsDir, episodePlotFileName(entry.from))
+      )
+      .filter((filePath) => this.isDirtyDocument(filePath));
+    if (dirty.length > 0) {
+      void vscode.window.showWarningMessage(
+        `保存していない単話プロットがあります（${dirty
+          .map((filePath) => paths.basename(filePath))
+          .join("、")}）。保存してから動かしてください。`
+      );
+      return;
+    }
+
+    const noun = this.unitNoun;
+    const listing = [...plan.renames]
+      .sort((left, right) => left.from - right.from)
+      .map((entry) => `第${entry.from}${noun} → 第${entry.to}${noun}`)
+      .join("\n");
+    const ok = "付け替える";
+    const picked = await vscode.window.showWarningMessage(
+      "予定の話の単話プロットを付け替えます。",
+      {
+        modal: true,
+        detail:
+          `${listing}\n\n` +
+          "動かすのは単話プロットのファイル名と見出しの話数だけです。本文のファイルには触れません。" +
+          "伏線の回収予定の話数は変えません（必要なら「伏線の状態を変える」で決め直してください）。",
+      },
+      ok
+    );
+    if (picked !== ok) return;
+
+    const outcome = await applyEpisodePlotRenames(plan.renames, {
+      rename: (fromName, toName) => this.renamePlotFile(fromName, toName),
+    });
+    if (!outcome.ok) {
+      useLogFile(this.work.folderPath);
+      logFailure("予定の話の付け替えに失敗", {
+        作品: this.work.title,
+        止まった所: outcome.failedStep,
+        内容: outcome.detail,
+        戻せなかったもの: outcome.stranded
+          .map((entry) => `${entry.now}（元は ${entry.original}）`)
+          .join("、"),
+      });
+      void vscode.window.showErrorMessage(
+        outcome.rolledBack
+          ? `付け替えられませんでした（${outcome.failedStep}：${outcome.detail}）。元の名前に戻してあります。`
+          : `付け替えが途中で止まり、元に戻せなかったファイルがあります：${outcome.stranded
+              .map((entry) => `${entry.now} は元の ${entry.original}`)
+              .join("、")}。${EPISODE_PLOTS_DIR} の中で名前を戻してください。`
+      );
+      await this.load();
+      return;
+    }
+
+    const headingFailures = await this.renumberHeadings(outcome.renames);
+    await this.load();
+    if (headingFailures.length > 0) {
+      void vscode.window.showWarningMessage(
+        `付け替えました。ただし見出しの話数を直せなかったものがあります（${headingFailures.join("、")}）。見出しを手で直してください。`
+      );
+      return;
+    }
+    void vscode.window.showInformationMessage(
+      `予定の${noun}を付け替えました（${outcome.renames.length}件）。本文のファイルには触れていません。`
+    );
+  }
+
+  /**
+   * 置き場の中で名前を変える。**上書きしない**（既にあれば失敗させる）。
+   *
+   * `WorkspaceEdit` の名前変更を通すのは、開いているタブも新しい名前へ
+   * ついて行かせるため（`workspace.fs.rename` だと、開いていたタブが
+   * 「削除済み」のまま残る）。
+   */
+  private async renamePlotFile(fromName: string, toName: string): Promise<void> {
+    const edit = new vscode.WorkspaceEdit();
+    edit.renameFile(
+      paths.toUri(paths.join(this.episodePlotsDir, fromName)),
+      paths.toUri(paths.join(this.episodePlotsDir, toName)),
+      { overwrite: false }
+    );
+    if (!(await vscode.workspace.applyEdit(edit))) {
+      throw new Error(`${fromName} の名前を ${toName} に変えられませんでした`);
+    }
+  }
+
+  /** 見出しの話数を合わせる。直せなかったファイル名を返す */
+  private async renumberHeadings(
+    renames: readonly EpisodePlotRename[]
+  ): Promise<string[]> {
+    const failures: string[] = [];
+    for (const entry of renames) {
+      const filePath = paths.join(
+        this.episodePlotsDir,
+        episodePlotFileName(entry.to)
+      );
+      try {
+        const content = await readTextFile(filePath);
+        const next = renumberEpisodePlotHeading(content.text, entry.to);
+        // 作者が見出しを書き換えていれば、そのまま（推測で作り直さない）
+        if (next === content.text) continue;
+        const result = await writeTextFilePreservingFormat(
+          filePath,
+          next,
+          content,
+          content.hash
+        );
+        if (!result.ok) failures.push(paths.basename(filePath));
+      } catch (error) {
+        useLogFile(this.work.folderPath);
+        logFailure("単話プロットの見出しの付け替えに失敗", {
+          置き場: filePath,
+          内容: messageOf(error),
+        });
+        failures.push(paths.basename(filePath));
+      }
+    }
+    return failures;
+  }
+
+  /** その場所の文書を、保存していない変更つきで開いているか */
+  private isDirtyDocument(filePath: string): boolean {
+    const key = paths.normalizeForComparison(filePath);
+    return vscode.workspace.textDocuments.some(
+      (document) =>
+        document.isDirty &&
+        paths.normalizeForComparison(paths.fromUri(document.uri)) === key
+    );
+  }
+
   private async openEpisodePlot(chapter: number | null): Promise<void> {
     if (chapter === null || !this.episodePlotsDir) return;
     await openInDefaultEditor(
       paths.join(this.episodePlotsDir, episodePlotFileName(chapter)),
-      { viewColumn: vscode.ViewColumn.One }
+      { viewColumn: this.documentColumn() }
     );
   }
 
@@ -552,6 +828,14 @@ class PlotModePanel {
 
     const plotChapters = await this.existingEpisodePlots();
     this.plotChapters = plotChapters;
+    const plotTexts = await this.readEpisodePlotTexts(plotChapters);
+    // 目標の1行（設計書6.4.8）。**書いた話も予定の話も、同じ読み方**
+    // （`episodePlotGoalHead`）で出す。問いかけのまま・空なら出さない
+    const goals = new Map<number, string>();
+    for (const [chapter, text] of plotTexts) {
+      const goal = episodePlotGoalHead(text);
+      if (goal) goals.set(chapter, goal);
+    }
     return buildPlotEpisodeRows({
       episodes,
       chapters,
@@ -559,8 +843,64 @@ class PlotModePanel {
       format,
       synopses,
       episodePlotChapters: new Set(plotChapters),
-      plannedEpisodes: await this.plannedEpisodes(episodes, plotChapters),
+      plannedEpisodes: this.plannedEpisodes(episodes, plotChapters, plotTexts, goals),
+      episodePlotGoals: goals,
+      foreshadowCounts: await this.loadForeshadows(episodes),
     });
+  }
+
+  /**
+   * 伏線の台帳を読み、話ごとの数と「回収予定を過ぎた伏線」を作る（設計書6.35）。
+   *
+   * **読めなくても一覧は出す**（数を出さないだけ）。読めないファイルが
+   * あることは黙らずに知らせる（伏線の一覧と同じ）。
+   */
+  private async loadForeshadows(
+    episodes: readonly EpisodeFile[]
+  ): Promise<Map<number, ForeshadowChapterCounts>> {
+    this.overdueCount = 0;
+    let loaded;
+    try {
+      loaded = await createForeshadowStore(this.work).loadAll();
+    } catch (error) {
+      this.notices.push(
+        `伏線の記録を読めませんでした：${messageOf(error)}（伏線の数は出しません）`
+      );
+      return new Map();
+    }
+    if (loaded.errors.length > 0) {
+      this.notices.push(
+        `読み込めない伏線が ${loaded.errors.length} 件あります（残りだけを数えています）。`
+      );
+    }
+    this.overdueCount = overdueForeshadows(
+      loaded.records,
+      lastWrittenChapter(episodes)
+    ).length;
+    return foreshadowCountsByChapter(loaded.records);
+  }
+
+  /**
+   * 単話プロットの中身（話数 → 本文）。**置き場のファイルを1度ずつ読むだけ**。
+   *
+   * 読めなかったものは断り書きを足して飛ばす——1つ読めないだけで一覧を
+   * 出さないほうが困る。
+   */
+  private async readEpisodePlotTexts(
+    plotChapters: readonly number[]
+  ): Promise<Map<number, string>> {
+    const texts = new Map<number, string>();
+    for (const chapter of plotChapters) {
+      const filePath = paths.join(this.episodePlotsDir, episodePlotFileName(chapter));
+      try {
+        texts.set(chapter, (await readTextFile(filePath)).text);
+      } catch (error) {
+        this.notices.push(
+          `第${chapter}話の単話プロットを読めませんでした：${messageOf(error)}（題と目標は出しません）`
+        );
+      }
+    }
+    return texts;
   }
 
   /**
@@ -593,31 +933,25 @@ class PlotModePanel {
   /**
    * 予定の話（本文の無い話数の単話プロット）と、その題（設計書6.4.8）。
    *
-   * **題を読むのは予定の話だけ。** 本文のある話は本文の題を出すので、
-   * プロットを開いて読む必要がない。読めなかったら題を空にして並べる
-   * ——題が読めないだけで予定を消して見せると、作ったのに無いことになる。
+   * **題を出すのは予定の話だけ。** 本文のある話は本文の題を出す。
+   * 読めなかったら題を空にして並べる——題が読めないだけで予定を消して
+   * 見せると、作ったのに無いことになる。
    */
-  private async plannedEpisodes(
+  private plannedEpisodes(
     episodes: readonly EpisodeFile[],
-    plotChapters: readonly number[]
-  ): Promise<PlannedEpisodePlot[]> {
-    const planned: PlannedEpisodePlot[] = [];
-    for (const chapter of plannedEpisodePlotChapters(episodes, plotChapters)) {
-      const filePath = paths.join(
-        this.episodePlotsDir,
-        episodePlotFileName(chapter)
-      );
-      let title = "";
-      try {
-        title = episodePlotTitleFromText((await readTextFile(filePath)).text);
-      } catch (error) {
-        this.notices.push(
-          `第${chapter}話の単話プロットを読めませんでした：${messageOf(error)}（題は出しません）`
-        );
-      }
-      planned.push({ chapter, title, filePath });
-    }
-    return planned;
+    plotChapters: readonly number[],
+    plotTexts: ReadonlyMap<number, string>,
+    goals: ReadonlyMap<number, string>
+  ): PlannedEpisodePlot[] {
+    return plannedEpisodePlotChapters(episodes, plotChapters).map((chapter) => {
+      const text = plotTexts.get(chapter);
+      return {
+        chapter,
+        title: text === undefined ? "" : episodePlotTitleFromText(text),
+        filePath: paths.join(this.episodePlotsDir, episodePlotFileName(chapter)),
+        goal: goals.get(chapter) ?? "",
+      };
+    });
   }
 
   private post(text: string): void {
@@ -648,7 +982,8 @@ class PlotModePanel {
         episodesNote:
           "上から読むと、作品の流れが分かります。" +
           `${this.unitNoun}を押すと本文を、右のボタンで単話プロットを開きます。` +
-          `「予定」の${this.unitNoun}は本文がまだ無く、押すと単話プロットが開きます。`,
+          `「予定」の${this.unitNoun}は本文がまだ無く、押すと単話プロットが開きます。` +
+          `予定の${this.unitNoun}は ↑↓ で並べ替え、「位置」で話数を指定して差し込めます（本文のファイルには触れません）。`,
         addPlanned: {
           label: `＋ 予定の${this.unitNoun}を足す`,
           detail:
@@ -665,6 +1000,15 @@ class PlotModePanel {
           })),
         })),
         emptyEpisodes: `まだ${this.unitNoun}がありません。`,
+        // 回収予定を過ぎた伏線（設計書6.35）。0件なら出さない
+        overdue:
+          this.overdueCount > 0
+            ? {
+                label: `回収予定を過ぎた伏線 ${this.overdueCount} 件`,
+                detail:
+                  "回収予定の話数が、書いた最後の話より前なのに、まだ未回収の伏線です。押すと伏線の一覧を開きます。",
+              }
+            : null,
         notice: this.notices.join(" "),
       },
     });

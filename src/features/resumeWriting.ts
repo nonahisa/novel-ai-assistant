@@ -2,8 +2,12 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
-import { readPlotText } from "../core/plotFile";
-import { isBlankPlotSection, parsePlotMarkdown } from "../core/plotDoc";
+import { plotPath, readPlotText } from "../core/plotFile";
+import {
+  isBlankPlotSection,
+  narrativePersonText,
+  parsePlotMarkdown,
+} from "../core/plotDoc";
 import { ChapterStore } from "../core/chapterStore";
 import { groupEpisodesByChapter } from "../core/chapterGrouping";
 import { findLatestEpisode } from "../core/latestEpisode";
@@ -220,13 +224,19 @@ async function createEpisodePlotFile(
     return false;
   }
 
+  // 作品の人称（設計書6.36.2。作者の依頼、2026-09-23）。**新しく作るときだけ**
+  // 視点の問いかけの下に添える。既にあるプロットは上で開くだけで、書き足さない
+  const narration = narrativePersonText(await plotTextForTemplate(work));
+
   try {
     await vscode.workspace.fs.createDirectory(path.toUri(directory));
     // **新規作成でしか書かない**（`atomicWrite.ts` の制約）。
     // ここへ来る時点で既存は除いてあるが、その間に作られていたら失敗させる
     await atomicWriteFile(
       filePath,
-      new TextEncoder().encode(buildEpisodePlotTemplate(chapter, plan?.title)),
+      new TextEncoder().encode(
+        buildEpisodePlotTemplate(chapter, plan?.title, narration)
+      ),
       { mode: "create" }
     );
   } catch (error) {
@@ -253,6 +263,26 @@ async function createEpisodePlotFile(
       : `第${chapter}話の単話プロットを作りました。視点・目標・展開を書いてください（AIは書きません）。`
   );
   return true;
+}
+
+/**
+ * 雛形に人称を添えるための plot.md の中身。
+ *
+ * **開いていれば、そちらが正しい**（プロットモードと同じ）。人称を書いた
+ * 直後に保存せず単話プロットを作ると、ディスクにはまだ書かれていない。
+ * 読めなければ空——人称が無いだけで、雛形はいつもどおり作れる。
+ */
+async function plotTextForTemplate(work: WorkEntry): Promise<string> {
+  try {
+    const key = path.normalizeForComparison(await plotPath(work));
+    const open = vscode.workspace.textDocuments.find(
+      (document) =>
+        path.normalizeForComparison(path.fromUri(document.uri)) === key
+    );
+    return open ? open.getText() : await readPlotText(work);
+  } catch {
+    return "";
+  }
 }
 
 /**

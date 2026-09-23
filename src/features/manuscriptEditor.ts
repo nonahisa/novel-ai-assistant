@@ -919,6 +919,11 @@ type Incoming =
   /** 執筆再開の資料を開く（設計書6.36。右クリックから。0.76.7） */
   | { type: "resumeWriting" }
   /**
+   * この話の単話プロットを右の列に開く（設計書6.36・6.25。上のバーと右クリック）。
+   * カーソルの行を添える——合本ではどの話かが位置でしか分からない
+   */
+  | { type: "openEpisodePlot"; line?: number }
+  /**
    * カーソルが動いた（設計書6.40.4）。
    *
    * **画面側で200ミリ秒まとめてから届く。** 打鍵のたびに来ると、
@@ -1067,6 +1072,22 @@ export interface ManuscriptEditorDeps {
    * **繋ぐのは `extension.ts` だけ**（シーンメモと同じ理由）。
    */
   resumeWriting?: (filePath: string) => Promise<void>;
+  /**
+   * この話の単話プロットを右の列に開く（設計書6.36。作者の依頼、2026-09-23
+   * 「エディターから単話プロット参照したいです」）。
+   *
+   * **渡すのは原稿の場所・中身・カーソルの行。** どの話か（合本ならカーソルの
+   * 行の話）と作品は繋ぎの側が決める。**繋ぐのは `extension.ts` だけ**
+   * （シーンメモと同じ理由。ここから単話プロットの機能を直に読むと輪になる）。
+   */
+  openEpisodePlot?: (filePath: string, rawText: string, line: number) => Promise<void>;
+  /**
+   * 原稿の画面が前面に来た（別の話へ移った）ことを外へ知らせる（設計書6.36）。
+   *
+   * **片方向である。** 受け手は、右に単話プロットが見えているときだけ
+   * その話のものへ切り替える。見えていなければ何もしない。
+   */
+  onManuscriptShown?: (filePath: string, rawText: string, line: number) => void;
   /**
    * カーソルが動いたことを外へ知らせる（設計書6.40.4）。
    *
@@ -1449,6 +1470,16 @@ export class ManuscriptEditorProvider
     subscriptions.push(
       panel.onDidChangeViewState((event) => {
         if (event.webviewPanel.visible) void send();
+        // 前面に来た＝この話を書き始めた。右に単話プロットが見えていれば、
+        // この話のものへ切り替えてもらう（設計書6.36。片方向）
+        if (event.webviewPanel.active) {
+          const filePath = fromUri(document.uri);
+          this.deps.onManuscriptShown?.(
+            filePath,
+            document.getText(),
+            lastCaret?.filePath === filePath ? lastCaret.line : 0
+          );
+        }
       })
     );
 
@@ -1505,6 +1536,15 @@ export class ManuscriptEditorProvider
           if (pendingReading) {
             pendingReading = false;
             showReadingNow();
+          }
+          // 「次の話」で新しく開いた画面は、前面に来た知らせ（ViewState）が
+          // 出ない。立ち上がった時点で、右の単話プロットに追いついてもらう
+          if (panel.active) {
+            this.deps.onManuscriptShown?.(
+              fromUri(document.uri),
+              document.getText(),
+              0
+            );
           }
           // 下段の字数は**本文より後**でよい（作品ぜんたいの走査が要る）。
           // 待たせると、開いた直後の本文の表示まで遅れる
@@ -1624,6 +1664,14 @@ export class ManuscriptEditorProvider
 
         case "resumeWriting":
           await this.deps.resumeWriting?.(fromUri(document.uri));
+          break;
+
+        case "openEpisodePlot":
+          await this.deps.openEpisodePlot?.(
+            fromUri(document.uri),
+            document.getText(),
+            message.line ?? 0
+          );
           break;
 
         case "readingPlan":

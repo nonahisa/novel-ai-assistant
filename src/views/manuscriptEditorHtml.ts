@@ -814,6 +814,7 @@ ruby > rt {
   <div class="sep"></div>
   <button id="copy" title="投稿サイトの記法に直してコピーします">投稿用にコピー</button>
   <button id="aloudToggle" title="読み上げの操作を出し入れします。耳で聞くと、目では気づかないリズムの悪さや誤字が見つかります">読み上げ</button>
+  <button id="episodePlot" title="この話の単話プロットを右の列に開きます。無ければ作るかを訊きます。前後の話へ移ると、右の単話プロットもその話のものに切り替わります">単話プロット</button>
   <div class="sep note-only"></div>
   <button id="noteStyle" class="note-only" title="noteの読み味に近い組版（幅・行間・書体）で表示します。もう一度押すと、いつもの表示に戻ります">note風</button>
   <button id="notePv" class="note-only" title="noteに貼ったときの見た目を出します。noteに無い記法には印が付きます">貼り付け後</button>
@@ -1407,6 +1408,14 @@ ruby > rt {
   document.getElementById("emph").addEventListener("click", function () {
     askEmphasis();
   });
+  /*
+    単話プロットを右の列に開く（設計書6.25・6.36。作者の依頼、2026-09-23
+    「エディターから単話プロット参照したいです」）。**カーソルの行を添える**
+    ——合本ではどの話かが位置でしか分からない（「次の話」と同じ）
+  */
+  document.getElementById("episodePlot").addEventListener("click", function () {
+    vscode.postMessage({ type: "openEpisodePlot", line: caretLine() });
+  });
   document.getElementById("copy").addEventListener("click", function () {
     /*
       **カーソルの行を添える。** 合本（1ファイルに全話）を開いていると、
@@ -1997,6 +2006,10 @@ ruby > rt {
     });
     add("シーンメモを横に開く", function () {
       vscode.postMessage({ type: "openMemos" });
+    });
+    // 単話プロット（設計書6.36）も「横に資料を開く」項目なので、同じ区切りに置く
+    add("単話プロットを横に開く", function () {
+      vscode.postMessage({ type: "openEpisodePlot", line: menuCaretLine() });
     });
 ${RESUME_WRITING_LABEL ? `
     /* ── 執筆再開の資料（設計書6.36。作者の依頼、2026-09-23） ──

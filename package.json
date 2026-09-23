@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを引き受けるVSCode拡張機能で、AIは提案するだけで原稿は書き換えません（無料の手元AIだけでも使えます）。※現在テスト中です。",
-  "version": "0.76.7",
+  "version": "0.77.0",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -583,6 +583,24 @@
         "title": "単話プロットを作る",
         "category": "小説執筆",
         "icon": "$(checklist)"
+      },
+      {
+        "command": "novelai.episodePlotToPlotMode",
+        "title": "プロットモードへ",
+        "category": "小説執筆",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "novelai.previousEpisodePlot",
+        "title": "前の話の単話プロット",
+        "category": "小説執筆",
+        "icon": "$(arrow-left)"
+      },
+      {
+        "command": "novelai.nextEpisodePlot",
+        "title": "次の話の単話プロット",
+        "category": "小説執筆",
+        "icon": "$(arrow-right)"
       },
       {
         "command": "novelai.checkEpisodePlot",
@@ -1386,6 +1404,23 @@
           "group": "9_danger"
         }
       ],
+      "editor/title": [
+        {
+          "command": "novelai.previousEpisodePlot",
+          "when": "resourceDirname =~ /episode-plots$/ && resourceExtname == .md",
+          "group": "navigation@1"
+        },
+        {
+          "command": "novelai.nextEpisodePlot",
+          "when": "resourceDirname =~ /episode-plots$/ && resourceExtname == .md",
+          "group": "navigation@2"
+        },
+        {
+          "command": "novelai.episodePlotToPlotMode",
+          "when": "resourceDirname =~ /episode-plots$/ && resourceExtname == .md",
+          "group": "navigation@3"
+        }
+      ],
       "editor/context": [
         {
           "command": "novelai.showSettingsForTerm",
@@ -1424,6 +1459,18 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "novelai.episodePlotToPlotMode",
+          "when": "resourceDirname =~ /episode-plots$/ && resourceExtname == .md"
+        },
+        {
+          "command": "novelai.previousEpisodePlot",
+          "when": "resourceDirname =~ /episode-plots$/ && resourceExtname == .md"
+        },
+        {
+          "command": "novelai.nextEpisodePlot",
+          "when": "resourceDirname =~ /episode-plots$/ && resourceExtname == .md"
+        },
         {
           "command": "novelai.soloWorks",
           "when": "false"

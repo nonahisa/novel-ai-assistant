@@ -124,6 +124,12 @@ function entryLines(record: Foreshadow): string[] {
     lines.push(`  - 引用：「${record.plantedQuote.trim()}」`);
   }
 
+  // 回収予定（設計書6.35）は作者が決めた話数。**未回収のものにだけ出す**
+  // ——回収済みなら実際に回収した話が下に出ており、予定は済んでいる
+  if (record.status === "open" && record.plannedResolveChapter !== null) {
+    lines.push(`- 第${record.plannedResolveChapter}話で回収予定`);
+  }
+
   if (record.status === "resolved") {
     lines.push(`- ${chapterText(record.resolvedChapter)}で回収`);
     if (record.resolvedQuote.trim()) {

@@ -178,8 +178,44 @@ export function saveOrUpdateForeshadow(
       // createdAt は書き換えない（いつ気づいた伏線かが残る）。
       // updatedAt は保存時に `SettingsStore` が入れ直す
       updatedAt: current.updatedAt,
+      // 回収予定（`plannedResolveChapter`）は `...current` のまま保つ。
+      // **作者だけが書く項目**で、AIの回収確認もこの口を通るため
     };
 
+    await store.saveAll([record]);
+    return record;
+  });
+}
+
+/**
+ * 回収予定の話を決める（設計書6.35。作者の依頼、2026-09-23）。
+ *
+ * **作者が決める操作からだけ呼ぶ。** AIの検知・回収確認はこの口を使わない
+ * （`authorNotes` と同じく、作者だけが書く項目である）。null で未定に戻す。
+ *
+ * 書き方は `saveOrUpdateForeshadow` と同じ——読んでから書き（ハッシュ照合）、
+ * 同じ列に並べ（`enqueue`）、変えるのはこの1項目だけ。状態・回収の記録・
+ * 作者メモには触らない。
+ */
+export function setForeshadowPlannedResolve(
+  work: WorkEntry,
+  id: string,
+  chapter: number | null
+): Promise<Foreshadow> {
+  return enqueue(work, async () => {
+    const store = createForeshadowStore(work);
+    const loaded = await store.loadAll();
+    const current = loaded.records.find((record) => record.id === id);
+    if (!current) {
+      throw new Error(
+        `伏線「${id}」が見つかりません。伏線の一覧を開いて確かめてください。`
+      );
+    }
+    const record: Foreshadow = {
+      ...current,
+      plannedResolveChapter: chapter,
+      updatedAt: current.updatedAt,
+    };
     await store.saveAll([record]);
     return record;
   });

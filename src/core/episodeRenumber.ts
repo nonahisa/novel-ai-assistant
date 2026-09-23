@@ -966,7 +966,11 @@ export function renumberCharacter(
  * 消したついでに捨ててはいけない。
  */
 export function renumberForeshadow<
-  T extends { plantedChapter: number | null; resolvedChapter: number | null }
+  T extends {
+    plantedChapter: number | null;
+    resolvedChapter: number | null;
+    plannedResolveChapter?: number | null;
+  }
 >(foreshadow: T, shift: EpisodeShift): { record: T; changed: number } {
   const counter = new ShiftCounter(shift);
   return {
@@ -974,6 +978,19 @@ export function renumberForeshadow<
       ...foreshadow,
       plantedChapter: counter.one(foreshadow.plantedChapter),
       resolvedChapter: counter.one(foreshadow.resolvedChapter),
+      /*
+        回収予定の話（設計書6.35）も同じ話数を指しているので付け替える。
+        **作者が書いた予定を、話を差し込んだついでにずらしたままにしない**
+        ——第10話の前へ1話差し込めば、予定の「第10話」は第11話になる。
+        旧い台帳（項目が無い）には足さない。
+      */
+      ...(foreshadow.plannedResolveChapter === undefined
+        ? {}
+        : {
+            plannedResolveChapter: counter.one(
+              foreshadow.plannedResolveChapter
+            ),
+          }),
     },
     changed: counter.changed,
   };

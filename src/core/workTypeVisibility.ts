@@ -232,6 +232,10 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.plotInterview": "story",
   "novelai.generatePlot": "story",
   "novelai.createEpisodePlot": "story",
+  // 単話プロットからの行き来（設計書6.36）。単話プロットと同じく続きものだけ
+  "novelai.episodePlotToPlotMode": "story",
+  "novelai.previousEpisodePlot": "story",
+  "novelai.nextEpisodePlot": "story",
   // **タイプを決める入口は、どのタイプでも要る。**
   // ここが消えると、間違えて選んだタイプから戻れなくなる
   "novelai.setPlotBasics": "allTypes",

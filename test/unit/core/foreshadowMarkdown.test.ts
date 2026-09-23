@@ -170,4 +170,22 @@ describe("伏線の一覧のMarkdown", () => {
 
     expect(markdown).toContain("作者メモ：第12話で使う");
   });
+
+  test("回収予定の話は、未回収のものにだけ出す（設計書6.35）", () => {
+    const markdown = buildForeshadowMarkdown([
+      foreshadow({ id: "foreshadow_001", label: "銀の懐中時計", plannedResolveChapter: 12 }),
+      foreshadow({
+        id: "foreshadow_002",
+        label: "割れた鏡",
+        status: "resolved",
+        resolvedChapter: 8,
+        plannedResolveChapter: 9,
+      }),
+    ]);
+
+    expect(markdown).toContain("第12話で回収予定");
+    // 回収済みのものは「回収」を出す。予定は済んだ話なので並べない
+    expect(markdown).not.toContain("第9話で回収予定");
+  });
 });
+

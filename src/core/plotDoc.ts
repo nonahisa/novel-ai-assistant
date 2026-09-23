@@ -178,6 +178,26 @@ export function isBlankPlotSection(body: string): boolean {
 }
 
 /**
+ * 「人称」節に作者が書いた文を、1行にして返す（設計書6.36.2。作者の依頼、
+ * 2026-09-23）。書かれていなければ空。
+ *
+ * 単話プロットの雛形の、視点の問いかけの下へ添えるために使う。
+ * **案内（HTMLコメント）と箇条書きの空欄は落とす**（`isBlankPlotSection` と
+ * 同じ見方）。**1行に畳む**のは、添える行を丸ごと括弧書きにするため——
+ * 行が割れると2行目が括弧の外に出て、視点の中身としてAIへ渡る。
+ */
+export function narrativePersonText(plotText: string): string {
+  const body = parsePlotMarkdown(plotText).sections.narrativePerson ?? "";
+  if (isBlankPlotSection(body)) return "";
+  return body
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .split("\n")
+    .map((line) => line.trim().replace(/^[-*+・]\s*/, "").trim())
+    .filter((line) => line !== "")
+    .join("／");
+}
+
+/**
  * **作品の分類を書き留めるだけの節。** ここが埋まっていても、
  * 「プロットを書いた」ことにはならない。
  *
