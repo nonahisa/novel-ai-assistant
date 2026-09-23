@@ -228,6 +228,34 @@ describe("URI のパスの判定", () => {
     expect(readerStatsUriAction("/import-reader-stats/")).toBe("import");
   });
 
+  test("公募の一覧の取り込み口（設計書6.3.6.1）も、約束のパスだけで見分ける", () => {
+    expect(readerStatsUriAction("/import-contests")).toBe("contests");
+    expect(readerStatsUriAction("/import-contests/")).toBe("contests");
+    expect(readerStatsUriAction("/Import-Contests")).toBeUndefined();
+    expect(readerStatsUriAction("/import-contests/extra")).toBeUndefined();
+  });
+
+  test("公募の一覧の合図は、公募の取り込みへ渡す（読者の反応の取り込みは始めない）", async () => {
+    works = [work("w1", "星を継ぐ者たち")];
+    writeLedger(works[0], onKakuyomu());
+    env.clipboard.text = envelopeText();
+    let contestCalls = 0;
+    const helper = new ReaderStatsHelperLink({
+      listWorks: () => works,
+      memory,
+      afterImport: async () => undefined,
+      importContests: async () => {
+        contestCalls++;
+      },
+    });
+
+    await helper.handleUri({ path: "/import-contests" });
+
+    expect(contestCalls).toBe(1);
+    expect(clipboardReads).toBe(0);
+    expect(readLedger(works[0])?.readerStats ?? []).toHaveLength(0);
+  });
+
   test("知らないパス・似た綴りは合図と読まない", () => {
     expect(readerStatsUriAction("")).toBeUndefined();
     expect(readerStatsUriAction("/")).toBeUndefined();

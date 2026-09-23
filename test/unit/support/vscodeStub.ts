@@ -393,6 +393,12 @@ export const authentication = {
   ): Promise<{ accessToken: string } | undefined> => undefined,
 };
 
+/** 選択画面の区切り（VS Code 本体と同じ値） */
+export enum QuickPickItemKind {
+  Separator = -1,
+  Default = 0,
+}
+
 export enum ProgressLocation {
   Window = 10,
   Notification = 15,

@@ -42,6 +42,7 @@ import {
   buildContestProgress,
   describeContestProgress,
 } from "../core/contestProgress";
+import { asOfLabel } from "../core/contestInbox";
 import {
   boundaryHour,
   dailyGoal,
@@ -292,7 +293,13 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
       ? {
           headline: describeContestProgress(contest),
           name: contest.contest.name,
-          url: contest.contest.url,
+          // 押すと拡張機能側で開く（openExternal）。http・https でなければ出さない
+          url:
+            contest.contest.url && isOpenableWorkUrl(contest.contest.url)
+              ? contest.contest.url
+              : null,
+          // 公募の一覧から入れた応募先は、いつの情報かを添える（募集は書き換わる。6.3.6.1）
+          asOf: contest.contest.imported ? asOfLabel(contest.contest.imported.importedAt) : null,
           deadline: contest.contest.deadline,
           daysLeft: contest.daysLeft,
           overdue: contest.overdue,

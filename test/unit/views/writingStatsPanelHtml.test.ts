@@ -39,6 +39,15 @@ describe("執筆量の言い方", () => {
     expect(script).toContain("amount(total)");
   });
 
+  test("応募先の募集要項は、拡張機能側へ頼んで開く（画面から直接繋がない。設計書6.3.6.1）", () => {
+    expect(script).toContain("data-contest-url");
+    expect(script).toContain("vscode.postMessage({ type: 'openExternal', url: el.dataset.contestUrl })");
+    // 公募の一覧から入れた応募先は、いつの情報かを添える
+    expect(script).toContain("contest.asOf");
+    // 以前の「href に募集要項のURLをそのまま入れる」形は残っていない
+    expect(script).not.toContain("'<div class=\"contest-detail\"><a href=\"' + escapeHtml(contest.url)");
+  });
+
   test("スクリプトがJavaScriptとして読める", () => {
     expect(() => new Function(script)).not.toThrow();
   });

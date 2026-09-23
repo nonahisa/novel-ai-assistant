@@ -75,6 +75,57 @@ describe("目標の読み取り", () => {
     ).toThrow();
   });
 
+  test("公募の一覧から入れた応募先は、取り込んだ日時と出どころを持つ（設計書6.3.6.1）", () => {
+    const goals = parseWorkGoals({
+      contest: {
+        name: "第3回 みずうみ文学賞",
+        url: "https://example.com/mizuumi",
+        deadline: "2026-10-31",
+        minChars: 20000,
+        maxChars: 40000,
+        imported: {
+          importedAt: "2026-09-23T10:00:00.000+09:00",
+          sourcePage: "https://creative-story.net/bungakusyou/",
+          organizer: "みずうみ文学振興会",
+          deadlineText: "2026年10月31日（土）23:59",
+          charText: "400字詰原稿用紙で50枚以上100枚以下",
+        },
+      },
+    });
+    expect(goals.contest?.imported).toEqual({
+      importedAt: "2026-09-23T10:00:00.000+09:00",
+      sourcePage: "https://creative-story.net/bungakusyou/",
+      organizer: "みずうみ文学振興会",
+      deadlineText: "2026年10月31日（土）23:59",
+      charText: "400字詰原稿用紙で50枚以上100枚以下",
+    });
+  });
+
+  test("手で入れた応募先（取り込みの記録が無い）は、これまでどおり読める", () => {
+    const goals = parseWorkGoals({
+      contest: { name: "賞", deadline: "2026-08-31" },
+    });
+    expect(goals.contest).not.toHaveProperty("imported");
+  });
+
+  test("取り込みの記録が壊れていれば、直さずエラーにする", () => {
+    expect(() =>
+      parseWorkGoals({
+        contest: { name: "賞", deadline: "2026-08-31", imported: { importedAt: 3 } },
+      })
+    ).toThrow("取り込み");
+    // http・https でない出どころは持たない（開かせない）
+    expect(() =>
+      parseWorkGoals({
+        contest: {
+          name: "賞",
+          deadline: "2026-08-31",
+          imported: { importedAt: "2026-09-23T10:00:00Z", sourcePage: "javascript:alert(1)" },
+        },
+      })
+    ).toThrow("取り込み");
+  });
+
   test("実在しない日付を弾く", () => {
     expect(isDateKey("2026-02-30")).toBe(false);
     expect(isDateKey("2026-13-01")).toBe(false);

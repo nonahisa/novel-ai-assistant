@@ -257,6 +257,10 @@ import { writePlotSections } from "./core/plotFile";
 import { statsDayKey } from "./core/writingStats";
 import { setWorkGoals } from "./features/setWorkGoals";
 import {
+  importContestsFromClipboard,
+  type ContestImportDeps,
+} from "./features/contestImport";
+import {
   checkContradictions,
   pickContradictionReadMode,
   pickContradictionRoute,
@@ -2934,6 +2938,17 @@ export async function activate(
     await openPlotFile(work);
   }
 
+  /*
+    公募の一覧（設計書6.3.6.1）。取り込んだ一覧は**この端末の置き場**（globalState）に
+    持ち、作品へは応募先に選んだ1件だけを書く。作品目標設定と、ヘルパーからの
+    呼び出し（下の読者の反応の受け口と同じ URI の受け口）の両方から使う。
+  */
+  const contestDeps: ContestImportDeps = {
+    memory: context.globalState,
+    listWorks: () => registry.list(),
+    afterSave: (work) => refreshWritingStatsPanel(work, deviceId),
+  };
+
   context.subscriptions.push(
     registerCommand(
       "novelai.createPlot",
@@ -2989,7 +3004,7 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
-        await setWorkGoals(work);
+        await setWorkGoals(work, { contests: contestDeps });
         // 目標を変えたら、開いているパネルの「あと何字」を出し直す
         await refreshWritingStatsPanel(work, deviceId);
       }
@@ -6173,6 +6188,8 @@ export async function activate(
         listWorks: () => registry.list(),
         memory: context.globalState,
         afterImport: (work) => refreshWritingStatsPanel(work, deviceId),
+        // 公募の一覧（ヘルパー 0.12.0）。URI の受け口は1つしか持てないので、ここで渡す
+        importContests: () => importContestsFromClipboard(contestDeps, "uri"),
       })
     )
   );

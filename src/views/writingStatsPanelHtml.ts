@@ -363,15 +363,30 @@ function renderContest() {
   }
   rows.push('<div class="contest-detail">' + detail.join(' ／ ') + '</div>');
 
-  // 募集要項は変わることがある。作者が確かめ直せるように残す
+  // 募集要項は変わることがある。作者が確かめ直せるように残す。
+  // 公募の一覧から入れた応募先は、いつの情報かを添える（設計書6.3.6.1）
+  const links = [];
   if (contest.url) {
-    rows.push(
-      '<div class="contest-detail"><a href="' + escapeHtml(contest.url) + '">募集要項を見る</a></div>'
+    // **拡張機能側へ頼んで開く**（openExternal）。画面の中から直接どこかへ繋がない
+    links.push(
+      '<a href="#" class="contest-link" data-contest-url="' + escapeHtml(contest.url) + '">募集要項を開く</a>'
     );
+  }
+  if (contest.asOf) {
+    links.push(escapeHtml(contest.asOf) + '（応募の前に募集要項で確かめてください）');
+  }
+  if (links.length > 0) {
+    rows.push('<div class="contest-detail">' + links.join(' ／ ') + '</div>');
   }
 
   const state2 = contest.overdue || contest.overMax ? ' warn' : '';
   box.innerHTML = '<div class="contest' + state2 + '">' + rows.join('') + '</div>';
+  box.querySelectorAll('[data-contest-url]').forEach((el) => {
+    el.addEventListener('click', (event) => {
+      event.preventDefault();
+      vscode.postMessage({ type: 'openExternal', url: el.dataset.contestUrl });
+    });
+  });
 }
 
 function renderCards() {

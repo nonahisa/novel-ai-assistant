@@ -44,6 +44,30 @@ export interface ContestGoal {
    * 割り算では出ない事情がある）。
    */
   dailyGoal: number | null;
+  /**
+   * 公募の一覧から入れたときの記録（設計書6.3.6.1）。手で入れた応募先には無い。
+   *
+   * **募集は書き換わる。** 締切の延長・字数の変更がよくあるので、いつの情報かを
+   * 画面に出し（「9月23日時点の情報」）、取り込み直したときに違いを見つける手がかりにする。
+   */
+  imported?: ContestImport | null;
+}
+
+/** 公募の一覧から応募先へ入れたときの記録 */
+export interface ContestImport {
+  /** 取り込んだ日時（ISO 8601） */
+  importedAt: string;
+  /** 読んだ一覧のページ（http・https）。貼り付けた文から入れたときは null */
+  sourcePage: string | null;
+  /**
+   * 主催。取り込み直したとき、**名前が同じでも主催が違えば別の公募**と見分ける
+   * （「第1回 短編小説賞」のような名前は、主催の違う募集で重なりうる）
+   */
+  organizer: string | null;
+  /** 締切の原文（作者が確かめ直せるように） */
+  deadlineText: string | null;
+  /** 字数の原文 */
+  charText: string | null;
 }
 
 export const WORK_GOALS_SCHEMA_VERSION = "0.1";
@@ -100,13 +124,40 @@ function parseContest(raw: unknown): ContestGoal {
     throw new Error("下限字数が上限字数を超えています。");
   }
 
-  return {
+  const contest: ContestGoal = {
     name,
     url: typeof value.url === "string" && value.url.trim() ? value.url.trim() : null,
     deadline,
     minChars,
     maxChars,
     dailyGoal: positiveOrNull(value.dailyGoal, "日間目標"),
+  };
+  // 記録が無い応募先（手で入れたもの・前の版で入れたもの）は欄ごと持たない
+  if (value.imported != null) contest.imported = parseContestImport(value.imported);
+  return contest;
+}
+
+function parseContestImport(raw: unknown): ContestImport {
+  const broken = new Error("応募先の取り込みの記録の形式が正しくありません。");
+  if (typeof raw !== "object" || raw === null) throw broken;
+  const value = raw as Record<string, unknown>;
+  if (typeof value.importedAt !== "string" || Number.isNaN(Date.parse(value.importedAt))) {
+    throw broken;
+  }
+  const optionalText = (field: unknown): string | null => {
+    if (field == null) return null;
+    if (typeof field !== "string") throw broken;
+    return field.trim() || null;
+  };
+  const sourcePage = optionalText(value.sourcePage);
+  // 画面から押して開く場所なので、http・https 以外は持たない
+  if (sourcePage !== null && !/^https?:\/\//u.test(sourcePage)) throw broken;
+  return {
+    importedAt: value.importedAt,
+    sourcePage,
+    organizer: optionalText(value.organizer),
+    deadlineText: optionalText(value.deadlineText),
+    charText: optionalText(value.charText),
   };
 }
 

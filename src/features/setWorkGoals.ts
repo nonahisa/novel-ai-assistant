@@ -1,18 +1,20 @@
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
-import { scanWork } from "../core/scanner";
 import { isDateKey, type ContestGoal, type WorkGoals } from "../models/workGoals";
 import { readWorkGoalsOrEmpty, writeWorkGoals } from "../core/workGoalsStore";
-import {
-  buildContestProgress,
-  describeContestProgress,
-} from "../core/contestProgress";
-import { statsDayKey } from "../core/writingStats";
-import { boundaryHour } from "./writingProgress";
 import { readWorkFormat } from "../core/workFormatStore";
 import { episodeUnit } from "../core/episodeLabel";
+import { asOfLabel } from "../core/contestInbox";
+import { isOpenableWorkUrl } from "../core/postingSiteRecords";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { notifyDone } from "../views/notify";
+import { reportContest } from "./contestGoalReport";
+import {
+  chooseContestForWork,
+  importContestsFromClipboard,
+  loadContestInbox,
+  type ContestImportDeps,
+} from "./contestImport";
 
 /**
  * 作品ごとの目標を決める（設計書6.3.6）。
@@ -23,7 +25,8 @@ import { notifyDone } from "../views/notify";
  *
  * **コンテストの一覧は同梱しない。** 募集は日々変わり、締切も規定も入れ替わる。
  * 古い一覧を抱えるより、**作者が募集要項を見て入れる**ほうが確かである。
- * 探す場所は案内に書く。
+ * 探す場所は案内に書く。一覧のページを読んで選ぶこともできる（設計書6.3.6.1。
+ * ヘルパーか、ページの文を貼り付けて取り込む）が、読むのは作者が開いたページだけである。
  */
 
 /** 募集を探す場所。同梱する一覧の代わりに、行き先だけを示す */
@@ -33,10 +36,23 @@ const CONTEST_DIRECTORIES = [
     label: "投稿サイトのコンテスト一覧",
     url: "https://creative-story.net/202111contest/",
   },
+  { label: "小説の公募一覧（ツクリテミライ）", url: "https://tsukuritemirai.com/kobo/novel/" },
 ];
 
-export async function setWorkGoals(work: WorkEntry): Promise<void> {
+export interface SetWorkGoalsOptions {
+  /** 公募の一覧から選ぶ・貼り付けて取り込む（設計書6.3.6.1）。無ければ出さない */
+  readonly contests?: ContestImportDeps;
+}
+
+export async function setWorkGoals(
+  work: WorkEntry,
+  options: SetWorkGoalsOptions = {}
+): Promise<void> {
   const goals = await readWorkGoalsOrEmpty(work);
+  const contests = options.contests;
+  const inboxCount = contests ? loadContestInbox(contests.memory).length : 0;
+  const contestUrl =
+    goals.contest?.url && isOpenableWorkUrl(goals.contest.url) ? goals.contest.url : null;
 
   const picked = await vscode.window.showQuickPick(
     [
@@ -55,11 +71,45 @@ export async function setWorkGoals(work: WorkEntry): Promise<void> {
         description: goals.contest
           ? `${goals.contest.name}（${goals.contest.deadline}）`
           : "未設定",
-        detail:
-          "締切日・作品の文字量・日間目標を入れると、" +
-          "執筆量パネルに「あと何日・あと何字・1日あたり何字」が出ます。",
+        detail: goals.contest?.imported
+          ? `${asOfLabel(goals.contest.imported.importedAt)}です。募集は変わることがあるので、` +
+            "応募の前に募集要項で確かめてください。ここで締切・文字量・日間目標を直せます。"
+          : "締切日・作品の文字量・日間目標を入れると、" +
+            "執筆量パネルに「あと何日・あと何字・1日あたり何字」が出ます。",
         action: "contest" as const,
       },
+      ...(contestUrl
+        ? [
+            {
+              label: "$(link-external) 応募先の募集要項を開く",
+              description: goals.contest?.imported
+                ? asOfLabel(goals.contest.imported.importedAt)
+                : "",
+              detail: contestUrl,
+              action: "openContest" as const,
+            },
+          ]
+        : []),
+      ...(contests
+        ? [
+            {
+              label: "$(list-unordered) 公募の一覧から応募先を選ぶ",
+              description: inboxCount > 0 ? `取り込んだ公募 ${inboxCount}件` : "まだ取り込んでいません",
+              detail:
+                "統合小説執筆環境ヘルパーか貼り付けで取り込んだ公募から選びます。" +
+                "いまの字数に合うもの・締切の近いものが上に並びます。",
+              action: "pickContest" as const,
+            },
+            {
+              label: "$(clippy) 公募の一覧を貼り付けて取り込む",
+              description: "ヘルパーを使わないとき",
+              detail:
+                "ノベルポータル・ツクリテミライの公募の一覧のページで、文章を全部選んでコピー" +
+                "（Ctrl+A → Ctrl+C）してから押してください。",
+              action: "pasteContests" as const,
+            },
+          ]
+        : []),
       ...(goals.contest
         ? [
             {
@@ -88,6 +138,18 @@ export async function setWorkGoals(work: WorkEntry): Promise<void> {
   if (picked.action === "clearContest") {
     await save(work, { ...goals, contest: null });
     notifyDone("応募先の情報を消しました。");
+    return;
+  }
+  if (picked.action === "openContest") {
+    if (contestUrl) await vscode.env.openExternal(vscode.Uri.parse(contestUrl));
+    return;
+  }
+  if (picked.action === "pickContest" && contests) {
+    await chooseContestForWork(work, contests);
+    return;
+  }
+  if (picked.action === "pasteContests" && contests) {
+    await importContestsFromClipboard(contests, "paste", work);
     return;
   }
 
@@ -215,7 +277,7 @@ async function editContest(
   });
   if (dailyGoal === undefined) return undefined;
 
-  return {
+  const edited: ContestGoal = {
     name: name.trim(),
     // URLは入力させない。募集要項を開く導線は上で示している
     url: current?.url ?? null,
@@ -224,36 +286,13 @@ async function editContest(
     maxChars: toCountOrNull(maxChars),
     dailyGoal: toCountOrNull(dailyGoal),
   };
-}
-
-/** 入れた直後に、いまの進み具合を見せる */
-async function reportContest(
-  work: WorkEntry,
-  contest: ContestGoal
-): Promise<void> {
-  let written = 0;
-  try {
-    written = (await scanWork(work)).stats.totals.net;
-  } catch {
-    // 走査できなくても保存は済んでいる
+  // 公募の一覧から入れた応募先の記録（いつの情報か・主催）は、名前を変えない限り残す。
+  // 名前を変えたら別の応募先なので、前の公募の記録を持ち越さない（URLも同じ理由で外す）
+  if (current?.imported) {
+    if (current.name === edited.name) edited.imported = current.imported;
+    else edited.url = null;
   }
-  const progress = buildContestProgress(
-    { schemaVersion: "0.1", perEpisodeChars: null, contest },
-    written,
-    statsDayKey(new Date(), boundaryHour())
-  );
-  if (!progress) return;
-
-  const answer = await vscode.window.showInformationMessage(
-    describeContestProgress(progress),
-    "執筆量を見る"
-  );
-  if (answer === "執筆量を見る") {
-    await vscode.commands.executeCommand("novelai.showWritingStats", {
-      type: "work",
-      work,
-    });
-  }
+  return edited;
 }
 
 async function save(work: WorkEntry, goals: WorkGoals): Promise<void> {

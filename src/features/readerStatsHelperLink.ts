@@ -76,6 +76,11 @@ export interface ReaderStatsHelperLinkDeps {
   memory: FingerprintMemory;
   /** 取り込んだあと（執筆量パネルを作り直す） */
   afterImport(work: WorkEntry): Promise<void>;
+  /**
+   * 公募の一覧の合図を受けたとき（設計書6.3.6.1）。VS Code の URI の受け口は
+   * 1つしか持てないので、ここで見分けて渡す。無ければ知らないパスと同じ扱い
+   */
+  importContests?(): Promise<void>;
 }
 
 /** URI の中身のうち、見るもの（パスだけ。クエリは読まない） */
@@ -99,7 +104,12 @@ export class ReaderStatsHelperLink {
    * 知らないパスは何もせず、記録だけ残す。
    */
   async handleUri(uri: HelperUri): Promise<void> {
-    if (readerStatsUriAction(uri.path) !== "import") {
+    const action = readerStatsUriAction(uri.path);
+    if (action === "contests" && this.deps.importContests) {
+      await this.deps.importContests();
+      return;
+    }
+    if (action !== "import") {
       useLogFile(undefined);
       logLine(
         `知らない呼び出し（${uriPathForLog(uri.path)}）を受けました。何もしていません。`

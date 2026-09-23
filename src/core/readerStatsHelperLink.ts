@@ -34,12 +34,21 @@ import {
 /** 取り込みの合図のパス（ヘルパーとの約束） */
 export const READER_STATS_IMPORT_URI_PATH = "/import-reader-stats";
 
+/**
+ * 公募の一覧の取り込みの合図のパス（ヘルパー 0.12.0 との約束。設計書6.3.6.1）。
+ * **VS Code の受け口は拡張機能に1つしか持てない**ので、読者の反応と同じ受け口で
+ * パスを見分ける。データは同じくクリップボードで渡る（リンクには載らない）。
+ */
+export const CONTESTS_IMPORT_URI_PATH = "/import-contests";
+
 /** URI のパスが何の合図か。知らないパスは undefined（何もしない） */
-export function readerStatsUriAction(uriPath: string): "import" | undefined {
+export function readerStatsUriAction(uriPath: string): "import" | "contests" | undefined {
   // 末尾の `/` だけは許す（ブラウザやOSが付け足すことがある）。
   // 大文字小文字は区別する——約束は1つの綴りで、似た綴りを拾う理由が無い
   const trimmed = uriPath.replace(/\/+$/u, "");
-  return trimmed === READER_STATS_IMPORT_URI_PATH ? "import" : undefined;
+  if (trimmed === READER_STATS_IMPORT_URI_PATH) return "import";
+  if (trimmed === CONTESTS_IMPORT_URI_PATH) return "contests";
+  return undefined;
 }
 
 /**
