@@ -403,10 +403,9 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   // 「ターゲット読者」（設計書6.108.6）。上の診断・シート・3つの輪を
   // まとめた入口なので、見せ方もそれらと同じ
   "novelai.openTargetReader": "allTypes",
-  // ターゲットシート（設計書6.108）。狙いと実態の突き合わせは、
-  // 連載でも短編でも同じように要る
+  // ターゲットシート・3つの輪（設計書6.108・6.101）。どちらも押すと
+  // 「ターゲット読者」を開く転送になった（2026-09-23）ので、見せ方も同じ
   "novelai.openTargetSheet": "allTypes",
-  // 3つの輪（設計書6.101）。読者から見た姿はどの形の作品にもある
   "novelai.showThreeCircles": "allTypes",
   "novelai.buildVectorIndex": "allTypes",
   "novelai.clearVectorIndex": "allTypes",

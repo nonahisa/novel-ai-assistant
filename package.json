@@ -255,13 +255,13 @@
       },
       {
         "command": "novelai.openTargetSheet",
-        "title": "ターゲットシート",
+        "title": "ターゲットシート（ターゲット読者へ）",
         "category": "小説執筆",
         "icon": "$(target)"
       },
       {
         "command": "novelai.showThreeCircles",
-        "title": "3つの輪",
+        "title": "3つの輪（ターゲット読者へ）",
         "category": "小説執筆",
         "icon": "$(circle-outline)"
       },

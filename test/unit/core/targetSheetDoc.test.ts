@@ -76,6 +76,25 @@ describe("作者の欄", () => {
     expect(isTargetSheetDoc(build(undefined, SCORES))).toBe(true);
   });
 
+  test("紙の印は、いまの入口（「ターゲット読者」）を指す", () => {
+    // 旧「ターゲットシート」の命令は「ターゲット読者」へ転送する形にした
+    // （2026-09-23）。紙の上で古い名前を案内すると、詳細メニューで見つからない
+    const doc = build(undefined, SCORES);
+    expect(doc).toContain("「ターゲット読者」で作り直されます");
+    expect(doc).not.toContain("「ターゲットシート」で作り直されます");
+  });
+
+  test("古い印の紙も、この紙が作ったものとして扱う（作り直せなくならない）", () => {
+    // 0.82.2 までの紙は古い印を持つ。印を変えただけで「作者の手書き」に
+    // 見えると、作り直しを断るようになってしまう
+    const old = [
+      "# ターゲットシート",
+      "",
+      "<!-- このファイルは「ターゲットシート」で作り直されます。 -->",
+    ].join("\n");
+    expect(isTargetSheetDoc(old)).toBe(true);
+  });
+
   test("ファイル名は 設定/ターゲットシート.md", () => {
     expect(TARGET_SHEET_FILE).toBe("ターゲットシート.md");
   });
@@ -236,6 +255,21 @@ describe("統合した1枚", () => {
     });
     expect(doc).toContain("## 3つの輪");
     expect(doc).toContain("あなた自身の読者タイプ");
+  });
+
+  test("3つの輪の節は、別の紙へ案内しない（シートの中に一本化した）", () => {
+    // 作者の裁定（2026-09-23）「ターゲットシートと3つの輪は完全統合」。
+    // 単独の3つの輪の紙を作る道はやめたので、そこへ案内すると押す先が無い
+    const circles = targetSheetCircles({
+      aim: ["lore_deep"],
+      actual: PROFILE.actual,
+    });
+    const doc = buildFull({
+      authorBlock: "狙い：考察層",
+      profile: PROFILE,
+      circles,
+    });
+    expect(doc).not.toContain("3つの輪の紙");
   });
 
   test("適合度をまだ測っていなければ、測り方を言う", () => {

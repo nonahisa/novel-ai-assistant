@@ -64,14 +64,20 @@ import { measureTitleFit } from "./titleFit";
  * 1段目の狙いだけが残ったシートになる。途中まで答えた2段目は残さない
  * （半端な答えが次に「前回の答え」として出てくるため。6.91と同じ約束）。
  *
- * ## 旧入口は残す
+ * ## 旧入口
  *
- * 「ターゲット読者診断」「ターゲットシート」「3つの輪」のコマンドは
- * これまでどおり動く（コマンドパレットと、既存の呼び出し元のため）。
- * 詳細メニューからは外し、この入口の選択肢から辿れるようにした。
+ * 作者の裁定（2026-09-23）「ターゲットシートと3つの輪は完全統合。読者診断は
+ * そのままでいい」——
+ *
+ * - 「ターゲット読者診断」のコマンドはこれまでどおり動く（詳細メニューからは
+ *   隠し、コマンドパレットに残す）
+ * - 「ターゲットシート」「3つの輪」のコマンドは、**この入口を開く**
+ *   （`core/commandForwards.ts`）。3つの輪は**シートの中の節だけ**になり、
+ *   単独の3つの輪の紙を作る道は無くした——同じ輪を2枚の紙で別々に作れると、
+ *   どちらが最新か作者に分からない
  */
 
-type Plan = "all" | "aim" | "declare" | "read" | "fit" | "sheet" | "circles";
+type Plan = "all" | "aim" | "declare" | "read" | "fit" | "sheet";
 type Stage = "aim" | "declare" | "read";
 
 const STAGES_OF: Record<Plan, readonly Stage[]> = {
@@ -81,14 +87,11 @@ const STAGES_OF: Record<Plan, readonly Stage[]> = {
   read: ["read"],
   fit: [],
   sheet: [],
-  circles: [],
 };
 
 export interface TargetReaderSources {
   /** 作者自身の読者タイプ（3つの輪の1つ）。**未診断なら undefined** */
   readonly authorReader?: AuthorReaderProfile;
-  /** 3つの輪の紙を開く（作家タイプなど、材料は呼ぶ側が持っている） */
-  readonly openThreeCircles: (work: WorkEntry) => Promise<void>;
 }
 
 export async function runTargetReader(
@@ -119,11 +122,6 @@ export async function runTargetReader(
 
   const plan = await choosePlan(work, profile, state.authorBlock);
   if (!plan) return CHECK_CANCELLED;
-
-  if (plan === "circles") {
-    await sources.openThreeCircles(work);
-    return CHECK_COMPLETED;
-  }
 
   if (plan === "fit") {
     const reader = await chooseFitReader(state.authorBlock, profile);
@@ -277,14 +275,9 @@ async function choosePlan(
     },
     {
       label: "いまの材料でシートを作り直す",
-      detail: "何も聞かずに、1枚にまとめ直して開きます。AIは使いません。",
-      plan: "sheet" as Plan,
-    },
-    {
-      label: "3つの輪の紙を開く",
       detail:
-        "書けたものの実績（話数・字数・反応）と、離れているときの近づける道まで並べた紙です。AIは使いません。",
-      plan: "circles" as Plan,
+        "何も聞かずに、1枚にまとめ直して開きます（3つの輪もこの中にあります）。AIは使いません。",
+      plan: "sheet" as Plan,
     },
   ];
 

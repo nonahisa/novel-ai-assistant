@@ -375,6 +375,8 @@ import {
   collectSuiteEstimate,
   runProofreadingSuite,
 } from "./features/proofreadingSuite";
+// 転送だけをする旧コマンドの表（旧「ターゲットシート」「3つの輪」。2026-09-23）
+import { COMMAND_FORWARDS } from "./core/commandForwards";
 import {
   CHECK_CANCELLED,
   CHECK_COMPLETED,
@@ -5375,34 +5377,30 @@ export async function activate(
   );
 
   /*
-    ターゲットシート（設計書6.108）。**AIを呼ばない**——狙い（作者が
-    手で書く欄）と、読者像の台帳にある点数だけで組む。
+    旧「ターゲットシート」「3つの輪」は、押すと「ターゲット読者」の入口を
+    開く（作者の裁定、2026-09-23「ターゲットシートと3つの輪は完全統合。
+    読者診断はそのままでいい」。表は `core/commandForwards.ts`）。
 
-    **結末を名乗って返す**——手順書きの段（`core/procedures.ts`）なので、
-    読者像が無くて止めたときに「画面で案内してもらう」が先へ進むと、
-    作ってもいない紙を案内することになる。
+    **作品の節点をそのまま渡す**——作品一覧の節点や相談から押されたとき、
+    転送先で作品を選び直させない。**結末もそのまま返す**（手順書きの段の
+    「画面で案内してもらう」が、先へ進んでよいかを判断できるように）。
   */
-  context.subscriptions.push(
-    registerCommand("novelai.openTargetSheet", async (node?: WorkNode) => {
-      const work = await resolveWork(node, registry);
-      if (!work) return CHECK_CANCELLED;
-
-      const { openTargetSheet } = await import("./features/targetSheet.js");
-      // 作者自身の読者タイプは、シートの3つの輪に使う（6.108.6）
-      const opened = await openTargetSheet(work, {
-        authorReader: authorReaderTypes.get(),
-      });
-      return opened ? CHECK_COMPLETED : CHECK_CANCELLED;
-    })
-  );
+  for (const forward of COMMAND_FORWARDS) {
+    context.subscriptions.push(
+      registerCommand(forward.from, (...args: unknown[]) =>
+        vscode.commands.executeCommand(forward.to, ...args)
+      )
+    );
+  }
 
   /*
     「ターゲット読者」——診断・シート・3つの輪を1つの入口に（設計書6.108.6。
     作者の指摘、2026-09-22 未明）。
 
     中は3段（狙い → 書き方の判断 → 本文の実像）で、どの段も1枚のシートへ
-    落ちる。**旧3つのコマンドは上に残してある**（コマンドパレットと
-    既存の呼び出し元のため）。
+    落ちる。3つの輪はシートの中の節（単独の紙は作らない。2026-09-23）。
+    旧「ターゲット読者診断」はそのまま残してあり、旧「ターゲットシート」
+    「3つの輪」はここへ転送する（上）。
 
     作品は `resolveWork` が決める——相談から入れば相談の対象の作品を
     そのまま使い、選び直させない（0.75.4 の `pickHintedWork`）。
@@ -5417,37 +5415,6 @@ export async function activate(
       const { runTargetReader } = await import("./features/targetReader.js");
       return runTargetReader(work, aiRegistry, {
         authorReader: authorReaderTypes.get(),
-        openThreeCircles: async (target) => {
-          const { showThreeCircles } = await import(
-            "./features/threeCircles.js"
-          );
-          await showThreeCircles(target, deviceId, {
-            authorReader: authorReaderTypes.get(),
-            advice: advicePolicies.getEffective(target.id),
-          });
-        },
-      });
-    })
-  );
-
-  /*
-    3つの輪（設計書6.101）。**AIを呼ばない**——材料はどれも既にある
-    台帳と実績から取る。**原稿も台帳も書き換えない**（書くのは
-    `.aiwriter/generated/` の紙1枚だけ）。
-
-    作家タイプ（6.86）と作者自身の読者タイプ（6.101の1）は保管庫にある
-    ので、ここで渡す。**未診断なら undefined** で、そのときは紙の側が
-    その行と辺をまるごと落とす（推測で埋めない）。
-  */
-  context.subscriptions.push(
-    registerCommand("novelai.showThreeCircles", async (node?: WorkNode) => {
-      const work = await resolveWork(node, registry);
-      if (!work) return;
-
-      const { showThreeCircles } = await import("./features/threeCircles.js");
-      await showThreeCircles(work, deviceId, {
-        authorReader: authorReaderTypes.get(),
-        advice: advicePolicies.getEffective(work.id),
       });
     })
   );

@@ -143,7 +143,7 @@ function choice(index: number): Answer {
 }
 
 const REGISTRY = {} as AIRegistry;
-const SOURCES = { openThreeCircles: async () => undefined };
+const SOURCES = {};
 
 beforeEach(() => {
   fs = new MemoryFs();
@@ -305,19 +305,25 @@ describe("作者が置いた同名のファイル", () => {
   });
 });
 
-describe("旧入口へ辿れる", () => {
-  it("「3つの輪の紙を開く」は、3つの輪の紙を開く", async () => {
-    let opened: WorkEntry | undefined;
-    answers = [plan("3つの輪の紙を開く")];
-
-    const outcome = await runTargetReader(WORK, REGISTRY, {
-      openThreeCircles: async (work) => {
-        opened = work;
+/**
+ * **3つの輪は、シートの中の節に一本化した**（作者の裁定、2026-09-23
+ * 「ターゲットシートと3つの輪は完全統合」）。単独の3つの輪の紙を作る道は
+ * もう無い——入口の選択肢にも出さない。
+ */
+describe("3つの輪はシートの中だけ", () => {
+  it("入口の選択肢に「3つの輪の紙を開く」が無い", async () => {
+    let labels: string[] = [];
+    answers = [
+      (items) => {
+        labels = items.map((item) => item.label);
+        return undefined;
       },
-    });
+    ];
 
-    expect(outcome).toBe(CHECK_COMPLETED);
-    expect(opened?.id).toBe("w1");
-    expect(fs.placed()).toEqual([]);
+    await runTargetReader(WORK, REGISTRY, SOURCES);
+
+    expect(labels.some((label) => label.includes("3つの輪"))).toBe(false);
+    // シートを作り直す道は残る（3つの輪の節はそちらに入る）
+    expect(labels).toContain("いまの材料でシートを作り直す");
   });
 });

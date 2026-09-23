@@ -991,7 +991,8 @@ describe("校正・校閲の並び", () => {
       "novelai.checkOpening",
       "novelai.openTargetReader",
       // 旧3つの入口は**消さずに隠す**（設計書6.108.6）。コマンドパレットと
-      // 既存の呼び出し元のために、ここに残してある
+      // 既存の呼び出し元のために、ここに残してある（シートと3つの輪は
+      // 「ターゲット読者」への転送。2026-09-23）
       "novelai.runReaderTargetDiagnosis",
       "novelai.openTargetSheet",
       "novelai.showThreeCircles",

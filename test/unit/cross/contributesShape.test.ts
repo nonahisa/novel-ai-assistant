@@ -95,6 +95,16 @@ describe("コマンドは、宣言と実体が揃っている", () => {
       }
     }
 
+    // ④ 転送の表を回して登録している：registerCommand(forward.from, …)
+    //    表（`core/commandForwards.ts`）の転送元を実体ありとして数える
+    //    （旧「ターゲットシート」「3つの輪」。2026-09-23）
+    if (/registerCommand\(\s*forward\.from\b/.test(all)) {
+      const body = readFileSync("src/core/commandForwards.ts", "utf8");
+      for (const match of body.matchAll(/from:\s*"(novelai\.[^"]+)"/g)) {
+        found.add(match[1]);
+      }
+    }
+
     return found;
   }
 

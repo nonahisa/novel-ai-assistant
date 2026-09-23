@@ -53,8 +53,22 @@ import type {
 export const TARGET_SHEET_TITLE = "ターゲットシート";
 export const TARGET_SHEET_FILE = `${TARGET_SHEET_TITLE}.md`;
 
-/** 生成物である印。**これが無いファイルには書き込まない** */
+/**
+ * 生成物である印。**これが無いファイルには書き込まない**。
+ *
+ * **いまの入口の名前を書く**（2026-09-23）。旧「ターゲットシート」の命令は
+ * 「ターゲット読者」への転送になったので、紙の上で古い名前を案内すると、
+ * 作者は詳細メニューでそれを見つけられない。
+ */
 export const TARGET_SHEET_MARKER =
+  "このファイルは「ターゲット読者」で作り直されます。";
+
+/**
+ * 0.82.2 までの紙が持つ印。**読むときは今の印と同じに扱う**——印を変えた
+ * だけで、この拡張機能が作った紙が「作者の手書き」に見えると、作り直しを
+ * 断るようになる（作者の欄の印が残っていれば区別できるが、欄を消した紙もある）。
+ */
+const LEGACY_TARGET_SHEET_MARKER =
   "このファイルは「ターゲットシート」で作り直されます。";
 
 /** 作者の欄を挟む印。**この間だけが作り直しを越えて残る** */
@@ -75,6 +89,7 @@ const REASON_LINE = /^理由\s*[:：]/;
 export function isTargetSheetDoc(existing: string): boolean {
   return (
     existing.includes(TARGET_SHEET_MARKER) ||
+    existing.includes(LEGACY_TARGET_SHEET_MARKER) ||
     (existing.includes(AUTHOR_BLOCK_BEGIN) &&
       existing.includes(AUTHOR_BLOCK_END))
   );
@@ -527,12 +542,7 @@ function circlesSection(circles: TargetSheetCircles | undefined): string[] {
     for (const note of circles.missing) lines.push(`- ${note}`);
     lines.push("");
   }
-  lines.push(
-    "書けたものの実績（話数・字数・届いている反応）や、離れているときの" +
-      "近づける道まで並べた紙は、「ターゲット読者」の選択肢" +
-      "「3つの輪の紙を開く」から出せます。",
-    ""
-  );
+  // 単独の3つの輪の紙へは案内しない（2026-09-23。シートの中に一本化した）
   return lines;
 }
 

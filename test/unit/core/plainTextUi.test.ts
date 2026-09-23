@@ -96,9 +96,6 @@ const MARKDOWN_ALLOWED = new Set([
   // ターゲット読者診断の紙をMarkdownの文書として開く（設計書6.91）。
   // **作家タイプ診断の紙と対で読ませる**ので、同じ見出しと強調が要る
   "src/core/readerTargetDoc.ts",
-  // 3つの輪の1枚をMarkdownの文書として開く（設計書6.101）。
-  // **画面に出す文言は持たない**——この紙だけを組む
-  "src/core/threeCirclesSheet.ts",
   // ターゲットシートを `設定/ターゲットシート.md` として書き出す（設計書6.108）。
   // **画面に出す文言は持たない**——通知は `features/targetSheet.ts` の側にある
   "src/core/targetSheetDoc.ts",
