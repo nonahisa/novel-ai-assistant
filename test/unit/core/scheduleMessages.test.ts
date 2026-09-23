@@ -7,6 +7,24 @@ import { buildEpisodeFacts } from "../../../src/core/scheduleEpisodes";
  */
 
 describe("画面から届く知らせ", () => {
+  test("並行・担い手の欄と、書き出し・祝日・設定の知らせ", () => {
+    expect(
+      parseScheduleMessage({
+        type: "updateStep",
+        workId: "w",
+        scheduleId: "s",
+        stepId: "t",
+        patch: { parallelWith: "", actor: "others" },
+      })
+    ).toEqual({ type: "updateStep", workId: "w", scheduleId: "s", stepId: "t", patch: { parallelWith: null, actor: "others" } });
+    expect(
+      parseScheduleMessage({ type: "updateStep", workId: "w", scheduleId: "s", stepId: "t", patch: { actor: "robot" } })
+    ).toBeNull();
+    for (const type of ["exportIcs", "importHolidays", "openWorkloadSettings"]) {
+      expect(parseScheduleMessage({ type })).toEqual({ type });
+    }
+  });
+
   test("形の合わないものは捨てる", () => {
     expect(parseScheduleMessage(null)).toBeNull();
     expect(parseScheduleMessage({ type: "unknown" })).toBeNull();

@@ -135,3 +135,28 @@ describe("スケジュールの書き換え", () => {
     expect(() => updateSchedule(fileWith(), "sch_1", { serial: { bufferEpisodes: 1 } }, "t")).toThrow("WEB連載");
   });
 });
+
+describe("並行と担い手（6.111.13・6.111.14）", () => {
+  test("同時に進める段を選べる。自分自身・無い段は止める。null で前の段の後ろへ戻す", () => {
+    // 出版社の雛形：stp_2 打ち合わせ・stp_3 改稿・stp_4 初校…
+    const paired = updateStep(fileWith(), "sch_1", "stp_4", { parallelWith: "stp_3" }, "2026-09-23", "t1");
+    expect(paired.schedules[0].steps[2].parallelWith).toBe("stp_3");
+    expect(() => updateStep(fileWith(), "sch_1", "stp_4", { parallelWith: "stp_4" }, "2026-09-23", "t1")).toThrow("自分自身");
+    expect(() => updateStep(fileWith(), "sch_1", "stp_4", { parallelWith: "stp_99" }, "2026-09-23", "t1")).toThrow("見つかりません");
+    const back = updateStep(paired, "sch_1", "stp_4", { parallelWith: null }, "2026-09-23", "t2");
+    expect(back.schedules[0].steps[2].parallelWith).toBeNull();
+  });
+
+  test("段を消すと、その段と並行にしていた段は前の段の後ろへ戻る", () => {
+    const paired = updateStep(fileWith(), "sch_1", "stp_4", { parallelWith: "stp_3" }, "2026-09-23", "t1");
+    const removed = removeStep(paired, "sch_1", "stp_3", "t2");
+    expect(removed.schedules[0].steps.find((s) => s.id === "stp_4")?.parallelWith).toBeNull();
+  });
+
+  test("自分で進めるか人に頼むかを切り替えられる。足した段は自分で進める", () => {
+    const changed = updateStep(fileWith(), "sch_1", "stp_3", { actor: "others" }, "2026-09-23", "t1");
+    expect(changed.schedules[0].steps[1].actor).toBe("others");
+    const added = addStep(fileWith(), "sch_1", { label: "告知", days: 2, afterStepId: null }, () => "stp_new", "t");
+    expect(added.schedules[0].steps[0]).toMatchObject({ id: "stp_new", actor: "self", parallelWith: null });
+  });
+});

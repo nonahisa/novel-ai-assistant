@@ -4,6 +4,7 @@ import {
   type ScheduleFile,
   type ScheduleStep,
   type SerialRule,
+  type StepActor,
   type StepStatus,
 } from "../models/schedule";
 import { isDateKey } from "../models/workGoals";
@@ -27,6 +28,10 @@ export interface StepPatch {
   readonly due?: string | null;
   readonly status?: StepStatus;
   readonly note?: string;
+  /** 同時に進められる段のID。null で「前の段が終わってから」に戻す（6.111.13） */
+  readonly parallelWith?: string | null;
+  /** 自分で進めるか、人に頼むか（6.111.14） */
+  readonly actor?: StepActor;
 }
 
 export interface SchedulePatch {
@@ -118,6 +123,20 @@ export function updateStep(
       // 済みにした日を残す。済みを外したら消す（済んでいない段に済んだ日は無い）
       next.doneAt = patch.status === "done" ? today : null;
     }
+    if (patch.parallelWith !== undefined) {
+      const partner = patch.parallelWith;
+      if (partner !== null) {
+        if (partner === step.id) throw new Error("段は自分自身と同時には進められません。");
+        if (!schedule.steps.some((other) => other.id === partner)) {
+          throw new Error("同時に進める段が見つかりません。画面を開き直してください。");
+        }
+      }
+      next.parallelWith = partner;
+    }
+    if (patch.actor !== undefined) {
+      if (patch.actor !== "self" && patch.actor !== "others") throw new Error("段を動かす人の指定が正しくありません。");
+      next.actor = patch.actor;
+    }
     const steps = [...schedule.steps];
     steps[index] = next;
     return { ...schedule, steps, updatedAt: now };
@@ -153,6 +172,8 @@ export function addStep(
       status: "todo",
       doneAt: null,
       note: "",
+      parallelWith: null,
+      actor: "self",
     };
     const steps = [...schedule.steps];
     steps.splice(at, 0, step);
@@ -165,7 +186,11 @@ export function removeStep(file: ScheduleFile, scheduleId: string, stepId: strin
     if (!schedule.steps.some((step) => step.id === stepId)) {
       throw new Error("その段が見つかりません。画面を開き直してください。");
     }
-    return { ...schedule, steps: schedule.steps.filter((step) => step.id !== stepId), updatedAt: now };
+    // 消した段と並行にしていた段は「前の段が終わってから」に戻す（無い段を指したまま残さない）
+    const steps = schedule.steps
+      .filter((step) => step.id !== stepId)
+      .map((step) => (step.parallelWith === stepId ? { ...step, parallelWith: null } : step));
+    return { ...schedule, steps, updatedAt: now };
   });
 }
 

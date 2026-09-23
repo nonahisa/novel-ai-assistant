@@ -98,6 +98,39 @@ export function isPaceStepKey(key: StepKey): boolean {
   return key === "write" || key === "serialBuffer";
 }
 
+/**
+ * 段を動かすのは誰か（設計書6.111.14）。
+ *
+ * - `self`：**作者が手を動かす**段。同じ日に重なると1日の作業量を分け合う
+ * - `others`：**人に頼む**段（表紙の絵師・ストアの審査・編集部の校正）。
+ *   作者の手は空くので重なりに数えず、作業量の割合（休む日）にも従わない
+ *   ——頼んだ先の暦で進むため、暦の日数で数える
+ */
+export type StepActor = "self" | "others";
+
+export const STEP_ACTOR_LABELS: Record<StepActor, string> = {
+  self: "自分で進める",
+  others: "人に頼む",
+};
+
+/**
+ * 段の印ごとの「誰が動かすか」の既定。**古いファイル（欄の無い段）もこれで読む。**
+ * 作者が足した段（`custom`）は自分で進めるとする。
+ */
+export function defaultStepActor(key: StepKey): StepActor {
+  switch (key) {
+    case "cover":
+    case "storeReview":
+    case "meeting":
+    case "firstProof":
+    case "secondProof":
+    case "sample":
+      return "others";
+    default:
+      return "self";
+  }
+}
+
 /** 段の所要日数の上限。巡航速度の完成予定（6.3.6.3）と同じ10年 */
 export const MAX_STEP_DAYS = 3650;
 
@@ -118,6 +151,19 @@ export interface ScheduleStep {
   /** 済みにした日（`YYYY-MM-DD`）。済みでなければ null */
   doneAt: string | null;
   note: string;
+  /**
+   * 並行（設計書6.111.13）。**この段と同時に進められる段のID**。null（や欄が無い）は
+   * 「前の段が終わってから」。0.83.0 までのファイルには無い欄なので、任意にしてある。
+   * 指す段が無い（消した）・済んだときは「前の段が終わってから」として扱う。
+   */
+  parallelWith?: string | null;
+  /** 誰が動かすか。欄が無ければ段の印ごとの既定（`defaultStepActor`） */
+  actor?: StepActor;
+}
+
+/** 段を動かすのは誰か（欄が無ければ既定） */
+export function stepActorOf(step: Pick<ScheduleStep, "key" | "actor">): StepActor {
+  return step.actor ?? defaultStepActor(step.key);
 }
 
 /** WEB連載の決まり（設計書6.111.5） */
@@ -272,7 +318,25 @@ function parseStep(raw: unknown, where: string): ScheduleStep {
     status,
     doneAt: optionalDate(value.doneAt, `${where}.doneAt`),
     note: typeof value.note === "string" ? value.note : "",
+    parallelWith: parseParallelWith(value.parallelWith, `${where}.parallelWith`),
+    actor: parseActor(value.actor, key as StepKey, `${where}.actor`),
   };
+}
+
+/** 欄が無い・空は「前の段が終わってから」（0.83.0 までのファイルはこの形） */
+function parseParallelWith(raw: unknown, where: string): string | null {
+  if (raw == null || raw === "") return null;
+  if (typeof raw !== "string") fail(`${where} は段のIDにしてください。`);
+  return raw.trim() || null;
+}
+
+/** 欄が無ければ段の印ごとの既定。知らない値は壊れているとする（ほかの欄と同じ） */
+function parseActor(raw: unknown, key: StepKey, where: string): StepActor {
+  if (raw == null) return defaultStepActor(key);
+  if (raw !== "self" && raw !== "others") {
+    fail(`${where}「${String(raw)}」は知らない値です（self か others）。`);
+  }
+  return raw;
 }
 
 function parseSerial(raw: unknown, where: string): SerialRule {

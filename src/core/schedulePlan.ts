@@ -3,13 +3,16 @@ import {
   MAX_STEP_DAYS,
   MILESTONE_LABELS,
   SCHEDULE_KIND_LABELS,
+  stepActorOf,
   type Schedule,
   type ScheduleFile,
   type ScheduleStep,
   type SerialRule,
+  type StepActor,
 } from "../models/schedule";
 import { addDays } from "./writingStats";
 import { goalsContestSchedule } from "./scheduleTemplates";
+import { dayCapacity, sharedSpeed, uniformCalendar, type WorkCalendar } from "./workCalendar";
 
 /**
  * スケジュールの逆算（設計書6.111.3・6.111.5）。
@@ -24,6 +27,9 @@ import { goalsContestSchedule } from "./scheduleTemplates";
  * | 執筆の日数 | （予定の字数 − 今の字数）÷ 巡航速度、切り上げ。速度が0なら**割らない**（仮の日数） |
  * | 間に合わない | 未着手で始まりが今日より前・進行中で終わりが今日より前、の最大の日数 |
  * | マイルストーンが無い | 逆算せず、今日から前へ詰める（「最短で○月○日」） |
+ * | 作業量の割合（6.111.12） | 段の量（平均の日で数えた日数）に、日ごとの進み（割合 ÷ 割り戻しの平均）の合計が届くまでを段の長さにする。割合0の日は進まない |
+ * | 並行（6.111.13） | 「同時に進められる」でつないだ段は1つの組になり、組の全員が同じ日に終わる（逆算）・同じ日に始まる（前へ詰める）。組の前後は「前の段が終わってから」 |
+ * | 重なり（6.111.14） | 作者が手を動かす段が同じ日にk個あれば、1つあたりの進みは `(1 − 損)^(k−1) ÷ k`。人に頼む段は暦の日数で進み、重なりに数えない |
  *
  * 日付は `YYYY-MM-DD` のまま UTC の暦で足し引きする（`addDays`）。時差や夏時間の影響を受けない。
  *
@@ -63,6 +69,29 @@ export interface PlanContext {
   readonly perEpisodeGoal: number | null;
   /** 話ごとの事実（話数の順でなくてよい） */
   readonly episodes: readonly EpisodeFact[];
+  /** 作業の暦（作業量の割合・祝日）。無ければ毎日同じだけ進む（0.83.0 までと同じ） */
+  readonly calendar?: WorkCalendar;
+}
+
+/**
+ * 作品をまたぐ重なり（`scheduleLoad.ts` が作る）。無ければ重ならないとして並べる。
+ */
+export interface LoadView {
+  /** その日に、この作業（`taskKey`）のほかに作者が手を動かしている作業の数 */
+  othersOn(taskKey: string, date: string): number;
+  /** 重なり1つごとに落ちる割合 */
+  readonly penalty: number;
+}
+
+export interface PlanOptions {
+  readonly load?: LoadView;
+  /** 作業の鍵の頭（作品ID）。作品をまたいで段を見分ける */
+  readonly taskPrefix?: string;
+}
+
+/** 作業の鍵（重なりの数え分けに使う）。作品ID｜スケジュールID｜段ID */
+export function taskKeyOf(prefix: string, scheduleId: string, stepId: string): string {
+  return `${prefix}|${scheduleId}|${stepId}`;
 }
 
 /** 執筆の段の日数を、どこから出したか */
@@ -83,13 +112,24 @@ export interface PlannedStep {
   /** 始まりの日。終わりより後なら長さ0（字数に届いている執筆の段） */
   readonly start: string;
   readonly end: string;
-  /** 使った日数 */
+  /** 使った日数（暦の日数。始まりから終わりまで） */
   readonly days: number;
   readonly daysSource: DaysSource;
   /** 手で入れた期日が、あとの段と重なる日数（0なら重ならない） */
   readonly overlapDays: number;
   /** この段が遅れている日数（0なら遅れていない） */
   readonly lateDays: number;
+  /** 誰が動かすか */
+  readonly actor: StepActor;
+  /** 並行の組の中の何番目か（0から）。画面で帯を横に並べる */
+  readonly track: number;
+  /** 並行の組の大きさ（1なら並行なし） */
+  readonly tracks: number;
+  /**
+   * この段の期間に、作者が手を動かす作業がいちばん多く重なった数（自分を含む）。
+   * 1なら重ならない。人に頼む段は常に1
+   */
+  readonly peakLoad: number;
 }
 
 export type SlotState = "posted" | "stocked" | "unwritten" | "missed";
@@ -173,7 +213,8 @@ export function schedulesWithGoals(
 export function planSchedule(
   schedule: Schedule,
   context: PlanContext,
-  virtual = false
+  virtual = false,
+  options: PlanOptions = {}
 ): PlannedSchedule {
   const today = context.today;
   const goals = schedule.followsGoals ? context.goalsContest : null;
@@ -189,34 +230,62 @@ export function planSchedule(
 
   const chain = schedule.steps.filter((step) => step.status !== "done");
   const sized = new Map(
-    chain.map((step) => [step.id, stepDays(step, schedule, context, targetChars, charsPerEpisode)])
+    chain.map((step) => [step.id, stepUnits(step, schedule, context, targetChars, charsPerEpisode)])
   );
+  const calendar = context.calendar ?? UNIFORM;
+  const prefix = options.taskPrefix ?? "";
+  const rateOf = (step: ScheduleStep): Pace =>
+    paceFor(stepActorOf(step), calendar, options.load, taskKeyOf(prefix, schedule.id, step.id));
 
-  const placed = new Map<string, { start: string; end: string; overlapDays: number }>();
+  const groups = parallelGroups(chain);
+  const placed = new Map<string, Placed>();
   let earliestMilestone: string | null = null;
   if (milestone !== null) {
-    // 後ろの段から前へ詰める。最後の段の終わりはマイルストーンの前日
+    // 後ろの組から前へ詰める。最後の組の終わりはマイルストーンの前日。
+    // 組の全員が同じ日に終わり、組の中でいちばん早い始まりの前日が、前の組の終わり
     let cursor = addDays(milestone, -1);
-    for (let index = chain.length - 1; index >= 0; index--) {
-      const step = chain[index];
-      const days = sized.get(step.id)!.days;
-      const end = step.due ?? cursor;
-      const overlapDays = step.due !== null && step.due > cursor ? dayDiff(cursor, step.due) : 0;
-      const start = addDays(end, -(days - 1));
-      placed.set(step.id, { start, end, overlapDays });
-      cursor = addDays(start, -1);
+    for (let index = groups.length - 1; index >= 0; index--) {
+      let groupStart: string | null = null;
+      for (const step of groups[index]) {
+        const size = sized.get(step.id)!;
+        const pace = rateOf(step);
+        // 手で入れた期日は動かさない（規則2）。逆算の終わりは、休みの日なら前の作業日へ寄せる
+        const end = step.due ?? (size.units > 0 ? lastWorkingDay(cursor, pace) : cursor);
+        const overlapDays = step.due !== null && step.due > cursor ? dayDiff(cursor, step.due) : 0;
+        const walk = walkBackward(end, size.units, pace);
+        placed.set(step.id, { start: walk.start, end, overlapDays, truncated: walk.truncated, peak: walk.peak });
+        if (groupStart === null || walk.start < groupStart) groupStart = walk.start;
+      }
+      if (groupStart !== null) cursor = addDays(groupStart, -1);
     }
   } else {
-    // マイルストーンが未定：今日から前へ詰める
+    // マイルストーンが未定：今日から前へ詰める。組の全員が同じ日に始まり、
+    // 組の中でいちばん遅い終わりの翌日が、次の組の始まり
     let cursor = today;
-    for (const step of chain) {
-      const days = sized.get(step.id)!.days;
-      const end = step.due ?? addDays(cursor, days - 1);
-      const start = step.due ? addDays(step.due, -(days - 1)) : cursor;
-      placed.set(step.id, { start, end, overlapDays: 0 });
-      cursor = addDays(end, 1);
+    for (const group of groups) {
+      let groupEnd: string | null = null;
+      for (const step of group) {
+        const size = sized.get(step.id)!;
+        const pace = rateOf(step);
+        let where: Placed;
+        if (step.due) {
+          const walk = walkBackward(step.due, size.units, pace);
+          where = { start: walk.start, end: step.due, overlapDays: 0, truncated: walk.truncated, peak: walk.peak };
+        } else {
+          const start = size.units > 0 ? firstWorkingDay(cursor, pace) : cursor;
+          const walk = walkForward(start, size.units, pace);
+          where = { start, end: walk.end, overlapDays: 0, truncated: walk.truncated, peak: walk.peak };
+        }
+        placed.set(step.id, where);
+        if (groupEnd === null || where.end > groupEnd) groupEnd = where.end;
+      }
+      if (groupEnd !== null) cursor = addDays(groupEnd, 1);
     }
     earliestMilestone = chain.length > 0 ? cursor : null;
+  }
+  const trackOf = new Map<string, { track: number; tracks: number }>();
+  for (const group of groups) {
+    group.forEach((step, track) => trackOf.set(step.id, { track, tracks: group.length }));
   }
 
   // 連載は、開始日を過ぎたら開始前の段（書き溜め・準備）の遅れを数えない。
@@ -236,19 +305,30 @@ export function planSchedule(
         daysSource: "fixed",
         overlapDays: 0,
         lateDays: 0,
+        actor: stepActorOf(step),
+        track: 0,
+        tracks: 1,
+        peakLoad: 1,
       };
     }
     const size = sized.get(step.id)!;
     const where = placed.get(step.id)!;
-    const lateDays = serialStarted ? 0 : lateness(step, size.days, where, today);
+    // 暦の日数（休みの日・重なりで、段の量より長くなることがある）。長さ0の段は0
+    const days = size.units > 0 ? dayDiff(where.start, where.end) + 1 : 0;
+    const lateDays = serialStarted ? 0 : lateness(step, days, where, today);
+    const track = trackOf.get(step.id) ?? { track: 0, tracks: 1 };
     return {
       step,
       start: where.start,
       end: where.end,
-      days: size.days,
-      daysSource: size.source,
+      days,
+      daysSource: where.truncated ? "tooSlow" : size.source,
       overlapDays: where.overlapDays,
       lateDays,
+      actor: stepActorOf(step),
+      track: track.track,
+      tracks: track.tracks,
+      peakLoad: where.peak,
     };
   });
 
@@ -306,21 +386,173 @@ function lateness(
   return where.end < today ? dayDiff(where.end, today) : 0;
 }
 
-function stepDays(
+/**
+ * 段の量（平均の日で数えた日数。小数のまま）。決まった日数の段はその日数、
+ * 執筆の段は残りの字数 ÷ 巡航速度。**0で割らない**（`paceDays` と同じ分け方）。
+ */
+function stepUnits(
   step: ScheduleStep,
   schedule: Schedule,
   context: PlanContext,
   targetChars: number | null,
   charsPerEpisode: number | null
-): { days: number; source: DaysSource } {
-  if (!isPaceStepKey(step.key)) return { days: step.days, source: "fixed" };
+): { units: number; source: DaysSource } {
+  if (!isPaceStepKey(step.key)) return { units: step.days, source: "fixed" };
   const remaining =
     step.key === "write"
       ? targetChars === null
         ? null
         : Math.max(0, targetChars - context.written)
       : bufferRemainingChars(schedule.serial, context, charsPerEpisode);
-  return paceDays(remaining, context.perDay, step.days);
+  if (remaining === null) return { units: step.days, source: "noTarget" };
+  if (remaining <= 0) return { units: 0, source: "pace" };
+  const perDay = context.perDay;
+  if (!Number.isFinite(perDay) || perDay <= 0) return { units: step.days, source: "noPace" };
+  const units = remaining / perDay;
+  // 切り上げた日数で上限を見る（`paceDays` と同じ判定。3650.5日は10年を超える）
+  if (Math.ceil(units - EPSILON) > MAX_STEP_DAYS) return { units: MAX_STEP_DAYS, source: "tooSlow" };
+  return { units, source: "pace" };
+}
+
+const UNIFORM = uniformCalendar();
+/** 小数の足し算の誤差を吸う幅（1日の進みに比べて十分小さい） */
+const EPSILON = 1e-9;
+
+/** その日の進み（平均の日を1として）と、その日に重なっている作業の数（自分を含む） */
+interface Pace {
+  rate(date: string): number;
+  load(date: string): number;
+}
+
+interface Placed {
+  start: string;
+  end: string;
+  overlapDays: number;
+  /** 10年を超えて止めたか */
+  truncated: boolean;
+  /** 重なりのいちばん多い数（自分を含む） */
+  peak: number;
+}
+
+/**
+ * 段の進み方。**人に頼む段は暦の日数で進み**（頼んだ先の暦で進む。作者の休む日にも、
+ * 重なりにも従わない）、自分で進める段は作業の暦の進み × 重なりの速さ。
+ */
+function paceFor(actor: StepActor, calendar: WorkCalendar, load: LoadView | undefined, key: string): Pace {
+  if (actor === "others") return { rate: () => 1, load: () => 1 };
+  return {
+    rate: (date) => {
+      const capacity = dayCapacity(calendar, date);
+      if (capacity === 0) return 0;
+      const k = 1 + (load?.othersOn(key, date) ?? 0);
+      return capacity * sharedSpeed(k, load?.penalty ?? 0);
+    },
+    load: (date) => (dayCapacity(calendar, date) === 0 ? 1 : 1 + (load?.othersOn(key, date) ?? 0)),
+  };
+}
+
+/** 作業のできる日（進みが0でない日）まで遡る。1年探して無ければそのまま */
+function lastWorkingDay(date: string, pace: Pace): string {
+  let day = date;
+  for (let guard = 0; guard < 366; guard++) {
+    if (pace.rate(day) > 0) return day;
+    day = addDays(day, -1);
+  }
+  return date;
+}
+
+function firstWorkingDay(date: string, pace: Pace): string {
+  let day = date;
+  for (let guard = 0; guard < 366; guard++) {
+    if (pace.rate(day) > 0) return day;
+    day = addDays(day, 1);
+  }
+  return date;
+}
+
+/**
+ * 終わりの日から遡って、進みの合計が段の量に届く日を始まりにする。量が0なら長さ0
+ * （始まり＝終わりの翌日。0.83.0 と同じ形）。10年ぶん遡っても届かなければそこで止める。
+ */
+function walkBackward(
+  end: string,
+  units: number,
+  pace: Pace
+): { start: string; truncated: boolean; peak: number } {
+  if (units <= 0) return { start: addDays(end, 1), truncated: false, peak: 1 };
+  let day = end;
+  let total = 0;
+  let peak = 1;
+  for (let count = 1; count <= MAX_STEP_DAYS; count++) {
+    const rate = pace.rate(day);
+    if (rate > 0) peak = Math.max(peak, pace.load(day));
+    total += rate;
+    if (total >= units - EPSILON) return { start: day, truncated: false, peak };
+    day = addDays(day, -1);
+  }
+  return { start: addDays(day, 1), truncated: true, peak };
+}
+
+function walkForward(
+  start: string,
+  units: number,
+  pace: Pace
+): { end: string; truncated: boolean; peak: number } {
+  if (units <= 0) return { end: addDays(start, -1), truncated: false, peak: 1 };
+  let day = start;
+  let total = 0;
+  let peak = 1;
+  for (let count = 1; count <= MAX_STEP_DAYS; count++) {
+    const rate = pace.rate(day);
+    if (rate > 0) peak = Math.max(peak, pace.load(day));
+    total += rate;
+    if (total >= units - EPSILON) return { end: day, truncated: false, peak };
+    day = addDays(day, 1);
+  }
+  return { end: addDays(day, -1), truncated: true, peak };
+}
+
+/**
+ * 並行の組を作る（設計書6.111.13）。「同時に進められる」でつないだ段を1つの組にまとめ、
+ * 組を**いちばん前の段の位置**に置く。組の中は段の並びのまま。
+ *
+ * つなぎ方が輪になっていても（AがBと、BがAと）同じ組になるだけで、たどり続けることは
+ * ない（組分けの木は、小さい番号を根にして1回ずつつなぐだけ）。指す段が無い・済んだ・
+ * 自分自身を指すつなぎは「前の段が終わってから」として扱う。
+ */
+export function parallelGroups(chain: readonly ScheduleStep[]): ScheduleStep[][] {
+  const index = new Map(chain.map((step, at) => [step.id, at]));
+  const parent = chain.map((_, at) => at);
+  const root = (at: number): number => {
+    let node = at;
+    while (parent[node] !== node) node = parent[node];
+    // 道を縮める（次に同じ段を訊いたときに、長い鎖をたどらない）
+    let walk = at;
+    while (parent[walk] !== node) {
+      const next = parent[walk];
+      parent[walk] = node;
+      walk = next;
+    }
+    return node;
+  };
+  chain.forEach((step, at) => {
+    const partner = step.parallelWith ? index.get(step.parallelWith) : undefined;
+    if (partner === undefined || partner === at) return;
+    const a = root(at);
+    const b = root(partner);
+    if (a === b) return;
+    // 小さい番号を根にする（組の位置＝いちばん前の段、を決まった形で出すため）
+    if (a < b) parent[b] = a;
+    else parent[a] = b;
+  });
+  const groups = new Map<number, ScheduleStep[]>();
+  chain.forEach((step, at) => {
+    const key = root(at);
+    const members = groups.get(key);
+    if (members) members.push(step);
+    else groups.set(key, [step]);
+  });
+  return [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([, members]) => members);
 }
 
 /**
@@ -433,11 +665,29 @@ export function planSerial(
     } else {
       const simStart = started ? today : startDate;
       const need = charsPerEpisode / context.perDay;
+      // 進みの合計（`simStart` から i 日目の始まりまで）。作業の暦に従い、休みの日は進まない。
+      // 毎日1なら i そのもので、0.83.0 の「切り捨て・切り上げ」と同じ日になる
+      const calendar = context.calendar ?? UNIFORM;
+      const cumulative: number[] = [0];
+      const progressAt = (index: number): number => {
+        while (cumulative.length <= index) {
+          const day = cumulative.length - 1;
+          cumulative.push(cumulative[day] + dayCapacity(calendar, addDays(simStart, day)));
+        }
+        return cumulative[index];
+      };
+      const limit = MAX_STEP_DAYS * 2;
       let elapsed = 0;
+      let cursor = 0;
       for (const slot of toWrite) {
-        const from = Math.floor(elapsed);
+        const before = elapsed;
         elapsed += need;
-        const to = Math.max(from, Math.ceil(elapsed) - 1);
+        // 始まり：書き始めの位置を含む日。終わり：書き終わりの位置に届く日
+        let from = cursor;
+        while (from < limit && !(progressAt(from + 1) > before)) from++;
+        let to = from;
+        while (to < limit && !(progressAt(to + 1) >= elapsed)) to++;
+        cursor = from;
         const start = addDays(simStart, from);
         const end = addDays(simStart, to);
         const late = end >= slot.date;

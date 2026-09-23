@@ -1,5 +1,6 @@
 import {
   DEFAULT_BUFFER_EPISODES,
+  defaultStepActor,
   type Schedule,
   type ScheduleKind,
   type ScheduleStep,
@@ -23,6 +24,11 @@ interface StepTemplate {
   readonly label: string;
   /** 所要日数。執筆の段では巡航速度が無いときの仮の日数 */
   readonly days: number;
+  /**
+   * 並行（設計書6.111.13）：この印の段と同時に進められる。無ければ前の段が終わってから。
+   * 同じ雛形の中の段を印で指す（作ったときにIDへ置き換える）
+   */
+  readonly parallelWithKey?: StepKey;
 }
 
 /** 執筆の段の仮の日数（巡航速度が無いとき） */
@@ -37,7 +43,8 @@ export const SCHEDULE_TEMPLATES: Record<ScheduleKind, readonly StepTemplate[]> =
   selfPublish: [
     { key: "write", label: "執筆（初稿まで）", days: FALLBACK_WRITE_DAYS },
     { key: "revise", label: "推敲", days: 10 },
-    { key: "cover", label: "表紙の用意", days: 14 },
+    // 表紙は絵師へ頼めるので、推敲と同時に進められる（作者の依頼の例、2026-09-23）
+    { key: "cover", label: "表紙の用意", days: 14, parallelWithKey: "revise" },
     { key: "proof", label: "最終校正", days: 7 },
     { key: "submitFiles", label: "入稿（EPUB・PDF）", days: 3 },
     { key: "storeReview", label: "配信の申請（ストアの審査）", days: 7 },
@@ -63,16 +70,26 @@ export const defaultIdMaker: IdMaker = (prefix) =>
   `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
 export function templateSteps(kind: ScheduleKind, makeId: IdMaker): ScheduleStep[] {
-  return SCHEDULE_TEMPLATES[kind].map((template) => ({
-    id: makeId("stp"),
-    key: template.key,
-    label: template.label,
-    days: template.days,
-    due: null,
-    status: "todo",
-    doneAt: null,
-    note: "",
-  }));
+  const templates = SCHEDULE_TEMPLATES[kind];
+  // 並行の相手をIDで指すので、先に全部のIDを作る（作る順は段の並びのまま）
+  const ids = templates.map(() => makeId("stp"));
+  return templates.map((template, index) => {
+    const partner = template.parallelWithKey
+      ? templates.findIndex((other) => other.key === template.parallelWithKey)
+      : -1;
+    return {
+      id: ids[index],
+      key: template.key,
+      label: template.label,
+      days: template.days,
+      due: null,
+      status: "todo",
+      doneAt: null,
+      note: "",
+      parallelWith: partner >= 0 ? ids[partner] : null,
+      actor: defaultStepActor(template.key),
+    };
+  });
 }
 
 /** 連載の既定の決まり：毎日・書き溜め5話・第1話から */

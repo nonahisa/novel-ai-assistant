@@ -7,6 +7,14 @@ import {
   type PlanContext,
   type PlannedSchedule,
 } from "./schedulePlan";
+import { selfTasksOf, settleLoad } from "./scheduleLoad";
+import {
+  dayWeight,
+  sharedSpeed,
+  uniformCalendar,
+  type WorkCalendar,
+  type WorkloadSettings,
+} from "./workCalendar";
 
 /**
  * スケジュールの画面の中身（設計書6.111.7）。縦が時間、横が作品。
@@ -31,6 +39,11 @@ export interface WorkScheduleInput {
 export interface BoardPlan extends PlannedSchedule {
   /** 画面に出す注意（間に合わない・重なり・仮の日数・書き溜め） */
   readonly alerts: readonly string[];
+  /**
+   * 段ID → 重なりの断り（「作業が2つ重なっています（速さ 約5割）」）。重ならない段は載せない。
+   * 速さの式を画面の側へ写さないために、ここで文にして渡す
+   */
+  readonly overlapNotes: Readonly<Record<string, string>>;
 }
 
 export interface BoardColumn {
@@ -52,6 +65,14 @@ export interface ScheduleBoard {
   readonly columns: readonly BoardColumn[];
   /** 隠した（済んだ・過ぎた）作品の数 */
   readonly hiddenCount: number;
+  /** 縦の範囲にある祝日（日付の横に名前を出す） */
+  readonly holidays: readonly { readonly date: string; readonly name: string }[];
+  /** 縦の範囲にある休み（割合0）の日。毎日作業する設定なら空 */
+  readonly restDays: readonly string[];
+  /** 作業量の割合（画面の上に添える） */
+  readonly workload: WorkloadSettings & { readonly uniform: boolean };
+  /** 設定を読めずに既定へ戻したことなど、画面の上に出す断り */
+  readonly notes: readonly string[];
 }
 
 /** 今日より上に見せる日数 */
@@ -65,10 +86,38 @@ const BOARD_MAX_BACK_DAYS = 3650;
 
 export function buildScheduleBoard(
   works: readonly WorkScheduleInput[],
-  options: { today: string; now: string; showFinished: boolean }
+  options: {
+    today: string;
+    now: string;
+    showFinished: boolean;
+    /** 作業の暦。無ければ毎日同じだけ進む */
+    calendar?: WorkCalendar;
+    notes?: readonly string[];
+  }
 ): ScheduleBoard {
   const today = options.today;
-  const all: BoardColumn[] = works.map((work) => {
+  const calendar = options.calendar ?? uniformCalendar(today);
+  const penalty = calendar.settings.overlapPenalty;
+
+  // **全作品を集めてから並べる**（重なりは作品をまたぐため。6.111.14）
+  const entries = works.map((work) => ({
+    work,
+    context: { ...work.context, calendar: work.context.calendar ?? calendar },
+    items: work.file === null ? [] : schedulesWithGoals(work.file, work.context.goalsContest, options.now),
+  }));
+  const settled = settleLoad((load) => {
+    const planned = entries.map((entry) =>
+      entry.items.map(({ schedule, virtual }) =>
+        planSchedule(schedule, entry.context, virtual, { load, taskPrefix: entry.work.workId })
+      )
+    );
+    const tasks = planned.flatMap((plans, index) =>
+      plans.flatMap((plan) => selfTasksOf(entries[index].work.workId, plan))
+    );
+    return { result: planned, tasks };
+  }, penalty);
+
+  const all: BoardColumn[] = entries.map(({ work, context }, index) => {
     if (work.file === null) {
       return {
         workId: work.workId,
@@ -79,13 +128,16 @@ export function buildScheduleBoard(
         perDay: work.context.perDay,
       };
     }
-    const planned = schedulesWithGoals(work.file, work.context.goalsContest, options.now).map(
-      ({ schedule, virtual }) => planSchedule(schedule, work.context, virtual)
-    );
+    const planned = settled.result[index];
     const serials = planned.filter((plan) => plan.serial !== null);
     const plans: BoardPlan[] = planned.map((plan) => ({
       ...plan,
-      alerts: alertsFor(plan, serials, work.context),
+      alerts: alertsFor(plan, serials, context, penalty),
+      overlapNotes: Object.fromEntries(
+        plan.steps
+          .filter((step) => step.peakLoad > 1)
+          .map((step) => [step.step.id, `この期間は${overlapText(step.peakLoad, penalty)}`])
+      ),
     }));
     return {
       workId: work.workId,
@@ -118,7 +170,42 @@ export function buildScheduleBoard(
   if (from < addDays(today, -BOARD_LEAD_DAYS)) from = addDays(from, -3);
   to = addDays(to, BOARD_TAIL_DAYS);
 
-  return { today, from, to, columns, hiddenCount };
+  const holidays = Object.entries(calendar.holidays.dates)
+    .filter(([date]) => date >= from && date <= to)
+    .map(([date, name]) => ({ date, name }));
+  const restDays: string[] = [];
+  if (!calendar.uniform) {
+    for (let date = from; date <= to; date = addDays(date, 1)) {
+      if (dayWeight(date, calendar.settings, calendar.holidays) === 0) restDays.push(date);
+    }
+  }
+  const notes = [...(options.notes ?? [])];
+  if (!settled.converged) {
+    notes.push("作業の重なりが決まりきらないので、途中の見込みで並べています（目安）");
+  }
+
+  return {
+    today,
+    from,
+    to,
+    columns,
+    hiddenCount,
+    holidays,
+    restDays,
+    workload: { ...calendar.settings, uniform: calendar.uniform },
+    notes,
+  };
+}
+
+/** 「約5割」。1割に満たなければ「1割未満」 */
+export function speedLabel(speed: number): string {
+  const tenths = Math.round(speed * 10);
+  return tenths <= 0 ? "1割未満" : tenths >= 10 ? "10割" : `約${tenths}割`;
+}
+
+/** 重なりの断り（段の詳細・注意の一覧で同じ言い方にする） */
+export function overlapText(peakLoad: number, penalty: number): string {
+  return `作業が${peakLoad}つ重なっています（速さ ${speedLabel(sharedSpeed(peakLoad, penalty))}）`;
 }
 
 /** 縦の範囲を決めるのに使う日付。済んだ段は「済んだ作品も見る」のときだけ上へ広げる */
@@ -153,7 +240,8 @@ export function monthDay(dateKey: string): string {
 function alertsFor(
   plan: PlannedSchedule,
   serials: readonly PlannedSchedule[],
-  context: PlanContext
+  context: PlanContext,
+  penalty: number
 ): string[] {
   const alerts: string[] = [];
   if (plan.detached) {
@@ -183,6 +271,9 @@ function alertsFor(
       );
     } else if (step.daysSource === "tooSlow") {
       alerts.push(`「${step.step.label}」はいまの速さでは10年を超えます`);
+    }
+    if (step.peakLoad > 1) {
+      alerts.push(`「${step.step.label}」の期間は${overlapText(step.peakLoad, penalty)}`);
     }
   }
   const serial = plan.serial;

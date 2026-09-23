@@ -21,7 +21,13 @@ export type ScheduleMessage =
   | { type: "removeStep"; workId: string; scheduleId: string; stepId: string }
   | { type: "moveStep"; workId: string; scheduleId: string; stepId: string; direction: -1 | 1 }
   | { type: "updateSchedule"; workId: string; scheduleId: string; patch: SchedulePatch }
-  | { type: "removeSchedule"; workId: string; scheduleId: string };
+  | { type: "removeSchedule"; workId: string; scheduleId: string }
+  /** 大きなマイルストーンを .ics へ書き出す（6.111.15） */
+  | { type: "exportIcs" }
+  /** 祝日の一覧を取り込む（押したときだけ通信。6.111.12） */
+  | { type: "importHolidays" }
+  /** 作業量の割合の設定を開く */
+  | { type: "openWorkloadSettings" };
 
 const STATUSES: readonly StepStatus[] = ["todo", "doing", "done"];
 
@@ -69,6 +75,10 @@ export function parseScheduleMessage(raw: unknown): ScheduleMessage | null {
     }
     case "removeSchedule":
       return workId && scheduleId ? { type: "removeSchedule", workId, scheduleId } : null;
+    case "exportIcs":
+    case "importHolidays":
+    case "openWorkloadSettings":
+      return { type: value.type };
     default:
       return null;
   }
@@ -86,6 +96,16 @@ function stepPatch(raw: unknown): StepPatch | null {
     patch.status = value.status as StepStatus;
   }
   if (typeof value.note === "string") patch.note = value.note;
+  if (value.parallelWith === null || value.parallelWith === "") {
+    patch.parallelWith = null;
+  } else if (typeof value.parallelWith === "string") {
+    if (value.parallelWith.length > 200) return null;
+    patch.parallelWith = value.parallelWith;
+  }
+  if (value.actor !== undefined) {
+    if (value.actor !== "self" && value.actor !== "others") return null;
+    patch.actor = value.actor;
+  }
   return patch;
 }
 

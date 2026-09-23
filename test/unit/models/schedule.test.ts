@@ -78,3 +78,50 @@ describe("スケジュールのファイルを読む", () => {
     expect(parseScheduleFile(raw).schedules[1].serial?.weekdays).toEqual([1, 4]);
   });
 });
+
+describe("0.83.0 までのファイル（並行・担い手の欄が無い）を読む", () => {
+  // 0.83.0 が書いた形そのもの。欄が増えても、古い形はそのまま読める（無い欄は既定）
+  const old = {
+    schemaVersion: "1",
+    schedules: [
+      {
+        id: "sch_old",
+        kind: "selfPublish",
+        name: "Kindle版",
+        followsGoals: false,
+        milestone: "2027-03-01",
+        targetChars: null,
+        steps: [
+          { id: "stp_a", key: "revise", label: "推敲", days: 10, due: null, status: "todo", doneAt: null, note: "" },
+          { id: "stp_b", key: "cover", label: "表紙の用意", days: 14, due: null, status: "doing", doneAt: null, note: "" },
+          { id: "stp_c", key: "custom", label: "告知", days: 2, due: null, status: "todo", doneAt: null, note: "" },
+        ],
+        serial: null,
+        note: "",
+        createdAt: "t",
+        updatedAt: "t",
+      },
+    ],
+  };
+
+  test("並行は「前の段が終わってから」、担い手は段の印ごとの既定で読む（並びを変えない）", () => {
+    const steps = parseScheduleFile(JSON.parse(JSON.stringify(old))).schedules[0].steps;
+    expect(steps.map((s) => [s.id, s.parallelWith, s.actor])).toEqual([
+      ["stp_a", null, "self"],
+      ["stp_b", null, "others"],
+      ["stp_c", null, "self"],
+    ]);
+  });
+
+  test("知らない担い手は壊れているとして止める", () => {
+    const raw = JSON.parse(JSON.stringify(old));
+    raw.schedules[0].steps[0].actor = "robot";
+    expect(() => parseScheduleFile(raw)).toThrow("知らない値");
+  });
+
+  test("並行の相手は文字で。数などは止める", () => {
+    const raw = JSON.parse(JSON.stringify(old));
+    raw.schedules[0].steps[1].parallelWith = 3;
+    expect(() => parseScheduleFile(raw)).toThrow("段のID");
+  });
+});
