@@ -2045,6 +2045,20 @@ export async function activate(
       picked
     );
   });
+  // 相談パネルへ落とされたバックアップと原稿の違いを、1か所ずつ提案パネルへ
+  // 並べる（設計書6.99.7。作者の裁定、2026-09-23）。**提案パネルの実体は
+  // ここにしか無い**ので、取り込みの口と同じ形で渡す
+  workChatPanel.setBackupProposals((work, proposals) => {
+    proposalPanel.showBackupDiffs(work, proposals);
+  });
+  // 相談パネルから話のファイルを足したあと（バックアップにあって手元に無い話）。
+  // **`novelai.addEpisode` と同じ後始末**：一覧を読み直し、執筆量の基準を置き直す
+  // （置き直さないと、次に書いた分が「今日 +0字」になって消える。設計書6.3.2）
+  workChatPanel.setEpisodesAdded(async (work) => {
+    treeProvider.refresh(work.id);
+    await progress.rebaseline(work);
+    updateStatusBar();
+  });
   /*
     画面で指しながらの案内（設計書6.104。第1段）。
 

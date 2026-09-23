@@ -23,13 +23,18 @@ vi.mock("../../src/core/logger", () => ({
 }));
 
 const received: Array<{ fileName: string; bytes: Uint8Array; works: number }> = [];
+let lastDeps: Record<string, unknown> | undefined;
+const receivedSource: Array<{ sourcePath?: string }> = [];
 let result: { message: string; recordPath?: string } | undefined;
 vi.mock("../../src/features/backupDrop", () => ({
   receiveBackup: async (
-    source: { fileName: string; bytes: Uint8Array },
+    source: { fileName: string; bytes: Uint8Array; sourcePath?: string },
     deps: { works: readonly unknown[] }
   ) => {
-    received.push({ ...source, works: deps.works.length });
+    const { sourcePath, ...rest } = source;
+    received.push({ ...rest, works: deps.works.length });
+    receivedSource.push({ sourcePath });
+    lastDeps = deps as Record<string, unknown>;
     return result;
   },
 }));
@@ -101,6 +106,45 @@ describe("拡張機能の側", () => {
       message: "「氷の街」へ取り込みました：章2",
       canOpenRecord: false,
     });
+  });
+
+  test("**提案パネルへ並べる口を渡されたら、判断へそのまま渡す**（設計書6.99.7）", async () => {
+    const panel = makePanel();
+    const show = () => undefined;
+    panel.setBackupProposals(show);
+
+    await send(panel, { type: "backupFile", name: "N5078JI.zip", bytes: new Uint8Array([1]) });
+
+    expect(lastDeps?.showProposals).toBe(show);
+  });
+
+  test("話を足したあとの後始末の口（一覧の読み直し・執筆量の基準）も渡す", async () => {
+    const panel = makePanel();
+    const after = async () => undefined;
+    panel.setEpisodesAdded(after);
+
+    await send(panel, { type: "backupFile", name: "N5078JI.zip", bytes: new Uint8Array([1]) });
+
+    expect(lastDeps?.afterEpisodesAdded).toBe(after);
+  });
+
+  test("エクスプローラーから落とされたときは、場所も判断へ渡す（Word 原稿の照合の手掛かり）", async () => {
+    const panel = makePanel();
+    const { workspace } = await import("./support/vscodeStub");
+    const saved = workspace.fs;
+    workspace.fs = {
+      ...saved,
+      stat: async () => ({ type: 1, ctime: 0, mtime: 0, size: 4 }),
+      readFile: async () => new Uint8Array([80, 75, 3, 4]),
+    } as unknown as typeof workspace.fs;
+    try {
+      await send(panel, { type: "backupUri", uri: "file:///c:/novels/w_a/原稿.docx" });
+    } finally {
+      workspace.fs = saved;
+    }
+
+    expect(received.at(-1)?.fileName).toBe("原稿.docx");
+    expect(String(receivedSource.at(-1)?.sourcePath)).toMatch(/novels[\\/]w_a[\\/]原稿\.docx$/);
   });
 
   test("ArrayBuffer で届いても受け取る", async () => {
@@ -177,6 +221,18 @@ describe("画面の側", () => {
       expect(script).toContain("new Uint8Array(buffer)");
       expect(script).toContain(`const MAX_BACKUP_BYTES = ${BACKUP_DROP_MAX_BYTES};`);
       expect(script).toContain("'backupTooLarge'");
+    });
+
+    test(`${where}：エクスプローラーから落とされた Word 原稿（.docx）も受け取る`, () => {
+      const line = script.match(/const BACKUP_NAME_PATTERN = (\/.*\/i);/);
+      expect(line).toBeTruthy();
+      const pattern = new Function(`return ${line?.[1]};`)() as RegExp;
+      expect(pattern.test("file:///c%3A/小説/原稿.docx")).toBe(true);
+      expect(pattern.test("file:///c%3A/N5078JI.zip")).toBe(true);
+      expect(pattern.test("file:///c%3A/N5078JI.txt")).toBe(true);
+      expect(pattern.test("file:///c%3A/絵.png")).toBe(false);
+      // 古い形式の .doc は受けない（既存の Word 変換も読めない）
+      expect(pattern.test("file:///c%3A/原稿.doc")).toBe(false);
     });
 
     test(`${where}：落とせないときのためのボタンがある`, () => {

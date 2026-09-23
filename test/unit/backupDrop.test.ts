@@ -319,6 +319,41 @@ describe("既にある作品に当たったとき", () => {
     expect(manuscriptSnapshot()).toEqual(before);
   });
 
+  it("**提案パネルへの口があれば、違い1か所ずつを並べる（原稿はまだ書き換えない）**", async () => {
+    putSplitManuscript(
+      SPECS.map((spec) => (spec.n === 2 ? { ...spec, body: "　手元で直した場面。" } : spec))
+    );
+    putNcodeLedger();
+    const before = manuscriptSnapshot();
+    const shown: Array<{ work: WorkEntry; proposals: unknown[] }> = [];
+
+    const result = await receiveBackup(
+      { fileName: "N5078JI.zip", bytes: narouZip() },
+      {
+        works: [WORK],
+        showProposals: (work, proposals) => shown.push({ work, proposals: [...proposals] }),
+      }
+    );
+
+    expect(modals[0].detail).toContain("・本文の違い：1話（1か所）。提案パネルに並べます");
+    expect(shown).toHaveLength(1);
+    expect(shown[0].work).toBe(WORK);
+    expect(shown[0].proposals).toEqual([
+      expect.objectContaining({
+        filePath: paths.join(MANUSCRIPT, "0002.txt"),
+        episodeLabel: "2話　検査",
+        // 区切り行・【エピソードタイトル】・題・空行・【本文】の次（6行目）
+        startLine: 6,
+        local: ["　手元で直した場面。"],
+        backup: ["　検査が続く。"],
+      }),
+    ]);
+    expect(result?.message).toContain("1か所を提案パネルに並べました");
+    // 「違いを見る」の記録も残す
+    expect(result?.recordPath).toBeDefined();
+    expect(manuscriptSnapshot()).toEqual(before);
+  });
+
   it("押さなければ、台帳も記録も書かない", async () => {
     putSplitManuscript();
     putNcodeLedger();
@@ -352,6 +387,99 @@ describe("既にある作品に当たったとき", () => {
     expect(modals[0].detail).toContain("既に1個あるため、立てません");
     expect(text(CHAPTERS)).toBe(authored);
     expect(result?.message).toBe("「コールドスリープ」へ取り込みました：いいね3話ぶん");
+  });
+
+  it("**手元に無い話は、題を並べて確かめてから、新しい話のファイルとして足す**（作者の裁定、2026-09-23）", async () => {
+    // 手元は2話まで。バックアップには3話（章「学園」の始まり）まである
+    putSplitManuscript(SPECS.slice(0, 2));
+    putNcodeLedger();
+    const before = manuscriptSnapshot();
+
+    const result = await receiveBackup(
+      { fileName: "N5078JI.zip", bytes: narouZip() },
+      { works: [WORK] }
+    );
+
+    expect(modals[0].detail).toContain(
+      "・手元に無い話：1話。新しい話のファイルとして足します（既存の話には触りません）\n　・3話　外へ"
+    );
+    expect(modals[0].detail).toContain("足すファイル：0003.txt");
+    expect(modals[0].buttons).toEqual(["取り込む", "話は足さずに取り込む"]);
+
+    // 手元の話の名前の流儀（0001.txt）に合わせた名前で、区切り行ごと足す
+    const added = text(paths.join(MANUSCRIPT, "0003.txt")) ?? "";
+    expect(added.startsWith(SEP(3))).toBe(true);
+    expect(added).toContain("　外は明るかった。");
+    expect(added).toContain("いいね: 15件");
+    // **既にあった話は1バイトも変わらない**
+    for (const [name, hex] of before) {
+      expect(manuscriptSnapshot().get(name)).toBe(hex);
+    }
+    expect(result?.message).toContain("新しい話1話");
+  });
+
+  it("「話は足さずに取り込む」なら、話のファイルは作らない（ほかは足す）", async () => {
+    putSplitManuscript(SPECS.slice(0, 2));
+    putNcodeLedger();
+    const before = manuscriptSnapshot();
+    modalAnswer = (_message, buttons) => buttons.find((button) => button.startsWith("話は足さず"));
+
+    const result = await receiveBackup(
+      { fileName: "N5078JI.zip", bytes: narouZip() },
+      { works: [WORK] }
+    );
+
+    expect(manuscriptSnapshot()).toEqual(before);
+    expect(result?.message).not.toContain("新しい話");
+    expect(result?.message).toContain("いいね3話ぶん");
+  });
+
+  it("**同じ名前のファイルが既にあれば上書きせず、足せなかったと言う**", async () => {
+    putSplitManuscript(SPECS.slice(0, 2));
+    putNcodeLedger();
+    // 一覧には出ていない（走査に載っていない）が、同じ名前のファイルがある
+    const occupied = paths.join(MANUSCRIPT, "0003.txt");
+    put(occupied, "作者の下書き");
+
+    const result = await receiveBackup(
+      { fileName: "N5078JI.zip", bytes: narouZip() },
+      { works: [WORK] }
+    );
+
+    expect(text(occupied)).toBe("作者の下書き");
+    expect(result?.message).toContain("足せなかった話1話");
+  });
+
+  it("章のある作品では、足した話から始まる章を台帳の末尾へ足す（作者の章は変えない）", async () => {
+    putSplitManuscript(SPECS.slice(0, 2));
+    putNcodeLedger();
+    put(
+      CHAPTERS,
+      JSON.stringify({
+        schemaVersion: "1",
+        chapters: [{ name: "作者の章", startEpisodePath: "本文/0001.txt" }],
+      })
+    );
+
+    await receiveBackup({ fileName: "N5078JI.zip", bytes: narouZip() }, { works: [WORK] });
+
+    expect(JSON.parse(text(CHAPTERS) ?? "{}").chapters).toEqual([
+      { name: "作者の章", startEpisodePath: "本文/0001.txt" },
+      { name: "学園", startEpisodePath: "本文/0003.txt" },
+    ]);
+  });
+
+  it("話を足したら、作品一覧と執筆量の基準を直す口を呼ぶ", async () => {
+    putSplitManuscript(SPECS.slice(0, 2));
+    putNcodeLedger();
+    const refreshed: string[] = [];
+
+    await receiveBackup(
+      { fileName: "N5078JI.zip", bytes: narouZip() },
+      { works: [WORK], afterEpisodesAdded: async (work) => void refreshed.push(work.id) }
+    );
+
+    expect(refreshed).toEqual([WORK.id]);
   });
 
   it("題で当たったときも、決めつけずに確かめる", async () => {

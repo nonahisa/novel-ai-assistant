@@ -174,9 +174,11 @@ import { openInDefaultEditor } from "../views/openDocument";
 import {
   BACKUP_DROP_MAX_BYTES,
   BACKUP_FILE_EXTENSIONS,
+  DROP_FILE_EXTENSIONS,
+  WORD_FILE_EXTENSIONS,
   tooLargeMessage,
 } from "../core/backupFileKinds";
-import type { ImportAsNewWork } from "./backupDrop";
+import type { ImportAsNewWork, ShowBackupProposals } from "./backupDrop";
 import { showBackupOpenDialog } from "./backupPickFolder";
 
 /**
@@ -697,6 +699,31 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
   setBackupImporter(importer: ImportAsNewWork): void {
     this.backupImporter = importer;
+  }
+
+  /**
+   * バックアップとの本文の違いを、提案パネルへ並べる口（設計書6.99.7。
+   * 作者の裁定、2026-09-23）。
+   *
+   * **提案パネルの実体は `extension.ts` にしか無い**ので、`setBackupImporter`
+   * と同じ形で渡してもらう。渡されていないあいだは、違いを記録へ書き出して
+   * 「違いを見る」で開くだけ（これまでどおり）。
+   */
+  private backupProposals: ShowBackupProposals | undefined;
+
+  setBackupProposals(show: ShowBackupProposals): void {
+    this.backupProposals = show;
+  }
+
+  /**
+   * バックアップ（や Word 原稿）から話をファイルとして足したあとに呼ぶ口
+   * （作品一覧の読み直しと、執筆量の基準の置き直し）。どちらも `extension.ts`
+   * にしか無いので、同じ形で渡してもらう。
+   */
+  private episodesAdded: ((work: WorkEntry) => Promise<void>) | undefined;
+
+  setEpisodesAdded(after: (work: WorkEntry) => Promise<void>): void {
+    this.episodesAdded = after;
   }
 
   /** バックアップを捌いている最中か。**2つ同時に落とされても1つずつ** */
@@ -1485,8 +1512,12 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       canSelectFolders: false,
       canSelectMany: false,
       openLabel: "これを渡す",
-      title: "相談パネルへ渡すバックアップを選ぶ（ZIP／テキスト）",
-      filters: { "バックアップ（ZIP／テキスト）": [...BACKUP_FILE_EXTENSIONS] },
+      title: "相談パネルへ渡すバックアップ・Word 原稿を選ぶ（ZIP／テキスト／.docx）",
+      filters: {
+        "バックアップ・Word 原稿": [...DROP_FILE_EXTENSIONS],
+        "バックアップ（ZIP／テキスト）": [...BACKUP_FILE_EXTENSIONS],
+        "Word 原稿（.docx）": [...WORD_FILE_EXTENSIONS],
+      },
     });
     if (!picked) return;
     await this.readAndHandleBackup(picked);
@@ -1522,7 +1553,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       });
       return;
     }
-    await this.handleBackup(fileName, bytes);
+    // 場所も渡す：Word 原稿が作品フォルダーの中にあれば、その作品の続きと見る手掛かり
+    await this.handleBackup(fileName, bytes, fromUri(uri));
   }
 
   /**
@@ -1532,7 +1564,12 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * 取り込みの部品（ZIPの展開など）は大きいので、落とされたときに初めて読む
    * ——相談パネルを開くたびに読み込む必要は無い。
    */
-  private async handleBackup(fileName: string, bytes: Uint8Array): Promise<void> {
+  private async handleBackup(
+    fileName: string,
+    bytes: Uint8Array,
+    /** 場所が分かるとき（エクスプローラー・選ぶ画面から）。Word 原稿の照合に使う */
+    sourcePath?: string
+  ): Promise<void> {
     if (this.receivingBackup) {
       this.postAll({
         type: "note",
@@ -1548,8 +1585,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       });
       const { receiveBackup } = await import("./backupDrop.js");
       const result = await receiveBackup(
-        { fileName, bytes },
-        { works: this.registry.list(), importAsNew: this.backupImporter }
+        { fileName, bytes, ...(sourcePath ? { sourcePath } : {}) },
+        {
+          works: this.registry.list(),
+          importAsNew: this.backupImporter,
+          showProposals: this.backupProposals,
+          afterEpisodesAdded: this.episodesAdded,
+        }
       );
       if (!result) {
         this.postAll({ type: "note", message: "バックアップの取り込みを取りやめました。" });

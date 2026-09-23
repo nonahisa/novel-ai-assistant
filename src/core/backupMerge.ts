@@ -13,6 +13,11 @@ import {
   type CollectedSectionStart,
 } from "./collectedSections";
 import { parseEpisodeMetadata } from "./metadataParser";
+import { countProposableHunks, locateBodyInFile } from "./backupHunks";
+import {
+  describeMissingEpisodes,
+  type MissingBackupEpisode,
+} from "./backupMissingEpisodes";
 import { decodeBytes, hasConflictMarkers } from "./textDecode";
 import type { WorkZipInspection } from "./workZip";
 
@@ -27,15 +32,16 @@ import type { WorkZipInspection } from "./workZip";
  * | 章の見出し（【第N章】） | **章の台帳が空のときだけ**立てる（`collectedSections.ts` と同じ守り） |
  * | いいね（【リアクション】）・作品全体の評価 | 読者の反応の台帳へ**追記**（出どころ `backup`） |
  * | 作品ID（Nコード） | サイトの作品情報が**まだ無いときだけ**書く |
- * | 本文 | **書き換えない。** 違う話を数え、違いを見せるだけ |
- * | 手元に無い話 | 取り込まない（数だけ言う） |
+ * | 本文 | **ここでは書き換えない。** 違い1か所ずつを提案パネルに並べ、採るかは作者が箇所ごとに選ぶ（`backupHunks.ts`） |
+ * | 手元に無い話 | 題を見せて確かめてから、新しい話のファイルとして足す（既存の話には触らない。`backupMissingEpisodes.ts`） |
  *
- * ## 本文を書き換えない理由（実装ルール1）
+ * ## 本文を黙って書き換えない理由（実装ルール1）
  *
  * バックアップと手元の原稿の**どちらが新しいかは、機械には分からない。**
  * サイトの編集画面で直したならバックアップが新しく、手元で直してまだ
  * 投稿していないならバックアップが古い。古いほうで上書きすると、直した
- * ものが消える。だから違いを見せて、どちらを採るかは作者が決める。
+ * ものが消える。だから違いを見せて、どちらを採るかは作者が決める
+ * （作者の裁定、2026-09-23：違い1か所ずつを提案にする）。
  *
  * ## コメントは入っていない
  *
@@ -74,6 +80,12 @@ export interface LocalManuscriptSource {
   readonly manuscriptName: string;
   /** 全文。**読めなかったら null** */
   readonly text: string | null;
+  /**
+   * 読んだときのハッシュ（`readTextFile` の `hash`）。**違いを提案にするのに要る**
+   * ——提案を作ってから当てるまでに原稿が変わったら当てない（実装ルール1）。
+   * 無ければ、違いは記録にだけ残す
+   */
+  readonly hash?: string;
 }
 
 /** 手元の原稿の中の1話 */
@@ -85,6 +97,9 @@ interface LocalEpisode {
   /** そのファイルの中で何番目の話か（0始まり）。章はファイルの頭にしか置けない */
   readonly indexInFile: number;
   readonly body: string;
+  /** そのファイルの全文（本文の在り処を探すのに使う） */
+  readonly fileText: string;
+  readonly fileHash: string | null;
 }
 
 /** 章の台帳をどうするか */
@@ -121,6 +136,16 @@ export interface EpisodeBodyDiff {
   /** 手元のどのファイルか（作品フォルダーからの相対パス） */
   readonly relPath: string;
   readonly hunks: readonly DiffHunk[];
+  /**
+   * 本文の1行目が、ファイルの何行目の**1つ前**か（0始まりの位置）。
+   * `hunk.localLine` に足すとファイルの行番号になる。
+   *
+   * **本文をファイルの中で1か所に決められなければ null**——そのときは
+   * 提案にせず、記録（「違いを見る」）にだけ残す（`backupHunks.ts`）
+   */
+  readonly bodyLineOffset: number | null;
+  /** 読んだときのファイルのハッシュ。分からなければ null（提案にしない） */
+  readonly fileHash: string | null;
 }
 
 /** 本文の違いの1か所。行の単位で持つ */
@@ -152,8 +177,13 @@ export interface BackupMergePlan {
   readonly bodyDiffs: readonly EpisodeBodyDiff[];
   /** 本文が同じだった話の数 */
   readonly sameBodies: number;
-  /** 手元に見当たらなかった話の数（取り込まない） */
+  /** 手元に見当たらなかった話の数（`missingEpisodes` の数） */
   readonly unmatched: number;
+  /**
+   * 手元に見当たらなかった話（作者の裁定、2026-09-23：確かめてから新しい話の
+   * ファイルとして足す）。中身の用意は `backupMissingEpisodes.ts`
+   */
+  readonly missingEpisodes: readonly MissingBackupEpisode[];
   /** 手元の同じ番号の話が2つ以上あって、どれと比べるか決められなかった数 */
   readonly ambiguousLocal: number;
   /** 競合マーカーがあって比べなかった手元のファイル */
@@ -251,6 +281,8 @@ function readLocalEpisodes(
           order: episode.order,
           indexInFile: index,
           body: episode.body,
+          fileText: source.text as string,
+          fileHash: source.hash ?? null,
         });
       });
       continue;
@@ -264,6 +296,8 @@ function readLocalEpisodes(
       order: null,
       indexInFile: 0,
       body: metadata.hasMetadata ? metadata.body : source.text,
+      fileText: source.text,
+      fileHash: source.hash ?? null,
     });
   }
   return { episodes, conflicted, unreadable };
@@ -318,11 +352,27 @@ export function planBackupMerge(input: {
 
   const bodyDiffs: EpisodeBodyDiff[] = [];
   let sameBodies = 0;
-  let unmatched = 0;
+  const missingEpisodes: MissingBackupEpisode[] = [];
   let ambiguousLocal = 0;
   for (const { episode, local: found } of matches) {
     if (found === "missing") {
-      unmatched++;
+      /*
+        **番号でも名前でも照らせなかった話が、手元に本文ごと在ることがある。**
+        作者が手で書き足した話（`エピソード32.txt`）は区切り行を持たないので
+        番号では照らせないが、サイトへ出したあとのバックアップには入っている。
+        本文がそっくり同じ話が手元にあれば「在る」と見る——足すと同じ話が
+        2つになる（作者の原稿に重複を作らない）。
+      */
+      if (hasSameBodyElsewhere(episode.body, local.episodes)) {
+        sameBodies++;
+        continue;
+      }
+      missingEpisodes.push({
+        order: episode.order,
+        label: episode.label,
+        part: episode.part,
+        fileName: episode.fileName,
+      });
       continue;
     }
     if (found === "ambiguous") {
@@ -339,6 +389,8 @@ export function planBackupMerge(input: {
       label: episode.label,
       relPath: found.relPath,
       hunks,
+      bodyLineOffset: locateBodyInFile(found.fileText, found.body),
+      fileHash: found.fileHash,
     });
   }
 
@@ -358,7 +410,8 @@ export function planBackupMerge(input: {
     profile: input.ledger ? profileToAdd(input.inspection, input.ledger) : null,
     bodyDiffs,
     sameBodies,
-    unmatched,
+    unmatched: missingEpisodes.length,
+    missingEpisodes,
     ambiguousLocal,
     conflicted: local.conflicted,
     unreadable: local.unreadable,
@@ -371,7 +424,8 @@ export function isEmptyMergePlan(plan: BackupMergePlan): boolean {
     plan.chapters.kind !== "create" &&
     plan.readerStats.length === 0 &&
     plan.profile === null &&
-    plan.bodyDiffs.length === 0
+    plan.bodyDiffs.length === 0 &&
+    plan.missingEpisodes.length === 0
   );
 }
 
@@ -570,6 +624,16 @@ export function diffBodies(localBody: string, backupBody: string): DiffHunk[] {
   }));
 }
 
+/** 手元のどれかの話が、比べ方をそろえたうえでこの本文とそっくり同じか */
+function hasSameBodyElsewhere(
+  body: string,
+  locals: readonly LocalEpisode[]
+): boolean {
+  const key = linesForDiff(body).join("\n");
+  if (key === "") return false;
+  return locals.some((local) => linesForDiff(local.body).join("\n") === key);
+}
+
 function linesForDiff(body: string): string[] {
   const lines = body
     .replace(/\r\n?/g, "\n")
@@ -639,7 +703,16 @@ const LISTED_CHAPTERS = 3;
 /**
  * 押す前に見せる一覧（実装ルール2：何を足すか・何を足さないかを先に言う）。
  */
-export function describeMergePlan(plan: BackupMergePlan): string[] {
+export function describeMergePlan(
+  plan: BackupMergePlan,
+  options: {
+    /**
+     * 本文の違いを提案パネルへ並べられるか（提案パネルへの口が繋がっているか）。
+     * 繋がっていなければ、これまでどおり記録へ書き出すとだけ言う
+     */
+    readonly proposals?: boolean;
+  } = {}
+): string[] {
   const lines: string[] = [];
 
   lines.push(`・章：${describeChapterPlan(plan.chapters)}`);
@@ -668,7 +741,26 @@ export function describeMergePlan(plan: BackupMergePlan): string[] {
     );
   }
 
-  if (plan.bodyDiffs.length > 0) {
+  const proposable = options.proposals ? countProposableHunks(plan.bodyDiffs) : 0;
+  if (plan.bodyDiffs.length > 0 && proposable > 0) {
+    /*
+      **違い1か所ずつを提案にする**（作者の裁定、2026-09-23）。
+      どちらが新しいかは機械には分からないので、ここでは書き換えず、
+      採るかどうかを作者が箇所ごとに選ぶ。
+    */
+    const total = plan.bodyDiffs.reduce((sum, diff) => sum + diff.hunks.length, 0);
+    lines.push(
+      `・本文の違い：${plan.bodyDiffs.length}話（${proposable}か所）。提案パネルに並べます（${listEpisodes(plan.bodyDiffs)}）`,
+      "　原稿はまだ書き換えません。1か所ずつ、手元のままにするか、" +
+        "バックアップの文を採るかを選べます。"
+    );
+    if (proposable < total) {
+      lines.push(
+        `　うち${total - proposable}か所は原稿の中の位置を決められないため、` +
+          "「バックアップとの違い」の記録にだけ書き出します。"
+      );
+    }
+  } else if (plan.bodyDiffs.length > 0) {
     lines.push(
       `・本文の違い：${plan.bodyDiffs.length}話（${listEpisodes(plan.bodyDiffs)}）`,
       "　原稿は書き換えません。どちらが新しいかは機械には分からないので、" +
@@ -678,10 +770,10 @@ export function describeMergePlan(plan: BackupMergePlan): string[] {
     lines.push("・本文の違い：ありません");
   }
 
+  // 手元に無い話（作者の裁定、2026-09-23：題を並べて、確かめてから足す）
+  lines.push(...describeMissingEpisodes(plan.missingEpisodes));
+
   const notes: string[] = [];
-  if (plan.unmatched > 0) {
-    notes.push(`手元に見当たらない話が${plan.unmatched}話あります（取り込みません）。`);
-  }
   if (plan.ambiguousLocal > 0) {
     notes.push(
       `手元に同じ番号の話が2つ以上あって、比べる相手を決められなかった話が${plan.ambiguousLocal}話あります。`
@@ -752,14 +844,24 @@ export function summarizeMergeResult(input: {
   workStats: boolean;
   bodyDiffs: number;
   recorded: boolean;
+  /** 提案パネルに並べた違いの数（並べなければ 0 か省く） */
+  proposals?: number;
+  /** 手元に無かったので新しいファイルとして足した話の数 */
+  addedEpisodes?: number;
 }): string {
+  const proposals = input.proposals ?? 0;
+  const bodyNote =
+    proposals > 0
+      ? `（${proposals}か所を提案パネルに並べました。原稿はまだ書き換えていません）`
+      : input.recorded
+        ? "（記録に残しました。原稿は書き換えていません）"
+        : "";
   const parts = [
     input.chapters > 0 ? `章${input.chapters}` : "",
     input.likesEpisodes > 0 ? `いいね${input.likesEpisodes}話ぶん` : "",
     input.workStats ? "作品全体の評価" : "",
-    input.bodyDiffs > 0
-      ? `本文の違い${input.bodyDiffs}話${input.recorded ? "（記録に残しました。原稿は書き換えていません）" : ""}`
-      : "",
+    (input.addedEpisodes ?? 0) > 0 ? `新しい話${input.addedEpisodes}話` : "",
+    input.bodyDiffs > 0 ? `本文の違い${input.bodyDiffs}話${bodyNote}` : "",
   ].filter((part) => part !== "");
   if (parts.length === 0) {
     return `「${input.workTitle}」に足すものはありませんでした。`;
@@ -776,13 +878,14 @@ export const BACKUP_DIFF_RECORD_KIND = "バックアップとの違い";
 /**
  * 本文の違いの記録（Markdown）。**読むためだけのもの**で、どこにも当てない。
  *
- * `-` が手元、`+` がバックアップ。どちらを採るかは作者が決め、採るなら
- * 原稿を自分で直す（この記録から原稿へ書き戻す道は作らない）。
+ * `-` が手元、`+` がバックアップ。**この記録から原稿へ書き戻す道は作らない**
+ * ——採るのは提案パネルの1か所ずつの提案で、そちらはハッシュの照合を通る。
+ * 記録は、提案にできなかった違い（位置を決められない）も含めた全部の控えである。
  */
 export function buildBackupDiffRecord(input: {
   workTitle: string;
   sourceName: string;
-  diffs: readonly EpisodeBodyDiff[];
+  diffs: readonly Pick<EpisodeBodyDiff, "label" | "relPath" | "hunks">[];
 }): string {
   const lines: string[] = [
     `# ${BACKUP_DIFF_RECORD_KIND}：${input.workTitle}`,
@@ -791,7 +894,7 @@ export function buildBackupDiffRecord(input: {
     "",
     "`-` の行が手元の原稿、`+` の行がバックアップです。",
     "原稿は書き換えていません。どちらが新しいかは機械には分からないため、",
-    "採るほうを選んで、原稿をご自分で直してください。",
+    "採るほうを選んでください（提案パネルに並んだ違いは、そこで1か所ずつ採れます）。",
     "",
   ];
   for (const diff of input.diffs) {

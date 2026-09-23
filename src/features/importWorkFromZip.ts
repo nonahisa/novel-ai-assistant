@@ -274,7 +274,9 @@ async function confirmImport(
     `作品名：${inspection.title}` +
       (inspection.titleSource === "about"
         ? "（作品情報から採りました。次の画面で直せます）"
-        : "（ZIPの名前から採りました。次の画面で直せます）"),
+        : inspection.titleSource === "fileName"
+          ? "（ファイルの名前から採りました。次の画面で直せます）"
+          : "（ZIPの名前から採りました。次の画面で直せます）"),
     "",
     // **話の数であって、ファイルの数ではない**（`workZip.ts` の `episodeCount`）。
     // 合本は1ファイルに全話が入っているので、そのことも書き添える
