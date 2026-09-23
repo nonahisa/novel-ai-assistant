@@ -1165,6 +1165,8 @@ describe("原稿整備と投稿・出力", () => {
       "novelai.resumeWriting",
       "novelai.proposeChapters",
       "novelai.chaptersFromHeadings",
+      // バックアップの章立てを読む（残課題 B7）。章見出しから章立ての仲間
+      "novelai.importChaptersFromBackup",
       "novelai.convertToMarkdown",
       "novelai.unifyEol",
     ]);

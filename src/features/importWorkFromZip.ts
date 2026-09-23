@@ -40,6 +40,7 @@ import {
 } from "../core/workZip";
 import { describeBackupEncoding } from "../core/backupEncoding";
 import { showBackupOpenDialog } from "./backupPickFolder";
+import { placeImportedChapters } from "./importChaptersFromBackup";
 import { describeEpisodeNumbers } from "../core/episodeNumberCheck";
 import type { WorkInfo } from "../core/workInfoParse";
 import { DEFAULT_MANUSCRIPT_DIR, type WorkEntry } from "../models/types";
@@ -189,7 +190,14 @@ export async function importWorkFromZip(
     ? await notePostingSite(entry, inspection.site, inspection)
     : NOTHING_RECORDED;
 
-  await reportResult(entry, zipPath, inspection, placed, recorded);
+  /*
+    **バックアップの章立てを置く**（残課題 B7）。なろうの合本は章の題を持っているのに、
+    受け渡しで落としていた。合本のままでは2つ目以降の章を置けないので、そのときは
+    「話ごとのファイルに分ける」で章が立つことを記録で伝える（`placeImportedChapters`）
+  */
+  const chapters = await placeImportedChapters(entry, inspection.outline);
+
+  await reportResult(entry, zipPath, inspection, placed, recorded, chapters);
 }
 
 /** ファイルを選ばせて、読んで確かめる（メニューから始めたときの道） */
@@ -690,7 +698,9 @@ async function reportResult(
   inspection: WorkZipInspection,
   placed: readonly string[],
   /** 台帳へ積んだ読者の反応の内訳（バックアップに入っていたぶん） */
-  recorded: RecordedReaderStats
+  recorded: RecordedReaderStats,
+  /** 章立てをどうしたか（章の見出しが無ければ undefined） */
+  chapters?: { readonly created: number; readonly note: string }
 ): Promise<void> {
   const invite = readerStatsInvite(inspection.site, recorded);
   // **確認の画面で言ったことを、済んだあとでもう一度言う**（作者の指示）。
@@ -720,17 +730,19 @@ async function reportResult(
       episodeNotes,
       encodingNotes,
       noted: invite?.noted,
+      chapters: chapters?.note,
     }),
     work
   );
 
   const message = recordPath
-    ? shortSummary(inspection, concerns, invite)
+    ? shortSummary(inspection, concerns, invite, chapters)
     : // 記録を置けなかった（権限・容量・ブラウザ版の保管庫）。
       // **黙って落とさない**——読みにくくても、この場で全部言う
       [
         `${inspection.episodeCount}話を取り込みました。`,
         invite?.noted ?? "",
+        chapters?.note ?? "",
         ...concerns,
         invite?.line ?? "",
       ]
@@ -771,12 +783,16 @@ async function reportResult(
 function shortSummary(
   inspection: WorkZipInspection,
   concerns: readonly string[],
-  invite: ReaderStatsInvite | undefined
+  invite: ReaderStatsInvite | undefined,
+  chapters?: { readonly created: number; readonly note: string }
 ): string {
   const topics = concernTopics(inspection);
+  // 章を立てられなかったとき（合本のまま等）は、記録に理由と次の一歩がある。
+  // 通知では見出しだけにする（中身まで書くと1行に収まらない）
+  if (chapters && chapters.created === 0) topics.push("章立て");
   const listed = topics.slice(0, LISTED_CONCERNS).join("・");
   const heading =
-    concerns.length === 0
+    concerns.length === 0 && !(chapters && chapters.created === 0)
       ? `取り込んだ内容は「${IMPORT_RECORD_KIND}」に残しました。`
       : `気をつけたいこと（${listed}${
           topics.length > LISTED_CONCERNS ? " ほか" : ""
@@ -784,6 +800,7 @@ function shortSummary(
 
   return [
     `${inspection.episodeCount}話を取り込みました。`,
+    chapters && chapters.created > 0 ? `章を${chapters.created}個立てました。` : "",
     invite?.short ?? "",
     heading,
     invite?.line ?? "",

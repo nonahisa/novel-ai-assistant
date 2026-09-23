@@ -222,6 +222,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.removeChapter": "story",
   "novelai.proposeChapters": "story",
   "novelai.chaptersFromHeadings": "story",
+  "novelai.importChaptersFromBackup": "story",
   "novelai.suggestChapterName": "story",
 
   // ── プロット・構想 ──

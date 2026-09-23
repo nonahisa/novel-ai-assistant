@@ -48,6 +48,8 @@ export interface ImportRecordInput {
   readonly encodingNotes: readonly string[];
   /** 読者の反応について何をしたか。出どころが分からなければ無い */
   readonly noted?: string;
+  /** 章立てをどうしたか（残課題 B7）。章の見出しが無ければ無い */
+  readonly chapters?: string;
 }
 
 /** 一覧に並べるファイル名の上限。超えたら「ほか」 */
@@ -88,6 +90,7 @@ export function buildImportRecord(
         )} を下書きとして置きました（設定フォルダーにあります）。`
       : "- 作品情報からの下書きはありません。"
   );
+  if (input.chapters) lines.push(`- ${input.chapters}`);
   if (input.skipped.length > 0) {
     lines.push(
       `- 原稿ではないファイル${input.skipped.length}件は入れていません` +

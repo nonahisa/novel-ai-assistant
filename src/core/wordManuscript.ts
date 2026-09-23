@@ -234,5 +234,7 @@ export function inspectionFromWord(doc: WordManuscript): WorkZipInspection {
     episodeNumbers: checkEpisodeNumbers([]),
     encodingNotice: checkBackupEncoding([]),
     dropped: [],
+    // Word 原稿には章の見出しの約束が無い（見出しの段は作者の書き方しだい）。章は作らない
+    outline: [],
   };
 }

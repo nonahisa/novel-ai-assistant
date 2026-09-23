@@ -44,15 +44,22 @@ export const READER_STATS_IMPORT_URI_PATH = "/import-reader-stats";
  */
 export const CONTESTS_IMPORT_URI_PATH = "/import-contests";
 
+/**
+ * 章立ての取り込みの合図のパス（ヘルパー 0.13.0 との約束。残課題 B7、設計書6.66.6）。
+ * カクヨムの作品管理の画面の大見出しを、ヘルパーがクリップボードで渡す（`chapterEnvelope.ts`）。
+ */
+export const CHAPTERS_IMPORT_URI_PATH = "/import-chapters";
+
 /** URI のパスが何の合図か。知らないパスは undefined（何もしない） */
 export function readerStatsUriAction(
   uriPath: string
-): "import" | "contests" | "setup" | undefined {
+): "import" | "contests" | "chapters" | "setup" | undefined {
   // 末尾の `/` だけは許す（ブラウザやOSが付け足すことがある）。
   // 大文字小文字は区別する——約束は1つの綴りで、似た綴りを拾う理由が無い
   const trimmed = uriPath.replace(/\/+$/u, "");
   if (trimmed === READER_STATS_IMPORT_URI_PATH) return "import";
   if (trimmed === CONTESTS_IMPORT_URI_PATH) return "contests";
+  if (trimmed === CHAPTERS_IMPORT_URI_PATH) return "chapters";
   /*
     **Claude Code からのセットアップの依頼**（設計書6.87.18）。受け口は1つしか
     持てないので同じ口で見分ける。**クエリを読むのはこのパスだけ**で、

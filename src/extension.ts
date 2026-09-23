@@ -484,6 +484,10 @@ import {
   suggestChapterName,
 } from "./features/proposeChapters";
 import { chaptersFromHeadings } from "./features/chaptersFromHeadings";
+import {
+  importChaptersFromBackup,
+  importChaptersFromHelper,
+} from "./features/importChaptersFromBackup";
 import { countUnextractedEpisodes } from "./features/extractionFreshness";
 import {
   describeChosenScope,
@@ -6375,6 +6379,12 @@ export async function activate(
         afterImport: (work) => refreshWritingStatsPanel(work, deviceId),
         // 公募の一覧（ヘルパー 0.12.0）。URI の受け口は1つしか持てないので、ここで渡す
         importContests: () => importContestsFromClipboard(contestDeps, "uri"),
+        // カクヨムの章立て（ヘルパー 0.13.0。残課題 B7）。同じ受け口でパスを見分ける
+        importChapters: () =>
+          importChaptersFromHelper({
+            listWorks: () => registry.list(),
+            afterChange: (work) => treeProvider.refresh(work.id),
+          }),
         // Claude Code からのセットアップの依頼（設計書6.87.18）。同じ受け口で見分ける
         handleSetupRequest: (query) =>
           handleSetupRequest(query, {
@@ -6529,6 +6539,16 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
         if (await chaptersFromHeadings(work)) treeProvider.refresh(work.id);
+      }
+    ),
+    // バックアップ（なろう・アルファポリス）やヘルパー（カクヨムの作品管理の画面）から
+    // 章立てだけを取り込む。原稿は触らず、章立てがあれば上書きせずに選ばせる（残課題 B7）
+    registerCommand(
+      "novelai.importChaptersFromBackup",
+      async (node?: WorkNode) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        if (await importChaptersFromBackup(work)) treeProvider.refresh(work.id);
       }
     ),
     registerCommand(

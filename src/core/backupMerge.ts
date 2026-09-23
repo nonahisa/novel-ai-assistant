@@ -797,7 +797,8 @@ function describeChapterPlan(plan: ChapterMergePlan): string {
     case "create":
       return `${plan.chapters.length}個立てます（${listChapters(plan.chapters)}）。章立ての記録に書くだけで、原稿は書き換えません`;
     case "existing":
-      return `章立ての記録に既に${plan.existingCount}個あるため、立てません（作者の章を上書きしないため）`;
+      // 違いを見て選ぶ道は別の操作にある（残課題 B7。`importChaptersFromBackup.ts`）
+      return `章立ての記録に既に${plan.existingCount}個あるため、立てません（作者の章を上書きしないため。違いを見て足すときは、作品の右クリック「バックアップから章立て」）`;
     case "unreadable":
       return "章立ての記録を読めなかったため、立てません";
     case "blocked": {

@@ -10,6 +10,7 @@ import {
 } from "./backupEncoding";
 import { detectBackupSite } from "./backupSite";
 import { parseCollectedFile, parseEpisodeTitle } from "./collectedFile";
+import type { OutlineEpisode } from "./chapterOutline";
 import { countEpisodeChars } from "./episodeCharCount";
 import {
   checkEpisodeNumbers,
@@ -162,6 +163,19 @@ export interface WorkZipInspection {
    * 188話のはずが187話になっていても誰も気づけない。
    */
   readonly dropped: readonly string[];
+  /**
+   * 話の並びと、それぞれが属する章の題（残課題 B7。設計書6.66.6）。
+   *
+   * **なろうの合本は章の題を持っているのに、ここへ載せていなかった**——
+   * `collectedFile.ts` は【第N章】の次の行を `part` で拾っていたが、受け渡しが
+   * 話数・題・本文だけで、`part` はここで落ちていた。章立てを取り込む側
+   * （`chapterOutline.ts`）はこの並びだけを見る。
+   *
+   * - なろう：合本の区切りごと（`part` は【第N章】の次の行）
+   * - アルファポリス：取り込む話ごと（中身まで同じ重複を落としたあと。書き出す合本と同じ並び）
+   * - カクヨム：話ごとのファイル（**章はバックアップに無い**ので `part` は全部 null）
+   */
+  readonly outline: readonly OutlineEpisode[];
 }
 
 /**
@@ -311,6 +325,13 @@ export function inspectWorkTextBackup(
       { encoding: decoded.encoding, text: decoded.text },
     ]),
     dropped: backup.dropped,
+    // 書き出す合本（`buildCollectedTextFromAlphapolis`）と同じ並び——重複を落としたあと
+    outline: backup.episodes.map((episode) => ({
+      label: episode.label,
+      number: episode.number,
+      title: episode.title,
+      part: episode.part,
+    })),
   };
 }
 
@@ -471,7 +492,64 @@ function inspectTextFiles(
     episodeNumbers: checkEpisodeNumbers(zipEpisodeEntries(files, narou)),
     encodingNotice: checkBackupEncoding(encodingEntries(files)),
     dropped: [],
+    outline: outlineOf(files),
   };
+}
+
+/**
+ * 話の並びと章の題を取り出す（`WorkZipInspection.outline`）。
+ *
+ * **読み方は取り込みと同じ部品を通す**（合本は `parseCollectedFile`、話ごとの
+ * ファイルは `parseEpisodeMetadata`）。並びは確認の画面と同じ、ファイル名の順
+ * （`inspectTextFiles` で並べ替えたあと）。
+ */
+function outlineOf(files: readonly ZipTextFile[]): OutlineEpisode[] {
+  const outline: OutlineEpisode[] = [];
+  for (const file of files) {
+    if (file.isWorkInfo) continue;
+    const text = decodeBytes(file.bytes).text;
+    const collected = parseCollectedFile(text);
+    if (collected) {
+      /*
+        **【第N章】は章の最初の話にしか付かない**（作者の `N5078JI.txt` で、5章31話に
+        見出し5つ）。`part` は「その話が属する章」なので、次の見出しまで引き継ぐ
+        ——アルファポリスの `part` と同じ意味に揃える
+      */
+      let part: string | null = null;
+      for (const episode of collected) {
+        part = episode.part?.trim() || part;
+        outline.push({
+          label: outlineLabel(episode.chapter, episode.title, episode.order),
+          number: episode.chapter,
+          title: episode.title,
+          part,
+        });
+      }
+      continue;
+    }
+    const metadata = parseEpisodeMetadata(text);
+    const fromTitle = parseEpisodeTitle(metadata.title);
+    outline.push({
+      label: metadata.title ?? file.name,
+      // 題に話数が無ければファイル名から（`episode_0012.txt`）。並び順では埋めない
+      number:
+        fromTitle.chapter ??
+        parseEpisodeFileName(file.name.replace(/^.*\//, "")).chapterStart,
+      title: fromTitle.title,
+      part: null,
+    });
+  }
+  return outline;
+}
+
+/** 「3話　嵐の夜」。話数が読めなければ題、題も無ければ「3番目の話」 */
+function outlineLabel(
+  number: number | null,
+  title: string | null,
+  order: number
+): string {
+  if (number !== null) return title ? `${number}話　${title}` : `${number}話`;
+  return title ?? `${order}番目の話`;
 }
 
 /**

@@ -82,6 +82,11 @@ export interface ReaderStatsHelperLinkDeps {
    */
   importContests?(): Promise<void>;
   /**
+   * 章立ての合図を受けたとき（ヘルパー 0.13.0。残課題 B7）。同じ受け口でパスを見分ける。
+   * 無ければ知らないパスと同じ扱い
+   */
+  importChapters?(): Promise<void>;
+  /**
    * Claude Code からのセットアップの依頼を受けたとき（設計書6.87.18）。
    * クエリをそのまま渡す（確かめるのは受けた側）。無ければ知らないパスと同じ扱い
    */
@@ -116,6 +121,10 @@ export class ReaderStatsHelperLink {
     const action = readerStatsUriAction(uri.path);
     if (action === "contests" && this.deps.importContests) {
       await this.deps.importContests();
+      return;
+    }
+    if (action === "chapters" && this.deps.importChapters) {
+      await this.deps.importChapters();
       return;
     }
     if (action === "setup" && this.deps.handleSetupRequest) {
