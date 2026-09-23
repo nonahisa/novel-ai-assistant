@@ -146,6 +146,7 @@ import {
   type RetrievalContext,
 } from "./vectorSearch";
 import { describeRetrieval, formatForPrompt } from "../core/retrieval";
+import { describeRetrievedItem } from "../core/retrievalCorpus";
 import {
   appendChatLog,
   summarizeMaterials,
@@ -3603,7 +3604,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       logStep(
         `相談: ${retrieval}（` +
           found
-            .map((candidate) => `${candidate.item.source}・${candidate.item.label}`)
+            .map((candidate) => describeRetrievedItem(candidate.item))
             .join("、") +
           "）"
       );
@@ -3619,7 +3620,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         retrieval,
         materials: summarizeMaterials(
           found.map((candidate) => ({
-            label: `${candidate.item.source}・${candidate.item.label}`,
+            label: describeRetrievedItem(candidate.item),
             text: candidate.item.text,
           }))
         ),

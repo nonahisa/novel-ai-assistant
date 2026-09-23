@@ -103,6 +103,7 @@ import {
 } from "../ai/registry";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { prepareRetrieval, search, type RetrievalContext } from "./vectorSearch";
+import { describeRetrievedItem } from "../core/retrievalCorpus";
 // 誤った変化を落としたあと、編集部へ渡す資料（`設定/characters.md`）を
 // 作り直すために呼ぶ。パネルの保存経路は資料を作り直さない
 import { generateSettingsDocs } from "./generateSettingsDocs";
@@ -2107,7 +2108,7 @@ export class SettingsPanel {
       if (found.length === 0) return undefined;
 
       return found.map((candidate) => ({
-        label: `${candidate.item.source}・${candidate.item.label}`,
+        label: describeRetrievedItem(candidate.item),
         text: candidate.item.text,
       }));
     } catch (error) {
