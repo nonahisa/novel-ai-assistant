@@ -624,6 +624,50 @@ describe("AIプロバイダ境界", () => {
       expect(result.text).toBe("はい");
       expect(result.usage).toEqual({ inputTokens: 9, outputTokens: 3 });
     });
+
+    test("空白だけの行が続いたら、上限を待たずに受け取りをやめる（残課題8）", async () => {
+      // 実機（さくらのAI、2026-09-22）では、中身を書き終えたあと空白が
+      // 出力上限まで続いた。流す道なら途中で気づいてやめられる
+      setStreamingSettingReader(() => true);
+      const encoder = new TextEncoder();
+      const lineOf = (content: string) =>
+        encoder.encode(
+          JSON.stringify({ message: { content }, done: false }) + "\n"
+        );
+      let pulled = 0;
+      let cancelled = false;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(lineOf('{"deviations": [{"lineStart": 0}'));
+        },
+        pull(controller) {
+          pulled += 1;
+          // 打ち切らなければ、ここまで空白を流し続ける（上限の代わり）
+          if (pulled > 100_000) {
+            controller.close();
+            return;
+          }
+          controller.enqueue(lineOf("\n        "));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(stream, { status: 200 }))
+      );
+
+      const result = await new OllamaProvider().generate(ollamaParams);
+
+      expect(cancelled).toBe(true);
+      // しきい値（2,000字）を超えたところでやめている。上限まで待っていない
+      expect(pulled).toBeLessThan(1_000);
+      // 書き切った応答ではないので、切り詰めの印を立てる（速さの台帳に採らせない）
+      expect(result.truncated).toBe(true);
+      // 中身は捨てない。救うのは機能の側
+      expect(result.text).toContain('"deviations"');
+    });
   });
 
   /**

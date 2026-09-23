@@ -40,7 +40,8 @@ import { readerStatsPageUrl } from "../core/postingSiteUrls";
 import { HELPER_DOWNLOAD_URL } from "../core/postingEnvelope";
 import { formatReaderStatsMetrics } from "../core/postingSiteRecords";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
-import { logFailure, useLogFile } from "../core/logger";
+import { logFailure, logStep, useLogFile } from "../core/logger";
+import { whenNoticePicked } from "../views/notify";
 import { configurePostingSites } from "./postingKit";
 
 /**
@@ -172,12 +173,21 @@ export async function importReaderStats(
       const buttons = page
         ? [openAdminLabel(page), HELPER_INSTALL_LABEL]
         : [HELPER_INSTALL_LABEL];
-      const answer = await vscode.window.showWarningMessage(
-        parsed.reason,
-        ...buttons
+      /*
+        **ボタンが押されるのを待たずに戻る**（残課題9。`views/notify.ts` の
+        `whenNoticePicked`）。ボタン付きの知らせは、閉じられるまで返事が来ない
+        ——通知センターへ沈んだだけでは来ない。待ったままだと「読者の反応を
+        取り込む」が動いたままになり、押し直すと「いま動いています」の知らせが
+        もう1つ出て、この断りを上へ押しやる（2026-09-23 ノートPCの (d)）
+      */
+      whenNoticePicked(
+        vscode.window.showWarningMessage(parsed.reason, ...buttons),
+        async (answer) => {
+          if (answer === HELPER_INSTALL_LABEL) await openHelperDownload();
+          else if (answer && page) await openAdminPage(page);
+        },
+        { label: "読者の反応の取り込み", workFolder: work.folderPath }
       );
-      if (answer === HELPER_INSTALL_LABEL) await openHelperDownload();
-      else if (answer && page) await openAdminPage(page);
     } else {
       void vscode.window.showWarningMessage(parsed.reason);
     }
@@ -231,7 +241,8 @@ export async function importReaderStats(
 
   if (added === 0) {
     // 何も書かない（保存もしない）。押したのに何も起きない、にならないよう理由を言う
-    void vscode.window.showInformationMessage(
+    announceResult(
+      work,
       say(
         `${info.label} の読者の反応は、すでに取り込んだ数と同じでした（${repeated}件）。` +
           "投稿の記録は変えていません。"
@@ -242,7 +253,8 @@ export async function importReaderStats(
 
   if (!(await save(store, work, next, "読者の反応の取り込み"))) return UNCHANGED;
 
-  void vscode.window.showInformationMessage(
+  announceResult(
+    work,
     say(
       `${info.label} の読者の反応を ${added}件 取り込みました` +
         (sourceLabel ? `（${sourceLabel}から）` : "") +
@@ -389,12 +401,34 @@ export async function importReaderStatsBundle(
   }
 
   const notice = readerStatsBundleNotice({ works: outcomes, failures });
+  // 知らせが画面から外れても読み返せるよう、同じ文を操作ログにも残す
+  // （`announceResult` と同じ理由。束は作品をまたぐので、書き先は保管庫）
+  useLogFile(undefined);
+  logStep(notice.message);
   if (notice.level === "warning") {
     void vscode.window.showWarningMessage(notice.message);
   } else {
     void vscode.window.showInformationMessage(notice.message);
   }
   return { changed: changedWorks.length > 0, changedWorks };
+}
+
+/**
+ * 取り込みの結果を知らせる。**同じ文を操作ログにも残す**（残課題9）。
+ *
+ * 右下の知らせ（トースト）は、ボタンが付いていても時間がたつと通知
+ * センターへ沈み、あとから来た知らせに押されて画面を外れる。拡張機能の
+ * 側から「消えない知らせ」は作れない（モーダルにすると、毎日の取り込みの
+ * たびに手が止まる）。**何件取り込んだかは、あとで確かめたくなる数字**
+ * なので、画面から外れても操作ログで読み返せるようにしておく。
+ *
+ * 知らせそのものは1つだけ出す——取り込みの道で続けて知らせを重ねない。
+ */
+function announceResult(work: WorkEntry, message: string): void {
+  // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+  useLogFile(work.folderPath);
+  logStep(message);
+  void vscode.window.showInformationMessage(message);
 }
 
 function errorMessage(error: unknown): string {

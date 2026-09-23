@@ -11,6 +11,7 @@ import { appendUsageLog } from "../core/usageLog";
 import { contextOverflow, skipsContextGuard } from "./contextGuard";
 import { resolveOutputTokensForSend } from "./outputLimit";
 import { recordFeatureOutputTokens } from "../core/featureOutputTokens";
+import { endsInWhitespaceRunaway } from "../core/truncatedResponse";
 import { logStep } from "../core/logger";
 import { AiQueueAbortError, acquireCall } from "../core/aiSequence";
 import {
@@ -596,6 +597,17 @@ export class MeteredProvider implements AIProvider {
     const feature = params.meta?.feature;
     if (feature === undefined || feature.length === 0) return;
     if (skipsContextGuard(feature)) return;
+    /*
+      **空白だけの行で埋まった回は、量も印も残さない**（残課題8）。
+
+      2026-09-22、さくらのAIの逸脱検知で、応答が空白で出力上限まで埋まった。
+      **上限が足りなかったのではない**——中身は書き終わっていて、そのあと
+      空白を書き続けただけである。ここで「切り詰められた」の印を付けると、
+      以後その機能は見込みを失って設定値の大きな上限で送り続け、空白で
+      埋まる回はかえって長くなる。量として残せば、空白の量を「要った量」と
+      覚える。どちらも測ったことにならない。
+    */
+    if (endsInWhitespaceRunaway(result.text)) return;
 
     const tokens = result.usage?.outputTokens;
     if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens <= 0) {

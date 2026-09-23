@@ -1,4 +1,5 @@
 import { environmentVariable } from "../core/runtime";
+import { endsInWhitespaceRunaway } from "../core/truncatedResponse";
 
 /**
  * Ollamaの応答を**流しながら**受け取る（設計書6.63.1）。
@@ -85,6 +86,16 @@ export interface StreamedChat {
   evalDuration?: number;
   /** 出力の上限で打ち切られたか */
   truncated: boolean;
+  /**
+   * **いま末尾が空白だけの行で埋まっているか**（残課題8）。
+   *
+   * 立ったら、受け取る側（`ollamaProvider.ts` の `streamChat`）はそれ以上
+   * 待たずに打ち切る。実機（さくらのAI、2026-09-22）では空白が出力上限の
+   * 12,288トークンまで続いた。流して受け取る道なら途中で気づける。
+   *
+   * 「いまの末尾」を見るので、空白のあとに中身が続けば下りる。
+   */
+  whitespaceRunaway?: boolean;
   /** Ollamaが返したエラー文（あれば） */
   error?: string;
 }
@@ -118,7 +129,12 @@ export function applyStreamLine(
     return into;
   }
   const chunk = parsed.message?.content;
-  if (typeof chunk === "string") into.content += chunk;
+  if (typeof chunk === "string" && chunk.length > 0) {
+    into.content += chunk;
+    // 数えるのは末尾から最大でしきい値ぶんだけ（`trailingWhitespaceLength`）
+    // なので、断片ごとに見ても重くならない
+    into.whitespaceRunaway = endsInWhitespaceRunaway(into.content);
+  }
   /*
     **思考は本文と混ぜない**（設計書6.63.1）。
 

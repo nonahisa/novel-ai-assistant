@@ -4,6 +4,7 @@ import {
   normalizeType,
   parseDeviationResult,
   referencesPlot,
+  salvageDeviationResult,
   sortDeviations,
   validateDeviations,
   type AcceptedDeviation,
@@ -358,5 +359,133 @@ describe("並べ方", () => {
         (entry) => entry.confidence
       )
     ).toEqual(["high", "medium", "low"]);
+  });
+});
+
+/**
+ * 「該当なし」を**配列の要素で**表してくる（残課題8。2026-09-22、さくらのAI
+ * `preview/gemma-4-31B-it` の第11話）。excerpt・reason・plotReference が
+ * すべて「（該当箇所なし）」、lineStart・lineEnd が 0 の要素だった。
+ *
+ * **指摘にも、検証で除外した件数にも数えない。** 除外に数えると、作者には
+ * 「AIが何か挙げたが根拠が無かった」と読める。実際は「何も無い」と言っただけ。
+ */
+describe("該当なしを表す埋め草の要素", () => {
+  const filler = {
+    lineStart: 0,
+    lineEnd: 0,
+    excerpt: "（該当箇所なし）",
+    type: "逸脱",
+    reason: "（該当箇所なし）",
+    plotReference: "（該当箇所なし）",
+    severity: "low",
+    confidence: "low",
+  };
+
+  test("実機の形は、指摘にも除外にも数えず、埋め草として数える", () => {
+    const result = validateDeviations({ deviations: [filler] }, episode);
+
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected).toHaveLength(0);
+    expect(result.fillers).toBe(1);
+  });
+
+  test.each([
+    "該当なし",
+    "該当箇所なし",
+    "なし",
+    "特になし",
+    "N/A",
+    // **プロンプトに新しく書いた指示語**（「空の配列で返す」）が
+    // そのまま返ってくる前提で押さえる（CLAUDE.md 失敗3）
+    "空の配列",
+    "（空の配列）",
+  ])("引用が「%s」なら埋め草", (excerpt) => {
+    const result = validateDeviations(
+      { deviations: [item({ excerpt })] },
+      episode
+    );
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected).toHaveLength(0);
+    expect(result.fillers).toBe(1);
+  });
+
+  test("行番号が0で、引用が本文に無ければ埋め草", () => {
+    const result = validateDeviations(
+      { deviations: [item({ lineStart: 0, lineEnd: 0, excerpt: "特に無し。" })] },
+      episode
+    );
+    expect(result.fillers).toBe(1);
+    expect(result.rejected).toHaveLength(0);
+  });
+
+  test("行番号が0でも、引用が本文に在るなら行の取り違え（これまでどおり除外に数える）", () => {
+    // 中身のある指摘を黙って消さない。行を間違えただけかもしれないので、
+    // 除外の件数として作者に見えるようにしておく
+    const result = validateDeviations(
+      { deviations: [item({ lineStart: 0 })] },
+      episode
+    );
+    expect(result.fillers).toBe(0);
+    expect(result.rejected[0].reason).toBe("line_out_of_range");
+  });
+
+  test("埋め草と本物が並んでいたら、本物だけを通す", () => {
+    const result = validateDeviations(
+      { deviations: [filler, item()] },
+      episode
+    );
+    expect(result.accepted).toHaveLength(1);
+    expect(result.fillers).toBe(1);
+    expect(result.rejected).toHaveLength(0);
+  });
+
+  test("ふつうの指摘は埋め草に数えない", () => {
+    expect(
+      validateDeviations({ deviations: [item()] }, episode).fillers
+    ).toBe(0);
+  });
+});
+
+/**
+ * 空白だけの行で埋まって切り詰められた応答から、閉じられるところまで読む。
+ */
+describe("空白で埋まった応答を救う", () => {
+  const blank = "\n        ".repeat(3000);
+
+  test("埋め草を閉じたあとで空白に入った応答は、救って0件になる", () => {
+    const text =
+      '{"deviations": [{"lineStart": 0, "lineEnd": 0, "excerpt": "（該当箇所なし）", ' +
+      '"type": "逸脱", "reason": "（該当箇所なし）", "plotReference": "（該当箇所なし）", ' +
+      '"severity": "low", "confidence": "low"}' +
+      blank;
+
+    // ふつうの読み方では読めない（閉じていない）
+    expect(parseDeviationResult(text)).toBeNull();
+
+    const salvaged = salvageDeviationResult(text);
+    expect(salvaged?.deviations).toHaveLength(1);
+    const result = validateDeviations(salvaged, episode);
+    expect(result.accepted).toHaveLength(0);
+    expect(result.fillers).toBe(1);
+  });
+
+  test("本物の指摘を書き終えてから空白に入ったなら、その指摘は残る", () => {
+    const text = '{"deviations": [' + JSON.stringify(item()) + "," + blank;
+
+    const result = validateDeviations(salvageDeviationResult(text), episode);
+    expect(result.accepted).toHaveLength(1);
+  });
+
+  test("空白で埋まっていない応答は救わない（ふつうの切り詰めは失敗のまま）", () => {
+    // 救いは「空白で埋まった」回に限る。ふつうの切り詰めを閉じて読むと、
+    // 途中まで書いた指摘を読めたことにしてしまう
+    const text =
+      '{"deviations": [' + JSON.stringify(item()) + ', {"lineStart": 4';
+    expect(salvageDeviationResult(text)).toBeNull();
+  });
+
+  test("閉じても形にならなければ null", () => {
+    expect(salvageDeviationResult("{" + blank)).toBeNull();
   });
 });

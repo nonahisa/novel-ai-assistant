@@ -702,6 +702,8 @@ export class OllamaProvider implements AIProvider {
       const decoder = new TextDecoder();
       const state = emptyStreamedChat();
       let buffer = "";
+      /** 空白が続いたので、こちらから受け取りをやめたか */
+      let whitespaceStopped = false;
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -718,6 +720,24 @@ export class OllamaProvider implements AIProvider {
           if (onThinking && after.length > before.length) {
             onThinking(after.slice(before.length));
           }
+        }
+        /*
+          **空白だけの行が続いたら、それ以上待たない**（残課題8）。
+
+          実機（さくらのAI、2026-09-22）では、中身を書き終えたあと空白が
+          出力上限まで続いた。上限まで待っても空白が増えるだけなので、
+          ここで受け取りをやめる（Ollama 側も接続が切れて生成を止める）。
+          そこまでで閉じられるJSONがあれば、機能の側が救う
+          （`deviationValidation.ts` の `salvageDeviationResult`）。
+
+          **切り詰めの印も立てる。** 「書き切った」応答ではないので、速さの
+          台帳に採らせない（`meteredProvider.ts` は切られた回を採らない）。
+        */
+        if (state.whitespaceRunaway) {
+          whitespaceStopped = true;
+          state.truncated = true;
+          await reader.cancel().catch(() => undefined);
+          break;
         }
       }
       /*
@@ -737,7 +757,10 @@ export class OllamaProvider implements AIProvider {
 
       logLine(
         `Ollama：流して受信（${Math.round((Date.now() - started) / 1000)}秒 / ` +
-          `${state.content.length}字 / 出力 ${state.evalCount ?? "不明"}トークン）`
+          `${state.content.length}字 / 出力 ${state.evalCount ?? "不明"}トークン）` +
+          (whitespaceStopped
+            ? "。空白だけの行が続いたので、そこで受け取りをやめました"
+            : "")
       );
 
       return {

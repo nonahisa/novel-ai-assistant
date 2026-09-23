@@ -1,4 +1,9 @@
 import { normalizeForComparison } from "./groundedEvidence";
+import { isPlaceholderText } from "./placeholderText";
+import {
+  closeTruncatedJson,
+  endsInWhitespaceRunaway,
+} from "./truncatedResponse";
 import {
   deviationBudget,
   DEVIATION_TYPES,
@@ -255,7 +260,36 @@ export function parseDeviationResult(
     extractBraces(text),
   ];
 
-  for (const candidate of attempts) {
+  return firstDeviationList(attempts);
+}
+
+/**
+ * **空白だけの行で埋まった応答**から、閉じられるところまでを読む（残課題8）。
+ *
+ * 実機（2026-09-22、さくらのAI `preview/gemma-4-31B-it` の第11話）では、
+ * 「該当なし」の要素を1件書いたあと空白が出力上限まで続き、閉じ括弧が
+ * 来ないまま切られた。中身はそこで書き終わっているので、閉じれば読める。
+ *
+ * **空白で埋まった回に限る。** ふつうの切り詰め（指摘を書いている途中で
+ * 上限に届いた）を閉じて読むと、書きかけの指摘を「読めた」ことにして
+ * しまう。そちらはこれまでどおり失敗として数える。
+ *
+ * 読めなければ `null`（呼ぶ側は失敗として記録する）。
+ */
+export function salvageDeviationResult(
+  text: string
+): { deviations: unknown[] } | null {
+  if (!endsInWhitespaceRunaway(text)) return null;
+  // 空白を先に落とす。文字列の途中で空白に入った場合も、空白ごと
+  // 値に含めて閉じるより、書かれた字だけで閉じたほうが検算で判断できる
+  return firstDeviationList(closeTruncatedJson(text.trimEnd()));
+}
+
+/** 候補を順に読み、`deviations` の配列を持つ最初のものを返す */
+function firstDeviationList(
+  candidates: readonly (string | null)[]
+): { deviations: unknown[] } | null {
+  for (const candidate of candidates) {
     if (!candidate) continue;
     try {
       const parsed: unknown = JSON.parse(candidate.trim());
@@ -269,12 +303,54 @@ export function parseDeviationResult(
   return null;
 }
 
+/**
+ * 「該当なし」を表すために置かれた要素か（残課題8）。
+ *
+ * AIは「指摘が0件」を、空の配列ではなく**中身の無い要素1件**で表すことが
+ * ある。実機では excerpt・reason・plotReference がすべて「（該当箇所なし）」、
+ * lineStart・lineEnd が 0 だった。プロンプト（P-11 v1.2）で空の配列を
+ * 求めたが、**指示の言葉がそのまま返ってくる**ので（CLAUDE.md 失敗3）、
+ * こちらでも見分ける。
+ *
+ * 見分けるのは2通り。
+ *
+ * - **引用が「中身が無い」という言葉**（`placeholderText.ts`）。引用は本文の
+ *   一部を写すもので、一文まるごとが「なし」になることはないので、
+ *   「なし」まで含めて見る（推敲と同じ広さ）
+ * - **行番号が0以下で、引用が本文に無い**。行番号が0の要素でも、引用が
+ *   本文に在るなら中身のある指摘で行を取り違えただけかもしれない。
+ *   そちらは黙って消さず、これまでどおり除外として数える
+ */
+function isFillerDeviation(
+  item: Record<string, unknown>,
+  normalizedText: string
+): boolean {
+  const excerpt = asString(item.excerpt);
+  if (excerpt && isPlaceholderText(excerpt, true)) return true;
+  const lineStart = item.lineStart;
+  if (typeof lineStart !== "number" || lineStart > 0) return false;
+  if (!excerpt) return true;
+  return !normalizedText.includes(normalizeForComparison(excerpt));
+}
+
 export function validateDeviations(
   raw: unknown,
   episode: { text: string; plot: string }
-): { accepted: AcceptedDeviation[]; rejected: RejectedDeviation[] } {
+): {
+  accepted: AcceptedDeviation[];
+  rejected: RejectedDeviation[];
+  /**
+   * 「該当なし」を表すために置かれた要素の数（`isFillerDeviation`）。
+   *
+   * **指摘にも、除外（`rejected`）にも数えない。** 除外に数えると、作者には
+   * 「AIが何か挙げたが根拠が無かった」と読める。実際は「何も無い」と
+   * 言っただけである。
+   */
+  fillers: number;
+} {
   const accepted: AcceptedDeviation[] = [];
   const rejected: RejectedDeviation[] = [];
+  let fillers = 0;
 
   const list =
     isRecord(raw) && Array.isArray(raw.deviations) ? raw.deviations : [];
@@ -285,6 +361,12 @@ export function validateDeviations(
   for (const item of list) {
     if (!isRecord(item)) {
       rejected.push({ raw: item, reason: "shape" });
+      continue;
+    }
+    // **形を見るより先に見る。** 埋め草は理由も空のことがあり、
+    // 先に形で落とすと除外の件数に入ってしまう
+    if (isFillerDeviation(item, normalizedText)) {
+      fillers += 1;
       continue;
     }
 
@@ -359,7 +441,7 @@ export function validateDeviations(
     rejected.push({ raw: extra, reason: "over_budget" });
   }
 
-  return { accepted, rejected };
+  return { accepted, rejected, fillers };
 }
 
 /** 確信度の高いものを上に。切るときに迷っているものだけが残らないように */

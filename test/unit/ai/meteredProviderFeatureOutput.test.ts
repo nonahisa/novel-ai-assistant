@@ -106,6 +106,24 @@ describe("普段の呼び出しから、機能ごとの出力トークン数を�
     expect(entryOf("blurb").outputTruncated).toBe(true);
   });
 
+  test("空白だけの行で埋まって切られた回は、量も印も残さない（残課題8）", async () => {
+    // 2026-09-22、さくらのAI `preview/gemma-4-31B-it` の逸脱検知で、応答が
+    // 空白で出力上限まで埋まった。**上限が足りなかったのではない**ので、
+    // 「上限以上に要る」の印を付けると、以後その機能は見込みを失い、
+    // 設定値の大きな上限で送り続ける（空白で埋まる回がさらに長くなる）
+    const metered = new MeteredProvider(
+      fakeProvider(() => ({
+        ...reply(12_288, true),
+        text: '{"deviations": [{"lineStart": 0}' + "\n        ".repeat(3000),
+      }))
+    );
+
+    await metered.generate(params("deviation_check"));
+
+    expect(entryOf("deviation_check").outputTruncated).toBeUndefined();
+    expect(entryOf("deviation_check").outputTokens).toBeUndefined();
+  });
+
   test("読める長さの測定からは採らない（わざと上限を試す呼び出し）", async () => {
     const metered = new MeteredProvider(fakeProvider(() => reply(9_100)));
 

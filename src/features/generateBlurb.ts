@@ -8,6 +8,11 @@ import {
   truncatedOutputAdvice,
 } from "../ai/outputLimit";
 import { confirmProviderReachable } from "./aiConnectivity";
+import {
+  WHITESPACE_RUNAWAY_ADVICE,
+  endsInWhitespaceRunaway,
+  truncationReasonForLog,
+} from "../core/truncatedResponse";
 
 import { scanWork } from "../core/scanner";
 import { loadEpisodeBodies } from "../core/episodeBodies";
@@ -206,18 +211,22 @@ export async function generateWorkBlurb(
     // 同じ文言）。「読み取れませんでした」だけだと、作者からは上限が足りない
     // のかAIの気まぐれなのか区別が付かない
     const truncated = response.truncated === true;
+    // **空白だけの行で埋まった回は、上限の不足と分ける**（残課題8。
+    // 2026-09-19、さくらのAI `preview/Qwen3.6-35B-A3B` で実際に起きた）。
+    // 上限を大きくしても空白が長くなるだけなので、上限の案内は嘘になる
+    const runaway = endsInWhitespaceRunaway(response.text);
     logFailure("作品紹介文の生成", {
-      理由: truncated
-        ? "応答が出力上限で切り詰められました"
-        : "応答を読み取れません",
-      応答: responseExcerptForLog(response.text),
+      理由: truncationReasonForLog(response) ?? "応答を読み取れません",
+      応答: responseExcerptForLog(response.text.trimEnd()),
     });
     void warnWithLog(
       // **文言を自前で書かない**（0.33.9）。上限が実測から来ているときに
       // 「設定を大きくして」と言うのは嘘で、作者は直らない操作を繰り返す
-      truncated
-        ? truncatedOutputAdvice(outputLimit)
-        : "応答を読み取れませんでした。"
+      runaway
+        ? WHITESPACE_RUNAWAY_ADVICE
+        : truncated
+          ? truncatedOutputAdvice(outputLimit)
+          : "応答を読み取れませんでした。"
     );
     return;
   }
@@ -371,18 +380,20 @@ export async function generateCatchphrases(
         AIの気まぐれなのか区別が付かず、同じ操作を繰り返すことになる。
       */
       const truncated = response.truncated === true;
+      // 空白で埋まった回は上限の不足と分ける（紹介文と同じ扱い。残課題8）
+      const runaway = endsInWhitespaceRunaway(response.text);
       logFailure("キャッチコピーの生成", {
-        理由: truncated
-          ? "応答が出力上限で切り詰められました"
-          : "使える案がありません",
-        応答: responseExcerptForLog(response.text),
+        理由: truncationReasonForLog(response) ?? "使える案がありません",
+        応答: responseExcerptForLog(response.text.trimEnd()),
       });
       const retry = await vscode.window.showWarningMessage(
-        truncated
-          ? truncatedOutputAdvice(outputLimit)
-          : leaked.length > 0
-            ? "使える案が返りませんでした（読者層の呼び名がそのまま入った案は落としました）。"
-            : `${CATCHPHRASE_MAX_CHARS}字以内の案が返りませんでした。`,
+        runaway
+          ? WHITESPACE_RUNAWAY_ADVICE
+          : truncated
+            ? truncatedOutputAdvice(outputLimit)
+            : leaked.length > 0
+              ? "使える案が返りませんでした（読者層の呼び名がそのまま入った案は落としました）。"
+              : `${CATCHPHRASE_MAX_CHARS}字以内の案が返りませんでした。`,
         "もう一度",
         "やめる"
       );

@@ -9,6 +9,8 @@ import {
   parseWriterStyleSignals,
   type WriterStyleSignals,
 } from "../core/writerStyle";
+// 途中で切れたJSONを閉じる部品。プロット逸脱検知でも使うので core へ移した
+import { closeTruncatedJson } from "../core/truncatedResponse";
 
 /**
  * P-21 いま開いている画面について相談する（相談パネル）
@@ -698,122 +700,6 @@ function looksLikeJson(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed.startsWith("{")) return false;
   return trimmed.includes('"reply"') || trimmed.includes('"needFiles"');
-}
-
-/** 「ここまでなら値が完結している」位置と、そのときに開いていた括弧 */
-interface SafePoint {
-  end: number;
-  stack: string[];
-}
-
-/**
- * 途中で切れたJSONを、閉じて読める形にした候補を作る（新しい順に2つまで）。
- *
- * **候補を2つ返すのは、切れ方が2通りあるからである。**
- * ①いまの位置のまま閉じる……切れた文字列の中身まで残る。**途中で切れた
- * `reply` こそ作者が読みたいもの**なので、こちらを先に試す。
- * ②値が完結しているところまで切り戻して閉じる……数値や `true` の途中で
- * 切れていて①が読めないときの受け皿。
- *
- * 救えないと分かったら**空を返す**（呼ぶ側は生の本文の扱いへ落ちる）。
- * ここで無理に形を作ると、中身の違うJSONを「読めた」ことにしてしまう。
- */
-function closeTruncatedJson(text: string): string[] {
-  const start = text.indexOf("{");
-  if (start === -1) return [];
-  let body = text.slice(start);
-  // 後ろにコードフェンスが残っていたら落とす（前は `{` から取っている）
-  const fence = body.indexOf("```");
-  if (fence !== -1) body = body.slice(0, fence);
-
-  const stack: string[] = [];
-  let inString = false;
-  let escaped = false;
-  let safe: SafePoint | undefined;
-  /** いま読んでいる文字列が始まる直前の安全点（鍵だったときに戻す先） */
-  let beforeString: SafePoint | undefined;
-
-  for (let i = 0; i < body.length; i++) {
-    const ch = body[i];
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (ch === '"') {
-        inString = false;
-        safe = { end: i + 1, stack: [...stack] };
-      }
-      continue;
-    }
-    if (ch === '"') {
-      beforeString = safe;
-      inString = true;
-      continue;
-    }
-    if (ch === "{" || ch === "[") {
-      stack.push(ch);
-      continue;
-    }
-    if (ch === "}" || ch === "]") {
-      // 閉じすぎている＝そもそも形が読めない。作り直さない
-      if (stack.length === 0) return [];
-      stack.pop();
-      safe = { end: i + 1, stack: [...stack] };
-      continue;
-    }
-    // 鍵の直後のコロン。**直前の文字列は値ではなく鍵だった**ので、安全点を
-    // その文字列の前まで戻す（`{"reply"` で切り戻しても読めない）
-    if (ch === ":") safe = beforeString;
-  }
-
-  // 閉じているなら、上の3通りで読めなかった理由はここには無い
-  if (stack.length === 0 && !inString) return [];
-
-  const candidates: string[] = [];
-  const head = inString
-    ? `${dropDanglingEscape(body)}"`
-    : // 末尾の中途半端な区切り（`,` や空白）は落としてから閉じる
-      body.replace(/[\s,]+$/, "");
-  candidates.push(head + closingFor(stack));
-  if (safe && safe.end > 0) {
-    candidates.push(body.slice(0, safe.end) + closingFor(safe.stack));
-  }
-  return candidates;
-}
-
-/** 開いたままの括弧を、逆順に閉じる文字列 */
-function closingFor(stack: string[]): string {
-  return [...stack]
-    .reverse()
-    .map((open) => (open === "{" ? "}" : "]"))
-    .join("");
-}
-
-/**
- * 文字列がエスケープの途中で切れていたら、その頭を落とす。
- *
- * 落とさずに `"` を足すと `"…\"` となって**閉じたことにならない**。
- */
-function dropDanglingEscape(text: string): string {
-  // 末尾の連続した逆斜線を数える。奇数なら最後の1本がエスケープの頭
-  let slashes = 0;
-  for (let i = text.length - 1; i >= 0 && text[i] === "\\"; i--) slashes++;
-  if (slashes % 2 === 1) return text.slice(0, -1);
-  // `\u00` のようにUnicodeエスケープの途中で切れた形
-  const unicode = text.match(/\\u[0-9a-fA-F]{0,3}$/);
-  if (unicode) {
-    const at = text.length - unicode[0].length;
-    // その逆斜線自身がエスケープされているなら（`\\u12`）、ただの文字
-    let back = 0;
-    for (let i = at - 1; i >= 0 && text[i] === "\\"; i--) back++;
-    if (back % 2 === 0) return text.slice(0, at);
-  }
-  return text;
 }
 
 /**

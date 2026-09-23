@@ -186,3 +186,41 @@ describe("流し受信の入切の優先順（0.42.0）", () => {
     expect(streamingEnabled()).toBe(false);
   });
 });
+
+/**
+ * **空白だけの行が続いたら、それ以上待たない**（残課題8）。
+ *
+ * 実機（さくらのAI、2026-09-22）では空白が出力上限まで 12,288 トークン
+ * 続いた。流して受け取る道なら途中で気づけるので、そこで打ち切る。
+ */
+describe("空白で埋まっていく応答", () => {
+  function line(content: string): string {
+    return JSON.stringify({ message: { content }, done: false });
+  }
+
+  it("空白が一定量続いたら、打ち切りの印を立てる", () => {
+    const state = emptyStreamedChat();
+    applyStreamLine(state, line('{"deviations": [{"lineStart": 0}'));
+    expect(state.whitespaceRunaway).toBeFalsy();
+    for (let i = 0; i < 400; i++) applyStreamLine(state, line("\n        "));
+    expect(state.whitespaceRunaway).toBe(true);
+  });
+
+  it("字下げ付きのふつうの応答では立てない", () => {
+    const state = emptyStreamedChat();
+    for (let i = 0; i < 400; i++) {
+      applyStreamLine(state, line('\n        {"lineStart": ' + i + "},"));
+    }
+    expect(state.whitespaceRunaway).toBeFalsy();
+  });
+
+  it("空白のあとに中身が続いたら、印は下ろす", () => {
+    // 印は「いま末尾が空白で埋まっているか」。途中の空白の山で
+    // 立ったままにすると、まっとうに書き終えた応答まで打ち切り扱いになる
+    const state = emptyStreamedChat();
+    applyStreamLine(state, line("{" + " ".repeat(5000)));
+    expect(state.whitespaceRunaway).toBe(true);
+    applyStreamLine(state, line('"deviations": []}'));
+    expect(state.whitespaceRunaway).toBe(false);
+  });
+});

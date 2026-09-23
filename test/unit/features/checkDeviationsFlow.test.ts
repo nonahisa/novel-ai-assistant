@@ -34,6 +34,10 @@ const state = vi.hoisted(() => ({
   sent: [] as string[],
   /** AIの応答（JSON文字列） */
   response: "",
+  /** 応答が出力上限で切られたか */
+  truncated: false,
+  /** キャッシュへ書いた回数（救った応答を覚えないことを見る） */
+  cacheSets: 0,
   /** AIを呼んだ回数 */
   calls: 0,
   logged: [] as string[],
@@ -63,7 +67,11 @@ vi.mock("../../../src/ai/registry", () => ({
         async generate(request: { userPrompt: string }) {
           state.calls += 1;
           state.sent.push(request.userPrompt);
-          return { text: state.response, truncated: false, elapsedMs: 1 };
+          return {
+            text: state.response,
+            truncated: state.truncated,
+            elapsedMs: 1,
+          };
         },
       },
       model: "test-model",
@@ -110,7 +118,9 @@ vi.mock("../../../src/core/chunkCache", () => ({
     get() {
       return undefined;
     }
-    async set() {}
+    async set() {
+      state.cacheSets += 1;
+    }
     async save() {}
   },
 }));
@@ -222,6 +232,8 @@ beforeEach(() => {
   state.episodes = [...EPISODES];
   state.sources = { ...SOURCES };
   state.response = JSON.stringify({ deviations: [] });
+  state.truncated = false;
+  state.cacheSets = 0;
 
   // 実行の確認は画面上部の選択窓で出る（A4、2026-09-23）。「実行」を選ぶ
   confirmPicker?.restore();
@@ -336,5 +348,57 @@ describe("端から端まで", () => {
     expect(result).toBeUndefined();
     expect(state.calls).toBe(0);
     expect(window.showWarningMessage).toHaveBeenCalled();
+  });
+});
+
+/**
+ * 空白だけの行で出力上限まで埋まった応答（残課題8。2026-09-22、さくらのAI
+ * `preview/gemma-4-31B-it` の第11話）。
+ */
+describe("空白で埋まった応答", () => {
+  const blank = "\n        ".repeat(3000);
+  const filler =
+    '{"deviations": [{"lineStart": 0, "lineEnd": 0, "excerpt": "（該当箇所なし）", ' +
+    '"type": "逸脱", "reason": "（該当箇所なし）", "plotReference": "（該当箇所なし）", ' +
+    '"severity": "low", "confidence": "low"}';
+
+  test("埋め草のあと空白で切られた話は、失敗にも除外にも数えず0件で読む", async () => {
+    state.response = filler + blank;
+    state.truncated = true;
+
+    const result = await checkDeviations(work, registry());
+
+    expect(result?.failedChunks).toBe(0);
+    expect(result?.issues).toHaveLength(0);
+    // 埋め草は「AIが挙げて、根拠が無かった指摘」ではない
+    expect(result?.rejectedCount).toBe(0);
+    // **救った結果はキャッシュに覚えない。** 閉じ括弧はこちらが補ったもので、
+    // AIが言い切った答えではない。次の実行で送り直させる
+    expect(state.cacheSets).toBe(0);
+    // 何が起きたかは記録に残す（上限の不足と分けて書く）
+    expect(state.logged.join("\n")).toContain("空白");
+  });
+
+  test("閉じても読めなければ失敗に数え、空白で埋まったと記録する", async () => {
+    state.response = "{" + blank;
+    state.truncated = true;
+
+    const result = await checkDeviations(work, registry());
+
+    expect(result?.failedChunks).toBe(EPISODES.length);
+    const log = state.logged.join("\n");
+    expect(log).toContain("空白");
+    // 「上限を大きくすれば直る」と読める文言だけにしない
+    expect(log).not.toContain("理由: 応答が出力上限で切り詰められました\n");
+  });
+
+  test("埋め草だけの閉じた応答は、除外の件数に数えない", async () => {
+    state.response = filler + "]}";
+
+    const result = await checkDeviations(work, registry());
+
+    expect(result?.issues).toHaveLength(0);
+    expect(result?.rejectedCount).toBe(0);
+    expect(result?.failedChunks).toBe(0);
   });
 });

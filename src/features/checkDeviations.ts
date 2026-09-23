@@ -28,6 +28,7 @@ import {
   trimPlotForDeviation,
 } from "../core/plotForDeviation";
 import { readPlotText } from "../core/plotFile";
+import { truncationReasonForLog } from "../core/truncatedResponse";
 import { parsePlotMarkdown, writtenPlotSections } from "../core/plotDoc";
 import {
   collectedChapterLabel,
@@ -47,6 +48,7 @@ import {
 } from "../prompts/deviationCheck";
 import {
   parseDeviationResult,
+  salvageDeviationResult,
   sortDeviations,
   validateDeviations,
   type AcceptedDeviation,
@@ -450,22 +452,43 @@ export async function checkDeviations(
           });
 
           const parsed = parseDeviationResult(response.text);
-          if (!parsed) {
-            failedChunks++;
-            // **切り詰めと「変な形で返った」を分ける**（設計書6.77の第2段）。
-            // 一緒くたにすると、上限が足りないのかAIの気まぐれなのかが
-            // 記録から分からず、直しようがない
-            logFailure("プロット逸脱検知", {
-              話: episode.label,
-              理由: response.truncated
-                ? "応答が出力上限で切り詰められました"
-                : "応答を読み取れません",
-              応答: responseExcerptForLog(response.text),
-            });
-            return undefined;
+          if (parsed) {
+            await cache.set(episode.hash, cacheKeyBase, parsed);
+            return parsed;
           }
-          await cache.set(episode.hash, cacheKeyBase, parsed);
-          return parsed;
+
+          /*
+            **空白だけの行で埋まった応答は、閉じられるところまで読む**
+            （残課題8。2026-09-22、さくらのAI `preview/gemma-4-31B-it` の第11話）。
+            中身を書き終えたあと空白を出力上限まで書き続けた形で、閉じれば読める。
+
+            **救った結果はキャッシュに覚えない。** 閉じ括弧はこちらが補った
+            もので、AIが言い切った答えではない。次の実行で送り直させる
+            （失敗から学習しない、と同じ向き。CLAUDE.md 規則5）
+          */
+          const salvaged = salvageDeviationResult(response.text);
+          // **切り詰め・空白で埋まった・変な形で返った、を分ける**（設計書6.77の
+          // 第2段）。一緒くたにすると、上限が足りないのかAIの気まぐれなのかが
+          // 記録から分からず、直しようがない。空白で埋まったのは上限の不足
+          // ではない（上げても空白が長くなるだけ）
+          const reason =
+            truncationReasonForLog(response) ?? "応答を読み取れません";
+          if (salvaged) {
+            logStep(
+              `プロット逸脱検知（${episode.label}）：${reason}。` +
+                "閉じられるところまでで読みました（この話の結果は覚えず、次の実行で送り直します）。"
+            );
+            return salvaged;
+          }
+          failedChunks++;
+          logFailure("プロット逸脱検知", {
+            話: episode.label,
+            理由: reason,
+            // 末尾の空白は落として残す。空白で埋まった回は、そのままだと
+            // 抜粋の残りが空白で潰れ、中身のあとに何が起きたか読めない
+            応答: responseExcerptForLog(response.text.trimEnd()),
+          });
+          return undefined;
         } catch (error) {
           if (error instanceof AIError && error.kind === "aborted") {
             return undefined;

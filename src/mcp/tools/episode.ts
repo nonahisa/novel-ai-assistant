@@ -22,6 +22,7 @@ import {
 } from "../../prompts/deviationCheck";
 import {
   parseDeviationResult,
+  salvageDeviationResult,
   validateDeviations,
 } from "../../core/deviationValidation";
 import {
@@ -334,7 +335,11 @@ export function deviationValidate(input: {
     これは「何も指摘しない実装が満点になる」形そのものである
     （CLAUDE.md の「繰り返し起きた失敗」2番）。
   */
-  const parsed = parseDeviationResult(input.response);
+  // 空白だけの行で埋まった応答は、閉じられるところまで読む（製品と同じ。
+  // 外から測るときに製品と違う読み方をすると、製品に無い失敗を数える）
+  const parsed =
+    parseDeviationResult(input.response) ??
+    salvageDeviationResult(input.response);
   if (!parsed) {
     throw new McpToolError(
       "応答を読み取れませんでした（プロット逸脱のスキーマに沿っていません。JSONの形か、項目が合っていません）。"

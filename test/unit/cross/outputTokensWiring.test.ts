@@ -373,8 +373,12 @@ describe("切り詰めを、切り詰めとして伝える", () => {
   ])("%s は response.truncated を見て理由を分ける", (file) => {
     const source = read(file);
 
+    // `truncationReasonForLog`（`core/truncatedResponse.ts`。0.83.12）は、
+    // 切り詰めと「空白だけの行で埋まった」を分けて理由を返す共通の口。
+    // これを通していれば、切り詰めを見ていることになる
     expect(
-      source.includes(".truncated"),
+      source.includes(".truncated") ||
+        source.includes("truncationReasonForLog("),
       `${file} が切り詰めを見ていない`
     ).toBe(true);
     expect(
