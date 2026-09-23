@@ -63,7 +63,42 @@ export function newFolderHomeCandidates(input: NewFolderHomeInput): string[] {
   }
 
   ordered.push(...(input.workspaceFolders ?? []));
+  return usableCandidates(ordered, input.works);
+}
 
+/**
+ * 「フォルダから追加」——**既にある作品フォルダーを選ぶ**窓の既定の場所を、
+ * 良い順に並べて返す（2026-09-23、ノートPCの実機確認）。
+ *
+ * 窓が**選択中の作品の `設定` フォルダーの中**から開いた。`defaultUri` を
+ * 渡しておらず、VS Code が「最後に使った場所」を出していた。
+ *
+ * **新しい置き場を作るとき（上の `newFolderHomeCandidates`）とは既定が違う。**
+ * あちらは何かを作るので、書庫の中（リポジトリの入れ子）を避けて親を出す。
+ * こちらは既にある作品を選ぶだけなので、**作品が並んでいる階層＝書庫
+ * そのもの**から始めるのがいちばん近い。書庫が無ければ、いま開いている
+ * フォルダーの先頭へ落ちる。作品の中と、ドライブの直下は既定にしない。
+ */
+export function existingWorkFolderHomeCandidates(
+  input: NewFolderHomeInput
+): string[] {
+  const ordered: string[] = [];
+  for (const library of findLibraries(input.works)) {
+    // 作品フォルダーの1つ上が根そのもの（`C:\作品`）なら、根は出さない
+    if (!isDriveRoot(library.folderPath)) ordered.push(library.folderPath);
+  }
+  ordered.push(...(input.workspaceFolders ?? []));
+  return usableCandidates(ordered, input.works);
+}
+
+/**
+ * 候補から、重なりと作品の中を除く（並びは保つ）。
+ * 2つの既定で同じ除き方をするために1つにしてある。
+ */
+function usableCandidates(
+  ordered: readonly string[],
+  works: readonly WorkLocation[]
+): string[] {
   const seen = new Set<string>();
   const usable: string[] = [];
   for (const candidate of ordered) {
@@ -71,10 +106,16 @@ export function newFolderHomeCandidates(input: NewFolderHomeInput): string[] {
     const key = path.normalizeForComparison(candidate);
     if (seen.has(key)) continue;
     seen.add(key);
-    if (isInsideAnyWork(candidate, input.works)) continue;
+    if (isInsideAnyWork(candidate, works)) continue;
     usable.push(candidate);
   }
   return usable;
+}
+
+/** 根（`C:\` や `/`）そのものか */
+function isDriveRoot(location: string): boolean {
+  const here = path.normalize(location);
+  return path.dirname(here) === here;
 }
 
 /**

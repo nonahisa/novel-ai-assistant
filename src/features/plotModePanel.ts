@@ -60,6 +60,7 @@ import { ensurePlotFile } from "./startWork";
 import { createEpisodePlot } from "./resumeWriting";
 import type { EpisodePlotCheckRef } from "./checkEpisodePlot";
 import { syncPlotCharacters } from "./plotCharacterSync";
+import { EpisodePlotFolderWatcher } from "./episodePlotWatch";
 import {
   renameEpisodePlotFile,
   renumberEpisodePlotHeadings,
@@ -194,6 +195,22 @@ class PlotModePanel {
   private episodesLoaded = false;
   /** 回収予定を過ぎても未回収の伏線の数（設計書6.35）。一覧の上に出す */
   private overdueCount = 0;
+  /**
+   * 単話プロットの置き場の見張り（2026-09-23）。**外から**書き換えた単話
+   * プロット（別のエディタ・同期・Git の復元）でも一覧を作り直す。
+   * VS Code での保存は `refreshPlotMode` が拾うので、二重に走っても
+   * 読み直しが1回増えるだけで害は無い
+   */
+  private readonly plotWatcher = new EpisodePlotFolderWatcher(() => {
+    // 作者が何も押していないのに出る失敗なので、通知は出さずに記録だけ残す
+    void this.reload().catch((error: unknown) => {
+      useLogFile(this.work.folderPath);
+      logFailure("プロットモード", {
+        作品: this.work.title,
+        内容: `単話プロットの外からの変更で読み直せませんでした：${messageOf(error)}`,
+      });
+    });
+  });
 
   constructor(
     context: vscode.ExtensionContext,
@@ -211,7 +228,10 @@ class PlotModePanel {
       { enableScripts: true, retainContextWhenHidden: true }
     );
     context.subscriptions.push(this.panel);
-    this.panel.onDidDispose(() => openPanels.delete(work.id));
+    this.panel.onDidDispose(() => {
+      openPanels.delete(work.id);
+      this.plotWatcher.dispose();
+    });
 
     this.panel.webview.html = buildPlotModePanelHtml(
       createNonce(),
@@ -740,6 +760,8 @@ class PlotModePanel {
     const settings = workPaths(this.work, config).settings;
     this.settingsDir = settings;
     this.episodePlotsDir = paths.join(settings, EPISODE_PLOTS_DIR);
+    // 置き場は作品の設定で変わりうるので、読むたびに合わせる（同じなら張り直さない）
+    this.plotWatcher.watch(this.episodePlotsDir);
 
     this.rows = await this.buildRows(format);
     this.post(text);

@@ -3,7 +3,10 @@ import { fromUri, toUri } from "../core/paths";
 import { canRunProcesses } from "../core/runtime";
 import { pathExists } from "../core/fileSystem";
 import type { WorkLocation } from "../core/libraryHome";
-import { newFolderHomeCandidates } from "../core/newFolderHome";
+import {
+  existingWorkFolderHomeCandidates,
+  newFolderHomeCandidates,
+} from "../core/newFolderHome";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 
 /**
@@ -103,13 +106,46 @@ export async function pickNewFolderParent(options: {
 export async function defaultParentForNewFolder(
   works: readonly WorkLocation[]
 ): Promise<string | undefined> {
-  const workspaceFolders = (vscode.workspace.workspaceFolders ?? []).map(
-    (folder) => fromUri(folder.uri)
+  return firstExisting(
+    newFolderHomeCandidates({ works, workspaceFolders: workspaceFolderPaths() })
   );
-  for (const candidate of newFolderHomeCandidates({
-    works,
-    workspaceFolders,
-  })) {
+}
+
+/**
+ * 「フォルダから追加」——既にある作品フォルダーを選ぶ（2026-09-23）。
+ *
+ * **窓は書庫（作品が並んでいる階層）から開く。** 渡さないと VS Code は
+ * 「最後に使った場所」を出し、ノートPCの実機では**選択中の作品の `設定`
+ * フォルダーの中**から開いた。どこを開くかの判断は `core/newFolderHome.ts`
+ * の `existingWorkFolderHomeCandidates`。
+ */
+export async function pickExistingWorkFolder(options: {
+  /** 登録済みの作品。**この中は既定にしない** */
+  readonly works: readonly WorkLocation[];
+}): Promise<string | undefined> {
+  const defaultPath = canRunProcesses()
+    ? await firstExisting(
+        existingWorkFolderHomeCandidates({
+          works: options.works,
+          workspaceFolders: workspaceFolderPaths(),
+        })
+      )
+    : // ブラウザ版は窓を出さず、開いているフォルダーから選ばせる（既定は要らない）
+      undefined;
+  return pickFolder("作品フォルダを選択", "この作品フォルダを登録", defaultPath);
+}
+
+function workspaceFolderPaths(): string[] {
+  return (vscode.workspace.workspaceFolders ?? []).map((folder) =>
+    fromUri(folder.uri)
+  );
+}
+
+/** 候補のうち、実在する最初の1つ。無ければ `undefined`（VS Codeに任せる） */
+async function firstExisting(
+  candidates: readonly string[]
+): Promise<string | undefined> {
+  for (const candidate of candidates) {
     // **確かめられなくても窓は開く。** 既定はあくまで親切であって、
     // 外したドライブや権限のないフォルダーのせいで
     // 「フォルダーを選べない」になってはいけない

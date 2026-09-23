@@ -2604,10 +2604,26 @@ export class ManuscriptEditorProvider
     from?: vscode.TextDocument
   ): Promise<void> {
     if (from) this.carryAppearance(from, filePath);
+    /*
+      **移ってきた原稿エディタの列に開く**（2026-09-23、ノートPCの実機確認）。
+
+      列を渡さないと、VS Code は「いま前面の列」へ開く。［単話プロット］を
+      押すと単話プロットが右の列に開いて前面になるので、その直後に
+      ［次の話 →］を押すと、次の話が右の列へ入り、左は元の話のまま・
+      単話プロットは隠れた。押したのは左の原稿エディタなので、前面が
+      どこであれ、その画面が居る列を使う。
+
+      `from` が無い（変換で元の面が閉じた）ときや、列を読めないときは
+      これまでどおり VS Code に任せる。
+    */
+    const column = from
+      ? openManuscripts.get(manuscriptLedgerKey(from.uri))?.panel.viewColumn
+      : undefined;
     await vscode.commands.executeCommand(
       "vscode.openWith",
       paths.toUri(filePath),
-      this.viewType
+      this.viewType,
+      column
     );
   }
 

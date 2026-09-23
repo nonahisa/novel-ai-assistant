@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { pickFolder } from "./features/pickFolder";
+import { pickExistingWorkFolder } from "./features/pickFolder";
 import { fromUri, storageRootFrom } from "./core/paths";
 import * as path from "./core/paths";
 import { describeSyncTarget } from "./core/syncTarget";
@@ -2716,9 +2716,11 @@ export async function activate(
       // （`npm run test:web`）は画面を押せないので、選択画面と入力画面を
       // 飛ばす道が要る。作者が押したときは引数が無く、これまで通り画面が出る
       const given = parseAddWorkArgument(argument);
+      // 窓は書庫から開く（作品の `設定` の中など、最後に使った場所から
+      // 始めない。2026-09-23 の実機確認）
       const folderPath =
         given?.folderPath ??
-        (await pickFolder("作品フォルダを選択", "この作品フォルダを登録"));
+        (await pickExistingWorkFolder({ works: registry.list() }));
       // **フォルダー選びを閉じたら「取りやめ」と名乗る**（設計書6.104）。
       // 黙って戻ると、画面の案内が済んだものとして次の段へ行く
       if (!folderPath) return CHECK_CANCELLED;
