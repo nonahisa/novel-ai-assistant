@@ -43,15 +43,54 @@ function entryOf(input: {
 }
 
 describe("控えを取るかどうか", () => {
-  test("点数が無ければ控えを取らない（残す値が無い）", () => {
-    const sheet = targetSheetFor({ aim: ["lore_deep"] });
+  test("点数も狙いも無ければ控えを取らない（残す値が無い）", () => {
+    const sheet = targetSheetFor({ aim: [] });
     expect(
-      buildTargetSheetHistoryEntry({
-        sheet,
-        source: "declared",
-        at: new Date(),
-      })
+      buildTargetSheetHistoryEntry({ sheet, at: new Date() })
     ).toBeUndefined();
+  });
+
+  /*
+    **狙いだけでも控えを取る**（設計書6.108.6、作者の指摘 2026-09-22 未明）。
+    「ターゲット読者」は3段を途中でやめられ、済んだ段だけでシートを作る。
+    1段目（狙い）だけで止めた日も、**狙いを決めた日として推移に残る**。
+    0.75.0 では点数が無いと控えを取らなかった（ここはその裁定で変えた）。
+  */
+  test("狙いだけでも控えを取る（点数・一致度は持たない）", () => {
+    const sheet = targetSheetFor({ aim: ["lore_deep"] });
+    const entry = buildTargetSheetHistoryEntry({
+      sheet,
+      at: new Date("2026-09-23T10:00:00"),
+    });
+    expect(entry?.aim).toEqual(["lore_deep"]);
+    expect(entry?.scores).toBeUndefined();
+    expect(entry?.top).toBeUndefined();
+    expect(entry?.affinities).toBeUndefined();
+  });
+
+  test("狙いだけの控えも読み直せる", () => {
+    const entry = buildTargetSheetHistoryEntry({
+      sheet: targetSheetFor({ aim: ["light"] }),
+      at: new Date("2026-09-23T10:00:00"),
+    });
+    const read = parseTargetSheetHistoryEntry(JSON.parse(JSON.stringify(entry)));
+    expect(read).toEqual(entry);
+  });
+
+  test("狙いだけの控えのあとで点数が付いたら増える", () => {
+    const aimOnly = buildTargetSheetHistoryEntry({
+      sheet: targetSheetFor({ aim: ["lore_deep"] }),
+      at: new Date("2026-09-23T10:00:00"),
+    });
+    const scored = entryOf({ aim: ["lore_deep"], at: "2026-09-23T10:05:00" });
+    expect(isSameAsLastHistory(scored, aimOnly)).toBe(false);
+    if (!aimOnly) throw new Error("控えを組めなかった");
+    const again = buildTargetSheetHistoryEntry({
+      sheet: targetSheetFor({ aim: ["lore_deep"] }),
+      at: new Date("2026-09-23T10:10:00"),
+    });
+    if (!again) throw new Error("控えを組めなかった");
+    expect(isSameAsLastHistory(again, aimOnly)).toBe(true);
   });
 
   test("前回と同じ点数・同じ狙いなら、増やさない", () => {
@@ -87,8 +126,8 @@ describe("控えを取るかどうか", () => {
   test("控えには、そのときの一致度といちばん高い層が入る", () => {
     const entry = entryOf({ aim: ["lore_deep"], at: "2026-09-21T23:00:00" });
     expect(entry.top).toBe("lore_deep");
-    expect(entry.affinities.lore_deep).toBe(100);
-    expect(Object.keys(entry.affinities).length).toBe(11);
+    expect(entry.affinities?.lore_deep).toBe(100);
+    expect(Object.keys(entry.affinities ?? {}).length).toBe(11);
     expect(entry.scores).toEqual(SCORES);
   });
 });
@@ -177,6 +216,16 @@ describe("推移の表", () => {
     ]);
     expect(doc).toContain("| 日時 | 狙いの一致度 | いちばん高い層 | 上位3つ |");
     expect(doc).toContain("| 2026-09-21 23:00 | 考察層 100 | 考察層 |");
+  });
+
+  test("狙いだけの日は、一致度の欄に「まだ測っていません」と出る", () => {
+    const aimOnly = buildTargetSheetHistoryEntry({
+      sheet: targetSheetFor({ aim: ["lore_deep"] }),
+      at: new Date("2026-09-21T22:00:00"),
+    });
+    if (!aimOnly) throw new Error("控えを組めなかった");
+    const doc = docWith([aimOnly]);
+    expect(doc).toContain("| 2026-09-21 22:00 | 考察層 | （まだ測っていません） | — |");
   });
 
   test("狙いを書いていなかった日も分かる", () => {

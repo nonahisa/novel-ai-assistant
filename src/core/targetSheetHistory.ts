@@ -50,19 +50,26 @@ export const TARGET_SHEET_HISTORY_SCHEMA_VERSION = "1";
  */
 export const TARGET_SHEET_HISTORY_ROWS = 20;
 
-/** 控え1件。**その日のシートが何を出していたか**をそのまま残す */
+/**
+ * 控え1件。**その日のシートが何を出していたか**をそのまま残す。
+ *
+ * **点数の4つ（`scores`・`source`・`top`・`affinities`）は、そろって有るか
+ * そろって無いか**のどちらかである。無いのは「狙いだけを決めた日」
+ * （設計書6.108.6。「ターゲット読者」の1段目だけで止めた日）で、
+ * 0.75.0 の控えには必ず4つとも入っている。
+ */
 export interface TargetSheetHistoryEntry {
   readonly schemaVersion: string;
   /** 控えを取った時刻（ISO） */
   readonly recordedAt: string;
   /** そのときの狙い（作者の欄の1行目） */
   readonly aim: readonly ReaderTypeId[];
-  /** そのときの軸の点数 */
-  readonly scores: ReaderScores;
+  /** そのときの軸の点数。**狙いだけの日は無い** */
+  readonly scores?: ReaderScores;
   /** 点数の出どころ（書けているもの／向けているつもり） */
-  readonly source: ReaderChatSource;
+  readonly source?: ReaderChatSource;
   /** そのときのいちばん高い型 */
-  readonly top: ReaderTypeId;
+  readonly top?: ReaderTypeId;
   /**
    * そのときの11型の一致度。
    *
@@ -70,17 +77,31 @@ export interface TargetSheetHistoryEntry {
    * 変えたとき、出し直すと**過去の紙に載っていた数字が書き換わる**。
    * 推移は「あの日そう見えた」の記録なので、当時の数字のまま残す。
    */
-  readonly affinities: Readonly<Record<ReaderTypeId, number>>;
+  readonly affinities?: Readonly<Record<ReaderTypeId, number>>;
 }
 
-/** 控えを組む。**実態（点数）が無いときは控えを取らない**（残す値が無い） */
+/**
+ * 控えを組む。
+ *
+ * **点数も狙いも無ければ取らない**（残す値が無い）。**狙いだけなら取る**
+ * ——「ターゲット読者」は3段を途中でやめられ、済んだ段だけでシートを
+ * 作る（設計書6.108.6）。狙いを決めた日そのものが見直しの記録である。
+ */
 export function buildTargetSheetHistoryEntry(input: {
   sheet: TargetSheet;
-  source: ReaderChatSource;
+  /** 点数の出どころ。**点数が無いときは要らない** */
+  source?: ReaderChatSource;
   at: Date;
 }): TargetSheetHistoryEntry | undefined {
   const actual = input.sheet.actual;
-  if (!actual) return undefined;
+  if (!actual) {
+    if (input.sheet.aim.length === 0) return undefined;
+    return {
+      schemaVersion: TARGET_SHEET_HISTORY_SCHEMA_VERSION,
+      recordedAt: input.at.toISOString(),
+      aim: [...input.sheet.aim],
+    };
+  }
 
   const affinities = {} as Record<ReaderTypeId, number>;
   for (const entry of actual.ranking) affinities[entry.type] = entry.affinity;
@@ -90,7 +111,9 @@ export function buildTargetSheetHistoryEntry(input: {
     recordedAt: input.at.toISOString(),
     aim: [...input.sheet.aim],
     scores: { ...actual.scores },
-    source: input.source,
+    // 出どころが渡されなければ「書けているもの」と決めつけず、宣言として残す
+    // （読み取り側の既定と同じ扱い）
+    source: input.source ?? "declared",
     top: actual.top,
     affinities,
   };
@@ -107,8 +130,10 @@ export function isSameAsLastHistory(
   last: TargetSheetHistoryEntry | undefined
 ): boolean {
   if (!last) return false;
+  // 狙いだけの日と、点数の付いた日は別の中身である
+  if (Boolean(entry.scores) !== Boolean(last.scores)) return false;
   const sameScores = READER_AXIS_ORDER.every(
-    (axis) => entry.scores[axis] === last.scores[axis]
+    (axis) => entry.scores?.[axis] === last.scores?.[axis]
   );
   if (!sameScores) return false;
   if (entry.aim.length !== last.aim.length) return false;
@@ -146,18 +171,37 @@ export function parseTargetSheetHistoryEntry(
   const recordedAt = typeof raw.recordedAt === "string" ? raw.recordedAt : "";
   if (!recordedAt) return undefined;
 
-  const scores = parseScores(raw.scores);
-  if (!scores) return undefined;
-
-  const top = toReaderType(raw.top);
-  if (!top) return undefined;
-
   const aim = Array.isArray(raw.aim)
     ? raw.aim.flatMap((entry) => {
         const type = toReaderType(entry);
         return type ? [type] : [];
       })
     : [];
+  const schemaVersion =
+    typeof raw.schemaVersion === "string"
+      ? raw.schemaVersion
+      : TARGET_SHEET_HISTORY_SCHEMA_VERSION;
+
+  /*
+    **狙いだけの控え**（設計書6.108.6）。点数の欄が1つも無く、狙いが
+    読めるときだけ。点数の欄が半端に残っているものは、狙いだけの控えと
+    見なさない——欠けた欄を「無かったこと」にして読むと、壊れた控えが
+    別の意味の行として推移に並ぶ。
+  */
+  if (
+    raw.scores === undefined &&
+    raw.top === undefined &&
+    raw.affinities === undefined &&
+    raw.source === undefined
+  ) {
+    return aim.length > 0 ? { schemaVersion, recordedAt, aim } : undefined;
+  }
+
+  const scores = parseScores(raw.scores);
+  if (!scores) return undefined;
+
+  const top = toReaderType(raw.top);
+  if (!top) return undefined;
 
   const affinities = {} as Record<ReaderTypeId, number>;
   const rawAffinities =
@@ -172,10 +216,7 @@ export function parseTargetSheetHistoryEntry(
   }
 
   return {
-    schemaVersion:
-      typeof raw.schemaVersion === "string"
-        ? raw.schemaVersion
-        : TARGET_SHEET_HISTORY_SCHEMA_VERSION,
+    schemaVersion,
     recordedAt,
     aim,
     scores,

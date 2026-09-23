@@ -5329,8 +5329,45 @@ export async function activate(
       if (!work) return CHECK_CANCELLED;
 
       const { openTargetSheet } = await import("./features/targetSheet.js");
-      const opened = await openTargetSheet(work);
+      // 作者自身の読者タイプは、シートの3つの輪に使う（6.108.6）
+      const opened = await openTargetSheet(work, {
+        authorReader: authorReaderTypes.get(),
+      });
       return opened ? CHECK_COMPLETED : CHECK_CANCELLED;
+    })
+  );
+
+  /*
+    「ターゲット読者」——診断・シート・3つの輪を1つの入口に（設計書6.108.6。
+    作者の指摘、2026-09-22 未明）。
+
+    中は3段（狙い → 書き方の判断 → 本文の実像）で、どの段も1枚のシートへ
+    落ちる。**旧3つのコマンドは上に残してある**（コマンドパレットと
+    既存の呼び出し元のため）。
+
+    作品は `resolveWork` が決める——相談から入れば相談の対象の作品を
+    そのまま使い、選び直させない（0.75.4 の `pickHintedWork`）。
+
+    **結末を名乗って返す**（手順書きの段。`core/procedures.ts`）。
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.openTargetReader", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return CHECK_CANCELLED;
+
+      const { runTargetReader } = await import("./features/targetReader.js");
+      return runTargetReader(work, aiRegistry, {
+        authorReader: authorReaderTypes.get(),
+        openThreeCircles: async (target) => {
+          const { showThreeCircles } = await import(
+            "./features/threeCircles.js"
+          );
+          await showThreeCircles(target, deviceId, {
+            authorReader: authorReaderTypes.get(),
+            advice: advicePolicies.getEffective(target.id),
+          });
+        },
+      });
     })
   );
 

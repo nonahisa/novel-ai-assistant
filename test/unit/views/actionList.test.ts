@@ -374,6 +374,9 @@ describe("AIの印", () => {
         // 4つには誤字脱字・推敲・矛盾が入っており、料金が出るためである
         "novelai.runProofreadingSuite",
         "novelai.runReaderTargetDiagnosis",
+        // 「ターゲット読者」（設計書6.108.6）。3段目（本文の実像）と
+        // タイトルの適合度でAIを呼ぶ
+        "novelai.openTargetReader",
         "novelai.checkTypos",
         "novelai.checkProofread",
         "novelai.checkContradictions",
@@ -986,10 +989,20 @@ describe("校正・校閲の並び", () => {
       sectionOf("読者診断").section.items.map((item) => item.command)
     ).toEqual([
       "novelai.checkOpening",
+      "novelai.openTargetReader",
+      // 旧3つの入口は**消さずに隠す**（設計書6.108.6）。コマンドパレットと
+      // 既存の呼び出し元のために、ここに残してある
       "novelai.runReaderTargetDiagnosis",
       "novelai.openTargetSheet",
       "novelai.showThreeCircles",
     ]);
+  });
+
+  test("読者の入口は「ターゲット読者」1つだけが詳細メニューに見える（6.108.6）", () => {
+    const visible = sectionOf("読者診断")
+      .section.items.filter((item) => !item.hiddenFromActionList)
+      .map((item) => item.label);
+    expect(visible).toEqual(["冒頭診断", "ターゲット読者"]);
   });
 });
 

@@ -10,7 +10,15 @@ import {
   TARGET_SHEET_FILE,
 } from "../../../src/core/targetSheetDoc";
 import { targetSheetFor } from "../../../src/core/targetSheet";
-import type { ReaderScores } from "../../../src/models/readerProfile";
+import type { ReaderProfile, ReaderScores } from "../../../src/models/readerProfile";
+import {
+  targetSheetCircles,
+  type TargetSheetCircles,
+} from "../../../src/core/targetSheetCircles";
+import {
+  TITLE_FIT_SCHEMA_VERSION,
+  type TitleFitRecord,
+} from "../../../src/core/titleFit";
 
 /**
  * ターゲットシートの紙（設計書6.108.2）。
@@ -146,5 +154,122 @@ describe("紙の中身", () => {
 
   test("助言の欄は、次の版だと書いてある", () => {
     expect(build(undefined, SCORES)).toContain("助言は次の版で入ります");
+  });
+});
+
+/**
+ * 統合した1枚（設計書6.108.6）。
+ *
+ * 「ターゲット読者」の3段（狙い→書き方の判断→本文の実像）が、この1枚へ
+ * 落ちる。ターゲット読者診断の紙・3つの輪の紙に分かれていたものを、
+ * **作者が1か所で見られるように**並べる。
+ */
+describe("統合した1枚", () => {
+  const DECLARED: ReaderScores = { familiarity: 0, posture: 0, craving: 0 };
+
+  function buildFull(input: {
+    authorBlock?: string;
+    profile?: ReaderProfile;
+    circles?: TargetSheetCircles;
+    titleFit?: TitleFitRecord;
+  }): string {
+    const scores = input.profile?.actual?.scores ?? input.profile?.declared?.scores;
+    return buildTargetSheetDoc({
+      workTitle: "テスト作品",
+      sheet: targetSheetFor({
+        aim: input.authorBlock ? readAimTypes(input.authorBlock) : [],
+        scores,
+      }),
+      authorBlock: input.authorBlock,
+      source: input.profile?.actual ? "actual" : scores ? "declared" : undefined,
+      profile: input.profile,
+      circles: input.circles,
+      titleFit: input.titleFit,
+      generatedAt: AT,
+    });
+  }
+
+  const PROFILE: ReaderProfile = {
+    schemaVersion: "1",
+    declared: {
+      scores: DECLARED,
+      answers: [0, 0, 0, 0, 0, 0, 0, 0, 0],
+      updatedAt: "2026-09-23T00:00:00.000Z",
+    },
+    actual: {
+      scores: SCORES,
+      evidence: [{ axis: "familiarity", quote: "説明する暇はなかった", from: "冒頭" }],
+      basis: "冒頭",
+      model: "test",
+      updatedAt: "2026-09-23T00:00:00.000Z",
+    },
+  };
+
+  test("書き方の判断と本文の実像のずれが出る（2段目と3段目の突き合わせ）", () => {
+    const doc = buildFull({ authorBlock: "狙い：考察層", profile: PROFILE });
+    expect(doc).toContain("## 書き方の判断と本文の実像");
+    expect(doc).toContain("読み慣れ：向けているつもりは0／書けているものは6");
+  });
+
+  test("2段目がまだなら、そう言う（黙って飛ばさない）", () => {
+    const doc = buildFull({
+      authorBlock: "狙い：考察層",
+      profile: { schemaVersion: "1", actual: PROFILE.actual },
+    });
+    expect(doc).toContain("書き方の判断（2段目）にまだ答えていません");
+  });
+
+  test("本文の実像の根拠（本文からの引用）が載る", () => {
+    const doc = buildFull({ authorBlock: "狙い：考察層", profile: PROFILE });
+    expect(doc).toContain("「説明する暇はなかった」");
+  });
+
+  test("3つの輪の節が入り、足りない輪はその埋め方を言う", () => {
+    const circles = targetSheetCircles({
+      aim: ["lore_deep"],
+      actual: PROFILE.actual,
+    });
+    const doc = buildFull({
+      authorBlock: "狙い：考察層",
+      profile: PROFILE,
+      circles,
+    });
+    expect(doc).toContain("## 3つの輪");
+    expect(doc).toContain("あなた自身の読者タイプ");
+  });
+
+  test("適合度をまだ測っていなければ、測り方を言う", () => {
+    const doc = buildFull({ authorBlock: "狙い：考察層", profile: PROFILE });
+    expect(doc).toContain("## タイトルとサブタイトルの適合度");
+    expect(doc).toContain("まだ測っていません");
+    expect(doc).toContain("「ターゲット読者」");
+  });
+
+  test("適合度を測っていれば、題ごとの点と一言、低い順の直す候補が並ぶ", () => {
+    const titleFit: TitleFitRecord = {
+      schemaVersion: TITLE_FIT_SCHEMA_VERSION,
+      measuredAt: "2026-09-23T10:00:00.000Z",
+      readerType: "lore_deep",
+      basis: "aim",
+      model: "gemma",
+      items: [
+        { id: "title", kind: "title", label: "作品タイトル", text: "鉛の海", score: 70, comment: "重さが届く" },
+        { id: "e1", kind: "episode", label: "第1話", text: "目覚め", score: 30, comment: "ありふれている" },
+      ],
+      unmeasured: 0,
+    };
+    const doc = buildFull({ authorBlock: "狙い：考察層", profile: PROFILE, titleFit });
+    expect(doc).toContain("| 作品タイトル | 鉛の海 | 70 | 重さが届く |");
+    expect(doc).toContain("| 第1話 | 目覚め | 30 | ありふれている |");
+    expect(doc).toContain("考察層");
+    expect(doc).toContain("直す候補");
+    // 数字は目安であることを断る
+    expect(doc).toContain("目安");
+  });
+
+  test("狙いだけの紙でも作れ、実態の欄は「ターゲット読者」の段を案内する", () => {
+    const doc = buildFull({ authorBlock: "狙い：考察層" });
+    expect(doc).toContain("まだ測っていません");
+    expect(doc).not.toContain("ターゲット読者診断");
   });
 });

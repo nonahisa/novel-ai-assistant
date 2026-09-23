@@ -1,4 +1,6 @@
 import {
+  describeReaderGap,
+  readerGaps,
   READER_AXIS_ENDS,
   READER_AXIS_LABELS,
   READER_AXIS_ORDER,
@@ -6,6 +8,9 @@ import {
   type ReaderChatSource,
   type ReaderTypeId,
 } from "./readerTarget";
+import type { ReaderProfile } from "../models/readerProfile";
+import type { TargetSheetCircles } from "./targetSheetCircles";
+import { titleFitCandidates, type TitleFitRecord } from "./titleFit";
 import { READER_TYPE_IDS } from "./readerTypeNeighbors";
 import {
   TARGET_SHEET_HISTORY_ROWS,
@@ -35,9 +40,12 @@ import type {
  * ## 狙いは、作者の欄の1行目から読む
  *
  * 「狙い：考察層、没入層」と書いてあれば、その2つが狙いである。
- * **読めなければ狙い無しとして進む**（推測で型を当てない）。設問で
- * 選ばせる形は第3段以降で考える——まず手で書ける形にしておけば、
- * 作者は今日から使える。
+ * **読めなければ狙い無しとして進む**（推測で型を当てない）。
+ *
+ * 0.82.0 から、「ターゲット読者」の1段目（狙い）で**選ばせる形**も入った
+ * （設計書6.108.6）。選んだ答えは `applyAimToAuthorBlock` がこの欄の
+ * 「狙い：」「理由：」の2行へ書き込む——手で書く道と同じ場所に落とすので、
+ * どちらで決めても読み方は1つである。
  *
  * VS Code API にも AI にも依存しない。
  */
@@ -58,6 +66,10 @@ export const TARGET_SHEET_AIM_LIMIT = 2;
 
 /** 作者の欄の初期値。**1行目が「狙い」であることが、読み取りの約束** */
 export const DEFAULT_AUTHOR_BLOCK = ["狙い：", "", "理由：", ""].join("\n");
+
+/** 作者の欄で、狙いと理由を読む行の頭 */
+const AIM_LINE = /^狙い\s*[:：]/;
+const REASON_LINE = /^理由\s*[:：]/;
 
 /** この紙が作った（または作者が使ってよい）ファイルか */
 export function isTargetSheetDoc(existing: string): boolean {
@@ -95,10 +107,10 @@ export function readAimTypes(authorBlock: string): ReaderTypeId[] {
   const line = authorBlock
     .split(/\r?\n/)
     .map((entry) => entry.trim())
-    .find((entry) => /^狙い\s*[:：]/.test(entry));
+    .find((entry) => AIM_LINE.test(entry));
   if (!line) return [];
 
-  const body = line.replace(/^狙い\s*[:：]/, "");
+  const body = line.replace(AIM_LINE, "");
   const found: ReaderTypeId[] = [];
   for (const part of body.split(/[、,／/・]/)) {
     const name = part.replace(/[「」\s]/g, "");
@@ -110,6 +122,67 @@ export function readAimTypes(authorBlock: string): ReaderTypeId[] {
     if (found.length >= TARGET_SHEET_AIM_LIMIT) break;
   }
   return found;
+}
+
+/**
+ * 1段目（狙い）の答えを、作者の欄へ書き込む（設計書6.108.6）。
+ *
+ * **書き換えるのは「狙い：」と「理由：」の行だけ。** 作者が手で足した
+ * ほかの行（メモなど）は1字も動かさない——この欄は作者のもので
+ * （実装ルール2）、選ぶ画面を通ったからといって欄ごと作り直してよい
+ * 理由にはならない。
+ *
+ * - 渡さなかったほう（`aims` か `reason` が `undefined`）は、その行を変えない
+ * - 行が無ければ、欄の先頭へ足す（読み取りは「狙いの行を探す」なので
+ *   どこにあっても読めるが、作者が見つけやすいよう上に置く）
+ * - 理由は**1行に畳む**。2行目以降は読み取りの外へこぼれ、作者の目には
+ *   理由の続きに見えるのに、次の書き込みで取り残される
+ * - 改行の形（LF／CRLF）は欄のものを保つ
+ */
+export function applyAimToAuthorBlock(
+  block: string,
+  change: { aims?: readonly ReaderTypeId[]; reason?: string }
+): string {
+  const eol = block.includes("\r\n") ? "\r\n" : "\n";
+  const lines = block.split(/\r?\n/);
+
+  const aimLine =
+    change.aims === undefined
+      ? undefined
+      : "狙い：" +
+        [...new Set(change.aims)]
+          .slice(0, TARGET_SHEET_AIM_LIMIT)
+          .map((type) => READER_TYPES[type].label)
+          .join("、");
+  const reasonLine =
+    change.reason === undefined
+      ? undefined
+      : "理由：" + change.reason.replace(/\s*\r?\n\s*/g, " ").trim();
+
+  const aimIndex = lines.findIndex((line) => AIM_LINE.test(line.trim()));
+  const reasonIndex = lines.findIndex((line) => REASON_LINE.test(line.trim()));
+
+  if (aimLine !== undefined && aimIndex >= 0) lines[aimIndex] = aimLine;
+  if (reasonLine !== undefined && reasonIndex >= 0) {
+    lines[reasonIndex] = reasonLine;
+  }
+
+  // 無かった行は先頭へ（狙い → 理由の順）。中身の無い欄は置き換える
+  const added: string[] = [];
+  if (aimLine !== undefined && aimIndex < 0) added.push(aimLine);
+  if (reasonLine !== undefined && reasonIndex < 0) added.push(reasonLine);
+  if (added.length === 0) return lines.join(eol);
+  const rest = lines.length === 1 && lines[0] === "" ? [] : lines;
+  return [...added, ...rest].join(eol);
+}
+
+/** 作者の欄の「理由：」の行の中身。無ければ空文字 */
+export function readAimReason(authorBlock: string): string {
+  const line = authorBlock
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .find((entry) => REASON_LINE.test(entry));
+  return line ? line.replace(REASON_LINE, "").trim() : "";
 }
 
 /** 点数の出どころの言い方（作者向け） */
@@ -129,6 +202,22 @@ export interface TargetSheetDocInput {
   readonly history?: readonly TargetSheetHistoryEntry[];
   /** 断り書き（読めなかった控えなど）。**黙って落とさない** */
   readonly notices?: readonly string[];
+  /**
+   * 読者像の台帳（2段目の宣言と3段目の実像）。
+   *
+   * 渡されれば「書き方の判断と本文の実像」の突き合わせと、実像の根拠を
+   * 載せる（設計書6.108.6。診断の紙に分かれていたものを1枚へ寄せる）。
+   */
+  readonly profile?: ReaderProfile;
+  /** 3段目で読み取れなかった軸の呼び名。**黙って埋めない** */
+  readonly unmeasured?: readonly string[];
+  /** 3つの輪（作者の読者タイプ × 狙い × 実像）。渡されなければ節ごと出さない */
+  readonly circles?: TargetSheetCircles;
+  /**
+   * タイトルとサブタイトルの適合度（P-41）。**測っていなければ `undefined`**
+   * ——その場合は測り方を案内する（空の表を出さない）。
+   */
+  readonly titleFit?: TitleFitRecord;
   readonly generatedAt: Date;
 }
 
@@ -144,9 +233,13 @@ export function buildTargetSheetDoc(input: TargetSheetDocInput): string {
     "     ほかの欄に書き足した文は、次の作り直しで失われます。 -->",
     "",
     ...aimSection(input.authorBlock ?? DEFAULT_AUTHOR_BLOCK),
-    ...actualSection(sheet, input.source),
+    ...actualSection(sheet, input.source, input.unmeasured ?? []),
     ...matchSection(sheet),
+    ...judgementSection(input.profile),
+    ...evidenceSection(input.profile),
     ...directionSection(sheet),
+    ...circlesSection(input.circles),
+    ...titleFitSection(input.titleFit),
     ...historySection(input.history ?? []),
     ...adviceSection(),
     ...noticeSection(input.notices ?? []),
@@ -167,7 +260,8 @@ function aimSection(authorBlock: string): string[] {
   return [
     "## 狙い（作者が書く欄）",
     "",
-    "**この欄だけは、作り直しても残ります。** 狙う読者層を" +
+    "**この欄だけは、作り直しても残ります。** 「ターゲット読者」の1段目で" +
+      "選ぶと、ここへ書き込まれます。手で書くときは、狙う読者層を" +
       `${TARGET_SHEET_AIM_LIMIT}つまで、名前で書いてください（${names}）。` +
       "理由は自由に書けます。",
     "",
@@ -181,14 +275,16 @@ function aimSection(authorBlock: string): string[] {
 /** 実態——11型との一致度 */
 function actualSection(
   sheet: TargetSheet,
-  source: ReaderChatSource | undefined
+  source: ReaderChatSource | undefined,
+  unmeasured: readonly string[]
 ): string[] {
   const lines = ["## 実態", ""];
   const actual = sheet.actual;
   if (!actual) {
     lines.push(
-      "**まだ測っていません。** 先に「ターゲット読者診断」を済ませると、" +
-        "11の読者層それぞれとの一致度がここに出ます。",
+      "**まだ測っていません。** 「ターゲット読者」の2段目（書き方の判断）か" +
+        "3段目（本文の実像）を済ませると、11の読者層それぞれとの一致度が" +
+        "ここに出ます。",
       ""
     );
     return lines;
@@ -224,6 +320,86 @@ function actualSection(
       "そろっているかで出しています。AIは使っていません。",
     ""
   );
+  if (unmeasured.length > 0) {
+    lines.push(
+      `**${unmeasured.join("・")}** は本文から読み取れませんでした` +
+        "（どちらとも言えない位置に置いてあります）。",
+      ""
+    );
+  }
+  return lines;
+}
+
+/**
+ * 書き方の判断（2段目の宣言）と本文の実像（3段目）の突き合わせ。
+ *
+ * 0.81 までは診断の紙（`readerTargetDoc.ts`）だけに出ていた節である。
+ * 統合した1枚では、**作者が答えた判断と、書けているもののずれ**を
+ * 狙いとのずれの隣に置く。言い回しは `describeReaderGap` を借りる
+ * ——2か所で書くと、上下を作らない書き方を片方だけ直す日が来る。
+ *
+ * 台帳を渡されなければ節ごと出さない（古い呼び出し元のため）。
+ */
+function judgementSection(profile: ReaderProfile | undefined): string[] {
+  if (!profile) return [];
+  const lines = ["## 書き方の判断と本文の実像", ""];
+  const { declared, actual } = profile;
+
+  if (!declared || !actual) {
+    if (!declared) {
+      lines.push(
+        "書き方の判断（2段目）にまだ答えていません。答えると、" +
+          "向けているつもりと書けているもののずれがここに出ます。"
+      );
+    }
+    if (!actual) {
+      lines.push(
+        "本文の実像（3段目）をまだ読んでいません。読むと、" +
+          "向けているつもりと書けているもののずれがここに出ます。"
+      );
+    }
+    lines.push("");
+    return lines;
+  }
+
+  const gaps = readerGaps(declared.scores, actual.scores);
+  if (gaps.length === 0) {
+    lines.push(
+      "**3つとも、ずれていません。** 向けようとしている先へ、書けているものが向いています。",
+      ""
+    );
+    return lines;
+  }
+  lines.push(
+    "**どちらが正しいとも言いません。** 向けている先が本当で書き方がまだ" +
+      "追いついていないこともあれば、書けているもののほうが本当で、" +
+      "気づかずにそう書いていることもあります。",
+    ""
+  );
+  for (const gap of gaps) lines.push(`- ${describeReaderGap(gap)}`);
+  lines.push("");
+  return lines;
+}
+
+/** 本文の実像の根拠。**引用は本文に実在するものだけが来る**（検算済み） */
+function evidenceSection(profile: ReaderProfile | undefined): string[] {
+  const actual = profile?.actual;
+  if (!actual || actual.evidence.length === 0) return [];
+  const basis = actual.basis ? `${actual.basis}から読みました。` : "";
+  const model = actual.model ? `（${actual.model}）` : "";
+  const lines = [
+    "## 本文の実像の根拠",
+    "",
+    `${basis}読んだ日：${actual.updatedAt.slice(0, 10)}${model}`,
+    "",
+  ];
+  for (const item of actual.evidence) {
+    const where = item.from ? `（${item.from}）` : "";
+    lines.push(
+      `- **${READER_AXIS_LABELS[item.axis]}**${where}　「${item.quote}」`
+    );
+  }
+  lines.push("");
   return lines;
 }
 
@@ -233,8 +409,9 @@ function matchSection(sheet: TargetSheet): string[] {
 
   if (sheet.aim.length === 0) {
     lines.push(
-      "**狙いが書かれていません。** 上の「狙い」の欄へ読者層の名前を書いて、" +
-        "もう一度この操作を押すと、狙いとの一致度とずれがここに出ます。",
+      "**狙いが書かれていません。** 「ターゲット読者」の1段目（狙い）で選ぶか、" +
+        "上の「狙い」の欄へ読者層の名前を書いて作り直すと、" +
+        "狙いとの一致度とずれがここに出ます。",
       ""
     );
     return lines;
@@ -326,6 +503,115 @@ function directionBlock(
 }
 
 /**
+ * 3つの輪（設計書6.108.6）。**作者の読者タイプ × 狙い × 本文の実像。**
+ *
+ * 行は `targetSheetCircles.ts` が組む（ここは並べるだけ）。足りない輪は
+ * 埋め方を1行ずつ書く——黙って落とすと、突き合わせたのかどうかが
+ * 作者に分からない。
+ */
+function circlesSection(circles: TargetSheetCircles | undefined): string[] {
+  if (!circles) return [];
+  const lines = [
+    "## 3つの輪",
+    "",
+    "**書きたいもの**（読者としてのあなた）・**読んでもらいたい読者**（狙い）・" +
+      "**書けているもの**（本文の実像）を突き合わせます。上下はありません" +
+      "——効く相手が違うだけです。",
+    "",
+  ];
+  for (const edge of circles.edges) {
+    lines.push(`### ${edge.heading}`, "", ...edge.lines, "");
+  }
+  if (circles.missing.length > 0) {
+    lines.push("まだ突き合わせられない輪があります。", "");
+    for (const note of circles.missing) lines.push(`- ${note}`);
+    lines.push("");
+  }
+  lines.push(
+    "書けたものの実績（話数・字数・届いている反応）や、離れているときの" +
+      "近づける道まで並べた紙は、「ターゲット読者」の選択肢" +
+      "「3つの輪の紙を開く」から出せます。",
+    ""
+  );
+  return lines;
+}
+
+/**
+ * タイトルとサブタイトルの適合度（設計書6.108.6、P-41）。
+ *
+ * **数字は目安である。** AI が返した点で、順位づけには使わない——
+ * 低い順に並べて「直す候補」を示すだけにする（規則3）。表は話の順の
+ * まま出す（点で並べ替えると、目安の数字が序列に見える）。
+ */
+function titleFitSection(record: TitleFitRecord | undefined): string[] {
+  const lines = ["## タイトルとサブタイトルの適合度", ""];
+  if (!record) {
+    lines.push(
+      "**まだ測っていません。** 「ターゲット読者」の選択肢" +
+        "「タイトルとサブタイトルの適合度を測る」で、狙いの読者層" +
+        "（無ければ実像の層）に引かれる言い方かを、AIが題ごとに見立てます。",
+      ""
+    );
+    return lines;
+  }
+
+  const type = READER_TYPES[record.readerType].label;
+  const basis = TITLE_FIT_BASIS_PHRASES[record.basis];
+  const model = record.model ? `（${record.model}）` : "";
+  lines.push(
+    `**${type}**（${basis}）に向けて、` +
+      `${formatDayTime(new Date(record.measuredAt))}に測りました${model}。`,
+    "",
+    "**点は目安です。** AIの見立てで、同じ題でも測り直すと動きます。" +
+      "題の良し悪しの判定ではなく、その読者層に引かれる言い方かどうかの見当です。",
+    ""
+  );
+
+  if (record.items.length === 0) {
+    lines.push("見立てを読み取れた題がありませんでした。", "");
+  } else {
+    lines.push("| どこ | 題 | 点 | 一言 |", "|---|---|---|---|");
+    for (const item of record.items) {
+      lines.push(
+        `| ${cell(item.label)} | ${cell(item.text)} | ${item.score} | ` +
+          `${cell(item.comment)} |`
+      );
+    }
+    lines.push("", "### 直す候補（点の低い順）", "");
+    for (const item of titleFitCandidates(record.items)) {
+      lines.push(
+        `- ${item.label}「${item.text}」（${item.score}）${item.comment}`
+      );
+    }
+    lines.push(
+      "",
+      "直すかどうかは作者が決めます。題を変える案が欲しいときは、" +
+        "「各話あらすじ」のサブタイトルの提案が読者像を考えて出します。",
+      ""
+    );
+  }
+
+  if (record.unmeasured > 0) {
+    lines.push(
+      `見立てが返らなかった題が${record.unmeasured}件あります（表には出していません）。`,
+      ""
+    );
+  }
+  return lines;
+}
+
+const TITLE_FIT_BASIS_PHRASES: Record<TitleFitRecord["basis"], string> = {
+  aim: "狙いの層",
+  actual: "本文の実像の層",
+  declared: "書き方の判断の層",
+};
+
+/** 表の升に入れる文字。**縦棒と改行で表を壊さない** */
+function cell(text: string): string {
+  return text.replace(/\|/g, "｜").replace(/\r?\n/g, " ");
+}
+
+/**
  * 推移（設計書6.108.5）。
  *
  * **控えのあるぶんだけ**出す。1件しか無くても表にするのは、
@@ -349,9 +635,13 @@ function historySection(
     "|---|---|---|---|"
   );
   for (const entry of history.slice(0, TARGET_SHEET_HISTORY_ROWS)) {
+    // 狙いだけの日（設計書6.108.6）は、点数の欄を「まだ測っていません」にする
+    const top = entry.top
+      ? READER_TYPES[entry.top].label
+      : "（まだ測っていません）";
     lines.push(
       `| ${historyWhen(entry)} | ${aimColumn(entry)} | ` +
-        `${READER_TYPES[entry.top].label} | ${topThree(entry)} |`
+        `${top} | ${topThree(entry)} |`
     );
   }
   if (history.length > TARGET_SHEET_HISTORY_ROWS) {
@@ -376,7 +666,7 @@ function aimColumn(entry: TargetSheetHistoryEntry): string {
   if (entry.aim.length === 0) return "（狙い未記入）";
   return entry.aim
     .map((type) => {
-      const affinity = entry.affinities[type];
+      const affinity = entry.affinities?.[type];
       const label = READER_TYPES[type].label;
       return typeof affinity === "number" ? `${label} ${affinity}` : label;
     })
@@ -384,17 +674,19 @@ function aimColumn(entry: TargetSheetHistoryEntry): string {
 }
 
 function topThree(entry: TargetSheetHistoryEntry): string {
+  const affinities = entry.affinities;
+  if (!affinities) return "—";
   const ranked = READER_TYPE_IDS.filter(
-    (type) => typeof entry.affinities[type] === "number"
+    (type) => typeof affinities[type] === "number"
   ).sort(
     (left, right) =>
-      entry.affinities[right] - entry.affinities[left] ||
+      affinities[right] - affinities[left] ||
       READER_TYPE_IDS.indexOf(left) - READER_TYPE_IDS.indexOf(right)
   );
   if (ranked.length === 0) return "—";
   return ranked
     .slice(0, 3)
-    .map((type) => `${READER_TYPES[type].label} ${entry.affinities[type]}`)
+    .map((type) => `${READER_TYPES[type].label} ${affinities[type]}`)
     .join("・");
 }
 

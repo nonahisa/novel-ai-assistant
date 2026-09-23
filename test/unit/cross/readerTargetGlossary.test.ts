@@ -14,6 +14,7 @@ import {
 import { ACTION_TREE } from "../../../src/views/actionList";
 import {
   READER_TARGET_DIAGNOSIS_TITLE,
+  TARGET_READER_ENTRY_TITLE,
   buildReaderTypeGlossary,
   buildReaderTypeGlossaryPrompt,
   buildReaderTypePrompt,
@@ -107,7 +108,13 @@ describe("読者像が決まっていない作品", () => {
   });
 
   test("決め方（操作の名前）を添える", () => {
+    // 案内するのは**いまの入口**「ターゲット読者」（設計書6.108.6）。
+    // 旧「ターゲット読者診断」は詳細メニューから外したので、その名前で
+    // 案内すると作者はメニューで見つけられない
     expect(buildReaderTypeUnknownPrompt()).toContain(
+      `「${TARGET_READER_ENTRY_TITLE}」`
+    );
+    expect(buildReaderTypeUnknownPrompt()).not.toContain(
       READER_TARGET_DIAGNOSIS_TITLE
     );
   });
@@ -123,7 +130,7 @@ describe("読者像が決まっていない作品", () => {
    */
   test("押す場所（詳細メニューの道筋）が、実際の並びと一致する", () => {
     const prompt = buildReaderTypeUnknownPrompt();
-    const path = menuPathOf("novelai.runReaderTargetDiagnosis");
+    const path = menuPathOf("novelai.openTargetReader");
 
     expect(path.length).toBeGreaterThan(0);
     for (const label of path) {
@@ -157,6 +164,11 @@ describe("読者像が決まっていない作品", () => {
     );
 
     expect(found?.title).toBe(READER_TARGET_DIAGNOSIS_TITLE);
+
+    const entry = pkg.contributes.commands.find(
+      (command) => command.command === "novelai.openTargetReader"
+    );
+    expect(entry?.title).toBe(TARGET_READER_ENTRY_TITLE);
   });
 
   /**

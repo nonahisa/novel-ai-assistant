@@ -228,8 +228,9 @@ describe("材料の無い行・節は出さない", () => {
 
     expect(overlap).not.toContain("###");
     expect(overlap).toContain("いまはまだ、3つを突き合わせられません");
-    // 何を済ませると出るかを添える（診断への誘い）
-    expect(overlap).toContain("ターゲット読者診断");
+    // 何を済ませると出るかを添える（いまの入口「ターゲット読者」への誘い。
+    // 設計書6.108.6 で入口を1つにした）
+    expect(overlap).toContain("「ターゲット読者」");
   });
 
   test("6.86 の受容度・自信度は紙に出さない", () => {

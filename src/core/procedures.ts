@@ -284,11 +284,17 @@ export const PROCEDURES: readonly Procedure[] = [
     whenToRead:
       "「ターゲット読者診断」で読者層・読者型を決めるとき、" +
       "この作品を誰に向けて書いているかを確かめるとき",
+    /*
+      **押す先は「ターゲット読者」**（設計書6.108.6。入口を1つにした）。
+      旧「ターゲット読者診断」は詳細メニューから外したので、画面で指す
+      案内（6.104）が指せない。当てるための言葉（上の whenToRead）は
+      名前で頼まれる聞き方に合わせて残してある。
+    */
     steps: [
       {
-        command: "novelai.runReaderTargetDiagnosis",
-        why: "向けているつもりと、書けているものの差が分かる",
-        check: "11通りの区分から1つ出る。作品ごとに覚える",
+        command: "novelai.openTargetReader",
+        why: "狙い・書き方の判断・本文の実像の3段で、この作品の読者が決まる",
+        check: "1枚のシートが開き、11通りの区分との一致度が出る。作品ごとに覚える",
       },
     ],
   },
@@ -309,11 +315,13 @@ export const PROCEDURES: readonly Procedure[] = [
     whenToRead:
       "ターゲットシートで、狙いと実態のずれや、各読者層との一致度を見るとき、" +
       "読者層を広げる・絞るの向かう先を決めるとき",
+    // 押す先は「ターゲット読者」（6.108.6。旧「ターゲットシート」は
+    // 詳細メニューから外した。紙は同じものが開く）
     steps: [
       {
-        command: "novelai.openTargetSheet",
+        command: "novelai.openTargetReader",
         why: "狙いと実態の一致度、広げる・絞るの向かう先が1枚に出る",
-        check: "「狙い」の欄へ層の名前を書いて押し直すと、推移に1行増える",
+        check: "1段目で狙いを選び直すと、シートの推移に1行増える",
       },
     ],
   },

@@ -39,6 +39,8 @@ const CONFIRMING_FILES = [
   "proposeChapters.ts",
   "nameCheck.ts",
   "readerTargetDiagnosis.ts",
+  // タイトルとサブタイトルの適合度（P-41、設計書6.108.6）
+  "titleFit.ts",
 ] as const;
 
 /** 呼び出しの括弧の中身（文字列の中の括弧は数えない） */
@@ -117,6 +119,8 @@ const STARTING_FILES = [
   "generatePlot.ts",
   "nameCheck.ts",
   "readerTargetDiagnosis.ts",
+  // タイトルとサブタイトルの適合度（P-41、設計書6.108.6）
+  "titleFit.ts",
 ] as const;
 
 describe("「開始」の記録は確認のあとに書く", () => {

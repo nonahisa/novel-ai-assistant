@@ -109,6 +109,7 @@ describe("プロンプト設計書の形", () => {
     ["P-38", "src/prompts/readerTarget.ts", "READER_TARGET_VERSION"],
     ["P-39", "src/prompts/writerStyle.ts", "WRITER_STYLE_PROMPT_VERSION"],
     ["P-40", "src/prompts/readerAdvice.ts", "READER_ADVICE_VERSION"],
+    ["P-41", "src/prompts/titleFit.ts", "TITLE_FIT_VERSION"],
   ];
 
   test.each(IMPLEMENTED)(

@@ -50,8 +50,10 @@ import type { ReaderProfile } from "../models/readerProfile";
  * - 1.0: 初版（0.54.0）。実データでは未確認——作者の作品で測ってから調整する
  * - 1.1: 未診断のときの1行（`buildReaderTypeUnknownPrompt`）が案内する道順を、
  *   2026-09-23 のメニューの組み直しに合わせた（執筆支援 → 読者診断）
+ * - 1.2: 未診断のときの1行が案内する操作の名前を「ターゲット読者」へ
+ *   （0.82.0。入口を1つにした。設計書6.108.6）。実像を読む本文は変えていない
  */
-export const READER_TARGET_VERSION = "1.1";
+export const READER_TARGET_VERSION = "1.2";
 
 export const READER_TARGET_SYSTEM_PROMPT = `あなたは日本語の小説を読んで、「この作品は、どういう読者に向いた書き方をされているか」だけを答える装置です。
 
@@ -278,6 +280,17 @@ export function readerTypeSummary(id: ReaderTypeId): string {
 export const READER_TARGET_DIAGNOSIS_TITLE = "ターゲット読者診断";
 
 /**
+ * 読者を決める**いまの入口**の名前（設計書6.108.6。0.82.0 で診断・シート・
+ * 3つの輪を1つにまとめた）。
+ *
+ * **`package.json` の `novelai.openTargetReader` の `title` と同じ文字列で
+ * なければならない**（`readerTargetGlossary.test.ts` が突き合わせる）。
+ * 相談の案内はこちらを指す——旧「ターゲット読者診断」は詳細メニューから
+ * 外したので、その名前で案内すると作者はメニューで見つけられない。
+ */
+export const TARGET_READER_ENTRY_TITLE = "ターゲット読者";
+
+/**
  * 読者の区分の一覧（作者の実機報告、2026-09-21）。
  *
  * 相談で「読者型はわかりませんか？」と聞くと、年齢・性別といった一般論が
@@ -320,7 +333,7 @@ export function buildReaderTypeUnknownPrompt(): string {
   // 操作の名前だけを渡していたら、作者が「実行して」と頼み、AIが実行した
   // ふりをして答えた。**押すのは作者**なので、押す場所が要る
   return (
-    `【この作品の読者】まだ決めていません。「${READER_TARGET_DIAGNOSIS_TITLE}」` +
+    `【この作品の読者】まだ決めていません。「${TARGET_READER_ENTRY_TITLE}」` +
     "（詳細メニュー → 執筆支援 → 読者診断）で決められます。" +
     "相談の答えの下の「画面で案内してもらう」からも押せます。"
   );

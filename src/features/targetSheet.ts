@@ -34,12 +34,91 @@ import {
 import { openInDefaultEditor } from "../views/openDocument";
 import { warnWithLog } from "../views/notify";
 import { logFailure, logStep, useLogFile } from "../core/logger";
+import type { AuthorReaderProfile } from "../core/authorReaderType";
+import { targetSheetCircles } from "../core/targetSheetCircles";
+import { TARGET_READER_ENTRY_TITLE } from "../prompts/readerTarget";
+import {
+  parseTitleFitRecord,
+  TITLE_FIT_FILE,
+  type TitleFitRecord,
+} from "../core/titleFit";
 
 /**
- * ターゲットシートを作り直して開く（設計書6.108、第1段と第2段）。
+ * 「ターゲット読者」の入口の名前。**写しを作らない**——相談の案内
+ * （`prompts/readerTarget.ts`）と同じ定数を使い、`package.json` の title との
+ * 一致はテストが見張る。
+ */
+export const TARGET_READER_TITLE = TARGET_READER_ENTRY_TITLE;
+
+/** シートの置き場と、いまの中身 */
+export interface TargetSheetState {
+  readonly settings: string;
+  readonly sheetPath: string;
+  /** いま置いてある紙。**無ければ `undefined`** */
+  readonly existing?: string;
+  /**
+   * 作者が自分で置いた同名のファイルか（印が無い）。
+   * **そうなら書かない**——狙いを書き込むこともしない。
+   */
+  readonly authorOwned: boolean;
+  /** 運び直す作者の欄。紙が無ければ初期値 */
+  readonly authorBlock: string;
+}
+
+/** シートの置き場と作者の欄を読む（書かない） */
+export async function readTargetSheetState(
+  work: WorkEntry
+): Promise<TargetSheetState> {
+  const config = await readWorkConfig(work);
+  const settings = workPaths(work, config).settings;
+  const sheetPath = path.join(settings, TARGET_SHEET_FILE);
+  const existing = await readTextIfExists(sheetPath);
+  const authorOwned = existing !== undefined && !isTargetSheetDoc(existing);
+  const authorBlock =
+    existing === undefined || authorOwned
+      ? DEFAULT_AUTHOR_BLOCK
+      : (extractAuthorBlock(existing) ?? DEFAULT_AUTHOR_BLOCK);
+  return { settings, sheetPath, existing, authorOwned, authorBlock };
+}
+
+/**
+ * 作者が置いた同名のファイルがあるときの断り（書かずに開いて見せる）。
+ * 設定資料の `GENERATED_MARKER` と同じ考え方——上書きしてから謝っても
+ * 文章は戻らない。
+ */
+export async function refuseAuthorOwnedSheet(
+  state: TargetSheetState
+): Promise<void> {
+  await warnWithLog(
+    `設定/${TARGET_SHEET_FILE} は作者が書いたファイルのようです。上書きを避けるため作り直しませんでした。` +
+      "　名前を変えて避けてから、もう一度お試しください。"
+  );
+  await openInDefaultEditor(state.sheetPath, { preview: false });
+}
+
+export interface OpenTargetSheetOptions {
+  /**
+   * 作者の欄をこれに差し替えて作る（「ターゲット読者」の1段目で狙いを
+   * 選んだとき）。渡さなければ、いまの紙から運び直す。
+   */
+  readonly authorBlock?: string;
+  /** 作者自身の読者タイプ（3つの輪の1つ）。**未診断なら渡さない** */
+  readonly authorReader?: AuthorReaderProfile;
+  /** 3段目で読み取れなかった軸の呼び名 */
+  readonly unmeasured?: readonly string[];
+  /**
+   * 読者像（いま答えた段を含むもの）。渡さなければ台帳から読む。
+   * 台帳へ保存できなかったときも、答えた段をシートに載せるため。
+   */
+  readonly profile?: ReaderProfile;
+}
+
+/**
+ * ターゲットシートを作り直して開く（設計書6.108・6.108.6）。
  *
- * **AIを1度も呼ばない。** 材料は読者像の台帳（`設定/読者像.json`）と、
- * 作者が手で書いた「狙い」の欄だけである。助言（第3段）は次の版。
+ * **ここではAIを呼ばない。** 材料は読者像の台帳（`設定/読者像.json`）・
+ * 作者の欄（狙いと理由）・作者自身の読者タイプ・タイトルの適合度の記録
+ * （測ったときに残したもの）である。助言（第3段）は次の版。
  *
  * ## 書くのは2つだけ
  *
@@ -50,51 +129,40 @@ import { logFailure, logStep, useLogFile } from "../core/logger";
  *
  * ## 実行したふりをしない（6.107の教訓）
  *
- * 読者像がまだ無ければ、**紙を作らずに止めて**「先に『ターゲット読者
- * 診断』を」と言う。空の紙を置くと、作者は「出たのに中身が無い」という
- * 一番分かりにくい形に出くわす。
+ * 狙いも読者像もまだ無ければ、**紙を作らずに止めて**「先に『ターゲット
+ * 読者』を」と言う。空の紙を置くと、作者は「出たのに中身が無い」という
+ * 一番分かりにくい形に出くわす。**狙いだけなら作る**（設計書6.108.6：
+ * 狙いだけでも一致度は出ないが、狙いの記録と推移は残る）。
  */
-export async function openTargetSheet(work: WorkEntry): Promise<boolean> {
+export async function openTargetSheet(
+  work: WorkEntry,
+  options: OpenTargetSheetOptions = {}
+): Promise<boolean> {
   useLogFile(work.folderPath);
 
-  const profile = await loadProfile(work);
+  const profile = options.profile ?? (await loadProfile(work));
   if (!profile) return false;
 
+  const state = await readTargetSheetState(work);
+  if (state.authorOwned) {
+    await refuseAuthorOwnedSheet(state);
+    return false;
+  }
+  const { settings, sheetPath } = state;
+  const authorBlock = options.authorBlock ?? state.authorBlock;
+  const aim = readAimTypes(authorBlock);
+
   const basis = sheetBasis(profile);
-  if (!basis) {
+  if (!basis && aim.length === 0) {
     await warnWithLog(
-      `${TARGET_SHEET_TITLE}：この作品の読者像がまだありません。` +
-        "先に「ターゲット読者診断」を済ませてください。" +
-        "　そのあとでもう一度この操作を押すと、11の読者層との一致度が出ます。"
+      `${TARGET_SHEET_TITLE}：この作品の狙いも読者像もまだありません。` +
+        `先に「${TARGET_READER_TITLE}」で、狙い（どんな読者に読んでもらいたいか）を` +
+        "選ぶか、書き方の判断に答えてください。"
     );
     return false;
   }
 
-  const config = await readWorkConfig(work);
-  const settings = workPaths(work, config).settings;
-  const sheetPath = path.join(settings, TARGET_SHEET_FILE);
-
-  const existing = await readTextIfExists(sheetPath);
-  if (existing !== undefined && !isTargetSheetDoc(existing)) {
-    // 作者が自分で置いた同名のファイルを、黙って作り直さない
-    // （設定資料の `GENERATED_MARKER` と同じ考え方）
-    await warnWithLog(
-      `設定/${TARGET_SHEET_FILE} は作者が書いたファイルのようです。上書きを避けるため作り直しませんでした。` +
-        "　名前を変えて避けてから、もう一度お試しください。"
-    );
-    await openInDefaultEditor(sheetPath, { preview: false });
-    return false;
-  }
-
-  const authorBlock =
-    existing === undefined
-      ? DEFAULT_AUTHOR_BLOCK
-      : (extractAuthorBlock(existing) ?? DEFAULT_AUTHOR_BLOCK);
-
-  const sheet = targetSheetFor({
-    aim: readAimTypes(authorBlock),
-    scores: basis.scores,
-  });
+  const sheet = targetSheetFor({ aim, scores: basis?.scores });
 
   const notices: string[] = [];
   const historyDir = path.join(
@@ -103,15 +171,24 @@ export async function openTargetSheet(work: WorkEntry): Promise<boolean> {
     TARGET_SHEET_HISTORY_SUBDIR
   );
   const at = new Date();
-  const history = await recordHistory(historyDir, sheet, basis.source, at, notices);
+  const history = await recordHistory(historyDir, sheet, basis?.source, at, notices);
+  const titleFit = await readTitleFitRecord(settings, notices);
 
   const doc = buildTargetSheetDoc({
     workTitle: work.title,
     sheet,
     authorBlock,
-    source: basis.source,
+    source: basis?.source,
     history,
     notices,
+    profile,
+    unmeasured: options.unmeasured,
+    circles: targetSheetCircles({
+      authorReader: options.authorReader,
+      aim,
+      actual: profile.actual,
+    }),
+    titleFit,
     generatedAt: at,
   });
 
@@ -182,7 +259,7 @@ function sheetBasis(
 async function recordHistory(
   historyDir: string,
   sheet: TargetSheet,
-  source: ReaderChatSource,
+  source: ReaderChatSource | undefined,
   at: Date,
   notices: string[]
 ): Promise<TargetSheetHistoryEntry[]> {
@@ -263,6 +340,39 @@ async function readHistory(
     );
   }
   return sortTargetSheetHistory(entries);
+}
+
+/** 適合度の記録の置き場（`設定/ターゲットシート/適合度.json`） */
+export function titleFitPath(settings: string): string {
+  return path.join(settings, TARGET_SHEET_HISTORY_DIR, TITLE_FIT_FILE);
+}
+
+/**
+ * 適合度の記録を読む。**無ければ `undefined`**。
+ *
+ * 読めない（壊れている）ときも `undefined` だが、**断り書きを残す**
+ * ——控えと同じで、記録1つのせいでシートがまるごと出ないほうが困る。
+ * 直しはしない（作者が見て決める）。
+ */
+export async function readTitleFitRecord(
+  settings: string,
+  notices: string[]
+): Promise<TitleFitRecord | undefined> {
+  const text = await readTextIfExists(titleFitPath(settings));
+  if (text === undefined) return undefined;
+  let record: TitleFitRecord | undefined;
+  try {
+    record = parseTitleFitRecord(JSON.parse(text));
+  } catch {
+    record = undefined;
+  }
+  if (!record) {
+    notices.push(
+      `設定/${TARGET_SHEET_HISTORY_DIR}/${TITLE_FIT_FILE} を読めませんでした（こちらでは直しません）。` +
+        "適合度の欄は空にしてあります。"
+    );
+  }
+  return record;
 }
 
 /** ファイルを読む。**無ければ `undefined`**（空文字と区別する） */

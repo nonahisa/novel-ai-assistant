@@ -121,12 +121,21 @@ export type ReaderQuestion = ThreeAxisQuestion<ReaderAxis>;
  *
  * **願望ではなく、書くときの判断を聞く。** 「どんな読者に読んで
  * ほしいか」は答えやすいが当たらない。判断なら本文と突き合わせられる。
+ *
+ * **文は「あなたはこの作品で〜していますか」の形に揃える**（設計書6.108.6、
+ * 作者の指摘 2026-09-22 未明）。答える主体（作者）と対象（この作品）が
+ * ぼやけていると、読者の好みを聞かれたのか作品の書き方を聞かれたのかが
+ * 分からない。願望（どんな読者に読んでもらいたいか）は「ターゲット読者」の
+ * 1段目（狙い）で別に聞くので、ここへは混ぜない。
+ *
+ * **選択肢と点数は変えない。** 答えは選んだ番号で台帳に残っており、
+ * 並びを動かすと前回の答えが別の意味になる。
  */
 export const READER_QUESTIONS: ReaderQuestion[] = [
   {
     id: "A1",
     axis: "familiarity",
-    text: "その題材のお約束（いわゆるテンプレ）を、どう扱っていますか",
+    text: "あなたはこの作品で、その題材のお約束（いわゆるテンプレ）をどう扱っていますか",
     choices: [
       { label: "ていねいになぞる。初めての人でも分かるように", score: 0 },
       { label: "なぞるが、一部は自分の形に変えている", score: 1 },
@@ -136,7 +145,7 @@ export const READER_QUESTIONS: ReaderQuestion[] = [
   {
     id: "A2",
     axis: "familiarity",
-    text: "作品の中だけの言葉（造語・独自の用語）が出たとき、説明をどうしていますか",
+    text: "あなたはこの作品で、作品の中だけの言葉（造語・独自の用語）の説明をどうしていますか",
     choices: [
       { label: "その場で説明を入れる", score: 0 },
       { label: "話の流れの中で分かるようにする", score: 1 },
@@ -146,7 +155,7 @@ export const READER_QUESTIONS: ReaderQuestion[] = [
   {
     id: "A3",
     axis: "familiarity",
-    text: "似た作品を読んだことがない人が読んだら、と考えることはありますか",
+    text: "あなたはこの作品を書くとき、似た作品を読んだことがない人が読んだら、と考えていますか",
     choices: [
       { label: "いつも考える。そこが基準になっている", score: 0 },
       { label: "ときどき考える", score: 1 },
@@ -156,7 +165,7 @@ export const READER_QUESTIONS: ReaderQuestion[] = [
   {
     id: "B1",
     axis: "posture",
-    text: "1話の長さを、どう決めていますか",
+    text: "あなたはこの作品で、1話の長さをどう決めていますか",
     choices: [
       { label: "短く。移動中に1話読み切れる長さにする", score: 0 },
       { label: "話の切れ目で決める。長さは成り行き", score: 1 },
@@ -166,7 +175,7 @@ export const READER_QUESTIONS: ReaderQuestion[] = [
   {
     id: "B2",
     axis: "posture",
-    text: "話の終わりに、次を読ませる引きを作っていますか",
+    text: "あなたはこの作品で、話の終わりに次を読ませる引きを作っていますか",
     choices: [
       { label: "毎回つくる。引きが無いと次が読まれない", score: 0 },
       { label: "つくる話と、つくらない話がある", score: 1 },
@@ -176,7 +185,7 @@ export const READER_QUESTIONS: ReaderQuestion[] = [
   {
     id: "B3",
     axis: "posture",
-    text: "前の話を忘れている読者を、どれくらい見込んでいますか",
+    text: "あなたはこの作品で、前の話を忘れている読者をどれくらい見込んでいますか",
     choices: [
       { label: "忘れている前提。要ることは毎回書き直す", score: 0 },
       { label: "大事なところだけ思い出せるようにする", score: 1 },
@@ -186,7 +195,7 @@ export const READER_QUESTIONS: ReaderQuestion[] = [
   {
     id: "C1",
     axis: "craving",
-    text: "主人公がひどい目に遭う場面を、どこまで書きますか",
+    text: "あなたはこの作品で、主人公がひどい目に遭う場面をどこまで書いていますか",
     choices: [
       { label: "長くは続けない。すぐ報われるようにする", score: 0 },
       { label: "必要なだけ書く", score: 1 },
@@ -196,7 +205,7 @@ export const READER_QUESTIONS: ReaderQuestion[] = [
   {
     id: "C2",
     axis: "craving",
-    text: "読み終わったあと、読者にどう感じてほしいですか",
+    text: "あなたはこの作品で、読み終わった読者がどう感じる終わり方にしていますか",
     choices: [
       { label: "すっきりしてほしい", score: 0 },
       { label: "満ち足りていてほしい", score: 1 },
@@ -206,7 +215,7 @@ export const READER_QUESTIONS: ReaderQuestion[] = [
   {
     id: "C3",
     axis: "craving",
-    text: "結末を決めるとき、何を優先しますか",
+    text: "あなたはこの作品で、結末を決めるときに何を優先していますか",
     choices: [
       { label: "気持ちよく終わること", score: 0 },
       { label: "物語として筋が通ること", score: 1 },

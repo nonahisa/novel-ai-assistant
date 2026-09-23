@@ -517,7 +517,7 @@ function readersSection(input: ThreeCirclesInput): string[] {
 
   if (rows.length === 0) {
     lines.push(
-      "まだ分かりません。「ターゲット読者診断」でお答えいただくと、ここに出ます。投稿サイトの数字を控えていれば、届いている反応もここに並びます。",
+      "まだ分かりません。「ターゲット読者」で書き方の判断に答えるか本文の実像を読むと、ここに出ます。投稿サイトの数字を控えていれば、届いている反応もここに並びます。",
       ""
     );
     return lines;
@@ -558,7 +558,7 @@ function missingLines(input: ThreeCirclesInput): string[] {
     missing.push("あなた自身の読者タイプ（9問。「あなた自身の読者タイプ」）");
   }
   if (!input.profile?.declared && !input.profile?.actual) {
-    missing.push("この作品の宛先と実像（「ターゲット読者診断」）");
+    missing.push("この作品の宛先と実像（「ターゲット読者」の2段目・3段目）");
   }
 
   if (missing.length === 0) {

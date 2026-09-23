@@ -226,6 +226,9 @@ const STEP_DEFS: readonly StepDef[] = [
       "novelai.checkNotation",
       "novelai.checkProofread",
       "novelai.checkOpening",
+      // 「ターゲット読者」（設計書6.108.6）。冒頭診断の隣——詳細メニューの
+      // 「読者診断」と同じ並び。診断・シート・3つの輪はこの1つに統合した
+      "novelai.openTargetReader",
       "novelai.checkDeviations",
       // 矛盾検知は入口1つ（設定との照合と話どうしの照合を、押してから選ぶ。
       // 作者の裁定、2026-09-23）

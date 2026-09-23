@@ -597,6 +597,8 @@ describe("取りやめを名乗れる段が、行き渡っていること", () =
       // `readerTargetDiagnosis.ts` が印を返す（0.74.12。手順書きの段に
       // なったので、取りやめ・済んだを名乗るようにした）
       "novelai.runReaderTargetDiagnosis",
+      // `targetReader.ts` が印を返す（設計書6.108.6。読者の手順書き2本の段）
+      "novelai.openTargetReader",
     ]);
     const silent = [...new Set(PROCEDURE_REFERENCED_COMMANDS)].filter(
       (command) =>

@@ -255,7 +255,15 @@ async function chooseStep(
  * 数は、答えている最中の見出しに事実として出す。
  */
 export async function askReaderQuestions(
-  previous?: number[]
+  previous?: number[],
+  /**
+   * 窓の見出し（何問目かを受け取って返す）。「ターゲット読者」の2段目
+   * （設計書6.108.6）から呼ぶときに、段の名前を見出しへ出すため。
+   * 渡さなければ、これまでどおり「ターゲット読者診断 1/9」。
+   */
+  titleOf: (index: number, total: number) => string = (index, total) =>
+    `ターゲット読者診断 ${index + 1}/${total}`,
+  cancelLabel = "診断をやめる"
 ): Promise<number[] | undefined> {
   const answers: number[] = [];
 
@@ -269,10 +277,10 @@ export async function askReaderQuestions(
             choiceIndex === before ? "$(check) 前回の答え" : undefined,
           value: choiceIndex,
         })),
-        cancelItem("診断をやめる"),
+        cancelItem(cancelLabel),
       ],
       {
-        title: `ターゲット読者診断 ${index + 1}/${READER_QUESTIONS.length}`,
+        title: titleOf(index, READER_QUESTIONS.length),
         placeHolder: question.text,
         // 選んでいる途中で別の窓へ目を移しても消えないようにする
         ignoreFocusOut: true,
@@ -286,19 +294,22 @@ export async function askReaderQuestions(
   return answers;
 }
 
-interface ReadResult {
+export interface ReadResult {
   reading: ReaderTargetReading;
   basis: string;
   model: string;
 }
 
 /**
- * 本文から実像を読む。
+ * 本文から実像を読む（P-38）。
  *
  * 戻り値は3通り。**「取りやめた」と「読めなかった」を分ける**——
  * 取りやめなら何も出さず、読めなかったら宣言だけで紙を出す。
+ *
+ * 「ターゲット読者」の3段目（設計書6.108.6）からも呼ぶ。読み方・確認・
+ * 検算を2つ持たないため、ここを外へ出してある。
  */
-async function readFromWork(
+export async function readFromWork(
   work: WorkEntry,
   registry: AIRegistry
 ): Promise<ReadResult | undefined | "cancelled"> {
