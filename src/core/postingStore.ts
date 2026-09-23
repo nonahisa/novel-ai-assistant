@@ -53,7 +53,13 @@ export class PostingStoreError extends Error {
     message: string,
     readonly kind: PostingStoreErrorKind,
     /** 作者に見せる場所。通知から開けるようにするために持つ */
-    readonly filePath?: string
+    readonly filePath?: string,
+    /**
+     * 台帳を読み込んだ時刻（ISO。外部変更で止めたときだけ持つ。0.81.4）。
+     * **どれだけ開いたまま待っていたか**を、ログから追えるようにする——
+     * 実機では、2択を開いている間に別の取り込みが書いていた
+     */
+    readonly loadedAt?: string
   ) {
     super(message);
     this.name = "PostingStoreError";
@@ -70,6 +76,8 @@ export class PostingStore {
    */
   private snapshot: string | null = null;
   private loaded = false;
+  /** 読み込んだ時刻。外部変更で止めたときにログへ残す（0.81.4） */
+  private loadedAt: string | undefined;
   /**
    * 読み込みで読み飛ばした、読者の反応の行（JSONそのままの形。0.33.9）。
    *
@@ -105,6 +113,7 @@ export class PostingStore {
     const target = await this.filePath();
     this.loaded = false;
     this.snapshot = null;
+    this.loadedAt = new Date().toISOString();
     // 前に読んだ台帳の行を、別の台帳へ持ち込まない
     this.skippedReaderStatsRows = [];
 
@@ -278,7 +287,8 @@ export class PostingStore {
       throw new PostingStoreError(
         externalChangeMessage("読み込んだあとに削除されました"),
         "modified_externally",
-        target
+        target,
+        this.loadedAt
       );
     }
 
@@ -286,7 +296,8 @@ export class PostingStore {
       throw new PostingStoreError(
         externalChangeMessage("読み込んだあとに作られました"),
         "modified_externally",
-        target
+        target,
+        this.loadedAt
       );
     }
 
@@ -294,7 +305,8 @@ export class PostingStore {
       throw new PostingStoreError(
         externalChangeMessage("外部で変更されています"),
         "modified_externally",
-        target
+        target,
+        this.loadedAt
       );
     }
   }
@@ -314,13 +326,21 @@ export class PostingStore {
   }
 }
 
-/** 外部変更で止めたときの言い方。作者が次に何をすればよいかまで書く */
+/**
+ * 外部変更で止めたときの言い方。作者が次に何をすればよいかまで書く。
+ *
+ * **「別の端末から」と決め打ちしない**（0.81.4）。実機で止まったときは、
+ * 31秒前に**同じ機械**でヘルパーからの読者の反応の取り込みが書いていた。
+ * 書き換える道は、同期・ヘルパーからの取り込み・手での編集と複数あり、
+ * どれだったかはこちらには分からない——例を並べるだけにする。
+ * やり直せば読み直してから保存するので、次の操作は「もう一度」でよい。
+ */
 function externalChangeMessage(reason: string): string {
   return (
     `投稿の記録（${POSTING_FILE}）が${reason}。` +
     "こちらの内容で上書きしないよう保存を中止しました。" +
-    "別の端末から投稿した記録が届いている可能性があります。" +
-    "同期してから、もう一度お試しください。"
+    "ほかの操作（同期・ヘルパーからの取り込み・手での編集など）が先に書き換えています。" +
+    "もう一度お試しください（読み直してから保存します）。"
   );
 }
 

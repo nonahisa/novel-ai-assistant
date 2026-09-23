@@ -205,8 +205,8 @@ export async function postNewEpisode(
     // **1サイトごとに書く**（まとめて最後に書かない）。途中で閉じても、
     // そこまで出したことは残る。台帳の保存はハッシュ照合つき
     const next = withPost(ledger, postTarget, site, new Date().toISOString());
-    if (!(await save(store, work, next))) {
-      // 別の端末から同期が降りてきた等。ここで止める——読み直さずに
+    if (!(await save(store, work, next, "投稿済みの記録（投稿キット）"))) {
+      // 同期やヘルパーからの取り込みが先に書いた等。ここで止める——読み直さずに
       // 続けると、こちらの古い手持ちで次のサイトぶんも上書きしてしまう
       return { changed };
     }
@@ -406,7 +406,9 @@ async function setUpPosting(
   if (!entries || entries.length === 0) return undefined;
 
   const withNewSites = withSites(ledger, entries);
-  if (!(await save(store, work, withNewSites))) return undefined;
+  if (!(await save(store, work, withNewSites, "投稿先の登録（投稿キットの初回）"))) {
+    return undefined;
+  }
 
   const next = await applyBaseline(store, work, withNewSites, episodes, format);
   return { ledger: next ?? withNewSites, changed: true };
@@ -467,7 +469,9 @@ export async function configurePostingSites(
   }
 
   const withNewSites = next;
-  if (!(await save(store, work, withNewSites))) return { changed: false };
+  if (!(await save(store, work, withNewSites, "投稿先の設定"))) {
+    return { changed: false };
+  }
   notifyDone(
     chosen.length === 0
       ? `${work.title} の投稿先をすべて外しました（記録は残っています）。`
@@ -767,7 +771,7 @@ export async function recordRanking(
     // 捨てるほうが、作者にとっては大きな損である）
     ...(note?.trim() ? { note: note.trim() } : {}),
   });
-  if (!(await save(store, work, next))) return { changed: false };
+  if (!(await save(store, work, next, "順位の記録"))) return { changed: false };
 
   void vscode.window.showInformationMessage(
     `${info.label} ${board} ${rank}位 を記録しました。` +
@@ -931,7 +935,7 @@ async function applyBaseline(
   );
   const added = next.posts.length - ledger.posts.length;
   if (added === 0) return undefined;
-  if (!(await save(store, work, next))) return undefined;
+  if (!(await save(store, work, next, "投稿済みの基準線"))) return undefined;
 
   void vscode.window.showInformationMessage(
     `${episodeLabelOf(episodes[picked.upto - 1], format)} までを、` +
@@ -1115,13 +1119,18 @@ async function load(
 async function save(
   store: PostingStore,
   work: WorkEntry,
-  ledger: PostingLedger
+  ledger: PostingLedger,
+  /**
+   * 何の保存か（0.81.4）。**ログに残す。** 実機で「外部で変更」で止まったとき、
+   * 「投稿状態の保存」とだけあって、どの操作の保存が止まったのか追えなかった
+   */
+  purpose: string
 ): Promise<boolean> {
   try {
     await store.save(ledger);
     return true;
   } catch (error) {
-    await report("投稿状態の保存", work, error);
+    await report("投稿状態の保存", work, error, purpose);
     return false;
   }
 }
@@ -1130,13 +1139,17 @@ async function save(
 async function report(
   what: string,
   work: WorkEntry,
-  error: unknown
+  error: unknown,
+  purpose?: string
 ): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
   useLogFile(work.folderPath);
   logFailure(what, {
     作品: work.title,
+    保存しようとしたもの: purpose,
     種類: error instanceof PostingStoreError ? error.kind : "unknown",
+    読み込んだ時刻:
+      error instanceof PostingStoreError ? error.loadedAt : undefined,
     内容: message,
   });
   await vscode.window.showErrorMessage(message);

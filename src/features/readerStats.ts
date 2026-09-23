@@ -115,7 +115,7 @@ export async function importReaderStats(
   options: ImportReaderStatsOptions = {}
 ): Promise<ReaderStatsResult> {
   const store = new PostingStore(work);
-  const ledger = await load(store, work);
+  let ledger = await load(store, work);
   if (!ledger) return UNCHANGED;
   const say = (message: string): string =>
     options.announceWork ? `「${work.title}」：${message}` : message;
@@ -150,6 +150,17 @@ export async function importReaderStats(
     // コピーしてきていることがある（そのときに読み直さないと、押しても
     // 何も起きないのと同じになる）
     parsed = parseReaderStatsPaste(await vscode.env.clipboard.readText());
+    /*
+      **台帳も読み直す**（0.81.4。実機、教科書チート_確認用 2026-09-22）。
+      2択は焦点が外れても閉じないので、作者がブラウザでヘルパーを押している
+      間に、ヘルパーの合図（URI）や VS Code へ戻ったときの取り込みが**先に
+      同じ台帳へ書く**。2択の前に読んだ台帳のまま積むと、保存の照合で
+      「外部で変更」と止まっていた（守りは正しいが、作者には理由が見えない）。
+      読み直せば、先に取り込まれた分は「すでに取り込んだ数と同じ」になる
+    */
+    const reloaded = await load(store, work);
+    if (!reloaded) return UNCHANGED;
+    ledger = reloaded;
   }
 
   if (!parsed.ok) {
@@ -229,7 +240,7 @@ export async function importReaderStats(
     return UNCHANGED;
   }
 
-  if (!(await save(store, work, next))) return UNCHANGED;
+  if (!(await save(store, work, next, "読者の反応の取り込み"))) return UNCHANGED;
 
   void vscode.window.showInformationMessage(
     say(
@@ -613,7 +624,7 @@ export async function recordReaderStats(
     metrics,
     source: "manual",
   });
-  if (!(await save(store, work, next))) return UNCHANGED;
+  if (!(await save(store, work, next, "読者の反応の手入力"))) return UNCHANGED;
 
   void vscode.window.showInformationMessage(
     `${info.label} の読者の反応を記録しました（${formatReaderStatsMetrics(metrics)}）。` +
@@ -787,13 +798,15 @@ async function load(
 async function save(
   store: PostingStore,
   work: WorkEntry,
-  ledger: PostingLedger
+  ledger: PostingLedger,
+  /** 何の保存か。**ログに残す**（`postingKit.ts` の `save` と同じ。0.81.4） */
+  purpose: string
 ): Promise<boolean> {
   try {
     await store.save(ledger);
     return true;
   } catch (error) {
-    await report("投稿状態の保存", work, error);
+    await report("投稿状態の保存", work, error, purpose);
     return false;
   }
 }
@@ -802,14 +815,18 @@ async function save(
 async function report(
   what: string,
   work: WorkEntry,
-  error: unknown
+  error: unknown,
+  purpose?: string
 ): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
   // **記録の直前に書き先を向ける**（0.43.3 と同じ）
   useLogFile(work.folderPath);
   logFailure(what, {
     作品: work.title,
+    保存しようとしたもの: purpose,
     種類: error instanceof PostingStoreError ? error.kind : "unknown",
+    読み込んだ時刻:
+      error instanceof PostingStoreError ? error.loadedAt : undefined,
     内容: message,
   });
   await vscode.window.showErrorMessage(message);

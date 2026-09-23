@@ -162,6 +162,30 @@ describe("投稿状態の台帳の読み書き", () => {
     expect(disk.get(ledgerPath)).toEqual(outside);
   });
 
+  /*
+    0.81.4（実機、教科書チート_確認用 2026-09-22 12:07:10）：止まった案内が
+    「別の端末から投稿した記録が届いている可能性があります」と言ったが、
+    実際は31秒前に**同じ機械**でヘルパーからの読者の反応の取り込みが同じ台帳へ
+    書いていた。止める守りは正しい。**言い方を「別の端末」に決め打ちしない。**
+  */
+  test("外部変更の案内は「別の端末」と決め打ちせず、ほかの操作の例を並べる", async () => {
+    const store = new PostingStore(work);
+    const ledger = await store.load();
+    disk.set(ledgerPath, utf8(JSON.stringify({ posts: [] })));
+
+    const error = await store.save(ledger).then(
+      () => undefined,
+      (caught: unknown) => caught
+    );
+    expect(error).toBeInstanceOf(PostingStoreError);
+    const message = (error as PostingStoreError).message;
+    expect(message).not.toContain("別の端末から投稿した記録");
+    expect(message).toContain("ほかの操作");
+    expect(message).toContain("ヘルパーからの取り込み");
+    // 読み込んだ時刻を持たせる（どれだけ開いたままだったかをログで追えるように）
+    expect((error as PostingStoreError).loadedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
   test("壊れたJSONは修復しない（読めないと言って止まる）", async () => {
     disk.set(ledgerPath, utf8("{ posts: 壊れている"));
     const store = new PostingStore(work);
