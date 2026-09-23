@@ -7,7 +7,6 @@ import {
   parseReaderStatsValue,
   postingSiteInfo,
   readerStatsMetricsFor,
-  repeatsReaderStats,
   siteProfile,
   validateReaderStatsEpisode,
   validateReaderStatsValue,
@@ -21,11 +20,21 @@ import {
 } from "../models/posting";
 import { PostingStore, PostingStoreError } from "../core/postingStore";
 import {
+  applyReaderStatsEnvelope,
   matchReaderStatsEnvelope,
-  parseReaderStatsEnvelope,
-  readerStatsRecordsFromEnvelope,
+  parseReaderStatsPaste,
   readerStatsSourceLabel,
+  type ReaderStatsApplied,
+  type ReaderStatsBundle,
+  type ReaderStatsEnvelope,
 } from "../core/readerStatsEnvelope";
+import {
+  readerStatsBundleItemLabel,
+  readerStatsBundleNotice,
+  routeReaderStatsBundleItem,
+  type ReaderStatsBundleFailure,
+  type ReaderStatsBundleWorkOutcome,
+} from "../core/readerStatsHelperLink";
 // 管理画面のURLを組むのは core（画面を出さずに確かめられるようにする）
 import { readerStatsPageUrl } from "../core/postingSiteUrls";
 import { formatReaderStatsMetrics } from "../core/postingSiteRecords";
@@ -62,6 +71,11 @@ import { configurePostingSites } from "./postingKit";
 export interface ReaderStatsResult {
   /** 台帳を書き換えたか。呼ぶ側が執筆量パネルを作り直すのに使う */
   changed: boolean;
+  /**
+   * 書き換えた作品（まとめて渡された分を取り込んだときだけ入る）。
+   * 選んだ作品とは限らない——振り分けた先の執筆量パネルを作り直すのに使う
+   */
+  changedWorks?: readonly WorkEntry[];
 }
 
 const UNCHANGED: ReaderStatsResult = { changed: false };
@@ -81,6 +95,11 @@ export interface ImportReaderStatsOptions {
    * どこにも出ていない。
    */
   announceWork?: boolean;
+  /**
+   * 登録した作品ぜんぶ。**まとめて渡された読者の反応**（ヘルパー 0.9.0）を
+   * 貼り付けたとき、作品ごとに振り分ける先になる。渡さなければ選んだ作品だけ。
+   */
+  works?: readonly WorkEntry[];
 }
 
 /**
@@ -100,7 +119,7 @@ export async function importReaderStats(
   const say = (message: string): string =>
     options.announceWork ? `「${work.title}」：${message}` : message;
 
-  let parsed = parseReaderStatsEnvelope(
+  let parsed = parseReaderStatsPaste(
     options.clipboardText ?? (await vscode.env.clipboard.readText())
   );
 
@@ -125,7 +144,7 @@ export async function importReaderStats(
     // **もう一度クリップボードを読む。** 2択を出している間に貼り込み係で
     // コピーしてきていることがある（そのときに読み直さないと、押しても
     // 何も起きないのと同じになる）
-    parsed = parseReaderStatsEnvelope(await vscode.env.clipboard.readText());
+    parsed = parseReaderStatsPaste(await vscode.env.clipboard.readText());
   }
 
   if (!parsed.ok) {
@@ -142,6 +161,20 @@ export async function importReaderStats(
     return UNCHANGED;
   }
 
+  /*
+    **まとめて渡された分（ヘルパー 0.9.0 の「まとめて渡す」）なら、作品ごとに振り分ける。**
+    選んだ作品だけに入れると、ほかの作品の画面は取り込めないまま捨てられる
+    ——作者は1回貼り付ければ済むと思っている。振り分けの先は登録した作品ぜんぶ
+    （呼ぶ側が渡さなければ、選んだ作品だけ）。
+  */
+  if (parsed.kind === "bundle") {
+    const works = options.works ?? [work];
+    return importReaderStatsBundle(
+      parsed.bundle,
+      works.some((entry) => entry.id === work.id) ? works : [work, ...works]
+    );
+  }
+
   // **取り違えを止めるのが、書き込む前の最後の関所**（6.79.7の4）。
   // 別の作品の管理画面を開いたまま押すことは現実に起きる
   const mismatch = matchReaderStatsEnvelope(parsed.envelope, ledger);
@@ -152,33 +185,27 @@ export async function importReaderStats(
 
   const info = postingSiteInfo(parsed.envelope.site);
   const sourceLabel = readerStatsSourceLabel(parsed.envelope.source);
-  // 記録の組み方（メモの書き方を含む）は core が持つ。自動取り込みの
-  // 「もう取り込んだか」の見分けと同じ記録を見るため
-  const records = readerStatsRecordsFromEnvelope(parsed.envelope);
-  let next = ledger;
   /*
     **同じ数の繰り返しは積まない**（残課題 B11 の続き、作者の裁定「同じ表を2度
     取り込んでも二重に積まない」）。Narou.fun の日ごとの表もカクヨムの日ごとの
     PV も直近30日なので、毎日取り込むと29日ぶんが前の回と重なる（見分けは
     サイトで分けず `repeatsReaderStats` の1か所）。どれを積まなかったかは件数で
     言う（黙って減らさない）。
+
+    積み方は core の `applyReaderStatsEnvelope` の1か所——まとめて渡された分
+    （`importReaderStatsBundle`）も同じところを通る。記録の組み方（メモの書き方を
+    含む）も core が持つ。自動取り込みの「もう取り込んだか」の見分けと同じ記録を見るため。
   */
-  let repeated = 0;
+  let applied: ReaderStatsApplied;
   try {
-    for (const record of records) {
-      if (repeatsReaderStats(next, record)) {
-        repeated++;
-        continue;
-      }
-      next = withReaderStats(next, record);
-    }
+    applied = applyReaderStatsEnvelope(ledger, parsed.envelope);
   } catch (error) {
     // 封筒の検証を通っていれば来ないが、黙って落とさない
     await report("読者の反応の取り込み", work, error);
     return UNCHANGED;
   }
+  const { ledger: next, added, repeated } = applied;
 
-  const added = records.length - repeated;
   if (added === 0) {
     // 何も書かない（保存もしない）。押したのに何も起きない、にならないよう理由を言う
     void vscode.window.showInformationMessage(
@@ -203,6 +230,163 @@ export async function importReaderStats(
     )
   );
   return { changed: true };
+}
+
+/**
+ * まとめて渡された読者の反応（束）を、作品ごとに振り分けて取り込む
+ * （作者の依頼 2026-09-23。ヘルパー 0.9.0 の「まとめて渡す」）。
+ *
+ * ## 1件のときと同じ道を通す
+ *
+ * 1件ずつ、1件の封筒と同じ関所（`matchReaderStatsEnvelope`。Narou.fun の
+ * Nコードの照合を含む）で行き先を決め、同じ積み方（`applyReaderStatsEnvelope`。
+ * 二重に積まない）で積む。足したのは**振り分け**と**知らせのまとめ方**だけである。
+ *
+ * ## 作品が決まらない画面は訊かずに外す
+ *
+ * 台帳の作品IDで1つに決まる画面だけを取り込む（`routeReaderStatsBundleItem`）。
+ * 決まらない画面は「取り込めなかったもの」に理由を添えて残し、**残りは止めない**。
+ * 画面ごとに作品を選ばせると、まとめて渡した意味が無くなる。
+ *
+ * ## 作品ごとに1回だけ書く
+ *
+ * 同じ作品の画面は**溜めた順に同じ台帳へ**積み、最後に1回保存する。作品管理と
+ * アクセス数のように話ごと・日ごとの数が重なる2画面も、あとの画面の重なった行は
+ * 前の画面の行を見て止まる（1件ずつ順に取り込んだのと同じ結果）。1つの作品の
+ * 保存に失敗しても、ほかの作品の取り込みは止めない。
+ */
+export async function importReaderStatsBundle(
+  bundle: ReaderStatsBundle,
+  works: readonly WorkEntry[]
+): Promise<ReaderStatsResult> {
+  // 各作品の投稿状態を読む。**読めない作品は振り分けの先から外す**（直さずに止める）
+  const loaded: { work: WorkEntry; store: PostingStore; ledger: PostingLedger }[] = [];
+  const unreadable: WorkEntry[] = [];
+  for (const work of works) {
+    const store = new PostingStore(work);
+    try {
+      loaded.push({ work, store, ledger: await store.load() });
+    } catch (error) {
+      unreadable.push(work);
+      logBundleFailure(`${work.title} の投稿状態を読めませんでした`, error, work);
+    }
+  }
+  const candidates = loaded.map((entry) => ({ id: entry.work.id, ledger: entry.ledger }));
+
+  const failures: ReaderStatsBundleFailure[] = [];
+  // 作品ごとの画面。**束に最初に出てきた順**（Map は入れた順を保つ）で、中は溜めた順
+  const groups = new Map<string, ReaderStatsEnvelope[]>();
+  for (const item of bundle.items) {
+    if (!item.result.ok) {
+      failures.push({
+        label: `${item.position}件目`,
+        reason: item.result.reason,
+        fixByWorkId: false,
+      });
+      continue;
+    }
+    const envelope = item.result.envelope;
+    const route = routeReaderStatsBundleItem(envelope, candidates);
+    if (route.kind === "none") {
+      failures.push({
+        label: readerStatsBundleItemLabel(envelope),
+        reason: route.reason,
+        fixByWorkId: true,
+      });
+      continue;
+    }
+    groups.set(route.id, [...(groups.get(route.id) ?? []), envelope]);
+  }
+  /*
+    投稿状態を読めなかった作品は、振り分けの先に入っていない。その作品の画面は
+    「作品が見つかりません」で落ちているかもしれないので、**そちらの失敗があるとき
+    だけ**読めなかった作品の名前も並べる（関係の無いときは知らせを長くしない）。
+  */
+  if (unreadable.length > 0 && failures.some((failure) => failure.fixByWorkId)) {
+    for (const work of unreadable) {
+      failures.push({
+        label: `「${work.title}」`,
+        reason: "投稿状態を読めなかったため、取り込み先に入れられませんでした（出力パネルに記録しました）。",
+        fixByWorkId: false,
+      });
+    }
+  }
+
+  const outcomes: ReaderStatsBundleWorkOutcome[] = [];
+  const changedWorks: WorkEntry[] = [];
+  for (const [id, envelopes] of groups) {
+    const entry = loaded.find((candidate) => candidate.work.id === id);
+    if (!entry) continue; // 振り分けの先は読めた作品からしか選ばないので来ない
+    let ledger = entry.ledger;
+    let added = 0;
+    let repeated = 0;
+    let screens = 0;
+    for (const envelope of envelopes) {
+      try {
+        const applied = applyReaderStatsEnvelope(ledger, envelope);
+        ledger = applied.ledger;
+        added += applied.added;
+        repeated += applied.repeated;
+        screens++;
+      } catch (error) {
+        // 封筒の検証を通っていれば来ないが、1画面の失敗で残りを止めない
+        logBundleFailure(`${entry.work.title} への取り込み`, error, entry.work);
+        failures.push({
+          label: readerStatsBundleItemLabel(envelope),
+          reason: `記録にできませんでした（${errorMessage(error)}）。`,
+          fixByWorkId: false,
+        });
+      }
+    }
+    if (screens === 0) continue;
+    if (added > 0) {
+      try {
+        await entry.store.save(ledger);
+      } catch (error) {
+        logBundleFailure(`${entry.work.title} の投稿状態の保存`, error, entry.work);
+        failures.push({
+          label: `「${entry.work.title}」の${screens}画面`,
+          reason: `保存できませんでした（${errorMessage(error)}）。`,
+          fixByWorkId: false,
+        });
+        continue;
+      }
+      changedWorks.push(entry.work);
+    }
+    outcomes.push({ title: entry.work.title, screens, added, repeated });
+  }
+
+  // 取り込めなかったものは**全部を記録に残す**（知らせには先頭の数件しか並べない）
+  if (failures.length > 0) {
+    useLogFile(undefined);
+    logFailure("まとめて渡された読者の反応のうち、取り込めなかったもの", {
+      件数: failures.length,
+      内訳: failures.map((failure) => `${failure.label}：${failure.reason}`).join("\n"),
+    });
+  }
+
+  const notice = readerStatsBundleNotice({ works: outcomes, failures });
+  if (notice.level === "warning") {
+    void vscode.window.showWarningMessage(notice.message);
+  } else {
+    void vscode.window.showInformationMessage(notice.message);
+  }
+  return { changed: changedWorks.length > 0, changedWorks };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** 束の取り込みの失敗を記録する（知らせは最後に1つにまとめるので、ここでは出さない） */
+function logBundleFailure(what: string, error: unknown, work: WorkEntry): void {
+  // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+  useLogFile(work.folderPath);
+  logFailure(what, {
+    作品: work.title,
+    種類: error instanceof PostingStoreError ? error.kind : "unknown",
+    内容: errorMessage(error),
+  });
 }
 
 /** 開ける管理画面。**どのサイトのものかを一緒に持つ**（文言に出すため） */

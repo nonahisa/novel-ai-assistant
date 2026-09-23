@@ -3,12 +3,14 @@ import type { WorkEntry } from "../models/types";
 import { postingSiteInfo, type PostingLedger } from "../models/posting";
 import { PostingStore } from "../core/postingStore";
 import {
-  parseReaderStatsEnvelope,
+  parseReaderStatsPaste,
+  type ReaderStatsBundle,
   type ReaderStatsEnvelope,
 } from "../core/readerStatsEnvelope";
 import {
   pickReaderStatsWork,
   readerStatsAlreadyImported,
+  readerStatsBundlePending,
   readerStatsClipboardFingerprint,
   readerStatsUriAction,
   rememberFingerprint,
@@ -18,7 +20,7 @@ import {
 import { isWebRuntime } from "../core/runtime";
 import { logLine, useLogFile } from "../core/logger";
 import { cancelItem, isCancelItem } from "../views/dialogs";
-import { importReaderStats } from "./readerStats";
+import { importReaderStats, importReaderStatsBundle } from "./readerStats";
 
 /**
  * ヘルパーから読者の反応を受け取る2つの入口（設計書6.79.7「ヘルパーからの受け口」）。
@@ -34,6 +36,10 @@ import { importReaderStats } from "./readerStats";
  * 作者が「読者の反応を貼り付けて取り込む」を押したときと同じである。
  * ここが足すのは「どの作品へ入れるか」を決める段だけで、それも取り込みと
  * 同じ照合（`matchReaderStatsEnvelope`）で絞り、**決めきれなければ訊く。**
+ *
+ * **まとめて渡された分（束。ヘルパー 0.9.0）は `importReaderStatsBundle` に任せる。**
+ * 束には複数の作品が混ざるので、1件ずつ台帳の作品IDで振り分け、決まらない画面は
+ * 訊かずに外して最後にまとめて知らせる（画面ごとに作品を選ばせない）。
  *
  * ## クリップボードは作者の私物
  *
@@ -139,7 +145,7 @@ export class ReaderStatsHelperLink {
     const text = await readClipboard(trigger);
     if (text === undefined) return;
 
-    const parsed = parseReaderStatsEnvelope(text);
+    const parsed = parseReaderStatsPaste(text);
     if (!parsed.ok && parsed.kind === "notEnvelope") {
       // **読者の反応のデータでない。** 窓が前に出ただけなら黙る（中身は記録にも残さない）
       if (trigger === "uri") {
@@ -161,6 +167,10 @@ export class ReaderStatsHelperLink {
     if (!parsed.ok) {
       // 形が合わない（版の食い違いなど）。理由は取り込みと同じ文言で1度だけ言う
       void vscode.window.showWarningMessage(parsed.reason);
+      return;
+    }
+    if (parsed.kind === "bundle") {
+      await this.runBundle(trigger, parsed.bundle);
       return;
     }
     const envelope = parsed.envelope;
@@ -226,6 +236,56 @@ export class ReaderStatsHelperLink {
       announceWork: pick.kind === "one",
     });
     if (result.changed) await this.deps.afterImport(work);
+  }
+
+  /**
+   * まとめて渡された読者の反応（ヘルパー 0.9.0 の「まとめて渡す」）。
+   *
+   * 取り込みそのものは `importReaderStatsBundle`（「貼り付けて取り込む」で
+   * 束を貼ったときと同じ）。ここが足すのは、窓に戻ったときに**訊くかどうか**だけ：
+   * 作品の決まる画面のうち、まだ取り込んでいないものが1つも無ければ訊かない
+   * （1件のときの「照合できる作品が無い」「もう取り込んである」と同じ）。
+   * 同じデータで二度訊かないのは、呼ぶ前に覚えた指紋が受け持つ。
+   */
+  private async runBundle(trigger: Trigger, bundle: ReaderStatsBundle): Promise<void> {
+    useLogFile(undefined);
+    logLine(
+      `ヘルパーがまとめて渡した読者の反応（${bundle.items.length}画面）を` +
+        (trigger === "uri" ? "呼び出しで受けました。" : "クリップボードに見つけました。")
+    );
+
+    const works = this.deps.listWorks();
+    if (works.length === 0) {
+      if (trigger === "uri") {
+        void vscode.window.showInformationMessage(
+          "作品が登録されていないため、読者の反応を取り込めませんでした。"
+        );
+      }
+      return;
+    }
+
+    if (trigger === "focus") {
+      const pending = readerStatsBundlePending(bundle, await loadCandidates(works));
+      if (pending.length === 0) return;
+      const summary = pending
+        .map((entry) => {
+          const title = works.find((work) => work.id === entry.id)?.title ?? entry.id;
+          return `「${title}」${entry.screens}画面`;
+        })
+        .join("・");
+      const answer = await vscode.window.showInformationMessage(
+        "クリップボードに、統合小説執筆環境ヘルパーがまとめて渡した読者の反応" +
+          `（まだ取り込んでいないもの：${summary}）があります。取り込みますか？`,
+        "取り込む",
+        "取り込まない"
+      );
+      if (answer !== "取り込む") return;
+    }
+
+    const result = await importReaderStatsBundle(bundle, works);
+    for (const work of result.changedWorks ?? []) {
+      await this.deps.afterImport(work);
+    }
   }
 
   private seen(fingerprint: string): boolean {

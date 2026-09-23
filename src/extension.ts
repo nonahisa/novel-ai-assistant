@@ -5886,8 +5886,12 @@ export async function activate(
     registerCommand("novelai.importReaderStats", async (node?: WorkNode) => {
       const work = await resolveWork(node, registry);
       if (!work) return;
-      const result = await importReaderStats(work);
-      if (result.changed) await refreshWritingStatsPanel(work, deviceId);
+      // まとめて渡された分（ヘルパー 0.9.0）は、登録した作品ぜんぶへ振り分ける
+      const result = await importReaderStats(work, { works: registry.list() });
+      if (!result.changed) return;
+      for (const changed of result.changedWorks ?? [work]) {
+        await refreshWritingStatsPanel(changed, deviceId);
+      }
     }),
     registerCommand("novelai.recordReaderStats", async (node?: WorkNode) => {
       const work = await resolveWork(node, registry);

@@ -8,7 +8,9 @@ import {
   postingSiteInfo,
   POSTING_SITES,
   READER_STATS_PERIODS,
+  repeatsReaderStats,
   siteProfile,
+  withReaderStats,
   type PostingLedger,
   type PostingSiteId,
   type ReaderStatsMetrics,
@@ -243,29 +245,49 @@ export function buildReaderStatsEnvelope(input: {
   });
 }
 
-/** 封筒を読む。**直さずに、受けるか断るかだけを決める** */
-export function parseReaderStatsEnvelope(
-  raw: string
-): ReaderStatsEnvelopeResult {
+/** 封筒が入っていなかったときの断り（1件の封筒と束で同じ文言を使う） */
+const NOT_ENVELOPE_REASON =
+  "クリップボードに、読者の反応の封筒が入っていませんでした。" +
+  "管理画面で統合小説執筆環境ヘルパーの「読者の反応をコピー」を押してから、もう一度お試しください。";
+
+/**
+ * クリップボードの文字列をJSONとして読む。**オブジェクトでなければ undefined**
+ * （封筒でも束でもない。呼ぶ側が「入っていませんでした」と言う）。
+ */
+function parseObject(raw: string): Record<string, unknown> | undefined {
   // クリップボード経由なので、前後に改行や空白が付くことがある
   const trimmed = raw.trim();
-  const notEnvelope =
-    "クリップボードに、読者の反応の封筒が入っていませんでした。" +
-    "管理画面で統合小説執筆環境ヘルパーの「読者の反応をコピー」を押してから、もう一度お試しください。";
-  if (!trimmed) return reject(notEnvelope, "notEnvelope");
-
+  if (!trimmed) return undefined;
   let parsed: unknown;
   try {
     parsed = JSON.parse(trimmed);
   } catch {
-    return reject(notEnvelope, "notEnvelope");
+    return undefined;
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return reject(notEnvelope, "notEnvelope");
+    return undefined;
   }
+  return parsed as Record<string, unknown>;
+}
 
-  const value = parsed as Record<string, unknown>;
-  if (value[MARKER] === undefined) return reject(notEnvelope, "notEnvelope");
+/** 封筒を読む。**直さずに、受けるか断るかだけを決める** */
+export function parseReaderStatsEnvelope(
+  raw: string
+): ReaderStatsEnvelopeResult {
+  const value = parseObject(raw);
+  if (!value) return reject(NOT_ENVELOPE_REASON, "notEnvelope");
+  return readEnvelopeValue(value);
+}
+
+/**
+ * JSONとして読めた値を、封筒として確かめる。
+ *
+ * **1件の封筒と、束の中の1件が同じ関所を通る**（束の受け取り、2026-09-23）。
+ * 束の中身はヘルパー 0.8.0 までクリップボードへ置いていた封筒と同じ形なので、
+ * ここに別の確かめ方を置くと、片方だけ緩むか締まる。
+ */
+function readEnvelopeValue(value: Record<string, unknown>): ReaderStatsEnvelopeResult {
+  if (value[MARKER] === undefined) return reject(NOT_ENVELOPE_REASON, "notEnvelope");
   // **知らない版数は読まない。** 欄の意味が変わったものを読むと、数字が化ける
   if (value[MARKER] !== READER_STATS_ENVELOPE_VERSION) {
     return reject(
@@ -372,6 +394,123 @@ export function parseReaderStatsEnvelope(
       entries: parsedEntries,
     },
   };
+}
+
+/**
+ * 読者の反応の束（作者の依頼 2026-09-23。ヘルパー 0.9.0 の「まとめて渡す」）。
+ *
+ * ## 何のためのものか
+ *
+ * ヘルパーは開いた画面ごとに読者の反応を溜め、「まとめて渡す」で1回に渡す。
+ * 束の中の1件は**これまでの封筒そのもの**（`novelai-stats` v1。形を変えない）で、
+ * 溜めた順（古いものが先）に並ぶ。1件は1つの作品の1つの画面なので、
+ * **束には複数の作品が混ざりうる**（振り分けは `readerStatsHelperLink.ts`）。
+ *
+ * 形（ヘルパーの README「溜めた分をまとめたデータ」・`common/stash.js` の `makeBundle`）：
+ *
+ *   { "kind": "novelai-stats-bundle", "version": 1, "handedAt": ISO 8601, "items": [ 封筒, … ] }
+ */
+export const READER_STATS_BUNDLE_KIND = "novelai-stats-bundle";
+
+/** 束の形式版数。**これと一致するときだけ読む**（ヘルパーとの取り決め） */
+export const READER_STATS_BUNDLE_VERSION = 1;
+
+/**
+ * 束の中の1件。**読めなかった件も、理由を持ったまま並びに残す**——1件が
+ * 読めないからといって束ごと断ると、読めた画面まで取り込めない（束は
+ * 別々の画面を溜めたもので、1件ずつ独立している）。
+ */
+export interface ReaderStatsBundleItem {
+  /** 束の中で何件目か（1から。取り込めなかったものを知らせるときに使う） */
+  readonly position: number;
+  readonly result: ReaderStatsEnvelopeResult;
+}
+
+export interface ReaderStatsBundle {
+  /** まとめて渡した時刻（ヘルパーが書く。記録には使わない——記録の日時は各封筒の readAt） */
+  readonly handedAt?: string;
+  /** 溜めた順（古いものが先）。**空の束は受け取らない** */
+  readonly items: readonly ReaderStatsBundleItem[];
+}
+
+/**
+ * クリップボードを読んだ結果。**1件の封筒か、束か**を見分けて返す。
+ *
+ * 断るとき（`ok: false`）の形は `ReaderStatsEnvelopeResult` と同じ——
+ * 「封筒が入っていなかった」（`notEnvelope`）の見分けも同じに使える。
+ */
+export type ReaderStatsPasteResult =
+  | { readonly ok: true; readonly kind: "envelope"; readonly envelope: ReaderStatsEnvelope }
+  | { readonly ok: true; readonly kind: "bundle"; readonly bundle: ReaderStatsBundle }
+  | Extract<ReaderStatsEnvelopeResult, { ok: false }>;
+
+/**
+ * 版の食い違いの断り（束）。**どちらが古いかはこちらに分からない**——
+ * 統合小説執筆環境が古くて新しい束を読めないのか、ヘルパーが古いのか。
+ * 両方を新しくすれば、どちらの場合も直る。
+ */
+export const READER_STATS_BUNDLE_VERSION_MISMATCH =
+  "ヘルパーと統合小説執筆環境の片方が古いようです。両方を新しくしてください。";
+
+/**
+ * クリップボードの中身を読む（1件の封筒か束か）。**直さずに、受けるか断るかだけを決める。**
+ *
+ * - 束の目印（`kind`）があれば束として読む。版が違えば**束ごと取り込まない**
+ *   （欄の意味が変わったものを読むと、数字が化ける）
+ * - 束の中の1件ずつは `parseReaderStatsEnvelope` と**同じ関所**を通す。
+ *   読めない件は理由を持たせて残し、残りは止めない
+ * - 束の目印が無ければ、これまでどおり1件の封筒として読む
+ */
+export function parseReaderStatsPaste(raw: string): ReaderStatsPasteResult {
+  const value = parseObject(raw);
+  if (!value) return notEnvelopeResult();
+  if (value.kind !== READER_STATS_BUNDLE_KIND) {
+    const single = readEnvelopeValue(value);
+    return single.ok ? { ok: true, kind: "envelope", envelope: single.envelope } : single;
+  }
+
+  if (value.version !== READER_STATS_BUNDLE_VERSION) {
+    return { ok: false, reason: READER_STATS_BUNDLE_VERSION_MISMATCH };
+  }
+  if (!Array.isArray(value.items)) {
+    // 版は合うのに並びが無い——作り手の不具合。直し方はこちらに分からない
+    return {
+      ok: false,
+      reason: `まとめて渡された読者の反応を読めませんでした。${READER_STATS_BUNDLE_VERSION_MISMATCH}`,
+    };
+  }
+  if (value.items.length === 0) {
+    // ヘルパーは空の束を作らない取り決め。来たら何も書かずに言う
+    return { ok: false, reason: "まとめて渡された読者の反応が、1件も入っていませんでした。" };
+  }
+
+  const items = value.items.map((item, index): ReaderStatsBundleItem => {
+    const position = index + 1;
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return { position, result: reject(BUNDLE_ITEM_NOT_ENVELOPE) };
+    }
+    const result = readEnvelopeValue(item as Record<string, unknown>);
+    // 束の中で「封筒が入っていない」は、クリップボードの話ではない（文言を束の言い方にする）
+    return {
+      position,
+      result: !result.ok && result.kind === "notEnvelope" ? reject(BUNDLE_ITEM_NOT_ENVELOPE) : result,
+    };
+  });
+  const handedAt =
+    typeof value.handedAt === "string" && value.handedAt.trim()
+      ? value.handedAt.trim()
+      : undefined;
+  return {
+    ok: true,
+    kind: "bundle",
+    bundle: { ...(handedAt ? { handedAt } : {}), items },
+  };
+}
+
+const BUNDLE_ITEM_NOT_ENVELOPE = "読者の反応のデータとして読めませんでした。";
+
+function notEnvelopeResult(): Extract<ReaderStatsEnvelopeResult, { ok: false }> {
+  return { ok: false, reason: NOT_ENVELOPE_REASON, kind: "notEnvelope" };
 }
 
 /**
@@ -539,6 +678,45 @@ export function readerStatsRecordsFromEnvelope(
     source: "helper" as const,
     ...(note ? { note } : {}),
   }));
+}
+
+/** 封筒を台帳へ積んだ結果 */
+export interface ReaderStatsApplied {
+  /** 積んだあとの台帳（元の台帳は書き換えない） */
+  readonly ledger: PostingLedger;
+  /** 積んだ行の数 */
+  readonly added: number;
+  /** 取り込み済みの数と同じだったので積まなかった行の数 */
+  readonly repeated: number;
+}
+
+/**
+ * 封筒の記録を台帳へ積む。**同じ数の繰り返しは積まない**（`repeatsReaderStats`）。
+ *
+ * **1件の取り込みと束の取り込みが、この1か所を通る**（写しを作らない）。
+ * 束では同じ作品の画面を**順に、同じ台帳へ**積むので、作品管理とアクセス数の
+ * ように日ごとの数が重なる2画面を続けて入れても、あとの画面の重なった行は
+ * 前の画面の行を見て止まる。
+ *
+ * 照合（`matchReaderStatsEnvelope`）は呼ぶ側が先に済ませる。記録が台帳の関所で
+ * 断られたときは例外がそのまま出る（封筒の検証を通っていれば来ない）。
+ */
+export function applyReaderStatsEnvelope(
+  ledger: PostingLedger,
+  envelope: ReaderStatsEnvelope
+): ReaderStatsApplied {
+  let next = ledger;
+  let added = 0;
+  let repeated = 0;
+  for (const record of readerStatsRecordsFromEnvelope(envelope)) {
+    if (repeatsReaderStats(next, record)) {
+      repeated++;
+      continue;
+    }
+    next = withReaderStats(next, record);
+    added++;
+  }
+  return { ledger: next, added, repeated };
 }
 
 /**

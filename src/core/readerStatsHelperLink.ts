@@ -1,4 +1,5 @@
 import {
+  postingSiteInfo,
   repeatsReaderStats,
   siteProfile,
   type PostingLedger,
@@ -7,6 +8,8 @@ import { hashText } from "./hash";
 import {
   matchReaderStatsEnvelope,
   readerStatsRecordsFromEnvelope,
+  readerStatsSourceLabel,
+  type ReaderStatsBundle,
   type ReaderStatsEnvelope,
 } from "./readerStatsEnvelope";
 
@@ -137,6 +140,185 @@ function workIdMatches(
   if (envelope.source !== undefined) return true;
   const known = siteProfile(ledger, envelope.site)?.workId?.trim();
   return Boolean(known && envelope.workId && known === envelope.workId);
+}
+
+/**
+ * まとめて渡された読者の反応（束）の1件を、どの作品へ入れるか。
+ *
+ * - `work`：作品が決まった
+ * - `none`：決まらない（取り込まずに理由を返す）
+ */
+export type ReaderStatsBundleRoute =
+  | { readonly kind: "work"; readonly id: string }
+  | { readonly kind: "none"; readonly reason: string };
+
+/**
+ * 束の1件の行き先を決める（作者の依頼 2026-09-23。ヘルパー 0.9.0 の「まとめて渡す」）。
+ *
+ * **1件のときより厳しい。台帳の作品IDで1つに決まるものだけを取り込む。**
+ *
+ * 1件の封筒（`pickReaderStatsWork`）は、作品IDが合わなくても関所を通った
+ * 作品が1つならそこへ入れ、2つ以上なら作者に選ばせる。束ではどちらもしない：
+ *
+ *   - **束には複数の作品が混ざる。** ヘルパーは覚えた作品の画面をすべて溜めるので、
+ *     統合小説執筆環境に登録していない作品や、カクヨムの登録が無い作品の画面も
+ *     入りうる。「関所を通った作品が1つだから」で決めると、その画面の数が
+ *     別の作品へ混ざる——いちど混ざると、あとから分けられない
+ *   - **画面ごとに作品を選ばせると、まとめて渡した意味が無くなる**（10画面なら10回訊く）
+ *
+ * 照合そのものは取り込みと同じ関所（`matchReaderStatsEnvelope`）で、緩めない。
+ * Narou.fun の封筒は関所を通った時点でNコードが一致している。
+ */
+export function routeReaderStatsBundleItem(
+  envelope: ReaderStatsEnvelope,
+  candidates: readonly ReaderStatsWorkCandidate[]
+): ReaderStatsBundleRoute {
+  const exact = candidates.filter(
+    (candidate) =>
+      matchReaderStatsEnvelope(envelope, candidate.ledger) === null &&
+      workIdMatches(envelope, candidate.ledger)
+  );
+  if (exact.length === 1) return { kind: "work", id: exact[0].id };
+  if (exact.length > 1) {
+    return {
+      kind: "none",
+      reason: `この作品IDを登録した作品が${exact.length}つあり、どれに入れるか決められませんでした。`,
+    };
+  }
+  if (!envelope.workId) {
+    return {
+      kind: "none",
+      reason: "作品IDが入っていないため、どの作品のものか決められませんでした。",
+    };
+  }
+  return { kind: "none", reason: "この作品IDを登録した作品が見つかりませんでした。" };
+}
+
+/**
+ * 取り込めなかった1件を、作者が見分けられる名前で言う（「カクヨム 作品ID 1177…」）。
+ * **作品名は言えない**——決まらなかったから取り込めなかったのである。
+ */
+export function readerStatsBundleItemLabel(envelope: ReaderStatsEnvelope): string {
+  const site = postingSiteInfo(envelope.site).label;
+  const source = readerStatsSourceLabel(envelope.source);
+  return (
+    site +
+    (source ? `（${source}）` : "") +
+    (envelope.workId ? ` 作品ID ${envelope.workId}` : "")
+  );
+}
+
+/**
+ * 窓に戻ったとき、束のうち**まだ取り込んでいない画面**が作品ごとに何画面あるか。
+ *
+ * 取り込めない画面（作品が決まらない）は数えない——1件のときに「照合できる
+ * 作品が無ければ訊かない」のと同じで、窓を行き来するたびに断りを出さない。
+ * 取り込み済みの見分けは1件のときと同じ（`readerStatsAlreadyImported`）。
+ *
+ * @returns 作品ごとの画面の数（束に最初に出てきた順）。空なら訊かない
+ */
+export function readerStatsBundlePending(
+  bundle: ReaderStatsBundle,
+  candidates: readonly ReaderStatsWorkCandidate[]
+): { id: string; screens: number }[] {
+  const pending = new Map<string, number>();
+  for (const item of bundle.items) {
+    if (!item.result.ok) continue;
+    const envelope = item.result.envelope;
+    const route = routeReaderStatsBundleItem(envelope, candidates);
+    if (route.kind !== "work") continue;
+    const ledger = candidates.find((candidate) => candidate.id === route.id)?.ledger;
+    if (!ledger || readerStatsAlreadyImported(envelope, ledger)) continue;
+    pending.set(route.id, (pending.get(route.id) ?? 0) + 1);
+  }
+  return [...pending].map(([id, screens]) => ({ id, screens }));
+}
+
+/** 束を取り込んだ結果のうち、1つの作品へ入った分 */
+export interface ReaderStatsBundleWorkOutcome {
+  readonly title: string;
+  /** その作品へ入れた画面の数（全部が取り込み済みの数と同じだった画面も数える） */
+  readonly screens: number;
+  readonly added: number;
+  readonly repeated: number;
+}
+
+/** 束のうち、取り込めなかったもの */
+export interface ReaderStatsBundleFailure {
+  /** 何の画面か（`readerStatsBundleItemLabel`、読めなかったものは「3件目」） */
+  readonly label: string;
+  readonly reason: string;
+  /**
+   * 作品IDの登録で直るか。直るものが1つでもあれば、直し方を添える
+   * （版の食い違いや保存の失敗は、作品IDを登録しても直らない）
+   */
+  readonly fixByWorkId: boolean;
+}
+
+export interface ReaderStatsBundleOutcome {
+  readonly works: readonly ReaderStatsBundleWorkOutcome[];
+  readonly failures: readonly ReaderStatsBundleFailure[];
+}
+
+/** 知らせに並べる「取り込めなかったもの」の数。**残りは件数で言い、全部は記録に残す** */
+export const BUNDLE_FAILURES_SHOWN = 3;
+
+/**
+ * 束を取り込んだ結果を、**1つの知らせ**にする。
+ *
+ * 画面ごとに知らせを出すと、10画面で10個の通知が重なる。作品ごとの画面の数・
+ * 積まなかった数・取り込めなかったもの（と直し方）を1つにまとめる。
+ * **取り込めなかったものがあれば注意**の知らせにする（見落とされないように）。
+ */
+export function readerStatsBundleNotice(outcome: ReaderStatsBundleOutcome): {
+  level: "info" | "warning";
+  message: string;
+} {
+  const added = outcome.works.reduce((sum, work) => sum + work.added, 0);
+  const repeated = outcome.works.reduce((sum, work) => sum + work.repeated, 0);
+  const perWork = outcome.works
+    .map((work) => `「${work.title}」${work.screens}画面`)
+    .join("・");
+
+  const parts: string[] = [];
+  if (outcome.works.length === 0) {
+    parts.push("読者の反応を取り込めませんでした。");
+  } else if (added === 0) {
+    // 何も書いていない（保存もしていない）。押したのに何も起きない、にならないよう理由を言う
+    parts.push(
+      `読者の反応は、すでに取り込んだ数と同じでした：${perWork}（${repeated}件）。記録は変えていません。`
+    );
+  } else {
+    parts.push(
+      `読者の反応を取り込みました：${perWork}` +
+        (repeated > 0 ? `（同じ数で積まなかったもの ${repeated}件）` : "") +
+        "。"
+    );
+  }
+
+  if (outcome.failures.length > 0) {
+    const shown = outcome.failures
+      .slice(0, BUNDLE_FAILURES_SHOWN)
+      .map((failure) => `${failure.label}：${failure.reason}`);
+    const rest = outcome.failures.length - shown.length;
+    parts.push(
+      `取り込めなかったもの（${outcome.failures.length}画面）：${shown.join(" ／ ")}` +
+        (rest > 0 ? ` ／ ほか${rest}画面（出力パネルに記録しました）` : "")
+    );
+    if (outcome.failures.some((failure) => failure.fixByWorkId)) {
+      parts.push(
+        "取り込みたい作品の「投稿サイトの設定」で作品IDを登録してから、" +
+          "ヘルパーの「もう一度渡す」で渡し直すと取り込めます（取り込み済みの数は二重に積みません）。"
+      );
+    }
+  }
+  if (added > 0) {
+    parts.push("執筆量パネルの「サイトの記録」で履歴を見られます。");
+  }
+  return {
+    level: outcome.failures.length > 0 ? "warning" : "info",
+    message: parts.join(""),
+  };
 }
 
 /**
