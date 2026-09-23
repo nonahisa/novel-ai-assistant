@@ -2017,7 +2017,9 @@ export async function activate(
               : {}),
           })
       );
-      if (!result) return;
+      // **中止した回に「完了しました」を重ねない**（ノートPCの実機、2026-09-23）。
+      // 中止の知らせは `checkTypos` が既に出している
+      if (!result || result.cancelled) return;
       const shown = proposalPanel.showResults(work, result.issues);
       reportTypoCheckResult(
         kind === "checkTyposForFile"
@@ -4552,7 +4554,14 @@ export async function activate(
               suiteHoldsRun,
             })
         );
-        if (!result) return CHECK_CANCELLED;
+        /*
+          **中止は完了ではない**（ノートPCの実機、2026-09-23）。`checkTypos` は
+          中止を `cancelled: true` の結果で返すので、`!result` だけでは
+          すり抜け、中止の知らせと「完了しました。指摘 9件」が同時に出ていた。
+          まとめ実行も、ここで CHECK_COMPLETED を返すと中止したのに次へ進む。
+          「検知した」の記録も付けない（次回、同じ話が対象に出るように）
+        */
+        if (!result || result.cancelled) return CHECK_CANCELLED;
 
         // **絞って見たときも「検知した」と記録する。**
         // 記録しないと、次回また同じ話が「前回から書いた分」に出る
@@ -5368,7 +5377,8 @@ export async function activate(
               onProgress,
             })
         );
-        if (!result) return;
+        // 中止した回に「完了しました」を重ねない（`novelai.checkTypos` と同じ）
+        if (!result || result.cancelled) return;
 
         const shown = proposalPanel.showResults(work, result.issues);
         reportTypoCheckResult(
