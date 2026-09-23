@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { window } from "../support/vscodeStub";
+import { isConfirmPick } from "../support/confirmPicker";
 import type { AIRegistry } from "../../../src/ai/registry";
 import { forgetTuning } from "../../../src/features/forgetTuning";
 import {
@@ -43,13 +44,18 @@ function installDialogs(options: {
   const informed: string[] = [];
   Object.assign(window, {
     showQuickPick: vi.fn(
-      async (items: { label: string; detail?: string }[]) => {
+      async (items: { label: string; detail?: string; button?: string }[]) => {
+        // 消す前の確認も、画面上部の選択窓で出る（A4、2026-09-23）。
+        // 並べる行（offered）には数えず、押すボタンを選ぶ
+        if (isConfirmPick(items)) {
+          const button = options.confirm ?? "消す";
+          return items.find((item) => item.button === button);
+        }
         offered.push(...items);
         return options.pick ? options.pick(items) : undefined;
       }
     ),
-    // 確認は `kind: "warning"` なので警告のほうへ出る
-    showWarningMessage: vi.fn(async () => options.confirm ?? "消す"),
+    showWarningMessage: vi.fn(async () => undefined),
     showInformationMessage: vi.fn(async (message: string) => {
       informed.push(message);
       return undefined;

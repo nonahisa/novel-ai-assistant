@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { window } from "../support/vscodeStub";
+import { answerConfirms, type ConfirmPicker } from "../support/confirmPicker";
 import type { AIRegistry } from "../../../src/ai/registry";
 import type { WorkEntry } from "../../../src/models/types";
 import { emptyCharacter } from "../../../src/models/character";
@@ -161,16 +162,22 @@ const work: WorkEntry = {
 
 const registry = {} as AIRegistry;
 
-/** 確認・同意の窓。取りやめる（閉じる）答えを返す */
+/**
+ * 確認・同意の窓（画面上部の選択窓。A4、2026-09-23）。既定は取りやめる
+ * （閉じる）。`confirmAnswer` を差し替えれば、その名前の項目を選ぶ
+ */
+let confirmAnswer: string | undefined;
+let picker: ConfirmPicker | undefined;
 function declineDialogs(): void {
-  const decline = vi.fn(async () => {
+  confirmAnswer = undefined;
+  picker?.restore();
+  picker = answerConfirms(() => {
     state.sentBeforeDialog.push(state.sent.length);
-    return undefined;
+    return confirmAnswer;
   });
-  Object.assign(window, {
-    showInformationMessage: decline,
-    showWarningMessage: decline,
-  });
+}
+function confirms(): ConfirmPicker["shown"] {
+  return picker?.shown ?? [];
 }
 
 beforeEach(() => {
@@ -215,7 +222,7 @@ describe("本命が処理済みで、2回目だけが残っているとき", () 
   test("分けて読む（手元のAI）：確認を出す。取りやめたら何も送らない", async () => {
     await checkContradictions(work, registry);
 
-    expect(window.showInformationMessage).toHaveBeenCalledTimes(1);
+    expect(confirms()).toHaveLength(1);
     expect(state.sentBeforeDialog).toEqual([0]);
     expect(state.sent).toEqual([]);
   });
@@ -223,9 +230,8 @@ describe("本命が処理済みで、2回目だけが残っているとき", () 
   test("確認の文面は、2回目だけを送ることを言う", async () => {
     await checkContradictions(work, registry);
 
-    const calls = (window.showInformationMessage as ReturnType<typeof vi.fn>).mock
-      .calls as unknown[][];
-    const detail = (calls[0][1] as { detail?: string }).detail ?? "";
+    // 補足の行は窓の幅で折り返されるので、改行を除いた形で探す
+    const detail = confirms()[0]?.flat ?? "";
     expect(detail).toContain("1チャンク中 1件を処理します");
     expect(detail).toContain("「あとで判明する事実」との突き合わせだけを送ります");
   });
@@ -235,20 +241,19 @@ describe("本命が処理済みで、2回目だけが残っているとき", () 
 
     await checkContradictions(work, registry, { readMode: "whole" });
 
-    expect(window.showWarningMessage).toHaveBeenCalledTimes(1);
-    const calls = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock
-      .calls as unknown[][];
-    // 同意のボタン（「送る」）で訊いている
-    expect(calls[0]).toContain(WHOLE_READ_CONSENT_LABEL);
+    expect(confirms()).toHaveLength(1);
+    const shown = confirms()[0];
+    // 同意のボタン（「送る」）で、警告の印を付けて訊いている
+    expect(shown.buttons).toContain(WHOLE_READ_CONSENT_LABEL);
+    expect(shown.warning).toBe(true);
     // 同意の文面が言う本文の量は、実際に送る区切りのもの（0字ではない）
-    const detail = (calls[0][1] as { detail?: string }).detail ?? "";
-    expect(detail).toContain("本文がまるごと");
-    expect(detail).not.toMatch(/本文 約0字/);
+    expect(shown.flat).toContain("本文がまるごと");
+    expect(shown.flat).not.toMatch(/本文 約0字/);
     expect(state.sent).toEqual([]);
   });
 
   test("確認で「実行」を押せば、2回目だけを送る", async () => {
-    Object.assign(window, { showInformationMessage: vi.fn(async () => "実行") });
+    confirmAnswer = "実行";
 
     await checkContradictions(work, registry);
 
@@ -275,7 +280,7 @@ describe("本文を読む段が全部処理済みで、検証だけが残って�
 
     await checkContradictions(work, registry);
 
-    expect(window.showInformationMessage).toHaveBeenCalledTimes(1);
+    expect(confirms()).toHaveLength(1);
     expect(state.sent).toEqual([]);
   });
 });
@@ -287,8 +292,7 @@ describe("何も残っていないとき", () => {
 
     await checkContradictions(work, registry);
 
-    expect(window.showInformationMessage).not.toHaveBeenCalled();
-    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(confirms()).toEqual([]);
     expect(state.sent).toEqual([]);
   });
 });

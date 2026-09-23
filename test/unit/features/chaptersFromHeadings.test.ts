@@ -8,6 +8,7 @@ import {
 } from "../../../src/core/collectedSections";
 import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { isConfirmPick, readConfirm } from "../support/confirmPicker";
 
 /**
  * 分け済みの作品の、話ごとのファイルの見出しから章を立てる（設計書6.66）。
@@ -256,17 +257,20 @@ describe("「話の見出しから章を立てる」", () => {
       },
     } as unknown as typeof workspace.fs;
 
-    // 確認（モーダル）は中身を覚えて答える。モーダルでない知らせは積むだけ
-    window.showInformationMessage = (async (
-      message: string,
-      options?: { modal?: boolean; detail?: string },
-      ...items: string[]
-    ) => {
-      if (options && typeof options === "object" && options.modal) {
-        confirmMessage = message;
-        confirmDetail = options.detail ?? "";
-        return items.includes("章を立てる") ? confirmAnswer : undefined;
-      }
+    // 確認（画面上部の選択窓。A4、2026-09-23）は中身を覚えて答える。
+    // 選択窓でない知らせは積むだけ
+    window.showQuickPick = (async (items: unknown, options?: unknown) => {
+      if (!isConfirmPick(items)) return undefined;
+      const list = items as Array<{ label: string; kind?: number; button?: string }>;
+      const shown = readConfirm(list, options as { title?: string });
+      confirmMessage = shown.title;
+      // 補足の行は窓の幅で折り返されるので、改行を除いてつなぐ
+      confirmDetail = shown.rows.join("");
+      return shown.buttons.includes("章を立てる")
+        ? list.find((item) => item.button === confirmAnswer)
+        : undefined;
+    }) as typeof window.showQuickPick;
+    window.showInformationMessage = (async (message: string) => {
       infoMessages.push(message);
       return undefined;
     }) as typeof window.showInformationMessage;

@@ -1,37 +1,36 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
-import { window, type StubMessage } from "../support/vscodeStub";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { confirmPaidUsage } from "../../../src/features/aiConnectivity";
 import type { AIProvider } from "../../../src/ai/types";
+import { answerConfirms, type ConfirmPicker } from "../support/confirmPicker";
 
 function provider(isPaid: boolean, displayName = "Claude API"): AIProvider {
   return { isPaid, displayName } as unknown as AIProvider;
 }
 
-/**
- * モーダルの設定から説明文だけを取り出す。
- *
- * **形が違えば「無かった」と扱う。** ここで決めつけると、
- * 呼び出し側が引数の並びを変えたときに黙って通ってしまう
- */
-function detailOf(option: unknown): string | undefined {
-  if (typeof option !== "object" || option === null) return undefined;
-  if (!("detail" in option)) return undefined;
-  return typeof option.detail === "string" ? option.detail : undefined;
-}
-
 describe("有料AIを使う前の確認", () => {
   let shown: Array<{ message: string; detail?: string }>;
+  let picker: ConfirmPicker | undefined;
+
+  /**
+   * 確認は画面上部の選択窓で出る（A4、2026-09-23）。文は窓の題、
+   * 説明は「内容」の下の行（長い行は折り返されるので、改行を除いてつなぐ）
+   */
+  function answering(answer: string | undefined): void {
+    picker?.restore();
+    picker = answerConfirms((confirm) => {
+      shown.push({ message: confirm.title, detail: confirm.rows.join("") });
+      return answer;
+    });
+  }
 
   beforeEach(() => {
     shown = [];
-    // 画面の知らせは「文言＋何でも受ける残りの引数」という形（`StubMessage`）。
-    // 2つ目がモーダルの設定（`{ modal, detail }`）、3つ目以降がボタンである
-    window.showInformationMessage = vi.fn<StubMessage>(
-      async (message, ...items) => {
-        shown.push({ message, detail: detailOf(items[0]) });
-        return "実行";
-      }
-    );
+    answering("実行");
+  });
+
+  afterEach(() => {
+    picker?.restore();
+    picker = undefined;
   });
 
   test("無料のAIでは何も出さずに通す", async () => {
@@ -81,7 +80,7 @@ describe("有料AIを使う前の確認", () => {
   });
 
   test("断られたら実行しない", async () => {
-    window.showInformationMessage = vi.fn(async () => undefined);
+    answering(undefined);
 
     const ok = await confirmPaidUsage(provider(true), {
       actionLabel: "AIへの相談",

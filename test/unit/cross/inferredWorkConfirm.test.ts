@@ -6,7 +6,8 @@ import {
   markInferredWork,
 } from "../../../src/core/workTarget";
 import { confirmRun } from "../../../src/views/notify";
-import { window, workspace } from "../support/vscodeStub";
+import { workspace } from "../support/vscodeStub";
+import { answerConfirms } from "../support/confirmPicker";
 
 /**
  * 「以降は訊かない」を覚えていても、**作品を推し量ったときは訊く**
@@ -41,21 +42,20 @@ function stubConfirmMemory(initial: Record<string, string>): () => void {
   };
 }
 
+/**
+ * 出た確認を `[文, 窓の形, ...ボタン]` の形で集める。確認は画面上部の
+ * 選択窓で出る（A4、2026-09-23）。文は窓の題と内容の行をつないだもの
+ */
 function captureModal(answer: string | undefined): {
   calls: unknown[][];
   restore: () => void;
 } {
-  const calls: unknown[][] = [];
-  const original = window.showInformationMessage;
-  window.showInformationMessage = async (message, ...items) => {
-    calls.push([message, ...items]);
-    return answer;
-  };
+  const picker = answerConfirms(answer);
   return {
-    calls,
-    restore: () => {
-      window.showInformationMessage = original;
+    get calls() {
+      return picker.shown.map((shown) => [shown.text, { picker: true }, ...shown.buttons]);
     },
+    restore: () => picker.restore(),
   };
 }
 
@@ -105,11 +105,13 @@ describe("confirmRun：推し量った作品は、覚えていても訊く", () 
       expect(result).toBe(true);
       expect(modal.calls).toHaveLength(1);
       const [message, options, ...buttons] = modal.calls[0];
-      expect(options).toMatchObject({ modal: true });
+      // 画面上部の選択窓で訊く（A4）
+      expect(options).toMatchObject({ picker: true });
       const text = String(message);
       expect(text.startsWith(`作品：${WORK.title}`)).toBe(true);
       expect(text).toContain("作品一覧");
-      expect(text).toContain("推し量ったので、確かめています");
+      // 長い一言は窓の幅で折り返されるので、改行を除いて探す
+      expect(text.replace(/\n/g, "")).toContain("推し量ったので、確かめています");
       expect(text).toContain("15 チャンクを処理します。");
       // もう覚えてあるので「以降は訊かない」は並べない（押しても何も変わらない）
       expect(buttons).toEqual(["実行"]);

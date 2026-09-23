@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { window } from "../support/vscodeStub";
+import { answerConfirms, type ConfirmPicker } from "../support/confirmPicker";
+
+let confirmPicker: ConfirmPicker | undefined;
 import type { AIRegistry } from "../../../src/ai/registry";
 import type { WorkEntry } from "../../../src/models/types";
 
@@ -219,6 +222,10 @@ beforeEach(() => {
   state.episodes = [...EPISODES];
   state.sources = { ...SOURCES };
   state.response = JSON.stringify({ deviations: [] });
+
+  // 実行の確認は画面上部の選択窓で出る（A4、2026-09-23）。「実行」を選ぶ
+  confirmPicker?.restore();
+  confirmPicker = answerConfirms("実行");
 
   Object.assign(window, {
     showInformationMessage: vi.fn(async () => "実行"),

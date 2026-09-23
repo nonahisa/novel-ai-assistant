@@ -10,11 +10,14 @@ import {
   readConfirmMemory,
   saveConfirmMemory,
 } from "../core/confirmMemoryStore";
+import { layoutConfirm } from "../core/confirmPickRows";
+import { cancelItem, isCancelItem } from "./dialogs";
 
 /**
  * 知らせの出し方をそろえる入口（作者の裁定 2026-09-06）。
  *
- * **「確認はモーダル、完了はステータスバー」。**
+ * **「確認は画面上部の選択窓、完了はステータスバー」。**（確認は当初モーダル。
+ * 作者の裁定 A4（2026-09-23）で、作品を選ぶ窓と同じ画面上部へ移した）
  *
  * きっかけは、1回の検知で「完了しました」「AIを設定しました」
  * 「解消を確認しました」「中止しました」が通知センターへ積み上がり、
@@ -24,12 +27,11 @@ import {
  *
  * そこで、行き先を4つに分ける。
  *
- * 1. **実行してよいかの確認** → モーダル（`confirmRun`）。
+ * 1. **実行してよいかの確認** → 画面上部の選択窓（`confirmRun`）。
  *    ほかの通知に埋もれないし、答えるまで先へ進まない。
- *    モーダルは `Esc` で閉じられるので「中止」ボタンは置かない
- *    （VS Codeがモーダルへ「キャンセル」を必ず付けるので、
- *    出口が無くなることもない）。
- *    **取り消しにくい操作は `kind: "warning"` で警告の顔にする**
+ *    `Esc` でも閉じられるが、「取りやめる」の項目も見せる
+ *    （`Esc` を知らない作者にも出口が見えるように。設計書6.17.3）。
+ *    **取り消しにくい操作は `kind: "warning"` で実行の項目に警告の印を付ける**
  * 2. **その場限りの完了** → ステータスバー＋操作ログ（`notifyDone`）。
  *    「コピーした」「設定した」「中止した」「解消を確認した」「切り替えた」
  *    「登録した」のように、**件数・理由・保存先を伴わない**もの。
@@ -95,7 +97,7 @@ export interface ConfirmOptions {
   /** 既定は `"info"`。取り消しにくい操作だけ `"warning"` にする */
   kind?: ConfirmKind;
   /**
-   * モーダルの小さい字で出す補足（VS Codeの `detail`）。
+   * 確認の補足。選択窓の「内容」の下に、行として並ぶ（折り返しは自前）。
    *
    * 処理量の見積もりのように**長くて読み飛ばされたくないもの**をここへ。
    * 渡さなければ今までどおり本文だけが出る。
@@ -119,7 +121,8 @@ export interface ConfirmOptions {
    *    「場所を抽出」が**作者の本物の作品**で確認画面（15チャンク・1時間30分）
    *    まで進み、件数が違うことでやっと気づいた。**確認画面に作品名があれば、
    *    押す前に分かる。** 文の頭に置くのは、モーダルでいちばん目に入る場所
-   *    だからである（件数や目安より先に「どの作品か」を読ませたい）
+   *    だからである（件数や目安より先に「どの作品か」を読ませたい）。
+ *    選択窓（A4）では、この1行目が窓の題になる
    * 2. **作品を推し量って決めていたら、「以降は訊かない」を覚えていても訊く**
    *    （作者の裁定、2026-09-23。`core/workTarget.ts` の `markInferredWork`）。
    *    題名の文字列では、どう決めたかが運べないので、作品の入れ物ごと受け取る
@@ -170,11 +173,10 @@ export function rememberLabel(runLabel: string): string {
 }
 
 /**
- * 実行してよいかを確かめる。**モーダルで出す。**
+ * 実行してよいかを確かめる。**画面上部の選択窓で出す**（A4。`askInTopPicker`）。
  *
- * 戻りは「押したかどうか」。`Esc` で閉じられたときは false になるので、
- * 呼び出し側に「中止」ボタンを足す必要はない。VS Codeはモーダルへ
- * 「キャンセル」を必ず付けるため、押して閉じる道も残っている。
+ * 戻りは「押したかどうか」。`Esc` で閉じられたときや「取りやめる」を
+ * 選んだときは false になるので、呼び出し側に「中止」を足す必要はない。
  *
  * `options.remember` を渡すと、ボタンが2つになる（「実行」と
  * 「実行（以降は訊かない）」）。**覚えるのは実行を選んだときだけで、
@@ -264,19 +266,13 @@ export async function confirmRunOrChoose(
     overridingMemory && inferred ? inferredWorkNote(inferred) : undefined
   );
 
-  // 顔つきが違うだけで、訊き方（モーダル）は同じにする。
-  // 揃えておかないと、警告のときだけ操作の手順が変わって見える。
-  // **関数を変数へ取り出さずに呼ぶ**——`vscode.window` から外すと
-  // 受け手（this）が外れる実装があり得るため
-  const modal = { modal: true, detail: options.detail };
-  const answer =
-    options.kind === "warning"
-      ? await vscode.window.showWarningMessage(shownMessage, modal, ...buttons)
-      : await vscode.window.showInformationMessage(
-          shownMessage,
-          modal,
-          ...buttons
-        );
+  const answer = await askInTopPicker({
+    message: shownMessage,
+    detail: options.detail,
+    buttons,
+    runLabel,
+    warning: options.kind === "warning",
+  });
 
   if (answer === runLabel) return { kind: "run" };
   if (rememberId && answer === rememberLabel(runLabel)) {
@@ -287,6 +283,94 @@ export async function confirmRunOrChoose(
     return { kind: "choice", label: answer };
   }
   return undefined;
+}
+
+/** 確認の選択窓の項目。`button` を持つものだけが押せる */
+type ConfirmPickItem = vscode.QuickPickItem & { readonly button?: string };
+
+/**
+ * 読んでいるだけの行を選ばれたとき、訊き直す回数の上限。
+ *
+ * 本物の画面では作者が何か選ぶまで続けてよいが、万一どこかが同じ行を
+ * 返し続けても止まるようにしておく（止まったら「閉じた」と同じ扱い）。
+ */
+const CONFIRM_REASK_LIMIT = 20;
+
+/**
+ * 確認を、**画面上部の選択窓**で訊く（作者の裁定 A4、2026-09-23）。
+ *
+ * 作者の要望は「メニューから選んだら、その横あたりに窓を」。VS Code は
+ * 拡張機能に窓の位置を決めさせない（モーダルは画面中央、通知は右下、
+ * 選択窓は画面上部に固定）。そこで**作品を選ぶ窓と同じ場所**で続けて訊き、
+ * 視線を「左のメニュー → 上の窓」の2か所に収めた。それまでは「左 → 上
+ * （作品）→ 中央（確認）」の3か所へ飛んでいた。
+ *
+ * 並べ方：
+ * - **先頭は実行。** Enter でそのまま進む——モーダルの既定のボタンと同じ
+ *   手触りにする。「以降は訊かない」・別の道・取りやめるが続く
+ * - その下に「内容」の区切りを置き、文の残りと補足（処理量・所要時間・
+ *   送る量）を**行として**並べる。1行は折り返されないので、字を落とさない
+ *   よう `core/confirmPickRows.ts` で割っておく
+ * - **内容の行を選んでも走らない。** 読んでいるだけの行なので、もう一度訊く
+ * - 外をクリックしても閉じない（`ignoreFocusOut`）。長い補足を読んでいる
+ *   あいだに閉じると、作者には何が起きたか分からない
+ *
+ * 取り消しにくい操作（`warning`）は、実行の項目に警告の印を付ける。
+ * モーダルの頃の「警告の顔」の代わりである。
+ */
+async function askInTopPicker(params: {
+  message: string;
+  detail?: string;
+  buttons: readonly string[];
+  runLabel: string;
+  warning: boolean;
+}): Promise<string | undefined> {
+  const layout = layoutConfirm(params.message, params.detail);
+  const actions: ConfirmPickItem[] = params.buttons.map((button) => ({
+    label: `${iconOfButton(button, params.runLabel, params.warning)} ${button}`,
+    button,
+  }));
+  const rows: ConfirmPickItem[] =
+    layout.rows.length > 0
+      ? [
+          { label: "内容", kind: vscode.QuickPickItemKind.Separator },
+          ...layout.rows.map(
+            (row): ConfirmPickItem =>
+              row === null
+                ? { label: "", kind: vscode.QuickPickItemKind.Separator }
+                : { label: row }
+          ),
+        ]
+      : [];
+
+  for (let round = 0; round < CONFIRM_REASK_LIMIT; round++) {
+    const picked = await vscode.window.showQuickPick<ConfirmPickItem>(
+      [...actions, cancelItem("取りやめる"), ...rows],
+      {
+        title: layout.title,
+        placeHolder: `「${params.runLabel}」を選ぶと始まります。内容は下に並べています`,
+        ignoreFocusOut: true,
+        // 内容の行の字で絞り込まない（打った字で実行が隠れると困る）
+        matchOnDescription: false,
+        matchOnDetail: false,
+      }
+    );
+    if (!picked || isCancelItem(picked)) return undefined;
+    if (picked.button !== undefined) return picked.button;
+    // 内容の行が選ばれた——読んでいただけなので、もう一度訊く
+  }
+  return undefined;
+}
+
+/** 選択窓の項目に付ける印。**押すと何が起きるか**が一目で分かるように */
+function iconOfButton(
+  button: string,
+  runLabel: string,
+  warning: boolean
+): string {
+  if (button === runLabel) return warning ? "$(warning)" : "$(play)";
+  if (button === rememberLabel(runLabel)) return "$(pin)";
+  return "$(arrow-right)";
 }
 
 /**

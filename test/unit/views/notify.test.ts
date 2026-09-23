@@ -17,6 +17,7 @@ import {
   workspace,
 } from "../support/vscodeStub";
 import * as logger from "../../../src/core/logger";
+import { answerConfirms } from "../support/confirmPicker";
 
 /**
  * 知らせの行き先（作者の裁定 2026-09-06、`src/views/notify.ts`）。
@@ -60,70 +61,59 @@ describe("その場限りの完了", () => {
   });
 });
 
+/*
+  確認は画面上部の選択窓で訊く（作者の裁定 A4、2026-09-23）。窓の並びそのもの
+  （実行が先頭・内容の行・取りやめ）は `confirmInTopPicker.test.ts` が見る。
+*/
 describe("実行前の確認", () => {
-  test("モーダルで出し、押されたら true", async () => {
-    const calls: unknown[][] = [];
-    const original = window.showInformationMessage;
-    window.showInformationMessage = async (message, ...items) => {
-      calls.push([message, ...items]);
-      return "実行";
-    };
+  test("選択窓で出し、実行を選べば true", async () => {
+    const picker = answerConfirms("実行");
     try {
       expect(await confirmRun("19話をAIで確認します。")).toBe(true);
-      expect(calls).toEqual([
-        ["19話をAIで確認します。", { modal: true }, "実行"],
-      ]);
+      expect(picker.shown).toHaveLength(1);
+      expect(picker.shown[0].title).toBe("19話をAIで確認します。");
+      expect(picker.shown[0].buttons).toEqual(["実行"]);
     } finally {
-      window.showInformationMessage = original;
+      picker.restore();
     }
   });
 
-  test("Escで閉じられたら false（「中止」ボタンは置かない）", async () => {
-    const original = window.showInformationMessage;
-    window.showInformationMessage = async () => undefined;
+  test("Escで閉じられたら false", async () => {
+    const picker = answerConfirms(undefined);
     try {
       expect(await confirmRun("19話をAIで確認します。")).toBe(false);
     } finally {
-      window.showInformationMessage = original;
+      picker.restore();
     }
   });
 
   test("押すボタンの名前は呼び出し側が決められる", async () => {
-    const calls: unknown[][] = [];
-    const original = window.showInformationMessage;
-    window.showInformationMessage = async (message, ...items) => {
-      calls.push([message, ...items]);
-      return "まとめる";
-    };
+    const picker = answerConfirms("まとめる");
     try {
       expect(await confirmRun("2人をまとめます。", "まとめる")).toBe(true);
-      expect(calls[0]?.[2]).toBe("まとめる");
+      expect(picker.shown[0].buttons[0]).toBe("まとめる");
     } finally {
-      window.showInformationMessage = original;
+      picker.restore();
     }
   });
 
   /*
     **作品名を渡せば、文の1行目に出す**（ノートPCの実機、2026-09-23）。
     詳細メニューの抽出が、作品一覧で誤って選ばれていた作者の本物の作品で
-    確認画面まで進み、件数の違いでやっと気づいた。
+    確認画面まで進み、件数の違いでやっと気づいた。選択窓では1行目が窓の題になる。
   */
-  test("作品名を渡すと、確認の文の1行目に出る", async () => {
-    const calls: unknown[][] = [];
-    const original = window.showInformationMessage;
-    window.showInformationMessage = async (message, ...items) => {
-      calls.push([message, ...items]);
-      return undefined;
-    };
+  test("作品名を渡すと、確認の文の1行目（窓の題）に出る", async () => {
+    const picker = answerConfirms(undefined);
     try {
       await confirmRun("15 チャンク中 15 件を処理します。", "実行", {
         work: { title: "こちら冒険者ギルド生活保護課!!" },
       });
-      expect(calls[0]?.[0]).toBe(
+      expect(picker.shown[0].text).toBe(
         "作品：こちら冒険者ギルド生活保護課!!\n15 チャンク中 15 件を処理します。"
       );
+      expect(picker.shown[0].title).toBe("作品：こちら冒険者ギルド生活保護課!!");
     } finally {
-      window.showInformationMessage = original;
+      picker.restore();
     }
   });
 
@@ -255,79 +245,55 @@ describe("ログへの入口つきの警告", () => {
  * ような**取り消しにくい操作まで情報アイコン**になった。もとは
  * `showWarningMessage` で出しており、見た目で身構えられていた。
  *
- * モーダルには VS Code が「キャンセル」を必ず付けるので、
- * 出口が無くなる心配は無い。
+ * 確認が画面上部の選択窓へ移ってから（A4、2026-09-23）は、**実行の項目に
+ * 警告の印を付ける**ことが「警告の顔」の代わりである。
  */
 describe("確認の顔つき", () => {
-  test("既定は情報の顔（showInformationMessage）", async () => {
-    const calls: unknown[][] = [];
-    const original = window.showInformationMessage;
-    window.showInformationMessage = async (message, ...items) => {
-      calls.push([message, ...items]);
-      return "実行";
-    };
+  test("既定は情報の顔（実行に警告の印が付かない）", async () => {
+    const picker = answerConfirms("実行");
     try {
       expect(await confirmRun("19話をAIで確認します。")).toBe(true);
-      expect(calls).toHaveLength(1);
+      expect(picker.shown).toHaveLength(1);
+      expect(picker.shown[0].warning).toBe(false);
     } finally {
-      window.showInformationMessage = original;
+      picker.restore();
     }
   });
 
-  test("kind: \"warning\" なら警告の顔（showWarningMessage）で出す", async () => {
-    const warnCalls: unknown[][] = [];
-    const infoCalls: unknown[][] = [];
-    const originalWarn = window.showWarningMessage;
-    const originalInfo = window.showInformationMessage;
-    window.showWarningMessage = async (message, ...items) => {
-      warnCalls.push([message, ...items]);
-      return "まとめる";
-    };
-    window.showInformationMessage = async (message, ...items) => {
-      infoCalls.push([message, ...items]);
-      return undefined;
-    };
+  test("kind: \"warning\" なら、実行に警告の印を付ける", async () => {
+    const picker = answerConfirms("まとめる");
     try {
       expect(
         await confirmRun("2人をまとめます。", "まとめる", { kind: "warning" })
       ).toBe(true);
-      expect(warnCalls).toEqual([
-        ["2人をまとめます。", { modal: true }, "まとめる"],
-      ]);
-      // 情報の顔では出さない（二重に出さない）
-      expect(infoCalls).toEqual([]);
+      expect(picker.shown).toHaveLength(1);
+      expect(picker.shown[0].warning).toBe(true);
+      expect(picker.shown[0].buttons).toEqual(["まとめる"]);
     } finally {
-      window.showWarningMessage = originalWarn;
-      window.showInformationMessage = originalInfo;
+      picker.restore();
     }
   });
 
-  test("警告の顔でも、押さなければ false", async () => {
-    const original = window.showWarningMessage;
-    window.showWarningMessage = async () => undefined;
+  test("警告の顔でも、選ばなければ false", async () => {
+    const picker = answerConfirms(undefined);
     try {
       expect(
         await confirmRun("送信します。", "送信する", { kind: "warning" })
       ).toBe(false);
     } finally {
-      window.showWarningMessage = original;
+      picker.restore();
     }
   });
 
   test("kind: \"info\" を明示しても、情報の顔のまま", async () => {
-    const calls: unknown[][] = [];
-    const original = window.showInformationMessage;
-    window.showInformationMessage = async (message, ...items) => {
-      calls.push([message, ...items]);
-      return "実行";
-    };
+    const picker = answerConfirms("実行");
     try {
       expect(await confirmRun("確かめます。", "実行", { kind: "info" })).toBe(
         true
       );
-      expect(calls).toHaveLength(1);
+      expect(picker.shown[0].warning).toBe(false);
     } finally {
-      window.showInformationMessage = original;
+      picker.restore();
     }
   });
 });
@@ -375,41 +341,47 @@ function stubConfirmMemory(initial: Record<string, string>): {
 describe("confirmRun：rememberId を渡したとき", () => {
   test("覚えがまだ無ければ、これまでどおり窓を出す", async () => {
     const memory = stubConfirmMemory({});
-    const calls: unknown[][] = [];
-    const original = window.showInformationMessage;
-    window.showInformationMessage = async (message, ...items) => {
-      calls.push([message, ...items]);
-      return "実行";
-    };
+    const picker = answerConfirms("実行");
     try {
       const result = await confirmRun("19話をAIで確認します。", "実行", {
         remember: { id: "ai.run.checkTypos" },
       });
       expect(result).toBe(true);
-      expect(calls).toHaveLength(1);
+      expect(picker.shown).toHaveLength(1);
+      expect(picker.shown[0].buttons).toEqual(["実行", "実行（以降は訊かない）"]);
     } finally {
-      window.showInformationMessage = original;
+      picker.restore();
+      memory.restore();
+    }
+  });
+
+  test("「以降は訊かない」を選べば、覚えて実行する", async () => {
+    const memory = stubConfirmMemory({});
+    const picker = answerConfirms("実行（以降は訊かない）");
+    try {
+      const result = await confirmRun("19話をAIで確認します。", "実行", {
+        remember: { id: "ai.run.checkTypos" },
+      });
+      expect(result).toBe(true);
+      expect(memory.updates.at(-1)).toMatchObject({ "ai.run.checkTypos": "実行" });
+    } finally {
+      picker.restore();
       memory.restore();
     }
   });
 
   test("「以降は訊かない」を覚えていれば、窓を出さずに実行したことにする（proceed相当）", async () => {
     const memory = stubConfirmMemory({ "ai.run.checkTypos": "実行" });
-    const calls: unknown[][] = [];
-    const original = window.showInformationMessage;
-    window.showInformationMessage = async (message, ...items) => {
-      calls.push([message, ...items]);
-      return "実行";
-    };
+    const picker = answerConfirms("実行");
     try {
       const result = await confirmRun("19話をAIで確認します。", "実行", {
         remember: { id: "ai.run.checkTypos" },
       });
       expect(result).toBe(true);
       // 窓を出していれば1件積まれるはず。出さずに通したことの証
-      expect(calls).toEqual([]);
+      expect(picker.shown).toEqual([]);
     } finally {
-      window.showInformationMessage = original;
+      picker.restore();
       memory.restore();
     }
   });

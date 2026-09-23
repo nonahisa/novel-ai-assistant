@@ -12,6 +12,10 @@ import {
   workspace,
 } from "../support/vscodeStub";
 import { importWorkFromZip } from "../../../src/features/importWorkFromZip";
+import {
+  bridgeConfirmsToMessages,
+  type ConfirmPicker,
+} from "../support/confirmPicker";
 import { inspectWorkBackup } from "../../../src/core/workZip";
 // **期待する場所は、製品と同じ組み立て方で作る。** 区切り文字を手で
 // 書くと、動かす環境（Windows と そうでないもの）で試験だけが落ちる
@@ -232,6 +236,8 @@ const original = {
   fs: workspace.fs,
 };
 
+let confirmBridge: ConfirmPicker | undefined;
+
 const warnings: string[] = [];
 /** 出した「お知らせ」。最後の1件が取り込みの完了報告になる */
 const notices: Array<{
@@ -245,6 +251,10 @@ const notices: Array<{
 function stubWindow(zipPath: string = ZIP_PATH): void {
   warnings.length = 0;
   notices.length = 0;
+  // 確認は画面上部の選択窓で出る（A4、2026-09-23）。このファイルは確認の
+  // 中身と答えを下の `showInformationMessage` で扱っているので、そこへ橋渡しする
+  confirmBridge?.restore();
+  confirmBridge = bridgeConfirmsToMessages();
   window.showOpenDialog = async () => [Uri.file(zipPath)];
   window.showInformationMessage = (async (
     message: string,
@@ -304,6 +314,8 @@ describe("ZIPから作品を取り込む", () => {
   afterEach(() => {
     window.showOpenDialog = original.showOpenDialog;
     window.showInformationMessage = original.showInformationMessage;
+    confirmBridge?.restore();
+    confirmBridge = undefined;
     window.showWarningMessage = original.showWarningMessage;
     workspace.fs = original.fs;
   });
@@ -704,6 +716,8 @@ describe("アルファポリスのバックアップ（.txt）から取り込む
   afterEach(() => {
     window.showOpenDialog = original.showOpenDialog;
     window.showInformationMessage = original.showInformationMessage;
+    confirmBridge?.restore();
+    confirmBridge = undefined;
     window.showWarningMessage = original.showWarningMessage;
     workspace.fs = original.fs;
   });
@@ -864,6 +878,8 @@ describe("完了のお知らせは短く、詳しい話は記録へ", () => {
   afterEach(() => {
     window.showOpenDialog = original.showOpenDialog;
     window.showInformationMessage = original.showInformationMessage;
+    confirmBridge?.restore();
+    confirmBridge = undefined;
     window.showWarningMessage = original.showWarningMessage;
     workspace.fs = original.fs;
   });

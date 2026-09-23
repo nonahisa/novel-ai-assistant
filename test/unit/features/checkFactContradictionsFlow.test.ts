@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { window } from "../support/vscodeStub";
+import { answerConfirms, type ConfirmPicker } from "../support/confirmPicker";
+
+let confirmPicker: ConfirmPicker | undefined;
+let confirmAnswer: string | undefined = "実行";
 import type { AIRegistry } from "../../../src/ai/registry";
 import type { WorkEntry } from "../../../src/models/types";
 
@@ -309,8 +313,12 @@ beforeEach(() => {
     explanation: "どちらも地の文で、両立しない",
     confidence: "high",
   });
+  // 実行の確認は画面上部の選択窓で出る（A4、2026-09-23）。既定は「実行」を選ぶ
+  confirmAnswer = "実行";
+  confirmPicker?.restore();
+  confirmPicker = answerConfirms(() => confirmAnswer);
   Object.assign(window, {
-    showInformationMessage: vi.fn(async () => "実行"),
+    showInformationMessage: vi.fn(async () => undefined),
     showWarningMessage: vi.fn(async () => undefined),
     createOutputChannel: () => ({
       appendLine: (line: string) => state.logged.push(line),
@@ -540,11 +548,11 @@ describe("取り出しが処理済みで、判定だけが残っているとき"
   }
 
   test("判定を送る前に確認を出す。取りやめたら送らない", async () => {
-    Object.assign(window, { showInformationMessage: vi.fn(async () => undefined) });
+    confirmAnswer = undefined;
 
     const result = await checkFactContradictions(work, registry());
 
-    expect(window.showInformationMessage).toHaveBeenCalled();
+    expect(confirmPicker?.shown.length).toBeGreaterThan(0);
     expect(state.sent).toEqual([]);
     expect(result?.cancelled).toBe(true);
   });
@@ -552,10 +560,9 @@ describe("取り出しが処理済みで、判定だけが残っているとき"
   test("確認で「実行」を押せば、判定だけを送る", async () => {
     const result = await checkFactContradictions(work, registry());
 
-    const calls = (window.showInformationMessage as ReturnType<typeof vi.fn>).mock
-      .calls as unknown[][];
-    expect(calls).toHaveLength(1);
-    expect(String(calls[0][0])).toContain("確かめます");
+    const shown = confirmPicker?.shown ?? [];
+    expect(shown).toHaveLength(1);
+    expect(shown[0].flat).toContain("確かめます");
     expect(verifySends()).toHaveLength(1);
     // 取り出しは処理済みなので送らない
     expect(
@@ -567,7 +574,7 @@ describe("取り出しが処理済みで、判定だけが残っているとき"
   test("まとめ実行が先に確認していれば、ここでは訊かない", async () => {
     await checkFactContradictions(work, registry(), { suiteConfirmed: true });
 
-    expect(window.showInformationMessage).not.toHaveBeenCalled();
+    expect(confirmPicker?.shown).toEqual([]);
     expect(verifySends()).toHaveLength(1);
   });
 });

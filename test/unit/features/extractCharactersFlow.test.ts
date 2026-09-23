@@ -298,6 +298,10 @@ import {
 } from "../../../src/features/extractCharacters";
 import { CharacterStoreError } from "../../../src/core/characterStore";
 import { emptyCharacter } from "../../../src/models/character";
+import {
+  bridgeConfirmsToMessages,
+  type ConfirmPicker,
+} from "../support/confirmPicker";
 
 const work: WorkEntry = {
   id: "work_test",
@@ -371,7 +375,16 @@ describe("AI失敗後の復旧案内", () => {
 });
 
 describe("人物抽出フロー", () => {
+  /*
+    実行の確認は画面上部の選択窓で出る（A4、2026-09-23）。このファイルは
+    確認で何を押すかを `showInformationMessage` の差し替えで決めている
+    （60か所近い）ので、選択窓に出た確認をそこへ橋渡しする
+  */
+  let confirmBridge: ConfirmPicker | undefined;
+
   beforeEach(() => {
+    confirmBridge?.restore();
+    confirmBridge = bridgeConfirmsToMessages();
     vi.clearAllMocks();
     state.generate.mockReset();
     state.saveAll.mockReset().mockResolvedValue(undefined);
