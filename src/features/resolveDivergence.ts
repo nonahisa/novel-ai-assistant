@@ -159,6 +159,16 @@ export type ConflictWalker = (input: {
 export interface FoldOptions {
   progress?: { report(value: { message?: string }): void };
   walk?: ConflictWalker;
+  /**
+   * 作者に選んでもらうものが残ったときに、どうするか（既定は `"walk"`）。
+   *
+   * `"stop"` は**選ぶ画面を開かずに、合わせるのをやめて元へ戻す。**
+   * 開いたときの点検（`handoffSync.ts`）が使う。作者が何も押していないのに
+   * 選ぶ画面が出るのは、「重なったら止めて訊く」（設計書6.15.1）に届かない。
+   * 点検は名前でしか重なりを見ないので、名前を変えたファイルは
+   * 「重ならない」と判断したまま、実際に合わせるとぶつかることがある
+   */
+  authorChoice?: "walk" | "stop";
 }
 
 export async function resolveDivergence(
@@ -461,6 +471,17 @@ export async function foldDivergence(
 
     // 3. 残りは作者が選ぶ。**同じ箇所を両方で書き換えたものだけ**が来る
     const forAuthor = [...undecided, ...classified.manuscripts];
+    if (forAuthor.length > 0 && options.authorChoice === "stop") {
+      // **選ぶ画面は、作者が押したときだけ開く。** ここでは合わせるのを
+      // やめて戻し、何が残ったかだけを返す（知らせと口は呼び出し側が出す）
+      await run(["merge", "--abort"], root, 15_000);
+      await dropUnusedBackup(root, backup, run);
+      return {
+        ok: false,
+        reason: describeAuthoredStop(forAuthor),
+        authored: forAuthor,
+      };
+    }
     if (forAuthor.length > 0) {
       const walk = options.walk ?? defaultWalk;
       let walked: WalkConflictsResult;
@@ -615,6 +636,35 @@ async function mergeAppendOnly(
 
   const added = await run(["add", "--", file], root, 15_000);
   return added.code === 0;
+}
+
+/**
+ * 使わなかった退避の枝を消す。
+ *
+ * **開いたときの点検は、作者が合わせるまで毎回同じ所で止まる。** そのたびに
+ * 枝が1本ずつ増えると、戻したいときにどれが本物か分からなくなる。
+ *
+ * **消すのは、先頭が枝と同じ位置のときだけ**（`branch -d` なので、先頭に
+ * 含まれていない枝は git が消さない）。合わせる前の自動保存で記録が1つ
+ * 進んでいるときは、記録する前へ戻れる枝として残す。
+ */
+async function dropUnusedBackup(
+  root: string,
+  backup: string,
+  run: GitCommandRunner
+): Promise<void> {
+  const head = await run(["rev-parse", "HEAD"], root, 15_000);
+  const saved = await run(["rev-parse", backup], root, 15_000);
+  if (head.code !== 0 || saved.code !== 0) return;
+  if (head.stdout.trim() !== saved.stdout.trim()) return;
+  const dropped = await run(["branch", "-d", backup], root, 15_000);
+  if (dropped.code !== 0) {
+    // 消せなくても害は無い（枝が1本残るだけ）。理由だけ残す
+    logFailure("使わなかった退避の枝を消せなかった", {
+      枝: backup,
+      詳細: (dropped.stderr || dropped.stdout).trim(),
+    });
+  }
 }
 
 /** 途中でやめる。**原稿を元へ戻してから理由を返す** */

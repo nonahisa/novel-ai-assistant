@@ -582,6 +582,60 @@ describe("設定資料と本文の自動合流", { timeout: 30_000 }, () => {
     expect(status()).toContain("behind");
   });
 
+  test("選ぶ画面へ進まない指定なら、画面を開かずに戻し、使わなかった枝を消す", async () => {
+    // 開いたときの点検が使う（設計書6.15.1。作者が何も押していない）
+    分岐を作る(
+      [["短編/本文/第5話.txt", "もとの本文。\n"]],
+      [["短編/本文/第5話.txt", "むこうの直し。\n"]],
+      [["短編/本文/第5話.txt", "こちらの直し。\n"]]
+    );
+    let walked = false;
+    const result = await foldDivergence(
+      deps(),
+      { root, label: "短編", upstream: "origin/main" },
+      {
+        authorChoice: "stop",
+        walk: async () => {
+          walked = true;
+          return { resolved: [], bulkResolved: [], aborted: true };
+        },
+      }
+    );
+
+    expect(walked).toBe(false);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.authored).toEqual(["短編/本文/第5話.txt"]);
+    expect(git(root, "status", "--porcelain").trim()).toBe("");
+    expect(
+      fs.readFileSync(nodePath.join(root, "短編/本文/第5話.txt"), "utf8")
+    ).toBe("こちらの直し。\n");
+    // 先頭が動いていないので、退避の枝は要らない（開くたびに増やさない）
+    expect(git(root, "branch", "--list", "backup/*").trim()).toBe("");
+  });
+
+  test("選ぶ画面へ進まない指定でも、自動保存で記録が進んだら枝は残す", async () => {
+    分岐を作る(
+      [["短編/本文/第5話.txt", "もとの本文。\n"]],
+      [["短編/本文/第5話.txt", "むこうの直し。\n"]],
+      [["短編/本文/第5話.txt", "こちらの直し。\n"]]
+    );
+    write(root, "短編/本文/第9話.txt", "書きかけ。\n");
+
+    const result = await foldDivergence(
+      deps(),
+      { root, label: "短編", upstream: "origin/main" },
+      { authorChoice: "stop" }
+    );
+
+    expect(result.ok).toBe(false);
+    // 書きかけは記録されて残り、記録する前へ戻れる枝もある
+    expect(
+      fs.readFileSync(nodePath.join(root, "短編/本文/第9話.txt"), "utf8")
+    ).toBe("書きかけ。\n");
+    expect(git(root, "branch", "--list", "backup/*")).toContain("backup/");
+  });
+
   test("本文の同じ行を両方で書き換えたら、作者に選ばせる", async () => {
     分岐を作る(
       [["短編/本文/第6話.txt", "もとの一行。\n"]],

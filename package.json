@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを引き受けるVSCode拡張機能で、AIは提案するだけで原稿は書き換えません（無料の手元AIだけでも使えます）。※現在テスト中です。",
-  "version": "0.83.12",
+  "version": "0.83.13",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -2171,7 +2171,7 @@
         "novelai.git.autoFetch": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "作品フォルダーがGitリポジトリのとき、起動時と本文を開いたときに `git fetch` する。\n\n・別の環境の変更が未取得かどうかを確かめる\n・fetchは取得のみ。原稿にもブランチにも触れない\n・取り込み（pull）と送信（push）は自動では行わない"
+          "markdownDescription": "本文を開いたときに `git fetch` し、別の環境の変更が未取得かを確かめる。\n\n・作品フォルダーがGitリポジトリのときだけ\n・fetchは取得のみ。原稿にもブランチにも触れない\n・切っても、VS Code を開いたときの点検は走る\n・開いたときの点検：別の環境だけが進んでいれば取り込む。未送信の記録があれば送る。両方に記録があって同じファイルが重ならなければ、合わせて送る。重なっていれば止めて知らせる（［分岐合流］で1件ずつ選べる）\n・保存していない原稿や、記録していない変更があるときは、取り込みも合流もしない"
         },
         "novelai.git.syncCache": {
           "type": "boolean",

@@ -297,10 +297,31 @@ async function foldBoth(
   try {
     folded = await foldDivergence(
       { registry: deps.registry, run: deps.run },
-      { root: target.root, label: target.label, upstream: status.upstream }
+      { root: target.root, label: target.label, upstream: status.upstream },
+      // **選ぶ画面は開かない。** 作者は何も押していない（設計書6.15.1）
+      { authorChoice: "stop" }
     );
   } finally {
     resume?.();
+  }
+
+  if (!folded.ok && folded.authored && folded.authored.length > 0) {
+    // 名前の上では重ならなかったが、実際に合わせたらぶつかった
+    // （名前を変えたファイルで起きる）。合わせるのはやめて元へ戻してある。
+    // **「重なる」と判断したときと同じ扱いにする**——知らせも口も同じにしないと、
+    // 作者から見て同じ状況に2通りの答えが出る
+    logStep(
+      `合わせてみたら、同じ箇所が両方で変わっていた（${target.label}／` +
+        `${folded.authored.length}件）。元に戻して止めた`
+    );
+    const asked: HandoffAction = {
+      kind: "ask",
+      behind: action.behind,
+      ahead: action.ahead,
+      dirty: action.dirty,
+      overlap: folded.authored,
+    };
+    return { label: target.label, action: asked, done: false };
   }
 
   if (!folded.ok) {
