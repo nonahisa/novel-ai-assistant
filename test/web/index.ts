@@ -13,7 +13,18 @@
  *
  * - クラウドAI（鍵が要る。検査に鍵を持たせない）
  * - ソース管理からGitHubへ保存する道（VS Code本体の機能で、繋ぎ先も要る）
- * - 本文を書き換えて保存する道（原稿を守るハッシュ照合。**ここは実機で見る**）
+ * - **本物の vscode.dev の、GitHub の上のファイルへ書く道**（`vscode-vfs://`）。
+ *   ここで書くのは `@vscode/test-web` の仮想ファイルシステムで、書き込みは
+ *   ブラウザのメモリに置かれるだけ（手元の材料へは返らない。
+ *   `scripts/runWebTests.mjs` が前後の指紋で確かめる）。本文を書き換える道
+ *   そのもの（ハッシュ照合・退避・作り直し）は、ここで通す
+ *
+ * ## パネル（WebView）の中身
+ *
+ * 拡張機能ホストからは、パネルが「作られた」ことまでしか分からない。
+ * 中身が描かれたかは、`scripts/webviewProbe.mjs` が見えない Chromium の
+ * フレームを DevTools の口で読み、ここから `fetch` で尋ねる
+ * （Claude の内蔵ブラウザでは、タブは出るのに中身が空だった。2026-09-23）。
  *
  * ## Mocha を使っていない
  *
@@ -25,13 +36,31 @@
 import * as vscode from "vscode";
 import { countChars } from "../../src/core/charCount";
 import { fromUri, join, toUri } from "../../src/core/paths";
+import {
+  readTextFile,
+  writeTextFilePreservingFormat,
+} from "../../src/core/textFile";
 import type { WorkEntry } from "../../src/models/types";
 
 /** 束ねるときに `scripts/buildWebTests.mjs` が埋める（publisher を変えても付いてくる） */
 declare const __EXTENSION_ID__: string;
+/** パネルの中身を覗く口（`scripts/webviewProbe.mjs`）。同じく束ねるときに埋める */
+declare const __WEB_PROBE_URL__: string;
 
 /** テストの中で使う作品名。実在の作品と紛れない名前にする */
 const WORK_TITLE = "ブラウザ確認用作品";
+
+/** 本文へ書き足す文。材料に無い言い回しにして、書けたかを取り違えない */
+const EDITED_MARK = "（ブラウザ版の検査で書き足した一文）";
+
+/**
+ * パネルの種類（`createWebviewPanel` の第1引数）。**製品の定数を import しない**
+ * ——パネルの部品ごと束へ引き込むと、検査の束が拡張機能の束と同じ大きさになる
+ */
+const SETTINGS_VIEW_TYPE = "novelai.settings";
+const PROPOSALS_VIEW_TYPE = "novelai.proposals";
+const WRITING_STATS_VIEW_TYPE = "novelai.writingStats";
+const PLOT_MODE_VIEW_TYPE = "novelai.plotMode";
 
 export async function run(): Promise<void> {
   const failures: string[] = [];
@@ -143,6 +172,211 @@ export async function run(): Promise<void> {
     console.log(`[web] ${first}: ${counts.net}字（記号を除く）`);
   });
 
+  await runCase("本文をエディタで書き換えて保存できる", failures, async () => {
+    assert(registered !== undefined, "作品が登録されていないため確かめられません");
+    // 1話目は上の検査が開いているので、2つ目の本文で試す
+    const name = (await manuscriptNames(registered.folderPath))[1];
+    assert(name !== undefined, "作品フォルダーに本文が2つありません");
+    const uri = toUri(join(registered.folderPath, name));
+    const before = await vscode.workspace.fs.readFile(uri);
+
+    try {
+      const document = await vscode.workspace.openTextDocument(uri);
+      const edit = new vscode.WorkspaceEdit();
+      edit.insert(uri, document.positionAt(document.getText().length), EDITED_MARK);
+      assert(await vscode.workspace.applyEdit(edit), "applyEdit が断られました");
+      assert(document.isDirty, "書き換えたのに、未保存の印が付きません");
+      assert(await document.save(), "保存が断られました");
+
+      // **エディタの中ではなく、ファイルの側を読み直す。** 画面に出ているだけで
+      // 書けていない、という壊れ方を拾うため
+      const saved = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+      assert(
+        saved.includes(EDITED_MARK),
+        `保存したはずの文が、読み直したファイルにありません（${name}）`
+      );
+    } finally {
+      await restoreBytes(uri, before);
+    }
+  });
+
+  await runCase(
+    "本文の書き戻し（writeTextFilePreservingFormat）は、ハッシュが合うときだけ書く",
+    failures,
+    async () => {
+      assert(registered !== undefined, "作品が登録されていないため確かめられません");
+      // エディタで開いていない本文で試す（開いていて未保存なら、別の理由で断られる）
+      const name = (await manuscriptNames(registered.folderPath))[2];
+      assert(name !== undefined, "作品フォルダーに本文が3つありません");
+      const filePath = join(registered.folderPath, name);
+      const uri = toUri(filePath);
+      const before = await vscode.workspace.fs.readFile(uri);
+
+      try {
+        // 製品と同じ読み方（読んだ時点のハッシュを持つ）
+        const content = await readTextFile(filePath);
+        const rewritten = `${EDITED_MARK}${content.text}`;
+
+        // ① ハッシュが違う → 書かない。ファイルは1バイトも変わらない
+        const refused = await writeTextFilePreservingFormat(
+          filePath,
+          rewritten,
+          content,
+          "0".repeat(content.hash.length)
+        );
+        assert(
+          !refused.ok && refused.reason === "modified_externally",
+          `ハッシュが違うのに断りませんでした: ${JSON.stringify(refused)}`
+        );
+        assert(
+          sameBytes(await vscode.workspace.fs.readFile(uri), before),
+          "断ったはずなのに、ファイルが変わっています"
+        );
+
+        // ② 読んだあとで外から書き換えられた → 読んだときのハッシュでは書かない。
+        //    **外の書き換えを押し流さない**のが、この照合の目的である
+        const external = new TextEncoder().encode(`${content.text}外から足した一行\n`);
+        await vscode.workspace.fs.writeFile(uri, external);
+        const overwritten = await writeTextFilePreservingFormat(
+          filePath,
+          rewritten,
+          content,
+          content.hash
+        );
+        assert(
+          !overwritten.ok && overwritten.reason === "modified_externally",
+          `外から書き換えられたのに書きました: ${JSON.stringify(overwritten)}`
+        );
+        assert(
+          sameBytes(await vscode.workspace.fs.readFile(uri), external),
+          "外から書き換えた内容が、押し流されています"
+        );
+
+        // ③ ハッシュが合う → 書ける。書く前の本文は回復先へ退避される
+        await vscode.workspace.fs.writeFile(uri, before);
+        const written = await writeTextFilePreservingFormat(
+          filePath,
+          rewritten,
+          content,
+          content.hash
+        );
+        assert(written.ok, `ハッシュが合うのに書けませんでした: ${JSON.stringify(written)}`);
+        const after = await readTextFile(filePath);
+        assert(
+          after.text === rewritten,
+          `書いた内容が違います（先頭: ${after.text.slice(0, 40)}）`
+        );
+        // 文字コード・改行・末尾の改行を読み込んだときのままにする（設計書5.4.2）
+        assert(
+          after.encoding === content.encoding &&
+            after.eol === content.eol &&
+            after.hasTrailingNewline === content.hasTrailingNewline,
+          `形式が変わりました: ${content.encoding}/${content.eol}/${content.hasTrailingNewline}` +
+            ` → ${after.encoding}/${after.eol}/${after.hasTrailingNewline}`
+        );
+        assert(written.recoveryPath !== undefined, "書く前の本文を退避した先が返りません");
+        assert(
+          sameBytes(await vscode.workspace.fs.readFile(toUri(written.recoveryPath)), before),
+          `退避した本文が、書く前の本文と違います: ${written.recoveryPath}`
+        );
+      } finally {
+        await restoreBytes(uri, before);
+      }
+    }
+  );
+
+  await runCase("設定資料パネルが開き、中身が描かれる", failures, async () => {
+    assert(registered !== undefined, "作品が登録されていないため確かめられません");
+    await runCommand("novelai.openSettingsPanel");
+    await waitForWebviewTab(SETTINGS_VIEW_TYPE);
+    await expectWebviewContent("設定資料", "左の一覧から選んでください。");
+  });
+
+  /** 本文を置いた列。提案パネル・執筆統計の置き場所の基準にする */
+  let textColumn: vscode.ViewColumn | undefined;
+
+  await runCase("提案パネルは、本文の右の列に開く", failures, async () => {
+    assert(registered !== undefined, "作品が登録されていないため確かめられません");
+    textColumn = await showOnlyManuscript(registered.folderPath);
+
+    await runCommand("novelai.openProposals");
+    const { group } = await waitForWebviewTab(PROPOSALS_VIEW_TYPE);
+    assert(
+      group.viewColumn > textColumn,
+      `提案パネルが本文（${textColumn}列目）の右に開いていません（${group.viewColumn}列目）`
+    );
+    // 押して開いたときは、フォーカスごと移る（`novelai.openProposals` の引数なし）
+    assert(
+      vscode.window.tabGroups.activeTabGroup.viewColumn === group.viewColumn,
+      "提案パネルを開いたのに、前面の列が移っていません"
+    );
+    await expectWebviewContent("提案");
+  });
+
+  await runCase(
+    "執筆統計は、右の列が前面でも本文の列に開く（wideViewColumn）",
+    failures,
+    async () => {
+      assert(textColumn !== undefined, "本文の列が決まっていないため確かめられません");
+      const proposals = findWebviewTab(PROPOSALS_VIEW_TYPE);
+      assert(proposals !== undefined, "提案パネルが開いていないため確かめられません");
+      // **ここが e16a8bf2 の場面**——細い右の列が前面のときに開く
+      assert(
+        vscode.window.tabGroups.activeTabGroup.viewColumn === proposals.group.viewColumn,
+        "右の列（提案パネル）が前面になっていないため、確かめたい場面になりません"
+      );
+
+      await runCommand("novelai.showWritingStats");
+      const { group } = await waitForWebviewTab(WRITING_STATS_VIEW_TYPE);
+      assert(
+        group.viewColumn === textColumn,
+        `執筆統計が本文の列（${textColumn}列目）ではなく${group.viewColumn}列目に開きました`
+      );
+      await expectWebviewContent("執筆量");
+    }
+  );
+
+  await runCase("プロットモードが開き、中身が描かれる", failures, async () => {
+    assert(registered !== undefined, "作品が登録されていないため確かめられません");
+    await runCommand("novelai.openPlotMode");
+    await waitForWebviewTab(PLOT_MODE_VIEW_TYPE);
+    await expectWebviewContent("プロットモード", "プロットの節");
+  });
+
+  await runCase("拡張機能の記録に、失敗が残っていない", failures, async () => {
+    assert(registered !== undefined, "作品が登録されていないため確かめられません");
+    /*
+      出力チャネルは外から読めないので、同じ行を写しているファイルを読む
+      （`core/logger.ts`）。**置き場は2つある**——作品が決まった処理は作品の下、
+      決まらない処理は拡張機能の保管庫（`globalStorageUri`。ブラウザでは
+      `vscode-userdata:` の下）。保管庫の場所は拡張機能の中からしか分からない
+      ので、VS Code の決まった置き方から組み立てる。
+    */
+    const places = [
+      join(registered.folderPath, ".aiwriter", "logs", "actions.log"),
+      `vscode-userdata:/User/globalStorage/${__EXTENSION_ID__.toLowerCase()}/.aiwriter/logs/actions.log`,
+    ];
+    const lines: string[] = [];
+    for (const place of places) {
+      let log = "";
+      try {
+        log = new TextDecoder().decode(await vscode.workspace.fs.readFile(toUri(place)));
+      } catch {
+        // 記録が1行も無いなら、そこには失敗も無い
+      }
+      const read = log.split("\n").filter((line) => line !== "");
+      // **何行見たかを残す。** 0行なら、その置き場については何も確かめていない
+      console.log(`[web] 拡張機能の記録 ${place}: ${read.length}行`);
+      lines.push(...read);
+    }
+    // `logFailure` は「--- 何の失敗 ---」の見出しで始まる
+    const failed = lines.filter((line) => /\] --- .+ ---$/.test(line));
+    assert(
+      failed.length === 0,
+      `失敗の記録があります（${failed.length}件）:\n${failed.join("\n")}`
+    );
+  });
+
   if (failures.length > 0) {
     throw new Error(`ブラウザ版の検査が失敗しました:\n${failures.join("\n")}`);
   }
@@ -194,6 +428,166 @@ async function waitForDocument(marker: string): Promise<string | undefined> {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 作品フォルダーの本文（.txt と .md）の名前を、並び順で返す */
+async function manuscriptNames(folderPath: string): Promise<string[]> {
+  const entries = await vscode.workspace.fs.readDirectory(toUri(folderPath));
+  return entries
+    .filter(
+      ([name, kind]) =>
+        kind === vscode.FileType.File && (name.endsWith(".txt") || name.endsWith(".md"))
+    )
+    .map(([name]) => name)
+    .sort();
+}
+
+/**
+ * 書き換えた本文を元のバイトへ戻す。
+ *
+ * 仮想ファイルシステムの書き込みは材料へ返らないが、**あとの検査が
+ * 書き換えた本文を読まないように**、その場で戻す。戻ったことも確かめる。
+ */
+async function restoreBytes(uri: vscode.Uri, bytes: Uint8Array): Promise<void> {
+  await vscode.workspace.fs.writeFile(uri, bytes);
+  const now = await vscode.workspace.fs.readFile(uri);
+  if (!sameBytes(now, bytes)) {
+    throw new Error(`本文を元へ戻せませんでした: ${uri.toString()}`);
+  }
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  for (let i = 0; i < left.byteLength; i++) {
+    if (left[i] !== right[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * コマンドを実行する。**待ち続けない。**
+ *
+ * 画面を出さないブラウザでは、確認のダイアログや選択画面が出ると
+ * 誰も押さないので、検査がそこで止まったまま終わらなくなる。
+ */
+async function runCommand(command: string, ...args: unknown[]): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${command} が20秒たっても返りません（選択画面か確認が出ている？）`)),
+      20_000
+    );
+  });
+  try {
+    await Promise.race([vscode.commands.executeCommand(command, ...args), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 編集の列をすべて閉じて、1話目の本文だけを1列目に置く。置いた列を返す */
+async function showOnlyManuscript(folderPath: string): Promise<vscode.ViewColumn> {
+  await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+  const name = (await manuscriptNames(folderPath))[0];
+  assert(name !== undefined, "作品フォルダーに本文がありません");
+  const document = await vscode.workspace.openTextDocument(toUri(join(folderPath, name)));
+  const editor = await vscode.window.showTextDocument(document, {
+    viewColumn: vscode.ViewColumn.One,
+    preview: false,
+  });
+  assert(editor.viewColumn !== undefined, "本文を置いた列が分かりません");
+  return editor.viewColumn;
+}
+
+/**
+ * その種類のパネルのタブ。
+ *
+ * **VS Code はタブの viewType に内部の接頭辞を付ける**
+ * （`mainThreadWebview-novelai.settings` のように）ので、末尾で比べる
+ * （`features/editorColumn.ts` の `columnOfWebviewPanel` と同じ見方）。
+ */
+function findWebviewTab(
+  viewType: string
+): { tab: vscode.Tab; group: vscode.TabGroup } | undefined {
+  for (const group of vscode.window.tabGroups.all) {
+    for (const tab of group.tabs) {
+      const input: unknown = tab.input;
+      if (
+        input instanceof vscode.TabInputWebview &&
+        (input.viewType === viewType || input.viewType.endsWith(`-${viewType}`))
+      ) {
+        return { tab, group };
+      }
+    }
+  }
+  return undefined;
+}
+
+async function waitForWebviewTab(
+  viewType: string
+): Promise<{ tab: vscode.Tab; group: vscode.TabGroup }> {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const found = findWebviewTab(viewType);
+    if (found) return found;
+    await delay(100);
+  }
+  throw new Error(`パネル（${viewType}）のタブが出ません`);
+}
+
+/** 覗く口（`scripts/webviewProbe.mjs`）が返す、WebView の1フレーム */
+interface ProbeFrame {
+  url: string;
+  title: string;
+  text: string;
+}
+
+async function readWebviewFrames(): Promise<ProbeFrame[]> {
+  let response: Response;
+  try {
+    response = await fetch(__WEB_PROBE_URL__);
+  } catch (error) {
+    // **覗けないことを「描かれていない」と取り違えない**
+    throw new Error(
+      `パネルの中身を覗く口（${__WEB_PROBE_URL__}）に繋がりません: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+  const body = (await response.json()) as { frames?: ProbeFrame[]; error?: string };
+  if (!response.ok || body.frames === undefined) {
+    throw new Error(`パネルの中身を覗けませんでした: ${body.error ?? response.status}`);
+  }
+  return body.frames;
+}
+
+/**
+ * 見出し（`<title>`）が `title` のパネルが描かれるまで待つ。
+ * `text` を渡したら、その文字が画面に出ていることまで確かめる。
+ *
+ * **タブが出ただけでは「開けた」ではない**——Service Worker の登録に
+ * 失敗したブラウザでは、タブは出るのに中身が空のままになる。
+ */
+async function expectWebviewContent(title: string, text?: string): Promise<void> {
+  let last: ProbeFrame[] = [];
+  for (let attempt = 0; attempt < 40; attempt++) {
+    last = await readWebviewFrames();
+    const hit = last.find(
+      (frame) => frame.title === title && (text === undefined || frame.text.includes(text))
+    );
+    if (hit) {
+      console.log(`[web] パネル「${title}」: ${hit.text.replace(/\s+/g, " ").slice(0, 60)}`);
+      return;
+    }
+    await delay(250);
+  }
+  const seen = last
+    .filter((frame) => frame.title !== "")
+    .map((frame) => `「${frame.title}」${frame.text.replace(/\s+/g, " ").slice(0, 40)}`);
+  throw new Error(
+    `パネル「${title}」の中身が描かれませんでした` +
+      (text === undefined ? "" : `（「${text}」を待った）`) +
+      `。見えたパネル: ${seen.length > 0 ? seen.join(" / ") : "なし"}`
+  );
 }
 
 /** 診断の「まとめ」だけを取り出す。失敗したときの手がかりにする */

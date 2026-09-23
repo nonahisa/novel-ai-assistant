@@ -62,6 +62,11 @@ await esbuild.build({
   define: {
     // publisher を変えても付いてこられるように、ここで埋める
     __EXTENSION_ID__: JSON.stringify(`${pkg.publisher}.${pkg.name}`),
+    // パネルの中身を覗く口（`scripts/webviewProbe.mjs`）。`runWebTests.mjs` と同じ既定値。
+    // **`VSCODE_` で始まる名前にしない**——あちらは起動時に `VSCODE_*` を全部落とす
+    __WEB_PROBE_URL__: JSON.stringify(
+      `http://127.0.0.1:${process.env.NOVELAI_WEB_PROBE_PORT ?? 3112}/webview-frames`
+    ),
   },
   logLevel: "info",
 });
