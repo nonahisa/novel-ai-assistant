@@ -101,6 +101,15 @@ export interface ConflictObservation {
    * どの話で書かれたかを遡って知る手段が無いため、推測で埋めない。
    */
   chapters: number[];
+  /**
+   * その値を読み取った本文の引用（P-01 の `evidence`）。古いデータには無い。
+   *
+   * **食い違いを変化へ畳むとき、根拠を運ぶため**（作者の裁定、2026-09-23）。
+   * 根拠の無い変化は本体の値を動かさない（`recordChanges.ts` の
+   * `changeMovesBody`）。ここで落とすと、抽出が根拠を示していた値まで
+   * 畳んだ時点で「根拠なし」になり、本体へ入れられなくなる
+   */
+  evidence?: string | null;
 }
 
 /** 設定と本文の食い違い（作中での変化かもしれない）を表す共通の構造 */
@@ -122,19 +131,32 @@ export interface RecordConflict {
 export function recordObservation(
   conflict: RecordConflict,
   value: string,
-  chapters: number[]
+  chapters: number[],
+  /** その値を読み取った本文の引用。**既にあれば置き換えない**（最初の根拠を残す） */
+  evidence: string | null = null
 ): boolean {
   const valid = chapters.filter((chapter) => Number.isSafeInteger(chapter));
   if (!conflict.observations) conflict.observations = [];
   const found = conflict.observations.find((item) => item.value === value);
+  const quote = evidence?.trim() || null;
   if (!found) {
-    conflict.observations.push({ value, chapters: sortedUnique(valid) });
+    conflict.observations.push({
+      value,
+      chapters: sortedUnique(valid),
+      // 根拠が無いときは項目ごと置かない（古いデータと同じ形のまま）
+      ...(quote ? { evidence: quote } : {}),
+    });
     return true;
+  }
+  let changed = false;
+  if (quote && !found.evidence?.trim()) {
+    found.evidence = quote;
+    changed = true;
   }
   const merged = sortedUnique([...found.chapters, ...valid]);
   // 増えていなければ書き換えない。呼ぶたびに「変更あり」と返すと、
   // 中身が同じままファイルを保存し直すことになる
-  if (merged.length === found.chapters.length) return false;
+  if (merged.length === found.chapters.length) return changed;
   found.chapters = merged;
   return true;
 }
@@ -167,7 +189,7 @@ export function mergeConflicts(
         values: [...conflict.values],
         chapters: [...conflict.chapters],
         observations: conflict.observations?.map((item) => ({
-          value: item.value,
+          ...item,
           chapters: [...item.chapters],
         })),
       });
@@ -179,7 +201,8 @@ export function mergeConflicts(
     }
     found.chapters = sortedUnique([...found.chapters, ...conflict.chapters]);
     for (const item of conflict.observations ?? []) {
-      recordObservation(found, item.value, item.chapters);
+      // 値ごとの根拠も運ぶ。落とすと、畳んだときに本体を動かせなくなる
+      recordObservation(found, item.value, item.chapters, item.evidence ?? null);
     }
     // 作者のメモは片方を捨てない
     const notes = [found.note, conflict.note]
@@ -223,6 +246,15 @@ export interface RecordChange {
   evidence: string | null;
   /** extracted ＝ 食い違いからの昇格、author ＝ 作者が直接書いた */
   source: "extracted" | "author";
+  /**
+   * 作者が「この変化は正しい」と認めた（作者の裁定、2026-09-23）。
+   *
+   * **根拠（`evidence`）の無い変化は、本体の値を動かさない**——
+   * 「要確認」として残る（`recordChanges.ts` の `changeMovesBody`）。
+   * 作者が設定資料パネルで認めたら、根拠の代わりにこの印を立てる。
+   * 出どころ（`source`）とは分ける：抽出が見つけた値であることは変わらない
+   */
+  confirmed?: boolean;
 }
 
 export function findChange(
@@ -300,6 +332,8 @@ export function mergeChangeLists(
     found.note = notes.length > 0 ? [...new Set(notes)].join("\n") : null;
     // 作者が書いたものは、昇格由来のものより強い
     if (change.source === "author") found.source = "author";
+    // 作者が認めた印も落とさない（片方で認めていれば、認めたことになる）
+    if (change.confirmed === true) found.confirmed = true;
   }
 
   return merged;
@@ -317,6 +351,7 @@ export function parseChanges(
     optionalNullableString(entry.note, `${entryPath}.note`);
     optionalNullableString(entry.evidence, `${entryPath}.evidence`);
     optionalEnum(entry.source, `${entryPath}.source`, ["extracted", "author"]);
+    optionalBoolean(entry.confirmed, `${entryPath}.confirmed`);
     return {
       field: entry.field as string,
       value: entry.value as string,
@@ -326,6 +361,9 @@ export function parseChanges(
       evidence: (entry.evidence as string | null | undefined) ?? null,
       source:
         (entry.source as RecordChange["source"] | undefined) ?? "extracted",
+      // 立っているときだけ置く。立っていない記録を読み直して書くたびに
+      // `confirmed: false` が増えると、作者の目には無関係の差分に見える
+      ...(entry.confirmed === true ? { confirmed: true } : {}),
     };
   });
 }
@@ -345,9 +383,13 @@ export function parseConflicts(
       (item, itemPath) => {
         requireNonEmptyString(item.value, `${itemPath}.value`);
         optionalNumberArray(item.chapters, `${itemPath}.chapters`);
+        optionalNullableString(item.evidence, `${itemPath}.evidence`);
+        const evidence = (item.evidence as string | null | undefined)?.trim();
         return {
           value: item.value as string,
           chapters: (item.chapters as number[] | undefined) ?? [],
+          // 根拠が無いときは項目ごと置かない（古いデータと同じ形のまま）
+          ...(evidence ? { evidence } : {}),
         };
       }
     );

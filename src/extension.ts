@@ -235,7 +235,7 @@ import {
 } from "./features/checkTypos";
 // 完了通知の件数は、提案パネルの見出しと同じ数え方をする（設計書6.8）
 import { describeCheckRunCounts } from "./core/checkRunCounts";
-import { pickHintedWork } from "./core/workTarget";
+import { markInferredWork, pickHintedWork } from "./core/workTarget";
 import type { IncomingCount } from "./core/proposalBuckets";
 import {
   checkNotation,
@@ -676,7 +676,7 @@ export async function activate(
       : undefined;
     const work =
       given?.work ??
-      (openedPath ? findWorkForPath(registry, openedPath) : undefined) ??
+      (openedPath ? inferredWorkOfPath(registry, openedPath) : undefined) ??
       (await resolveWork(undefined, registry));
     // 選ばずに閉じたなら、そこで終わり。もう一度選ばせない
     if (!work) return { run: false };
@@ -1979,8 +1979,11 @@ export async function activate(
       // 前の件数を「指摘 N件」と言っていた（設計書6.8.16）
       const command = CHAT_RUN_COMMANDS[kind];
       if (command) {
-        // 作品を指定して呼ぶ。引数無しだと作品選択からやり直させてしまう
-        const ref: WorkRef = { type: "work", work };
+        // 作品を指定して呼ぶ。引数無しだと作品選択からやり直させてしまう。
+        // **相談の対象として印を付ける**（作者の裁定、2026-09-23）——作品を
+        // 名指ししたのではなく、相談パネルが対象にしていた作品で走るので、
+        // 「以降は訊かない」を覚えていても確認を出す
+        const ref: WorkRef = { type: "work", work: markInferredWork(work, "chat") };
         await vscode.commands.executeCommand(command, ref);
         return;
       }
@@ -4837,7 +4840,7 @@ export async function activate(
 
       const work =
         ref?.work ??
-        (openedPath ? findWorkForPath(registry, openedPath) : undefined) ??
+        (openedPath ? inferredWorkOfPath(registry, openedPath) : undefined) ??
         (await resolveWork(
           arg instanceof vscode.Uri ? undefined : (arg as WorkRef | undefined),
           registry
@@ -6386,6 +6389,25 @@ function findWorkForPath(
 }
 
 /**
+ * 開いているファイルから、**処理の対象として**作品を決める。
+ *
+ * `findWorkForPath` と引き方は同じで、**推し量ったという印**を付けて返す
+ * （作者の裁定、2026-09-23。`core/workTarget.ts` の `markInferredWork`）。
+ * 開いていたファイルが別の作品のものだっただけで、「以降は訊かない」の
+ * 確認が黙って通らないようにする。
+ *
+ * **ステータスバーや保存時の記録には使わない**——そちらは確認を出さないので
+ * 印は要らず、`findWorkForPath` のままでよい。
+ */
+function inferredWorkOfPath(
+  registry: WorkRegistry,
+  filePath: string
+): WorkEntry | undefined {
+  const work = findWorkForPath(registry, filePath);
+  return work ? markInferredWork(work, "file") : undefined;
+}
+
+/**
  * いま作者が見ている本文（作者の実機報告、2026-09-06）。
  *
  * **素のエディタと原稿エディタの、どちらで開いていても同じ答えを返す。**
@@ -6701,7 +6723,19 @@ async function resolveWork(
   });
   if (hinted) {
     const found = works.find((work) => work.id === hinted.workId);
-    if (found) return found;
+    /*
+      **推し量った作品には印を付けて返す**（作者の裁定、2026-09-23）。
+      作品一覧の行を誤って選んでいただけで、「以降は訊かない」の確認が
+      黙って通り、1時間30分の抽出が別の作品で走りうる。印の付いた作品は、
+      覚えていても確認が出る（`views/notify.ts` の `confirmRun`）。
+
+      **1作品しか無いときは付けない。** 取り違える相手がいない
+    */
+    if (found) {
+      return hinted.source === "single"
+        ? found
+        : markInferredWork(found, hinted.source);
+    }
   }
 
   const title = options.title ?? "作品を選択";

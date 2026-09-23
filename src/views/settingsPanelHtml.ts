@@ -1377,9 +1377,10 @@ button.danger:hover {
         key.textContent = entry.label;
         line.appendChild(key);
         line.appendChild(document.createTextNode(entry.value));
-        // 参考の行に添える操作。2種類ある。
+        // 参考の行に添える操作。3種類ある。
         // - 食い違いを「作中の変化」として確定させる（値はどちらも残る）
         // - 記録された変化から、誤って入ったものを落とす（拡張機能側で選ばせる）
+        // - 根拠が無いので本体へ入れていない変化（要確認）を、作者が認める
         // **どちらかは kind で決まる。** 見出しの文言から当てない
         if (entry.action) {
           const field = entry.action.field;

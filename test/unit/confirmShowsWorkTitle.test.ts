@@ -86,8 +86,12 @@ describe("確認画面に作品名を出す", () => {
     const calls = confirmCalls(source);
     expect(calls.length, `${file} に確認が見つからない`).toBeGreaterThan(0);
     for (const args of calls) {
-      // 文の中に書くか（`${work.title} の…`）、`workTitle` で渡すか
-      expect(args, args.slice(0, 80)).toMatch(/work\.title|workTitle/);
+      // 文の中に書くか（`${work.title} の…`）、作品そのものを `work` で渡すか
+      // （2026-09-23 に `workTitle` から改めた。推し量った作品かどうかも
+      // 確認まで運ぶため。`inferredWorkConfirm.test.ts`）
+      expect(args, args.slice(0, 80)).toMatch(
+        /work\.title|(^|[\s{,])work(: [\w.?]+)?\s*[,}]/
+      );
     }
   });
 });

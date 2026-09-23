@@ -201,9 +201,16 @@ describe("昇格したあとの再抽出", () => {
   });
 
   test("変化のほうに話数が足され、今の値も動く", () => {
+    // 本体を動かすのは根拠（本文の引用）のある変化だけ（作者の裁定、
+    // 2026-09-23。根拠の無いときは `unevidencedChanges.test.ts`）
     const result = mergeExtractedCharacters(
       [promoted()],
-      [{ data: { name: "文佳", appearance: "黒髪" }, chapters: [9] }]
+      [
+        {
+          data: { name: "文佳", appearance: "黒髪", evidence: "黒い髪を結い直した" },
+          chapters: [9],
+        },
+      ]
     );
 
     const change = result.characters[0].changes.find(
@@ -217,7 +224,12 @@ describe("昇格したあとの再抽出", () => {
   test("知らない値でも、話数が違えば作中の変化として畳む", () => {
     const result = mergeExtractedCharacters(
       [promoted()],
-      [{ data: { name: "文佳", appearance: "赤毛" }, chapters: [11] }]
+      [
+        {
+          data: { name: "文佳", appearance: "赤毛", evidence: "赤毛を揺らした" },
+          chapters: [11],
+        },
+      ]
     );
 
     expect(result.characters[0].conflicts).toEqual([]);

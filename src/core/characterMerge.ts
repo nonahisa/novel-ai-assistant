@@ -1,5 +1,6 @@
 import {
   AddressTerm,
+  CHARACTER_TEXT_FIELDS,
   Character,
   emptyCharacter,
   nextCharacterId,
@@ -27,15 +28,19 @@ import {
   isFamilyNameForm,
 } from "./familyName";
 import {
+  findChange,
   hasChange,
   recordChangeChapters,
   recordObservation,
+  type ConflictObservation,
+  type RecordChange,
 } from "../models/jsonValidation";
 import {
   chaptersOfValue,
   foldCharacterConflicts,
   isUnchangingField,
-  latestValueOfField,
+  adoptableValueOfField,
+  heldChangesOfField,
   overlaps,
   recordValue,
   refineValue,
@@ -66,6 +71,15 @@ export interface MergeResult {
    * **黙って書き換えたことにしないため**、件数を作者へ伝えるのに使う。
    */
   folded: Array<{ characterName: string; field: string }>;
+  /**
+   * **根拠が無いので、本体の値を変えなかった変化**（作者の裁定、2026-09-23）。
+   *
+   * 変化としては記録したが、本文の引用が無いので本体へは入れていない
+   * （要確認）。今回のマージで新たに要確認になったものだけを数える
+   * ——前から要確認だったものまで毎回数えると、何もしていない抽出の
+   * 報告にまで同じ件数が出続ける。
+   */
+  heldChanges: Array<{ characterName: string; field: string; value: string }>;
   /**
    * 作者が「別人だ」と決めた相手の呼び名が付いていたため、
    * 既存レコードへ取り込まなかった候補（設計書6.5.8）。
@@ -365,6 +379,7 @@ export function mergeExtractedCharacters(
         )
     ),
     folded,
+    heldChanges: newlyHeldChanges(existing, result, changedIds),
     rejectedDistinct,
     honorificMerges,
     mergeCandidates: [
@@ -375,6 +390,47 @@ export function mergeExtractedCharacters(
       ...findMergeCandidates(result),
     ],
   };
+}
+
+/**
+ * このマージで新たに「要確認」になった変化（作者の裁定、2026-09-23）。
+ *
+ * **マージの前後を比べて数える。** 要確認は、話数の違う値を積む道
+ * （`fillOrConflict`）と、食い違いを畳む道（`foldCharacterConflicts`）の
+ * 2か所で生まれる。それぞれの場で数えると、片方を直したときに件数と
+ * 実態がずれる。前後の差なら、どこで生まれても同じ数え方になる。
+ */
+function newlyHeldChanges(
+  before: readonly Character[],
+  after: readonly Character[],
+  changedIds: ReadonlySet<string>
+): MergeResult["heldChanges"] {
+  const held: MergeResult["heldChanges"] = [];
+  for (const character of after) {
+    if (!changedIds.has(character.id)) continue;
+    const previous = before.find((entry) => entry.id === character.id);
+    for (const field of CHARACTER_TEXT_FIELDS) {
+      // **値で比べる**（話数は含めない）。前から要確認だった値に話数が
+      // 1つ足されただけのものを、新しい要確認として数えない
+      const known = new Set(
+        previous
+          ? heldChangesOfField(previous.changes, field, previous[field]).map(
+              (change) => change.value
+            )
+          : []
+      );
+      for (const change of heldChangesOfField(
+        character.changes,
+        field,
+        character[field]
+      )) {
+        if (known.has(change.value)) continue;
+        known.add(change.value);
+        held.push({ characterName: character.name, field, value: change.value });
+      }
+    }
+  }
+  return held;
 }
 
 /**
@@ -775,13 +831,17 @@ function fillOrConflict(
   // 作者が確定させた変化を食い違いへ戻さないのも、この経路である
   if (foldable && hasChange(target.changes, field, value)) {
     const noted = recordChangeChapters(target.changes, field, value, chapters);
-    return adoptLatest(target, field) || noted;
+    // **根拠の無かった記録へ、いま読んだ根拠を添える**（2026-09-23）。
+    // 根拠の無い変化は本体を動かさない（要確認）。同じ値を本文の引用つきで
+    // 読み直せたなら、それはもう確かめられた変化である
+    const quoted = attachEvidence(target.changes, field, value, evidence);
+    return adoptLatest(target, field) || noted || quoted;
   }
 
   if (current === value) {
     // 履歴に無い（この項目より前に作られたデータ）。ここで話数が分かるので残す
     const recorded = target.conflicts.find((c) => c.field === field);
-    if (recorded) return recordObservation(recorded, value, chapters);
+    if (recorded) return recordObservation(recorded, value, chapters, evidence);
     // 変わらない項目は変化として並べないので、履歴も作らない
     if (!foldable) return false;
     return recordValue(target.changes, field, value, chapters, evidence);
@@ -820,8 +880,9 @@ function fillOrConflict(
   if (already) {
     const isNewValue = !already.values.includes(value);
     if (isNewValue) already.values.push(value);
-    // 同じ値が別の話にも出てきたら、話数だけを足す
-    const noted = recordObservation(already, value, chapters);
+    // 同じ値が別の話にも出てきたら、話数だけを足す。
+    // 根拠も値ごとに残す——畳んだときに本体へ入れてよいかを決めるのに使う
+    const noted = recordObservation(already, value, chapters, evidence);
     if (!isNewValue) return noted;
     conflicts.push({
       characterName: target.name,
@@ -839,9 +900,16 @@ function fillOrConflict(
     // 値ごとの話数を残す。並べれば「作中で変わった」のか
     // 「AIが取り違えた」のかを作者が読み分けられる。
     // 履歴に無い古いデータでは、先にあった値の話数が分からないので空にする
+    //
+    // **値ごとの根拠も残す**（2026-09-23）。畳んで変化へ移すとき、根拠の
+    // ある値だけが本体を動かせる（`changeMovesBody`）。ここで落とすと、
+    // 抽出が引用を示していた値まで「根拠なし」になる
     observations: [
-      { value: current, chapters: [...(currentChapters ?? [])] },
-      { value, chapters: [...chapters] },
+      withEvidence(
+        { value: current, chapters: [...(currentChapters ?? [])] },
+        findChange(target.changes, field, current)?.evidence ?? null
+      ),
+      withEvidence({ value, chapters: [...chapters] }, evidence),
     ],
   });
   conflicts.push({
@@ -849,6 +917,33 @@ function fillOrConflict(
     field,
     values: [current, value],
   });
+  return true;
+}
+
+/** 根拠があるときだけ `evidence` を置く（無ければ古いデータと同じ形のまま） */
+function withEvidence(
+  observation: ConflictObservation,
+  evidence: string | null
+): ConflictObservation {
+  const quote = evidence?.trim();
+  return quote ? { ...observation, evidence: quote } : observation;
+}
+
+/**
+ * 履歴にある値へ、根拠を添える。**既に根拠があれば置き換えない**
+ * （最初に読んだ一節を残す。取り違えを見抜く手掛かりが揺れないように）。
+ */
+function attachEvidence(
+  changes: RecordChange[],
+  field: string,
+  value: string,
+  evidence: string | null
+): boolean {
+  const quote = evidence?.trim();
+  if (!quote) return false;
+  const change = findChange(changes, field, value);
+  if (!change || change.evidence?.trim()) return false;
+  change.evidence = quote;
   return true;
 }
 
@@ -917,10 +1012,14 @@ export function insertFieldValue(
  *
  * 入れ直さないと、資料の「外見」が第1話の姿のまま止まる。
  * 話数の分かる値が1つも無ければ何もしない（順序を決められないため）。
+ *
+ * **入れるのは、本体を動かしてよい変化の値だけ**（作者の裁定、2026-09-23。
+ * `recordChanges.ts` の `adoptableValueOfField`）。根拠の無い変化は記録に
+ * 残るが本体は変えず、要確認として作者の判断を待つ。
  */
 function adoptLatest(target: Character, field: CharacterTextField): boolean {
-  const latest = latestValueOfField(target.changes, field);
-  if (!latest || latest === target[field]) return false;
+  const latest = adoptableValueOfField(target.changes, field, target[field]);
+  if (!latest) return false;
   target[field] = latest;
   return true;
 }

@@ -72,3 +72,84 @@ export function pickHintedWork(
 
   return undefined;
 }
+
+/**
+ * 作品を**推し量って**決めたときの、決め方（作者の裁定、2026-09-23）。
+ *
+ * - `"tree"`：作品一覧（ツリー）で選ばれていた
+ * - `"chat"`：相談パネルがいま対象にしていた（相談からの実行を含む）
+ * - `"file"`：開いているファイルがその作品の中にあった
+ *
+ * **1作品しか登録が無いとき（`"single"`）は含めない。** 取り違える相手が
+ * いないので、推し量ったことにしなくてよい。
+ */
+export type InferredWorkSource = "tree" | "chat" | "file";
+
+/**
+ * 推し量って決めた作品の印。
+ *
+ * ## なぜ要るか
+ *
+ * ノートPCの実機（2026-09-23）で、作品一覧の行を誤って選んでいたため、
+ * 詳細メニューの「場所を抽出」が**作者の本物の作品**で確認画面まで進んだ。
+ * 確認で「以降は訊かない」を選んでいれば、**約1時間30分の抽出が黙って走る。**
+ * 作者の裁定は「推し量ったときは、覚えていても確認を出す。右クリックや
+ * 作品を選ぶ画面で名指ししたときは、これまでどおり訊かない」。
+ *
+ * ## なぜ作品そのものに印を付けるか
+ *
+ * 作品を決める所（`extension.ts` の `resolveWork` など）と、確認を出す所
+ * （`views/notify.ts` の `confirmRun`）のあいだは、**作品の入れ物が
+ * そのまま通る**——コマンドは作品を機能へ渡し、機能は確認へ渡すだけである。
+ * 決め方を別の引数で運ぶと、コマンドと機能の関数をすべて書き換えることになり、
+ * 1か所渡し忘れれば、そこだけ黙って走る。印を入れ物に付けておけば、
+ * **作品が届く所には決め方も届く。**
+ *
+ * ## なぜ写しに付けるか
+ *
+ * 登録簿（`WorkRegistry.list()`）が返す作品は、同じ入れ物が使い回される
+ * ことがある。それに印を付けると、あとで右クリックで名指ししたときまで
+ * 「推し量った」ことになる。**印は写しにだけ付け、元には触らない。**
+ *
+ * `WeakMap` にするのは、写しが要らなくなったら印も一緒に消える
+ * ようにするため（覚えたまま溜まり続けない）。
+ */
+const inferredWorks = new WeakMap<object, InferredWorkSource>();
+
+/**
+ * 推し量って決めた作品に印を付けた**写し**を返す。
+ *
+ * 呼び出し側は、返った写しを元の代わりに使うこと（元には印が付かない）。
+ */
+export function markInferredWork<T extends object>(
+  work: T,
+  source: InferredWorkSource
+): T {
+  const copy = { ...work };
+  inferredWorks.set(copy, source);
+  return copy;
+}
+
+/** その作品は推し量って決めたものか。名指しなら undefined */
+export function inferredWorkSource(
+  work: object | undefined
+): InferredWorkSource | undefined {
+  return work ? inferredWorks.get(work) : undefined;
+}
+
+/**
+ * 確認画面に添える、決め方の言い方。
+ *
+ * 「なぜ今回は訊かれたのか」が分からないと、作者は「以降は訊かない」が
+ * 壊れたと受け取る。**どこから決めたか**を具体的に言う。
+ */
+export function describeInferredWorkSource(source: InferredWorkSource): string {
+  switch (source) {
+    case "tree":
+      return "作品一覧で選ばれている作品";
+    case "chat":
+      return "相談パネルの作品";
+    case "file":
+      return "開いているファイルの作品";
+  }
+}

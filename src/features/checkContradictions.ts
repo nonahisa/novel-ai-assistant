@@ -508,7 +508,7 @@ export async function checkContradictions(
       const confirmed = await confirmRun(
         `${work.title} の矛盾を検知します。`,
         "実行",
-        { detail, remember: { id: "ai.run.checkContradictions" } }
+        { detail, remember: { id: "ai.run.checkContradictions" }, work }
       );
       if (!confirmed) return undefined;
     }

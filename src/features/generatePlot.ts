@@ -102,6 +102,7 @@ export async function generatePlot(
         .filter(Boolean)
         .join("\n"),
       remember: { id: "ai.run.generatePlot" },
+      work,
     }
   );
   if (!confirmed) return;

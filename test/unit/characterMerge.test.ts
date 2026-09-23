@@ -370,11 +370,13 @@ describe("登場人物マージ", () => {
     const existing = emptyCharacter("char_001", "灯");
     existing.appearance = "黒髪";
 
+    // 本体を動かすのは根拠（本文の引用）のある値だけ（作者の裁定、2026-09-23。
+    // 根拠の無いときは `unevidencedChanges.test.ts`）
     const first = mergeExtractedCharacters([existing], [
-      { data: { name: "灯", appearance: "銀髪" }, chapters: [7] },
+      { data: { name: "灯", appearance: "銀髪", evidence: "銀の髪" }, chapters: [7] },
     ]);
     const second = mergeExtractedCharacters(first.characters, [
-      { data: { name: "灯", appearance: "赤髪" }, chapters: [12] },
+      { data: { name: "灯", appearance: "赤髪", evidence: "赤い髪" }, chapters: [12] },
     ]);
 
     expect(second.characters[0].conflicts).toEqual([]);
@@ -415,12 +417,13 @@ describe("登場人物マージ", () => {
     const existing = emptyCharacter("char_001", "灯");
     existing.appearance = "黒髪";
 
+    // 根拠つきで読んだ値（根拠が無ければ本体は動かない。作者の裁定、2026-09-23）
     const first = mergeExtractedCharacters([existing], [
-      { data: { name: "灯", appearance: "銀髪" }, chapters: [7] },
+      { data: { name: "灯", appearance: "銀髪", evidence: "銀の髪" }, chapters: [7] },
     ]);
     // 同じ「銀髪」が第12話にも出てきた
     const second = mergeExtractedCharacters(first.characters, [
-      { data: { name: "灯", appearance: "銀髪" }, chapters: [12] },
+      { data: { name: "灯", appearance: "銀髪", evidence: "銀の髪" }, chapters: [12] },
     ]);
     // 先にあった「黒髪」も、第9話に出てきた時点で話数が分かる
     const third = mergeExtractedCharacters(second.characters, [
@@ -430,7 +433,8 @@ describe("登場人物マージ", () => {
     // 話数が分かっているのは「銀髪」だけなので、まだ畳めない
     expect(second.characters[0].conflicts[0].observations).toEqual([
       { value: "黒髪", chapters: [] },
-      { value: "銀髪", chapters: [7, 12] },
+      // 値ごとの根拠も残る（畳んだときに本体へ入れてよいかを決めるのに使う）
+      { value: "銀髪", chapters: [7, 12], evidence: "銀の髪" },
     ]);
 
     // 第9話で「黒髪」が出た時点で両方の話数が分かり、作中の変化として畳める
@@ -467,11 +471,12 @@ describe("登場人物マージ", () => {
     const existing = emptyCharacter("char_001", "灯");
     existing.summary = "村の薬師";
 
+    // 根拠つきで読んだ値（根拠が無ければ本体は動かない。作者の裁定、2026-09-23）
     const first = mergeExtractedCharacters([existing], [
-      { data: { name: "灯", summary: "旅の商人" }, chapters: [7] },
+      { data: { name: "灯", summary: "旅の商人", evidence: "行商の荷" }, chapters: [7] },
     ]);
     const second = mergeExtractedCharacters(first.characters, [
-      { data: { name: "灯", summary: "王都の騎士" }, chapters: [12] },
+      { data: { name: "灯", summary: "王都の騎士", evidence: "騎士団の紋" }, chapters: [12] },
     ]);
 
     expect(second.characters[0].conflicts).toEqual([]);

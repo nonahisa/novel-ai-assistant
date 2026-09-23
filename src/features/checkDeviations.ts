@@ -295,7 +295,7 @@ export async function checkDeviations(
       const confirmed = await confirmRun(
         `${work.title} のプロット逸脱を検知します。`,
         "実行",
-        { detail, remember: { id: "ai.run.checkDeviations" } }
+        { detail, remember: { id: "ai.run.checkDeviations" }, work }
       );
       if (!confirmed) return undefined;
     }

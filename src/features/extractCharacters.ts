@@ -72,6 +72,7 @@ import {
   resolveOutputTokensForSend,
 } from "../ai/outputLimit";
 import { PendingUpdateStore } from "../core/pendingUpdates";
+import { describeHeldChanges } from "../core/recordChanges";
 import { applyPendingCharacterUpdates } from "./applyPendingUpdates";
 import type { ProposalPanel } from "./proposalPanel";
 import { ChunkCache } from "../core/chunkCache";
@@ -160,6 +161,12 @@ interface ExtractionSummaryCounts {
    * 黙って書き換えたことにしないため、報告に出す（設計書6.18）。
    */
   folded: number;
+  /**
+   * 根拠（本文の引用）が無いので、本体の値を変えなかった変化の件数
+   * （作者の裁定、2026-09-23）。変化としては記録してあり、要確認として
+   * 設定資料パネルから認められる。**黙って据え置いたことにしない**
+   */
+  heldChanges: number;
   /**
    * 作者が「別人だ」と決めた呼び名が付いていたため取り込まなかった候補（設計書6.5.8）。
    * 件数だけでなく中身も持つ——どのレコードに何が付いていたかを出さないと、
@@ -547,7 +554,7 @@ export async function extractCharacters(
         // **どの作品かを確認画面に出す**（ノートPCの実機、2026-09-23）。
         // 詳細メニューの抽出は作品一覧の選択へ訊かずに進むので、一覧の
         // 行を誤ってクリックしていると、別の作品で確認まで進む
-        workTitle: work.title,
+        work,
       }
     );
     if (!confirmed) return false;
@@ -983,6 +990,7 @@ export async function extractCharacters(
     rejected: rejectedCandidates,
     conflicts: merged?.conflicts.length ?? 0,
     folded: merged?.folded.length ?? 0,
+    heldChanges: merged?.heldChanges.length ?? 0,
     rejectedDistinct: merged?.rejectedDistinct ?? [],
     honorificMerges: merged?.honorificMerges ?? [],
     failedChunks: failures.length,
@@ -1143,6 +1151,7 @@ export async function extractCharacters(
       saved: baseCounts.saved,
       pendingUpdates: baseCounts.pendingUpdates,
       cacheWarnings: baseCounts.cacheWarnings,
+      heldChanges: baseCounts.heldChanges,
     })
   );
   /*
@@ -1439,6 +1448,9 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
     distinctDetail +
     honorificDetail +
     fixDetail +
+    // 根拠が無いので本体を据え置いた変化（作者の裁定、2026-09-23）。
+    // **黙って据え置いたことにしない**。0件なら何も足さない
+    describeHeldChanges(counts.heldChanges) +
     // 既存人物への変更は承認待ちに回る。件数を出さないと、
     // 作者は「更新0名」を見て何も増えなかったと思ってしまう
     (counts.pendingUpdates > 0

@@ -60,6 +60,46 @@ export interface RetrievalItem {
   hash: string;
   /** 作者が自分で書いた記述を含むか。含むならAIの抽出とは独立している */
   authorWritten: boolean;
+  /**
+   * 本文の1話が複数の場面に分かれたときの、何番目か／いくつ中か
+   * （作者の裁定、2026-09-23。残課題 A6）。1つに収まった話・設定資料・
+   * あらすじには無い。
+   *
+   * 記録の札（`describeRetrievedItem`）に「（2/4）」と添えるために持つ。
+   * 無いと、同じ話の別の場面が「本文・第12話」の同じ札で並び、
+   * **重複して渡したように読める**。
+   */
+  part?: { index: number; total: number };
+}
+
+/**
+ * 記録に出す札。「本文・第12話（2/4）」「設定資料・登場人物: 太志」。
+ *
+ * **札の作り方はここ1か所に置く**（相談パネルと設定資料パネルの両方が使う）。
+ * 同じ話が複数の場面に分かれたときだけ（何番目/いくつ中）を添え、
+ * 1つに収まった話には付けない——付けると「（1/1）」が全部の札に並んで読みにくい。
+ *
+ * AIへ渡す出典（`label`）は変えない。これは作者が記録を読むための札である。
+ */
+export function describeRetrievedItem(item: RetrievalItem): string {
+  const part = item.part ? `（${item.part.index}/${item.part.total}）` : "";
+  return `${item.source}・${item.label}${part}`;
+}
+
+/**
+ * 1話の本文を、検索の場面へ分ける。
+ *
+ * 場面が2つ以上になったときだけ、何番目か（`part`）を持たせる。
+ * 画面を開かずに確かめられるよう、ファイルを読む所から分けてある。
+ */
+export function manuscriptItems(label: string, text: string): RetrievalItem[] {
+  const passages = splitPassages(text);
+  return passages.map((passage, index) => ({
+    ...makeItem("本文", `${label}#${index}`, label, passage, false),
+    ...(passages.length > 1
+      ? { part: { index: index + 1, total: passages.length } }
+      : {}),
+  }));
 }
 
 export interface CorpusResult {
@@ -75,9 +115,7 @@ export async function buildRetrievalCorpus(
 
   const manuscript = await loadExcerptSources(work);
   for (const source of manuscript.sources) {
-    splitPassages(source.text).forEach((text, index) => {
-      items.push(makeItem("本文", `${source.label}#${index}`, source.label, text, false));
-    });
+    items.push(...manuscriptItems(source.label, source.text));
   }
 
   items.push(...(await collectSettings(work)));

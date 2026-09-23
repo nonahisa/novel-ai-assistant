@@ -264,6 +264,12 @@ export interface ExtractionLogCounts {
   /** 既存人物への更新のうち、承認待ちに回した人数 */
   readonly pendingUpdates: number;
   readonly cacheWarnings: number;
+  /**
+   * 根拠（本文の引用）が無いので、本体の値を変えなかった変化の件数
+   * （作者の裁定、2026-09-23。`characterMerge.ts` の `heldChanges`）。
+   * 0件なら行に書かない
+   */
+  readonly heldChanges?: number;
 }
 
 /**
@@ -288,6 +294,11 @@ export function describeExtractionLog(counts: ExtractionLogCounts): string {
   }
   if (counts.cacheWarnings > 0) {
     parts.push(`キャッシュ保存警告 ${formatCount(counts.cacheWarnings)}件`);
+  }
+  if ((counts.heldChanges ?? 0) > 0) {
+    parts.push(
+      `根拠が無いので本体を変えなかった変化 ${formatCount(counts.heldChanges ?? 0)}件`
+    );
   }
 
   // 資料が1件も増えなかったときは、なぜ増えなかったかの手がかりを添える
