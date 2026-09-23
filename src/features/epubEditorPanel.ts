@@ -1233,7 +1233,7 @@ async function addChapter(state: PanelState): Promise<void> {
     data: await previewData(state),
   });
   await vscode.commands.executeCommand("novelai.refresh");
-  status(state, "章立ての台帳へ書きました（本の並びには入りません）");
+  status(state, "章立ての記録へ書きました（本の並びには入りません）");
 }
 
 /**
@@ -1777,7 +1777,7 @@ function insertTypeEntries(blocks: readonly BookBlock[]): InsertTypeEntry[] {
     label: "章区切り",
     enabled: true,
     reason:
-      "どの話から章を始めるかを訊いて、章立ての台帳へ書きます（本の並びには入りません）。",
+      "どの話から章を始めるかを訊いて、章立ての記録へ書きます（本の並びには入りません）。",
   });
   return entries;
 }

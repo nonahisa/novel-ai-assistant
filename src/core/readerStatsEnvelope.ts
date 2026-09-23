@@ -247,7 +247,7 @@ export function buildReaderStatsEnvelope(input: {
 
 /** 封筒が入っていなかったときの断り（1件の封筒と束で同じ文言を使う） */
 const NOT_ENVELOPE_REASON =
-  "クリップボードに、読者の反応の封筒が入っていませんでした。" +
+  "クリップボードに、読者の反応のデータが入っていませんでした。" +
   "管理画面で統合小説執筆環境ヘルパーの「読者の反応をコピー」を押してから、もう一度お試しください。";
 
 /**
@@ -291,7 +291,7 @@ function readEnvelopeValue(value: Record<string, unknown>): ReaderStatsEnvelopeR
   // **知らない版数は読まない。** 欄の意味が変わったものを読むと、数字が化ける
   if (value[MARKER] !== READER_STATS_ENVELOPE_VERSION) {
     return reject(
-      "読者の反応の封筒の形式が違います（ヘルパーと拡張機能の版が" +
+      "読者の反応のデータの形式が違います（ヘルパーと拡張機能の版が" +
         "食い違っています）。どちらかを更新してからお試しください。"
     );
   }
@@ -301,7 +301,7 @@ function readEnvelopeValue(value: Record<string, unknown>): ReaderStatsEnvelopeR
     typeof site === "string"
       ? POSTING_SITES.find((info) => info.id === site)
       : undefined;
-  if (!known) return reject("封筒に書かれたサイトが分かりませんでした。");
+  if (!known) return reject("コピーしたデータに書かれたサイトが分かりませんでした。");
 
   /*
     出どころ（残課題 B11）。**`null` は「欄なし」**（ほかの欄と同じ扱い）。
@@ -312,7 +312,7 @@ function readEnvelopeValue(value: Record<string, unknown>): ReaderStatsEnvelopeR
   const rawSource = absent(value.source) ? undefined : value.source;
   if (rawSource !== undefined && !isReaderStatsEnvelopeSource(rawSource)) {
     return reject(
-      "封筒に書かれた読み取り元が分かりませんでした（ヘルパーと拡張機能の版が" +
+      "コピーしたデータに書かれた読み取り元が分かりませんでした（ヘルパーと拡張機能の版が" +
         "食い違っているかもしれません）。どちらかを更新してからお試しください。"
     );
   }
@@ -320,7 +320,7 @@ function readEnvelopeValue(value: Record<string, unknown>): ReaderStatsEnvelopeR
   if (source !== undefined && !supportsReaderStatsHelper(known.id, source)) {
     // Narou.fun の封筒が「カクヨム」を名乗っている、のような食い違い。直し方はこちらに分からない
     return reject(
-      `${READER_STATS_ENVELOPE_SOURCES[source].label}から読んだ封筒に、` +
+      `${READER_STATS_ENVELOPE_SOURCES[source].label}から読んだデータに、` +
         `${known.label}の数が入っていました。取り込みを中止しました。`
     );
   }
@@ -338,21 +338,21 @@ function readEnvelopeValue(value: Record<string, unknown>): ReaderStatsEnvelopeR
   // 素直な書き方で、そこで断ると数字が正しい封筒まで丸ごと落ちる
   const workId = absent(value.workId) ? undefined : value.workId;
   if (workId !== undefined && typeof workId !== "string") {
-    return reject("封筒の作品IDを読めませんでした。");
+    return reject("コピーしたデータの作品IDを読めませんでした。");
   }
   if (typeof readAt !== "string" || !readAt.trim()) {
-    return reject("封筒に読み取った日時が入っていませんでした。");
+    return reject("コピーしたデータに読み取った日時が入っていませんでした。");
   }
   // 記録の日時の印（残課題 B11 の続き）。`null` は「欄なし」＝押した時刻
   const readAtBasis = absent(value.readAtBasis) ? undefined : value.readAtBasis;
   if (readAtBasis !== undefined && !isReaderStatsReadAtBasis(readAtBasis)) {
     return reject(
-      "封筒の読み取った日時の種類が分かりませんでした（ヘルパーと拡張機能の版が" +
+      "コピーしたデータの読み取った日時の種類が分かりませんでした（ヘルパーと拡張機能の版が" +
         "食い違っているかもしれません）。どちらかを更新してからお試しください。"
     );
   }
   if (!Array.isArray(entries) || entries.length === 0) {
-    return reject("封筒に読者の反応が1件も入っていませんでした。");
+    return reject("コピーしたデータに読者の反応が1件も入っていませんでした。");
   }
 
   const parsedEntries: ReaderStatsEnvelopeEntry[] = [];
@@ -362,7 +362,7 @@ function readEnvelopeValue(value: Record<string, unknown>): ReaderStatsEnvelopeR
     // 作者には「取り込んだ」としか見えないまま、抜けた行に気づけない
     if (!entry) {
       return reject(
-        "封筒の中に、数として読めない値がありました（取り込みを中止しました）。"
+        "コピーしたデータの中に、数として読めない値がありました（取り込みを中止しました）。"
       );
     }
     parsedEntries.push(entry);
@@ -377,7 +377,7 @@ function readEnvelopeValue(value: Record<string, unknown>): ReaderStatsEnvelopeR
   */
   if (source !== undefined && !trimmedWorkId) {
     return reject(
-      `${READER_STATS_ENVELOPE_SOURCES[source].label}から読んだ封筒に、` +
+      `${READER_STATS_ENVELOPE_SOURCES[source].label}から読んだデータに、` +
         "作品ID（Nコード）が入っていませんでした。どの作品の数か確かめられないため、" +
         "取り込みません。"
     );
@@ -777,7 +777,7 @@ export function matchReaderStatsEnvelope(
   if (!known || !envelope.workId) return null;
   if (known !== envelope.workId) {
     return (
-      `封筒の作品ID（${envelope.workId}）が、この作品に登録された` +
+      `コピーしたデータの作品ID（${envelope.workId}）が、この作品に登録された` +
       `${info.label}の作品ID（${known}）と違います。` +
       "別の作品の管理画面を読んでいないかご確認ください。"
     );
@@ -821,7 +821,7 @@ function matchBySourceWorkId(
   const received = narouNcode(envelope.workId);
   if (received !== known) {
     return (
-      `封筒の作品ID（${envelope.workId ?? ""}）が、この作品に登録された` +
+      `コピーしたデータの作品ID（${envelope.workId ?? ""}）が、この作品に登録された` +
       `${info.label}の作品ID（${known.toUpperCase()}）と違います。` +
       `${sourceLabel}でほかの作品の頁を読んでいないかご確認ください。`
     );

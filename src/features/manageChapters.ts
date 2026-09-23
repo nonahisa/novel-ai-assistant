@@ -80,7 +80,7 @@ export async function renameChapter(
   const existing = findChapterStartingAt(set.chapters, chapter.startEpisodePath);
   if (!existing) {
     void vscode.window.showWarningMessage(
-      `章「${chapter.name}」は台帳にありません。作品一覧を更新してください。`
+      `章「${chapter.name}」は章立ての記録にありません。作品一覧を更新してください。`
     );
     return false;
   }

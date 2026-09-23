@@ -168,7 +168,7 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
     useLogFile(work.folderPath);
     logFailure("EPUBの章立て", { 作品: work.title, 内容: message });
     notices.push(
-      `章立ての台帳を読めなかったので、目次は話数の並びで束ねました（${message}）`
+      `章立ての記録を読めなかったので、目次は話数の並びで束ねました（${message}）`
     );
   }
   const groupLabels = episodeGroupLabels(

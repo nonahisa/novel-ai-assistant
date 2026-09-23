@@ -531,7 +531,7 @@ describe("読者の反応を貼り付けて取り込む", () => {
       expect(picks).toHaveLength(0);
       expect(env.opened).toEqual([]);
       // **黙って終わらない**（押したのに何も起きない、を作らない）
-      expect(warned.join("")).toContain("封筒");
+      expect(warned.join("")).toContain("読者の反応のデータ");
     });
   });
 });

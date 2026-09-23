@@ -188,7 +188,7 @@ async function orphanNotes(
     );
     if (posts.length > 0) {
       notes.push(
-        `投稿の記録が${posts.length}件、${work.title} の台帳に残ります（消しません）。`
+        `投稿の記録が${posts.length}件、${work.title} の投稿状態.json に残ります（消しません）。`
       );
     }
   } catch {

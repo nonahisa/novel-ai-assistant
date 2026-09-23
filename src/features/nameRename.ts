@@ -634,7 +634,7 @@ async function applyToForeshadows(
     await store.saveAll(changed.map((pair) => pair.next));
     result.foreshadowsUpdated = changed.length;
   } catch (error) {
-    result.failures.push(`伏線台帳：${messageOf(error)}`);
+    result.failures.push(`伏線の記録：${messageOf(error)}`);
   }
 }
 

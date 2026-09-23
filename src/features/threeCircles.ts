@@ -326,7 +326,7 @@ async function loadReaderProfile(
   try {
     return await new ReaderTargetStore(work).load();
   } catch (error) {
-    notices.push(`読者像の台帳を読めませんでした：${messageOf(error)}`);
+    notices.push(`読者像の記録を読めませんでした：${messageOf(error)}`);
     logFailure("3つの輪：読者像を読めなかった", {
       作品: work.title,
       詳細: messageOf(error),
@@ -351,7 +351,7 @@ async function readReactions(
   try {
     ledger = await new PostingStore(work).load();
   } catch (error) {
-    notices.push(`投稿の台帳を読めませんでした：${messageOf(error)}`);
+    notices.push(`投稿の記録を読めませんでした：${messageOf(error)}`);
     return [];
   }
   return collectReactions(ledger);

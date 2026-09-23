@@ -246,7 +246,7 @@ export async function checkForeshadows(
       }),
       `既に登録されている伏線: ${ledger.records.length}件`,
       "",
-      "台帳へは何も自動で入りません。 候補を「提案」パネルへ並べますので、",
+      "伏線の記録へは何も自動で入りません。 候補を「提案」パネルへ並べますので、",
       "登録するものを1件ずつ選んでください。",
       resolved.provider.isPaid
         ? `\n${resolved.provider.displayName} はチャンクごとに課金されます。`
@@ -709,7 +709,7 @@ export async function checkForeshadowResolution(
             `照らします（うち ${pending.length}件を処理。` +
             `処理済み ${targeted.length - pending.length}件はスキップ）。`,
           "",
-          "台帳へは何も自動で入りません。 回収されたと読める箇所を「提案」パネルへ",
+          "伏線の記録へは何も自動で入りません。 回収されたと読める箇所を「提案」パネルへ",
           "並べますので、回収済みにするものを1件ずつ選んでください。",
           resolved.provider.isPaid
             ? `\n${resolved.provider.displayName} は1か所ごとに課金されます。`
@@ -1025,7 +1025,7 @@ async function loadLedger(
     return { records: loaded.records };
   } catch (error) {
     void vscode.window.showErrorMessage(
-      `伏線の台帳を読み込めませんでした：${describeError(error)}`
+      `伏線の記録を読み込めませんでした：${describeError(error)}`
     );
     return undefined;
   }

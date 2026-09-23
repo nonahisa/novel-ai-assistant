@@ -107,7 +107,7 @@ function parseTime(raw: unknown, what: string): string {
  * 作者が手で書き換えるファイルなので、こちらの解釈で上書きしない。
  */
 export function parseReaderProfile(raw: unknown): ReaderProfile {
-  if (!isRecord(raw)) throw new Error("読者像の台帳の形が違います。");
+  if (!isRecord(raw)) throw new Error("読者像の記録の形が違います。");
 
   const profile: ReaderProfile = {
     schemaVersion:

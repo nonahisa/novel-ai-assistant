@@ -109,10 +109,10 @@ describe("資料へ反映した結果の伝え方", () => {
     const text = describeRenameRecordsResult(pending, {
       ...empty,
       characterUpdated: true,
-      failures: ["伏線台帳：書き込めませんでした"],
+      failures: ["伏線の記録：書き込めませんでした"],
     });
     expect(text).toContain("1件は直せませんでした");
-    expect(text).toContain("伏線台帳");
+    expect(text).toContain("伏線の記録");
   });
 });
 

@@ -181,7 +181,7 @@ async function applyToEpisodeSynopsis(
   */
   if (content === "") {
     throw new Error(
-      `第${chapter}話のあらすじは空にできません（台帳が読めなくなるため）。` +
+      `第${chapter}話のあらすじは空にできません（あらすじの記録が読めなくなるため）。` +
         "手で書き換えてください。"
     );
   }

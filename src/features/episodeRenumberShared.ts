@@ -133,7 +133,7 @@ export function reportRenumberOutcome(input: {
   const ledgerText = describeLedgerFollowSummary(summary);
   const failureText =
     summary.failures.length > 0
-      ? `\n台帳への追従で失敗したもの：\n${summary.failures.join("\n")}`
+      ? `\n章立て・設定資料などの記録への追従で失敗したもの：\n${summary.failures.join("\n")}`
       : "";
 
   if (outcome.stoppedAt) {
@@ -162,7 +162,7 @@ export function reportRenumberOutcome(input: {
   );
   if (failureText) {
     void vscode.window.showWarningMessage(
-      `話数の付け替え自体は完了しましたが、一部の台帳を追従できませんでした：` +
+      `話数の付け替え自体は完了しましたが、一部の記録（章立て・設定資料など）を追従できませんでした：` +
         summary.failures.join("　")
     );
   }

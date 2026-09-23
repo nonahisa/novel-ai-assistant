@@ -211,7 +211,7 @@ export async function importReaderStats(
     void vscode.window.showInformationMessage(
       say(
         `${info.label} の読者の反応は、すでに取り込んだ数と同じでした（${repeated}件）。` +
-          "台帳は変えていません。"
+          "投稿の記録は変えていません。"
       )
     );
     return UNCHANGED;
@@ -457,7 +457,7 @@ async function askAdminPage(
       // **一覧から選ぶ画面だと、題にも書く**（placeHolder は打つと消える）
       title: `${work.title} の読者の反応（一覧から選びます）`,
       placeHolder:
-        "クリップボードに読者の反応の封筒が入っていません。どちらにしますか",
+        "クリップボードに、ヘルパーでコピーした読者の反応が入っていません。どちらにしますか",
       ignoreFocusOut: true,
     }
   );

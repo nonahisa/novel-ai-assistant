@@ -186,12 +186,12 @@ export function describeSplitSections(plan: SectionPlan): string | null {
       )}`;
     case "existing":
       return (
-        `章の台帳に既に章が${plan.existingCount}個あるため、合本の章の見出し` +
+        `章立ての記録に既に章が${plan.existingCount}個あるため、合本の章の見出し` +
         `（${plan.sections.length}個）から章は立てません。見出しは分けたファイルに残ります。`
       );
     case "unreadable":
       return (
-        "章の台帳を読めなかったため、合本の章の見出し" +
+        "章立ての記録を読めなかったため、合本の章の見出し" +
         `（${plan.sections.length}個）から章は立てません。見出しは分けたファイルに残ります。`
       );
   }
@@ -315,7 +315,7 @@ export function describeEpisodeSections(
       `読めなかったファイルが${reading.unreadable}件あります（そこに見出しがあっても拾えていません）。`
     );
   }
-  notes.push("章立ての台帳（設定/章立て.json）に書くだけで、原稿は書き換えません。");
+  notes.push("章立ての記録（設定/章立て.json）に書くだけで、原稿は書き換えません。");
 
   return [...lines, "", ...notes].join("\n");
 }

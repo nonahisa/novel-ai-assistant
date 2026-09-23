@@ -54,7 +54,7 @@ describe("各話あらすじは、空へ戻せない", () => {
         },
         { allowEmpty: true }
       )
-    ).rejects.toThrow(/第12話.*台帳が読めなくなる.*手で書き換えて/s);
+    ).rejects.toThrow(/第12話.*あらすじの記録が読めなくなる.*手で書き換えて/s);
   });
 
   test("allowEmpty を渡さなくても、同じく断る", async () => {

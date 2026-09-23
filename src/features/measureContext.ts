@@ -2474,20 +2474,20 @@ function describeTuningWriteFailure(outcome: TuningWriteOutcome): string {
       return "";
     case "unreadable":
       return (
-        `AIチューニングの台帳（拡張機能の保管庫の ${TUNING_STORE_FILE}）が` +
+        `AIチューニングの記録（拡張機能の保管庫の ${TUNING_STORE_FILE}）が` +
         "読めない形になっているため、上書きせずに止めました。" +
         "中身を直すか、詳細メニューの「AIチューニングの記録を消す」で" +
         "作り直してから測り直してください。"
       );
     case "no_store":
       return (
-        "AIチューニングの台帳の置き場が使えないため、書けませんでした。" +
+        "AIチューニングの記録の置き場が使えないため、書けませんでした。" +
         "拡張機能を入れ直すか、VS Code を開き直してから測り直してください。"
       );
     case "lost":
       return (
-        "台帳へ書いても残りませんでした。" +
-        "ほかの VS Code の窓が同じ台帳を書いている可能性があります。" +
+        "AIチューニングの記録へ書いても残りませんでした。" +
+        "ほかの VS Code の窓が同じ記録を書いている可能性があります。" +
         "窓を1つにしてから測り直してください。"
       );
   }

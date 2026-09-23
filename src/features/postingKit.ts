@@ -293,7 +293,7 @@ async function walkSite(input: {
       [
         {
           label: "$(check) 投稿しました",
-          detail: "台帳に記録して、次へ進みます",
+          detail: "投稿の記録に残して、次へ進みます",
           answer: "posted" as const,
         },
         {

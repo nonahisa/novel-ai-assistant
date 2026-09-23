@@ -36,7 +36,7 @@ export async function openForeshadows(work: WorkEntry): Promise<void> {
     loaded = await store.loadAll();
   } catch (error) {
     void vscode.window.showErrorMessage(
-      `伏線の台帳を読み込めませんでした：${messageOf(error)}`
+      `伏線の記録を読み込めませんでした：${messageOf(error)}`
     );
     return;
   }
@@ -149,7 +149,7 @@ export async function setForeshadowStatus(work: WorkEntry): Promise<void> {
     loaded = await store.loadAll();
   } catch (error) {
     void vscode.window.showErrorMessage(
-      `伏線の台帳を読み込めませんでした：${messageOf(error)}`
+      `伏線の記録を読み込めませんでした：${messageOf(error)}`
     );
     return;
   }

@@ -4341,7 +4341,7 @@ export async function activate(
           failedCount: result.failedChunks,
           tail:
             result.candidates.length > 0
-              ? "台帳へはまだ入れていません。 「提案」パネルで登録するものを選んでください。"
+              ? "伏線の記録へはまだ入れていません。 「提案」パネルで登録するものを選んでください。"
               : "",
         });
         return CHECK_COMPLETED;
@@ -4397,7 +4397,7 @@ export async function activate(
           failedCount: result.failedChunks,
           tail:
             result.proposals.length > 0
-              ? "台帳はまだ変えていません。 「提案」パネルで確かめてから決めてください。"
+              ? "伏線の記録はまだ変えていません。 「提案」パネルで確かめてから決めてください。"
               : "",
         });
         return CHECK_COMPLETED;

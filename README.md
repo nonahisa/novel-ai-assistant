@@ -379,7 +379,7 @@ code --install-extension ".\novel-ai-assistant-$($v.TrimStart('v')).vsix" --forc
 | `novelai.findings.retentionDays` | `3` | AIの指摘を並べ続ける日数（`0`でずっと並べる） |
 | `novelai.proposals.showInBottomPanel` | `false` | 提案パネルを画面下のパネル領域にも出す（既定はエディターの右の列だけ） |
 
-`novelai.modelTuning` は「AIが実際に読める長さを測る」が書き込む台帳です（手で書く項目ではありません）。`novelai.claude.maxOutputTokens` は旧設定で、`novelai.maxOutputTokens` に置き換わりました。
+`novelai.modelTuning` は「AIが実際に読める長さを測る」が書き込む記録です（手で書く項目ではありません）。`novelai.claude.maxOutputTokens` は旧設定で、`novelai.maxOutputTokens` に置き換わりました。
 
 `novelai.confirm.remembered` は、確認の画面で「以降は訊かない」を押したときに書き込まれる控えです。戻すときは、この設定の説明にある「**訊かないことにした確認を見直す**」から選ぶか、ここを空（`{}`）にしてください。
 

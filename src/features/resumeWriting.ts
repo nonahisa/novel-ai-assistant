@@ -498,7 +498,7 @@ async function loadOpenForeshadows(
   try {
     loaded = await createForeshadowStore(work).loadAll();
   } catch (error) {
-    notices.push(`伏線の台帳を読めませんでした：${messageOf(error)}`);
+    notices.push(`伏線の記録を読めませんでした：${messageOf(error)}`);
     return [];
   }
 

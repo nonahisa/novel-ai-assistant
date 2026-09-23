@@ -229,7 +229,7 @@ export class ChapterStore {
 /** 外部変更で止めたときの言い方。作者が次に何をすればよいかまで書く */
 function externalChangeMessage(reason: string): string {
   return (
-    `章の台帳（${CHAPTERS_FILE}）が${reason}。` +
+    `章立ての記録（${CHAPTERS_FILE}）が${reason}。` +
     "こちらの内容で上書きしないよう保存を中止しました。" +
     "作品一覧を更新してからやり直してください。"
   );

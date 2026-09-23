@@ -317,7 +317,7 @@ export class PostingStore {
 /** 外部変更で止めたときの言い方。作者が次に何をすればよいかまで書く */
 function externalChangeMessage(reason: string): string {
   return (
-    `投稿状態の台帳（${POSTING_FILE}）が${reason}。` +
+    `投稿の記録（${POSTING_FILE}）が${reason}。` +
     "こちらの内容で上書きしないよう保存を中止しました。" +
     "別の端末から投稿した記録が届いている可能性があります。" +
     "同期してから、もう一度お試しください。"

@@ -94,7 +94,7 @@ export async function requestReaderAdvice(
       作品: work.title,
       内容: detail,
     });
-    return { kind: "failed", message: `投稿状態の台帳を読めませんでした：${detail}` };
+    return { kind: "failed", message: `投稿の記録を読めませんでした：${detail}` };
   }
   if (materials.length === 0) {
     return {

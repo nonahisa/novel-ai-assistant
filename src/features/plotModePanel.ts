@@ -537,7 +537,7 @@ class PlotModePanel {
       chapters = (await new ChapterStore(this.work).load()).chapters;
     } catch (error) {
       this.notices.push(
-        `章立ての台帳を読めませんでした：${messageOf(error)}（章名は出しません）`
+        `章立ての記録を読めませんでした：${messageOf(error)}（章名は出しません）`
       );
     }
 

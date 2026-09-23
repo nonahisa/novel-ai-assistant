@@ -507,7 +507,7 @@ export async function suggestChapterName(
     ],
     {
       title: `章「${chapter.name}」の名前`,
-      placeHolder: "採用する名前を選んでください（選ぶまで台帳は変わりません）",
+      placeHolder: "採用する名前を選んでください（選ぶまで章立ての記録は変わりません）",
       ignoreFocusOut: true,
     }
   );
@@ -527,7 +527,7 @@ export async function suggestChapterName(
 
   if (!findChapterStartingAt(set.chapters, chapter.startEpisodePath)) {
     vscode.window.showWarningMessage(
-      `章「${chapter.name}」は台帳にありません。作品一覧を更新してください。`
+      `章「${chapter.name}」は章立ての記録にありません。作品一覧を更新してください。`
     );
     return false;
   }

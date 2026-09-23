@@ -723,10 +723,10 @@ export function describeMergePlan(
     counts.work ? "作品全体の評価" : "",
   ].filter((part) => part !== "");
   if (stats.length > 0) {
-    lines.push(`・読者の反応：${stats.join("と")}を台帳へ足します（これまでの記録は消しません）`);
+    lines.push(`・読者の反応：${stats.join("と")}を投稿の記録へ足します（これまでの記録は消しません）`);
   } else if (plan.readerStatsBlocked) {
     lines.push(
-      "・読者の反応：投稿状態の台帳（設定/投稿状態.json）を読めなかったため、足しません"
+      "・読者の反応：投稿の記録（設定/投稿状態.json）を読めなかったため、足しません"
     );
   } else if (plan.readerStatsAlready > 0) {
     lines.push("・読者の反応：前に取り込んだときと同じ数字なので、足しません");
@@ -795,11 +795,11 @@ function describeChapterPlan(plan: ChapterMergePlan): string {
     case "none":
       return "バックアップに章の見出しはありません";
     case "create":
-      return `${plan.chapters.length}個立てます（${listChapters(plan.chapters)}）。章立ての台帳に書くだけで、原稿は書き換えません`;
+      return `${plan.chapters.length}個立てます（${listChapters(plan.chapters)}）。章立ての記録に書くだけで、原稿は書き換えません`;
     case "existing":
-      return `章立ての台帳に既に${plan.existingCount}個あるため、立てません（作者の章を上書きしないため）`;
+      return `章立ての記録に既に${plan.existingCount}個あるため、立てません（作者の章を上書きしないため）`;
     case "unreadable":
-      return "章立ての台帳を読めなかったため、立てません";
+      return "章立ての記録を読めなかったため、立てません";
     case "blocked": {
       const why = [
         plan.insideCollected > 0
