@@ -101,3 +101,63 @@ describe("記録に出す札", () => {
     }
   });
 });
+
+/**
+ * **話の題が話数で始まる作品で、札に話数が2回並んだ**（ノートPCの実機、0.76.1、2026-09-23）。
+ *
+ * 相談の操作ログに「本文・第1話 第1話　薄皮の向こう側（1/11）」と出た。
+ * 出典の名前（`label`）は「話数 ＋ 題」で作られ（`core/manuscriptSources.ts` の
+ * `episodeLabel`）、この作品は題そのものが「第1話　薄皮の向こう側」だった。
+ *
+ * **AIへ渡す出典（`label`）は変えない**——変えるとプロンプトの中身が変わり、
+ * 版とキャッシュに響く。直すのは記録の札だけ。
+ */
+describe("題が話数で始まる話の札", () => {
+  const titled: RetrievalItem = {
+    id: "本文:第1話 第1話　薄皮の向こう側#0",
+    source: "本文",
+    label: "第1話 第1話　薄皮の向こう側",
+    text: "……",
+    hash: "x",
+    authorWritten: false,
+  };
+
+  test("話数を重ねない（作者の例）", () => {
+    expect(describeRetrievedItem(titled)).toBe("本文・第1話　薄皮の向こう側");
+  });
+
+  test("連番も、重ねを畳んだ札に付く", () => {
+    const eleven = Array.from({ length: 11 }, (_, index) => ({
+      ...titled,
+      id: `本文:第1話 第1話　薄皮の向こう側#${index}`,
+    }));
+    expect(describeRetrievedItems(eleven)[0]).toBe("本文・第1話　薄皮の向こう側（1/11）");
+  });
+
+  test("全角の数字で書いた題も、同じ話数として畳む（題の書き方はそのまま残す）", () => {
+    expect(
+      describeRetrievedItem({ ...titled, label: "第1話 第１話　薄皮の向こう側" })
+    ).toBe("本文・第１話　薄皮の向こう側");
+  });
+
+  test("題が話数で始まらなければ、これまでどおり話数と題を並べる", () => {
+    expect(
+      describeRetrievedItem({ ...titled, label: "第1話 薄皮の向こう側" })
+    ).toBe("本文・第1話 薄皮の向こう側");
+    // 「第1話」と「第12話」は別の話数（前方一致で畳まない）
+    expect(
+      describeRetrievedItem({ ...titled, label: "第1話 第12話の手前で" })
+    ).toBe("本文・第1話 第12話の手前で");
+  });
+
+  test("設定資料の札は触らない", () => {
+    expect(
+      describeRetrievedItem({ ...titled, source: "設定資料", label: "登場人物: 太志" })
+    ).toBe("設定資料・登場人物: 太志");
+  });
+
+  test("AIへ渡す出典（label）は変えない", () => {
+    const items = manuscriptItems("第1話 第1話　薄皮の向こう側", "灯は目を覚ました。");
+    expect(items[0].label).toBe("第1話 第1話　薄皮の向こう側");
+  });
+});
