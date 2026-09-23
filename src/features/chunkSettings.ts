@@ -77,6 +77,12 @@ export interface ChunkSettings {
    * だけでは、設定を直したのに変わらない理由が読めない。
    */
   budget?: ChunkBudget & { overheadChars: number };
+  /**
+   * まるごと読む大きさで決めたか（A3⑤）。**ログに「まるごと」と出す**
+   * ——分けて読むときの字数と桁が違うので、黙っていると設定が効いていない
+   * ように見える。分けて読むときは undefined。
+   */
+  wholeRead?: true;
 }
 
 /**
@@ -190,7 +196,22 @@ export function readChunkSettings(
    *    選んだ大きさは台帳へ覚えて、次に開いたときも同じ段にする
    *    （キャッシュを外さないため）
    */
-  outputTuning?: ChunkTuningTarget
+  outputTuning?: ChunkTuningTarget,
+  /**
+   * **まるごと読む**（作者の裁定 A3⑤、2026-09-23。設計書6.10.7）。
+   *
+   * 分けて読むときの大きさ（文脈長の35%・上限20,000字・作者の字数指定）を
+   * 使わず、**文脈長から指示・資料・出力の見込みを引いた残り全部**を1回の
+   * 大きさにする。話をまたいで詰めるので、区切りは話の切れ目に落ちる。
+   *
+   * 残る絞りは3つ——**待ち時間の上限**（手元の遅い機械で1回が上限を超え
+   * ないように）、**出力の上限**（書ける量の実測。指摘が出力の上限を超えて
+   * 丸ごと捨てられないように）、**文脈長**（入らないものは送らない）。
+   * 未チューニングの安全既定（6,000字）は外す——作者が「まるごと」を選んだ
+   * のに6,000字で切ると、選んだ意味が無くなる。入るかどうかは送る直前の
+   * 関所（`ai/contextGuard.ts`）がこれまでどおり実測で見る。
+   */
+  plan: { readonly wholeRead?: boolean } = {}
 ): ChunkSettings {
   const config = vscode.workspace.getConfiguration("novelai");
   const mode = parseChunkSizeMode(config.get<string>("chunkSizeMode"));
@@ -199,20 +220,34 @@ export function readChunkSettings(
     ? modelTuning(outputTuning.providerId, outputTuning.model)
     : undefined;
 
-  const requested = resolveChunkChars({
-    mode,
-    configured: config.get<number>("chunkChars"),
-    contextWindow,
-    // **字/トークンの実測**（設計書6.77）。無ければ当て推量（0.7）のまま
-    // なので、渡していない呼び出し側の字数は変わらない
-    measured: tuning,
-  });
+  const requested: ResolvedChunkSize = plan.wholeRead
+    ? {
+        // 望みを「無限」にして、固定費と出力を引いた残り（入るだけ）を取る
+        chars: planChunkBudget({
+          contextWindow,
+          overheadChars: fixedCost?.overheadChars ?? 0,
+          outputTokens: fixedCost?.outputTokens ?? 0,
+          requestedChars: Number.MAX_SAFE_INTEGER,
+          measured: tuning,
+        }).chunkChars,
+        from: "model",
+      }
+    : resolveChunkChars({
+        mode,
+        configured: config.get<number>("chunkChars"),
+        contextWindow,
+        // **字/トークンの実測**（設計書6.77）。無ければ当て推量（0.7）のまま
+        // なので、渡していない呼び出し側の字数は変わらない
+        measured: tuning,
+      });
 
   // **未チューニングの安全既定**（設計書6.65.16の1）。自動モードだけが
   // 対象——手動で字数を指定しているなら、未チューニングでも作者の指定を
   // そのまま尊重する。outputTuning を渡さない呼び出し側は、対応させる
-  // までの逃げ道としてこれまでどおり抑えない
-  const untunedCapApplies = mode === "auto" && outputTuning !== undefined;
+  // までの逃げ道としてこれまでどおり抑えない。**まるごと読むときも外す**
+  // （上の `plan` の説明）
+  const untunedCapApplies =
+    mode === "auto" && outputTuning !== undefined && !plan.wholeRead;
   const cappedChars = untunedCapApplies
     ? capUntunedChunkChars(requested.chars, tuning?.measuredChars)
     : requested.chars;
@@ -233,10 +268,15 @@ export function readChunkSettings(
   */
   const timeFit =
     outputTuning?.feature !== undefined && outputTuning.feature.length > 0
-      ? fitToTimeout(requestedAfterSafetyCap.chars, fixedCost, {
-          ...outputTuning,
-          feature: outputTuning.feature,
-        })
+      ? fitToTimeout(
+          requestedAfterSafetyCap.chars,
+          fixedCost,
+          { ...outputTuning, feature: outputTuning.feature },
+          // **まるごと読む回の段は覚えない。** 同じ鍵（機能・モデル）に
+          // 覚えると、次に分けて読むときの揺れ止めが外れて段が動き、
+          // 分けて読む側の処理済みキャッシュが丸ごと外れうる
+          !plan.wholeRead
+        )
       : undefined;
   const requestedAfterTimeFit: ResolvedChunkSize =
     timeFit && timeFit.chars < requestedAfterSafetyCap.chars
@@ -265,11 +305,15 @@ export function readChunkSettings(
     ? { ...requestedAfterTimeFit, chars: budget.chunkChars }
     : requestedAfterTimeFit;
 
-  const requestedMergeChars = resolveMergeChars({
-    mode,
-    configured: config.get<number>("mergeChunkChars"),
-    chunkChars: chunk.chars,
-  });
+  // **まるごと読むときは、1回の大きさまで必ず詰める**（まとめ送信の字数の
+  // 指定は「分けて読む」ためのもの）。区切りは話の切れ目に落ちる
+  const requestedMergeChars = plan.wholeRead
+    ? chunk.chars
+    : resolveMergeChars({
+        mode,
+        configured: config.get<number>("mergeChunkChars"),
+        chunkChars: chunk.chars,
+      });
 
   // **絞るのは、指定されたモデルの実測が台帳にあるときだけ**
   // （設計書6.65.14の2）。渡されなければ `tuning` が undefined のままなので、
@@ -294,6 +338,7 @@ export function readChunkSettings(
       ? { chunkCharsBeforeTimeFit: requestedAfterSafetyCap.chars }
       : {}),
     ...(timeFit ? { timeFit } : {}),
+    ...(plan.wholeRead ? { wholeRead: true as const } : {}),
     budget,
   };
 }
@@ -337,7 +382,9 @@ export function forgetTimeFitMemoryForTests(): void {
 function fitToTimeout(
   requestedChars: number,
   fixedCost: ChunkFixedCost | undefined,
-  target: ChunkTuningTarget & { readonly feature: string }
+  target: ChunkTuningTarget & { readonly feature: string },
+  /** 選んだ段を覚えるか（まるごと読む回は覚えない） */
+  remember = true
 ): (ChunkTimeFit & { timeoutSeconds: number }) | undefined {
   const feature = target.feature;
   // **目安と同じ引き方で速さを引く**（`ai/runTimeEstimate.ts`）。別々に引くと、
@@ -379,7 +426,7 @@ function fitToTimeout(
     確認の前の見積もり（`proofreadingSuite` の桁の感覚）は指示の量を知らずに
     呼ぶので、そこで選んだ段を覚えると本番の判断を引きずる。
   */
-  if (fixedCost) {
+  if (fixedCost && remember) {
     const memory: TimeFitMemory = { chars: fit.chars, requestedChars };
     timeFitMemory.set(memoryKey, memory);
     // 後ろで書く（処理を止めない）。書けなかった理由は台帳の側が記録に残す
@@ -452,5 +499,8 @@ export function describeChunkSettings(settings: ChunkSettings): string {
           ? "（縮めても入り切らない見込み。下限で送ります）"
           : "")
     : "";
-  return `1チャンク ${settings.chunk.chars}字（${source}）${untuned}${timeFit}${merge}${budget}`;
+  const whole = settings.wholeRead
+    ? "／まるごと読む（文脈長・出力・待ち時間の上限から区切る）"
+    : "";
+  return `1チャンク ${settings.chunk.chars}字（${source}）${untuned}${timeFit}${merge}${budget}${whole}`;
 }

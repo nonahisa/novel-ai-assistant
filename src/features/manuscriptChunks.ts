@@ -75,6 +75,11 @@ export async function collectManuscriptChunks(params: {
    * 違う名前がログへ出ると、原因を追う側が別の機能を疑う。
    */
   logLabel: string;
+  /**
+   * まるごと読む（A3⑤。`readChunkSettings` の `plan.wholeRead`）。
+   * 区切りは文脈長・出力・待ち時間の上限から決まり、話の切れ目に落ちる
+   */
+  wholeRead?: boolean;
 }): Promise<ManuscriptChunks> {
   const { work, info, options, fixedCost, outputTuning, logLabel } = params;
   const scan = await scanWork(work);
@@ -95,7 +100,8 @@ export async function collectManuscriptChunks(params: {
   const chunkSettings = readChunkSettings(
     info.contextWindow,
     fixedCost,
-    outputTuning
+    outputTuning,
+    { wholeRead: params.wholeRead === true }
   );
   const maxChars = chunkSettings.chunk.chars;
 

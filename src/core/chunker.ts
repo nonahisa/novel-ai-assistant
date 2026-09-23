@@ -739,6 +739,24 @@ export function splitMergedChunk(chunk: Chunk): Chunk[] {
 }
 
 /**
+ * 結合したチャンクを、**話の切れ目で半分ずつ**に戻す（A3⑤、2026-09-23）。
+ *
+ * まるごと読む矛盾検知で、応答が出力の上限で切り詰められたときに使う。
+ * `splitMergedChunk` は1話ずつまで戻すので、30話の区切りが切り詰められると
+ * 30回の「分けて読む」になり、まるごと読む意味が消える。**半分なら出力も
+ * 半分で済み、話をまたいで読む形は残る。** 半分でも切り詰められれば、
+ * 呼ぶ側がもう一度ここを通す（2話まで減れば1話ずつと同じ）。
+ */
+export function halveMergedChunk(chunk: Chunk): Chunk[] {
+  const episodes = splitMergedChunk(chunk);
+  if (episodes.length <= 2) return episodes;
+  const halves = mergeAdjacentChunks(episodes, {
+    maxChars: Math.ceil(chunk.text.length / 2),
+  });
+  return halves.length > 1 ? halves : episodes;
+}
+
+/**
  * 切り詰められたチャンクを半分に割る。
  *
  * まとめていないチャンク（大きいファイルを分割した断片）でも、

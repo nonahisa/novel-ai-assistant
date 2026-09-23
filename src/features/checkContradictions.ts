@@ -12,11 +12,17 @@ import {
 } from "../ai/outputLimit";
 import {
   describeChunkScope,
+  halveMergedChunk,
   locateChunkLine,
   splitMergedChunk,
   withLineNumbers,
   type Chunk,
 } from "../core/chunker";
+import { isLocalProviderId } from "../core/localProviders";
+import {
+  describeWholeReadConsent,
+  WHOLE_READ_CONSENT_LABEL,
+} from "../core/wholeReadConsent";
 import { linesAround } from "../core/factContradiction";
 import { ChunkCache, type CacheKeyBase } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
@@ -102,7 +108,7 @@ import {
   withCancellableProgress,
   type CheckProgress,
 } from "../views/progress";
-import { estimateRunTimeText } from "../ai/runTimeEstimate";
+import { estimateRunTimeText, lookupCallSpeeds } from "../ai/runTimeEstimate";
 import { describeSendVolume } from "../core/sendVolume";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurn } from "./aiTurn";
@@ -118,6 +124,7 @@ import { summarizeReasons } from "../core/checkRunCounts";
 import { hashText } from "../core/textFile";
 import { confirmRunOrChoose } from "../views/notify";
 import { findLargerModelOffer } from "./largerModelOffer";
+import { cancelItem } from "../views/dialogs";
 
 /**
  * 矛盾検知（P-12、設計書6.10.1）。
@@ -219,6 +226,67 @@ export interface CheckContradictionsOptions extends SuiteAwareOptions {
    * 値を変える口は MCP の `options.carryOver`。
    */
   carryOverChapters?: number;
+  /**
+   * 読み方（作者の裁定 A3⑤、2026-09-23。設計書6.10.7）。**既定は分けて読む**
+   * （これまでどおり）。まるごと読むのは、押したときに作者が選んだときだけ
+   * （`pickContradictionReadMode`）。まとめ実行からは来ない。
+   */
+  readMode?: ContradictionReadMode;
+}
+
+/** 矛盾検知の読み方 */
+export type ContradictionReadMode = "chunked" | "whole";
+
+/**
+ * 押したときに出す、読み方の選択肢（A3⑤）。**先頭は分けて読む**——これまで
+ * どおりの形を、何も考えずに選べる位置に置く。
+ *
+ * 作者の問い「全量読み込みの同意がなくても実行可能な状態になるということ
+ * でしょうか？」への答えが、この2つが**並んでいる**ことである——分けて読む
+ * 矛盾検知はそのまま残り、まるごと読むのは別の選択肢。
+ */
+export const CONTRADICTION_READ_MODE_CHOICES: ReadonlyArray<{
+  readonly mode: ContradictionReadMode;
+  readonly label: string;
+  readonly detail: string;
+}> = [
+  {
+    mode: "chunked",
+    label: "分けて読む（これまでどおり）",
+    detail: "話ごと・チャンクごとに、設定資料と突き合わせます。",
+  },
+  {
+    mode: "whole",
+    label: "まるごと読む",
+    detail:
+      "作品を文脈長と出力の上限まで詰めて、話をまたいで読ませます。" +
+      "長い作品は区切ります。クラウドのAIでは本文がまるごと外へ出るので、毎回確かめます。",
+  },
+];
+
+/**
+ * 読み方を訊く（A4 の裁定どおり、画面上部の選択窓で）。取りやめたら undefined。
+ */
+export async function pickContradictionReadMode(): Promise<
+  ContradictionReadMode | undefined
+> {
+  const picked = await vscode.window.showQuickPick(
+    [
+      ...CONTRADICTION_READ_MODE_CHOICES.map((choice) => ({
+        label: choice.label,
+        detail: choice.detail,
+        mode: choice.mode,
+      })),
+      cancelItem("取りやめる"),
+    ],
+    {
+      title: "矛盾検知：読み方を選ぶ",
+      placeHolder: "どちらで読みますか",
+      ignoreFocusOut: true,
+    }
+  );
+  if (!picked || !("mode" in picked)) return undefined;
+  return picked.mode;
 }
 
 export async function checkContradictions(
@@ -230,6 +298,8 @@ export async function checkContradictions(
 
   const resolved = await ensureConfigured(registry, "contradiction");
   if (!resolved) return undefined;
+  /** まるごと読むか（A3⑤）。区切り方と確認と、切り詰められたときの戻し方が変わる */
+  const wholeRead = options.readMode === "whole";
 
   // **モデルの情報を先に1回だけ引く。** チャンクの大きさも、観点の絞りも、
   // 世界観に回してよい字数も、すべてここから決まる（設計書6.27.10）。
@@ -359,6 +429,16 @@ export async function checkContradictions(
     // 機能名を添えると、待ち時間の上限に収まる大きさにもする（2026-09-23）
     outputTuning: { ...outputTuning, feature: "contradiction_check" },
     logLabel: "矛盾検知",
+    /*
+      **まるごと読むときは、文脈長と出力の上限から区切る**（A3⑤）。
+
+      区切りは話の切れ目に落ちる。**区切りのあいだで持ち越すのは、分けて
+      読むときと同じ材料だけ**——前の話までのあらすじ（【これまでの経緯】）、
+      名前の出る過去の場面の抜粋（6.74）、直前2話の人物（6.10.6）、その時点の
+      設定資料。**前の区切りで出た指摘は持ち越さない**（検証を通る前の指摘を
+      次の前提にすると、誤りが連鎖する）。
+    */
+    wholeRead,
   });
   const { chunks, chapterLabelByFile, chunkNote, unreadableEpisodes } = tasks;
   if (chunks.length === 0) {
@@ -518,7 +598,44 @@ export async function checkContradictions(
       .filter(Boolean)
       .join("\n");
 
-    if (options.suiteConfirmed) {
+    /*
+      **まるごと読むときの確認**（A3⑤、2026-09-23。設計書6.10.7）。
+
+      - **クラウドなら毎回同意を取る。** 作品が丸ごと1つのサービスへ渡る。
+        「以降は訊かない」を出さず、まとめ実行から来ても飛ばさない
+      - **手元なら同意は取らない**（原稿が外へ出ない）。確認は時間の目安の
+        ために出すが、分けて読むときの「以降は訊かない」は持ち込まない
+        ——同じ id にすると、分けて読むほうで覚えた答えで黙って走る
+    */
+    const cloudWhole = wholeRead && !isLocalProviderId(resolved.provider.id);
+    let wholeNote = "";
+    if (cloudWhole) {
+      // **2回目の突き合わせ（あとで判明する事実）も足す**——同じ本文を
+      // もう一度送るので、量の目安は上限寄りにする
+      const totalChars =
+        sendChars.reduce((total, chars) => total + chars, 0) +
+        pending.reduce((total, chunk) => total + futureSendChars(chunk), 0);
+      const tokensPerChar = lookupCallSpeeds(
+        resolved.provider.id,
+        resolved.model,
+        "contradiction_check"
+      ).tokensPerChar;
+      wholeNote = describeWholeReadConsent({
+        // **サービス名を決め打ちしない**（規則5）。プロバイダの表示名を使う
+        serviceName: resolved.provider.displayName,
+        bodyChars: pending.reduce((total, chunk) => total + chunk.text.length, 0),
+        totalChars,
+        calls: pending.length,
+        inputTokens: Math.ceil(totalChars * tokensPerChar),
+        maxOutputTokens: sendOutputTokens * pending.length,
+      });
+    } else if (wholeRead) {
+      wholeNote =
+        "手元のAIで読むので、原稿は外へ出ません。" +
+        "作品を文脈長と出力の上限まで詰めて、話をまたいで読ませます。";
+    }
+
+    if (options.suiteConfirmed && !cloudWhole) {
       // まとめ実行が先に1回だけ確認している（設計書6.80）。
       // **飛ばした中身はログへ残す**——観点を絞ったことや、過去の場面を
       // 足したことは、この確認の中にしか書かれていない
@@ -528,6 +645,7 @@ export async function checkContradictions(
         **この機械で上限内に終わる、もっと大きいモデルがあれば案内する**
         （A3④、2026-09-23）。矛盾検知は大きさで当たりが最も変わる機能
         （e4b 0/4・26b 4/4）。まとめ実行では確認を出さないので案内もしない。
+        クラウドでは出ない（`findLargerModelOffer` が手元だけを見る）。
       */
       const offer = await findLargerModelOffer({
         registry,
@@ -541,11 +659,18 @@ export async function checkContradictions(
         workFolder: work.folderPath,
       });
       const answer = await confirmRunOrChoose(
-        `${work.title} の矛盾を検知します。`,
-        "実行",
+        cloudWhole
+          ? `${work.title} の本文を、まるごと ${resolved.provider.displayName} へ送って矛盾を検知します。`
+          : wholeRead
+            ? `${work.title} の矛盾を、まるごと読んで検知します。`
+            : `${work.title} の矛盾を検知します。`,
+        cloudWhole ? WHOLE_READ_CONSENT_LABEL : "実行",
         {
-          detail: offer ? `${detail}\n\n${offer.detail}` : detail,
-          remember: { id: "ai.run.checkContradictions" },
+          kind: cloudWhole ? "warning" : undefined,
+          detail: [wholeNote, detail, offer?.detail ?? ""]
+            .filter(Boolean)
+            .join("\n\n"),
+          remember: wholeRead ? undefined : { id: "ai.run.checkContradictions" },
           choices: offer?.choices,
         }
       );
@@ -698,12 +823,17 @@ export async function checkContradictions(
           }
 
           if (raw === RETRY_SMALLER) {
-            const parts = splitMergedChunk(chunk);
+            // **まるごと読むときは半分ずつに戻す**（A3⑤）。1話ずつまで戻すと
+            // 30話の区切りが30回の「分けて読む」になり、選んだ意味が消える。
+            // 半分でも切り詰められれば、次の周でもう一度ここを通る
+            const parts = wholeRead ? halveMergedChunk(chunk) : splitMergedChunk(chunk);
             if (parts.length > 1) {
               queue.splice(cursor + 1, 0, ...parts);
               chunksTotal += parts.length;
               logStep(
-                `切り詰められたため ${parts.length} 話に分けて試し直します: ${chunk.hash}`
+                wholeRead
+                  ? `切り詰められたため ${parts.length} つの区切りに分けて試し直します: ${chunk.hash}`
+                  : `切り詰められたため ${parts.length} 話に分けて試し直します: ${chunk.hash}`
               );
             } else {
               failedChunks++;
@@ -1037,6 +1167,20 @@ export async function checkContradictions(
       pastScenes,
     });
     return { userPrompt, relevant, bodyWithLines, previousSynopses, pastScenes };
+  }
+
+  /**
+   * 「あとで判明する事実」の向き（設計書6.10.4）で送るぶんの字数。送らない
+   * （事実が無い・照らし合わせる相手が無い）なら0。
+   *
+   * まるごと読むときの同意（A3⑤）で、送る量を上限寄りに言うためだけに使う
+   * ——本命が通ったチャンクでしか送らないので、実際はこれ以下になる。
+   */
+  function futureSendChars(chunk: Chunk): number {
+    const facts = settings.futureFactsFor(chunk.text, chunk.chapterStart);
+    if (!facts) return 0;
+    const built = promptFor(chunk, "future", facts);
+    return built ? systemPrompt.length + built.userPrompt.length : 0;
   }
 
   /**
