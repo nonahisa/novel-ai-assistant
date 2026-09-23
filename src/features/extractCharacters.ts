@@ -76,7 +76,11 @@ import { applyPendingCharacterUpdates } from "./applyPendingUpdates";
 import type { ProposalPanel } from "./proposalPanel";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
-import { readChunkSettings, resolveModelInfoOrWarn } from "./chunkSettings";
+import {
+  describeChunkSettings,
+  readChunkSettings,
+  resolveModelInfoOrWarn,
+} from "./chunkSettings";
 import {
   AbilitySystemStore,
   createAbilityStore,
@@ -331,7 +335,8 @@ export async function extractCharacters(
       overheadChars,
       outputTokens: plannedOutputTokens,
     },
-    outputTuning
+    // 機能名を添えると、待ち時間の上限に収まる大きさにもする（2026-09-23）
+    { ...outputTuning, feature: "character_extract" }
   );
   const chunkChars = chunkSettings.chunk.chars;
 
@@ -562,7 +567,10 @@ export async function extractCharacters(
   useLogFile(work.folderPath);
   logStep(
     `抽出を開始: ${work.title} / ${resolved.provider.displayName} / ` +
-      `${resolved.model} / ${chunks.length}チャンク / v${CHARACTER_EXTRACT_VERSION}`
+      `${resolved.model} / ${chunks.length}チャンク / ` +
+      // **なぜこの大きさか**も残す。待ち時間に収めるために縮めた回
+      // （2026-09-23）は、書かないと作者には設定が効いていないように見える
+      `${describeChunkSettings(chunkSettings)} / v${CHARACTER_EXTRACT_VERSION}`
   );
 
   const extractedAll: Array<{

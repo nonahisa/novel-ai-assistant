@@ -1,6 +1,7 @@
 import { ollamaEndpoint } from "../features/aiConnectivity";
 import { lmstudioEndpoint } from "./lmstudioProvider";
 import type { ProviderId } from "./types";
+import { isLocalProviderId } from "../core/localProviders";
 
 /**
  * **もう一方の手元AIが動いていないか**を確かめる（設計書6.62.2）。
@@ -25,14 +26,14 @@ import type { ProviderId } from "./types";
  * 見て、案内へ一言足す。
  */
 
-/** 手元で動く（＝メモリを取り合う）プロバイダ */
-const LOCAL_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>([
-  "ollama",
-  "lmstudio",
-]);
-
+/**
+ * 手元で動く（＝メモリを取り合う）プロバイダか。
+ *
+ * **一覧は `core/localProviders.ts` の1つだけ**（待ち時間の上限も同じ一覧で
+ * 分ける。2026-09-23）。ここで持ち直すと、片方にだけ新しいAIが足される。
+ */
 export function isLocalProvider(id: ProviderId): boolean {
-  return LOCAL_PROVIDERS.has(id);
+  return isLocalProviderId(id);
 }
 
 /**

@@ -3,7 +3,10 @@ import { window, workspace } from "./support/vscodeStub";
 import type { AIRegistry } from "../../src/ai/registry";
 import { AIError } from "../../src/ai/types";
 import type { GenerateParams, GenerateResult } from "../../src/ai/types";
-import { resolveTimeoutSeconds } from "../../src/core/modelTuning";
+import {
+  maxTimeoutSeconds,
+  resolveTimeoutSeconds,
+} from "../../src/core/modelTuning";
 import {
   tuningStoreContents,
   useMemoryTuningStore,
@@ -510,13 +513,19 @@ describe("測定のあいだの待ち時間", () => {
     expect(notice).toContain("待ち時間を一時的に 1200 秒へ");
   });
 
-  test("**台帳へ書く待ち時間は、600秒を超えない**", async () => {
+  /*
+    2026-09-23 から、手元のAI（この測定は Ollama）のふだんの上限は1800秒
+    （`LOCAL_MAX_TIMEOUT_SECONDS`）。クラウドは600秒のまま。
+  */
+  test("**台帳へ書く待ち時間は、ふだんの上限（手元1800秒）を超えない**", async () => {
     state.limitChars = 1_000_000;
     state.timeoutAboveChars = 20_000;
     state.timeoutTimes = 1;
     const { tuning } = await measure({ before });
 
-    expect(tuning.timeoutSeconds as number).toBeLessThanOrEqual(600);
+    expect(tuning.timeoutSeconds as number).toBeLessThanOrEqual(
+      maxTimeoutSeconds("ollama")
+    );
   });
 
   test("反映しなければ、延ばした待ち時間は元へ戻る", async () => {
@@ -531,17 +540,23 @@ describe("測定のあいだの待ち時間", () => {
     expect(tuning.timeoutSeconds).toBe(600);
   });
 
-  test("**測定が終われば、ふだんの上限（600秒）に戻る**", async () => {
+  test("**測定が終われば、ふだんの上限に戻る**（クラウド600秒・手元1800秒）", async () => {
     state.limitChars = 1_000_000;
     state.timeoutAboveChars = 20_000;
     state.timeoutTimes = 1;
     await measure({ before });
 
-    // 測ったあとに1,200秒が台帳に居座っても、ふだんの呼び出しは600秒で挟む
+    /*
+      測ったあとに長い待ち時間が台帳に居座っても、ふだんの呼び出しは
+      ふだんの上限で挟む。**戻ったかどうかはクラウドで見る**——手元の
+      ふだんの上限は測定の上限と同じ1800秒なので、手元では見分けが付かない。
+    */
     await useMemoryTuningStore({
-      "ollama/gemma4:e4b": { timeoutSeconds: 1200 },
+      "ollama/gemma4:e4b": { timeoutSeconds: 5000 },
+      "gemini/gemini-2.5-flash": { timeoutSeconds: 1200 },
     });
-    expect(resolveTimeoutSeconds("ollama", "gemma4:e4b")).toBe(600);
+    expect(resolveTimeoutSeconds("gemini", "gemini-2.5-flash")).toBe(600);
+    expect(resolveTimeoutSeconds("ollama", "gemma4:e4b")).toBe(1800);
   });
 });
 

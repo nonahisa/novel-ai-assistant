@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { logLine } from "./logger";
+import { isLocalProviderId } from "./localProviders";
 import {
   bundledContextWindow,
   bundledTuningByKey,
@@ -204,7 +205,12 @@ export interface ModelTuning {
    * トークナイザの性質ではない。**作者自身の実測だけが入る。**
    *
    * **平均しない。直近の実測をそのまま入れる**（`outputTokensPerSecond` と
-   * 同じ流儀）。**見積もり以外には使わない**——送り方は変えない。
+   * 同じ流儀）。
+   *
+   * **2026-09-23 から、送り方にも使う**（作者の裁定。残課題 A8）——チャンクに
+   * 分けて呼ぶ機能で、1チャンクの所要時間が待ち時間の上限の7割に収まる
+   * 大きさへ縮める（`core/chunkTimeFit.ts`）。直近の1回の値なので揺れるが、
+   * 大きさは決まった段から選び、前回の段を覚えて揺れでは動かさない。
    */
   readonly inputTokensPerSecond?: number;
   /**
@@ -364,10 +370,49 @@ const BUNDLED_CHARS_PER_TOKEN_SAMPLES = 5;
 export const MIN_TIMEOUT_SECONDS = 180;
 
 /**
- * 待ち時間の上限。これ以上待たせるくらいなら、モデルかチャンクの
- * 大きさを見直すほうが作者のためになる。
+ * **クラウドのAI**の、待ち時間の上限。これ以上待たせるくらいなら、
+ * モデルかチャンクの大きさを見直すほうが作者のためになる。
+ *
+ * **手元のAIには使わない**（`LOCAL_MAX_TIMEOUT_SECONDS`）。どちらを使うかは
+ * `maxTimeoutSeconds` の1か所で決める。
  */
 export const MAX_TIMEOUT_SECONDS = 600;
+
+/**
+ * **手元のAI（Ollama・LM Studio）**の、待ち時間の上限（作者の裁定、2026-09-23）。
+ *
+ * ## なぜ手元だけ延ばすか
+ *
+ * CPUだけのノートPC（gemma4:e2b。読み込み約26.7・書き出し約6.3トークン/秒）
+ * では、作品全体を渡す相談が**読み込みだけで約620秒**かかって600秒で切れ、
+ * 抽出の13,000字のチャンクも526秒（上限まで74秒）だった。台帳に1800秒と
+ * 書いてあっても、読む側がここで600秒へ抑えていた——**書いたのに効かない**。
+ *
+ * - **手元は待っても誰の財布も減らない。** 遅いのは機械の地力で、待てば返る
+ * - **クラウドは600秒のまま。** 10分返らないのは向こうの詰まりか回線で、
+ *   待っても返る見込みが薄い。課金されるAIで長く待たせる理由も無い
+ *
+ * 手元かどうかは `core/localProviders.ts` の一覧だけで決める（通信の口
+ * `localFetch`／`cloudFetch` の分けと同じ一覧。写しを作らない）。
+ *
+ * 値は測定の上限（`PROBE_MAX_TIMEOUT_SECONDS`）と同じ1800秒にした。
+ * 測定で確かめられた長さを、ふだんの呼び出しでも待てるようにするため。
+ */
+export const LOCAL_MAX_TIMEOUT_SECONDS = 1800;
+
+/**
+ * そのプロバイダで、ふだんの呼び出しに許す待ち時間の上限（秒）。
+ *
+ * **上限を読む所はすべてここを通す**——台帳の読み出し（`tunedTimeoutSeconds`）、
+ * 測定から勧める値（`recommendTimeoutSeconds` へ渡す）、相談の「延ばす」札と
+ * 案内（`features/workChatPanel.ts`）。どこか1か所が600秒のままだと、
+ * 札は1800秒を勧めるのに読む側が600秒で切る、という食い違いになる。
+ */
+export function maxTimeoutSeconds(providerId: string): number {
+  return isLocalProviderId(providerId)
+    ? LOCAL_MAX_TIMEOUT_SECONDS
+    : MAX_TIMEOUT_SECONDS;
+}
 
 /**
  * **測定のあいだだけ**使う、待ち時間の上限（作者の依頼、2026-09-13）。
@@ -383,19 +428,35 @@ export const MAX_TIMEOUT_SECONDS = 600;
  * gemma4:12b はいちばん遅い回が273秒で、`recommendTimeoutSeconds` の
  * ×3が **600秒に頭打ち**になっていた——測定の側だけが窮屈になっている。
  *
- * **`MAX_TIMEOUT_SECONDS` のほうは動かさない。** 台帳へ書く待ち時間
- * （`recommendTimeoutSeconds`）は従来どおり600秒止まりで、ここで延ばした
+ * **ふだんの上限（`maxTimeoutSeconds`）のほうは動かさない。** 台帳へ書く
+ * 待ち時間（`recommendTimeoutSeconds`）はふだんの上限止まりで、ここで延ばした
  * 値がふだんの呼び出しへ持ち込まれることはない。
+ *
+ * 2026-09-23 から手元のAIはふだんの上限も1800秒になった
+ * （`LOCAL_MAX_TIMEOUT_SECONDS`）ので、測定で上がるのはクラウドだけである。
  */
 export const PROBE_MAX_TIMEOUT_SECONDS = 1800;
 
 /**
- * いま、台帳の待ち時間を読むときに掛ける上限。
+ * いま測定の最中か。**台帳の待ち時間を読むときの上限を上げる**ために持つ。
  *
- * **ふだんは `MAX_TIMEOUT_SECONDS`。** 測定のあいだだけ
- * `PROBE_MAX_TIMEOUT_SECONDS` へ上げる（`raiseTimeoutCeilingForProbe`）。
+ * **ふだんは `maxTimeoutSeconds`（手元1800秒・クラウド600秒）。** 測定の
+ * あいだだけ `PROBE_MAX_TIMEOUT_SECONDS` まで上げる（`raiseTimeoutCeilingForProbe`）。
  */
-let timeoutCeilingSeconds: number = MAX_TIMEOUT_SECONDS;
+let probeRaisesCeiling = false;
+
+/**
+ * いま、そのプロバイダの台帳の待ち時間を読むときに掛ける上限（秒）。
+ *
+ * ふだんは `maxTimeoutSeconds`。測定のあいだは、それと測定用の上限の
+ * 大きいほう（手元はもともと1800秒なので、測定で下がることはない）。
+ */
+export function timeoutCeilingSeconds(providerId: string): number {
+  const usual = maxTimeoutSeconds(providerId);
+  return probeRaisesCeiling
+    ? Math.max(usual, PROBE_MAX_TIMEOUT_SECONDS)
+    : usual;
+}
 
 /**
  * 測定のあいだだけ、待ち時間の読み出し上限を上げる。返った関数で元へ戻す。
@@ -406,15 +467,15 @@ let timeoutCeilingSeconds: number = MAX_TIMEOUT_SECONDS;
  * 通った」と「動く」が違う、この作品でくり返した失敗の6番そのものになる。
  *
  * 上げるのは測定のあいだだけで、`measureContext` の `finally` が必ず戻す。
- * 戻し忘れても、台帳のほうは600秒を超える値を持たない（反映は
+ * 戻し忘れても、台帳のほうはふだんの上限を超える値を持たない（反映は
  * `recommendTimeoutSeconds` が挟み、反映しなければ元の値へ戻す）ので、
  * ふだんの呼び出しが長く待つようにはならない。
  */
 export function raiseTimeoutCeilingForProbe(): () => void {
-  const before = timeoutCeilingSeconds;
-  timeoutCeilingSeconds = PROBE_MAX_TIMEOUT_SECONDS;
+  const before = probeRaisesCeiling;
+  probeRaisesCeiling = true;
   return () => {
-    timeoutCeilingSeconds = before;
+    probeRaisesCeiling = before;
   };
 }
 
@@ -593,10 +654,18 @@ function nonEmptyText(value: unknown): string | undefined {
 /**
  * 測った応答時間から、設定してよい待ち時間を決める。
  *
- * `Math.min(600, Math.max(180, Math.ceil(秒 * 3 / 30) * 30))`。
- * 掛ける3・下限180・上限600・30秒刻みの理由は、それぞれ上の定数に書いた。
+ * `Math.min(上限, Math.max(180, Math.ceil(秒 * 3 / 30) * 30))`。
+ * 掛ける3・下限180・上限・30秒刻みの理由は、それぞれ上の定数に書いた。
+ *
+ * @param ceilingSeconds 上限。**呼び出し側はプロバイダの上限
+ *   （`maxTimeoutSeconds(providerId)`）を渡す**——手元のAIへ600秒を勧めると、
+ *   読む側は1800秒まで許すのに台帳の値が600秒で切れる。省略すると
+ *   クラウドの上限（これまでの動き）。
  */
-export function recommendTimeoutSeconds(longestResponseSeconds: number): number {
+export function recommendTimeoutSeconds(
+  longestResponseSeconds: number,
+  ceilingSeconds: number = MAX_TIMEOUT_SECONDS
+): number {
   if (
     !Number.isFinite(longestResponseSeconds) ||
     longestResponseSeconds <= 0
@@ -606,7 +675,7 @@ export function recommendTimeoutSeconds(longestResponseSeconds: number): number 
   }
   const raw = longestResponseSeconds * RESPONSE_TIME_MARGIN;
   const rounded = Math.ceil(raw / TIMEOUT_STEP_SECONDS) * TIMEOUT_STEP_SECONDS;
-  return Math.min(MAX_TIMEOUT_SECONDS, Math.max(MIN_TIMEOUT_SECONDS, rounded));
+  return Math.min(ceilingSeconds, Math.max(MIN_TIMEOUT_SECONDS, rounded));
 }
 
 const CONFIG_SECTION = "novelai";
@@ -730,8 +799,9 @@ export function tunedContextWindow(
  * 上限は書き込み側（`recommendTimeoutSeconds`）でしか守られていないので、
  * 読む側でも同じ線を引く。
  *
- * 挟む線は、ふだんは `MAX_TIMEOUT_SECONDS`。**測定のあいだだけ
- * `PROBE_MAX_TIMEOUT_SECONDS` まで上がる**（`raiseTimeoutCeilingForProbe`）。
+ * 挟む線は、ふだんは `maxTimeoutSeconds`（**手元のAIは1800秒・クラウドは
+ * 600秒**。2026-09-23）。**測定のあいだだけ `PROBE_MAX_TIMEOUT_SECONDS`
+ * まで上がる**（`raiseTimeoutCeilingForProbe`）。
  */
 export function tunedTimeoutSeconds(
   providerId: string,
@@ -739,7 +809,7 @@ export function tunedTimeoutSeconds(
 ): number | undefined {
   const tuned = modelTuning(providerId, model)?.timeoutSeconds;
   if (tuned === undefined) return undefined;
-  const ceiling = timeoutCeilingSeconds;
+  const ceiling = timeoutCeilingSeconds(providerId);
   if (tuned > ceiling) {
     noteOnce(
       `AIチューニング：${modelTuningKey(providerId, model)} の待ち時間 ` +

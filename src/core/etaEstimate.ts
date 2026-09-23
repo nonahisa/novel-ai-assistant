@@ -206,7 +206,7 @@ export function estimateCallsTime(params: {
         total + (Number.isFinite(value) && value > 0 ? value : 0),
       0
     );
-    inputMs = ((chars * tokensPerChar) / inputSpeed) * 1000;
+    inputMs = inputReadMs(chars, tokensPerChar, inputSpeed) ?? 0;
   }
 
   if (outputKnown) {
@@ -216,6 +216,26 @@ export function estimateCallsTime(params: {
   // 読み込みは分かるが、書く側が分からない。決め打ちで埋めるか、作らないか
   if (fallback === undefined) return undefined;
   return { ms: inputMs + count * fallback * 1000, source: "partial" };
+}
+
+/**
+ * 読み込みにかかる時間（ミリ秒）。字数 × 字→トークン ÷ 読み込みの速さ。
+ * どれかが分からなければ undefined。
+ *
+ * **式はここ1か所**。確認画面の目安（上の `estimateCallsTime`）と、チャンクの
+ * 大きさを待ち時間に収める側（`core/chunkTimeFit.ts`）が同じものを使う——
+ * 写しを作ると、目安は「収まる」と言うのに大きさは縮む、という食い違いになる。
+ */
+export function inputReadMs(
+  chars: number,
+  tokensPerChar: number | undefined,
+  inputTokensPerSecond: number | undefined
+): number | undefined {
+  const speed = positiveOrUndefined(inputTokensPerSecond);
+  const perChar = positiveOrUndefined(tokensPerChar);
+  if (speed === undefined || perChar === undefined) return undefined;
+  const safeChars = Number.isFinite(chars) && chars > 0 ? chars : 0;
+  return ((safeChars * perChar) / speed) * 1000;
 }
 
 /**

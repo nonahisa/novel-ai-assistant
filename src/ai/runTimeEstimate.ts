@@ -128,8 +128,14 @@ export function estimateCallsTimeFor(params: {
   });
 }
 
-/** 見積もりに要る、台帳の値。**引き方をここ1か所にする**（2つの目安で写さない） */
-interface CallSpeeds {
+/**
+ * 見積もりに要る、台帳の値。**引き方をここ1か所にする**（2つの目安で写さない）。
+ *
+ * チャンクの大きさを待ち時間に収める側（`features/chunkSettings.ts`。
+ * 2026-09-23）も、ここから引く——目安と大きさが別々の速さを見ると、
+ * 目安は「収まる」と言うのに大きさは縮む、という食い違いになる。
+ */
+export interface CallSpeeds {
   readonly inputTokensPerSecond?: number;
   readonly outputTokensPerSecond?: number;
   /** 1回に書く量（平均があれば平均、無ければ最大） */
@@ -140,7 +146,7 @@ interface CallSpeeds {
   readonly basis: RunTimeEstimateBasis;
 }
 
-function lookupCallSpeeds(
+export function lookupCallSpeeds(
   providerId: string,
   model: string,
   feature: string | undefined

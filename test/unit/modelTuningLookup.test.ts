@@ -208,13 +208,47 @@ describe("台帳への書き込み", () => {
  * 上限は書き込み側（`recommendTimeoutSeconds`）でしか守られていなかった。
  */
 describe("台帳の値を、読むときに挟む", () => {
-  test("待ち時間は上限を超えさせない", async () => {
+  /*
+    **上限は手元とクラウドで違う**（作者の裁定、2026-09-23）。
+    手元のAI（Ollama・LM Studio）は1800秒、クラウドは600秒。
+  */
+  test("待ち時間は上限を超えさせない（手元のAIは1800秒）", async () => {
     withSettings({ "ollama.timeoutSeconds": 180 });
     await useMemoryTuningStore({
       "ollama/gemma4:e4b": { timeoutSeconds: 100_000 },
+      "lmstudio/gemma-4-12b": { timeoutSeconds: 100_000 },
     });
 
-    expect(resolveTimeoutSeconds("ollama", "gemma4:e4b", 180)).toBe(600);
+    expect(resolveTimeoutSeconds("ollama", "gemma4:e4b", 180)).toBe(1800);
+    expect(resolveTimeoutSeconds("lmstudio", "gemma-4-12b", 180)).toBe(1800);
+  });
+
+  test("待ち時間は上限を超えさせない（クラウドは600秒のまま）", async () => {
+    withSettings({});
+    await useMemoryTuningStore({
+      "gemini/gemini-2.5-flash": { timeoutSeconds: 100_000 },
+      "claude/claude-sonnet": { timeoutSeconds: 1800 },
+      "openai/gpt-5": { timeoutSeconds: 1800 },
+      "sakura/gpt-oss-120b": { timeoutSeconds: 1800 },
+    });
+
+    expect(resolveTimeoutSeconds("gemini", "gemini-2.5-flash", 180)).toBe(600);
+    expect(resolveTimeoutSeconds("claude", "claude-sonnet", 300)).toBe(600);
+    expect(resolveTimeoutSeconds("openai", "gpt-5", 180)).toBe(600);
+    expect(resolveTimeoutSeconds("sakura", "gpt-oss-120b", 180)).toBe(600);
+  });
+
+  /**
+   * ノートPCの実機（2026-09-23）。台帳に1800秒と書いてあるのに、
+   * 読む側が600秒へ抑えていたので、約620秒かかる相談が切れていた。
+   */
+  test("手元のAIの台帳に1800秒と書けば、1800秒待つ", async () => {
+    withSettings({});
+    await useMemoryTuningStore({
+      "ollama/gemma4:e2b": { timeoutSeconds: 1800 },
+    });
+
+    expect(resolveTimeoutSeconds("ollama", "gemma4:e2b", 300)).toBe(1800);
   });
 
   test("上限の内側なら、そのまま使う", async () => {

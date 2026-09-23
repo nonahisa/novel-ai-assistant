@@ -16,6 +16,7 @@ import {
   describeChunkSettings,
   readChunkSettings,
   type ChunkFixedCost,
+  type ChunkTuningTarget,
 } from "./chunkSettings";
 
 /**
@@ -62,8 +63,11 @@ export async function collectManuscriptChunks(params: {
   info: ModelInfo;
   options: ManuscriptChunkOptions;
   fixedCost: ChunkFixedCost;
-  /** 未チューニングの安全既定・書ける量の絞り込み用（設計書6.65.16） */
-  outputTuning: { providerId: string; model: string };
+  /**
+   * 未チューニングの安全既定・書ける量の絞り込み用（設計書6.65.16）。
+   * `feature` を添えると、待ち時間の上限に収まる大きさにもする（2026-09-23）
+   */
+  outputTuning: ChunkTuningTarget;
   /**
    * 失敗をログへ残すときの名前（「矛盾検知」など）。
    *

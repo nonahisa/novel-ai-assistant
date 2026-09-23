@@ -19,6 +19,7 @@ import { probeGeneration } from "./generationProbe";
 import { logFailure, logStep, showLog } from "../core/logger";
 import { askText, cancelItem } from "../views/dialogs";
 import { canRunProcesses } from "../core/runtime";
+import { isLocalProviderId } from "../core/localProviders";
 import { allModelTuning, modelTuningKey } from "../core/modelTuning";
 import { modelPickDetail } from "../core/tuningStats";
 import { EXPERTS_BADGE } from "../core/modelExperts";
@@ -120,14 +121,13 @@ export type FeatureAssignments = Partial<
  *
  * `localhost` はブラウザからは（vscode.dev が動いているMicrosoftのサーバ
  * から見て）作者のPCではないので、選んでも必ず「接続できません」になる。
+ * **一覧は `core/localProviders.ts` の1つだけ**（写しを持たない）。
  */
-const LOCAL_PROVIDERS = new Set<ProviderId>(["ollama", "lmstudio"]);
-
 export function filterProvidersForRuntime(
   providers: AIProvider[],
   canRun: boolean
 ): AIProvider[] {
-  return canRun ? providers : providers.filter((p) => !LOCAL_PROVIDERS.has(p.id));
+  return canRun ? providers : providers.filter((p) => !isLocalProviderId(p.id));
 }
 
 /**

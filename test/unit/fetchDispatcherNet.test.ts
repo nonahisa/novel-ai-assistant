@@ -2,6 +2,10 @@ import { describe, expect, test } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as ts from "typescript";
+import {
+  LOCAL_PROVIDER_IDS,
+  isLocalProviderId,
+} from "../../src/core/localProviders";
 
 /**
  * **AIを呼ぶ道が、どちらの口で投げているか**を留める網（設計書6.63。2026-09-23）。
@@ -220,6 +224,31 @@ describe("AIを呼ぶ道は、手元なら localFetch、クラウドなら cloud
         .map((s) => `${s.where} fetchJson に local: true`),
     ];
     expect(offenders).toEqual([]);
+  });
+
+  /**
+   * **手元・クラウドの一覧は、ここの分けと `core/localProviders.ts` で一致する**
+   * （作者の裁定、2026-09-23）。
+   *
+   * 待ち時間の上限（手元1800秒・クラウド600秒）は `core/localProviders.ts` の
+   * 一覧で分ける。通信の口はこの網のファイル分けで決まる。**2つが食い違うと、
+   * 手元の口で投げているのにクラウドの上限で切る（あるいはその逆）**ことになる。
+   * プロバイダのファイル（`src/ai/<ID>Provider.ts`）で突き合わせる。
+   */
+  test("手元のプロバイダの一覧は、口の分けと一致する", () => {
+    const providerIdOf = (file: string): string | undefined =>
+      /^src\/ai\/(\w+)Provider\.ts$/.exec(file)?.[1];
+    const localIds = [...LOCAL_FILES].map(providerIdOf).filter(
+      (id): id is string => id !== undefined
+    );
+    const cloudIds = [...CLOUD_FILES].map(providerIdOf).filter(
+      (id): id is string => id !== undefined
+    );
+    expect(new Set(localIds)).toEqual(new Set(LOCAL_PROVIDER_IDS));
+    expect(cloudIds.filter((id) => isLocalProviderId(id))).toEqual([]);
+    // 網のほうが空振りしていないこと（どちらも1つ以上ある）
+    expect(localIds.length).toBeGreaterThan(0);
+    expect(cloudIds.length).toBeGreaterThan(0);
   });
 
   test("口を使うファイルは、fetchTimeouts の部品から取っている", () => {

@@ -1,11 +1,17 @@
 import { describe, expect, test } from "vitest";
 import {
+  LOCAL_MAX_TIMEOUT_SECONDS,
   MAX_TIMEOUT_SECONDS,
   MIN_TIMEOUT_SECONDS,
+  PROBE_MAX_TIMEOUT_SECONDS,
+  maxTimeoutSeconds,
   modelTuningKey,
   parseModelTuning,
+  raiseTimeoutCeilingForProbe,
   recommendTimeoutSeconds,
+  timeoutCeilingSeconds,
 } from "../../src/core/modelTuning";
+import { MCP_OLLAMA_WAIT_MS } from "../../src/mcp/tools/ollama";
 
 /**
  * AIチューニングの台帳（設計書6.49）。
@@ -299,5 +305,67 @@ describe("待ち時間の見立て", () => {
         MIN_TIMEOUT_SECONDS
       );
     }
+  });
+});
+
+/**
+ * **待ち時間の上限は、手元とクラウドで分ける**（作者の裁定、2026-09-23。残課題 A8）。
+ *
+ * CPUだけのノートPC（gemma4:e2b）では、作品全体を渡す相談が読み込みだけで
+ * 約620秒かかって600秒で切れていた。手元のAIは待っても誰の財布も減らない
+ * ので1800秒まで許し、クラウドは600秒のまま据え置く。
+ *
+ * **手元かどうかは `core/localProviders.ts` の一覧だけで決める**（通信の口の
+ * 分けと同じ一覧。`fetchDispatcherNet.test.ts` が一致を見張る）。
+ */
+describe("待ち時間の上限（手元1800秒・クラウド600秒）", () => {
+  test("手元のAIは1800秒", () => {
+    expect(LOCAL_MAX_TIMEOUT_SECONDS).toBe(1800);
+    expect(maxTimeoutSeconds("ollama")).toBe(1800);
+    expect(maxTimeoutSeconds("lmstudio")).toBe(1800);
+  });
+
+  test("クラウドのAIは600秒のまま", () => {
+    for (const id of ["gemini", "claude", "openai", "sakura", "vscode-lm"]) {
+      expect(maxTimeoutSeconds(id), id).toBe(600);
+    }
+  });
+
+  /** 知らないIDを緩いほう（手元）へ倒さない */
+  test("知らないプロバイダはクラウド扱い", () => {
+    expect(maxTimeoutSeconds("知らないAI")).toBe(MAX_TIMEOUT_SECONDS);
+  });
+
+  test("測定から勧める値も、渡した上限まで伸びる", () => {
+    // 手元のAIで最長500秒かかった測定なら、×3＝1500秒を勧めてよい
+    expect(recommendTimeoutSeconds(500, maxTimeoutSeconds("ollama"))).toBe(1500);
+    expect(recommendTimeoutSeconds(10_000, maxTimeoutSeconds("ollama"))).toBe(1800);
+    // クラウドは600秒止まり（これまでどおり）
+    expect(recommendTimeoutSeconds(500, maxTimeoutSeconds("gemini"))).toBe(600);
+  });
+
+  test("測定中はクラウドも測定用の上限まで上がり、戻せば元へ戻る", () => {
+    expect(timeoutCeilingSeconds("gemini")).toBe(600);
+    expect(timeoutCeilingSeconds("ollama")).toBe(1800);
+    const restore = raiseTimeoutCeilingForProbe();
+    try {
+      expect(timeoutCeilingSeconds("gemini")).toBe(PROBE_MAX_TIMEOUT_SECONDS);
+      // 手元はもともと1800秒。測定で下がることはない
+      expect(timeoutCeilingSeconds("ollama")).toBe(1800);
+    } finally {
+      restore();
+    }
+    expect(timeoutCeilingSeconds("gemini")).toBe(600);
+  });
+
+  /**
+   * MCP の道具（`mcp/tools/ollama.ts`）は `vscode` を読めないので、上限を
+   * 自前の定数で持っている。**製品の手元の上限より短いと、製品では待てる
+   * 長さを MCP では切る**ので、下回っていないことを見張る。
+   */
+  test("MCP の Ollama の待ち時間は、手元の上限を下回らない", () => {
+    expect(MCP_OLLAMA_WAIT_MS).toBeGreaterThanOrEqual(
+      LOCAL_MAX_TIMEOUT_SECONDS * 1000
+    );
   });
 });

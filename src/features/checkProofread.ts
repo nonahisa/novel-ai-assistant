@@ -633,7 +633,8 @@ async function collectChunks(
         "proofread"
       ),
     },
-    outputTuning
+    // 機能名を添えると、待ち時間の上限に収まる大きさにもする（2026-09-23）
+    { ...outputTuning, feature: "proofread" }
   );
   const maxChars = chunkSettings.chunk.chars;
 
