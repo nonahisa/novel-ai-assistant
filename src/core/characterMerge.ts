@@ -8,6 +8,7 @@ import {
 } from "../models/character";
 import { ExtractedCharacter } from "../prompts/characterExtract";
 import { clampSummary } from "./summaryLimit";
+import { createRejectedRelationMatcher } from "./rejectedRelations";
 import { fillReading, toDictionaryReading } from "./reading";
 import { normalizeGender } from "./gender";
 import { isMeaningfulValue } from "./characterExtractionValidation";
@@ -108,6 +109,18 @@ export interface MergeResult {
     characterName: string;
     /** 抽出が書いてきた、敬称の付いた呼び方 */
     incomingName: string;
+  }>;
+  /**
+   * 作者が退けた関係に一致したため、足さなかった関係
+   * （作者の裁定、2026-09-23「退けた関係を記録する」）。
+   *
+   * **黙って捨てない。** 件数と中身を完了報告に出す。同じ退けた記録に
+   * 何話ぶん当たっても1件に数える（関係は抽出が見た最初の書き方）。
+   */
+  skippedRejectedRelations: Array<{
+    characterName: string;
+    name: string;
+    relation: string;
   }>;
   /** 同一人物かもしれない組。自動では統合せず、作者の判断に委ねる */
   mergeCandidates: MergeCandidate[];
@@ -233,6 +246,9 @@ export function mergeExtractedCharacters(
   const conflicts: MergeResult["conflicts"] = [];
   const rejectedDistinct: MergeResult["rejectedDistinct"] = [];
   const honorificMerges: MergeResult["honorificMerges"] = [];
+  const skippedRejectedRelations: MergeResult["skippedRejectedRelations"] = [];
+  /** 報告済みの退けた記録（人物id と記録の位置）。何話ぶん当たっても1件に数える */
+  const reportedRejections = new Set<string>();
   /** 統合先を決められず新規にした組。作者の判断へ回す */
   const ambiguousPairs: Array<{
     names: [string, string];
@@ -326,9 +342,36 @@ export function mergeExtractedCharacters(
       continue;
     }
 
+    // **作者が退けた関係は足さない**（作者の裁定、2026-09-23）。
+    // マージは関係の言葉が違えば両方残すので、ここで止めないと、
+    // 「ターナ=母」に直したところへ誤りの「ターナ=父の娘」がまた積まれる。
+    // 止めたものは完了報告に出す（黙って捨てない）
+    let data = ex;
+    const rejected = match.rejectedRelations ?? [];
+    if (rejected.length > 0 && (ex.relations ?? []).length > 0) {
+      const matches = createRejectedRelationMatcher(result, rejected);
+      const kept: NonNullable<ExtractedCharacter["relations"]> = [];
+      for (const relation of ex.relations ?? []) {
+        const hit = matches(relation.name, relation.relation);
+        if (hit < 0) {
+          kept.push(relation);
+          continue;
+        }
+        const reportKey = `${match.id}\u0000${hit}`;
+        if (reportedRejections.has(reportKey)) continue;
+        reportedRejections.add(reportKey);
+        skippedRejectedRelations.push({
+          characterName: match.name,
+          name: relation.name.trim(),
+          relation: relation.relation.trim(),
+        });
+      }
+      data = { ...ex, relations: kept };
+    }
+
     const changed = applyExtracted(
       match,
-      ex,
+      data,
       item.chapters,
       conflicts,
       otherRecordNames(result, match)
@@ -382,6 +425,7 @@ export function mergeExtractedCharacters(
     heldChanges: newlyHeldChanges(existing, result, changedIds),
     rejectedDistinct,
     honorificMerges,
+    skippedRejectedRelations,
     mergeCandidates: [
       ...ambiguousPairs.map((pair) => ({
         ...pair,

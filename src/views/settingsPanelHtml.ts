@@ -1210,6 +1210,12 @@ button.danger:hover {
         return now !== control.dataset.initial;
       });
       if (saveRow) saveRow.classList.toggle("dirty", dirty);
+      // 退けた記録から外すと詳細を読み直すので、保存前の書き換えが消える。
+      // 書き換えのあるあいだは押させない
+      const forgets = el.detail.querySelectorAll("button.forget-rejected");
+      for (let i = 0; i < forgets.length; i++) {
+        forgets[i].disabled = busy || dirty;
+      }
       if (saveHint) {
         saveHint.textContent = dirty
           ? "変更があります。「保存」を押すまで反映されません。"
@@ -1285,6 +1291,48 @@ button.danger:hover {
         hint.className = "hint";
         hint.textContent = field.hint;
         wrap.appendChild(hint);
+      }
+      /*
+        退けた関係（作者の裁定、2026-09-23）。関係欄の下に並べ、
+        1件ずつ「退けた記録から外す」を押せるようにする。
+        **外すのは記録だけで、関係そのものは戻さない**（戻すなら上の欄に書いて保存）。
+        保存していない書き換えがあると、押したあとの読み直しで消えるので、
+        そのあいだは押せなくする
+      */
+      if (field.rejected && field.rejected.length > 0) {
+        const box = document.createElement("div");
+        box.className = "rejected-relations";
+        const title = document.createElement("p");
+        title.className = "hint";
+        title.textContent =
+          "退けた関係（次の抽出と外部AIの提案は、これと同じ関係を足しません）：";
+        box.appendChild(title);
+        for (const entry of field.rejected) {
+          const row = document.createElement("div");
+          row.className = "row";
+          const text = document.createElement("span");
+          text.className = "sub";
+          text.textContent = entry.target + "=" + entry.relation + "（" + entry.note + "）";
+          row.appendChild(text);
+          const forget = document.createElement("button");
+          forget.type = "button";
+          forget.className = "action secondary forget-rejected";
+          forget.textContent = "退けた記録から外す";
+          forget.disabled = busy;
+          forget.title =
+            "次の抽出や外部AIの提案が、この関係を足してよいことにします（関係そのものは戻しません）";
+          forget.addEventListener("click", function () {
+            post("forgetRejectedRelation", {
+              kind: detail.kind,
+              id: detail.id,
+              target: entry.target,
+              relation: entry.relation,
+            });
+          });
+          row.appendChild(forget);
+          box.appendChild(row);
+        }
+        wrap.appendChild(box);
       }
       el.detail.appendChild(wrap);
     }

@@ -412,6 +412,95 @@ describe("novel.propose——関係（relations）", () => {
   });
 });
 
+/**
+ * 作者が退けた関係（作者の裁定、2026-09-23「退けた関係を記録する」）。
+ *
+ * 作者が消した関係（「ターナ=父の娘」）を、外部AIの提案がもう一度
+ * 持ち込まないこと。**黙って捨てずに**、何を足さなかったかを返す。
+ */
+describe("novel.propose——退けた関係", () => {
+  function giveRecord(folder: string, extra: Record<string, unknown>): void {
+    const file = nodePath.join(folder, "設定", "characters", "char_0001.json");
+    const record = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+    fs.writeFileSync(file, JSON.stringify({ ...record, ...extra }, null, 2), "utf8");
+  }
+
+  const REJECTED = {
+    target: "ターナ",
+    relation: "父の娘",
+    rejectedAt: "2026-09-24T00:00:00.000Z",
+    via: "external",
+  };
+
+  it("退けた関係は足さず、足さなかったものを返す", () => {
+    const folder = workCopy();
+    giveRecord(folder, {
+      relations: [{ name: "ターナ", relation: "母" }],
+      rejectedRelations: [REJECTED],
+    });
+
+    const result = settingsPropose({
+      folder,
+      name: "少年",
+      changes: {
+        relations: [
+          { name: "ターナ", relation: "父の娘" },
+          { name: "リナ", relation: "友人" },
+        ],
+      },
+      reason: "第3話から。",
+    });
+
+    expect(result.skippedRejectedRelations).toEqual([
+      { name: "ターナ", relation: "父の娘" },
+    ]);
+    const character = parseCharacter(
+      unwrapPendingCharacter(readPending(folder, "char_0001.json"))
+    );
+    // 退けた「父の娘」で「母」を差し替えない（ターナの関係はそのまま）
+    expect(character.relations).toEqual([
+      { name: "ターナ", relation: "母" },
+      { name: "リナ", relation: "友人" },
+    ]);
+  });
+
+  it("全角半角や前後の空白が違うだけでも、退けた関係として扱う", () => {
+    const folder = workCopy();
+    giveRecord(folder, {
+      relations: [{ name: "ターナ", relation: "母" }],
+      rejectedRelations: [REJECTED],
+    });
+    const result = settingsPropose({
+      folder,
+      name: "少年",
+      changes: {
+        relations: [{ name: "ﾀｰﾅ ", relation: "父の娘　" }],
+        role: "灯台の当番",
+      },
+      reason: "第3話から。",
+    });
+    expect(result.changedFields).toEqual(["role"]);
+    expect(result.skippedRejectedRelations).toHaveLength(1);
+  });
+
+  it("提案が退けた関係だけなら、置かずに断る（作者が消したものです、と言う）", () => {
+    const folder = workCopy();
+    giveRecord(folder, {
+      relations: [{ name: "ターナ", relation: "母" }],
+      rejectedRelations: [REJECTED],
+    });
+    expect(() =>
+      settingsPropose({
+        folder,
+        name: "少年",
+        changes: { relations: [{ name: "ターナ", relation: "父の娘" }] },
+        reason: "第3話から。",
+      })
+    ).toThrow(/退けた/);
+    expect(fs.existsSync(pendingDir(folder))).toBe(false);
+  });
+});
+
 describe("novel.propose——台帳に無い名前", () => {
   it("creation として new_… に置き、IDは仮のまま", () => {
     const folder = workCopy();

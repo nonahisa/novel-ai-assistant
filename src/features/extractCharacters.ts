@@ -179,6 +179,11 @@ interface ExtractionSummaryCounts {
    * 出さないと、作者からは「何も増えなかった」としか見えない。
    */
   honorificMerges: MergeResult["honorificMerges"];
+  /**
+   * 作者が退けた関係に一致したため、足さなかった関係（作者の裁定、2026-09-23）。
+   * **黙って捨てない**——出さないと、作者は抽出が関係を読み落としたと思う
+   */
+  skippedRejectedRelations: MergeResult["skippedRejectedRelations"];
   failedChunks: number;
   saved: number;
   ambiguous: number;
@@ -993,6 +998,7 @@ export async function extractCharacters(
     heldChanges: merged?.heldChanges.length ?? 0,
     rejectedDistinct: merged?.rejectedDistinct ?? [],
     honorificMerges: merged?.honorificMerges ?? [],
+    skippedRejectedRelations: merged?.skippedRejectedRelations ?? [],
     failedChunks: failures.length,
     saved: 0,
     ambiguous: 0,
@@ -1428,6 +1434,10 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
           counts.honorificMerges.length
         }件（${describeHonorificMerges(counts.honorificMerges)}）`
       : "";
+  // 作者が退けた関係は足さない（2026-09-23）。**黙って捨てたことにしない**
+  const rejectedRelationDetail = describeSkippedRejectedRelations(
+    counts.skippedRejectedRelations
+  );
   // AIの読みをコードで直した分。**黙って書き換えたことにしない**
   const fixDetail = describeValidationFixes(counts.validationFixes);
   return (
@@ -1447,6 +1457,7 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
     candidateDetail +
     distinctDetail +
     honorificDetail +
+    rejectedRelationDetail +
     fixDetail +
     // 根拠が無いので本体を据え置いた変化（作者の裁定、2026-09-23）。
     // **黙って据え置いたことにしない**。0件なら何も足さない
@@ -1666,6 +1677,28 @@ function describeDistinctRejections(
   const rest =
     rejections.length > 3 ? ` ほか${rejections.length - 3}件` : "";
   return shown + rest;
+}
+
+/**
+ * 退けた関係に一致して足さなかった分（作者の裁定、2026-09-23）。0件なら空。
+ *
+ * 中身も3件まで出す——件数だけだと、退けた判断が正しかったのか
+ * （止めてはいけない関係まで止めていないか）を作者が見直せない。
+ * 取り消すのは設定資料パネルの関係欄の下（「退けた記録から外す」）。
+ */
+export function describeSkippedRejectedRelations(
+  skipped: MergeResult["skippedRejectedRelations"]
+): string {
+  if (skipped.length === 0) return "";
+  const shown = skipped
+    .slice(0, 3)
+    .map((entry) => `${entry.characterName} の「${entry.name}=${entry.relation}」`)
+    .join("、");
+  const rest = skipped.length > 3 ? ` ほか${skipped.length - 3}件` : "";
+  return (
+    `\n退けた関係を ${skipped.length}件足しませんでした（${shown}${rest}）。` +
+    "取り消すときは設定資料パネルの関係欄の下から"
+  );
 }
 
 /**

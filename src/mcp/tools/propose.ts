@@ -9,6 +9,7 @@ import {
   buildPendingPayload,
   pendingFileName,
 } from "../../core/pendingUpdateFormat";
+import { withoutRejectedRelations } from "../../core/rejectedRelations";
 import {
   FOLDER_INPUT,
   McpToolError,
@@ -79,7 +80,8 @@ const CHANGES_SCHEMA = z.looseObject({
     .optional()
     .describe(
       "関係（{name: 相手, relation: この人物から見た相手の続柄・立場}）。" +
-        "書いた相手の関係は、いまの記録を置き換えます（ほかの相手の関係は残ります）。関係を消すだけの提案は受け付けません"
+        "書いた相手の関係は、いまの記録を置き換えます（ほかの相手の関係は残ります）。関係を消すだけの提案は受け付けません。" +
+        "作者が退けた関係（人物の rejectedRelations）は足しません"
     ),
 });
 
@@ -133,6 +135,11 @@ export interface SettingsProposeResult {
   name: string;
   /** 実際に書き換えた欄 */
   changedFields: string[];
+  /**
+   * 作者が退けた関係に一致したため、足さなかった関係（2026-09-23）。
+   * **黙って落とさない**——返さないと、呼んだ側は通ったと思い込む
+   */
+  skippedRejectedRelations: Array<{ name: string; relation: string }>;
   /** 作者が次にすること */
   nextStep: string;
   note: string;
@@ -188,7 +195,22 @@ export function settingsPropose(
     : emptyCharacter(PENDING_CREATION_ID, name);
   const kind = existing ? undefined : ("creation" as const);
 
-  const changedFields = applyChanges(base, changes);
+  const skippedRejectedRelations: Array<{ name: string; relation: string }> = [];
+  const changedFields = applyChanges(base, changes, records, skippedRejectedRelations);
+
+  /*
+    **提案が退けた関係だけだったら、置かずに断る。** 置いても承認の画面には
+    何も並ばず（差分が無いので片付けられる）、呼んだ側は「置けた」と思い込む。
+    作者が消した関係であることを、そのまま伝える。
+  */
+  if (changedFields.length === 0 && skippedRejectedRelations.length > 0) {
+    throw new McpToolError(
+      `${skippedRejectedRelations
+        .map((item) => `「${item.name}=${item.relation}」`)
+        .join("、")}は、作者が退けた関係です（消した・言葉を直した記録が残っています）。` +
+        "足さないので、承認待ちへは置きませんでした。どうしても必要なら作者に頼んでください（作者が関係欄に入れ直すと記録から外れます）。"
+    );
+  }
 
   // **製品と同じ検証を通してから書く**（6.87.6 の3）。ここを迂回すると、
   // 作者の承認画面で初めて壊れたJSONが見つかることになる
@@ -235,9 +257,14 @@ export function settingsPropose(
     characterId: validated.id,
     name: validated.name,
     changedFields,
+    skippedRejectedRelations,
     nextStep:
       "VS Code の詳細メニュー「設定資料更新分反映」で採否を決めます。作者が採るまで反映されません。",
-    note: "台帳（設定/characters）は書き換えていません。",
+    note:
+      "台帳（設定/characters）は書き換えていません。" +
+      (skippedRejectedRelations.length > 0
+        ? `作者が退けた関係 ${skippedRejectedRelations.length}件は足していません（skippedRejectedRelations）。`
+        : ""),
   };
 }
 
@@ -281,7 +308,11 @@ function assertAllowedFields(
  */
 function applyChanges(
   target: Character,
-  changes: Partial<Record<AllowedField, unknown>>
+  changes: Partial<Record<AllowedField, unknown>>,
+  /** 台帳の顔ぶれ。退けた関係の相手を、相関図と同じ規則で引き当てるのに使う */
+  characters: readonly Character[],
+  /** 退けた関係に一致して足さなかったものを積む先 */
+  skippedRejected: Array<{ name: string; relation: string }>
 ): string[] {
   const changed: string[] = [];
 
@@ -290,7 +321,9 @@ function applyChanges(
     if (value === undefined) continue;
 
     if (field === "relations") {
-      if (applyRelations(target, value)) changed.push("relations");
+      if (applyRelations(target, value, characters, skippedRejected)) {
+        changed.push("relations");
+      }
       continue;
     }
 
@@ -346,11 +379,21 @@ function applyChanges(
  *   来れば、元の関係は残り、承認の差分に両方が並ぶ
  * - **空の相手・空の関係は断る。** 関係を消すのは作者の操作である
  *
+ * - **作者が退けた関係は足さない**（作者の裁定、2026-09-23）。一致の判定は
+ *   抽出のマージと同じ（`rejectedRelations.ts`）。足さなかったものは
+ *   `skippedRejected` に積んで呼んだ側へ返す。退けた関係では差し替えもしない
+ *   （「ターナ=父の娘」だけが来て、いまの「ターナ=母」が消えることは無い）
+ *
  * 承認の画面は製品の差分（`characterDiff` の葉）なので、消える関係と入る関係が
  * 1つずつ並び、入る側は ✕ で落とせる。マージはここと製品のコードが行い、AIには
  * させない（規則3）。
  */
-function applyRelations(target: Character, value: unknown): boolean {
+function applyRelations(
+  target: Character,
+  value: unknown,
+  characters: readonly Character[],
+  skippedRejected: Array<{ name: string; relation: string }>
+): boolean {
   if (!Array.isArray(value) || value.length === 0) {
     throw new McpToolError(
       "relations は {name, relation} の配列で、1件以上渡してください。"
@@ -377,7 +420,14 @@ function applyRelations(target: Character, value: unknown): boolean {
     proposed.push({ name, relation });
   }
 
-  const targets = new Set(proposed.map((item) => item.name));
+  const { kept: accepted, skipped } = withoutRejectedRelations(
+    proposed,
+    target.rejectedRelations,
+    characters
+  );
+  skippedRejected.push(...skipped);
+
+  const targets = new Set(accepted.map((item) => item.name));
   const next: Array<{ name: string; relation: string }> = [];
   const placed = new Set<string>();
   for (const current of target.relations) {
@@ -389,9 +439,9 @@ function applyRelations(target: Character, value: unknown): boolean {
     // その相手の最初の位置に、提案の関係をまとめて入れる
     if (placed.has(name)) continue;
     placed.add(name);
-    next.push(...proposed.filter((item) => item.name === name));
+    next.push(...accepted.filter((item) => item.name === name));
   }
-  for (const item of proposed) {
+  for (const item of accepted) {
     if (!placed.has(item.name)) next.push(item);
   }
 

@@ -103,6 +103,10 @@ export function unifyCharacters(
       // まとめる操作は2人ぶんの関係を足すので、重複がいちばん出やすい。
       // 名前の揺れ（「ばあさん」「おばあさん」）も1つに寄せる
       relations: dedupeRelations([...keep.relations, ...absorb.relations]),
+      // 退けた関係（2026-09-23）は両方から引き継ぐ。吸収される側の分を落とすと、
+      // その人物で作者が消した関係が、まとめたあとの次の抽出で戻る。
+      // 文字どおり同じ記録だけ畳む（一致の判定で寄せると、記録が勝手に減る）
+      rejectedRelations: unifyRejectedRelations(keep, absorb),
       abilities: dedupeBy(
         [...keep.abilities, ...absorb.abilities],
         (ability) => ability.name
@@ -165,6 +169,26 @@ function dedupeBy<T>(items: T[], key: (item: T) => string): T[] {
     if (seen.has(id)) continue;
     seen.add(id);
     result.push(item);
+  }
+  return result;
+}
+
+/** 退けた関係を2人ぶん合わせる。文字どおり同じ相手・同じ言葉だけ畳む */
+function unifyRejectedRelations(
+  keep: Character,
+  absorb: Character
+): Character["rejectedRelations"] {
+  const result: Character["rejectedRelations"] = [];
+  const seen = new Set<string>();
+  for (const entry of [
+    ...(keep.rejectedRelations ?? []),
+    ...(absorb.rejectedRelations ?? []),
+  ]) {
+    // 区切りにNULを使うのは、名前にも関係にも現れない文字だから（エスケープで書く）
+    const key = `${entry.target}\u0000${entry.relation}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(entry);
   }
   return result;
 }

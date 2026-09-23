@@ -321,6 +321,16 @@ export function applyMappingToRecord<T extends object>(
     if (Array.isArray(source.relations)) {
       next.relations = applyToLinkNames(source.relations, "name", mapping);
     }
+    // 退けた関係の相手も同じく付け替える（2026-09-23）。旧名のまま残ると、
+    // 資料に居なくなった旧名は名前そのものでしか比べられず、新しい名前で
+    // 届いた同じ関係を止め損ねる
+    if (Array.isArray(source.rejectedRelations)) {
+      next.rejectedRelations = applyToLinkNames(
+        source.rejectedRelations,
+        "target",
+        mapping
+      );
+    }
     if (Array.isArray(source.addressTerms)) {
       next.addressTerms = applyToLinkNames(
         source.addressTerms,

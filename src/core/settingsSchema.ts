@@ -198,6 +198,28 @@ export function characterSchema(): Record<string, unknown> {
         "authorLocked: true の項目は変更しないこと",
     },
     relations: { type: "array" },
+    // 作者が退けた関係（2026-09-23）。外部のAIにも見せる——見せないと、
+    // 作者が消した関係をAIが足し戻しても、なぜいけないのかが読み取れない
+    rejectedRelations: {
+      type: "array",
+      description:
+        "**作者が退けた（消した）関係。** " +
+        "ここに挙がっている相手と関係を relations に足さないこと。" +
+        "**この記録そのものを書き換えない・消さないこと**（消すと退けた関係が次の抽出で戻る）",
+      items: {
+        type: "object",
+        properties: {
+          target: { type: "string", minLength: 1 },
+          relation: { type: "string", minLength: 1 },
+          rejectedAt: { type: "string" },
+          via: {
+            type: "string",
+            enum: ["panel", "extraction", "external", "plot", "chat"],
+          },
+        },
+        required: ["target", "relation"],
+      },
+    },
     // 作者が「別人だ」と決めた組（設計書6.5.8）。
     // 外部のAIが手を入れる資料にも載せる——載せないと、AIが別名を
     // 足し戻したときに「なぜ足してはいけなかったか」が読み取れない
