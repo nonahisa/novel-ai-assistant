@@ -24,6 +24,12 @@ import {
 } from "../core/printHtml";
 import { notationModeFor } from "../core/manuscriptRender";
 import { BookStore } from "../core/bookStore";
+import {
+  buildGridPrintHtml,
+  GRID_HEADER_FOOTER,
+  type GridPaper,
+} from "../core/printGridHtml";
+import { layoutGrid, type GridOptions } from "../core/manuscriptGrid";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { revealFolder } from "../views/openDocument";
 import { openInDefaultApp } from "../core/openExternalFile";
@@ -65,12 +71,14 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
   const selected = await pickEpisodes(scan.episodes, unit.noun, format);
   if (!selected || selected.length === 0) return;
 
-  const preset = await pickPreset();
-  if (!preset) return;
+  const paper = await pickPaper();
+  if (!paper) return;
 
   // 上下の余白に刷るもの（設計書6.33.5 の2）。**書き出すときに選ぶだけで、
   // どこにも保存しない**——紙の大きさと同じ持ち方にそろえた
-  const headerFooter = await pickHeaderFooter(preset);
+  const headerFooter = await pickHeaderFooter(
+    paper.kind === "grid" ? GRID_HEADER_FOOTER : printPreset(paper.preset).headerFooter
+  );
   if (!headerFooter) return;
   let author: string | undefined;
   if (headerFooter.top === "author" || headerFooter.bottom === "author") {
@@ -140,17 +148,37 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
     return;
   }
 
-  const html = buildPrintHtml({
-    workTitle: work.title,
-    episodes: chapters,
-    preset,
-    // **種類で組み方が変わる**（設計書6.70・6.109。台本は柱・ト書き・台詞）。
-    // 上で読んだものをそのまま渡す——ここで読み直すと、選んでいる間に
-    // 設定が書き換わったときに、見出しと組み方で別の種類を指す
-    kind,
-    headerFooter,
-    author,
-  });
+  // 公募の納品用（設計書6.33.5 の3）は1字1マスで組む。**種類ごとの組み方
+  // （台本の柱・ト書きの字下げなど）は当てない**——字下げや寄せを入れると
+  // 1行の字数が指定からずれる。公募の原稿は本文をそのまま升目に置く
+  const html =
+    paper.kind === "grid"
+      ? buildGridPrintHtml({
+          workTitle: work.title,
+          episodes: chapters,
+          paper: paper.paper,
+          grid: paper.grid,
+          headerFooter,
+          author,
+        })
+      : buildPrintHtml({
+          workTitle: work.title,
+          episodes: chapters,
+          preset: paper.preset,
+          // **種類で組み方が変わる**（設計書6.70・6.109。台本は柱・ト書き・台詞）。
+          // 上で読んだものをそのまま渡す——ここで読み直すと、選んでいる間に
+          // 設定が書き換わったときに、見出しと組み方で別の種類を指す
+          kind,
+          headerFooter,
+          author,
+        });
+  // 公募の規定は枚数で決まることが多い。刷る前に枚数が分かるよう知らせる
+  const gridNote =
+    paper.kind === "grid"
+      ? `\n${paper.grid.columns}字×${paper.grid.rows}行で本文${
+          layoutGrid(chapters, paper.grid).length
+        }枚（扉を除く）です。`
+      : "";
 
   let target: string;
   try {
@@ -170,6 +198,7 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
   const opened = await openInDefaultApp(target);
 
   const droppedNote =
+    gridNote +
     (conflicted.length > 0
       ? `\n未解決の競合を含む${conflicted.length}件は外しました（${conflicted.join(
           "、"
@@ -255,7 +284,12 @@ async function pickEpisodes(
   return picked?.map((item) => item.episode);
 }
 
-async function pickPreset(): Promise<PrintPreset | undefined> {
+/** 紙の選び方。ふつうの紙（流し込み）か、公募の納品用（1字1マス） */
+type PaperChoice =
+  | { kind: "preset"; preset: PrintPreset }
+  | { kind: "grid"; paper: GridPaper; grid: GridOptions };
+
+async function pickPaper(): Promise<PaperChoice | undefined> {
   const picked = await vscode.window.showQuickPick(
     [
       ...PRINT_PRESETS.map((preset) => ({
@@ -263,6 +297,12 @@ async function pickPreset(): Promise<PrintPreset | undefined> {
         detail: preset.detail,
         id: preset.id,
       })),
+      // 公募の納品用（設計書6.33.5 の3）。字数・行数・向きは次の画面で決める
+      {
+        label: "公募の納品用（字数×行数を決める）",
+        detail: "1ページの字数と行数を決めて、1字1マスで組みます。句読点・括弧の禁則処理つき",
+        manuscript: true as const,
+      },
       cancelItem(),
     ],
     {
@@ -270,8 +310,128 @@ async function pickPreset(): Promise<PrintPreset | undefined> {
       ignoreFocusOut: true,
     }
   );
-  if (!picked || isCancelItem(picked) || !("id" in picked)) return undefined;
-  return picked.id;
+  if (!picked || isCancelItem(picked)) return undefined;
+  if ("id" in picked) return { kind: "preset", preset: picked.id };
+  if (!("manuscript" in picked)) return undefined;
+  return pickGrid();
+}
+
+/**
+ * 公募の納品用の組み方を決める：字数×行数 → 向きと紙 → ぶら下げ。
+ *
+ * **よくある字数×行数を先に並べる。** 募集要項に「40字×40行」とあれば
+ * 1回で選べる。要項ごとに違う（42字×34行など）ので、自分で決める道も置く。
+ */
+async function pickGrid(): Promise<PaperChoice | undefined> {
+  const size = await vscode.window.showQuickPick(
+    [
+      { label: "40字×40行", detail: "A4に縦書きで組む公募でよく使われます", columns: 40, rows: 40 },
+      { label: "40字×30行", detail: "行間を広めにとる公募で使われます", columns: 40, rows: 30 },
+      {
+        label: "20字×20行（原稿用紙）",
+        detail: "400字詰め原稿用紙と同じ。原稿用紙の枚数で数える公募に",
+        columns: 20,
+        rows: 20,
+      },
+      {
+        label: "字数と行数を自分で決める",
+        detail: "募集要項の指定（42字×34行など）に合わせます",
+        custom: true as const,
+      },
+      cancelItem(),
+    ],
+    { title: "1ページの字数と行数を選んでください（募集要項の指定に合わせます）", ignoreFocusOut: true }
+  );
+  if (!size || isCancelItem(size)) return undefined;
+  let columns: number;
+  let rows: number;
+  if ("columns" in size && size.columns !== undefined && size.rows !== undefined) {
+    columns = size.columns;
+    rows = size.rows;
+  } else {
+    const typedColumns = await askGridNumber("1行の字数", "40");
+    if (typedColumns === undefined) return undefined;
+    const typedRows = await askGridNumber("1ページの行数", "40");
+    if (typedRows === undefined) return undefined;
+    columns = typedColumns;
+    rows = typedRows;
+  }
+
+  const layout = await vscode.window.showQuickPick(
+    [
+      {
+        label: "縦書き・A4横置き",
+        detail: "用紙を横長に使い、右から左へ行が進みます。縦書きの公募で多い形です",
+        paper: "a4-landscape" as const,
+        vertical: true,
+      },
+      {
+        label: "縦書き・A4縦置き",
+        detail: "用紙を縦長に使います。行が多いと字が小さくなります",
+        paper: "a4-portrait" as const,
+        vertical: true,
+      },
+      {
+        label: "横書き・A4縦置き",
+        detail: "横書きの公募に。半角の英数字は2字で1マスに入れます",
+        paper: "a4-portrait" as const,
+        vertical: false,
+      },
+      cancelItem(),
+    ],
+    { title: "向きと用紙を選んでください", ignoreFocusOut: true }
+  );
+  if (!layout || isCancelItem(layout) || !("paper" in layout)) return undefined;
+
+  const hang = await vscode.window.showQuickPick(
+    [
+      {
+        label: "句読点をぶら下げる",
+        detail: "行末からはみ出す「。」「、」を、行の外（余白）に書きます。原稿用紙の書き方です",
+        hanging: true,
+      },
+      {
+        label: "句読点をぶら下げない",
+        detail: "「。」「、」が行の頭に来るときは、前の字ごと次の行へ送ります",
+        hanging: false,
+      },
+      cancelItem(),
+    ],
+    { title: "行末の句読点の扱いを選んでください", ignoreFocusOut: true }
+  );
+  if (!hang || isCancelItem(hang) || !("hanging" in hang)) return undefined;
+
+  return {
+    kind: "grid",
+    paper: layout.paper,
+    grid: { columns, rows, hanging: hang.hanging, vertical: layout.vertical },
+  };
+}
+
+/** 自分で決める字数・行数の幅。小さすぎても大きすぎても、紙として読めない */
+const GRID_MIN = 5;
+const GRID_MAX = 60;
+
+async function askGridNumber(
+  what: string,
+  example: string
+): Promise<number | undefined> {
+  const typed = await askText({
+    title: what,
+    prompt: `${what}を数字で入れてください（${GRID_MIN}〜${GRID_MAX}）`,
+    placeHolder: `例：${example}`,
+    validateInput: (value) => {
+      const trimmed = value.trim();
+      if (!/^\d+$/.test(trimmed)) return "半角の数字で入れてください";
+      const number = Number(trimmed);
+      if (number < GRID_MIN || number > GRID_MAX) {
+        return `${GRID_MIN}から${GRID_MAX}までの数にしてください`;
+      }
+      return undefined;
+    },
+  });
+  if (typed === undefined) return undefined;
+  return Number(typed.trim());
 }
 
 /**
@@ -285,9 +445,8 @@ async function pickPreset(): Promise<PrintPreset | undefined> {
  * 外すもの——と項目の説明で言い分ける。
  */
 async function pickHeaderFooter(
-  preset: PrintPreset
+  defaults: HeaderFooter
 ): Promise<HeaderFooter | undefined> {
-  const defaults = printPreset(preset).headerFooter;
   const picked = await vscode.window.showQuickPick(
     [
       {

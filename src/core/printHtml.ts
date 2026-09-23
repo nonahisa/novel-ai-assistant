@@ -244,10 +244,18 @@ export function buildPrintHtml(input: PrintHtmlInput): string {
  */
 function buildGuide(preset: PrintPresetInfo, margins: HeaderFooter): string {
   const [width, height] = paperSize(preset);
+  return buildPrintGuide(`${escapeHtml(preset.label)}（${width} × ${height}）`, margins);
+}
+
+/**
+ * 案内帯の本体。`paper` は紙の説明（**逃がし済みの**HTML）。
+ * 公募の納品用の組版（`printGridHtml.ts`）も同じ帯を出す。
+ */
+export function buildPrintGuide(paper: string, margins: HeaderFooter): string {
   return [
     '<div class="print-guide">',
     `<p class="print-guide-lead">この画面の白い面が、そのまま紙1枚ずつになります（<span id="print-page-count">面に分けています…</span>）。` +
-      `紙：${escapeHtml(preset.label)}（${width} × ${height}）。` +
+      `紙：${paper}。` +
       `上の余白：${marginContentLabel(margins.top)}／下の余白：${marginContentLabel(margins.bottom)}</p>`,
     "<p>Ctrl+P で印刷の画面を開き、送信先を「PDF に保存」にしてください。" +
       "「詳細設定」の「ヘッダーとフッター」のチェックを外してください（入れたままだと、日付とファイルの場所が紙の端に刷られます）。" +
@@ -270,6 +278,10 @@ function paperSize(preset: PrintPresetInfo): [string, string] {
  * 変わらないようにするため。
  */
 const PAGE_MARGIN = "15mm";
+
+/** 紙の書体。明朝を先に置く（公募の納品用の組版も同じ） */
+export const PRINT_FONT_FAMILY =
+  '"Yu Mincho", "游明朝", "Hiragino Mincho ProN", "MS Mincho", serif';
 
 /** 1話ぶん。**話ごとに改ページする**（本の体裁に合わせる） */
 function renderEpisode(
@@ -390,7 +402,7 @@ function buildStyle(
     "html, body { margin: 0; padding: 0; }",
     "body {",
     // 明朝を先に置く。ゴシックで組んだ小説は、紙にすると読み疲れる
-    '  font-family: "Yu Mincho", "游明朝", "Hiragino Mincho ProN", "MS Mincho", serif;',
+    `  font-family: ${PRINT_FONT_FAMILY};`,
     `  font-size: ${preset.fontSize};`,
     // ルビが親文字にぶつからない程度に空ける
     "  line-height: 1.8;",
@@ -420,11 +432,24 @@ function buildStyle(
     // 傍点は圏点（ゴマ点）で出す。位置の指定は既定のまま
     // （縦書きなら右、横書きなら上へ、ブラウザが振り分ける）
     ".emphasis { text-emphasis: filled sesame; -webkit-text-emphasis: filled sesame; }",
-    /*
-      紙1枚ずつの面（設計書6.33.5 の1）。**紙と同じ寸法の箱**で、余白の内側に
-      本文の箱を置く。印刷のときは `@page` の余白が0になり、箱1つが紙1枚に
-      刷られる。箱の外へははみ出させない（はみ出したら次の面へ送ってある）
-    */
+    ...pageSheetCss(width, height, margin),
+  ].join("\n");
+}
+
+/**
+ * 紙1枚ずつの面と、画面・印刷の見せ方の指定（設計書6.33.5 の1）。
+ * 公募の納品用の組版（`printGridHtml.ts`）も同じものを使う。
+ *
+ * 面は**紙と同じ寸法の箱**で、余白の内側に本文の箱を置く。印刷のときは
+ * `@page` の余白が0になり、箱1つが紙1枚に刷られる。箱の外へははみ出させない
+ * （はみ出したら次の面へ送ってある）。
+ */
+export function pageSheetCss(
+  width: string,
+  height: string,
+  margin: string
+): string[] {
+  return [
     `.page { position: relative; box-sizing: border-box; width: ${width}; height: ${height}; overflow: hidden; background: #fff; break-after: page; page-break-after: always; }`,
     ".page:last-child { break-after: auto; page-break-after: auto; }",
     `.page-body { position: absolute; top: ${margin}; right: ${margin}; bottom: ${margin}; left: ${margin}; overflow: hidden; }`,
@@ -451,5 +476,5 @@ function buildStyle(
     "  .print-guide { display: none; }",
     "  body { background: #fff; }",
     "}",
-  ].join("\n");
+  ];
 }

@@ -107,6 +107,15 @@ describe("スクリプトの形", () => {
     expect(decorateAt).toBeGreaterThan(paginateAt);
   });
 
+  test("公募の納品用（面を組んで渡す）では割り直さず、余白を埋めて数えるだけ", () => {
+    expect(PRINT_PAGINATE_SCRIPT).toContain("var grid = body.getAttribute('data-grid') === '1';");
+    expect(PRINT_PAGINATE_SCRIPT).toContain("if (!grid) paginate();");
+    // 失敗しても、組んで渡された面は消さない
+    expect(PRINT_PAGINATE_SCRIPT).toContain(
+      "if (!grid) { while (root.firstChild) root.removeChild(root.firstChild); }"
+    );
+  });
+
   test("上下の余白は文字として入れる（札として読ませない）", () => {
     // 題名や作者名に < があっても、紙に文字として出る
     expect(PRINT_PAGINATE_SCRIPT).toContain("head.textContent = marginText(");

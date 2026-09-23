@@ -92,7 +92,10 @@ export const PRINT_PAGINATE_SCRIPT = [
   "var body = doc.body;",
   "var source = doc.getElementById('print-source');",
   "var root = doc.getElementById('print-pages');",
-  "if (!source || !root) return;",
+  // 公募の納品用の組版（設計書6.33.5 の3）は、面をこちら（コード）で組んで
+  // 渡してある。割り直さず、上下の余白を埋めて数えるだけにする
+  "var grid = body.getAttribute('data-grid') === '1';",
+  "if (!root || (!source && !grid)) return;",
   "var vertical = body.getAttribute('data-vertical') === '1';",
   "",
   "function overflows(box) {",
@@ -216,6 +219,9 @@ export const PRINT_PAGINATE_SCRIPT = [
   "      place(block, state);",
   "    });",
   "  });",
+  "}",
+  "",
+  "function countPages() {",
   "  var pages = root.querySelectorAll('.page');",
   "  var count = doc.getElementById('print-page-count');",
   "  if (count) count.textContent = '全' + pages.length + 'ページ（扉を含む）';",
@@ -243,10 +249,11 @@ export const PRINT_PAGINATE_SCRIPT = [
   "}",
   "",
   "function run() {",
-  "  body.classList.add('paginating');",
+  "  if (!grid) body.classList.add('paginating');",
   "  try {",
-  "    paginate();",
+  "    if (!grid) paginate();",
   "    decorate();",
+  "    countPages();",
   // 面が出来てから、印刷の余白を0にする（面の中に余白を持っている）。
   // 失敗したときは付けない——流し込みの紙に余白が無くなる
   "    var style = doc.createElement('style');",
@@ -254,7 +261,8 @@ export const PRINT_PAGINATE_SCRIPT = [
   "    doc.head.appendChild(style);",
   "    body.classList.add('paginated');",
   "  } catch (error) {",
-  "    while (root.firstChild) root.removeChild(root.firstChild);",
+  // 組んで渡された面（公募の納品用）は消さない。消すと何も残らない
+  "    if (!grid) { while (root.firstChild) root.removeChild(root.firstChild); }",
   "    var failed = doc.getElementById('print-page-count');",
   "    if (failed) failed.textContent = '面に分けられなかったため、続けて並べています';",
   "    if (window.console) console.error(error);",

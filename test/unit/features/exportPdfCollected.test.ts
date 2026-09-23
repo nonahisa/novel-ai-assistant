@@ -400,6 +400,113 @@ describe("上下の余白に刷るものを選ぶ", () => {
 });
 
 /**
+ * 公募の納品用の組版を選ぶ（設計書6.33.5 の3、0.84.2）。
+ *
+ * 紙の選択の並びに「公募の納品用」を足し、字数×行数・向きと紙・
+ * ぶら下げの有無を順に選ぶ。**選んだ字数と行数がそのまま紙になる**
+ * （組版は `manuscriptGrid.ts`）。
+ */
+describe("公募の納品用で書き出す", () => {
+  const shownTitles: string[] = [];
+  const inputs: Array<{ validateInput?: (value: string) => unknown }> = [];
+
+  /** 紙の選択で公募を選び、あとは `answers` の順に項目の形で答える */
+  function chooseManuscript(
+    answers: Array<(item: Record<string, unknown>) => boolean>,
+    typed: string[] = []
+  ): void {
+    const queue = [...answers];
+    (window as unknown as Record<string, unknown>).showQuickPick = async (
+      items: Array<Record<string, unknown>>,
+      options?: { title?: string }
+    ) => {
+      shownTitles.push(options?.title ?? "");
+      const all = items.find((item) => item.all === true);
+      if (all) return all;
+      const manuscript = items.find((item) => item.manuscript === true);
+      if (manuscript) return manuscript;
+      const keep = items.find((item) => item.margins === "default");
+      if (keep) return keep;
+      const answer = queue.shift();
+      return answer ? items.find(answer) : undefined;
+    };
+    (window as unknown as Record<string, unknown>).showInputBox = async (options?: {
+      validateInput?: (value: string) => unknown;
+    }) => {
+      inputs.push(options ?? {});
+      return typed.shift();
+    };
+  }
+
+  beforeEach(() => {
+    shownTitles.length = 0;
+    inputs.length = 0;
+    put("本文/第1話 出会い.txt", "　朝が来た。\n\n　鐘が鳴る。");
+  });
+
+  test("40字×40行・縦書き・A4横置き・ぶら下げありで組む", async () => {
+    chooseManuscript([
+      (item) => item.columns === 40 && item.rows === 40,
+      (item) => item.paper === "a4-landscape" && item.vertical === true,
+      (item) => item.hanging === true,
+    ]);
+    await exportPdf(work);
+    const html = exportedHtml();
+
+    expect(html).toContain('data-grid="1"');
+    expect(html).toContain("@page { size: 297mm 210mm; margin: 0; }");
+    expect(html).toContain("公募の納品用・縦書き・40字×40行・句読点のぶら下げあり");
+    // 公募の上下の既定：上はなし、下はページ番号（名前を出さない公募があるため）
+    expect(html).toContain('data-head="none" data-foot="page"');
+  });
+
+  test("書き出したあとの知らせに、字数×行数と本文の枚数を出す", async () => {
+    chooseManuscript([
+      (item) => item.columns === 20 && item.rows === 20,
+      (item) => item.paper === "a4-portrait" && item.vertical === false,
+      (item) => item.hanging === false,
+    ]);
+    await exportPdf(work);
+
+    expect(shown.some((message) => message.includes("20字×20行で本文1枚"))).toBe(true);
+  });
+
+  test("字数と行数を自分で決められる。数でないもの・範囲の外は断る", async () => {
+    chooseManuscript(
+      [
+        (item) => item.custom === true,
+        (item) => item.paper === "a4-landscape",
+        (item) => item.hanging === true,
+      ],
+      ["42", "34"]
+    );
+    await exportPdf(work);
+
+    expect(exportedHtml()).toContain("42字×34行");
+    const validate = inputs[0]?.validateInput;
+    expect(validate?.("abc")).toBeTruthy();
+    expect(validate?.("3")).toBeTruthy();
+    expect(validate?.("61")).toBeTruthy();
+    expect(validate?.("40")).toBeFalsy();
+    expect(validate?.(" 20 ")).toBeFalsy();
+  });
+
+  test("字数×行数の選択で取りやめたら、書き出さない", async () => {
+    chooseManuscript([(item) => item.__cancel === true]);
+    await exportPdf(work);
+
+    expect([...disk.keys()].some((name) => name.endsWith(".html"))).toBe(false);
+  });
+
+  test("ふつうの紙を選んだときは、これまでどおり流し込みの組版", async () => {
+    await exportPdf(work);
+
+    expect(exportedHtml()).not.toContain('data-grid="1"');
+    expect(exportedHtml()).toContain('id="print-source"');
+  });
+});
+
+/**
  * **単話ファイルだけの作品の紙は、1バイトも変わらない**（回帰の固定）。
  *
  * 合本を割る道を足したせいで、いままで出ていた紙が変わっては困る。
@@ -553,6 +660,8 @@ describe(".mdと.txtが混ざっても両方組まれる（実機確認リスト
  *   流し込みの本文にだけ当てるようにした
  * - 0.84.1（2026-09-24）：上下の余白に刷るもの（ヘッダー・フッター）を足した
  *   （設計書6.33.5 の2）。body に選んだ中身と材料が付き、案内帯に何が刷られるかが出る
+ * - 0.84.2（2026-09-24）：埋め込むスクリプトに、公募の納品用（面を組んで渡す）の
+ *   ときは割り直さない分かれ道が加わった（設計書6.33.5 の3）。組み方そのものは変わらない
  */
 const GOLDEN =
-  "f038e058d76a0525f567ca6099232423936cd49dd35c76fca50822b1654e8a66";
+  "22fb34f3f6c832681f90c3c5682e116f283145b696a41a63958c6d52a631beb8";
