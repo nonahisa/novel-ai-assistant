@@ -21,11 +21,7 @@ import {
   MemoFileNode,
   type TreeNode,
 } from "./views/workTree";
-import {
-  countChars,
-  formatCount,
-  toManuscriptPages,
-} from "./core/charCount";
+import { formatCount } from "./core/charCount";
 import {
   nextChapterNumber,
   nextDatedName,
@@ -77,6 +73,7 @@ import {
 } from "./features/generateAnnouncement";
 import {
   findOpenSettingsPanel,
+  hasOpenSettingsPanel,
   openSettingsPanel,
   setRelationGraphOpener,
   setSettingsChangeObserver,
@@ -151,14 +148,7 @@ import {
   tryRegisterAsCollection,
   type CollectionOptions,
 } from "./features/addCollection";
-import {
-  currentCountMode,
-  countModeLabel,
-  excludeRubyFromCount,
-  pickCount,
-  needsRedraw,
-  needsRescan,
-} from "./core/countSettings";
+import { needsRedraw, needsRescan } from "./core/countSettings";
 import { abbreviateTitle, isAbbreviated } from "./core/abbreviateTitle";
 // 以下6つはgit・外部プロセス起動が要る。動的importする（設計書5.8.5）
 // shareWithEditor, collectEditorProposals ← ./features/shareWithEditor
@@ -168,6 +158,11 @@ import { abbreviateTitle, isAbbreviated } from "./core/abbreviateTitle";
 // setupVectorSearch ← ./features/setupVectorSearch
 // runFullSetup ← ./features/setupWizard
 import { showVersion } from "./features/showVersion";
+import {
+  CharCountStatusBar,
+  STATUS_BAR_TYPING_PAUSE_MS,
+} from "./features/charCountStatusBar";
+import { TypingPause } from "./core/typingPause";
 import { chatLogPath, isChatLogEnabled } from "./core/chatLog";
 import {
   buildVectorIndex,
@@ -301,7 +296,6 @@ import { PROPOSALS_VIEW_ID, ProposalPanel } from "./features/proposalPanel";
 import {
   WritingProgressTracker,
   boundaryHour,
-  describeStatusBarProgress,
 } from "./features/writingProgress";
 import {
   openWritingStatsPanel,
@@ -1241,21 +1235,47 @@ export async function activate(
 
   // 本文で用語をクリックしたら、右側の資料をその項目へ切り替える。
   // 資料を開いていないときは何もしない（勝手に画面が割れると邪魔になる）
+  //
+  // **打鍵でもカーソルは動く**（作者の報告、2026-09-23「変換時に入力が飛ぶ」）。
+  // 資料パネルが1つも無ければ、何も探さずに帰る。開いていても、クリック
+  // 以外（打鍵・矢印キー）で動いたときは、打鍵が止まってから1回だけ追従させる
+  // ——変換中の1打ごとに資料パネルを描き直させない
+  const followTerm = async (
+    editor: vscode.TextEditor,
+    active: vscode.Position
+  ): Promise<void> => {
+    if (!hasOpenSettingsPanel()) return;
+    const found = await highlighter.termAt(editor.document, active);
+    if (!found) return;
+    const panel = findOpenSettingsPanel(found.work.id);
+    if (!panel) return;
+    // **本文から開いたのだから、その話に出る人どうしに絞る**（設計書6.92）
+    panel.setChapterContext(chapterOfPath(fromUri(editor.document.uri)));
+    await panel.showRecord(found.entry.kind, found.entry.id);
+  };
+  let pendingFollow:
+    | { editor: vscode.TextEditor; active: vscode.Position }
+    | undefined;
+  const followAfterTyping = new TypingPause(() => {
+    const target = pendingFollow;
+    pendingFollow = undefined;
+    if (target) void followTerm(target.editor, target.active);
+  });
   context.subscriptions.push(
-    vscode.window.onDidChangeTextEditorSelection(async (event) => {
-      const panels = registry.list().map((work) => work.id);
-      if (panels.length === 0) return;
-
-      const found = await highlighter.termAt(
-        event.textEditor.document,
-        event.selections[0].active
-      );
-      if (!found) return;
-      const panel = findOpenSettingsPanel(found.work.id);
-      if (!panel) return;
-      // **本文から開いたのだから、その話に出る人どうしに絞る**（設計書6.92）
-      panel.setChapterContext(chapterOfPath(fromUri(event.textEditor.document.uri)));
-      await panel.showRecord(found.entry.kind, found.entry.id);
+    followAfterTyping,
+    vscode.window.onDidChangeTextEditorSelection((event) => {
+      if (!hasOpenSettingsPanel()) return;
+      const active = event.selections[0].active;
+      if (event.kind === vscode.TextEditorSelectionChangeKind.Mouse) {
+        followAfterTyping.cancel();
+        pendingFollow = undefined;
+        void followTerm(event.textEditor, active);
+        return;
+      }
+      pendingFollow = { editor: event.textEditor, active };
+      // 待ち時間はステータスバーの字数とそろえる（どちらも「打ち終えてから
+      // 追いつく」もので、別々の間合いにする理由が無い）
+      followAfterTyping.typed(STATUS_BAR_TYPING_PAUSE_MS);
     })
   );
 
@@ -2288,109 +2308,17 @@ export async function activate(
   })().catch(() => undefined);
 
   // ─── ステータスバー（現在開いているファイルの文字数） ───
-  const statusBar = vscode.window.createStatusBarItem(
-    vscode.StatusBarAlignment.Right,
-    100
-  );
-  statusBar.tooltip = "小説AI執筆補助: 現在のファイルの文字数";
-  context.subscriptions.push(statusBar);
-
-  /**
-   * 表示を作り直した回数。
-   *
-   * 今日の執筆量は記録を読んでから添えるため、書いている最中に
-   * 何度も呼ばれると古い結果が新しい表示を上書きしうる。
-   * 自分より新しい呼び出しがあれば、その結果は捨てる。
-   */
-  let statusBarGeneration = 0;
-
-  const updateStatusBar = () => {
-    const generation = ++statusBarGeneration;
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-      statusBar.hide();
-      return;
-    }
-    const ext = path.extname(editor.document.fileName).toLowerCase();
-    if (!(SUPPORTED_EXTENSIONS as readonly string[]).includes(ext)) {
-      statusBar.hide();
-      return;
-    }
-
-    // 作品一覧と同じ部品を使う。別々に読むと、片方だけ直したときにずれる
-    const mode = currentCountMode();
-    const excludeRuby = excludeRubyFromCount();
-
-    const counts = countChars(
-      editor.document.getText(),
-      ext === ".md" ? excludeRuby : false
-    );
-    const value = pickCount(counts, mode);
-    const label = countModeLabel(mode);
-
-    // 選択範囲があればその文字数も出す
-    const sel = editor.selection;
-    let selectionPart = "";
-    if (!sel.isEmpty) {
-      const selCounts = countChars(
-        editor.document.getText(sel),
-        ext === ".md" ? excludeRuby : false
-      );
-      const selValue = pickCount(selCounts, mode);
-      selectionPart = ` (選択 ${formatCount(selValue)})`;
-    }
-
-    const fileText = `$(book) ${label}${formatCount(value)}字${selectionPart}`;
-    const fileTooltip = [
-      `**${path.basename(editor.document.fileName)}**`,
-      "",
-      `- 純文字数: ${formatCount(counts.net)} 字`,
-      `- 総文字数: ${formatCount(counts.gross)} 字`,
-      `- 段落数: ${counts.paragraphs}`,
-      `- 原稿用紙換算: 約 ${formatCount(toManuscriptPages(counts.manuscriptLines))} 枚`,
-    ];
-    statusBar.text = fileText;
-    statusBar.tooltip = new vscode.MarkdownString(fileTooltip.join("\n"));
-    statusBar.show();
-
-    // 今日どれだけ進んだかは、開いているファイルの字数だけでは分からない。
-    // 記録が読めたときにだけ添える（統計を切っていれば何も出ない）
-    const showProgress = vscode.workspace
-      .getConfiguration("novelai")
-      .get<boolean>("stats.showInStatusBar", true);
-    const work = showProgress
-      ? findWorkForPath(registry, fromUri(editor.document.uri))
-      : undefined;
-    if (!work) return;
-
-    void progress.summary(work).then((summary) => {
-      if (!summary || generation !== statusBarGeneration) return;
-      statusBar.text = `${fileText}  ${describeStatusBarProgress(summary)}`;
-      statusBar.tooltip = new vscode.MarkdownString(
-        [
-          ...fileTooltip,
-          "",
-          `**${work.title}**`,
-          "",
-          `- 今日: ${formatCount(summary.todayProgress.written)} 字${
-            summary.todayProgress.goal > 0
-              ? `（目標 ${formatCount(summary.todayProgress.goal)} 字 / 達成率 ${
-                  summary.todayProgress.rate
-                }%）`
-              : ""
-          }`,
-          `- 今月: ${formatCount(summary.monthProgress.written)} 字（${
-            summary.monthActiveDays
-          }日）`,
-          `- 連続: ${summary.streak} 日`,
-        ].join("\n")
-      );
-    });
-  };
+  // **打鍵が止まってから数える**（作者の報告、2026-09-23「変換時に入力が飛ぶ」）。
+  // 打鍵・カーソル移動の知らせは向こうで受ける。ここから呼ぶのは、保存や設定の
+  // 変更のような打鍵でない知らせだけで、それはすぐ数え直す
+  const charCountBar = new CharCountStatusBar({
+    findWork: (filePath) => findWorkForPath(registry, filePath),
+    summary: (work) => progress.summary(work),
+  });
+  context.subscriptions.push(charCountBar);
+  const updateStatusBar = (): void => charCountBar.refreshNow();
 
   context.subscriptions.push(
-    vscode.window.onDidChangeActiveTextEditor(updateStatusBar),
-    vscode.window.onDidChangeTextEditorSelection(updateStatusBar),
     // **数え方の設定を変えたら、その場で反映する。** これまで受け口が
     // 無く、ファイルを開き直すまで古い数字のままだった（2026-08-21）
     vscode.workspace.onDidChangeConfiguration((event) => {
@@ -2402,11 +2330,6 @@ export async function activate(
         treeProvider.refresh();
       } else {
         treeProvider.redraw();
-      }
-    }),
-    vscode.workspace.onDidChangeTextDocument((e) => {
-      if (e.document === vscode.window.activeTextEditor?.document) {
-        updateStatusBar();
       }
     }),
     vscode.workspace.onDidSaveTextDocument((document) => {
