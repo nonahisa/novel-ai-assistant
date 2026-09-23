@@ -44,7 +44,7 @@ import {
 } from "./findingRecorder";
 // **判断のあと、シーンメモの横の一覧にも効かせる**（設計書6.96.5）。
 // あちらは本文の保存でしか読み直さないので、知らせないと片方だけ残る
-import { refreshSceneMemoFindings } from "./sceneMemoPanel";
+import { refreshSceneMemoFindings, SCENE_MEMO_VIEW_TYPE } from "./sceneMemoPanel";
 import type { FindingStatus } from "../models/finding";
 import {
   countIncoming,
@@ -76,6 +76,7 @@ import { locateAppliedSuggestion } from "../core/proposalUndo";
 // 飛び先の行は、指摘が持つ行番号ではなく引用から決め直す（設計書6.11）
 import { relocateQuote } from "../core/relocateQuote";
 import { revealTextLocation } from "./revealLocation";
+import { columnForLocation, columnOfWebviewPanel } from "./editorColumn";
 import { openInDefaultEditor } from "../views/openDocument";
 import { notifyDone } from "../views/notify";
 // バックアップとの違い（設計書6.99.7）。分類名は記録の見出しと同じものを使う
@@ -91,10 +92,13 @@ import {
 /**
  * 提案パネル（誤字脱字）。
  *
- * 出力・デバッグコンソールと同じ下段の領域に表示する
- * `WebviewViewProvider`。設定資料パネル（`settingsPanel.ts`）は
- * エディター領域に開く別方式だが、こちらは本文を編集しながら
- * 常に見えている場所に置きたいという要望のため下段にした。
+ * **エディターの右の列に開く**（`reveal`。作者の指示、2026-09-23）。
+ * シーンメモと同じ置き方で、本文を編集しながら横で見る。
+ *
+ * かつては出力・デバッグコンソールと同じ下段の領域（`WebviewViewProvider`）
+ * だけに出していた。「下の提案等は混乱しそう」との指示で、**下段は既定で
+ * 出さない**（設定 `novelai.proposals.showInBottomPanel` を入れれば出る）。
+ * 下段の面も同じクラスが受け持ち、中身は1つだけ持って両方へ送る。
  *
  * 設計書6.11は誤字脱字／推敲／逸脱・間延び／矛盾を同じパネルに
  * タブ分けで統合する設計。ビューIDとコンテナ名は既にその前提で
@@ -102,6 +106,18 @@ import {
  */
 
 export const PROPOSALS_VIEW_ID = "novelai.proposalsView";
+
+/** エディターの列に開く提案パネルの種類（`createWebviewPanel` の viewType） */
+export const PROPOSALS_PANEL_TYPE = "novelai.proposals";
+
+/**
+ * 提案パネルを右の列に開くコマンド（2026-09-23）。
+ *
+ * **パネルの中からも、このコマンドを通して開く。** 画面を開く処理を直に
+ * 呼ぶと、結果を出すだけの試験まで画面の代役を用意することになる。
+ * 引数 `{ preserveFocus: true }` で、フォーカスを奪わずに出す。
+ */
+export const OPEN_PROPOSALS_COMMAND = "novelai.openProposals";
 
 /**
  * 単話プロットの判定の分類名（設計書6.36.3）。
@@ -718,7 +734,10 @@ function countRemaining(
 }
 
 export class ProposalPanel implements vscode.WebviewViewProvider {
+  /** 下段の面。**既定では出さない**（設定 `novelai.proposals.showInBottomPanel`） */
   private view: vscode.WebviewView | undefined;
+  /** エディターの右の列に開いた面（既定の置き場。`reveal`） */
+  private editorPanel: vscode.WebviewPanel | undefined;
   private work: WorkEntry | undefined;
   private items: ProposalViewItem[] = [];
   /**
@@ -1004,7 +1023,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       this.activate(category);
       // パネルが開いていなければ前面に出す。開いていれば余計なフォーカス移動はしない
       if (!options.quiet) {
-        void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
+        // **書いている手からフォーカスを奪わない**（右の列に出すだけ）
+        void vscode.commands.executeCommand(OPEN_PROPOSALS_COMMAND, {
+          preserveFocus: true,
+        });
       }
       return arrivedCount;
     }
@@ -1051,7 +1073,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     this.stashCurrent();
     this.work = entry.work;
     this.activate(category);
-    void vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
+    // 作者が「表示する」を押したので、フォーカスごと移す
+    void vscode.commands.executeCommand(OPEN_PROPOSALS_COMMAND);
   }
 
   /** その作品の置き場（無ければ作る）。題名はいちばん新しいものへ揃える */
@@ -1255,9 +1278,90 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     });
   }
 
-  /** 画面へ送る（開いていなければ何もしない） */
+  /** 画面へ送る（開いていなければ何もしない。右の列と下段の両方へ） */
   private post(message: OutgoingMessage): void {
-    void this.view?.webview.postMessage(message);
+    for (const webview of this.webviews()) void webview.postMessage(message);
+  }
+
+  /**
+   * いま開いている画面。**右の列（`WebviewPanel`）と下段（`WebviewView`）の
+   * 2つがありうる**——下段は設定で出したときだけ（既定では出さない）。
+   * 中身はこのクラスが1つだけ持っているので、両方へ同じものを送る。
+   */
+  private webviews(): vscode.Webview[] {
+    const list: vscode.Webview[] = [];
+    if (this.editorPanel) list.push(this.editorPanel.webview);
+    if (this.view) list.push(this.view.webview);
+    return list;
+  }
+
+  /**
+   * 提案パネルを**エディターの右の列**に開く（作者の指示、2026-09-23）。
+   *
+   * 「提案パネルは右側のメモを基準とし、下の提案等は混乱しそうなので
+   * 最小化しましょう」。これまでは下段（出力・ターミナルと同じ領域）の
+   * `WebviewView` だけで、VS Code の通知（右下）と重なる場所に
+   * 「まとめて適用」が来ていた（通知を押そうとして、先に消えた通知の
+   * 下のボタンを押しかけた。2回）。
+   *
+   * **置き方はシーンメモにそろえる**（`sceneMemoPanel.ts`：
+   * `ViewColumn.Beside`、`retainContextWhenHidden`）。シーンメモが開いて
+   * いれば、その列へ重ねる——右の列を基準にするという指示どおり、
+   * 右に列を増やし続けない。
+   *
+   * **既に開いていれば、作者が置いた列から動かさない。**
+   *
+   * @param preserveFocus 結果が届いて自動で開くときは true（書いている
+   *   手からフォーカスを奪わない）。作者が押して開くときは false
+   */
+  reveal(options: { preserveFocus?: boolean } = {}): void {
+    const preserveFocus = options.preserveFocus ?? false;
+    if (this.editorPanel) {
+      this.editorPanel.reveal(this.editorPanel.viewColumn, preserveFocus);
+      return;
+    }
+    const panel = vscode.window.createWebviewPanel(
+      PROPOSALS_PANEL_TYPE,
+      "提案",
+      {
+        viewColumn: columnOfWebviewPanel(SCENE_MEMO_VIEW_TYPE) ?? vscode.ViewColumn.Beside,
+        preserveFocus,
+      },
+      // **隠れても中身を捨てない。** 捨てると、タブを戻すたびに一覧・
+      // 開いた詳細・スクロール位置が最初からになる（下段と同じ扱い）
+      { enableScripts: true, retainContextWhenHidden: true }
+    );
+    this.editorPanel = panel;
+    panel.webview.html = buildProposalPanelHtml(createNonce(), panel.webview.cspSource);
+    panel.webview.onDidReceiveMessage((message: unknown) => {
+      void this.handleMessage(message as IncomingMessage);
+    });
+    panel.onDidDispose(() => {
+      if (this.editorPanel === panel) this.editorPanel = undefined;
+    });
+    // 開いたときに、既にある結果と承認待ちを出す（下段の `resolveWebviewView` と同じ）
+    this.postItems();
+    void this.loadPending?.(this);
+  }
+
+  /** 右の列の提案パネルが前面でフォーカスを持っているか（適用後に戻すため） */
+  private editorPanelFocused(): boolean {
+    return this.editorPanel?.active === true;
+  }
+
+  /**
+   * 適用のあと本文を読み直したら、フォーカスを提案パネルへ戻す。
+   *
+   * 読み直し（`revertIfOpen`）は、本文の列を前へ出さないと効かない
+   * （VS Code の読み直しは**前面の列**の本文に掛かる）。右の列の提案パネルから
+   * 押したとき、そのままだと次の「適用」を押す前にパネルを押し直すことになる。
+   */
+  private async reloadAfterApply(filePath: string): Promise<void> {
+    const focused = this.editorPanelFocused();
+    await revertIfOpen(filePath);
+    if (focused && this.editorPanel) {
+      this.editorPanel.reveal(this.editorPanel.viewColumn, false);
+    }
   }
 
   /**
@@ -1743,6 +1847,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     summaries: readonly CategorySummary[],
     remaining: number
   ): void {
+    // 右の列の面にはタブの数字（バッジ）が無いので、題名に残りを出す
+    if (this.editorPanel) {
+      this.editorPanel.title = remaining > 0 ? `提案（${remaining}）` : "提案";
+    }
     if (!this.view) return;
     if (remaining > 0) {
       this.view.badge = {
@@ -1800,7 +1908,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       0
     );
     this.updateBadge(summaries, remaining);
-    if (!this.view) return;
+    if (this.webviews().length === 0) return;
     const works = this.summarizeWorks(remaining);
     const contradictionMode = this.contradictions.length > 0;
     const updateMode = this.recordUpdates.length > 0;
@@ -1824,7 +1932,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       // 作品の切り替え口も同じ（1作品なら、これまでと同じ見た目のまま）
       works: works.length > 1 ? works : [],
     };
-    void this.view.webview.postMessage(message);
+    for (const webview of this.webviews()) void webview.postMessage(message);
   }
 
   /**
@@ -2444,7 +2552,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         return;
       }
       this.markStatus(id, "applied", "提案を採り入れました。");
-      await revertIfOpen(item.filePath);
+      await this.reloadAfterApply(item.filePath);
       return;
     }
 
@@ -2496,7 +2604,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       return;
     }
 
-    await revertIfOpen(item.filePath);
+    await this.reloadAfterApply(item.filePath);
 
     // **戻すときの手がかりとして、入れた場所を控える**（設計書6.8.12）。
     // 同じ文がその行に2度あると、文脈だけでは戻す先が決まらない
@@ -2611,7 +2719,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       return;
     }
 
-    await revertIfOpen(item.filePath);
+    await this.reloadAfterApply(item.filePath);
     await this.noteBlockWritten(item, step, next);
     this.markStatus(item.id, direction === "apply" ? "applied" : "pending");
 
@@ -2766,7 +2874,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       return;
     }
 
-    await revertIfOpen(item.filePath);
+    await this.reloadAfterApply(item.filePath);
 
     // **もう一度適用できる状態に戻す。** 戻したあとで考え直すこともある。
     // 適用の記録は、もう当てにならないので落とす
@@ -3270,8 +3378,20 @@ async function revertIfOpen(filePath: string): Promise<void> {
   );
   if (!openDoc) return;
   try {
+    /*
+      **本文が開いている列を名指しし、その列を前へ出す**（2026-09-23）。
+
+      読み直しの命令（`workbench.action.files.revert`）は**前面の列**の本文に
+      掛かる。提案パネルが下段にあったころは、フォーカスが下段にあっても
+      前面の列は本文の列のままだったので `preserveFocus: true` で足りた。
+      **右の列に開くようになると、前面の列が提案パネルの列になる**——
+      フォーカスを残したままでは読み直しが提案パネルへ掛かって空振りし、
+      列を名指ししないと本文が提案パネルの列へもう1枚開く。
+      フォーカスは呼ぶ側（`reloadAfterApply`）が提案パネルへ戻す。
+    */
     const before = await vscode.window.showTextDocument(openDoc, {
-      preserveFocus: true,
+      viewColumn: columnForLocation(filePath).column,
+      preserveFocus: false,
       preview: false,
     });
     const selection = before.selection;
@@ -3283,6 +3403,8 @@ async function revertIfOpen(filePath: string): Promise<void> {
         (candidate) => candidate.document.uri.toString() === openDoc.uri.toString()
       ) ??
       (await vscode.window.showTextDocument(openDoc, {
+        // 読み直す前と同じ列へ（提案パネルの列へ開かない）
+        viewColumn: before.viewColumn,
         preserveFocus: true,
         preview: false,
       }));
