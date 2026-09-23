@@ -301,7 +301,12 @@ import {
 import {
   episodePlotChapterOfPath,
   episodePlotCompletionParts,
+  episodePlotReviewTail,
 } from "./core/episodePlotDoc";
+import {
+  EPISODE_PLOT_REVIEW_KIND,
+  renderEpisodePlotReview,
+} from "./core/episodePlotReview";
 import { checkOpening } from "./features/checkOpening";
 // 名前の点検と付け替え（設計書6.37）
 import {
@@ -501,6 +506,7 @@ import {
 } from "./features/typoCheckScope";
 import { switchMode } from "./features/switchMode";
 import {
+  openGeneratedMarkdown,
   revealFolder,
   setGeneratedStorageRoot,
 } from "./views/openDocument";
@@ -5322,11 +5328,31 @@ export async function activate(
           headline: `${result.chapterLabel}の単話プロットの検査`,
           parts,
           failedCount: result.failed ? 1 : 0,
-          tail:
-            result.findings.length > 0
-              ? "プロットは書き換えていません。 直すかどうかは作者が決めます。"
-              : "",
+          // **指摘0件を黙らない**（プロンプト設計書1.9）。失敗した回には言わない
+          tail: episodePlotReviewTail({
+            findingCount: result.findings.length,
+            failed: result.failed,
+          }),
         });
+        /*
+          **良いところは講評の紙で、指摘より先に読めるように開く**（1.9）。
+          提案パネルは指摘を処理する一覧なので、ほめ言葉は混ぜない
+          （`core/episodePlotReview.ts` の説明）。返らなかった回は開かない
+          ——「返りませんでした」だけの紙を毎回増やさない
+        */
+        if (!result.failed && result.strengths.length > 0) {
+          await openGeneratedMarkdown(
+            EPISODE_PLOT_REVIEW_KIND,
+            renderEpisodePlotReview({
+              chapterLabel: result.chapterLabel,
+              strengths: result.strengths,
+              strengthsDropped: result.strengthsDropped,
+              findingCount: result.findings.length,
+            }),
+            undefined,
+            { work }
+          );
+        }
         return;
       }
 

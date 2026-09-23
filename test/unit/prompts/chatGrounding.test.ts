@@ -195,7 +195,8 @@ describe("版", () => {
     // 3.16（2026-09-23）：起動できる機能の札へ「応募先をAIに提案してもらう」を足した
     // （設計書6.3.6.5。詳細メニューに無い隠し機能で、相談が入口の1つ）
     // 3.17（2026-09-23）：出力形式の例に "writerStyleSignals": null を足した
-    expect(WORK_CHAT_VERSION).toBe("3.17");
+    // 3.18（2026-09-24）：講評の構え（プロンプト設計書1.9）を【答え方】へ足した
+    expect(WORK_CHAT_VERSION).toBe("3.18");
     expect(SETTINGS_CHAT_VERSION).toBe("3.0");
   });
 });

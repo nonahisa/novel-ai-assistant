@@ -43,6 +43,7 @@ import {
   type EpisodePlotContrastFinding,
   type EpisodePlotFinding,
 } from "../core/episodePlotValidation";
+import type { PraiseItem } from "../core/praise";
 import {
   buildEpisodePlotCheckPrompt,
   episodePlotCheckBudget,
@@ -123,6 +124,10 @@ export interface EpisodePlotRunBase {
 
 export interface EpisodePlotDesignResult extends EpisodePlotRunBase {
   findings: EpisodePlotFinding[];
+  /** 効いている展開（プロンプト設計書1.9）。照合済みで、件数では切らない */
+  strengths: PraiseItem[];
+  /** 箇条書きに無い行をほめていたので落とした数 */
+  strengthsDropped: number;
 }
 
 export interface EpisodePlotContrastResult extends EpisodePlotRunBase {
@@ -351,6 +356,8 @@ export async function checkEpisodePlotDesign(
     blanks: doc.blanks,
   };
   const findings: EpisodePlotFinding[] = [];
+  const strengths: PraiseItem[] = [];
+  let strengthsDropped = 0;
 
   await withCancellableProgress(
     "単話プロットの展開を見ています",
@@ -406,14 +413,22 @@ export async function checkEpisodePlotDesign(
       base.rejectedCount = validated.rejected.length;
       base.rejectSummary = describeEpisodePlotRejects(validated.rejected);
       findings.push(...validated.accepted);
+      strengths.push(...validated.strengths);
+      strengthsDropped = validated.strengthsDropped;
     }
   );
 
   await cache.save();
 
   logEpisodePlotEnd("単話プロットの検査", base, findings.length, Boolean(cached));
+  if (strengths.length > 0 || strengthsDropped > 0) {
+    logStep(
+      `単話プロットの検査：良いところ ${strengths.length}件` +
+        (strengthsDropped > 0 ? `（箇条書きに無い行で外した ${strengthsDropped}件）` : "")
+    );
+  }
 
-  return { ...base, findings };
+  return { ...base, findings, strengths, strengthsDropped };
 }
 
 // ── P-28 本文との照合 ────────────────────────────

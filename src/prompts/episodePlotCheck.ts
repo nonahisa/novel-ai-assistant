@@ -25,9 +25,22 @@
  *     検証側（`core/episodePlotValidation.ts`）が `EPISODE_PLOT_CHECK_HINTS`
  *     と突き合わせて弾く
  *
+ * ## 良いところも返させる（1.1、プロンプト設計書1.9）
+ *
+ * 作者の方針（2026-09-24）：「作品が高い水準でバランスをとっているとき、
+ * 無理に助言を言わなくてもいいです。あと、ほめることができる場所は、
+ * 省略せずきちんとほめてください。」
+ *
+ * 1.0 から「0件でも構いません」とは言っていたが、**返せる欄が指摘しか
+ * 無かった**ので、緩みの無い設計図には何も返らず、作者から見ると
+ * 「何も言われなかった」のと区別がつかなかった。1.1 で `strengths`
+ * （効いている展開の行と、なぜ効いているか）を足した。**行は指摘と同じく
+ * 箇条書きとの照合を通したものだけ残す**（`core/episodePlotValidation.ts`）。
+ * 件数の上限（`maxFindings`）は指摘だけに掛け、良いところには掛けない。
+ *
  * プロンプトを変更したら version を上げること。
  */
-export const EPISODE_PLOT_CHECK_VERSION = "1.0";
+export const EPISODE_PLOT_CHECK_VERSION = "1.1";
 
 /**
  * 送るときの温度。判断を伴うので、事実の突き合わせより少しだけ揺らす（P-11と同じ）。
@@ -65,8 +78,10 @@ const KIND_ITEMS: Record<EpisodePlotCheckKind, string> = {
 
 /** 出力例に書く、項目の言い換え。**プロンプトと検証で別々に書かない** */
 const REASON_HINT = "そう言える理由";
+/** 良いところの出力例に書く言い換え。返ってきたら検証が弾く */
+const WHY_HINT = "効いている理由";
 
-export const EPISODE_PLOT_CHECK_HINTS: readonly string[] = [REASON_HINT];
+export const EPISODE_PLOT_CHECK_HINTS: readonly string[] = [REASON_HINT, WHY_HINT];
 
 /** 節が空のときに書く言葉。**無いものを埋めさせない** */
 export const EPISODE_PLOT_BLANK_MARK = "（書かれていません）";
@@ -134,11 +149,25 @@ ${kinds}
 - 順番を入れ替える案・足りないものを補う案は書かないでください。
 - 意図的な緩急（山場の前の静かな場面）を停滞と呼ばないこと。
 - 挙げてよいのは最大${input.maxFindings}件です。0件でも構いません。無理に探さないでください。
+  目標へ向かって締まっている設計なら、findings は空の配列にしてください。
+
+【良いところ】
+目標へ向かう働きがよく効いている展開を、strengths に入れてください。
+見つかったぶんだけ入れ、数を絞る必要はありません。
+- item には、上の箇条書きにある行をそのまま写してください（言い換えない）。
+- why には、その行がなぜ効いているのかを具体的に書いてください（60字以内）。
+- 良いところが見当たらなければ、strengths は空の配列にしてください。
 
 【出力形式】JSONのみ
 kind には次のどれか1つだけを入れてください：${EPISODE_PLOT_CHECK_KINDS.join("、")}
 
 {
+  "strengths": [
+    {
+      "item": ${sampleItem},
+      "why": "${WHY_HINT}（60字以内）"
+    }
+  ],
   "findings": [
     {
       "item": ${sampleItem},
@@ -159,6 +188,19 @@ kind には次のどれか1つだけを入れてください：${EPISODE_PLOT_CH
 export const EPISODE_PLOT_CHECK_SCHEMA = {
   type: "object",
   properties: {
+    // 良いところ（1.9）。**required に入れる**——任意にすると、小さいモデルは
+    // 指摘だけ書いて落とす（ほめる欄が後回しになる形そのもの）
+    strengths: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          item: { type: "string" },
+          why: { type: "string" },
+        },
+        required: ["item", "why"],
+      },
+    },
     findings: {
       type: "array",
       items: {
@@ -172,7 +214,7 @@ export const EPISODE_PLOT_CHECK_SCHEMA = {
       },
     },
   },
-  required: ["findings"],
+  required: ["strengths", "findings"],
 } as const;
 
 /**

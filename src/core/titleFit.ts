@@ -39,6 +39,18 @@ export const TITLE_FIT_COMMENT_MAX = 40;
 /** 直す候補として挙げる数 */
 export const TITLE_FIT_CANDIDATES = 5;
 
+/**
+ * この点から上は「よく届いている題」とし、直す候補に入れない
+ * （プロンプト設計書1.9、作者の方針 2026-09-24「無理に助言を言わなくても
+ * いい。ほめることができる場所は、省略せずきちんとほめて」）。
+ *
+ * 前は点に関わらず低い順の5つを必ず直す候補にしていたので、どの題も
+ * 高い作品でも「直す候補」が5つ並んだ。**直す所を件数で作っていた。**
+ * 70 は「その読者層が一覧で見て開きたくなる度合い」の7割で、目安である
+ * （点そのものが目安なので、ここも厳密な線ではない）。
+ */
+export const TITLE_FIT_REACHES_SCORE = 70;
+
 /** 作品タイトルの ID。各話は `e<何番目>` */
 export const TITLE_FIT_TITLE_ID = "title";
 
@@ -219,6 +231,22 @@ export function titleFitCandidates(
     .sort((left, right) => left.item.score - right.item.score || left.index - right.index)
     .slice(0, limit)
     .map((entry) => entry.item);
+}
+
+/**
+ * よく届いている題（`TITLE_FIT_REACHES_SCORE` 以上）と、直す候補に
+ * 回してよい題（それ未満）に分ける。
+ *
+ * **よく届いている題は件数で切らない**（1.9の2）。並びは元のまま
+ * （作品タイトル → 話の順）——点で並べ替えると、目安の数字が序列に見える。
+ */
+export function splitTitleFit(items: readonly TitleFitItem[]): {
+  reaching: TitleFitItem[];
+  candidates: TitleFitItem[];
+} {
+  const reaching = items.filter((item) => item.score >= TITLE_FIT_REACHES_SCORE);
+  const rest = items.filter((item) => item.score < TITLE_FIT_REACHES_SCORE);
+  return { reaching, candidates: titleFitCandidates(rest) };
 }
 
 /**

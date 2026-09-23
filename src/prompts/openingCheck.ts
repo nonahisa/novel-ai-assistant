@@ -1,4 +1,10 @@
 import { isPlaceholderText } from "../core/placeholderText";
+import {
+  isNoAdviceFiller,
+  readGroundedPraise,
+  verbatimIn,
+  type PraiseItem,
+} from "../core/praise";
 
 /**
  * P-24 冒頭診断（設計書6.30）
@@ -26,9 +32,21 @@ import { isPlaceholderText } from "../core/placeholderText";
  * 見るのは第1話の先頭3,000字だけなので、チャンクに割る必要が無い。
  * 割らないぶん、切れ目で「引きが無い」と誤判定されることもない。
  *
+ * ## 無理に言わない・ほめる所は省かない（1.1、プロンプト設計書1.9）
+ *
+ * 作者の方針（2026-09-24）：「作品が高い水準でバランスをとっているとき、
+ * 無理に助言を言わなくてもいいです。あと、ほめることができる場所は、
+ * 省略せずきちんとほめてください。」
+ *
+ * 1.0 は総評に「いちばん効く直しどころを1点だけ」と頼んでいた。**1点を
+ * 必ず書かせる形**なので、直す所の無い冒頭にも直しどころが作られていた。
+ * 1.1 で「見当たらなければ空でよい」とし、効いている所（`strengths`）を
+ * 本文の引用と「なぜ効いているか」つきで頼むようにした。**引用は本文と
+ * 照合し、無いものは落とす**（規則3。`core/praise.ts`）。
+ *
  * プロンプトを変更したら version を上げること。
  */
-export const OPENING_CHECK_VERSION = "1.0";
+export const OPENING_CHECK_VERSION = "1.1";
 
 /**
  * 送るときの温度。判定と根拠を出すだけなので揺らす理由が無い。0にしないのは、同じ言い回しが6要素に並ぶのを避けるため。
@@ -109,8 +127,16 @@ ${input.openingText}
    どこにあるかを判定してください。あるなら hook.present を true にして、
    どの箇所がそれにあたるかを note に書いてください。
    無ければ false にして、無いとだけ書いてください。探して作り出さないこと。
-3. 総評：この冒頭でいちばん効く直しどころを1点だけ advice に書いてください。
-   2文以内。2点以上は書かないこと。
+3. 効いている所：この冒頭で読者を引き込むのに効いている箇所を、
+   見つかったぶんだけ strengths に入れてください。数を絞る必要はありません。
+   quote には本文を40字以内で逐語で引用し（言い換えない）、
+   why にはなぜ効いているのかを具体的に書いてください。
+   「全体的に良い」のような、箇所を指さないほめ方はしないこと。
+   本文から引いて示せる所が無ければ、strengths は空の配列にしてください。
+4. 総評：直すべき所があれば、この冒頭でいちばん効く直しどころを advice に書いてください。
+   2文以内で、2点以上は書かないこと。
+   直すべき所が見当たらなければ、advice は空にしてください。
+   直す所を無理に探して作らないこと。
 
 【注意】
 - 6要素がすべて揃っている必要はありません。冒頭で伏せるのは技法です。
@@ -120,7 +146,7 @@ ${input.openingText}
   総評も「〜が伝わっていない」という指摘までに留めること。
 - 造語・固有名詞・独自の言い回しを誤りとして扱わないこと。
   読者が知らない名前が出てくること自体は欠点ではありません。
-- 「なし」「特になし」とだけ書かないこと。
+- 6要素と引きの note には、「なし」「特になし」とだけ書かないこと。
   何が無いのか、何が分からないままなのかを書いてください。`;
 }
 
@@ -156,9 +182,23 @@ export const OPENING_CHECK_SCHEMA = {
       required: ["present", "note"],
       additionalProperties: false,
     },
+    // **ほめる欄も required にする**（1.9）。任意にすると、小さいモデルは
+    // 助言だけ書いて落とす——ほめる欄が後回しになる形そのものである
+    strengths: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          quote: { type: "string" },
+          why: { type: "string" },
+        },
+        required: ["quote", "why"],
+        additionalProperties: false,
+      },
+    },
     advice: { type: "string" },
   },
-  required: ["elements", "hook", "advice"],
+  required: ["elements", "hook", "strengths", "advice"],
   additionalProperties: false,
 } as const;
 
@@ -184,8 +224,22 @@ export interface OpeningCheckResult {
    * 混ぜると、答えが返らなかっただけの冒頭に「引きがありません」と出る。
    */
   hook: OpeningHookJudgement | null;
-  /** 総評。読み取れなければ空文字 */
+  /**
+   * 総評（直しどころ）。**直すべき所が無ければ空文字。**
+   * 「特になし」のような埋め草も空へ落とす（1.9の5）
+   */
   advice: string;
+  /**
+   * 総評の欄が応答に在ったか。
+   *
+   * **空の総評を「返らなかった」と取り違えない**（1.9の1）。欄が在って
+   * 空なら「直すべき所は見当たりません」、欄ごと無ければ「返りませんでした」
+   */
+  adviceAnswered: boolean;
+  /** 効いている所。**本文との照合を通ったものだけ**（規則3） */
+  strengths: PraiseItem[];
+  /** 引用が本文に見つからず落としたほめ言葉の数。**黙って減らさない** */
+  strengthsDropped: number;
 }
 
 /**
@@ -194,8 +248,15 @@ export interface OpeningCheckResult {
  * **6要素が1つも読めなければ諦める**（undefined）。診断の本体がそこなので、
  * 表が空の報告を見せても作者の役に立たない。一方、期待感と総評は
  * 欠けても残りを見せる——1項目のために全部を捨てるほうが損である。
+ *
+ * @param openingText AIへ渡した冒頭本文。**ほめる欄の引用の照合に使う。**
+ *   渡されなければ照合できないので、ほめる欄は1件も通さない
+ *   （照合していない引用を、照合したものと同じ顔で出さない）
  */
-export function parseOpeningCheck(text: string): OpeningCheckResult | undefined {
+export function parseOpeningCheck(
+  text: string,
+  openingText = ""
+): OpeningCheckResult | undefined {
   const source = extractJson(text);
   if (!source) return undefined;
 
@@ -210,10 +271,15 @@ export function parseOpeningCheck(text: string): OpeningCheckResult | undefined 
   const elements = readElements(parsed.elements);
   if (elements.length === 0) return undefined;
 
+  const praise = readGroundedPraise(parsed.strengths, verbatimIn(openingText));
+  const advice = cleanNote(parsed.advice);
   return {
     elements,
     hook: readHook(parsed.hook),
-    advice: cleanNote(parsed.advice),
+    advice: advice && isNoAdviceFiller(advice) ? "" : advice,
+    adviceAnswered: typeof parsed.advice === "string",
+    strengths: praise.items,
+    strengthsDropped: praise.notFound,
   };
 }
 

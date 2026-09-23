@@ -18,6 +18,7 @@ import {
 import {
   READER_ADVICE_EXAMPLES,
   READER_ADVICE_GUIDELINES,
+  READER_ADVICE_SCHEMA,
   buildReaderAdvicePrompt,
   buildReaderAdviceTonePrompt,
   buildReaderReactionChatBlock,
@@ -415,6 +416,84 @@ describe("AIの答えの確かめ", () => {
   });
 });
 
+/**
+ * 助言の構え（プロンプト設計書1.9、作者の方針 2026-09-24）。
+ * 「無理に助言を言わなくてもいい。ほめることができる場所は、省略せずきちんとほめて」
+ */
+describe("助言の構え（1.9）：無理に言わない・良いところは省かない", () => {
+  const material = materialOf(series(decaying(20), weekly(20)));
+  const json = (value: unknown) => JSON.stringify(value);
+
+  test("見てほしい所0件＋良いところありの答えは、読めた答えとして通る", () => {
+    const answer = validateReaderAdviceAnswer(
+      json({
+        summary: "",
+        strengths: [
+          { title: "序盤", body: "第1話から第2話へよく続いています。" },
+          { title: "安定", body: "急に読者が減った話がありません。" },
+        ],
+        points: [],
+      }),
+      [material]
+    );
+    expect(answer).toBeDefined();
+    expect(answer?.points).toEqual([]);
+    expect(answer?.strengths).toHaveLength(2);
+  });
+
+  test("「特になし」「直すべき所は見当たりません」は見てほしい所の項目にしない", () => {
+    const answer = validateReaderAdviceAnswer(
+      json({
+        summary: "よく読まれています。",
+        strengths: [],
+        points: [
+          { title: "特になし", body: "特になし" },
+          { title: "見てほしい所", body: "直すべき所は見当たりません。" },
+          { title: "", body: "問題ありません" },
+        ],
+      }),
+      [material]
+    );
+    expect(answer?.points).toEqual([]);
+  });
+
+  test("材料に無い話数・数字でほめる言葉は落とす（作ったほめ言葉を出さない）", () => {
+    const answer = validateReaderAdviceAnswer(
+      json({
+        summary: "",
+        strengths: [
+          { title: "終盤", body: "第250話でも読者が残っています。" },
+          { title: "率", body: "離脱率は12.5%と低めです。" },
+          { title: "序盤", body: "第2話へよく続いています。" },
+        ],
+        points: [],
+      }),
+      [material]
+    );
+    expect(answer?.strengths.map((item) => item.title)).toEqual(["序盤"]);
+    expect(answer?.notes.join("")).toContain("材料に無い話数や数字でほめていた 2 件を外しました");
+  });
+
+  test("良いところは件数で切らない（見てほしい所の上限とは別）", () => {
+    const strengths = Array.from({ length: 8 }, (_, index) => ({
+      title: `良い${index}`,
+      body: `第${index + 1}話がよく読まれています。`,
+    }));
+    const answer = validateReaderAdviceAnswer(
+      json({ summary: "", strengths, points: [] }),
+      [material]
+    );
+    expect(answer?.strengths).toHaveLength(8);
+  });
+
+  test("プロンプト：見てほしい所が無ければ空でよいと言い、良いところを頼む", () => {
+    const prompt = buildReaderAdvicePrompt({ workTitle: "作品", materials: [material] });
+    expect(prompt).toContain("strengths");
+    expect(prompt).toContain("見当たらなければ");
+    expect(READER_ADVICE_SCHEMA.required).toContain("strengths");
+  });
+});
+
 describe("相談：読者の反応の話のときだけ材料を足す", () => {
   test("反応の話に当たる", () => {
     for (const question of [
@@ -573,6 +652,48 @@ describe("画面：助言", () => {
     expect(html).toContain("前の答えを出しています");
     expect(html).toContain("AIに聞き直す");
     expect(html).toContain('data-force="1"');
+  });
+
+  test("見てほしい所が0件なら「直すべき所は見当たりません」と書き、良いところを先に並べる（1.9）", () => {
+    const html = render()("kakuyomu", advice, {
+      kind: "answer",
+      answer: {
+        summary: "",
+        summaryMarks: [],
+        strengths: [{ title: "序盤", body: "第2話へよく続いています。" }],
+        points: [],
+        notes: [],
+      },
+      fromCache: false,
+      model: "gemma4:e4b",
+      provider: "Ollama",
+    });
+    expect(html).toContain("直すべき所は見当たりません");
+    expect(html).toContain("第2話へよく続いています。");
+    expect(html.indexOf("第2話へよく続いています。")).toBeLessThan(
+      html.indexOf("直すべき所は見当たりません")
+    );
+    // 折りたたまない（良いところを details の中へ入れない）
+    const folded = html.indexOf("<details");
+    expect(folded === -1 || html.indexOf("第2話へよく続いています。") < folded).toBe(true);
+  });
+
+  test("良いところと見てほしい所の両方があれば、良いところが先", () => {
+    const html = render()("kakuyomu", advice, {
+      kind: "answer",
+      answer: {
+        summary: "",
+        summaryMarks: [],
+        strengths: [{ title: "序盤", body: "良いところの本文" }],
+        points: [{ title: "中盤", body: "見てほしい所の本文", marks: [] }],
+        notes: [],
+      },
+      fromCache: false,
+      model: "m",
+      provider: "p",
+    });
+    expect(html.indexOf("良いところの本文")).toBeLessThan(html.indexOf("見てほしい所の本文"));
+    expect(html).not.toContain("直すべき所は見当たりません");
   });
 
   test("聞いている最中はボタンを押せない。失敗は理由を出す", () => {

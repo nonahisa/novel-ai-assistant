@@ -78,6 +78,10 @@ const MARKDOWN_ALLOWED = new Set([
   "src/features/diagnoseWeb.ts",
   // 冒頭診断のレポートをMarkdownの文書として開く（P-24）
   "src/features/checkOpening.ts",
+  // 単話プロットの検査（P-27）の講評をMarkdownの文書として開く（プロンプト設計書1.9）。
+  // **完了の知らせの一言は `src/core/episodePlotDoc.ts` に分けてある**ので、
+  // そちらはこの検査の網に掛かったままである
+  "src/core/episodePlotReview.ts",
   /*
     「ひと通り仕上げる」の結果の1枚をMarkdownの文書として開く。
 

@@ -102,9 +102,36 @@ describe("冒頭診断（P-24）", () => {
   });
 
   test("読み取れない応答は断る（空として流さない）", () => {
-    expect(() => openingValidate({ response: "わかりません" })).toThrow(
+    expect(() => openingValidate({ folder: WORK, response: "わかりません" })).toThrow(
       /読み取れません/
     );
+  });
+
+  test("ほめる欄の引用は、製品と同じく冒頭の本文と照合する（プロンプト設計書1.9）", () => {
+    // 送った冒頭から、実在する一続きを引用として使う
+    const prompt = openingPrompt({ folder: WORK });
+    const body = prompt.userPrompt.split(/【冒頭本文】[^\n]*\n/)[1] ?? "";
+    const firstLine = body.split("\n").find((line) => line.trim().length >= 12) ?? "";
+    const real = firstLine.trim().slice(0, 12);
+    expect(real.length).toBe(12);
+
+    const result = openingValidate({
+      folder: WORK,
+      response: JSON.stringify({
+        elements: [{ element: "いつ", conveyed: true, note: "根拠" }],
+        hook: { present: true, note: "謎" },
+        strengths: [
+          { quote: real, why: "書き出しで場面が立つ" },
+          { quote: "この本文には無い作り物の一文です", why: "作文" },
+        ],
+        advice: "",
+      }),
+    });
+    expect(result.strengths.map((item) => item.quote)).toEqual([real]);
+    expect(result.strengthsDropped).toBe(1);
+    // 直す所が無い答えも、読めた答えである
+    expect(result.advice).toBe("");
+    expect(result.adviceAnswered).toBe(true);
   });
 });
 

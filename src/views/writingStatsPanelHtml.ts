@@ -883,7 +883,14 @@ function renderReaderAdvice(site, advice, outcome, busy) {
   return parts.join('');
 }
 
-/** AIの答え（見立てと、見てほしい所） */
+/**
+ * AIの答え（見立て・良いところ・見てほしい所）。
+ *
+ * 良いところを見てほしい所より先に出し、折りたたまない（プロンプト設計書1.9、
+ * 作者の方針 2026-09-24「ほめることができる場所は、省略せずきちんとほめて」）。
+ * 見てほしい所が0件なら、そう明記する——空の欄を黙って消すと、
+ * AIが答えなかったのか、直す所が無いのかが作者に分からない。
+ */
 function renderReaderAdviceAnswer(outcome) {
   const answer = outcome.answer || {};
   const parts = [];
@@ -891,7 +898,21 @@ function renderReaderAdviceAnswer(outcome) {
     parts.push('<div class="advice-summary">' + escapeHtml(answer.summary) +
       readerAdviceMarks(answer.summaryMarks) + '</div>');
   }
-  (answer.points || []).forEach((point) => {
+  const strengths = answer.strengths || [];
+  if (strengths.length > 0) {
+    parts.push('<div class="advice-title">良いところ</div>');
+    strengths.forEach((item) => {
+      parts.push('<div class="advice-item advice-strength">' +
+        (item.title ? '<div class="advice-title">' + escapeHtml(item.title) + '</div>' : '') +
+        '<div>' + escapeHtml(item.body) + '</div></div>');
+    });
+  }
+  const points = answer.points || [];
+  parts.push('<div class="advice-title">確かめてほしい所</div>');
+  if (points.length === 0) {
+    parts.push('<div class="advice-item">直すべき所は見当たりません。</div>');
+  }
+  points.forEach((point) => {
     parts.push('<div class="advice-item">' +
       (point.title ? '<div class="advice-title">' + escapeHtml(point.title) + '</div>' : '') +
       '<div>' + escapeHtml(point.body) + '</div>' +

@@ -438,6 +438,61 @@ describe("統合した1枚", () => {
     expect(doc).toContain("目安");
   });
 
+  /*
+    助言の構え（プロンプト設計書1.9、作者の方針 2026-09-24）。
+    「無理に助言を言わなくてもいい。ほめることができる場所は、省略せずきちんとほめて」。
+    前は点の高低に関わらず、低い順の5つを必ず「直す候補」に挙げていた。
+  */
+  function fitOf(items: Array<[string, string, number, string]>): TitleFitRecord {
+    return {
+      schemaVersion: TITLE_FIT_SCHEMA_VERSION,
+      measuredAt: "2026-09-23T10:00:00.000Z",
+      readerType: "lore_deep",
+      basis: "aim",
+      model: "gemma",
+      items: items.map(([id, text, score, comment], index) => ({
+        id,
+        kind: index === 0 ? "title" : "episode",
+        label: index === 0 ? "作品タイトル" : `第${index}話`,
+        text,
+        score,
+        comment,
+      })),
+      unmeasured: 0,
+    };
+  }
+
+  test("どの題もよく届いていれば「直す候補は見当たりません」と書き、届いている題を並べる（1.9）", () => {
+    const doc = buildFull({
+      authorBlock: "狙い：考察層",
+      profile: PROFILE,
+      titleFit: fitOf([
+        ["title", "鉛の海", 88, "重さが届く"],
+        ["e1", "目覚め", 75, "謎の入口になっている"],
+      ]),
+    });
+    expect(doc).toContain("直す候補は見当たりません");
+    expect(doc).toContain("よく届いている題");
+    expect(doc).toContain("謎の入口になっている");
+    // 届いている題を、直す候補の欄より先に出す
+    expect(doc.indexOf("よく届いている題")).toBeLessThan(doc.indexOf("直す候補"));
+  });
+
+  test("よく届いている題は直す候補に入れない（点の高い題まで直させない）", () => {
+    const doc = buildFull({
+      authorBlock: "狙い：考察層",
+      profile: PROFILE,
+      titleFit: fitOf([
+        ["title", "鉛の海", 90, "重さが届く"],
+        ["e1", "目覚め", 30, "ありふれている"],
+      ]),
+    });
+    const candidates = doc.slice(doc.indexOf("### 直す候補"));
+    expect(candidates).toContain("目覚め");
+    expect(candidates).not.toContain("鉛の海");
+    expect(doc).not.toContain("直す候補は見当たりません");
+  });
+
   test("狙いだけの紙でも作れ、実態の欄は「ターゲット読者」の段を案内する", () => {
     const doc = buildFull({ authorBlock: "狙い：考察層" });
     expect(doc).toContain("まだ測っていません");

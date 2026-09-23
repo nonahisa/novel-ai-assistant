@@ -18,7 +18,11 @@ import {
   writtenRows,
   type TargetSheetWrittenRecord,
 } from "./targetSheetWritten";
-import { titleFitCandidates, type TitleFitRecord } from "./titleFit";
+import {
+  splitTitleFit,
+  TITLE_FIT_REACHES_SCORE,
+  type TitleFitRecord,
+} from "./titleFit";
 import { READER_TYPE_IDS } from "./readerTypeNeighbors";
 import {
   TARGET_SHEET_HISTORY_ROWS,
@@ -674,8 +678,26 @@ function titleFitSection(record: TitleFitRecord | undefined): string[] {
           `${cell(item.comment)} |`
       );
     }
+    /*
+      **よく届いている題を先に、件数で切らずに並べる**（プロンプト設計書1.9、
+      作者の方針 2026-09-24）。直す候補は届いている題を除いた中から選び、
+      無ければそう書く——前は点に関わらず5つを必ず挙げていた。
+    */
+    const { reaching, candidates } = splitTitleFit(record.items);
+    lines.push("", "### よく届いている題", "");
+    if (reaching.length === 0) {
+      lines.push(`点が${TITLE_FIT_REACHES_SCORE}以上の題はありませんでした。`);
+    }
+    for (const item of reaching) {
+      lines.push(
+        `- ${item.label}「${item.text}」（${item.score}）${item.comment}`
+      );
+    }
     lines.push("", "### 直す候補（点の低い順）", "");
-    for (const item of titleFitCandidates(record.items)) {
+    if (candidates.length === 0) {
+      lines.push("直す候補は見当たりません。");
+    }
+    for (const item of candidates) {
       lines.push(
         `- ${item.label}「${item.text}」（${item.score}）${item.comment}`
       );

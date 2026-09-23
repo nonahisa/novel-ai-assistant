@@ -291,3 +291,130 @@ describe("レポートの整形", () => {
     expect(row(markdown, "いつ").split(" | ")).toHaveLength(3);
   });
 });
+
+/**
+ * 助言の構え（プロンプト設計書1.9、作者の方針 2026-09-24）。
+ *
+ * 「高い水準でバランスをとっているとき、無理に助言を言わなくてもいい。
+ * ほめることができる場所は、省略せずきちんとほめて」。
+ */
+describe("助言の構え（1.9）：無理に言わない・ほめる所は省かない", () => {
+  const opening =
+    "開架の夜、図書塔の灯が一つずつ消えていく。\n" +
+    "灯は母の遺した手紙を胸に抱えたまま、最上階の扉の前に立っていた。\n" +
+    "読めない文字で書かれたその手紙だけが、母と彼女を繋いでいる。";
+
+  function withStrengths(advice: unknown, strengths: unknown): string {
+    return JSON.stringify({
+      ...(allConveyed() as Record<string, unknown>),
+      advice,
+      strengths,
+    });
+  }
+
+  test("助言0件＋ほめる欄ありの応答が検査を通り、「見当たりません」とほめ言葉が並ぶ", () => {
+    const result = parseOpeningCheck(
+      withStrengths("", [
+        {
+          quote: "図書塔の灯が一つずつ消えていく",
+          why: "一文目で場所と時刻と不穏さが同時に伝わる",
+        },
+        {
+          quote: "読めない文字で書かれたその手紙",
+          why: "謎が主人公の動機と結びついている",
+        },
+      ]),
+      opening
+    );
+    // 助言0件を「読めなかった」にしない
+    expect(result).toBeDefined();
+    expect(result?.advice).toBe("");
+    expect(result?.strengths).toHaveLength(2);
+
+    const markdown = report(result as OpeningCheckResult);
+    expect(markdown).toContain("直すべき所は見当たりません");
+    expect(markdown).not.toContain("総評が返りませんでした");
+    expect(markdown).toContain("図書塔の灯が一つずつ消えていく");
+    expect(markdown).toContain("謎が主人公の動機と結びついている");
+    // **ほめる欄を助言より先に出す**
+    expect(markdown.indexOf("## 効いている所")).toBeGreaterThanOrEqual(0);
+    expect(markdown.indexOf("## 効いている所")).toBeLessThan(
+      markdown.indexOf("## 総評")
+    );
+  });
+
+  test("「特になし」「直すべき所は見当たりません」のような埋め草は助言にしない", () => {
+    for (const filler of ["特になし", "なし", "空文字", "直すべき所は見当たりません。", "改善点はありません"]) {
+      const result = parseOpeningCheck(withStrengths(filler, []), opening);
+      expect(result?.advice, filler).toBe("");
+      const markdown = report(result as OpeningCheckResult);
+      expect(markdown, filler).toContain("直すべき所は見当たりません");
+      // 埋め草そのものは項目として並べない
+      if (filler !== "直すべき所は見当たりません。") {
+        expect(markdown, filler).not.toContain(filler);
+      }
+    }
+  });
+
+  test("続きのある本物の助言は、埋め草と見なさない", () => {
+    const advice = "直すべき所はほぼ見当たりませんが、「なぜ」の手がかりがもう一つあると読み進めやすくなります。";
+    const result = parseOpeningCheck(withStrengths(advice, []), opening);
+    expect(result?.advice).toBe(advice);
+  });
+
+  test("本文に無い引用のほめ言葉は落とし、落としたことを書く", () => {
+    const result = parseOpeningCheck(
+      withStrengths("", [
+        { quote: "灯は母の遺した手紙を胸に抱えたまま", why: "人物と目的が一度に見える" },
+        // 本文に無い文（作文）
+        { quote: "塔の鐘が十三回鳴った", why: "異常事態が引きになっている" },
+        // 前半だけ本物で後半が作文（断片のすべてを照合する）
+        { quote: "開架の夜。鐘が十三回鳴った", why: "時刻が伝わる" },
+      ]),
+      opening
+    );
+    expect(result?.strengths.map((item) => item.quote)).toEqual([
+      "灯は母の遺した手紙を胸に抱えたまま",
+    ]);
+    expect(result?.strengthsDropped).toBe(2);
+    const markdown = report(result as OpeningCheckResult);
+    expect(markdown).not.toContain("十三回");
+    expect(markdown).toContain("本文に見つからない引用");
+  });
+
+  test("ほめる欄を件数で切らない（10件でも全部出す）", () => {
+    const lines = Array.from({ length: 10 }, (_, index) => `第${index + 1}の良い文がここにある。`);
+    const source = lines.join("\n");
+    const result = parseOpeningCheck(
+      withStrengths(
+        "",
+        lines.map((line) => ({ quote: line, why: "効いている理由" }))
+      ),
+      source
+    );
+    expect(result?.strengths).toHaveLength(10);
+    const markdown = report(result as OpeningCheckResult);
+    for (const line of lines) expect(markdown).toContain(line);
+  });
+
+  test("総評の欄そのものが無い応答は「返りませんでした」のまま（0件と取り違えない）", () => {
+    const result = parsed({
+      elements: [{ element: "誰が", conveyed: true, note: "「灯」と名乗る" }],
+    });
+    expect(report(result)).toContain("総評が返りませんでした");
+  });
+
+  test("プロンプト：件数を強いず、見当たらなければ空でよいと言い、ほめる欄を頼む", () => {
+    const prompt = buildOpeningCheckPrompt({
+      workTitle: "作品",
+      genre: "",
+      logline: "",
+      openingText: "本文",
+    });
+    expect(prompt).not.toMatch(/1点だけ advice に書いてください/);
+    expect(prompt).toContain("見当たらなければ");
+    expect(prompt).toContain("strengths");
+    expect(prompt).toContain("なぜ効いている");
+    expect(OPENING_CHECK_SCHEMA.required).toContain("strengths");
+  });
+});

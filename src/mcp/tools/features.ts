@@ -696,7 +696,9 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
   },
   opening: {
     prompt: (input) => openingPrompt({ folder: input.folder }),
-    validate: (input) => openingValidate({ response: needResponse(input) }),
+    // `folder` を渡す。ほめる欄の引用を冒頭の本文と照合するため（1.9）
+    validate: (input) =>
+      openingValidate({ folder: input.folder, response: needResponse(input) }),
     run: (input) => openingRun({ folder: input.folder, ...runnerArgs(input) }),
   },
   name: {

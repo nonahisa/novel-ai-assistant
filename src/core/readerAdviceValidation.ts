@@ -1,4 +1,5 @@
 import { isPlaceholderText } from "./placeholderText";
+import { isNoAdviceFiller, PRAISE_MAX_ITEMS } from "./praise";
 import {
   READER_ADVICE_EXAMPLES,
   READER_ADVICE_LIMITS,
@@ -27,9 +28,25 @@ export interface ReaderAdvicePoint {
   marks: string[];
 }
 
+/** 良いところ（プロンプト設計書1.9）。**照合で印の付いたものは入らない** */
+export interface ReaderAdviceStrength {
+  title: string;
+  body: string;
+}
+
 export interface ReaderAdviceAnswer {
   summary: string;
   summaryMarks: string[];
+  /**
+   * 良いところ。**件数で切らない**（1.9の2）。
+   *
+   * 見てほしい所と違い、**記録に無い話数・材料に無い数字を含むものは
+   * 印を付けて残すのではなく落とす**（1.9の3）。確かめどころは
+   * 「AIが言い間違えた」ことが作者に見えるほうがよいが、ほめ言葉が
+   * 作り物の数字に立っていたら、ほめたことにならない
+   */
+  strengths: ReaderAdviceStrength[];
+  /** 見てほしい所。**0件でよい**（1.9の1）。埋め草は項目にしない */
   points: ReaderAdvicePoint[];
   /** 捨てた・切り詰めた件数の説明（画面の下に小さく出す）。無ければ空 */
   notes: string[];
@@ -97,6 +114,27 @@ export function validateReaderAdviceAnswer(
   const summary = clean(parsed.summary, READER_ADVICE_LIMITS.summary);
   const summaryMarks = summary ? marksFor(summary, existing, knownPercents) : [];
 
+  /*
+    良いところ（1.9）。**上限で切らない**——見てほしい所の上限（4つ）は
+    「どれから手を付けるかで止まる」ための歯止めで、ほめる所には当たらない。
+    壊れた応答への歯止めだけは共通の上限（`PRAISE_MAX_ITEMS`）で持つ。
+  */
+  const strengths: ReaderAdviceStrength[] = [];
+  let ungrounded = 0;
+  const rawStrengths = Array.isArray(parsed.strengths) ? parsed.strengths : [];
+  for (const entry of rawStrengths) {
+    if (strengths.length >= PRAISE_MAX_ITEMS) break;
+    if (!isRecord(entry)) continue;
+    const body = clean(entry.body, READER_ADVICE_LIMITS.body);
+    if (!body || isNoAdviceFiller(body)) continue;
+    const title = clean(entry.title, READER_ADVICE_LIMITS.title);
+    if (marksFor(`${title} ${body}`, existing, knownPercents).length > 0) {
+      ungrounded++;
+      continue;
+    }
+    strengths.push({ title: title && isNoAdviceFiller(title) ? "" : title, body });
+  }
+
   const points: ReaderAdvicePoint[] = [];
   const rawPoints = Array.isArray(parsed.points) ? parsed.points : [];
   let overflow = 0;
@@ -105,6 +143,9 @@ export function validateReaderAdviceAnswer(
     const body = clean(entry.body, READER_ADVICE_LIMITS.body);
     // 本文の無い項目は、見出しだけあっても中身が無い
     if (!body) continue;
+    // 「直すべき所は見当たりません」は**見てほしい所が0件だという答え**で、
+    // 1件の項目ではない（1.9の5）。並べると中身の無い行が欄を占める
+    if (isNoAdviceFiller(body)) continue;
     if (points.length >= READER_ADVICE_LIMITS.points) {
       overflow++;
       continue;
@@ -117,7 +158,8 @@ export function validateReaderAdviceAnswer(
     });
   }
 
-  if (!summary && points.length === 0) return undefined;
+  // **見てほしい所が0件でも、良いところがあれば読めた答えである**（1.9の1）
+  if (!summary && points.length === 0 && strengths.length === 0) return undefined;
 
   if (trimmed > 0) {
     notes.push(`字数の上限を超えた ${trimmed} か所を切り詰めました。`);
@@ -130,7 +172,12 @@ export function validateReaderAdviceAnswer(
       `見てほしい所が上限（${READER_ADVICE_LIMITS.points}つ）を超えたので、あとの ${overflow} つを外しました。`
     );
   }
-  return { summary, summaryMarks, points, notes };
+  if (ungrounded > 0) {
+    notes.push(
+      `材料に無い話数や数字でほめていた ${ungrounded} 件を外しました。`
+    );
+  }
+  return { summary, summaryMarks, strengths, points, notes };
 }
 
 function isEcho(body: string): boolean {

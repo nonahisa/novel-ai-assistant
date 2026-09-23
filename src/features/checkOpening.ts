@@ -206,7 +206,8 @@ export async function checkOpening(
   }
   if (responseText === undefined) return CHECK_CANCELLED;
 
-  const result = parseOpeningCheck(responseText);
+  // 送った冒頭を渡す。**ほめる欄の引用は、この本文と照合して残す**（1.9）
+  const result = parseOpeningCheck(responseText, material.openingText);
   if (!result) {
     // **応答の中身は捨てない。** 通知には出さなくても、ログには残す
     logFailure("冒頭診断", {
@@ -317,6 +318,13 @@ export function renderOpeningCheck(report: OpeningCheckReport): string {
   const lines: string[] = [
     `# ${OPENING_CHECK_KIND}：${report.workTitle}`,
     "",
+    /*
+      **ほめる欄をいちばん先に出す**（プロンプト設計書1.9の4、作者の方針
+      2026-09-24「ほめることができる場所は、省略せずきちんとほめて」）。
+      表や総評の後ろへ回すと、読み終える前に閉じられて届かない。
+      折りたたまず、件数で切らない
+    */
+    ...strengthLines(report.result),
     "## 読者に伝わるか（5W1H）",
     "",
     `| 要素 | 伝わるか | 根拠・理由 |`,
@@ -354,7 +362,7 @@ export function renderOpeningCheck(report: OpeningCheckReport): string {
   }
 
   lines.push("", "## 総評", "");
-  lines.push(report.result.advice || "総評が返りませんでした。");
+  lines.push(adviceLine(report.result));
 
   lines.push(
     "",
@@ -365,6 +373,45 @@ export function renderOpeningCheck(report: OpeningCheckReport): string {
   );
 
   return lines.join("\n");
+}
+
+/**
+ * 効いている所の節。
+ *
+ * **引用は照合済みのものだけが届く**（`parseOpeningCheck`）。落とした数は
+ * 黙らずに書く——「AIはもっと挙げたが、本文に無い文だった」ことが
+ * 作者に見えないと、ほめる所が少ない冒頭だと読まれてしまう。
+ */
+function strengthLines(result: OpeningCheckResult): string[] {
+  const lines = ["## 効いている所", ""];
+  if (result.strengths.length === 0) {
+    lines.push("本文から引いて示せる、効いている所は返りませんでした。");
+  } else {
+    for (const item of result.strengths) {
+      lines.push(`- 「${item.quote}」——${item.why}`);
+    }
+  }
+  if (result.strengthsDropped > 0) {
+    lines.push(
+      "",
+      `本文に見つからない引用のもの ${result.strengthsDropped}件は外しました。`
+    );
+  }
+  lines.push("");
+  return lines;
+}
+
+/**
+ * 総評の1行。
+ *
+ * **直す所が無いことを、返らなかったことと取り違えない**（1.9の1）。
+ * 欄が在って空なら、それは「直す所は無い」というAIの答えである。
+ */
+function adviceLine(result: OpeningCheckResult): string {
+  if (result.advice) return result.advice;
+  return result.adviceAnswered
+    ? "直すべき所は見当たりません。"
+    : "総評が返りませんでした。";
 }
 
 function elementMark(judgement: OpeningElementJudgement | undefined): string {

@@ -131,6 +131,26 @@ describe("P-27 単話プロットの検査のプロンプト", () => {
     expect(EPISODE_PLOT_CHECK_SYSTEM_PROMPT).toContain("JSON");
     expect(EPISODE_PLOT_CHECK_SYSTEM_PROMPT).toContain("書き直");
   });
+
+  test("良いところを頼み（件数で絞らない）、指摘は0件でよいと言う（プロンプト設計書1.9）", () => {
+    const prompt = buildEpisodePlotCheckPrompt(CHECK_INPUT);
+    expect(prompt).toContain("strengths");
+    expect(prompt).toContain("0件でも構いません");
+    expect(prompt).toContain("数を絞る必要はありません");
+    expect(EPISODE_PLOT_CHECK_SCHEMA.required).toContain("strengths");
+    // 良いところの見本の理由も、返ってきたら検証が弾く言い換えである
+    const { strengths } = validateEpisodePlotCheck(
+      {
+        findings: [],
+        strengths: EPISODE_PLOT_CHECK_HINTS.map((hint) => ({
+          item: ITEMS[0].text,
+          why: hint,
+        })),
+      },
+      { items: ITEMS, maxFindings: 3 }
+    );
+    expect(strengths).toEqual([]);
+  });
 });
 
 const CONTRAST_INPUT = {

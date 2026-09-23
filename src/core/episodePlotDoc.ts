@@ -232,6 +232,24 @@ export function episodePlotCompletionParts(result: {
 }
 
 /**
+ * 単話プロットの検査（P-27）の完了の知らせの末尾の一言（プロンプト設計書1.9）。
+ *
+ * **指摘0件を黙らない**。0件のときに何も書かないと、「AIが何も
+ * 言わなかった」のか「直す所が無い」のかが分からない。ただし**失敗した
+ * ときは書かない**——読めなかった回を「見当たりません」と言うと、
+ * 確かめていないことを確かめたことにしてしまう。
+ */
+export function episodePlotReviewTail(result: {
+  findingCount: number;
+  failed: boolean;
+}): string {
+  if (result.failed) return "";
+  return result.findingCount > 0
+    ? "プロットは書き換えていません。 直すかどうかは作者が決めます。"
+    : "直すべき所は見当たりません。";
+}
+
+/**
  * そのファイルが単話プロットなら、その話数（設計書6.36.3）。
  *
  * **置き場まで見る。** 名前だけで決めると、本文の「第3話.md」を単話

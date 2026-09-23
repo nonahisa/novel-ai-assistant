@@ -180,6 +180,82 @@ describe("P-27 展開の検査の検証", () => {
   });
 });
 
+/**
+ * 助言の構え（プロンプト設計書1.9、作者の方針 2026-09-24）。
+ * 「無理に助言を言わなくてもいい。ほめることができる場所は、省略せずきちんとほめて」
+ */
+describe("P-27 良いところ（1.9）", () => {
+  test("指摘0件＋良いところありの応答が通り、良いところは実在の行で残る", () => {
+    const result = validateEpisodePlotCheck(
+      {
+        findings: [],
+        strengths: [
+          { item: "形見の懐中時計を見つける", why: "目標の手がかりが早めに置かれている" },
+          // 一部だけ写してきても実在の行として拾う（指摘と同じ物差し）
+          { item: "老人が訪ねて", why: "外から話を動かす出来事になっている" },
+        ],
+      },
+      { items: ITEMS, maxFindings: 5 }
+    );
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toEqual([]);
+    expect(result.strengths).toEqual([
+      { quote: "形見の懐中時計を見つける", why: "目標の手がかりが早めに置かれている" },
+      { quote: "老人が訪ねてくる", why: "外から話を動かす出来事になっている" },
+    ]);
+  });
+
+  test("箇条書きに無い行をほめたものは落とし、数を残す", () => {
+    const result = validateEpisodePlotCheck(
+      {
+        findings: [],
+        strengths: [
+          { item: "王都で剣を買う", why: "作り物" },
+          { item: "朝、兄の部屋を片付ける", why: "日常から入っている" },
+        ],
+      },
+      { items: ITEMS, maxFindings: 5 }
+    );
+    expect(result.strengths.map((item) => item.quote)).toEqual(["朝、兄の部屋を片付ける"]);
+    expect(result.strengthsDropped).toBe(1);
+  });
+
+  test("理由が埋め草・出力例の言い換えなら、良いところにしない", () => {
+    const result = validateEpisodePlotCheck(
+      {
+        findings: [],
+        strengths: [
+          { item: "朝、兄の部屋を片付ける", why: "特になし" },
+          { item: "老人が訪ねてくる", why: "（効いている理由）" },
+        ],
+      },
+      { items: ITEMS, maxFindings: 5 }
+    );
+    expect(result.strengths).toEqual([]);
+  });
+
+  test("良いところは件数の上限（maxFindings）で切らない", () => {
+    const result = validateEpisodePlotCheck(
+      {
+        findings: [],
+        strengths: ITEMS.map((item) => ({ item: item.text, why: "効いている" })),
+      },
+      { items: ITEMS, maxFindings: 1 }
+    );
+    expect(result.strengths).toHaveLength(3);
+  });
+
+  test("読み取りで良いところの欄を捨てない（キャッシュへ残る形）", () => {
+    const parsed = parseEpisodePlotFindings(
+      JSON.stringify({ findings: [], strengths: [{ item: "老人が訪ねてくる", why: "理由" }] })
+    );
+    expect(parsed).toEqual({
+      findings: [],
+      strengths: [{ item: "老人が訪ねてくる", why: "理由" }],
+    });
+  });
+});
+
 describe("P-28 本文との照合の検証", () => {
   test("本文に実在する引用は通り、行番号が付く", () => {
     const { accepted } = contrast([

@@ -95,9 +95,12 @@ export function openingPrompt(input: OpeningPromptInput) {
   };
 }
 
-export function openingValidate(input: { response: string }) {
-  // **解析も製品のもの**（前後に説明が付くモデルがある）
-  const result = parseOpeningCheck(input.response);
+export function openingValidate(input: { folder: string; response: string }) {
+  // **解析も製品のもの**（前後に説明が付くモデルがある）。
+  // **ほめる欄の引用は、送ったのと同じ冒頭と照合する**（プロンプト設計書1.9）。
+  // 照合せずに通すと、製品では落ちる作り物の引用がここでは残る——
+  // 製品に無い振る舞いを外から見せることになる
+  const result = parseOpeningCheck(input.response, readOpening(input.folder).text);
   if (!result) {
     throw new McpToolError(
       "応答を読み取れませんでした（冒頭診断のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
@@ -108,6 +111,6 @@ export function openingValidate(input: { response: string }) {
 
 export async function openingRun(input: OpeningPromptInput & RunnerInput) {
   return runOnce(input, openingPrompt(input), (response) =>
-    openingValidate({ response })
+    openingValidate({ folder: input.folder, response })
   );
 }

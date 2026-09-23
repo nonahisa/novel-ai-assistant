@@ -3,8 +3,10 @@ import {
   parseTitleFitRecord,
   parseTitleFitResponse,
   titleFitBatches,
+  splitTitleFit,
   titleFitCandidates,
   titleFitTargets,
+  TITLE_FIT_REACHES_SCORE,
   TITLE_FIT_BATCH,
   TITLE_FIT_CANDIDATES,
   TITLE_FIT_COMMENT_MAX,
@@ -173,6 +175,23 @@ describe("直す候補", () => {
   test("同点は元の並び（話の順）を崩さない", () => {
     const picked = titleFitCandidates([item("e1", 50), item("e2", 50)]);
     expect(picked.map((entry) => entry.id)).toEqual(["e1", "e2"]);
+  });
+
+  test("よく届いている題は直す候補に回さず、件数で切らずに元の並びで返す（プロンプト設計書1.9）", () => {
+    const items = [
+      item("e1", 95),
+      item("e2", 20),
+      item("e3", TITLE_FIT_REACHES_SCORE),
+      item("e4", 80),
+      item("e5", 90),
+      item("e6", 85),
+      item("e7", 99),
+    ];
+    const { reaching, candidates } = splitTitleFit(items);
+    expect(reaching.map((entry) => entry.id)).toEqual(["e1", "e3", "e4", "e5", "e6", "e7"]);
+    expect(candidates.map((entry) => entry.id)).toEqual(["e2"]);
+    // どれも高ければ、直す候補は0件（件数で作らない）
+    expect(splitTitleFit([item("e1", 90)]).candidates).toEqual([]);
   });
 });
 

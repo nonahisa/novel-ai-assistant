@@ -1,5 +1,6 @@
 import { normalizeForComparison } from "./groundedEvidence";
 import { isPlaceholderText } from "./placeholderText";
+import { readGroundedPraise, type PraiseItem } from "./praise";
 // 引用の長さの上限は**逸脱検知が持つものを借りる**（設計書6.77の第2段）。
 // 以前は同名同値の定数を両方が持っており、片方だけ直す壊れ方ができた
 import { MAX_EXCERPT_CHARS } from "./deviationValidation";
@@ -123,7 +124,7 @@ export function lineOfExcerpt(text: string, excerpt: string): number | null {
  */
 export function parseEpisodePlotFindings(
   text: string
-): { findings: unknown[] } | null {
+): { findings: unknown[]; strengths?: unknown[] } | null {
   const attempts = [
     text,
     text.replace(/^[\s\S]*?```(?:json)?\s*/i, "").replace(/```[\s\S]*$/, ""),
@@ -135,7 +136,15 @@ export function parseEpisodePlotFindings(
     try {
       const parsed: unknown = JSON.parse(candidate.trim());
       if (isRecord(parsed) && Array.isArray(parsed.findings)) {
-        return { findings: parsed.findings };
+        /*
+          **良いところの欄も残す**（P-27 の 1.1、プロンプト設計書1.9）。
+          この戻り値がそのままキャッシュへ入るので、ここで捨てると
+          2回目以降は良いところが1件も出なくなる。欄が無い応答（P-28・
+          1.0 の古い答え）では足さない——無いものを空配列で作らない
+        */
+        return Array.isArray(parsed.strengths)
+          ? { findings: parsed.findings, strengths: parsed.strengths }
+          : { findings: parsed.findings };
       }
     } catch {
       // 次の候補を試す
@@ -196,6 +205,38 @@ export interface EpisodePlotFinding {
 }
 
 export function validateEpisodePlotCheck(
+  raw: unknown,
+  input: { items: readonly EpisodePlotItem[]; maxFindings: number }
+): {
+  accepted: EpisodePlotFinding[];
+  rejected: RejectedEpisodePlotFinding[];
+  /**
+   * 効いている展開（プロンプト設計書1.9）。`quote` は**実在の行そのもの**。
+   * 件数の上限（`maxFindings`）は掛けない——上限は「作り直しの要求に
+   * ならないため」の歯止めで、ほめる所には当たらない
+   */
+  strengths: PraiseItem[];
+  /** 箇条書きに無い行をほめていたので落とした数。**黙って減らさない** */
+  strengthsDropped: number;
+} {
+  const praise = readGroundedPraise(
+    isRecord(raw) ? raw.strengths : undefined,
+    (quote) => matchPlotItem(quote, input.items)?.text,
+    { quote: "item", why: "why" }
+  );
+  // 出力例の言い換え（「効いている理由」）がそのまま返ったものは、理由ではない
+  const strengths = praise.items.filter(
+    (item) => !isEmptyAnswer(item.why, EPISODE_PLOT_CHECK_HINTS)
+  );
+  const findingsResult = validateEpisodePlotFindings(raw, input);
+  return {
+    ...findingsResult,
+    strengths,
+    strengthsDropped: praise.notFound,
+  };
+}
+
+function validateEpisodePlotFindings(
   raw: unknown,
   input: { items: readonly EpisodePlotItem[]; maxFindings: number }
 ): {
