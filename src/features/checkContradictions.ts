@@ -68,7 +68,13 @@ import {
   pastSceneMaxChars,
   promptVersionWithPastScenes,
   PastSceneIndex,
+  type PastSceneSemantic,
 } from "../core/pastSceneSelect";
+import {
+  checkVectorsNote,
+  describeVectorUnavailable,
+  openCheckVectors,
+} from "./vectorSearch";
 import { loadExcerptSources } from "../core/manuscriptSources";
 import type { ExcerptSource } from "../core/mentionExcerpts";
 import {
@@ -533,10 +539,25 @@ export async function checkContradictions(
   // **渡りうるときだけ組む**（0.32.6のレビュー）。合本（1ファイルに全話）の
   // 作品では、全チャンクが合本の最小話数を名乗るので抜粋は必ず0件になる。
   // それでも索引を組み、確認ダイアログでは「渡します」と告げていた
+  /*
+    **意味の近い前の場面も渡すか**（設計書6.19.10。作者の依頼 2026-09-23 の2）。
+
+    作者が「検知にもベクトル検索を使う」を入れ、索引が本文に追いついている
+    ときだけ。**切のとき（既定）は `off` で、抜粋も鍵もこれまでと1文字も
+    変わらない。** 索引のベクトルだけを使い、Ollama は呼ばない
+    （`openCheckVectors` の注釈）。
+  */
+  const checkVectors = await openCheckVectors(
+    work,
+    buildPastScenes(episodeSources).map((scene) => scene.hash)
+  );
   const pastSceneIndex = collectPastScenes(
     episodeSources,
-    chunks.map((chunk) => chunk.chapterStart)
+    chunks.map((chunk) => chunk.chapterStart),
+    checkVectors.kind === "on" ? { lookup: checkVectors.lookup } : undefined
   );
+  /** 名前で入った場面・意味で入った場面の数（終わりの記録に出す） */
+  const pastSceneTally = { byName: 0, byMeaning: 0, chunksWithMeaning: 0 };
   /** チャンクごとの抜粋。鍵を決めるときと送るときで、同じものを使う */
   const pastSceneByChunk = new Map<string, string>();
 
@@ -711,9 +732,14 @@ export async function checkContradictions(
       // **送る量が増えることを黙らない**（設計書6.74）。過去の本文を
       // 足すので、有料AIでは料金にも効く
       pastSceneIndex
-        ? `前の話の本文からも、名前の出てくる場面を探して渡します` +
+        ? (checkVectors.kind === "on"
+            ? "前の話の本文からも、名前の出てくる場面と、意味の近い場面" +
+              "（ベクトル検索）を探して渡します"
+            : "前の話の本文からも、名前の出てくる場面を探して渡します") +
           `（${pastSceneIndex.size}か所から最大${pastSceneBudget}字）。`
         : "",
+      // 使う設定なのに使えないときだけ、何をすれば使えるかを添える
+      pastSceneIndex ? checkVectorsNote(checkVectors, "意味の近い前の場面も渡せます") : "",
       // **引き継ぐことを黙らない**（設計書6.10.6）。本文は送らないが、
       // 載る人物が増えるので、指摘の数も変わる
       carryOverChapters > 0
@@ -835,6 +861,18 @@ export async function checkContradictions(
       `${chunks.length}チャンク / ${chunkNote} / ` +
       `v${CONTRADICTION_CHECK_VERSION}`
   );
+  // **ベクトル検索を使ったかを残す**（設計書6.19.10）。使わない設定（既定）では
+  // 何も書かない——これまでの記録の形を変えない
+  if (checkVectors.kind === "on") {
+    logStep(
+      `矛盾検知：前の話の場面を、名前と意味の近さ（ベクトル検索）で選びます` +
+        `（索引に載っている場面 ${checkVectors.covered}/${checkVectors.total}）`
+    );
+  } else if (checkVectors.kind === "unavailable") {
+    logStep(
+      `矛盾検知：ベクトル検索は使えないため、前の話の場面は名前だけで選びます（${describeVectorUnavailable(checkVectors.reason)}）`
+    );
+  }
 
   /*
     **落としたことを言う**（設計書6.10.6）。
@@ -1223,6 +1261,15 @@ export async function checkContradictions(
 
   const verifyNote = describeVerifyResults(verifyRejected, verifyUndecided);
   if (verifyNote) logStep(`矛盾検知の検証: ${verifyNote}`);
+  // 意味で足した場面の数。**指摘の根拠になったか、誤検知の種になったかを
+  // 後から測る手がかり**（見逃しと誤検出の両方を測る。CLAUDE.md の失敗2）
+  if (checkVectors.kind === "on") {
+    logStep(
+      `矛盾検知：前の話の場面は、名前で${pastSceneTally.byName}件・` +
+        `意味の近さで${pastSceneTally.byMeaning}件` +
+        `（意味で足したチャンク ${pastSceneTally.chunksWithMeaning}件）`
+    );
+  }
 
   const accepted = sortContradictions(dedupe(issues));
 
@@ -1347,17 +1394,23 @@ export async function checkContradictions(
     const remembered = pastSceneByChunk.get(chunk.hash);
     if (remembered !== undefined) return remembered;
 
-    // **名前が1つも出ないチャンクでは引かない。** 検索語が無いまま引くと
-    // 無関係な場面が並び、従来より悪くなる（＝そのときは従来と同じ入力）
-    const selected = pastSceneIndex
-      ? pastSceneIndex.select({
+    // **名前が1つも出ないチャンクでは、名前では引かない。** 検索語が無いまま
+    // 引くと無関係な場面が並び、従来より悪くなる（＝そのときは従来と同じ入力）。
+    // 意味の近さで引くのは索引を渡したときだけで、下限より遠い場面は入れない
+    const detail = pastSceneIndex
+      ? pastSceneIndex.selectWithDetail({
           chapter: chunk.chapterStart,
           terms: settings.namesIn(chunk.text),
           maxChars: pastSceneBudget,
+          // 索引を渡していなければ見られない（意味の近さを測るときだけ使う）
+          chunkText: chunk.text,
         })
-      : "";
-    pastSceneByChunk.set(chunk.hash, selected);
-    return selected;
+      : { text: "", byName: 0, byMeaning: 0 };
+    pastSceneTally.byName += detail.byName;
+    pastSceneTally.byMeaning += detail.byMeaning;
+    if (detail.byMeaning > 0) pastSceneTally.chunksWithMeaning++;
+    pastSceneByChunk.set(chunk.hash, detail.text);
+    return detail.text;
   }
 
   /**
@@ -1832,13 +1885,15 @@ function carryOverBodiesOf(
 function collectPastScenes(
   sources: readonly ExcerptSource[],
   /** チャンクの話数。**渡りうるかの判断に要る**（`anyPastSceneReachable`） */
-  chunkChapters: readonly (number | null)[]
+  chunkChapters: readonly (number | null)[],
+  /** 意味の近さも測るときだけ渡す（設計書6.19.10）。無ければ名前だけ */
+  semantic?: PastSceneSemantic
 ): PastSceneIndex | undefined {
   try {
     const scenes = buildPastScenes(sources);
     if (scenes.length === 0) return undefined;
     if (!anyPastSceneReachable(scenes, chunkChapters)) return undefined;
-    return new PastSceneIndex(scenes);
+    return new PastSceneIndex(scenes, semantic);
   } catch (error) {
     logFailure("矛盾検知：過去の場面の索引づくり", {
       詳細: error instanceof Error ? error.message : String(error),

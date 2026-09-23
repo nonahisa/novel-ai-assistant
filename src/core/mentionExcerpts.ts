@@ -25,6 +25,12 @@ export interface ExcerptSource {
    * 使わない機能（掘り下げ・相談）は見なくてよい。
    */
   chapter?: number | null;
+  /**
+   * 元のファイル。場面検索・似た場面の検出で「押すとその箇所を開く」ために
+   * 持つ（設計書6.19.10）。合本は中の話も同じファイルを指す。使わない機能は
+   * 見なくてよい。
+   */
+  filePath?: string;
 }
 
 export interface MentionExcerpt {

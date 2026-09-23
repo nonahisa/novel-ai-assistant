@@ -175,6 +175,8 @@ import {
   isVectorSearchEnabled,
   removeVectorIndex,
 } from "./features/vectorSearch";
+import { searchScenes } from "./features/sceneSearch";
+import { findSimilarScenes } from "./features/similarScenes";
 import {
   registerProgressCancelCommand,
   withProgress,
@@ -4232,6 +4234,30 @@ export async function activate(
       const work = await resolveWork(node, registry);
       if (!work) return;
       await showChronicle(work);
+    })
+  );
+
+  /*
+    場面検索と似た場面の検出（設計書6.19.10）。AIは使わない——相談と同じ
+    ベクトル検索の索引（と語句一致）で探すだけ。本文へ飛ぶ道は1本だけ
+    （`revealLocation.ts`）。原稿エディタで書いていればその画面のまま示す。
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.searchScenes", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await searchScenes(work, {
+        revealInManuscript: (filePath, line) =>
+          manuscriptProvider.revealLine(filePath, line),
+      });
+    }),
+    registerCommand("novelai.findSimilarScenes", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry);
+      if (!work) return;
+      await findSimilarScenes(work, {
+        revealInManuscript: (filePath, line) =>
+          manuscriptProvider.revealLine(filePath, line),
+      });
     })
   );
 

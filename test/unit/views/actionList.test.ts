@@ -996,6 +996,9 @@ describe("校正・校閲の並び", () => {
       "novelai.runReaderTargetDiagnosis",
       "novelai.openTargetSheet",
       "novelai.showThreeCircles",
+      // 別の話どうしの似た場面（設計書6.19.10）。読者が「前にも読んだ」と
+      // 感じるかを見る道具として、診断の末尾に置く
+      "novelai.findSimilarScenes",
     ]);
   });
 
@@ -1003,7 +1006,8 @@ describe("校正・校閲の並び", () => {
     const visible = sectionOf("読者診断")
       .section.items.filter((item) => !item.hiddenFromActionList)
       .map((item) => item.label);
-    expect(visible).toEqual(["冒頭診断", "ターゲット読者"]);
+    // 類似場面検出は読者の入口ではない（読者タイプを扱わない）。並びは末尾
+    expect(visible).toEqual(["冒頭診断", "ターゲット読者", "類似場面検出"]);
   });
 });
 

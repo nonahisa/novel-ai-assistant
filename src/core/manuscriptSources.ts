@@ -42,6 +42,7 @@ export async function loadExcerptSources(
           label: collectedEpisodeLabel(episode, inner),
           text: body,
           chapter: inner.chapter,
+          filePath: episode.filePath,
         });
       }
       continue;
@@ -53,6 +54,7 @@ export async function loadExcerptSources(
       label: episodeLabel(episode),
       text: body,
       chapter: episodeChapter(episode),
+      filePath: episode.filePath,
     });
   }
 

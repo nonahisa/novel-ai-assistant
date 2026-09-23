@@ -83,6 +83,25 @@ export interface ResumeMemo {
   text: string;
 }
 
+/**
+ * 単話プロットを問いにして引いた、前の話の場面（設計書6.19.10）。
+ *
+ * - `found`       … 見つかった場面（出典と、場面の頭の数行）
+ * - `none`        … 探したが、近い場面が無かった
+ * - `unavailable` … ベクトル検索が使えない。`hint` は何をすれば使えるかの1文
+ */
+export type ResumeRelatedScenes =
+  | { kind: "found"; scenes: readonly ResumeRelatedScene[] }
+  | { kind: "none" }
+  | { kind: "unavailable"; hint: string };
+
+export interface ResumeRelatedScene {
+  /** 出典（「第3話 再会」） */
+  label: string;
+  /** 場面の頭。呼び出し側で短く切って渡す */
+  excerpt: string;
+}
+
 /** 今日の執筆量と目標。目標が未設定のときは呼び出し側で null にする */
 export interface ResumeTodayGoal {
   written: number;
@@ -146,6 +165,13 @@ export interface ResumeSheetInput {
    */
   openMemos?: readonly ResumeMemo[];
   episodePlot: ResumeEpisodePlot;
+  /**
+   * これから書く話に関係しそうな前の場面（設計書6.19.10）。
+   *
+   * **省略したら節ごと出さない**——単話プロットが無い話・ベクトル検索を
+   * 使わない作品では、これまでの1枚のままにする。
+   */
+  relatedScenes?: ResumeRelatedScenes;
   /** 今日の目標。取れないときは null（**無理に0を出さない**） */
   todayGoal: ResumeTodayGoal | null;
   /** 読めなかった材料の断り書き。**黙って落とさない** */
@@ -210,6 +236,9 @@ export function buildResumeSheet(input: ResumeSheetInput): string {
   lines.push(...foreshadowSection(input.openForeshadows));
   lines.push(...memoSection(input.openMemos ?? []));
   lines.push(...episodePlotSection(input.episodePlot));
+  // プロットのすぐ下に置く——プロットを読んで「前にどう書いたか」を
+  // 思い出したくなる、その場所で出す
+  lines.push(...relatedScenesSection(input.relatedScenes));
   lines.push(...nextStepsSection());
 
   return lines.join("\n");
@@ -359,6 +388,35 @@ function episodePlotSection(plot: ResumeEpisodePlot): string[] {
   }
 
   lines.push(`（${plot.path}）`, "", plot.body.trimEnd(), "");
+  return lines;
+}
+
+/**
+ * これから書く話に関係しそうな前の場面（設計書6.19.10）。
+ *
+ * **本文は引用で出す**（前回どこまでの節と同じ理由——「-」で始まる行が
+ * この1枚の箇条書きに見えないように）。**飛び先のリンクは置かない**
+ * （次にすることの節と同じ理由。押せないリンクになる）。
+ */
+function relatedScenesSection(related: ResumeRelatedScenes | undefined): string[] {
+  if (!related) return [];
+  const lines = ["## この話に関係しそうな前の場面", ""];
+  if (related.kind === "unavailable") {
+    lines.push(related.hint, "");
+    return lines;
+  }
+  if (related.kind === "none" || related.scenes.length === 0) {
+    lines.push("単話プロットに近い前の場面は見つかりませんでした。", "");
+    return lines;
+  }
+  lines.push("単話プロットを手がかりに、意味の近い場面を探しました（ベクトル検索）。", "");
+  for (const scene of related.scenes) {
+    lines.push(`- ${scene.label}`);
+    for (const line of scene.excerpt.split("\n")) {
+      lines.push(line.length > 0 ? `  > ${line}` : "  >");
+    }
+  }
+  lines.push("");
   return lines;
 }
 

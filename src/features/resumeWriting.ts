@@ -49,10 +49,18 @@ import {
   type ResumeForeshadow,
   type ResumeMemo,
   type ResumeOverview,
+  type ResumeRelatedScenes,
   type ResumeSynopsis,
   type ResumeTodayGoal,
 } from "../core/resumeSheet";
 import { parseMemos } from "../core/sceneMemo";
+import { parseEpisodePlot } from "../core/episodePlotDoc";
+import {
+  prepareRetrieval,
+  searchScenesByMeaning,
+  vectorReadiness,
+  vectorSetupHint,
+} from "./vectorSearch";
 
 /**
  * 執筆再開支援と単話プロット（設計書6.36）のうち、**AIを使わない口**。
@@ -82,6 +90,7 @@ export async function resumeWriting(
   const config = await readWorkConfig(work);
   const paths = workPaths(work, config);
 
+  const episodePlot = await readEpisodePlot(paths, chapter, notices);
   const sheet = buildResumeSheet({
     workTitle: work.title,
     overview: await loadOverview(work, episodes, chapter, notices),
@@ -97,7 +106,8 @@ export async function resumeWriting(
     synopses: await recentSynopses(work, chapter, format, notices),
     openForeshadows: await loadOpenForeshadows(work, notices),
     openMemos: await loadOpenMemos(episodes, format, notices),
-    episodePlot: await readEpisodePlot(paths, chapter, notices),
+    episodePlot,
+    relatedScenes: await relatedScenesFor(work, episodePlot, chapter, notices),
     todayGoal: await todayGoal(work, deviceId, notices),
     notices,
   });
@@ -110,6 +120,91 @@ export async function resumeWriting(
     { preview: false },
     { work }
   );
+}
+
+/** 関係しそうな前の場面を、何話ぶん並べるか。1枚に収まる数にする */
+const RELATED_SCENE_COUNT = 5;
+/** 1件あたりの引用の長さ（場面は400字。頭だけで思い出せれば足りる） */
+const RELATED_EXCERPT_CHARS = 120;
+
+/**
+ * これから書く話に関係しそうな前の場面（設計書6.19.10。作者の依頼
+ * 2026-09-23 の3）。
+ *
+ * **単話プロットに中身があるときだけ**探す（目標と展開の箇条書きを問いに
+ * する。雛形の問いかけのままなら探さない——雛形の言葉で引くと、どの作品でも
+ * 同じ場面が並ぶ）。ベクトル検索が使えなければ、何をすれば使えるかを1行だけ出す。
+ *
+ * **AIは呼ばない。** 手元の Ollama で問いを1回埋め込むだけ（料金はかからない）。
+ * 失敗しても1枚は出す（断り書きを足して、節は「使えない」にする）。
+ */
+async function relatedScenesFor(
+  work: WorkEntry,
+  plot: ResumeEpisodePlot,
+  chapter: number | null,
+  notices: string[]
+): Promise<ResumeRelatedScenes | undefined> {
+  if (plot.kind !== "found" || chapter === null) return undefined;
+  const parsed = parseEpisodePlot(plot.body);
+  const query = [parsed.goal, ...parsed.items.map((item) => item.text)]
+    .map((text) => text.trim())
+    .filter((text) => text.length > 0)
+    .join("\n");
+  if (!query) return undefined;
+
+  const purpose = "この話に関係しそうな前の場面もここに出せます";
+  const readiness = await vectorReadiness(work);
+  if (!readiness.ready) {
+    return { kind: "unavailable", hint: vectorSetupHint(readiness.reason, purpose) };
+  }
+  try {
+    const context = await prepareRetrieval(work);
+    if (!context.vector) {
+      return {
+        kind: "unavailable",
+        hint: vectorSetupHint(context.vectorUnavailable ?? "noIndex", purpose),
+      };
+    }
+    const hits = await searchScenesByMeaning(context, query, {
+      limit: RELATED_SCENE_COUNT,
+      beforeChapter: chapter,
+      onePerEpisode: true,
+      minScore: RELATED_MIN_SIMILARITY,
+    });
+    if (hits.length === 0) return { kind: "none" };
+    return {
+      kind: "found",
+      scenes: hits.map((hit) => ({
+        label: hit.item.label,
+        excerpt: shortExcerpt(hit.item.text),
+      })),
+    };
+  } catch (error) {
+    logFailure("執筆再開：関係しそうな前の場面を探せませんでした", {
+      詳細: error instanceof Error ? error.message : String(error),
+    });
+    notices.push("関係しそうな前の場面を探せませんでした（理由は記録に残しました）。");
+    return undefined;
+  }
+}
+
+/**
+ * 近さの下限。**単話プロットと本文は書き方が違う**（箇条書きと地の文）ので、
+ * 場面どうし（`PAST_SCENE_MIN_SIMILARITY`）より低く置く。値の決め方は設計書6.19.10。
+ */
+const RELATED_MIN_SIMILARITY = 0.5;
+
+/** 場面の頭を、行の切れ目で短く切る */
+function shortExcerpt(text: string): string {
+  const lines = text.split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
+  const out: string[] = [];
+  let length = 0;
+  for (const line of lines) {
+    if (length > 0 && length + line.length > RELATED_EXCERPT_CHARS) break;
+    out.push(line.length > RELATED_EXCERPT_CHARS ? `${line.slice(0, RELATED_EXCERPT_CHARS)}…` : line);
+    length += line.length;
+  }
+  return out.join("\n");
 }
 
 /**

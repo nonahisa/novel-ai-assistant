@@ -305,3 +305,90 @@ describe("渡りうるかを先に見る", () => {
     expect(anyPastSceneReachable(built, [null, 1, 5])).toBe(true);
   });
 });
+
+/**
+ * 意味の近い前の場面も渡す（設計書6.19.10。作者の依頼 2026-09-23 の2）。
+ *
+ * 名前で引く（6.74）だけでは、名前の出ない関係（「傷口」「薬草」）が
+ * 拾えない。ベクトル検索の索引があるときだけ、チャンクに入っている場面の
+ * ベクトルを問いにして、意味の近い前の場面を足す。
+ *
+ * **索引を渡さなければ、これまでと1文字も変わらない**——鍵が変わると
+ * 処理済みのキャッシュが飛ぶ（有料AIなら費用がかかる）。
+ */
+describe("意味の近い場面も渡す（索引があるときだけ）", () => {
+  const sources = [
+    source("第1話 薬草", 1, "薬師の婆は、裂けた傷口へ苦い葉を貼った。"),
+    source("第2話 湖畔", 2, "白鷺湖のほとりで舟を借りた。"),
+    source("第3話 市場", 3, "月島灯は市場で林檎を買った。"),
+    source("第5話 手当て", 5, "月島灯は腕の傷へ、また苦い葉を当てた。"),
+  ];
+  const built = buildPastScenes(sources);
+  const hashOf = (label: string): string =>
+    built.find((scene) => scene.label === label)!.hash;
+  // 第1話と第5話を近く、残りは遠く置いた作り物の索引
+  const vectors = new Map<string, Float32Array>([
+    [hashOf("第1話 薬草"), new Float32Array([1, 0, 0])],
+    [hashOf("第2話 湖畔"), new Float32Array([0, 1, 0])],
+    [hashOf("第3話 市場"), new Float32Array([0, 0.2, 1])],
+    [hashOf("第5話 手当て"), new Float32Array([0.95, 0.05, 0.1])],
+  ]);
+  const lookup = (hash: string): Float32Array | undefined => vectors.get(hash);
+  const chunkText = sources[3].text;
+
+  test("索引が無ければ、これまでと同じ文字列", () => {
+    const plain = new PastSceneIndex(built).select({
+      chapter: 5,
+      terms: ["月島灯"],
+      maxChars: 4000,
+    });
+    const withoutLookup = new PastSceneIndex(built).select({
+      chapter: 5,
+      terms: ["月島灯"],
+      maxChars: 4000,
+      chunkText,
+    });
+    expect(withoutLookup).toBe(plain);
+  });
+
+  test("名前の出ない、意味の近い前の場面を足す", () => {
+    const selected = new PastSceneIndex(built, { lookup }).select({
+      chapter: 5,
+      terms: ["月島灯"],
+      maxChars: 4000,
+      chunkText,
+    });
+    // 名前で当たる第3話に加えて、名前の出ない第1話（薬草）も入る
+    expect(selected).toContain("【第3話 市場】");
+    expect(selected).toContain("【第1話 薬草】");
+    // 遠い第2話は入れない（下限より遠い）
+    expect(selected).not.toContain("湖畔");
+  });
+
+  test("後の話・同じ話は、意味が近くても渡さない", () => {
+    const selected = new PastSceneIndex(built, { lookup }).select({
+      chapter: 1,
+      terms: [],
+      maxChars: 4000,
+      chunkText: sources[0].text,
+    });
+    expect(selected).toBe("");
+  });
+
+  test("何件が意味で、何件が名前で入ったかを数えられる（見逃しと誤検出を測るため）", () => {
+    const detail = new PastSceneIndex(built, { lookup }).selectWithDetail({
+      chapter: 5,
+      terms: ["月島灯"],
+      maxChars: 4000,
+      chunkText,
+    });
+    expect(detail.byName).toBe(1);
+    expect(detail.byMeaning).toBe(1);
+  });
+
+  test("同じ入力からは同じ文字列（鍵が揺れない）", () => {
+    const index = new PastSceneIndex(built, { lookup });
+    const options = { chapter: 5, terms: ["月島灯"], maxChars: 4000, chunkText };
+    expect(index.select(options)).toBe(index.select(options));
+  });
+});

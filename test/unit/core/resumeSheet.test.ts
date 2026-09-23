@@ -342,3 +342,54 @@ describe("前回どこまで書いたか（設計書6.36.1）", () => {
     expect(tail).toBe("");
   });
 });
+
+/**
+ * これから書く話に関係しそうな前の場面（設計書6.19.10。作者の依頼
+ * 2026-09-23 の3）。単話プロットを問いにして、ベクトル検索で前の話の
+ * 場面を引く。**渡されなければ節ごと出さない**（これまでの1枚のまま）。
+ */
+describe("関係しそうな前の場面", () => {
+  test("渡されなければ、これまでの1枚と1文字も変わらない", () => {
+    const before = buildResumeSheet(input());
+    const after = buildResumeSheet(input({ relatedScenes: undefined }));
+    expect(after).toBe(before);
+  });
+
+  test("単話プロットの節のすぐ下に、出典と引用を並べる", () => {
+    const sheet = buildResumeSheet(
+      input({
+        relatedScenes: {
+          kind: "found",
+          scenes: [
+            { label: "第3話 懐中時計", excerpt: "彼は懐中時計を握りしめた。" },
+            { label: "第7話 手紙", excerpt: "- 父の筆跡だった。" },
+          ],
+        },
+      })
+    );
+    // 単話プロットの中身（「## 視点」など）はそのまま出るので、
+    // 「単話プロットの後・次にすることの直前」で位置を見る
+    const list = headings(sheet);
+    const at = list.indexOf("この話に関係しそうな前の場面");
+    expect(at).toBeGreaterThan(list.indexOf("この話の単話プロット"));
+    expect(at).toBe(list.indexOf("次にすること") - 1);
+    expect(sheet).toContain("- 第3話 懐中時計");
+    // 本文は引用で出す（「-」で始まる行が、この1枚の箇条書きに見えないように）
+    expect(sheet).toContain("  > - 父の筆跡だった。");
+  });
+
+  test("使えないときは、何をすれば使えるかを1行だけ出す", () => {
+    const sheet = buildResumeSheet(
+      input({
+        relatedScenes: { kind: "unavailable", hint: "ベクトル検索の準備をすると、出せます。" },
+      })
+    );
+    expect(sheet).toContain("ベクトル検索の準備をすると、出せます。");
+  });
+
+  test("探して見つからなければ、そう書く（黙って節を消さない）", () => {
+    const sheet = buildResumeSheet(input({ relatedScenes: { kind: "none" } }));
+    expect(sheet).toContain("## この話に関係しそうな前の場面");
+    expect(sheet).toContain("見つかりませんでした");
+  });
+});

@@ -382,6 +382,7 @@ code --install-extension ".\novel-ai-assistant-$($v.TrimStart('v')).vsix" --forc
 | `novelai.vectorSearch.enabled` | `false` | 相談で使う意味検索（ベクトルDB）を使うか |
 | `novelai.vectorSearch.model` | `bge-m3` | 意味検索に使う埋め込みモデル（変更すると索引は作り直し） |
 | `novelai.vectorSearch.autoUpdate` | `true` | 相談を始めるときに、変更ぶんだけ索引を追加する |
+| `novelai.vectorSearch.useInChecks` | `false` | 矛盾検知で意味の近い前の場面も渡し、伏線回収確認で意味の近い箇所だけを照らす |
 | `novelai.chatLog.enabled` | `true` | 相談のやり取りを `.aiwriter/logs/chat.md` に残す（**原稿の一部を含みます**） |
 | `novelai.usageLog.enabled` | `true` | 送った量を `.aiwriter/logs/usage.md` に1行残す（字数だけ） |
 | `novelai.logs.retentionDays` | `7` | ログに残す日数（`0`で消さない） |

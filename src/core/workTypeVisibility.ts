@@ -285,6 +285,10 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   // 続きものでない作品には並べる筋が無い
   "novelai.openChronicle": "story",
   "novelai.editTimeline": "story",
+  // 場面検索と似た場面の検出（設計書6.19.10）。**書いた文字がある限り効く**
+  // ——探す・重なりを見るのに、話の連なりは要らない
+  "novelai.searchScenes": "allTypes",
+  "novelai.findSimilarScenes": "allTypes",
 
   /*
     新作をひと通り仕上げる（作者の指示、2026-09-19）。

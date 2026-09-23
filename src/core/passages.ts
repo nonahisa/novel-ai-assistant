@@ -12,6 +12,20 @@
  * （`retrievalCorpus.ts` は再exportで従来どおり使える）。
  */
 
+import { sha1Text } from "./hash";
+
+/**
+ * 場面の内容ハッシュ（ベクトル検索の索引の鍵）。
+ *
+ * **索引（`vectorIndex.ts`）はこの値でベクトルを持つ。** 矛盾検知の過去の
+ * 場面（`pastSceneSelect.ts`）が索引のベクトルを引くときも、同じ式で
+ * 数えないと1件も当たらない。だから式はここに1つだけ置く
+ * （`retrievalCorpus.ts` の `hashText` もこれを指す）。
+ */
+export function passageHash(text: string): string {
+  return sha1Text(text).slice(0, 24);
+}
+
 /** 本文を切る単位。相談パネルの抜粋窓（400字）に合わせる */
 export const PASSAGE_CHARS = 400;
 /** 隣の場面と重ねる量。場面の切れ目で文脈が消えるのを防ぐ */

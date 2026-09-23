@@ -3,7 +3,8 @@ import { sha1Text } from "./hash";
 import type { ExcerptSource } from "./mentionExcerpts";
 // **葉の部品から取る**（`retrievalCorpus` は台帳を読むために
 // VS Code APIを引き込む。ここは純粋関数だけで居たい）
-import { splitPassages } from "./passages";
+import { passageHash, splitPassages } from "./passages";
+import { passagesWithin, rankByNearest, type VectorLookup } from "./semanticRank";
 import { referenceBudgetChars } from "./sizeBudget";
 
 /**
@@ -40,6 +41,12 @@ export interface PastScene {
   /** この場面が書かれている話数。**これより後のチャンクにだけ渡す** */
   chapter: number;
   text: string;
+  /**
+   * 内容ハッシュ。**ベクトル検索の索引の鍵と同じ式**（`passageHash`）。
+   * 相談の索引が同じ切り方・同じ式で場面を持っているので、ここから
+   * 索引のベクトルをそのまま引ける（埋め込みを取り直さない）
+   */
+  hash: string;
 }
 
 /**
@@ -122,6 +129,7 @@ export function buildPastScenes(
         label: source.label,
         chapter,
         text,
+        hash: passageHash(text),
       });
     }
   }
@@ -167,7 +175,51 @@ export interface PastSceneSelection {
   terms: readonly string[];
   maxChars: number;
   maxScenes?: number;
+  /**
+   * いま調べているチャンクの本文。**意味の近い場面を探すときだけ使う**
+   * （索引を渡していなければ見ない）。チャンクに丸ごと入っている場面の
+   * ベクトルを、問いにする
+   */
+  chunkText?: string;
 }
+
+/**
+ * 意味の近い場面も探すための索引の口（設計書6.19.10）。
+ *
+ * **渡さなければ、これまでどおり名前だけで引く**（1文字も変わらない）。
+ * 渡すのは、作者がベクトル検索を検知にも使うと決め、索引が揃っている
+ * ときだけ（`features/vectorSearch.ts` の `loadCheckVectors`）。
+ */
+export interface PastSceneSemantic {
+  lookup: VectorLookup;
+}
+
+/** 選んだ抜粋と、その内訳（見逃しと誤検出を測るために数える） */
+export interface PastSceneSelectionDetail {
+  text: string;
+  /** 名前で当たって入った件数 */
+  byName: number;
+  /** 名前では当たらず、意味の近さだけで入った件数 */
+  byMeaning: number;
+}
+
+/**
+ * 意味の近さの下限（コサイン類似度）。**これより遠い場面は渡さない。**
+ *
+ * 意味検索は、関係が無くても「いちばん近いもの」を必ず返す。6.74 の
+ * 「関連が無ければ渡さない」を守るための門。値の決め方は設計書6.19.10。
+ */
+export const PAST_SCENE_MIN_SIMILARITY = 0.72;
+
+/**
+ * 意味の近さで足す件数の上限の割合。**名前で当たった場面を押しのけない**
+ * ために、件数の上限（`PAST_SCENE_MAX_COUNT`）の4分の1まで（8件なら2件）にする。
+ *
+ * 交互に詰めるので、意味で入った数だけ名前の場面が後ろへ押し出される。
+ * 半分にすると名前の場面が8件から4件へ減る——設定資料の選び方で意味検索が
+ * 名前一致に負けた実測（6.27.5）があるので、名前の側を厚く残す。
+ */
+const PAST_SCENE_MEANING_SHARE = 0.25;
 
 /**
  * 過去の場面の索引。
@@ -181,8 +233,11 @@ export class PastSceneIndex {
   /** id → 元の並び順。点が同じときの前後を決めるのに使う */
   private readonly orderById: Map<string, number>;
 
-  constructor(scenes: readonly PastScene[]) {
+  private readonly semantic: PastSceneSemantic | undefined;
+
+  constructor(scenes: readonly PastScene[], semantic?: PastSceneSemantic) {
     this.scenes = scenes;
+    this.semantic = semantic;
     this.index = new Bm25Index(
       scenes.map((scene) => ({ id: scene.id, text: scene.text }))
     );
@@ -201,9 +256,21 @@ export class PastSceneIndex {
    * ふるった結果が空になる（`Bm25Index.search` の `allowedIds` の注釈）。
    */
   select(options: PastSceneSelection): string {
+    return this.selectWithDetail(options).text;
+  }
+
+  /**
+   * 抜粋と、名前で入った件数・意味で入った件数を返す（設計書6.19.10）。
+   *
+   * 件数は操作ログへ残す。**意味で足した場面が指摘の根拠になったのか、
+   * 誤検知の種になったのか**を後から測るための手がかりである
+   * （CLAUDE.md の失敗2——見逃しと誤検出の両方を測る）。
+   */
+  selectWithDetail(options: PastSceneSelection): PastSceneSelectionDetail {
+    const empty: PastSceneSelectionDetail = { text: "", byName: 0, byMeaning: 0 };
     const { chapter, maxChars } = options;
     const maxScenes = options.maxScenes ?? PAST_SCENE_MAX_COUNT;
-    if (chapter === null || maxChars <= 0 || maxScenes <= 0) return "";
+    if (chapter === null || maxChars <= 0 || maxScenes <= 0) return empty;
 
     // **いま調べている話より前だけ。** 後の話を渡すと「あとで判明する
     // 事実」との整合が壊れ、誤検知の種になる（futureFacts と同じ理屈）
@@ -211,10 +278,66 @@ export class PastSceneIndex {
     for (const scene of this.scenes) {
       if (scene.chapter < chapter) allowed.add(scene.id);
     }
-    if (allowed.size === 0) return "";
+    if (allowed.size === 0) return empty;
 
-    const terms = searchTerms(options.terms);
-    if (terms.length === 0) return "";
+    const byName = this.rankByName(options.terms, allowed, maxScenes);
+    const byMeaning = this.rankByMeaning(options, allowed, maxScenes);
+    if (byName.length === 0 && byMeaning.length === 0) return empty;
+
+    /*
+      **名前で当たったものを先に、意味で当たったものと交互に詰める**
+      （相談の検索 `retrieval.ts` と同じ考え方。点を足し込むと両方薄まる）。
+      名前一致を先に置くのは、設定資料の選び方で意味検索が名前一致に
+      負けた実測があるため（6.27.5）。索引を渡していなければ `byMeaning`
+      は空で、これまでの並びと1件も変わらない。
+    */
+    const ranked: string[] = [];
+    const meaningOnly = new Set<string>();
+    for (let i = 0; i < Math.max(byName.length, byMeaning.length); i++) {
+      const named = byName[i];
+      if (named !== undefined && !ranked.includes(named)) ranked.push(named);
+      const meant = byMeaning[i];
+      if (meant !== undefined && !ranked.includes(meant)) {
+        ranked.push(meant);
+        if (!byName.includes(meant)) meaningOnly.add(meant);
+      }
+    }
+    const top = ranked.slice(0, maxScenes);
+
+    const chosen: string[] = [];
+    let total = 0;
+    // 詰めるのは点の高い順、出すのは話数の順（下の sort）
+    for (const id of top) {
+      const at = this.orderOf(id);
+      const text = render(this.scenes[at]);
+      const size = chosen.length === 0 ? text.length : SEPARATOR.length + text.length;
+      // **1件も入らないなら、はみ出させずに諦める。** 世界観と違って
+      // 空でよい材料なので、上限を破ってまで渡す理由が無い
+      if (total + size > maxChars) break;
+      chosen.push(id);
+      total += size;
+    }
+    if (chosen.length === 0) return empty;
+
+    const meaningCount = chosen.filter((id) => meaningOnly.has(id)).length;
+    return {
+      text: chosen
+        .sort((left, right) => this.orderOf(left) - this.orderOf(right))
+        .map((id) => render(this.scenes[this.orderOf(id)]))
+        .join(SEPARATOR),
+      byName: chosen.length - meaningCount,
+      byMeaning: meaningCount,
+    };
+  }
+
+  /** 名前で引いた並び（6.74。これまでの選び方そのもの） */
+  private rankByName(
+    rawTerms: readonly string[],
+    allowed: ReadonlySet<string>,
+    maxScenes: number
+  ): string[] {
+    const terms = searchTerms(rawTerms);
+    if (terms.length === 0) return [];
 
     // **語ごとに引いて点を足す。** 検索語をつなげて1つの質問にすると、
     // 2つ組みの索引では語と語のまたぎ（「灯白」のような組み）が生まれ、
@@ -226,9 +349,7 @@ export class PastSceneIndex {
         scores.set(hit.id, (scores.get(hit.id) ?? 0) + hit.score);
       }
     }
-    if (scores.size === 0) return "";
-
-    const ranked = [...scores]
+    return [...scores]
       // 点が同じなら元の並び順。**同点の順が揺れると鍵も揺れる**
       .sort(
         (left, right) =>
@@ -236,26 +357,36 @@ export class PastSceneIndex {
       )
       .slice(0, maxScenes)
       .map(([id]) => id);
+  }
 
-    const chosen: string[] = [];
-    let total = 0;
-    // 詰めるのは点の高い順、出すのは話数の順（下の sort）
-    for (const id of ranked) {
-      const at = this.orderOf(id);
-      const text = render(this.scenes[at]);
-      const size = chosen.length === 0 ? text.length : SEPARATOR.length + text.length;
-      // **1件も入らないなら、はみ出させずに諦める。** 世界観と違って
-      // 空でよい材料なので、上限を破ってまで渡す理由が無い
-      if (total + size > maxChars) break;
-      chosen.push(id);
-      total += size;
-    }
-    if (chosen.length === 0) return "";
+  /**
+   * 意味の近さで引いた並び（設計書6.19.10）。索引を渡していなければ空。
+   *
+   * 問いは**チャンクに丸ごと入っている場面のベクトル**（索引に既にある）。
+   * 検知のたびに埋め込みを取り直さないので、Ollama を呼ばず、同じ索引からは
+   * 同じ並びが出る（鍵が揺れない）。
+   */
+  private rankByMeaning(
+    options: PastSceneSelection,
+    allowed: ReadonlySet<string>,
+    maxScenes: number
+  ): string[] {
+    if (!this.semantic || !options.chunkText) return [];
+    const lookup = this.semantic.lookup;
+    const inChunk = new Set(passagesWithin(options.chunkText, this.scenes));
+    const queries = this.scenes
+      .filter((scene) => inChunk.has(scene.id))
+      .map((scene) => lookup(scene.hash))
+      .filter((vector): vector is Float32Array => vector !== undefined);
+    if (queries.length === 0) return [];
 
-    return chosen
-      .sort((left, right) => this.orderOf(left) - this.orderOf(right))
-      .map((id) => render(this.scenes[this.orderOf(id)]))
-      .join(SEPARATOR);
+    const limit = Math.max(1, Math.floor(maxScenes * PAST_SCENE_MEANING_SHARE));
+    return rankByNearest(
+      queries,
+      this.scenes.filter((scene) => allowed.has(scene.id)),
+      lookup,
+      { limit, minScore: PAST_SCENE_MIN_SIMILARITY }
+    ).map((hit) => hit.id);
   }
 
   private orderOf(id: string): number {

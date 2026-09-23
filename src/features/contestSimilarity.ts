@@ -6,7 +6,7 @@ import type { StoredContest } from "../core/contestInbox";
 import { logFailure } from "../core/logger";
 import { OllamaEmbeddingProvider } from "../ai/ollamaEmbedding";
 import type { EmbeddingProvider } from "../ai/embeddingProvider";
-import { isVectorSearchEnabled } from "./vectorSearch";
+import { vectorReadiness } from "./vectorSearch";
 
 /**
  * 作品に近い順に公募を並べる（設計書6.3.6.4。作者の選択）。
@@ -36,8 +36,11 @@ export async function similarityReadiness(
   work: WorkEntry,
   profile: WorkProfile
 ): Promise<SimilarityReadiness> {
-  if (!isVectorSearchEnabled()) return { ready: false, reason: "disabled" };
-  if ((await VectorIndex.storedBytes(work)) === 0) return { ready: false, reason: "noIndex" };
+  // 使えるかの判定は共通の口に任せる（設計書6.19.10。判定を写さない）
+  const readiness = await vectorReadiness(work);
+  if (!readiness.ready) {
+    return { ready: false, reason: readiness.reason === "disabled" ? "disabled" : "noIndex" };
+  }
   if (!hasWorkProfile(profile)) return { ready: false, reason: "noProfile" };
   return { ready: true };
 }

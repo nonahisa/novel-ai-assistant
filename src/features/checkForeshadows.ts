@@ -78,6 +78,22 @@ import {
   useLogFile,
 } from "../core/logger";
 import type { ProposalPanel, RecordUpdateViewItem } from "./proposalPanel";
+import { sha1Text } from "../core/hash";
+import { loadExcerptSources } from "../core/manuscriptSources";
+import { manuscriptItems } from "../core/retrievalCorpus";
+import { passagesWithin } from "../core/semanticRank";
+import {
+  foreshadowQueryText,
+  narrowTargetsByMeaning,
+} from "../core/foreshadowRelevance";
+import {
+  checkVectorsNote,
+  describeVectorUnavailable,
+  embedTexts,
+  isVectorUseInChecksEnabled,
+  openCheckVectors,
+  type CheckVectors,
+} from "./vectorSearch";
 
 /**
  * 伏線の配置・回収の自動検知（P-25 / P-26、設計書6.35.2・6.35.3）。
@@ -676,9 +692,31 @@ export async function checkForeshadowResolution(
   };
 
   // 見に行くのは、その本文より前に張られた伏線があるチャンクだけである
-  const targeted = chunks
+  const byChapter = chunks
     .map((chunk) => ({ chunk, targets: targetsFor(open, chunk) }))
     .filter((entry) => entry.targets.length > 0);
+  /*
+    **意味の近い箇所だけへ絞る**（設計書6.19.10。作者の依頼 2026-09-23 の2）。
+
+    作者が「検知にもベクトル検索を使う」を入れたときだけ。**切のとき（既定）は
+    これまでと同じ組を、同じ鍵で送る。** 絞った箇所は鍵を分ける——全部の伏線を
+    掛けた答えと、絞って掛けた答えを同じ鍵に入れると、あとで設定を切ったときに
+    絞った答え（＝見ていない伏線がある）が返り、回収を見逃す。
+  */
+  const meaning = await narrowResolutionByMeaning(work, open, byChapter);
+  const targeted = meaning.entries
+    .filter((entry) => entry.targets.length > 0)
+    .map((entry) => ({
+      ...entry,
+      key: entry.narrowed
+        ? {
+            ...cacheKeyBase,
+            promptVersion:
+              `${cacheKeyBase.promptVersion}:rel` +
+              sha1Text(entry.targets.map((target) => target.id).join("\u0000")).slice(0, 16),
+          }
+        : cacheKeyBase,
+    }));
   if (targeted.length === 0) {
     vscode.window.showInformationMessage(
       "未回収の伏線より後の本文がありません。" +
@@ -688,7 +726,7 @@ export async function checkForeshadowResolution(
   }
 
   const pending = targeted.filter(
-    (entry) => !cache.get(entry.chunk.hash, cacheKeyBase)
+    (entry) => !cache.get(entry.chunk.hash, entry.key)
   );
   if (pending.length > 0) {
     if (
@@ -708,6 +746,8 @@ export async function checkForeshadowResolution(
           `未回収の伏線 ${open.length}件を、${targeted.length}か所の本文と` +
             `照らします（うち ${pending.length}件を処理。` +
             `処理済み ${targeted.length - pending.length}件はスキップ）。`,
+          // 意味の近さで絞るときだけ出す（設計書6.19.10。既定では空）
+          describeResolutionMeaning(meaning),
           "",
           "伏線の記録へは何も自動で入りません。 回収されたと読める箇所を「提案」パネルへ",
           "並べますので、回収済みにするものを1件ずつ選んでください。",
@@ -729,6 +769,20 @@ export async function checkForeshadowResolution(
       `${resolved.model} / 未回収 ${open.length}件 / ${targeted.length}か所 / ` +
       `v${FORESHADOW_RESOLVE_VERSION}`
   );
+  // **絞ったなら、どれだけ絞ったかを残す**（見逃しを後から測る手がかり）。
+  // 使わない設定（既定）では何も書かない
+  if (meaning.vectors.kind === "on") {
+    logStep(
+      meaning.embedFailed
+        ? "伏線の回収の確認：伏線を埋め込めなかったため、絞らずに全部の箇所を照らします"
+        : `伏線の回収の確認：意味の近さで絞りました（伏線1つにつき上位${FORESHADOW_KEEP_PER_RECORD}か所。` +
+            `組 ${meaning.pairsBefore}→${meaning.pairsAfter}、箇所 ${byChapter.length}→${targeted.length}）`
+    );
+  } else if (meaning.vectors.kind === "unavailable") {
+    logStep(
+      `伏線の回収の確認：ベクトル検索は使えないため、絞らずに照らします（${describeVectorUnavailable(meaning.vectors.reason)}）`
+    );
+  }
 
   const provider = resolved.provider;
   const model = resolved.model;
@@ -782,8 +836,8 @@ export async function checkForeshadowResolution(
         if (fatalFailure) break;
         const entry = queue[cursor];
 
-        const cached = cache.get(entry.chunk.hash, cacheKeyBase);
-        const raw = cached ?? (await ask(entry.chunk, entry.targets));
+        const cached = cache.get(entry.chunk.hash, entry.key);
+        const raw = cached ?? (await ask(entry.chunk, entry.targets, entry.key));
         if (cached === undefined) {
           done++;
           const eta = runEta.step(done, total);
@@ -799,8 +853,16 @@ export async function checkForeshadowResolution(
           if (retry.kind === "split") {
             // **分けたら、その断片に掛かる伏線を選び直す。** 元の組を
             // そのまま持ち回すと、張った話より前の本文にまで掛けてしまう
+            // **絞った箇所は、絞った組のまま分ける**（設計書6.19.10）。
+            // 分けたとたんに全部の伏線を掛け直すと、絞った意味が無くなり、
+            // 鍵（絞った組の印）と送る中身も食い違う
             const parts = retry.parts
-              .map((chunk) => ({ chunk, targets: targetsFor(open, chunk) }))
+              .map((chunk) => ({
+                chunk,
+                targets: targetsFor(entry.narrowed ? entry.targets : open, chunk),
+                narrowed: entry.narrowed,
+                key: entry.key,
+              }))
               .filter((part) => part.targets.length > 0);
             queue.splice(cursor + 1, 0, ...parts);
             total += parts.length;
@@ -837,7 +899,8 @@ export async function checkForeshadowResolution(
 
       async function ask(
         chunk: Chunk,
-        targets: readonly Foreshadow[]
+        targets: readonly Foreshadow[],
+        cacheKey: typeof cacheKeyBase
       ): Promise<unknown | undefined> {
         try {
           const userPrompt = buildForeshadowResolvePrompt({
@@ -890,7 +953,7 @@ export async function checkForeshadowResolution(
             });
             return undefined;
           }
-          await cache.set(chunk.hash, cacheKeyBase, parsed);
+          await cache.set(chunk.hash, cacheKey, parsed);
           return parsed;
         } catch (error) {
           if (error instanceof AIError && error.kind === "aborted") {
@@ -1004,6 +1067,133 @@ export function showForeshadowResolutions(
     // 見送っても台帳は変わらない（未回収のまま残る）
     async () => ({ ok: true }),
     "伏線の回収"
+  );
+}
+
+// ── 意味の近さで絞る（設計書6.19.10）─────────────────
+
+/**
+ * 伏線1つにつき、意味の近い箇所を何か所まで照らすか。
+ *
+ * 値の決め方は設計書6.19.10（手元の作品の回収済みの伏線で、回収の箇所が
+ * 近さの何番目に来るかを測った）。**小さくするほど送る回数は減り、
+ * 見逃しは増える。**
+ */
+export const FORESHADOW_KEEP_PER_RECORD = 5;
+
+interface ResolutionEntry {
+  chunk: Chunk;
+  targets: Foreshadow[];
+  narrowed: boolean;
+}
+
+interface ResolutionMeaning {
+  entries: ResolutionEntry[];
+  vectors: CheckVectors;
+  /** 伏線×箇所の組の数。絞る前と後（確認の画面と記録に出す） */
+  pairsBefore: number;
+  pairsAfter: number;
+  /** 伏線の埋め込みに失敗して、絞らなかったか */
+  embedFailed: boolean;
+}
+
+/**
+ * 伏線ごとに、意味の近い箇所だけへ掛け直す。**使わない設定（既定）・
+ * 使えない・埋め込みに失敗した、のどれでも、渡された組をそのまま返す。**
+ *
+ * 箇所の問いは、その箇所に丸ごと入っている場面の、索引に既にあるベクトル
+ * （`passagesWithin`）。伏線の側だけはその場で埋め込む（数件〜数十件で、
+ * 手元の Ollama に1回投げる程度）。
+ */
+async function narrowResolutionByMeaning(
+  work: WorkEntry,
+  open: readonly Foreshadow[],
+  entries: ReadonlyArray<{ chunk: Chunk; targets: Foreshadow[] }>
+): Promise<ResolutionMeaning> {
+  const pairsBefore = entries.reduce((sum, entry) => sum + entry.targets.length, 0);
+  const unchanged = (vectors: CheckVectors, embedFailed = false): ResolutionMeaning => ({
+    entries: entries.map((entry) => ({ ...entry, narrowed: false })),
+    vectors,
+    pairsBefore,
+    pairsAfter: pairsBefore,
+    embedFailed,
+  });
+  // 使わない設定では、全話を読み直すこともしない
+  if (!isVectorUseInChecksEnabled()) return unchanged({ kind: "off" });
+
+  let items: ReturnType<typeof manuscriptItems> = [];
+  try {
+    const sources = (await loadExcerptSources(work)).sources;
+    items = sources.flatMap((source) => manuscriptItems(source.label, source.text));
+  } catch (error) {
+    logFailure("伏線の回収の確認：本文の読み込み（意味の近さで絞るため）", {
+      詳細: describeError(error),
+    });
+    return unchanged({ kind: "unavailable", reason: "noIndex" });
+  }
+
+  const vectors = await openCheckVectors(
+    work,
+    items.map((item) => item.hash)
+  );
+  if (vectors.kind !== "on") return unchanged(vectors);
+
+  const embedded = await embedTexts(open.map(foreshadowQueryText));
+  if (!embedded) return unchanged(vectors, true);
+  const foreshadowVectors = new Map<string, Float32Array>();
+  open.forEach((record, at) => {
+    const vector = embedded[at];
+    if (vector) foreshadowVectors.set(record.id, vector);
+  });
+
+  const hashById = new Map(items.map((item) => [item.id, item.hash]));
+  const narrowed = narrowTargetsByMeaning(
+    entries.map((entry, at) => ({
+      key: String(at),
+      targets: entry.targets,
+      vectors: passagesWithin(entry.chunk.text, items)
+        .map((id) => vectors.lookup(hashById.get(id) ?? ""))
+        .filter((vector): vector is Float32Array => vector !== undefined),
+    })),
+    foreshadowVectors,
+    FORESHADOW_KEEP_PER_RECORD,
+    // 張った話そのものは、近さの枠の外で必ず残す（同じ話での回収もある）
+    (record, key) => {
+      const chunk = entries[Number(key)]?.chunk;
+      return (
+        chunk !== undefined &&
+        record.plantedChapter !== null &&
+        chunk.chapterStart === record.plantedChapter
+      );
+    }
+  );
+  const result = entries.map((entry, at) => ({
+    chunk: entry.chunk,
+    targets: narrowed[at].targets,
+    narrowed: narrowed[at].narrowed,
+  }));
+  return {
+    entries: result,
+    vectors,
+    pairsBefore,
+    pairsAfter: result.reduce((sum, entry) => sum + entry.targets.length, 0),
+    embedFailed: false,
+  };
+}
+
+/** 確認の画面へ出す1行。使わない設定では空 */
+function describeResolutionMeaning(meaning: ResolutionMeaning): string {
+  if (meaning.vectors.kind === "unavailable") {
+    return checkVectorsNote(meaning.vectors, "伏線ごとに意味の近い箇所だけを照らせます");
+  }
+  if (meaning.vectors.kind !== "on") return "";
+  if (meaning.embedFailed) {
+    return "（伏線の意味の近さを測れなかったため、これまでどおり全部の箇所を照らします。理由は記録に残しました）";
+  }
+  return (
+    `伏線ごとに、意味の近い${FORESHADOW_KEEP_PER_RECORD}か所までを照らします` +
+    `（ベクトル検索。伏線と箇所の組 ${meaning.pairsBefore}組のうち${meaning.pairsAfter}組）。` +
+    "近さの上位に入らない箇所での回収は見逃します。"
   );
 }
 

@@ -1121,6 +1121,18 @@
         "icon": "$(list-ordered)"
       },
       {
+        "command": "novelai.searchScenes",
+        "title": "場面検索（言葉で本文を探す）",
+        "category": "小説執筆",
+        "icon": "$(search)"
+      },
+      {
+        "command": "novelai.findSimilarScenes",
+        "title": "類似場面検出（別の話どうしの似た場面）",
+        "category": "小説執筆",
+        "icon": "$(copy)"
+      },
+      {
         "command": "novelai.openSceneMemos",
         "title": "シーンメモ一覧",
         "category": "小説執筆",
@@ -2120,6 +2132,11 @@
           "type": "boolean",
           "default": true,
           "description": "相談を始めるときに、本文の変更ぶんだけ索引へ足す。切ると「検索索引作成／更新」まで更新しない。"
+        },
+        "novelai.vectorSearch.useInChecks": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "矛盾検知と伏線回収確認にも「意味検索」を使う。\n\n・矛盾検知：名前の出てくる前の場面に加えて、意味の近い前の場面も渡す\n・伏線回収確認：伏線ごとに、意味の近い箇所だけを照らす（送る回数が減る。近さの上位に入らない箇所での回収は見逃す）\n・入れると、処理済みの結果を使えず送り直しになることがある\n・「ベクトル検索準備」と「検索索引作成／更新」が済んでいる作品だけで効く"
         },
         "novelai.chatLog.enabled": {
           "type": "boolean",

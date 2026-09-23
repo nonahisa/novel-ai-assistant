@@ -1,4 +1,3 @@
-import { sha1Text } from "./hash";
 import { WorkEntry } from "../models/types";
 import type { CustomFieldDefinition } from "../models/customField";
 import { loadExcerptSources } from "./manuscriptSources";
@@ -18,7 +17,7 @@ import {
   describeOrganization,
   describeWorldItem,
 } from "./settingsSummary";
-import { splitPassages } from "./passages";
+import { passageHash, splitPassages } from "./passages";
 
 /**
  * 切り方は葉の部品（`passages.ts`）へ移した。**ここからも今までどおり
@@ -70,6 +69,16 @@ export interface RetrievalItem {
    * （`describeRetrievedItems`。作者の例「4回並ぶ → （1/4）」に合わせた）。
    */
   part?: { index: number; total: number };
+  /**
+   * 本文の場面だけが持つ、元のファイルと話数（設計書6.19.10）。
+   *
+   * 場面検索で「押すとその箇所を開く」ため（ファイル）と、執筆再開で
+   * 「これから書く話より前だけ」に絞るため（話数）に使う。**AIへ渡す文章にも
+   * ハッシュにも入れない**——入れると索引の鍵とプロンプトが変わる。
+   * 話数は出典の最後の話数（`ExcerptSource.chapter` と同じ）。読めなければ null。
+   */
+  filePath?: string;
+  chapter?: number | null;
 }
 
 /**
@@ -141,13 +150,19 @@ export function describeRetrievedItems(
  * 場面が2つ以上になったときだけ、何番目か（`part`）を持たせる。
  * 画面を開かずに確かめられるよう、ファイルを読む所から分けてある。
  */
-export function manuscriptItems(label: string, text: string): RetrievalItem[] {
+export function manuscriptItems(
+  label: string,
+  text: string,
+  origin?: { filePath?: string; chapter?: number | null }
+): RetrievalItem[] {
   const passages = splitPassages(text);
   return passages.map((passage, index) => ({
     ...makeItem("本文", `${label}#${index}`, label, passage, false),
     ...(passages.length > 1
       ? { part: { index: index + 1, total: passages.length } }
       : {}),
+    ...(origin?.filePath !== undefined ? { filePath: origin.filePath } : {}),
+    ...(origin && "chapter" in origin ? { chapter: origin.chapter ?? null } : {}),
   }));
 }
 
@@ -164,7 +179,12 @@ export async function buildRetrievalCorpus(
 
   const manuscript = await loadExcerptSources(work);
   for (const source of manuscript.sources) {
-    items.push(...manuscriptItems(source.label, source.text));
+    items.push(
+      ...manuscriptItems(source.label, source.text, {
+        filePath: source.filePath,
+        chapter: source.chapter ?? null,
+      })
+    );
   }
 
   items.push(...(await collectSettings(work)));
@@ -315,6 +335,7 @@ function makeItem(
   };
 }
 
+/** 索引の鍵。式は `passages.ts` の1か所だけに置く（矛盾検知の過去の場面と揃える） */
 export function hashText(text: string): string {
-  return sha1Text(text).slice(0, 24);
+  return passageHash(text);
 }
