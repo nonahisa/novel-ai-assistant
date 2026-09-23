@@ -207,15 +207,6 @@ interface ComposeApi {
   memoClassFor(line: string): string;
   /** 字を揃えるための印が、規則から外れたか（作者の実機報告、2026-09-21） */
   composeMarkIsStale(name: string, value: string): boolean;
-  /** 変換中（IME）の字が占める範囲（設計書6.34.5。0.74.11） */
-  composeComposingSpan(
-    atoms: ComposeAtom[],
-    start: number | null,
-    length: number
-  ): {
-    start: { node: FakeNode; offset: number };
-    end: { node: FakeNode; offset: number };
-  } | null;
   /** 印が占める範囲（作者の実機報告、2026-09-22。設計書6.34.5） */
   composeMarkRangeOf(
     atoms: ComposeAtom[],
@@ -252,7 +243,7 @@ const api = new Function(
     " composeTermForOffset, pickMenuTerm," +
     " composeCopyPayloads, composePastePick, COMPOSE_NOTATION_FLAVOR," +
     " memoIsLine, memoPartsOf, memoClassFor, composeMarkIsStale," +
-    " composeComposingSpan, composeMarkRangeOf, composeEscapeAfterArrow };"
+    " composeMarkRangeOf, composeEscapeAfterArrow };"
 )() as ComposeApi;
 
 /** 記法から組み立てたDOM（偽） */
@@ -2131,148 +2122,72 @@ describe("規則から外れた印を見つける", () => {
 });
 
 /**
- * 変換中（IME）の字を背景で見せる（作者の実機報告、2026-09-21
- * 「変換中左側に線がでます」）。
+ * **変換中（IME）の字に色を置かない**（作者の依頼、2026-09-24。0.74.11 で
+ * 入れた塗りを取り除いた。設計書6.34.5）。
  *
- * 線を引いているのは日本語入力の層なので消せない。**代わりに、どこを
- * 変換しているのかを背景で見せる。**
+ * ノートPCの実機（0.82.6）で、横書きの変換中に置いた黄色の下地が字とずれた
+ * （「あいうえおかき」を変換中、黄色が「あいうえお」までで「かき」に届かない）。
+ * 作者「入力の反応がわずかに悪い気がするので、文字の変換時の色替えはいらない。
+ * やめましょう」。
+ *
+ * 塗りを消すだけでなく、**変換中に走る処理そのものを残さない**ことを見張る
+ * ——反応の悪さは、compositionupdate の度に全文の位置一覧を数え直していた
+ * ことが効いていた可能性がある。用語の色付け・読み上げの塗りは残す。
  */
-describe("変換中の字に背景色を置く", () => {
-  it("薄い黄の塗りが定義してある", () => {
-    expect(html).toContain("::highlight(novelai-composing)");
-    expect(html).toContain("background-color: rgba(255, 200, 0, 0.35);");
+describe("変換中の字に色を置かない（作者の依頼、2026-09-24）", () => {
+  it("変換中の塗りの定義が無い", () => {
+    expect(html).not.toContain("novelai-composing");
+    expect(html).not.toContain("rgba(255, 200, 0, 0.35)");
   });
 
-  it("変換の始まり・途中・終わりの3つに繋いである", () => {
-    expect(html).toContain(
-      'compose.addEventListener("compositionstart", function (event) {'
-    );
-    expect(html).toContain(
-      'compose.addEventListener("compositionupdate", function (event) {'
-    );
-    expect(html).toContain("composeMarkComposing(event.data);");
+  it("用語の色付けと読み上げの塗りは残っている", () => {
+    expect(html).toContain("::highlight(novelai-term-character)");
+    expect(html).toContain("::highlight(novelai-reading)");
   });
 
-  it("変換が終われば消す", () => {
+  /** 変換の途中の出来事を拾わない（拾えば、1字打つたびに何かが走る） */
+  it("compositionupdate を拾っていない", () => {
+    expect(html).not.toMatch(/addEventListener\(\s*"compositionupdate"/);
+  });
+
+  /** 変換の始まりでは印を立てるだけ（位置を読む・数える処理を置かない） */
+  it("変換の始まりでは、変換中の印を立てるだけ", () => {
+    const start = html.slice(
+      html.indexOf('compose.addEventListener("compositionstart"')
+    );
+    const body = start.slice(0, start.indexOf("});"));
+    expect(body).toContain("composing = true;");
+    // 下請けの関数へ回していれば、その先で何をしていても同じこと
+    expect(body).not.toMatch(/compose[A-Z]\w*\(/);
+    for (const heavy of [
+      "getSelection",
+      "composeAtoms",
+      "createRange",
+      "CSS.highlights",
+    ]) {
+      expect(body).not.toContain(heavy);
+    }
+  });
+
+  it("変換の終わりに、消すべき塗りを探していない", () => {
     const end = html.slice(
       html.indexOf('compose.addEventListener("compositionend"')
     );
-    expect(end.slice(0, 400)).toContain("composeClearComposing();");
-  });
-
-  /** 面を閉じるときに塗りを残さない */
-  it("まとめて消す道にも入っている", () => {
-    const clear = html.slice(html.indexOf("function composeClearHighlights("));
-    expect(clear.slice(0, 500)).toContain("composeClearComposing();");
+    expect(end.slice(0, 400)).toContain("composing = false;");
+    expect(html).not.toContain("composeClearComposing");
+    expect(html).not.toContain("composeComposingStart");
   });
 
   /**
-   * **DOM を触らない**のがこの手当ての肝である（変換中に DOM を書き換えると
-   * 変換そのものが壊れる）。CSS Custom Highlight API だけで置く
+   * **カーソルの行の知らせも、変換中は数えない。** selectionchange は変換中も
+   * 字が動くたびに起き、組んで書く面ではそのたびに（打鍵で捨てられた）
+   * 位置の一覧を全文から数え直す。4万字の原稿では打つ手に効く。
+   * 行は変換中に変わらないので、確定のあとの知らせで足りる。
    */
-  it("**変換中にDOMを書き換えない**", () => {
-    const paint = html.slice(html.indexOf("function composeMarkComposing("));
-    const body = paint.slice(0, paint.indexOf("function composeClearComposing("));
-    expect(body).toContain('CSS.highlights.set("novelai-composing"');
-    expect(body).not.toContain("appendChild");
-    expect(body).not.toContain("insertBefore");
-    expect(body).not.toContain("removeChild");
-    expect(body).not.toContain("setAttribute");
-  });
-
-  /**
-   * **塗る長さが合わない**（作者の実機、0.74.10）。塗りが途中で切れたり
-   * 余ったりしていた。0.74.10 は「いまのカーソルから、変換中の字の長さだけ
-   * 手前」で範囲を作っていたが、**変換中のカーソルは末尾とは限らない**
-   * ——文節を選び直せば語の途中へ、候補を選べばその位置へ動く。
-   *
-   * 0.74.11 で、`compositionstart` の時点の**始点**を控え、そこから
-   * `event.data.length` 文字ぶん**前向き**に数えるように改めた。
-   */
-  describe("塗る範囲は、始点から前向きに数える", () => {
-    /** 範囲を作って、**記法の位置に戻して**測る */
-    function spanOf(
-      value: string,
-      start: number | null,
-      length: number,
-      mode?: Mode
-    ) {
-      const atoms = api.composeAtoms(build(value, mode));
-      const span = api.composeComposingSpan(atoms, start, length);
-      if (!span) return null;
-      return {
-        sameNode: span.start.node === span.end.node,
-        from: api.composePointToOffset(atoms, span.start.node, span.start.offset),
-        to: api.composePointToOffset(atoms, span.end.node, span.end.offset),
-      };
-    }
-
-    it("始点から前向きに数える（手前へ遡らない）", () => {
-      // 「あいうえお」の2文字目から2文字＝「いう」。**カーソルは見ない**
-      expect(spanOf("あいうえお", 1, 2)).toEqual({
-        sameNode: true,
-        from: 1,
-        to: 3,
-      });
-    });
-
-    it("節点をまたいでも数え続ける（三点リーダの span を越える）", () => {
-      /*
-        「あ……い」は、素の span（三点リーダ）が2つ挟まって
-        **4つの節点**に分かれる。変換中の字がこれをまたぐことはあるので、
-        1つの節点に収まらなければ諦める、では塗りが消える
-      */
-      expect(spanOf("あ……い", 0, 4)).toEqual({
-        sameNode: false,
-        from: 0,
-        to: 4,
-      });
-    });
-
-    it("カーソルが文節の途中にあっても、長さは `data` と一致する", () => {
-      /*
-        **範囲の作り方にカーソルが入っていないこと**を、2つの側から見る。
-        ①どの始点・長さでも、塗る長さは頼んだ長さと必ず一致する
-        ②関数がカーソル（`endOffset`）を読んでいない
-      */
-      for (const [start, length] of [
-        [0, 1],
-        [2, 3],
-        [3, 2],
-      ]) {
-        const span = spanOf("あいうえお", start, length);
-        expect(`${start}+${length}`).toBe(
-          `${span?.from}+${(span?.to ?? 0) - (span?.from ?? 0)}`
-        );
-      }
-
-      const paint = html.slice(html.indexOf("function composeMarkComposing("));
-      const body = paint.slice(0, paint.indexOf("function composeComposingStartOffset("));
-      expect(body).toContain("composeComposingStart");
-      expect(body).not.toContain("endOffset");
-    });
-
-    it("かたまり（ルビ）と行の切れ目は跨がない", () => {
-      // 跨いだ範囲を塗れば必ず見当違いになる。**ずれた色は、無い色より悪い**
-      expect(spanOf("あ｜漢字《かんじ》い", 0, 3, "site")).toBeNull();
-      expect(spanOf("あい\nうえ", 1, 2)).toBeNull();
-      // 長さが無い（変換中の字が消えた）ときも塗らない
-      expect(spanOf("あいうえお", 1, 0)).toBeNull();
-      expect(spanOf("あいうえお", null, 2)).toBeNull();
-    });
-
-    it("始点は `compositionstart` で控え、確定で捨てる", () => {
-      const start = html.slice(
-        html.indexOf('compose.addEventListener("compositionstart"')
-      );
-      expect(start.slice(0, 600)).toContain(
-        "composeComposingStart = composeComposingStartOffset();"
-      );
-      const end = html.slice(
-        html.indexOf('compose.addEventListener("compositionend"')
-      );
-      expect(end.slice(0, 400)).toContain("composeComposingStart = null;");
-    });
+  it("カーソルの行を知らせる処理は、変換中は数えずに見送る", () => {
+    const notify = html.slice(html.indexOf("function notifyCaret("));
+    const body = notify.slice(0, notify.indexOf("caretLine()"));
+    expect(body).toContain("if (composing) return;");
   });
 });
 

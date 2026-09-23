@@ -562,23 +562,12 @@ body.vertical .tcy { text-combine-upright: all; }
 ::highlight(novelai-reading) {
   background-color: rgba(64, 160, 255, 0.28);
 }
-/* **変換中（IME）の字**（作者の実機報告、2026-09-21「変換中左側に線がでます」）。
-
-   縦書きで変換中に出る下線を引いているのは日本語入力の層で、本文の下線とは
-   別の道を通る。だから text-underline-position: right では動かせない
-   （0.19.3 で確かめてある。#surface の但し書きを参照）。**線は消せない**ので、
-   代わりに**どこを変換しているのかを背景で見せる。**
-
-   置き方は用語・読み上げと同じ CSS Custom Highlight API にする。
-   **変換中に DOM を触ると変換そのものが壊れる**（設計書6.34）ので、
-   DOMを変えずに色を置けるこの仕掛け以外は使えない。
-
-   色は薄い黄。用語は文字色、シーンメモは蛍光ペン、読み上げは水色なので、
-   4つが同時に載っても取り違えない。**横書きでも同じに効く**（縦書きだけに
-   絞る理由が無く、どこを変換中かは横でも分かったほうがよい） */
-::highlight(novelai-composing) {
-  background-color: rgba(255, 200, 0, 0.35);
-}
+/* **変換中（IME）の字には色を置かない**（作者の依頼、2026-09-24。設計書6.34.5）。
+   0.74.10〜0.83.4 は、縦書きで変換中に出る線（日本語入力の層が描くので消せない）の
+   代わりに、変換中の範囲へ薄い黄の下地を置いていた。ノートPCの実機で下地が
+   字とずれ（変換中の後ろの字に届かない）、作者から「入力の反応がわずかに
+   悪い気がするので、色替えはいらない」と言われて取り除いた。
+   **変換中に走る処理を増やさないこと**が、この面の決まりである */
 
 /* ── SNS記事のnote風（設計書6.69） ─────────────────
    **ここから下は、すべて body.note / body.notepv の中に閉じ込める。**
@@ -2199,6 +2188,11 @@ ${RESUME_WRITING_LABEL ? `
 
     **片方向である。** パネルは受けて光らせるだけで、本文は動かさない
     （本文が動くのは、パネルの行を押したときだけ）。
+
+    **変換中（IME）は数えない**（作者の依頼、2026-09-24）。selectionchange は
+    変換中も1字ごとに起き、組んで書く面では打鍵で捨てた位置の一覧を全文から
+    数え直すことになる（4万字で重い）。変換中に行は変わらないので、確定の
+    あとの知らせ（keyup・selectionchange）で足りる。
   */
   let caretTimer = null;
   let lastCaretLine = 0;
@@ -2206,6 +2200,8 @@ ${RESUME_WRITING_LABEL ? `
     if (caretTimer !== null) return;
     caretTimer = setTimeout(function () {
       caretTimer = null;
+      // 変換中は数えない（全文を数え直すと打つ手に効く。設計書6.34.5）
+      if (composing) return;
       const line = caretLine();
       // 同じ行に居るあいだは送らない（パネルの光る行は変わらない）
       if (line <= 0 || line === lastCaretLine) return;
@@ -2491,14 +2487,6 @@ ${RESUME_WRITING_LABEL ? `
   let termsForText = null;
   /** 変換中に外から届いた本文。確定してから片づける */
   let composePending = null;
-  /**
-   * 変換の始点（記法の位置。設計書6.34.5。0.74.11）。
-   *
-   * **compositionstart の時点でしか取れない。** 変換が進むとカーソルは
-   * 文節の途中や候補の位置へ動くので、あとからでは始点が分からない。
-   * 変換していないときは null。
-   */
-  let composeComposingStart = null;
   /**
    * いま組んでいる記法（設計書6.12）。**拡張機能側が原稿の種類で決める**
    * （.md は "curly"、.txt は "site"）。最初の update で届く。
@@ -3154,44 +3142,6 @@ ${RESUME_WRITING_LABEL ? `
     }
     if (lastAtom === null) return null;
     return composeEndPoint(lastAtom);
-  }
-
-  /**
-   * 変換中（IME）の字が占めている範囲（設計書6.34.5。0.74.11）。
-   *
-   * **始点から前向きに数える。** 0.74.10 は「いまのカーソルから、変換中の
-   * 字の長さだけ手前」で作っていたが、**変換中のカーソルは末尾とは限らない**
-   * ——文節を選び直せば語の途中へ、候補を選べばその位置へ動く。そのため
-   * 塗りが途中で切れたり、変換していない手前の字まで余分に塗れていた
-   * （作者の実機報告、2026-09-21）。
-   *
-   * 始点は compositionstart の時点で控えてある（記法の位置）。そこから
-   * event.data.length 文字ぶん**前向き**に数えれば、カーソルがどこに
-   * あっても長さは変換中の字と必ず一致する。
-   *
-   * **かたまり（ルビ・傍点）と行の切れ目は跨がない。** 変換中の字が
-   * その向こうまで届くことは無く、跨いだ範囲を塗れば必ず見当違いになる
-   * （ずれた色は、無い色より分かりにくい）。素の span（三点リーダ）は
-   * 平文として数えられるので、**節点が変わっても続けて数える。**
-   *
-   * @param atoms composeAtoms(compose)
-   * @param start 変換の始点（記法の位置）
-   * @param length 変換中の字数（event.data.length）
-   * @returns start と end（どちらも DOM の位置）。数えられなければ null
-   */
-  function composeComposingSpan(atoms, start, length) {
-    if (start === null || start === undefined) return null;
-    if (!(length > 0)) return null;
-    const end = start + length;
-    for (const atom of atoms) {
-      // 重なっていない atom は関係ない
-      if (atom.end <= start || atom.start >= end) continue;
-      if (atom.kind !== "text") return null;
-    }
-    const from = composeOffsetToPoint(atoms, start);
-    const to = composeOffsetToPoint(atoms, end);
-    if (!from || !to) return null;
-    return { start: from, end: to };
   }
 
   /** その節点を含んでいるか（親をたどれない偽のDOMでも動くように、子から探す） */
@@ -3934,28 +3884,18 @@ ${RESUME_WRITING_LABEL ? `
     }
   }
 
-  compose.addEventListener("compositionstart", function (event) {
-    composing = true;
-    /*
-      **始点は、ここでしか取れない**（設計書6.34.5。0.74.11）。変換が
-      進むとカーソルは文節の途中や候補の位置へ動く。範囲を選んだ上での
-      変換なら、その範囲の始まり（置き換わったあとの位置と同じ）である。
-    */
-    composeComposingStart = composeComposingStartOffset();
-    composeMarkComposing(event.data);
-  });
   /*
-    **変換中の字が動くたびに、塗る範囲を置き直す。** 変換中は DOM を
-    触れないので、色は CSS Custom Highlight API で置く（DOMを変えない）
+    **変換中は印を立てるだけにする**（作者の依頼、2026-09-24。設計書6.34.5）。
+    0.74.10〜0.83.4 は、変換中の範囲へ色を置くために compositionstart で位置を
+    読み、compositionupdate（1字ごと）で全文の位置一覧を数え直していた。
+    作者が入力の反応の悪さを感じたので、色ごと取り除いた。ここへ処理を
+    足すと、変換中の1字ごとに走る
   */
-  compose.addEventListener("compositionupdate", function (event) {
-    composeMarkComposing(event.data);
+  compose.addEventListener("compositionstart", function () {
+    composing = true;
   });
   compose.addEventListener("compositionend", function () {
     composing = false;
-    // 変換が終われば塗る範囲は無い（確定した字は普通の本文）
-    composeComposingStart = null;
-    composeClearComposing();
     // 確定ぶんが入るのは、この直後のことがある（打つ面と同じ理由）
     setTimeout(function () {
       // **確定した字が印の中へ入っていたら、ここで外す**（変換中は触れない）
@@ -4319,89 +4259,6 @@ ${RESUME_WRITING_LABEL ? `
       for (const kind of COMPOSE_HIGHLIGHTS) {
         CSS.highlights.delete("novelai-term-" + kind);
       }
-    } catch (error) {
-      /* 消せなくても入力は動く */
-    }
-    // 変換中の塗りも同じ仕掛けで置いている。面を閉じるときに残さない
-    composeClearComposing();
-  }
-
-  /* ── 変換中（IME）の字を塗る（作者の実機報告、2026-09-21） ── */
-
-  /**
-   * 変換中の範囲へ色を置く。
-   *
-   * 作者の報告「変換中左側に線がでます」。縦書きで変換中に出る下線は
-   * **日本語入力の層が描いている**ので、CSS（text-underline-position）では
-   * 動かせない（0.19.3 で確かめた）。線は消せないが、**どこを変換中かは
-   * 背景で見せられる。**
-   *
-   * **DOM は書き換えない。** 変換の途中で DOM を触ると変換そのものが
-   * 壊れる（設計書6.34。この面の既存の決まり）。用語の色付けと同じ
-   * CSS Custom Highlight API なら、色を置いても DOM は変わらない。
-   *
-   * 範囲は**変換の始点から、変換中の字の長さだけ前向き**に作る
-   * （設計書6.34.5。0.74.11）。compositionupdate の event.data が
-   * 変換中の字そのものなので、長さはそこから取れる。
-   *
-   * **カーソルからは数えない。** 0.74.10 は「いまのカーソルから長さだけ
-   * 手前」で作っていたが、**変換中のカーソルは末尾とは限らない**
-   * ——文節を選び直せば語の途中へ動く。作者の実機では、塗りが途中で
-   * 切れたり余ったりしていた。始点は compositionstart で控える。
-   *
-   * 数え方そのものは composeComposingSpan（切り出せる側）にある。
-   */
-  function composeMarkComposing(data) {
-    if (!composeHighlightsUsable()) return;
-    try {
-      const length = data ? data.length : 0;
-      const span = composeComposingSpan(
-        composeAtoms(compose),
-        composeComposingStart,
-        length
-      );
-      if (!span) {
-        composeClearComposing();
-        return;
-      }
-      const range = document.createRange();
-      range.setStart(span.start.node, span.start.offset);
-      range.setEnd(span.end.node, span.end.offset);
-      CSS.highlights.set("novelai-composing", new Highlight(range));
-    } catch (error) {
-      // **色が出ないだけで、変換は動く。** ここで止めない
-      composeClearComposing();
-    }
-  }
-
-  /**
-   * 変換の始点（記法の位置）を読む。**compositionstart の時点で呼ぶ。**
-   *
-   * 選択があってもその**始まり**を取る——範囲を選んだ上で変換すると、
-   * 選んだぶんは消えて始点の位置から新しい字が入るので、deleteContents
-   * のあとの位置と同じところである。
-   */
-  function composeComposingStartOffset() {
-    try {
-      const selection = window.getSelection();
-      if (!selection || selection.rangeCount === 0) return null;
-      const range = selection.getRangeAt(0);
-      if (!compose.contains(range.startContainer)) return null;
-      return composePointToOffset(
-        composeAtoms(compose),
-        range.startContainer,
-        range.startOffset
-      );
-    } catch (error) {
-      // 読めなければ塗らない（見当違いの場所を塗るよりよい）
-      return null;
-    }
-  }
-
-  function composeClearComposing() {
-    if (!composeHighlightsUsable()) return;
-    try {
-      CSS.highlights.delete("novelai-composing");
     } catch (error) {
       /* 消せなくても入力は動く */
     }
