@@ -466,10 +466,13 @@ export async function reviewPendingSettingsUpdates(
       review.stale.push(update);
       continue;
     }
+    // 出どころを渡す——作者が確定させた記録へ白名簿の欄を入れてよいのは
+    // 外部AIの案だけ（作者の裁定、2026-09-24。`mergePendingSettingsRecord`）
     const merged = mergePendingSettingsRecord(
       update.recordKind,
       current,
-      update.record
+      update.record,
+      { source: update.source }
     );
     const diff = diffSettingsRecord(
       update.recordKind,
