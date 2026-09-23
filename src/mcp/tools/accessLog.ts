@@ -68,10 +68,13 @@ export function exposureOf(
     置くだけ**で、原稿も設定資料も読まないし、操作も実行しない。
     `windows.list`（0.75.x）は**保管庫の窓の札を読むだけ**で、作品フォルダーを
     1つも開かない（`mcp.version` と同じ）。
+    `setup.request`（0.82.1、設計書6.87.18）は**作者の画面に確認を出させる
+    URI を開くだけ**で、ファイルを1つも読まない。
   */
   if (
     tool === "mcp.version" ||
     tool === "windows.list" ||
+    tool === "setup.request" ||
     tool === "ollama.models" ||
     tool === "novel.propose" ||
     tool === "novel.notice" ||

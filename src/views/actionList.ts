@@ -772,6 +772,27 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・読ませるかは「外部AI許可／取消」で決める\n\n" +
               "置いただけでは、外部AIはまだ1文字も読めない。",
           },
+          /*
+            **外部AIの2つの隣に置く**（設計書6.87.18）。こちらは作品を選ばない
+            ——登録は Claude Code のユーザー全体へ入る。
+          */
+          {
+            kind: "action",
+            command: "novelai.connectClaudeCode",
+            // 14字まで（ビューが狭い）。「とつなぐ」は補足と説明で言う
+            label: "Claude Code接続",
+            icon: "plug",
+            requiresWork: false,
+            usesAI: false,
+            note: "会話でセットアップ",
+            detail:
+              "Claude Code にこの拡張機能の MCP サーバーを登録する\n\n" +
+              "・押す前に、何をどこへ書くかを見せて確かめる\n\n" +
+              "・つないだら、Claude Code のチャットで「/」から「novel-ai-assistant:setup」を選ぶと、" +
+              "会話しながら最初の作品までセットアップできる\n\n" +
+              "・作品を作る・入れるのは拡張機能で、どの段もいつもの確認が出る\n\n" +
+              "・作品を読ませるかは「外部AI許可／取消」で別に決める",
+          },
         ],
       },
     ],

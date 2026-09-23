@@ -40,7 +40,7 @@
 
 ## 道具の早見表
 
-**道具は13本で、何をするかは `feature` の引数で決まる**（0.66.7）。ほとんどの用は `novel.run` に `feature` を渡せば足りる。
+**道具は14本で、何をするかは `feature` の引数で決まる**（0.66.7）。ほとんどの用は `novel.run` に `feature` を渡せば足りる。
 
 | したいこと | 道具 |
 |---|---|
@@ -58,6 +58,7 @@
 | 手元の Ollama のモデルを知る | `ollama.models` |
 | サーバーの版と、あなたの名乗り | `mcp.version` |
 | この機械で開いている VS Code の窓と、それぞれの拡張機能の版・開発ホストか | `windows.list`（**読むだけ**。`probablyClosed` は閉じたときに消し損ねた札） |
+| 初期設定の1段（AIの導入・作品の作成／登録など）を作者の画面に頼む | `setup.request`（**確認が出るだけで、押すのは作者**。手順はプロンプト `setup`。0.82.1） |
 
 feature ごとの追加の指定（`mode`・`group`・`plotPath`・`question`・`characterName` など）は `options` に入れる。**一覧は `novel.run` の説明にある。**
 

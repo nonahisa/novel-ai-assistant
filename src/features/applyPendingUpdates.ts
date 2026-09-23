@@ -303,6 +303,8 @@ export function recordUpdateViewItems(
       };
     }),
     source: describeChange(item),
+    // 出どころの印（まとめて承認はこれで見分ける。設計書6.87.18）
+    ...(item.update.source ? { origin: item.update.source } : {}),
     status: "pending" as const,
   }));
 }
@@ -481,6 +483,7 @@ export function settingsUpdateViewItems(
       return { label: change.label, before, after, diff: diffChars(before, after) };
     }),
     source: describeSettingsChange(item),
+    ...(item.update.source ? { origin: item.update.source } : {}),
     status: "pending" as const,
   }));
 }

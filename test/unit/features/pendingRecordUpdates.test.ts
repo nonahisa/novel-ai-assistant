@@ -178,3 +178,25 @@ describe("溜まっている承認待ちの組み立て", () => {
     expect(recordUpdateViewItems(review)).toHaveLength(1);
   });
 });
+
+describe("出どころの印（まとめて承認。設計書6.87.18）", () => {
+  test("外部AIの案には origin: external が付き、ほかには付かない", async () => {
+    const characters = seedCharacters(2);
+    // 外部AIが novel.propose で置いた形（包みに source と reason）
+    put(pendingDir, "char_001.json", {
+      source: "external",
+      reason: "第3話で所属が明かされる",
+      character: { ...characters[0], summary: "外部AIの紹介" },
+    });
+    put(pendingDir, "char_002.json", {
+      ...characters[1],
+      summary: "抽出の紹介",
+    });
+
+    const view = recordUpdateViewItems(await reviewPendingCharacterUpdates(work));
+    const byName = new Map(view.map((entry) => [entry.name, entry]));
+
+    expect(byName.get("人物1")?.origin).toBe("external");
+    expect(byName.get("人物2")?.origin).toBeUndefined();
+  });
+});

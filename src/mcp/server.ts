@@ -51,6 +51,17 @@ import {
   type SpotlightRequestInput,
 } from "./tools/spotlight";
 import { windowsList } from "./tools/windows";
+import {
+  SETUP_REQUEST_INPUT,
+  setupRequest,
+  type SetupRequestInput,
+} from "./tools/setupRequest";
+import {
+  SETUP_PROMPT_DESCRIPTION,
+  SETUP_PROMPT_NAME,
+  SETUP_PROMPT_TITLE,
+  buildSetupGuide,
+} from "./prompts/setupGuide";
 
 /**
  * Claude Code から、製品のプロンプトと検算をツールとして呼ぶ（設計書6.87.8）。
@@ -59,8 +70,9 @@ import { windowsList } from "./tools/windows";
  * そちらを直に呼ぶ（`test/unit/mcp/mcpTools.test.ts`）。混ぜると、
  * ツールの中身を確かめるのに stdio を立てなければならなくなる。
  *
- * **道具は13本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
- * 0.75.x で `windows.list` を足した。0.66.7 の時点では10本）。
+ * **道具は14本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
+ * 0.75.x で `windows.list`、0.82.1 で `setup.request` を足した。0.66.7 の時点では10本）。
+ * ほかに**プロンプトが1つ**（`setup`。Claude Code では `/` から選べる。6.87.18）。
  * 56本あったものを
  * `feature` を引数に取る形へ束ねた——**AI は繋いだ瞬間にこの一覧を読む**ので、
  * 一覧そのものが会話のたびに払う費用だった（44,882字）。
@@ -379,6 +391,37 @@ server.registerTool(
     inputSchema: OLLAMA_MODELS_INPUT,
   },
   tool("ollama.models", (args: OllamaModelsInput) => ollamaModels(args))
+);
+
+server.registerTool(
+  "setup.request",
+  {
+    title: "拡張機能の画面に、セットアップの確認を出させる",
+    description:
+      "統合小説執筆環境の初期設定の1段（Ollama導入・AI設定・ベクトル検索準備・作品の作成／登録・" +
+      "作家タイプ診断・外部AIの許可）を、作者の VS Code に頼みます。" +
+      "**作者の画面に「Claude Code からの依頼です」という確認が出るだけで、押すのは作者です。** " +
+      "ファイルは1つも作らず読みません。1段ずつ頼み、作者の返事を待ってから次へ進んでください。" +
+      "手順はプロンプト setup にあります。",
+    inputSchema: SETUP_REQUEST_INPUT,
+  },
+  tool("setup.request", (args: SetupRequestInput) => setupRequest(args))
+);
+
+/*
+  **セットアップの手順書**（設計書6.87.18）。Claude Code のチャットで `/` を
+  打つと `/novel-ai-assistant:setup (MCP)` と並ぶ。引数は取らない——
+  聞き取りは会話で行うので、打つときに何かを覚えている必要が無い。
+  道具ではないので許可（6.87.14）の対象ではない。作品に触れず、文を返すだけ。
+*/
+server.registerPrompt(
+  SETUP_PROMPT_NAME,
+  { title: SETUP_PROMPT_TITLE, description: SETUP_PROMPT_DESCRIPTION },
+  () => ({
+    messages: [
+      { role: "user", content: { type: "text", text: buildSetupGuide() } },
+    ],
+  })
 );
 
 async function main(): Promise<void> {

@@ -114,6 +114,12 @@ const MARKDOWN_ALLOWED = new Set([
   "src/mcp/server.ts",
   "src/mcp/tools/ollama.ts",
   /*
+    セットアップの手順書（MCP の prompts。設計書6.87.18）。**読む相手は
+    Claude Code** で、見出しと強調は「原稿を書き換えない」などの外せない
+    決まりに付く。VS Code の画面には出さない。
+  */
+  "src/mcp/prompts/setupGuide.ts",
+  /*
     AI用の指示書（`.md`）を組む（設計書6.87.15 柱5、6.87.14 の末尾）。
 
     **読む相手は VS Code の画面ではなく、繋いだAIである。** 強調は

@@ -374,6 +374,25 @@ async function resolveRegistration(
   return registrationFor(chosen);
 }
 
+/**
+ * 登録に使う束の場所を、**作者に尋ねずに**決める（「Claude Code とつなぐ」
+ * 設計書6.87.18）。同梱の束があれば版に依らない場所へ写した道、無ければ
+ * 前に選んだ場所。どちらも無ければ undefined（呼んだ側が断る）。
+ *
+ * 決め方は `resolveRegistration` の①②と同じ。**2か所で別々に決めない**
+ * ——片方だけが古い場所を指すと、同じ機械に2つの束が走る。
+ */
+export async function resolveStableBundlePath(
+  context: vscode.ExtensionContext
+): Promise<string | undefined> {
+  if (!canRunProcesses()) return undefined;
+  const bundled = path.join(fromUri(context.extensionUri), "dist", "mcp-server.mjs");
+  if (await exists(bundled)) return stableBundlePath(context, bundled);
+  const remembered = context.globalState.get<string>(KEY_BUNDLE_PATH);
+  if (remembered && (await exists(remembered))) return remembered;
+  return undefined;
+}
+
 function registrationFor(bundlePath: string): McpRegistration {
   return { name: SERVER_NAME, command: "node", args: [bundlePath] };
 }

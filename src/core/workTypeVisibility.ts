@@ -274,6 +274,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   // AI用の指示書（設計書6.87.15 柱5）。**どのタイプの作品でも要る**——
   // 外部AIに扱わせるときの決まりに、作品の種類は関係ない
   "novelai.writeAiInstructions": "allTypes",
+  // Claude Code とつなぐ（設計書6.87.18）。作品を選ばない
+  "novelai.connectClaudeCode": "allTypes",
   // 年表と時期・系統は「作中の時間」を並べるもの。
   // 続きものでない作品には並べる筋が無い
   "novelai.openChronicle": "story",

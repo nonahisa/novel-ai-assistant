@@ -165,6 +165,10 @@ const PROCESS_ALLOWED: ReadonlyMap<string, string> = new Map([
     "OSのコマンドで開く道（openWithShell）だけが読む。入口で canRunProcesses() を見てから呼ぶ",
   ],
   [
+    "features/connectClaudeCode.ts",
+    "Claude Code とつなぐ。拡張機能からは動的 import だけで届き、入口で canRunProcesses() を見て、ブラウザでは理由を出して戻る",
+  ],
+  [
     "features/windowCard.ts",
     "窓の札。入口で canRunProcesses() を見て、ブラウザでは何もせずに戻る",
   ],

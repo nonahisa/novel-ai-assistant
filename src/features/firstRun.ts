@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { AIRegistry, runSetupWizard } from "../ai/registry";
+import { CLAUDE_CODE_EXTENSION_ID } from "../core/claudeCodeRegistration";
 
 /**
  * はじめて開いたときに、使うAIを選んでもらう（作者の指示、2026-08-19）。
@@ -29,9 +30,20 @@ export interface FirstRunDeps {
   markShown: () => Promise<void>;
   /** 選択画面を出す */
   runWizard: () => Promise<boolean>;
-  /** 案内を出す */
-  notify: (message: string, action: string) => Promise<string | undefined>;
+  /** 案内を出す（押し口は1つか2つ） */
+  notify: (message: string, ...actions: string[]) => Promise<string | undefined>;
+  /**
+   * VS Code 版の Claude Code が入っているか（設計書6.87.18）。入っていれば
+   * 「Claude Code とつなぐ」も並べる——会話でセットアップを進められる
+   */
+  claudeCodeInstalled?: () => boolean;
+  /** つなぐ（`novelai.connectClaudeCode`） */
+  connectClaudeCode?: () => Promise<void>;
 }
+
+/** 案内の押し口の名前 */
+const PICK_AI = "AIを選ぶ";
+export const CONNECT_CLAUDE_CODE = "Claude Code とつなぐ";
 
 /**
  * 出すべきかを決める。**VS Code APIに依存しないので単体で試せる。**
@@ -56,12 +68,26 @@ export async function offerFirstRunSetup(deps: FirstRunDeps): Promise<void> {
   // また出るのは邪魔である。あとから「AI設定」でいつでも開ける
   await deps.markShown();
 
+  /*
+    **Claude Code が入っていれば、つなぐ口も並べる**（設計書6.87.18）。
+    つなげば、Claude Code のチャットで会話しながら最初の作品まで準備できる。
+    入っていない人には出さない——何のことか分からない押し口は迷わせるだけ。
+  */
+  const offerConnect = Boolean(deps.claudeCodeInstalled?.() && deps.connectClaudeCode);
   const answer = await deps.notify(
     "小説執筆へようこそ。使うAIを選ぶと、設定資料の抽出や誤字脱字の検知が使えます。" +
-      "（作品の管理と文字数の集計は、AIなしでも使えます）",
-    "AIを選ぶ"
+      "（作品の管理と文字数の集計は、AIなしでも使えます）" +
+      (offerConnect
+        ? "Claude Code とつなぐと、Claude Code のチャットで会話しながらセットアップを進められます。"
+        : ""),
+    PICK_AI,
+    ...(offerConnect ? [CONNECT_CLAUDE_CODE] : [])
   );
-  if (answer !== "AIを選ぶ") return;
+  if (answer === CONNECT_CLAUDE_CODE && deps.connectClaudeCode) {
+    await deps.connectClaudeCode();
+    return;
+  }
+  if (answer !== PICK_AI) return;
   await deps.runWizard();
 }
 
@@ -82,7 +108,13 @@ export function offerFirstRunSetupInVsCode(
       await context.globalState.update(SHOWN_KEY, true);
     },
     runWizard: () => runSetupWizard(registry),
-    notify: async (message, action) =>
-      vscode.window.showInformationMessage(message, action),
+    notify: async (message, ...actions) =>
+      vscode.window.showInformationMessage(message, ...actions),
+    claudeCodeInstalled: () =>
+      vscode.extensions.getExtension(CLAUDE_CODE_EXTENSION_ID) !== undefined,
+    // 中身はコマンド側（動的に読む。Node の部品を抱えているため）
+    connectClaudeCode: async () => {
+      await vscode.commands.executeCommand("novelai.connectClaudeCode");
+    },
   });
 }

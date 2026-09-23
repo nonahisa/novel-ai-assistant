@@ -81,11 +81,20 @@ export interface ReaderStatsHelperLinkDeps {
    * 1つしか持てないので、ここで見分けて渡す。無ければ知らないパスと同じ扱い
    */
   importContests?(): Promise<void>;
+  /**
+   * Claude Code からのセットアップの依頼を受けたとき（設計書6.87.18）。
+   * クエリをそのまま渡す（確かめるのは受けた側）。無ければ知らないパスと同じ扱い
+   */
+  handleSetupRequest?(query: string): Promise<void>;
 }
 
-/** URI の中身のうち、見るもの（パスだけ。クエリは読まない） */
+/**
+ * URI の中身のうち、見るもの。**クエリはセットアップの依頼のときだけ読む**
+ * （読者の反応・公募はクリップボードで渡り、クエリには何も載らない約束）
+ */
 export interface HelperUri {
   readonly path: string;
+  readonly query?: string;
 }
 
 type Trigger = "uri" | "focus";
@@ -107,6 +116,10 @@ export class ReaderStatsHelperLink {
     const action = readerStatsUriAction(uri.path);
     if (action === "contests" && this.deps.importContests) {
       await this.deps.importContests();
+      return;
+    }
+    if (action === "setup" && this.deps.handleSetupRequest) {
+      await this.deps.handleSetupRequest(uri.query ?? "");
       return;
     }
     if (action !== "import") {

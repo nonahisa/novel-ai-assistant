@@ -184,6 +184,7 @@ import { describeTuningScope } from "./core/tuningScope";
 import {
   disposeLog,
   logFailure,
+  logLine,
   logStep,
   setFallbackLogRoot,
   showLog,
@@ -258,7 +259,13 @@ import {
   readWorkFormat,
 } from "./core/workFormatStore";
 import { invalidateWorkKind, readWorkKind } from "./core/workKindStore";
-import type { WorkFormatKey } from "./core/workFormat";
+import {
+  selectableWorkFormats,
+  type WorkFormatDef,
+  type WorkFormatKey,
+} from "./core/workFormat";
+import { findSetupStep, type SetupRequest } from "./core/setupRequest";
+import { handleSetupRequest } from "./features/setupRequestHandler";
 // 作品タイプの在り処はプロットの `## 形式` ひとつ（設計書6.70）
 import { writePlotSections } from "./core/plotFile";
 import { statsDayKey } from "./core/writingStats";
@@ -306,7 +313,7 @@ import {
 import { pruneAllLogs } from "./features/pruneLogs";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
-import { hasUnsavedChanges } from "./core/textFile";
+import { hasUnsavedChanges, sameFilePath } from "./core/textFile";
 import { PROPOSALS_VIEW_ID, ProposalPanel } from "./features/proposalPanel";
 import {
   WritingProgressTracker,
@@ -2831,7 +2838,13 @@ export async function activate(
    *   （コマンドパレットの「新規作品を作成」から来た場合）
    */
   async function createNewWork(
-    mode?: WorkStartMode
+    mode?: WorkStartMode,
+    /**
+     * 先に聞き取ってある答え（Claude Code からの依頼。設計書6.87.18）。
+     * **答えのある問いは訊き直さない**——受け口の確認に全部並べて、作者が
+     * 「始める」を押している。答えの無い問いは、これまでどおり画面で訊く
+     */
+    preset: SetupRequest = { step: "create" }
   ): Promise<CheckCommandOutcome> {
     /*
       **行き先は書庫にする**（設計書6.97.2）。「書庫を作りますか」とは
@@ -2847,16 +2860,18 @@ export async function activate(
     if (!home) return CHECK_CANCELLED;
     const parentPath = home.folderPath;
 
-    const title = await askText({
-      title: home.note,
-      prompt: "作品名を入力してください（フォルダ名になります）",
-      validateInput: (v) => {
-        const t = v.trim();
-        if (t.length === 0) return "作品名を入力してください";
-        if (/[/\\:*?"<>|]/.test(t)) return "フォルダ名に使えない文字が含まれています";
-        return null;
-      },
-    });
+    const title =
+      preset.title ??
+      (await askText({
+        title: home.note,
+        prompt: "作品名を入力してください（フォルダ名になります）",
+        validateInput: (v) => {
+          const t = v.trim();
+          if (t.length === 0) return "作品名を入力してください";
+          if (/[/\\:*?"<>|]/.test(t)) return "フォルダ名に使えない文字が含まれています";
+          return null;
+        },
+      }));
     if (!title) return CHECK_CANCELLED;
 
     // **種類もタイプも始め方も、フォルダーを作る前に訊く。** 作ったあとで
@@ -2864,9 +2879,9 @@ export async function activate(
     //
     // 種類（何を書くか。設計書6.109）を先に訊く。先頭の「小説」を選べば
     // これまでとまったく同じ作品になる
-    const kind = await chooseWorkKind(title.trim());
+    const kind = preset.kind ?? (await chooseWorkKind(title.trim()));
     if (!kind) return CHECK_CANCELLED;
-    const workType = await chooseWorkType(title.trim());
+    const workType = presetWorkType(preset) ?? (await chooseWorkType(title.trim()));
     if (!workType) return CHECK_CANCELLED;
     const format =
       workType === "unset" ? undefined : (workType.key as WorkFormatKey);
@@ -2878,7 +2893,7 @@ export async function activate(
     */
     const startMode = skipsStartModeQuestion(format)
       ? "manuscript"
-      : (mode ?? (await chooseWorkStartMode(title.trim())));
+      : (mode ?? preset.start ?? (await chooseWorkStartMode(title.trim())));
     if (!startMode) return CHECK_CANCELLED;
 
     const folderPath = path.join(parentPath, title.trim());
@@ -6054,7 +6069,18 @@ export async function activate(
         if (!work) return;
         await writeAiInstructions(context, work);
       }
-    )
+    ),
+    /*
+      「Claude Code とつなぐ」（設計書6.87.18）。作品を選ばない——登録は
+      Claude Code のユーザー全体へ入る。**Node の部品を抱えるので動的に読む**
+      （実装ルール7。ブラウザ版では中で理由を出して断る）
+    */
+    registerCommand("novelai.connectClaudeCode", async () => {
+      const { connectClaudeCodeInVsCode } = await import(
+        "./features/connectClaudeCode.js"
+      );
+      await connectClaudeCodeInVsCode(context);
+    })
   );
 
   context.subscriptions.push(
@@ -6276,9 +6302,70 @@ export async function activate(
         afterImport: (work) => refreshWritingStatsPanel(work, deviceId),
         // 公募の一覧（ヘルパー 0.12.0）。URI の受け口は1つしか持てないので、ここで渡す
         importContests: () => importContestsFromClipboard(contestDeps, "uri"),
+        // Claude Code からのセットアップの依頼（設計書6.87.18）。同じ受け口で見分ける
+        handleSetupRequest: (query) =>
+          handleSetupRequest(query, {
+            confirm: async (message, detail) =>
+              (await vscode.window.showInformationMessage(
+                message,
+                { modal: true, detail },
+                "始める"
+              )) === "始める",
+            run: runSetupStep,
+            warn: (message) => void vscode.window.showWarningMessage(message),
+            log: (line) => {
+              useLogFile(undefined);
+              logLine(line);
+            },
+          }),
       })
     )
   );
+
+  /**
+   * 依頼された段を呼ぶ（設計書6.87.18）。**どれも作者が画面で押せる既存の
+   * 操作**で、その操作の確認（導入の同意・書庫の選択・許可の画面）は
+   * そのまま出る。ここで確認を飛ばすものは無い。
+   */
+  async function runSetupStep(request: SetupRequest): Promise<void> {
+    const def = findSetupStep(request.step);
+    if (!def) return;
+    if (request.step === "create") {
+      await createNewWork(undefined, request);
+      return;
+    }
+    if (request.step === "register") {
+      const folderPath = request.path ?? "";
+      try {
+        await vscode.workspace.fs.stat(path.toUri(folderPath));
+      } catch {
+        void vscode.window.showWarningMessage(
+          `登録しようとしたフォルダーが見つかりませんでした：${folderPath}`
+        );
+        return;
+      }
+      await vscode.commands.executeCommand(def.command, {
+        folderPath,
+        title: request.title,
+      });
+      return;
+    }
+    if (request.step === "external-access") {
+      const work = registry
+        .list()
+        .find((entry) => sameFilePath(entry.folderPath, request.path ?? ""));
+      if (!work) {
+        void vscode.window.showWarningMessage(
+          "外部AIの許可は、登録済みの作品にだけ設定できます。先に作品を登録してください。"
+        );
+        return;
+      }
+      await toggleExternalAccessPermission(work);
+      return;
+    }
+    // 導入・AI設定・ベクトル検索準備・作家タイプ診断は、引数を取らない
+    await vscode.commands.executeCommand(def.command);
+  }
 
   /*
     作品ごとのメモ（設計書6.71）。
@@ -6699,6 +6786,16 @@ export function deactivate(): Promise<void> | undefined {
  * 右クリックからも呼ばれ、そこでは別のもの（`Uri` など）が渡ってくる。
  * 欄が揃っていないものは「引数なし」と同じに扱い、これまでの画面を出す。
  */
+/**
+ * Claude Code から渡された形式（設計書6.87.18）を、作る画面の答えの形へ。
+ * 渡されていなければ undefined（画面で訊く）。値は受け口で確かめてある
+ */
+function presetWorkType(preset: SetupRequest): WorkFormatDef | "unset" | undefined {
+  if (preset.format === undefined) return undefined;
+  if (preset.format === "unset") return "unset";
+  return selectableWorkFormats().find((format) => format.key === preset.format);
+}
+
 function parseAddWorkArgument(
   arg: unknown
 ): { folderPath: string; title?: string } | undefined {

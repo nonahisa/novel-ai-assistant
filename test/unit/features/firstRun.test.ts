@@ -89,6 +89,38 @@ describe("案内の流れ", () => {
   });
 });
 
+describe("Claude Code が入っていれば「つなぐ」も出す（設計書6.87.18）", () => {
+  test("入っていれば、2つ目の押し口として並べる", async () => {
+    const notify = vi.fn<FirstRunDeps["notify"]>(async () => undefined);
+    await offerFirstRunSetup(
+      deps({ notify, claudeCodeInstalled: () => true, connectClaudeCode: async () => undefined })
+    );
+    expect(notify.mock.calls[0]).toContain("Claude Code とつなぐ");
+    expect(notify.mock.calls[0]).toContain("AIを選ぶ");
+  });
+
+  test("押されたら、つなぐ（AIの選択画面は開かない）", async () => {
+    const connectClaudeCode = vi.fn(async () => undefined);
+    const runWizard = vi.fn(async () => true);
+    await offerFirstRunSetup(
+      deps({
+        notify: async () => "Claude Code とつなぐ",
+        claudeCodeInstalled: () => true,
+        connectClaudeCode,
+        runWizard,
+      })
+    );
+    expect(connectClaudeCode).toHaveBeenCalled();
+    expect(runWizard).not.toHaveBeenCalled();
+  });
+
+  test("入っていなければ出さない（これまでと同じ）", async () => {
+    const notify = vi.fn<FirstRunDeps["notify"]>(async () => undefined);
+    await offerFirstRunSetup(deps({ notify, claudeCodeInstalled: () => false }));
+    expect(notify.mock.calls[0]).not.toContain("Claude Code とつなぐ");
+  });
+});
+
 describe("作品一覧のボタン", () => {
   test("「AI設定」の歯車を置かない", () => {
     // **作者の指示（2026-08-19）。** はじめて開いたときに出すので、

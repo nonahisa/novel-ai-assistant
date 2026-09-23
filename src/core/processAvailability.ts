@@ -51,6 +51,9 @@ const REQUIRES_PROCESSES = new Set<string>([
   // にある。ブラウザからブラウザへファイルを渡す道が無い以上、
   // 判定は `canRunProcesses()` と同じところで分かれる
   "novelai.exportPdf",
+  // **Claude Code の CLI を起動して登録する**（設計書6.87.18）。MCP サーバーも
+  // この機械で起動するもので、ブラウザ版には起こす先が無い
+  "novelai.connectClaudeCode",
 ]);
 
 /**
@@ -129,6 +132,13 @@ export function describeProcessesBlocked(command: string): string {
       "ブラウザ版では、印刷用のファイルをブラウザへ渡せません" +
       "（作品がパソコンの中に無いためです）。" +
       "手元のVS Codeで開いてからお使いください。"
+    );
+  }
+  if (command === "novelai.connectClaudeCode") {
+    return (
+      "ブラウザ版では、Claude Code とつなげません" +
+      "（この機械で Claude Code のコマンドと MCP サーバーを起動する必要があるためです）。" +
+      "手元のVS Codeからお使いください。"
     );
   }
   if (command === "novelai.shareWithEditor" || command === "novelai.collectEditorProposals") {

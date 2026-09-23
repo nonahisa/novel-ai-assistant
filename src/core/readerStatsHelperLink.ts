@@ -5,6 +5,7 @@ import {
   type PostingLedger,
 } from "../models/posting";
 import { hashText } from "./hash";
+import { SETUP_URI_PATH } from "./setupRequest";
 import {
   matchReaderStatsEnvelope,
   readerStatsRecordsFromEnvelope,
@@ -27,6 +28,8 @@ import {
  * リンク1つで開かせられる）。知らないパスは何もせず、クエリに何が
  * 書いてあっても読まない——読むのはクリップボードだけで、そこから先は
  * 作者が「読者の反応を貼り付けて取り込む」を押したときと同じ関所を通る。
+ * （例外は Claude Code からのセットアップの依頼 `/setup` だけで、そこでは
+ * クエリを白名簿で確かめ、作者の確認を経てから呼ぶ。設計書6.87.18）
  *
  * VS Code API には依存しない。
  */
@@ -42,12 +45,20 @@ export const READER_STATS_IMPORT_URI_PATH = "/import-reader-stats";
 export const CONTESTS_IMPORT_URI_PATH = "/import-contests";
 
 /** URI のパスが何の合図か。知らないパスは undefined（何もしない） */
-export function readerStatsUriAction(uriPath: string): "import" | "contests" | undefined {
+export function readerStatsUriAction(
+  uriPath: string
+): "import" | "contests" | "setup" | undefined {
   // 末尾の `/` だけは許す（ブラウザやOSが付け足すことがある）。
   // 大文字小文字は区別する——約束は1つの綴りで、似た綴りを拾う理由が無い
   const trimmed = uriPath.replace(/\/+$/u, "");
   if (trimmed === READER_STATS_IMPORT_URI_PATH) return "import";
   if (trimmed === CONTESTS_IMPORT_URI_PATH) return "contests";
+  /*
+    **Claude Code からのセットアップの依頼**（設計書6.87.18）。受け口は1つしか
+    持てないので同じ口で見分ける。**クエリを読むのはこのパスだけ**で、
+    白名簿で確かめてから（`core/setupRequest.ts`）、作者の確認を経て呼ぶ。
+  */
+  if (trimmed === SETUP_URI_PATH) return "setup";
   return undefined;
 }
 

@@ -351,6 +351,7 @@ body.show-low .issue.low { display: flex; }
   <span class="title" id="category">誤字脱字</span>
   <span class="count" id="count">0件</span>
   <button class="secondary" id="applyAll" title="確信度が「高」「中」で、修正案のあるものだけが対象です">まとめて適用</button>
+  <button class="secondary" id="approveExternal" title="外部AI（Claude Code など）から届いた設定資料の提案だけを、中身を見てからまとめて承認します">外部AIの提案をまとめて確かめる</button>
   <span class="running" id="running"></span>
   <label><input type="checkbox" id="showLow"> 確信度が低いものも表示</label>
   <button class="secondary" id="clear" title="この分類の一覧を空にします（本文は書き換わりません）">一覧を空にする</button>
@@ -371,6 +372,9 @@ const emptyEl = document.getElementById('empty');
 const countEl = document.getElementById('count');
 const showLowEl = document.getElementById('showLow');
 const applyAllEl = document.getElementById('applyAll');
+const approveExternalEl = document.getElementById('approveExternal');
+// 最初は隠す。**属性の style は CSP に止められる**ので、ここで消す
+approveExternalEl.style.display = 'none';
 const tabsEl = document.getElementById('tabs');
 const worksEl = document.getElementById('works');
 const clearEl = document.getElementById('clear');
@@ -455,6 +459,11 @@ showLowEl.addEventListener('change', () => {
 });
 applyAllEl.addEventListener('click', () => {
   vscode.postMessage(applyAllMessage());
+});
+// 外部AIの提案だけを束ねる（設計書6.87.18）。✕ の印は「まとめて適用」と同じく添える
+approveExternalEl.addEventListener('click', () => {
+  const message = applyAllMessage();
+  vscode.postMessage({ type: 'approveExternal', drops: message.drops });
 });
 
 clearEl.addEventListener('click', () => {
@@ -1103,6 +1112,8 @@ window.addEventListener('message', (event) => {
     document.getElementById('category').textContent = message.category || '誤字脱字';
     // 矛盾には「まとめて適用」が無い。どちらが正しいか決められないため
     applyAllEl.style.display = message.canApplyAll === false ? 'none' : '';
+    // 外部AIから来た未判断の案があるときだけ出す
+    approveExternalEl.style.display = message.canApproveExternal ? '' : 'none';
     // 空の分類に「空にする」を出しても押すものが無い
     clearEl.style.display = message.items.length > 0 ? '' : 'none';
     renderWorks(message.works);
