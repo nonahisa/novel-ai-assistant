@@ -407,6 +407,12 @@ type PanelMessage =
   | { type: "filter"; onlyCurrent: boolean; tag: string; query: string }
   | { type: "export" };
 
+/**
+ * シーンメモの画面の種類。**提案パネルが、シーンメモの列を探すのに使う**
+ * （右の列を基準にする。作者の指示、2026-09-23）
+ */
+export const SCENE_MEMO_VIEW_TYPE = "novelai.sceneMemos";
+
 class SceneMemoPanel {
   private readonly panel: vscode.WebviewPanel;
 
@@ -443,7 +449,7 @@ class SceneMemoPanel {
     this.currentFile = filePath ?? lastManuscriptCaret()?.filePath ?? null;
 
     this.panel = vscode.window.createWebviewPanel(
-      "novelai.sceneMemos",
+      SCENE_MEMO_VIEW_TYPE,
       `シーンメモ: ${work.title}`,
       // **原稿エディタの横へ開く**（作者の指示）。書きながら見るものなので、
       // 本文の上に重なっては用をなさない

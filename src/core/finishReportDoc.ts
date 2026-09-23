@@ -57,7 +57,7 @@ export function describeFinishReport(summary: FinishRunSummary): string {
     lines.push("指摘を数える段は走りませんでした。");
   } else if (total > 0) {
     lines.push(
-      `合わせて ${total}件です。下段の「提案」パネルで、1件ずつ確かめてください。`
+      `合わせて ${total}件です。右の列の「提案」パネルで、1件ずつ確かめてください。`
     );
   } else {
     lines.push("手を付ける指摘は残っていません。");

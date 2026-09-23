@@ -2754,7 +2754,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       this.postAll({
         type: "runDone",
         id,
-        message: "実行しました。結果は下段の「提案」パネルに出ます。",
+        message: "実行しました。結果は右の列の「提案」パネルに出ます。",
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -3074,7 +3074,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       );
       this.postAll({
         type: "note",
-        message: `「${label}」を実行しました。結果は下段の「提案」パネルに出ます。`,
+        message: `「${label}」を実行しました。結果は右の列の「提案」パネルに出ます。`,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

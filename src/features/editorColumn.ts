@@ -84,6 +84,42 @@ export function columnForLocation(location: string): ColumnChoice {
   };
 }
 
+/**
+ * その種類の画面（`createWebviewPanel` の viewType）が開いている列。
+ * 無ければ undefined（2026-09-23）。
+ *
+ * 提案パネルを、シーンメモが開いている列へ重ねるのに使う——右の列を
+ * 基準にするという作者の指示で、`ViewColumn.Beside` だけだと、前面が
+ * シーンメモのときに、さらに右へ列が増える。
+ *
+ * **VS Code はタブの viewType に内部の接頭辞を付ける**
+ * （`mainThreadWebview-novelai.sceneMemos` のように）ので、末尾で比べる。
+ */
+export function columnOfWebviewPanel(viewType: string): vscode.ViewColumn | undefined {
+  let groups: readonly vscode.TabGroup[];
+  try {
+    groups = vscode.window.tabGroups.all;
+  } catch {
+    return undefined;
+  }
+  for (const group of groups) {
+    for (const tab of group.tabs) {
+      try {
+        const input: unknown = tab.input;
+        if (
+          input instanceof vscode.TabInputWebview &&
+          (input.viewType === viewType || input.viewType.endsWith(`-${viewType}`))
+        ) {
+          return group.viewColumn;
+        }
+      } catch {
+        // 種類を読めない環境では「見つからない」と同じ扱いにする
+      }
+    }
+  }
+  return undefined;
+}
+
 /** そのタブが指しているファイル。指していなければ undefined */
 function tabUri(tab: vscode.Tab): vscode.Uri | undefined {
   const input: unknown = tab.input;

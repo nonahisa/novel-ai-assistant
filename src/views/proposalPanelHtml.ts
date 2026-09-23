@@ -1,5 +1,6 @@
 /**
- * 提案パネル（下段・誤字脱字）の中身。
+ * 提案パネル（誤字脱字など）の中身。既定はエディターの右の列に開き、
+ * 設定で下段にも出せる（`features/proposalPanel.ts` の `reveal`）。
  *
  * 設定資料パネルと同じく、値はすべて postMessage で渡し、
  * HTMLへ文字列として埋め込まない（本文の引用符で画面が壊れるのを防ぐ）。
@@ -29,6 +30,8 @@ body {
 #toolbar {
   display: flex;
   align-items: center;
+  /* 右の列は幅が狭いので、はみ出さずに折り返す（ボタンを画面の外へ逃がさない） */
+  flex-wrap: wrap;
   gap: 12px;
   padding: 6px 10px;
   border-bottom: 1px solid var(--vscode-panel-border);
@@ -334,13 +337,23 @@ body.show-low .issue.low { display: flex; }
 <body>
 <div id="works"></div>
 <div id="tabs"></div>
+<!--
+  **本文を書き換える一括のボタン（まとめて適用）を、右の端に置かない**
+  （ノートPCの実機、0.76.1、2026-09-23。2回報告あり）。
+
+  VS Code の通知は画面の右下に出る。下段に開いていたころ、ツールバーの右の端は
+  ちょうど通知の真下にあり、通知の［表示する］を押そうとしたら通知が先に消え、
+  下の［まとめて適用］を押しかけた（確認の窓が出たので止まった）。
+  見出しと件数のすぐ後ろ（左寄り）に置く。右の端には本文を書き換えない
+  ものだけを残す。確認の窓はそのまま出す。
+-->
 <div id="toolbar">
   <span class="title" id="category">誤字脱字</span>
   <span class="count" id="count">0件</span>
+  <button class="secondary" id="applyAll" title="確信度が「高」「中」で、修正案のあるものだけが対象です">まとめて適用</button>
   <span class="running" id="running"></span>
   <label><input type="checkbox" id="showLow"> 確信度が低いものも表示</label>
   <button class="secondary" id="clear" title="この分類の一覧を空にします（本文は書き換わりません）">一覧を空にする</button>
-  <button class="secondary" id="applyAll" title="確信度が「高」「中」で、修正案のあるものだけが対象です">まとめて適用</button>
 </div>
 <!--
   **分類の名前を書かない。** この案内は誤字脱字・表記ゆれ・推敲・矛盾・

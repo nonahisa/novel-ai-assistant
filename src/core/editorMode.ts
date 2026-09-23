@@ -50,6 +50,9 @@ const EDITOR_ALLOWED = new Set<string>([
   // 読むために要る
   "novelai.openSettingsPanel",
   "novelai.showEditHistory",
+  // 提案パネルを開く（結果が届いたときもこれで開く。止めると、編集者モードで
+  // 検知の結果が届くたびに「使えません」が出る）
+  "novelai.openProposals",
 
   // **校閲の要**。ファイルを押さえ、提案の行方を見る
   "novelai.toggleReviewLock",

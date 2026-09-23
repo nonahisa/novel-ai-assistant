@@ -377,6 +377,7 @@ code --install-extension ".\novel-ai-assistant-$($v.TrimStart('v')).vsix" --forc
 | `novelai.usageLog.enabled` | `true` | 送った量を `.aiwriter/logs/usage.md` に1行残す（字数だけ） |
 | `novelai.logs.retentionDays` | `7` | ログに残す日数（`0`で消さない） |
 | `novelai.findings.retentionDays` | `3` | AIの指摘を並べ続ける日数（`0`でずっと並べる） |
+| `novelai.proposals.showInBottomPanel` | `false` | 提案パネルを画面下のパネル領域にも出す（既定はエディターの右の列だけ） |
 
 `novelai.modelTuning` は「AIが実際に読める長さを測る」が書き込む台帳です（手で書く項目ではありません）。`novelai.claude.maxOutputTokens` は旧設定で、`novelai.maxOutputTokens` に置き換わりました。
 

@@ -1815,12 +1815,12 @@ export async function activate(
       直る日が来る。
 
       **渡したら提案パネルを前へ出す。** 静かに置くだけだと、押しても何も
-      起きなかったようにしか見えない（提案パネルは下段にあり、ほかのタブへ
-      切り替えていると見えない）。
+      起きなかったようにしか見えない（提案パネルは右の列にあり、ほかのタブの
+      後ろに隠れていると見えない）。
     */
     handOverFinding: async (work, finding) => {
       if (!handOverFinding(work, proposalPanel, finding)) return false;
-      await vscode.commands.executeCommand(`${PROPOSALS_VIEW_ID}.focus`);
+      proposalPanel.reveal();
       return true;
     },
     // シーンメモで見送ったものを、提案の一覧からも下げる（6.96.5）
@@ -1898,8 +1898,21 @@ export async function activate(
     }
   );
   context.subscriptions.push(
+    // 下段の面。**既定では出さない**（package.json の `when` が設定
+    // `novelai.proposals.showInBottomPanel` を見る）。出したときのために登録は残す
     vscode.window.registerWebviewViewProvider(PROPOSALS_VIEW_ID, proposalPanel, {
       webviewOptions: { retainContextWhenHidden: true },
+    })
+  );
+  context.subscriptions.push(
+    /*
+      **提案パネルを右の列に開く**（作者の指示、2026-09-23）。結果が届いた
+      ときもパネルの中からこのコマンドを呼ぶ（`{ preserveFocus: true }`）。
+      作者が押したときは引数なし＝フォーカスごと移す。閉じたあとで開き直す
+      口でもある（下段と違い、閉じたら画面から消える）。
+    */
+    registerCommand("novelai.openProposals", (options?: { preserveFocus?: boolean }) => {
+      proposalPanel.reveal({ preserveFocus: options?.preserveFocus === true });
     })
   );
 

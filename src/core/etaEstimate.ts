@@ -127,10 +127,27 @@ export function estimateRunMs(
  */
 export type CallTimeSource = "measured" | "partial" | "fixed";
 
+/**
+ * 書く側で、何を測っていないか（`partial`／`fixed` のときだけ持つ）。
+ *
+ * **名乗りで「何を測っていないか」を取り違えないために分けた**（ノートPCの
+ * 実機、0.76.1、2026-09-23）。読者の反応の助言の確認に「書き出しはまだ
+ * 測っていない」と出たが、台帳には書き出しの速さ（6.7トークン/秒）が
+ * 入っていた。欠けていたのは**その機能が1回に書く量**のほうである。
+ *
+ * - `speed`……書き出しの速さ（モデルごとの台帳）が無い
+ * - `amount`……その機能が1回に書く量（機能ごとの実測の平均）が無い
+ * - `both`……両方無い。まとめ実行で機能ごとに欠けたものが違うときもこれ
+ *   （「速さや量」と言い、どちらとも言い切らない）
+ */
+export type CallTimeUnmeasured = "speed" | "amount" | "both";
+
 /** 押す前の見積もり。**出どころを必ず連れて歩く**（数字だけを渡さない） */
 export interface CallTimeEstimate {
   readonly ms: number;
   readonly source: CallTimeSource;
+  /** 書く側で欠けたもの。無ければ名乗りは「速さや量」と広く言う */
+  readonly unmeasured?: CallTimeUnmeasured;
 }
 
 /**
@@ -191,11 +208,19 @@ export function estimateCallsTime(params: {
 
   const inputKnown = inputSpeed !== undefined && tokensPerChar !== undefined;
   const outputKnown = outputSpeed !== undefined && perCall !== undefined;
+  // 書く側で欠けたもの。**名乗りがこれを名指しする**（取り違えると、測って
+  // ある速さを「測っていない」と言うことになる）
+  const unmeasured: CallTimeUnmeasured =
+    outputSpeed === undefined && perCall === undefined
+      ? "both"
+      : outputSpeed === undefined
+        ? "speed"
+        : "amount";
 
   if (!inputKnown && !outputKnown) {
     return fallback === undefined
       ? undefined
-      : { ms: count * fallback * 1000, source: "fixed" };
+      : { ms: count * fallback * 1000, source: "fixed", unmeasured };
   }
 
   let inputMs = 0;
@@ -215,7 +240,7 @@ export function estimateCallsTime(params: {
   }
   // 読み込みは分かるが、書く側が分からない。決め打ちで埋めるか、作らないか
   if (fallback === undefined) return undefined;
-  return { ms: inputMs + count * fallback * 1000, source: "partial" };
+  return { ms: inputMs + count * fallback * 1000, source: "partial", unmeasured };
 }
 
 /**
@@ -250,7 +275,7 @@ export function inputReadMs(
  */
 export function describeCallTimeEstimate(estimate: CallTimeEstimate): string {
   const minutes = Math.max(1, Math.ceil(estimate.ms / 60_000));
-  const label = CALL_TIME_SOURCE_LABEL[estimate.source];
+  const label = callTimeSourceLabel(estimate);
   // 1時間を超えたら、進み具合の表示と同じ言い方（「およそ8時間」）にそろえる。
   // 実測の速さで見積もると、CPUだけの機械では何百分にもなる——
   // 「目安 480 分程度」は、読んでから割り算させる数字になる
@@ -260,12 +285,63 @@ export function describeCallTimeEstimate(estimate: CallTimeEstimate): string {
   return `目安 ${minutes} 分程度（${label}）`;
 }
 
-/** 出どころごとの名乗り。**決め打ちが混ざったなら、必ずそう言う** */
-const CALL_TIME_SOURCE_LABEL: Readonly<Record<CallTimeSource, string>> = {
-  measured: "これまでの実測から",
-  partial: "読み込みは実測、書き出しはまだ測っていないので決め打ちの見込みです",
-  fixed: "この機械ではまだ速さを測っていないので、決め打ちの見込みです",
-};
+/**
+ * 出どころごとの名乗り。**決め打ちが混ざったなら、必ずそう言う。** そのうえで
+ * **何を測っていないのかを名指しする**（0.76.1 の実機。速さは測ってあるのに
+ * 「書き出しはまだ測っていない」と言っていた）。
+ *
+ * 言い方は検知の確認（`describeRunTimeRange` の「読み込みは実測から。1回に
+ * 書く量はまだ測っていないので」）とそろえる——同じ台帳で、画面ごとに
+ * 違う言い方をしない。
+ */
+function callTimeSourceLabel(estimate: CallTimeEstimate): string {
+  if (estimate.source === "measured") return "これまでの実測から";
+  const missing =
+    estimate.unmeasured === "amount"
+      ? "1回に書く量はまだ測っていないので"
+      : estimate.unmeasured === "speed"
+        ? "書き出しの速さはまだ測っていないので"
+        : "書き出しの速さや1回に書く量をまだ測っていないので";
+  if (estimate.source === "partial") {
+    return `読み込みは実測から。${missing}、決め打ちの見込みです`;
+  }
+  // 読み込みの速さも無い。書き出しの速さがあるなら、欠けたのは書く量だけ
+  // ——「速さを測っていない」と言うと、測った速さを否定することになる
+  if (estimate.unmeasured === "amount") return `${missing}、決め打ちの見込みです`;
+  return "この機械ではまだ速さを測っていないので、決め打ちの見込みです";
+}
+
+/**
+ * 機能ごとの見積もりを平均する（校正のまとめ実行。`features/proofreadingSuite.ts`）。
+ *
+ * **欠けたものも持ち越す。** 出どころだけを畳むと、名乗りが「何を測って
+ * いないか」を言えなくなる。機能ごとに欠けたものが違えば `both`（「速さや
+ * 量」）にし、どちらとも言い切らない。
+ */
+export function mergeCallTimeEstimates(
+  estimates: readonly CallTimeEstimate[]
+): CallTimeEstimate | undefined {
+  if (estimates.length === 0) return undefined;
+  const ms =
+    estimates.reduce((total, estimate) => total + estimate.ms, 0) /
+    estimates.length;
+  const source: CallTimeSource = estimates.every(
+    (estimate) => estimate.source === "measured"
+  )
+    ? "measured"
+    : estimates.every((estimate) => estimate.source === "fixed")
+      ? "fixed"
+      : "partial";
+  if (source === "measured") return { ms, source };
+  const kinds = new Set(
+    estimates
+      .filter((estimate) => estimate.source !== "measured")
+      .map((estimate) => estimate.unmeasured ?? "both")
+  );
+  const unmeasured: CallTimeUnmeasured =
+    kinds.size === 1 ? [...kinds][0] : "both";
+  return { ms, source, unmeasured };
+}
 
 function positiveOrUndefined(value: number | undefined): number | undefined {
   return value !== undefined && Number.isFinite(value) && value > 0

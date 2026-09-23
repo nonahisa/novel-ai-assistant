@@ -109,7 +109,13 @@ import {
   type CheckProgress,
 } from "../views/progress";
 import { estimateRunTimeText, lookupCallSpeeds } from "../ai/runTimeEstimate";
-import { describeSendVolume } from "../core/sendVolume";
+import {
+  describeSendVolume,
+  describeSentAgainstPlanned,
+  sumPlannedSends,
+  type PlannedSend,
+  type PlannedSendTotal,
+} from "../core/sendVolume";
 import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurn } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
@@ -523,6 +529,16 @@ export async function checkContradictions(
   const pending = chunks.filter(
     (chunk) => !cache.get(chunk.hash, keyWithPastScenes(cacheKeyBase, chunk))
   );
+  /**
+   * 確認で示した送る量（全呼び出しの合計）。送り終えたら、実際に送った量と
+   * 並べて操作ログへ残す。確認を出さない回（送るものが無い）は undefined
+   */
+  let plannedTotal: PlannedSendTotal | undefined;
+  /** 実際に送った字数と回数（検出の段。検証の段は別に数えない） */
+  let sentChars = 0;
+  let sentCalls = 0;
+  /** まるごと読み、しかもクラウドへ送るか（同意を取る） */
+  const cloudWhole = wholeRead && !isLocalProviderId(resolved.provider.id);
   if (pending.length > 0) {
     // **モデル名を渡す。** LM Studioをこの場から起こしたとき、
     // 起こした直後に読み込ませるために要る（`aiConnectivity.ts`）
@@ -541,16 +557,41 @@ export async function checkContradictions(
       本文の字数だけで見積もっていたので、引き継ぎ（`carryOver`。既定2話）で
       増えた人物の設定（＋16%）が時間にも量にも出ていなかった。送るときと
       同じ組み立て（`promptFor`）でプロンプトを組み、指示も含めて数える。
-      照らし合わせる相手が無いチャンクは送らないので0字にする。
+      照らし合わせる相手が無いチャンクは送らない（予定に積まない）。
+
+      **「あとで判明する事実」との突き合わせも積む**（ノートPCの実機、
+      0.76.1、2026-09-23）。同じ本文をもう一度送る2回目の呼び出しで、
+      ここを本命だけで数えていたので、まるごと読むときの同意画面に
+      「送る量: 約63,420字」（本命だけ）と、同意の文面が自分で足した
+      「約127,986字」（2回ぶん）が並んだ。**確認に出す量は、時間の見積もりも
+      同意の文面も、すべてこの一覧から数える。**
+
+      2回目は下の輪と同じ条件で積む——本命が送られるか処理済みのチャンクで、
+      事実があり、2回目がまだ処理済みでないもの。本命が失敗すれば2回目は
+      送らないので、実際はこれ以下になる（上限寄り）。
     */
-    const sendChars = pending.map((chunk) => {
+    const plannedSends: PlannedSend[] = [];
+    const pendingHashes = new Set(pending.map((chunk) => chunk.hash));
+    const settledSent = new Set<string>();
+    for (const chunk of pending) {
       const built = promptFor(chunk, "settled");
-      return built ? systemPrompt.length + built.userPrompt.length : 0;
-    });
-    const sendVolume = describeSendVolume({
-      totalChars: sendChars.reduce((total, chars) => total + chars, 0),
-      bodyChars: pending.reduce((total, chunk) => total + chunk.text.length, 0),
-    });
+      if (!built) continue;
+      settledSent.add(chunk.hash);
+      plannedSends.push({ chars: sendCharsOf(built), bodyChars: chunk.text.length });
+    }
+    for (const chunk of chunks) {
+      // 本命を送らないチャンク（照らし合わせる相手が無い）は、2回目も送らない
+      if (pendingHashes.has(chunk.hash) && !settledSent.has(chunk.hash)) continue;
+      if (cache.get(chunk.hash, futureKeyBase)) continue;
+      const facts = settings.futureFactsFor(chunk.text, chunk.chapterStart);
+      if (!facts) continue;
+      const built = promptFor(chunk, "future", facts);
+      if (!built) continue;
+      plannedSends.push({ chars: sendCharsOf(built), bodyChars: chunk.text.length });
+    }
+    plannedTotal = sumPlannedSends(plannedSends);
+    const sendChars = plannedSends.map((send) => send.chars);
+    const sendVolume = describeSendVolume(plannedTotal);
     const detail = [
       `${chunks.length}チャンク中 ${pending.length}件を処理します` +
         `（処理済み ${chunks.length - pending.length}件はスキップ）。`,
@@ -560,11 +601,14 @@ export async function checkContradictions(
         providerId: resolved.provider.id,
         model: resolved.model,
         feature: "contradiction_check",
-        count: pending.length,
+        // **呼ぶ回数で数える**（2回目の突き合わせを含む）。送る量と同じ一覧
+        count: sendChars.length,
         // 送るぶんそのもの（指示・設定資料・本文）。読み込みの時間を足す（設計書6.8.19）
         inputChars: sendChars,
       }),
-      sendVolume,
+      // クラウドでまるごと読むときは、同意の文面が送る量を言う（同じ画面に
+      // 2度書かない）
+      cloudWhole ? "" : sendVolume,
       `材料: 人物${material.characterCount}人 / 場所${material.locationCount}件 / ` +
         `世界観${material.worldCount}件`,
       // **送る量が増えることを黙らない**（設計書6.74）。過去の本文を
@@ -607,14 +651,8 @@ export async function checkContradictions(
         ために出すが、分けて読むときの「以降は訊かない」は持ち込まない
         ——同じ id にすると、分けて読むほうで覚えた答えで黙って走る
     */
-    const cloudWhole = wholeRead && !isLocalProviderId(resolved.provider.id);
     let wholeNote = "";
     if (cloudWhole) {
-      // **2回目の突き合わせ（あとで判明する事実）も足す**——同じ本文を
-      // もう一度送るので、量の目安は上限寄りにする
-      const totalChars =
-        sendChars.reduce((total, chars) => total + chars, 0) +
-        pending.reduce((total, chunk) => total + futureSendChars(chunk), 0);
       const tokensPerChar = lookupCallSpeeds(
         resolved.provider.id,
         resolved.model,
@@ -624,10 +662,12 @@ export async function checkContradictions(
         // **サービス名を決め打ちしない**（規則5）。プロバイダの表示名を使う
         serviceName: resolved.provider.displayName,
         bodyChars: pending.reduce((total, chunk) => total + chunk.text.length, 0),
-        totalChars,
-        calls: pending.length,
-        inputTokens: Math.ceil(totalChars * tokensPerChar),
-        maxOutputTokens: sendOutputTokens * pending.length,
+        pieces: pending.length,
+        // **確認の本体と同じ合計を渡す。** ここで足し直すと、同じ画面に
+        // 違う数が2つ並ぶ（0.76.1 の実機で起きた）
+        volume: plannedTotal,
+        tokensPerChar,
+        maxOutputTokensPerCall: sendOutputTokens,
       });
     } else if (wholeRead) {
       wholeNote =
@@ -912,6 +952,10 @@ export async function checkContradictions(
               pastScenes,
             } = built;
 
+            // **送る直前に数える**（送った量を、確認で示した量と並べるため）。
+            // 失敗して答えが返らなくても、本文は外へ出ている
+            sentChars += sendCharsOf(built);
+            sentCalls++;
             const response = await provider.generate({
               systemPrompt,
               userPrompt,
@@ -1065,6 +1109,18 @@ export async function checkContradictions(
 
   await cache.save();
 
+  // **同意した量と送った量を並べて残す**（ノートPCの実機、0.76.1）。
+  // 確認で示した量は上限寄りなので下回るのは普通。超えたらそう書く
+  if (plannedTotal) {
+    logStep(
+      `矛盾検知：${describeSentAgainstPlanned({
+        planned: plannedTotal,
+        sentChars,
+        sentCalls,
+      })}`
+    );
+  }
+
   const verifyNote = describeVerifyResults(verifyRejected, verifyUndecided);
   if (verifyNote) logStep(`矛盾検知の検証: ${verifyNote}`);
 
@@ -1172,17 +1228,12 @@ export async function checkContradictions(
   }
 
   /**
-   * 「あとで判明する事実」の向き（設計書6.10.4）で送るぶんの字数。送らない
-   * （事実が無い・照らし合わせる相手が無い）なら0。
-   *
-   * まるごと読むときの同意（A3⑤）で、送る量を上限寄りに言うためだけに使う
-   * ——本命が通ったチャンクでしか送らないので、実際はこれ以下になる。
+   * 1回の呼び出しで送る字数（指示＋組んだプロンプト）。**数え方はここ1つ。**
+   * 押す前の見積もり（送る予定）と、送るときの数え（送った量）が同じ関数を
+   * 通るので、同意した量と送った量が同じ物差しで並ぶ。
    */
-  function futureSendChars(chunk: Chunk): number {
-    const facts = settings.futureFactsFor(chunk.text, chunk.chapterStart);
-    if (!facts) return 0;
-    const built = promptFor(chunk, "future", facts);
-    return built ? systemPrompt.length + built.userPrompt.length : 0;
+  function sendCharsOf(built: { userPrompt: string }): number {
+    return systemPrompt.length + built.userPrompt.length;
   }
 
   /**

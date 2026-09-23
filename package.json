@@ -130,7 +130,8 @@
         {
           "id": "novelai.proposalsView",
           "name": "提案",
-          "type": "webview"
+          "type": "webview",
+          "when": "config.novelai.proposals.showInBottomPanel"
         }
       ]
     },
@@ -420,6 +421,12 @@
         "title": "ログを開く",
         "category": "小説執筆",
         "icon": "$(output)"
+      },
+      {
+        "command": "novelai.openProposals",
+        "title": "提案パネルを開く",
+        "category": "小説執筆",
+        "icon": "$(checklist)"
       },
       {
         "command": "novelai.diagnoseWeb",
@@ -1674,6 +1681,11 @@
           "default": 3,
           "minimum": 0,
           "markdownDescription": "AIの指摘（`.aiwriter/findings.jsonl`）を並べる日数。\n\n・古い指摘は表示から外れるだけ（ファイルからは消えない）\n・消えるのは「古い指摘を片づける」を押したときだけ\n・`0` でいつまでも並べる"
+        },
+        "novelai.proposals.showInBottomPanel": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "提案パネルを、画面下のパネル領域（出力・ターミナルと同じ場所）にも出す。\n\n・既定では出さない（提案パネルはエディターの右の列に開く）\n・どちらに出しても中身は同じ"
         },
         "novelai.chatter.enabled": {
           "type": "boolean",

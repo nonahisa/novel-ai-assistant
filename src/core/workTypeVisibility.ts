@@ -407,6 +407,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.runWriterDiagnosis": "allTypes",
   "novelai.openManual": "allTypes",
   "novelai.showLog": "allTypes",
+  "novelai.openProposals": "allTypes",
   "novelai.openChatLog": "allTypes",
   "novelai.diagnoseWeb": "allTypes",
   "novelai.showVersion": "allTypes",
