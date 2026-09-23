@@ -412,6 +412,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.exitChatFocus": "allTypes",
   "novelai.runWriterDiagnosis": "allTypes",
   "novelai.openManual": "allTypes",
+  "novelai.openSceneGuide": "allTypes",
   "novelai.showLog": "allTypes",
   "novelai.openProposals": "allTypes",
   "novelai.openChatLog": "allTypes",

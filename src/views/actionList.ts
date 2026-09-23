@@ -2394,6 +2394,21 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           "・はじめてなら「執筆支援 › 相談・助言 › 作家タイプ診断」から\n\n" +
           "保存はしない（閉じてよい）。",
       },
+      // 場面別案内（作者の依頼、2026-09-23）。中身は相談の「画面で案内して
+      // もらう」と同じ手順書き（`features/sceneGuide.ts`）。作品の要否は場面ごと
+      {
+        kind: "action",
+        command: "novelai.openSceneGuide",
+        label: "場面別案内",
+        icon: "map",
+        requiresWork: false,
+        detail:
+          "場面を選ぶと、押す場所を順に光らせて案内する\n\n" +
+          "・新作の始め方・原稿の登録・推敲・矛盾・投稿の準備・読者など\n\n" +
+          "・案内は相談パネルに出る。押すのは作者（代わりに押すこともできる）\n\n" +
+          "・作品が要る場面は、作品を登録してから\n\n" +
+          "AIは呼ばない。",
+      },
       {
         kind: "action",
         command: "novelai.showLog",

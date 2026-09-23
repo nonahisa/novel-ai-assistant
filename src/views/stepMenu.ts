@@ -307,10 +307,13 @@ const STEP_DEFS: readonly StepDef[] = [
     detail:
       "使い方が分からないとき、うまく動かないときに開く場所\n\n" +
       "・作品を選んでいなくても使える",
-    // 並びは詳細メニューの「ヘルプ」分類に合わせる（使い方 → ログ → 版）。
-    // 「動作を診断」はブラウザ版だけの操作なので、ここには置かない
+    // 並びは詳細メニューの「ヘルプ」分類に合わせる（使い方 → 場面別案内 →
+    // ログ → 版）。「動作を診断」はブラウザ版だけの操作なので、ここには置かない
     entries: [
       "novelai.openManual",
+      // 場面別案内も置く。簡単ステップメニューを使う作者のほうが、
+      // 「何から押せばよいか」を案内してほしい場面が多い
+      "novelai.openSceneGuide",
       "novelai.showLog",
       "novelai.openChatLog",
       "novelai.showVersion",

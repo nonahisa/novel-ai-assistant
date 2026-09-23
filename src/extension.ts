@@ -3249,6 +3249,13 @@ export async function activate(
     registerCommand("novelai.openManual", async () => {
       const { openManual } = await import("./features/openManual.js");
       await openManual();
+    }),
+    // 場面別案内（作者の依頼、2026-09-23）。場面を選ぶと、相談の
+    // 「画面で案内してもらう」と同じ案内が相談パネルに出る
+    registerCommand("novelai.openSceneGuide", async () => {
+      const { pickScene } = await import("./features/sceneGuide.js");
+      const key = await pickScene(registry.list().length > 0);
+      if (key) await workChatPanel.startGuidedTour(key);
     })
   );
 

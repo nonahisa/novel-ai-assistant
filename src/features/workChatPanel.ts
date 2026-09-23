@@ -690,6 +690,17 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   }
 
   /**
+   * 手順書きの鍵で、画面の案内を始める（ヘルプの「場面別案内」から。2026-09-23）。
+   *
+   * **相談の札（`startTour` の知らせ）と同じ `GuidedTourHost.start` を通す。**
+   * 入口ごとに案内の組み方を持つと、片方だけ直したときに食い違う。
+   * 札はこのパネルに出るので、閉じていれば開く（`ensureChatVisible`）。
+   */
+  async startGuidedTour(key: string): Promise<void> {
+    await this.tour.start(key);
+  }
+
+  /**
    * 持ち込まれたバックアップを、新しい作品として取り込む口（2026-09-23）。
    *
    * **登録の道は `extension.ts` が持っている**ので、ここでは受け取るだけにする

@@ -300,6 +300,7 @@ describe("最下段のヘルプ", () => {
       )
     ).toEqual([
       "novelai.openManual",
+      "novelai.openSceneGuide",
       "novelai.showLog",
       "novelai.openChatLog",
       "novelai.showVersion",
@@ -336,14 +337,15 @@ describe("最下段のヘルプ", () => {
     }
   });
 
-  test("押せるものが3つある（要件を絞り込んで空振りしない）", () => {
+  test("押せるものが4つある（要件を絞り込んで空振りしない）", () => {
     // 上の2つは「押せないものを飛ばす」書き方なので、全部が
     // `requiresWork` になると**何も確かめずに通ってしまう**
     const openable = helpStep().entries.filter(
       (entry) => entry.kind === "action" && !entry.requiresWork
     );
 
-    expect(openable).toHaveLength(3);
+    // 使い方・場面別案内・ログ表示・バージョン確認
+    expect(openable).toHaveLength(4);
   });
 
   test("「相談のログを開く」だけは作品が要る", () => {
