@@ -3473,7 +3473,11 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
-        await openWritingStatsPanel(context, work, deviceId);
+        // 「AIに助言をもらう」（設計書6.79.7.3）は相談と同じ割当・同じ助言方針を使う
+        await openWritingStatsPanel(context, work, deviceId, {
+          ai: aiRegistry,
+          advicePolicies,
+        });
       }
     )
   );

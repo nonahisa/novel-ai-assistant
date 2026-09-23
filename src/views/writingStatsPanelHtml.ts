@@ -168,10 +168,17 @@ details.fold > summary {
   padding: 4px 0;
 }
 .site-foot { font-size: 12px; color: var(--vscode-descriptionForeground); margin: 4px 0 0; }
-/* 読者の反応の助言（設計書6.79.7.3）。1件ずつ左に線を引いて、率の表と見分ける */
+/* 読者の反応の助言（設計書6.79.7.3）。AIの答えを1件ずつ左に線を引いて、率の表と見分ける */
 .advice-item { margin: 6px 0 8px; padding-left: 8px; border-left: 2px solid var(--vscode-panel-border); line-height: 1.6; }
 .advice-title { font-weight: 600; font-size: 12px; }
 ul.advice-list { margin: 2px 0; padding-left: 18px; }
+.advice-ask-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0; }
+.advice-summary { margin: 6px 0; line-height: 1.6; }
+/* 記録に無い話数・材料に無い数字の印。読み違いかもしれないことを目立たせる */
+.advice-mark { color: var(--vscode-editorWarning-foreground, #cca700); font-size: 12px; }
+/* AIへ渡す材料。送る文そのものなので、改行を保って見せる */
+.advice-material { white-space: pre-wrap; font-size: 12px; line-height: 1.5; max-height: 320px; overflow: auto; padding: 6px 8px; background: var(--vscode-textBlockQuote-background, rgba(127,127,127,0.08)); }
+button:disabled { opacity: 0.6; cursor: default; }
 a, .link {
   color: var(--vscode-textLink-foreground);
   cursor: pointer;
@@ -209,6 +216,12 @@ a:hover, .link:hover { text-decoration: underline; }
 const vscode = acquireVsCodeApi();
 let state = null;
 let granularity = 'daily';
+/*
+  サイトごとのAIの助言（設計書6.79.7.3）。**画面を描き直しても消えないよう、
+  統計の中身（state）とは別に持つ**——本文を保存するたびに統計は送り直される。
+*/
+const readerAdviceOutcomes = {};
+const readerAdviceBusy = {};
 
 const GRANULARITY_LABELS = { daily: '日次', weekly: '週次', monthly: '月次', yearly: '年次' };
 
@@ -579,7 +592,8 @@ function renderSiteRecords() {
     */
     const reader = renderReaderLatest(record.readerLatest) +
       renderReaderRates(record.readerRates) +
-      renderReaderAdvice(record.readerAdvice) +
+      renderReaderAdvice(record.site, record.readerAdvice,
+        readerAdviceOutcomes[record.site], readerAdviceBusy[record.site] === true) +
       renderReaderCharts(record.readerCharts) +
       renderReaderStatsTable(record.readerWork, '読者の反応', true) +
       renderReaderEpisodes(record.readerEpisodes);
@@ -597,6 +611,20 @@ function renderSiteRecords() {
   host.querySelectorAll('[data-url]').forEach((el) => {
     el.addEventListener('click', () => {
       vscode.postMessage({ type: 'openExternal', url: el.dataset.url });
+    });
+  });
+  // 「AIに助言をもらう」（設計書6.79.7.3）。**押したときだけ**頼む
+  host.querySelectorAll('[data-advice-site]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const site = el.dataset.adviceSite;
+      if (readerAdviceBusy[site]) return;
+      readerAdviceBusy[site] = true;
+      renderSiteRecords();
+      vscode.postMessage({
+        type: 'askReaderAdvice',
+        site: site,
+        force: el.dataset.force === '1',
+      });
     });
   });
 }
@@ -682,60 +710,75 @@ function renderReaderRates(rates) {
  * 読者の反応の助言（残課題 B9。設計書6.79.7.3）。**率のすぐ下に置く**
  * ——助言は率の値から出ているので、離れた場所に置くと何の話か分からない。
  *
- * 判定も文面も core 側（readerAdvice.ts）が済ませてある。ここは並べるだけ。
- * **出どころは必ず添える**（どの記事の目安で言っているかを作者が確かめられる
- * ように）。記事は作者のブラウザで開く（data-url。サイトの記録のリンクと同じ口）。
+ * **決め打ちの助言文は出さない**（作者の方針転換、2026-09-23 朝「これは
+ * むしろ例示だけでAIには自由に答えてほしい」）。ここにあるのは
+ * 「AIに助言をもらう」のボタンと、その答え、AIへ渡す材料（畳んで）だけ。
+ * **押したときだけAIを呼ぶ**——押す前の料金と所要時間の確認は拡張機能側が出す。
  *
- * 出さなかった助言の理由と、数字の読み方の注意は、読み終えたあとの補足なので
- * 小さく薄く・畳んで置く。
+ * 答えは core 側（readerAdviceValidation.ts）が確かめ済みのものが届く。
+ * 記録に無い話数・材料に無い数字には印が付いてくるので、そのまま並べる。
  */
-function renderReaderAdvice(advice) {
+function renderReaderAdvice(site, advice, outcome, busy) {
   if (!advice) return '';
-  const blocks = (advice.items || []).map((item) => {
-    const parts = [];
-    parts.push('<div class="advice-title">' + escapeHtml(item.title) + '</div>');
-    parts.push('<div>' + escapeHtml(item.text) + '</div>');
-    if (item.drops && item.drops.length > 0) {
-      parts.push('<ul class="advice-list">' + item.drops.map((drop) =>
-        '<li>第' + formatCount(drop.episode) + '話 ' + formatCount(drop.pv) +
-        '（それまでの最少は第' + formatCount(drop.fromEpisode) + '話の ' +
-        formatCount(drop.fromPv) + '。−' + escapeHtml(drop.percent) + '）</li>'
-      ).join('') + '</ul>');
-    }
-    if (item.suggestions && item.suggestions.length > 0) {
-      parts.push('<div class="site-meta">記事が挙げている手</div>' +
-        '<ul class="advice-list">' + item.suggestions.map((suggestion) =>
-          '<li>' + escapeHtml(suggestion) + '</li>'
-        ).join('') + '</ul>');
-    }
-    parts.push(readerAdviceSources(item.sources));
-    return '<div class="advice-item">' + parts.join('') + '</div>';
-  });
+  const answered = outcome && outcome.kind === 'answer';
+  const label = busy
+    ? 'AIに聞いています…'
+    : (answered ? 'AIに聞き直す' : 'AIに助言をもらう');
+  const button = '<button class="advice-ask" data-advice-site="' + escapeHtml(site) + '"' +
+    (answered ? ' data-force="1"' : '') + (busy ? ' disabled' : '') + '>' +
+    escapeHtml(label) + '</button>';
 
-  const withheld = (advice.withheld || []).map((note) =>
-    '<li>' + escapeHtml(note.text) + readerAdviceSources(note.sources) + '</li>'
-  );
-  const cautions = (advice.cautions || []).map((note) =>
-    '<li>' + escapeHtml(note.text) + readerAdviceSources(note.sources) + '</li>'
-  );
+  const parts = ['<div class="site-sub">助言</div>'];
+  parts.push('<div class="advice-ask-row">' + button +
+    '<span class="site-meta">押すとAIを1回呼びます。先に料金と所要時間の目安を出します。</span></div>');
 
-  return '<div class="site-sub">助言（記事の目安から）</div>' +
-    (blocks.length > 0
-      ? blocks.join('')
-      : '<div class="site-foot">記事の目安に当たるものはありません。</div>') +
-    (withheld.length > 0
-      ? '<div class="site-foot"><ul class="advice-list">' + withheld.join('') + '</ul></div>'
-      : '') +
-    (cautions.length > 0
-      ? '<details class="fold"><summary>数字の読み方の注意（' + cautions.length + '件）</summary>' +
-        '<div class="site-foot"><ul class="advice-list">' + cautions.join('') + '</ul></div></details>'
-      : '');
+  if (outcome && outcome.kind === 'failed') {
+    parts.push('<div class="note">' + escapeHtml(outcome.message || '') + '</div>');
+  }
+  if (answered) parts.push(renderReaderAdviceAnswer(outcome));
+
+  parts.push('<details class="fold"><summary>AIへ渡す材料</summary>' +
+    '<div class="advice-material">' + escapeHtml(advice.materialText || '') + '</div>' +
+    readerAdviceSources(advice.sources) + '</details>');
+  return parts.join('');
 }
 
-/** 出どころ（記事の題と日付）。開けるリンクにする */
+/** AIの答え（見立てと、見てほしい所） */
+function renderReaderAdviceAnswer(outcome) {
+  const answer = outcome.answer || {};
+  const parts = [];
+  if (answer.summary) {
+    parts.push('<div class="advice-summary">' + escapeHtml(answer.summary) +
+      readerAdviceMarks(answer.summaryMarks) + '</div>');
+  }
+  (answer.points || []).forEach((point) => {
+    parts.push('<div class="advice-item">' +
+      (point.title ? '<div class="advice-title">' + escapeHtml(point.title) + '</div>' : '') +
+      '<div>' + escapeHtml(point.body) + '</div>' +
+      readerAdviceMarks(point.marks) + '</div>');
+  });
+  const foot = ['AI（' + escapeHtml(outcome.provider || '') + ' / ' +
+    escapeHtml(outcome.model || '') + '）の答えです。'];
+  if (outcome.fromCache) {
+    foot.push('材料が前と同じなので、前の答えを出しています。');
+  }
+  (answer.notes || []).forEach((note) => foot.push(escapeHtml(note)));
+  parts.push('<div class="site-foot">' + foot.join('') + '</div>');
+  return parts.join('');
+}
+
+/** 照合で見つかったこと（記録に無い話数・材料に無い数字） */
+function readerAdviceMarks(marks) {
+  if (!marks || marks.length === 0) return '';
+  return '<ul class="advice-list advice-mark">' + marks.map((mark) =>
+    '<li>' + escapeHtml(mark) + '</li>'
+  ).join('') + '</ul>';
+}
+
+/** 例示として渡す記事（題と日付）。開けるリンクにする */
 function readerAdviceSources(sources) {
   if (!sources || sources.length === 0) return '';
-  return '<div class="site-meta">出どころ：' + sources.map((source) =>
+  return '<div class="site-meta">例示として渡す記事：' + sources.map((source) =>
     '<span class="link" data-url="' + escapeHtml(source.url) + '">' +
     escapeHtml(source.label) + '</span>'
   ).join('、') + '</div>';
@@ -1096,6 +1139,15 @@ function renderEpisodes() {
 
 window.addEventListener('message', (event) => {
   const message = event.data;
+  if (message.type === 'readerAdvice') {
+    delete readerAdviceBusy[message.site];
+    // 取りやめたときは、前の答えをそのまま残す（消すと見ていたものが消える）
+    if (message.outcome && message.outcome.kind !== 'cancelled') {
+      readerAdviceOutcomes[message.site] = message.outcome;
+    }
+    renderSiteRecords();
+    return;
+  }
   if (message.type !== 'stats') return;
   state = message.data;
   document.getElementById('title').textContent = state.title;

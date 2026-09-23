@@ -90,6 +90,7 @@ export const REMEMBERABLE_CONFIRMS: readonly RememberableConfirm[] = [
     label: "単話プロットと本文の照合：処理量の確認",
   },
   { id: "ai.run.generatePlot", label: "プロットを組み立て直す：処理量の確認" },
+  { id: "ai.run.readerAdvice", label: "読者の反応の助言：処理量の確認" },
 
   // ── 有料のAIを使う断り（`confirmPaidUsage`）──
   { id: "ai.paid.checkOpening", label: "冒頭診断：料金の確認" },

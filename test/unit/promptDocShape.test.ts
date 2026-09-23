@@ -108,6 +108,7 @@ describe("プロンプト設計書の形", () => {
     // チャンクキャッシュが古い結果を返す（CLAUDE.md 規則4）
     ["P-38", "src/prompts/readerTarget.ts", "READER_TARGET_VERSION"],
     ["P-39", "src/prompts/writerStyle.ts", "WRITER_STYLE_PROMPT_VERSION"],
+    ["P-40", "src/prompts/readerAdvice.ts", "READER_ADVICE_VERSION"],
   ];
 
   test.each(IMPLEMENTED)(

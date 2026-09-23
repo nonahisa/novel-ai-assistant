@@ -26,6 +26,12 @@ import {
   type PostingSiteRecord,
 } from "../core/postingSiteRecords";
 import { PostingStore } from "../core/postingStore";
+import { POSTING_SITES } from "../models/posting";
+import {
+  requestReaderAdvice,
+  type ReaderAdviceDeps,
+  type ReaderAdviceOutcome,
+} from "./readerAdvice";
 import { logFailure, useLogFile } from "../core/logger";
 import { episodeUnit } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
@@ -55,7 +61,13 @@ const openPanels = new Map<string, vscode.WebviewPanel>();
 export async function openWritingStatsPanel(
   context: vscode.ExtensionContext,
   work: WorkEntry,
-  deviceId: string
+  deviceId: string,
+  /**
+   * 「AIに助言をもらう」（設計書6.79.7.3）に要るもの。**省略できる**——
+   * 渡されていなければ、押されたときに「使えません」と返す（試験や、
+   * AIを使わない呼び出し元のため）。
+   */
+  readerAdviceDeps?: ReaderAdviceDeps
 ): Promise<void> {
   const existing = openPanels.get(work.id);
   if (existing) {
@@ -93,7 +105,35 @@ export async function openWritingStatsPanel(
       type?: string;
       filePath?: string;
       url?: string;
+      site?: string;
+      force?: boolean;
     };
+    if (parsed.type === "askReaderAdvice" && parsed.site) {
+      /*
+        **押したときだけAIを呼ぶ**（設計書6.79.7.3）。画面から届いたサイト名は
+        そのまま使わず、知っているサイトかを確かめる（台帳の外の名前で
+        台帳を引かない）。
+      */
+      const site = POSTING_SITES.find((info) => info.id === parsed.site)?.id;
+      if (!site) return;
+      let outcome: ReaderAdviceOutcome;
+      try {
+        outcome = readerAdviceDeps
+          ? await requestReaderAdvice(work, site, readerAdviceDeps, {
+              force: parsed.force === true,
+            })
+          : { kind: "failed", message: "この画面からはAIを呼べません。" };
+      } catch (error) {
+        // **必ず返事をする。** 返さないと、画面のボタンが「聞いています…」の
+        // まま戻らない（押しても何も起きない画面になる）
+        const detail = error instanceof Error ? error.message : String(error);
+        useLogFile(work.folderPath);
+        logFailure("読者の反応の助言", { 作品: work.title, 内容: detail });
+        outcome = { kind: "failed", message: detail };
+      }
+      panel.webview.postMessage({ type: "readerAdvice", site, outcome });
+      return;
+    }
     if (parsed.type === "openExternal" && parsed.url) {
       /*
         作品ページを**開くだけ**（設計書6.68.5）。中身は読みにいかない。

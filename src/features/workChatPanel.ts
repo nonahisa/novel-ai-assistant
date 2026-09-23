@@ -66,6 +66,8 @@ import {
   type ReaderTypeGlossaryEntry,
 } from "../core/readerTarget";
 import { ReaderTargetStore } from "../core/readerTargetStore";
+import { PostingStore } from "../core/postingStore";
+import { readerReactionChatBlockFor } from "../core/readerAdviceChat";
 import { hasReaderProfile, type ReaderProfile } from "../models/readerProfile";
 import { chatExamplesFor } from "../core/chatExamples";
 import { notifyDone } from "../views/notify";
@@ -958,6 +960,31 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       if (questionMentionsReader(question)) {
         logStep("相談: 読者タイプの区分一覧を添えた（読者の話のため）");
         blocks.push(buildReaderTypeGlossaryPrompt());
+      }
+
+      /*
+        **読者の反応（PV・離脱・ブクマ・評価）の話なら、その材料を足す**
+        （設計書6.79.7.3。作者の依頼「頼む場所は両方」、2026-09-23）。
+        材料も約束も、執筆統計の「AIに助言をもらう」と**同じもの**を使う
+        （`core/readerAdviceChat.ts` 経由。二重に持たない）。当たりの付け方は
+        字面の照合だけで、AIは呼ばない。
+
+        **台帳が読めなくても相談は止めない**（読者像と同じ扱い）。
+      */
+      const reaction = await readerReactionChatBlockFor(question, async () =>
+        new PostingStore(work).load()
+      ).catch((error: unknown) => {
+        logFailure("相談: 投稿状態の台帳を読めませんでした", {
+          作品: work.title,
+          詳細: error instanceof Error ? error.message : String(error),
+        });
+        return undefined;
+      });
+      if (reaction) {
+        logStep(
+          `相談: 読者の反応の材料を添えた（${reaction.sites.length > 0 ? reaction.sites.join("・") : "記録なし"} / ${reaction.text.length}字）`
+        );
+        blocks.push(reaction.text);
       }
     }
 

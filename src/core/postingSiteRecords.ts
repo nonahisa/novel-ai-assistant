@@ -12,7 +12,12 @@ import {
   type ReaderStatsRecord,
   type ReaderStatsSource,
 } from "../models/posting";
-import { buildReaderAdvice, type ReaderAdvice } from "./readerAdvice";
+import {
+  READER_ADVICE_SOURCES,
+  buildReaderAdviceMaterial,
+  type ReaderAdviceSource,
+} from "./readerAdvice";
+import { formatReaderAdviceMaterial } from "../prompts/readerAdvice";
 import { computeReaderRates, type ReaderRates } from "./readerRates";
 import { buildReaderCharts, type ReaderCharts } from "./readerStatsCharts";
 
@@ -85,10 +90,18 @@ export interface PostingSiteRecord {
    */
   readerRates: ReaderRates | null;
   /**
-   * 率とPVから、記事の目安に沿った助言（残課題 B9。設計書6.79.7.3）。
+   * 読者の反応の助言（残課題 B9。設計書6.79.7.3）。**画面に決め打ちの助言は
+   * 出さない**（作者の方針転換、2026-09-23 朝）。ここにあるのは「AIに助言を
+   * もらう」のボタンを出すための印と、**AIへ渡す材料をそのまま文にしたもの**
+   * ——押す前に、何を送るのかを作者が確かめられるようにする。
+   *
    * 率と同じく、話ごとの記録が1件も無ければ null（節ごと出さない）。
    */
-  readerAdvice: ReaderAdvice | null;
+  readerAdvice: {
+    materialText: string;
+    /** AIへ例示として渡す記事（画面で開けるリンクにする） */
+    sources: ReaderAdviceSource[];
+  } | null;
   /** PVのグラフ（各話・日・月・年・合計）。材料の無いグラフは null */
   readerCharts: ReaderCharts;
 }
@@ -268,7 +281,16 @@ export function buildPostingSiteRecords(
       readerAdvice:
         rates.episodeReadAt === null
           ? null
-          : buildReaderAdvice(rates, inLedgerOrder),
+          : {
+              materialText: formatReaderAdviceMaterial(
+                buildReaderAdviceMaterial(
+                  postingSiteInfo(info.id).label,
+                  rates,
+                  inLedgerOrder
+                )
+              ),
+              sources: Object.values(READER_ADVICE_SOURCES),
+            },
       readerCharts: buildReaderCharts(
         inLedgerOrder,
         rates.base?.episode ?? null

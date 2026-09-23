@@ -1,44 +1,50 @@
-import type { ReaderStatsRecord } from "../models/posting";
 import {
+  POSTING_SITES,
+  postingSiteInfo,
+  type PostingLedger,
+  type PostingSiteId,
+  type ReaderStatsRecord,
+} from "../models/posting";
+import {
+  computeReaderRates,
   formatPercent,
   latestEpisodeValues,
+  type ReaderRate,
+  type ReaderRateBase,
   type ReaderRates,
 } from "./readerRates";
 
 /**
- * 読者の反応の助言（残課題 B9。作者の依頼、2026-09-23。設計書6.79.7.3）。
+ * 読者の反応の助言の**材料**（残課題 B9。設計書6.79.7.3）。
  *
- * 作者「あとで助言を行えるようにしてください」「なろうとかだと更新の話とかは
- * 古い情報もあるので気を付けてください」。
+ * ## 決め打ちの助言をやめた（作者の方針転換、2026-09-23 朝）
  *
- * ## 助言の元は作者の記事だけ
+ * 0.75.16 では、作者の記事の目安だけでコードが決め打ちの文を出していた。
+ * 作者の言葉：
  *
- * 目安の数字は `docs/読者の反応の助言_作者の考え.md` に拾い出した記事にある
- * ものだけを使う。**記事に無いしきい値は作らない**——作ると、作者の考えでは
- * ない基準が作者の名前で出ることになる。だから次のものは**出さない**。
+ * - 「これはむしろ例示だけでAIには自由に答えてほしい」
+ * - 「話数が増える、長期休載などあれば離脱率も上がるのではないかと思います。
+ *   その場合はアップの日付などから判断し、休載前の最終話で測ったものを出す
+ *   など、**一律作者のやる気を削ぐことは避けてください**」
  *
- * - ブックマーク率の目安と助言（記事に無い）
- * - 評価率が低いときの対策（記事に無い。目安を超えたときに「伸びている」とだけ言う）
- * - 【古い可能性】に分けた事柄（なろうの更新時刻・トップページ・完結欄など。
- *   サイトの仕組みが変わっていれば、作者の考えとして誤ったことを言う）
+ * 50話で約70%という目安は「50話で」の値で、200話を超える作品や、長く休んだ
+ * あとの作品に同じ物差しを当てると、作品の実力と関係なく「目安より高い」と
+ * 言うことになる。決め打ちの文は作品の事情を読めない。
  *
- * ## 助言はコードで決める
+ * そこで**分担を変えた**：
  *
- * AIに書かせない。率の値と話ごとのPVを、記事の目安と比べるだけである。
- * 同じ数からはいつも同じ助言が出るので、どの目安で何を言ったかを後から
- * 確かめられる。
+ * - **数はコードが正確に作る**（ここ）。率・話ごとのPV・休載らしい区間・
+ *   休載前の最終話での離脱率——どれも台帳からの割り算で、見込みは作らない
+ * - **読むのはAI**（`prompts/readerAdvice.ts`。P-40）。記事の目安は
+ *   「こういう見方もある」という例示として渡し、判定の基準にはさせない
  *
- * ## 言い方はまだタイプに依らない
- *
- * 作者の記事⑦（2026-09-23）は「数字の目安は記事から、言い方は作者のタイプ
- * （相談の助言方針、6.86）から」としている。ここはまず**中立の文面だけ**を
- * 持つ——11タイプぶんの言い方を推測で書き分けると、作者の考えでない文面が
- * 作者の考えとして出る。
+ * 材料は、執筆量パネルのボタンと相談パネルの**両方が同じものを使う**
+ * （二重に持たない）。
  *
  * VS Code API には依存しない。
  */
 
-/** 助言の出どころ（記事1本） */
+/** 例示として渡す記事1本 */
 export interface ReaderAdviceSource {
   /** 題と日付（「「…」（note、2025-06-15）」） */
   label: string;
@@ -46,7 +52,7 @@ export interface ReaderAdviceSource {
 }
 
 /**
- * 出どころの記事。**番号は拾い出しの md と同じ**（①③⑥）。
+ * 例示の出どころ。**番号は拾い出しの md と同じ**（①③⑥）。
  *
  * 画面では題と日付で出す——「作者の記事①」と書いても、Marketplace から入れた
  * 人には誰の何番か分からない。③は拾い出しに題が無いので、場所と日付で呼ぶ
@@ -68,11 +74,8 @@ export const READER_ADVICE_SOURCES = {
 } as const satisfies Record<string, ReaderAdviceSource>;
 
 /**
- * 記事にある目安。**ここに無い数字で判定しない。**
- *
- * 境目の含み方は記事の言い方に合わせた——「8割以上」「7割以上」は含む、
- * 「3割を超えれば」は含まない。離脱率の「約70%」「約50%」は、その値ちょうどを
- * 目安の内側に数える（ちょうどで「高い」と言わない）。
+ * 記事にある目安。**判定には使わない**——AIへ例示として渡す文を組む材料
+ * （`prompts/readerAdvice.ts`）で、数字を2か所に書かないためにここに置く。
  */
 export const READER_ADVICE_BENCHMARKS = {
   /** 離脱率100%：作品として成立していない（①） */
@@ -83,24 +86,54 @@ export const READER_ADVICE_BENCHMARKS = {
   dropoutMidTierEpisode: 50,
   /** 離脱率約50%：書籍化レベル（①） */
   dropoutPublishable: 0.5,
+  /** 最高値は離脱率2%程度（きわめて稀な例。①） */
+  dropoutBest: 0.02,
   /** 1話→2話で8割以上の離脱：文章の基礎的な課題（③） */
   openingFirstStep: 0.8,
   /** 序盤全体で7割以上の離脱：序盤のインパクト不足・タイトルと内容の食い違い（③） */
   openingWhole: 0.7,
   /** 評価率が3割を超えればランキングを駆け上がれる（①） */
   ratingClimb: 0.3,
+  /** 改稿で読破率が10%→35%に戻った実例（③。【普遍】の経験則） */
+  revisionRecoveredFrom: 0.1,
+  revisionRecoveredTo: 0.35,
 } as const;
 
-/** 指す話の数（大きく減った順に） */
-export const READER_ADVICE_MAX_DROPS = 3;
+/** 急に減った話を、大きい順に何話まで材料へ入れるか */
+export const READER_ADVICE_MAX_DROPS = 5;
 
-export type ReaderAdviceTopic =
-  | "dropout"
-  | "openingFirst"
-  | "openingWhole"
-  | "decline"
-  | "rating"
-  | "bookmark";
+/**
+ * 話ごとのPVを**全部**渡す上限の話数。これを超えたら要約する。
+ *
+ * 219話ぶんを全部並べると、それだけで数千字になり、AIは数の羅列に
+ * 引きずられる。60話までなら1行ずつ並べても2,000字ほどで、全体を見渡せる。
+ */
+export const READER_ADVICE_FULL_SERIES_MAX = 60;
+
+/**
+ * 休載の見分けのしきい値（設計書6.79.7.3）。**記事には無い**ので、
+ * **作品自身のふだんの間隔と比べる**形にした。
+ *
+ * - ふだんの間隔の**4倍**以上空いた所：週1回の作品なら4週（更新が3回続けて
+ *   抜けた）、月1回の作品なら4か月。1回・2回の抜けは、事情で遅れた程度で
+ *   休載とは言いにくい
+ * - ただし**28日（4週）未満は休載と呼ばない**：毎日更新の作品が1週間
+ *   休んだのは、作者の言う「長期休載」ではない
+ */
+export const HIATUS_USUAL_MULTIPLIER = 4;
+export const HIATUS_MIN_DAYS = 28;
+/**
+ * ふだんの間隔を決めるのに要る、更新と更新の間の数。
+ * 3つ以下では、たまたまの間隔と区別が付かない。
+ */
+export const HIATUS_MIN_INTERVALS = 4;
+/**
+ * 同じ回の更新とみなす近さ。まとめて何話か出した日は、1回の更新である
+ * （話と話の間を数えると、ふだんの間隔が0日になってしまう）。
+ */
+export const SAME_UPDATE_HOURS = 12;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** 大きく減った話1つ */
 export interface ReaderAdviceDrop {
@@ -114,286 +147,461 @@ export interface ReaderAdviceDrop {
   percent: string;
 }
 
-export interface ReaderAdviceItem {
-  topic: ReaderAdviceTopic;
-  /** 「離脱率」「序盤（1話→2話）」 */
-  title: string;
-  /** 目安と比べてどうか */
-  text: string;
-  /** 指した話（話ごとの減り方だけ）。無ければ空 */
-  drops: ReaderAdviceDrop[];
-  /** 記事が挙げている手。**記事に手が無ければ空**（作らない） */
-  suggestions: string[];
-  sources: ReaderAdviceSource[];
+/** 「第1話の読者のうち、第N話までに何割が離れたか」 */
+export interface ReaderRatioFact {
+  episode: number;
+  pv: number;
+  firstPv: number;
+  /** 1 − pv ÷ firstPv */
+  ratio: number;
+  percent: string;
 }
 
-/** 出さなかった助言の理由・数字の読み方の注意 */
-export interface ReaderAdviceNote {
-  topic?: ReaderAdviceTopic;
-  text: string;
-  sources: ReaderAdviceSource[];
+/** 話ごとのPV1点 */
+export interface ReaderPvPoint {
+  episode: number;
+  pv: number;
+  /** 第1話のPVに対する割合（第1話のPVが無ければ undefined） */
+  retainedPercent?: string;
 }
 
-export interface ReaderAdvice {
-  items: ReaderAdviceItem[];
-  /** 出さなかった助言と、その理由（材料が欠けた・記事に目安が無い） */
-  withheld: ReaderAdviceNote[];
-  /** 数字の読み方の注意（記事の【普遍】のもの）。いつも付ける */
-  cautions: ReaderAdviceNote[];
+/** 休載らしい区間1つ */
+export interface ReaderHiatusGap {
+  /** 休む前の最後の話 */
+  beforeEpisode: number;
+  /** 休んだあとの最初の話 */
+  afterEpisode: number;
+  /** 休む前の最後の更新（推定。ISO） */
+  from: string;
+  /** 休んだあとの最初の更新（推定。ISO） */
+  to: string;
+  days: number;
+  /** 休む前の最終話での離脱率（1 − その話のPV ÷ 第1話のPV） */
+  dropoutBefore?: ReaderRatioFact;
+  pvBefore?: number;
+  pvAfter?: number;
 }
-
-const { article1, article3, article6 } = READER_ADVICE_SOURCES;
-const B = READER_ADVICE_BENCHMARKS;
 
 /**
- * 数字の読み方の注意。**拾い出しで【普遍】に分けたものだけ。**
+ * 休載の見分けの結果。
  *
- * 更新直後の話へのリンクの話は「原則は普遍、トップページという呼び方は
- * サイト次第」とされているので、原則だけを書く。
+ * - `found`：休載らしい区間がある
+ * - `none`：ふだんの間隔が分かり、休載らしい区間は無い
+ * - `unknown`：更新日が無い・少ないので見分けられない（`reason`）
  */
-const CAUTIONS: ReaderAdviceNote[] = [
-  {
-    text:
-      "話数が少ないうちは、離脱率が安定しません。読み切った人の割合をきちんと計れるのは、安定期の終わりごろからです。",
-    sources: [article3],
-  },
-  {
-    text: "PVは厳密な人数ではなく、人気のおおよその目安です。ほかの話や前の回と比べて読みます。",
-    sources: [article1],
-  },
-  {
-    text:
-      "更新した話へ直接リンクして宣伝すると、その話から読みはじめる人が出て、話ごとの数が歪みます。宣伝のリンクは、各話ではなく作品の各話一覧へ向けます。",
-    sources: [article1, article3],
-  },
-  {
-    text:
-      "10万字を超える長編は、読むのに何日もかかります。1日だけでなく、何日かに分けて集計したほうが確かです。",
-    sources: [article3],
-  },
-];
+export interface ReaderHiatusReport {
+  status: "found" | "none" | "unknown";
+  reason?: string;
+  /** ふだんの間隔（日。更新と更新の間の中央値） */
+  usualDays?: number;
+  /** 休載と見たしきい値（日） */
+  thresholdDays?: number;
+  gaps: ReaderHiatusGap[];
+  /**
+   * 最後の更新から、読んだ時点までの日数が、しきい値を超えているとき。
+   * **完結か休載かは材料からは分からない**ので、そうとだけ言う。
+   */
+  stalled?: { lastEpisode: number; lastUpdate: string; days: number };
+}
+
+export interface ReaderAdviceMaterial {
+  /** 「カクヨム」 */
+  siteLabel: string;
+  /** 話ごとの記録のうち、いちばん新しい取り込み。無ければ null */
+  readAt: string | null;
+  dropout: ReaderRate;
+  bookmark: ReaderRate;
+  rating: ReaderRate;
+  base: ReaderRateBase | null;
+  baseMissing?: string;
+  /** 作品の長さ */
+  length: {
+    /** PVの分かる話の数 */
+    episodes: number;
+    /** いちばん大きい話数 */
+    lastEpisode: number;
+    /** 最初の話の公開（推定）と、最後の話の更新。更新日が無ければ無い */
+    firstUpdate?: string;
+    lastUpdate?: string;
+    /** その間の日数 */
+    spanDays?: number;
+  };
+  /** 記録にある話数（昇順）。**AIの答えに出る話数の照合に使う** */
+  existingEpisodes: number[];
+  firstPv?: number;
+  /** 話ごとのPV。多ければ要約した点だけ（`summarized`） */
+  pvPoints: ReaderPvPoint[];
+  summarized: boolean;
+  /** 1話→2話で離れた割合 */
+  firstStep?: ReaderRatioFact;
+  /** 第1話の読者の7割以上が初めて離れた話（見た範囲の中で） */
+  seventyPercentAt?: ReaderRatioFact;
+  /** 急に読者が減った話（大きい順） */
+  drops: ReaderAdviceDrop[];
+  /** 序盤・減り方を見た範囲の最後の話 */
+  inspectedUntil?: number;
+  /** 第50話時点の離脱率（中堅の目安が「50話で」の値なので） */
+  at50?: ReaderRatioFact;
+  hiatus: ReaderHiatusReport;
+  /** 材料の限界（AIへも画面へも、そのまま渡す） */
+  notes: string[];
+}
 
 /**
- * 率と話ごとのPVから、記事の目安に沿った助言を組む。
+ * 材料を組む。
  *
  * @param rates `computeReaderRates` の結果（同じ記録から出したもの）
  * @param records **1つのサイトの**記録。**台帳に書かれた順**で渡す
  *   （率・グラフと同じ拾い方をするため）
  */
-export function buildReaderAdvice(
+export function buildReaderAdviceMaterial(
+  siteLabel: string,
   rates: ReaderRates,
   records: readonly ReaderStatsRecord[]
-): ReaderAdvice {
-  const items: ReaderAdviceItem[] = [];
-  const withheld: ReaderAdviceNote[] = [];
-
+): ReaderAdviceMaterial {
+  const latest = latestEpisodeValues(records);
   const pvs = new Map<number, number>();
-  for (const [episode, entry] of latestEpisodeValues(records).pv) {
-    pvs.set(episode, entry.value);
+  for (const [episode, entry] of latest.pv) pvs.set(episode, entry.value);
+
+  const existing = [
+    ...new Set([...latest.pv.keys(), ...latest.updated.keys()]),
+  ].sort((left, right) => left - right);
+  const pvEpisodes = [...pvs.keys()].sort((left, right) => left - right);
+  const lastEpisode = existing[existing.length - 1] ?? 0;
+
+  const firstPvValue = pvs.get(1);
+  const firstPv =
+    firstPvValue !== undefined && firstPvValue > 0 ? firstPvValue : undefined;
+  const ratioAt = (episode: number): ReaderRatioFact | undefined => {
+    const pv = pvs.get(episode);
+    if (pv === undefined || firstPv === undefined) return undefined;
+    const ratio = 1 - pv / firstPv;
+    return { episode, pv, firstPv, ratio, percent: formatPercent(ratio) };
+  };
+
+  const notes: string[] = [];
+  const hiatus = detectHiatus(latest.updated, pvs, ratioAt);
+  const publishTimes = estimatedPublishTimes(latest.updated);
+
+  /*
+    **見る範囲は基準の話まで。** それより新しい話はまだ読まれ切っていない
+    ので、PVが少なく出る（離脱が大きく見える）。基準の話が決まらない
+    （更新日が無い）ときは最後の話まで見るが、そう断る——黙って混ぜると、
+    新しい話の少なさを「減った」と読ませることになる。
+  */
+  const inspectedUntil = rates.base?.episode ?? pvEpisodes[pvEpisodes.length - 1];
+  if (!rates.base && pvEpisodes.length > 0) {
+    notes.push(
+      "更新から3日以上たった話が分からない（基準の話が決まらない）ので、" +
+        "新しい話ほどまだ読まれ切っておらず、PVが少なく出ている可能性があります。"
+    );
   }
 
-  // ---- 離脱率・序盤・話ごとの減り方（どれも「読まれ切った話」が要る） ----
-  const dropout = rates.dropout;
-  const base = rates.base;
-  const firstPv = pvs.get(1);
-  if (dropout.value === undefined || !base || firstPv === undefined) {
-    withheld.push({
-      topic: "dropout",
-      text:
-        "離脱率が出ていないので、離脱率・序盤の離れ方・話ごとの減り方の助言は出しません（" +
-        (dropout.missing ?? rates.baseMissing ?? "材料が足りません") +
-        "）。",
-      sources: [],
-    });
-  } else if (base.episode < 2) {
-    // 第1話しか読まれ切っていない。離脱率は 0% と出るが、離れ方は
-    // まだ見えていないだけで、書籍化レベルと読んではいけない
-    withheld.push({
-      topic: "dropout",
-      text:
-        "更新から3日以上たった話が第1話だけなので、読者の離れ方はまだ見られません。離脱率の助言は出しません。",
-      sources: [],
-    });
-  } else {
-    const value = dropout.value;
-    items.push(dropoutItem(value, base.episode, pvs, firstPv));
-
-    const opening = openingItems(pvs, firstPv, base.episode);
-    items.push(...opening);
-
-    // 目安（書籍化レベル＝約50%）を上回ったら、どの話で減っているかを指す（⑥）
-    if (value > B.dropoutPublishable) {
-      const drops = findDrops(pvs, base.episode);
-      if (drops.length > 0) items.push(declineItem(drops, base.episode));
+  const firstStep =
+    pvEpisodes.includes(2) && (inspectedUntil ?? 0) >= 2 ? ratioAt(2) : undefined;
+  let seventyPercentAt: ReaderRatioFact | undefined;
+  if (inspectedUntil !== undefined) {
+    for (const episode of pvEpisodes) {
+      if (episode < 2 || episode > inspectedUntil) continue;
+      const fact = ratioAt(episode);
+      if (fact && fact.ratio >= READER_ADVICE_BENCHMARKS.openingWhole) {
+        seventyPercentAt = fact;
+        break;
+      }
     }
   }
+  const drops =
+    inspectedUntil !== undefined ? findDrops(pvs, inspectedUntil) : [];
 
-  // ---- 評価率（目安を超えたときだけ言う） ----
-  const rating = rates.rating;
-  if (rating.value === undefined || rating.percent === undefined) {
-    withheld.push({
-      topic: "rating",
-      text:
-        "評価率が出ていないので、評価率の助言は出しません（" +
-        (rating.missing ?? "材料が足りません") +
-        "）。",
-      sources: [],
-    });
-  } else if (rating.value > B.ratingClimb) {
-    items.push({
-      topic: "rating",
-      title: "評価率",
-      text:
-        `評価率 ${rating.percent} は、目安の「3割を超えれば、ランキングを駆け上がれる」を超えています。伸びている作品です。`,
-      drops: [],
-      suggestions: [],
-      sources: [article1],
-    });
-  } else {
-    withheld.push({
-      topic: "rating",
-      text:
-        `評価率 ${rating.percent} は、目安の「3割を超えれば、ランキングを駆け上がれる」には届いていません。低いときの対策は記事に無いので、助言は出しません。`,
-      sources: [article1],
-    });
+  // 第50話時点。**50話より先がある作品だけ**（50話ちょうどの作品では
+  // 離脱率そのものと同じ値になる）
+  const midTier = READER_ADVICE_BENCHMARKS.dropoutMidTierEpisode;
+  const at50 = lastEpisode > midTier ? ratioAt(midTier) : undefined;
+
+  const firstTime = publishTimes.get(existing.find((e) => publishTimes.has(e)) ?? -1);
+  const lastUpdated = latest.updated.get(lastEpisode);
+  const length: ReaderAdviceMaterial["length"] = {
+    episodes: pvEpisodes.length,
+    lastEpisode,
+  };
+  if (firstTime !== undefined && lastUpdated) {
+    length.firstUpdate = new Date(firstTime).toISOString();
+    length.lastUpdate = lastUpdated.updatedAt;
+    length.spanDays = Math.max(
+      0,
+      Math.round((lastUpdated.updatedTime - firstTime) / DAY_MS)
+    );
+  }
+  if (latest.updated.size > 0) {
+    notes.push(
+      "話ごとの日付は、サイトの「最終更新」の日時で、公開日ではありません。" +
+        "あとから直した話は新しい日付になります。そのため「その話より後の話の、" +
+        "いちばん早い更新日までには公開されていた」と読んで間隔を出しています。" +
+        "途中から後ろの話をまとめて直していると、休載でない所が休載らしく見えることがあります。"
+    );
   }
 
-  // ---- ブックマーク率（記事に目安が無い） ----
-  withheld.push({
-    topic: "bookmark",
-    text: "ブックマーク率は、記事に目安が無いので、数値を見せるだけにして助言は出しません。",
-    sources: [],
+  const pvPoints = pickPvPoints(pvEpisodes, pvs, firstPv, {
+    base: rates.base?.episode,
+    drops,
+    hiatus,
+    firstStep,
+    seventyPercentAt,
   });
 
-  return { items, withheld, cautions: CAUTIONS };
-}
-
-function dropoutItem(
-  value: number,
-  baseEpisode: number,
-  pvs: ReadonlyMap<number, number>,
-  firstPv: number
-): ReaderAdviceItem {
-  const percent = formatPercent(value);
-  let text: string;
-  if (value >= B.dropoutBroken) {
-    text = `離脱率 ${percent} は、目安で「作品として成立していない」とされる100%です。`;
-  } else {
-    if (value > B.dropoutMidTier) {
-      text = `離脱率 ${percent} は、目安（50話で約70%なら中堅、約50%なら書籍化レベル）より高い値です。`;
-    } else if (value > B.dropoutPublishable) {
-      text = `離脱率 ${percent} は、目安の中堅（50話で約70%）と書籍化レベル（約50%）のあいだです。`;
-    } else {
-      text = `離脱率 ${percent} は、目安の書籍化レベル（約50%）に届いています。`;
-    }
-    text += midTierNote(baseEpisode, pvs, firstPv);
-  }
   return {
-    topic: "dropout",
-    title: "離脱率",
-    text,
-    drops: [],
-    suggestions: [],
-    sources: [article1],
+    siteLabel,
+    readAt: rates.episodeReadAt,
+    dropout: rates.dropout,
+    bookmark: rates.bookmark,
+    rating: rates.rating,
+    base: rates.base,
+    ...(rates.baseMissing ? { baseMissing: rates.baseMissing } : {}),
+    length,
+    existingEpisodes: existing,
+    ...(firstPv !== undefined ? { firstPv } : {}),
+    pvPoints: pvPoints.points,
+    summarized: pvPoints.summarized,
+    ...(firstStep ? { firstStep } : {}),
+    ...(seventyPercentAt ? { seventyPercentAt } : {}),
+    drops,
+    ...(inspectedUntil !== undefined ? { inspectedUntil } : {}),
+    ...(at50 ? { at50 } : {}),
+    hiatus,
+    notes,
   };
 }
 
 /**
- * 中堅の目安は「50話で」の値である。基準の話が50話でないときに、黙って
- * 比べると、長い作品ほど高く見える。
+ * 台帳から、サイトごとの材料を組む。**執筆統計のボタンと相談の両方がここを通る**
+ * （材料の作り方を二重に持たない）。
  *
- * **第50話時点の値は、率と同じ式で出すだけ**（新しい目安は作らない）。
- * 基準の話が50話より先なら、第50話も読まれ切っている。
+ * 話ごとの記録が無いサイトは入れない（率も休載も出せない）。並びは
+ * `POSTING_SITES` に揃える（画面の並びと同じ）。
+ *
+ * @param site 1つのサイトだけが要るとき（執筆統計のボタンはサイトごとにある）
  */
-function midTierNote(
-  baseEpisode: number,
-  pvs: ReadonlyMap<number, number>,
-  firstPv: number
-): string {
-  const at = B.dropoutMidTierEpisode;
-  if (baseEpisode === at) return "";
-  if (baseEpisode < at) {
-    return `中堅の目安は50話時点の値で、この作品の基準の話（第${baseEpisode}話）はまだ50話まで来ていません。`;
+export function buildReaderAdviceMaterials(
+  ledger: PostingLedger,
+  site?: PostingSiteId
+): ReaderAdviceMaterial[] {
+  const materials: ReaderAdviceMaterial[] = [];
+  for (const info of POSTING_SITES) {
+    if (site !== undefined && info.id !== site) continue;
+    // **台帳に書かれた順**で渡す（同じ日時に同じ話が2件あれば、あとのほう）
+    const records = (ledger.readerStats ?? []).filter(
+      (entry) => entry.site === info.id
+    );
+    const rates = computeReaderRates(records);
+    if (rates.episodeReadAt === null) continue;
+    materials.push(
+      buildReaderAdviceMaterial(postingSiteInfo(info.id).label, rates, records)
+    );
   }
-  const pv = pvs.get(at);
-  if (pv === undefined) return "中堅の目安は50話時点の値です。";
-  return (
-    `中堅の目安は50話時点の値です。この作品の第50話時点では ` +
-    `${formatPercent(1 - pv / firstPv)}（1 − ${count(pv)} ÷ ${count(firstPv)}）です。`
-  );
+  return materials;
 }
 
 /**
- * 序盤（③）。**1話→2話の壊滅的な脱落と、序盤全体の脱落を分ける。**
+ * 話ごとの「遅くともこの時までには公開されていた」時刻。
  *
- * - 1話→2話で8割以上 → 基礎から見直して書き直す（③の強い助言。ここだけ）
- * - 序盤全体で7割以上 → 序盤のインパクト不足・タイトルと内容の食い違いを疑う
+ * **更新日は最終編集の日時で、公開日ではない**（貼り込み係が読むのは
+ * カクヨムの「◯年◯月◯日 最終更新」の枡）。あとから直した古い話は新しい
+ * 日付を持つので、そのまま並べると、直した話の前に大きな空きが出て
+ * 休載に見える。
  *
- * **序盤が何話までかは記事に無い。** 決めつけずに、第1話の読者の7割が
- * 初めて離れた話を示し、そこまでが序盤かどうかは作者に委ねる。
- *
- * どちらも**第1話まで来た読者が離れた割合**で、第1話へ来る読者の数（流入）の
- * 多い少ないとは別の問題である（③も分けて扱う）。
+ * 第k話は、第k話より後のどの話よりも先に公開されている。後の話の更新日は
+ * その話の公開より後なので、**第k話以降の更新日のいちばん早いもの**までには、
+ * 第k話は公開されていた。直した話の日付はこれで押さえ込まれる
+ * （休載を見逃す向きには倒れても、作り出す向きには倒れにくい）。
  */
-function openingItems(
-  pvs: ReadonlyMap<number, number>,
-  firstPv: number,
-  baseEpisode: number
-): ReaderAdviceItem[] {
-  const items: ReaderAdviceItem[] = [];
-  const inflowNote =
-    "これは第1話まで来た読者が離れた割合で、第1話へ来る読者の数（流入）の多い少ないとは別の問題です。";
+function estimatedPublishTimes(
+  updated: ReadonlyMap<number, { updatedTime: number }>
+): Map<number, number> {
+  const episodes = [...updated.keys()].sort((left, right) => right - left);
+  const result = new Map<number, number>();
+  let earliest = Number.POSITIVE_INFINITY;
+  for (const episode of episodes) {
+    const time = updated.get(episode)?.updatedTime;
+    if (time === undefined) continue;
+    earliest = Math.min(earliest, time);
+    result.set(episode, earliest);
+  }
+  return result;
+}
 
-  const secondPv = pvs.get(2);
-  let firstStepFired = false;
-  if (secondPv !== undefined && baseEpisode >= 2) {
-    const ratio = 1 - secondPv / firstPv;
-    if (ratio >= B.openingFirstStep) {
-      firstStepFired = true;
-      items.push({
-        topic: "openingFirst",
-        title: "序盤（1話→2話）",
-        text:
-          `第1話の読者のうち ${formatPercent(ratio)} が、第2話までに離れています（1 − ${count(secondPv)} ÷ ${count(firstPv)}）。` +
-          "目安では、1話から2話で8割以上が離れるのは、文章の基礎に課題があるしるしとされています。" +
-          inflowNote,
-        drops: [],
-        suggestions: [
-          "記事では、基礎から見直したうえで、この作品を1から書き直すことを勧めています。",
-        ],
-        sources: [article3],
-      });
+/**
+ * 休載らしい区間を見つける（作者の依頼、2026-09-23）。
+ *
+ * 更新（同じ回にまとめて出した話は1回と数える）と更新の間の日数を並べ、
+ * その**中央値を「ふだんの間隔」**にする。平均でないのは、休載の空き
+ * そのものが平均を引き上げ、見分けたいものが物差しを歪めるから。
+ */
+export function detectHiatus(
+  updated: ReadonlyMap<
+    number,
+    { updatedAt: string; updatedTime: number; readAt: string; time: number }
+  >,
+  pvs: ReadonlyMap<number, number>,
+  ratioAt: (episode: number) => ReaderRatioFact | undefined
+): ReaderHiatusReport {
+  if (updated.size === 0) {
+    return {
+      status: "unknown",
+      reason: "話ごとの更新日が記録に無いので、休載を見分けられません",
+      gaps: [],
+    };
+  }
+  const times = estimatedPublishTimes(updated);
+  const episodes = [...times.keys()].sort((left, right) => left - right);
+
+  // 同じ回の更新をまとめる
+  const updates: Array<{ first: number; last: number; start: number; end: number }> = [];
+  for (const episode of episodes) {
+    const time = times.get(episode) as number;
+    const current = updates[updates.length - 1];
+    if (current && time - current.end < SAME_UPDATE_HOURS * 60 * 60 * 1000) {
+      current.last = episode;
+      current.end = time;
+    } else {
+      updates.push({ first: episode, last: episode, start: time, end: time });
     }
   }
 
-  // 第1話の読者の7割が、初めて離れた話（基準の話まで）
-  const episodes = [...pvs.keys()]
-    .filter((episode) => episode >= 2 && episode <= baseEpisode)
-    .sort((left, right) => left - right);
-  for (const episode of episodes) {
-    const pv = pvs.get(episode);
-    if (pv === undefined) continue;
-    const ratio = 1 - pv / firstPv;
-    if (ratio < B.openingWhole) continue;
-    // 第2話で越えていて、1話→2話の助言をもう出したなら、同じことを2度言わない
-    if (episode === 2 && firstStepFired) break;
-    items.push({
-      topic: "openingWhole",
-      title: "序盤全体",
-      text:
-        `第1話の読者の7割以上が、第${episode}話までに離れています（1 − ${count(pv)} ÷ ${count(firstPv)} = ${formatPercent(ratio)}）。` +
-        `目安では、序盤全体で7割以上が離れるときは、序盤のインパクト不足や、タイトルと内容の食い違いを疑うところです。序盤が何話までかは記事に無いので、第${episode}話までがこの作品の序盤にあたるかどうかは、作者が判断してください。` +
-        inflowNote,
-      drops: [],
-      suggestions: [
-        "序盤の場面に、読み進めたくなる引き（インパクト）があるか見直す",
-        "タイトル・あらすじと、序盤の中身が食い違っていないか確かめる",
-      ],
-      sources: [article3],
-    });
-    break;
+  const intervals: Array<{ days: number; before: (typeof updates)[number]; after: (typeof updates)[number] }> = [];
+  for (let index = 1; index < updates.length; index++) {
+    const before = updates[index - 1];
+    const after = updates[index];
+    intervals.push({ days: (after.start - before.end) / DAY_MS, before, after });
   }
-  return items;
+  if (intervals.length < HIATUS_MIN_INTERVALS) {
+    return {
+      status: "unknown",
+      reason:
+        `更新日の分かる更新が${updates.length}回しかなく、ふだんの間隔が分かりません` +
+        `（${HIATUS_MIN_INTERVALS + 1}回以上要ります）`,
+      gaps: [],
+    };
+  }
+
+  const usualDays = median(intervals.map((interval) => interval.days));
+  const thresholdDays = Math.max(
+    usualDays * HIATUS_USUAL_MULTIPLIER,
+    HIATUS_MIN_DAYS
+  );
+
+  const gaps: ReaderHiatusGap[] = intervals
+    .filter((interval) => interval.days >= thresholdDays)
+    .map((interval) => {
+      const beforeEpisode = interval.before.last;
+      const afterEpisode = interval.after.first;
+      // 第1話の前には読者がいない。休む前が第1話なら離脱率は 0% で意味が無い
+      const dropoutBefore = beforeEpisode >= 2 ? ratioAt(beforeEpisode) : undefined;
+      const pvBefore = pvs.get(beforeEpisode);
+      const pvAfter = pvs.get(afterEpisode);
+      return {
+        beforeEpisode,
+        afterEpisode,
+        from: new Date(interval.before.end).toISOString(),
+        to: new Date(interval.after.start).toISOString(),
+        days: roundDays(interval.days),
+        ...(dropoutBefore ? { dropoutBefore } : {}),
+        ...(pvBefore !== undefined ? { pvBefore } : {}),
+        ...(pvAfter !== undefined ? { pvAfter } : {}),
+      };
+    });
+
+  /*
+    **いま止まっているか。** 最後の話の更新から、それを読んだ時点までの
+    日数で見る（手元の時計では見ない——同じ台帳から、機械によって違う
+    答えが出ないように）。完結したのか休んでいるのかは材料に無い。
+  */
+  const lastEpisode = episodes[episodes.length - 1];
+  const lastEntry = updated.get(lastEpisode);
+  let stalled: ReaderHiatusReport["stalled"];
+  if (lastEntry) {
+    const days = (lastEntry.time - lastEntry.updatedTime) / DAY_MS;
+    if (days >= thresholdDays) {
+      stalled = {
+        lastEpisode,
+        lastUpdate: lastEntry.updatedAt,
+        days: roundDays(days),
+      };
+    }
+  }
+
+  return {
+    status: gaps.length > 0 ? "found" : "none",
+    usualDays: roundDays(usualDays),
+    thresholdDays: roundDays(thresholdDays),
+    gaps,
+    ...(stalled ? { stalled } : {}),
+  };
+}
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+/** 日数は小数1桁まで（「6.9日」）。半日単位の違いは判断を変えない */
+function roundDays(days: number): number {
+  return Math.round(days * 10) / 10;
+}
+
+/**
+ * 話ごとのPVを、AIへ渡す点に絞る。
+ *
+ * **60話までは全部渡す。** それより長い作品は、序盤の細かい点（1・2・3・5・
+ * 10・20・30・40・50話）と、そこから50話おき、それに「何かが起きた話」
+ * （基準の話・急に減った話とその比べた相手・休載の前後・7割を越えた話・
+ * 最後の話）だけを渡す。**点を作らない**——どれも記録にある値そのもの。
+ */
+function pickPvPoints(
+  pvEpisodes: readonly number[],
+  pvs: ReadonlyMap<number, number>,
+  firstPv: number | undefined,
+  marks: {
+    base?: number;
+    drops: readonly ReaderAdviceDrop[];
+    hiatus: ReaderHiatusReport;
+    firstStep?: ReaderRatioFact;
+    seventyPercentAt?: ReaderRatioFact;
+  }
+): { points: ReaderPvPoint[]; summarized: boolean } {
+  const toPoint = (episode: number): ReaderPvPoint => {
+    const pv = pvs.get(episode) as number;
+    return {
+      episode,
+      pv,
+      ...(firstPv !== undefined
+        ? { retainedPercent: formatPercent(pv / firstPv) }
+        : {}),
+    };
+  };
+  if (pvEpisodes.length <= READER_ADVICE_FULL_SERIES_MAX) {
+    return { points: pvEpisodes.map(toPoint), summarized: false };
+  }
+  const wanted = new Set<number>([1, 2, 3, 5, 10, 20, 30, 40, 50]);
+  const last = pvEpisodes[pvEpisodes.length - 1];
+  for (let episode = 100; episode <= last; episode += 50) wanted.add(episode);
+  wanted.add(last);
+  if (marks.base !== undefined) wanted.add(marks.base);
+  for (const drop of marks.drops) {
+    wanted.add(drop.episode);
+    wanted.add(drop.fromEpisode);
+  }
+  for (const gap of marks.hiatus.gaps) {
+    wanted.add(gap.beforeEpisode);
+    wanted.add(gap.afterEpisode);
+  }
+  if (marks.seventyPercentAt) wanted.add(marks.seventyPercentAt.episode);
+  return {
+    points: pvEpisodes.filter((episode) => wanted.has(episode)).map(toPoint),
+    summarized: true,
+  };
 }
 
 /**
@@ -406,16 +614,16 @@ function openingItems(
  * 外から入った読者で、続けて読んできた読者の数ではない——続けて読む人は
  * 前の話を読んでいるので、それまでの最少を上回らないのが本来の形である。
  *
- * 第2話から数えはじめる（1話→2話は序盤の助言が見る）。基準の話より新しい
+ * 第2話から数えはじめる（1話→2話は `firstStep` が持つ）。基準の話より新しい
  * 話は、まだ読まれ切っていないので見ない。**減り幅に下限は設けない**
  * （記事に無い）——大きい順に `READER_ADVICE_MAX_DROPS` 話まで。
  */
 export function findDrops(
   pvs: ReadonlyMap<number, number>,
-  baseEpisode: number
+  untilEpisode: number
 ): ReaderAdviceDrop[] {
   const episodes = [...pvs.keys()]
-    .filter((episode) => episode >= 2 && episode <= baseEpisode)
+    .filter((episode) => episode >= 2 && episode <= untilEpisode)
     .sort((left, right) => left - right);
   const drops: ReaderAdviceDrop[] = [];
   let lowest: { episode: number; pv: number } | undefined;
@@ -443,33 +651,4 @@ export function findDrops(
   return drops
     .sort((left, right) => right.ratio - left.ratio || left.episode - right.episode)
     .slice(0, READER_ADVICE_MAX_DROPS);
-}
-
-/**
- * 話ごとの減り方。**選択肢は③の「安定期の読者減少」への手だけ**
- * （再推敲・再校正・話の切れ目の調整・細かい改稿）。基礎からの書き直しは
- * 1話→2話の壊滅的な脱落専用なので、ここでは言わない。
- */
-function declineItem(
-  drops: ReaderAdviceDrop[],
-  baseEpisode: number
-): ReaderAdviceItem {
-  return {
-    topic: "decline",
-    title: "話ごとの減り方",
-    text:
-      `離脱率が書籍化レベルの目安を上回っているので、急に読者が減っている話を探しました。それまでにいちばんPVが少なかった話から、さらに大きく減った話です（基準の第${baseEpisode}話まで）。`,
-    drops,
-    suggestions: [
-      "読み返して推敲・校正し、表現を平易にする",
-      "話の切れ目（どこで話を区切るか）を調整する",
-      "細かく改稿する",
-    ],
-    sources: [article6, article3],
-  };
-}
-
-/** 3桁区切り（率の式と同じ読み方） */
-function count(value: number): string {
-  return value.toLocaleString("ja-JP");
 }
