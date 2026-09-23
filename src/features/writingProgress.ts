@@ -102,16 +102,27 @@ export class WritingProgressTracker {
       .get<boolean>("stats.enabled", true);
   }
 
-  /** 保存されたときに呼ぶ。差があればその日の執筆量に積む */
-  async record(work: WorkEntry): Promise<void> {
-    if (!this.enabled()) return;
+  /**
+   * 保存されたときに呼ぶ。差があればその日の執筆量に積む。
+   *
+   * 何が起きたかを返す（目標の達成を祝うかの判断に使う。設計書6.3.8）。
+   * 記録を止めている・記録に失敗したときは undefined。
+   */
+  async record(work: WorkEntry): Promise<RecordOutcome | undefined> {
+    if (!this.enabled()) return undefined;
     try {
       const scan = await this.statsFor(work);
-      await this.store(work).record(toMeasurement(work, scan), {
+      const result = await this.store(work).record(toMeasurement(work, scan), {
         boundaryHour: boundaryHour(),
       });
       // 記録が変わったので、次にステータスバーが必要としたときに読み直す
       this.cache.delete(work.id);
+      return {
+        // **数えた回で、しかも増えたときだけ「書いた」とする。** 取り込み
+        // （ファイル数の変化）や削った保存で「目標に届いた」と祝わない
+        wrote: result.counted && result.delta > 0,
+        written: scan.stats.totals.net,
+      };
     } catch (error) {
       // **記録の直前に書き先を向ける**（0.43.3 と同じ）
       useLogFile(work.folderPath);
@@ -119,6 +130,7 @@ export class WritingProgressTracker {
         作品: work.title,
         詳細: error instanceof Error ? error.message : String(error),
       });
+      return undefined;
     }
   }
 
@@ -199,6 +211,14 @@ export class WritingProgressTracker {
   private store(work: WorkEntry): WritingStatsStore {
     return new WritingStatsStore(work, this.deviceId);
   }
+}
+
+/** 保存1回の記録の結果（設計書6.3.8） */
+export interface RecordOutcome {
+  /** 数えた回で、字数が増えたか */
+  wrote: boolean;
+  /** 保存した作品の、いまの純文字数 */
+  written: number;
 }
 
 export interface WritingSummary {

@@ -6,7 +6,7 @@
 
 > **※現在テスト中です。** 動作の確認（実機テスト）が済んでいない機能が含まれます。大切な原稿は、必ずバックアップ（GitHub同期など）を取ったうえでお使いください。
 
-このリポジトリの版：**0.77.0**（Marketplace に出ている版は **0.76.0**）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**0.78.0**（Marketplace に出ている版は **0.76.0**）。Marketplace に出ている版はこれより遅れることがあります。
 
 - 原稿を書き換えるAIはいません。提案を適用するのは、いつもあなたです。
 - 手元AI（Ollama / LM Studio）なら無料で使えます。クラウドAIも、鍵を入れれば機能ごとに選べます。
@@ -150,6 +150,8 @@ code --install-extension ".\novel-ai-assistant-$($v.TrimStart('v')).vsix" --forc
 
 - **執筆量**タブ：日次30日・週次12週・月次12か月・年次のグラフ。目標線・達成率・連続日数
 - **話ごと**タブ：話数・タイトル・文字数・枚数・平均比の一覧（押すとその話が開きます）
+
+目標（1日・1か月の字数、作品の文字量、締切前の書き上げ）に届くと、執筆統計に風船が上がります（作品の文字量と締切は花火も）。原稿エディタでは下の欄に一言出るだけです。同じ目標で祝うのは一度だけです。
 
 初回の測定、ファイルの増減、競合件数の変化、pull による増減は執筆量に数えません。記録は `.aiwriter/stats/<環境名>.json` に環境ごとに置き、読むときは合算します。「執筆データ → **全作品の執筆統計を表示**」で全作品の合計を見られます。
 
@@ -331,6 +333,7 @@ code --install-extension ".\novel-ai-assistant-$($v.TrimStart('v')).vsix" --forc
 | `novelai.stats.monthlyGoal` | `0`（目標なし） | 1か月の目標字数 |
 | `novelai.stats.dayBoundaryHour` | `4` | 1日の区切りとする時刻 |
 | `novelai.stats.weekStart` | `monday` | 週次グラフで週の始まりとする曜日 |
+| `novelai.celebrations.enabled` | `true` | 目標に届いたら、執筆統計に風船（大きな目標は花火も）、原稿エディターの下の欄に一言 |
 | `novelai.readerStats.importOnFocus` | `true` | VS Code に戻ったとき、統合小説執筆環境ヘルパーがコピーした読者の反応を取り込むか訊く |
 | `novelai.epub.ornamentFolder` | `""`（指していない） | EPUBの飾り（`*.svg`）を追加で読み込むフォルダーの絶対パス |
 | `novelai.mode` | `author` | この環境を作者（`author`）と編集者（`editor`）のどちらとして使うか |

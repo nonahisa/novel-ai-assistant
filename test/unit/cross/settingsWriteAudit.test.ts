@@ -59,6 +59,9 @@ const OVERWRITE_ALLOWED: Record<string, string> = {
     "キャッチコピーの履歴。同上（作り直しても失うものが無い）",
   "typoIssueHistory.ts":
     "誤字脱字の指摘の履歴。同じ指摘を二度出さないための控え",
+  "achievementStore.ts":
+    "目標の達成の記録（6.3.8）。拡張機能だけが書き、読んで足してすぐ書く" +
+    "（間に待ちが無い）。読めない記録には書かない（壊れたまま上書きしない）",
 
   // 読み込み→併合→保存で、作者の書いたものを守る
   "abilityStore.ts":

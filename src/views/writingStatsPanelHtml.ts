@@ -187,6 +187,46 @@ a, .link {
 a:hover, .link:hover { text-decoration: underline; }
 .empty { padding: 24px 0; color: var(--vscode-descriptionForeground); line-height: 1.7; }
 .conflicted { color: var(--vscode-editorWarning-foreground, #cca700); }
+/* 達成の記録（設計書6.3.8）。どの目標をいつ達成したかを、控えめに並べる */
+.achievements { margin: 0 0 18px; }
+.achievements-head { font-size: 12px; color: var(--vscode-descriptionForeground); margin: 0 0 4px; }
+.achievement-row { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; padding: 2px 0; }
+.achievement-row .mark {
+  color: var(--vscode-testing-iconPassed, #4caf50);
+  border: 1px solid var(--vscode-testing-iconPassed, #4caf50);
+  border-radius: 10px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+.achievement-row .day { color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
+/*
+  祝い（設計書6.3.8）。**画面の操作を妨げない**——重ねる層は pointer-events: none
+  にして、下のボタンやグラフはそのまま押せるようにする。数秒で消える。
+*/
+.celebrate-layer { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 20; }
+.celebrate-banner {
+  position: fixed;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  pointer-events: none;
+  z-index: 21;
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--vscode-testing-iconPassed, #4caf50);
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  text-align: center;
+  line-height: 1.6;
+  transition: opacity 0.6s;
+}
+.celebrate-banner .head { font-weight: 600; color: var(--vscode-testing-iconPassed, #4caf50); }
+.celebrate-banner.fade { opacity: 0; }
+/* 動きを減らす設定では、動かさずに「達成」の印だけを出す */
+@media (prefers-reduced-motion: reduce) {
+  .celebrate-banner { transition: none; }
+}
 </style>
 </head>
 <body>
@@ -201,6 +241,7 @@ a:hover, .link:hover { text-decoration: underline; }
   <section class="page active" id="page-writing">
     <div id="contest"></div>
     <div class="cards" id="cards"></div>
+    <div id="achievements"></div>
     <div class="controls" id="granularity"></div>
     <div class="chart-wrap"><svg id="chart" width="100%" height="240"></svg></div>
     <div class="note" id="chart-note"></div>
@@ -1179,8 +1220,220 @@ function renderEpisodes() {
   });
 }
 
+/* ── 目標の達成を祝う（設計書6.3.8） ── */
+
+/**
+ * 達成の記録。**どの目標をいつ達成したか**を残す。
+ * 風船は数秒で消えるが、この印は残る（動きを減らす設定では、印だけになる）。
+ */
+function renderAchievements() {
+  const host = document.getElementById('achievements');
+  const rows = (state && state.achievements) || [];
+  if (rows.length === 0) {
+    host.innerHTML = '';
+    return;
+  }
+  host.innerHTML =
+    '<div class="achievements"><div class="achievements-head">達成の記録</div>' +
+    rows.map((row) =>
+      '<div class="achievement-row"><span class="mark">達成</span>' +
+      '<span class="day">' + escapeHtml(row.day) + '</span>' +
+      '<span>' + escapeHtml(row.text) + '</span></div>'
+    ).join('') +
+    '</div>';
+}
+
+/**
+ * 上げ終えた祝いの鍵。**同じ祝いを二度上げない。** 保存が続くと、
+ * 「見せ終えた」が拡張機能へ届く前に同じ祝いがもう一度送られてくることがある。
+ */
+const playedCelebrations = new Set();
+/** 風船と花火を出しておく長さ。数秒で消え、書く手を待たせない */
+const CELEBRATION_MS = 4500;
+const CELEBRATION_COLORS = ['#f25f5c', '#ffcf3f', '#4cc9a0', '#4ea8ff', '#b983ff', '#ff8c42'];
+
+function reducedMotion() {
+  return Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+
+function celebrate(payload) {
+  if (!payload || !Array.isArray(payload.ids)) return;
+  const fresh = payload.ids.filter((id) => !playedCelebrations.has(id));
+  if (fresh.length === 0) return;
+  fresh.forEach((id) => playedCelebrations.add(id));
+  showCelebrationBanner(Array.isArray(payload.lines) ? payload.lines : []);
+  if (!reducedMotion()) runCelebration(payload.size);
+  vscode.postMessage({ type: 'celebrated', ids: payload.ids });
+}
+
+/** 何を達成したかの札。動きを減らす設定でも出す（これが「達成」の印になる） */
+function showCelebrationBanner(lines) {
+  const banner = document.createElement('div');
+  banner.className = 'celebrate-banner';
+  banner.setAttribute('role', 'status');
+  const head = document.createElement('div');
+  head.className = 'head';
+  head.textContent = 'おめでとうございます';
+  banner.appendChild(head);
+  lines.forEach((line) => {
+    const row = document.createElement('div');
+    row.textContent = line;
+    banner.appendChild(row);
+  });
+  document.body.appendChild(banner);
+  setTimeout(() => banner.classList.add('fade'), CELEBRATION_MS);
+  setTimeout(() => banner.remove(), CELEBRATION_MS + 800);
+}
+
+/** 終わり際は全体を薄くして消す（ぱっと消えると、かえって目が引かれる） */
+function celebrationAlpha(elapsed) {
+  return elapsed > CELEBRATION_MS - 600
+    ? Math.max(0, (CELEBRATION_MS - elapsed) / 600)
+    : 1;
+}
+
+/**
+ * 風船（と花火）を描く。**外部のライブラリは使わず Canvas で描く**
+ * （WebView の CSP を緩めずに済み、配布物も重くならない）。
+ *
+ * - small（1日の目標）：風船を少し
+ * - balloons（1か月の目標）：風船をたくさん
+ * - fireworks（作品の文字量・締切）：風船に花火を足す
+ */
+function runCelebration(size) {
+  const canvas = document.createElement('canvas');
+  canvas.className = 'celebrate-layer';
+  canvas.setAttribute('aria-hidden', 'true');
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  document.body.appendChild(canvas);
+  ctx.scale(ratio, ratio);
+
+  const pick = () => CELEBRATION_COLORS[Math.floor(Math.random() * CELEBRATION_COLORS.length)];
+  const balloonCount = size === 'small' ? 5 : 12;
+  const balloons = [];
+  for (let index = 0; index < balloonCount; index++) {
+    const radius = 14 + Math.random() * 10;
+    balloons.push({
+      x: (width * (index + 0.5)) / balloonCount + (Math.random() - 0.5) * 40,
+      y: height + radius * 2 + Math.random() * height * 0.35,
+      radius,
+      // 画面の下から上まで、3〜4秒ほどで抜ける速さ
+      speed: (height + 200) / (3000 + Math.random() * 1200),
+      phase: Math.random() * Math.PI * 2,
+      color: pick(),
+    });
+  }
+
+  const bursts = [];
+  if (size === 'fireworks') {
+    for (let index = 0; index < 5; index++) {
+      bursts.push({
+        at: 250 + index * 550,
+        x: width * (0.2 + Math.random() * 0.6),
+        y: height * (0.15 + Math.random() * 0.3),
+        color: pick(),
+        done: false,
+      });
+    }
+  }
+  const sparks = [];
+
+  const start = performance.now();
+  let last = start;
+  function frame(now) {
+    const elapsed = now - start;
+    const step = Math.min(50, now - last);
+    last = now;
+    ctx.clearRect(0, 0, width, height);
+    const alpha = celebrationAlpha(elapsed);
+    ctx.globalAlpha = alpha;
+
+    balloons.forEach((balloon) => {
+      const y = balloon.y - balloon.speed * elapsed;
+      const x = balloon.x + Math.sin(elapsed / 650 + balloon.phase) * 12;
+      const r = balloon.radius;
+      // 糸
+      ctx.strokeStyle = 'rgba(127, 127, 127, 0.7)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, y + r * 1.15);
+      ctx.quadraticCurveTo(x + Math.sin(elapsed / 300 + balloon.phase) * 5, y + r * 1.15 + 18, x, y + r * 1.15 + 36);
+      ctx.stroke();
+      // 風船
+      ctx.fillStyle = balloon.color;
+      ctx.beginPath();
+      ctx.ellipse(x, y, r * 0.85, r * 1.1, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 結び目
+      ctx.beginPath();
+      ctx.moveTo(x - 3, y + r * 1.18);
+      ctx.lineTo(x + 3, y + r * 1.18);
+      ctx.lineTo(x, y + r * 1.05);
+      ctx.fill();
+      // 光
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+      ctx.beginPath();
+      ctx.ellipse(x - r * 0.3, y - r * 0.4, r * 0.18, r * 0.3, -0.5, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    bursts.forEach((burst) => {
+      if (burst.done || elapsed < burst.at) return;
+      burst.done = true;
+      const count = 36;
+      for (let index = 0; index < count; index++) {
+        const angle = (Math.PI * 2 * index) / count;
+        const power = 0.12 + Math.random() * 0.08;
+        sparks.push({
+          x: burst.x,
+          y: burst.y,
+          vx: Math.cos(angle) * power,
+          vy: Math.sin(angle) * power,
+          born: elapsed,
+          life: 1100 + Math.random() * 500,
+          color: Math.random() < 0.7 ? burst.color : pick(),
+        });
+      }
+    });
+    for (let index = sparks.length - 1; index >= 0; index--) {
+      const spark = sparks[index];
+      const age = elapsed - spark.born;
+      if (age > spark.life) {
+        sparks.splice(index, 1);
+        continue;
+      }
+      spark.vy += 0.00012 * step;
+      spark.x += spark.vx * step;
+      spark.y += spark.vy * step;
+      ctx.globalAlpha = Math.min(alpha, 1 - age / spark.life);
+      ctx.fillStyle = spark.color;
+      ctx.beginPath();
+      ctx.arc(spark.x, spark.y, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    if (elapsed < CELEBRATION_MS) {
+      requestAnimationFrame(frame);
+    } else {
+      canvas.remove();
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
 window.addEventListener('message', (event) => {
   const message = event.data;
+  if (message.type === 'celebrate') {
+    celebrate(message.payload);
+    return;
+  }
   if (message.type === 'readerAdvice') {
     delete readerAdviceBusy[message.site];
     // 取りやめたときは、前の答えをそのまま残す（消すと見ていたものが消える）
@@ -1196,6 +1449,7 @@ window.addEventListener('message', (event) => {
   renderGranularity();
   renderContest();
   renderCards();
+  renderAchievements();
   renderChart();
   renderDevices();
   renderSiteRecords();

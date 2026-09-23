@@ -1020,6 +1020,14 @@ export interface ManuscriptEditorDeps {
    */
   todayFileCount(work: WorkEntry, filePath: string): Promise<number | undefined>;
   /**
+   * 目標に届いた日の一言（設計書6.3.8）。下段の字数の隣に出す。
+   *
+   * **この画面では祝わない**（風船も札も出さない）。書いている最中に
+   * 画面が動くと手が止まるので、文字で添えるだけにする。省略できる
+   * 形にしてあるのは、祝う係が無くても原稿エディタは成り立つため。
+   */
+  cheerFor?(work: WorkEntry): Promise<string | undefined>;
+  /**
    * 執筆量の基準を置き直す（設計書6.3.2）。
    *
    * **拡張機能が本文ファイルを作った直後に呼ぶ。** 記録は「ファイル数が
@@ -2011,8 +2019,10 @@ export class ManuscriptEditorProvider
     try {
       const stats = await this.deps.workStats(found.work);
       const today = await this.deps.todayFileCount(found.work, filePath);
+      const cheer = await this.deps.cheerFor?.(found.work);
       await panel.webview.postMessage({
         type: "counts",
+        cheer,
         workTotal: pickCount(stats.totals, currentCountMode()),
         fileAtBase: countForDisplay(
           toLf(document.getText()),

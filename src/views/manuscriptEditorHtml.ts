@@ -803,6 +803,13 @@ ruby > rt {
 #note {
   color: var(--vscode-notificationsInfoIcon-foreground, inherit);
 }
+/* 目標に届いた日の一言（設計書6.3.8）。**書いている最中の画面は動かさない**
+   ので、字数の隣に文字で添えるだけにする。その日の間だけ出る */
+#cheer {
+  color: var(--vscode-testing-iconPassed, inherit);
+  white-space: nowrap;
+}
+#cheer:empty { display: none; }
 </style>
 </head>
 <body class="vertical">
@@ -867,6 +874,7 @@ ruby > rt {
 
 <div id="foot">
   <span id="counts"></span>
+  <span id="cheer"></span>
   <span id="note"></span>
 </div>
 
@@ -899,6 +907,8 @@ ruby > rt {
   const note = document.getElementById("note");
   /** 下段の字数（作品／このファイル／今日。作者の指示、2026-08-29） */
   const countsLabel = document.getElementById("counts");
+  /** 目標に届いた日の一言（設計書6.3.8）。字数と一緒に届く */
+  const cheerLabel = document.getElementById("cheer");
   const dirButton = document.getElementById("dir");
   /** 組んで書く（実験。設計書6.34） */
   const compose = document.getElementById("compose");
@@ -2410,6 +2420,8 @@ ${RESUME_WRITING_LABEL ? `
       }
       // 記録を止めている作者には届かない。そのときは出さない（0と書かない）
       footToday = typeof message.today === "number" ? message.today : null;
+      // 届いた日だけ一言が来る。来なければ消す（日が替われば出ない）
+      cheerLabel.textContent = typeof message.cheer === "string" ? message.cheer : "";
       paintCounts();
     } else if (message.type === "applyAppearance") {
       /*

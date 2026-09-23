@@ -49,6 +49,11 @@ import {
   summarize,
   weekStart,
 } from "./writingProgress";
+import {
+  acceptCelebrated,
+  achievementRowsFor,
+  offerCelebration,
+} from "./celebrations";
 
 /**
  * 執筆量パネル（設計書6.3）。
@@ -77,6 +82,7 @@ export async function openWritingStatsPanel(
       type: "stats",
       data: await buildStatsPanelData(work, deviceId),
     });
+    await offerCelebration(existing, work);
     return;
   }
 
@@ -89,6 +95,10 @@ export async function openWritingStatsPanel(
   openPanels.set(work.id, panel);
   context.subscriptions.push(panel);
   panel.onDidDispose(() => openPanels.delete(work.id));
+  // 裏に回っていたタブが見えるようになったら、その間に届いた祝いを上げる（設計書6.3.8）
+  panel.onDidChangeViewState((event) => {
+    if (event.webviewPanel.visible) void offerCelebration(panel, work);
+  });
 
   // 見出しの語（「話」か「投稿」か）と、本文を開く画面の向きの両方に使う
   const format = await readWorkFormat(work);
@@ -109,6 +119,8 @@ export async function openWritingStatsPanel(
       site?: string;
       force?: boolean;
     };
+    // 風船を見せ終えた（設計書6.3.8）。印を付けて、二度は上げない
+    if (await acceptCelebrated(message)) return;
     if (parsed.type === "askReaderAdvice" && parsed.site) {
       /*
         **押したときだけAIを呼ぶ**（設計書6.79.7.3）。画面から届いたサイト名は
@@ -152,6 +164,8 @@ export async function openWritingStatsPanel(
         type: "stats",
         data: await buildStatsPanelData(work, deviceId),
       });
+      // 閉じている間に届いた目標は、開いたこのときに一度だけ祝う
+      await offerCelebration(panel, work);
       return;
     }
     if (parsed.type === "open" && parsed.filePath) {
@@ -189,6 +203,8 @@ export async function refreshWritingStatsPanel(
     type: "stats",
     data: await buildStatsPanelData(work, deviceId),
   });
+  // 保存で目標に届いた瞬間、開いていればその場で祝う（設計書6.3.8）
+  await offerCelebration(panel, work);
 }
 
 async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
@@ -265,6 +281,8 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
     // 読めなかったときは理由を添える（黙って消さない。0.33.9）
     siteRecords: siteRecords.records,
     siteRecordsError: siteRecords.error,
+    // 達成の印（設計書6.3.8）。どの目標をいつ達成したかを残す
+    achievements: await achievementRowsFor(work),
     // 締切のある作品では、いちばん上に「あと何日・あと何字」を出す。
     // 数字だけでは間に合うか判断できないので、文にして添える
     contest: contest

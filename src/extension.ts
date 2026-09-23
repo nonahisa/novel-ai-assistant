@@ -297,7 +297,13 @@ import { PROPOSALS_VIEW_ID, ProposalPanel } from "./features/proposalPanel";
 import {
   WritingProgressTracker,
   boundaryHour,
+  dailyGoal,
+  monthlyGoal,
 } from "./features/writingProgress";
+import {
+  connectCelebrations,
+  createCelebrationService,
+} from "./features/celebrations";
 import {
   openWritingStatsPanel,
   refreshWritingStatsPanel,
@@ -1147,6 +1153,20 @@ export async function activate(
     episodes: await treeProvider.getEpisodes(work),
   }));
 
+  // 目標の達成を祝う（設計書6.3.8）。判定は保存を記録し終えたときだけ。
+  // 祝うのは執筆統計（風船・花火）と原稿エディタの下段（一言）の2か所
+  const celebrations = createCelebrationService({
+    globalState: context.globalState,
+    works: () => registry.list(),
+    deviceId,
+    settings: () => ({
+      dailyGoal: dailyGoal(),
+      monthlyGoal: monthlyGoal(),
+      boundaryHour: boundaryHour(),
+    }),
+  });
+  connectCelebrations(celebrations);
+
   // 競合の見比べに使う読み取り専用の本文置き場。
   // 競合はgit操作でしか起きないので、ブラウザでは作らない（設計書5.8.5）
   let conflictProvider: ConflictContentProviderType | undefined;
@@ -1381,6 +1401,8 @@ export async function activate(
     // 改行コードの案内（設計書5.4.2）も、走査は一覧の結果を借りる
     workEpisodes: (work) => treeProvider.getEpisodes(work),
     todayFileCount: (work, filePath) => progress.todayFileCount(work, filePath),
+    // 目標に届いた日の一言（設計書6.3.8）。この画面では風船を上げない
+    cheerFor: (work) => celebrations.cheerFor(work),
     // 空の話を作った直後に基準を置き直す（設計書6.3.2）。
     // **置き直さないと、そのあと書いた分が「今日 +0字」になって消える**
     rebaseline: (work) => progress.rebaseline(work),
@@ -2479,7 +2501,10 @@ export async function activate(
     // 保存を「手を動かした」印として独り言へ渡す。
     // 書いている最中に話しかけないための基準になる
     chatter.noteEdit(work, filePath);
-    await progress.record(work);
+    const outcome = await progress.record(work);
+    // **記録し終えてから、届いたかを見る**（設計書6.3.8）。下の2つの
+    // 描き直し（下段・執筆統計）より先に済ませ、その描き直しで祝いを出す
+    if (outcome) await celebrations.afterSave(work, outcome);
     updateStatusBar();
     // **記録し終えてから、原稿エディタの下段を測り直す**（作者の指示、
     // 2026-08-29）。先に読むと「今日 +◯字」が保存1回ぶん古いままになる

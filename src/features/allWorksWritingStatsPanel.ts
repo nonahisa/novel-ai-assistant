@@ -23,6 +23,11 @@ import {
   summarize,
   weekStart,
 } from "./writingProgress";
+import {
+  acceptCelebrated,
+  achievementRowsFor,
+  offerCelebration,
+} from "./celebrations";
 
 /**
  * 全作品の執筆量パネル（作者の要望、2026-08-13）。
@@ -57,6 +62,7 @@ export async function openAllWorksWritingStatsPanel(
       type: "stats",
       data: await buildAllWorksStatsPanelData(registry, deviceId),
     });
+    await offerCelebration(panel, undefined);
     return;
   }
 
@@ -71,6 +77,10 @@ export async function openAllWorksWritingStatsPanel(
   created.onDidDispose(() => {
     panel = undefined;
   });
+  // 全作品の画面では、全作品で共有の1日・1月の目標だけを祝う（設計書6.3.8）
+  created.onDidChangeViewState((event) => {
+    if (event.webviewPanel.visible) void offerCelebration(created, undefined);
+  });
 
   const nonce = createNonce();
   created.webview.html = buildWritingStatsPanelHtml(nonce, created.webview.cspSource, {
@@ -78,12 +88,14 @@ export async function openAllWorksWritingStatsPanel(
   });
 
   created.webview.onDidReceiveMessage(async (message: unknown) => {
+    if (await acceptCelebrated(message)) return;
     const parsed = message as { type?: string };
     if (parsed.type === "ready") {
       created.webview.postMessage({
         type: "stats",
         data: await buildAllWorksStatsPanelData(registry, deviceId),
       });
+      await offerCelebration(created, undefined);
     }
   });
 }
@@ -98,6 +110,7 @@ export async function refreshAllWorksWritingStatsPanel(
     type: "stats",
     data: await buildAllWorksStatsPanelData(registry, deviceId),
   });
+  await offerCelebration(panel, undefined);
 }
 
 async function buildAllWorksStatsPanelData(
@@ -166,6 +179,7 @@ async function buildAllWorksStatsPanelData(
     devices: totalsByLabel(
       perWork.map((entry) => ({ label: entry.work.title, days: entry.days }))
     ),
+    achievements: await achievementRowsFor(undefined),
     devicesTitle: "作品ごとの内訳",
     devicesColumn: "作品",
     totalsCardLabel: "全作品の合計",
