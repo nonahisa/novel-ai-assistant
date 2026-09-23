@@ -1,5 +1,6 @@
 import { bundledFeatureOutput } from "./bundledTuning";
 import { tuningStoreTable, writeTuningEntry } from "./modelTuningStore";
+import { logLine } from "./logger";
 
 /**
  * **機能ごと**の「1回の応答に何トークン書くか」の台帳（設計書6.77の第3段）。
@@ -374,6 +375,101 @@ export async function recordFeatureOutputTokens(
     outputTokenSamples: samples + 1,
     measuredAt: now,
   });
+}
+
+/**
+ * **前回、待ち時間に収めるために選んだチャンクの大きさ**（字。
+ * `core/chunkTimeFit.ts`。作者の裁定、2026-09-23）。無ければ undefined。
+ *
+ * ## なぜ台帳に残すか
+ *
+ * チャンクの大きさが変わると内容ハッシュが総入れ替えになり、処理済みの
+ * キャッシュが全部外れる。速さは直近の実測1回なので、VS Code を開き直す
+ * たびに少しずつ違う——**前回の段を覚えていないと、境目の近くでは開き直す
+ * たびに大きさが動く。** 覚えておけば、よほど速さが変わらない限り動かさない。
+ *
+ * ## なぜこの行に置くか
+ *
+ * 大きさは**機能×プロバイダ×モデル**で決まる（毎回送る指示の量も、1回に
+ * 書く量も機能ごとに違う）。鍵がちょうど同じこの行に、欄を1つ足した。
+ * `recordFeatureOutputTokens` は欄ごとに書くので、この欄は消されない。
+ * 詳細メニューの「AIチューニングの記録を消す」でこの行を消せば、覚えた
+ * 大きさも一緒に消える（測り直しと同じ扱い）。
+ *
+ * **出力量の読み手（`featureOutputTuningRaw`）はこの欄を見ない。** この欄
+ * しか無い行は、出力量については「測っていない」のままである。
+ */
+export function rememberedTimeFitChunkChars(
+  feature: string,
+  providerId: string,
+  model: string
+): TimeFitMemory | undefined {
+  if (feature.length === 0 || providerId.length === 0 || model.length === 0) {
+    return undefined;
+  }
+  const raw = tuningStoreTable()[featureOutputKey(feature, providerId, model)];
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return undefined;
+  }
+  const entry = raw as Record<string, unknown>;
+  const chars = positiveNumber(entry.timeFitChunkChars);
+  const requestedChars = positiveNumber(entry.timeFitRequestedChars);
+  // 整数でない値は手で書き換えられたもの。段と一致しないので使わない
+  if (chars === undefined || !Number.isInteger(chars)) return undefined;
+  if (requestedChars === undefined || !Number.isInteger(requestedChars)) {
+    return undefined;
+  }
+  return { chars, requestedChars };
+}
+
+/**
+ * 覚えておく中身。**選んだ大きさと、そのときの望みの字数の対**。
+ *
+ * 望みの字数（設定・モデルのコンテキスト長から決まる値）が変わったら、
+ * 前回の段は見ない——作者が設定を直したのに、前回の段に引き留められて
+ * 効かない、ということにしない。
+ */
+export interface TimeFitMemory {
+  readonly chars: number;
+  readonly requestedChars: number;
+}
+
+/**
+ * 待ち時間に収めるために選んだ大きさを覚える。**前と同じなら書かない**
+ * （呼び出しのたびにファイルを書かない）。
+ *
+ * **投げない。** 覚えられなかっただけで、その回の処理は進める（次に開いた
+ * ときに段が動くことがある、というだけ）。書けなかった理由は台帳の側が
+ * 記録に残す（`writeTuningEntry`）。
+ */
+export async function rememberTimeFitChunkChars(
+  feature: string,
+  providerId: string,
+  model: string,
+  memory: TimeFitMemory
+): Promise<void> {
+  if (feature.length === 0 || providerId.length === 0 || model.length === 0) {
+    return;
+  }
+  const { chars, requestedChars } = memory;
+  if (!Number.isInteger(chars) || chars <= 0) return;
+  if (!Number.isInteger(requestedChars) || requestedChars <= 0) return;
+  const current = rememberedTimeFitChunkChars(feature, providerId, model);
+  if (current?.chars === chars && current.requestedChars === requestedChars) {
+    return;
+  }
+  try {
+    await writeTuningEntry(featureOutputKey(feature, providerId, model), {
+      timeFitChunkChars: chars,
+      timeFitRequestedChars: requestedChars,
+    });
+  } catch (error) {
+    // 呼び出し側は待たずに進む（`void`）ので、ここで受け止める。理由は捨てない
+    logLine(
+      `チャンクの大きさ（待ち時間に収める段）を台帳へ覚えられませんでした：` +
+        `${error instanceof Error ? error.message : String(error)}`
+    );
+  }
 }
 
 /**

@@ -10,7 +10,18 @@ import {
   type ChunkSizeMode,
   type ResolvedChunkSize,
 } from "../core/chunker";
-import { modelTuning } from "../core/modelTuning";
+import { modelTuning, resolveTimeoutSeconds } from "../core/modelTuning";
+import {
+  fitChunkCharsToTimeout,
+  CHUNK_TIME_FIT_RATIO,
+  type ChunkTimeFit,
+} from "../core/chunkTimeFit";
+import {
+  rememberTimeFitChunkChars,
+  rememberedTimeFitChunkChars,
+  type TimeFitMemory,
+} from "../core/featureOutputTokens";
+import { lookupCallSpeeds } from "../ai/runTimeEstimate";
 import { confirmProviderReachable } from "./aiConnectivity";
 import type { AIProvider, ModelInfo } from "../ai/types";
 import type { AssignableFeature } from "../ai/registry";
@@ -48,6 +59,17 @@ export interface ChunkSettings {
    * 作者へ見せるためだけにある（`mergeCharsBeforeOutputCap` と同じ形）。
    */
   chunkCharsBeforeUntunedCap?: number;
+  /**
+   * **待ち時間の上限に収めるために縮める前**の字数（作者の裁定、2026-09-23。
+   * `core/chunkTimeFit.ts`）。縮めていなければ undefined。
+   *
+   * **手動で字数を指定していても縮める**——時間切れが決まっている大きさで
+   * 送っても、そのチャンクは丸ごと失敗するだけである。ただし黙っては
+   * 縮めない：ログと `describeChunkSettings` に、元の字数と理由を出す。
+   */
+  chunkCharsBeforeTimeFit?: number;
+  /** 待ち時間に収める判断の中身。速さが測れていなければ undefined */
+  timeFit?: ChunkTimeFit & { timeoutSeconds: number };
   /**
    * 固定費を差し引いた結果。差し引く材料を渡されなければ undefined。
    *
@@ -162,8 +184,13 @@ export function readChunkSettings(
    * **省略すると、これまでどおりどちらも絞らない。** 呼び出し側（誤字脱字・
    * 設定資料の抽出など）を1つずつ対応させるまでの間、動作を変えないため
    * の逃げ道である——渡さない限り、この関数の挙動は前と同じになる。
+   *
+   * 3. **待ち時間の上限に収める**（作者の裁定、2026-09-23。`core/chunkTimeFit.ts`）。
+   *    `feature` を添えた呼び出しで、読み込みの速さが台帳に測れているときだけ。
+   *    選んだ大きさは台帳へ覚えて、次に開いたときも同じ段にする
+   *    （キャッシュを外さないため）
    */
-  outputTuning?: { providerId: string; model: string }
+  outputTuning?: ChunkTuningTarget
 ): ChunkSettings {
   const config = vscode.workspace.getConfiguration("novelai");
   const mode = parseChunkSizeMode(config.get<string>("chunkSizeMode"));
@@ -192,6 +219,30 @@ export function readChunkSettings(
   const requestedAfterSafetyCap: ResolvedChunkSize =
     cappedChars === requested.chars ? requested : { ...requested, chars: cappedChars };
 
+  /*
+    **待ち時間の上限に収める**（作者の裁定、2026-09-23）。
+
+    コンテキスト長で決まる大きさは「入るか」しか見ていない。CPUだけの機械
+    では、入る大きさでも読み込みだけで上限を超える（ノートPCで13,000字が
+    526秒、上限まで74秒）。**手動・自動のどちらでも効かせる**——時間切れが
+    決まっている大きさは、作者の指定でも送る意味が無い。縮めたことは
+    ログと `describeChunkSettings` に出す（黙って変えない）。
+
+    **固定費（指示と資料）の差し引きより先に置く。** 差し引きは「入るか」の
+    ために本文を痩せさせるだけで、時間の側の判断を覆さない。
+  */
+  const timeFit =
+    outputTuning?.feature !== undefined && outputTuning.feature.length > 0
+      ? fitToTimeout(requestedAfterSafetyCap.chars, fixedCost, {
+          ...outputTuning,
+          feature: outputTuning.feature,
+        })
+      : undefined;
+  const requestedAfterTimeFit: ResolvedChunkSize =
+    timeFit && timeFit.chars < requestedAfterSafetyCap.chars
+      ? { ...requestedAfterSafetyCap, chars: timeFit.chars }
+      : requestedAfterSafetyCap;
+
   // 固定費が分かっているなら、そのぶんを本文から引く。**引かないと、
   // 指示や資料が育ったときに本文が押し出されて溢れる**（溢れた分は
   // Ollama では黙って捨てられる）
@@ -201,7 +252,7 @@ export function readChunkSettings(
           contextWindow,
           overheadChars: fixedCost.overheadChars,
           outputTokens: fixedCost.outputTokens,
-          requestedChars: requestedAfterSafetyCap.chars,
+          requestedChars: requestedAfterTimeFit.chars,
           // 上の `resolveChunkChars` と同じ係数で差し引く。片方だけ実測に
           // すると、決めた字数を自分で削り直すことになる
           measured: tuning,
@@ -211,8 +262,8 @@ export function readChunkSettings(
     : undefined;
 
   const chunk: ResolvedChunkSize = budget
-    ? { ...requestedAfterSafetyCap, chars: budget.chunkChars }
-    : requestedAfterSafetyCap;
+    ? { ...requestedAfterTimeFit, chars: budget.chunkChars }
+    : requestedAfterTimeFit;
 
   const requestedMergeChars = resolveMergeChars({
     mode,
@@ -239,8 +290,114 @@ export function readChunkSettings(
     ...(cappedChars < requested.chars
       ? { chunkCharsBeforeUntunedCap: requested.chars }
       : {}),
+    ...(requestedAfterTimeFit.chars < requestedAfterSafetyCap.chars
+      ? { chunkCharsBeforeTimeFit: requestedAfterSafetyCap.chars }
+      : {}),
+    ...(timeFit ? { timeFit } : {}),
     budget,
   };
+}
+
+/** 台帳を引くための指定（`readChunkSettings` の3つ目） */
+export interface ChunkTuningTarget {
+  readonly providerId: string;
+  readonly model: string;
+  /**
+   * 出力量の実測を引く機能名（`meta.feature` と同じもの。`character_extract` など）。
+   *
+   * **渡した呼び出しだけ、待ち時間の上限に収める**（`core/chunkTimeFit.ts`）。
+   * その機能が1回に書く量の実測（平均）を時間に足し、選んだ大きさを台帳へ
+   * 覚えて次に開いたときも同じ段にする。
+   *
+   * **本文をチャンクに分けて何回も呼ぶ機能だけが渡す**（抽出・誤字脱字・推敲・
+   * 矛盾・伏線）。1回きりの呼び出し（告知文・章立て・単話プロット照合）は
+   * 渡さない——あちらで縮めると、時間切れを避ける代わりに**材料を落とす**
+   * ことになり、失うものの種類が違う。
+   */
+  readonly feature?: string;
+}
+
+/**
+ * この窓のあいだ覚えておく、前回選んだ大きさ（鍵は プロバイダ/モデル/機能）。
+ *
+ * 台帳（`rememberTimeFitChunkChars`）への書き込みは非同期なので、書き終わる
+ * 前に次の実行が来ても同じ段を引けるよう、手元にも持つ。
+ */
+const timeFitMemory = new Map<string, TimeFitMemory>();
+
+/** テスト用：この窓のあいだの記憶を消す（台帳のほうは消さない） */
+export function forgetTimeFitMemoryForTests(): void {
+  timeFitMemory.clear();
+}
+
+/**
+ * 待ち時間の上限に収まる大きさを決める（`readChunkSettings` の3段目）。
+ * **速さが測れていなければ undefined**（これまでどおり）。
+ */
+function fitToTimeout(
+  requestedChars: number,
+  fixedCost: ChunkFixedCost | undefined,
+  target: ChunkTuningTarget & { readonly feature: string }
+): (ChunkTimeFit & { timeoutSeconds: number }) | undefined {
+  const feature = target.feature;
+  // **目安と同じ引き方で速さを引く**（`ai/runTimeEstimate.ts`）。別々に引くと、
+  // 確認画面の目安は「収まる」と言うのに大きさは縮む、という食い違いになる
+  const speeds = lookupCallSpeeds(target.providerId, target.model, feature);
+  if (speeds.inputTokensPerSecond === undefined) return undefined;
+
+  const memoryKey = `${target.providerId}/${target.model}/${feature}`;
+  const remembered =
+    timeFitMemory.get(memoryKey) ??
+    rememberedTimeFitChunkChars(feature, target.providerId, target.model);
+  // **望みの字数が変わったら、前回の段は見ない**（設定を直したのに前回に
+  // 引き留められて効かない、ということにしない）
+  const previousChars =
+    remembered !== undefined && remembered.requestedChars === requestedChars
+      ? remembered.chars
+      : undefined;
+
+  // **いま効いている待ち時間で見る**（台帳 → 設定 → 既定。上限は手元1800秒・
+  // クラウド600秒）。実際に切れるのはこの秒数である
+  const timeoutSeconds = resolveTimeoutSeconds(target.providerId, target.model);
+  const fit = fitChunkCharsToTimeout({
+    requestedChars,
+    timeoutSeconds,
+    overheadChars: fixedCost?.overheadChars ?? 0,
+    speeds: {
+      inputTokensPerSecond: speeds.inputTokensPerSecond,
+      outputTokensPerSecond: speeds.outputTokensPerSecond,
+      // **平均だけ**（最大を使うと所要時間は必ず過大になる。runTimeEstimate と同じ）
+      outputTokensPerCall: speeds.outputTokensAverage,
+      tokensPerChar: speeds.tokensPerChar,
+    },
+    previousChars,
+  });
+  if (!fit) return undefined;
+
+  /*
+    **覚えるのは、実際に送る回だけ**（固定費を渡してくる呼び出し）。
+    確認の前の見積もり（`proofreadingSuite` の桁の感覚）は指示の量を知らずに
+    呼ぶので、そこで選んだ段を覚えると本番の判断を引きずる。
+  */
+  if (fixedCost) {
+    const memory: TimeFitMemory = { chars: fit.chars, requestedChars };
+    timeFitMemory.set(memoryKey, memory);
+    // 後ろで書く（処理を止めない）。書けなかった理由は台帳の側が記録に残す
+    void rememberTimeFitChunkChars(
+      feature,
+      target.providerId,
+      target.model,
+      memory
+    );
+  }
+
+  /*
+    **ここではログへ書かない。** 抽出・誤字脱字は、確認で「実行」が押されて
+    から作品のログへ向ける（キャンセルした回に、別の作品のログへ書かない
+    ため。2026-09-23）。縮めたことは `describeChunkSettings` が言葉にし、
+    各機能が向けたあとの開始の1行に載せる。
+  */
+  return { ...fit, timeoutSeconds };
 }
 
 /**
@@ -262,6 +419,20 @@ export function describeChunkSettings(settings: ChunkSettings): string {
     settings.chunkCharsBeforeUntunedCap !== undefined
       ? `（未チューニングのため ${settings.chunkCharsBeforeUntunedCap}字から抑制）`
       : "";
+  // **待ち時間に収めるために縮めたことも書く**（2026-09-23）。手動で字数を
+  // 指定している作者には、書かないと「指定が効いていない」ようにしか見えない
+  const timeFit =
+    settings.chunkCharsBeforeTimeFit !== undefined && settings.timeFit
+      ? `（待ち時間 ${settings.timeFit.timeoutSeconds}秒の` +
+        `${Math.round(CHUNK_TIME_FIT_RATIO * 10)}割に収まるよう ` +
+        `${settings.chunkCharsBeforeTimeFit}字から縮小。` +
+        `見込み 約${Math.round(settings.timeFit.predictedSeconds)}秒` +
+        (settings.timeFit.reason === "minimum"
+          ? "。縮めても収まらない見込みで、時間切れになることがあります" +
+            "——より速いAIを選ぶか、待ち時間を延ばしてください"
+          : "") +
+        "）"
+      : "";
   const merge =
     settings.mergeChars > 0
       ? `／まとめ送信 ${settings.mergeChars}字` +
@@ -281,5 +452,5 @@ export function describeChunkSettings(settings: ChunkSettings): string {
           ? "（縮めても入り切らない見込み。下限で送ります）"
           : "")
     : "";
-  return `1チャンク ${settings.chunk.chars}字（${source}）${untuned}${merge}${budget}`;
+  return `1チャンク ${settings.chunk.chars}字（${source}）${untuned}${timeFit}${merge}${budget}`;
 }

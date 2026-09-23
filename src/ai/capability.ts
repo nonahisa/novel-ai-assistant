@@ -4,6 +4,7 @@ import {
   type CapabilityTier,
   type ProviderId,
 } from "./types";
+import { isLocalProviderId } from "../core/localProviders";
 
 /**
  * モデルの地力に応じて、機能の重さを決める。
@@ -84,8 +85,9 @@ export interface CapabilityProfile {
  * `parseParameterSize` が大きさを読める。**読めたなら、どこで動いていようと
  * 大きさで決める**——名前で門を作ると、さくらの `12b` に「観点は絞るのに
  * 抑制はゆるめる」という、実測でいちばん出来の悪かった組み合わせが渡る。
+ *
+ * **一覧は `core/localProviders.ts` の1つだけ**（写しを持たない）。
  */
-const LOCAL_PROVIDERS: readonly ProviderId[] = ["ollama", "lmstudio"];
 
 /**
  * このモデルで、重い判断をさせてよいか。
@@ -127,7 +129,7 @@ export function capabilityProfile(input: CapabilityInput): CapabilityProfile {
 function suppressUncertain(input: CapabilityInput): boolean {
   const billions = parameterSizeInBillions(input.parameterSize);
   if (billions !== undefined) return billions < LARGE_MODEL_MIN_BILLIONS;
-  return LOCAL_PROVIDERS.includes(input.providerId);
+  return isLocalProviderId(input.providerId);
 }
 
 /**

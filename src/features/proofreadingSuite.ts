@@ -434,6 +434,10 @@ export async function collectEstimateForFeatures(
   const settings = readChunkSettings(info.contextWindow, undefined, {
     providerId: first.provider.id,
     model: first.model,
+    // **本番と同じく、待ち時間の上限に収まる大きさで数える**（2026-09-23）。
+    // 渡さないと、確認に出すチャンク数が本番より少なく出る。指示の量は
+    // 知らないので0として数える（本番より少し大きめの段に落ちうる。桁の感覚）
+    feature: OUTPUT_FEATURE_OF[features[0]],
   });
   const perChunk = settings.mergeChars > 0 ? settings.mergeChars : settings.chunk.chars;
   if (perChunk <= 0) return undefined;

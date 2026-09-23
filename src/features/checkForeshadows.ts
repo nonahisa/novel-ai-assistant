@@ -192,7 +192,8 @@ export async function checkForeshadows(
         "foreshadow_detect"
       ),
     },
-    outputTuning
+    // 機能名を添えると、待ち時間の上限に収まる大きさにもする（2026-09-23）
+    { ...outputTuning, feature: "foreshadow_detect" }
   );
   const { chunks, chapterLabelByFile, unreadableEpisodes } = await collectChunks(
     work,
@@ -646,7 +647,8 @@ export async function checkForeshadowResolution(
         "foreshadow_resolve"
       ),
     },
-    outputTuning
+    // 機能名を添えると、待ち時間の上限に収まる大きさにもする（2026-09-23）
+    { ...outputTuning, feature: "foreshadow_resolve" }
   );
   // **話をまたいでまとめない。** 「張った話より後か」を話数で決めるので、
   // 前後の話が1つの塊になっていると、その判断ができなくなる

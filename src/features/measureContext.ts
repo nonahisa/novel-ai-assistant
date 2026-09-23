@@ -57,6 +57,7 @@ import {
 import {
   MAX_TIMEOUT_SECONDS,
   PROBE_MAX_TIMEOUT_SECONDS,
+  maxTimeoutSeconds,
   modelTuning,
   modelTuningKey,
   modelTuningRaw,
@@ -363,7 +364,9 @@ async function waitWatchingCancel(
  *   を渡す**（作者の依頼、2026-09-13）。ふだんの上限（600秒）のままだと、
  *   台帳が既に600秒のモデル——実機の gemma4:12b がそうだった——では
  *   1秒も延ばせず、時間切れがそのまま結果に化けていた。
- *   省略するとふだんの上限（これまでの動き）。
+ *   省略するとクラウドのふだんの上限（`MAX_TIMEOUT_SECONDS`。これまでの動き）。
+ *   手元のAIのふだんの上限は2026-09-23から測定と同じ1800秒である
+ *   （`maxTimeoutSeconds`）。
  */
 export function doubledTimeoutSeconds(
   currentSeconds: number,
@@ -542,8 +545,10 @@ export async function measureContext(
     待たない——書いたのに効かない状態になる。
 
     ここで上げたぶんは `finally` が必ず戻す。台帳のほうは、反映しても
-    `recommendTimeoutSeconds` が600秒で挟み、反映しなければ元の値へ戻すので、
-    **測定のあいだ延ばした値がふだんの呼び出しへ持ち込まれることはない。**
+    `recommendTimeoutSeconds` がふだんの上限で挟み、反映しなければ元の値へ
+    戻すので、**測定のあいだ延ばした値がふだんの呼び出しへ持ち込まれることは
+    ない。**（2026-09-23 から手元のAIはふだんの上限も1800秒なので、上がるのは
+    クラウドだけ。600秒の話はクラウドのこと）
   */
   const restoreTimeoutCeiling = raiseTimeoutCeilingForProbe();
   try {
@@ -2268,7 +2273,12 @@ async function offerToSave(input: {
 
   const key = modelTuningKey(input.providerId, input.model);
   const tokens = probeCharsToTokens(input.low, input.measured);
-  const timeoutSeconds = recommendTimeoutSeconds(input.longestResponseSeconds);
+  // **上限はプロバイダごと**（手元1800秒・クラウド600秒。2026-09-23）。
+  // 手元のAIへ600秒を書くと、読む側は1800秒まで許すのに台帳の値で切れる
+  const timeoutSeconds = recommendTimeoutSeconds(
+    input.longestResponseSeconds,
+    maxTimeoutSeconds(input.providerId)
+  );
   // 上限を書いてよいのは、申告値を取れないプロバイダだけ
   const writesContext = CONTEXT_TUNABLE_PROVIDERS.has(input.providerId);
 

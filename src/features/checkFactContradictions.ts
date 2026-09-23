@@ -243,7 +243,8 @@ export async function checkFactContradictions(
     info,
     options,
     fixedCost: { overheadChars, outputTokens: plannedOutputTokens },
-    outputTuning,
+    // 機能名を添えると、待ち時間の上限に収まる大きさにもする（2026-09-23）
+    outputTuning: { ...outputTuning, feature: "story_fact_extract" },
     logLabel: "矛盾検知（事実の照合）",
   });
   const { chunks, chapterLabelByFile, chapterByFile, chunkNote } = tasks;

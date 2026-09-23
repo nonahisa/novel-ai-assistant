@@ -41,6 +41,11 @@ export const DEFAULT_ENDPOINT = "http://localhost:11434";
  * それでも Node の通信部品は既定300秒で勝手に諦めるので、そこだけは
  * **製品で作者が選びうる長さ（台帳で1800秒の実例がある）より短くしない。**
  * 無期限にしないのは、落ちた Ollama を永久に待たないため。
+ *
+ * 製品側の手元のAIの上限（`core/modelTuning.ts` の `LOCAL_MAX_TIMEOUT_SECONDS`、
+ * 2026-09-23 から1800秒）と同じ長さである。ここから引き込まないのは、あちらが
+ * `vscode` を読むため（MCP の束へ入れられない）。**下回っていないことは
+ * `test/unit/modelTuning.test.ts` が見張る。**
  */
 export const MCP_OLLAMA_WAIT_MS = 30 * 60 * 1000;
 

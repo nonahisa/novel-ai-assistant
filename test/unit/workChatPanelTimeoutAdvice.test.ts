@@ -153,7 +153,11 @@ afterEach(() => {
 
 describe("待ち時間が上限に当たっているとき", () => {
   beforeEach(async () => {
-    // 実機と同じ形。**台帳は1800秒でも、読む側で600秒に抑えられる**
+    /*
+      実機と同じ台帳（1800秒）。**2026-09-23 までは読む側で600秒に抑えられて
+      いた**が、手元のAIの上限を1800秒にした（作者の裁定。残課題 A8）ので、
+      いまは1800秒がそのまま効き、それが上限でもある。
+    */
     await useMemoryTuningStore({
       "ollama/gemma4:e2b": { timeoutSeconds: 1800 },
     });
@@ -169,9 +173,24 @@ describe("待ち時間が上限に当たっているとき", () => {
     expect(error, "失敗の案内が出ていない").toBeTruthy();
     expect(error!.message).not.toContain("延ばしてください");
     expect(error!.message).not.toContain("チャンク");
-    expect(error!.message).toContain("上限（600秒）");
+    // **上限の秒数は、そのAIの上限から出す**（手元は1800秒）
+    expect(error!.message).toContain("上限（1800秒）");
     // 押しても変わらない札は出さない（これまでどおり）
     expect(error!.actions).toBeUndefined();
+  });
+
+  test("クラウドのAIは、上限600秒で「延ばせない」と言う", async () => {
+    await useMemoryTuningStore({
+      "sakura/gpt-oss-120b": { timeoutSeconds: 600 },
+    });
+    response.error = new AIError("応答がありませんでした。", "timeout");
+    const { panel, posted } = harness("sakura", "gpt-oss-120b");
+
+    await ask(panel, "この作品の弱いところはどこですか");
+
+    const error = posted.find((m) => m.type === "error")!;
+    expect(error.message).toContain("上限（600秒）");
+    expect(error.actions).toBeUndefined();
   });
 
   test("送った量を字数で添える", async () => {
@@ -225,6 +244,24 @@ describe("待ち時間がまだ上限未満のとき", () => {
     expect(error.actions?.[0].label).toBe("タイムアウトを360秒にする");
     expect(error.message).toContain("延ば");
     expect(error.message).not.toContain("チャンク");
+  });
+
+  /**
+   * **手元のAIは600秒からでも延ばせる**（2026-09-23）。これまでは600秒が
+   * 上限だったので、札が出ずに「別のAIを」と案内していた。
+   */
+  test("手元のAIが600秒で切れたら、1200秒へ延ばす札を出す", async () => {
+    await useMemoryTuningStore({
+      "ollama/gemma4:e2b": { timeoutSeconds: 600 },
+    });
+    response.error = TIMEOUT_600();
+    const { panel, posted } = harness("ollama", "gemma4:e2b");
+
+    await ask(panel, "この作品の弱いところはどこですか");
+
+    const error = posted.find((m) => m.type === "error")!;
+    expect(error.actions?.[0].label).toBe("タイムアウトを1200秒にする");
+    expect(error.message).not.toContain("上限");
   });
 });
 

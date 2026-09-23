@@ -19,7 +19,7 @@ import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { AIRegistry } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
 import {
-  MAX_TIMEOUT_SECONDS,
+  maxTimeoutSeconds,
   resolveTimeoutSeconds,
   saveModelTuning,
   timeoutSettingKey,
@@ -2078,7 +2078,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
                       resolved.provider.id,
                       resolved.model
                     ),
-                    maxSeconds: MAX_TIMEOUT_SECONDS,
+                    // **そのAIの上限**（手元1800秒・クラウド600秒）。
+                    // 決め打ちの600秒で案内すると、手元のAIでは延ばせるのに
+                    // 「もう延ばせません」と言ってしまう
+                    maxSeconds: maxTimeoutSeconds(resolved.provider.id),
                     canRaise: actions !== undefined,
                     sentChars: sent?.total,
                     historyChars: sent?.history,
@@ -2179,18 +2182,20 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   /**
    * タイムアウトで失敗したときに出す「その場で直す」札。
    *
-   * **いまの値の倍まで**（上限は `MAX_TIMEOUT_SECONDS`）。すでに上限なら
-   * 札を出さない——押しても何も変わらない札は、直し方を探す邪魔になる。
+   * **いまの値の倍まで**（上限は `maxTimeoutSeconds`。手元1800秒・クラウド
+   * 600秒）。すでに上限なら札を出さない——押しても何も変わらない札は、
+   * 直し方を探す邪魔になる。
    */
   private timeoutAction(
     provider: { id: string; displayName: string },
     model: string
   ): { label: string; command: string } | undefined {
     const current = resolveTimeoutSeconds(provider.id, model);
-    if (!Number.isFinite(current) || current >= MAX_TIMEOUT_SECONDS) {
+    const ceiling = maxTimeoutSeconds(provider.id);
+    if (!Number.isFinite(current) || current >= ceiling) {
       return undefined;
     }
-    const seconds = Math.min(MAX_TIMEOUT_SECONDS, Math.round(current) * 2);
+    const seconds = Math.min(ceiling, Math.round(current) * 2);
     if (seconds <= current) return undefined;
     const command = `timeout-${++this.editSeq}`;
     this.pendingErrorActions.set(command, {
@@ -3858,7 +3863,8 @@ const HISTORY_SHARE_FOR_CLEAR = 0.25;
  * 相談の時間切れの案内（ノートPCの実機、2026-09-23）。
  *
  * 共通の案内（`recoveryForAIError`）を使わない理由は2つ。
- * 1. 待ち時間が既に上限（`MAX_TIMEOUT_SECONDS`）なら、延ばせない
+ * 1. 待ち時間が既に上限（`maxTimeoutSeconds`。手元1800秒・クラウド600秒）
+ *    なら、延ばせない。**文言の秒数は `maxSeconds` から出す**（決め打ちしない）
  * 2. 相談はチャンクに分けないので、「1チャンクの文字数」は効かない
  *
  * **実際に効く操作を1つだけ言う**（実装ルール5）。上限未満なら延ばす
