@@ -21,7 +21,7 @@ import { resolve } from "node:path";
  */
 
 const SOURCE = readFileSync(
-  resolve(__dirname, "../../src/views/epubEditorPanelHtml.ts"),
+  resolve(__dirname, "../../../src/views/epubEditorPanelHtml.ts"),
   "utf8"
 );
 
@@ -90,7 +90,7 @@ describe("向きを台帳へ書かない", () => {
  */
 describe("書き出しは、リフロー型のまま", () => {
   const PACKAGE = readFileSync(
-    resolve(__dirname, "../../src/core/epubPackage.ts"),
+    resolve(__dirname, "../../../src/core/epubPackage.ts"),
     "utf8"
   );
 

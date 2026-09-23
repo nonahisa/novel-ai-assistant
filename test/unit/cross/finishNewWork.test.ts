@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { commands, window } from "./support/vscodeStub";
+import { commands, window } from "../support/vscodeStub";
 import {
   FINISH_NEW_WORK_COMMAND,
   FINISH_PREREQUISITES,
@@ -10,12 +10,12 @@ import {
   describeFinishStep,
   planFinish,
   stepsToRun,
-} from "../../src/core/finishNewWork";
-import { describeFinishReport } from "../../src/core/finishReportDoc";
-import { PROOFREADING_CHECKS } from "../../src/core/proofreadingSuite";
-import { CHAPTER_PROPOSAL_CATEGORY } from "../../src/features/proposeChapters";
-import { allActions } from "../../src/views/actionList";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/core/finishNewWork";
+import { describeFinishReport } from "../../../src/core/finishReportDoc";
+import { PROOFREADING_CHECKS } from "../../../src/core/proofreadingSuite";
+import { CHAPTER_PROPOSAL_CATEGORY } from "../../../src/features/proposeChapters";
+import { allActions } from "../../../src/views/actionList";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 「新しい作品を、ひと通り仕上げる」（作者の指示、2026-09-19）。
@@ -49,7 +49,7 @@ const state = vi.hoisted(() => ({
   notices: [] as string[],
 }));
 
-vi.mock("../../src/views/progress", async (importOriginal) => ({
+vi.mock("../../../src/views/progress", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   // 進捗の窓はテストでは要らない。中の処理だけをそのまま走らせる
   withProgress: async (
@@ -58,18 +58,18 @@ vi.mock("../../src/views/progress", async (importOriginal) => ({
   ) => await task({ report: () => undefined }),
 }));
 
-vi.mock("../../src/views/openDocument", async (importOriginal) => ({
+vi.mock("../../../src/views/openDocument", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   openGeneratedMarkdown: async (_kind: string, content: string) => {
     state.report = content;
   },
 }));
 
-vi.mock("../../src/features/prerequisiteGate", () => ({
+vi.mock("../../../src/features/prerequisiteGate", () => ({
   collectPresentPrerequisites: async () => new Set(state.present),
 }));
 
-const { runFinishNewWork } = await import("../../src/features/finishNewWork");
+const { runFinishNewWork } = await import("../../../src/features/finishNewWork");
 
 const work = {
   id: "w1",
@@ -82,7 +82,7 @@ interface PackageManifest {
 }
 
 const manifest = JSON.parse(
-  readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+  readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
 ) as PackageManifest;
 
 const declared = new Set(
@@ -90,7 +90,7 @@ const declared = new Set(
 );
 
 function sourceOf(file: string): string {
-  return readFileSync(new URL(`../../${file}`, import.meta.url), "utf8");
+  return readFileSync(new URL(`../../../${file}`, import.meta.url), "utf8");
 }
 
 /**

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { eolLabel } from "../../src/core/eolAudit";
+import { eolLabel } from "../../../src/core/eolAudit";
 
 /**
  * 改行コードを揃える操作は、**ファイルの全行を書き換える**。
@@ -16,7 +16,7 @@ import { eolLabel } from "../../src/core/eolAudit";
  * （`dictationClean.ts`、0.40.8）と同じ形にそろえた。
  */
 const source = readFileSync(
-  resolve(__dirname, "../../src/features/eolUnify.ts"),
+  resolve(__dirname, "../../../src/features/eolUnify.ts"),
   "utf8"
 );
 

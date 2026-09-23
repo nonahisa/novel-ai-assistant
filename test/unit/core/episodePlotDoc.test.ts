@@ -7,12 +7,12 @@ import {
   episodePlotCompletionParts,
   isEpisodePlotWritten,
   parseEpisodePlot,
-} from "../../src/core/episodePlotDoc";
+} from "../../../src/core/episodePlotDoc";
 import {
   buildEpisodePlotTemplate,
   episodePlotChapterFromFileName,
   episodePlotFileName,
-} from "../../src/core/resumeSheet";
+} from "../../../src/core/resumeSheet";
 
 /**
  * 単話プロット（設計書6.36.2）の読み取り。

@@ -6,7 +6,7 @@ import {
   invertLineBlock,
   locateBodyInFile,
   shiftedStartLine,
-} from "../../src/core/backupHunks";
+} from "../../../src/core/backupHunks";
 
 /**
  * バックアップとの違いを、1か所ずつの提案にする部品（設計書6.99.7。

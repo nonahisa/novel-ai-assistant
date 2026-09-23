@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   FORESHADOW_STATUS_NAME,
   foreshadowStatusChoices,
-} from "../../src/core/foreshadowStatusChoice";
+} from "../../../src/core/foreshadowStatusChoice";
 
 /**
  * 伏線の状態を変えるときの選択肢（作者の指摘、2026-09-06）。

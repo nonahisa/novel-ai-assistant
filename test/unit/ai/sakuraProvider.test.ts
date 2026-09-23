@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { parseParameterSize } from "../../src/ai/sakuraProvider";
-import { inferTier } from "../../src/ai/types";
+import { parseParameterSize } from "../../../src/ai/sakuraProvider";
+import { inferTier } from "../../../src/ai/types";
 
 /**
  * さくらのAI Engine アダプタ。

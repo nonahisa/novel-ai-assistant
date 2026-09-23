@@ -16,11 +16,11 @@ vi.mock("vscode", () => ({
   Position: class {},
 }));
 
-import { buildHover } from "../../src/views/termHighlight";
-import { emptyCharacter } from "../../src/models/character";
-import { emptyAbility } from "../../src/models/ability";
-import { emptyLocation } from "../../src/models/location";
-import type { TermEntry } from "../../src/core/termIndex";
+import { buildHover } from "../../../src/views/termHighlight";
+import { emptyCharacter } from "../../../src/models/character";
+import { emptyAbility } from "../../../src/models/ability";
+import { emptyLocation } from "../../../src/models/location";
+import type { TermEntry } from "../../../src/core/termIndex";
 
 function settings(overrides: Partial<Parameters<typeof buildHover>[1]> = {}) {
   return {

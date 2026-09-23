@@ -7,8 +7,8 @@ import {
   summarizeUnsent,
   writeUnsentMark,
   type UnsentMarkStorage,
-} from "../../src/core/unsentMark";
-import type { GitSyncStatus } from "../../src/core/git";
+} from "../../../src/core/unsentMark";
+import type { GitSyncStatus } from "../../../src/core/git";
 
 /**
  * 「送らずに閉じた」印（設計書6.15.1）。

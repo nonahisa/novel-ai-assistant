@@ -3,13 +3,13 @@ import type * as vscode from "vscode";
 import {
   ADVICE_HISTORY_MAX,
   ADVICE_REDIAGNOSE_DAYS,
-} from "../../src/core/advicePolicy";
+} from "../../../src/core/advicePolicy";
 import {
   READER_QUESTIONS,
   READER_TYPES,
   resolveReaderType,
   scoreReaderAnswers,
-} from "../../src/core/readerTarget";
+} from "../../../src/core/readerTarget";
 import {
   authorReaderProfileFromAnswers,
   describeAuthorReaderChange,
@@ -18,12 +18,12 @@ import {
   AUTHOR_READER_QUESTIONS,
   AUTHOR_READER_REDIAGNOSE_DAYS,
   type AuthorReaderProfile,
-} from "../../src/core/authorReaderType";
+} from "../../../src/core/authorReaderType";
 import {
   AuthorReaderTypeStore,
   AUTHOR_READER_TYPE_KEY,
-} from "../../src/core/authorReaderTypeStore";
-import { ADVICE_POLICY_KEY_PREFIX } from "../../src/core/advicePolicyStore";
+} from "../../../src/core/authorReaderTypeStore";
+import { ADVICE_POLICY_KEY_PREFIX } from "../../../src/core/advicePolicyStore";
 
 /**
  * **作者自身の読者タイプ**（設計書6.101、実装の順「1」）。

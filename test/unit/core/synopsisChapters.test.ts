@@ -1,9 +1,9 @@
 import * as path from "path";
 import { describe, expect, test } from "vitest";
-import { buildSynopsisChapterMarks } from "../../src/core/synopsisChapters";
-import type { Chapter } from "../../src/models/chapter";
-import type { ChapterSynopsis, ChapterSynopsisSet } from "../../src/models/synopsis";
-import type { EpisodeFile } from "../../src/models/types";
+import { buildSynopsisChapterMarks } from "../../../src/core/synopsisChapters";
+import type { Chapter } from "../../../src/models/chapter";
+import type { ChapterSynopsis, ChapterSynopsisSet } from "../../../src/models/synopsis";
+import type { EpisodeFile } from "../../../src/models/types";
 
 /**
  * あらすじの文書へ挟む章の印（設計書6.66.4の3）。

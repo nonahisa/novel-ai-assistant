@@ -8,14 +8,14 @@ import {
   IGNORED_PATHS,
   lastCacheDirective,
   missingIgnoreRules,
-} from "../../src/core/workRegistry";
+} from "../../../src/core/workRegistry";
 import {
   isGitAvailable,
   runGit,
   type GitCommandResult,
   type GitCommandRunner,
   type GitSyncStatus,
-} from "../../src/core/git";
+} from "../../../src/core/git";
 import {
   canFetch,
   describeDirtyPull,
@@ -23,9 +23,9 @@ import {
   describeSyncBadge,
   pullBeforeRecording,
   RECORD_THEN_PULL,
-} from "../../src/features/gitSync";
-import { ACTION_TREE } from "../../src/views/actionList";
-import { AI_INSTRUCTION_TARGETS } from "../../src/core/aiInstructions";
+} from "../../../src/features/gitSync";
+import { ACTION_TREE } from "../../../src/views/actionList";
+import { AI_INSTRUCTION_TARGETS } from "../../../src/core/aiInstructions";
 
 const encode = (text: string) => new TextEncoder().encode(text);
 
@@ -130,9 +130,9 @@ describe("同期対象から外す規則", () => {
       **足した登録が勝手に現れる**ことを見る。
     */
     vi.resetModules();
-    vi.doMock("../../src/core/aiInstructions", async (importOriginal) => {
+    vi.doMock("../../../src/core/aiInstructions", async (importOriginal) => {
       const actual =
-        await importOriginal<typeof import("../../src/core/aiInstructions")>();
+        await importOriginal<typeof import("../../../src/core/aiInstructions")>();
       return {
         ...actual,
         AI_INSTRUCTION_TARGETS: [
@@ -149,12 +149,12 @@ describe("同期対象から外す規則", () => {
       };
     });
     try {
-      const reloaded = await import("../../src/core/workRegistry");
+      const reloaded = await import("../../../src/core/workRegistry");
       expect(reloaded.IGNORED_PATHS).toContain(".fake/registration.json");
       // 手引きのほうは、足しても除外に入らない
       expect(reloaded.IGNORED_PATHS).not.toContain("FAKE.md");
     } finally {
-      vi.doUnmock("../../src/core/aiInstructions");
+      vi.doUnmock("../../../src/core/aiInstructions");
       vi.resetModules();
     }
   });

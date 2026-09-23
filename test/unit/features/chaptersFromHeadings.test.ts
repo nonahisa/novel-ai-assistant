@@ -5,9 +5,9 @@ import {
   planEpisodeSections,
   readEpisodeSections,
   type EpisodeHeadingSource,
-} from "../../src/core/collectedSections";
-import type { EpisodeFile, WorkEntry } from "../../src/models/types";
-import { FileSystemError, Uri, window, workspace } from "./support/vscodeStub";
+} from "../../../src/core/collectedSections";
+import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
+import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
 
 /**
  * 分け済みの作品の、話ごとのファイルの見出しから章を立てる（設計書6.66）。
@@ -25,7 +25,7 @@ import { FileSystemError, Uri, window, workspace } from "./support/vscodeStub";
  */
 
 const scanned: EpisodeFile[] = [];
-vi.mock("../../src/core/scanner", () => ({
+vi.mock("../../../src/core/scanner", () => ({
   scanWork: async () => ({
     episodes: scanned,
     stats: {},
@@ -34,12 +34,12 @@ vi.mock("../../src/core/scanner", () => ({
     timing: {},
   }),
 }));
-vi.mock("../../src/core/workFormatStore", () => ({
+vi.mock("../../../src/core/workFormatStore", () => ({
   readWorkFormat: async () => undefined,
 }));
 
 const { chaptersFromHeadings } = await import(
-  "../../src/features/chaptersFromHeadings"
+  "../../../src/features/chaptersFromHeadings"
 );
 
 const SEP = (n: number) =>

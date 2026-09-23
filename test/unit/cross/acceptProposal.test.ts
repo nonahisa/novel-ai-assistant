@@ -7,8 +7,8 @@ import {
   FileType,
   window,
   workspace,
-} from "./support/vscodeStub";
-import type { WorkEntry } from "../../src/models/types";
+} from "../support/vscodeStub";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 編集部の提案を採る（設計書5.6）。実機確認 A-3 の2件に当たる。
@@ -31,11 +31,11 @@ import type { WorkEntry } from "../../src/models/types";
  * 書かれたか」なので、作り物の円盤では確かめたことにならない。
  */
 
-vi.mock("../../src/core/gitAttribution", () => ({
+vi.mock("../../../src/core/gitAttribution", () => ({
   tryGitUserName: vi.fn(async () => "編集部"),
 }));
 
-const { acceptProposal } = await import("../../src/features/reviewProposals");
+const { acceptProposal } = await import("../../../src/features/reviewProposals");
 
 const BODY = nodePath.join("本文", "001.txt");
 

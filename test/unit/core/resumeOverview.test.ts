@@ -3,7 +3,7 @@ import {
   buildResumeSheet,
   type ResumeOverview,
   type ResumeSheetInput,
-} from "../../src/core/resumeSheet";
+} from "../../../src/core/resumeSheet";
 
 /**
  * **作品の大きな流れ**（設計書6.36.1）。

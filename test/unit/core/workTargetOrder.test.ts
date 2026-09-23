@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { pickHintedWork } from "../../src/core/workTarget";
+import { pickHintedWork } from "../../../src/core/workTarget";
 
 /**
  * 画面で「この作品」と指しているなら、選び直させない
@@ -76,7 +76,7 @@ describe("作品の当てどころ", () => {
   */
   test("resolveWork が当てどころを見ており、見えている画面だけを渡している", () => {
     const source = readFileSync(
-      resolve(__dirname, "../../src/extension.ts"),
+      resolve(__dirname, "../../../src/extension.ts"),
       "utf8"
     );
     const body = source.slice(source.indexOf("async function resolveWork("));

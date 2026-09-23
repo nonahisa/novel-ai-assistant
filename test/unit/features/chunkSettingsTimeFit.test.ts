@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { workspace } from "./support/vscodeStub";
+import { workspace } from "../support/vscodeStub";
 import {
   describeChunkSettings,
   forgetTimeFitMemoryForTests,
   readChunkSettings,
-} from "../../src/features/chunkSettings";
-import { CHUNK_SIZE_MODE_MANUAL } from "../../src/core/chunker";
-import { featureOutputKey, rememberedTimeFitChunkChars } from "../../src/core/featureOutputTokens";
-import { tuningStoreContents, useMemoryTuningStore } from "./support/tuningStore";
+} from "../../../src/features/chunkSettings";
+import { CHUNK_SIZE_MODE_MANUAL } from "../../../src/core/chunker";
+import { featureOutputKey, rememberedTimeFitChunkChars } from "../../../src/core/featureOutputTokens";
+import { tuningStoreContents, useMemoryTuningStore } from "../support/tuningStore";
 
 /**
  * **チャンクの大きさを、待ち時間の上限に収まる大きさにする**——

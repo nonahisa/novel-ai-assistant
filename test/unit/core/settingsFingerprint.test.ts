@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { settingsFingerprint } from "../../src/core/settingsSummary";
-import { emptyCharacter, type Character } from "../../src/models/character";
-import { emptyLocation } from "../../src/models/location";
-import { emptyWorldItem } from "../../src/models/world";
+import { settingsFingerprint } from "../../../src/core/settingsSummary";
+import { emptyCharacter, type Character } from "../../../src/models/character";
+import { emptyLocation } from "../../../src/models/location";
+import { emptyWorldItem } from "../../../src/models/world";
 
 function character(overrides: Partial<Character> = {}): Character {
   return { ...emptyCharacter("char_001", "灯"), ...overrides };

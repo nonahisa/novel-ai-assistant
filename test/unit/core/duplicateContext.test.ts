@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { wouldDuplicateContext } from "../../src/core/typoCheckValidation";
+import { wouldDuplicateContext } from "../../../src/core/typoCheckValidation";
 
 /**
  * 当てると本文が二重になる修正案を弾く（設計書6.8.11）。

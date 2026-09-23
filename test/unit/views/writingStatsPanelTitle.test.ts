@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
-import { allActions } from "../../src/views/actionList";
+import { allActions } from "../../../src/views/actionList";
 
 /**
  * タブの題は、メニューの名前と揃える（作者の裁定、2026-09-06）。

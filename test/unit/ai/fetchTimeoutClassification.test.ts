@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { describeFetchFailure, isFetchTimeout } from "../../src/ai/httpClient";
+import { describeFetchFailure, isFetchTimeout } from "../../../src/ai/httpClient";
 
 /**
  * **`AbortError` だけがタイムアウトではない。**

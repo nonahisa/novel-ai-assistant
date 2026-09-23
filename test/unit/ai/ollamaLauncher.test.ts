@@ -32,7 +32,7 @@ import {
   portFromBindError,
   resolveExecutable,
   startOllama,
-} from "../../src/ai/ollamaLauncher";
+} from "../../../src/ai/ollamaLauncher";
 
 describe("起動してよい接続先の判定", () => {
   test.each([
@@ -86,7 +86,7 @@ describe("実行ファイルの探索", () => {
   test("既定の場所が実在すれば、PATHへ行かずにそれを使う", async () => {
     // 不具合の再現：PATHを先に置いていたときは、実在する場所があっても
     // 存在確認なしで "ollama.exe" が返っていた
-    const real = path.join(__dirname, "support", "vscodeStub.ts");
+    const real = path.join(__dirname, "..", "support", "vscodeStub.ts");
     await expect(resolveExecutable(undefined, [real, "ollama.exe"])).resolves.toBe(
       real
     );

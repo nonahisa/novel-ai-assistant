@@ -4,13 +4,13 @@ import {
   extractEpisodeParts,
   sourceForPostingCopy,
   nameWithSubtitle,
-} from "../../src/core/episodeCopy";
-import { convertForPosting } from "../../src/core/postingConvert";
-import type { PostingCopyTarget } from "../../src/core/postingCopyTargets";
+} from "../../../src/core/episodeCopy";
+import { convertForPosting } from "../../../src/core/postingConvert";
+import type { PostingCopyTarget } from "../../../src/core/postingCopyTargets";
 import {
   formatChapterLabel,
   stripChapterLabel,
-} from "../../src/core/episodeLabel";
+} from "../../../src/core/episodeLabel";
 
 /**
  * サブタイトル・本文のコピーと、ファイル名への付与（設計書6.2.3）。

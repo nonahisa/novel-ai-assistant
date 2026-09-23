@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseHttpsRemote } from "../../src/core/gitSetup";
+import { parseHttpsRemote } from "../../../src/core/gitSetup";
 
 /**
  * VS Codeのアカウントで得た鍵を、git側にも覚えさせる（設計書5.5.12）。

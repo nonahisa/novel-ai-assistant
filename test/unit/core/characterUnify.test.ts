@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { unifyCharacters } from "../../src/core/characterUnify";
-import { emptyCharacter, type Character } from "../../src/models/character";
+import { unifyCharacters } from "../../../src/core/characterUnify";
+import { emptyCharacter, type Character } from "../../../src/models/character";
 
 function character(id: string, name: string, overrides: Partial<Character> = {}) {
   return { ...emptyCharacter(id, name), ...overrides };

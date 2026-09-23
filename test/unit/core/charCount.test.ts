@@ -6,11 +6,11 @@ import {
   countManuscriptLines,
   stripRuby,
   toManuscriptPages,
-} from "../../src/core/charCount";
+} from "../../../src/core/charCount";
 import {
   fromSiteNotation,
   stripRuby as rubyStripRuby,
-} from "../../src/core/ruby";
+} from "../../../src/core/ruby";
 
 describe("文字数計測", () => {
   test("改行と空白を純文字数から除外し、総文字数には空白を残す", () => {

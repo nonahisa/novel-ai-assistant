@@ -10,8 +10,8 @@ import {
   selectFilesToPrune,
   writeGeneratedFile,
   type GeneratedFileEntry,
-} from "../../src/core/generatedFiles";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
+} from "../../../src/core/generatedFiles";
+import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 
 /**
  * その場で組み立てる読み物を、実ファイルとして置く（設計書6.17.7）。

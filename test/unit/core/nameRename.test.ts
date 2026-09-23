@@ -5,7 +5,7 @@ import {
   buildRenameMapping,
   planTextReplacements,
   type RenameMappingEntry,
-} from "../../src/core/nameRename";
+} from "../../../src/core/nameRename";
 
 /** 対応表から1件を名指しで取る。並び順にテストを縛らない */
 function find(mapping: RenameMappingEntry[], from: string) {

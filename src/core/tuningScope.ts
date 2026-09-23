@@ -33,7 +33,7 @@ export interface TuningScopeChoice {
    * **どれも時間の目安から書き出す。** 今回の困りごとは「どれだけ待たされる
    * のか分からないまま始まる」ことだったので、そこを先頭に置く。
    * 画面にそのまま出るプレーンテキストなので、記号は混ぜない
-   * （`test/unit/plainTextUi.test.ts`）。
+   * （`test/unit/core/plainTextUi.test.ts`）。
    */
   readonly detail: string;
 }

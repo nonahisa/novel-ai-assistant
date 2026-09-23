@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { window, workspace } from "./support/vscodeStub";
-import type { AIRegistry } from "../../src/ai/registry";
+import { window, workspace } from "../support/vscodeStub";
+import type { AIRegistry } from "../../../src/ai/registry";
 import {
   AIError,
   type GenerateParams,
   type GenerateResult,
-} from "../../src/ai/types";
+} from "../../../src/ai/types";
 
 /**
  * AIチューニングの `num_ctx` は、**その回に送る長さに合わせる**
@@ -42,7 +42,7 @@ const log = vi.hoisted(() => ({
 
 // **ログを覗く。** 「下げた」ことが作者へ伝わっているかは、
 // 通知だけでなくログにも残っていなければ後から追えない
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logStep: vi.fn((message: string) => {
     log.steps.push(message);
   }),
@@ -58,7 +58,7 @@ vi.mock("../../src/core/logger", () => ({
   }),
 }));
 
-vi.mock("../../src/ai/registry", () => ({
+vi.mock("../../../src/ai/registry", () => ({
   ensureConfigured: vi.fn(async () => ({
     provider: {
       id: "ollama",
@@ -99,12 +99,12 @@ vi.mock("../../src/ai/registry", () => ({
   })),
 }));
 
-vi.mock("../../src/features/aiConnectivity", () => ({
+vi.mock("../../../src/features/aiConnectivity", () => ({
   confirmPaidUsage: vi.fn(async () => true),
   confirmProviderReachable: vi.fn(async () => true),
 }));
 
-vi.mock("../../src/views/progress", () => ({
+vi.mock("../../../src/views/progress", () => ({
   withCancellableProgress: vi.fn(
     async (
       _title: string,
@@ -126,7 +126,7 @@ vi.mock("../../src/views/progress", () => ({
 import {
   measureContext,
   numCtxForProbe,
-} from "../../src/features/measureContext";
+} from "../../../src/features/measureContext";
 
 /** 申告値。8GBのVRAMには載らない大きさ（作者の機械の実例） */
 const DECLARED = 262144;

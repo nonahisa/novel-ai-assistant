@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isNoteStyleTarget } from "../../src/core/noteStyle";
+import { isNoteStyleTarget } from "../../../src/core/noteStyle";
 
 /**
  * note風にする原稿の見分け（設計書6.69）。

@@ -6,13 +6,13 @@ import {
   CONTRADICTION_CHECK_SYSTEM_PROMPT,
   CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT,
   LIGHT_CATEGORIES,
-} from "../../src/prompts/contradictionCheck";
-import { buildProposalPanelHtml } from "../../src/views/proposalPanelHtml";
+} from "../../../src/prompts/contradictionCheck";
+import { buildProposalPanelHtml } from "../../../src/views/proposalPanelHtml";
 import {
   contradictionMaterial,
   contradictionPrompt,
   contradictionRun,
-} from "../../src/mcp/tools/contradiction";
+} from "../../../src/mcp/tools/contradiction";
 
 /**
  * 矛盾検知のプロンプトと画面（設計書6.10.1）。

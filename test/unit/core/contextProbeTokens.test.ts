@@ -11,7 +11,7 @@ import {
   startProbeState,
   type ProbeState,
   type ProbeTokenReading,
-} from "../../src/core/contextProbe";
+} from "../../../src/core/contextProbe";
 
 /**
  * 「読める長さ」を**入力トークン数の伸び**で測る（作者の裁定、2026-09-13。

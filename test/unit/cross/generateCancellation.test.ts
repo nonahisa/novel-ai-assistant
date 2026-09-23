@@ -16,7 +16,7 @@ import { describe, expect, test } from "vitest";
  * 足した人が忘れたら、ここが落ちる。
  */
 
-const FEATURES_DIR = path.join(__dirname, "..", "..", "src", "features");
+const FEATURES_DIR = path.join(__dirname, "..", "..", "..", "src", "features");
 
 /**
  * `signal` を渡していなくてよい呼び出し。**増やすときは理由を書く。**

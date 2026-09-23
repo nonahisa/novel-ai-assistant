@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   CHATTER_COMMENT_MAX_CHARS,
   validateChatterComment,
-} from "../../src/core/chatterCommentValidation";
+} from "../../../src/core/chatterCommentValidation";
 
 /**
  * 本文を読んで言う一言の検査（設計書6.21.4、P-34）。

@@ -8,13 +8,13 @@ import {
   startTour,
   startTourByKey,
   type TourState,
-} from "../../src/core/guidedTour";
+} from "../../../src/core/guidedTour";
 import {
   PROCEDURES,
   type Procedure,
   type ProcedureActionInfo,
-} from "../../src/core/procedures";
-import { findAction, prerequisiteNoteOf } from "../../src/views/actionList";
+} from "../../../src/core/procedures";
+import { findAction, prerequisiteNoteOf } from "../../../src/views/actionList";
 
 /**
  * 画面で指しながら案内する仕組みの、進み方の判断（設計書6.104）。

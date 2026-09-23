@@ -1,7 +1,7 @@
 import * as crypto from "crypto";
 import { beforeEach, describe, expect, test, vi, type Mock } from "vitest";
-import { atomicWriteFile } from "../../src/core/atomicWrite";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
+import { atomicWriteFile } from "../../../src/core/atomicWrite";
+import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 
 const path = "C:\\novels\\001.txt";
 const destinationPath = Uri.file(path).fsPath;

@@ -71,7 +71,7 @@ const saveOrUpdateForeshadow = vi.fn<
 // IDの採番とハッシュ照合（既存ファイルを壊さない仕掛け）を落とす。
 // 包みを挟んでいるのは、差し替えの中身が読まれる時点では
 // 上の `const` がまだ用意できていないため（引数はそのまま渡す）
-vi.mock("../../src/core/foreshadowStore", () => ({
+vi.mock("../../../src/core/foreshadowStore", () => ({
   addForeshadow: (...args: Parameters<typeof addForeshadow>) =>
     addForeshadow(...args),
   saveOrUpdateForeshadow: (...args: Parameters<typeof saveOrUpdateForeshadow>) =>
@@ -83,16 +83,16 @@ import {
   showForeshadowCandidates,
   showForeshadowResolutions,
   type ForeshadowResolutionProposal,
-} from "../../src/features/checkForeshadows";
-import { ProposalPanel } from "../../src/features/proposalPanel";
-import type { WorkEntry } from "../../src/models/types";
-import type { AcceptedForeshadowCandidate } from "../../src/core/foreshadowValidation";
-import type { Foreshadow } from "../../src/models/foreshadow";
+} from "../../../src/features/checkForeshadows";
+import { ProposalPanel } from "../../../src/features/proposalPanel";
+import type { WorkEntry } from "../../../src/models/types";
+import type { AcceptedForeshadowCandidate } from "../../../src/core/foreshadowValidation";
+import type { Foreshadow } from "../../../src/models/foreshadow";
 // 差し替える相手の引数の型だけ借りる（型は消えるので差し替えとぶつからない）
 import type {
   ForeshadowDraft,
   ForeshadowStatusChange,
-} from "../../src/core/foreshadowStore";
+} from "../../../src/core/foreshadowStore";
 
 const work: WorkEntry = {
   id: "w1",

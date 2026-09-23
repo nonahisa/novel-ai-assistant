@@ -3,9 +3,9 @@ import {
   MANUSCRIPT_SIZE_DEFAULT,
   resolveInitialAppearance,
   takeCarriedAppearance,
-} from "../../src/core/manuscriptAppearance";
-import type { ManuscriptAppearance } from "../../src/core/manuscriptAppearance";
-import { buildManuscriptEditorHtml } from "../../src/views/manuscriptEditorHtml";
+} from "../../../src/core/manuscriptAppearance";
+import type { ManuscriptAppearance } from "../../../src/core/manuscriptAppearance";
+import { buildManuscriptEditorHtml } from "../../../src/views/manuscriptEditorHtml";
 
 /**
  * 原稿エディタの見た目の引き継ぎ（設計書6.25.5）。

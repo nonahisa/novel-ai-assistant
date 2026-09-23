@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
-const root = new URL("../../", import.meta.url);
+const root = new URL("../../../", import.meta.url);
 const readme = readFileSync(fileURLToPath(new URL("README.md", root)), "utf8");
 const manifest = JSON.parse(
   readFileSync(fileURLToPath(new URL("package.json", root)), "utf8")

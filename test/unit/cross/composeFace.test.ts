@@ -1,21 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { buildManuscriptEditorHtml } from "../../src/views/manuscriptEditorHtml";
+import { buildManuscriptEditorHtml } from "../../../src/views/manuscriptEditorHtml";
 import {
   NOTATION_PATTERN,
   NOTATION_RULES,
   SITE_NOTATION_PATTERN,
   collectTermSpans,
-} from "../../src/core/manuscriptRender";
+} from "../../../src/core/manuscriptRender";
 // 用語の位置は**製品と同じ道**で作る（写した位置で測ると、実機で外れる）
-import { TermIndex, type TermEntry } from "../../src/core/termIndex";
+import { TermIndex, type TermEntry } from "../../../src/core/termIndex";
 // 面が送る位置が、拡張機能側の判定に当たるかを同じ本文で確かめる
-import { findRubyAt } from "../../src/core/ruby";
+import { findRubyAt } from "../../../src/core/ruby";
 import {
   MEMO_LINE_PATTERN,
   MEMO_TAG_CLASS_MAP,
   memoTagClass,
   parseMemos,
-} from "../../src/core/sceneMemo";
+} from "../../../src/core/sceneMemo";
 
 /**
  * 組んで書く（実験）の面（設計書6.34）。

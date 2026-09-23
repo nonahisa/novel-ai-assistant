@@ -104,8 +104,8 @@
  *   → `core/modelTuning.ts` の `resolveContextWindow` へ寄せた
  *   （**API申告のあるOllama・Gemini・Claudeは台帳を見ない**——申告が正）
  *
- * 見張っているのは `test/unit/sizeBudgetStage2.test.ts` と
- * `test/unit/contextWindowResolve.test.ts`。写しが復活すると落ちる。
+ * 見張っているのは `test/unit/cross/sizeBudgetStage2.test.ts` と
+ * `test/unit/cross/contextWindowResolve.test.ts`。写しが復活すると落ちる。
  *
  * **第2段（挙動変更）で触る予定のもの**は設計書6.77に列挙してある
  * ——関所の出力見込み（`OUTPUT_RESERVE_TOKENS`）と実送信の既定

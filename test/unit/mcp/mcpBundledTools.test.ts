@@ -6,13 +6,13 @@ import { z } from "zod";
 import {
   FEATURES,
   FILE_TARGET_FEATURES as MEASURE_FILE_TARGETS,
-} from "../../scripts/measureScoring.mjs";
+} from "../../../scripts/measureScoring.mjs";
 import {
   FEATURE_LABELS,
   FEATURE_NAMES,
   FILE_TARGET_FEATURES,
   type FeatureName,
-} from "../../src/core/mcpFeatures";
+} from "../../../src/core/mcpFeatures";
 import {
   ALL_TOOLS,
   ANONYMOUS_CLIENT,
@@ -20,7 +20,7 @@ import {
   isToolAllowed,
   parseExternalAccessPermission,
   permissionKeyOf,
-} from "../../src/core/externalAccessPermission";
+} from "../../../src/core/externalAccessPermission";
 import {
   NOVEL_DETECT_INPUT,
   NOVEL_MATERIAL_INPUT,
@@ -32,8 +32,8 @@ import {
   novelPrompt,
   novelRun,
   novelValidate,
-} from "../../src/mcp/tools/features";
-import { assertExternalAccessAllowed } from "../../src/mcp/tools/permission";
+} from "../../../src/mcp/tools/features";
+import { assertExternalAccessAllowed } from "../../../src/mcp/tools/permission";
 
 /**
  * 道具を束ねた入口（設計書6.87.15 の柱1。0.66.7）。
@@ -46,7 +46,7 @@ import { assertExternalAccessAllowed } from "../../src/mcp/tools/permission";
  *   そのときは**許していない作品の原稿が外へ出る**
  */
 
-const WORK = nodePath.join(__dirname, "..", "fixtures", "mcp-work");
+const WORK = nodePath.join(__dirname, "..", "..", "fixtures", "mcp-work");
 
 /* ── 許可の読み替え ─────────────────────────────────────── */
 

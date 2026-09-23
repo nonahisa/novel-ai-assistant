@@ -4,9 +4,9 @@ import {
   factContradictionPrompt,
   factContradictionValidate,
   factContradictionRun,
-} from "../../src/mcp/tools/factContradiction";
-import { novelPrompt, novelRun } from "../../src/mcp/tools/features";
-import { STORY_FACT_EXTRACT_VERSION } from "../../src/prompts/storyFactExtract";
+} from "../../../src/mcp/tools/factContradiction";
+import { novelPrompt, novelRun } from "../../../src/mcp/tools/features";
+import { STORY_FACT_EXTRACT_VERSION } from "../../../src/prompts/storyFactExtract";
 
 /**
  * 矛盾検知（事実の照合）を外から呼ぶ口（設計書6.88 の評価セット）。
@@ -20,6 +20,7 @@ import { STORY_FACT_EXTRACT_VERSION } from "../../src/prompts/storyFactExtract";
 /** 答え付きの台（P-12 と**同じ仕込み**を使う。台を分けると比べられない） */
 const WORK = nodePath.join(
   __dirname,
+  "..",
   "..",
   "fixtures",
   "seeded",

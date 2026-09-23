@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "vitest";
-import { localDateKey } from "../../src/core/localDate";
+import { localDateKey } from "../../../src/core/localDate";
 
 /**
  * 「今後直さない」に足した語の日付が1日ずれた（実機、2026-09-11）。

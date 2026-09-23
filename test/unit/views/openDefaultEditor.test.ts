@@ -5,8 +5,8 @@ import {
   openGeneratedMarkdown,
   setGeneratedStorageRoot,
   untitledMarkdownUri,
-} from "../../src/views/openDocument";
-import { FileSystemError, Uri, commands, workspace } from "./support/vscodeStub";
+} from "../../../src/views/openDocument";
+import { FileSystemError, Uri, commands, workspace } from "../support/vscodeStub";
 
 /**
  * ファイルは、作者の既定のエディターで開く（設計書6.17.6）。

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { buildProposalPanelHtml } from "../../src/views/proposalPanelHtml";
+import { buildProposalPanelHtml } from "../../../src/views/proposalPanelHtml";
 
 /**
  * 更新案の中の1つだけに ✕ を出す（作者の依頼、2026-09-12）。

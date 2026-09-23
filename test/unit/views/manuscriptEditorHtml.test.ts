@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildManuscriptEditorHtml } from "../../src/views/manuscriptEditorHtml";
-import { MEMO_MARKER_COLOR } from "../../src/core/sceneMemo";
+import { buildManuscriptEditorHtml } from "../../../src/views/manuscriptEditorHtml";
+import { MEMO_MARKER_COLOR } from "../../../src/core/sceneMemo";
 import {
   SCRIPT_LINE_CLASSES,
   SCRIPT_LINE_CSS,
   SCRIPT_LINE_RULES,
-} from "../../src/core/scriptLines";
+} from "../../../src/core/scriptLines";
 
 /**
  * 原稿エディタの画面（設計書6.25）。

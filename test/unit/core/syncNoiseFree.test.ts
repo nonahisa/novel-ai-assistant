@@ -1,11 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { rebaseline, sameBaseline } from "../../src/core/writingStats";
+import { rebaseline, sameBaseline } from "../../../src/core/writingStats";
 // 型そのものは models 側にある（core は使うだけで再輸出していない）
-import type { DeviceWritingStats } from "../../src/models/writingStats";
+import type { DeviceWritingStats } from "../../../src/models/writingStats";
 import {
   bodyChangePaths,
   isBodyChangePath,
-} from "../../src/core/manuscriptChangePaths";
+} from "../../../src/core/manuscriptChangePaths";
 
 /**
  * **何も触っていないのに、同期するたびに差分が出ていた**

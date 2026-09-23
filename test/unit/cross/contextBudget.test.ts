@@ -9,7 +9,7 @@ import { describe, expect, test, vi } from "vitest";
 const usageCalls = vi.hoisted(
   () => [] as Array<[string, Record<string, unknown>]>
 );
-vi.mock("../../src/core/usageLog", async (importOriginal) => ({
+vi.mock("../../../src/core/usageLog", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   appendUsageLog: (folder: string, entry: Record<string, unknown>) => {
     usageCalls.push([folder, entry]);
@@ -22,19 +22,19 @@ import {
   planChunkBudget,
   type Chunk,
   type ChunkBudget,
-} from "../../src/core/chunker";
+} from "../../../src/core/chunker";
 import {
   describeChunkSettings,
   type ChunkSettings,
-} from "../../src/features/chunkSettings";
+} from "../../../src/features/chunkSettings";
 import {
   CONTEXT_GUARD_EXEMPT_FEATURE,
   OUTPUT_RESERVE_TOKENS,
   checkContextFit,
   contextOverflow,
   skipsContextGuard,
-} from "../../src/ai/contextGuard";
-import { MeteredProvider } from "../../src/ai/meteredProvider";
+} from "../../../src/ai/contextGuard";
+import { MeteredProvider } from "../../../src/ai/meteredProvider";
 import {
   AIError,
   recoveryForAIError,
@@ -42,13 +42,13 @@ import {
   type GenerateParams,
   type GenerateResult,
   type ModelInfo,
-} from "../../src/ai/types";
-import { retryOnOverflow } from "../../src/features/chunkRetry";
+} from "../../../src/ai/types";
+import { retryOnOverflow } from "../../../src/features/chunkRetry";
 import {
   WORLDVIEW_MAX_CHARS,
   worldviewMaxChars,
-} from "../../src/core/worldviewSelect";
-import { workspace } from "./support/vscodeStub";
+} from "../../../src/core/worldviewSelect";
+import { workspace } from "../support/vscodeStub";
 
 /**
  * 本文を溢れさせない仕組みの検査（設計書6.27.10）。

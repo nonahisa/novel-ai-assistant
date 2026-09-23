@@ -23,7 +23,7 @@ import {
  *    どちらも書いてあるからで、実際そう読める
  *
  * そのため、**各タイプの文章は独立していて、他のタイプの名前も記述も
- * 含まない**（`test/unit/advicePolicy.test.ts` が見張っている）。
+ * 含まない**（`test/unit/cross/advicePolicy.test.ts` が見張っている）。
  *
  * プロンプトを変更したら version を上げること。
  */

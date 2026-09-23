@@ -3,8 +3,8 @@ import {
   findMergeCandidates,
   isFamilyNameForm,
   isSuffixCallOf,
-} from "../../src/core/characterMerge";
-import { emptyCharacter, type Character } from "../../src/models/character";
+} from "../../../src/core/characterMerge";
+import { emptyCharacter, type Character } from "../../../src/models/character";
 
 /**
  * 日本語では、同じ人物を「近所のおばあさん」と説明的に書いたり、

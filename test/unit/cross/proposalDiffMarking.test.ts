@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildProposalPanelHtml } from "../../src/views/proposalPanelHtml";
-import { diffChars } from "../../src/core/inlineDiff";
+import { buildProposalPanelHtml } from "../../../src/views/proposalPanelHtml";
+import { diffChars } from "../../../src/core/inlineDiff";
 
 /**
  * 提案パネルで、違うところだけを塗る（設計書6.11.2）。

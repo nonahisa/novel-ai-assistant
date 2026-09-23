@@ -1,16 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { workspace } from "./support/vscodeStub";
+import { workspace } from "../support/vscodeStub";
 import {
   describeChunkSettings,
   forgetTimeFitMemoryForTests,
   readChunkSettings,
-} from "../../src/features/chunkSettings";
-import { CHUNK_SIZE_MODE_MANUAL, planChunkBudget } from "../../src/core/chunker";
+} from "../../../src/features/chunkSettings";
+import { CHUNK_SIZE_MODE_MANUAL, planChunkBudget } from "../../../src/core/chunker";
 import {
   featureOutputKey,
   rememberedTimeFitChunkChars,
-} from "../../src/core/featureOutputTokens";
-import { useMemoryTuningStore } from "./support/tuningStore";
+} from "../../../src/core/featureOutputTokens";
+import { useMemoryTuningStore } from "../support/tuningStore";
 
 /**
  * **まるごと読む**ときの大きさ（作者の裁定 A3⑤、2026-09-23。設計書6.10.7）。

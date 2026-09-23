@@ -5,9 +5,9 @@ import {
   planRubyInsertions,
   type RubyFileResult,
   type RubyTerm,
-} from "../../src/core/settingsRuby";
-import { describePendingUpdatesConfirm } from "../../src/features/applyPendingUpdates";
-import { describeRenameScope } from "../../src/features/nameRename";
+} from "../../../src/core/settingsRuby";
+import { describePendingUpdatesConfirm } from "../../../src/features/applyPendingUpdates";
+import { describeRenameScope } from "../../../src/features/nameRename";
 
 /**
  * 確認画面に出る数の整合（実機確認リスト A-10・A-14・F-11 の代わり）。

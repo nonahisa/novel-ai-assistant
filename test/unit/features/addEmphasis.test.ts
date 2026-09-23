@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { window } from "./support/vscodeStub";
-import { addEmphasis } from "../../src/features/ruby";
+import { window } from "../support/vscodeStub";
+import { addEmphasis } from "../../../src/features/ruby";
 
 /**
  * 傍点を付ける（設計書6.12）。

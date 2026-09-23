@@ -32,7 +32,7 @@ const FILES = [
 
 /** 案内の文言だけを見る（注釈は除く） */
 function messagesOf(relative: string): string {
-  const source = readFileSync(resolve(__dirname, "../..", relative), "utf8");
+  const source = readFileSync(resolve(__dirname, "../../..", relative), "utf8");
   return source
     .split("\n")
     .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))

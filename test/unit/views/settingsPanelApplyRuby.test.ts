@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { buildSettingsPanelHtml } from "../../src/views/settingsPanelHtml";
+import { buildSettingsPanelHtml } from "../../../src/views/settingsPanelHtml";
 
 /**
  * 設定資料パネルの「ルビを追加」（設計書6.12.5。実機確認 2026-09-06）。

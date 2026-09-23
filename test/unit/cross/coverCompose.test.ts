@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildEpubEditorPanelHtml } from "../../src/views/epubEditorPanelHtml";
-import { describeBakedPreview } from "../../src/core/coverBake";
+import { buildEpubEditorPanelHtml } from "../../../src/views/epubEditorPanelHtml";
+import { describeBakedPreview } from "../../../src/core/coverBake";
 
 /**
  * 表紙の合成（設計書6.65.8・6.65.9）。

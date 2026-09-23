@@ -270,7 +270,7 @@ export async function generateAnnouncement(
  * 入口を出すだけである（設計書6.79.8）。
  *
  * **export してあるのは、AIを呼ばずに配線を確かめるため**
- * （`test/unit/announcementShare.test.ts`）。
+ * （`test/unit/cross/announcementShare.test.ts`）。
  */
 export async function offerAnnouncementActions(input: {
   work: WorkEntry;

@@ -31,7 +31,7 @@
  * - **外で変わった資料の扱い**（`watchSettings`）——どちらを残すかは
  *   そのときの中身で決まるので、前回と同じ答えが正しいとは限らない
  *
- * 一覧に載せてよいかの線引きは `test/unit/confirmMemory.test.ts` が見張る
+ * 一覧に載せてよいかの線引きは `test/unit/core/confirmMemory.test.ts` が見張る
  * （上の名前を含む id は落ちる）。**うっかりでは足せない形にしてある。**
  *
  * ここは `vscode` に依存しない。読み書きは `features/confirmMemoryStore.ts`

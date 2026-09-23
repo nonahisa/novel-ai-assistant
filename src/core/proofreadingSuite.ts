@@ -8,7 +8,7 @@
  * 実物と結ばれていない。写しを作ると、片方だけ改名したときに
  * **件数がいつも0件と出る**——例外は出ないので、作者からは「指摘が
  * 無かった」としか見えない。噛み合っていることは
- * `test/unit/proofreadingSuite.test.ts` が実物と突き合わせて見張る。
+ * `test/unit/core/proofreadingSuite.test.ts` が実物と突き合わせて見張る。
  *
  * VS Code APIに依存しない。
  */

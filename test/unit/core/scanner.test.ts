@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { FileSystemError, FileType, Uri, workspace } from "./support/vscodeStub";
-import { scanWork } from "../../src/core/scanner";
+import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub";
+import { scanWork } from "../../../src/core/scanner";
 import {
   setFileReaderForTests,
   vscodeFileReaderForTests,
-} from "../../src/core/fileRead";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/core/fileRead";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work: WorkEntry = {
   id: "work_test",
@@ -379,7 +379,7 @@ describe("走査の計測", () => {
 
 describe("走査の計測をまとめる", () => {
   test("作品ごとの計測を足し合わせ、最長は全体から選ぶ", async () => {
-    const { summarizeScanTimings } = await import("../../src/core/scanner");
+    const { summarizeScanTimings } = await import("../../../src/core/scanner");
 
     const summary = summarizeScanTimings([
       {
@@ -422,7 +422,7 @@ describe("走査の計測をまとめる", () => {
   });
 
   test("0件でも、すべて0の計測を返す（呼び出し側で場合分けさせない）", async () => {
-    const { summarizeScanTimings } = await import("../../src/core/scanner");
+    const { summarizeScanTimings } = await import("../../../src/core/scanner");
 
     const summary = summarizeScanTimings([]);
 

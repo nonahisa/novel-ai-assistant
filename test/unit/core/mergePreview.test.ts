@@ -6,17 +6,17 @@ import {
   isAutoWrittenPath,
   mergeTreeArgs,
   parseMergeTree,
-} from "../../src/core/mergePreview";
+} from "../../../src/core/mergePreview";
 import {
   authoredConflictCount,
   classifyConflicts,
-} from "../../src/core/divergenceScan";
+} from "../../../src/core/divergenceScan";
 import {
   containsConflictMarkers,
   describeGuardFailure,
   guardResult,
   unexpectedChanges,
-} from "../../src/core/mergeGuard";
+} from "../../../src/core/mergeGuard";
 
 /**
  * 分岐したときに畳めるか（設計書5.5.16）。

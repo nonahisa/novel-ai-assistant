@@ -2,16 +2,16 @@ import * as path from "path";
 import { beforeEach, describe, expect, test, vi, type Mock } from "vitest";
 
 // 掃除の件数はログにだけ出る（通知には出さない）ので、記録の中身を見るために差し替える
-vi.mock("../../src/core/logger", () => ({ logLine: vi.fn() }));
+vi.mock("../../../src/core/logger", () => ({ logLine: vi.fn() }));
 
 import {
   ChunkCache,
   CHUNK_CACHE_MAX_ENTRIES,
   type CacheKeyBase,
-} from "../../src/core/chunkCache";
-import { logLine } from "../../src/core/logger";
-import type { WorkEntry } from "../../src/models/types";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
+} from "../../../src/core/chunkCache";
+import { logLine } from "../../../src/core/logger";
+import type { WorkEntry } from "../../../src/models/types";
+import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 
 const work: WorkEntry = {
   id: "work_test",

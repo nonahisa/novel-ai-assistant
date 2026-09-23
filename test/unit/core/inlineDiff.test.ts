@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { diffChars, type DiffSegment } from "../../src/core/inlineDiff";
+import { diffChars, type DiffSegment } from "../../../src/core/inlineDiff";
 
 /**
  * 提案パネルで、違うところだけを塗る（設計書6.11.2）。

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { window, type StubMessage } from "./support/vscodeStub";
-import { confirmPaidUsage } from "../../src/features/aiConnectivity";
-import type { AIProvider } from "../../src/ai/types";
+import { window, type StubMessage } from "../support/vscodeStub";
+import { confirmPaidUsage } from "../../../src/features/aiConnectivity";
+import type { AIProvider } from "../../../src/ai/types";
 
 function provider(isPaid: boolean, displayName = "Claude API"): AIProvider {
   return { isPaid, displayName } as unknown as AIProvider;

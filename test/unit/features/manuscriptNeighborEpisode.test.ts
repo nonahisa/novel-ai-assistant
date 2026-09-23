@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planNeighborStep } from "../../src/features/manuscriptEditor";
+import { planNeighborStep } from "../../../src/features/manuscriptEditor";
 
 /**
  * 原稿エディタの「← 前の話」「次の話 →」（設計書6.25.5、実機確認リスト F-35）。

@@ -5,16 +5,16 @@ import {
   buildWriterStylePrompt,
   WRITER_PLAN_PROMPTS,
   WRITER_REVISE_PROMPTS,
-} from "../../src/prompts/writerStyle";
+} from "../../../src/prompts/writerStyle";
 import {
   parseWorkChatAnswer,
   WORK_CHAT_SCHEMA,
-} from "../../src/prompts/workChat";
+} from "../../../src/prompts/workChat";
 import {
   buildReaderTypePrompt,
   READER_TYPE_PROMPTS,
-} from "../../src/prompts/readerTarget";
-import { buildAdvicePolicyPrompt } from "../../src/prompts/advicePolicy";
+} from "../../../src/prompts/readerTarget";
+import { buildAdvicePolicyPrompt } from "../../../src/prompts/advicePolicy";
 import {
   applyWriterStyleSignals,
   describeWriterStyleChange,
@@ -27,24 +27,24 @@ import {
   type WriterPlanType,
   type WriterReviseTiming,
   type WriterStyle,
-} from "../../src/core/writerStyle";
+} from "../../../src/core/writerStyle";
 import {
   WriterProfileStore,
   WRITER_PROFILE_KEY,
   type WriterProfile,
-} from "../../src/core/writerProfileStore";
+} from "../../../src/core/writerProfileStore";
 import {
   chatReaderBasis,
   READER_TYPES,
   readerTypeChatLogLines,
   resolveReaderType,
-} from "../../src/core/readerTarget";
+} from "../../../src/core/readerTarget";
 import {
   emptyReaderProfile,
   type ReaderProfile,
   type ReaderScores,
-} from "../../src/models/readerProfile";
-import type { AdviceProfile } from "../../src/core/advicePolicy";
+} from "../../../src/models/readerProfile";
+import type { AdviceProfile } from "../../../src/core/advicePolicy";
 
 /**
  * 診断した結果を、相談の指示へ渡す道（設計書6.86・6.90.1・6.91.9）。

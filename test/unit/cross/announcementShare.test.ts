@@ -1,9 +1,9 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { offerAnnouncementActions } from "../../src/features/generateAnnouncement";
-import { X_SHARE_LABEL } from "../../src/core/snsShare";
-import type { WorkEntry } from "../../src/models/types";
-import { env, FileSystemError, Uri, window, workspace } from "./support/vscodeStub";
+import { offerAnnouncementActions } from "../../../src/features/generateAnnouncement";
+import { X_SHARE_LABEL } from "../../../src/core/snsShare";
+import type { WorkEntry } from "../../../src/models/types";
+import { env, FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
 
 /**
  * 更新告知の結果画面から、Xの投稿画面を開く配線（設計書6.79.8）。

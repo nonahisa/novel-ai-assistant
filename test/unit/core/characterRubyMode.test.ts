@@ -3,12 +3,12 @@ import {
   buildCharacterPageFragment,
   shouldRubyName,
   type EpubCharacterEntry,
-} from "../../src/core/epubCharacterPage";
+} from "../../../src/core/epubCharacterPage";
 import {
   DEFAULT_CHARACTER_RUBY_MODE,
   defaultBookConfig,
   parseBookConfig,
-} from "../../src/models/book";
+} from "../../../src/models/book";
 
 /**
  * 人物紹介の名前のルビ（作者の指定、2026-09-13「人物紹介もルビは選べる

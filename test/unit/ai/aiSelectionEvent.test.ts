@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type * as vscode from "vscode";
-import { AIRegistry } from "../../src/ai/registry";
+import { AIRegistry } from "../../../src/ai/registry";
 
 /**
  * AIの選択は globalState にあり、変えても VS Code からは何の合図も出ない。

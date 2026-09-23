@@ -4,8 +4,8 @@ import {
   installWithBrew,
   interpretBrewResult,
   type CommandResult,
-} from "../../src/core/packageInstall";
-import { REQUIREMENTS } from "../../src/core/requirements";
+} from "../../../src/core/packageInstall";
+import { REQUIREMENTS } from "../../../src/core/requirements";
 
 /**
  * WindowsのほかにMacとLinuxでも案内する（作者の指示、2026-08-19）。

@@ -5,10 +5,10 @@ import { describe, expect, test, vi } from "vitest";
 vi.mock("vscode", () => ({
   window: { showWarningMessage: vi.fn() },
 }));
-vi.mock("../../src/core/logger", () => ({ logFailure: vi.fn() }));
+vi.mock("../../../src/core/logger", () => ({ logFailure: vi.fn() }));
 
-import { describeAIError } from "../../src/features/reportAIError";
-import { AIError } from "../../src/ai/types";
+import { describeAIError } from "../../../src/features/reportAIError";
+import { AIError } from "../../../src/ai/types";
 
 /**
  * AIの失敗の伝え方（設計書6.44）。
@@ -39,7 +39,7 @@ describe("写しを作らない", () => {
   test("features に reportAIError の定義は1つだけ", () => {
     // **5つ目を作らせない。** 4ファイルに1文字も違わない写しがあり、
     // 直すときに片方だけ直る形だった
-    const dir = path.join(__dirname, "..", "..", "src", "features");
+    const dir = path.join(__dirname, "..", "..", "..", "src", "features");
     const defining = fs
       .readdirSync(dir)
       .filter((name) => name.endsWith(".ts"))

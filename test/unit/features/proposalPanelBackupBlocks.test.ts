@@ -53,7 +53,7 @@ vi.mock("vscode", () => {
 const hashOf = (value: string) => `h:${value}`;
 
 const writes: string[] = [];
-vi.mock("../../src/core/textFile", () => ({
+vi.mock("../../../src/core/textFile", () => ({
   readTextFile: vi.fn(async () => ({
     text,
     hash: hashOf(text),
@@ -75,7 +75,7 @@ vi.mock("../../src/core/textFile", () => ({
   ),
 }));
 
-vi.mock("../../src/core/fileLockStore", () => ({
+vi.mock("../../../src/core/fileLockStore", () => ({
   FileLockStore: class {
     async lockFor(): Promise<undefined> {
       return undefined;
@@ -84,7 +84,7 @@ vi.mock("../../src/core/fileLockStore", () => ({
 }));
 
 const edits: Array<{ actor: string; action: string; detail?: string }> = [];
-vi.mock("../../src/core/actorContext", () => ({
+vi.mock("../../../src/core/actorContext", () => ({
   isEditorMode: () => false,
   manualActor: () => "author",
   recordEdit: vi.fn(async (_work: unknown, entry: { actor: string; action: string }) => {
@@ -94,7 +94,7 @@ vi.mock("../../src/core/actorContext", () => ({
 
 /** 誤字脱字の「無視」の記録。**バックアップとの違いでは触らない** */
 const typoDismissed: unknown[] = [];
-vi.mock("../../src/core/typoIssueHistory", () => ({
+vi.mock("../../../src/core/typoIssueHistory", () => ({
   appendAiActionLog: vi.fn(async () => undefined),
   dismissKey: () => "key",
   TypoDismissedHistory: class {
@@ -107,8 +107,8 @@ vi.mock("../../src/core/typoIssueHistory", () => ({
   },
 }));
 
-import { ProposalPanel } from "../../src/features/proposalPanel";
-import type { WorkEntry } from "../../src/models/types";
+import { ProposalPanel } from "../../../src/features/proposalPanel";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work: WorkEntry = {
   id: "w1",

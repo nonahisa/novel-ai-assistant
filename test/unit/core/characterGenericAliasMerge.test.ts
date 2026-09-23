@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { mergeExtractedCharacters } from "../../src/core/characterMerge";
-import { validateCharacterExtractResult } from "../../src/core/characterExtractionValidation";
-import type { Chunk } from "../../src/core/chunker";
-import type { ExtractedCharacter } from "../../src/prompts/characterExtract";
+import { mergeExtractedCharacters } from "../../../src/core/characterMerge";
+import { validateCharacterExtractResult } from "../../../src/core/characterExtractionValidation";
+import type { Chunk } from "../../../src/core/chunker";
+import type { ExtractedCharacter } from "../../../src/prompts/characterExtract";
 
 /**
  * 実データで見つかった不具合の再現（2026-09-19の実機確認）。

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { bundledTuningKeys } from "../../src/core/bundledTuning";
-import { ollamaModels } from "../../src/mcp/tools/ollama";
+import { bundledTuningKeys } from "../../../src/core/bundledTuning";
+import { ollamaModels } from "../../../src/mcp/tools/ollama";
 
 /**
  * 手元の Ollama に何が入っているか（設計書6.87.15 の柱2の2）。

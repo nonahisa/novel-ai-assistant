@@ -4,7 +4,7 @@ import {
   normalizeReading,
   toMoras,
   type NameEntry,
-} from "../../src/core/nameCollision";
+} from "../../../src/core/nameCollision";
 
 /** 人物を1件作る。読みはカタカナ名なら省略できる */
 function person(id: string, name: string, extra: Partial<NameEntry> = {}): NameEntry {

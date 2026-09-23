@@ -7,7 +7,7 @@ import {
   isStartupProfileRequested,
   profileFileStamp,
   startStartupProfile,
-} from "../../src/core/startupProfiler";
+} from "../../../src/core/startupProfiler";
 
 /**
  * **起動のプロファイルを自分で採る**（設計書6.107。0.74.11）。

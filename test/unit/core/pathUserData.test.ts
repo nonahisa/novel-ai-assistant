@@ -9,7 +9,7 @@ import {
   relative,
   resolve,
   separatorFor,
-} from "../../src/core/pathText";
+} from "../../../src/core/pathText";
 
 /**
  * **場所（authority）の無い URI**（設計書5.8）。

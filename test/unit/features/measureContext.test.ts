@@ -4,16 +4,16 @@ import {
   describeProbeStop,
   doubledTimeoutSeconds,
   estimateProbeTokens,
-} from "../../src/features/measureContext";
-import { AIError } from "../../src/ai/types";
+} from "../../../src/features/measureContext";
+import { AIError } from "../../../src/ai/types";
 import {
   MAX_TIMEOUT_SECONDS,
   PROBE_MAX_TIMEOUT_SECONDS,
-} from "../../src/core/modelTuning";
+} from "../../../src/core/modelTuning";
 import {
   probeCharsToTokens,
   worstCaseProbeChars,
-} from "../../src/core/contextProbe";
+} from "../../../src/core/contextProbe";
 
 /**
  * 「AIが実際に読める長さを測る」の、エラーの数え方（作者のログ、

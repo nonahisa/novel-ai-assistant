@@ -120,7 +120,7 @@ const {
   describeWalkStart,
   describeWalkStartDetail,
   walkConflicts,
-} = await import("../../src/features/resolveConflicts");
+} = await import("../../../src/features/resolveConflicts");
 
 let root: string;
 

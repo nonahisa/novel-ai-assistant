@@ -4,24 +4,24 @@ import {
   MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
   MANUSCRIPT_EDITOR_VIEW_TYPE,
   manuscriptViewTypeFor,
-} from "../../src/core/manuscriptViewTypes";
+} from "../../../src/core/manuscriptViewTypes";
 import {
   episodeListLabel,
   episodeUnit,
   formatChapterLabel,
-} from "../../src/core/episodeLabel";
+} from "../../../src/core/episodeLabel";
 import {
   firstEpisodeFileName,
   newEpisodeExtension,
   newEpisodeTemplate,
-} from "../../src/core/episodeTemplate";
-import { skipsStartModeQuestion } from "../../src/features/startWork";
-import { updatePlotMarkdown } from "../../src/core/plotDoc";
-import { nextUntitledName } from "../../src/core/episodeParser";
-import { WORK_FORMATS, type WorkFormatKey } from "../../src/core/workFormat";
-import { matchWorkFormat } from "../../src/core/workFormatStore";
-import { workTypeColumn } from "../../src/core/workTypeVisibility";
-import type { EpisodeFile } from "../../src/models/types";
+} from "../../../src/core/episodeTemplate";
+import { skipsStartModeQuestion } from "../../../src/features/startWork";
+import { updatePlotMarkdown } from "../../../src/core/plotDoc";
+import { nextUntitledName } from "../../../src/core/episodeParser";
+import { WORK_FORMATS, type WorkFormatKey } from "../../../src/core/workFormat";
+import { matchWorkFormat } from "../../../src/core/workFormatStore";
+import { workTypeColumn } from "../../../src/core/workTypeVisibility";
+import type { EpisodeFile } from "../../../src/models/types";
 
 /**
  * 作品タイプ「創作メモ集」「脚本」（設計書6.70）。

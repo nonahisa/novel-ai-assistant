@@ -27,11 +27,11 @@ import { resolve } from "node:path";
  */
 
 const editor = readFileSync(
-  resolve(__dirname, "../../src/features/manuscriptEditor.ts"),
+  resolve(__dirname, "../../../src/features/manuscriptEditor.ts"),
   "utf8"
 );
 const convert = readFileSync(
-  resolve(__dirname, "../../src/features/markdownConvert.ts"),
+  resolve(__dirname, "../../../src/features/markdownConvert.ts"),
   "utf8"
 );
 

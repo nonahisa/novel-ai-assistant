@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
-import { FindingStore } from "../../src/features/findingStore";
-import type { Finding, FindingDecision } from "../../src/models/finding";
-import type { WorkEntry } from "../../src/models/types";
+import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
+import { FindingStore } from "../../../src/features/findingStore";
+import type { Finding, FindingDecision } from "../../../src/models/finding";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 「古い指摘を片づける」（設計書6.96.4）。

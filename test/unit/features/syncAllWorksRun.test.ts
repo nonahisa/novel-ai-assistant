@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { syncAllWorks } from "../../src/features/syncAllWorks";
-import type { GitCommandRunner } from "../../src/core/git";
-import type { WorkRegistry } from "../../src/core/workRegistry";
-import type { GitSyncMonitorLike } from "../../src/features/gitSyncStub";
-import type { WorkEntry } from "../../src/models/types";
-import { window } from "./support/vscodeStub";
+import { syncAllWorks } from "../../../src/features/syncAllWorks";
+import type { GitCommandRunner } from "../../../src/core/git";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
+import type { GitSyncMonitorLike } from "../../../src/features/gitSyncStub";
+import type { WorkEntry } from "../../../src/models/types";
+import { window } from "../support/vscodeStub";
 
 /**
  * 「作品をすべて同期」を、作り物の git で一通り走らせる（設計書5.5.14）。

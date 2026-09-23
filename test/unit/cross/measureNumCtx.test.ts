@@ -6,10 +6,10 @@ import {
   measuredOf,
   outputReserveTokens,
   promptCharsOf,
-} from "../../scripts/measureNumCtx.mjs";
-import { contextSizeForPrompt } from "../../src/core/chunker";
-import { MIN_CHARS_PER_TOKEN_SAMPLES } from "../../src/core/sizeBudget";
-import { OUTPUT_RESERVE_TOKENS } from "../../src/ai/contextGuard";
+} from "../../../scripts/measureNumCtx.mjs";
+import { contextSizeForPrompt } from "../../../src/core/chunker";
+import { MIN_CHARS_PER_TOKEN_SAMPLES } from "../../../src/core/sizeBudget";
+import { OUTPUT_RESERVE_TOKENS } from "../../../src/ai/contextGuard";
 
 /*
   測定台が送る `num_ctx` の決め方（`scripts/measure.mjs --runner ollama`）。

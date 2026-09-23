@@ -16,7 +16,7 @@ import {
   toSiteNotation,
   validateEmphasis,
   validateRuby,
-} from "../../src/core/ruby";
+} from "../../../src/core/ruby";
 
 /**
  * ルビの記法変換（設計書6.12）。

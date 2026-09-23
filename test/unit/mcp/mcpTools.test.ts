@@ -3,30 +3,30 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import { afterEach, describe, expect, test } from "vitest";
 import { z } from "zod";
-import { workScan } from "../../src/mcp/tools/workScan";
-import { NOVEL_RUN_INPUT } from "../../src/mcp/tools/features";
-import { validateWith } from "../../src/mcp/tools/run";
+import { workScan } from "../../../src/mcp/tools/workScan";
+import { NOVEL_RUN_INPUT } from "../../../src/mcp/tools/features";
+import { validateWith } from "../../../src/mcp/tools/run";
 import {
   proofreadPrompt,
   proofreadRun,
   proofreadValidate,
-} from "../../src/mcp/tools/proofread";
+} from "../../../src/mcp/tools/proofread";
 import {
   typoPrompt,
   typoRun,
   typoValidate,
-} from "../../src/mcp/tools/typo";
-import { TYPO_CHECK_VERSION } from "../../src/prompts/typoCheck";
+} from "../../../src/mcp/tools/typo";
+import { TYPO_CHECK_VERSION } from "../../../src/prompts/typoCheck";
 import {
   chatPrompt,
   chatRun,
   chatValidate,
-} from "../../src/mcp/tools/chat";
-import { WORK_CHAT_VERSION } from "../../src/prompts/workChat";
-import { contradictionMaterial } from "../../src/mcp/tools/contradiction";
-import { foreshadowPrompt } from "../../src/mcp/tools/foreshadow";
-import { ollamaGenerate } from "../../src/mcp/tools/ollama";
-import { settingsPrompt, settingsValidate } from "../../src/mcp/tools/settings";
+} from "../../../src/mcp/tools/chat";
+import { WORK_CHAT_VERSION } from "../../../src/prompts/workChat";
+import { contradictionMaterial } from "../../../src/mcp/tools/contradiction";
+import { foreshadowPrompt } from "../../../src/mcp/tools/foreshadow";
+import { ollamaGenerate } from "../../../src/mcp/tools/ollama";
+import { settingsPrompt, settingsValidate } from "../../../src/mcp/tools/settings";
 import {
   synopsisPrompt,
   synopsisValidate,
@@ -34,12 +34,12 @@ import {
   deviationValidate,
   episodePlotPrompt,
   episodePlotValidate,
-} from "../../src/mcp/tools/episode";
+} from "../../../src/mcp/tools/episode";
 import {
   notationDetect,
   notationPrompt,
   notationValidate,
-} from "../../src/mcp/tools/notation";
+} from "../../../src/mcp/tools/notation";
 
 /**
  * 外から呼ぶ口（MCPのツール）を、**転送層を通さずに**確かめる（設計書6.87.8）。
@@ -51,7 +51,7 @@ import {
  * **本物の原稿は読まない。** 作り物のフォルダー（`test/fixtures/mcp-work`）
  * だけを相手にする。
  */
-const WORK = path.join(__dirname, "..", "fixtures", "mcp-work");
+const WORK = path.join(__dirname, "..", "..", "fixtures", "mcp-work");
 
 /** 手元で使う想定のモデルと同じくらいの上限。チャンクの大きさはここから決まる */
 const NUM_CTX = 32768;

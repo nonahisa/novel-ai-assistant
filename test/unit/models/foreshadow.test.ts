@@ -5,7 +5,7 @@ import {
   nextForeshadowId,
   parseForeshadow,
   type Foreshadow,
-} from "../../src/models/foreshadow";
+} from "../../../src/models/foreshadow";
 
 /**
  * 伏線の台帳（設計書6.35.1）。

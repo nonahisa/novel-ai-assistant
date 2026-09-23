@@ -15,7 +15,7 @@
 - **種別ちがい**：場所は当てたが、`type` が仕込んだ `kind` と違うもの（拾えたには数え、別に出す）
 - **仕込み以外の指摘**：`mustNotFlag` でない話に付いた、どの仕込みとも重ならない指摘。**誤検出とは別に数える**——プロットに無い展開が他にも読めた可能性があり、機械には正否を決められない
 
-数え方の本体は `scripts/measureScoring.mjs` の `scoreDeviation()` にあり、`test/unit/measureScoring.test.ts` が確かめている。
+数え方の本体は `scripts/measureScoring.mjs` の `scoreDeviation()` にあり、`test/unit/prompts/measureScoring.test.ts` が確かめている。
 
 ## 仕込みの一覧
 
@@ -28,7 +28,7 @@
 
 **1話につき仕込みは1つだけ**にしてある。`deviationBudget()`（`src/prompts/deviationCheck.ts`）は 1,300字の話に**1件しか通さない**ので、2つ仕込むと片方が `over_budget` で落ちて、見逃しと区別が付かなくなる。
 
-**上限と仕込みは釣り合っている（＝満点が取れる）。** 各話の枠は `Math.max(1, Math.min(4, Math.round(字数/2000)))` で1件、仕込みも1話1つ（全3件、指摘が出てはいけない第1話を除く）。推敲の台（`../proofread/`）は上限12件に18語を仕込んであり満点が取れないが、**ここにその欠陥は無い**。釣り合いが崩れていないことは `test/unit/measureScoring.test.ts` が本文の字数から数えて確かめる。
+**上限と仕込みは釣り合っている（＝満点が取れる）。** 各話の枠は `Math.max(1, Math.min(4, Math.round(字数/2000)))` で1件、仕込みも1話1つ（全3件、指摘が出てはいけない第1話を除く）。推敲の台（`../proofread/`）は上限12件に18語を仕込んであり満点が取れないが、**ここにその欠陥は無い**。釣り合いが崩れていないことは `test/unit/prompts/measureScoring.test.ts` が本文の字数から数えて確かめる。
 
 また、逸脱では**1件に複数を詰めても点は伸びない**——`scoreDeviation()` が「1つの指摘は1つの仕込みにしか当たらない」と決めているため。
 

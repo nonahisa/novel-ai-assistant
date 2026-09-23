@@ -3,7 +3,7 @@ import type {
   AIProvider,
   GenerateParams,
   GenerateResult,
-} from "../../src/ai/types";
+} from "../../../src/ai/types";
 
 /**
  * 一括機能どうしを同時に起動したときの流れ（設計書6.76）。
@@ -19,14 +19,14 @@ import type {
  * 機能側に札が入っているかどうかは `aiTurnWiring.test.ts` が見張る。
  */
 
-vi.mock("../../src/core/usageLog", async (importOriginal) => {
+vi.mock("../../../src/core/usageLog", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../src/core/usageLog")>();
+    await importOriginal<typeof import("../../../src/core/usageLog")>();
   return { ...actual, appendUsageLog: () => undefined };
 });
 
 /** `views/progress` の代役。中止はしないので、素通しでよい */
-vi.mock("../../src/views/progress", () => ({
+vi.mock("../../../src/views/progress", () => ({
   withCancellableProgress: async (
     _title: string,
     task: (
@@ -46,9 +46,9 @@ vi.mock("../../src/views/progress", () => ({
     ),
 }));
 
-const { MeteredProvider } = await import("../../src/ai/meteredProvider");
-const { withAiTurnProgress } = await import("../../src/features/aiTurn");
-const { resetAiSequence } = await import("../../src/core/aiSequence");
+const { MeteredProvider } = await import("../../../src/ai/meteredProvider");
+const { withAiTurnProgress } = await import("../../../src/features/aiTurn");
+const { resetAiSequence } = await import("../../../src/core/aiSequence");
 
 /** 送られた順番を書き留めるAI。1回あたり少しだけ間を置く */
 function recordingProvider(sent: string[]): AIProvider {

@@ -3,7 +3,7 @@ import {
   describeProtectResult,
   protectRecords,
   type ProtectableRecord,
-} from "../../src/core/protectExternalEdits";
+} from "../../../src/core/protectExternalEdits";
 
 /**
  * 拡張機能の外で直された設定資料を守る（設計書5.5）。

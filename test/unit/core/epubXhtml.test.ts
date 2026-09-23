@@ -14,7 +14,7 @@ import {
   placementsIn,
   splitParagraphs,
   type EpubBodyOptions,
-} from "../../src/core/epubXhtml";
+} from "../../../src/core/epubXhtml";
 
 /**
  * 話1つぶんのXHTML（設計書6.65.4の第1段）。

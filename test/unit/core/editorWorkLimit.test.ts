@@ -3,7 +3,7 @@ import {
   canRegisterWork,
   describeWorkLimit,
   EDITOR_WORK_LIMIT,
-} from "../../src/core/editorMode";
+} from "../../../src/core/editorMode";
 
 /**
  * 編集者モードは1作品だけ（設計書5.7.4）。

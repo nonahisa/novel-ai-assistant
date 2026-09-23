@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { formatLogTime, redactSecrets } from "../../src/core/logger";
+import { formatLogTime, redactSecrets } from "../../../src/core/logger";
 
 describe("ログの時刻", () => {
   test("作者の時計に合わせる（UTCで書かない）", () => {

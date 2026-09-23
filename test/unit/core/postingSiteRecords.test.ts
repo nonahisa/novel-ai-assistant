@@ -6,7 +6,7 @@ import {
   readerStatsColumns,
   type GroupedReaderStatsRow,
   type ReaderStatsTable,
-} from "../../src/core/postingSiteRecords";
+} from "../../../src/core/postingSiteRecords";
 import {
   emptyPostingLedger,
   withRanking,
@@ -15,8 +15,8 @@ import {
   withSites,
   type PostingLedger,
   type ReaderStatsRecord,
-} from "../../src/models/posting";
-import { buildWritingStatsPanelHtml } from "../../src/views/writingStatsPanelHtml";
+} from "../../../src/models/posting";
+import { buildWritingStatsPanelHtml } from "../../../src/views/writingStatsPanelHtml";
 
 /**
  * 執筆量パネルの「サイトの記録」（設計書6.68.5）。

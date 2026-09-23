@@ -47,12 +47,12 @@ vi.mock("vscode", () => ({
   },
 }));
 
-vi.mock("../../src/core/scanner", () => ({ scanWork: vi.fn() }));
+vi.mock("../../../src/core/scanner", () => ({ scanWork: vi.fn() }));
 
-import { WorkTreeProvider, EpisodeNode } from "../../src/views/workTree";
-import { MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE } from "../../src/core/manuscriptViewTypes";
-import type { WorkEntry, EpisodeFile } from "../../src/models/types";
-import type { WorkRegistry } from "../../src/core/workRegistry";
+import { WorkTreeProvider, EpisodeNode } from "../../../src/views/workTree";
+import { MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE } from "../../../src/core/manuscriptViewTypes";
+import type { WorkEntry, EpisodeFile } from "../../../src/models/types";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
 
 const work: WorkEntry = {
   id: "w1",

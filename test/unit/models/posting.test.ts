@@ -22,7 +22,7 @@ import {
   withSiteProfile,
   withSites,
   type PostingLedger,
-} from "../../src/models/posting";
+} from "../../../src/models/posting";
 
 /**
  * 投稿状態の台帳（設計書6.68.2）。

@@ -1,7 +1,7 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { openEpubEditorPanel } from "../../src/features/epubEditorPanel";
-import type { WorkEntry } from "../../src/models/types";
+import { openEpubEditorPanel } from "../../../src/features/epubEditorPanel";
+import type { WorkEntry } from "../../../src/models/types";
 import {
   commands,
   FileSystemError,
@@ -9,7 +9,7 @@ import {
   Uri,
   window,
   workspace,
-} from "./support/vscodeStub";
+} from "../support/vscodeStub";
 
 /**
  * EPUBエディターの「未保存」の扱い（設計書6.65.6。作者の指摘、2026-09-06）。

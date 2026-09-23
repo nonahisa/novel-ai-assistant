@@ -5,7 +5,7 @@ import {
   pendingProposalNote,
   pushWaitingNote,
   sortByPickOrder,
-} from "../../src/core/workPickNotes";
+} from "../../../src/core/workPickNotes";
 
 /**
  * 作品を選ぶ場面の補足（実機確認リスト F-15）。

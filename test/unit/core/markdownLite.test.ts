@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { renderMarkdownLite } from "../../src/core/markdownLite";
+import { renderMarkdownLite } from "../../../src/core/markdownLite";
 
 describe("Markdownの簡易整形", () => {
   test("段落にする", () => {

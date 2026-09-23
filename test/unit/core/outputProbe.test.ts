@@ -8,7 +8,7 @@ import {
   nextOutputProbeSize,
   startOutputProbeState,
   type OutputProbeState,
-} from "../../src/core/outputProbe";
+} from "../../../src/core/outputProbe";
 
 /**
  * **1回の応答で書ける量を測る**（設計書6.61）。

@@ -198,7 +198,7 @@ export function goesOutside(base: string, relative: string): boolean {
  * - **空文字はどちらでも false。** 空の道は `normalize` で `.`（いまの場所）に
  *   化け、たまたま中と答えうる。場所が分からないものを中とは言わない
  *
- * **ここへ写しを作らない。** `test/unit/pathInside.test.ts` が、`src` の中で
+ * **ここへ写しを作らない。** `test/unit/core/pathInside.test.ts` が、`src` の中で
  * 自前の判定（`function isPathInside` / `function isInside`）を定義していたら落とす。
  */
 export function isPathInside(parent: string, candidate: string): boolean {

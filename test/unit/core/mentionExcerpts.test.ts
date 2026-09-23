@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   collectMentionExcerpts,
   sampleEvenly,
-} from "../../src/core/mentionExcerpts";
+} from "../../../src/core/mentionExcerpts";
 
 function episode(label: string, lines: string[]) {
   return { label, text: lines.join("\n") };

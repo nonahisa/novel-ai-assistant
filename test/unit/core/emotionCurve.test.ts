@@ -2,14 +2,14 @@ import { describe, expect, test } from "vitest";
 import {
   buildEmotionCurveMarkdown,
   collectEmotionPoints,
-} from "../../src/core/emotionCurve";
+} from "../../../src/core/emotionCurve";
 import {
   buildSynopsisMarkdown,
   parseSynopsisMarkdown,
-} from "../../src/core/synopsisDoc";
-import type { ChapterEmotion, ChapterSynopsis } from "../../src/models/synopsis";
-import { parseSynopsisSet } from "../../src/models/synopsis";
-import { validateSynopsisResult } from "../../src/core/synopsisValidation";
+} from "../../../src/core/synopsisDoc";
+import type { ChapterEmotion, ChapterSynopsis } from "../../../src/models/synopsis";
+import { parseSynopsisSet } from "../../../src/models/synopsis";
+import { validateSynopsisResult } from "../../../src/core/synopsisValidation";
 
 function emotion(overrides: Partial<ChapterEmotion> = {}): ChapterEmotion {
   return { intensity: 5, valence: 0, dominant: null, reason: "理由", ...overrides };

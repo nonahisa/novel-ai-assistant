@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import type { WorkEntry } from "../../src/models/types";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 相談パネル上部のエンジン名・「有料」の印・「AI未設定」（F-14）。
@@ -13,18 +13,18 @@ import type { WorkEntry } from "../../src/models/types";
  * が、**送るところまではここで機械に見せられる**。
  */
 
-vi.mock("../../src/core/chatLog", () => ({
+vi.mock("../../../src/core/chatLog", () => ({
   appendChatLog: () => undefined,
   summarizeMaterials: () => [],
 }));
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logFailure: () => undefined,
   logStep: () => undefined,
   logLine: () => undefined,
   useLogFile: () => undefined,
 }));
 
-const { WorkChatPanel } = await import("../../src/features/workChatPanel");
+const { WorkChatPanel } = await import("../../../src/features/workChatPanel");
 
 const WORK: WorkEntry = {
   id: "w_badge",

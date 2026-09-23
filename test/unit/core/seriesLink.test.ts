@@ -10,9 +10,9 @@ import {
   resolveRelatedWorkPaths,
   shouldOfferSeriesLink,
   type SeriesCharacterCandidate,
-} from "../../src/core/seriesLink";
-import { parseWorkConfig } from "../../src/core/workRegistry";
-import { SRC, chainTo, relativeName, walkStaticImports } from "./support/importGraph";
+} from "../../../src/core/seriesLink";
+import { parseWorkConfig } from "../../../src/core/workRegistry";
+import { SRC, chainTo, relativeName, walkStaticImports } from "../support/importGraph";
 import * as path from "node:path";
 
 /**

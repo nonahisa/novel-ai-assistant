@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { buildWorkChatPanelHtml } from "../../src/views/workChatPanelHtml";
+import { buildWorkChatPanelHtml } from "../../../src/views/workChatPanelHtml";
 
 /**
  * **番号の枠を記号に流用しない**（作者の指摘、2026-09-07

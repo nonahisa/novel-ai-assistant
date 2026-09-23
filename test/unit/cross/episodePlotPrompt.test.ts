@@ -7,7 +7,7 @@ import {
   EPISODE_PLOT_CHECK_SYSTEM_PROMPT,
   EPISODE_PLOT_CHECK_VERSION,
   episodePlotCheckBudget,
-} from "../../src/prompts/episodePlotCheck";
+} from "../../../src/prompts/episodePlotCheck";
 import {
   buildEpisodePlotContrastPrompt,
   EPISODE_PLOT_CONTRAST_HINTS,
@@ -15,11 +15,11 @@ import {
   EPISODE_PLOT_CONTRAST_SCHEMA,
   EPISODE_PLOT_CONTRAST_SYSTEM_PROMPT,
   EPISODE_PLOT_CONTRAST_VERSION,
-} from "../../src/prompts/episodePlotContrast";
+} from "../../../src/prompts/episodePlotContrast";
 import {
   validateEpisodePlotCheck,
   validateEpisodePlotContrast,
-} from "../../src/core/episodePlotValidation";
+} from "../../../src/core/episodePlotValidation";
 
 /**
  * P-27・P-28 のプロンプト（設計書6.36.3）。

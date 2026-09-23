@@ -40,7 +40,7 @@ import {
   LOAD_CONFIRM_TTL_MS,
   type CliOutcome,
   type LoadCliOutcome,
-} from "../../src/ai/lmstudioLauncher";
+} from "../../../src/ai/lmstudioLauncher";
 
 /**
  * LM Studioのサーバーを、拡張機能から起動する（作者の依頼、2026-08-29：

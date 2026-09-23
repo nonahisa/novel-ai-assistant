@@ -3,9 +3,9 @@ import {
   describeVerifyResults,
   parseVerifyOutcome,
   undecidedOutcome,
-} from "../../src/core/contradictionVerifyValidation";
-import { factsRevealedAfter } from "../../src/core/settingsAsOf";
-import type { RecordChange } from "../../src/models/jsonValidation";
+} from "../../../src/core/contradictionVerifyValidation";
+import { factsRevealedAfter } from "../../../src/core/settingsAsOf";
+import type { RecordChange } from "../../../src/models/jsonValidation";
 
 /**
  * 矛盾の検証（設計書6.10.5）と、将来の事実との突き合わせ（6.10.4）。

@@ -11,11 +11,11 @@ import {
   X_WEIGHTED_LIMIT,
   xPostWithUrl,
   xWeightedLength,
-} from "../../src/core/announcement";
+} from "../../../src/core/announcement";
 import {
   X_POST_MAX_CHARS,
   type AnnounceResult,
-} from "../../src/prompts/announce";
+} from "../../../src/prompts/announce";
 
 /** 注意ゼロの状態を作る土台。各テストは壊したい欄だけを上書きする */
 function result(over: Partial<AnnounceResult> = {}): AnnounceResult {

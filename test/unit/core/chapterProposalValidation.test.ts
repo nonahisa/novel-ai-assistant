@@ -4,11 +4,11 @@ import {
   parseChapterProposeResult,
   validateChapterNames,
   validateChapterProposal,
-} from "../../src/core/chapterProposalValidation";
+} from "../../../src/core/chapterProposalValidation";
 import {
   CHAPTER_NAME_MAX_CHARS,
   CHAPTER_PROPOSE_HINTS,
-} from "../../src/prompts/chapterPropose";
+} from "../../../src/prompts/chapterPropose";
 
 /**
  * 章立ての提案（P-31）の検証（設計書6.66.4）。

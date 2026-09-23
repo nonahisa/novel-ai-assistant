@@ -7,14 +7,14 @@ import {
   tokenizeLine,
   NOTATION_RULES,
   SITE_NOTATION_PATTERN,
-} from "../../src/core/manuscriptRender";
+} from "../../../src/core/manuscriptRender";
 import {
   countSiteNotation,
   SITE_EMPHASIS_SOURCE,
   SITE_RUBY_BARE_SOURCE,
   SITE_RUBY_BAR_SOURCE,
-} from "../../src/core/ruby";
-import { TermIndex, type TermEntry } from "../../src/core/termIndex";
+} from "../../../src/core/ruby";
+import { TermIndex, type TermEntry } from "../../../src/core/termIndex";
 
 /**
  * 原稿エディタの表示（設計書6.25）。

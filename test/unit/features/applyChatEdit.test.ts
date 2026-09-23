@@ -1,8 +1,8 @@
 import * as nodePath from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
-import { applyChatEdit } from "../../src/features/applyChatEdit";
-import type { WorkEntry } from "../../src/models/types";
+import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
+import { applyChatEdit } from "../../../src/features/applyChatEdit";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 相談パネルからの書き込みは `applyChatEdit` を通る（設計書6.4.7）。

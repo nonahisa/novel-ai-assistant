@@ -14,8 +14,8 @@ import {
   parseStoredSelection,
   serializeSelection,
   sortToRunOrder,
-} from "../../src/core/proofreadingSuite";
-import { allActions } from "../../src/views/actionList";
+} from "../../../src/core/proofreadingSuite";
+import { allActions } from "../../../src/views/actionList";
 
 /**
  * 校正のまとめ実行（設計書6.80）の、順番と控えを守る。
@@ -30,7 +30,7 @@ interface PackageManifest {
 }
 
 const manifest = JSON.parse(
-  readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+  readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
 ) as PackageManifest;
 
 const declared = new Set(
@@ -205,7 +205,7 @@ describe("表が実物と噛み合っている", () => {
       "src/features/checkForeshadows.ts",
       "src/extension.ts",
     ].map((file) =>
-      readFileSync(new URL(`../../${file}`, import.meta.url), "utf8")
+      readFileSync(new URL(`../../../${file}`, import.meta.url), "utf8")
     );
 
     const handedOver = sources

@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   countByteFallback,
   decodeByteFallback,
-} from "../../src/core/byteFallback";
+} from "../../../src/core/byteFallback";
 
 /**
  * 実データで見つかった不具合の再現（2026-08-15）。

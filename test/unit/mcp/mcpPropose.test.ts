@@ -3,13 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
 import { createHash } from "node:crypto";
-import { settingsPropose } from "../../src/mcp/tools/propose";
-import { McpToolError } from "../../src/mcp/tools/shared";
+import { settingsPropose } from "../../../src/mcp/tools/propose";
+import { McpToolError } from "../../../src/mcp/tools/shared";
 import {
   exposureOf,
   setExternalClientName,
-} from "../../src/mcp/tools/accessLog";
-import { assertExternalAccessAllowed } from "../../src/mcp/tools/permission";
+} from "../../../src/mcp/tools/accessLog";
+import { assertExternalAccessAllowed } from "../../../src/mcp/tools/permission";
 import {
   PENDING_CREATION_ID,
   pendingSourceLabel,
@@ -17,8 +17,8 @@ import {
   readReason,
   readSource,
   unwrapPendingCharacter,
-} from "../../src/core/pendingUpdateFormat";
-import { parseCharacter } from "../../src/models/character";
+} from "../../../src/core/pendingUpdateFormat";
+import { parseCharacter } from "../../../src/models/character";
 
 /**
  * 設定資料の更新案を承認待ちへ置く道具（設計書6.87.16）。
@@ -32,7 +32,7 @@ import { parseCharacter } from "../../src/models/character";
  * あるとき、黙って通さず、鍵の名前まで挙げて断ることを確かめる。
  */
 
-const FIXTURE = nodePath.join(__dirname, "..", "fixtures", "mcp-work");
+const FIXTURE = nodePath.join(__dirname, "..", "..", "fixtures", "mcp-work");
 const TEST_CLIENT = "試験";
 
 const temporary: string[] = [];

@@ -35,7 +35,7 @@ type Property = {
 };
 
 const manifest = JSON.parse(
-  readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+  readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
 ) as {
   contributes: { configuration: { properties: Record<string, Property> } };
 };

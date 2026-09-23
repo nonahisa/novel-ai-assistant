@@ -5,8 +5,8 @@ import {
   fromLfText,
   toLf,
   toLfOffset,
-} from "../../src/core/eolSpace";
-import { computeMinimalEdit } from "../../src/core/textEdit";
+} from "../../../src/core/eolSpace";
+import { computeMinimalEdit } from "../../../src/core/textEdit";
 
 /**
  * 改行コードの空間の変換（設計書6.34.5の既知の穴の根本修正）。

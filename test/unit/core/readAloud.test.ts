@@ -3,14 +3,14 @@ import { readFileSync } from "node:fs";
 import {
   MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
   clampReadAloudRate,
-} from "../../src/features/manuscriptEditor";
-import { manuscriptViewTypeFor } from "../../src/core/manuscriptViewTypes";
-import { allActions } from "../../src/views/actionList";
+} from "../../../src/features/manuscriptEditor";
+import { manuscriptViewTypeFor } from "../../../src/core/manuscriptViewTypes";
+import { allActions } from "../../../src/views/actionList";
 import {
   READ_ALOUD_MEMO_TEXT,
   buildReadingPlan,
-} from "../../src/core/readAloud";
-import { isMemoLine, parseMemos } from "../../src/core/sceneMemo";
+} from "../../../src/core/readAloud";
+import { isMemoLine, parseMemos } from "../../../src/core/sceneMemo";
 
 /**
  * 読み上げ（音読推敲。設計書6.42）。

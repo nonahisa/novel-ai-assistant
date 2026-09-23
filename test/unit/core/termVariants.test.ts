@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { TermIndex, expandNameVariants } from "../../src/core/termIndex";
+import { TermIndex, expandNameVariants } from "../../../src/core/termIndex";
 
 describe("本文に現れる呼び方への展開", () => {
   test("中黒で区切られた姓名を分ける", () => {

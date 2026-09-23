@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { relocateQuote } from "../../src/core/relocateQuote";
+import { relocateQuote } from "../../../src/core/relocateQuote";
 
 /**
  * 引用が「いま何行目に在るか」を探し直す（作者の報告、2026-09-12）。

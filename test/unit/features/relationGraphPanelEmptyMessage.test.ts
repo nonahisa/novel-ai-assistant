@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { WorkEntry } from "../../src/models/types";
-import { emptyCharacter, type Character } from "../../src/models/character";
-import { window } from "./support/vscodeStub";
+import type { WorkEntry } from "../../../src/models/types";
+import { emptyCharacter, type Character } from "../../../src/models/character";
+import { window } from "../support/vscodeStub";
 
 /**
  * 人物相関図の「空のとき」の案内（設計書6.38。`relationGraphPanel.ts` の
@@ -23,7 +23,7 @@ const state = vi.hoisted(() => ({
   characters: [] as Character[],
 }));
 
-vi.mock("../../src/core/characterStore", () => ({
+vi.mock("../../../src/core/characterStore", () => ({
   CharacterStore: class {
     async loadAll() {
       return { characters: state.characters, errors: [] };
@@ -32,7 +32,7 @@ vi.mock("../../src/core/characterStore", () => ({
 }));
 
 const { openRelationGraph } = await import(
-  "../../src/features/relationGraphPanel"
+  "../../../src/features/relationGraphPanel"
 );
 
 let nextWorkId = 0;

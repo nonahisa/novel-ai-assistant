@@ -8,9 +8,9 @@ import {
   commands,
   window,
   workspace,
-} from "./support/vscodeStub";
-import type { WorkEntry } from "../../src/models/types";
-import { AI_INSTRUCTION_TARGETS } from "../../src/core/aiInstructions";
+} from "../support/vscodeStub";
+import type { WorkEntry } from "../../../src/models/types";
+import { AI_INSTRUCTION_TARGETS } from "../../../src/core/aiInstructions";
 
 /**
  * 許可の画面を、行き止まりにしない（設計書6.87.15）。
@@ -33,7 +33,7 @@ import { AI_INSTRUCTION_TARGETS } from "../../src/core/aiInstructions";
  */
 
 const { toggleExternalAccessPermission } = await import(
-  "../../src/features/externalAccessPermission"
+  "../../../src/features/externalAccessPermission"
 );
 
 let root = "";

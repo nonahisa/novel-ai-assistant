@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSceneMemoPanelHtml } from "../../src/views/sceneMemoPanelHtml";
+import { buildSceneMemoPanelHtml } from "../../../src/views/sceneMemoPanelHtml";
 
 /**
  * シーンメモのパネルの骨組み（設計書6.40.4）。

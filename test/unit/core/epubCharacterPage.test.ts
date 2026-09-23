@@ -1,11 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { emptyCharacter, type Character } from "../../src/models/character";
+import { emptyCharacter, type Character } from "../../../src/models/character";
 import {
   buildCharacterPageFragment,
   characterIconPath,
   selectBookCharacters,
   toCharacterEntry,
-} from "../../src/core/epubCharacterPage";
+} from "../../../src/core/epubCharacterPage";
 
 /**
  * 登場人物一覧（設計書6.65.11）。

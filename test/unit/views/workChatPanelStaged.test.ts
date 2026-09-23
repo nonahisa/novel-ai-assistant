@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { buildWorkChatPanelHtml } from "../../src/views/workChatPanelHtml";
+import { buildWorkChatPanelHtml } from "../../../src/views/workChatPanelHtml";
 
 /**
  * **頼んでいない作業を、答えの下に広げない**（作者の指摘、2026-09-08

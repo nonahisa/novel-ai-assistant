@@ -5,10 +5,10 @@ import {
   buildLocationMarkdown,
   describeConflictValues,
   formatChapters,
-} from "../../src/core/settingsMarkdown";
-import { emptyAbility, emptyAbilitySystem } from "../../src/models/ability";
-import { emptyLocation } from "../../src/models/location";
-import { emptyCharacter } from "../../src/models/character";
+} from "../../../src/core/settingsMarkdown";
+import { emptyAbility, emptyAbilitySystem } from "../../../src/models/ability";
+import { emptyLocation } from "../../../src/models/location";
+import { emptyCharacter } from "../../../src/models/character";
 
 const options = { workTitle: "図書塔の魔女" };
 

@@ -7,7 +7,7 @@ vi.mock("vscode", () => ({
   commands: {},
 }));
 
-import { blurbConfirmMessage } from "../../src/features/generateBlurb";
+import { blurbConfirmMessage } from "../../../src/features/generateBlurb";
 
 describe("作品紹介文の実行前の確認（0.45.3）", () => {
   test("各話あらすじが無いときは、本筋を外すことがあると添える", () => {

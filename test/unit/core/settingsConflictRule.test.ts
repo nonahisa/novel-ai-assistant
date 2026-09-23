@@ -3,7 +3,7 @@ import {
   decideByUpdatedAt,
   decideSettingsConflict,
   isSettingsJsonPath,
-} from "../../src/core/settingsConflictRule";
+} from "../../../src/core/settingsConflictRule";
 
 /**
  * 設定資料の衝突を、規則で決める（設計書5.5.18）。

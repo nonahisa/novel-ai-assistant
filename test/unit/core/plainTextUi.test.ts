@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { diffLinesForPanel } from "../../src/core/characterDiff";
-import type { CharacterDiff } from "../../src/core/characterDiff";
+import { diffLinesForPanel } from "../../../src/core/characterDiff";
+import type { CharacterDiff } from "../../../src/core/characterDiff";
 
 /**
  * 画面に出す文字列へ、Markdownの記号を混ぜていないか見張る。

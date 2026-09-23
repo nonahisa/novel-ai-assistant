@@ -1,17 +1,17 @@
 import { describe, expect, test } from "vitest";
-import type { Chunk } from "../../src/core/chunker";
-import { validateExtractedWorldItems } from "../../src/core/settingsExtractionValidation";
-import { mergeExtractedWorldItems } from "../../src/core/settingsMerge";
-import { buildWorldMarkdown } from "../../src/core/settingsMarkdown";
-import { buildWorldListItems } from "../../src/core/settingsList";
-import { applyWorldItemEdits } from "../../src/core/settingsEdit";
-import { describeWorldItem } from "../../src/core/settingsSummary";
-import { searchTermsFor } from "../../src/features/settingsPanel";
+import type { Chunk } from "../../../src/core/chunker";
+import { validateExtractedWorldItems } from "../../../src/core/settingsExtractionValidation";
+import { mergeExtractedWorldItems } from "../../../src/core/settingsMerge";
+import { buildWorldMarkdown } from "../../../src/core/settingsMarkdown";
+import { buildWorldListItems } from "../../../src/core/settingsList";
+import { applyWorldItemEdits } from "../../../src/core/settingsEdit";
+import { describeWorldItem } from "../../../src/core/settingsSummary";
+import { searchTermsFor } from "../../../src/features/settingsPanel";
 import {
   GENERATED_MARKER,
   isGeneratedDoc,
-} from "../../src/features/generateSettingsDocs";
-import { emptyWorldItem, type WorldItem } from "../../src/models/world";
+} from "../../../src/features/generateSettingsDocs";
+import { emptyWorldItem, type WorldItem } from "../../../src/models/world";
 
 /**
  * 世界観（P-03）の抽出から資料までを通しで固定する。

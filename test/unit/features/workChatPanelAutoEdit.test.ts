@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { WorkEntry } from "../../src/models/types";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 頼まれた書き込みは、確認を出さずに書く（作者の裁定 2026-09-21）。
@@ -32,7 +32,7 @@ const currentValue = vi.hoisted(() => ({ text: "" }));
 const behavior = vi.hoisted(() => ({ ignoreWrites: false }));
 const confirmed = vi.hoisted(() => [] as string[]);
 
-vi.mock("../../src/features/applyChatEdit", () => ({
+vi.mock("../../../src/features/applyChatEdit", () => ({
   applyChatEdit: async (
     work: { id: string },
     edit: { target: unknown; content: string },
@@ -59,7 +59,7 @@ vi.mock("../../src/features/applyChatEdit", () => ({
   readChatEditTarget: async () => currentValue.text,
 }));
 
-vi.mock("../../src/views/notify", () => ({
+vi.mock("../../../src/views/notify", () => ({
   // **呼ばれたら試験は落ちる。** 作者へ訊く確認はもう出さない
   confirmRun: async (message: string) => {
     confirmed.push(message);
@@ -69,24 +69,24 @@ vi.mock("../../src/views/notify", () => ({
   warnWithLog: () => undefined,
 }));
 
-vi.mock("../../src/core/chatLog", () => ({
+vi.mock("../../../src/core/chatLog", () => ({
   appendChatLog: () => undefined,
   summarizeMaterials: () => [],
 }));
 
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logFailure: () => undefined,
   logStep: () => undefined,
   logLine: () => undefined,
   useLogFile: () => undefined,
 }));
 
-vi.mock("../../src/features/aiConnectivity", () => ({
+vi.mock("../../../src/features/aiConnectivity", () => ({
   confirmProviderReachable: async () => true,
   confirmPaidUsage: async () => true,
 }));
 
-const { WorkChatPanel } = await import("../../src/features/workChatPanel");
+const { WorkChatPanel } = await import("../../../src/features/workChatPanel");
 
 const WORK: WorkEntry = {
   id: "w_a",

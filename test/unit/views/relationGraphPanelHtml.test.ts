@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
-import { TERM_COLORS } from "../../src/core/termColors";
-import { buildRelationGraphPanelHtml } from "../../src/views/relationGraphPanelHtml";
+import { TERM_COLORS } from "../../../src/core/termColors";
+import { buildRelationGraphPanelHtml } from "../../../src/views/relationGraphPanelHtml";
 
 /**
  * 人物相関図の画面（設計書6.38.4）。

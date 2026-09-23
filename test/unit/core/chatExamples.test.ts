@@ -3,8 +3,8 @@ import {
   CHAT_EXAMPLES,
   READER_TARGET_EXAMPLE,
   chatExamplesFor,
-} from "../../src/core/chatExamples";
-import { selectProcedure } from "../../src/core/procedures";
+} from "../../../src/core/chatExamples";
+import { selectProcedure } from "../../../src/core/procedures";
 
 /**
  * 相談パネルの「聞き方の例」（作者の要望、2026-09-22）。

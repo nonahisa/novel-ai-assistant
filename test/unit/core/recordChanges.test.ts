@@ -7,24 +7,24 @@ import {
   dropChanges,
   isFoldableConflict,
   promoteConflictToChanges,
-} from "../../src/core/recordChanges";
-import { mergeExtractedCharacters } from "../../src/core/characterMerge";
-import { unifyCharacters } from "../../src/core/characterUnify";
+} from "../../../src/core/recordChanges";
+import { mergeExtractedCharacters } from "../../../src/core/characterMerge";
+import { unifyCharacters } from "../../../src/core/characterUnify";
 import {
   emptyCharacter,
   parseCharacter,
   type Character,
-} from "../../src/models/character";
+} from "../../../src/models/character";
 import {
   parseChanges,
   type RecordChange,
   type RecordConflict,
-} from "../../src/models/jsonValidation";
+} from "../../../src/models/jsonValidation";
 import {
   buildCharacterMarkdown,
   describeChangeValues,
-} from "../../src/core/settingsMarkdown";
-import { describeCharacter } from "../../src/core/settingsSummary";
+} from "../../../src/core/settingsMarkdown";
+import { describeCharacter } from "../../../src/core/settingsSummary";
 
 /** 第1〜3話は黒髪、第7話で銀髪になった人物 */
 function withHairConflict(): Character {

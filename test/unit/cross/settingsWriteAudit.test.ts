@@ -24,7 +24,7 @@ import { resolve } from "node:path";
  * ことである。
  */
 
-const CORE = resolve(__dirname, "../../src/core");
+const CORE = resolve(__dirname, "../../../src/core");
 
 /**
  * 上書き（指定なし）で書いてよい部品と、その理由。

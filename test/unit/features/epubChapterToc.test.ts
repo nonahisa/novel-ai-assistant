@@ -1,15 +1,15 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
 import { unzipSync } from "fflate";
-import { exportEpub } from "../../src/features/exportEpub";
-import type { WorkEntry } from "../../src/models/types";
+import { exportEpub } from "../../../src/features/exportEpub";
+import type { WorkEntry } from "../../../src/models/types";
 import {
   FileSystemError,
   FileType,
   Uri,
   window,
   workspace,
-} from "./support/vscodeStub";
+} from "../support/vscodeStub";
 
 /**
  * 「章ごとに区切る」目次の束ね（設計書6.66.4の3・6.65.7の4）。

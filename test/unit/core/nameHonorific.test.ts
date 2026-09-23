@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { hasHonorific, stripHonorific } from "../../src/core/nameHonorific";
+import { hasHonorific, stripHonorific } from "../../../src/core/nameHonorific";
 
 /**
  * 敬称を外す境界の検算（設計書6.5.9）。

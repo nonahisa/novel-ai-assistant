@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { organizationsFromAffiliations } from "../../src/core/settingsMerge";
-import { emptyLocation } from "../../src/models/location";
-import { emptyOrganization } from "../../src/models/organization";
+import { organizationsFromAffiliations } from "../../../src/core/settingsMerge";
+import { emptyLocation } from "../../../src/models/location";
+import { emptyOrganization } from "../../../src/models/organization";
 
 /**
  * 名前が「null」の組織ができていた不具合の再現（作者の指摘、2026-08-16）。

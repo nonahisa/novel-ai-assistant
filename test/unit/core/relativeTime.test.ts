@@ -4,7 +4,7 @@ import {
   formatRelativeTime,
   isOrderUnknown,
   parseRelativeTime,
-} from "../../src/core/relativeTime";
+} from "../../../src/core/relativeTime";
 
 /**
  * 相対時期の読み（設計書6.88.4）。

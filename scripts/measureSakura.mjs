@@ -2,7 +2,7 @@
 //
 // **`measure.mjs` から切り出してある。** ここは fetch とプロンプトの受け渡しだけを
 // 引き受け、束も引数の解釈も持たない——**偽の fetch を渡せば、本物へ繋がずに
-// 形を確かめられる**（`test/unit/measureSakura.test.ts`）。
+// 形を確かめられる**（`test/unit/cross/measureSakura.test.ts`）。
 //
 // **3段で回す**（MCP の `claude` 経路と同じ形）。
 //   1. `novel.prompt` でプロンプトを受け取る
@@ -66,7 +66,7 @@ export function readSakuraToken(env = process.env) {
  *
  * **`src/ai/jsonSchema.ts` の `toOpenAIJsonSchema` と同じ直し方**でなければ、
  * 製品と違う形のスキーマで測ることになる。**同じ結果になるかは
- * `test/unit/measureSakura.test.ts` が製品の関数と突き合わせて見張る**
+ * `test/unit/cross/measureSakura.test.ts` が製品の関数と突き合わせて見張る**
  * ——写しを置いたまま片方だけ直る、をここで止める。
  */
 export function toOpenAIJsonSchema(schema) {

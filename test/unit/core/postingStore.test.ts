@@ -1,14 +1,14 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { PostingStore, PostingStoreError } from "../../src/core/postingStore";
+import { PostingStore, PostingStoreError } from "../../../src/core/postingStore";
 import {
   emptyPostingLedger,
   siteProfile,
   withReaderStats,
   withSites,
-} from "../../src/models/posting";
-import type { WorkEntry } from "../../src/models/types";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
+} from "../../../src/models/posting";
+import type { WorkEntry } from "../../../src/models/types";
+import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 
 /**
  * 投稿状態の台帳の読み書き（設計書6.68.2）。

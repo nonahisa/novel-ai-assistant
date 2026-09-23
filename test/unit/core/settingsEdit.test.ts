@@ -7,12 +7,12 @@ import {
   editedAliases,
   removeAiNote,
   SettingsEditError,
-} from "../../src/core/settingsEdit";
-import { emptyCharacter } from "../../src/models/character";
-import { mergeExtractedCharacters } from "../../src/core/characterMerge";
-import { emptyAbility } from "../../src/models/ability";
-import { emptyLocation } from "../../src/models/location";
-import { parseAiNotes } from "../../src/models/aiNote";
+} from "../../../src/core/settingsEdit";
+import { emptyCharacter } from "../../../src/models/character";
+import { mergeExtractedCharacters } from "../../../src/core/characterMerge";
+import { emptyAbility } from "../../../src/models/ability";
+import { emptyLocation } from "../../../src/models/location";
+import { parseAiNotes } from "../../../src/models/aiNote";
 
 describe("作者による書き換え", () => {
   test("書き換えたレコードは以後の抽出で上書きされないようにする", () => {

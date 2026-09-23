@@ -1,10 +1,10 @@
 import { describe, expect, test } from "vitest";
-import type { Chunk } from "../../src/core/chunker";
+import type { Chunk } from "../../../src/core/chunker";
 import {
   normalizeExtractedAbilitySystem,
   validateExtractedAbilities,
   validateExtractedLocations,
-} from "../../src/core/settingsExtractionValidation";
+} from "../../../src/core/settingsExtractionValidation";
 
 const sourceLine = "「灯火よ、道を示せ」と灯が唱えた";
 const chunk: Chunk = {

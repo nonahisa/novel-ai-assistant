@@ -48,7 +48,7 @@ export type FindingShape =
  *   戻すと「押しても何も起きない口」ができる
  *
  * **検知を足したら、ここへ1行足す。** 足し忘れると記録されないので、
- * `test/unit/findingRecording.test.ts` が実際の検知の口を通して見張る。
+ * `test/unit/models/findingRecording.test.ts` が実際の検知の口を通して見張る。
  */
 const RECORDED: ReadonlyMap<
   string,

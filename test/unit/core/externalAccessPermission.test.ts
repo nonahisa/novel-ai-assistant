@@ -14,13 +14,13 @@ import {
   isToolAllowed,
   parseExternalAccessPermission,
   samplingNotPermittedMessage,
-} from "../../src/core/externalAccessPermission";
+} from "../../../src/core/externalAccessPermission";
 import {
   assertExternalAccessAllowed,
   readExternalAccessPermission,
-} from "../../src/mcp/tools/permission";
-import { setExternalClientName } from "../../src/mcp/tools/accessLog";
-import { IGNORED_PATHS } from "../../src/core/workRegistry";
+} from "../../../src/mcp/tools/permission";
+import { setExternalClientName } from "../../../src/mcp/tools/accessLog";
+import { IGNORED_PATHS } from "../../../src/core/workRegistry";
 
 /**
  * 外部AIの利用は**既定で拒否**（設計書6.87.10・6.87.14。

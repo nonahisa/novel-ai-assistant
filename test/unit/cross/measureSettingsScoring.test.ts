@@ -8,7 +8,7 @@ import {
   scoreSettings,
   settingsLedgerOf,
   spreadOfRuns,
-} from "../../scripts/measureScoring.mjs";
+} from "../../../scripts/measureScoring.mjs";
 
 /*
   設定資料の抽出（P-04a、feature: settings）の**数え方**を確かめる
@@ -20,6 +20,7 @@ import {
 
 const ROOT = path.join(
   __dirname,
+  "..",
   "..",
   "fixtures",
   "seeded",

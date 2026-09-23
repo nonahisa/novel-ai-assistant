@@ -6,9 +6,9 @@ import {
   parseForeshadowResolveResult,
   validateForeshadowCandidates,
   validateForeshadowResolutions,
-} from "../../src/core/foreshadowValidation";
-import type { Chunk } from "../../src/core/chunker";
-import { chunksOfEpisodeFile } from "../../src/core/episodeChunks";
+} from "../../../src/core/foreshadowValidation";
+import type { Chunk } from "../../../src/core/chunker";
+import { chunksOfEpisodeFile } from "../../../src/core/episodeChunks";
 
 /**
  * 伏線の検知（P-25 / P-26）の検証（設計書6.35.2・6.35.3）。

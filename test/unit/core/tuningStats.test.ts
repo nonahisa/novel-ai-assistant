@@ -7,8 +7,8 @@ import {
   outputTokensPerSecond,
   tuningStatsEntries,
   type TuningStatsEntry,
-} from "../../src/core/tuningStats";
-import { parseModelTuning } from "../../src/core/modelTuning";
+} from "../../../src/core/tuningStats";
+import { parseModelTuning } from "../../../src/core/modelTuning";
 
 /**
  * AIチューニングの実測一覧（作者の要望、2026-09-06

@@ -61,7 +61,7 @@ vi.mock("vscode", () => {
   };
 });
 
-vi.mock("../../src/core/textFile", () => ({
+vi.mock("../../../src/core/textFile", () => ({
   readTextFile: vi.fn(async () => ({
     text,
     hash: "h",
@@ -76,7 +76,7 @@ vi.mock("../../src/core/textFile", () => ({
   }),
 }));
 
-vi.mock("../../src/core/fileLockStore", () => ({
+vi.mock("../../../src/core/fileLockStore", () => ({
   FileLockStore: class {
     async lockFor(): Promise<undefined> {
       return undefined;
@@ -84,7 +84,7 @@ vi.mock("../../src/core/fileLockStore", () => ({
   },
 }));
 
-vi.mock("../../src/core/actorContext", () => ({
+vi.mock("../../../src/core/actorContext", () => ({
   isEditorMode: () => false,
   manualActor: () => "author",
   recordEdit: vi.fn(async () => undefined),
@@ -92,17 +92,17 @@ vi.mock("../../src/core/actorContext", () => ({
 
 /** シーンメモの横の一覧へ、判断が届いたか */
 const notified: string[] = [];
-vi.mock("../../src/features/sceneMemoPanel", () => ({
+vi.mock("../../../src/features/sceneMemoPanel", () => ({
   refreshSceneMemoFindings: vi.fn(async (workId: string) => {
     notified.push(workId);
   }),
 }));
 
-import { ProposalPanel } from "../../src/features/proposalPanel";
-import { FindingStore, visibleFindings } from "../../src/features/findingStore";
-import { findingIdOf } from "../../src/core/findingSource";
-import type { ProposalViewItem } from "../../src/features/proposalPanel";
-import type { WorkEntry } from "../../src/models/types";
+import { ProposalPanel } from "../../../src/features/proposalPanel";
+import { FindingStore, visibleFindings } from "../../../src/features/findingStore";
+import { findingIdOf } from "../../../src/core/findingSource";
+import type { ProposalViewItem } from "../../../src/features/proposalPanel";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work: WorkEntry = {
   id: "w1",

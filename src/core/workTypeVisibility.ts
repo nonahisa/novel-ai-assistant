@@ -22,7 +22,7 @@ import type { WorkFormatKey } from "./workFormat";
  *
  * 表に無いコマンドは**出す**。隠しすぎると、作者は機能が消えたことにも
  * 気づけない（見えすぎは、押してから「合いません」と分かるだけで済む）。
- * 載せ忘れは `test/unit/workTypeVisibility.test.ts` が知らせる。
+ * 載せ忘れは `test/unit/core/workTypeVisibility.test.ts` が知らせる。
  *
  * VS Code APIに依存しない。
  */

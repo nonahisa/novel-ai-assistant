@@ -13,8 +13,8 @@ import {
   describeSyncTarget,
   parentFolderOf,
   worksInside,
-} from "../../src/core/syncTarget";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/core/syncTarget";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 同期する置き場（設計書5.7.9）。

@@ -5,7 +5,7 @@
   // **`node` の型を入れている。** 検査そのものはブラウザで動くが、
   // ここから読む `src/core/paths.ts` などが `path` と `process` を
   // （実行時は差し替えた上で）参照しているため、型だけは要る。
-  // 「ブラウザで本当に動くか」は `test/unit/browserReach.test.ts`
+  // 「ブラウザで本当に動くか」は `test/unit/cross/browserReach.test.ts`
   // （静的importの走査）と、この検査の実動のほうが見る
   "extends": "../../tsconfig.json",
   "compilerOptions": {

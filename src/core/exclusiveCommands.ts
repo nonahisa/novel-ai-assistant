@@ -19,7 +19,7 @@
  * **ここへ並べるIDは `package.json` に実在するものだけ。** ただの文字列なので
  * 綴り違いは型検査を素通りし、押しても何も起きないまま気づかれない
  * （`EDITOR_ALLOWED` で実際に起きた。0.47.3）。
- * `test/unit/exclusiveCommands.test.ts` が突き合わせる。
+ * `test/unit/core/exclusiveCommands.test.ts` が突き合わせる。
  *
  * VS Code APIに依存しない。
  */

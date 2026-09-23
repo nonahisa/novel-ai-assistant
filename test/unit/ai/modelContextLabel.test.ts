@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { formatModelContext } from "../../src/ai/registry";
-import type { ModelInfo } from "../../src/ai/types";
+import { formatModelContext } from "../../../src/ai/registry";
+import type { ModelInfo } from "../../../src/ai/types";
 
 /**
  * モデル選択に出す文脈の表示（作者の報告、2026-08-29：

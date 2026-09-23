@@ -15,11 +15,11 @@ import {
   resolveChunkChars,
   resolveMergeChars,
   type Chunk,
-} from "../../src/core/chunker";
-import { workspace } from "./support/vscodeStub";
-import { readChunkSettings } from "../../src/features/chunkSettings";
-import { saveModelTuning } from "../../src/core/modelTuning";
-import { useMemoryTuningStore } from "./support/tuningStore";
+} from "../../../src/core/chunker";
+import { workspace } from "../support/vscodeStub";
+import { readChunkSettings } from "../../../src/features/chunkSettings";
+import { saveModelTuning } from "../../../src/core/modelTuning";
+import { useMemoryTuningStore } from "../support/tuningStore";
 
 /**
  * チャンクの大きさの決め方（設計書6.23）。
@@ -403,7 +403,7 @@ describe("まとめ送信の決め方は1か所だけが持つ", () => {
   const ALLOWED = ["src/features/chunkSettings.ts"];
 
   it("mergeChunkChars を読むのは chunkSettings.ts だけ", () => {
-    const root = path.join(__dirname, "..", "..");
+    const root = path.join(__dirname, "..", "..", "..");
     const offenders: string[] = [];
     const walk = (dir: string): void => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -449,7 +449,7 @@ describe("プロバイダの設定を、機能ごとに読まない", () => {
   it.each(PROVIDER_SETTINGS)(
     "$key を読むのは $owner だけ",
     ({ key, owner }) => {
-      const root = path.join(__dirname, "..", "..");
+      const root = path.join(__dirname, "..", "..", "..");
       const offenders: string[] = [];
       const walk = (dir: string): void => {
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

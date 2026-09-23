@@ -1,8 +1,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import * as nodePath from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { workspace } from "./support/vscodeStub";
-import { findingsRetentionDays } from "../../src/features/findingStore";
+import { workspace } from "../support/vscodeStub";
+import { findingsRetentionDays } from "../../../src/features/findingStore";
 
 /**
  * 指摘を残す日数の設定（設計書6.96.4）。
@@ -15,7 +15,7 @@ import { findingsRetentionDays } from "../../src/features/findingStore";
  * 気づかない。だから見張りを置く。
  */
 
-const root = nodePath.join(__dirname, "..", "..");
+const root = nodePath.join(__dirname, "..", "..", "..");
 
 describe("設定の登録", () => {
   const manifest = JSON.parse(

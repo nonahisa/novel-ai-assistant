@@ -34,21 +34,21 @@ vi.mock("vscode", () => ({
 }));
 
 const scanWork = vi.fn();
-vi.mock("../../src/core/scanner", () => ({
+vi.mock("../../../src/core/scanner", () => ({
   scanWork: (...args: unknown[]) => scanWork(...args),
 }));
 
-vi.mock("../../src/core/workFormatStore", () => ({
+vi.mock("../../../src/core/workFormatStore", () => ({
   readWorkFormat: async () => undefined,
 }));
-vi.mock("../../src/core/synopsisStore", () => ({
+vi.mock("../../../src/core/synopsisStore", () => ({
   SynopsisStore: class {
     async load() {
       return { episodes: [] };
     }
   },
 }));
-vi.mock("../../src/core/chapterStore", () => ({
+vi.mock("../../../src/core/chapterStore", () => ({
   ChapterStore: class {
     async load() {
       return { schemaVersion: "1", chapters: [] };
@@ -57,10 +57,10 @@ vi.mock("../../src/core/chapterStore", () => ({
   ChapterStoreError: class extends Error {},
 }));
 
-import { abbreviateTitle, isAbbreviated } from "../../src/core/abbreviateTitle";
-import { WorkTreeProvider } from "../../src/views/workTree";
-import type { WorkEntry } from "../../src/models/types";
-import type { WorkRegistry } from "../../src/core/workRegistry";
+import { abbreviateTitle, isAbbreviated } from "../../../src/core/abbreviateTitle";
+import { WorkTreeProvider } from "../../../src/views/workTree";
+import type { WorkEntry } from "../../../src/models/types";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
 
 describe("作品名の省略", () => {
   test("20字ちょうどは省略しない", () => {

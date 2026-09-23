@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { tuningStoreContents, useMemoryTuningStore } from "./support/tuningStore";
-import { MeteredProvider } from "../../src/ai/meteredProvider";
-import { resetAiSequence } from "../../src/core/aiSequence";
+import { tuningStoreContents, useMemoryTuningStore } from "../support/tuningStore";
+import { MeteredProvider } from "../../../src/ai/meteredProvider";
+import { resetAiSequence } from "../../../src/core/aiSequence";
 import {
   MIN_FEATURE_OUTPUT_SAMPLES,
   featureOutputKey,
-} from "../../src/core/featureOutputTokens";
-import { CONTEXT_GUARD_EXEMPT_FEATURE } from "../../src/ai/contextGuard";
+} from "../../../src/core/featureOutputTokens";
+import { CONTEXT_GUARD_EXEMPT_FEATURE } from "../../../src/ai/contextGuard";
 import type {
   AIProvider,
   GenerateParams,
   GenerateResult,
-} from "../../src/ai/types";
+} from "../../../src/ai/types";
 
 /**
  * **実測を記録する道**（設計書6.77の第3段）。

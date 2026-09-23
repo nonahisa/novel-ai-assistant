@@ -5,7 +5,7 @@ import {
   resolveConflicts,
   sanitizeLabel,
   sideFileName,
-} from "../../src/core/conflictFile";
+} from "../../../src/core/conflictFile";
 
 const CONFLICTED = [
   "　朝の光が差し込んだ。",

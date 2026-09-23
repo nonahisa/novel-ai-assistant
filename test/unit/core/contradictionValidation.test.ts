@@ -8,8 +8,8 @@ import { buildKnownAtIndex, lookupKnownAt, lookupKnownAtValue,
   sortContradictions,
   validateContradictions,
   type AcceptedContradiction,
-} from "../../src/core/contradictionValidation";
-import type { Chunk } from "../../src/core/chunker";
+} from "../../../src/core/contradictionValidation";
+import type { Chunk } from "../../../src/core/chunker";
 
 /**
  * 矛盾検知の応答の検証（設計書6.10.1）。

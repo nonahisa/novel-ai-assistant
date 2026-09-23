@@ -9,12 +9,12 @@ import {
 } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { FileSystemError, FileType, workspace } from "./support/vscodeStub";
+import { FileSystemError, FileType, workspace } from "../support/vscodeStub";
 import {
   scanCollection,
   looksLikeWork,
   describeScan,
-} from "../../src/core/workCollection";
+} from "../../../src/core/workCollection";
 
 /**
  * 書庫の走査。

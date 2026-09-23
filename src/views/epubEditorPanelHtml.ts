@@ -1841,7 +1841,7 @@ function setStatus(text, isError) {
 
 /*
  * ここから cover:end までは、**画面の外から切り出して動かせる**ように
- * 印で挟んである（test/unit/coverCompose.test.ts）。合成の計算は
+ * 印で挟んである（test/unit/cross/coverCompose.test.ts）。合成の計算は
  * canvas を持たない環境では確かめられないので、印の中の関数を
  * new Function で取り出し、偽の canvas で測る——core/ へ写さないのは、
  * 写した側と画面側の片方だけが直る日が必ず来るからである

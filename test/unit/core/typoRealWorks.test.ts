@@ -4,8 +4,8 @@ import {
   onlyScriptDifference,
   onlyTrailingPunctuation,
   validateTypoIssues,
-} from "../../src/core/typoCheckValidation";
-import type { Chunk } from "../../src/core/chunker";
+} from "../../../src/core/typoCheckValidation";
+import type { Chunk } from "../../../src/core/chunker";
 
 /**
  * 誤字脱字を、**作者の10作品・44,000字**で実際に走らせて分かったこと

@@ -4,8 +4,8 @@ import type {
   DailyStat,
   DeviceWritingStats,
   WritingMeasurement,
-} from "../../src/models/writingStats";
-import { WRITING_STATS_SCHEMA_VERSION } from "../../src/models/writingStats";
+} from "../../../src/models/writingStats";
+import { WRITING_STATS_SCHEMA_VERSION } from "../../../src/models/writingStats";
 import {
   addDays,
   aggregate,
@@ -25,14 +25,14 @@ import {
   sumRange,
   totalsByLabel,
   weekStartKey,
-} from "../../src/core/writingStats";
-import { describeWrittenAmount } from "../../src/core/writingAmountText";
+} from "../../../src/core/writingStats";
+import { describeWrittenAmount } from "../../../src/core/writingAmountText";
 import {
   describeStatusBarProgress,
   fileCountKeyFor,
   summarize,
-} from "../../src/features/writingProgress";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/features/writingProgress";
+import type { WorkEntry } from "../../../src/models/types";
 
 /** 作品を走査した結果の代わり */
 function measurement(

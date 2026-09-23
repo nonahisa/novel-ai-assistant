@@ -1,16 +1,16 @@
 import { describe, expect, test } from "vitest";
-import { Bm25Index, bigrams } from "../../src/core/bm25";
+import { Bm25Index, bigrams } from "../../../src/core/bm25";
 import {
   describeRetrieval,
   formatForPrompt,
   retrieve,
-} from "../../src/core/retrieval";
-import { splitPassages } from "../../src/core/retrievalCorpus";
-import type { RetrievalItem } from "../../src/core/retrievalCorpus";
+} from "../../../src/core/retrieval";
+import { splitPassages } from "../../../src/core/retrievalCorpus";
+import type { RetrievalItem } from "../../../src/core/retrievalCorpus";
 import {
   buildSearchQuery,
   parseSearchTerms,
-} from "../../src/prompts/searchTerms";
+} from "../../../src/prompts/searchTerms";
 
 function item(
   id: string,

@@ -375,7 +375,7 @@ export const PROCEDURE_MIN_HITS = 1;
 /**
  * 手順書きの通し方。
  *
- * **残してあるのは測り直しのため**（`test/unit/procedureSelect.test.ts` が
+ * **残してあるのは測り直しのため**（`test/unit/core/procedureSelect.test.ts` が
  * しきい値2へ戻した列を並べて、緩めたことで何件増えたかを毎回示す）。
  * 製品はどこからも渡さないが、**テストが両方の値を通るので腐らない**。
  */

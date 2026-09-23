@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createEditQueue } from "../../src/core/editQueue";
+import { createEditQueue } from "../../../src/core/editQueue";
 
 /**
  * 打たれた本文を1つずつ順に当てる（設計書6.25.2）。

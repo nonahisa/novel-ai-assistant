@@ -6,10 +6,10 @@ import {
   commands,
   window,
   workspace,
-} from "./support/vscodeStub";
-import { emptyCharacter, type Character } from "../../src/models/character";
-import type { WorkEntry } from "../../src/models/types";
-import type { WorkChatTurn } from "../../src/prompts/workChat";
+} from "../support/vscodeStub";
+import { emptyCharacter, type Character } from "../../../src/models/character";
+import type { WorkEntry } from "../../../src/models/types";
+import type { WorkChatTurn } from "../../../src/prompts/workChat";
 
 /**
  * 相談から設定資料への書き込み（設計書6.72、P-32）。
@@ -31,7 +31,7 @@ const state = vi.hoisted(() => ({
   logged: [] as unknown[],
 }));
 
-vi.mock("../../src/core/characterStore", () => ({
+vi.mock("../../../src/core/characterStore", () => ({
   CharacterStore: class {
     async loadAll() {
       return { characters: state.characters, errors: state.loadErrors };
@@ -39,13 +39,13 @@ vi.mock("../../src/core/characterStore", () => ({
   },
 }));
 
-vi.mock("../../src/core/pendingUpdates", () => ({
+vi.mock("../../../src/core/pendingUpdates", () => ({
   PendingUpdateStore: class {
     stage = state.stage;
   },
 }));
 
-vi.mock("../../src/core/chatLog", () => ({
+vi.mock("../../../src/core/chatLog", () => ({
   appendChatLog: (_work: unknown, entry: unknown) => {
     state.logged.push(entry);
   },
@@ -59,7 +59,7 @@ vi.mock("../../src/core/chatLog", () => ({
  */
 const hooks = vi.hoisted(() => ({ beforeSend: () => undefined as void }));
 
-vi.mock("../../src/features/aiConnectivity", () => ({
+vi.mock("../../../src/features/aiConnectivity", () => ({
   confirmProviderReachable: async () => true,
   confirmPaidUsage: async () => {
     hooks.beforeSend();
@@ -73,8 +73,8 @@ const failures = vi.hoisted(
 );
 // **切り詰めは本物を使う**（`responseExcerptForLog`）。ここで写しを置くと、
 // 共有の字数を変えたときに、この試験だけ古い字数で通ってしまう
-vi.mock("../../src/core/logger", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/core/logger")>()),
+vi.mock("../../../src/core/logger", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../src/core/logger")>()),
   logFailure: (context: string, detail: Record<string, unknown>) => {
     failures.push({ context, detail });
   },
@@ -82,7 +82,7 @@ vi.mock("../../src/core/logger", async (importOriginal) => ({
 }));
 
 /** 中止ボタン付きの進捗。ここでは中止しないので、そのまま実行する */
-vi.mock("../../src/views/progress", () => ({
+vi.mock("../../../src/views/progress", () => ({
   withCancellableProgress: async (
     _title: string,
     task: (
@@ -107,12 +107,12 @@ const {
   formatChatConversation,
   trimChatHistory,
   verifyChatDecisions,
-} = await import("../../src/core/chatSettingsSync");
+} = await import("../../../src/core/chatSettingsSync");
 const { parseChatSettingsSync } = await import(
-  "../../src/prompts/chatSettingsSync"
+  "../../../src/prompts/chatSettingsSync"
 );
 const { applyChatToSettings } = await import(
-  "../../src/features/chatSettingsSync"
+  "../../../src/features/chatSettingsSync"
 );
 
 const work: WorkEntry = {

@@ -6,19 +6,19 @@ import {
   DICTATION_CLEAN_SYSTEM_PROMPT,
   DICTATION_CLEAN_VERSION,
   DICTATION_MIN_CHARS,
-} from "../../src/prompts/dictationClean";
+} from "../../../src/prompts/dictationClean";
 import {
   DICTATION_MAX_LENGTH_RATIO,
   DICTATION_MIN_LENGTH_RATIO,
   dictationQuoteAllowance,
   parseDictationCleanResult,
   validateDictationClean,
-} from "../../src/core/dictationCleanValidation";
-import { applyDictationText } from "../../src/features/dictationClean";
-import { EndOfLine, WorkspaceEdit, workspace } from "./support/vscodeStub";
-import { EXTRA_GUIDE, buildGuideBundles } from "../../src/features/featureGuide";
-import { allActions } from "../../src/views/actionList";
-import { COMMAND_FEATURES } from "../../src/core/workTypeVisibility";
+} from "../../../src/core/dictationCleanValidation";
+import { applyDictationText } from "../../../src/features/dictationClean";
+import { EndOfLine, WorkspaceEdit, workspace } from "../support/vscodeStub";
+import { EXTRA_GUIDE, buildGuideBundles } from "../../../src/features/featureGuide";
+import { allActions } from "../../../src/views/actionList";
+import { COMMAND_FEATURES } from "../../../src/core/workTypeVisibility";
 
 /**
  * 口述筆記（P-35、設計書6.83）。

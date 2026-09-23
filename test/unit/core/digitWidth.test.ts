@@ -8,7 +8,7 @@ import {
   isHalfWidthDigit,
   toFullWidthDigit,
   toHalfWidthDigit,
-} from "../../src/core/digitWidth";
+} from "../../../src/core/digitWidth";
 
 describe("半角と全角の数字の行き来", () => {
   test("0〜9のすべてを往復できる", () => {

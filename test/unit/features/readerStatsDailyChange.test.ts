@@ -4,13 +4,13 @@ import {
   buildReaderStatsEnvelope,
   parseReaderStatsEnvelope,
   READER_STATS_ENVELOPE_VERSION,
-} from "../../src/core/readerStatsEnvelope";
-import { importReaderStats } from "../../src/features/readerStats";
-import { computeReaderRates } from "../../src/core/readerRates";
+} from "../../../src/core/readerStatsEnvelope";
+import { importReaderStats } from "../../../src/features/readerStats";
+import { computeReaderRates } from "../../../src/core/readerRates";
 import {
   buildReaderCharts,
   type ReaderCharts,
-} from "../../src/core/readerStatsCharts";
+} from "../../../src/core/readerStatsCharts";
 import {
   emptyPostingLedger,
   readerStatsMetricInfo,
@@ -19,10 +19,10 @@ import {
   withReaderStats,
   type PostingLedger,
   type ReaderStatsRecord,
-} from "../../src/models/posting";
-import { buildWritingStatsPanelHtml } from "../../src/views/writingStatsPanelHtml";
-import type { WorkEntry } from "../../src/models/types";
-import { env, FileSystemError, Uri, window, workspace } from "./support/vscodeStub";
+} from "../../../src/models/posting";
+import { buildWritingStatsPanelHtml } from "../../../src/views/writingStatsPanelHtml";
+import type { WorkEntry } from "../../../src/models/types";
+import { env, FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
 
 /**
  * Narou.fun の日ごとのブクマと評価の表を、日ごとの増減として受ける

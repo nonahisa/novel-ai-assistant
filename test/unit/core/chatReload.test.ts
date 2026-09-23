@@ -5,14 +5,14 @@ import {
   parseChatReload,
   RELOAD_KIND_LABELS,
   type ReloadCandidate,
-} from "../../src/core/chatReload";
-import { KIND_LABELS } from "../../src/core/settingsSummary";
+} from "../../../src/core/chatReload";
+import { KIND_LABELS } from "../../../src/core/settingsSummary";
 import {
   parseWorkChatAnswer,
   WORK_CHAT_SCHEMA,
   WORK_CHAT_SYSTEM_PROMPT,
-} from "../../src/prompts/workChat";
-import { buildWorkChatPanelHtml } from "../../src/views/workChatPanelHtml";
+} from "../../../src/prompts/workChat";
+import { buildWorkChatPanelHtml } from "../../../src/views/workChatPanelHtml";
 
 /**
  * 相談からの「AIで再読込」（設計書6.31.3）。

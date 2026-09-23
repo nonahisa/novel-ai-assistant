@@ -5,7 +5,7 @@ import {
   type ActionGroup,
   type ActionItem,
   type ActionSection,
-} from "../../src/views/actionList";
+} from "../../../src/views/actionList";
 
 /**
  * 設定の説明の中のコマンドリンクが、メニューの項目名と食い違っていないか。

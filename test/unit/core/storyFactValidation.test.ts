@@ -3,7 +3,7 @@ import {
   describeStoryFactRejections,
   validateStoryFactResult,
   type StoryFactValidationInput,
-} from "../../src/core/storyFactValidation";
+} from "../../../src/core/storyFactValidation";
 
 /**
  * P-37 の応答の検算（設計書6.88）。

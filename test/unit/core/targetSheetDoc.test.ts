@@ -8,9 +8,9 @@ import {
   isTargetSheetDoc,
   readAimTypes,
   TARGET_SHEET_FILE,
-} from "../../src/core/targetSheetDoc";
-import { targetSheetFor } from "../../src/core/targetSheet";
-import type { ReaderScores } from "../../src/models/readerProfile";
+} from "../../../src/core/targetSheetDoc";
+import { targetSheetFor } from "../../../src/core/targetSheet";
+import type { ReaderScores } from "../../../src/models/readerProfile";
 
 /**
  * ターゲットシートの紙（設計書6.108.2）。

@@ -19,7 +19,7 @@ import { describe, expect, test } from "vitest";
  * 呼ぶ処理を足した人が忘れたら、ここが落ちる。
  */
 
-const FEATURES_DIR = path.join(__dirname, "..", "..", "src", "features");
+const FEATURES_DIR = path.join(__dirname, "..", "..", "..", "src", "features");
 
 /**
  * `confirmProviderReachable` を呼ばなくてよいファイル。**増やすときは理由を書く。**

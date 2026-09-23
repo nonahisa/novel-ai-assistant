@@ -5,14 +5,14 @@ import {
   buildExportMarkdown,
   type ExportAudience,
   type SettingsExportData,
-} from "../../src/core/settingsExportProfiles";
-import { buildCharacterMarkdown } from "../../src/core/settingsMarkdown";
-import { emptyCharacter, type Character } from "../../src/models/character";
-import { emptyLocation, type Location } from "../../src/models/location";
-import { emptyAbility, emptyAbilitySystem } from "../../src/models/ability";
-import { emptyOrganization } from "../../src/models/organization";
-import { emptyWorldItem } from "../../src/models/world";
-import type { RecordChange } from "../../src/models/jsonValidation";
+} from "../../../src/core/settingsExportProfiles";
+import { buildCharacterMarkdown } from "../../../src/core/settingsMarkdown";
+import { emptyCharacter, type Character } from "../../../src/models/character";
+import { emptyLocation, type Location } from "../../../src/models/location";
+import { emptyAbility, emptyAbilitySystem } from "../../../src/models/ability";
+import { emptyOrganization } from "../../../src/models/organization";
+import { emptyWorldItem } from "../../../src/models/world";
+import type { RecordChange } from "../../../src/models/jsonValidation";
 
 /**
  * 設定資料の提供先別エクスポート（設計書6.75）。

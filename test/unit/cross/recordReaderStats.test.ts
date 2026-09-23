@@ -3,10 +3,10 @@ import { beforeEach, describe, expect, test } from "vitest";
 import {
   importReaderStats,
   recordReaderStats,
-} from "../../src/features/readerStats";
-import { buildReaderStatsEnvelope } from "../../src/core/readerStatsEnvelope";
-import type { WorkEntry } from "../../src/models/types";
-import { env, FileSystemError, Uri, window, workspace } from "./support/vscodeStub";
+} from "../../../src/features/readerStats";
+import { buildReaderStatsEnvelope } from "../../../src/core/readerStatsEnvelope";
+import type { WorkEntry } from "../../../src/models/types";
+import { env, FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
 
 /**
  * 読者の反応の2つの入口（設計書6.79.7）。

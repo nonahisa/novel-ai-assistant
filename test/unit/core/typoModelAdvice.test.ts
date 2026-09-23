@@ -4,7 +4,7 @@ import * as path from "node:path";
 import {
   EXTRACT_MODEL_ADVICE,
   TYPO_MODEL_ADVICE,
-} from "../../src/core/requirements";
+} from "../../../src/core/requirements";
 
 /**
  * 誤字脱字は、大きいモデルを勧める（作者の裁定 2026-09-06）。
@@ -21,7 +21,7 @@ import {
  */
 function read(relative: string): string {
   return readFileSync(
-    path.join(__dirname, "..", "..", "src", relative),
+    path.join(__dirname, "..", "..", "..", "src", relative),
     "utf8"
   );
 }

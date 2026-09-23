@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { episodeUnit, formatChapterLabel } from "../../src/core/episodeLabel";
-import { matchWorkFormat } from "../../src/core/workFormatStore";
-import { formatWarningFor } from "../../src/core/formatFit";
-import type { EpisodeFile } from "../../src/models/types";
+import { episodeUnit, formatChapterLabel } from "../../../src/core/episodeLabel";
+import { matchWorkFormat } from "../../../src/core/workFormatStore";
+import { formatWarningFor } from "../../../src/core/formatFit";
+import type { EpisodeFile } from "../../../src/models/types";
 
 /**
  * 形式を実際の振る舞いへ効かせる（設計書6.4.5）。

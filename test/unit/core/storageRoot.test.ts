@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import * as vscode from "vscode";
-import { storageRootFrom, toUri } from "../../src/core/paths";
+import { storageRootFrom, toUri } from "../../../src/core/paths";
 
 /**
  * 拡張機能の保管庫（`globalStorageUri`）を、持ち回る文字列にする（設計書5.8）。
@@ -70,7 +70,7 @@ describe("保管庫の置き場（storageRootFrom）", () => {
  */
 describe("`vscode-userdata` の判定は core/paths.ts だけ", () => {
   test("ほかのソースに `scheme === \"vscode-userdata\"` が無い", () => {
-    const srcRoot = nodePath.resolve(__dirname, "../../src");
+    const srcRoot = nodePath.resolve(__dirname, "../../../src");
     const allowed = nodePath.join(srcRoot, "core", "paths.ts");
     const pattern = /scheme\s*===\s*["']vscode-userdata["']/;
     const offenders: string[] = [];

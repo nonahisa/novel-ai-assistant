@@ -22,6 +22,7 @@ const manifest = JSON.parse(
       path.dirname(fileURLToPath(import.meta.url)),
       "..",
       "..",
+      "..",
       "package.json"
     ),
     "utf8"

@@ -3,11 +3,11 @@ import {
   mergeOne,
   reregister,
   type MergeOutcome,
-} from "../../src/features/mergeIntoLibrary";
-import type { MergePlan } from "../../src/core/libraryMerge";
-import type { WorkEntry } from "../../src/models/types";
-import type { WorkRegistry } from "../../src/core/workRegistry";
-import { FileType, workspace } from "./support/vscodeStub";
+} from "../../../src/features/mergeIntoLibrary";
+import type { MergePlan } from "../../../src/core/libraryMerge";
+import type { WorkEntry } from "../../../src/models/types";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
+import { FileType, workspace } from "../support/vscodeStub";
 
 /**
  * 書庫へまとめ直すときの、**写す側と登録簿の側**（設計書5.7.10）。

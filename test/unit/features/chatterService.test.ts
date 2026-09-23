@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 const failures = vi.hoisted(
   () => [] as Array<{ context: string; detail: Record<string, unknown> }>
 );
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logFailure: (context: string, detail: Record<string, unknown>) => {
     failures.push({ context, detail });
   },
@@ -22,16 +22,16 @@ import {
   ChatterService,
   QUIET_GAP_MS,
   type ChatterDeps,
-} from "../../src/features/chatterService";
-import { IDLE_THRESHOLD_MS, type Chatter } from "../../src/core/chatter";
-import { beginAiWork, resetAiActivity } from "../../src/core/aiActivity";
+} from "../../../src/features/chatterService";
+import { IDLE_THRESHOLD_MS, type Chatter } from "../../../src/core/chatter";
+import { beginAiWork, resetAiActivity } from "../../../src/core/aiActivity";
 import {
   acquireCall,
   acquireRun,
   resetAiSequence,
-} from "../../src/core/aiSequence";
-import type { WorkEntry } from "../../src/models/types";
-import { workspace } from "./support/vscodeStub";
+} from "../../../src/core/aiSequence";
+import type { WorkEntry } from "../../../src/models/types";
+import { workspace } from "../support/vscodeStub";
 
 /**
  * 独り言を「いつ言うか」。

@@ -3,8 +3,8 @@ import {
   PROCEDURE_MIN_HITS,
   PROCEDURES,
   selectProcedure,
-} from "../../src/core/procedures";
-import { MIN_EVIDENCE_HITS } from "../../src/core/guideSelect";
+} from "../../../src/core/procedures";
+import { MIN_EVIDENCE_HITS } from "../../../src/core/guideSelect";
 
 /**
  * 相談から手順書きが選ばれるか——**取りこぼしの見張り**（設計書6.104）。

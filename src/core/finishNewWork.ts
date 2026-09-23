@@ -88,7 +88,7 @@ export interface FinishStep {
  * **実物は `features/proposeChapters.ts` の `CHAPTER_PROPOSAL_CATEGORY`**
  * である。あちらは `vscode` を import しているので `core` からは読めず、
  * ここでは同じ文字列を持つしかない。**噛み合っていることは
- * `test/unit/finishNewWork.test.ts` が実物と突き合わせて見張る**
+ * `test/unit/cross/finishNewWork.test.ts` が実物と突き合わせて見張る**
  * （ずれると件数が黙って0件になる）。
  */
 const CHAPTER_CATEGORY = "章立て";
@@ -345,7 +345,7 @@ export function buildFinishConfirm(
   );
   /*
     **ここはダイアログの文言なので、Markdownの記号を混ぜない**
-    （`test/unit/plainTextUi.test.ts`）。VS Code の確認はプレーンテキストで、
+    （`test/unit/core/plainTextUi.test.ts`）。VS Code の確認はプレーンテキストで、
     強調の記号はそのまま画面に出る。結果の紙のほうは Markdown として
     読まれるので、そちらは `core/finishReportDoc.ts` に分けてある。
   */

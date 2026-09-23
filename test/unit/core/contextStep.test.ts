@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { contextSizeForPrompt } from "../../src/core/chunker";
+import { contextSizeForPrompt } from "../../../src/core/chunker";
 
 /**
  * `num_ctx` を段に丸める（設計書6.52）。

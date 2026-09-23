@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   findContradictionCandidates,
   findIdentityDrift,
-} from "../../src/core/contradictionMatch";
-import type { SceneIdentity } from "../../src/models/identity";
-import type { IdentityTransition } from "../../src/models/storyFact";
+} from "../../../src/core/contradictionMatch";
+import type { SceneIdentity } from "../../../src/models/identity";
+import type { IdentityTransition } from "../../../src/models/storyFact";
 
 /**
  * 同一性の照合（設計書6.88.5）。

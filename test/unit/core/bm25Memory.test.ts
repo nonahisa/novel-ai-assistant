@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { Bm25Index, bigrams } from "../../src/core/bm25";
+import { Bm25Index, bigrams } from "../../../src/core/bm25";
 
 /**
  * 語句検索の索引が大きすぎた問題の再現（作者の指摘、2026-08-16）。

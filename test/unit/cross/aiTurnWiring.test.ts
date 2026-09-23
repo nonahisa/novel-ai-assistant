@@ -21,7 +21,7 @@ import * as nodePath from "node:path";
  * 起きる。相談や独り言が10分待たされる作りになると道具として使えないので、
  * **取らないことも決めごととして書き留める。**
  */
-const FEATURES = nodePath.join(__dirname, "..", "..", "src", "features");
+const FEATURES = nodePath.join(__dirname, "..", "..", "..", "src", "features");
 
 function read(file: string): string {
   return fs.readFileSync(nodePath.join(FEATURES, file), "utf8");

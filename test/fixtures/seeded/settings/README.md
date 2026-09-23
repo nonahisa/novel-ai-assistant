@@ -14,7 +14,7 @@ node scripts/measure.mjs settings --model gemma4:12b --repeat 3   # 揺れを見
 
 **製品と同じ束（MCP）を通る**（`novel.run`、feature: `settings`）。`novel.prompt` だけ呼んで検算を飛ばす測り方は、製品に無い不具合を見つけたことになる（CLAUDE.md の「繰り返し起きた失敗」5）。
 
-数え方の本体は `scripts/measureScoring.mjs` の `scoreSettings()` にあり、`test/unit/measureSettingsScoring.test.ts` が**満点の入力とわざと壊した入力の両方**で確かめている（片方だけでは、常に満点を返す採点器が通ってしまう）。
+数え方の本体は `scripts/measureScoring.mjs` の `scoreSettings()` にあり、`test/unit/cross/measureSettingsScoring.test.ts` が**満点の入力とわざと壊した入力の両方**で確かめている（片方だけでは、常に満点を返す採点器が通ってしまう）。
 
 ## 仕込んである罠（すべて実機で本当に起きた壊れ方）
 

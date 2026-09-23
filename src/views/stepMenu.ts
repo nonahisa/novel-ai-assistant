@@ -41,7 +41,7 @@ import {
  * しかも、どちらが正しいのかは画面を見比べるまで分からない。
  *
  * 参照が切れた（コマンドを改名した）ときは `STEP_MENU_MISSING_COMMANDS` に残り、
- * `test/unit/stepMenu.test.ts` が落ちる。
+ * `test/unit/views/stepMenu.test.ts` が落ちる。
  *
  * ## 最上段で選んだ作品にだけ効く
  *

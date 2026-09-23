@@ -11,8 +11,8 @@ import {
   isCommandVisibleForWorkType,
   workTypeContextValue,
   type WorkTypeColumn,
-} from "../../src/core/workTypeVisibility";
-import { allActions } from "../../src/views/actionList";
+} from "../../../src/core/workTypeVisibility";
+import { allActions } from "../../../src/views/actionList";
 
 /**
  * タイプ×機能の対応表（設計書6.70.1）。
@@ -40,7 +40,7 @@ interface PackageManifest {
 }
 
 const manifest = JSON.parse(
-  readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+  readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
 ) as PackageManifest;
 
 /**
@@ -233,7 +233,7 @@ describe("タイプに合わない操作は出さない", () => {
     // 事故のほうが「未設定では見せる」利便より重い（本体の裁定、2026-09-04）。
     // package.json の when も episode-memo の完全一致であること
     const manifest = JSON.parse(
-      readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+      readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
     ) as {
       contributes: {
         menus: Record<string, Array<{ command: string; when?: string }>>;

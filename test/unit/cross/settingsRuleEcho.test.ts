@@ -3,15 +3,15 @@ import { readFileSync, readdirSync } from "node:fs";
 import {
   BASE_SYSTEM_PROMPT,
   buildCharacterExtractPrompt,
-} from "../../src/prompts/characterExtract";
+} from "../../../src/prompts/characterExtract";
 import {
   dropInstructionEcho,
   isInstructionEcho,
   mergeAbilitySystemRules,
-} from "../../src/core/settingsExtractionValidation";
-import { SettingsExtractionCollector } from "../../src/core/settingsExtractionCollect";
-import type { Chunk } from "../../src/core/chunker";
-import type { CharacterExtractResult } from "../../src/prompts/characterExtract";
+} from "../../../src/core/settingsExtractionValidation";
+import { SettingsExtractionCollector } from "../../../src/core/settingsExtractionCollect";
+import type { Chunk } from "../../../src/core/chunker";
+import type { CharacterExtractResult } from "../../../src/prompts/characterExtract";
 
 /*
   2026-09-19 の実機確認（さくらのAI / preview/Qwen3.6-35B-A3B）で、

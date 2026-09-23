@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { commands, window } from "vscode";
-import type { WorkEntry } from "../../src/models/types";
+import type { WorkEntry } from "../../../src/models/types";
 import {
   emptyPlotSections,
   type PlotSections,
-} from "../../src/core/plotDoc";
-import { PLOT_SKIP_OPTION } from "../../src/core/plotInterview";
+} from "../../../src/core/plotDoc";
+import { PLOT_SKIP_OPTION } from "../../../src/core/plotInterview";
 
 /**
  * 「この項目は飛ばす」で次へ進む（ノートのソース照合、2026-09-22）。
@@ -22,15 +22,15 @@ import { PLOT_SKIP_OPTION } from "../../src/core/plotInterview";
 
 // **書き出しだけを止める。** ほかの口（時刻の整形・伏せ字）は
 // 相談の記録（`chatLog.ts`）が使うので、置き換えると落ちる
-vi.mock("../../src/core/logger", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/core/logger")>()),
+vi.mock("../../../src/core/logger", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../src/core/logger")>()),
   logFailure: () => undefined,
   logStep: () => undefined,
   logLine: () => undefined,
   useLogFile: () => undefined,
 }));
 
-const { WorkChatPanel } = await import("../../src/features/workChatPanel");
+const { WorkChatPanel } = await import("../../../src/features/workChatPanel");
 
 const WORK: WorkEntry = {
   id: "w_a",

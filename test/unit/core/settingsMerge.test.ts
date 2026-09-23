@@ -4,9 +4,9 @@ import {
   isContainedName,
   mergeExtractedAbilities,
   mergeExtractedLocations,
-} from "../../src/core/settingsMerge";
-import { emptyAbility } from "../../src/models/ability";
-import { emptyLocation } from "../../src/models/location";
+} from "../../../src/core/settingsMerge";
+import { emptyAbility } from "../../../src/models/ability";
+import { emptyLocation } from "../../../src/models/location";
 
 function mergeAbilities(names: string[]) {
   return mergeExtractedAbilities(

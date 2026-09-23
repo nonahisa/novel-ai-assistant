@@ -6,8 +6,8 @@ import {
   promptVersionWithPastScenes,
   PastSceneIndex,
   PAST_SCENE_MAX_CHARS,
-} from "../../src/core/pastSceneSelect";
-import type { ExcerptSource } from "../../src/core/mentionExcerpts";
+} from "../../../src/core/pastSceneSelect";
+import type { ExcerptSource } from "../../../src/core/mentionExcerpts";
 
 /**
  * 矛盾検知へ渡す「過去の関連場面」の選抜（設計書6.74）。

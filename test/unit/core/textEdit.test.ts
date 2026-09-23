@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeMinimalEdit } from "../../src/core/textEdit";
+import { computeMinimalEdit } from "../../../src/core/textEdit";
 
 /**
  * 書き換わった範囲だけを取り出す（設計書6.25）。

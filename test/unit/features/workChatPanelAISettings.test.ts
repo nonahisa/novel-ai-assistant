@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { buildWorkChatPanelHtml } from "../../src/views/workChatPanelHtml";
-import { commands } from "./support/vscodeStub";
-import type { WorkEntry } from "../../src/models/types";
+import { buildWorkChatPanelHtml } from "../../../src/views/workChatPanelHtml";
+import { commands } from "../support/vscodeStub";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 相談パネルの上に出ているAIの名前（作者の指摘、2026-09-06）。
@@ -14,18 +14,18 @@ import type { WorkEntry } from "../../src/models/types";
  * 画面から届いた文字列がそのままコマンド名になる道は作らない（既存の流儀）。
  */
 
-vi.mock("../../src/core/chatLog", () => ({
+vi.mock("../../../src/core/chatLog", () => ({
   appendChatLog: () => undefined,
   summarizeMaterials: () => [],
 }));
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logFailure: () => undefined,
   logStep: () => undefined,
   logLine: () => undefined,
   useLogFile: () => undefined,
 }));
 
-const { WorkChatPanel } = await import("../../src/features/workChatPanel");
+const { WorkChatPanel } = await import("../../../src/features/workChatPanel");
 
 const WORK: WorkEntry = {
   id: "w_a",

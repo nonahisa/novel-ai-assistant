@@ -6,15 +6,15 @@ import {
   READER_ADVICE_FULL_SERIES_MAX,
   READER_ADVICE_SOURCES,
   type ReaderAdviceMaterial,
-} from "../../src/core/readerAdvice";
-import { computeReaderRates } from "../../src/core/readerRates";
-import { buildPostingSiteRecords } from "../../src/core/postingSiteRecords";
+} from "../../../src/core/readerAdvice";
+import { computeReaderRates } from "../../../src/core/readerRates";
+import { buildPostingSiteRecords } from "../../../src/core/postingSiteRecords";
 import {
   emptyPostingLedger,
   withReaderStats,
   type PostingLedger,
   type ReaderStatsRecord,
-} from "../../src/models/posting";
+} from "../../../src/models/posting";
 import {
   READER_ADVICE_EXAMPLES,
   READER_ADVICE_GUIDELINES,
@@ -23,14 +23,14 @@ import {
   buildReaderReactionChatBlock,
   formatReaderAdviceMaterial,
   questionMentionsReaderReaction,
-} from "../../src/prompts/readerAdvice";
+} from "../../../src/prompts/readerAdvice";
 import {
   mentionedEpisodes,
   validateReaderAdviceAnswer,
-} from "../../src/core/readerAdviceValidation";
-import { readerReactionChatBlockFor } from "../../src/core/readerAdviceChat";
-import type { AdviceProfile } from "../../src/core/advicePolicy";
-import { buildWritingStatsPanelHtml } from "../../src/views/writingStatsPanelHtml";
+} from "../../../src/core/readerAdviceValidation";
+import { readerReactionChatBlockFor } from "../../../src/core/readerAdviceChat";
+import type { AdviceProfile } from "../../../src/core/advicePolicy";
+import { buildWritingStatsPanelHtml } from "../../../src/views/writingStatsPanelHtml";
 
 /**
  * 読者の反応の助言（残課題 B9。設計書6.79.7.3）。

@@ -9,12 +9,12 @@ import {
   saveModelTuning,
   timeoutSettingKey,
   tunedContextWindow,
-} from "../../src/core/modelTuning";
+} from "../../../src/core/modelTuning";
 import {
   tuningStoreContents,
   useBrokenTuningStore,
   useMemoryTuningStore,
-} from "./support/tuningStore";
+} from "../support/tuningStore";
 
 /**
  * 台帳（AIチューニング、設計書6.49）を、プロバイダが**先に**見ること。
@@ -282,7 +282,7 @@ describe("台帳の値を、読むときに挟む", () => {
 });
 
 describe("6つのプロバイダが台帳を通る", () => {
-  const root = path.join(__dirname, "..", "..");
+  const root = path.join(__dirname, "..", "..", "..");
   const providers = [
     "ollama",
     "lmstudio",

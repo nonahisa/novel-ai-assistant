@@ -5,10 +5,10 @@ import {
   buildCharacterAddressView,
   type AddressLine,
   type AddressScope,
-} from "../../src/core/addressPairsView";
-import { buildSettingsPanelHtml } from "../../src/views/settingsPanelHtml";
-import { emptyCharacter } from "../../src/models/character";
-import type { AddressForm, AddressTerm, Character } from "../../src/models/character";
+} from "../../../src/core/addressPairsView";
+import { buildSettingsPanelHtml } from "../../../src/views/settingsPanelHtml";
+import { emptyCharacter } from "../../../src/models/character";
+import type { AddressForm, AddressTerm, Character } from "../../../src/models/character";
 
 /**
  * 呼び合いを画面へ出す（設計書6.92）。

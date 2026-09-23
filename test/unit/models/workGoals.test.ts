@@ -4,15 +4,15 @@ import {
   parseWorkGoals,
   emptyWorkGoals,
   type ContestGoal,
-} from "../../src/models/workGoals";
+} from "../../../src/models/workGoals";
 import {
   buildContestProgress,
   daysUntil,
   describeContestProgress,
   targetCharsOf,
-} from "../../src/core/contestProgress";
-import { buildEpisodeCountTable } from "../../src/core/episodeCharTable";
-import type { EpisodeFile } from "../../src/models/types";
+} from "../../../src/core/contestProgress";
+import { buildEpisodeCountTable } from "../../../src/core/episodeCharTable";
+import type { EpisodeFile } from "../../../src/models/types";
 
 /**
  * 作品ごとの目標と、締切への進み具合（設計書6.3.6）。

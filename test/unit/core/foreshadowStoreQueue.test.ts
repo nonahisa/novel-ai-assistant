@@ -44,7 +44,7 @@ let stored: Array<Record<string, unknown>> = [];
 /** `loadAll` を何回通ったか。追い越しが起きたかの手がかりにする */
 let loadCalls = 0;
 
-vi.mock("../../src/core/settingsStore", () => ({
+vi.mock("../../../src/core/settingsStore", () => ({
   SettingsStore: class {
     async loadAll(): Promise<{ records: unknown[]; errors: unknown[] }> {
       loadCalls++;
@@ -73,8 +73,8 @@ vi.mock("../../src/core/settingsStore", () => ({
 import {
   addForeshadow,
   saveOrUpdateForeshadow,
-} from "../../src/core/foreshadowStore";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/core/foreshadowStore";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work: WorkEntry = {
   id: "w1",

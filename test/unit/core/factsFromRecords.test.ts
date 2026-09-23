@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildAttributeIntervals } from "../../src/core/attributeIntervals";
-import { findIntervalConflicts } from "../../src/core/contradictionMatch";
-import { factsFromCharacters } from "../../src/core/factsFromRecords";
-import { emptyCharacter, type Character } from "../../src/models/character";
-import type { RecordChange } from "../../src/models/jsonValidation";
+import { buildAttributeIntervals } from "../../../src/core/attributeIntervals";
+import { findIntervalConflicts } from "../../../src/core/contradictionMatch";
+import { factsFromCharacters } from "../../../src/core/factsFromRecords";
+import { emptyCharacter, type Character } from "../../../src/models/character";
+import type { RecordChange } from "../../../src/models/jsonValidation";
 
 /**
  * 既にある設定資料から事実を組む（設計書6.88.6の第2段）。

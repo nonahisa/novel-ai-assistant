@@ -3,20 +3,20 @@ import { beforeEach, describe, expect, test, vi, type Mock } from "vitest";
 import {
   CharacterStore,
   CharacterStoreError,
-} from "../../src/core/characterStore";
+} from "../../../src/core/characterStore";
 import {
   characterFileName,
   emptyCharacter,
   parseCharacter,
   type Character,
-} from "../../src/models/character";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/models/character";
+import type { WorkEntry } from "../../../src/models/types";
 import {
   FileSystemError,
   FileType,
   Uri,
   workspace,
-} from "./support/vscodeStub";
+} from "../support/vscodeStub";
 
 const work: WorkEntry = {
   id: "work_test",

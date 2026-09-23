@@ -3,26 +3,26 @@ import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { FileSystemError, workspace } from "./support/vscodeStub";
+import { FileSystemError, workspace } from "../support/vscodeStub";
 import {
   latestSpotlightRequest,
   parseSpotlightRequestLine,
   parseSpotlightRequestLog,
-} from "../../src/core/spotlightRequest";
-import { guideSpotlight } from "../../src/mcp/tools/spotlight";
+} from "../../../src/core/spotlightRequest";
+import { guideSpotlight } from "../../../src/mcp/tools/spotlight";
 import {
   exposureOf,
   setExternalClientName,
-} from "../../src/mcp/tools/accessLog";
-import { assertExternalAccessAllowed } from "../../src/mcp/tools/permission";
-import { IGNORED_PATHS } from "../../src/core/workRegistry";
-import { SpotlightRequestWatcher } from "../../src/features/spotlightRequestWatcher";
+} from "../../../src/mcp/tools/accessLog";
+import { assertExternalAccessAllowed } from "../../../src/mcp/tools/permission";
+import { IGNORED_PATHS } from "../../../src/core/workRegistry";
+import { SpotlightRequestWatcher } from "../../../src/features/spotlightRequestWatcher";
 import type {
   ActionSpotlight,
   SpotlightResult,
-} from "../../src/features/actionSpotlight";
-import { findAction, menuEntries } from "../../src/views/actionList";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/features/actionSpotlight";
+import { findAction, menuEntries } from "../../../src/views/actionList";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * AI の答えで、メニュー項目を2回点滅させる（設計書6.104。0.75.6）。

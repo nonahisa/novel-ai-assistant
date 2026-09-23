@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { window } from "./support/vscodeStub";
-import { disposeLog } from "../../src/core/logger";
-import { appliedFixKey } from "../../src/core/typoIssueHistory";
-import type { Chunk } from "../../src/core/chunker";
-import type { TypoCheckResult } from "../../src/prompts/typoCheck";
+import { window } from "../support/vscodeStub";
+import { disposeLog } from "../../../src/core/logger";
+import { appliedFixKey } from "../../../src/core/typoIssueHistory";
+import type { Chunk } from "../../../src/core/chunker";
+import type { TypoCheckResult } from "../../../src/prompts/typoCheck";
 
-const { collectIssues } = await import("../../src/features/checkTypos");
+const { collectIssues } = await import("../../../src/features/checkTypos");
 
 /**
  * 誤字脱字検知で落とした指摘の、理由をログへ残す（設計書6.8）。

@@ -10,13 +10,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const logged: string[] = [];
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logStep: (message: string) => {
     logged.push(message);
   },
 }));
 
-const { revealTextLocation } = await import("../../src/features/revealLocation");
+const { revealTextLocation } = await import("../../../src/features/revealLocation");
 
 beforeEach(() => {
   logged.length = 0;

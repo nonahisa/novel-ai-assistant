@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useMemoryTuningStore } from "./support/tuningStore";
+import { useMemoryTuningStore } from "../support/tuningStore";
 // **0.72.0 で `views/progress.ts` から `ai/runTimeEstimate.ts` へ移した。**
 // この検査はそのままで、**読む場所だけを差し替えてある**——移設で文言が
 // 変わっていないことは、下の期待値がそっくり通ることで示す
-import { estimateRunTimeText } from "../../src/ai/runTimeEstimate";
-import { featureOutputKey } from "../../src/core/featureOutputTokens";
-import { modelTuningKey } from "../../src/core/modelTuning";
+import { estimateRunTimeText } from "../../../src/ai/runTimeEstimate";
+import { featureOutputKey } from "../../../src/core/featureOutputTokens";
+import { modelTuningKey } from "../../../src/core/modelTuning";
 
 /**
  * 押す前の所要時間は、**普段の量（平均）から見積もる**（実機、2026-09-21）。

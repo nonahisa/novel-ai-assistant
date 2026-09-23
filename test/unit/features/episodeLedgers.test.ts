@@ -1,23 +1,23 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { FileSystemError, FileType, Uri, workspace } from "./support/vscodeStub";
-import type { WorkEntry } from "../../src/models/types";
+import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub";
+import type { WorkEntry } from "../../../src/models/types";
 import {
   describeLedgerFollowSummary,
   followEpisodeLedgers,
-} from "../../src/features/episodeLedgers";
-import type { EpisodeRename } from "../../src/core/episodeRenumber";
-import { ChapterStore } from "../../src/core/chapterStore";
-import { BookStore } from "../../src/core/bookStore";
-import { CharacterStore } from "../../src/core/characterStore";
-import { createAbilityStore } from "../../src/core/abilityStore";
-import { createForeshadowStore } from "../../src/core/foreshadowStore";
-import { SynopsisStore } from "../../src/core/synopsisStore";
-import { PostingStore } from "../../src/core/postingStore";
-import { emptyCharacter } from "../../src/models/character";
-import { emptyAbility } from "../../src/models/ability";
-import { emptyForeshadow } from "../../src/models/foreshadow";
-import { emptySynopsisSet } from "../../src/models/synopsis";
+} from "../../../src/features/episodeLedgers";
+import type { EpisodeRename } from "../../../src/core/episodeRenumber";
+import { ChapterStore } from "../../../src/core/chapterStore";
+import { BookStore } from "../../../src/core/bookStore";
+import { CharacterStore } from "../../../src/core/characterStore";
+import { createAbilityStore } from "../../../src/core/abilityStore";
+import { createForeshadowStore } from "../../../src/core/foreshadowStore";
+import { SynopsisStore } from "../../../src/core/synopsisStore";
+import { PostingStore } from "../../../src/core/postingStore";
+import { emptyCharacter } from "../../../src/models/character";
+import { emptyAbility } from "../../../src/models/ability";
+import { emptyForeshadow } from "../../../src/models/foreshadow";
+import { emptySynopsisSet } from "../../../src/models/synopsis";
 
 /**
  * 話数を指している台帳の追従（設計書6.67.3）。

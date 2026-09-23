@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
+import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 import {
   appendAiActionLog,
   appliedFixKey,
@@ -8,8 +8,8 @@ import {
   legacyDismissKey,
   loadAppliedFixKeys,
   TypoDismissedHistory,
-} from "../../src/core/typoIssueHistory";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/core/typoIssueHistory";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work: WorkEntry = {
   id: "w1",

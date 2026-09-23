@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { planCharacterSeparation } from "../../src/core/characterSeparate";
-import { emptyCharacter, type Character } from "../../src/models/character";
+import { planCharacterSeparation } from "../../../src/core/characterSeparate";
+import { emptyCharacter, type Character } from "../../../src/models/character";
 
 /**
  * 1つにまとめられた人物を、別人に分ける（設計書6.5.8）。

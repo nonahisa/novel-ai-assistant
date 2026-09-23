@@ -16,7 +16,7 @@ node scripts/measure.mjs typo --model gemma4:26b --repeat 3   # 揺れを見る
 
 **製品と同じ束（MCP）を通る**（`novel.run`、feature: `typo`）。固有名詞の辞書・作品の書き方・`validateTypoIssues` の検算まで、`features/checkTypos.ts` と同じ並びで通る。`novel.prompt` だけ呼んで検算を飛ばす測り方は、製品に無い不具合を見つけたことになる（CLAUDE.md の「繰り返し起きた失敗」5）。
 
-数え方の本体は `scripts/measureScoring.mjs` の `scoreTypo()` にあり、`test/unit/measureTypoScoring.test.ts` が**正解どおりの入力・わざと間違えた入力・何も返さない入力**の3通りで確かめている。**「何も返さない入力が0点になること」は必ず通す**——通らない採点器は、壊れた実装を満点にする。
+数え方の本体は `scripts/measureScoring.mjs` の `scoreTypo()` にあり、`test/unit/cross/measureTypoScoring.test.ts` が**正解どおりの入力・わざと間違えた入力・何も返さない入力**の3通りで確かめている。**「何も返さない入力が0点になること」は必ず通す**——通らない採点器は、壊れた実装を満点にする。
 
 ## 仕込んである誤字（12件。どれも本文に1か所ずつ）
 

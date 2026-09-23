@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
-import * as extraction from "../../src/features/extractCharacters";
-import type { ExtractedCharacter } from "../../src/prompts/characterExtract";
-import { emptyCharacter } from "../../src/models/character";
+import * as extraction from "../../../src/features/extractCharacters";
+import type { ExtractedCharacter } from "../../../src/prompts/characterExtract";
+import { emptyCharacter } from "../../../src/models/character";
 
 describe("人物抽出オーケストレーションの補助処理", () => {
   test("既存人物と前チャンクの名前・別名を重複なく次へ渡す", () => {

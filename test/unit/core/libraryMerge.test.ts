@@ -13,8 +13,8 @@ import {
   describeOriginalsNote,
   planMerge,
   shouldSkip,
-} from "../../src/core/libraryMerge";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/core/libraryMerge";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 別々に置かれている作品を、1つの書庫へまとめ直す（設計書5.7.10）。

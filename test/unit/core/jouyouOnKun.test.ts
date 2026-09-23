@@ -1,11 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { jouyouKanjiList } from "../../src/core/jouyouKanji";
+import { jouyouKanjiList } from "../../../src/core/jouyouKanji";
 import {
   hasNoKunReading,
   jouyouOnKunSize,
   jouyouReadingCounts,
   readingsOf,
-} from "../../src/core/jouyouOnKun";
+} from "../../../src/core/jouyouOnKun";
 
 /**
  * 常用漢字表の音訓の写し（`src/core/jouyouOnKun.ts`）。

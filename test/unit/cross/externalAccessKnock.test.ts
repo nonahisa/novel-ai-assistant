@@ -5,8 +5,8 @@ import {
   parseExternalAccessLog,
   pendingExternalAccessKnocks,
   type ExternalAccessEntry,
-} from "../../src/core/externalAccessLog";
-import { recordExternalAccess } from "../../src/mcp/tools/accessLog";
+} from "../../../src/core/externalAccessLog";
+import { recordExternalAccess } from "../../../src/mcp/tools/accessLog";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";

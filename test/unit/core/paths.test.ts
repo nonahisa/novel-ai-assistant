@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as nodePath from "path";
-import * as paths from "../../src/core/paths";
+import * as paths from "../../../src/core/paths";
 
 /**
  * 手元のファイルと、ブラウザ上の作品を、同じ書き方で扱う（設計書5.8）。

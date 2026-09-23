@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { tryRegisterAsCollection } from "../../src/features/addCollection";
-import type { WorkRegistry } from "../../src/core/workRegistry";
+import { tryRegisterAsCollection } from "../../../src/features/addCollection";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
 
 /**
  * 「1作品だと分かっている」ときは、書庫かどうかを訊かない（設計書5.7・6.99）。

@@ -5,7 +5,7 @@ import {
   splitSerifu,
   SCRIPT_LINE_CSS,
   SCRIPT_LINE_RULES,
-} from "../../src/core/scriptLines";
+} from "../../../src/core/scriptLines";
 
 /**
  * 脚本の行の種別（設計書6.70）。

@@ -45,8 +45,8 @@ vi.mock("vscode", () => {
   };
 });
 
-import { WorkFolderWatchers, isManuscriptPath } from "../../src/features/workFolderWatch";
-import type { WorkEntry } from "../../src/models/types";
+import { WorkFolderWatchers, isManuscriptPath } from "../../../src/features/workFolderWatch";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work = (id: string, folder: string): WorkEntry => ({
   id,

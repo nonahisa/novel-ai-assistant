@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { commands, window } from "./support/vscodeStub";
-import { resolveModelInfoOrWarn } from "../../src/features/chunkSettings";
-import type { AIProvider, ModelInfo } from "../../src/ai/types";
+import { commands, window } from "../support/vscodeStub";
+import { resolveModelInfoOrWarn } from "../../../src/features/chunkSettings";
+import type { AIProvider, ModelInfo } from "../../../src/ai/types";
 
 /**
  * モデル情報が取れないときに、黙って既定値へ落ちない（設計書6.23・6.27.10）。

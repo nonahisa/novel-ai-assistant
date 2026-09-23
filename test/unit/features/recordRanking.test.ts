@@ -1,8 +1,8 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { recordRanking } from "../../src/features/postingKit";
-import type { WorkEntry } from "../../src/models/types";
-import { FileSystemError, Uri, window, workspace } from "./support/vscodeStub";
+import { recordRanking } from "../../../src/features/postingKit";
+import type { WorkEntry } from "../../../src/models/types";
+import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
 
 /**
  * 「ランキングを記録する」（設計書6.68.5）。

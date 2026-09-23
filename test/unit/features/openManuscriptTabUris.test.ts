@@ -50,7 +50,7 @@ import {
   MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
   MANUSCRIPT_EDITOR_VIEW_TYPE,
   openManuscriptTabUris,
-} from "../../src/features/manuscriptEditor";
+} from "../../../src/features/manuscriptEditor";
 
 const second = { fsPath: "C:/小説/いじめられっ子/episode_0002.md" };
 const sixth = { fsPath: "C:/小説/いじめられっ子/episode_0006.md" };

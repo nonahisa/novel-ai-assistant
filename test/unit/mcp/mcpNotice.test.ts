@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
-import { novelNotice } from "../../src/mcp/tools/notice";
-import { assertExternalAccessAllowed } from "../../src/mcp/tools/permission";
-import { setExternalClientName } from "../../src/mcp/tools/accessLog";
-import { LARGE_MODEL_MIN_BILLIONS } from "../../src/ai/types";
+import { novelNotice } from "../../../src/mcp/tools/notice";
+import { assertExternalAccessAllowed } from "../../../src/mcp/tools/permission";
+import { setExternalClientName } from "../../../src/mcp/tools/accessLog";
+import { LARGE_MODEL_MIN_BILLIONS } from "../../../src/ai/types";
 
 /**
  * 実行前に出る「断り」を、**画面を押さずに読む**（`novel.notice`、0.72.0）。

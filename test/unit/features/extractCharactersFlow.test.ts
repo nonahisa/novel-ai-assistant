@@ -5,14 +5,14 @@ import {
   window,
   workspace,
   type StubMessage,
-} from "./support/vscodeStub";
-import type { AIRegistry } from "../../src/ai/registry";
-import { splitIntoChunks, type Chunk } from "../../src/core/chunker";
-import type { WorkEntry } from "../../src/models/types";
+} from "../support/vscodeStub";
+import type { AIRegistry } from "../../../src/ai/registry";
+import { splitIntoChunks, type Chunk } from "../../../src/core/chunker";
+import type { WorkEntry } from "../../../src/models/types";
 import {
   AIError,
   recoveryForAIError,
-} from "../../src/ai/types";
+} from "../../../src/ai/types";
 
 const state = vi.hoisted(() => ({
   saveAll: vi.fn(),
@@ -73,7 +73,7 @@ const state = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("../../src/ai/registry", () => ({
+vi.mock("../../../src/ai/registry", () => ({
   ensureConfigured: vi.fn(async () =>
     state.configured
       ? {
@@ -99,7 +99,7 @@ vi.mock("../../src/ai/registry", () => ({
  */
 const loggedSteps = vi.hoisted(() => ({ lines: [] as string[] }));
 
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logStep: vi.fn((message: string) => loggedSteps.lines.push(message)),
   logLine: vi.fn((message: string) => loggedSteps.lines.push(message)),
   logFailure: vi.fn(),
@@ -107,7 +107,7 @@ vi.mock("../../src/core/logger", () => ({
   useLogFile: vi.fn(),
 }));
 
-vi.mock("../../src/core/scanner", () => ({
+vi.mock("../../../src/core/scanner", () => ({
   scanWork: vi.fn(async () => ({
     episodes: [
       {
@@ -120,7 +120,7 @@ vi.mock("../../src/core/scanner", () => ({
   })),
 }));
 
-vi.mock("../../src/core/textFile", () => ({
+vi.mock("../../../src/core/textFile", () => ({
   readTextFile: vi.fn(async () => ({
     text: "灯が歩いた。",
     hasConflictMarkers: false,
@@ -169,10 +169,10 @@ function chunkFixture(count: number): Chunk[] {
   }));
 }
 
-vi.mock("../../src/core/chunker", async (importOriginal) => {
+vi.mock("../../../src/core/chunker", async (importOriginal) => {
   // 結合と分け直しは本物を使う。テストで作った固定チャンクが
   // 実際にどうまとめられるかまで見たいため
-  const actual = await importOriginal<typeof import("../../src/core/chunker")>();
+  const actual = await importOriginal<typeof import("../../../src/core/chunker")>();
   return {
     ...actual,
     decideChunkSize: vi.fn(() => 1000),
@@ -197,7 +197,7 @@ vi.mock("../../src/core/chunker", async (importOriginal) => {
   };
 });
 
-vi.mock("../../src/core/characterStore", () => ({
+vi.mock("../../../src/core/characterStore", () => ({
   CharacterStoreError: state.CharacterStoreError,
   CharacterStore: class {
     async loadAll() {
@@ -212,9 +212,9 @@ vi.mock("../../src/core/characterStore", () => ({
   },
 }));
 
-vi.mock("../../src/core/characterMerge", async (importOriginal) => {
+vi.mock("../../../src/core/characterMerge", async (importOriginal) => {
   const actual = await importOriginal<
-    typeof import("../../src/core/characterMerge")
+    typeof import("../../../src/core/characterMerge")
   >();
   return {
     ...actual,
@@ -227,7 +227,7 @@ vi.mock("../../src/core/characterMerge", async (importOriginal) => {
 
 // 能力・場所の保存はこのテストの対象外。人物フローに集中させる。
 // 収集した件数だけ state に残し、必要なテストから参照する。
-vi.mock("../../src/core/abilityStore", () => ({
+vi.mock("../../../src/core/abilityStore", () => ({
   AbilitySystemStore: class {
     async load() {
       return {
@@ -276,7 +276,7 @@ vi.mock("../../src/core/abilityStore", () => ({
   }),
 }));
 
-vi.mock("../../src/core/chunkCache", () => ({
+vi.mock("../../../src/core/chunkCache", () => ({
   ChunkCache: class {
     async load() {}
     get(hash: string) {
@@ -295,9 +295,9 @@ vi.mock("../../src/core/chunkCache", () => ({
 import {
   extractCharacters,
   saveDirtyDocumentsBeforeExtraction,
-} from "../../src/features/extractCharacters";
-import { CharacterStoreError } from "../../src/core/characterStore";
-import { emptyCharacter } from "../../src/models/character";
+} from "../../../src/features/extractCharacters";
+import { CharacterStoreError } from "../../../src/core/characterStore";
+import { emptyCharacter } from "../../../src/models/character";
 
 const work: WorkEntry = {
   id: "work_test",

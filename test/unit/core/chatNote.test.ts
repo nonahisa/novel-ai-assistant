@@ -6,7 +6,7 @@ import {
   buildChatNoteMarkdown,
   chatNoteFileNameCandidates,
   type ChatNoteTurn,
-} from "../../src/core/chatNote";
+} from "../../../src/core/chatNote";
 
 /**
  * 相談メモ（作者の要望、2026-08-28）。

@@ -7,8 +7,8 @@ import {
   sortDeviations,
   validateDeviations,
   type AcceptedDeviation,
-} from "../../src/core/deviationValidation";
-import { deviationBudget } from "../../src/prompts/deviationCheck";
+} from "../../../src/core/deviationValidation";
+import { deviationBudget } from "../../../src/prompts/deviationCheck";
 
 /**
  * プロット逸脱・間延びの検証（設計書6.10.2）。

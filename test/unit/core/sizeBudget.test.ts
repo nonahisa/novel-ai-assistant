@@ -3,20 +3,20 @@ import {
   decideChunkSize,
   planChunkBudget,
   TOKENS_PER_CHAR,
-} from "../../src/core/chunker";
+} from "../../../src/core/chunker";
 import {
   WORLDVIEW_MAX_CHARS,
   worldviewMaxChars,
-} from "../../src/core/worldviewSelect";
+} from "../../../src/core/worldviewSelect";
 import {
   PAST_SCENE_MAX_CHARS,
   pastSceneMaxChars,
-} from "../../src/core/pastSceneSelect";
+} from "../../../src/core/pastSceneSelect";
 import {
   CHARS_PER_TOKEN,
   referenceBudgetChars,
   TOKENS_PER_CHAR as TOKENS_PER_CHAR_SOURCE,
-} from "../../src/core/sizeBudget";
+} from "../../../src/core/sizeBudget";
 
 /**
  * 大きさの予算の共通化・第1段（設計書6.77）の**同値の固定**。

@@ -28,13 +28,13 @@ import {
   seededWordCount,
   spreadOfRuns,
   toolNameOf,
-} from "../../scripts/measureScoring.mjs";
+} from "../../../scripts/measureScoring.mjs";
 // **製品の式そのもの**（写しがずれていないことを、ここで突き合わせる）
 import {
   MAX_ISSUES_PER_1000_CHARS,
   issueBudget,
-} from "../../src/prompts/proofread";
-import { deviationBudget } from "../../src/prompts/deviationCheck";
+} from "../../../src/prompts/proofread";
+import { deviationBudget } from "../../../src/prompts/deviationCheck";
 
 /*
   測定台（`scripts/measure.mjs`）の**数え方**だけを確かめる（設計書6.87.15 の柱3）。
@@ -223,7 +223,7 @@ describe("誤字脱字の答え合わせ（正解が複数ある仕込み）", (
 */
 describe("指摘の上限（枠）", () => {
   const promptSource = fs.readFileSync(
-    path.join(__dirname, "..", "..", "src", "prompts", "proofread.ts"),
+    path.join(__dirname, "..", "..", "..", "src", "prompts", "proofread.ts"),
     "utf8"
   );
 
@@ -272,7 +272,7 @@ describe("指摘の上限（枠）", () => {
 });
 
 describe("推敲の台（上限と仕込みの釣り合い）", () => {
-  const root = path.join(__dirname, "..", "fixtures", "seeded", "proofread");
+  const root = path.join(__dirname, "..", "..", "fixtures", "seeded", "proofread");
   const answers = JSON.parse(
     fs.readFileSync(path.join(root, "answers.json"), "utf8")
   );
@@ -647,6 +647,7 @@ describe("逸脱の測定台（答えと本文が食い違っていないか）"
   const root = path.join(
     __dirname,
     "..",
+    "..",
     "fixtures",
     "seeded",
     "deviation"
@@ -678,7 +679,7 @@ describe("逸脱の測定台（答えと本文が食い違っていないか）"
 
   it("種別は、プロンプトが使う語だけ（逸脱・間延び）", () => {
     const source = fs.readFileSync(
-      path.join(__dirname, "..", "..", "src", "prompts", "deviationCheck.ts"),
+      path.join(__dirname, "..", "..", "..", "src", "prompts", "deviationCheck.ts"),
       "utf8"
     );
     const declared = source
@@ -951,7 +952,7 @@ describe("矛盾の答え合わせ", () => {
 });
 
 describe("矛盾の測定台（答えと本文が食い違っていないか）", () => {
-  const root = path.join(__dirname, "..", "fixtures", "seeded", "contradiction");
+  const root = path.join(__dirname, "..", "..", "fixtures", "seeded", "contradiction");
   const answers = JSON.parse(
     fs.readFileSync(path.join(root, "answers.json"), "utf8")
   );
@@ -995,7 +996,7 @@ describe("矛盾の測定台（答えと本文が食い違っていないか）"
     // **all でしか見ない観点を混ぜない。** 混ぜると light で測ったときに
     // 「観点の外だから出なかったもの」が見逃しとして積まれる
     const source = fs.readFileSync(
-      path.join(__dirname, "..", "..", "src", "prompts", "contradictionCheck.ts"),
+      path.join(__dirname, "..", "..", "..", "src", "prompts", "contradictionCheck.ts"),
       "utf8"
     );
     const light = source
@@ -1161,7 +1162,7 @@ describe("前回との比較（--compare）", () => {
 
 describe("道具名の対応表", () => {
   const serverSource = fs.readFileSync(
-    path.join(__dirname, "..", "..", "src", "mcp", "server.ts"),
+    path.join(__dirname, "..", "..", "..", "src", "mcp", "server.ts"),
     "utf8"
   );
 

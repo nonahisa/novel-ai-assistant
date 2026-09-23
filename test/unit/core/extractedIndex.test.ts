@@ -6,7 +6,7 @@ import {
   parseExtractedIndex,
   recordExtracted,
   shouldOfferExtraction,
-} from "../../src/core/extractedIndex";
+} from "../../../src/core/extractedIndex";
 
 /**
  * 取り込んだ話を中身で覚える（設計書6.21.3）。

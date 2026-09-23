@@ -5,9 +5,9 @@ import {
   episodeGroupLabels,
   formatChapterRange,
   groupEpisodesByChapter,
-} from "../../src/core/chapterGrouping";
-import type { Chapter } from "../../src/models/chapter";
-import type { EpisodeFile } from "../../src/models/types";
+} from "../../../src/core/chapterGrouping";
+import type { Chapter } from "../../../src/models/chapter";
+import type { EpisodeFile } from "../../../src/models/types";
 
 /**
  * 章ごとに話を束ねる論理（設計書6.66.1・6.66.3）。

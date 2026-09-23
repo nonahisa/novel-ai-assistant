@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import * as vscode from "vscode";
-import { SettingsPanel } from "../../src/features/settingsPanel";
-import { emptyCharacter, type Character } from "../../src/models/character";
-import type { RecordChange } from "../../src/models/jsonValidation";
-import { mergeExtractedCharacters } from "../../src/core/characterMerge";
+import { SettingsPanel } from "../../../src/features/settingsPanel";
+import { emptyCharacter, type Character } from "../../../src/models/character";
+import type { RecordChange } from "../../../src/models/jsonValidation";
+import { mergeExtractedCharacters } from "../../../src/core/characterMerge";
 
 /**
  * 誤って記録された変化を、設定資料パネルから落とす（作者の裁定、2026-09-21）。
@@ -25,7 +25,7 @@ const { generated } = vi.hoisted(() => ({
 
 // 資料集の生成はファイルを読み書きする。ここで見たいのは
 // 「呼ばれたか・人物だけを指しているか」なので、呼び出しだけを控える
-vi.mock("../../src/features/generateSettingsDocs", () => ({
+vi.mock("../../../src/features/generateSettingsDocs", () => ({
   generateSettingsDocs: (
     _work: unknown,
     options: { kinds?: readonly string[]; silent?: boolean } = {}

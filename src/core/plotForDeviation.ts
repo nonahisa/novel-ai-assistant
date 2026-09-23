@@ -9,7 +9,7 @@
  * 不具合を見つけたことになる**（CLAUDE.md の「繰り返し起きた失敗」5番）。
  *
  * **`vscode` を持ち込まない。** ここは外から呼ぶ束の起点でもある
- * （`scripts/coreEntries.mjs`。`test/unit/mcpReach.test.ts` が見張る）。
+ * （`scripts/coreEntries.mjs`。`test/unit/cross/mcpReach.test.ts` が見張る）。
  */
 
 /**

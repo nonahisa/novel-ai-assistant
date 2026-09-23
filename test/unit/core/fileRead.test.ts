@@ -8,9 +8,9 @@ import {
   readerKind,
   setFileReaderForTests,
   vscodeFileReaderForTests,
-} from "../../src/core/fileRead";
-import { FileSystemError, FileType, Uri, workspace } from "./support/vscodeStub";
-import * as runtime from "../../src/core/runtime";
+} from "../../../src/core/fileRead";
+import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub";
+import * as runtime from "../../../src/core/runtime";
 
 /**
  * 読むだけの口（`core/fileRead.ts`。設計書6.107）。

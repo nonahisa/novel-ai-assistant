@@ -6,12 +6,12 @@ import {
   totalSizeLabel,
   type RequirementId,
   type RequirementState,
-} from "../../src/core/requirements";
+} from "../../../src/core/requirements";
 import {
   interpretWingetResult,
   shortenProgress,
   stripControl,
-} from "../../src/core/packageInstall";
+} from "../../../src/core/packageInstall";
 
 function states(
   overrides: Partial<Record<RequirementId, boolean>>

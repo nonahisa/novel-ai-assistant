@@ -14,7 +14,7 @@ import { describe, expect, test } from "vitest";
  * （`generateCancellation` と同じ方式）。
  */
 
-const EXTENSION = path.join(__dirname, "..", "..", "src", "extension.ts");
+const EXTENSION = path.join(__dirname, "..", "..", "..", "src", "extension.ts");
 
 function source(): string {
   return fs.readFileSync(EXTENSION, "utf8");

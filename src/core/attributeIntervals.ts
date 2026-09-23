@@ -68,7 +68,7 @@ const MODALITY_STRENGTH: Record<FactModality, number> = {
  *
  * 区切りは本文に出てこないNUL。空白で繋ぐと「名前に空白のある人物」と
  * 「空白のある項目名」が同じ鍵になる。**ソースには生の制御文字を置かない**
- * ので、エスケープで書く（`test/unit/sourceHygiene.test.ts`）。
+ * ので、エスケープで書く（`test/unit/cross/sourceHygiene.test.ts`）。
  */
 const SEPARATOR = "\u0000";
 

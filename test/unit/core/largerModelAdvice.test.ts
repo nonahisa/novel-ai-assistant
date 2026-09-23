@@ -5,12 +5,12 @@ import {
   largerModelButtons,
   type CandidateSpeeds,
   type InstalledModel,
-} from "../../src/core/largerModelAdvice";
+} from "../../../src/core/largerModelAdvice";
 import {
   accuracyRecordFor,
   describeAccuracyComparison,
   type FeatureAccuracyRecord,
-} from "../../src/core/bundledFeatureAccuracy";
+} from "../../../src/core/bundledFeatureAccuracy";
 
 /**
  * **この機械で上限内に終わる、いちばん大きいモデルを案内する**

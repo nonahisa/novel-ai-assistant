@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dropsOriginalTail } from "../../src/core/proofreadValidation";
+import { dropsOriginalTail } from "../../../src/core/proofreadValidation";
 
 /**
  * **推敲は原文まるごとを置き換える**（設計書6.60）。だから修正案は、

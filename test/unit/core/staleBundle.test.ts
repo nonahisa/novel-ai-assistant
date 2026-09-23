@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { isStaleBundleError } from "../../src/core/staleBundle";
+import { isStaleBundleError } from "../../../src/core/staleBundle";
 
 /**
  * 拡張機能が裏で入れ替わったあとにコマンドを押すと落ちる件（設計書6.106）。

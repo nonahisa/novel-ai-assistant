@@ -3,8 +3,8 @@ import {
   NOTE_UNSUPPORTED,
   noteHeadingLevel,
   toNoteMarkdown,
-} from "../../src/core/noteMarkdown";
-import { toSiteNotation } from "../../src/core/ruby";
+} from "../../../src/core/noteMarkdown";
+import { toSiteNotation } from "../../../src/core/ruby";
 
 /**
  * note へ貼るための整え（設計書6.84）。

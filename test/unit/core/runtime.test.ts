@@ -5,7 +5,7 @@ import {
   isWebRuntime,
   randomHex,
   randomUuid,
-} from "../../src/core/runtime";
+} from "../../../src/core/runtime";
 
 /**
  * 実行環境の判定（設計書5.8）。

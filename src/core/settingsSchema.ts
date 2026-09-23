@@ -13,7 +13,7 @@ import { WORLD_CATEGORIES } from "../models/world";
  * スキーマでは表せない。
  *
  * **型定義とずれないよう、テストで突き合わせている**
- * （`test/unit/settingsSchema.test.ts`）。モデルに項目を足して
+ * （`test/unit/core/settingsSchema.test.ts`）。モデルに項目を足して
  * ここを忘れると、テストが項目名を名指しで落とす。
  * 抽出側で同じ取りこぼしを2度やっているので、同じ形で守る。
  */

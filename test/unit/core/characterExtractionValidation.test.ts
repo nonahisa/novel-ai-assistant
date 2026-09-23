@@ -1,13 +1,13 @@
 import { describe, expect, test } from "vitest";
-import type { Chunk } from "../../src/core/chunker";
+import type { Chunk } from "../../../src/core/chunker";
 import {
   isSentenceShapedRelation,
   isSpeculativeRelation,
   parseResult,
   validateCharacterExtractResult,
   type CharacterRejectionReason,
-} from "../../src/core/characterExtractionValidation";
-import type { CharacterExtractResult } from "../../src/prompts/characterExtract";
+} from "../../../src/core/characterExtractionValidation";
+import type { CharacterExtractResult } from "../../../src/prompts/characterExtract";
 
 const sourceLine = "灯は静かに帰宅した";
 const chunk: Chunk = {

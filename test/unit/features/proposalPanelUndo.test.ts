@@ -49,7 +49,7 @@ vi.mock("vscode", () => {
   };
 });
 
-vi.mock("../../src/core/textFile", () => ({
+vi.mock("../../../src/core/textFile", () => ({
   readTextFile: vi.fn(async () => ({
     text,
     hash: "h",
@@ -65,7 +65,7 @@ vi.mock("../../src/core/textFile", () => ({
 }));
 
 /** 校閲ロックは掛かっていない（ロックの扱いは `proposalAndLock.test.ts`） */
-vi.mock("../../src/core/fileLockStore", () => ({
+vi.mock("../../../src/core/fileLockStore", () => ({
   FileLockStore: class {
     async lockFor(): Promise<undefined> {
       return undefined;
@@ -75,7 +75,7 @@ vi.mock("../../src/core/fileLockStore", () => ({
 
 /** 編集履歴（gitの問い合わせを通さない。ここで見たいのは本文の中身） */
 const edits: Array<{ action: string; detail?: string }> = [];
-vi.mock("../../src/core/actorContext", () => ({
+vi.mock("../../../src/core/actorContext", () => ({
   isEditorMode: () => false,
   manualActor: () => "author",
   recordEdit: vi.fn(async (_work: unknown, entry: { action: string; detail?: string }) => {
@@ -83,8 +83,8 @@ vi.mock("../../src/core/actorContext", () => ({
   }),
 }));
 
-import { ProposalPanel } from "../../src/features/proposalPanel";
-import type { WorkEntry } from "../../src/models/types";
+import { ProposalPanel } from "../../../src/features/proposalPanel";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work: WorkEntry = {
   id: "w1",

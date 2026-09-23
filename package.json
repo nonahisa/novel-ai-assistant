@@ -1987,7 +1987,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc --noEmit -p tsconfig.tests-typecheck.json",
     "test:unit": "vitest run",
-    "test:quality": "vitest run test/unit/characterExtractionQuality.test.ts --reporter=verbose",
+    "test:quality": "vitest run test/unit/prompts/characterExtractionQuality.test.ts --reporter=verbose",
     "test:coverage": "vitest run --config vitest.coverage.config.mts --coverage",
     "test:ollama": "vitest run --config vitest.live.config.mts",
     "measure": "node scripts/measure.mjs",

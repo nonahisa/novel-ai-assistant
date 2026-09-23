@@ -4,8 +4,8 @@ import {
   orderStartupTargets,
   overlappingChangedFiles,
   planHandoff,
-} from "../../src/core/handoffPlan";
-import type { GitSyncStatus } from "../../src/core/git";
+} from "../../../src/core/handoffPlan";
+import type { GitSyncStatus } from "../../../src/core/git";
 
 /**
  * 機械を行き来したときの手順（設計書6.15.1）。

@@ -7,13 +7,13 @@ import {
   parseRecheckAnswer,
   recheckProposal,
   type RecheckRequest,
-} from "../../src/features/recheckProposal";
+} from "../../../src/features/recheckProposal";
 import {
   AIError,
   type AIProvider,
   type GenerateParams,
   type GenerateResult,
-} from "../../src/ai/types";
+} from "../../../src/ai/types";
 
 /**
  * 指摘の再チェック（P-23）。

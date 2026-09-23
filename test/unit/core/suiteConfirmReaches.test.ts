@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { PROOFREADING_CHECKS } from "../../src/core/proofreadingSuite";
-import { buildFinishConfirm, planFinish } from "../../src/core/finishNewWork";
+import { PROOFREADING_CHECKS } from "../../../src/core/proofreadingSuite";
+import { buildFinishConfirm, planFinish } from "../../../src/core/finishNewWork";
 
 /**
  * **確認は、まとめ実行が最初に1回だけ取る**（設計書6.80）。
@@ -18,7 +18,7 @@ import { buildFinishConfirm, planFinish } from "../../src/core/finishNewWork";
  * 登録の書きぶりをここで見る。
  */
 
-const SRC = resolve(__dirname, "../../src");
+const SRC = resolve(__dirname, "../../../src");
 const read = (path: string): string => readFileSync(resolve(SRC, path), "utf8");
 
 /** そのコマンドの登録のかたまりだけを切り出す */

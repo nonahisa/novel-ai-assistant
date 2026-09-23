@@ -9,7 +9,7 @@ import {
   pageLayoutVertical,
   parseBookConfig,
   type BookConfig,
-} from "../../src/models/book";
+} from "../../../src/models/book";
 import {
   buildColophonFragment,
   buildEpub,
@@ -17,9 +17,9 @@ import {
   buildTitlePageFragment,
   buildTocFragment,
   type EpubBook,
-} from "../../src/core/epubPackage";
-import { buildCharacterPageFragment } from "../../src/core/epubCharacterPage";
-import { buildEpubEditorPanelHtml } from "../../src/views/epubEditorPanelHtml";
+} from "../../../src/core/epubPackage";
+import { buildCharacterPageFragment } from "../../../src/core/epubCharacterPage";
+import { buildEpubEditorPanelHtml } from "../../../src/views/epubEditorPanelHtml";
 
 /**
  * 本文以外の面（中表紙・目次・人物紹介・あとがき・奥付）の文字の体裁

@@ -4,18 +4,18 @@ import {
   episodeRanges,
   formatPercent,
   type ReaderRates,
-} from "../../src/core/readerRates";
+} from "../../../src/core/readerRates";
 import {
   buildReaderCharts,
   type ReaderCharts,
-} from "../../src/core/readerStatsCharts";
-import { buildPostingSiteRecords } from "../../src/core/postingSiteRecords";
+} from "../../../src/core/readerStatsCharts";
+import { buildPostingSiteRecords } from "../../../src/core/postingSiteRecords";
 import {
   emptyPostingLedger,
   withReaderStats,
   type ReaderStatsRecord,
-} from "../../src/models/posting";
-import { buildWritingStatsPanelHtml } from "../../src/views/writingStatsPanelHtml";
+} from "../../../src/models/posting";
+import { buildWritingStatsPanelHtml } from "../../../src/views/writingStatsPanelHtml";
 
 /**
  * 離脱率・ブックマーク率・評価率と、PVのグラフ（作者の依頼、2026-09-23）。

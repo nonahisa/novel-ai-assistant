@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { buildSettingsPanelHtml } from "../../src/views/settingsPanelHtml";
+import { buildSettingsPanelHtml } from "../../../src/views/settingsPanelHtml";
 
 /**
  * 設定資料パネルの見づらさを直した（作者の指摘、2026-08-16）。
@@ -29,7 +29,7 @@ function script(): string {
  * `HTML.toContain("flex-wrap: wrap")` のような検査は、その字が同じ
  * ファイルの中の無関係な規則（`.chips` など）に残っているだけでも通って
  * しまう。見たい選択子の `{ … }` の中だけを見る形にする。
- * （test/unit/scriptLines.test.ts の ruleBody() と同じ考え方）
+ * （test/unit/core/scriptLines.test.ts の ruleBody() と同じ考え方）
  */
 function ruleBody(selector: string): string {
   const escaped = selector.replace(/[.#[\]]/g, "\\$&");

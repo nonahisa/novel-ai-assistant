@@ -4,8 +4,8 @@ import {
   WriterProfileStore,
   WRITER_PROFILE_KEY,
   WRITER_WELCOME_KEY,
-} from "../../src/core/writerProfileStore";
-import { buildWriterStyle } from "../../src/core/writerStyle";
+} from "../../../src/core/writerProfileStore";
+import { buildWriterStyle } from "../../../src/core/writerStyle";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -100,11 +100,11 @@ describe("診断のやり直し", () => {
  */
 describe("質問の数の言い方", () => {
   const source = readFileSync(
-    resolve(__dirname, "../../src/features/writerDiagnosis.ts"),
+    resolve(__dirname, "../../../src/features/writerDiagnosis.ts"),
     "utf8"
   );
   const menu = readFileSync(
-    resolve(__dirname, "../../src/views/actionList.ts"),
+    resolve(__dirname, "../../../src/views/actionList.ts"),
     "utf8"
   );
 

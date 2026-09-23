@@ -12,19 +12,19 @@ import {
   isAdviceMirrorNewer,
   parseAdviceMirror,
   type AdviceMirrorFile,
-} from "../../src/core/adviceProfileMirror";
+} from "../../../src/core/adviceProfileMirror";
 import {
   ADVICE_STORAGE_ENV,
   updateAdviceProfile,
-} from "../../src/mcp/adviceProfileMirror";
-import { chatPrompt, chatValidate } from "../../src/mcp/tools/chat";
-import type { AdviceProfile } from "../../src/core/advicePolicy";
-import { AdvicePolicyStore } from "../../src/core/advicePolicyStore";
+} from "../../../src/mcp/adviceProfileMirror";
+import { chatPrompt, chatValidate } from "../../../src/mcp/tools/chat";
+import type { AdviceProfile } from "../../../src/core/advicePolicy";
+import { AdvicePolicyStore } from "../../../src/core/advicePolicyStore";
 import {
   importAdviceProfileMirror,
   refreshAdviceProfileMirror,
-} from "../../src/features/adviceProfileMirror";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/features/adviceProfileMirror";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 助言方針の控え（設計書6.86.7）。

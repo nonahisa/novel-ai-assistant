@@ -2,8 +2,8 @@ import { describe, expect, test } from "vitest";
 import {
   nextDatedName,
   parseEpisodeFileName,
-} from "../../src/core/episodeParser";
-import { formatChapterLabel } from "../../src/core/episodeLabel";
+} from "../../../src/core/episodeParser";
+import { formatChapterLabel } from "../../../src/core/episodeLabel";
 
 /**
  * SNS記事は投稿日で管理する（設計書6.4.6、作者の指示 2026-08-16）。

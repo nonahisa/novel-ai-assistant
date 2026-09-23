@@ -303,7 +303,7 @@ export async function checkProofread(
   let fatalFailure = "";
   /**
    * 何チャンクまでAIへ送ったか。**最後に「推敲を終了」の1行を残すのに要る**
-   * （誤字脱字・矛盾と同じ形。`test/unit/checkEndLog.test.ts`）。
+   * （誤字脱字・矛盾と同じ形。`test/unit/cross/checkEndLog.test.ts`）。
    *
    * **数えるのは送ったものだけである**（作者の指摘、2026-09-06）。
    * キャッシュ命中まで分母に入れると、実際には1件しか動かない実行が

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { FileSystemError, workspace } from "./support/vscodeStub";
-import { AnnouncementHistory } from "../../src/core/announcementHistory";
-import type { WorkEntry } from "../../src/models/types";
+import { FileSystemError, workspace } from "../support/vscodeStub";
+import { AnnouncementHistory } from "../../../src/core/announcementHistory";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work: WorkEntry = {
   id: "w1",

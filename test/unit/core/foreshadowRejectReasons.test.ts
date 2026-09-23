@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { describeRejectReasons } from "../../src/core/foreshadowValidation";
+import { describeRejectReasons } from "../../../src/core/foreshadowValidation";
 
 /**
  * 却下の内訳をログに出す（設計書6.35.7）。

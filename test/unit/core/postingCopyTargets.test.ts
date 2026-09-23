@@ -3,9 +3,9 @@ import { describe, expect, test } from "vitest";
 import {
   postingCopyTargets,
   type PostingCopyTarget,
-} from "../../src/core/postingCopyTargets";
-import { POSTING_SITES } from "../../src/models/posting";
-import { toSiteNotation } from "../../src/core/ruby";
+} from "../../../src/core/postingCopyTargets";
+import { POSTING_SITES } from "../../../src/models/posting";
+import { toSiteNotation } from "../../../src/core/ruby";
 
 /**
  * 「投稿サイト用に変換してコピー」で訊くこと（作者の裁定、2026-09-06）。

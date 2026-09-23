@@ -4,7 +4,7 @@ import {
   forgetSecret,
   redactSecrets,
   registerSecret,
-} from "../../src/core/logger";
+} from "../../../src/core/logger";
 
 /**
  * ログはファイルにも残るようになったので、伏せ字の取りこぼしは

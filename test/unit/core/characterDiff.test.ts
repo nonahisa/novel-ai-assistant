@@ -3,13 +3,13 @@ import {
   diffCharacter,
   formatDiff,
   summarizeDiff,
-} from "../../src/core/characterDiff";
+} from "../../../src/core/characterDiff";
 import {
   emptyCharacter,
   type AddressForm,
   type AddressTerm,
   type Character,
-} from "../../src/models/character";
+} from "../../../src/models/character";
 
 function character(overrides: Partial<Character> = {}): Character {
   return { ...emptyCharacter("char_001", "灯"), ...overrides };

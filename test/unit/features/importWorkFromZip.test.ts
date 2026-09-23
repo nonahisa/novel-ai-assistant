@@ -10,13 +10,13 @@ import {
   Uri,
   window,
   workspace,
-} from "./support/vscodeStub";
-import { importWorkFromZip } from "../../src/features/importWorkFromZip";
-import { inspectWorkBackup } from "../../src/core/workZip";
+} from "../support/vscodeStub";
+import { importWorkFromZip } from "../../../src/features/importWorkFromZip";
+import { inspectWorkBackup } from "../../../src/core/workZip";
 // **期待する場所は、製品と同じ組み立て方で作る。** 区切り文字を手で
 // 書くと、動かす環境（Windows と そうでないもの）で試験だけが落ちる
-import * as paths from "../../src/core/paths";
-import type { WorkEntry } from "../../src/models/types";
+import * as paths from "../../../src/core/paths";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * ZIPからの取り込み（設計書6.98）の、書き込みまわり。

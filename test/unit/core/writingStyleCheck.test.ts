@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { checkWritingStyle } from "../../src/core/writingStyleCheck";
-import type { Chunk } from "../../src/core/chunker";
+import { checkWritingStyle } from "../../../src/core/writingStyleCheck";
+import type { Chunk } from "../../../src/core/chunker";
 
 function makeChunk(text: string, startLine = 0): Chunk {
   return {

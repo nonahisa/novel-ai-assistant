@@ -6,14 +6,14 @@ import {
   sanitizeWorkFolderName,
   WorkZipError,
   workTitleFromZipFileName,
-} from "../../src/core/workZip";
-import { parseTagList, parseWorkInfo } from "../../src/core/workInfoParse";
+} from "../../../src/core/workZip";
+import { parseTagList, parseWorkInfo } from "../../../src/core/workInfoParse";
 import {
   plotDraftFromWorkInfo,
   synopsisDraftFromWorkInfo,
-} from "../../src/core/workInfoDraft";
-import { emptyPlotSections } from "../../src/core/plotDoc";
-import { isWorkInfoFile } from "../../src/core/workInfoFile";
+} from "../../../src/core/workInfoDraft";
+import { emptyPlotSections } from "../../../src/core/plotDoc";
+import { isWorkInfoFile } from "../../../src/core/workInfoFile";
 
 /**
  * ZIPから作品を取り込む（設計書6.98）の、読み取りと下書きの決め方。

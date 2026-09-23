@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { window, workspace } from "./support/vscodeStub";
-import type { AIRegistry } from "../../src/ai/registry";
+import { window, workspace } from "../support/vscodeStub";
+import type { AIRegistry } from "../../../src/ai/registry";
 import {
   AIError,
   type GenerateParams,
   type GenerateResult,
   type ProviderId,
-} from "../../src/ai/types";
-import { CONTEXT_GUARD_EXEMPT_FEATURE } from "../../src/ai/contextGuard";
-import { OUTPUT_PROBE_SYSTEM_PROMPT } from "../../src/core/outputProbe";
+} from "../../../src/ai/types";
+import { CONTEXT_GUARD_EXEMPT_FEATURE } from "../../../src/ai/contextGuard";
+import { OUTPUT_PROBE_SYSTEM_PROMPT } from "../../../src/core/outputProbe";
 
 /**
  * AIチューニングは、読める長さのあとに**書ける量**も測る（設計書6.61）。
@@ -58,7 +58,7 @@ const log = vi.hoisted(() => ({
   failures: [] as Array<[string, Record<string, unknown>]>,
 }));
 
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logStep: vi.fn((message: string) => {
     log.steps.push(message);
   }),
@@ -72,7 +72,7 @@ vi.mock("../../src/core/logger", () => ({
   useLogFile: vi.fn(),
 }));
 
-vi.mock("../../src/ai/registry", () => ({
+vi.mock("../../../src/ai/registry", () => ({
   ensureConfigured: vi.fn(async () => ({
     provider: {
       id: state.providerId,
@@ -116,7 +116,7 @@ vi.mock("../../src/ai/registry", () => ({
   })),
 }));
 
-vi.mock("../../src/features/aiConnectivity", () => ({
+vi.mock("../../../src/features/aiConnectivity", () => ({
   confirmPaidUsage: vi.fn(async () => true),
   confirmProviderReachable: vi.fn(async () => true),
   // 手元AIの判定（`ai/otherLocalAi.ts`）が同じ束に入るので、
@@ -124,7 +124,7 @@ vi.mock("../../src/features/aiConnectivity", () => ({
   ollamaEndpoint: vi.fn(() => "http://127.0.0.1:11434"),
 }));
 
-vi.mock("../../src/views/progress", () => ({
+vi.mock("../../../src/views/progress", () => ({
   withCancellableProgress: vi.fn(
     async (
       _title: string,
@@ -143,11 +143,11 @@ vi.mock("../../src/views/progress", () => ({
   ),
 }));
 
-import { measureContext } from "../../src/features/measureContext";
+import { measureContext } from "../../../src/features/measureContext";
 import {
   tuningStoreContents,
   useMemoryTuningStore,
-} from "./support/tuningStore";
+} from "../support/tuningStore";
 
 /**
  * いまの台帳（`<保管庫>/model-tuning.json`）の、そのモデルの行。

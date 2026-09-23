@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { buildManuscriptEditorHtml } from "../../src/views/manuscriptEditorHtml";
+import { buildManuscriptEditorHtml } from "../../../src/views/manuscriptEditorHtml";
 
 /**
  * SNS記事のnote風エディタ（設計書6.69）。

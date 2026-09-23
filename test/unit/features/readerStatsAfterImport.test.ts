@@ -3,15 +3,15 @@ import { beforeEach, describe, expect, test } from "vitest";
 import {
   importReaderStats,
   recordReaderStats,
-} from "../../src/features/readerStats";
+} from "../../../src/features/readerStats";
 import {
   buildReaderStatsEnvelope,
   matchReaderStatsEnvelope,
   parseReaderStatsEnvelope,
-} from "../../src/core/readerStatsEnvelope";
-import { readPostingLedger } from "../../src/models/posting";
-import type { WorkEntry } from "../../src/models/types";
-import { env, FileSystemError, Uri, window, workspace } from "./support/vscodeStub";
+} from "../../../src/core/readerStatsEnvelope";
+import { readPostingLedger } from "../../../src/models/posting";
+import type { WorkEntry } from "../../../src/models/types";
+import { env, FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
 
 /**
  * ZIPから取り込んだ直後の作品で、**読者の反応の口が通るか**（設計書6.99／6.79.7）。

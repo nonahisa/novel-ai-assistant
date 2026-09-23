@@ -3,7 +3,7 @@ import {
   isStoryFactError,
   parseStoryFact,
   type StoryFact,
-} from "../../src/models/storyFact";
+} from "../../../src/models/storyFact";
 
 /**
  * AIが返した事実の受け取り（設計書6.88.3）。

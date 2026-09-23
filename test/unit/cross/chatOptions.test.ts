@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { cleanOption, parseWorkChatAnswer } from "../../src/prompts/workChat";
-import { renderChatLogEntry } from "../../src/core/chatLog";
+import { cleanOption, parseWorkChatAnswer } from "../../../src/prompts/workChat";
+import { renderChatLogEntry } from "../../../src/core/chatLog";
 
 /**
  * 実機で見つかった不具合の再現（2026-08-15）。

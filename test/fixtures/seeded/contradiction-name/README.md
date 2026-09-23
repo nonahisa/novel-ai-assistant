@@ -49,7 +49,7 @@ node scripts/measure.mjs contradiction --model gemma4:12b --option categories=al
 
 矛盾の `accepted[]` は `line` を**1つだけ**持つ（逸脱の `lineStart`〜`lineEnd` と違う）ので、行の突き合わせは「点が範囲に入るか」で見る。
 
-数え方の本体は `scripts/measureScoring.mjs` の `scoreContradiction()` にあり、`test/unit/measureScoring.test.ts` が確かめている。
+数え方の本体は `scripts/measureScoring.mjs` の `scoreContradiction()` にあり、`test/unit/prompts/measureScoring.test.ts` が確かめている。
 
 ## 仕込みの一覧
 

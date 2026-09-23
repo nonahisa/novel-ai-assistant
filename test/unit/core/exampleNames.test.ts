@@ -6,7 +6,7 @@ import {
   EXAMPLE_PERSON,
   EXAMPLE_REPO,
   EXAMPLE_SUMMARY,
-} from "../../src/core/exampleNames";
+} from "../../../src/core/exampleNames";
 
 /**
  * **例に出す人物は、架空の作品の人物である**（作者の指定、2026-09-13
@@ -89,7 +89,7 @@ function scan(files: string[]): Hit[] {
 }
 
 describe("例に出す人物", () => {
-  const SRC = resolve(__dirname, "../../src");
+  const SRC = resolve(__dirname, "../../../src");
 
   test("走査する対象がある（拾い方を間違えて0件を通さない）", () => {
     expect(sources(SRC).length).toBeGreaterThan(100);
@@ -105,7 +105,7 @@ describe("例に出す人物", () => {
 
   test("`package.json` と `README.md` にも無い", () => {
     for (const file of ["package.json", "README.md"]) {
-      const text = readFileSync(resolve(__dirname, "../..", file), "utf8");
+      const text = readFileSync(resolve(__dirname, "../../..", file), "utf8");
       for (const name of REAL_NAMES) {
         expect(text.includes(name), `${file} に「${name}」`).toBe(false);
       }
@@ -131,7 +131,7 @@ describe("例に出す人物", () => {
 describe("GitHubの入力例", () => {
   test("**画面に、作者のアカウントと書庫の名前が出ない**", () => {
     const hits: string[] = [];
-    for (const file of sources(resolve(__dirname, "../../src"))) {
+    for (const file of sources(resolve(__dirname, "../../../src"))) {
       const rel = file.slice(file.indexOf(`src${sep}`)).split(sep).join("/");
       readFileSync(file, "utf8")
         .split("\n")
@@ -154,7 +154,7 @@ describe("GitHubの入力例", () => {
       "src/core/githubRepoRef.ts",
       "src/features/addWorkFromGithubWeb.ts",
     ]) {
-      const text = readFileSync(resolve(__dirname, "../..", file), "utf8");
+      const text = readFileSync(resolve(__dirname, "../../..", file), "utf8");
       expect(text, file).toContain("EXAMPLE_REPO");
     }
   });
@@ -195,7 +195,7 @@ describe("例の置き場", () => {
       "src/prompts/workChat.ts",
     ];
     for (const file of users) {
-      const text = readFileSync(resolve(__dirname, "../..", file), "utf8");
+      const text = readFileSync(resolve(__dirname, "../../..", file), "utf8");
       expect(text, file).toContain('from "../core/exampleNames"');
       expect(text, file).toContain("EXAMPLE_PERSON");
     }
@@ -203,7 +203,7 @@ describe("例の置き場", () => {
 
   test("架空の名前そのものを、ほかのファイルへ写していない", () => {
     const hits: string[] = [];
-    for (const file of sources(resolve(__dirname, "../../src"))) {
+    for (const file of sources(resolve(__dirname, "../../../src"))) {
       const rel = file.slice(file.indexOf(`src${sep}`)).split(sep).join("/");
       if (rel === "src/core/exampleNames.ts") continue;
       const text = readFileSync(file, "utf8");

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { LOOP_LAG_LIMIT_MS, startLoopLagMeter } from "../../src/core/loopLag";
+import { LOOP_LAG_LIMIT_MS, startLoopLagMeter } from "../../../src/core/loopLag";
 
 /**
  * **イベントループが握られていたかを測る**（設計書6.107。0.74.11）。

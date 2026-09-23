@@ -47,8 +47,8 @@ vi.mock("vscode", () => {
   };
 });
 
-import { ProposalPanel } from "../../src/features/proposalPanel";
-import type { WorkEntry } from "../../src/models/types";
+import { ProposalPanel } from "../../../src/features/proposalPanel";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work: WorkEntry = {
   id: "w1",

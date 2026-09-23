@@ -6,10 +6,10 @@ import {
   parseKeepWordSet,
   validateKeepWord,
   type KeepWord,
-} from "../../src/models/keepWord";
-import { validateTypoIssues } from "../../src/core/typoCheckValidation";
-import { validateProofreadIssues } from "../../src/core/proofreadValidation";
-import type { Chunk } from "../../src/core/chunker";
+} from "../../../src/models/keepWord";
+import { validateTypoIssues } from "../../../src/core/typoCheckValidation";
+import { validateProofreadIssues } from "../../../src/core/proofreadValidation";
+import type { Chunk } from "../../../src/core/chunker";
 
 /**
  * 「直さない語」（設計書6.8.3）。

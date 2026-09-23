@@ -29,7 +29,7 @@ import { resolve } from "node:path";
  */
 
 function sourceOf(relative: string): string {
-  return readFileSync(resolve(__dirname, "../..", relative), "utf8");
+  return readFileSync(resolve(__dirname, "../../..", relative), "utf8");
 }
 
 describe("本文を書く経路", () => {

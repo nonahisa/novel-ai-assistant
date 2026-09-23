@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { window, workspace } from "./support/vscodeStub";
-import { disposeLog } from "../../src/core/logger";
-import type { WorkEntry } from "../../src/models/types";
+import { window, workspace } from "../support/vscodeStub";
+import { disposeLog } from "../../../src/core/logger";
+import type { WorkEntry } from "../../../src/models/types";
 import {
   chooseScope,
   resolveCheckScope,
   scopeFeatureSpec,
   describeChosenScope,
   type ScopeFeature,
-} from "../../src/features/typoCheckScope";
+} from "../../../src/features/typoCheckScope";
 // 差し替える相手（`views/notify`）の項目の型だけ借りる。
 // 型は消えるので、`vi.mock` の差し替えとはぶつからない
-import type { MemorablePick } from "../../src/views/notify";
+import type { MemorablePick } from "../../../src/views/notify";
 
 /**
  * `chooseScope` が並べる項目をのぞくための差し替え。
@@ -35,14 +35,14 @@ const notifyMocks = vi.hoisted(() => ({
   >(async () => undefined),
   confirmRun: vi.fn(async () => true),
 }));
-vi.mock("../../src/views/notify", () => ({
+vi.mock("../../../src/views/notify", () => ({
   pickWithMemory: notifyMocks.pickWithMemory,
   confirmRun: notifyMocks.confirmRun,
 }));
 
 /** `chooseScope` が走査する話の一覧。中身は `scanWork` の結果を差し替える */
 const scannerMocks = vi.hoisted(() => ({ scanWork: vi.fn() }));
-vi.mock("../../src/core/scanner", () => ({
+vi.mock("../../../src/core/scanner", () => ({
   scanWork: scannerMocks.scanWork,
 }));
 

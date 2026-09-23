@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
-import { contradictionPrompt } from "../../src/mcp/tools/contradiction";
+import { contradictionPrompt } from "../../../src/mcp/tools/contradiction";
 
 /**
  * **矛盾検知へ送る材料が、1文字も変わっていないこと**（設計書6.10.6）。

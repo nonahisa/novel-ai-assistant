@@ -1,19 +1,19 @@
 import * as path from "path";
 import { describe, expect, test } from "vitest";
-import { SRC, chainTo, walkStaticImports } from "./support/importGraph";
+import { SRC, chainTo, walkStaticImports } from "../support/importGraph";
 import {
   PROCEDURES,
   PROCEDURE_CHAR_LIMIT,
   PROCEDURE_REFERENCED_COMMANDS,
   renderProcedure,
   selectProcedure,
-} from "../../src/core/procedures";
+} from "../../../src/core/procedures";
 import {
   allActions,
   findAction,
   prerequisiteNoteOf,
-} from "../../src/views/actionList";
-import { buildFeatureGuideForQuestion } from "../../src/features/featureGuide";
+} from "../../../src/views/actionList";
+import { buildFeatureGuideForQuestion } from "../../../src/features/featureGuide";
 
 /**
  * 手順書き——よくある仕事の「順番と判断」（`src/core/procedures.ts`）。

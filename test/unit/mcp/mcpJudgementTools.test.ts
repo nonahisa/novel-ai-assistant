@@ -2,22 +2,22 @@ import { describe, expect, test, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
-import { openingPrompt, openingValidate } from "../../src/mcp/tools/opening";
+import { openingPrompt, openingValidate } from "../../../src/mcp/tools/opening";
 import {
   nameCollisions,
   namePrompt,
   nameValidate,
-} from "../../src/mcp/tools/name";
+} from "../../../src/mcp/tools/name";
 import {
   plotReversePrompt,
   plotReverseValidate,
-} from "../../src/mcp/tools/plot";
-import { chapterPrompt, chapterValidate } from "../../src/mcp/tools/chapter";
+} from "../../../src/mcp/tools/plot";
+import { chapterPrompt, chapterValidate } from "../../../src/mcp/tools/chapter";
 import {
   blurbPrompt,
   blurbValidate,
   catchphraseValidate,
-} from "../../src/mcp/tools/blurb";
+} from "../../../src/mcp/tools/blurb";
 
 /**
  * 外から呼べるようにした5つの「判断」（0.66.0。設計書6.87.13）。
@@ -34,7 +34,7 @@ import {
  * 3. **黙って減らさない。** 落としたものは理由とともに返す
  */
 
-const WORK = nodePath.join(__dirname, "..", "fixtures", "mcp-work");
+const WORK = nodePath.join(__dirname, "..", "..", "fixtures", "mcp-work");
 
 const temporary: string[] = [];
 

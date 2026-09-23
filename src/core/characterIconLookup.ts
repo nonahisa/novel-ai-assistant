@@ -156,7 +156,7 @@ export const LISTED_MISSING_NAMES = 3;
  * 手の打ちようが無かった）。付いた人数・付かなかった人の名前・置き場を
  * この1文で伝える。
  *
- * **Markdownの記号は混ぜない**（`test/unit/plainTextUi.test.ts`）。
+ * **Markdownの記号は混ぜない**（`test/unit/core/plainTextUi.test.ts`）。
  */
 export function characterIconNotice(
   total: number,

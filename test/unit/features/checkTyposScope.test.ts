@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { WorkEntry } from "../../src/models/types";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 誤字脱字は、**誤字脱字の札で**範囲を決める（設計書6.8.7）。
@@ -14,11 +14,11 @@ import type { WorkEntry } from "../../src/models/types";
  */
 
 const mocks = vi.hoisted(() => ({ resolveCheckScope: vi.fn() }));
-vi.mock("../../src/features/typoCheckScope", () => ({
+vi.mock("../../../src/features/typoCheckScope", () => ({
   resolveCheckScope: mocks.resolveCheckScope,
 }));
 
-const { resolveTypoScope } = await import("../../src/features/checkTypos");
+const { resolveTypoScope } = await import("../../../src/features/checkTypos");
 
 const work: WorkEntry = {
   id: "w1",

@@ -8,7 +8,7 @@ import { describe, expect, test } from "vitest";
  */
 type Command = { command: string; args: string[] };
 
-const releaseGithub = (await import("../../scripts/releaseGithub.mjs")) as {
+const releaseGithub = (await import("../../../scripts/releaseGithub.mjs")) as {
   parseReleaseArguments(argv: string[]): {
     dryRun: boolean;
     skipVerify: boolean;

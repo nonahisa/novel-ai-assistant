@@ -3,7 +3,7 @@ import {
   bundledTuning,
   bundledTuningByKey,
   bundledTuningKeys,
-} from "../../src/core/bundledTuning";
+} from "../../../src/core/bundledTuning";
 
 /**
  * 測った値の初期値の同梱（作者の裁定、2026-09-13）。

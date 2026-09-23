@@ -4,9 +4,9 @@ import { describe, expect, test } from "vitest";
 import {
   inferredWorkSource,
   markInferredWork,
-} from "../../src/core/workTarget";
-import { confirmRun } from "../../src/views/notify";
-import { window, workspace } from "./support/vscodeStub";
+} from "../../../src/core/workTarget";
+import { confirmRun } from "../../../src/views/notify";
+import { window, workspace } from "../support/vscodeStub";
 
 /**
  * 「以降は訊かない」を覚えていても、**作品を推し量ったときは訊く**
@@ -190,7 +190,7 @@ describe("confirmRun：推し量った作品は、覚えていても訊く", () 
 */
 describe("作品を推し量る所は、どれも印を付けて返す", () => {
   const source = readFileSync(
-    resolve(__dirname, "../../src/extension.ts"),
+    resolve(__dirname, "../../../src/extension.ts"),
     "utf8"
   );
 
@@ -224,7 +224,7 @@ describe("作品を推し量る所は、どれも印を付けて返す", () => {
  * 作品に対してAIを走らせる確認は、**作品そのもの**（`work`）を渡す。
  * 題名の文字列だけでは、推し量ったかどうかが確認まで届かない。
  */
-const FEATURES = join(__dirname, "..", "..", "src", "features");
+const FEATURES = join(__dirname, "..", "..", "..", "src", "features");
 const WORK_CONFIRMS: ReadonlyArray<readonly [string, string]> = [
   ["extractCharacters.ts", "ai.run.extractCharacters"],
   ["checkTypos.ts", "ai.run.checkTypos"],

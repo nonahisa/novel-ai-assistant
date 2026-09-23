@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { buildPlotTemplate } from "../../src/core/plotTemplate";
-import { PLOT_SECTIONS } from "../../src/core/plotDoc";
+import { buildPlotTemplate } from "../../../src/core/plotTemplate";
+import { PLOT_SECTIONS } from "../../../src/core/plotDoc";
 
 /**
  * プロットの書き出し。

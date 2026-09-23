@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { globSync, readFileSync } from "node:fs";
-import { countEpisodeChars, episodeBodyForCount } from "../../src/core/episodeCharCount";
+import { countEpisodeChars, episodeBodyForCount } from "../../../src/core/episodeCharCount";
 
 /**
  * 話の字数は、どの画面でも同じ関数で数える（実機確認リスト F-7・A-9 の代わり）。

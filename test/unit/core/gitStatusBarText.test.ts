@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { describeSyncStatusBar } from "../../src/core/gitSyncStatusText";
-import type { GitSyncStatus } from "../../src/core/git";
+import { describeSyncStatusBar } from "../../../src/core/gitSyncStatusText";
+import type { GitSyncStatus } from "../../../src/core/git";
 
 /**
  * ステータスバーの文言（設計書6.15.1）。

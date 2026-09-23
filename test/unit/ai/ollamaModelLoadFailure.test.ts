@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { isModelLoadFailure } from "../../src/ai/ollamaProvider";
-import { AIError, recoveryForAIError } from "../../src/ai/types";
+import { isModelLoadFailure } from "../../../src/ai/ollamaProvider";
+import { AIError, recoveryForAIError } from "../../../src/ai/types";
 
 /**
  * Ollamaが「モデルを載せられなかった」ときを、応答の形の問題と分けて扱う

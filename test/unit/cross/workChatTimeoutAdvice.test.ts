@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { workChatTimeoutAdvice } from "../../src/features/workChatPanel";
-import { maxTimeoutSeconds } from "../../src/core/modelTuning";
+import { workChatTimeoutAdvice } from "../../../src/features/workChatPanel";
+import { maxTimeoutSeconds } from "../../../src/core/modelTuning";
 
 /**
  * 相談の時間切れの案内（ノートPCの実機、2026-09-23）。
@@ -50,7 +50,7 @@ describe("相談の時間切れの案内は、そのAIの上限で言う", () =>
    */
   test("相談パネルは、クラウドの上限の定数を直に読まない", () => {
     const source = fs.readFileSync(
-      path.join(__dirname, "..", "..", "src", "features", "workChatPanel.ts"),
+      path.join(__dirname, "..", "..", "..", "src", "features", "workChatPanel.ts"),
       "utf8"
     );
     expect(source).not.toMatch(/\bMAX_TIMEOUT_SECONDS\b/);

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { isPlaceholderText } from "../../src/core/placeholderText";
-import { validateProofreadIssues } from "../../src/core/proofreadValidation";
-import { validateTypoIssues } from "../../src/core/typoCheckValidation";
-import type { Chunk } from "../../src/core/chunker";
+import { isPlaceholderText } from "../../../src/core/placeholderText";
+import { validateProofreadIssues } from "../../../src/core/proofreadValidation";
+import { validateTypoIssues } from "../../../src/core/typoCheckValidation";
+import type { Chunk } from "../../../src/core/chunker";
 
 /**
  * **AIが「中身が無い」ことを、中身として書いてくる。**

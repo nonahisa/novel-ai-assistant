@@ -11,7 +11,7 @@
 // 配布物に入らないので要らない。
 //
 // **依存を足したら、これを走らせ直すこと。**
-// `test/unit/thirdPartyNotices.test.ts` がずれを止める。
+// `test/unit/cross/thirdPartyNotices.test.ts` がずれを止める。
 import fs from "node:fs";
 import path from "path";
 import { fileURLToPath } from "url";

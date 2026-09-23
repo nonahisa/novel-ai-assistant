@@ -6,8 +6,8 @@ import {
   planMisattributedRecord,
   resolveMisattributedDestination,
   type MisattributedValue,
-} from "../../src/core/misattributedValues";
-import { emptyCharacter, type Character } from "../../src/models/character";
+} from "../../../src/core/misattributedValues";
+import { emptyCharacter, type Character } from "../../../src/models/character";
 
 /**
  * 「AIで再読込」ではじいた記述の受け皿（設計書6.31.2）。

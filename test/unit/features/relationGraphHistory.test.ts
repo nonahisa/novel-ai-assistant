@@ -3,7 +3,7 @@ import {
   EMPTY_CENTER_HISTORY,
   pushCenterHistory,
   stepCenterHistory,
-} from "../../src/features/relationGraphPanel";
+} from "../../../src/features/relationGraphPanel";
 
 /**
  * 人物相関図の「戻る」「進む」（設計書6.38.3）。

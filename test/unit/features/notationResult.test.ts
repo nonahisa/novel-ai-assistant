@@ -5,12 +5,12 @@ import {
   dropKeptGroups,
   NOTATION_SCOPE_NOTE,
   readGroupSelection,
-} from "../../src/features/checkNotation";
-import type { NotationCheckRunResult } from "../../src/features/checkNotation";
-import type { TypoCheckIssue } from "../../src/features/checkTypos";
-import type { IncomingCount } from "../../src/core/proposalBuckets";
-import type { NotationVariantGroup } from "../../src/core/notationVariants";
-import type { KeepWord } from "../../src/models/keepWord";
+} from "../../../src/features/checkNotation";
+import type { NotationCheckRunResult } from "../../../src/features/checkNotation";
+import type { TypoCheckIssue } from "../../../src/features/checkTypos";
+import type { IncomingCount } from "../../../src/core/proposalBuckets";
+import type { NotationVariantGroup } from "../../../src/core/notationVariants";
+import type { KeepWord } from "../../../src/models/keepWord";
 
 /**
  * 表記ゆれの完了報告（設計書6.8.9）。

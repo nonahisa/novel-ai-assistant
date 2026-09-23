@@ -6,11 +6,11 @@ import {
   NAME_SUGGEST_HINTS,
   NAME_SUGGEST_SCHEMA,
   parseNameSuggest,
-} from "../../src/prompts/nameSuggest";
+} from "../../../src/prompts/nameSuggest";
 import {
   screenNameCandidates,
   type NameEntry,
-} from "../../src/core/nameCollision";
+} from "../../../src/core/nameCollision";
 
 function response(candidates: unknown[]): string {
   return JSON.stringify({ candidates });

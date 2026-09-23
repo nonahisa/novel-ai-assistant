@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { WorkEntry } from "../../src/models/types";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 相談パネルの「相談を資料へ反映」（設計書6.72）。
@@ -15,7 +15,7 @@ import type { WorkEntry } from "../../src/models/types";
 const applyCalls = vi.hoisted(
   () => [] as Array<{ workId: string; turns: number }>
 );
-vi.mock("../../src/features/chatSettingsSync", () => ({
+vi.mock("../../../src/features/chatSettingsSync", () => ({
   applyChatToSettings: async (
     work: { id: string },
     turns: readonly unknown[]
@@ -34,24 +34,24 @@ vi.mock("../../src/features/chatSettingsSync", () => ({
 }));
 
 /** 相談の記録はディスクへ書く。ここでは配線を見ないので黙らせる */
-vi.mock("../../src/core/chatLog", () => ({
+vi.mock("../../../src/core/chatLog", () => ({
   appendChatLog: () => undefined,
   summarizeMaterials: () => [],
 }));
 
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logFailure: () => undefined,
   logStep: () => undefined,
   logLine: () => undefined,
   useLogFile: () => undefined,
 }));
 
-vi.mock("../../src/features/aiConnectivity", () => ({
+vi.mock("../../../src/features/aiConnectivity", () => ({
   confirmProviderReachable: async () => true,
   confirmPaidUsage: async () => true,
 }));
 
-const { WorkChatPanel } = await import("../../src/features/workChatPanel");
+const { WorkChatPanel } = await import("../../../src/features/workChatPanel");
 
 function work(id: string, title: string): WorkEntry {
   return {

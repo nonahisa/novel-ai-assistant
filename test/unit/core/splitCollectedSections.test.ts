@@ -5,11 +5,11 @@ import {
   describeSplitSections,
   planSplitSections,
   splitPartSections,
-} from "../../src/core/collectedSections";
-import { planSplit } from "../../src/core/splitCollected";
-import { splitCollectedFile } from "../../src/features/splitCollectedFile";
-import type { WorkEntry } from "../../src/models/types";
-import { FileSystemError, Uri, window, workspace } from "./support/vscodeStub";
+} from "../../../src/core/collectedSections";
+import { planSplit } from "../../../src/core/splitCollected";
+import { splitCollectedFile } from "../../../src/features/splitCollectedFile";
+import type { WorkEntry } from "../../../src/models/types";
+import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
 
 /**
  * 合本を話ごとに分けるとき、中の【第N章】から章を立てる（設計書6.66.4・6.2.2）。

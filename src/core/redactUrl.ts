@@ -19,7 +19,7 @@ const URL_CREDENTIAL = /([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/\s@]+@/g;
  *
  * **アスタリスク3つを文字列にじかに書かない。** 画面へ出す文言に
  * Markdownの強調が混ざっていないかを見張る検査
- * （`test/unit/plainTextUi.test.ts`）が、`**` を含む文字列を拾うためである。
+ * （`test/unit/core/plainTextUi.test.ts`）が、`**` を含む文字列を拾うためである。
  * ここでの意味は強調ではなく伏せ字なので、組み立てて渡す。
  */
 const MASK = "*".repeat(3);

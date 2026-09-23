@@ -2,8 +2,8 @@ import { describe, expect, test } from "vitest";
 import {
   buildEmptyForeshadowGuide,
   buildForeshadowMarkdown,
-} from "../../src/core/foreshadowMarkdown";
-import { emptyForeshadow, type Foreshadow } from "../../src/models/foreshadow";
+} from "../../../src/core/foreshadowMarkdown";
+import { emptyForeshadow, type Foreshadow } from "../../../src/models/foreshadow";
 
 /**
  * 伏線の一覧（設計書6.35.5）。

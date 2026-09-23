@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { withoutChapterStartingAt } from "../../src/models/chapter";
+import { withoutChapterStartingAt } from "../../../src/models/chapter";
 
 /**
  * **章を外しても、話は1つも消えない**（設計書6.66）。実機確認 F-60 の項目。
@@ -20,7 +20,7 @@ import { withoutChapterStartingAt } from "../../src/models/chapter";
  */
 
 const source = readFileSync(
-  resolve(__dirname, "../../src/features/manageChapters.ts"),
+  resolve(__dirname, "../../../src/features/manageChapters.ts"),
   "utf8"
 );
 

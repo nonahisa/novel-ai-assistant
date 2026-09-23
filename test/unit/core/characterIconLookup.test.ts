@@ -6,7 +6,7 @@ import {
   compareIconPaths,
   iconNameKey,
   resolveCharacterIconPath,
-} from "../../src/core/characterIconLookup";
+} from "../../../src/core/characterIconLookup";
 
 /**
  * 人物イラストを素材置き場から名前で引く（作者の指定、2026-09-13

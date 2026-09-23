@@ -3,12 +3,12 @@ import {
   READER_GAP_THRESHOLD,
   READER_TYPES,
   resolveReaderType,
-} from "../../src/core/readerTarget";
-import type { ReaderProfile, ReaderScores } from "../../src/models/readerProfile";
-import { authorReaderProfileFromAnswers } from "../../src/core/authorReaderType";
-import type { AuthorReaderProfile } from "../../src/core/authorReaderType";
-import { compareAuthorReader } from "../../src/core/authorReaderGap";
-import { buildReaderGuide } from "../../src/core/readerTargetDoc";
+} from "../../../src/core/readerTarget";
+import type { ReaderProfile, ReaderScores } from "../../../src/models/readerProfile";
+import { authorReaderProfileFromAnswers } from "../../../src/core/authorReaderType";
+import type { AuthorReaderProfile } from "../../../src/core/authorReaderType";
+import { compareAuthorReader } from "../../../src/core/authorReaderGap";
+import { buildReaderGuide } from "../../../src/core/readerTargetDoc";
 
 /**
  * **作者自身の読者タイプと、その作品のターゲット読者のズレ**

@@ -9,7 +9,7 @@ import {
   parseTimeline,
   timepointOfEpisode,
   timepointsOfLine,
-} from "../../src/models/timeline";
+} from "../../../src/models/timeline";
 
 /** 本編＋IF編＋夢＋並行世界を持つ作品。多くのテストで使う */
 function sample() {

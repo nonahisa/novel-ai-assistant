@@ -8,15 +8,15 @@ import {
   clearSamplingHost,
   samplingAvailable,
   setSamplingHost,
-} from "../../src/mcp/tools/sampling";
+} from "../../../src/mcp/tools/sampling";
 import {
   RUNNER_KINDS,
   assertRunner,
   runChunksBySampling,
-} from "../../src/mcp/tools/run";
-import { RUNNER_INPUT } from "../../src/mcp/tools/shared";
-import { typoRun } from "../../src/mcp/tools/typo";
-import { setExternalClientName } from "../../src/mcp/tools/accessLog";
+} from "../../../src/mcp/tools/run";
+import { RUNNER_INPUT } from "../../../src/mcp/tools/shared";
+import { typoRun } from "../../../src/mcp/tools/typo";
+import { setExternalClientName } from "../../../src/mcp/tools/accessLog";
 
 /** この試験での接続元の名乗り。**許可と門番が同じ相手を見る** */
 const TEST_CLIENT = "試験のクライアント";
@@ -36,7 +36,7 @@ const TEST_CLIENT = "試験のクライアント";
  * 3. **行き先の顔ぶれが、入力の形と食い違わないこと**（写しを作らない）
  */
 
-const WORK = nodePath.join(__dirname, "..", "fixtures", "mcp-work");
+const WORK = nodePath.join(__dirname, "..", "..", "fixtures", "mcp-work");
 
 /** 作り物のクライアント。宣言と答えを差し替えられる */
 function fakeHost(options: {

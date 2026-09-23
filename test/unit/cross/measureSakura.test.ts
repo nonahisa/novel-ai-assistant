@@ -8,9 +8,9 @@ import {
   runSakuraChunks,
   toOpenAIJsonSchema,
   validateArgsOf,
-} from "../../scripts/measureSakura.mjs";
-import { toOpenAIJsonSchema as productToOpenAIJsonSchema } from "../../src/ai/jsonSchema";
-import { PROOFREAD_SCHEMA } from "../../src/prompts/proofread";
+} from "../../../scripts/measureSakura.mjs";
+import { toOpenAIJsonSchema as productToOpenAIJsonSchema } from "../../../src/ai/jsonSchema";
+import { PROOFREAD_SCHEMA } from "../../../src/prompts/proofread";
 
 /*
   さくらのAI（クラウド）で測る道（`scripts/measure.mjs --runner sakura`）を、

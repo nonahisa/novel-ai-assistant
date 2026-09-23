@@ -3,8 +3,8 @@ import {
   buildExcerpt,
   classifyChatContext,
   describeChatContext,
-} from "../../src/core/chatContext";
-import { parseWorkChatAnswer } from "../../src/prompts/workChat";
+} from "../../../src/core/chatContext";
+import { parseWorkChatAnswer } from "../../../src/prompts/workChat";
 
 function classify(relativePath: string, isEpisode = false) {
   return classifyChatContext({

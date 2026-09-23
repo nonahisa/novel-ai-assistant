@@ -2,8 +2,8 @@ import { describe, expect, test } from "vitest";
 import {
   buildTuningStatsMarkdown,
   type TuningStatsEntry,
-} from "../../src/core/tuningStats";
-import { parseModelTuning, type ModelTuning } from "../../src/core/modelTuning";
+} from "../../../src/core/tuningStats";
+import { parseModelTuning, type ModelTuning } from "../../../src/core/modelTuning";
 
 /**
  * **実測と「そこまでは確かめた」を、一覧で見分けられるようにする**

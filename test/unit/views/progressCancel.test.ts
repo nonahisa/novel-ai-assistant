@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type * as vscode from "vscode";
-import { window } from "./support/vscodeStub";
+import { window } from "../support/vscodeStub";
 import {
   cancelRunningTask,
   withCancellableProgress,
-} from "../../src/views/progress";
+} from "../../../src/views/progress";
 
 /**
  * 中止ボタンは「どれを止めるか」を選べる（設計書6.76、0.33.0のレビュー）。

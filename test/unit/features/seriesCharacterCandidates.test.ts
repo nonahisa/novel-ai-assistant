@@ -3,18 +3,18 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   buildSeriesMatchPairs,
   offerSeriesCharacterMatches,
-} from "../../src/features/seriesCharacterCandidates";
-import { clearSeriesCache } from "../../src/core/seriesSettings";
-import { emptyCharacter, type Character } from "../../src/models/character";
-import type { SeriesCharacterCandidate } from "../../src/core/seriesLink";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/features/seriesCharacterCandidates";
+import { clearSeriesCache } from "../../../src/core/seriesSettings";
+import { emptyCharacter, type Character } from "../../../src/models/character";
+import type { SeriesCharacterCandidate } from "../../../src/core/seriesLink";
+import type { WorkEntry } from "../../../src/models/types";
 import {
   FileSystemError,
   FileType,
   Uri,
   window,
   workspace,
-} from "./support/vscodeStub";
+} from "../support/vscodeStub";
 
 /**
  * 設定資料の抽出で出た新しい人物に、シリーズの同名を候補として並べる。

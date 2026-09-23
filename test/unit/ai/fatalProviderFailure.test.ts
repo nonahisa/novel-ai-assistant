@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { isConnectivityFailure, isFatalProviderFailure } from "../../src/ai/types";
+import { isConnectivityFailure, isFatalProviderFailure } from "../../../src/ai/types";
 
 /**
  * 「待っても直らない失敗」で、残りのチャンクを試すのをやめる。
@@ -63,7 +63,7 @@ describe("チャンクを回す機能は中断の判定を持つ", () => {
 
   for (const name of FEATURES) {
     const source = readFileSync(
-      resolve(__dirname, "../../src/features", name),
+      resolve(__dirname, "../../../src/features", name),
       "utf8"
     );
 

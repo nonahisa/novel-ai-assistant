@@ -13,13 +13,13 @@ import {
   imageMediaType,
   scopeCssForPreview,
   type EpubBook,
-} from "../../src/core/epubPackage";
+} from "../../../src/core/epubPackage";
 import {
   defaultBookBlocks,
   defaultBookConfig,
   type BookConfig,
-} from "../../src/models/book";
-import { BUILTIN_ORNAMENTS } from "../../src/core/epubOrnaments";
+} from "../../../src/models/book";
+import { BUILTIN_ORNAMENTS } from "../../../src/core/epubOrnaments";
 
 /**
  * EPUB3のZIP組み立て（設計書6.65.4の第1段）。

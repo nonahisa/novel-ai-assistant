@@ -9,14 +9,14 @@ import {
   planBackupMerge,
   summarizeMergeResult,
   type LocalManuscriptSource,
-} from "../../src/core/backupMerge";
-import { countProposableHunks, hunkProposalsOf } from "../../src/core/backupHunks";
-import { inspectWorkBackup } from "../../src/core/workZip";
+} from "../../../src/core/backupMerge";
+import { countProposableHunks, hunkProposalsOf } from "../../../src/core/backupHunks";
+import { inspectWorkBackup } from "../../../src/core/workZip";
 import {
   emptyPostingLedger,
   withReaderStats,
   type PostingLedger,
-} from "../../src/models/posting";
+} from "../../../src/models/posting";
 
 /**
  * 既にある作品へ、バックアップのうち「足してよいもの」だけを足す計画

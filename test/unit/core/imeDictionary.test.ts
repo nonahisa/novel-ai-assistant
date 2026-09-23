@@ -7,12 +7,12 @@ import {
   splitByEncodable,
   summarizeForComment,
   type DictionaryEntry,
-} from "../../src/core/imeDictionary";
-import { emptyCharacter, type Character } from "../../src/models/character";
-import { emptyLocation, type Location } from "../../src/models/location";
-import { emptyAbility, type Ability } from "../../src/models/ability";
-import { emptyOrganization } from "../../src/models/organization";
-import { emptyWorldItem } from "../../src/models/world";
+} from "../../../src/core/imeDictionary";
+import { emptyCharacter, type Character } from "../../../src/models/character";
+import { emptyLocation, type Location } from "../../../src/models/location";
+import { emptyAbility, type Ability } from "../../../src/models/ability";
+import { emptyOrganization } from "../../../src/models/organization";
+import { emptyWorldItem } from "../../../src/models/world";
 
 function character(
   id: string,

@@ -2,15 +2,15 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { workspace } from "vscode";
-import { modelTuning, resolveContextWindow } from "../../src/core/modelTuning";
+import { modelTuning, resolveContextWindow } from "../../../src/core/modelTuning";
 import {
   bundledTuningByKey,
   bundledTuningKeys,
-} from "../../src/core/bundledTuning";
-import { useMemoryTuningStore } from "./support/tuningStore";
-import { LMSTUDIO_CONTEXT_WINDOW } from "../../src/ai/lmstudioProvider";
-import { OPENAI_CONTEXT_WINDOW } from "../../src/ai/openaiProvider";
-import { SAKURA_CONTEXT_WINDOW } from "../../src/ai/sakuraProvider";
+} from "../../../src/core/bundledTuning";
+import { useMemoryTuningStore } from "../support/tuningStore";
+import { LMSTUDIO_CONTEXT_WINDOW } from "../../../src/ai/lmstudioProvider";
+import { OPENAI_CONTEXT_WINDOW } from "../../../src/ai/openaiProvider";
+import { SAKURA_CONTEXT_WINDOW } from "../../../src/ai/sakuraProvider";
 
 /**
  * コンテキスト長の「台帳 → プロバイダ別設定 → 既定」の読み順（設計書6.77）。
@@ -134,7 +134,7 @@ describe("台帳 → 設定 → 既定 の順（3社とも同じ）", () => {
 });
 
 describe("台帳を見るのは、申告しないプロバイダだけ", () => {
-  const root = path.join(__dirname, "..", "..");
+  const root = path.join(__dirname, "..", "..", "..");
 
   test("3社は共通の読み順を通り、自前で設定を引かない", () => {
     // **写しを作らせない。** 1社だけ元へ戻ると、そのAIでだけ
@@ -171,7 +171,7 @@ describe("台帳を見るのは、申告しないプロバイダだけ", () => {
  * するまで全モデルがその値で動いていた（31Bは実測 273,001トークン）。
  */
 describe("申告しないプロバイダは、同梱の実測を既定より先に使う", () => {
-  const root = path.join(__dirname, "..", "..");
+  const root = path.join(__dirname, "..", "..", "..");
 
   /**
    * **本物に近い設定のスタブ。** `package.json` に既定のある設定は、

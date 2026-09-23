@@ -2,16 +2,16 @@ import * as fsp from "node:fs/promises";
 import * as nodePath from "node:path";
 import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { FileType, workspace } from "./support/vscodeStub";
+import { FileType, workspace } from "../support/vscodeStub";
 import {
   copyForEditor,
   setUpAndPush,
   shareNoticeFor,
-} from "../../src/features/shareWithEditor";
-import { isNestedLocation, isSameLocation } from "../../src/core/locationCompare";
-import { RECOVERY_DIRECTORY_NAME } from "../../src/core/atomicWrite";
-import { workPaths } from "../../src/core/workRegistry";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/features/shareWithEditor";
+import { isNestedLocation, isSameLocation } from "../../../src/core/locationCompare";
+import { RECOVERY_DIRECTORY_NAME } from "../../../src/core/atomicWrite";
+import { workPaths } from "../../../src/core/workRegistry";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 編集部へ渡す（設計書5.6.11）。

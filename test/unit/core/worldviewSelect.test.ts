@@ -1,10 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { describeWorldItem } from "../../src/core/settingsSummary";
+import { describeWorldItem } from "../../../src/core/settingsSummary";
 import {
   WORLDVIEW_MAX_CHARS,
   selectWorldview,
-} from "../../src/core/worldviewSelect";
-import { emptyWorldItem, type WorldItem } from "../../src/models/world";
+} from "../../../src/core/worldviewSelect";
+import { emptyWorldItem, type WorldItem } from "../../../src/models/world";
 
 /**
  * 矛盾検知へ渡す世界観の絞り（設計書6.27.6の穴2）。

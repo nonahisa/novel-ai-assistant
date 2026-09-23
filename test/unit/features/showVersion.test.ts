@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
-import { buildVersionReport } from "../../src/features/showVersion";
+import { buildVersionReport } from "../../../src/features/showVersion";
 
 function info(overrides: Partial<Parameters<typeof buildVersionReport>[0]> = {}) {
   return {

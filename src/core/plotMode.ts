@@ -329,7 +329,7 @@ function chapterNameByPath(
  *
  * **既存のコマンドを呼ぶだけ**で、名前も説明もここには書かない
  * （`ACTION_TREE` から引く。簡単ステップメニューと同じ決まり）。
- * 改名されたら `test/unit/plotMode.test.ts` が落ちる。
+ * 改名されたら `test/unit/core/plotMode.test.ts` が落ちる。
  */
 export const PLOT_MODE_AI_COMMANDS: readonly string[] = [
   "novelai.generatePlot",

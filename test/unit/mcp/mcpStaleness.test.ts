@@ -9,8 +9,8 @@ import {
   rememberBundleAtStartup,
   staleBundleLine,
   withStaleNote,
-} from "../../src/mcp/staleness";
-import { SERVER_VERSION } from "../../src/mcp/version";
+} from "../../../src/mcp/staleness";
+import { SERVER_VERSION } from "../../../src/mcp/version";
 
 /**
  * 走っている束が古くなっていないか（設計書6.87.15 の柱2の1）。

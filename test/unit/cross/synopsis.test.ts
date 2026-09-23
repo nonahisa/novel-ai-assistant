@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   parseSynopsisResult,
   validateSynopsisResult,
-} from "../../src/core/synopsisValidation";
+} from "../../../src/core/synopsisValidation";
 import {
   dedupeSynopsisEpisodes,
   emptySynopsisSet,
@@ -10,18 +10,18 @@ import {
   parseSynopsisSet,
   upsertSynopsis,
   type ChapterSynopsis,
-} from "../../src/models/synopsis";
+} from "../../../src/models/synopsis";
 import {
   buildSynopsisPrompt,
   synopsisPromptVersion,
   SYNOPSIS_VERSION,
-} from "../../src/prompts/synopsis";
-import { buildReaderTypePrompt } from "../../src/prompts/readerTarget";
-import { readerTypeCacheMark } from "../../src/core/readerTarget";
+} from "../../../src/prompts/synopsis";
+import { buildReaderTypePrompt } from "../../../src/prompts/readerTarget";
+import { readerTypeCacheMark } from "../../../src/core/readerTarget";
 import {
   READER_PROFILE_SCHEMA_VERSION,
   type ReaderProfile,
-} from "../../src/models/readerProfile";
+} from "../../../src/models/readerProfile";
 
 function episode(overrides: Partial<ChapterSynopsis> = {}): ChapterSynopsis {
   return {

@@ -45,7 +45,7 @@ const FINDINGS_FILE = "findings.jsonl";
  * 先例は `novelai.logs.retentionDays`（`features/pruneLogs.ts`）。
  * 写しが方々に増えると、同じ設定が機能によって効いたり効かなかったり
  * するので、決め方は1か所へ寄せる。見張りは
- * `test/unit/findingRetention.test.ts` が持つ。
+ * `test/unit/features/findingRetention.test.ts` が持つ。
  *
  * **既定は3日**（作者の指示）。`0` で無期限。
  */

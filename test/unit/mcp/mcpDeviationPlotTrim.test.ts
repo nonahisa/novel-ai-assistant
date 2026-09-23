@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
-import { deviationPrompt } from "../../src/mcp/tools/episode";
-import { PLOT_MAX_CHARS } from "../../src/core/plotForDeviation";
+import { deviationPrompt } from "../../../src/mcp/tools/episode";
+import { PLOT_MAX_CHARS } from "../../../src/core/plotForDeviation";
 
 /**
  * 外から呼ぶ逸脱検知（P-11）も、プロットを製品と同じところで切るか
@@ -19,7 +19,7 @@ import { PLOT_MAX_CHARS } from "../../src/core/plotForDeviation";
  * プロットでは何も変わらないこと**。
  */
 
-const FIXTURE = nodePath.join(__dirname, "..", "fixtures", "mcp-work");
+const FIXTURE = nodePath.join(__dirname, "..", "..", "fixtures", "mcp-work");
 const EPISODE = "本文/004_よあけ.txt";
 
 const temporary: string[] = [];

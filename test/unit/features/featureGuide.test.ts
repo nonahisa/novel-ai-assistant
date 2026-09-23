@@ -4,8 +4,8 @@ import {
   buildFeatureIndex,
   buildGuideBundles,
   EXTRA_GUIDE,
-} from "../../src/features/featureGuide";
-import { ACTION_TREE } from "../../src/views/actionList";
+} from "../../../src/features/featureGuide";
+import { ACTION_TREE } from "../../../src/views/actionList";
 
 /**
  * 相談へ渡す「使い方の説明」（目次＋束）。

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   foldTextForComparison,
   isSameBodyText,
-} from "../../src/core/bodyCompare";
+} from "../../../src/core/bodyCompare";
 
 /**
  * 本文どうしを比べる前の、文字の揃え（設計書6.100の下ごしらえ）。

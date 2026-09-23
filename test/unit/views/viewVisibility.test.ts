@@ -5,7 +5,7 @@ import {
   SOLO_VIEW_KEY,
   initialViewContext,
   resetViewVisibility,
-} from "../../src/views/viewVisibility";
+} from "../../../src/views/viewVisibility";
 
 /**
  * 左側の4つのビューの出し入れ（作者の報告、2026-09-03）。
@@ -28,7 +28,7 @@ interface Manifest {
 
 const VIEWS = (
   JSON.parse(
-    readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+    readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
   ) as Manifest
 ).contributes.views.novelai;
 

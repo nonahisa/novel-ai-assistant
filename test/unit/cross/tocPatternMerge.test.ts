@@ -6,9 +6,9 @@ import {
   defaultBookConfig,
   parseBookConfig,
   type BookConfig,
-} from "../../src/models/book";
-import { buildEpub, type EpubBook } from "../../src/core/epubPackage";
-import { buildEpubEditorPanelHtml } from "../../src/views/epubEditorPanelHtml";
+} from "../../../src/models/book";
+import { buildEpub, type EpubBook } from "../../../src/core/epubPackage";
+import { buildEpubEditorPanelHtml } from "../../../src/views/epubEditorPanelHtml";
 
 /**
  * 目次の「並べ方」と「文字の向き」の重複を潰した（作者の指摘、2026-09-13

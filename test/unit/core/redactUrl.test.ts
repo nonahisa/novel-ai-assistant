@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { redactUrlCredentials } from "../../src/core/redactUrl";
+import { redactUrlCredentials } from "../../../src/core/redactUrl";
 
 /**
  * URLに埋め込まれた資格情報（`https://user:token@host/...`）を落とす。

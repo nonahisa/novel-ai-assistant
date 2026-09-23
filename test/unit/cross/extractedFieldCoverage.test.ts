@@ -2,15 +2,15 @@ import { describe, expect, test } from "vitest";
 import {
   EXTRACTED_TEXT_FIELDS,
   normalizeExtractedCharacter,
-} from "../../src/core/characterExtractionValidation";
+} from "../../../src/core/characterExtractionValidation";
 import {
   normalizeExtractedAbility,
   normalizeExtractedLocation,
   normalizeExtractedWorldItem,
-} from "../../src/core/settingsExtractionValidation";
-import { CHARACTER_EXTRACT_SCHEMA } from "../../src/prompts/characterExtract";
-import { mergeExtractedCharacters } from "../../src/core/characterMerge";
-import { emptyCharacter } from "../../src/models/character";
+} from "../../../src/core/settingsExtractionValidation";
+import { CHARACTER_EXTRACT_SCHEMA } from "../../../src/prompts/characterExtract";
+import { mergeExtractedCharacters } from "../../../src/core/characterMerge";
+import { emptyCharacter } from "../../../src/models/character";
 
 /**
  * プロンプトが要求している項目が、抽出結果として最後まで届くかを固定する。

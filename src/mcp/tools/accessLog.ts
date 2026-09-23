@@ -17,7 +17,7 @@ import { permissionKeyOf } from "../../core/externalAccessPermission";
  * **転送層が1か所で呼ぶ。** 道具ごとに書くと、新しい道具を足した人が
  * 忘れる——そして**忘れたことは作者には見えない**。`server.ts` の
  * `tool()` を通るものは全部ここを通り、通っているかは
- * `test/unit/mcpAccessLog.test.ts` が見張る。
+ * `test/unit/mcp/mcpAccessLog.test.ts` が見張る。
  *
  * **書けなくても道具を止めない。** 記録が残らないのは困るが、そのために
  * 作者が頼んだ測定を失敗させるのは本末転倒である（`editHistory.ts` と同じ）。

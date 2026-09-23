@@ -4,8 +4,8 @@ import {
   isBlankEpisode,
   isBlankText,
   planLatestEpisode,
-} from "../../src/core/latestEpisode";
-import type { EpisodeFile } from "../../src/models/types";
+} from "../../../src/core/latestEpisode";
+import type { EpisodeFile } from "../../../src/models/types";
 
 /**
  * 「最新話を書く」（作者の依頼、2026-08-27。設計書6.25.5）。

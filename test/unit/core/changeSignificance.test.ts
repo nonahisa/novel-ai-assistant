@@ -5,10 +5,10 @@ import {
   scoreChanges,
   scoreFieldChange,
   stripInvolvementNote,
-} from "../../src/core/changeSignificance";
-import { describeCharacter } from "../../src/core/settingsSummary";
-import { emptyCharacter, type Character } from "../../src/models/character";
-import type { RecordChange } from "../../src/models/jsonValidation";
+} from "../../../src/core/changeSignificance";
+import { describeCharacter } from "../../../src/core/settingsSummary";
+import { emptyCharacter, type Character } from "../../../src/models/character";
+import type { RecordChange } from "../../../src/models/jsonValidation";
 
 /**
  * 変化の関与度（2026-08-26）。

@@ -10,9 +10,9 @@ import {
   planSyncTarget,
   syncCommitMessage,
   type SyncTargetState,
-} from "../../src/core/syncAllPlan";
-import type { GitSyncStatus } from "../../src/core/git";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/core/syncAllPlan";
+import type { GitSyncStatus } from "../../../src/core/git";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 作品をすべて同期する（設計書5.5.14）。

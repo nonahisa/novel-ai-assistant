@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { validateTypoIssues } from "../../src/core/typoCheckValidation";
-import type { Chunk } from "../../src/core/chunker";
+import { validateTypoIssues } from "../../../src/core/typoCheckValidation";
+import type { Chunk } from "../../../src/core/chunker";
 
 /**
  * 修正案そのものが、直しの形をしているか（設計書6.8.15）。

@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useMemoryTuningStore } from "./support/tuningStore";
-import { estimateCallsTimeFor } from "../../src/ai/runTimeEstimate";
+import { useMemoryTuningStore } from "../support/tuningStore";
+import { estimateCallsTimeFor } from "../../../src/ai/runTimeEstimate";
 import {
   describeCallTimeEstimate,
   estimateCallsTime,
-} from "../../src/core/etaEstimate";
-import { featureOutputKey } from "../../src/core/featureOutputTokens";
-import { modelTuningKey } from "../../src/core/modelTuning";
+} from "../../../src/core/etaEstimate";
+import { featureOutputKey } from "../../../src/core/featureOutputTokens";
+import { modelTuningKey } from "../../../src/core/modelTuning";
 
 /**
  * 押す前の目安が、**CPUだけの機械で15倍ずれた**（ノートPCの実機、2026-09-23、0.75.15）。

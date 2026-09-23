@@ -29,7 +29,7 @@ export const DEFAULT_MODE: WorkMode = "author";
  *
  * **ここへ並べるIDは `package.json` に実在するものだけ。** ただの文字列なので
  * 綴り違いは型検査を素通りし、押しても何も起きないまま気づかれない
- * （実際に3つ紛れていた）。`test/unit/editorMode.test.ts` が突き合わせる。
+ * （実際に3つ紛れていた）。`test/unit/core/editorMode.test.ts` が突き合わせる。
  */
 const EDITOR_ALLOWED = new Set<string>([
   // 本文の校正・校閲。**これが編集部の仕事である**

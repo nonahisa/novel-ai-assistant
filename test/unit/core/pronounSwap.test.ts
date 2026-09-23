@@ -2,8 +2,8 @@ import { describe, expect, test } from "vitest";
 import {
   isPronounSwap,
   validateTypoIssues,
-} from "../../src/core/typoCheckValidation";
-import type { Chunk } from "../../src/core/chunker";
+} from "../../../src/core/typoCheckValidation";
+import type { Chunk } from "../../../src/core/chunker";
 
 /**
  * 一人称の入れ替えを止める。

@@ -5,8 +5,8 @@ import {
   isAiBusy,
   resetAiActivity,
   withAiWork,
-} from "../../src/core/aiActivity";
-import { LmStudioProvider } from "../../src/ai/lmstudioProvider";
+} from "../../../src/core/aiActivity";
+import { LmStudioProvider } from "../../../src/ai/lmstudioProvider";
 
 /**
  * AIが仕事中かどうか。独り言が割り込まないための印。

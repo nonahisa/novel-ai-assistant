@@ -3,8 +3,8 @@ import {
   describeProcessesBlocked,
   isCommandAvailableInRuntime,
   processRequiredCommands,
-} from "../../src/core/processAvailability";
-import { allActions } from "../../src/views/actionList";
+} from "../../../src/core/processAvailability";
+import { allActions } from "../../../src/views/actionList";
 
 /**
  * ブラウザ版では使えない操作（設計書5.8.5）。

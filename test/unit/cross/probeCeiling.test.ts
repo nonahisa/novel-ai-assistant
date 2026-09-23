@@ -3,14 +3,14 @@ import {
   probeCharsPerToken,
   probeCharsToTokens,
   probeTokensPerChar,
-} from "../../src/core/contextProbe";
-import { ceilingCharsFor } from "../../src/features/measureContext";
+} from "../../../src/core/contextProbe";
+import { ceilingCharsFor } from "../../../src/features/measureContext";
 import {
   CHARS_PER_TOKEN,
   CHARS_PER_TOKEN_MARGIN,
   resolveCharsPerToken,
-} from "../../src/core/sizeBudget";
-import { decideChunkSize } from "../../src/core/chunker";
+} from "../../../src/core/sizeBudget";
+import { decideChunkSize } from "../../../src/core/chunker";
 
 /**
  * 読める長さの測定の**天井**を、当て推量ではなく実測の換算で置く

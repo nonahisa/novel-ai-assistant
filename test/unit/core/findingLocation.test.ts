@@ -2,8 +2,8 @@ import { describe, expect, test } from "vitest";
 import {
   locateFinding,
   locateFindings,
-} from "../../src/core/findingLocation";
-import type { Finding } from "../../src/models/finding";
+} from "../../../src/core/findingLocation";
+import type { Finding } from "../../../src/models/finding";
 
 /**
  * 残した指摘の位置を、開くたびに探し直す（設計書6.96.3）。

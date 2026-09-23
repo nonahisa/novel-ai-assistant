@@ -1,11 +1,11 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
-import { ChapterStore } from "../../src/core/chapterStore";
-import { groupEpisodesByChapter } from "../../src/core/chapterGrouping";
-import type { EpisodeFile, WorkEntry } from "../../src/models/types";
-import type { CollectedEpisode } from "../../src/core/collectedFile";
-import { SYNOPSIS_SCHEMA_VERSION } from "../../src/models/synopsis";
+import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
+import { ChapterStore } from "../../../src/core/chapterStore";
+import { groupEpisodesByChapter } from "../../../src/core/chapterGrouping";
+import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
+import type { CollectedEpisode } from "../../../src/core/collectedFile";
+import { SYNOPSIS_SCHEMA_VERSION } from "../../../src/models/synopsis";
 import {
   buildChapterMaterialEntries,
   buildChapterRanges,
@@ -13,7 +13,7 @@ import {
   describeChapterMaterial,
   describeChapterProposal,
   INSIDE_COLLECTED_REASON,
-} from "../../src/features/proposeChapters";
+} from "../../../src/features/proposeChapters";
 
 /**
  * 章立ての提案を承認したときの書き込み（設計書6.66.4）。

@@ -5,7 +5,7 @@ import {
   type Chatter,
   type ChatterDecision,
   type ChatterState,
-} from "../../src/core/chatter";
+} from "../../../src/core/chatter";
 
 /**
  * AIの独り言。

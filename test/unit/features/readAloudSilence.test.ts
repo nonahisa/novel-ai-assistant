@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { waitFor } from "../../src/features/manuscriptEditor";
+import { waitFor } from "../../../src/features/manuscriptEditor";
 
 /**
  * **「押しても何も起きない」を作らない**（設計書6.42）。
@@ -24,7 +24,7 @@ import { waitFor } from "../../src/features/manuscriptEditor";
  */
 
 const source = readFileSync(
-  resolve(__dirname, "../../src/features/manuscriptEditor.ts"),
+  resolve(__dirname, "../../../src/features/manuscriptEditor.ts"),
   "utf8"
 );
 

@@ -4,10 +4,10 @@ import { describe, expect, test } from "vitest";
 import {
   MAX_LOGGED_RESPONSE_CHARS,
   responseExcerptForLog,
-} from "../../src/core/logger";
-import { MAX_EXCERPT_CHARS } from "../../src/core/deviationValidation";
-import { PLOT_OPENING_EXCERPT_CHARS } from "../../src/features/generatePlot";
-import { BLURB_OPENING_EXCERPT_CHARS } from "../../src/features/generateBlurb";
+} from "../../../src/core/logger";
+import { MAX_EXCERPT_CHARS } from "../../../src/core/deviationValidation";
+import { PLOT_OPENING_EXCERPT_CHARS } from "../../../src/features/generatePlot";
+import { BLURB_OPENING_EXCERPT_CHARS } from "../../../src/features/generateBlurb";
 
 /**
  * 大きさの予算の共通化・**第2段**（設計書6.77）の重複4件。
@@ -18,7 +18,7 @@ import { BLURB_OPENING_EXCERPT_CHARS } from "../../src/features/generateBlurb";
  * （`modelTuningLookup.test.ts` の「6つのプロバイダが台帳を通る」と同じ手）。
  */
 
-const root = path.join(__dirname, "..", "..");
+const root = path.join(__dirname, "..", "..", "..");
 
 function readSource(...parts: readonly string[]): string {
   return fs.readFileSync(path.join(root, ...parts), "utf8");

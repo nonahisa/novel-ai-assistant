@@ -6,15 +6,15 @@ import {
 } from "node:fs/promises";
 import * as os from "node:os";
 import * as nodePath from "node:path";
-import { FileSystemError, FileType, window, workspace } from "./support/vscodeStub";
-import { resolveSyncTarget } from "../../src/features/resolveSyncTarget";
-import { recordChanges } from "../../src/features/gitOnboarding";
+import { FileSystemError, FileType, window, workspace } from "../support/vscodeStub";
+import { resolveSyncTarget } from "../../../src/features/resolveSyncTarget";
+import { recordChanges } from "../../../src/features/gitOnboarding";
 import {
   buildSyncTarget,
   describeIncludedWorks,
-} from "../../src/core/syncTarget";
-import type { GitCommandRunner } from "../../src/core/git";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/core/syncTarget";
+import type { GitCommandRunner } from "../../../src/core/git";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 「まとめて1つの置き場にする」（設計書5.7.9）の**出るものの中身**。

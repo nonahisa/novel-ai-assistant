@@ -3,7 +3,7 @@ import {
   createMaintenanceTrigger,
   MAINTENANCE_SIGNAL_WAIT_MS,
   MAINTENANCE_TIMEOUT_NOTE,
-} from "../../src/core/maintenanceTrigger";
+} from "../../../src/core/maintenanceTrigger";
 
 /**
  * **作品フォルダーの整備を、いつ起こすか**（設計書6.107。0.74.9）。

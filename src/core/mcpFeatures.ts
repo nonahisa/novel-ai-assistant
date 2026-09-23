@@ -75,7 +75,7 @@ export const FEATURE_LABELS: Record<FeatureName, string> = {
  * 本文を1話ずつ見る機能。**`filePath` が要る。**
  *
  * 測定の台本（`scripts/measureScoring.mjs`）が同じ表を持っており、
- * ずれていないことを `test/unit/mcpBundledTools.test.ts` が見張る
+ * ずれていないことを `test/unit/mcp/mcpBundledTools.test.ts` が見張る
  * ——ずれると、作品ぜんたいを1回見る機能を**話数ぶん回す**ことになる。
  */
 export const FILE_TARGET_FEATURES: readonly FeatureName[] = [

@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { describe, expect, test } from "vitest";
-import { SERVER_NAME, SERVER_VERSION } from "../../src/mcp/version";
+import { SERVER_NAME, SERVER_VERSION } from "../../../src/mcp/version";
 
 /**
  * 外から呼ぶ束（MCPサーバー）の版が、拡張機能の版と揃っているか。
@@ -13,7 +13,7 @@ import { SERVER_NAME, SERVER_VERSION } from "../../src/mcp/version";
  *
  * `showVersion.test.ts`（CHANGELOG・README・設計書の版）と同じ考え。
  */
-const root = path.join(__dirname, "..", "..");
+const root = path.join(__dirname, "..", "..", "..");
 
 function packageJson(): { version: string; name: string } {
   return JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));

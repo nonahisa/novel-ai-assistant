@@ -6,9 +6,9 @@ import {
   parseNameStatus,
   planRestore,
   restoreToCommit,
-} from "../../src/core/gitHistory";
-import { folderNameFromUrl, looksLikeAuthFailure } from "../../src/core/gitClone";
-import type { GitCommandResult, GitCommandRunner } from "../../src/core/git";
+} from "../../../src/core/gitHistory";
+import { folderNameFromUrl, looksLikeAuthFailure } from "../../../src/core/gitClone";
+import type { GitCommandResult, GitCommandRunner } from "../../../src/core/git";
 
 const UNIT = String.fromCharCode(31);
 

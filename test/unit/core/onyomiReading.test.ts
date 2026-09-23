@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   isOnyomiReading,
   opensOnyomiCompound,
-} from "../../src/core/onyomiReading";
+} from "../../../src/core/onyomiReading";
 
 /**
  * 音読みをつないだだけの熟語を見分ける（作者の報告、2026-09-12）。

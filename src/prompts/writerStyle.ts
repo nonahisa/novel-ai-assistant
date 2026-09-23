@@ -31,7 +31,7 @@ import type { WriterProfile } from "../core/writerProfileStore";
  * 1. **1軸につき1つだけ送る**（P-36・P-38 と同じ）。全部を毎回送ると
  *    相談ごとに字数が積み上がり、しかも他の書き方の記述に引きずられる
  * 2. **各文章は独立させ、ほかの書き方の名前も記述も含まない**
- *    （`test/unit/chatProfilePrompts.test.ts` が見張る）
+ *    （`test/unit/cross/chatProfilePrompts.test.ts` が見張る）
  * 3. **値踏みをしない。** 段取りに良し悪しは無い（設計書6.90.1
  *    「点数にしないのは、やり方に良し悪しが無いからである」）。
  *    即興派を「計画性が無い」と読める書き方は禁止

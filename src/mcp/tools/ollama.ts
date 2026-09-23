@@ -45,7 +45,7 @@ export const DEFAULT_ENDPOINT = "http://localhost:11434";
  * 製品側の手元のAIの上限（`core/modelTuning.ts` の `LOCAL_MAX_TIMEOUT_SECONDS`、
  * 2026-09-23 から1800秒）と同じ長さである。ここから引き込まないのは、あちらが
  * `vscode` を読むため（MCP の束へ入れられない）。**下回っていないことは
- * `test/unit/modelTuning.test.ts` が見張る。**
+ * `test/unit/core/modelTuning.test.ts` が見張る。**
  */
 export const MCP_OLLAMA_WAIT_MS = 30 * 60 * 1000;
 
@@ -317,7 +317,7 @@ function stringOrNull(value: unknown): string | null {
  *
  * **`ollamaProvider.ts` の同じ読み取りは借りられない**——あちらは `vscode` を
  * 静的に import しているので、この束へ持ち込むと**読み込んだ瞬間に落ちる**
- * （`test/unit/mcpReach.test.ts` が見張っている）。純粋な部分だけを切り出す
+ * （`test/unit/cross/mcpReach.test.ts` が見張っている）。純粋な部分だけを切り出す
  * にはあのファイルを割る必要があり、それは今回の範囲を越えるので、
  * ここでは小さく書いた。
  */

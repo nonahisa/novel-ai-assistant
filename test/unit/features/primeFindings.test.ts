@@ -55,7 +55,7 @@ vi.mock("vscode", () => {
 /** いまの本文。読めないファイルを試すため、`undefined` も返せる形にする */
 let text: string | undefined;
 
-vi.mock("../../src/core/textFile", () => ({
+vi.mock("../../../src/core/textFile", () => ({
   readTextFile: vi.fn(async () => {
     if (text === undefined) throw new Error("FileNotFound");
     return {
@@ -75,16 +75,16 @@ vi.mock("../../src/core/textFile", () => ({
 import {
   handOverFinding,
   primeSavedFindings,
-} from "../../src/features/primeFindings";
-import { FindingStore } from "../../src/features/findingStore";
-import { findingFilePath } from "../../src/core/findingSource";
+} from "../../../src/features/primeFindings";
+import { FindingStore } from "../../../src/features/findingStore";
+import { findingFilePath } from "../../../src/core/findingSource";
 import type {
   ContradictionViewItem,
   ProposalPanel,
   ProposalViewItem,
-} from "../../src/features/proposalPanel";
-import type { Finding, FindingDecision } from "../../src/models/finding";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/features/proposalPanel";
+import type { Finding, FindingDecision } from "../../../src/models/finding";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work: WorkEntry = {
   id: "w1",

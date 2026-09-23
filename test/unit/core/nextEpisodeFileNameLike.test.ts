@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { nextEpisodeFileNameLike } from "../../src/core/episodeRenumber";
+import { nextEpisodeFileNameLike } from "../../../src/core/episodeRenumber";
 
 /**
  * 「最新話を書く」「話を追加」の新しいファイル名は、**既存の話の名前の流儀**で

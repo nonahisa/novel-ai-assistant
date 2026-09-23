@@ -6,8 +6,8 @@ import {
   normalizeWorkTitle,
   type BackupIdentity,
   type BackupMatchCandidate,
-} from "../../src/core/backupMatch";
-import { inspectWorkBackup } from "../../src/core/workZip";
+} from "../../../src/core/backupMatch";
+import { inspectWorkBackup } from "../../../src/core/workZip";
 
 /**
  * 持ち込まれたバックアップが、どの登録済み作品のものかを決める

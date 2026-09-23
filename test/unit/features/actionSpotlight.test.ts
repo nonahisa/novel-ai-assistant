@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type * as vscode from "vscode";
-import { ActionDecorationProvider } from "../../src/views/actionDecorations";
+import { ActionDecorationProvider } from "../../../src/views/actionDecorations";
 import {
   actionResourceUri,
   ActionListProvider,
@@ -8,11 +8,11 @@ import {
   stepActionResourceUri,
   type ActionNode,
   type GroupStateStore,
-} from "../../src/views/actionList";
-import { StepMenuProvider, type StepNode } from "../../src/views/stepMenu";
-import { createActionSpotlight } from "../../src/features/actionSpotlight";
-import type { WorkEntry } from "../../src/models/types";
-import type { WorkRegistry } from "../../src/core/workRegistry";
+} from "../../../src/views/actionList";
+import { StepMenuProvider, type StepNode } from "../../../src/views/stepMenu";
+import { createActionSpotlight } from "../../../src/features/actionSpotlight";
+import type { WorkEntry } from "../../../src/models/types";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
 
 /**
  * 案内を**目立たせる**ところ（設計書6.104。作者の報告、2026-09-22

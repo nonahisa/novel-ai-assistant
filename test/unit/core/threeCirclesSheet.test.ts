@@ -6,15 +6,15 @@ import {
   threeCirclesEdges,
   THREE_CIRCLES_KIND,
   type ThreeCirclesInput,
-} from "../../src/core/threeCirclesSheet";
+} from "../../../src/core/threeCirclesSheet";
 import {
   emptyPostingLedger,
   type PostingLedger,
   type ReaderStatsRecord,
-} from "../../src/models/posting";
-import { authorReaderProfileFromAnswers } from "../../src/core/authorReaderType";
-import type { AuthorReaderProfile } from "../../src/core/authorReaderType";
-import type { ReaderProfile, ReaderScores } from "../../src/models/readerProfile";
+} from "../../../src/models/posting";
+import { authorReaderProfileFromAnswers } from "../../../src/core/authorReaderType";
+import type { AuthorReaderProfile } from "../../../src/core/authorReaderType";
+import type { ReaderProfile, ReaderScores } from "../../../src/models/readerProfile";
 
 /**
  * 3つの輪の1枚（設計書6.101、実装の順「3」と「4」）。

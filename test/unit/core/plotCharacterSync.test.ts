@@ -5,8 +5,8 @@ import {
   parsePlotCharacters,
   plotCharactersDigest,
   PENDING_CREATION_ID,
-} from "../../src/core/plotCharacterSync";
-import { emptyCharacter, type Character } from "../../src/models/character";
+} from "../../../src/core/plotCharacterSync";
+import { emptyCharacter, type Character } from "../../../src/models/character";
 
 /**
  * plot.md の「主要登場人物」から設定資料への差分反映（設計書6.4.9）。

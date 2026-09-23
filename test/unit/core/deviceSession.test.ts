@@ -4,12 +4,12 @@ import {
   isValidDeviceId,
   resolveDeviceId,
   sanitizeHostname,
-} from "../../src/core/device";
+} from "../../../src/core/device";
 import {
   describeElapsed,
   describeOtherDeviceSession,
   parseSessionRecord,
-} from "../../src/core/sessionStore";
+} from "../../../src/core/sessionStore";
 
 function memoryStorage(initial?: string) {
   const values = new Map<string, string>();

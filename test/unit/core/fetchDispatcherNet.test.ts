@@ -5,7 +5,7 @@ import * as ts from "typescript";
 import {
   LOCAL_PROVIDER_IDS,
   isLocalProviderId,
-} from "../../src/core/localProviders";
+} from "../../../src/core/localProviders";
 
 /**
  * **AIを呼ぶ道が、どちらの口で投げているか**を留める網（設計書6.63。2026-09-23）。
@@ -38,7 +38,7 @@ import {
  * ——決められないものは危ない側に倒す。
  */
 
-const ROOT = path.resolve(__dirname, "../..");
+const ROOT = path.resolve(__dirname, "../../..");
 const SCAN_DIRS = ["src/ai", "src/mcp"];
 
 /** 口そのもの。ここだけは素の fetch を持ってよい */

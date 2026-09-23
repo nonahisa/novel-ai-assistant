@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   episodeNumberFromHint,
   resolveEpisodeByNumber,
-} from "../../src/core/locateEpisode";
+} from "../../../src/core/locateEpisode";
 
 /**
  * 相談パネルの「そこを見せて」が、**存在しないファイルを開こうとした**

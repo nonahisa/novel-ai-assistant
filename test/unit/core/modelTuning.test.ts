@@ -10,8 +10,8 @@ import {
   raiseTimeoutCeilingForProbe,
   recommendTimeoutSeconds,
   timeoutCeilingSeconds,
-} from "../../src/core/modelTuning";
-import { MCP_OLLAMA_WAIT_MS } from "../../src/mcp/tools/ollama";
+} from "../../../src/core/modelTuning";
+import { MCP_OLLAMA_WAIT_MS } from "../../../src/mcp/tools/ollama";
 
 /**
  * AIチューニングの台帳（設計書6.49）。

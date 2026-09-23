@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { parseEpisodeMetadata } from "../../src/core/metadataParser";
-import { countChars } from "../../src/core/charCount";
-import { countParagraphs } from "../../src/core/epubXhtml";
+import { parseEpisodeMetadata } from "../../../src/core/metadataParser";
+import { countChars } from "../../../src/core/charCount";
+import { countParagraphs } from "../../../src/core/epubXhtml";
 
 describe("投稿サイトのメタデータ", () => {
   test("カクヨム形式のヘッダーと本文を分離する", () => {

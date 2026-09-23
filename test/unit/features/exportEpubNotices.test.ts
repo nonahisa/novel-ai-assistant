@@ -1,16 +1,16 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
 import { unzipSync } from "fflate";
-import { exportEpub } from "../../src/features/exportEpub";
-import { emptyCharacter } from "../../src/models/character";
-import type { WorkEntry } from "../../src/models/types";
+import { exportEpub } from "../../../src/features/exportEpub";
+import { emptyCharacter } from "../../../src/models/character";
+import type { WorkEntry } from "../../../src/models/types";
 import {
   FileSystemError,
   FileType,
   Uri,
   window,
   workspace,
-} from "./support/vscodeStub";
+} from "../support/vscodeStub";
 
 /**
  * 書き出しが作者へ伝えること（設計書6.65.8・6.65.10）。

@@ -5,12 +5,12 @@ import {
   isBlankPlotSection,
   updatePlotMarkdown,
   parsePlotMarkdown,
-} from "../../src/core/plotDoc";
-import { buildPlotTemplate } from "../../src/core/plotTemplate";
+} from "../../../src/core/plotDoc";
+import { buildPlotTemplate } from "../../../src/core/plotTemplate";
 import {
   parsePlotReverseResult,
   validatePlotReverseResult,
-} from "../../src/core/plotReverseValidation";
+} from "../../../src/core/plotReverseValidation";
 
 describe("プロットの読み取りと組み立て", () => {
   test("見出しごとに中身を取り出す", () => {

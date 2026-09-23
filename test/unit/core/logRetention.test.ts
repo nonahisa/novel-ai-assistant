@@ -3,7 +3,7 @@ import {
   cutoffDate,
   logLineDate,
   pruneLogText,
-} from "../../src/core/logRetention";
+} from "../../../src/core/logRetention";
 
 /**
  * ログの自動削除（設計書8.3、作者の要望 2026-08-16）。

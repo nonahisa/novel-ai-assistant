@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { customEndpointNotice } from "../../src/core/endpointNotice";
+import { customEndpointNotice } from "../../../src/core/endpointNotice";
 
 /**
  * 既定と違う宛先を使っているときに、接続の知らせへ添える印。

@@ -43,7 +43,7 @@ import {
  * 合っているかを確かめる手立ても無い。
  *
  * 載っていない feature は「前提なし」として扱われる。足りなければ
- * `test/unit/mcpPrerequisites.test.ts` が、表に載っているのに結べない
+ * `test/unit/mcp/mcpPrerequisites.test.ts` が、表に載っているのに結べない
  * コマンドを見つけて止める。
  */
 export const FEATURE_COMMANDS: Readonly<Partial<Record<FeatureName, string>>> =

@@ -11,7 +11,7 @@ import { resolve } from "node:path";
  * 源の形で見張る（resolveCustomTextEditor を代役で組むには依存が多すぎる）。
  */
 const source = readFileSync(
-  resolve(__dirname, "../../src/features/manuscriptEditor.ts"),
+  resolve(__dirname, "../../../src/features/manuscriptEditor.ts"),
   "utf8"
 );
 

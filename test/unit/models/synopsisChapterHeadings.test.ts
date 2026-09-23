@@ -1,8 +1,8 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { refreshSynopsisDoc } from "../../src/features/generateBlurb";
-import type { WorkEntry } from "../../src/models/types";
-import type { ChapterSynopsis } from "../../src/models/synopsis";
+import { refreshSynopsisDoc } from "../../../src/features/generateBlurb";
+import type { WorkEntry } from "../../../src/models/types";
+import type { ChapterSynopsis } from "../../../src/models/synopsis";
 import {
   commands,
   FileSystemError,
@@ -10,7 +10,7 @@ import {
   Uri,
   window,
   workspace,
-} from "./support/vscodeStub";
+} from "../support/vscodeStub";
 
 /**
  * あらすじの文書に章の見出しが挟まること（設計書6.66.4の3）。

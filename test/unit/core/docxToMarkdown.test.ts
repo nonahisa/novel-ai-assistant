@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { zipSync } from "fflate";
-import { docxToMarkdown } from "../../src/core/docxToMarkdown";
+import { docxToMarkdown } from "../../../src/core/docxToMarkdown";
 
 /**
  * Word（.docx）の本文を Markdown にする（設計書6.85）。

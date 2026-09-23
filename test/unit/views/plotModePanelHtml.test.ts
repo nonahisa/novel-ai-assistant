@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPlotModePanelHtml } from "../../src/views/plotModePanelHtml";
+import { buildPlotModePanelHtml } from "../../../src/views/plotModePanelHtml";
 
 /**
  * プロットモードのパネルの骨組み（設計書6.4.8）。

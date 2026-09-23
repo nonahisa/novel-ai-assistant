@@ -13,23 +13,23 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
  */
 
 const scanWork = vi.fn();
-vi.mock("../../src/core/scanner", () => ({
+vi.mock("../../../src/core/scanner", () => ({
   scanWork: (...args: unknown[]) => scanWork(...args),
 }));
 
 const readWorkFormat = vi.fn();
-vi.mock("../../src/core/workFormatStore", () => ({
+vi.mock("../../../src/core/workFormatStore", () => ({
   readWorkFormat: (...args: unknown[]) => readWorkFormat(...args),
 }));
 
-vi.mock("../../src/core/synopsisStore", () => ({
+vi.mock("../../../src/core/synopsisStore", () => ({
   SynopsisStore: class {
     async load() {
       return { episodes: [] };
     }
   },
 }));
-vi.mock("../../src/core/chapterStore", () => ({
+vi.mock("../../../src/core/chapterStore", () => ({
   ChapterStore: class {
     async load() {
       return { schemaVersion: "1", chapters: [] };
@@ -38,10 +38,10 @@ vi.mock("../../src/core/chapterStore", () => ({
   ChapterStoreError: class extends Error {},
 }));
 
-import { WorkTreeProvider, type TreeNode } from "../../src/views/workTree";
-import type { EpisodeFile, WorkEntry } from "../../src/models/types";
-import type { WorkRegistry } from "../../src/core/workRegistry";
-import { MANUSCRIPT_EDITOR_VIEW_TYPE } from "../../src/core/manuscriptViewTypes";
+import { WorkTreeProvider, type TreeNode } from "../../../src/views/workTree";
+import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
+import { MANUSCRIPT_EDITOR_VIEW_TYPE } from "../../../src/core/manuscriptViewTypes";
 
 /** ホバーの本文。スタブの `MarkdownString` は `value` に持つ */
 function tooltipText(tooltip: unknown): string {

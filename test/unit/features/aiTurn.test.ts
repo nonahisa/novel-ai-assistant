@@ -14,7 +14,7 @@ const shown: Array<{ title: string; messages: string[] }> = [];
 /** いま出ている進捗を、テスト側から中止するための取っ手 */
 let cancelCurrent: (() => void) | undefined;
 
-vi.mock("../../src/views/progress", () => ({
+vi.mock("../../../src/views/progress", () => ({
   withCancellableProgress: async (
     title: string,
     task: (
@@ -51,10 +51,10 @@ vi.mock("../../src/views/progress", () => ({
 }));
 
 const { withAiTurn, withAiTurnProgress } = await import(
-  "../../src/features/aiTurn"
+  "../../../src/features/aiTurn"
 );
 const { acquireRun, currentRunLabel, resetAiSequence } = await import(
-  "../../src/core/aiSequence"
+  "../../../src/core/aiSequence"
 );
 
 /** 次のマイクロタスクまで待つ */

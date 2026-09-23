@@ -9,7 +9,7 @@
  *
  * **IDは文字列でしかない**ので、依存の向きに関わらず誰でも参照してよい
  * ものとして `core` へ置いた。`package.json` の `customEditors` と
- * 一致していることは `test/unit/manuscriptEditorEntries.test.ts` が見る。
+ * 一致していることは `test/unit/features/manuscriptEditorEntries.test.ts` が見る。
  */
 
 import type { WorkFormatKey } from "./workFormat";

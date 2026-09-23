@@ -5,7 +5,7 @@ import {
   isRemaining,
   mergeProposals,
   summarizeCategories,
-} from "../../src/core/proposalBuckets";
+} from "../../../src/core/proposalBuckets";
 
 /**
  * 提案パネルの中身を、分類ごとに分けて足す（設計書6.11.3）。

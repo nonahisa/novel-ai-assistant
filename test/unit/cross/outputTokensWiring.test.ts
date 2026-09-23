@@ -26,8 +26,8 @@ import * as nodePath from "node:path";
  * ——モデルでも、16,384を確保したうえで送ることになる。
  * 非力な機械では、その差がそのまま無駄なメモリになる。
  */
-const FEATURES = nodePath.join(__dirname, "..", "..", "src", "features");
-const AI = nodePath.join(__dirname, "..", "..", "src", "ai");
+const FEATURES = nodePath.join(__dirname, "..", "..", "..", "src", "features");
+const AI = nodePath.join(__dirname, "..", "..", "..", "src", "ai");
 
 function read(file: string): string {
   return fs.readFileSync(nodePath.join(FEATURES, file), "utf8");
@@ -242,7 +242,7 @@ describe("出力トークンの3つの口に、機能の名前を渡す", () => 
     return out;
   }
 
-  const SRC = nodePath.join(__dirname, "..", "..", "src");
+  const SRC = nodePath.join(__dirname, "..", "..", "..", "src");
 
   test("機能を渡さない（引数2つの）呼び出しが1つも残っていない", () => {
     const offenders: string[] = [];

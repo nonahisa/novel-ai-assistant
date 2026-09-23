@@ -6,8 +6,8 @@ import {
   chunksOfWorkFile,
   parseChunkId,
   selectChunks,
-} from "../../src/mcp/tools/shared";
-import { settingsPrompt } from "../../src/mcp/tools/settings";
+} from "../../../src/mcp/tools/shared";
+import { settingsPrompt } from "../../../src/mcp/tools/settings";
 
 /**
  * チャンクの呼び名が、**話をまたいでぶつからない**こと（設計書6.87.8）。
@@ -25,7 +25,7 @@ import { settingsPrompt } from "../../src/mcp/tools/settings";
  * **合本の fixture で鍵そのものを見る**ここが、再発を止める。
  */
 
-const WORK = path.join(__dirname, "..", "fixtures", "mcp-work");
+const WORK = path.join(__dirname, "..", "..", "fixtures", "mcp-work");
 const NUM_CTX = 32768;
 
 /** 第1〜3話が入っている合本。各話が1チャンクに収まる大きさ */

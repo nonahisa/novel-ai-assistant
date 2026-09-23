@@ -4,14 +4,14 @@ import {
   expertsCellText,
   expertsPickText,
   readExpertCounts,
-} from "../../src/core/modelExperts";
+} from "../../../src/core/modelExperts";
 import {
   buildTuningStatsMarkdown,
   modelPickDetail,
   tuningStatsEntries,
-} from "../../src/core/tuningStats";
-import { OllamaProvider } from "../../src/ai/ollamaProvider";
-import { workspace } from "./support/vscodeStub";
+} from "../../../src/core/tuningStats";
+import { OllamaProvider } from "../../../src/ai/ollamaProvider";
+import { workspace } from "../support/vscodeStub";
 
 /**
  * 「大きいけれど速い型」を見せる（作者の指示、2026-09-19「見せてください」）。

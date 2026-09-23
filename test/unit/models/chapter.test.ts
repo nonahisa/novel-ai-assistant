@@ -5,7 +5,7 @@ import {
   parseChapterSet,
   withChapterStartingAt,
   withoutChapterStartingAt,
-} from "../../src/models/chapter";
+} from "../../../src/models/chapter";
 
 /**
  * 章の台帳の形（設計書6.66.1）。

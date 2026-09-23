@@ -33,7 +33,7 @@ export const EXPECTED_ARCHIVE_FILES = [
  *
  * **鍵の接頭辞は `src/core/logger.ts` の `SECRET_PREFIXES` と揃える。**
  * 片方に足してもう片方を忘れるのが一番ありがちな壊れ方なので、
- * `test/unit/secretScanParity.test.ts` が両者の揃いを見張っている
+ * `test/unit/core/secretScanParity.test.ts` が両者の揃いを見張っている
  * （こちらは素のNodeで動く `.mjs`、あちらはTypeScriptなので、
  * 定義そのものは共有できない）。
  *

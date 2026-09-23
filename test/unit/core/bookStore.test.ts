@@ -1,9 +1,9 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { BookStore, BookStoreError } from "../../src/core/bookStore";
-import { defaultBookConfig } from "../../src/models/book";
-import type { WorkEntry } from "../../src/models/types";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
+import { BookStore, BookStoreError } from "../../../src/core/bookStore";
+import { defaultBookConfig } from "../../../src/models/book";
+import type { WorkEntry } from "../../../src/models/types";
+import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 
 /**
  * 本の設計図の保存（設計書6.65.6）。

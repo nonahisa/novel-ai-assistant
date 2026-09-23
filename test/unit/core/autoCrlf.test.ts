@@ -3,7 +3,7 @@ import {
   describeAutoCrlfRisk,
   readAutoCrlf,
   rewritesLineEndings,
-} from "../../src/core/git";
+} from "../../../src/core/git";
 
 /**
  * `core.autocrlf` の警告（設計書5.5.1）。

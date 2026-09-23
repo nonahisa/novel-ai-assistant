@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type * as vscode from "vscode";
-import { needsRedraw, needsRescan } from "../../src/core/countSettings";
+import { needsRedraw, needsRescan } from "../../../src/core/countSettings";
 
 /**
  * 数え方の設定を変えた「その場」で反映されるかの見張り。

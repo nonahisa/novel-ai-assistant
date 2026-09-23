@@ -4,9 +4,9 @@ import {
   ORNAMENT_DIR,
   collectOrnamentCatalogue,
   readOrnamentFolder,
-} from "../../src/core/epubOrnamentFolder";
-import { BUILTIN_ORNAMENTS } from "../../src/core/epubOrnaments";
-import { FileSystemError, FileType, Uri, workspace } from "./support/vscodeStub";
+} from "../../../src/core/epubOrnamentFolder";
+import { BUILTIN_ORNAMENTS } from "../../../src/core/epubOrnaments";
+import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub";
 
 /**
  * 外から足す飾りを読む口（設計書6.65.17）。

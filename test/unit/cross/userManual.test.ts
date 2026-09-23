@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { buildUserManual, MANUAL_TITLE } from "../../src/features/openManual";
-import { allActions, ACTION_TREE, visibleEntries } from "../../src/views/actionList";
-import { STEP_MENU } from "../../src/views/stepMenu";
-import { canRunProcesses } from "../../src/core/runtime";
+import { buildUserManual, MANUAL_TITLE } from "../../../src/features/openManual";
+import { allActions, ACTION_TREE, visibleEntries } from "../../../src/views/actionList";
+import { STEP_MENU } from "../../../src/views/stepMenu";
+import { canRunProcesses } from "../../../src/core/runtime";
 
 /**
  * 使い方のマニュアル（作者の要望、2026-08-28）。

@@ -1,7 +1,7 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { WorkEntry } from "../../src/models/types";
-import { FileSystemError, Uri, window, workspace } from "./support/vscodeStub";
+import type { WorkEntry } from "../../../src/models/types";
+import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
 
 /**
  * 「投稿済みの基準線」の窓（作者の実機の指摘、2026-09-22）。
@@ -30,14 +30,14 @@ const episodes = [
 ];
 
 const scanWork = vi.fn();
-vi.mock("../../src/core/scanner", () => ({
+vi.mock("../../../src/core/scanner", () => ({
   scanWork: (...args: unknown[]) => scanWork(...args),
 }));
-vi.mock("../../src/core/workFormatStore", () => ({
+vi.mock("../../../src/core/workFormatStore", () => ({
   readWorkFormat: async () => undefined,
 }));
 
-import { configurePostingSites } from "../../src/features/postingKit";
+import { configurePostingSites } from "../../../src/features/postingKit";
 
 const work: WorkEntry = {
   id: "work_baseline",

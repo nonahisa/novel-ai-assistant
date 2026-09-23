@@ -3,7 +3,7 @@ import {
   offerFirstRunSetup,
   shouldOfferSetup,
   type FirstRunDeps,
-} from "../../src/features/firstRun";
+} from "../../../src/features/firstRun";
 import { readFileSync } from "node:fs";
 
 /**

@@ -10,12 +10,12 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
  */
 
 const scanWork = vi.fn();
-vi.mock("../../src/core/scanner", () => ({
+vi.mock("../../../src/core/scanner", () => ({
   scanWork: (...args: unknown[]) => scanWork(...args),
 }));
 
 // 章は、この試験の対象ではない（章が無ければ作品の直下に話が並ぶ）
-vi.mock("../../src/core/chapterStore", () => ({
+vi.mock("../../../src/core/chapterStore", () => ({
   ChapterStore: class {
     async load() {
       return { schemaVersion: "1", chapters: [] };
@@ -25,7 +25,7 @@ vi.mock("../../src/core/chapterStore", () => ({
 }));
 
 const loadPosting = vi.fn();
-vi.mock("../../src/core/postingStore", () => ({
+vi.mock("../../../src/core/postingStore", () => ({
   PostingStore: class {
     load() {
       return loadPosting();
@@ -34,21 +34,21 @@ vi.mock("../../src/core/postingStore", () => ({
   PostingStoreError: class extends Error {},
 }));
 
-vi.mock("../../src/core/synopsisStore", () => ({
+vi.mock("../../../src/core/synopsisStore", () => ({
   SynopsisStore: class {
     async load() {
       return { episodes: [] };
     }
   },
 }));
-vi.mock("../../src/core/workFormatStore", () => ({
+vi.mock("../../../src/core/workFormatStore", () => ({
   readWorkFormat: async () => undefined,
 }));
 
-import { WorkTreeProvider } from "../../src/views/workTree";
-import { emptyPostingLedger, withPost, withSites } from "../../src/models/posting";
-import type { EpisodeFile, WorkEntry } from "../../src/models/types";
-import type { WorkRegistry } from "../../src/core/workRegistry";
+import { WorkTreeProvider } from "../../../src/views/workTree";
+import { emptyPostingLedger, withPost, withSites } from "../../../src/models/posting";
+import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
 
 const work: WorkEntry = {
   id: "work_1",

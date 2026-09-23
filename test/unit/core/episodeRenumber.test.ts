@@ -12,9 +12,9 @@ import {
   renumberBookPositions,
   renameWithNumber,
   type RenumberEpisode,
-} from "../../src/core/episodeRenumber";
-import { emptyCharacter } from "../../src/models/character";
-import type { Chapter } from "../../src/models/chapter";
+} from "../../../src/core/episodeRenumber";
+import { emptyCharacter } from "../../../src/models/character";
+import type { Chapter } from "../../../src/models/chapter";
 
 /**
  * 話数の付け替え（設計書6.67）。

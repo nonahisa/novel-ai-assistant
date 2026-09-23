@@ -3,11 +3,11 @@ import { zipSync } from "fflate";
 import {
   describeMissingEpisodes,
   missingEpisodeFiles,
-} from "../../src/core/backupMissingEpisodes";
-import { planBackupMerge } from "../../src/core/backupMerge";
-import { parseCollectedFile } from "../../src/core/collectedFile";
-import { inspectWorkBackup } from "../../src/core/workZip";
-import { emptyPostingLedger } from "../../src/models/posting";
+} from "../../../src/core/backupMissingEpisodes";
+import { planBackupMerge } from "../../../src/core/backupMerge";
+import { parseCollectedFile } from "../../../src/core/collectedFile";
+import { inspectWorkBackup } from "../../../src/core/workZip";
+import { emptyPostingLedger } from "../../../src/models/posting";
 
 /**
  * バックアップにあって手元に無い話を、新しい話のファイルとして足す材料

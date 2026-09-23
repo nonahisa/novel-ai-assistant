@@ -10,17 +10,17 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
  */
 
 const scanWork = vi.fn();
-vi.mock("../../src/core/scanner", () => ({
+vi.mock("../../../src/core/scanner", () => ({
   scanWork: (...args: unknown[]) => scanWork(...args),
 }));
 
 const listWorkMemos = vi.fn();
-vi.mock("../../src/core/workMemos", () => ({
+vi.mock("../../../src/core/workMemos", () => ({
   listWorkMemos: (...args: unknown[]) => listWorkMemos(...args),
 }));
 
 // 章・あらすじ・形式は、この試験の対象ではない
-vi.mock("../../src/core/chapterStore", () => ({
+vi.mock("../../../src/core/chapterStore", () => ({
   ChapterStore: class {
     async load() {
       return { schemaVersion: "1", chapters: [] };
@@ -28,7 +28,7 @@ vi.mock("../../src/core/chapterStore", () => ({
   },
   ChapterStoreError: class extends Error {},
 }));
-vi.mock("../../src/core/synopsisStore", () => ({
+vi.mock("../../../src/core/synopsisStore", () => ({
   SynopsisStore: class {
     async load() {
       return { episodes: [] };
@@ -36,7 +36,7 @@ vi.mock("../../src/core/synopsisStore", () => ({
   },
 }));
 const workFormat = vi.fn();
-vi.mock("../../src/core/workFormatStore", () => ({
+vi.mock("../../../src/core/workFormatStore", () => ({
   readWorkFormat: (...args: unknown[]) => workFormat(...args),
 }));
 
@@ -44,9 +44,9 @@ import {
   MemoFileNode,
   MemoFolderNode,
   WorkTreeProvider,
-} from "../../src/views/workTree";
-import type { EpisodeFile, WorkEntry } from "../../src/models/types";
-import type { WorkRegistry } from "../../src/core/workRegistry";
+} from "../../../src/views/workTree";
+import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
 
 const work: WorkEntry = {
   id: "work_1",

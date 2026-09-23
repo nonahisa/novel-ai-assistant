@@ -1,23 +1,23 @@
 import { describe, expect, test } from "vitest";
-import { toGeminiSchema, toOpenAIJsonSchema } from "../../src/ai/jsonSchema";
-import { isChatModel, isUnsupportedParameter } from "../../src/ai/openaiProvider";
+import { toGeminiSchema, toOpenAIJsonSchema } from "../../../src/ai/jsonSchema";
+import { isChatModel, isUnsupportedParameter } from "../../../src/ai/openaiProvider";
 import {
   geminiAttemptPlan,
   isInvalidArgument,
-} from "../../src/ai/geminiProvider";
-import { parseRetryAfterMs, toStatusError } from "../../src/ai/httpClient";
+} from "../../../src/ai/geminiProvider";
+import { parseRetryAfterMs, toStatusError } from "../../../src/ai/httpClient";
 import {
   claudeAttemptPlan,
   toClaudeJsonSchema,
-} from "../../src/ai/claudeProvider";
-import { clampToModelLimit } from "../../src/ai/outputLimit";
-import { AIError, validateApiKeyFormat } from "../../src/ai/types";
-import { CHARACTER_EXTRACT_SCHEMA } from "../../src/prompts/characterExtract";
+} from "../../../src/ai/claudeProvider";
+import { clampToModelLimit } from "../../../src/ai/outputLimit";
+import { AIError, validateApiKeyFormat } from "../../../src/ai/types";
+import { CHARACTER_EXTRACT_SCHEMA } from "../../../src/prompts/characterExtract";
 import {
   buildExtractionCostNotice,
   describeRateLimitGiveUp,
   rateLimitWaitMs,
-} from "../../src/features/extractCharacters";
+} from "../../../src/features/extractCharacters";
 
 describe("OpenAI向けスキーマ変換", () => {
   test("すべてのobjectに additionalProperties: false を付ける", () => {

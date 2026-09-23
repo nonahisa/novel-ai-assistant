@@ -3,7 +3,7 @@ import {
   collectedEpisodeLineOf,
   collectedEpisodeStarts,
   planCollectedStep,
-} from "../../src/core/collectedFile";
+} from "../../../src/core/collectedFile";
 
 /**
  * 合本（1ファイルに全話）の中を、前の話・次の話で移る（設計書6.25.5）。

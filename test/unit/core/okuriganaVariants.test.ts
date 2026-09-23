@@ -6,7 +6,7 @@ import {
   kanjiSkeleton,
   OKURIGANA_GROUPS,
   segment,
-} from "../../src/core/okuriganaVariants";
+} from "../../../src/core/okuriganaVariants";
 
 /**
  * 送り仮名ゆれ（設計書6.13.6）。

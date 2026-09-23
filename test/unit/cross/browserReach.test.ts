@@ -6,7 +6,7 @@ import {
   relativeNames,
   walkAllImports,
   walkStaticImports,
-} from "./support/importGraph";
+} from "../support/importGraph";
 
 /**
  * コメントと文字列を落とす（2026-09-21）。

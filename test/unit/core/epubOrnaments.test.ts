@@ -8,7 +8,7 @@ import {
   sanitizeOrnamentSvg,
   unknownOrnamentIds,
   type OrnamentDef,
-} from "../../src/core/epubOrnaments";
+} from "../../../src/core/epubOrnaments";
 
 /**
  * 飾りの図録（設計書6.65.17）。

@@ -4,8 +4,8 @@ import {
   isEmptyAfterRollback,
   recordAsOf,
   valueAsOf,
-} from "../../src/core/settingsAsOf";
-import type { RecordChange } from "../../src/models/jsonValidation";
+} from "../../../src/core/settingsAsOf";
+import type { RecordChange } from "../../../src/models/jsonValidation";
 
 /**
  * 設定資料を「第N話の時点で分かっていること」に絞る（設計書6.10.3）。

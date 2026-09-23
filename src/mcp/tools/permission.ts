@@ -28,7 +28,7 @@ import { McpToolError } from "./shared";
  *
  * **転送層の1か所で確かめる。** 道具ごとに書くと、新しい道具を足した人が
  * 忘れる——そして**忘れた道具は、許可なしで原稿を読む**。
- * `test/unit/mcpAccessLog.test.ts` が、素通りする道具が無いことを見張る。
+ * `test/unit/mcp/mcpAccessLog.test.ts` が、素通りする道具が無いことを見張る。
  */
 
 export function readExternalAccessPermission(

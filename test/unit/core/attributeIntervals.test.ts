@@ -3,8 +3,8 @@ import {
   buildAttributeIntervals,
   compareFactPosition,
   orderFacts,
-} from "../../src/core/attributeIntervals";
-import type { StoryFact } from "../../src/models/storyFact";
+} from "../../../src/core/attributeIntervals";
+import type { StoryFact } from "../../../src/models/storyFact";
 
 /**
  * 区間の状態表（設計書6.88.6）。

@@ -7,7 +7,7 @@ import {
   metricsOfRun,
   scoreTypo,
   spreadOfRuns,
-} from "../../scripts/measureScoring.mjs";
+} from "../../../scripts/measureScoring.mjs";
 
 /*
   誤字脱字検知（P-09、feature: typo）の**数え方**を確かめる
@@ -18,7 +18,7 @@ import {
   ことを防ぐのが、この試験のいちばんの役目**である（CLAUDE.md）。
 */
 
-const ROOT = path.join(__dirname, "..", "fixtures", "seeded", "typo");
+const ROOT = path.join(__dirname, "..", "..", "fixtures", "seeded", "typo");
 
 interface Seed {
   kind: string;

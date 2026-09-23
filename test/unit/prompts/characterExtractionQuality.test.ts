@@ -2,23 +2,23 @@ import { readFile } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, test } from "vitest";
-import type { Chunk } from "../../src/core/chunker";
+import type { Chunk } from "../../../src/core/chunker";
 import {
   parseResult,
   validateCharacterExtractResult,
-} from "../../src/core/characterExtractionValidation";
-import { mergeExtractedCharacters } from "../../src/core/characterMerge";
+} from "../../../src/core/characterExtractionValidation";
+import { mergeExtractedCharacters } from "../../../src/core/characterMerge";
 import {
   emptyCharacter,
   type Character,
-} from "../../src/models/character";
+} from "../../../src/models/character";
 import {
   buildCharacterExtractPrompt,
   CHARACTER_EXTRACT_SCHEMA,
   CHARACTER_EXTRACT_VERSION,
   type CharacterExtractResult,
-} from "../../src/prompts/characterExtract";
-import { SUMMARY_MAX_CHARS } from "../../src/core/summaryLimit";
+} from "../../../src/prompts/characterExtract";
+import { SUMMARY_MAX_CHARS } from "../../../src/core/summaryLimit";
 
 interface AddressPeriodExpectation {
   targetName: string;
@@ -68,7 +68,7 @@ interface QualityMetrics {
 }
 
 const FIXTURE_PATH = fileURLToPath(
-  new URL("../fixtures/character-extraction/balanced.json", import.meta.url)
+  new URL("../../fixtures/character-extraction/balanced.json", import.meta.url)
 );
 
 let fixture: QualityFixture;

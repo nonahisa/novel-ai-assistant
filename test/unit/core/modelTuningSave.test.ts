@@ -25,21 +25,21 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const logs: string[] = [];
 
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logLine: (message: string) => logs.push(message),
   logFailure: () => undefined,
   logStep: () => undefined,
 }));
 
-const { saveModelTuning } = await import("../../src/core/modelTuning");
-const { forgetModelTuning } = await import("../../src/core/modelTuningStore");
+const { saveModelTuning } = await import("../../../src/core/modelTuning");
+const { forgetModelTuning } = await import("../../../src/core/modelTuningStore");
 const {
   fsTiming,
   tuningStoreContents,
   useBrokenTuningStore,
   useMemoryTuningStore,
   writeTuningStoreDirectly,
-} = await import("./support/tuningStore");
+} = await import("../support/tuningStore");
 
 beforeEach(async () => {
   logs.length = 0;

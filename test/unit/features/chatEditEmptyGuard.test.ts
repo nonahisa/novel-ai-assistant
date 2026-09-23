@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { applyChatEdit } from "../../src/features/applyChatEdit";
-import type { WorkEntry } from "../../src/models/types";
+import { applyChatEdit } from "../../../src/features/applyChatEdit";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 相談からの書き込みを「取り消す」ときに、**空へ戻してよい対象かどうか**

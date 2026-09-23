@@ -3,11 +3,11 @@ import { readFileSync } from "node:fs";
 import {
   convertForPosting,
   noteCopyMessage,
-} from "../../src/core/postingConvert";
-import { postingCopyTargets } from "../../src/core/postingCopyTargets";
-import { EXTRA_GUIDE, buildGuideBundles } from "../../src/features/featureGuide";
-import { toNoteMarkdown } from "../../src/core/noteMarkdown";
-import { toSiteNotation } from "../../src/core/ruby";
+} from "../../../src/core/postingConvert";
+import { postingCopyTargets } from "../../../src/core/postingCopyTargets";
+import { EXTRA_GUIDE, buildGuideBundles } from "../../../src/features/featureGuide";
+import { toNoteMarkdown } from "../../../src/core/noteMarkdown";
+import { toSiteNotation } from "../../../src/core/ruby";
 
 /**
  * 「投稿サイト用に変換してコピー」の変換（設計書6.84）。

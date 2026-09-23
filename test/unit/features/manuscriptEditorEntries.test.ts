@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
   MANUSCRIPT_EDITOR_VIEW_TYPE,
-} from "../../src/features/manuscriptEditor";
+} from "../../../src/features/manuscriptEditor";
 
 /**
  * 原稿エディタの入口（作者の依頼、2026-08-27。設計書6.25.4）。

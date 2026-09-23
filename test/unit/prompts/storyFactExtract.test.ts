@@ -6,8 +6,8 @@ import {
   STORY_FACT_EXTRACT_VERSION,
   STORY_FACT_MAX_ITEMS,
   type StoryFactExtractInput,
-} from "../../src/prompts/storyFactExtract";
-import { FACT_KINDS, FACT_MODALITIES } from "../../src/models/storyFact";
+} from "../../../src/prompts/storyFactExtract";
+import { FACT_KINDS, FACT_MODALITIES } from "../../../src/models/storyFact";
 
 /**
  * P-37 場面の事実の抽出（設計書6.88、プロンプト設計書 P-37）。

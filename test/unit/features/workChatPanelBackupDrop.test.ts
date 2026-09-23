@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { buildWorkChatPanelHtml } from "../../src/views/workChatPanelHtml";
-import { BACKUP_DROP_MAX_BYTES } from "../../src/core/backupFileKinds";
-import type { WorkEntry } from "../../src/models/types";
+import { buildWorkChatPanelHtml } from "../../../src/views/workChatPanelHtml";
+import { BACKUP_DROP_MAX_BYTES } from "../../../src/core/backupFileKinds";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 相談パネルの、バックアップの受け口（作者の依頼、2026-09-23）。
@@ -11,11 +11,11 @@ import type { WorkEntry } from "../../src/models/types";
  * 結果を会話の中に出すこと、画面の側で大きすぎるものを送る前に止めること。
  */
 
-vi.mock("../../src/core/chatLog", () => ({
+vi.mock("../../../src/core/chatLog", () => ({
   appendChatLog: () => undefined,
   summarizeMaterials: () => [],
 }));
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logFailure: () => undefined,
   logStep: () => undefined,
   logLine: () => undefined,
@@ -26,7 +26,7 @@ const received: Array<{ fileName: string; bytes: Uint8Array; works: number }> = 
 let lastDeps: Record<string, unknown> | undefined;
 const receivedSource: Array<{ sourcePath?: string }> = [];
 let result: { message: string; recordPath?: string } | undefined;
-vi.mock("../../src/features/backupDrop", () => ({
+vi.mock("../../../src/features/backupDrop", () => ({
   receiveBackup: async (
     source: { fileName: string; bytes: Uint8Array; sourcePath?: string },
     deps: { works: readonly unknown[] }
@@ -39,7 +39,7 @@ vi.mock("../../src/features/backupDrop", () => ({
   },
 }));
 
-const { WorkChatPanel } = await import("../../src/features/workChatPanel");
+const { WorkChatPanel } = await import("../../../src/features/workChatPanel");
 
 const WORK: WorkEntry = {
   id: "w_a",
@@ -130,7 +130,7 @@ describe("拡張機能の側", () => {
 
   test("エクスプローラーから落とされたときは、場所も判断へ渡す（Word 原稿の照合の手掛かり）", async () => {
     const panel = makePanel();
-    const { workspace } = await import("./support/vscodeStub");
+    const { workspace } = await import("../support/vscodeStub");
     const saved = workspace.fs;
     workspace.fs = {
       ...saved,

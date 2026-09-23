@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { findTextRange } from "../../src/core/textLocate";
-import { parseChatLocate } from "../../src/core/chatEdit";
+import { findTextRange } from "../../../src/core/textLocate";
+import { parseChatLocate } from "../../../src/core/chatEdit";
 
 describe("該当箇所を探す", () => {
   const text = ["一行目です。", "二行目に探したい文があります。", "三行目です。"].join(

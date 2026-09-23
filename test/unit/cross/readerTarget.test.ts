@@ -14,8 +14,8 @@ import {
   scoreReaderAnswers,
   type ReaderScores,
   type ReaderTypeId,
-} from "../../src/core/readerTarget";
-import { READER_TYPE_PROMPTS } from "../../src/prompts/readerTarget";
+} from "../../../src/core/readerTarget";
+import { READER_TYPE_PROMPTS } from "../../../src/prompts/readerTarget";
 
 /**
  * **ターゲット読者の分類**（設計書6.91）。
@@ -199,7 +199,7 @@ describe("相談へ渡す方針", () => {
  */
 describe("作家タイプと、判定の芯を分け合う", () => {
   const read = (path: string) =>
-    readFileSync(resolve(__dirname, "../../src", path), "utf8");
+    readFileSync(resolve(__dirname, "../../../src", path), "utf8");
 
   test("どちらも `threeAxis.ts` を通る", () => {
     expect(read("core/advicePolicy.ts")).toContain('from "./threeAxis"');

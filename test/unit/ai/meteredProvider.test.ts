@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { UsageLogEntry } from "../../src/core/usageLog";
+import type { UsageLogEntry } from "../../../src/core/usageLog";
 
 /**
  * 記録の中身を確かめたいので、書き込みだけ差し替える。
  * 実物は `vscode.workspace.fs` を触るため、単体試験では動かせない。
  */
 const appended: Array<{ workFolder: string; entry: UsageLogEntry }> = [];
-vi.mock("../../src/core/usageLog", async (importOriginal) => {
+vi.mock("../../../src/core/usageLog", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../src/core/usageLog")>();
+    await importOriginal<typeof import("../../../src/core/usageLog")>();
   return {
     ...actual,
     appendUsageLog: (workFolder: string, entry: UsageLogEntry) => {
@@ -17,17 +17,17 @@ vi.mock("../../src/core/usageLog", async (importOriginal) => {
   };
 });
 
-const { MeteredProvider } = await import("../../src/ai/meteredProvider");
-const { AIError } = await import("../../src/ai/types");
+const { MeteredProvider } = await import("../../../src/ai/meteredProvider");
+const { AIError } = await import("../../../src/ai/types");
 const { resetAiSequence, acquireRun } = await import(
-  "../../src/core/aiSequence"
+  "../../../src/core/aiSequence"
 );
 import type {
   AIProvider,
   GenerateParams,
   GenerateResult,
   ModelInfo,
-} from "../../src/ai/types";
+} from "../../../src/ai/types";
 
 function fakeProvider(overrides: Partial<AIProvider> = {}): AIProvider {
   return {

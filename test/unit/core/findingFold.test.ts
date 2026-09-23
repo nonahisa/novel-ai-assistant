@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { foldSameFindings } from "../../src/core/proposalBuckets";
+import { foldSameFindings } from "../../../src/core/proposalBuckets";
 
 /**
  * 番号の作り方が違うだけの同じ指摘を畳む（設計書6.96.4）。

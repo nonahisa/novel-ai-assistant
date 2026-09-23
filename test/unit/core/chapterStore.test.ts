@@ -1,9 +1,9 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { ChapterStore, ChapterStoreError } from "../../src/core/chapterStore";
-import { emptyChapterSet } from "../../src/models/chapter";
-import type { WorkEntry } from "../../src/models/types";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
+import { ChapterStore, ChapterStoreError } from "../../../src/core/chapterStore";
+import { emptyChapterSet } from "../../../src/models/chapter";
+import type { WorkEntry } from "../../../src/models/types";
+import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 
 /**
  * 章の台帳の保存（設計書6.66.1）。

@@ -1,12 +1,12 @@
 import { describe, expect, test } from "vitest";
-import { parseReaderStatsEnvelope } from "../../src/core/readerStatsEnvelope";
+import { parseReaderStatsEnvelope } from "../../../src/core/readerStatsEnvelope";
 import {
   emptyPostingLedger,
   isReaderStatsUpdatedAt,
   parsePostingLedger,
   withReaderStats,
   type ReaderStatsRecord,
-} from "../../src/models/posting";
+} from "../../../src/models/posting";
 
 /**
  * 話ごとの記録の「最終更新」（約束 v1b、2026-09-23）。

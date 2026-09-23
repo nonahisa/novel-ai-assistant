@@ -85,10 +85,10 @@ import {
   chooseFindingsTarget,
   pruneFindings,
   pruneFindingsAcrossWorks,
-} from "../../src/features/pruneFindings";
-import { FindingStore } from "../../src/features/findingStore";
-import type { Finding } from "../../src/models/finding";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/features/pruneFindings";
+import { FindingStore } from "../../../src/features/findingStore";
+import type { Finding } from "../../../src/models/finding";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work: WorkEntry = {
   id: "w1",

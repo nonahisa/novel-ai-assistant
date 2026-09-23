@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { countReadable } from "../../src/features/applySettingsRuby";
+import { countReadable } from "../../../src/features/applySettingsRuby";
 
 /**
  * ルビの対象の種類を選ぶ画面（作者の裁定、2026-09-08。設計書6.12.5）。

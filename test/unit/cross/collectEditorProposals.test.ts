@@ -2,8 +2,8 @@ import * as fsp from "node:fs/promises";
 import * as nodePath from "node:path";
 import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { FileType, window, workspace } from "./support/vscodeStub";
-import type { WorkEntry } from "../../src/models/types";
+import { FileType, window, workspace } from "../support/vscodeStub";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 編集部の提案を取り込む（設計書5.6.11）。
@@ -21,18 +21,18 @@ import type { WorkEntry } from "../../src/models/types";
  * 「何を書いたか」を見るのが目的なので、作り物の円盤では確かめたことにならない。
  */
 
-vi.mock("../../src/core/git", () => ({
+vi.mock("../../../src/core/git", () => ({
   // 取り寄せは通ったことにする。ここで見たいのは取り寄せの後である
   pullFastForward: vi.fn(async () => ({ ok: true, detail: "" })),
   runGit: vi.fn(async () => ({ ok: true, stdout: "", stderr: "" })),
 }));
 
-vi.mock("../../src/views/progress", () => ({
+vi.mock("../../../src/views/progress", () => ({
   withProgress: async <T>(_title: string, run: () => Promise<T>) => run(),
 }));
 
 const { collectEditorProposals } = await import(
-  "../../src/features/shareWithEditor"
+  "../../../src/features/shareWithEditor"
 );
 
 const PROPOSAL_RELATIVE = nodePath.join(

@@ -22,7 +22,7 @@ import { TERM_COLORS } from "../core/termColors";
  *
  * 人物のノードは人物の色、所属の帯は組織の色（設計書6.38.2）。16進は
  * `core/termColors.ts` にしか無い——ここへ写すと、本文の色を変えた日に
- * 図だけが古い色のまま残る（`test/unit/termColors.test.ts` が見張る）。
+ * 図だけが古い色のまま残る（`test/unit/core/termColors.test.ts` が見張る）。
  *
  * 明るいほうを既定に置き、暗いテーマだけを上書きする。VS Code が body へ
  * class を付けない場面でも色が消えないようにするため（設定資料パネルと

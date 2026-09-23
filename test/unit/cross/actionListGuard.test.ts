@@ -8,7 +8,7 @@ import { resolve } from "node:path";
  * 2026-09-08）。項目ごとに捕まえてログに残し、その項目は素の表示で出す。
  */
 const source = readFileSync(
-  resolve(__dirname, "../../src/views/actionList.ts"),
+  resolve(__dirname, "../../../src/views/actionList.ts"),
   "utf8"
 );
 

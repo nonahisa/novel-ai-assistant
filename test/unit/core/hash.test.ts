@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as crypto from "crypto";
-import { sha1Bytes, sha1Text, sha256Bytes, sha256Text } from "../../src/core/hash";
+import { sha1Bytes, sha1Text, sha256Bytes, sha256Text } from "../../../src/core/hash";
 
 /**
  * 自前のハッシュが、Node の `crypto` と1文字も違わないことを確かめる（設計書5.8）。

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { swapNameWithAlias } from "../../src/core/settingsEdit";
+import { swapNameWithAlias } from "../../../src/core/settingsEdit";
 
 /**
  * 名前を別名から選べるようにする（設計書6.5.6）。

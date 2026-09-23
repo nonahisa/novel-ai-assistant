@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAttributeIntervals } from "../../src/core/attributeIntervals";
+import { buildAttributeIntervals } from "../../../src/core/attributeIntervals";
 import {
   filterAllowed,
   findContradictionCandidates,
@@ -8,11 +8,11 @@ import {
   findPostDeathAppearances,
   findTravelImpossibilities,
   fingerprintOf,
-} from "../../src/core/contradictionMatch";
+} from "../../../src/core/contradictionMatch";
 import type {
   IdentityTransition,
   StoryFact,
-} from "../../src/models/storyFact";
+} from "../../../src/models/storyFact";
 
 /**
  * 機械照合（設計書6.88.6）。**LLMを使わない。**

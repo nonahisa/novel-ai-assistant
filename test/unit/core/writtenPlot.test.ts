@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { hasWrittenPlot } from "../../src/core/prerequisiteCheck";
-import { updatePlotMarkdown } from "../../src/core/plotDoc";
-import { buildPlotTemplate } from "../../src/core/plotTemplate";
+import { hasWrittenPlot } from "../../../src/core/prerequisiteCheck";
+import { updatePlotMarkdown } from "../../../src/core/plotDoc";
+import { buildPlotTemplate } from "../../../src/core/plotTemplate";
 
 /**
  * 「プロットが書かれているか」の数え方（設計書6.94）。

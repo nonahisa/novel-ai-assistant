@@ -1,10 +1,10 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { postNewEpisode } from "../../src/features/postingKit";
-import { parsePostingEnvelope } from "../../src/core/postingEnvelope";
-import type { AIRegistry } from "../../src/ai/registry";
-import type { EpisodeFile, WorkEntry } from "../../src/models/types";
-import { env, FileSystemError, Uri, window, workspace } from "./support/vscodeStub";
+import { postNewEpisode } from "../../../src/features/postingKit";
+import { parsePostingEnvelope } from "../../../src/core/postingEnvelope";
+import type { AIRegistry } from "../../../src/ai/registry";
+import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
+import { env, FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
 
 /**
  * 「貼り込み係へ渡す形でコピー」（設計書6.79.3）の配線。

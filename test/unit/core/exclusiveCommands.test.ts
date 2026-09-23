@@ -3,8 +3,8 @@ import { describe, expect, test } from "vitest";
 import {
   EXCLUSIVE_COMMANDS,
   exclusiveLabelOf,
-} from "../../src/core/exclusiveCommands";
-import { beginCommand, endCommand } from "../../src/core/runningCommands";
+} from "../../../src/core/exclusiveCommands";
+import { beginCommand, endCommand } from "../../../src/core/runningCommands";
 
 /**
  * 同じ操作の二重起動を塞ぐ一覧（作者の報告 2026-09-12。設計書6.17.4の末尾）。
@@ -20,7 +20,7 @@ import { beginCommand, endCommand } from "../../src/core/runningCommands";
  */
 describe("二重起動を塞ぐ一覧", () => {
   const manifest = JSON.parse(
-    readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+    readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
   ) as { contributes: { commands: { command: string }[] } };
   const declared = new Set(manifest.contributes.commands.map((c) => c.command));
 

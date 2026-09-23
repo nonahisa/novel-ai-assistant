@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { isGenerationModel } from "../../src/ai/ollamaProvider";
+import { isGenerationModel } from "../../../src/ai/ollamaProvider";
 
 /**
  * 埋め込み用のモデルを一覧に出さない（設計書6.28.10）。

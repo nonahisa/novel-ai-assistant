@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { workspace } from "vscode";
-import { allModelTuning, saveModelTuning } from "../../src/core/modelTuning";
+import { allModelTuning, saveModelTuning } from "../../../src/core/modelTuning";
 import {
   tuningStoreContents,
   tuningStoreDirectoryExists,
   tuningStoreFileExists,
   useMemoryTuningStore,
-} from "./support/tuningStore";
+} from "../support/tuningStore";
 
 /**
  * 設定 `novelai.modelTuning` から、保管庫のファイルへの**引っ越し**（0.66.6）。
@@ -26,7 +26,7 @@ import {
 /** 記録に残ったこと。件数を言っているかを見る */
 const logs: string[] = [];
 
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logLine: (message: string) => logs.push(message),
   logFailure: () => undefined,
   logStep: () => undefined,

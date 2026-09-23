@@ -226,7 +226,7 @@ function subsumes(
  *
  * **区切りは `\u0000` とエスケープで書く**——生のNULを置くと、gitとgrepが
  * このファイルをバイナリ扱いし、差分も検索も効かなくなる
- * (`test/unit/sourceHygiene.test.ts` が止める)。ファイル名に現れない字なので、
+ * (`test/unit/cross/sourceHygiene.test.ts` が止める)。ファイル名に現れない字なので、
  * 行番号との境目が混ざらない。
  */
 function lineKey(occurrence: NotationOccurrence): string {

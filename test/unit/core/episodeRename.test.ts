@@ -5,9 +5,9 @@ vi.mock("vscode", () => ({
   workspace: { fs: { rename: async () => {}, stat: async () => {} } },
 }));
 
-import { renamedFileName } from "../../src/core/episodeRename";
-import { needsSubtitle, type EpisodeBody } from "../../src/core/episodeBodies";
-import type { EpisodeFile } from "../../src/models/types";
+import { renamedFileName } from "../../../src/core/episodeRename";
+import { needsSubtitle, type EpisodeBody } from "../../../src/core/episodeBodies";
+import type { EpisodeFile } from "../../../src/models/types";
 
 function file(overrides: Partial<EpisodeFile> = {}): EpisodeFile {
   return {

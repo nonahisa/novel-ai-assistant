@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { effectiveContextWindow } from "../../src/ai/ollamaProvider";
+import { effectiveContextWindow } from "../../../src/ai/ollamaProvider";
 
 /**
  * **関所・分割・送信の3つが、同じ上限を見る**（設計書6.58.4）。

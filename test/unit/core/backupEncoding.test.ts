@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   checkBackupEncoding,
   describeBackupEncoding,
-} from "../../src/core/backupEncoding";
+} from "../../../src/core/backupEncoding";
 
 /**
  * 取り込みの文字コードの助言（作者の指示、2026-09-19。設計書6.99）。

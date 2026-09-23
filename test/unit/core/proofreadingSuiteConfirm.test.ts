@@ -11,7 +11,7 @@ import {
   outcomeKindOf,
   outcomeNotesOf,
   outcomeReasonOf,
-} from "../../src/core/proofreadingSuite";
+} from "../../../src/core/proofreadingSuite";
 
 /**
  * 有料の確認を「最初に1回だけ」にする（設計書6.80）。
@@ -318,7 +318,7 @@ describe("各機能が、まとめ実行のときは自分の確認を出さな�
   for (const name of files) {
     test(`${name} は確認を飛ばし、飛ばした中身をログへ残す`, () => {
       const source = readFileSync(
-        new URL(`../../src/features/${name}.ts`, import.meta.url),
+        new URL(`../../../src/features/${name}.ts`, import.meta.url),
         "utf8"
       );
 

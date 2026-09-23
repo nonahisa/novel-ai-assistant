@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { SECRET_PREFIXES, redactSecrets } from "../../src/core/logger";
+import { SECRET_PREFIXES, redactSecrets } from "../../../src/core/logger";
 
 /**
  * 鍵の見張りが2か所にある——**その2つを揃えたままにする**ための番人。
@@ -14,7 +14,7 @@ import { SECRET_PREFIXES, redactSecrets } from "../../src/core/logger";
  */
 
 const { FORBIDDEN_CONTENT_PATTERNS: forbiddenContentPatterns } = (await import(
-  "../../scripts/releaseSupport.mjs"
+  "../../../scripts/releaseSupport.mjs"
 )) as { FORBIDDEN_CONTENT_PATTERNS: RegExp[] };
 
 describe("鍵の見張りの揃い", () => {

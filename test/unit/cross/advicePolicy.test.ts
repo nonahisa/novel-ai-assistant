@@ -18,14 +18,14 @@ import {
   type AdviceProfile,
   type AdviceScores,
   type AdviceTypeId,
-} from "../../src/core/advicePolicy";
+} from "../../../src/core/advicePolicy";
 import {
   ADVICE_STATE_PROMPTS,
   ADVICE_TYPE_PROMPTS,
   buildAdvicePolicyPrompt,
-} from "../../src/prompts/advicePolicy";
-import { AdvicePolicyStore } from "../../src/core/advicePolicyStore";
-import { parseWorkChatAnswer } from "../../src/prompts/workChat";
+} from "../../../src/prompts/advicePolicy";
+import { AdvicePolicyStore } from "../../../src/core/advicePolicyStore";
+import { parseWorkChatAnswer } from "../../../src/prompts/workChat";
 
 /**
  * 相談の助言方針（設計書6.86、P-36）。

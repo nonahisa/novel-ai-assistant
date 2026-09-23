@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   selectGuideBundles,
   type GuideBundle,
-} from "../../src/core/guideSelect";
+} from "../../../src/core/guideSelect";
 
 /*
   **実物の束（`buildGuideBundles()`）は使わない。** 実物は機能を足すたびに

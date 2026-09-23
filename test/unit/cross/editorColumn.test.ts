@@ -57,7 +57,7 @@ const hoisted = vi.hoisted(() => {
 });
 
 const logged: string[] = [];
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logStep: (message: string) => {
     logged.push(message);
   },
@@ -111,7 +111,7 @@ vi.mock("vscode", async (importOriginal) => {
 });
 
 const vscode = await import("vscode");
-const { revealTextLocation } = await import("../../src/features/revealLocation");
+const { revealTextLocation } = await import("../../../src/features/revealLocation");
 
 const MANUSCRIPT = "C:/小説/いじめられっ子/本文/2.md";
 const OTHER = "C:/小説/いじめられっ子/本文/1.md";

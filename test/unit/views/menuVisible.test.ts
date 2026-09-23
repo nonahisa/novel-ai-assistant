@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { ACTION_TREE, shownEntries } from "../../src/views/actionList";
+import { ACTION_TREE, shownEntries } from "../../../src/views/actionList";
 
 /**
  * **画面に実際に出る詳細メニュー**を、ここに写して固定する。

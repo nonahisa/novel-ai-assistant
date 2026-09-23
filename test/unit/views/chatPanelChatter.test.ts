@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { buildWorkChatPanelHtml } from "../../src/views/workChatPanelHtml";
+import { buildWorkChatPanelHtml } from "../../../src/views/workChatPanelHtml";
 
 /**
  * 相談パネルの、独り言まわりの組み立て。

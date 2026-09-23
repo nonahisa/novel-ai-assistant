@@ -4,13 +4,13 @@ import {
   findOccurrences,
   switchKanaScript,
   type NotationSource,
-} from "../../src/core/notationVariants";
-import { buildUniqueContext } from "../../src/features/checkNotation";
+} from "../../../src/core/notationVariants";
+import { buildUniqueContext } from "../../../src/features/checkNotation";
 import {
   DIGIT_WIDTH_FULL,
   DIGIT_WIDTH_HALF,
   digitWidthReplacement,
-} from "../../src/core/digitWidth";
+} from "../../../src/core/digitWidth";
 
 function source(body: string, startLine = 1, filePath = "C:\\work\\001.txt"): NotationSource {
   return { filePath, body, startLine };

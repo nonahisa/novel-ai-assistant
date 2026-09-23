@@ -1,25 +1,25 @@
 import { describe, expect, test } from "vitest";
-import type { Chunk } from "../../src/core/chunker";
+import type { Chunk } from "../../../src/core/chunker";
 import {
   correctRelationDirection,
   isTruncatedAlias,
   validateCharacterExtractResult,
-} from "../../src/core/characterExtractionValidation";
+} from "../../../src/core/characterExtractionValidation";
 import {
   dedupeRelations,
   describeMergeCandidate,
   findMergeCandidates,
   mergeExtractedCharacters,
   normalizeSpacing,
-} from "../../src/core/characterMerge";
-import { unifyCharacters } from "../../src/core/characterUnify";
+} from "../../../src/core/characterMerge";
+import { unifyCharacters } from "../../../src/core/characterUnify";
 import {
   buildChronicle,
   type ChronicleEpisode,
-} from "../../src/core/chronicle";
-import { chronicleToMarkdown } from "../../src/core/chronicleMarkdown";
-import { emptyCharacter, type Character } from "../../src/models/character";
-import type { CharacterExtractResult } from "../../src/prompts/characterExtract";
+} from "../../../src/core/chronicle";
+import { chronicleToMarkdown } from "../../../src/core/chronicleMarkdown";
+import { emptyCharacter, type Character } from "../../../src/models/character";
+import type { CharacterExtractResult } from "../../../src/prompts/characterExtract";
 
 /**
  * 設定資料の人物が分裂する不具合（実機確認A-18）の検算。

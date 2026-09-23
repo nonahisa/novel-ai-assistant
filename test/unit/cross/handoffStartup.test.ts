@@ -3,13 +3,13 @@ import {
   noticeBeforeClose,
   refreshUnsentMark,
   runStartupHandoff,
-} from "../../src/features/handoffSync";
-import type { GitCommandRunner, GitSyncStatus } from "../../src/core/git";
-import type { WorkRegistry } from "../../src/core/workRegistry";
-import type { GitSyncMonitorLike } from "../../src/features/gitSyncStub";
-import type { WorkEntry } from "../../src/models/types";
-import { UNSENT_MARK_KEY } from "../../src/core/unsentMark";
-import { window, workspace } from "./support/vscodeStub";
+} from "../../../src/features/handoffSync";
+import type { GitCommandRunner, GitSyncStatus } from "../../../src/core/git";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
+import type { GitSyncMonitorLike } from "../../../src/features/gitSyncStub";
+import type { WorkEntry } from "../../../src/models/types";
+import { UNSENT_MARK_KEY } from "../../../src/core/unsentMark";
+import { window, workspace } from "../support/vscodeStub";
 
 /**
  * VS Code を開いた時点の点検（設計書6.15.1の①）を、作り物の git で走らせる。

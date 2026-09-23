@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { zipSync } from "fflate";
-import { commands, FileSystemError, window, workspace } from "./support/vscodeStub";
-import * as paths from "../../src/core/paths";
-import type { EpisodeFile, WorkEntry } from "../../src/models/types";
-import type { PickedBackup } from "../../src/features/importWorkFromZip";
+import { commands, FileSystemError, window, workspace } from "../support/vscodeStub";
+import * as paths from "../../../src/core/paths";
+import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
+import type { PickedBackup } from "../../../src/features/importWorkFromZip";
 
 /**
  * 相談パネルへ落とされた Word 原稿（.docx）を捌く（作者の裁定、2026-09-23
@@ -28,7 +28,7 @@ const MANUSCRIPT = paths.join(SLEEP_FOLDER, "本文");
 
 const scannedBy = new Map<string, EpisodeFile[]>();
 
-vi.mock("../../src/core/scanner", () => ({
+vi.mock("../../../src/core/scanner", () => ({
   scanWork: async (work: WorkEntry) => ({
     episodes: scannedBy.get(work.folderPath) ?? [],
     stats: {},
@@ -38,7 +38,7 @@ vi.mock("../../src/core/scanner", () => ({
   }),
 }));
 
-const { receiveBackup } = await import("../../src/features/backupDrop");
+const { receiveBackup } = await import("../../../src/features/backupDrop");
 
 const SLEEP: WorkEntry = {
   id: "w-sleep",

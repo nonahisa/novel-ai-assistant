@@ -20,13 +20,13 @@ import {
   type ActionNode,
   type ActionSection,
   type GroupStateStore,
-} from "../../src/views/actionList";
+} from "../../../src/views/actionList";
 import {
   PROCESSES_BLOCKED_HINT,
   processRequiredCommands,
-} from "../../src/core/processAvailability";
-import { ActionDecorationProvider } from "../../src/views/actionDecorations";
-import type { WorkRegistry } from "../../src/core/workRegistry";
+} from "../../../src/core/processAvailability";
+import { ActionDecorationProvider } from "../../../src/views/actionDecorations";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
 
 interface PackageManifest {
   contributes: {
@@ -119,7 +119,7 @@ describe("操作メニューの構成", () => {
     // 一覧はコマンドIDを文字列で持つため、コマンドを改名すると
     // 何も起きないボタンが残る。実際に改名して壊した経験があるので固定する
     const manifest = JSON.parse(
-      readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+      readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
     ) as PackageManifest;
     const declared = new Set(
       manifest.contributes.commands.map((entry) => entry.command)
@@ -786,7 +786,7 @@ describe("メニュー名とコマンドパレットの名前", () => {
 
   function titles(): Map<string, string> {
     const manifest = JSON.parse(
-      readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+      readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
     ) as PackageManifest;
     return new Map(
       manifest.contributes.commands.map((entry) => [entry.command, entry.title])
@@ -1265,7 +1265,7 @@ describe("相談の項目は、木に残して画面から隠す", () => {
    */
   test("EPUBの書き出しは、コマンドパレットにも出さない", () => {
     const manifest = JSON.parse(
-      readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+      readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
     ) as PackageManifest;
     const hidden = manifest.contributes.menus.commandPalette
       .filter((entry) => entry.when === "false")

@@ -5,10 +5,10 @@ import {
   listSeriesNeighbors,
   loadSeriesCharacterCandidates,
   loadSeriesTerms,
-} from "../../src/core/seriesSettings";
-import { emptyCharacter, type Character } from "../../src/models/character";
-import type { WorkEntry } from "../../src/models/types";
-import { FileSystemError, FileType, Uri, workspace } from "./support/vscodeStub";
+} from "../../../src/core/seriesSettings";
+import { emptyCharacter, type Character } from "../../../src/models/character";
+import type { WorkEntry } from "../../../src/models/types";
+import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub";
 
 /**
  * つないだ作品から、借りてよいものだけを読む（設計書6.95.3）。

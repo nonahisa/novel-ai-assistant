@@ -7,9 +7,9 @@ import {
   fitChunkCharsToTimeout,
   predictChunkSeconds,
   type ChunkTimeSpeeds,
-} from "../../src/core/chunkTimeFit";
-import { MIN_CHUNK_CHARS } from "../../src/core/chunker";
-import { estimateCallsTime } from "../../src/core/etaEstimate";
+} from "../../../src/core/chunkTimeFit";
+import { MIN_CHUNK_CHARS } from "../../../src/core/chunker";
+import { estimateCallsTime } from "../../../src/core/etaEstimate";
 
 /**
  * **チャンクの大きさを、測った速さから待ち時間の上限に収まる大きさにする**

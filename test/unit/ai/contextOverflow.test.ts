@@ -3,11 +3,11 @@ import {
   asContextOverflowError,
   classifyContextOverflow,
   OpenAIProvider,
-} from "../../src/ai/openaiProvider";
-import { SakuraProvider } from "../../src/ai/sakuraProvider";
-import { LmStudioProvider } from "../../src/ai/lmstudioProvider";
-import { toStatusError } from "../../src/ai/httpClient";
-import { AIError } from "../../src/ai/types";
+} from "../../../src/ai/openaiProvider";
+import { SakuraProvider } from "../../../src/ai/sakuraProvider";
+import { LmStudioProvider } from "../../../src/ai/lmstudioProvider";
+import { toStatusError } from "../../../src/ai/httpClient";
+import { AIError } from "../../../src/ai/types";
 
 /**
  * 上限を超えたときの400を「入らなかった」と分類する（作者のログ、

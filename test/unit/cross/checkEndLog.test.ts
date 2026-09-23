@@ -53,7 +53,7 @@ describe("チャンクを回す検知は、開始と終了を対で残す", () =
 
   for (const { file, label, via } of FEATURES) {
     const source = readFileSync(
-      resolve(__dirname, "../../src/features", file),
+      resolve(__dirname, "../../../src/features", file),
       "utf8"
     );
 
@@ -88,7 +88,7 @@ describe("チャンクを回す検知は、開始と終了を対で残す", () =
    */
   test("矛盾検知の終了ログは、中止と打ち切りを書き分ける", () => {
     const source = readFileSync(
-      resolve(__dirname, "../../src/features/checkContradictions.ts"),
+      resolve(__dirname, "../../../src/features/checkContradictions.ts"),
       "utf8"
     );
     const end = source.slice(source.indexOf("`矛盾検知を終了"));
@@ -104,7 +104,7 @@ describe("チャンクを回す検知は、開始と終了を対で残す", () =
    */
   test("推敲の終了ログは、中止と打ち切りを書き分ける", () => {
     const source = readFileSync(
-      resolve(__dirname, "../../src/features/checkProofread.ts"),
+      resolve(__dirname, "../../../src/features/checkProofread.ts"),
       "utf8"
     );
     const end = source.slice(source.indexOf("`推敲を終了"));
@@ -119,7 +119,7 @@ describe("チャンクを回す検知は、開始と終了を対で残す", () =
    */
   test("伏線の終了ログは、中止と打ち切りを書き分ける", () => {
     const source = readFileSync(
-      resolve(__dirname, "../../src/features/checkForeshadows.ts"),
+      resolve(__dirname, "../../../src/features/checkForeshadows.ts"),
       "utf8"
     );
     for (const label of ["伏線の検知", "伏線の回収の確認"]) {
@@ -137,7 +137,7 @@ describe("チャンクを回す検知は、開始と終了を対で残す", () =
    */
   test("表記ゆれは、途中で抜けても終了ログが残る", () => {
     const source = readFileSync(
-      resolve(__dirname, "../../src/features/checkNotation.ts"),
+      resolve(__dirname, "../../../src/features/checkNotation.ts"),
       "utf8"
     );
 

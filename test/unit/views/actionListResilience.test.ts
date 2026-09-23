@@ -3,8 +3,8 @@ import {
   ACTION_TREE,
   ActionListProvider,
   visibleGroups,
-} from "../../src/views/actionList";
-import type { WorkRegistry } from "../../src/core/workRegistry";
+} from "../../../src/views/actionList";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
 
 /**
  * 詳細メニューが丸ごと欠けないこと（実機確認 A-21、0.40.8 の保険）。

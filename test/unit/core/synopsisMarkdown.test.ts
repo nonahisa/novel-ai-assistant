@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { buildSynopsisListMarkdown } from "../../src/core/synopsisMarkdown";
-import type { ChapterSynopsis } from "../../src/models/synopsis";
+import { buildSynopsisListMarkdown } from "../../../src/core/synopsisMarkdown";
+import type { ChapterSynopsis } from "../../../src/models/synopsis";
 
 function episode(overrides: Partial<ChapterSynopsis> = {}): ChapterSynopsis {
   return {

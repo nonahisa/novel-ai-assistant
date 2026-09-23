@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { clampSummary, SUMMARY_MAX_CHARS } from "../../src/core/summaryLimit";
-import { buildCharacterMarkdown } from "../../src/core/settingsMarkdown";
-import { emptyCharacter, type Character } from "../../src/models/character";
+import { clampSummary, SUMMARY_MAX_CHARS } from "../../../src/core/summaryLimit";
+import { buildCharacterMarkdown } from "../../../src/core/settingsMarkdown";
+import { emptyCharacter, type Character } from "../../../src/models/character";
 
 describe("紹介文の長さ", () => {
   // 上限は変わることがある（50→60）。テストが直書きしていると

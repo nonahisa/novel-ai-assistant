@@ -42,7 +42,7 @@ vi.mock("vscode", () => {
 });
 
 /** 何を訊いて何が返ったかの記録。ここでは配線を見ないので黙らせる */
-vi.mock("../../src/core/typoIssueHistory", () => ({
+vi.mock("../../../src/core/typoIssueHistory", () => ({
   appendAiActionLog: vi.fn(async () => undefined),
   readTypoIssueHistory: vi.fn(async () => []),
 }));
@@ -52,7 +52,7 @@ const advice = vi.hoisted(() => ({
   resolve: undefined as ((value: unknown) => void) | undefined,
 }));
 
-vi.mock("../../src/features/notationAdvice", () => ({
+vi.mock("../../../src/features/notationAdvice", () => ({
   askNotationAdvice: vi.fn(
     () =>
       new Promise((resolve) => {
@@ -63,8 +63,8 @@ vi.mock("../../src/features/notationAdvice", () => ({
     `AIの答え：「${a.choice}」に揃える`,
 }));
 
-import { ProposalPanel } from "../../src/features/proposalPanel";
-import type { WorkEntry } from "../../src/models/types";
+import { ProposalPanel } from "../../../src/features/proposalPanel";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work: WorkEntry = {
   id: "w1",

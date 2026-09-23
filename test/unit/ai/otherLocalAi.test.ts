@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import "./support/vscodeStub";
+import "../support/vscodeStub";
 import {
   isLocalProvider,
   noteOtherLocalAiRunning,
   otherLocalAi,
-} from "../../src/ai/otherLocalAi";
+} from "../../../src/ai/otherLocalAi";
 
 /**
  * **2つの推論エンジンが同じメモリを取り合う状況は、こちらが作っている**

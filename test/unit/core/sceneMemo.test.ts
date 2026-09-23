@@ -21,15 +21,15 @@ import {
   sortMemos,
   stripMemoLines,
   type SceneMemo,
-} from "../../src/core/sceneMemo";
-import { sceneMemoToMarkdown } from "../../src/core/sceneMemoMarkdown";
-import { countChars, countManuscriptLines } from "../../src/core/charCount";
-import { splitIntoChunks, withLineNumbers } from "../../src/core/chunker";
-import { convertForPosting } from "../../src/core/postingConvert";
-import { buildPrintHtml } from "../../src/core/printHtml";
-import { renderTermMarks } from "../../src/core/manuscriptRender";
-import { hideMemoLinesInMarkdown } from "../../src/core/markdownItRuby";
-import { TermIndex } from "../../src/core/termIndex";
+} from "../../../src/core/sceneMemo";
+import { sceneMemoToMarkdown } from "../../../src/core/sceneMemoMarkdown";
+import { countChars, countManuscriptLines } from "../../../src/core/charCount";
+import { splitIntoChunks, withLineNumbers } from "../../../src/core/chunker";
+import { convertForPosting } from "../../../src/core/postingConvert";
+import { buildPrintHtml } from "../../../src/core/printHtml";
+import { renderTermMarks } from "../../../src/core/manuscriptRender";
+import { hideMemoLinesInMarkdown } from "../../../src/core/markdownItRuby";
+import { TermIndex } from "../../../src/core/termIndex";
 
 /**
  * シーンメモ——本文中の付箋（設計書6.40）。

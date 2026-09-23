@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import * as path from "path";
-import { SynopsisStore } from "../../src/core/synopsisStore";
-import type { WorkEntry } from "../../src/models/types";
-import type { ChapterSynopsis } from "../../src/models/synopsis";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
+import { SynopsisStore } from "../../../src/core/synopsisStore";
+import type { WorkEntry } from "../../../src/models/types";
+import type { ChapterSynopsis } from "../../../src/models/synopsis";
+import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 
 const work: WorkEntry = {
   id: "w1",

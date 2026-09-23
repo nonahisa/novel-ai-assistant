@@ -9,7 +9,7 @@ import {
   withoutRemembered,
   withRemembered,
   type ConfirmMemory,
-} from "../../src/core/confirmMemory";
+} from "../../../src/core/confirmMemory";
 
 /**
  * 「以降は訊かない」の覚え書き（設計書6.89）。

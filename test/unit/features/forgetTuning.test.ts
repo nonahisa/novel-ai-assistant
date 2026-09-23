@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { window } from "./support/vscodeStub";
-import type { AIRegistry } from "../../src/ai/registry";
-import { forgetTuning } from "../../src/features/forgetTuning";
+import { window } from "../support/vscodeStub";
+import type { AIRegistry } from "../../../src/ai/registry";
+import { forgetTuning } from "../../../src/features/forgetTuning";
 import {
   tuningStoreContents,
   useBrokenTuningStore,
   useMemoryTuningStore,
-} from "./support/tuningStore";
+} from "../support/tuningStore";
 
 /**
  * 「AIチューニングの記録を消す」（作者の裁定、2026-09-18。設計書6.49）。

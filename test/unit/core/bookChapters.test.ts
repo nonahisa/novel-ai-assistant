@@ -2,8 +2,8 @@ import { describe, expect, test } from "vitest";
 import {
   bookChapterBodies,
   bookChaptersOf,
-} from "../../src/core/bookChapters";
-import type { EpisodeFile } from "../../src/models/types";
+} from "../../../src/core/bookChapters";
+import type { EpisodeFile } from "../../../src/models/types";
 
 /**
  * 本に入る章の切り分け（設計書6.65.15）。

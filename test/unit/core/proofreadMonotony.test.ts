@@ -6,12 +6,12 @@ import {
   hasMonotonousEnding,
   locateProofreadIssue,
   validateProofreadIssues,
-} from "../../src/core/proofreadValidation";
+} from "../../../src/core/proofreadValidation";
 import {
   mergeAdjacentChunks,
   splitIntoChunks,
   type Chunk,
-} from "../../src/core/chunker";
+} from "../../../src/core/chunker";
 
 /**
  * 語尾単調の指摘を、コードで数え直す（作者の報告、2026-09-04）。

@@ -10,12 +10,12 @@ import {
   parseExternalAccessLine,
   parseExternalAccessLog,
   type ExternalAccessEntry,
-} from "../../src/core/externalAccessLog";
+} from "../../../src/core/externalAccessLog";
 import {
   exposureOf,
   recordExternalAccess,
   setExternalClientName,
-} from "../../src/mcp/tools/accessLog";
+} from "../../../src/mcp/tools/accessLog";
 
 /**
  * 外部AIが作品を触った記録（設計書6.87.9）。
@@ -29,7 +29,7 @@ import {
  *    作者は原稿がクラウドへ渡ったことに気づけない
  */
 
-const SERVER = nodePath.join(__dirname, "../../src/mcp/server.ts");
+const SERVER = nodePath.join(__dirname, "../../../src/mcp/server.ts");
 
 describe("転送層が、全部の道具の記録を取る", () => {
   const source = fs.readFileSync(SERVER, "utf8");

@@ -29,7 +29,7 @@ import { resolve } from "node:path";
  *
  * プロバイダ（`src/ai`）と `src/core` は、呼ぶ側の機能が先に向けているので対象外。
  */
-const FEATURES = resolve(__dirname, "../../src/features");
+const FEATURES = resolve(__dirname, "../../../src/features");
 
 /** `core/logger` から取り込んでいる名前 */
 function loggerImports(source: string): string[] {

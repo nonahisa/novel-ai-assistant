@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { findNameOccurrences } from "../../src/core/nameOccurrences";
+import { findNameOccurrences } from "../../../src/core/nameOccurrences";
 
 describe("登場箇所の走査（設計書6.37.4）", () => {
   test("長い名前を先に当て、重なりは長いほうを取る", () => {

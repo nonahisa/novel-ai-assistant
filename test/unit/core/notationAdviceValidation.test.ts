@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { parseNotationAdvice } from "../../src/core/notationAdviceValidation";
+import { parseNotationAdvice } from "../../../src/core/notationAdviceValidation";
 import {
   NOTATION_ADVICE_HINTS,
   NOTATION_ADVICE_NO_UNIFY,
-} from "../../src/prompts/notationAdvice";
+} from "../../../src/prompts/notationAdvice";
 
 /**
  * 表記ゆれのAI問い合わせ（P-33、設計書6.73）の応答の検証。

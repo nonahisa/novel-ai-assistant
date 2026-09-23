@@ -8,15 +8,15 @@ import {
   writeFile as writeHostFile,
 } from "node:fs/promises";
 import { describe, expect, test, vi } from "vitest";
-import * as workRegistry from "../../src/core/workRegistry";
-import type { WorkConfig, WorkEntry } from "../../src/models/types";
+import * as workRegistry from "../../../src/core/workRegistry";
+import type { WorkConfig, WorkEntry } from "../../../src/models/types";
 import {
   FileSystemError,
   FileType,
   Uri,
   window,
   workspace,
-} from "./support/vscodeStub";
+} from "../support/vscodeStub";
 
 const parseWorkConfig = (
   workRegistry as unknown as {

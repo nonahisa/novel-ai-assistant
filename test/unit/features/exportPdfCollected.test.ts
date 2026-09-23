@@ -1,14 +1,14 @@
 import * as path from "path";
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { WorkEntry } from "../../src/models/types";
+import type { WorkEntry } from "../../../src/models/types";
 import {
   FileSystemError,
   FileType,
   Uri,
   window,
   workspace,
-} from "./support/vscodeStub";
+} from "../support/vscodeStub";
 
 /**
  * 合本（1ファイルに複数話）をPDF（印刷用HTML）へ組む（設計書6.65.15）。
@@ -28,17 +28,17 @@ import {
 // （`cmd /c start` が実際に走ってブラウザが開いてしまう）。
 // 「開けなかった」ときの案内（F-25）も確かめたいので、成否を差し替えられるようにする
 const openExternalFileState = { succeeds: true };
-vi.mock("../../src/core/openExternalFile", () => ({
+vi.mock("../../../src/core/openExternalFile", () => ({
   openInDefaultApp: async () => openExternalFileState.succeeds,
 }));
 const revealedFolders: string[] = [];
-vi.mock("../../src/views/openDocument", () => ({
+vi.mock("../../../src/views/openDocument", () => ({
   revealFolder: async (target: string) => {
     revealedFolders.push(target);
   },
 }));
 
-const { exportPdf } = await import("../../src/features/exportPdf");
+const { exportPdf } = await import("../../../src/features/exportPdf");
 
 const work: WorkEntry = {
   id: "work_pdf_collected",

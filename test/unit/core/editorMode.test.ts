@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   editorAllowedCommands,
   isCommandAllowed,
-} from "../../src/core/editorMode";
+} from "../../../src/core/editorMode";
 
 /**
  * 編集者モードの許可一覧（設計書5.6）。
@@ -16,7 +16,7 @@ import {
 describe("編集者モードの許可一覧", () => {
   test("一覧のIDはすべて package.json に実在する", () => {
     const manifest = JSON.parse(
-      readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+      readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
     ) as { contributes: { commands: { command: string }[] } };
     const declared = new Set(
       manifest.contributes.commands.map((c) => c.command)

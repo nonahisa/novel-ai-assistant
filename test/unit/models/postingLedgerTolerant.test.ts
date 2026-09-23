@@ -5,7 +5,7 @@ import {
   SITE_READER_STATS_METRICS,
   withReaderStats,
   type PostingLedger,
-} from "../../src/models/posting";
+} from "../../../src/models/posting";
 
 /**
  * 台帳の読みを寛容にする（作者の裁定、2026-09-19）。

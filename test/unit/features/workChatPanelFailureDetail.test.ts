@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { WorkEntry } from "../../src/models/types";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 相談パネルが残す失敗の記録（実装ルール5「エラーの本文を捨てない」）。
@@ -18,7 +18,7 @@ const failures = vi.hoisted(
   () => [] as Array<{ context: string; detail: Record<string, unknown> }>
 );
 
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logFailure: (context: string, detail: Record<string, unknown>) => {
     failures.push({ context, detail });
   },
@@ -28,18 +28,18 @@ vi.mock("../../src/core/logger", () => ({
 }));
 
 /** 相談の記録はディスクへ書く。ここでは配線を見ないので黙らせる */
-vi.mock("../../src/core/chatLog", () => ({
+vi.mock("../../../src/core/chatLog", () => ({
   appendChatLog: () => undefined,
   summarizeMaterials: () => [],
 }));
 
-vi.mock("../../src/features/aiConnectivity", () => ({
+vi.mock("../../../src/features/aiConnectivity", () => ({
   confirmProviderReachable: async () => true,
   confirmPaidUsage: async () => true,
 }));
 
-const { WorkChatPanel } = await import("../../src/features/workChatPanel");
-const { AIError } = await import("../../src/ai/types");
+const { WorkChatPanel } = await import("../../../src/features/workChatPanel");
+const { AIError } = await import("../../../src/ai/types");
 
 const WORK: WorkEntry = {
   id: "w_a",

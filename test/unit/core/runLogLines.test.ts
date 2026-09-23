@@ -7,7 +7,7 @@ import {
   describeRunStart,
   describeRunStep,
   describeTuningLog,
-} from "../../src/core/runLog";
+} from "../../../src/core/runLog";
 
 /**
  * 長い処理の「終わった」と「何が残ったか」を、画面以外にも残す
@@ -336,7 +336,7 @@ const logged = vi.hoisted(() => ({
   targets: [] as (string | undefined)[],
 }));
 
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logStep: (message: string) => logged.steps.push(message),
   logLine: (message: string) => logged.steps.push(message),
   logFailure: () => undefined,
@@ -344,7 +344,7 @@ vi.mock("../../src/core/logger", () => ({
   useLogFile: (folderPath: string | undefined) => logged.targets.push(folderPath),
 }));
 
-vi.mock("../../src/views/progress", async (importOriginal) => ({
+vi.mock("../../../src/views/progress", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   withProgress: async (
     _title: string,
@@ -352,35 +352,35 @@ vi.mock("../../src/views/progress", async (importOriginal) => ({
   ) => await task({ report: () => undefined }),
 }));
 
-vi.mock("../../src/views/openDocument", async (importOriginal) => ({
+vi.mock("../../../src/views/openDocument", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   openGeneratedMarkdown: async () => undefined,
 }));
 
 const present = vi.hoisted(() => ({ value: [] as string[] }));
-vi.mock("../../src/features/prerequisiteGate", () => ({
+vi.mock("../../../src/features/prerequisiteGate", () => ({
   collectPresentPrerequisites: async () => new Set(present.value),
 }));
 
 const outcomes = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
 
-const { commands, window } = await import("./support/vscodeStub");
-const { runFinishNewWork } = await import("../../src/features/finishNewWork");
+const { commands, window } = await import("../support/vscodeStub");
+const { runFinishNewWork } = await import("../../../src/features/finishNewWork");
 const { FINISH_PREREQUISITES, FINISH_STEPS } = await import(
-  "../../src/core/finishNewWork"
+  "../../../src/core/finishNewWork"
 );
 const { runProofreadingSuite } = await import(
-  "../../src/features/proofreadingSuite"
+  "../../../src/features/proofreadingSuite"
 );
 const { checkSkipped, sortToRunOrder } = await import(
-  "../../src/core/proofreadingSuite"
+  "../../../src/core/proofreadingSuite"
 );
 
 const work = {
   id: "w1",
   title: "試しの作品",
   folderPath: "C:/tmp/work",
-} as import("../../src/models/types").WorkEntry;
+} as import("../../../src/models/types").WorkEntry;
 
 beforeEach(() => {
   logged.steps = [];

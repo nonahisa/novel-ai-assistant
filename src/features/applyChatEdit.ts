@@ -176,7 +176,7 @@ async function applyToEpisodeSynopsis(
   /*
     **空にはできない**（2026-09-21）。台帳は非空を前提に検証しているので、
     空を書くと**保存は通るのに次の読み込みで台帳ごと読めなくなる**
-    （`test/unit/synopsisStore.test.ts`）。取り消しで空が来たときのために
+    （`test/unit/core/synopsisStore.test.ts`）。取り消しで空が来たときのために
     ここで断る——`plot.md` のように「空へ戻す」はできない対象である。
   */
   if (content === "") {

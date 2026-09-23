@@ -3,7 +3,7 @@ import {
   mergeProposalJsonl,
   editingFolderName,
   replacedDirectories,
-} from "../../src/core/editingRepo";
+} from "../../../src/core/editingRepo";
 
 /**
  * 編集用リポジトリ（設計書5.7.5）。

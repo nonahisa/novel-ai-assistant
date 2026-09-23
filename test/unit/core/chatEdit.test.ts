@@ -5,7 +5,7 @@ import {
   parseChatEdit,
   parseChatRun,
   sanitizeRequestedPaths,
-} from "../../src/core/chatEdit";
+} from "../../../src/core/chatEdit";
 
 function parse(target: string, content = "書き込む内容") {
   return parseChatEdit({ target, content });

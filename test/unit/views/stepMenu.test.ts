@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
-import { abbreviateTitle } from "../../src/core/abbreviateTitle";
+import { abbreviateTitle } from "../../../src/core/abbreviateTitle";
 import { TreeItemCollapsibleState } from "vscode";
-import { findAction } from "../../src/views/actionList";
+import { findAction } from "../../../src/views/actionList";
 import {
   STEP_CHOOSE_WORK_LABEL,
   STEP_MENU,
@@ -18,7 +18,7 @@ import {
   type StepNode,
   type StepPlaceholder,
   type StepWorkStore,
-} from "../../src/views/stepMenu";
+} from "../../../src/views/stepMenu";
 import {
   ACTION_SCHEME,
   allActions,
@@ -27,10 +27,10 @@ import {
   type ActionCounter,
   type ActionItem,
   type GroupStateStore,
-} from "../../src/views/actionList";
-import { ActionDecorationProvider } from "../../src/views/actionDecorations";
-import type { WorkEntry } from "../../src/models/types";
-import type { WorkRegistry } from "../../src/core/workRegistry";
+} from "../../../src/views/actionList";
+import { ActionDecorationProvider } from "../../../src/views/actionDecorations";
+import type { WorkEntry } from "../../../src/models/types";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
 
 /**
  * 簡単ステップメニュー（作者の依頼、2026-08-27。名前は2026-08-29に改名）。
@@ -812,7 +812,7 @@ describe("ビューの見出しに出す作品名", () => {
 describe("左に並ぶビューの名前", () => {
   const views = (
     JSON.parse(
-      readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+      readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
     ) as {
       contributes: {
         views: Record<string, Array<{ id: string; name: string }>>;

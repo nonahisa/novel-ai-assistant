@@ -27,7 +27,7 @@ import { resolve } from "node:path";
  */
 
 function sourceOf(relative: string): string {
-  return readFileSync(resolve(__dirname, "../..", relative), "utf8");
+  return readFileSync(resolve(__dirname, "../../..", relative), "utf8");
 }
 
 const PANEL = sourceOf("src/features/epubEditorPanel.ts");

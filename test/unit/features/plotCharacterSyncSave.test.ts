@@ -1,8 +1,8 @@
 import * as nodePath from "path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { FileSystemError, Uri, window, workspace } from "./support/vscodeStub";
-import { emptyCharacter, type Character } from "../../src/models/character";
-import type { WorkEntry } from "../../src/models/types";
+import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { emptyCharacter, type Character } from "../../../src/models/character";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * plot.md を保存したときの、設定資料への差分反映（設計書6.4.9）。
@@ -22,11 +22,11 @@ const state = vi.hoisted(() => ({
   stage: vi.fn(async () => undefined),
 }));
 
-vi.mock("../../src/core/plotFile", () => ({
+vi.mock("../../../src/core/plotFile", () => ({
   readPlotText: vi.fn(async () => state.plotText),
 }));
 
-vi.mock("../../src/core/characterStore", () => ({
+vi.mock("../../../src/core/characterStore", () => ({
   CharacterStore: class {
     async loadAll() {
       return { characters: state.characters, errors: state.loadErrors };
@@ -34,16 +34,16 @@ vi.mock("../../src/core/characterStore", () => ({
   },
 }));
 
-vi.mock("../../src/core/pendingUpdates", () => ({
+vi.mock("../../../src/core/pendingUpdates", () => ({
   PendingUpdateStore: class {
     stage = state.stage;
   },
 }));
 
-vi.mock("../../src/core/logger", () => ({ logFailure: vi.fn() }));
+vi.mock("../../../src/core/logger", () => ({ logFailure: vi.fn() }));
 
 const { syncPlotCharacters } = await import(
-  "../../src/features/plotCharacterSync"
+  "../../../src/features/plotCharacterSync"
 );
 
 const work: WorkEntry = {

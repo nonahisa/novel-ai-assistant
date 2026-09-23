@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   parseCollectedFile,
   parseEpisodeTitle,
-} from "../../src/core/collectedFile";
+} from "../../../src/core/collectedFile";
 
 const sample = [
   "【タイトル】",

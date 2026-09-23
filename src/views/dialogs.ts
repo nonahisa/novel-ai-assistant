@@ -38,7 +38,7 @@ import * as vscode from "vscode";
  * 文字を入力してもらう。
  *
  * **`showInputBox` を直接呼ばないこと。** `ignoreFocusOut` の付け忘れを
- * 防ぐため、`test/unit/dialogCancel.test.ts` が直接呼び出しを見張っている。
+ * 防ぐため、`test/unit/views/dialogCancel.test.ts` が直接呼び出しを見張っている。
  */
 export async function askText(
   options: vscode.InputBoxOptions

@@ -4,7 +4,7 @@ import {
   nextChapterNumber,
   parseEpisodeFileName,
   sanitizeFileName,
-} from "../../src/core/episodeParser";
+} from "../../../src/core/episodeParser";
 
 describe("話数ファイル名", () => {
   test.each([

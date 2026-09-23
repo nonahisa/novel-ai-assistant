@@ -71,7 +71,7 @@ export function buildManuscriptEditorHtml(
    * 省略できるようにしてあるのは、タイプを決めていない作品
    * （プロットに `## 形式` が無い）と、作品を引けなかったときのためで、
    * そのときはこれまでどおりの画面になる。**脚本以外では、出来上がる
-   * HTMLが1バイトも変わらない**（test/unit/composeFace.test.ts が見張る）。
+   * HTMLが1バイトも変わらない**（test/unit/cross/composeFace.test.ts が見張る）。
    */
   format?: WorkFormatKey
 ): string {
@@ -576,7 +576,7 @@ body.vertical .tcy { text-combine-upright: all; }
 /* ── SNS記事のnote風（設計書6.69） ─────────────────
    **ここから下は、すべて body.note / body.notepv の中に閉じ込める。**
    小説の原稿の見え方を1pxも変えないための決まりで、
-   test/unit/manuscriptEditorNote.test.ts が規則の見出しを見張っている。
+   test/unit/views/manuscriptEditorNote.test.ts が規則の見出しを見張っている。
 
    ## 編集面は、テーマに馴染ませたまま「組み方」だけをnoteに寄せる
    紙面を白く塗らないのは、**重ね敷きの色が全部テーマ由来**だからである
@@ -2893,7 +2893,7 @@ ruby > rt {
    * 1行ぶんの段落を作る。**かたまり（ルビ・傍点）は編集不可**（設計書6.34.2）。
    *
    * doc を引数で受けるのは、**画面の外から試せるようにする**ためである
-   * （test/unit/composeFace.test.ts が偽の document を渡して往復を確かめる）。
+   * （test/unit/cross/composeFace.test.ts が偽の document を渡して往復を確かめる）。
    */
   function composeBuildLine(line, doc, mode) {
     const p = doc.createElement("p");

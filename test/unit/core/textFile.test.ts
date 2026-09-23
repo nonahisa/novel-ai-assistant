@@ -8,8 +8,8 @@ import {
   hashText,
   readTextFile,
   writeTextFilePreservingFormat,
-} from "../../src/core/textFile";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
+} from "../../../src/core/textFile";
+import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 
 const path = "C:\\novels\\001.txt";
 const fileKey = (filePath: string): string => filePath.toLowerCase();

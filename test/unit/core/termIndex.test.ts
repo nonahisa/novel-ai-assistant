@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { TermIndex, type TermEntry } from "../../src/core/termIndex";
+import { TermIndex, type TermEntry } from "../../../src/core/termIndex";
 
 function entry(
   text: string,

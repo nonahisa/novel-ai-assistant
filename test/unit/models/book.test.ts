@@ -19,7 +19,7 @@ import {
   resolveBookBlocks,
   setBookBlockSuspended,
   type BookBlock,
-} from "../../src/models/book";
+} from "../../../src/models/book";
 
 /**
  * 本の設計図（設計書6.65.2）。

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { SYNOPSIS_FILE } from "../../src/core/synopsisDoc";
+import { SYNOPSIS_FILE } from "../../../src/core/synopsisDoc";
 
 /**
  * 「作りました」と案内した資料が開けない不具合の再現（2026-08-15）。

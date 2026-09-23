@@ -11,13 +11,13 @@ import {
   sortProofreadIssues,
   validateProofreadIssues,
   type AcceptedProofreadIssue,
-} from "../../src/core/proofreadValidation";
+} from "../../../src/core/proofreadValidation";
 import {
   issueBudget,
   MAX_ISSUES_PER_1000_CHARS,
   PROOFREAD_REASONS,
-} from "../../src/prompts/proofread";
-import type { Chunk } from "../../src/core/chunker";
+} from "../../../src/prompts/proofread";
+import type { Chunk } from "../../../src/core/chunker";
 
 /**
  * 推敲の提案の検証（設計書6.9.1）。

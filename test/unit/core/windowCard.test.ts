@@ -13,12 +13,12 @@ import {
   serializeWindowCard,
   windowCardFileName,
   type WindowCard,
-} from "../../src/core/windowCard";
-import { GLOBAL_STORAGE_ENV, mcpGlobalStorageRoot } from "../../src/mcp/globalStorage";
-import { ADVICE_STORAGE_ENV } from "../../src/mcp/adviceProfileMirror";
-import { windowsList } from "../../src/mcp/tools/windows";
-import { exposureOf } from "../../src/mcp/tools/accessLog";
-import { assertExternalAccessAllowed } from "../../src/mcp/tools/permission";
+} from "../../../src/core/windowCard";
+import { GLOBAL_STORAGE_ENV, mcpGlobalStorageRoot } from "../../../src/mcp/globalStorage";
+import { ADVICE_STORAGE_ENV } from "../../../src/mcp/adviceProfileMirror";
+import { windowsList } from "../../../src/mcp/tools/windows";
+import { exposureOf } from "../../../src/mcp/tools/accessLog";
+import { assertExternalAccessAllowed } from "../../../src/mcp/tools/permission";
 
 /**
  * 窓の札と MCP の道具 `windows.list`（作者の依頼、2026-09-22）。
@@ -255,7 +255,7 @@ describe("保管庫の場所は、助言方針の控えと同じ道で決める"
 
   it("束の居場所を読む処理は globalStorage.ts だけにある", () => {
     // 2か所で別々に決めると、片方だけが別の場所を指す日が来る
-    const mcpDir = nodePath.join(__dirname, "../../src/mcp");
+    const mcpDir = nodePath.join(__dirname, "../../../src/mcp");
     const advice = fs.readFileSync(nodePath.join(mcpDir, "adviceProfileMirror.ts"), "utf8");
     const windows = fs.readFileSync(nodePath.join(mcpDir, "tools/windows.ts"), "utf8");
     expect(advice).not.toMatch(/process\.argv/);
@@ -289,7 +289,7 @@ describe("許可と記録は mcp.version と同じ扱い", () => {
 });
 
 describe("道具の数を書いた文書が、登録と揃っている", () => {
-  const root = nodePath.join(__dirname, "../..");
+  const root = nodePath.join(__dirname, "../../..");
   const server = fs.readFileSync(nodePath.join(root, "src/mcp/server.ts"), "utf8");
   const registered = [...server.matchAll(/registerTool\(\s*"([\w.]+)"/g)].map(
     (match) => match[1]

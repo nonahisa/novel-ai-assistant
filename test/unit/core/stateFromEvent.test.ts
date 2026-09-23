@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   stateBeforeEvent,
   statesBeforeEvents,
-} from "../../src/core/stateFromEvent";
-import type { StoryFact } from "../../src/models/storyFact";
+} from "../../../src/core/stateFromEvent";
+import type { StoryFact } from "../../../src/models/storyFact";
 
 /**
  * 出来事から、その直前まで成り立っていた状態を導く（設計書6.88.6）。

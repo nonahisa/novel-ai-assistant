@@ -8,7 +8,7 @@ import {
   planRubyInsertions,
   splitSingleCharTerms,
   type RubyTerm,
-} from "../../src/core/settingsRuby";
+} from "../../../src/core/settingsRuby";
 
 /**
  * 設定資料の読み仮名を、本文のルビとして振る（設計書6.12.5）。

@@ -70,7 +70,7 @@ vi.mock("vscode", () => {
 });
 
 /** 本文の読み込み。**再チェックはファイルを読むところから始まる** */
-vi.mock("../../src/core/textFile", () => ({
+vi.mock("../../../src/core/textFile", () => ({
   readTextFile: vi.fn(async () => ({
     text: "　夕暮れの校庭に、影が長く伸びていた。\n　プリム様は振り返らなかった。\n",
     hash: "h",
@@ -100,15 +100,15 @@ let nextOutcome: { kind: string; reason?: string } = {
   reason: "設定どおりの表記に直っています",
 };
 
-vi.mock("../../src/features/recheckProposal", () => ({
+vi.mock("../../../src/features/recheckProposal", () => ({
   recheckProposal: vi.fn(async (request: (typeof recheckCalls)[number]) => {
     recheckCalls.push(request);
     return nextOutcome;
   }),
 }));
 
-import { ProposalPanel } from "../../src/features/proposalPanel";
-import type { WorkEntry } from "../../src/models/types";
+import { ProposalPanel } from "../../../src/features/proposalPanel";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work: WorkEntry = {
   id: "w1",

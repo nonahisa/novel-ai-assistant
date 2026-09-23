@@ -3,16 +3,16 @@ import {
   proposalId,
   resolveProposals,
   type ProposalLine,
-} from "../../src/models/proposal";
-import { parseProposalLines } from "../../src/core/proposalStore";
+} from "../../../src/models/proposal";
+import { parseProposalLines } from "../../../src/core/proposalStore";
 import {
   describeLock,
   lockOf,
   normalizeFile,
   resolveLocks,
   type LockEvent,
-} from "../../src/models/fileLock";
-import { parseLockEvents } from "../../src/core/fileLockStore";
+} from "../../../src/models/fileLock";
+import { parseLockEvents } from "../../../src/core/fileLockStore";
 
 /**
  * 編集部からの提案と、校閲ロック（設計書5.6）。

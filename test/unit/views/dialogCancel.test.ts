@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import * as path from "node:path";
-import { askText, cancelItem, isCancelItem } from "../../src/views/dialogs";
-import { window } from "./support/vscodeStub";
+import { askText, cancelItem, isCancelItem } from "../../../src/views/dialogs";
+import { window } from "../support/vscodeStub";
 
 /**
  * 取りやめ方が分かること（設計書6.17.2、作者の指摘 2026-08-16）。

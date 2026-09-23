@@ -5,7 +5,7 @@ import {
   estimateRemainingMs,
   estimateRunMs,
   describeRunTimeEstimate,
-} from "../../src/core/etaEstimate";
+} from "../../../src/core/etaEstimate";
 
 /**
  * 残り時間の見当（設計書6.8.19。作者の指摘、2026-09-20）。

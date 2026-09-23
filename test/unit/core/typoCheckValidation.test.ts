@@ -3,8 +3,8 @@ import {
   checkParticleRange,
   parseTypoCheckResult,
   validateTypoIssues,
-} from "../../src/core/typoCheckValidation";
-import type { Chunk } from "../../src/core/chunker";
+} from "../../../src/core/typoCheckValidation";
+import type { Chunk } from "../../../src/core/chunker";
 
 function makeChunk(text: string, startLine = 0): Chunk {
   return {

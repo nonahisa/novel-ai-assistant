@@ -56,7 +56,7 @@ vi.mock("vscode", () => {
 });
 
 /** 見送りの記録（本物はファイルへ書く）。ここでは書かせない */
-vi.mock("../../src/core/typoIssueHistory", () => ({
+vi.mock("../../../src/core/typoIssueHistory", () => ({
   TypoDismissedHistory: class {
     add = () => Promise.resolve(undefined);
     load = () => Promise.resolve(new Set<string>());
@@ -66,8 +66,8 @@ vi.mock("../../src/core/typoIssueHistory", () => ({
   appendAiActionLog: () => Promise.resolve(undefined),
 }));
 
-import { ProposalPanel } from "../../src/features/proposalPanel";
-import type { WorkEntry } from "../../src/models/types";
+import { ProposalPanel } from "../../../src/features/proposalPanel";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work: WorkEntry = {
   id: "w1",

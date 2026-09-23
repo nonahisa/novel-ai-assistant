@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { runSetupWizard } from "../../src/ai/registry";
-import type { AIProvider, ModelInfo } from "../../src/ai/types";
-import type { AIRegistry } from "../../src/ai/registry";
-import { commands, window } from "./support/vscodeStub";
+import { runSetupWizard } from "../../../src/ai/registry";
+import type { AIProvider, ModelInfo } from "../../../src/ai/types";
+import type { AIRegistry } from "../../../src/ai/registry";
+import { commands, window } from "../support/vscodeStub";
 
 const model: ModelInfo = {
   id: "model-1",

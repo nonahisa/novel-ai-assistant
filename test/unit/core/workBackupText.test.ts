@@ -5,10 +5,10 @@ import {
   inspectWorkBackup,
   WorkZipError,
   workTitleFromBackupFileName,
-} from "../../src/core/workZip";
-import { parseCollectedFile } from "../../src/core/collectedFile";
-import { backupIdentityOf } from "../../src/core/backupMatch";
-import { backupEpisodesOf } from "../../src/core/backupMerge";
+} from "../../../src/core/workZip";
+import { parseCollectedFile } from "../../../src/core/collectedFile";
+import { backupIdentityOf } from "../../../src/core/backupMatch";
+import { backupEpisodesOf } from "../../../src/core/backupMerge";
 
 /**
  * `.txt` 直のバックアップ（アルファポリス）の取り込みと、

@@ -7,10 +7,10 @@ import {
   targetSheetHistoryNameCandidates,
   TARGET_SHEET_HISTORY_ROWS,
   type TargetSheetHistoryEntry,
-} from "../../src/core/targetSheetHistory";
-import { targetSheetFor } from "../../src/core/targetSheet";
-import { buildTargetSheetDoc } from "../../src/core/targetSheetDoc";
-import type { ReaderScores } from "../../src/models/readerProfile";
+} from "../../../src/core/targetSheetHistory";
+import { targetSheetFor } from "../../../src/core/targetSheet";
+import { buildTargetSheetDoc } from "../../../src/core/targetSheetDoc";
+import type { ReaderScores } from "../../../src/models/readerProfile";
 
 /**
  * ターゲットシートの控えと推移（設計書6.108.5）。

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describeCheckRunCounts } from "../../src/core/checkRunCounts";
+import { describeCheckRunCounts } from "../../../src/core/checkRunCounts";
 
 /**
  * 検知の完了通知は、提案パネルの見出しと同じ数え方をする（設計書6.8）。
@@ -60,7 +60,7 @@ describe("完了通知の件数", () => {
   */
   test("推敲の落とした件数も、この関数へ渡している", () => {
     const source = readFileSync(
-      resolve(__dirname, "../../src/extension.ts"),
+      resolve(__dirname, "../../../src/extension.ts"),
       "utf8"
     );
     const start = source.indexOf('"novelai.checkProofread"');

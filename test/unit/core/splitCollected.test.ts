@@ -3,7 +3,7 @@ import {
   planSplit,
   rebuild,
   unnumberedCount,
-} from "../../src/core/splitCollected";
+} from "../../../src/core/splitCollected";
 
 /**
  * 合本ファイルの分割（設計書6.2.1）。

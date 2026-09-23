@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { workspace } from "vscode";
-import type { WorkEntry } from "../../src/models/types";
-import { useMemoryTuningStore } from "./support/tuningStore";
+import type { WorkEntry } from "../../../src/models/types";
+import { useMemoryTuningStore } from "../support/tuningStore";
 
 /**
  * 相談パネルの時間切れの案内（ノートPCの実機、2026-09-23）。
@@ -22,25 +22,25 @@ const response = vi.hoisted(() => ({
   error: undefined as unknown,
 }));
 
-vi.mock("../../src/core/chatLog", () => ({
+vi.mock("../../../src/core/chatLog", () => ({
   appendChatLog: () => undefined,
   summarizeMaterials: () => [],
 }));
 
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logFailure: () => undefined,
   logStep: () => undefined,
   logLine: () => undefined,
   useLogFile: () => undefined,
 }));
 
-vi.mock("../../src/features/aiConnectivity", () => ({
+vi.mock("../../../src/features/aiConnectivity", () => ({
   confirmProviderReachable: async () => true,
   confirmPaidUsage: async () => true,
 }));
 
-const { WorkChatPanel } = await import("../../src/features/workChatPanel");
-const { AIError, recoveryForAIError } = await import("../../src/ai/types");
+const { WorkChatPanel } = await import("../../../src/features/workChatPanel");
+const { AIError, recoveryForAIError } = await import("../../../src/ai/types");
 
 const WORK: WorkEntry = {
   id: "w_a",

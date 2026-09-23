@@ -8,8 +8,8 @@ import {
   CHAPTER_PROPOSE_VERSION,
   NO_CHAPTERS_MARK,
   type ChapterProposeEpisode,
-} from "../../src/prompts/chapterPropose";
-import { validateChapterProposal } from "../../src/core/chapterProposalValidation";
+} from "../../../src/prompts/chapterPropose";
+import { validateChapterProposal } from "../../../src/core/chapterProposalValidation";
 
 /**
  * P-31 章立ての提案のプロンプト（設計書6.66.4）。

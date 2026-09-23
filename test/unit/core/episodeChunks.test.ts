@@ -3,13 +3,13 @@ import {
   chunksOfEpisodeFile,
   episodeBodySources,
   shiftLines,
-} from "../../src/core/episodeChunks";
+} from "../../../src/core/episodeChunks";
 import {
   locateChunkLine,
   segmentAtLine,
   segmentsOf,
   withLineNumbers,
-} from "../../src/core/chunker";
+} from "../../../src/core/chunker";
 
 /**
  * 1ファイル分の本文からチャンクを作る共通の口（設計書6.23）。

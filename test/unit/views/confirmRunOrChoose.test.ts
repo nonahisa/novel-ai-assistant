@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "vitest";
-import { confirmRunOrChoose } from "../../src/views/notify";
-import { window } from "./support/vscodeStub";
+import { confirmRunOrChoose } from "../../../src/views/notify";
+import { window } from "../support/vscodeStub";
 
 /**
  * 確認に「別の道」を並べる（A3④、2026-09-23）。

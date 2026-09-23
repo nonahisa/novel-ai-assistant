@@ -2,7 +2,7 @@
 //
 // **束も Ollama も要らない純粋な関数にしてある**——`measure.mjs` は
 // 束を起こして返り値を集めるだけで、数えるのはここ。こうしておくと
-// **数え方そのものを単体テストで確かめられる**（`test/unit/measureScoring.test.ts`）。
+// **数え方そのものを単体テストで確かめられる**（`test/unit/prompts/measureScoring.test.ts`）。
 //
 // `src/` に置いていないのは、**これが製品ではなく `scripts/` の道具だから**。
 // 製品の検算（`core/proofreadValidation.ts`）は束の中で通っており、ここは
@@ -32,7 +32,7 @@ export const KANJI_REASON = "漢字ひらき";
  *
  * **写しを持たない。** `measure.mjs` の中にも書くと、名前が変わったとき
  * 片方だけ直して「動くけれど別のものを測っている」が起きる。**この並びが
- * 束の feature と揃っているか**は `test/unit/mcpBundledTools.test.ts` が
+ * 束の feature と揃っているか**は `test/unit/mcp/mcpBundledTools.test.ts` が
  * `src/core/mcpFeatures.ts` と突き合わせて確かめる——表だけでは、
  * こちらの思い込みが残る。
  */
@@ -1269,7 +1269,7 @@ export function maxIssuesPer1000CharsOf(promptSource) {
  * 値（1000字あたり何件か）は `maxIssuesPer1000CharsOf()` で源から読むので
  * 写していないが、**式の形だけはここにある**——`.mjs` から `.ts` を
  * import できないため。**式がずれていないことは
- * `test/unit/measureScoring.test.ts` が製品の `issueBudget()` と
+ * `test/unit/prompts/measureScoring.test.ts` が製品の `issueBudget()` と
  * 突き合わせて確かめる**（表だけでは、こちらの思い込みが残る）。
  */
 export function issueBudgetOf(chars, perThousand) {

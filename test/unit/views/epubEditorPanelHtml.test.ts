@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildEpubEditorPanelHtml } from "../../src/views/epubEditorPanelHtml";
+import { buildEpubEditorPanelHtml } from "../../../src/views/epubEditorPanelHtml";
 
 /**
  * EPUBエディターの画面（設計書6.65.6）。

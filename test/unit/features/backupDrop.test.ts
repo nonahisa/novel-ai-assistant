@@ -5,11 +5,11 @@ import {
   FileSystemError,
   window,
   workspace,
-} from "./support/vscodeStub";
-import * as paths from "../../src/core/paths";
-import { setFallbackLogRoot, useLogFile } from "../../src/core/logger";
-import type { EpisodeFile, WorkEntry } from "../../src/models/types";
-import type { PickedBackup } from "../../src/features/importWorkFromZip";
+} from "../support/vscodeStub";
+import * as paths from "../../../src/core/paths";
+import { setFallbackLogRoot, useLogFile } from "../../../src/core/logger";
+import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
+import type { PickedBackup } from "../../../src/features/importWorkFromZip";
 
 /**
  * 相談パネルへ持ち込まれたバックアップを捌く（作者の依頼、2026-09-23）。
@@ -33,7 +33,7 @@ const SETTINGS = paths.join(WORK_FOLDER, "設定");
 const CHAPTERS = paths.join(SETTINGS, "章立て.json");
 const POSTING = paths.join(SETTINGS, "投稿状態.json");
 
-vi.mock("../../src/core/scanner", () => ({
+vi.mock("../../../src/core/scanner", () => ({
   scanWork: async () => ({
     episodes: scanned,
     stats: {},
@@ -43,7 +43,7 @@ vi.mock("../../src/core/scanner", () => ({
   }),
 }));
 
-const { receiveBackup } = await import("../../src/features/backupDrop");
+const { receiveBackup } = await import("../../../src/features/backupDrop");
 
 const SEP = (n: number) =>
   `------------------------- エピソード${n}開始 -------------------------`;

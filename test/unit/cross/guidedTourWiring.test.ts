@@ -1,30 +1,30 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
-import { PROCEDURE_REFERENCED_COMMANDS } from "../../src/core/procedures";
-import { announceCommandFinished } from "../../src/core/guidedTour";
+import { PROCEDURE_REFERENCED_COMMANDS } from "../../../src/core/procedures";
+import { announceCommandFinished } from "../../../src/core/guidedTour";
 import {
   CHECK_CANCELLED,
   CHECK_COMPLETED,
   CHECK_FAILED,
   checkSkipped,
-} from "../../src/core/proofreadingSuite";
+} from "../../../src/core/proofreadingSuite";
 import {
   GuidedTourHost,
   type TourScreen,
-} from "../../src/features/guidedTour";
+} from "../../../src/features/guidedTour";
 import {
   ActionListProvider,
   type ActionNode,
   type GroupStateStore,
-} from "../../src/views/actionList";
-import { StepMenuProvider, type StepNode } from "../../src/views/stepMenu";
+} from "../../../src/views/actionList";
+import { StepMenuProvider, type StepNode } from "../../../src/views/stepMenu";
 import {
   describeSpotlight,
   type ActionSpotlight,
   type SpotlightResult,
-} from "../../src/features/actionSpotlight";
-import type { WorkEntry } from "../../src/models/types";
-import type { WorkRegistry } from "../../src/core/workRegistry";
+} from "../../../src/features/actionSpotlight";
+import type { WorkEntry } from "../../../src/models/types";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
 
 /**
  * 画面で指しながらの案内——**繋ぎ目**（設計書6.104。第1段）。

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
-import { TERM_COLORS } from "../../src/core/termColors";
-import { buildSettingsPanelHtml } from "../../src/views/settingsPanelHtml";
+import { TERM_COLORS } from "../../../src/core/termColors";
+import { buildSettingsPanelHtml } from "../../../src/views/settingsPanelHtml";
 
 /**
  * 用語の色は、画面ごとに違ってはならない（作者の指示、2026-08-28

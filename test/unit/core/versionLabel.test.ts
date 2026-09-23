@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { menuVersionLabel } from "../../src/core/versionLabel";
+import { menuVersionLabel } from "../../../src/core/versionLabel";
 
 describe("menuVersionLabel（見出しの脇に出す版の札）", () => {
   it("版に v を付けて返す", () => {

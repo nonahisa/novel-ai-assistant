@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { splitIntoChunks } from "../../src/core/chunker";
+import { splitIntoChunks } from "../../../src/core/chunker";
 
 describe("本文チャンク分割", () => {
   test.each([0, -1, 0.5, Number.NaN])(

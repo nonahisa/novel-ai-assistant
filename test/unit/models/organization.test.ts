@@ -5,20 +5,20 @@ import {
   nextOrganizationId,
   parseOrganization,
   type Organization,
-} from "../../src/models/organization";
+} from "../../../src/models/organization";
 import {
   mergeExtractedOrganizations,
   organizationsFromAffiliations,
-} from "../../src/core/settingsMerge";
-import { validateExtractedOrganizations } from "../../src/core/settingsExtractionValidation";
-import { buildOrganizationMarkdown } from "../../src/core/settingsMarkdown";
-import { describeOrganization } from "../../src/core/settingsSummary";
-import { buildOrganizationListItems } from "../../src/core/settingsList";
-import { applyOrganizationEdits } from "../../src/core/settingsEdit";
-import { emptyCharacter } from "../../src/models/character";
-import { emptyLocation } from "../../src/models/location";
-import { CHARACTER_EXTRACT_SCHEMA } from "../../src/prompts/characterExtract";
-import type { Chunk } from "../../src/core/chunker";
+} from "../../../src/core/settingsMerge";
+import { validateExtractedOrganizations } from "../../../src/core/settingsExtractionValidation";
+import { buildOrganizationMarkdown } from "../../../src/core/settingsMarkdown";
+import { describeOrganization } from "../../../src/core/settingsSummary";
+import { buildOrganizationListItems } from "../../../src/core/settingsList";
+import { applyOrganizationEdits } from "../../../src/core/settingsEdit";
+import { emptyCharacter } from "../../../src/models/character";
+import { emptyLocation } from "../../../src/models/location";
+import { CHARACTER_EXTRACT_SCHEMA } from "../../../src/prompts/characterExtract";
+import type { Chunk } from "../../../src/core/chunker";
 
 /**
  * 組織は人物の `affiliation`（所属）に対応する設定。

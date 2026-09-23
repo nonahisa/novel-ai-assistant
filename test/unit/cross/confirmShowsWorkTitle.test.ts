@@ -16,7 +16,7 @@ import { describe, expect, test } from "vitest";
  * 押さえる（それぞれを走らせるには画面の部品を大量に偽る必要がある）。
  */
 
-const FEATURES = join(__dirname, "..", "..", "src", "features");
+const FEATURES = join(__dirname, "..", "..", "..", "src", "features");
 
 /**
  * 確認画面（`confirmRun`／`confirmPaidUsage`）を出す、作品に対してAIを

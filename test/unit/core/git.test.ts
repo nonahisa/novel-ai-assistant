@@ -19,14 +19,14 @@ import {
   unmergedPaths,
   type GitCommandResult,
   type GitCommandRunner,
-} from "../../src/core/git";
-import { parseConflicts } from "../../src/core/conflictFile";
+} from "../../../src/core/git";
+import { parseConflicts } from "../../../src/core/conflictFile";
 import {
   describeStatus,
   describeSyncBadge,
   describeSyncTooltip,
   isWarning,
-} from "../../src/features/gitSync";
+} from "../../../src/features/gitSync";
 
 /** 応答を並べておくだけの偽git。引数の並びで返す値を決める */
 function fakeGit(

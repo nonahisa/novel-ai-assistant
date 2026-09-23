@@ -1,11 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { dropDiffEntries } from "../../src/core/dropDiffEntries";
+import { dropDiffEntries } from "../../../src/core/dropDiffEntries";
 import {
   emptyCharacter,
   type AddressForm,
   type AddressTerm,
   type Character,
-} from "../../src/models/character";
+} from "../../../src/models/character";
 
 /**
  * 更新案の中の1つだけを落としてから保存する（作者の依頼、2026-09-12）。

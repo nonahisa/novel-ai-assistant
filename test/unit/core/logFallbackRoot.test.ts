@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { workspace } from "./support/vscodeStub";
-import { logStep, setFallbackLogRoot, useLogFile } from "../../src/core/logger";
+import { workspace } from "../support/vscodeStub";
+import { logStep, setFallbackLogRoot, useLogFile } from "../../../src/core/logger";
 
 /**
  * 作品が決まらない処理のログを、どこへ置くか（作者の裁定、2026-09-19）。

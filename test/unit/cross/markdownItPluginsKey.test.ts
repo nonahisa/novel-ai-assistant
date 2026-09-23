@@ -13,7 +13,7 @@ import { resolve } from "node:path";
  * 呼ぶので通ってしまう）。入れ子へ戻ると黙って死ぬので、鍵の形を見張る。
  */
 const manifest = JSON.parse(
-  readFileSync(resolve(__dirname, "../../package.json"), "utf8")
+  readFileSync(resolve(__dirname, "../../../package.json"), "utf8")
 ) as { contributes: Record<string, unknown> };
 
 describe("markdown-it プラグインの登録", () => {

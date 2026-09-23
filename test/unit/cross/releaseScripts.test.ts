@@ -10,7 +10,7 @@ const temporaryDirectories: string[] = [];
  * 持ったまま落ちた。写すと必ずずれる。
  */
 const { EXPECTED_ARCHIVE_FILES: expectedArchiveFiles } = (await import(
-  "../../scripts/releaseSupport.mjs"
+  "../../../scripts/releaseSupport.mjs"
 )) as { EXPECTED_ARCHIVE_FILES: string[] };
 
 afterEach(async () => {
@@ -29,7 +29,7 @@ describe("release metadata", () => {
       publisher: "writer",
     });
     const { deriveReleaseMetadata } = await import(
-      "../../scripts/releaseSupport.mjs"
+      "../../../scripts/releaseSupport.mjs"
     );
 
     const metadata = await deriveReleaseMetadata(repositoryRoot);
@@ -43,7 +43,7 @@ describe("release metadata", () => {
 
   test("導入済み一覧から期待するextension identityを返す", async () => {
     const { validateInstalledExtension } = await import(
-      "../../scripts/releaseSupport.mjs"
+      "../../../scripts/releaseSupport.mjs"
     );
 
     expect(
@@ -58,7 +58,7 @@ describe("release metadata", () => {
 describe("VSIX validation", () => {
   test("exact allowlistだけを受理し追加ファイルを拒否する", async () => {
     const { validateArchiveFiles } = await import(
-      "../../scripts/releaseSupport.mjs"
+      "../../../scripts/releaseSupport.mjs"
     );
 
     expect(() => validateArchiveFiles(expectedArchiveFiles)).not.toThrow();
@@ -74,7 +74,7 @@ describe("VSIX validation", () => {
     "_test_extract-result.json",
   ])("secretまたはlocal pathを含む配布内容を拒否する: %s", async (forbidden) => {
     const { validateArchiveContents } = await import(
-      "../../scripts/releaseSupport.mjs"
+      "../../../scripts/releaseSupport.mjs"
     );
     const contents = new Map(
       expectedArchiveFiles.map((file) => [file, file === "extension/readme.md" ? forbidden : "safe"])
@@ -87,7 +87,7 @@ describe("VSIX validation", () => {
 
   test("root package metadataと異なるpackaged manifestを拒否する", async () => {
     const { validatePackagedManifest } = await import(
-      "../../scripts/releaseSupport.mjs"
+      "../../../scripts/releaseSupport.mjs"
     );
     const rootManifest = {
       name: "novel-ai-assistant",
@@ -109,7 +109,7 @@ describe("prepare release notes", () => {
   test("stable本文へexact VSIX bytesのlowercase SHA-256を1行だけ追加する", async () => {
     const repositoryRoot = await createReleaseRepository("0.0.2");
     const { prepareReleaseNotes } = await import(
-      "../../scripts/prepareReleaseNotes.mjs"
+      "../../../scripts/prepareReleaseNotes.mjs"
     );
 
     const result = await prepareReleaseNotes(repositoryRoot);
@@ -125,7 +125,7 @@ describe("prepare release notes", () => {
   test("package versionが0.0.2以外なら拒否する", async () => {
     const repositoryRoot = await createReleaseRepository("0.0.3");
     const { prepareReleaseNotes } = await import(
-      "../../scripts/prepareReleaseNotes.mjs"
+      "../../../scripts/prepareReleaseNotes.mjs"
     );
 
     await expect(prepareReleaseNotes(repositoryRoot)).rejects.toThrow(
@@ -136,7 +136,7 @@ describe("prepare release notes", () => {
   test("release assetが存在しなければ拒否する", async () => {
     const repositoryRoot = await createReleaseRepository("0.0.2", false);
     const { prepareReleaseNotes } = await import(
-      "../../scripts/prepareReleaseNotes.mjs"
+      "../../../scripts/prepareReleaseNotes.mjs"
     );
 
     await expect(prepareReleaseNotes(repositoryRoot)).rejects.toThrow(
@@ -152,7 +152,7 @@ describe("prepare release notes", () => {
       "utf8"
     );
     const { prepareReleaseNotes } = await import(
-      "../../scripts/prepareReleaseNotes.mjs"
+      "../../../scripts/prepareReleaseNotes.mjs"
     );
 
     await expect(prepareReleaseNotes(repositoryRoot)).rejects.toThrow(

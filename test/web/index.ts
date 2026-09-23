@@ -4,7 +4,7 @@
  * 手元のChromiumにブラウザのVS Codeを立ち上げ、この関数を呼ぶ。
  *
  * **これまで、ブラウザ版を動かした検査は1つも無かった。**
- * `test/unit/browserReach.test.ts` は「Node専用のファイルへ静的importが
+ * `test/unit/cross/browserReach.test.ts` は「Node専用のファイルへ静的importが
  * 届いていない」ことしか見ておらず、それは「起動できるはず」までしか言えない
  * （CLAUDE.md の繰り返し起きた失敗6）。ここで確かめるのは、起動した**あと**に
  * 実際に通る道である。

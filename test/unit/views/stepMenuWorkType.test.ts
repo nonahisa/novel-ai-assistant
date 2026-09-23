@@ -6,11 +6,11 @@ import {
   type Step,
   type StepNode,
   type StepWorkStore,
-} from "../../src/views/stepMenu";
-import type { ActionItem } from "../../src/views/actionList";
-import type { WorkEntry } from "../../src/models/types";
-import type { WorkRegistry } from "../../src/core/workRegistry";
-import type { WorkFormatKey } from "../../src/core/workFormat";
+} from "../../../src/views/stepMenu";
+import type { ActionItem } from "../../../src/views/actionList";
+import type { WorkEntry } from "../../../src/models/types";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
+import type { WorkFormatKey } from "../../../src/core/workFormat";
 
 /**
  * 簡単ステップメニューを、選んだ作品のタイプで絞る（設計書6.70.1）。

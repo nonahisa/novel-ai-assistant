@@ -3,8 +3,8 @@ import {
   exportFileBaseName,
   exportFileNameCandidates,
   writeAudienceExport,
-} from "../../src/features/exportSettingsForAudience";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
+} from "../../../src/features/exportSettingsForAudience";
+import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 
 /**
  * 提供先を選んだ設定資料の書き出し（設計書6.75）。

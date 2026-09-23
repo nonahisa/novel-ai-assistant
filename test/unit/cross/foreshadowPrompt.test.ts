@@ -5,15 +5,15 @@ import {
   FORESHADOW_DETECT_SCHEMA,
   FORESHADOW_DETECT_SYSTEM_PROMPT,
   FORESHADOW_LABEL_MAX_CHARS,
-} from "../../src/prompts/foreshadowDetect";
+} from "../../../src/prompts/foreshadowDetect";
 import {
   buildForeshadowResolvePrompt,
   FORESHADOW_RESOLVE_HINTS,
   FORESHADOW_RESOLVE_SCHEMA,
   FORESHADOW_RESOLVE_SYSTEM_PROMPT,
-} from "../../src/prompts/foreshadowResolve";
-import { validateForeshadowCandidates } from "../../src/core/foreshadowValidation";
-import type { Chunk } from "../../src/core/chunker";
+} from "../../../src/prompts/foreshadowResolve";
+import { validateForeshadowCandidates } from "../../../src/core/foreshadowValidation";
+import type { Chunk } from "../../../src/core/chunker";
 
 /**
  * 伏線の検知のプロンプト（P-25 / P-26、設計書6.35.2・6.35.3）。

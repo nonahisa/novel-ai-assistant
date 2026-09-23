@@ -2,15 +2,15 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 import { describe, expect, test } from "vitest";
-import { workScan } from "../../src/mcp/tools/workScan";
-import { novelMaterial, novelPrompt, novelRun } from "../../src/mcp/tools/features";
+import { workScan } from "../../../src/mcp/tools/workScan";
+import { novelMaterial, novelPrompt, novelRun } from "../../../src/mcp/tools/features";
 import {
   FEATURE_COMMANDS,
   featureAlternative,
   featureNeeds,
   featureOfCommand,
-} from "../../src/core/featurePrerequisites";
-import { ACTION_PREREQUISITES } from "../../src/core/prerequisites";
+} from "../../../src/core/featurePrerequisites";
+import { ACTION_PREREQUISITES } from "../../../src/core/prerequisites";
 
 /**
  * 外部AIにも、順路と代わりの道を届ける（設計書6.94、0.67.3）。
@@ -25,7 +25,7 @@ import { ACTION_PREREQUISITES } from "../../src/core/prerequisites";
  */
 
 /** 4つの前提のうち3つ（設定資料・あらすじ・プロット）と単話プロットが揃った作り物 */
-const WORK = nodePath.join(__dirname, "..", "fixtures", "mcp-work");
+const WORK = nodePath.join(__dirname, "..", "..", "fixtures", "mcp-work");
 const NUM_CTX = 32768;
 
 /** 設定資料もあらすじもプロットも無い作品。本文だけ置く */

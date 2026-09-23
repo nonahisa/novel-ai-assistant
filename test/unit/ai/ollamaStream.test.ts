@@ -5,7 +5,7 @@ import {
   streamingEnabled,
   takeCompleteLines,
   setStreamingSettingReader,
-} from "../../src/ai/ollamaStream";
+} from "../../../src/ai/ollamaStream";
 
 /**
  * **流しながら受け取る**（設計書6.63.1）。

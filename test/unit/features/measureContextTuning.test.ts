@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { window, workspace } from "./support/vscodeStub";
-import type { AIRegistry } from "../../src/ai/registry";
-import { AIError, type GenerateParams, type GenerateResult } from "../../src/ai/types";
+import { window, workspace } from "../support/vscodeStub";
+import type { AIRegistry } from "../../../src/ai/registry";
+import { AIError, type GenerateParams, type GenerateResult } from "../../../src/ai/types";
 
 /**
  * AIチューニングが**設定へ手を出す範囲**（設計書6.49）。
@@ -26,7 +26,7 @@ const state = vi.hoisted(() => ({
   >,
 }));
 
-vi.mock("../../src/ai/registry", () => ({
+vi.mock("../../../src/ai/registry", () => ({
   ensureConfigured: vi.fn(async (_registry: unknown, feature: unknown) => {
     state.requestedFeatures.push(feature);
     // **機能別割当（設計書6.28.9）を再現する。** 誤字脱字だけ別のAIへ
@@ -61,14 +61,14 @@ vi.mock("../../src/ai/registry", () => ({
   }),
 }));
 
-vi.mock("../../src/features/aiConnectivity", () => ({
+vi.mock("../../../src/features/aiConnectivity", () => ({
   confirmPaidUsage: vi.fn(async () => true),
   // 疎通の確認は通ったものとして先へ進める（設計書6.51）。
   // ここで測っているのは待ち時間の台帳への書き込みであって、接続ではない
   confirmProviderReachable: vi.fn(async () => true),
 }));
 
-vi.mock("../../src/views/progress", () => ({
+vi.mock("../../../src/views/progress", () => ({
   withCancellableProgress: vi.fn(
     async (
       _title: string,
@@ -87,14 +87,14 @@ vi.mock("../../src/views/progress", () => ({
   ),
 }));
 
-import { measureContext } from "../../src/features/measureContext";
-import { recommendTimeoutSeconds } from "../../src/core/modelTuning";
+import { measureContext } from "../../../src/features/measureContext";
+import { recommendTimeoutSeconds } from "../../../src/core/modelTuning";
 import {
   fsTiming,
   tuningStoreContents,
   tuningWrites,
   useMemoryTuningStore,
-} from "./support/tuningStore";
+} from "../support/tuningStore";
 
 const OLLAMA = { providerId: "ollama", model: "gemma4:26b", isPaid: false };
 const SAKURA = { providerId: "sakura", model: "gpt-oss-120b", isPaid: true };

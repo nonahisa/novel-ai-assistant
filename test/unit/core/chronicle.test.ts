@@ -8,14 +8,14 @@ import {
   UNASSIGNED_SECTION_LABEL,
   UNKNOWN_CHAPTER_LABEL,
   type ChronicleEpisode,
-} from "../../src/core/chronicle";
-import { emptyCharacter, type Character } from "../../src/models/character";
-import { emptyForeshadow, type Foreshadow } from "../../src/models/foreshadow";
+} from "../../../src/core/chronicle";
+import { emptyCharacter, type Character } from "../../../src/models/character";
+import { emptyForeshadow, type Foreshadow } from "../../../src/models/foreshadow";
 import {
   emptySynopsisSet,
   type ChapterSynopsisSet,
-} from "../../src/models/synopsis";
-import { emptyTimeline, type Timeline } from "../../src/models/timeline";
+} from "../../../src/models/synopsis";
+import { emptyTimeline, type Timeline } from "../../../src/models/timeline";
 
 /**
  * 年表の組み立て（設計書6.39.1・6.39.2）。

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { parseWorkChatAnswer } from "../../src/prompts/workChat";
+import { parseWorkChatAnswer } from "../../../src/prompts/workChat";
 
 /**
  * 切り詰められた相談の返答を救う（作者の実機報告、2026-09-23

@@ -6,8 +6,8 @@ import {
   planConversion,
   planFolderConversion,
   shouldSuggestMarkdown,
-} from "../../src/core/markdownConversion";
-import { countSiteNotation } from "../../src/core/ruby";
+} from "../../../src/core/markdownConversion";
+import { countSiteNotation } from "../../../src/core/ruby";
 
 /**
  * .txt を .md へ変える判断（設計書6.12）。

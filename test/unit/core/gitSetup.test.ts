@@ -24,12 +24,12 @@ import {
   pushSetUpstream,
   suggestRepositoryName,
   validateRepositoryUrl,
-} from "../../src/core/gitSetup";
+} from "../../../src/core/gitSetup";
 import {
   canRecordChanges,
   nextSetupStep,
-} from "../../src/features/gitOnboarding";
-import type { GitCommandResult, GitCommandRunner } from "../../src/core/git";
+} from "../../../src/features/gitOnboarding";
+import type { GitCommandResult, GitCommandRunner } from "../../../src/core/git";
 
 /** 呼ばれたコマンドを記録する差し替え口 */
 function runner(

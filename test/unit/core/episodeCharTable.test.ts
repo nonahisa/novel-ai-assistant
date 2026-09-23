@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { buildEpisodeCountTable } from "../../src/core/episodeCharTable";
-import type { EpisodeFile } from "../../src/models/types";
+import { buildEpisodeCountTable } from "../../../src/core/episodeCharTable";
+import type { EpisodeFile } from "../../../src/models/types";
 
 /** 走査結果の1件。文字数まわり以外は既定値でよい */
 function episode(

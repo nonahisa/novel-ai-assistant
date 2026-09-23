@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { window, workspace } from "./support/vscodeStub";
-import type { AIRegistry } from "../../src/ai/registry";
+import { window, workspace } from "../support/vscodeStub";
+import type { AIRegistry } from "../../../src/ai/registry";
 import type {
   GenerateParams,
   GenerateResult,
   ProviderId,
-} from "../../src/ai/types";
+} from "../../../src/ai/types";
 
 /**
  * AIチューニングが終わったことと、その結果を記録へ残す
@@ -32,7 +32,7 @@ const state = vi.hoisted(() => ({
 
 const log = vi.hoisted(() => ({ steps: [] as string[] }));
 
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logStep: vi.fn((message: string) => {
     log.steps.push(message);
   }),
@@ -44,7 +44,7 @@ vi.mock("../../src/core/logger", () => ({
   useLogFile: vi.fn(),
 }));
 
-vi.mock("../../src/ai/registry", () => ({
+vi.mock("../../../src/ai/registry", () => ({
   ensureConfigured: vi.fn(async () => ({
     provider: {
       id: state.providerId,
@@ -68,13 +68,13 @@ vi.mock("../../src/ai/registry", () => ({
   })),
 }));
 
-vi.mock("../../src/features/aiConnectivity", () => ({
+vi.mock("../../../src/features/aiConnectivity", () => ({
   confirmPaidUsage: vi.fn(async () => true),
   confirmProviderReachable: vi.fn(async () => true),
   ollamaEndpoint: vi.fn(() => "http://127.0.0.1:11434"),
 }));
 
-vi.mock("../../src/views/progress", () => ({
+vi.mock("../../../src/views/progress", () => ({
   withCancellableProgress: vi.fn(
     async (
       _title: string,
@@ -93,8 +93,8 @@ vi.mock("../../src/views/progress", () => ({
   ),
 }));
 
-const { measureContext } = await import("../../src/features/measureContext");
-const { useMemoryTuningStore } = await import("./support/tuningStore");
+const { measureContext } = await import("../../../src/features/measureContext");
+const { useMemoryTuningStore } = await import("../support/tuningStore");
 
 const registry = {
   resolveModelInfo: async () => ({ contextWindow: 262144 }),

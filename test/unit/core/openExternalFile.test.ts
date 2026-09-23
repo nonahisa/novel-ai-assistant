@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { shellOpenCommand } from "../../src/core/openExternalFile";
+import { shellOpenCommand } from "../../../src/core/openExternalFile";
 
 /**
  * 書き出したファイルをOSの既定のアプリで開く（設計書6.43）。

@@ -46,7 +46,7 @@ function skipsCachedInCount(source: string): boolean {
 }
 
 function read(file: string): string {
-  return readFileSync(resolve(__dirname, "../../src/features", file), "utf8");
+  return readFileSync(resolve(__dirname, "../../../src/features", file), "utf8");
 }
 
 describe("分母は、実際にAIへ送る件数にする", () => {
@@ -93,7 +93,7 @@ describe("分母は、実際にAIへ送る件数にする", () => {
 describe("飛ばした件数を運ぶ口", () => {
   test("CheckProgress が、飛ばした件数を受けられる", () => {
     const source = readFileSync(
-      resolve(__dirname, "../../src/views/progress.ts"),
+      resolve(__dirname, "../../../src/views/progress.ts"),
       "utf8"
     );
 

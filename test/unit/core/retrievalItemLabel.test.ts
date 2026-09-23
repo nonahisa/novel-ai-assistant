@@ -6,7 +6,7 @@ import {
   describeRetrievedItems,
   manuscriptItems,
   type RetrievalItem,
-} from "../../src/core/retrievalCorpus";
+} from "../../../src/core/retrievalCorpus";
 
 /**
  * 操作ログの札に、同じ話のどの場面かの連番を付ける（作者の裁定、2026-09-23。残課題 A6）。
@@ -95,7 +95,7 @@ describe("記録に出す札", () => {
 
   test("札を作る所は、この1か所を通す（写しを作らない）", () => {
     for (const file of ["features/workChatPanel.ts", "features/settingsPanel.ts"]) {
-      const source = readFileSync(resolve(__dirname, "../../src", file), "utf8");
+      const source = readFileSync(resolve(__dirname, "../../../src", file), "utf8");
       expect(source, file).not.toContain("${candidate.item.source}・${candidate.item.label}");
       expect(source, file).toContain("describeRetrievedItems(");
     }

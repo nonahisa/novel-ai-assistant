@@ -1,23 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { workspace } from "./support/vscodeStub";
-import { tuningStoreContents, useMemoryTuningStore } from "./support/tuningStore";
+import { workspace } from "../support/vscodeStub";
+import { tuningStoreContents, useMemoryTuningStore } from "../support/tuningStore";
 import {
   resolveOutputLimitForSend,
   resolveOutputTokensForPlanning,
   resolveOutputTokensForSend,
-} from "../../src/ai/outputLimit";
+} from "../../../src/ai/outputLimit";
 import {
   FEATURE_OUTPUT_MARGIN,
   MIN_FEATURE_OUTPUT_SAMPLES,
   featureOutputCeiling,
   featureOutputKey,
   recordFeatureOutputTokens,
-} from "../../src/core/featureOutputTokens";
+} from "../../../src/core/featureOutputTokens";
 import {
   bundledFeatureOutput,
   bundledFeatureOutputKeys,
-} from "../../src/core/bundledTuning";
-import { OUTPUT_RESERVE_TOKENS } from "../../src/ai/contextGuard";
+} from "../../../src/core/bundledTuning";
+import { OUTPUT_RESERVE_TOKENS } from "../../../src/ai/contextGuard";
 
 /**
  * 出力に見込むトークン数を、**実測から決める**（作者の裁定、2026-09-19）。
@@ -233,7 +233,7 @@ describe("痩せすぎない（見込みを不必要に大きく取らない）"
   it("モデルが書ける量の実測が小さければ、そちらが勝つ", async () => {
     installSettings({ maxOutputTokens: 16384 });
     await recordSamples("character_extract", 12023, MIN_FEATURE_OUTPUT_SAMPLES);
-    const { saveModelTuning } = await import("../../src/core/modelTuning");
+    const { saveModelTuning } = await import("../../../src/core/modelTuning");
     await saveModelTuning(PROVIDER, MODEL, { measuredOutputTokens: 6500 });
 
     expect(
@@ -256,7 +256,7 @@ describe("モデルの表と混ざらない", () => {
     installSettings({ maxOutputTokens: 16384 });
     await recordSamples("typo_check", 8753, MIN_FEATURE_OUTPUT_SAMPLES);
 
-    const { allModelTuning } = await import("../../src/core/modelTuning");
+    const { allModelTuning } = await import("../../../src/core/modelTuning");
     const keys = [...allModelTuning().keys()];
 
     // 置き場は同じファイルだが、鍵の意味も欄の意味も別物である。

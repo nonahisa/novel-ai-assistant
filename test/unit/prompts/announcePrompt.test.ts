@@ -4,8 +4,8 @@ import {
   ANNOUNCE_VERSION,
   buildAnnouncePrompt,
   type AnnouncePromptInput,
-} from "../../src/prompts/announce";
-import { parseAnnounceResponse } from "../../src/features/generateAnnouncement";
+} from "../../../src/prompts/announce";
+import { parseAnnounceResponse } from "../../../src/features/generateAnnouncement";
 
 function input(over: Partial<AnnouncePromptInput> = {}): AnnouncePromptInput {
   return {

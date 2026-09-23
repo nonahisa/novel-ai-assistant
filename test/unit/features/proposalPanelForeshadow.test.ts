@@ -76,8 +76,8 @@ vi.mock("vscode", () => {
 import {
   ProposalPanel,
   type ForeshadowFromContradiction,
-} from "../../src/features/proposalPanel";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/features/proposalPanel";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work: WorkEntry = {
   id: "w1",

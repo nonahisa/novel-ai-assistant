@@ -4,8 +4,8 @@ import * as path from "node:path";
 import {
   countEpisodeChars,
   episodeBodyForCount,
-} from "../../src/core/episodeCharCount";
-import { countChars } from "../../src/core/charCount";
+} from "../../../src/core/episodeCharCount";
+import { countChars } from "../../../src/core/charCount";
 
 /**
  * 話の字数の数え方（作者の裁定 2026-09-06、設計書6.25）。
@@ -104,7 +104,7 @@ describe("ルビの扱い", () => {
  */
 describe("数え方の置き場所", () => {
   const read = (...parts: string[]): string =>
-    readFileSync(path.join(__dirname, "..", "..", ...parts), "utf8");
+    readFileSync(path.join(__dirname, "..", "..", "..", ...parts), "utf8");
 
   test("作品一覧（scanner）は countEpisodeChars を通す", () => {
     const source = read("src", "core", "scanner.ts");

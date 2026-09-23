@@ -8,8 +8,8 @@ import {
   Uri,
   window,
   workspace,
-} from "./support/vscodeStub";
-import type { WorkEntry } from "../../src/models/types";
+} from "../support/vscodeStub";
+import type { WorkEntry } from "../../../src/models/types";
 import {
   AI_INSTRUCTION_TARGETS,
   AI_INSTRUCTION_TEMPLATE_PATH,
@@ -20,17 +20,17 @@ import {
   findAiInstructionTarget,
   mergeCodexToml,
   mergeMcpServersJson,
-} from "../../src/core/aiInstructions";
-import { RECOVERY_DIRECTORY_NAME } from "../../src/core/atomicWrite";
+} from "../../../src/core/aiInstructions";
+import { RECOVERY_DIRECTORY_NAME } from "../../../src/core/atomicWrite";
 import {
   AI_INSTRUCTION_USAGE_FILE,
   DIRECT_READ_CAVEAT,
   VIA_TOOLS_ONLY_NOTE,
   describeAiInstructionUsage,
-} from "../../src/core/aiInstructionUsage";
-import { AiInstructionUsageStore } from "../../src/core/aiInstructionUsageStore";
-import { IGNORED_PATHS } from "../../src/core/workRegistry";
-import { SERVER_NAME } from "../../src/mcp/version";
+} from "../../../src/core/aiInstructionUsage";
+import { AiInstructionUsageStore } from "../../../src/core/aiInstructionUsageStore";
+import { IGNORED_PATHS } from "../../../src/core/workRegistry";
+import { SERVER_NAME } from "../../../src/mcp/version";
 
 /**
  * AI用の指示書を作品へ置く（設計書6.87.15 柱5）。
@@ -50,7 +50,7 @@ import { SERVER_NAME } from "../../src/mcp/version";
  */
 
 const { writeAiInstructions, REGISTRATION_IS_LOCAL_NOTE } = await import(
-  "../../src/features/writeAiInstructions"
+  "../../../src/features/writeAiInstructions"
 );
 
 const REGISTRATION = {

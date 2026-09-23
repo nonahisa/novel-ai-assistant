@@ -10,15 +10,15 @@ vi.mock("vscode", () => ({
 import {
   buildSynopsisMarkdown,
   parseSynopsisMarkdown,
-} from "../../src/core/synopsisDoc";
+} from "../../../src/core/synopsisDoc";
 import {
   parseBlurbResponse,
   parseCatchphraseResponse,
-} from "../../src/features/generateBlurb";
+} from "../../../src/features/generateBlurb";
 import {
   buildBlurbPrompt,
   buildCatchphrasePrompt,
-} from "../../src/prompts/blurb";
+} from "../../../src/prompts/blurb";
 
 describe("synopsis.md の組み立てと読み取り", () => {
   test("キャッチコピーは見出しの直後に置く", () => {

@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   parseNarouBackup,
   parseNarouBackupHeader,
-} from "../../src/core/narouBackup";
-import { parseCollectedFile } from "../../src/core/collectedFile";
-import { parseWorkInfo } from "../../src/core/workInfoParse";
+} from "../../../src/core/narouBackup";
+import { parseCollectedFile } from "../../../src/core/collectedFile";
+import { parseWorkInfo } from "../../../src/core/workInfoParse";
 
 /**
  * なろうのバックアップ（投稿済み作品テキストダウンロード）の読み取り（設計書6.99）。

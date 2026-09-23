@@ -48,7 +48,7 @@ interface PackageManifest {
 const declared = new Set(
   (
     JSON.parse(
-      readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+      readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
     ) as PackageManifest
   ).contributes.commands.map((entry) => entry.command)
 );

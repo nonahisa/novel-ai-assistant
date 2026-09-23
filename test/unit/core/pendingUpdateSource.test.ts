@@ -1,12 +1,12 @@
 import * as nodePath from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { FileSystemError, FileType, Uri, workspace } from "./support/vscodeStub";
+import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub";
 import {
   PendingUpdateStore,
   pendingSourceLabel,
-} from "../../src/core/pendingUpdates";
-import { emptyCharacter } from "../../src/models/character";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/core/pendingUpdates";
+import { emptyCharacter } from "../../../src/models/character";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 承認待ちの更新案の「出どころ」（設計書6.4.9）。

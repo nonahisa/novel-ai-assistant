@@ -7,7 +7,7 @@ import {
   planEolUnify,
   planFileEolWrite,
   type EolAuditEntry,
-} from "../../src/core/eolAudit";
+} from "../../../src/core/eolAudit";
 
 /**
  * 改行コードの監査（設計書5.4.2）。

@@ -3,7 +3,7 @@ import {
   deriveSiteProfile,
   postingPageUrl,
   readerStatsPageUrl,
-} from "../../src/core/postingSiteUrls";
+} from "../../../src/core/postingSiteUrls";
 
 /**
  * 投稿ページのURLから作品IDと作品ページを導く（設計書6.68.5）。

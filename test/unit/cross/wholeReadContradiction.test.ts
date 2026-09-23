@@ -6,12 +6,12 @@ import {
   locateChunkLine,
   mergeAdjacentChunks,
   splitIntoChunks,
-} from "../../src/core/chunker";
+} from "../../../src/core/chunker";
 import {
   describeWholeReadConsent,
   WHOLE_READ_CONSENT_LABEL,
-} from "../../src/core/wholeReadConsent";
-import { CONTRADICTION_READ_MODE_CHOICES } from "../../src/features/checkContradictions";
+} from "../../../src/core/wholeReadConsent";
+import { CONTRADICTION_READ_MODE_CHOICES } from "../../../src/features/checkContradictions";
 
 /**
  * **まるごと読む矛盾検知**（作者の裁定 A3⑤、2026-09-23。設計書6.10.7）。
@@ -26,7 +26,7 @@ import { CONTRADICTION_READ_MODE_CHOICES } from "../../src/features/checkContrad
  */
 
 const SOURCE = readFileSync(
-  join(__dirname, "..", "..", "src", "features", "checkContradictions.ts"),
+  join(__dirname, "..", "..", "..", "src", "features", "checkContradictions.ts"),
   "utf8"
 );
 

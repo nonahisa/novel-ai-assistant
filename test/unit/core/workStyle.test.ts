@@ -3,8 +3,8 @@ import {
   detectFirstPerson,
   collectWorkStyle,
   buildStyleNote,
-} from "../../src/core/workStyle";
-import { looksArchaicText } from "../../src/core/typoCheckValidation";
+} from "../../../src/core/workStyle";
+import { looksArchaicText } from "../../../src/core/typoCheckValidation";
 
 /**
  * 作品の作法（設計書6.8.14）。

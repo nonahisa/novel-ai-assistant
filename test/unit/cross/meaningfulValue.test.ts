@@ -1,11 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { isMeaningfulValue } from "../../src/core/characterExtractionValidation";
-import { mergeExtractedCharacters } from "../../src/core/characterMerge";
-import { emptyCharacter } from "../../src/models/character";
+import { isMeaningfulValue } from "../../../src/core/characterExtractionValidation";
+import { mergeExtractedCharacters } from "../../../src/core/characterMerge";
+import { emptyCharacter } from "../../../src/models/character";
 import {
   BASE_SYSTEM_PROMPT,
   buildCharacterExtractPrompt,
-} from "../../src/prompts/characterExtract";
+} from "../../../src/prompts/characterExtract";
 
 /**
  * AIは null にする代わりに「（本文から読み取れる性格に関する記述なし）」と

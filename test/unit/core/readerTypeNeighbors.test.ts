@@ -1,10 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { READER_TYPES, type ReaderTypeId } from "../../src/core/readerTarget";
+import { READER_TYPES, type ReaderTypeId } from "../../../src/core/readerTarget";
 import {
   neighborToward,
   readerTypeNeighbors,
   READER_TYPE_IDS,
-} from "../../src/core/readerTypeNeighbors";
+} from "../../../src/core/readerTypeNeighbors";
 
 /**
  * 読者タイプの隣り合い（設計書6.101、実装の順「4」）。

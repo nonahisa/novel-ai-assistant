@@ -1,15 +1,15 @@
 import { describe, expect, test } from "vitest";
-import { detectChatTopic } from "../../src/core/chatTopic";
+import { detectChatTopic } from "../../../src/core/chatTopic";
 import {
   buildFeatureGuideForQuestion,
   buildFeatureIndex,
   buildGuideBundles,
   NO_INDEX_NOTICE,
-} from "../../src/features/featureGuide";
+} from "../../../src/features/featureGuide";
 import {
   buildWorkChatSystemPrompt,
   WORK_CHAT_SYSTEM_PROMPT,
-} from "../../src/prompts/workChat";
+} from "../../../src/prompts/workChat";
 
 /**
  * 創作の相談か、操作の相談か（設計書6.27.9）。

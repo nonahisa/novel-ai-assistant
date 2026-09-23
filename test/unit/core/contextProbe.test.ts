@@ -14,7 +14,7 @@ import {
   startProbeState,
   worstCaseProbeChars,
   type ProbeState,
-} from "../../src/core/contextProbe";
+} from "../../../src/core/contextProbe";
 
 /**
  * AIが実際に読める長さを測る仕組みの検査（設計書6.27.11）。

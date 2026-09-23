@@ -52,9 +52,9 @@ vi.mock("vscode", async (importOriginal) => {
 import {
   insertMemoLineAbove,
   isInsideWork,
-} from "../../src/features/manuscriptEditor";
-import { READ_ALOUD_MEMO_TEXT } from "../../src/core/readAloud";
-import { isMemoLine, parseMemos } from "../../src/core/sceneMemo";
+} from "../../../src/features/manuscriptEditor";
+import { READ_ALOUD_MEMO_TEXT } from "../../../src/core/readAloud";
+import { isMemoLine, parseMemos } from "../../../src/core/sceneMemo";
 
 /** 行数だけを持つ、偽の文書（挿す位置の計算にしか使わない） */
 function fakeDocument(lineCount: number): Parameters<

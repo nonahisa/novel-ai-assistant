@@ -73,7 +73,7 @@ let text = [
   "　窓の外で鐘が鳴る。",
 ].join("\n");
 
-vi.mock("../../src/core/textFile", () => ({
+vi.mock("../../../src/core/textFile", () => ({
   readTextFile: vi.fn(async () => ({
     text,
     hash: "h",
@@ -90,7 +90,7 @@ vi.mock("../../src/core/textFile", () => ({
   }),
 }));
 
-vi.mock("../../src/core/fileLockStore", () => ({
+vi.mock("../../../src/core/fileLockStore", () => ({
   FileLockStore: class {
     async lockFor(): Promise<undefined> {
       return undefined;
@@ -98,14 +98,14 @@ vi.mock("../../src/core/fileLockStore", () => ({
   },
 }));
 
-vi.mock("../../src/core/actorContext", () => ({
+vi.mock("../../../src/core/actorContext", () => ({
   isEditorMode: () => false,
   manualActor: () => "author",
   recordEdit: vi.fn(async () => undefined),
 }));
 
 /** 見送りの記録（`typo_dismissed.json`）はここの関心ではない */
-vi.mock("../../src/core/typoIssueHistory", () => ({
+vi.mock("../../../src/core/typoIssueHistory", () => ({
   TypoDismissedHistory: class {
     add = () => Promise.resolve(undefined);
     load = () => Promise.resolve(new Set<string>());
@@ -119,10 +119,10 @@ import {
   ProposalPanel,
   type ProposalViewItem,
   type RecordUpdateViewItem,
-} from "../../src/features/proposalPanel";
-import type { AcceptedContradiction } from "../../src/core/contradictionValidation";
-import type { WorkEntry } from "../../src/models/types";
-import type { FindingLine } from "../../src/models/finding";
+} from "../../../src/features/proposalPanel";
+import type { AcceptedContradiction } from "../../../src/core/contradictionValidation";
+import type { WorkEntry } from "../../../src/models/types";
+import type { FindingLine } from "../../../src/models/finding";
 
 const work: WorkEntry = {
   id: "w1",

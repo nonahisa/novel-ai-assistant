@@ -67,8 +67,8 @@ import {
   MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
   MANUSCRIPT_EDITOR_VIEW_TYPE,
   activeManuscriptTabUri,
-} from "../../src/features/manuscriptEditor";
-import { manuscriptNotOpenMessage } from "../../src/features/manuscriptTab";
+} from "../../../src/features/manuscriptEditor";
+import { manuscriptNotOpenMessage } from "../../../src/features/manuscriptTab";
 
 const manuscript = { fsPath: "C:/小説/いじめられっ子/本文/002.md" };
 const plainText = { fsPath: "C:/小説/いじめられっ子/本文/003.txt" };
@@ -153,7 +153,7 @@ describe("原稿エディタで開いている本文", () => {
  */
 describe("縦書きで開く", () => {
   const source = readFileSync(
-    resolve(__dirname, "../../src/extension.ts"),
+    resolve(__dirname, "../../../src/extension.ts"),
     "utf8"
   );
 

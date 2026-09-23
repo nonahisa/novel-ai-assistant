@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { window } from "./support/vscodeStub";
-import type { AIRegistry } from "../../src/ai/registry";
-import type { WorkEntry } from "../../src/models/types";
+import { window } from "../support/vscodeStub";
+import type { AIRegistry } from "../../../src/ai/registry";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * プロット逸脱の検知（設計書6.33）を、入口から1回通す。
@@ -46,7 +46,7 @@ const state = vi.hoisted(() => ({
   sources: {} as Record<string, string>,
 }));
 
-vi.mock("../../src/ai/registry", () => ({
+vi.mock("../../../src/ai/registry", () => ({
   ensureConfigured: vi.fn(async (_registry: unknown, feature: string) => {
     state.features.push(feature);
     return {
@@ -68,11 +68,11 @@ vi.mock("../../src/ai/registry", () => ({
   }),
 }));
 
-vi.mock("../../src/core/scanner", () => ({
+vi.mock("../../../src/core/scanner", () => ({
   scanWork: vi.fn(async () => ({ episodes: state.episodes })),
 }));
 
-vi.mock("../../src/core/textFile", () => ({
+vi.mock("../../../src/core/textFile", () => ({
   readTextFile: vi.fn(async (filePath: string) => {
     const text = state.sources[filePath];
     if (text === undefined) throw new Error("読めません（文字コード）");
@@ -81,19 +81,19 @@ vi.mock("../../src/core/textFile", () => ({
   hashText: (text: string) => `hash-${text.length}`,
 }));
 
-vi.mock("../../src/core/plotFile", () => ({
+vi.mock("../../../src/core/plotFile", () => ({
   readPlotText: vi.fn(async () => state.plot),
 }));
 
-vi.mock("../../src/core/workFormatStore", () => ({
+vi.mock("../../../src/core/workFormatStore", () => ({
   readWorkFormat: vi.fn(async () => ({ kind: "novel" })),
 }));
 
-vi.mock("../../src/features/formatFitPrompt", () => ({
+vi.mock("../../../src/features/formatFitPrompt", () => ({
   confirmFormatFit: vi.fn(async () => true),
 }));
 
-vi.mock("../../src/core/synopsisStore", () => ({
+vi.mock("../../../src/core/synopsisStore", () => ({
   SynopsisStore: class {
     async load() {
       return { episodes: [] };
@@ -101,7 +101,7 @@ vi.mock("../../src/core/synopsisStore", () => ({
   },
 }));
 
-vi.mock("../../src/core/chunkCache", () => ({
+vi.mock("../../../src/core/chunkCache", () => ({
   ChunkCache: class {
     async load() {}
     get() {
@@ -113,7 +113,7 @@ vi.mock("../../src/core/chunkCache", () => ({
 }));
 
 // 順番待ちの札は、ここでは本体をそのまま走らせるだけでよい
-vi.mock("../../src/features/aiTurn", () => ({
+vi.mock("../../../src/features/aiTurn", () => ({
   withAiTurnProgress: async (
     _title: string,
     _options: unknown,
@@ -131,7 +131,7 @@ vi.mock("../../src/features/aiTurn", () => ({
     ),
 }));
 
-const { checkDeviations } = await import("../../src/features/checkDeviations");
+const { checkDeviations } = await import("../../../src/features/checkDeviations");
 
 const work: WorkEntry = {
   id: "w1",

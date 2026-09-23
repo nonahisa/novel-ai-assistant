@@ -3,13 +3,13 @@ import {
   SelfWriteTracker,
   isWatchedSettingsFile,
   kindOfSettingsFile,
-} from "../../src/core/externalChanges";
+} from "../../../src/core/externalChanges";
 import {
   createAbilityStore,
   createLocationStore,
   createOrganizationStore,
   createWorldStore,
-} from "../../src/core/abilityStore";
+} from "../../../src/core/abilityStore";
 
 /**
  * 外部のAI・ツールが設定資料を書き換えたことを見分ける。

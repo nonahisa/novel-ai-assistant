@@ -1,18 +1,18 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { window, workspace } from "./support/vscodeStub";
-import type { AIRegistry } from "../../src/ai/registry";
-import { AIError } from "../../src/ai/types";
+import { window, workspace } from "../support/vscodeStub";
+import type { AIRegistry } from "../../../src/ai/registry";
+import { AIError } from "../../../src/ai/types";
 import type {
   GenerateParams,
   GenerateResult,
   ProviderId,
-} from "../../src/ai/types";
-import { isCancelItem } from "../../src/views/dialogs";
+} from "../../../src/ai/types";
+import { isCancelItem } from "../../../src/views/dialogs";
 import {
   measuresInput,
   measuresOutput,
   TUNING_SCOPE_CHOICES,
-} from "../../src/core/tuningScope";
+} from "../../../src/core/tuningScope";
 
 /**
  * AIチューニングを「読める長さ」と「書ける長さ」に分ける
@@ -57,7 +57,7 @@ const log = vi.hoisted(() => ({
   steps: [] as string[],
 }));
 
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logStep: vi.fn((message: string) => {
     log.steps.push(message);
   }),
@@ -69,7 +69,7 @@ vi.mock("../../src/core/logger", () => ({
   useLogFile: vi.fn(),
 }));
 
-vi.mock("../../src/ai/registry", () => ({
+vi.mock("../../../src/ai/registry", () => ({
   ensureConfigured: vi.fn(async () => ({
     provider: {
       id: state.providerId,
@@ -109,14 +109,14 @@ vi.mock("../../src/ai/registry", () => ({
   })),
 }));
 
-vi.mock("../../src/features/aiConnectivity", () => ({
+vi.mock("../../../src/features/aiConnectivity", () => ({
   confirmPaidUsage: vi.fn(async () => true),
   confirmProviderReachable: vi.fn(async () => true),
   // 手元AIの判定（`ai/otherLocalAi.ts`）が同じ束に入るので、口だけ塞ぐ
   ollamaEndpoint: vi.fn(() => "http://127.0.0.1:11434"),
 }));
 
-vi.mock("../../src/views/progress", () => ({
+vi.mock("../../../src/views/progress", () => ({
   withCancellableProgress: vi.fn(
     async (
       _title: string,
@@ -138,11 +138,11 @@ vi.mock("../../src/views/progress", () => ({
 import {
   askTuningScope,
   measureContext,
-} from "../../src/features/measureContext";
+} from "../../../src/features/measureContext";
 import {
   tuningStoreContents,
   useMemoryTuningStore,
-} from "./support/tuningStore";
+} from "../support/tuningStore";
 
 /** `novelai.*` の設定を持つ入れ物 */
 function installSettings(values: Record<string, unknown>): void {

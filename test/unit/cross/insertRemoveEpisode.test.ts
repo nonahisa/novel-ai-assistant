@@ -1,10 +1,10 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { FileSystemError, FileType, Uri, window, workspace } from "./support/vscodeStub";
-import type { EpisodeFile, WorkEntry } from "../../src/models/types";
-import { emptyCounts } from "../../src/core/charCount";
-import { insertEpisodeBefore } from "../../src/features/insertEpisode";
-import { removeEpisodeAndRenumber } from "../../src/features/removeEpisode";
+import { FileSystemError, FileType, Uri, window, workspace } from "../support/vscodeStub";
+import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
+import { emptyCounts } from "../../../src/core/charCount";
+import { insertEpisodeBefore } from "../../../src/features/insertEpisode";
+import { removeEpisodeAndRenumber } from "../../../src/features/removeEpisode";
 
 /**
  * 話の挿入と削除（設計書6.67.4）。

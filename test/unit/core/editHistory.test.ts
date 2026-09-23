@@ -4,17 +4,17 @@ import {
   parseHistory,
   sortNewestFirst,
   type EditHistoryEntry,
-} from "../../src/core/editHistory";
+} from "../../../src/core/editHistory";
 import {
   ACTOR_MARKS,
   ACTOR_STYLES,
   actorLabel,
   parseActorKind,
-} from "../../src/models/actor";
+} from "../../../src/models/actor";
 import {
   editorAllowedCommands,
   isCommandAllowed,
-} from "../../src/core/editorMode";
+} from "../../../src/core/editorMode";
 
 /**
  * 編集履歴（設計書5.6）。

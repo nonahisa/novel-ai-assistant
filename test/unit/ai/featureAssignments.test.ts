@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import type * as vscode from "vscode";
-import { AIRegistry, type AssignableFeature } from "../../src/ai/registry";
-import type { AIProvider, ModelInfo, ProviderId } from "../../src/ai/types";
+import { AIRegistry, type AssignableFeature } from "../../../src/ai/registry";
+import type { AIProvider, ModelInfo, ProviderId } from "../../../src/ai/types";
 
 /**
  * 機能ごとのAI割当（設計書6.28.7の1、7.1）。

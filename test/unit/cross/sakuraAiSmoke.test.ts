@@ -4,7 +4,7 @@ import {
   SAKURA_AI_SMOKE_MODEL,
   SAKURA_AI_SMOKE_MODEL_ENV,
   runSakuraAiSmoke,
-} from "../../scripts/sakuraAiSmoke.mjs";
+} from "../../../scripts/sakuraAiSmoke.mjs";
 
 const TOKEN = "uuid:secret";
 const RESPONSE_CONTENT = "接続確認OK";

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { saveLoadedContextWindow } from "../../src/ai/lmstudioModelLoad";
-import { workspace } from "./support/vscodeStub";
+import { saveLoadedContextWindow } from "../../../src/ai/lmstudioModelLoad";
+import { workspace } from "../support/vscodeStub";
 
 /**
  * `saveLoadedContextWindow`（実測の文脈長を設定へ書き戻す口）を呼ぶテストが

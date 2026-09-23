@@ -2,9 +2,9 @@ import { describe, expect, test } from "vitest";
 import {
   mergeExtractedCharacters,
   sharedNameParts,
-} from "../../src/core/characterMerge";
-import { emptyCharacter } from "../../src/models/character";
-import type { Character } from "../../src/models/character";
+} from "../../../src/core/characterMerge";
+import { emptyCharacter } from "../../../src/models/character";
+import type { Character } from "../../../src/models/character";
 
 /**
  * 実データで見つかった不具合の再現（2026-08-15）。

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { buildProposalPanelHtml } from "../../src/views/proposalPanelHtml";
+import { buildProposalPanelHtml } from "../../../src/views/proposalPanelHtml";
 
 /**
  * 提案パネルのボタン列（作者の指摘、2026-09-06）。

@@ -5,7 +5,7 @@
  * `dist/mcp-server.mjs` へ置くので、走らせるときに読める場所に
  * `package.json` があるとは限らない（配布物にも入れない）。
  *
- * **書き写しだが、ずれたら止まる。** `test/unit/mcpVersion.test.ts` が
+ * **書き写しだが、ずれたら止まる。** `test/unit/mcp/mcpVersion.test.ts` が
  * `package.json` と突き合わせる——CHANGELOG や README の版を
  * `showVersion.test.ts` が見張っているのと同じ形である。
  * こうしてあるのは、**テストを `npm run build` に依存させない**ため

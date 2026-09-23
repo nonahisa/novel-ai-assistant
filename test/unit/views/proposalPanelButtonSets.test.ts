@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { buildProposalPanelHtml } from "../../src/views/proposalPanelHtml";
+import { buildProposalPanelHtml } from "../../../src/views/proposalPanelHtml";
 
 /**
  * 分類ごとに、出るボタンの組（実機確認リスト A-1・A-16・F-49 の代わり）。

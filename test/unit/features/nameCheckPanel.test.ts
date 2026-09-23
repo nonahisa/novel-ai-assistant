@@ -1,13 +1,13 @@
 import { describe, expect, test } from "vitest";
-import { buildNameEntries } from "../../src/features/nameCheck";
+import { buildNameEntries } from "../../../src/features/nameCheck";
 import {
   describeRenameRecordsResult,
   pendingRenameKey,
   type PendingRename,
   type RenameRecordsResult,
-} from "../../src/features/nameRename";
-import { buildNameCheckPanelHtml } from "../../src/views/nameCheckPanelHtml";
-import { findNameCollisions } from "../../src/core/nameCollision";
+} from "../../../src/features/nameRename";
+import { buildNameCheckPanelHtml } from "../../../src/views/nameCheckPanelHtml";
+import { findNameCollisions } from "../../../src/core/nameCollision";
 
 const HTML = buildNameCheckPanelHtml("test-nonce", "vscode-webview:");
 

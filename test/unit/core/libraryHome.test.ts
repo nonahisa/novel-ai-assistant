@@ -5,12 +5,12 @@ import {
   describeNewWorkHome,
   findLibraries,
   shouldOfferLibraryMerge,
-} from "../../src/core/libraryHome";
-import { normalize } from "../../src/core/pathText";
+} from "../../../src/core/libraryHome";
+import { normalize } from "../../../src/core/pathText";
 import {
   offerLibraryMerge,
   MERGE_ACTION_LABEL,
-} from "../../src/features/offerLibraryMerge";
+} from "../../../src/features/offerLibraryMerge";
 
 /**
  * 書庫を既定にする（設計書6.97）。

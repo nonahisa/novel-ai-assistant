@@ -25,7 +25,7 @@
  *
  * **当たらない言い方は置かない。** 押しても案内が出ない札は、
  * 「押しても何も起きない」と同じに見える。
- * `test/unit/chatExamples.test.ts` が全部の例を `selectProcedure` へ通す。
+ * `test/unit/core/chatExamples.test.ts` が全部の例を `selectProcedure` へ通す。
  *
  * ## `vscode` を持ち込まない
  *

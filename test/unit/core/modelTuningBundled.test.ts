@@ -3,11 +3,11 @@ import {
   allModelTuning,
   modelTuning,
   saveModelTuning,
-} from "../../src/core/modelTuning";
+} from "../../../src/core/modelTuning";
 import {
   tuningStoreContents,
   useMemoryTuningStore,
-} from "./support/tuningStore";
+} from "../support/tuningStore";
 
 /**
  * 同梱の初期値を、台帳へどう混ぜるか（作者の裁定、2026-09-13）。

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
-import { countForDisplay } from "../../src/features/manuscriptEditor";
-import { countChars } from "../../src/core/charCount";
-import { countEpisodeChars } from "../../src/core/episodeCharCount";
+import { countForDisplay } from "../../../src/features/manuscriptEditor";
+import { countChars } from "../../../src/core/charCount";
+import { countEpisodeChars } from "../../../src/core/episodeCharCount";
 
 /**
  * 原稿エディタの「このファイル ◯字」は、**作品一覧とまったく同じ数え方**で
@@ -118,7 +118,7 @@ describe("原稿エディタの字数", () => {
 describe("投稿サイト用のコピー", () => {
   test("原稿エディタも postingCopySource を通す（全文を渡さない）", () => {
     const source = readFileSync(
-      path.join(__dirname, "..", "..", "src", "features", "manuscriptEditor.ts"),
+      path.join(__dirname, "..", "..", "..", "src", "features", "manuscriptEditor.ts"),
       "utf8"
     );
     /*

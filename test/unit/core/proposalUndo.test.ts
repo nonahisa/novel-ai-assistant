@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   locateAppliedSuggestion,
   type AppliedSuggestion,
-} from "../../src/core/proposalUndo";
+} from "../../../src/core/proposalUndo";
 
 /**
  * 適用した直しを「戻す」ときの位置決め（設計書6.8.12）。

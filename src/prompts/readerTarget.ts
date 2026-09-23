@@ -191,7 +191,7 @@ export const READER_TARGET_SCHEMA = {
  *    どちらも書いてあるからで、実際そう読める
  *
  * そのため、**各タイプの文章は独立していて、他のタイプの名前も記述も
- * 含まない**（`test/unit/readerTarget.test.ts` が見張る）。
+ * 含まない**（`test/unit/cross/readerTarget.test.ts` が見張る）。
  */
 export const READER_TYPE_PROMPTS: Record<ReaderTypeId, string> = {
   lore_flow: `【この作品の読者】回遊層
@@ -270,7 +270,7 @@ export function readerTypeSummary(id: ReaderTypeId): string {
  * 読者像を決める操作の名前。
  *
  * **`package.json` の `novelai.runReaderTargetDiagnosis` の `title` と
- * 同じ文字列でなければならない**（`test/unit/readerTargetGlossary.test.ts`
+ * 同じ文字列でなければならない**（`test/unit/cross/readerTargetGlossary.test.ts`
  * が突き合わせている）。違う名前で案内すると、作者は操作を探せない。
  */
 export const READER_TARGET_DIAGNOSIS_TITLE = "ターゲット読者診断";

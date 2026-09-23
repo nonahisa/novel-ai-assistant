@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
-import { buildWorkChatPanelHtml } from "../../src/views/workChatPanelHtml";
+import { buildWorkChatPanelHtml } from "../../../src/views/workChatPanelHtml";
 
 /**
  * 大きい相談パネル（作者の要望、2026-08-28）。
@@ -414,7 +414,7 @@ describe("暗黙のグローバルを作らない", () => {
  */
 describe("本文の右クリックから開く相談", () => {
   const manifest = JSON.parse(
-    readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+    readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
   ) as {
     contributes: {
       menus: Record<string, Array<{ command: string; when?: string }>>;
@@ -452,7 +452,7 @@ describe("本文の右クリックから開く相談", () => {
 
   test("横のパネルは、視点を移すだけで大きい画面を作らない（実機確認リスト F-23 の代わり）", () => {
     const source = readFileSync(
-      new URL("../../src/extension.ts", import.meta.url),
+      new URL("../../../src/extension.ts", import.meta.url),
       "utf8"
     );
     const at = source.indexOf('registerCommand("novelai.openChat"');

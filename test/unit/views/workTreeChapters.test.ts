@@ -12,12 +12,12 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
  */
 
 const scanWork = vi.fn();
-vi.mock("../../src/core/scanner", () => ({
+vi.mock("../../../src/core/scanner", () => ({
   scanWork: (...args: unknown[]) => scanWork(...args),
 }));
 
 const loadChapters = vi.fn();
-vi.mock("../../src/core/chapterStore", () => ({
+vi.mock("../../../src/core/chapterStore", () => ({
   ChapterStore: class {
     load() {
       return loadChapters();
@@ -27,14 +27,14 @@ vi.mock("../../src/core/chapterStore", () => ({
 }));
 
 // あらすじと形式は、この試験の対象ではない（読めなくても一覧は出る）
-vi.mock("../../src/core/synopsisStore", () => ({
+vi.mock("../../../src/core/synopsisStore", () => ({
   SynopsisStore: class {
     async load() {
       return { episodes: [] };
     }
   },
 }));
-vi.mock("../../src/core/workFormatStore", () => ({
+vi.mock("../../../src/core/workFormatStore", () => ({
   readWorkFormat: async () => undefined,
 }));
 
@@ -42,9 +42,9 @@ import {
   ChapterNode,
   EpisodeNode,
   WorkTreeProvider,
-} from "../../src/views/workTree";
-import type { EpisodeFile, WorkEntry } from "../../src/models/types";
-import type { WorkRegistry } from "../../src/core/workRegistry";
+} from "../../../src/views/workTree";
+import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
 
 const work: WorkEntry = {
   id: "work_1",

@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 // 差し替え口はスタブから直に取る（`importWorkFromZip.test.ts` と同じ理由：
 // `"vscode"` から取ると `workspace.fs` が読み取り専用の型になる）
-import { FileSystemError, Uri, window, workspace } from "./support/vscodeStub";
+import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
 import type * as vscode from "vscode";
 import {
   BACKUP_PICK_FOLDER_KEY,
   initBackupPickFolder,
   showBackupOpenDialog,
-} from "../../src/features/backupPickFolder";
+} from "../../../src/features/backupPickFolder";
 
 /**
  * バックアップを選ぶ画面を、前に選んだフォルダーから開く（2026-09-23）。

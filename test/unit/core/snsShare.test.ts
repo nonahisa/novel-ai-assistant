@@ -3,7 +3,7 @@ import {
   X_SHARE_LABEL,
   workListUrl,
   xIntentUrl,
-} from "../../src/core/snsShare";
+} from "../../../src/core/snsShare";
 
 /**
  * SNSへの告知貼り付け（設計書6.79.8）の純粋関数。

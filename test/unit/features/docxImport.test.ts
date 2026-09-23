@@ -1,10 +1,10 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
 import { zipSync } from "fflate";
-import { convertDocxToMarkdown } from "../../src/features/docxImport";
-import type { WorkEntry } from "../../src/models/types";
-import { FileSystemError, FileType, Uri, window, workspace } from "./support/vscodeStub";
-import { cancelRunningTask } from "../../src/views/progress";
+import { convertDocxToMarkdown } from "../../../src/features/docxImport";
+import type { WorkEntry } from "../../../src/models/types";
+import { FileSystemError, FileType, Uri, window, workspace } from "../support/vscodeStub";
+import { cancelRunningTask } from "../../../src/views/progress";
 
 /**
  * Word（.docx）を .md へ一括変換する（設計書6.85）。

@@ -1,8 +1,8 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { registeredPostingSites } from "../../src/features/postingCopyRegistered";
-import type { WorkEntry } from "../../src/models/types";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
+import { registeredPostingSites } from "../../../src/features/postingCopyRegistered";
+import type { WorkEntry } from "../../../src/models/types";
+import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 
 /**
  * 「投稿サイト用に変換してコピー」で、登録済みの投稿先を先頭に出すための

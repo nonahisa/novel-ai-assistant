@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { deriveReading, fillReading } from "../../src/core/reading";
-import { mergeExtractedCharacters } from "../../src/core/characterMerge";
-import { emptyCharacter } from "../../src/models/character";
+import { deriveReading, fillReading } from "../../../src/core/reading";
+import { mergeExtractedCharacters } from "../../../src/core/characterMerge";
+import { emptyCharacter } from "../../../src/models/character";
 
 describe("カタカナ名からの読み生成", () => {
   test("カタカナをひらがなにする", () => {

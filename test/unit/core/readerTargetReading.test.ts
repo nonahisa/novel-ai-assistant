@@ -4,9 +4,9 @@ import {
   parseReaderTargetReading,
   quoteAppearsIn,
   READER_NEUTRAL_SCORE,
-} from "../../src/core/readerTargetValidation";
-import { buildReaderGuide } from "../../src/core/readerTargetDoc";
-import type { ReaderProfile } from "../../src/models/readerProfile";
+} from "../../../src/core/readerTargetValidation";
+import { buildReaderGuide } from "../../../src/core/readerTargetDoc";
+import type { ReaderProfile } from "../../../src/models/readerProfile";
 
 /**
  * **AIの読み取りを信用しない**（設計書6.91、CLAUDE.mdの実装ルール3）。

@@ -4,7 +4,7 @@ import {
   renderUsageRow,
   usageLogHeader,
   type UsageLogEntry,
-} from "../../src/core/usageLog";
+} from "../../../src/core/usageLog";
 
 const AT = new Date(2026, 7, 27, 9, 5, 3);
 

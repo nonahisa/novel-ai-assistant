@@ -7,7 +7,7 @@ import {
   firstEpisodes,
   scopeKinds,
   shouldAskScope,
-} from "../../src/core/typoCheckScope";
+} from "../../../src/core/typoCheckScope";
 
 /**
  * 誤字脱字の「差分のみ」（設計書6.8.7）。

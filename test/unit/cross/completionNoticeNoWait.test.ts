@@ -17,7 +17,7 @@ import { describe, expect, test } from "vitest";
  * ほかは画面の部品を大量に偽らないと走らせられないので、書き方で押さえる。
  */
 
-const SRC = join(__dirname, "..", "..", "src");
+const SRC = join(__dirname, "..", "..", "..", "src");
 
 /** 直した所。ファイルと、その知らせの文にしか無い言葉 */
 const SITES: ReadonlyArray<{ file: string; phrase: string; why: string }> = [

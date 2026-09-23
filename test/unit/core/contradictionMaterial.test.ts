@@ -8,16 +8,16 @@ import {
   promptVersionWithCarryOver,
   CARRY_OVER_DEFAULT_CHAPTERS,
   CARRY_OVER_MAX_CHAPTERS,
-} from "../../src/core/contradictionMaterial";
+} from "../../../src/core/contradictionMaterial";
 import {
   describeCharacter,
   describeLocation,
   describeWorldItem,
-} from "../../src/core/settingsSummary";
-import { emptyCharacter, type Character } from "../../src/models/character";
-import { emptyLocation, type Location } from "../../src/models/location";
-import { emptyWorldItem, type WorldItem } from "../../src/models/world";
-import type { RecordChange } from "../../src/models/jsonValidation";
+} from "../../../src/core/settingsSummary";
+import { emptyCharacter, type Character } from "../../../src/models/character";
+import { emptyLocation, type Location } from "../../../src/models/location";
+import { emptyWorldItem, type WorldItem } from "../../../src/models/world";
+import type { RecordChange } from "../../../src/models/jsonValidation";
 
 /**
  * 矛盾検知へ渡す材料の組み立て（設計書6.10.3）。

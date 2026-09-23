@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { probeGeneration } from "../../src/ai/generationProbe";
-import { AIError, type AIProvider, type GenerateParams } from "../../src/ai/types";
+import { probeGeneration } from "../../../src/ai/generationProbe";
+import { AIError, type AIProvider, type GenerateParams } from "../../../src/ai/types";
 
 /**
  * モデル一覧が引けても生成できるとは限らない。

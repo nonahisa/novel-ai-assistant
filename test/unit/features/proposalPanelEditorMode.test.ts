@@ -67,7 +67,7 @@ vi.mock("vscode", () => {
 
 // **本文の書き込みは `writeTextFilePreservingFormat` だけを通る**（規則1）。
 // 編集者モードでは1回も呼ばれないことを、このモックで確かめる
-vi.mock("../../src/core/textFile", () => ({
+vi.mock("../../../src/core/textFile", () => ({
   readTextFile: vi.fn(async () => ({
     text,
     hash: "h",
@@ -82,7 +82,7 @@ vi.mock("../../src/core/textFile", () => ({
   }),
 }));
 
-vi.mock("../../src/core/fileLockStore", () => ({
+vi.mock("../../../src/core/fileLockStore", () => ({
   FileLockStore: class {
     async lockFor(): Promise<undefined> {
       return undefined;
@@ -92,7 +92,7 @@ vi.mock("../../src/core/fileLockStore", () => ({
 
 /** 編集履歴。ここでは「誰が」「何を」提案したかだけを見る */
 const edits: Array<{ actor: string; action: string; detail?: string }> = [];
-vi.mock("../../src/core/actorContext", () => ({
+vi.mock("../../../src/core/actorContext", () => ({
   isEditorMode: () => true,
   manualActor: () => "editor",
   recordEdit: vi.fn(
@@ -106,13 +106,13 @@ vi.mock("../../src/core/actorContext", () => ({
 }));
 
 // gitの実行に環境依存させない（記名は固定値でよい）
-vi.mock("../../src/core/gitAttribution", () => ({
+vi.mock("../../../src/core/gitAttribution", () => ({
   tryGitUserName: vi.fn(async () => "編集部"),
 }));
 
-import { ProposalPanel } from "../../src/features/proposalPanel";
-import { writeTextFilePreservingFormat } from "../../src/core/textFile";
-import type { WorkEntry } from "../../src/models/types";
+import { ProposalPanel } from "../../../src/features/proposalPanel";
+import { writeTextFilePreservingFormat } from "../../../src/core/textFile";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work: WorkEntry = {
   id: "w1",

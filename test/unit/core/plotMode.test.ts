@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
-import type { EpisodeFile } from "../../src/models/types";
-import type { Chapter } from "../../src/models/chapter";
-import type { ChapterSynopsis } from "../../src/models/synopsis";
-import { isBlankPlotSection, parsePlotMarkdown } from "../../src/core/plotDoc";
-import { buildPlotTemplate } from "../../src/core/plotTemplate";
+import type { EpisodeFile } from "../../../src/models/types";
+import type { Chapter } from "../../../src/models/chapter";
+import type { ChapterSynopsis } from "../../../src/models/synopsis";
+import { isBlankPlotSection, parsePlotMarkdown } from "../../../src/core/plotDoc";
+import { buildPlotTemplate } from "../../../src/core/plotTemplate";
 import {
   EPISODE_PLOT_CHECK_LABELS,
   PLOT_MODE_AI_COMMANDS,
@@ -13,8 +13,8 @@ import {
   listPlotHeadings,
   synopsisHead,
   unusedPlotSections,
-} from "../../src/core/plotMode";
-import { allActions } from "../../src/views/actionList";
+} from "../../../src/core/plotMode";
+import { allActions } from "../../../src/views/actionList";
 
 /**
  * プロットモードの画面の材料（設計書6.4.8）。

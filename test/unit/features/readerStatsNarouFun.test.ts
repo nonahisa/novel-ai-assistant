@@ -6,9 +6,9 @@ import {
   parseReaderStatsEnvelope,
   READER_STATS_ENVELOPE_VERSION,
   type ReaderStatsEnvelope,
-} from "../../src/core/readerStatsEnvelope";
-import { importReaderStats } from "../../src/features/readerStats";
-import { computeReaderRates } from "../../src/core/readerRates";
+} from "../../../src/core/readerStatsEnvelope";
+import { importReaderStats } from "../../../src/features/readerStats";
+import { computeReaderRates } from "../../../src/core/readerRates";
 import {
   emptyPostingLedger,
   readerStatsMetricsFor,
@@ -17,9 +17,9 @@ import {
   withSites,
   type PostingLedger,
   type ReaderStatsRecord,
-} from "../../src/models/posting";
-import type { WorkEntry } from "../../src/models/types";
-import { env, FileSystemError, Uri, window, workspace } from "./support/vscodeStub";
+} from "../../../src/models/posting";
+import type { WorkEntry } from "../../../src/models/types";
+import { env, FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
 
 /**
  * Narou.fun（なろうの分析サイト）の封筒を受ける（残課題 B11。作者の依頼、2026-09-23）。

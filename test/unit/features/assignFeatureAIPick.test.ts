@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import type * as vscode from "vscode";
-import { assignFeatureAI } from "../../src/features/assignFeatureAI";
+import { assignFeatureAI } from "../../../src/features/assignFeatureAI";
 import {
   AIRegistry,
   ASSIGNABLE_FEATURES,
   ASSIGNABLE_FEATURE_LABELS,
-} from "../../src/ai/registry";
-import type { AIProvider, ModelInfo, ProviderId } from "../../src/ai/types";
-import { statusBarMessages, window } from "./support/vscodeStub";
+} from "../../../src/ai/registry";
+import type { AIProvider, ModelInfo, ProviderId } from "../../../src/ai/types";
+import { statusBarMessages, window } from "../support/vscodeStub";
 
 /**
  * 「機能ごとにAIを割り当てる」の選択画面（設計書6.28.7の1）。

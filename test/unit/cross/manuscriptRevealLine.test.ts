@@ -86,13 +86,13 @@ let episodes: Array<{ filePath: string }> = [];
  */
 let workFormat: WorkFormatKey | undefined;
 
-vi.mock("../../src/core/workFormatStore", () => ({
+vi.mock("../../../src/core/workFormatStore", () => ({
   readWorkFormat: async () => workFormat,
   invalidateWorkFormat: () => undefined,
   matchWorkFormat: () => undefined,
 }));
 
-vi.mock("../../src/core/scanner", async (importOriginal) => {
+vi.mock("../../../src/core/scanner", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
@@ -113,13 +113,13 @@ import {
   manuscriptLedgerKey,
   waitFor,
   type ManuscriptEditorDeps,
-} from "../../src/features/manuscriptEditor";
+} from "../../../src/features/manuscriptEditor";
 import {
   MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
   MANUSCRIPT_EDITOR_VIEW_TYPE,
-} from "../../src/core/manuscriptViewTypes";
-import type { WorkEntry } from "../../src/models/types";
-import type { WorkFormatKey } from "../../src/core/workFormat";
+} from "../../../src/core/manuscriptViewTypes";
+import type { WorkEntry } from "../../../src/models/types";
+import type { WorkFormatKey } from "../../../src/core/workFormat";
 
 const work: WorkEntry = {
   id: "w1",

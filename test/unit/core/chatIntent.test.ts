@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { detectRunIntent } from "../../src/core/chatIntent";
+import { detectRunIntent } from "../../../src/core/chatIntent";
 
 /**
  * 実機のログで見つかった不具合の再現（2026-08-15）。

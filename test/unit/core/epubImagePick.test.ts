@@ -9,8 +9,8 @@ import {
   pickImportName,
   sortImageChoices,
   workRelativePath,
-} from "../../src/core/epubImagePick";
-import { parseBookConfig } from "../../src/models/book";
+} from "../../../src/core/epubImagePick";
+import { parseBookConfig } from "../../../src/models/book";
 
 /**
  * 画像の投入口と選択画面の、決めごとの部分（設計書6.65.15）。

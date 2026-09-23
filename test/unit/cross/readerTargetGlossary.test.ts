@@ -6,12 +6,12 @@ import {
   readerTypeGlossaryEntries,
   resolveReaderType,
   type ReaderTypeId,
-} from "../../src/core/readerTarget";
+} from "../../../src/core/readerTarget";
 import {
   READER_PROFILE_SCHEMA_VERSION,
   type ReaderProfile,
-} from "../../src/models/readerProfile";
-import { ACTION_TREE } from "../../src/views/actionList";
+} from "../../../src/models/readerProfile";
+import { ACTION_TREE } from "../../../src/views/actionList";
 import {
   READER_TARGET_DIAGNOSIS_TITLE,
   buildReaderTypeGlossary,
@@ -19,7 +19,7 @@ import {
   buildReaderTypePrompt,
   buildReaderTypeUnknownPrompt,
   questionMentionsReader,
-} from "../../src/prompts/readerTarget";
+} from "../../../src/prompts/readerTarget";
 
 /**
  * 相談が読者型の区分を知らなかった件（作者の実機報告、2026-09-21）。
@@ -87,7 +87,7 @@ describe("読者の区分の一覧", () => {
 
   test("写しを書かず、`READER_TYPES` から組む", () => {
     const source = readFileSync(
-      resolve(__dirname, "../../src/prompts/readerTarget.ts"),
+      resolve(__dirname, "../../../src/prompts/readerTarget.ts"),
       "utf8"
     );
     const body = source.slice(source.indexOf("export function buildReaderTypeGlossary("));
@@ -222,7 +222,7 @@ describe("読者について聞かれた回に、一覧を添える", () => {
  */
 describe("相談の画面に繋がっている", () => {
   const panel = readFileSync(
-    resolve(__dirname, "../../src/features/workChatPanel.ts"),
+    resolve(__dirname, "../../../src/features/workChatPanel.ts"),
     "utf8"
   );
 
@@ -270,11 +270,11 @@ describe("相談の画面に繋がっている", () => {
  */
 describe("読者タイプの区分を、作者にも見せる", () => {
   const panel = readFileSync(
-    resolve(__dirname, "../../src/features/workChatPanel.ts"),
+    resolve(__dirname, "../../../src/features/workChatPanel.ts"),
     "utf8"
   );
   const face = readFileSync(
-    resolve(__dirname, "../../src/views/workChatPanelHtml.ts"),
+    resolve(__dirname, "../../../src/views/workChatPanelHtml.ts"),
     "utf8"
   );
 

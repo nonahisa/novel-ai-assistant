@@ -56,7 +56,7 @@ import { windowsList } from "./tools/windows";
  * Claude Code から、製品のプロンプトと検算をツールとして呼ぶ（設計書6.87.8）。
  *
  * **ここは転送層だけ。** 判断は `tools/*.ts` にあり、単体テストは
- * そちらを直に呼ぶ（`test/unit/mcpTools.test.ts`）。混ぜると、
+ * そちらを直に呼ぶ（`test/unit/mcp/mcpTools.test.ts`）。混ぜると、
  * ツールの中身を確かめるのに stdio を立てなければならなくなる。
  *
  * **道具は13本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
@@ -67,7 +67,7 @@ import { windowsList } from "./tools/windows";
  * 何をするかは `feature`、どこまで原稿が出るかは `runner` が決める。
  *
  * **`vscode` を1つでも静的に import すると、この束は読み込んだ瞬間に落ちる。**
- * `test/unit/mcpReach.test.ts` が、この入口から辿って届かないことを見張る。
+ * `test/unit/cross/mcpReach.test.ts` が、この入口から辿って届かないことを見張る。
  *
  * **読む・測る・提案するだけ**（6.87.7）。原稿も設定資料も書き換えない。
  */
@@ -114,7 +114,7 @@ function fail(error: unknown, staleness?: BundleStaleness): CallToolResult {
  * 2. **外から触られたことを1行残す**（設計書6.87.9）。道具ごとに書くと
  *    新しい道具を足した人が忘れ、**忘れたことは作者には見えない**。
  *    名前をここへ渡しているのはそのためで、渡し忘れは
- *    `test/unit/mcpAccessLog.test.ts` が止める
+ *    `test/unit/mcp/mcpAccessLog.test.ts` が止める
  *
  * **成功しても失敗しても残す。** 失敗した試みも、試みには違いない。
  */

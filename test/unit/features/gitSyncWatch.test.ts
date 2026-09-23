@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   fileSystemWatchers,
   resetFileSystemWatchers,
-} from "./support/vscodeStub";
-import { WorkRegistry } from "../../src/core/workRegistry";
-import { affectsSyncStatus, GitSyncMonitor } from "../../src/features/gitSync";
-import type { GitCommandResult, GitCommandRunner } from "../../src/core/git";
-import type { WorkEntry } from "../../src/models/types";
+} from "../support/vscodeStub";
+import { WorkRegistry } from "../../../src/core/workRegistry";
+import { affectsSyncStatus, GitSyncMonitor } from "../../../src/features/gitSync";
+import type { GitCommandResult, GitCommandRunner } from "../../../src/core/git";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 保存しただけで「送っていないもの」の印が変わるか（設計書6.15.1）。

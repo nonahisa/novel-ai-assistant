@@ -4,9 +4,9 @@ import {
   CancellationError,
   setStubChatModels,
   type StubChatModel,
-} from "./support/vscodeStub";
-import { VsCodeLmProvider } from "../../src/ai/vscodeLmProvider";
-import { AIError } from "../../src/ai/types";
+} from "../support/vscodeStub";
+import { VsCodeLmProvider } from "../../../src/ai/vscodeLmProvider";
+import { AIError } from "../../../src/ai/types";
 
 /**
  * VS Code 経由でつなぐ（設計書6.87.11）。
@@ -75,7 +75,7 @@ describe("繋がっていないとき", () => {
       **古い VS Code や、口を塞いだ配布物がありうる。** 在ることを
       当てにすると、この接続先だけでなく設定の画面ごと開けなくなる。
     */
-    const vscode = await import("./support/vscodeStub");
+    const vscode = await import("../support/vscodeStub");
     const saved = vscode.lm.selectChatModels;
     try {
       (vscode.lm as { selectChatModels?: unknown }).selectChatModels = undefined;
@@ -250,7 +250,7 @@ describe("失敗の3つを分ける", () => {
 
 describe("接続先としての性質", () => {
   test("**鍵を持たない**（VS Code 側に在る）", async () => {
-    const { isApiKeyProvider } = await import("../../src/ai/types");
+    const { isApiKeyProvider } = await import("../../../src/ai/types");
     expect(isApiKeyProvider(new VsCodeLmProvider())).toBe(false);
   });
 
@@ -280,7 +280,7 @@ describe("ブラウザ版でも選べる", () => {
       `vscode.lm` は **VS Code の口**なので、ブラウザ版（vscode.dev）でも
       動く。`localhost` を叩く Ollama・LM Studio とはそこが違う。
     */
-    const { filterProvidersForRuntime } = await import("../../src/ai/registry");
+    const { filterProvidersForRuntime } = await import("../../../src/ai/registry");
     const provider = new VsCodeLmProvider();
     const kept = filterProvidersForRuntime([provider], false);
     expect(kept).toHaveLength(1);

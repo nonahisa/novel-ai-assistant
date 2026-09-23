@@ -5,9 +5,9 @@ import {
   parseEpisodePlotFindings,
   validateEpisodePlotCheck,
   validateEpisodePlotContrast,
-} from "../../src/core/episodePlotValidation";
-import { EPISODE_PLOT_CHECK_KINDS } from "../../src/prompts/episodePlotCheck";
-import { EPISODE_PLOT_CONTRAST_KINDS } from "../../src/prompts/episodePlotContrast";
+} from "../../../src/core/episodePlotValidation";
+import { EPISODE_PLOT_CHECK_KINDS } from "../../../src/prompts/episodePlotCheck";
+import { EPISODE_PLOT_CONTRAST_KINDS } from "../../../src/prompts/episodePlotContrast";
 
 /**
  * P-27・P-28 の応答の検証（設計書6.36.3）。

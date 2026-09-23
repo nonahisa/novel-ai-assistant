@@ -9,7 +9,7 @@ import {
   withPost,
   withSites,
   type PostingLedger,
-} from "../../src/models/posting";
+} from "../../../src/models/posting";
 
 /**
  * 投稿の記録を「話単位」で引く（設計書6.68.2・6.12.1）。

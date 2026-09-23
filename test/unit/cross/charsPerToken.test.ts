@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { ModelTuning } from "../../src/core/modelTuning";
+import type { ModelTuning } from "../../../src/core/modelTuning";
 
 /**
  * 字↔トークンの換算を、当て推量から実測へ替える（設計書6.77）。
@@ -36,9 +36,9 @@ const saved: Array<{
   tuning: ModelTuning;
 }> = [];
 
-vi.mock("../../src/core/modelTuning", async (importOriginal) => {
+vi.mock("../../../src/core/modelTuning", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../src/core/modelTuning")>();
+    await importOriginal<typeof import("../../../src/core/modelTuning")>();
   return {
     ...actual,
     modelTuning: () => ledger,
@@ -71,18 +71,18 @@ const {
   resolveTokensPerChar,
   roundCharsPerToken,
   TOKENS_PER_CHAR,
-} = await import("../../src/core/sizeBudget");
+} = await import("../../../src/core/sizeBudget");
 const { decideChunkSize, planChunkBudget, contextSizeForPrompt } = await import(
-  "../../src/core/chunker"
+  "../../../src/core/chunker"
 );
-const { checkContextFit } = await import("../../src/ai/contextGuard");
-const { MeteredProvider } = await import("../../src/ai/meteredProvider");
-const { resetAiSequence } = await import("../../src/core/aiSequence");
+const { checkContextFit } = await import("../../../src/ai/contextGuard");
+const { MeteredProvider } = await import("../../../src/ai/meteredProvider");
+const { resetAiSequence } = await import("../../../src/core/aiSequence");
 import type {
   AIProvider,
   GenerateParams,
   GenerateResult,
-} from "../../src/ai/types";
+} from "../../../src/ai/types";
 
 /** 5回ぶん採れた、信じてよい台帳 */
 function measured(charsPerToken: number, samples = 5): ModelTuning {

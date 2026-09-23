@@ -79,7 +79,7 @@ async function main() {
    *
    * `external: []`——SDKごと1ファイルに束ねる。ここで何かを外へ出すと、
    * `node dist/mcp-server.mjs` が読み込んだ瞬間に解決できずに落ちる。
-   * `vscode` が混ざっていればここで気づける（`test/unit/mcpReach.test.ts`
+   * `vscode` が混ざっていればここで気づける（`test/unit/cross/mcpReach.test.ts`
    * が静的importからも見ているので、二重に見張っている）。
    *
    * **配布物には入れない**（`.vscodeignore`）。拡張機能そのものは使わない。

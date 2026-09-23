@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { buildWritingStatsPanelHtml } from "../../src/views/writingStatsPanelHtml";
-import { describeWrittenAmount } from "../../src/core/writingAmountText";
+import { buildWritingStatsPanelHtml } from "../../../src/views/writingStatsPanelHtml";
+import { describeWrittenAmount } from "../../../src/core/writingAmountText";
 
 /**
  * 執筆量パネルの画面（設計書6.3）。

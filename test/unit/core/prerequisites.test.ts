@@ -6,16 +6,16 @@ import {
   PREREQUISITES,
   type Prerequisite,
   type PrerequisiteInfo,
-} from "../../src/core/prerequisites";
+} from "../../../src/core/prerequisites";
 import {
   askPrerequisiteRoute,
   checkPrerequisites,
   prerequisiteRoute,
-} from "../../src/features/prerequisiteGate";
-import { findAction, prerequisiteNoteOf } from "../../src/views/actionList";
-import { buildGuideBundles } from "../../src/features/featureGuide";
-import { buildUserManual } from "../../src/features/openManual";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/features/prerequisiteGate";
+import { findAction, prerequisiteNoteOf } from "../../../src/views/actionList";
+import { buildGuideBundles } from "../../../src/features/featureGuide";
+import { buildUserManual } from "../../../src/features/openManual";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 前提（設定資料・あらすじ・プロット・単話プロット）の扱い（設計書6.94）。

@@ -4,11 +4,11 @@ import {
   buildCharacterListItems,
   buildLocationListItems,
   countMobs,
-} from "../../src/core/settingsList";
-import { emptyCharacter, type Character } from "../../src/models/character";
-import { emptyAbility } from "../../src/models/ability";
-import { emptyLocation } from "../../src/models/location";
-import type { AiNote } from "../../src/models/aiNote";
+} from "../../../src/core/settingsList";
+import { emptyCharacter, type Character } from "../../../src/models/character";
+import { emptyAbility } from "../../../src/models/ability";
+import { emptyLocation } from "../../../src/models/location";
+import type { AiNote } from "../../../src/models/aiNote";
 
 function character(
   id: string,

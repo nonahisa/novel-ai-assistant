@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   NOTE_UNSUPPORTED,
   renderNotePreview,
-} from "../../src/core/notePreview";
+} from "../../../src/core/notePreview";
 import {
   NOTE_UNSUPPORTED as UNSUPPORTED_SOURCE,
   toNoteMarkdown,
-} from "../../src/core/noteMarkdown";
-import { toSiteNotation } from "../../src/core/ruby";
+} from "../../../src/core/noteMarkdown";
+import { toSiteNotation } from "../../../src/core/ruby";
 
 /**
  * 「noteに貼ったときの見た目」の描画（設計書6.69）。

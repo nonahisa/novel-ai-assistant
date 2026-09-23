@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   isInsideAnyWork,
   newFolderHomeCandidates,
-} from "../../src/core/newFolderHome";
-import { isSameLocation } from "../../src/core/locationCompare";
+} from "../../../src/core/newFolderHome";
+import { isSameLocation } from "../../../src/core/locationCompare";
 
 /**
  * 「新しい置き場を作る」ときの既定の場所（設計書6.97.6）。

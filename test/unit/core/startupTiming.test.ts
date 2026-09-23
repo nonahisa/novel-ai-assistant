@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beginStartupTiming } from "../../src/core/startupTiming";
+import { beginStartupTiming } from "../../../src/core/startupTiming";
 
 /**
  * 起動の所要時間の計測（設計書6.107）。

@@ -4,7 +4,7 @@
  * ## なぜ `finishNewWork.ts` から分けるか
  *
  * **この作品では、画面に出す文言へMarkdownの記号を混ぜてはいけない**
- * （`test/unit/plainTextUi.test.ts`）。VS Code のダイアログと選択肢の説明は
+ * （`test/unit/core/plainTextUi.test.ts`）。VS Code のダイアログと選択肢の説明は
  * プレーンテキストなので、`**強調**` と書くと記号がそのまま画面に出る——
  * 実際に36か所でそれが起きている（2026-08-20、作者が実機で発見）。
  *

@@ -35,7 +35,7 @@ import * as path from "node:path";
  * **挙げずに増やせない**ようにして、次に足す人へ判断を促す。
  */
 
-const ROOT = path.resolve(__dirname, "../..");
+const ROOT = path.resolve(__dirname, "../../..");
 
 function readSource(relative: string): string {
   return fs.readFileSync(path.join(ROOT, relative), "utf8");

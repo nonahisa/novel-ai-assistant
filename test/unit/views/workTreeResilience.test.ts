@@ -45,17 +45,17 @@ const scanWork = vi.fn();
   差し替えで消してしまい、初回描画の合図がまるごと出なかった実績がある
   （知らせ先の失敗は一覧を守るために握り潰される。設計書6.107）。
 */
-vi.mock("../../src/core/scanner", async () => {
+vi.mock("../../../src/core/scanner", async () => {
   const actual =
-    await vi.importActual<typeof import("../../src/core/scanner")>(
-      "../../src/core/scanner"
+    await vi.importActual<typeof import("../../../src/core/scanner")>(
+      "../../../src/core/scanner"
     );
   return { ...actual, scanWork: (...args: unknown[]) => scanWork(...args) };
 });
 
-import { WorkTreeProvider, WorkNode } from "../../src/views/workTree";
-import type { WorkEntry } from "../../src/models/types";
-import type { WorkRegistry } from "../../src/core/workRegistry";
+import { WorkTreeProvider, WorkNode } from "../../../src/views/workTree";
+import type { WorkEntry } from "../../../src/models/types";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
 
 const works: WorkEntry[] = [
   {

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { WorkEntry } from "../../src/models/types";
-import { buildWorkChatPanelHtml } from "../../src/views/workChatPanelHtml";
-import { window } from "./support/vscodeStub";
+import type { WorkEntry } from "../../../src/models/types";
+import { buildWorkChatPanelHtml } from "../../../src/views/workChatPanelHtml";
+import { window } from "../support/vscodeStub";
 
 /**
  * 面を移っても、会話の「いまの端」が消えない（ノートPCの実機、2026-09-23）。
@@ -21,24 +21,24 @@ import { window } from "./support/vscodeStub";
  *    （送っていても、受け側が捨てていれば同じ見た目になる）
  */
 
-vi.mock("../../src/core/chatLog", () => ({
+vi.mock("../../../src/core/chatLog", () => ({
   appendChatLog: () => undefined,
   summarizeMaterials: () => [],
 }));
 
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logFailure: () => undefined,
   logStep: () => undefined,
   logLine: () => undefined,
   useLogFile: () => undefined,
 }));
 
-vi.mock("../../src/features/aiConnectivity", () => ({
+vi.mock("../../../src/features/aiConnectivity", () => ({
   confirmProviderReachable: async () => true,
   confirmPaidUsage: async () => true,
 }));
 
-const { WorkChatPanel } = await import("../../src/features/workChatPanel");
+const { WorkChatPanel } = await import("../../../src/features/workChatPanel");
 
 const WORK: WorkEntry = {
   id: "w_a",

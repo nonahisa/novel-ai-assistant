@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   buildEmptyChronicleGuide,
   chronicleToMarkdown,
-} from "../../src/core/chronicleMarkdown";
+} from "../../../src/core/chronicleMarkdown";
 import type {
   ChronicleRow,
   ChronicleSection,
-} from "../../src/core/chronicle";
+} from "../../../src/core/chronicle";
 
 /**
  * 年表のMarkdown書き出し（設計書6.39.4）。

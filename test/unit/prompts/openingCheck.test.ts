@@ -16,8 +16,8 @@ import {
   OPENING_EXCERPT_MAX_CHARS,
   parseOpeningCheck,
   type OpeningCheckResult,
-} from "../../src/prompts/openingCheck";
-import { renderOpeningCheck } from "../../src/features/checkOpening";
+} from "../../../src/prompts/openingCheck";
+import { renderOpeningCheck } from "../../../src/features/checkOpening";
 
 /**
  * 冒頭診断（P-24、設計書6.30）。

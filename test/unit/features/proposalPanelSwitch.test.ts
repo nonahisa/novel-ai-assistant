@@ -74,8 +74,8 @@ vi.mock("vscode", () => {
   };
 });
 
-import { ProposalPanel } from "../../src/features/proposalPanel";
-import type { WorkEntry } from "../../src/models/types";
+import { ProposalPanel } from "../../../src/features/proposalPanel";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work: WorkEntry = {
   id: "w1",
@@ -849,7 +849,7 @@ describe("スクロール位置を保つための材料", () => {
 
   test("webviewは、作品と分類が同じときだけ位置を戻す", () => {
     const html = readFileSync(
-      new URL("../../src/views/proposalPanelHtml.ts", import.meta.url),
+      new URL("../../../src/views/proposalPanelHtml.ts", import.meta.url),
       "utf8"
     );
     expect(html).toContain("lastListKey");

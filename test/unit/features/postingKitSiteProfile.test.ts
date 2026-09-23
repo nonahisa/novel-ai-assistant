@@ -1,9 +1,9 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { configurePostingSites } from "../../src/features/postingKit";
-import { POSTING_SITES, postingSiteInfo } from "../../src/models/posting";
-import type { WorkEntry } from "../../src/models/types";
-import { FileSystemError, Uri, window, workspace } from "./support/vscodeStub";
+import { configurePostingSites } from "../../../src/features/postingKit";
+import { POSTING_SITES, postingSiteInfo } from "../../../src/models/posting";
+import type { WorkEntry } from "../../../src/models/types";
+import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
 
 /**
  * サイトごとの作品情報を訊く画面（設計書6.68.5）。

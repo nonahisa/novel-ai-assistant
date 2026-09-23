@@ -1,7 +1,7 @@
 // 外から呼ぶ束（MCP サーバー）の起点。**ここが唯一の定義**（設計書6.87.3）。
 //
 // `scripts/bundleCore.mjs`（束ねられるかを機械で確かめる）と
-// `test/unit/mcpReach.test.ts`（`vscode` へ届かないかを見る）の両方が
+// `test/unit/cross/mcpReach.test.ts`（`vscode` へ届かないかを見る）の両方が
 // ここを読む。**写すと、片方だけ増えて検査が素通りする。**
 import fs from "node:fs";
 import path from "node:path";
@@ -88,7 +88,7 @@ export const CORE_ENTRY_NAMES = [
  * 読み込ませるわけにいかない。`server.ts` が本当に束ねられるかは
  * `npm run build`（3つ目の束）と `scripts/smokeMcp.mjs` が見る。
  *
- * たどる側（`test/unit/mcpReach.test.ts`）だけがここを足して歩く。
+ * たどる側（`test/unit/cross/mcpReach.test.ts`）だけがここを足して歩く。
  */
 export const MCP_ENTRY_NAMES = ["server"];
 

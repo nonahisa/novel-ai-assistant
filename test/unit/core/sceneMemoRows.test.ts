@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { locateFindings } from "../../src/core/findingLocation";
-import { parseMemos } from "../../src/core/sceneMemo";
-import { normalizeForComparison } from "../../src/core/pathText";
+import { locateFindings } from "../../../src/core/findingLocation";
+import { parseMemos } from "../../../src/core/sceneMemo";
+import { normalizeForComparison } from "../../../src/core/pathText";
 import {
   arrangeRows,
   findingCategoryLabel,
@@ -14,9 +14,9 @@ import {
   prevNoteRow,
   type NoteRow,
   type PlacedFinding,
-} from "../../src/core/sceneMemoRows";
-import { visibleFindings } from "../../src/features/findingStore";
-import type { Finding, FindingView } from "../../src/models/finding";
+} from "../../../src/core/sceneMemoRows";
+import { visibleFindings } from "../../../src/features/findingStore";
+import type { Finding, FindingView } from "../../../src/models/finding";
 
 /**
  * 作者の付箋とAIの指摘を、1本の並びに混ぜる（設計書6.96.5）。

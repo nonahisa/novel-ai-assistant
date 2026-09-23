@@ -4,10 +4,10 @@ import {
   PRINT_PRESETS,
   printPreset,
   type PrintPreset,
-} from "../../src/core/printHtml";
-import { timestampedFileNameCandidates } from "../../src/core/timestampedFileName";
-import type { NotationMode } from "../../src/core/manuscriptRender";
-import { SCRIPT_LINE_CSS } from "../../src/core/scriptLines";
+} from "../../../src/core/printHtml";
+import { timestampedFileNameCandidates } from "../../../src/core/timestampedFileName";
+import type { NotationMode } from "../../../src/core/manuscriptRender";
+import { SCRIPT_LINE_CSS } from "../../../src/core/scriptLines";
 
 /**
  * 印刷用HTML（PDF出力のもと）。

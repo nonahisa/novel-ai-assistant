@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { SelfWriteTracker } from "../../src/core/externalChanges";
-import { normalizeForComparison } from "../../src/core/pathText";
-import { isSameLocation } from "../../src/core/locationCompare";
-import * as runtime from "../../src/core/runtime";
-import { platformLabel } from "../../src/features/showVersion";
+import { SelfWriteTracker } from "../../../src/core/externalChanges";
+import { normalizeForComparison } from "../../../src/core/pathText";
+import { isSameLocation } from "../../../src/core/locationCompare";
+import * as runtime from "../../../src/core/runtime";
+import { platformLabel } from "../../../src/features/showVersion";
 
 /**
  * `process` が無いところ（ブラウザ版）で、押したときに落ちないか（2026-09-23）。

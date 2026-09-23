@@ -3,10 +3,10 @@ import { beforeEach, describe, expect, test } from "vitest";
 import {
   recordUpdateViewItems,
   reviewPendingCharacterUpdates,
-} from "../../src/features/applyPendingUpdates";
-import { emptyCharacter, type Character } from "../../src/models/character";
-import type { WorkEntry } from "../../src/models/types";
-import { FileSystemError, FileType, Uri, workspace } from "./support/vscodeStub";
+} from "../../../src/features/applyPendingUpdates";
+import { emptyCharacter, type Character } from "../../../src/models/character";
+import type { WorkEntry } from "../../../src/models/types";
+import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub";
 
 /**
  * 提案パネルを開いただけでは、溜まっている承認待ちが出なかった

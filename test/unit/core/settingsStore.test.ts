@@ -1,18 +1,18 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { SettingsStoreError } from "../../src/core/settingsStore";
+import { SettingsStoreError } from "../../../src/core/settingsStore";
 import {
   createAbilityStore,
   createLocationStore,
-} from "../../src/core/abilityStore";
+} from "../../../src/core/abilityStore";
 import {
   abilityFileName,
   emptyAbility,
   type Ability,
-} from "../../src/models/ability";
-import { emptyLocation, type Location } from "../../src/models/location";
-import type { WorkEntry } from "../../src/models/types";
-import { FileSystemError, FileType, Uri, workspace } from "./support/vscodeStub";
+} from "../../../src/models/ability";
+import { emptyLocation, type Location } from "../../../src/models/location";
+import type { WorkEntry } from "../../../src/models/types";
+import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub";
 
 const work: WorkEntry = {
   id: "work_test",

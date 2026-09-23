@@ -1,16 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { ExtensionContext } from "vscode";
-import { ClaudeProvider } from "../../src/ai/claudeProvider";
-import { OllamaProvider } from "../../src/ai/ollamaProvider";
-import { contextSizeForPrompt } from "../../src/core/chunker";
-import { OUTPUT_RESERVE_TOKENS } from "../../src/ai/contextGuard";
-import { OpenAIProvider } from "../../src/ai/openaiProvider";
-import { GeminiProvider } from "../../src/ai/geminiProvider";
-import { LmStudioProvider } from "../../src/ai/lmstudioProvider";
-import { SakuraProvider } from "../../src/ai/sakuraProvider";
-import { DEFAULT_MAX_OUTPUT_TOKENS } from "../../src/ai/outputLimit";
-import type { AIProvider } from "../../src/ai/types";
-import { workspace } from "./support/vscodeStub";
+import { ClaudeProvider } from "../../../src/ai/claudeProvider";
+import { OllamaProvider } from "../../../src/ai/ollamaProvider";
+import { contextSizeForPrompt } from "../../../src/core/chunker";
+import { OUTPUT_RESERVE_TOKENS } from "../../../src/ai/contextGuard";
+import { OpenAIProvider } from "../../../src/ai/openaiProvider";
+import { GeminiProvider } from "../../../src/ai/geminiProvider";
+import { LmStudioProvider } from "../../../src/ai/lmstudioProvider";
+import { SakuraProvider } from "../../../src/ai/sakuraProvider";
+import { DEFAULT_MAX_OUTPUT_TOKENS } from "../../../src/ai/outputLimit";
+import type { AIProvider } from "../../../src/ai/types";
+import { workspace } from "../support/vscodeStub";
 
 /**
  * 出力トークンの2つの欄を、全プロバイダが同じように扱う（設計書6.77の第2段）。

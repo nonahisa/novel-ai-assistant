@@ -1,15 +1,15 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { window, workspace } from "./support/vscodeStub";
-import type { WorkEntry } from "../../src/models/types";
-import type { GitCommandResult, GitCommandRunner } from "../../src/core/git";
-import type { EpisodeRename } from "../../src/core/episodeRenumber";
+import { window, workspace } from "../support/vscodeStub";
+import type { WorkEntry } from "../../../src/models/types";
+import type { GitCommandResult, GitCommandRunner } from "../../../src/core/git";
+import type { EpisodeRename } from "../../../src/core/episodeRenumber";
 import {
   findUnsavedEpisodes,
   offerIndependentRenameCommit,
   reportRenumberOutcome,
-} from "../../src/features/episodeRenumberShared";
-import { emptyLedgerFollowSummary } from "../../src/features/episodeLedgers";
+} from "../../../src/features/episodeRenumberShared";
+import { emptyLedgerFollowSummary } from "../../../src/features/episodeLedgers";
 
 /**
  * 「名前だけの独立コミット」（設計書6.67.1）の配線と、実行前後の関所。

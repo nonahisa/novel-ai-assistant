@@ -7,11 +7,11 @@ import {
   readWordManuscript,
   wordBodyHead,
   type WordMatchWork,
-} from "../../src/core/wordManuscript";
+} from "../../../src/core/wordManuscript";
 import {
   isDroppableFileName,
   isWordFileName,
-} from "../../src/core/backupFileKinds";
+} from "../../../src/core/backupFileKinds";
 
 /**
  * 相談パネルへ落とされた Word 原稿（.docx）を読み、既存作品の続きかを照らす

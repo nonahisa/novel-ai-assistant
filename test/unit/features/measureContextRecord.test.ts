@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { window, workspace } from "./support/vscodeStub";
-import type { AIRegistry } from "../../src/ai/registry";
-import type { GenerateParams, GenerateResult } from "../../src/ai/types";
+import { window, workspace } from "../support/vscodeStub";
+import type { AIRegistry } from "../../../src/ai/registry";
+import type { GenerateParams, GenerateResult } from "../../../src/ai/types";
 
 /**
  * AIチューニングの結果が**台帳へ入ったのかどうか**を、作者に正しく伝える
@@ -21,7 +21,7 @@ const state = vi.hoisted(() => ({
   assignment: { providerId: "ollama", model: "gemma4:26b", isPaid: false },
 }));
 
-vi.mock("../../src/ai/registry", () => ({
+vi.mock("../../../src/ai/registry", () => ({
   ensureConfigured: vi.fn(async () => ({
     provider: {
       id: state.assignment.providerId,
@@ -43,12 +43,12 @@ vi.mock("../../src/ai/registry", () => ({
   })),
 }));
 
-vi.mock("../../src/features/aiConnectivity", () => ({
+vi.mock("../../../src/features/aiConnectivity", () => ({
   confirmPaidUsage: vi.fn(async () => true),
   confirmProviderReachable: vi.fn(async () => true),
 }));
 
-vi.mock("../../src/views/progress", () => ({
+vi.mock("../../../src/views/progress", () => ({
   withCancellableProgress: vi.fn(
     async (
       _title: string,
@@ -67,12 +67,12 @@ vi.mock("../../src/views/progress", () => ({
   ),
 }));
 
-import { measureContext } from "../../src/features/measureContext";
+import { measureContext } from "../../../src/features/measureContext";
 import {
   tuningStoreContents,
   useBrokenTuningStore,
   useMemoryTuningStore,
-} from "./support/tuningStore";
+} from "../support/tuningStore";
 
 const KEY = "ollama/gemma4:26b";
 

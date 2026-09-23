@@ -6,20 +6,20 @@ import {
   parseCustomFieldValues,
   validateNewField,
   type CustomFieldDefinition,
-} from "../../src/models/customField";
+} from "../../../src/models/customField";
 import {
   applyCharacterEdits,
   editedCustomFields,
   toRecordEdits,
-} from "../../src/core/settingsEdit";
-import { emptyCharacter, parseCharacter } from "../../src/models/character";
-import { diffCharacter } from "../../src/core/characterDiff";
-import { buildCharacterMarkdown } from "../../src/core/settingsMarkdown";
-import { describeCharacter } from "../../src/core/settingsSummary";
+} from "../../../src/core/settingsEdit";
+import { emptyCharacter, parseCharacter } from "../../../src/models/character";
+import { diffCharacter } from "../../../src/core/characterDiff";
+import { buildCharacterMarkdown } from "../../../src/core/settingsMarkdown";
+import { describeCharacter } from "../../../src/core/settingsSummary";
 import {
   buildEnrichSchema,
   enrichableFields,
-} from "../../src/prompts/settingsEnrich";
+} from "../../../src/prompts/settingsEnrich";
 
 function definition(
   key: string,

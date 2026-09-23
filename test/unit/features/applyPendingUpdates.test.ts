@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { window } from "./support/vscodeStub";
-import { emptyCharacter, type Character } from "../../src/models/character";
-import type { WorkEntry } from "../../src/models/types";
+import { window } from "../support/vscodeStub";
+import { emptyCharacter, type Character } from "../../../src/models/character";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 承認待ちの更新案を、作者が確認して反映する道（`applyPendingUpdates`）。
@@ -29,7 +29,7 @@ const state = vi.hoisted(() => ({
   discard: vi.fn<(filePath: string) => Promise<void>>(async () => undefined),
 }));
 
-vi.mock("../../src/core/characterStore", () => ({
+vi.mock("../../../src/core/characterStore", () => ({
   CharacterStoreError: class CharacterStoreError extends Error {},
   CharacterStore: class {
     async loadAll() {
@@ -40,8 +40,8 @@ vi.mock("../../src/core/characterStore", () => ({
   },
 }));
 
-vi.mock("../../src/core/pendingUpdates", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/core/pendingUpdates")>()),
+vi.mock("../../../src/core/pendingUpdates", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../src/core/pendingUpdates")>()),
   PendingUpdateStore: class {
     async loadAll() {
       return { updates: state.pending, errors: state.pendingErrors };
@@ -50,7 +50,7 @@ vi.mock("../../src/core/pendingUpdates", async (importOriginal) => ({
   },
 }));
 
-vi.mock("../../src/core/customFieldStore", () => ({
+vi.mock("../../../src/core/customFieldStore", () => ({
   CustomFieldStore: class {
     async loadFields() {
       return [];
@@ -58,18 +58,18 @@ vi.mock("../../src/core/customFieldStore", () => ({
   },
 }));
 
-vi.mock("../../src/views/openDocument", () => ({
+vi.mock("../../../src/views/openDocument", () => ({
   openGeneratedMarkdown: vi.fn(async () => undefined),
 }));
 
 // 記録の書き先を向ける口も代役に要る（0.45.0 で features 全体へ広げた）
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logFailure: vi.fn(),
   useLogFile: vi.fn(),
 }));
 
 const { applyPendingCharacterUpdates } = await import(
-  "../../src/features/applyPendingUpdates"
+  "../../../src/features/applyPendingUpdates"
 );
 
 const work: WorkEntry = {

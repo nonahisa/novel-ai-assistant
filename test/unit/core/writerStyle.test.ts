@@ -11,7 +11,7 @@ import {
   WRITER_PLAN_TYPES,
   type TutorialGoal,
   type WriterStyle,
-} from "../../src/core/writerStyle";
+} from "../../../src/core/writerStyle";
 
 /**
  * 作家タイプ診断と、はじめの案内（設計書6.90）。
@@ -31,7 +31,7 @@ import {
 const REGISTERED: ReadonlySet<string> = new Set(
   (
     JSON.parse(
-      readFileSync(resolve(__dirname, "../../package.json"), "utf8")
+      readFileSync(resolve(__dirname, "../../../package.json"), "utf8")
     ) as { contributes?: { commands?: { command: string }[] } }
   ).contributes?.commands?.map((entry) => entry.command) ?? []
 );

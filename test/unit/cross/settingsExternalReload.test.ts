@@ -1,10 +1,10 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { CharacterStore } from "../../src/core/characterStore";
-import { describeSettingsLoadErrors } from "../../src/features/settingsPanel";
-import { buildSettingsPanelHtml } from "../../src/views/settingsPanelHtml";
-import type { WorkEntry } from "../../src/models/types";
-import { FileSystemError, FileType, Uri, workspace } from "./support/vscodeStub";
+import { CharacterStore } from "../../../src/core/characterStore";
+import { describeSettingsLoadErrors } from "../../../src/features/settingsPanel";
+import { buildSettingsPanelHtml } from "../../../src/views/settingsPanelHtml";
+import type { WorkEntry } from "../../../src/models/types";
+import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub";
 
 /**
  * 「形の違う人物ファイルは黙って消えるのか」（49 の問い、2026-09-11）。

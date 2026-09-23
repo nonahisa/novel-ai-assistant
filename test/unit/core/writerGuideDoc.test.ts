@@ -2,13 +2,13 @@ import { describe, expect, test } from "vitest";
 import {
   buildWriterGuide,
   WRITER_GUIDE_TITLE,
-} from "../../src/core/writerGuideDoc";
+} from "../../../src/core/writerGuideDoc";
 import {
   ADVICE_TYPES,
   resolveAdviceType,
   scoreAnswers,
   type AdviceProfile,
-} from "../../src/core/advicePolicy";
+} from "../../../src/core/advicePolicy";
 import {
   buildWriterStyle,
   WRITER_PLAN_TYPES,
@@ -16,7 +16,7 @@ import {
   tutorialGoals,
   WRITER_QUESTIONS,
   type WriterStyle,
-} from "../../src/core/writerStyle";
+} from "../../../src/core/writerStyle";
 
 /**
  * はじめの案内の紙（設計書6.90）。

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectBackupSite } from "../../src/core/backupSite";
+import { detectBackupSite } from "../../../src/core/backupSite";
 
 /**
  * バックアップZIPの出どころの見分け（設計書6.99）。

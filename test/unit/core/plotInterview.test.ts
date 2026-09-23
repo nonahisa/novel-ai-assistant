@@ -6,13 +6,13 @@ import {
   nextQuestion,
   describeProgress,
   sectionKeyOf,
-} from "../../src/core/plotInterview";
+} from "../../../src/core/plotInterview";
 import {
   emptyPlotSections,
   parsePlotMarkdown,
   PLOT_SECTIONS,
-} from "../../src/core/plotDoc";
-import { buildPlotTemplate } from "../../src/core/plotTemplate";
+} from "../../../src/core/plotDoc";
+import { buildPlotTemplate } from "../../../src/core/plotTemplate";
 
 /**
  * 対話でプロットを作る（設計書6.4.7）。

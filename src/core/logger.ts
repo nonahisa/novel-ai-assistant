@@ -228,7 +228,7 @@ export function redactSecrets(text: string): string {
  * 伏せ字にするキーの接頭辞。
  *
  * **`scripts/releaseSupport.mjs` の出口走査と揃える。** 片方だけに足すのが
- * 一番ありがちな壊れ方なので、`test/unit/secretScanParity.test.ts` が
+ * 一番ありがちな壊れ方なので、`test/unit/core/secretScanParity.test.ts` が
  * 「同じ形の値を両方が知っているか」を見張っている。
  *
  * GitHubのトークン（`ghp_` など）は、`https://<トークン>@github.com/...` の

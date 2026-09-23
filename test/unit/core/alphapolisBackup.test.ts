@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildCollectedTextFromAlphapolis,
   parseAlphapolisBackup,
-} from "../../src/core/alphapolisBackup";
-import { parseCollectedFile } from "../../src/core/collectedFile";
+} from "../../../src/core/alphapolisBackup";
+import { parseCollectedFile } from "../../../src/core/collectedFile";
 
 /**
  * アルファポリスのバックアップ（.txt 直）の読み取り（設計書6.99）。

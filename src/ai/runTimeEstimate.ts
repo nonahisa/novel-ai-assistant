@@ -21,7 +21,7 @@ import {
  * **ここに `vscode` を持ち込まない**（実装ルール7）。持ち込むと、外から呼ぶ束
  * （MCP）へ出す道が塞がる。**ただし今はまだ届いていない**——`core/modelTuning.ts`
  * と `core/featureOutputTokens.ts` が `vscode` を静的 import しているためで、
- * そちらを割るまでは MCP の束からは引けない（`test/unit/mcpReach.test.ts`）。
+ * そちらを割るまでは MCP の束からは引けない（`test/unit/cross/mcpReach.test.ts`）。
  */
 
 /**

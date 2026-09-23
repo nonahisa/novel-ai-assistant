@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, test } from "vitest";
 
 const WORKFLOW_PATH = fileURLToPath(
-  new URL("../../.github/workflows/sakura-ai-smoke.yml", import.meta.url)
+  new URL("../../../.github/workflows/sakura-ai-smoke.yml", import.meta.url)
 );
 
 let workflow = "";

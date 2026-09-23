@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { TCY_RUN_PATTERN, tcyRuns } from "../../src/core/tateChuYoko";
-import { buildManuscriptEditorHtml } from "../../src/views/manuscriptEditorHtml";
+import { TCY_RUN_PATTERN, tcyRuns } from "../../../src/core/tateChuYoko";
+import { buildManuscriptEditorHtml } from "../../../src/views/manuscriptEditorHtml";
 
 /**
  * 縦書きで立てる半角数字（縦中横）の規則（作者の依頼、2026-09-12）。

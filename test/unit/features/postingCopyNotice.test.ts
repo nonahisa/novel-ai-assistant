@@ -7,10 +7,10 @@ import {
   statusBarMessages,
   window,
   workspace,
-} from "./support/vscodeStub";
-import { showPostingCopyNotice } from "../../src/features/postingCopyNotice";
-import type { NoteMarkdownResult } from "../../src/core/noteMarkdown";
-import type { WorkEntry } from "../../src/models/types";
+} from "../support/vscodeStub";
+import { showPostingCopyNotice } from "../../../src/features/postingCopyNotice";
+import type { NoteMarkdownResult } from "../../../src/core/noteMarkdown";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * noteへコピーしたあとの知らせ（設計書6.84）。

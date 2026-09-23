@@ -71,7 +71,7 @@ export interface PostingSiteInfo {
    *
    * **値を書き写しているのは、`models` が `core` に依存しないため**
    * （依存の向きは views/features → core → models）。取り違えると
-   * 貼り付けた先で記号が並ぶので、`test/unit/posting.test.ts` が見張る。
+   * 貼り付けた先で記号が並ぶので、`test/unit/models/posting.test.ts` が見張る。
    */
   notation: "site" | "paren";
   /**

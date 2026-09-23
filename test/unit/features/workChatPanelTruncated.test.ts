@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { workspace } from "vscode";
-import type { WorkEntry } from "../../src/models/types";
-import { useMemoryTuningStore } from "./support/tuningStore";
+import type { WorkEntry } from "../../../src/models/types";
+import { useMemoryTuningStore } from "../support/tuningStore";
 
 /**
  * 切り詰められた返答と、タイムアウトの直し方（作者の実機報告、2026-09-23）。
@@ -21,12 +21,12 @@ const response = vi.hoisted(() => ({
   error: undefined as unknown,
 }));
 
-vi.mock("../../src/core/chatLog", () => ({
+vi.mock("../../../src/core/chatLog", () => ({
   appendChatLog: () => undefined,
   summarizeMaterials: () => [],
 }));
 
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logFailure: () => undefined,
   logStep: () => undefined,
   logLine: () => undefined,
@@ -36,13 +36,13 @@ vi.mock("../../src/core/logger", () => ({
 /** AIに届くか。**接続できない道**の試験だけ false にする（既定は届く） */
 const connectivity = { reachable: true };
 
-vi.mock("../../src/features/aiConnectivity", () => ({
+vi.mock("../../../src/features/aiConnectivity", () => ({
   confirmProviderReachable: async () => connectivity.reachable,
   confirmPaidUsage: async () => true,
 }));
 
-const { WorkChatPanel } = await import("../../src/features/workChatPanel");
-const { AIError } = await import("../../src/ai/types");
+const { WorkChatPanel } = await import("../../../src/features/workChatPanel");
+const { AIError } = await import("../../../src/ai/types");
 
 const WORK: WorkEntry = {
   id: "w_a",
@@ -329,7 +329,7 @@ describe("タイムアウトは、その場で直せる", () => {
 
     await press(h, action.command);
 
-    const { tuningStoreContents } = await import("./support/tuningStore");
+    const { tuningStoreContents } = await import("../support/tuningStore");
     expect(written, "効かない設定のほうへ書いている").toHaveLength(0);
     expect(
       (

@@ -1,9 +1,9 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { openEpubEditorPanel } from "../../src/features/epubEditorPanel";
-import { emptyCharacter } from "../../src/models/character";
-import { BAKED_COVER_FILES } from "../../src/core/coverBake";
-import type { WorkEntry } from "../../src/models/types";
+import { openEpubEditorPanel } from "../../../src/features/epubEditorPanel";
+import { emptyCharacter } from "../../../src/models/character";
+import { BAKED_COVER_FILES } from "../../../src/core/coverBake";
+import type { WorkEntry } from "../../../src/models/types";
 import {
   commands,
   FileSystemError,
@@ -11,7 +11,7 @@ import {
   Uri,
   window,
   workspace,
-} from "./support/vscodeStub";
+} from "../support/vscodeStub";
 
 /**
  * EPUBエディターのプレビュー（設計書6.65.6・6.65.8・6.65.10・6.65.11）。

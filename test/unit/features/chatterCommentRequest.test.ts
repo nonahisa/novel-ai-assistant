@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { requestChatterComment } from "../../src/features/chatterComment";
+import { requestChatterComment } from "../../../src/features/chatterComment";
 import type {
   AIProvider,
   GenerateParams,
   GenerateResult,
-} from "../../src/ai/types";
-import type { WorkEntry } from "../../src/models/types";
-import { workspace } from "./support/vscodeStub";
+} from "../../../src/ai/types";
+import type { WorkEntry } from "../../../src/models/types";
+import { workspace } from "../support/vscodeStub";
 
 /**
  * 本文を読んで言う一言を、AIへ頼みに行くところ（設計書6.21.4、P-34）。

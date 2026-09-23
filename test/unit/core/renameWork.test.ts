@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { renamePlotHeading } from "../../src/core/plotDoc";
-import { WorkRegistry } from "../../src/core/workRegistry";
-import type { WorkEntry } from "../../src/models/types";
+import { renamePlotHeading } from "../../../src/core/plotDoc";
+import { WorkRegistry } from "../../../src/core/workRegistry";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 作品名の変更（設計書6.1.1。作者の依頼、2026-09-10）。

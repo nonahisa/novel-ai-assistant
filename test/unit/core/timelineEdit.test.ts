@@ -8,8 +8,8 @@ import {
   toTimelineEpisodePath,
   unassignEpisode,
   validateTimeline,
-} from "../../src/core/timelineEdit";
-import { emptyTimeline, type Timeline } from "../../src/models/timeline";
+} from "../../../src/core/timelineEdit";
+import { emptyTimeline, type Timeline } from "../../../src/models/timeline";
 
 /**
  * 時期と系統を作る流れの、純粋な部分（設計書6.39.3）。

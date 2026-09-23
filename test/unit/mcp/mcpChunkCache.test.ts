@@ -33,24 +33,24 @@ const reply = JSON.stringify({
   ],
 });
 
-vi.mock("../../src/mcp/tools/ollama", () => ({
+vi.mock("../../../src/mcp/tools/ollama", () => ({
   ollamaGenerate: vi.fn(async (params: { userPrompt: string }) => {
     asked.push(params.userPrompt);
     return { text: reply };
   }),
 }));
 
-import { typoRun, typoPrompt } from "../../src/mcp/tools/typo";
-import { chunkFromId } from "../../src/mcp/tools/shared";
-import { chunkCacheFileOf } from "../../src/mcp/tools/chunkCacheFile";
+import { typoRun, typoPrompt } from "../../../src/mcp/tools/typo";
+import { chunkFromId } from "../../../src/mcp/tools/shared";
+import { chunkCacheFileOf } from "../../../src/mcp/tools/chunkCacheFile";
 import {
   ChunkCacheStore,
   type CacheKeyBase,
   type ChunkCacheIo,
-} from "../../src/core/chunkCacheStore";
-import { TYPO_CHECK_VERSION } from "../../src/prompts/typoCheck";
+} from "../../../src/core/chunkCacheStore";
+import { TYPO_CHECK_VERSION } from "../../../src/prompts/typoCheck";
 
-const WORK = nodePath.join(__dirname, "..", "fixtures", "mcp-work");
+const WORK = nodePath.join(__dirname, "..", "..", "fixtures", "mcp-work");
 const FILE = nodePath.join("本文", "004_よあけ.txt");
 const NUM_CTX = 32768;
 const MODEL = "gemma4:e4b";

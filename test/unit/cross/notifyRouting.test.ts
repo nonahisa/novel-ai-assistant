@@ -16,7 +16,7 @@ import * as path from "node:path";
  */
 function read(relative: string): string {
   return readFileSync(
-    path.join(__dirname, "..", "..", "src", relative),
+    path.join(__dirname, "..", "..", "..", "src", relative),
     "utf8"
   );
 }

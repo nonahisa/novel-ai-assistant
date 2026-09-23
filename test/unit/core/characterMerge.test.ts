@@ -2,8 +2,8 @@ import { describe, expect, test, vi } from "vitest";
 import {
   findMergeCandidates,
   mergeExtractedCharacters,
-} from "../../src/core/characterMerge";
-import { emptyCharacter, type Character } from "../../src/models/character";
+} from "../../../src/core/characterMerge";
+import { emptyCharacter, type Character } from "../../../src/models/character";
 
 describe("登場人物マージ", () => {
   test("空白だけの人物名は新規人物として保存しない", () => {

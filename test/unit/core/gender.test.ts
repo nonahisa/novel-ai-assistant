@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { normalizeGender } from "../../src/core/gender";
-import { mergeExtractedCharacters } from "../../src/core/characterMerge";
-import { emptyCharacter } from "../../src/models/character";
-import { CHARACTER_EXTRACT_SCHEMA } from "../../src/prompts/characterExtract";
+import { normalizeGender } from "../../../src/core/gender";
+import { mergeExtractedCharacters } from "../../../src/core/characterMerge";
+import { emptyCharacter } from "../../../src/models/character";
+import { CHARACTER_EXTRACT_SCHEMA } from "../../../src/prompts/characterExtract";
 
 describe("性別の表記を揃える", () => {
   test("男女は「男性」「女性」に統一する", () => {

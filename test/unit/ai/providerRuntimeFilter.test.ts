@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { filterProvidersForRuntime } from "../../src/ai/registry";
-import type { AIProvider } from "../../src/ai/types";
+import { filterProvidersForRuntime } from "../../../src/ai/registry";
+import type { AIProvider } from "../../../src/ai/types";
 
 /**
  * ブラウザ版では、**手元のPCで動くものを選択肢に出さない**

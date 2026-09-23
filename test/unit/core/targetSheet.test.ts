@@ -5,8 +5,8 @@ import {
   READER_TYPE_TABLE,
   resolveReaderType,
   type ReaderTypeId,
-} from "../../src/core/readerTarget";
-import { READER_TYPE_IDS } from "../../src/core/readerTypeNeighbors";
+} from "../../../src/core/readerTarget";
+import { READER_TYPE_IDS } from "../../../src/core/readerTypeNeighbors";
 import {
   rankReaderTypes,
   readerTypeAffinity,
@@ -14,8 +14,8 @@ import {
   readerTypeGaps,
   READER_TYPE_CENTERS,
   targetSheetFor,
-} from "../../src/core/targetSheet";
-import type { ReaderScores } from "../../src/models/readerProfile";
+} from "../../../src/core/targetSheet";
+import type { ReaderScores } from "../../../src/models/readerProfile";
 
 /**
  * ターゲットシートの一致度（設計書6.108、第1段と第2段）。

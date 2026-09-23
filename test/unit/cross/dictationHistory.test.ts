@@ -9,7 +9,7 @@ import { resolve } from "node:path";
  * 適用に成功したら `recordEdit` を通すことを、源の形で見張る。
  */
 const source = readFileSync(
-  resolve(__dirname, "../../src/features/dictationClean.ts"),
+  resolve(__dirname, "../../../src/features/dictationClean.ts"),
   "utf8"
 );
 

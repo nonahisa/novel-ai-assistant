@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { commands, window } from "./support/vscodeStub";
-import type { WorkEntry } from "../../src/models/types";
+import { commands, window } from "../support/vscodeStub";
+import type { WorkEntry } from "../../../src/models/types";
 import {
   runProofreadingSuite,
   type SelectionMemento,
-} from "../../src/features/proofreadingSuite";
+} from "../../../src/features/proofreadingSuite";
 
 /**
  * 校正のまとめ実行（設計書6.80）の走らせ方。

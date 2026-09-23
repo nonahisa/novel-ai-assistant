@@ -66,8 +66,8 @@ vi.mock("undici", async (importOriginal) => {
 });
 
 /** ブラウザ版のふりをするときだけ、処理を起こせない側へ倒す */
-vi.mock("../../src/core/runtime", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/core/runtime")>();
+vi.mock("../../../src/core/runtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/core/runtime")>();
   return {
     ...actual,
     canRunProcesses: () => !webFlag.on && actual.canRunProcesses(),
@@ -75,14 +75,14 @@ vi.mock("../../src/core/runtime", async (importOriginal) => {
 });
 
 import { Agent } from "undici";
-import { OllamaProvider } from "../../src/ai/ollamaProvider";
-import { OllamaEmbeddingProvider } from "../../src/ai/ollamaEmbedding";
-import { LmStudioProvider } from "../../src/ai/lmstudioProvider";
-import { setStreamingSettingReader } from "../../src/ai/ollamaStream";
-import { fetchJson, isFetchTimeout } from "../../src/ai/httpClient";
-import * as fetchTimeouts from "../../src/ai/fetchTimeouts";
-import { ollamaGenerate, MCP_OLLAMA_WAIT_MS } from "../../src/mcp/tools/ollama";
-import { workspace } from "./support/vscodeStub";
+import { OllamaProvider } from "../../../src/ai/ollamaProvider";
+import { OllamaEmbeddingProvider } from "../../../src/ai/ollamaEmbedding";
+import { LmStudioProvider } from "../../../src/ai/lmstudioProvider";
+import { setStreamingSettingReader } from "../../../src/ai/ollamaStream";
+import { fetchJson, isFetchTimeout } from "../../../src/ai/httpClient";
+import * as fetchTimeouts from "../../../src/ai/fetchTimeouts";
+import { ollamaGenerate, MCP_OLLAMA_WAIT_MS } from "../../../src/mcp/tools/ollama";
+import { workspace } from "../support/vscodeStub";
 
 /** 作者の設定：Ollama の待ち時間を900秒へ延ばしてある（ノートPCと同じ） */
 const CONFIGURED_SECONDS = 900;

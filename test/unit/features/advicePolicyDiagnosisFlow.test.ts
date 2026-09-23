@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { setAdvicePolicy } from "../../src/features/advicePolicyDiagnosis";
-import { AdvicePolicyStore } from "../../src/core/advicePolicyStore";
+import { setAdvicePolicy } from "../../../src/features/advicePolicyDiagnosis";
+import { AdvicePolicyStore } from "../../../src/core/advicePolicyStore";
 import {
   ADVICE_QUESTIONS,
   type AdviceProfile,
-} from "../../src/core/advicePolicy";
-import type { WorkEntry } from "../../src/models/types";
-import { window } from "./support/vscodeStub";
+} from "../../../src/core/advicePolicy";
+import type { WorkEntry } from "../../../src/models/types";
+import { window } from "../support/vscodeStub";
 
 /**
  * 相談の助言方針を決める9問（設計書6.86、P-36）。実機確認リスト F-95。

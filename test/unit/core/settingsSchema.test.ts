@@ -7,13 +7,13 @@ import {
   organizationSchema,
   schemaReadme,
   worldSchema,
-} from "../../src/core/settingsSchema";
-import { emptyCharacter } from "../../src/models/character";
-import { emptyAbility } from "../../src/models/ability";
-import { emptyLocation } from "../../src/models/location";
-import { emptyOrganization } from "../../src/models/organization";
-import { emptyWorldItem } from "../../src/models/world";
-import { SUMMARY_MAX_CHARS } from "../../src/core/summaryLimit";
+} from "../../../src/core/settingsSchema";
+import { emptyCharacter } from "../../../src/models/character";
+import { emptyAbility } from "../../../src/models/ability";
+import { emptyLocation } from "../../../src/models/location";
+import { emptyOrganization } from "../../../src/models/organization";
+import { emptyWorldItem } from "../../../src/models/world";
+import { SUMMARY_MAX_CHARS } from "../../../src/core/summaryLimit";
 
 /**
  * 外部のAIへ渡すスキーマが、実際のデータ構造とずれていないかを固定する。

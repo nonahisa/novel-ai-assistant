@@ -4,7 +4,7 @@ import {
   matchReaderStatsEnvelope,
   parseReaderStatsEnvelope,
   READER_STATS_ENVELOPE_VERSION,
-} from "../../src/core/readerStatsEnvelope";
+} from "../../../src/core/readerStatsEnvelope";
 import {
   assertReaderStatsRecords,
   emptyPostingLedger,
@@ -20,7 +20,7 @@ import {
   withSites,
   type PostingLedger,
   type ReaderStatsRecord,
-} from "../../src/models/posting";
+} from "../../../src/models/posting";
 
 /**
  * 読者の反応の取り込み（設計書6.79.7）。

@@ -1,8 +1,8 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { readSiteRecords } from "../../src/features/writingStatsPanel";
-import type { WorkEntry } from "../../src/models/types";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
+import { readSiteRecords } from "../../../src/features/writingStatsPanel";
+import type { WorkEntry } from "../../../src/models/types";
+import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 
 /**
  * 執筆量パネルの「サイトの記録」を読むところ（0.33.9のレビュー、中1）。

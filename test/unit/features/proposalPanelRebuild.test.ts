@@ -43,7 +43,7 @@ vi.mock("vscode", () => {
   };
 });
 
-vi.mock("../../src/core/typoIssueHistory", () => ({
+vi.mock("../../../src/core/typoIssueHistory", () => ({
   TypoDismissedHistory: class {
     add = () => Promise.resolve(undefined);
     load = () => Promise.resolve(new Set<string>());
@@ -56,8 +56,8 @@ vi.mock("../../src/core/typoIssueHistory", () => ({
 import {
   ProposalPanel,
   type RecordUpdateViewItem,
-} from "../../src/features/proposalPanel";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/features/proposalPanel";
+import type { WorkEntry } from "../../../src/models/types";
 
 const work: WorkEntry = {
   id: "w1",

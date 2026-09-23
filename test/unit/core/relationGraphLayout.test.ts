@@ -2,15 +2,15 @@ import { describe, expect, test } from "vitest";
 import {
   emptyCharacter,
   type Character,
-} from "../../src/models/character";
-import { buildRelationGraph, egoGraph } from "../../src/core/relationGraph";
+} from "../../../src/models/character";
+import { buildRelationGraph, egoGraph } from "../../../src/core/relationGraph";
 import {
   layoutCircle,
   layoutEgo,
   NODE_RADII,
   type GraphLayout,
   type LayoutArc,
-} from "../../src/core/relationGraphLayout";
+} from "../../../src/core/relationGraphLayout";
 
 /**
  * 人物相関図の配置（設計書6.38.2）。

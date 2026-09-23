@@ -5,8 +5,8 @@ import {
   ADVICE_POLICY_DEFAULT_KEY,
   ADVICE_POLICY_KEY_PREFIX,
   advicePolicyKey,
-} from "../../src/core/advicePolicyStore";
-import { scoreAnswers, type AdviceProfile } from "../../src/core/advicePolicy";
+} from "../../../src/core/advicePolicyStore";
+import { scoreAnswers, type AdviceProfile } from "../../../src/core/advicePolicy";
 
 /**
  * 助言方針の**作者ごとの既定**（設計書6.90.2）。

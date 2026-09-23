@@ -3,9 +3,9 @@ import {
   defaultParentForNewFolder,
   describeFolder,
   pickNewFolderParent,
-} from "../../src/features/pickFolder";
-import { FileSystemError, Uri, window, workspace } from "./support/vscodeStub";
-import { isSameLocation } from "../../src/core/locationCompare";
+} from "../../../src/features/pickFolder";
+import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
+import { isSameLocation } from "../../../src/core/locationCompare";
 
 /**
  * 開いているフォルダーの見せ方（設計書5.8.8）。

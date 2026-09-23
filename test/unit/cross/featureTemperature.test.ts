@@ -6,33 +6,33 @@ import {
   runByRunner,
   runOnce,
   temperatureFor,
-} from "../../src/mcp/tools/run";
-import { OLLAMA_GENERATE_INPUT } from "../../src/mcp/tools/ollama";
-import { runSakuraChunks } from "../../scripts/measureSakura.mjs";
+} from "../../../src/mcp/tools/run";
+import { OLLAMA_GENERATE_INPUT } from "../../../src/mcp/tools/ollama";
+import { runSakuraChunks } from "../../../scripts/measureSakura.mjs";
 
-import { TYPO_CHECK_TEMPERATURE } from "../../src/prompts/typoCheck";
-import { PROOFREAD_TEMPERATURE } from "../../src/prompts/proofread";
-import { NOTATION_ADVICE_TEMPERATURE } from "../../src/prompts/notationAdvice";
-import { CONTRADICTION_CHECK_TEMPERATURE } from "../../src/prompts/contradictionCheck";
-import { CONTRADICTION_VERIFY_TEMPERATURE } from "../../src/prompts/contradictionVerify";
-import { STORY_FACT_EXTRACT_TEMPERATURE } from "../../src/prompts/storyFactExtract";
-import { FORESHADOW_DETECT_TEMPERATURE } from "../../src/prompts/foreshadowDetect";
-import { FORESHADOW_RESOLVE_TEMPERATURE } from "../../src/prompts/foreshadowResolve";
-import { DEVIATION_CHECK_TEMPERATURE } from "../../src/prompts/deviationCheck";
-import { EPISODE_PLOT_CHECK_TEMPERATURE } from "../../src/prompts/episodePlotCheck";
-import { EPISODE_PLOT_CONTRAST_TEMPERATURE } from "../../src/prompts/episodePlotContrast";
-import { CHARACTER_EXTRACT_TEMPERATURE } from "../../src/prompts/characterExtract";
-import { SYNOPSIS_TEMPERATURE } from "../../src/prompts/synopsis";
-import { PLOT_REVERSE_TEMPERATURE } from "../../src/prompts/plotReverse";
-import { CHAPTER_PROPOSE_TEMPERATURE } from "../../src/prompts/chapterPropose";
+import { TYPO_CHECK_TEMPERATURE } from "../../../src/prompts/typoCheck";
+import { PROOFREAD_TEMPERATURE } from "../../../src/prompts/proofread";
+import { NOTATION_ADVICE_TEMPERATURE } from "../../../src/prompts/notationAdvice";
+import { CONTRADICTION_CHECK_TEMPERATURE } from "../../../src/prompts/contradictionCheck";
+import { CONTRADICTION_VERIFY_TEMPERATURE } from "../../../src/prompts/contradictionVerify";
+import { STORY_FACT_EXTRACT_TEMPERATURE } from "../../../src/prompts/storyFactExtract";
+import { FORESHADOW_DETECT_TEMPERATURE } from "../../../src/prompts/foreshadowDetect";
+import { FORESHADOW_RESOLVE_TEMPERATURE } from "../../../src/prompts/foreshadowResolve";
+import { DEVIATION_CHECK_TEMPERATURE } from "../../../src/prompts/deviationCheck";
+import { EPISODE_PLOT_CHECK_TEMPERATURE } from "../../../src/prompts/episodePlotCheck";
+import { EPISODE_PLOT_CONTRAST_TEMPERATURE } from "../../../src/prompts/episodePlotContrast";
+import { CHARACTER_EXTRACT_TEMPERATURE } from "../../../src/prompts/characterExtract";
+import { SYNOPSIS_TEMPERATURE } from "../../../src/prompts/synopsis";
+import { PLOT_REVERSE_TEMPERATURE } from "../../../src/prompts/plotReverse";
+import { CHAPTER_PROPOSE_TEMPERATURE } from "../../../src/prompts/chapterPropose";
 import {
   BLURB_TEMPERATURE,
   CATCHPHRASE_TEMPERATURE,
-} from "../../src/prompts/blurb";
-import { OPENING_CHECK_TEMPERATURE } from "../../src/prompts/openingCheck";
-import { NAME_SUGGEST_TEMPERATURE } from "../../src/prompts/nameSuggest";
-import { WORK_CHAT_TEMPERATURE } from "../../src/prompts/workChat";
-import { SEARCH_TERMS_TEMPERATURE } from "../../src/prompts/searchTerms";
+} from "../../../src/prompts/blurb";
+import { OPENING_CHECK_TEMPERATURE } from "../../../src/prompts/openingCheck";
+import { NAME_SUGGEST_TEMPERATURE } from "../../../src/prompts/nameSuggest";
+import { WORK_CHAT_TEMPERATURE } from "../../../src/prompts/workChat";
+import { SEARCH_TERMS_TEMPERATURE } from "../../../src/prompts/searchTerms";
 
 /**
  * 温度は、製品と測定台で同じものを見る（設計書6.87.16）。
@@ -56,7 +56,7 @@ import { SEARCH_TERMS_TEMPERATURE } from "../../src/prompts/searchTerms";
  * 3. **明示が無ければ製品の値、明示があればその値**（揺らして測る道は残す）
  */
 
-const ROOT = path.resolve(__dirname, "..", "..");
+const ROOT = path.resolve(__dirname, "..", "..", "..");
 
 /** 数字は1か所にしか無い。**ここは「値そのもの」の錨である** */
 const EXPECTED: Array<[string, number]> = [

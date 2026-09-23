@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { describeSendVolume } from "../../src/core/sendVolume";
-import { CARRY_OVER_DEFAULT_CHAPTERS } from "../../src/core/contradictionMaterial";
+import { describeSendVolume } from "../../../src/core/sendVolume";
+import { CARRY_OVER_DEFAULT_CHAPTERS } from "../../../src/core/contradictionMaterial";
 
 /**
  * 矛盾検知の引き継ぎ（`carryOver`）を既定にした（作者の裁定、2026-09-23。A3①）。
@@ -41,7 +41,7 @@ describe("送る量の言い方（`describeSendVolume`）", () => {
 
 describe("矛盾検知の確認画面は、実際に送る量で見積もる", () => {
   const source = readFileSync(
-    join(__dirname, "..", "..", "src", "features", "checkContradictions.ts"),
+    join(__dirname, "..", "..", "..", "src", "features", "checkContradictions.ts"),
     "utf8"
   );
 

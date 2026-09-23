@@ -4,8 +4,8 @@ import {
   buildEnrichSchema,
   ENRICHABLE_FIELDS,
   MISATTRIBUTED_KEY,
-} from "../../src/prompts/settingsEnrich";
-import { SUMMARY_MAX_CHARS } from "../../src/core/summaryLimit";
+} from "../../../src/prompts/settingsEnrich";
+import { SUMMARY_MAX_CHARS } from "../../../src/core/summaryLimit";
 
 describe("項目を充実させる提案", () => {
   test("種別ごとに提案する項目を決める", () => {

@@ -17,7 +17,7 @@ import { describe, expect, test } from "vitest";
  * ——あれは判断の根拠であって、動きを決めていない。
  */
 
-const SRC = path.join(__dirname, "..", "..", "src");
+const SRC = path.join(__dirname, "..", "..", "..", "src");
 
 /**
  * よく出るモデルの系統。名前そのものではなく**系統**で見る。

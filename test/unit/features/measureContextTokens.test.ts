@@ -1,16 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { window, workspace } from "./support/vscodeStub";
-import type { AIRegistry } from "../../src/ai/registry";
-import { AIError } from "../../src/ai/types";
-import type { GenerateParams, GenerateResult } from "../../src/ai/types";
+import { window, workspace } from "../support/vscodeStub";
+import type { AIRegistry } from "../../../src/ai/registry";
+import { AIError } from "../../../src/ai/types";
+import type { GenerateParams, GenerateResult } from "../../../src/ai/types";
 import {
   maxTimeoutSeconds,
   resolveTimeoutSeconds,
-} from "../../src/core/modelTuning";
+} from "../../../src/core/modelTuning";
 import {
   tuningStoreContents,
   useMemoryTuningStore,
-} from "./support/tuningStore";
+} from "../support/tuningStore";
 
 /**
  * 「読める長さ」を入力トークン数で測る道を、**送るところまで通して**見る
@@ -85,7 +85,7 @@ const state = vi.hoisted(() => ({
   declaredTokens: 262_144,
 }));
 
-vi.mock("../../src/core/logger", () => ({
+vi.mock("../../../src/core/logger", () => ({
   logStep: vi.fn(),
   logLine: vi.fn(),
   logFailure: vi.fn(),
@@ -93,7 +93,7 @@ vi.mock("../../src/core/logger", () => ({
   useLogFile: vi.fn(),
 }));
 
-vi.mock("../../src/ai/registry", () => ({
+vi.mock("../../../src/ai/registry", () => ({
   ensureConfigured: vi.fn(async () => ({
     provider: {
       id: "ollama",
@@ -182,13 +182,13 @@ vi.mock("../../src/ai/registry", () => ({
   })),
 }));
 
-vi.mock("../../src/features/aiConnectivity", () => ({
+vi.mock("../../../src/features/aiConnectivity", () => ({
   confirmPaidUsage: vi.fn(async () => true),
   confirmProviderReachable: vi.fn(async () => true),
   ollamaEndpoint: vi.fn(() => "http://127.0.0.1:11434"),
 }));
 
-vi.mock("../../src/views/progress", () => ({
+vi.mock("../../../src/views/progress", () => ({
   withCancellableProgress: vi.fn(
     async (
       _title: string,
@@ -218,7 +218,7 @@ vi.mock("../../src/views/progress", () => ({
   ),
 }));
 
-import { measureContext } from "../../src/features/measureContext";
+import { measureContext } from "../../../src/features/measureContext";
 
 const registry = {
   resolveModelInfo: async () => ({ contextWindow: state.declaredTokens }),

@@ -8,9 +8,9 @@ import {
   useCoversChapter,
   ADDRESS_ISSUE_LABELS,
   type AddressUse,
-} from "../../src/core/addressPairs";
-import { emptyCharacter } from "../../src/models/character";
-import type { AddressTerm, Character } from "../../src/models/character";
+} from "../../../src/core/addressPairs";
+import { emptyCharacter } from "../../../src/models/character";
+import type { AddressTerm, Character } from "../../../src/models/character";
 
 /**
  * **登場人物どうしの呼び合い**（設計書6.92）。

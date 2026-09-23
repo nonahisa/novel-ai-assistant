@@ -5,10 +5,10 @@ import {
   describeCapability,
   describeContradictionCapabilityForAuthor,
   type CapabilityProfile,
-} from "../../src/ai/capability";
+} from "../../../src/ai/capability";
 // **境目は `types.ts` にある**（0.71.3で1つにまとめた）。`capability.ts` は
 // `types.ts` を import する側なので、逆向きには置けない
-import { inferTier, LARGE_MODEL_MIN_BILLIONS } from "../../src/ai/types";
+import { inferTier, LARGE_MODEL_MIN_BILLIONS } from "../../../src/ai/types";
 
 describe("モデルの地力で、機能の重さを決める", () => {
   test("高性能なモデルには、観点を全部渡す", () => {

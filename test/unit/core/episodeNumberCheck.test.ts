@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   checkEpisodeNumbers,
   describeEpisodeNumbers,
-} from "../../src/core/episodeNumberCheck";
+} from "../../../src/core/episodeNumberCheck";
 
 /**
  * 話番号の点検——重複と欠番（作者の指示、2026-09-19）。

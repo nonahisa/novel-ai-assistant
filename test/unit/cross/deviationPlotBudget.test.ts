@@ -6,12 +6,12 @@ import {
   describePlotTrim,
   plotMaxChars,
   trimPlotForDeviation,
-} from "../../src/features/checkDeviations";
+} from "../../../src/features/checkDeviations";
 import {
   buildDeviationCheckPrompt,
   DEVIATION_TYPES,
   deviationBudget,
-} from "../../src/prompts/deviationCheck";
+} from "../../../src/prompts/deviationCheck";
 
 /**
  * 逸脱検知へ渡すプロットの上限（設計書6.77の第2段、6.27.4）。
@@ -154,7 +154,7 @@ describe("切ったことを黙らない", () => {
  */
 describe("案内は一度だけ（配線）", () => {
   const source = fs.readFileSync(
-    nodePath.join(__dirname, "..", "..", "src", "features", "checkDeviations.ts"),
+    nodePath.join(__dirname, "..", "..", "..", "src", "features", "checkDeviations.ts"),
     "utf8"
   );
 
@@ -171,7 +171,7 @@ describe("案内は一度だけ（配線）", () => {
     expect(source).toContain('from "../core/plotForDeviation"');
 
     const mcp = fs.readFileSync(
-      nodePath.join(__dirname, "..", "..", "src", "mcp", "tools", "episode.ts"),
+      nodePath.join(__dirname, "..", "..", "..", "src", "mcp", "tools", "episode.ts"),
       "utf8"
     );
     expect(mcp).toContain('from "../../core/plotForDeviation"');
@@ -181,7 +181,7 @@ describe("案内は一度だけ（配線）", () => {
     expect(source).toContain("plotTrimmedNote");
 
     const extension = fs.readFileSync(
-      nodePath.join(__dirname, "..", "..", "src", "extension.ts"),
+      nodePath.join(__dirname, "..", "..", "..", "src", "extension.ts"),
       "utf8"
     );
     expect(extension).toContain("plotTrimmedNote");

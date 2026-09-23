@@ -2,8 +2,8 @@ import { describe, expect, test } from "vitest";
 import {
   buildAppellationIndex,
   findMergeCandidates,
-} from "../../src/core/characterMerge";
-import { emptyCharacter, type Character } from "../../src/models/character";
+} from "../../../src/core/characterMerge";
+import { emptyCharacter, type Character } from "../../../src/models/character";
 import { readFileSync } from "node:fs";
 import * as nodePath from "node:path";
 
@@ -203,7 +203,7 @@ describe("同一人物の候補検出", () => {
 describe("誰にでも使う呼び方の一覧", () => {
   const read = (relative: string): string =>
     readFileSync(
-      nodePath.join(__dirname, "..", "..", "src", relative),
+      nodePath.join(__dirname, "..", "..", "..", "src", relative),
       "utf8"
     );
 

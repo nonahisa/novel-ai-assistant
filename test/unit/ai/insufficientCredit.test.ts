@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { AIError, recoveryForAIError } from "../../src/ai/types";
-import { toStatusError } from "../../src/ai/httpClient";
-import { billingProblem } from "../../src/ai/claudeProvider";
-import { recoveryForAIError as recovery } from "../../src/ai/types";
+import { AIError, recoveryForAIError } from "../../../src/ai/types";
+import { toStatusError } from "../../../src/ai/httpClient";
+import { billingProblem } from "../../../src/ai/claudeProvider";
+import { recoveryForAIError as recovery } from "../../../src/ai/types";
 
 describe("残高不足の扱い", () => {
   test("Anthropicの残高不足を見分ける", () => {

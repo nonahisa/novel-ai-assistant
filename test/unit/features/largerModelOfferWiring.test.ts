@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { isMeasureTarget } from "../../src/features/measureContext";
+import { isMeasureTarget } from "../../../src/features/measureContext";
 
 /**
  * 大きいモデルの案内（A3④）を、**当たりがモデルの大きさで変わる3機能**の
@@ -12,7 +12,7 @@ import { isMeasureTarget } from "../../src/features/measureContext";
  * 押さえる（`confirmShowsWorkTitle.test.ts` と同じ流儀）。
  */
 
-const FEATURES = join(__dirname, "..", "..", "src", "features");
+const FEATURES = join(__dirname, "..", "..", "..", "src", "features");
 
 const WIRED = [
   { file: "checkContradictions.ts", feature: "contradiction", self: "checkContradictions" },
@@ -53,7 +53,7 @@ describe("名指しで測る（「〈モデル〉の速さを測る」）", () =
 
   test("コマンドは名指しを受けて、割当ではなくそのモデルを測る", () => {
     const extension = readFileSync(
-      join(__dirname, "..", "..", "src", "extension.ts"),
+      join(__dirname, "..", "..", "..", "src", "extension.ts"),
       "utf8"
     );
     expect(extension).toMatch(

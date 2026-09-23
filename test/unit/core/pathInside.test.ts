@@ -17,13 +17,13 @@ import { resolve, sep } from "node:path";
  */
 const host = vi.hoisted(() => ({ windows: false }));
 
-vi.mock("../../src/core/runtime", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/core/runtime")>();
+vi.mock("../../../src/core/runtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/core/runtime")>();
   return { ...actual, isWindowsHost: () => host.windows };
 });
 
-import { isPathInside } from "../../src/core/pathText";
-import * as paths from "../../src/core/pathText";
+import { isPathInside } from "../../../src/core/pathText";
+import * as paths from "../../../src/core/pathText";
 
 afterEach(() => {
   host.windows = false;
@@ -153,7 +153,7 @@ describe("網：自前の「中にあるか」を作らない", () => {
    * すり抜ける**——そこは検査では防げないので、`pathText.ts` の注記と
    * この網の両方で「ここにある」と知らせる。
    */
-  const SRC_DIR = resolve(__dirname, "..", "..", "src");
+  const SRC_DIR = resolve(__dirname, "..", "..", "..", "src");
   const ALLOWED = "src/core/pathText.ts";
   const DEFINITION =
     /\bfunction\s+(isPathInside|isInside)\s*\(|\b(?:const|let)\s+(isPathInside|isInside)\s*=/;

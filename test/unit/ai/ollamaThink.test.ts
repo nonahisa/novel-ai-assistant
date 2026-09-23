@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "vitest";
-import { thinkOptionFor, willStreamChat } from "../../src/ai/ollamaProvider";
-import { setStreamingSettingReader } from "../../src/ai/ollamaStream";
+import { thinkOptionFor, willStreamChat } from "../../../src/ai/ollamaProvider";
+import { setStreamingSettingReader } from "../../../src/ai/ollamaStream";
 
 /**
  * **思考を流す口を渡しているときは、思考を切らない**（作者の指摘、

@@ -3,7 +3,7 @@ import {
   renderChatLogEntry,
   summarizeMaterials,
   type ChatLogEntry,
-} from "../../src/core/chatLog";
+} from "../../../src/core/chatLog";
 
 const AT = new Date(2026, 7, 15, 21, 34, 56);
 

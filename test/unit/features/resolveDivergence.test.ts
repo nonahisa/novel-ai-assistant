@@ -102,7 +102,7 @@ const {
   describeDivergenceConfirm,
   describeFoldSuccess,
   foldDivergence,
-} = await import("../../src/features/resolveDivergence");
+} = await import("../../../src/features/resolveDivergence");
 type ConflictWalker = Parameters<
   typeof foldDivergence
 >[2] extends { walk?: infer W } | undefined

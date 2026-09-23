@@ -8,15 +8,15 @@ import {
   warnWithLog,
   whenNoticePicked,
   withWorkTitle,
-} from "../../src/views/notify";
+} from "../../../src/views/notify";
 import {
   lastQuickPick,
   resetLastQuickPick,
   statusBarMessages,
   window,
   workspace,
-} from "./support/vscodeStub";
-import * as logger from "../../src/core/logger";
+} from "../support/vscodeStub";
+import * as logger from "../../../src/core/logger";
 
 /**
  * 知らせの行き先（作者の裁定 2026-09-06、`src/views/notify.ts`）。

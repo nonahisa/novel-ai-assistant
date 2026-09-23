@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { saveAndSyncAll } from "../../src/features/handoffSync";
-import type { GitSyncStatus } from "../../src/core/git";
-import type { WorkRegistry } from "../../src/core/workRegistry";
-import type { GitSyncMonitorLike } from "../../src/features/gitSyncStub";
-import type { WorkEntry } from "../../src/models/types";
-import { UNSENT_MARK_KEY } from "../../src/core/unsentMark";
-import { window, workspace } from "./support/vscodeStub";
+import { saveAndSyncAll } from "../../../src/features/handoffSync";
+import type { GitSyncStatus } from "../../../src/core/git";
+import type { WorkRegistry } from "../../../src/core/workRegistry";
+import type { GitSyncMonitorLike } from "../../../src/features/gitSyncStub";
+import type { WorkEntry } from "../../../src/models/types";
+import { UNSENT_MARK_KEY } from "../../../src/core/unsentMark";
+import { window, workspace } from "../support/vscodeStub";
 
 /**
  * 「保存して同期」（設計書6.15.1の②）。**1押しで 保存 → 記録 → 送信。**
@@ -22,7 +22,7 @@ import { window, workspace } from "./support/vscodeStub";
 /** 「作品をすべて同期」が呼ばれた回数（作り物） */
 let syncCalls = 0;
 
-vi.mock("../../src/features/syncAllWorks", () => ({
+vi.mock("../../../src/features/syncAllWorks", () => ({
   syncAllWorks: async () => {
     syncCalls += 1;
     order.push("sync");

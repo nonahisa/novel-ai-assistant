@@ -7,7 +7,7 @@ import {
   tailOfEpisodeFile,
   tailParagraphs,
   type ResumeSheetInput,
-} from "../../src/core/resumeSheet";
+} from "../../../src/core/resumeSheet";
 
 /**
  * 執筆再開の1枚（設計書6.36.1）と、単話プロットの雛形（6.36.2）。

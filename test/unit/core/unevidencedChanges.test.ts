@@ -1,19 +1,19 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
-import { mergeExtractedCharacters } from "../../src/core/characterMerge";
+import { mergeExtractedCharacters } from "../../../src/core/characterMerge";
 import {
   changeMovesBody,
   confirmHeldChanges,
   describeHeldChanges,
   heldChangesOfField,
-} from "../../src/core/recordChanges";
-import { describeExtractionLog } from "../../src/core/runLog";
-import { emptyCharacter, parseCharacter } from "../../src/models/character";
+} from "../../../src/core/recordChanges";
+import { describeExtractionLog } from "../../../src/core/runLog";
+import { emptyCharacter, parseCharacter } from "../../../src/models/character";
 import {
   mergeConflicts,
   type RecordChange,
-} from "../../src/models/jsonValidation";
+} from "../../../src/models/jsonValidation";
 
 /**
  * 根拠（本文の引用）の無い「変化」は、台帳の本体を動かさない
@@ -263,7 +263,7 @@ describe("抽出の完了報告", () => {
 
   test("抽出の報告が件数を受け取っている（書き方で確かめる）", () => {
     const source = readFileSync(
-      resolve(__dirname, "../../src/features/extractCharacters.ts"),
+      resolve(__dirname, "../../../src/features/extractCharacters.ts"),
       "utf8"
     );
     expect(source).toContain("heldChanges: merged?.heldChanges.length ?? 0");
@@ -274,7 +274,7 @@ describe("抽出の完了報告", () => {
 
 describe("設定資料パネル", () => {
   const source = readFileSync(
-    resolve(__dirname, "../../src/features/settingsPanel.ts"),
+    resolve(__dirname, "../../../src/features/settingsPanel.ts"),
     "utf8"
   );
 

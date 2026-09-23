@@ -62,7 +62,7 @@ const handlers: Array<(uri: { fsPath: string }) => void> = [];
 
 const 作品フォルダー = "C:/書庫/短編";
 
-vi.mock("../../src/core/workRegistry", () => ({
+vi.mock("../../../src/core/workRegistry", () => ({
   readWorkConfig: async () => ({}),
   workPaths: () => ({ settings: `${作品フォルダー}/設定` }),
 }));
@@ -73,8 +73,8 @@ const {
   clearExternalChangeQueue,
   describeExternalChange,
   externalChangeButtons,
-} = await import("../../src/features/watchSettings");
-const { SelfWriteTracker } = await import("../../src/core/externalChanges");
+} = await import("../../../src/features/watchSettings");
+const { SelfWriteTracker } = await import("../../../src/core/externalChanges");
 
 const 短編 = { id: "w1", title: "短編", folderPath: 作品フォルダー } as never;
 const 長編 = {

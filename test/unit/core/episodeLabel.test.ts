@@ -5,8 +5,8 @@ import {
   collectedLabelIndex,
   episodeGroupLabel,
   isCollectedFile,
-} from "../../src/core/episodeLabel";
-import type { EpisodeFile } from "../../src/models/types";
+} from "../../../src/core/episodeLabel";
+import type { EpisodeFile } from "../../../src/models/types";
 
 /** 見出しの材料。話数と種別だけを見るので、残りは空でよい */
 function episode(patch: Partial<EpisodeFile>): EpisodeFile {

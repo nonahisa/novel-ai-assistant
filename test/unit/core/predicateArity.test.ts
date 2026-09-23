@@ -3,7 +3,7 @@ import {
   arityOf,
   canonicalPredicate,
   isExclusivePredicate,
-} from "../../src/core/predicateArity";
+} from "../../../src/core/predicateArity";
 
 /**
  * 項目ごとの「同時に1つか、いくつでもか」（設計書6.88.6）。

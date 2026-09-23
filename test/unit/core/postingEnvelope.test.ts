@@ -5,7 +5,7 @@ import {
   pasteHelperSites,
   POSTING_ENVELOPE_VERSION,
   supportsPasteHelper,
-} from "../../src/core/postingEnvelope";
+} from "../../../src/core/postingEnvelope";
 
 /**
  * 貼り込み係へ渡すJSON封筒（設計書6.79.3）。

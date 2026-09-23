@@ -1,17 +1,17 @@
 import { describe, expect, it, afterEach, beforeEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { workspace } from "./support/vscodeStub";
-import { useMemoryTuningStore } from "./support/tuningStore";
+import { workspace } from "../support/vscodeStub";
+import { useMemoryTuningStore } from "../support/tuningStore";
 import {
   MINIMUM_OUTPUT_TOKENS,
   resolveOutputLimitForSend,
   resolveOutputTokensForPlanning,
   resolveOutputTokensForSend,
   truncatedOutputAdvice,
-} from "../../src/ai/outputLimit";
-import { saveModelTuning } from "../../src/core/modelTuning";
-import { readChunkSettings } from "../../src/features/chunkSettings";
+} from "../../../src/ai/outputLimit";
+import { saveModelTuning } from "../../../src/core/modelTuning";
+import { readChunkSettings } from "../../../src/features/chunkSettings";
 
 /**
  * チャンク予算・num_ctx の確保に見込む出力トークン数（設計書6.65.16の2）。
@@ -304,6 +304,7 @@ describe("measureContext.ts は resolveOutputTokensForPlanning を経由しな�
   it("測定の呼び出しは resolveMaxOutputTokens を直接使う", () => {
     const file = path.join(
       __dirname,
+      "..",
       "..",
       "..",
       "src",

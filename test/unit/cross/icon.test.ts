@@ -10,7 +10,7 @@ import { describe, expect, test } from "vitest";
  * 「そもそも表示できない書き方」だけは機械で止められる。
  */
 const icon = readFileSync(
-  path.join(__dirname, "..", "..", "media", "icon.svg"),
+  path.join(__dirname, "..", "..", "..", "media", "icon.svg"),
   "utf8"
 );
 

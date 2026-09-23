@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { jouyouKanjiList, nonJouyouKanjiIn } from "../../src/core/jouyouKanji";
+import { jouyouKanjiList, nonJouyouKanjiIn } from "../../../src/core/jouyouKanji";
 
 /**
  * 常用漢字表（平成22年内閣告示第2号）の照合（作者の指定、2026-08-28）。

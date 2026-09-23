@@ -8,9 +8,9 @@ import {
   splitIntoChunks,
   splitMergedChunk,
   type Chunk,
-} from "../../src/core/chunker";
-import { chaptersForCandidate } from "../../src/core/groundedEvidence";
-import { validateCharacterExtractResult } from "../../src/core/characterExtractionValidation";
+} from "../../../src/core/chunker";
+import { chaptersForCandidate } from "../../../src/core/groundedEvidence";
+import { validateCharacterExtractResult } from "../../../src/core/characterExtractionValidation";
 
 /**
  * 短い話をまとめて1回で送る仕組み。

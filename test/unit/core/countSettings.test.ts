@@ -6,8 +6,8 @@ import {
   pickCount,
   countModeLabel,
   DEFAULT_COUNT_MODE,
-} from "../../src/core/countSettings";
-import { countChars } from "../../src/core/charCount";
+} from "../../../src/core/countSettings";
+import { countChars } from "../../../src/core/charCount";
 
 /**
  * 数え方の設定（設計書6.4）。

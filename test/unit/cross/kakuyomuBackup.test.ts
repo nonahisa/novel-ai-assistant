@@ -2,10 +2,10 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { isWorkInfoFile } from "../../src/core/workInfoFile";
-import { workScan } from "../../src/mcp/tools/workScan";
-import { orderedEpisodeBodies } from "../../src/mcp/tools/shared";
-import { emptyDeviceStats, recordMeasurement } from "../../src/core/writingStats";
+import { isWorkInfoFile } from "../../../src/core/workInfoFile";
+import { workScan } from "../../../src/mcp/tools/workScan";
+import { orderedEpisodeBodies } from "../../../src/mcp/tools/shared";
+import { emptyDeviceStats, recordMeasurement } from "../../../src/core/writingStats";
 
 /**
  * カクヨムのバックアップを、そのまま作品フォルダーとして登録したとき

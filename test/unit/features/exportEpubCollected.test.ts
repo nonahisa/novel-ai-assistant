@@ -2,15 +2,15 @@ import * as path from "path";
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, test } from "vitest";
 import { unzipSync } from "fflate";
-import { exportEpub } from "../../src/features/exportEpub";
-import type { WorkEntry } from "../../src/models/types";
+import { exportEpub } from "../../../src/features/exportEpub";
+import type { WorkEntry } from "../../../src/models/types";
 import {
   FileSystemError,
   FileType,
   Uri,
   window,
   workspace,
-} from "./support/vscodeStub";
+} from "../support/vscodeStub";
 
 /**
  * 合本（1ファイルに複数話）をEPUBへ組む（設計書6.65.15）。

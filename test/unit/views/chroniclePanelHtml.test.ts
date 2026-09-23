@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChroniclePanelHtml } from "../../src/views/chroniclePanelHtml";
+import { buildChroniclePanelHtml } from "../../../src/views/chroniclePanelHtml";
 
 /**
  * 年表の画面（設計書6.39.4）。

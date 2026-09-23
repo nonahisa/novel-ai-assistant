@@ -335,7 +335,7 @@ export async function checkDeviations(
   let cancelled = false;
   /**
    * 何話をAIへ送ったか。**最後に「プロット逸脱検知を終了」の1行を残すのに
-   * 要る**（誤字脱字・矛盾と同じ形。`test/unit/checkEndLog.test.ts`）。
+   * 要る**（誤字脱字・矛盾と同じ形。`test/unit/cross/checkEndLog.test.ts`）。
    * この検知はチャンクではなく話ごとに送るので、分母は `pending.length`
    * （＝実際に送る話数。処理済みは含めない。作者の指摘、2026-09-06）。
    */

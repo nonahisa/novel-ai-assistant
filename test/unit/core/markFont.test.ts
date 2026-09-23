@@ -3,8 +3,8 @@ import {
   MARK_FONT_GOTHIC,
   MARK_FONT_MINCHO,
   markFontFor,
-} from "../../src/core/markFont";
-import { MANUSCRIPT_FONTS } from "../../src/core/manuscriptFonts";
+} from "../../../src/core/markFont";
+import { MANUSCRIPT_FONTS } from "../../../src/core/manuscriptFonts";
 
 /**
  * ダッシュ「――」と三点リーダ「……」に当てる書体（設計書6.34）。

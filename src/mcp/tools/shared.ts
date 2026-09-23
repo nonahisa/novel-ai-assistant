@@ -44,7 +44,7 @@ export class McpToolError extends Error {}
  * 名前は `characterStore.ts`・`abilityStore.ts`・`foreshadowStore.ts` が
  * 持っているが、**どれも `vscode` を import している**ので束へ持ち込めない。
  * ずれると「資料が1件も無い」と見えるだけで止まらないので、
- * `test/unit/mcpTools.test.ts` が作り物のフォルダーで読めることを見る。
+ * `test/unit/mcp/mcpTools.test.ts` が作り物のフォルダーで読めることを見る。
  */
 export const SETTINGS_SUBDIRS = {
   characters: "characters",

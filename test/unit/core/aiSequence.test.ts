@@ -7,7 +7,7 @@ import {
   pendingCallCount,
   pendingRunCount,
   resetAiSequence,
-} from "../../src/core/aiSequence";
+} from "../../../src/core/aiSequence";
 
 /**
  * AI呼び出しの全体キュー（設計書6.76）。

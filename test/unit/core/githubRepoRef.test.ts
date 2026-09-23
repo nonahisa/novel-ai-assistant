@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { EXAMPLE_REPO } from "../../src/core/exampleNames";
+import { EXAMPLE_REPO } from "../../../src/core/exampleNames";
 import {
   describeRepoRef,
   describeRepoRefProblem,
   githubVfsLocation,
   parseGithubRepoRef,
   vscodeDevUrl,
-} from "../../src/core/githubRepoRef";
+} from "../../../src/core/githubRepoRef";
 
 /**
  * GitHubのリポジトリの指し方（設計書5.8.12）。

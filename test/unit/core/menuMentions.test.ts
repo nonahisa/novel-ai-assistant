@@ -4,8 +4,8 @@ import {
   findMenuCommandByLabel,
   findMenuMentions,
   type MenuEntry,
-} from "../../src/core/menuMentions";
-import { menuEntries } from "../../src/views/actionList";
+} from "../../../src/core/menuMentions";
+import { menuEntries } from "../../../src/views/actionList";
 
 /**
  * AI の答えの中で名指しされたメニュー項目を拾う（設計書6.104。0.75.6）。

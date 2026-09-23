@@ -1,7 +1,7 @@
 import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
-import { checkDictionaryFreshness } from "../../src/core/imeDictionaryStatus";
-import { FileType, Uri, workspace } from "./support/vscodeStub";
+import { checkDictionaryFreshness } from "../../../src/core/imeDictionaryStatus";
+import { FileType, Uri, workspace } from "../support/vscodeStub";
 
 /**
  * 「書き出したIME辞書が古くなっていないか」の判定（設計書6.13）。

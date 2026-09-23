@@ -64,15 +64,15 @@ vi.mock("vscode", () => {
  */
 let reachable = true;
 let paidAccepted = true;
-vi.mock("../../src/features/aiConnectivity", () => ({
+vi.mock("../../../src/features/aiConnectivity", () => ({
   confirmProviderReachable: vi.fn(async () => reachable),
   confirmPaidUsage: vi.fn(async () => paidAccepted),
 }));
 
-import { ProposalPanel } from "../../src/features/proposalPanel";
-import type { WorkEntry } from "../../src/models/types";
-import type { NotationAdviceGroup } from "../../src/prompts/notationAdvice";
-import type { TypoCheckIssue } from "../../src/features/checkTypos";
+import { ProposalPanel } from "../../../src/features/proposalPanel";
+import type { WorkEntry } from "../../../src/models/types";
+import type { NotationAdviceGroup } from "../../../src/prompts/notationAdvice";
+import type { TypoCheckIssue } from "../../../src/features/checkTypos";
 
 const work: WorkEntry = {
   id: "w1",

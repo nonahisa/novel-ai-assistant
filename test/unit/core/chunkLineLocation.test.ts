@@ -6,7 +6,7 @@ import {
   splitChunkInHalf,
   withLineNumbers,
   locateChunkLine,
-} from "../../src/core/chunker";
+} from "../../../src/core/chunker";
 
 /**
  * まとめたチャンクで返ってきた行番号を、元のファイルへ戻せること。

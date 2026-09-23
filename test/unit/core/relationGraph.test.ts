@@ -3,7 +3,7 @@ import {
   emptyCharacter,
   type AddressTerm,
   type Character,
-} from "../../src/models/character";
+} from "../../../src/models/character";
 import {
   buildRelationGraph,
   countUnresolved,
@@ -13,7 +13,7 @@ import {
   restrictUnresolved,
   UNRESOLVED_ID_PREFIX,
   type RelationGraph,
-} from "../../src/core/relationGraph";
+} from "../../../src/core/relationGraph";
 
 /**
  * 人物相関図の材料（設計書6.38.1）。

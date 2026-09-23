@@ -7,9 +7,9 @@ import {
   memoDirectoryOf,
   transferMemoToWork,
   WorkMemoError,
-} from "../../src/core/workMemos";
-import type { WorkEntry } from "../../src/models/types";
-import { FileSystemError, FileType, Uri, workspace } from "./support/vscodeStub";
+} from "../../../src/core/workMemos";
+import type { WorkEntry } from "../../../src/models/types";
+import { FileSystemError, FileType, Uri, workspace } from "../support/vscodeStub";
 
 /**
  * 作品ごとのメモと、創作メモ集からの移管（設計書6.71）。

@@ -5,11 +5,11 @@ import {
   acquireRun,
   currentRunLabel,
   pendingRunCount,
-} from "../../src/core/aiSequence";
+} from "../../../src/core/aiSequence";
 import {
   isSuiteHoldingRun,
   PROOFREADING_CHECKS,
-} from "../../src/core/proofreadingSuite";
+} from "../../../src/core/proofreadingSuite";
 
 /**
  * **まとめ実行のあいだに、あとから押した一括処理が割り込まない**
@@ -25,7 +25,7 @@ import {
  * と出ていた。**作者は時間差で押したのだから、あとのものは後ろに並ぶはずである。**
  */
 
-const SRC = resolve(__dirname, "../../src");
+const SRC = resolve(__dirname, "../../../src");
 const read = (path: string) => readFileSync(resolve(SRC, path), "utf8");
 
 describe("札は、まとめ実行が丸ごと持つ", () => {

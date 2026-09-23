@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { ExtensionContext } from "vscode";
-import { OllamaProvider } from "../../src/ai/ollamaProvider";
+import { OllamaProvider } from "../../../src/ai/ollamaProvider";
 import {
   ClaudeProvider,
   toClaudeAIError,
   toClaudeJsonSchema,
-} from "../../src/ai/claudeProvider";
-import { OpenAIProvider } from "../../src/ai/openaiProvider";
-import { GeminiProvider } from "../../src/ai/geminiProvider";
-import { LmStudioProvider } from "../../src/ai/lmstudioProvider";
-import { AIError } from "../../src/ai/types";
-import { setStreamingSettingReader } from "../../src/ai/ollamaStream";
-import { workspace } from "./support/vscodeStub";
+} from "../../../src/ai/claudeProvider";
+import { OpenAIProvider } from "../../../src/ai/openaiProvider";
+import { GeminiProvider } from "../../../src/ai/geminiProvider";
+import { LmStudioProvider } from "../../../src/ai/lmstudioProvider";
+import { AIError } from "../../../src/ai/types";
+import { setStreamingSettingReader } from "../../../src/ai/ollamaStream";
+import { workspace } from "../support/vscodeStub";
 
 const ollamaParams = {
   systemPrompt: "system",

@@ -5,7 +5,7 @@ import {
   describeCurrentFont,
   findFont,
   listChoices,
-} from "../../src/core/manuscriptFonts";
+} from "../../../src/core/manuscriptFonts";
 
 /**
  * 原稿の書体（作者の依頼、2026-08-27）。

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import * as vscode from "vscode";
-import { SettingsPanel } from "../../src/features/settingsPanel";
+import { SettingsPanel } from "../../../src/features/settingsPanel";
 
 /**
  * 右クリック→設定資料の1件を出す（作者の報告、2026-08-28）。

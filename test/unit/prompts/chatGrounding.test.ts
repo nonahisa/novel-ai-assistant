@@ -2,12 +2,12 @@ import { describe, expect, test } from "vitest";
 import {
   SETTINGS_ASSISTANT_SYSTEM_PROMPT,
   SETTINGS_CHAT_VERSION,
-} from "../../src/prompts/settingsChat";
+} from "../../../src/prompts/settingsChat";
 import {
   WORK_CHAT_SYSTEM_PROMPT,
   WORK_CHAT_VERSION,
-} from "../../src/prompts/workChat";
-import { BASE_SYSTEM_PROMPT } from "../../src/prompts/characterExtract";
+} from "../../../src/prompts/workChat";
+import { BASE_SYSTEM_PROMPT } from "../../../src/prompts/characterExtract";
 
 /**
  * 「分からない」で突き放す指示が、考えるための問いにまで掛かっていた

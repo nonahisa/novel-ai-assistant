@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
+import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 import {
   FindingStore,
   visibleFindings,
-} from "../../src/features/findingStore";
+} from "../../../src/features/findingStore";
 import {
   findingId,
   isFindingExpired,
@@ -11,8 +11,8 @@ import {
   resolveFindings,
   type Finding,
   type FindingView,
-} from "../../src/models/finding";
-import type { WorkEntry } from "../../src/models/types";
+} from "../../../src/models/finding";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * AIの指摘を数日残す置き場（設計書6.96）。

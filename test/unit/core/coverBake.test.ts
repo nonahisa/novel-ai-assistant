@@ -12,8 +12,8 @@ import {
   describeCoverUse,
   readCoverSource,
   saveBakedCover,
-} from "../../src/core/coverBake";
-import { FileSystemError, Uri, workspace } from "./support/vscodeStub";
+} from "../../../src/core/coverBake";
+import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 
 /**
  * 表紙・裏表紙の合成（設計書6.65.8）。

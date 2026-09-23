@@ -5,13 +5,13 @@ import {
   GENRE_SITES,
   genreSite,
   listGenres,
-} from "../../src/core/genre";
+} from "../../../src/core/genre";
 import {
   suggestWorkFormat,
   WORK_FORMATS,
   workFormatLabels,
-} from "../../src/core/workFormat";
-import { PLOT_SECTIONS, updatePlotMarkdown } from "../../src/core/plotDoc";
+} from "../../../src/core/workFormat";
+import { PLOT_SECTIONS, updatePlotMarkdown } from "../../../src/core/plotDoc";
 
 /**
  * 形式とジャンル（設計書6.4.4、作者の要望 2026-08-16）。

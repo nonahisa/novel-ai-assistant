@@ -9,7 +9,7 @@ import {
 } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { FileSystemError, FileType, workspace } from "./support/vscodeStub";
+import { FileSystemError, FileType, workspace } from "../support/vscodeStub";
 import {
   describeUnregistered,
   findUnregisteredWorks,
@@ -17,8 +17,8 @@ import {
   libraryRootsOf,
   unnotifiedFolders,
   type FoundWork,
-} from "../../src/core/unregisteredWorks";
-import { normalizeForComparison } from "../../src/core/pathText";
+} from "../../../src/core/unregisteredWorks";
+import { normalizeForComparison } from "../../../src/core/pathText";
 
 /**
  * 書庫にあるのに登録されていない作品を拾う（設計書6.97.4）。

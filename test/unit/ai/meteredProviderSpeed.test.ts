@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import type { ModelTuning } from "../../src/core/modelTuning";
+import type { ModelTuning } from "../../../src/core/modelTuning";
 
 /**
  * 出力の速さを、**普段のAI呼び出しから**記録する（作者の裁定、2026-09-06）。
@@ -25,9 +25,9 @@ const saved: Array<{
   model: string;
   tuning: ModelTuning;
 }> = [];
-vi.mock("../../src/core/modelTuning", async (importOriginal) => {
+vi.mock("../../../src/core/modelTuning", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../src/core/modelTuning")>();
+    await importOriginal<typeof import("../../../src/core/modelTuning")>();
   return {
     ...actual,
     saveModelTuning: async (
@@ -40,15 +40,15 @@ vi.mock("../../src/core/modelTuning", async (importOriginal) => {
   };
 });
 
-const { MeteredProvider } = await import("../../src/ai/meteredProvider");
-const { AIError } = await import("../../src/ai/types");
-const { resetAiSequence } = await import("../../src/core/aiSequence");
-const { TOKENS_PER_CHAR } = await import("../../src/core/sizeBudget");
+const { MeteredProvider } = await import("../../../src/ai/meteredProvider");
+const { AIError } = await import("../../../src/ai/types");
+const { resetAiSequence } = await import("../../../src/core/aiSequence");
+const { TOKENS_PER_CHAR } = await import("../../../src/core/sizeBudget");
 import type {
   AIProvider,
   GenerateParams,
   GenerateResult,
-} from "../../src/ai/types";
+} from "../../../src/ai/types";
 
 /** 止めた時計。`Date.now` を差し替えて、テストから進める */
 let clockMs = Date.UTC(2026, 8, 6, 3, 0, 0);

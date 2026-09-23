@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { window } from "./support/vscodeStub";
-import type { AIRegistry } from "../../src/ai/registry";
-import type { WorkEntry } from "../../src/models/types";
+import { window } from "../support/vscodeStub";
+import type { AIRegistry } from "../../../src/ai/registry";
+import type { WorkEntry } from "../../../src/models/types";
 
 /**
  * 矛盾検知（事実の照合。設計書6.88の第4段）を、入口から1回通す。
@@ -46,7 +46,7 @@ const state = vi.hoisted(() => ({
   extractNeedles: null as Array<{ needle: string; value: string }> | null,
 }));
 
-vi.mock("../../src/ai/registry", () => ({
+vi.mock("../../../src/ai/registry", () => ({
   ensureConfigured: vi.fn(async (_registry: unknown, feature: string) => {
     state.features.push(feature);
     return {
@@ -100,7 +100,7 @@ vi.mock("../../src/ai/registry", () => ({
   }),
 }));
 
-vi.mock("../../src/core/scanner", () => ({
+vi.mock("../../../src/core/scanner", () => ({
   scanWork: vi.fn(async () => ({ episodes: state.episodes })),
 }));
 
@@ -166,7 +166,7 @@ const COLLECTED_EPISODES = [
   },
 ];
 
-vi.mock("../../src/core/textFile", () => ({
+vi.mock("../../../src/core/textFile", () => ({
   readTextFile: vi.fn(async () => ({
     text: state.source,
     hasConflictMarkers: false,
@@ -174,11 +174,11 @@ vi.mock("../../src/core/textFile", () => ({
   hashText: (text: string) => `hash-${text.length}`,
 }));
 
-vi.mock("../../src/core/workFormatStore", () => ({
+vi.mock("../../../src/core/workFormatStore", () => ({
   readWorkFormat: vi.fn(async () => ({ kind: "novel" })),
 }));
 
-vi.mock("../../src/core/characterStore", () => ({
+vi.mock("../../../src/core/characterStore", () => ({
   CharacterStore: class {
     async loadAll() {
       // 資料が無くても走る（事実は本文から抜ける）
@@ -187,7 +187,7 @@ vi.mock("../../src/core/characterStore", () => ({
   },
 }));
 
-vi.mock("../../src/core/chunkCache", () => ({
+vi.mock("../../../src/core/chunkCache", () => ({
   ChunkCache: class {
     async load() {}
     get() {
@@ -199,12 +199,12 @@ vi.mock("../../src/core/chunkCache", () => ({
 }));
 
 // 順番待ちの札は、ここでは本体をそのまま走らせるだけでよい
-vi.mock("../../src/features/aiTurn", () => ({
+vi.mock("../../../src/features/aiTurn", () => ({
   withAiTurn: async (_options: unknown, run: () => Promise<void>) => run(),
 }));
 
 const { checkFactContradictions } = await import(
-  "../../src/features/checkFactContradictions"
+  "../../../src/features/checkFactContradictions"
 );
 
 const work: WorkEntry = {

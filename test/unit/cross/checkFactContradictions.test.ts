@@ -9,11 +9,11 @@ import {
   FACT_CONTRADICTION_CATEGORY,
   isRecordFact,
   linesAround,
-} from "../../src/core/factContradiction";
-import { STORY_FACT_EXTRACT_VERSION } from "../../src/prompts/storyFactExtract";
-import type { ContradictionCandidate } from "../../src/core/contradictionMatch";
-import type { StoryFact } from "../../src/models/storyFact";
-import { emptyCharacter } from "../../src/models/character";
+} from "../../../src/core/factContradiction";
+import { STORY_FACT_EXTRACT_VERSION } from "../../../src/prompts/storyFactExtract";
+import type { ContradictionCandidate } from "../../../src/core/contradictionMatch";
+import type { StoryFact } from "../../../src/models/storyFact";
+import { emptyCharacter } from "../../../src/models/character";
 
 /**
  * 矛盾検知（事実の照合）の第4段（設計書6.88）。
