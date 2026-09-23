@@ -126,12 +126,23 @@ export async function createEpisodePlot(
    * どこへ開くか。プロットモード（6.4.8）は**左の面へ**出す
    * ——押したのはパネル（右）なので、既定のままだとパネルの上に重なる。
    */
-  showOptions?: vscode.TextDocumentShowOptions
-): Promise<void> {
+  showOptions?: vscode.TextDocumentShowOptions,
+  /**
+   * 予定の話として作るとき（設計書6.4.8）。題は見出しに入れる。
+   * **本文のファイルは作らない**——作るのは単話プロットだけである
+   */
+  plan?: EpisodePlotPlan
+): Promise<boolean> {
   const picked =
     chapter === undefined ? await pickEpisodeChapter(work) : chapter;
-  if (picked === undefined) return;
-  await createEpisodePlotFile(work, picked, showOptions);
+  if (picked === undefined) return false;
+  return createEpisodePlotFile(work, picked, showOptions, plan);
+}
+
+/** 予定の話（設計書6.4.8）として単話プロットを作るときの指定 */
+export interface EpisodePlotPlan {
+  /** 見出しに入れる題。空なら入れない */
+  title: string;
 }
 
 /** どの話の単話プロットを作るかを選ばせる。選ばれなければ undefined */
@@ -191,8 +202,9 @@ async function pickEpisodeChapter(
 async function createEpisodePlotFile(
   work: WorkEntry,
   chapter: number,
-  showOptions?: vscode.TextDocumentShowOptions
-): Promise<void> {
+  showOptions?: vscode.TextDocumentShowOptions,
+  plan?: EpisodePlotPlan
+): Promise<boolean> {
   const config = await readWorkConfig(work);
   const directory = path.join(
     workPaths(work, config).settings,
@@ -205,7 +217,7 @@ async function createEpisodePlotFile(
     void vscode.window.showInformationMessage(
       `第${chapter}話の単話プロットは既にあります。そのまま開きました。`
     );
-    return;
+    return false;
   }
 
   try {
@@ -214,7 +226,7 @@ async function createEpisodePlotFile(
     // ここへ来る時点で既存は除いてあるが、その間に作られていたら失敗させる
     await atomicWriteFile(
       filePath,
-      new TextEncoder().encode(buildEpisodePlotTemplate(chapter)),
+      new TextEncoder().encode(buildEpisodePlotTemplate(chapter, plan?.title)),
       { mode: "create" }
     );
   } catch (error) {
@@ -228,13 +240,19 @@ async function createEpisodePlotFile(
     void vscode.window.showErrorMessage(
       `単話プロットを作れませんでした：${detail}`
     );
-    return;
+    return false;
   }
 
   await openInDefaultEditor(filePath, showOptions);
   void vscode.window.showInformationMessage(
-    `第${chapter}話の単話プロットを作りました。視点・目標・展開を書いてください（AIは書きません）。`
+    plan
+      ? // 予定の話では、本文を作っていないことと、結びつき方を言う。
+        // 言わないと「本文はどこへ行ったのか」と探すことになる
+        `第${chapter}話を予定として足しました（本文はまだ作っていません）。` +
+          `第${chapter}話の本文を作ると、この単話プロットと同じ話として並びます。`
+      : `第${chapter}話の単話プロットを作りました。視点・目標・展開を書いてください（AIは書きません）。`
   );
+  return true;
 }
 
 /**

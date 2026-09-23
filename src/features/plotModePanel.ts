@@ -11,24 +11,35 @@ import {
   PLOT_MODE_AI_COMMANDS,
   appendPlotSection,
   buildPlotEpisodeRows,
-  episodePlotChapterOf,
   listPlotHeadings,
+  nextPlannedEpisodeNumber,
+  parsePlannedEpisodeNumber,
+  plannedEpisodePlotChapters,
   unusedPlotSections,
   type EpisodePlotCheckAction,
+  type PlannedEpisodePlot,
   type PlotEpisodeRow,
 } from "../core/plotMode";
+import { SUPPORTED_EXTENSIONS } from "../models/types";
+import { readTextFile } from "../core/textFile";
 import { computeMinimalEdit } from "../core/textEdit";
 import { scanWork } from "../core/scanner";
 import { ChapterStore } from "../core/chapterStore";
 import { SynopsisStore } from "../core/synopsisStore";
 import { readWorkFormat } from "../core/workFormatStore";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
-import { EPISODE_PLOTS_DIR, episodePlotFileName } from "../core/resumeSheet";
+import {
+  EPISODE_PLOTS_DIR,
+  episodePlotChapterFromFileName,
+  episodePlotFileName,
+  episodePlotTitleFromText,
+} from "../core/resumeSheet";
 import { currentCountMode, pickCount } from "../core/countSettings";
 import { episodeUnit } from "../core/episodeLabel";
 import { logFailure, useLogFile } from "../core/logger";
 import { buildPlotModePanelHtml } from "../views/plotModePanelHtml";
 import { openInDefaultEditor } from "../views/openDocument";
+import { askText } from "../views/dialogs";
 import { allActions } from "../views/actionList";
 import { ensurePlotFile } from "./startWork";
 import { createEpisodePlot } from "./resumeWriting";
@@ -54,6 +65,7 @@ import { syncPlotCharacters } from "./plotCharacterSync";
  *   `appendPlotSection` が包む）。**末尾へ足すだけ**で、触らない節は
  *   1文字も変えない
  * - 単話プロットを作る：既存の `createEpisodePlot`（6.36.2。新規作成だけ）
+ * - 予定の話を足す：同じ `createEpisodePlot` に題を渡すだけ。**本文は作らない**
  * - AIの3つ：既存コマンドを `executeCommand` するだけ（写しを作らない）
  *
  * 新しい書き込み経路は作らない。
@@ -133,6 +145,7 @@ type PanelMessage =
   | { type: "syncCharacters" }
   | { type: "openEpisode"; filePath: string }
   | { type: "createEpisodePlot"; chapter: number | null }
+  | { type: "addPlannedEpisode" }
   | { type: "openEpisodePlot"; chapter: number | null }
   | {
       type: "checkEpisodePlot";
@@ -147,6 +160,13 @@ class PlotModePanel {
   private notices: string[] = [];
   private unitNoun = "話";
   private episodePlotsDir = "";
+  private settingsDir = "";
+  /** 直近に読んだ本文の並び。予定の話数を決めるときに使う */
+  private episodes: EpisodeFile[] = [];
+  /** 直近に読んだ、単話プロットのある話数（予定の話を含む） */
+  private plotChapters: number[] = [];
+  /** 本文を読めたか。読めないまま予定を足すと、本文のある話数と重なりうる */
+  private episodesLoaded = false;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -200,9 +220,37 @@ class PlotModePanel {
     if (!this.episodePlotsDir) return false;
     // **前方一致では見ない。** 区切りはWindowsで `\`、ブラウザ上の作品で
     // `/` と変わる（`paths.normalize`）ので、置き場そのものを突き合わせる
-    return (
+    if (
       paths.normalizeForComparison(paths.dirname(filePath)) ===
       paths.normalizeForComparison(this.episodePlotsDir)
+    ) {
+      return true;
+    }
+    return this.isNewManuscript(filePath);
+  }
+
+  /**
+   * 見取り図にまだ無い本文が保存されたか（設計書6.4.8、予定の話）。
+   *
+   * **予定の話の本文を書き始めたら、同じ行へ結びつける。** 結びつき自体は
+   * 話数で決まるので読み直すだけでよいが、読み直さないと、本文ができたのに
+   * 「予定」の印が残って見える。
+   *
+   * **既に並んでいる本文の保存では読み直さない。** 書いている最中の保存の
+   * たびに作品を走査しないためである（シーンメモと同じく、開いている
+   * パネルの都合で書く手を重くしない）。
+   */
+  private isNewManuscript(filePath: string): boolean {
+    const ext = paths.extname(filePath).toLowerCase();
+    if (!(SUPPORTED_EXTENSIONS as readonly string[]).includes(ext)) return false;
+    if (!paths.isPathInside(this.work.folderPath, filePath)) return false;
+    // 設定資料（単話プロットの置き場を除く）は本文ではない
+    if (this.settingsDir && paths.isPathInside(this.settingsDir, filePath)) {
+      return false;
+    }
+    const key = paths.normalizeForComparison(filePath);
+    return !this.rows.some(
+      (row) => !row.planned && paths.normalizeForComparison(row.filePath) === key
     );
   }
 
@@ -238,6 +286,9 @@ class PlotModePanel {
           return;
         case "createEpisodePlot":
           await this.createEpisodePlot(message.chapter);
+          return;
+        case "addPlannedEpisode":
+          await this.addPlannedEpisode();
           return;
         case "openEpisodePlot":
           await this.openEpisodePlot(message.chapter);
@@ -348,6 +399,59 @@ class PlotModePanel {
   }
 
   /**
+   * 予定の話を足す（設計書6.4.8。作者の依頼、2026-09-23）。
+   *
+   * **作るのは単話プロットだけ**で、本文のファイルは作らない。書き込みは
+   * `createEpisodePlot` の1本（新規作成だけ・上書きしない、6.36.2）を通る。
+   * 本文の無い話数のプロットがそのまま「予定」になるので、台帳は持たない。
+   *
+   * 何話目かを先に訊く。**本文のある話数・プロットが既にある話数は、
+   * 打っているあいだに断る**（押してから「既にあります」と言うより早い）。
+   */
+  private async addPlannedEpisode(): Promise<void> {
+    // 押す直前の状態で決める（パネルを開いたあとに話が増えていることがある）
+    await this.load();
+    if (!this.episodesLoaded) {
+      // どの話数に本文があるか分からないまま足すと、予定のつもりが
+      // 書いた話のプロットになる。読めない理由はパネルの上に出ている
+      void vscode.window.showWarningMessage(
+        "本文を読めなかったため、予定の話を足せません。パネルの上の知らせを確かめてください。"
+      );
+      return;
+    }
+    const episodes = this.episodes;
+    const plotChapters = this.plotChapters;
+    const noun = this.unitNoun;
+
+    const numberText = await askText({
+      title: `予定の${noun}を足す（1/2）：何${noun}目にしますか`,
+      prompt:
+        `本文のまだ無い${noun}数を入れてください。既定は最後の${noun}の次です。` +
+        "本文のファイルは作りません（単話プロットだけを作ります）。",
+      value: String(nextPlannedEpisodeNumber(episodes, plotChapters)),
+      validateInput: (text) =>
+        parsePlannedEpisodeNumber(text, episodes, plotChapters).problem ?? null,
+    });
+    if (numberText === undefined) return;
+    const parsed = parsePlannedEpisodeNumber(numberText, episodes, plotChapters);
+    if (parsed.chapter === undefined) return;
+
+    const title = await askText({
+      title: `予定の${noun}を足す（2/2）：第${parsed.chapter}${noun}の題`,
+      prompt: "空のままでも足せます。題は単話プロットの見出しに入ります。",
+    });
+    if (title === undefined) return;
+
+    await createEpisodePlot(
+      this.work,
+      parsed.chapter,
+      { viewColumn: vscode.ViewColumn.One },
+      { title }
+    );
+    await this.load();
+  }
+
+  /**
    * 単話プロットのAI判定（P-27・P-28、設計書6.36.3）。
    *
    * **既存のコマンドを呼ぶだけ**（AIの3つと同じ決まり）。どの話の
@@ -399,6 +503,7 @@ class PlotModePanel {
 
     const config = await readWorkConfig(this.work);
     const settings = workPaths(this.work, config).settings;
+    this.settingsDir = settings;
     this.episodePlotsDir = paths.join(settings, EPISODE_PLOTS_DIR);
 
     this.rows = await this.buildRows(format);
@@ -415,12 +520,17 @@ class PlotModePanel {
     format: WorkFormatKey | undefined
   ): Promise<PlotEpisodeRow[]> {
     let episodes: EpisodeFile[];
+    this.episodes = [];
+    this.plotChapters = [];
+    this.episodesLoaded = false;
     try {
       episodes = (await scanWork(this.work)).episodes;
     } catch (error) {
       this.notices.push(`本文を読めませんでした：${messageOf(error)}`);
       return [];
     }
+    this.episodes = episodes;
+    this.episodesLoaded = true;
 
     let chapters: Chapter[] = [];
     try {
@@ -440,28 +550,28 @@ class PlotModePanel {
       );
     }
 
+    const plotChapters = await this.existingEpisodePlots();
+    this.plotChapters = plotChapters;
     return buildPlotEpisodeRows({
       episodes,
       chapters,
       workFolder: this.work.folderPath,
       format,
       synopses,
-      episodePlotChapters: await this.existingEpisodePlots(episodes),
+      episodePlotChapters: new Set(plotChapters),
+      plannedEpisodes: await this.plannedEpisodes(episodes, plotChapters),
     });
   }
 
   /**
-   * 単話プロットが既にある話数。
+   * 単話プロットが既にある話数（本文の無い、予定の話を含む）。
    *
    * **置き場を1度読むだけ**にする（話ごとに有無を尋ねると、19話で
-   * 19回の問い合わせになる）。突き合わせるのは `episodePlotFileName` が
-   * 作る名前だけで、**`第N話.md` という形をここで読み解かない**
-   * ——名前の決め方を変えたときに、片方だけが古くなる。
+   * 19回の問い合わせになる）。名前から話数を読むのは、作る側の隣に
+   * 置いた `episodePlotChapterFromFileName` だけ——**`第N話.md` という形を
+   * ここで読み解かない**（名前の決め方を変えたときに、片方だけが古くなる）。
    */
-  private async existingEpisodePlots(
-    episodes: readonly EpisodeFile[]
-  ): Promise<Set<number>> {
-    const found = new Set<number>();
+  private async existingEpisodePlots(): Promise<number[]> {
     let entries: Array<[string, vscode.FileType]>;
     try {
       entries = await vscode.workspace.fs.readDirectory(
@@ -469,17 +579,45 @@ class PlotModePanel {
       );
     } catch {
       // 置き場がまだ無いのは普通のこと（1つも作っていない作品）
-      return found;
+      return [];
     }
 
-    const names = new Set(entries.map(([name]) => name));
-    for (const episode of episodes) {
-      const chapter = episodePlotChapterOf(episode);
-      if (chapter !== null && names.has(episodePlotFileName(chapter))) {
-        found.add(chapter);
-      }
+    const found = new Set<number>();
+    for (const [name] of entries) {
+      const chapter = episodePlotChapterFromFileName(name);
+      if (chapter !== null) found.add(chapter);
     }
-    return found;
+    return [...found].sort((left, right) => left - right);
+  }
+
+  /**
+   * 予定の話（本文の無い話数の単話プロット）と、その題（設計書6.4.8）。
+   *
+   * **題を読むのは予定の話だけ。** 本文のある話は本文の題を出すので、
+   * プロットを開いて読む必要がない。読めなかったら題を空にして並べる
+   * ——題が読めないだけで予定を消して見せると、作ったのに無いことになる。
+   */
+  private async plannedEpisodes(
+    episodes: readonly EpisodeFile[],
+    plotChapters: readonly number[]
+  ): Promise<PlannedEpisodePlot[]> {
+    const planned: PlannedEpisodePlot[] = [];
+    for (const chapter of plannedEpisodePlotChapters(episodes, plotChapters)) {
+      const filePath = paths.join(
+        this.episodePlotsDir,
+        episodePlotFileName(chapter)
+      );
+      let title = "";
+      try {
+        title = episodePlotTitleFromText((await readTextFile(filePath)).text);
+      } catch (error) {
+        this.notices.push(
+          `第${chapter}話の単話プロットを読めませんでした：${messageOf(error)}（題は出しません）`
+        );
+      }
+      planned.push({ chapter, title, filePath });
+    }
+    return planned;
   }
 
   private post(text: string): void {
@@ -509,7 +647,14 @@ class PlotModePanel {
         episodesHeading: `${this.unitNoun}の並び`,
         episodesNote:
           "上から読むと、作品の流れが分かります。" +
-          `${this.unitNoun}を押すと本文を、右のボタンで単話プロットを開きます。`,
+          `${this.unitNoun}を押すと本文を、右のボタンで単話プロットを開きます。` +
+          `「予定」の${this.unitNoun}は本文がまだ無く、押すと単話プロットが開きます。`,
+        addPlanned: {
+          label: `＋ 予定の${this.unitNoun}を足す`,
+          detail:
+            `これから書く${this.unitNoun}を、単話プロットだけ先に作って並べます。` +
+            "本文のファイルは作りません。その話数の本文を作ると、同じ行に結びつきます。",
+        },
         episodes: this.rows.map((row) => ({
           ...row,
           chars: pickCount({ ...zeroCounts, net: row.net, gross: row.gross }, mode),

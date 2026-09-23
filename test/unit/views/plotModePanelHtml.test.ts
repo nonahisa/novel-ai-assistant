@@ -81,3 +81,79 @@ describe("プロットモードのパネルのHTML", () => {
     expect(html).toContain('post("ready")');
   });
 });
+
+/**
+ * 予定の話（設計書6.4.8。作者の依頼、2026-09-23）。
+ *
+ * 行の描き方は画面の中の関数（`renderEpisode`）が持つので、**その関数を
+ * 取り出して実際に描かせる**。文字列が含まれるかだけを見ると、描き分けの
+ * 条件を取り違えても通ってしまう。
+ */
+describe("予定の話の描き方", () => {
+  function pick(name: string, until: string): string {
+    const start = html.indexOf(`function ${name}(`);
+    const end = html.indexOf(until, start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    return html.slice(start, end);
+  }
+
+  const renderEpisode = new Function(
+    pick("escapeHtml", "/**") +
+      pick("renderEpisode", "function renderEpisodes(") +
+      "return renderEpisode;"
+  )() as (row: Record<string, unknown>) => string;
+
+  const base = {
+    filePath: "C:/work/本文/001.txt",
+    label: "第1話",
+    title: "",
+    chapter: 1,
+    chars: 1000,
+    hasManuscript: true,
+    conflicted: false,
+    hasEpisodePlot: false,
+    canCreateEpisodePlot: true,
+    synopsisHead: "",
+    checks: [],
+    planned: false,
+  };
+
+  it("予定の話には「予定」の印が付き、押すと単話プロットを開く", () => {
+    const out = renderEpisode({
+      ...base,
+      filePath: "C:/work/設定/episode-plots/第3話.md",
+      label: "第3話",
+      title: "嵐の夜",
+      chapter: 3,
+      chars: 0,
+      hasManuscript: false,
+      hasEpisodePlot: true,
+      planned: true,
+      checks: [{ check: "design", label: "設計を検査", detail: "AI" }],
+    });
+
+    expect(out).toContain(">予定</span>");
+    expect(out).toContain("嵐の夜");
+    expect(out).toContain('class="open-body open-plot"');
+    expect(out).toContain("本文はまだありません");
+    // 行を押せば開くので、「プロット」「単話プロットを作る」は並べない
+    expect(out).not.toContain(">プロット</button>");
+    expect(out).not.toContain("単話プロットを作る");
+    // 本文が無くても、設計の検査は掛けられる
+    expect(out).toContain("設計を検査");
+  });
+
+  it("書いた話には「予定」の印が付かず、押すと本文を開く", () => {
+    const out = renderEpisode({ ...base, hasEpisodePlot: true });
+
+    expect(out).not.toContain(">予定</span>");
+    expect(out).toContain('class="open-body"');
+    expect(out).toContain(">単話プロット</span>");
+  });
+
+  it("予定の話を足す口がある（押したことを返すだけ）", () => {
+    expect(html).toContain('id="episodeActions"');
+    expect(html).toContain('post("addPlannedEpisode")');
+  });
+});

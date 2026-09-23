@@ -482,10 +482,18 @@ export function episodePlotChapterFromFileName(
  * 作者にする（6.21.2「作者のものではない話」の教訓）。空欄の書き方を
  * 括弧の問いかけにしてあるのは、消して上書きすれば済むようにするためで、
  * 見出しだけ並べると何を書く欄なのかが分からない。
+ *
+ * **題は見出しに入れる**（予定の話、設計書6.4.8）。本文のまだ無い話には
+ * 題を置く場所がほかに無い。台帳を別に作らずプロットの1行目に持たせる
+ * ——ファイルを消せば予定ごと消え、作者が見出しを書き換えればそれが題になる。
  */
-export function buildEpisodePlotTemplate(chapter: number): string {
+export function buildEpisodePlotTemplate(chapter: number, title = ""): string {
+  // 改行が入ると見出しが2行に割れ、2行目が本文として読まれる
+  const flat = title.replace(/\s+/g, " ").trim();
   return [
-    `# 第${chapter}話の単話プロット`,
+    flat
+      ? `# 第${chapter}話「${flat}」の単話プロット`
+      : `# 第${chapter}話の単話プロット`,
     "",
     "## 視点",
     "（この話は誰の視点で語りますか）",
@@ -499,6 +507,22 @@ export function buildEpisodePlotTemplate(chapter: number): string {
     "- ",
     "",
   ].join("\n");
+}
+
+/**
+ * 単話プロットの見出しから題を読む（`buildEpisodePlotTemplate` の逆）。
+ *
+ * **作る側の隣に置く**（`episodePlotChapterFromFileName` と同じ理由）。
+ * 見出しの形が崩れていれば空を返す——**推測で題を作らない。**
+ * 題の中の鉤括弧も残すため、閉じの「」の単話プロット」は最後のものを取る。
+ */
+export function episodePlotTitleFromText(text: string): string {
+  // 先頭のBOM（0xFEFF）は見出しの一部ではない。文字で書かず番号で見る
+  // （生の不可視文字をソースへ置かない）
+  const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  const first = body.split(/\r\n?|\n/, 1)[0] ?? "";
+  const matched = /^#\s+第\d+話「(.+)」の単話プロット\s*$/.exec(first);
+  return matched ? matched[1].trim() : "";
 }
 
 /**
