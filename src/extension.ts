@@ -4514,9 +4514,7 @@ export async function activate(
         const id =
           workChatPanel.currentWorkId() ??
           (works.length === 1 ? works[0].id : undefined);
-        return id
-          ? advicePolicies.getEffective(id)
-          : advicePolicies.getDefault();
+        return advicePolicies.getFor(id);
       },
       // **読者としての好み（6.101）も、作家タイプ診断から答えられる**
       // （作者の裁定、2026-09-23。診断の入口を1つにした）
@@ -4569,7 +4567,7 @@ export async function activate(
         await setAuthorReaderType(
           authorReaderTypes,
           work,
-          work ? advicePolicies.getEffective(work.id) : advicePolicies.getDefault()
+          advicePolicies.getFor(work?.id)
         );
       }
     )

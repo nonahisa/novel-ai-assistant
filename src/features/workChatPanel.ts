@@ -952,11 +952,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     // 唯一の手掛かりで、答えの調子が変わった理由がここにしか無い。
     // 文言はどれも core 側が持つ（features の中に書くと試験から見られない）
 
-    if (work && this.advicePolicies) {
+    if (this.advicePolicies) {
       // **作品に無ければ、作者の既定を使う**（0.51.1。設計書6.90.2）。
       // 使用開始時の診断で答えた9問は、まだ作品が無いところで答えるので
-      // 作者ごとに置いてある。ここで拾わないと、はじめの1作で効かない
-      const profile = this.advicePolicies.getEffective(work.id);
+      // 作者ごとに置いてある。ここで拾わないと、はじめの1作で効かない。
+      // **作品が決まらない相談でも既定を乗せる**（2026-09-23）——以前は
+      // 作品があるときだけで、執筆スタイル（作者ごと）は乗るのに方針だけ抜けていた
+      const profile = this.advicePolicies.getFor(work?.id);
       if (profile) {
         for (const line of advicePolicyLogLines(profile, now)) logStep(line);
         blocks.push(buildAdvicePolicyPrompt(profile, now));

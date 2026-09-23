@@ -73,6 +73,18 @@ export class AdvicePolicyStore {
     return effectiveAdviceProfile(this.get(workId), this.getDefault());
   }
 
+  /**
+   * 作品が決まっていればその作品の `getEffective`、**決まらなければ作者の
+   * 既定**（2026-09-23）。
+   *
+   * 作品が無い相談（使い方を聞く・作品を決める前）で方針が抜けていた。
+   * 同じ三項を呼び出し側の各所に書くと、1か所だけ `undefined` を返す日が
+   * 来るので、ここへ寄せる。
+   */
+  getFor(workId: string | undefined): AdviceProfile | undefined {
+    return workId === undefined ? this.getDefault() : this.getEffective(workId);
+  }
+
   async set(workId: string, profile: AdviceProfile): Promise<void> {
     await this.state.update(advicePolicyKey(workId), profile);
     this.onChange?.();
