@@ -1,4 +1,5 @@
 import type { WorkGoals } from "../models/workGoals";
+import { streakBalloons } from "./celebrationStreaks";
 import { daysUntil, targetCharsOf } from "./contestProgress";
 import { addDays, monthKey } from "./writingStats";
 
@@ -45,6 +46,15 @@ export interface Achievement {
   workTitle?: string;
   contestName?: string;
   deadline?: string;
+  /**
+   * 1日・1か月の目標が何日（何か月）続けて届いたか（`celebrationStreaks.ts`）。
+   * **2以上のときだけ持つ**——1回目は今までどおりの祝い方にする
+   */
+  streak?: number;
+  /** 連続の節目に届いた（花火を上げる） */
+  streakMilestone?: boolean;
+  /** これまでの最長の連続を超えた（花火を上げる） */
+  streakRecord?: boolean;
 }
 
 export function dailyAchievementId(day: string, goal: number): string {
@@ -178,6 +188,60 @@ export function celebrationSize(
   return undefined;
 }
 
+/**
+ * 連続まで見た祝いの大きさと、風船の数。
+ *
+ * **連続の節目と、これまでの最長を超えた日は、1日の目標でも花火を上げる**
+ * （作者の裁定、2026-09-23）。風船は連続が続くほど増やし、複数の達成が
+ * 重なったときは、いちばん多いものに揃える（足し合わせると上限を超える）。
+ */
+export function celebrationScale(
+  entries: readonly Achievement[]
+): { size: CelebrationSize; balloons: number } | undefined {
+  const size = celebrationSize(entries.map((entry) => entry.kind));
+  if (!size) return undefined;
+  const streakFireworks = entries.some(
+    (entry) => entry.streakMilestone === true || entry.streakRecord === true
+  );
+  return {
+    size: streakFireworks ? "fireworks" : size,
+    balloons: Math.max(
+      ...entries.map((entry) => streakBalloons(entry.kind, entry.streak))
+    ),
+  };
+}
+
+/** 連続の数え方の単位（1日は「日」、1か月は「か月」） */
+function streakUnit(entry: Achievement): string {
+  return entry.kind === "monthly" ? "か月" : "日";
+}
+
+/** 連続として言えるか（1日・1か月で2以上） */
+function hasStreak(entry: Achievement): entry is Achievement & { streak: number } {
+  return (
+    (entry.kind === "daily" || entry.kind === "monthly") &&
+    typeof entry.streak === "number" &&
+    entry.streak >= 2
+  );
+}
+
+/**
+ * 執筆統計の札に出す1行。「1日の目標（1,000字）を3日連続で達成」。
+ * 最長を超えた日だけ「（これまでの最長を更新）」を添える。
+ * **途切れたことは言わない**（作者の裁定）——連続が1なら今までどおりの言い方になる。
+ */
+export function celebrationLine(entry: Achievement): string {
+  const base = describeAchievement(entry);
+  if (!hasStreak(entry)) return `${base}を達成`;
+  const record = entry.streakRecord ? "（これまでの最長を更新）" : "";
+  return `${base}を${entry.streak}${streakUnit(entry)}連続で達成${record}`;
+}
+
+/** 達成の記録の欄で、行に添える連続（無ければ undefined） */
+export function streakNote(entry: Achievement): string | undefined {
+  return hasStreak(entry) ? `${entry.streak}${streakUnit(entry)}連続` : undefined;
+}
+
 /** 大きい順。下の欄に1つだけ出すとき、どれを選ぶかに使う */
 const WEIGHT: Record<AchievementKind, number> = {
   daily: 1,
@@ -212,7 +276,14 @@ export function footCheer(
     if (entry.workId !== undefined && entry.workId !== workId) continue;
     if (!best || WEIGHT[entry.kind] > WEIGHT[best.kind]) best = entry;
   }
-  return best ? CHEER[best.kind] : undefined;
+  if (!best) return undefined;
+  // 連続が続いていれば添える（「3日連続で目標に届きました」。作者の裁定、2026-09-23）
+  if (hasStreak(best)) {
+    return best.kind === "monthly"
+      ? `${best.streak}か月連続で今月の目標に届きました`
+      : `${best.streak}日連続で目標に届きました`;
+  }
+  return CHEER[best.kind];
 }
 
 /**
@@ -323,6 +394,12 @@ function toAchievement(item: unknown): Achievement | undefined {
   for (const key of ["workId", "workTitle", "contestName", "deadline"] as const) {
     const text = value[key];
     if (typeof text === "string") entry[key] = text;
+  }
+  if (typeof value.streak === "number" && Number.isFinite(value.streak)) {
+    entry.streak = value.streak;
+  }
+  for (const key of ["streakMilestone", "streakRecord"] as const) {
+    if (value[key] === true) entry[key] = true;
   }
   return entry;
 }

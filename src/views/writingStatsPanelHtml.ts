@@ -199,6 +199,8 @@ a:hover, .link:hover { text-decoration: underline; }
   font-size: 11px;
 }
 .achievement-row .day { color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
+.achievement-row .streak { color: var(--vscode-descriptionForeground); }
+.achievements-head .best { margin-left: 10px; }
 /*
   祝い（設計書6.3.8）。**画面の操作を妨げない**——重ねる層は pointer-events: none
   にして、下のボタンやグラフはそのまま押せるようにする。数秒で消える。
@@ -1233,14 +1235,31 @@ function renderAchievements() {
     host.innerHTML = '';
     return;
   }
+  const best = streakHeadline(state.achievementStreaks);
   host.innerHTML =
-    '<div class="achievements"><div class="achievements-head">達成の記録</div>' +
+    '<div class="achievements"><div class="achievements-head">達成の記録' +
+    (best ? '<span class="best">' + escapeHtml(best) + '</span>' : '') +
+    '</div>' +
     rows.map((row) =>
       '<div class="achievement-row"><span class="mark">達成</span>' +
       '<span class="day">' + escapeHtml(row.day) + '</span>' +
-      '<span>' + escapeHtml(row.text) + '</span></div>'
+      '<span>' + escapeHtml(row.text) + '</span>' +
+      (row.streak ? '<span class="streak">' + escapeHtml(row.streak) + '</span>' : '') +
+      '</div>'
     ).join('') +
     '</div>';
+}
+
+/**
+ * 最長の連続（1日・1か月）。**途切れたことは言わない**——いまの連続ではなく
+ * これまでの最長だけを出す（作者の裁定、2026-09-23）。拡張機能は2以上のときだけ送る。
+ */
+function streakHeadline(streaks) {
+  if (!streaks) return '';
+  const parts = [];
+  if (typeof streaks.dailyBest === 'number') parts.push('最長 ' + streaks.dailyBest + '日連続');
+  if (typeof streaks.monthlyBest === 'number') parts.push('最長 ' + streaks.monthlyBest + 'か月連続');
+  return parts.join('・');
 }
 
 /**
@@ -1262,7 +1281,7 @@ function celebrate(payload) {
   if (fresh.length === 0) return;
   fresh.forEach((id) => playedCelebrations.add(id));
   showCelebrationBanner(Array.isArray(payload.lines) ? payload.lines : []);
-  if (!reducedMotion()) runCelebration(payload.size);
+  if (!reducedMotion()) runCelebration(payload.size, payload.balloons);
   vscode.postMessage({ type: 'celebrated', ids: payload.ids });
 }
 
@@ -1293,14 +1312,29 @@ function celebrationAlpha(elapsed) {
 }
 
 /**
+ * 描く風船の数。拡張機能から届いた数を使い、届かない・壊れていれば
+ * 大きさから決める（size === 'small' ? 5 : 12。連続を数える前の版と同じ）。
+ * **40個で止める**——拡張機能側の上限（1日24個・1か月30個）より余裕を持たせた
+ * 画面側の歯止めで、届いた値がどうであれ画面を埋め尽くさない。
+ */
+function balloonCountFor(size, balloons) {
+  if (typeof balloons !== 'number' || !Number.isFinite(balloons)) {
+    return size === 'small' ? 5 : 12;
+  }
+  return Math.max(1, Math.min(40, Math.round(balloons)));
+}
+
+/**
  * 風船（と花火）を描く。**外部のライブラリは使わず Canvas で描く**
  * （WebView の CSP を緩めずに済み、配布物も重くならない）。
  *
  * - small（1日の目標）：風船を少し
  * - balloons（1か月の目標）：風船をたくさん
- * - fireworks（作品の文字量・締切）：風船に花火を足す
+ * - fireworks（作品の文字量・締切、連続の節目・最長を超えた日）：風船に花火を足す
+ *
+ * 風船の数は拡張機能が決めて送る（連続が続くほど増える。core/celebrationStreaks.ts）。
  */
-function runCelebration(size) {
+function runCelebration(size, balloons) {
   const canvas = document.createElement('canvas');
   canvas.className = 'celebrate-layer';
   canvas.setAttribute('aria-hidden', 'true');
@@ -1315,11 +1349,11 @@ function runCelebration(size) {
   ctx.scale(ratio, ratio);
 
   const pick = () => CELEBRATION_COLORS[Math.floor(Math.random() * CELEBRATION_COLORS.length)];
-  const balloonCount = size === 'small' ? 5 : 12;
-  const balloons = [];
+  const balloonCount = balloonCountFor(size, balloons);
+  const flock = [];
   for (let index = 0; index < balloonCount; index++) {
     const radius = 14 + Math.random() * 10;
-    balloons.push({
+    flock.push({
       x: (width * (index + 0.5)) / balloonCount + (Math.random() - 0.5) * 40,
       y: height + radius * 2 + Math.random() * height * 0.35,
       radius,
@@ -1354,7 +1388,7 @@ function runCelebration(size) {
     const alpha = celebrationAlpha(elapsed);
     ctx.globalAlpha = alpha;
 
-    balloons.forEach((balloon) => {
+    flock.forEach((balloon) => {
       const y = balloon.y - balloon.speed * elapsed;
       const x = balloon.x + Math.sin(elapsed / 650 + balloon.phase) * 12;
       const r = balloon.radius;

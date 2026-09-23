@@ -27,6 +27,7 @@ import {
   acceptCelebrated,
   achievementRowsFor,
   offerCelebration,
+  streakSummaryFor,
 } from "./celebrations";
 
 /**
@@ -180,6 +181,8 @@ async function buildAllWorksStatsPanelData(
       perWork.map((entry) => ({ label: entry.work.title, days: entry.days }))
     ),
     achievements: await achievementRowsFor(undefined),
+    // 1日・1か月の目標の最長の連続（2以上のときだけ。作者の裁定 2026-09-23）
+    achievementStreaks: streakSummaryFor(),
     devicesTitle: "作品ごとの内訳",
     devicesColumn: "作品",
     totalsCardLabel: "全作品の合計",

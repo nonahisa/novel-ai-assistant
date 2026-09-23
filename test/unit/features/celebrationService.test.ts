@@ -246,3 +246,178 @@ describe("執筆統計で見せるのは一度だけ", () => {
     expect(await service.cheerFor(workA)).toBe("今日の目標に届きました");
   });
 });
+
+/**
+ * 連続達成（作者の裁定、2026-09-23）。日を進めながら保存し、
+ * 連続・節目・最長が係を通しても正しく数えられるかを見る。
+ */
+describe("連続達成", () => {
+  function daily(overrides: Partial<CelebrationDeps> = {}) {
+    let today = "2026-09-01";
+    const net = { value: 1_200 };
+    const store = memento();
+    const settings = { enabled: true, dailyGoal: 1_000, monthlyGoal: 0, boundaryHour: 4 };
+    const loadStats = vi.fn(async () => [
+      {
+        schemaVersion: "0.1",
+        deviceId: "pc1",
+        baseline: null,
+        days: [{ date: today, net: net.value, gross: net.value, saves: 1 }],
+      } as unknown as DeviceWritingStats,
+    ]);
+    const service = new CelebrationService({
+      memento: store,
+      works: () => [workA],
+      loadStats,
+      loadWorkLog: async () => [],
+      appendWorkLog: async () => undefined,
+      readGoals: async () => ({ schemaVersion: "0.1", perEpisodeChars: null, contest: null }),
+      settings: () => settings,
+      now: () => new Date(`${today}T10:00:00`),
+      ...overrides,
+    });
+    return {
+      service,
+      store,
+      settings,
+      loadStats,
+      net,
+      setDay: (day: string) => {
+        today = day;
+      },
+      /** その日に届くまで書いて保存する */
+      async reach(day: string) {
+        today = day;
+        return service.afterSave(workA, { wrote: true, written: net.value });
+      },
+    };
+  }
+
+  test("3日続けて届くと、札と下の欄に連続が出て、風船が増える", async () => {
+    const { service, reach } = daily();
+    await reach("2026-09-01");
+    await reach("2026-09-02");
+    const third = await reach("2026-09-03");
+    expect(third[0].streak).toBe(3);
+
+    const pending = await service.pendingFor(workA);
+    expect(pending?.size).toBe("small");
+    expect(pending?.balloons).toBe(7);
+    expect(pending?.lines).toEqual(["1日の目標（1,000字）を3日連続で達成"]);
+    expect(await service.cheerFor(workA)).toBe("3日連続で目標に届きました");
+  });
+
+  test("7日目は花火", async () => {
+    const { service, reach } = daily();
+    for (let day = 1; day <= 7; day++) {
+      await reach(`2026-09-0${day}`);
+    }
+    const pending = await service.pendingFor(workA);
+    expect(pending?.size).toBe("fireworks");
+    expect(pending?.balloons).toBe(11);
+  });
+
+  test("途切れたら何も言わず、次に届いた日から数え直す", async () => {
+    const { service, reach } = daily();
+    await reach("2026-09-01");
+    await reach("2026-09-02");
+    const after = await reach("2026-09-04");
+    expect(after[0].streak).toBeUndefined();
+    const pending = await service.pendingFor(workA);
+    expect(pending?.lines).toEqual(["1日の目標（1,000字）を達成"]);
+    expect(pending?.balloons).toBe(5);
+    expect(await service.cheerFor(workA)).toBe("今日の目標に届きました");
+    // 最長は残る
+    expect(service.streakSummary()).toEqual({ dailyBest: 2 });
+  });
+
+  test("同じ日に何度保存しても、連続は1日分しか進まない", async () => {
+    const { service, reach, net } = daily();
+    await reach("2026-09-01");
+    net.value = 1_500;
+    await reach("2026-09-01");
+    await reach("2026-09-01");
+    const next = await reach("2026-09-02");
+    expect(next[0].streak).toBe(2);
+    expect(service.streakSummary()).toEqual({ dailyBest: 2 });
+  });
+
+  test("同じ日に目標を上げて届き直しても、連続は増えず花火も繰り返さない", async () => {
+    const { reach, settings, net } = daily();
+    for (let day = 1; day <= 7; day++) await reach(`2026-09-0${day}`);
+    settings.dailyGoal = 1_100;
+    net.value = 1_200;
+    const again = await reach("2026-09-07");
+    expect(again[0].goal).toBe(1_100);
+    expect(again[0].streak).toBe(7);
+    expect(again[0].streakMilestone).toBeUndefined();
+  });
+
+  test("目標の値が日ごとに変わっても、その日の目標に届けば連続", async () => {
+    const { reach, settings } = daily();
+    await reach("2026-09-01");
+    settings.dailyGoal = 800;
+    const second = await reach("2026-09-02");
+    expect(second[0].streak).toBe(2);
+  });
+
+  test("0.78.2以前の記録しか無いとき（帳面が無い）は、記録から組み直して続ける", async () => {
+    const { store, reach } = daily();
+    await store.update(
+      "novelai.celebrations.global",
+      [1, 2, 3, 4, 5, 6].map((day) => ({
+        id: `daily:2026-09-0${day}:1000`,
+        kind: "daily",
+        day: `2026-09-0${day}`,
+        at: `2026-09-0${day}T01:00:00.000Z`,
+        goal: 1000,
+        written: 1200,
+      }))
+    );
+    const seventh = await reach("2026-09-07");
+    expect(seventh[0]).toMatchObject({ streak: 7, streakMilestone: true });
+  });
+
+  test("連続を数えるのに、達成の記録を毎回組み直さない（帳面から進める）", async () => {
+    const { store, reach } = daily();
+    await reach("2026-09-01");
+    await reach("2026-09-02");
+    // 記録から古い行が落ちても（上限400件）、帳面が覚えている
+    await store.update("novelai.celebrations.global", []);
+    const third = await reach("2026-09-03");
+    expect(third[0].streak).toBe(3);
+  });
+
+  test("最長を超えた日に花火（途切れたあとの連続が前の最長を追い抜いた日）", async () => {
+    const { service, reach } = daily();
+    for (const day of ["2026-09-01", "2026-09-02", "2026-09-03"]) await reach(day);
+    for (const day of ["2026-09-10", "2026-09-11", "2026-09-12"]) {
+      await reach(day);
+    }
+    const passed = await reach("2026-09-13");
+    expect(passed[0]).toMatchObject({ streak: 4, streakRecord: true });
+    const pending = await service.pendingFor(workA);
+    expect(pending?.size).toBe("fireworks");
+    expect(pending?.lines[0]).toBe(
+      "1日の目標（1,000字）を4日連続で達成（これまでの最長を更新）"
+    );
+    expect(service.streakSummary()).toEqual({ dailyBest: 4 });
+  });
+
+  test("1か月の目標も月をまたいで連続を数える（年をまたいでも）", async () => {
+    const { reach, settings } = daily();
+    settings.dailyGoal = 0;
+    settings.monthlyGoal = 1_000;
+    await reach("2026-11-20");
+    await reach("2026-12-15");
+    const third = await reach("2027-01-10");
+    expect(third[0]).toMatchObject({ kind: "monthly", streak: 3, streakMilestone: true });
+  });
+
+  test("最長が1のうちは、最長の欄に何も出さない", async () => {
+    const { service, reach } = daily();
+    expect(service.streakSummary()).toEqual({});
+    await reach("2026-09-01");
+    expect(service.streakSummary()).toEqual({});
+  });
+});

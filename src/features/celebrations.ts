@@ -4,17 +4,25 @@ import type { WorkGoals } from "../models/workGoals";
 import type { DeviceWritingStats } from "../models/writingStats";
 import {
   appendAchievements,
-  celebrationSize,
+  celebrationLine,
+  celebrationScale,
   dailyAchievementId,
   describeAchievement,
   footCheer,
   judgeAchievements,
   monthlyAchievementId,
   pendingCelebrations,
+  streakNote,
   toAchievements,
   type Achievement,
   type CelebrationSize,
 } from "../core/celebrations";
+import {
+  applyStreaks,
+  rebuildStreaks,
+  streakBookOf,
+  type StreakBook,
+} from "../core/celebrationStreaks";
 import { AchievementStore } from "../core/achievementStore";
 import { logFailure, useLogFile } from "../core/logger";
 import {
@@ -38,6 +46,7 @@ import type { RecordOutcome } from "./writingProgress";
  * | 1日・1月の達成 | globalState（この端末） | 目標が全作品で共有の設定なので、作品のどれにも属さない |
  * | 作品・締切の達成 | 作品の `.aiwriter/achievements.json` | 作品についての事実。別の環境でも二度祝わない |
  * | 執筆統計で見せたか | globalState（この端末） | 見たかどうかは画面の前の作者の話で、作品の事実ではない |
+ * | 1日・1月の連続（最後に届いた日・いまの連続・最長） | globalState（この端末） | 1日・1月の達成と同じ置き場。保存のたびに記録を数え直さないため |
  *
  * **祝い方は2か所だけ。** 原稿エディターの下の欄に一言、執筆統計に風船と花火。
  * 書いている最中の画面には何も飛ばさない——手が止まるからである。
@@ -45,6 +54,8 @@ import type { RecordOutcome } from "./writingProgress";
 
 const GLOBAL_KEY = "novelai.celebrations.global";
 const SHOWN_KEY = "novelai.celebrations.shown";
+/** 連続の帳面（`core/celebrationStreaks.ts`） */
+const STREAK_KEY = "novelai.celebrations.streaks";
 /** 見せた印の上限。記録の上限と揃える（それより古い達成は記録からも落ちている） */
 const SHOWN_LIMIT = 400;
 
@@ -80,6 +91,8 @@ export interface CelebrationDeps {
 /** 執筆統計へ送る祝いの中身 */
 export interface CelebrationPayload {
   size: CelebrationSize;
+  /** 風船の数（連続が続くほど増える。上限あり） */
+  balloons: number;
   /** 画面に出す「◯◯を達成」の行 */
   lines: string[];
   /** 見せ終えたら返してもらう鍵 */
@@ -106,6 +119,28 @@ export class CelebrationService {
     return new Set(
       Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string") : []
     );
+  }
+
+  /**
+   * 連続の帳面。**無い・崩れているときだけ**、残っている1日・1月の記録から
+   * 組み直す（0.78.2以前から上げたとき）。ふだんは帳面から1つ進めるだけで、
+   * 記録を数え直さない。
+   */
+  private streakBook(global?: readonly Achievement[]): StreakBook {
+    const saved = streakBookOf(this.deps.memento.get<unknown>(STREAK_KEY, undefined));
+    return saved ?? rebuildStreaks(global ?? this.globalRecords());
+  }
+
+  /**
+   * 執筆統計の「達成の記録」に添える最長の連続。
+   * **2以上のときだけ出す**——1日きりを「最長1日連続」とは言わない。
+   */
+  streakSummary(): { dailyBest?: number; monthlyBest?: number } {
+    const book = this.streakBook();
+    const summary: { dailyBest?: number; monthlyBest?: number } = {};
+    if (book.daily && book.daily.best >= 2) summary.dailyBest = book.daily.best;
+    if (book.monthly && book.monthly.best >= 2) summary.monthlyBest = book.monthly.best;
+    return summary;
   }
 
   /**
@@ -177,11 +212,22 @@ export class CelebrationService {
       const recorded: Achievement[] = [];
 
       if (globalFound.length > 0) {
+        // 連続は、記録へ書く前に書き込む（あとから画面が札を組むとき、記録だけで言えるように）
+        const { found: annotated, book } = applyStreaks(
+          globalFound,
+          this.streakBook(global)
+        );
+        /*
+          **帳面を先に書く。** 記録の書き込みが失敗しても、次の保存で同じ日の
+          達成が見つかり直すだけで、帳面は「同じ日」として数を増やさない。
+          逆の順だと、帳面が古いまま残って翌日に連続が途切れたことになる。
+        */
+        await this.deps.memento.update(STREAK_KEY, book);
         await this.deps.memento.update(
           GLOBAL_KEY,
-          appendAchievements(global, globalFound)
+          appendAchievements(global, annotated)
         );
-        recorded.push(...globalFound);
+        recorded.push(...annotated);
       }
       if (workFound.length > 0) {
         try {
@@ -263,11 +309,12 @@ export class CelebrationService {
       this.shown(),
       this.today()
     );
-    const size = celebrationSize(pending.map((entry) => entry.kind));
-    if (!size) return undefined;
+    const scale = celebrationScale(pending);
+    if (!scale) return undefined;
     return {
-      size,
-      lines: pending.map((entry) => `${describeAchievement(entry)}を達成`),
+      size: scale.size,
+      balloons: scale.balloons,
+      lines: pending.map((entry) => celebrationLine(entry)),
       ids: pending.map((entry) => entry.id),
     };
   }
@@ -312,6 +359,19 @@ export interface AchievementRow {
   day: string;
   kind: Achievement["kind"];
   text: string;
+  /** 「3日連続」。連続でなければ持たない */
+  streak?: string;
+}
+
+/** 達成の記録の欄の見出しに添える最長の連続（2以上のときだけ） */
+export function streakSummaryFor(): { dailyBest?: number; monthlyBest?: number } {
+  if (!connected) return {};
+  try {
+    return connected.streakSummary();
+  } catch {
+    // 最長が出せなくても、統計の画面は開く
+    return {};
+  }
 }
 
 /** 画面に出す行の上限。古いものまで並べても読まない */
@@ -325,11 +385,16 @@ export async function achievementRowsFor(
   return records
     .slice(-ROW_LIMIT)
     .reverse()
-    .map((entry) => ({
-      day: entry.day,
-      kind: entry.kind,
-      text: describeAchievement(entry),
-    }));
+    .map((entry) => {
+      const row: AchievementRow = {
+        day: entry.day,
+        kind: entry.kind,
+        text: describeAchievement(entry),
+      };
+      const streak = streakNote(entry);
+      if (streak) row.streak = streak;
+      return row;
+    });
 }
 
 /**

@@ -53,6 +53,7 @@ import {
   acceptCelebrated,
   achievementRowsFor,
   offerCelebration,
+  streakSummaryFor,
 } from "./celebrations";
 
 /**
@@ -283,6 +284,8 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
     siteRecordsError: siteRecords.error,
     // 達成の印（設計書6.3.8）。どの目標をいつ達成したかを残す
     achievements: await achievementRowsFor(work),
+    // 1日・1か月の目標の最長の連続（2以上のときだけ。作者の裁定 2026-09-23）
+    achievementStreaks: streakSummaryFor(),
     // 締切のある作品では、いちばん上に「あと何日・あと何字」を出す。
     // 数字だけでは間に合うか判断できないので、文にして添える
     contest: contest

@@ -39,7 +39,9 @@ describe("風船と花火", () => {
 
   test("動きを減らす設定では、風船を描かず札（達成の印）だけ出す", () => {
     expect(script).toContain("prefers-reduced-motion: reduce");
-    expect(script).toContain("if (!reducedMotion()) runCelebration(payload.size);");
+    expect(script).toContain(
+      "if (!reducedMotion()) runCelebration(payload.size, payload.balloons);"
+    );
     expect(style).toContain("@media (prefers-reduced-motion: reduce)");
   });
 
@@ -77,5 +79,40 @@ describe("達成の記録", () => {
 
   test("スクリプトがJavaScriptとして読める", () => {
     expect(() => new Function(script)).not.toThrow();
+  });
+});
+
+/** 画面のスクリプトから関数を1つ取り出して、その場で動かす */
+function pickFunction(name: string): (...args: unknown[]) => unknown {
+  const start = script.indexOf(`function ${name}(`);
+  if (start < 0) throw new Error(`${name} がありません`);
+  const end = script.indexOf("\n}\n", start);
+  return new Function(`${script.slice(start, end + 2)}; return ${name};`)() as (
+    ...args: unknown[]
+  ) => unknown;
+}
+
+describe("連続達成（作者の裁定、2026-09-23）", () => {
+  test("拡張機能が決めた風船の数で描く。数が無い・壊れていれば今までどおり", () => {
+    const balloonCountFor = pickFunction("balloonCountFor");
+    expect(balloonCountFor("small", 9)).toBe(9);
+    expect(balloonCountFor("small", undefined)).toBe(5);
+    expect(balloonCountFor("balloons", "x")).toBe(12);
+    // 画面から埋まるほどは描かない
+    expect(balloonCountFor("small", 5000)).toBe(40);
+    expect(balloonCountFor("small", 0)).toBe(1);
+    expect(script).toContain("balloonCountFor(size, balloons)");
+  });
+
+  test("達成の記録の欄に、行ごとの連続と最長の連続を出す", () => {
+    expect(script).toContain("row.streak");
+    expect(script).toContain("state.achievementStreaks");
+    const streakHeadline = pickFunction("streakHeadline");
+    expect(streakHeadline({ dailyBest: 12, monthlyBest: 3 })).toBe(
+      "最長 12日連続・最長 3か月連続"
+    );
+    expect(streakHeadline({ dailyBest: 4 })).toBe("最長 4日連続");
+    expect(streakHeadline({})).toBe("");
+    expect(streakHeadline(undefined)).toBe("");
   });
 });
