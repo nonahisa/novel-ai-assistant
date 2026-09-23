@@ -23,12 +23,27 @@ import {
   type LocalManuscriptSource,
 } from "../core/backupMerge";
 import { hunkProposalsOf, type BackupHunkProposal } from "../core/backupHunks";
+import {
+  missingEpisodeFiles,
+  type MissingEpisodeFile,
+} from "../core/backupMissingEpisodes";
+import { AtomicWriteFileError, atomicWriteFile } from "../core/atomicWrite";
+import {
+  episodeNameStyleOf,
+  nextEpisodeFileNameLike,
+} from "../core/episodeRenumber";
+import { findLatestEpisode } from "../core/latestEpisode";
+import {
+  encodeForNewFile,
+  readTextFile,
+  type TextFileContent,
+} from "../core/textFile";
+import type { Chapter } from "../models/chapter";
 import { episodePathFor } from "../core/bookStore";
 import { ChapterStore } from "../core/chapterStore";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { PostingStore } from "../core/postingStore";
 import { scanWork } from "../core/scanner";
-import { readTextFile } from "../core/textFile";
 import {
   inspectWorkBackup,
   WorkZipError,
@@ -96,6 +111,11 @@ export interface BackupDropDeps {
   readonly importAsNew?: ImportAsNewWork;
   /** 本文の違いを提案パネルへ並べる口。渡されなければ記録へ書き出すだけ */
   readonly showProposals?: ShowBackupProposals;
+  /**
+   * 手元に無い話をファイルとして足したあとに呼ぶ口（作品一覧の読み直しと、
+   * 執筆量の基準の置き直し。どちらも `extension.ts` にしか無い）
+   */
+  readonly afterEpisodesAdded?: (work: WorkEntry) => Promise<void>;
 }
 
 /** 相談パネルに出す結果 */
@@ -405,8 +425,9 @@ async function mergeIntoWork(
     });
   }
 
-  const local = await withProgress("手元の原稿と比べています…", () =>
-    readLocalSources(work)
+  const { sources: local, scan } = await withProgress(
+    "手元の原稿と比べています…",
+    () => readLocalSources(work)
   );
 
   const plan = planBackupMerge({
@@ -438,6 +459,37 @@ async function mergeIntoWork(
     return { message: `「${work.title}」に足すものはありませんでした。` };
   }
 
+  /*
+    **手元に無い話は、押す前に名前まで決めて見せる**（作者の裁定、2026-09-23：
+    「確認画面に話の題を並べ、押したら新しい話のファイルとして足す」）。
+    名前を決められなかった話・中身を用意できなかった話も、ここで言う。
+  */
+  const prepared = missingEpisodeFiles(picked.inspection, plan.missingEpisodes);
+  const naming = nameMissingEpisodes(
+    prepared.files,
+    scan,
+    local.map((source) => source.manuscriptName)
+  );
+  const notAdded = [...prepared.skipped, ...naming.skipped];
+  const episodeLines: string[] = [];
+  if (naming.named.length > 0) {
+    episodeLines.push(
+      `　足すファイル：${listNames(naming.named.map((entry) => entry.name))}` +
+        `（${path.basename(scan.manuscriptDir)} の中）`
+    );
+  }
+  if (notAdded.length > 0) {
+    episodeLines.push(
+      `　足せない話が${notAdded.length}話あります：` +
+        notAdded
+          .slice(0, 3)
+          .map((entry) => `${entry.label}（${entry.reason}）`)
+          .join("、")
+    );
+  }
+
+  const ADD_ALL = "取り込む";
+  const WITHOUT_EPISODES = "話は足さずに取り込む";
   const answer = await vscode.window.showInformationMessage(
     heading,
     {
@@ -446,11 +498,13 @@ async function mergeIntoWork(
         `取り込む元：${path.basename(picked.fileName)}`,
         "",
         ...describeMergePlan(plan, describeOptions),
+        ...(episodeLines.length > 0 ? ["", ...episodeLines] : []),
       ].join("\n"),
     },
-    "取り込む"
+    // **話を足すかは別に選べるようにする**（いいねだけ欲しい、ということがある）
+    ...(naming.named.length > 0 ? [ADD_ALL, WITHOUT_EPISODES] : [ADD_ALL])
   );
-  if (answer !== "取り込む") {
+  if (answer !== ADD_ALL && answer !== WITHOUT_EPISODES) {
     logStep(`相談パネル：「${work.title}」への取り込みを取りやめました（確かめの画面で押さなかった）`);
     return undefined;
   }
@@ -465,8 +519,19 @@ async function mergeIntoWork(
       postingStore,
       ledger,
     },
-    deps
+    deps,
+    {
+      scan,
+      files: answer === ADD_ALL ? naming.named : [],
+      notAdded: answer === ADD_ALL ? notAdded : [],
+    }
   );
+}
+
+/** ファイル名を3つまで並べ、残りは数で言う */
+function listNames(names: readonly string[]): string {
+  const listed = names.slice(0, 3).join("、");
+  return names.length > 3 ? `${listed} ほか${names.length - 3}件` : listed;
 }
 
 /**
@@ -474,7 +539,7 @@ async function mergeIntoWork(
  */
 async function readLocalSources(
   work: WorkEntry
-): Promise<LocalManuscriptSource[]> {
+): Promise<{ sources: LocalManuscriptSource[]; scan: WorkScan }> {
   const scan = await scanWork(work);
   const sources: LocalManuscriptSource[] = [];
   for (const episode of scan.episodes) {
@@ -501,7 +566,162 @@ async function readLocalSources(
       ...(hash === undefined ? {} : { hash }),
     });
   }
-  return sources;
+  return { sources, scan };
+}
+
+/** 走査の結果（使うのは話の一覧と本文フォルダーだけ） */
+type WorkScan = Awaited<ReturnType<typeof scanWork>>;
+
+/** 足す1話ぶん（名前が決まったもの） */
+interface NamedEpisodeFile {
+  readonly file: MissingEpisodeFile;
+  /** 本文フォルダーからの名前（`/` 区切り） */
+  readonly name: string;
+}
+
+/**
+ * 手元に無い話の名前を決める（作者の裁定、2026-09-23）。
+ *
+ * **手元の話の名前の流儀に合わせる**——「新しい話を作る」
+ * （`novelai.addEpisode`）と同じ `nextEpisodeFileNameLike` を通す。流儀が
+ * 読めない作品（合本1つだけ等）では「合本を話ごとに分ける」と同じ名前にする。
+ * カクヨムの話ごとのファイルは名前を変えない（次のバックアップと名前で照らす）。
+ *
+ * **既にある名前には置かない**（上書きしない。実装ルール2）。ぶつかったら
+ * その話は足さず、理由を言う。
+ */
+function nameMissingEpisodes(
+  files: readonly MissingEpisodeFile[],
+  scan: WorkScan,
+  existing: readonly string[]
+): { named: NamedEpisodeFile[]; skipped: { label: string; reason: string }[] } {
+  const latest = findLatestEpisode(scan.episodes);
+  const style = latest ? episodeNameStyleOf(latest.fileName) : null;
+  const used = new Set(existing.map((name) => name.toLowerCase()));
+  const named: NamedEpisodeFile[] = [];
+  const skipped: { label: string; reason: string }[] = [];
+  for (const file of files) {
+    const name =
+      file.renamable && latest && style
+        ? nextEpisodeFileNameLike({
+            latestFileName: latest.fileName,
+            number: file.number,
+            fallback: { digits: 4, extension: style.ext },
+          })
+        : file.defaultFileName;
+    if (used.has(name.toLowerCase())) {
+      skipped.push({
+        label: file.label,
+        reason: `同じ名前のファイル（${name}）が既にあります（上書きしません）`,
+      });
+      continue;
+    }
+    used.add(name.toLowerCase());
+    named.push({ file, name });
+  }
+  return { named, skipped };
+}
+
+/**
+ * 手元に無い話を、新しいファイルとして足す。**`mode: "create"` だけ**
+ * （既にあれば失敗する。実装ルール2の3経路の②）。
+ *
+ * 合本から切り出した話は**手元の原稿と同じ文字コード・改行**で書く
+ * （`encodeForNewFile`。いちばん新しい話を手本にする）。手本が読めなければ
+ * UTF-8・LF。カクヨムの話ごとのファイルはバックアップのバイト列のまま
+ * （6.99 の新規取り込みと同じ）。
+ *
+ * @returns 足せた話（章を立てるのに使う）と、足せなかった話（理由つき）
+ */
+async function writeMissingEpisodes(
+  work: WorkEntry,
+  scan: WorkScan,
+  files: readonly NamedEpisodeFile[]
+): Promise<{
+  added: { file: MissingEpisodeFile; path: string }[];
+  skipped: { label: string; reason: string }[];
+}> {
+  const added: { file: MissingEpisodeFile; path: string }[] = [];
+  const skipped: { label: string; reason: string }[] = [];
+  if (files.length === 0) return { added, skipped };
+
+  const latest = findLatestEpisode(scan.episodes);
+  let reference: TextFileContent | undefined;
+  if (latest) {
+    try {
+      reference = await readTextFile(latest.filePath);
+    } catch {
+      // 手本が読めなければ UTF-8・LF で書く（新しいファイルなので壊すものは無い）
+    }
+  }
+
+  for (const { file, name } of files) {
+    const target = path.join(scan.manuscriptDir, name);
+    const bytes =
+      file.content.kind === "bytes"
+        ? file.content.bytes
+        : reference
+          ? encodeForNewFile(file.content.text, reference)
+          : new TextEncoder().encode(file.content.text);
+    if (!bytes) {
+      skipped.push({
+        label: file.label,
+        reason: `手元の原稿の文字コード（${reference?.encoding ?? ""}）で書けない文字があります`,
+      });
+      continue;
+    }
+    try {
+      await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
+      await atomicWriteFile(target, bytes, { mode: "create" });
+      added.push({ file, path: target });
+    } catch (error) {
+      skipped.push({
+        label: file.label,
+        reason:
+          error instanceof AtomicWriteFileError && error.kind === "path_conflict"
+            ? `同じ名前のファイル（${name}）が既にあります（上書きしません）`
+            : messageOf(error),
+      });
+      logFailure("相談パネル：バックアップの話を新しいファイルとして足せなかった", {
+        作品: work.title,
+        ファイル: target,
+        詳細: messageOf(error),
+      });
+    }
+  }
+  return { added, skipped };
+}
+
+/**
+ * 足した話から始まる章を、章の台帳の**末尾へ足す**。
+ *
+ * **台帳に作者の章が既にあるときだけ**（空の台帳に章を立てるのは
+ * `planChapters` の役目で、そちらは手元の全部の話が揃っていないと
+ * 立てない）。作者の章は1つも変えない。同じ名前の章が既にあれば足さない。
+ *
+ * 章の台帳は「章の始まりの話」だけを持つので、章の途中に足した話は
+ * 台帳に載せなくても、並びでその章に入る。
+ *
+ * @returns 足した章の数
+ */
+async function appendChaptersForAdded(
+  work: WorkEntry,
+  stores: { chapterStore: ChapterStore; chapterSet: ChapterSet | null },
+  added: readonly { file: MissingEpisodeFile; path: string }[]
+): Promise<number> {
+  const set = stores.chapterSet;
+  if (!set || set.chapters.length === 0) return 0;
+  const names = new Set(set.chapters.map((chapter) => chapter.name));
+  const extra: Chapter[] = [];
+  for (const entry of [...added].sort((a, b) => a.file.order - b.file.order)) {
+    const part = entry.file.part;
+    if (!part || names.has(part)) continue;
+    names.add(part);
+    extra.push({ name: part, startEpisodePath: episodePathFor(work.folderPath, entry.path) });
+  }
+  if (extra.length === 0) return 0;
+  await stores.chapterStore.save({ ...set, chapters: [...set.chapters, ...extra] });
+  return extra.length;
 }
 
 /**
@@ -518,7 +738,14 @@ async function applyMergePlan(
     postingStore: PostingStore;
     ledger: PostingLedger | null;
   },
-  deps: BackupDropDeps
+  deps: BackupDropDeps,
+  episodes: {
+    scan: WorkScan;
+    /** 足す話（作者が「話は足さずに」を選んだら空） */
+    files: readonly NamedEpisodeFile[];
+    /** 押す前から足せないと分かっていた話 */
+    notAdded: readonly { label: string; reason: string }[];
+  }
 ): Promise<BackupDropResult> {
   const failures: string[] = [];
 
@@ -558,6 +785,38 @@ async function applyMergePlan(
         作品: work.title,
         詳細: messageOf(error),
       });
+    }
+  }
+
+  /*
+    **手元に無い話を、新しい話のファイルとして足す**（作者の裁定、2026-09-23）。
+    既存の話には触らない（`mode: "create"` だけ）。章のある作品では、
+    足した話から始まる章を台帳の末尾へ足す。
+  */
+  const written = await writeMissingEpisodes(work, episodes.scan, episodes.files);
+  const notAdded = [...episodes.notAdded, ...written.skipped];
+  let appendedChapters = 0;
+  if (written.added.length > 0) {
+    try {
+      appendedChapters = await appendChaptersForAdded(work, stores, written.added);
+    } catch (error) {
+      failures.push("足した話の章");
+      logFailure("相談パネル：足した話の章を台帳へ書けなかった", {
+        作品: work.title,
+        詳細: messageOf(error),
+      });
+    }
+    // 作品一覧と執筆量の基準を直してもらう（基準を置き直さないと、次に書いた分が
+    // 「ファイル数が変わった回」として数えられずに消える。設計書6.3.2）
+    if (deps.afterEpisodesAdded) {
+      try {
+        await deps.afterEpisodesAdded(work);
+      } catch (error) {
+        logFailure("相談パネル：話を足したあとの一覧の読み直し", {
+          作品: work.title,
+          詳細: messageOf(error),
+        });
+      }
     }
   }
 
@@ -618,6 +877,19 @@ async function applyMergePlan(
       `作品ID${wroteProfile ? "を書いた" : "は書かず"}`,
       `本文の違い${plan.bodyDiffs.length}話${recordPath ? `（記録：${recordPath}）` : ""}`,
       `提案パネルへ${proposals}か所`,
+      `新しい話${written.added.length}話${
+        written.added.length > 0
+          ? `（${written.added.map((entry) => path.basename(entry.path)).join("、")}）`
+          : ""
+      }`,
+      ...(appendedChapters > 0 ? [`足した話の章${appendedChapters}`] : []),
+      ...(notAdded.length > 0
+        ? [
+            `足せなかった話：${notAdded
+              .map((entry) => `${entry.label}（${entry.reason}）`)
+              .join("、")}`,
+          ]
+        : []),
       ...(failures.length > 0 ? [`書けなかったもの：${failures.join("・")}`] : []),
     ].join("・")
   );
@@ -630,12 +902,21 @@ async function applyMergePlan(
     bodyDiffs: plan.bodyDiffs.length,
     recorded: recordPath !== undefined,
     proposals,
+    addedEpisodes: written.added.length,
   });
+  // **足せなかった話は黙って落とさない**（同じ名前のファイルがあった等）
+  const notAddedNote =
+    notAdded.length > 0
+      ? `（足せなかった話${notAdded.length}話：${notAdded
+          .slice(0, 3)
+          .map((entry) => `${entry.label}——${entry.reason}`)
+          .join("、")}）`
+      : "";
   return {
     message:
-      failures.length > 0
+      (failures.length > 0
         ? `${summary}（${failures.join("・")}は書けませんでした。詳しくは記録（ログ）をご覧ください）`
-        : summary,
+        : summary) + notAddedNote,
     recordPath,
   };
 }

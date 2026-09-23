@@ -359,11 +359,36 @@ describe("本文の違い", () => {
     expect(result.bodyDiffs[0].relPath).toBe("本文/N5078JI.txt");
   });
 
-  it("手元に無い話は数えるだけで、取り込まない", () => {
+  it("手元に無い話は、題を並べて「新しい話のファイルとして足します」と言う（作者の裁定、2026-09-23）", () => {
     const result = plan(splitSources(EPISODES.slice(0, 2)));
 
     expect(result.unmatched).toBe(1);
-    expect(describeMergePlan(result).join("\n")).toContain("手元に見当たらない話が1話");
+    expect(result.missingEpisodes).toEqual([
+      { order: 3, label: "3話　外へ", part: "学園", fileName: null },
+    ]);
+    const text = describeMergePlan(result).join("\n");
+    expect(text).toContain(
+      "・手元に無い話：1話。新しい話のファイルとして足します（既存の話には触りません）\n　・3話　外へ"
+    );
+    // 足すものがあるので、空の計画ではない
+    expect(isEmptyMergePlan(result)).toBe(false);
+  });
+
+  it("**番号で照らせなくても、本文がそっくり同じ話が手元にあれば足さない**（重複を作らない）", () => {
+    // 作者が手で書き足した話（区切り行の無い `エピソード3.txt`）が、あとでサイトへ出た
+    const sources: LocalManuscriptSource[] = [
+      ...splitSources(EPISODES.slice(0, 2)),
+      {
+        relPath: "本文/エピソード3.txt",
+        manuscriptName: "エピソード3.txt",
+        text: "　外は明るかった。\n",
+      },
+    ];
+
+    const result = plan(sources);
+
+    expect(result.missingEpisodes).toEqual([]);
+    expect(result.sameBodies).toBe(3);
   });
 
   it("**競合の印があるファイルは比べない**", () => {

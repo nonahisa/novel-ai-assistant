@@ -713,6 +713,17 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     this.backupProposals = show;
   }
 
+  /**
+   * バックアップ（や Word 原稿）から話をファイルとして足したあとに呼ぶ口
+   * （作品一覧の読み直しと、執筆量の基準の置き直し）。どちらも `extension.ts`
+   * にしか無いので、同じ形で渡してもらう。
+   */
+  private episodesAdded: ((work: WorkEntry) => Promise<void>) | undefined;
+
+  setEpisodesAdded(after: (work: WorkEntry) => Promise<void>): void {
+    this.episodesAdded = after;
+  }
+
   /** バックアップを捌いている最中か。**2つ同時に落とされても1つずつ** */
   private receivingBackup = false;
   /** 直近の「バックアップとの違い」の記録。「違いを見る」で開く */
@@ -1567,6 +1578,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           works: this.registry.list(),
           importAsNew: this.backupImporter,
           showProposals: this.backupProposals,
+          afterEpisodesAdded: this.episodesAdded,
         }
       );
       if (!result) {

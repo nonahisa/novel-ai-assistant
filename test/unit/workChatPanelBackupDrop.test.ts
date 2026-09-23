@@ -115,6 +115,16 @@ describe("拡張機能の側", () => {
     expect(lastDeps?.showProposals).toBe(show);
   });
 
+  test("話を足したあとの後始末の口（一覧の読み直し・執筆量の基準）も渡す", async () => {
+    const panel = makePanel();
+    const after = async () => undefined;
+    panel.setEpisodesAdded(after);
+
+    await send(panel, { type: "backupFile", name: "N5078JI.zip", bytes: new Uint8Array([1]) });
+
+    expect(lastDeps?.afterEpisodesAdded).toBe(after);
+  });
+
   test("ArrayBuffer で届いても受け取る", async () => {
     const panel = makePanel();
 
