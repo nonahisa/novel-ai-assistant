@@ -52,6 +52,11 @@ const SITES: ReadonlyArray<{ file: string; phrase: string; why: string }> = [
     why: "すべて同期の終わりに、まとめて1回出る",
   },
   {
+    file: "features/nameRename.ts",
+    phrase: "件を提案パネルに出しました。",
+    why: "名前の付け替えの終わりに、資料への反映のボタン付きで出る（0.76.7）",
+  },
+  {
     file: "extension.ts",
     phrase: "意味検索が「切」になっています。",
     why: "索引づくりを押したが意味検索が切のとき",

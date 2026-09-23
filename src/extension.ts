@@ -281,6 +281,7 @@ import {
   refreshNameCheckPanel,
 } from "./features/nameCheck";
 import {
+  announceRenameProposals,
   applyRenameToRecords,
   clearPendingRename,
   describeRenameRecordsResult,
@@ -1360,6 +1361,18 @@ export async function activate(
     // パネルを直に読み込むと、パネル側もこちらを読むので輪になる
     openSceneMemos: async (filePath) => {
       await showSceneMemosFor(filePath);
+    },
+    // 執筆再開の資料（設計書6.36）。**開いている原稿の作品で開く**——
+    // コマンドを引数なしで呼ぶと、作品が複数あるときに訊き直してしまう。
+    // 登録した作品の外の原稿なら、メニューから押したときと同じ（作品を訊く）。
+    // **コマンドを通す**のは、失敗の知らせと「動いている」札をメニューから
+    // 押したときと揃えるため（画面からの知らせの受け口は失敗を拾わない）
+    resumeWriting: async (filePath) => {
+      const work = workOfPath(registry, filePath);
+      await vscode.commands.executeCommand(
+        "novelai.resumeWriting",
+        work ? ({ type: "work", work } satisfies WorkRef) : undefined
+      );
     },
     // カーソルの追従は片方向。パネルが開いていなければ何も起きない
     onCaretMoved: (filePath, line) => noteSceneMemoCaret(filePath, line),
@@ -4604,13 +4617,8 @@ export async function activate(
     if (result.issues.length > 0) {
       proposalPanel.showResults(work, result.issues, "名前の付け替え");
     }
-    vscode.window.showInformationMessage(
-      result.issues.length > 0
-        ? `本文の置き換え ${result.issues.length}件を提案パネルに出しました。` +
-            "適用が済んだら「名前の付け替えを資料にも反映」を実行してください。"
-        : "本文に置き換えるところはありませんでした。" +
-            "「名前の付け替えを資料にも反映」で資料だけ直せます。"
-    );
+    // 資料への反映へそのまま進めるボタンを付ける（押さなければ何もしない。待たない）
+    announceRenameProposals(work, result.issues.length);
   };
 
   context.subscriptions.push(

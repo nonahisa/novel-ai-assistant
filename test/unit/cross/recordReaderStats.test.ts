@@ -5,6 +5,7 @@ import {
   recordReaderStats,
 } from "../../../src/features/readerStats";
 import { buildReaderStatsEnvelope } from "../../../src/core/readerStatsEnvelope";
+import { HELPER_DOWNLOAD_URL } from "../../../src/core/postingEnvelope";
 import type { WorkEntry } from "../../../src/models/types";
 import { env, FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
 
@@ -532,6 +533,75 @@ describe("読者の反応を貼り付けて取り込む", () => {
       expect(env.opened).toEqual([]);
       // **黙って終わらない**（押したのに何も起きない、を作らない）
       expect(warned.join("")).toContain("読者の反応のデータ");
+    });
+  });
+
+  /**
+   * ヘルパーの入手先への道（作者の依頼、2026-09-23「ヘルパーにつなぐ案内を
+   * 仕込んでください。今はGithubで」）。
+   *
+   * 「ヘルパーの『読者の反応をコピー』を押してから」と案内しても、
+   * **ヘルパーを入れていない作者には押す場所が無い。** 封筒が入っていない
+   * ときに、入手先を開く道を添える。開くだけで、何も書かない。
+   */
+  describe("ヘルパーの入手先を開く", () => {
+    test("入手先は GitHub の1か所", () => {
+      expect(HELPER_DOWNLOAD_URL).toBe("https://github.com/nonahisa/novel-ai-helper");
+    });
+
+    test("2択の画面に「ヘルパーを入れる」があり、選べば入手先を開く", async () => {
+      bothSites();
+      env.clipboard.text = "";
+      const picks = stubQuickPick([
+        (items) => items.find((item) => item.helper === true),
+      ]);
+
+      const result = await importReaderStats(work);
+
+      expect(result.changed).toBe(false);
+      expect(picks[0].map((item) => item.label).join("")).toContain("ヘルパーを入れる");
+      expect(env.opened).toEqual([HELPER_DOWNLOAD_URL]);
+      expect(readLedger().readerStats).toBeUndefined();
+    });
+
+    test("管理画面を組めないときも、断りの知らせから入手先を開ける", async () => {
+      writeLedger({
+        schemaVersion: "1",
+        sites: [{ site: "narou", newEpisodeUrl: narouUrl }],
+        posts: [],
+      });
+      env.clipboard.text = "きょうは雨が降っていた。";
+      const buttons: string[][] = [];
+      Object.assign(window, {
+        showWarningMessage: async (message: string, ...items: string[]) => {
+          warned.push(message);
+          buttons.push(items);
+          return items.find((item) => item.includes("ヘルパーを入れる"));
+        },
+      });
+
+      const result = await importReaderStats(work);
+
+      expect(result.changed).toBe(false);
+      expect(buttons.flat().join("")).toContain("ヘルパーを入れる");
+      expect(env.opened).toEqual([HELPER_DOWNLOAD_URL]);
+    });
+
+    test("封筒の版違いなど、ヘルパーを入れても直らない断りには出さない", async () => {
+      bothSites();
+      env.clipboard.text = JSON.stringify({ "novelai-stats": 999, site: "kakuyomu" });
+      const buttons: string[][] = [];
+      Object.assign(window, {
+        showWarningMessage: async (message: string, ...items: string[]) => {
+          warned.push(message);
+          buttons.push(items);
+          return undefined;
+        },
+      });
+
+      await importReaderStats(work);
+
+      expect(buttons.flat().join("")).not.toContain("ヘルパーを入れる");
     });
   });
 });

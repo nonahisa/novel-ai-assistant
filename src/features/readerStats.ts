@@ -37,6 +37,7 @@ import {
 } from "../core/readerStatsHelperLink";
 // 管理画面のURLを組むのは core（画面を出さずに確かめられるようにする）
 import { readerStatsPageUrl } from "../core/postingSiteUrls";
+import { HELPER_DOWNLOAD_URL } from "../core/postingEnvelope";
 import { formatReaderStatsMetrics } from "../core/postingSiteRecords";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { logFailure, useLogFile } from "../core/logger";
@@ -141,6 +142,10 @@ export async function importReaderStats(
       await openAdminPage(page);
       return UNCHANGED;
     }
+    if (answer === "helper") {
+      await openHelperDownload();
+      return UNCHANGED;
+    }
     // **もう一度クリップボードを読む。** 2択を出している間に貼り込み係で
     // コピーしてきていることがある（そのときに読み直さないと、押しても
     // 何も起きないのと同じになる）
@@ -148,13 +153,20 @@ export async function importReaderStats(
   }
 
   if (!parsed.ok) {
-    // 封筒が無いままなら、断りの文言に管理画面への道を添える
-    if (parsed.kind === "notEnvelope" && page) {
+    // 封筒が無いままなら、断りの文言に管理画面とヘルパーの入手先への道を添える。
+    // **入手先は管理画面を組めないときも出す**——ヘルパーが無ければ、
+    // 案内の「読者の反応をコピー」を押す場所がそもそも無い。
+    // 版違いなどほかの断りには出さない（入れても直らない）
+    if (parsed.kind === "notEnvelope") {
+      const buttons = page
+        ? [openAdminLabel(page), HELPER_INSTALL_LABEL]
+        : [HELPER_INSTALL_LABEL];
       const answer = await vscode.window.showWarningMessage(
         parsed.reason,
-        openAdminLabel(page)
+        ...buttons
       );
-      if (answer) await openAdminPage(page);
+      if (answer === HELPER_INSTALL_LABEL) await openHelperDownload();
+      else if (answer && page) await openAdminPage(page);
     } else {
       void vscode.window.showWarningMessage(parsed.reason);
     }
@@ -429,6 +441,7 @@ function openAdminLabel(page: AdminPage): string {
 
 /**
  * 「管理画面を開く」か「クリップボードから取り込む」かを訊く。
+ * ヘルパーをまだ入れていない作者のために、入手先を開く道も並べる（0.76.7）。
  *
  * **封筒が入っていなかったときだけ出る。** 入っていれば黙って取り込む
  * （もうコピーしてある作者に、1手増やす理由が無い）。
@@ -436,7 +449,7 @@ function openAdminLabel(page: AdminPage): string {
 async function askAdminPage(
   work: WorkEntry,
   page: AdminPage
-): Promise<"open" | "clipboard" | "cancel"> {
+): Promise<"open" | "clipboard" | "helper" | "cancel"> {
   const picked = await vscode.window.showQuickPick(
     [
       {
@@ -450,6 +463,11 @@ async function askAdminPage(
         detail: "もうコピーしてある場合はこちら",
         open: false,
       },
+      {
+        label: `$(cloud-download) ${HELPER_INSTALL_LABEL}`,
+        detail: "まだ入れていない場合はこちら。入手先（GitHub）をブラウザで開きます",
+        helper: true,
+      },
       // 出口を目に見える形で置く（`views/dialogs.ts`。Esc を知らない作者にも）
       cancelItem("取り込まずに終わる"),
     ],
@@ -457,11 +475,13 @@ async function askAdminPage(
       // **一覧から選ぶ画面だと、題にも書く**（placeHolder は打つと消える）
       title: `${work.title} の読者の反応（一覧から選びます）`,
       placeHolder:
-        "クリップボードに、ヘルパーでコピーした読者の反応が入っていません。どちらにしますか",
+        "クリップボードに、ヘルパーでコピーした読者の反応が入っていません。どうしますか",
       ignoreFocusOut: true,
     }
   );
-  if (!picked || isCancelItem(picked) || !("open" in picked)) return "cancel";
+  if (!picked || isCancelItem(picked)) return "cancel";
+  if ("helper" in picked) return "helper";
+  if (!("open" in picked)) return "cancel";
   return picked.open ? "open" : "clipboard";
 }
 
@@ -475,6 +495,21 @@ async function openAdminPage(page: AdminPage): Promise<void> {
   // `Uri.parse` を使う——`paths.toUri()` は手元のファイル用で、
   // ここで開くのは http(s) のURLである（実装ルール7の対象外）
   await vscode.env.openExternal(vscode.Uri.parse(page.url));
+}
+
+/**
+ * ヘルパーを入れる道の文言（0.76.7。作者の依頼、2026-09-23）。
+ * 2択の画面と断りの知らせで同じ言葉を使う（押した答えをこの文字列で見分ける）
+ */
+const HELPER_INSTALL_LABEL = "ヘルパーを入れる";
+
+/**
+ * ヘルパーの入手先を開く。**開くだけ**で、入れるのは作者がブラウザで行う。
+ * URL は `core/postingEnvelope.ts` の1か所が持つ。
+ */
+async function openHelperDownload(): Promise<void> {
+  // http(s) のURLなので `Uri.parse`（`openAdminPage` と同じ。実装ルール7の対象外）
+  await vscode.env.openExternal(vscode.Uri.parse(HELPER_DOWNLOAD_URL));
 }
 
 /**

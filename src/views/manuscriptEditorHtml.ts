@@ -47,6 +47,7 @@ import {
   SCRIPT_LINE_RULES,
 } from "../core/scriptLines";
 import type { WorkFormatKey } from "../core/workFormat";
+import { findAction } from "./actionList";
 
 /**
  * 測る書体の名前。
@@ -60,6 +61,17 @@ import type { WorkFormatKey } from "../core/workFormat";
 const PROBE_FONT_NAMES = MANUSCRIPT_FONTS.map((font) => font.probe).filter(
   (name): name is string => name !== undefined
 );
+
+/**
+ * 右クリックの「執筆を再開」の名前（設計書6.36・6.25。0.76.7）。
+ *
+ * **メニューの項目から引く。** ここへ写すと、メニュー名を付け替えたときに
+ * 右クリックだけが古い名前で残る。木から消えていたら（コマンドIDを
+ * 変えたとき）空になり、項目ごと出さない——押しても何も起きない項目を
+ * 置くより、無いほうがよい。**こちらが決めた定数**なので、PROBE_FONT_NAMES と
+ * 同じく埋め込んでよい（作者の書いたものではない）。
+ */
+const RESUME_WRITING_LABEL = findAction("novelai.resumeWriting")?.label ?? "";
 
 export function buildManuscriptEditorHtml(
   nonce: string,
@@ -1986,7 +1998,14 @@ ruby > rt {
     add("シーンメモを横に開く", function () {
       vscode.postMessage({ type: "openMemos" });
     });
-
+${RESUME_WRITING_LABEL ? `
+    /* ── 執筆再開の資料（設計書6.36。作者の依頼、2026-09-23） ──
+       シーンメモと同じく「横に資料を開く」項目なので、同じ区切りに置く。
+       作品は開いている原稿のものを使う（extension.ts の繋ぎが引く） */
+    add(${JSON.stringify(RESUME_WRITING_LABEL)}, function () {
+      vscode.postMessage({ type: "resumeWriting" });
+    });
+` : ""}
     menu.classList.add("open");
     // 画面の外へはみ出さないように収める
     const box = menu.getBoundingClientRect();

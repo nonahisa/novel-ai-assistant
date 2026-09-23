@@ -1376,3 +1376,26 @@ describe("分類の出し分けは環境で変わらない", () => {
     }
   });
 });
+
+/**
+ * 「読者の反応を取り込む」の説明（0.76.7）。
+ *
+ * 「対応はカクヨムとアルファポリスだけ」と書いていたが、ヘルパーが
+ * 読者の反応を読むのは**カクヨムと Narou.fun（なろうの数）**である
+ * （アルファポリスは画面を実機で確かめるまで読み取りを止めている）。
+ * 説明と実際が食い違うと、作者は読めないサイトで押して手詰まりになる。
+ */
+describe("読者の反応を取り込むの説明", () => {
+  const item = allActions().find(
+    (action) => action.command === "novelai.importReaderStats"
+  );
+
+  test("ヘルパーが読めるサイトを、実際のとおりに書く", () => {
+    expect(item).toBeDefined();
+    expect(item!.detail).toContain("カクヨム");
+    expect(item!.detail).toContain("Narou.fun");
+    expect(item!.detail).not.toContain("アルファポリスだけ");
+    // 読めないサイトには手入力の道がある
+    expect(item!.detail).toContain("手入力");
+  });
+});

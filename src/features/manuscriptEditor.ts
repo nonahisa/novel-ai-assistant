@@ -916,6 +916,8 @@ type Incoming =
   | { type: "addMemo"; line: number }
   /** シーンメモのパネルを横に開く（設計書6.40.4） */
   | { type: "openMemos" }
+  /** 執筆再開の資料を開く（設計書6.36。右クリックから。0.76.7） */
+  | { type: "resumeWriting" }
   /**
    * カーソルが動いた（設計書6.40.4）。
    *
@@ -1056,6 +1058,15 @@ export interface ManuscriptEditorDeps {
    * 省略できる形にしてあるのは、この画面がメモの機能なしでも成り立つため。
    */
   openSceneMemos?: (filePath: string) => Promise<void>;
+  /**
+   * 執筆再開の資料（設計書6.36）を開く。右クリックの品書きから呼ぶ
+   * （作者の依頼、2026-09-23「原稿エディター内でも呼び出せたらいいな」）。
+   *
+   * **渡すのは原稿のパス。** 作品はこの原稿のものを繋ぎの側が引く——
+   * コマンドを引数なしで呼ぶと、作品が複数あるときに訊き直してしまう。
+   * **繋ぐのは `extension.ts` だけ**（シーンメモと同じ理由）。
+   */
+  resumeWriting?: (filePath: string) => Promise<void>;
   /**
    * カーソルが動いたことを外へ知らせる（設計書6.40.4）。
    *
@@ -1609,6 +1620,10 @@ export class ManuscriptEditorProvider
 
         case "openMemos":
           await this.deps.openSceneMemos?.(fromUri(document.uri));
+          break;
+
+        case "resumeWriting":
+          await this.deps.resumeWriting?.(fromUri(document.uri));
           break;
 
         case "readingPlan":

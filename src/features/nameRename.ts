@@ -30,6 +30,7 @@ import type { TypoCheckIssue } from "./checkTypos";
 import { askText, cancelItem } from "../views/dialogs";
 import { suggestAction } from "../views/notify";
 import { logFailure, useLogFile } from "../core/logger";
+import { findAction } from "../views/actionList";
 
 /**
  * 名前の付け替え（設計書6.37.3）。
@@ -354,6 +355,40 @@ async function collectIssues(
   }
 
   return { issues, fileCount: files.size, conflicted };
+}
+
+/** 資料への反映のコマンド。知らせのボタンから呼ぶ */
+const APPLY_RENAME_COMMAND = "novelai.applyRenameToRecords";
+
+/**
+ * 付け替えの候補を出し終えた知らせ（設計書6.37.3。0.76.7）。
+ *
+ * 前は「〜を実行してください」と言うだけで、作者はメニューを探し直す
+ * 必要があった。**知らせに資料への反映のボタンを付ける。** 押さなければ
+ * 何もしない。本文に当たりが無かったときも、資料だけ直す道として同じ
+ * ボタンを出す。
+ *
+ * **返事を待たない**（`completionNoticeNoWait.test.ts`）。待つと、知らせを
+ * 閉じるまで「名前を付け替える」の札を持ち続け、同じ操作が断られる。
+ * 押すのは本文の適用を済ませてからになるので、知らせは通知センターに
+ * 沈んだあとで押されることが多い。
+ *
+ * **ボタンの名前はメニューの項目から引く**（写すとメニュー名の付け替えで
+ * 片方だけ古くなる）。作品は付け替えた作品を指して渡す——引数なしで
+ * 呼ぶと、作品が複数あるときに訊き直してしまう。
+ */
+export function announceRenameProposals(work: WorkEntry, issueCount: number): void {
+  const label = findAction(APPLY_RENAME_COMMAND)?.label ?? "資料にも反映";
+  const message =
+    issueCount > 0
+      ? `本文の置き換え ${issueCount}件を提案パネルに出しました。` +
+        `適用が済んだら「${label}」を押してください。`
+      : "本文に置き換えるところはありませんでした。" +
+        `「${label}」で資料だけ直せます。`;
+  void vscode.window.showInformationMessage(message, label).then((answer) => {
+    if (answer !== label) return;
+    void vscode.commands.executeCommand(APPLY_RENAME_COMMAND, { type: "work", work });
+  });
 }
 
 /**

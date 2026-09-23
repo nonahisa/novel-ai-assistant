@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildManuscriptEditorHtml } from "../../../src/views/manuscriptEditorHtml";
 import { MEMO_MARKER_COLOR } from "../../../src/core/sceneMemo";
+import { findAction } from "../../../src/views/actionList";
 import {
   SCRIPT_LINE_CLASSES,
   SCRIPT_LINE_CSS,
@@ -777,6 +778,27 @@ describe("シーンメモの見え方", () => {
     expect(code).toContain("シーンメモを横に開く");
     expect(code).toContain('type: "addMemo", line: menuCaretLine()');
     expect(code).toContain('type: "openMemos"');
+  });
+
+  /**
+   * 執筆再開の資料（設計書6.36）を、原稿エディターの中からも開く
+   * （作者の依頼、2026-09-23「原稿エディター内でも呼び出せたらいいな」）。
+   *
+   * **名前はメニューの項目から引く。** 写しを置くと、メニュー名を
+   * 付け替えたときに右クリックだけが古い名前で残る。
+   */
+  it("右クリックの品書きに、執筆再開の資料を開く項目がある（名前はメニューと同じ）", () => {
+    const label = findAction("novelai.resumeWriting")?.label;
+    expect(label).toBeTruthy();
+    expect(code).toContain(`add(${JSON.stringify(label)}, function () {`);
+    expect(code).toContain('type: "resumeWriting"');
+  });
+
+  /** 上のバーには足さない（作者の依頼は右クリックから呼べること） */
+  it("執筆再開は、上のバーには出さない", () => {
+    const label = findAction("novelai.resumeWriting")?.label ?? "";
+    const beforeScript = html.slice(0, html.indexOf("<script"));
+    expect(beforeScript).not.toContain(label);
   });
 
   /**
