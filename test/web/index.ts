@@ -37,9 +37,12 @@ import * as vscode from "vscode";
 import { countChars } from "../../src/core/charCount";
 import { fromUri, join, toUri } from "../../src/core/paths";
 import {
+  getOpenDocumentText,
+  hasUnsavedChanges,
   readTextFile,
   writeTextFilePreservingFormat,
 } from "../../src/core/textFile";
+import { isSamePath } from "../../src/core/pathText";
 import type { WorkEntry } from "../../src/models/types";
 import { registerAll } from "../../src/features/addCollection";
 import { WorkRegistry, readWorkConfig } from "../../src/core/workRegistry";
@@ -452,6 +455,49 @@ export async function run(): Promise<void> {
       assert(kind === "essay", `種類が書けていません: ${String(kind)}`);
     } finally {
       await vscode.workspace.fs.delete(toUri(shelf), { recursive: true });
+    }
+  });
+
+  /*
+    **日本語の名前の話を開いて書きかけにすると、組んだ場所から開いている文書を引けること**
+    （0.85.6。2026-09-24）。
+
+    `join` で組んだ場所は生の日本語、開いた文書の場所（`fromUri(document.uri)`）は
+    符号化される。比べ方が揃っていないと、開いている話の書きかけ（保存前）が
+    文字数に入らず、保存前かどうかも分からない。**ブラウザの本物の Uri で**
+    確かめる——符号化の仕方は単体テストの作り物では決め打ちになる。
+
+    書きかけのまま閉じると保存の確認が出て止まるので、戻してから閉じる。
+  */
+  await runCase("日本語の名前の話の書きかけを、組んだ場所から引ける", failures, async () => {
+    assert(registered !== undefined, "作品が登録されていないため確かめられません");
+    const folder = join(registered.folderPath, "場所の比べ方確認用");
+    const episode = join(folder, "第1話.txt");
+    await vscode.workspace.fs.createDirectory(toUri(folder));
+    await vscode.workspace.fs.writeFile(
+      toUri(episode),
+      new TextEncoder().encode("保存してある一文。")
+    );
+    try {
+      const document = await vscode.workspace.openTextDocument(toUri(episode));
+      const editor = await vscode.window.showTextDocument(document);
+      const opened = fromUri(document.uri);
+      console.log(`[web] 組んだ場所: ${episode} ／ 開いた文書の場所: ${opened}`);
+      assert(isSamePath(opened, episode), `同じ場所と見ませんでした: ${opened} と ${episode}`);
+
+      await editor.edit((builder) =>
+        builder.insert(document.positionAt(document.getText().length), EDITED_MARK)
+      );
+      assert(hasUnsavedChanges(episode), "書きかけ（保存前）だと分かりませんでした");
+      const text = getOpenDocumentText(episode);
+      assert(
+        text?.includes(EDITED_MARK) === true,
+        `開いている文書の書きかけを引けませんでした: ${text ?? "undefined"}`
+      );
+    } finally {
+      await vscode.commands.executeCommand("workbench.action.files.revert");
+      await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+      await vscode.workspace.fs.delete(toUri(folder), { recursive: true });
     }
   });
 

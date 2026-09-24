@@ -202,6 +202,41 @@ export function normalizeForComparison(location: string): string {
 }
 
 /**
+ * **ファイルが同じ場所か**を比べるための鍵（2026-09-24）。
+ *
+ * `normalizeForComparison` の前に、URI の百分率符号を解く（`decodeUriEscapes`）。
+ * ブラウザ版では、登録簿や `join` で組んだ場所は生の日本語、
+ * `fromUri(document.uri)` は符号化された形で来る。`normalizeForComparison`
+ * どうしを `===` で比べていた所では、開いている文書を探しても見つからず、
+ * 日本語の名前の作品や話が「別の場所」になっていた。
+ *
+ * **2つの場所を比べる所は、これ（か `isSamePath`）を通す。** 鍵を先に作って
+ * ループの中で比べる所のために、鍵だけでも取り出せるようにしてある。
+ *
+ * **`normalizeForComparison` そのものは変えない。** 回復先の名前
+ * （`atomicWrite.ts` の `recoveryKey`）の鍵に使われており、変えると
+ * すでに退避してある控えが見つからなくなる。手元の道はここでも
+ * 今までと同じ鍵になる（`decodeUriEscapes` は手元の道に触れない）。
+ */
+export function pathKeyForComparison(location: string): string {
+  return normalizeForComparison(decodeUriEscapes(location));
+}
+
+/**
+ * 2つのファイルが同じ場所か（`pathKeyForComparison` で比べる）。
+ * **どちらかが空なら false**——場所が分からないものを同じとは言わない
+ * （空の道は `normalize` で `.` に化け、空どうしが一致してしまう）。
+ *
+ * `core/locationCompare.ts` の `isSameLocation` は Git の作業場の判定用で、
+ * 手元の道しか来ない（ブラウザ版では Git が動かない）。**場所を比べる
+ * ほかの所はここを使う。**
+ */
+export function isSamePath(left: string, right: string): boolean {
+  if (!left || !right) return false;
+  return pathKeyForComparison(left) === pathKeyForComparison(right);
+}
+
+/**
  * フォルダーの場所を、登録簿へ入れる形に整える（2026-09-24）。
  *
  * **前後の空白と末尾の区切りだけを落とす。** 大小は変えない——大小まで
@@ -256,10 +291,16 @@ function stripTrailingSeparators(location: string): string {
  * （ファイルの道に末尾の区切りは付かない）。
  *
  * 空（空白だけを含む）なら空文字を返す。
+ *
+ * **URI の日本語は符号を解いてから鍵にする**（`pathKeyForComparison`。
+ * 2026-09-24）。ブラウザ版では、フォルダー選びで登録した場所は符号化の形、
+ * 書庫から登録した場所は生の日本語になり、同じ作品を二重に登録できた。
+ * 登録簿へ入れる形（`tidyFolderPath`）は変えない——符号化の形のまま残すのは、
+ * `toUri` で開ける形を崩さないため。
  */
 export function folderKeyForComparison(location: string): string {
   const tidy = tidyFolderPath(location);
-  return tidy ? normalizeForComparison(tidy) : "";
+  return tidy ? pathKeyForComparison(tidy) : "";
 }
 
 /**
@@ -314,11 +355,12 @@ export function goesOutside(base: string, relative: string): boolean {
  */
 export function isPathInside(parent: string, candidate: string): boolean {
   if (!parent || !candidate) return false;
-  // 符号を解くのは、この判定の中だけ。`normalizeForComparison` は
-  // 回復先の名前（`atomicWrite.ts` の `recoveryKey`）の鍵にも使われており、
-  // そちらを変えると、すでに退避してある控えが見つからなくなる
-  const base = normalizeForComparison(decodeUriEscapes(parent));
-  const target = normalizeForComparison(decodeUriEscapes(candidate));
+  // 符号を解くのは比べる鍵（`pathKeyForComparison`）の中だけ。
+  // `normalizeForComparison` は回復先の名前（`atomicWrite.ts` の
+  // `recoveryKey`）の鍵にも使われており、そちらを変えると、すでに
+  // 退避してある控えが見つからなくなる
+  const base = pathKeyForComparison(parent);
+  const target = pathKeyForComparison(candidate);
   const rel = relative(base, target);
   return rel.length > 0 && !goesOutside(base, rel);
 }

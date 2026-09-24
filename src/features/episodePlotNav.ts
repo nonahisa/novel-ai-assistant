@@ -194,9 +194,9 @@ export function manuscriptEpisodePlotChapter(
 ): number | null {
   const inCollected = chapterAtManuscriptLine(rawText, line);
   if (inCollected !== undefined) return inCollected;
-  const key = paths.normalizeForComparison(manuscriptPath);
+  const key = paths.pathKeyForComparison(manuscriptPath);
   const episode = episodes.find(
-    (entry) => paths.normalizeForComparison(entry.filePath) === key
+    (entry) => paths.pathKeyForComparison(entry.filePath) === key
   );
   if (episode) return episodePlotChapterOf(episode);
   const parsed = parseEpisodeFileName(paths.basename(manuscriptPath));

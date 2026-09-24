@@ -102,6 +102,33 @@ describe("既存作品の続きかを照らす", () => {
     expect(result).toEqual({ kind: "matched", workId: "b", by: "folder" });
   });
 
+  it("**ブラウザ版で符号化された場所から落とされても**、その作品と見る（2026-09-24）", () => {
+    // 登録簿の場所は生の日本語、落とされたファイルの場所は `fromUri` で符号化される
+    const encoded = `vscode-test-web://mount/${encodeURIComponent("コールドスリープ")}/${encodeURIComponent("35話.docx")}`;
+    const result = matchWordToWorks({
+      titles: ["無関係な名前"],
+      head: null,
+      sourcePath: encoded,
+      works: [
+        work("a", "教科書チート", { folderPath: "vscode-test-web://mount/教科書チート" }),
+        work("b", "コールドスリープ", { folderPath: "vscode-test-web://mount/コールドスリープ" }),
+      ],
+    });
+
+    expect(result).toEqual({ kind: "matched", workId: "b", by: "folder" });
+  });
+
+  it("名前の続きが違う作品フォルダーには当てない（`作品` と `作品2`）", () => {
+    const result = matchWordToWorks({
+      titles: ["無関係な名前"],
+      head: null,
+      sourcePath: "C:/小説/コールドスリープ2/35話.docx",
+      works: [work("b", "コールドスリープ")],
+    });
+
+    expect(result).toEqual({ kind: "none" });
+  });
+
   it("ファイル名に作品の題が入っていれば候補にする（決めつけずに選ばせる）", () => {
     const result = matchWordToWorks({
       titles: ["35話　再会", "コールドスリープ 35話"],

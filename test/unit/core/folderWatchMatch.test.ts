@@ -113,4 +113,11 @@ describe("「置き場の直下の .md」（単話プロットの見張り）", 
       false
     );
   });
+
+  it("見張りの知らせの場所が符号化されていても直下と見る（2026-09-24）", () => {
+    // 置き場は `join` で組んだ生の日本語、知らせの場所は `fromUri` で符号化される
+    const base = "vscode-test-web://mount/作品/設定/episode-plots";
+    const encoded = `vscode-test-web://mount/${encodeURIComponent("作品")}/${encodeURIComponent("設定")}/episode-plots/${encodeURIComponent("第1話.md")}`;
+    expect(isDirectChildWithExtension(base, encoded, ["md"])).toBe(true);
+  });
 });

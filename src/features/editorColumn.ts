@@ -64,12 +64,14 @@ export function columnForLocation(location: string): ColumnChoice {
   }
   if (groups.length === 0) return { reason: "列は指定なし（タブが無い）" };
 
-  const wanted = paths.normalizeForComparison(location);
+  // タブの場所は `fromUri` 由来（ブラウザ版では符号化された形）なので、
+  // 符号を解いて比べる鍵（`pathKeyForComparison`）にそろえる
+  const wanted = paths.pathKeyForComparison(location);
   for (const group of groups) {
     for (const tab of group.tabs) {
       const uri = tabUri(tab);
       if (!uri) continue;
-      if (paths.normalizeForComparison(paths.fromUri(uri)) === wanted) {
+      if (paths.pathKeyForComparison(paths.fromUri(uri)) === wanted) {
         return {
           column: group.viewColumn,
           reason: `既に開いている列（${group.viewColumn}）へ`,

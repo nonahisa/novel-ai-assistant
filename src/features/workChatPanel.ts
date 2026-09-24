@@ -16,7 +16,7 @@ import { wideViewColumn } from "./editorColumn";
 import * as path from "../core/paths";
 import type { EpisodeFile, WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
-import { readWorkConfig, workPaths } from "../core/workRegistry";
+import { findWorkForFile, readWorkConfig, workPaths } from "../core/workRegistry";
 import { AIRegistry } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
 import {
@@ -3892,19 +3892,15 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * 開いているファイルが属する作品。
+   *
+   * 引き当ては `findWorkForFile`（入れ子なら内側。下の欄と同じ）に任せる。
+   * 以前は `resolve`＋`startsWith` の自前の判定で、大小の違い（Windows）も、
+   * ブラウザ版で符号化された日本語の場所も、別の作品と見ていた（2026-09-24）
+   */
   private findWork(filePath: string): WorkEntry | undefined {
-    const resolved = path.resolve(filePath);
-    // 入れ子になった作品でも正しく選べるよう、長く一致するほうを採る
-    let found: WorkEntry | undefined;
-    for (const work of this.registry.list()) {
-      const root = path.resolve(work.folderPath);
-      if (resolved === root || resolved.startsWith(root + path.separatorFor(root))) {
-        if (!found || root.length > path.resolve(found.folderPath).length) {
-          found = work;
-        }
-      }
-    }
-    return found;
+    return findWorkForFile(this.registry.list(), filePath);
   }
 }
 

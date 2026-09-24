@@ -153,7 +153,7 @@ export function manuscriptLedgerKey(
 ): string {
   const filePath =
     typeof location === "string" ? location : fromUri(location);
-  return paths.normalizeForComparison(filePath);
+  return paths.pathKeyForComparison(filePath);
 }
 
 /**
@@ -694,13 +694,12 @@ function extensionOf(document: vscode.TextDocument): string {
  * 同じファイルを指しているか。
  *
  * **文字列の一致では足りない。** Windowsではドライブ文字の大小や
- * 区切りの表れ方が経路によって違う（`paths.normalizeForComparison`）。
+ * 区切りの表れ方が経路によって違う。ブラウザ版では、開いた文書の場所の
+ * 日本語が符号化されて来る（2026-09-24）。比べ方は `paths.isSamePath` の1か所。
  * 取り違えると「いま開いている話」が見つからず、前後の話へ移れない。
  */
 function samePath(left: string, right: string): boolean {
-  return (
-    paths.normalizeForComparison(left) === paths.normalizeForComparison(right)
-  );
+  return paths.isSamePath(left, right);
 }
 
 /**
@@ -2084,7 +2083,7 @@ export class ManuscriptEditorProvider
    */
   private async suggestMarkdown(document: vscode.TextDocument): Promise<void> {
     const filePath = fromUri(document.uri);
-    if (markdownAsked.has(paths.normalizeForComparison(filePath))) return;
+    if (markdownAsked.has(paths.pathKeyForComparison(filePath))) return;
 
     const counts = countSiteNotation(document.getText());
     if (
@@ -2092,7 +2091,7 @@ export class ManuscriptEditorProvider
     ) {
       return;
     }
-    markdownAsked.add(paths.normalizeForComparison(filePath));
+    markdownAsked.add(paths.pathKeyForComparison(filePath));
 
     const picked = await suggestAction({
       message: describeMarkdownSuggestion(counts),
@@ -2150,7 +2149,7 @@ export class ManuscriptEditorProvider
     document: vscode.TextDocument
   ): Promise<void> {
     const filePath = fromUri(document.uri);
-    const key = paths.normalizeForComparison(filePath);
+    const key = paths.pathKeyForComparison(filePath);
     if (eolNoticeChecked.has(key)) return;
 
     // **作品に属さない原稿では出さない。** 比べる相手（多数派）が無い
@@ -2175,14 +2174,14 @@ export class ManuscriptEditorProvider
     }
 
     const mine = entries.find(
-      (entry) => paths.normalizeForComparison(entry.filePath) === key
+      (entry) => paths.pathKeyForComparison(entry.filePath) === key
     );
     if (!mine || mine.eol === null) return;
 
     const audit = auditEol(entries);
     if (audit.majority === null) return;
     const differs = audit.differing.some(
-      (differing) => paths.normalizeForComparison(differing) === key
+      (differing) => paths.pathKeyForComparison(differing) === key
     );
     if (!differs) return;
 
@@ -2190,7 +2189,7 @@ export class ManuscriptEditorProvider
       (entry) =>
         !entry.hasMixedEol &&
         entry.eol === audit.majority &&
-        paths.normalizeForComparison(entry.filePath) !== key
+        paths.pathKeyForComparison(entry.filePath) !== key
     ).length;
 
     const picked = await suggestAction({

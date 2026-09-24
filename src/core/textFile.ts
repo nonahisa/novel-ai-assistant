@@ -439,6 +439,11 @@ export function hasUnsavedChanges(filePath: string): boolean {
   return doc?.isDirty ?? false;
 }
 
+/**
+ * 同じファイルか。比べ方は `paths.isSamePath` の1か所（2026-09-24）。
+ * ブラウザ版では、開いた文書の場所（`fromUri`）の日本語が符号化されて来るので、
+ * そのまま比べると開いている話の書きかけが文字数に入らなかった
+ */
 export function sameFilePath(left: string, right: string): boolean {
-  return path.normalizeForComparison(left) === path.normalizeForComparison(right);
+  return path.isSamePath(left, right);
 }

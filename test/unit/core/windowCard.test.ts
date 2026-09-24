@@ -391,6 +391,13 @@ describe("窓で開いている作品（worksOpenInWindow）", () => {
   it("フォルダーを開いていない窓は空", () => {
     expect(worksOpenInWindow(works, [])).toEqual([]);
   });
+
+  it("ブラウザ版で窓のフォルダーが符号化されていても、その作品（2026-09-24）", () => {
+    // 窓のフォルダーは `fromUri` 由来で符号化、作品の場所は登録簿の生の日本語
+    const browserWorks = [{ title: "仮作品", folderPath: "vscode-test-web://mount/仮作品" }];
+    const encoded = `vscode-test-web://mount/${encodeURIComponent("仮作品")}`;
+    expect(worksOpenInWindow(browserWorks, [encoded])).toEqual(["仮作品"]);
+  });
 });
 
 describe("札の新しい項目（machineName・works）", () => {

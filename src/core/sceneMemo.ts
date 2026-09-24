@@ -385,7 +385,7 @@ export function fileRanker(
 ): (filePath: string) => number {
   const index = new Map<string, number>();
   const put = (filePath: string): void => {
-    const key = paths.normalizeForComparison(filePath);
+    const key = paths.pathKeyForComparison(filePath);
     if (!index.has(key)) index.set(key, index.size);
   };
   for (const file of fileOrder ?? []) put(file);
@@ -393,7 +393,7 @@ export function fileRanker(
   // メモは在りうるので、飛べなくなるほうが困る
   for (const memo of memos) put(memo.filePath);
   return (filePath) =>
-    index.get(paths.normalizeForComparison(filePath)) ?? index.size;
+    index.get(paths.pathKeyForComparison(filePath)) ?? index.size;
 }
 
 /** 位置の前後。負なら a が前 */
@@ -462,11 +462,11 @@ export function nearestMemo(
   filePath: string,
   line: number
 ): SceneMemo | undefined {
-  const key = paths.normalizeForComparison(filePath);
+  const key = paths.pathKeyForComparison(filePath);
   let best: SceneMemo | undefined;
   let bestDistance = Number.POSITIVE_INFINITY;
   for (const memo of memos) {
-    if (paths.normalizeForComparison(memo.filePath) !== key) continue;
+    if (paths.pathKeyForComparison(memo.filePath) !== key) continue;
     const distance = Math.abs(memo.line - line);
     // 同じ距離なら**手前**を選ぶ（書いている場所より先の付箋より、
     // いま通り過ぎたばかりの付箋のほうが関わりが深い）

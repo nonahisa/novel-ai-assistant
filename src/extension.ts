@@ -1463,9 +1463,9 @@ export async function activate(
   };
   /** 開いている文書の中身（原稿エディタが持っている、保存前のもの） */
   const openDocumentText = (filePath: string): string | undefined => {
-    const key = path.normalizeForComparison(filePath);
+    // 比べ方は `isSamePath`（ブラウザ版では開いた文書の場所が符号化された形で来る）
     return vscode.workspace.textDocuments
-      .find((document) => path.normalizeForComparison(fromUri(document.uri)) === key)
+      .find((document) => path.isSamePath(fromUri(document.uri), filePath))
       ?.getText();
   };
   const manuscriptDeps = {

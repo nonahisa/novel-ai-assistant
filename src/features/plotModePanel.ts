@@ -265,15 +265,13 @@ class PlotModePanel {
    * （単話プロットを書いて保存したら、一覧の印も追いつくべきである）。
    */
   covers(filePath: string): boolean {
-    const key = paths.normalizeForComparison(filePath);
-    if (key === paths.normalizeForComparison(this.plotFile)) return true;
+    // 保存された文書の場所は `fromUri` 由来（ブラウザ版では日本語が
+    // 符号化された形）。比べ方は `isSamePath` にそろえる
+    if (paths.isSamePath(filePath, this.plotFile)) return true;
     if (!this.episodePlotsDir) return false;
     // **前方一致では見ない。** 区切りはWindowsで `\`、ブラウザ上の作品で
     // `/` と変わる（`paths.normalize`）ので、置き場そのものを突き合わせる
-    if (
-      paths.normalizeForComparison(paths.dirname(filePath)) ===
-      paths.normalizeForComparison(this.episodePlotsDir)
-    ) {
+    if (paths.isSamePath(paths.dirname(filePath), this.episodePlotsDir)) {
       return true;
     }
     return this.isNewManuscript(filePath);
@@ -298,9 +296,8 @@ class PlotModePanel {
     if (this.settingsDir && paths.isPathInside(this.settingsDir, filePath)) {
       return false;
     }
-    const key = paths.normalizeForComparison(filePath);
     return !this.rows.some(
-      (row) => !row.planned && paths.normalizeForComparison(row.filePath) === key
+      (row) => !row.planned && paths.isSamePath(row.filePath, filePath)
     );
   }
 
@@ -721,11 +718,9 @@ class PlotModePanel {
 
   /** その場所の文書を、保存していない変更つきで開いているか */
   private isDirtyDocument(filePath: string): boolean {
-    const key = paths.normalizeForComparison(filePath);
     return vscode.workspace.textDocuments.some(
       (document) =>
-        document.isDirty &&
-        paths.normalizeForComparison(paths.fromUri(document.uri)) === key
+        document.isDirty && paths.isSamePath(paths.fromUri(document.uri), filePath)
     );
   }
 
@@ -744,10 +739,8 @@ class PlotModePanel {
    * 打ち込んだばかりの見出しが目次に出ない。
    */
   private openPlotDocument(): vscode.TextDocument | undefined {
-    const key = paths.normalizeForComparison(this.plotFile);
-    return vscode.workspace.textDocuments.find(
-      (document) =>
-        paths.normalizeForComparison(paths.fromUri(document.uri)) === key
+    return vscode.workspace.textDocuments.find((document) =>
+      paths.isSamePath(paths.fromUri(document.uri), this.plotFile)
     );
   }
 

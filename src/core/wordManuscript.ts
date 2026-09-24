@@ -1,4 +1,5 @@
 import { matchBackupToWorks } from "./backupMatch";
+import { decodeUriEscapes, isPathInside } from "./pathText";
 import { checkBackupEncoding } from "./backupEncoding";
 import { docxToMarkdown, type DocxConversion } from "./docxToMarkdown";
 import { countEpisodeChars } from "./episodeCharCount";
@@ -163,12 +164,14 @@ export function matchWordToWorks(input: {
 
   // 2. 作品フォルダーの中から落とされた
   if (input.sourcePath) {
-    const source = comparablePath(input.sourcePath);
-    const inside = input.works.filter((work) =>
-      source.startsWith(`${comparablePath(work.folderPath)}/`)
-    );
-    // 入れ子の作品フォルダー（書庫の中の作品）では、いちばん深いものを採る
-    inside.sort((a, b) => b.folderPath.length - a.folderPath.length);
+    const source = input.sourcePath;
+    // 中にあるかは `isPathInside` の1か所に任せる（2026-09-24）。自前の
+    // 比べ方では、ブラウザ版で符号化された日本語の場所を別の作品と見ていた
+    const inside = input.works.filter((work) => isPathInside(work.folderPath, source));
+    // 入れ子の作品フォルダー（書庫の中の作品）では、いちばん深いものを採る。
+    // 深さは符号を解いた長さで比べる（符号化された側だけ長く見えないように）
+    const depth = (work: WordMatchWork): number => decodeUriEscapes(work.folderPath).length;
+    inside.sort((a, b) => depth(b) - depth(a));
     if (inside.length > 0) return { kind: "matched", workId: inside[0].id, by: "folder" };
   }
 
@@ -198,10 +201,6 @@ export function matchWordToWorks(input: {
   return { kind: "none" };
 }
 
-/** 場所を比べる形（区切りを `/` に、大文字小文字をそろえる。末尾の `/` を落とす） */
-function comparablePath(value: string): string {
-  return value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-}
 
 /**
  * 新しい作品として取り込むときの形（6.99 の取り込みへ渡す）。

@@ -1,7 +1,7 @@
 import {
   basename,
   isPathInside,
-  normalizeForComparison,
+  pathKeyForComparison,
   relative,
 } from "./pathText";
 
@@ -17,7 +17,7 @@ import {
  *
  * 大文字小文字の扱いも VS Code に合わせる——VS Code の見張りは、
  * 大文字小文字を区別しないファイルシステム（Windows）では場所も
- * パターンも小文字にしてから比べる。ここでは `normalizeForComparison`
+ * パターンも小文字にしてから比べる。ここでは `pathKeyForComparison`
  * （Windows のときだけ小文字にそろえる）を通すので、同じ振る舞いになる。
  *
  * **`vscode` を持ち込まない**（`core` の決まり。`mcpReach.test.ts`）。
@@ -54,8 +54,8 @@ export function isDirectChildWithExtension(
 ): boolean {
   if (!isPathInside(folder, filePath)) return false;
   const rel = relative(
-    normalizeForComparison(folder),
-    normalizeForComparison(filePath)
+    pathKeyForComparison(folder),
+    pathKeyForComparison(filePath)
   );
   // 区切りを含まなければ直下。区切りは OS とURIで違うので両方見る
   if (rel.includes("/") || rel.includes("\\")) return false;
@@ -71,6 +71,6 @@ export function isDirectChildWithExtension(
 function hasExtension(filePath: string, extensions: readonly string[]): boolean {
   // Windows では小文字にそろった名前が返る（`.MD` も通る）。それ以外では
   // 綴りのまま比べる（`.MD` は通らない）——どちらも VS Code の glob と同じ
-  const name = basename(normalizeForComparison(filePath));
+  const name = basename(pathKeyForComparison(filePath));
   return extensions.some((extension) => name.endsWith(`.${extension}`));
 }

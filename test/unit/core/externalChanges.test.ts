@@ -27,6 +27,15 @@ describe("自分の書き込みと区別する", () => {
     ).toBe(true);
   });
 
+  test("ブラウザ版で知らせの場所が符号化されていても、自分の書き込みと見る（2026-09-24）", () => {
+    // 控える場所は `join` で組んだ生の日本語、見張りの知らせは `fromUri` で符号化される
+    const tracker = new SelfWriteTracker();
+    tracker.markWriting("vscode-test-web://mount/作品/設定/characters/char_001_灯.json");
+    const encoded = `vscode-test-web://mount/${encodeURIComponent("作品")}/${encodeURIComponent("設定")}/characters/${encodeURIComponent("char_001_灯.json")}`;
+
+    expect(tracker.isSelfWrite(encoded)).toBe(true);
+  });
+
   test("控えていないパスは外部の変更とみなす", () => {
     const tracker = new SelfWriteTracker();
 

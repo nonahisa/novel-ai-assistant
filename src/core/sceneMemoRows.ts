@@ -185,7 +185,7 @@ export function markSameLine(rows: readonly NoteRow[]): NoteRow[] {
   return rows.map((row) => {
     // **行番号を先に置く**（`memoKey` と同じ理由）。道の中に区切りと同じ
     // 文字があっても、数字が先なら最初の区切りで必ず割れる
-    const key = `${row.line}:${paths.normalizeForComparison(row.filePath)}`;
+    const key = `${row.line}:${paths.pathKeyForComparison(row.filePath)}`;
     const sameLine = key === previous;
     previous = key;
     return { ...row, sameLine };
@@ -201,7 +201,7 @@ export function markSameLine(rows: readonly NoteRow[]): NoteRow[] {
  * 行どうしの順番は変わらない（話数の順で下のほうにあった話でも、
  * 中の並びはそのままで頭へ来る）。
  *
- * `currentKey` は **`normalizeForComparison` を通した**形で渡す
+ * `currentKey` は **`pathKeyForComparison` を通した**形で渡す
  * （大文字小文字や区切りの違いで同じ話を別物にしないため）。
  * 開いている話が無ければ、並びは1つも動かない。
  *
@@ -215,10 +215,10 @@ export function currentFirst<T extends { filePath: string }>(
 ): T[] {
   if (!currentKey) return [...rows];
   const here = rows.filter(
-    (row) => paths.normalizeForComparison(row.filePath) === currentKey
+    (row) => paths.pathKeyForComparison(row.filePath) === currentKey
   );
   const rest = rows.filter(
-    (row) => paths.normalizeForComparison(row.filePath) !== currentKey
+    (row) => paths.pathKeyForComparison(row.filePath) !== currentKey
   );
   return [...here, ...rest];
 }

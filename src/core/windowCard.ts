@@ -1,7 +1,7 @@
 import { AIWRITER_DIR } from "../models/types";
 // `paths.ts` ではなく純粋な部分を直に指す——ここは MCP の束からも読まれ、
 // `vscode` へ届いてはいけない（`mcpReach.test.ts` が見張る）
-import { isPathInside, normalizeForComparison } from "./pathText";
+import { isPathInside, isSamePath } from "./pathText";
 
 /**
  * 窓の札（MCP の道具 `windows.list`。作者の依頼、2026-09-22）。
@@ -174,13 +174,13 @@ export function worksOpenInWindow(
   folders: readonly string[]
 ): string[] {
   if (folders.length === 0) return [];
-  const same = (left: string, right: string): boolean =>
-    normalizeForComparison(left) === normalizeForComparison(right);
+  // 窓のフォルダーは `fromUri` 由来（ブラウザ版では日本語が符号化された形）、
+  // 作品の場所は登録簿の生の形で来るので、符号を解いて比べる `isSamePath` を通す
   return works
     .filter((work) =>
       folders.some(
         (folder) =>
-          same(folder, work.folderPath) ||
+          isSamePath(folder, work.folderPath) ||
           isPathInside(folder, work.folderPath) ||
           isPathInside(work.folderPath, folder)
       )

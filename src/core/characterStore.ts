@@ -639,11 +639,11 @@ function isGuardedSamePathSave(prepared: PreparedCharacterSave): boolean {
   return sourcePath !== undefined && samePath(sourcePath, prepared.destinationPath);
 }
 
-// 比べ方は `paths.normalizeForComparison` の1か所に任せる（2026-09-23）。
-// ここに写しがあり、`process.platform` を素で読んでいたので、ブラウザ版では
-// 人物の保存が `process is not defined` で落ちていた
+// 比べ方は `paths.isSamePath` の1か所に任せる（2026-09-23、09-24 に符号を
+// 解く比べ方へ寄せた）。ここに写しがあり、`process.platform` を素で読んで
+// いたので、ブラウザ版では人物の保存が `process is not defined` で落ちていた
 function samePath(left: string, right: string): boolean {
-  return path.normalizeForComparison(left) === path.normalizeForComparison(right);
+  return path.isSamePath(left, right);
 }
 
 function asCharacterStoreError(error: unknown): CharacterStoreError {

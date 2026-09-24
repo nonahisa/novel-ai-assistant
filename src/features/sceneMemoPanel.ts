@@ -309,7 +309,7 @@ async function collectMemos(work: WorkEntry): Promise<CollectedMemos> {
       memos.push(...parseMemos(content.text, episode.filePath));
       if (isCollectedFile(episode.collectedCount)) {
         collectedTexts.set(
-          paths.normalizeForComparison(episode.filePath),
+          paths.pathKeyForComparison(episode.filePath),
           content.text
         );
       }
@@ -385,9 +385,9 @@ function belongsTo(
   files: readonly EpisodeFile[],
   filePath: string
 ): boolean {
-  const key = paths.normalizeForComparison(filePath);
+  const key = paths.pathKeyForComparison(filePath);
   return files.some(
-    (file) => paths.normalizeForComparison(file.filePath) === key
+    (file) => paths.pathKeyForComparison(file.filePath) === key
   );
 }
 
@@ -500,8 +500,8 @@ class SceneMemoPanel {
     // 光る行が同じでも描き直す必要がある
     const movedFile =
       this.currentFile === null ||
-      paths.normalizeForComparison(this.currentFile) !==
-        paths.normalizeForComparison(filePath);
+      paths.pathKeyForComparison(this.currentFile) !==
+        paths.pathKeyForComparison(filePath);
     this.currentFile = filePath;
 
     const near = nearestMemo(this.memos, filePath, line);
@@ -550,7 +550,7 @@ class SceneMemoPanel {
     this.chapterLabels = new Map();
     this.memoLabels = new Map();
     for (const file of this.files) {
-      const key = paths.normalizeForComparison(file.filePath);
+      const key = paths.pathKeyForComparison(file.filePath);
       const label = formatChapterLabel(file, format) || file.fileName;
       this.chapterLabels.set(key, {
         label,
@@ -562,7 +562,7 @@ class SceneMemoPanel {
       // 索引は1ファイルにつき1度だけ作る（メモの数だけ解析し直さない）
       const index = collectedLabelIndex(text, label, format);
       for (const memo of this.memos) {
-        if (paths.normalizeForComparison(memo.filePath) !== key) continue;
+        if (paths.pathKeyForComparison(memo.filePath) !== key) continue;
         this.memoLabels.set(memoKey(memo), {
           label: index.labelAt(memo.line),
           title: "",
@@ -793,7 +793,7 @@ class SceneMemoPanel {
   private labelOf(memo: SceneMemo): { label: string; title: string } {
     return (
       this.memoLabels.get(memoKey(memo)) ??
-      this.chapterLabels.get(paths.normalizeForComparison(memo.filePath)) ?? {
+      this.chapterLabels.get(paths.pathKeyForComparison(memo.filePath)) ?? {
         label: paths.basename(memo.filePath),
         title: "",
       }
@@ -803,7 +803,7 @@ class SceneMemoPanel {
   /** いま開いている話（比べるための表記） */
   private get currentKey(): string | null {
     return this.currentFile
-      ? paths.normalizeForComparison(this.currentFile)
+      ? paths.pathKeyForComparison(this.currentFile)
       : null;
   }
 
@@ -812,7 +812,7 @@ class SceneMemoPanel {
     const currentKey = this.currentKey;
     const query = this.query.trim();
     return this.memos.filter((memo) => {
-      const key = paths.normalizeForComparison(memo.filePath);
+      const key = paths.pathKeyForComparison(memo.filePath);
       if (this.onlyCurrent && currentKey && key !== currentKey) return false;
       if (this.tag && memo.tag !== this.tag) return false;
       if (query && !`${memo.tag} ${memo.text}`.includes(query)) return false;
@@ -831,7 +831,7 @@ class SceneMemoPanel {
     const currentKey = this.currentKey;
     const query = this.query.trim();
     return this.findings.filter((finding) => {
-      const key = paths.normalizeForComparison(finding.filePath);
+      const key = paths.pathKeyForComparison(finding.filePath);
       if (this.onlyCurrent && currentKey && key !== currentKey) return false;
       const label = findingLabelOf(finding);
       if (this.tag && label !== this.tag) return false;
@@ -879,7 +879,7 @@ class SceneMemoPanel {
     const currentKey = this.currentKey;
     const currentCount = currentKey
       ? this.memos.filter(
-          (memo) => paths.normalizeForComparison(memo.filePath) === currentKey
+          (memo) => paths.pathKeyForComparison(memo.filePath) === currentKey
         ).length
       : 0;
 
@@ -943,7 +943,7 @@ class SceneMemoPanel {
   private toRow(row: NoteRow, currentKey: string | null): Record<string, unknown> {
     const isCurrent =
       currentKey !== null &&
-      paths.normalizeForComparison(row.filePath) === currentKey;
+      paths.pathKeyForComparison(row.filePath) === currentKey;
     // どの話を書いているか分からないうちは、「その他」と書かない
     // （何に対する「その他」なのかが伝わらない）
     const section =
@@ -1005,7 +1005,7 @@ class SceneMemoPanel {
    */
   private labelAt(filePath: string): { label: string; title: string } {
     return (
-      this.chapterLabels.get(paths.normalizeForComparison(filePath)) ?? {
+      this.chapterLabels.get(paths.pathKeyForComparison(filePath)) ?? {
         label: paths.basename(filePath),
         title: "",
       }
@@ -1020,7 +1020,7 @@ class SceneMemoPanel {
  * あったときに切れ目が読めなくなる。数字が先なら、最初の区切りで必ず割れる。
  */
 function memoKey(memo: SceneMemo): string {
-  return `${memo.line}:${paths.normalizeForComparison(memo.filePath)}`;
+  return `${memo.line}:${paths.pathKeyForComparison(memo.filePath)}`;
 }
 
 /** 書き込みに失敗した理由を、作者の言葉にする */

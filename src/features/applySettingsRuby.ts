@@ -84,13 +84,11 @@ async function pickScope(
     ...openManuscriptTabUris(),
   ]
     .filter((uri): uri is vscode.Uri => uri !== undefined)
-    .map((uri) => path.normalizeForComparison(fromUri(uri)));
+    .map((uri) => fromUri(uri));
+  // タブの場所はブラウザ版では符号化された形、話の場所は生の日本語で来る
   const openOne = candidates
     .map((candidate) =>
-      markdown.find(
-        (episode) =>
-          path.normalizeForComparison(episode.filePath) === candidate
-      )
+      markdown.find((episode) => path.isSamePath(episode.filePath, candidate))
     )
     .find((episode) => episode !== undefined);
 

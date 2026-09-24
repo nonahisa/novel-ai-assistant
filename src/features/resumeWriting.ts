@@ -369,10 +369,10 @@ async function createEpisodePlotFile(
  */
 async function plotTextForTemplate(work: WorkEntry): Promise<string> {
   try {
-    const key = path.normalizeForComparison(await plotPath(work));
-    const open = vscode.workspace.textDocuments.find(
-      (document) =>
-        path.normalizeForComparison(path.fromUri(document.uri)) === key
+    // 開いた文書の場所は、ブラウザ版では符号化された形で来る（`isSamePath`）
+    const plotFile = await plotPath(work);
+    const open = vscode.workspace.textDocuments.find((document) =>
+      path.isSamePath(path.fromUri(document.uri), plotFile)
     );
     return open ? open.getText() : await readPlotText(work);
   } catch {

@@ -121,13 +121,17 @@ export function kindOfSettingsFile(
 /**
  * Windowsの区切りと大文字小文字を吸収する。
  *
- * **大文字小文字の扱いは `paths.normalizeForComparison` に任せる**（2026-09-23）。
+ * **大文字小文字の扱いは `paths.pathKeyForComparison` に任せる**（2026-09-23）。
  * 以前はここに写しがあり、`process.platform` を素で読んでいた。書き込み口
  * （`atomicWriteFile`）は書く前に必ず `markWriting` を呼ぶので、ブラウザ版では
  * **すべての書き込みがここで `process is not defined` になって落ちていた**
  * （実機で「動作を診断」の生成文書が置けずに発覚）。区切りを `/` に揃えるのは
  * ここだけの仕事なので残す。
+ *
+ * **URI の符号も解いてから鍵にする**（2026-09-24）。書く前に控える場所は
+ * `join` で組んだ生の日本語、見張りの知らせの場所は `fromUri` 由来で、
+ * ブラウザ版では符号化されて来る。そろえないと自分の書き込みを外の変更と見る。
  */
 function normalize(filePath: string): string {
-  return path.normalizeForComparison(filePath).split(path.sep).join("/");
+  return path.pathKeyForComparison(filePath).split(path.sep).join("/");
 }

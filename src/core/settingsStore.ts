@@ -398,9 +398,9 @@ export class SettingsStore<T extends StorableRecord> {
  * 同じファイルを指すパスか。
  *
  * Windowsは大文字小文字を区別しないため、文字列が違っても
- * 同じファイルであることがある。人物側（`characterStore.ts` の `samePath`）と
- * 同じ判定を使う。
+ * 同じファイルであることがある。比べ方は `paths.isSamePath` の1か所
+ * （人物側の `characterStore.ts` の `samePath` も同じ。2026-09-24）。
  */
 function isSamePath(left: string, right: string): boolean {
-  return path.normalizeForComparison(left) === path.normalizeForComparison(right);
+  return path.isSamePath(left, right);
 }
