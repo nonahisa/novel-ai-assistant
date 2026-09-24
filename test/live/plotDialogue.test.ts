@@ -7,11 +7,15 @@ import { FileSystemError, commands, window, workspace } from "../unit/support/vs
 import { OllamaProvider } from "../../src/ai/ollamaProvider";
 import { buildPlotMarkdown, emptyPlotSections } from "../../src/core/plotDoc";
 import {
+  PLOT_CONTINUE_OPTION,
   PLOT_END_OPTION,
+  PLOT_MORE_OPTION,
   PLOT_RETRY_OPTION,
   PLOT_SKIP_OPTION,
   PLOT_START_FROM_PLOT_OPTION,
+  PLOT_SUMMARY_OPTION,
   PLOT_WRITE_OPTION,
+  PLOT_WRITE_SUMMARY_OPTION,
 } from "../../src/core/plotInterview";
 import type { WorkEntry } from "../../src/models/types";
 
@@ -28,7 +32,11 @@ import type { WorkEntry } from "../../src/models/types";
  * - `PROBE_MODEL`：モデル（既定 gemma4:e4b）
  * - `PROBE_IDEA`：1通目に書く着想
  * - `PROBE_TURNS`：往復の数（既定 5）
- * - `PROBE_REPLIES`：「|」区切りで、往復ごとの返事を指定（空なら出た候補の1つ目を押す）
+ * - `PROBE_REPLIES`：「|」区切りで、往復ごとの返事を指定（空なら出た候補の1つ目を押す）。
+ *   `@more`（ほかの案もほしい）・`@skip`（飛ばす）・`@2`（2つ目の候補を押す）も書ける
+ * - `PROBE_STYLE`：型の札（既定「着想から掘る」。設計書6.4.7「問答は『型の一つ』」）
+ * - `PROBE_FRAME`：「型に当てはめる」のときの型（既定「起承転結」）
+ * - `PROBE_SUMMARY`：1 なら最後に「決まったことをまとめる」→「このまとめでプロットに書く」
  * - `PROBE_OUT`：やり取りを書き出すファイル（指定したときだけ）
  */
 
@@ -48,12 +56,19 @@ const IDEA =
   process.env.PROBE_IDEA ??
   "現代ベースのファンタジー。各地にダンジョンが出現。ダンジョンに挑む冒険者と、その中から配信で稼ぐ者が現れるが、配信のために通信ケーブルを敷設するインフラ業者が最強で……みたいな話。";
 const TURNS = Number(process.env.PROBE_TURNS ?? 5);
+const STYLE = process.env.PROBE_STYLE ?? "着想から掘る";
+const FRAME = process.env.PROBE_FRAME ?? "起承転結";
+const SUMMARY = process.env.PROBE_SUMMARY === "1";
 const RESERVED = [
   PLOT_SKIP_OPTION,
   PLOT_WRITE_OPTION,
   PLOT_END_OPTION,
   PLOT_RETRY_OPTION,
   PLOT_START_FROM_PLOT_OPTION,
+  PLOT_MORE_OPTION,
+  PLOT_SUMMARY_OPTION,
+  PLOT_WRITE_SUMMARY_OPTION,
+  PLOT_CONTINUE_OPTION,
 ];
 
 function log(text: string): void {
@@ -69,7 +84,7 @@ interface Posted {
   preview?: string;
 }
 
-test(`対話式プロット作成を手元のAIで${TURNS}往復させる（${MODEL}）`, { timeout: 1_800_000 }, async () => {
+test(`対話式プロット作成を手元のAIで${TURNS}往復させる（${MODEL}・${STYLE}）`, { timeout: 1_800_000 }, async () => {
   const root = await fs.mkdtemp(nodePath.join(os.tmpdir(), "plot-dialogue-"));
   try {
     const work: WorkEntry = {
@@ -182,12 +197,33 @@ test(`対話式プロット作成を手元のAIで${TURNS}往復させる（${MO
     await panel.startPlotInterview(work);
     posted.forEach(show);
 
+    // 型を選ぶ（「型に当てはめる」なら型の枠も）。ここまではAIを呼ばない
+    const choose = async (label: string): Promise<void> => {
+      const seen = posted.length;
+      log(`\n作者：${label}`);
+      await inner.ask(label);
+      posted.slice(seen).forEach(show);
+    };
+    await choose(STYLE);
+    if (STYLE === "型に当てはめる") await choose(FRAME);
+    expect(calls).toBe(0);
+
     const plan = (process.env.PROBE_REPLIES ?? "").split("|");
     const topics: string[] = [];
     for (let turn = 0; turn < TURNS; turn++) {
       const options = [...posted].reverse().find((m) => m.options?.length)?.options ?? [];
       const candidates = options.filter((option) => !RESERVED.includes(option));
-      const pick = turn === 0 ? IDEA : plan[turn] || candidates[0] || PLOT_RETRY_OPTION;
+      const wish = plan[turn] ?? "";
+      const pick =
+        turn === 0
+          ? IDEA
+          : wish === "@more"
+            ? PLOT_MORE_OPTION
+            : wish === "@skip"
+              ? PLOT_SKIP_OPTION
+              : /^@\d+$/u.test(wish)
+                ? candidates[Number(wish.slice(1)) - 1] ?? candidates[0] ?? PLOT_RETRY_OPTION
+                : wish || candidates[0] || PLOT_RETRY_OPTION;
       const seen = posted.length;
       const before = calls;
       const started = Date.now();
@@ -198,15 +234,31 @@ test(`対話式プロット作成を手元のAIで${TURNS}往復させる（${MO
 
       const answer = posted.slice(seen).find((m) => m.type === "answer");
       expect(answer, `往復${turn + 1}で答えが出ない`).toBeDefined();
+      // ほかの案は同じ問い、確かめ直しは直前と同じ名前なので、繰り返しに数えない
       const topic = /【(.+?)】/u.exec(answer?.reply ?? "")?.[1];
-      if (topic) topics.push(topic);
+      if (topic && !answer?.reply?.includes("のほかの案です") && topics[topics.length - 1] !== topic) {
+        topics.push(topic);
+      }
     }
 
-    log("\n----- 「ここまでをプロットに書く」");
-    const seen = posted.length;
-    await inner.ask(PLOT_WRITE_OPTION);
+    let seen = posted.length;
+    if (SUMMARY) {
+      log("\n----- 「決まったことをまとめる」");
+      const before = calls;
+      const started = Date.now();
+      await inner.ask(PLOT_SUMMARY_OPTION);
+      log(`  （AIを呼んだ回数 ${calls - before}／${Math.round((Date.now() - started) / 1000)}秒）`);
+      posted.slice(seen).forEach(show);
+      seen = posted.length;
+      log("\n----- 「このまとめでプロットに書く」");
+      await inner.ask(PLOT_WRITE_SUMMARY_OPTION);
+    } else {
+      log("\n----- 「ここまでをプロットに書く」");
+      await inner.ask(PLOT_WRITE_OPTION);
+    }
     posted.slice(seen).forEach(show);
     log(`\n[AIを呼んだ回数] ${calls}`);
+    log(`\n[plot.md]\n${await fs.readFile(nodePath.join(root, "設定", "plot.md"), "utf8")}`);
 
     // **同じ問いを二度出さない**（ループしない）
     expect(new Set(topics).size).toBe(topics.length);

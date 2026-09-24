@@ -35,6 +35,12 @@ import {
  * **書かないと次の問いが来ない形にしない**——それがループの元だった。
  * 作者が自分で書いた項目は上書きしない（実装ルール2）。
  *
+ * ## 入り方は型で選ぶ（2026-09-25）
+ *
+ * この問答は「着想から掘る」型で、ほかに「場面から広げる」「結末から逆算する」
+ * 「型に当てはめる」「項目を順に埋める」がある（`plotDialogueStyles.ts`）。
+ * どの型でも上の決まりは変わらない。
+ *
  * VS Code API に依存しない。
  */
 
@@ -52,6 +58,30 @@ export const PLOT_END_OPTION = "問答を終える";
 
 /** プロットに何か書いてある作品で、それを着想として始める */
 export const PLOT_START_FROM_PLOT_OPTION = "プロットに書いてあることから始める";
+
+/**
+ * **同じ問いのまま**、もう見せた案と違う候補を出してもらう（何も記録しない）。
+ * 作者とリーダーの問答（2026-09-25）で、作者は「もっとアイデアを」と求め、
+ * 8案から2案を組み替えて選んだ。候補が3〜4つで尽きると、作者は自分で
+ * 書くか飛ばすしかない
+ */
+export const PLOT_MORE_OPTION = "ほかの案もほしい";
+
+/** 決まったことを、ログライン・人物・世界・構成へまとめてもらう（P-44） */
+export const PLOT_SUMMARY_OPTION = "決まったことをまとめる";
+
+/** まとめを見たあと、そのまとめで `plot.md` へ書く */
+export const PLOT_WRITE_SUMMARY_OPTION = "このまとめでプロットに書く";
+
+/** まとめを見たあと、書かずに問答へ戻る */
+export const PLOT_CONTINUE_OPTION = "問答を続ける";
+
+/**
+ * まとめで**AIがつなぐために補った文**の頭に付ける印（P-44）。
+ * 印の無い補いは、作者が決めたことと見分けがつかない。作者はこの印で
+ * 見分けて、要らなければ消す
+ */
+export const PLOT_SUPPLEMENT_MARK = "〔補い〕";
 
 /** 最初の返事（着想）を、決まったことの一覧に載せるときの名前 */
 export const PLOT_IDEA_TOPIC = "着想";
@@ -109,46 +139,97 @@ export interface PlotAskedPoint {
 }
 
 /**
- * 始めたときに1回だけ言うこと。
- *
- * 何をする機能で、答えるとどうなるのかが分からないまま選択肢だけが続くと、
- * 作者には「わけがわからない」（作者の実機の報告、2026-09-24 夜）。
- */
-export function describePlotDialogueStart(workTitle: string, hasPlot: boolean): string {
-  return [
-    `「${workTitle}」のプロットを、問答で一緒に考えます。`,
-    "まず、思いついていることを自由に書いてください（着想・書きたい場面・人物など。断片でかまいません）。",
-    "AIが、いま決めると話が一番広がる1点を選んで、候補を添えて1つずつ尋ねます。候補から選んでも、組み合わせても、自分で書いてもかまいません。",
-    `決まったことは「${PLOT_WRITE_OPTION}」を押したときだけ plot.md に書きます（作者が書いた項目は上書きしません）。`,
-    ...(hasPlot
-      ? [`プロットにすでに書いてあることも読んでから尋ねます。そこから始めるなら「${PLOT_START_FROM_PLOT_OPTION}」を押してください。`]
-      : []),
-  ].join("\n");
-}
-
-/**
  * AIの問い1回分を、画面に出す文にする。
  *
- * 確かめ直し（1〜2行）→【決める1点】問い →（なぜ決めるか）の順。
- * **何を訊いていて、なぜ訊くのか**を毎回見せる——選択肢だけが続くと、
- * 何のための問答か分からなくなる（0.86.1 の作者の報告）。
+ * 確かめ直し（1〜2行）→【決める1点】問い →（なぜ決めるか）→ 候補と
+ * 「選ぶと話がどう変わるか」の順。**何を訊いていて、なぜ訊くのか**を
+ * 毎回見せる——選択肢だけが続くと、何のための問答か分からなくなる
+ * （0.86.1 の作者の報告）。
+ *
+ * **候補ごとの変わることは本文に並べる。** 札は候補の文だけ（押すと
+ * その文がそのまま答えになる）なので、札に混ぜると答えに入ってしまう。
  *
  * @param first 最初の問いか。答え方の案内は最初の1回だけ添える
+ * @param more 「ほかの案もほしい」への答えか。問いは同じなので、案だけ見せる
+ * @param progress 型・項目を順に埋めるときの、いまどこか（「［起承転結 2/4］」）
  */
 export function describePlotTurn(
-  turn: { confirm: string; topic: string; question: string; why: string },
-  first: boolean
+  turn: {
+    confirm: string;
+    topic: string;
+    question: string;
+    why: string;
+    candidates?: ReadonlyArray<{ text: string; effect: string }>;
+  },
+  first: boolean,
+  more = false,
+  progress?: string
 ): string {
   const lines: string[] = [];
-  if (turn.confirm) lines.push(turn.confirm, "");
-  lines.push(`【${turn.topic}】${turn.question}`);
-  if (turn.why) lines.push(`（${turn.why}）`);
+  if (more) {
+    lines.push(`【${turn.topic}】のほかの案です。`);
+  } else {
+    if (turn.confirm) lines.push(turn.confirm, "");
+    if (progress) lines.push(progress);
+    lines.push(`【${turn.topic}】${turn.question}`);
+    if (turn.why) lines.push(`（${turn.why}）`);
+  }
+  const candidates = turn.candidates ?? [];
+  if (candidates.some((candidate) => candidate.effect)) {
+    lines.push(
+      "",
+      ...candidates.map((candidate) =>
+        candidate.effect ? `・${candidate.text} → ${candidate.effect}` : `・${candidate.text}`
+      )
+    );
+  }
   if (first) {
     lines.push(
       "",
       "下の候補から選ぶか、組み合わせたり自分の言葉で書いたりして送ってください。"
     );
   }
+  return lines.join("\n");
+}
+
+/**
+ * まとめ（P-44）を見せる文。**補いの印の意味と、戻したものを言う。**
+ * 書くのは「このまとめでプロットに書く」を押したときだけ。
+ *
+ * @param restored まとめから抜けていたので、作者の言葉のまま戻した決まったこと
+ * @param marked AIが印を付け忘れた補いに、コードが印を付けた行の数
+ */
+export function describePlotSummary(
+  contents: ReadonlyMap<PlotDialogueSection, string>,
+  restored: readonly PlotDecision[],
+  marked = 0
+): string {
+  const lines = [
+    `決まったことを、プロットの項目にまとめました。${PLOT_SUPPLEMENT_MARK}はAIがつなぐために補った所です（要らなければ消してください）。`,
+  ];
+  for (const section of PLOT_SECTIONS) {
+    const content = contents.get(section.key as PlotDialogueSection);
+    if (!content) continue;
+    lines.push("", `【${section.heading}】`, content);
+  }
+  if (marked > 0) {
+    lines.push(
+      "",
+      `（決まったことに無い中身が${marked}か所あったので、${PLOT_SUPPLEMENT_MARK}を付けました）`
+    );
+  }
+  if (restored.length > 0) {
+    lines.push(
+      "",
+      `（まとめから抜けていた決まったことを、あなたの言葉のまま戻しました：${restored
+        .map((item) => item.topic)
+        .join("・")}）`
+    );
+  }
+  lines.push(
+    "",
+    `「${PLOT_WRITE_SUMMARY_OPTION}」を押すと書きます（あなたが書いた項目は上書きしません）。`
+  );
   return lines.join("\n");
 }
 
@@ -293,8 +374,20 @@ export function planPlotWrite(
   current: PlotSections,
   written: ReadonlyMap<PlotSectionKey, string>
 ): PlotWritePlan {
+  return planSectionWrite(composeSectionContents(decisions), current, written);
+}
+
+/**
+ * 項目ごとの中身から、書く計画を立てる。決まったこと（`planPlotWrite`）と
+ * まとめ（P-44）の**両方がここを通る**——上書きしない決まりを2か所に書かない。
+ */
+export function planSectionWrite(
+  contents: ReadonlyMap<PlotDialogueSection, string>,
+  current: PlotSections,
+  written: ReadonlyMap<PlotSectionKey, string>
+): PlotWritePlan {
   const plan: PlotWritePlan = { write: [], kept: [] };
-  for (const [section, content] of composeSectionContents(decisions)) {
+  for (const [section, content] of contents) {
     const now = current[section] ?? "";
     // 同じ中身ならもう書いてある。書き直すと更新時刻だけ動く
     if (now.trim() === content.trim()) continue;

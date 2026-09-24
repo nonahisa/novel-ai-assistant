@@ -2,17 +2,19 @@ import { describe, it, expect } from "vitest";
 import {
   composeSectionContents,
   describePlotDialogueEnd,
-  describePlotDialogueStart,
+  describePlotSummary,
   describePlotTurn,
   describeWrittenPlot,
   isOptionReply,
   isPlaceholderContent,
   isRequestLikeOption,
   planPlotWrite,
+  planSectionWrite,
   PLOT_DIALOGUE_SECTIONS,
   PLOT_SKIP_OPTION,
-  PLOT_START_FROM_PLOT_OPTION,
+  PLOT_SUPPLEMENT_MARK,
   PLOT_WRITE_OPTION,
+  PLOT_WRITE_SUMMARY_OPTION,
   type PlotDecision,
 } from "../../../src/core/plotInterview";
 import { emptyPlotSections, parsePlotMarkdown, PLOT_SECTIONS } from "../../../src/core/plotDoc";
@@ -40,26 +42,16 @@ describe("書いてよい項目", () => {
   });
 });
 
-describe("最初の一言", () => {
-  it("何をするのか・答えるとどうなるのか・書くのはいつかを言う", () => {
-    const text = describePlotDialogueStart("回線の街", false);
-    expect(text).toContain("自由に書いてください");
-    expect(text).toContain("1点");
-    expect(text).toContain(PLOT_WRITE_OPTION);
-    expect(text).not.toContain(PLOT_START_FROM_PLOT_OPTION);
-  });
-
-  it("プロットに書いてある作品では、そこから始められると言う", () => {
-    expect(describePlotDialogueStart("回線の街", true)).toContain(PLOT_START_FROM_PLOT_OPTION);
-  });
-});
-
 describe("問いの見せ方", () => {
   const turn = {
     confirm: "業者が最強、という話ですね。",
     topic: "最強の理由",
     question: "業者はなぜ最強なのですか？",
     why: "理由が決まると敵も決まります",
+    candidates: [
+      { text: "回線が魔力も運ぶから", effect: "世界の仕組みの話になる" },
+      { text: "地図を握っているから", effect: "" },
+    ],
   };
 
   it("確かめ直し →【決める1点】問い →（なぜ）の順", () => {
@@ -68,9 +60,52 @@ describe("問いの見せ方", () => {
     expect(text).toContain("（理由が決まると敵も決まります）");
   });
 
+  it("候補ごとに「選ぶと話がどう変わるか」を本文に並べる（札には混ぜない）", () => {
+    const text = describePlotTurn(turn, false);
+    expect(text).toContain("・回線が魔力も運ぶから → 世界の仕組みの話になる");
+    // 変わることが無い候補は、候補だけ
+    expect(text).toContain("・地図を握っているから");
+    expect(text).not.toContain("地図を握っているから →");
+  });
+
   it("答え方の案内は最初の問いにだけ添える", () => {
     expect(describePlotTurn(turn, true)).toContain("自分の言葉で書いたり");
     expect(describePlotTurn(turn, false)).not.toContain("自分の言葉で書いたり");
+  });
+
+  it("ほかの案は、問いを繰り返さず案だけ見せる", () => {
+    const text = describePlotTurn(turn, false, true);
+    expect(text).toContain("【最強の理由】のほかの案です。");
+    expect(text).not.toContain(turn.question);
+    expect(text).not.toContain(turn.confirm);
+  });
+
+  it("型・項目を順に埋めるときは、いまどこかを問いの前に出す", () => {
+    const text = describePlotTurn(turn, false, false, "［起承転結 2/4］");
+    expect(text.indexOf("［起承転結 2/4］")).toBeLessThan(text.indexOf("【最強の理由】"));
+  });
+});
+
+describe("まとめの見せ方", () => {
+  it("補いの印の意味・項目・戻したもの・書き方を言う", () => {
+    const text = describePlotSummary(
+      new Map([
+        ["logline", "〔補い〕回線業者の新人が最強の班長と出会う"],
+        ["outline", "- 〜5万字：新人が現場に入る"],
+      ]),
+      [{ topic: "最強は誰か", answer: "くたびれた班長", section: "mainCharacters" }]
+    );
+    expect(text).toContain(`${PLOT_SUPPLEMENT_MARK}はAIがつなぐために補った所`);
+    expect(text).toContain("【ログライン】\n〔補い〕回線業者の新人が最強の班長と出会う");
+    // 並びは plot.md の順（ログラインがあらすじより先）
+    expect(text.indexOf("【ログライン】")).toBeLessThan(text.indexOf("【あらすじ】"));
+    expect(text).toContain("あなたの言葉のまま戻しました：最強は誰か");
+    expect(text).toContain(PLOT_WRITE_SUMMARY_OPTION);
+    // 印を付け忘れた補いにコードが印を付けたら、その数を言う（黙って直さない）
+    expect(text).not.toContain("を付けました");
+    expect(describePlotSummary(new Map([["theme", "〔補い〕x"]]), [], 2)).toContain(
+      "決まったことに無い中身が2か所あったので、〔補い〕を付けました"
+    );
   });
 });
 
@@ -223,6 +258,21 @@ describe("どの項目を書くか（作者が書いたものを上書きしな�
       new Map()
     );
     expect(plan.write).toEqual([{ section: "logline", content: "回線業者が最強" }]);
+  });
+
+  it("まとめ（項目ごとの中身）も同じ決まりで書く（作者の項目は上書きしない）", () => {
+    const sections = emptyPlotSections();
+    sections.theme = "作者が書いたテーマ";
+    const plan = planSectionWrite(
+      new Map([
+        ["theme", "〔補い〕裏方の誇り"],
+        ["logline", "回線業者の新人の話"],
+      ]),
+      sections,
+      new Map()
+    );
+    expect(plan.write).toEqual([{ section: "logline", content: "回線業者の新人の話" }]);
+    expect(plan.kept.map((item) => item.section)).toEqual(["theme"]);
   });
 
   it("もう同じ中身が入っていれば、書き直さない", () => {

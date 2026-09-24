@@ -266,7 +266,7 @@ describe("2つ目の画面から押されたとき", () => {
  * 問答そのものの流れは `workChatPanelPlotInterviewLoop.test.ts` が見る。
  */
 describe("対話でプロットを作る（入口）", () => {
-  test("プロットがまだ無い作品でも、着想を訊くところから始める", async () => {
+  test("プロットがまだ無い作品でも、型を選ぶところから始める（2026-09-25 から最初に型を選ぶ）", async () => {
     const h = harness();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (h.panel as any).readPlot = async () => undefined;
@@ -278,6 +278,7 @@ describe("対話でプロットを作る（入口）", () => {
     const last = chatters[chatters.length - 1];
     expect(last.run).toBeUndefined();
     expect(last.text).toContain("氷の街");
-    expect(last.text).toContain("自由に書いてください");
+    expect(last.text).toContain("始め方を選んでください");
+    expect(last.options).toContain("着想から掘る");
   });
 });

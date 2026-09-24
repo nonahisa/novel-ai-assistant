@@ -7,35 +7,68 @@ import {
 import { fromUri } from "../core/paths";
 import { readPlotText } from "../core/plotFile";
 import {
+  composeSectionContents,
   describePlotDialogueEnd,
-  describePlotDialogueStart,
+  describePlotSummary,
   describePlotTurn,
   describeWrittenPlot,
   isOptionReply,
-  planPlotWrite,
+  planSectionWrite,
+  PLOT_CONTINUE_OPTION,
   PLOT_END_OPTION,
   PLOT_IDEA_SECTION,
-  PLOT_IDEA_TOPIC,
+  PLOT_MORE_OPTION,
   PLOT_RETRY_OPTION,
   PLOT_SKIP_OPTION,
   PLOT_START_FROM_PLOT_OPTION,
+  PLOT_SUMMARY_OPTION,
   PLOT_WRITE_OPTION,
+  PLOT_WRITE_SUMMARY_OPTION,
   type PlotAskedPoint,
   type PlotDecision,
+  type PlotDialogueSection,
 } from "../core/plotInterview";
+import {
+  describeFixedDone,
+  describeFixedProgress,
+  describePlotFrameChoice,
+  describePlotSeedAsk,
+  describePlotStyleChoice,
+  frameOfReply,
+  nextFixedPoint,
+  plotFrame,
+  plotFrameOptions,
+  plotSeedOptions,
+  plotStyleDef,
+  plotStyleOptions,
+  PLOT_FRAME_TOPIC,
+  styleOfReply,
+  type PlotDialogueStyle,
+  type PlotFixedPoint,
+  type PlotFrameKey,
+} from "../core/plotDialogueStyles";
 import {
   describePlotDialogueFailure,
   describeRetryNote,
   validatePlotDialogueAnswer,
+  validatePlotSummary,
   type PlotDialogueTurn,
+  type PlotTurnRequest,
 } from "../core/plotDialogueValidation";
 import {
   buildPlotDialoguePrompt,
+  buildPlotDialogueSystemPrompt,
   PLOT_DIALOGUE_SCHEMA,
-  PLOT_DIALOGUE_SYSTEM_PROMPT,
   PLOT_DIALOGUE_TEMPERATURE,
   PLOT_DIALOGUE_VERSION,
 } from "../prompts/plotDialogue";
+import {
+  buildPlotSummaryPrompt,
+  PLOT_SUMMARY_SCHEMA,
+  PLOT_SUMMARY_SYSTEM_PROMPT,
+  PLOT_SUMMARY_TEMPERATURE,
+  PLOT_SUMMARY_VERSION,
+} from "../prompts/plotSummary";
 import * as vscode from "vscode";
 import { wideViewColumn } from "./editorColumn";
 import * as path from "../core/paths";
@@ -447,7 +480,20 @@ interface ChatAnswerExtras {
 /** 対話式プロット作成の問答の状態（設計書6.4.7。`WorkChatPanel.plotDialogue`） */
 interface PlotDialogueState {
   work: WorkEntry;
-  /** 作者が最初に書いた着想。まだなら undefined、プロットから始めたときは空文字 */
+  /** 始めたとき、プロットに何か書いてあったか（「プロットから始める」札を出すか） */
+  hasPlot: boolean;
+  /** 選んだ型。まだ選んでいなければ undefined（`plotDialogueStyles.ts`） */
+  style?: PlotDialogueStyle;
+  /** 「型に当てはめる」で選んだ型の枠 */
+  frame?: PlotFrameKey;
+  /**
+   * コードが決める型で、いま尋ねている（尋ねようとしている）1点。
+   * 尋ね終えたら undefined（`fixedDone`）
+   */
+  pending?: PlotFixedPoint;
+  /** コードが決める型で、尋ねる枠・項目が尽きた */
+  fixedDone?: boolean;
+  /** 作者が最初に書いたこと（着想・場面・結末）。まだなら undefined、プロットから始めたときは空文字 */
   idea?: string;
   decisions: PlotDecision[];
   /** 尋ねた1点すべて。**同じ問いを二度出さない**ために渡し、照合もする */
@@ -456,6 +502,8 @@ interface PlotDialogueState {
   current?: PlotDialogueTurn;
   /** この問答が `plot.md` に書いた中身（作者の記述と見分けるため） */
   written: Map<PlotSectionKey, string>;
+  /** 最後に見せたまとめ（P-44）。「このまとめでプロットに書く」で書く */
+  summary?: Map<PlotDialogueSection, string>;
 }
 
 /** 最後の問いが失敗したときの赤字（`postError` が送るものと同じ形） */
@@ -3498,8 +3546,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * だったので、選択肢の往復が延々と続いた（作者の実機の報告、2026-09-24 夜
    * 「本題が始まらない」「あまりにかけ離れている」）。
    *
-   * ここでは最初の一言を出すだけで、AIは呼ばない。作品を選んだ直後の
-   * いちばん待たされたくないところで待たせない（`startPlotAdvice` と同じ理由）。
+   * ここでは最初の一言（型を選ぶ札）を出すだけで、AIは呼ばない。作品を選んだ
+   * 直後のいちばん待たされたくないところで待たせない（`startPlotAdvice` と同じ理由）。
+   * 型は5つ（`plotDialogueStyles.ts`。2026-09-25 に作者が選んだ）。
    */
   async startPlotInterview(work: WorkEntry): Promise<void> {
     /*
@@ -3527,17 +3576,20 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     // 前回飛ばしたのは「そのとき決まっていなかった」からで、今日も同じとは限らない
     this.plotDialogue = {
       work,
+      hasPlot,
       decisions: [],
       asked: [],
       written: new Map(),
     };
+    /*
+      **最初に型を選ぶ**（作者の指示、2026-09-25「これはプロット作成の
+      パターンの一つ。これだけに固定しないで」）。説明は1行ずつ
+    */
     this.postAll({
       type: "chatter",
       who: "AI",
-      text: describePlotDialogueStart(work.title, hasPlot),
-      options: hasPlot
-        ? [PLOT_START_FROM_PLOT_OPTION, PLOT_END_OPTION]
-        : [PLOT_END_OPTION],
+      text: describePlotStyleChoice(work.title),
+      options: plotStyleOptions(),
     });
   }
 
@@ -3548,11 +3600,15 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * 書いても、組み合わせても、送った文がそのまま「決まったこと」になる。
    * **書かなくても次の問いへ進む**——書くのは「ここまでをプロットに書く」を
    * 押したときだけ（0.86.1 のループの元は「書かないと進まない」だった）。
+   *
+   * 始めた直後は**型を選ぶ段**、「型に当てはめる」なら**枠を選ぶ段**を通る。
+   * ここまではコードが答え、AIは呼ばない。
    */
   private async answerPlotDialogue(text: string): Promise<void> {
     const dialogue = this.plotDialogue;
     if (!dialogue) return;
     const reply = text.trim();
+    const current = dialogue.current;
 
     if (isOptionReply(reply, PLOT_END_OPTION)) {
       this.plotDialogue = undefined;
@@ -3566,46 +3622,140 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       return;
     }
 
-    if (isOptionReply(reply, PLOT_WRITE_OPTION)) {
+    if (!dialogue.style) {
+      const chosen = styleOfReply(reply);
+      if (chosen) {
+        dialogue.style = chosen.key;
+        this.postAll({ type: "cancelled" });
+        this.postAll(
+          chosen.key === "structure"
+            ? {
+                type: "chatter",
+                who: "AI",
+                text: describePlotFrameChoice(),
+                options: plotFrameOptions(),
+              }
+            : {
+                type: "chatter",
+                who: "AI",
+                text: describePlotSeedAsk(chosen.key, dialogue.hasPlot),
+                options: plotSeedOptions(chosen.key, dialogue.hasPlot),
+              }
+        );
+        return;
+      }
+      /*
+        **型を選ばずに書き始めたら、「着想から掘る」として受け取る**（その文を
+        着想にする）。選び直させると、書いた着想を打ち直させることになる
+      */
+      dialogue.style = "idea";
+    }
+
+    if (dialogue.style === "structure" && !dialogue.frame) {
+      const frame = frameOfReply(reply);
       this.postAll({ type: "cancelled" });
-      await this.writePlotDialogue(dialogue);
-      // **書いても問答は続く。** 出ている問いにそのまま答えられるよう、札を出し直す
-      if (this.plotDialogue === dialogue) {
+      if (!frame) {
         this.postAll({
           type: "chatter",
           who: "AI",
-          text: dialogue.current
-            ? `続けるなら、【${dialogue.current.topic}】の問いに答えてください。`
-            : "続けるなら、思いついたことを書くか、下の札を押してください。",
-          options: this.plotDialogueOptions(dialogue),
+          text: describePlotFrameChoice(true),
+          options: plotFrameOptions(),
         });
+        return;
       }
+      dialogue.frame = frame.key;
+      // 選んだ型も作者の答え。plot.md の「あらすじ」に「型：起承転結」と残る
+      dialogue.decisions.push({
+        topic: PLOT_FRAME_TOPIC,
+        answer: frame.label,
+        section: PLOT_IDEA_SECTION,
+      });
+      this.postAll({
+        type: "chatter",
+        who: "AI",
+        text: describePlotSeedAsk("structure", dialogue.hasPlot, frame),
+        options: plotSeedOptions("structure", dialogue.hasPlot),
+      });
       return;
     }
 
+    if (isOptionReply(reply, PLOT_WRITE_OPTION)) {
+      this.postAll({ type: "cancelled" });
+      await this.writePlotSections(
+        dialogue,
+        composeSectionContents(dialogue.decisions),
+        "問答で決めたこと"
+      );
+      this.offerPlotContinue(dialogue);
+      return;
+    }
+
+    if (isOptionReply(reply, PLOT_WRITE_SUMMARY_OPTION) && dialogue.summary) {
+      this.postAll({ type: "cancelled" });
+      await this.writePlotSections(dialogue, dialogue.summary, "問答のまとめ");
+      this.offerPlotContinue(dialogue);
+      return;
+    }
+
+    if (isOptionReply(reply, PLOT_CONTINUE_OPTION)) {
+      this.postAll({ type: "cancelled" });
+      this.offerPlotContinue(dialogue);
+      return;
+    }
+
+    if (isOptionReply(reply, PLOT_SUMMARY_OPTION) && dialogue.decisions.length > 0) {
+      await this.requestPlotSummary(dialogue, reply);
+      return;
+    }
+
+    // **同じ問いのまま、ほかの案を出してもらう**（何も記録しない）
+    if (isOptionReply(reply, PLOT_MORE_OPTION) && current) {
+      await this.requestPlotTurn(dialogue, reply, undefined, {
+        more: {
+          topic: current.topic,
+          question: current.question,
+          section: current.section,
+          shown: current.candidates.map((candidate) => candidate.text),
+        },
+      });
+      return;
+    }
+
+    const def = plotStyleDef(dialogue.style);
+    const pending = def.fixed ? dialogue.pending : undefined;
     let lastAnswer: { topic: string; answer: string } | undefined;
-    const current = dialogue.current;
+    let clarifyFor: { topic: string; section: PlotDialogueSection } | undefined;
     if (isOptionReply(reply, PLOT_SKIP_OPTION) && current) {
       // 飛ばした問いも「尋ねたこと」に残す。**残さないと、すぐまた尋ねられる**
-      dialogue.asked.push({
-        topic: current.topic,
-        question: current.question,
-        skipped: true,
-      });
+      // （確かめ直しの問いは、もとの問いがもう一覧にある）
+      if (current.mode === "ask") {
+        dialogue.asked.push({
+          topic: current.topic,
+          question: current.question,
+          skipped: true,
+        });
+      }
       dialogue.current = undefined;
+    } else if (isOptionReply(reply, PLOT_SKIP_OPTION) && pending) {
+      /*
+        **問いを出せなかった枠・項目も飛ばせる。** 飛ばせないと、同じ枠を
+        頼み直すか問答を終えるしかない（コードが順を決める型だけの道）
+      */
+      dialogue.asked.push({ topic: pending.topic, question: pending.note, skipped: true });
     } else if (
       isOptionReply(reply, PLOT_RETRY_OPTION) ||
-      isOptionReply(reply, PLOT_SKIP_OPTION)
+      isOptionReply(reply, PLOT_SKIP_OPTION) ||
+      isOptionReply(reply, PLOT_MORE_OPTION)
     ) {
       // 問いを受け取れていないときの頼み直し。何も記録しない
     } else if (dialogue.idea === undefined) {
-      // 最初の返事は着想。プロットから始めるなら、着想は plot.md にある
+      // 最初の返事は着想（型によっては場面・結末）。プロットから始めるなら、着想は plot.md にある
       if (isOptionReply(reply, PLOT_START_FROM_PLOT_OPTION)) {
         dialogue.idea = "";
       } else {
         dialogue.idea = reply;
         dialogue.decisions.push({
-          topic: PLOT_IDEA_TOPIC,
+          topic: def.seedTopic,
           answer: reply,
           section: PLOT_IDEA_SECTION,
         });
@@ -3616,13 +3766,31 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         answer: reply,
         section: current.section,
       });
-      dialogue.asked.push({
-        topic: current.topic,
-        question: current.question,
-        skipped: false,
-      });
+      if (current.mode === "ask") {
+        dialogue.asked.push({
+          topic: current.topic,
+          question: current.question,
+          skipped: false,
+        });
+        /*
+          **答えが途中で切れている・どちらにも読めるときは、AIに確かめ直させて
+          よい**（作者とリーダーの問答、2026-09-25。「元アイデアを」で切れた答えを
+          推測で進めず、解釈の候補を出して確かめた）。**確かめ直しへの答えには
+          もう許さない**——確かめ直しが続くと、それ自体が往復のループになる
+        */
+        clarifyFor = { topic: current.topic, section: current.section };
+      }
       dialogue.current = undefined;
       lastAnswer = { topic: current.topic, answer: reply };
+    } else if (pending) {
+      /*
+        問いを出せなかった枠・項目へ、作者が自分で書いた。**その枠の答えとして
+        受け取る**——何の枠かは画面に出してあり（`requestPlotTurn`）、補足に
+        回すと同じ枠をもう一度尋ねることになる
+      */
+      dialogue.decisions.push({ topic: pending.topic, answer: reply, section: pending.section });
+      dialogue.asked.push({ topic: pending.topic, question: pending.note, skipped: false });
+      lastAnswer = { topic: pending.topic, answer: reply };
     } else {
       /*
         問いを受け取れていないあいだに書かれた言葉は、補足として残す。
@@ -3637,47 +3805,257 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       lastAnswer = { topic, answer: reply };
     }
 
-    await this.requestPlotTurn(dialogue, reply, lastAnswer);
+    await this.requestPlotTurn(dialogue, reply, lastAnswer, { clarifyFor });
   }
 
   /**
-   * 次の1点をAIに尋ねてもらう（P-43）。
+   * 次の1点・ほかの案・確かめ直しをAIに出してもらう（P-43）。
    *
-   * **受け取れなければ1度だけ頼み直す。** 何が駄目だったか（繰り返し・
-   * 候補の不足・問いが2つ）を添える。2度目も駄目なら、同じ問いを出さずに
-   * 止めて、作者が次に押せる札を並べる——**ここで3度4度と頼むと、
-   * 作者は待たされ続ける**（ループの形が変わるだけ）。
+   * **コードが次の1点を決める型**（型に当てはめる・項目を順に埋める）では、
+   * 先に `nextFixedPoint` で尋ねる枠・項目を決め、尽きていればAIを呼ばずに
+   * 締めの一言を出す。
+   *
+   * **受け取れなければ1度だけ頼み直す**（`askPlotAI`）。2度目も駄目なら、
+   * 同じ問いを出さずに止めて、作者が次に押せる札を並べる。
    */
   private async requestPlotTurn(
     dialogue: PlotDialogueState,
     authorText: string,
-    lastAnswer: { topic: string; answer: string } | undefined
+    lastAnswer: { topic: string; answer: string } | undefined,
+    options: {
+      more?: PlotTurnRequest["more"];
+      clarifyFor?: PlotTurnRequest["clarifyFor"];
+    }
   ): Promise<void> {
+    const style = dialogue.style ?? "idea";
+    const def = plotStyleDef(style);
+    const frame = plotFrame(dialogue.frame);
+    const plot = await this.readPlot(dialogue.work);
+    const writtenPlot = plot ? describeWrittenPlot(plot.sections, plot.extra) : "";
+
+    let fixedPoint: PlotFixedPoint | undefined;
+    if (def.fixed && !options.more) {
+      fixedPoint = nextFixedPoint(
+        style,
+        frame,
+        dialogue.asked,
+        plot?.sections ?? emptyPlotSections(),
+        dialogue.written
+      );
+      dialogue.pending = fixedPoint;
+      if (!fixedPoint) {
+        // 尋ねる枠・項目が尽きた。**AIは呼ばない**（尋ねることが無い）
+        dialogue.fixedDone = true;
+        dialogue.current = undefined;
+        this.postPlotAnswer(dialogue, describeFixedDone(style, frame), authorText);
+        return;
+      }
+    }
+
+    const request: PlotTurnRequest = {
+      asked: dialogue.asked,
+      more: options.more,
+      clarifyFor: options.clarifyFor,
+      fixed: fixedPoint
+        ? { topic: fixedPoint.topic, section: fixedPoint.section, note: fixedPoint.note }
+        : undefined,
+    };
+
+    const result = await this.askPlotAI(dialogue, authorText, {
+      label: `対話式プロット作成（${def.label}）`,
+      version: `P-43 ${PLOT_DIALOGUE_VERSION}`,
+      feature: "plot_dialogue",
+      systemPrompt: buildPlotDialogueSystemPrompt(style),
+      schema: PLOT_DIALOGUE_SCHEMA as unknown as object,
+      temperature: PLOT_DIALOGUE_TEMPERATURE,
+      build: (retryNote) =>
+        buildPlotDialoguePrompt({
+          workTitle: dialogue.work.title,
+          style,
+          frame,
+          fixedPoint,
+          idea: dialogue.idea,
+          writtenPlot,
+          decisions: dialogue.decisions,
+          asked: dialogue.asked,
+          lastAnswer,
+          more: options.more,
+          mayClarify: options.clarifyFor !== undefined,
+          retryNote,
+        }),
+      check: (text) => {
+        const check = validatePlotDialogueAnswer(text, request);
+        return check.ok
+          ? { ok: true, value: check.turn }
+          : {
+              ok: false,
+              reason: check.reason,
+              detail: check.detail,
+              retryNote: describeRetryNote(check.reason, check.detail, fixedPoint?.topic),
+              failure: describePlotDialogueFailure(check.reason),
+            };
+      },
+    });
+    if (!result) return;
+
+    if (!result.ok) {
+      // ほかの案が出せなかっただけなら、いまの問いは生きている
+      if (!options.more) dialogue.current = undefined;
+      this.postPlotAnswer(
+        dialogue,
+        fixedPoint
+          ? `${result.failure}\n【${fixedPoint.topic}】について思いついたことを書けば、その答えにします。下の札も押せます。`
+          : `${result.failure}\n思いついたことを書き足すか、下の札を押してください。`,
+        authorText
+      );
+      return;
+    }
+
+    const turn = result.value;
+    if (turn.mode === "clarify") {
+      /*
+        **確かめ直しなら、直前の答えはまだ決まったことにしない。** 作者が
+        どちらの意味かを選んだら、その答えで記録し直す（尋ねたことの一覧には
+        もとの問いが残っているので、同じ問いは出ない）
+      */
+      const last = dialogue.decisions[dialogue.decisions.length - 1];
+      if (last && last.topic === turn.topic) dialogue.decisions.pop();
+    }
+    dialogue.current = turn;
+    const progress =
+      fixedPoint && turn.mode === "ask"
+        ? describeFixedProgress(style, frame, fixedPoint)
+        : undefined;
+    this.postPlotAnswer(
+      dialogue,
+      describePlotTurn(
+        turn,
+        dialogue.asked.length === 0 && !options.more,
+        Boolean(options.more),
+        progress
+      ),
+      authorText
+    );
+  }
+
+  /**
+   * 決まったことを、ログライン・人物・世界・構成へまとめてもらう（P-44）。
+   *
+   * **決まったことが抜けていれば、コードが足す**（実装ルール3「マージはAIで
+   * なくコードが行う」）。まとめは見せるだけで、書くのは「このまとめで
+   * プロットに書く」を押したとき。
+   */
+  private async requestPlotSummary(
+    dialogue: PlotDialogueState,
+    authorText: string
+  ): Promise<void> {
+    const plot = await this.readPlot(dialogue.work);
+    const writtenPlot = plot ? describeWrittenPlot(plot.sections, plot.extra) : "";
+    const def = plotStyleDef(dialogue.style ?? "idea");
+
+    const result = await this.askPlotAI(dialogue, authorText, {
+      label: "対話式プロット作成（まとめ）",
+      version: `P-44 ${PLOT_SUMMARY_VERSION}`,
+      /*
+        **問いとは別の機能名で数える。** 出力の上限は機能ごとの実測から
+        見込む（`featureOutputCeiling`）。短い問いの実測で、項目をいくつも
+        書くまとめを切らないため
+      */
+      feature: "plot_summary",
+      systemPrompt: PLOT_SUMMARY_SYSTEM_PROMPT,
+      schema: PLOT_SUMMARY_SCHEMA as unknown as object,
+      temperature: PLOT_SUMMARY_TEMPERATURE,
+      build: (retryNote) =>
+        buildPlotSummaryPrompt({
+          workTitle: dialogue.work.title,
+          idea: dialogue.idea,
+          ideaHeading: def.seedHeading,
+          writtenPlot,
+          decisions: dialogue.decisions,
+          retryNote,
+        }),
+      check: (text) => {
+        // 着想とプロットに書いてあることも、根ざしてよいもの（補いに数えない）
+        const check = validatePlotSummary(text, dialogue.decisions, [
+          dialogue.idea ?? "",
+          writtenPlot,
+        ]);
+        return check.ok
+          ? { ok: true, value: check }
+          : {
+              ok: false,
+              reason: check.reason,
+              retryNote:
+                "前の答えは、決められた形になっていませんでした。指定のJSONで、項目ごとのまとめを書いてください。",
+              failure: "AIのまとめを読み取れませんでした。",
+            };
+      },
+    });
+    if (!result) return;
+
+    if (!result.ok) {
+      this.postPlotAnswer(
+        dialogue,
+        `${result.failure}\n問答を続けるか、決まったことをそのまま書いてください。`,
+        authorText
+      );
+      return;
+    }
+
+    dialogue.summary = result.value.contents;
+    this.postPlotAnswer(
+      dialogue,
+      describePlotSummary(result.value.contents, result.value.restored, result.value.marked),
+      authorText,
+      [PLOT_WRITE_SUMMARY_OPTION, PLOT_CONTINUE_OPTION, PLOT_END_OPTION]
+    );
+  }
+
+  /**
+   * 問答の AI 呼び出しの共通部分（P-43・P-44）。
+   *
+   * 繋がるかの確認・有料の確認・**1度だけの頼み直し**・記録・失敗の案内を
+   * 1か所に置く。問いとまとめで別々に持つと、片方だけ直る日が来る。
+   *
+   * @returns 取りやめ・失敗を画面へ出し終えたときは undefined
+   */
+  private async askPlotAI<T>(
+    dialogue: PlotDialogueState,
+    authorText: string,
+    spec: {
+      label: string;
+      version: string;
+      feature: string;
+      systemPrompt: string;
+      schema: object;
+      temperature: number;
+      build: (retryNote?: string) => string;
+      check: (
+        text: string
+      ) =>
+        | { ok: true; value: T }
+        | { ok: false; reason: string; detail?: string; retryNote: string; failure: string };
+    }
+  ): Promise<{ ok: true; value: T } | { ok: false; failure: string } | undefined> {
     const resolved = this.ai.resolve("chat");
     if (!resolved) {
       this.postError(
         "AIが設定されていません。詳細メニューの「AIの設定」から設定してください。"
       );
-      return;
+      return undefined;
     }
-    if (
-      !(await confirmProviderReachable(
-        resolved.provider,
-        "対話式プロット作成",
-        resolved.model
-      ))
-    ) {
+    if (!(await confirmProviderReachable(resolved.provider, spec.label, resolved.model))) {
       this.postError(
         "AIに接続できないため、問いを出せませんでした。" +
           "AIを起動してから、もう一度送ってください（書いた答えは覚えています）。"
       );
-      return;
+      return undefined;
     }
     // 有料のAIは、相談と同じく**会話ごとに一度だけ**確認する（`ask` と同じ鍵）
     const paidKey = `${resolved.provider.id}:${resolved.model}`;
     if (resolved.provider.isPaid && this.paidConfirmedFor !== paidKey) {
       const ok = await confirmPaidUsage(resolved.provider, {
-        actionLabel: "対話式プロット作成",
+        actionLabel: spec.label,
         remember: { id: "ai.paid.workChat" },
         model: resolved.model,
         detail:
@@ -3686,77 +4064,69 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       });
       if (!ok) {
         this.postAll({ type: "cancelled" });
-        return;
+        return undefined;
       }
       this.paidConfirmedFor = paidKey;
     }
 
     const work = dialogue.work;
     useLogFile(work.folderPath);
-    const plot = await this.readPlot(work);
-    const writtenPlot = plot ? describeWrittenPlot(plot.sections, plot.extra) : "";
     const outputLimit = resolveOutputLimitForSend(
       resolved.provider.id,
       resolved.model,
-      "plot_dialogue"
+      spec.feature
     );
     const started = Date.now();
-
     let retryNote: string | undefined;
-    let check: ReturnType<typeof validatePlotDialogueAnswer> | undefined;
+    let failure = "";
     try {
       for (let attempt = 0; attempt < 2; attempt++) {
-        const userPrompt = buildPlotDialoguePrompt({
-          workTitle: work.title,
-          idea: dialogue.idea,
-          writtenPlot,
-          decisions: dialogue.decisions,
-          asked: dialogue.asked,
-          lastAnswer,
-          retryNote,
-        });
         logStep(
-          `対話式プロット作成: v${PLOT_DIALOGUE_VERSION} / ${resolved.model}` +
+          `${spec.label}: ${spec.version} / ${resolved.model}` +
             (attempt > 0 ? "（頼み直し）" : "")
         );
         const result = await resolved.provider.generate({
-          systemPrompt: PLOT_DIALOGUE_SYSTEM_PROMPT,
-          userPrompt,
+          systemPrompt: spec.systemPrompt,
+          userPrompt: spec.build(retryNote),
           model: resolved.model,
-          temperature: PLOT_DIALOGUE_TEMPERATURE,
+          temperature: spec.temperature,
           maxOutputTokens: outputLimit.tokens,
           plannedOutputTokens: resolveOutputTokensForPlanning(
             resolved.provider.id,
             resolved.model,
-            "plot_dialogue"
+            spec.feature
           ),
-          jsonSchema: PLOT_DIALOGUE_SCHEMA as unknown as object,
+          jsonSchema: spec.schema,
           disableThinking: true,
-          meta: { feature: "plot_dialogue", workFolder: work.folderPath },
+          meta: { feature: spec.feature, workFolder: work.folderPath },
         });
-        check = validatePlotDialogueAnswer(result.text, dialogue.asked);
+        const check = spec.check(result.text);
         // **受け取れなかった回も残す。** 何が返って捨てたのかが無いと、
         // 「AIが止めた」と言われたときに確かめようがない
         appendChatLog(work, {
           panel: "相談パネル",
-          promptVersion: `P-43 ${PLOT_DIALOGUE_VERSION}`,
+          promptVersion: spec.version,
           provider: resolved.provider.displayName,
           model: resolved.model,
           paid: resolved.provider.isPaid,
-          target: "対話式プロット作成",
+          target: spec.label,
           question: authorText,
           reply: result.text,
           elapsedMs: Date.now() - started,
           usage: result.usage,
           ...(check.ok ? {} : { error: `受け取れず（${check.reason}）` }),
         });
-        if (check.ok) break;
+        if (check.ok) {
+          // 待っているあいだに「最初から」が押された・始め直された
+          return this.plotDialogue === dialogue ? { ok: true, value: check.value } : undefined;
+        }
         logStep(
-          `対話式プロット作成: 受け取れず（${check.reason}` +
+          `${spec.label}: 受け取れず（${check.reason}` +
             (check.detail ? `：${check.detail}` : "") +
             "）"
         );
-        retryNote = describeRetryNote(check.reason, check.detail);
+        retryNote = check.retryNote;
+        failure = check.failure;
       }
     } catch (error) {
       const timedOut = error instanceof AIError && error.kind === "timeout";
@@ -3769,35 +4139,19 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           : error instanceof Error
             ? error.message
             : String(error);
-      logFailure("対話式プロット作成", {
-        内容: message,
-        詳細: failureDetail(error),
-      });
+      logFailure(spec.label, { 内容: message, 詳細: failureDetail(error) });
       this.postError(message, actions ? [actions] : undefined);
-      return;
+      return undefined;
     }
-
-    // 待っているあいだに「最初から」が押された・始め直された
-    if (this.plotDialogue !== dialogue || !check) return;
-
-    if (!check.ok) {
-      dialogue.current = undefined;
-      const reply =
-        describePlotDialogueFailure(check.reason) +
-        "\n思いついたことを書き足すか、下の札を押してください。";
-      this.postPlotAnswer(dialogue, reply, authorText);
-      return;
-    }
-
-    dialogue.current = check.turn;
-    this.postPlotAnswer(dialogue, describePlotTurn(check.turn, dialogue.asked.length === 0), authorText);
+    return this.plotDialogue === dialogue ? { ok: false, failure } : undefined;
   }
 
   /** 問答の答えを画面へ出す。**相談と同じ「答え」の形**で送る（待ち状態が解ける） */
   private postPlotAnswer(
     dialogue: PlotDialogueState,
     reply: string,
-    authorText: string
+    authorText: string,
+    options?: string[]
   ): void {
     // 普通の相談へ戻ったとき、問答の流れを知っているように会話にも積む
     this.history.push(
@@ -3807,7 +4161,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     this.historyWorkId = dialogue.work.id;
 
     const extras: ChatAnswerExtras = {
-      options: this.plotDialogueOptions(dialogue),
+      options: options ?? this.plotDialogueOptions(dialogue),
     };
     this.tail = { lastAnswer: extras };
     this.postAll({
@@ -3818,37 +4172,66 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     });
   }
 
+  /** 書いたあと・まとめを見たあとに、いまの問いへ戻る札を出す */
+  private offerPlotContinue(dialogue: PlotDialogueState): void {
+    if (this.plotDialogue !== dialogue) return;
+    this.postAll({
+      type: "chatter",
+      who: "AI",
+      text: dialogue.current
+        ? `続けるなら、【${dialogue.current.topic}】の問いに答えてください。`
+        : dialogue.fixedDone
+          ? `終えるなら「${PLOT_END_OPTION}」を押してください。思いついたことを書けば、補足として残します。`
+          : "続けるなら、思いついたことを書くか、下の札を押してください。",
+      options: this.plotDialogueOptions(dialogue),
+    });
+  }
+
   /**
-   * 問答の札。候補 → 飛ばす → 書く → 終える の順。
+   * 問答の札。候補 → ほかの案 → 飛ばす → 書く → まとめる → 終える の順。
    *
-   * **「書く」は決まったことがあるときだけ。** 何も決まっていないのに
-   * 出すと、押しても何も起きない札になる。
+   * **「書く」「まとめる」は決まったことがあるときだけ。** 何も決まって
+   * いないのに出すと、押しても何も起きない札になる。
+   * コードが順を決める型で問いを出せなかったときは、**その枠を飛ばす札も出す**。
+   * 枠・項目が尽きたら、頼み直しの札は出さない（頼んでも尋ねることが無い）。
    */
-  private plotDialogueOptions(
-    dialogue: PlotDialogueState
-  ): string[] {
+  private plotDialogueOptions(dialogue: PlotDialogueState): string[] {
     const current = dialogue.current;
+    const decided = dialogue.decisions.length > 0;
+    const fixed = plotStyleDef(dialogue.style ?? "idea").fixed;
     return [
-      ...(current ? [...current.candidates, PLOT_SKIP_OPTION] : [PLOT_RETRY_OPTION]),
-      ...(dialogue.decisions.length > 0 ? [PLOT_WRITE_OPTION] : []),
+      ...(current
+        ? [
+            ...current.candidates.map((candidate) => candidate.text),
+            PLOT_MORE_OPTION,
+            PLOT_SKIP_OPTION,
+          ]
+        : dialogue.fixedDone
+          ? []
+          : fixed && dialogue.pending
+            ? [PLOT_RETRY_OPTION, PLOT_SKIP_OPTION]
+            : [PLOT_RETRY_OPTION]),
+      ...(decided ? [PLOT_WRITE_OPTION, PLOT_SUMMARY_OPTION] : []),
       PLOT_END_OPTION,
     ];
   }
 
   /**
-   * 決まったことを `plot.md` へ書く（「ここまでをプロットに書く」）。
+   * 項目ごとの中身を `plot.md` へ書く（決まったこと・まとめの両方）。
    *
    * **書く道は相談の書き込みと同じ**（`applyStagedEdit` → `applyChatEdit`）。
    * 退避・取り消し・書いた中身の表示を2通りにしない。
-   * **作者が書いた項目は上書きしない**（`planPlotWrite`）——書かなかった
+   * **作者が書いた項目は上書きしない**（`planSectionWrite`）——書かなかった
    * ものは中身ごと見せる（黙って捨てない）。
    */
-  private async writePlotDialogue(
-    dialogue: PlotDialogueState
+  private async writePlotSections(
+    dialogue: PlotDialogueState,
+    contents: ReadonlyMap<PlotDialogueSection, string>,
+    note: string
   ): Promise<void> {
     const plot = await this.readPlot(dialogue.work);
-    const plan = planPlotWrite(
-      dialogue.decisions,
+    const plan = planSectionWrite(
+      contents,
       plot?.sections ?? emptyPlotSections(),
       dialogue.written
     );
@@ -3856,7 +4239,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     if (plan.write.length === 0 && plan.kept.length === 0) {
       this.postAll({
         type: "note",
-        message: "書き足すことはありません（決まったことは、もう plot.md に入っています）。",
+        message: "書き足すことはありません（もう plot.md に入っています）。",
       });
       return;
     }
@@ -3868,7 +4251,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         edit: {
           target,
           content: item.content,
-          label: describeChatEditButton(target, "問答で決めたこと"),
+          label: describeChatEditButton(target, note),
         },
         work: dialogue.work,
       });

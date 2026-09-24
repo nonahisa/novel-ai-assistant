@@ -8,11 +8,15 @@ import {
   parsePlotMarkdown,
 } from "../../../src/core/plotDoc";
 import {
+  PLOT_CONTINUE_OPTION,
   PLOT_END_OPTION,
+  PLOT_MORE_OPTION,
   PLOT_RETRY_OPTION,
   PLOT_SKIP_OPTION,
   PLOT_START_FROM_PLOT_OPTION,
+  PLOT_SUMMARY_OPTION,
   PLOT_WRITE_OPTION,
+  PLOT_WRITE_SUMMARY_OPTION,
 } from "../../../src/core/plotInterview";
 
 /**
@@ -96,6 +100,7 @@ function turn(fields: {
 function harness(answers: object[]) {
   const posted: Posted[] = [];
   const prompts: string[] = [];
+  const systems: string[] = [];
   const ai = {
     onDidChangeSelection: () => ({ dispose: () => undefined }),
     resolve: () => ({
@@ -103,8 +108,9 @@ function harness(answers: object[]) {
         id: "ollama",
         displayName: "Ollama",
         isPaid: false,
-        generate: async (params: { userPrompt: string }) => {
+        generate: async (params: { userPrompt: string; systemPrompt: string }) => {
           prompts.push(params.userPrompt);
+          systems.push(params.systemPrompt);
           const answer = answers[Math.min(prompts.length - 1, answers.length - 1)];
           return { text: JSON.stringify(answer) };
         },
@@ -138,6 +144,7 @@ function harness(answers: object[]) {
     panel,
     posted,
     prompts,
+    systems,
     reply: (text: string): Promise<void> => inner.ask(text),
     /** 画面へ出た問いの【名前】を、出た順に */
     topics: (): string[] =>
@@ -196,17 +203,42 @@ beforeEach(() => {
 });
 
 describe("対話式プロット作成（問答）", () => {
-  test("始めたときはAIを呼ばず、何をするのかを1回だけ言う", async () => {
+  test("始めたときはAIを呼ばず、型を選ぶ札を出す（説明は1行ずつ）", async () => {
     const h = harness([turn({ topic: "最強の理由", question: "業者はなぜ最強なのですか？" })]);
 
     await h.panel.startPlotInterview(WORK);
 
     expect(h.prompts).toHaveLength(0);
     const first = h.posted.find((message) => message.type === "chatter");
-    expect(first?.text).toContain("自由に書いてください");
+    expect(first?.text).toContain("始め方を選んでください");
     expect(first?.text).toContain(PLOT_WRITE_OPTION);
+    expect(first?.options).toEqual([
+      "着想から掘る",
+      "場面から広げる",
+      "結末から逆算する",
+      "型に当てはめる",
+      "項目を順に埋める",
+      PLOT_END_OPTION,
+    ]);
+
+    // 型を選んでも、まだAIは呼ばない。何を書けばよいかをコードが言う
+    await h.reply("着想から掘る");
+    expect(h.prompts).toHaveLength(0);
+    const seed = h.posted.filter((message) => message.type === "chatter").pop();
+    expect(seed?.text).toContain("自由に書いてください");
     // 雛形だけのプロットは「書いてあること」に数えない
-    expect(first?.options).not.toContain(PLOT_START_FROM_PLOT_OPTION);
+    expect(seed?.options).not.toContain(PLOT_START_FROM_PLOT_OPTION);
+  });
+
+  test("型を選ばずに書き始めたら、着想から掘る問答としてその文を着想にする", async () => {
+    const h = harness([turn({ topic: "最強の理由", question: "業者はなぜ最強なのですか？" })]);
+
+    await h.panel.startPlotInterview(WORK);
+    await h.reply(IDEA);
+
+    expect(h.prompts).toHaveLength(1);
+    expect(h.prompts[0]).toContain(`# 作者の着想\n${IDEA}`);
+    expect(h.systems[0]).toContain("尋ねる順は決まっていません");
   });
 
   test("書かなくても次の問いへ進む（選んだ答えがそのまま決まったことになる）", async () => {
@@ -223,13 +255,15 @@ describe("対話式プロット作成（問答）", () => {
     await h.panel.startPlotInterview(WORK);
     await h.reply(IDEA);
     expect(h.topics()).toEqual(["最強の理由"]);
-    // 候補 → 飛ばす → 書く → 終える
+    // 候補 → ほかの案 → 飛ばす → 書く → まとめる → 終える
     expect(h.lastOptions()).toEqual([
       "回線が魔力も運ぶから",
       "ダンジョンの地図を握っているから",
       "配信が止まると冒険者が死ぬから",
+      PLOT_MORE_OPTION,
       PLOT_SKIP_OPTION,
       PLOT_WRITE_OPTION,
+      PLOT_SUMMARY_OPTION,
       PLOT_END_OPTION,
     ]);
 
@@ -337,6 +371,7 @@ describe("対話式プロット作成（問答）", () => {
     ]);
 
     await h.panel.startPlotInterview(WORK);
+    await h.reply("着想から掘る");
     // プロットに書いてあるので、そこから始める札が出る
     expect(h.lastOptions()).toContain(PLOT_START_FROM_PLOT_OPTION);
     await h.reply(PLOT_START_FROM_PLOT_OPTION);
@@ -369,5 +404,306 @@ describe("対話式プロット作成（問答）", () => {
     const sent = h.prompts.slice(before);
     expect(sent.length).toBeGreaterThan(0);
     expect(sent.some((prompt) => prompt.includes("# すでに尋ねたこと"))).toBe(false);
+  });
+});
+
+/**
+ * 型（設計書6.4.7「問答は『型の一つ』」）。作者の指示（2026-09-25）
+ * 「これはプロット作成のパターンの一つ。これだけに固定しないで」。
+ * どの型でも「候補はAI・決めるのは作者」「書くのは押したときだけ」
+ * 「書かなくても次へ進む」「同じ問いを繰り返さない」は変わらない。
+ */
+describe("対話式プロット作成（型）", () => {
+  const SCENE = "中級エリアで配線が切れ、配信中の新人配信者が魔物に襲われる";
+  const ENDING = "最強の班長の正体は、ただの電気工事士だった";
+
+  function lastChatter(h: ReturnType<typeof harness>): Posted | undefined {
+    return h.posted.filter((message) => message.type === "chatter").pop();
+  }
+
+  test("場面から広げる：場面を起点に、外へ広げる指示で尋ねる。場面は「あらすじ」に残る", async () => {
+    const h = harness([
+      turn({ topic: "場面の直前", question: "配線が切れる直前、現場で何がありましたか？", section: "outline" }),
+    ]);
+
+    await h.panel.startPlotInterview(WORK);
+    await h.reply("場面から広げる");
+    expect(h.prompts).toHaveLength(0);
+    expect(lastChatter(h)?.text).toContain("書きたい場面を書いてください");
+    // 場面が無いと始まらないので、「プロットから始める」は出さない
+    expect(lastChatter(h)?.options).toEqual([PLOT_END_OPTION]);
+
+    await h.reply(SCENE);
+    expect(h.prompts[0]).toContain(`# 作者が書きたい場面\n${SCENE}`);
+    expect(h.systems[0]).toContain("場面の直前に何があったか");
+    expect(h.topics()).toEqual(["場面の直前"]);
+
+    await h.reply(PLOT_WRITE_OPTION);
+    expect(parsePlotMarkdown(readPlot()).sections.outline).toContain(`書きたい場面：${SCENE}`);
+  });
+
+  test("結末から逆算する：結末を変えない指示で、さかのぼって尋ねる", async () => {
+    const h = harness([
+      turn({ topic: "正体を隠す理由", question: "班長はなぜ正体を隠していたのですか？", section: "mainCharacters" }),
+    ]);
+
+    await h.panel.startPlotInterview(WORK);
+    await h.reply("結末から逆算する");
+    expect(lastChatter(h)?.text).toContain("決まっている終わり方を書いてください");
+    await h.reply(ENDING);
+
+    expect(h.prompts[0]).toContain(`# 作者が決めている結末\n${ENDING}`);
+    expect(h.systems[0]).toContain("結末を変える候補や、結末を疑う問いを出さないこと");
+    expect(h.topics()).toEqual(["正体を隠す理由"]);
+  });
+
+  test("型に当てはめる：枠を順に尋ね、名前と書く先はコードが持ち、尽きたらAIを呼ばずに締める", async () => {
+    // AIは枠と違う名前・書く先を返すが、コードが決めた枠で記録する。
+    // 問いの文は枠の名前だけ違う（似かたでは繰り返しに見える）
+    const h = harness([
+      turn({ topic: "導入", question: "起では、主人公にどんな出来事が起きますか？", section: "worldview" }),
+      turn({ topic: "展開", question: "承では、主人公にどんな出来事が起きますか？", section: "worldview" }),
+      turn({ topic: "転換", question: "転では、主人公にどんな出来事が起きますか？", section: "worldview" }),
+      turn({ topic: "決着", question: "結では、主人公にどんな出来事が起きますか？", section: "worldview" }),
+    ]);
+
+    await h.panel.startPlotInterview(WORK);
+    await h.reply("型に当てはめる");
+    expect(lastChatter(h)?.options).toEqual(["三幕構成", "起承転結", "ヒーローズジャーニー", "序破急", PLOT_END_OPTION]);
+    await h.reply("起承転結");
+    expect(lastChatter(h)?.text).toContain("起承転結（起 → 承 → 転 → 結）で進めます。");
+    expect(h.prompts).toHaveLength(0);
+
+    await h.reply(IDEA);
+    expect(h.prompts[0]).toContain("# 次に埋める枠（ここだけを尋ねる）\n【起】");
+    expect(h.systems[0]).toContain("「次に埋める枠」に書いてある枠1つだけ");
+    const firstTurn = h.posted.filter((message) => message.type === "answer").pop();
+    expect(firstTurn?.reply).toContain("［起承転結 1/4］");
+
+    await h.reply("新人が初現場で配線を敷く");
+    await h.reply("配線が魔力を運ぶと分かる");
+    await h.reply("班長が深層へ一人で潜る");
+    expect(h.topics()).toEqual(["起", "承", "転", "結"]);
+    expect(h.prompts[3]).toContain("【結】");
+
+    await h.reply("班長の正体が明かされる");
+    // 枠が尽きた：AIは呼ばず、締めの一言と「書く」「まとめる」「終える」だけ
+    expect(h.prompts).toHaveLength(4);
+    const done = h.posted.filter((message) => message.type === "answer").pop();
+    expect(done?.reply).toContain("起承転結の枠は、すべて尋ねました");
+    expect(done?.options).toEqual([PLOT_WRITE_OPTION, PLOT_SUMMARY_OPTION, PLOT_END_OPTION]);
+
+    await h.reply(PLOT_WRITE_OPTION);
+    const outline = parsePlotMarkdown(readPlot()).sections.outline;
+    expect(outline).toContain("- 型：起承転結");
+    expect(outline).toContain(`- 着想：${IDEA}`);
+    expect(outline).toContain("- 起：新人が初現場で配線を敷く");
+    expect(outline).toContain("- 結：班長の正体が明かされる");
+    // AIが言った書く先（世界観）へは書いていない
+    expect(parsePlotMarkdown(readPlot()).sections.worldview).toBe("");
+  });
+
+  test("型に当てはめる：型を札で選ばずに書いたら、選び直してもらう（着想と取り違えない）", async () => {
+    const h = harness([turn({ topic: "導入", question: "起では何が起きますか？" })]);
+
+    await h.panel.startPlotInterview(WORK);
+    await h.reply("型に当てはめる");
+    await h.reply("起承転結で");
+
+    expect(h.prompts).toHaveLength(0);
+    expect(lastChatter(h)?.text).toContain("型を下の札から選んでください");
+  });
+
+  test("型に当てはめる：問いを出せなかった枠は、飛ばすことも、自分で書いて答えにすることもできる", async () => {
+    const bad = turn({
+      topic: "導入",
+      question: "起では何が起きますか？",
+      candidates: ["主人公の立場を教えてほしい", "案1を元に考えてほしい", "（ここに出来事が入ります）"],
+    });
+    const h = harness([
+      bad,
+      bad,
+      turn({ topic: "展開", question: "承では何が深まりますか？" }),
+      bad,
+      bad,
+      turn({ topic: "決着", question: "結ではどう決着しますか？" }),
+    ]);
+
+    await h.panel.startPlotInterview(WORK);
+    await h.reply("型に当てはめる");
+    await h.reply("起承転結");
+    await h.reply(IDEA);
+
+    // 2度とも受け取れず止まった。どの枠かを言い、飛ばす札も出す
+    const stopped = h.posted[h.posted.length - 1];
+    expect(stopped.reply).toContain("【起】について思いついたことを書けば、その答えにします");
+    expect(stopped.options).toEqual([
+      PLOT_RETRY_OPTION,
+      PLOT_SKIP_OPTION,
+      PLOT_WRITE_OPTION,
+      PLOT_SUMMARY_OPTION,
+      PLOT_END_OPTION,
+    ]);
+
+    // 自分で書いたら、その枠の答えになる（補足にしない）
+    await h.reply("新人が初現場で配線を敷く");
+    expect(h.prompts[2]).toContain("- 【起】新人が初現場で配線を敷く");
+    expect(h.prompts[2]).toContain("# 次に埋める枠（ここだけを尋ねる）\n【承】");
+    // （止まったときの一言にも【起】が出るので、最後の問いだけを見る）
+    expect(h.topics().pop()).toBe("承");
+
+    // 承の問いは飛ばし、転で止まったら、その枠も飛ばせる
+    await h.reply(PLOT_SKIP_OPTION);
+    expect(h.prompts[3]).toContain("【転】");
+    await h.reply(PLOT_SKIP_OPTION);
+    expect(h.prompts[5]).toContain("- 転：大きな転換・意外な展開（作者は飛ばした）");
+    expect(h.prompts[5]).toContain("# 次に埋める枠（ここだけを尋ねる）\n【結】");
+  });
+
+  test("項目を順に埋める：決まった順に、作者が書いた項目を飛ばして尋ね、書く先はその項目", async () => {
+    const sections = emptyPlotSections();
+    sections.logline = "作者が書いたログライン";
+    disk.set(PLOT_PATH, new TextEncoder().encode(buildPlotMarkdown(WORK.title, sections)));
+    const h = harness([
+      turn({ topic: "テーマの話", question: "読み終えた人に何を残したいですか？", section: "worldview" }),
+      turn({ topic: "世界の話", question: "この世界は現実と何が違いますか？", section: "outline" }),
+    ]);
+
+    await h.panel.startPlotInterview(WORK);
+    await h.reply("項目を順に埋める");
+    // プロットに書いてあるので、そこから始める札も出る
+    expect(lastChatter(h)?.options).toContain(PLOT_START_FROM_PLOT_OPTION);
+    await h.reply(IDEA);
+
+    // ログラインは作者が書いているので尋ねない
+    expect(h.prompts[0]).toContain("# 次に埋める項目（ここだけを尋ねる）\n【テーマ】");
+    expect(h.topics()).toEqual(["テーマ"]);
+    await h.reply("裏方の誇り");
+    expect(h.prompts[1]).toContain("【世界観】");
+    await h.reply(PLOT_WRITE_OPTION);
+
+    const written = parsePlotMarkdown(readPlot()).sections;
+    expect(written.theme).toBe("裏方の誇り");
+    expect(written.logline).toBe("作者が書いたログライン");
+  });
+});
+
+describe("対話式プロット作成（ほかの案・確かめ直し・まとめ）", () => {
+  test("ほかの案：同じ問いのまま、見せた案と違う案を出す。何も記録しない", async () => {
+    const h = harness([
+      turn({
+        topic: "最強の理由",
+        question: "業者はなぜ最強なのですか？",
+        candidates: ["回線が魔力も運ぶから", "地図を握っているから", "配信が命綱だから"],
+      }),
+      turn({
+        topic: "最強の理由",
+        question: "言い換えた問い？",
+        candidates: [
+          "回線が魔力も運ぶから",
+          "魔物と契約しているから",
+          "国が後ろ盾だから",
+          "線が結界になるから",
+          "班長が元勇者だから",
+        ],
+      }),
+      turn({ topic: "主人公", question: "主人公は誰ですか？", section: "mainCharacters" }),
+    ]);
+
+    await h.panel.startPlotInterview(WORK);
+    await h.reply(IDEA);
+    await h.reply(PLOT_MORE_OPTION);
+
+    expect(h.prompts[1]).toContain("ほかの案を求めています");
+    expect(h.prompts[1]).toContain("- 回線が魔力も運ぶから");
+    const more = h.posted.filter((message) => message.type === "answer").pop();
+    expect(more?.reply).toContain("【最強の理由】のほかの案です。");
+    // もう見せた案は落ち、普段（4つ）より多く出せる
+    expect(h.lastOptions().slice(0, 4)).toEqual([
+      "魔物と契約しているから",
+      "国が後ろ盾だから",
+      "線が結界になるから",
+      "班長が元勇者だから",
+    ]);
+
+    await h.reply("国が後ろ盾だから");
+    expect(h.prompts[2]).toContain("- 【最強の理由】国が後ろ盾だから");
+    // 尋ねたことは1回だけ（ほかの案は同じ問い）
+    expect(h.prompts[2].match(/- 最強の理由：/gu)).toHaveLength(1);
+  });
+
+  test("確かめ直し：切れた答えは決まったことにせず、選び直した答えで記録する。2度目は許さない", async () => {
+    const h = harness([
+      turn({ topic: "最強の理由", question: "業者はなぜ最強なのですか？" }),
+      {
+        ...turn({
+          topic: "別の名前",
+          question: "「回線が」の続きは、どちらですか？",
+          candidates: ["回線が魔力も運ぶ", "回線が地図になる", "回線が結界になる"],
+        }),
+        mode: "clarify",
+      },
+      turn({ topic: "主人公", question: "主人公は誰ですか？" }),
+    ]);
+
+    await h.panel.startPlotInterview(WORK);
+    await h.reply(IDEA);
+    await h.reply("回線が");
+
+    // 直前の答えを受けた回は確かめ直してよい
+    expect(h.prompts[1]).not.toContain("この回は確かめ直しをしないこと");
+    // 確かめ直しは、もとの問いの名前で出る
+    expect(h.topics()).toEqual(["最強の理由", "最強の理由"]);
+
+    await h.reply("回線が魔力も運ぶ");
+    // 確かめ直しへの答えには、もう確かめ直しを許さない
+    expect(h.prompts[2]).toContain("この回は確かめ直しをしないこと");
+    expect(h.prompts[2]).toContain("- 【最強の理由】回線が魔力も運ぶ");
+    expect(h.prompts[2]).not.toMatch(/- 【最強の理由】回線が\n/u);
+  });
+
+  test("まとめ：項目へまとめ、抜けた決まったことはコードが戻し、押したときだけ書く", async () => {
+    const h = harness([
+      turn({ topic: "最強の理由", question: "業者はなぜ最強なのですか？", section: "worldview" }),
+      turn({ topic: "主人公", question: "主人公は誰ですか？", section: "mainCharacters" }),
+      {
+        logline: "〔補い〕回線業者の新人が、最強の班長と現場を回る話",
+        theme: "",
+        motif: "",
+        worldview: "回線が魔力も運ぶ世界",
+        setting: "",
+        narrativePerson: "",
+        protagonistMotive: "",
+        outline: "- 新人が現場に入る",
+        mainCharacters: "",
+      },
+    ]);
+
+    await h.panel.startPlotInterview(WORK);
+    await h.reply(IDEA);
+    await h.reply("回線が魔力も運ぶから");
+    await h.reply(PLOT_SUMMARY_OPTION);
+
+    expect(h.systems[2]).toContain("まとめる係");
+    expect(h.prompts[2]).toContain("- 【最強の理由】回線が魔力も運ぶから（書く先の目安：worldview）");
+    const summary = h.posted.filter((message) => message.type === "answer").pop();
+    expect(summary?.reply).toContain("〔補い〕はAIがつなぐために補った所");
+    expect(summary?.reply).toContain("【ログライン】");
+    // 着想はまとめから抜けていた。作者の言葉のまま戻す
+    expect(summary?.reply).toContain("あなたの言葉のまま戻しました：着想");
+    expect(summary?.options).toEqual([PLOT_WRITE_SUMMARY_OPTION, PLOT_CONTINUE_OPTION, PLOT_END_OPTION]);
+    // まだ書いていない
+    expect(parsePlotMarkdown(readPlot()).sections.logline).toBe("");
+
+    await h.reply(PLOT_WRITE_SUMMARY_OPTION);
+    const written = parsePlotMarkdown(readPlot()).sections;
+    expect(written.logline).toBe("〔補い〕回線業者の新人が、最強の班長と現場を回る話");
+    expect(written.worldview).toBe("回線が魔力も運ぶ世界");
+    expect(written.outline).toContain(`- 着想：${IDEA}`);
+
+    // 書いたあとも、いまの問いへ戻れる
+    await h.reply(PLOT_CONTINUE_OPTION);
+    expect(h.lastOptions()[0]).toBe("主人公の答えその一");
+    expect(h.prompts).toHaveLength(3);
   });
 });
