@@ -395,3 +395,46 @@ export function collectedLabelIndex(
     },
   };
 }
+
+/**
+ * AIに示す出典名。
+ *
+ * 「第12話 再会」のように話数とサブタイトルを出す。
+ * 話数が判定できないファイルはファイル名で示す。
+ *
+ * **置き場所をここへ移した**（0.85.1）。元は `manuscriptSources.ts` に
+ * あったが、あちらは走査（`vscode` を引く）を import しているので、
+ * MCP の相談（`mcp/tools/chat.ts`）が聞き直しの候補を同じ名前で組めなかった。
+ * `manuscriptSources.ts` は再輸出で受ける。
+ */
+export function episodeLabel(
+  episode: Pick<
+    EpisodeFile,
+    "fileName" | "metaTitle" | "subtitle" | "kind" | "chapterStart" | "chapterEnd"
+  >
+): string {
+  const title = episode.metaTitle ?? episode.subtitle;
+  const chapter = chapterPart(episode);
+  if (chapter && title) return `${chapter} ${title}`;
+  if (chapter) return chapter;
+  if (title) return `${episode.fileName}（${title}）`;
+  return episode.fileName;
+}
+
+function chapterPart(
+  episode: Pick<EpisodeFile, "kind" | "chapterStart" | "chapterEnd">
+): string {
+  if (episode.kind !== "本編" && episode.kind !== "不明") {
+    return episode.chapterStart !== null
+      ? `${episode.kind}${episode.chapterStart}`
+      : episode.kind;
+  }
+  if (episode.chapterStart === null) return "";
+  if (
+    episode.chapterEnd !== null &&
+    episode.chapterEnd !== episode.chapterStart
+  ) {
+    return `第${episode.chapterStart}〜${episode.chapterEnd}話`;
+  }
+  return `第${episode.chapterStart}話`;
+}

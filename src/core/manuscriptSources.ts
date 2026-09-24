@@ -6,6 +6,9 @@ import { parseEpisodeMetadata } from "./metadataParser";
 import { parseCollectedFile, type CollectedEpisode } from "./collectedFile";
 import { blankMemoLines } from "./sceneMemo";
 import type { ExcerptSource } from "./mentionExcerpts";
+// 出典名の付け方は `episodeLabel.ts` が持つ（0.85.1。MCP の束からも使うため）
+import { episodeLabel } from "./episodeLabel";
+export { episodeLabel } from "./episodeLabel";
 
 /**
  * 本文を「出典ラベル付きのテキスト」として読み込む。
@@ -62,21 +65,6 @@ export async function loadExcerptSources(
 }
 
 /**
- * AIに示す出典名。
- *
- * 「第12話 再会」のように話数とサブタイトルを出す。
- * 話数が判定できないファイルはファイル名で示す。
- */
-export function episodeLabel(episode: EpisodeFile): string {
-  const title = episode.metaTitle ?? episode.subtitle;
-  const chapter = chapterPart(episode);
-  if (chapter && title) return `${chapter} ${title}`;
-  if (chapter) return chapter;
-  if (title) return `${episode.fileName}（${title}）`;
-  return episode.fileName;
-}
-
-/**
  * 合本の中の1話の出典名。
  *
  * 話数が読み取れなければファイル内の並び順で示す。
@@ -96,28 +84,12 @@ export function collectedEpisodeLabel(
  *
  * **本編（と、種別を読めなかったもの）だけを数える。** プロローグ・
  * 幕間・エピローグは `chapterStart` に番号が入っていても「第N話」では
- * ないので（`chapterPart` が「プロローグ1」と書き分けている）、
- * 話数として扱うと本編の第1話と前後を比べてしまう。
+ * ないので（`episodeLabel.ts` の `chapterPart` が「プロローグ1」と
+ * 書き分けている）、話数として扱うと本編の第1話と前後を比べてしまう。
  *
  * 範囲を持つ話は**終わりの話数**を返す（`ExcerptSource.chapter` の注釈）。
  */
 function episodeChapter(episode: EpisodeFile): number | null {
   if (episode.kind !== "本編" && episode.kind !== "不明") return null;
   return episode.chapterEnd ?? episode.chapterStart;
-}
-
-function chapterPart(episode: EpisodeFile): string {
-  if (episode.kind !== "本編" && episode.kind !== "不明") {
-    return episode.chapterStart !== null
-      ? `${episode.kind}${episode.chapterStart}`
-      : episode.kind;
-  }
-  if (episode.chapterStart === null) return "";
-  if (
-    episode.chapterEnd !== null &&
-    episode.chapterEnd !== episode.chapterStart
-  ) {
-    return `第${episode.chapterStart}〜${episode.chapterEnd}話`;
-  }
-  return `第${episode.chapterStart}話`;
 }

@@ -41,6 +41,11 @@ import {
 } from "./tools/ollama";
 import { SETTINGS_PROPOSE_INPUT, novelPropose } from "./tools/propose";
 import {
+  PENDING_LIST_INPUT,
+  pendingList,
+  type PendingListInput,
+} from "./tools/pendingList";
+import {
   NOVEL_NOTICE_INPUT,
   novelNotice,
   type NoticeInput,
@@ -80,9 +85,9 @@ import {
  * そちらを直に呼ぶ（`test/unit/mcp/mcpTools.test.ts`）。混ぜると、
  * ツールの中身を確かめるのに stdio を立てなければならなくなる。
  *
- * **道具は17本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
+ * **道具は18本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
  * 0.75.x で `windows.list`、0.82.1 で `setup.request`、0.83.x で `schedule.milestones`、
- * 0.85.0 で `notices.recent` と `works.list` を足した。0.66.7 の時点では10本）。
+ * 0.85.0 で `notices.recent` と `works.list`、0.85.1 で `pending.list` を足した。0.66.7 の時点では10本）。
  * ほかに**プロンプトが1つ**（`setup`。Claude Code では `/` から選べる。6.87.18）。
  * 56本あったものを
  * `feature` を引数に取る形へ束ねた——**AI は繋いだ瞬間にこの一覧を読む**ので、
@@ -418,6 +423,21 @@ server.registerTool(
     inputSchema: SETTINGS_PROPOSE_INPUT,
   },
   tool("novel.propose", novelPropose)
+);
+
+server.registerTool(
+  "pending.list",
+  {
+    title: "承認待ちの更新案を読む",
+    description:
+      "作者の承認を待っている設定資料の更新案（人物・能力・組織・場所・世界観）を、" +
+      "**提案パネルと同じ組み立てで**1件ずつ返します（種類・名前・出どころ・理由・" +
+      "変わる欄の前と後・古い案か・読めない案か）。" +
+      "status が pending のものがパネルに並び、stale は「設定資料更新分反映」で片付けられる古い案です。" +
+      "**読むだけで、承認も見送りも片付けもしません。** kind・source で絞り、limit で件数を決めます。",
+    inputSchema: PENDING_LIST_INPUT,
+  },
+  tool("pending.list", (args: PendingListInput) => pendingList(args))
 );
 
 server.registerTool(

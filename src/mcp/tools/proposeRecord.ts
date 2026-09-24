@@ -115,14 +115,16 @@ export interface RecordProposeResult {
   note: string;
 }
 
-const PARSERS: Record<PendingSettingsKind, (raw: unknown) => PendingSettingsRecord> = {
+/** 種類ごとの読み方。`pending.list` も同じ表で台帳を読む（写しを作らない） */
+export const PARSERS: Record<PendingSettingsKind, (raw: unknown) => PendingSettingsRecord> = {
   ability: parseAbility,
   organization: parseOrganization,
   location: parseLocation,
   world: parseWorldItem,
 };
 
-const SUBDIRS: Record<PendingSettingsKind, string> = {
+/** 種類ごとの台帳の置き場（`設定/` の下）。`pending.list` も同じ表を使う */
+export const SUBDIRS: Record<PendingSettingsKind, string> = {
   ability: SETTINGS_SUBDIRS.abilities,
   organization: SETTINGS_SUBDIRS.organizations,
   location: SETTINGS_SUBDIRS.locations,

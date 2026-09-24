@@ -6,11 +6,17 @@ import type { PendingUpdateSource } from "./pendingUpdateFormat";
 import {
   PENDING_SETTINGS_DIR,
   buildPendingSettingsPayload,
-  parsePendingSettingsPayload,
   pendingSettingsFileName,
   type PendingSettingsKind,
   type PendingSettingsRecord,
 } from "./pendingSettingsMerge";
+// **1件の読み方と並べ方は `pendingReview.ts` が持つ**（0.85.1。MCP の
+// `pending.list` も同じものを通る）
+import {
+  comparePendingSettingsUpdates,
+  readPendingSettingsFile,
+  type PendingSettingsUpdate,
+} from "./pendingReview";
 
 /**
  * 人物以外（能力・組織・場所・世界観）の承認待ちの置き場
@@ -28,15 +34,8 @@ import {
  * 「人物以外の承認待ちも」の節）。
  */
 
-export interface PendingSettingsUpdate {
-  recordKind: PendingSettingsKind;
-  /** 更新案。既存レコードと同じID */
-  record: PendingSettingsRecord;
-  /** 保留ファイルのパス。反映後に片付ける */
-  filePath: string;
-  source?: PendingUpdateSource;
-  reason?: string;
-}
+/** 1件の形。定義は `pendingReview.ts`（`vscode` を持たない側） */
+export type { PendingSettingsUpdate } from "./pendingReview";
 
 export class PendingSettingsUpdateStore {
   constructor(private readonly work: WorkEntry) {}
@@ -94,10 +93,12 @@ export class PendingSettingsUpdateStore {
       const filePath = path.join(this.directory, name);
       try {
         const bytes = await vscode.workspace.fs.readFile(path.toUri(filePath));
-        const payload = parsePendingSettingsPayload(
-          JSON.parse(new TextDecoder().decode(bytes))
+        updates.push(
+          readPendingSettingsFile(
+            JSON.parse(new TextDecoder().decode(bytes)),
+            filePath
+          )
         );
-        updates.push({ ...payload, filePath });
       } catch (error) {
         errors.push({
           file: name,
@@ -106,7 +107,7 @@ export class PendingSettingsUpdateStore {
       }
     }
 
-    updates.sort((a, b) => a.record.id.localeCompare(b.record.id));
+    updates.sort(comparePendingSettingsUpdates);
     return { updates, errors };
   }
 

@@ -227,10 +227,16 @@ const OPTIONS_TABLE =
   "notation: group※（novel.detect が返した組の1件）・limit（detect の上限）。" +
   "synopsis: needsSubtitle。" +
   "episodePlot: plotPath※（単話プロットの相対パス）・chapterLabel。" +
-  "chat: question※・history・adviceAnswers・writerStyle・featureIndex。" +
-  // 相談は往復しない（製品の needFiles の聞き直しが無い）。本文を渡さないと、
-  // 講評を頼んでも「本文を見せてください」で終わる（2026-09-24、実データの測定）
-  "講評など本文が要る問いは filePath でその話を渡してください。" +
+  "chat: question※・history・adviceAnswers・writerStyle・featureIndex・" +
+  "overview（true で作品の全体像＝話の一覧と各話の場所・紹介文・プロットを添える。製品と同じ材料）。" +
+  /*
+    ollama／sampling は、AIが求めたファイル（needFiles）を読んで1回だけ聞き直す
+    （0.85.1。製品と同じ）。claude の道はプロンプトを返すだけなので往復しない
+    ——本文を渡さないと、講評を頼んでも「本文を見せてください」で終わる
+    （2026-09-24、実データの測定）
+  */
+  "ollama／sampling は求められたファイルを読んで1回だけ聞き直します（followUp）。" +
+  "claude では往復しないので、講評など本文が要る問いは filePath でその話を渡してください。" +
   "name: characterName※（いまの名前）・origin。" +
   "chapter: nameOnly。" +
   "catchphrase: blurb・rejected。";
@@ -775,6 +781,7 @@ function chatArgs(input: FeatureCallInput): {
   adviceAnswers?: number[];
   writerStyle?: Record<string, unknown>;
   featureIndex?: boolean;
+  overview?: boolean;
 } {
   return {
     folder: input.folder,
@@ -785,6 +792,7 @@ function chatArgs(input: FeatureCallInput): {
     adviceAnswers: option(input, "adviceAnswers", CHAT_ADVICE_ANSWERS_SCHEMA),
     writerStyle: option(input, "writerStyle", CHAT_WRITER_STYLE_SCHEMA),
     featureIndex: option(input, "featureIndex", z.boolean()),
+    overview: option(input, "overview", z.boolean()),
   };
 }
 

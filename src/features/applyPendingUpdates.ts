@@ -1,11 +1,6 @@
 import * as vscode from "vscode";
 import { WorkEntry } from "../models/types";
-import {
-  emptyCharacter,
-  nextCharacterId,
-  type Character,
-} from "../models/character";
-import { findCharactersByAppellation } from "../core/plotCharacterSync";
+import { nextCharacterId, type Character } from "../models/character";
 import { CharacterStore, CharacterStoreError } from "../core/characterStore";
 import {
   PendingUpdateStore,
@@ -13,31 +8,37 @@ import {
   type PendingUpdate,
 } from "../core/pendingUpdates";
 import {
-  diffCharacter,
   diffLinesForPanel,
   formatDiff,
-  summarizeDiff,
   type CharacterDiff,
 } from "../core/characterDiff";
 import { diffChars } from "../core/inlineDiff";
 import { dropDiffEntries } from "../core/dropDiffEntries";
-import {
-  recordRemovedRelations,
-  settlePendingRelations,
-} from "../core/rejectedRelations";
+import { recordRemovedRelations } from "../core/rejectedRelations";
 import { CustomFieldStore } from "../core/customFieldStore";
-import { fieldsFor } from "../models/customField";
 import {
   PendingSettingsUpdateStore,
   type PendingSettingsUpdate,
 } from "../core/pendingSettingsUpdates";
 import {
   PENDING_KIND_SHORT_LABELS,
-  diffSettingsRecord,
-  mergePendingSettingsRecord,
   type PendingSettingsKind,
   type PendingSettingsRecord,
 } from "../core/pendingSettingsMerge";
+/*
+  **組み立て（どれを見せ、どれを古い案として片付けるか）と一行の説明は
+  `core/pendingReview.ts` が持つ**（0.85.1）。MCP の `pending.list` が
+  同じ関数を通るので、画面と外から読めるものがずれない。ここに残るのは
+  ファイルの読み書きと、画面・確認の出し方だけ。
+*/
+import {
+  assembleCharacterReview,
+  assembleSettingsReview,
+  describeCharacterReviewItem,
+  describeSettingsReviewItem,
+  type CharacterReviewItem,
+  type SettingsReviewItem,
+} from "../core/pendingReview";
 import {
   createAbilityStore,
   createLocationStore,
@@ -63,29 +64,13 @@ import type { ProposalPanel, RecordUpdateViewItem } from "./proposalPanel";
  * 中身を見たうえで「すべて反映」できるようにする。
  */
 
-interface ReviewItem {
-  update: PendingUpdate;
-  /** 更新前のレコード。**新規案には無い**（まだ台帳に居ない） */
-  current: Character | undefined;
-  diff: CharacterDiff;
-  /**
-   * 積んだあとに作者が退けた関係に当たったため、更新案から外した関係
-   * （作者の裁定、2026-09-23）。**黙って外さない**——承認の説明に件数を出す
-   */
-  skippedRejected: Array<{ name: string; relation: string }>;
-}
+type ReviewItem = CharacterReviewItem;
 
 /** その案が「新しく作る」ものか（設計書6.4.9） */
 function isCreation(item: ReviewItem): boolean {
   return item.update.kind === "creation";
 }
 
-/**
- * 何が変わるかの要約に、出どころを添える（設計書6.4.9）。
- *
- * **AIが本文から読んだものと、作者がプロットへ書いたものは別物である。**
- * 同じ「紹介を変更」でも、承認するときの見方が変わる。
- */
 /** 確認文に名前を並べる上限。多いと読まずに押される */
 const CONFIRM_PREVIEW_LIMIT = 5;
 
@@ -114,33 +99,14 @@ export function describePendingUpdatesConfirm(
   );
 }
 
-function describeChange(item: ReviewItem): string {
-  const label = pendingSourceLabel(item.update.source);
-  const summary = isCreation(item) ? "新規の人物" : summarizeDiff(item.diff);
-  /*
-    **理由があれば、出どころの隣に出す**（設計書6.87.16）。外部AIの案は
-    本文の根拠（`evidence`）を持たないことがあるので、**なぜそう提案したか
-    だけが作者の判断材料**になる。確認文は1行なので、ここは短く切る
-    （長い理由は差分の文書側に全部出る）。
-  */
-  const base = label ? `${label}：${summary}` : summary;
-  const reason = item.update.reason?.trim();
-  const withReason = reason ? `${base}（理由：${clampReason(reason)}）` : base;
-  // 退けた関係を外したことを黙らない（`settlePendingRelations`）
-  return item.skippedRejected.length > 0
-    ? `${withReason}（作者が退けた関係 ${item.skippedRejected.length}件は入れません）`
-    : withReason;
-}
-
-/** 確認文へ入れる理由の長さ。長いと一覧が読めなくなる */
-const REASON_PREVIEW_MAX = 40;
-
-function clampReason(reason: string): string {
-  const oneLine = reason.replace(/\s+/g, " ").trim();
-  return oneLine.length > REASON_PREVIEW_MAX
-    ? `${oneLine.slice(0, REASON_PREVIEW_MAX)}…`
-    : oneLine;
-}
+/**
+ * 何が変わるかの要約に、出どころを添える（設計書6.4.9）。
+ *
+ * **AIが本文から読んだものと、作者がプロットへ書いたものは別物である。**
+ * 同じ「紹介を変更」でも、承認するときの見方が変わる。文の組み立ては
+ * `core/pendingReview.ts`（MCP の `pending.list` も同じ文を返す）。
+ */
+const describeChange = describeCharacterReviewItem;
 
 /**
  * 承認された1件を台帳へ入れる。
@@ -240,64 +206,15 @@ export async function reviewPendingCharacterUpdates(
   // 気付かないうちに書き換わることになる
   const customFields = await new CustomFieldStore(work).loadFields();
 
-  const byId = new Map(loaded.characters.map((c) => [c.id, c]));
   review.known = [...loaded.characters];
-
-  for (const update of pending.updates) {
-    // **新規案は、居ないことの判定より先に分ける**（設計書6.4.9）。
-    // 台帳に居ないのが当たり前なので、更新案の規則（居なければ片付ける）を
-    // そのまま当てると、確認される前に必ず消える
-    if (update.kind === "creation") {
-      // 積んだあとに同じ名前の人物が資料へ増えていたら、作らない。
-      // 二重に作ると、次の抽出で「同じかもしれません」と言われ続ける
-      if (
-        findCharactersByAppellation(loaded.characters, update.character.name)
-          .length > 0
-      ) {
-        review.stale.push(update);
-        continue;
-      }
-      review.items.push({
-        update,
-        current: undefined,
-        skippedRejected: [],
-        // 何が入るのかを、更新案と同じ並びで見せる。
-        // 比べる相手は空のレコード（すべてが「追加」になる）
-        diff: diffCharacter(
-          emptyCharacter(update.character.id, ""),
-          update.character,
-          customFields
-        ),
-      });
-      continue;
-    }
-
-    const current = byId.get(update.character.id);
-    if (!current) {
-      // 対象が消えている（まとめた・削除した）。反映しても復活させるだけ
-      review.stale.push(update);
-      continue;
-    }
-    // 更新案は積んだ時点の写し。**積んだあとに作者が退けた関係**を外し、
-    // 退けた記録そのものは台帳の側に合わせる（作者の裁定、2026-09-23）。
-    // 外さないと、写しの中で「足される関係」に見え、承認すると戻ってしまう
-    const settled = settlePendingRelations(
-      current,
-      update.character,
-      loaded.characters
-    );
-    const diff = diffCharacter(current, settled.character, customFields);
-    if (diff.changes.length === 0) {
-      review.stale.push(update);
-      continue;
-    }
-    review.items.push({
-      update: { ...update, character: settled.character },
-      current,
-      diff,
-      skippedRejected: settled.skipped,
-    });
-  }
+  // **分け方は core に1つだけ**（MCP の `pending.list` と同じものを通す）
+  const assembled = assembleCharacterReview(
+    pending.updates,
+    loaded.characters,
+    customFields
+  );
+  review.items = assembled.items;
+  review.stale = assembled.stale;
 
   return review;
 }
@@ -334,20 +251,6 @@ export function recordUpdateViewItems(
     ...(item.update.source ? { origin: item.update.source } : {}),
     status: "pending" as const,
   }));
-}
-
-/**
- * 人物以外（能力・組織・場所・世界観）の更新案の1件（作者の裁定、2026-09-23 問11 B）。
- *
- * `merged` は**いまの台帳のレコードへ、コードで取り込んだ結果**である
- * （`mergePendingSettingsRecord`）。更新案をそのまま保存すると、積んでから
- * 承認までに作者が書いたものを古い写しで巻き戻すため。
- */
-interface SettingsReviewItem {
-  update: PendingSettingsUpdate;
-  current: PendingSettingsRecord;
-  merged: PendingSettingsRecord;
-  diff: CharacterDiff;
 }
 
 /** 種類ごとの台帳の読み書き。`SettingsStore<T>` の型の違いをここで吸収する */
@@ -442,62 +345,31 @@ export async function reviewPendingSettingsUpdates(
   const customFields = await new CustomFieldStore(work).loadOrEmpty();
 
   const kinds = [...new Set(pending.updates.map((update) => update.recordKind))];
-  const byKind = new Map<PendingSettingsKind, Map<string, PendingSettingsRecord>>();
+  const byKind = new Map<PendingSettingsKind, PendingSettingsRecord[]>();
   for (const kind of kinds) {
     const ledger = openLedger(work, kind);
     const loaded = await ledger.loadAll();
     if (loaded.errors.length > 0) {
+      // 台帳が読めなかった種類は `byKind` に入れない＝組み立てず片付けもしない
       review.ledgerErrors.push(
         ...loaded.errors.map((error) => ({ kind, ...error }))
       );
       continue;
     }
     review.ledgers[kind] = ledger;
-    byKind.set(kind, new Map(loaded.records.map((record) => [record.id, record])));
+    byKind.set(kind, loaded.records);
   }
 
-  for (const update of pending.updates) {
-    const records = byKind.get(update.recordKind);
-    // 台帳が読めなかった種類は、組み立てず片付けもしない（上の ledgerErrors を参照）
-    if (!records) continue;
-    const current = records.get(update.record.id);
-    if (!current) {
-      // 対象が消えている（取り下げた・まとめた）。反映しても復活させるだけ
-      review.stale.push(update);
-      continue;
-    }
-    // 出どころを渡す——作者が確定させた記録へ白名簿の欄を入れてよいのは
-    // 外部AIの案だけ（作者の裁定、2026-09-24。`mergePendingSettingsRecord`）
-    const merged = mergePendingSettingsRecord(
-      update.recordKind,
-      current,
-      update.record,
-      { source: update.source }
-    );
-    const diff = diffSettingsRecord(
-      update.recordKind,
-      current,
-      merged,
-      fieldsFor(customFields, update.recordKind)
-    );
-    if (diff.changes.length === 0) {
-      review.stale.push(update);
-      continue;
-    }
-    review.items.push({ update, current, merged, diff });
-  }
+  // **分け方は core に1つだけ**（MCP の `pending.list` と同じものを通す）
+  const assembled = assembleSettingsReview(pending.updates, byKind, customFields);
+  review.items = assembled.items;
+  review.stale = assembled.stale;
 
   return review;
 }
 
-/** 人物以外の案の出どころの一行。種類を先に出す（人物と取り違えないため） */
-function describeSettingsChange(item: SettingsReviewItem): string {
-  const kind = PENDING_KIND_SHORT_LABELS[item.update.recordKind];
-  const label = pendingSourceLabel(item.update.source);
-  const base = `${label ? `${kind}・${label}` : kind}：${summarizeDiff(item.diff)}`;
-  const reason = item.update.reason?.trim();
-  return reason ? `${base}（理由：${clampReason(reason)}）` : base;
-}
+/** 人物以外の案の出どころの一行。種類を先に出す（組み立ては core） */
+const describeSettingsChange = describeSettingsReviewItem;
 
 /** 提案パネルへ出す形（人物の `recordUpdateViewItems` と同じ組み立て） */
 export function settingsUpdateViewItems(

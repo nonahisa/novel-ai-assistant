@@ -42,7 +42,7 @@
 
 ## 道具の早見表
 
-**道具は17本で、何をするかは `feature` の引数で決まる**（0.66.7）。ほとんどの用は `novel.run` に `feature` を渡せば足りる。
+**道具は18本で、何をするかは `feature` の引数で決まる**（0.66.7）。ほとんどの用は `novel.run` に `feature` を渡せば足りる。
 
 | したいこと | 道具 |
 |---|---|
@@ -53,8 +53,10 @@
 | 名前の衝突／候補 | `novel.detect`（`feature: name`）／`novel.run`（`feature: name`） |
 | 矛盾の材料だけを見る | `novel.material`（`feature: contradiction`） |
 | 相談／冒頭診断／プロット逆算／章立て／紹介文／キャッチコピー | `novel.run`（`feature: chat`／`opening`／`plotReverse`／`chapter`／`blurb`／`catchphrase`） |
+| 相談で、AIが求めたファイルを読んで聞き直す | `novel.run`（`feature: chat`、`runner: ollama`／`sampling`）。**製品と同じく1回だけ**聞き直し、何を求められ・読み・見つからなかったかを `followUp` で返す。`options.overview: true` で作品の全体像も添える（0.85.1） |
 | プロンプトだけ・検算だけ | `novel.prompt`／`novel.validate`（同じ `feature` で） |
 | 設定資料の更新案を置く（人物。能力・組織・場所・世界観は `recordKind` を渡す） | `novel.propose` |
+| 作者の承認を待っている更新案（提案パネルに並ぶもの）を読む | `pending.list`（**読むだけ**。提案パネルと同じ組み立てで、種類・名前・出どころ・理由・変わる欄の前と後を返す。`status` が `stale` のものは画面に並ばない古い案。`kind`・`source`・`limit` で絞る。0.85.1） |
 | **実行前に画面へ出る断りを、走らせずに読む** | `novel.notice`（`feature` とモデルを渡す。**AIは呼ばず、本文も読まない**。0.72.0） |
 | **押す場所を作者の画面で光らせる** | `guide.spotlight`（`command` か `label`。**2回点滅するだけで、操作は実行しない**。0.75.6） |
 | 手元の Ollama のモデルを知る | `ollama.models` |

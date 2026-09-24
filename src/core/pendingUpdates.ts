@@ -1,20 +1,24 @@
 import * as vscode from "vscode";
 import * as path from "./paths";
 import { AIWRITER_DIR, WorkEntry } from "../models/types";
-import { parseCharacter, type Character } from "../models/character";
+import type { Character } from "../models/character";
 import { atomicWriteFile } from "./atomicWrite";
 import {
   PENDING_DIR,
   buildPendingPayload,
   pendingFileName,
   // `pendingSourceLabel` はこの中では使わないので、下の再輸出だけで渡す
-  readKind,
-  readReason,
   readSource,
-  unwrapPendingCharacter,
   type PendingUpdateKind,
   type PendingUpdateSource,
 } from "./pendingUpdateFormat";
+// **1件の読み方と並べ方は `pendingReview.ts` が持つ**（0.85.1）。MCP の
+// `pending.list` も同じものを通るので、ここに写しを置かない
+import {
+  comparePendingCharacterUpdates,
+  readPendingCharacterFile,
+  type PendingUpdate,
+} from "./pendingReview";
 
 /**
  * 抽出で作られた「既存人物の更新案」の置き場。
@@ -56,24 +60,8 @@ export type {
   PendingPayload,
 } from "./pendingUpdateFormat";
 
-export interface PendingUpdate {
-  /** 更新案。既存レコードと同じID（新規案では仮のID） */
-  character: Character;
-  /** 保留ファイルのパス。反映後に片付ける */
-  filePath: string;
-  /** どこから来た提案か。古いファイルには無い（＝抽出） */
-  source?: PendingUpdateSource;
-  /** 何の案か。古いファイルには無い（＝既存レコードの更新） */
-  kind?: PendingUpdateKind;
-  /**
-   * なぜそう提案するか（設計書6.87.16）。
-   *
-   * いまのところ外部AIの案だけが持つ。**作者が採否を決める材料**なので、
-   * 承認の画面へそのまま出す。製品の抽出は根拠を `evidence` に入れるので、
-   * ここは空のままでよい。
-   */
-  reason?: string;
-}
+/** 1件の形。定義は `pendingReview.ts`（MCP の束からも読むため、`vscode` を持たない側に置く） */
+export type { PendingUpdate } from "./pendingReview";
 
 /**
  * 新規案のIDは仮である（`PENDING_CREATION_ID`）。`parseCharacter` が
@@ -170,13 +158,7 @@ export class PendingUpdateStore {
           path.toUri(filePath)
         );
         const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-        updates.push({
-          character: parseCharacter(unwrapPendingCharacter(parsed)),
-          filePath,
-          source: readSource(parsed),
-          kind: readKind(parsed),
-          reason: readReason(parsed),
-        });
+        updates.push(readPendingCharacterFile(parsed, filePath));
       } catch (error) {
         errors.push({
           file: name,
@@ -185,7 +167,7 @@ export class PendingUpdateStore {
       }
     }
 
-    updates.sort((a, b) => a.character.id.localeCompare(b.character.id));
+    updates.sort(comparePendingCharacterUpdates);
     return { updates, errors };
   }
 

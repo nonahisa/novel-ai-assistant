@@ -89,12 +89,30 @@ describe("求めたファイルが見つからなかったときの聞き直し�
 // 元から減らす側：製品の目次（話の一覧）は題しか持たず、AI は needFiles の
 // パスを当て推量で書いていた。題にファイルの場所を添えていることを見張る
 describe("相談の目次の話の一覧には、ファイルの場所が添えてある", () => {
-  test("buildOverview が題の後ろに作品フォルダーからの相対パスを付ける", async () => {
+  /*
+    0.85.1 で組み方を `core/chatFileRequest.ts` の `formatChatOverview` へ寄せた
+    （MCP の相談も同じものを通す）。**組み方そのものは中身で確かめ**、
+    相談パネルがそれを通していることは源を読んで確かめる
+  */
+  test("題の後ろに作品フォルダーからの相対パスを付ける", async () => {
+    const { formatChatOverview } = await import("../../../src/core/chatFileRequest");
+    const text = formatChatOverview({
+      episodes: [{ path: "本文/episode_0001.md", label: "第1話 出会い" }],
+      documents: [],
+    });
+    expect(text).toContain("第1話 出会い（本文/episode_0001.md）");
+  });
+
+  test("相談パネルの buildOverview は、その組み方と、候補と同じ話の一覧を通す", async () => {
     const { readFileSync } = await import("node:fs");
     const source = readFileSync("src/features/workChatPanel.ts", "utf8");
     const start = source.indexOf("private async buildOverview");
     expect(start).toBeGreaterThan(0);
-    const body = source.slice(start, start + 2500);
-    expect(body).toMatch(/episodeLabel\(episode\)\}（\$\{path\s*\.relative\(work\.folderPath, episode\.filePath\)/);
+    const body = source.slice(start, start + 1500);
+    expect(body).toContain("this.episodeHints(work)");
+    expect(body).toContain("formatChatOverview(");
+    // 話の一覧の場所は作品フォルダーからの相対（区切りは / に揃える）
+    const hints = source.slice(source.indexOf("private async episodeHints"));
+    expect(hints).toMatch(/path\.relative\(root, episode\.filePath\)\.replace\(/);
   });
 });

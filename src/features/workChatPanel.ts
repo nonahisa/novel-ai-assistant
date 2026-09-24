@@ -42,7 +42,6 @@ import { collectedEpisodeLineOf } from "../core/collectedFile";
 import { isCollectedFile } from "../core/episodeLabel";
 import { readTextFile } from "../core/textFile";
 import { episodeLabel } from "../core/manuscriptSources";
-import { SYNOPSIS_FILE } from "../core/synopsisDoc";
 import { CharacterStore } from "../core/characterStore";
 import { measureParts } from "../core/usageLog";
 import {
@@ -98,11 +97,9 @@ import {
 import {
   describeChatEditDestination,
   describeChatEditRejection,
-  findExtensionVariant,
   parseChatEdit,
   parseChatLocate,
   parseChatRun,
-  pickFileHints,
   runnableFeatures,
   sanitizeRequestedPaths,
   type ChatEdit,
@@ -110,6 +107,15 @@ import {
   type ChatLocate,
   type ChatRunKind,
 } from "../core/chatEdit";
+import {
+  CHARACTER_NAMES_HEADING,
+  CHAT_OVERVIEW_DOCUMENTS,
+  MAX_REQUESTED_FILES,
+  OVERVIEW_HEADING,
+  formatChatOverview,
+  missingFileHintsFrom,
+  readRequestedFiles,
+} from "../core/chatFileRequest";
 import {
   buildChatNoteMarkdown,
   chatNoteFileNameCandidates,
@@ -232,39 +238,18 @@ const EXCERPT_CHARS = 4_000;
 const RELATED_MAX_CHARS = 8_000;
 /** 覚えておくやり取りの数。増やすほど入力が伸びて料金がかかる */
 const HISTORY_TURNS = 12;
-/** AIの求めに応じて読むファイルの上限。読みすぎると入力が膨らむ */
-const MAX_REQUESTED_FILES = 3;
-/** 1ファイルあたりに渡す上限 */
-const REQUESTED_FILE_CHARS = 6_000;
-/**
- * 求められたファイルが見つからなかったとき、代わりに示す候補の数。
- * 目次を全部並べると、219話の作品で数千字になる。番号の近いものを
- * 先に選ぶ（`pickFileHints`）ので、この数で足りる
- */
-const MISSING_FILE_HINTS = 8;
 /** 該当箇所の印を残す時間。見つけたあとは要らないので消す */
 const HIGHLIGHT_MS = 8_000;
 
-/**
- * 全体像に並べる話数の上限。
- *
- * 219話の作品でそのまま並べると4,000字を超え、
- * 肝心の本文の抜粋が入らなくなる。
- */
-const OVERVIEW_EPISODE_LIMIT = 40;
-/** 全体像に載せる紹介文・プロットの上限 */
-const OVERVIEW_FILE_CHARS = 2_000;
-
 /*
-  **材料の見出しは定数で持つ。**
+  **求められたファイルの上限・候補の数・全体像の組み方・材料の見出しは
+  `core/chatFileRequest.ts` が持つ**（0.85.1）。MCP の相談も同じものを通して
+  聞き直すので、ここに写しを置かない。
 
-  `reference` は種類の違う材料（全体像・登場人物名）が1つの配列に入って
-  いる。送信量の内訳（`usage.md`）を取るときに、どれがどれかを見出しで
-  見分けるので、**組み立てる側と数える側で同じ文字列を使う**。
-  片方だけ直すと、内訳が黙って0字になる。
+  見出し（`OVERVIEW_HEADING`・`CHARACTER_NAMES_HEADING`）は、送信量の内訳
+  （`usage.md`）を取るときにも使う——組み立てる側と数える側で同じ文字列を
+  使わないと、内訳が黙って0字になる。
 */
-const OVERVIEW_HEADING = "【作品の全体像】";
-const CHARACTER_NAMES_HEADING = "登場人物: ";
 
 type Incoming =
   | { type: "ready" }
@@ -2973,10 +2958,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * **解決後のパスが本当に作品フォルダーの中かを、ここでもう一度確かめる。**
    * 記号リンクなどで外へ出られる余地を残さないため。
    *
-   * **無いファイルは、拡張子だけ違う原稿が1つだけあればそれを読む**
-   * （`findExtensionVariant`。2026-09-24、`.txt` を求められて実物は `.md`
-   * だった）。それでも読めなかったものは `missing` に入れて返す——以前は
-   * 黙って飛ばしており、1つも読めないと作者には何が起きたか分からなかった。
+   * 拡張子違いの引き当て・重複の畳み方・長さの上限は
+   * `core/chatFileRequest.ts` の `readRequestedFiles`（MCP の相談と同じもの）。
+   * ここが持つのは `vscode.workspace.fs` での読み方だけ。
    */
   private async readWorkFiles(
     work: WorkEntry,
@@ -2986,95 +2970,63 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     missing: string[];
   }> {
     const root = path.resolve(work.folderPath);
-    const files: Array<{ path: string; content: string }> = [];
-    const missing: string[] = [];
-
-    const readText = async (relative: string): Promise<string | undefined> => {
-      const target = path.resolve(root, relative);
-      // 判定は `isPathInside` の1か所に寄せてある（写しを作ると網が落とす）。
-      // 作品フォルダーそのものはファイルではないので、中に数えなくてよい
-      if (!path.isPathInside(root, target)) return undefined;
-      try {
-        const bytes = await vscode.workspace.fs.readFile(path.toUri(target));
-        return new TextDecoder().decode(bytes);
-      } catch {
-        return undefined;
-      }
-    };
-
-    for (const relative of relativePaths) {
-      let actual = relative;
-      let text = await readText(relative);
-      if (text === undefined) {
-        const variant = await this.findVariantOnDisk(root, relative);
-        if (variant) {
-          text = await readText(variant);
-          if (text !== undefined) actual = variant;
+    return readRequestedFiles(relativePaths, {
+      readText: async (relative) => {
+        const target = path.resolve(root, relative);
+        // 判定は `isPathInside` の1か所に寄せてある（写しを作ると網が落とす）。
+        // 作品フォルダーそのものはファイルではないので、中に数えなくてよい
+        if (!path.isPathInside(root, target)) return undefined;
+        try {
+          const bytes = await vscode.workspace.fs.readFile(path.toUri(target));
+          return new TextDecoder().decode(bytes);
+        } catch {
+          return undefined;
         }
-      }
-      if (text === undefined) {
-        missing.push(relative);
-        continue;
-      }
-      // `a.txt` と `a.md` を両方求められ、どちらも `a.md` に行き着くことがある。
-      // 同じ中身を2回渡すと入力が膨らむだけなので1回にする
-      if (files.some((file) => file.path === actual)) continue;
-      files.push({
-        path: actual,
-        content:
-          text.length > REQUESTED_FILE_CHARS
-            ? `${text.slice(0, REQUESTED_FILE_CHARS)}\n（以下省略）`
-            : text,
-      });
-    }
-    return { files, missing };
+      },
+      // フォルダーごと無い・読めないときは引き当てない（`undefined`）
+      siblingNames: async (relative) => {
+        const folder = path.dirname(path.resolve(root, relative));
+        try {
+          const entries = await vscode.workspace.fs.readDirectory(
+            path.toUri(folder)
+          );
+          return entries
+            .filter(([, type]) => (type & vscode.FileType.File) !== 0)
+            .map(([name]) => name);
+        } catch {
+          return undefined;
+        }
+      },
+    });
   }
 
   /**
-   * 求められたファイルと同じフォルダーを見て、拡張子違いの原稿を探す。
-   * フォルダーごと無い・読めないときは引き当てない（`undefined`）。
-   */
-  private async findVariantOnDisk(
-    root: string,
-    relative: string
-  ): Promise<string | undefined> {
-    const folder = path.dirname(path.resolve(root, relative));
-    try {
-      const entries = await vscode.workspace.fs.readDirectory(
-        path.toUri(folder)
-      );
-      const names = entries
-        .filter(([, type]) => (type & vscode.FileType.File) !== 0)
-        .map(([name]) => name);
-      return findExtensionVariant(relative, names);
-    } catch {
-      return undefined;
-    }
-  }
-
-  /**
-   * 求められたファイルが見つからなかったとき、AIへ示す候補を組む。
+   * 話の一覧（作品フォルダーからの相対パスと表示名）。
    *
-   * **目次（全体像の話の一覧）と同じ走査から作る。** 別の数え方をすると、
-   * 全体像には載っているのに候補には無い、という食い違いが起きる。
-   * 全体像の話の一覧はファイル名を持たないので、ここでは相対パスを添える
-   * （AIが次に作者へ「どのファイルか」を正しく伝えられるように）。
+   * **全体像の話の一覧と、見つからなかったときの候補は、この1つから作る。**
+   * 別の数え方をすると、全体像には載っているのに候補には無い、という
+   * 食い違いが起きる。
+   */
+  private async episodeHints(work: WorkEntry): Promise<FileHint[]> {
+    const root = path.resolve(work.folderPath);
+    const scan = await scanWork(work);
+    return scan.episodes.map((episode) => ({
+      path: path.relative(root, episode.filePath).replace(/\\/g, "/"),
+      label: episodeLabel(episode),
+    }));
+  }
+
+  /**
+   * 求められたファイルが見つからなかったとき、AIへ示す候補を組む
+   * （選び方は `core/chatFileRequest.ts` の `missingFileHintsFrom`）。
+   * AIが次に作者へ「どのファイルか」を正しく伝えられるよう、相対パスを添える。
    */
   private async missingFileHints(
     work: WorkEntry,
     missing: string[]
   ): Promise<{ available: FileHint[]; availableTotal: number }> {
     try {
-      const root = path.resolve(work.folderPath);
-      const scan = await scanWork(work);
-      const all: FileHint[] = scan.episodes.map((episode) => ({
-        path: path.relative(root, episode.filePath).replace(/\\/g, "/"),
-        label: episodeLabel(episode),
-      }));
-      return {
-        available: pickFileHints(missing, all, MISSING_FILE_HINTS),
-        availableTotal: all.length,
-      };
+      return missingFileHintsFrom(missing, await this.episodeHints(work));
     } catch {
       // 走査できなくても「見つからなかった」ことだけは伝えられる
       return { available: [], availableTotal: 0 };
@@ -3910,55 +3862,19 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * 4,000字を超え、肝心の本文の抜粋が入らなくなる。
    */
   private async buildOverview(work: WorkEntry): Promise<string | undefined> {
-    const lines: string[] = [];
-
+    let episodes: FileHint[] = [];
     try {
-      const scan = await scanWork(work);
-      const total = scan.episodes.length;
-      if (total > 0) {
-        lines.push(`全${total}話。`);
-
-        // **題にファイルの場所を添える。** 題だけだと、AI は needFiles の
-        // パスを当て推量で書き、拡張子や表記を取り違える（2026-09-24、
-        // `episode_0001.txt` を求めたが実物は `.md` だった）
-        const labels = scan.episodes.map(
-          (episode) =>
-            `${episodeLabel(episode)}（${path
-              .relative(work.folderPath, episode.filePath)
-              .replace(/\\/g, "/")}）`
-        );
-        // 多いときは先頭と末尾だけ見せる。**間を省いたことを明記する**
-        // （省略に気づかないと「これで全部」と誤解する）
-        if (labels.length <= OVERVIEW_EPISODE_LIMIT) {
-          lines.push(`話の一覧: ${labels.join(" / ")}`);
-        } else {
-          const head = labels.slice(0, OVERVIEW_EPISODE_LIMIT / 2).join(" / ");
-          const tail = labels.slice(-OVERVIEW_EPISODE_LIMIT / 2).join(" / ");
-          lines.push(
-            `話の一覧（多いため中間を省略）: ${head} …（中略）… ${tail}`
-          );
-        }
-      }
+      episodes = await this.episodeHints(work);
     } catch {
       // 走査できなくても、紹介文とプロットだけで全体像は伝わる
     }
-
-    for (const [label, relative] of [
-      ["作品紹介文・各話あらすじ", SYNOPSIS_FILE],
-      ["プロット", "plot.md"],
-    ] as const) {
-      const text = await this.readSettingsFile(work, relative);
-      if (!text) continue;
-      lines.push(
-        `【${label}（${relative}）】\n` +
-          (text.length > OVERVIEW_FILE_CHARS
-            ? `${text.slice(0, OVERVIEW_FILE_CHARS)}\n（以下省略。全文が要るなら needFiles で求めてください）`
-            : text)
-      );
+    const documents: Array<{ label: string; file: string; text: string }> = [];
+    for (const document of CHAT_OVERVIEW_DOCUMENTS) {
+      const text = await this.readSettingsFile(work, document.file);
+      if (text) documents.push({ ...document, text });
     }
-
-    if (lines.length === 0) return undefined;
-    return `${OVERVIEW_HEADING}\n${lines.join("\n")}`;
+    // 組み方（話数の上限・省略の断り・文書の切り詰め）は core（MCP の相談と同じもの）
+    return formatChatOverview({ episodes, documents });
   }
 
   private async readSettingsFile(

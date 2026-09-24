@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as nodePath from "node:path";
 import { z } from "zod";
 import {
   WORK_CHAT_SCHEMA,
@@ -7,8 +9,24 @@ import {
   buildWorkChatSystemPrompt,
   parseWorkChatAnswer,
   type WorkChatAnswer,
+  type WorkChatInput,
   type WorkChatTurn,
 } from "../../prompts/workChat";
+import { sanitizeRequestedPaths, type FileHint } from "../../core/chatEdit";
+import {
+  CHAT_OVERVIEW_DOCUMENTS,
+  MAX_REQUESTED_FILES,
+  formatChatOverview,
+  missingFileHintsFrom,
+  readRequestedFiles,
+  type RequestedFileAccess,
+} from "../../core/chatFileRequest";
+import { episodeLabel } from "../../core/episodeLabel";
+import { parseEpisodeFileName } from "../../core/episodeParser";
+import { parseEpisodeMetadata } from "../../core/metadataParser";
+import { parseCollectedFile } from "../../core/collectedFile";
+import { isWorkInfoFile } from "../../core/workInfoFile";
+import { decodeBytes } from "../../core/textDecode";
 import { buildAdvicePolicyPrompt } from "../../prompts/advicePolicy";
 import { buildWriterStylePrompt } from "../../prompts/writerStyle";
 import { buildReaderTypePrompt } from "../../prompts/readerTarget";
@@ -33,9 +51,12 @@ import { parseLocation } from "../../models/location";
 import {
   McpToolError,
   SETTINGS_SUBDIRS,
+  listBodyFiles,
   readBody,
   readReaderProfile,
   readSettingsRecords,
+  resolveInsideFolder,
+  settingsDirOf,
 } from "./shared";
 import { ollamaGenerate } from "./ollama";
 import { askSampling } from "./sampling";
@@ -150,8 +171,10 @@ export interface ChatPromptResult {
   temperature: number;
   validateWith: string;
   userPrompt: string;
-  /** 材料として添えた語（登場人物・場所の名前） */
+  /** 材料として添えた語（登場人物・場所の名前）。`overview` を渡すと全体像の塊が先頭に入る */
   reference: string[];
+  /** 作品の全体像（話の一覧・紹介文・プロット）を添えたか */
+  overview: boolean;
   diagnoses: ChatDiagnosisReport;
 }
 
@@ -163,6 +186,27 @@ export interface ChatPromptInput {
   adviceAnswers?: number[];
   writerStyle?: Record<string, unknown>;
   featureIndex?: boolean;
+  /**
+   * 作品の全体像（話の一覧と各話のファイルの場所・紹介文・プロット）を添えるか。
+   *
+   * **既定は添えない**（これまでどおり）。製品の相談は作品のファイルを
+   * 開いているときに必ず添えるが、MCP は材料を絞って測る口として作って
+   * きたので、既定を変えると過去の測定と比べられなくなる。製品と同じ
+   * 材料で測りたいときに `true` を渡す。組み方は製品と同じ
+   * （`core/chatFileRequest.ts` の `formatChatOverview`）。
+   */
+  overview?: boolean;
+}
+
+/**
+ * 聞き直しの回にだけ足す材料（`chatRun` が使う）。
+ *
+ * 形は製品の相談パネルが2回目に渡すものと同じ（`WorkChatInput` の
+ * `requestedFiles`・`missingFiles`）。
+ */
+export interface ChatFollowUpMaterial {
+  requestedFiles?: WorkChatInput["requestedFiles"];
+  missingFiles?: WorkChatInput["missingFiles"];
 }
 
 /**
@@ -279,7 +323,127 @@ function collectReference(folder: string): string[] {
   ].slice(0, REFERENCE_LIMIT);
 }
 
-export function chatPrompt(input: ChatPromptInput): ChatPromptResult {
+/**
+ * 話の一覧（作品フォルダーからの相対パスと表示名）。**全体像の話の一覧と、
+ * 見つからなかったときの候補は、この1つから作る**（製品の相談パネルと同じ約束）。
+ *
+ * 表示名は製品と同じ関数（`core/episodeLabel.ts` の `episodeLabel`）で付ける。
+ * 製品の走査（`core/scanner.ts`）は `vscode` を引くので使えず、走査が使う
+ * 部品（ファイル名の解析・頭書き・合本の分け方）を直に通す（`workScan.ts` と同じ考え）。
+ * 並びは名前順（製品は話数順に並べ直す。候補は番号の近いものを先に選ぶので、
+ * 選ばれるものは変わらない）。
+ *
+ * 作品情報（`about.txt`）は話ではないので入れない。読めないファイルは
+ * 名前だけで並べる（製品も読めないファイルを0字の話として一覧に残す）。
+ */
+export function episodeHintsOf(folder: string): FileHint[] {
+  let files: string[];
+  try {
+    files = listBodyFiles(folder);
+  } catch {
+    return [];
+  }
+  const hints: FileHint[] = [];
+  for (const relative of files) {
+    const fileName = nodePath.basename(relative);
+    const parsed = parseEpisodeFileName(fileName);
+    let metaTitle: string | null = null;
+    let chapterStart = parsed.chapterStart;
+    let chapterEnd = parsed.chapterEnd;
+    try {
+      const text = decodeBytes(
+        fs.readFileSync(resolveInsideFolder(folder, relative))
+      ).text;
+      if (isWorkInfoFile(fileName, text)) continue;
+      metaTitle = parseEpisodeMetadata(text).title;
+      // 合本はファイル名から話数を取れない。中の各話から範囲を読む（製品の走査と同じ）
+      const chapters = (parseCollectedFile(text) ?? [])
+        .map((episode) => episode.chapter)
+        .filter((chapter): chapter is number => chapter !== null);
+      if (chapters.length > 0) {
+        chapterStart = Math.min(...chapters);
+        chapterEnd = Math.max(...chapters);
+      }
+    } catch {
+      // 読めなくても、ファイル名だけで並べる
+    }
+    hints.push({
+      path: relative.split(nodePath.sep).join("/"),
+      label: episodeLabel({
+        fileName,
+        metaTitle,
+        subtitle: parsed.subtitle ?? metaTitle,
+        kind: parsed.kind,
+        chapterStart,
+        chapterEnd,
+      }),
+    });
+  }
+  return hints;
+}
+
+/** 作品の全体像（製品と同じ組み方）。材料が何も無ければ undefined */
+function overviewOf(folder: string): string | undefined {
+  const settings = settingsDirOf(folder);
+  const documents: Array<{ label: string; file: string; text: string }> = [];
+  for (const document of CHAT_OVERVIEW_DOCUMENTS) {
+    if (!settings) break;
+    try {
+      const text = decodeBytes(
+        fs.readFileSync(nodePath.join(settings, document.file))
+      ).text.trim();
+      if (text) documents.push({ ...document, text });
+    } catch {
+      // 無い文書は載せないだけ（製品と同じ）
+    }
+  }
+  return formatChatOverview({ episodes: episodeHintsOf(folder), documents });
+}
+
+/**
+ * AIが求めたファイルを、作品フォルダーの中からだけ読む口（`RequestedFileAccess`）。
+ *
+ * **外を指す指定は読まない**（`resolveInsideFolder`。`sanitizeRequestedPaths` を
+ * 通したあとでも、解決したパスをもう一度確かめる。製品の `isPathInside` と同じ役）。
+ * 文字コードは製品の読み方（`decodeBytes`。MCP の読み方の決まり、6.87.8 の7）。
+ */
+function folderAccess(folder: string): RequestedFileAccess {
+  const inside = (relative: string): string | undefined => {
+    try {
+      return resolveInsideFolder(folder, relative);
+    } catch {
+      return undefined;
+    }
+  };
+  return {
+    readText: async (relative) => {
+      const target = inside(relative);
+      if (!target) return undefined;
+      try {
+        return decodeBytes(fs.readFileSync(target)).text;
+      } catch {
+        return undefined;
+      }
+    },
+    siblingNames: async (relative) => {
+      const target = inside(relative);
+      if (!target) return undefined;
+      try {
+        return fs
+          .readdirSync(nodePath.dirname(target), { withFileTypes: true })
+          .filter((entry) => entry.isFile())
+          .map((entry) => entry.name);
+      } catch {
+        return undefined;
+      }
+    },
+  };
+}
+
+export function chatPrompt(
+  input: ChatPromptInput,
+  followUp: ChatFollowUpMaterial = {}
+): ChatPromptResult {
   const now = new Date();
   const { blocks, report } = buildDiagnosisBlocks(input.folder, input, now);
 
@@ -299,7 +463,12 @@ export function chatPrompt(input: ChatPromptInput): ChatPromptResult {
     excerpt = truncated ? text.slice(0, EXCERPT_LIMIT) : text;
   }
 
-  const reference = collectReference(input.folder);
+  // 全体像は製品と同じく材料の先頭に置く（`buildReference` の並び）
+  const overview = input.overview === true ? overviewOf(input.folder) : undefined;
+  const reference = [
+    ...(overview ? [overview] : []),
+    ...collectReference(input.folder),
+  ];
 
   return {
     promptVersion: WORK_CHAT_VERSION,
@@ -315,10 +484,13 @@ export function chatPrompt(input: ChatPromptInput): ChatPromptResult {
       excerptTruncated: truncated,
       fromSelection: false,
       reference,
+      requestedFiles: followUp.requestedFiles,
+      missingFiles: followUp.missingFiles,
       history: input.history ?? [],
       question: input.question,
     }),
     reference,
+    overview: overview !== undefined,
     diagnoses: report,
   };
 }
@@ -453,6 +625,34 @@ export interface ChatRunInput extends ChatPromptInput {
   numCtx?: number;
 }
 
+/**
+ * 1往復目でAIがファイルを求めたときの、聞き直しの記録（0.85.1）。
+ *
+ * **測るために全部返す。** 製品の相談パネルは、読めたファイルと見つから
+ * なかったファイルを記録（`chat.md`）へ残し、画面にも「読んでいます」と
+ * 出す。外から測るときも、何を求められ、何を渡し、何が無かったかが
+ * 分からないと、2往復目の答えの良し悪しを読めない。
+ */
+export interface ChatFollowUp {
+  /** 1往復目の答え（`reply`）。作者の画面には出ない回の答え */
+  firstReply: string;
+  /** 1往復目でAIが求めたもの（AIが書いたまま。文字列だけ） */
+  requested: string[];
+  /** そのうち読みに行ったもの（製品と同じ関門 `sanitizeRequestedPaths` を通したあと。最大3件） */
+  needFiles: string[];
+  /** 読めたファイル（拡張子違いを引き当てたときは、実際に読んだほうの場所） */
+  readFiles: string[];
+  /** 見つからなかったファイル */
+  missingFiles: string[];
+  /** 見つからなかったときにAIへ示した、作品にあるファイルの候補 */
+  hints: FileHint[];
+  /**
+   * 2往復目でもAIがファイルを求めたか。**もう読まない**（製品も聞き直しは
+   * 1回だけ）。求めていたら、その回の答えは材料が足りないまま書かれている
+   */
+  askedAgain: string[];
+}
+
 export type ChatRunResult =
   | {
       runner: "claude";
@@ -469,7 +669,10 @@ export type ChatRunResult =
       model: string;
       temperature: number;
       diagnoses: ChatDiagnosisReport;
+      /** 最後の答え（聞き直したなら2往復目）を検算したもの */
       result: ChatValidateResult;
+      /** 聞き直したときだけ入る。聞き直さなかった回は null */
+      followUp: ChatFollowUp | null;
     }
   | {
       /** 呼び出し元に考えてもらった（設計書6.87.12） */
@@ -478,8 +681,75 @@ export type ChatRunResult =
       model: string;
       temperature: number;
       diagnoses: ChatDiagnosisReport;
+      /** 最後の答え（聞き直したなら2往復目）を検算したもの */
       result: ChatValidateResult;
+      /** 聞き直したときだけ入る。聞き直さなかった回は null */
+      followUp: ChatFollowUp | null;
     };
+
+/** AIへ1回尋ねて、答えの本文と答えたモデルを返す（`runner` ごとの違いはここだけ） */
+type AskOnce = (userPrompt: string) => Promise<{ text: string; model: string }>;
+
+/**
+ * 尋ね、ファイルを求められたら読んで**1回だけ**聞き直す（製品の相談パネルと同じ流れ）。
+ *
+ * - 読み方・拡張子違いの引き当て・長さの上限・見つからなかったときの候補は、
+ *   製品と同じ core の部品（`core/chatFileRequest.ts`）を通す
+ * - **1つも読めなくても聞き直す**（0.84.7 の製品と同じ）。見つからなかったことと
+ *   候補を渡して、同じ1回の枠の中で答えさせる
+ * - 検算（`chatValidate`）と控えの書き戻しは**最後の答えにだけ**掛ける。
+ *   製品も、作者に見せた答え（2往復目）からだけ推定を拾う
+ */
+async function askWithFollowUp(
+  input: ChatRunInput,
+  prompt: ChatPromptResult,
+  ask: AskOnce
+): Promise<{
+  model: string;
+  result: ChatValidateResult;
+  followUp: ChatFollowUp | null;
+}> {
+  const first = await ask(prompt.userPrompt);
+  const firstAnswer = parseWorkChatAnswer(first.text);
+  const wanted = sanitizeRequestedPaths(firstAnswer.needFiles, MAX_REQUESTED_FILES);
+  if (wanted.length === 0) {
+    return {
+      model: first.model,
+      result: chatValidate({ folder: input.folder, response: first.text }),
+      followUp: null,
+    };
+  }
+
+  const { files, missing } = await readRequestedFiles(wanted, folderAccess(input.folder));
+  const hints =
+    missing.length > 0
+      ? missingFileHintsFrom(missing, episodeHintsOf(input.folder))
+      : undefined;
+  const again = chatPrompt(input, {
+    requestedFiles: files,
+    missingFiles: hints ? { paths: missing, ...hints } : undefined,
+  });
+  const second = await ask(again.userPrompt);
+  const result = chatValidate({ folder: input.folder, response: second.text });
+
+  return {
+    model: second.model,
+    result,
+    followUp: {
+      firstReply: firstAnswer.reply,
+      requested: Array.isArray(firstAnswer.needFiles)
+        ? firstAnswer.needFiles.filter(
+            (entry): entry is string => typeof entry === "string"
+          )
+        : [],
+      needFiles: wanted,
+      readFiles: files.map((file) => file.path),
+      missingFiles: missing,
+      hints: hints?.available ?? [],
+      askedAgain: sanitizeRequestedPaths(result.answer.needFiles, MAX_REQUESTED_FILES),
+    },
+  };
+}
 
 export async function chatRun(input: ChatRunInput): Promise<ChatRunResult> {
   // **省略を既定で埋めない**（設計書6.87.8 の5）
@@ -489,6 +759,8 @@ export async function chatRun(input: ChatRunInput): Promise<ChatRunResult> {
   const temperature = temperatureFor(input, prompt.temperature);
 
   if (input.runner === "claude") {
+    // **この道は1往復だけ**（プロンプトを返すだけで、答えはこちらに来ない）。
+    // 聞き直すなら、呼び出し元が求められたファイルを filePath で渡して呼び直す
     return {
       runner: "claude",
       note: claudeNote(VALIDATE_WITH),
@@ -503,18 +775,22 @@ export async function chatRun(input: ChatRunInput): Promise<ChatRunResult> {
 
   if (input.runner === "sampling") {
     // **呼び出し元に考えてもらい、検算まで通す**（設計書6.87.12）
-    const reply = await askSampling({
-      folder: input.folder,
-      systemPrompt: prompt.systemPrompt,
-      userPrompt: prompt.userPrompt,
-      temperature,
+    const done = await askWithFollowUp(input, prompt, async (userPrompt) => {
+      const reply = await askSampling({
+        folder: input.folder,
+        systemPrompt: prompt.systemPrompt,
+        userPrompt,
+        temperature,
+      });
+      return { text: reply.text, model: reply.model };
     });
     return {
       runner: "sampling",
-      model: reply.model,
+      model: done.model,
       temperature,
       diagnoses: prompt.diagnoses,
-      result: chatValidate({ folder: input.folder, response: reply.text }),
+      result: done.result,
+      followUp: done.followUp,
     };
   }
 
@@ -522,15 +798,18 @@ export async function chatRun(input: ChatRunInput): Promise<ChatRunResult> {
   if (!model) {
     throw new McpToolError("runner が ollama のときは model が要ります。");
   }
-  const response = await ollamaGenerate({
-    endpoint: input.endpoint,
-    model,
-    systemPrompt: prompt.systemPrompt,
-    userPrompt: prompt.userPrompt,
-    schema: prompt.schema,
-    numCtx: input.numCtx ?? 16384,
-    temperature,
-    allowRemote: input.allowRemote,
+  const done = await askWithFollowUp(input, prompt, async (userPrompt) => {
+    const response = await ollamaGenerate({
+      endpoint: input.endpoint,
+      model,
+      systemPrompt: prompt.systemPrompt,
+      userPrompt,
+      schema: prompt.schema,
+      numCtx: input.numCtx ?? 16384,
+      temperature,
+      allowRemote: input.allowRemote,
+    });
+    return { text: response.text, model };
   });
 
   return {
@@ -538,6 +817,7 @@ export async function chatRun(input: ChatRunInput): Promise<ChatRunResult> {
     model,
     temperature,
     diagnoses: prompt.diagnoses,
-    result: chatValidate({ folder: input.folder, response: response.text }),
+    result: done.result,
+    followUp: done.followUp,
   };
 }

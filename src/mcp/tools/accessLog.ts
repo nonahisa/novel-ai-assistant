@@ -111,8 +111,13 @@ export function exposureOf(
   // プロンプトを組んで返すもの——**本文がまとまって呼び出し元へ渡る**
   if (tool === "novel.prompt") return "body";
 
-  // 走査・検算・検出・材料——抜粋と名前と件数が渡る
+  /*
+    走査・検算・検出・材料——抜粋と名前と件数が渡る。
+    `pending.list`（0.85.1）も同じ重さ：本文は返さないが、承認待ちの案の
+    名前・理由・変わる欄の前と後（＝設定資料の記述）が呼び出し元へ渡る
+  */
   if (
+    tool === "pending.list" ||
     tool === "novel.scan" ||
     tool === "novel.validate" ||
     tool === "novel.detect" ||
@@ -192,6 +197,17 @@ function detailOf(
     return pointed ? `画面で指した（${pointed}）` : "画面で指した";
   }
   if (tool === "schedule.milestones") return "締切・発売日などの日付を読んだ";
+  /*
+    承認待ちを読んだ回（0.85.1）。`feature` を取らない道具なので、書かないと
+    記録が道具の名前だけになる。**絞り方だけ**を残す（中身は残さない）
+  */
+  if (tool === "pending.list") {
+    const kind =
+      typeof args?.kind === "string"
+        ? PENDING_KIND_SHORT_LABELS[args.kind as PendingSettingsKind | "character"]
+        : undefined;
+    return kind ? `承認待ちを読んだ（${kind}）` : "承認待ちを読んだ";
+  }
   const parts: string[] = [];
   /*
     **どの機能だったかを残す**（0.66.7）。道具の名前は `novel.run` の1つに

@@ -67,6 +67,8 @@ export const SYNOPSES_FILE = "chapter_synopses.json";
 export const KEEP_WORDS_FILE = "keep_words.json";
 /** プロット（`core/workRegistry.ts` の `PLOT_FILE`） */
 export const PLOT_FILE = "plot.md";
+/** 作者が足した項目の定義（`core/customFieldStore.ts` の `CUSTOM_FIELDS_FILE`） */
+export const CUSTOM_FIELDS_FILE = "custom_fields.json";
 
 /** どのツールにも要る入力。**作品フォルダーの外は読まない** */
 export const FOLDER_INPUT = {
@@ -310,28 +312,37 @@ export function readSettingsRecords<T>(
   folder: string,
   subdir: string,
   parse: (raw: unknown) => T
-): { records: T[]; unreadable: number } {
+): {
+  records: T[];
+  unreadable: number;
+  /**
+   * 読めなかったファイルの名前（0.85.1）。**件数だけでは足りない道具がある**
+   * ——`pending.list` は、製品が「読めない人物ファイルがあるので組み立てない」
+   * と止まるのと同じ場面で、どのファイルかを返す
+   */
+  unreadableFiles: string[];
+} {
   const settings = settingsDirOf(folder);
-  if (!settings) return { records: [], unreadable: 0 };
+  if (!settings) return { records: [], unreadable: 0, unreadableFiles: [] };
   const dir = nodePath.join(settings, subdir);
-  if (!fs.existsSync(dir)) return { records: [], unreadable: 0 };
+  if (!fs.existsSync(dir)) return { records: [], unreadable: 0, unreadableFiles: [] };
 
   const records: T[] = [];
-  let unreadable = 0;
+  const unreadableFiles: string[] = [];
   for (const name of fs.readdirSync(dir).sort()) {
     if (!name.endsWith(".json")) continue;
     const raw = readJson(nodePath.join(dir, name));
     if (raw === undefined) {
-      unreadable += 1;
+      unreadableFiles.push(name);
       continue;
     }
     try {
       records.push(parse(raw));
     } catch {
-      unreadable += 1;
+      unreadableFiles.push(name);
     }
   }
-  return { records, unreadable };
+  return { records, unreadable: unreadableFiles.length, unreadableFiles };
 }
 
 /** `設定/` の直下のファイルを1つ読む（あらすじ・直さない語）。無ければ undefined */
