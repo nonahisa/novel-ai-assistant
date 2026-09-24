@@ -5086,6 +5086,15 @@ export async function activate(
     // 付け替えの資料が旧名のまま取り残され、対応表も消えて直しようがなくなる
     const waiting = loadPendingRename(context.workspaceState, work.id);
     if (waiting) {
+      /*
+        **資料への反映へ、ここから進めるようにする**（2026-09-24 B10①）。
+        「人物名変更の資料反映」は詳細メニューから外したので、名前を
+        言うだけでは作者はメニューを探して見つけられない。入口は、付け替えを
+        終えたときの知らせのボタンと、コマンドパレットと、この確認である。
+        ボタンの名前はメニューの項目から引く（写すと付け替えで古くなる）。
+      */
+      const applyLabel =
+        findAction("novelai.applyRenameToRecords")?.label ?? "資料にも反映";
       const answer = await vscode.window.showWarningMessage(
         `「${waiting.oldName}」→「${waiting.newName}」の資料への反映が、` +
           "まだ済んでいません。",
@@ -5095,11 +5104,19 @@ export async function activate(
             `この待ちは ${describeCreatedAt(waiting.createdAt)} に作りました。\n` +
             "新しい付け替えを作り終えると、この対応表は置き換わります" +
             "（前の付け替えは、資料に反映できなくなります）。\n" +
-            "先に「人物名変更の資料反映」を実行することもできます。\n" +
+            `先に「${applyLabel}」を実行することもできます。\n` +
             "ここで取りやめれば、いまの待ちはそのまま残ります。",
         },
+        applyLabel,
         "破棄して新しく始める"
       );
+      if (answer === applyLabel) {
+        await vscode.commands.executeCommand("novelai.applyRenameToRecords", {
+          type: "work",
+          work,
+        });
+        return;
+      }
       if (answer !== "破棄して新しく始める") return;
     }
 

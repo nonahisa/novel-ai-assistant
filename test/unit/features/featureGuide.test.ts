@@ -371,8 +371,8 @@ describe("説明の束", () => {
     // 名前は 2026-09-23 に「執筆AI支援 → 原稿づくり／投稿・書き出し」から改名
     const labels = bundles.map((bundle) => bundle.label);
 
-    expect(labels).toContain("執筆支援 → 原稿整備");
-    expect(labels).toContain("執筆支援 → 投稿・出力");
+    expect(labels).toContain("作品執筆 → 原稿整備");
+    expect(labels).toContain("投稿脱稿 → 投稿・出力");
     expect(labels.some((label) => label.includes("その他支援"))).toBe(false);
   });
 
@@ -402,8 +402,8 @@ describe("説明の束", () => {
   test("「校正・校閲」は、校正と伏線・矛盾に割ってある", () => {
     const labels = bundles.map((bundle) => bundle.label);
 
-    expect(labels).toContain("執筆支援 → 校正");
-    expect(labels).toContain("執筆支援 → 伏線・矛盾");
+    expect(labels).toContain("自己校正 → 校正");
+    expect(labels).toContain("自己校正 → 伏線・矛盾");
     expect(labels.some((label) => label.includes("校正・校閲"))).toBe(false);
   });
 
@@ -411,8 +411,8 @@ describe("説明の束", () => {
     const find = (label: string) =>
       bundles.find((bundle) => bundle.label === label)?.text ?? "";
 
-    const proofread = find("執筆支援 → 校正");
-    const consistency = find("執筆支援 → 伏線・矛盾");
+    const proofread = find("自己校正 → 校正");
+    const consistency = find("自己校正 → 伏線・矛盾");
 
     // 文の直し
     expect(proofread).toContain("誤字脱字検知");
@@ -528,7 +528,7 @@ describe("相談1回ぶんの組み立て", () => {
     });
 
     // 束は「校正」と「伏線・矛盾」に割ってある（0.33.10）。誤字脱字は前者
-    expect(built.selected).toContain("執筆支援 → 校正");
+    expect(built.selected).toContain("自己校正 → 校正");
     // 目次は落とさない。説明のある操作だけが全部だと読まれては困る
     expect(built.text).toContain("表記ゆれ検知");
   });
@@ -553,7 +553,7 @@ describe("相談1回ぶんの組み立て", () => {
       question: "縦書きで原稿を開きたい",
     });
 
-    expect(built.selected[0]).toBe("執筆支援 → 原稿整備");
+    expect(built.selected[0]).toBe("作品執筆 → 原稿整備");
   });
 
   test("投稿の質問では、投稿・書き出しだけが選ばれる", () => {
@@ -561,8 +561,8 @@ describe("相談1回ぶんの組み立て", () => {
       question: "新話を投稿するにはどうしますか",
     });
 
-    expect(built.selected).toContain("執筆支援 → 投稿・出力");
-    expect(built.selected).not.toContain("執筆支援 → 原稿整備");
+    expect(built.selected).toContain("投稿脱稿 → 投稿・出力");
+    expect(built.selected).not.toContain("作品執筆 → 原稿整備");
   });
 });
 

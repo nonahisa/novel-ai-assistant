@@ -100,8 +100,13 @@ describe("操作メニューの構成", () => {
     expect(ACTION_TREE.map((group) => group.label)).toEqual([
       "執筆データ",
       "作品管理",
-      // 2026-09-23 に「執筆AI支援」から改名（作者の裁定）
-      "執筆支援",
+      // 「執筆支援」（2026-09-23 に「執筆AI支援」から改名）を、簡単ステップ
+      // メニューの段の名前で5つに割った（作者の裁定、2026-09-24 B10②）
+      "新作構想",
+      "作品執筆",
+      "自己校正",
+      "投稿脱稿",
+      "電子出版等",
       "資料管理",
       // 2026-09-23 に「拡張機能の設定」から改名（作者の裁定）
       "統合小説執筆環境設定",
@@ -510,7 +515,7 @@ describe("件数の印", () => {
 
     expect(
       provider.provideFileDecoration(
-        actionResourceUri(sectionNode("執筆支援", "校正・校閲"))
+        actionResourceUri(sectionNode("自己校正", "校正・校閲"))
       )
     ).toBeUndefined();
   });
@@ -970,21 +975,18 @@ describe("校正・校閲の並び", () => {
   });
 
   test("診断の類は、校正・校閲のすぐ下の「読者診断」に置く", () => {
-    const writing = ACTION_TREE.find((group) => group.label === "執筆支援");
-    const sections = (writing?.entries ?? [])
-      .filter((entry) => entry.kind === "section")
-      .map((entry) => entry.label);
+    const sectionsOf = (label: string): string[] =>
+      (ACTION_TREE.find((group) => group.label === label)?.entries ?? [])
+        .filter((entry) => entry.kind === "section")
+        .map((entry) => entry.label);
 
-    // 工程の順（作者の裁定、2026-09-23 問1 A）
-    expect(sections).toEqual([
-      "プロット",
-      "相談・助言",
-      "原稿整備",
-      "校正・校閲",
-      "読者診断",
-      "広報支援",
-      "投稿・出力",
-    ]);
+    // 工程の順（作者の裁定、2026-09-23 問1 A）。2026-09-24 に「執筆支援」を
+    // 工程の束へ割った（B10②）ので、束をまたいで同じ順に並ぶ
+    expect(sectionsOf("新作構想")).toEqual([]);
+    expect(sectionsOf("作品執筆")).toEqual(["相談・助言", "原稿整備"]);
+    expect(sectionsOf("自己校正")).toEqual(["校正・校閲", "読者診断"]);
+    expect(sectionsOf("投稿脱稿")).toEqual(["広報支援", "投稿・出力"]);
+    expect(sectionsOf("電子出版等")).toEqual([]);
     expect(
       sectionOf("読者診断").section.items.map((item) => item.command)
     ).toEqual([
@@ -1042,9 +1044,10 @@ describe("告知の入口の場所（実機確認 F-48）", () => {
     throw new Error(`操作「${command}」がどの小分類にもありません`);
   }
 
-  test("「更新SNS告知文作成」は 執筆支援 → 広報支援", () => {
+  test("「更新SNS告知文作成」は 投稿脱稿 → 広報支援", () => {
+    // 2026-09-24 に「執筆支援」を工程の束へ割った（B10②）。広報は投稿の段
     expect(placeOf("novelai.generateAnnouncement")).toEqual({
-      group: "執筆支援",
+      group: "投稿脱稿",
       section: "広報支援",
     });
   });
@@ -1196,13 +1199,26 @@ describe("原稿整備と投稿・出力", () => {
     expect(commands[0]).toBe("novelai.postNewEpisode");
     expect(sectionCommands("投稿・出力")).toContain("novelai.copyForPosting");
     for (const command of [
-      "novelai.exportPdf",
       "novelai.generateSettingsDocs",
       "novelai.exportImeDictionary",
     ]) {
       expect(commands, command).toContain(command);
     }
     expect(commands).not.toContain("novelai.addRuby");
+    // 印刷と電子書籍は「電子出版等」の束へ移した（2026-09-24 B10②。
+    // 簡単ステップメニューの「7. 電子出版等」と同じ置き場）
+    expect(sectionCommands("投稿・出力")).not.toContain("novelai.exportPdf");
+    expect(sectionCommands("投稿・出力")).not.toContain("novelai.openEpubEditor");
+    const publishing = ACTION_TREE.find((group) => group.label === "電子出版等");
+    expect(
+      (publishing?.entries ?? []).map((entry) =>
+        entry.kind === "action" ? entry.command : entry.label
+      )
+    ).toEqual([
+      "novelai.exportPdf",
+      "novelai.openEpubEditor",
+      "novelai.exportEpub",
+    ]);
   });
 
   /**
@@ -1330,8 +1346,8 @@ describe("相談の項目は、木に残して画面から隠す", () => {
     expect(isItemShownInActionList(action!, true)).toBe(false);
   });
 
-  test("「執筆支援 › 相談・助言」を描画すると、この項目だけが落ちる", () => {
-    const group = ACTION_TREE.find((entry) => entry.label === "執筆支援");
+  test("「作品執筆 › 相談・助言」を描画すると、この項目だけが落ちる", () => {
+    const group = ACTION_TREE.find((entry) => entry.label === "作品執筆");
     const section = group?.entries.find(
       (entry) => entry.kind === "section" && entry.label === "相談・助言"
     );
@@ -1357,7 +1373,7 @@ describe("相談の項目は、木に残して画面から隠す", () => {
    * に押せる。
    */
   test("「相談パネルを開く」は、相談・助言の見えている項目のいちばん下（作者の指定、2026-09-23）", () => {
-    const support = ACTION_TREE.find((group) => group.label === "執筆支援");
+    const support = ACTION_TREE.find((group) => group.label === "作品執筆");
     const section = support?.entries.find(
       (entry) => entry.kind === "section" && entry.label === "相談・助言"
     );
@@ -1486,8 +1502,8 @@ describe("更新告知文の置き場所", () => {
       : [];
   }
 
-  test("「執筆支援 → 広報支援」に「更新SNS告知文作成」が並ぶ（実機確認リスト F-48 の代わり）", () => {
-    expect(itemsIn("執筆支援", "広報支援")).toContain(
+  test("「投稿脱稿 → 広報支援」に「更新SNS告知文作成」が並ぶ（実機確認リスト F-48 の代わり）", () => {
+    expect(itemsIn("投稿脱稿", "広報支援")).toContain(
       "novelai.generateAnnouncement"
     );
   });
@@ -1497,7 +1513,7 @@ describe("更新告知文の置き場所", () => {
       "novelai.configureAnnouncement"
     );
     // 広報支援からは外してある（同じものを2か所に置かない）
-    expect(itemsIn("執筆支援", "広報支援")).not.toContain(
+    expect(itemsIn("投稿脱稿", "広報支援")).not.toContain(
       "novelai.configureAnnouncement"
     );
   });
@@ -1523,7 +1539,7 @@ describe("分類の出し分けは環境で変わらない", () => {
       .map((node) => (node.type === "group" ? node.group.label : ""));
 
     expect(labels).not.toContain("テスト中");
-    for (const label of ["執筆データ", "作品管理", "執筆支援", "ヘルプ"]) {
+    for (const label of ["執筆データ", "作品管理", "自己校正", "ヘルプ"]) {
       expect(labels, label).toContain(label);
     }
   });

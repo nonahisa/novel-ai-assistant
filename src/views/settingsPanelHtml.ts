@@ -1057,7 +1057,7 @@ button.danger:hover {
       if (!value) {
         body.appendChild(
           missingNote(
-            "執筆支援 → 広報支援 → " +
+            "投稿脱稿 → 広報支援 → " +
               (item.id === "blurb" ? "作品紹介文" : "キャッチコピー案")
           )
         );

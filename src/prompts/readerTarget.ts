@@ -52,8 +52,10 @@ import type { ReaderProfile } from "../models/readerProfile";
  *   2026-09-23 のメニューの組み直しに合わせた（執筆支援 → 読者診断）
  * - 1.2: 未診断のときの1行が案内する操作の名前を「ターゲット読者」へ
  *   （0.82.0。入口を1つにした。設計書6.108.6）。実像を読む本文は変えていない
+ * - 1.3: 同じ1行の道順を「執筆支援 → 読者診断」から「自己校正 → 読者診断」へ
+ *   （0.86.0。「執筆支援」を工程の束に割った。設計書6.17.9）
  */
-export const READER_TARGET_VERSION = "1.2";
+export const READER_TARGET_VERSION = "1.3";
 
 export const READER_TARGET_SYSTEM_PROMPT = `あなたは日本語の小説を読んで、「この作品は、どういう読者に向いた書き方をされているか」だけを答える装置です。
 
@@ -334,7 +336,7 @@ export function buildReaderTypeUnknownPrompt(): string {
   // ふりをして答えた。**押すのは作者**なので、押す場所が要る
   return (
     `【この作品の読者】まだ決めていません。「${TARGET_READER_ENTRY_TITLE}」` +
-    "（詳細メニュー → 執筆支援 → 読者診断）で決められます。" +
+    "（詳細メニュー → 自己校正 → 読者診断）で決められます。" +
     "相談の答えの下の「画面で案内してもらう」からも押せます。"
   );
 }
