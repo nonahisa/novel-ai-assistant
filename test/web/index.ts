@@ -41,6 +41,9 @@ import {
   writeTextFilePreservingFormat,
 } from "../../src/core/textFile";
 import type { WorkEntry } from "../../src/models/types";
+import { registerAll } from "../../src/features/addCollection";
+import { WorkRegistry, readWorkConfig } from "../../src/core/workRegistry";
+import { writeWorkKind } from "../../src/core/workKindStore";
 
 /** 束ねるときに `scripts/buildWebTests.mjs` が埋める（publisher を変えても付いてくる） */
 declare const __EXTENSION_ID__: string;
@@ -111,6 +114,24 @@ export async function run(): Promise<void> {
       `登録された場所が違います: ${entry.folderPath}`
     );
     registered = entry;
+  });
+
+  /*
+    **登録したら、設定ファイルがその場で読めること**（2026-09-24）。
+
+    実機で「作品の種類」が「設定ファイルが見つかりません」で止まった。
+    原因は test-web の置き場の性質（書いたものはメモリに置かれ、読み込み
+    直すと消える。`test/unit/features/addCollectionConfig.test.ts`）だったが、
+    **同じ画面の中で書けて読めること**はここで押さえておく。ここが割れたら、
+    それは置き場のせいではなく登録の道の不具合である。
+  */
+  await runCase("登録した作品に設定ファイル（.aiwriter/config.json）ができる", failures, async () => {
+    assert(registered !== undefined, "作品が登録されていないため確かめられません");
+    const config = await readConfigFile(registered.folderPath);
+    assert(
+      config.workTitle === WORK_TITLE,
+      `設定ファイルの作品名が違います: ${String(config.workTitle)}`
+    );
   });
 
   await runCase("「動作を診断」が通り、登録した作品が出る", failures, async () => {
@@ -386,9 +407,79 @@ export async function run(): Promise<void> {
     );
   });
 
+  /*
+    **書庫の道（「n件の作品が見つかりました」から選ぶ登録）でも、設定ファイルが
+    できて種類を書けること**（2026-09-24。実機で止まった操作そのもの）。
+
+    **いちばん後ろに置く。** 作品フォルダーの中に書庫の形（子フォルダーに本文）を
+    メモリの上だけで作るので、前の検査（診断の話数・文字数）に混ざらないように
+    する。終わったら消す。
+
+    選択画面は押せないので、画面のあとに通る `registerAll` を直に呼ぶ。
+    **登録簿は使い捨て**（拡張機能の登録簿には入れない）——ここで確かめたいのは
+    「ブラウザの置き場で `addExisting` が設定ファイルを書き、読めるか」
+    （読み口の「見つからない」の見分け・書き込みの両方）である。
+  */
+  await runCase("書庫の道で登録すると、設定ファイルができて種類を書ける", failures, async () => {
+    assert(registered !== undefined, "作品が登録されていないため確かめられません");
+    const shelf = join(registered.folderPath, "書庫確認用");
+    const child = join(shelf, "仮作品");
+    await vscode.workspace.fs.createDirectory(toUri(child));
+    await vscode.workspace.fs.writeFile(
+      toUri(join(child, "episode_0001.txt")),
+      new TextEncoder().encode("書き出しの一文です。")
+    );
+    try {
+      let stored: WorkEntry[] = [];
+      const throwaway = new WorkRegistry({
+        globalState: {
+          get: <T>(_key: string, _fallback: T): T => stored as unknown as T,
+          update: async (_key: string, value: unknown) => {
+            stored = value as WorkEntry[];
+          },
+        },
+      } as unknown as vscode.ExtensionContext);
+      const added = await registerAll(throwaway, [
+        { folderPath: child, title: "仮作品", hasConfig: false, alreadyRegistered: false },
+      ]);
+      assert(added.length === 1, `登録できませんでした（${added.length}件）`);
+
+      const config = await readConfigFile(child);
+      assert(config.workTitle === "仮作品", `設定ファイルの作品名が違います: ${String(config.workTitle)}`);
+
+      await writeWorkKind(added[0], "essay");
+      const kind = (await readWorkConfig(added[0]))?.kind;
+      assert(kind === "essay", `種類が書けていません: ${String(kind)}`);
+    } finally {
+      await vscode.workspace.fs.delete(toUri(shelf), { recursive: true });
+    }
+  });
+
   if (failures.length > 0) {
     throw new Error(`ブラウザ版の検査が失敗しました:\n${failures.join("\n")}`);
   }
+}
+
+/**
+ * 作品の設定ファイルを、**拡張機能の読み口を通さずに**読む。
+ *
+ * 製品の `readWorkConfig` は「見つからない」を `undefined` に畳むので、
+ * 無いのか読めないのかを取り違える。ここでは置き場へ直に訊き、
+ * 無ければ無いと言って落ちる。
+ */
+async function readConfigFile(folderPath: string): Promise<{ workTitle?: unknown }> {
+  const uri = toUri(join(folderPath, ".aiwriter", "config.json"));
+  let bytes: Uint8Array;
+  try {
+    bytes = await vscode.workspace.fs.readFile(uri);
+  } catch (error) {
+    throw new Error(
+      `設定ファイルがありません（${fromUri(uri)}）: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+  return JSON.parse(new TextDecoder().decode(bytes)) as { workTitle?: unknown };
 }
 
 /**

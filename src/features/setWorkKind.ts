@@ -1,7 +1,11 @@
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { WORK_KINDS, workKindDef, type WorkKindKey } from "../core/workKind";
-import { readWorkKind, writeWorkKind } from "../core/workKindStore";
+import {
+  readWorkKind,
+  WorkConfigMissingError,
+  writeWorkKind,
+} from "../core/workKindStore";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 
 /**
@@ -41,6 +45,22 @@ export async function setWorkKind(
   try {
     await writeWorkKind(work, picked.workKind);
   } catch (error) {
+    if (error instanceof WorkConfigMissingError) {
+      /*
+        **無いときは、次の手を1つ添える**（規則5の考え方。2026-09-24）。
+        原因だけを出していたころは、作者はそこで行き止まりだった。
+        設定ファイルを作り直す操作は無いが、登録（`addExisting`）は
+        設定ファイルが無ければ作るので、登録し直せば直る。
+        解除してもフォルダーとファイルは消えない（`novelai.removeWork` の
+        確認と同じ言い方で安心させる）。
+      */
+      void vscode.window.showErrorMessage(
+        `種類を変えられませんでした。${error.message}` +
+          "作品一覧でこの作品の登録を解除し、同じフォルダーを登録し直すと作られます" +
+          "（本文と設定資料のファイルはそのまま残ります）。"
+      );
+      return undefined;
+    }
     // **壊れた設定ファイルは直さずに止める**（規則2）。理由はそのまま出す
     void vscode.window.showErrorMessage(
       `種類を変えられませんでした。${

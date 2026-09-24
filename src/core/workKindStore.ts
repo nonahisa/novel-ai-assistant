@@ -65,11 +65,26 @@ export async function readConfiguredWorkKind(
 }
 
 /**
+ * 設定ファイルそのものが無い（壊れているのとは別）。
+ *
+ * **呼び手が見分けて、次の手を添えられるように型を分ける**（2026-09-24）。
+ * 壊れているなら直すのは作者の手（規則2）だが、無いなら登録し直せば
+ * 作られる（`addExisting` は設定ファイルが無ければ作る）。同じ `Error` で
+ * 投げると、画面には原因しか出せない。
+ */
+export class WorkConfigMissingError extends Error {
+  constructor() {
+    super("作品の設定ファイル（.aiwriter/config.json）が見つかりません。");
+    this.name = "WorkConfigMissingError";
+  }
+}
+
+/**
  * 種類を書く。**本文には触れない**（種類を変えても、変わるのは雛形・
  * 数え方・組み方・出力だけ。書いたものは1字も書き換えない）。
  *
- * 設定ファイルが無い・壊れている作品では投げる——壊れたJSONは直さず
- * 止める（規則2）。
+ * 設定ファイルが無い作品では `WorkConfigMissingError` を、壊れている作品では
+ * 読み込みの失敗をそのまま投げる——壊れたJSONは直さず止める（規則2）。
  */
 export async function writeWorkKind(
   work: WorkEntry,
@@ -77,9 +92,7 @@ export async function writeWorkKind(
 ): Promise<void> {
   const config = await readWorkConfig(work);
   if (!config) {
-    throw new Error(
-      "作品の設定ファイル（.aiwriter/config.json）が見つかりません。"
-    );
+    throw new WorkConfigMissingError();
   }
   await writeWorkConfig(work, { ...config, kind });
   invalidateWorkKind(work.id);
