@@ -3161,7 +3161,8 @@ export async function activate(
       async (node?: WorkNode) => {
         const work = await resolveWork(node, registry);
         if (!work) return;
-        await openPlotMode(context, work);
+        // AIを渡すのは「名前の候補を出す」（P-45）のため
+        await openPlotMode(context, work, aiRegistry);
       }
     ),
     // 対話でプロットを作る（設計書6.4.7。0.86.2 で問答に作り直した）。
@@ -3926,7 +3927,7 @@ export async function activate(
     registerCommand("novelai.episodePlotToPlotMode", async (arg?: unknown) => {
       const target = openedEpisodePlot(arg);
       if (!target) return;
-      await openPlotMode(context, target.work);
+      await openPlotMode(context, target.work, aiRegistry);
     }),
     registerCommand("novelai.previousEpisodePlot", async (arg?: unknown) => {
       const target = openedEpisodePlot(arg);

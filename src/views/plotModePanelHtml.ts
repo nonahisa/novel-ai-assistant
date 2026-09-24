@@ -12,6 +12,9 @@
  * 話の見取り図——だけで、書くのは左に開いた普通のエディタである。
  * 中身を写す欄（`textarea`）を置いた時点で、この機能は記入用紙に戻る。
  *
+ * 名前の候補（P-45）の欄だけは、人物の説明を1行ずつ添える。どの人物の
+ * 候補かを見分けるための写しで、ここで書き換えることはできない。
+ *
  * 押したことは拡張機能へ返すだけで、書き込みは向こうが既存の道
  * （`updatePlotMarkdown`・`createEpisodePlot`・既存コマンド）を通る。
  */
@@ -185,6 +188,36 @@ button:disabled { opacity: 0.45; cursor: default; }
 /* 回収予定を過ぎた伏線。話の並びの上に1行だけ出す */
 #overdue { padding: 4px 12px 0; }
 #overdue:empty { display: none; }
+/* 名前の候補（P-45）。人物ごとに1つ選ぶ */
+#nameActions { padding: 4px 12px 0; }
+#nameActions button { text-align: left; }
+#nameResults { padding: 4px 12px 0; }
+#nameResults:empty { display: none; }
+.name-person {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 2px;
+  padding: 6px 8px;
+  margin: 6px 0;
+}
+.name-person .role { font-weight: bold; }
+.name-person .summary,
+.name-person .unsure,
+.name-person .empty {
+  display: block;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  margin: 2px 0 4px;
+}
+.name-person label { display: block; padding: 1px 0; cursor: pointer; }
+.name-person label .reading,
+.name-person label .why { font-size: 11px; color: var(--vscode-descriptionForeground); }
+.name-person details { font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 4px; }
+#nameButtons { display: flex; gap: 6px; padding: 6px 0 0; }
+#nameButtons .apply {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+#nameButtons .apply:hover:enabled { background: var(--vscode-button-hoverBackground); }
 #overdue button {
   background: none;
   border: 1px solid var(--vscode-editorWarning-foreground, var(--vscode-descriptionForeground));
@@ -207,6 +240,10 @@ button:disabled { opacity: 0.45; cursor: default; }
   <h2>AIに頼む</h2>
   <div id="aiActions"></div>
   <div id="syncActions"></div>
+  <h2 id="namesHeading">主要登場人物の名前</h2>
+  <div id="nameActions"></div>
+  <div class="note" id="namesNote"></div>
+  <div id="nameResults"></div>
   <h2 id="episodesHeading">話の並び</h2>
   <div class="note" id="episodesNote"></div>
   <div id="overdue"></div>
@@ -233,7 +270,14 @@ const el = {
   episodesNote: document.getElementById("episodesNote"),
   episodeActions: document.getElementById("episodeActions"),
   overdue: document.getElementById("overdue"),
+  namesHeading: document.getElementById("namesHeading"),
+  nameActions: document.getElementById("nameActions"),
+  namesNote: document.getElementById("namesNote"),
+  nameResults: document.getElementById("nameResults"),
 };
+
+/** 名前の候補（P-45）。目録とは別に届く——目録の読み直しで選びかけを消さない */
+let names = { status: "idle", note: "", people: [] };
 
 function post(type, payload) {
   vscode.postMessage(Object.assign({ type: type }, payload || {}));
@@ -337,6 +381,33 @@ el.episodeActions.addEventListener("click", function (event) {
   const target = event.target.closest("[data-add-planned]");
   if (!target) return;
   post("addPlannedEpisode");
+});
+
+/**
+ * 名前の候補（P-45）。押したことと選んだ名前を返すだけで、
+ * 書くのは拡張機能（控えと照らし合わせてから plot.md と承認待ちへ）
+ */
+el.nameActions.addEventListener("click", function (event) {
+  if (!event.target.closest("[data-suggest-names]")) return;
+  post("suggestNames");
+});
+
+el.nameResults.addEventListener("click", function (event) {
+  if (event.target.closest("[data-clear-names]")) {
+    post("clearNames");
+    return;
+  }
+  if (!event.target.closest("[data-apply-names]")) return;
+  const picks = [];
+  for (const person of names.people) {
+    const checked = el.nameResults.querySelector(
+      'input[name="name-' + person.id + '"]:checked'
+    );
+    if (checked && checked.value !== "") {
+      picks.push({ id: person.id, name: checked.value });
+    }
+  }
+  post("applyNames", { picks: picks });
 });
 
 function renderHeadings() {
@@ -496,6 +567,70 @@ function renderEpisodes() {
     : "";
 }
 
+/**
+ * 名前の候補（P-45）。人物ごとに「選ばない」を先頭に置き、既定はそれにする
+ * ——選ばずに［入れる］を押しても、その人物には何も書かない
+ */
+function renderNames() {
+  const labels = (data && data.nameSuggest) || null;
+  if (labels) {
+    el.namesHeading.textContent = labels.heading;
+    el.nameActions.innerHTML =
+      '<button data-suggest-names="1" title="' + escapeHtml(labels.detail) + '"' +
+      (names.status === "busy" ? " disabled" : "") + ">" +
+      escapeHtml(labels.label) + "</button>";
+  }
+  el.namesNote.textContent = names.note || "";
+  if (names.status !== "ready" || !labels) {
+    el.nameResults.innerHTML = "";
+    return;
+  }
+
+  const html = [];
+  for (const person of names.people) {
+    const group = "name-" + person.id;
+    const rows = [
+      '<label><input type="radio" name="' + escapeHtml(group) + '" value="" checked> ' +
+        escapeHtml(labels.none) + "</label>",
+    ];
+    for (const candidate of person.candidates) {
+      rows.push(
+        '<label><input type="radio" name="' + escapeHtml(group) + '" value="' +
+          escapeHtml(candidate.name) + '"> ' + escapeHtml(candidate.name) +
+          ' <span class="reading">（' + escapeHtml(candidate.reading) + "）</span>" +
+          (candidate.note ? ' <span class="why">' + escapeHtml(candidate.note) + "</span>" : "") +
+        "</label>"
+      );
+    }
+    const dropped = person.dropped.length > 0
+      ? "<details><summary>" + escapeHtml(labels.droppedLabel) + " " +
+        person.dropped.length + "件</summary>" +
+        person.dropped.map(function (entry) {
+          return "<div>" + escapeHtml(entry.name) + "：" + escapeHtml(entry.reason) + "</div>";
+        }).join("") + "</details>"
+      : "";
+    html.push(
+      '<div class="name-person">' +
+        '<span class="role">' + escapeHtml(person.role) + "</span>" +
+        (person.summary ? '<span class="summary">' + escapeHtml(person.summary) + "</span>" : "") +
+        (person.unsure ? '<span class="unsure">' + escapeHtml(person.unsure) + "</span>" : "") +
+        rows.join("") +
+        (person.candidates.length === 0
+          ? '<span class="empty">使える候補が残りませんでした。もう一度出すと、違う候補が出ます。</span>'
+          : "") +
+        dropped +
+      "</div>"
+    );
+  }
+  html.push(
+    '<div id="nameButtons">' +
+      '<button class="apply" data-apply-names="1">' + escapeHtml(labels.apply) + "</button>" +
+      '<button data-clear-names="1">' + escapeHtml(labels.clear) + "</button>" +
+    "</div>"
+  );
+  el.nameResults.innerHTML = html.join("");
+}
+
 function render() {
   if (!data) return;
   el.title.textContent = data.title;
@@ -507,11 +642,21 @@ function render() {
   renderHeadings();
   renderAiActions();
   renderEpisodes();
+  // 候補の欄は、目録の読み直しでは作り直さない（選びかけの丸が消える）。
+  // 入口のボタンだけ最新の文言にする
+  if (names.status !== "ready") renderNames();
+  else if (data.nameSuggest && !el.nameActions.firstChild) renderNames();
 }
 
 window.addEventListener("message", function (event) {
   const message = event.data;
-  if (!message || message.type !== "plotMode") return;
+  if (!message) return;
+  if (message.type === "plotNames") {
+    names = message.data || { status: "idle", note: "", people: [] };
+    renderNames();
+    return;
+  }
+  if (message.type !== "plotMode") return;
   data = message.data;
   render();
 });

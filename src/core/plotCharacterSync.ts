@@ -5,6 +5,7 @@ import { PENDING_CREATION_ID } from "./pendingUpdateFormat";
 import { normalizeName } from "./characterMerge";
 import { sha256Text } from "./hash";
 import { clampSummary } from "./summaryLimit";
+import { splitRoleAnnotation } from "./plotRoleNames";
 
 /**
  * plot.md の「主要登場人物」から設定資料への差分反映（設計書6.4.9）。
@@ -47,6 +48,11 @@ export interface PlotCharacterEntry {
   name: string;
   /** 説明。名前だけの行では空文字 */
   summary: string;
+  /**
+   * 役名（「主人公（相馬 誠）：〜」の「主人公」）。**「役名（名前）」の形の
+   * 行だけが持つ**（設計書6.4.8「名前の候補を出す」）。無い行では欄ごと無い
+   */
+  role?: string;
 }
 
 export interface ParsedPlotCharacters {
@@ -56,7 +62,7 @@ export interface ParsedPlotCharacters {
 }
 
 /** 行頭の箇条書きの印。`- ` `* ` `+ ` `・` `1. ` */
-const BULLET = /^(?:[-*+]\s+|・\s*|\d+[.)]\s+)/;
+export const PLOT_CHARACTER_BULLET = /^(?:[-*+]\s+|・\s*|\d+[.)]\s+)/;
 
 /** 名前として認めない長さ。ここを超える行は説明文か地の文である */
 const MAX_NAME_LENGTH = 20;
@@ -87,7 +93,7 @@ function tidySummary(value: string): string {
  * `bullet` が false の行（箇条書きでない行）は、区切りが明示されている
  * ものだけを読む——上の「区切りの優先順」を参照。
  */
-function parseEntryLine(
+export function parsePlotCharacterLine(
   content: string,
   bullet: boolean
 ): PlotCharacterEntry | undefined {
@@ -107,12 +113,25 @@ function parseEntryLine(
     if (!matched) continue;
     const name = stripEmphasis(matched[1]);
     if (!isNameLike(name)) continue;
-    return { name, summary: tidySummary(matched[2] ?? "") };
+    return withRole(name, tidySummary(matched[2] ?? ""));
   }
 
   if (!bullet) return undefined;
   const name = stripEmphasis(content);
-  return isNameLike(name) ? { name, summary: "" } : undefined;
+  return isNameLike(name) ? withRole(name, "") : undefined;
+}
+
+/**
+ * 「役名（名前）」なら名前と役名に分ける（設計書6.4.8「名前の候補を出す」）。
+ *
+ * **分けないと、名前を足した行が「主人公（相馬 誠）」という名前の人物として
+ * 資料へ積まれる。** 外側が役名のときだけ分ける（「灯（あかり）」は
+ * そのまま——括弧の中は読みか注記である。`splitRoleAnnotation`）
+ */
+function withRole(name: string, summary: string): PlotCharacterEntry {
+  const split = splitRoleAnnotation(name);
+  if (!split) return { name, summary };
+  return { name: split.name, summary, role: split.role };
 }
 
 /**
@@ -140,7 +159,7 @@ export function parsePlotCharacters(
     if (/^[-*+・]$/.test(trimmed)) continue;
 
     const indented = /^[ \t　]/.test(line);
-    const bulletMatch = BULLET.exec(trimmed);
+    const bulletMatch = PLOT_CHARACTER_BULLET.exec(trimmed);
     const content = bulletMatch
       ? trimmed.slice(bulletMatch[0].length).trim()
       : trimmed;
@@ -155,7 +174,7 @@ export function parsePlotCharacters(
       continue;
     }
 
-    const entry = parseEntryLine(content, Boolean(bulletMatch));
+    const entry = parsePlotCharacterLine(content, Boolean(bulletMatch));
     if (!entry) {
       unparsed.push(trimmed);
       continue;
@@ -181,7 +200,15 @@ export function plotCharactersDigest(
   entries: readonly PlotCharacterEntry[]
 ): string {
   const rows = entries
-    .map((entry) => JSON.stringify([entry.name, entry.summary]))
+    // 役名は持つ行だけ綴じる。**持たない行の形を変えない**——変えると、
+    // 反映済みの作品がすべて「変わった」と読まれて積み直しになる
+    .map((entry) =>
+      JSON.stringify(
+        entry.role
+          ? [entry.name, entry.summary, entry.role]
+          : [entry.name, entry.summary]
+      )
+    )
     .sort();
   return sha256Text(rows.join("\n"));
 }
@@ -288,8 +315,39 @@ export function buildNewCharacterRecords(
   return entries.map((entry) => ({
     ...emptyCharacter(PENDING_CREATION_ID, entry.name),
     summary: clampSummary(entry.summary),
+    // 「主人公（相馬 誠）」の役名は、役割の欄へ（別名にはしない——「魔物」
+    // 「班長」を別名にすると、本文のその語がすべてこの人物の呼び名になる）
+    ...(entry.role ? { role: entry.role } : {}),
     status: "未登場" as const,
   }));
+}
+
+/**
+ * 積み直す新規案へ、**既に積んである同じ名前の新規案**から読みと役割を引き継ぐ
+ * （設計書6.4.8「名前の候補を出す」）。
+ *
+ * 名前の候補から選んだ人物は、読み仮名つきで承認待ちへ置かれる。ところが
+ * plot.md には読みを書かないので、あとで「プロットの人物を資料へ反映」が
+ * 同じ人を積み直すと、**読みの無い案で上書きしてしまう**。プロットが
+ * 持たない欄だけを、既にある案から受け継ぐ（プロットに書いてある欄は
+ * プロットが正しいので触らない）。
+ */
+export function inheritPendingCreationFields(
+  records: readonly Character[],
+  pendingCreations: readonly Character[]
+): Character[] {
+  return records.map((record) => {
+    const key = normalizeName(record.name);
+    const previous = pendingCreations.find(
+      (entry) => normalizeName(entry.name) === key
+    );
+    if (!previous) return record;
+    return {
+      ...record,
+      reading: record.reading ?? previous.reading,
+      role: record.role ?? previous.role,
+    };
+  });
 }
 
 /**

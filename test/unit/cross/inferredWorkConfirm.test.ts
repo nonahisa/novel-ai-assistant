@@ -250,6 +250,7 @@ const WORK_CONFIRMS: ReadonlyArray<readonly [string, string]> = [
   ["proposeChapters.ts", "ai.run.proposeChapters"],
   ["proposeChapters.ts", "ai.run.proposeChapterName"],
   ["nameCheck.ts", "ai.paid.nameCheck"],
+  ["plotNameSuggest.ts", "ai.paid.plotNameSuggest"],
   ["notationAdvice.ts", "ai.paid.notationAdvice"],
   ["readerTargetDiagnosis.ts", "ai.paid.readerTarget"],
   ["titleFit.ts", "ai.paid.titleFit"],

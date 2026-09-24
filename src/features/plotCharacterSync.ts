@@ -7,6 +7,7 @@ import { readPlotText } from "../core/plotFile";
 import {
   buildNewCharacterRecords,
   buildPlotCharacterUpdates,
+  inheritPendingCreationFields,
   parsePlotCharacters,
   plotCharactersDigest,
   type PlotCharacterSkip,
@@ -110,10 +111,18 @@ export async function syncPlotCharacters(
       // 資料にまだ無い人は**新規の人物案**として積む。台帳へは書かない
       // ——承認したときに `applyPendingUpdates` が採番して作る
       if (plan.creations.length > 0) {
-        await store.stage(buildNewCharacterRecords(plan.creations), {
-          source: "plot",
-          kind: "creation",
-        });
+        // 名前の候補から選んで置いた案（設計書6.4.8）は読みを持つが、
+        // plot.md は読みを書かない。**積み直しで読みを消さない**
+        const pending = (await store.loadAll()).updates
+          .filter((entry) => entry.kind === "creation")
+          .map((entry) => entry.character);
+        await store.stage(
+          inheritPendingCreationFields(
+            buildNewCharacterRecords(plan.creations),
+            pending
+          ),
+          { source: "plot", kind: "creation" }
+        );
       }
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
@@ -213,6 +222,32 @@ function describeSkipped(skipped: readonly PlotCharacterSkip[]): string[] {
     );
   }
   return lines;
+}
+
+/**
+ * plot.md を**こちらで書き足したあと**、反映済みの印を追いつかせる
+ * （設計書6.4.8「名前の候補を出す」）。
+ *
+ * 名前を選んで「主人公（相馬 誠）」と書き足したときは、同じ人を承認待ちへ
+ * 読みつきで置き、役名だけの古い案は片付けてある。印を古いままにすると、
+ * 次の保存で同じ人をもう一度積む（読みの無い案で）。
+ *
+ * **書き足す前の欄が反映済みだったときだけ**印を進める。反映していない
+ * 書きかけが欄にあれば、印は進めない——進めるとその書きかけが
+ * 一度も積まれないまま「反映済み」になる。
+ */
+export async function markPlotCharactersSynced(
+  work: WorkEntry,
+  beforeText: string,
+  afterText: string
+): Promise<boolean> {
+  const digestOf = (text: string): string =>
+    plotCharactersDigest(
+      parsePlotCharacters(parsePlotMarkdown(text).sections.mainCharacters).entries
+    );
+  if ((await readDigest(work)) !== digestOf(beforeText)) return false;
+  await writeDigest(work, digestOf(afterText));
+  return true;
 }
 
 /** 前回積んだ節の内容ハッシュ。無い・壊れていれば undefined */

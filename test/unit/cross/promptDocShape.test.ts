@@ -112,6 +112,7 @@ describe("プロンプト設計書の形", () => {
     ["P-41", "src/prompts/titleFit.ts", "TITLE_FIT_VERSION"],
     ["P-43", "src/prompts/plotDialogue.ts", "PLOT_DIALOGUE_VERSION"],
     ["P-44", "src/prompts/plotSummary.ts", "PLOT_SUMMARY_VERSION"],
+    ["P-45", "src/prompts/plotNameSuggest.ts", "PLOT_NAME_SUGGEST_VERSION"],
   ];
 
   test.each(IMPLEMENTED)(

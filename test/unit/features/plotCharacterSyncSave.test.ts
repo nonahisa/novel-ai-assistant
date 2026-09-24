@@ -20,6 +20,8 @@ const state = vi.hoisted(() => ({
   characters: [] as unknown[],
   loadErrors: [] as unknown[],
   stage: vi.fn(async () => undefined),
+  /** 既に積んである承認待ち（新規案の読みを引き継ぐ元。設計書6.4.8） */
+  pending: [] as Array<{ kind?: string; character: unknown; filePath: string }>,
 }));
 
 vi.mock("../../../src/core/plotFile", () => ({
@@ -37,12 +39,15 @@ vi.mock("../../../src/core/characterStore", () => ({
 vi.mock("../../../src/core/pendingUpdates", () => ({
   PendingUpdateStore: class {
     stage = state.stage;
+    async loadAll() {
+      return { updates: state.pending, errors: [] };
+    }
   },
 }));
 
 vi.mock("../../../src/core/logger", () => ({ logFailure: vi.fn() }));
 
-const { syncPlotCharacters } = await import(
+const { markPlotCharactersSynced, syncPlotCharacters } = await import(
   "../../../src/features/plotCharacterSync"
 );
 
@@ -74,6 +79,7 @@ describe("plot.md の保存で人物の更新案を積む", () => {
     announced = [];
     state.stage.mockClear();
     state.loadErrors = [];
+    state.pending = [];
     state.characters = [character("char_001", "灯", "主人公")];
     state.plotText = plot("- 灯：主人公。幽霊が見える。");
 
@@ -246,6 +252,68 @@ describe("plot.md の保存で人物の更新案を積む", () => {
     expect(result.staged).toBe(0);
     expect(state.stage).not.toHaveBeenCalled();
     // 覚え書きも残さない（次の保存でやり直せるようにする）
+    expect(disk.has(statePath)).toBe(false);
+  });
+
+  /*
+    名前の候補（設計書6.4.8）で「主人公（相馬 誠）」と書き足したあとの反映。
+    **「主人公（相馬 誠）」という名前の人物を積まない**、そして名前の候補から
+    読みつきで置いた案を、**読みの無い案で上書きしない**
+  */
+  test("「役名（名前）」の行は、名前で積み、役名は役割の欄へ入れる", async () => {
+    state.plotText = plot("- 主人公（相馬 誠）：冒険者試験に落ちた新人");
+
+    const result = await syncPlotCharacters(work);
+
+    expect(result.creations).toEqual(["相馬 誠"]);
+    const [staged] = state.stage.mock.calls[0] as unknown as [Character[]];
+    expect(staged[0].name).toBe("相馬 誠");
+    expect(staged[0].role).toBe("主人公");
+    expect(staged[0].aliases).toEqual([]);
+  });
+
+  test("積み直すときは、承認待ちの同じ名前の案から読みを引き継ぐ", async () => {
+    state.plotText = plot("- 主人公（相馬 誠）：冒険者試験に落ちた新人");
+    state.pending = [
+      {
+        kind: "creation",
+        filePath: "new_相馬 誠.json",
+        character: {
+          ...emptyCharacter("char_000", "相馬 誠"),
+          reading: "そうま まこと",
+          role: "主人公",
+        },
+      },
+    ];
+
+    await syncPlotCharacters(work);
+
+    const [staged] = state.stage.mock.calls[0] as unknown as [Character[]];
+    expect(staged[0].reading).toBe("そうま まこと");
+  });
+
+  test("書き足す前の欄が反映済みなら、書き足したあとの欄を反映済みにする", async () => {
+    const before = plot("- 灯：主人公。幽霊が見える。\n- 主人公：新人");
+    const after = plot("- 灯：主人公。幽霊が見える。\n- 主人公（相馬 誠）：新人");
+    state.plotText = before;
+    await syncPlotCharacters(work);
+    state.stage.mockClear();
+
+    expect(await markPlotCharactersSynced(work, before, after)).toBe(true);
+    state.plotText = after;
+    const result = await syncPlotCharacters(work);
+
+    // 名前の候補の側で読みつきの案を置いてあるので、積み直さない
+    expect(result.unchanged).toBe(true);
+    expect(state.stage).not.toHaveBeenCalled();
+  });
+
+  test("反映していない書きかけがあれば、反映済みの印を進めない", async () => {
+    const before = plot("- 灯：主人公。幽霊が見える。\n- 主人公：新人");
+    const after = plot("- 灯：主人公。幽霊が見える。\n- 主人公（相馬 誠）：新人");
+    // 一度も反映していない（覚え書きが無い）
+
+    expect(await markPlotCharactersSynced(work, before, after)).toBe(false);
     expect(disk.has(statePath)).toBe(false);
   });
 

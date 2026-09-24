@@ -131,6 +131,8 @@ const PASSES_BOTH_TOKENS: Array<[file: string, marker: string]> = [
   // 0.33.9で残っていた1か所（設計書6.77の第2段その1）。相談の会話を丸ごと
   // 送るので、ここが設定値のままだと非力な機械で `num_ctx` がいちばん育つ
   ["chatSettingsSync.ts", '"chat_settings_sync"'],
+  // プロットの名前の候補（P-45、設計書6.4.8）。人数で書く量が変わる
+  ["plotNameSuggest.ts", '"plot_name_suggest"'],
 ];
 
 describe("出力トークンの2つの欄の配り先", () => {

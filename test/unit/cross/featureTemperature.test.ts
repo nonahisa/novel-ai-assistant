@@ -31,6 +31,7 @@ import {
 } from "../../../src/prompts/blurb";
 import { OPENING_CHECK_TEMPERATURE } from "../../../src/prompts/openingCheck";
 import { NAME_SUGGEST_TEMPERATURE } from "../../../src/prompts/nameSuggest";
+import { PLOT_NAME_SUGGEST_TEMPERATURE } from "../../../src/prompts/plotNameSuggest";
 import { WORK_CHAT_TEMPERATURE } from "../../../src/prompts/workChat";
 import { SEARCH_TERMS_TEMPERATURE } from "../../../src/prompts/searchTerms";
 
@@ -79,6 +80,7 @@ const EXPECTED: Array<[string, number]> = [
   ["キャッチコピー（P-06）", CATCHPHRASE_TEMPERATURE],
   ["冒頭診断", OPENING_CHECK_TEMPERATURE],
   ["名前の候補（P-29）", NAME_SUGGEST_TEMPERATURE],
+  ["プロットの名前の候補（P-45）", PLOT_NAME_SUGGEST_TEMPERATURE],
   ["相談（P-20）", WORK_CHAT_TEMPERATURE],
   ["検索語づくり", SEARCH_TERMS_TEMPERATURE],
 ];
@@ -121,6 +123,7 @@ const PRODUCT_WIRED: Array<[string, string]> = [
   ["src/features/generateBlurb.ts", "BLURB_TEMPERATURE"],
   ["src/features/generateBlurb.ts", "CATCHPHRASE_TEMPERATURE"],
   ["src/features/nameCheck.ts", "NAME_SUGGEST_TEMPERATURE"],
+  ["src/features/plotNameSuggest.ts", "PLOT_NAME_SUGGEST_TEMPERATURE"],
   ["src/features/workChatPanel.ts", "WORK_CHAT_TEMPERATURE"],
   ["src/features/workChatPanel.ts", "SEARCH_TERMS_TEMPERATURE"],
   ["src/features/settingsPanel.ts", "SEARCH_TERMS_TEMPERATURE"],

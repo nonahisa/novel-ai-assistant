@@ -132,8 +132,11 @@ export interface NameSuggestPromptInput {
   plan: NameOriginPlan;
 }
 
-/** 表記の指示。**英字で書かせない**（gemma4:26b が Lukas などを英字で返した） */
-function scriptInstruction(plan: NameOriginPlan): string {
+/**
+ * 表記の指示。**英字で書かせない**（gemma4:26b が Lukas などを英字で返した）。
+ * プロットの名前の候補（P-45）も同じ文を使う
+ */
+export function scriptInstruction(plan: NameOriginPlan): string {
   if (plan.script === "kanji") {
     return "- name は漢字で書いてください（名はひらがなでもかまいません）。カタカナ・英字で書かないこと。";
   }
@@ -273,7 +276,11 @@ export function parseNameSuggestAnswer(text: string): {
   return { origin: cleanText(parsed.origin), candidates: readCandidates(parsed.candidates) };
 }
 
-function readCandidates(entries: readonly unknown[]): NameCandidate[] {
+/**
+ * 候補の並びを読む。**プロットの名前の候補（P-45）も同じ読み方を通す**
+ * （指示語のなぞりを弾く・同じ名前は先勝ち）。読み方を2つ持つと、片方だけ直る
+ */
+export function readCandidates(entries: readonly unknown[]): NameCandidate[] {
   const seen = new Set<string>();
   const candidates: NameCandidate[] = [];
   for (const entry of entries) {
@@ -322,7 +329,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * 構造化出力に対応していないモデルは、前置きやコードフェンスを付けてくる
  * （`openingCheck.ts` と同じ手）。
  */
-function extractJson(text: string): string | undefined {
+export function extractJson(text: string): string | undefined {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   const body = fenced ? fenced[1] : text;
   const start = body.indexOf("{");

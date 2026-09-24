@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   buildNewCharacterRecords,
   buildPlotCharacterUpdates,
+  inheritPendingCreationFields,
   parsePlotCharacters,
   plotCharactersDigest,
   PENDING_CREATION_ID,
 } from "../../../src/core/plotCharacterSync";
 import { emptyCharacter, type Character } from "../../../src/models/character";
+import { sha256Text } from "../../../src/core/hash";
 
 /**
  * plot.md の「主要登場人物」から設定資料への差分反映（設計書6.4.9）。
@@ -230,5 +232,63 @@ describe("更新案の組み立て", () => {
     );
     expect(plan.updates).toHaveLength(1);
     expect([...(plan.updates[0].summary ?? "")].length).toBeLessThanOrEqual(80);
+  });
+});
+
+/*
+  名前の候補（設計書6.4.8）で書き足す「役名（名前）」の形。
+  **「主人公（相馬 誠）」という名前の人物を作らない**
+*/
+describe("役名（名前）の行を読む", () => {
+  it("外側が役名なら、名前と役名に分ける", () => {
+    const parsed = parsePlotCharacters(
+      ["- 主人公（相馬 誠）：新人", "- 向こうの業者（ガルド）——封印の業者"].join("\n")
+    );
+    expect(parsed.entries).toEqual([
+      { name: "相馬 誠", summary: "新人", role: "主人公" },
+      { name: "ガルド", summary: "封印の業者", role: "向こうの業者" },
+    ]);
+  });
+
+  it("外側が名前なら分けない（読みを添えた書き方をそのまま読む）", () => {
+    const parsed = parsePlotCharacters("- 灯（あかり）：主人公");
+    expect(parsed.entries).toEqual([{ name: "灯（あかり）", summary: "主人公" }]);
+  });
+
+  it("役名を持たない行のダイジェストは、役名の欄を足す前と同じ綴じ方", () => {
+    // 足す前の綴じ方（名前と説明の2つ）をここで組み直して比べる。
+    // 変わると、反映済みの作品がすべて積み直しになる
+    const entries = [{ name: "灯", summary: "主人公" }];
+    expect(plotCharactersDigest(entries)).toBe(
+      sha256Text(JSON.stringify(["灯", "主人公"]))
+    );
+    expect(plotCharactersDigest(entries)).not.toBe(
+      plotCharactersDigest([{ name: "灯", summary: "主人公", role: "ヒロイン" }])
+    );
+  });
+
+  it("新規案は役名を役割の欄へ入れ、別名にはしない", () => {
+    const [record] = buildNewCharacterRecords([
+      { name: "相馬 誠", summary: "新人", role: "主人公" },
+    ]);
+    expect(record.role).toBe("主人公");
+    expect(record.aliases).toEqual([]);
+  });
+
+  it("積み直す新規案は、承認待ちの同じ名前の案から読みと役割だけを引き継ぐ", () => {
+    const [fresh] = buildNewCharacterRecords([{ name: "相馬 誠", summary: "新しい説明" }]);
+    const previous = {
+      ...character("char_000", "相馬 誠"),
+      reading: "そうま まこと",
+      role: "主人公",
+      summary: "古い説明",
+    };
+
+    const [inherited] = inheritPendingCreationFields([fresh], [previous]);
+
+    expect(inherited.reading).toBe("そうま まこと");
+    expect(inherited.role).toBe("主人公");
+    // プロットに書いてある欄はプロットが正しい
+    expect(inherited.summary).toBe("新しい説明");
   });
 });

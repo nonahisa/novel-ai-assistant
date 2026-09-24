@@ -23,7 +23,7 @@ import {
 // 使う側（テスト・画面）の書き方は今までどおりでよい
 export { buildNameEntries } from "../core/nameCollision";
 import { readPlotText } from "../core/plotFile";
-import { isBlankPlotSection, parsePlotMarkdown } from "../core/plotDoc";
+import { settingFromPlotText } from "../core/plotNameTargets";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
 import { AIError } from "../ai/types";
 import {
@@ -550,8 +550,15 @@ function logNameSuggestEnd(counts: {
   );
 }
 
-/** 系統を選ばせる。「指定なし」は既存の名前からAIに1つ推定させる */
-async function pickOrigin(): Promise<NameOrigin | "auto" | undefined> {
+/**
+ * 系統を選ばせる。「指定なし」は人物名と世界観からコードが決める。
+ * **プロットの名前の候補（P-45）も同じ選び方を使う**（`plotNameSuggest.ts`）
+ *
+ * @param title 選ぶ画面の題。省略すると名前の点検のもの
+ */
+export async function pickOrigin(
+  title = `名前の系統（${NAME_SUGGEST_COUNT}件の候補を出します）`
+): Promise<NameOrigin | "auto" | undefined> {
   const items: Array<{
     label: string;
     detail?: string;
@@ -569,7 +576,7 @@ async function pickOrigin(): Promise<NameOrigin | "auto" | undefined> {
   ];
 
   const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
-    title: `名前の系統（${NAME_SUGGEST_COUNT}件の候補を出します）`,
+    title,
     placeHolder: "系統は混ぜません。1つだけ選んでください",
     ignoreFocusOut: true,
   });
@@ -636,11 +643,8 @@ async function collectSuggestMaterial(
  */
 async function readSetting(work: WorkEntry): Promise<string> {
   try {
-    const sections = parsePlotMarkdown(await readPlotText(work)).sections;
-    return [sections.worldview, sections.setting]
-      .filter((body) => body && !isBlankPlotSection(body))
-      .map((body) => body.trim())
-      .join("\n");
+    // 読み方はプロットの名前の候補（P-45）と1つにしてある
+    return settingFromPlotText(await readPlotText(work));
   } catch {
     return "";
   }

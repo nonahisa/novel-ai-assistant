@@ -157,3 +157,97 @@ describe("予定の話の描き方", () => {
     expect(html).toContain('post("addPlannedEpisode")');
   });
 });
+
+/**
+ * 主要登場人物の名前の候補（設計書6.4.8、P-45）。
+ *
+ * 候補の欄の描き方（`renderNames`）を取り出して実際に描かせる。
+ * **書くのは拡張機能**で、画面は選んだ名前を返すだけ。
+ */
+describe("名前の候補の欄", () => {
+  it("画面のスクリプトが、構文として読める", () => {
+    const start = html.indexOf('<script nonce="NONCE123">') + '<script nonce="NONCE123">'.length;
+    const source = html.slice(start, html.indexOf("</script>", start));
+    expect(() => new Function(source)).not.toThrow();
+  });
+
+  function pick(name: string, until: string): string {
+    const start = html.indexOf(`function ${name}(`);
+    const end = html.indexOf(until, start);
+    return html.slice(start, end);
+  }
+
+  const renderNames = new Function(
+    "el",
+    "data",
+    "names",
+    pick("escapeHtml", "/**") + pick("renderNames", "function render()") + "renderNames();"
+  ) as (
+    el: Record<string, { innerHTML: string; textContent: string }>,
+    data: unknown,
+    names: unknown
+  ) => void;
+
+  function box() {
+    return { innerHTML: "", textContent: "" };
+  }
+  const labels = {
+    heading: "主要登場人物の名前",
+    label: "名前の候補を出す（AIを使う）",
+    detail: "説明",
+    apply: "選んだ名前を入れる",
+    clear: "閉じる",
+    none: "選ばない",
+    droppedLabel: "落とした候補",
+  };
+
+  it("人物ごとに「選ばない」を既定にして候補を並べ、落とした候補は理由つきで畳む", () => {
+    const el = {
+      namesHeading: box(),
+      nameActions: box(),
+      namesNote: box(),
+      nameResults: box(),
+    };
+    renderNames(el, { nameSuggest: labels }, {
+      status: "ready",
+      note: "系統：和風",
+      people: [
+        {
+          id: "1",
+          role: "主人公",
+          summary: "新人",
+          unsure: "",
+          candidates: [{ name: "相馬<誠>", reading: "そうま まこと", note: "" }],
+          dropped: [{ name: "相馬真琴", reason: "「相馬誠」と重なります" }],
+        },
+      ],
+    });
+
+    const out = el.nameResults.innerHTML;
+    expect(out).toContain('name="name-1" value="" checked> 選ばない');
+    // 名前は escapeHtml を通す
+    expect(out).toContain('value="相馬&lt;誠&gt;"');
+    expect(out).toContain("落とした候補 1件");
+    expect(out).toContain("相馬真琴：「相馬誠」と重なります");
+    expect(out).toContain('data-apply-names="1"');
+    expect(el.namesNote.textContent).toBe("系統：和風");
+  });
+
+  it("候補を考えているあいだは、入口を押せなくする", () => {
+    const el = {
+      namesHeading: box(),
+      nameActions: box(),
+      namesNote: box(),
+      nameResults: box(),
+    };
+    renderNames(el, { nameSuggest: labels }, { status: "busy", note: "考えています", people: [] });
+    expect(el.nameActions.innerHTML).toContain(" disabled>");
+    expect(el.nameResults.innerHTML).toBe("");
+  });
+
+  it("選んだ名前を返すだけで、書く口を持たない", () => {
+    expect(html).toContain('post("applyNames", { picks: picks })');
+    expect(html).toContain('post("suggestNames")');
+    expect(html).not.toContain("<textarea");
+  });
+});

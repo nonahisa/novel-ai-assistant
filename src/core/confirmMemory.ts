@@ -95,6 +95,10 @@ export const REMEMBERABLE_CONFIRMS: readonly RememberableConfirm[] = [
   // ── 有料のAIを使う断り（`confirmPaidUsage`）──
   { id: "ai.paid.checkOpening", label: "冒頭診断：料金の確認" },
   { id: "ai.paid.nameCheck", label: "名前の候補：料金の確認" },
+  {
+    id: "ai.paid.plotNameSuggest",
+    label: "プロットの人物の名前の候補：料金の確認",
+  },
   { id: "ai.paid.measureContext", label: "AIチューニング：料金の確認" },
   { id: "ai.paid.notationAdvice", label: "表記ゆれの相談：料金の確認" },
   { id: "ai.paid.chatSettingsSync", label: "相談を資料へ反映：料金の確認" },

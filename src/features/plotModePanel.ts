@@ -66,6 +66,15 @@ import {
   renameEpisodePlotFile,
   renumberEpisodePlotHeadings,
 } from "./episodePlotFiles";
+import type { AIRegistry } from "../ai/registry";
+import {
+  IDLE_PLOT_NAMES,
+  applyPlotNames,
+  suggestPlotNames,
+  type PlotNameChoice,
+  type PlotNameSession,
+  type PlotNamesView,
+} from "./plotNameSuggest";
 
 /**
  * プロットモードの画面（設計書6.4.8）。
@@ -88,6 +97,9 @@ import {
  * - 単話プロットを作る：既存の `createEpisodePlot`（6.36.2。新規作成だけ）
  * - 予定の話を足す：同じ `createEpisodePlot` に題を渡すだけ。**本文は作らない**
  * - AIの3つ：既存コマンドを `executeCommand` するだけ（写しを作らない）
+ * - 名前の候補（P-45）：plot.md の行へは本文と同じ書き戻しの口
+ *   （`writeTextFilePreservingFormat`）、資料へは承認待ちへ積むだけ
+ *   （`plotNameSuggest.ts`）
  *
  * 新しい書き込み経路は作らない。
  */
@@ -96,7 +108,9 @@ const openPanels = new Map<string, PlotModePanel>();
 
 export async function openPlotMode(
   context: vscode.ExtensionContext,
-  work: WorkEntry
+  work: WorkEntry,
+  /** 名前の候補（P-45）に使う。渡さなければその入口だけが押せない */
+  registry?: AIRegistry
 ): Promise<void> {
   // **左に plot.md、右にパネル。** 先に文書を開くのは、パネルが
   // 開いた側（ViewColumn.Two）へ収まるようにするためである
@@ -108,7 +122,7 @@ export async function openPlotMode(
     await existing.revealAndReload();
     return;
   }
-  const panel = new PlotModePanel(context, work, plotFile);
+  const panel = new PlotModePanel(context, work, plotFile, registry);
   openPanels.set(work.id, panel);
   await panel.initialize();
 }
@@ -178,7 +192,13 @@ type PanelMessage =
   /** 予定の話を、指定の話数へ差し込む */
   | { type: "insertPlanned"; chapter: number | null }
   /** 伏線の一覧を開く（一覧の数・回収予定を過ぎた知らせから） */
-  | { type: "openForeshadows" };
+  | { type: "openForeshadows" }
+  /** 役名だけの人物に名前の候補を出す（P-45） */
+  | { type: "suggestNames" }
+  /** 選んだ名前を入れる。**名前は控えと照らし合わせてから使う** */
+  | { type: "applyNames"; picks: PlotNameChoice[] }
+  /** 候補を閉じる（何も書かない） */
+  | { type: "clearNames" };
 
 class PlotModePanel {
   private readonly panel: vscode.WebviewPanel;
@@ -196,6 +216,13 @@ class PlotModePanel {
   private episodesLoaded = false;
   /** 回収予定を過ぎても未回収の伏線の数（設計書6.35）。一覧の上に出す */
   private overdueCount = 0;
+  /**
+   * 名前の候補を出したときの控え（P-45）。［入れる］はこれと照らし合わせる。
+   * 画面を読み直しても消さない——候補を選んでいる途中で plot.md を
+   * 保存しただけで、選んだものが消えては困る
+   */
+  private nameSession: PlotNameSession | undefined;
+  private namesView: PlotNamesView = IDLE_PLOT_NAMES;
   /**
    * 単話プロットの置き場の見張り（2026-09-23）。**外から**書き換えた単話
    * プロット（別のエディタ・同期・Git の復元）でも一覧を作り直す。
@@ -218,7 +245,8 @@ class PlotModePanel {
   constructor(
     context: vscode.ExtensionContext,
     private readonly work: WorkEntry,
-    private readonly plotFile: string
+    private readonly plotFile: string,
+    private readonly registry?: AIRegistry
   ) {
     this.panel = vscode.window.createWebviewPanel(
       "novelai.plotMode",
@@ -306,6 +334,8 @@ class PlotModePanel {
       switch (message.type) {
         case "ready":
           await this.load();
+          // 画面を作り直したとき（開き直し）も、出ている候補を並べ直す
+          this.postNames(this.namesView);
           return;
         case "reveal":
           await showPlotDocument(this.plotFile, message.line);
@@ -356,8 +386,20 @@ class PlotModePanel {
             work: this.work,
           });
           return;
+        case "suggestNames":
+          await this.suggestNames();
+          return;
+        case "applyNames":
+          await this.applyNames(message.picks);
+          return;
+        case "clearNames":
+          this.nameSession = undefined;
+          this.postNames(IDLE_PLOT_NAMES);
+          return;
       }
     } catch (error) {
+      // 候補づくりの途中で落ちたら、押せなくしたボタンを戻す
+      if (this.namesView.status === "busy") this.postNames(IDLE_PLOT_NAMES);
       const detail = messageOf(error);
       // **記録の直前に書き先を向ける**（0.43.3 と同じ）
       useLogFile(this.work.folderPath);
@@ -432,6 +474,60 @@ class PlotModePanel {
       (entry) => entry.heading === def.heading
     );
     if (added) await showPlotDocument(this.plotFile, added.line);
+  }
+
+  /**
+   * 役名だけの人物に名前の候補を出す（P-45、設計書6.4.8）。
+   *
+   * 出した候補は画面に並べるだけで、**何も書かない**。書くのは［入れる］
+   * （`applyNames`）のときだけ。
+   */
+  private async suggestNames(): Promise<void> {
+    if (!this.registry) {
+      void vscode.window.showWarningMessage(
+        "この画面からはAIを呼べません。プロットモードを開き直してください。"
+      );
+      return;
+    }
+    // 前の候補は、新しく出し始めたら捨てる（古い控えで書かないため）
+    this.nameSession = undefined;
+    const result = await suggestPlotNames(
+      this.work,
+      this.registry,
+      this.plotFile,
+      () => this.postNames({ status: "busy", note: "名前の候補を考えています…", people: [] })
+    );
+    if (!result) {
+      this.postNames(IDLE_PLOT_NAMES);
+      return;
+    }
+    this.nameSession = result.session;
+    this.postNames(result.view);
+  }
+
+  /** 選んだ名前を入れる。書けたら候補を片付けて読み直す */
+  private async applyNames(picks: PlotNameChoice[]): Promise<void> {
+    if (!this.nameSession) {
+      void vscode.window.showInformationMessage(
+        "候補の控えがありません。もう一度「名前の候補を出す」を押してください。"
+      );
+      this.postNames(IDLE_PLOT_NAMES);
+      return;
+    }
+    const written = await applyPlotNames(
+      this.work,
+      this.nameSession,
+      Array.isArray(picks) ? picks : []
+    );
+    if (!written) return;
+    this.nameSession = undefined;
+    this.postNames(IDLE_PLOT_NAMES);
+    await this.load();
+  }
+
+  private postNames(view: PlotNamesView): void {
+    this.namesView = view;
+    void this.panel.webview.postMessage({ type: "plotNames", data: view });
   }
 
   /**
@@ -955,6 +1051,7 @@ class PlotModePanel {
         headings,
         aiActions: aiActions(),
         syncActions: SYNC_ACTIONS,
+        nameSuggest: NAME_SUGGEST_ACTION,
         episodesHeading: `${this.unitNoun}の並び`,
         episodesNote:
           "上から読むと、作品の流れが分かります。" +
@@ -1020,6 +1117,23 @@ const SYNC_ACTIONS: ReadonlyArray<{
       "AIは使いません。承認するまで資料は変わりません。",
   },
 ];
+
+/**
+ * 名前の候補（P-45、設計書6.4.8）の入口。**コマンドは作らない**
+ * （候補を並べて選ぶのがこの画面の中なので、ほかから呼ぶ意味が無い）。
+ */
+const NAME_SUGGEST_ACTION = {
+  heading: "主要登場人物の名前",
+  label: "名前の候補を出す（AIを使う）",
+  detail:
+    "「主要登場人物」で役名だけの人物（主人公・ヒロイン・班長など）に、" +
+    "人物ごとに名前の候補を出します。選んで［入れる］を押したときだけ、" +
+    "プロットの行と設定資料（承認待ち）に書きます。",
+  apply: "選んだ名前を入れる",
+  clear: "閉じる",
+  none: "選ばない",
+  droppedLabel: "落とした候補",
+};
 
 /**
  * AIの入口に出す3つ。**名前も説明も `ACTION_TREE` から引く**
