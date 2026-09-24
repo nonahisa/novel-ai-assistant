@@ -228,6 +228,9 @@ const OPTIONS_TABLE =
   "synopsis: needsSubtitle。" +
   "episodePlot: plotPath※（単話プロットの相対パス）・chapterLabel。" +
   "chat: question※・history・adviceAnswers・writerStyle・featureIndex。" +
+  // 相談は往復しない（製品の needFiles の聞き直しが無い）。本文を渡さないと、
+  // 講評を頼んでも「本文を見せてください」で終わる（2026-09-24、実データの測定）
+  "講評など本文が要る問いは filePath でその話を渡してください。" +
   "name: characterName※（いまの名前）・origin。" +
   "chapter: nameOnly。" +
   "catchphrase: blurb・rejected。";

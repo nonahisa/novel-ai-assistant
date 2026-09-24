@@ -1419,9 +1419,18 @@ window.addEventListener('message', (event) => {
     return;
   }
   if (message.type === 'reading') {
-    // 材料が足りず、AIが別のファイルを求めた。何を見ているかを伝える
-    thinkingEl.textContent =
-      (message.files || []).join('・') + ' を読んでいます…';
+    // 材料が足りず、AIが別のファイルを求めた。何を見ているかを伝える。
+    // 見つからなかったものも出す（2026-09-24）。黙って飛ばすと、答えが
+    // 「本文を見せてください」で終わったときに理由が分からない
+    const files = message.files || [];
+    const missing = message.missing || [];
+    const parts = [];
+    if (files.length > 0) parts.push(files.join('・') + ' を読んでいます…');
+    if (missing.length > 0) {
+      parts.push('見つからなかった: ' + missing.join('・'));
+      if (files.length === 0) parts.push('考え直しています…');
+    }
+    thinkingEl.textContent = parts.join('　');
     return;
   }
   if (message.type === 'searched') {

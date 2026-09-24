@@ -405,3 +405,102 @@ export function sanitizeRequestedPaths(
 
   return cleaned;
 }
+
+/** 拡張子違いの引き当てを行う原稿の拡張子。作品の本文はこの2つで書かれる */
+const MANUSCRIPT_EXTENSIONS = [".txt", ".md"];
+
+/**
+ * 求められたファイルが無いとき、同じフォルダーで拡張子だけ違う原稿を探す。
+ *
+ * 実データの測定（2026-09-24）で、AIが `episode_0001.txt` を求めたのに
+ * 実物は `episode_0001.md` だった。AIはファイル名を当て推量で書くことがあり、
+ * 拡張子は特に取り違えやすい。
+ *
+ * **引き当てるのは候補がちょうど1つのときだけ。** 2つ以上あるとどれを
+ * 求めたのか決められず、当て推量で別の話を読ませると、違う話についての
+ * 答えが返る（実装ルール3：AIの出力を信用しない）。名前の一部が似ている
+ * だけのもの（`episode_00010`）は候補にしない。
+ *
+ * - `requested`：`sanitizeRequestedPaths` を通した相対パス（`/` 区切り）
+ * - `siblingNames`：同じフォルダーにあるファイルの名前
+ * - 戻り値：読むべき相対パス。引き当てられなければ `undefined`
+ *
+ * 拡張子の無い指定（`episode_0001`）も、候補が1つなら引き当てる。
+ * 原稿でない拡張子（`.json` など）は引き当てない——設定のJSONを求められて
+ * 同名のMarkdown（生成物）を渡すのは別物になる。
+ */
+export function findExtensionVariant(
+  requested: string,
+  siblingNames: readonly string[]
+): string | undefined {
+  const normalized = requested.replace(/\\/g, "/");
+  // 外へ出る指定には答えない。絞り込みで落ちているはずだが、
+  // この関数だけを使う呼び出し側が現れても外を指さないように
+  if (normalized.split("/").some((part) => part === "..")) return undefined;
+
+  const slash = normalized.lastIndexOf("/");
+  const folder = slash >= 0 ? normalized.slice(0, slash + 1) : "";
+  const base = normalized.slice(slash + 1);
+  const { stem, ext } = splitExtension(base);
+  if (!stem) return undefined;
+  if (ext && !MANUSCRIPT_EXTENSIONS.includes(ext.toLowerCase())) {
+    return undefined;
+  }
+
+  const candidates = new Set<string>();
+  for (const name of siblingNames) {
+    if (name === base) continue;
+    const other = splitExtension(name);
+    if (other.stem !== stem) continue;
+    const otherExt = other.ext.toLowerCase();
+    if (!MANUSCRIPT_EXTENSIONS.includes(otherExt)) continue;
+    if (otherExt === ext.toLowerCase()) continue;
+    candidates.add(name);
+  }
+
+  if (candidates.size !== 1) return undefined;
+  const [only] = candidates;
+  return folder + only;
+}
+
+function splitExtension(name: string): { stem: string; ext: string } {
+  const dot = name.lastIndexOf(".");
+  // 先頭の点（`.gitignore`）は拡張子ではない
+  if (dot <= 0) return { stem: name, ext: "" };
+  return { stem: name.slice(0, dot), ext: name.slice(dot) };
+}
+
+/** 見つからなかったときにAIへ示す、作品にあるファイルの候補 */
+export interface FileHint {
+  /** 作品フォルダーからの相対パス（`/` 区切り） */
+  path: string;
+  /** 「第1話 出会い」のような表示名 */
+  label: string;
+}
+
+/**
+ * 求められたファイルが見つからなかったとき、代わりに示す候補を選ぶ。
+ *
+ * **求められた名前と同じ番号を持つものを先に並べる。** AIは
+ * `episode_0015.txt` のように番号で求めることが多く、目次の先頭だけを
+ * 見せると肝心の話が入らない（219話の作品もある）。番号が当たらなければ
+ * 先頭から並べる。上限で切るので、送る量は作品の大きさに比例しない。
+ */
+export function pickFileHints(
+  missing: readonly string[],
+  available: readonly FileHint[],
+  limit: number
+): FileHint[] {
+  const wantedNumbers = new Set(missing.flatMap(numbersIn));
+  const matched = available.filter((hint) =>
+    numbersIn(hint.path).some((value) => wantedNumbers.has(value))
+  );
+  const rest = available.filter((hint) => !matched.includes(hint));
+  return [...matched, ...rest].slice(0, Math.max(0, limit));
+}
+
+/** ファイル名に含まれる数（`episode_0015.md` なら 15）。フォルダー名は見ない */
+function numbersIn(location: string): number[] {
+  const base = location.slice(location.replace(/\\/g, "/").lastIndexOf("/") + 1);
+  return (base.match(/\d+/g) ?? []).map(Number);
+}

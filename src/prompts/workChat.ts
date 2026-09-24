@@ -1,6 +1,6 @@
 import type { ChatContextKind } from "../core/chatContext";
 import { EXAMPLE_OTHER, EXAMPLE_PERSON } from "../core/exampleNames";
-import { runnableFeatureList } from "../core/chatEdit";
+import { runnableFeatureList, type FileHint } from "../core/chatEdit";
 import {
   parseProfileSignals,
   type AdviceProfileSignals,
@@ -87,7 +87,11 @@ import { closeTruncatedJson } from "../core/truncatedResponse";
 //       直す所が無ければそう書いてよい、を足した。あわせて助言方針（P-36）の
 //       「指摘は1つだけ」「比率は3対1」「一つだけ名指しで」を、件数を強いない
 //       言い方へ直した（送る本文が変わる）。読者の反応の約束（P-40）にも1行足した
-export const WORK_CHAT_VERSION = "3.18";
+// 3.19: 求めたファイルが見つからなかったとき、聞き直しの材料に【見つからなかった
+//       ファイル】と作品にあるファイルの候補を足した（2026-09-24、実データの測定。
+//       `episode_0001.txt` を求めて実物は `.md` だった。1つも読めないと聞き直さず、
+//       作者の画面には「本文を提示してください」だけが残っていた）。送る本文が変わる
+export const WORK_CHAT_VERSION = "3.19";
 
 /**
  * 送るときの温度。相談は考えを広げる場なので、抽出よりは揺らす。
@@ -355,6 +359,21 @@ export interface WorkChatInput {
    */
   requestedFiles?: Array<{ path: string; content: string }>;
   /**
+   * 前の応答で AI が求めたのに、作品フォルダーに無かったファイル。
+   *
+   * **黙って飛ばすと、作者には何が起きたか分からない**（2026-09-24、
+   * 実データの測定）。1つも読めないときに聞き直さず、1往復目の
+   * 「本文を提示してください」だけが画面に残った。見つからなかったことと、
+   * 作品にあるファイルの候補を渡し、今の「1回だけ」の聞き直しの中で答えさせる。
+   */
+  missingFiles?: {
+    paths: string[];
+    /** 作品にあるファイルの候補（`core/chatEdit.ts` の `pickFileHints` で選ぶ） */
+    available: FileHint[];
+    /** 候補を選んだ元の件数。一部だけ見せていることを明記するため */
+    availableTotal: number;
+  };
+  /**
    * いま対話で埋めようとしているプロットの項目（設計書6.4.7）。
    *
    * **これが無いと、書き込み先をAIが当てずっぽうで決める。** 対話で
@@ -425,6 +444,36 @@ export function buildWorkChatPrompt(input: WorkChatInput): string {
       `【あなたが求めたファイル】\n${files}\n\n` +
         "（これで材料は揃っています。needFiles は空にして、答えを書いてください）"
     );
+  }
+
+  const missing = input.missingFiles;
+  if (missing && missing.paths.length > 0) {
+    const lines = [
+      "【見つからなかったファイル】",
+      `あなたが求めた次のファイルは、作品フォルダーの中に見つかりませんでした: ${missing.paths.join("、")}`,
+    ];
+    if (missing.available.length > 0) {
+      // 一部だけ見せていることを明記する。「これで全部」と読まれると、
+      // 一覧に無い話を「無い」と作者へ答えてしまう
+      const shown =
+        missing.availableTotal > missing.available.length
+          ? `（全${missing.availableTotal}件のうち${missing.available.length}件）`
+          : "";
+      lines.push(
+        `作品にあるのは、たとえば次のファイルです${shown}:`,
+        ...missing.available.map((hint) => `- ${hint.path}（${hint.label}）`)
+      );
+    }
+    // **聞き直しは1回だけ**なので、ここで needFiles を返されてももう読まない。
+    // 読めたものが1つも無いときは、分かる範囲で答えるよう先に言っておく
+    if (!input.requestedFiles || input.requestedFiles.length === 0) {
+      lines.push(
+        "",
+        "今回はファイルの中身を渡せません。needFiles は空にしてください。",
+        "渡された範囲で答えられることは答え、足りないところは、どのファイル（上の一覧の名前）を見たかったのかを作者へ伝えてください。"
+      );
+    }
+    blocks.push(lines.join("\n"));
   }
 
   if (input.history.length > 0) {

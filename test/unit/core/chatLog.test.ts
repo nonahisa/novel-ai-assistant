@@ -34,6 +34,17 @@ describe("相談ログの組み立て", () => {
     expect(text).toContain("冒頭の説明を削ると引き締まります。");
   });
 
+  test("AIが求めたのに見つからなかったファイルを残す", () => {
+    // 答えが「本文を見せてください」で終わったとき、理由を追えるようにする
+    // （2026-09-24、実データの測定で黙って止まった）
+    const text = renderChatLogEntry(
+      entry({ missingFiles: ["episode_0001.txt"] }),
+      AT
+    );
+
+    expect(text).toContain("見つからなかったファイル: episode_0001.txt");
+  });
+
   test("質問と返事は引用にする", () => {
     // 見出し記号が混ざっても、文書の構造を壊さない
     const text = renderChatLogEntry(

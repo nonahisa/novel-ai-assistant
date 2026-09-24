@@ -98,12 +98,15 @@ import {
 import {
   describeChatEditDestination,
   describeChatEditRejection,
+  findExtensionVariant,
   parseChatEdit,
   parseChatLocate,
   parseChatRun,
+  pickFileHints,
   runnableFeatures,
   sanitizeRequestedPaths,
   type ChatEdit,
+  type FileHint,
   type ChatLocate,
   type ChatRunKind,
 } from "../core/chatEdit";
@@ -233,6 +236,12 @@ const HISTORY_TURNS = 12;
 const MAX_REQUESTED_FILES = 3;
 /** 1ファイルあたりに渡す上限 */
 const REQUESTED_FILE_CHARS = 6_000;
+/**
+ * 求められたファイルが見つからなかったとき、代わりに示す候補の数。
+ * 目次を全部並べると、219話の作品で数千字になる。番号の近いものを
+ * 先に選ぶ（`pickFileHints`）ので、この数で足りる
+ */
+const MISSING_FILE_HINTS = 8;
 /** 該当箇所の印を残す時間。見つけたあとは要らないので消す */
 const HIGHLIGHT_MS = 8_000;
 
@@ -1849,7 +1858,12 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       );
 
       const call = (
-        requestedFiles?: Array<{ path: string; content: string }>
+        requestedFiles?: Array<{ path: string; content: string }>,
+        missingFiles?: {
+          paths: string[];
+          available: FileHint[];
+          availableTotal: number;
+        }
       ) => {
         const userPrompt = buildWorkChatPrompt({
           workTitle: context?.work.title ?? "（作品を特定できません）",
@@ -1860,6 +1874,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           fromSelection: context?.fromSelection ?? false,
           reference: [...(context?.reference ?? []), ...found.reference],
           requestedFiles,
+          missingFiles,
           plotFocus: this.plotFocus,
           history: this.history.slice(-HISTORY_TURNS),
           question,
@@ -1941,20 +1956,36 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       let result = await call();
       let answer = parseWorkChatAnswer(result.text);
       let readFiles: string[] = [];
+      let missingFiles: string[] = [];
 
       // 材料が足りないと言われたら、作品フォルダーの中から渡して聞き直す。
       // **往復は1回だけ。** 際限なく求められると料金と待ち時間が読めなくなる
+      //
+      // **1つも読めなくても聞き直す**（2026-09-24、実データの測定）。
+      // 以前は読めたものが無いと聞き直さず、作者の画面には1往復目の
+      // 「本文を提示していただけますか」だけが残った——何が起きたのか
+      // 作者には分からない。見つからなかったことと、作品にあるファイルの
+      // 候補を渡して、同じ1回の枠の中で答えさせる
       const wanted = context
         ? sanitizeRequestedPaths(answer.needFiles, MAX_REQUESTED_FILES)
         : [];
       if (wanted.length > 0) {
-        const files = await this.readWorkFiles(context!.work, wanted);
-        if (files.length > 0) {
-          readFiles = files.map((file) => file.path);
-          this.postAll({ type: "reading", files: readFiles });
-          result = await call(files);
-          answer = parseWorkChatAnswer(result.text);
-        }
+        const { files, missing } = await this.readWorkFiles(
+          context!.work,
+          wanted
+        );
+        readFiles = files.map((file) => file.path);
+        missingFiles = missing;
+        this.postAll({ type: "reading", files: readFiles, missing });
+        const hints =
+          missing.length > 0
+            ? await this.missingFileHints(context!.work, missing)
+            : undefined;
+        result = await call(
+          files,
+          hints ? { paths: missing, ...hints } : undefined
+        );
+        answer = parseWorkChatAnswer(result.text);
       }
 
       if (!answer.reply) {
@@ -2022,6 +2053,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           options: answer.options,
           proposals: describeStagedProposals(staged),
           requestedFiles: readFiles,
+          missingFiles,
           elapsedMs: Date.now() - started,
           usage: result.usage,
         });
@@ -2940,35 +2972,113 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * パスの安全確認は `sanitizeRequestedPaths` で済ませているが、
    * **解決後のパスが本当に作品フォルダーの中かを、ここでもう一度確かめる。**
    * 記号リンクなどで外へ出られる余地を残さないため。
+   *
+   * **無いファイルは、拡張子だけ違う原稿が1つだけあればそれを読む**
+   * （`findExtensionVariant`。2026-09-24、`.txt` を求められて実物は `.md`
+   * だった）。それでも読めなかったものは `missing` に入れて返す——以前は
+   * 黙って飛ばしており、1つも読めないと作者には何が起きたか分からなかった。
    */
   private async readWorkFiles(
     work: WorkEntry,
     relativePaths: string[]
-  ): Promise<Array<{ path: string; content: string }>> {
+  ): Promise<{
+    files: Array<{ path: string; content: string }>;
+    missing: string[];
+  }> {
     const root = path.resolve(work.folderPath);
     const files: Array<{ path: string; content: string }> = [];
+    const missing: string[] = [];
+
+    const readText = async (relative: string): Promise<string | undefined> => {
+      const target = path.resolve(root, relative);
+      // 判定は `isPathInside` の1か所に寄せてある（写しを作ると網が落とす）。
+      // 作品フォルダーそのものはファイルではないので、中に数えなくてよい
+      if (!path.isPathInside(root, target)) return undefined;
+      try {
+        const bytes = await vscode.workspace.fs.readFile(path.toUri(target));
+        return new TextDecoder().decode(bytes);
+      } catch {
+        return undefined;
+      }
+    };
 
     for (const relative of relativePaths) {
-      const target = path.resolve(root, relative);
-      if (target !== root && !target.startsWith(root + path.separatorFor(root)))
-        continue;
-      try {
-        const bytes = await vscode.workspace.fs.readFile(
-          path.toUri(target)
-        );
-        const text = new TextDecoder().decode(bytes);
-        files.push({
-          path: relative,
-          content:
-            text.length > REQUESTED_FILE_CHARS
-              ? `${text.slice(0, REQUESTED_FILE_CHARS)}\n（以下省略）`
-              : text,
-        });
-      } catch {
-        // 読めないファイルは黙って飛ばす。AIの言うパスが実在するとは限らない
+      let actual = relative;
+      let text = await readText(relative);
+      if (text === undefined) {
+        const variant = await this.findVariantOnDisk(root, relative);
+        if (variant) {
+          text = await readText(variant);
+          if (text !== undefined) actual = variant;
+        }
       }
+      if (text === undefined) {
+        missing.push(relative);
+        continue;
+      }
+      // `a.txt` と `a.md` を両方求められ、どちらも `a.md` に行き着くことがある。
+      // 同じ中身を2回渡すと入力が膨らむだけなので1回にする
+      if (files.some((file) => file.path === actual)) continue;
+      files.push({
+        path: actual,
+        content:
+          text.length > REQUESTED_FILE_CHARS
+            ? `${text.slice(0, REQUESTED_FILE_CHARS)}\n（以下省略）`
+            : text,
+      });
     }
-    return files;
+    return { files, missing };
+  }
+
+  /**
+   * 求められたファイルと同じフォルダーを見て、拡張子違いの原稿を探す。
+   * フォルダーごと無い・読めないときは引き当てない（`undefined`）。
+   */
+  private async findVariantOnDisk(
+    root: string,
+    relative: string
+  ): Promise<string | undefined> {
+    const folder = path.dirname(path.resolve(root, relative));
+    try {
+      const entries = await vscode.workspace.fs.readDirectory(
+        path.toUri(folder)
+      );
+      const names = entries
+        .filter(([, type]) => (type & vscode.FileType.File) !== 0)
+        .map(([name]) => name);
+      return findExtensionVariant(relative, names);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * 求められたファイルが見つからなかったとき、AIへ示す候補を組む。
+   *
+   * **目次（全体像の話の一覧）と同じ走査から作る。** 別の数え方をすると、
+   * 全体像には載っているのに候補には無い、という食い違いが起きる。
+   * 全体像の話の一覧はファイル名を持たないので、ここでは相対パスを添える
+   * （AIが次に作者へ「どのファイルか」を正しく伝えられるように）。
+   */
+  private async missingFileHints(
+    work: WorkEntry,
+    missing: string[]
+  ): Promise<{ available: FileHint[]; availableTotal: number }> {
+    try {
+      const root = path.resolve(work.folderPath);
+      const scan = await scanWork(work);
+      const all: FileHint[] = scan.episodes.map((episode) => ({
+        path: path.relative(root, episode.filePath).replace(/\\/g, "/"),
+        label: episodeLabel(episode),
+      }));
+      return {
+        available: pickFileHints(missing, all, MISSING_FILE_HINTS),
+        availableTotal: all.length,
+      };
+    } catch {
+      // 走査できなくても「見つからなかった」ことだけは伝えられる
+      return { available: [], availableTotal: 0 };
+    }
   }
 
   /** 開いているファイルから、相談の材料を組み立てる */

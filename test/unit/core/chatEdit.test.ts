@@ -3,7 +3,9 @@ import {
   describeChatEditButton,
   describeChatEditDestination,
   parseChatEdit,
+  findExtensionVariant,
   parseChatRun,
+  pickFileHints,
   sanitizeRequestedPaths,
 } from "../../../src/core/chatEdit";
 
@@ -236,5 +238,109 @@ describe("読み込みを求められたパスの絞り込み", () => {
   test("配列でなければ何も読まない", () => {
     expect(sanitizeRequestedPaths(undefined, 3)).toEqual([]);
     expect(sanitizeRequestedPaths("設定/plot.md", 3)).toEqual([]);
+  });
+});
+
+/**
+ * AIが求めたファイルが無いときの拡張子違いの引き当て（2026-09-24、実データの測定）。
+ *
+ * AIは `episode_0001.txt` を求めたが、実物は `episode_0001.md` だった。
+ * 読めないまま黙って止まり、作者の画面には「本文を提示してください」だけが
+ * 残った。**引き当てるのは候補が1つに決まるときだけ**——当て推量で
+ * 別の話を読ませると、違う話についての講評が返る（実装ルール3）。
+ */
+describe("求められたファイルの拡張子違いを引き当てる", () => {
+  test("拡張子だけ違う原稿が1つだけあれば、それを読む", () => {
+    expect(
+      findExtensionVariant("episode_0001.txt", [
+        "episode_0001.md",
+        "episode_0002.md",
+      ])
+    ).toBe("episode_0001.md");
+    // 逆向き（.md を求められて .txt がある）も同じ
+    expect(findExtensionVariant("第1話.md", ["第1話.txt"])).toBe("第1話.txt");
+  });
+
+  test("下のフォルダーのパスは、フォルダーを付けたまま返す", () => {
+    expect(
+      findExtensionVariant("本編/episode_0003.txt", ["episode_0003.md"])
+    ).toBe("本編/episode_0003.md");
+  });
+
+  test("候補が2つあれば引き当てない", () => {
+    // 拡張子の無い指定は .txt と .md のどちらにも当たる。どちらかを
+    // 選ぶ根拠が無いので読まない
+    expect(
+      findExtensionVariant("episode_0001", [
+        "episode_0001.txt",
+        "episode_0001.md",
+      ])
+    ).toBeUndefined();
+    // 大文字小文字だけ違う2つも、どちらか決められない
+    expect(findExtensionVariant("a.txt", ["a.md", "a.MD"])).toBeUndefined();
+  });
+
+  test("拡張子の無い指定は、候補が1つなら引き当てる", () => {
+    expect(findExtensionVariant("episode_0001", ["episode_0001.md"])).toBe(
+      "episode_0001.md"
+    );
+  });
+
+  test("候補が無ければ引き当てない", () => {
+    expect(
+      findExtensionVariant("episode_0001.txt", [
+        "episode_0002.md",
+        "episode_0001.json",
+      ])
+    ).toBeUndefined();
+    // 名前の一部が同じだけのものは別のファイル
+    expect(
+      findExtensionVariant("episode_0001.txt", [
+        "episode_00010.md",
+        "episode_0001_改.md",
+      ])
+    ).toBeUndefined();
+  });
+
+  test("原稿でない拡張子は引き当てない", () => {
+    // 設定のJSONを求められて、同じ名前のMarkdownを渡すのは別物
+    expect(
+      findExtensionVariant("設定/characters.json", ["characters.md"])
+    ).toBeUndefined();
+  });
+
+  test("親フォルダーへ出るパスは今までどおり断る", () => {
+    // 絞り込み（sanitizeRequestedPaths）が先に落とすので、引き当てまで届かない
+    expect(sanitizeRequestedPaths(["../外/episode_0001.txt"], 3)).toEqual([]);
+    // 引き当ての側も、外へ出る指定には答えない（二重の歯止め）
+    expect(
+      findExtensionVariant("../episode_0001.txt", ["episode_0001.md"])
+    ).toBeUndefined();
+  });
+});
+
+describe("見つからなかったときに示すファイルの候補", () => {
+  const available = [
+    { path: "episode_0001.md", label: "第1話 出会い" },
+    { path: "episode_0002.md", label: "第2話 別れ" },
+    { path: "episode_0003.md", label: "第3話 再会" },
+    { path: "episode_0015.md", label: "第15話 旅立ち" },
+  ];
+
+  test("求められた番号と同じ番号のものを先に並べる", () => {
+    const hints = pickFileHints(["episode_0015.txt"], available, 3);
+    expect(hints.map((hint) => hint.path)).toEqual([
+      "episode_0015.md",
+      "episode_0001.md",
+      "episode_0002.md",
+    ]);
+  });
+
+  test("番号が当たらなければ先頭から並べ、上限で切る", () => {
+    const hints = pickFileHints(["あとがき.txt"], available, 2);
+    expect(hints.map((hint) => hint.path)).toEqual([
+      "episode_0001.md",
+      "episode_0002.md",
+    ]);
   });
 });

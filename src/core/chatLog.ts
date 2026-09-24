@@ -88,6 +88,12 @@ export interface ChatLogEntry {
   proposals?: string[];
   /** AIが求めた追加のファイル */
   requestedFiles?: string[];
+  /**
+   * AIが求めたのに作品フォルダーに無かったファイル。
+   * 答えが「本文を見せてください」で終わったとき、なぜそうなったかを
+   * あとから追えるようにする（2026-09-24、実データの測定で黙って止まった）
+   */
+  missingFiles?: string[];
   elapsedMs?: number;
   usage?: { inputTokens: number; outputTokens: number };
   /** 失敗したとき */
@@ -188,6 +194,9 @@ export function renderChatLogEntry(
   }
   if (entry.requestedFiles && entry.requestedFiles.length > 0) {
     facts.push(`AIが求めたファイル: ${entry.requestedFiles.join("、")}`);
+  }
+  if (entry.missingFiles && entry.missingFiles.length > 0) {
+    facts.push(`見つからなかったファイル: ${entry.missingFiles.join("、")}`);
   }
   if (entry.elapsedMs !== undefined) {
     facts.push(`所要: ${(entry.elapsedMs / 1000).toFixed(1)}秒`);
