@@ -1,3 +1,4 @@
+import { removeQuoted } from "./quotedSpans";
 import { looksArchaicText } from "./typoCheckValidation";
 
 /**
@@ -75,8 +76,17 @@ const PLURAL_FORMS = [
   "吾々",
 ] as const;
 
-/** 台詞の外だけを見るために落とす範囲 */
-const DIALOGUE = /[「『][^」』]*[」』]/gu;
+/**
+ * 台詞の外だけを見るために、台詞を落とす。
+ *
+ * **入れ子のかぎを数える**（`quotedSpans.ts`。2026-09-25）。台詞の中の『』で
+ * 台詞が閉じたと見ると、残りの台詞の「俺」を地の文の一人称として数える。
+ * **最後まで閉じない台詞は落とさない**——作品全体を繋いだ本文で、末尾近くの
+ * 閉じ忘れ1つが後ろの地の文をまるごと消すと、語り手が決まらなくなる。
+ */
+function withoutDialogue(text: string): string {
+  return removeQuoted(text, { unclosedToEnd: false });
+}
 
 /** これ以上出てこなければ、語り手の一人称とは言えない */
 const MIN_FIRST_PERSON_HITS = 10;
@@ -109,7 +119,7 @@ export interface WorkStyleFacts {
  * 突出しないので、そこで無理に決めると嘘を教えることになる。
  */
 export function detectFirstPerson(bodyText: string): string | null {
-  const narration = bodyText.replace(DIALOGUE, "");
+  const narration = withoutDialogue(bodyText);
   if (narration.length < 500) return null;
   const counts = countNarrationFirstPersons(narration);
 
@@ -138,7 +148,7 @@ export function detectFirstPerson(bodyText: string): string | null {
 export function countNarrationFirstPersons(
   bodyText: string
 ): Map<string, number> {
-  let narration = bodyText.replace(DIALOGUE, "");
+  let narration = withoutDialogue(bodyText);
   // 複数形を先に落とす（「私たち」を「私」と数えないため）
   for (const plural of PLURAL_FORMS) {
     narration = narration.split(plural).join(" ");
@@ -154,6 +164,30 @@ export function countNarrationFirstPersons(
     rest = parts.join("\u0000");
   }
   return counts;
+}
+
+/**
+ * 1つの場面の地の文が一人称で語られているとき、その一人称（と数）を返す。
+ *
+ * 推敲の「視点」の札は**一人称の場面でしか出さない**（2026-09-25 の2回目。
+ * 三人称の場面・代名詞の無い一人称の場面で、当たりが0・誤検出ばかりだった）。
+ * その判定に使う。決め方は作品全体の `detectFirstPerson` と同じ
+ * （いちばん多い一人称が、全体の一定の割合を占めること）で、
+ * 場面は短いので下限の数だけを呼ぶ側が決める。
+ */
+export function narrationFirstPersonOf(
+  text: string,
+  minHits: number
+): { word: string; hits: number } | null {
+  let best: { word: string; hits: number } | null = null;
+  let total = 0;
+  for (const [word, hits] of countNarrationFirstPersons(text)) {
+    total += hits;
+    if (!best || hits > best.hits) best = { word, hits };
+  }
+  if (!best || best.hits < minHits) return null;
+  if (best.hits / total < MIN_FIRST_PERSON_SHARE) return null;
+  return best;
 }
 
 /** 本文と作者の設定から、その作品の作法をまとめる */

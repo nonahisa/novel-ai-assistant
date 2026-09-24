@@ -120,6 +120,12 @@ describe("語尾単調を数え直す", () => {
     expect(result.accepted).toHaveLength(0);
     expect(result.rejected[0]?.reason).toBe("not_monotonous");
   });
+
+  it("台詞の中に『』があっても、台詞の残りを地の文として数えない（2026-09-25）", () => {
+    // 「」の中の』を台詞の終わりと見ると、後ろの4文が地の文の連続に見える
+    const text = "「俺は『谷』へ行った。川を渡った。山を越えた。海を見た。」と父は語る。";
+    expect(findMonotonousRuns(text, 1)).toEqual([]);
+  });
 });
 
 describe("語尾の数え方そのもの", () => {

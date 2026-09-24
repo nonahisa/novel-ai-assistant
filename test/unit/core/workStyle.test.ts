@@ -5,6 +5,7 @@ import {
   buildStyleNote,
 } from "../../../src/core/workStyle";
 import { looksArchaicText } from "../../../src/core/typoCheckValidation";
+import { countNarrationFirstPersons } from "../../../src/core/workStyleFacts";
 
 /**
  * 作品の作法（設計書6.8.14）。
@@ -50,6 +51,14 @@ describe("語り手の一人称を数える", () => {
 
   it("短すぎる本文では決めない", () => {
     expect(detectFirstPerson("　僕は歩いた。")).toBeNull();
+  });
+
+  it("台詞の中の『』で台詞が閉じたと見ない（入れ子のかぎ。2026-09-25）", () => {
+    // 「」の中の』を台詞の終わりと見ると、台詞の残りの「俺」を地の文として数える
+    const counts = countNarrationFirstPersons(
+      "「俺は『死の谷』へ行く。俺が戻るまで待て」と父は言った。"
+    );
+    expect(counts.get("俺")).toBeUndefined();
   });
 
   it("「私たち」を「私」と数えない", () => {

@@ -22,12 +22,17 @@ import type { Chunk } from "../../../src/core/chunker";
  * **指示の言葉がそのまま返る形**（CLAUDE.md の失敗3）を落とすことの両方を見る。
  */
 
-// 台（seeded/contradiction）の第1話に仕込んだ3行を含む本文。行は 11〜14 行目
+// 台（seeded/contradiction）の第1話に仕込んだ3行を含む本文。行は 11〜14 行目。
+// **15行目から後は「俺」の地の文**——視点の札は一人称の場面でしか出さない
+// （2026-09-25 の2回目。三人称の場面では当たりが0だった）ので、台の第1話と
+// 同じく、この場面が「俺」の語りだと数えられるだけの一人称を置く
 const TEXT = [
   "　最初にそれを聞いたとき、俺は損をしたのだと思った。",
   "　蓬田さんは内心、この無口な配達員を気に入っていた。",
   "　千夏は伝票を揃えながら、相沢くんはきっと来月も水筒を忘れるだろうと思い、少しだけ胸が温かくなった。",
   "「蓬田さんは本当はさびしいんだよ」",
+  "　俺は坂の途中で足を止めた。",
+  "　俺の足首はまだ痛んだ。",
 ].join("\n");
 
 function chunkOf(text: string): Chunk {
@@ -217,6 +222,246 @@ describe("視点の札で落とすもの", () => {
   });
 });
 
+/**
+ * 2026-09-25 夜の測定（作者の作品3作12話）で、通った「視点」は e4b 2件・26b 15件、
+ * **すべて誤検出**だった。形は4つ——推し量り、丸括弧の心の声、語り手自身の
+ * 心の声や地の文の説明、三人称の場面。ここに並べる説明と本文は、その形を
+ * 写した作り例である（作者の本文は写していない）。
+ */
+function viewpoint(
+  line: number,
+  original: string,
+  explanation: string,
+  text: string
+) {
+  return validateProofreadIssues(
+    {
+      issues: [
+        {
+          line,
+          original,
+          suggestion: "",
+          reason: "視点",
+          explanation,
+          confidence: "medium",
+        },
+      ],
+    },
+    chunkOf(text)
+  );
+}
+
+/** 「俺」の語りの場面（1〜4行目）。5行目以降を足して使う */
+const ORE_SCENE = [
+  "　俺は坂の途中で足を止めた。",
+  "　俺の足首はまだ痛んだ。",
+  "　俺は伝票の束を抱え直した。",
+  "　俺は窓口の椅子に座った。",
+].join("\n");
+
+describe("視点の札を絞る（2026-09-25 の2回目）", () => {
+  test("三人称の場面では出さない（not_first_person_scene）", () => {
+    const text =
+      "　宰相は書類を国王の前に置いた。\n" +
+      "　国王は内心、この若い宰相を疎ましく思っていた。\n" +
+      "　宰相は一礼して下がった。";
+    const result = viewpoint(
+      12,
+      "国王は内心、この若い宰相を疎ましく思っていた。",
+      "宰相の語りの中に、国王の『疎ましく思っていた』という心が書かれています",
+      text
+    );
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected.map((entry) => entry.reason)).toEqual([
+      "not_first_person_scene",
+    ]);
+  });
+
+  test("場面の区切りの後が三人称なら、そこでは出さない。前の一人称の場面では出す", () => {
+    const text =
+      `${ORE_SCENE}\n` +
+      "　蓬田さんは内心、この無口な配達員を気に入っていた。\n" +
+      "◆◇◆◇\n" +
+      "　宰相は書類を置いた。\n" +
+      "　国王は内心、宰相を疎ましく思っていた。";
+    const before = viewpoint(
+      15,
+      "蓬田さんは内心、この無口な配達員を気に入っていた。",
+      "「俺」の語りなのに、蓬田さんの『気に入っていた』が言い切られています",
+      text
+    );
+    expect(before.accepted.map((issue) => issue.line)).toEqual([15]);
+    const after = viewpoint(
+      18,
+      "国王は内心、宰相を疎ましく思っていた。",
+      "「俺」の語りなのに、国王の『疎ましく』が言い切られています",
+      text
+    );
+    expect(after.rejected.map((entry) => entry.reason)).toEqual([
+      "not_first_person_scene",
+    ]);
+  });
+
+  test("推し量り（〜のか、〜らしい、〜ようだ、〜だろう）は視点のずれではない", () => {
+    const text =
+      `${ORE_SCENE}\n` +
+      "　無意識なのか、騎士は顔の古傷をなでている。\n" +
+      "　騎士は顔をあげそうになって、意思の力で押さえ込んだらしい。\n" +
+      "　騎士は少しむっとしたようだ。\n" +
+      "　あの洞窟には大きな群れは住めないだろう。";
+    const cases: Array<[number, string]> = [
+      [15, "顔の古傷をなでている。"],
+      [16, "意思の力で押さえ込んだらしい。"],
+      [17, "騎士は少しむっとしたようだ。"],
+      [18, "大きな群れは住めないだろう。"],
+    ];
+    for (const [line, original] of cases) {
+      const result = viewpoint(
+        line,
+        original,
+        "「俺」の語りの中に、騎士の心の動きが書かれています",
+        text
+      );
+      expect({ line, reasons: result.rejected.map((entry) => entry.reason) }).toEqual({
+        line,
+        reasons: ["narrator_guess"],
+      });
+    }
+  });
+
+  test("「〜だろうと思い」は人物の考えの中身であって、語り手の推し量りではない（仕込み C）", () => {
+    const text =
+      `${ORE_SCENE}\n` +
+      "　千夏は伝票を揃えながら、相沢くんはきっと来月も水筒を忘れるだろうと思い、少しだけ胸が温かくなった。";
+    const result = viewpoint(
+      15,
+      "少しだけ胸が温かくなった。",
+      "相沢の語りの中に、千夏の「胸が温かくなった」という感覚が書かれています",
+      text
+    );
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toHaveLength(1);
+  });
+
+  test("丸括弧の心の声は、誰の考えか作者が示している（inner_voice）", () => {
+    const text = `${ORE_SCENE}\n（あいつはもうちょい考えるべきだったかもしれへんな）\n　騎士は(なんで俺が)と思った。`;
+    const first = viewpoint(
+      15,
+      "（あいつはもうちょい考えるべきだったかもしれへんな）",
+      "地の文に括弧書きの心の声が割り込み、誰の考えか分かりません",
+      text
+    );
+    expect(first.rejected.map((entry) => entry.reason)).toEqual(["inner_voice"]);
+    const second = viewpoint(
+      16,
+      "なんで俺が",
+      "「俺」の語りなのに、騎士の心の中が書かれています",
+      text
+    );
+    expect(second.rejected.map((entry) => entry.reason)).toEqual(["inner_voice"]);
+  });
+
+  test("語り手自身の心の声・考え・地の文の説明は、視点のずれではない（narrator_own_mind）", () => {
+    const text = `${ORE_SCENE}\n　弱めと言ったつもりだったんだけど、ある意味予想通りだ。`;
+    const explanations = [
+      "「俺」の心の声が、地の文に直接入り込んでいます",
+      "「俺」の思考が、地の文の独白として混ざっています",
+      "「俺」の視点の中に、一般的な知識の解説が地の文として入り込んでいます",
+      "「俺」の視点の中に、状況を客観的に説明する地の文が混ざっています",
+      "兵士の視点の中に、兵士自身の「予想通り」という内面的な感覚が書かれています",
+      "「俺」の語りの中に、突如「僕」という一人称が混じっています",
+      "一人称が「俺」から「おれ」に変わっています",
+    ];
+    for (const explanation of explanations) {
+      const result = viewpoint(15, "ある意味予想通りだ。", explanation, text);
+      expect({ explanation, reasons: result.rejected.map((entry) => entry.reason) }).toEqual({
+        explanation,
+        reasons: ["narrator_own_mind"],
+      });
+    }
+  });
+
+  test("ほかの人物の心も、視点の移りも言っていない説明は落とす（no_other_mind）", () => {
+    const text = `${ORE_SCENE}\n　あの洞窟はおそらく群れの巣だ。\n　ナイン様は三百歳を超えても、若く見える。`;
+    const first = viewpoint(
+      15,
+      "あの洞窟はおそらく群れの巣だ。",
+      "「俺」の視点なのに、群れであるという確信が地の文で言い切られています",
+      text
+    );
+    expect(first.rejected.map((entry) => entry.reason)).toEqual(["no_other_mind"]);
+    const second = viewpoint(
+      16,
+      "若く見える。",
+      "トゥエルの語りの中に、トゥエルが知り得ないナインの年齢への言及があります",
+      text
+    );
+    expect(second.rejected.map((entry) => entry.reason)).toEqual(["no_other_mind"]);
+  });
+
+  test("語り手が「知らない」と断っている形は、推し量りと同じく落とす", () => {
+    const text = `${ORE_SCENE}\n　ナイン様が何歳なのかは知らないが、若く見える。`;
+    const result = viewpoint(
+      15,
+      "若く見える。",
+      "「俺」の語りなのに、ナインの年齢の感覚が書かれています",
+      text
+    );
+    expect(result.rejected.map((entry) => entry.reason)).toEqual(["narrator_guess"]);
+  });
+
+  test("段落の途中で視点が移る指摘は残す", () => {
+    const text = `${ORE_SCENE}\n　千夏は窓の外を見て、明日は晴れると信じていた。`;
+    const result = viewpoint(
+      15,
+      "明日は晴れると信じていた。",
+      "俺の語りの途中から、千夏の視点に移っています",
+      text
+    );
+    expect(result.rejected).toEqual([]);
+  });
+
+  test("通った視点の説明には、必ず「わざとなら、このままで構いません」を添える", () => {
+    const text = `${ORE_SCENE}\n　蓬田さんは内心、この無口な配達員を気に入っていた。`;
+    const result = viewpoint(
+      15,
+      "蓬田さんは内心、この無口な配達員を気に入っていた。",
+      "「俺」の語りなのに、蓬田さんの『気に入っていた』が言い切られています",
+      text
+    );
+    expect(result.accepted[0]?.explanation).toBe(
+      "「俺」の語りなのに、蓬田さんの『気に入っていた』が言い切られています" +
+        "（わざとなら、このままで構いません）"
+    );
+  });
+
+  test("説明が空・札の名前だけの視点は、誰の心か確かめられないので落とす", () => {
+    const text = `${ORE_SCENE}\n　蓬田さんは内心、この無口な配達員を気に入っていた。`;
+    for (const explanation of ["", "視点"]) {
+      const result = viewpoint(
+        15,
+        "蓬田さんは内心、この無口な配達員を気に入っていた。",
+        explanation,
+        text
+      );
+      expect(result.rejected.map((entry) => entry.reason)).toEqual(["no_other_mind"]);
+    }
+  });
+
+  test("すでに「わざと」の断りがある説明には重ねない", () => {
+    const text = `${ORE_SCENE}\n　蓬田さんは内心、この無口な配達員を気に入っていた。`;
+    const result = viewpoint(
+      15,
+      "蓬田さんは内心、この無口な配達員を気に入っていた。",
+      "「俺」の語りに蓬田さんの内心が入っています。わざとなら問題ありません",
+      text
+    );
+    expect(result.accepted[0]?.explanation).toBe(
+      "「俺」の語りに蓬田さんの内心が入っています。わざとなら問題ありません"
+    );
+  });
+});
+
 describe("札と指示", () => {
   test("札は7つで、視点が入っている", () => {
     expect(PROOFREAD_REASONS).toHaveLength(7);
@@ -225,7 +470,7 @@ describe("札と指示", () => {
     expect(explainProofreadReason("視点")).toContain("わざとなら");
   });
 
-  test("プロンプトに視点の定義と「推し量りは違う」が入り、版は 1.10", () => {
+  test("プロンプトに視点の定義と「推し量りは違う」が入り、版は 1.11", () => {
     const prompt = buildProofreadPrompt({
       chunkTextWithLineNumbers: "1: 本文",
       narrativeStyle: "",
@@ -234,6 +479,18 @@ describe("札と指示", () => {
     expect(prompt).toContain("7. 視点");
     expect(prompt).toContain("視点のずれではありません");
     expect(prompt).toContain("、視点");
-    expect(PROOFREAD_VERSION).toBe("1.10");
+    expect(PROOFREAD_VERSION).toBe("1.11");
+  });
+
+  test("1.11：視点は一人称の場面の2つの形だけ。語り手自身の心の声・丸括弧は挙げない", () => {
+    const prompt = buildProofreadPrompt({
+      chunkTextWithLineNumbers: "1: 本文",
+      narrativeStyle: "",
+      maxIssues: 3,
+    });
+    // 1.10 の3つ目（括弧の無い心の声）は、語り手自身の心の声を拾わせていた
+    expect(prompt).not.toContain("誰の考えなのか分からない");
+    expect(prompt).toContain("語り手自身の心の声");
+    expect(prompt).toContain("丸括弧");
   });
 });

@@ -1,5 +1,8 @@
 import type { Character } from "../models/character";
 import { detectNarrator, type NarratorHint } from "./narrator";
+import { VIEWPOINT_INTENT_NOTE } from "./proofreadValidation";
+import { maskQuoted } from "./quotedSpans";
+import { sceneRanges, type SceneRange } from "./sceneBreaks";
 import { blankMemoLines } from "./sceneMemo";
 import { countNarrationFirstPersons } from "./workStyleFacts";
 
@@ -20,7 +23,9 @@ import { countNarrationFirstPersons } from "./workStyleFacts";
  *
  * 1. 作品全体で語り手が1人に決まる（`detectNarrator`。一人称が人物1人に結び付く）
  * 2. **その話も**、その一人称で語られている（多視点の作品で、千夏の「私」の章に
- *    出る「春人は」を拾わないため）
+ *    出る「春人は」を拾わないため）。**さらに場面ごとに**確かめ、場面の区切り
+ *    （「◆◇◆◇」「＊＊＊」。`sceneBreaks.ts`）の後の三人称の場面は見ない
+ *    （2026-09-25 の2回目）
  * 3. 名前の形が、ほかの人物の名前・別名と重ならない（兄妹で同じ苗字なら苗字は見ない）
  * 4. 見つかった数が、その話の一人称の数に比べて少ない（多ければ、三人称の地の文に
  *    心の声の「俺」が混じる書き方なので、よじれではなく作者の文体である）
@@ -30,8 +35,15 @@ import { countNarrationFirstPersons } from "./workStyleFacts";
 
 /** その話の地の文に、語り手の一人称が最低これだけ出ていること */
 const MIN_EPISODE_FIRST_PERSON_HITS = 3;
-/** その話の地の文の一人称のうち、語り手のものが占める割合 */
+/** その話の地の文の一人称のうち、語り手のものが占める割合（場面ごとにも同じ割合を見る） */
 const MIN_EPISODE_FIRST_PERSON_SHARE = 0.6;
+/**
+ * 1つの場面の地の文に、語り手の一人称が最低これだけ出ていること。
+ *
+ * 話全体（3回）より緩いのは、場面が短いから。**1回では決めない**——三人称の
+ * 場面の地の文にも、心の声の「俺」が1つ混じることはある。
+ */
+const MIN_SCENE_FIRST_PERSON_HITS = 2;
 /**
  * 一人称の数に対して、名前の出てよい数（この割合を超えたら黙る）。
  *
@@ -162,38 +174,66 @@ export function findNarratorNameSlips(options: {
     return { slips: [], skipped: "not_narrator_episode" };
   }
 
+  const rawLines = body.split("\n");
+  // **場面ごとに、その場面が語り手の一人称かを確かめる**（2026-09-25 の2回目）。
+  // 一人称の話の後半に「◆◇◆◇」を挟んで三人称の場面が続くと、話の単位の判定を
+  // 越えてそこの名前を拾っていた（教科書チート127話）
+  const scenes: SceneRange[] = [];
+  let sceneHits = 0;
+  for (const scene of sceneRanges(rawLines)) {
+    const sceneCounts = countNarrationFirstPersons(
+      rawLines.slice(scene.start, scene.end).join("\n")
+    );
+    const own = sceneCounts.get(narrator.firstPerson) ?? 0;
+    let sceneTotal = 0;
+    for (const count of sceneCounts.values()) sceneTotal += count;
+    if (
+      own < MIN_SCENE_FIRST_PERSON_HITS ||
+      own / sceneTotal < MIN_EPISODE_FIRST_PERSON_SHARE
+    ) {
+      continue;
+    }
+    scenes.push(scene);
+    sceneHits += own;
+  }
+  if (scenes.length === 0) return { slips: [], skipped: "not_narrator_episode" };
+
   const forms = narratorNameForms(narrator, options.people);
   if (forms.length === 0) return { slips: [], skipped: "no_name_form" };
   const pattern = slipPattern(forms);
 
-  const rawLines = body.split("\n");
-  const maskedLines = maskQuoted(body).split("\n");
+  // 台詞は**入れ子を数えて**伏せる（`quotedSpans.ts`）。「…『死の谷』…」の』で
+  // 台詞が閉じたと見ると、残りの台詞を地の文として拾う（教科書チート18話）
+  const maskedLines = maskQuoted(body, "　").split("\n");
   const slips: NarratorNameSlip[] = [];
-  for (let index = 0; index < maskedLines.length; index++) {
-    const masked = maskedLines[index];
-    // 見出しは地の文ではない
-    if (/^\s*#/u.test(masked)) continue;
-    const raw = rawLines[index] ?? "";
-    for (const matched of masked.matchAll(pattern)) {
-      const at = matched.index ?? 0;
-      // **引用は元の行から取る**（伏せた側から取ると、台詞の穴が混ざる）。
-      // 伏せたのは括弧の中だけなので、ここは元の行と同じ文字列である
-      const original = raw.slice(at, at + matched[0].length);
-      const particle = matched[3];
-      slips.push({
-        line: index + 1,
-        original,
-        suggestion: occursTwice(raw, original)
-          ? ""
-          : `${narrator.firstPerson}${particle}`,
-        nameForm: matched[1] ?? matched[0],
-        narrator,
-      });
+  for (const scene of scenes) {
+    for (let index = scene.start; index < scene.end; index++) {
+      const masked = maskedLines[index] ?? "";
+      // 見出しは地の文ではない
+      if (/^\s*#/u.test(masked)) continue;
+      const raw = rawLines[index] ?? "";
+      for (const matched of masked.matchAll(pattern)) {
+        const at = matched.index ?? 0;
+        // **引用は元の行から取る**（伏せた側から取ると、台詞の穴が混ざる）。
+        // 伏せたのは括弧の中だけなので、ここは元の行と同じ文字列である
+        const original = raw.slice(at, at + matched[0].length);
+        const particle = matched[3];
+        slips.push({
+          line: index + 1,
+          original,
+          suggestion: occursTwice(raw, original)
+            ? ""
+            : `${narrator.firstPerson}${particle}`,
+          nameForm: matched[1] ?? matched[0],
+          narrator,
+        });
+      }
     }
   }
 
-  // **多すぎるなら、よじれではなく書き方である**（上の `FIRST_PERSON_PER_SLIP`）
-  const allowed = Math.max(1, Math.floor(hits / FIRST_PERSON_PER_SLIP));
+  // **多すぎるなら、よじれではなく書き方である**（上の `FIRST_PERSON_PER_SLIP`）。
+  // 数えるのは、探した場面の一人称だけ
+  const allowed = Math.max(1, Math.floor(sceneHits / FIRST_PERSON_PER_SLIP));
   if (slips.length > allowed) return { slips: [], skipped: "too_many" };
   return { slips };
 }
@@ -217,21 +257,6 @@ function slipPattern(forms: readonly string[]): RegExp {
   );
 }
 
-/**
- * 台詞（「」『』）の中を、**同じ長さの全角空白へ置き換える**（改行は残す）。
- *
- * 台詞の中で人物が語り手を名前で呼ぶのは当たり前である（「相沢は来ないのか」）。
- * 消すと位置と行がずれるので、長さを変えずに潰す。閉じていない括弧は
- * 本文の終わりまでを台詞と見る（**拾わない側へ倒す**）。
- */
-function maskQuoted(text: string): string {
-  // `u` を付けない。付けると代用対（サロゲートペア）を1文字として
-  // 1つの空白に置き換え、長さ＝位置が狂う
-  return text.replace(/[「『][^」』]*[」』]?/g, (matched) =>
-    matched.replace(/[^\n]/g, "　")
-  );
-}
-
 function occursTwice(line: string, original: string): boolean {
   const first = line.indexOf(original);
   return first >= 0 && line.indexOf(original, first + 1) >= 0;
@@ -245,10 +270,13 @@ function escapeRegExp(text: string): string {
  * 作者へ見せる説明（推敲の「視点」の札に載せる）。
  *
  * **直せとは言わない。** 夢の場面や回想で、わざと自分を三人称で書くことがある。
+ * 視点の札にはいつも「わざとなら」の断りを添える（AIの視点の指摘と同じ文。
+ * `proofreadValidation.ts` の `VIEWPOINT_INTENT_NOTE`）。
  */
 export function describeNarratorNameSlip(slip: NarratorNameSlip): string {
   return (
     `「${slip.narrator.firstPerson}」（${slip.narrator.name}）の語りの地の文に` +
-    `「${slip.original}」と名前が出ていて、ここだけ三人称の語りに読めます`
+    `「${slip.original}」と名前が出ていて、ここだけ三人称の語りに読めます` +
+    VIEWPOINT_INTENT_NOTE
   );
 }

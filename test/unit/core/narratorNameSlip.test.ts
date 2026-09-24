@@ -106,6 +106,10 @@ describe("答え付きの台（seeded/contradiction）", () => {
       nameForm: "相沢",
     });
     expect(describeNarratorNameSlip(found.slips[0])).toContain("相沢は");
+    // 視点の札には、いつも「わざとなら」の断りを添える（夢や回想でわざと書くことがある）
+    expect(describeNarratorNameSlip(found.slips[0])).toContain(
+      "（わざとなら、このままで構いません）"
+    );
   });
 
   test("仕込みの無い5話では1件も出さない（「相沢くん」と呼ばれる台詞がある）", () => {
@@ -180,6 +184,49 @@ describe("台詞と呼ばれ方", () => {
     expect(found.slips).toEqual([]);
   });
 
+  test("実測の誤検出①：台詞の中の『』で台詞が閉じたと見ない（入れ子のかぎ）", () => {
+    // 2026-09-25 の測定（教科書チート18話49行）と同じ形。父の台詞の中に
+    // 『地名』があり、その後ろの「相沢は」を地の文として拾っていた
+    const text =
+      `${ore(6)}\n` +
+      "「俺が『死の谷』の奥地に行っている間、相沢は体調が戻るまで家にいなさい」";
+    const found = findNarratorNameSlips({
+      text,
+      narrator: NARRATOR,
+      people: [HARUTO, CHINATSU],
+    });
+    expect(found.slips).toEqual([]);
+  });
+
+  test("『』だけの台詞・台詞の中の『』が閉じたあとの地の文は、地の文として見る", () => {
+    const text =
+      `${ore(6)}\n` +
+      "『相沢は来ないのか』と手紙にあった。\n" +
+      "「『谷』だ」と父は言い、相沢は黙った。";
+    const found = findNarratorNameSlips({
+      text,
+      narrator: NARRATOR,
+      people: [HARUTO, CHINATSU],
+    });
+    expect(found.slips.map((slip) => [slip.line, slip.original])).toEqual([
+      [8, "相沢は"],
+    ]);
+  });
+
+  test("閉じ忘れの台詞は、次の台詞の始まりまでを台詞と見る（その先は地の文）", () => {
+    const text =
+      `${ore(6)}\n` +
+      "「相沢は来ないのか\n" +
+      "「来ない」\n" +
+      "　相沢は黙った。";
+    const found = findNarratorNameSlips({
+      text,
+      narrator: NARRATOR,
+      people: [HARUTO, CHINATSU],
+    });
+    expect(found.slips.map((slip) => slip.line)).toEqual([9]);
+  });
+
   test("同じ行の台詞にも同じ形があるなら、修正案は空にする（台詞の側が書き換わる）", () => {
     const text = `${ore(6)}\n「相沢は？」と訊かれて、相沢は黙った。`;
     const found = findNarratorNameSlips({
@@ -245,6 +292,50 @@ describe("その話の語り手", () => {
     ).join("\n");
     const found = findNarratorNameSlips({
       text: chinatsuChapter,
+      narrator: NARRATOR,
+      people: [HARUTO, CHINATSU],
+    });
+    expect(found).toEqual({ slips: [], skipped: "not_narrator_episode" });
+  });
+
+  test("実測の誤検出②：場面の区切り（◆◇◆◇）の後の三人称の場面では拾わない", () => {
+    // 2026-09-25 の測定（教科書チート127話131行）と同じ形。一人称の話の後半に
+    // 区切りを挟んで宰相と国王の三人称の場面があり、そこの名前を拾っていた
+    const text =
+      `${ore(10)}\n\n◆◇◆◇\n\n` +
+      "　宰相は書類を国王の前に置いた。\n" +
+      "　相沢が学院に入ったという報せだった。\n" +
+      "　国王は黙って頷いた。";
+    const found = findNarratorNameSlips({
+      text,
+      narrator: NARRATOR,
+      people: [HARUTO, CHINATSU],
+    });
+    expect(found.slips).toEqual([]);
+  });
+
+  test("区切りの前後どちらでも、一人称の場面のよじれは拾う", () => {
+    const text =
+      `${ore(6)}\n　相沢は坂を見上げた。\n` +
+      "＊＊＊\n" +
+      "　宰相は書類を置いた。相沢が来たという。\n" +
+      "◇\n" +
+      `${ore(6)}\n　相沢は笑った。`;
+    const found = findNarratorNameSlips({
+      text,
+      narrator: NARRATOR,
+      people: [HARUTO, CHINATSU],
+    });
+    expect(found.slips.map((slip) => slip.line)).toEqual([7, 17]);
+  });
+
+  test("話のどの場面も語り手の一人称でなければ not_narrator_episode", () => {
+    const text =
+      "　宰相は書類を置いた。相沢が来たという。\n" +
+      "◆◇◆◇\n" +
+      "　国王は頷いた。相沢は若い。";
+    const found = findNarratorNameSlips({
+      text,
       narrator: NARRATOR,
       people: [HARUTO, CHINATSU],
     });

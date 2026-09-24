@@ -5,6 +5,9 @@ import { nonJouyouKanjiIn } from "./jouyouKanji";
 import { opensOnyomiCompound } from "./onyomiReading";
 import { suggestsOpeningKanji } from "./notationVariants";
 import { isKeptWord, type KeepWord } from "../models/keepWord";
+import { maskQuoted, removeQuoted } from "./quotedSpans";
+import { sceneRanges } from "./sceneBreaks";
+import { narrationFirstPersonOf } from "./workStyleFacts";
 import {
   issueBudget,
   PROOFREAD_REASONS,
@@ -103,7 +106,36 @@ export interface RejectedProofreadIssue {
      * 「語り手が知り得ない他人の心の中を、地の文が言い切っている」と
      * 写しただけでは、誰の話なのかが分からない
      */
-    | "guide_echo";
+    | "guide_echo"
+    /*
+      ここから下の5つは「視点」の札を絞るもの（1.11、2026-09-25 の2回目）。
+      作者の作品3作12話で、通った視点の指摘が e4b 2件・26b 15件、
+      **すべて誤検出**だった。その形ごとに落とす
+    */
+    /**
+     * 指摘の場面（場面の区切りと話の境で割った範囲）の地の文が、一人称で
+     * 語られていない。三人称の場面・代名詞の無い一人称の場面では、
+     * 当たりが0で誤検出だけが出た
+     */
+    | "not_first_person_scene"
+    /** 丸括弧の心の声。誰の考えかは作者が括弧と前後の文で示している */
+    | "inner_voice"
+    /**
+     * 語り手の推し量り（〜のか、〜らしい、〜ようだ、〜だろう）。
+     * 一人称の語り手は相手の顔色から気持ちを読む。言い切っていない
+     */
+    | "narrator_guess"
+    /**
+     * 説明が、**語り手自身の**心の声・考え・地の文の説明を指している
+     * （一人称の言い方の揺れも含む）。語り手が自分の心を書くのは視点のずれではない
+     */
+    | "narrator_own_mind"
+    /**
+     * 説明が、ほかの人物の心（気持ち・感覚）にも、視点の移りにも触れていない。
+     * 「年齢への言及」「確信が言い切られています」のような、誰の心の話でも
+     * ない指摘。説明が空なら、誰の心かを確かめられないので同じく落とす
+     */
+    | "no_other_mind";
 }
 
 const LEVELS = new Set(["high", "medium", "low"]);
@@ -459,14 +491,14 @@ function endingOf(sentence: string): string | undefined {
 }
 
 /**
- * 台詞（「」『』）。閉じていない台詞は、閉じ括弧が現れないまま
+ * 台詞（「」『』）を取り除く。閉じていない台詞は、閉じ括弧が現れないまま
  * 終わる形（本文の切れ目）なので、そこまでを台詞と見る。
+ *
+ * **入れ子のかぎを数える**（`quotedSpans.ts`。2026-09-25）。台詞の中の『』で
+ * 台詞が閉じたと見ると、台詞の残りの語尾を地の文の連続として数える。
  */
-const DIALOGUE = /[「『][^」』]*[」』]?/gu;
-
-/** 台詞を取り除く */
 function withoutDialogue(text: string): string {
-  return text.replace(DIALOGUE, "");
+  return removeQuoted(text);
 }
 
 /**
@@ -476,9 +508,7 @@ function withoutDialogue(text: string): string {
  * 位置を保ったまま「無いことにする」ために、長さを変えずに潰す。
  */
 function maskDialogue(text: string): string {
-  // `u` を付けない。付けると代用対（サロゲートペア）を1文字として
-  // 空白1つに置き換えてしまい、長さ＝位置が狂う
-  return text.replace(DIALOGUE, (matched) => matched.replace(/[^\n]/g, " "));
+  return maskQuoted(text, " ");
 }
 
 /**
@@ -922,6 +952,189 @@ function relabelViewpoint(
   return VIEWPOINT_TALK.test(explanation) ? "視点" : reason;
 }
 
+/**
+ * 視点の札の説明の後ろに添える断り（1.10 から決まり文句にはあった。1.11 で
+ * AIの説明にも、語り手の名前のよじれの説明にも、いつも添えるようにした）。
+ *
+ * **わざと視点を移す書き方がある。** 誤りと言い切らない。
+ */
+export const VIEWPOINT_INTENT_NOTE = "（わざとなら、このままで構いません）";
+
+/**
+ * 視点の札を出してよい場面か——**その場面の地の文が一人称で語られているか**
+ * （1.11、2026-09-25 の2回目）。
+ *
+ * 作者の作品で測ると、三人称の7話で通った視点は e4b 2件・26b 4件、すべて誤り
+ * だった（推し量り・丸括弧の心の声・語り手が自分の知らないことを言う形）。
+ * 代名詞の無い一人称の話でも 26b が7件、すべて語り手自身の心の声だった。
+ * 三人称の語りでは「語り手が知り得ない心」の線がそもそも引けない
+ * （語り手はどの心にも入れる）ので、**当たりを出せる見込みが薄い。**
+ * 一人称の場面に限る。区切り（`sceneBreaks.ts`）と話の境で場面を割り、
+ * 地の文の一人称がこれだけ出ていて、その一人称が6割を占める場面だけ見る
+ */
+const VIEWPOINT_SCENE_MIN_FIRST_PERSON = 2;
+
+/**
+ * 語り手の推し量り。**言い切っていない**ので、知り得ない心を書いたことにならない。
+ *
+ * 「〜だろうと思い」の「だろう」は、**人物の考えの中身**である（仕込み C の
+ * 「千夏は…忘れるだろうと思い、胸が温かくなった」は本物の視点のずれ）。
+ * だから「だろう」の後ろに「と」が続くものは推し量りと見ない。
+ * 「何歳なのかは知らないが」のように、語り手が知らないと断っている形も同じ
+ */
+const NARRATOR_GUESS =
+  /(のか[、。，]|だろうか|らしい|らしく|ようだ|ようで|ように見え|ように思え|みたいだ|みたいに|そうだった|そうだ[。、]|かもしれ|に違いな|はずだ|気がし|だろう(?!と)|でしょう(?!と)|か(は|も)?(知ら|分から|わから|判ら)ない)/u;
+/** 説明の側が「推測している」と言っているもの（e4b が「無意識なのか」をこう説明した） */
+const EXPLANATION_GUESS = /(推測|推し量|推量|推察)/u;
+
+/** 一人称の語（説明の「「俺」の心の声」を見分けるため） */
+const FIRST_PERSON_WORDS =
+  "俺|僕|私|わたし|あたし|わたくし|ぼく|おれ|うち|わし|儂|自分|拙者|小生|余|我|吾輩|わい|あたい";
+/**
+ * 説明が、**語り手自身の**心・考え・地の文の説明を指しているか。
+ *
+ * 26b は代名詞の無い一人称の話で、「「俺」の心の声が、地の文に直接入り込んでいます」
+ * 「「俺」の視点の中に、一般的な知識の解説が…」を視点として7件挙げた。
+ * 語り手が自分の心を書くのは一人称の語りそのものである。
+ * 一人称の言い方の揺れ（「俺」の語りに「僕ら」）も視点の札では出さない
+ * ——視点は「誰の心が書かれているか」の札に絞った（1.11）
+ */
+const NARRATOR_OWN_MIND = new RegExp(
+  `(「(?:${FIRST_PERSON_WORDS})」|(?<!\\p{Script=Han})(?:${FIRST_PERSON_WORDS}))(自身)?の(心の声|思考|独白|内面|考え|心情|心理|感情|気持ち|思い|本音|推測|判断|感想|内心)` +
+    "|(語り手|自分)(自身)?の(心|思考|独白|内面|考え|感情|心理|気持ち|思い)" +
+    // 「兵士の視点の中に、兵士自身の…」——視点人物が自分の心を書いている
+    "|(?<who>[^\\s、。「」『』]{1,10})の(視点|語り)[^、。]{0,6}、\\k<who>自身の" +
+    "|独白|一般的な|一般論|客観的|知識|解説|説明的|状況を説明|状況の説明" +
+    "|という一人称|一人称が|一人称の(揺れ|混在|ぶれ|不統一)",
+  "u"
+);
+/**
+ * 心（気持ち・感覚）の話をしているか。札の定義（知り得ない他人の心・体の感覚）に
+ * 当たる語。**説明か原文のどちらか**にあればよい——AIは説明で本文の語を
+ * 引くだけのことがある（「蓬田さんの『気に入っていた』が言い切られています」）
+ */
+const OTHER_MIND =
+  /(心|気持ち|感情|思い|思っ|考え|感覚|内面|本音|本心|胸|感じ|気づ|気付|気に入|怖|恐|嬉|喜|悲|寂|さびし|怒|苛立|痛|意図|つもり|信じ|願|望|疎|好|嫌|憎|愛)/u;
+/** 説明が、段落の途中の視点の移りを指しているか */
+const VIEWPOINT_SHIFT = /(視点|目線|語り)[^。]{0,15}(移|替|変わ|切り?替|揺|ずれ)/u;
+
+/**
+ * 視点の指摘を落とす理由（1.11）。落とさないなら `undefined`。
+ *
+ * **コードで確かめられるものはコードで落とす**（プロンプトでも絞るが、
+ * 小さいモデルは守らない）。見る順は、本文から決まるもの（場面・括弧・
+ * 推し量り）→ 説明の中身。
+ */
+function viewpointRejection(
+  chunk: Chunk,
+  chunkLines: readonly string[],
+  lineIndex: number,
+  original: string,
+  explanation: string
+): RejectedProofreadIssue["reason"] | undefined {
+  const found = lineHolding(chunkLines, lineIndex, original);
+  if (!isFirstPersonScene(chunk, chunkLines, found?.index ?? lineIndex)) {
+    return "not_first_person_scene";
+  }
+  const line = found ? chunkLines[found.index] : original;
+  const at = found ? found.at : 0;
+  if (
+    /^[\s　]*[（(]/u.test(original) ||
+    insideRoundBrackets(line, at) ||
+    /括弧/u.test(explanation)
+  ) {
+    return "inner_voice";
+  }
+  if (
+    NARRATOR_GUESS.test(sentenceAround(line, at, found ? original.length : line.length)) ||
+    EXPLANATION_GUESS.test(explanation)
+  ) {
+    return "narrator_guess";
+  }
+  if (NARRATOR_OWN_MIND.test(explanation)) return "narrator_own_mind";
+  // 説明が空・札の名前だけなら、誰の心の話かを確かめられない（原文だけでは決めない）
+  if (
+    !explanation ||
+    explanation === "視点" ||
+    isPlaceholderText(explanation) ||
+    (!OTHER_MIND.test(explanation) &&
+      !OTHER_MIND.test(original) &&
+      !VIEWPOINT_SHIFT.test(explanation))
+  ) {
+    return "no_other_mind";
+  }
+  return undefined;
+}
+
+/**
+ * 原文がどの行のどこにあるか。AIの行番号の行を先に見て、無ければチャンクの中を探す
+ * （AIは行番号を1つ2つずらす）。改行をまたぐ原文は見つからない（`undefined`）
+ */
+function lineHolding(
+  chunkLines: readonly string[],
+  lineIndex: number,
+  original: string
+): { index: number; at: number } | undefined {
+  const own = chunkLines[lineIndex]?.indexOf(original) ?? -1;
+  if (own >= 0) return { index: lineIndex, at: own };
+  for (let index = 0; index < chunkLines.length; index++) {
+    const at = chunkLines[index].indexOf(original);
+    if (at >= 0) return { index, at };
+  }
+  return undefined;
+}
+
+/** その行を含む場面（区切りと話の境で割る）の地の文が、一人称で語られているか */
+function isFirstPersonScene(
+  chunk: Chunk,
+  chunkLines: readonly string[],
+  lineIndex: number
+): boolean {
+  // まとめたチャンクでは、話の境でも場面を割る（別の話の一人称を数えない）
+  const segmentStarts = segmentsOf(chunk).map((segment) =>
+    countNewlines(chunk.text, segment.start)
+  );
+  const scene = sceneRanges(chunkLines, segmentStarts).find(
+    (range) => lineIndex >= range.start && lineIndex < range.end
+  );
+  if (!scene) return false;
+  const text = chunkLines.slice(scene.start, scene.end).join("\n");
+  return narrationFirstPersonOf(text, VIEWPOINT_SCENE_MIN_FIRST_PERSON) !== null;
+}
+
+/** 行の `at` の位置が丸括弧の中か */
+function insideRoundBrackets(line: string, at: number): boolean {
+  let depth = 0;
+  for (let index = 0; index < at; index++) {
+    const char = line[index];
+    if (char === "（" || char === "(") depth++;
+    else if ((char === "）" || char === ")") && depth > 0) depth--;
+  }
+  return depth > 0;
+}
+
+/**
+ * 原文を含む一文（台詞は伏せる）。**原文は短い範囲**（5〜30字）なので、
+ * 推し量りの語は原文の外（同じ文の前半）にあることが多い
+ * （「無意識なのか、顔の古傷をなでている。」の原文が「顔の古傷をなでている。」）
+ */
+function sentenceAround(line: string, at: number, length: number): string {
+  const masked = maskQuoted(line, " ");
+  const isEnd = (char: string | undefined): boolean =>
+    char !== undefined && /[。！？!?]/u.test(char);
+  let start = at;
+  while (start > 0 && !isEnd(masked[start - 1])) start--;
+  let end = Math.min(masked.length, at + length);
+  while (end < masked.length && !isEnd(masked[end - 1])) end++;
+  return masked.slice(start, end);
+}
+
+/** 視点の説明に「わざとなら」の断りを添える（すでに断っていれば重ねない） */
+function withIntentNote(explanation: string): string {
+  if (!explanation || /わざと/u.test(explanation)) return explanation;
+  return `${explanation}${VIEWPOINT_INTENT_NOTE}`;
+}
+
 export function mentionsForbiddenAspect(
   explanation: string,
   reason?: string
@@ -1137,6 +1350,21 @@ export function validateProofreadIssues(
       rejected.push({ raw: item, reason: "original_not_found" });
       continue;
     }
+    // **視点の札を絞る**（1.11）。一人称の場面で、語り手以外の人物の心を
+    // 言い切っているか、段落の途中で視点が移るものだけ残す
+    if (reason === "視点") {
+      const dropped = viewpointRejection(
+        chunk,
+        chunkLines,
+        line - firstLine,
+        original,
+        asString(item.explanation)
+      );
+      if (dropped) {
+        rejected.push({ raw: item, reason: dropped });
+        continue;
+      }
+    }
     // **「空文字」という3文字を修正案として返してくる。**
     // プロンプトの「空文字にしてください」をそのまま書いたもので、
     // 押すと本文の一文がその3文字に置き換わる（2026-08-17、実データ）。
@@ -1243,7 +1471,10 @@ export function validateProofreadIssues(
         : reason === "漢字ひらき"
           ? // 漢字ひらきには、常用漢字表との照合結果を参考として添える
             withNonJouyouNote(asString(item.explanation), original)
-          : asString(item.explanation),
+          : reason === "視点"
+            ? // 視点には、いつも「わざとなら」の断りを添える（1.11）
+              withIntentNote(asString(item.explanation))
+            : asString(item.explanation),
       confidence: level(item.confidence),
       ...(run ? { monotony: run } : {}),
     });
@@ -1395,7 +1626,7 @@ export function explainProofreadReason(reason: string): string | undefined {
       // **誤りとは言わない**（1.10）。わざと視点を移す書き方がある
       return (
         "語り手が知り得ないことが書かれているか、途中で視点が移って読めます" +
-        "（わざとなら、このままで構いません）"
+        VIEWPOINT_INTENT_NOTE
       );
     default:
       return undefined;
