@@ -5,8 +5,10 @@ import {
   CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT,
   CONTRADICTION_CHECK_TEMPERATURE,
   CONTRADICTION_CHECK_VERSION,
+  CONTRADICTION_TOM_TOOLS,
   LIGHT_CATEGORIES,
   buildContradictionCheckPrompt,
+  replyToContradictionToolCall,
   type ContradictionCategory,
 } from "../../prompts/contradictionCheck";
 import {
@@ -24,6 +26,13 @@ import {
   type CarryOverResult,
   type ContradictionMaterial,
 } from "../../core/contradictionMaterial";
+import type { NarratorHint } from "../../core/narrator";
+import {
+  buildStoryDateSources,
+  describeStoryDates,
+  readStoryDates,
+  type StoryDate,
+} from "../../core/storyCalendar";
 import { worldviewMaxChars } from "../../core/worldviewSelect";
 import { withLineNumbers, type Chunk } from "../../core/chunker";
 import { parseCharacter, type Character } from "../../models/character";
@@ -78,6 +87,14 @@ interface Settings {
   worldItems: WorldItem[];
   material: ContradictionMaterial;
   synopsesBefore(chapter: number | null): string;
+  /**
+   * 話ごとのあらすじ（設計書6.10.9）。**作中の日付を読むのに要る。**
+   *
+   * `synopsesBefore` は「その話より前」を文面へ組んだものなので、日付を
+   * 読む材料には使えない——**その話自身のあらすじ**に日付が書かれている
+   * ことが多い。
+   */
+  synopses: ReadonlyArray<{ chapter: number | null; synopsis: string }>;
   unreadable: number;
 }
 
@@ -144,6 +161,9 @@ function loadSettings(folder: string, numCtx: number): Settings {
         .map((item) => `第${item.chapter}話: ${item.synopsis}`)
         .join("\n");
     },
+    // **読み取りは呼ぶ側でやる**（設計書6.10.9）。ここはあらすじを渡すだけで、
+    // 日付を読むのは本文と一緒に1回だけ（作品ぜんぶで1度）
+    synopses,
     unreadable: people.unreadable + places.unreadable + worldItems.unreadable,
   };
 }
@@ -286,6 +306,13 @@ interface CarryOverLookup {
    * `carryOver` の指定に関わらず**必ず1話ぶん**を引く。
    */
   previous(chapter: number | null): string;
+  /**
+   * 全話の本文（設計書6.10.9）。**作中の日付を読むのに要る。**
+   *
+   * **同じものを二度読まない**——引き継ぎ・落としたことを言う・日付の
+   * 読み取りが、どれも全話の本文を見る。
+   */
+  bodies(): ReadonlyArray<{ chapter: number | null; text: string }>;
 }
 
 /**
@@ -318,7 +345,35 @@ function carryOverReader(folder: string, chapters: number): CarryOverLookup {
       return carryOverBodyText({ bodies: bodiesOf(), chapter, chapters: 1 })
         .text;
     },
+    bodies: bodiesOf,
   };
+}
+
+/**
+ * 作中の日付（設計書6.10.9）。**作品ぜんぶで1回だけ読む。**
+ *
+ * **製品と同じ材料を渡す**（6.87.6 の3）。あらすじと本文の両方に日付が
+ * 書かれているので、両方を繋いでから読む。
+ */
+function storyDatesOf(
+  settings: Settings,
+  carryOver: CarryOverLookup
+): StoryDate[] {
+  return readStoryDates(
+    buildStoryDateSources(settings.synopses, carryOver.bodies())
+  );
+}
+
+/**
+ * そのチャンクへ渡す日付の欄。無ければ空文字。
+ *
+ * **その話より後の日付は渡さない**（設計書6.10.3。`synopsesBefore` と同じ
+ * 基準）。**話数の読めないチャンクでは欄を出さない**——どこまでが「まだ
+ * 分かっていないこと」かを決められない。
+ */
+function storyDatesFor(dates: readonly StoryDate[], chapter: number | null): string {
+  if (chapter === null) return "";
+  return describeStoryDates(dates, chapter);
 }
 
 export interface ContradictionChunkMaterial {
@@ -352,6 +407,28 @@ export interface ContradictionChunkMaterial {
    * 問題が無かったのか**が呼ぶ側に区別できない。
    */
   missedCharacters: string[];
+  /**
+   * **この話の語り手**（設計書6.10.6）。名指しできなければ null。
+   *
+   * 地の文の一人称と、材料に載った人物の一人称が**ちょうど1人だけ**
+   * 一致するときに決まる（`core/narrator.ts`）。
+   *
+   * **決められなかったことも黙らない**（`missedCharacters` と同じ考え方）。
+   * 一人称小説では、ここが null の回だけ「地の文の『俺』が誰か」を
+   * 突き合わせずに答えを出していることになる。
+   */
+  narrator: NarratorHint | null;
+  /**
+   * **作中の日付**（設計書6.10.9）。読み取れなければ空文字。
+   *
+   * 本文とあらすじの「十月三日」のような表記をコードで読み取り、日数の差
+   * まで数えた欄そのもの。**日付の引き算はAIにさせない**——答え付きの台の
+   * 仕込みは、26bでも27bでも3回とも見逃した。
+   *
+   * **読み取れなかったことも黙らない**（`narrator` と同じ考え方）。ここが
+   * 空の回は、経過日数を突き合わせずに出した答えである。
+   */
+  storyDates: string;
 }
 
 export interface ContradictionMaterialInput {
@@ -379,6 +456,8 @@ export function contradictionMaterial(input: ContradictionMaterialInput): {
     input.numCtx
   );
   const carryOver = carryOverReader(input.folder, carryOverOf(input.carryOver));
+  // **チャンクごとに読み直さない**（作品ぜんぶで1回。設計書6.10.9）
+  const storyDates = storyDatesOf(settings, carryOver);
 
   return {
     settingsCount: {
@@ -389,7 +468,14 @@ export function contradictionMaterial(input: ContradictionMaterialInput): {
     unreadableSettings: settings.unreadable,
     referenceBudgetChars: settings.material.referenceBudgetChars,
     chunks: selectChunks(chunks, input.chunkIndex).map((chunk) =>
-      materialForChunk(input.filePath, chunk, maxChars, settings, carryOver)
+      materialForChunk(
+        input.filePath,
+        chunk,
+        maxChars,
+        settings,
+        carryOver,
+        storyDates
+      )
     ),
   };
 }
@@ -399,7 +485,9 @@ function materialForChunk(
   chunk: Chunk,
   maxChars: number,
   settings: Settings,
-  carryOver: CarryOverLookup
+  carryOver: CarryOverLookup,
+  /** 作品ぜんぶで1回だけ読んだ日付（設計書6.10.9） */
+  storyDates: readonly StoryDate[]
 ): ContradictionChunkMaterial {
   // **引き継ぐのは人物を索引で見つけるためだけ**（設計書6.10.6）。
   // この本文そのものはプロンプトへ入らない
@@ -428,6 +516,10 @@ function materialForChunk(
     names: settings.material.namesIn(chunk.text),
     carriedOverChapters: carried.chapters,
     missedCharacters: relevant.missedCharacters,
+    narrator: relevant.narrator,
+    // **まとめたチャンクは、いちばん前の話に合わせる**（`previousSynopses`
+    // と同じ基準。設計書6.10.3）
+    storyDates: storyDatesFor(storyDates, chunk.chapterStart),
   };
 }
 
@@ -489,6 +581,8 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
   const categories = categoriesOf(input.categories);
   const suppression = suppressionOf(input.suppression);
   const carryOver = carryOverReader(input.folder, carryOverOf(input.carryOver));
+  // **チャンクごとに読み直さない**（作品ぜんぶで1回。設計書6.10.9）
+  const storyDates = storyDatesOf(settings, carryOver);
 
   const prompts: ContradictionChunkPrompt[] = [];
   const skipped: Array<{ chunkId: string; reason: string }> = [];
@@ -498,7 +592,8 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
       chunk,
       maxChars,
       settings,
-      carryOver
+      carryOver,
+      storyDates
     );
     if (!material.hasAnything) {
       // **材料なしで問わない。** 照らし合わせる相手が無いと、
@@ -524,6 +619,12 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
         worldviewSummary: material.worldviewSummary,
         previousSynopses: material.previousSynopses,
         categories,
+        // **日付の引き算はこちらで済ませて渡す**（設計書6.10.9）。
+        // 読み取れなければ空文字で、欄そのものが出ない
+        storyDates: material.storyDates,
+        // **地の文の「俺」が誰かを名指しする**（設計書6.10.6）。
+        // 名指しできなければ undefined で、欄そのものが出ない
+        narrator: material.narrator ?? undefined,
       }),
     });
   }
@@ -649,7 +750,19 @@ export async function contradictionRun(input: ContradictionRunInput): Promise<
         chunkFromId(input.folder, chunkId),
         responseText
       ),
-    ollamaGenerate
+    /*
+      **道具も製品と同じものを渡す**（設計書6.87.12 の「製品と同じ経路で測る」）。
+
+      道具の説明はモデルの一覧に常在して、呼ばれなくても読まれる
+      （unused-tool 効果）。ここで渡さないと、**製品とは違うものを測った**
+      ことになる。受け答え（1往復）も製品と同じ関数を使う。
+    */
+    (params) =>
+      ollamaGenerate({
+        ...params,
+        tools: CONTRADICTION_TOM_TOOLS,
+        toolReply: replyToContradictionToolCall,
+      })
   );
   return { ...outcome, missed };
 }

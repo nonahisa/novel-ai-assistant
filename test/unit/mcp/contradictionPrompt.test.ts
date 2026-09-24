@@ -181,7 +181,7 @@ describe("MCP の options.suppression", () => {
     const built = promptFor();
 
     expect(built.systemPrompt).toBe(CONTRADICTION_CHECK_SYSTEM_PROMPT);
-    expect(built.promptVersion).toBe("1.6");
+    expect(built.promptVersion).toBe("1.7");
     // 空文字は打ち間違いとみなさず、既定へ倒す
     expect(promptFor("")).toEqual(built);
   });
@@ -191,7 +191,7 @@ describe("MCP の options.suppression", () => {
     const built = promptFor("strict");
 
     expect(built.systemPrompt).toBe(CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT);
-    expect(built.promptVersion).toBe("1.6:strict");
+    expect(built.promptVersion).toBe("1.7:strict");
   });
 
   test("loose と明示しても、既定と同じ", () => {
@@ -258,7 +258,43 @@ describe("過去の場面の抜粋（設計書6.74）", () => {
 【出力形式】JSONのみ
 category には次のどれか**1つだけ**を入れてください：人物、状態、時系列
 
+**3つの段を、この順に埋めてください。** 先の2つは**読み取るための段**で、
+**そこでは矛盾かどうかの判断をしません。**
+
+**1. perspective_taking (Theory of Mind)**
+Step into the other person's position before you answer: what are they feeling right now,
+what do they actually know, and what would I need if I were exactly them?
+**The surface words are rarely the whole message.** What the narration never mentions is
+still true of them — their body, what they carry, where they are, what carried over from
+earlier episodes. Do this for every person in the material above.
+
+- who：その人物の名前（材料に載っている正式名称）
+- asThem：**その人物になりきって、いまの自分の身の上を一人称で言う**（「俺は〜」「私は〜」）。
+  体の具合・身につけているもの・どこに居るか・前の話から続いていることを、
+  **材料の言葉を写すのではなく、その人の口から出る言葉に言い直してください。**
+
+**2. joint_attention**
+Attend to the SAME thing the writer is attending to, and speak about that object —
+**not about the room, not about yourself.** Sharing attention is how two people show they
+are in the same moment. Here the other person is **the writer of this text**.
+
+- attendingTo：**書き手がこの場面で指し示しているもの**（出来事・物・人の身の上）。
+  **書き手の言葉のまま**書く。多くとも3つまで
+- readerKnows：**そのものについて、読者がこの話までに知っていること**を、上の材料から書く。
+  材料に何も無ければ「まだ知らない」と書く
+
+**3. contradictions——1 と 2 で読み取ったことと、対象本文の記述が食い違うものだけ。**
+
 {
+  "perspective_taking": [
+    { "who": "人物の名前", "asThem": "その人物になりきった一人称の言葉" }
+  ],
+  "joint_attention": [
+    {
+      "attendingTo": "書き手が見せようとしている対象",
+      "readerKnows": "それについて読者がここまでに知っていること"
+    }
+  ],
   "contradictions": [
     {
       "line": 42,
@@ -329,6 +365,174 @@ category には次のどれか**1つだけ**を入れてください：人物、
     );
 
     expect(prompt).toContain("対象本文（第7話）から写した文だけ");
+  });
+});
+
+/*
+  **地の文の「俺」が誰かを名指しする**（設計書6.10.6）。
+
+  材料に載せるだけでは、地の文の「俺」と設定の「相沢 春人」が同じ人物だと
+  AIが確信しきれない——引き継ぎで語り手の設定が載るようになっても（80%→99%）、
+  答え付きの台での当たりは 2/4 のままだった。
+
+  **名指しできる回にしか欄を出さない。** 版（1.6）を据え置いたので、
+  **渡さないときの文面が1文字でも変わると、同じ鍵に別の材料で得た答えが入る。**
+*/
+describe("この話の語り手（設計書6.10.6）", () => {
+  const narrator = { firstPerson: "俺", name: "相沢 春人" };
+
+  /** 渡したときに増える欄。**この文字列を丸ごと取り除けば、元と同じになる** */
+  const NARRATOR_SECTION = `
+【この話の語り手】
+地の文は一人称「俺」で書かれています。上の設定で一人称が「俺」の人物は「相沢 春人」だけです。
+
+- **地の文の「俺」は「相沢 春人」だと考えて突き合わせてください。** 本文に名前が
+  出てこなくても、地の文が語り手自身について述べたこと（外見・負傷・年齢・
+  持ち物・居場所など）には、照らし合わせる相手があります。
+- **地の文の一人称が、途中で別の語に変わっていたら、それも食い違いです。**
+  ただし視点が交代する場面や、別人の手記・作中作として書かれている場合は除きます。
+- **会話文の中の一人称は、語り手のものとは限りません**（別の人物が喋っています）。
+  一人称の食い違いは地の文だけで見てください。
+`;
+
+  test("渡さなければ、欄そのものを出さない", () => {
+    const prompt = buildContradictionCheckPrompt(
+      input({ categories: LIGHT_CATEGORIES })
+    );
+
+    expect(prompt).not.toContain("【この話の語り手】");
+    // 「（登録されていません）」も出さない。無いなら黙っている
+    expect(prompt).not.toContain("語り手");
+  });
+
+  test("渡したときに増えるのは、この欄だけ", () => {
+    // **ほかが1文字でも変われば、版を据え置いたキャッシュが壊れる**
+    const without = buildContradictionCheckPrompt(
+      input({ categories: LIGHT_CATEGORIES })
+    );
+    const withNarrator = buildContradictionCheckPrompt(
+      input({ categories: LIGHT_CATEGORIES, narrator })
+    );
+
+    expect(withNarrator).toContain(NARRATOR_SECTION);
+    expect(withNarrator.replace(NARRATOR_SECTION, "")).toBe(without);
+  });
+
+  test("名前と一人称は、渡されたものを埋める", () => {
+    const prompt = buildContradictionCheckPrompt(
+      input({ narrator: { firstPerson: "僕", name: "月島 灯" } })
+    );
+
+    expect(prompt).toContain(
+      "地の文は一人称「僕」で書かれています。上の設定で一人称が「僕」の人物は「月島 灯」だけです。"
+    );
+    expect(prompt).toContain(
+      "**地の文の「僕」は「月島 灯」だと考えて突き合わせてください。**"
+    );
+  });
+
+  test("名前が出てこなくても突き合わせる相手があると言う", () => {
+    // 一人称小説では、語り手は自分の名前を言わない。**名前が出ないことを
+    // 理由に黙られる**のが、この機能で塞ぎたかった穴である
+    const prompt = buildContradictionCheckPrompt(input({ narrator }));
+
+    expect(prompt).toContain("本文に名前が");
+    expect(prompt).toContain("照らし合わせる相手があります");
+  });
+
+  test("一人称が途中で変わることも、食い違いだと言う", () => {
+    const prompt = buildContradictionCheckPrompt(input({ narrator }));
+
+    expect(prompt).toContain("途中で別の語に変わっていたら、それも食い違いです");
+    // ただし視点交代・作中作は除く（除外を書かないと誤検出が増える）
+    expect(prompt).toContain("視点が交代する場面");
+  });
+
+  test("会話文の一人称を、語り手のものと数えさせない", () => {
+    // 登場人物はそれぞれ違う一人称を使う。混ぜて見ると誤検出になる
+    const prompt = buildContradictionCheckPrompt(input({ narrator }));
+
+    expect(prompt).toContain("会話文の中の一人称は、語り手のものとは限りません");
+    expect(prompt).toContain("一人称の食い違いは地の文だけで見てください");
+  });
+
+  test("【これまでの経緯】より後、【検証項目】より前に置く", () => {
+    // 設定（人物・場所・世界観）を読んだあとでなければ、「上の設定で
+    // 一人称が『俺』の人物は…」が指す先が無い
+    const prompt = buildContradictionCheckPrompt(input({ narrator }));
+
+    expect(prompt.indexOf("【これまでの経緯】")).toBeLessThan(
+      prompt.indexOf("【この話の語り手】")
+    );
+    expect(prompt.indexOf("【この話の語り手】")).toBeLessThan(
+      prompt.indexOf("【検証項目】")
+    );
+  });
+});
+
+/*
+  **作中の日付を、コードで数えて渡す**（設計書6.10.9）。
+
+  「十月三日に折ったのに、十二月八日の話で『ちょうど二週間が過ぎた』」という
+  仕込みは、26bでも27bでも3回とも見逃した。**引き算をAIにさせない。**
+
+  **版（1.6）を据え置いたので、渡さないときの文面が1文字でも変わると、
+  同じ鍵に別の材料で得た答えが入る。**
+*/
+describe("作中の日付（設計書6.10.9）", () => {
+  const storyDates = `【作中の日付】（本文とあらすじに書かれた表記から、機械が読み取って数えたものです）
+第2話: 十月三日
+この話（第5話）: 十二月八日（第2話から66日）
+
+- 年は書かれていないので、**話の順に進むものとして数えています。** 回想や時間の前後がある作品では、この数えが合っていないことがあります。
+- 読み取れなかった話（「九月の終わり」のような書き方）は並んでいません。
+- **本文に「◯日が過ぎた」「◯週間ぶり」のような経過の記述があれば、上の日数と食い違っていないかを見てください。**
+- 読み取った日付そのものが誤っている可能性もあります。断定せず、「日付ではこう、本文ではこう」と並べてください。`;
+
+  /** 渡したときに増える欄。**この文字列を丸ごと取り除けば、元と同じになる** */
+  const STORY_DATES_SECTION = `
+${storyDates}
+`;
+
+  test("渡さなければ、欄そのものを出さない", () => {
+    const prompt = buildContradictionCheckPrompt(
+      input({ categories: LIGHT_CATEGORIES })
+    );
+
+    expect(prompt).not.toContain("【作中の日付】");
+    // 空文字を渡したときも同じ（読み取れなかった作品）
+    expect(
+      buildContradictionCheckPrompt(
+        input({ categories: LIGHT_CATEGORIES, storyDates: "" })
+      )
+    ).toBe(prompt);
+  });
+
+  test("渡したときに増えるのは、この欄だけ", () => {
+    // **ほかが1文字でも変われば、版を据え置いたキャッシュが壊れる**
+    const without = buildContradictionCheckPrompt(
+      input({ categories: LIGHT_CATEGORIES })
+    );
+    const withDates = buildContradictionCheckPrompt(
+      input({ categories: LIGHT_CATEGORIES, storyDates })
+    );
+
+    expect(withDates).toContain(STORY_DATES_SECTION);
+    expect(withDates.replace(STORY_DATES_SECTION, "")).toBe(without);
+  });
+
+  test("【これまでの経緯】より後、【この話の語り手】より前に置く", () => {
+    // あらすじを読んだあとに日付が並び、そのあとで語り手を名指しする
+    const prompt = buildContradictionCheckPrompt(
+      input({ storyDates, narrator: { firstPerson: "俺", name: "相沢 春人" } })
+    );
+
+    expect(prompt.indexOf("【これまでの経緯】")).toBeLessThan(
+      prompt.indexOf("【作中の日付】")
+    );
+    expect(prompt.indexOf("【作中の日付】")).toBeLessThan(
+      prompt.indexOf("【この話の語り手】")
+    );
   });
 });
 
@@ -566,6 +770,55 @@ describe("前の話に出た人物を引き継ぐ（設計書6.10.6）", () => {
     }).chunks[0];
 
     expect(first.carriedOverChapters).toEqual([]);
+  });
+});
+
+/*
+  **作中の日付を、材料としても返す**（設計書6.10.9）。
+
+  答え付きの台の第5話には「十月三日に折ったのに、ちょうど二週間が過ぎた」
+  という仕込みがあり、26bでも27bでも3回とも見逃した。**日付の引き算は
+  コードでやって渡す**——外部AIが自分で数えなくても済むようにする。
+
+  **読み取れなかったことも黙らない**（`missedCharacters` と同じ考え方）。
+*/
+describe("作中の日付を材料に載せる（設計書6.10.9）", () => {
+  const folder = "test/fixtures/seeded/contradiction";
+
+  function datesIn(file: string): string {
+    return contradictionMaterial({
+      folder,
+      filePath: `本文/${file}`,
+      numCtx: 16384,
+    }).chunks[0].storyDates;
+  }
+
+  test("第5話では、折った日からの日数を数えて渡す", () => {
+    const dates = datesIn("005_初雪の窓口.txt");
+
+    expect(dates).toContain("第2話: 十月三日");
+    // 本文は「ちょうど二週間」と言うが、数えれば66日である
+    expect(dates).toContain("この話（第5話）: 十二月八日（第2話から66日）");
+  });
+
+  test("読み取れたものが1件しかない話では、欄を出さない", () => {
+    // 第1話は「九月の終わり」で、月日がそろっていない
+    expect(datesIn("001_九月の終わりの坂.txt")).toBe("");
+    // 第2話は自分の日付だけ（差を出す相手がいない）
+    expect(datesIn("002_十月三日の坂.txt")).toBe("");
+  });
+
+  test("プロンプトにも同じ欄が入る", () => {
+    const built = contradictionPrompt({
+      folder,
+      filePath: "本文/005_初雪の窓口.txt",
+      numCtx: 16384,
+    });
+
+    expect(built.chunks[0].userPrompt).toContain("【作中の日付】");
+    expect(built.chunks[0].userPrompt).toContain(
+      "この話（第5話）: 十二月八日（第2話から66日）"
+    );
   });
 });
 

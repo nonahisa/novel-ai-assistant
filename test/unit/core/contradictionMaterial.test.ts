@@ -6,6 +6,8 @@ import {
   describeMissedCharacters,
   mergeMissedCharactersByEpisode,
   promptVersionWithCarryOver,
+  promptVersionWithNarrator,
+  promptVersionWithStoryDates,
   CARRY_OVER_DEFAULT_CHAPTERS,
   CARRY_OVER_MAX_CHAPTERS,
 } from "../../../src/core/contradictionMaterial";
@@ -50,14 +52,20 @@ function person(options: {
   summary?: string | null;
   chapters?: number[];
   changes?: RecordChange[];
+  /** 語り手を名指しするときに見る（設計書6.10.6） */
+  firstPerson?: string;
 }): Character {
+  const base = emptyCharacter(options.id, options.name);
   return {
-    ...emptyCharacter(options.id, options.name),
+    ...base,
     aliases: options.aliases ?? [],
     role: options.role ?? null,
     summary: options.summary ?? null,
     appearedChapters: options.chapters ?? [],
     changes: options.changes ?? [],
+    firstPerson: options.firstPerson
+      ? { default: options.firstPerson, variants: [] }
+      : base.firstPerson,
   };
 }
 
@@ -880,5 +888,254 @@ describe("チャンクごとの結果を、話ごとにまとめる（設計書6
         .missedCharacters
     ).toEqual(["如月 玲"]);
     expect(merged).toEqual([]);
+  });
+});
+
+/*
+  **地の文の「俺」が誰かを名指しする**（設計書6.10.6）。
+
+  材料に載せるところまでは引き継ぎで済んでいる（80%→99%）が、地の文は
+  「俺」、設定は「相沢 春人」なので、**同じ人物だとAIが確信しきれない**
+  ——答え付きの台での当たりは 2/4 のまま増えなかった。
+
+  **決め打ちはしない。** 一人称が一致する人物が材料の中に**ちょうど1人**
+  いるときだけ名指しし、絞れなければ黙る。
+*/
+describe("この話の語り手（設計書6.10.6）", () => {
+  const haruto = person({
+    id: "char_001",
+    name: "相沢 春人",
+    role: "生活支援課の職員",
+    firstPerson: "俺",
+    chapters: [1, 2, 3, 4, 5],
+  });
+  const chinatsu = person({
+    id: "char_002",
+    name: "黒瀬 千夏",
+    role: "窓口の相談員",
+    firstPerson: "私",
+    chapters: [1, 2, 3, 4, 5],
+  });
+
+  /**
+   * 名前の出ない地の文（一人称小説の本文）。
+   *
+   * **`detectFirstPerson` は台詞を落として500字以上／10回以上でなければ
+   * 決めない**ので、見本も同じ長さが要る。
+   */
+  function narration(word: string, times = 14): string {
+    return Array.from(
+      { length: times },
+      (_, index) =>
+        `${word}は窓口の椅子に座っていた。冷えた蛍光灯の下で、書類の角が` +
+        `わずかに反り返っている。外は雨だった。${index}`
+    ).join("\n");
+  }
+
+  /** 前の話の本文。**人物を索引で見つけるためだけ**に渡す（材料には入らない） */
+  const carryOverText = "相沢は坂を下りた。黒瀬は窓口で待っていた。";
+
+  test("一人称が一致する人物が材料に1人だけなら、名指しする", () => {
+    const relevant = material({ people: [haruto, chinatsu] }).relevantFor(
+      narration("俺"),
+      4,
+      { carryOverText }
+    );
+
+    expect(relevant.narrator).toEqual({ firstPerson: "俺", name: "相沢 春人" });
+  });
+
+  test("引き継いだ本文と繋いで一人称を数える（対象だけでは短い回がある）", () => {
+    // 1話ぶんの地の文が短いと、対象チャンクだけでは決められない。
+    // 引き継ぎ（既定2話）を混ぜて数えれば届く
+    const settings = material({ people: [haruto, chinatsu] });
+    const short = "俺は窓口の椅子に座っていた。相沢は黒瀬を見た。";
+
+    expect(settings.relevantFor(short, 4, {}).narrator).toBeNull();
+    expect(
+      settings.relevantFor(short, 4, {
+        carryOverText: narration("俺"),
+      }).narrator
+    ).toEqual({ firstPerson: "俺", name: "相沢 春人" });
+  });
+
+  test("材料に載っていない人物は、語り手と呼ばない", () => {
+    // 引き継ぎでも名前が出ず、材料に載らなかった人物を名指しすると、
+    // 「照らし合わせる相手がある」と言いながら設定を渡していないことになる
+    const relevant = material({ people: [haruto, chinatsu] }).relevantFor(
+      narration("俺"),
+      4,
+      { carryOverText: "黒瀬は窓口で待っていた。" }
+    );
+
+    expect(relevant.characters).toBe(describeCharacter(chinatsu, []));
+    expect(relevant.narrator).toBeNull();
+  });
+
+  test("同じ一人称の人物が2人載っていたら黙る", () => {
+    const goichi = person({
+      id: "char_003",
+      name: "蓬田 吾一",
+      role: "常連の相談者",
+      firstPerson: "俺",
+      chapters: [1, 2, 3, 4, 5],
+    });
+
+    expect(
+      material({ people: [haruto, goichi] }).relevantFor(narration("俺"), 4, {
+        carryOverText: "相沢は坂を下りた。蓬田は窓口に来た。",
+      }).narrator
+    ).toBeNull();
+  });
+
+  test("三人称の本文では黙る", () => {
+    expect(
+      material({ people: [haruto, chinatsu] }).relevantFor(
+        narration("春人"),
+        4,
+        { carryOverText }
+      ).narrator
+    ).toBeNull();
+  });
+
+  test("話数で材料から外れた人物は、語り手にもならない（6.10.3）", () => {
+    // その話の時点でまだ登場していない人物は材料に載らない。
+    // 載っていないものを名指ししない
+    const later = person({
+      id: "char_004",
+      name: "相沢 春人",
+      role: "生活支援課の職員",
+      firstPerson: "俺",
+      chapters: [9],
+    });
+
+    const relevant = material({ people: [later] }).relevantFor(
+      narration("俺"),
+      4,
+      { carryOverText: "相沢は坂を下りた。" }
+    );
+
+    expect(relevant.characters).toBe("");
+    expect(relevant.narrator).toBeNull();
+  });
+
+  /*
+    **語り手の欄は、材料の選び方を1文字も変えない。**
+
+    プロンプトが変わるとキャッシュの鍵に**別の材料で得た答え**が入るので、
+    ここは「数えるだけ」の欄でなければならない（`missedCharacters` と同じ）。
+  */
+  test("characters・hasAnything・missedCharacters はこれまでと同じ", () => {
+    const relevant = material({ people: [haruto, chinatsu] }).relevantFor(
+      narration("俺"),
+      4,
+      { carryOverText, previousBodyText: "相沢は坂を下りた。" }
+    );
+
+    expect(relevant.characters).toBe(
+      [describeCharacter(haruto, []), describeCharacter(chinatsu, [])].join(
+        "\n\n"
+      )
+    );
+    expect(relevant.hasAnything).toBe(true);
+    expect(relevant.missedCharacters).toEqual([]);
+    expect(relevant.locations).toBe("");
+  });
+
+  test("語り手が決まらなくても、材料はこれまでどおり載る", () => {
+    // 名指しできない作品でも、突き合わせそのものは従来と同じに動く
+    const relevant = material({ people: [chinatsu] }).relevantFor(
+      narration("俺"),
+      4,
+      { carryOverText: "黒瀬は窓口で待っていた。" }
+    );
+
+    expect(relevant.narrator).toBeNull();
+    expect(relevant.characters).toBe(describeCharacter(chinatsu, []));
+    expect(relevant.hasAnything).toBe(true);
+  });
+});
+
+describe("語り手をキャッシュの鍵へ混ぜる（設計書6.10.6）", () => {
+  test("名指しできなければ、版はそのまま（処理済みが飛ばない）", () => {
+    // **語り手の欄が出ない作品では、送る内容も鍵もこれまでと同じ**である。
+    // 版（1.6）を上げなかったのはこのため
+    expect(promptVersionWithNarrator("1.6", null)).toBe("1.6");
+  });
+
+  test("名指しした回だけ、版に印が付く", () => {
+    const key = promptVersionWithNarrator("1.6", {
+      firstPerson: "俺",
+      name: "相沢 春人",
+    });
+
+    expect(key).not.toBe("1.6");
+    expect(key.startsWith("1.6:narrator")).toBe(true);
+  });
+
+  test("名指しした相手が変われば、鍵も変わる", () => {
+    // 台帳の一人称が直れば、名指しする相手も変わりうる
+    const first = promptVersionWithNarrator("1.6", {
+      firstPerson: "俺",
+      name: "相沢 春人",
+    });
+    const second = promptVersionWithNarrator("1.6", {
+      firstPerson: "俺",
+      name: "蓬田 吾一",
+    });
+
+    expect(first).not.toBe(second);
+  });
+
+  test("同じ語り手なら、いつでも同じ鍵になる", () => {
+    const narrator = { firstPerson: "俺", name: "相沢 春人" };
+
+    expect(promptVersionWithNarrator("1.6", narrator)).toBe(
+      promptVersionWithNarrator("1.6", { ...narrator })
+    );
+  });
+});
+
+describe("作中の日付をキャッシュの鍵へ混ぜる（設計書6.10.9）", () => {
+  const section = "【作中の日付】\n第2話: 十月三日\nこの話（第5話）: 十二月八日（第2話から66日）";
+
+  test("読み取れなければ、版はそのまま（処理済みが飛ばない）", () => {
+    // **日付の欄が出ない作品では、送る内容も鍵もこれまでと同じ**である。
+    // 版（1.6）を上げなかったのはこのため
+    expect(promptVersionWithStoryDates("1.6", "")).toBe("1.6");
+  });
+
+  test("欄を出した回だけ、版に印が付く", () => {
+    const key = promptVersionWithStoryDates("1.6", section);
+
+    expect(key).not.toBe("1.6");
+    expect(key.startsWith("1.6:dates")).toBe(true);
+  });
+
+  test("並んだ日付が変われば、鍵も変わる", () => {
+    // あらすじを書き直せば読み取れる日付も変わるし、話が進めば行も増える
+    expect(promptVersionWithStoryDates("1.6", section)).not.toBe(
+      promptVersionWithStoryDates("1.6", `${section}\nこの話（第6話）: 一月四日`)
+    );
+  });
+
+  test("同じ欄なら、いつでも同じ鍵になる", () => {
+    expect(promptVersionWithStoryDates("1.6", section)).toBe(
+      promptVersionWithStoryDates("1.6", `${section}`)
+    );
+  });
+
+  test("語り手の印と重ねても、どちらも消えない", () => {
+    // 抜粋・引き継ぎ・語り手・日付は同じ版へ順に積む
+    const key = promptVersionWithStoryDates(
+      promptVersionWithNarrator("1.6", {
+        firstPerson: "俺",
+        name: "相沢 春人",
+      }),
+      section
+    );
+
+    expect(key).toContain(":narrator");
+    expect(key).toContain(":dates");
   });
 });

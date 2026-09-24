@@ -1,0 +1,549 @@
+{
+  "measuredAt": "2026-09-24T05:06:01.229Z",
+  "feature": "contradiction",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "qwen3.8-27b-cc:latest",
+  "numCtx": 20480,
+  "numCtxDecision": {
+    "numCtx": 20480,
+    "source": "プロンプトの長さから（製品と同じ道）",
+    "promptChars": 6303,
+    "outputTokens": 8192,
+    "contextWindow": 262144,
+    "charsPerToken": null
+  },
+  "temperature": 0,
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": {
+    "contextLength": 262144,
+    "bundled": null,
+    "note": null
+  },
+  "warmup": {
+    "elapsedMs": 11218,
+    "ok": true,
+    "reason": null
+  },
+  "endpoint": null,
+  "options": {},
+  "repeat": 2,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.84.10",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.6",
+  "verifyPromptVersion": null,
+  "plans": [
+    {
+      "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@5017",
+      "chars": 1235,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\002_十月三日の坂.txt#2-0@5017",
+      "chars": 1218,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\003_窓口の椅子.txt#3-0@5017",
+      "chars": 1211,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@5017",
+      "chars": 1246,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\005_初雪の窓口.txt#5-0@5017",
+      "chars": 1216,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\Mizushima\\repo\\novel-ai-assistant\\test\\fixtures\\seeded\\contradiction",
+    "targets": [
+      "本文\\001_九月の終わりの坂.txt",
+      "本文\\002_十月三日の坂.txt",
+      "本文\\003_窓口の椅子.txt",
+      "本文\\004_ギプスが外れた日.txt",
+      "本文\\005_初雪の窓口.txt"
+    ]
+  },
+  "answers": "C:\\Users\\Mizushima\\repo\\novel-ai-assistant\\test\\fixtures\\seeded\\contradiction\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 192008,
+      "temperature": 0,
+      "staleNote": null,
+      "metrics": {
+        "seededContradictions": 4,
+        "seededContradictionsTotal": 4,
+        "missedContradictions": 0,
+        "falseFlagsContradiction": 0,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 0,
+        "accepted": 4,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 192008
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "seededContradictions": {
+          "人物": {
+            "found": 2,
+            "total": 2
+          },
+          "状態": {
+            "found": 1,
+            "total": 1
+          },
+          "時系列": {
+            "found": 1,
+            "total": 1
+          }
+        },
+        "missedContradictions": [],
+        "falseFlagsContradiction": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_九月の終わりの坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3.8-27b-cc:latest",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@5017",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "missed": []
+          }
+        },
+        {
+          "target": "本文\\002_十月三日の坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3.8-27b-cc:latest",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\002_十月三日の坂.txt#2-0@5017",
+                "chapterLabel": "第2話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "missed": []
+          }
+        },
+        {
+          "target": "本文\\003_窓口の椅子.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3.8-27b-cc:latest",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\003_窓口の椅子.txt#3-0@5017",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 39,
+                    "excerpt": "僕は判子を押す手を止めた。",
+                    "category": "人物",
+                    "settingSays": "相沢春人の一人称は「俺」である。",
+                    "textSays": "地の文で一人称が「僕」となっている。",
+                    "note": "前後の文脈（3行目、9行目など）では一貫して「俺」が使われているため、誤記の可能性が高い。意図的な視点交代や作中作ではない。",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\003_窓口の椅子.txt",
+                    "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "missed": []
+          }
+        },
+        {
+          "target": "本文\\004_ギプスが外れた日.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3.8-27b-cc:latest",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@5017",
+                "chapterLabel": "第4話",
+                "accepted": [
+                  {
+                    "line": 1,
+                    "excerpt": "右足のギプスが外れたのは",
+                    "category": "状態",
+                    "settingSays": "第2話の経緯では「左の足首を折る」とされている。",
+                    "textSays": "本文では「右足のギプス」が外れたと書かれている。",
+                    "note": "負傷した左右が食い違っている可能性がある。",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\004_ギプスが外れた日.txt",
+                    "chunkHash": "141fc42ff943b6682b09d940014710a090bd10e95a44b0846c3a8626372c22de"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "missed": []
+          }
+        },
+        {
+          "target": "本文\\005_初雪の窓口.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3.8-27b-cc:latest",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\005_初雪の窓口.txt#5-0@5017",
+                "chapterLabel": "第5話",
+                "accepted": [
+                  {
+                    "line": 11,
+                    "excerpt": "足を折ってから、ちょうど二週間が過ぎた",
+                    "category": "時系列",
+                    "settingSays": "第2話で10月3日に骨折し、第4話で11月の最初の週にギプスが外れた（約1ヶ月経過）。本話は12月8日であり、骨折から約66日（9週間以上）が経過している。",
+                    "textSays": "足を折ってから「ちょうど二週間」が過ぎたと記述されている。",
+                    "note": "第4話でギプスが外れ自転車に乗れるようになった後の話であるため、「二週間」は骨折直後（第2話〜3話相当）の時間感覚と矛盾する。",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "c0716844893b3ccff4ff26f2790b4ee47ae3963bc15481798ae58a4e2f692428"
+                  },
+                  {
+                    "line": 7,
+                    "excerpt": "左目の下のほくろが、鏡の中で滲んだ",
+                    "category": "人物",
+                    "settingSays": "相沢春人の外見設定では「右目の下に小さなほくろがある」とされている。",
+                    "textSays": "「左目」の下のほくろと記述されている。",
+                    "note": "左右が逆になっている可能性がある。",
+                    "severity": "medium",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "c0716844893b3ccff4ff26f2790b4ee47ae3963bc15481798ae58a4e2f692428"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "missed": []
+          }
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "elapsedMs": 200061,
+      "temperature": 0,
+      "staleNote": null,
+      "metrics": {
+        "seededContradictions": 4,
+        "seededContradictionsTotal": 4,
+        "missedContradictions": 0,
+        "falseFlagsContradiction": 0,
+        "categoryMismatch": 0,
+        "otherFlagsContradiction": 0,
+        "accepted": 4,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 200061
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "seededContradictions": {
+          "人物": {
+            "found": 2,
+            "total": 2
+          },
+          "状態": {
+            "found": 1,
+            "total": 1
+          },
+          "時系列": {
+            "found": 1,
+            "total": 1
+          }
+        },
+        "missedContradictions": [],
+        "falseFlagsContradiction": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_九月の終わりの坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3.8-27b-cc:latest",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@5017",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "missed": []
+          }
+        },
+        {
+          "target": "本文\\002_十月三日の坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3.8-27b-cc:latest",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\002_十月三日の坂.txt#2-0@5017",
+                "chapterLabel": "第2話",
+                "accepted": [],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "missed": []
+          }
+        },
+        {
+          "target": "本文\\003_窓口の椅子.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3.8-27b-cc:latest",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\003_窓口の椅子.txt#3-0@5017",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 39,
+                    "excerpt": "僕は判子を押す手を止めた。",
+                    "category": "人物",
+                    "settingSays": "相沢春人の一人称は「俺」である。",
+                    "textSays": "地の文で一人称が「僕」となっている。",
+                    "note": "前後の文脈（3行目、9行目など）では一貫して「俺」が使われているため、誤記の可能性が高い。意図的な視点交代や作中作ではない。",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\003_窓口の椅子.txt",
+                    "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "missed": []
+          }
+        },
+        {
+          "target": "本文\\004_ギプスが外れた日.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3.8-27b-cc:latest",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@5017",
+                "chapterLabel": "第4話",
+                "accepted": [
+                  {
+                    "line": 1,
+                    "excerpt": "右足のギプスが外れたのは",
+                    "category": "状態",
+                    "settingSays": "第2話の経緯では「左の足首を折る」とされている。",
+                    "textSays": "本文では「右足のギプス」が外れたと書かれている。",
+                    "note": "負傷した左右が食い違っている可能性がある。",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\004_ギプスが外れた日.txt",
+                    "chunkHash": "141fc42ff943b6682b09d940014710a090bd10e95a44b0846c3a8626372c22de"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "missed": []
+          }
+        },
+        {
+          "target": "本文\\005_初雪の窓口.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3.8-27b-cc:latest",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\005_初雪の窓口.txt#5-0@5017",
+                "chapterLabel": "第5話",
+                "accepted": [
+                  {
+                    "line": 11,
+                    "excerpt": "足を折ってから、ちょうど二週間が過ぎた",
+                    "category": "時系列",
+                    "settingSays": "第2話で10月3日に骨折し、第4話で11月の最初の週にギプスが外れた（約1ヶ月経過）。本話は12月8日であり、骨折から約66日（9週間以上）が経過している。",
+                    "textSays": "足を折ってから「ちょうど二週間」が過ぎたと記述されている。",
+                    "note": "第4話でギプスが外れ自転車に乗れるようになった後の話であるため、「二週間」は骨折直後（第2話〜3話相当）の時間感覚と矛盾する。",
+                    "severity": "high",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "c0716844893b3ccff4ff26f2790b4ee47ae3963bc15481798ae58a4e2f692428"
+                  },
+                  {
+                    "line": 7,
+                    "excerpt": "左目の下のほくろが、鏡の中で滲んだ",
+                    "category": "人物",
+                    "settingSays": "相沢春人の外見設定では「右目の下に小さなほくろがある」とされている。",
+                    "textSays": "「左目」の下のほくろと記述されている。",
+                    "note": "左右が逆になっている可能性がある。",
+                    "severity": "medium",
+                    "confidence": "high",
+                    "filePath": "本文\\005_初雪の窓口.txt",
+                    "chunkHash": "c0716844893b3ccff4ff26f2790b4ee47ae3963bc15481798ae58a4e2f692428"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": [],
+            "missed": []
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seededContradictions": {
+      "values": [
+        4,
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "seededContradictionsTotal": {
+      "values": [
+        4,
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "missedContradictions": {
+      "values": [
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "falseFlagsContradiction": {
+      "values": [
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "categoryMismatch": {
+      "values": [
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "otherFlagsContradiction": {
+      "values": [
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        4,
+        4
+      ],
+      "min": 4,
+      "max": 4
+    },
+    "rejected": {
+      "values": [
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "failures": {
+      "values": [
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        192008,
+        200061
+      ],
+      "min": 192008,
+      "max": 200061
+    }
+  },
+  "lines": [
+    "仕込んだ矛盾を拾えた: 4/4（各回：4/4、4/4）",
+    "見逃し（拾えなかった仕込み）: 0（各回：0、0）",
+    "誤検出（罠と、矛盾の無い話に付いた指摘）: 0（各回：0、0）",
+    "区分ちがい（場所は当てたが 人物／状態／時系列 を取り違えた）: 0（各回：0、0）",
+    "仕込み以外の箇所への指摘: 0（各回：0、0）",
+    "指摘（検算を通ったもの）: 4（各回：4、4）",
+    "落とした（検算で弾いたもの）: 0（各回：0、0）",
+    "失敗（チャンクごと通らなかったもの）: 0（各回：0、0）",
+    "所要時間: 192.0秒〜200.1秒（各回：192.0秒、200.1秒）",
+    "num_ctx: 20480（プロンプトの長さから（製品と同じ道））",
+    "temperature: 0（製品と同じ（束が返した値））",
+    "温め（読み込みを含む。上の所要時間には入っていません）: 11.2秒"
+  ]
+}

@@ -2,6 +2,7 @@ import type { Character } from "../models/character";
 import type { Location } from "../models/location";
 import type { WorldItem } from "../models/world";
 import { sha1Text } from "./hash";
+import { detectNarrator, type NarratorHint } from "./narrator";
 import {
   appearsIn,
   hasAppearedBy,
@@ -92,6 +93,17 @@ export interface RelevantSettings {
    * いないから外したのであって、名前が出ないせいで落ちたのではない。
    */
   missedCharacters: string[];
+  /**
+   * **この話の語り手**（設計書6.10.6）。決められなければ null。
+   *
+   * 地の文から数えた一人称と、**この材料に載った人物**の一人称が
+   * ちょうど1人だけ一致するときに限って入る（`core/narrator.ts`）。
+   *
+   * **`characters` にも `hasAnything` にも影響しない。** 材料の選び方は
+   * ここまでで終わっており、これは「載っている人物のうち誰が語り手か」を
+   * 言うだけの欄である。
+   */
+  narrator: NarratorHint | null;
 }
 
 /**
@@ -254,14 +266,38 @@ export function createContradictionMaterial(options: {
       // **その話の時点で分かっていることだけを渡す**（設計書6.10.3）。
       // 資料は作品全体から作られているので、そのまま渡すと
       // **あとの話で明かされる事実**と食い違って見える
-      const characterText = [...seenCharacters]
+      //
+      // **ここで残った人物が、実際に材料へ載る人物である。** 語り手を
+      // 名指しするとき（下）に、この並びだけを見る——載っていない人物を
+      // 「地の文の『俺』はこの人です」と言うわけにはいかない
+      const pickedCharacters = [...seenCharacters]
         .map((id) => characterById.get(id))
         .filter((item) => item !== undefined)
         .filter((item) => hasAppearedBy(item.appearedChapters, chapter))
         .map((item) => recordAsOf(item, CHARACTER_AS_OF_FIELDS, chapter))
-        .filter((item) => !isEmptyAfterRollback(item, CHARACTER_AS_OF_FIELDS))
+        .filter((item) => !isEmptyAfterRollback(item, CHARACTER_AS_OF_FIELDS));
+      const characterText = pickedCharacters
         .map((item) => describeCharacter(item, []))
         .join("\n\n");
+
+      /*
+        **地の文の「俺」が誰かを名指しする**（設計書6.10.6）。
+
+        材料に載せるところまでは引き継ぎ（`carryOverText`）で済んでいるが、
+        地の文は「俺」、設定は「相沢 春人」と書かれているので、**その2つが
+        同じ人物だとAIが確信しきれない。** 一人称と人物が1対1に結び付く
+        ときだけ、その対応を材料へ書く（絞れなければ黙る＝`null`）。
+
+        **一人称を数える本文には、引き継いだ本文も混ぜる。** 対象チャンク
+        だけでは地の文が短く（台詞を除いて500字未満）、一人称を決められない
+        回がある——引き継ぎは既定で2話ぶん入るので、それを一緒に数える。
+
+        **`characters`・`hasAnything` は変えない。** ここは数えるだけである。
+      */
+      const narrator = detectNarrator({
+        narrationText: carryOverText ? `${text}\n\n${carryOverText}` : text,
+        people: pickedCharacters,
+      });
 
       /*
         **落としたことを言う**（設計書6.10.6）。
@@ -342,6 +378,7 @@ export function createContradictionMaterial(options: {
           characterText || locationText || worldItems.length > 0
         ),
         missedCharacters,
+        narrator,
       };
     },
     namesIn(text) {
@@ -570,4 +607,46 @@ export function promptVersionWithCarryOver(
 ): string {
   if (!carryOverText) return promptVersion;
   return `${promptVersion}:carry${sha1Text(carryOverText).slice(0, 16)}`;
+}
+
+/**
+ * キャッシュの鍵（プロンプトの版）へ、名指しした語り手を混ぜる（6.10.6）。
+ *
+ * **語り手の欄が出る回だけ、鍵に印が付く。** プロンプトの版
+ * （`CONTRADICTION_CHECK_VERSION`）を上げると、**語り手が決まらない作品の
+ * 処理済みまで道連れで飛ぶ**——欄が出るかどうかはチャンクごとに変わるので、
+ * 版ではなく鍵の印で区別する（`promptVersionWithCarryOver` と同じ作法）。
+ *
+ * **中身も混ぜる。** 台帳の一人称が直れば、名指しする相手も変わりうる。
+ */
+export function promptVersionWithNarrator(
+  promptVersion: string,
+  narrator: NarratorHint | null
+): string {
+  if (!narrator) return promptVersion;
+  // 鍵は `promptVersion|providerId|model|chunkHash` の形で区切られるので、
+  // 名前や一人称をそのまま入れずにハッシュへ畳む（区切り文字が混ざらない）
+  const fingerprint = sha1Text(
+    JSON.stringify([narrator.firstPerson, narrator.name])
+  ).slice(0, 16);
+  return `${promptVersion}:narrator${fingerprint}`;
+}
+
+/**
+ * キャッシュの鍵（プロンプトの版）へ、作中の日付の欄を混ぜる（6.10.9）。
+ *
+ * **日付の欄が出た回だけ、鍵に印が付く**（`promptVersionWithNarrator` と
+ * 同じ作法）。プロンプトの版を上げると、**日付を読み取れない作品の
+ * 処理済みまで道連れで飛ぶ**——欄が出るかどうかは作品にもチャンクにも
+ * よるので、版ではなく鍵の印で区別する。
+ *
+ * **中身も混ぜる。** あらすじを書き直せば読み取れる日付も変わるし、
+ * 話が進めば並ぶ行が増える。
+ */
+export function promptVersionWithStoryDates(
+  promptVersion: string,
+  storyDates: string
+): string {
+  if (!storyDates) return promptVersion;
+  return `${promptVersion}:dates${sha1Text(storyDates).slice(0, 16)}`;
 }

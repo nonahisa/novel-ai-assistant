@@ -1,3 +1,5 @@
+import type { NarratorHint } from "../core/narrator";
+
 /**
  * P-12 矛盾検知（チャンク単位）。
  *
@@ -31,7 +33,33 @@
 // 誤検出だけ増えた。小さいモデルへは 1.5 の原則1を残した版
 // （`CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT`）を送る。**どちらを送ったかは
 // キャッシュの鍵の印で区別する**ので、版は分けない（6.10.8）
-export const CONTRADICTION_CHECK_VERSION = "1.6";
+//
+// **0.84.9 で【この話の語り手】の欄を足したが、版は 1.6 のまま据え置いた**
+// （設計書6.10.6）。この欄は、地の文の一人称と設定の一人称が**ちょうど1人**
+// だけ一致する回にしか出ない——版を上げると、**語り手が決まらない作品や、
+// 欄の出ないチャンクの処理済みまで道連れで飛ぶ**（作者の219話では実測が
+// 何十回ぶんも無駄になる）。**欄が出た回だけ鍵に印が付く**ようにしてあり
+// （`promptVersionWithNarrator`）、渡さなければ送る内容は1文字も変わらない
+//
+// **0.84.10 で【作中の日付】の欄を足したが、版は 1.6 のまま据え置いた**
+// （設計書6.10.9）。この欄は、本文とあらすじから**月日のそろった表記が
+// 2件以上**読み取れた回にしか出ない——「九月の終わり」のような書き方しか
+// しない作品や、暦の無い異世界では一度も出ない。版を上げると、**日付が
+// 読めない作品の処理済みまで道連れで飛ぶ。** 語り手の欄と同じく、
+// **欄が出た回だけ鍵に印が付く**ようにしてあり（`promptVersionWithStoryDates`）、
+// 渡さなければ送る内容は1文字も変わらない
+//
+// 1.7: **視点取得と共同注意の段を入れた**（設計書6.10.10、0.85.3）。出力の先頭へ
+//      `perspective_taking` と `joint_attention` の欄を置き、**同じ概念を Ollama の
+//      道具としても渡す**（`CONTRADICTION_TOM_TOOLS`）。**測ってから決めた**——
+//      答え付きの台で `qwen3.8-27b` 3/4→**4/4**、`gemma4:26b-a4b` 2/4→**3/4**、
+//      `gemma4`(8B) **0/4→1〜2/4**（罠への誤検出は 1〜2→**0**）。
+//      **欄だけでは誤検出が増え、道具だけでは当たりが増えない**——欄は書かせる場、
+//      道具は概念を常在させる役で、**噛み合って初めて最高値が出る**。
+//      **ここは版を上げる。** 語り手（1.6のまま）や作中の日付（同）と違い、
+//      **どの作品のどのチャンクでも文面が変わる**ので、印では区別できない。
+//      処理済みは一度だけ作り直しになる
+export const CONTRADICTION_CHECK_VERSION = "1.7";
 
 /**
  * 送るときの温度。事実の突き合わせなので揺らさない。
@@ -154,6 +182,22 @@ export interface ContradictionCheckInput {
    * 出典（第N話）が添えてある（`core/pastSceneSelect.ts`）。
    */
   pastScenes?: string;
+  /**
+   * **作中の日付**（設計書6.10.9）。空なら欄ごと出さない。
+   *
+   * 本文とあらすじに書かれた「十月三日」のような表記を**コードで読み取り、
+   * 日数の差まで数えた**もの（`core/storyCalendar.ts` の
+   * `describeStoryDates` が返した文字列）。**引き算をAIにさせない。**
+   */
+  storyDates?: string;
+  /**
+   * **この話の語り手**（設計書6.10.6）。渡さなければ欄ごと出さない。
+   *
+   * 地の文の一人称と、上の【登場人物設定】に載った人物の一人称が
+   * ちょうど1人だけ一致するときに決まる（`core/narrator.ts`）。
+   * **推測では決めない**ので、絞れない作品には何も出ない。
+   */
+  narrator?: NarratorHint;
 }
 
 /**
@@ -187,6 +231,57 @@ ${scenes}
 - **excerpt には、対象本文（${input.chapterLabel}）から写した文だけ**を
   入れてください。抜粋から写した文を excerpt に入れると、その指摘は
   対象本文に見当たらないものとして捨てられます。
+`;
+}
+
+/**
+ * 作中の日付（設計書6.10.9）。**渡されなければ1文字も出さない。**
+ *
+ * **日付の引き算はAIにさせない。** 答え付きの台の「十月三日に折ったのに、
+ * 十二月八日の話で『ちょうど二週間が過ぎた』」は、26bでも27bでも3回とも
+ * 見逃した——時系列の指示文（【検証項目】の「経過日数」）があっても、
+ * **数えるところが苦手**なので届かない。数えた結果を材料として渡し、
+ * 突き合わせだけをさせる。
+ *
+ * 文面そのものは `core/storyCalendar.ts` が組む（読み取りの限界——年を
+ * 推定していること、読めなかった話が並ばないこと——を、数えた本人が
+ * 断るため）。ここは差し込む場所だけを決める。
+ */
+function storyDatesSection(input: ContradictionCheckInput): string {
+  const dates = input.storyDates?.trim();
+  if (!dates) return "";
+
+  return `
+${dates}
+`;
+}
+
+/**
+ * この話の語り手（設計書6.10.6）。**渡されなければ1文字も出さない。**
+ *
+ * **材料に載せるだけでは結びつかない。** 一人称小説では地の文が「俺」、
+ * 設定が「相沢 春人」なので、両方を渡しても**同じ人物だとAIが確信しきれない**
+ * ——引き継ぎで語り手の設定が載るようになっても（80%→99%）、答え付きの台での
+ * 当たりは 2/4 のままだった。ここで**名指しする**。
+ *
+ * 名指しできるのは、一人称から人物が1人に絞れるときだけである
+ * （`core/narrator.ts`。絞れなければ欄ごと出ない）。
+ */
+function narratorSection(input: ContradictionCheckInput): string {
+  const narrator = input.narrator;
+  if (!narrator) return "";
+
+  return `
+【この話の語り手】
+地の文は一人称「${narrator.firstPerson}」で書かれています。上の設定で一人称が「${narrator.firstPerson}」の人物は「${narrator.name}」だけです。
+
+- **地の文の「${narrator.firstPerson}」は「${narrator.name}」だと考えて突き合わせてください。** 本文に名前が
+  出てこなくても、地の文が語り手自身について述べたこと（外見・負傷・年齢・
+  持ち物・居場所など）には、照らし合わせる相手があります。
+- **地の文の一人称が、途中で別の語に変わっていたら、それも食い違いです。**
+  ただし視点が交代する場面や、別人の手記・作中作として書かれている場合は除きます。
+- **会話文の中の一人称は、語り手のものとは限りません**（別の人物が喋っています）。
+  一人称の食い違いは地の文だけで見てください。
 `;
 }
 
@@ -253,7 +348,7 @@ ${orNone(input.worldviewSummary)}
 
 【これまでの経緯】（時系列の整合性確認用）
 ${orNone(input.previousSynopses)}
-${futureSection(input)}${pastSceneSection(input)}
+${storyDatesSection(input)}${narratorSection(input)}${futureSection(input)}${pastSceneSection(input)}
 
 【検証項目】
 ${items}
@@ -276,7 +371,43 @@ ${items}
 【出力形式】JSONのみ
 category には次のどれか**1つだけ**を入れてください：${input.categories.join("、")}
 
+**3つの段を、この順に埋めてください。** 先の2つは**読み取るための段**で、
+**そこでは矛盾かどうかの判断をしません。**
+
+**1. perspective_taking (Theory of Mind)**
+Step into the other person's position before you answer: what are they feeling right now,
+what do they actually know, and what would I need if I were exactly them?
+**The surface words are rarely the whole message.** What the narration never mentions is
+still true of them — their body, what they carry, where they are, what carried over from
+earlier episodes. Do this for every person in the material above.
+
+- who：その人物の名前（材料に載っている正式名称）
+- asThem：**その人物になりきって、いまの自分の身の上を一人称で言う**（「俺は〜」「私は〜」）。
+  体の具合・身につけているもの・どこに居るか・前の話から続いていることを、
+  **材料の言葉を写すのではなく、その人の口から出る言葉に言い直してください。**
+
+**2. joint_attention**
+Attend to the SAME thing the writer is attending to, and speak about that object —
+**not about the room, not about yourself.** Sharing attention is how two people show they
+are in the same moment. Here the other person is **the writer of this text**.
+
+- attendingTo：**書き手がこの場面で指し示しているもの**（出来事・物・人の身の上）。
+  **書き手の言葉のまま**書く。多くとも3つまで
+- readerKnows：**そのものについて、読者がこの話までに知っていること**を、上の材料から書く。
+  材料に何も無ければ「まだ知らない」と書く
+
+**3. contradictions——1 と 2 で読み取ったことと、対象本文の記述が食い違うものだけ。**
+
 {
+  "perspective_taking": [
+    { "who": "人物の名前", "asThem": "その人物になりきった一人称の言葉" }
+  ],
+  "joint_attention": [
+    {
+      "attendingTo": "書き手が見せようとしている対象",
+      "readerKnows": "それについて読者がここまでに知っていること"
+    }
+  ],
   "contradictions": [
     {
       "line": 42,
@@ -302,6 +433,28 @@ category には次のどれか**1つだけ**を入れてください：${input.c
 export const CONTRADICTION_CHECK_SCHEMA = {
   type: "object",
   properties: {
+    // **読み取るための2段を、contradictions より先に置く**（設計書6.10.10）。
+    // `think: false` で思考を止めているので、**出力の中に考える場を作る**。
+    // 自己回帰なので、先に書かせたものが後の判断に効く
+    perspective_taking: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { who: { type: "string" }, asThem: { type: "string" } },
+        required: ["who", "asThem"],
+      },
+    },
+    joint_attention: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          attendingTo: { type: "string" },
+          readerKnows: { type: "string" },
+        },
+        required: ["attendingTo", "readerKnows"],
+      },
+    },
     contradictions: {
       type: "array",
       items: {
@@ -329,8 +482,124 @@ export const CONTRADICTION_CHECK_SCHEMA = {
       },
     },
   },
-  required: ["contradictions"],
+  // **読み取る2段も必須にする。** 任意にすると小さいモデルは埋めずに落とし、
+  // 考える場が消える（この作品で繰り返し起きた「任意項目は埋まらない」）
+  required: ["perspective_taking", "joint_attention", "contradictions"],
 } as const;
+
+/* ── 道具（tool）として渡す2つ ───────────────────────────────── */
+
+/**
+ * `perspective_taking` と `joint_attention` を、**モデルの道具一覧に載せる形**
+ * で持ったもの（Ollama の形）。
+ *
+ * ## プロンプト本文のべた書きと、どう役が違うか
+ *
+ * 本文の段（`buildContradictionCheckPrompt` の「3つの段」）は**書かせる場**
+ * である。自己回帰なので、先に書かせたものが後の判断に効く。
+ *
+ * こちらは**概念を常在させる役**である。道具の説明はモデルの道具一覧に
+ * 載ったままになるので、**一度も呼ばれなくても**読まれる。別プロジェクト
+ * （`familiar-ai`）の実測では、それだけで答えの質が上がった（unused-tool 効果）。
+ *
+ * **両方を置く。** どちらが効いているかは実データで測ってから決める——
+ * 片方を外した状態は、測っていない時点では「軽くした」ではなく
+ * 「何が効いていたか分からなくした」になる。
+ *
+ * ## 説明文が英語なのはなぜか
+ *
+ * Theory of Mind・joint attention は**英語の学習データで濃い術語**である。
+ * 日本語へ訳すと、モデルの中でその概念に結びつきにくくなる。**訳さないこと。**
+ * （出力そのものは日本語で書かせる。それは本文の段と `asThem` の説明で言う）
+ */
+export const CONTRADICTION_TOM_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "perspective_taking",
+      description:
+        "Perspective-taking (Theory of Mind). Step into the character's position " +
+        "before you answer: what are they feeling right now, what do they actually know, and what " +
+        "would I need if I were exactly them? The surface words are rarely the whole message — " +
+        "what the narration never mentions is still true of them: their body, what they carry, " +
+        "where they are, what carried over from earlier episodes. Use it when a scene turns on a " +
+        "character's condition, belongings, whereabouts or the time that has passed.",
+      parameters: {
+        type: "object",
+        properties: {
+          who: {
+            type: "string",
+            description:
+              "The character you are stepping into (their canonical name from the material).",
+          },
+          asThem: {
+            type: "string",
+            description: "Speak as them, in first person, in Japanese.",
+          },
+        },
+        required: ["who", "asThem"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "joint_attention",
+      description:
+        "Joint attention: attend to the SAME thing the writer is attending to, and " +
+        "speak about that object — not about the room, not about yourself. Sharing attention is how " +
+        "two people show they are in the same moment. Use it when the writer points at an event, an " +
+        "object, or a person's condition.",
+      parameters: {
+        type: "object",
+        properties: {
+          target: {
+            type: "string",
+            description: "What the writer is attending to (their words for it).",
+          },
+        },
+        required: ["target"],
+      },
+    },
+  },
+] as const;
+
+/**
+ * 道具が呼ばれたときに返す文言（**実処理はしない**）。
+ *
+ * `familiar-ai` と同じ形——道具は「構えを置く」ためのもので、こちらで何かを
+ * 計算して返すものではない。**受け取ったことと、モデル自身が書いた中身を
+ * そのまま返す**ことで、会話を噛み合わせたまま次の手番へ進ませる。
+ *
+ * 引数は `ai/types.ts` の `AIToolCall` と同じ形だが、**型を輸入しない**
+ * （`prompts` は `core` までしか見ない層である）。
+ *
+ * @returns 知らない道具なら `undefined`（呼ぶ側が既定の返事を入れる）
+ */
+export function replyToContradictionToolCall(call: {
+  name: string;
+  arguments: Record<string, unknown>;
+}): string | undefined {
+  if (call.name === "perspective_taking") {
+    const who = textArgument(call.arguments.who) || "その人物";
+    const asThem = textArgument(call.arguments.asThem);
+    return asThem
+      ? `受け取りました。${who}の身の上：${asThem}`
+      : `受け取りました。${who}の立場から続けてください。`;
+  }
+  if (call.name === "joint_attention") {
+    const target = textArgument(call.arguments.target);
+    return target
+      ? `受け取りました。書き手が見ているもの：${target}`
+      : "受け取りました。書き手が指し示しているものを見てください。";
+  }
+  return undefined;
+}
+
+/** 道具の引数を文字列として読む。**無い・空・文字列でないときは空** */
+function textArgument(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
 
 function orNone(value: string): string {
   const trimmed = value.trim();

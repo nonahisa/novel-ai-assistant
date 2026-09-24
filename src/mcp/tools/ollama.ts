@@ -4,7 +4,10 @@ import {
   applyStreamLine,
   emptyStreamedChat,
   takeCompleteLines,
+  type StreamedChat,
 } from "../../ai/ollamaStream";
+import { normalizeToolCalls, toolFollowUpMessages } from "../../ai/toolCalls";
+import type { AIToolCall } from "../../ai/types";
 import { localFetch } from "../../ai/fetchTimeouts";
 import { McpToolError, describeError } from "./shared";
 
@@ -98,6 +101,22 @@ export interface OllamaGenerateInput {
    */
   temperature: number;
   allowRemote?: boolean;
+  /**
+   * モデルの一覧に載せる**道具（tool）の定義**（`ai/types.ts` の `tools`）。
+   *
+   * **製品と同じものを渡すためにある。** ここが揃っていないと、測ったのは
+   * 「製品とは違うプロンプトの結果」になる。**MCP の入力の形
+   * （`OLLAMA_GENERATE_INPUT`）には出さない**——道具の定義は製品の
+   * `prompts/*.ts` が持つもので、外から差し替えるものではない。
+   */
+  tools?: readonly unknown[];
+  /**
+   * 道具が呼ばれたときの受け（**渡したときだけ1往復**）。
+   *
+   * 関数なので JSON では渡せない。`novel.run` の経路
+   * （`mcp/tools/contradiction.ts`）が製品と同じ受け答えを渡す。
+   */
+  toolReply?: (call: AIToolCall) => string | undefined;
 }
 
 /**
@@ -137,6 +156,38 @@ export async function ollamaGenerate(
   assertLocalOrAllowed(endpoint, input.allowRemote);
 
   const startedAt = Date.now();
+  const messages: unknown[] = [
+    { role: "system", content: input.systemPrompt },
+    { role: "user", content: input.userPrompt },
+  ];
+
+  const first = await postChat(endpoint, input, messages);
+  /*
+    **道具だけが返った手番を、失敗にしない**（製品の `ai/ollamaProvider.ts` と
+    同じ受け）。道具を呼んだ手番は本文が空なので、そのままだと
+    「応答に本文がありません」で測定が丸ごと落ちる。**往復は1回まで。**
+  */
+  const streamed =
+    (await answerToolCalls(endpoint, input, messages, first)) ?? first;
+
+  if (!streamed.content) {
+    throw new McpToolError("Ollama の応答に本文がありません。");
+  }
+
+  return {
+    text: streamed.content,
+    model: input.model,
+    endpoint,
+    elapsedMs: Date.now() - startedAt,
+  };
+}
+
+/** `/api/chat` へ1回投げて、流れてきた応答を組み立てる */
+async function postChat(
+  endpoint: string,
+  input: OllamaGenerateInput,
+  messages: readonly unknown[]
+): Promise<StreamedChat> {
   let response: Response;
   try {
     /*
@@ -173,6 +224,10 @@ export async function ollamaGenerate(
         // 抽出の仕事に思考モードは要らない（遅くなるだけ）
         think: false,
         ...(input.schema === undefined ? {} : { format: input.schema }),
+        // **道具の定義**（`ai/types.ts` の `tools`）。製品と同じものを渡せる
+        // ようにしておかないと、ここでの測定が製品の結果にならない。
+        // 空の配列は送らない（「道具は無い」と明示する意味が無い）
+        ...(input.tools && input.tools.length > 0 ? { tools: input.tools } : {}),
         options: {
           // **これを外さない。** 既定の短いコンテキストで動くと、
           // 入力が黙って切り捨てられる
@@ -181,10 +236,7 @@ export async function ollamaGenerate(
           // `prompts/*.ts` にあり、呼ぶ側がそこから渡す
           temperature: input.temperature,
         },
-        messages: [
-          { role: "system", content: input.systemPrompt },
-          { role: "user", content: input.userPrompt },
-        ],
+        messages,
       }),
     }, MCP_OLLAMA_WAIT_MS);
   } catch (error) {
@@ -207,16 +259,49 @@ export async function ollamaGenerate(
   if (streamed.error) {
     throw new McpToolError(`Ollama がエラーを返しました: ${streamed.error}`);
   }
-  if (!streamed.content) {
-    throw new McpToolError("Ollama の応答に本文がありません。");
-  }
+  return streamed;
+}
 
-  return {
-    text: streamed.content,
-    model: input.model,
-    endpoint,
-    elapsedMs: Date.now() - startedAt,
-  };
+/**
+ * 道具だけが返ったときに、**1往復だけ**受けてもう一度書かせる。
+ *
+ * 受け答え（`toolReply`）を渡されたときだけ動く。2回目も道具だけなら、
+ * **何が起きたのかを言って止める**——黙って「本文がありません」と出すと、
+ * 道具を渡したせいだと気づけない。
+ *
+ * @returns 2回目の応答。往復しなかったときは `undefined`
+ */
+async function answerToolCalls(
+  endpoint: string,
+  input: OllamaGenerateInput,
+  messages: unknown[],
+  first: StreamedChat
+): Promise<StreamedChat | undefined> {
+  if (!input.toolReply) return undefined;
+  if (first.content) return undefined;
+  const rawToolCalls = first.toolCalls;
+  if (!rawToolCalls || rawToolCalls.length === 0) return undefined;
+  const calls = normalizeToolCalls(rawToolCalls);
+  if (calls.length === 0) return undefined;
+
+  /*
+    **2回目は道具を外す**（実測、2026-09-24。製品の `ai/ollamaProvider.ts` と
+    同じ）。`qwen3.8-27b-cc` は返事を受け取っても道具を呼び続け、答え付きの台が
+    全5チャンク失敗した。`tool_choice: "none"` は素の Ollama で無視される。
+    **モデル名では分けない**——見るのは「道具だけが返った」振る舞いだけ。
+  */
+  const second = await postChat(endpoint, { ...input, tools: undefined }, [
+    ...messages,
+    ...toolFollowUpMessages({ rawToolCalls, calls, reply: input.toolReply }),
+  ]);
+
+  if (!second.content) {
+    // 道具を外してなお本文が無いのは道具とは別の不調。そうと分かる言い方で残す
+    throw new McpToolError(
+      "道具に返事をして投げ直しましたが、本文が返りませんでした。"
+    );
+  }
+  return second;
 }
 
 /**

@@ -98,6 +98,14 @@ export interface StreamedChat {
   whitespaceRunaway?: boolean;
   /** Ollamaが返したエラー文（あれば） */
   error?: string;
+  /**
+   * モデルが呼んだ道具（`ai/toolCalls.ts`）。**そのままの形で持つ。**
+   *
+   * **流す道でも拾わないと、道具を渡した途端に機能が落ちる**——道具だけを
+   * 呼んだ手番は本文が空なので、拾わなければ「応答に本文がありません」に
+   * なる。中身を検めるのは受け取る側（`normalizeToolCalls`）の仕事。
+   */
+  toolCalls?: unknown[];
 }
 
 interface StreamLine {
@@ -149,6 +157,15 @@ export function applyStreamLine(
   const thought = (parsed.message as { thinking?: unknown } | undefined)
     ?.thinking;
   if (typeof thought === "string") into.thinking = (into.thinking ?? "") + thought;
+  /*
+    **道具の呼び出しは足し込む。** 1件のメッセージで丸ごと来るのが普通だが、
+    複数の行に分かれて届いても落とさないよう、配列を継ぎ足す形にしておく。
+  */
+  const calls = (parsed.message as { tool_calls?: unknown } | undefined)
+    ?.tool_calls;
+  if (Array.isArray(calls) && calls.length > 0) {
+    into.toolCalls = [...(into.toolCalls ?? []), ...calls];
+  }
   if (typeof parsed.error === "string") into.error = parsed.error;
   if (typeof parsed.eval_count === "number") into.evalCount = parsed.eval_count;
   if (typeof parsed.prompt_eval_count === "number") {
