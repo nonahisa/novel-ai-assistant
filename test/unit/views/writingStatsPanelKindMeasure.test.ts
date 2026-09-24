@@ -92,7 +92,7 @@ function renderEpisodesFor(kind: WorkKindKey | undefined): {
 describe("話ごとの一覧に、種類の目安を出す", () => {
   test("エッセイは「目安」の列と合計のカードが出る", () => {
     const { cards, table } = renderEpisodesFor("essay");
-    expect(table).toContain("<th class=\"num\">目安</th>");
+    expect(table).toContain(">目安</th>");
     expect(table).toContain("読了 約2分");
     expect(cards).toContain("種類の目安");
     expect(cards).toContain("読了 約4分");
@@ -102,6 +102,19 @@ describe("話ごとの一覧に、種類の目安を出す", () => {
     const { cards, table } = renderEpisodesFor("novel");
     expect(table).not.toContain("目安");
     expect(cards).not.toContain("種類の目安");
+  });
+
+  /**
+   * ノートPCの実機確認（2026-09-25）：「目安」の列が狭く、「読了 約12分」が
+   * 1字ずつ縦に折れて読めなかった。表は幅いっぱい（width:100%）で、題の列に
+   * 幅を取られると、短い列ほど折り返される。
+   */
+  test("「目安」の列は折り返さない（見出しも中身も）", () => {
+    const { table } = renderEpisodesFor("essay");
+    expect(table).toContain('<th class="num measure">目安</th>');
+    expect(table).toMatch(/<td class="num measure">読了 約2分<\/td>/);
+    // 折り返さない指定そのもの（class だけ付けて規則が無ければ効かない）
+    expect(html).toMatch(/\.measure\s*\{[^}]*white-space:\s*nowrap/);
   });
 
   test("概要の「作品の総量」にも、目安の短い形を添える", () => {

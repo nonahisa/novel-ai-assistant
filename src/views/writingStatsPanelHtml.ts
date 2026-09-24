@@ -133,6 +133,11 @@ table.reader-rates { width: auto; }
 table { border-collapse: collapse; width: 100%; }
 th, td { padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--vscode-panel-border); }
 th { color: var(--vscode-descriptionForeground); font-weight: normal; font-size: 12px; }
+/*
+  種類の目安の列（「読了 約12分」）。表が幅いっぱいなので、題の列に幅を
+  取られると1字ずつ縦に折れて読めなかった（ノートPCの実機確認、2026-09-25）
+*/
+.measure { white-space: nowrap; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 tr.clickable { cursor: pointer; }
 tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
@@ -261,6 +266,11 @@ a:hover, .link:hover { text-decoration: underline; }
 const vscode = acquireVsCodeApi();
 let state = null;
 let granularity = 'daily';
+/**
+ * グラフを右端（いちばん新しい日）に合わせ続けるか（pinChartToLatest）。
+ * 作者が左へ送ると外れ、右端まで戻すとまた合わせる
+ */
+let chartFollowLatest = true;
 /*
   サイトごとのAIの助言（設計書6.79.7.3）。**画面を描き直しても消えないよう、
   統計の中身（state）とは別に持つ**——本文を保存するたびに統計は送り直される。
@@ -316,8 +326,23 @@ document.querySelectorAll('.tab').forEach((tab) => {
     tab.classList.add('active');
     document.querySelectorAll('.page').forEach((el) => el.classList.remove('active'));
     document.getElementById('page-' + tab.dataset.page).classList.add('active');
+    // 隠れていたあいだは横の送りが効かない（幅が0）ので、見えたところで合わせ直す
+    if (tab.dataset.page === 'writing') pinChartToLatest();
   });
 });
+
+// 作者が自分で横へ送ったかどうかを覚える（右端から離れたら、描き直しで引き戻さない）
+(() => {
+  const chartSvg = document.getElementById('chart');
+  const chartWrap = chartSvg && chartSvg.parentElement;
+  if (!chartWrap) return;
+  chartWrap.addEventListener('scroll', () => {
+    // 隠れているあいだ（幅が0）の知らせでは判断しない
+    if (chartWrap.clientWidth === 0) return;
+    chartFollowLatest =
+      chartWrap.scrollLeft + chartWrap.clientWidth >= chartWrap.scrollWidth - 4;
+  });
+})();
 
 function renderGranularity() {
   const host = document.getElementById('granularity');
@@ -331,6 +356,8 @@ function renderGranularity() {
   host.querySelectorAll('[data-granularity]').forEach((el) => {
     el.addEventListener('click', () => {
       granularity = el.dataset.granularity;
+      // 別の刻みに切り替えたら、まずいちばん新しい期間から見せる
+      chartFollowLatest = true;
       renderGranularity();
       renderChart();
     });
@@ -503,22 +530,49 @@ function card(label, value, sub, progress) {
  * （ノートPCの実機確認、2026-09-23〜24。目標10字で、どの日も10字未満だと
  * 目標の線がいちばん上になり、「目標 10」と「10字」が重なった）。
  * 目標が小さく0の線に近いときも同じことが起きる。
- * そのときと、札が左の余白に収まらない長さのときは、**右端へ寄せて線の上に
- * 載せる**（線の下だと、棒の頭と重なりやすい）。
+ * そのときと、札が左の余白に収まらない長さのときは、**棒の並びの右の外へ
+ * 出す**。グラフの幅を札のぶん広げ、目標の線の端に添える。
+ *
+ * 以前は右端へ寄せて線の上に載せていたが、札はグラフの右端から左へ
+ * 伸びるので、**いちばん右の棒（今日）の上に載って「目標」が読めなかった**
+ * （ノートPCの実機確認、2026-09-25）。棒の並びの外なら、どの棒とも重ならない。
  *
  * @param input.goalY 目標の線の高さ
  * @param input.occupiedYs 左に既に置いてある数字の高さ（文字の下端）
  * @param input.padLeft 左の余白（縦軸の数字の置き場）
- * @param input.width グラフ全体の幅
+ * @param input.barsRight 棒の並びの右端（最後の棒の右）
  * @param input.labelWidth 札の幅の見積もり（estimateLabelWidth）
+ * @returns 置き場所と、そのためにグラフの右へ足す幅（extraRight）
  */
 function goalLabelPlacement(input) {
   const leftY = input.goalY + 3;
   // 目盛りの字は10px。上下12px以内なら重なって見える
   const collides = input.occupiedYs.some((y) => Math.abs(y - leftY) < 12);
   const fits = 4 + input.labelWidth <= input.padLeft - 2;
-  if (!collides && fits) return { x: 4, y: leftY, anchor: 'start' };
-  return { x: input.width - 4, y: input.goalY - 3, anchor: 'end' };
+  if (!collides && fits) return { x: 4, y: leftY, anchor: 'start', extraRight: 0 };
+  return {
+    x: input.barsRight + 4,
+    y: leftY,
+    anchor: 'start',
+    extraRight: input.labelWidth + 8,
+  };
+}
+
+/**
+ * 日ごとのグラフを、いちばん新しい側（右端）から見せる。
+ *
+ * グラフは古い日から左へ並ぶので、横に長いと今日の棒は横へ送らないと
+ * 見えなかった（ノートPCの実機確認、2026-09-25）。**作者が自分で左へ
+ * 送って見ているあいだは引き戻さない**——保存のたびに描き直すので、
+ * そのたびに右端へ飛ぶと過去の日を見ていられない。
+ */
+function pinChartToLatest() {
+  const svg = document.getElementById('chart');
+  const wrap = svg && svg.parentElement;
+  if (!wrap) return;
+  if (!chartFollowLatest) return;
+  // 行き過ぎた値はブラウザが右端に丸める
+  wrap.scrollLeft = wrap.scrollWidth;
 }
 
 function renderChart() {
@@ -534,7 +588,8 @@ function renderChart() {
   const padTop = 12;
   const padBottom = 34;
   const plotHeight = 180;
-  const width = padLeft + padRight + buckets.length * (barWidth + gap);
+  // 棒の並びの右端（最後の棒の右の隙間まで）
+  const barsRight = padLeft + buckets.length * (barWidth + gap);
   const height = padTop + plotHeight + padBottom;
 
   // 目標線は日次のときだけ意味がある（週次以降は目標の単位が変わる）
@@ -546,15 +601,30 @@ function renderChart() {
   const zeroY = padTop + (maxValue / span) * plotHeight;
   const scale = (value) => (Math.abs(value) / span) * plotHeight;
 
+  const topLabelY = padTop + 8;
+  const zeroLabelY = zeroY + 3;
+  const goalY = goal > 0 ? padTop + ((maxValue - goal) / span) * plotHeight : 0;
+  const goalText = '目標 ' + formatCount(goal);
+  // 札の置き場所は、グラフの幅より先に決める（棒の右へ出すなら、その分だけ広げる）
+  const goalSpot = goal > 0
+    ? goalLabelPlacement({
+        goalY: goalY,
+        occupiedYs: [topLabelY, zeroLabelY],
+        padLeft: padLeft,
+        barsRight: barsRight,
+        labelWidth: estimateLabelWidth(goalText),
+      })
+    : null;
+  const width = barsRight + padRight + (goalSpot ? goalSpot.extraRight : 0);
+
   const parts = [];
   // 0の線。消した日を下向きに出すため、上端固定にはしない
   parts.push('<line class="axis" x1="' + padLeft + '" y1="' + zeroY + '" x2="' + width + '" y2="' + zeroY + '" />');
 
-  const topLabelY = padTop + 8;
-  const zeroLabelY = zeroY + 3;
-  const goalY = goal > 0 ? padTop + ((maxValue - goal) / span) * plotHeight : 0;
   if (goal > 0) {
-    parts.push('<line class="goal-line" x1="' + padLeft + '" y1="' + goalY + '" x2="' + width + '" y2="' + goalY + '" />');
+    // 札を棒の右へ出したときは、線を札の手前で止める（札に線が貫かない）
+    const goalLineEnd = goalSpot && goalSpot.extraRight > 0 ? barsRight : width;
+    parts.push('<line class="goal-line" x1="' + padLeft + '" y1="' + goalY + '" x2="' + goalLineEnd + '" y2="' + goalY + '" />');
   }
   parts.push('<text class="tick" x="4" y="' + topLabelY + '">' + formatCount(maxValue) + '字</text>');
   parts.push('<text class="tick" x="4" y="' + zeroLabelY + '">0</text>');
@@ -596,19 +666,11 @@ function renderChart() {
     }
   });
 
-  // 目標の札は**棒のあとに描く**。右端へ寄せたとき、棒に隠れないように
-  if (goal > 0) {
-    const goalText = '目標 ' + formatCount(goal);
-    const spot = goalLabelPlacement({
-      goalY: goalY,
-      occupiedYs: [topLabelY, zeroLabelY],
-      padLeft: padLeft,
-      width: width,
-      labelWidth: estimateLabelWidth(goalText),
-    });
+  // 目標の札は**棒のあとに描く**（置き場所が変わっても、棒に隠れないように）
+  if (goalSpot) {
     parts.push(
-      '<text class="tick goal-label" x="' + spot.x + '" y="' + spot.y +
-      '" text-anchor="' + spot.anchor + '">目標 ' + formatCount(goal) + '</text>'
+      '<text class="tick goal-label" x="' + goalSpot.x + '" y="' + goalSpot.y +
+      '" text-anchor="' + goalSpot.anchor + '">' + escapeHtml(goalText) + '</text>'
     );
   }
 
@@ -616,6 +678,7 @@ function renderChart() {
   svg.setAttribute('height', String(height));
   svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
   svg.innerHTML = parts.join('');
+  pinChartToLatest();
 
   const total = buckets.reduce((sum, bucket) => sum + bucket.net, 0);
   const active = buckets.reduce((sum, bucket) => sum + bucket.activeDays, 0);
@@ -1317,7 +1380,7 @@ function renderEpisodes() {
   table.innerHTML = collectedNote +
     '<table><thead><tr>' +
     '<th>話</th><th>タイトル</th><th class="num">純文字数</th><th class="num">原稿用紙</th>' +
-    (hasMeasure ? '<th class="num">目安</th>' : '') +
+    (hasMeasure ? '<th class="num measure">目安</th>' : '') +
     '<th class="num">平均比</th><th>長さ</th></tr></thead><tbody>' +
     rows.map((row) => {
       if (row.conflicted) {
@@ -1336,7 +1399,7 @@ function renderEpisodes() {
         '<td>' + escapeHtml(row.title || row.fileName) + collected + '</td>' +
         '<td class="num">' + formatCount(row.net) + '</td>' +
         '<td class="num">約' + formatCount(row.pages) + '枚</td>' +
-        (hasMeasure ? '<td class="num">' + escapeHtml(row.measure || '—') + '</td>' : '') +
+        (hasMeasure ? '<td class="num measure">' + escapeHtml(row.measure || '—') + '</td>' : '') +
         '<td class="num">' + Math.round(row.ratio * 100) + '%</td>' +
         '<td><div class="mini">' + meterSvg(Math.round((row.net / maxNet) * 100), '') +
         '</div>' + flag + '</td></tr>';

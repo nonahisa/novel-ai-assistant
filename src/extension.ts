@@ -440,7 +440,9 @@ import {
   insertMemoLineAbove,
   isInsideWork,
   openManuscriptForReading,
+  refreshAllManuscriptCounts,
   refreshManuscriptCounts,
+  refreshManuscriptKinds,
   type ManuscriptEditorDeps,
 } from "./features/manuscriptEditor";
 // 「本文が見つからない」ときの文言は1か所に置く（`features/ruby.ts` と共用）
@@ -2684,11 +2686,17 @@ export async function activate(
     const outcome = await progress.record(work);
     // **記録し終えてから、届いたかを見る**（設計書6.3.8）。下の2つの
     // 描き直し（下段・執筆統計）より先に済ませ、その描き直しで祝いを出す
-    if (outcome) await celebrations.afterSave(work, outcome);
+    const achieved = outcome ? await celebrations.afterSave(work, outcome) : [];
     updateStatusBar();
     // **記録し終えてから、原稿エディタの下段を測り直す**（作者の指示、
     // 2026-08-29）。先に読むと「今日 +◯字」が保存1回ぶん古いままになる
-    refreshManuscriptCounts(filePath);
+    // 目標に届いたら、**開いている原稿すべて**に一言を出す（2026-09-25）。
+    // 保存した原稿だけだと、先に開いてあった別の話には一言が出なかった
+    if (achieved.length > 0) {
+      refreshAllManuscriptCounts();
+    } else {
+      refreshManuscriptCounts(filePath);
+    }
     await refreshWritingStatsPanel(work, deviceId);
     await refreshAllWorksWritingStatsPanel(registry, deviceId);
   }
@@ -3192,6 +3200,9 @@ export async function activate(
         const changed = await setWorkKind(work);
         if (!changed) return CHECK_CANCELLED;
         treeProvider.refresh(work.id);
+        // 開いている原稿の下段の目安（読了 約N分など）も新しい種類で出し直す。
+        // 組み方は開き直すまで変わらない（変えたときの知らせがそう案内する）
+        await refreshManuscriptKinds();
         // 種類で絞る並び（設計書6.109.7）も読み直す。詳細メニューは
         // 作品一覧が読み直し終えた合図（onDidLoadWork）で並べ直す
         stepProvider.invalidateFormats(work.id);

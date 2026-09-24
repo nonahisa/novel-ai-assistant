@@ -35,7 +35,7 @@ describe("原稿エディタが外の変更に追いつく", () => {
   test("表示に戻ったら送り直す", () => {
     const code = body();
     expect(code).toContain("panel.onDidChangeViewState(");
-    expect(code).toMatch(/event\.webviewPanel\.visible\) void send\(\)/);
+    expect(code).toMatch(/event\.webviewPanel\.visible\) \{\s*void send\(\);/);
   });
 
   test("外からの変更を送った事実をログに残す（自分の書き換えと取り消しは除く）", () => {

@@ -21,6 +21,11 @@ import { parseSeriesConfig } from "./seriesLink";
 import { fileReader, isNotFound } from "./fileRead";
 import { AI_INSTRUCTION_TARGETS } from "./aiInstructions";
 import { logFailure } from "./logger";
+import {
+  detectJsonFileFormat,
+  formatJsonForFile,
+  type JsonFileFormat,
+} from "./jsonFileFormat";
 
 const STORAGE_KEY = "novelai.works";
 
@@ -1047,11 +1052,42 @@ export async function writeWorkConfig(
   workPaths(work, validated);
   const p = workPaths(work);
   await vscode.workspace.fs.createDirectory(path.toUri(p.aiwriter));
-  const body = JSON.stringify(validated, null, 2);
+  const format = await existingConfigFormat(p.configFile);
   await vscode.workspace.fs.writeFile(
     path.toUri(p.configFile),
-    new TextEncoder().encode(body)
+    new TextEncoder().encode(formatJsonForFile(validated, format))
   );
+}
+
+/**
+ * 設定ファイルを新しく作るときの形。**これまでと1バイトも変えない**
+ * （LF・末尾に改行なし）。登録で作る設定ファイルは長くこの形で、
+ * 作品のリポジトリにもこの形で入っている。
+ */
+const NEW_CONFIG_FORMAT: JsonFileFormat = {
+  useCrlf: false,
+  finalNewline: false,
+};
+
+/**
+ * 既にある設定ファイルの改行の形（2026-09-25、ノートPCの実機確認）。
+ *
+ * 種類を変える・作品名を変えるなどで1項目を書き足すたびに、Windows で
+ * git が CRLF にして取り出したファイルを LF・末尾改行なしで書き直していた。
+ * **1項目の変更で全行が差分になる**——設定資料で直した件（0.81.1）と同じ
+ * なので、同じ部品（`jsonFileFormat.ts`）で読んだままの形に戻して書く。
+ *
+ * 読めなければ（無い・読み取りの失敗）新しく作るときの形にする。
+ * 形が分からないだけで、書くこと自体はこれまでどおり続ける。
+ */
+async function existingConfigFormat(configFile: string): Promise<JsonFileFormat> {
+  try {
+    return detectJsonFileFormat(
+      await vscode.workspace.fs.readFile(path.toUri(configFile))
+    );
+  } catch {
+    return NEW_CONFIG_FORMAT;
+  }
 }
 
 /**

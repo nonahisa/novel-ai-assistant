@@ -184,6 +184,15 @@ const openManuscripts = new Map<
      */
     refreshCounts(): void;
     /**
+     * 作品の種類を読み直し、下段の字数と目安を送り直す（2026-09-25）。
+     *
+     * 種類を変えても、開いている画面は開いたときの種類で目安を測り続け、
+     * エッセイに変えた直後に「読了 約N分」が出なかった。**組み方（縦横・
+     * 台本の組み分け）は変えない**——組み直すには画面を開き直す必要があり、
+     * 種類を変えたときの知らせもそう案内している。
+     */
+    refreshKind(): Promise<void>;
+    /**
      * 読み上げの列を出す（設計書6.42）。
      *
      * **`revealLine` と同じで、`ready` を待ってから送る。** 開いた直後の
@@ -257,6 +266,35 @@ export function lastManuscriptCaret():
  */
 export function refreshManuscriptCounts(filePath: string): void {
   openManuscripts.get(manuscriptLedgerKey(filePath))?.refreshCounts();
+}
+
+/**
+ * 開いている原稿**すべて**の下段を測り直す（2026-09-25）。
+ *
+ * 保存で目標に届いたときに呼ぶ。下段の一言（「今日の目標に届きました」）は
+ * どの話かを見ない（1日・1月の達成は全作品で共有）ので、同じ日なら
+ * どの原稿にも出るのが正しい。保存した原稿だけを測り直していたため、
+ * **先に開いてあった別の話の画面には一言が出なかった**（ノートPCの
+ * 実機確認：第1話には出て第2話には出なかった）。
+ *
+ * 達成の無い保存では呼ばない。開いている原稿の数だけ作品の合計を
+ * 読みに行くので、保存のたびには重い。
+ */
+export function refreshAllManuscriptCounts(): void {
+  for (const open of openManuscripts.values()) open.refreshCounts();
+}
+
+/**
+ * 開いている原稿すべてに、作品の種類を読み直させる（2026-09-25）。
+ *
+ * 種類を変えたあとに呼ぶ。読み直すのは下段の目安だけ（`refreshKind`）。
+ * どの作品の原稿かは見分けない——種類は作品ごとに覚えてあり、変えていない
+ * 作品の原稿は同じ種類を読み直すだけで、見た目は変わらない。
+ */
+export async function refreshManuscriptKinds(): Promise<void> {
+  await Promise.all(
+    [...openManuscripts.values()].map((open) => open.refreshKind())
+  );
 }
 
 /**
@@ -1174,6 +1212,13 @@ export class ManuscriptEditorProvider
       panel.webview.cspSource,
       kind
     );
+    /*
+      **下段の目安を測る種類は、あとから読み直せるように別に持つ**
+      （2026-09-25）。組み方（上の `kind`）は画面を組み立てた時点で決まり、
+      開き直すまで変わらない。目安は数字を出し直すだけなので、種類を
+      変えたらその場で新しい種類に合わせる（`refreshKind`）。
+    */
+    let measureKind = kind;
 
     /**
      * この原稿の記法（設計書6.12）。
@@ -1276,7 +1321,7 @@ export class ManuscriptEditorProvider
       // 添えるのは最初の1回だけ（送り直すたびに当て直させない）
       initialAppearance = undefined;
       undoCaret = undefined;
-      await this.sendCount(panel, text, document, kind);
+      await this.sendCount(panel, text, document, measureKind);
     };
 
     /**
@@ -1320,6 +1365,17 @@ export class ManuscriptEditorProvider
       },
       refreshCounts: (): void => {
         void this.sendFootCounts(panel, document);
+      },
+      refreshKind: async (): Promise<void> => {
+        measureKind = await this.kindOfDocument(document);
+        // 画面が動き出す前なら送らない（`ready` で最初の字数と一緒に届く）
+        if (!webviewReady) return;
+        await this.sendCount(
+          panel,
+          toLf(document.getText()),
+          document,
+          measureKind
+        );
       },
       document,
       appearance: (): ManuscriptAppearance | undefined => appearanceNow,
@@ -1495,7 +1551,16 @@ export class ManuscriptEditorProvider
     // 画面が取りこぼしていても、見えた瞬間に文書の中身へ揃う
     subscriptions.push(
       panel.onDidChangeViewState((event) => {
-        if (event.webviewPanel.visible) void send();
+        if (event.webviewPanel.visible) {
+          void send();
+          /*
+            **下段（作品の合計・今日・一言）も測り直す**（2026-09-25）。
+            裏にいたあいだに別の話の保存で目標に届いても、この画面の一言は
+            開いたときのままだった（第1話には出て第2話には出なかった）。
+            日が替わったあとの古い一言もここで消える
+          */
+          void this.sendFootCounts(panel, document);
+        }
         // 前面に来た＝この話を書き始めた。右に単話プロットが見えていれば、
         // この話のものへ切り替えてもらう（設計書6.36。片方向）
         if (event.webviewPanel.active) {
@@ -1587,7 +1652,7 @@ export class ManuscriptEditorProvider
           break;
 
         case "count":
-          await this.sendCount(panel, message.text, document, kind);
+          await this.sendCount(panel, message.text, document, measureKind);
           break;
 
         case "ruby":

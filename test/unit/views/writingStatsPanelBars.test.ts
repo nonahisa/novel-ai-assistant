@@ -122,43 +122,161 @@ describe("(b) 目標の札を、縦軸の数字と重ねない", () => {
     goalY: number;
     occupiedYs: number[];
     padLeft: number;
-    width: number;
+    barsRight: number;
     labelWidth: number;
-  }) => { x: number; y: number; anchor: "start" | "end" };
+  }) => { x: number; y: number; anchor: "start" | "end"; extraRight: number };
 
-  const base = { padLeft: 56, width: 1000 };
+  const base = { padLeft: 56, barsRight: 1000 };
 
-  test("目標がいちばん上（=縦軸の上の数字と同じ高さ）なら、右端へ寄せる", () => {
+  test("目標がいちばん上（=縦軸の上の数字と同じ高さ）なら、棒の並びの右へ出す", () => {
     // 作者の実機：目標10字で、どの日も10字未満 → 目標の線がいちばん上
     const spot = place({ ...base, goalY: 12, occupiedYs: [20, 192], labelWidth: 38 });
-    expect(spot.anchor).toBe("end");
-    expect(spot.x).toBeGreaterThan(base.width - 20);
-    // 線の上に載せる（線の下に置くと棒の頭と重なりやすい）
-    expect(spot.y).toBeLessThan(12);
+    expect(spot.anchor).toBe("start");
+    // **棒の並びより右**（右端の棒の上に載せると、今日の棒に被って読めない。
+    // ノートPCの実機確認、2026-09-25）
+    expect(spot.x).toBeGreaterThanOrEqual(base.barsRight);
+    // 札のぶん、グラフの幅を足してもらう
+    expect(spot.extraRight).toBeGreaterThanOrEqual(38);
   });
 
-  test("0の線のすぐそばでも、右端へ寄せる", () => {
+  test("0の線のすぐそばでも、棒の並びの右へ出す", () => {
     const spot = place({ ...base, goalY: 188, occupiedYs: [20, 195], labelWidth: 38 });
-    expect(spot.anchor).toBe("end");
+    expect(spot.x).toBeGreaterThanOrEqual(base.barsRight);
   });
 
   test("離れていれば、今までどおり左の縦軸の位置に置く", () => {
     const spot = place({ ...base, goalY: 100, occupiedYs: [20, 192], labelWidth: 38 });
-    expect(spot).toEqual({ x: 4, y: 103, anchor: "start" });
+    expect(spot).toEqual({ x: 4, y: 103, anchor: "start", extraRight: 0 });
   });
 
-  test("札が左の余白に収まらない長さなら、右端へ寄せる（棒に被せない）", () => {
+  test("札が左の余白に収まらない長さなら、棒の並びの右へ出す（棒に被せない）", () => {
     // 「目標 10,000」は余白（56）より長い
     const spot = place({ ...base, goalY: 100, occupiedYs: [20, 192], labelWidth: 62 });
-    expect(spot.anchor).toBe("end");
+    expect(spot.x).toBeGreaterThanOrEqual(base.barsRight);
+    expect(spot.extraRight).toBeGreaterThanOrEqual(62);
   });
 
   test("グラフは札の置き場所をこの関数で決め、棒のあとに描く（棒に隠れない）", () => {
     const chart = functionSource("renderChart");
     expect(chart).toContain("goalLabelPlacement(");
-    const goalLabel = chart.indexOf("目標 ' + formatCount(goal)");
+    const goalLabel = chart.indexOf("goal-label");
     expect(goalLabel).toBeGreaterThan(0);
     const bars = chart.indexOf("buckets.forEach(");
     expect(goalLabel).toBeGreaterThan(bars);
+  });
+});
+
+/**
+ * 日ごとのグラフを実際に描いて確かめる（ノートPCの実機確認、2026-09-25）。
+ *
+ * (c) 「目標 10」の札の「目標」が、右端（今日）の棒に被って読めなかった。
+ *     右端へ寄せた札は、グラフの右端から左へ伸びるので、最後の棒の上に載る。
+ * (d) グラフは左端（古い日）から見え、今日の棒は横に送らないと見えなかった。
+ */
+describe("(c)(d) 日ごとのグラフを描く", () => {
+  interface Wrap {
+    scrollLeft: number;
+    scrollWidth: number;
+    clientWidth: number;
+  }
+
+  function draw(
+    values: number[],
+    goal: number
+  ): { markup: string; width: number; wrap: Wrap } {
+    const attributes: Record<string, string> = {};
+    const wrap: Wrap = { scrollLeft: 0, scrollWidth: 2000, clientWidth: 400 };
+    const svg = {
+      innerHTML: "",
+      parentElement: wrap,
+      setAttribute: (name: string, value: string) => {
+        attributes[name] = value;
+      },
+    };
+    const note = { textContent: "" };
+    const fakeDocument = {
+      getElementById: (id: string) =>
+        id === "chart" ? svg : id === "chart-note" ? note : null,
+    };
+    const buckets = values.map((net, index) => ({
+      key: `2026-09-${String(index + 1).padStart(2, "0")}`,
+      label: `9/${index + 1}`,
+      net,
+      activeDays: net > 0 ? 1 : 0,
+    }));
+    const state = {
+      buckets: { daily: buckets },
+      goal: { daily: goal },
+      currentBucketKey: { daily: buckets[buckets.length - 1].key },
+      notice: "",
+    };
+    const run = new Function(
+      "document",
+      "state",
+      [
+        "let granularity = 'daily';",
+        "let chartFollowLatest = true;",
+        "const GRANULARITY_LABELS = { daily: '日次', weekly: '週次', monthly: '月次', yearly: '年次' };",
+        functionSource("escapeHtml"),
+        functionSource("formatCount"),
+        functionSource("estimateLabelWidth"),
+        functionSource("amount"),
+        functionSource("goalLabelPlacement"),
+        functionSource("pinChartToLatest"),
+        functionSource("renderChart"),
+        "renderChart();",
+      ].join("\n")
+    );
+    run(fakeDocument, state);
+    return { markup: svg.innerHTML, width: Number(attributes.width), wrap };
+  }
+
+  const estimate = new Function(
+    [functionSource("estimateLabelWidth"), "return estimateLabelWidth;"].join("\n")
+  )() as (label: string) => number;
+
+  test("札は、どの棒にも被らず、グラフの幅に収まる（作者の実機：目標10・どの日も10字未満）", () => {
+    const { markup, width } = draw([3, 0, 5, 8, 0, 2, 9], 10);
+    const label = markup.match(
+      /<text class="tick goal-label" x="([0-9.]+)" y="[0-9.-]+" text-anchor="(start|end)">([^<]*)<\/text>/
+    );
+    expect(label).not.toBeNull();
+    const x = Number(label![1]);
+    const textWidth = estimate(label![3]);
+    const left = label![2] === "start" ? x : x - textWidth;
+    const right = left + textWidth;
+
+    const bars = [
+      ...markup.matchAll(
+        /<rect class="bar[^"]*" x="([0-9.]+)" y="[0-9.-]+" width="([0-9.]+)"/g
+      ),
+    ];
+    expect(bars.length).toBe(7);
+    for (const bar of bars) {
+      const barLeft = Number(bar[1]);
+      const barRight = barLeft + Number(bar[2]);
+      // 横に重なる棒が1本でもあれば、札が棒に被っている
+      expect(right <= barLeft || left >= barRight).toBe(true);
+    }
+    expect(right).toBeLessThanOrEqual(width);
+  });
+
+  test("最初に見える位置は右端（今日の側）", () => {
+    const { wrap } = draw([3, 0, 5, 8, 0, 2, 9], 10);
+    expect(wrap.scrollLeft).toBeGreaterThanOrEqual(
+      wrap.scrollWidth - wrap.clientWidth
+    );
+  });
+
+  test("作者が左へ送って見ているあいだは、描き直しで右端へ引き戻さない", () => {
+    expect(script).toMatch(/chartFollowLatest\s*=/);
+    expect(functionSource("pinChartToLatest")).toContain(
+      "if (!chartFollowLatest) return;"
+    );
+  });
+
+  test("執筆量の見開きへ戻ったときと、日次・週次を切り替えたときも右端から見せる", () => {
+    expect(script).toContain("if (tab.dataset.page === 'writing') pinChartToLatest();");
+    expect(functionSource("renderGranularity")).toContain("chartFollowLatest = true;");
   });
 });
