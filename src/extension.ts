@@ -6,6 +6,7 @@ import { describeSyncTarget } from "./core/syncTarget";
 import { menuVersionLabel } from "./core/versionLabel";
 import {
   WorkRegistry,
+  findWorkForFile,
   readWorkConfig,
   scaffoldWorkFolder,
   workPaths,
@@ -7088,17 +7089,11 @@ function findWorkForPath(
   registry: WorkRegistry,
   filePath: string
 ): WorkEntry | undefined {
-  // 比べ方は `paths.normalizeForComparison` の1か所に任せる（2026-09-23）。
-  // 以前はここに写しがあり、`process.platform` を素で読んでいたので、
-  // ブラウザ版では作品の見分けが `process is not defined` で落ちた
-  const normalize = path.normalizeForComparison;
-  return [...registry.list()]
-    .sort((a, b) => b.folderPath.length - a.folderPath.length)
-    .find((work) => {
-      const normalizedWork = normalize(work.folderPath);
-      const relative = path.relative(normalizedWork, normalize(filePath));
-      return relative.length > 0 && !path.goesOutside(normalizedWork, relative);
-    });
+  // 中身は `core/workRegistry.ts` の `findWorkForFile`（2026-09-24）。
+  // ここに判定の写しがあり、ブラウザ版では登録簿の場所（生の日本語）と
+  // 開いた本文の場所（符号化された形）が食い違って、作品を引けなかった
+  // （下の欄に種類の目安も今日の執筆量も出なかった）
+  return findWorkForFile(registry.list(), filePath);
 }
 
 /**

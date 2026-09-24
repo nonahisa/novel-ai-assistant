@@ -467,6 +467,27 @@ export function findWorkByFolder<T extends { folderPath: string }>(
   return works.find((work) => path.folderKeyForComparison(work.folderPath) === key);
 }
 
+/**
+ * そのファイルが属する作品を引く（2026-09-24。`extension.ts` の
+ * `findWorkForPath` の中身を、テストできるようにここへ出した）。
+ *
+ * **深い作品フォルダーを先に見て、入れ子なら内側を選ぶ。**
+ * 中にあるかの判定は `paths.isPathInside` に任せる——ブラウザ版では
+ * 登録簿の場所（生の日本語）と開いた本文の場所（`fromUri` で符号化される）の
+ * 表記が割れるので、符号を解いて比べる所を1つにしておく。
+ * 深さも符号を解いた長さで比べる（符号化された側だけ長く見えないように）。
+ */
+export function findWorkForFile<T extends { folderPath: string }>(
+  works: readonly T[],
+  filePath: string
+): T | undefined {
+  const depth = (work: T): number =>
+    path.decodeUriEscapes(work.folderPath).length;
+  return [...works]
+    .sort((a, b) => depth(b) - depth(a))
+    .find((work) => path.isPathInside(work.folderPath, filePath));
+}
+
 /** 見つからない作品の知らせと、確認のダイアログに出すボタン（作品一覧の右クリックと同じ語） */
 const UNREGISTER_LABEL = "登録を解除";
 

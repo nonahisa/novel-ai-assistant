@@ -97,7 +97,15 @@ export class CharCountStatusBar implements vscode.Disposable {
       this.item.hide();
       return;
     }
-    const ext = path.extname(editor.document.fileName).toLowerCase();
+    /*
+      **場所は `document.uri` から取る。`document.fileName` は使わない**（2026-09-24）。
+      `fileName` は `uri.fsPath` で、ブラウザ版（Windows の上のブラウザ）では
+      `\仮作品\episode_0001.txt` のような `\` 区切りになる。ブラウザ束の `path` は
+      posix なので `\` で割れず、吹き出しの先頭に道まるごとが出ていた。
+      作品の引き当ても同じ場所の文字列を使う
+    */
+    const location = fromUri(editor.document.uri);
+    const ext = path.extname(location).toLowerCase();
     if (!(SUPPORTED_EXTENSIONS as readonly string[]).includes(ext)) {
       this.item.hide();
       return;
@@ -135,7 +143,8 @@ export class CharCountStatusBar implements vscode.Disposable {
         measure ? `（${measure.short}）` : ""
       }${selectionPart}`;
     const fileTooltipWith = (measure?: KindMeasure): string[] => [
-      `**${path.basename(editor.document.fileName)}**`,
+      // URI の日本語は符号化されて来るので、解いてから名前を出す
+      `**${path.basename(path.decodeUriEscapes(location))}**`,
       "",
       `- 純文字数: ${formatCount(counts.net)} 字`,
       `- 総文字数: ${formatCount(counts.gross)} 字`,
@@ -155,9 +164,7 @@ export class CharCountStatusBar implements vscode.Disposable {
     const kindOf = this.deps.kindOf;
     // 作品の外のファイル（作品一覧の外の .md）には、執筆量も目安も無い
     const work =
-      showProgress || kindOf
-        ? this.deps.findWork(fromUri(editor.document.uri))
-        : undefined;
+      showProgress || kindOf ? this.deps.findWork(location) : undefined;
     if (!work) return;
 
     /*

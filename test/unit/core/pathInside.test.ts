@@ -116,6 +116,49 @@ describe("URI の形（ブラウザ版の作品）", () => {
   });
 });
 
+/**
+ * **同じ場所でも、日本語が百分率符号化されているかどうかで表記が割れる**
+ * （2026-09-24。ブラウザ版の実機で、本文を開いても下の欄に種類の目安と
+ * 今日の執筆量が出なかった）。
+ *
+ * - 登録簿の場所は、書庫の中を読んだ名前を `join` でつないだもの——**生の日本語**
+ *   （`vscode-test-web://mount/仮作品`）
+ * - 開いた本文の場所は `paths.fromUri(document.uri)`——非 `file:` では
+ *   `uri.toString()` になり、**日本語が符号化される**
+ *   （`vscode-test-web://mount/%E4%BB%AE%E4%BD%9C%E5%93%81/episode_0001.txt`）
+ *
+ * 文字列のまま比べると「外」になり、作品が引き当てられなかった。
+ */
+describe("URI の日本語が符号化されていても、同じ場所として比べる", () => {
+  const raw = "vscode-test-web://mount/仮作品";
+  const encoded = "vscode-test-web://mount/%E4%BB%AE%E4%BD%9C%E5%93%81";
+
+  test("生の作品フォルダーと、符号化された本文", () => {
+    expect(isPathInside(raw, `${encoded}/episode_0001.txt`)).toBe(true);
+  });
+
+  test("符号化された作品フォルダーと、生の本文（逆向き）", () => {
+    expect(isPathInside(encoded, `${raw}/episode_0001.txt`)).toBe(true);
+  });
+
+  test("符号を解いても別のフォルダーなら、外のまま", () => {
+    // 「仮作品2」＝ 仮作品 のあとに 2
+    const other = "vscode-test-web://mount/%E4%BB%AE%E4%BD%9C%E5%93%812/1.txt";
+    expect(isPathInside(raw, other)).toBe(false);
+  });
+
+  test("解けない % を含む名前でも落ちず、そのまま比べる", () => {
+    const folder = "vscode-vfs://github/owner/repo/50%OFF";
+    expect(isPathInside(folder, `${folder}/1.md`)).toBe(true);
+    expect(isPathInside(folder, "vscode-vfs://github/owner/repo/50%25OFF/1.md")).toBe(true);
+  });
+
+  test("手元の道の % は符号として読まない（名前の一部）", () => {
+    // 手元のフォルダー名に「%E4」と書いてあっても、それは名前そのもの
+    expect(isPathInside("/小説/%E4%BB%AE", "/小説/仮/1.md")).toBe(false);
+  });
+});
+
 describe("以前の写し（startsWith 型）が誤っていたこと", () => {
   /**
    * `termHighlight.ts`・`settingsStore.ts` にあった判定をそのまま写したもの。

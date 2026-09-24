@@ -455,6 +455,77 @@ export async function run(): Promise<void> {
     }
   });
 
+  /*
+    **日本語の名前の作品の本文を開くと、下の欄に種類の目安が出ること**
+    （2026-09-24。実機で、本文を開いても `11字` だけで「（読了 約1分）」も
+    「今日 +N字」も出なかった）。
+
+    登録簿の場所は生の日本語（`…/仮作品`）、開いた本文の場所は
+    `fromUri(document.uri)` で符号化される（`…/%E4%BB%AE…`）。そのまま比べて
+    作品を引き当てられなかった。**本物の登録簿へ登録し、本物の画面の下の欄を
+    読む**——引き当ての部品だけを試しても、画面に出る所までは言えない。
+
+    種類は登録の前に設定ファイルへ書いておく（`addExisting` は設定ファイルが
+    あればそのまま使う）。登録のあとに書くと、拡張機能が覚えた種類との
+    行き違いを試すことになり、ここで確かめたいことからずれる。
+
+    **いちばん後ろに置く。** 登録した作品のフォルダーは最後に消す。
+  */
+  await runCase("日本語の名前の作品の本文を開くと、下の欄に種類の目安が出る", failures, async () => {
+    assert(registered !== undefined, "作品が登録されていないため確かめられません");
+    const shelf = join(registered.folderPath, "下の欄確認用");
+    const child = join(shelf, "仮作品");
+    const episode = join(child, "episode_0001.txt");
+    await vscode.workspace.fs.createDirectory(toUri(join(child, ".aiwriter")));
+    await vscode.workspace.fs.writeFile(
+      toUri(episode),
+      new TextEncoder().encode("書き出しの一文です。")
+    );
+    await vscode.workspace.fs.writeFile(
+      toUri(join(child, ".aiwriter", "config.json")),
+      new TextEncoder().encode(
+        JSON.stringify(
+          {
+            schemaVersion: "0.1",
+            workTitle: "仮作品",
+            manuscriptDir: "本文",
+            settingsDir: "設定",
+            createdAt: new Date().toISOString(),
+            kind: "essay",
+          },
+          null,
+          2
+        )
+      )
+    );
+    try {
+      const entry = await vscode.commands.executeCommand<WorkEntry | undefined>(
+        "novelai.addWork",
+        { folderPath: child, title: "仮作品" }
+      );
+      assert(entry !== undefined, "作品を登録できませんでした（undefined が返りました）");
+
+      const document = await vscode.workspace.openTextDocument(toUri(episode));
+      await vscode.window.showTextDocument(document);
+      console.log(`[web] 開いた本文の場所: ${fromUri(document.uri)}`);
+
+      let seen: string | null = null;
+      for (let attempt = 0; attempt < 40; attempt++) {
+        seen = await readStatusBar();
+        if (seen?.includes("読了")) break;
+        await delay(250);
+      }
+      assert(
+        seen?.includes("読了") === true,
+        `下の欄に種類の目安（読了）が出ません。下の欄: ${seen?.replace(/\s+/g, " ") ?? "読めませんでした"}`
+      );
+      console.log(`[web] 下の欄: ${seen?.replace(/\s+/g, " ").slice(0, 80)}`);
+    } finally {
+      await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+      await vscode.workspace.fs.delete(toUri(shelf), { recursive: true });
+    }
+  });
+
   if (failures.length > 0) {
     throw new Error(`ブラウザ版の検査が失敗しました:\n${failures.join("\n")}`);
   }
@@ -658,6 +729,32 @@ async function readWebviewFrames(): Promise<ProbeFrame[]> {
     throw new Error(`パネルの中身を覗けませんでした: ${body.error ?? response.status}`);
   }
   return body.frames;
+}
+
+/**
+ * 画面の下の欄（ステータスバー）の文字。覗く口の `/statusbar` に尋ねる。
+ *
+ * **拡張機能の側からは、自分で出したステータスバーの文字も読めない。**
+ * 口の場所はパネルの口（`__WEB_PROBE_URL__`）の末尾を差し替えて作る
+ * ——束ねる側（`buildWebTests.mjs`）に定数を増やさない。
+ */
+async function readStatusBar(): Promise<string | null> {
+  const url = __WEB_PROBE_URL__.replace(/\/webview-frames$/, "/statusbar");
+  let response: Response;
+  try {
+    response = await fetch(url);
+  } catch (error) {
+    throw new Error(
+      `下の欄を覗く口（${url}）に繋がりません: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+  const body = (await response.json()) as { text?: string | null; error?: string };
+  if (!response.ok) {
+    throw new Error(`下の欄を覗けませんでした: ${body.error ?? response.status}`);
+  }
+  return body.text ?? null;
 }
 
 /**

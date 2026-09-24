@@ -134,6 +134,43 @@ export function relative(from: string, to: string): string {
 }
 
 /**
+ * URI の道に入った百分率符号を解く（2026-09-24）。**手元の道はそのまま返す。**
+ *
+ * **同じ場所でも、どこから来たかで表記が割れる。**
+ *
+ * - 書庫の中を読んだ名前を `join` でつないだ場所——**生の日本語**
+ *   （`vscode-test-web://mount/仮作品`）
+ * - 開いた本文の場所（`paths.fromUri(document.uri)`）——非 `file:` では
+ *   `uri.toString()` になり、**日本語が符号化される**（`%E4%BB%AE…`）
+ *
+ * 比べる前と、画面に名前を出す前に通す。**持ち回る場所そのものは
+ * 書き換えない**——符号化された形を `toUri` で開ける形のまま残すため。
+ *
+ * **区画（`/` の間）ごとに解き、解けない区画はそのまま残す。**
+ * `50%OFF` のように `%` を含むだけの名前で `decodeURIComponent` は例外を
+ * 投げる。まとめて解くと、その1区画のせいでほかの区画まで符号化のまま残る。
+ *
+ * 手元の道（`C:\…`・`/home/…`）の `%` は名前の一部なので解かない。
+ */
+export function decodeUriEscapes(location: string): string {
+  if (!isUriString(location) || !location.includes("%")) return location;
+  const { head, body } = splitUri(location);
+  return head + body.split("/").map(decodeSegment).join("/");
+}
+
+function decodeSegment(segment: string): string {
+  if (!segment.includes("%")) return segment;
+  try {
+    const decoded = decodeURIComponent(segment);
+    // `%2F` を解くと区切りが増えて別の道になる。名前に `/` は入らないので、
+    // そう解ける区画は符号のまま残す
+    return decoded.includes("/") ? segment : decoded;
+  } catch {
+    return segment;
+  }
+}
+
+/**
  * 区切り文字。
  *
  * **URIの中は必ず `/`** である。手元のファイルは OS に合わせる。
@@ -265,6 +302,10 @@ export function goesOutside(base: string, relative: string): boolean {
  * - **前方一致では足りない**——`いじめられっ子2` は `いじめられっ子` の中ではない
  * - 大文字小文字は、Windows のときだけ同一視する（`normalizeForComparison`）
  * - 仕組みや場所の違う URI、別のドライブは、相対で表せないので「外」
+ * - **URI の日本語は、符号を解いてから比べる**（`decodeUriEscapes`。2026-09-24）。
+ *   登録簿の場所は生の日本語、開いた本文の場所は符号化された形で来るので、
+ *   そのまま比べるとブラウザ版では作品の中の本文がすべて「外」になっていた
+ *   （下の欄に種類の目安も今日の執筆量も出なかった）
  * - **空文字はどちらでも false。** 空の道は `normalize` で `.`（いまの場所）に
  *   化け、たまたま中と答えうる。場所が分からないものを中とは言わない
  *
@@ -273,8 +314,11 @@ export function goesOutside(base: string, relative: string): boolean {
  */
 export function isPathInside(parent: string, candidate: string): boolean {
   if (!parent || !candidate) return false;
-  const base = normalizeForComparison(parent);
-  const target = normalizeForComparison(candidate);
+  // 符号を解くのは、この判定の中だけ。`normalizeForComparison` は
+  // 回復先の名前（`atomicWrite.ts` の `recoveryKey`）の鍵にも使われており、
+  // そちらを変えると、すでに退避してある控えが見つからなくなる
+  const base = normalizeForComparison(decodeUriEscapes(parent));
+  const target = normalizeForComparison(decodeUriEscapes(candidate));
   const rel = relative(base, target);
   return rel.length > 0 && !goesOutside(base, rel);
 }

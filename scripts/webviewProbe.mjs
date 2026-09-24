@@ -34,6 +34,19 @@ export function startWebviewProbe({ cdpPort, listenPort }) {
       response.end();
       return;
     }
+    if (request.url && request.url.startsWith("/statusbar")) {
+      try {
+        const text = await readStatusBar(cdpPort);
+        response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ text }));
+      } catch (error) {
+        response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(
+          JSON.stringify({ error: error instanceof Error ? error.message : String(error) })
+        );
+      }
+      return;
+    }
     if (!request.url || !request.url.startsWith("/webview-frames")) {
       response.writeHead(404);
       response.end();
@@ -122,6 +135,45 @@ async function framesOfTarget(webSocketUrl) {
   } finally {
     session.close();
   }
+}
+
+/**
+ * 画面の下の欄（ステータスバー）に出ている文字（2026-09-24）。
+ *
+ * **拡張機能の側からは、自分で出したステータスバーの文字も読めない**
+ * （`StatusBarItem` は書くだけの口）。ブラウザ版で「本文を開いても種類の
+ * 目安が出ない」を実機で踏んだので、画面に出た文字そのものを読む。
+ * 見つからなければ null（読めなかったことを「空」と取り違えない）。
+ */
+async function readStatusBar(cdpPort) {
+  const listResponse = await fetch(`http://127.0.0.1:${cdpPort}/json/list`);
+  const targets = await listResponse.json();
+  for (const target of targets) {
+    if (target.type !== "page" || !target.webSocketDebuggerUrl) continue;
+    let session;
+    try {
+      session = await CdpSession.open(target.webSocketDebuggerUrl);
+      const { frameTree } = await session.send("Page.getFrameTree");
+      // **ページの側の変数に触れない別の世界で読む**（パネルを読むときと同じ）
+      const { executionContextId } = await session.send("Page.createIsolatedWorld", {
+        frameId: frameTree.frame.id,
+        worldName: "novelai-web-probe",
+      });
+      const { result: value } = await session.send("Runtime.evaluate", {
+        contextId: executionContextId,
+        returnByValue: true,
+        expression:
+          "(() => { const bar = document.getElementById('workbench.parts.statusbar');" +
+          " return bar ? bar.innerText : null; })()",
+      });
+      if (value && typeof value.value === "string") return value.value;
+    } catch {
+      // 閉じかけの標的などは読めないことがある。ほかの標的を見る
+    } finally {
+      session?.close();
+    }
+  }
+  return null;
 }
 
 function flatten(tree, out) {

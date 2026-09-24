@@ -81,6 +81,7 @@ import {
   STATUS_BAR_TYPING_PAUSE_MS,
 } from "../../../src/features/charCountStatusBar";
 import { countChars } from "../../../src/core/charCount";
+import { findWorkForFile } from "../../../src/core/workRegistry";
 
 const countSpy = vi.mocked(countChars);
 
@@ -283,6 +284,27 @@ describe("ステータスバーに、種類の目安を添える", () => {
     await vi.runAllTimersAsync();
 
     expect(state.item.text).toBe("$(book) 600字");
+  });
+
+  test("本物の引き当て（findWorkForFile）でも、手元の作品の本文に目安を出す", async () => {
+    // ブラウザ版の直し（2026-09-24。`charCountStatusBarWeb.test.ts`）で
+    // 引き当てを `core/workRegistry.ts` へ出した。手元の道が変わらず引けること
+    const target = fakeEditor(
+      nodePath.resolve("kind-test-repo", "本文", "001.txt"),
+      "あ".repeat(600)
+    );
+    state.activeTextEditor = target.editor;
+    bar = new CharCountStatusBar({
+      findWork: (filePath) => findWorkForFile([work], filePath),
+      summary: async () => summary,
+      kindOf: async () => "essay",
+    });
+    bar.refreshNow();
+    await vi.runAllTimersAsync();
+
+    expect(state.item.text).toContain("読了 約2分");
+    expect(state.item.text).toContain("今日 +120字");
+    expect(tooltipText().split("\n")[0]).toBe("**001.txt**");
   });
 
   test("作品の外のファイルには、目安を出さない", async () => {
