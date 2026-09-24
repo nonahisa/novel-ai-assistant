@@ -91,10 +91,20 @@ export function selectGuideBundles(input: {
     ...(input.recentAuthorTurns ?? []),
   ]);
 
+  const terms = featureNameTermsIn([
+    input.question,
+    ...(input.recentAuthorTurns ?? []),
+  ]);
+
   const scored = input.bundles
     .map((bundle) => ({
       bundle,
-      score: countGramHits(bundle.text, grams),
+      score:
+        countGramHits(bundle.text, grams) +
+        // 機能の名前は1語で話題を名指しているので、それだけで当たりに届かせる
+        // （`FEATURE_NAME_TERMS` の説明）
+        terms.filter((term) => bundle.text.includes(term)).length *
+          MIN_EVIDENCE_HITS,
     }))
     // **1個では偶然と区別できない。** 束はどれも数百字あるので、
     // 当たりが1つなら「その話題の説明がある」根拠にならない
@@ -134,8 +144,11 @@ export function selectGuideBundles(input: {
  *
  * カタカナも落とす。「タイトルはこれでいいと思う？」のような作品の相談が
  * 「タイ」「イト」「トル」で説明を引き寄せてしまい、漢字だけにしないと
- * 10問すべてを目次だけにできなかった（同じ測定）。**カタカナの名前
- * （ルビ・プロットなど）は目次に載っているので、名前そのものは失わない。**
+ * 10問すべてを目次だけにできなかった（同じ測定）。
+ *
+ * **ただし、捨てたままでは「ルビを振りたい」がどの束にも当たらない。** 当たらないと
+ * 話題の見分けが創作の相談と言い切り、目次ごと落ちていた（2026-09-25）。
+ * 機能を名指すカタカナの語は、下の `FEATURE_NAME_TERMS` で別に拾う。
  */
 function isEvidenceGram(gram: string): boolean {
   return /^\p{Script=Han}{2}$/u.test(gram) || /^[A-Za-z]{2}$/.test(gram);
@@ -160,6 +173,90 @@ export function evidenceGrams(sources: readonly string[]): Set<string> {
     }
   }
   return grams;
+}
+
+/**
+ * 1語で機能を名指している名前。質問に入っていれば、**その語を含む束は
+ * それだけで当たり**とする（2026-09-25）。
+ *
+ * ## なぜ要るか
+ *
+ * 上の `isEvidenceGram` はカタカナを捨て、漢字も2組み以上を求める。
+ * そのため「ルビを振りたい」（証拠の組みが0）、「傍点を付けたい」（「傍点」の
+ * 1組みだけ）、「音声読み上げはある？」（「音声」の1組みだけ）は、どの束にも
+ * 当たらなかった。束に当たらないと話題の見分け（`chatTopic.ts`）が創作の相談と
+ * 言い切り、**目次ごと落ちる**。実接続では、目次に「原稿読み上げ」があるのに
+ * AIが「この拡張機能には備わっておりません」と答えた（2026-09-25 深夜の測定）。
+ *
+ * ## なぜ一覧を手で持つか——カタカナを戻すのではない
+ *
+ * カタカナを捨てたのは、「タイトル」「テーマ」「プロット」のような**作品の
+ * 相談で普通に使う語**が説明を引き寄せたためだった（2026-09-11の測定）。
+ * カタカナをまるごと戻すと同じことが起きる。ここに並べるのは、
+ * **作品の相談にはまず出てこず、出れば機能の話をしている語**だけである。
+ *
+ * - 入れない語：プロット・タイトル・テーマ・シーン・キャラ・スキル・ジャンル
+ *   ・シリーズ・メモ（作品の中身の話で日常的に使う）。「音読」も入れない
+ *   （「音読み」に含まれる）
+ * - 語は束の本文（操作の名前か説明）に実際に出てくるものに限る
+ *   （`featureGuideKatakana.test.ts` が見張る）。束に無い語は当てる先が無い
+ *
+ * **カタカナの語は、前後がカタカナのときは当たりにしない。** 「ルビー」という
+ * 人物名の「ルビ」を拾うと、その人物の相談が操作の相談になる。
+ */
+export const FEATURE_NAME_TERMS: readonly string[] = [
+  // 原稿整備
+  "ルビ",
+  "傍点",
+  "縦書き",
+  "読み上げ",
+  "章立て",
+  // 口述筆記
+  "口述",
+  // 取り込み・投稿・広報
+  "バックアップ",
+  "ハッシュタグ",
+  "ランキング",
+  // 資料の閲覧
+  "年表",
+  // AIまわり
+  "チューニング",
+  "ベクトル",
+];
+
+/** 前後にカタカナが続くか（「ルビー」の「ルビ」を名前の一部と見分ける） */
+const KATAKANA = /[\p{Script=Katakana}ー]/u;
+
+/**
+ * 質問（と直前の発言）に入っている機能の名前（`FEATURE_NAME_TERMS`）。
+ *
+ * 前後がカタカナの所は数えない。語の端がカタカナでない（「傍点」「縦書き」の
+ * 末尾など）ときは、その側は見ない——漢字の語は隣の漢字と続いて熟語になるが
+ * （「傍点付与」）、それは名前の一部で、別の語に化けるわけではない。
+ */
+export function featureNameTermsIn(sources: readonly string[]): string[] {
+  const found = new Set<string>();
+  for (const term of FEATURE_NAME_TERMS) {
+    const guardHead = KATAKANA.test(term[0]);
+    const guardTail = KATAKANA.test(term[term.length - 1]);
+    for (const source of sources) {
+      let at = source.indexOf(term);
+      while (at >= 0) {
+        const before = source[at - 1] ?? "";
+        const after = source[at + term.length] ?? "";
+        const clean =
+          !(guardHead && before && KATAKANA.test(before)) &&
+          !(guardTail && after && KATAKANA.test(after));
+        if (clean) {
+          found.add(term);
+          break;
+        }
+        at = source.indexOf(term, at + 1);
+      }
+      if (found.has(term)) break;
+    }
+  }
+  return [...found];
 }
 
 /** 質問側の組みのうち、渡した文の中に現れるものの数 */

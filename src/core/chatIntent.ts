@@ -1,4 +1,4 @@
-import type { ChatRunKind } from "./chatEdit";
+import { parseChatRun, type ChatRun, type ChatRunKind } from "./chatEdit";
 
 /**
  * 「作業を頼まれた」ことをコード側で見分ける。
@@ -119,4 +119,71 @@ export function detectRunIntent(question: string): ChatRunKind | undefined {
     if (!best || rule.priority > best.priority) best = rule;
   }
   return best?.kind;
+}
+
+/**
+ * 起動できる操作ごとの「話題の語」（2026-09-25 深夜の実接続の測定）。
+ *
+ * ## なぜ要るか
+ *
+ * 相談の答えの `run`（実行ボタン）は**AIが選んで返す**。これまでコードは
+ * 「許可した一覧にあるか」（`parseChatRun`）しか見ていなかったので、一覧に
+ * ありさえすれば、質問と無関係でもボタンになった。実測では、読者層の質問に
+ * 誤字脱字の検知（e4b）と応募先の提案（26b）、読み上げの質問に推敲と
+ * 誤字脱字の検知（e4b）が返った。**AIの出力は信用しない**（実装ルール3）。
+ *
+ * ## 見方——頼みの形は問わず、話題だけを見る
+ *
+ * 上の `RULES` は「頼まれたか」まで見てボタンを**足す**ための規則で、厳しい。
+ * こちらはAIが出したボタンを**落とす**ための規則なので、話題が合っているか
+ * だけを見る（「誤字脱字が気になる」に誤字脱字の検知を出すのは的外れではない）。
+ * 語は `RULES` の語を含めて広めに取る——落としすぎると、頼んだ作業の
+ * ボタンまで消える（2026-08-15 に実機で続いた不具合の裏返し）。
+ *
+ * 語が当たる先は**作者の言葉だけ**（質問と直前の作者の発言）。AIの答えの
+ * 文面は見ない。答えの中で「誤字脱字の検知も役立ちます」と自分で書けば、
+ * 自分の出したボタンの裏づけになってしまう。
+ */
+const RUN_TOPIC_WORDS: Readonly<Record<ChatRunKind, RegExp>> = {
+  checkTypos: /誤字|脱字|誤変換|校正|打ち間違|変換ミス|タイポ/,
+  checkTyposForFile: /誤字|脱字|誤変換|校正|打ち間違|変換ミス|タイポ/,
+  // 「ぶれ」は入れない。「性格がぶれている」は人物の相談である
+  checkNotation: /表記|ゆれ|揺れ|不統一/,
+  checkProofread: /推敲|冗長|同語|反復|係り受け|長文|読みやす|文章を(直|整|磨)|言い回し|くどい/,
+  checkContradictions: /矛盾|食い違|整合|辻褄|つじつま|設定.{0,6}(違|合)/,
+  checkDeviations: /逸脱|間延び|プロット.{0,8}(外れ|ずれ|ズレ|離れ|沿)|脱線/,
+  extractSettings: /抽出|洗い出|設定資料|資料|拾/,
+  extractCharacters: /登場人物|人物|キャラ/,
+  extractLocations: /場所|地名|舞台|土地/,
+  extractAbilities: /能力|スキル|魔法|技/,
+  extractOrganizations: /組織|勢力|ギルド|団体|国家/,
+  extractWorld: /世界観|設定用語|用語/,
+  generateSettingsDocs: /資料集|設定資料/,
+  openSettingsPanel: /資料集|設定資料/,
+  unifyCharacters: /重複|同一人物|同じ人物|まとめ直|統合/,
+  applyPendingUpdates: /承認|更新|反映/,
+  generateSynopses: /あらすじ|要約/,
+  generateWorkBlurb: /紹介文|作品紹介|あらすじ文|紹介/,
+  generateCatchphrases: /キャッチ|コピー|惹句/,
+  openSynopsisDocs: /紹介文|あらすじ/,
+  generatePlot: /プロット|逆算|構成|筋書/,
+  suggestContests: /応募|公募|コンテスト|新人賞|文学賞|賞|投稿先/,
+};
+
+/**
+ * AIが返した実行ボタン（`run`）のうち、作者の言葉と話題が合うものだけを返す。
+ *
+ * `sources` は質問と、直前の作者の発言（「はい、お願い」のように、話題を
+ * 前の発言が持っている返事のため）。**迷ったら出さない**（`detectRunIntent` と
+ * 同じ構え）——関係の無いボタンが出ると、押していいのか作者が迷う。
+ */
+export function relatedChatRun(
+  raw: unknown,
+  sources: readonly string[]
+): ChatRun | undefined {
+  const parsed = parseChatRun(raw);
+  if (!parsed) return undefined;
+
+  const words = RUN_TOPIC_WORDS[parsed.kind];
+  return sources.some((source) => words.test(source)) ? parsed : undefined;
 }

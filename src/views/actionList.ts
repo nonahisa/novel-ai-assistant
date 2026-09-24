@@ -110,6 +110,19 @@ export interface ActionItem {
    */
   hiddenFromActionList?: boolean;
   /**
+   * いまはほかの入口にまとめた**旧入口**か。値はいまの入口のコマンドID
+   * （2026-09-25 深夜の実接続の測定）。
+   *
+   * 相談へ渡す目次と説明の束（`features/featureGuide.ts`）に**載せない**。
+   * `hiddenFromActionList` だけでは目次に名前が残り、AIがその旧名を操作名として
+   * 案内した（「ターゲット読者診断」。作者は詳細メニューで探せない）。補足で
+   * 「旧入口。いまは〜」と添えても、小さいモデルは名前のほうを写した。
+   *
+   * 旧名で頼まれたとき（「ターゲット読者診断を実行して」）は、手順書き
+   * （`core/procedures.ts`）がいまの入口へ導く。コマンドそのものはパレットに残る。
+   */
+  supersededBy?: string;
+  /**
    * この操作が動くために先に要るもの（設計書6.94／`core/prerequisites.ts`）。
    *
    * **文章ではなくデータで持つ。** 前提はこれまで `detail` の中の一文に
@@ -1693,12 +1706,17 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             （`core/commandForwards.ts`）。名前に「（ターゲット読者へ）」を
             付けて、押すと別の入口が開くと分かるようにした。
           */
+          /*
+            **相談の目次にも載せない**（`supersededBy`。2026-09-25 深夜の実接続の
+            測定）。隠しただけでは目次に名前が残り、AIが旧名を案内した。
+          */
           {
             kind: "action",
             command: "novelai.runReaderTargetDiagnosis",
             label: "ターゲット読者診断",
             icon: "person",
             hiddenFromActionList: true,
+            supersededBy: "novelai.openTargetReader",
             requiresWork: true,
             usesAI: true,
             detail:

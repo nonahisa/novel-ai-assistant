@@ -38,8 +38,11 @@ function allActions() {
 /** 手元（Nodeあり）の画面に出る操作 */
 function visibleActions() {
   // **画面に出ない操作は、案内にも入れない**（`browserOnly`）。
-  // 試験は手元で走るので、ブラウザ版だけの操作は外れる
-  return allActions().filter((action) => !action.browserOnly);
+  // 試験は手元で走るので、ブラウザ版だけの操作は外れる。
+  // 旧入口（`supersededBy`）も案内しない（下の「旧入口」の試験）
+  return allActions().filter(
+    (action) => !action.browserOnly && !action.supersededBy
+  );
 }
 
 /** `EXTRA_GUIDE` から【…】の節を1つ取り出す（製品側と同じ切り方） */
@@ -78,6 +81,30 @@ describe("使い方の説明（目次と束）", () => {
         line.startsWith(`  - ${action.label}`)
       );
       expect(found, action.label).toBe(true);
+    }
+  });
+
+  test("旧入口（supersededBy）は案内に入れず、いまの入口は入れる", () => {
+    /*
+      旧名が目次にあると、AIはいまの入口ではなくそちらを案内した（2026-09-25
+      深夜の実接続の測定。「ターゲット読者診断」）。**いまの入口が実在して
+      詳細メニューに並んでいること**も見る——指す先が無い旧入口を外すと、
+      その仕事の名前が目次から消える。
+    */
+    const superseded = allActions().filter((action) => action.supersededBy);
+
+    expect(superseded.length).toBeGreaterThan(0);
+    for (const action of superseded) {
+      expect(index, `目次: ${action.label}`).not.toContain(action.label);
+      expect(bundleText, `束: ${action.label}`).not.toContain(action.label);
+
+      const current = allActions().find(
+        (entry) => entry.command === action.supersededBy
+      );
+      expect(current, action.command).toBeDefined();
+      expect(current?.hiddenFromActionList, action.command).toBeFalsy();
+      expect(current?.supersededBy, action.command).toBeUndefined();
+      expect(index, action.command).toContain(current?.label ?? "");
     }
   });
 
@@ -548,6 +575,10 @@ describe("相談1回ぶんの組み立て", () => {
       AIが「そんな機能はない」と答える心配は残らないが、**説明は付かない**。
       ここで見たいのは「割った束が互いに紛れないこと」なので、漢字の
       名前を持つ操作（縦書きで開く）で同じことを確かめる。
+
+      （2026-09-25 に、機能を名指すカタカナの語を別の一覧で拾うようにした
+      （`core/guideSelect.ts` の `FEATURE_NAME_TERMS`）。「ルビを振りたい」には
+      いま説明が付く——それは `featureGuideKatakana.test.ts` が見ている）
     */
     const built = buildFeatureGuideForQuestion({
       question: "縦書きで原稿を開きたい",

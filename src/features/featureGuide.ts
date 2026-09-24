@@ -5,6 +5,7 @@ import {
   prerequisiteNoteOf,
   visibleEntries,
   type ActionItem,
+  type ActionSection,
 } from "../views/actionList";
 import { canRunProcesses } from "../core/runtime";
 import {
@@ -152,6 +153,23 @@ export const EXTRA_GUIDE = `
 `.trim();
 
 /**
+ * 相談へ渡す操作。この環境で動くもの（`visibleEntries`）から、**旧入口**
+ * （`supersededBy`）を除く。
+ *
+ * 旧入口の名前が目次にあると、AIはいまの入口ではなくそちらを案内する
+ * （2026-09-25 深夜の実接続の測定。「ターゲット読者診断」）。目次と束で
+ * 同じ規則を使う——片方だけに残すと、目次に無いのに説明がある操作ができる。
+ */
+function guideEntries<T extends ActionItem | ActionSection>(
+  entries: readonly T[],
+  allowsProcesses: boolean
+): T[] {
+  return visibleEntries(entries, allowsProcesses).filter(
+    (entry) => entry.kind !== "action" || !entry.supersededBy
+  );
+}
+
+/**
  * 操作の**目次**を作る。名前だけで、説明は入れない。
  *
  * **これは毎回送る。** 名前が1つでも欠けると、AIは「その機能はありません」と
@@ -173,13 +191,13 @@ export function buildFeatureIndex(): string {
 
   for (const group of ACTION_TREE) {
     lines.push(`■ ${group.label}`);
-    for (const entry of visibleEntries(group.entries, allowsProcesses)) {
+    for (const entry of guideEntries(group.entries, allowsProcesses)) {
       if (entry.kind === "action") {
         lines.push(nameOnly(entry, ""));
         continue;
       }
       lines.push(`  ▸ ${entry.label}`);
-      for (const item of visibleEntries(entry.items, allowsProcesses)) {
+      for (const item of guideEntries(entry.items, allowsProcesses)) {
         lines.push(nameOnly(item, "  "));
       }
     }
@@ -276,7 +294,7 @@ export function buildGuideBundles(): GuideBundle[] {
   const bundles: GuideBundle[] = [];
 
   for (const group of ACTION_TREE) {
-    const entries = visibleEntries(group.entries, allowsProcesses);
+    const entries = guideEntries(group.entries, allowsProcesses);
 
     const direct = entries.filter((entry) => entry.kind === "action");
     if (direct.length > 0) {
@@ -292,7 +310,7 @@ export function buildGuideBundles(): GuideBundle[] {
 
     for (const entry of entries) {
       if (entry.kind !== "section") continue;
-      const items = visibleEntries(entry.items, allowsProcesses);
+      const items = guideEntries(entry.items, allowsProcesses);
       if (items.length === 0) continue;
 
       for (const part of splitSectionItems(entry.label, items)) {

@@ -197,7 +197,7 @@ import {
   createOrganizationStore,
 } from "../core/abilityStore";
 import type { Chatter } from "../core/chatter";
-import { detectRunIntent } from "../core/chatIntent";
+import { detectRunIntent, relatedChatRun } from "../core/chatIntent";
 import { findTextRange } from "../core/textLocate";
 import { applyChatEdit, readChatEditTarget } from "./applyChatEdit";
 import {
@@ -842,13 +842,21 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * 作者の最後の発言も選ぶ材料にする。**AIは呼ばない**（字面の照合だけ）。
    */
   private featureGuideFor(question: string) {
+    return buildFeatureGuideForQuestion({
+      question,
+      recentAuthorTurns: this.lastAuthorTurns(),
+    });
+  }
+
+  /**
+   * 作者の最後の発言（あれば1件）。**今回の質問を履歴へ積む前に**呼ぶこと——
+   * 積んだあとだと、今回の質問そのものが返る。
+   */
+  private lastAuthorTurns(): string[] {
     const lastAuthorTurn = [...this.history]
       .reverse()
       .find((turn) => turn.role === "author");
-    return buildFeatureGuideForQuestion({
-      question,
-      recentAuthorTurns: lastAuthorTurn ? [lastAuthorTurn.text] : [],
-    });
+    return lastAuthorTurn ? [lastAuthorTurn.text] : [];
   }
 
   /** 当たった手順書きの鍵だけ（AIに接続できなかった道で使う） */
@@ -1872,6 +1880,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // 作者の最後の発言も選ぶ材料にする
       const guide = this.featureGuideFor(question);
       procedureKey = guide.procedureKey;
+      // 実行ボタンを話題で照らすときの材料（下の `relatedChatRun`）。
+      // 履歴へ今回の質問を積む前に取っておく
+      const earlierAuthorTurns = this.lastAuthorTurns();
       // 何を渡したかを残す。答えがおかしいときに、説明が届いていたのかを
       // 後から確かめられないと切り分けられない
       // 話題（創作か操作か）も残す。目次を落とした回に「そんな機能はない」と
@@ -2103,10 +2114,23 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // 押せるボタンが出ない状態が実機で続いた（2026-08-15）。
       // 「作業を頼まれたか」は規則で見分けられるので、コード側で決める。
       const intended = detectRunIntent(question);
+      /*
+        **AIが出したボタンは、作者の言葉と話題が合うものだけ残す**
+        （2026-09-25 深夜の実接続の測定）。読者層の質問に誤字脱字の検知や
+        応募先の提案が付いていた。一覧にあるかだけでは足りない（実装ルール3）。
+        落としたことは記録に残す——ボタンが出なかった理由を後から追えるように。
+      */
+      const relatedRun = relatedChatRun(answer.run, [
+        question,
+        ...earlierAuthorTurns,
+      ]);
+      if (answer.run && !relatedRun && parseChatRun(answer.run)) {
+        logStep(`相談: 質問と話題の合わない実行ボタンを落とした（${String(answer.run)}）`);
+      }
       const staged = {
         edit: this.stageEdit(answer.edit, context?.work),
         run:
-          this.stageRun(answer.run, context) ??
+          this.stageRun(relatedRun?.kind, context) ??
           (intended ? this.stageRun(intended, context) : undefined),
         locate: this.stageLocate(answer.locate, context),
         // 実在の照合に資料の読み込みが要るので、ここだけ待つ
