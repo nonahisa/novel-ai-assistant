@@ -323,4 +323,35 @@ describe("検知への配線", () => {
       expect(source, name).not.toContain(`await ${name}(`);
     }
   });
+
+  /**
+   * **矛盾検知は、本文を読み終えたら「検出した矛盾を検証 n/m件」へ切り替わる**
+   * （設計書6.10.5。実機確認リスト F-37 の代わり）。
+   *
+   * 検証はAIを1件ずつ呼ぶので時間がかかる。読む段の札のままだと
+   * 「12/12チャンク」で止まって見える。切り替えは3か所の配線で決まる：
+   * (1) 入口が検証の段に別の札（名前と単位）を渡す、(2) 札は読む段と同じ
+   * `showRunning` を通る（出し方は上の「進み具合を送る」が見ている）、
+   * (3) 検知が検証の1件ごとに、その札へ件数を流す。
+   */
+  test("矛盾検知は、検証の段を別の札（件）で流す", () => {
+    const at = source.indexOf('"矛盾を検知",');
+    expect(at).toBeGreaterThan(-1);
+    expect(source.slice(at, at + 800)).toContain(
+      'onVerifyProgress: stage("検出した矛盾を検証", "件"),'
+    );
+
+    // 札は、読む段と同じ出し方（showRunning）へ名前と単位ごと渡る
+    const reporter = source.slice(source.indexOf("async function withPanelProgress<T>("));
+    expect(reporter.slice(0, 1600)).toMatch(
+      /proposalPanel\.showRunning\(\s*work,\s*stageLabel,\s*done,\s*total,\s*stageUnit,/
+    );
+
+    // 検知の側は、検証の1件ごとに件数を流す（読む段の札とは別に）
+    const check = readFileSync("src/features/checkContradictions.ts", "utf8");
+    const verify = check.slice(check.indexOf('"検出した矛盾を検証しています"'));
+    expect(verify.slice(0, 1200)).toContain(
+      "options.onVerifyProgress?.(done, found.length);"
+    );
+  });
 });

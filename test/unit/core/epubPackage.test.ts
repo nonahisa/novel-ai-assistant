@@ -1517,6 +1517,40 @@ describe("ブロックの並びで面を組む（設計書6.65.15）", () => {
     expect(spine(files)).toEqual(["cover", "chapter-001", "chapter-002"]);
     expect(files["OEBPS/cover.xhtml"]).toBeDefined();
   });
+
+  /**
+   * **表紙の面を全部保留にしても、本棚に出る絵は入る**（実機確認リスト F-75 の代わり）。
+   *
+   * 表紙の面（本の1ページ目）と、本棚の絵（`properties="cover-image"`）は
+   * 役目が別である。面を保留にして比べている最中に書き出しても、
+   * 本棚では絵の無い本にならない。書き出しの側（`features/exportEpub.ts`）は
+   * 並びと関係なく表紙の画像を読むので、ここで組み立てを見れば足りる。
+   */
+  test("表紙の面をすべて保留にしても、本棚の絵は入る", () => {
+    const built = buildEpub({
+      ...withConfig({
+        blocks: [{ type: "cover", suspended: true }, { type: "body" }],
+      }),
+      cover: {
+        fileName: "表紙.png",
+        data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+      },
+    });
+    const zip = unzipSync(built);
+    const files = open(built);
+    const opf = files["OEBPS/content.opf"];
+
+    // 面は入らない
+    expect(spine(files)).not.toContain("cover");
+    expect(files["OEBPS/cover.xhtml"]).toBeUndefined();
+    // 本棚の絵は入る（印も付く）
+    expect(opf).toMatch(
+      /<item[^>]*id="cover-image"[^>]*properties="cover-image"/
+    );
+    const href = opf.match(/<item[^>]*id="cover-image"[^>]*href="([^"]+)"/)?.[1];
+    expect(href).toBeDefined();
+    expect(zip[`OEBPS/${href}`]).toBeDefined();
+  });
 });
 
 describe("口絵・扉絵の面（設計書6.65.15）", () => {

@@ -161,6 +161,22 @@ describe("誤字脱字・推敲に出るボタン", () => {
     expect(buttonsOf(typoIssue())).not.toContain("AIに訊く");
   });
 
+  /**
+   * **「AIに訊く」を足しても、「今後直さない」はこれまでどおり並ぶ**
+   * （設計書6.73。実機確認リスト F-78 の代わり）。上の試験は「AIに訊く」が
+   * 出ることしか見ていないので、足したときに隣の「今後直さない」を
+   * 押し出していないかを別に見る。押したあとの登録は `keepWord.test.ts`。
+   */
+  test("表記ゆれの指摘でも、「今後直さない」は「AIに訊く」と並んで残る", () => {
+    const buttons = buttonsOf(
+      typoIssue({ notation: { label: "良い／よい", forms: [] }, canRecheck: true })
+    );
+
+    expect(buttons).toContain("AIに訊く");
+    expect(buttons).toContain("今後直さない");
+    expect(buttons).toContain("適用");
+  });
+
   test("適用したあとは「戻す」だけになる", () => {
     expect(buttonsOf(typoIssue({ status: "applied" }))).toEqual(["戻す"]);
   });

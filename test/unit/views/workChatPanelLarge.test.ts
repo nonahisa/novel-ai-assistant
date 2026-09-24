@@ -195,6 +195,62 @@ describe("メインとサブを行き来する", () => {
 });
 
 /**
+ * **質問を送っている間は、どちらの画面でも「送る」と面を移るボタンを押せない**
+ * （実機確認リスト F-59 の代わり）。
+ *
+ * 上の「考えている間は押せない」は `setBusy` の中に2つの名前が出てくる
+ * ことしか見ていない。ここでは、(1) 押せなくする値そのもの、(2) 押した側が
+ * 送る前に考え中になること、(3) **もう片方の画面**も、届いた問い（`asked`）で
+ * 考え中になること——の3つをつなげて見る。(3) が抜けると、横で送っている
+ * 最中に大きい画面の「サブに戻す」が押せてしまう。
+ */
+describe("質問の送信中は、両方の画面のボタンが押せない", () => {
+  /** スクリプトの中の関数の本体（最初の `{` から対応する `}` まで） */
+  function bodyOf(code: string, signature: string): string {
+    const start = code.indexOf(signature);
+    expect(start, `${signature} が見つからない`).toBeGreaterThan(-1);
+    const open = code.indexOf("{", start);
+    let depth = 0;
+    for (let i = open; i < code.length; i++) {
+      if (code[i] === "{") depth++;
+      else if (code[i] === "}" && --depth === 0) return code.slice(open, i + 1);
+    }
+    throw new Error(`${signature} の閉じ括弧が見つからない`);
+  }
+
+  for (const [name, html] of [
+    ["横のパネル", SIDEBAR],
+    ["大きい画面", LARGE],
+  ] as const) {
+    test(`${name}：考え中は「送る」と面を移るボタンを押せなくする`, () => {
+      const busy = bodyOf(script(html), "function setBusy(value)");
+      expect(busy).toContain("sendEl.disabled = value;");
+      expect(busy).toContain("if (toMainEl) toMainEl.disabled = value;");
+      expect(busy).toContain("if (toSubEl) toSubEl.disabled = value;");
+    });
+
+    test(`${name}：押した側は、送る前に考え中になる（二度送れない）`, () => {
+      const send = bodyOf(script(html), "function send(question)");
+      expect(send).toContain("if (busy) return;");
+      expect(send.indexOf("setBusy(true);")).toBeGreaterThan(-1);
+      expect(send.indexOf("setBusy(true);")).toBeLessThan(
+        send.indexOf("vscode.postMessage({ type: 'ask'")
+      );
+    });
+
+    test(`${name}：もう片方で送られた問いが届いたら、こちらも考え中になる`, () => {
+      const code = script(html);
+      expect(bodyOf(code, "function showAsked(question)")).toContain(
+        "setBusy(true);"
+      );
+      const at = code.indexOf("if (message.type === 'asked')");
+      expect(at).toBeGreaterThan(-1);
+      expect(code.slice(at, at + 200)).toContain("showAsked(message.question)");
+    });
+  }
+});
+
+/**
  * 番号の案内（「番号（1〜3）を打って選ぶこともできます」）を、ボタンの行へ
  * 入れない（ノートPCの実機、2026-09-23）。
  *

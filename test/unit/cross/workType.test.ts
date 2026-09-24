@@ -255,6 +255,28 @@ describe("タイプを決める・変える配線", () => {
     expect(command.slice(0, 1200)).toContain("invalidateWorkFormat(work.id)");
     expect(command.slice(0, 1200)).toContain("stepProvider.invalidateFormats(");
   });
+
+  /**
+   * **一覧と右クリックも、その場で描き直す**（実機確認リスト F-69 の代わり）。
+   *
+   * 右クリックに何を出すかは、作品一覧の各行が持つ印（`contextValue`。
+   * タイプで変わる。`workTypeVisibility.test.ts`）で決まる。印は行を
+   * 作り直したときにしか変わらないので、**覚えを捨てるだけでは足りず、
+   * 一覧を描き直す呼び出しが要る**。捨てる前に描き直すと古い形のまま
+   * 描かれるので、順番も見る。
+   */
+  test("形式を決め直したら、覚えを捨ててから作品一覧を描き直す", () => {
+    const command = source().slice(
+      source().indexOf('"novelai.setPlotBasics"')
+    ).slice(0, 1200);
+
+    const forget = command.indexOf("invalidateWorkFormat(work.id)");
+    const redraw = command.indexOf("treeProvider.refresh(work.id)");
+    expect(redraw).toBeGreaterThan(-1);
+    expect(forget).toBeLessThan(redraw);
+    // 形式を書き終えてから（setPlotBasics の後で）描き直す
+    expect(command.indexOf("await setPlotBasics(work);")).toBeLessThan(forget);
+  });
 });
 
 describe("タイプの束ね方（表と右クリックが使う列）", () => {

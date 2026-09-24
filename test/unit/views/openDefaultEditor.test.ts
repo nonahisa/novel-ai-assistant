@@ -294,6 +294,51 @@ describe("生成文書の開き方", () => {
  * `workbench.editorAssociations` に従うので、**既定の画面で開く**。
  * 実際に画面が出ることは実機に残る。
  */
+/**
+ * プロット（`設定/plot.md`）を開く2つの入口（実機確認リスト F-1 の代わり）。
+ *
+ * 「プロットを作る」と「形式とジャンル」のあとに開く plot.md は、作者が
+ * `*.md` に割り当てた画面で開く（2026-08-21 に素のテキストエディターで
+ * 開いていた件）。**`vscode.open` が割り当てに従うこと**は統合テスト
+ * （`src/test/run.ts`「プロットを作ると、作者が .md に割り当てた画面で開く」）が
+ * 本物の VS Code で見ている。ここは、2つの入口がその同じ助け
+ * （`openInDefaultEditor`）を通っていることを見る。
+ */
+describe("プロットを開く入口", () => {
+  function bodyOf(file: string, marker: string): string {
+    const source = readFileSync(file, "utf-8");
+    const start = source.indexOf(marker);
+    expect(start, `${file} に ${marker} が無い`).toBeGreaterThan(-1);
+    const open = source.indexOf("{", source.indexOf(")", start));
+    let depth = 0;
+    for (let i = open; i < source.length; i++) {
+      if (source[i] === "{") depth++;
+      else if (source[i] === "}" && --depth === 0) return source.slice(open, i + 1);
+    }
+    throw new Error(`${marker} の閉じ括弧が見つからない`);
+  }
+
+  it("「プロットを作る」は、既定の画面で開く助けを通る", () => {
+    const body = bodyOf("src/features/startWork.ts", "export async function openPlotFile(");
+    expect(body).toContain("openInDefaultEditor(plotPath)");
+    expect(body).not.toContain("showTextDocument");
+  });
+
+  it("「形式とジャンル」のあとも、同じ助けで plot.md を開く", () => {
+    const body = bodyOf(
+      "src/features/setPlotBasics.ts",
+      "export async function setPlotBasics("
+    );
+    const write = body.indexOf("await writePlotSections(work, updates);");
+    const open = body.indexOf("await openInDefaultEditor(await plotPath(work));");
+    expect(open).toBeGreaterThan(-1);
+    // 書いてから開く（開いてから書くと、開いた画面が古い中身を見せる）
+    expect(write).toBeGreaterThan(-1);
+    expect(write).toBeLessThan(open);
+    expect(body).not.toContain("showTextDocument");
+  });
+});
+
 describe("その場で作る読み物の開き方", () => {
   const ENTRIES: Array<[string, string, string]> = [
     [

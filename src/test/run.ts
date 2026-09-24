@@ -13,6 +13,11 @@ import { PendingUpdateStore } from "../core/pendingUpdates";
 import { scanWork } from "../core/scanner";
 import { scaffoldWorkFolder } from "../core/workRegistry";
 import { extractCharacters } from "../features/extractCharacters";
+import { createFirstEpisodeFile } from "../features/startWork";
+import {
+  MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
+  manuscriptViewTypeFor,
+} from "../core/manuscriptViewTypes";
 import {
   checkoutSide,
   isGitAvailable,
@@ -750,6 +755,104 @@ export async function run(): Promise<void> {
   );
 
   await runCase(
+    "プロットを作ると、作者が .md に割り当てた画面で開く（実機確認リスト F-1）",
+    failures,
+    async () => {
+      // **本物の VS Code の割り当て（`workbench.editorAssociations`）に従うか**を見る。
+      // 単体テストは「`vscode.open` を呼んでいる」までしか言えない。
+      // 割り当て先には、この拡張機能が必ず持っている原稿エディタを使う
+      // （組み込みのMarkdown画面は、試験用のVS Codeに在るとは限らない）。
+      // そのあと「テキストエディター」へ戻して、今度は素の画面で開くことも見る
+      // ——片方だけだと「いつも原稿エディタで開く」実装でも通ってしまう
+      const temporaryRoot = await fs.mkdtemp(
+        path.join(os.tmpdir(), "novel-ai-assistant-plot-open-")
+      );
+      const workbench = vscode.workspace.getConfiguration("workbench");
+      const saved = workbench.inspect("editorAssociations")?.globalValue;
+      try {
+        const workFolder = path.join(temporaryRoot, "テスト作品");
+        await scaffoldWorkFolder(workFolder, "テスト作品");
+        const work = makeWork(workFolder);
+        const isPlot = (uri: vscode.Uri): boolean =>
+          path.basename(uri.fsPath) === "plot.md";
+
+        await workbench.update(
+          "editorAssociations",
+          { "*.md": MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE },
+          vscode.ConfigurationTarget.Global
+        );
+        await vscode.commands.executeCommand("novelai.createPlot", {
+          type: "work",
+          work,
+        });
+        const custom = await waitForActiveTab(
+          (input) => input instanceof vscode.TabInputCustom && isPlot(input.uri)
+        );
+        assert.ok(custom instanceof vscode.TabInputCustom);
+        assert.equal(custom.viewType, MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE);
+        // 作ったのは設定フォルダーの plot.md
+        await fs.access(path.join(workFolder, "設定", "plot.md"));
+
+        await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+        await workbench.update(
+          "editorAssociations",
+          { "*.md": "default" },
+          vscode.ConfigurationTarget.Global
+        );
+        await vscode.commands.executeCommand("novelai.createPlot", {
+          type: "work",
+          work,
+        });
+        const text = await waitForActiveTab(
+          (input) => input instanceof vscode.TabInputText && isPlot(input.uri)
+        );
+        assert.ok(text instanceof vscode.TabInputText);
+      } finally {
+        await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+        await workbench.update(
+          "editorAssociations",
+          saved,
+          vscode.ConfigurationTarget.Global
+        );
+        await fs.rm(temporaryRoot, { recursive: true, force: true });
+      }
+    }
+  );
+
+  await runCase(
+    "新規作品の第1話は、作品一覧と同じ原稿エディタで開く（実機確認リスト F-1）",
+    failures,
+    async () => {
+      // 本文の既定は「原稿エディタ（横書き）」（作者の指定、2026-08-29。作品一覧の
+      // クリックと同じ `manuscriptViewTypeFor`）。第1話だけ素の画面で開くと、
+      // 書き始めの1話だけ見た目も道具も違うことになる
+      const temporaryRoot = await fs.mkdtemp(
+        path.join(os.tmpdir(), "novel-ai-assistant-first-episode-")
+      );
+      try {
+        const workFolder = path.join(temporaryRoot, "テスト作品");
+        await scaffoldWorkFolder(workFolder, "テスト作品");
+        const work = makeWork(workFolder);
+
+        const created = await createFirstEpisodeFile(work);
+        assert.ok(created, "第1話のファイルが作られていません");
+
+        const opened = await waitForActiveTab(
+          (input) =>
+            input instanceof vscode.TabInputCustom &&
+            input.uri.fsPath.toLowerCase() === created.toLowerCase()
+        );
+        assert.ok(opened instanceof vscode.TabInputCustom);
+        assert.equal(opened.viewType, manuscriptViewTypeFor(undefined));
+        assert.equal(opened.viewType, MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE);
+      } finally {
+        await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+        await fs.rm(temporaryRoot, { recursive: true, force: true });
+      }
+    }
+  );
+
+  await runCase(
     "手元のAIの待ち時間は、VS Code の通信の差し替えを越えて届く",
     failures,
     async () => {
@@ -780,6 +883,30 @@ async function git(args: string[], cwd: string): Promise<void> {
       `git ${args.join(" ")} が失敗しました: ${result.stderr || result.stdout}`
     );
   }
+}
+
+/**
+ * いま前に出ているタブの中身が、条件に合うまで待つ。
+ *
+ * 画面を開くコマンドは、開き終わる前に戻ってくることがある。
+ * 5秒待っても合わなければ、そのときの中身を添えて落とす（何が開いたかを残す）。
+ */
+async function waitForActiveTab(
+  matches: (input: unknown) => boolean
+): Promise<unknown> {
+  let last: unknown;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    last = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    if (last !== undefined && matches(last)) return last;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const described =
+    last instanceof vscode.TabInputCustom
+      ? `独自の画面 ${last.viewType}（${last.uri.fsPath}）`
+      : last instanceof vscode.TabInputText
+        ? `テキスト（${last.uri.fsPath}）`
+        : String(last);
+  throw new Error(`期待したタブが前に出ません。いま前にあるのは：${described}`);
 }
 
 async function runCase(

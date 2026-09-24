@@ -296,6 +296,33 @@ vi.mock("../../../src/core/chunkCache", () => ({
   },
 }));
 
+/**
+ * 完了の知らせの「提案を見る」が、どの提案パネルへ渡したかを覗く口。
+ *
+ * **既定では本物へそのまま通す**（ほかの試験の振る舞いを変えない）。
+ * `intercept` を立てた試験だけが、渡された引数を控えて本物を呼ばない。
+ */
+const pendingApply = vi.hoisted(() => ({
+  intercept: false,
+  calls: [] as unknown[][],
+}));
+vi.mock("../../../src/features/applyPendingUpdates", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../../src/features/applyPendingUpdates")
+  >();
+  return {
+    ...actual,
+    applyPendingCharacterUpdates: async (
+      ...args: Parameters<typeof actual.applyPendingCharacterUpdates>
+    ) => {
+      if (!pendingApply.intercept) {
+        return actual.applyPendingCharacterUpdates(...args);
+      }
+      pendingApply.calls.push(args);
+    },
+  };
+});
+
 import {
   characterExtractCacheKey,
   extractCharacters,
@@ -2441,6 +2468,127 @@ describe("人物抽出フロー", () => {
       // 退けた関係は、承認待ちにも積まれない（台帳へ戻る道が無い）
       const staged = [...disk.values()].map((bytes) => new TextDecoder().decode(bytes));
       expect(staged.some((text) => text.includes("\"姉\"") && !text.includes("rejectedRelations"))).toBe(false);
+    });
+
+    /*
+      **押したら、渡した提案パネルへ出す**（実機確認リスト F-51 の代わり）。
+
+      上の2つは「ボタンが出るか」まで。押した先が**別のダイアログ**
+      （パネルを渡さない道＝「内容を確認／すべて反映／選んで反映」の確認）へ
+      落ちると、窓口が2つに分かれる。抽出の入口から受け取ったパネルを、
+      そのまま反映の口へ渡しているかを見る。
+    */
+    test("「提案を見る」を押すと、抽出の入口で渡された提案パネルへ出す", async () => {
+      state.loadedCharacters = [emptyCharacter("char_001", "灯")];
+      state.mergeResult = {
+        characters: [
+          { ...emptyCharacter("char_001", "灯"), summary: "新しい要約" },
+        ],
+        added: [],
+        updated: ["灯"],
+        changedIds: ["char_001"],
+        conflicts: [],
+        folded: [],
+        heldChanges: [],
+      };
+      const { showInformationMessage } = installWindow();
+      // 完了の知らせでだけ「提案を見る」を押す
+      showInformationMessage.mockImplementation(
+        async (_message: string, ...actions: unknown[]) =>
+          actions.includes("実行")
+            ? "実行"
+            : actions.includes("提案を見る")
+              ? "提案を見る"
+              : undefined
+      );
+      state.generate.mockResolvedValue(successfulResult("灯"));
+      const panel = { name: "提案パネルの代役" };
+      pendingApply.calls = [];
+      pendingApply.intercept = true;
+      try {
+        await extractCharacters(work, testRegistry(), {
+          proposalPanel: panel as never,
+        });
+
+        await vi.waitFor(() => expect(pendingApply.calls).toHaveLength(1));
+        const [passedWork, passedPanel] = pendingApply.calls[0];
+        expect(passedWork).toBe(work);
+        // **パネルを渡している**＝確認のダイアログの道へ落ちない
+        expect(passedPanel).toBe(panel);
+      } finally {
+        pendingApply.intercept = false;
+      }
+    });
+  });
+
+  /*
+    **作者が別人と決めた呼び名が付いた場面を取り込まなかったら、完了報告で
+    言う**（設計書6.5.8。実機確認リスト F-20 の代わり）。
+
+    どの候補を弾くかは `characterMerge.test.ts`「別人と決めた呼び名が付いた
+    候補」が見ている。ここは、その件数が**作者の目に届く文**になるか。
+    黙って捨てると、作者には「なぜか資料が増えなかった」としか見えない。
+  */
+  describe("別人と決めた呼び名で弾いた場面の報告", () => {
+    function installWindow(): { shown: string[] } {
+      const shown: string[] = [];
+      const record = async (message: string, ...actions: unknown[]) => {
+        shown.push(message);
+        return actions.includes("実行") ? "実行" : undefined;
+      };
+      Object.assign(window, {
+        showInformationMessage: vi.fn(record),
+        showWarningMessage: vi.fn(record),
+        showErrorMessage: vi.fn(async () => undefined),
+        withProgress: vi.fn(async (_options, task) =>
+          task(
+            { report: vi.fn() },
+            { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+          )
+        ),
+      });
+      return { shown };
+    }
+
+    function mergedWith(rejectedDistinct: unknown[]): unknown {
+      return {
+        characters: [],
+        added: [],
+        updated: [],
+        changedIds: [],
+        conflicts: [],
+        folded: [],
+        heldChanges: [],
+        rejectedDistinct,
+      };
+    }
+
+    test("弾いた件数と、誰に付いたどの呼び名かを完了報告に出す", async () => {
+      state.mergeResult = mergedWith([
+        { characterName: "アジャーノ", blockedName: "殿下", chapters: [12] },
+      ]);
+      const { shown } = installWindow();
+      // 本文に居る名前で返させる（本文に根拠の無い候補は、突き合わせの前に落ちる）。
+      // 突き合わせの結果は上の `mergedWith` で決めている
+      state.generate.mockResolvedValue(successfulResult("灯"));
+
+      await extractCharacters(work, testRegistry());
+
+      const report = shown.join("\n");
+      expect(report).toContain(
+        "作者が別人と決めた呼び名が付いた場面を 1件、取り込みませんでした"
+      );
+      expect(report).toContain("アジャーノ に付いた「殿下」");
+    });
+
+    test("弾いたものが無ければ、その行は出さない", async () => {
+      state.mergeResult = mergedWith([]);
+      const { shown } = installWindow();
+      state.generate.mockResolvedValue(successfulResult("灯"));
+
+      await extractCharacters(work, testRegistry());
+
+      expect(shown.join("\n")).not.toContain("別人と決めた呼び名");
     });
   });
 });

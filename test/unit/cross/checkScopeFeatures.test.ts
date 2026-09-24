@@ -213,3 +213,62 @@ describe("「はじめの10話だけ（試す）」には noRemember が付く",
     expect(byValue.get("changed")?.noRemember).toBeUndefined();
   });
 });
+
+/**
+ * **前回の検知のあとに書いた話が1つも無ければ、その旨を言う**
+ * （実機確認リスト F-3 の代わり）。
+ *
+ * 黙って全体を見ると、作者は「差分だけのはずが全部出た」と思う。
+ * 逆に黙って止めると、押したのに何も起きなかったように見える。
+ * 言ったうえで「作品全体を見る」を選べるのが約束である。
+ *
+ * 話がある場合（上の noRemember の試験）とない場合の両方を見る——片方だけだと
+ * 「いつも訊く」「いつも黙る」実装でも通ってしまう。
+ */
+describe("前回の検知のあとに書いた話が無いとき", () => {
+  const episodes = Array.from({ length: 3 }, (_, i) => ({
+    filePath: `C:/works/試しの作品/原稿/${String(i + 1).padStart(3, "0")}.txt`,
+  }));
+
+  beforeEach(() => {
+    notifyMocks.pickWithMemory.mockClear();
+    notifyMocks.confirmRun.mockClear();
+    scannerMocks.scanWork.mockResolvedValue({ episodes });
+  });
+
+  /** 前回の検知は 1000、どの話も 500（＝それより前）に書いた状態で選ばせる */
+  async function chooseWithNothingNew(answer: boolean) {
+    notifyMocks.confirmRun.mockResolvedValue(answer);
+    const originalFs = workspace.fs;
+    workspace.fs = {
+      readFile: async () =>
+        new TextEncoder().encode(JSON.stringify({ checkedAt: 1000 })),
+      stat: async () => ({ mtime: 500 }),
+    };
+    try {
+      return await chooseScope(work, "typo");
+    } finally {
+      workspace.fs = originalFs;
+    }
+  }
+
+  test("「前回の検知のあとに書いた話はありません」と、どの検知かを添えて訊く", async () => {
+    await chooseWithNothingNew(true);
+
+    expect(notifyMocks.confirmRun).toHaveBeenCalledTimes(1);
+    const [message, runLabel] = notifyMocks.confirmRun.mock.calls[0] as unknown as [
+      string,
+      string,
+    ];
+    expect(message).toContain("前回の検知のあとに書いた話はありません。");
+    expect(message).toContain("誤字脱字検知");
+    expect(runLabel).toBe("作品全体を見る");
+    // 選ぶ画面（前回から／試す／全体）は出さない。選べるものが無いので
+    expect(notifyMocks.pickWithMemory).not.toHaveBeenCalled();
+  });
+
+  test("「作品全体を見る」を選べば全体、断れば取りやめ", async () => {
+    expect(await chooseWithNothingNew(true)).toEqual({ kind: "all" });
+    expect(await chooseWithNothingNew(false)).toBeUndefined();
+  });
+});

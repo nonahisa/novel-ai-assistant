@@ -351,3 +351,74 @@ describe("プロットからの新規の人物案（設計書6.4.9）", () => {
     expect(state.discard).toHaveBeenCalledWith("pending/new_澪.json");
   });
 });
+
+/**
+ * **プロット・相談から来た「既存人物の更新案」**（設計書6.4.9・6.72）。
+ *
+ * 積むところ（plot.md の保存・「相談を資料へ反映」）は
+ * `plotCharacterSyncSave.test.ts`・`chatSettingsSync.test.ts` が見ている。
+ * ここでは積んだあと——「更新分を反映」で**出どころの印つきで並び**、
+ * **承認するまで資料が変わらず、承認すると紹介が変わる**ことを見る
+ * （実機確認リスト F-72・F-77 の代わり）。
+ */
+describe("プロット・相談から来た既存人物の更新案", () => {
+  beforeEach(() => {
+    state.pending = [];
+    state.pendingErrors = [];
+    state.characters = [];
+    state.loadErrors = [];
+    state.saveOrUpdate.mockClear();
+    state.save.mockClear();
+    state.discard.mockClear();
+    window.showInformationMessage = (async () =>
+      undefined) as typeof window.showInformationMessage;
+  });
+
+  /** 既存の「灯」の紹介を書き換える案 */
+  function update(source: "plot" | "chat"): Record<string, unknown> {
+    return {
+      character: character("char_001", "灯", "幽霊の見える高校生"),
+      filePath: `pending/char_001_${source}.json`,
+      source,
+    };
+  }
+
+  test.each([
+    ["plot", "プロットから：紹介を変更"],
+    ["chat", "相談から：紹介を変更"],
+  ] as const)("%s から来た案は「%s」の印で並ぶ", async (source, label) => {
+    state.characters = [character("char_001", "灯", "主人公")];
+    state.pending = [update(source)];
+
+    const { panel, captured } = fakePanel();
+    await applyPendingCharacterUpdates(work, panel as never);
+
+    expect(captured.items).toHaveLength(1);
+    expect(captured.items[0].source).toBe(label);
+  });
+
+  test.each(["plot", "chat"] as const)(
+    "%s から来た案は、承認するまで資料を変えず、承認すると紹介が変わる",
+    async (source) => {
+      state.characters = [character("char_001", "灯", "主人公")];
+      state.pending = [update(source)];
+
+      const { panel, captured } = fakePanel();
+      await applyPendingCharacterUpdates(work, panel as never);
+
+      // 並べただけでは何も保存しない
+      expect(state.saveOrUpdate).not.toHaveBeenCalled();
+      expect(state.save).not.toHaveBeenCalled();
+
+      const result = await captured.apply!(`pending/char_001_${source}.json`);
+
+      expect(result.ok).toBe(true);
+      expect(state.saveOrUpdate).toHaveBeenCalledTimes(1);
+      expect(state.save).not.toHaveBeenCalled();
+      const saved = state.saveOrUpdate.mock.calls[0][0];
+      expect(saved.id).toBe("char_001");
+      expect(saved.summary).toBe("幽霊の見える高校生");
+      expect(state.discard).toHaveBeenCalledWith(`pending/char_001_${source}.json`);
+    }
+  );
+});

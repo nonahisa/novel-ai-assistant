@@ -213,6 +213,33 @@ describe("本文の感想", () => {
     idleMs: idle,
   };
 
+  /**
+   * **目標を達成した日は、感想より先に祝う**（設計書6.21.4。実機確認リスト
+   * F-81 の代わり）。下の試験は承認待ち・誤字脱字との順しか見ていないので、
+   * 祝いと重なったときを別に見る。祝ったあと（言い終えた日）は感想へ回る
+   * ことも見る——「祝える日は感想を出さない」だけの実装を通さないため。
+   */
+  test("目標の達成と重なったら、祝いが先。祝い終えたら感想へ回る", () => {
+    // 節目（1,000字〜）の祝いと混ざらないよう、節目の手前で目標に届いた日にする
+    const reached = {
+      ...wrote,
+      writtenToday: 600,
+      dailyGoal: 500,
+      saidToday: new Set(["idleTypos"]),
+    };
+
+    expect(decideChatter(state(reached))?.kind).toBe("goalReached");
+
+    // 祝いを言い終えた日は、感想を取りに行く
+    const afterCheer = decideChatter(
+      state({
+        ...reached,
+        saidToday: new Set(["idleTypos", "goalReached"]),
+      })
+    );
+    expect(afterCheer?.kind).toBe("commentRequest");
+  });
+
   test("ほかに言うことが無いときだけ取りに行く", () => {
     // **祝いも申し出も、データに基づく確かな発言である。**
     // AIの感想は当たり外れがあるので、確かなものを差し置いて出さない
