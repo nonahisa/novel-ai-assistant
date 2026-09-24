@@ -463,6 +463,7 @@ import {
   refreshWriterProfileMirror,
 } from "./features/adviceProfileMirror";
 import { startWindowCard } from "./features/windowCard";
+import { startLocalAiGate } from "./features/localAiGate";
 import { startNoticeRecorder } from "./features/noticeRecorder";
 import { startWorksSnapshot } from "./features/worksSnapshot";
 import {
@@ -2579,6 +2580,13 @@ export async function activate(
     context.subscriptions.push(windowCard);
     closeWindowCard = windowCard.close;
   }
+
+  // ─── 手元のAIの重複起動の見張り（設計書6.76.1・6.76.2。作者の依頼 2026-09-25） ───
+  // 別の窓・開発ホスト・MCP サーバーと、保管庫の札で順番を取る。札が空いて
+  // いるのに GPU が忙しければ、管理の外の負荷として警告する。
+  // ブラウザ版では動かさない（手元のAIを使わない）
+  const localAiGateHandle = startLocalAiGate(context);
+  if (localAiGateHandle) context.subscriptions.push(localAiGateHandle);
 
   // ─── 登録簿の写し（MCP の works.list。作者の承認 2026-09-24） ───
   // 登録簿は globalState にあって外から読めないので、起動時と変わるたびに

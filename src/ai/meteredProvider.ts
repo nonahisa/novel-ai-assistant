@@ -14,6 +14,8 @@ import { recordFeatureOutputTokens } from "../core/featureOutputTokens";
 import { endsInWhitespaceRunaway } from "../core/truncatedResponse";
 import { logStep } from "../core/logger";
 import { AiQueueAbortError, acquireCall } from "../core/aiSequence";
+import { localAiGate } from "../core/localAiGate";
+import { isLocalProviderId } from "../core/localProviders";
 import {
   type SpeedSource,
   modelTuning,
@@ -226,10 +228,17 @@ export class MeteredProvider implements AIProvider {
     // ここで待つのは**実送信のあいだだけ**である。上の `contextWindowOf`
     // はプロバイダによっては1往復するが、数ミリ秒なので関所の外に置いて、
     // 待たせる時間を短くしている
+    //
+    // **手元のAIは、その前にプロセスをまたいだ門を通る**（設計書6.76.1）。
+    // 順番は「実行の札 → 門 → 関所」。関所を持ったまま門で待つと、同じ窓の
+    // クラウドへの送信まで別の窓の完了を待たされる（関所は6社共通の1本）
+    let leaveLocalGate: (() => void) | undefined;
     let release: () => void;
     try {
+      leaveLocalGate = await this.enterLocalGate(params);
       release = await this.enterQueue(params.signal);
     } catch (error) {
+      leaveLocalGate?.();
       // 送っていないので、所要時間は0で残す。**順番待ちの長さを
       // AIの遅さとして記録しない**（overflow のときと同じ扱い）
       this.record(params, { elapsedMs: 0, error: describeError(error) });
@@ -244,6 +253,7 @@ export class MeteredProvider implements AIProvider {
         result = await this.inner.generate(params);
       } finally {
         release();
+        leaveLocalGate?.();
       }
       this.record(params, {
         usage: result.usage,
@@ -262,6 +272,40 @@ export class MeteredProvider implements AIProvider {
         error: describeError(error),
       });
       throw error;
+    }
+  }
+
+  /**
+   * 手元のAIへ送る前の、プロセスをまたいだ門（設計書6.76.1）。
+   *
+   * **クラウドは通さない**（取り合うメモリが無い）。門が差し込まれていない
+   * とき（単体テスト・ブラウザ版）も今までどおり送る。
+   *
+   * **門の失敗で送信を止めない。** 中止と作者の「やめる」だけを `aborted` として
+   * 通し、ほかの失敗はログに残して素通りする——順番待ちは「あればよいもの」で、
+   * これが壊れて執筆の道具が止まるほうが害が大きい。
+   */
+  private async enterLocalGate(
+    params: GenerateParams
+  ): Promise<(() => void) | undefined> {
+    if (!isLocalProviderId(this.inner.id)) return undefined;
+    const gate = localAiGate();
+    if (!gate) return undefined;
+    try {
+      return await gate.enter({
+        providerId: this.inner.id,
+        model: params.model,
+        feature: params.meta?.feature,
+        signal: params.signal,
+      });
+    } catch (error) {
+      if (error instanceof AiQueueAbortError) {
+        throw new AIError(error.message || "処理が中止されました。", "aborted");
+      }
+      logStep(
+        `手元のAIの順番待ち（ほかの窓との札）を確かめられなかったので、そのまま送ります：${describeError(error)}`
+      );
+      return undefined;
     }
   }
 

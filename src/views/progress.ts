@@ -79,6 +79,18 @@ export async function cancelRunningTask(): Promise<void> {
   if ("task" in picked) picked.task.source.cancel();
 }
 
+/**
+ * その合図（token）を持つ処理を、中止ボタンを押したのと同じように止める。
+ *
+ * 手元のAIの負荷の警告で作者が［やめる］を選んだとき（設計書6.76.2）に使う。
+ * **中止ボタンと同じ道で止める**——機能側は token の中止だけを「作者が止めた」と
+ * 読むので、別の形で止めると失敗として数えてしまう。見つからなければ何もしない。
+ */
+export function cancelTaskByToken(token: vscode.CancellationToken): void {
+  const task = activeTasks.find((entry) => entry.source.token === token);
+  task?.source.cancel();
+}
+
 /** activate から一度だけ呼び、戻り値を subscriptions に入れる */
 export function registerProgressCancelCommand(): vscode.Disposable {
   return vscode.commands.registerCommand(

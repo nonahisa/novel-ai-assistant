@@ -10,6 +10,7 @@ import { normalizeToolCalls, toolFollowUpMessages } from "../../ai/toolCalls";
 import type { AIToolCall } from "../../ai/types";
 import { localFetch } from "../../ai/fetchTimeouts";
 import { McpToolError, describeError } from "./shared";
+import { enterLocalAi } from "../localAiTurn";
 
 /**
  * 手元の Ollama へ投げる（設計書6.87.8 の4）／何が入っているかを見る
@@ -155,20 +156,30 @@ export async function ollamaGenerate(
   const endpoint = (input.endpoint ?? DEFAULT_ENDPOINT).replace(/\/+$/, "");
   assertLocalOrAllowed(endpoint, input.allowRemote);
 
+  /*
+    **ほかの窓・ほかの MCP サーバーと順番を取る**（設計書6.76.1）。拡張機能と
+    同じ保管庫の札を使う。道具の呼び出しの中なら最初の1回だけ取り、道具が
+    返るまで持つ（`mcp/localAiTurn.ts`）。札が使えなくても送る
+  */
+  const leave = await enterLocalAi(endpoint);
   const startedAt = Date.now();
   const messages: unknown[] = [
     { role: "system", content: input.systemPrompt },
     { role: "user", content: input.userPrompt },
   ];
 
-  const first = await postChat(endpoint, input, messages);
-  /*
-    **道具だけが返った手番を、失敗にしない**（製品の `ai/ollamaProvider.ts` と
-    同じ受け）。道具を呼んだ手番は本文が空なので、そのままだと
-    「応答に本文がありません」で測定が丸ごと落ちる。**往復は1回まで。**
-  */
-  const streamed =
-    (await answerToolCalls(endpoint, input, messages, first)) ?? first;
+  let streamed: StreamedChat;
+  try {
+    const first = await postChat(endpoint, input, messages);
+    /*
+      **道具だけが返った手番を、失敗にしない**（製品の `ai/ollamaProvider.ts` と
+      同じ受け）。道具を呼んだ手番は本文が空なので、そのままだと
+      「応答に本文がありません」で測定が丸ごと落ちる。**往復は1回まで。**
+    */
+    streamed = (await answerToolCalls(endpoint, input, messages, first)) ?? first;
+  } finally {
+    leave();
+  }
 
   if (!streamed.content) {
     throw new McpToolError("Ollama の応答に本文がありません。");

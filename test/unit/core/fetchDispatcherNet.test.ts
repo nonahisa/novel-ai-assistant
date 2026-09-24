@@ -70,6 +70,8 @@ const SHORT_ENDPOINTS: RegExp[] = [
   /\/api\/tags[`"']/,
   /\/api\/show[`"']/,
   /\/models[`"']/,
+  // 読み込み中のモデルを聞くだけ（手元のAIの負荷の見張り。設計書6.76.2）
+  /\/api\/ps[`"']/,
   // 手元のAIが起きているかを根元へ聞くだけ（otherLocalAi.ts）
   /new URL\(\s*"\/"\s*,/,
 ];

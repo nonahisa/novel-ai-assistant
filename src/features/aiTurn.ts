@@ -5,6 +5,19 @@ import {
   currentRunLabel,
 } from "../core/aiSequence";
 import { withCancellableProgress } from "../views/progress";
+import { localAiGate } from "../core/localAiGate";
+import { pushRunControl } from "./localAiRunControl";
+
+/**
+ * 一括処理の札を返したあと、手元のAIの門（設計書6.76.1）へ知らせる。
+ *
+ * 門は一括処理のあいだ、ほかの窓との札を**持ち続ける**（チャンクの合間ごとに
+ * 離すと、別の窓と交互に流れて読み込み直しが往復する）。札を返した瞬間は
+ * 門からは見えないので、ここから伝える。
+ */
+function notifyRunEnded(): void {
+  localAiGate()?.runEnded();
+}
 
 /**
  * まとまった一括処理の「実行の札」を取る口（設計書6.76）。
@@ -110,22 +123,30 @@ export async function withAiTurnProgress(
   ) => Promise<void>
 ): Promise<void> {
   await withCancellableProgress(title, async (progress, token) => {
-    // **もう持っているなら、取りにいかない**（自分の札を自分で待つ形を作らない）
-    if (options.alreadyHeld) {
-      await task(progress, token);
-      return;
-    }
-    const release = await takeTurn(options.label, signalOf(token), (message) =>
-      progress.report({ message })
-    );
-    if (!release) {
-      options.onCancelled?.();
-      return;
-    }
+    // 手元のAIの門が「別の窓の〜を待っています」をこの進捗へ出し、GPU の負荷の
+    // 警告で［やめる］を選ばれたらこの中止ボタンと同じ道で止めるため（6.76.2）
+    const popRunControl = pushRunControl(progress, token);
     try {
-      await task(progress, token);
+      // **もう持っているなら、取りにいかない**（自分の札を自分で待つ形を作らない）
+      if (options.alreadyHeld) {
+        await task(progress, token);
+        return;
+      }
+      const release = await takeTurn(options.label, signalOf(token), (message) =>
+        progress.report({ message })
+      );
+      if (!release) {
+        options.onCancelled?.();
+        return;
+      }
+      try {
+        await task(progress, token);
+      } finally {
+        release();
+        notifyRunEnded();
+      }
     } finally {
-      release();
+      popRunControl();
     }
   });
 }
@@ -165,5 +186,6 @@ export async function withAiTurn<T>(
     return await run();
   } finally {
     release();
+    notifyRunEnded();
   }
 }

@@ -1,0 +1,266 @@
+import { describe, expect, test } from "vitest";
+import {
+  GPU_BUSY_UTILIZATION_PERCENT,
+  LOAD_CHECK_INTERVAL_MS,
+  LOAD_WARNING_SNOOZE_MS,
+  LoadCheckSchedule,
+  externalLoadMessage,
+  judgeExternalLoad,
+  otherVramLimitMiB,
+  parseNvidiaSmi,
+  parseOllamaPs,
+  probeExternalLoad,
+  readOllamaPsWith,
+  type GpuSample,
+} from "../../../src/core/gpuLoad";
+
+/**
+ * 管理の外の負荷（設計書6.76.2）。閾値は 2026-09-25 に作者の機械
+ * （RTX 4060 Ti 8GB）で実測した値から決めた。**実測の数字をそのまま**
+ * 試験の入力にしている——何もしていないとき・Ollama の生成中・読み込み中。
+ */
+
+/** 実物の出力（依頼に貼られたもの） */
+const REAL_LINE = "NVIDIA GeForce RTX 4060 Ti, 5412 MiB, 8188 MiB, 14 %";
+
+function gpu(usedMiB: number, utilization: number): GpuSample {
+  return {
+    name: "NVIDIA GeForce RTX 4060 Ti",
+    memoryUsedMiB: usedMiB,
+    memoryTotalMiB: 8188,
+    utilizationPercent: utilization,
+  };
+}
+
+describe("nvidia-smi の出力の読み取り", () => {
+  test("実物の1行を読む", () => {
+    expect(parseNvidiaSmi(`${REAL_LINE}\r\n`)).toEqual([
+      {
+        name: "NVIDIA GeForce RTX 4060 Ti",
+        memoryUsedMiB: 5412,
+        memoryTotalMiB: 8188,
+        utilizationPercent: 14,
+      },
+    ]);
+  });
+
+  test("単位なし（nounits）・複数枚・名前の「,」・読めない行", () => {
+    const stdout = [
+      "GPU A, 100, 1000, 5",
+      "Weird, Name, 200, 2000, 50 %",
+      "GPU C, [N/A], 8188 MiB, [Not Supported]",
+      "",
+    ].join("\n");
+    const samples = parseNvidiaSmi(stdout);
+    expect(samples).toHaveLength(2);
+    expect(samples[0]).toMatchObject({ name: "GPU A", memoryUsedMiB: 100, utilizationPercent: 5 });
+    expect(samples[1]).toMatchObject({ name: "Weird, Name", memoryTotalMiB: 2000 });
+  });
+
+  test("空・エラー文は何も返さない", () => {
+    expect(parseNvidiaSmi("")).toEqual([]);
+    expect(parseNvidiaSmi("NVIDIA-SMI has failed because it couldn't communicate")).toEqual([]);
+  });
+});
+
+describe("Ollama の /api/ps の読み取り", () => {
+  test("読み込み中のモデルと GPU に載せた量", () => {
+    const models = parseOllamaPs({
+      models: [
+        { name: "gemma4:e4b", model: "gemma4:e4b", size: 3253731328, size_vram: 3253731328 },
+        { model: "x:1b", size_vram: "壊れた値" },
+      ],
+    });
+    expect(models).toEqual([
+      { name: "gemma4:e4b", sizeVramBytes: 3253731328 },
+      { name: "x:1b", sizeVramBytes: 0 },
+    ]);
+    expect(parseOllamaPs({ models: [] })).toEqual([]);
+    expect(parseOllamaPs({})).toBeUndefined();
+    expect(parseOllamaPs("x")).toBeUndefined();
+  });
+
+  test("聞けなければ undefined（止めない）", async () => {
+    const ok = await readOllamaPsWith(async () => ({
+      ok: true,
+      json: async () => ({ models: [{ name: "a", size_vram: 1 }] }),
+    }));
+    expect(ok).toEqual([{ name: "a", sizeVramBytes: 1 }]);
+    expect(
+      await readOllamaPsWith(async () => ({ ok: false, json: async () => ({}) }))
+    ).toBeUndefined();
+    expect(
+      await readOllamaPsWith(async () => {
+        throw new Error("繋がらない");
+      })
+    ).toBeUndefined();
+  });
+});
+
+describe("管理の外の負荷とみなすか（実測の数字で）", () => {
+  test("何もしていないとき（0%・1,032MiB）は騒がない。1回だけ跳ねた 20% でも騒がない", () => {
+    const judgement = judgeExternalLoad({
+      gpuSamples: [[gpu(1032, 0)], [gpu(1032, 20)], [gpu(1032, 0)]],
+      ollamaModels: [],
+      providerId: "ollama",
+    });
+    expect(judgement.external).toBe(false);
+    expect(judgement.reasons).toEqual([]);
+  });
+
+  test("ほかの使い手が生成している（68〜97%）なら、使用率で気づく", () => {
+    const judgement = judgeExternalLoad({
+      gpuSamples: [[gpu(5358, 97)], [gpu(5660, 68)], [gpu(5676, 96)]],
+      ollamaModels: [],
+      providerId: "ollama",
+    });
+    expect(judgement.external).toBe(true);
+    expect(judgement.reasons[0]).toBe("GPU の使用率が 96% です");
+  });
+
+  test("読み込み中（4,840MiB・/api/ps は空）はメモリで気づく", () => {
+    const judgement = judgeExternalLoad({
+      gpuSamples: [[gpu(4840, 0)], [gpu(4840, 4)], [gpu(4840, 20)]],
+      ollamaModels: [],
+      providerId: "ollama",
+    });
+    expect(judgement.external).toBe(true);
+    expect(judgement.reasons).toEqual([
+      "ほかのアプリが GPU のメモリを 4.7GB 使っています（全体 8.0GB）",
+    ]);
+  });
+
+  test("2026-09-25 朝の形（5,412MiB・14%・Ollama は空）も気づく", () => {
+    const [sample] = parseNvidiaSmi(REAL_LINE);
+    const judgement = judgeExternalLoad({
+      gpuSamples: [[sample], [sample], [sample]],
+      ollamaModels: [],
+      providerId: "ollama",
+    });
+    expect(judgement.external).toBe(true);
+  });
+
+  test("Ollama 自身が載せた分は「ほかのアプリ」から差し引く（前の実行の残り）", () => {
+    // 実測：こちらが載せた gemma4:e4b（文脈16,384）が残っているだけのとき、
+    // メモリ 5,261MiB に対し一覧の size_vram は 3,103MiB（実際より約1.1GB少ない）。
+    // 差し引いた 2,158MiB を「ほかのアプリ」と読んで騒がないこと
+    for (const [used, vram] of [
+      [5261, 3103],
+      [5149, 3063],
+    ]) {
+      const judgement = judgeExternalLoad({
+        gpuSamples: [[gpu(used, 0)], [gpu(used, 0)], [gpu(used, 0)]],
+        ollamaModels: [{ name: "gemma4:e4b", sizeVramBytes: vram * 1024 * 1024 }],
+        providerId: "ollama",
+      });
+      expect(judgement.external, `${used}MiB`).toBe(false);
+    }
+  });
+
+  test("札を取らない使い手が読み込んでいる途中は、一覧の申告が少なく「ほかのアプリ」に見える", () => {
+    // 実測（2026-09-25、別の担当が gemma4:26b を回していたとき）：メモリ 7,630MiB、
+    // 一覧は gemma4:26b の 881MiB だけ。差し引いても 6.7GB 残るので気づく
+    const judgement = judgeExternalLoad({
+      gpuSamples: [[gpu(7630, 0)], [gpu(7630, 0)], [gpu(7630, 0)]],
+      ollamaModels: [{ name: "gemma4:26b", sizeVramBytes: 881 * 1024 * 1024 }],
+      providerId: "ollama",
+    });
+    expect(judgement.external).toBe(true);
+  });
+
+  test("LM Studio へ送るときはメモリの線を使わない（こちらが載せた分を差し引けない）", () => {
+    const judgement = judgeExternalLoad({
+      gpuSamples: [[gpu(6000, 0)], [gpu(6000, 0)], [gpu(6000, 0)]],
+      ollamaModels: [],
+      providerId: "lmstudio",
+    });
+    expect(judgement.external).toBe(false);
+    expect(judgement.summary).toContain("LM Studio へ送るので見ない");
+  });
+
+  test("NVIDIA でなければ、Ollama の情報だけでは騒がない", () => {
+    const judgement = judgeExternalLoad({
+      gpuSamples: [],
+      ollamaModels: [{ name: "other:7b", sizeVramBytes: 5e9 }],
+      providerId: "ollama",
+    });
+    expect(judgement.external).toBe(false);
+    expect(judgement.summary).toContain("nvidia-smi なし");
+  });
+
+  test("線そのもの：使用率50%、メモリは「全体の37.5%」と3GBの大きいほう", () => {
+    expect(GPU_BUSY_UTILIZATION_PERCENT).toBe(50);
+    expect(otherVramLimitMiB(8188)).toBe(3072);
+    expect(otherVramLimitMiB(4096)).toBe(3072);
+    expect(otherVramLimitMiB(24576)).toBe(9216);
+  });
+
+  test("警告の本文は理由と、心当たりの例を並べる", () => {
+    const text = externalLoadMessage({
+      external: true,
+      reasons: ["GPU の使用率が 96% です"],
+      summary: "",
+    });
+    expect(text).toContain("GPU の使用率が 96% です。");
+    expect(text).toContain("LM Studio");
+  });
+});
+
+describe("測り方（nvidia-smi は3回まで、無ければ1回で諦める）", () => {
+  test("3回測って中央値で決める", async () => {
+    let calls = 0;
+    const outputs = [
+      "G, 1032 MiB, 8188 MiB, 90 %",
+      "G, 1032 MiB, 8188 MiB, 0 %",
+      "G, 1032 MiB, 8188 MiB, 0 %",
+    ];
+    const result = await probeExternalLoad("ollama", {
+      runNvidiaSmi: async () => outputs[calls++],
+      readOllamaPs: async () => [],
+      sleep: async () => undefined,
+    });
+    expect(calls).toBe(3);
+    expect(result.nvidiaSmiFound).toBe(true);
+    expect(result.external).toBe(false);
+  });
+
+  test("nvidia-smi が無ければ1回で諦める", async () => {
+    let calls = 0;
+    const result = await probeExternalLoad("ollama", {
+      runNvidiaSmi: async () => {
+        calls += 1;
+        return undefined;
+      },
+      readOllamaPs: async () => {
+        throw new Error("繋がらない");
+      },
+      sleep: async () => undefined,
+    });
+    expect(calls).toBe(1);
+    expect(result.nvidiaSmiFound).toBe(false);
+    expect(result.external).toBe(false);
+    expect(result.summary).toContain("Ollama の読み込みは不明");
+  });
+});
+
+describe("いつ見るか・警告をいつまで出さないか", () => {
+  test("札を新しく取ったときと、一定の間隔ごとだけ見る（毎チャンクでは見ない）", () => {
+    const schedule = new LoadCheckSchedule();
+    expect(schedule.due(0, true)).toBe(true);
+    schedule.checked(0);
+    expect(schedule.due(1_000, false)).toBe(false);
+    expect(schedule.due(LOAD_CHECK_INTERVAL_MS, false)).toBe(true);
+    expect(schedule.due(1_000, true)).toBe(true);
+  });
+
+  test("［このまま送る］のあとは、その実行の間と数分は出さない", () => {
+    const schedule = new LoadCheckSchedule();
+    schedule.snooze(0);
+    // 実行の間は、札を新しく取り直しても出さない（持ち続けているので取り直さないが念のため）
+    expect(schedule.due(LOAD_WARNING_SNOOZE_MS * 3, true)).toBe(false);
+    schedule.leaseDropped();
+    // 実行が終わっても、数分のうちは出さない
+    expect(schedule.due(LOAD_WARNING_SNOOZE_MS - 1, true)).toBe(false);
+    expect(schedule.due(LOAD_WARNING_SNOOZE_MS, true)).toBe(true);
+  });
+});

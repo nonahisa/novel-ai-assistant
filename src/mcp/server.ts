@@ -16,6 +16,12 @@ import {
   setExternalClientName,
 } from "./tools/accessLog";
 import { assertExternalAccessAllowed } from "./tools/permission";
+import { withLocalAiNotes, withLocalAiSession } from "./localAiTurn";
+import {
+  FEATURE_LABELS,
+  FEATURE_NAMES,
+  type FeatureName,
+} from "../core/mcpFeatures";
 import { setSamplingHost } from "./tools/sampling";
 import { WORK_SCAN_INPUT, workScan } from "./tools/workScan";
 import {
@@ -130,6 +136,21 @@ function fail(error: unknown, staleness?: BundleStaleness): CallToolResult {
 }
 
 /**
+ * 札に書く名乗り。`feature` のある道具は機能名（「誤字脱字の検知」）、
+ * ほかは道具の名前。**VS Code の窓の側では「外部AI（MCP）の「〜」」と出る。**
+ */
+function sessionLabel(name: string, args: unknown): string {
+  const feature =
+    typeof args === "object" && args !== null
+      ? (args as { feature?: unknown }).feature
+      : undefined;
+  if (typeof feature === "string" && (FEATURE_NAMES as readonly string[]).includes(feature)) {
+    return FEATURE_LABELS[feature as FeatureName];
+  }
+  return name;
+}
+
+/**
  * ツールの中身を1か所で包む。
  *
  * 包む用は3つある。
@@ -149,8 +170,8 @@ function fail(error: unknown, staleness?: BundleStaleness): CallToolResult {
 function tool<Args>(
   name: string,
   handler: (args: Args) => unknown | Promise<unknown>
-): (args: Args) => Promise<CallToolResult> {
-  return async (args: Args) => {
+): (args: Args, extra?: { signal?: AbortSignal }) => Promise<CallToolResult> {
+  return async (args: Args, extra?: { signal?: AbortSignal }) => {
     /*
       **まず許可を確かめる**（設計書6.87.10・6.87.14。作者の指示、2026-09-15／16）。
       既定は拒否で、作者が意思確認をしていない作品は1文字も読ませない。
@@ -167,9 +188,19 @@ function tool<Args>(
     }
 
     try {
-      const value = await handler(args);
+      /*
+        **手元の Ollama へ送るなら、ほかの窓と順番を取る**（設計書6.76.1）。
+        道具の呼び出し1回を1つの実行とみなし、最初に送るときに札を取って
+        返るまで持つ。送らない道具では何も起きない。待ったこと・管理外の
+        負荷の疑い・札が無いことは、結果に1行添える（止めない）
+      */
+      const { value, notes } = await withLocalAiSession(
+        sessionLabel(name, args),
+        extra?.signal,
+        async () => await handler(args)
+      );
       recordExternalAccess({ tool: name, args, ok: true });
-      return ok(withStaleNote(value, checkBundleStaleness()));
+      return ok(withStaleNote(withLocalAiNotes(value, notes), checkBundleStaleness()));
     } catch (error) {
       const result = fail(error, checkBundleStaleness());
       recordExternalAccess({
