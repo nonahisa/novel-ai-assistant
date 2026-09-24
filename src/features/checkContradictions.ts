@@ -43,6 +43,8 @@ import {
   describeMissedCharacters,
   mergeMissedCharactersByEpisode,
   promptVersionWithCarryOver,
+  promptVersionWithNarrator,
+  promptVersionWithStoryDates,
   CARRY_OVER_DEFAULT_CHAPTERS,
   CHARACTER_AS_OF_FIELDS,
   type CarryOverBody,
@@ -52,6 +54,12 @@ import {
   type RelevantOptions,
   type RelevantSettings,
 } from "../core/contradictionMaterial";
+import {
+  buildStoryDateSources,
+  describeStoryDates,
+  readStoryDates,
+  type StoryDate,
+} from "../core/storyCalendar";
 import { CharacterStore } from "../core/characterStore";
 import {
   createAbilityStore,
@@ -85,7 +93,9 @@ import {
   CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT,
   CONTRADICTION_CHECK_TEMPERATURE,
   CONTRADICTION_CHECK_VERSION,
+  CONTRADICTION_TOM_TOOLS,
   LIGHT_CATEGORIES,
+  replyToContradictionToolCall,
   type ContradictionCategory,
 } from "../prompts/contradictionCheck";
 import {
@@ -576,10 +586,31 @@ export async function checkContradictions(
   const carryOverChapters =
     options.carryOverChapters ?? CARRY_OVER_DEFAULT_CHAPTERS;
   const carryOverBodies = carryOverBodiesOf(episodeSources);
+  /*
+    **作中の日付**（設計書6.10.9）。**作品ぜんぶで1回だけ読む。**
+
+    本文とあらすじに書かれた「十月三日」のような表記をコードで読み取り、
+    日数の差まで数えておく——**引き算はAIにさせない**（26bでも27bでも
+    3回とも見逃した仕込みがある）。読み取れなければ空の並びで、
+    これまでと1文字も変わらない材料が送られる。
+  */
+  const storyDates: StoryDate[] = readStoryDates(
+    buildStoryDateSources(settings.synopsisTexts, carryOverBodies)
+  );
+  /** チャンクごとの日付の欄。鍵を決めるときと送るときで、同じものを使う */
+  const storyDatesByChunk = new Map<string, string>();
   /** チャンクごとの引き継ぎ。鍵を決めるときと送るときで、同じものを使う */
   const carryOverByChunk = new Map<string, CarryOverResult>();
   /** チャンクごとの「直前の1話」。**材料には入らない**（数えるためだけ） */
   const previousBodyByChunk = new Map<string, string>();
+  /**
+   * チャンクごとの材料。**鍵を決めるときと送るときで、同じものを使う**
+   * （`pastScenesFor`・`carryOverFor` と同じ理由）。
+   *
+   * 語り手（設計書6.10.6）が鍵にも文面にも効くようになったので、両方から
+   * 材料が要る——チャンクごとに二度組むと、作品の大きさぶんだけ無駄に効く
+   */
+  const materialByChunk = new Map<string, RelevantSettings>();
 
   // **設定が変われば、同じ本文でも答えが変わる。**
   // 材料のハッシュをキャッシュの鍵へ入れないと、設定を直したのに
@@ -1103,6 +1134,20 @@ export async function checkContradictions(
               maxOutputTokens: sendOutputTokens,
               plannedOutputTokens,
               jsonSchema: CONTRADICTION_CHECK_SCHEMA as unknown as object,
+              /*
+                **道具として渡す**（`prompts/contradictionCheck.ts`）。
+
+                呼ばせるためではなく、**説明をモデルの道具一覧へ常に載せる**
+                ため。呼ばれなくても読まれることで効く（unused-tool 効果）。
+                プロンプト本文の段（書かせる場）とは役が違うので、両方置く。
+
+                **道具に対応していないプロバイダは黙って無視する**ので、
+                Ollama 以外へ回ってもこれまでどおり動く。
+              */
+              tools: CONTRADICTION_TOM_TOOLS,
+              // 道具だけを呼んだ手番は本文が空になる。受けが無いと
+              // 「空の応答」で丸ごと落ちるので、1往復だけ受ける
+              onToolCall: replyToContradictionToolCall,
               disableThinking: true,
               signal: controller.signal,
               meta: {
@@ -1344,9 +1389,7 @@ export async function checkContradictions(
     //
     // **引き継ぎは人物を索引で見つけるためだけ**（設計書6.10.6）。
     // 引き継いだ本文そのものはプロンプトへ入らない
-    const relevant = settings.relevantFor(chunk.text, chunk.chapterStart, {
-      carryOverText: carryOverFor(chunk).text,
-    });
+    const relevant = materialFor(chunk);
     if (!relevant.hasAnything) return undefined;
 
     const bodyWithLines = withLineNumbers(chunk);
@@ -1370,6 +1413,16 @@ export async function checkContradictions(
       categories,
       futureFacts,
       pastScenes,
+      // **日付の引き算はこちらで済ませて渡す**（設計書6.10.9）。
+      // 読み取れなければ空文字で、欄そのものが出ない。
+      //
+      // **「あとで判明する事実」の向きには渡さない**（`pastScenes` と同じ）。
+      // あちらの鍵（`futureKeyBase`）には欄の印が付かないので、渡すと
+      // **同じ鍵に別の材料で得た答え**が入る
+      storyDates: mode === "future" ? "" : storyDatesFor(chunk),
+      // **地の文の「俺」が誰かを名指しする**（設計書6.10.6）。
+      // 決められなければ undefined で、欄そのものが出ない
+      narrator: relevant.narrator ?? undefined,
     });
     return { userPrompt, relevant, bodyWithLines, previousSynopses, pastScenes };
   }
@@ -1436,6 +1489,52 @@ export async function checkContradictions(
   }
 
   /**
+   * そのチャンクへ渡す、作中の日付の欄（設計書6.10.9）。無ければ空文字。
+   *
+   * **同じチャンクで二度組まない**（`carryOverFor` と同じ理由）。鍵を
+   * 決める段と、実際に送る段の2回要る。
+   *
+   * **その話より後の日付は渡さない**（設計書6.10.3。`synopsesBefore` と
+   * 同じ基準）。**話数の読めないチャンクでは欄を出さない**——どこまでが
+   * 「まだ分かっていないこと」かを決められないので、全部の日付を並べると
+   * 先の話の日付まで見せることになる。
+   */
+  function storyDatesFor(chunk: Chunk): string {
+    const remembered = storyDatesByChunk.get(chunk.hash);
+    if (remembered !== undefined) return remembered;
+
+    // **まとめたチャンクは、いちばん前の話に合わせる**（`carryOverFor` と同じ）
+    const described =
+      chunk.chapterStart === null
+        ? ""
+        : describeStoryDates(storyDates, chunk.chapterStart);
+    storyDatesByChunk.set(chunk.hash, described);
+    return described;
+  }
+
+  /**
+   * そのチャンクへ渡す材料（設計書6.10.3・6.10.6）。
+   *
+   * **同じチャンクで二度組まない**（`carryOverFor` と同じ理由）。鍵を決める
+   * 段（語り手が印になる）と、実際に送る段の2回要る。索引を引き直しても
+   * 同じ結果になるが、作品の大きさぶんだけ無駄に効く。
+   *
+   * **「落としたことを言う」ための呼び出しとは分ける。** あちらは
+   * `previousBodyText` を足して呼ぶので、返るものが違う（`missedCharacters`）。
+   */
+  function materialFor(chunk: Chunk): RelevantSettings {
+    const remembered = materialByChunk.get(chunk.hash);
+    if (remembered !== undefined) return remembered;
+
+    // **まとめたチャンクでは、いちばん前の話に合わせる**（設計書6.10.3）
+    const relevant = settings.relevantFor(chunk.text, chunk.chapterStart, {
+      carryOverText: carryOverFor(chunk).text,
+    });
+    materialByChunk.set(chunk.hash, relevant);
+    return relevant;
+  }
+
+  /**
    * そのチャンクの**直前の1話**の本文（設計書6.10.6「落としたことを言う」）。
    *
    * **材料には入らないし、鍵にも混ぜない。** 見るのは「物語の流れでは
@@ -1496,20 +1595,33 @@ export async function checkContradictions(
   }
 
   /**
-   * 渡した抜粋と、引き継いだ本文の内容を鍵に混ぜる（設計書6.74・6.10.6）。
+   * 渡した抜粋・引き継いだ本文・名指しした語り手を鍵に混ぜる
+   * （設計書6.74・6.10.6）。
    *
-   * **どちらも0件のときは混ぜない。** 混ぜると、何も足していないチャンクの
-   * 鍵まで変わり、これまで処理済みだったぶんが無駄に飛ぶ。
+   * **どれも無いときは混ぜない。** 混ぜると、何も足していないチャンクの
+   * 鍵まで変わり、これまで処理済みだったぶんが無駄に飛ぶ。**語り手の欄も
+   * 出る回と出ない回があるので、版ではなくここで区別する**（欄が出ない
+   * 作品の処理済みを道連れにしない）。
    */
   function keyWithPastScenes(base: CacheKeyBase, chunk: Chunk): CacheKeyBase {
     const scenes = pastScenesFor(chunk);
     const carried = carryOverFor(chunk);
-    if (!scenes && !carried.text) return base;
+    const narrator = materialFor(chunk).narrator;
+    // 日付の欄も出る回と出ない回があるので、版ではなくここで区別する
+    // （日付の読めない作品の処理済みを道連れにしない。6.10.9）
+    const dates = storyDatesFor(chunk);
+    if (!scenes && !carried.text && !narrator && !dates) return base;
     return {
       ...base,
-      promptVersion: promptVersionWithCarryOver(
-        promptVersionWithPastScenes(base.promptVersion, scenes),
-        carried.text
+      promptVersion: promptVersionWithStoryDates(
+        promptVersionWithNarrator(
+          promptVersionWithCarryOver(
+            promptVersionWithPastScenes(base.promptVersion, scenes),
+            carried.text
+          ),
+          narrator
+        ),
+        dates
       ),
     };
   }
@@ -1679,6 +1791,14 @@ interface SettingsMaterial {
   /** その設定が何話で分かるか。検証で使う（設計書6.10.5） */
   knownAtFor(value: string): string;
   synopsesBefore(chapter: number | null): string;
+  /**
+   * 話ごとのあらすじ（設計書6.10.9）。**作中の日付を読むのに要る。**
+   *
+   * `synopsesBefore` は「その話より前」を文面に組んだものなので、日付を
+   * 読む材料には使えない——**その話自身のあらすじ**に日付が書かれている
+   * ことが多い（台の第2話「十月三日、雨。」）。
+   */
+  synopsisTexts: readonly { chapter: number | null; synopsis: string }[];
 }
 
 /**
@@ -1825,6 +1945,9 @@ async function collectSettings(
         .map((item) => `第${item.chapter}話: ${item.synopsis}`)
         .join("\n");
     },
+    // **読み取りは呼ぶ側でやる**（設計書6.10.9）。ここはあらすじを渡すだけで、
+    // 日付を読むのは本文と一緒に1回だけ（作品ぜんぶで1度）
+    synopsisTexts: synopses,
   };
   // 能力・組織はまだ渡していない（引継ぎ書に残した）
   void abilitySystem;

@@ -262,6 +262,14 @@ export class SakuraProvider implements ApiKeyProvider {
   }
 
   async generate(params: GenerateParams): Promise<GenerateResult> {
+    /*
+      **`params.tools`（道具の定義）と `onToolCall` は、ここでは見ない。**
+
+      渡ってくるのは Ollama の形（`prompts/contradictionCheck.ts`）なので、
+      そのままでは送れない。知らない欄を送って要求ごと弾かれるより、黙って
+      無視して従来どおり答えさせるほうがよい——**道具は答えの質を上げる
+      添え物**で、本体はプロンプトの段のほうにある（無くても成り立つ）。
+    */
     const started = Date.now();
     const headers = await this.headers();
 

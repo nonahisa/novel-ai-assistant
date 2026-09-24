@@ -8,6 +8,7 @@ import {
   ModelInfo,
   inferTier,
 } from "./types";
+import { normalizeToolCalls, toolFollowUpMessages } from "./toolCalls";
 import { countByteFallback, decodeByteFallback } from "../core/byteFallback";
 import { readExpertCounts, type ModelExperts } from "../core/modelExperts";
 import { contextSizeForPrompt } from "../core/chunker";
@@ -183,7 +184,12 @@ interface ShowResponse {
 }
 
 interface ChatResponse {
-  message?: { content?: string; thinking?: string };
+  /**
+   * `tool_calls` は**形を検めずに `unknown` のまま持つ**（`durations` と同じ考え）。
+   * 中身を揃えるのは `ai/toolCalls.ts` の `normalizeToolCalls` の仕事で、
+   * ここで厳しく見ると、読めない1件のために応答ごと捨てることになる。
+   */
+  message?: { content?: string; thinking?: string; tool_calls?: unknown };
   done_reason?: string;
   prompt_eval_count?: number;
   eval_count?: number;
@@ -547,6 +553,16 @@ export class OllamaProvider implements AIProvider {
       // Ollamaの構造化出力。スキーマを渡すとJSON形式を強制できる
       body.format = params.jsonSchema;
     }
+    /*
+      **道具（tool）の定義**（`ai/types.ts` の `tools`）。
+
+      `format`（JSONスキーマの強制）と**同時に渡せる**ことは素の Ollama で
+      確かめてある。**空の配列は送らない**——「道具は無い」と明示する意味は
+      無く、渡し忘れと区別が付かない送り方をモデルに見せる理由も無い。
+    */
+    if (params.tools && params.tools.length > 0) {
+      body.tools = params.tools;
+    }
     // **流すか切るかを、思考の判定より先に決める。** 同じ式を2回書くと、
     // 片方だけ直したときに「流しているのに思考は切ったまま」へ戻る
     const streaming = willStreamChat(params);
@@ -555,6 +571,60 @@ export class OllamaProvider implements AIProvider {
       body.think = think;
     }
 
+    const first = await this.sendChat(body, params, streaming);
+    // 道具だけが返ったときの受け（1往復まで）。受け口が無ければ undefined
+    const second = await this.answerToolCalls(first, body, params, streaming);
+    const res = second ?? first;
+
+    // 珍しい漢字が `<0xE5><0x9B><0xAE>` のようなバイト表記のまま
+    // 返ることがある（実データで「囮」がそうなっていた）。
+    // ここで戻さないと、そのまま資料ファイルへ保存されてしまう
+    const raw = res.message?.content ?? "";
+    const text = decodeByteFallback(raw);
+    const repaired = countByteFallback(raw);
+    if (repaired > 0) {
+      logLine(`バイト表記のまま返った文字を ${repaired} 箇所戻しました。`);
+    }
+    if (!text.trim()) {
+      throw new AIError(
+        "AIから空の応答が返りました。",
+        "bad_response",
+        JSON.stringify(res).slice(0, 500)
+      );
+    }
+
+    return {
+      text,
+      thinking: res.message?.thinking,
+      usage: {
+        // **往復したぶんは足す**（送った量の記録は、実際に呼んだ回数ぶん
+        // 出す）。内訳の時間は最後の回のものを使う——2回ぶんの合計にすると、
+        // 「1回あたりどれだけ待つか」の目安として読めなくなる
+        inputTokens:
+          (first.prompt_eval_count ?? 0) +
+          (second ? (second.prompt_eval_count ?? 0) : 0),
+        outputTokens:
+          (first.eval_count ?? 0) + (second ? (second.eval_count ?? 0) : 0),
+        // 読み込みと書き出しの内訳。押す前の目安に使う（設計書6.8.19）
+        ...durationUsage(res),
+      },
+      truncated: res.done_reason === "length",
+      elapsedMs: Date.now() - started,
+    };
+  }
+
+  /**
+   * `/api/chat` へ1回投げて、応答の形とエラー欄まで見る。
+   *
+   * **道具の受けで2回投げるので、1回ぶんをここへ切り出した。** 同じ検査を
+   * 2か所へ書き写すと、片方だけ直したときに「1回目は弾くが2回目は素通り」
+   * という気づきにくい差ができる。
+   */
+  private async sendChat(
+    body: Record<string, unknown>,
+    params: GenerateParams,
+    streaming: boolean
+  ): Promise<ChatResponse> {
     let res: ChatResponse;
     try {
       /*
@@ -599,36 +669,83 @@ export class OllamaProvider implements AIProvider {
       }
       throw new AIError(res.error, "bad_response", res.error);
     }
+    return res;
+  }
 
-    // 珍しい漢字が `<0xE5><0x9B><0xAE>` のようなバイト表記のまま
-    // 返ることがある（実データで「囮」がそうなっていた）。
-    // ここで戻さないと、そのまま資料ファイルへ保存されてしまう
-    const raw = res.message?.content ?? "";
-    const text = decodeByteFallback(raw);
-    const repaired = countByteFallback(raw);
-    if (repaired > 0) {
-      logLine(`バイト表記のまま返った文字を ${repaired} 箇所戻しました。`);
+  /**
+   * 道具だけが返ったときに、**1往復だけ**受けてもう一度書かせる。
+   *
+   * モデルが道具を呼ぶと、その手番は本文が空で `tool_calls` だけになる。
+   * そのまま返すと「AIから空の応答が返りました」で機能ごと落ちるので、
+   * 道具に返事をして会話を続ける。
+   *
+   * **往復は1回まで。** 2回目も道具だけなら、そこで打ち切る——何度でも
+   * 受けると、道具を呼び続けるモデルに付き合って永久に終わらない。
+   *
+   * @returns 2回目の応答。往復しなかったときは `undefined`
+   */
+  private async answerToolCalls(
+    first: ChatResponse,
+    body: Record<string, unknown>,
+    params: GenerateParams,
+    streaming: boolean
+  ): Promise<ChatResponse | undefined> {
+    // **受け口を渡されたときだけ往復する**（渡さなければ従来どおり）。
+    // 本文が返っているなら、道具を呼んでいても受ける必要は無い
+    if (!params.onToolCall) return undefined;
+    if ((first.message?.content ?? "").trim()) return undefined;
+    const rawToolCalls = first.message?.tool_calls;
+    if (!Array.isArray(rawToolCalls) || rawToolCalls.length === 0) {
+      return undefined;
     }
-    if (!text.trim()) {
+    const calls = normalizeToolCalls(rawToolCalls);
+    if (calls.length === 0) return undefined;
+
+    logLine(
+      `Ollama：道具が呼ばれました（${calls
+        .map((call) => call.name)
+        .join("、")}）。返事をして、道具を外して書かせ直します`
+    );
+
+    const messages = Array.isArray(body.messages) ? body.messages : [];
+    const followUp: Record<string, unknown> = {
+      ...body,
+      messages: [
+        ...messages,
+        ...toolFollowUpMessages({
+          rawToolCalls,
+          calls,
+          reply: params.onToolCall,
+        }),
+      ],
+    };
+    /*
+      **2回目は道具を外す**（実測、2026-09-24）。
+
+      `qwen3.8-27b-cc` は返事を受け取っても `perspective_taking` を呼び続け、
+      **答え付きの台が全5チャンク失敗した。** `tool_choice: "none"` は素の
+      Ollama で無視されたので当てにできない。道具そのものを渡さなければ、
+      モデルには書く以外の手が無くなる。
+
+      **モデル名で分けない**（CLAUDE.md 規則6）。見るのは「道具だけが
+      返った」という振る舞いだけで、呼ばずに答えるモデル（gemma4 系）は
+      そもそもここへ来ない——1回目の定義が読まれる利点はそのまま残る。
+    */
+    delete followUp.tools;
+
+    const second = await this.sendChat(followUp, params, streaming);
+
+    if (!(second.message?.content ?? "").trim()) {
+      // **黙って空を返さない**（CLAUDE.md 規則5）。道具を外してなお本文が
+      // 無いのは道具とは別の不調なので、そうと分かる言い方で残す
+      logLine("Ollama：道具を外して投げ直しても、本文が返りませんでした");
       throw new AIError(
-        "AIから空の応答が返りました。",
+        "道具に返事をして投げ直しましたが、本文が返りませんでした。",
         "bad_response",
-        JSON.stringify(res).slice(0, 500)
+        JSON.stringify(second.message).slice(0, 500)
       );
     }
-
-    return {
-      text,
-      thinking: res.message?.thinking,
-      usage: {
-        inputTokens: res.prompt_eval_count ?? 0,
-        outputTokens: res.eval_count ?? 0,
-        // 読み込みと書き出しの内訳。押す前の目安に使う（設計書6.8.19）
-        ...durationUsage(res),
-      },
-      truncated: res.done_reason === "length",
-      elapsedMs: Date.now() - started,
-    };
+    return second;
   }
 
   /**
@@ -764,7 +881,12 @@ export class OllamaProvider implements AIProvider {
       );
 
       return {
-        message: { content: state.content },
+        message: {
+          content: state.content,
+          // **道具だけを呼んだ手番は本文が空になる。** ここで落とすと、
+          // 呼ばれたこと自体が受け取る側へ伝わらない
+          ...(state.toolCalls ? { tool_calls: state.toolCalls } : {}),
+        },
         done_reason: state.truncated ? "length" : "stop",
         error: state.error,
         eval_count: state.evalCount,
