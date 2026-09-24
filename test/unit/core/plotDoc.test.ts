@@ -279,6 +279,33 @@ describe("書き足しても、作者の文書の形を変えない", () => {
     expect(after).toContain("\r\n");
     expect(after).not.toMatch(/[^\r]\n/);
   });
+
+  test("差し替えた節と次の見出しのあいだの空行を消さない（0.86.2）", () => {
+    // 対話式プロット作成で雛形へ書くと「中身\n## テーマ」とくっついていた。
+    // 元の中身を空行ごと捨てていたため
+    const before = buildPlotMarkdown("作品", emptyPlotSections(), { hints: true });
+
+    const after = updatePlotMarkdown(
+      before,
+      { logline: "回線業者が最強の世界" },
+      { workTitle: "作品" }
+    );
+
+    expect(after).toContain("## ログライン\n回線業者が最強の世界\n\n## テーマ");
+  });
+
+  test("もともと空行が無ければ、足さない", () => {
+    // 作者が詰めて書いている文書の形も変えない
+    const before = "# 作品\n## ログライン\n旧\n## テーマ\nテーマ\n";
+
+    const after = updatePlotMarkdown(
+      before,
+      { logline: "新" },
+      { workTitle: "作品" }
+    );
+
+    expect(after).toBe("# 作品\n## ログライン\n新\n## テーマ\nテーマ\n");
+  });
 });
 
 describe("書き出し（テンプレート）", () => {

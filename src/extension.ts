@@ -3148,8 +3148,8 @@ export async function activate(
         await openPlotMode(context, work);
       }
     ),
-    // 対話でプロットを埋める（設計書6.4.7）。**AIに筋書きを作らせず、
-    // まだ書かれていない項目を1つずつ尋ねて引き出す**
+    // 対話でプロットを作る（設計書6.4.7。0.86.2 で問答に作り直した）。
+    // **作者の着想から、AIが1点ずつ候補を添えて尋ねる。決めるのは作者**
     registerCommand(
       "novelai.plotInterview",
       async (node?: WorkNode) => {

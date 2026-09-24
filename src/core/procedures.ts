@@ -112,8 +112,10 @@ export const PROCEDURES: readonly Procedure[] = [
       },
       {
         command: "novelai.plotInterview",
-        why: "空いている項目をAIが1つずつ尋ねる。筋書きを作らせるのではない",
-        check: "plot.md の項目が埋まる。決まっていない項目は飛ばしてよい",
+        // 0.86.2 で問答に作り直した（設計書6.4.7）。AIは候補を出し、決めるのは作者
+        why: "着想を書くと、AIが1点ずつ候補を添えて尋ねる。決めるのは作者",
+        // 「」はメニュー名を引くときだけに使う（`sceneGuide.test.ts`）。問答の札は括弧で
+        check: "問答の札（ここまでをプロットに書く）で plot.md に入る。問いは飛ばしてよい",
       },
       {
         command: "novelai.checkNames",

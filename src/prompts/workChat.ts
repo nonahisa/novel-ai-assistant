@@ -384,14 +384,6 @@ export interface WorkChatInput {
     /** 候補を選んだ元の件数。一部だけ見せていることを明記するため */
     availableTotal: number;
   };
-  /**
-   * いま対話で埋めようとしているプロットの項目（設計書6.4.7）。
-   *
-   * **これが無いと、書き込み先をAIが当てずっぽうで決める。** 対話で
-   * プロットを作るときは、作者の答えがどの項目のものかが決まっている。
-   * 決まっていることを推測させない。
-   */
-  plotFocus?: { heading: string; target: string; purpose: string };
   /** これまでのやり取り。古いものから順に */
   history: WorkChatTurn[];
   question: string;
@@ -415,22 +407,13 @@ export function buildWorkChatPrompt(input: WorkChatInput): string {
 
   blocks.push(`【いま開いている画面】\n${input.contextLabel}`);
 
-  // **対話でプロットを埋めているときは、書き込み先が決まっている**（6.4.7）。
-  // 決まっていることをAIに推測させない
-  if (input.plotFocus) {
-    blocks.push(
-      [
-        "【いま埋めている項目】",
-        `${input.plotFocus.heading}（${input.plotFocus.purpose}）`,
-        "",
-        "作者の返事は、この項目についての答えです。",
-        `書き込みを提案するときは target を "${input.plotFocus.target}" にしてください。`,
-        "**作者が言っていないことを足さないこと。** 言葉を整えるのはよいが、",
-        "設定や筋書きをこちらで作らないこと。足りないと感じたら、reply で聞き返してください。",
-        "答えがまだ出せない様子なら、無理に書き込みを提案せず、聞き方を変えてください。",
-      ].join("\n")
-    );
-  }
+  /*
+    0.86.1 まではここに【いま埋めている項目】（`plotFocus`）を足し、対話式
+    プロット作成を相談の上で動かしていた。決まった9項目を順に尋ねる形で、
+    選択肢の往復で止まった（作者の実機の報告、2026-09-24 夜）。**対話式
+    プロット作成は専用の問答（P-43、`prompts/plotDialogue.ts`）へ移した**ので、
+    相談の指示にはもう載せない（相談そのものの送る本文は変わらない）。
+  */
 
   if (input.excerpt.trim()) {
     const note = input.fromSelection

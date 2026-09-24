@@ -299,11 +299,21 @@ export function updatePlotMarkdown(
   const applied = new Set<PlotSectionKey>();
   /** いま差し替え中の節。中身の行は捨てて、新しい中身を1度だけ置く */
   let replacing: PlotSectionKey | undefined;
+  /*
+    差し替えた節の元の中身が、**空行で次の見出しと区切られていたか**（0.86.2）。
+
+    元の中身は空行ごと捨てるので、区切りの空行まで消えて「中身\n## 次の見出し」と
+    くっついていた（対話式プロット作成で雛形へ書くたびに起きた）。
+    **作者の文書の形を変えない**ので、区切りがあったときだけ1行戻す。
+  */
+  let droppedBlankTail = false;
 
   for (const line of lines) {
     const heading = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
     if (heading) {
+      if (replacing !== undefined && droppedBlankTail) out.push("");
       replacing = undefined;
+      droppedBlankTail = false;
       out.push(line);
 
       // 節の見出しは `##`。`#`（文書の題）や `###` 以下は節ではない
@@ -318,7 +328,10 @@ export function updatePlotMarkdown(
     }
 
     // 差し替え中の節の元の中身は捨てる
-    if (replacing !== undefined) continue;
+    if (replacing !== undefined) {
+      droppedBlankTail = line.trim() === "";
+      continue;
+    }
     out.push(line);
   }
 

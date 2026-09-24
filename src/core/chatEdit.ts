@@ -1,4 +1,5 @@
 import { PLOT_SECTIONS, type PlotSectionKey } from "./plotDoc";
+import { isPlaceholderContent } from "./plotInterview";
 
 /**
  * 相談パネルからの加筆修正（P-21の`edit`）の解釈。
@@ -45,7 +46,8 @@ export type ChatEditRejection =
   | "unknown_target"
   | "manuscript_not_allowed"
   | "empty_content"
-  | "too_long";
+  | "too_long"
+  | "placeholder_content";
 
 /** 1回の書き込みで受け付ける上限。丸ごと差し替えを防ぐ意味もある */
 const MAX_CONTENT_CHARS = 4_000;
@@ -75,6 +77,11 @@ export function parseChatEdit(
 
   if (!content) return { ok: false, reason: "empty_content" };
   if (content.length > MAX_CONTENT_CHARS) return { ok: false, reason: "too_long" };
+  // **案内文だけの書き込みは書かない**（0.86.2）。「（ここに最終決定した
+  // ログラインが入ります）」がそのままプロットへ書かれた（手元の gemma4:e4b）
+  if (isPlaceholderContent(content)) {
+    return { ok: false, reason: "placeholder_content" };
+  }
 
   // 本文を名指しされたら、はっきり断る（黙って無視すると原因が分からない）
   if (
@@ -174,6 +181,8 @@ export function describeChatEditRejection(reason: ChatEditRejection): string {
       return "書き込む内容が空でした。";
     case "too_long":
       return `一度に書き込める長さ（${MAX_CONTENT_CHARS}字）を超えています。`;
+    case "placeholder_content":
+      return "AIの書き込みが「ここに〜が入ります」のような案内だけだったので、書きませんでした。";
   }
 }
 
