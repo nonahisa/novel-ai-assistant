@@ -18,6 +18,7 @@ import {
   PLOT_WRITE_OPTION,
   PLOT_WRITE_SUMMARY_OPTION,
 } from "../../../src/core/plotInterview";
+import { PLOT_DIG_ON_OPTION, PLOT_FIELD_ORDER } from "../../../src/core/plotDialogueStyles";
 
 /**
  * 対話式プロット作成（設計書6.4.7。0.86.2 で作り直した）。
@@ -545,11 +546,16 @@ describe("対話式プロット作成（型）", () => {
     expect(h.prompts[3]).toContain("【結】");
 
     await h.reply("班長の正体が明かされる");
-    // 枠が尽きた：AIは呼ばず、締めの一言と「書く」「まとめる」「終える」だけ
+    // 枠が尽きた：AIは呼ばず、締めの一言と「続けて掘る」「書く」「まとめる」「終える」だけ
     expect(h.prompts).toHaveLength(4);
     const done = h.posted.filter((message) => message.type === "answer").pop();
     expect(done?.reply).toContain("起承転結の枠は、すべて尋ねました");
-    expect(done?.options).toEqual([PLOT_WRITE_OPTION, PLOT_SUMMARY_OPTION, PLOT_END_OPTION]);
+    expect(done?.options).toEqual([
+      PLOT_DIG_ON_OPTION,
+      PLOT_WRITE_OPTION,
+      PLOT_SUMMARY_OPTION,
+      PLOT_END_OPTION,
+    ]);
 
     await h.reply(PLOT_WRITE_OPTION);
     const outline = parsePlotMarkdown(readPlot()).sections.outline;
@@ -559,6 +565,92 @@ describe("対話式プロット作成（型）", () => {
     expect(outline).toContain("- 結：班長の正体が明かされる");
     // AIが言った書く先（世界観）へは書いていない
     expect(parsePlotMarkdown(readPlot()).sections.worldview).toBe("");
+  });
+
+  test("型に当てはめる：枠を埋め終えたら「続けて着想から掘る」で、決まったことを土台にAIが1点を選ぶ問答へ移る", async () => {
+    // 作者の裁定（2026-09-25 朝）：埋め終えたあと「書く・まとめる・終える」しか無かった
+    const h = harness([
+      turn({ topic: "導入", question: "起では何が起きますか？" }),
+      turn({ topic: "展開", question: "承では何が深まりますか？" }),
+      turn({ topic: "転換", question: "転では何が覆りますか？" }),
+      turn({ topic: "決着", question: "結ではどう決着しますか？" }),
+      turn({ topic: "班長の過去", question: "班長は業者に入る前、何をしていましたか？", section: "mainCharacters" }),
+      turn({ topic: "新人の弱み", question: "新人の弱みは何ですか？", section: "mainCharacters" }),
+    ]);
+
+    await h.panel.startPlotInterview(WORK);
+    await h.reply("型に当てはめる");
+    await h.reply("起承転結");
+    await h.reply(IDEA);
+    await h.reply("新人が初現場で配線を敷く");
+    await h.reply("配線が魔力を運ぶと分かる");
+    await h.reply("班長が深層へ一人で潜る");
+    await h.reply("班長の正体が明かされる");
+    expect(h.prompts).toHaveLength(4);
+
+    // 枠が尽きた：続けて掘る札が、書く・まとめる・終えるの前に出る
+    const done = h.posted.filter((message) => message.type === "answer").pop();
+    expect(done?.reply).toContain("起承転結の枠は、すべて尋ねました");
+    expect(done?.reply).toContain(`「${PLOT_DIG_ON_OPTION}」`);
+    expect(done?.options).toEqual([
+      PLOT_DIG_ON_OPTION,
+      PLOT_WRITE_OPTION,
+      PLOT_SUMMARY_OPTION,
+      PLOT_END_OPTION,
+    ]);
+
+    await h.reply(PLOT_DIG_ON_OPTION);
+    // 着想から掘る型の指示で、AIが1点を選ぶ（コードは枠も字数も割り込まない）
+    expect(h.prompts).toHaveLength(5);
+    expect(h.systems[4]).toContain("着想のいちばん強いところから");
+    expect(h.prompts[4]).toContain("# 問答の型\n着想から掘る");
+    expect(h.prompts[4]).toContain("型に当てはめる（起承転結）");
+    expect(h.prompts[4]).not.toContain("# 次に埋める枠");
+    expect(h.prompts[4]).not.toContain("# 次に尋ねる1点");
+    // 決まったことと、尋ねた問いの記録を引き継ぐ（同じ問いを繰り返さない）
+    expect(h.prompts[4]).toContain("- 【結】班長の正体が明かされる");
+    expect(h.prompts[4]).toContain("- 結：結ではどう決着しますか？");
+    expect(h.topics().pop()).toBe("班長の過去");
+    const next = h.posted.filter((message) => message.type === "answer").pop();
+    // いまどこかの印は出さない（AIが選ぶ型には終わりの数が無い）
+    expect(next?.reply).not.toContain("［起承転結");
+    expect(next?.options).toContain(PLOT_MORE_OPTION);
+
+    // 次の回からは、着想から掘る型の決まりどおり（字数がまだなのでコードが割り込む）
+    await h.reply("元は電力会社の保線員");
+    expect(h.prompts[5]).toContain("# 次に尋ねる1点（ここだけを尋ねる）\n【目標の文字数】");
+
+    await h.reply(PLOT_WRITE_OPTION);
+    const written = parsePlotMarkdown(readPlot()).sections;
+    expect(written.outline).toContain("- 結：班長の正体が明かされる");
+    expect(written.mainCharacters).toContain("班長の過去：元は電力会社の保線員");
+  });
+
+  test("項目を順に埋める：埋め終えたあとも「続けて着想から掘る」へ移れる", async () => {
+    const sections = emptyPlotSections();
+    // 最後の1項目（モチーフ）だけが空の作品
+    for (const key of PLOT_FIELD_ORDER) {
+      if (key !== "motif") sections[key] = `作者が書いた${key}`;
+    }
+    disk.set(PLOT_PATH, new TextEncoder().encode(buildPlotMarkdown(WORK.title, sections)));
+    const h = harness([
+      turn({ topic: "モチーフの話", question: "繰り返し出すものは何ですか？", section: "motif" }),
+      turn({ topic: "敵の動機", question: "敵はなぜ回線を切るのですか？", section: "mainCharacters" }),
+    ]);
+
+    await h.panel.startPlotInterview(WORK);
+    await h.reply("項目を順に埋める");
+    await h.reply(IDEA);
+    await h.reply("切れた回線の火花");
+    const done = h.posted.filter((message) => message.type === "answer").pop();
+    expect(done?.reply).toContain("プロットの項目は、すべて尋ねました");
+    expect(done?.options?.[0]).toBe(PLOT_DIG_ON_OPTION);
+
+    await h.reply(PLOT_DIG_ON_OPTION);
+    expect(h.prompts[1]).toContain("# 問答の型\n着想から掘る");
+    expect(h.prompts[1]).toContain("項目を順に埋める");
+    expect(h.prompts[1]).not.toContain("# 次に埋める項目");
+    expect(h.topics().pop()).toBe("敵の動機");
   });
 
   test("型に当てはめる：型を札で選ばずに書いたら、選び直してもらう（着想と取り違えない）", async () => {

@@ -5,8 +5,11 @@ import {
   NAME_ORIGINS,
   NAME_SUGGEST_HINTS,
   NAME_SUGGEST_SCHEMA,
+  buildNameSuggestSchema,
   parseNameSuggest,
+  parseNameSuggestAnswer,
 } from "../../../src/prompts/nameSuggest";
+import { planNameOrigin } from "../../../src/core/nameOriginFit";
 import {
   screenNameCandidates,
   type NameEntry,
@@ -25,6 +28,7 @@ describe("P-29 プロンプトの組み立て", () => {
     affiliation: "",
     existingNames: ["ミナ（みな）", "ミナモト（みなもと）"],
     setting: "中世風の王国",
+    plan: planNameOrigin({ existingNames: [], setting: "" }),
   };
 
   test("既存の名前と世界観を渡す", () => {
@@ -41,16 +45,49 @@ describe("P-29 プロンプトの組み立て", () => {
   });
 
   test("系統を指定すると、その系統だけを求める", () => {
-    const prompt = buildNameSuggestPrompt({ ...base, origin: "北欧" });
-    expect(prompt).toContain("北欧");
+    const prompt = buildNameSuggestPrompt({
+      ...base,
+      plan: planNameOrigin({ chosen: "北欧", existingNames: [], setting: "" }),
+    });
+    expect(prompt).toContain("【系統】\n北欧\n");
     expect(prompt).toContain("混ぜないこと");
+    // 作者が選んだときは、決めた根拠を添えない
+    expect(prompt).not.toContain("根拠");
+    expect(prompt).toContain("name はカタカナで書いてください");
   });
 
-  test("指定なしなら、既存の名前から1つ見立てさせる", () => {
-    const prompt = buildNameSuggestPrompt({ ...base, origin: undefined });
-    expect(prompt).toContain("指定なし");
+  test("指定なしで手がかりも無ければ、全部の系統から1つ見立てさせる", () => {
+    const prompt = buildNameSuggestPrompt(base);
+    expect(prompt).toContain("指定なし（決める手がかりが無い）");
     // 選べる系統を全部並べて、その中から1つを選ばせる
     for (const origin of NAME_ORIGINS) expect(prompt).toContain(origin);
+    expect(prompt).toContain("見立てた系統を先に origin に書き");
+    expect(prompt).toContain("英字（ローマ字）で書かないこと");
+  });
+
+  test("指定なしでも、コードが作品に合わせて決めた系統と根拠を渡す（作者の裁定 2026-09-25）", () => {
+    const kanji = buildNameSuggestPrompt({
+      ...base,
+      plan: planNameOrigin({ existingNames: ["三門太志", "密倉文佳", "春原月夜"], setting: "" }),
+    });
+    expect(kanji).toContain("【系統】\n和風（この作品に合わせて決めました。根拠：既にある人物名が漢字中心");
+    expect(kanji).toContain("name は漢字で書いてください");
+
+    const katakana = buildNameSuggestPrompt({
+      ...base,
+      plan: planNameOrigin({ existingNames: ["ジャック", "ケイン", "グレイ"], setting: "" }),
+    });
+    expect(katakana).toContain("指定なし（既にある人物名がカタカナ中心");
+    // カタカナで書く系統だけを並べる
+    expect(katakana).not.toContain("和風");
+    expect(katakana).toContain("架空語");
+  });
+
+  test("スキーマの系統は、コードが決めた選択肢に縛り、候補より先に名乗らせる", () => {
+    const schema = buildNameSuggestSchema(["和風"]);
+    expect(Object.keys(schema.properties)).toEqual(["origin", "candidates"]);
+    expect(schema.properties.origin.enum).toEqual(["和風"]);
+    expect(schema.properties.candidates.items.properties.origin.enum).toEqual(["和風"]);
   });
 
   test("指示語をなぞらないよう、同じ定数から釘を刺す", () => {
@@ -64,8 +101,20 @@ describe("P-29 プロンプトの組み立て", () => {
     // 任意にすると、地力の足りないモデルは埋めずに落とす
     const item = NAME_SUGGEST_SCHEMA.properties.candidates.items;
     expect(item.required).toEqual(["name", "reading", "origin", "note"]);
-    expect(NAME_SUGGEST_SCHEMA.required).toEqual(["candidates"]);
+    expect(NAME_SUGGEST_SCHEMA.required).toEqual(["origin", "candidates"]);
   });
+});
+
+test("答えの頭の系統も読み取る（無ければ空文字）", () => {
+  const answer = parseNameSuggestAnswer(
+    JSON.stringify({
+      origin: "ドイツ",
+      candidates: [{ name: "エルマー", reading: "えるまー", origin: "ドイツ", note: "" }],
+    })
+  );
+  expect(answer.origin).toBe("ドイツ");
+  expect(answer.candidates).toHaveLength(1);
+  expect(parseNameSuggestAnswer(response([])).origin).toBe("");
 });
 
 describe("応答の読み取り", () => {

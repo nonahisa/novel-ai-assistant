@@ -17,6 +17,7 @@ import {
   PLOT_WRITE_OPTION,
   PLOT_WRITE_SUMMARY_OPTION,
 } from "../../src/core/plotInterview";
+import { PLOT_DIG_ON_OPTION } from "../../src/core/plotDialogueStyles";
 import type { WorkEntry } from "../../src/models/types";
 
 /**
@@ -33,7 +34,8 @@ import type { WorkEntry } from "../../src/models/types";
  * - `PROBE_IDEA`：1通目に書く着想
  * - `PROBE_TURNS`：往復の数（既定 5）
  * - `PROBE_REPLIES`：「|」区切りで、往復ごとの返事を指定（空なら出た候補の1つ目を押す）。
- *   `@more`（ほかの案もほしい）・`@skip`（飛ばす）・`@2`（2つ目の候補を押す）も書ける
+ *   `@more`（ほかの案もほしい）・`@skip`（飛ばす）・`@2`（2つ目の候補を押す）・
+ *   `@dig`（型を埋め終えたあとの「続けて着想から掘る」）も書ける
  * - `PROBE_STYLE`：型の札（既定「着想から掘る」。設計書6.4.7「問答は『型の一つ』」）
  * - `PROBE_FRAME`：「型に当てはめる」のときの型（既定「起承転結」）
  * - `PROBE_SUMMARY`：1 なら最後に「決まったことをまとめる」→「このまとめでプロットに書く」
@@ -69,6 +71,7 @@ const RESERVED = [
   PLOT_SUMMARY_OPTION,
   PLOT_WRITE_SUMMARY_OPTION,
   PLOT_CONTINUE_OPTION,
+  PLOT_DIG_ON_OPTION,
 ];
 
 function log(text: string): void {
@@ -219,7 +222,9 @@ test(`対話式プロット作成を手元のAIで${TURNS}往復させる（${MO
           ? IDEA
           : wish === "@more"
             ? PLOT_MORE_OPTION
-            : wish === "@skip"
+            : wish === "@dig"
+              ? PLOT_DIG_ON_OPTION
+              : wish === "@skip"
               ? PLOT_SKIP_OPTION
               : /^@\d+$/u.test(wish)
                 ? candidates[Number(wish.slice(1)) - 1] ?? candidates[0] ?? PLOT_RETRY_OPTION
@@ -235,7 +240,9 @@ test(`対話式プロット作成を手元のAIで${TURNS}往復させる（${MO
       const answer = posted.slice(seen).find((m) => m.type === "answer");
       expect(answer, `往復${turn + 1}で答えが出ない`).toBeDefined();
       // ほかの案は同じ問い、確かめ直しは直前と同じ名前なので、繰り返しに数えない
-      const topic = /【(.+?)】/u.exec(answer?.reply ?? "")?.[1];
+      // 問いの【名前】は行頭にある。確かめ直しの文が「【起】…→【結】…」と
+      // 前の枠を引いても、それを問いに数えない（2026-09-25、e4b で実際に誤って数えた）
+      const topic = /^【(.+?)】/mu.exec(answer?.reply ?? "")?.[1];
       if (topic && !answer?.reply?.includes("のほかの案です") && topics[topics.length - 1] !== topic) {
         topics.push(topic);
       }

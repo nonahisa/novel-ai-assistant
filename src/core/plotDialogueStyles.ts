@@ -210,6 +210,30 @@ export const PLOT_FRAMES: readonly PlotFrame[] = [
 export const PLOT_FRAME_TOPIC = "型";
 
 /**
+ * コードが決める型（型に当てはめる・項目を順に埋める）で枠・項目を埋め終えた
+ * あと、**それまでに決まったことを土台に「着想から掘る」問答へ続ける札**。
+ *
+ * 作者の裁定（2026-09-25 朝）。埋め終えたときに「書く・まとめる・終える」しか
+ * 選べず、枠の外（人物の過去・敵の動機・目標の文字数など）を掘るには問答を
+ * 始め直すしかなかった。始め直すと決まったことも尋ねた問いの記録も捨てる
+ * （`startPlotInterview`）ので、**型だけを切り替えて記録は引き継ぐ**。
+ */
+export const PLOT_DIG_ON_OPTION = "続けて着想から掘る";
+
+/**
+ * 型を切り替えたときに、どの型から続けたかをAIへ言う名前
+ * （「型に当てはめる（起承転結）」）。枠で決めた出来事を「作者が決めた筋」と
+ * して読ませ、埋めた枠を尋ね直させないため
+ */
+export function describeContinuedFrom(
+  style: PlotDialogueStyle,
+  frame: PlotFrame | undefined
+): string {
+  const label = plotStyleDef(style).label;
+  return style === "structure" && frame ? `${label}（${frame.label}）` : label;
+}
+
+/**
  * 「項目を順に埋める」の順。**0.86.1 までの `PLOT_QUESTIONS` と同じ順**
  * （ログラインを先に置く。話を一言で言えると、テーマも世界観もそこから決まる）。
  * タイトル・形式・ジャンルは尋ねない（`PlotDialogueSection` に無い）。
@@ -383,20 +407,26 @@ export function hasTargetLength(
  * 2. どの型でも：`PLOT_LENGTH_ASK_AFTER` 問を尋ねても目標の文字数が決まって
  *    いなければ「目標の文字数」。**AIが自分で字数を尋ねていた（作者が飛ばした）
  *    なら割り込まない**——飛ばしたものをすぐまた尋ねない
+ * 3. **型を埋め終えて「着想から掘る」へ続けた直後の1問は割り込まない**
+ *    （`continuedAt`）。作者は「AIが次の1点を選ぶ問答」の札を押したので、
+ *    最初の1問から字数を尋ねると押した札と違うことが起きる。字数は次の問いで尋ねる
  *
  * 渡し方と検算は、コードが決める型（`nextFixedPoint`）と同じ道を通る
  * （名前と書く先はこちらのものを使う）。違うのは、並びを見せないことと、
  * 「［起承転結 2/4］」のような、いまどこかの印を出さないことだけ。
  *
  * @param writtenPlot プロットにすでに書いてあること（`describeWrittenPlot`）
+ * @param continuedAt 型を切り替えたときの、尋ねた問いの数（切り替えていなければ省く）
  */
 export function nextGuidedPoint(
   style: PlotDialogueStyle,
   asked: readonly PlotAskedPoint[],
   decisions: readonly PlotDecision[],
-  writtenPlot: string
+  writtenPlot: string,
+  continuedAt?: number
 ): PlotFixedPoint | undefined {
   if (plotStyleDef(style).fixed) return undefined;
+  if (continuedAt !== undefined && asked.length <= continuedAt) return undefined;
   const askedTopics = new Set(asked.map((point) => point.topic));
 
   if (style === "scene") {
@@ -492,11 +522,16 @@ export function describeFixedProgress(
   return `［${name} ${point.index}/${point.total}］`;
 }
 
-/** コードが決める型で、尋ねる枠・項目が尽きたときの一言（AIは呼ばない） */
+/**
+ * コードが決める型で、尋ねる枠・項目が尽きたときの一言（AIは呼ばない）。
+ * 続けて掘る札（`PLOT_DIG_ON_OPTION`）を先に言う——書く・終えるだけだと、
+ * 枠の外を掘るには始め直すしかないように読める
+ */
 export function describeFixedDone(style: PlotDialogueStyle, frame: PlotFrame | undefined): string {
   const what = style === "structure" ? `${frame?.label ?? "型"}の枠` : "プロットの項目";
   return [
     `${what}は、すべて尋ねました。`,
-    `「${PLOT_WRITE_OPTION}」で書くか、「${PLOT_END_OPTION}」で終えてください。`,
+    `まだ掘るなら「${PLOT_DIG_ON_OPTION}」を押してください。ここまでに決まったことを土台に、AIが次に決める1点を選んで尋ねます。`,
+    `「${PLOT_WRITE_OPTION}」で書くか、「${PLOT_END_OPTION}」で終えることもできます。`,
   ].join("\n");
 }

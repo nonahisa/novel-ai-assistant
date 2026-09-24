@@ -1,0 +1,295 @@
+import {
+  NAME_ORIGINS,
+  type NameCandidate,
+  type NameOrigin,
+} from "../prompts/nameSuggest";
+
+/**
+ * 名前の候補（P-29）の系統を、作品に合わせて揃える（設計書6.37.2）。
+ *
+ * **作者の裁定（2026-09-25 朝）**：系統の指定が無ければ、作品の世界観
+ * （設定資料・既存の人物名）に合わせて揃える。
+ *
+ * それまでは「指定なし」のとき、系統の見立てをAIに任せ、揃っているかを
+ * 確かめていなかった。測定（引継ぎ書8章「【測定】2026-09-25 深夜（2巡目）」）で、
+ * gemma4:e4b は1回の10件に7系統を混ぜ、gemma4:26b は外国系の名前を英字
+ * （Lukas・Friedrich）で返した。**頼むだけでは揃わない**（実装ルール3）。
+ *
+ * ## 何をコードが決めるか
+ *
+ * - **表記（漢字かカタカナか）はコードが決める。** 既にある人物名を数える
+ *   だけで分かり、AIの見立てより確かである
+ * - 系統が1つに決まるなら（漢字の作品は和風、世界観に「北欧」などと
+ *   はっきり書いてある）、**AIへは1つだけ渡す**
+ * - カタカナの作品で、どの国の響きかまでは数えても分からない。
+ *   **カタカナで書く系統だけを並べてAIに1つ選ばせ**、返ってきた候補の
+ *   系統が選んだものと揃っているかをコードで確かめて、外れたものを落とす
+ * - 英字の名前は、AIが付けたひらがなの読みからカタカナに直す
+ *   （読みが無ければ落とす）。**直したことは作者へ見せる**
+ *
+ * VS Code API に依存しない（MCP の束からも使う）。
+ */
+
+/** 名前の表記。漢字（ひらがなを含む）か、カタカナか */
+export type NameScript = "kanji" | "katakana";
+
+/** 系統をどう決めたか。AIへ渡す選択肢と、作者・AIへ見せる根拠 */
+export interface NameOriginPlan {
+  /** AIに選ばせる系統。1つに決まっていれば1件 */
+  choices: readonly NameOrigin[];
+  /** 名前の表記。決まらなければ undefined（AIが選んだ系統から決める） */
+  script?: NameScript;
+  /** 決めた根拠（「既にある人物名がカタカナ中心（カタカナ11・漢字4）」） */
+  basis: string;
+  /** 作者が系統を選んだか */
+  chosen: boolean;
+}
+
+/** 系統ごとの表記。朝鮮はどちらでも書かれるので決めない */
+export function scriptOfOrigin(origin: NameOrigin | undefined): NameScript | undefined {
+  if (origin === "和風" || origin === "中華") return "kanji";
+  if (origin === "朝鮮" || origin === undefined) return undefined;
+  return "katakana";
+}
+
+/** カタカナで書く系統（カタカナの作品で、AIに1つ選ばせるときの並び） */
+const KATAKANA_ORIGINS = NAME_ORIGINS.filter(
+  (origin) => scriptOfOrigin(origin) === "katakana"
+);
+
+/**
+ * 世界観にはっきり書いてあれば、その系統に決める印。
+ *
+ * **「〜風」などの言い切りだけを見る。** 「日本」「皇帝」のような語は、
+ * 異世界に転移した日本人の話や西洋風の帝国にも出るので印にしない。
+ */
+const ORIGIN_MARKERS: ReadonlyArray<readonly [NameOrigin, RegExp]> = [
+  ["和風", /和風|現代日本/u],
+  ["中華", /中華|古代中国/u],
+  ["朝鮮", /朝鮮風|韓国風/u],
+  ["英語圏", /英国風|イギリス風|アメリカ風/u],
+  ["ドイツ", /ドイツ風/u],
+  ["フランス", /フランス風/u],
+  ["北欧", /北欧/u],
+  ["イタリア・スペイン", /イタリア風|スペイン風/u],
+  ["スラブ", /スラブ|ロシア風/u],
+  ["アラビア", /アラビア風|アラブ風|中東風/u],
+];
+
+/** 系統までは決めないが、表記がカタカナだと分かる印 */
+const KATAKANA_WORLD = /西洋|ヨーロッパ|欧州/u;
+
+/**
+ * 既にある名前1つの表記。数えないものは undefined。
+ *
+ * - **「の」を含む呼び名は数えない**（「指輪の男」「宰相の側近」）。
+ *   役どころの呼び名で、作品の名前の系統を映さない
+ * - **カタカナが2字以上あればカタカナ**（「勇者アジャン」「精霊姫ナイン」も、
+ *   名前の部分はカタカナ）
+ * - ひらがなだけ（「おっさん」「おばあさん」）は呼び名のことが多いので数えない
+ */
+function scriptOfExistingName(name: string): NameScript | undefined {
+  const body = name.replace(/[\s・･＝=]/gu, "");
+  if (!body || body.includes("の")) return undefined;
+  const katakana = (body.match(/[\p{Script=Katakana}ー]/gu) ?? []).length;
+  if (katakana >= 2) return "katakana";
+  if (/\p{Script=Han}/u.test(body)) return "kanji";
+  return undefined;
+}
+
+/**
+ * 系統をどう決めるか。
+ *
+ * @param chosen 作者が選んだ系統（「指定なし」なら undefined）
+ * @param existingNames 既にある**人物**の名前（付け替える本人は除く）
+ * @param setting 世界観・舞台の節（`plot.md`）
+ */
+export function planNameOrigin(input: {
+  chosen?: NameOrigin;
+  existingNames: readonly string[];
+  setting: string;
+}): NameOriginPlan {
+  if (input.chosen) {
+    return {
+      choices: [input.chosen],
+      script: scriptOfOrigin(input.chosen),
+      basis: "作者が選んだ系統",
+      chosen: true,
+    };
+  }
+
+  let kanji = 0;
+  let katakana = 0;
+  for (const name of input.existingNames) {
+    const script = scriptOfExistingName(name);
+    if (script === "kanji") kanji++;
+    if (script === "katakana") katakana++;
+  }
+  const byNames: NameScript | undefined =
+    katakana > kanji ? "katakana" : kanji > katakana ? "kanji" : undefined;
+  const namesBasis =
+    byNames === "katakana"
+      ? `既にある人物名がカタカナ中心（カタカナ${katakana}・漢字${kanji}）`
+      : `既にある人物名が漢字中心（漢字${kanji}・カタカナ${katakana}）`;
+
+  /*
+    **世界観の印は、人物名の表記と食い違わないときだけ採る。** 書いてある
+    名前のほうが作品の実際で、世界観の一言は昔の構想のことがある
+  */
+  const marked = ORIGIN_MARKERS.filter(([, pattern]) => pattern.test(input.setting));
+  if (marked.length === 1) {
+    const [origin, pattern] = marked[0];
+    const script = scriptOfOrigin(origin);
+    if (byNames === undefined || script === undefined || script === byNames) {
+      const word = pattern.exec(input.setting)?.[0] ?? origin;
+      return {
+        choices: [origin],
+        script: script ?? byNames,
+        basis: `世界観に「${word}」とある`,
+        chosen: false,
+      };
+    }
+  }
+
+  if (byNames === "kanji") {
+    // 漢字の作品は和風に決める。中華・朝鮮の作品は、世界観にそう書くか作者が選ぶ
+    return { choices: ["和風"], script: "kanji", basis: namesBasis, chosen: false };
+  }
+  if (byNames === "katakana") {
+    return { choices: KATAKANA_ORIGINS, script: "katakana", basis: namesBasis, chosen: false };
+  }
+  if (KATAKANA_WORLD.test(input.setting)) {
+    return {
+      choices: KATAKANA_ORIGINS,
+      script: "katakana",
+      basis: "世界観が西洋風",
+      chosen: false,
+    };
+  }
+  return { choices: NAME_ORIGINS, basis: "決める手がかりが無い", chosen: false };
+}
+
+/** 候補を揃えた結果。**落としたもの・直したものは理由つきで残す**（黙って減らさない） */
+export interface FittedNameCandidates {
+  kept: NameCandidate[];
+  dropped: Array<{ candidate: NameCandidate; reason: string }>;
+  /** 英字からカタカナに直した名前 */
+  converted: Array<{ from: string; to: string }>;
+  /** 揃えた系統。決まらなければ undefined */
+  origin?: NameOrigin;
+}
+
+/** ひらがなをカタカナに（ゔ → ヴ も同じずらしで届く） */
+export function toKatakana(text: string): string {
+  return text.replace(/[ぁ-ゖ]/gu, (char) =>
+    String.fromCharCode(char.charCodeAt(0) + 0x60)
+  );
+}
+
+const LATIN = /\p{Script=Latin}/u;
+const KATAKANA_ONLY = /^[\p{Script=Katakana}ー・･＝=\s]+$/u;
+const HIRAGANA_READING = /^[\p{Script=Hiragana}ー・\s]+$/u;
+
+function isOrigin(value: string | undefined): value is NameOrigin {
+  return (NAME_ORIGINS as readonly string[]).includes(value ?? "");
+}
+
+/**
+ * 揃える系統を決める。1つに決まっていればそれ、AIが申告した系統が選択肢に
+ * あればそれ、無ければ候補の系統の多数（同数なら先に出たほう）。
+ */
+function decideOrigin(
+  candidates: readonly NameCandidate[],
+  plan: NameOriginPlan,
+  declared: string | undefined
+): NameOrigin | undefined {
+  if (plan.choices.length === 1) return plan.choices[0];
+  if (isOrigin(declared) && plan.choices.includes(declared)) return declared;
+  const counts = new Map<NameOrigin, number>();
+  for (const candidate of candidates) {
+    const origin = candidate.origin;
+    if (isOrigin(origin) && plan.choices.includes(origin)) {
+      counts.set(origin, (counts.get(origin) ?? 0) + 1);
+    }
+  }
+  let best: NameOrigin | undefined;
+  for (const [origin, count] of counts) {
+    // Map は入れた順に回るので、同数なら先に出た系統が残る
+    if (best === undefined || count > (counts.get(best) ?? 0)) best = origin;
+  }
+  return best;
+}
+
+/**
+ * 返ってきた候補の系統と表記を揃える（実装ルール3「AIの出力を信用しない」）。
+ *
+ * 1. 英字の名前は、ひらがなの読みからカタカナに直す（漢字の作品では落とす）
+ * 2. 系統の申告が揃える系統と違えば落とす。**申告が空なら系統では落とさない**
+ *    （表記だけで確かめる。空を外れと数えると、欄を書かないモデルで全部落ちる）
+ * 3. 表記が作品と違えば落とす（カタカナの作品に漢字、漢字の作品にカタカナ）
+ *
+ * @param declared AIが見立てた系統（答えの `origin`）
+ */
+export function fitNameCandidates(
+  candidates: readonly NameCandidate[],
+  plan: NameOriginPlan,
+  declared?: string
+): FittedNameCandidates {
+  const origin = decideOrigin(candidates, plan, declared);
+  const script = plan.script ?? scriptOfOrigin(origin);
+  const result: FittedNameCandidates = { kept: [], dropped: [], converted: [], origin };
+  const seen = new Set<string>();
+
+  for (const candidate of candidates) {
+    let name = candidate.name.trim();
+    if (LATIN.test(name)) {
+      if (script === "kanji") {
+        result.dropped.push({ candidate, reason: "英字の名前は、漢字の名前の並びと揃いません" });
+        continue;
+      }
+      const reading = candidate.reading.trim();
+      if (!reading || !HIRAGANA_READING.test(reading)) {
+        result.dropped.push({
+          candidate,
+          reason: "英字の名前で、ひらがなの読みも無いため、カタカナに直せません",
+        });
+        continue;
+      }
+      const converted = toKatakana(reading).replace(/\s+/gu, "・");
+      result.converted.push({ from: name, to: converted });
+      name = converted;
+    }
+
+    if (origin && candidate.origin && candidate.origin !== origin) {
+      result.dropped.push({
+        candidate,
+        reason: `系統が揃っていません（${candidate.origin}。この作品は${origin}で揃えます）`,
+      });
+      continue;
+    }
+    if (script === "katakana" && !KATAKANA_ONLY.test(name)) {
+      result.dropped.push({
+        candidate,
+        reason: "漢字・ひらがなを含む名前は、カタカナの名前の並びと揃いません",
+      });
+      continue;
+    }
+    if (script === "kanji" && /\p{Script=Katakana}/u.test(name)) {
+      result.dropped.push({
+        candidate,
+        reason: "カタカナを含む名前は、漢字の名前の並びと揃いません",
+      });
+      continue;
+    }
+    if (seen.has(name)) {
+      result.dropped.push({
+        candidate,
+        reason: "英字をカタカナに直すと、ほかの候補と同じ名前になります",
+      });
+      continue;
+    }
+    seen.add(name);
+    result.kept.push(name === candidate.name ? candidate : { ...candidate, name });
+  }
+  return result;
+}

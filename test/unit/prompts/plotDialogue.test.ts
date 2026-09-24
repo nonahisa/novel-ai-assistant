@@ -191,6 +191,52 @@ describe("作者側の材料", () => {
     expect(prompt).toContain("# 項目の順\nログライン → テーマ → 世界観");
     expect(prompt).toContain("# 次に埋める項目（ここだけを尋ねる）\n【ログライン】");
   });
+
+  it("型を埋め終えて着想から掘るへ続けたときは、元の型と、決まったことを土台にすることを言う", () => {
+    const prompt = buildPlotDialoguePrompt({
+      ...base,
+      continuedFrom: "型に当てはめる（起承転結）",
+      decisions: [{ topic: "結", answer: "班長の正体が明かされる", section: "outline" }],
+      asked: [{ topic: "結", question: "結ではどう決着しますか？", skipped: false }],
+    });
+    expect(prompt).toContain("# 問答の型\n着想から掘る\n\n# ここまでの流れ\n");
+    expect(prompt).toContain("作者は「型に当てはめる（起承転結）」で、決められた枠・項目をすべて埋め終えました");
+    expect(prompt).toContain("埋めた枠・項目を言い直す問いや、決まった筋と食い違う候補を出さないこと");
+    expect(prompt).toContain("（作者は「型に当てはめる（起承転結）」を埋め終え、この問答へ続けたところです）");
+    // 続けたあとの回は、直前の答えを渡す（流れの段は毎回付く）
+    const later = buildPlotDialoguePrompt({
+      ...base,
+      continuedFrom: "項目を順に埋める",
+      lastAnswer: { topic: "班長の過去", answer: "元は保線員" },
+    });
+    expect(later).toContain("# ここまでの流れ\n作者は「項目を順に埋める」で");
+    expect(later).toContain("# 作者の直前の答え\n【班長の過去】元は保線員");
+    // 続けていなければ、流れの段は出さない
+    expect(buildPlotDialoguePrompt(base)).not.toContain("# ここまでの流れ");
+  });
+
+  it("続けたときの段の言い回しは、検算の止める言葉に入っている", () => {
+    const prompt = buildPlotDialoguePrompt({ ...base, continuedFrom: "項目を順に埋める" });
+    expect(prompt).toContain("まだ決まっていない1点");
+    expect(prompt).toContain("作者が決めた筋");
+    const echo = validatePlotDialogueAnswer(
+      JSON.stringify({
+        mode: "ask",
+        confirm: "",
+        topic: "まだ決まっていない1点",
+        question: "まだ決まっていない1点を選んでください",
+        why: "話が広がります",
+        candidates: [
+          { text: "班長は元保線員", effect: "過去が効く" },
+          { text: "班長は元自衛官", effect: "戦いに強い" },
+          { text: "班長は元配信者", effect: "配信と繋がる" },
+        ],
+        section: "mainCharacters",
+      }),
+      { asked: [] }
+    );
+    expect(echo.ok).toBe(false);
+  });
 });
 
 describe("答えの形", () => {

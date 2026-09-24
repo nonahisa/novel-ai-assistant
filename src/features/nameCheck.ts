@@ -32,16 +32,21 @@ import {
 } from "../ai/outputLimit";
 import {
   buildNameSuggestPrompt,
+  buildNameSuggestSchema,
   NAME_ORIGINS,
   NAME_SUGGEST_COUNT,
-  NAME_SUGGEST_SCHEMA,
   NAME_SUGGEST_SYSTEM_PROMPT,
   NAME_SUGGEST_TEMPERATURE,
   NAME_SUGGEST_VERSION,
-  parseNameSuggest,
+  parseNameSuggestAnswer,
   type NameCandidate,
   type NameOrigin,
 } from "../prompts/nameSuggest";
+import {
+  fitNameCandidates,
+  planNameOrigin,
+  type NameOriginPlan,
+} from "../core/nameOriginFit";
 import { buildNameCheckPanelHtml } from "../views/nameCheckPanelHtml";
 import { withCancellableProgress } from "../views/progress";
 import { reportAIError } from "./reportAIError";
@@ -368,7 +373,12 @@ async function suggestNames(
 
   void panel.webview.postMessage({ type: "busy", id: characterId });
 
-  const material = await collectSuggestMaterial(work, character);
+  const material = await collectSuggestMaterial(
+    work,
+    character,
+    origin === "auto" ? undefined : origin
+  );
+  const plan = material.plan;
   let responseText: string | undefined;
   let failure: unknown;
 
@@ -381,7 +391,7 @@ async function suggestNames(
         logStep(
           `名前の候補を開始: ${work.title} / ${character.name} / ` +
             `${resolved.provider.displayName} / ${resolved.model} / ` +
-            `v${NAME_SUGGEST_VERSION}`
+            `v${NAME_SUGGEST_VERSION} / 系統 ${plan.choices.join("・")}（${plan.basis}）`
         );
         const response = await resolved.provider.generate({
           systemPrompt: NAME_SUGGEST_SYSTEM_PROMPT,
@@ -393,7 +403,7 @@ async function suggestNames(
             affiliation: character.affiliation ?? "",
             existingNames: material.existingNames,
             setting: material.setting,
-            origin: origin === "auto" ? undefined : origin,
+            plan,
           }),
           model: resolved.model,
           // 候補は広く出させる。当たり外れは作者が選ぶ（P-29）
@@ -410,7 +420,8 @@ async function suggestNames(
             resolved.model,
             "name_suggest"
           ),
-          jsonSchema: NAME_SUGGEST_SCHEMA as unknown as object,
+          // 選べる系統は、コードが決めた選択肢に縛る（`planNameOrigin`）
+          jsonSchema: buildNameSuggestSchema(plan.choices) as unknown as object,
           disableThinking: true,
           meta: { feature: "name_suggest", workFolder: work.folderPath },
           signal: controller.signal,
@@ -442,7 +453,8 @@ async function suggestNames(
     return;
   }
 
-  const parsed = parseNameSuggest(responseText);
+  const answer = parseNameSuggestAnswer(responseText);
+  const parsed = answer.candidates;
   if (parsed.length === 0) {
     // **応答の中身は捨てない。** 通知に出さなくても、ログには残す
     logFailure("名前の候補", {
@@ -452,35 +464,63 @@ async function suggestNames(
     await warnWithLog("名前の候補を読み取れませんでした。");
   }
 
-  const screened = screenNameCandidates(parsed, material.entries, {
+  /*
+    **系統と表記を先に揃え、残ったものの響きを見る**（作者の裁定、2026-09-25 朝）。
+    揃っていない候補を響きの判定に回しても、結局は選べない
+  */
+  const fitted = fitNameCandidates(parsed, plan, answer.origin);
+  const screened = screenNameCandidates(fitted.kept, material.entries, {
     excludeId: character.id,
   });
+  const dropped = [...fitted.dropped, ...screened.dropped];
 
   void panel.webview.postMessage({
     type: "candidates",
     data: {
       characterId,
       kept: screened.kept,
-      dropped: screened.dropped.map((entry) => ({
+      dropped: dropped.map((entry) => ({
         name: entry.candidate.name,
         reason: entry.reason,
       })),
     },
   });
 
+  if (fitted.converted.length > 0) {
+    logStep(
+      `名前の候補：英字の名前を読みからカタカナに直しました（${fitted.converted
+        .map((item) => `${item.from}→${item.to}`)
+        .join("・")}）`
+    );
+  }
   logNameSuggestEnd({
     failed: false,
     cancelled: false,
     kept: screened.kept.length,
-    dropped: screened.dropped.length,
+    dropped: dropped.length,
+    offOrigin: fitted.dropped.length,
   });
 
+  const notes: string[] = [];
+  if (fitted.dropped.length > 0) {
+    notes.push(
+      `${fitted.dropped.length}件は系統・表記が揃わないため` +
+        `（この作品は${fitted.origin ?? plan.choices.join("・")}で揃えます）`
+    );
+  }
   if (screened.dropped.length > 0) {
-    // 黙って減らさない。何件が何で落ちたのかは画面にも出るが、
-    // 通知でも一度伝える（画面の下のほうにあると気づかれない）
+    notes.push(`${screened.dropped.length}件は既にある名前と響きが重なるため`);
+  }
+  if (notes.length > 0 || fitted.converted.length > 0) {
+    // 黙って減らさない・黙って書き換えない。何件が何で落ちたのかは画面にも
+    // 出るが、通知でも一度伝える（画面の下のほうにあると気づかれない）
     vscode.window.showInformationMessage(
-      `候補 ${parsed.length}件のうち ${screened.dropped.length}件は、` +
-        "既にある名前と響きが重なるため落としました（理由は画面に出ています）。"
+      (notes.length > 0
+        ? `候補 ${parsed.length}件のうち、${notes.join("、")}落としました（理由は画面に出ています）。`
+        : "") +
+        (fitted.converted.length > 0
+          ? `英字で返った${fitted.converted.length}件は、読みからカタカナに直しました。`
+          : "")
     );
   }
 }
@@ -496,11 +536,15 @@ function logNameSuggestEnd(counts: {
   cancelled: boolean;
   kept: number;
   dropped: number;
+  /** 落としたうち、系統・表記が揃わなかったもの */
+  offOrigin?: number;
 }): void {
+  const offOrigin = counts.offOrigin ?? 0;
   logStep(
     `名前の候補を終了: ${counts.cancelled ? 0 : 1}/1（失敗 ${
       counts.failed ? 1 : 0
-    }件 / 候補 ${counts.kept}件 / 響きが重なって落とした ${counts.dropped}件` +
+    }件 / 候補 ${counts.kept}件 / 系統・表記が揃わず落とした ${offOrigin}件` +
+      ` / 響きが重なって落とした ${counts.dropped - offOrigin}件` +
       (counts.cancelled ? " / 中止された" : "") +
       "）"
   );
@@ -514,8 +558,8 @@ async function pickOrigin(): Promise<NameOrigin | "auto" | undefined> {
     origin: NameOrigin | "auto";
   }> = [
     {
-      label: "$(wand) 指定なし（作品の既存名から推定）",
-      detail: "いまある名前の並びから系統を1つ見立てて、その中だけで出します",
+      label: "$(wand) 指定なし（作品に合わせる）",
+      detail: "いまある人物名（漢字かカタカナか）と世界観から系統を決め、その1つに揃えます",
       origin: "auto",
     },
     ...NAME_ORIGINS.map((origin) => ({
@@ -539,11 +583,14 @@ interface SuggestMaterial {
   /** 衝突判定に使う元の一覧 */
   entries: NameEntry[];
   setting: string;
+  /** 系統の決め方（作者が選んだもの、または人物名と世界観からコードが決めたもの） */
+  plan: NameOriginPlan;
 }
 
 async function collectSuggestMaterial(
   work: WorkEntry,
-  character: Character
+  character: Character,
+  chosen: NameOrigin | undefined
 ): Promise<SuggestMaterial> {
   const [characters, abilities, locations, organizations] = await Promise.all([
     new CharacterStore(work).loadAll(),
@@ -566,7 +613,19 @@ async function collectSuggestMaterial(
       entry.reading ? `${entry.name}（${entry.reading}）` : entry.name
     );
 
-  return { existingNames, entries, setting: await readSetting(work) };
+  const setting = await readSetting(work);
+  /*
+    系統を決めるのは**人物の名前だけ**で数える（付け替える本人は除く）。
+    地名・組織・能力の名前は、人名と別の付け方をする作品がある
+  */
+  const plan = planNameOrigin({
+    chosen,
+    existingNames: characters.characters
+      .filter((entry) => entry.id !== character.id)
+      .map((entry) => entry.name),
+    setting,
+  });
+  return { existingNames, entries, setting, plan };
 }
 
 /**

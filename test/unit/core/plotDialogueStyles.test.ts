@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  PLOT_DIG_ON_OPTION,
+  describeContinuedFrom,
   describeFixedDone,
   describeFixedProgress,
   describePlotFrameChoice,
@@ -227,6 +229,30 @@ describe("コードが割り込む1点（AIが選ぶ型）", () => {
     expect(
       nextGuidedPoint("idea", three, [{ topic: "目標の文字数", answer: "長編で", section: "outline" }], "")
     ).toBeUndefined();
+  });
+
+  it("型を埋め終えて着想から掘るへ続けた直後の1問は割り込まず、次の問いから字数を尋ねる", () => {
+    const four = [ask("起"), ask("承"), ask("転"), ask("結")];
+    // 切り替えた直後（尋ねた数が切り替えたときのまま）は AI が選ぶ
+    expect(nextGuidedPoint("idea", four, [], "", 4)).toBeUndefined();
+    // 切り替えたあと1問尋ねたら、いつもの決まり（字数が決まっていなければ尋ねる）
+    expect(nextGuidedPoint("idea", [...four, ask("班長の過去")], [], "", 4)?.topic).toBe(
+      PLOT_LENGTH_TOPIC
+    );
+  });
+
+  it("続けたときの元の型の名前：型に当てはめるなら選んだ枠も添える", () => {
+    expect(describeContinuedFrom("structure", plotFrame("kishotenketsu"))).toBe(
+      "型に当てはめる（起承転結）"
+    );
+    expect(describeContinuedFrom("fields", undefined)).toBe("項目を順に埋める");
+  });
+
+  it("枠・項目が尽きたときの一言は、続けて掘る札を先に言う", () => {
+    const text = describeFixedDone("structure", plotFrame("johakyu"));
+    expect(text).toContain("序破急の枠は、すべて尋ねました");
+    expect(text.indexOf(PLOT_DIG_ON_OPTION)).toBeGreaterThan(0);
+    expect(text.indexOf(PLOT_DIG_ON_OPTION)).toBeLessThan(text.indexOf(PLOT_WRITE_OPTION));
   });
 
   it("コードが順を決める型（型に当てはめる・項目を順に埋める）では割り込まない", () => {

@@ -29,6 +29,8 @@ import {
   type PlotDialogueSection,
 } from "../core/plotInterview";
 import {
+  PLOT_DIG_ON_OPTION,
+  describeContinuedFrom,
   describeFixedDone,
   describeFixedProgress,
   describePlotFrameChoice,
@@ -495,6 +497,12 @@ interface PlotDialogueState {
   pending?: PlotFixedPoint;
   /** コードが決める型で、尋ねる枠・項目が尽きた */
   fixedDone?: boolean;
+  /**
+   * 型を埋め終えて「着想から掘る」へ続けた（`PLOT_DIG_ON_OPTION`）。
+   * `from` は元の型の名前（AIへ毎回言う）、`at` は切り替えたときの尋ねた問いの数
+   * （直後の1問はコードが割り込まない。`nextGuidedPoint`）
+   */
+  continued?: { from: string; at: number };
   /** 作者が最初に書いたこと（着想・場面・結末）。まだなら undefined、プロットから始めたときは空文字 */
   idea?: string;
   decisions: PlotDecision[];
@@ -3705,6 +3713,24 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       return;
     }
 
+    /*
+      **型を埋め終えたあと、「着想から掘る」へ続ける**（作者の裁定、2026-09-25 朝）。
+      型だけを切り替え、決まったこと・尋ねた問い・着想は引き継ぐ——始め直すと
+      記録を捨てるので、埋めた枠を尋ね直したり、決めた筋を忘れたりする
+    */
+    if (isOptionReply(reply, PLOT_DIG_ON_OPTION) && dialogue.fixedDone) {
+      dialogue.continued = {
+        from: describeContinuedFrom(dialogue.style, plotFrame(dialogue.frame)),
+        at: dialogue.asked.length,
+      };
+      dialogue.style = "idea";
+      dialogue.fixedDone = false;
+      dialogue.pending = undefined;
+      dialogue.current = undefined;
+      await this.requestPlotTurn(dialogue, reply, undefined, {});
+      return;
+    }
+
     if (isOptionReply(reply, PLOT_WRITE_OPTION)) {
       this.postAll({ type: "cancelled" });
       await this.writePlotSections(
@@ -3886,7 +3912,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         割り込んで決める**（2026-09-25 夜の実接続。頼むだけでは守られなかった）。
         渡し方・検算・問いを出せなかったときの扱いは、コードが決める型と同じ
       */
-      fixedPoint = nextGuidedPoint(style, dialogue.asked, dialogue.decisions, writtenPlot);
+      fixedPoint = nextGuidedPoint(
+        style,
+        dialogue.asked,
+        dialogue.decisions,
+        writtenPlot,
+        dialogue.continued?.at
+      );
       dialogue.pending = fixedPoint;
     }
 
@@ -3920,6 +3952,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           more: options.more,
           mayClarify: options.clarifyFor !== undefined,
           retryNote,
+          continuedFrom: dialogue.continued?.from,
         }),
       check: (text) => {
         const check = validatePlotDialogueAnswer(text, request);
@@ -4225,7 +4258,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       text: dialogue.current
         ? `続けるなら、【${dialogue.current.topic}】の問いに答えてください。`
         : dialogue.fixedDone
-          ? `終えるなら「${PLOT_END_OPTION}」を押してください。思いついたことを書けば、補足として残します。`
+          ? `まだ掘るなら「${PLOT_DIG_ON_OPTION}」、終えるなら「${PLOT_END_OPTION}」を押してください。思いついたことを書けば、補足として残します。`
           : "続けるなら、思いついたことを書くか、下の札を押してください。",
       options: this.plotDialogueOptions(dialogue),
     });
@@ -4250,7 +4283,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
             PLOT_SKIP_OPTION,
           ]
         : dialogue.fixedDone
-          ? []
+          ? // 埋め終えた。枠の外を掘るなら「着想から掘る」へ続けられる
+            [PLOT_DIG_ON_OPTION]
           : // コードが決めた・割り込んだ1点（枠・場面の3点・目標の文字数）は飛ばせる
             dialogue.pending
             ? [PLOT_RETRY_OPTION, PLOT_SKIP_OPTION]

@@ -62,8 +62,12 @@ import { PLOT_SECTIONS } from "../core/plotDoc";
  *   （場面の3点・目標の文字数。`nextGuidedPoint`）を「次に尋ねる1点」として
  *   渡し、それだけを尋ねさせる。「5つを超えても」の決まりから目標の文字数を
  *   外した（コードが尋ねる。2026-09-25 夜の実接続で、10本とも字数を尋ねなかった）
+ * - 1.4: 型に当てはめる・項目を順に埋めるで埋め終えたあと、「着想から掘る」へ
+ *   続けられるようにした（作者の裁定、2026-09-25 朝）。続けたあとは
+ *   「# ここまでの流れ」で、どの型を埋め終えたかと、決まったことを作者の決めた
+ *   筋として土台にすることを言う
  */
-export const PLOT_DIALOGUE_VERSION = "1.3";
+export const PLOT_DIALOGUE_VERSION = "1.4";
 
 /**
  * 温度。候補は広げる場なので、抽出より揺らす（相談と同じ 0.7）。
@@ -190,6 +194,11 @@ export interface PlotDialoguePromptInput {
   mayClarify?: boolean;
   /** 前の答えを受け取れなかったときの一言（`describeRetryNote`） */
   retryNote?: string;
+  /**
+   * 型を埋め終えて「着想から掘る」へ続けたときの、元の型の名前
+   * （`describeContinuedFrom`。「型に当てはめる（起承転結）」）。続けたあとは毎回渡す
+   */
+  continuedFrom?: string;
 }
 
 export function buildPlotDialoguePrompt(input: PlotDialoguePromptInput): string {
@@ -210,7 +219,24 @@ export function buildPlotDialoguePrompt(input: PlotDialoguePromptInput): string 
       : "（まだありません）";
   const last = input.lastAnswer
     ? `【${input.lastAnswer.topic}】${input.lastAnswer.answer}`
-    : `（作者は${def.seedTopic}を書いたところです）`;
+    : input.continuedFrom
+      ? `（作者は「${input.continuedFrom}」を埋め終え、この問答へ続けたところです）`
+      : `（作者は${def.seedTopic}を書いたところです）`;
+
+  /*
+    型を埋め終えて続けたときは、**枠で決めた出来事を作者の決めた筋として読ませる。**
+    言わないと、着想だけを見て枠の出来事と食い違う候補や、埋めた枠を言い直す
+    問いを出しうる（尋ねた問いの一覧だけでは、筋が決まっていることまでは伝わらない）
+  */
+  const continued = input.continuedFrom
+    ? [
+        "# ここまでの流れ",
+        `作者は「${input.continuedFrom}」で、決められた枠・項目をすべて埋め終えました。` +
+          "下の「ここまでに決まったこと」は作者が決めた筋です。それを土台に、まだ決まっていない1点を選んでください。" +
+          "埋めた枠・項目を言い直す問いや、決まった筋と食い違う候補を出さないこと。",
+        "",
+      ]
+    : [];
 
   // 型に当てはめる・項目を順に埋めるときは、全体の並びも見せる（前後のつながりのため）
   const outline: string[] = [];
@@ -256,6 +282,7 @@ export function buildPlotDialoguePrompt(input: PlotDialoguePromptInput): string 
     "# 問答の型",
     def.label,
     "",
+    ...continued,
     ...(outline.length > 0 ? [...outline, ""] : []),
     `# ${def.seedHeading}`,
     input.idea?.trim() || "（作者は、下のプロットに書いてあることから始めたいそうです）",
