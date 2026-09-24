@@ -129,6 +129,62 @@ describe("どれを知らせるか", () => {
     expect(knocks.map((knock) => knock.tool)).toEqual(["work.scan"]);
   });
 
+  it("**そのあと同じ組が通っていれば、もう出さない**（許可が出たあと。2026-09-24）", () => {
+    // 記録は新しい順。22:12 に断り、22:15 に許可されて通った
+    const knocks = pendingExternalAccessKnocks(
+      [
+        entry({
+          time: "2026-09-23T22:15:27.440Z",
+          tool: "schedule.milestones",
+          key: "schedule.milestones",
+          ok: true,
+          detail: "締切・発売日などの日付を読んだ",
+        }),
+        entry({
+          time: "2026-09-23T22:12:41.762Z",
+          tool: "schedule.milestones",
+          key: "schedule.milestones",
+        }),
+      ],
+      ""
+    );
+    expect(knocks).toEqual([]);
+  });
+
+  it("道具の中で失敗した回も、関所は越えているので答えが出ている", () => {
+    const knocks = pendingExternalAccessKnocks(
+      [
+        entry({ time: "2026-09-16T10:00:05.000Z", detail: "本文ファイルが見つかりません" }),
+        entry({ time: "2026-09-16T10:00:00.000Z" }),
+      ],
+      ""
+    );
+    expect(knocks).toEqual([]);
+  });
+
+  it("**通ったあとにまた断られたら、それは出す**（許可を取り消したあとなど）", () => {
+    const knocks = pendingExternalAccessKnocks(
+      [
+        entry({ time: "2026-09-16T10:00:09.000Z" }),
+        entry({ time: "2026-09-16T10:00:05.000Z", ok: true, detail: "" }),
+      ],
+      ""
+    );
+    expect(knocks.map((knock) => knock.at)).toEqual(["2026-09-16T10:00:09.000Z"]);
+  });
+
+  it("別の相手・別の道具が通っても、このノックの答えにはしない", () => {
+    const knocks = pendingExternalAccessKnocks(
+      [
+        entry({ time: "2026-09-16T10:00:05.000Z", tool: "work.scan", ok: true, detail: "" }),
+        entry({ time: "2026-09-16T10:00:04.000Z", client: "別のなにか", ok: true, detail: "" }),
+        entry({ time: "2026-09-16T10:00:00.000Z" }),
+      ],
+      ""
+    );
+    expect(knocks).toHaveLength(1);
+  });
+
   it("うまくいった記録は混ざらない", () => {
     const knocks = pendingExternalAccessKnocks(
       [entry({ ok: true, detail: "" }), entry({ tool: "work.scan" })],

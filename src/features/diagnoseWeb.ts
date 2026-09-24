@@ -229,7 +229,8 @@ async function appendWorkScan(lines: string[], base: string): Promise<void> {
     if (scan.kind === "collection") {
       lines.push("", "| 作品 | 設定ファイル |", "|---|---|");
       for (const w of scan.works) {
-        lines.push(`| ${w.title} | ${w.hasConfig ? "あり" : "なし"} |`);
+        // 題に縦棒が入っていても表の列がずれないよう、ほかの欄と同じく逃がす
+        lines.push(`| ${escapeCell(w.title)} | ${w.hasConfig ? "あり" : "なし"} |`);
       }
     } else if (scan.kind === "no_works") {
       // なぜ見つからないのかを、子フォルダーごとに出す
@@ -242,7 +243,7 @@ async function appendWorkScan(lines: string[], base: string): Promise<void> {
           if (name.startsWith(".")) continue;
           const child = path.join(base, name);
           lines.push(
-            `| ${name} | ${await mark(child, "本文")} | ${await mark(child, "設定")}` +
+            `| ${escapeCell(name)} | ${await mark(child, "本文")} | ${await mark(child, "設定")}` +
               ` | ${await mark(child, ".aiwriter")} |`
           );
         }

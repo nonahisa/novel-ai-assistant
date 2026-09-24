@@ -193,6 +193,8 @@ export interface ExternalAccessKnock {
  * （チャンクごとに1回）ので、畳まないと**数十回のポップアップ**になる。
  * 同じ組なら作者の判断も同じなので、まとめて1回尋ねれば足りる。
  *
+ * **そのノックより新しい「通った」回がある組は出さない**（許可が出たあと）。
+ *
  * @param since この時刻より後のものだけ。空なら全部（初めて見るとき）
  */
 export function pendingExternalAccessKnocks(
@@ -201,8 +203,21 @@ export function pendingExternalAccessKnocks(
 ): ExternalAccessKnock[] {
   const knocks: ExternalAccessKnock[] = [];
   const seen = new Set<string>();
+  /*
+    **あとで通った組は、もう答えが出ている**（2026-09-24、窓Bが処理済みの
+    ノックを出し直した件）。記録は新しい順に来るので、先に「通った」を
+    見た組の、それより古いノックは出さない——作者はそのあと許可しており、
+    「断りました」と出すと事実と違う。**別の機械で許可して通った回**も、
+    記録は同期で届くのでここで畳める（許可の印は同期しないので、印だけでは
+    分からない）。
+  */
+  const answered = new Set<string>();
   for (const entry of entries) {
-    if (!isExternalAccessKnock(entry)) continue;
+    if (!isExternalAccessKnock(entry)) {
+      // 道具の中で失敗した回（ok:false・別の理由）も、許可の関所は越えている
+      answered.add(JSON.stringify([entry.client, entry.key || entry.tool]));
+      continue;
+    }
     if (since && entry.time <= since) continue;
     /*
       **畳む単位は許可の鍵**（0.66.7）。道具の名前で畳むと、`novel.run` の
@@ -213,6 +228,7 @@ export function pendingExternalAccessKnocks(
     */
     const key = entry.key || entry.tool;
     const pair = JSON.stringify([entry.client, key]);
+    if (answered.has(pair)) continue;
     if (seen.has(pair)) continue;
     seen.add(pair);
     knocks.push({ client: entry.client, tool: entry.tool, key, at: entry.time });

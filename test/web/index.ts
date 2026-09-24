@@ -138,6 +138,15 @@ export async function run(): Promise<void> {
       `走査が通っていません（この行）: ${row}`
     );
 
+    // **表が崩れずに読めるか**（実機確認リストの「表が崩れずに読めるか」）。
+    // Markdown の表は、1行でも列の数がずれるとその行から下が表でなくなる。
+    // 見出しと区切りと各行の列の数が揃っていることを、表ごとに見る
+    const broken = brokenTableRows(text);
+    assert(
+      broken.length === 0,
+      `診断の表の列がずれています:\n${broken.join("\n")}`
+    );
+
     // ファイル操作（作る・書く・読む・消す）が全部通ったか。
     // ここが割れると、ブラウザ版では設定資料を保存できない
     assert(
@@ -591,6 +600,43 @@ async function expectWebviewContent(title: string, text?: string): Promise<void>
 }
 
 /** 診断の「まとめ」だけを取り出す。失敗したときの手がかりにする */
+/**
+ * 列の数が見出しと合わない表の行を返す（無ければ空）。
+ *
+ * 数えるのは**逃がしていない縦棒**だけ（`\|` は欄の中の文字）。表は
+ * 「| で始まる行が続くところ」とし、1行目を見出し、2行目を区切りと読む。
+ * 区切りが `|---|` の形でなければ、そこは表として組まれない（崩れている）。
+ */
+function brokenTableRows(text: string): string[] {
+  const cellCount = (line: string): number =>
+    line.replace(/\\\|/g, "").split("|").length - 2;
+  const broken: string[] = [];
+  let table: string[] = [];
+  const check = (): void => {
+    if (table.length === 0) return;
+    const [header, separator, ...rows] = table;
+    const width = cellCount(header);
+    if (!separator || !/^\|(\s*:?-+:?\s*\|)+$/.test(separator.trim())) {
+      broken.push(`区切りの行がない表: ${header}`);
+    } else if (cellCount(separator) !== width) {
+      broken.push(`区切りの列の数が見出しと違う: ${header} / ${separator}`);
+    }
+    for (const row of rows) {
+      if (cellCount(row) !== width) broken.push(`列の数が${width}でない: ${row}`);
+    }
+    table = [];
+  };
+  for (const line of text.split("\n")) {
+    if (line.trimStart().startsWith("|")) {
+      table.push(line.trim());
+    } else {
+      check();
+    }
+  }
+  check();
+  return broken;
+}
+
 function summaryOf(text: string): string {
   const index = text.indexOf("## まとめ");
   return index < 0 ? text.slice(-400) : text.slice(index, index + 600);

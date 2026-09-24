@@ -106,9 +106,17 @@ export async function askAboutKnock(
   if (!answer) return false;
 
   const store = new ExternalAccessPermissionStore(work);
+  /*
+    **許可したあとの知らせは待たない**（`void`。2026-09-24）。ボタン付きの
+    知らせは、作者が閉じるまで返事を返さない——右下から消えても通知の
+    一覧に残り、待ち続ける。ここで待つと、呼び出し側（見張り）が「見た」を
+    覚えるのがその先になり、**放っておいた窓では覚えが書かれないまま、
+    別の窓が同じノックを出し直した**。答えはモーダルで出ているので、
+    ここで返してよい。
+  */
   if (answer === "この道具だけ許可") {
     await store.allowTool(knock.client, knock.key);
-    await offerReview(
+    void offerReview(
       work,
       `${who} の「${what}」を許可しました。ほかの道具はまだ拒否のままです。`
     );
@@ -132,7 +140,7 @@ export async function askAboutKnock(
   );
   if (sure !== "全部許可する") return false;
   await store.allowTool(knock.client, ALL_TOOLS);
-  await offerReview(work, `${who} に全部の道具を許可しました。`);
+  void offerReview(work, `${who} に全部の道具を許可しました。`);
   return true;
 }
 

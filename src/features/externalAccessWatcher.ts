@@ -11,6 +11,8 @@ import {
   type ExternalAccessEntry,
 } from "../core/externalAccessLog";
 import { askAboutKnock } from "./externalAccessPermission";
+import { ExternalAccessPermissionStore } from "../core/externalAccessPermissionStore";
+import { isToolAllowed } from "../core/externalAccessPermission";
 
 /**
  * 外部AIのノックを見つけて、その場で作者に尋ねる（設計書6.87.14）。
@@ -39,6 +41,14 @@ import { askAboutKnock } from "./externalAccessPermission";
  * **数十回のポップアップ**になるので、**接続元と道具の組ごとに1回**へ畳む。
  * どこまで知らせたかは `globalState`（VS Code の持ち物。同期しない）に持つ
  * ——**この機械で知らせたかどうか**の話なので、作品と一緒に持ち運ばない。
+ *
+ * ## 答えの出たノックは出さない（2026-09-24）
+ *
+ * 窓Aで許可したノックが、あとで開いた窓Bでもう一度出た。**覚えに頼るだけ
+ * では足りない**ので、答えを3つの所から拾う——①覚え（この機械で見せた
+ * 時刻）②許可の印（いまその道具が通るか）③記録（そのノックより後に
+ * 同じ組が通った回があるか。別の機械で許可した分もここに届く）。
+ * 覚えは**モーダルに答えた直後**に書く（そのあとの知らせを待たない）。
  */
 
 /** どこまで知らせたかの覚え。作品の場所ごとに、最後に見た時刻を持つ */
@@ -86,11 +96,26 @@ export class ExternalAccessWatcher {
 
   private async check(work: WorkEntry): Promise<void> {
     if (this.asking) return;
-    const knocks = await this.unseenKnocks(work);
-    if (knocks.length === 0) return;
-
     this.asking = true;
     try {
+      const unseen = await this.unseenKnocks(work);
+      if (unseen.length === 0) return;
+      /*
+        **いまの許可の印で、もう通る道具は尋ねない**（2026-09-24、窓Bが
+        処理済みのノックを出し直した件）。窓Aで許可したあとに開いた窓でも、
+        覚え（`globalState`）が何かの理由で残っていなくても、**印を見れば
+        答えは出ている**。許可済みの道具に「断りました」と出すと、作者は
+        許可が効いていないと読む。
+      */
+      const permission = await new ExternalAccessPermissionStore(work).load();
+      const knocks = unseen.filter(
+        (knock) => !isToolAllowed(permission, knock.client, knock.key)
+      );
+      if (knocks.length === 0) {
+        await this.remember(work, unseen[0].at);
+        return;
+      }
+
       /*
         **いちばん新しいものを1件出す。** 続けて呼ばれたぶんは、
         接続元と道具が同じなら同じ判断になるので、まとめて1回尋ねる。
@@ -105,8 +130,9 @@ export class ExternalAccessWatcher {
         );
       }
       // **決めても決めなくても、見たことは覚える。** 覚えないと、
-      // ファイルが変わるたびに同じノックで尋ね続けることになる
-      await this.remember(work, knocks[0].at);
+      // ファイルが変わるたびに同じノックで尋ね続けることになる。
+      // 覚えるのは許可済みで飛ばした分も含めた、いちばん新しい時刻
+      await this.remember(work, unseen[0].at);
       if (decided) this.onChanged();
     } finally {
       this.asking = false;
