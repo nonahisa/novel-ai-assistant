@@ -27,9 +27,40 @@ export type CharacterRejectionReason =
   | "collective"
   | "ungrounded";
 
+/**
+ * 捨てたレコードの中身。**名前を決められなかった2つの理由のときだけ**持つ
+ * （`pronoun_name`・`descriptive_name`）。
+ *
+ * 一人称の作品では、語り手が自分の名前を名乗らないことがある。AIは外見や
+ * 性格まで読み取っていても「僕」「語り手」としか呼べず、レコードごと捨てられる。
+ * **捨てること自体は正しい**（「僕」という名前の人物が台帳に入ったら壊れる）が、
+ * 件数しか残らないと、作者には「認識していそうなのに増えない」としか見えない。
+ * そこで中身を持ち回し、完了報告へ添える（設計書6.10.6 の「落としたことを言う」）。
+ *
+ * ほかの理由（`ungrounded` など）には付けない。語り手の可能性があるのは
+ * この2つだけで、全部に付けると報告が騒がしくなり肝心の行が読まれなくなる。
+ *
+ * 項目を絞っているのは、**作者が「誰のことか」を見当できれば足りる**ためである。
+ */
+export interface RejectedCharacterDetails {
+  /** 紹介 */
+  summary?: string;
+  /** 役割 */
+  role?: string;
+  /** 外見 */
+  appearance?: string;
+  /** 性別 */
+  gender?: string;
+}
+
 export interface RejectedCharacterCandidate {
   name: string | null;
   reason: CharacterRejectionReason;
+  /**
+   * 捨てたレコードの中身。中身のある項目が1つも無ければ**付けない**
+   * （空の括弧が並ぶだけの報告にしないため）。
+   */
+  details?: RejectedCharacterDetails;
 }
 
 export interface AcceptedCharacterCandidate {
@@ -301,7 +332,7 @@ export function validateCharacterExtractResult(
     // 「僕」という人物レコードが作られた（実機確認A-18の2026-09-08）ので、
     // コードで弾く。捨てた件数と理由は完了報告に出す（黙って捨てない）
     if (isPronounName(character.name)) {
-      rejected.push({ name: character.name, reason: "pronoun_name" });
+      rejected.push(rejectedWithDetails(character, "pronoun_name"));
       continue;
     }
     // 説明的な名前（「主人公」「密倉の母親」）は、AIがその場で作った言い方で、
@@ -309,7 +340,7 @@ export function validateCharacterExtractResult(
     // 「仮の名前や説明的な名前を発明してレコードを作らない」と禁じているが
     // gemma4:26b でも返ってきた。**代名詞と同じく、理由付きで除外して報告に出す**
     if (isDescriptiveName(character.name)) {
-      rejected.push({ name: character.name, reason: "descriptive_name" });
+      rejected.push(rejectedWithDetails(character, "descriptive_name"));
       continue;
     }
     // 「兵士たち」のような集団名詞はモブとして残す。
@@ -1114,6 +1145,49 @@ function isDescriptiveName(name: string): boolean {
   const bare = normalizeSpacingOnly(name);
   if (!bare) return false;
   return DESCRIPTIVE_ROLES.has(bare) || DESCRIPTIVE_ROLES.has(stripHonorific(bare));
+}
+
+/**
+ * 名前を決められずに捨てたレコードを、**中身を添えて**記録する。
+ *
+ * 添えるのは `pronoun_name` と `descriptive_name` のときだけである
+ * （`RejectedCharacterDetails` に理由を書いた）。
+ */
+function rejectedWithDetails(
+  character: ExtractedCharacter,
+  reason: "pronoun_name" | "descriptive_name"
+): RejectedCharacterCandidate {
+  const details = narratorDetails(character);
+  return details
+    ? { name: character.name, reason, details }
+    : // 中身が無いときは項目ごと付けない。空の `details` が並ぶと、
+      // 受け取る側（報告・MCP）で「中身がある」と読み違える
+      { name: character.name, reason };
+}
+
+/**
+ * 捨てたレコードから、作者が「誰のことか」を見当できる項目だけを取り出す。
+ *
+ * 性格や口調まで載せないのは、**報告に並べるため**である。誰のことか
+ * 当たりが付けば足りるので、欄を増やすほど読まれなくなる。
+ */
+function narratorDetails(
+  character: ExtractedCharacter
+): RejectedCharacterDetails | undefined {
+  const details: RejectedCharacterDetails = {};
+  const fields: Array<
+    [keyof RejectedCharacterDetails, string | null | undefined]
+  > = [
+    ["summary", character.summary],
+    ["role", character.role],
+    ["appearance", character.appearance],
+    ["gender", character.gender],
+  ];
+  for (const [key, value] of fields) {
+    // 「（本文からは読み取れない）」のような不在文は空欄と同じ扱いにする
+    if (value && isMeaningfulValue(value)) details[key] = value.trim();
+  }
+  return Object.keys(details).length > 0 ? details : undefined;
 }
 
 /**

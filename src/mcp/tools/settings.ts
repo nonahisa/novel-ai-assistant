@@ -289,6 +289,15 @@ export interface SettingsValidateResult {
   /** 人物。`accepted` が取り出せたもの、`rejected` が検算で落ちたもの */
   characters: {
     accepted: unknown[];
+    /**
+     * 検算で落ちたもの（`{ name, reason }`）。
+     *
+     * 名前を決められずに落ちたもの（`pronoun_name`・`descriptive_name`）には、
+     * **そのレコードの中身が `details` に付く**。一人称の作品では語り手が
+     * 名前を名乗らず、AIが外見まで読み取っていても丸ごと落ちるので、
+     * 件数だけ返すと外から見ても「認識しているのに増えない」としか分からない
+     * （`missedCharacters` と同じ考え方で、外部AIにも黙らない）。
+     */
     rejected: unknown[];
     droppedSharedBodyAliases: unknown[];
     droppedTruncatedAliases: unknown[];

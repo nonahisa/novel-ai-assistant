@@ -1921,6 +1921,52 @@ describe("人物抽出フロー", () => {
     expect(showInformationMessage.mock.calls.at(-1)?.[0]).toContain(
       "AI出力から除外 1 件"
     );
+    // 「先生」は語り手ではないので、語り手の断り書きは出さない
+    // （毎回出る断り書きは読まれなくなる）
+    expect(showInformationMessage.mock.calls.at(-1)?.[0]).not.toContain(
+      "地の文の語り手らしき人物"
+    );
+  });
+
+  test("名前が決められずに落とした語り手らしき人物を、完了報告で知らせる", async () => {
+    // 一人称の作品では、AIが外見まで読み取っていても「僕」としか呼べず、
+    // レコードごと捨てられる。**捨てるのは正しいが、件数だけでは伝わらない**
+    // （作者の報告、2026-09-24）
+    state.cachedResults.set("chunk-1", {
+      characters: [
+        { name: "灯", evidence: "灯が歩いた。" },
+        { name: "僕", appearance: "背が高い", evidence: "灯が歩いた" },
+      ],
+    });
+    state.cachedResults.set("chunk-2", { characters: [] });
+    const showInformationMessage = vi.fn<StubMessage>(async () => undefined);
+    Object.assign(window, {
+      showInformationMessage,
+      showWarningMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    const registry = {
+      resolveModelInfo: vi.fn(async () => ({ contextWindow: 8192 })),
+    } as unknown as AIRegistry;
+
+    await extractCharacters(work, registry);
+
+    const message = String(showInformationMessage.mock.calls.at(-1)?.[0]);
+    expect(message).toContain(
+      "地の文の語り手らしき人物を1件、名前が決められないため登録しませんでした。"
+    );
+    expect(message).toContain(
+      "AIは「僕」という名前で返しています（外見：背が高い）。"
+    );
+    // 原稿を直せとは言わない。手で書き足せることだけを伝える
+    expect(message).toContain(
+      "人物一覧の誰かに当たるなら、その人の資料へ手で書き足してください。"
+    );
   });
 
   test("検証前の解析結果をキャッシュして後の規則変更で再評価できるようにする", async () => {

@@ -45,6 +45,10 @@ import {
   type RelationRejectionReason,
 } from "../core/characterExtractionValidation";
 import {
+  describeRejectedNarrators,
+  describeRejectedNarratorsForLog,
+} from "../core/rejectedNarratorNotice";
+import {
   BASE_SYSTEM_PROMPT,
   CHARACTER_EXTRACT_SCHEMA,
   CHARACTER_EXTRACT_VERSION,
@@ -1185,6 +1189,14 @@ export async function extractCharacters(
         staleRules.map((rule) => `  ${rule}`).join("\n")
     );
   }
+  /*
+    **名前が決められずに落とした語り手らしき人物は、ここに全件が残る。**
+
+    画面には代表を3件までしか並べない（案内が読まれなくなるため）。
+    あとから「誰を落としたのか」を確かめる手立ては、ここにしかない。
+  */
+  const narratorLog = describeRejectedNarratorsForLog(baseCounts.rejected);
+  if (narratorLog) logStep(narratorLog);
 
   const summary = buildExtractionSummary(baseCounts) + settingsNotice;
   const recovery = describeFailureRecoveries(failures);
@@ -1409,6 +1421,10 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
     counts.rejected.length > 0
       ? ` / ${describeRejectedCandidates(counts.rejected)}`
       : "";
+  // 名前が決められずに落ちた語り手らしき人物は、**件数だけでは伝わらない**。
+  // 一人称の作品ではAIが外見まで読み取っていても「僕」としか呼べず、
+  // 丸ごと消える（作者の報告、2026-09-24）。捨てたものが無ければ何も出さない
+  const narratorDetail = describeRejectedNarrators(counts.rejected);
   // 統合候補は自動では反映しないので、作者が気づけるよう本文に出す
   const candidateDetail =
     counts.mergeCandidates.length > 0
@@ -1454,6 +1470,7 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
       `キャッシュ保存警告 ${counts.cacheWarnings}件`,
     ].join(" / ") +
     rejectedDetail +
+    narratorDetail +
     candidateDetail +
     distinctDetail +
     honorificDetail +
