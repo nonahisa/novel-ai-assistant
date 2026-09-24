@@ -1,8 +1,13 @@
 import { describe, expect, test } from "vitest";
 import { parseNotationAdvice } from "../../../src/core/notationAdviceValidation";
 import {
+  isWidthNotationGroup,
+  NOTATION_ADVICE_FULL,
+  NOTATION_ADVICE_HALF,
   NOTATION_ADVICE_HINTS,
   NOTATION_ADVICE_NO_UNIFY,
+  notationAdviceChoices,
+  type NotationAdviceGroup,
 } from "../../../src/prompts/notationAdvice";
 
 /**
@@ -86,6 +91,69 @@ describe("choice の照合", () => {
       '判断しました。\n```json\n{"choice":"引っ越し","reason":"公用文の送り仮名"}\n```'
     );
     expect(advice?.choice).toBe("引っ越し");
+  });
+});
+
+/**
+ * 数字（と英字）の幅の組。0〜9 の半角・全角をまとめた1組は、表記が最大20個ある。
+ * 2026-09-25 夜の実接続で、gemma4:26b が揃え先に「2」と答えた——選べるのが
+ * 20個の数字そのものと「揃えない」だけで、「半角」「全角」を選ぶ口が無かった。
+ * 画面には「「2」に揃える」と出て、何をすればよいのか分からない。
+ */
+describe("数字・英字の幅の組", () => {
+  const digits: NotationAdviceGroup = {
+    label: "半角の数字（0〜9）↔ 全角",
+    forms: [
+      { surface: "2", count: 5, excerpts: ["2人で歩く"] },
+      { surface: "3", count: 2, excerpts: ["3日後"] },
+      { surface: "２", count: 9, excerpts: ["２人は笑った"] },
+    ],
+  };
+
+  test("選べるのは「半角」「全角」だけ（数字そのものは選ばせない）", () => {
+    expect(isWidthNotationGroup(digits)).toBe(true);
+    expect(notationAdviceChoices(digits)).toEqual([NOTATION_ADVICE_HALF, NOTATION_ADVICE_FULL]);
+    const choices = notationAdviceChoices(digits);
+    expect(parseNotationAdvice('{"choice":"全角","reason":"縦書きで寝ない"}', choices)).toMatchObject({
+      choice: NOTATION_ADVICE_FULL,
+      width: "full",
+      noUnify: false,
+    });
+    // 言い足しても指すものは1つ
+    expect(parseNotationAdvice('{"choice":"半角に揃える","reason":"横書き"}', choices)).toMatchObject({
+      choice: NOTATION_ADVICE_HALF,
+      width: "half",
+    });
+    // 数字そのものを答えたら受け取らない（「2」に揃える、には意味が無い）
+    expect(parseNotationAdvice('{"choice":"2","reason":"半角が多い"}', choices)).toBeUndefined();
+    expect(parseNotationAdvice('{"choice":"揃えない","reason":"年号だけ半角"}', choices)?.noUnify).toBe(true);
+  });
+
+  test("半角だけの組（全角が本文に1度も出ていない）も幅の組", () => {
+    const halfOnly = { label: digits.label, forms: [digits.forms[0]] };
+    expect(notationAdviceChoices(halfOnly)).toEqual([NOTATION_ADVICE_HALF, NOTATION_ADVICE_FULL]);
+  });
+
+  test("英字の幅だけが違う組（AI ↔ ＡＩ）も幅の組。ふつうの組は表記そのもの", () => {
+    const alpha = {
+      label: "AI ↔ ＡＩ",
+      forms: [
+        { surface: "AI", count: 4, excerpts: [] },
+        { surface: "ＡＩ", count: 1, excerpts: [] },
+      ],
+    };
+    expect(isWidthNotationGroup(alpha)).toBe(true);
+    expect(notationAdviceChoices({ label: "", forms: [{ surface: "引っ越し", count: 1, excerpts: [] }, { surface: "引越し", count: 1, excerpts: [] }] })).toEqual(SURFACES);
+    // 綴りが違う英字（大文字小文字）は幅の組にしない（「半角」では指すものが決まらない）
+    expect(
+      isWidthNotationGroup({
+        label: "",
+        forms: [
+          { surface: "AI", count: 1, excerpts: [] },
+          { surface: "Ai", count: 1, excerpts: [] },
+        ],
+      })
+    ).toBe(false);
   });
 });
 

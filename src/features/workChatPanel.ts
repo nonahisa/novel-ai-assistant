@@ -36,6 +36,7 @@ import {
   describePlotStyleChoice,
   frameOfReply,
   nextFixedPoint,
+  nextGuidedPoint,
   plotFrame,
   plotFrameOptions,
   plotSeedOptions,
@@ -488,7 +489,8 @@ interface PlotDialogueState {
   frame?: PlotFrameKey;
   /**
    * コードが決める型で、いま尋ねている（尋ねようとしている）1点。
-   * 尋ね終えたら undefined（`fixedDone`）
+   * 尋ね終えたら undefined（`fixedDone`）。AIが選ぶ型でも、コードが割り込んだ
+   * 回（場面の3点・目標の文字数。`nextGuidedPoint`）だけ立つ
    */
   pending?: PlotFixedPoint;
   /** コードが決める型で、尋ねる枠・項目が尽きた */
@@ -3722,7 +3724,11 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
 
     const def = plotStyleDef(dialogue.style);
-    const pending = def.fixed ? dialogue.pending : undefined;
+    /*
+      コードが決めた（割り込んだ）1点。AIが選ぶ型では、場面の3点・目標の文字数を
+      尋ねようとした回だけ立つ（`requestPlotTurn` が毎回付け直す）
+    */
+    const pending = dialogue.pending;
     let lastAnswer: { topic: string; answer: string } | undefined;
     let clarifyFor: { topic: string; section: PlotDialogueSection } | undefined;
     if (isOptionReply(reply, PLOT_SKIP_OPTION) && current) {
@@ -3850,6 +3856,14 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         this.postPlotAnswer(dialogue, describeFixedDone(style, frame), authorText);
         return;
       }
+    } else if (!options.more) {
+      /*
+        **AIが1点を選ぶ型でも、型の狙い（場面の3点）と目標の文字数はコードが
+        割り込んで決める**（2026-09-25 夜の実接続。頼むだけでは守られなかった）。
+        渡し方・検算・問いを出せなかったときの扱いは、コードが決める型と同じ
+      */
+      fixedPoint = nextGuidedPoint(style, dialogue.asked, dialogue.decisions, writtenPlot);
+      dialogue.pending = fixedPoint;
     }
 
     const request: PlotTurnRequest = {
@@ -3922,8 +3936,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       if (last && last.topic === turn.topic) dialogue.decisions.pop();
     }
     dialogue.current = turn;
+    // いまどこかの印は、コードが順を決める型だけ（割り込んだ1点には終わりの数が無い）
     const progress =
-      fixedPoint && turn.mode === "ask"
+      def.fixed && fixedPoint && turn.mode === "ask"
         ? describeFixedProgress(style, frame, fixedPoint)
         : undefined;
     this.postPlotAnswer(
@@ -4005,7 +4020,12 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     dialogue.summary = result.value.contents;
     this.postPlotAnswer(
       dialogue,
-      describePlotSummary(result.value.contents, result.value.restored, result.value.marked),
+      describePlotSummary(
+        result.value.contents,
+        result.value.restored,
+        result.value.marked,
+        result.value.dropped
+      ),
       authorText,
       [PLOT_WRITE_SUMMARY_OPTION, PLOT_CONTINUE_OPTION, PLOT_END_OPTION]
     );
@@ -4198,7 +4218,6 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   private plotDialogueOptions(dialogue: PlotDialogueState): string[] {
     const current = dialogue.current;
     const decided = dialogue.decisions.length > 0;
-    const fixed = plotStyleDef(dialogue.style ?? "idea").fixed;
     return [
       ...(current
         ? [
@@ -4208,7 +4227,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           ]
         : dialogue.fixedDone
           ? []
-          : fixed && dialogue.pending
+          : // コードが決めた・割り込んだ1点（枠・場面の3点・目標の文字数）は飛ばせる
+            dialogue.pending
             ? [PLOT_RETRY_OPTION, PLOT_SKIP_OPTION]
             : [PLOT_RETRY_OPTION]),
       ...(decided ? [PLOT_WRITE_OPTION, PLOT_SUMMARY_OPTION] : []),

@@ -298,6 +298,66 @@ describe("うまくいかなかったとき", () => {
   });
 });
 
+/**
+ * 数字の組（0〜9 の半角・全角をまとめた1組、`digit_width`）。
+ *
+ * 2026-09-25 夜の実接続で、gemma4:26b が揃え先に「2」と答え、理由に
+ * 「半角が多い」と書いた（事実は逆）。選べるのが20個の数字そのものと
+ * 「揃えない」だけで、画面には「「2」に揃える」と出ていた。
+ */
+describe("数字の組は、半角か全角かで訊く", () => {
+  const digits: NotationAdviceGroup = {
+    label: "半角の数字（0〜9）↔ 全角",
+    forms: [
+      { surface: "2", count: 3, excerpts: ["2人で帰った。"] },
+      { surface: "5", count: 1, excerpts: ["5日目の朝。"] },
+      { surface: "２", count: 10, excerpts: ["２人は笑った。"] },
+      { surface: "３", count: 6, excerpts: ["３日後。"] },
+    ],
+  };
+
+  function panelWithDigits(): ProposalPanel {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const panel = new ProposalPanel(fakeRegistry() as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    panel.resolveWebviewView(fakeView() as any);
+    panel.showResults(
+      work,
+      [{ ...issue, target: "2", suggestion: "２", notation: digits } as typeof issue],
+      "表記ゆれ"
+    );
+    return panel;
+  }
+
+  test("選ばせるのは「半角」「全角」「揃えない」だけで、幅ごとの合計を渡す", async () => {
+    nextAnswer = '{"choice":"全角","reason":"全角のほうが多く、縦書きで寝ない"}';
+    const panel = panelWithDigits();
+    await press(panel, shown().id);
+
+    const request = asked[0] as unknown as {
+      userPrompt: string;
+      jsonSchema: { properties: { choice: { enum: string[] } } };
+    };
+    expect(request.jsonSchema.properties.choice.enum).toEqual(["半角", "全角", "揃えない"]);
+    // 数の多寡を取り違えないよう、幅ごとの合計を渡す（半角4回・全角16回）
+    expect(request.userPrompt).toContain("半角：合わせて4回");
+    expect(request.userPrompt).toContain("全角：合わせて16回");
+    // どちらが多いかも言葉で添える（gemma4:e4b は数を見ても多い側を取り違えた）
+    expect(request.userPrompt).toContain("（合計では全角のほうが多い）");
+    expect(shown().adviceNote).toContain("AIの答え：全角に揃える");
+    expect(shown().adviceNote).not.toContain("「全角」に揃える");
+  });
+
+  test("数字そのものを答えたら、それは出さない", async () => {
+    nextAnswer = '{"choice":"2","reason":"半角が多い"}';
+    const panel = panelWithDigits();
+    await press(panel, shown().id);
+
+    expect(shown().adviceNote).toContain("読み取れませんでした");
+    expect(shown().adviceNote).not.toContain("「2」に揃える");
+  });
+});
+
 describe("有料のAIを使うとき", () => {
   test("確認を断られたら、AIを呼ばない", async () => {
     paidAccepted = false;

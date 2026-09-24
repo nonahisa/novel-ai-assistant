@@ -435,11 +435,69 @@ describe("対話式プロット作成（型）", () => {
 
     await h.reply(SCENE);
     expect(h.prompts[0]).toContain(`# 作者が書きたい場面\n${SCENE}`);
-    expect(h.systems[0]).toContain("場面の直前に何があったか");
+    expect(h.systems[0]).toContain("話を外へ広げる1点");
     expect(h.topics()).toEqual(["場面の直前"]);
 
     await h.reply(PLOT_WRITE_OPTION);
     expect(parsePlotMarkdown(readPlot()).sections.outline).toContain(`書きたい場面：${SCENE}`);
+  });
+
+  test("場面から広げる：直前 → 至る理由 → その後 は、AIが別の1点を返してもコードの順で尋ねる", async () => {
+    // 手元の gemma4:26b は、場面の直前を正面から尋ねず「配信者の背景」から始めた（2026-09-25 夜）
+    const h = harness([
+      turn({ topic: "配信者の背景", question: "新人配信者はなぜ中級エリアにいたのですか？", section: "mainCharacters" }),
+      turn({ topic: "襲撃の理由", question: "なぜその場面に至ったのですか？", section: "mainCharacters" }),
+      turn({ topic: "直後", question: "その場面のあと、何が起きますか？", section: "worldview" }),
+      turn({ topic: "魔物の種類", question: "襲ってくる魔物はどんな魔物ですか？", section: "worldview" }),
+    ]);
+
+    await h.panel.startPlotInterview(WORK);
+    await h.reply("場面から広げる");
+    await h.reply(SCENE);
+    expect(h.prompts[0]).toContain("# 次に尋ねる1点（ここだけを尋ねる）\n【場面の直前】");
+    await h.reply("配信の同接が伸びず焦っていた");
+    expect(h.prompts[1]).toContain("# 次に尋ねる1点（ここだけを尋ねる）\n【場面に至る理由】");
+    await h.reply("業者の敷いた線を勝手に使っていた");
+    expect(h.prompts[2]).toContain("# 次に尋ねる1点（ここだけを尋ねる）\n【場面のその後】");
+    await h.reply("業者の班長が現れて魔物を倒す");
+    // 3点を尋ね終えたら、次は目標の文字数（4問目）
+    expect(h.prompts[3]).toContain("# 次に尋ねる1点（ここだけを尋ねる）\n【目標の文字数】");
+
+    // 名前と書く先はコードの点を使う。場面の型でも、いまどこかの印は出さない
+    expect(h.topics()).toEqual(["場面の直前", "場面に至る理由", "場面のその後", "目標の文字数"]);
+    expect(h.posted.some((message) => message.reply?.includes("［"))).toBe(false);
+    await h.reply(PLOT_WRITE_OPTION);
+    const outline = parsePlotMarkdown(readPlot()).sections.outline;
+    expect(outline).toContain("- 場面の直前：配信の同接が伸びず焦っていた");
+    expect(outline).toContain("- 場面のその後：業者の班長が現れて魔物を倒す");
+    expect(parsePlotMarkdown(readPlot()).sections.mainCharacters).toBe("");
+  });
+
+  test("着想から掘る：3問を尋ねても目標の文字数が決まっていなければ、4問目はコードが字数を尋ねる", async () => {
+    // 2026-09-25 夜の実接続では、5つの型 × 2モデルの10本とも、5往復のうちに一度も字数を尋ねなかった
+    const h = harness([
+      turn({ topic: "最強の理由", question: "業者はなぜ最強なのですか？" }),
+      turn({ topic: "主人公", question: "主人公は誰ですか？", section: "mainCharacters" }),
+      turn({ topic: "敵", question: "誰と戦いますか？", section: "mainCharacters" }),
+      turn({ topic: "舞台の広さ", question: "物語はどこまで広がりますか？", section: "setting" }),
+      turn({ topic: "山場", question: "いちばんの山場は何ですか？", section: "outline" }),
+    ]);
+
+    await h.panel.startPlotInterview(WORK);
+    await h.reply(IDEA);
+    await h.reply("回線が魔力も運ぶから");
+    await h.reply("その業者に入った新人");
+    expect(h.prompts[2]).not.toContain("【目標の文字数】");
+    await h.reply("回線を切る魔物");
+
+    expect(h.prompts[3]).toContain("# 次に尋ねる1点（ここだけを尋ねる）\n【目標の文字数】");
+    expect(h.topics().pop()).toBe("目標の文字数");
+    await h.reply("10万字");
+    // 決まったら、もう割り込まない
+    expect(h.prompts[4]).not.toContain("# 次に尋ねる1点");
+    expect(h.prompts[4]).toContain("- 【目標の文字数】10万字");
+    await h.reply(PLOT_WRITE_OPTION);
+    expect(parsePlotMarkdown(readPlot()).sections.outline).toContain("- 目標の文字数：10万字");
   });
 
   test("結末から逆算する：結末を変えない指示で、さかのぼって尋ねる", async () => {
@@ -685,7 +743,7 @@ describe("対話式プロット作成（ほかの案・確かめ直し・まと�
     await h.reply(PLOT_SUMMARY_OPTION);
 
     expect(h.systems[2]).toContain("まとめる係");
-    expect(h.prompts[2]).toContain("- 【最強の理由】回線が魔力も運ぶから（書く先の目安：worldview）");
+    expect(h.prompts[2]).toContain("## worldview\n- 【最強の理由】回線が魔力も運ぶから");
     const summary = h.posted.filter((message) => message.type === "answer").pop();
     expect(summary?.reply).toContain("〔補い〕はAIがつなぐために補った所");
     expect(summary?.reply).toContain("【ログライン】");

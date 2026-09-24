@@ -1,5 +1,7 @@
 import { isPlaceholderText } from "./placeholderText";
 import {
+  NOTATION_ADVICE_FULL,
+  NOTATION_ADVICE_HALF,
   NOTATION_ADVICE_HINTS,
   NOTATION_ADVICE_NO_UNIFY,
 } from "../prompts/notationAdvice";
@@ -9,9 +11,9 @@ import {
  *
  * **AIの出力を信用しない。** 見るのは2つ。
  *
- *   1. `choice` が**渡した表記のどれか**、または「揃えない」か。
- *      選択肢に無い表記（言い換え・新しい書き方）は捨てる。そのまま出すと、
- *      **本文に一度も出ていない書き方へ揃えるよう勧める**ことになる
+ *   1. `choice` が**渡した表記のどれか**（数字・英字の幅の組なら「半角」「全角」）、
+ *      または「揃えない」か。選択肢に無い表記（言い換え・新しい書き方）は捨てる。
+ *      そのまま出すと、**本文に一度も出ていない書き方へ揃えるよう勧める**ことになる
  *   2. `reason` に**指示の言葉がそのまま返っていないか**（`placeholderText` と
  *      プロンプト側の `NOTATION_ADVICE_HINTS`）。理由が無いことと、答えが
  *      無いことは違うので、**理由だけを空にして答えは残す**
@@ -30,6 +32,11 @@ export interface NotationAdvice {
   choice: string;
   /** 「揃えない」と答えたか。画面の文言を分けるために持つ */
   noUnify: boolean;
+  /**
+   * 数字・英字の幅の組で、半角・全角のどちらに揃えるか（P-33 1.1）。
+   * 幅の組でなければ無い。画面の文言を「全角に揃える」にするために持つ
+   */
+  width?: "half" | "full";
   /** そう判断した理由。中身の無い言葉なら空 */
   reason: string;
 }
@@ -37,7 +44,8 @@ export interface NotationAdvice {
 /**
  * 応答を読む。
  *
- * @param surfaces その組に実在する表記（この中からしか選ばせない）
+ * @param surfaces 揃え先として選べるもの（`notationAdviceChoices`。その組に
+ *   実在する表記か、幅の組なら「半角」「全角」）。この中からしか選ばせない
  */
 export function parseNotationAdvice(
   text: string,
@@ -51,9 +59,17 @@ export function parseNotationAdvice(
   if (!choice) return undefined;
 
   const reason = typeof parsed.reason === "string" ? parsed.reason.trim() : "";
+  const width = !surfaces.includes(NOTATION_ADVICE_HALF)
+    ? undefined
+    : choice === NOTATION_ADVICE_HALF
+      ? "half"
+      : choice === NOTATION_ADVICE_FULL
+        ? "full"
+        : undefined;
   return {
     choice,
     noUnify: choice === NOTATION_ADVICE_NO_UNIFY,
+    ...(width ? { width } : {}),
     reason: isEmptyAnswer(reason) ? "" : reason,
   };
 }
@@ -77,6 +93,15 @@ function matchChoice(
 
   const found = surfaces.find((surface) => normalize(surface) === body);
   if (found) return found;
+
+  /*
+    幅の組の「半角に揃える」「全角で統一」のような言い足しも読む。
+    言い足されても指すものは1つで、取り違えようがない（「揃えない」と同じ緩み）
+  */
+  const width = [NOTATION_ADVICE_HALF, NOTATION_ADVICE_FULL].find(
+    (choice) => surfaces.includes(choice) && body.startsWith(choice)
+  );
+  if (width) return width;
 
   const noUnify = normalize(NOTATION_ADVICE_NO_UNIFY);
   if (body === noUnify || body.startsWith(noUnify)) {

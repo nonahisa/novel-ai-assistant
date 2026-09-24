@@ -6,6 +6,7 @@ import {
   PLOT_START_FROM_PLOT_OPTION,
   PLOT_WRITE_OPTION,
   type PlotAskedPoint,
+  type PlotDecision,
   type PlotDialogueSection,
 } from "./plotInterview";
 
@@ -24,7 +25,8 @@ import {
  * ## 2つの系統
  *
  * - **AIが次の1点を選ぶ型**（着想・場面・結末）：向き（どこから広げるか）だけを
- *   プロンプトで変える
+ *   プロンプトで変える。ただし**型の狙いと目標の文字数だけはコードが割り込んで
+ *   決める**（`nextGuidedPoint`。頼むだけでは守られなかった、2026-09-25 夜）
  * - **コードが次の1点を決める型**（型に当てはめる・項目を順に埋める）：
  *   何を尋ねるかはコードが持ち（`nextFixedPoint`）、AIには問いの言い回しと
  *   候補だけを出させる。**順を AI に任せると、飛ばしたり戻ったりする**
@@ -303,6 +305,121 @@ export function nextFixedPoint(
       };
     }
     return undefined;
+  }
+  return undefined;
+}
+
+/**
+ * 「場面から広げる」で、**コードが順に尋ねる3点**（型の狙い：場面の前後と、
+ * そこへ至る理由）。
+ *
+ * 0.86.5 ではプロンプトで「場面の直前・至る理由・直後…の順に」と頼むだけ
+ * だった。手元の gemma4:26b は、場面の直前を正面から尋ねず「配信者の背景 →
+ * 直後 → 配信スタイル → 魔物の種類」と進んだ（2026-09-25 夜の実接続）。
+ * **型の狙いそのものを AI の選び方に任せない。** 3点を尋ね終えたら、あとは
+ * AI が場面から外へ広げる（尋ねる順を決めない形は残す）。
+ *
+ * 名前に「：」を使わない（書くときに「名前：答え」で並べる。`PLOT_FRAMES` と同じ）。
+ */
+export const PLOT_SCENE_BEATS: readonly PlotFrameBeat[] = [
+  { name: "場面の直前", note: "その場面の直前に、何があったか" },
+  { name: "場面に至る理由", note: "人物がなぜその場面に至ったか" },
+  { name: "場面のその後", note: "その場面の直後に何が起き、話がどう続くか" },
+];
+
+/** 目標の文字数を尋ねるときの名前。「決まったこと」の名前にもなる */
+export const PLOT_LENGTH_TOPIC = "目標の文字数";
+
+/** AIへ渡す、目標の文字数の説明（答えとして返ってきたら中身が無い） */
+const PLOT_LENGTH_NOTE = "話全体を何字くらいの長さにするか";
+
+/**
+ * 何問を尋ねても目標の文字数が決まっていなければ、次の1問をコードが
+ * 「目標の文字数」にするか。**3問を尋ねたあと（4問目）にする。**
+ *
+ * - 設計書6.4.7 は「決まったことが5つを超えても決まっていなければ次はそれを
+ *   尋ねる」とプロンプトに書いていたが、2026-09-25 夜の実接続では5つの型 ×
+ *   2モデルの10本とも、5往復のうちに一度も尋ねなかった。**頼むだけでは足りない**
+ * - 4問目にするのは、**まとめ（P-44）を押す前に決まっていてほしい**から。
+ *   目標の文字数は、まとめであらすじに付ける字数の区切りと、山場をいくつ
+ *   置くかの土台になる。作者も台も5往復ほどでまとめを押しており、5問目以降
+ *   では一度も尋ねないまま終わりうる
+ * - 1〜3問目にしないのは、**着想の強いところから掘る**順を崩さないため。
+ *   最初の3問は着想の芯（最強の理由・主人公・敵など）に使ってほしい。
+ *   「場面から広げる」は場面の3点（`PLOT_SCENE_BEATS`）を尋ね終えた直後になる
+ */
+export const PLOT_LENGTH_ASK_AFTER = 3;
+
+/** 名前が字数の話か（AIが自分で尋ねた「物語の長さ」なども含める） */
+const LENGTH_TOPIC = /文字数|字数|長さ|分量/u;
+
+/**
+ * 答えに字数が書いてあるか（「10万字」「八万字くらい」「5,000字」「3万〜5万文字」）。
+ * 「文字」も数える——手元の gemma4:26b の候補は「3万〜5万文字」だった（2026-09-25 夜）
+ */
+const LENGTH_TEXT = /[0-9０-９〇一二三四五六七八九十百千]+(?:[.,，．][0-9０-９]+)?\s*万?\s*文?字/u;
+
+/**
+ * 目標の文字数が、もう決まっているか。作者の答えか、プロットに書いてある
+ * ことに字数があれば決まっている。名前が字数の話なら、答えに数字が無くても
+ * （「長編で」）作者が答えたものとして扱う
+ */
+export function hasTargetLength(
+  decisions: readonly PlotDecision[],
+  writtenPlot: string
+): boolean {
+  return (
+    decisions.some(
+      (item) => LENGTH_TOPIC.test(item.topic) || LENGTH_TEXT.test(item.answer)
+    ) || LENGTH_TEXT.test(writtenPlot)
+  );
+}
+
+/**
+ * **AIが次の1点を選ぶ型（着想・場面・結末）で、コードが割り込んで決める1点。**
+ * 割り込まないときは undefined（AIが選ぶ）。
+ *
+ * 1. 場面から広げる：`PLOT_SCENE_BEATS` を順に（尋ねた・飛ばした点は除く）
+ * 2. どの型でも：`PLOT_LENGTH_ASK_AFTER` 問を尋ねても目標の文字数が決まって
+ *    いなければ「目標の文字数」。**AIが自分で字数を尋ねていた（作者が飛ばした）
+ *    なら割り込まない**——飛ばしたものをすぐまた尋ねない
+ *
+ * 渡し方と検算は、コードが決める型（`nextFixedPoint`）と同じ道を通る
+ * （名前と書く先はこちらのものを使う）。違うのは、並びを見せないことと、
+ * 「［起承転結 2/4］」のような、いまどこかの印を出さないことだけ。
+ *
+ * @param writtenPlot プロットにすでに書いてあること（`describeWrittenPlot`）
+ */
+export function nextGuidedPoint(
+  style: PlotDialogueStyle,
+  asked: readonly PlotAskedPoint[],
+  decisions: readonly PlotDecision[],
+  writtenPlot: string
+): PlotFixedPoint | undefined {
+  if (plotStyleDef(style).fixed) return undefined;
+  const askedTopics = new Set(asked.map((point) => point.topic));
+
+  if (style === "scene") {
+    const index = PLOT_SCENE_BEATS.findIndex((beat) => !askedTopics.has(beat.name));
+    if (index >= 0) {
+      const beat = PLOT_SCENE_BEATS[index];
+      return {
+        topic: beat.name,
+        note: beat.note,
+        section: "outline",
+        index: index + 1,
+        total: PLOT_SCENE_BEATS.length,
+      };
+    }
+  }
+
+  if (
+    asked.length >= PLOT_LENGTH_ASK_AFTER &&
+    !asked.some((point) => LENGTH_TOPIC.test(point.topic)) &&
+    !hasTargetLength(decisions, writtenPlot)
+  ) {
+    // 目標の文字数は「あらすじ」へ書く（`PLOT_DIALOGUE_SECTIONS` の outline の説明）
+    return { topic: PLOT_LENGTH_TOPIC, note: PLOT_LENGTH_NOTE, section: "outline", index: 1, total: 1 };
   }
   return undefined;
 }

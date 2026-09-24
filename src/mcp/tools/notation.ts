@@ -6,6 +6,7 @@ import {
   NOTATION_ADVICE_VERSION,
   buildNotationAdvicePrompt,
   buildNotationAdviceSchema,
+  notationAdviceChoices,
   type NotationAdviceGroup,
 } from "../../prompts/notationAdvice";
 import { parseNotationAdvice } from "../../core/notationAdviceValidation";
@@ -201,13 +202,13 @@ export function notationValidate(input: {
   group: NotationAdviceGroup;
   response: string;
 }) {
-  const surfaces = input.group.forms.map((form) => form.surface);
-  const advice = parseNotationAdvice(input.response, surfaces);
+  // 選べるのは表記そのもの、数字・英字の幅の組なら「半角」「全角」（製品と同じ一覧）
+  const advice = parseNotationAdvice(input.response, notationAdviceChoices(input.group));
   if (!advice) {
     // **本文に無い表記を選ばれたら受け取らない。** 揃え先は
     // 「いま出ている表記のどれか」でなければ、置き換えられない
     throw new McpToolError(
-      "応答から揃え先を読み取れませんでした（渡した表記のどれかを選ばせてください）。"
+      "応答から揃え先を読み取れませんでした（渡した表記のどれか、数字・英字の幅の組なら「半角」「全角」を選ばせてください）。"
     );
   }
   return { label: input.group.label, advice };

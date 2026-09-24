@@ -197,12 +197,15 @@ export function describePlotTurn(
  * 書くのは「このまとめでプロットに書く」を押したときだけ。
  *
  * @param restored まとめから抜けていたので、作者の言葉のまま戻した決まったこと
- * @param marked AIが印を付け忘れた補いに、コードが印を付けた行の数
+ * @param marked AIが印を付け忘れた補いに、コードが印を付けた所の数
+ * @param dropped 決まっていないことを決まったように書いた所・指示の言葉の写しで、
+ *   コードが落とした所の数。**黙って消さない**（作者が「AIの書いたものが減った」と気づける）
  */
 export function describePlotSummary(
   contents: ReadonlyMap<PlotDialogueSection, string>,
   restored: readonly PlotDecision[],
-  marked = 0
+  marked = 0,
+  dropped = 0
 ): string {
   const lines = [
     `決まったことを、プロットの項目にまとめました。${PLOT_SUPPLEMENT_MARK}はAIがつなぐために補った所です（要らなければ消してください）。`,
@@ -216,6 +219,12 @@ export function describePlotSummary(
     lines.push(
       "",
       `（決まったことに無い中身が${marked}か所あったので、${PLOT_SUPPLEMENT_MARK}を付けました）`
+    );
+  }
+  if (dropped > 0) {
+    lines.push(
+      "",
+      `（まだ決まっていないことを決まったように書いた所が${dropped}か所あったので、消しました）`
     );
   }
   if (restored.length > 0) {

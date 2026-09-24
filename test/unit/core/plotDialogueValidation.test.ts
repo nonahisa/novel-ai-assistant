@@ -434,6 +434,86 @@ describe("まとめ（P-44）", () => {
     expect(check.marked).toBe(2);
   });
 
+  it("決まっていないことを決まったように書いた括弧書き（指示の言葉の写し）は落とす（CLAUDE.md 失敗3）", () => {
+    // 手元の gemma4:26b が「結末から逆算する」のまとめで実際に書いた形（2026-09-25 夜）。
+    // 行の残りは作者の結末そのものなので、行ごと見ると根ざしていて印が付かなかった
+    const ending = "最強の班長の正体は、ただの電気工事士だった";
+    const check = validatePlotSummary(
+      JSON.stringify({
+        protagonistMotive: "街のインフラを破壊するテロ組織を阻止すること",
+        outline: `- ${ending}（結末の目安：執筆時に設定）`,
+      }),
+      [
+        { topic: "結末", answer: ending, section: "outline" },
+        { topic: "主人公の目的", answer: "街のインフラを破壊するテロ組織を阻止すること", section: "protagonistMotive" },
+      ],
+      [ending]
+    );
+    expect(check.ok).toBe(true);
+    if (!check.ok) return;
+    expect(check.contents.get("outline")).toBe(`- ${ending}`);
+    expect(check.dropped).toBe(1);
+    expect(check.restored).toEqual([]);
+  });
+
+  it("根ざした行に足された、決まったことに無い括弧書き・文には、その所に〔補い〕を付ける", () => {
+    const check = validatePlotSummary(
+      JSON.stringify({
+        mainCharacters: "- くたびれた班長（実は主人公の生き別れの父親）",
+        worldview: "回線が魔力も運ぶ世界。魔王が千年前に封印された。",
+      }),
+      decisions
+    );
+    expect(check.ok).toBe(true);
+    if (!check.ok) return;
+    expect(check.contents.get("mainCharacters")).toBe("- くたびれた班長〔補い〕（実は主人公の生き別れの父親）");
+    expect(check.contents.get("worldview")).toBe("回線が魔力も運ぶ世界。〔補い〕魔王が千年前に封印された。");
+    expect(check.marked).toBe(2);
+  });
+
+  it("文の途中の括弧書きでは切らない（切れ端ごとに印が付いて読めなくなる）", () => {
+    // 手元の gemma4:e4b が実際に書いたまとめ（2026-09-25 夜）。文の途中で切っていた版では
+    // 「「繋がり（通信線）〔補い〕」の価値」「新人作業員〔補い〕（主人公）〔補い〕の視点」になった
+    const check = validatePlotSummary(
+      JSON.stringify({
+        theme: "未知への探求心と、現代社会における「繋がり（通信線）」の価値。",
+        narrativePerson: "通信線敷設業の新人作業員（主人公）の視点（三人称視点）。",
+      }),
+      [{ topic: "主人公", answer: "通信線敷設業の新人作業員の視点で描く", section: "mainCharacters" }],
+      ["現代にダンジョンが出現。配信のために通信線を敷く業者が実は最強"]
+    );
+    expect(check.ok).toBe(true);
+    if (!check.ok) return;
+    expect(check.contents.get("theme")).toBe(
+      "〔補い〕未知への探求心と、現代社会における「繋がり（通信線）」の価値。"
+    );
+    // 文末に足された括弧書き（作者が決めていない人称）にだけ印を付ける
+    expect(check.contents.get("narrativePerson")).toBe(
+      "通信線敷設業の新人作業員（主人公）の視点〔補い〕（三人称視点）。"
+    );
+  });
+
+  it("字数の区切りは、目標の文字数が決まっているときだけ根ざしたものとみなす", () => {
+    const outline = "- 新人が初現場で配線を敷く（〜2万字）";
+    const decided = validatePlotSummary(
+      JSON.stringify({ outline }),
+      [
+        { topic: "起", answer: "新人が初現場で配線を敷く", section: "outline" },
+        { topic: "目標の文字数", answer: "10万字", section: "outline" },
+      ]
+    );
+    expect(decided.ok && decided.contents.get("outline")).toContain(outline);
+    expect(decided.ok && decided.marked).toBe(0);
+
+    // 決まっていないのに字数を書いたら、補いとして印を付ける
+    const undecided = validatePlotSummary(JSON.stringify({ outline }), [
+      { topic: "起", answer: "新人が初現場で配線を敷く", section: "outline" },
+    ]);
+    expect(undecided.ok && undecided.contents.get("outline")).toBe(
+      "- 新人が初現場で配線を敷く〔補い〕（〜2万字）"
+    );
+  });
+
   it("印だけ・鍵の名前・伏せ字は中身にしない。全部空なら受け取らない", () => {
     expect(
       validatePlotSummary(

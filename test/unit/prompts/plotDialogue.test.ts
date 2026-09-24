@@ -12,6 +12,7 @@ import {
 import { PLOT_DIALOGUE_SECTIONS } from "../../../src/core/plotInterview";
 import {
   nextFixedPoint,
+  nextGuidedPoint,
   PLOT_DIALOGUE_STYLES,
   plotFrame,
 } from "../../../src/core/plotDialogueStyles";
@@ -49,7 +50,7 @@ describe("システムの指示", () => {
 
   it("型ごとに次の1点の選び方が違う", () => {
     expect(buildPlotDialogueSystemPrompt("idea")).toContain("尋ねる順は決まっていません");
-    expect(buildPlotDialogueSystemPrompt("scene")).toContain("場面の直前に何があったか");
+    expect(buildPlotDialogueSystemPrompt("scene")).toContain("場面の直前・場面に至る理由・場面のその後");
     expect(buildPlotDialogueSystemPrompt("ending")).toContain("結末を変える候補や、結末を疑う問いを出さないこと");
     expect(buildPlotDialogueSystemPrompt("structure")).toContain("「次に埋める枠」に書いてある枠1つだけ");
     expect(buildPlotDialogueSystemPrompt("fields")).toContain("「次に埋める項目」に書いてある項目1つだけ");
@@ -60,6 +61,8 @@ describe("システムの指示", () => {
   it("目標の文字数と大きな流れも、問答の中で決める（AIが1点を選ぶ型）", () => {
     for (const key of ["idea", "scene", "ending"] as const) {
       expect(buildPlotDialogueSystemPrompt(key), key).toContain("目標の文字数");
+      // コードが割り込んで決めた1点（場面の3点・目標の文字数）は、それだけを尋ねさせる
+      expect(buildPlotDialogueSystemPrompt(key), key).toContain("「次に尋ねる1点」があるときは、その1点だけを尋ねること");
     }
     expect(PLOT_DIALOGUE_SYSTEM_PROMPT).toContain("どんでん返し");
   });
@@ -72,6 +75,7 @@ describe("指示の言葉がそのまま返ってきたら受け取らない（C
       "話を外へ広げる1点",
       "結末が成り立つのに欠かせない1点",
       "次に埋める枠",
+      "次に尋ねる1点",
     ]) {
       const text = JSON.stringify({
         mode: "ask",
@@ -170,6 +174,15 @@ describe("作者側の材料", () => {
     expect(prompt).toContain("# 型の枠（この順に埋める）\n起承転結：起（");
     expect(prompt).toContain("# 次に埋める枠（ここだけを尋ねる）\n【起】");
     expect(prompt).toContain("【起】について、問いを1つと");
+  });
+
+  it("AIが選ぶ型でコードが割り込んだときは、「次に尋ねる1点」として渡す（並びは渡さない）", () => {
+    const fixedPoint = nextGuidedPoint("scene", [], [], "");
+    const prompt = buildPlotDialoguePrompt({ ...base, style: "scene", fixedPoint });
+    expect(prompt).toContain("# 次に尋ねる1点（ここだけを尋ねる）\n【場面の直前】");
+    expect(prompt).toContain("【場面の直前】について、問いを1つと");
+    expect(prompt).not.toContain("# 型の枠");
+    expect(prompt).not.toContain("# 項目の順");
   });
 
   it("項目を順に埋めるときは、項目の順と次に埋める項目を渡す", () => {

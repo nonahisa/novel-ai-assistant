@@ -7,7 +7,9 @@ import {
   describePlotStyleChoice,
   frameOfReply,
   nextFixedPoint,
+  nextGuidedPoint,
   PLOT_DIALOGUE_STYLES,
+  PLOT_LENGTH_TOPIC,
   PLOT_FIELD_ORDER,
   PLOT_FRAMES,
   plotFrame,
@@ -170,5 +172,66 @@ describe("コードが決める次の1点", () => {
   it("AIが1点を選ぶ型では、コードは決めない", () => {
     expect(nextFixedPoint("idea", undefined, [], emptyPlotSections(), new Map())).toBeUndefined();
     expect(nextFixedPoint("scene", undefined, [], emptyPlotSections(), new Map())).toBeUndefined();
+  });
+});
+
+/**
+ * AIが1点を選ぶ型（着想・場面・結末）でも、**コードが割り込んで決める1点**。
+ *
+ * 2026-09-25 夜の実接続（gemma4:e4b・26b × 5つの型、5往復）で、
+ * ①目標の文字数を5往復のうちに一度も尋ねなかった（10本とも）
+ * ②26b は「場面から広げる」で場面の直前を正面から尋ねなかった。
+ * どちらもプロンプトに書いてあったのに守られなかった——頼むだけでは足りない。
+ */
+describe("コードが割り込む1点（AIが選ぶ型）", () => {
+  const ask = (topic: string, skipped = false) => ({ topic, question: `${topic}は？`, skipped });
+
+  it("場面から広げる：直前 → 至る理由 → その後 の順に、コードが尋ねる1点を決める", () => {
+    const first = nextGuidedPoint("scene", [], [], "");
+    expect(first).toMatchObject({ topic: "場面の直前", section: "outline", index: 1, total: 3 });
+    expect(nextGuidedPoint("scene", [ask("場面の直前")], [], "")?.topic).toBe("場面に至る理由");
+    // 飛ばした点も尋ねたことに数える（飛ばしたものをすぐまた尋ねない）
+    expect(
+      nextGuidedPoint("scene", [ask("場面の直前"), ask("場面に至る理由", true)], [], "")?.topic
+    ).toBe("場面のその後");
+  });
+
+  it("目標の文字数：3問を尋ねても決まっていなければ、4問目はコードが「目標の文字数」にする", () => {
+    const three = [ask("最強の理由"), ask("主人公"), ask("敵")];
+    expect(nextGuidedPoint("idea", three.slice(0, 2), [], "")).toBeUndefined();
+    expect(nextGuidedPoint("idea", three, [], "")).toMatchObject({
+      topic: PLOT_LENGTH_TOPIC,
+      section: "outline",
+    });
+    expect(nextGuidedPoint("ending", three, [], "")?.topic).toBe(PLOT_LENGTH_TOPIC);
+    // 場面から広げる型は、場面の3点を尋ね終えたあとに尋ねる
+    const beats = [ask("場面の直前"), ask("場面に至る理由"), ask("場面のその後")];
+    expect(nextGuidedPoint("scene", beats, [], "")?.topic).toBe(PLOT_LENGTH_TOPIC);
+  });
+
+  it("目標の文字数：もう決まっている・尋ねた（飛ばした）なら割り込まない", () => {
+    const three = [ask("最強の理由"), ask("主人公"), ask("敵")];
+    // 作者の答えに字数がある
+    expect(
+      nextGuidedPoint("idea", three, [{ topic: "構成", answer: "10万字くらいの長編", section: "outline" }], "")
+    ).toBeUndefined();
+    // 「文字」と書いた答え（手元の gemma4:26b の候補「3万〜5万文字」）
+    expect(
+      nextGuidedPoint("idea", three, [{ topic: "構成", answer: "3万〜5万文字の中編", section: "outline" }], "")
+    ).toBeUndefined();
+    // プロットにもう書いてある
+    expect(nextGuidedPoint("idea", three, [], "【あらすじ】全体で8万字")).toBeUndefined();
+    // AIが自分で尋ねていた（作者は飛ばした）
+    expect(nextGuidedPoint("idea", [...three, ask("物語の長さ", true)], [], "")).toBeUndefined();
+    // 字数の話を名前で答えた
+    expect(
+      nextGuidedPoint("idea", three, [{ topic: "目標の文字数", answer: "長編で", section: "outline" }], "")
+    ).toBeUndefined();
+  });
+
+  it("コードが順を決める型（型に当てはめる・項目を順に埋める）では割り込まない", () => {
+    const three = [ask("起"), ask("承"), ask("転")];
+    expect(nextGuidedPoint("structure", three, [], "")).toBeUndefined();
+    expect(nextGuidedPoint("fields", three, [], "")).toBeUndefined();
   });
 });

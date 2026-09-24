@@ -19,7 +19,7 @@ import {
   type PlotDecision,
   type PlotDialogueSection,
 } from "./plotInterview";
-import { PLOT_DIALOGUE_STYLES, PLOT_FRAMES } from "./plotDialogueStyles";
+import { hasTargetLength, PLOT_DIALOGUE_STYLES, PLOT_FRAMES } from "./plotDialogueStyles";
 import { stripCodeFence } from "./synopsisValidation";
 
 /**
@@ -167,6 +167,8 @@ const INSTRUCTION_ECHOES = [
   "欠かせない1点",
   "次に埋める枠",
   "次に埋める項目",
+  // コードが割り込んだ1点の見出し（P-43 1.3）
+  "次に尋ねる1点",
   "その枠に入る出来事",
   "その項目に入る中身",
   "confirm",
@@ -422,8 +424,13 @@ export type PlotSummaryCheck =
       contents: Map<PlotDialogueSection, string>;
       /** まとめから抜けていたので、作者の言葉のまま戻した決まったこと */
       restored: PlotDecision[];
-      /** AIが印を付けずに補っていたので、コードが〔補い〕を付けた行の数 */
+      /** AIが印を付けずに補っていたので、コードが〔補い〕を付けた所の数 */
       marked: number;
+      /**
+       * 決まっていないことを決まったように書いた所・指示の言葉の写しで、
+       * コードが落とした所の数（「（結末の目安：執筆時に設定）」の形）
+       */
+      dropped: number;
     }
   | { ok: false; reason: "json" | "empty" };
 
@@ -436,7 +443,11 @@ export type PlotSummaryCheck =
  *   一度も決めていない人称・テーマ・モチーフを印なしで埋めてきた（2026-09-25）。
  *   そのまま書くと、作者が選んでいない筋が「決まったこと」の顔で plot.md に
  *   入る（6.4.7「作者が選ばないまま筋を確定させない」）。決まったこと・着想・
- *   プロットに書いてあることのどれにも根ざさない行は補いとみなす
+ *   プロットに書いてあることのどれにも根ざさない行は補いとみなす。**行の中の
+ *   文・括弧書きごとに見る**（根ざした文の後ろに足された括弧書きを見逃さない）
+ * - **決まっていないことを決まったように書いた所・指示の言葉の写しは落とす**
+ *   （「（結末の目安：執筆時に設定）」。`UNSETTLED_FILLS`）。字数の区切りは、
+ *   目標の文字数が決まっているときだけ根ざしたものとみなす
  * - **決まったことが抜けていたら、コードが作者の言葉のまま書く先へ戻す**
  *   （実装ルール3「マージはAIでなくコードが行う」）。まとめは言い回しを整えて
  *   よいので、完全一致では見ない。作者の答えの2字組が**その決まったことの
@@ -484,24 +495,69 @@ export function validatePlotSummary(
     contents.set(key, value);
   }
 
-  // 印の無い補いに印を付ける（戻す前に行う。戻すのは作者の言葉なので印は要らない）
+  /*
+    印の無い補いに印を付け、中身の無い書き足しを落とす（戻す前に行う。戻すのは
+    作者の言葉なので印は要らない）。
+
+    **行ではなく、行の中のまとまり（文・括弧書き）ごとに見る。** 手元の
+    gemma4:26b は、作者の結末の文の後ろに「（結末の目安：執筆時に設定）」を
+    印なしで付けた（2026-09-25 夜）。行ごと見ると残りが作者の結末そのもので
+    根ざしていて、印が付かないまま plot.md に入った。根ざした文に足された
+    括弧書き・文は、その所に印を付ける。
+  */
   const sources = [...decisions.map((item) => item.answer), ...grounds]
     .map((item) => item.trim())
     .filter(Boolean);
   const pool = sources.join("\n");
+  const lengthDecided = hasTargetLength(decisions, grounds.join("\n"));
+  const judge = (segment: string): "grounded" | "unsettled" | "added" => {
+    if (!normalize(segment)) return "grounded";
+    // 字数の区切り（「（〜2万字）」）は、目標の文字数が決まっているときだけ根ざしている
+    if (isLengthOnly(segment)) return lengthDecided ? "grounded" : "added";
+    if (coverage(segment, pool) >= 0.5 || sources.some((source) => coverage(source, segment) >= 0.6)) {
+      return "grounded";
+    }
+    return isUnsettledFill(segment) ? "unsettled" : "added";
+  };
   let marked = 0;
-  for (const [key, value] of contents) {
-    const lines = value.split(/\r?\n/u).map((line) => {
+  let dropped = 0;
+  for (const [key, value] of [...contents]) {
+    const lines: string[] = [];
+    for (const line of value.split(/\r?\n/u)) {
       const head = /^\s*(?:[-・*]\s*)?/u.exec(line)?.[0] ?? "";
       const body = line.slice(head.length);
-      if (!body.trim() || body.includes(PLOT_SUPPLEMENT_MARK)) return line;
-      const grounded =
-        coverage(body, pool) >= 0.5 || sources.some((source) => coverage(source, body) >= 0.6);
-      if (grounded) return line;
-      marked++;
-      return `${head}${PLOT_SUPPLEMENT_MARK}${body}`;
-    });
-    contents.set(key, lines.join("\n"));
+      if (!body.trim() || body.includes(PLOT_SUPPLEMENT_MARK)) {
+        lines.push(line);
+        continue;
+      }
+      const parts = splitSegments(body).map((segment) => ({ segment, state: judge(segment) }));
+      /*
+        **決まっていないことを決まったように書いた所・指示の言葉の写しは落とす。**
+        印を付けて残しても、作者が消す手間が増えるだけで中身が無い。
+        作者の答えに根ざすもの（作者が「未定」と答えた）は落とさない
+      */
+      const kept = parts.filter((part) => part.state !== "unsettled");
+      dropped += parts.length - kept.length;
+      if (kept.length === 0) continue;
+      // まとまり全部が補いなら、これまでどおり行の頭に1つだけ付ける
+      if (kept.every((part) => part.state === "added")) {
+        marked++;
+        lines.push(`${head}${PLOT_SUPPLEMENT_MARK}${kept.map((part) => part.segment).join("")}`);
+        continue;
+      }
+      const rebuilt = kept.map((part) => {
+        // 2字ほどの括弧書き（「（最強）」）まで印を付けると、印だらけで読めない
+        if (part.state !== "added" || normalize(part.segment).length < 3) return part.segment;
+        marked++;
+        return `${PLOT_SUPPLEMENT_MARK}${part.segment}`;
+      });
+      lines.push(`${head}${rebuilt.join("").trim()}`);
+    }
+    if (lines.some((line) => line.trim())) {
+      contents.set(key, lines.join("\n"));
+    } else {
+      contents.delete(key);
+    }
   }
 
   const restored: PlotDecision[] = [];
@@ -522,7 +578,72 @@ export function validatePlotSummary(
   }
 
   if (contents.size === 0) return { ok: false, reason: "empty" };
-  return { ok: true, contents, restored, marked };
+  return { ok: true, contents, restored, marked, dropped };
+}
+
+/**
+ * 1行を、文と**文末の**括弧書きのまとまりに分ける。**つなげ直すと元の行に戻る**
+ * （どの文字もどれかのまとまりに入る）。
+ *
+ * **文の途中の括弧書きでは切らない。** 切ると「現代社会における『繋がり
+ * （通信線）』の価値」が「…『繋がり」「（通信線）」「』の価値。」の切れ端に
+ * なり、切れ端ごとに印が付いて読めなくなった（手元の gemma4:e4b、2026-09-25 夜）。
+ * AIが足すのは文の後ろの括弧書き（「…だった（結末の目安：執筆時に設定）」
+ * 「…の視点（三人称視点）。」）なので、そこだけ切り出す。
+ */
+function splitSegments(body: string): string[] {
+  const sentences = body.match(/[^。！？!?]+[。！？!?]*|[。！？!?]+/gu) ?? [body];
+  return sentences.flatMap((sentence) => {
+    const trailing = /^(.*?[^\s（(])([（(][^（）()]*[）)])([。！？!?\s]*)$/su.exec(sentence);
+    return trailing ? [trailing[1], trailing[2], trailing[3]].filter(Boolean) : [sentence];
+  });
+}
+
+/** 字数だけのまとまり（「（〜2万字）」「約5000字」「3〜5万字まで」） */
+function isLengthOnly(segment: string): boolean {
+  const body = segment.replace(/[（）()\s]/gu, "");
+  const n = "[0-9０-９〇一二三四五六七八九十百千.,，．]+";
+  return new RegExp(
+    `^[〜~約]?${n}万?文?字?(?:[〜~\\-－]${n}万?文?字)?(?:まで|前後|程度|ほど|くらい)?$`,
+    "u"
+  ).test(body) && /字/u.test(body);
+}
+
+/**
+ * まとめのプロンプトに書いた言葉と、**決まっていないことを埋める言葉**。
+ * 根ざさないまとまりにこれがあれば、中身が無いので落とす。
+ *
+ * gemma4:26b は「（結末の目安：執筆時に設定）」を書いた（2026-09-25 夜）。
+ * 「目安」はまとめの指示（1.0 の「字数の目安」「書く先の目安」）の言葉で、
+ * 「執筆時に設定」は決まっていないことを、決まったことの顔で埋めた形である
+ * （CLAUDE.md の繰り返し起きた失敗3）。指示からは「目安」を外したが
+ * （P-44 1.1）、**言い方を変えても別の言い方で返ってくる**ので、コードでも止める。
+ */
+const UNSETTLED_FILLS = [
+  "目安",
+  "書く先",
+  "執筆時",
+  "未定",
+  "未設定",
+  "後で決め",
+  "あとで決め",
+  "追って決め",
+  "今後決め",
+  "要検討",
+  "検討中",
+  "決まっていない",
+  "決めていない",
+  "決まり次第",
+];
+
+function isUnsettledFill(segment: string): boolean {
+  const body = segment.replace(/[（）()]/gu, "").trim();
+  return (
+    UNSETTLED_FILLS.some((word) => body.includes(word)) ||
+    isEcho(body) ||
+    isPlaceholderText(body) ||
+    isPlaceholderContent(body)
+  );
 }
 
 /**

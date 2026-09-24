@@ -25,8 +25,15 @@ import {
 /**
  * 変更履歴（要点だけ。詳しくはプロンプト設計書 P-44）
  * - 1.0: 初版（0.86.5）
+ * - 1.1: 「目安」の言葉を指示から外した。手元の gemma4:26b が、作者の結末の
+ *   後ろに「（結末の目安：執筆時に設定）」を印なしで付けた（2026-09-25 夜）——
+ *   決まったことの後ろの「（書く先の目安：outline）」と、字数の区切りの
+ *   「字数の目安」が返ってきた形（CLAUDE.md の繰り返し起きた失敗3）。
+ *   決まったことは項目の鍵ごとにまとめて渡し、答えの後ろに括弧書きを付けない。
+ *   字数の区切りは目標の文字数が決まっているときだけ、決まっていないことは
+ *   書かない（埋める言葉も書かない）と言い切った
  */
-export const PLOT_SUMMARY_VERSION = "1.0";
+export const PLOT_SUMMARY_VERSION = "1.1";
 
 /** 温度。決まったことを並べ直すだけなので、揺らさない */
 export const PLOT_SUMMARY_TEMPERATURE = 0.3;
@@ -42,10 +49,11 @@ export const PLOT_SUMMARY_SYSTEM_PROMPT = `あなたは、小説の作者が問�
 2. 作者が決めていないことを書き足すのは、話をつなぐのにどうしても要るときだけにすること。
    書き足した文は、その文の頭に「${PLOT_SUPPLEMENT_MARK}」を付けること。作者はこの印で見分けて、要らなければ消します。
 3. outline（あらすじ）には、事件の並び・山場・どんでん返しを順に箇条書きで並べること。
-   目標の文字数が決まっていれば、それぞれの区切りに字数の目安（例：〜2万字）を付けること。
+   目標の文字数が決まっているときだけ、それぞれの区切りに字数（例：〜2万字）を付けること。決まっていなければ、字数について何も書かないこと。
 4. mainCharacters（主要登場人物）は、人物ごとに箇条書きにすること。
-5. 決まったことが無い項目は、空文字にすること。
-6. 出力は指定されたJSONのみ。前置き・後書き・コードフェンスを含めないこと。
+5. 決まっていないことを、決まったように書かないこと。決まっていないことは書かずに省くこと（決まっていないと断る言葉も書かないこと）。
+6. 決まったことが無い項目は、空文字にすること。
+7. 出力は指定されたJSONのみ。前置き・後書き・コードフェンスを含めないこと。
 
 【項目の鍵】
 ${SECTION_LIST}`;
@@ -62,8 +70,19 @@ export interface PlotSummaryPromptInput {
 }
 
 export function buildPlotSummaryPrompt(input: PlotSummaryPromptInput): string {
-  const decisions = input.decisions
-    .map((item) => `- 【${item.topic}】${item.answer}（書く先の目安：${item.section}）`)
+  /*
+    **いま入っている項目の鍵ごとに見出しを立てて並べる。** 1.0 は答えの後ろに
+    「（書く先の目安：outline）」と添えていて、gemma4:26b はその括弧書きの形を
+    写して「（結末の目安：執筆時に設定）」を書いた。答えの後ろには何も付けない
+  */
+  const grouped = new Map<string, string[]>();
+  for (const item of input.decisions) {
+    const list = grouped.get(item.section) ?? [];
+    list.push(`- 【${item.topic}】${item.answer}`);
+    grouped.set(item.section, list);
+  }
+  const decisions = [...grouped]
+    .map(([section, list]) => `## ${section}\n${list.join("\n")}`)
     .join("\n");
   return `# 作品
 ${input.workTitle}
@@ -74,7 +93,7 @@ ${input.idea?.trim() || "（プロットに書いてあることから始めた�
 # プロットにすでに書いてあること
 ${input.writtenPlot.trim() || "（まだありません）"}
 
-# 問答で決まったこと（作者の答え）
+# 問答で決まったこと（作者の答え。いま入っている項目の鍵ごと）
 ${decisions || "（まだありません）"}
 
 # お願い

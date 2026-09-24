@@ -23,6 +23,7 @@ import {
   NOTATION_ADVICE_SYSTEM_PROMPT,
   NOTATION_ADVICE_TEMPERATURE,
   NOTATION_ADVICE_VERSION,
+  notationAdviceChoices,
   type NotationAdviceGroup,
 } from "../prompts/notationAdvice";
 
@@ -188,10 +189,8 @@ export async function askNotationAdvice(
     return { kind: "failed", reason: "AIに訊けませんでした。" };
   }
 
-  const advice = parseNotationAdvice(
-    text,
-    group.forms.map((form) => form.surface)
-  );
+  // 選べるのは表記そのもの、幅の組なら「半角」「全角」（スキーマと同じ一覧）
+  const advice = parseNotationAdvice(text, notationAdviceChoices(group));
   if (!advice) {
     useLogFile(request.work.folderPath);
     logFailure(ACTION_LABEL, {
@@ -209,12 +208,16 @@ export async function askNotationAdvice(
  * 答えを、指摘の下に出す1行にする。
  *
  * **「揃えない」は言い方を変える。** 「『揃えない』に揃える」では意味が通らない。
+ * **幅の組も言い方を変える**——「「全角」に揃える」では、「全角」という表記が
+ * あるように読める。
  * 理由が読み取れなかったときも、答えそのものは出す（黙って消さない）。
  */
 export function describeNotationAdvice(advice: NotationAdvice): string {
   const head = advice.noUnify
     ? "AIの答え：揃えないほうがよい"
-    : `AIの答え：「${advice.choice}」に揃える`;
+    : advice.width
+      ? `AIの答え：${advice.choice}に揃える`
+      : `AIの答え：「${advice.choice}」に揃える`;
   return advice.reason
     ? `${head}——${advice.reason}`
     : `${head}（理由は返りませんでした）`;
