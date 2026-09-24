@@ -6,8 +6,11 @@ import {
 import {
   WORK_CHAT_SYSTEM_PROMPT,
   WORK_CHAT_VERSION,
+  buildWorkChatSystemPrompt,
   parseWorkChatAnswer,
 } from "../../../src/prompts/workChat";
+import { detectChatTopic } from "../../../src/core/chatTopic";
+import { buildGuideBundles } from "../../../src/features/featureGuide";
 import { applyWriterStyleSignals } from "../../../src/core/writerStyle";
 import type { WriterProfile } from "../../../src/core/writerProfileStore";
 import { BASE_SYSTEM_PROMPT } from "../../../src/prompts/characterExtract";
@@ -180,6 +183,39 @@ describe("相談は、操作を実行したふりをしない", () => {
   });
 });
 
+/**
+ * 相談パネルへバックアップを落とす入口は**隠し機能**（作者の指示、2026-09-24
+ * 「訊かれたら案内しても良い」）。画面の案内とボタンをしまったので、この入口を
+ * 知っているのは相談だけになる。**材料があること**と**自分から勧めないこと**の
+ * 両方を見る——片方だけだと、黙る相談か、毎回勧める相談のどちらかが通ってしまう。
+ */
+describe("バックアップを落とす入口は、訊かれたときだけ案内できる", () => {
+  const withIndex = buildWorkChatSystemPrompt({ featureIndex: true });
+
+  test("目次を渡す回には、落とす入口の材料が入っている", () => {
+    expect(withIndex).toContain("相談パネルへファイルを落とす");
+    expect(withIndex).toContain("ZIP・展開した .txt");
+    expect(withIndex).toContain("Word 原稿（.docx）");
+    expect(withIndex).toContain("どの作品のものかを確かめてから");
+    expect(withIndex).toContain("Shift を押しながら");
+  });
+
+  test("自分から勧めないと書いてある", () => {
+    expect(withIndex).toContain("聞かれないのに自分から勧めないこと");
+  });
+
+  test("取り込み方を訊く質問では、使い方の節（＝この材料）が外れない", () => {
+    // 創作の相談と見なされると節ごと外れ、訊かれても答えられなくなる
+    const bundles = buildGuideBundles();
+    for (const question of [
+      "カクヨムのバックアップを取り込みたい",
+      "なろうのZIPはどうやって読み込むの？",
+    ]) {
+      expect(detectChatTopic({ question, bundles }), question).not.toBe("craft");
+    }
+  });
+});
+
 describe("版", () => {
   test("プロンプトを変えたら版も上がっている", () => {
     // 版を止めたままだと、古い応答がキャッシュから返る
@@ -198,7 +234,9 @@ describe("版", () => {
     // 3.18（2026-09-24）：講評の構え（プロンプト設計書1.9）を【答え方】へ足した
     // 3.19（2026-09-24）：求めたファイルが見つからなかったとき、聞き直しの材料に
     // 【見つからなかったファイル】と候補を足した（システム指示は変えていない）
-    expect(WORK_CHAT_VERSION).toBe("3.19");
+    // 3.20（2026-09-24）：相談パネルへバックアップを落とす入口（隠し機能）を、
+    // 聞かれたときだけ案内できるよう使い方の節へ足した
+    expect(WORK_CHAT_VERSION).toBe("3.20");
     expect(SETTINGS_CHAT_VERSION).toBe("3.0");
   });
 });

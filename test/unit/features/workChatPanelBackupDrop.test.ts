@@ -235,9 +235,21 @@ describe("画面の側", () => {
       expect(pattern.test("file:///c%3A/原稿.doc")).toBe(false);
     });
 
-    test(`${where}：落とせないときのためのボタンがある`, () => {
-      expect(html).toContain('id="pick-backup"');
-      expect(script).toContain("'pickBackup'");
+    /*
+      **隠し機能にした**（作者の指示、2026-09-24「チャットにドロップしたら取り込みが
+      始まる感じに」「説明文がくどい」）。空の会話の案内・［バックアップを渡す］は
+      しまい、覆いの文は1行。落とせば今までどおり受け取る（上のテスト）
+    */
+    test(`${where}：案内とボタンは出さず、覆いの文は1行`, () => {
+      expect(html).not.toContain("backup-hint");
+      expect(html).not.toContain("pick-backup");
+      expect(html).not.toContain("バックアップを渡す");
+      expect(script).not.toContain("'pickBackup'");
+      expect(html).toContain('<div id="drop-overlay">落とすと取り込みます</div>');
+    });
+
+    test(`${where}：読めなかったときは、いまある手（Shift）だけを言う`, () => {
+      expect(script).toContain("Shiftを押しながら落とし直してください");
     });
   }
 });

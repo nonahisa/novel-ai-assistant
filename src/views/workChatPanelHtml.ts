@@ -45,7 +45,6 @@ const TOOLBAR_HTML = `<div id="toolbar">
     <button class="action secondary" id="choose-work">作品を選ぶ</button>
     <button class="action secondary" id="save-note">会話をメモに保存</button>
     <button class="action secondary" id="open-manual">使い方を開く</button>
-    <button class="action secondary" id="pick-backup-toolbar">バックアップを渡す</button>
   </div>
   <details>
     <summary>できること</summary>
@@ -386,6 +385,10 @@ body.large textarea { min-height: 72px; }
  *
  * **引きずっているあいだだけ出す。** 普段から枠を出しておくと、会話の場が
  * 狭くなるうえ、何の枠なのか分からない。
+ *
+ * **隠し機能にした**（作者の指示、2026-09-24「チャットにドロップしたら取り込みが
+ * 始まる感じに」「説明文がくどい」）。空の会話の案内と選ぶためのボタンは
+ * しまい、覆いの文も1行にした。訊かれたら相談のAIが案内する（prompts/workChat.ts）
  */
 #drop-overlay {
   display: none;
@@ -404,8 +407,6 @@ body.large textarea { min-height: 72px; }
   pointer-events: none;
 }
 body.dragging #drop-overlay { display: flex; }
-.backup-hint { margin-top: 10px; font-size: 12px; color: var(--vscode-descriptionForeground); }
-.backup-hint button { margin-top: 4px; }
 </style>
 </head>
 <body${large ? ` class="large"` : ""}>
@@ -420,14 +421,9 @@ ${large ? TOOLBAR_HTML : ""}
       <li>この場面、説明が多すぎない？</li>
       <li>この人物の動機がぼやけている気がする</li>
     </ul>
-    <div class="backup-hint">
-      投稿サイトのバックアップ（ZIP／テキスト）や Word 原稿（.docx）をここへ落とすと、どの作品のものかを確かめて取り込みます。<br>
-      うまく落とせないときは、Shiftを押しながら落とすか、下のボタンから選んでください。<br>
-      <button class="action secondary" id="pick-backup">バックアップを渡す</button>
-    </div>
   </div>
 </div>
-<div id="drop-overlay">ここに落とすと、バックアップを取り込みます<br>（どの作品のものかを確かめてから、何を足すかをお見せします）</div>
+<div id="drop-overlay">落とすと取り込みます</div>
 <div id="thinking" hidden>考えています…</div>
 <div id="composer">
   <!-- 聞き方の例。中身は拡張機能側から届いたものをその都度作り直す
@@ -1254,7 +1250,7 @@ function sendBackupFile(file) {
       });
     },
     () => {
-      appendNote('「' + file.name + '」を読めませんでした。「バックアップを渡す」から選んでください。');
+      appendNote('「' + file.name + '」を読めませんでした。Shiftを押しながら落とし直してください。');
     }
   );
 }
@@ -1310,14 +1306,6 @@ document.addEventListener('drop', (event) => {
     event.preventDefault();
     vscode.postMessage({ type: 'backupUri', uri: first });
   }
-});
-
-['pick-backup', 'pick-backup-toolbar'].forEach((id) => {
-  const button = document.getElementById(id);
-  if (!button) return;
-  button.addEventListener('click', () => {
-    vscode.postMessage({ type: 'pickBackup' });
-  });
 });
 
 inputEl.addEventListener('keydown', (event) => {

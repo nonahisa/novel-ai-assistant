@@ -357,7 +357,11 @@ type Incoming =
    * 中身は拡張機能側が読む（画面はそのファイルを読めない）。
    */
   | { type: "backupUri"; uri: string }
-  /** 「バックアップを渡す」ボタン（落とせない環境のための入口） */
+  /**
+   * 「バックアップを渡す」ボタン（落とせない環境のための入口）。
+   * **いまは画面にボタンを置いていない**（隠し機能にした、2026-09-24）。受け口だけ
+   * 残してあるので、ボタンを戻すときは画面の側へ送る処理を足せばよい
+   */
   | { type: "pickBackup" }
   /**
    * 大きすぎて画面の側で止めた。**中身は送られてこない**（送る前に止めるのが
@@ -1477,8 +1481,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       logStep("相談パネル：落とされたファイルの中身を受け取れませんでした");
       this.postAll({
         type: "note",
-        message:
-          "落とされたファイルの中身を受け取れませんでした。「バックアップを渡す」から選んでください。",
+        // ［バックアップを渡す］はしまった（隠し機能、2026-09-24）。いまある手だけを言う
+        message: "落とされたファイルの中身を受け取れませんでした。Shiftを押しながら落とし直してください。",
       });
       return;
     }
@@ -1506,7 +1510,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       );
       this.postAll({
         type: "note",
-        message: "落とされたファイルの場所を読めませんでした。「バックアップを渡す」から選んでください。",
+        message: "落とされたファイルの場所を読めませんでした。Shiftを押しながら落とし直してください。",
       });
       return;
     }
