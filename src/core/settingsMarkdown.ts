@@ -1,6 +1,11 @@
 import type { Ability, AbilitySystem } from "../models/ability";
 import type { Location } from "../models/location";
-import type { Character } from "../models/character";
+import type { Character, PersonalityFacet } from "../models/character";
+import {
+  PERSONALITY_SEPARATOR,
+  activeFacets,
+  isBodyComposedOfFacets,
+} from "./personalityFacets";
 import type { AiNote } from "../models/aiNote";
 import type { CustomFieldDefinition } from "../models/customField";
 import { membersOf, type Organization } from "../models/organization";
@@ -487,7 +492,14 @@ function describeCharacter(
   }
   if (character.gender) lines.push(`- **性別**: ${character.gender}`);
   if (character.role) lines.push(`- **役割**: ${character.role}`);
-  if (character.personality) lines.push(`- **性格**: ${character.personality}`);
+  if (character.personality) {
+    // 面ごとに積んだ性格（2026-09-24 夜）は、どの話で見えた面かを添える。
+    // 本体が面の外で書き換えられていたら、本体の文章をそのまま載せる
+    const facets = isBodyComposedOfFacets(character)
+      ? describePersonalityFacets(activeFacets(character.personalityFacets))
+      : "";
+    lines.push(`- **性格**: ${facets || character.personality}`);
+  }
   if (character.appearance) lines.push(`- **外見**: ${character.appearance}`);
   if (character.firstPerson.default) {
     const variants = character.firstPerson.variants
@@ -660,6 +672,23 @@ function foldSameChanges(changes: RecordChange[]): RecordChange[] {
 /** 並べ替え用。話数が無いものは、気づく前からあった値なので先に置く */
 function firstChapter(chapters: number[]): number {
   return chapters.length > 0 ? Math.min(...chapters) : -1;
+}
+
+/**
+ * 性格の面を「面（第1話）／面（第5話）」の形にする（2026-09-24 夜）。
+ * 話を持たない面（面の仕組みより前からあった値）には話数を付けない。
+ * 設定資料集と設定資料パネルが同じ書き方をする。
+ */
+export function describePersonalityFacets(
+  facets: readonly PersonalityFacet[]
+): string {
+  return facets
+    .map((facet) =>
+      facet.chapters.length > 0
+        ? `${facet.value}（${formatChapters(facet.chapters)}）`
+        : facet.value
+    )
+    .join(PERSONALITY_SEPARATOR);
 }
 
 /** 連番は範囲にまとめる。「1, 2, 3, 7」→「1〜3, 7」 */

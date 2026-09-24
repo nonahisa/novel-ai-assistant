@@ -1,4 +1,5 @@
 import type { ExtractedCharacter } from "../prompts/characterExtract";
+import { sha1Text } from "./hash";
 
 /**
  * 抽出のプロンプトへ渡す「既にいる人物の名前」を組み立てる。
@@ -105,4 +106,50 @@ export function buildKnownCharacterNamesForPrompt(
     person.name,
     ...(kept.get(person.name) ?? []),
   ]);
+}
+
+/**
+ * 人物抽出の使い回しの鍵へ、**既に分かっている人物の顔ぶれ**を混ぜる
+ * （作者の裁定、2026-09-24 夜「人物が増えたら読み直す」）。
+ *
+ * ## なぜ混ぜるか
+ *
+ * 人物抽出のプロンプトには、既知の人物の名前を渡している（同一人物の判定を
+ * 助けるため）。ところが使い回しの鍵は「内容・AIサービス・モデル・
+ * プロンプト版」だけで、**渡した顔ぶれが入っていなかった。** 人物が増えても
+ * 名前を直しても、前の顔ぶれで読んだ古い答えがそのまま使われていた。
+ *
+ * ## 何を混ぜるか
+ *
+ * **プロンプトへ渡す人（人数の上限まで）の本名だけ**を、並べ替えてから混ぜる。
+ *
+ * - 本名：作者が手で足した人物・名前を直した人物で、読み直しが起きる
+ * - 別名は混ぜない：別名は抽出のたびにマージが足していくので、混ぜると
+ *   **抽出するたびに全部読み直す**ことになり、使い回しの意味が無くなる
+ * - 並べ替える：保存の順が変わっただけで読み直さないため
+ * - **実行の途中で増えた名前は混ぜない**：鍵は実行前に決める。途中で
+ *   変わる鍵では、確認画面の「処理するチャンク数」と実際が食い違う
+ *
+ * **顔ぶれが空なら混ぜない。** 混ぜると、これまで処理済みだった
+ * 「人物がまだいない作品」の答えまで無駄に飛ぶ（矛盾検知の
+ * `promptVersionWithPastScenes` と同じ考え方）。
+ *
+ * **読み直すと処理量が増える。** 有料のAIでは料金がかかるので、
+ * 確認画面の「処理する件数」と送る量はこの鍵で数える（同じ鍵を使う）。
+ */
+export function promptVersionWithKnownCast(
+  promptVersion: string,
+  existing: Array<{ name: string; aliases: string[] }>
+): string {
+  const names = [
+    ...new Set(
+      collectKnownPeople(existing, [])
+        .slice(0, KNOWN_CHARACTER_PEOPLE_LIMIT)
+        .map((person) => person.name)
+    ),
+  ].sort();
+  if (names.length === 0) return promptVersion;
+  // 区切りは名前に現れない文字（改行）にする。「相沢 春人」の空白を
+  // 区切りと取り違えない
+  return `${promptVersion}:cast${sha1Text(names.join("\n")).slice(0, 16)}`;
 }

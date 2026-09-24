@@ -236,6 +236,23 @@ export function isUnchangingField(field: string): boolean {
 }
 
 /**
+ * 面を積み重ねる項目（作者の裁定、2026-09-24 夜。`personalityFacets.ts`）。
+ *
+ * 性格は同時に成り立つ面を重ねて描かれるので、**変化の記録の値1つで
+ * 本体を置き換えてはいけない。** 本体は面をつないだ文章で、変化の記録に
+ * 残るのは作者が「変わった」と決めたものだけである。そこで、
+ * - 食い違いを自動で畳まない（`isFoldableConflict`）
+ * - 変化の値で本体を入れ替えない（`adoptableValueOfField`）
+ * - 要確認として数えない（`heldChangesOfField`）
+ * 本体を動かすのは、面を足す処理と作者の操作だけにする。
+ */
+const ACCUMULATING_FIELDS = new Set(["personality"]);
+
+export function isAccumulatingField(field: string): boolean {
+  return ACCUMULATING_FIELDS.has(field);
+}
+
+/**
  * その食い違いを、作者に聞かずに変化として畳んでよいか。
  *
  * **判断の分かれ目は「同じ話の中で矛盾しているか」である。**
@@ -251,6 +268,8 @@ export function isUnchangingField(field: string): boolean {
  */
 export function isFoldableConflict(conflict: RecordConflict): boolean {
   if (UNCHANGING_FIELDS.has(conflict.field)) return false;
+  // 性格の食い違いは変化へ畳まない。面へ移す（`migratePersonalityFacets`）
+  if (ACCUMULATING_FIELDS.has(conflict.field)) return false;
 
   const entries = observationsOf(conflict);
   if (entries.length < 2) return false;
@@ -365,6 +384,8 @@ export function adoptableValueOfField(
   field: string,
   current: string | null | undefined
 ): string | undefined {
+  // 面を積む項目は、変化の値1つで本体を置き換えない（`isAccumulatingField`）
+  if (ACCUMULATING_FIELDS.has(field)) return undefined;
   const latest = latestEntry(
     changes.filter((change) => change.field === field && changeMovesBody(change))
   );
@@ -386,6 +407,8 @@ export function heldChangesOfField(
   field: string,
   current: string | null | undefined
 ): RecordChange[] {
+  // 面を積む項目の本体は変化の値ではないので、「本体へ入れていない」も無い
+  if (ACCUMULATING_FIELDS.has(field)) return [];
   const currentLast = lastChapterOfValue(changes, field, current) ?? -Infinity;
   return changesOfField(changes, field).filter(
     (change) =>

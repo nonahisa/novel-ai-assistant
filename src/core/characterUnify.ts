@@ -77,6 +77,9 @@ export function unifyCharacters(
       iconSource: keep.icon ? keep.iconSource : absorb.iconSource,
       role: keep.role ?? absorb.role,
       personality: keep.personality ?? absorb.personality,
+      // 性格の面（2026-09-24 夜）は両方から引き継ぐ。同じ面は話数を合わせて
+      // 1つにする。吸収される側の面を落とすと、見えた話と根拠が消える
+      personalityFacets: unifyPersonalityFacets(keep, absorb),
       appearance: keep.appearance ?? absorb.appearance,
       physical: keep.physical ?? absorb.physical,
       firstPerson: {
@@ -138,6 +141,35 @@ export function unifyCharacters(
     },
     retiredId: absorb.id,
   };
+}
+
+/** 性格の面を1つにまとめる。値が同じ面は話数を合わせ、根拠は先のものを残す */
+function unifyPersonalityFacets(
+  keep: Character,
+  absorb: Character
+): Character["personalityFacets"] {
+  const merged: Character["personalityFacets"] = [];
+  for (const facet of [
+    ...(keep.personalityFacets ?? []),
+    ...(absorb.personalityFacets ?? []),
+  ]) {
+    const found = merged.find(
+      (entry) => normalizeSpacing(entry.value) === normalizeSpacing(facet.value)
+    );
+    if (!found) {
+      merged.push({ ...facet, chapters: [...facet.chapters] });
+      continue;
+    }
+    found.chapters = [...new Set([...found.chapters, ...facet.chapters])].sort(
+      (a, b) => a - b
+    );
+    found.evidence = found.evidence ?? facet.evidence;
+    // 作者が「変わった」と決めた印は、片方で決めていれば残す
+    if (!found.supersededBy && facet.supersededBy) {
+      found.supersededBy = facet.supersededBy;
+    }
+  }
+  return merged;
 }
 
 const SPOILER_ORDER = ["public", "staff_only", "author_only"] as const;

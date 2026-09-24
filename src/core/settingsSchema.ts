@@ -178,7 +178,27 @@ export function characterSchema(): Record<string, unknown> {
       type: ["string", "null"],
       description:
         "性格。**この項目だけは本文の言動からの推論を認める。** " +
-        "ただし必ず「どう振る舞ったか」を添えること",
+        "ただし必ず「どう振る舞ったか」を添えること。" +
+        "**同時に成り立つ面を「／」でつなぐ**（personalityFacets の面から作られる）",
+    },
+    // 性格の面（2026-09-24 夜）。外部のAIにも見せる——見せないと、
+    // 性格を1つの値に書き直されたとき、作者が決めた「過去の面」が読み取れない
+    personalityFacets: {
+      type: "array",
+      description:
+        "**性格の面。** 性格は上書きせず、話ごとに見えた面を積み重ねる。" +
+        "supersededBy は作者が「この面から変わった」と決めた印なので、" +
+        "**書き換えない・消さないこと**",
+      items: {
+        type: "object",
+        properties: {
+          value: { type: "string", minLength: 1 },
+          chapters: { type: "array", items: { type: "integer", minimum: 0 } },
+          evidence: { type: ["string", "null"] },
+          supersededBy: { type: "string" },
+        },
+        required: ["value"],
+      },
     },
     appearance: { type: ["string", "null"] },
     physical: { type: ["object", "null"] },

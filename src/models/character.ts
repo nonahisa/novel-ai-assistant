@@ -119,6 +119,35 @@ export interface RejectedRelation {
   via: RejectedRelationVia;
 }
 
+/**
+ * 性格の1つの面（作者の裁定、2026-09-24 夜。設計書6.5.10）。
+ *
+ * **性格は、同時に成り立つ面を積み重ねるものとして持つ。** 外見のように
+ * 「今の値が1つ」ではない——第1話で「無愛想だが面倒見はよい」、第5話で
+ * 「臆病」と見えたら、それは変わったのではなく別の面が見えただけである。
+ * 以前は外見と同じ上書き型で扱っていたので、第5話の一面が本体を押し流し、
+ * 年表には起きていない「性格の変化」が載っていた。
+ *
+ * 本体の `personality` は、過去の面を除いた面を「／」でつないだ文章として
+ * 持つ（資料・紹介・AIへの材料は本体を読むので、どこも書き換えずに
+ * 全部の面が出る）。
+ */
+export interface PersonalityFacet {
+  value: string;
+  /** その面が見えた話数。空なら「それ以前」（面の仕組みより前からあった値） */
+  chapters: number[];
+  /** 抽出が示した本文の引用。無ければ null */
+  evidence: string | null;
+  /**
+   * 作者が「作中でこの面から変わった」と決めたときの、変わった先の面。
+   *
+   * **AIは書かない。** 変化かどうかを本文から機械で見分けるのは難しいので、
+   * 既定は積み、変化は作者が設定資料パネルで決める。立っている面は
+   * 「過去の面」として本体から外れる（記録からは消えない）
+   */
+  supersededBy?: string;
+}
+
 export interface FirstPersonVariant {
   form: string;
   context: string | null;
@@ -173,6 +202,11 @@ export interface Character {
   affiliation: string | null;
   role: string | null;
   personality: string | null;
+  /**
+   * 性格の面（2026-09-24 夜）。`PersonalityFacet` を参照。
+   * **古い形の資料には無い**ので、読み込みで空配列を補う。
+   */
+  personalityFacets: PersonalityFacet[];
   appearance: string | null;
   physical: CharacterPhysical | null;
   firstPerson: {
@@ -252,6 +286,7 @@ export function emptyCharacter(id: string, name: string): Character {
     affiliation: null,
     role: null,
     personality: null,
+    personalityFacets: [],
     appearance: null,
     physical: null,
     firstPerson: { default: null, variants: [] },
@@ -293,6 +328,7 @@ export function normalizeCharacter(raw: Partial<Character>): Character {
     ...raw,
     aliases: raw.aliases ?? [],
     distinctFrom: raw.distinctFrom ?? [],
+    personalityFacets: raw.personalityFacets ?? [],
     firstPerson: raw.firstPerson ?? base.firstPerson,
     addressTerms: raw.addressTerms ?? [],
     relations: raw.relations ?? [],
@@ -434,6 +470,27 @@ export function parseCharacter(raw: unknown): Character {
       id: (entry.id as string | null | undefined) ?? null,
     };
   });
+  // 性格の面（2026-09-24 夜）。**壊れた形は読み込みエラーにする。**
+  // 黙って空にすると、作者が「変化」と決めた印（supersededBy）が消え、
+  // 過去の面が次の抽出で本体へ戻る
+  const personalityFacets = optionalObjectArray(
+    value.personalityFacets,
+    "personalityFacets",
+    (entry, path) => {
+      requireNonEmptyString(entry.value, `${path}.value`);
+      optionalNumberArray(entry.chapters, `${path}.chapters`);
+      optionalNullableString(entry.evidence, `${path}.evidence`);
+      optionalString(entry.supersededBy, `${path}.supersededBy`);
+      const facet: PersonalityFacet = {
+        value: entry.value as string,
+        chapters: (entry.chapters as number[] | undefined) ?? [],
+        evidence: (entry.evidence as string | null | undefined) ?? null,
+      };
+      const supersededBy = (entry.supersededBy as string | undefined)?.trim();
+      if (supersededBy) facet.supersededBy = supersededBy;
+      return facet;
+    }
+  );
   const abilities = optionalObjectArray(value.abilities, "abilities", (entry, path) => {
     requireNonEmptyString(entry.name, `${path}.name`);
     optionalNullableString(entry.abilityId, `${path}.abilityId`);
@@ -475,6 +532,7 @@ export function parseCharacter(raw: unknown): Character {
     relations,
     rejectedRelations,
     distinctFrom,
+    personalityFacets,
     abilities,
     conflicts,
     changes,

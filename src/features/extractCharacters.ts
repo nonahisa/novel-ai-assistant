@@ -79,7 +79,7 @@ import { PendingUpdateStore } from "../core/pendingUpdates";
 import { describeHeldChanges } from "../core/recordChanges";
 import { applyPendingCharacterUpdates } from "./applyPendingUpdates";
 import type { ProposalPanel } from "./proposalPanel";
-import { ChunkCache } from "../core/chunkCache";
+import { ChunkCache, type CacheKeyBase } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
 import {
   describeChunkSettings,
@@ -171,6 +171,11 @@ interface ExtractionSummaryCounts {
    * 設定資料パネルから認められる。**黙って据え置いたことにしない**
    */
   heldChanges: number;
+  /**
+   * 性格を以前の形（作中の変化・食い違い）から、面ごとに積む形へ移した人物
+   * （作者の裁定、2026-09-24 夜）。**黙って書き換えたことにしない**
+   */
+  personalityMigrated: string[];
   /**
    * 作者が「別人だ」と決めた呼び名が付いていたため取り込まなかった候補（設計書6.5.8）。
    * 件数だけでなく中身も持つ——どのレコードに何が付いていたかを出さないと、
@@ -470,12 +475,14 @@ export async function extractCharacters(
   const cache = new ChunkCache(work);
   await cache.load();
 
-  const cacheKeyBase = {
-    feature: "character_extract",
-    promptVersion: CHARACTER_EXTRACT_VERSION,
-    providerId: resolved.provider.id,
-    model: resolved.model,
-  };
+  // **鍵には、既に分かっている人物の顔ぶれも入る**（2026-09-24 夜）。
+  // 人物が増えたら・名前を直したら読み直す。確認画面の件数と送る量も
+  // この鍵で数えるので、読み直すぶんが見積もりにそのまま載る
+  const cacheKeyBase = characterExtractCacheKey(
+    resolved.provider.id,
+    resolved.model,
+    loaded.characters
+  );
 
   // 未処理チャンクの件数を先に出して確認を取る
   const pending = chunks.filter(
@@ -1000,6 +1007,7 @@ export async function extractCharacters(
     conflicts: merged?.conflicts.length ?? 0,
     folded: merged?.folded.length ?? 0,
     heldChanges: merged?.heldChanges.length ?? 0,
+    personalityMigrated: merged?.personalityMigrated ?? [],
     rejectedDistinct: merged?.rejectedDistinct ?? [],
     honorificMerges: merged?.honorificMerges ?? [],
     skippedRejectedRelations: merged?.skippedRejectedRelations ?? [],
@@ -1479,6 +1487,8 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
     // 根拠が無いので本体を据え置いた変化（作者の裁定、2026-09-23）。
     // **黙って据え置いたことにしない**。0件なら何も足さない
     describeHeldChanges(counts.heldChanges) +
+    // 性格を面ごとに積む形へ移した人物（2026-09-24 夜）。0件なら何も足さない
+    describePersonalityMigration(counts.personalityMigrated) +
     // 既存人物への変更は承認待ちに回る。件数を出さないと、
     // 作者は「更新0名」を見て何も増えなかったと思ってしまう
     (counts.pendingUpdates > 0
@@ -1733,6 +1743,24 @@ function describeHonorificMerges(
     .join("、");
   const rest = merges.length > 3 ? ` ほか${merges.length - 3}件` : "";
   return shown + rest;
+}
+
+/**
+ * 性格を面ごとに積む形へ移した人物（作者の裁定、2026-09-24 夜）。
+ *
+ * 移すと本体の性格が「A／B」になり、年表から性格の「変化」が消える。
+ * **黙って書き換えたことにしない**ので名前を出す。0人なら何も足さない
+ * （移すのは古い形の資料で1度きりなので、毎回は出ない）。
+ */
+export function describePersonalityMigration(names: readonly string[]): string {
+  if (names.length === 0) return "";
+  const shown = names.slice(0, 3).join("、");
+  const rest = names.length > 3 ? ` ほか${names.length - 3}名` : "";
+  return (
+    `\n性格を「面ごとに積む」形へ移した人物 ${names.length}名（${shown}${rest}）。` +
+    "以前「作中の変化」として並んでいた性格は、同時に成り立つ面として残しました。" +
+    "本当に変わったものは、設定資料パネルの「性格の面」から「作中の変化にする」で記録できます"
+  );
 }
 
 function describeCharacterStoreError(error: CharacterStoreError): string {
@@ -1995,7 +2023,34 @@ export function buildKnownCharacterNames(
   移したのは、MCP から同じプロンプトを組むためである（設計書6.87.8）。
 */
 export { buildKnownCharacterNamesForPrompt } from "../core/knownCharacterNames";
-import { buildKnownCharacterNamesForPrompt } from "../core/knownCharacterNames";
+import {
+  buildKnownCharacterNamesForPrompt,
+  promptVersionWithKnownCast,
+} from "../core/knownCharacterNames";
+
+/**
+ * 人物抽出の使い回しの鍵（設計書6.27.6。顔ぶれは 2026-09-24 夜から）。
+ *
+ * 内容ハッシュ・AIサービス・モデル・プロンプト版に、**既に分かっている
+ * 人物の顔ぶれ**を足す（`promptVersionWithKnownCast`）。未処理の件数を
+ * 数える所と、答えを引く所・書く所が**同じ鍵**を使うよう、ここ1か所で作る
+ * ——別々に組むと、確認画面の見積もりと実際に送る件数が食い違う。
+ */
+export function characterExtractCacheKey(
+  providerId: string,
+  model: string,
+  characters: Array<{ name: string; aliases: string[] }>
+): CacheKeyBase {
+  return {
+    feature: "character_extract",
+    promptVersion: promptVersionWithKnownCast(
+      CHARACTER_EXTRACT_VERSION,
+      characters
+    ),
+    providerId,
+    model,
+  };
+}
 
 /** 変更された人物だけを書き戻す */
 export function selectChangedCharacters(

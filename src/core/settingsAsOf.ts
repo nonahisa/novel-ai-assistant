@@ -1,4 +1,33 @@
+import type { PersonalityFacet } from "../models/character";
 import type { RecordChange } from "../models/jsonValidation";
+import {
+  personalityAsOf,
+  personalityRevealedAfter,
+} from "./personalityFacets";
+
+/**
+ * 性格を面で巻き戻せる記録か（2026-09-24 夜）。
+ *
+ * 性格は面ごとに見えた話を持つ（`personalityFacets.ts`）。変化の記録には
+ * 作者が「変わった」と決めたものしか残らないので、**面を見ないと、後の話で
+ * 初めて見えた面まで前の話の材料に混ざる**（設計書6.10.3と同じ落とし穴）。
+ */
+function personalityRecord(
+  record: object
+): { personality: string | null; personalityFacets: PersonalityFacet[] } | undefined {
+  const source = record as {
+    personality?: unknown;
+    personalityFacets?: unknown;
+  };
+  if (!Array.isArray(source.personalityFacets)) return undefined;
+  if (typeof source.personality !== "string" && source.personality !== null) {
+    return undefined;
+  }
+  return {
+    personality: source.personality,
+    personalityFacets: source.personalityFacets as PersonalityFacet[],
+  };
+}
 
 /**
  * 設定資料を「第N話の時点で分かっていること」に絞る（設計書6.10.3）。
@@ -124,9 +153,19 @@ export function recordAsOf<T extends object>(
   if (!changes) return record;
 
   const rolled = { ...record } as Record<string, unknown>;
+  const facetSource = personalityRecord(record);
   for (const field of fields) {
     const current = rolled[field];
     if (typeof current !== "string" && current !== null) continue;
+    // 性格は面で巻き戻す。面で扱えない記録（面が無い・本体が手で書き換え
+    // られている）は、これまでどおり変化の記録で巻き戻す
+    if (field === "personality" && facetSource && chapter !== null) {
+      const asOf = personalityAsOf(facetSource, chapter);
+      if (asOf !== undefined) {
+        rolled[field] = asOf;
+        continue;
+      }
+    }
     rolled[field] = valueAsOf(
       changes,
       field,
@@ -171,7 +210,19 @@ export function factsRevealedAfter<T extends object>(
   if (!changes) return [];
 
   const found: FutureFact[] = [];
+  const facetSource = personalityRecord(record);
   for (const field of fields) {
+    // 性格は面で見る。変化の記録（作者が決めたもの）は面と同じ値の写しなので、
+    // 両方から拾うと同じ事実が2件並ぶ
+    if (field === "personality" && facetSource) {
+      const revealed = personalityRevealedAfter(facetSource, chapter);
+      if (revealed !== undefined) {
+        for (const facet of revealed) {
+          found.push({ field, value: facet.value, chapter: facet.chapter });
+        }
+        continue;
+      }
+    }
     for (const change of changes) {
       if (change.field !== field) continue;
       const known = change.chapters.filter((at) => Number.isFinite(at));

@@ -917,8 +917,9 @@ export function renumberSettingsRecord<T extends ChapteredRecord>(
 /**
  * 登場人物の話数を付け替える（6.67.3）。
  *
- * 話数を持つ場所は6か所ある——登場話数・一人称の使い分け・作中での変化・
- * 食い違い（値ごとの観測を含む）・呼び名の初出と最後・能力の初出と登場話数。
+ * 話数を持つ場所は7か所ある——登場話数・一人称の使い分け・作中での変化・
+ * 食い違い（値ごとの観測を含む）・呼び名の初出と最後・能力の初出と登場話数・
+ * 性格の面（2026-09-24 夜）。
  * **どれか1つでも取りこぼすと、そこだけが別の話を指す。**
  */
 export function renumberCharacter(
@@ -953,6 +954,10 @@ export function renumberCharacter(
       })),
       changes: counter.changes(character.changes),
       conflicts: counter.conflicts(character.conflicts),
+      personalityFacets: (character.personalityFacets ?? []).map((facet) => ({
+        ...facet,
+        chapters: counter.list(facet.chapters),
+      })),
     },
     changed: counter.changed,
   };
