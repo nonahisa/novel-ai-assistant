@@ -408,6 +408,234 @@ describe("回収の候補（P-26）", () => {
   });
 });
 
+/**
+ * 張った箇所の**近く**を回収と言い張る答え（実機確認 2026-09-25 深夜、
+ * gemma4:e4b・ハイエルフ未亡人の写しの第8話）。
+ *
+ * 前は「引用が張った箇所と丸ごと同じ」ときだけ弾いていたので、
+ * **張った台詞を含む1行まるごと**や、**張った台詞と同じ行の前半**を
+ * 返されると、回収として通っていた（台帳が張った話のうちに閉じる）。
+ *
+ * 一方で、**同じ言い回しが本当に回収の場面で繰り返される**ことはある
+ * （「あの時と同じ台詞を、今度は別の意味で言う」）。文字列だけで落とすと
+ * それまで消えるので、**本文の中の位置**（行と話数）で見る。
+ */
+describe("張った箇所の近くを回収と言い張る（位置で見る）", () => {
+  /** 第8話の本文から、張った2か所とその前後だけを抜いたもの（写しのまま） */
+  const CH8_LINES = [
+    "　門番に首から下げた冒険者証を見せながら聞くと、一瞥だけして顔をあげた。",
+    "",
+    "「帝都近郊でかなり強力な爆炎魔法が複数回観測されたんだ。魔物が騒いでいるので、スタンピードが起こるかもしれない」",
+    "",
+    "　心当たりがありすぎて、顔がひきつる。スタンピードは魔物が狂乱状態になって街を襲う現象のことだ。",
+    "",
+    "「ちょっと訳ありでね。こちらのエルシーさんを冒険者登録したいんだけど」",
+    "",
+    "　騒ぐ冒険者たちを放置して、エルシーさんを前に押し出す。ウィーネさんはエルシーさんの全身を見回し、ジト目でこちらを見た。",
+    "",
+    "「わかりました。エルシーさん、こちらへ」",
+  ];
+  const CH8 = CH8_LINES.join("\n");
+  const ch8: Chunk = {
+    filePath: "C:/works/8_金貨百枚分の小銭.txt",
+    index: 0,
+    text: CH8,
+    startLine: 0,
+    chapterStart: 8,
+    chapterEnd: 8,
+    hash: "hash-ch8",
+  };
+
+  /** 写しに置いた、答えの分かっている伏線（作者の記録の形） */
+  const OPEN = [
+    {
+      id: "foreshadow_101",
+      plantedQuote: "魔物が騒いでいるので、スタンピードが起こるかもしれない",
+      plantedChapter: 8,
+    },
+    {
+      id: "foreshadow_103",
+      plantedQuote: "こちらのエルシーさんを冒険者登録したいんだけど",
+      plantedChapter: 8,
+    },
+  ];
+
+  test("張った台詞を含む1行まるごとは、回収ではない（e4b の実物の答え）", () => {
+    const result = validateForeshadowResolutions(
+      {
+        resolutions: [
+          {
+            id: "foreshadow_103",
+            quote: "「ちょっと訳ありでね。こちらのエルシーさんを冒険者登録したいんだけど」",
+            note: "アジャーノが目立たないようにエルシーを冒険者登録させようとする行動が実際に起こり、登録室へ案内されたため、回収されたと言える。",
+          },
+        ],
+      },
+      ch8,
+      OPEN
+    );
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected[0].reason).toBe("planted_echo");
+  });
+
+  test("張った台詞と同じ行の前半も、回収ではない（e4b の実物の答え）", () => {
+    const result = validateForeshadowResolutions(
+      {
+        resolutions: [
+          {
+            id: "foreshadow_101",
+            quote: "帝都近郊でかなり強力な爆炎魔法が複数回観測されたんだ。",
+            note: "本文中でスタンピードの懸念が語られるのみで、実際にスタンピードが起こる描写や、その懸念が解消された描写はないため、回収されたとは言えない。",
+          },
+        ],
+      },
+      ch8,
+      OPEN
+    );
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected[0].reason).toBe("planted_echo");
+  });
+
+  test("張った台詞の一部だけを返しても、同じ箇所なら回収ではない", () => {
+    const result = validateForeshadowResolutions(
+      {
+        resolutions: [
+          { id: "foreshadow_101", quote: "スタンピードが起こるかもしれない", note: "" },
+        ],
+      },
+      ch8,
+      OPEN
+    );
+
+    expect(result.rejected[0].reason).toBe("planted_echo");
+  });
+
+  test("同じ話でも、張った行とは別の行なら通す（同じ話の中での回収）", () => {
+    // 短い話では同じ話の中で張って回収する（0.24.10）。行が違えば位置では落とさない
+    const result = validateForeshadowResolutions(
+      {
+        resolutions: [
+          { id: "foreshadow_103", quote: "「わかりました。エルシーさん、こちらへ」", note: "" },
+        ],
+      },
+      ch8,
+      OPEN
+    );
+
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted[0]).toMatchObject({ id: "foreshadow_103", chapter: 8 });
+  });
+
+  test("張った言い回しが、あとの話でもう一度言われたら通す（その話数で）", () => {
+    // 第8話と第10話をまとめたチャンク。**同じ台詞が2か所にある**。
+    // 第8話の側は張った箇所、第10話の側は回収の場面での繰り返し
+    const CH10 =
+      "　試験官は目を丸くしたまま、書類に判を押した。\n" +
+      "「こちらのエルシーさんを冒険者登録したいんだけど、って言われた時は冗談かと思いました。十分すぎる合格です」";
+    const text = `${CH8}\n${CH10}`;
+    const both: Chunk = {
+      filePath: "C:/works/8_金貨百枚分の小銭.txt",
+      index: 0,
+      text,
+      startLine: 0,
+      chapterStart: 8,
+      chapterEnd: 10,
+      hash: "hash-ch8-10",
+      segments: [
+        {
+          filePath: "C:/works/8_金貨百枚分の小銭.txt",
+          chapterStart: 8,
+          chapterEnd: 8,
+          start: 0,
+          end: CH8.length + 1,
+          startLine: 0,
+        },
+        {
+          filePath: "C:/works/10_槍が折れて、相棒ができた.txt",
+          chapterStart: 10,
+          chapterEnd: 10,
+          start: CH8.length + 1,
+          end: text.length,
+          startLine: 0,
+        },
+      ],
+    };
+
+    const result = validateForeshadowResolutions(
+      {
+        resolutions: [
+          {
+            id: "foreshadow_103",
+            quote: "こちらのエルシーさんを冒険者登録したいんだけど",
+            note: "",
+          },
+        ],
+      },
+      both,
+      OPEN
+    );
+
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted[0]).toMatchObject({
+      id: "foreshadow_103",
+      chapter: 10,
+      filePath: "C:/works/10_槍が折れて、相棒ができた.txt",
+    });
+  });
+
+  test("張った話が入っていないチャンクなら、同じ言い回しでも通す", () => {
+    // 第10話だけのチャンク。張った箇所はこのチャンクに居ないので、
+    // 同じ言い回しは繰り返しである（張った箇所を指しようがない）
+    const ch10: Chunk = {
+      filePath: "C:/works/10_槍が折れて、相棒ができた.txt",
+      index: 0,
+      text: "「こちらのエルシーさんを冒険者登録したいんだけど、って言われた時は冗談かと思いました」",
+      startLine: 0,
+      chapterStart: 10,
+      chapterEnd: 10,
+      hash: "hash-ch10",
+    };
+
+    const result = validateForeshadowResolutions(
+      {
+        resolutions: [
+          {
+            id: "foreshadow_103",
+            quote: "こちらのエルシーさんを冒険者登録したいんだけど",
+            note: "",
+          },
+        ],
+      },
+      ch10,
+      OPEN
+    );
+
+    expect(result.accepted[0]).toMatchObject({ id: "foreshadow_103", chapter: 10 });
+  });
+
+  test("張った話数が分からない記録では、チャンクの中の張った文の位置をすべて張った箇所とみなす", () => {
+    // 話数が無いと「どれが張った箇所か」を決められない。取り違えて
+    // 台帳を閉じるより、回収を1回見送るほうが害が小さい
+    const result = validateForeshadowResolutions(
+      {
+        resolutions: [
+          {
+            id: "foreshadow_103",
+            quote: "「ちょっと訳ありでね。こちらのエルシーさんを冒険者登録したいんだけど」",
+            note: "",
+          },
+        ],
+      },
+      ch8,
+      [{ id: "foreshadow_103", plantedQuote: "こちらのエルシーさんを冒険者登録したいんだけど" }]
+    );
+
+    expect(result.rejected[0].reason).toBe("planted_echo");
+  });
+});
+
 describe("引用の位置", () => {
   test("内訳をまたぐ引用は、話数を付けずに通す", () => {
     // チャンク全体には在るので捏造ではない。**推測で話数を埋めない**

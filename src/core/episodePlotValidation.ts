@@ -8,6 +8,7 @@ import type { EpisodePlotItem } from "./episodePlotDoc";
 import {
   EPISODE_PLOT_CHECK_HINTS,
   EPISODE_PLOT_CHECK_KINDS,
+  episodePlotCheckKindsFor,
   type EpisodePlotCheckKind,
 } from "../prompts/episodePlotCheck";
 import {
@@ -53,7 +54,11 @@ export type EpisodePlotRejectReason =
   /** 同じ行への二重の指摘 */
   | "duplicate"
   /** 件数の上限を超えた */
-  | "over_budget";
+  | "over_budget"
+  /** 目標の節が空なのに、目標の観点で指摘した（P-27） */
+  | "no_goal"
+  /** 理由の中で、自分の指摘を打ち消している（P-28） */
+  | "self_denied";
 
 export interface RejectedEpisodePlotFinding {
   raw: unknown;
@@ -165,6 +170,8 @@ const REJECT_REASON_LABELS: Record<EpisodePlotRejectReason, string> = {
   nothing_pointed: "どこも指していない",
   duplicate: "同じ行への重なり",
   over_budget: "件数の上限超え",
+  no_goal: "目標が書かれていないのに目標で判断",
+  self_denied: "理由で自分の指摘を打ち消している",
 };
 
 /**
@@ -204,9 +211,14 @@ export interface EpisodePlotFinding {
   reason: string;
 }
 
+/**
+ * @param input.goal 単話プロットの「この話の目標」の節（空なら空文字）。
+ *   **空のときは、目標を物差しにする観点の指摘を落とす**
+ *   （`episodePlotCheckKindsFor`。プロンプトもその観点を尋ねない）
+ */
 export function validateEpisodePlotCheck(
   raw: unknown,
-  input: { items: readonly EpisodePlotItem[]; maxFindings: number }
+  input: { items: readonly EpisodePlotItem[]; goal: string; maxFindings: number }
 ): {
   accepted: EpisodePlotFinding[];
   rejected: RejectedEpisodePlotFinding[];
@@ -238,7 +250,7 @@ export function validateEpisodePlotCheck(
 
 function validateEpisodePlotFindings(
   raw: unknown,
-  input: { items: readonly EpisodePlotItem[]; maxFindings: number }
+  input: { items: readonly EpisodePlotItem[]; goal: string; maxFindings: number }
 ): {
   accepted: EpisodePlotFinding[];
   rejected: RejectedEpisodePlotFinding[];
@@ -246,6 +258,12 @@ function validateEpisodePlotFindings(
   const accepted: EpisodePlotFinding[] = [];
   const rejected: RejectedEpisodePlotFinding[] = [];
   const seen = new Set<number>();
+  // 尋ねた観点だけを受け取る。**目標が空なら「目標に向かっていない」
+  // 「目標と矛盾」は成り立たない**——照らす目標が無い。実機確認
+  // （2026-09-25 深夜、gemma4:e4b）で、目標の空な19話に11件これが付き、
+  // 理由は「目標が不明なため判断できません」だった。プロンプトからも外したが、
+  // 小さいモデルは尋ねていない観点でも見本を覚えて返すので、ここでも落とす
+  const askedKinds = episodePlotCheckKindsFor(input.goal);
 
   for (const entry of findingsOf(raw)) {
     if (!isRecord(entry)) {
@@ -262,6 +280,10 @@ function validateEpisodePlotFindings(
     const kind = normalizeKind(asString(entry.kind), EPISODE_PLOT_CHECK_KINDS);
     if (!kind) {
       rejected.push({ raw: entry, reason: "unknown_kind" });
+      continue;
+    }
+    if (!askedKinds.includes(kind)) {
+      rejected.push({ raw: entry, reason: "no_goal" });
       continue;
     }
     const matched = matchPlotItem(item, input.items);
@@ -345,6 +367,11 @@ export function validateEpisodePlotContrast(
       rejected.push({ raw: entry, reason: "placeholder" });
       continue;
     }
+    // **理由の中で、自分の指摘を打ち消している答えを通さない**（`deniesOwnContrast`）
+    if (deniesOwnContrast(kind, reason)) {
+      rejected.push({ raw: entry, reason: "self_denied" });
+      continue;
+    }
 
     // 「無い」を言葉で書いてくることがある（`null` ではなく「該当なし」）。
     // 中身の無い言葉は、指していないものとして扱う
@@ -400,6 +427,61 @@ export function validateEpisodePlotContrast(
   }
 
   return { accepted, rejected };
+}
+
+/**
+ * 「順序（流れ）は箇条書きと一致している」と**言い切った**形。
+ *
+ * 実機確認（2026-09-25 深夜、gemma4:e4b・ギルドの19話）で、箇条書きどおりに
+ * 書いた話に「順序の食い違い」を挙げ、理由に「**順序は合致しているが**、本文の
+ * 描写がより詳細」「メアリーからの誘いと断りの**流れは本文の描写と一致している**」
+ * と書いてきた。配列があると何か埋めようとする型である（矛盾検知の
+ * `self_denied` と同じ）。
+ *
+ * **網は絞る。** 矛盾検知では「一致して**いるか**確認が必要」（疑問）や
+ * 「文体が一致して**いるため**、誤記の可能性が高い」（理由）まで打ち消しと読み、
+ * 仕込みの正解を落とした（0.86.1 で直した。縛りの洗い出し1番）。
+ * ここでも疑問・理由の形（か・ため・ので・から）は打ち消しと読まない。
+ * 主語も「順序・順番・並び・流れ」に限る——「描写が一致している」だけでは、
+ * 何が一致しているのか分からない。
+ *
+ * **「順序の食い違い」の指摘にだけ当てる。** 「箇条書きに無い」の理由で
+ * 「順序は合っているが、この場面は箇条書きに無い」と書くのは、打ち消しではない。
+ */
+const ORDER_DENIAL_PATTERN =
+  /(順序|順番|並び|流れ)(は|も|が)?[^。．！!？?\n]{0,30}?((合致|一致)して(いる|います|おり)|(とおり|通り|どおり)(だ|です|で(ある|あり)|に(進|描かれ|な)))(?!の?か|ため|ので|から)/;
+
+/**
+ * 「食い違いはない」と言い切った形。どの種別でも、自分の指摘の打ち消しである。
+ *
+ * 「ずれ」「入れ替わり」は入れない——「起きていない」の理由で「本文では
+ * 二人の入れ替わりはない」と書けば、それは本物の指摘（箇条書きの出来事が
+ * 起きていない）になる。
+ */
+const CONTRAST_DENIAL_PATTERN =
+  /食い違い(は|が)?(特に)?(ない|なく|ありませ|見られ(ない|ませ|ず)|見当たら(ない|ず))/;
+
+/**
+ * 入れ替わっていると**言い切っている**部分。打ち消しの言葉が混ざっていても、
+ * これがあれば本物の指摘として残す（矛盾検知の `AFFIRMATION_PATTERN` と同じ歯止め。
+ * 「前半の順序は合致しているが、後半は箇条書きと逆になっている」を落とさない）。
+ */
+const ORDER_AFFIRMATION_PATTERN =
+  /(逆|反対)(に|の順|の並び)|入れ替わって(いる|います|おり)(?!の?か)|(順序|順番|並び)(が|は)?[^。．！!？?\n]{0,20}?(異な(る|り|って)|違って|違う)(?!の?か)|食い違って(いる|います|おり)(?!の?か)|より(も)?(前|先)に(描かれ|起き|来|置かれ)/;
+
+/**
+ * 理由の中で、自分の指摘を打ち消しているか（P-28）。
+ *
+ * 種別ごとに見る。順序の網は「順序の食い違い」にだけ当て、
+ * 「食い違いはない」の網はどの種別にも当てる。
+ */
+export function deniesOwnContrast(
+  kind: EpisodePlotContrastKind,
+  reason: string
+): boolean {
+  if (ORDER_AFFIRMATION_PATTERN.test(reason)) return false;
+  if (CONTRAST_DENIAL_PATTERN.test(reason)) return true;
+  return kind === "順序の食い違い" && ORDER_DENIAL_PATTERN.test(reason);
 }
 
 // ── 共通の小物 ───────────────────────────────────

@@ -29,8 +29,14 @@ const TEXT = [
   "老人が訪ねてきた。",
 ].join("\n");
 
+/** 目標の書かれた単話プロット（目標が空のときの扱いは下の describe で見る） */
+const GOAL = "ミナが旅に出ると決める。";
+
 function check(findings: unknown[], maxFindings = 5) {
-  return validateEpisodePlotCheck({ findings }, { items: ITEMS, maxFindings });
+  return validateEpisodePlotCheck(
+    { findings },
+    { items: ITEMS, goal: GOAL, maxFindings }
+  );
 }
 
 function contrast(findings: unknown[], maxFindings = 5) {
@@ -195,7 +201,7 @@ describe("P-27 良いところ（1.9）", () => {
           { item: "老人が訪ねて", why: "外から話を動かす出来事になっている" },
         ],
       },
-      { items: ITEMS, maxFindings: 5 }
+      { items: ITEMS, goal: GOAL, maxFindings: 5 }
     );
     expect(result.accepted).toEqual([]);
     expect(result.rejected).toEqual([]);
@@ -214,7 +220,7 @@ describe("P-27 良いところ（1.9）", () => {
           { item: "朝、兄の部屋を片付ける", why: "日常から入っている" },
         ],
       },
-      { items: ITEMS, maxFindings: 5 }
+      { items: ITEMS, goal: GOAL, maxFindings: 5 }
     );
     expect(result.strengths.map((item) => item.quote)).toEqual(["朝、兄の部屋を片付ける"]);
     expect(result.strengthsDropped).toBe(1);
@@ -229,7 +235,7 @@ describe("P-27 良いところ（1.9）", () => {
           { item: "老人が訪ねてくる", why: "（効いている理由）" },
         ],
       },
-      { items: ITEMS, maxFindings: 5 }
+      { items: ITEMS, goal: GOAL, maxFindings: 5 }
     );
     expect(result.strengths).toEqual([]);
   });
@@ -240,7 +246,7 @@ describe("P-27 良いところ（1.9）", () => {
         findings: [],
         strengths: ITEMS.map((item) => ({ item: item.text, why: "効いている" })),
       },
-      { items: ITEMS, maxFindings: 1 }
+      { items: ITEMS, goal: GOAL, maxFindings: 1 }
     );
     expect(result.strengths).toHaveLength(3);
   });
@@ -356,6 +362,274 @@ describe("P-28 本文との照合の検証", () => {
 
     expect(accepted).toHaveLength(0);
     expect(rejected[0].reason).toBe("placeholder");
+  });
+});
+
+/**
+ * 理由の中で、自分の指摘を打ち消している答え（実機確認 2026-09-25 深夜、
+ * gemma4:e4b・ギルドの19話）。
+ *
+ * 箇条書きどおりに書いた話（対照）に「順序の食い違い」を挙げ、理由に
+ * 「**順序は合致しているが**、本文の描写がより詳細」と書いてきた。
+ * 自分で食い違っていないと言っている指摘は、作者に出さない
+ * （矛盾検知の `self_denied` と同じ考え）。
+ *
+ * **ただし網は絞る。** 矛盾検知では「一致して**いるか**確認が必要」
+ * （疑問）や「一致して**いるため**」（理由）まで打ち消しと読み、
+ * 仕込みの正解を落とした（0.86.1 で直した。縛りの洗い出し1番）。
+ * ここで落とすのは「順序（流れ）は一致している」「食い違いはない」と
+ * **言い切った**形だけにする。
+ */
+describe("P-28 理由で自分の指摘を打ち消している答え", () => {
+  /** 第9話の箇条書きと本文（照合に要る2行だけ。写しのまま） */
+  const CH9_ITEMS = [
+    {
+      text: "ホンゴーがウィズの失踪廃止のケース記録を綴ると、メアリーがやってきて父の不在による生活の変化を語る。",
+      line: 9,
+    },
+    {
+      text: "その後、ギルマスからの呼び出しを告げられたホンゴーは、メアリーから食事に誘われるが、受給者の関係者という理由で断るのだった。",
+      line: 10,
+    },
+  ];
+  const CH9_TEXT = [
+    "「お父さんの記録ですか？」",
+    "\t部署の違うメアリーさんが、後ろから声をかけてくる。",
+    "「あ、そうそう。ギルマスがホンゴーさんを呼んでこいって」",
+  ].join("\n");
+
+  function contrast9(findings: unknown[]) {
+    return validateEpisodePlotContrast(
+      { findings },
+      { items: CH9_ITEMS, text: CH9_TEXT, maxFindings: 5 }
+    );
+  }
+
+  test("「順序は合致しているが」と書いた順序の食い違いは落とす（e4b の実物の答え）", () => {
+    const { accepted, rejected } = contrast9([
+      {
+        kind: "順序の食い違い",
+        plotItem: CH9_ITEMS[0].text,
+        excerpt: "「お父さんの記録ですか？」\n\t部署の違うメアリーさんが、後ろから声をかけてくる。",
+        reason:
+          "本文では、ケース記録を綴った後にメアリーが声をかけているため、順序は合致しているが、本文の描写がより詳細。",
+      },
+    ]);
+
+    expect(accepted).toEqual([]);
+    expect(rejected[0].reason).toBe("self_denied");
+  });
+
+  test("「流れは本文の描写と一致している」と書いた順序の食い違いも落とす（e4b の実物の理由）", () => {
+    // 実物は引用が2行をつないだ形で本文照合に落ちていた。理由の形だけを見る
+    const { rejected } = contrast9([
+      {
+        kind: "順序の食い違い",
+        plotItem: CH9_ITEMS[1].text,
+        excerpt: "「あ、そうそう。ギルマスがホンゴーさんを呼んでこいって」",
+        reason:
+          "ギルマスからの呼び出しは本文で発生しているが、メアリーからの誘いと断りの流れは本文の描写と一致している。",
+      },
+    ]);
+
+    expect(rejected[0].reason).toBe("self_denied");
+  });
+
+  test("「食い違いはない」と言い切った指摘は、種別を問わず落とす", () => {
+    const { rejected } = contrast([
+      {
+        kind: EPISODE_PLOT_CONTRAST_KINDS[1],
+        plotItem: "老人が訪ねてくる",
+        excerpt: null,
+        reason: "本文との食い違いはありません。",
+      },
+    ]);
+
+    expect(rejected[0].reason).toBe("self_denied");
+  });
+
+  describe("落としすぎない（矛盾検知で本物を落とした形）", () => {
+    test("疑問の形（一致しているか）は打ち消しと読まない", () => {
+      const { accepted } = contrast9([
+        {
+          kind: "順序の食い違い",
+          plotItem: CH9_ITEMS[1].text,
+          excerpt: "「あ、そうそう。ギルマスがホンゴーさんを呼んでこいって」",
+          reason: "呼び出しと食事の誘いの順序が一致しているか、確かめてほしい。",
+        },
+      ]);
+
+      expect(accepted).toHaveLength(1);
+    });
+
+    test("理由の形（一致しているため）は打ち消しと読まない", () => {
+      const { accepted } = contrast9([
+        {
+          kind: "順序の食い違い",
+          plotItem: CH9_ITEMS[1].text,
+          excerpt: "「あ、そうそう。ギルマスがホンゴーさんを呼んでこいって」",
+          reason:
+            "前半の流れは一致しているため目立たないが、食事の誘いが呼び出しより前に描かれている。",
+        },
+      ]);
+
+      expect(accepted).toHaveLength(1);
+    });
+
+    test("打ち消しと一緒に、入れ替わりを言い切っていれば残す", () => {
+      const { accepted } = contrast9([
+        {
+          kind: "順序の食い違い",
+          plotItem: CH9_ITEMS[1].text,
+          excerpt: "「あ、そうそう。ギルマスがホンゴーさんを呼んでこいって」",
+          reason:
+            "前半の順序は合致しているが、食事の誘いと呼び出しは箇条書きと逆になっている。",
+        },
+      ]);
+
+      expect(accepted).toHaveLength(1);
+    });
+
+    test("順序の話は、ほかの種別の打ち消しにならない", () => {
+      // 「箇条書きに無い」の理由で順序に触れても、無い場面の指摘は生きている
+      const { accepted } = contrast9([
+        {
+          kind: "箇条書きに無い",
+          plotItem: null,
+          excerpt: "\t部署の違うメアリーさんが、後ろから声をかけてくる。",
+          reason: "順序は合致しているが、声をかける場面は箇条書きに無い。",
+        },
+      ]);
+
+      expect(accepted).toHaveLength(1);
+    });
+
+    test("26b が挙げた本物の順序の食い違いは残す（実物の答え）", () => {
+      const { accepted } = validateEpisodePlotContrast(
+        {
+          findings: [
+            {
+              kind: "順序の食い違い",
+              plotItem: "受付のスタッフが驚きの声を上げ、ホンゴーが「メアリーでなくても良い」と伝える。",
+              excerpt: "「いや、メアリーさんでなくても良いんですけど……」",
+              reason: "スタッフの驚きの声が、ホンゴーのセリフよりも前に描かれているため。",
+            },
+          ],
+        },
+        {
+          items: [
+            {
+              text: "受付のスタッフが驚きの声を上げ、ホンゴーが「メアリーでなくても良い」と伝える。",
+              line: 10,
+            },
+          ],
+          text: "キャーという黄色い悲鳴が様子をうかがう受付担当たちから聞こえてきた。\n「いや、メアリーさんでなくても良いんですけど……」",
+          maxFindings: 5,
+        }
+      );
+
+      expect(accepted).toHaveLength(1);
+    });
+  });
+});
+
+/**
+ * 目標が空の単話プロットに「目標に向かっていない」を出す答え
+ * （実機確認 2026-09-25 深夜、gemma4:e4b・ギルドの19話。19話とも目標の節が空）。
+ *
+ * 理由は「**目標が不明なため**、この展開が目標にどう繋がるか判断できません」。
+ * プロンプトには「目標が書かれていないときは判断できません」と書いてあったが、
+ * e4b は11件これを出した。**照らす目標が無いのだから、その観点の指摘は
+ * 成り立たない**——コードで外す（プロンプトからもその観点を外した）。
+ */
+describe("P-27 目標が空のときは、目標の観点の指摘を出さない", () => {
+  /** 第11話の箇条書き（写しのまま） */
+  const CH11_ITEMS = [
+    { text: "ホンゴーの部下として、異世界人のハルトが事務室にやってくる。", line: 9 },
+    {
+      text: "日本語を話すハルトは、自身の異能や帝国での経緯を語り、生活保護のケースワーカーとして働くことに不満を漏らしつつも、引き受けるのだった。",
+      line: 10,
+    },
+  ];
+  /** e4b の実物の答え（第11話） */
+  const E4B_CH11 = [
+    {
+      item: "ホンゴーの部下として、異世界人のハルトが事務室にやってくる。",
+      kind: "目標に向かっていない",
+      reason: "この時点では、目標が不明なため、この展開が目標にどう繋がるか判断できません。",
+    },
+    {
+      item: "日本語を話すハルトは、自身の異能や帝国での経緯を語り、生活保護のケースワーカーとして働くことに不満を漏らしつつも、引き受けるのだった。",
+      kind: "目標に向かっていない",
+      reason: "目標が不明なため、この展開が目標にどう繋がるか判断できません。",
+    },
+  ];
+
+  test("目標が空なら「目標に向かっていない」は落とす（e4b の実物の答え）", () => {
+    const { accepted, rejected } = validateEpisodePlotCheck(
+      { findings: E4B_CH11 },
+      { items: CH11_ITEMS, goal: "", maxFindings: 5 }
+    );
+
+    expect(accepted).toEqual([]);
+    expect(rejected.map((entry) => entry.reason)).toEqual(["no_goal", "no_goal"]);
+  });
+
+  test("目標が空なら「目標と矛盾」も落とす（空白だけの目標も空とみなす）", () => {
+    const { rejected } = validateEpisodePlotCheck(
+      {
+        findings: [
+          { item: CH11_ITEMS[0].text, kind: "目標と矛盾", reason: "目標と逆を向いている。" },
+        ],
+      },
+      { items: CH11_ITEMS, goal: " \n　", maxFindings: 5 }
+    );
+
+    expect(rejected[0].reason).toBe("no_goal");
+  });
+
+  test("目標が空でも、停滞・重複は目標が要らないので残す（e4b の実物の答え、第18話）", () => {
+    const { accepted } = validateEpisodePlotCheck(
+      {
+        findings: [
+          {
+            item: "その後、ハルトと共に金髪美人の被保護者ジャンヌのケース記録を確認し、療養指導や就労指導について話し合う。",
+            kind: "停滞・重複",
+            reason:
+              "前の項目で「線引きの重要性」というテーマが提示された直後に、具体的なケース記録の確認という作業に移行しており、テーマの深掘りという点で重複感がある可能性があります。",
+          },
+        ],
+      },
+      {
+        items: [
+          {
+            text: "その後、ハルトと共に金髪美人の被保護者ジャンヌのケース記録を確認し、療養指導や就労指導について話し合う。",
+            line: 10,
+          },
+        ],
+        goal: "",
+        maxFindings: 5,
+      }
+    );
+
+    expect(accepted).toHaveLength(1);
+  });
+
+  test("目標が書いてあれば、目標に向かっていないは通す", () => {
+    const { accepted } = validateEpisodePlotCheck(
+      {
+        findings: [
+          {
+            item: CH11_ITEMS[0].text,
+            kind: "目標に向かっていない",
+            reason: "ハルトが働くと決める流れに、この場面が繋がって見えない。",
+          },
+        ],
+      },
+      { items: CH11_ITEMS, goal: "ハルトが生活保護課で働くと決める。", maxFindings: 5 }
+    );
+
+    expect(accepted).toHaveLength(1);
   });
 });
 

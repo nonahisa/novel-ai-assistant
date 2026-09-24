@@ -273,7 +273,14 @@ function validateAgainst(
   // 番号を返してくるので、それで台帳を書き換えては困る
   const open = ledger.records
     .filter((record) => record.status === "open")
-    .map((record) => ({ id: record.id, plantedQuote: record.plantedQuote }));
+    // 張った話数も渡す。張った箇所を「本文の中の位置」で決めるのに要る
+    // （製品の回収検知と同じ材料にする。欠けると、あとの話での正当な
+    // 繰り返しまで張った箇所とみなして落とす）
+    .map((record) => ({
+      id: record.id,
+      plantedQuote: record.plantedQuote,
+      plantedChapter: record.plantedChapter,
+    }));
   const result = validateForeshadowResolutions(parsed, chunk, open);
   return {
     mode,

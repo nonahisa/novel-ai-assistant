@@ -38,9 +38,17 @@
  * 箇条書きとの照合を通したものだけ残す**（`core/episodePlotValidation.ts`）。
  * 件数の上限（`maxFindings`）は指摘だけに掛け、良いところには掛けない。
  *
+ * ## 目標が空なら、目標の観点を尋ねない（1.2）
+ *
+ * 1.1 までは目標が空でも3つの観点を並べ、「目標が書かれていないときは
+ * 判断できません」と注意を添えていた。実機確認（2026-09-25 深夜、
+ * gemma4:e4b・目標の空な19話）で「目標に向かっていない」が11件返った
+ * （理由は「目標が不明なため判断できません」）。**並べる観点と見本の種別を
+ * 目標の有無で変える**（`episodePlotCheckKindsFor`）。検証も同じ関数で落とす。
+ *
  * プロンプトを変更したら version を上げること。
  */
-export const EPISODE_PLOT_CHECK_VERSION = "1.1";
+export const EPISODE_PLOT_CHECK_VERSION = "1.2";
 
 /**
  * 送るときの温度。判断を伴うので、事実の突き合わせより少しだけ揺らす（P-11と同じ）。
@@ -63,6 +71,27 @@ export const EPISODE_PLOT_CHECK_KINDS = [
 ] as const;
 
 export type EpisodePlotCheckKind = (typeof EPISODE_PLOT_CHECK_KINDS)[number];
+
+/**
+ * 尋ねる観点。**目標が空なら、目標を物差しにする2つは尋ねない**（1.2）。
+ *
+ * 1.1 までは3つとも並べ、「目標が書かれていないときは判断できません」と
+ * 注意を添えていた。実機確認（2026-09-25 深夜、gemma4:e4b・ギルドの19話。
+ * 19話とも目標の節が空）で、**「目標に向かっていない」が11件**返り、
+ * 理由は「目標が不明なため判断できません」だった。出力例の種別の見本が
+ * 先頭の「目標に向かっていない」だったので、見本ごと写したと見る。
+ * **尋ねなければ返らない**ので、並べる観点も見本の種別もここで決める。
+ *
+ * **検証（`core/episodePlotValidation.ts`）も同じ関数で決める。** プロンプトで
+ * 尋ねなかった観点が返ってきたら、そこで落とす（`no_goal`）。
+ */
+export function episodePlotCheckKindsFor(
+  goal: string
+): readonly EpisodePlotCheckKind[] {
+  return goal.trim()
+    ? EPISODE_PLOT_CHECK_KINDS
+    : EPISODE_PLOT_CHECK_KINDS.filter((kind) => kind === "停滞・重複");
+}
 
 const KIND_ITEMS: Record<EpisodePlotCheckKind, string> = {
   目標に向かっていない:
@@ -119,9 +148,22 @@ export function buildEpisodePlotCheckPrompt(
   // 見本の対象は実在する1行（上の「見本の値の選び方」）。引用符を含む
   // 行でも壊れないよう、JSONの値として組み立てる
   const sampleItem = JSON.stringify(input.items[0] ?? "");
-  const kinds = EPISODE_PLOT_CHECK_KINDS.map(
-    (kind, index) => `${index + 1}. ${kind}：${KIND_ITEMS[kind]}`
-  ).join("\n");
+  // 目標が空なら、目標を物差しにする観点は並べない（`episodePlotCheckKindsFor`）。
+  // 見本の種別も、並べた観点の先頭にする——見本ごと写してくるので
+  const asked = episodePlotCheckKindsFor(input.goal);
+  const hasGoal = asked.length === EPISODE_PLOT_CHECK_KINDS.length;
+  const kinds = asked
+    .map((kind, index) => `${index + 1}. ${kind}：${KIND_ITEMS[kind]}`)
+    .join("\n");
+  const question = hasGoal
+    ? "上の展開は、この話の目標に向かっていますか。"
+    : "この話の目標は書かれていません。目標に照らした判断はせず、\n上の展開に停滞や重複がないかだけを見てください。";
+  const emptyWhen = hasGoal
+    ? "目標へ向かって締まっている設計なら、findings は空の配列にしてください。"
+    : "停滞や重複が見当たらなければ、findings は空の配列にしてください。";
+  const strengthsAsk = hasGoal
+    ? "目標へ向かう働きがよく効いている展開を、strengths に入れてください。"
+    : "話を前へ進める働きがよく効いている展開を、strengths に入れてください。";
 
   return `以下は、小説の${input.chapterLabel}のために作者が書いた単話プロットです。
 展開の箇条書きに緩みがないかを見て、気になるところを指摘してください。
@@ -136,7 +178,7 @@ ${input.goal.trim() || EPISODE_PLOT_BLANK_MARK}
 ${list}
 
 【問い】
-上の展開は、この話の目標に向かっていますか。
+${question}
 
 【指摘の対象】
 ${kinds}
@@ -144,22 +186,20 @@ ${kinds}
 【判断の注意】
 - item には、上の箇条書きにある行をそのまま写してください（言い換えない）。
   写せない指摘（どの行のことか言えない指摘）は書かないでください。
-- 目標が書かれていないときは、「目標に向かっていない」「目標と矛盾」は
-  判断できません。停滞・重複だけを見てください。
 - 順番を入れ替える案・足りないものを補う案は書かないでください。
 - 意図的な緩急（山場の前の静かな場面）を停滞と呼ばないこと。
 - 挙げてよいのは最大${input.maxFindings}件です。0件でも構いません。無理に探さないでください。
-  目標へ向かって締まっている設計なら、findings は空の配列にしてください。
+  ${emptyWhen}
 
 【良いところ】
-目標へ向かう働きがよく効いている展開を、strengths に入れてください。
+${strengthsAsk}
 見つかったぶんだけ入れ、数を絞る必要はありません。
 - item には、上の箇条書きにある行をそのまま写してください（言い換えない）。
 - why には、その行がなぜ効いているのかを具体的に書いてください（60字以内）。
 - 良いところが見当たらなければ、strengths は空の配列にしてください。
 
 【出力形式】JSONのみ
-kind には次のどれか1つだけを入れてください：${EPISODE_PLOT_CHECK_KINDS.join("、")}
+kind には次のどれか1つだけを入れてください：${asked.join("、")}
 
 {
   "strengths": [
@@ -171,7 +211,7 @@ kind には次のどれか1つだけを入れてください：${EPISODE_PLOT_CH
   "findings": [
     {
       "item": ${sampleItem},
-      "kind": "${EPISODE_PLOT_CHECK_KINDS[0]}",
+      "kind": "${asked[0]}",
       "reason": "${REASON_HINT}（60字以内）"
     }
   ]

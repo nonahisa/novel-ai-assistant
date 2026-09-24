@@ -202,15 +202,21 @@ export interface RejectedResolution {
 /**
  * 回収の候補（P-26）を検証する。
  *
- * @param open いま未回収の伏線（idと張った引用）。**ここに無い id は捨てる。**
+ * @param open いま未回収の伏線（idと張った引用と張った話数）。**ここに無い id は捨てる。**
  *   張った引用は「張った箇所そのものを回収と言い張る」候補を弾くのに使う
  *   ——同じ話の中での回収も検知の対象にしたので（0.24.10）、張った文が
- *   同じチャンクに居る。それを回収と誤認されると台帳が誤って閉じる
+ *   同じチャンクに居る。それを回収と誤認されると台帳が誤って閉じる。
+ *   張った話数は「チャンクの中のどこが張った箇所か」を決めるのに使う
+ *   （`plantedEchoFree`）。無ければ、張った文の出てくる所をすべて張った箇所とみなす
  */
 export function validateForeshadowResolutions(
   raw: unknown,
   chunk: Chunk,
-  open: ReadonlyArray<{ id: string; plantedQuote: string }>
+  open: ReadonlyArray<{
+    id: string;
+    plantedQuote: string;
+    plantedChapter?: number | null;
+  }>
 ): {
   accepted: AcceptedForeshadowResolution[];
   rejected: RejectedResolution[];
@@ -220,9 +226,7 @@ export function validateForeshadowResolutions(
 
   const list =
     isRecord(raw) && Array.isArray(raw.resolutions) ? raw.resolutions : [];
-  const known = new Map(
-    open.map((entry) => [entry.id, entry.plantedQuote] as const)
-  );
+  const known = new Map(open.map((entry) => [entry.id, entry] as const));
   const seen = new Set<string>();
 
   for (const item of list) {
@@ -256,12 +260,13 @@ export function validateForeshadowResolutions(
       continue;
     }
     // 張った箇所そのものは回収ではない。同じ話も検知の対象にしたので、
-    // 張った文が同じチャンクに居る——AIがそれを指してくることがある
-    const planted = known.get(id);
-    if (
-      planted !== undefined &&
-      normalizeForComparison(quote) === normalizeForComparison(planted)
-    ) {
+    // 張った文が同じチャンクに居る——AIがそれを指してくることがある。
+    // **文字列の一致ではなく、本文の中の位置で見る**（`plantedEchoFree`）
+    const entry = known.get(id);
+    const place = entry
+      ? plantedEchoFree(chunk, quote, entry.plantedQuote, entry.plantedChapter ?? null)
+      : at;
+    if (!place) {
       rejected.push({ raw: item, reason: "planted_echo" });
       continue;
     }
@@ -275,13 +280,154 @@ export function validateForeshadowResolutions(
       id,
       quote,
       note: usableNote(asString(item.note), FORESHADOW_RESOLVE_HINTS),
-      filePath: at.filePath,
-      chapter: at.chapter,
+      // 付ける話数は、張った箇所から離れた出どころのもの（同じ台詞が
+      // 張った話と回収の話の両方にあるとき、先に見つかる張った話を付けない）
+      filePath: place.filePath,
+      chapter: place.chapter,
       chunkHash: chunk.hash,
     });
   }
 
   return { accepted, rejected };
+}
+
+/**
+ * 回収の引用が、張った箇所から離れた所にもあるか。あればその出どころを返す。
+ *
+ * **張った箇所そのものを「回収」と言い張る答えを、位置で見分ける。**
+ * 2026-09-25 まで、弾くのは「引用が張った引用と丸ごと同じ」ときだけだった。
+ * 実機確認（gemma4:e4b、第8話）で、**張った台詞を含む1行まるごと**
+ * （「ちょっと訳ありでね。**こちらのエルシーさんを冒険者登録したいんだけど**」）や、
+ * **張った台詞と同じ行の前半**（「帝都近郊で…観測されたんだ。」の後ろに
+ * 張った文が続く）を返され、どちらも回収として通っていた。
+ *
+ * 文字列の包含だけで落とさないのは、**同じ言い回しが本当に回収の場面で
+ * 繰り返される**ことがあるから（あの時の台詞を、あとの話でもう一度言う）。
+ * そこで「張った箇所」を本文の中の**位置**として決め、引用の出てくる所が
+ * **どれもその位置と同じ行に掛かる**ときだけ落とす。
+ *
+ * - 張った箇所：チャンクの中で張った文が出てくる所。張った話数が分かれば、
+ *   **その話の内訳の中**に出てくる所だけ（あとの話での繰り返しは張った箇所ではない）。
+ *   話数が分からなければ、出てくる所をすべて張った箇所とみなす
+ *   （取り違えて台帳を閉じるより、回収を1回見送るほうが害が小さい）
+ * - 近すぎる：張った箇所と**同じ行**（改行から改行まで。小説では1段落）に掛かる。
+ *   行が違えば、同じ話の中の回収として通す（短い話では同じ話の中で張って回収する）
+ * - 張った文がこのチャンクに無ければ（あとの話だけのチャンク）、位置では落とさない
+ *
+ * @returns 張った箇所から離れた出どころ。すべて張った箇所に掛かるなら undefined
+ */
+function plantedEchoFree(
+  chunk: Chunk,
+  quote: string,
+  plantedQuote: string,
+  plantedChapter: number | null
+): { filePath: string; chapter: number | null } | undefined {
+  const text = chunk.text;
+  const index = normalizedWithPositions(text);
+  const segments = segmentsOf(chunk);
+
+  const plantedLines = findSpans(index, plantedQuote)
+    .filter(
+      (span) =>
+        plantedChapter === null ||
+        segments.some(
+          (segment) =>
+            span.start >= segment.start &&
+            span.start < segment.end &&
+            coversChapter(segment, plantedChapter)
+        )
+    )
+    .map((span) => lineRange(text, span));
+
+  for (const span of findSpans(index, quote)) {
+    const near = plantedLines.some(
+      (line) => span.start < line.end && span.end > line.start
+    );
+    if (near) continue;
+    // 離れた所にある。**その出どころの話数を付ける**（内訳をまたぐなら話数は付けない。
+    // `locateQuoteInChunk` と同じ扱い）
+    const segment = segments.find(
+      (candidate) => span.start >= candidate.start && span.end <= candidate.end
+    );
+    return segment
+      ? { filePath: segment.filePath, chapter: segment.chapterStart }
+      : { filePath: chunk.filePath, chapter: null };
+  }
+  return undefined;
+}
+
+/** 内訳が、その話数を含むか。話数の分からない内訳は「含むかもしれない」とみなす */
+function coversChapter(
+  segment: { chapterStart: number | null; chapterEnd: number | null },
+  chapter: number
+): boolean {
+  if (segment.chapterStart === null) return true;
+  const end = segment.chapterEnd ?? segment.chapterStart;
+  return chapter >= segment.chapterStart && chapter <= end;
+}
+
+/**
+ * `normalizeForComparison` と同じ落とし方で正規化し、正規化後の各文字が
+ * 元の本文の何文字目だったかを控える。
+ *
+ * 照合は正規化した形で行う（gemma系は全角スペースやバイト表記の揺れを
+ * 返す）が、**行を決めるには元の本文の位置が要る**（改行も空白として
+ * 落ちるため、正規化後の文字列には行の切れ目が残らない）。
+ */
+function normalizedWithPositions(text: string): {
+  normalized: string;
+  positions: number[];
+} {
+  let normalized = "";
+  const positions: number[] = [];
+  let i = 0;
+  while (i < text.length) {
+    // バイト表記（<0xE3>）は6文字まとめて落とす（`normalizeForComparison` と同じ）
+    if (/^<0x[0-9A-Fa-f]{2}>/u.test(text.slice(i, i + 6))) {
+      i += 6;
+      continue;
+    }
+    const ch = text[i];
+    if (/[\s　]/u.test(ch)) {
+      i++;
+      continue;
+    }
+    normalized += ch;
+    positions.push(i);
+    i++;
+  }
+  return { normalized, positions };
+}
+
+/** 引用が本文に出てくる所を、元の本文の位置（開始・終了）ですべて返す */
+function findSpans(
+  index: { normalized: string; positions: number[] },
+  quote: string
+): Array<{ start: number; end: number }> {
+  const needle = normalizeForComparison(quote);
+  if (!needle) return [];
+  const spans: Array<{ start: number; end: number }> = [];
+  let from = 0;
+  for (;;) {
+    const at = index.normalized.indexOf(needle, from);
+    if (at < 0) break;
+    spans.push({
+      start: index.positions[at],
+      end: index.positions[at + needle.length - 1] + 1,
+    });
+    from = at + 1;
+  }
+  return spans;
+}
+
+/** 範囲が掛かる行（改行の次から、次の改行まで）の範囲 */
+function lineRange(
+  text: string,
+  span: { start: number; end: number }
+): { start: number; end: number } {
+  const start = text.lastIndexOf("\n", span.start - 1) + 1;
+  const next = text.indexOf("\n", span.end);
+  return { start, end: next < 0 ? text.length : next };
 }
 
 /**

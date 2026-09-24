@@ -429,6 +429,7 @@ export function episodePlotValidate(
   const parsed = parseEpisodePlotFindings(input.response);
   return validateEpisodePlotCheck(parsed, {
     items: doc.items,
+    goal: doc.goal,
     maxFindings: EPISODE_PLOT_MAX_FINDINGS,
   });
 }

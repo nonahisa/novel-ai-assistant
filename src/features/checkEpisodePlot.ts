@@ -408,6 +408,8 @@ export async function checkEpisodePlotDesign(
 
       const validated = validateEpisodePlotCheck(raw, {
         items: doc.items,
+        // 目標が空なら目標の観点の指摘を落とす（プロンプトと同じ物差し）
+        goal: doc.goal,
         maxFindings,
       });
       base.rejectedCount = validated.rejected.length;

@@ -75,6 +75,29 @@ describe("P-27 単話プロットの検査のプロンプト", () => {
     expect(JSON.stringify(items.properties)).not.toContain("suggestion");
   });
 
+  test("目標が空なら、目標の観点を尋ねない（見本の種別も停滞・重複にする）", () => {
+    // 実機確認 2026-09-25 深夜：目標が空の19話に、e4b が「目標に向かっていない」を
+    // 11件出した。「目標が無いときは判断できない」と書いても、見本の種別
+    // （先頭の「目標に向かっていない」）ごと写してくる。**尋ねなければ返らない**
+    const prompt = buildEpisodePlotCheckPrompt({ ...CHECK_INPUT, goal: "" });
+
+    expect(prompt).not.toContain("目標に向かっていない");
+    expect(prompt).not.toContain("目標と矛盾");
+    expect(prompt).toContain('"kind": "停滞・重複"');
+    expect(prompt).toContain("kind には次のどれか1つだけを入れてください：停滞・重複");
+    // 目標の節そのものは「書かれていません」と断る（無いものを埋めさせない）
+    expect(prompt).toContain("（書かれていません）");
+  });
+
+  test("目標が書いてあれば、3つの観点を尋ねる", () => {
+    const prompt = buildEpisodePlotCheckPrompt(CHECK_INPUT);
+
+    expect(prompt).toContain(`"kind": "${EPISODE_PLOT_CHECK_KINDS[0]}"`);
+    expect(prompt).toContain(
+      `kind には次のどれか1つだけを入れてください：${EPISODE_PLOT_CHECK_KINDS.join("、")}`
+    );
+  });
+
   test("見本の対象は実在の箇条書き（そのまま返っても実害が無い）", () => {
     const prompt = buildEpisodePlotCheckPrompt(CHECK_INPUT);
 
@@ -91,7 +114,7 @@ describe("P-27 単話プロットの検査のプロンプト", () => {
           },
         ],
       },
-      { items: ITEMS, maxFindings: 3 }
+      { items: ITEMS, goal: CHECK_INPUT.goal, maxFindings: 3 }
     );
     expect(accepted).toHaveLength(1);
     expect(accepted[0].line).toBe(10);
@@ -113,7 +136,7 @@ describe("P-27 単話プロットの検査のプロンプト", () => {
           },
         ],
       },
-      { items: ITEMS, maxFindings: 3 }
+      { items: ITEMS, goal: CHECK_INPUT.goal, maxFindings: 3 }
     );
     expect(accepted).toHaveLength(0);
     expect(rejected[0].reason).toBe("placeholder");
@@ -147,7 +170,7 @@ describe("P-27 単話プロットの検査のプロンプト", () => {
           why: hint,
         })),
       },
-      { items: ITEMS, maxFindings: 3 }
+      { items: ITEMS, goal: CHECK_INPUT.goal, maxFindings: 3 }
     );
     expect(strengths).toEqual([]);
   });
