@@ -180,6 +180,28 @@ describe("返ってきた候補の系統が揃っているかをコードで確�
     expect(kanji.dropped.map((item) => item.candidate.name)).toEqual(["ケイ", "Ren"]);
   });
 
+  test("漢字のあいだの「ノ」「ヶ」「ケ」「ヵ」は日本の名前の一部として通す（26b の「一ノ瀬 莉子」が落ちた、2026-09-25）", () => {
+    const fit = fitNameCandidates(
+      [
+        candidate("一ノ瀬 莉子", "いちのせ りこ", "和風"),
+        candidate("霞ヶ浦 透", "かすみがうら とおる", "和風"),
+        candidate("三ケ田", "みけた", "和風"),
+        candidate("八ヵ岳", "やつがたけ", "和風"),
+        // 漢字に挟まれていないカタカナは今までどおり落とす
+        candidate("ノア", "のあ", "和風"),
+        candidate("一ノ", "いちの", "和風"),
+      ],
+      planNameOrigin({ existingNames: IJIME, setting: "" })
+    );
+    expect(fit.kept.map((item) => item.name)).toEqual([
+      "一ノ瀬 莉子",
+      "霞ヶ浦 透",
+      "三ケ田",
+      "八ヵ岳",
+    ]);
+    expect(fit.dropped.map((item) => item.candidate.name)).toEqual(["ノア", "一ノ"]);
+  });
+
   test("直した名前が、ほかの候補と同じになったら後のほうを落とす", () => {
     const fit = fitNameCandidates(
       [candidate("ルカス", "るかす", "ドイツ"), candidate("Lukas", "るかす", "ドイツ")],

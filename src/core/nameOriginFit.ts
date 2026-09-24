@@ -188,6 +188,17 @@ export function toKatakana(text: string): string {
 
 const LATIN = /\p{Script=Latin}/u;
 const KATAKANA_ONLY = /^[\p{Script=Katakana}ー・･＝=\s]+$/u;
+
+/**
+ * 漢字のあいだに挟まる「ノ」「ヶ」「ケ」「ヵ」（一ノ瀬・霞ヶ浦・三ケ田・八ヵ岳）は
+ * 日本の名前の一部なので、カタカナとは数えない。数えると漢字の作品の候補から
+ * 落ちる（2026-09-25、26b の「一ノ瀬 莉子」が「カタカナを含む」で落ちた）
+ */
+const NAME_JOINT = /(?<=\p{Script=Han})[ノヶケヵ](?=\p{Script=Han})/gu;
+
+function hasKatakanaOutsideJoints(name: string): boolean {
+  return /\p{Script=Katakana}/u.test(name.replace(NAME_JOINT, ""));
+}
 const HIRAGANA_READING = /^[\p{Script=Hiragana}ー・\s]+$/u;
 
 function isOrigin(value: string | undefined): value is NameOrigin {
@@ -274,7 +285,7 @@ export function fitNameCandidates(
       });
       continue;
     }
-    if (script === "kanji" && /\p{Script=Katakana}/u.test(name)) {
+    if (script === "kanji" && hasKatakanaOutsideJoints(name)) {
       result.dropped.push({
         candidate,
         reason: "カタカナを含む名前は、漢字の名前の並びと揃いません",
