@@ -81,6 +81,58 @@ export async function run(): Promise<void> {
     }
   });
 
+  await runCase("出した知らせと登録簿の写しを保管庫へ書く（MCP の notices.recent・works.list）", failures, async () => {
+    // **本物の拡張機能ホストで `vscode.window` を包めるか**は、単体テストの
+    // 作り物では確かめられない（凍結されていれば包めない）。ここで実際に知らせを出し、
+    // 保管庫に記録が現れることを見る
+    const userData = process.env.NOVELAI_TEST_USER_DATA;
+    assert.ok(userData, "NOVELAI_TEST_USER_DATA が渡されていません（scripts/runIntegrationTests.mjs）");
+    const pkg = JSON.parse(
+      await fs.readFile(path.join(__dirname, "..", "..", "..", "package.json"), "utf-8")
+    ) as { publisher: string; name: string };
+    const storage = path.join(
+      userData,
+      "User",
+      "globalStorage",
+      `${pkg.publisher}.${pkg.name}`.toLowerCase()
+    );
+    const marker = `統合テストの知らせ ${Date.now()}`;
+    // 右下の通知は閉じるまで約束が解けないので待たない
+    void vscode.window.showInformationMessage(marker, "了解");
+
+    const noticeDirectory = path.join(storage, ".aiwriter", "notices");
+    let found = "";
+    // 書き出しは1秒まとめるので、少し待ちながら探す
+    for (let attempt = 0; attempt < 30 && !found; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      let names: string[] = [];
+      try {
+        names = await fs.readdir(noticeDirectory);
+      } catch {
+        continue;
+      }
+      for (const name of names.filter((item) => item.endsWith(".json"))) {
+        const text = await fs.readFile(path.join(noticeDirectory, name), "utf-8");
+        if (text.includes(marker)) found = text;
+      }
+    }
+    assert.ok(found, `知らせの記録に「${marker}」が現れません（${noticeDirectory}）`);
+    const log = JSON.parse(found) as {
+      pid: number;
+      notices: { message: string; severity: string; items: string[] }[];
+    };
+    const entry = log.notices.find((notice) => notice.message === marker);
+    assert.ok(entry);
+    assert.equal(entry.severity, "info");
+    assert.deepEqual(entry.items, ["了解"]);
+
+    const snapshot = JSON.parse(
+      await fs.readFile(path.join(storage, ".aiwriter", "works.json"), "utf-8")
+    ) as { schema: number; works: unknown[] };
+    assert.equal(snapshot.schema, 1);
+    assert.ok(Array.isArray(snapshot.works));
+  });
+
   await runCase("作品を作成・走査し、既存フォルダを上書きしない", failures, async () => {
     const temporaryRoot = await fs.mkdtemp(
       path.join(os.tmpdir(), "novel-ai-assistant-work-")

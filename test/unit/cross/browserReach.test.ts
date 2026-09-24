@@ -172,6 +172,14 @@ const PROCESS_ALLOWED: ReadonlyMap<string, string> = new Map([
     "features/windowCard.ts",
     "窓の札。入口で canRunProcesses() を見て、ブラウザでは何もせずに戻る",
   ],
+  [
+    "features/noticeRecorder.ts",
+    "知らせの記録（MCP の notices.recent）。入口で canRunProcesses() を見て、ブラウザでは何もせずに戻る（process.pid は その後ろでだけ読む）",
+  ],
+  [
+    "features/worksSnapshot.ts",
+    "登録簿の写し（MCP の works.list）。入口で canRunProcesses() を見て、ブラウザでは何もせずに戻る（process.pid は その後ろでだけ読む）",
+  ],
 ]);
 
 /**

@@ -460,6 +460,8 @@ import {
   refreshWriterProfileMirror,
 } from "./features/adviceProfileMirror";
 import { startWindowCard } from "./features/windowCard";
+import { startNoticeRecorder } from "./features/noticeRecorder";
+import { startWorksSnapshot } from "./features/worksSnapshot";
 import {
   reviewProposals,
   toggleReviewLock,
@@ -676,6 +678,20 @@ export async function activate(
    * にある（手元とブラウザで扱いが逆になる。生成文書の置き場と同じ判定）。
    */
   const fallbackLogRoot = storageRootFrom(context.globalStorageUri);
+
+  /**
+   * 出した知らせの記録（MCP の notices.recent。作者の承認 2026-09-24）。
+   *
+   * **入口のすぐ後ろで包む。** `vscode.window` の知らせの3つを包むので、
+   * これより前に出た知らせは記録に残らない——起動の途中の知らせ
+   * （フォルダーが見つからない、など）こそ実機確認で見たい。
+   * ブラウザ版では何もしない（読む相手の MCP サーバーが走らない）。
+   */
+  const noticeRecorder = startNoticeRecorder(context);
+  if (noticeRecorder) {
+    context.subscriptions.push(noticeRecorder);
+    flushNoticeRecorder = noticeRecorder.flush;
+  }
 
   /**
    * 起動のプロファイル（設計書6.107。0.74.11）。
@@ -2575,6 +2591,15 @@ export async function activate(
     context.subscriptions.push(windowCard);
     closeWindowCard = windowCard.close;
   }
+
+  // ─── 登録簿の写し（MCP の works.list。作者の承認 2026-09-24） ───
+  // 登録簿は globalState にあって外から読めないので、起動時と変わるたびに
+  // 保管庫へ写す。**写すだけで、登録簿を書き換える道は作らない**
+  const worksSnapshot = startWorksSnapshot(context, {
+    listWorks: () => registry.list(),
+    onDidChangeWorks: registry.onDidChange,
+  });
+  if (worksSnapshot) context.subscriptions.push(worksSnapshot);
 
   // ─── 助言方針の控え（設計書6.86.7） ───
   // **取り込んでから書き出す。** 外部AI経由の相談で動いた推定は
@@ -6976,6 +7001,12 @@ let beforeClose: (() => void) | undefined;
  */
 let closeWindowCard: (() => Promise<void>) | undefined;
 
+/**
+ * 知らせの記録（MCP の notices.recent）の溜まっている分を書き出す。起動時に掴んでおく。
+ * 札と同じく待ち切られないことがあるが、そのときは閉じる前の1秒ぶんが欠けるだけ。
+ */
+let flushNoticeRecorder: (() => Promise<void>) | undefined;
+
 export function deactivate(): Promise<void> | undefined {
   /*
     **閉じる前に未送信を問う**（設計書6.15.1、作者の裁定 2026-09-21）。
@@ -7002,8 +7033,13 @@ export function deactivate(): Promise<void> | undefined {
   // ログだけは遅延生成でsubscriptionsに載っていないので個別に閉じる
   disposeLog();
 
-  // 札は最後に消す（上の問いやログの片づけを、札の消去の待ちで遅らせない）
-  return closeWindowCard?.().catch(() => undefined);
+  // 札は最後に消す（上の問いやログの片づけを、札の消去の待ちで遅らせない）。
+  // 知らせの記録も溜まっている分を書き出す（閉じる直前の知らせを落とさない）
+  if (!closeWindowCard && !flushNoticeRecorder) return undefined;
+  return Promise.all([
+    closeWindowCard?.().catch(() => undefined),
+    flushNoticeRecorder?.().catch(() => undefined),
+  ]).then(() => undefined);
 }
 
 /**

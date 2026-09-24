@@ -52,6 +52,12 @@ import {
 } from "./tools/spotlight";
 import { mcpMachineName, windowsList } from "./tools/windows";
 import {
+  NOTICES_RECENT_INPUT,
+  noticesRecent,
+  type NoticesRecentInput,
+} from "./tools/notices";
+import { worksList } from "./tools/works";
+import {
   SETUP_REQUEST_INPUT,
   setupRequest,
   type SetupRequestInput,
@@ -74,9 +80,9 @@ import {
  * そちらを直に呼ぶ（`test/unit/mcp/mcpTools.test.ts`）。混ぜると、
  * ツールの中身を確かめるのに stdio を立てなければならなくなる。
  *
- * **道具は15本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
- * 0.75.x で `windows.list`、0.82.1 で `setup.request`、0.83.x で `schedule.milestones`
- * を足した。0.66.7 の時点では10本）。
+ * **道具は17本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
+ * 0.75.x で `windows.list`、0.82.1 で `setup.request`、0.83.x で `schedule.milestones`、
+ * 0.85.0 で `notices.recent` と `works.list` を足した。0.66.7 の時点では10本）。
  * ほかに**プロンプトが1つ**（`setup`。Claude Code では `/` から選べる。6.87.18）。
  * 56本あったものを
  * `feature` を引数に取る形へ束ねた——**AI は繋いだ瞬間にこの一覧を読む**ので、
@@ -238,6 +244,39 @@ server.registerTool(
     同じ）で、`now` を外から差し込めるのは試験のためだけである。
   */
   tool("windows.list", () => windowsList())
+);
+
+server.registerTool(
+  "notices.recent",
+  {
+    title: "拡張機能が出した知らせ（直近）",
+    description:
+      "この機械で拡張機能が出した知らせ（右下の通知・画面中央の確認）を新しい順に返します" +
+      "（文・種類・ボタンの名前・押されたボタン・時刻・どの窓か）。" +
+      "since（ISO時刻）・limit・contains（文字の部分一致）・pid（windows.list の窓）で絞れます。" +
+      "**読むだけで、作品の中身は読みません。** 文は先頭200字まで、記録は7日ぶん。",
+    inputSchema: NOTICES_RECENT_INPUT,
+  },
+  /*
+    **`folder` を取らない**ので許可の対象外（`windows.list` と同じ）。
+    返すのは知らせの文だけで、作品フォルダーを1つも開かない。
+  */
+  tool("notices.recent", (args: NoticesRecentInput) => noticesRecent(args))
+);
+
+server.registerTool(
+  "works.list",
+  {
+    title: "作品の登録簿（写し）",
+    description:
+      "拡張機能に登録されている作品の一覧を返します（作品ID・作品名・場所・登録日・書庫に入っているか・" +
+      "二重登録）。登録簿は VS Code の中にあるので、拡張機能が書いた写しを読みます（writtenAt が写しの時刻）。" +
+      "**読むだけで、作品の中身は読まず、登録簿も書き換えません。**",
+  },
+  /*
+    **引数を渡さない**（`windows.list` と同じ）。作品フォルダーを1つも開かない。
+  */
+  tool("works.list", () => worksList())
 );
 
 server.registerTool(

@@ -55,6 +55,12 @@ try {
     extensionDevelopmentPath: repositoryRoot,
     extensionTestsPath: path.join(repositoryRoot, "out", "src", "test", "run.js"),
     version: requestedVersion,
+    // 保管庫（globalStorage）の場所を試験に教える。拡張機能の外からは
+    // `context.globalStorageUri` が見えないので、使い捨ての user-data の場所を渡す
+    // （知らせの記録・登録簿の写しが本当に書かれたかを確かめるため）
+    extensionTestsEnv: {
+      NOVELAI_TEST_USER_DATA: path.join(temporaryRoot, "user-data"),
+    },
     launchArgs: [
       "--disable-extensions",
       "--disable-workspace-trust",
