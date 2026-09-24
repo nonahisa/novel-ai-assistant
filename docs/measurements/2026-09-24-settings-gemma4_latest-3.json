@@ -1,0 +1,1100 @@
+{
+  "measuredAt": "2026-09-24T08:22:03.921Z",
+  "feature": "settings",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:latest",
+  "numCtx": 24576,
+  "numCtxDecision": {
+    "numCtx": 24576,
+    "source": "プロンプトの長さから（製品と同じ道）",
+    "promptChars": 8429,
+    "outputTokens": 8192,
+    "contextWindow": 131072,
+    "charsPerToken": null
+  },
+  "temperature": 0.2,
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": {
+    "contextLength": 131072,
+    "bundled": null,
+    "note": null
+  },
+  "warmup": {
+    "elapsedMs": 25221,
+    "ok": true,
+    "reason": null
+  },
+  "endpoint": null,
+  "options": {},
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.85.6",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "5.5",
+  "verifyPromptVersion": null,
+  "plans": [
+    {
+      "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@6020",
+      "chars": 1235,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\002_十月三日の坂.txt#2-0@6020",
+      "chars": 1218,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\003_窓口の椅子.txt#3-0@6020",
+      "chars": 1211,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@6020",
+      "chars": 1246,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\005_初雪の窓口.txt#5-0@6020",
+      "chars": 1216,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\MIZUSH~1\\AppData\\Local\\Temp\\claude\\C--Users-Mizushima-repo-novel-ai-assistant\\7cd8959c-284b-4d94-acc3-a40ed75914e1\\scratchpad\\narrator-repro2",
+    "targets": [
+      "本文\\001_九月の終わりの坂.txt",
+      "本文\\002_十月三日の坂.txt",
+      "本文\\003_窓口の椅子.txt",
+      "本文\\004_ギプスが外れた日.txt",
+      "本文\\005_初雪の窓口.txt"
+    ]
+  },
+  "answers": "C:\\Users\\MIZUSH~1\\AppData\\Local\\Temp\\claude\\C--Users-Mizushima-repo-novel-ai-assistant\\7cd8959c-284b-4d94-acc3-a40ed75914e1\\scratchpad\\narrator-repro2\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 159237,
+      "temperature": 0.2,
+      "staleNote": null,
+      "metrics": {
+        "settingsFound": 0,
+        "settingsFoundTotal": 0,
+        "settingsMissed": 0,
+        "settingsAliases": 0,
+        "settingsAliasesTotal": 0,
+        "settingsFabricated": 0,
+        "settingsWrongMerge": 0,
+        "settingsWrongMergeTotal": 0,
+        "settingsWrongSplit": 0,
+        "settingsWrongSplitTotal": 0,
+        "settingsFakeRelations": 0,
+        "settingsAbilityTerm": 1,
+        "settingsRuleLeak": 0,
+        "settingsOtherRecords": 12,
+        "dropped.言い回しで落とした関係": 3,
+        "accepted": 17,
+        "rejected": 10,
+        "rejected.non_person": 1,
+        "rejected.pronoun_name": 1,
+        "rejected.ungrounded": 5,
+        "rejected.invalid_name": 3,
+        "failures": 0,
+        "elapsedMs": 159237
+      },
+      "detail": {
+        "rejectedReasons": {
+          "non_person": 1,
+          "pronoun_name": 1,
+          "ungrounded": 5,
+          "invalid_name": 3
+        },
+        "failures": [],
+        "settingsFound": {
+          "人物": {
+            "found": 0,
+            "total": 0
+          },
+          "能力": {
+            "found": 0,
+            "total": 0
+          },
+          "場所": {
+            "found": 0,
+            "total": 0
+          },
+          "組織": {
+            "found": 0,
+            "total": 0
+          },
+          "世界観": {
+            "found": 0,
+            "total": 0
+          }
+        },
+        "settingsMissed": [],
+        "settingsAliasesMissed": [],
+        "settingsFabricated": [],
+        "settingsWrongMerge": [],
+        "settingsWrongSplit": [],
+        "settingsFakeRelations": [],
+        "settingsAbilityTerm": {
+          "expected": "",
+          "actual": null,
+          "ok": true
+        },
+        "settingsRuleLeak": [],
+        "settingsOtherRecords": [
+          {
+            "kind": "人物",
+            "name": "黒瀬千夏"
+          },
+          {
+            "kind": "人物",
+            "name": "蓬田さん"
+          },
+          {
+            "kind": "人物",
+            "name": "蓬田"
+          },
+          {
+            "kind": "人物",
+            "name": "千夏"
+          },
+          {
+            "kind": "人物",
+            "name": "局長"
+          },
+          {
+            "kind": "人物",
+            "name": "女の人"
+          },
+          {
+            "kind": "場所",
+            "name": "鳶ヶ丘"
+          },
+          {
+            "kind": "場所",
+            "name": "立花郵便局"
+          },
+          {
+            "kind": "場所",
+            "name": "診察室"
+          },
+          {
+            "kind": "場所",
+            "name": "窓口"
+          },
+          {
+            "kind": "組織",
+            "name": "立花郵便局"
+          },
+          {
+            "kind": "組織",
+            "name": "局"
+          }
+        ]
+      },
+      "raw": [
+        {
+          "target": "本文\\001_九月の終わりの坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:latest",
+            "temperature": 0.2,
+            "results": [
+              {
+                "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@6020",
+                "chapterLabel": "第1話",
+                "characters": {
+                  "accepted": [
+                    {
+                      "data": {
+                        "name": "黒瀬千夏",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "立花郵便局の窓口に立つ職員で、主人公と同じ年に局に入った。",
+                        "affiliation": "立花郵便局",
+                        "gender": "女性",
+                        "role": null,
+                        "personality": "世話焼きな一面がある（「忘れてる。毎回言ってるでしょ」と指摘する）",
+                        "appearance": "null",
+                        "evidence": "\"相沢くん、水筒\"",
+                        "relations": [
+                          {
+                            "name": "俺",
+                            "relation": "同僚"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        1
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "蓬田さん",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "鳶ヶ丘の丘の一番上に住む白髪の老人。郵便を受け取る。",
+                        "affiliation": null,
+                        "gender": "男性",
+                        "role": null,
+                        "personality": "物静かで、必要最低限のことしか口にしない（「今日は二通です」と言われても顔を上げずに手だけを伸ばす）",
+                        "appearance": "白髪の老人。紺の半纏を着ている。",
+                        "evidence": "「今日は二通です」\n<0xE3><0x80><0x80>俺が言うと、蓬田さんは顔も上げずに手だけを伸ばした。",
+                        "relations": [
+                          {
+                            "name": "俺",
+                            "relation": "配達する相手"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        1
+                      ]
+                    }
+                  ],
+                  "rejected": [],
+                  "droppedSharedBodyAliases": [],
+                  "droppedTruncatedAliases": [],
+                  "droppedSharedFamilyNameAliases": [],
+                  "droppedRelativeAliases": [],
+                  "droppedRelations": [],
+                  "correctedRelations": []
+                },
+                "settings": {
+                  "abilities": [],
+                  "locations": [
+                    {
+                      "data": {
+                        "name": "鳶ヶ丘",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "主人公が配達する区域の一つであり、坂道と家々が並ぶ場所。",
+                        "region": null,
+                        "description": null,
+                        "evidence": "俺は局の裏で自転車の荷台に袋を縛りつけ、鳶ヶ丘へ向かう坂の入口を見上げた。"
+                      },
+                      "chapters": [
+                        1
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "立花郵便局",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "主人公が勤務する場所。窓口がある。",
+                        "region": null,
+                        "description": null,
+                        "evidence": "局へ戻ると、日はもう傾いていた。\n<0xE3><0x80><0x80>千夏が窓口の内側で伝票を数えている。"
+                      },
+                      "chapters": [
+                        1
+                      ]
+                    }
+                  ],
+                  "organizations": [
+                    {
+                      "data": {
+                        "name": "立花郵便局",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "主人公が勤務する場所であり、配達のルールが存在する。",
+                        "parent": null,
+                        "category": null,
+                        "description": null,
+                        "evidence": "鳶ヶ丘は一人で受け持つ。それが立花郵便局のきまりだった。"
+                      },
+                      "chapters": [
+                        1
+                      ]
+                    }
+                  ],
+                  "worldItems": [
+                    {
+                      "data": {
+                        "name": "配達区域の分け方",
+                        "category": "society",
+                        "description": "立花郵便局では、配達区域が町と鳶ヶ丘の二つに分かれており、町の区域は三人で分ける一方、鳶ヶ丘は一人で受け持つというきまりがある。",
+                        "evidence": "配達区域が町と鳶ヶ丘の二つに分かれていると知ったのは、入った初日だった。\n<0xE3><0x80><0x80>町の区域は三人で分ける。鳶ヶ丘は一人。"
+                      },
+                      "category": "society",
+                      "chapters": [
+                        1
+                      ]
+                    }
+                  ],
+                  "affiliations": [
+                    "立花郵便局"
+                  ],
+                  "rejected": [],
+                  "abilityTerm": null,
+                  "rules": []
+                },
+                "note": "マージ（既存の資料との突き合わせ）と保存は行っていません。これは取り出して検算したところまでの結果です。"
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\002_十月三日の坂.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:latest",
+            "temperature": 0.2,
+            "results": [
+              {
+                "chunkId": "本文\\002_十月三日の坂.txt#2-0@6020",
+                "chapterLabel": "第2話",
+                "characters": {
+                  "accepted": [
+                    {
+                      "data": {
+                        "name": "蓬田",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "郵便配達員。左足首を骨折し、一時的に業務から離脱する。",
+                        "affiliation": null,
+                        "gender": "男性",
+                        "role": "配達員",
+                        "personality": "自分の区域を人に渡すことに落ち着かない様子を見せる（「自分の区域を人に渡すのが、これほど落ち着かないとは思わなかった」）",
+                        "appearance": "合羽を着ている。松葉杖を使用している。",
+                        "evidence": "俺は合羽の袖をまくり直して、二つ目の曲がりに入った。",
+                        "relations": [
+                          {
+                            "name": "千夏",
+                            "relation": "同僚"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        2
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "千夏",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "郵便配達員。蓬田が怪我をした後、彼の担当区域の配達を引き継ぐ。",
+                        "affiliation": null,
+                        "gender": "女性",
+                        "role": "配達員",
+                        "personality": "状況を把握し、必要な対応（窓口の代行）について提案する（「きまりには続きがあるでしょ。配達員が出られないときは、窓口が代わりに回るって」）。",
+                        "appearance": "合羽を着ている。",
+                        "evidence": "局へ戻ると、千夏が窓口を飛び出してきた。",
+                        "relations": [
+                          {
+                            "name": "蓬田",
+                            "relation": "同僚"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        2
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "局長",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "郵便局の責任者。蓬田に対し窓口業務を覚える機会だと伝えた。",
+                        "affiliation": null,
+                        "gender": null,
+                        "role": null,
+                        "personality": null,
+                        "appearance": null,
+                        "evidence": "局長は「窓口を覚える機会だ」と言ったが、俺はうまく返事ができなかった。",
+                        "relations": []
+                      },
+                      "chapters": [
+                        2
+                      ]
+                    }
+                  ],
+                  "rejected": [
+                    {
+                      "name": "医者",
+                      "reason": "non_person"
+                    }
+                  ],
+                  "droppedSharedBodyAliases": [],
+                  "droppedTruncatedAliases": [],
+                  "droppedSharedFamilyNameAliases": [],
+                  "droppedRelativeAliases": [],
+                  "droppedRelations": [],
+                  "correctedRelations": []
+                },
+                "settings": {
+                  "abilities": [],
+                  "locations": [
+                    {
+                      "data": {
+                        "name": "鳶ヶ丘",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "物語の舞台となる地域。郵便配達のルートの一部。",
+                        "region": null,
+                        "description": null,
+                        "evidence": "こういう日の鳶ヶ丘は、路面が黒く光って、落ち葉が薄く敷き詰められている。"
+                      },
+                      "chapters": [
+                        2
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "診察室",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "怪我をした際に利用した医療施設の一室。",
+                        "region": null,
+                        "description": null,
+                        "evidence": "気がつくと診察室の丸椅子に座っていて、白い長靴下のようなものを足首から下に巻かれていた。"
+                      },
+                      "chapters": [
+                        2
+                      ]
+                    }
+                  ],
+                  "organizations": [],
+                  "worldItems": [
+                    {
+                      "data": {
+                        "name": "配達業務の慣習",
+                        "category": "rule",
+                        "description": "郵便配達員は担当区域を一人で受け持つことが基本であり、代わりが回る仕組みが存在する。",
+                        "evidence": "鳶ヶ丘は一人で受け持つ。」「きまりには続きがあるでしょ。配達員が出られないときは、窓口が代わりに回るって」"
+                      },
+                      "category": "rule",
+                      "chapters": [
+                        2
+                      ]
+                    }
+                  ],
+                  "affiliations": [],
+                  "rejected": [
+                    {
+                      "name": "null",
+                      "reason": "invalid_name"
+                    },
+                    {
+                      "name": "郵便局",
+                      "reason": "ungrounded"
+                    }
+                  ],
+                  "abilityTerm": null,
+                  "rules": []
+                },
+                "note": "マージ（既存の資料との突き合わせ）と保存は行っていません。これは取り出して検算したところまでの結果です。"
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\003_窓口の椅子.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:latest",
+            "temperature": 0.2,
+            "results": [
+              {
+                "chunkId": "本文\\003_窓口の椅子.txt#3-0@6020",
+                "chapterLabel": "第3話",
+                "characters": {
+                  "accepted": [
+                    {
+                      "data": {
+                        "name": "千夏",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "郵便局の窓口に立つ人物で、毎朝鳶ヶ丘から坂を上り下りする生活を送っている。",
+                        "affiliation": null,
+                        "gender": "女性",
+                        "role": null,
+                        "personality": "（周囲への気遣いを見せる）隣の窓口から「相沢くん、声。もうちょっと出る？」と声をかけている。",
+                        "appearance": "null",
+                        "evidence": "\"相沢くん、声。もうちょっと出る？\"",
+                        "relations": [
+                          {
+                            "name": "俺",
+                            "relation": "同僚"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        3
+                      ]
+                    }
+                  ],
+                  "rejected": [
+                    {
+                      "name": "俺",
+                      "reason": "pronoun_name",
+                      "details": {
+                        "summary": "郵便局の窓口に座り、療養生活を送っている人物。足首をギプスで固定している。",
+                        "appearance": "足首がギプスの中にある。",
+                        "gender": "男性"
+                      }
+                    },
+                    {
+                      "name": "蓬田さん",
+                      "reason": "ungrounded"
+                    }
+                  ],
+                  "droppedSharedBodyAliases": [],
+                  "droppedTruncatedAliases": [],
+                  "droppedSharedFamilyNameAliases": [],
+                  "droppedRelativeAliases": [],
+                  "droppedRelations": [
+                    {
+                      "characterName": "蓬田さん",
+                      "partner": "俺",
+                      "relation": "（親しい間柄と思われる）",
+                      "reason": "not_a_relation"
+                    }
+                  ],
+                  "correctedRelations": []
+                },
+                "settings": {
+                  "abilities": [],
+                  "locations": [
+                    {
+                      "data": {
+                        "name": "鳶ヶ丘",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "千夏が毎朝から坂を上り下りする場所。郵便局がある地域の一部と思われる。",
+                        "region": null,
+                        "description": null,
+                        "evidence": "その千夏は、毎朝八時に鳶ヶ丘の袋を持って出ていく。"
+                      },
+                      "chapters": [
+                        3
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "窓口",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "主人公が座り、業務を行う場所。客と正面から向き合う必要がある。",
+                        "region": null,
+                        "description": null,
+                        "evidence": "俺は局の窓口に座っている。"
+                      },
+                      "chapters": [
+                        3
+                      ]
+                    }
+                  ],
+                  "organizations": [
+                    {
+                      "data": {
+                        "name": "局",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "登場人物たちが日常的に利用し、仕事をする場所（郵便局の窓口がある施設）。",
+                        "parent": null,
+                        "category": "施設",
+                        "description": null,
+                        "evidence": "俺は局の窓口に座っている。"
+                      },
+                      "chapters": [
+                        3
+                      ]
+                    }
+                  ],
+                  "worldItems": [
+                    {
+                      "data": {
+                        "name": "郵便業務の慣習",
+                        "category": "society",
+                        "description": "切手を買いに来る際、ついでで坂を下りてくる人がいるかどうかの様子が描かれている。",
+                        "evidence": "「ついでだ。切手を買いに来た」 / 「ついでで四十分の坂を下りる人がいるだろうか。」"
+                      },
+                      "category": "society",
+                      "chapters": [
+                        3
+                      ]
+                    }
+                  ],
+                  "affiliations": [],
+                  "rejected": [
+                    {
+                      "name": "null",
+                      "reason": "invalid_name"
+                    }
+                  ],
+                  "abilityTerm": null,
+                  "rules": []
+                },
+                "note": "マージ（既存の資料との突き合わせ）と保存は行っていません。これは取り出して検算したところまでの結果です。"
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\004_ギプスが外れた日.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:latest",
+            "temperature": 0.2,
+            "results": [
+              {
+                "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@6020",
+                "chapterLabel": "第4話",
+                "characters": {
+                  "accepted": [
+                    {
+                      "data": {
+                        "name": "蓬田さん",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "丘の上で縁側にいる年配の男性。主人公に気遣いを見せ、杖について話す。",
+                        "affiliation": null,
+                        "gender": "男性",
+                        "role": null,
+                        "personality": "穏やかだが、相手の様子を観察している（「戻ったか」「杖はもういらんのか」）。",
+                        "appearance": null,
+                        "evidence": "\"蓬田さんが縁側から手を上げた。\"",
+                        "relations": [
+                          {
+                            "name": "俺",
+                            "relation": "対面した人物"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        4
+                      ]
+                    }
+                  ],
+                  "rejected": [
+                    {
+                      "name": "千夏",
+                      "reason": "ungrounded"
+                    }
+                  ],
+                  "droppedSharedBodyAliases": [],
+                  "droppedTruncatedAliases": [],
+                  "droppedSharedFamilyNameAliases": [],
+                  "droppedRelativeAliases": [],
+                  "droppedRelations": [],
+                  "correctedRelations": []
+                },
+                "settings": {
+                  "abilities": [],
+                  "locations": [
+                    {
+                      "data": {
+                        "name": "鳶ヶ丘",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "坂道や家々が並ぶ、物語の舞台となる地域名。",
+                        "region": null,
+                        "description": null,
+                        "evidence": "「鳶ヶ丘の袋を俺の荷台のほうへ押してよこした。」"
+                      },
+                      "chapters": [
+                        4
+                      ]
+                    }
+                  ],
+                  "organizations": [],
+                  "worldItems": [
+                    {
+                      "data": {
+                        "name": "季節の変化",
+                        "category": "culture",
+                        "description": "十一月になり、空気が冷たくなっている様子が描写されている。",
+                        "evidence": "「外の空気が、想像していたより冷たかった。」"
+                      },
+                      "category": "culture",
+                      "chapters": [
+                        4
+                      ]
+                    }
+                  ],
+                  "affiliations": [],
+                  "rejected": [
+                    {
+                      "name": "立花郵便局",
+                      "reason": "ungrounded"
+                    }
+                  ],
+                  "abilityTerm": null,
+                  "rules": []
+                },
+                "note": "マージ（既存の資料との突き合わせ）と保存は行っていません。これは取り出して検算したところまでの結果です。"
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\005_初雪の窓口.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:latest",
+            "temperature": 0.2,
+            "results": [
+              {
+                "chunkId": "本文\\005_初雪の窓口.txt#5-0@6020",
+                "chapterLabel": "第5話",
+                "characters": {
+                  "accepted": [
+                    {
+                      "data": {
+                        "name": "千夏",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "郵便局の窓口で働く人物。主人公に対して気遣いを見せ、世話を焼く様子がうかがえる。",
+                        "affiliation": "null",
+                        "gender": "女性",
+                        "role": "窓口係（と思われる）",
+                        "personality": "親密な関係性を持つ相手に対し、気遣いや指摘を行う（「お客さんの顔、見てた」「そうか、じゃないでしょ」）。",
+                        "appearance": "null",
+                        "evidence": "千夏が一人で捌ききれずにいる。\n「相沢くん、いま」\n「気をつけて」と言った。",
+                        "relations": []
+                      },
+                      "chapters": [
+                        5
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "蓬田さん",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "配達ルート上の家の一人。縁側の雪を掃いており、主人公が丘の頂上で待っている人物。",
+                        "affiliation": null,
+                        "gender": null,
+                        "role": null,
+                        "personality": "（本文中の言動から読み取れる性格は不明）",
+                        "appearance": "紺の半纏を羽織り、寒そうに袖を合わせている。",
+                        "evidence": "蓬田さんの家の前では、縁側の雪がきれいに掃いてあった。\n丘のいちばん上で、蓬田さんが待っている。紺の半纏の袖を、寒そうに合わせながら。",
+                        "relations": []
+                      },
+                      "chapters": [
+                        5
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "女の人",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "郵便局の窓口で年賀状を購入する客の一人。主人公が接客対応をする場面で登場した。",
+                        "affiliation": null,
+                        "gender": "女性",
+                        "role": "顧客",
+                        "personality": "（本文中の言動から読み取れる性格は不明）",
+                        "appearance": "null",
+                        "evidence": "「あら、よく分かるわね」\n女の人は目を丸くして、それから笑った。",
+                        "relations": []
+                      },
+                      "chapters": [
+                        5
+                      ]
+                    }
+                  ],
+                  "rejected": [],
+                  "droppedSharedBodyAliases": [],
+                  "droppedTruncatedAliases": [],
+                  "droppedSharedFamilyNameAliases": [],
+                  "droppedRelativeAliases": [],
+                  "droppedRelations": [
+                    {
+                      "characterName": "千夏",
+                      "partner": "主人公の人物名が不明",
+                      "relation": "同僚（と思われる）",
+                      "reason": "not_a_relation"
+                    },
+                    {
+                      "characterName": "蓬田さん",
+                      "partner": "主人公の人物名が不明",
+                      "relation": "配達ルート上の知り合い（と思われる）",
+                      "reason": "not_a_relation"
+                    }
+                  ],
+                  "correctedRelations": []
+                },
+                "settings": {
+                  "abilities": [],
+                  "locations": [
+                    {
+                      "data": {
+                        "name": "鳶ヶ丘",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "主人公が配達を行う地域。坂道があり、家々が点在している。",
+                        "region": null,
+                        "description": "配達ルートとなる丘の集落。坂道がある。",
+                        "evidence": "鳶ヶ丘の配達は、ここから春まで歩きになる。\n三つ目の曲がりを抜けたところで、丘の家々の屋根がすっかり白くなっているのが見えた。"
+                      },
+                      "chapters": [
+                        5
+                      ]
+                    }
+                  ],
+                  "organizations": [
+                    {
+                      "data": {
+                        "name": "局",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "郵便業務を行う施設。洗面所や窓口がある。",
+                        "parent": null,
+                        "category": null,
+                        "description": "郵便業務を行う施設（と思われる）",
+                        "evidence": "局の洗面所で手を温めていると、鏡に自分の顔が映った。\n昼を過ぎて局へ戻ると、窓口が混んでいた。\n局の戸を閉めるとき、千夏が「気をつけて」と言った。"
+                      },
+                      "chapters": [
+                        5
+                      ]
+                    }
+                  ],
+                  "worldItems": [
+                    {
+                      "data": {
+                        "name": "配達業務の様式",
+                        "category": "society",
+                        "description": "郵便物の配達は、雪の状況や季節によって徒歩での移動が必要となる。",
+                        "evidence": "鳶ヶ丘の配達は、ここから春まで歩きになる。\n年賀状の束が届くのは、たぶん来週あたりだ。あの坂を、雪の上を、束を抱えて上ることになる。"
+                      },
+                      "category": "society",
+                      "chapters": [
+                        5
+                      ]
+                    }
+                  ],
+                  "affiliations": [
+                    "null"
+                  ],
+                  "rejected": [
+                    {
+                      "name": "null",
+                      "reason": "invalid_name"
+                    },
+                    {
+                      "name": "郵便局",
+                      "reason": "ungrounded"
+                    }
+                  ],
+                  "abilityTerm": null,
+                  "rules": []
+                },
+                "note": "マージ（既存の資料との突き合わせ）と保存は行っていません。これは取り出して検算したところまでの結果です。"
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "settingsFound": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsFoundTotal": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsMissed": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsAliases": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsAliasesTotal": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsFabricated": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsWrongMerge": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsWrongMergeTotal": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsWrongSplit": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsWrongSplitTotal": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsFakeRelations": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsAbilityTerm": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "settingsRuleLeak": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "settingsOtherRecords": {
+      "values": [
+        12
+      ],
+      "min": 12,
+      "max": 12
+    },
+    "dropped.言い回しで落とした関係": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "accepted": {
+      "values": [
+        17
+      ],
+      "min": 17,
+      "max": 17
+    },
+    "rejected": {
+      "values": [
+        10
+      ],
+      "min": 10,
+      "max": 10
+    },
+    "rejected.non_person": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "rejected.pronoun_name": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "rejected.ungrounded": {
+      "values": [
+        5
+      ],
+      "min": 5,
+      "max": 5
+    },
+    "rejected.invalid_name": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        159237
+      ],
+      "min": 159237,
+      "max": 159237
+    }
+  },
+  "lines": [
+    "出るべきものを拾えた（人物・能力・場所・組織・世界観）: 0/0",
+    "見逃し（出るべきなのに出なかった）: 0",
+    "あるべき別名を拾えた: 0/0",
+    "でっち上げ（出てはいけないものが出た）: 0",
+    "誤って統合した組（別人を1件にまとめた）: 0/0",
+    "誤って分けた組（同じ人物を別レコードにした）: 0/0",
+    "でっち上げの関係（本文に無い血縁などを書いた）: 0",
+    "能力の総称が合っている（1＝合っている）: 1",
+    "指示文の混入（rules にプロンプトの文が入った）: 0",
+    "仕込み以外に出たレコード: 12",
+    "指摘（検算を通ったもの）: 17",
+    "落とした（検算で弾いたもの）: 10",
+    "　└ 落とした理由：invalid_name（名前が不正）: 3",
+    "　└ 落とした理由：non_person（人物以外）: 1",
+    "　└ 落とした理由：pronoun_name（代名詞の名前）: 1",
+    "　└ 落とした理由：ungrounded（本文根拠なし）: 5",
+    "　└ 関係の検算：言い回しで落とした関係: 3",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 159.2秒",
+    "num_ctx: 24576（プロンプトの長さから（製品と同じ道））",
+    "temperature: 0.2（製品と同じ（束が返した値））",
+    "温め（読み込みを含む。上の所要時間には入っていません）: 25.2秒"
+  ]
+}

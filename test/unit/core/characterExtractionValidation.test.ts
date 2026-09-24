@@ -1118,3 +1118,102 @@ describe("関係の欄に文が入っていたら、構造で落とす", () => {
     ]);
   });
 });
+
+describe("名前が決められずに捨てたレコードの中身", () => {
+  // 一人称の作品では、語り手が自分の名前を名乗らないことがある。
+  // AIは外見や性格まで読み取っていても「僕」「語り手」としか呼べず、
+  // レコードごと捨てられる。**捨てること自体は正しい**（設計書6.5.9）が、
+  // 件数しか残らないと作者には「認識してそうなのに増えない」としか見えない
+  test("代名詞の名前で捨てたレコードは、中身を持ち回す", () => {
+    const line = "僕は背が高いと言われる";
+    const result = validate(
+      {
+        characters: [
+          {
+            name: "僕",
+            summary: "語り手の少年",
+            role: "主人公",
+            appearance: "背が高い。右目の下に小さなほくろ",
+            gender: "男性",
+            personality: "皮肉屋",
+            evidence: line,
+          },
+        ],
+      },
+      { ...chunk, text: line }
+    );
+
+    expect(result.rejected).toEqual([
+      {
+        name: "僕",
+        reason: "pronoun_name",
+        // 誰のことか見当が付く分だけ（性格などは入れない——報告が長くなる）
+        details: {
+          summary: "語り手の少年",
+          role: "主人公",
+          appearance: "背が高い。右目の下に小さなほくろ",
+          gender: "男性",
+        },
+      },
+    ]);
+    expect(result.accepted).toEqual([]);
+  });
+
+  test("説明的な名前で捨てたレコードも、中身を持ち回す", () => {
+    const line = "語り手は縁側で笑った";
+    const result = validate(
+      {
+        characters: [
+          { name: "語り手", appearance: "痩せている", evidence: line },
+        ],
+      },
+      { ...chunk, text: line }
+    );
+
+    expect(result.rejected).toEqual([
+      {
+        name: "語り手",
+        reason: "descriptive_name",
+        details: { appearance: "痩せている" },
+      },
+    ]);
+  });
+
+  test("本文に根拠が無くて捨てたものには、中身を付けない", () => {
+    // 語り手の可能性があるのは名前を決められなかった2つだけである。
+    // 全部に付けると報告が騒がしくなり、肝心の行が読まれなくなる
+    const result = validate({
+      characters: [
+        {
+          name: "谷村修一",
+          summary: "旅の商人",
+          appearance: "痩せている",
+          evidence: "谷村がやってきた",
+        },
+      ],
+    });
+
+    expect(result.rejected).toEqual([
+      { name: "谷村修一", reason: "ungrounded" },
+    ]);
+  });
+
+  test("中身が空欄や不在文だけなら、details を付けない", () => {
+    const line = "僕は歩いた";
+    const result = validate(
+      {
+        characters: [
+          {
+            name: "僕",
+            summary: "（本文からは読み取れない）",
+            appearance: null,
+            evidence: line,
+          },
+        ],
+      },
+      { ...chunk, text: line }
+    );
+
+    expect(result.rejected).toEqual([{ name: "僕", reason: "pronoun_name" }]);
+  });
+});

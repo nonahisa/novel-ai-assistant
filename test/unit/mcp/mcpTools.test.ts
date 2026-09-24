@@ -841,6 +841,45 @@ describe("settings.validate", () => {
     expect(rejected.reason).toBe("ungrounded");
   });
 
+  test("名前が決められずに落ちた語り手らしき候補は、中身まで返す", () => {
+    // 一人称の作品では語り手が名前を名乗らないことがある。
+    // **外のAIにも黙らない**——件数だけ返すと、外から見ても
+    // 「認識しているのに増えない」としか分からない
+    const prompts = settingsPrompt({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      numCtx: NUM_CTX,
+    });
+    const chunkId = prompts.chunks[0].chunkId;
+
+    const response = JSON.stringify({
+      characters: [
+        {
+          name: "僕",
+          aliases: [],
+          entityType: "person",
+          appearance: "背が高い。右目の下に小さなほくろ",
+          gender: "男性",
+          evidence: "僕は歩いた",
+        },
+      ],
+    });
+
+    const result = settingsValidate({ folder: WORK, chunkId, response });
+
+    expect(result.characters.accepted).toEqual([]);
+    expect(result.characters.rejected).toEqual([
+      {
+        name: "僕",
+        reason: "pronoun_name",
+        details: {
+          appearance: "背が高い。右目の下に小さなほくろ",
+          gender: "男性",
+        },
+      },
+    ]);
+  });
+
   test("応答がJSONとして読めなければ、そこで止まる", () => {
     const prompts = settingsPrompt({
       folder: WORK,
