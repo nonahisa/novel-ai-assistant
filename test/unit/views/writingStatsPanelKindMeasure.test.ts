@@ -117,6 +117,74 @@ describe("話ごとの一覧に、種類の目安を出す", () => {
     expect(html).toMatch(/\.measure\s*\{[^}]*white-space:\s*nowrap/);
   });
 
+  /**
+   * ブラウザ版の実機確認（2026-09-25）：「目安」を直したあとも、「原稿用紙」の
+   * 「約15枚」が「約15／枚」と2行に折れ、「話」の「第10話」も折れた。理由は
+   * 「目安」と同じで、題の列に幅を取られた短い列が折り返される。
+   * **題の列だけは折れてよい**（長い題があるので、そこで幅を吸収する）。
+   */
+  describe("題の列のほかは折り返さない（話・純文字数・原稿用紙・目安・平均比）", () => {
+    /** 見出しの行と、最初の話の行の、列ごとの開きタグ */
+    function columns(table: string): { head: string[]; row: string[] } {
+      const head = table.match(/<thead>([\s\S]*?)<\/thead>/)?.[1] ?? "";
+      const row = table.match(/<tr class="clickable"[^>]*>([\s\S]*?)<\/tr>/)?.[1] ?? "";
+      return {
+        head: head.match(/<th[^>]*>/g) ?? [],
+        row: row.match(/<td[^>]*>/g) ?? [],
+      };
+    }
+
+    for (const kind of ["essay", "novel"] as const) {
+      test(`${kind === "essay" ? "目安の列があるとき" : "目安の列が無いとき（小説）"}`, () => {
+        const { head, row } = columns(renderEpisodesFor(kind).table);
+        const names = kind === "essay"
+          ? ["話", "タイトル", "純文字数", "原稿用紙", "目安", "平均比", "長さ"]
+          : ["話", "タイトル", "純文字数", "原稿用紙", "平均比", "長さ"];
+        expect(head).toHaveLength(names.length);
+        expect(row).toHaveLength(names.length);
+        names.forEach((name, index) => {
+          // 題の列は折れてよい。長さの列は棒なので、字の折り返しは関係ない
+          const shouldKeep = name !== "タイトル" && name !== "長さ";
+          const pattern = /class="[^"]*\b(nowrap|measure)\b/;
+          expect(pattern.test(head[index]), `見出し「${name}」: ${head[index]}`).toBe(shouldKeep);
+          expect(pattern.test(row[index]), `中身「${name}」: ${row[index]}`).toBe(shouldKeep);
+        });
+      });
+    }
+
+    test("折り返さない指定そのものがある（class だけ付けて規則が無ければ効かない）", () => {
+      expect(html).toMatch(/\.nowrap\s*\{[^}]*white-space:\s*nowrap/);
+    });
+
+    /**
+     * 折れなくした分、狭い画面では表の幅が画面を超えうる。そのときは表の
+     * 入れ物だけを横に送れるようにする（画面全体を横にずらさない）。
+     */
+    /**
+     * 420px の画面で試したところ、折らない列に幅を取られた題の列が1字幅まで
+     * 細り、題が1字ずつ縦に並んだ（1行が700px を超えた）。題は折れてよいが、
+     * 最低の幅は持たせる。
+     */
+    test("題の列は細りすぎない（最低の幅を持つ）", () => {
+      const { head, row } = columns(renderEpisodesFor("essay").table);
+      expect(head[1]).toContain("episode-title");
+      expect(row[1]).toContain("episode-title");
+      expect(html).toMatch(/\.episode-title\s*\{[^}]*min-width:/);
+      // 題の列は折れてよいまま
+      expect(html).not.toMatch(/\.episode-title\s*\{[^}]*white-space:\s*nowrap/);
+    });
+
+    test("話ごとの表の入れ物は、はみ出したら横に送れる", () => {
+      const holder = html.match(/<div id="episode-table"[^>]*>/)?.[0] ?? "";
+      const classes = holder.match(/class="([^"]*)"/)?.[1].split(/\s+/) ?? [];
+      expect(classes.length, holder).toBeGreaterThan(0);
+      const scrolls = classes.some((name) =>
+        new RegExp(`\\.${name}\\s*\\{[^}]*overflow-x:\\s*auto`).test(html)
+      );
+      expect(scrolls, holder).toBe(true);
+    });
+  });
+
   test("概要の「作品の総量」にも、目安の短い形を添える", () => {
     expect(script).toContain("state.totals.measure ? ' / ' + state.totals.measure : ''");
   });

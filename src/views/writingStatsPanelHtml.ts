@@ -138,6 +138,23 @@ th { color: var(--vscode-descriptionForeground); font-weight: normal; font-size:
   取られると1字ずつ縦に折れて読めなかった（ノートPCの実機確認、2026-09-25）
 */
 .measure { white-space: nowrap; }
+/*
+  話・純文字数・原稿用紙・平均比の列も同じ理由で折らない（ブラウザ版の実機
+  確認、2026-09-25。「約15枚」が「約15／枚」、「第10話」が2行に折れた）。
+  **題の列だけは折れてよい**——長い題があり、表の幅はそこで吸収する
+*/
+.nowrap { white-space: nowrap; }
+/*
+  折らない列を増やした分、狭い画面では表が画面の幅を超えうる。そのときは
+  表の入れ物だけを横に送る（画面全体を横にずらさない）
+*/
+.table-scroll { overflow-x: auto; }
+/*
+  題の列は折れてよいが、細りすぎないようにする。折らない列が幅を取ると、
+  狭い画面（420px で確かめた）では題が1字ずつ縦に並び、1行が700px を
+  超えた。題に最低の幅を持たせ、足りない分は上の横送りで見せる
+*/
+.episode-title { min-width: 8em; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 tr.clickable { cursor: pointer; }
 tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
@@ -259,7 +276,7 @@ a:hover, .link:hover { text-decoration: underline; }
   </section>
   ${hasEpisodesTab ? `<section class="page" id="page-episodes">
     <div class="cards" id="episode-cards"></div>
-    <div id="episode-table"></div>
+    <div id="episode-table" class="table-scroll"></div>
   </section>` : ''}
 </main>
 <script nonce="${nonce}">
@@ -1379,14 +1396,14 @@ function renderEpisodes() {
   const hasMeasure = rows.some((row) => row.measure);
   table.innerHTML = collectedNote +
     '<table><thead><tr>' +
-    '<th>話</th><th>タイトル</th><th class="num">純文字数</th><th class="num">原稿用紙</th>' +
+    '<th class="nowrap">話</th><th class="episode-title">タイトル</th><th class="num nowrap">純文字数</th><th class="num nowrap">原稿用紙</th>' +
     (hasMeasure ? '<th class="num measure">目安</th>' : '') +
-    '<th class="num">平均比</th><th>長さ</th></tr></thead><tbody>' +
+    '<th class="num nowrap">平均比</th><th>長さ</th></tr></thead><tbody>' +
     rows.map((row) => {
       if (row.conflicted) {
         return '<tr class="clickable" data-path="' + escapeHtml(row.filePath) + '">' +
-          '<td>' + escapeHtml(row.chapterLabel || '—') + '</td>' +
-          '<td>' + escapeHtml(row.title || row.fileName) + '</td>' +
+          '<td class="nowrap">' + escapeHtml(row.chapterLabel || '—') + '</td>' +
+          '<td class="episode-title">' + escapeHtml(row.title || row.fileName) + '</td>' +
           '<td class="num conflicted" colspan="' + (hasMeasure ? 5 : 4) + '">⚠ 未解決の競合（未集計）</td></tr>';
       }
       const flag = row.flag === 'short'
@@ -1395,12 +1412,12 @@ function renderEpisodes() {
       const collected = row.collectedCount !== null
         ? ' <span class="flag">' + row.collectedCount + '話ぶん</span>' : '';
       return '<tr class="clickable" data-path="' + escapeHtml(row.filePath) + '">' +
-        '<td>' + escapeHtml(row.chapterLabel || '—') + '</td>' +
-        '<td>' + escapeHtml(row.title || row.fileName) + collected + '</td>' +
-        '<td class="num">' + formatCount(row.net) + '</td>' +
-        '<td class="num">約' + formatCount(row.pages) + '枚</td>' +
+        '<td class="nowrap">' + escapeHtml(row.chapterLabel || '—') + '</td>' +
+        '<td class="episode-title">' + escapeHtml(row.title || row.fileName) + collected + '</td>' +
+        '<td class="num nowrap">' + formatCount(row.net) + '</td>' +
+        '<td class="num nowrap">約' + formatCount(row.pages) + '枚</td>' +
         (hasMeasure ? '<td class="num measure">' + escapeHtml(row.measure || '—') + '</td>' : '') +
-        '<td class="num">' + Math.round(row.ratio * 100) + '%</td>' +
+        '<td class="num nowrap">' + Math.round(row.ratio * 100) + '%</td>' +
         '<td><div class="mini">' + meterSvg(Math.round((row.net / maxNet) * 100), '') +
         '</div>' + flag + '</td></tr>';
     }).join('') +

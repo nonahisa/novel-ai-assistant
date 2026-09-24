@@ -3211,6 +3211,9 @@ export async function activate(
         // 開いている原稿の下段の目安（読了 約N分など）も新しい種類で出し直す。
         // 組み方は開き直すまで変わらない（変えたときの知らせがそう案内する）
         await refreshManuscriptKinds();
+        // 開いている執筆統計の「目安」の列と「種類の目安」の札も出し直す
+        // （ブラウザ版の実機確認、2026-09-25。閉じて開き直すまで出なかった）
+        await refreshWritingStatsPanel(work, deviceId);
         // 種類で絞る並び（設計書6.109.7）も読み直す。詳細メニューは
         // 作品一覧が読み直し終えた合図（onDidLoadWork）で並べ直す
         stepProvider.invalidateFormats(work.id);
