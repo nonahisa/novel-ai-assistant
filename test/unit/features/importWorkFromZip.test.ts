@@ -457,6 +457,71 @@ describe("ZIPから作品を取り込む", () => {
     );
   });
 
+  /*
+    実機確認リスト（0.83.8）の「なろうのバックアップを新しく取り込むと、取り込みの記録に
+    「話ごとのファイルに分ける」の案内が出るか」。なろうの合本は【第N章】の見出しを
+    章の最初の話にだけ持つ（作者の N5078JI.txt の形）。合本のままでは2つ目以降の章を
+    置けないので、取り込みは章を立てずに、分ける操作へ案内する。
+    分けると章が立つことは `splitCollectedSections.test.ts` が見ている。
+  */
+  it("章の見出しのある、なろうの合本を取り込むと、記録に「話ごとのファイルに分ける」の案内が残る", async () => {
+    const withChapters = NAROU_TEXT.replace(
+      "【エピソードタイトル】\n１　自殺の後始末",
+      "【第1章】\n第一章『夏』\n\n【エピソードタイトル】\n１　自殺の後始末"
+    ).replace(
+      "【エピソードタイトル】\n２　ラジオ",
+      "【第2章】\n第二章『冬』\n\n【エピソードタイトル】\n２　ラジオ"
+    );
+    // 置き換えが効いていること（効かなければ、この試験は何も見ていない）
+    expect(withChapters.match(/【第\d章】/g)).toHaveLength(2);
+
+    /** 作品を数え直す（章立ての判断で走査する）ために、フォルダーの中も読めるようにする */
+    class ListingFs extends MemoryFs {
+      override install(): void {
+        super.install();
+        const files = this.files;
+        const directories = this.directories;
+        (workspace.fs as unknown as Record<string, unknown>).readDirectory = async (uri: {
+          fsPath: string;
+        }) => {
+          const separator = paths.separatorFor(uri.fsPath);
+          const prefix = uri.fsPath.endsWith(separator) ? uri.fsPath : uri.fsPath + separator;
+          const children = new Map<string, number>();
+          for (const name of [...files.keys(), ...directories]) {
+            if (!name.startsWith(prefix)) continue;
+            const rest = name.slice(prefix.length);
+            if (!rest) continue;
+            const [head, ...tail] = rest.split(separator);
+            children.set(head, tail.length > 0 || directories.has(name) ? 2 : 1);
+          }
+          if (children.size === 0 && !directories.has(uri.fsPath)) {
+            throw new FileSystemError(uri.fsPath, "FileNotFound");
+          }
+          return [...children.entries()];
+        };
+      }
+    }
+    const fs = new ListingFs({
+      [NAROU_ZIP_PATH]: zipSync({ "N4190FX.txt": utf8(withChapters) }),
+    });
+    fs.install();
+    stubWindow(NAROU_ZIP_PATH);
+
+    await importWorkFromZip(WORKS, async () =>
+      workEntry(NAROU_WORK_FOLDER, NAROU_TITLE)
+    );
+
+    const text = importRecord(fs, NAROU_WORK_FOLDER);
+    expect(text).toContain("章の見出しが2個あります");
+    expect(text).toContain("話ごとのファイルに分ける");
+    // 取り込みは章立ての台帳を作らない（原稿も1文字も変えずに置く約束）
+    expect(
+      fs.placed().some((name) => name.includes(paths.join(".aiwriter", "chapters")))
+    ).toBe(false);
+    // 知らせには見出しだけ（中身は記録にある）
+    expect(notices[notices.length - 1].message).toContain("章立て");
+  });
+
   it("なろうのバックアップでは、貼り付けを案内しない（手入力だけ）", async () => {
     const fs = new MemoryFs({ [NAROU_ZIP_PATH]: NAROU_ZIP_BYTES });
     fs.install();

@@ -26,6 +26,31 @@ import { FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
  * 見本の公募はすべて作り物である。
  */
 
+/**
+ * 近さで並べる部品（`contestSimilarity.ts`）は、**既定では本物を通す**。
+ * 「ベクトル検索の準備が済んでいる」場面を作る試験だけが、準備の判定と近さを
+ * 差し替える（本物は Ollama と作品の索引が要る）。
+ */
+const similarity = vi.hoisted(() => ({
+  ready: false,
+  /** 公募の名前ごとの近さ（-1〜1） */
+  scores: undefined as Record<string, number> | undefined,
+}));
+
+vi.mock("../../../src/features/contestSimilarity", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/features/contestSimilarity")>();
+  return {
+    ...actual,
+    similarityReadiness: (...args: Parameters<typeof actual.similarityReadiness>) =>
+      similarity.ready ? Promise.resolve({ ready: true as const }) : actual.similarityReadiness(...args),
+    scoreContestsByWork: (...args: Parameters<typeof actual.scoreContestsByWork>) => {
+      const scores = similarity.scores;
+      if (!scores) return actual.scoreContestsByWork(...args);
+      return Promise.resolve(new Map(args[1].map((contest) => [contest, scores[contest.name] ?? 0])));
+    },
+  };
+});
+
 class MemoryStub implements ContestMemory {
   readonly values = new Map<string, unknown>();
   get<T>(key: string, defaultValue: T): T {
@@ -118,6 +143,8 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  similarity.ready = false;
+  similarity.scores = undefined;
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-09-23T12:00:00+09:00"));
   disk.clear();
@@ -290,6 +317,71 @@ describe("完成予定から選ぶ", () => {
       minChars: 50000,
       maxChars: 120000,
     });
+  });
+
+  /*
+    実機確認リスト（0.80.0）の「ベクトル検索の準備が済んでいれば、「作品に近い順に
+    並べ替える」で並びが変わるか」。準備の済んでいない側（案内が出る）は上の試験が見る。
+  */
+  test("準備が済んでいれば「作品に近い順に並べ替える」が出て、押すと近い順に並び替わる", async () => {
+    // 締切に間に合う公募を2つ置く（うみかぜは締切が近く、あおぞらは遠い）
+    const cards = [
+      { name: "第5回 うみかぜ文学賞", text: "締切：2026年11月30日\n字数：5万字以上12万字以内\n募集作品：海の物語" },
+      { name: "第9回 あおぞら大賞", text: "締切：2027年1月31日\n字数：3万字以上20万字以内\n募集作品：空の物語" },
+    ];
+    memory.values.set(
+      CONTEST_INBOX_KEY,
+      JSON.parse(
+        JSON.stringify(
+          storeContests(
+            cards.map((card) => {
+              const listing = parseContestCard({ ...card, source: "pasted" });
+              if (!listing) throw new Error(card.name);
+              return listing;
+            }),
+            { importedAt: "2026-09-23T10:00:00.000+09:00", sourcePage: null }
+          )
+        )
+      )
+    );
+    inputs = ["60000", "2000"];
+    similarity.ready = true;
+    // 作品には、締切の遠いあおぞらのほうが近い
+    similarity.scores = { "第5回 うみかぜ文学賞": 0.2, "第9回 あおぞら大賞": 0.9 };
+
+    let round = 0;
+    Object.assign(window, {
+      showQuickPick: async (
+        items: { label: string; description?: string; kind?: number }[],
+        options?: { placeHolder?: string }
+      ) => {
+        pickedItems.push(items);
+        pickPlaceholders.push(options?.placeHolder ?? "");
+        round++;
+        // 1回目は並べ替えを押し、2回目は並びを見て閉じる
+        return round === 1
+          ? items.find((item) => item.label.includes("作品に近い順に並べ替える"))
+          : undefined;
+      },
+    });
+
+    await chooseContestByForecast(MAIN, deps());
+
+    const names = (items: { label: string; kind?: number }[]) =>
+      items
+        .filter((item) => item.kind === undefined)
+        .map((item) => item.label)
+        .filter((label) => label.startsWith("第"));
+    // 最初は締切の近い順。準備が済んでいるので、案内ではなく並べ替えの行が出る
+    expect(names(pickedItems[0])).toEqual(["第5回 うみかぜ文学賞", "第9回 あおぞら大賞"]);
+    expect(pickedItems[0].some((item) => item.label.includes("作品に近い順に並べ替える"))).toBe(true);
+    expect(pickedItems[0].some((item) => item.label.includes("作品に近い順にも並べられます"))).toBe(false);
+    expect(pickPlaceholders[0]).toContain("締切の近い順に並べています");
+    // 押したあとは近い順で、近さが添う
+    expect(names(pickedItems[1])).toEqual(["第9回 あおぞら大賞", "第5回 うみかぜ文学賞"]);
+    expect(pickPlaceholders[1]).toContain("作品に近い順に並べています");
+    const aozora = pickedItems[1].find((item) => item.label === "第9回 あおぞら大賞");
+    expect(aozora?.description).toContain("近さ 90%");
   });
 
   test("公募を取り込んでいなければ、取り込み方を言って止める", async () => {

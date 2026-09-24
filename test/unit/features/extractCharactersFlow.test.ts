@@ -2379,5 +2379,68 @@ describe("人物抽出フロー", () => {
       const completion = showInformationMessage.mock.calls.at(-1);
       expect(completion?.slice(1)).not.toContain("提案を見る");
     });
+
+    /*
+      実機確認リスト（0.83.7）の「設定資料の抽出をかけ直しても、退けた関係が戻らず、
+      完了の知らせに「退けた関係を1件足しませんでした」と出るか」。
+      マージそのものは `rejectedRelations.test.ts` が見ている。ここでは**本物の
+      マージを通した抽出の流れ**で、知らせの文まで届くことを見る。
+    */
+    test("退けた関係はかけ直しても足さず、完了の知らせに件数と中身を出す", async () => {
+      state.loadedCharacters = [
+        {
+          ...emptyCharacter("char_001", "灯"),
+          relations: [{ name: "澪", relation: "妹" }],
+          rejectedRelations: [
+            {
+              target: "澪",
+              relation: "姉",
+              rejectedAt: "2026-09-24T00:00:00.000Z",
+              via: "external",
+            },
+          ],
+          appearedChapters: [1],
+        },
+        { ...emptyCharacter("char_002", "澪"), appearedChapters: [1] },
+      ];
+      const shown: string[] = [];
+      const { showInformationMessage } = installWindow();
+      showInformationMessage.mockImplementation(
+        async (message: string, ...actions: unknown[]) => {
+          shown.push(message);
+          return actions.includes("実行") ? "実行" : undefined;
+        }
+      );
+      Object.assign(window, {
+        showWarningMessage: vi.fn(async (message: string) => {
+          shown.push(message);
+          return undefined;
+        }),
+      });
+      // AIは、作者が退けた「澪=姉」をまた読んでくる
+      state.generate.mockResolvedValue({
+        text: JSON.stringify({
+          characters: [
+            {
+              name: "灯",
+              evidence: "灯が歩いた。",
+              relations: [{ name: "澪", relation: "姉" }],
+            },
+          ],
+        }),
+        truncated: false,
+        elapsedMs: 1,
+      });
+
+      await extractCharacters(work, testRegistry());
+
+      const summary = shown.find((message) => message.includes("新規")) ?? "";
+      expect(summary).toContain("退けた関係を 1件足しませんでした（灯 の「澪=姉」）");
+      // 取り消し方も同じ知らせで言う
+      expect(summary).toContain("取り消すときは設定資料パネルの関係欄の下から");
+      // 退けた関係は、承認待ちにも積まれない（台帳へ戻る道が無い）
+      const staged = [...disk.values()].map((bytes) => new TextDecoder().decode(bytes));
+      expect(staged.some((text) => text.includes("\"姉\"") && !text.includes("rejectedRelations"))).toBe(false);
+    });
   });
 });

@@ -145,6 +145,29 @@ describe("取り込んだ結果の知らせ", () => {
     expect(log).toContain("カクヨム の読者の反応を 1件 取り込みました");
   });
 
+  /*
+    実機確認リスト（0.83.12）の「操作ログに「〜件 取り込みました」と残るか」は、
+    ファイル（作品の `.aiwriter/logs/actions.log`）で確かめると書いてある。
+    上の試験は出力パネルの行を見ているので、ここでは**ファイルに書かれた行**を見る。
+  */
+  test("作品の .aiwriter/logs/actions.log に「〜件 取り込みました」の行が書かれる", async () => {
+    env.clipboard.text = envelope(123456);
+
+    await importReaderStats(work);
+
+    const logFile = Uri.file(
+      path.join(work.folderPath, ".aiwriter", "logs", "actions.log")
+    ).fsPath;
+    // 記録の書き込みは順番待ちの列で後から走るので、書かれるまで少し待つ
+    let written = "";
+    for (let attempt = 0; attempt < 50 && !written.includes("取り込みました"); attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const bytes = disk.get(logFile);
+      written = bytes ? new TextDecoder().decode(bytes) : "";
+    }
+    expect(written).toContain("カクヨム の読者の反応を 1件 取り込みました");
+  });
+
   test("同じ数だった回も、操作ログに残る", async () => {
     env.clipboard.text = envelope(123456);
     await importReaderStats(work);

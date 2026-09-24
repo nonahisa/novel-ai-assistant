@@ -131,6 +131,57 @@ describe("種類を変えるとき、設定ファイルの改行を保つ", () =
   });
 });
 
+/**
+ * 実機確認リスト（0.86.3）の「CRLF の config.json の作品で種類を変えたあと、
+ * `git diff` の差分が "kind" の1行だけで、改行が LF に変わらず末尾の改行も残るか」。
+ *
+ * git の差分は行ごとに比べるので、書く前と書いた後を行に割って比べれば同じことが
+ * 分かる。改行は CRLF のまま割る（CR を落とすと、改行が変わったことを見逃す）。
+ */
+describe("種類を変えたときの差分は kind の行だけ", () => {
+  /** 前と後で違う行（行の数が同じときだけ使う） */
+  function changedLines(before: string, after: string): string[] {
+    const a = before.split("\n");
+    const b = after.split("\n");
+    expect(b.length, "行の数が変わった").toBe(a.length);
+    return b.filter((line, index) => line !== a[index]);
+  }
+
+  test("CRLF・種類ありの作品で種類を変えると、違う行は kind の1行だけ", async () => {
+    const before = `${JSON.stringify({ ...baseConfig, kind: "novel" }, null, 2)}\n`.replace(
+      /\n/g,
+      "\r\n"
+    );
+    await placeConfig(before);
+
+    await writeWorkKind(work, "essay");
+
+    const after = await readConfigText();
+    expect(changedLines(before, after)).toEqual(['  "kind": "essay"\r']);
+    expect(after.endsWith("}\r\n")).toBe(true);
+  });
+
+  test("CRLF・種類なしの作品に種類を足すと、足した行と、その前の行の読点だけが変わる", async () => {
+    // JSON は最後の項目に「,」を付けないので、末尾へ項目を足すと直前の行にも
+    // 「,」が付く。git の差分は2行（直前の行の読点と、足した kind の行）になる
+    const before = `${JSON.stringify(baseConfig, null, 2)}\n`.replace(/\n/g, "\r\n");
+    await placeConfig(before);
+
+    await writeWorkKind(work, "essay");
+
+    const after = await readConfigText();
+    const a = before.split("\n");
+    const b = after.split("\n");
+    expect(b.length).toBe(a.length + 1);
+    const added = b.filter((line) => !a.includes(line));
+    // 足した行と、直前の行に読点が付いたもの。それ以外の行は1文字も変わらない
+    expect(added.every((line) => /"kind": "essay"|,\r$/.test(line))).toBe(true);
+    expect(added.length).toBeLessThanOrEqual(2);
+    expect(hasBareLf(after)).toBe(false);
+    expect(after.endsWith("}\r\n")).toBe(true);
+  });
+});
+
 describe("設定ファイルが無いときは、これまでと同じ形で作る", () => {
   test("LF・末尾に改行なし（登録で作る設定ファイルを1バイトも変えない）", async () => {
     await writeWorkConfig(work, baseConfig);

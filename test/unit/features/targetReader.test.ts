@@ -275,6 +275,79 @@ describe("途中でやめる", () => {
   });
 });
 
+/**
+ * 入口の選択肢と、1段目の「選ばずに OK」（実機確認リスト 0.82.0）。
+ *
+ * - 押すと6つの道が並び、段の行（1〜3）には**いまの値**が添う
+ * - 1段目で何も選ばずに OK を押すと、**いまの狙いのまま**先の段へ進む
+ *   （押し間違いで作者の欄を空にしない）
+ */
+describe("入口の選択肢と、選ばずに OK", () => {
+  /** 最初の選択窓に並んだ行を写して閉じる */
+  function captureFirst(into: PickItem[][]): Answer {
+    return (items) => {
+      into.push(items);
+      return undefined;
+    };
+  }
+
+  it("6つの道がこの順で並び、段の行にはいまの値が添う", async () => {
+    const shown: PickItem[][] = [];
+    answers = [captureFirst(shown)];
+    await runTargetReader(WORK, REGISTRY, SOURCES);
+
+    const labels = shown[0].map((item) => item.label);
+    expect(labels.slice(0, 6)).toEqual([
+      "3段とも通す",
+      "1 狙いを選ぶ",
+      "2 書き方の判断に答える",
+      "3 本文の実像を読む",
+      "タイトルとサブタイトルの適合度を測る",
+      "いまの材料でシートを作り直す",
+    ]);
+    // 出口も見える形で置く
+    expect(labels[labels.length - 1]).toContain("取りやめる");
+    // まだ何もしていない作品では、「まだ」と言う
+    const describe = (label: string) =>
+      String(shown[0].find((item) => item.label === label)?.description ?? "");
+    expect(describe("1 狙いを選ぶ")).toBe("まだ選んでいません");
+    expect(describe("2 書き方の判断に答える")).toBe("まだ答えていません");
+    expect(describe("3 本文の実像を読む")).toBe("まだ読んでいません");
+
+    // 狙いを決めたあとは、その層を「いま：」で添える
+    answers = [plan("1 狙い"), types("刺激層")];
+    inputs = ["理由"];
+    await runTargetReader(WORK, REGISTRY, SOURCES);
+    answers = [captureFirst(shown)];
+    await runTargetReader(WORK, REGISTRY, SOURCES);
+    expect(
+      String(shown[1].find((item) => item.label === "1 狙いを選ぶ")?.description)
+    ).toBe("いま：刺激層");
+  });
+
+  it("1段目で何も選ばずに OK を押すと、いまの狙いのまま2段目へ進む", async () => {
+    // 先に狙いを決めておく
+    answers = [plan("1 狙い"), types("刺激層")];
+    inputs = ["昔の理由"];
+    await runTargetReader(WORK, REGISTRY, SOURCES);
+
+    answers = [
+      plan("3段とも通す"),
+      types(), // 何も選ばずに OK（空の配列が返る）
+      escape, // 2段目の1問目で閉じる——ここまで来たことが「先へ進んだ」証
+    ];
+    inputs = ["新しい理由"];
+    const outcome = await runTargetReader(WORK, REGISTRY, SOURCES);
+
+    expect(outcome).toBe(CHECK_COMPLETED);
+    // 用意した答えをすべて使った＝2段目の問いが出た
+    expect(answers).toEqual([]);
+    const block = extractAuthorBlock(fs.text(SHEET) ?? "") ?? "";
+    expect(readAimTypes(block)).toEqual(["crave_pure"]);
+    expect(readAimReason(block)).toBe("新しい理由");
+  });
+});
+
 describe("2段目（書き方の判断）", () => {
   it("9問すべてに答えると、読者像に残り、シートに一致度が出る", async () => {
     answers = [

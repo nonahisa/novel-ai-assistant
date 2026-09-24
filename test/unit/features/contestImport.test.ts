@@ -223,6 +223,23 @@ describe("取り込み", () => {
     expect(informed[0]).toContain("全部選んでコピー");
   });
 
+  /*
+    実機確認リスト（0.80.0）の「公募の一覧を貼り付けて取り込む」で、1件も読めなければ
+    「全部選んでコピーして貼る」の案内が出るか。上の試験はヘルパーからの道（uri）なので、
+    貼り付けの道（paste）でも同じ案内が出ることを見る。
+  */
+  test("貼り付けの道で公募の一覧が読めなければ、取り込まず「全部選んでコピー」を案内する", async () => {
+    env.clipboard.text = "今日の買い物：卵、牛乳";
+
+    await importContestsFromClipboard(deps(), "paste");
+
+    expect(memory.values.has(CONTEST_INBOX_KEY)).toBe(false);
+    const said = [...informed, ...warned].join("\n");
+    expect(said).toContain("公募の一覧が見つかりませんでした");
+    expect(said).toContain("全部選んでコピー");
+    expect(said).toContain("貼り付けて取り込む");
+  });
+
   test("ヘルパーが渡した一覧を1件も読めなければ、成功と言わずに理由と貼り付け方を言う", async () => {
     env.clipboard.text = envelope([
       { name: "作り物A", url: null, section: null, text: "作り物A\n説明だけ" },

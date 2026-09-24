@@ -265,6 +265,38 @@ describe("ブラウザ版（規則7）", () => {
 });
 
 describe("順番", () => {
+  /*
+    実機確認リスト（0.83.3）の「段（作家タイプ診断→使うAIを決める→手元の無料AIを
+    入れる→Claude Codeとつなぐ→作品を用意する→原稿エディターで書く→困ったら）」。
+    VS Code は宣言の順に段を並べるので、並びは宣言を見れば決まる。
+    どの段も押したら済みになる条件を持つことは「形」の試験が見ている。
+  */
+  test("道案内の名前と、7つの段の並び", () => {
+    const w = walkthrough();
+    expect(w.title).toBe("統合小説執筆環境をはじめる");
+    expect(w.steps.map((s) => s.id)).toEqual([
+      "diagnosis",
+      "chooseAI",
+      "localAI",
+      "claudeCode",
+      "prepareWork",
+      "write",
+      "help",
+    ]);
+    // 1段目のボタンは作家タイプ診断（段の名前は「自分の書き方を知る」）
+    expect(commandsOf(w.steps[0])).toContain("novelai.runWriterDiagnosis");
+    expect(commandsOf(w.steps[3])).toContain("novelai.connectClaudeCode");
+    expect(w.steps.map((s) => s.title)).toEqual([
+      "自分の書き方を知る",
+      "使うAIを決める",
+      "手元の無料AIを入れる（任意）",
+      "Claude Code とつなぐ（任意）",
+      "作品を用意する",
+      "原稿エディターで書く",
+      "困ったら",
+    ]);
+  });
+
   test("作家タイプ診断が先、AIを決めるのが後（起動時の声かけと同じ順）", () => {
     // `extension.ts` の起動時の声かけは「診断 → AI」の順（作者の依頼、
     // 2026-09-13）。**何をしたいかが決まる前にAIを選ばせても、何のために

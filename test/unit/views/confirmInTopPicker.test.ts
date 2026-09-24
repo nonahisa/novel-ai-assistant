@@ -1,6 +1,7 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, test } from "vitest";
 import { confirmRun, confirmRunOrChoose } from "../../../src/views/notify";
-import { window } from "../support/vscodeStub";
+import { QuickPickItemKind, window } from "../support/vscodeStub";
 
 /**
  * 確認の窓を、画面上部の選択窓にそろえる（作者の裁定 A4、2026-09-23）。
@@ -125,6 +126,50 @@ describe("確認は画面上部の選択窓で訊く（A4）", () => {
     expect(calls).toHaveLength(2);
   });
 
+  /*
+    実機確認リスト（0.82.7）の「実行（以降は訊かない）・大きいモデルへの切り替え・
+    取りやめるが続き、その下に内容が並ぶか」。上の補足の試験は「実行より下」しか
+    見ていないので、4種の行が全部そろった窓で、並びを丸ごと確かめる。
+  */
+  test("並びは 実行 → 以降は訊かない → 別の道 → 取りやめる → 内容の区切り → 内容の行", async () => {
+    const calls = picking(() => undefined);
+    await confirmRunOrChoose("矛盾を検知します。", "実行", {
+      // 「以降は訊かない」を並べる id（覚えていない状態。既定の設定は空）
+      remember: { id: "ai.run.checkTypos" },
+      choices: ["gemma4:26b に切り替える"],
+      detail: "12チャンク中 12件を処理します。\n\n材料: 人物3人",
+    });
+    const items = calls[0].items;
+    const labels = items.map((item) => item.label);
+    const at = (text: string) => labels.findIndex((label) => label.includes(text));
+
+    expect(at("実行")).toBe(0);
+    expect(labels[1]).toContain("実行（以降は訊かない）");
+    expect(labels[2]).toContain("gemma4:26b に切り替える");
+    expect(labels[3]).toContain("取りやめる");
+    // 4つの押せる行のあとに「内容」の区切りが来て、その下に処理量などが並ぶ
+    expect(labels[4]).toBe("内容");
+    expect(items[4].kind).toBe(QuickPickItemKind.Separator);
+    expect(at("12チャンク中 12件を処理します。")).toBeGreaterThan(4);
+    expect(at("材料: 人物3人")).toBeGreaterThan(4);
+  });
+
+  test("内容の行（処理量）を選んでも始まらず、もう一度訊く。次に「実行」を選べば始まる", async () => {
+    let round = 0;
+    const calls = picking((shown) => {
+      round++;
+      return round === 1
+        ? labelled(shown, "12チャンク中 12件を処理します。")
+        : shown.items[0];
+    });
+    expect(
+      await confirmRun("矛盾を検知します。", "実行", {
+        detail: "12チャンク中 12件を処理します。",
+      })
+    ).toBe(true);
+    expect(calls).toHaveLength(2);
+  });
+
   test("別の道を選べば、その名前が返る", async () => {
     picking((shown) => labelled(shown, "gemma4:26b に切り替える"));
     expect(
@@ -132,5 +177,45 @@ describe("確認は画面上部の選択窓で訊く（A4）", () => {
         choices: ["gemma4:26b に切り替える"],
       })
     ).toEqual({ kind: "choice", label: "gemma4:26b に切り替える" });
+  });
+});
+
+/**
+ * 取り消しにくい操作の「実行」には警告の印を付ける（実機確認リスト 0.82.7）。
+ *
+ * モーダルだった頃は窓の顔（警告の三角）で分けていた。選択窓に移ったので、
+ * 実行の行の頭の印（`$(warning)`）で分ける。ふつうの確認は再生の印のまま。
+ */
+describe("取り消しにくい操作の印", () => {
+  test("kind: warning なら、実行の行の頭が警告の印", async () => {
+    const calls = picking(() => undefined);
+    await confirmRun("送信します。", "送信する", { kind: "warning" });
+    expect(calls[0].items[0].label).toBe("$(warning) 送信する");
+  });
+
+  test("ふつうの確認は再生の印（警告の印を付けない）", async () => {
+    const calls = picking(() => undefined);
+    await confirmRun("19話をAIで確認します。");
+    expect(calls[0].items[0].label).toBe("$(play) 実行");
+    expect(calls[0].items.some((item) => item.label.includes("$(warning)"))).toBe(false);
+  });
+
+  /*
+    印を付けるかは呼ぶ側が決める。項目に名指しされた2つ（GitHubへの送信・
+    人物をまとめる）が warning を渡していることを、呼び出しの本体で見る
+    （どちらも Git や台帳の代役を組むと重いので、源の形で見張る）。
+  */
+  test("GitHubへの送信と人物をまとめる確認は、warning を渡している", () => {
+    const callOf = (file: string, runLabel: string): string => {
+      const source = readFileSync(file, "utf8");
+      const at = source.indexOf(`"${runLabel}",`);
+      expect(at, `${file} に「${runLabel}」の確認が見つからない`).toBeGreaterThan(-1);
+      // 実行の言葉の直後の引数が、確認の指定（{ kind: "warning" }）
+      return source.slice(at, at + 300);
+    };
+    expect(callOf("src/features/gitSync.ts", "送信する")).toMatch(/\{\s*kind:\s*"warning"\s*\}/);
+    expect(callOf("src/features/unifyCharacters.ts", "まとめる")).toMatch(
+      /\{\s*kind:\s*"warning"\s*\}/
+    );
   });
 });
