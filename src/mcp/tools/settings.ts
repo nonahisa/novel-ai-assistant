@@ -339,19 +339,37 @@ function validateAgainst(
   chunk: Chunk,
   parsed: CharacterExtractResult,
   stored: StoredSettings,
-  accumulator: SettingsExtractionCollector
+  accumulator: SettingsExtractionCollector,
+  /** この回の前のチャンクで受け入れた人物（AIに「既知」として見せたもの） */
+  extractedPeople: ReadonlyArray<{
+    data: { name: string; aliases?: string[] };
+  }> = []
 ): SettingsValidateResult {
+  const knownNames = stored.characters.flatMap((person) => [
+    person.name,
+    ...person.aliases,
+  ]);
   const people = validateCharacterExtractResult(parsed, chunk, {
-    knownNames: stored.characters.flatMap((person) => [
-      person.name,
-      ...person.aliases,
-    ]),
+    knownNames,
     authorEditedNames: stored.authorEditedNames,
+    // **製品と同じく、AIに見せた顔ぶれ**（既存＋この回の分）。その名前で
+    // 返った人物は、本文に名前が無くても根拠なしにしない（2026-09-24）
+    knownRecordNames: [
+      ...knownNames,
+      ...extractedPeople.flatMap((person) => [
+        person.data.name,
+        ...(person.data.aliases ?? []),
+      ]),
+    ],
   });
 
   // **製品の集約をそのまま通す。** 総称を先に読む・人物側の所属を拾う、
   // といった順そのものが意味を持っているので、外で検算を呼び直さない
-  accumulator.collect(parsed, chunk);
+  accumulator.collect(parsed, chunk, {
+    abilities: stored.abilityNames,
+    locations: stored.locationNames,
+    organizations: stored.organizationNames,
+  });
   const gathered = accumulator.candidates();
 
   return {
@@ -523,7 +541,8 @@ export async function settingsRun(
       chunk,
       parsed,
       stored,
-      accumulator
+      accumulator,
+      extractedPeople
     );
     for (const person of result.characters.accepted) {
       const data = (person as { data?: { name?: string; aliases?: string[] } })

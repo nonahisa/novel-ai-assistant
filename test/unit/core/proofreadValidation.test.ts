@@ -326,6 +326,142 @@ describe("実データで見つかった、通してはいけない提案", () =
   });
 
   /**
+   * **指示と検算が食い違っていた**（2026-09-24 の縛りの洗い出し6番）。
+   * 指示は「original は5〜30字の短い範囲でかまいません」、検算は
+   * 「original の**中に**長文・繰り返しがあること」。指示どおり短く
+   * 写すと、本物の長文も、行をまたぐ繰り返しも必ず落ちていた。
+   * 検算は、写した範囲を含む文・前後の段落で数える。
+   */
+  describe("写した範囲の外を見る（2026-09-24）", () => {
+    // 答え付きの台（seeded/proofread 第3話）の25〜27行目をそのまま写す
+    const episode3 = {
+      filePath: "本文/003_よる.txt",
+      index: 0,
+      text: [
+        "　窓の外では、波の音が静かに響いていた。遠くで漁船のエンジン音がして、また静かになった。母は写真を丁寧に箱へしまい、湯呑みにお茶を注いだ。",
+        "",
+        "　海斗はお茶を一口飲み、写真の中の若い母の顔をもう一度思い浮かべた。同じ港でも、時代が違えば見える景色も違うのだろうと思うと、不思議な気持ちになった。壁の時計が、静かに十時を告げた。",
+        "",
+        "　母はお茶を一口飲み、湯呑みを卓袱台に置く。壁の時計の音だけが、静かな部屋に響いていた。",
+      ].join("\n"),
+      startLine: 22,
+      chapterStart: 3,
+      chapterEnd: 3,
+      hash: "ep3",
+      segments: [],
+    } as unknown as Chunk;
+
+    test("実測の not_repeated（25行目と27行目の「お茶を一口飲み」）を通す", () => {
+      const result = validateProofreadIssues(
+        {
+          issues: [
+            {
+              confidence: "medium",
+              explanation: "「お茶を一口飲み」が25行目と27行目で繰り返されています",
+              line: 27,
+              original: "母はお茶を一口飲み",
+              reason: "同語反復",
+              suggestion: "",
+            },
+          ],
+        },
+        episode3
+      );
+
+      expect(result.rejected).toEqual([]);
+      expect(result.accepted).toHaveLength(1);
+    });
+
+    test("近くに繰り返しの無い「同語反復」は、今までどおり落とす", () => {
+      // 1件目は前後の段落にも無い語。2件目は「になった」だけが23行目と
+      // 重なる——**仮名だけの3字の一致は数えない**。どの段落にも出るので、
+      // それで通すと網が無いのと同じになる
+      const result = validateProofreadIssues(
+        {
+          issues: [
+            {
+              confidence: "medium",
+              explanation: "繰り返しています",
+              line: 27,
+              original: "卓袱台に置く",
+              reason: "同語反復",
+              suggestion: "",
+            },
+            {
+              confidence: "medium",
+              explanation: "繰り返しています",
+              line: 25,
+              original: "不思議な気持ちになった",
+              reason: "同語反復",
+              suggestion: "",
+            },
+          ],
+        },
+        episode3
+      );
+
+      expect(result.accepted).toEqual([]);
+      expect(result.rejected.map((entry) => entry.reason)).toEqual([
+        "not_repeated",
+        "not_repeated",
+      ]);
+    });
+
+    test("短く写した範囲でも、それを含む一文が長文なら通す", () => {
+      const longSentence =
+        "　彼は、朝早くに起きて、顔を洗い、着替えを済ませ、鞄を持って、玄関を出て、" +
+        "駅までの道を急ぎ足で歩き、いつもの電車に間に合うように改札を抜け、" +
+        "席に座って本を開き、目的の駅まで一度も顔を上げなかった。夜が明けた。";
+      const result = validateProofreadIssues(
+        {
+          issues: [
+            {
+              line: 11,
+              original: "鞄を持って、玄関を出て",
+              suggestion: "",
+              reason: "長文",
+              explanation: "一文が長く、読点が多いです",
+              confidence: "medium",
+            },
+          ],
+        },
+        chunkOf(longSentence)
+      );
+
+      expect(result.rejected).toEqual([]);
+      expect(result.accepted).toHaveLength(1);
+    });
+
+    test("短く写した範囲を含む文が短ければ、今までどおり not_long", () => {
+      // 実測の not_long の1件（14字の断片）と同じ形。前後に長い文があっても、
+      // **写した範囲を含む文**だけを見る
+      const text =
+        "　手を洗いに洗面所へ向かった。彼は、朝早くに起きて、顔を洗い、着替えを済ませ、鞄を持って、玄関を出て、" +
+        "駅までの道を急ぎ足で歩き、いつもの電車に間に合うように改札を抜け、" +
+        "席に座って本を開き、目的の駅まで一度も顔を上げなかった。";
+      const result = validateProofreadIssues(
+        {
+          issues: [
+            {
+              line: 11,
+              original: "手を洗いに洗面所へ向かった。",
+              suggestion: "",
+              reason: "長文",
+              explanation: "一文が長いです",
+              confidence: "medium",
+            },
+          ],
+        },
+        chunkOf(text)
+      );
+
+      expect(result.rejected.map((entry) => entry.reason)).toEqual([
+        "not_long",
+      ]);
+    });
+  });
+
+  /**
    * 作者の10作品・44,000字で測ったときに実際に挙がったもの
    * （gemma4:e4b、2026-08-17）。
    *

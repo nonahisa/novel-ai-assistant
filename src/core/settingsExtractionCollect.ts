@@ -18,6 +18,13 @@ import type { Location } from "../models/location";
 import type { Organization } from "../models/organization";
 import type { WorldItem } from "../models/world";
 
+/** 既存レコードの名前・別名（種別ごと）。`collect` の根拠の照合に使う */
+export interface KnownSettingNames {
+  abilities?: readonly string[];
+  locations?: readonly string[];
+  organizations?: readonly string[];
+}
+
 /**
  * 設定資料の抽出で、**集めるところだけ**（設計書6.5）。
  *
@@ -158,8 +165,19 @@ export class SettingsExtractionCollector {
     };
   }
 
-  /** 1チャンク分の応答から能力・場所を取り出す */
-  collect(result: CharacterExtractResult, chunk: Chunk): void {
+  /**
+   * 1チャンク分の応答から能力・場所を取り出す。
+   *
+   * @param existingNames 既存レコードの名前・別名。**この回ですでに受け入れた
+   *   名前は自分で足す**——どちらもAIに「既知」として見せたもので、name が
+   *   そこにあれば、その話の本文に name が無くても根拠なしにしない
+   *   （2026-09-24 の裁定。`isGroundedInChunk`）
+   */
+  collect(
+    result: CharacterExtractResult,
+    chunk: Chunk,
+    existingNames: KnownSettingNames = {}
+  ): void {
     const raw = result as unknown as Record<string, unknown>;
 
     // 総称は最初に読み取れたものを使う。
@@ -193,18 +211,26 @@ export class SettingsExtractionCollector {
     const abilities = validateExtractedAbilities(
       raw.abilities,
       chunk,
-      this.abilityTerm
+      this.abilityTerm,
+      [...(existingNames.abilities ?? []), ...this.knownAbilityNames([])]
     );
     this.abilities.push(...abilities.accepted);
     this.rejected.push(...abilities.rejected);
 
-    const locations = validateExtractedLocations(raw.locations, chunk);
+    const locations = validateExtractedLocations(raw.locations, chunk, [
+      ...(existingNames.locations ?? []),
+      ...this.knownLocationNames([]),
+    ]);
     this.locations.push(...locations.accepted);
     this.rejected.push(...locations.rejected);
 
     const organizations = validateExtractedOrganizations(
       raw.organizations,
-      chunk
+      chunk,
+      [
+        ...(existingNames.organizations ?? []),
+        ...this.knownOrganizationNames([]),
+      ]
     );
     this.organizations.push(...organizations.accepted);
     this.rejected.push(...organizations.rejected);

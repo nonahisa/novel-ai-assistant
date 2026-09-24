@@ -25,8 +25,11 @@ import type { ReaderProfile } from "../models/readerProfile";
  * 変更履歴（要点だけ。詳しくはプロンプト設計書 P-07）
  * - 2.1: サブタイトル案に、作品の読者像（P-38の塊）を添えるようにした
  *   （0.75.2）。診断していない作品では今までどおり渡さない
+ * - 2.2: プロンプトは同じ。応答の読み取りが感情の測り（emotion）を捨てていた
+ *   不具合を直した（0.86.2）。**保存済みの記録は emotion がすべて null** なので、
+ *   版を上げて一度だけ作り直させる（本文が同じ話も感情値を取り直す）
  */
-export const SYNOPSIS_VERSION = "2.1";
+export const SYNOPSIS_VERSION = "2.2";
 
 /**
  * 作り直しの判断に使う版（0.75.3）。

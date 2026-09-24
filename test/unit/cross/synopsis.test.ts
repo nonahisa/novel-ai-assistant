@@ -51,6 +51,30 @@ describe("あらすじの応答を読む", () => {
     expect(result?.synopsis).toBe("灯が転生する。");
   });
 
+  test("感情の測りを読み取りで捨てない（応答の文字列から検算まで通す）", () => {
+    // 2026-09-24 の縛りの洗い出しで見つけた不具合。読み取りが emotion を
+    // 返す物に入れておらず、検算は毎回 undefined を受け取って null にしていた。
+    // 作者の3作品で emotion が全部 null だったのはこのため。
+    // **検算だけを試すテストでは気づけない**ので、文字列から通す
+    const parsed = parseSynopsisResult(
+      JSON.stringify({
+        synopsis: "灯が転生する。",
+        subtitles: [],
+        confidence: "high",
+        emotion: { intensity: 7, valence: -2, dominant: "哀", reason: "別れ" },
+      })
+    );
+    expect(parsed).not.toBeNull();
+    const validated = validateSynopsisResult(parsed!);
+
+    expect(validated.emotion).toEqual({
+      intensity: 7,
+      valence: -2,
+      dominant: "哀",
+      reason: "別れ",
+    });
+  });
+
   test("形が違えば null を返す（壊れた値を保存しない）", () => {
     expect(parseSynopsisResult("こんにちは")).toBeNull();
     expect(parseSynopsisResult('{"subtitles":[]}')).toBeNull();

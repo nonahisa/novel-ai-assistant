@@ -4,6 +4,7 @@ import {
   normalizeExtractedAbilitySystem,
   validateExtractedAbilities,
   validateExtractedLocations,
+  validateExtractedOrganizations,
 } from "../../../src/core/settingsExtractionValidation";
 
 const sourceLine = "「灯火よ、道を示せ」と灯が唱えた";
@@ -274,5 +275,82 @@ describe("境界事例の方針", () => {
 
     expect(result.rejected).toEqual([]);
     expect(result.accepted).toHaveLength(1);
+  });
+});
+
+describe("既知の組織・場所・能力の名前は、その話の本文に無くても落とさない（2026-09-24 の裁定）", () => {
+  // 実測の ungrounded：郵便局7件・立花郵便局2件。本文は「局」としか書かない話がある。
+  // **本文に実在すべきは根拠の引用のほう**なので、引用の照合は残す
+  const episode: Chunk = {
+    filePath: "004.txt",
+    index: 0,
+    text: "　俺は局の裏で自転車の荷台に袋を縛りつけた。\n　坂の入口を見上げた。",
+    startLine: 0,
+    hash: "episode",
+    chapterStart: 4,
+    chapterEnd: 4,
+  };
+  const evidence = "俺は局の裏で自転車の荷台に袋を縛りつけた";
+
+  test("既知の組織名で返った組織を、引用が本文にあれば通す", () => {
+    const result = validateExtractedOrganizations(
+      [{ name: "立花郵便局", evidence }],
+      episode,
+      ["立花郵便局", "郵便局"]
+    );
+
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted.map((item) => item.data.name)).toEqual([
+      "立花郵便局",
+    ]);
+  });
+
+  test("既知の場所名で返った場所を、引用が本文にあれば通す", () => {
+    const result = validateExtractedLocations(
+      [{ name: "鳶ヶ丘", evidence }],
+      episode,
+      ["鳶ヶ丘"]
+    );
+
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toHaveLength(1);
+  });
+
+  test("既知の能力名で返った能力を、引用が本文にあれば通す", () => {
+    const result = validateExtractedAbilities(
+      [{ name: "灯火", evidence }],
+      episode,
+      null,
+      ["灯火"]
+    );
+
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toHaveLength(1);
+  });
+
+  test("既知の名前でも、引用が本文に無ければ落とす", () => {
+    const result = validateExtractedOrganizations(
+      [{ name: "立花郵便局", evidence: "立花郵便局は駅前にある" }],
+      episode,
+      ["立花郵便局"]
+    );
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toEqual([
+      { name: "立花郵便局", reason: "ungrounded" },
+    ]);
+  });
+
+  test("既知でない名前は、本文に無ければ今までどおり落とす", () => {
+    const result = validateExtractedOrganizations(
+      [{ name: "鳶ヶ丘郵便局", evidence }],
+      episode,
+      ["立花郵便局"]
+    );
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toEqual([
+      { name: "鳶ヶ丘郵便局", reason: "ungrounded" },
+    ]);
   });
 });

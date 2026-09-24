@@ -13,11 +13,23 @@ import { segmentsOf, type Chunk } from "./chunker";
  * 構造的に必ず落ちていた（実データで主要人物が11件除外された）。
  * 引用が「その対象についてのものか」はコードでは判定できないため、
  * 捏造でないことの確認までに留める。
+ *
+ * **`appellations` の先頭は name として扱う。** name が既知の資料の名前・
+ * 別名（`knownNames`）と一致するときは、1 の照合を省く（2026-09-24 の裁定）。
+ * プロンプトは「既知と同じなら既知の名前を name に」と頼んでいるので、
+ * 本文が「相沢くん」「局」としか書かない話では、指示どおりの答えが
+ * 必ず落ちていた（実測43件の大半が正解の人物・組織）。**既知の名前は
+ * 捏造ではない**ので、名前の照合の目的はもう果たされている。2 の引用の
+ * 照合は残す——「この話にいる」ことの裏付けは引用が担う。
+ *
+ * **別名だけが既知と一致しても省かない。** 作り話の人物に既知の人の別名を
+ * 貼っただけで通ると、名寄せで既知の人物へ混ざる。
  */
 export function isGroundedInChunk(
   appellations: Array<string | null | undefined>,
   evidence: string | null | undefined,
-  chunkText: string
+  chunkText: string,
+  knownNames: readonly string[] = []
 ): boolean {
   const normalizedAppellations = appellations
     .map((appellation) => normalizeForComparison(appellation ?? ""))
@@ -26,7 +38,9 @@ export function isGroundedInChunk(
 
   const normalizedChunk = normalizeForComparison(chunkText);
 
+  const nameIsKnown = isKnownName(appellations[0], knownNames);
   if (
+    !nameIsKnown &&
     !normalizedAppellations.some((appellation) =>
       normalizedChunk.includes(appellation)
     )
@@ -37,6 +51,23 @@ export function isGroundedInChunk(
   return evidenceSegments(evidence).some((segment) =>
     normalizedChunk.includes(segment)
   );
+}
+
+/**
+ * その名前が既知の資料の名前・別名と一致するか。
+ *
+ * 空白の有無（「相沢 春人」と「相沢春人」）は同じ名前として扱う。
+ * 敬称や部分一致までは広げない——「相沢」が既知でも「相沢さん」「相沢 誠」は
+ * 別の名前かもしれず、ここで通すと名前の捏造の網に穴が開く。
+ */
+export function isKnownName(
+  name: string | null | undefined,
+  knownNames: readonly string[]
+): boolean {
+  if (!name || knownNames.length === 0) return false;
+  const target = normalizeForComparison(name);
+  if (target.length === 0) return false;
+  return knownNames.some((known) => normalizeForComparison(known) === target);
 }
 
 /**

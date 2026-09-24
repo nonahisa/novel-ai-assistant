@@ -1217,3 +1217,114 @@ describe("名前が決められずに捨てたレコードの中身", () => {
     expect(result.rejected).toEqual([{ name: "僕", reason: "pronoun_name" }]);
   });
 });
+
+describe("既知の人物の名前は、その話の本文に無くても落とさない（2026-09-24 の裁定）", () => {
+  /*
+    指示は「既知の人物と同じなら既知の名前を name に」。一方で検算は
+    「その名前がその話の本文に無ければ ungrounded」だった。試験台
+    （seeded/contradiction）の第4話には「相沢」が一度も出ない（語り手の「俺」）。
+    指示どおり既知のフルネームで返すと落ち、実測43件の大半が正解の人物だった。
+    **本文に実在すべきは根拠の引用のほう**なので、引用の照合は残す。
+  */
+  const episode4: Chunk = {
+    filePath: "004_右足.txt",
+    index: 0,
+    text:
+      "　丘のいちばん上で、蓬田さんが縁側から手を上げた。\n" +
+      "　蓬田さんは自分の杖の先で、縁側の板を軽く叩いた。",
+    startLine: 0,
+    hash: "episode4",
+    chapterStart: 4,
+    chapterEnd: 4,
+  };
+  const known = ["相沢 春人", "春人", "蓬田 吾一", "蓬田さん", "吾一"];
+
+  test("既知のフルネームで返った人物を、引用が本文にあれば通す", () => {
+    const result = validateCharacterExtractResult(
+      {
+        characters: [
+          {
+            name: "相沢春人",
+            entityType: "person",
+            evidence: "丘のいちばん上で、蓬田さんが縁側から手を上げた",
+          },
+          {
+            name: "蓬田 吾一",
+            entityType: "person",
+            evidence: "蓬田さんは自分の杖の先で、縁側の板を軽く叩いた",
+          },
+        ],
+      },
+      episode4,
+      { knownNames: known, knownRecordNames: known }
+    );
+
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted.map((item) => item.data.name)).toEqual([
+      "相沢春人",
+      "蓬田 吾一",
+    ]);
+  });
+
+  test("既知の名前でも、引用が本文に無ければ今までどおり落とす", () => {
+    const result = validateCharacterExtractResult(
+      {
+        characters: [
+          {
+            name: "相沢 春人",
+            entityType: "person",
+            evidence: "相沢は右足を引きずって坂を上った",
+          },
+        ],
+      },
+      episode4,
+      { knownNames: known, knownRecordNames: known }
+    );
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toEqual([
+      { name: "相沢 春人", reason: "ungrounded" },
+    ]);
+  });
+
+  test("既知でない名前は、本文に無ければ今までどおり落とす（名前の捏造）", () => {
+    const result = validateCharacterExtractResult(
+      {
+        characters: [
+          {
+            name: "月島 蓮",
+            entityType: "person",
+            evidence: "丘のいちばん上で、蓬田さんが縁側から手を上げた",
+          },
+        ],
+      },
+      episode4,
+      { knownNames: known, knownRecordNames: known }
+    );
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toEqual([{ name: "月島 蓮", reason: "ungrounded" }]);
+  });
+
+  test("別名だけが既知と一致しても、名前の照合は省かない", () => {
+    // 作り話の人物に既知の人の別名を貼っただけで通ると、名寄せで
+    // 既知の人物へ混ざる。**省くのは name そのものが既知のときだけ**
+    const result = validateCharacterExtractResult(
+      {
+        characters: [
+          {
+            name: "月島 蓮",
+            aliases: ["春人"],
+            entityType: "person",
+            evidence: "丘のいちばん上で、蓬田さんが縁側から手を上げた",
+          },
+        ],
+      },
+      episode4,
+      { knownNames: known, knownRecordNames: known }
+    );
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toEqual([{ name: "月島 蓮", reason: "ungrounded" }]);
+  });
+});

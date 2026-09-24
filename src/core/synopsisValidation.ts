@@ -73,6 +73,10 @@ export function parseSynopsisResult(text: string): SynopsisResult | null {
     synopsis: raw.synopsis,
     subtitles,
     confidence: typeof raw.confidence === "string" ? raw.confidence : "low",
+    // **形はここで決めず、そのまま渡す。** 数値の丸めと読めないときの null は
+    // 検算（validateEmotion）の仕事。0.86.2 で直すまではここで渡し忘れており、
+    // 検算が毎回 undefined を受け取って、感情値がすべて null で保存されていた
+    emotion: raw.emotion,
   };
 }
 

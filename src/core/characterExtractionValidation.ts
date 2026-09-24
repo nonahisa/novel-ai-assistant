@@ -162,6 +162,20 @@ export interface CharacterValidationOptions {
    * AIの読みを直す話ではない。
    */
   authorEditedNames?: readonly string[];
+  /**
+   * AIに「既知の登場人物」として見せた名前・別名（既存レコード＋この回で
+   * すでに受け入れた人物）。
+   *
+   * **name がここにあれば、その話の本文に name が無くても根拠なしにしない**
+   * （2026-09-24 の裁定。引用の照合は残す）。プロンプトは「既知と同じなら
+   * 既知の名前を name に」と頼んでいるので、本文が「相沢くん」としか
+   * 書かない話では、指示どおりの「相沢 春人」が必ず落ちていた。
+   *
+   * `knownNames` と分けるのは、あちらが**ループの前に1回だけ作る**
+   * （切れた別名の裏付けを実行ごとに揺らさない）のに対し、こちらは
+   * AIに見せたものと揃える必要があるため。
+   */
+  knownRecordNames?: readonly string[];
 }
 
 const MAX_NAME_LENGTH = 30;
@@ -400,7 +414,14 @@ export function validateCharacterExtractResult(
 
   for (const character of survived) {
     const names = groundingNames.get(character) ?? [character.name];
-    if (!isGroundedInChunk(names, character.evidence, chunk.text)) {
+    if (
+      !isGroundedInChunk(
+        names,
+        character.evidence,
+        chunk.text,
+        options.knownRecordNames ?? []
+      )
+    ) {
       rejected.push({ name: character.name, reason: "ungrounded" });
       continue;
     }

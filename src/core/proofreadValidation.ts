@@ -650,6 +650,122 @@ export function paraphrasesInsteadOfOpening(
   return suggestionChars.length < originalChars.length;
 }
 
+/**
+ * 同語反復を探す範囲。写した範囲を含む段落と、その前後の段落をいくつ見るか。
+ *
+ * 実測の繰り返し（台の第3話、25行目と27行目の「お茶を一口飲み」）は、
+ * 空行をはさんだ隣の段落どうしだった。空行は数えない。
+ */
+const NEARBY_PARAGRAPHS = 2;
+
+/**
+ * 写した範囲が、チャンクのどの行のどこにあるか。
+ *
+ * AIの言う行を先に見て、無ければチャンク全体から探す（行がずれて
+ * 返ることがある）。見つからなければ null——そのときは範囲の中だけで
+ * 数える（今までどおり）。
+ */
+function locateInLines(
+  lines: readonly string[],
+  lineIndex: number,
+  original: string
+): { index: number; start: number } | null {
+  const target = original.trim();
+  if (!target) return null;
+  const own = lines[lineIndex];
+  if (own !== undefined) {
+    const at = own.indexOf(target);
+    if (at >= 0) return { index: lineIndex, start: at };
+  }
+  for (let index = 0; index < lines.length; index++) {
+    const at = lines[index].indexOf(target);
+    if (at >= 0) return { index, start: at };
+  }
+  return null;
+}
+
+/**
+ * 「長文」の札が、写した範囲を**含む一文**に当たっているか。
+ *
+ * **指示と検算が食い違っていた**（2026-09-24 の縛りの洗い出し6番）。
+ * プロンプトは「original は5〜30字の短い範囲でかまいません」と頼み、
+ * 検算は original の**中に**80字を超える一文を求めていた。指示どおり
+ * 短く写すと、本物の長文も必ず落ちる。**写した範囲の外まで、その文の
+ * 終わりまで数える。** 前後の別の文は見ない——14字の断片に「長文」を
+ * 貼った答え（実測の not_long）は、隣に長い文があっても落とす。
+ */
+export function hasLongSentenceAround(
+  lines: readonly string[],
+  lineIndex: number,
+  original: string
+): boolean {
+  if (hasLongSentence(original)) return true;
+  const found = locateInLines(lines, lineIndex, original);
+  if (!found) return false;
+  const from = found.start;
+  const to = found.start + original.trim().length;
+  return splitSentencesWithOffsets(lines[found.index]).some(
+    (sentence) =>
+      sentence.start < to &&
+      sentence.start + sentence.body.length > from &&
+      hasLongSentence(sentence.body)
+  );
+}
+
+/**
+ * 「同語反復」の札が、写した範囲の**近くの繰り返し**に当たっているか。
+ *
+ * 長文と同じ食い違い（2026-09-24）。指示どおり「母はお茶を一口飲み」と
+ * 短く写すと、2行前の「海斗はお茶を一口飲み」は範囲の外にあり、本物の
+ * 繰り返しが `not_repeated` で落ちていた。**写した範囲の一部（3字）が、
+ * 同じ段落の残りか前後の段落にもう一度出るか**を見る。
+ *
+ * **範囲の外で数えるのは、漢字か片仮名を含む3字だけ。** 「になった」
+ * 「ていた」のような仮名だけの並びはどの段落にも出るので、それで通すと
+ * 繰り返しの無い所に貼った札（文体の話）がみな通る。範囲の中の繰り返しは
+ * 今までどおり仮名でも数える（`hasRepetition`）。
+ */
+export function hasRepetitionNearby(
+  lines: readonly string[],
+  lineIndex: number,
+  original: string
+): boolean {
+  if (hasRepetition(original)) return true;
+  const found = locateInLines(lines, lineIndex, original);
+  if (!found) return false;
+
+  const own = lines[found.index];
+  const around = [
+    own.slice(0, found.start),
+    own.slice(found.start + original.trim().length),
+  ];
+  const collect = (step: 1 | -1): void => {
+    let taken = 0;
+    for (
+      let index = found.index + step;
+      index >= 0 && index < lines.length && taken < NEARBY_PARAGRAPHS;
+      index += step
+    ) {
+      if (lines[index].trim().length === 0) continue;
+      around.push(lines[index]);
+      taken++;
+    }
+  };
+  collect(-1);
+  collect(1);
+  // 段落の境をまたいで3字が繋がらないよう、区切りを残して空白だけ落とす
+  const haystack = around.join("\n").replace(/[^\S\n]/gu, "");
+
+  const body = original.replace(/\s/g, "");
+  const contentChar = /[\p{Script=Han}\p{Script=Katakana}]/u;
+  for (let start = 0; start + REPEAT_MIN_LENGTH <= body.length; start++) {
+    const piece = body.slice(start, start + REPEAT_MIN_LENGTH);
+    if (!contentChar.test(piece)) continue;
+    if (haystack.includes(piece)) return true;
+  }
+  return false;
+}
+
 export function hasRepetition(text: string): boolean {
   const body = text.replace(/\s/g, "");
   for (let start = 0; start + REPEAT_MIN_LENGTH <= body.length; start++) {
@@ -831,13 +947,22 @@ export function validateProofreadIssues(
       continue;
     }
     // **「長文」だけは数で決まるので、確かめられる。**
-    // 当てはまる一文が無ければ、それは長文の指摘ではない
-    if (reason === "長文" && !hasLongSentence(original)) {
+    // 当てはまる一文が無ければ、それは長文の指摘ではない。
+    // **写した範囲を含む一文で数える**（2026-09-24。プロンプトは短い範囲を
+    // 写すよう頼んでいるので、範囲の中だけで数えると本物が必ず落ちる）
+    if (
+      reason === "長文" &&
+      !hasLongSentenceAround(chunkLines, line - firstLine, original)
+    ) {
       rejected.push({ raw: item, reason: "not_long" });
       continue;
     }
-    // 「同語反復」も数えられる。繰り返しが無ければ、それは別の指摘である
-    if (reason === "同語反復" && !hasRepetition(original)) {
+    // 「同語反復」も数えられる。繰り返しが無ければ、それは別の指摘である。
+    // 長文と同じく、**写した範囲の近く（同じ段落と前後の段落）まで見る**
+    if (
+      reason === "同語反復" &&
+      !hasRepetitionNearby(chunkLines, line - firstLine, original)
+    ) {
       rejected.push({ raw: item, reason: "not_repeated" });
       continue;
     }

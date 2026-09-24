@@ -180,7 +180,13 @@ export function validateExtractedAbilities(
   raw: unknown,
   chunk: Chunk,
   /** 既に決まっている総称。総称そのものを能力名として採らないために使う */
-  abilityTerm?: string | null
+  abilityTerm?: string | null,
+  /**
+   * AIに「既知の能力」として見せた名前・別名。name がここにあれば、
+   * その話の本文に name が無くても根拠なしにしない（引用の照合は残す。
+   * `isGroundedInChunk` の説明）
+   */
+  knownNames: readonly string[] = []
 ): AbilityValidationResult {
   const accepted: AcceptedAbilityCandidate[] = [];
   const rejected: RejectedSettingCandidate[] = [];
@@ -205,7 +211,8 @@ export function validateExtractedAbilities(
       !isGroundedInChunk(
         [ability.name, ...(ability.aliases ?? [])],
         ability.evidence,
-        chunk.text
+        chunk.text,
+        knownNames
       )
     ) {
       rejected.push({ name: ability.name, reason: "ungrounded" });
@@ -226,7 +233,9 @@ export function validateExtractedAbilities(
 
 export function validateExtractedLocations(
   raw: unknown,
-  chunk: Chunk
+  chunk: Chunk,
+  /** AIに「既知の場所」として見せた名前・別名（能力と同じ扱い） */
+  knownNames: readonly string[] = []
 ): LocationValidationResult {
   const accepted: AcceptedLocationCandidate[] = [];
   const rejected: RejectedSettingCandidate[] = [];
@@ -257,7 +266,8 @@ export function validateExtractedLocations(
       !isGroundedInChunk(
         [location.name, ...(location.aliases ?? [])],
         location.evidence,
-        chunk.text
+        chunk.text,
+        knownNames
       )
     ) {
       rejected.push({ name: location.name, reason: "ungrounded" });
@@ -286,7 +296,12 @@ export function validateExtractedLocations(
  */
 export function validateExtractedOrganizations(
   raw: unknown,
-  chunk: Chunk
+  chunk: Chunk,
+  /**
+   * AIに「既知の組織」として見せた名前・別名（能力と同じ扱い）。
+   * 実測で「郵便局」「立花郵便局」が、本文が「局」としか書かない話で落ちていた
+   */
+  knownNames: readonly string[] = []
 ): OrganizationValidationResult {
   const accepted: AcceptedOrganizationCandidate[] = [];
   const rejected: RejectedSettingCandidate[] = [];
@@ -312,7 +327,8 @@ export function validateExtractedOrganizations(
       !isGroundedInChunk(
         [organization.name, ...(organization.aliases ?? [])],
         organization.evidence,
-        chunk.text
+        chunk.text,
+        knownNames
       )
     ) {
       rejected.push({ name: organization.name, reason: "ungrounded" });
