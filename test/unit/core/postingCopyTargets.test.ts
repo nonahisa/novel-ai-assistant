@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import {
+  copyEmphasisFor,
   postingCopyTargets,
   type PostingCopyTarget,
 } from "../../../src/core/postingCopyTargets";
@@ -275,5 +276,36 @@ describe("残る2つの入口も、同じ1段の訊き方を通る", () => {
     // extension.ts も自前で持たない（写しがあると片方だけ直る日が来る）
     const extension = readFileSync("src/extension.ts", "utf8");
     expect(extension).not.toContain("async function registeredPostingSites(");
+  });
+});
+
+/**
+ * 原稿エディタで写したときの、素のテキストの傍点の書き方
+ * （作者の裁定、2026-09-25 朝。設計書6.12.8）。
+ *
+ * 素のテキストはルビを記法（｜漢字《かんじ》）ごと載せる。ルビの記法は
+ * どのサイトでも同じだが、**傍点だけはサイトで書き方が違う**ので、
+ * 作品に登録してある投稿先から決める（写すたびに訊けない）。
+ */
+describe("写したときの傍点の書き方", () => {
+  test("登録が無ければカクヨムの書き方", () => {
+    expect(copyEmphasisFor([])).toBe("kakuyomu");
+  });
+
+  test("最初に登録してある、ルビの記法を持つ投稿先に合わせる", () => {
+    expect(copyEmphasisFor(["narou", "kakuyomu"])).toBe("narou");
+    expect(copyEmphasisFor(["kakuyomu", "narou"])).toBe("kakuyomu");
+    expect(copyEmphasisFor(["alphapolis"])).toBe("narou");
+  });
+
+  test("ルビの記法を持たない note は飛ばす（括弧書きは記法ではない）", () => {
+    expect(copyEmphasisFor(["note", "narou"])).toBe("narou");
+    expect(copyEmphasisFor(["note"])).toBe("kakuyomu");
+  });
+
+  test("サイトの表（POSTING_SITES）から引く（写しを持たない）", () => {
+    for (const site of POSTING_SITES.filter((s) => s.notation === "site")) {
+      expect(copyEmphasisFor([site.id])).toBe(site.emphasis);
+    }
   });
 });

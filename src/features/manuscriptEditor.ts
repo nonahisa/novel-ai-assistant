@@ -79,6 +79,7 @@ import { MEMO_LINE_PREFIX, memoColorVars } from "../core/sceneMemo";
 import { READ_ALOUD_MEMO_TEXT, buildReadingPlan } from "../core/readAloud";
 import { pickPostingTarget } from "./ruby";
 import { registeredPostingSites } from "./postingCopyRegistered";
+import { copyEmphasisFor } from "../core/postingCopyTargets";
 import { askText } from "../views/dialogs";
 import { logLine, useLogFile } from "../core/logger";
 import { readTextFile } from "../core/textFile";
@@ -1233,6 +1234,22 @@ export class ManuscriptEditorProvider
     const notation = notationModeFor(fromUri(document.uri));
 
     /**
+     * 組んで書く面で写したときの、素のテキストの傍点の書き方（設計書6.12.8。
+     * 作者の裁定、2026-09-25 朝）。**.md のときだけ効く**——.txt は書いてある
+     * 投稿サイトの記法をそのまま載せる。
+     *
+     * **開いたときに1回だけ引く。** `send` は打つたびに走るので、そのたびに
+     * 投稿状態の台帳を読まない。台帳を読めなくても止めない
+     * （`registeredPostingSites` が空を返し、カクヨムの書き方になる）。
+     */
+    const copyEmphasis =
+      notation === "curly"
+        ? registeredPostingSites(
+            this.deps.workOf(fromUri(document.uri))
+          ).then(copyEmphasisFor)
+        : Promise.resolve(copyEmphasisFor([]));
+
+    /**
      * 「noteに貼ったときの見た目」の面が開いているか（設計書6.69）。
      *
      * 画面から届く知らせで切り替わる。**閉じているあいだは組まない。**
@@ -1284,6 +1301,8 @@ export class ManuscriptEditorProvider
           : {}),
         // **組んで書く面も、この記法で組む**（画面側に写しを持たせない）
         notation,
+        // 写したときの傍点の書き方（素のテキストの側。設計書6.12.8）
+        copyEmphasis: await copyEmphasis,
         /*
           **組み上がりのHTMLはもう送らない**（0.25.2）。
           送り先だった「読む」面・「並べる」面は、0.24.14で切り替えの

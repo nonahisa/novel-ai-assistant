@@ -84,6 +84,29 @@ export function postingCopyTargetFor(site: PostingSiteId): PostingCopyTarget {
   };
 }
 
+/**
+ * 原稿エディタで写したときの、素のテキストの傍点の書き方
+ * （作者の裁定、2026-09-25 朝。設計書6.12.8）。
+ *
+ * 素のテキストへはルビを記法（`｜漢字《かんじ》`）ごと載せる。ルビの記法は
+ * どのサイトでも同じだが、**傍点だけはサイトで書き方が違う**。写すたびに
+ * 訊くわけにはいかないので、**作品に登録してある投稿先の最初の1つ**
+ * （ルビの記法を持つもの）に合わせる。登録が無ければカクヨムの書き方
+ * （`toSiteNotation` の既定と同じ）。
+ *
+ * noteは飛ばす——括弧書き（`paren`）はルビの記法ではなく、素のテキストへ
+ * 載せる形として選ぶ理由が無い。
+ */
+export function copyEmphasisFor(
+  registered: readonly PostingSiteId[]
+): EmphasisSite {
+  for (const site of registered) {
+    const info = postingSiteInfo(site);
+    if (info.notation === "site") return info.emphasis;
+  }
+  return "kakuyomu";
+}
+
 /** 記法だけで決まる書き出し先（サイトを選ぶ画面の、いちばん後ろ） */
 function styleTarget(id: RubyStyle["id"], label?: string): PostingCopyTarget {
   const style = RUBY_STYLES.find((entry) => entry.id === id);

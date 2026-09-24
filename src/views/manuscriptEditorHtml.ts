@@ -2306,6 +2306,10 @@ ${RESUME_WRITING_LABEL ? `
         typeof message.notation === "string" ? message.notation : "curly";
       const notationChanged = notation !== composeNotation;
       composeNotation = notation;
+      // 写すときの傍点の書き方（届かなければ前の値のまま）
+      if (message.copyEmphasis === "kakuyomu" || message.copyEmphasis === "narou") {
+        composeCopyEmphasis = message.copyEmphasis;
+      }
       /*
         **取り消し・やり直しで戻ったときは、置く場所が添えてある**
         （設計書6.25.8）。添えてあれば差分からずらすのをやめ、そこへ置く
@@ -2502,6 +2506,13 @@ ${RESUME_WRITING_LABEL ? `
    * 出てくることは稀で、取り違えても平文として素通りする側だから。
    */
   let composeNotation = "curly";
+  /**
+   * 写すときの傍点の書き方（素のテキストの側。設計書6.12.8）。
+   * **拡張機能側が作品の投稿先で決める**（.md のときだけ効く）。届く前に
+   * 写したときはカクヨムの書き方——ルビの記法はどのサイトでも同じで、
+   * 違うのは傍点だけである。
+   */
+  let composeCopyEmphasis = "kakuyomu";
 
   /* compose:start */
   /**
@@ -3434,7 +3445,8 @@ ${RESUME_WRITING_LABEL ? `
    * 自前のクリップボードの形。**記法をそのまま載せる箱**である。
    *
    * 貼り先がこの形を読めるのは、この画面（と、同じ拡張機能の別の窓）だけ。
-   * ほかの場所へ貼ると、その場所が読める形（字だけ／HTML）が使われる。
+   * ほかの場所へ貼ると、その場所が読める形（投稿サイトの記法つきの素のテキスト／
+   * HTML）が使われる。
    */
   const COMPOSE_NOTATION_FLAVOR = "application/x-novelai-notation";
 
@@ -3447,55 +3459,69 @@ ${RESUME_WRITING_LABEL ? `
   }
 
   /**
-   * 写すときの3つの形（作者の裁定、2026-09-21）。
+   * 写すときの3つの形（作者の裁定、2026-09-21。素のテキストは 2026-09-25 朝）。
    *
    * 作者の言葉：「通常のコピー」＝「text とルビ等を持ったコピーで、
-   * メモにコピーしたら字だけ、ルビが可能なエディターに貼り付けたら
-   * ルビごと」。**貼り先が選べるように、3つ同時に載せる。**
+   * ルビが可能なエディターに貼り付けたらルビごと」。**貼り先が選べるように、
+   * 3つ同時に載せる。**
    *
-   * - plain（text/plain）……**字だけ。** 読み仮名も記法の記号も落とす。
-   *   メモ帳・チャット・素のエディタへ貼ったときに、本文だけが入る
+   * - plain（text/plain）……**投稿サイトの記法つき**（｜漢字《かんじ》）。
+   *   メモ帳・素のエディタへ貼ったときに、ルビが記法ごと入る。
+   *   2026-09-21 から 09-25 までは「字だけ」にしていたが、素のエディタへ
+   *   貼るとルビが消えるので、作者の答え「記法ごと貼りたい」で改めた
+   *   （実機確認リスト F-27）。**拡張機能の中だけの記法（{漢字|かんじ}）は
+   *   外へ出さない**——0.74.12 より前はそれがメモ帳へそのまま入っていた
    * - html（text/html）……ruby 要素と em.emphasis。
-   *   ルビを組めるエディタ（Word・note など）へ貼ると、ルビごと入る
-   * - notation（自前の形）……記法のまま。この面へ貼り戻すと元に戻る
+   *   ルビを組めるエディタ（Word・note など）へ貼ると、ルビごと入る。
+   *   HTML を読める貼り先は html のほうを取るので、plain を変えても変わらない
+   * - notation（自前の形）……記法のまま。この面へ貼り戻すと元に戻る。
+   *   **貼り付けはこちらを先に読む**ので、plain が記法つきでも二重にならない
    *
-   * **投稿サイトの記法（.txt）でも同じ。** どちらの記法で書かれていても
-   * 「字だけ」は字だけになる——記法の切り分けは 「composeParts」に任せ、
-   * ここでは写しを持たない。
+   * **.txt（投稿サイトの記法）は、書いてあるとおりに載せる。** 縦線の有無も
+   * 傍点の書き方も作者が選んだ形で、.txt はその形を保つ決まりである。
+   * **.md は投稿サイトの記法へ直す。** 傍点だけはサイトで書き方が違うので、
+   * 作品の投稿先（投稿状態の台帳）から拡張機能側が決めて渡す
+   * （「composeCopyEmphasis」。変換の規則は core/ruby.ts の toSiteNotation と同じ）。
    *
    * @param notation 選んだ範囲の**記法のままの文字列**
    * @param mode "curly"（.md）か "site"（.txt）
+   * @param emphasis 傍点の書き方。"kakuyomu"（《《強調》》）か "narou"（｜強調《・・》）
    */
-  function composeCopyPayloads(notation, mode) {
+  function composeCopyPayloads(notation, mode, emphasis) {
     const source = composeNormalizeNewlines(notation);
     const plain = [];
     const html = [];
     for (const line of source.split("\\n")) {
-      let bare = "";
+      let marked = "";
       let rich = "";
       for (const part of composeParts(line, mode)) {
         if (part.kind === "ruby") {
-          bare += part.base;
+          marked += "｜" + part.base + "《" + part.reading + "》";
           rich +=
             "<ruby>" + composeEscapeHtml(part.base) +
             "<rt>" + composeEscapeHtml(part.reading) + "</rt></ruby>";
         } else if (part.kind === "emphasis") {
-          bare += part.base;
+          marked +=
+            emphasis === "narou"
+              ? "｜" + part.base + "《" +
+                "・".repeat(Array.from(part.base).length) + "》"
+              : "《《" + part.base + "》》";
           rich +=
             '<em class="emphasis">' + composeEscapeHtml(part.base) + "</em>";
         } else {
-          // **書きかけの記法は、字だけの側にも記法のまま残す。**
+          // **書きかけの記法は、記法のまま残す。**
           // composeParts が平文へ落とすのは「読み仮名が空のルビ」などで、
           // 本文を消さないための扱いである。ここで畳むと字が減る
-          bare += part.src;
+          marked += part.src;
           rich += composeEscapeHtml(part.src);
         }
       }
-      plain.push(bare);
+      plain.push(marked);
       html.push(rich);
     }
     return {
-      plain: plain.join("\\n"),
+      // .txt は組み直さない（書いてある記法がそのまま作品の記法）
+      plain: mode === "site" ? source : plain.join("\\n"),
       html: html.join("<br>"),
       notation: source
     };
@@ -4136,8 +4162,9 @@ ${RESUME_WRITING_LABEL ? `
    *
    * かつては記法だけを text/plain へ載せていた。作者の裁定
    * （2026-09-21）で「通常のコピー」＝**貼り先に合わせて変わるコピー**に
-   * 改めた——メモへ貼れば字だけ、ルビの組めるエディタへ貼ればルビごと、
-   * この面へ貼り戻せば記法のまま。どれを使うかは貼り先が選ぶ。
+   * 改めた——ルビの組めるエディタへ貼ればルビごと、この面へ貼り戻せば
+   * 記法のまま。どれを使うかは貼り先が選ぶ。メモ・素のエディタへ貼ったときの
+   * 形は、2026-09-25 朝の裁定で「字だけ」から「投稿サイトの記法つき」に改めた。
    */
   function composeCopyNotation(event, andDelete) {
     const at = composeSelectionNow();
@@ -4149,7 +4176,8 @@ ${RESUME_WRITING_LABEL ? `
     for (const atom of composeCurrentAtoms()) text += atom.text;
     const payloads = composeCopyPayloads(
       text.slice(at.start, at.end),
-      composeNotation
+      composeNotation,
+      composeCopyEmphasis
     );
     data.setData("text/plain", payloads.plain);
     data.setData("text/html", payloads.html);

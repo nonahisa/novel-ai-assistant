@@ -330,8 +330,27 @@ export interface EpisodePlotContrastFinding {
   excerpt: string | null;
   /** 本文の何行目か（引用から機械的に求める）。引用が無ければ null */
   line: number | null;
+  /**
+   * 入れ替わった相手の箇条書きの行（「順序の食い違い」だけ。ほかは null）。
+   * **実在の行そのもの**（AIが写した断片ではない）
+   */
+  swappedItem: string | null;
+  /** 相手の行が単話プロットの何行目か */
+  swappedPlotLine: number | null;
+  /** 相手の行に当たる本文の引用 */
+  swappedExcerpt: string | null;
+  /** 相手の引用が本文の何行目か */
+  swappedLine: number | null;
   reason: string;
 }
+
+/** 指していない、を表す相手の欄（「順序の食い違い」以外の種別） */
+const NO_PARTNER = {
+  swappedItem: null,
+  swappedPlotLine: null,
+  swappedExcerpt: null,
+  swappedLine: null,
+} as const;
 
 export function validateEpisodePlotContrast(
   raw: unknown,
@@ -354,11 +373,11 @@ export function validateEpisodePlotContrast(
       continue;
     }
 
-    const kind = normalizeKind(
+    const labeledKind = normalizeKind(
       asString(entry.kind),
       EPISODE_PLOT_CONTRAST_KINDS
     );
-    if (!kind) {
+    if (!labeledKind) {
       rejected.push({ raw: entry, reason: "unknown_kind" });
       continue;
     }
@@ -367,16 +386,29 @@ export function validateEpisodePlotContrast(
       rejected.push({ raw: entry, reason: "placeholder" });
       continue;
     }
-    // **理由の中で、自分の指摘を打ち消している答えを通さない**（`deniesOwnContrast`）
-    if (deniesOwnContrast(kind, reason)) {
-      rejected.push({ raw: entry, reason: "self_denied" });
-      continue;
-    }
 
     // 「無い」を言葉で書いてくることがある（`null` ではなく「該当なし」）。
     // 中身の無い言葉は、指していないものとして扱う
     const rawItem = usableOrEmpty(asString(entry.plotItem));
     const rawExcerpt = usableOrEmpty(asString(entry.excerpt));
+
+    // **札の貼り違いを直す**（`isMislabeledAbsence`）。付け替えてから
+    // 打ち消しの網を当てる——網は種別ごとに違うので、先に当てると
+    // 「起きていない」の指摘を順序の網で見ることになる
+    const kind: EpisodePlotContrastKind = isMislabeledAbsence(
+      labeledKind,
+      rawItem,
+      rawExcerpt,
+      reason
+    )
+      ? "起きていない"
+      : labeledKind;
+
+    // **理由の中で、自分の指摘を打ち消している答えを通さない**（`deniesOwnContrast`）
+    if (deniesOwnContrast(kind, reason)) {
+      rejected.push({ raw: entry, reason: "self_denied" });
+      continue;
+    }
     if (!rawItem && !rawExcerpt) {
       rejected.push({ raw: entry, reason: "nothing_pointed" });
       continue;
@@ -385,18 +417,12 @@ export function validateEpisodePlotContrast(
     let excerpt: string | null = null;
     let line: number | null = null;
     if (rawExcerpt) {
-      // **段落をまるごと写してくる。** それは引用ではない（P-11と同じ）
-      if (rawExcerpt.length > MAX_EXCERPT_CHARS) {
-        rejected.push({ raw: entry, reason: "excerpt_too_long" });
+      const located = locateGroundedExcerpt(input.text, rawExcerpt);
+      if (typeof located === "string") {
+        rejected.push({ raw: entry, reason: located });
         continue;
       }
-      line = lineOfExcerpt(input.text, rawExcerpt);
-      // **本文に無い文を引いてくる。** 箇条書きの側の文をそのまま
-      // 「本文にこうある」と言うことがある（矛盾検知で実際に起きた）
-      if (line === null) {
-        rejected.push({ raw: entry, reason: "excerpt_not_found" });
-        continue;
-      }
+      line = located.line;
       excerpt = rawExcerpt;
     }
 
@@ -412,8 +438,22 @@ export function validateEpisodePlotContrast(
       plotLine = matched.line;
     }
 
-    // 同じ組み合わせを二度並べても、作者の判断は増えない
-    const key = `${plotLine ?? ""}:${line ?? ""}:${kind}`;
+    // 入れ替わった相手は**書かれていれば添えるだけ**（`readOrderPartner`）。
+    // 落とす判定には使わない（作者の判断、2026-09-25「拾う方」）
+    const partner =
+      kind === "順序の食い違い"
+        ? readOrderPartner(entry, input, plotLine)
+        : NO_PARTNER;
+    // 同じ組み合わせを二度並べても、作者の判断は増えない。
+    // **相手が分かっていれば、同じ2行の組は向きを問わず1件**——
+    // 「AがBより前」と「BがAより後」は同じ入れ替わりを言っている
+    const key =
+      partner.swappedPlotLine !== null && plotLine !== null
+        ? `順序:${[plotLine, partner.swappedPlotLine]
+            .sort((a, b) => a - b)
+            .join("-")}`
+        : `${plotLine ?? ""}:${line ?? ""}:${kind}`;
+
     if (seen.has(key)) {
       rejected.push({ raw: entry, reason: "duplicate" });
       continue;
@@ -423,11 +463,119 @@ export function validateEpisodePlotContrast(
       continue;
     }
     seen.add(key);
-    accepted.push({ kind, plotItem, plotLine, excerpt, line, reason });
+    accepted.push({
+      kind,
+      plotItem,
+      plotLine,
+      excerpt,
+      line,
+      ...partner,
+      reason,
+    });
   }
 
   return { accepted, rejected };
 }
+
+/**
+ * 引用を本文の中に見つける。見つからなければ捨てる理由を返す。
+ *
+ * 照合の本体の引用と、順序の相手の引用とで**同じ物差しを当てる**ために
+ * 1か所にまとめてある（片方だけ長さの上限を忘れる、ということを起こさない）。
+ */
+function locateGroundedExcerpt(
+  text: string,
+  excerpt: string
+): { line: number } | "excerpt_too_long" | "excerpt_not_found" {
+  // **段落をまるごと写してくる。** それは引用ではない（P-11と同じ）
+  if (excerpt.length > MAX_EXCERPT_CHARS) return "excerpt_too_long";
+  // **本文に無い文を引いてくる。** 箇条書きの側の文をそのまま
+  // 「本文にこうある」と言うことがある（矛盾検知で実際に起きた）
+  const line = lineOfExcerpt(text, excerpt);
+  return line === null ? "excerpt_not_found" : { line };
+}
+
+/**
+ * 「順序の食い違い」の、入れ替わった相手（任意の欄）を読む。
+ *
+ * **書かれていれば添えるだけで、落とす判定には使わない**（作者の判断、
+ * 2026-09-25「拾う方」）。1.1 では相手を必須にして前後が本当に逆のときだけ
+ * 通したが、対照の誤検出が消えた代わりに、本物の入れ替えを拾う数が落ちた
+ * （26b 15/19 → 12/19、e4b 7/19 → 1/19）。誤検出は残ってよいから、拾う方を取る。
+ *
+ * プロンプト（1.2＝1.0 の文面）は相手の欄を尋ねない。別のモデルや MCP の道で
+ * 書かれてきたときに、提案パネルへ「入れ替わった相手」を出せるように読む。
+ * 相手の行が箇条書きに無い・自分の行と同じ・引用が本文に無いときは、
+ * **相手が無いものとして扱う**（指摘そのものは残す）。
+ */
+function readOrderPartner(
+  entry: Record<string, unknown>,
+  input: { items: readonly EpisodePlotItem[]; text: string },
+  selfPlotLine: number | null
+): Pick<
+  EpisodePlotContrastFinding,
+  "swappedItem" | "swappedPlotLine" | "swappedExcerpt" | "swappedLine"
+> {
+  const rawPartner = usableOrEmpty(asString(entry.swappedItem));
+  if (!rawPartner) return NO_PARTNER;
+  const partner = matchPlotItem(rawPartner, input.items);
+  // 自分自身を相手にしたものは、行の前後ではない（1つの行の中の順番）
+  if (!partner || partner.line === selfPlotLine) return NO_PARTNER;
+
+  const rawPartnerExcerpt = usableOrEmpty(asString(entry.swappedExcerpt));
+  const located = rawPartnerExcerpt
+    ? locateGroundedExcerpt(input.text, rawPartnerExcerpt)
+    : null;
+  const grounded = located !== null && typeof located !== "string";
+  return {
+    swappedItem: partner.text,
+    swappedPlotLine: partner.line,
+    // 本文に無い引用は添えない（作者に存在しない文を読ませない）
+    swappedExcerpt: grounded ? rawPartnerExcerpt : null,
+    swappedLine: grounded ? located.line : null,
+  };
+}
+
+/**
+ * 「起きていない」出来事に、別の種別の札を付けた答えか。
+ *
+ * 実機確認（2026-09-25 深夜、gemma4:e4b）で、仕込んだ「起きない出来事」に
+ * 「順序の食い違い」を付け、**引用は null、理由は「記述は見当たらない」**と
+ * 書いてきた（第1・4・7・14話）。1.1 の測定では gemma4:26b が同じ出来事に
+ * **「箇条書きに無い」**を付けて同じ形で返した（第3・14話。plotItem に足した行、
+ * 理由は「記述が本文にないため」）。どちらも中身は「起きていない」の指摘である。
+ * 相手が無いと落とす・札のまま出すと、**仕込みの見逃しが増える**ので付け替える。
+ *
+ * 付け替えるのは、**箇条書きの行を指し、引用が空で、理由が「無い」と
+ * 言い切っている**ときだけ。
+ *   - 引用があるときは付け替えない。本文に場面を指しておきながら
+ *     「起きていない」とは言えない
+ *   - 行を指していなければ付け替えない。何が起きていないのか分からない
+ *   - 理由が「無い」と言っていなければ付け替えない（前後の話をして
+ *     引用を書き忘れただけかもしれない）
+ */
+function isMislabeledAbsence(
+  kind: EpisodePlotContrastKind,
+  plotItem: string,
+  excerpt: string,
+  reason: string
+): boolean {
+  return (
+    kind !== "起きていない" &&
+    Boolean(plotItem) &&
+    !excerpt &&
+    ABSENCE_PATTERN.test(reason)
+  );
+}
+
+/**
+ * 本文に「無い」と言い切った形。
+ *
+ * 実物の言い回し：「記述は見当たらない」「確認できない」「記述がない」
+ * 「記述が本文にないため」。疑問の形（「見当たらないか」）は言い切りではないので外す。
+ */
+const ABSENCE_PATTERN =
+  /(見当たら(ない|ず|ぬ|ません)|確認でき(ない|ず|ません)|(記述|描写|言及|場面)(は|が|も)?(本文中?(に|では)(は|も)?)?(ない|無い|なく|無く|ありません|存在しない)|(描かれ|書かれ|触れられ)て(いない|おらず|いません))(?!の?か)/;
 
 /**
  * 「順序（流れ）は箇条書きと一致している」と**言い切った**形。

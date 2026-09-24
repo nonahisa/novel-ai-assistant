@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { buildManuscriptEditorHtml } from "../../../src/views/manuscriptEditorHtml";
 import {
@@ -195,7 +196,8 @@ interface ComposeApi {
   /** 写すときの3つの形（設計書6.12.8。0.74.12） */
   composeCopyPayloads(
     notation: string,
-    mode?: Mode
+    mode?: Mode,
+    emphasis?: "kakuyomu" | "narou"
   ): { plain: string; html: string; notation: string };
   /** 貼り付けで使う文字列を選ぶ（自前の形を先に読む） */
   composePastePick(data: {
@@ -2223,24 +2225,27 @@ describe("巻き込まれた印を、打ったあとに外す", () => {
 });
 
 /**
- * 写す・貼る（設計書6.12.8。0.74.12）。
+ * 写す・貼る（設計書6.12.8。0.74.12、素のテキストの形は 2026-09-25 朝の裁定）。
  *
  * 作者の裁定（2026-09-21）：「通常のコピー」＝「text とルビ等を持った
  * コピーで、メモにコピーしたら字だけ、ルビが可能なエディターに貼り付けたら
  * ルビごと」。**クリップボードに3つ同時に載せ、貼り先が選ぶ。**
  *
- * かつては記法だけを text/plain へ載せていたので、メモ帳へ貼ると
- * `{漢字|かんじ}` がそのまま入っていた。
+ * **素のテキスト（text/plain）の形は 2026-09-25 朝に改めた。** 字だけに
+ * すると、素のテキストエディターへ貼ったときにルビが消える（実機確認リスト
+ * F-27）。作者の答えは「記法（｜漢字《かんじ》）ごと貼りたい」。
+ * `{漢字|かんじ}`（拡張機能の中だけの記法）ではなく、**投稿サイトの記法**で
+ * 載せる——0.74.12 より前は `{漢字|かんじ}` がメモ帳へそのまま入っていた。
  */
 describe("写すときの3つの形", () => {
   const line = "　{灯|あかり}は{{確かに}}見た。";
 
-  it("字だけ・HTML・記法の3つが、同時に載る", () => {
+  it("記法つきの素のテキスト・HTML・記法の3つが、同時に載る", () => {
     const payloads = api.composeCopyPayloads(line);
 
-    // ① 字だけ。読み仮名も記法の記号も落ちる（メモ帳・チャットへ貼る形）
-    expect(payloads.plain).toBe("　灯は確かに見た。");
-    // ② HTML。ルビを組めるエディタへ貼ると、ルビごと入る
+    // ① 素のテキスト。投稿サイトの記法で、ルビも傍点も残る（メモ帳・素のエディタへ貼る形）
+    expect(payloads.plain).toBe("　｜灯《あかり》は《《確かに》》見た。");
+    // ② HTML。ルビを組めるエディタ（Word など）へ貼ると、これまでどおりルビごと入る
     expect(payloads.html).toBe(
       "　<ruby>灯<rt>あかり</rt></ruby>は" +
         '<em class="emphasis">確かに</em>見た。'
@@ -2249,28 +2254,75 @@ describe("写すときの3つの形", () => {
     expect(payloads.notation).toBe(line);
   });
 
-  it("読み仮名は、字だけの側から必ず落ちる", () => {
-    // ここが残ると、メモへ貼った本文に読み仮名が混ざる（貼り戻すと壊れる）
-    expect(api.composeCopyPayloads("{雪|ゆき}").plain).toBe("雪");
-    expect(api.composeCopyPayloads("{雪|ゆき}").plain).not.toContain("ゆき");
+  it("読み仮名は、記法の中に収まる（本文へ地の文として混ざらない）", () => {
+    // 「雪ゆき」と並ぶと、貼った先で読み仮名が本文になる
+    const plain = api.composeCopyPayloads("{雪|ゆき}").plain;
+    expect(plain).toBe("｜雪《ゆき》");
+    expect(plain).not.toContain("雪ゆき");
   });
 
-  it("投稿サイトの記法（.txt）でも、字だけになる", () => {
-    // 記法の切り分けは composeParts に任せている。写しを持たないので、
-    // モードを渡すだけで両方に効く
-    const site = "　｜灯《あかり》は《《確かに》》見た。";
-    const payloads = api.composeCopyPayloads(site, "site");
+  it("傍点は、作品の投稿先の書き方に合わせる（なろう・アルファポリスはルビで代用）", () => {
+    // 傍点だけはサイトによって書き方が違う（core/ruby.ts の toSiteNotation と同じ）
+    expect(api.composeCopyPayloads(line, "curly", "narou").plain).toBe(
+      "　｜灯《あかり》は｜確かに《・・・》見た。"
+    );
+    expect(api.composeCopyPayloads(line, "curly", "kakuyomu").plain).toBe(
+      "　｜灯《あかり》は《《確かに》》見た。"
+    );
+  });
 
-    expect(payloads.plain).toBe("　灯は確かに見た。");
+  it("投稿サイトの記法（.txt）は、書いてあるとおりに載る", () => {
+    // .txt は投稿サイトの形をそのまま保つ決まり。縦線を省いたルビや傍点の
+    // 書き方も作者が選んだものなので、書き換えない
+    const site = "　｜灯《あかり》は《《確かに》》見た。漢字《かんじ》";
+    const payloads = api.composeCopyPayloads(site, "site", "narou");
+
+    expect(payloads.plain).toBe(site);
     expect(payloads.html).toContain("<ruby>灯<rt>あかり</rt></ruby>");
     expect(payloads.notation).toBe(site);
+  });
+
+  /**
+   * 原稿エディター同士の貼り付け（2026-09-25 の裁定で確かめる2点目）。
+   * **自前の形が先に読まれる**ので、素のテキストを記法つきにしても、
+   * 記法が二重（｜｜灯《あかり》《あかり》など）にはならない。
+   */
+  it("この面へ貼り戻すと、記法が二重にならず元どおりになる", () => {
+    for (const [value, mode] of [
+      [line, "curly"],
+      ["　｜灯《あかり》は《《確かに》》見た。", "site"],
+    ] as const) {
+      const payloads = api.composeCopyPayloads(value, mode);
+      const clipboard = {
+        getData: (flavor: string) =>
+          ({
+            [api.COMPOSE_NOTATION_FLAVOR]: payloads.notation,
+            "text/plain": payloads.plain,
+            "text/html": payloads.html,
+          })[flavor] ?? "",
+      };
+      expect(api.composePastePick(clipboard)).toBe(value);
+    }
+  });
+
+  /**
+   * 傍点の書き方は拡張機能側が作品の投稿先から決めて送る（`copyEmphasisFor`）。
+   * **送る側と受ける側と写す側の3か所が繋がっていないと、いつもカクヨムの形になる。**
+   */
+  it("傍点の書き方は、拡張機能側から届いたものを写すときに使う", () => {
+    expect(html).toContain("composeCopyEmphasis = message.copyEmphasis;");
+    const copy = html.slice(html.indexOf("function composeCopyNotation("));
+    expect(copy.slice(0, 1600)).toContain("composeCopyEmphasis");
+    const host = readFileSync("src/features/manuscriptEditor.ts", "utf8");
+    expect(host).toContain("copyEmphasis: await copyEmphasis,");
+    expect(host).toContain(".then(copyEmphasisFor)");
   });
 
   it("複数行でも、行がずれない", () => {
     const value = "一行目。\n{二|に}行目。\n";
     const payloads = api.composeCopyPayloads(value);
 
-    expect(payloads.plain).toBe("一行目。\n二行目。\n");
+    expect(payloads.plain).toBe("一行目。\n｜二《に》行目。\n");
     // HTMLの側は、行の区切りを br にする（貼り先で1行に潰れない）
     expect(payloads.html.split("<br>")).toHaveLength(3);
     expect(payloads.notation).toBe(value);

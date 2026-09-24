@@ -247,6 +247,19 @@ describe("P-28 単話プロットと本文の照合のプロンプト", () => {
     expect(accepted).toHaveLength(0);
   });
 
+  /**
+   * 作者の判断（2026-09-25「拾う方」）。1.1 で入れ替わった相手を必須にしたら、
+   * 本物の入れ替えを拾う数が落ちた（26b 15/19 → 12/19）。1.2 は 1.0 の文面に戻し、
+   * 相手を尋ねず、「書けないなら挙げない」とも言わない。
+   */
+  test("順序の指摘に、入れ替わった相手を必須で書かせない（拾う方）", () => {
+    const prompt = buildEpisodePlotContrastPrompt(CONTRAST_INPUT);
+    expect(prompt).not.toContain("swappedItem");
+    expect(prompt).not.toContain("書けないなら挙げない");
+    const items = EPISODE_PLOT_CONTRAST_SCHEMA.properties.findings.items;
+    expect(JSON.stringify(items)).not.toContain("swapped");
+  });
+
   test("システムプロンプトは、書き直しを禁じてJSONだけを求める", () => {
     expect(EPISODE_PLOT_CONTRAST_SYSTEM_PROMPT).toContain("JSON");
     expect(EPISODE_PLOT_CONTRAST_SYSTEM_PROMPT).toContain("書き直");

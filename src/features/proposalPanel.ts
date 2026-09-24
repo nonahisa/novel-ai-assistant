@@ -1664,6 +1664,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       plotLine: number | null;
       excerpt: string | null;
       line: number | null;
+      /** 順序の食い違いの相手（1.1）。ほかの種別では null */
+      swappedItem?: string | null;
+      swappedExcerpt?: string | null;
+      swappedLine?: number | null;
       reason: string;
     }>
   ): void {
@@ -1679,12 +1683,18 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         // 空欄を出すと、何の指摘なのか分からない
         excerpt: finding.excerpt ?? finding.plotItem ?? "",
         category: finding.kind,
-        settingSays: finding.plotItem ?? "（該当する項目はありません）",
+        // **順序の食い違いは、入れ替わった2行を並べて見せる。** 1行だけでは
+        // 「何と比べて前なのか」が作者に分からない（コードが照らしたのも2行の組）
+        settingSays: finding.swappedItem
+          ? `${finding.plotItem ?? ""}（入れ替わった相手：${finding.swappedItem}）`
+          : (finding.plotItem ?? "（該当する項目はありません）"),
         textSays: finding.reason,
         note:
           finding.excerpt === null
             ? "本文には見当たりません（飛び先は話の先頭です）"
-            : "",
+            : finding.swappedExcerpt
+              ? `相手の場面（${finding.swappedLine ?? "?"}行目）：${finding.swappedExcerpt}`
+              : "",
         confidence: "medium",
         status: "pending",
         leftLabel: "箇条書きでは",

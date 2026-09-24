@@ -366,6 +366,313 @@ describe("P-28 本文との照合の検証", () => {
 });
 
 /**
+ * 「順序の食い違い」は、**入れ替わった相手が無くても落とさない**
+ * （作者の判断、2026-09-25「拾う方」。プロンプト 1.2）。
+ *
+ * 1.1 では相手の行と2つの引用を必須にし、前後が本当に逆のときだけ通した。
+ * 対照の誤検出は消えたが、本物の入れ替えを拾う数が落ちた（26b 15/19 → 12/19、
+ * e4b 7/19 → 1/19）。**誤検出は残ってよいから、本物の入れ替えを落とさない。**
+ *
+ * 相手の欄は任意で、**書かれていれば提案パネルに添えるだけ**。
+ * 落とす判定には使わない。
+ */
+describe("P-28 順序の食い違いは、相手が無くても落とさない（拾う方）", () => {
+  /** 箇条書きでは「朝、兄の部屋」が先だが、本文では老人が先に来る */
+  const SWAPPED_TEXT = [
+    "老人が訪ねてきた。",
+    "窓の外で雨が降っていた。",
+    "朝、兄の部屋を片付けた。",
+  ].join("\n");
+
+  function contrastSwapped(findings: unknown[], maxFindings = 5) {
+    return validateEpisodePlotContrast(
+      { findings },
+      { items: ITEMS, text: SWAPPED_TEXT, maxFindings }
+    );
+  }
+
+  test("相手の欄の無い答え（1.0・1.2 の形）はそのまま通る", () => {
+    const { accepted, rejected } = contrastSwapped([
+      {
+        kind: "順序の食い違い",
+        plotItem: "朝、兄の部屋を片付ける",
+        excerpt: "朝、兄の部屋を片付けた。",
+        reason: "片付けが後ろに回っている。",
+      },
+    ]);
+
+    expect(rejected).toEqual([]);
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]).toMatchObject({
+      kind: "順序の食い違い",
+      plotLine: 10,
+      line: 3,
+      swappedItem: null,
+      swappedExcerpt: null,
+    });
+  });
+
+  test("相手が書かれていれば、実在の行と本文の位置を添える", () => {
+    const { accepted } = contrastSwapped([
+      {
+        kind: "順序の食い違い",
+        plotItem: "朝、兄の部屋を片付ける",
+        excerpt: "朝、兄の部屋を片付けた。",
+        swappedItem: "老人が訪ねてくる",
+        swappedExcerpt: "老人が訪ねてきた。",
+        reason: "箇条書きでは片付けが先だが、本文では老人の訪問が先に来る。",
+      },
+    ]);
+
+    expect(accepted[0]).toMatchObject({
+      swappedItem: "老人が訪ねてくる",
+      swappedPlotLine: 12,
+      swappedExcerpt: "老人が訪ねてきた。",
+      swappedLine: 1,
+    });
+  });
+
+  test("本文でも同じ順に見えても落とさない（前後の判定はしない）", () => {
+    // 1.1 ではここを落とした。どの引用がどの行に当たるかはコードでは
+    // 確かめられず、26b の本物の入れ替えを2話この形で落としていた
+    const { accepted, rejected } = contrast([
+      {
+        kind: "順序の食い違い",
+        plotItem: "老人が訪ねてくる",
+        excerpt: "老人が訪ねてきた。",
+        swappedItem: "朝、兄の部屋を片付ける",
+        swappedExcerpt: "朝、兄の部屋を片付けた。",
+        reason: "老人の訪問は、この後に続く場面と関連しているため。",
+      },
+    ]);
+
+    expect(rejected).toEqual([]);
+    expect(accepted).toHaveLength(1);
+  });
+
+  test.each([
+    ["相手の行が箇条書きに無い", "王都へ向かう", "老人が訪ねてきた。"],
+    ["相手が自分の行と同じ", "朝、兄の部屋を片付ける", "朝、兄の部屋を片付けた。"],
+  ])("%s相手は添えないが、指摘は残す", (_label, swappedItem, swappedExcerpt) => {
+    const { accepted, rejected } = contrastSwapped([
+      {
+        kind: "順序の食い違い",
+        plotItem: "朝、兄の部屋を片付ける",
+        excerpt: "朝、兄の部屋を片付けた。",
+        swappedItem,
+        swappedExcerpt,
+        reason: "片付けが後ろに回っている。",
+      },
+    ]);
+
+    expect(rejected).toEqual([]);
+    expect(accepted[0].swappedItem).toBeNull();
+    expect(accepted[0].swappedExcerpt).toBeNull();
+  });
+
+  test("相手の引用が本文に無ければ、引用だけ添えない（本文に無い文を作者に読ませない）", () => {
+    const { accepted } = contrastSwapped([
+      {
+        kind: "順序の食い違い",
+        plotItem: "朝、兄の部屋を片付ける",
+        excerpt: "朝、兄の部屋を片付けた。",
+        swappedItem: "老人が訪ねてくる",
+        swappedExcerpt: "老人が玄関の戸を叩いた。",
+        reason: "片付けが後ろに回っている。",
+      },
+    ]);
+
+    expect(accepted[0]).toMatchObject({
+      swappedItem: "老人が訪ねてくる",
+      swappedExcerpt: null,
+      swappedLine: null,
+    });
+  });
+
+  test("相手の欄は、順序以外の種別には添えない", () => {
+    const { accepted } = contrast([
+      {
+        kind: "箇条書きに無い",
+        plotItem: null,
+        excerpt: "窓の外で雨が降っていた。",
+        swappedItem: "老人が訪ねてくる",
+        swappedExcerpt: "老人が訪ねてきた。",
+        reason: "雨の場面は箇条書きに無い。",
+      },
+    ]);
+
+    expect(accepted[0].swappedItem).toBeNull();
+  });
+
+  test("同じ2行の組を、向きを変えて二度挙げても1件にする", () => {
+    const pair = {
+      kind: "順序の食い違い",
+      reason: "片付けと老人の訪問が入れ替わっている。",
+    };
+    const { accepted, rejected } = contrastSwapped([
+      {
+        ...pair,
+        plotItem: "朝、兄の部屋を片付ける",
+        excerpt: "朝、兄の部屋を片付けた。",
+        swappedItem: "老人が訪ねてくる",
+        swappedExcerpt: "老人が訪ねてきた。",
+      },
+      {
+        ...pair,
+        plotItem: "老人が訪ねてくる",
+        excerpt: "老人が訪ねてきた。",
+        swappedItem: "朝、兄の部屋を片付ける",
+        swappedExcerpt: "朝、兄の部屋を片付けた。",
+      },
+    ]);
+
+    expect(accepted).toHaveLength(1);
+    expect(rejected[0].reason).toBe("duplicate");
+  });
+
+  describe("起きていない出来事に「順序の食い違い」の札を付けた答え", () => {
+    /*
+      e4b の仕込み（第1・4・7・14話）：足した出来事「ギルド長が突然辞任を発表し、
+      ホンゴーが後任に指名される」に「順序の食い違い」を付け、引用は null、理由は
+      「本文中でギルド長や後任指名に関する記述は見当たらない」。**中身は
+      「起きていない」の指摘**なので、札を付け替えて通す（仕込みの見逃しを増やさない）
+    */
+    test("引用が空で、理由が「見当たらない」なら「起きていない」へ付け替える", () => {
+      const { accepted, rejected } = contrast([
+        {
+          kind: "順序の食い違い",
+          plotItem: "形見の懐中時計を見つける",
+          excerpt: null,
+          swappedItem: null,
+          swappedExcerpt: null,
+          reason: "本文中で懐中時計を見つけることに関する記述は見当たらない。",
+        },
+      ]);
+
+      expect(rejected).toEqual([]);
+      expect(accepted).toHaveLength(1);
+      expect(accepted[0]).toMatchObject({
+        kind: "起きていない",
+        plotItem: "形見の懐中時計を見つける",
+        plotLine: 11,
+        excerpt: null,
+        line: null,
+        swappedItem: null,
+      });
+    });
+
+    test.each([
+      "本文中でギルド長の辞任やホンゴーの後任指名は確認できない。",
+      "本文中には、懐中時計を見つけたという記述がない。",
+      "懐中時計を見つける場面は描かれていない。",
+    ])("言い方が違っても付け替える：%s", (reason) => {
+      const { accepted } = contrast([
+        {
+          kind: "順序の食い違い",
+          plotItem: "形見の懐中時計を見つける",
+          excerpt: null,
+          swappedItem: null,
+          swappedExcerpt: null,
+          reason,
+        },
+      ]);
+
+      expect(accepted[0]?.kind).toBe("起きていない");
+    });
+
+    test("付け替えたものが、同じ行の「起きていない」と重なれば1件にする", () => {
+      const { accepted, rejected } = contrast([
+        {
+          kind: "起きていない",
+          plotItem: "形見の懐中時計を見つける",
+          excerpt: null,
+          reason: "本文に懐中時計の場面が無い。",
+        },
+        {
+          kind: "順序の食い違い",
+          plotItem: "形見の懐中時計を見つける",
+          excerpt: null,
+          reason: "懐中時計に関する記述は見当たらない。",
+        },
+      ]);
+
+      expect(accepted).toHaveLength(1);
+      expect(rejected[0].reason).toBe("duplicate");
+    });
+
+    /*
+      26b の仕込み（1.1 の測定、第3・14話）：足した出来事に「箇条書きに無い」を
+      付け、plotItem にその行、引用は null、理由は「記述が本文にないため」。
+      「箇条書きに無い」は本文の場面を引くはずの種別で、引用が無いのは形が
+      合わない。中身は「起きていない」なので同じく付け替える
+    */
+    test("「箇条書きに無い」の札でも、引用が空で「本文にない」と言い切っていれば付け替える（26b の実物）", () => {
+      const { accepted } = contrast([
+        {
+          kind: "箇条書きに無い",
+          plotItem: "形見の懐中時計を見つける",
+          excerpt: null,
+          swappedItem: null,
+          swappedExcerpt: null,
+          reason: "懐中時計を見つけることに関する記述が本文にないため。",
+        },
+      ]);
+
+      expect(accepted).toHaveLength(1);
+      expect(accepted[0].kind).toBe("起きていない");
+      expect(accepted[0].plotLine).toBe(11);
+    });
+
+    test("箇条書きの行を指していなければ付け替えない（何が起きていないのか分からない）", () => {
+      const { accepted, rejected } = contrast([
+        {
+          kind: "箇条書きに無い",
+          plotItem: null,
+          excerpt: null,
+          reason: "本文に記述がない。",
+        },
+      ]);
+
+      expect(accepted).toEqual([]);
+      expect(rejected[0].reason).toBe("nothing_pointed");
+    });
+
+    test("引用があるなら付け替えない（本文に場面があるのに「起きていない」とは言えない）", () => {
+      const { accepted, rejected } = contrast([
+        {
+          kind: "順序の食い違い",
+          plotItem: "老人が訪ねてくる",
+          excerpt: "老人が訪ねてきた。",
+          swappedItem: null,
+          swappedExcerpt: null,
+          reason: "老人の訪問の前に、雨の描写は見当たらない。",
+        },
+      ]);
+
+      expect(rejected).toEqual([]);
+      expect(accepted[0].kind).toBe("順序の食い違い");
+    });
+
+    test("引用が空でも、理由が「無い」と言っていなければ付け替えない", () => {
+      // 前後の話をしているのに引用を書かなかっただけ。順序の指摘のまま残す（拾う方）
+      const { accepted, rejected } = contrast([
+        {
+          kind: "順序の食い違い",
+          plotItem: "形見の懐中時計を見つける",
+          excerpt: null,
+          swappedItem: null,
+          swappedExcerpt: null,
+          reason: "懐中時計の場面が、老人の訪問より後に来ている。",
+        },
+      ]);
+
+      expect(rejected).toEqual([]);
+      expect(accepted[0].kind).toBe("順序の食い違い");
+    });
+  });
+});
+
+/**
  * 理由の中で、自分の指摘を打ち消している答え（実機確認 2026-09-25 深夜、
  * gemma4:e4b・ギルドの19話）。
  *
