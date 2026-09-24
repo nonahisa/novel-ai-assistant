@@ -271,6 +271,53 @@ describe("誤って記録された変化を落とす（設定資料パネル）"
     expect(changes[0].evidence).toBe("短く切った黒髪に、色の薄い目をしていた。");
   });
 
+  /*
+    **根拠の無い記録は「根拠の記録なし」と出す**（C3。作者の裁定、2026-09-24 夜）。
+
+    0.75.2 までに記録された変化は根拠がいつも空だった（上の 0.75.3 の件）。
+    後から埋めると読んでいない本文を根拠として載せることになるので、
+    埋めずに残してある。そのまま空で出すと、作者からは「根拠が出ない不具合」
+    にしか見えない（実機確認リスト A-16 で実際にそう見えた）。
+    **無いことを、無いと書く。**
+  */
+  test("根拠の無い記録は、黙って空にせず「根拠の記録なし」と出す", async () => {
+    const character = misread();
+    character.changes = [
+      change("リーダー格の男性。", [1]),
+      change("学院の教師。", [7], {
+        evidence: "ターナ先生は教壇に立ち、生徒たちを見渡した。",
+      }),
+    ];
+    const { inner } = panelWith(character);
+    const shown = choosing(() => undefined);
+
+    await inner.handleDropChanges("char_002", "summary");
+
+    expect(shown[0][0].detail).toBe("根拠の記録なし");
+    expect(shown[0][1].detail).toContain("根拠：");
+    expect(shown[0][1].detail).toContain("ターナ先生は教壇に立ち");
+  });
+
+  /*
+    作者の補足（`note`）は根拠ではない。以前は根拠が無いと補足を根拠の欄に
+    出していたので、作者の書いた言葉を本文の引用と取り違えうる。
+    分けて並べ、根拠が無いことも書く。
+  */
+  test("作者の補足は、根拠と分けて並べる", async () => {
+    const character = misread();
+    character.changes = [
+      change("リーダー格の男性。", [1], { note: "呼びかけの取り違えかも" }),
+    ];
+    const { inner } = panelWith(character);
+    const shown = choosing(() => undefined);
+
+    await inner.handleDropChanges("char_002", "summary");
+
+    expect(shown[0][0].detail).toBe(
+      "根拠の記録なし / 補足：呼びかけの取り違えかも"
+    );
+  });
+
   test("何も選ばずに閉じたら、保存も作り直しもしない", async () => {
     const { inner, saved, notices } = panelWith(misread());
     choosing(() => undefined);

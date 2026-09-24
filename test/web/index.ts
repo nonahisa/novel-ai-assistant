@@ -572,6 +572,55 @@ export async function run(): Promise<void> {
     }
   });
 
+  /*
+    **日本語の名前の作品の本文を開くと、相談パネルの対象がその本文になること**
+    （2026-09-24 夜。作者の裁定）。
+
+    相談パネルは `file` の文書しか受け取っておらず、ブラウザ版
+    （`vscode-test-web://…`・`vscode-vfs://…`）で本文を開いても、相談の対象は
+    「作品全体」か「作品のファイルを開いてください」のままだった。
+    **本物の画面の「相談の対象」を読む**——引き当ての部品だけを試しても、
+    画面に出る所（符号化された名前が日本語で出るか）までは言えない。
+
+    話数の読めない名前にしておく。話数が読めると見出しが「第n話 の本文」になり、
+    ファイル名が画面に出ないので、どの本文を相手にしたかを確かめられない。
+  */
+  await runCase("日本語の名前の作品の本文を開くと、相談の対象がその本文になる", failures, async () => {
+    assert(registered !== undefined, "作品が登録されていないため確かめられません");
+    const shelf = join(registered.folderPath, "相談確認用");
+    const child = join(shelf, "相談の作品");
+    const fileName = "相談確認の一話.txt";
+    const episode = join(child, fileName);
+    await vscode.workspace.fs.createDirectory(toUri(child));
+    await vscode.workspace.fs.writeFile(
+      toUri(episode),
+      new TextEncoder().encode("相談で見てもらう一文です。")
+    );
+    try {
+      const entry = await vscode.commands.executeCommand<WorkEntry | undefined>(
+        "novelai.addWork",
+        { folderPath: child, title: "相談の作品" }
+      );
+      assert(entry !== undefined, "作品を登録できませんでした（undefined が返りました）");
+
+      await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+      const document = await vscode.workspace.openTextDocument(toUri(episode));
+      await vscode.window.showTextDocument(document);
+      console.log(`[web] 相談に渡す本文の場所: ${fromUri(document.uri)}`);
+
+      await runCommand("novelai.openChatPanel");
+      await waitForWebviewTab("novelai.chatPanel");
+      // 名前が出るのは「相談の対象」の欄だけ。直す前は「（作品全体）」か
+      // 「作品のファイルを開いてください」が出ていた
+      await expectWebviewContent("AIに相談", fileName);
+    } finally {
+      const chat = findWebviewTab("novelai.chatPanel");
+      if (chat) await vscode.window.tabGroups.close(chat.tab);
+      await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+      await vscode.workspace.fs.delete(toUri(shelf), { recursive: true });
+    }
+  });
+
   if (failures.length > 0) {
     throw new Error(`ブラウザ版の検査が失敗しました:\n${failures.join("\n")}`);
   }

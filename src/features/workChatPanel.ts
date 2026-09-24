@@ -1254,7 +1254,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   /** エディターが変わったら覚え直す。拡張機能側から呼ぶ */
   trackEditor(editor: vscode.TextEditor | undefined): void {
     if (!editor) return;
-    if (editor.document.uri.scheme !== "file") return;
+    // 作品の外の文書（無題・設定・出力）は受け取らない。パネルへ
+    // フォーカスが移る途中で前に来ることがあり、受け取ると直前まで
+    // 見ていた本文を手放してしまう
+    if (this.documentPath(editor) === undefined) return;
     this.lastEditor = editor;
     void this.postContext();
   }
@@ -3082,11 +3085,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * 「どの作品か」を知りたいだけの呼び出しからは通せない。
    */
   currentWorkId(): string | undefined {
-    const editor = this.lastEditor;
-    const filePath =
-      editor && editor.document.uri.scheme === "file"
-        ? fromUri(editor.document.uri)
-        : undefined;
+    const filePath = this.documentPath(this.lastEditor);
     const opened = filePath ? this.findWork(filePath) : undefined;
     return opened?.id ?? this.selectedWorkId;
   }
@@ -3612,10 +3611,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
   private async resolveContext(): Promise<ResolvedContext | undefined> {
     const editor = this.lastEditor;
-    const filePath =
-      editor && editor.document.uri.scheme === "file"
-        ? fromUri(editor.document.uri)
-        : undefined;
+    const filePath = this.documentPath(editor);
     const work = filePath ? this.findWork(filePath) : undefined;
 
     // **ファイルを開いていなくても相談できるようにする。**
@@ -3625,14 +3621,21 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
     const config = await readWorkConfig(work);
     const settingsDirName = path.basename(workPaths(work, config).settings);
-    const relativePath = path.relative(work.folderPath, filePath);
+    // **符号を解いてから相対にする。** ブラウザ版では作品の場所が生の日本語、
+    // 開いた本文の場所が百分率符号の形で来るので、そのまま `relative` へ
+    // 渡すと作品の外を指す道になり、設定資料を開いていても本文扱いになる
+    const relativePath = path.relative(
+      path.decodeUriEscapes(work.folderPath),
+      path.decodeUriEscapes(filePath)
+    );
 
     let isEpisode = false;
     let chapterLabel: string | null = null;
     try {
       const scan = await scanWork(work);
-      const episode = scan.episodes.find(
-        (item) => path.resolve(item.filePath) === path.resolve(filePath)
+      // 同じ理由で、話の引き当ても符号を解いて比べる（`isSamePath`）
+      const episode = scan.episodes.find((item) =>
+        path.isSamePath(item.filePath, filePath)
       );
       isEpisode = Boolean(episode);
       chapterLabel =
@@ -3665,7 +3668,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       filePath,
       label: describeChatContext(
         kind,
-        path.basename(filePath),
+        // 画面の上部に出る名前。ブラウザ版でも `%E7…` ではなく日本語で出す
+        path.basename(path.decodeUriEscapes(filePath)),
         chapterLabel
       ),
       excerpt: excerpt.text,
@@ -3905,6 +3909,31 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    */
   private findWork(filePath: string): WorkEntry | undefined {
     return findWorkForFile(this.registry.list(), filePath);
+  }
+
+  /**
+   * 相談の相手にしてよい文書なら、その場所。してはいけないなら `undefined`
+   * （作者の裁定、2026-09-24 夜。設計書6.72／5.8）。
+   *
+   * - **`file` は今までどおり受け取る**（作品の外でも受け取り、作品の
+   *   特定は `findWork` に任せる。作品の外なら「選んである作品」の相談になる）
+   * - **`file` 以外は、登録済みの作品の中にある文書だけ受け取る。**
+   *   以前は `file` しか受け取らず、ブラウザ版（`vscode-vfs://…`）では
+   *   本文を開いていても相談の対象がその作品にならなかった
+   * - **URI の形をしていないもの（`untitled:Untitled-1`）は受け取らない。**
+   *   `fromUri` は `file` 以外を URI の文字列で返すが、斜線の無い形は
+   *   手元の相対の道と見分けられず、中にあるかの判定に回すと
+   *   いまの場所しだいで「中」と答えうる
+   */
+  private documentPath(
+    editor: vscode.TextEditor | undefined
+  ): string | undefined {
+    if (!editor) return undefined;
+    const uri = editor.document.uri;
+    const location = fromUri(uri);
+    if (uri.scheme === "file") return location;
+    if (!path.isUriString(location)) return undefined;
+    return this.findWork(location) ? location : undefined;
   }
 }
 

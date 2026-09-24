@@ -2802,11 +2802,33 @@ function changeDropPicks(entries: RecordChange[]): ChangeDropPick[] {
       ]
         .filter((part) => part)
         .join(" / "),
-      detail: change.evidence ?? change.note ?? undefined,
+      detail: changeDropDetail(change),
       key,
     });
   }
   return [...picks.values()];
+}
+
+/**
+ * 選択肢の2行目（根拠と補足）。C3、作者の裁定（2026-09-24 夜）。
+ *
+ * - **根拠が無ければ「根拠の記録なし」と書く。** 0.75.2 までに記録された
+ *   変化は根拠がいつも空で（`characterMerge` が渡していなかった）、埋めずに
+ *   残してある——後から埋めると、読んでいない本文を根拠として載せることになる。
+ *   空のまま出すと、作者には「根拠が出ない不具合」にしか見えなかった
+ *   （実機確認リスト A-16）
+ * - **作者の補足（`note`）は根拠の代わりにしない。** 以前は根拠が無いと
+ *   補足を同じ欄に出しており、作者の言葉を本文の引用と取り違えうる。分けて並べる
+ */
+function changeDropDetail(change: RecordChange): string {
+  const quote = change.evidence?.trim();
+  const note = change.note?.trim();
+  return [
+    quote ? `根拠：${quote}` : "根拠の記録なし",
+    note ? `補足：${note}` : "",
+  ]
+    .filter((part) => part)
+    .join(" / ");
 }
 
 /** AIの応答をJSONとして読む。前後に余計な文字が付くことがある */
