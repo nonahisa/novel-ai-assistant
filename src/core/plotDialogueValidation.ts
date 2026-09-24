@@ -507,7 +507,11 @@ export function validatePlotSummary(
   const restored: PlotDecision[] = [];
   for (const decision of decisions) {
     const answer = decision.answer.trim();
-    if (!answer || coverage(answer, contents.get(decision.section) ?? "") >= 0.7) continue;
+    // 文末の言い回し（「〜から」「〜こと」）は、まとめで整えられて消えるのが普通なので比べない
+    const core = answer.replace(/(から|ので|ため|こと|である|です|だ)[。．.]?$/u, "") || answer;
+    if (!answer || coverage(core, contents.get(decision.section) ?? "") >= RESTORE_COVERAGE) {
+      continue;
+    }
     restored.push(decision);
     const list = PLOT_SECTIONS.find((item) => item.key === decision.section)?.list ?? false;
     const heading = PLOT_SECTIONS.find((item) => item.key === decision.section)?.heading;
@@ -520,6 +524,19 @@ export function validatePlotSummary(
   if (contents.size === 0) return { ok: false, reason: "empty" };
   return { ok: true, contents, restored, marked };
 }
+
+/**
+ * 決まったことが「まとめに入っている」とみなす重なり（2字組）。
+ *
+ * **高めに置く。** 7割にしていたとき、手元の gemma4:26b のまとめは着想
+ * 「現代にダンジョンが出現。配信のために通信線を敷く業者が実は最強」を
+ * 「…通信線を敷設する業者が存在する世界」と書き、**着想の芯（実は最強）が
+ * 消えたのに7割を超えて戻らなかった**（重なりは約0.76。2026-09-25）。芯は
+ * たいてい短い言葉なので、割合を下げるほど落ちても気づけない。重ねて書かれた
+ * 文は作者が消せるので、戻す側に倒す。文末の言い回しは比べる前に落とす
+ * （「回線が魔力も運ぶから」→「回線が魔力も運ぶ世界」を抜けと取り違えない）
+ */
+const RESTORE_COVERAGE = 0.85;
 
 /** `part` の2字組のうち、`whole` にもあるものの割合（0〜1） */
 function coverage(part: string, whole: string): number {

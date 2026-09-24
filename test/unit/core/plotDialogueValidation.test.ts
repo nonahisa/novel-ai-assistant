@@ -399,6 +399,19 @@ describe("まとめ（P-44）", () => {
     expect(check.ok && check.contents.get("outline")).toContain("- 起：通信業者の新人技術者が初現場に入る");
   });
 
+  it("言い換えで着想の芯（短い言葉）が消えたら、ほとんど同じ文でも戻す", () => {
+    // 手元の gemma4:26b が実際に書いたまとめ。「実は最強」が消えていた
+    const idea = "現代にダンジョンが出現。配信のために通信線を敷く業者が実は最強";
+    const check = validatePlotSummary(
+      JSON.stringify({
+        outline: "現代にダンジョンが出現し、配信のために通信線を敷設する業者が存在する世界を舞台にする",
+      }),
+      [{ topic: "着想", answer: idea, section: "outline" }]
+    );
+    expect(check.ok && check.restored.map((item) => item.topic)).toEqual(["着想"]);
+    expect(check.ok && check.contents.get("outline")).toContain(`着想：${idea}`);
+  });
+
   it("決まったこと・着想のどれにも根ざさない行は、印が無ければコードが〔補い〕を付ける", () => {
     // 手元の gemma4:e4b は、作者が一度も決めていない人称やテーマを印なしで埋めた
     const check = validatePlotSummary(
