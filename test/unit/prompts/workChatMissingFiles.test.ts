@@ -85,3 +85,16 @@ describe("求めたファイルが見つからなかったときの聞き直し�
     expect(prompt).not.toContain("見つかりませんでした");
   });
 });
+
+// 元から減らす側：製品の目次（話の一覧）は題しか持たず、AI は needFiles の
+// パスを当て推量で書いていた。題にファイルの場所を添えていることを見張る
+describe("相談の目次の話の一覧には、ファイルの場所が添えてある", () => {
+  test("buildOverview が題の後ろに作品フォルダーからの相対パスを付ける", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync("src/features/workChatPanel.ts", "utf8");
+    const start = source.indexOf("private async buildOverview");
+    expect(start).toBeGreaterThan(0);
+    const body = source.slice(start, start + 2500);
+    expect(body).toMatch(/episodeLabel\(episode\)\}（\$\{path\s*\.relative\(work\.folderPath, episode\.filePath\)/);
+  });
+});

@@ -3918,7 +3918,15 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       if (total > 0) {
         lines.push(`全${total}話。`);
 
-        const labels = scan.episodes.map((episode) => episodeLabel(episode));
+        // **題にファイルの場所を添える。** 題だけだと、AI は needFiles の
+        // パスを当て推量で書き、拡張子や表記を取り違える（2026-09-24、
+        // `episode_0001.txt` を求めたが実物は `.md` だった）
+        const labels = scan.episodes.map(
+          (episode) =>
+            `${episodeLabel(episode)}（${path
+              .relative(work.folderPath, episode.filePath)
+              .replace(/\\/g, "/")}）`
+        );
         // 多いときは先頭と末尾だけ見せる。**間を省いたことを明記する**
         // （省略に気づかないと「これで全部」と誤解する）
         if (labels.length <= OVERVIEW_EPISODE_LIMIT) {
