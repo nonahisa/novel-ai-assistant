@@ -109,8 +109,36 @@ export interface WorkStyleFacts {
  * 突出しないので、そこで無理に決めると嘘を教えることになる。
  */
 export function detectFirstPerson(bodyText: string): string | null {
-  let narration = bodyText.replace(DIALOGUE, "");
+  const narration = bodyText.replace(DIALOGUE, "");
   if (narration.length < 500) return null;
+  const counts = countNarrationFirstPersons(narration);
+
+  let best: { word: string; hits: number } | null = null;
+  let total = 0;
+  for (const [word, hits] of counts) {
+    total += hits;
+    if (!best || hits > best.hits) best = { word, hits };
+  }
+
+  if (!best || best.hits < MIN_FIRST_PERSON_HITS) return null;
+  if (best.hits / total < MIN_FIRST_PERSON_SHARE) return null;
+  return best.word;
+}
+
+/**
+ * 地の文の一人称を、語ごとに数える（台詞の外だけ）。
+ *
+ * **数え方を1か所に置くために切り出した**（2026-09-25、人称のよじれ）。
+ * 作品全体で語り手を決める `detectFirstPerson` と、**その話が本当に
+ * その語り手の一人称で書かれているか**を確かめる `narratorNameSlip.ts` が
+ * 同じ数え方をしないと、片方だけ直したときに黙って食い違う。
+ *
+ * 台詞はここで落とす（渡す側が落としてあっても害は無い）。
+ */
+export function countNarrationFirstPersons(
+  bodyText: string
+): Map<string, number> {
+  let narration = bodyText.replace(DIALOGUE, "");
   // 複数形を先に落とす（「私たち」を「私」と数えないため）
   for (const plural of PLURAL_FORMS) {
     narration = narration.split(plural).join(" ");
@@ -125,17 +153,7 @@ export function detectFirstPerson(bodyText: string): string | null {
     if (hits > 0) counts.set(word, hits);
     rest = parts.join("\u0000");
   }
-
-  let best: { word: string; hits: number } | null = null;
-  let total = 0;
-  for (const [word, hits] of counts) {
-    total += hits;
-    if (!best || hits > best.hits) best = { word, hits };
-  }
-
-  if (!best || best.hits < MIN_FIRST_PERSON_HITS) return null;
-  if (best.hits / total < MIN_FIRST_PERSON_SHARE) return null;
-  return best.word;
+  return counts;
 }
 
 /** 本文と作者の設定から、その作品の作法をまとめる */

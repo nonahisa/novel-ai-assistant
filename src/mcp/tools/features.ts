@@ -23,7 +23,12 @@ import {
 import { presentPrerequisites } from "./prerequisiteState";
 import { assertRunner, responseInput, type RunnerKind } from "./run";
 import { typoPrompt, typoRun, typoValidate } from "./typo";
-import { proofreadPrompt, proofreadRun, proofreadValidate } from "./proofread";
+import {
+  proofreadPrompt,
+  proofreadRun,
+  proofreadValidate,
+  scanNarratorSlips,
+} from "./proofread";
 import {
   NOTATION_GROUP_SCHEMA,
   notationDetect,
@@ -548,6 +553,9 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
     run: (input) => typoRun({ ...chunkArgs(input), ...runnerArgs(input) }),
   },
   proofread: {
+    // 語り手の名前が地の文に出る所（設計書6.9.2）。AIを使わずに、作品
+    // ぜんたいを数える（1話ぶんは novel.run の narratorSlips に同じものが載る）
+    detect: (input) => scanNarratorSlips(input.folder),
     prompt: (input) => proofreadPrompt(chunkArgs(input)),
     validate: (input) =>
       proofreadValidate({

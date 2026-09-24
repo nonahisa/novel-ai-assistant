@@ -75,13 +75,22 @@ import {
   collectWorkStyle,
   readNarrativePerson,
 } from "../core/workStyle";
+import { CharacterStore } from "../core/characterStore";
+import type { Character } from "../models/character";
+import { isKeptWord } from "../models/keepWord";
+import {
+  describeNarratorNameSlip,
+  findNarratorNameSlips,
+  resolveWorkNarrator,
+} from "../core/narratorNameSlip";
 
 /**
  * 推敲支援（P-10、設計書6.9.1）。
  *
  * **「できるだけシンプル」が要求である。** 文体の大幅改変はしない。
- * 冗長・同語反復・係り受け・長すぎる文・漢字ひらき・語尾単調の6つだけを見る
- * （後ろの2つはプロンプト1.5で追加。**実モデルでの見逃し・誤検出は未計測**）。
+ * 冗長・同語反復・係り受け・長すぎる文・漢字ひらき・語尾単調・視点の7つだけを見る
+ * （漢字ひらき・語尾単調はプロンプト1.5、視点は1.10で追加）。視点のうち
+ * 「語り手の名前が地の文に出る」形だけは、AIではなくコードが数える（設計書6.9.2）。
  *
  * **いちばん危ないのは出しすぎること。** 誤字脱字には正解があるが
  * 推敲には無く、AIはどの文にも何かしら言える。`MAX_ISSUES_PER_1000_CHARS`
@@ -173,7 +182,8 @@ export async function checkProofread(
 
   const prepared = await collectChunks(work, info, options, outputTuning);
   if (!prepared) return undefined;
-  const { chunks, narrativeStyle, keepWords, styleNote } = prepared;
+  const { chunks, narrativeStyle, keepWords, styleNote, narratorSlips } =
+    prepared;
   if (chunks.length === 0) {
     vscode.window.showWarningMessage("推敲できる本文がありませんでした。");
     return undefined;
@@ -219,8 +229,8 @@ export async function checkProofread(
         ? "（前回から本文の分け方が変わっているため、今回はすべて送り直します）"
         : "",
       "",
-      "見るのは6つだけです（冗長・同語反復・係り受け・長すぎる文・" +
-        "読みに詰まる漢字・語尾の単調さ）。",
+      "見るのは7つだけです（冗長・同語反復・係り受け・長すぎる文・" +
+        "読みに詰まる漢字・語尾の単調さ・視点のずれ）。",
       "語彙や文体、描写の増減には触れません。",
       // **上限の値を書き写さない。** 定数を変えたときに、画面だけが
       // 古い数字を言い続ける（2026-09-18 に 3 → 5 へ変えて気づいた）
@@ -531,7 +541,29 @@ export async function checkProofread(
     logStep(`語尾単調：同じ連続の重複${monotonyMergedCount}件をまとめた`);
   }
 
-  const accepted = sortProofreadIssues(issues) as ProofreadIssue[];
+  /*
+    **語り手の名前が地の文に出る所は、コードが数えたものを並べる**（設計書6.9.2）。
+
+    上限（`issueBudget`）には数えない——AIの出しすぎを抑える網であって、
+    コードが本文から数えた箇所を削るためのものではない。
+    **作者が「直さない」と決めた語を含むなら出さない**（AIの指摘と同じ扱い）。
+    **AIが同じ行に「視点」を出していたら、コードの側を残す**——説明が
+    語り手と名前を名指しし、修正案も持っているので、作者には読みやすい。
+  */
+  const slipsShown = narratorSlips.filter(
+    (slip) => !isKeptWord(slip.original, keepWords)
+  );
+  const slipLines = new Set(
+    slipsShown.map((slip) => `${slip.filePath}|${slip.line}`)
+  );
+  const withoutDuplicates = issues.filter(
+    (issue) =>
+      issue.reason !== "視点" || !slipLines.has(`${issue.filePath}|${issue.line}`)
+  );
+  const accepted = sortProofreadIssues([
+    ...withoutDuplicates,
+    ...slipsShown,
+  ]) as ProofreadIssue[];
 
   /*
     **開始したら、必ず終了の1行を残す**（実機確認 2026-09-06）。
@@ -593,24 +625,31 @@ async function collectChunks(
       keepWords: KeepWord[];
       /** AIへ渡す作法の説明 */
       styleNote: string;
+      /** コードで見つけた、語り手の名前が地の文に出る所（設計書6.9.2） */
+      narratorSlips: ProofreadIssue[];
     }
   | undefined
 > {
   const scan = await scanWork(work);
-  const targets = options.filePaths
-    ? scan.episodes.filter((episode) =>
-        options.filePaths!.some(
-          (filePath) =>
-            path.resolve(filePath).toLowerCase() ===
-            path.resolve(episode.filePath).toLowerCase()
-        )
-      )
-    : scan.episodes;
+  const isTarget = (filePath: string): boolean =>
+    !options.filePaths ||
+    options.filePaths.some(
+      (wanted) =>
+        path.resolve(wanted).toLowerCase() ===
+        path.resolve(filePath).toLowerCase()
+    );
 
   // **切る前の本文をいったん溜める**（設計書6.27.10）
   const sources: EpisodeBodySource[] = [];
+  /*
+    **語り手を決めるための本文は、絞っても全話から取る**（設計書6.9.2）。
+    1話だけでは一人称の数が決める下限に届かない（台の第1話は「俺」が9回で、
+    下限は10回）。1話だけ推敲したときに限って黙る、という食い違いを作らない。
+    読むだけで、AIへは送らない。
+  */
+  const narrationBodies: string[] = [];
 
-  for (const episode of targets) {
+  for (const episode of scan.episodes) {
     // 競合マーカーのあるファイルはAI処理をブロックする
     if (episode.hasConflictMarkers) continue;
     let text: string;
@@ -621,8 +660,16 @@ async function collectChunks(
     }
     // **合本は話ごとに分ける**（`core/episodeChunks.ts`）。丸ごと1つに
     // すると、全チャンクの話数が先頭の話数になる
-    sources.push(...episodeBodySources(episode.filePath, text, episode));
+    const parts = episodeBodySources(episode.filePath, text, episode);
+    narrationBodies.push(...parts.map((part) => blankMemoLines(part.body)));
+    if (isTarget(episode.filePath)) sources.push(...parts);
   }
+
+  const narratorSlips = await findNarratorSlipsInSources(
+    work,
+    sources,
+    narrationBodies.join("\n")
+  );
 
   const narrativeStyle = await readNarrativePerson(work);
   // 作者が「直さない」と決めた語。推敲は原文まるごとを置き換えるので、
@@ -689,5 +736,74 @@ async function collectChunks(
     narrativeStyle,
     keepWords,
     styleNote,
+    narratorSlips,
   };
+}
+
+/**
+ * 語り手の名前が地の文に三人称で出る所を、**コードで**探す（設計書6.9.2）。
+ *
+ * AIを呼ばないので処理量はかからない。結果は推敲の「視点」の札で並べる
+ * （新しい画面は作らない）。**分からないときは黙る**——語り手が決まらない・
+ * その話が語り手の一人称でない・名前がほかの人物と重なる、のどれでも出さない。
+ *
+ * **人物の資料に読めないファイルがあれば探さない。** 読めなかった人物と
+ * 苗字が重なっていても分からず、その苗字を語り手のものとして拾ってしまう。
+ */
+async function findNarratorSlipsInSources(
+  work: WorkEntry,
+  sources: readonly EpisodeBodySource[],
+  workBodyText: string
+): Promise<ProofreadIssue[]> {
+  if (sources.length === 0) return [];
+  let people: Character[];
+  try {
+    const loaded = await new CharacterStore(work).loadAll();
+    if (loaded.errors.length > 0) {
+      logStep(
+        `推敲：人物の資料に読めないファイルが${loaded.errors.length}件あるため、` +
+          "語り手の名前の確認は行いません"
+      );
+      return [];
+    }
+    people = loaded.characters;
+  } catch (error) {
+    logStep(
+      `推敲：人物の資料を読めないため、語り手の名前の確認は行いません（${
+        error instanceof Error ? error.message : String(error)
+      }）`
+    );
+    return [];
+  }
+
+  const narrator = resolveWorkNarrator(workBodyText, people);
+  if (!narrator) return [];
+
+  const issues: ProofreadIssue[] = [];
+  const skipped: string[] = [];
+  for (const source of sources) {
+    const found = findNarratorNameSlips({ text: source.body, narrator, people });
+    if (found.skipped) skipped.push(found.skipped);
+    for (const slip of found.slips) {
+      issues.push({
+        filePath: source.filePath,
+        // 合本から切り出した話は、元ファイルの行へ戻す
+        line: source.lineOffset + slip.line,
+        original: slip.original,
+        target: slip.original,
+        suggestion: slip.suggestion,
+        reason: "視点",
+        explanation: describeNarratorNameSlip(slip),
+        confidence: "medium",
+        // 提案パネルの見分けに使う。AIのチャンクとは別物なので、鍵の形を変える
+        chunkHash: `narrator:${path.basename(source.filePath)}`,
+      });
+    }
+  }
+  logStep(
+    `推敲：語り手（「${narrator.firstPerson}」＝${narrator.name}）の名前が` +
+      `地の文に出る所 ${issues.length}件` +
+      (skipped.length > 0 ? `（見なかった話 ${summarizeReasons(skipped)}）` : "")
+  );
+  return issues;
 }

@@ -102,7 +102,7 @@ export const CHUNKED_FEATURES: readonly FeatureName[] = [
 ];
 
 /** AIを使わずに探す機能（`novel.detect`） */
-export const DETECT_FEATURES = ["notation", "name"] as const;
+export const DETECT_FEATURES = ["notation", "name", "proofread"] as const;
 
 /** AIへ渡す材料だけを組む機能（`novel.material`） */
 export const MATERIAL_FEATURES = ["contradiction"] as const;

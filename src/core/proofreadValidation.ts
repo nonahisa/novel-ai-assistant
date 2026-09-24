@@ -8,6 +8,8 @@ import { isKeptWord, type KeepWord } from "../models/keepWord";
 import {
   issueBudget,
   PROOFREAD_REASONS,
+  PROOFREAD_VIEWPOINT_EXAMPLE,
+  PROOFREAD_VIEWPOINT_GUIDE,
   type ProofreadReason,
 } from "../prompts/proofread";
 
@@ -24,7 +26,7 @@ import {
  * - **件数を機械的に切る**（`MAX_ISSUES_PER_1000_CHARS`）。プロンプトでも言うが守らない
  * - **確信度の高いものから残す。** 切るときに迷っている提案が残ると、
  *   質の低いものだけが手元に来る
- * - 決めた6種類以外の理由を弾く（文体への干渉が紛れ込む口を塞ぐ）
+ * - 決めた7種類以外の理由を弾く（文体への干渉が紛れ込む口を塞ぐ）
  * - **変わっていない提案を弾く。** 原文と同じものを「修正案」として返す
  *
  * VS Code APIに依存しない。
@@ -86,7 +88,22 @@ export interface RejectedProofreadIssue {
      */
     | "onyomi_compound"
     /** 説明が、禁じた観点（語彙・文体など）を語っている */
-    | "forbidden_aspect";
+    | "forbidden_aspect"
+    /**
+     * 「視点」の札だが、当たっている先がまるごと台詞である（1.10）。
+     *
+     * 視点は**地の文の**話である。人物が台詞で他人の気持ちを言い切るのは
+     * その人物の思い込みで、語りのずれではない
+     */
+    | "not_narration"
+    /**
+     * 「視点」の札の説明が、**指示の文をそのまま写しただけ**（1.10）。
+     *
+     * 指示の言葉は答えの中身として返ってくる（CLAUDE.md の失敗3）。
+     * 「語り手が知り得ない他人の心の中を、地の文が言い切っている」と
+     * 写しただけでは、誰の話なのかが分からない
+     */
+    | "guide_echo";
 }
 
 const LEVELS = new Set(["high", "medium", "low"]);
@@ -824,7 +841,86 @@ const FORBIDDEN_EXPLANATION =
 const ALLOWED_BY_REASON: Partial<Record<string, RegExp>> = {
   語尾単調: /(リズム|テンポ)/gu,
   漢字ひらき: /(やや古|硬い)/gu,
+  // 視点のずれは「唐突に」「不自然に」移るもので、正しい指摘の説明に普通に
+  // 出る（2026-09-24 の縛りの洗い出し）。**「描写」は開けない**——実測
+  // （2026-09-25、gemma4:e4b）で「『俺』の語りなのに、自分の心理描写が長い」
+  // という文体の話が視点の札で来た
+  視点: /(唐突|不自然)/gu,
 };
+
+/**
+ * 視点の札に限って、さらに落とす語（1.10）。
+ *
+ * 視点は「誰の心が書かれているか」の話で、**長さ・語調・流れの話ではない。**
+ * 実測（2026-09-25、gemma4:e4b）で、語り手自身の独白に「自己分析的な文章が
+ * 続き、地の文のトーンが不安定」「心理描写が長いため、少し流れが止まります」
+ * が視点の札で来た。どちらも文体の話で、指示例の「〜の語りなのに」の形だけを
+ * 真似ている。
+ */
+const VIEWPOINT_FORBIDDEN = /(トーン|流れが|長い|長く|語調)/u;
+
+/**
+ * 「視点」の説明が、指示の文を写しただけか（1.10）。
+ *
+ * **写した答えは、誰の語りに誰の心が入ったかを言っていない。** 作者は
+ * どこを見ればよいか分からない。
+ *
+ * **語尾だけ変えた写しも写しである**（「言い切っている」→「言い切っています」）。
+ * 空白と句読点を落とし、説明を6字ずつの窓に切って、**7割以上の窓が指示か
+ * 例の中にあれば**写しとみる。本文の名前（「蓬田さんの内心」）を挙げた説明は、
+ * その窓が指示に無いので残る。**短すぎる説明は比べない**——「視点」の二字は
+ * 指示にも正しい説明にも出る。
+ */
+const GUIDE_ECHO_MIN_CHARS = 8;
+const GUIDE_ECHO_WINDOW = 6;
+const GUIDE_ECHO_SHARE = 0.7;
+
+export function echoesViewpointGuide(explanation: string): boolean {
+  const target = Array.from(compactForEcho(explanation));
+  if (target.length < GUIDE_ECHO_MIN_CHARS) return false;
+  const sources = [
+    compactForEcho(PROOFREAD_VIEWPOINT_GUIDE),
+    compactForEcho(PROOFREAD_VIEWPOINT_EXAMPLE),
+  ];
+  let windows = 0;
+  let copied = 0;
+  for (let start = 0; start + GUIDE_ECHO_WINDOW <= target.length; start++) {
+    const piece = target.slice(start, start + GUIDE_ECHO_WINDOW).join("");
+    windows++;
+    if (sources.some((source) => source.includes(piece))) copied++;
+  }
+  return windows > 0 && copied / windows >= GUIDE_ECHO_SHARE;
+}
+
+function compactForEcho(text: string): string {
+  return text.replace(/[\s　、。，．・「」『』（）()*"]/gu, "");
+}
+
+/**
+ * 札の付け替え（1.10）。**視点の話を、ほかの札に押し込んで返してくる。**
+ *
+ * 2026-09-24 の測定で、AIは「一人称の『俺』の視点の中に、突然蓬田さんの内心が
+ * 混ざり、視点が揺らぎます」を「係り受け」の札で返した。受け皿が無かった
+ * からで、1.10 で札を足しても小さいモデルは古い札を選び続けることがある。
+ * そのままにすると、長文・同語反復の検算（数で確かめる）が本物の指摘を落とす。
+ *
+ * **説明が視点の話をしているなら、視点の札へ付け替える。** 付け替えると
+ * 修正案は必ず空になる（視点は直し方を作者が決める札）ので、原稿の側へ
+ * 危険は増えない。漢字ひらき・語尾単調は、説明に「語り手」が出ても
+ * その札の話なので触らない。
+ */
+const VIEWPOINT_TALK = /(視点|語り手)/u;
+
+function relabelViewpoint(
+  reason: ProofreadReason | undefined,
+  explanation: string
+): ProofreadReason | undefined {
+  if (!reason) return reason;
+  if (reason === "漢字ひらき" || reason === "語尾単調" || reason === "視点") {
+    return reason;
+  }
+  return VIEWPOINT_TALK.test(explanation) ? "視点" : reason;
+}
 
 export function mentionsForbiddenAspect(
   explanation: string,
@@ -832,6 +928,7 @@ export function mentionsForbiddenAspect(
 ): boolean {
   const allowed = reason ? ALLOWED_BY_REASON[reason] : undefined;
   const target = allowed ? explanation.replace(allowed, "") : explanation;
+  if (reason === "視点" && VIEWPOINT_FORBIDDEN.test(explanation)) return true;
   return FORBIDDEN_EXPLANATION.test(target);
 }
 
@@ -922,7 +1019,12 @@ export function validateProofreadIssues(
 
     const original = asString(item.original);
     const suggestion = asString(item.suggestion);
-    const reason = normalizeReason(asString(item.reason));
+    // **視点の話を別の札で返してきたら、視点の札へ付け替える**（1.10）。
+    // 長文・同語反復の検算より前でないと、本物の指摘がそこで落ちる
+    const reason = relabelViewpoint(
+      normalizeReason(asString(item.reason)),
+      asString(item.explanation)
+    );
     const line = typeof item.line === "number" ? Math.round(item.line) : NaN;
 
     // **修正案が無くてもよい。** 長すぎる文をどう割るか、繰り返しをどう
@@ -934,7 +1036,7 @@ export function validateProofreadIssues(
       continue;
     }
     if (!reason) {
-      // 決めた6種類以外は、文体への干渉が紛れ込む口になる
+      // 決めた7種類以外は、文体への干渉が紛れ込む口になる
       rejected.push({ raw: item, reason: "unknown_reason" });
       continue;
     }
@@ -970,6 +1072,17 @@ export function validateProofreadIssues(
     // 喋りも、強調の反復も、直したら人物が変わってしまう
     if (reason === "同語反復" && isDialogueOnly(original)) {
       rejected.push({ raw: item, reason: "dialogue_voice" });
+      continue;
+    }
+    // **視点は地の文の話である**（1.10）。台詞で他人の気持ちを言い切るのは
+    // その人物の思い込みであって、語りのずれではない
+    if (reason === "視点" && isDialogueOnly(original)) {
+      rejected.push({ raw: item, reason: "not_narration" });
+      continue;
+    }
+    // **指示の文を写しただけの説明は、誰の話かを言っていない**（1.10）
+    if (reason === "視点" && echoesViewpointGuide(asString(item.explanation))) {
+      rejected.push({ raw: item, reason: "guide_echo" });
       continue;
     }
     // **「語尾単調」も数えられる。** AIは「〜た。が5連続」と言うが、実際は
@@ -1045,8 +1158,11 @@ export function validateProofreadIssues(
     // （P-10 1.8 の測定で gemma4:12b が「然し」→「でも」を返した）。
     // 押すと作者の文体がモデルの語彙で置き換わるので、ここも同じ扱いで
     // 修正案だけ空にする（作者の裁定、2026-09-17）
+    // **視点の修正案も、コードで必ず空にする**（1.10）。わざと視点を移す
+    // 書き方があり、直すかどうか・どう直すかは作者が決める
     const usableSuggestion =
       reason === "語尾単調" ||
+      reason === "視点" ||
       isPlaceholderText(suggestion, true) ||
       dropsOriginalTail(original, suggestion) ||
       isAmbiguousInLine(chunkLines[line - firstLine] ?? "", original) ||
@@ -1251,7 +1367,7 @@ function extractBraces(text: string): string | null {
  * 種類の言葉をなぞっただけだったりしたときに、これを代わりに出す。
  * **「AIが説明を返さなかったから何も出ない」を作らない。**
  *
- * 6つの種類のどれでもなければ `undefined`（誤字脱字や表記ゆれの
+ * 7つの種類のどれでもなければ `undefined`（誤字脱字や表記ゆれの
  * `reason` はここへ来る。あちらは説明そのものが `reason` に入っている）。
  */
 export function explainProofreadReason(reason: string): string | undefined {
@@ -1275,6 +1391,12 @@ export function explainProofreadReason(reason: string): string | undefined {
       // **直し方は書かない。** どう散らすかは文体そのものなので、
       // 決めるのは作者である（修正案も空で返させている）
       return "同じ語尾が続いてリズムが単調です。どう散らすかは作者の判断です";
+    case "視点":
+      // **誤りとは言わない**（1.10）。わざと視点を移す書き方がある
+      return (
+        "語り手が知り得ないことが書かれているか、途中で視点が移って読めます" +
+        "（わざとなら、このままで構いません）"
+      );
     default:
       return undefined;
   }
