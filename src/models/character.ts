@@ -120,6 +120,29 @@ export interface RejectedRelation {
 }
 
 /**
+ * 作者が「誤り」として落とした、食い違いの値（作者の裁定、2026-09-26 深夜）。
+ *
+ * 設定資料パネルの食い違いの行で［こちらは誤り（落とす）］を押すと、その値は
+ * 食い違いと変化の記録から外れ、ここへ移る。**黙って消さないための記録**で
+ * あり、**次の抽出で同じ値を立て直させないための記録**でもある——抽出は
+ * キャッシュの答えも毎回マージし直すので、記録が無いと押した直後の抽出で
+ * 同じ食い違いが戻る。
+ *
+ * `rejectedRelations` と同じく**AIは書かない欄**（CLAUDE.md 規則2）。
+ */
+export interface RejectedValue {
+  /** どの項目の値か（`summary`・`appearance` など） */
+  field: string;
+  value: string;
+  /** その値が出てきた話（食い違いに記録されていたまま） */
+  chapters: number[];
+  /** その値を読み取った本文の引用。あれば残す（取り違えを後から確かめる手がかり） */
+  evidence?: string | null;
+  /** 落とした時刻（ISO 8601）。手書きで省いたものは空 */
+  rejectedAt: string;
+}
+
+/**
  * 性格の1つの面（作者の裁定、2026-09-24 夜。設計書6.5.10）。
  *
  * **性格は、同時に成り立つ面を積み重ねるものとして持つ。** 外見のように
@@ -277,6 +300,14 @@ export interface Character {
   evidence: string | null;
   /** 食い違い（作中での変化かもしれない）。値ごとの話数は observations に入る */
   conflicts: RecordConflict[];
+  /**
+   * 作者が食い違いの中から「誤り」として落とした値（2026-09-26 深夜）。
+   * `RejectedValue` を参照。抽出のマージは、ここに一致する値を入れない。
+   *
+   * **省略可能にしてある。** 1件も落としていない人物のJSONに空の配列を
+   * 増やさない（作者が開いて読むファイルである）。
+   */
+  rejectedValues?: RejectedValue[];
   /**
    * 作中での変化。作者が食い違いを「これは変化だ」と確定させたものが入る。
    * 話数と、分かれば作中の時期（`設定/timeline.json`）を持つ（設計書6.18）。
@@ -495,6 +526,29 @@ export function parseCharacter(raw: unknown): Character {
       };
     }
   );
+  // 誤りとして落とした値（2026-09-26 深夜）。**壊れた形は読み込みエラーにする。**
+  // 黙って空にすると、作者が落とした値が次の抽出で食い違いへ戻る。
+  // 持っていない古い資料は undefined のまま（空の配列を足さない）
+  const rejectedValues = optionalObjectArray(
+    value.rejectedValues,
+    "rejectedValues",
+    (entry, path): RejectedValue => {
+      requireNonEmptyString(entry.field, `${path}.field`);
+      requireNonEmptyString(entry.value, `${path}.value`);
+      optionalNumberArray(entry.chapters, `${path}.chapters`);
+      optionalNullableString(entry.evidence, `${path}.evidence`);
+      optionalString(entry.rejectedAt, `${path}.rejectedAt`);
+      const quote = (entry.evidence as string | null | undefined) ?? undefined;
+      return {
+        field: entry.field as string,
+        value: entry.value as string,
+        chapters: (entry.chapters as number[] | undefined) ?? [],
+        // 根拠が無いときは項目ごと置かない（落としたときと同じ形）
+        ...(quote ? { evidence: quote } : {}),
+        rejectedAt: (entry.rejectedAt as string | undefined) ?? "",
+      };
+    }
+  );
   // 別人だと決めた相手（6.5.8）。**壊れた形は読み込みエラーにする。**
   // 黙って空にすると、作者の判断が消えたまま次の抽出でまとめ直される
   const distinctFrom = optionalObjectArray(value.distinctFrom, "distinctFrom", (entry, path) => {
@@ -559,6 +613,7 @@ export function parseCharacter(raw: unknown): Character {
     addressTerms,
     relations,
     rejectedRelations,
+    ...(rejectedValues !== undefined ? { rejectedValues } : {}),
     distinctFrom,
     personalityFacets,
     speechStyleFacets,

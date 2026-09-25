@@ -80,6 +80,8 @@ const CASES = [
  * まとめて緩めると、モデルから消した項目の取り残しを見逃す。
  */
 const OPTIONAL_KEYS: Record<string, readonly string[]> = {
+  // 誤りとして落とした値（2026-09-26 深夜）は、1件も落としていない人物には無い
+  登場人物: ["rejectedValues"],
   能力: ["customFields"],
   組織: ["customFields"],
   場所: ["customFields"],

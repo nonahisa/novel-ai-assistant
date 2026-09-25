@@ -268,6 +268,27 @@ export function characterSchema(): Record<string, unknown> {
         required: ["target", "relation"],
       },
     },
+    // 作者が「誤り」として落とした食い違いの値（2026-09-26 深夜）。
+    // 外部のAIにも見せる——見せないと、作者が落とした値をAIが書き戻しても、
+    // なぜいけないのかが読み取れない
+    rejectedValues: {
+      type: "array",
+      description:
+        "**作者が誤りとして落とした値。** " +
+        "ここに挙がっている項目へ、同じ値を書かないこと。" +
+        "**この記録そのものを書き換えない・消さないこと**（消すと落とした値が次の抽出で戻る）",
+      items: {
+        type: "object",
+        properties: {
+          field: { type: "string", minLength: 1 },
+          value: { type: "string", minLength: 1 },
+          chapters: { type: "array", items: { type: "integer", minimum: 0 } },
+          evidence: { type: ["string", "null"] },
+          rejectedAt: { type: "string" },
+        },
+        required: ["field", "value"],
+      },
+    },
     // 作者が「別人だ」と決めた組（設計書6.5.8）。
     // 外部のAIが手を入れる資料にも載せる——載せないと、AIが別名を
     // 足し戻したときに「なぜ足してはいけなかったか」が読み取れない

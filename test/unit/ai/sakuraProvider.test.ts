@@ -357,19 +357,39 @@ describe("モデル一覧から、会話に使えないモデルを外す", () =
     expect(ids).not.toContain("multilingual-e5-large");
     expect(ids).not.toContain("preview/Qwen3-Embedding-4B-FP16");
     expect(ids).not.toContain("whisper-large-v3-turbo");
-    // 会話に使えるものは、ひとつも落とさない
+    // 会話に使えるものは、候補から外すと決めた2つ（下の試験）のほかは落とさない
     expect([...ids].sort()).toEqual(
       [
         "gpt-oss-120b",
-        "llm-jp-3.1-8x13b-instruct4",
         "preview/Kimi-K2.6",
         "preview/Kimi-K2.7-Code",
         "preview/Phi-4-mini-instruct-cpu",
-        "preview/Qwen3-0.6B-cpu",
         "preview/Qwen3-VL-30B-A3B-Instruct",
         "preview/Qwen3.6-35B-A3B",
         "preview/gemma-4-31B-it",
       ].sort()
+    );
+  });
+
+  /*
+    **再現**（作者の裁定 2026-09-26 深夜）：誤字脱字検知の比べで、llm-jp と
+    Qwen3-0.6B は確実な誤り19件を1件も拾わなかった（llm-jp は指示の言葉を
+    そのまま返した）。一覧に出ていると機能別AI割当などで選べてしまう。
+    **一覧から外すだけで、名前を指定すれば使える**形は残す
+  */
+  test("仕事をこなせないと測った2つを候補に出さない。名前を指定すれば使える", async () => {
+    stubFetchSequence([{ status: 200, body: REAL_LIST }]);
+    const provider = new SakuraProvider(fakeContext());
+
+    const ids = (await provider.listModels()).map((model) => model.id);
+    expect(ids).not.toContain("llm-jp-3.1-8x13b-instruct4");
+    expect(ids).not.toContain("preview/Qwen3-0.6B-cpu");
+
+    // 選ぶ画面で名前を打った・前から割り当ててある、の道は閉じない
+    const named = await provider.getModel("llm-jp-3.1-8x13b-instruct4");
+    expect(named?.id).toBe("llm-jp-3.1-8x13b-instruct4");
+    expect((await provider.getModel("preview/Qwen3-0.6B-cpu"))?.id).toBe(
+      "preview/Qwen3-0.6B-cpu"
     );
   });
 });

@@ -24,6 +24,7 @@ import { allModelTuning, modelTuningKey } from "../core/modelTuning";
 import { modelPickDetail } from "../core/tuningStats";
 import { EXPERTS_BADGE } from "../core/modelExperts";
 import { notifyDone } from "../views/notify";
+import { manualModelEntryPrompt } from "./hiddenModels";
 
 const KEY_PROVIDER = "novelai.ai.provider";
 const KEY_MODEL = "novelai.ai.model";
@@ -560,6 +561,7 @@ export async function pickProviderAndModel(
     そのたびに設定を読んで解釈し直すことになる。
   */
   const tuningTable = allModelTuning();
+  const manualPrompt = manualModelEntryPrompt(providerPick.providerId);
 
   const modelPick = await vscode.window.showQuickPick(
     [
@@ -590,11 +592,52 @@ export async function pickProviderAndModel(
         ),
         model: m,
       })),
+      /*
+        **候補から外したモデルも、名前を打てば選べる**（作者の裁定
+        2026-09-26 深夜。`hiddenModels.ts`）。外したのは「名前だけ見て選び、
+        実行して初めて使えないと分かる」のを防ぐためで、作者が理由を見た
+        うえで使うと決めたなら止めない。外したモデルがあるプロバイダだけに
+        出す（無いところに出すと、打った名前が一覧に無いだけの誤りになる）
+      */
+      ...(manualPrompt && provider.getModel
+        ? [
+            {
+              label: "$(edit) 一覧に無いモデルの名前を入れる",
+              detail: "候補から外したモデルも、名前を入れれば使えます",
+              manual: true as const,
+            },
+          ]
+        : []),
       cancelItem(),
     ],
     { title: "使用するモデルを選んでください", ignoreFocusOut: true }
   );
-  if (!modelPick || !("model" in modelPick)) return undefined;
+  if (!modelPick) return undefined;
+  let chosenModel: ModelInfo;
+  if ("model" in modelPick) {
+    chosenModel = modelPick.model;
+  } else if ("manual" in modelPick && provider.getModel) {
+    const name = (
+      await askText({
+        title: "使うモデルの名前を入れてください",
+        prompt: manualPrompt,
+        placeHolder: "モデルの名前（一覧に出る名前と同じ書き方）",
+        validateInput: (value) =>
+          value.trim().length === 0 ? "名前が空です。" : undefined,
+      })
+    )?.trim();
+    if (!name) return undefined;
+    const named = await provider.getModel(name);
+    if (!named) {
+      vscode.window.showWarningMessage(
+        `「${name}」というモデルの情報を取れませんでした。設定は保存していません。`
+      );
+      return undefined;
+    }
+    chosenModel = named;
+  } else {
+    return undefined;
+  }
 
   // **生成を試す前に、LM Studioへモデルを読み込ませる。**
   // JITに任せるとLM Studio側の既定の短い文脈で載り、作者には
@@ -603,8 +646,8 @@ export async function pickProviderAndModel(
     // 読み込みを断られたなら、このあとの生成でも断られる。
     // 使えない組み合わせを設定に残さない
     const loaded = await prepareLmStudioModel(
-      modelPick.model.id,
-      modelPick.model.maxContextWindow,
+      chosenModel.id,
+      chosenModel.maxContextWindow,
       "AIの設定"
     );
     if (!loaded) return undefined;
@@ -613,16 +656,17 @@ export async function pickProviderAndModel(
   // 選んだモデルで実際に生成できるか確かめる。
   // モデル一覧は残高ゼロでも返ってくるので、ここまでの確認では
   // 「使える」と言い切れない。設定を終えたあと抽出で初めて
-  // 失敗すると、作者は何が悪いのか分からない
+  // 失敗すると、作者は何が悪いのか分からない。
+  // **名前を打ったモデルも同じく試す**——打ち間違いはここで分かる
   const probe = await withProgress("実際に生成できるか試しています…", () =>
-    probeGeneration(provider, modelPick.model.id)
+    probeGeneration(provider, chosenModel.id)
   );
   if (!probe.ok) {
     if (probe.error) {
       logFailure("AIの設定（生成の試行）", {
         種別: probe.error.kind,
         詳細: probe.error.detail,
-        モデル: modelPick.model.id,
+        モデル: chosenModel.id,
       });
     }
     const action = await vscode.window.showErrorMessage(
@@ -637,7 +681,7 @@ export async function pickProviderAndModel(
   return {
     providerId: providerPick.providerId,
     provider,
-    model: modelPick.model,
+    model: chosenModel,
   };
 }
 

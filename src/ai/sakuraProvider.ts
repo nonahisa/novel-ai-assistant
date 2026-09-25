@@ -24,6 +24,7 @@ import {
   isChatModel,
   isUnsupportedParameter,
 } from "./openaiProvider";
+import { hiddenModel } from "./hiddenModels";
 
 /**
  * さくらのAI Engine アダプタ。
@@ -285,6 +286,10 @@ export class SakuraProvider implements ApiKeyProvider {
     for (const entry of response.data ?? []) {
       const id = entry.id;
       if (!id || !isChatModel(id)) continue;
+      // **仕事をこなせないと測ったモデルは候補に出さない**（作者の裁定
+      // 2026-09-26 深夜。`hiddenModels.ts`）。`getModel` は外さないので、
+      // 名前を打てば使え、すでに割り当ててあるならそのまま動く
+      if (hiddenModel(this.id, id)) continue;
       infos.push(this.describe(id));
     }
     infos.sort((a, b) => a.id.localeCompare(b.id));

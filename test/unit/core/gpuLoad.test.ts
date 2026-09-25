@@ -4,6 +4,7 @@ import {
   LOAD_CHECK_INTERVAL_MS,
   LOAD_WARNING_SNOOZE_MS,
   MANAGED_SEND_SETTLE_MS,
+  SPLIT_GPU_BUSY_UTILIZATION_PERCENT,
   LoadCheckSchedule,
   externalLoadMessage,
   judgeExternalLoad,
@@ -433,5 +434,79 @@ describe("Ollama が GPU と CPU に分けて載せたモデル（2026-09-25 午
         ],
       })
     ).toEqual([GEMMA26B_SPLIT, { name: "old", sizeVramBytes: 5 }]);
+  });
+});
+
+describe("分けて載せたモデルがあるときの使用率の線（作者の裁定 2026-09-26 深夜）", () => {
+  /*
+    **再現**：26b を GPU と CPU に分けて載せていると、GPU は CPU の計算を待つ
+    あいだ遊ぶので、ほかの使い手が 26b で生成していても使用率は 34〜53% にしか
+    ならない（2026-09-25 の実測。作者の機械 RTX 4060 Ti 8GB）。0.89.3 で分けて
+    載せたときはメモリの線を見なくしたので、残る手がかりは使用率だけなのに、
+    線が50%のままでは3回のうち2回（中央値 34%・38%）を見逃していた。
+    分けて載せたモデルがあるときだけ、線を25%に下げる
+  */
+  const GEMMA26B_SPLIT = {
+    name: "gemma4:26b",
+    sizeBytes: 1227557434,
+    sizeVramBytes: 902960248,
+  };
+  const judge = (utilizations: number[], sinceManagedSendMs?: number) =>
+    judgeExternalLoad({
+      gpuSamples: utilizations.map((value) => [gpu(7648, value)]),
+      ollamaModels: [GEMMA26B_SPLIT],
+      providerId: "ollama",
+      ...(sinceManagedSendMs !== undefined ? { sinceManagedSendMs } : {}),
+    });
+
+  test("ほかの使い手の 26b の生成（実測の3回：中央値 34%・38%・53%）を、3回とも拾う", () => {
+    for (const samples of [
+      [49, 34, 34],
+      [43, 37, 38],
+      [100, 38, 53],
+    ]) {
+      const judgement = judge(samples);
+      expect(judgement.external, samples.join("/")).toBe(true);
+      expect(judgement.reasons[0]).toContain("GPU の使用率");
+    }
+  });
+
+  test("26b が載っているだけ（実測の待機：中央値 0〜8%、1回の跳ね 12%）では騒がない", () => {
+    for (const samples of [
+      [0, 0, 0],
+      [1, 3, 3],
+      [0, 1, 0],
+      [8, 8, 12],
+      [1, 1, 1],
+    ]) {
+      expect(judge(samples).external, samples.join("/")).toBe(false);
+    }
+  });
+
+  test("直前の送信の名残は、下げた線でも見ない（送り終えて3秒）", () => {
+    expect(judge([49, 34, 34], 800).external).toBe(false);
+    expect(judge([49, 34, 34], MANAGED_SEND_SETTLE_MS).external).toBe(true);
+  });
+
+  test("分けて載せたモデルが無ければ、線は50%のまま（読み込み中の 20% 台で騒がない）", () => {
+    const judgement = judgeExternalLoad({
+      gpuSamples: [[gpu(5283, 26)], [gpu(5283, 20)], [gpu(5283, 34)]],
+      ollamaModels: [
+        { name: "gemma4:e4b", sizeBytes: 3254161242, sizeVramBytes: 3254161242 },
+      ],
+      providerId: "ollama",
+    });
+    expect(judgement.reasons.some((reason) => reason.includes("使用率"))).toBe(false);
+  });
+
+  test("ログには下げた線と、その理由を残す", () => {
+    const summary = judge([43, 37, 38]).summary;
+    expect(summary).toContain(`線 ${SPLIT_GPU_BUSY_UTILIZATION_PERCENT}%`);
+    expect(summary).toContain("分けて載せているので下げた");
+  });
+
+  test("線そのもの：25%（待機の最大 8%・読み込み中の最大 20% より上、生成の最小 34% より下）", () => {
+    expect(SPLIT_GPU_BUSY_UTILIZATION_PERCENT).toBe(25);
+    expect(GPU_BUSY_UTILIZATION_PERCENT).toBe(50);
   });
 });

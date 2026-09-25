@@ -116,6 +116,10 @@ export function unifyCharacters(
       // その人物で作者が消した関係が、まとめたあとの次の抽出で戻る。
       // 文字どおり同じ記録だけ畳む（一致の判定で寄せると、記録が勝手に減る）
       rejectedRelations: unifyRejectedRelations(keep, absorb),
+      // 誤りとして落とした値（2026-09-26 深夜）も両方から引き継ぐ。落とすと、
+      // 吸収される側で作者が落とした値が、まとめたあとの次の抽出で戻る。
+      // どちらも持っていなければ欄ごと置かない（空の配列を増やさない）
+      ...unifyRejectedValues(keep, absorb),
       abilities: dedupeBy(
         [...keep.abilities, ...absorb.abilities],
         (ability) => ability.name
@@ -234,6 +238,27 @@ function unifyRejectedRelations(
     result.push(entry);
   }
   return result;
+}
+
+/** 誤りとして落とした値を2人ぶん合わせる。文字どおり同じ項目・同じ値だけ畳む */
+function unifyRejectedValues(
+  keep: Character,
+  absorb: Character
+): Pick<Character, "rejectedValues"> {
+  if (!keep.rejectedValues && !absorb.rejectedValues) return {};
+  const result: NonNullable<Character["rejectedValues"]> = [];
+  const seen = new Set<string>();
+  for (const entry of [
+    ...(keep.rejectedValues ?? []),
+    ...(absorb.rejectedValues ?? []),
+  ]) {
+    // 区切りにNULを使うのは、項目名にも値にも現れない文字だから（エスケープで書く）
+    const key = `${entry.field}\u0000${entry.value}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(entry);
+  }
+  return { rejectedValues: result };
 }
 
 /**

@@ -1499,6 +1499,26 @@ button.danger:hover {
           });
           line.appendChild(button);
         }
+        // 値ごとの操作（2026-09-26 深夜）。食い違いの値の1つを「こちらは誤り」
+        // として一度で落とす。**送る値は拡張機能側が組んだものをそのまま返す**
+        // （札の文字から切り出すと、頭だけ見せた長い値で取り違える）
+        if (entry.valueActions) {
+          for (const valueAction of entry.valueActions) {
+            const valueButton = document.createElement("button");
+            valueButton.className = "action secondary drop-conflict-value";
+            valueButton.textContent = valueAction.label;
+            valueButton.title = valueAction.title;
+            valueButton.addEventListener("click", () => {
+              post(valueAction.kind, {
+                kind: detail.kind,
+                id: detail.id,
+                field: valueAction.field,
+                value: valueAction.value,
+              });
+            });
+            line.appendChild(valueButton);
+          }
+        }
         el.detail.appendChild(line);
       }
     }

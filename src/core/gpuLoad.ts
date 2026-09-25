@@ -29,7 +29,9 @@
  *
  * そこで次の2つのどちらかで「管理の外の負荷」とみなす。
  *
- * 1. **使用率の中央値が 50% 以上**（3回測る。1回だけの跳ねで騒がない）
+ * 1. **使用率の中央値が 50% 以上**（3回測る。1回だけの跳ねで騒がない）。
+ *    **GPU と CPU に分けて載せたモデルがあるときは 25% 以上**
+ *    （`SPLIT_GPU_BUSY_UTILIZATION_PERCENT`。2026-09-26 深夜の裁定）
  * 2. **ほかのアプリの GPU メモリが「全体の37.5%」と「3GB」の大きいほう以上**
  *    （8GB の機械で 3,072MiB。常駐＋こちらの残りのモデルの差分で約2.2GB、
  *    読み込み中の 4,840MiB は越える）。**LM Studio へ送るときは見ない**——
@@ -50,6 +52,33 @@ export const NVIDIA_SMI_ARGS: readonly string[] = [
 
 /** 使用率がこれ以上なら忙しい（%）。3回の中央値で見る */
 export const GPU_BUSY_UTILIZATION_PERCENT = 50;
+
+/**
+ * **GPU と CPU に分けて載せたモデルがあるとき**の使用率の線（%）。
+ * 作者の裁定（2026-09-26 深夜）「25〜30%に下げる」から、実測で25%に決めた。
+ *
+ * ## なぜ下げるか
+ *
+ * 分けて載せたモデルが生成しているあいだ、GPU は CPU の計算を待って遊ぶ。
+ * ほかの使い手の 26b の生成は**中央値 34%・38%・53%**にしかならず
+ * （2026-09-25 の実測、RTX 4060 Ti・gemma4:26b）、50%の線では3回のうち2回を
+ * 見逃していた。しかも分けて載せたときはメモリの線を見ない（`isSplitAcrossCpu`）
+ * ので、残る手がかりは使用率だけである。
+ *
+ * ## 25%にした理由（同じ日の実測の記録から）
+ *
+ * - 26b が載っているだけ（待機）：中央値 0〜8%（1回だけの跳ねは 12%）——7回
+ * - 読み込みの途中：中央値 9〜20%（1回だけの跳ねは 29%）。**このとき `/api/ps` は
+ *   空なので、そもそもこの線は使われない**が、読み込みと重なっても騒がない高さに置く
+ * - ほかの使い手の 26b の生成：中央値 34〜53%（1回ずつの最小も 34%）——3回
+ *
+ * 30%は生成の最小 34%に近すぎる——生成の測定は3回しか無く、文脈が長くなれば
+ * CPU の分が増えて使用率はさらに下がりうる。待機と読み込みの最大（20%）からも
+ * 生成の最小（34%）からも離れた25%にした。**見逃しのほうを重く見た**——誤った
+ * 警告は［このまま送る］で10分黙らせられるが、見逃すと2人が同じ GPU を
+ * 取り合って、どちらの実行も遅くなる。
+ */
+export const SPLIT_GPU_BUSY_UTILIZATION_PERCENT = 25;
 
 /**
  * ほかのアプリのメモリの下限（MiB）。小さい GPU で割合だけだと低すぎるため。
@@ -294,19 +323,27 @@ export function judgeExternalLoad(input: ExternalLoadInput): ExternalLoadJudgeme
   const limitMiB = otherVramLimitMiB(totalMiB);
 
   const reasons: string[] = [];
-  // **直前の生成の名残は見ない。** メモリの線は Ollama の申告分を差し引いて
-  // いるので、直後でも今までどおり見てよい（名残で膨らむのは使用率だけ）
-  const settling =
-    input.sinceManagedSendMs !== undefined &&
-    input.sinceManagedSendMs < MANAGED_SEND_SETTLE_MS;
-  if (!settling && utilization >= GPU_BUSY_UTILIZATION_PERCENT) {
-    reasons.push(`GPU の使用率が ${Math.round(utilization)}% です`);
-  }
   // **Ollama が GPU と CPU に分けて載せたモデルがあれば、メモリの線を見ない**
   // （2026-09-25 午後。`isSplitAcrossCpu`）。空いたメモリをそのモデルが埋めて
   // いるので、使用量はほかのアプリの量を表さず、申告も当てにならない。
   // 26b を使うたびに「ほかのアプリが 6.7GB」と読んで警告していた
   const splitModels = (input.ollamaModels ?? []).filter(isSplitAcrossCpu);
+  // **そのときは使用率の線を下げる**（作者の裁定 2026-09-26 深夜）。分けて
+  // 載せたモデルの生成は GPU を半分ほどしか使わず、50%では見逃す。
+  // メモリの線を見ないぶん、使用率がただ1つの手がかりになる
+  const busyLine =
+    splitModels.length > 0
+      ? SPLIT_GPU_BUSY_UTILIZATION_PERCENT
+      : GPU_BUSY_UTILIZATION_PERCENT;
+  // **直前の生成の名残は見ない。** メモリの線は Ollama の申告分を差し引いて
+  // いるので、直後でも今までどおり見てよい（名残で膨らむのは使用率だけ）。
+  // 線を下げたときも同じ——名残はむしろ下げた線のほうを越えやすい
+  const settling =
+    input.sinceManagedSendMs !== undefined &&
+    input.sinceManagedSendMs < MANAGED_SEND_SETTLE_MS;
+  if (!settling && utilization >= busyLine) {
+    reasons.push(`GPU の使用率が ${Math.round(utilization)}% です`);
+  }
   const isLmStudio = input.providerId === "lmstudio";
   const watchesMemory = !isLmStudio && splitModels.length === 0;
   if (watchesMemory && otherMiB >= limitMiB) {
@@ -317,7 +354,8 @@ export function judgeExternalLoad(input: ExternalLoadInput): ExternalLoadJudgeme
 
   const summary =
     `GPU 使用率 ${utilizations.map((value) => `${Math.round(value)}%`).join("/")}` +
-    `（中央値 ${Math.round(utilization)}%、線 ${GPU_BUSY_UTILIZATION_PERCENT}%` +
+    `（中央値 ${Math.round(utilization)}%、線 ${busyLine}%` +
+    `${splitModels.length > 0 ? "——GPU と CPU に分けて載せているので下げた" : ""}` +
     `${
       settling
         ? `——直前の送信の終わりから${((input.sinceManagedSendMs ?? 0) / 1000).toFixed(1)}秒なので、` +

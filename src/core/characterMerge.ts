@@ -43,6 +43,7 @@ import {
   isUnchangingField,
   adoptableValueOfField,
   heldChangesOfField,
+  isRejectedValue,
   overlaps,
   recordValue,
   refineValue,
@@ -976,6 +977,11 @@ function fillOrConflict(
   // 「（本文から読み取れる記述なし）」のような、値が無いことを述べた文言は
   // 空欄と同じ扱いにする。そのまま入れると設定資料へ載ってしまう
   if (!isMeaningfulValue(value)) return false;
+  // **作者が「誤り」として落とした値は入れない**（作者の裁定、2026-09-26 深夜。
+  // `recordChanges.ts` の `dropConflictValue`）。抽出はキャッシュの答えも毎回
+  // マージし直すので、ここで止めないと押した直後の抽出で同じ食い違いが戻る。
+  // 空欄を埋める道でも止める——作者はその値を誤りと決めている
+  if (isRejectedValue(target, field, value)) return false;
 
   // **読み仮名は作中で変わらない**（CLAUDE.md 実装ルール2）。
   // 違う読みが出たらAIの読み違いなので、「作中の変化」として畳まず、

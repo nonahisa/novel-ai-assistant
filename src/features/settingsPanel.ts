@@ -4,6 +4,7 @@ import {
   isCharacterTextField,
   type Character,
   type PersonalityFacet,
+  type RejectedValue,
 } from "../models/character";
 import type { Ability, AbilitySystem } from "../models/ability";
 import type { Location } from "../models/location";
@@ -76,7 +77,9 @@ import {
   changeEntryKey,
   changesOfField,
   confirmHeldChanges,
+  conflictValuesOf,
   dropChanges,
+  dropConflictValue,
   heldChangesOfField,
   promoteConflictToChanges,
 } from "../core/recordChanges";
@@ -340,6 +343,21 @@ interface DetailView {
         | "markPersonalityChange"
         | "restorePersonalityFacet";
     };
+    /**
+     * 値ごとに添える操作（作者の裁定、2026-09-26 深夜）。**今は食い違いの行だけ。**
+     *
+     * 食い違いの値の1つを「こちらは誤り」として一度で落とす。値ごとに札を
+     * 分けるのは、押した先で選ばせると2手に戻るため——食い違いの値はふつう
+     * 2〜3個で、変化の記録（何件も積もる）とは数が違う。
+     */
+    valueActions?: Array<{
+      label: string;
+      /** 札に収まらない長い値の全文（指を載せると出る） */
+      title: string;
+      field: string;
+      value: string;
+      kind: "dropConflictValue";
+    }>;
   }>;
   /**
    * 別人として切り出せる呼び名（設計書6.5.8）。**人物のときだけ入る。**
@@ -914,7 +932,8 @@ export class SettingsPanel {
             character.appearedChapters,
             // 要確認（根拠が無いので本体へ入れていない変化）を見分けるのに、
             // いまの本体の値が要る
-            (field) => (isCharacterTextField(field) ? character[field] : null)
+            (field) => (isCharacterTextField(field) ? character[field] : null),
+            character.rejectedValues
           ),
         ],
         fields: [
@@ -1184,6 +1203,13 @@ export class SettingsPanel {
         case "dropChanges":
           await this.handleDropChanges(message.id, message.field);
           return;
+        case "dropConflictValue":
+          await this.handleDropConflictValue(
+            message.id,
+            message.field,
+            message.value
+          );
+          return;
         case "confirmChanges":
           await this.handleConfirmChanges(message.id, message.field);
           return;
@@ -1347,6 +1373,67 @@ export class SettingsPanel {
       "character",
       id,
       `「${field}」を作中の変化として記録しました。`
+    );
+  }
+
+  /**
+   * 食い違いの値の1つを「誤り」として一度で落とす（作者の裁定、2026-09-26 深夜）。
+   *
+   * これまでは［作中の変化として記録］してから、変化の行の［誤りを落とす］で
+   * 選び直す2手が要った（0.89.5 の F4 の担当の報告）。
+   *
+   * **落とすのは作者が押した値だけ**（CLAUDE.md 規則2）。確認の窓は出さない
+   * ——押した札に値が書いてあり、落とした値は資料の「誤りとして落とした値」に
+   * 残るので、取り違えても作者が見て欄を直せる。中身は `dropConflictValue`
+   * （本体を入れ替えるのは、作者が本体の値を誤りとし、残りが1つのときだけ）。
+   */
+  private async handleDropConflictValue(
+    id: string,
+    field: string,
+    value: string
+  ): Promise<void> {
+    const character = this.characters.find((entry) => entry.id === id);
+    if (!character) {
+      this.post({ type: "error", message: "選択した設定が見つかりません。" });
+      return;
+    }
+
+    const outcome = dropConflictValue(
+      character,
+      field,
+      value,
+      new Date().toISOString()
+    );
+    if (!outcome) {
+      // 別の窓で先に処理された場合など。読み直して今の状態を見せる
+      await this.reloadAfterSave(
+        "character",
+        id,
+        `「${field}」の食い違いに、その値はもうありません。`
+      );
+      return;
+    }
+
+    await this.persist("character", outcome.character);
+    // 食い違いは `設定/characters.md`（編集部へ渡す資料）にも載っている。
+    // パネルの保存経路は作り直さないので、変化を落とすときと同じく作り直す
+    await generateSettingsDocs(this.work, {
+      kinds: ["characters"],
+      silent: true,
+    });
+
+    const body = isCharacterTextField(field)
+      ? outcome.character[field]
+      : undefined;
+    await this.reloadAfterSave(
+      "character",
+      id,
+      `「${field}」の「${value}」を誤りとして落としました（「誤りとして落とした値」に残してあります）。` +
+        (outcome.bodyReplaced && body ? `欄は「${body}」にしました。` : "") +
+        (outcome.bodyStillDropped
+          ? "欄はまだ落とした値のままです。残った値を見て、欄を直してください。"
+          : "") +
+        (outcome.resolved ? "" : "ほかの値の食い違いは、まだ残っています。")
     );
   }
 
@@ -2900,7 +2987,9 @@ function referenceLines(
    * 2026-09-23）。根拠の無い変化のうち、本体より後の話のものが要確認である
    * （`heldChangesOfField`）。渡さなければ要確認の行は出さない
    */
-  currentOf?: (field: string) => string | null | undefined
+  currentOf?: (field: string) => string | null | undefined,
+  /** 作者が誤りとして落とした値（2026-09-26 深夜）。今は人物だけが持つ */
+  rejectedValues?: readonly RejectedValue[]
 ): DetailView["reference"] {
   const heldFields = changes && currentOf
     ? [...new Set(changes.map((change) => change.field))]
@@ -2963,11 +3052,75 @@ function referenceLines(
               field: conflict.field,
               kind: "promoteConflict" as const,
             },
+            /*
+              **「こちらは誤り」を値ごとに置く**（作者の裁定、2026-09-26 深夜）。
+              これまでは［作中の変化として記録］→ 変化の行の［誤りを落とす］の
+              2手で、しかも1手目で誤りの値が「作者が認めた変化」として本体に
+              入りえた。値が1つしか無い（壊れた）食い違いには出さない——
+              落とすと何も残らず、押しても断られるだけになる
+            */
+            ...conflictValueActions(conflict),
           }
         : {}),
     })),
+    /*
+      **落とした値を見せる**（黙って消したことにしない。2026-09-26 深夜）。
+      操作は付けない——戻したくなったら、欄へ直接書けば本体に入る
+      （落とした値の記録は、抽出がその値を入れないためのもので、作者の
+      手入力は止めない）
+    */
+    ...rejectedValueLines(rejectedValues),
     { label: "抽出根拠", value: evidence ?? "" },
   ].filter((entry) => entry.value);
+}
+
+/** 札に載せる値の長さ。紹介のような長い値は頭だけ見せ、全文は指を載せると出す */
+const VALUE_ACTION_LABEL_CHARS = 12;
+
+function conflictValueActions(
+  conflict: RecordConflict
+): { valueActions?: NonNullable<DetailView["reference"][number]["valueActions"]> } {
+  const values = conflictValuesOf(conflict);
+  if (values.length < 2) return {};
+  return {
+    valueActions: values.map((value) => {
+      const chars = [...value];
+      const short =
+        chars.length > VALUE_ACTION_LABEL_CHARS
+          ? `${chars.slice(0, VALUE_ACTION_LABEL_CHARS).join("")}…`
+          : value;
+      return {
+        label: `「${short}」は誤り（落とす）`,
+        title: `「${value}」を誤りとして落とします。落とした値は記録に残り、次の抽出でも入りません`,
+        field: conflict.field,
+        value,
+        kind: "dropConflictValue" as const,
+      };
+    }),
+  };
+}
+
+/** 誤りとして落とした値を、項目ごとに1行へまとめる */
+function rejectedValueLines(
+  rejectedValues: readonly RejectedValue[] | undefined
+): DetailView["reference"] {
+  const byField = new Map<string, RejectedValue[]>();
+  for (const entry of rejectedValues ?? []) {
+    const list = byField.get(entry.field) ?? [];
+    list.push(entry);
+    byField.set(entry.field, list);
+  }
+  return [...byField.entries()].map(([field, entries]) => ({
+    label: `誤りとして落とした値（${field}）`,
+    value: entries
+      .map(
+        (entry) =>
+          `${entry.value}（${
+            entry.chapters.length > 0 ? formatChapters(entry.chapters) : "それ以前"
+          }）`
+      )
+      .join("、"),
+  }));
 }
 
 /**
@@ -3291,6 +3444,16 @@ type PanelMessage =
       id: string;
       /** どの項目の食い違いを変化として確定させるか */
       field: string;
+    }
+  /** 食い違いの値の1つを「誤り」として落とす（作者の裁定、2026-09-26 深夜） */
+  | {
+      type: "dropConflictValue";
+      kind: SettingsKind;
+      id: string;
+      /** どの項目の食い違いか */
+      field: string;
+      /** 誤りと決めた値（食い違いに記録されていたまま） */
+      value: string;
     }
   /** 記録された変化から、誤って入ったものを落とす（設計書6.18） */
   | {
