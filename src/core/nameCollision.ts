@@ -441,6 +441,12 @@ function sideOf(unit: NameUnit): NameCollisionSide {
 
 interface RuleHit {
   rule: CollisionRule;
+  /**
+   * ⑤のとき、清音にした形に当たった規則（①〜④）。理由文をこの言葉で出す——
+   * 「濁点・半濁点を除くと重なる」とだけ書くと、清音にしても1音違う組
+   * （「くると／きると」）まで「同じになる」と読めてしまう（3巡目で実際に出た）
+   */
+  freedRule?: 1 | 2 | 3 | 4;
   /** 理由文に出す、実際に比べた形 */
   shownA: string;
   shownB: string;
@@ -462,6 +468,7 @@ function matchRule(a: NameUnit, b: NameUnit): RuleHit | undefined {
   if (freed) {
     return {
       rule: 5,
+      freedRule: freed,
       shownA: a.reading.dakutenFree,
       shownB: b.reading.dakutenFree,
     };
@@ -480,7 +487,7 @@ function matchRule(a: NameUnit, b: NameUnit): RuleHit | undefined {
 }
 
 /** 響きの規則①〜④。当たらなければ undefined */
-function soundRule(a: string[], b: string[]): CollisionRule | undefined {
+function soundRule(a: string[], b: string[]): 1 | 2 | 3 | 4 | undefined {
   if (a.length === 0 || b.length === 0) return undefined;
 
   // ① 読みが同じ
@@ -523,18 +530,21 @@ function soundRule(a: string[], b: string[]): CollisionRule | undefined {
 
 function buildReason(hit: RuleHit, a: NameUnit, b: NameUnit): string {
   const pair = `${hit.shownA}／${hit.shownB}`;
-  const head =
-    hit.rule === 1
+  const sound = (rule: 1 | 2 | 3 | 4): string =>
+    rule === 1
       ? `読みが同じ（${hit.shownA}）`
-      : hit.rule === 2
+      : rule === 2
         ? `片方がもう片方の先頭（${pair}）`
-        : hit.rule === 3
+        : rule === 3
           ? `頭2音が同じで音数も近い（${pair}）`
-          : hit.rule === 4
-            ? `1音だけ違う（${pair}）`
-            : hit.rule === 5
-              ? `濁点・半濁点を除くと重なる（${pair}）`
-              : `表記の先頭2文字が同じ（${pair}）`;
+          : `1音だけ違う（${pair}）`;
+  const head =
+    hit.rule === 6
+      ? `表記の先頭2文字が同じ（${pair}）`
+      : hit.rule === 5
+        ? // 清音にした形に当たった規則の言葉で出す（`RuleHit.freedRule`）
+          `濁点・半濁点を除くと${sound(hit.freedRule ?? 1)}`
+        : sound(hit.rule);
 
   const notes: string[] = [];
   if (a.isFamilyPart && b.isFamilyPart) {

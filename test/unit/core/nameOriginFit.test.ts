@@ -273,6 +273,131 @@ describe("返ってきた候補の系統が揃っているかをコードで確�
   });
 });
 
+/**
+ * 系統の札だけ揃えて、名前の中身は別の系統を出す（実機確認 3巡目、2026-09-25 午後、
+ * gemma4:e4b）。「ドイツ」の札で「ギヨーム」「エリオット」、「北欧」の札で「シングル」
+ * 「フレイム」。札が揃っているので、それまでの検算（札の照合）は素通りだった。
+ *
+ * 完全な判定は無理なので、**はっきり言えるものだけ**を見る：
+ *   - 英語のふつうの言葉（名前として使わない語だけ）
+ *   - ほかの系統でよく使う名前の短い表（複数の系統で使う名前は、その全部を持つ）
+ */
+describe("系統の札と名前の中身が合っているか（札だけ揃えた答え）", () => {
+  test("「ドイツ」の札のフランス・英語の名前と英語の言葉を落とす（e4b の実物）", () => {
+    const fit = fitNameCandidates(
+      [
+        candidate("ヴェルナー", "ゔぇるなー", "ドイツ"),
+        candidate("フリードリヒ", "ふりーどりひ", "ドイツ"),
+        candidate("ヴォルフガング", "ゔぉるふがんぐ", "ドイツ"),
+        candidate("アルベルト", "あるべると", "ドイツ"),
+        candidate("ギヨーム", "ぎよーむ", "ドイツ"),
+        candidate("フリーメン", "ふりーめん", "ドイツ"),
+        candidate("ラウル", "らうる", "ドイツ"),
+        candidate("エリオット", "えりおっと", "ドイツ"),
+        candidate("ルートヴィヒ", "るーとゔぃひ", "ドイツ"),
+      ],
+      planNameOrigin({ existingNames: GUILD, setting: "" }),
+      "ドイツ"
+    );
+
+    expect(fit.kept.map((item) => item.name)).toEqual([
+      "ヴェルナー",
+      "フリードリヒ",
+      "ヴォルフガング",
+      "アルベルト",
+      "ルートヴィヒ",
+    ]);
+    expect(fit.dropped.map((item) => item.candidate.name)).toEqual([
+      "ギヨーム",
+      "フリーメン",
+      "ラウル",
+      "エリオット",
+    ]);
+    // 作者が読める理由（どの系統の名前に見えるか）を添える
+    expect(fit.dropped[0].reason).toContain("フランス");
+    expect(fit.dropped[1].reason).toContain("英語の言葉");
+  });
+
+  test("「北欧」の札の英語の言葉と英語圏の名前を落とす（e4b の実物）", () => {
+    const fit = fitNameCandidates(
+      [
+        candidate("シングル", "しんぐる", "北欧"),
+        candidate("バルドゥル", "ばるどぅる", "北欧"),
+        candidate("ホルン", "ほるん", "北欧"),
+        candidate("ビヨルン", "びよるん", "北欧"),
+        candidate("エリス", "えりす", "北欧"),
+        candidate("トールヴィ", "とーるゔぃ", "北欧"),
+        candidate("ハラルド", "はらるど", "北欧"),
+        candidate("フィンバル", "ふぃんばる", "北欧"),
+        candidate("トービン", "とーびん", "北欧"),
+        candidate("フレイム", "ふれいむ", "北欧"),
+      ],
+      planNameOrigin({ existingNames: GUILD, setting: "" }),
+      "北欧"
+    );
+
+    expect(fit.kept.map((item) => item.name)).toEqual([
+      "バルドゥル",
+      "ホルン",
+      "ビヨルン",
+      "トールヴィ",
+      "ハラルド",
+    ]);
+    expect(fit.dropped.map((item) => item.candidate.name)).toEqual([
+      "シングル",
+      "エリス",
+      "フィンバル",
+      "トービン",
+      "フレイム",
+    ]);
+  });
+
+  test("26b の答え（札と中身が合っている）は1件も落とさない", () => {
+    const plan = planNameOrigin({ existingNames: GUILD, setting: "" });
+    const answers: Array<[string, string[]]> = [
+      ["ドイツ", ["ヴォルフガング", "フリードリヒ", "ジークフリート", "ルドルフ", "ラインハルト", "アルブレヒト", "ディーター"]],
+      ["北欧", ["ヴィダル", "グンナー", "ハルデン", "イヴァル", "スヴェン", "ロルケ", "エリック", "トールム", "ビョルン", "シグルド", "エギル"]],
+      ["イタリア・スペイン", ["ロレンツォ", "ディエゴ", "マルコ", "エンリケ", "ルカ", "フェリペ", "マテオ", "サンティアゴ", "ラファエル", "ニコラ"]],
+      ["フランス", ["ジャン＝ピエール", "アラン", "セバスチャン", "エティエンヌ", "フィリップ", "マルセル", "オノレ", "アントワーヌ"]],
+      ["英語圏", ["ミラー", "ベネット", "ロビン", "ハリス", "クーパー", "ディラン", "ライリー", "スコット", "ダグラス", "ブライト"]],
+    ];
+    for (const [origin, names] of answers) {
+      const fit = fitNameCandidates(
+        names.map((name) => candidate(name, "", origin)),
+        plan,
+        origin
+      );
+      expect(fit.dropped, origin).toEqual([]);
+    }
+  });
+
+  test("複数の系統で使う名前は、そのどれかの札なら通す（ラウルはフランスにもスペインにもある）", () => {
+    const fit = fitNameCandidates(
+      [candidate("ラウル", "らうる", "イタリア・スペイン")],
+      planNameOrigin({ existingNames: GUILD, setting: "" }),
+      "イタリア・スペイン"
+    );
+    expect(fit.kept.map((item) => item.name)).toEqual(["ラウル"]);
+  });
+
+  test("架空語の札では、実在の名前の表を当てない（英語の言葉だけ見る）", () => {
+    const fit = fitNameCandidates(
+      [candidate("エリオット", "えりおっと", "架空語"), candidate("シャドウ", "しゃどう", "架空語")],
+      planNameOrigin({ chosen: "架空語", existingNames: GUILD, setting: "" })
+    );
+    expect(fit.kept.map((item) => item.name)).toEqual(["エリオット"]);
+    expect(fit.dropped.map((item) => item.candidate.name)).toEqual(["シャドウ"]);
+  });
+
+  test("「・」「＝」でつないだ名前は、部分ごとに見る", () => {
+    const fit = fitNameCandidates(
+      [candidate("ハンス・ギヨーム", "はんす ぎよーむ", "ドイツ")],
+      planNameOrigin({ chosen: "ドイツ", existingNames: [], setting: "" })
+    );
+    expect(fit.dropped[0]?.reason).toContain("ギヨーム");
+  });
+});
+
 test("ひらがなの読みをカタカナへ（ゔ・長音も）", () => {
   expect(toKatakana("ゔぃくとる")).toBe("ヴィクトル");
   expect(toKatakana("ふりーどりっく")).toBe("フリードリック");

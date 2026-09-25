@@ -121,6 +121,24 @@ describe("衝突の判定（設計書6.37.1の①〜⑥）", () => {
     expect(hit?.reason).toContain("濁点");
   });
 
+  /**
+   * 実機確認 3巡目（2026-09-25 午後、26b の候補「クルト」と「冒険者ギルド」）で、
+   * 理由が「濁点・半濁点を除くと重なる（くると／きると）」と出た。清音にしても
+   * 読みは同じにならず、**実際の判定は「清音にしたうえで1音だけ違う」**だった。
+   * 判定と同じ言葉で理由を出す。
+   */
+  test.each([
+    // 清音にすると1音だけ違う（④）
+    ["クルト", "ギルド", "濁点・半濁点を除くと1音だけ違う（くると／きると）"],
+    // 清音にすると読みが同じ（①）
+    ["ハンソウ", "バンゾウ", "濁点・半濁点を除くと読みが同じ（はんそう）"],
+  ])("⑤の理由は、清音にしたあと当たった規則の言葉で出す：%s／%s", (a, b, reason) => {
+    const result = findNameCollisions([person("a", a), person("b", b)]);
+    const hit = pairOf(result, "a", "b");
+    expect(hit?.rule).toBe(5);
+    expect(hit?.reason).toBe(reason);
+  });
+
   test("⑥表記の先頭2文字が同じ", () => {
     const result = findNameCollisions([
       person("a", "小鳥遊隼", { reading: "たかなしはやぶさ" }),

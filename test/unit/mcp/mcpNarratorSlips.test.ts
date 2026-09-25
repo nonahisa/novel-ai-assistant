@@ -73,6 +73,37 @@ describe("語り手の名前が地の文に出る所（MCP）", () => {
     expect(result.note).toContain("語り手");
   });
 
+  /**
+   * 実機確認 3巡目（2026-09-25 午後、コールドスリープの写し）で、合本 `N5078JI.txt` が
+   * `skipped` に**同じ名前で3回**並んだ。合本の中の話ごとに1件ずつ積んでいたため。
+   * 同じファイル・同じ理由は1件にまとめ、何話ぶんかを添える。
+   */
+  it("合本の中の話は、見なかった理由が同じなら1件にまとめて話の数を添える", () => {
+    const folder = seededCopy();
+    const episode = (order: number, title: string) =>
+      [
+        `------------------------- エピソード${order}開始 -------------------------`,
+        "【エピソードタイトル】",
+        `${order}話　${title}`,
+        "",
+        "【本文】",
+        "　その日、少女は丘の上から町を見下ろしていた。",
+        "　風が冷たく、少女は外套の襟を立てた。",
+        "",
+      ].join("\n");
+    fs.writeFileSync(
+      nodePath.join(folder, "本文/900_外伝合本.txt"),
+      [episode(1, "丘"), episode(2, "町"), episode(3, "風")].join("\n")
+    );
+
+    const skipped = scanNarratorSlips(folder).skipped.filter((entry) =>
+      entry.filePath.endsWith("900_外伝合本.txt")
+    );
+    expect(skipped).toEqual([
+      { filePath: "本文/900_外伝合本.txt", reason: "not_narrator_episode", episodes: 3 },
+    ]);
+  });
+
   it("novel.detect の proofread で呼べる", () => {
     const result = novelDetect({ folder: seededCopy(), feature: "proofread" }) as {
       slips: unknown[];

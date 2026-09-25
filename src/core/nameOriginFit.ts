@@ -3,6 +3,7 @@ import {
   type NameCandidate,
   type NameOrigin,
 } from "../prompts/nameSuggest";
+import { originMismatchReason } from "./nameOriginLexicon";
 
 /**
  * 名前の候補（P-29）の系統を、作品に合わせて揃える（設計書6.37.2）。
@@ -371,6 +372,8 @@ function decideOrigin(
  * 2. 系統の申告が揃える系統と違えば落とす。**申告が空なら系統では落とさない**
  *    （表記だけで確かめる。空を外れと数えると、欄を書かないモデルで全部落ちる）
  * 3. 表記が作品と違えば落とす（カタカナの作品に漢字、漢字の作品にカタカナ）
+ * 4. 札は揃っていても、中身が英語の言葉か、ほかの系統でよく使う名前なら落とす
+ *    （`nameOriginLexicon.ts` の短い表。表に無い名前は落とさない）
  *
  * @param declared AIが見立てた系統（答えの `origin`）
  */
@@ -424,6 +427,16 @@ export function fitNameCandidates(
         reason: "カタカナを含む名前は、漢字の名前の並びと揃いません",
       });
       continue;
+    }
+    // **札だけ揃えて、中身は別の系統**（3巡目、e4b の「ドイツ」の札のギヨーム・
+    // エリオット、「北欧」の札のシングル・フレイム）。表で言い切れるものだけ落とす
+    // （`nameOriginLexicon.ts`。表に無い名前は何も言わない）。カタカナの名前だけ見る
+    if (KATAKANA_ONLY.test(name)) {
+      const mismatch = originMismatchReason(name, origin);
+      if (mismatch) {
+        result.dropped.push({ candidate, reason: mismatch });
+        continue;
+      }
     }
     if (seen.has(name)) {
       result.dropped.push({

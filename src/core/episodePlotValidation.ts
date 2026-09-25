@@ -61,7 +61,9 @@ export type EpisodePlotRejectReason =
   /** 理由の中で、自分の指摘を打ち消している（P-28） */
   | "self_denied"
   /** 「主筋の改変」なのに、変わった元の箇条書きの行を指していない（P-28） */
-  | "change_without_item";
+  | "change_without_item"
+  /** 「主筋の改変」の理由が、箇条書きの筋の言い直しで、逆の結果を言っていない（P-28） */
+  | "restated_item";
 
 export interface RejectedEpisodePlotFinding {
   raw: unknown;
@@ -203,6 +205,7 @@ const REJECT_REASON_LABELS: Record<EpisodePlotRejectReason, string> = {
   no_goal: "目標が書かれていないのに目標で判断",
   self_denied: "理由で自分の指摘を打ち消している",
   change_without_item: "改変の元の行を指していない",
+  restated_item: "改変の理由が筋の言い直し（逆の結果を言っていない）",
 };
 
 /**
@@ -487,6 +490,18 @@ export function validateEpisodePlotContrast(
       plotLine = matched.line;
     }
 
+    // **「主筋の改変」の理由が、箇条書きの筋を言い直しただけの答えを通さない**
+    // （`restatesPlotWithoutReversal`）。箇条書きの行は写し方が揺れる（途中を
+    // 省いて返してくる）ので、照合で当てた**箇条書きの側の文**で打ち消しを見る
+    if (
+      kind === "主筋の改変" &&
+      plotItem !== null &&
+      restatesPlotWithoutReversal(reason, plotItem, input.items)
+    ) {
+      rejected.push({ raw: entry, reason: "restated_item" });
+      continue;
+    }
+
     // 入れ替わった相手は**書かれていれば添えるだけ**（`readOrderPartner`）。
     // 落とす判定には使わない（作者の判断、2026-09-25「拾う方」）
     const partner =
@@ -752,6 +767,117 @@ export function deniesOwnContrast(
   if (CONTRAST_DENIAL_PATTERN.test(reason)) return true;
   if (kind === "順序の食い違い") return ORDER_DENIAL_PATTERN.test(reason);
   if (kind === "主筋の改変") return CHANGE_DENIAL_PATTERN.test(reason);
+  return false;
+}
+
+/**
+ * 「主筋の改変」の理由が、**箇条書きの筋を言い直しただけ**か（P-28）。
+ *
+ * 実機確認 3巡目（2026-09-25 午後、gemma4:e4b・ハイエルフ未亡人の写し）で、
+ * あらすじどおりの第14話に「主筋の改変」を2件挙げ、理由は「本文では、子供たちから
+ * 金を貸してほしいと懇願され、アジャーノが突き放す流れになっている」——箇条書きの
+ * 次の行を言い直しただけで、**逆になった結果・決断を一言も言っていない**。
+ * 打ち消しの網（`CHANGE_DENIAL_PATTERN`）は「箇条書きどおり」と言い切った形だけを
+ * 落とすので、この形はすり抜ける。
+ *
+ * **逆を言っている手がかりが1つも無く、箇条書きと言葉が重なる**ときだけ落とす。
+ * 手がかりは、本物の改変（結果を逆にした仕込み）で当たった答えの実物から集めた：
+ *   - 「逆」「異なる」などの言い切り（`CHANGE_AFFIRMATION_PATTERN`）
+ *   - 「〜ではなく」「〜でなく」
+ *   - 「箇条書きでは〜が、本文では〜」の対比（26b の大半がこの形）
+ *   - 「無い」の言い切り（`ABSENCE_PATTERN`。欠落の札の貼り違いで、言い直しではない）
+ *   - 理由か箇条書きの行のどちらかに打ち消し（「断らずに引き受けている」
+ *     「戦わずに逃げ出し」）。行の側を見るのは、e4b が「本文では、アジャーノは
+ *     沼ワニと戦い」とだけ書いて、逆であることを言葉にしないため
+ *   - 決断の語の対（行に「断る」・理由に「同意」、行に「受ける」・理由に「断り」）。
+ *     行に同じ側の語もあるときは効かせない（「拒否して」の言い直しを拾わない）
+ *
+ * **拾う方に倒してある**（作者の判断、2026-09-25「本物を落とさないのが優先」）。
+ * 手がかりの網は広めで、言い直しでも「〜ではなく」を含めば残る。測った数
+ * （同じ網を実物の答えに当てた）：3巡目は仕込みの当たり 12/12 を残して言い直し
+ * 4/6 を落とし、ギルドの 1.3 は 24/24 を残して 4/12、捨てた 1.3a の文面の答え
+ * では 32/32 を残して 40/87。
+ *
+ * かぎかっこの中は本文の写しなので、手がかりを探す前に外す（台詞の「〜ねぇだろ」の
+ * 打ち消しを、理由の打ち消しと読まない）。
+ */
+function restatesPlotWithoutReversal(
+  reason: string,
+  plotItem: string,
+  items: readonly EpisodePlotItem[]
+): boolean {
+  const said = withoutQuotations(reason);
+  const item = withoutQuotations(plotItem);
+  if (CHANGE_AFFIRMATION_PATTERN.test(said)) return false;
+  if (NOT_BUT_PATTERN.test(said)) return false;
+  if (PLOT_VERSUS_TEXT_PATTERN.test(said)) return false;
+  if (ABSENCE_PATTERN.test(said)) return false;
+  if (NEGATION_PATTERN.test(said) || NEGATION_PATTERN.test(item)) return false;
+  if (opposesDecision(said, item)) return false;
+  // 箇条書きと言葉が1つも重ならない理由は、言い直しではない（何か別のことを
+  // 言っている）。「結果が箇条書きどおりか、確かめる必要がある」のような疑問の形が
+  // これに当たり、打ち消しの網でも疑問の形は落とさない（0.86.1 の教訓）
+  return sharesPlotWords(said, items);
+}
+
+/** 「〜ではなく」「〜でなく」。対比の言い切り */
+const NOT_BUT_PATTERN = /(で|に)は?なく/;
+
+/**
+ * 「箇条書きでは〜が、本文では〜」の対比。
+ * 「箇条書きでは対峙するだけで、本文では〜が深まっている」（e4b の実物）は、
+ * 逆接（が・のに・けど・ものの）が無いので対比と読まない——細部が詳しいと
+ * 言っているだけで、結果は逆になっていない。
+ */
+const PLOT_VERSUS_TEXT_PATTERN =
+  /(箇条書き|プロット)[^。．\n]*?(が|のに|けど|けれど|ものの|一方|に対し(て)?)[、，,]?\s*(本文|実際)/;
+
+/**
+ * 打ち消し（〜ず・〜ない・〜なかった・〜ません）。
+ * 「まず」「必ず」「わずか」「ずっと」は打ち消しではないので外す。
+ */
+const NEGATION_PATTERN = /(?<![ま必わ])ず(?![っかつ])|ない|なかっ|ません/;
+
+/** 決断の語のうち、断る側 */
+const REFUSAL_PATTERN = /断|拒|見送|諦|あきらめ|取り逃/;
+/** 決断の語のうち、受ける側 */
+const ACCEPTANCE_PATTERN = /引き受|受け入|承諾|認め|応じ|同意|サイン|署名|快諾|誘いを受/;
+
+/**
+ * 箇条書きの行と理由とで、決断が逆の側にあるか。
+ * 行に同じ側の語もあるときは逆と読まない（「拒否して〜促すと」の行に「拒否し」の理由）。
+ */
+function opposesDecision(said: string, item: string): boolean {
+  const saysRefuse = REFUSAL_PATTERN.test(said);
+  const saysAccept = ACCEPTANCE_PATTERN.test(said);
+  const itemRefuse = REFUSAL_PATTERN.test(item);
+  const itemAccept = ACCEPTANCE_PATTERN.test(item);
+  return (
+    (saysRefuse && itemAccept && !itemRefuse) ||
+    (saysAccept && itemRefuse && !itemAccept)
+  );
+}
+
+/** かぎかっこの中（本文や箇条書きの写し）を外す */
+function withoutQuotations(text: string): string {
+  return text.replace(/「[^」]*」|『[^』]*』/gu, "");
+}
+
+/**
+ * 理由の漢字・カタカナの2字が、箇条書きのどれかの行に現れるか。
+ * 言い直しは箇条書きのどの行でもあり得る（第14話は、指した行の**次の行**を言い直した）
+ * ので、全部の行と比べる。
+ */
+function sharesPlotWords(
+  said: string,
+  items: readonly EpisodePlotItem[]
+): boolean {
+  const plan = items.map((item) => item.text).join("\n");
+  for (const run of said.match(/[一-龥々ァ-ヶー]{2,}/gu) ?? []) {
+    for (let i = 0; i + 2 <= run.length; i++) {
+      if (plan.includes(run.slice(i, i + 2))) return true;
+    }
+  }
   return false;
 }
 

@@ -164,8 +164,13 @@ export interface NarratorSlipScan {
   /** 何も出さなかった理由（語り手が決まらない・人物の資料が読めない） */
   note: string;
   slips: NarratorSlipResult[];
-  /** 見なかった話と、その理由（`NarratorSlipSkip`） */
-  skipped: Array<{ filePath: string; reason: string }>;
+  /**
+   * 見なかった話と、その理由（`NarratorSlipSkip`）。
+   * **同じファイル・同じ理由は1件にまとめ、何話ぶんかを `episodes` に添える**——合本は
+   * 1ファイルに何十話も入るので、話ごとに積むと同じ名前が並んで読めない
+   * （3巡目のコールドスリープで `N5078JI.txt` が3回並んだ）
+   */
+  skipped: Array<{ filePath: string; reason: string; episodes: number }>;
 }
 
 /**
@@ -210,7 +215,7 @@ export function scanNarratorSlips(
   // 作者が「直さない」と決めた語を含むなら出さない（製品と同じ）
   const keepWords = readKeepWords(folder);
   const slips: NarratorSlipResult[] = [];
-  const skipped: Array<{ filePath: string; reason: string }> = [];
+  const skipped: NarratorSlipScan["skipped"] = [];
   for (const source of sources) {
     if (filePath && !sameRelative(source.filePath, filePath)) continue;
     const found = findNarratorNameSlips({
@@ -219,10 +224,12 @@ export function scanNarratorSlips(
       people: people.records,
     });
     if (found.skipped) {
-      skipped.push({
-        filePath: source.filePath.replace(/\\/g, "/"),
-        reason: found.skipped,
-      });
+      const relative = source.filePath.replace(/\\/g, "/");
+      const same = skipped.find(
+        (entry) => entry.filePath === relative && entry.reason === found.skipped
+      );
+      if (same) same.episodes++;
+      else skipped.push({ filePath: relative, reason: found.skipped, episodes: 1 });
     }
     for (const slip of found.slips) {
       if (isKeptWord(slip.original, keepWords)) continue;
