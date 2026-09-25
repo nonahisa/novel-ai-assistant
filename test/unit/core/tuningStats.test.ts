@@ -9,6 +9,8 @@ import {
   type TuningStatsEntry,
 } from "../../../src/core/tuningStats";
 import { parseModelTuning } from "../../../src/core/modelTuning";
+import { TUNING_WORK_SAMPLE_VERSION } from "../../../src/core/tuningWorkSample";
+import { TYPO_CHECK_VERSION } from "../../../src/prompts/typoCheck";
 
 /**
  * AIチューニングの実測一覧（作者の要望、2026-09-06
@@ -631,5 +633,74 @@ describe("分あたりの上限の印が、設定から表まで届く", () => {
     expect(modelPickDetail([], tuning)).toBe(
       "読める 186,435字（分あたりの上限で頭打ち）"
     );
+  });
+});
+
+/**
+ * 誤字脱字の精度の目安（設計書6.49.9）を、記録の一覧にも出す。
+ *
+ * **機能別のAIの割り当てにしか出ていなかった。** 割り当ての画面は1機能ずつ
+ * なので、モデルを見比べるにはこの一覧のほうが向く。表の列は増やさず、
+ * 表のあとの節に1行ずつ並べる（列が11あり、これ以上足すと読めない）。
+ */
+describe("誤字脱字の精度の目安の節", () => {
+  const current = {
+    typoAccuracyHits: 5,
+    typoAccuracyTotal: 7,
+    typoAccuracyFalsePositives: 2,
+    typoAccuracyWrongFixes: 0,
+    typoAccuracyTrapHits: 1,
+    typoAccuracyTrapTotal: 4,
+    typoAccuracyPromptVersion: TYPO_CHECK_VERSION,
+    typoAccuracySmallPrompt: false,
+    typoAccuracySampleVersion: TUNING_WORK_SAMPLE_VERSION,
+    typoAccuracyMeasuredAt: "2026-09-26T03:00:00.000Z",
+  };
+
+  test("測ったモデルごとに「7件中N件・誤検出M（うち罠K）」を1行ずつ出す", () => {
+    const markdown = buildTuningStatsMarkdown([
+      entry("さくらのAI", "preview/Kimi-K2.6", current),
+      entry("Ollama", "gemma4:e4b", { outputTokensPerSecond: 40 }),
+    ]);
+    expect(markdown).toContain("## 誤字脱字の精度の目安");
+    expect(markdown).toContain(
+      "- さくらのAI / preview/Kimi-K2.6：誤字脱字：7件中5件・誤検出2件（うち罠1/4）"
+    );
+    // 罠が何かを、節の頭で一度だけ言う（作者は「罠」の意味を知らない）
+    expect(markdown).toContain("誤りではないのに直したくなる語");
+    // 測っていないモデルは並べない（「—」の行で埋めない）
+    expect(markdown).not.toContain("- Ollama / gemma4:e4b");
+    // 表は崩さない（節は表のあと）
+    expect(rows(markdown)).toHaveLength(2);
+  });
+
+  test("頼み方か文が変わる前の結果は、古い結果と添える", () => {
+    const markdown = buildTuningStatsMarkdown([
+      entry("さくらのAI", "preview/gpt-oss-120b", {
+        ...current,
+        typoAccuracySampleVersion: "1",
+        typoAccuracyTrapHits: undefined,
+        typoAccuracyTrapTotal: undefined,
+      }),
+    ]);
+    const line = markdown.split("\n").find((text) => text.includes("gpt-oss-120b：")) ?? "";
+    expect(line).toContain("古い結果");
+    // 版1には罠が無かったので、罠の数を言わない（0と書くと「掛からなかった」に化ける）
+    expect(line).not.toContain("罠");
+  });
+
+  test("どのモデルも測っていなければ、節ごと出さない", () => {
+    const markdown = buildTuningStatsMarkdown([
+      entry("Ollama", "gemma4:e4b", { outputTokensPerSecond: 40 }),
+    ]);
+    expect(markdown).not.toContain("誤字脱字の精度の目安");
+  });
+
+  test("台帳から読んだ罠の数も落とさない", () => {
+    const read = parseModelTuning({ "sakura/preview/Kimi-K2.6": current }).get(
+      "sakura/preview/Kimi-K2.6"
+    );
+    expect(read?.typoAccuracyTrapHits).toBe(1);
+    expect(read?.typoAccuracyTrapTotal).toBe(4);
   });
 });

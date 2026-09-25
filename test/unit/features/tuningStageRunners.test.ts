@@ -254,18 +254,76 @@ describe("製品の誤字脱字と同じ形で送る", () => {
     expect(calls.length).toBeGreaterThan(0);
     for (const call of calls) {
       /*
-        **精度の段は、製品と同じく大きさで頼み方を選ぶ**（手元の e4b は
-        小さい側＝P-09 1.1）。時間の段は 0.89.13 のときの送り方のまま
+        **どの段も、製品と同じく大きさで頼み方を選ぶ**（手元の、大きさの
+        分からない e4b は小さい側＝P-09 1.1）。0.89.16 までは時間の段と
+        思考の段が小さいモデルにも 1.2 を送っており、製品の誤字脱字と
+        答えの長さの種類がずれていた
       */
-      expect(call.systemPrompt).toBe(
-        isAccuracyCall(call) ? TYPO_CHECK_SYSTEM_PROMPT_SMALL : TYPO_CHECK_SYSTEM_PROMPT
-      );
+      expect(call.systemPrompt).toBe(TYPO_CHECK_SYSTEM_PROMPT_SMALL);
       expect(call.jsonSchema).toBe(TYPO_CHECK_SCHEMA);
       // 関所は素通りさせない（製品と同じ検査を通す）
       expect(call.meta?.feature).toBe(TUNING_WORK_FEATURE);
       expect(call.userPrompt).toContain("誤字・脱字・変換ミス");
       // 作者の作品ではなく、同梱の文を送る
       expect(call.userPrompt).toContain("澪");
+    }
+  });
+
+  test("時間の段も、20B 以上と分かっているモデルには大きいモデル向けで送る", async () => {
+    const calls: GenerateParams[] = [];
+    const provider = fakeProvider(
+      "ollama",
+      false,
+      { thinks: false, offWorks: true, fixedMs: 1000, perCharMs: 5 },
+      calls
+    );
+    await runTuningStages(
+      { ...context(provider, "gemma4:26b"), modelInfo: { parameterSize: "25.2B", tier: "standard" } },
+      plannedStages({ providerId: "ollama", local: true }).filter((stage) => stage.id === "work")
+    );
+    // 読み込ませる1回＋短い回＋長い回
+    expect(calls).toHaveLength(3);
+    for (const call of calls) {
+      expect(call.systemPrompt).toBe(TYPO_CHECK_SYSTEM_PROMPT);
+    }
+  });
+
+  test("時間の段は、20B 未満と分かっているモデルには小さいモデル向けで送る（クラウドでも）", async () => {
+    const calls: GenerateParams[] = [];
+    const provider = fakeProvider(
+      "sakura",
+      false,
+      { thinks: false, offWorks: true, fixedMs: 1000, perCharMs: 5 },
+      calls
+    );
+    await runTuningStages(
+      {
+        ...context(provider, "llm-jp-3.1-8x13b-instruct4"),
+        modelInfo: { parameterSize: "8B", tier: "standard" },
+      },
+      plannedStages({ providerId: "sakura", local: false }).filter((stage) => stage.id === "work")
+    );
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      expect(call.systemPrompt).toBe(TYPO_CHECK_SYSTEM_PROMPT_SMALL);
+    }
+  });
+
+  test("時間の段は、大きさの分からないクラウドのモデルには大きいモデル向けで送る（製品と同じ）", async () => {
+    const calls: GenerateParams[] = [];
+    const provider = fakeProvider(
+      "sakura",
+      false,
+      { thinks: false, offWorks: true, fixedMs: 1000, perCharMs: 5 },
+      calls
+    );
+    await runTuningStages(
+      context(provider, "preview/Kimi-K2.6"),
+      plannedStages({ providerId: "sakura", local: false }).filter((stage) => stage.id === "work")
+    );
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      expect(call.systemPrompt).toBe(TYPO_CHECK_SYSTEM_PROMPT);
     }
   });
 });

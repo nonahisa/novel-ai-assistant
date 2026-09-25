@@ -351,6 +351,12 @@ export interface ModelTuning {
   readonly typoAccuracyFalsePositives?: number;
   readonly typoAccuracyWrongFixes?: number;
   /**
+   * 誤検出のうち、掛かった罠（誤りではないのに直したくなる語）の数と、
+   * 置いた罠の数（同梱の文の版2から）。**版1の結果には無い**
+   */
+  readonly typoAccuracyTrapHits?: number;
+  readonly typoAccuracyTrapTotal?: number;
+  /**
    * 送った頼み方の版（P-09）と、小さいモデル向けを送ったか。**版が変わった
    * 結果は古い結果として扱う**（`isTypoAccuracyCurrent`）。
    */
@@ -766,6 +772,9 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
     const typoAccuracyTotal = positiveNumber(entry.typoAccuracyTotal);
     const typoAccuracyFalsePositives = nonNegativeInteger(entry.typoAccuracyFalsePositives);
     const typoAccuracyWrongFixes = nonNegativeInteger(entry.typoAccuracyWrongFixes);
+    // 掛かった罠は0を読む（中身）。置いた罠の数は0を読まない（0個中は測りにならない）
+    const typoAccuracyTrapHits = nonNegativeInteger(entry.typoAccuracyTrapHits);
+    const typoAccuracyTrapTotal = positiveNumber(entry.typoAccuracyTrapTotal);
     const typoAccuracyPromptVersion = nonEmptyText(entry.typoAccuracyPromptVersion);
     const typoAccuracySmallPrompt =
       typeof entry.typoAccuracySmallPrompt === "boolean"
@@ -808,6 +817,8 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
       ...(typoAccuracyTotal !== undefined ? { typoAccuracyTotal } : {}),
       ...(typoAccuracyFalsePositives !== undefined ? { typoAccuracyFalsePositives } : {}),
       ...(typoAccuracyWrongFixes !== undefined ? { typoAccuracyWrongFixes } : {}),
+      ...(typoAccuracyTrapHits !== undefined ? { typoAccuracyTrapHits } : {}),
+      ...(typoAccuracyTrapTotal !== undefined ? { typoAccuracyTrapTotal } : {}),
       ...(typoAccuracyPromptVersion !== undefined ? { typoAccuracyPromptVersion } : {}),
       ...(typoAccuracySmallPrompt !== undefined ? { typoAccuracySmallPrompt } : {}),
       ...(typoAccuracySampleVersion !== undefined ? { typoAccuracySampleVersion } : {}),

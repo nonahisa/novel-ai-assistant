@@ -13,6 +13,7 @@ import {
   TUNING_WORK_PLANTED_TYPOS,
   TUNING_WORK_PROPER_NOUNS,
   TUNING_WORK_SAMPLE_VERSION,
+  TUNING_WORK_TRAPS,
 } from "../../../src/core/tuningWorkSample";
 import { validateTypoIssues } from "../../../src/core/typoCheckValidation";
 import { parseModelTuning } from "../../../src/core/modelTuning";
@@ -74,6 +75,45 @@ describe("当たりと誤検出を両方数える", () => {
       "包まれていた",
       "古い",
     ]);
+    // 罠ではない所への誤検出は、罠に掛かった数に入れない
+    expect(score.trapHits).toBe(0);
+    expect(score.trapTotal).toBe(TUNING_WORK_TRAPS.length);
+  });
+
+  test("罠（誤りではないのに直したくなる語）への指摘は誤検出に数え、掛かった罠の数を別に数える", () => {
+    const score = scoreTypoAccuracy([
+      ...perfectIssues(),
+      // 正しい「以外」を「意外」へ
+      { line: 1, original: "祖父以外にいない", target: "以外", suggestion: "意外" },
+      // 造語を「星読み」へ。同じ罠へ2件
+      { line: 4, original: "星詠みの針", target: "詠み", suggestion: "読み" },
+      { line: 4, original: "星詠みの針を窓辺", target: "星詠み", suggestion: "星読み" },
+      // 方言を標準語へ
+      { line: 3, original: "使うとった暗号じゃ", target: "使うとった", suggestion: "使っていた" },
+    ]);
+    expect(score.hits).toBe(score.total);
+    // 作者が消して回る指摘の数（4件）はそのまま誤検出に出る
+    expect(score.falsePositives).toBe(4);
+    // 掛かった罠は3つ（同じ罠への2件目は、罠の数を増やさない）
+    expect(score.trapHits).toBe(3);
+    expect(score.trapItems.map((item) => item.kind)).toEqual([
+      "正しい同音の語",
+      "造語",
+      "造語",
+      "方言",
+    ]);
+  });
+
+  test("罠の一覧を渡さなければ、罠は数えない（台を差し替えた答え合わせ）", () => {
+    const score = scoreTypoAccuracy(
+      [{ line: 1, original: "祖父以外にいない", target: "以外", suggestion: "意外" }],
+      TUNING_WORK_PARAGRAPHS,
+      TUNING_WORK_PLANTED_TYPOS,
+      []
+    );
+    expect(score.falsePositives).toBe(1);
+    expect(score.trapHits).toBe(0);
+    expect(score.trapTotal).toBe(0);
   });
 
   test("切り方が違っても、当てた結果が同じなら当たり（「りり」→「り」）", () => {
@@ -145,6 +185,57 @@ describe("製品の検算を通した形で数える", () => {
     expect(score.hits).toBe(TUNING_WORK_PLANTED_TYPOS.length);
     expect(score.falsePositives).toBe(0);
   });
+
+  /*
+    **実接続の生の答え**（2026-09-26、さくらの gpt-oss-120b、文の版2、P-09 1.2）。
+
+    版1の測定で、検算が「本文に無い引用」で1件落としていた。生の答えを
+    控えて見ると、落ちた3件はどれも**モデルの写し間違い**だった——
+    「読めるのは」を「読んだのは」、「灯台」を「灯」＋置き換え文字2つ
+    （U+FFFD。サーバーが返した答えにすでに入っていた）、「掛け直し」を
+    「掛か直し」と写し、写し間違えた字を「直して」いる。本文に無い引用を
+    落とすのは検算の仕事どおりなので、検算は緩めない。
+  */
+  test("写し間違えた引用は検算が落とし、口語の台詞への指摘は罠に掛かったと数える（実接続の答え）", () => {
+    const issue = (line: number, original: string, target: string, suggestion: string) => ({
+      line,
+      original,
+      target,
+      suggestion,
+      reason: "誤変換",
+      confidence: "high",
+    });
+    const validated = validateTypoIssues(
+      {
+        issues: [
+          issue(1, "栓はしっかりりと閉じられ、中には", "しっかりり", "しっかり"),
+          issue(1, "この島でこれを読んだのは、祖父以外に", "読んだ", "読める"),
+          issue(2, "灯��の方へ行く道は、こっちで会っていますか", "灯��", "灯台"),
+          issue(2, "こっちで会っていますか", "会って", "合って"),
+          issue(2, "青年は礼言い、額の汗をぬぐった", "礼言い", "礼を言い"),
+          issue(2, "二つ目の角を左です。", "左です", "左に"),
+          issue(3, "古い海図を広げてていた。", "てて", "て"),
+          issue(3, "とは以外だった。", "以外だった", "意外だった"),
+          issue(3, "眼鏡を掛か直し、", "掛か直し", "掛け直し"),
+          issue(4, "話を効いてみようと決めた。", "効いて", "聞いて"),
+        ],
+      },
+      chunk,
+      [...TUNING_WORK_PROPER_NOUNS],
+      []
+    );
+    expect(validated.rejected.map((rejected) => [rejected.target, rejected.reason])).toEqual([
+      ["読んだ", "ungrounded"],
+      ["灯��", "ungrounded"],
+      ["掛か直し", "ungrounded"],
+    ]);
+    const score = scoreTypoAccuracy(validated.accepted);
+    expect(score.hits).toBe(6);
+    expect(score.missed.map((typo) => typo.target)).toEqual(["名前を読んだ"]);
+    expect(score.falsePositives).toBe(1);
+    expect(score.trapHits).toBe(1);
+    expect(score.trapItems).toEqual([{ target: "左です", suggestion: "左に", kind: "口語の台詞" }]);
+  });
 });
 
 describe("台帳に残す形", () => {
@@ -159,9 +250,40 @@ describe("台帳に残す形", () => {
     expect(typoAccuracyRecord(score, true, "x").typoAccuracyPromptVersion).toBe(
       TYPO_CHECK_VERSION_SMALL
     );
+    expect(record.typoAccuracyTrapHits).toBe(0);
+    expect(record.typoAccuracyTrapTotal).toBe(TUNING_WORK_TRAPS.length);
     expect(describeTypoAccuracyRecord(record)).toBe(
-      `誤字脱字：7件中5件・誤検出0件（2026-09-26・P-09 ${TYPO_CHECK_VERSION}）`
+      `誤字脱字：7件中5件・誤検出0件（うち罠0/${TUNING_WORK_TRAPS.length}）` +
+        `（2026-09-26・P-09 ${TYPO_CHECK_VERSION}）`
     );
+  });
+
+  test("罠に掛かった数は、記録の一文にも、割り当ての目安にも出る", () => {
+    const trapped = scoreTypoAccuracy([
+      { line: 4, original: "星詠みの針", target: "詠み", suggestion: "読み" },
+    ]);
+    const record = typoAccuracyRecord(trapped, false, "2026-09-26T01:02:03.000Z");
+    expect(describeTypoAccuracyRecord(record)).toContain(
+      `誤検出1件（うち罠1/${TUNING_WORK_TRAPS.length}）`
+    );
+    expect(describeTypoAccuracyHint(record)).toContain(`誤検出1（うち罠1）`);
+    expect(describeTypoAccuracyScore(trapped)).toContain("罠");
+  });
+
+  test("罠を数える前（文の版1）の結果は、罠を言わずに古い結果として出す", () => {
+    // 版1の台帳には罠の欄が無い
+    const old = {
+      typoAccuracyHits: 6,
+      typoAccuracyTotal: 7,
+      typoAccuracyFalsePositives: 0,
+      typoAccuracyPromptVersion: TYPO_CHECK_VERSION,
+      typoAccuracySmallPrompt: false,
+      typoAccuracySampleVersion: "1",
+      typoAccuracyMeasuredAt: "2026-09-26T01:02:03.000Z",
+    };
+    const text = describeTypoAccuracyRecord(old) ?? "";
+    expect(text).not.toContain("罠");
+    expect(text).toContain("古い結果");
   });
 
   test("日付は作者の機械の暦で出す（世界時の頭10字を取らない）", () => {

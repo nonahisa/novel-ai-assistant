@@ -16,6 +16,7 @@ import { runTuningStages } from "../../src/features/tuningStageRunners";
 import { plannedStages } from "../../src/core/tuningStages";
 import { describeTypoAccuracyRecord } from "../../src/core/tuningAccuracy";
 import { readOllamaPsWith } from "../../src/core/gpuLoad";
+import { TUNING_WORK_PARAGRAPHS } from "../../src/core/tuningWorkSample";
 import { localFetch } from "../../src/ai/fetchTimeouts";
 
 /**
@@ -62,6 +63,22 @@ const STAGE_FILTER = (process.env.NOVELAI_TUNING_STAGES ?? "")
   .split(",")
   .map((entry) => entry.trim())
   .filter((entry) => entry.length > 0);
+
+/**
+ * 精度の段の**生の答え**を結果に写す（任意）。
+ *
+ *   $env:NOVELAI_TUNING_RAW = "1"
+ *
+ * 検算が「本文に無い引用」で落とした指摘が、モデルの写し間違いか、検算が
+ * 厳しすぎるのかを切り分けるために使う（2026-09-26、gpt-oss-120b）。
+ * 写すのは同梱の文への答えだけで、作者の作品は通らない。
+ */
+const CAPTURE_RAW = process.env.NOVELAI_TUNING_RAW === "1";
+
+/** 精度の段の回か（同梱の4段落がすべて入っている） */
+function isAccuracyPrompt(userPrompt: string): boolean {
+  return TUNING_WORK_PARAGRAPHS.every((paragraph) => userPrompt.includes(paragraph));
+}
 
 /** さくらへ送った回数（プロバイダの中の再試行も含む） */
 let sakuraPosts = 0;
@@ -133,6 +150,19 @@ describe.skipIf(TARGETS.length === 0)("AIチューニング：仕事に近い形
       const report: Record<string, unknown> = {};
       for (const target of TARGETS) {
         const provider = providerFor(target.providerId);
+        /*
+          **関所の外側で控える**（製品の道はそのまま通す）。答えの中身を
+          書き換えないので、検算と数え方は製品と同じになる
+        */
+        const rawAnswers: string[] = [];
+        if (CAPTURE_RAW) {
+          const inner = provider.generate.bind(provider);
+          provider.generate = async (params) => {
+            const result = await inner(params);
+            if (isAccuracyPrompt(params.userPrompt)) rawAnswers.push(result.text);
+            return result;
+          };
+        }
         const startedPosts = sakuraPosts;
         const started = Date.now();
         const stageTarget = {
@@ -192,6 +222,7 @@ describe.skipIf(TARGETS.length === 0)("AIチューニング：仕事に近い形
           },
           大きさ: info?.parameterSize ?? null,
           精度のログ: logLines.filter((line) => line.includes("精度")),
+          ...(CAPTURE_RAW ? { 精度の生の答え: rawAnswers } : {}),
           止まった理由: result.fatal?.message,
         };
         console.log(JSON.stringify(report[`${target.providerId}/${target.model}`], null, 2));

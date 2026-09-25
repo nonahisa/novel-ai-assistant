@@ -5,6 +5,7 @@ import {
   TUNING_WORK_PLANTED_TYPOS,
   TUNING_WORK_PROPER_NOUNS,
   TUNING_WORK_SHORT,
+  TUNING_WORK_TRAPS,
   TUNING_WORK_WARMUP,
 } from "../../../src/core/tuningWorkSample";
 
@@ -45,6 +46,35 @@ describe("同梱の文", () => {
       text.slice(0, 20)
     );
     expect(new Set(heads).size).toBe(3);
+  });
+
+  test("罠（誤りではないのに直したくなる語）は、段落に1回だけあり、置いた誤りと重ならない", () => {
+    // 3〜5個。少なすぎると誤検出の癖が見えず、多すぎると罠探しの試験になる
+    expect(TUNING_WORK_TRAPS.length).toBeGreaterThanOrEqual(3);
+    expect(TUNING_WORK_TRAPS.length).toBeLessThanOrEqual(5);
+    // 種類を散らす（同じ種類ばかりだと、その1つの癖しか測れない）
+    expect(new Set(TUNING_WORK_TRAPS.map((trap) => trap.kind)).size).toBe(
+      TUNING_WORK_TRAPS.length
+    );
+    for (const trap of TUNING_WORK_TRAPS) {
+      const paragraph = TUNING_WORK_PARAGRAPHS[trap.paragraph];
+      const at = paragraph.indexOf(trap.text);
+      expect(at).toBeGreaterThanOrEqual(0);
+      expect(paragraph.indexOf(trap.text, at + 1)).toBe(-1);
+      for (const typo of TUNING_WORK_PLANTED_TYPOS.filter(
+        (planted) => planted.paragraph === trap.paragraph
+      )) {
+        const typoAt = paragraph.indexOf(typo.target);
+        const overlaps = at < typoAt + typo.target.length && typoAt < at + trap.text.length;
+        expect(overlaps).toBe(false);
+      }
+      // 造語を辞書に載せると、検算が弾いてモデルの癖が見えなくなる
+      expect(TUNING_WORK_PROPER_NOUNS.some((noun) => trap.text.includes(noun))).toBe(false);
+    }
+  });
+
+  test("誤りは7つのまま（罠を足しても、当たりの数の意味を変えない）", () => {
+    expect(TUNING_WORK_PLANTED_TYPOS).toHaveLength(7);
   });
 
   test("固有名詞の辞書に載せた語は、文の中にある", () => {

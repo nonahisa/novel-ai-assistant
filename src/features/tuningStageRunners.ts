@@ -123,7 +123,8 @@ export interface StageContext {
   /**
    * モデルの大きさ（API が教える `parameterSize` とティア）。取れなければ無い。
    *
-   * **精度の段が、製品と同じ頼み方を選ぶために使う**——誤字脱字は 20B 未満へ
+   * **同梱の文を送る段（思考・時間・精度）が、製品と同じ頼み方を選ぶために
+   * 使う**——誤字脱字は 20B 未満へ
    * P-09 1.1、それ以上へ 1.2 を送る（`ai/capability.ts` の
    * `useSmallModelTypoPrompt`）。無いときは製品と同じく、手元のAIを小さい側、
    * クラウドを大きい側として扱う。
@@ -265,26 +266,24 @@ async function sendTypoSample(
   options: {
     readonly disableThinking: boolean;
     readonly roomyOutput?: boolean;
-    /**
-     * 小さいモデル向けの頼み方（P-09 1.1）を送るか。**精度の段だけが渡す**
-     * （製品と同じ選び分けで答え合わせするため）。省くと大きいモデル向け
-     * （時間の段は 0.89.13 のときの送り方のまま）。
-     */
-    readonly forSmallModel?: boolean;
   }
 ): Promise<GenerateResult> {
   const chunk = sampleChunk(body);
+  /*
+    **頼み方は、どの段も製品と同じ選び分けにする**（20B 未満は P-09 1.1）。
+    0.89.16 までは精度の段だけが選び分け、時間の段と思考の段は小さい
+    モデルにも 1.2 を送っていた。頼み方が違えば答えの長さも違うので、
+    測った時間が製品の誤字脱字の見込みからずれる。
+  */
+  const forSmallModel = typoSampleForSmallModel(context);
   const userPrompt = buildTypoCheckPrompt({
     chunkTextWithLineNumbers: withLineNumbers(chunk),
     properNounDictionary: [...TUNING_WORK_PROPER_NOUNS],
-    forSmallModel: options.forSmallModel,
+    forSmallModel,
   });
   const providerId = context.provider.id;
   return context.provider.generate({
-    systemPrompt:
-      options.forSmallModel === true
-        ? TYPO_CHECK_SYSTEM_PROMPT_SMALL
-        : TYPO_CHECK_SYSTEM_PROMPT,
+    systemPrompt: forSmallModel ? TYPO_CHECK_SYSTEM_PROMPT_SMALL : TYPO_CHECK_SYSTEM_PROMPT,
     userPrompt,
     model: context.model,
     temperature: TYPO_CHECK_TEMPERATURE,
@@ -311,6 +310,20 @@ async function sendTypoSample(
     disableStreaming: true,
     meta: { feature: TUNING_WORK_FEATURE },
     signal: context.signal,
+  });
+}
+
+/**
+ * 同梱の文へ、小さいモデル向けの頼み方（P-09 1.1）を送るか。
+ *
+ * **製品の誤字脱字と同じ判断**（`ai/capability.ts` の `useSmallModelTypoPrompt`）。
+ * 大きさが分からなければ、手元のAIを小さい側、クラウドを大きい側として扱う。
+ */
+function typoSampleForSmallModel(context: StageContext): boolean {
+  return useSmallModelTypoPrompt({
+    tier: context.modelInfo?.tier,
+    providerId: context.provider.id,
+    parameterSize: context.modelInfo?.parameterSize,
   });
 }
 
@@ -668,18 +681,14 @@ const ACCURACY_LOG_EXCERPT_CHARS = 300;
  */
 async function runAccuracyStage(context: StageContext): Promise<StageOutcome> {
   const label = "誤字脱字の精度の目安";
-  const forSmallModel = useSmallModelTypoPrompt({
-    tier: context.modelInfo?.tier,
-    providerId: context.provider.id,
-    parameterSize: context.modelInfo?.parameterSize,
-  });
+  // 送る頼み方は `sendTypoSample` が同じ判断で選ぶ。ここは版を残すために引く
+  const forSmallModel = typoSampleForSmallModel(context);
   const promptVersion = typoPromptVersion(forSmallModel);
 
   let result: GenerateResult;
   try {
     result = await sendTypoSample(context, TUNING_ACCURACY_BODY, {
       disableThinking: true,
-      forSmallModel,
     });
   } catch (error) {
     return failedOutcome(label, error);
@@ -718,6 +727,12 @@ async function runAccuracyStage(context: StageContext): Promise<StageOutcome> {
   logStep(
     `仕事に近い形の測定：精度（P-09 ${promptVersion}）→ 当たり ${score.hits}/${score.total}` +
       ` / 直し方が違う ${score.wrongFixes} / 誤検出 ${score.falsePositives}` +
+      ` / 罠 ${score.trapHits}/${score.trapTotal}` +
+      (score.trapItems.length > 0
+        ? `（${score.trapItems
+            .map((item) => `${item.kind}：${item.target}→${item.suggestion}`)
+            .join("・")}）`
+        : "") +
       ` / 検算で落とした ${validated.rejected.length}` +
       (validated.rejected.length > 0
         ? `（${summarizeRejectReasons(validated.rejected)}）`

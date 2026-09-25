@@ -18,6 +18,10 @@
  *   **当たりには数えない**（押しても本文が直らない）。誤検出にも数えない
  * - **誤検出**：置いた誤りのどれとも重ならない指摘。この文には置いた誤り
  *   のほかに直すところは無いので、作者が消して回る指摘の数になる
+ * - **罠に掛かった**：誤検出のうち、わざと置いた「誤りではないのに直したく
+ *   なる語」（造語・方言・口語の台詞・正しい同音の語・わざとの崩し。文の版2から）に
+ *   当たったもの。**誤検出の内訳であって、別に足す数ではない。** 数えるのは
+ *   掛かった罠の数（同じ罠への2件目で増やさない）
  *
  * ## 目安でしかない
  *
@@ -34,6 +38,8 @@ import {
   TUNING_WORK_PARAGRAPHS,
   TUNING_WORK_PLANTED_TYPOS,
   TUNING_WORK_SAMPLE_VERSION,
+  TUNING_WORK_TRAPS,
+  type TuningWorkTrapKind,
 } from "./tuningWorkSample";
 
 /**
@@ -51,6 +57,13 @@ export interface PlantedTypo {
   readonly suggestion: string;
 }
 
+/** 罠1つ（`TUNING_WORK_TRAPS` の形） */
+export interface TuningTrap {
+  readonly paragraph: number;
+  readonly text: string;
+  readonly kind: TuningWorkTrapKind;
+}
+
 /** 答え合わせの結果 */
 export interface TypoAccuracyScore {
   /** 当たり（位置が合い、当てると正しい形になる） */
@@ -65,6 +78,16 @@ export interface TypoAccuracyScore {
   readonly missed: readonly PlantedTypo[];
   /** 誤検出の中身。ログに残す（作者が見る画面には出さない） */
   readonly falsePositiveItems: readonly { readonly target: string; readonly suggestion: string }[];
+  /** 掛かった罠の数（誤検出の内訳。同じ罠への2件目では増えない） */
+  readonly trapHits: number;
+  /** 置いた罠の数 */
+  readonly trapTotal: number;
+  /** 罠に当たった指摘（誤検出の中身のうち罠のもの）。ログに残す */
+  readonly trapItems: readonly {
+    readonly target: string;
+    readonly suggestion: string;
+    readonly kind: TuningWorkTrapKind;
+  }[];
 }
 
 /** 指摘が本文のどこを直すか（本文の通しの字の位置） */
@@ -136,7 +159,8 @@ function locate(
 export function scoreTypoAccuracy(
   accepted: readonly Pick<AcceptedTypoIssue, "line" | "original" | "target" | "suggestion">[],
   paragraphs: readonly string[] = TUNING_WORK_PARAGRAPHS,
-  planted: readonly PlantedTypo[] = TUNING_WORK_PLANTED_TYPOS
+  planted: readonly PlantedTypo[] = TUNING_WORK_PLANTED_TYPOS,
+  traps: readonly TuningTrap[] = TUNING_WORK_TRAPS
 ): TypoAccuracyScore {
   const text = paragraphs.join("\n");
   const offsets = paragraphOffsets(paragraphs);
@@ -180,15 +204,28 @@ export function scoreTypoAccuracy(
     }
   }
 
+  const trapRanges = traps.map((trap) => {
+    const start = offsets[trap.paragraph] + paragraphs[trap.paragraph].indexOf(trap.text);
+    return { trap, start, end: start + trap.text.length };
+  });
   const falsePositiveItems: { target: string; suggestion: string }[] = [];
+  const trapItems: { target: string; suggestion: string; kind: TuningWorkTrapKind }[] = [];
+  const trapsHit = new Set<number>();
   fixes.forEach((fix, at) => {
     if (used.has(at)) return;
     // 同じ誤りへの2件目（上の断り書き）
     if (fix !== undefined && plantedRanges.some((range) => overlaps(fix, range))) return;
-    falsePositiveItems.push({
-      target: accepted[at].target,
-      suggestion: accepted[at].suggestion,
-    });
+    const item = { target: accepted[at].target, suggestion: accepted[at].suggestion };
+    falsePositiveItems.push(item);
+    /*
+      **罠は誤検出の内訳として数える。** 位置へ戻せなかった指摘は、どこを
+      直したか分からないので罠には数えない（誤検出には数える）
+    */
+    if (fix === undefined) return;
+    const trapAt = trapRanges.findIndex((range) => overlaps(fix, range));
+    if (trapAt === -1) return;
+    trapsHit.add(trapAt);
+    trapItems.push({ ...item, kind: trapRanges[trapAt].trap.kind });
   });
 
   return {
@@ -198,6 +235,9 @@ export function scoreTypoAccuracy(
     falsePositives: falsePositiveItems.length,
     missed,
     falsePositiveItems,
+    trapHits: trapsHit.size,
+    trapTotal: traps.length,
+    trapItems,
   };
 }
 
@@ -214,6 +254,12 @@ export interface TypoAccuracyRecord {
   readonly typoAccuracyTotal?: number;
   readonly typoAccuracyFalsePositives?: number;
   readonly typoAccuracyWrongFixes?: number;
+  /**
+   * 掛かった罠の数と、置いた罠の数（文の版2から）。**版1の結果には無い**
+   * ——無いときは罠を言わない（0と書くと「罠に掛からなかった」に化ける）
+   */
+  readonly typoAccuracyTrapHits?: number;
+  readonly typoAccuracyTrapTotal?: number;
   /** 送った頼み方の版（P-09 の `typoPromptVersion`） */
   readonly typoAccuracyPromptVersion?: string;
   /** 小さいモデル向けの頼み方を送ったか（版の比べ先を決める） */
@@ -235,6 +281,8 @@ export function typoAccuracyRecord(
     typoAccuracyTotal: score.total,
     typoAccuracyFalsePositives: score.falsePositives,
     typoAccuracyWrongFixes: score.wrongFixes,
+    typoAccuracyTrapHits: score.trapHits,
+    typoAccuracyTrapTotal: score.trapTotal,
     typoAccuracyPromptVersion: typoPromptVersion(forSmallModel),
     typoAccuracySmallPrompt: forSmallModel,
     typoAccuracySampleVersion: TUNING_WORK_SAMPLE_VERSION,
@@ -286,9 +334,20 @@ function dateOf(iso: string | undefined): string {
 }
 
 /**
+ * 誤検出のうち罠に掛かった数の断り（「（うち罠1/4）」）。罠の欄が無い
+ * 結果（文の版1）では何も付けない。
+ */
+function trapNote(record: TypoAccuracyRecord, withTotal: boolean): string {
+  const hits = record.typoAccuracyTrapHits;
+  const total = record.typoAccuracyTrapTotal;
+  if (hits === undefined || total === undefined || total <= 0) return "";
+  return withTotal ? `（うち罠${hits}/${total}）` : `（うち罠${hits}）`;
+}
+
+/**
  * 台帳に残した形の一文（記録の一覧・ログ向け）。
  *
- * 例：「誤字脱字：7件中5件・誤検出1件（2026-09-26・P-09 1.2）」
+ * 例：「誤字脱字：7件中5件・誤検出1件（うち罠1/4）（2026-09-26・P-09 1.2）」
  */
 export function describeTypoAccuracyRecord(record: TypoAccuracyRecord | undefined): string | undefined {
   if (!hasTypoAccuracy(record)) return undefined;
@@ -301,6 +360,7 @@ export function describeTypoAccuracyRecord(record: TypoAccuracyRecord | undefine
   return (
     `誤字脱字：${record.typoAccuracyTotal}件中${record.typoAccuracyHits}件・` +
     `誤検出${record.typoAccuracyFalsePositives}件` +
+    trapNote(record, true) +
     (notes.length > 0 ? `（${notes.join("・")}）` : "") +
     (isTypoAccuracyCurrent(record) ? "" : "（頼み方か文が変わる前の、古い結果）")
   );
@@ -317,10 +377,11 @@ export function describeTypoAccuracyHint(record: TypoAccuracyRecord | undefined)
   if (!hasTypoAccuracy(record)) return undefined;
   const numbers =
     `${record.typoAccuracyTotal}件中${record.typoAccuracyHits}件・` +
-    `誤検出${record.typoAccuracyFalsePositives}`;
+    `誤検出${record.typoAccuracyFalsePositives}` +
+    trapNote(record, false);
   return isTypoAccuracyCurrent(record)
     ? `目安（同梱の短い文で測定）：${numbers}`
-    : `目安（同梱の短い文で測定）：${numbers}（頼み方が変わる前の古い結果。測り直せます）`;
+    : `目安（同梱の短い文で測定）：${numbers}（頼み方か文が変わる前の古い結果。測り直せます）`;
 }
 
 /**
@@ -335,6 +396,18 @@ export function describeTypoAccuracyScore(score: TypoAccuracyScore): string {
     `${score.hits}件を正しく直し（見逃し${missed}件` +
     (score.wrongFixes > 0 ? `。うち${score.wrongFixes}件は場所は合っていたが直し方が違った` : "") +
     `）、誤りでない所への指摘は${score.falsePositives}件でした。` +
+    /*
+      **罠に掛かったかを言う。** 誤検出の数だけでは、言い換えの好みで
+      指摘したのか、造語や方言を「直して」しまったのかが分からない。
+      後者は作者の作品を別物にするので、分けて言う
+    */
+    (score.trapTotal > 0
+      ? `誤りではないのに直したくなる語（造語・方言・口語の台詞・正しい同音の語・わざとの崩し）を` +
+        `${score.trapTotal}つ置いてあり、` +
+        (score.trapHits > 0
+          ? `そのうち${score.trapHits}つの罠に掛かりました（直すと作品が変わる所です）。`
+          : "どの罠にも掛かりませんでした。")
+      : "") +
     "文は4段落しかないので1件で大きく動きます。モデルの良し悪しは、作品で" +
     "指摘を採った・退けた率のほうが確かです（機能別のAIの割り当てに並べて出します）。"
   );

@@ -4,6 +4,7 @@ import {
   expertsPickText,
   type ModelExperts,
 } from "./modelExperts";
+import { describeTypoAccuracyRecord } from "./tuningAccuracy";
 import {
   CHARS_PER_TOKEN,
   MIN_CHARS_PER_TOKEN_SAMPLES,
@@ -26,6 +27,9 @@ import {
 
 /** 画面に出すときの名前。タブの見出しとファイル名の前置きになる */
 export const TUNING_STATS_TITLE = "AIチューニングの実測一覧";
+
+/** 表のあとに置く、誤字脱字の精度の目安の節の見出し */
+const TYPO_ACCURACY_SECTION_TITLE = "誤字脱字の精度の目安";
 
 /** 測っていない項目の見せ方。**0とは違う**ので、数字を書かない */
 const UNKNOWN = "—";
@@ -187,7 +191,44 @@ export function buildTuningStatsMarkdown(
     );
   });
 
+  lines.push(...typoAccuracySection(sorted));
+
   return lines.join("\n") + "\n";
+}
+
+/**
+ * 誤字脱字の精度の目安の節（設計書6.49.9）。測ったモデルが無ければ空。
+ *
+ * **表の列にしない。** 表はすでに11列あり、これ以上足すと読めない。
+ * 精度は「7件中N件・誤検出M」と文で言うほうが伝わるので、表のあとへ
+ * 1モデル1行で並べる。並びは表と同じ（行を目で行き来しやすい）。
+ *
+ * **良し悪しで並べ替えない。** 短い文での目安でしかなく、1件で大きく動く
+ * （`core/tuningAccuracy.ts`）。順位を付けると、目安が判定に見える。
+ */
+function typoAccuracySection(entries: readonly TuningStatsEntry[]): string[] {
+  const items = entries.flatMap((entry) => {
+    const text = describeTypoAccuracyRecord(entry.tuning);
+    return text === undefined
+      ? []
+      : [`- ${escapeCell(entry.providerLabel)} / ${escapeCell(entry.model)}：${text}`];
+  });
+  if (items.length === 0) return [];
+  return [
+    "",
+    // 表の題（`# ${TUNING_STATS_TITLE}`）と同じ組み方にする。この文書は
+    // Markdown として開くが、同じファイルの `modelPickDetail` は選ぶ画面の
+    // 素の文なので、ファイルごと記号の検査（plainTextUi）から外さない
+    `## ${TYPO_ACCURACY_SECTION_TITLE}`,
+    "",
+    "製品に同梱した短い文（4段落）に置いた誤りを、誤字脱字と同じ頼み方・同じ検算で" +
+      "どれだけ正しく直したかです。「誤検出」は誤りでない所への指摘で、「罠」は" +
+      "誤りではないのに直したくなる語（造語・方言・口語の台詞・正しい同音の語・わざとの崩し）に" +
+      "掛かった数です。文が短く1件で大きく動くので目安です。作品で指摘を採った・" +
+      "退けた率があれば、そちらのほうが確かです。",
+    "",
+    ...items,
+  ];
 }
 
 /**
