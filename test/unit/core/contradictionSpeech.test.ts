@@ -39,13 +39,66 @@ describe("プロンプトに口調の照らし方が載る", () => {
     expect(prompt).toContain(SPEECH_JUDGE_NOTE);
   });
 
-  test("原則2の「口調の変化は矛盾ではない」に、きっかけの無い違いは挙げると添える（抑制版にも）", () => {
+  test("原則2の「口調の変化は矛盾ではない」に、きっかけの無い違いは挙げると添える", () => {
     expect(CONTRADICTION_CHECK_SYSTEM_PROMPT).toContain(SPEECH_PRINCIPLE_NOTE);
-    expect(CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT).toContain(SPEECH_PRINCIPLE_NOTE);
   });
 
   test("読み取る段では、設定の一人称と口調のまま言わせる", () => {
     expect(prompt).toContain("設定の一人称と口調のまま");
+  });
+});
+
+/*
+  小さいモデル（抑制版を送るモデル）には、口調の指示を送らない（P-12 1.9。
+  作者の判断、2026-09-25）。1.8 で e4b は口調の仕込みを1件多く拾ったが、
+  口調まわりの余計な指摘が増え、答え付きの台の当たりが減った。
+  **文面は 1.7 と1文字も違わない形に戻す**（測った形を送るため）。
+*/
+describe("小さいモデルには口調の指示を送らない（1.9）", () => {
+  const base = {
+    chapterLabel: "第6話",
+    chunkTextWithLineNumbers: "1: 「わたくし、この胡椒という粉が好きでございますわ」",
+    characterDetails: "エルシー\n- 口調: 一人称は「ボク」。語尾に「〜です」",
+    locationDetails: "",
+    worldviewSummary: "",
+    previousSynopses: "",
+    categories: LIGHT_CATEGORIES,
+  };
+  const withSpeech = buildContradictionCheckPrompt(base);
+  const without = buildContradictionCheckPrompt({ ...base, speechCheck: false });
+
+  test("抑制版のシステムプロンプトには、原則2の口調の一行が無い", () => {
+    expect(CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT).not.toContain(SPEECH_PRINCIPLE_NOTE);
+    // 行ごと消えている（空行や字下げだけが残っていない）
+    expect(CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT).toContain(
+      "関係の変化に伴う呼び方の変化は矛盾ではない。\n3. **未回収の伏線は矛盾ではない。**"
+    );
+  });
+
+  test("本文の3か所（検証項目・判断の注意・asThem）が外れる", () => {
+    expect(without).not.toContain(SPEECH_CHECK_ITEM);
+    expect(without).not.toContain(SPEECH_JUDGE_NOTE);
+    expect(without).not.toContain("設定の一人称と口調のまま");
+    expect(without).toContain("1. 人物：一人称、口調、性格、外見、能力が設定と食い違わないか\n");
+    expect(without).toContain(
+      "- asThem：**その人物になりきって、いまの自分の身の上を一人称で言う**（「俺は〜」「私は〜」）。"
+    );
+  });
+
+  test("違いは口調の3か所だけ（ほかの文面は1文字も変わらない）", () => {
+    const reverted = withSpeech
+      .replace(`。${SPEECH_CHECK_ITEM}`, "")
+      .replace(`\n- ${SPEECH_JUDGE_NOTE}`, "")
+      .replace(
+        "**その人物になりきって、設定の一人称と口調のまま、いまの自分の身の上を言う**。",
+        "**その人物になりきって、いまの自分の身の上を一人称で言う**（「俺は〜」「私は〜」）。"
+      );
+    expect(without).toBe(reverted);
+    expect(without).not.toBe(withSpeech);
+  });
+
+  test("指定しなければ口調の指示を入れる（大きいモデルの形）", () => {
+    expect(buildContradictionCheckPrompt({ ...base, speechCheck: true })).toBe(withSpeech);
   });
 });
 

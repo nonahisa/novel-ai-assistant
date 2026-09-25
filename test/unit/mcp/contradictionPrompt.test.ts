@@ -6,6 +6,9 @@ import {
   CONTRADICTION_CHECK_SYSTEM_PROMPT,
   CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT,
   LIGHT_CATEGORIES,
+  SPEECH_CHECK_ITEM,
+  SPEECH_JUDGE_NOTE,
+  SPEECH_PRINCIPLE_NOTE,
 } from "../../../src/prompts/contradictionCheck";
 import { buildProposalPanelHtml } from "../../../src/views/proposalPanelHtml";
 import {
@@ -120,18 +123,22 @@ describe("プロンプト", () => {
   ゆるめて得をしたのは 26b 以上だけだったので、それ未満には 1.5 の抑制を残す。
 */
 describe("抑制を残した版（6.10.8）", () => {
-  test("原則1だけが違う", () => {
+  test("原則1と、原則2の口調の一行（1.9）だけが違う", () => {
     // **2つを別々に書き下ろすと、片方を直したときにもう片方が取り残される。**
-    // 実装は `.replace()` で導いているので、ここでは「差が原則1の行だけ」で
-    // あることを、行ごとに突き合わせて確かめる
+    // 実装は `.replace()` で導いているので、ここでは「差が原則1の行と
+    // 口調の一行だけ」であることを、行ごとに突き合わせて確かめる
     const loose = CONTRADICTION_CHECK_SYSTEM_PROMPT.split("\n");
     const strict = CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT.split("\n");
 
     // ゆるめた版の原則1は2行、抑制版は1行
     expect(loose.slice(0, 3)).toEqual(strict.slice(0, 3));
     expect(loose[3]).not.toBe(strict[3]);
-    // 原則2以降（＝原則1の次の行から末尾まで）は1文字も違わない
-    expect(loose.slice(5)).toEqual(strict.slice(4));
+    // 原則2以降は、口調の一行（1.8 で足し、1.9 で抑制版からは外した）を
+    // 除けば1文字も違わない
+    expect(
+      loose.slice(5).filter((line) => line.trim() !== SPEECH_PRINCIPLE_NOTE)
+    ).toEqual(strict.slice(4));
+    expect(loose.slice(5).length - strict.slice(4).length).toBe(1);
   });
 
   test("抑制版は 1.5 の文言に戻っている", () => {
@@ -181,7 +188,7 @@ describe("MCP の options.suppression", () => {
     const built = promptFor();
 
     expect(built.systemPrompt).toBe(CONTRADICTION_CHECK_SYSTEM_PROMPT);
-    expect(built.promptVersion).toBe("1.8");
+    expect(built.promptVersion).toBe("1.9");
     // 空文字は打ち間違いとみなさず、既定へ倒す
     expect(promptFor("")).toEqual(built);
   });
@@ -191,7 +198,25 @@ describe("MCP の options.suppression", () => {
     const built = promptFor("strict");
 
     expect(built.systemPrompt).toBe(CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT);
-    expect(built.promptVersion).toBe("1.8:strict");
+    expect(built.promptVersion).toBe("1.9:strict");
+  });
+
+  test("strict では口調の指示も外れ、既定では残る（P-12 1.9。製品と同じ組み合わせ）", () => {
+    // 抑制版のシステムプロンプトと本文の口調の3か所は一対で外す——
+    // 片方だけだと、測っていない形が外部AIへ渡る
+    const strict = promptFor("strict");
+    const loose = promptFor();
+
+    expect(strict.chunks.length).toBeGreaterThan(0);
+    for (const chunk of strict.chunks) {
+      expect(chunk.userPrompt).not.toContain(SPEECH_CHECK_ITEM);
+      expect(chunk.userPrompt).not.toContain(SPEECH_JUDGE_NOTE);
+      expect(chunk.userPrompt).not.toContain("設定の一人称と口調のまま");
+    }
+    for (const chunk of loose.chunks) {
+      expect(chunk.userPrompt).toContain(SPEECH_CHECK_ITEM);
+      expect(chunk.userPrompt).toContain(SPEECH_JUDGE_NOTE);
+    }
   });
 
   test("loose と明示しても、既定と同じ", () => {

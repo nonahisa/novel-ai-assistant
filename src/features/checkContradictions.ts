@@ -429,6 +429,9 @@ export async function checkContradictions(
   const systemPrompt = capability.suppressUncertainContradictions
     ? CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT
     : CONTRADICTION_CHECK_SYSTEM_PROMPT;
+  // **口調の指示も、抑制版と一対で外す**（P-12 1.9）。小さいモデルは
+  // 口調の指示で余計な指摘が増え、答え付きの台の当たりが減った
+  const speechCheck = !capability.suppressUncertainContradictions;
   // 地力の足りないモデルでは観点を絞る。1回の負荷を下げないと検出漏れが増える
   const categories: readonly ContradictionCategory[] =
     capability.narrowContradictionCategories
@@ -468,6 +471,7 @@ export async function checkContradictions(
       previousSynopses: "",
       categories,
       futureFacts: "",
+      speechCheck,
     }).length +
     material.referenceBudgetChars;
 
@@ -1425,6 +1429,7 @@ export async function checkContradictions(
       // **地の文の「俺」が誰かを名指しする**（設計書6.10.6）。
       // 決められなければ undefined で、欄そのものが出ない
       narrator: relevant.narrator ?? undefined,
+      speechCheck,
     });
     return { userPrompt, relevant, bodyWithLines, previousSynopses, pastScenes };
   }

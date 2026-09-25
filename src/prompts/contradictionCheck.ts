@@ -67,7 +67,14 @@ import type { NarratorHint } from "../core/narrator";
 //      原則2に「きっかけが描かれていない違いは挙げる」を足し、【判断の注意】に
 //      台詞ごとの照らし方を、読み取る段（asThem）に「設定の一人称と口調のまま」を書いた。
 //      **どの作品のどのチャンクでも文面が変わる**ので版を上げる
-export const CONTRADICTION_CHECK_VERSION = "1.8";
+// 1.9: **口調の指示を、小さいモデル（抑制版を送るモデル）には送らない**
+//      （作者の判断、2026-09-25。プロンプト設計書 P-12）。1.8 で e4b は
+//      口調の仕込みを1件多く拾ったが、口調まわりの余計な指摘が増え、
+//      答え付きの台の当たりが減った。大きいモデルには 1.8 のまま送る。
+//      小さいモデルへの文面は 1.7 と同じに戻るが、**検算は 1.8 のもの**
+//      （括弧を外す照合・設定の欄の自己否定・指示の写し）なので、1.7 と
+//      同じ鍵にはしない——版を上げて、小さいモデルの処理済みを作り直す
+export const CONTRADICTION_CHECK_VERSION = "1.9";
 
 /**
  * 口調の照らし方の指示（1.8）。**そのまま答えに返ってくる前提で置く**
@@ -145,7 +152,11 @@ export const CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT =
   CONTRADICTION_CHECK_SYSTEM_PROMPT.replace(
     LOOSE_PRINCIPLE_1,
     STRICT_PRINCIPLE_1
-  );
+  )
+    // **口調の指示も外す**（1.9）。小さいモデルは「きっかけが描かれていない
+    // 違いは挙げる」を、台詞を1つずつ挙げる合図として読み、余計な指摘が
+    // 増えた（e4b）。本文側の3か所は `speechCheck` で外す
+    .replace(`\n   ${SPEECH_PRINCIPLE_NOTE}`, "");
 
 /** 検証する観点。lightなモデルでは上から3つに絞る（プロンプト設計書1.3） */
 export const CONTRADICTION_CATEGORIES = [
@@ -167,8 +178,21 @@ export const LIGHT_CATEGORIES: readonly ContradictionCategory[] = [
   "時系列",
 ];
 
+/** 検証項目の「人物」。口調の一文（1.8）は `speechCheck` のときだけ足す */
+const PERSON_CHECK_ITEM = "一人称、口調、性格、外見、能力が設定と食い違わないか";
+
+/**
+ * 読み取る段の asThem の説明。**口調の指示のあるなしで2つある**（1.9）。
+ * 口調なしは 1.7 までの文面そのまま——小さいモデルへは、測った 1.7 と
+ * 同じ文面を送るため、言い回しを混ぜて作り直さない。
+ */
+const AS_THEM_PLAIN =
+  "**その人物になりきって、いまの自分の身の上を一人称で言う**（「俺は〜」「私は〜」）。";
+const AS_THEM_SPEECH =
+  "**その人物になりきって、設定の一人称と口調のまま、いまの自分の身の上を言う**。";
+
 const CHECK_ITEMS: Record<ContradictionCategory, string> = {
-  人物: `一人称、口調、性格、外見、能力が設定と食い違わないか。${SPEECH_CHECK_ITEM}`,
+  人物: PERSON_CHECK_ITEM,
   呼称:
     "ある人物が別の人物を呼ぶ呼び方が、確立された呼称と食い違わないか。" +
     "ただし喧嘩・他人行儀になる場面・第三者の目がある場面など、" +
@@ -226,6 +250,17 @@ export interface ContradictionCheckInput {
    * **推測では決めない**ので、絞れない作品には何も出ない。
    */
   narrator?: NarratorHint;
+  /**
+   * **台詞を話し手の設定の一人称・口調と照らす指示（1.8）を入れるか**（1.9）。
+   * 省けば入れる（大きいモデルの形）。
+   *
+   * **システムプロンプトの抑制版（`_STRICT`）と一対で決める。** 抑制版を
+   * 送るモデル（`ai/capability.ts` の `suppressUncertainContradictions`、
+   * MCP の `suppression: "strict"`）には false を渡す。口調の指示は4か所に
+   * あり、原則2の1か所は抑制版の側で外してある——片方だけ外すと、測って
+   * いない形が送られる。
+   */
+  speechCheck?: boolean;
 }
 
 /**
@@ -356,9 +391,19 @@ ${facts}
 export function buildContradictionCheckPrompt(
   input: ContradictionCheckInput
 ): string {
+  const speechCheck = input.speechCheck ?? true;
   const items = input.categories
-    .map((category, index) => `${index + 1}. ${category}：${CHECK_ITEMS[category]}`)
+    .map((category, index) => {
+      const item =
+        category === "人物" && speechCheck
+          ? `${CHECK_ITEMS[category]}。${SPEECH_CHECK_ITEM}`
+          : CHECK_ITEMS[category];
+      return `${index + 1}. ${category}：${item}`;
+    })
     .join("\n");
+  // 【判断の注意】の口調の一行。無い形では行ごと出さない（1.7 と同じ文面にする）
+  const speechJudge = speechCheck ? `\n- ${SPEECH_JUDGE_NOTE}` : "";
+  const asThem = speechCheck ? AS_THEM_SPEECH : AS_THEM_PLAIN;
 
   return `以下の小説本文が、確立された設定と矛盾していないか検証してください。
 
@@ -384,8 +429,7 @@ ${items}
 【判断の注意】
 - 作中で意図的に描かれた変化（成長による口調の変化、設定の秘密が明かされる等）を
   矛盾と誤認しないこと。判断がつかない場合は confidence を low とし、
-  「意図的な変化の可能性」を note に記載すること。
-- ${SPEECH_JUDGE_NOTE}
+  「意図的な変化の可能性」を note に記載すること。${speechJudge}
 - 未回収の伏線は矛盾ではありません。
 - **設定側が誤っている可能性も考慮し、指摘は断定形にしないこと。**
 - 上に設定が示されていない事柄については、何も指摘しないこと。
@@ -411,7 +455,7 @@ still true of them — their body, what they carry, where they are, what carried
 earlier episodes. Do this for every person in the material above.
 
 - who：その人物の名前（材料に載っている正式名称）
-- asThem：**その人物になりきって、設定の一人称と口調のまま、いまの自分の身の上を言う**。
+- asThem：${asThem}
   体の具合・身につけているもの・どこに居るか・前の話から続いていることを、
   **材料の言葉を写すのではなく、その人の口から出る言葉に言い直してください。**
 

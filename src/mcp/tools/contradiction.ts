@@ -625,6 +625,8 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
         // **地の文の「俺」が誰かを名指しする**（設計書6.10.6）。
         // 名指しできなければ undefined で、欄そのものが出ない
         narrator: material.narrator ?? undefined,
+        // **口調の指示は、抑制版と一対で外す**（P-12 1.9。製品と同じ組み合わせ）
+        speechCheck: suppression !== "strict",
       }),
     });
   }
