@@ -6,6 +6,7 @@ import {
 } from "../models/posting";
 import { hashText } from "./hash";
 import { SETUP_URI_PATH } from "./setupRequest";
+import { RUN_URI_PATH } from "./runRequest";
 import {
   matchReaderStatsEnvelope,
   readerStatsRecordsFromEnvelope,
@@ -53,7 +54,7 @@ export const CHAPTERS_IMPORT_URI_PATH = "/import-chapters";
 /** URI のパスが何の合図か。知らないパスは undefined（何もしない） */
 export function readerStatsUriAction(
   uriPath: string
-): "import" | "contests" | "chapters" | "setup" | undefined {
+): "import" | "contests" | "chapters" | "setup" | "run" | undefined {
   // 末尾の `/` だけは許す（ブラウザやOSが付け足すことがある）。
   // 大文字小文字は区別する——約束は1つの綴りで、似た綴りを拾う理由が無い
   const trimmed = uriPath.replace(/\/+$/u, "");
@@ -66,6 +67,11 @@ export function readerStatsUriAction(
     白名簿で確かめてから（`core/setupRequest.ts`）、作者の確認を経て呼ぶ。
   */
   if (trimmed === SETUP_URI_PATH) return "setup";
+  /*
+    **外部AIから頼まれた実行**（設計書6.87.22）。クエリは依頼番号と合言葉だけで、
+    札（保管庫）と突き合わせてから作者の確認を出す（`core/runRequest.ts`）。
+  */
+  if (trimmed === RUN_URI_PATH) return "run";
   return undefined;
 }
 

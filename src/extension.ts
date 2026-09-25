@@ -279,6 +279,8 @@ import {
   type SetupRequest,
 } from "./core/setupRequest";
 import { handleSetupRequest } from "./features/setupRequestHandler";
+import { handleRunRequest } from "./features/runRequestHandler";
+import { createRunRequestDeps } from "./features/runRequestRunners";
 // 作品タイプの在り処はプロットの `## 形式` ひとつ（設計書6.70）
 import { writePlotSections } from "./core/plotFile";
 import { statsDayKey } from "./core/writingStats";
@@ -6574,6 +6576,20 @@ export async function activate(
               logLine(line);
             },
           }),
+        // 外部AIから頼まれた実行（設計書6.87.22）。毎回作者に確かめてから走らせる
+        handleRunRequest: (query) =>
+          handleRunRequest(
+            query,
+            createRunRequestDeps({
+              context,
+              findWork: (folder) => registry.findByFolder(folder),
+              aiRegistry,
+              log: (line) => {
+                useLogFile(undefined);
+                logLine(line);
+              },
+            })
+          ),
       })
     )
   );

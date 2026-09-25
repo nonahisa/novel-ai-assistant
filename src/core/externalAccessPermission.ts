@@ -156,6 +156,18 @@ const FEATURE_KEYED_TOOLS = new Set([
 ]);
 
 /**
+ * **ほかの道具と同じ鍵で確かめる道具**（設計書6.87.22）。
+ *
+ * `run.result` は `run.request` で頼んだ結果を読む口で、2つは組でしか意味が無い。
+ * 鍵を分けると、作者は1つの依頼のために2回ノックを受けて2回許すことになる
+ * ——しかも片方だけ許した状態（頼めるが読めない）は、作者にも頼んだ側にも
+ * 何も良いことが無い。
+ */
+const SHARED_KEY_TOOLS: Readonly<Record<string, string>> = {
+  "run.result": "run.request",
+};
+
+/**
  * その呼び出しの許可の鍵。
  *
  * **ここが唯一の決め方。** 許可を確かめる側（`mcp/tools/permission.ts`）と
@@ -166,6 +178,8 @@ const FEATURE_KEYED_TOOLS = new Set([
  *   （＝許可されていない鍵になり、断る側に倒れる）
  */
 export function permissionKeyOf(tool: string, feature: unknown): string {
+  const shared = SHARED_KEY_TOOLS[tool];
+  if (shared) return shared;
   if (!FEATURE_KEYED_TOOLS.has(tool)) return tool;
   return typeof feature === "string" && feature.trim() ? feature : tool;
 }

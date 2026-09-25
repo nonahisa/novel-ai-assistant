@@ -6,6 +6,7 @@ import type {
 import { lmstudioEndpoint } from "../ai/lmstudioProvider";
 import { prepareLmStudioModel } from "../ai/registry";
 import { canRunProcesses } from "../core/runtime";
+import { paidUsageLines } from "../core/paidUsageNotice";
 import { withProgress } from "../views/progress";
 import { confirmRun, notifyDone, type ConfirmWork } from "../views/notify";
 
@@ -270,21 +271,12 @@ export async function confirmPaidUsage(
 ): Promise<boolean> {
   if (!provider.isPaid) return true;
 
-  const lines = [
-    `${provider.displayName}（${options.model}）を使います。`,
-    "実行するとトークンを消費し、利用量が加算されます。",
-  ];
-  if (options.calls !== undefined) {
-    lines.push(
-      options.calls === 1
-        ? "AIの呼び出しは1回です。"
-        : `AIの呼び出しは ${options.calls} 回です。`
-    );
-  }
-  if (options.detail) lines.push(options.detail);
-  lines.push(
-    "実際の金額はモデル・実使用量・各社の現行料金によって変わります。"
-  );
+  // **行の中身は `core/paidUsageNotice.ts` の1か所**（外から頼まれた実行の
+  // 確認、設計書6.87.22 も同じ行を出す。写すと片方だけ言い回しがずれる）
+  const lines = paidUsageLines(provider.displayName, options.model, {
+    calls: options.calls,
+    detail: options.detail,
+  });
 
   // **訊き方は `confirmRun` に寄せる。** 「以降は訊かない」の出し方を
   // 2か所に書くと、片方だけ直したときに振る舞いが割れる

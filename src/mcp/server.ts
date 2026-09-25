@@ -78,6 +78,14 @@ import {
   type SetupRequestInput,
 } from "./tools/setupRequest";
 import {
+  RUN_REQUEST_INPUT,
+  RUN_RESULT_INPUT,
+  runRequest,
+  runResult,
+  type RunRequestInput,
+  type RunResultInput,
+} from "./tools/runRequest";
+import {
   SCHEDULE_MILESTONES_INPUT,
   scheduleMilestones,
 } from "./tools/scheduleMilestones";
@@ -95,9 +103,10 @@ import {
  * そちらを直に呼ぶ（`test/unit/mcp/mcpTools.test.ts`）。混ぜると、
  * ツールの中身を確かめるのに stdio を立てなければならなくなる。
  *
- * **道具は18本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
+ * **道具は20本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
  * 0.75.x で `windows.list`、0.82.1 で `setup.request`、0.83.x で `schedule.milestones`、
- * 0.85.0 で `notices.recent` と `works.list`、0.85.1 で `pending.list` を足した。0.66.7 の時点では10本）。
+ * 0.85.0 で `notices.recent` と `works.list`、0.85.1 で `pending.list`、
+ * 0.88 の次の版で `run.request` と `run.result`（設計書6.87.22）を足した。0.66.7 の時点では10本）。
  * ほかに**プロンプトが1つ**（`setup`。Claude Code では `/` から選べる。6.87.18）。
  * 56本あったものを
  * `feature` を引数に取る形へ束ねた——**AI は繋いだ瞬間にこの一覧を読む**ので、
@@ -518,6 +527,43 @@ server.registerTool(
     inputSchema: SETUP_REQUEST_INPUT,
   },
   tool("setup.request", (args: SetupRequestInput) => setupRequest(args))
+);
+
+server.registerTool(
+  "run.request",
+  {
+    title: "作者のAI設定で走らせてもらう（作者の確認つき）",
+    description:
+      "作者が VS Code で設定したAI（機能別AI割当のとおり。クラウドのAIも含む）で、" +
+      "製品の機能を**検算まで通して**走らせるよう頼みます。鍵はこちらへ出ません。" +
+      "**作者の画面に毎回確認が出て、押すのは作者です。** 待たずに requestId を返すので、" +
+      "結果は run.result で読んでください。読み取りと生成だけで、原稿・設定資料・提案パネルは変わりません。",
+    inputSchema: RUN_REQUEST_INPUT,
+  },
+  /*
+    **作品を指すので、転送層が許可を確かめる**（鍵は `run.request`。設計書6.87.22）。
+    この道具自身は札を置いて URI を開くだけで、作品のファイルを1つも開かない。
+  */
+  tool("run.request", (args: RunRequestInput) => runRequest(args))
+);
+
+server.registerTool(
+  "run.result",
+  {
+    title: "run.request の結果を読む",
+    description:
+      "run.request が返した requestId で、状態（waiting＝拡張機能がまだ受け取っていない・" +
+      "confirming＝作者の確認待ち・running＝実行中・done・failed・declined＝作者が断った・" +
+      "refused＝拡張機能が断った・expired＝期限切れ）を返します。done なら検算済みの結果" +
+      "（使ったAI・モデル・プロンプトの版・検算で落とした件数を含む）も返します。" +
+      "**作者の確認を急かさず、間を置いて呼んでください。**",
+    inputSchema: RUN_RESULT_INPUT,
+  },
+  /*
+    **読むときも許可を通す**（結果には原稿の抜粋が入る）。鍵は `run.request` と同じ
+    （`permissionKeyOf`）——頼めるのに読めない、という半端な許可を作らない。
+  */
+  tool("run.result", (args: RunResultInput) => runResult(args))
 );
 
 server.registerTool(

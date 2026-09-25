@@ -139,7 +139,7 @@ export function envWithoutElectronFlag(
   return next;
 }
 
-async function openUri(uri: string): Promise<void> {
+export async function openUri(uri: string): Promise<void> {
   const { spawn } = await import("node:child_process");
   const { command, args } = openerCommand(process.platform, uri);
   await new Promise<void>((resolve, reject) => {

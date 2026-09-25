@@ -91,6 +91,8 @@ export interface ReaderStatsHelperLinkDeps {
    * クエリをそのまま渡す（確かめるのは受けた側）。無ければ知らないパスと同じ扱い
    */
   handleSetupRequest?(query: string): Promise<void>;
+  /** 外部AIから頼まれた実行（設計書6.87.22）。同じ受け口でパスを見分ける */
+  handleRunRequest?(query: string): Promise<void>;
 }
 
 /**
@@ -129,6 +131,10 @@ export class ReaderStatsHelperLink {
     }
     if (action === "setup" && this.deps.handleSetupRequest) {
       await this.deps.handleSetupRequest(uri.query ?? "");
+      return;
+    }
+    if (action === "run" && this.deps.handleRunRequest) {
+      await this.deps.handleRunRequest(uri.query ?? "");
       return;
     }
     if (action !== "import") {

@@ -38,6 +38,11 @@ import { emptyAbility } from "../models/ability";
 import type { WorkEntry } from "../models/types";
 import { CHARACTER_EXTRACT_VERSION } from "../prompts/characterExtract";
 import { assertFetchPatch, describeFetchPatch, probeFetchPatch } from "./fetchPatch";
+import { runRequest, runResult } from "../mcp/tools/runRequest";
+import { handleRunRequest } from "../features/runRequestHandler";
+import { createRunRequestDeps } from "../features/runRequestRunners";
+import { RUN_REQUEST_DIRECTORY, runStateFileName } from "../core/runRequest";
+import { RECOMMENDED_CHAT_MODEL } from "../core/requirements";
 
 const COMMANDS = [
   "novelai.addWork",
@@ -137,6 +142,14 @@ export async function run(): Promise<void> {
     assert.equal(snapshot.schema, 1);
     assert.ok(Array.isArray(snapshot.works));
   });
+
+  await runCase(
+    "外部AIからの実行の依頼：MCP の札 → 作者の確認 → 保管庫の結果 → run.result（設計書6.87.22）",
+    failures,
+    async () => {
+      await checkRunRequestRoundTrip();
+    }
+  );
 
   await runCase("作品を作成・走査し、既存フォルダを上書きしない", failures, async () => {
     const temporaryRoot = await fs.mkdtemp(
@@ -921,6 +934,175 @@ async function runCase(
     const detail = error instanceof Error ? error.stack ?? error.message : String(error);
     failures.push(`FAIL ${name}\n${detail}`);
   }
+}
+
+/**
+ * 外部AIから頼まれた実行を、本物の拡張機能ホストで通す（設計書6.87.22）。
+ *
+ * **OS の `vscode://` の配達だけは作り物にする。** 開くと、この機械に入っている
+ * 作者の VS Code（試験用ではないほう）が呼び起こされるため。配達の代わりに、
+ * MCP の道具が開こうとした URI のクエリをそのまま受け口へ渡す。
+ *
+ * ほかは本物：MCP の道具が保管庫へ札を置く・受け口が `vscode.workspace.fs` で
+ * 読み書きする（「新しく作るだけ」の錠が本物のファイル装置で効くか）・確認は
+ * `vscode.window.showWarningMessage` のモーダルを差し替えて中身を見る。
+ *
+ * **手元の Ollama に薦めるモデル（`RECOMMENDED_CHAT_MODEL`）があるときだけ**、作者が「走らせる」を押した
+ * 道も通す（製品の誤字脱字検知を本物のAIで回し、結果を `run.result` で読む）。
+ * 無ければ省く（CI には Ollama が無い）。
+ */
+async function checkRunRequestRoundTrip(): Promise<void> {
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "novel-ai-assistant-run-"));
+  const storage = path.join(temporaryRoot, "globalStorage", "nonahisa.novel-ai-assistant");
+  const warningDescriptor = Object.getOwnPropertyDescriptor(vscode.window, "showWarningMessage");
+  assert.ok(warningDescriptor?.configurable, "showWarningMessage をテスト用に差し替えられません");
+  try {
+    const workFolder = path.join(temporaryRoot, "星の町");
+    await scaffoldWorkFolder(workFolder, "星の町");
+    const work = makeWork(workFolder);
+    const episodePath = path.join(workFolder, "本文", "001.txt");
+    const body = "彼は学校え行った。空はとても青かった。";
+    await fs.writeFile(episodePath, body, "utf8");
+    // **許可の印は一時フォルダーの作り物の作品にだけ置く**（作者の作品には触れない）
+    await fs.writeFile(
+      path.join(workFolder, ".aiwriter", "external-access.json"),
+      JSON.stringify({
+        schemaVersion: "2",
+        clients: [{ name: "claude-code", tools: ["run.request"], sampling: false, decidedAt: "" }],
+      }),
+      "utf8"
+    );
+
+    const memory = new Map<string, unknown>();
+    const fakeContext = {
+      globalStorageUri: vscode.Uri.file(storage),
+      globalState: {
+        get: <T>(key: string, fallback?: T) => (memory.has(key) ? (memory.get(key) as T) : fallback),
+        update: async (key: string, value: unknown) => {
+          memory.set(key, value);
+        },
+        keys: () => [...memory.keys()],
+        setKeysForSync: () => undefined,
+      },
+      secrets: {
+        get: async () => undefined,
+        store: async () => undefined,
+        delete: async () => undefined,
+        onDidChange: () => ({ dispose: () => undefined }),
+      },
+      subscriptions: [],
+    } as unknown as vscode.ExtensionContext;
+    const aiRegistry = new AIRegistry(fakeContext);
+
+    const modals: Array<{ message: string; detail: string }> = [];
+    const warnings: string[] = [];
+    let answer: string | undefined;
+    Object.defineProperty(vscode.window, "showWarningMessage", {
+      configurable: true,
+      value: async (message: string, ...rest: unknown[]) => {
+        const options = rest[0] as { modal?: boolean; detail?: string } | undefined;
+        if (options && typeof options === "object" && options.modal) {
+          modals.push({ message, detail: options.detail ?? "" });
+          return answer;
+        }
+        warnings.push(message);
+        return undefined;
+      },
+    });
+
+    const handlerDeps = createRunRequestDeps({
+      context: fakeContext,
+      findWork: (folder: string) =>
+        path.resolve(folder) === path.resolve(workFolder) ? work : undefined,
+      aiRegistry,
+      log: () => undefined,
+    });
+    const delivered: string[] = [];
+    const mcpDeps = {
+      open: async (uri: string) => {
+        delivered.push(uri);
+        await handleRunRequest(uri.slice(uri.indexOf("?") + 1), handlerDeps);
+      },
+      now: () => Date.now(),
+      random: (bytes: number) =>
+        Array.from({ length: bytes * 2 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join(""),
+      storageRoot: () => storage,
+      clientName: () => "claude-code",
+    };
+    const beforeBody = await fs.readFile(episodePath, "utf8");
+
+    // ── 1. AIが未設定なら、確認を出さずに断る（次の操作を返す）
+    const first = await runRequest({ folder: workFolder, feature: "typo" }, mcpDeps);
+    assert.equal(modals.length, 0, "AIが未設定なのに確認が出ました");
+    const refused = runResult({ folder: workFolder, requestId: first.requestId }, mcpDeps);
+    assert.equal(refused.status, "refused");
+    assert.match(refused.nextAction ?? "", /AI設定/u);
+
+    // ── 2. 作者の設定したAI（手元の Ollama）で、作者が断る
+    await aiRegistry.select("ollama", RECOMMENDED_CHAT_MODEL);
+    answer = undefined;
+    const second = await runRequest({ folder: workFolder, feature: "typo" }, mcpDeps);
+    assert.equal(modals.length, 1, "確認のモーダルが出ていません");
+    for (const expected of ["claude-code", work.title, "誤字脱字の検知", RECOMMENDED_CHAT_MODEL, "無料"]) {
+      assert.ok(modals[0].detail.includes(expected) || modals[0].message.includes(expected), `確認に「${expected}」がありません:\n${modals[0].detail}`);
+    }
+    assert.equal(runResult({ folder: workFolder, requestId: second.requestId }, mcpDeps).status, "declined");
+    // 状態は保管庫に書かれ、本物のファイル装置で「新しく作るだけ」の錠が効く
+    const statePath = path.join(storage, RUN_REQUEST_DIRECTORY, runStateFileName(second.requestId));
+    assert.ok((await fs.stat(statePath)).isFile());
+    const secondUri = delivered[delivered.length - 1];
+    await handleRunRequest(secondUri.slice(secondUri.indexOf("?") + 1), handlerDeps);
+    assert.equal(modals.length, 1, "使い回した合言葉で確認が出ました");
+    assert.ok(warnings.some((message) => message.includes("1回しか")), warnings.join("\n"));
+
+    // ── 3. 手元の Ollama に薦めるモデルがあれば、走らせて結果を読む
+    let hasModel = false;
+    try {
+      const response = await fetch("http://localhost:11434/api/tags");
+      const tags = (await response.json()) as { models?: Array<{ name: string }> };
+      hasModel = (tags.models ?? []).some((model) => model.name === RECOMMENDED_CHAT_MODEL);
+    } catch {
+      hasModel = false;
+    }
+    if (!hasModel) {
+      console.log(`SKIP 手元の Ollama に ${RECOMMENDED_CHAT_MODEL} が無いため、走らせる道は省略`);
+    } else {
+      answer = "走らせる";
+      const third = await runRequest({ folder: workFolder, feature: "typo" }, mcpDeps);
+      const read = runResult({ folder: workFolder, requestId: third.requestId }, mcpDeps);
+      assert.equal(read.status, "done", `走り終えていません: ${JSON.stringify(read)}`);
+      assert.equal(read.result?.provider.id, "ollama");
+      assert.equal(read.result?.model, RECOMMENDED_CHAT_MODEL);
+      assert.ok(read.result?.promptVersion, "プロンプトの版がありません");
+      console.log(
+        `run.result（手元の Ollama ${RECOMMENDED_CHAT_MODEL}）: 指摘 ${read.result?.findings.length}件 / ` +
+          `落とした ${read.result?.dropped.count}件 / 失敗 ${read.result?.failures.count}件\n` +
+          JSON.stringify(read.result?.findings, null, 2)
+      );
+    }
+
+    // **原稿は1文字も変わらない。** 結果は作品の外（保管庫）にだけある
+    assert.equal(await fs.readFile(episodePath, "utf8"), beforeBody);
+    const inWork = await listFilesRecursive(workFolder);
+    assert.ok(
+      !inWork.some((file) => file.includes(RUN_REQUEST_DIRECTORY)),
+      `作品フォルダーに依頼の置き場ができています: ${inWork.join(", ")}`
+    );
+  } finally {
+    Object.defineProperty(vscode.window, "showWarningMessage", warningDescriptor);
+    await fs.rm(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
+async function listFilesRecursive(dir: string): Promise<string[]> {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  const nested = await Promise.all(
+    entries.map(async (entry) => {
+      const full = path.join(dir, entry.name);
+      return entry.isDirectory() ? listFilesRecursive(full) : [full];
+    })
+  );
+  return nested.flat();
 }
 
 function makeWork(folderPath: string): WorkEntry {

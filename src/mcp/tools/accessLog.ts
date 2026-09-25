@@ -83,6 +83,14 @@ export function exposureOf(
     tool === "notices.recent" ||
     tool === "works.list" ||
     tool === "setup.request" ||
+    /*
+      `run.request`（設計書6.87.22）は**依頼の札を保管庫へ置いて URI を開くだけ**で、
+      作品のファイルを1つも開かない。本文が作者のAIへ送られるのは、作者が確認で
+      「走らせる」を押したあと——作者自身が製品の機能を走らせたのと同じで、
+      送った量は送信の記録（`MeteredProvider`）に残る。こちらへ渡るのは
+      `run.result` で読む結果（抜粋）だけである
+    */
+    tool === "run.request" ||
     tool === "ollama.models" ||
     tool === "novel.propose" ||
     tool === "novel.notice" ||
@@ -118,6 +126,8 @@ export function exposureOf(
   */
   if (
     tool === "pending.list" ||
+    // 作者のAIで走らせた結果（指摘の原文・あらすじ）が呼び出し元へ渡る（6.87.22）
+    tool === "run.result" ||
     tool === "novel.scan" ||
     tool === "novel.validate" ||
     tool === "novel.detect" ||
@@ -197,6 +207,18 @@ function detailOf(
     return pointed ? `画面で指した（${pointed}）` : "画面で指した";
   }
   if (tool === "schedule.milestones") return "締切・発売日などの日付を読んだ";
+  /*
+    作者のAIで走らせる依頼（6.87.22）。**何を頼んだか**と、読んだ回は**どの依頼か**を
+    残す（本文も結果の中身も残さない）
+  */
+  if (tool === "run.request") {
+    const feature = typeof args?.feature === "string" ? args.feature : "";
+    return feature ? `作者のAIでの実行を頼んだ（${feature}）` : "作者のAIでの実行を頼んだ";
+  }
+  if (tool === "run.result") {
+    const id = typeof args?.requestId === "string" ? args.requestId.slice(0, 40) : "";
+    return id ? `作者のAIで走らせた結果を読んだ（${id}）` : "作者のAIで走らせた結果を読んだ";
+  }
   /*
     承認待ちを読んだ回（0.85.1）。`feature` を取らない道具なので、書かないと
     記録が道具の名前だけになる。**絞り方だけ**を残す（中身は残さない）
