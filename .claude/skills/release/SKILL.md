@@ -79,6 +79,7 @@ mcp__claude-in-chrome__file_upload
 6. **押す直前に、作者へもう一度確認する。** 上げるもの・バイト数・SHA-256・実機確認の済み具合を並べて出す。**公開は取り消せない**（版を非公開にはできるが、その間に入れた方には届く）
 7. 上げたあと、検証（Verifying）に**数分から十数分**かかる。`get_page_text` で状態を読む（`screenshot` より確か）
 8. **反映は `node scripts/checkMarketplace.mjs` で確かめる。** 画面の表示ではなく、手順0と同じ口で読む
+9. **上げ終わったら、開いたタブを必ず閉じる**（`mcp__claude-in-chrome__tabs_close_mcp`）。作者の報告（2026-09-25「Chrome上にアップの痕跡がいくつも残ってたことがあった」）。タブは作者の Chrome に残り、別のセッションからは一覧にも出ず閉じられない。反映の見張り（`checkMarketplace.mjs`）はタブを使わないので、Upload を押して「just now」を確かめたらすぐ閉じてよい
 
 ## 記録
 
