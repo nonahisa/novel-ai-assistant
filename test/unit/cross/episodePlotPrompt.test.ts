@@ -204,11 +204,44 @@ describe("P-28 単話プロットと本文の照合のプロンプト", () => {
     expect(prompt).not.toContain("作品全体のプロット");
   });
 
-  test("見る観点は3つだけ", () => {
+  test("見る観点は4つ（1.3 で「出来事の欠落」「主筋の改変」。作者の裁定 2026-09-25 昼）", () => {
     const prompt = buildEpisodePlotContrastPrompt(CONTRAST_INPUT);
+    expect(EPISODE_PLOT_CONTRAST_KINDS).toHaveLength(4);
     for (const kind of EPISODE_PLOT_CONTRAST_KINDS) {
       expect(prompt).toContain(kind);
     }
+    // 「起きていない」は「出来事の欠落」へ名前を替えた。古い名前を種別として指示に残さない
+    expect(prompt).not.toContain("「起きていない」");
+  });
+
+  test("欠落と改変の分け方を言う（場面があるなら改変、無いなら欠落）", () => {
+    const prompt = buildEpisodePlotContrastPrompt(CONTRAST_INPUT);
+    expect(prompt).toMatch(/「主筋の改変」は、場面はあるのに/);
+  });
+
+  /*
+    1.3 の最初の文面（「結果や決断が箇条書きと違う方向へ進んでいる」だけ）では、
+    e4b が箇条書きどおりの話19話に「主筋の改変」を27件挙げ（理由は言い方・細部・
+    前後の違い）、入れ替えた話でも順序の指摘を「主筋の改変」の札で返して、
+    入れ替えを拾う数が 16/19 → 3/19 に落ちた。逆になったときだけ、と絞り、
+    順番の違いは「順序の食い違い」へ向ける
+  */
+  test("主筋の改変は「逆になったときだけ」で、細部・順番の違いは含めないと言う", () => {
+    const prompt = buildEpisodePlotContrastPrompt(CONTRAST_INPUT);
+    expect(prompt).toContain("結果や決断が箇条書きと逆になったときだけです");
+    expect(prompt).toContain("起きる順番が違うだけのものは「主筋の改変」にしないでください");
+    expect(prompt).toContain("順番が違うなら「順序の食い違い」です");
+  });
+
+  /*
+    e4b は箇条書きどおりの話（対照）に「箇条書きに無い」を出しすぎる
+    （1.1 の測定で19話に36件、1.2 で15件）。理由を読むと、ほとんどが箇条書きの行の
+    中身を本文が詳しく描いた場面だった（「本文の後半で、ホンゴーが捜索依頼を出す場面がある」）
+  */
+  test("箇条書きは要約で、行の中身を詳しく描いた場面は「箇条書きに無い」にしないと言う", () => {
+    const prompt = buildEpisodePlotContrastPrompt(CONTRAST_INPUT);
+    expect(prompt).toContain("箇条書きは話の要約です");
+    expect(prompt).toContain("詳しく描いているだけなら「箇条書きに無い」にしないでください");
   });
 
   test("修正案の欄を持たない（指摘だけ）", () => {

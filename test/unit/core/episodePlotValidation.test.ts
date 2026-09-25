@@ -552,7 +552,8 @@ describe("P-28 順序の食い違いは、相手が無くても落とさない�
       expect(rejected).toEqual([]);
       expect(accepted).toHaveLength(1);
       expect(accepted[0]).toMatchObject({
-        kind: "起きていない",
+        // 1.3 で「起きていない」は「出来事の欠落」へ名前を替えた（同じ観点）
+        kind: "出来事の欠落",
         plotItem: "形見の懐中時計を見つける",
         plotLine: 11,
         excerpt: null,
@@ -577,12 +578,13 @@ describe("P-28 順序の食い違いは、相手が無くても落とさない�
         },
       ]);
 
-      expect(accepted[0]?.kind).toBe("起きていない");
+      expect(accepted[0]?.kind).toBe("出来事の欠落");
     });
 
     test("付け替えたものが、同じ行の「起きていない」と重なれば1件にする", () => {
       const { accepted, rejected } = contrast([
         {
+          // 1.2 までの名前のまま返ってきても、「出来事の欠落」として読む
           kind: "起きていない",
           plotItem: "形見の懐中時計を見つける",
           excerpt: null,
@@ -619,7 +621,7 @@ describe("P-28 順序の食い違いは、相手が無くても落とさない�
       ]);
 
       expect(accepted).toHaveLength(1);
-      expect(accepted[0].kind).toBe("起きていない");
+      expect(accepted[0].kind).toBe("出来事の欠落");
       expect(accepted[0].plotLine).toBe(11);
     });
 
@@ -980,5 +982,376 @@ describe("捨てた理由の内訳", () => {
 
   test("0件なら空文字（黙って何も言わない）", () => {
     expect(describeEpisodePlotRejects([])).toBe("");
+  });
+});
+
+/**
+ * 箇条書きの行を、番号ごと写して返す（2026-09-25 の測定、gemma4:e4b・ギルドの19話）。
+ *
+ * P-28 は順序を見るため箇条書きに番号を振って渡している（「1. 〜」）。e4b は
+ * plotItem に「2. 受付嬢のメアリーが〜」と**番号ごと**写して返し、1.2 の測定で
+ * 18件が「箇条書きに無い行を指した」として落ちた（仕込みの第8話を含む）。
+ * 行の中身は実在の行そのものなので、番号を外して照らす。
+ */
+describe("P-28 番号ごと写した箇条書きの行", () => {
+  test.each([
+    "2. 形見の懐中時計を見つける",
+    "２．形見の懐中時計を見つける",
+    "2) 形見の懐中時計を見つける",
+    "2、形見の懐中時計を見つける",
+  ])("番号を外して実在の行に当てる：%s", (plotItem) => {
+    const { accepted, rejected } = contrast([
+      {
+        kind: EPISODE_PLOT_CONTRAST_KINDS[1],
+        plotItem,
+        excerpt: null,
+        reason: "本文に懐中時計の場面が見当たらない。",
+      },
+    ]);
+
+    expect(rejected).toEqual([]);
+    expect(accepted[0]).toMatchObject({
+      plotItem: "形見の懐中時計を見つける",
+      plotLine: 11,
+    });
+  });
+
+  test("番号を外しても実在しない行なら、これまでどおり捨てる", () => {
+    const { rejected } = contrast([
+      {
+        kind: EPISODE_PLOT_CONTRAST_KINDS[1],
+        plotItem: "2. 王都へ向かう",
+        excerpt: null,
+        reason: "本文に見当たらない。",
+      },
+    ]);
+
+    expect(rejected[0].reason).toBe("plot_item_not_found");
+  });
+
+  test("数字で始まる行そのもの（「3日後、〜」）は、番号と取り違えない", () => {
+    const items = [...ITEMS, { text: "3日後、老人がまた来る", line: 13 }];
+    const { accepted } = validateEpisodePlotContrast(
+      {
+        findings: [
+          {
+            kind: EPISODE_PLOT_CONTRAST_KINDS[1],
+            plotItem: "3日後、老人がまた来る",
+            excerpt: null,
+            reason: "本文に見当たらない。",
+          },
+        ],
+      },
+      { items, text: TEXT, maxFindings: 5 }
+    );
+
+    expect(accepted[0]?.plotLine).toBe(13);
+  });
+});
+
+/**
+ * 台詞の途中から引いて、頭に「「」を足して返す（2026-09-25 の測定。1.2 の答えで
+ * e4b の「本文に無い引用」7件中7件、26b の8件中4件がこの形）。
+ *
+ * 本文「「ぷはっ。やっぱ仕事のあとの酒はうめぇな。そうそう、うちの徒弟の〜」」に対し、
+ * 引用が「「そうそう、うちの徒弟の〜」」。**かっこの内側は本文そのまま**なので、
+ * 外側のかぎかっこを外して本文に当てる（外した形を引用として残す）。
+ */
+describe("P-28 台詞の途中から引いて、かぎかっこを足した引用", () => {
+  const SPEECH = [
+    "「ぷはっ。やっぱ仕事のあとの酒はうめぇな。そうそう、うちの徒弟に言っといたから」",
+    "僕はそうならないための仕組みとして、制度を提案した。",
+  ].join("\n");
+
+  function speech(excerpt: string) {
+    return validateEpisodePlotContrast(
+      {
+        findings: [
+          {
+            kind: EPISODE_PLOT_CONTRAST_KINDS[2],
+            plotItem: "老人が訪ねてくる",
+            excerpt,
+            reason: "この場面は、老人の訪問より前に描かれている。",
+          },
+        ],
+      },
+      { items: ITEMS, text: SPEECH, maxFindings: 5 }
+    );
+  }
+
+  test.each([
+    ["「そうそう、うちの徒弟に言っといたから」", "そうそう、うちの徒弟に言っといたから", 1],
+    ["「そうそう、うちの徒弟に", "そうそう、うちの徒弟に", 1],
+    ["『僕はそうならないための仕組みとして』", "僕はそうならないための仕組みとして", 2],
+  ])("かっこを外して本文に当てる：%s", (excerpt, grounded, line) => {
+    const { accepted, rejected } = speech(excerpt);
+
+    expect(rejected).toEqual([]);
+    expect(accepted[0]).toMatchObject({ excerpt: grounded, line });
+  });
+
+  test("本文にそのままあるなら、かっこも含めて写したまま残す", () => {
+    const { accepted } = speech(
+      "「ぷはっ。やっぱ仕事のあとの酒はうめぇな。そうそう、うちの徒弟に言っといたから」"
+    );
+
+    expect(accepted[0]?.excerpt).toBe(
+      "「ぷはっ。やっぱ仕事のあとの酒はうめぇな。そうそう、うちの徒弟に言っといたから」"
+    );
+  });
+
+  test("かっこを外しても本文に無ければ、これまでどおり捨てる", () => {
+    const { rejected } = speech("「王都へ向かおう」");
+    expect(rejected[0].reason).toBe("excerpt_not_found");
+  });
+
+  test("かっこを外すと短すぎる（4字未満）なら当てない", () => {
+    const { rejected } = speech("「そうそ」");
+    expect(rejected[0].reason).toBe("excerpt_not_found");
+  });
+});
+
+/**
+ * 起きていない出来事を、箇条書きの欄ではなく**引用の欄**に写して返す
+ * （2026-09-25 の測定、gemma4:26b・仕込みの第1話。1.0 から続く見逃し1件）。
+ *
+ * 足した出来事「ギルド長が突然辞任を発表し、ホンゴーが後任に指名される」を
+ * excerpt に写し、kind は「箇条書きに無い」、理由は「〜場面が本文に存在しないため」。
+ * 本文に無い引用として落ち、仕込みを見逃していた。中身は「出来事の欠落」なので、
+ * **引用が箇条書きの行と一致し、本文には無く、理由が「無い」と言い切っていれば**付け替える。
+ */
+describe("P-28 箇条書きの行を引用の欄に写した「起きていない」", () => {
+  test("引用が箇条書きの行で、理由が「本文に存在しない」なら「出来事の欠落」へ付け替える（26b の実物）", () => {
+    const { accepted, rejected } = contrast([
+      {
+        kind: "箇条書きに無い",
+        plotItem: null,
+        excerpt: "形見の懐中時計を見つける",
+        reason: "懐中時計を見つける場面が本文に存在しないため。",
+      },
+    ]);
+
+    expect(rejected).toEqual([]);
+    expect(accepted[0]).toMatchObject({
+      kind: EPISODE_PLOT_CONTRAST_KINDS[1],
+      plotItem: "形見の懐中時計を見つける",
+      plotLine: 11,
+      excerpt: null,
+      line: null,
+    });
+  });
+
+  test("理由が「無い」と言っていなければ付け替えない（本文に無い引用として捨てる）", () => {
+    const { accepted, rejected } = contrast([
+      {
+        kind: "箇条書きに無い",
+        plotItem: null,
+        excerpt: "形見の懐中時計を見つける",
+        reason: "懐中時計の場面が加わっている。",
+      },
+    ]);
+
+    expect(accepted).toEqual([]);
+    expect(rejected[0].reason).toBe("excerpt_not_found");
+  });
+
+  test("引用が本文にもあるなら付け替えない（本文に場面がある）", () => {
+    const text = `${TEXT}\n形見の懐中時計を見つける`;
+    const { accepted } = validateEpisodePlotContrast(
+      {
+        findings: [
+          {
+            kind: "箇条書きに無い",
+            plotItem: null,
+            excerpt: "形見の懐中時計を見つける",
+            reason: "懐中時計の場面の記述は本文にない。",
+          },
+        ],
+      },
+      { items: ITEMS, text, maxFindings: 5 }
+    );
+
+    expect(accepted[0]?.kind).toBe("箇条書きに無い");
+  });
+
+  test("「主筋の改変」の札でも同じく付け替える（場面が無いなら、起きていない）", () => {
+    const { accepted } = contrast([
+      {
+        kind: "主筋の改変",
+        plotItem: null,
+        excerpt: "形見の懐中時計を見つける",
+        reason: "懐中時計を見つける場面の描写は本文にない。",
+      },
+    ]);
+
+    expect(accepted[0]).toMatchObject({ kind: "出来事の欠落", plotLine: 11 });
+  });
+
+  test("引用が箇条書きのどの行にも当たらなければ付け替えない", () => {
+    const { accepted, rejected } = contrast([
+      {
+        kind: "箇条書きに無い",
+        plotItem: null,
+        excerpt: "ミナが剣を抜く",
+        reason: "剣を抜く場面は本文に存在しないため。",
+      },
+    ]);
+
+    expect(accepted).toEqual([]);
+    expect(rejected[0].reason).toBe("excerpt_not_found");
+  });
+});
+
+/**
+ * 1.3 で足した「主筋の改変」（作者の裁定、2026-09-25 昼）。
+ *
+ * 箇条書きの出来事は本文でも起きているが、結果や決断が違う方向へ進んでいる。
+ * **変わった元の行が要る**（どの筋と違うのかを作者が読めないため）。
+ */
+describe("P-28 主筋の改変", () => {
+  const CHANGE = EPISODE_PLOT_CONTRAST_KINDS[3];
+
+  test("種別の並びは変えずに末尾へ足した（添え字で引く検証とテストを壊さない）", () => {
+    expect([...EPISODE_PLOT_CONTRAST_KINDS]).toEqual([
+      "箇条書きに無い",
+      "出来事の欠落",
+      "順序の食い違い",
+      "主筋の改変",
+    ]);
+  });
+
+  test("箇条書きの行と本文の場面の両方を指していれば通る", () => {
+    const { accepted, rejected } = contrast([
+      {
+        kind: CHANGE,
+        plotItem: "老人が訪ねてくる",
+        excerpt: "老人が訪ねてきた。",
+        reason: "箇条書きでは訪ねてくるだけだが、本文では追い返している。",
+      },
+    ]);
+
+    expect(rejected).toEqual([]);
+    expect(accepted[0]).toMatchObject({
+      kind: CHANGE,
+      plotItem: "老人が訪ねてくる",
+      plotLine: 12,
+      line: 3,
+    });
+  });
+
+  test("変わった元の行を指していなければ捨てる（「箇条書きに無い」かどうかを推し量らない）", () => {
+    const { accepted, rejected } = contrast([
+      {
+        kind: CHANGE,
+        plotItem: null,
+        excerpt: "老人が訪ねてきた。",
+        reason: "結末が逆になっている。",
+      },
+    ]);
+
+    expect(accepted).toEqual([]);
+    expect(rejected[0].reason).toBe("change_without_item");
+    expect(describeEpisodePlotRejects(rejected)).toContain("改変の元の行を指していない");
+  });
+
+  test("引用が空で「無い」と言い切っていれば「出来事の欠落」へ付け替える", () => {
+    const { accepted } = contrast([
+      {
+        kind: CHANGE,
+        plotItem: "形見の懐中時計を見つける",
+        excerpt: null,
+        reason: "懐中時計を見つける場面は描かれていない。",
+      },
+    ]);
+
+    expect(accepted[0]?.kind).toBe("出来事の欠落");
+  });
+
+  test("引用が空でも「無い」と言っていなければ、改変のまま残す（飛び先は話の先頭）", () => {
+    const { accepted } = contrast([
+      {
+        kind: CHANGE,
+        plotItem: "老人が訪ねてくる",
+        excerpt: null,
+        reason: "老人は訪ねてくるが、箇条書きと逆に主人公を責める。",
+      },
+    ]);
+
+    expect(accepted[0]).toMatchObject({ kind: CHANGE, excerpt: null, line: null });
+  });
+
+  describe("理由で自分の指摘を打ち消している答え（順序の網と同じ作り）", () => {
+    test.each([
+      "結果は箇条書きどおりだが、描写がより詳しい。",
+      "結末は箇条書きと一致している。",
+      "決断の方向は箇条書きと同じである。",
+      "食い違いは特にない。",
+    ])("言い切った打ち消しは落とす：%s", (reason) => {
+      const { accepted, rejected } = contrast([
+        { kind: CHANGE, plotItem: "老人が訪ねてくる", excerpt: "老人が訪ねてきた。", reason },
+      ]);
+
+      expect(accepted).toEqual([]);
+      expect(rejected[0].reason).toBe("self_denied");
+    });
+
+    test.each([
+      // 疑問・理由の形は打ち消しと読まない（0.86.1 の教訓）
+      "結果が箇条書きどおりか、確かめる必要がある。",
+      // 違う方向を言い切っていれば、打ち消しが混ざっても残す
+      "前半の結果は箇条書きどおりだが、最後の決断は逆になっている。",
+      "結末が箇条書きと異なる。",
+    ])("打ち消しと読まない：%s", (reason) => {
+      const { accepted } = contrast([
+        { kind: CHANGE, plotItem: "老人が訪ねてくる", excerpt: "老人が訪ねてきた。", reason },
+      ]);
+
+      expect(accepted).toHaveLength(1);
+    });
+
+    test("結果の網は「主筋の改変」にだけ当てる（ほかの種別の理由で言っても落とさない）", () => {
+      const { accepted } = contrast([
+        {
+          kind: EPISODE_PLOT_CONTRAST_KINDS[0],
+          plotItem: null,
+          excerpt: "窓の外で雨が降っていた。",
+          reason: "結果は箇条書きどおりだが、雨の場面は箇条書きに無い。",
+        },
+      ]);
+
+      expect(accepted).toHaveLength(1);
+    });
+  });
+});
+
+/**
+ * 1.3 で種別の説明の言葉を指示に足した。**指示の言葉は理由の欄にそのまま返ってくる**
+ * （失敗3）ので、説明をなぞっただけの理由は中身の無い答えとして捨てる。
+ */
+describe("P-28 種別の説明をなぞっただけの理由", () => {
+  test.each([
+    ["主筋の改変", "箇条書きの出来事は本文でも起きているが、結果や決断が箇条書きと逆になっている"],
+    ["箇条書きに無い", "箇条書きのどの行にも当たらない出来事が、本文で起きている。"],
+    ["出来事の欠落", "（箇条書きにある出来事が、本文で起きていない）"],
+  ])("%s の説明を写しただけなら捨てる", (kind, reason) => {
+    const { accepted, rejected } = contrast([
+      { kind, plotItem: "老人が訪ねてくる", excerpt: "老人が訪ねてきた。", reason },
+    ]);
+
+    expect(accepted).toEqual([]);
+    expect(rejected[0].reason).toBe("placeholder");
+  });
+
+  test("説明の言葉を含んでいても、中身があれば通す（丸ごと同じときだけ捨てる）", () => {
+    const { accepted } = contrast([
+      {
+        kind: "主筋の改変",
+        plotItem: "老人が訪ねてくる",
+        excerpt: "老人が訪ねてきた。",
+        reason: "結果や決断が箇条書きと違う方向へ進んでいる：老人を追い返している。",
+      },
+    ]);
+
+    expect(accepted).toHaveLength(1);
   });
 });

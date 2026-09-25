@@ -13,6 +13,7 @@ import {
 } from "../prompts/episodePlotCheck";
 import {
   EPISODE_PLOT_CONTRAST_HINTS,
+  EPISODE_PLOT_CONTRAST_KIND_ALIASES,
   EPISODE_PLOT_CONTRAST_KINDS,
   type EpisodePlotContrastKind,
 } from "../prompts/episodePlotContrast";
@@ -58,7 +59,9 @@ export type EpisodePlotRejectReason =
   /** 目標の節が空なのに、目標の観点で指摘した（P-27） */
   | "no_goal"
   /** 理由の中で、自分の指摘を打ち消している（P-28） */
-  | "self_denied";
+  | "self_denied"
+  /** 「主筋の改変」なのに、変わった元の箇条書きの行を指していない（P-28） */
+  | "change_without_item";
 
 export interface RejectedEpisodePlotFinding {
   raw: unknown;
@@ -80,6 +83,23 @@ export function matchPlotItem(
   raw: string,
   items: readonly EpisodePlotItem[]
 ): EpisodePlotItem | undefined {
+  const found = matchPlotItemAsWritten(raw, items);
+  if (found) return found;
+  // **番号ごと写してくる。** P-28 は順序を見るため箇条書きに番号を振って
+  // 渡しており（「1. 〜」）、gemma4:e4b は「2. 受付嬢のメアリーが〜」と
+  // 番号ごと返した（2026-09-25 の測定で18件がこれで落ちた）。
+  // **写したまま当ててから**外す——行そのものが「3日後、〜」のように
+  // 数字で始まることもあるので、先に外すと別の行に当たりうる
+  const unnumbered = stripListNumber(raw);
+  return unnumbered === raw
+    ? undefined
+    : matchPlotItemAsWritten(unnumbered, items);
+}
+
+function matchPlotItemAsWritten(
+  raw: string,
+  items: readonly EpisodePlotItem[]
+): EpisodePlotItem | undefined {
   const needle = normalizeForComparison(raw);
   if (!needle) return undefined;
 
@@ -93,6 +113,16 @@ export function matchPlotItem(
   return items.find((item) =>
     normalizeForComparison(item.text).includes(needle)
   );
+}
+
+/**
+ * 行の頭の番号（「2. 」「２．」「2) 」「2、」）を外す。
+ *
+ * 番号の後ろに区切りがあるものだけを番号と読む。「3日後、」のように
+ * 数字の直後に字が続くものは行の中身なので外さない。
+ */
+function stripListNumber(raw: string): string {
+  return raw.replace(/^\s*[0-9０-９]{1,3}\s*[.．、,，)）:：]\s*/u, "");
 }
 
 /**
@@ -172,6 +202,7 @@ const REJECT_REASON_LABELS: Record<EpisodePlotRejectReason, string> = {
   over_budget: "件数の上限超え",
   no_goal: "目標が書かれていないのに目標で判断",
   self_denied: "理由で自分の指摘を打ち消している",
+  change_without_item: "改変の元の行を指していない",
 };
 
 /**
@@ -373,10 +404,7 @@ export function validateEpisodePlotContrast(
       continue;
     }
 
-    const labeledKind = normalizeKind(
-      asString(entry.kind),
-      EPISODE_PLOT_CONTRAST_KINDS
-    );
+    const labeledKind = normalizeContrastKind(asString(entry.kind));
     if (!labeledKind) {
       rejected.push({ raw: entry, reason: "unknown_kind" });
       continue;
@@ -389,19 +417,33 @@ export function validateEpisodePlotContrast(
 
     // 「無い」を言葉で書いてくることがある（`null` ではなく「該当なし」）。
     // 中身の無い言葉は、指していないものとして扱う
-    const rawItem = usableOrEmpty(asString(entry.plotItem));
-    const rawExcerpt = usableOrEmpty(asString(entry.excerpt));
+    let rawItem = usableOrEmpty(asString(entry.plotItem));
+    let rawExcerpt = usableOrEmpty(asString(entry.excerpt));
+
+    // **箇条書きの行を引用の欄に写してきたら、箇条書きの欄へ移す**
+    // （`bulletCopiedAsExcerpt`）。移したあとは下の札の付け替えが
+    // 「出来事の欠落」へ直す（引用は空、行を指す、理由は「無い」）
+    const copied = bulletCopiedAsExcerpt(
+      rawItem,
+      rawExcerpt,
+      reason,
+      input
+    );
+    if (copied) {
+      rawItem = copied;
+      rawExcerpt = "";
+    }
 
     // **札の貼り違いを直す**（`isMislabeledAbsence`）。付け替えてから
     // 打ち消しの網を当てる——網は種別ごとに違うので、先に当てると
-    // 「起きていない」の指摘を順序の網で見ることになる
+    // 「出来事の欠落」の指摘を順序の網で見ることになる
     const kind: EpisodePlotContrastKind = isMislabeledAbsence(
       labeledKind,
       rawItem,
       rawExcerpt,
       reason
     )
-      ? "起きていない"
+      ? "出来事の欠落"
       : labeledKind;
 
     // **理由の中で、自分の指摘を打ち消している答えを通さない**（`deniesOwnContrast`）
@@ -411,6 +453,13 @@ export function validateEpisodePlotContrast(
     }
     if (!rawItem && !rawExcerpt) {
       rejected.push({ raw: entry, reason: "nothing_pointed" });
+      continue;
+    }
+    // **「主筋の改変」は、変わった元の行が要る。** 本文の場面だけでは、
+    // 箇条書きのどの筋と違う方向なのかを作者が読めない（それは
+    // 「箇条書きに無い」の形）。どちらと読むかをコードが推し量らずに捨てる
+    if (kind === "主筋の改変" && !rawItem) {
+      rejected.push({ raw: entry, reason: "change_without_item" });
       continue;
     }
 
@@ -423,7 +472,7 @@ export function validateEpisodePlotContrast(
         continue;
       }
       line = located.line;
-      excerpt = rawExcerpt;
+      excerpt = located.excerpt;
     }
 
     let plotItem: string | null = null;
@@ -486,13 +535,27 @@ export function validateEpisodePlotContrast(
 function locateGroundedExcerpt(
   text: string,
   excerpt: string
-): { line: number } | "excerpt_too_long" | "excerpt_not_found" {
+):
+  | { line: number; excerpt: string }
+  | "excerpt_too_long"
+  | "excerpt_not_found" {
   // **段落をまるごと写してくる。** それは引用ではない（P-11と同じ）
   if (excerpt.length > MAX_EXCERPT_CHARS) return "excerpt_too_long";
   // **本文に無い文を引いてくる。** 箇条書きの側の文をそのまま
   // 「本文にこうある」と言うことがある（矛盾検知で実際に起きた）
   const line = lineOfExcerpt(text, excerpt);
-  return line === null ? "excerpt_not_found" : { line };
+  if (line !== null) return { line, excerpt };
+  // **台詞の途中から引いて、頭に「「」を足してくる**（1.2 の答えで e4b の
+  // 「本文に無い引用」7件中7件、26b の8件中4件）。かっこの内側が本文に
+  // そのままあれば、外した形を引用として残す（作者に本文に無い字を読ませない）
+  const unquoted = excerpt.replace(/^[「『]+|[」』]+$/gu, "");
+  if (unquoted === excerpt || normalizeForComparison(unquoted).length < 4) {
+    return "excerpt_not_found";
+  }
+  const unquotedLine = lineOfExcerpt(text, unquoted);
+  return unquotedLine === null
+    ? "excerpt_not_found"
+    : { line: unquotedLine, excerpt: unquoted };
 }
 
 /**
@@ -531,7 +594,7 @@ function readOrderPartner(
     swappedItem: partner.text,
     swappedPlotLine: partner.line,
     // 本文に無い引用は添えない（作者に存在しない文を読ませない）
-    swappedExcerpt: grounded ? rawPartnerExcerpt : null,
+    swappedExcerpt: grounded ? located.excerpt : null,
     swappedLine: grounded ? located.line : null,
   };
 }
@@ -545,6 +608,9 @@ function readOrderPartner(
  * **「箇条書きに無い」**を付けて同じ形で返した（第3・14話。plotItem に足した行、
  * 理由は「記述が本文にないため」）。どちらも中身は「起きていない」の指摘である。
  * 相手が無いと落とす・札のまま出すと、**仕込みの見逃しが増える**ので付け替える。
+ * （1.3 で「起きていない」は「出来事の欠落」へ名前を替えた。付け替え先もそちら。
+ * 1.3 で足した「主筋の改変」も、引用が空で「無い」と言い切っていれば付け替える
+ * ——場面が無いなら、違う方向へ進んだのではなく起きていない）
  *
  * 付け替えるのは、**箇条書きの行を指し、引用が空で、理由が「無い」と
  * 言い切っている**ときだけ。
@@ -561,11 +627,44 @@ function isMislabeledAbsence(
   reason: string
 ): boolean {
   return (
-    kind !== "起きていない" &&
+    kind !== "出来事の欠落" &&
     Boolean(plotItem) &&
     !excerpt &&
     ABSENCE_PATTERN.test(reason)
   );
+}
+
+/**
+ * 箇条書きの行を、箇条書きの欄ではなく**引用の欄**に写してきた「無い」の指摘か。
+ * そうなら、写してきた文を返す（箇条書きの欄へ移すため）。
+ *
+ * 2026-09-25 の測定（gemma4:26b・仕込みの第1話。1.0 から毎回同じ形）で、
+ * 足した出来事「ギルド長が突然辞任を発表し、ホンゴーが後任に指名される」を
+ * `excerpt` に写し、`plotItem` は null、kind は「箇条書きに無い」、理由は
+ * 「〜場面が本文に存在しないため」と返した。引用が本文に無いので落ち、
+ * 仕込みを見逃していた。
+ *
+ * 移すのは、次の4つが揃うときだけ。
+ *   - 箇条書きの欄が空（両方埋まっていれば、どちらかを推し量らない）
+ *   - 引用が箇条書きの行に当たる（`matchPlotItem`。写し方の揺れは許す）
+ *   - 引用が本文には無い（本文にもあるなら、本当に本文の引用である）
+ *   - 理由が「無い」と言い切っている（`ABSENCE_PATTERN`。言っていなければ、
+ *     行を写し間違えただけかもしれない）
+ *
+ * 札は問わない（「箇条書きに無い」でも「出来事の欠落」でも中身は同じ）。
+ * 付け替えそのものは `isMislabeledAbsence` が行う。
+ */
+function bulletCopiedAsExcerpt(
+  plotItem: string,
+  excerpt: string,
+  reason: string,
+  input: { items: readonly EpisodePlotItem[]; text: string }
+): string | undefined {
+  if (plotItem || !excerpt) return undefined;
+  if (!ABSENCE_PATTERN.test(reason)) return undefined;
+  if (!matchPlotItem(excerpt, input.items)) return undefined;
+  if (lineOfExcerpt(input.text, excerpt) !== null) return undefined;
+  return excerpt;
 }
 
 /**
@@ -618,18 +717,42 @@ const ORDER_AFFIRMATION_PATTERN =
   /(逆|反対)(に|の順|の並び)|入れ替わって(いる|います|おり)(?!の?か)|(順序|順番|並び)(が|は)?[^。．！!？?\n]{0,20}?(異な(る|り|って)|違って|違う)(?!の?か)|食い違って(いる|います|おり)(?!の?か)|より(も)?(前|先)に(描かれ|起き|来|置かれ)/;
 
 /**
+ * 「結果（結末・決断・筋）は箇条書きどおり」と**言い切った**形（「主筋の改変」の打ち消し）。
+ *
+ * 順序の網（`ORDER_DENIAL_PATTERN`）と同じ作り。箇条書きどおりの話に順序の
+ * 指摘を挙げて「順序は合致しているが」と書いてきた型が、1.3 で足した
+ * 「主筋の改変」でも起きる前提で置く（配列があると何か埋めようとする）。
+ * 疑問・理由の形（か・ため・ので・から）は打ち消しと読まない（0.86.1 の教訓）。
+ * **「主筋の改変」の指摘にだけ当てる。**
+ */
+const CHANGE_DENIAL_PATTERN =
+  /(結果|結末|決断|結論|筋|方向)(は|も|が)?[^。．！!？?\n]{0,30}?((合致|一致)して(いる|います|おり)|(とおり|通り|どおり)(だ|です|で(ある|あり)|に(進|描かれ|な))|同じ(だ|です|で(ある|あり)))(?!の?か|ため|ので|から)/;
+
+/**
+ * 違う方向へ進んでいると**言い切っている**部分。打ち消しの言葉が混ざっていても
+ * 残す（「前半の結果は箇条書きどおりだが、最後の決断は逆になっている」を落とさない）。
+ */
+const CHANGE_AFFIRMATION_PATTERN =
+  /(逆|反対)(に|の|だ|で|と)|異な(る|り|って)(?!の?か)|違(う|って)(方向|結果|結末|決断|いる|います|おり)(?!の?か)|食い違って(いる|います|おり)(?!の?か)/;
+
+/**
  * 理由の中で、自分の指摘を打ち消しているか（P-28）。
  *
- * 種別ごとに見る。順序の網は「順序の食い違い」にだけ当て、
- * 「食い違いはない」の網はどの種別にも当てる。
+ * 種別ごとに見る。順序の網は「順序の食い違い」にだけ、結果の網は
+ * 「主筋の改変」にだけ当て、「食い違いはない」の網はどの種別にも当てる。
  */
 export function deniesOwnContrast(
   kind: EpisodePlotContrastKind,
   reason: string
 ): boolean {
   if (ORDER_AFFIRMATION_PATTERN.test(reason)) return false;
+  if (kind === "主筋の改変" && CHANGE_AFFIRMATION_PATTERN.test(reason)) {
+    return false;
+  }
   if (CONTRAST_DENIAL_PATTERN.test(reason)) return true;
-  return kind === "順序の食い違い" && ORDER_DENIAL_PATTERN.test(reason);
+  if (kind === "順序の食い違い") return ORDER_DENIAL_PATTERN.test(reason);
+  if (kind === "主筋の改変") return CHANGE_DENIAL_PATTERN.test(reason);
+  return false;
 }
 
 // ── 共通の小物 ───────────────────────────────────
@@ -653,6 +776,25 @@ function normalizeKind<T extends string>(
   const starts = kinds.find((kind) => trimmed.startsWith(kind));
   if (starts) return starts;
   return kinds.find((kind) => trimmed.includes(kind));
+}
+
+/**
+ * P-28 の種別を読む。**1.2 までの名前（「起きていない」）も今の種別として読む。**
+ *
+ * 1.3 で「起きていない」を「出来事の欠落」へ名前を替えた（同じ観点。
+ * プロンプト設計書 P-28）。指示文から消しても前の言い方で返ってくることがあり、
+ * 知らない種別として捨てると、本物の欠落を見逃す。
+ */
+function normalizeContrastKind(
+  raw: string
+): EpisodePlotContrastKind | undefined {
+  const current = normalizeKind(raw, EPISODE_PLOT_CONTRAST_KINDS);
+  if (current) return current;
+  const trimmed = raw.trim();
+  const alias = Object.keys(EPISODE_PLOT_CONTRAST_KIND_ALIASES).find((old) =>
+    trimmed.includes(old)
+  );
+  return alias ? EPISODE_PLOT_CONTRAST_KIND_ALIASES[alias] : undefined;
 }
 
 /**

@@ -303,7 +303,7 @@ describe("単話プロットの判定を出す", () => {
     const panel = panelWithView();
     panel.showEpisodePlotContrast(work, plotPath, episodePath, [
       {
-        kind: "起きていない",
+        kind: "出来事の欠落",
         plotItem: "・主人公が家を出る",
         plotLine: 5,
         excerpt: null,
@@ -325,6 +325,51 @@ describe("単話プロットの判定を出す", () => {
       note: "本文には見当たりません（飛び先は話の先頭です）",
     });
     expect(latest().items[0]).not.toHaveProperty("suggestion");
+  });
+
+  /*
+    1.3 で足した「主筋の改変」（作者の裁定 2026-09-25 昼）。札は種別の名前そのまま、
+    場面はあるので本文のその行へ飛び、注記で「結果や決断が箇条書きと逆」と言う
+  */
+  test("主筋の改変は、札に種別を出し、本文の場面へ飛び、結果や決断が逆になったことを注記する", () => {
+    const panel = panelWithView();
+    panel.showEpisodePlotContrast(work, plotPath, episodePath, [
+      {
+        kind: "主筋の改変",
+        plotItem: "・主人公が家を出る",
+        plotLine: 5,
+        excerpt: "結局、家に残ることにした。",
+        line: 12,
+        reason: "箇条書きでは家を出るが、本文では残る。",
+      },
+    ]);
+
+    expect(latest().items[0]).toMatchObject({
+      category: "主筋の改変",
+      settingSays: "・主人公が家を出る",
+      excerpt: "結局、家に残ることにした。",
+      line: 12,
+      note: "場面はありますが、結果や決断が箇条書きと逆になっています",
+    });
+  });
+
+  test("主筋の改変で引用が無ければ、話の先頭へ飛ぶことを断る（「見当たらない」とは言わない）", () => {
+    const panel = panelWithView();
+    panel.showEpisodePlotContrast(work, plotPath, episodePath, [
+      {
+        kind: "主筋の改変",
+        plotItem: "・主人公が家を出る",
+        plotLine: 5,
+        excerpt: null,
+        line: null,
+        reason: "結末が逆になっている。",
+      },
+    ]);
+
+    expect(latest().items[0]).toMatchObject({
+      line: 1,
+      note: "逆になった場面は示されていません（飛び先は話の先頭です）",
+    });
   });
 });
 

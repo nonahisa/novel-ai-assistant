@@ -1677,7 +1677,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         filePath: episodePath,
         fileName: path.basename(episodePath),
         chunkHash: "",
-        // 本文を指していない指摘（起きていない）は、話の頭へ飛ばす
+        // 本文を指していない指摘（出来事の欠落）は、話の頭へ飛ばす
         line: finding.line ?? 1,
         // **引用が無いときは、箇条書きのほうを見出しに出す。**
         // 空欄を出すと、何の指摘なのか分からない
@@ -1689,12 +1689,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
           ? `${finding.plotItem ?? ""}（入れ替わった相手：${finding.swappedItem}）`
           : (finding.plotItem ?? "（該当する項目はありません）"),
         textSays: finding.reason,
-        note:
-          finding.excerpt === null
-            ? "本文には見当たりません（飛び先は話の先頭です）"
-            : finding.swappedExcerpt
-              ? `相手の場面（${finding.swappedLine ?? "?"}行目）：${finding.swappedExcerpt}`
-              : "",
+        note: episodePlotContrastNote(finding),
         confidence: "medium",
         status: "pending",
         leftLabel: "箇条書きでは",
@@ -3758,6 +3753,35 @@ function proposalDetail(issue: {
 
 /** 中身の無い言い方。これが来たら説明として扱わない */
 const PLACEHOLDER = /^(なし|無し|空文字|特になし|説明)$/;
+
+/**
+ * 単話プロットと本文の照合（P-28）の1件に添える注記。
+ *
+ * **札（種別）ごとに、作者が見る場所を言う。**
+ *   - 出来事の欠落：本文に場面が無いので、飛び先が話の先頭であることを断る
+ *   - 主筋の改変（1.3）：場面はあるが、結果・決断が箇条書きと違う。
+ *     「どちらが正しい」とは言わない（箇条書きのほうが古いこともある）
+ *   - 順序の食い違い：入れ替わった相手の場面が分かっていれば、その場所
+ */
+function episodePlotContrastNote(finding: {
+  kind: string;
+  excerpt: string | null;
+  swappedExcerpt?: string | null;
+  swappedLine?: number | null;
+}): string {
+  if (finding.excerpt === null) {
+    return finding.kind === "主筋の改変"
+      ? "逆になった場面は示されていません（飛び先は話の先頭です）"
+      : "本文には見当たりません（飛び先は話の先頭です）";
+  }
+  if (finding.swappedExcerpt) {
+    return `相手の場面（${finding.swappedLine ?? "?"}行目）：${finding.swappedExcerpt}`;
+  }
+  if (finding.kind === "主筋の改変") {
+    return "場面はありますが、結果や決断が箇条書きと逆になっています";
+  }
+  return "";
+}
 
 // 「まだ手を付けていないか」の判定は `core/proposalBuckets.ts` にある
 // （分類ごとの件数を数えるのにも使うため、VS Codeに依らない側へ置いた）
