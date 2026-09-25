@@ -8,6 +8,12 @@ import {
   type ProviderAndModelPick,
 } from "../ai/registry";
 import { EXTRACT_MODEL_ADVICE, TYPO_MODEL_ADVICE } from "../core/requirements";
+import {
+  asVerdictFeature,
+  describeVerdictCount,
+  findVerdictCount,
+  type VerdictCount,
+} from "../core/verdictTally";
 import { cancelItem } from "../views/dialogs";
 import { notifyDone } from "../views/notify";
 
@@ -22,8 +28,15 @@ import { notifyDone } from "../views/notify";
  * **割り当てていない機能は、AI設定で選んだ既定のAIを使う。**
  * 「機能別割当が有効か」のフラグは持たない（設計書6.28.7）。
  */
-export async function assignFeatureAI(registry: AIRegistry): Promise<void> {
-  const feature = await pickFeature(registry);
+export async function assignFeatureAI(
+  registry: AIRegistry,
+  /**
+   * 作者が採った・退けた指摘の数（設計書6.49.7。書庫のすべての作品の合計）。
+   * 渡されなければ、行に率を出さないだけで割当はできる
+   */
+  verdicts: readonly VerdictCount[] = []
+): Promise<void> {
+  const feature = await pickFeature(registry, verdicts);
   if (!feature) return;
 
   const target = await pickTarget(registry, feature);
@@ -76,9 +89,33 @@ const MODEL_SIZE_ADVICE: Partial<Record<AssignableFeature, string>> = {
   extract: EXTRACT_MODEL_ADVICE,
 };
 
+/**
+ * その行のモデルの指摘を、作者がどれだけ採ったか（設計書6.49.7）。
+ *
+ * **判断が1件も無ければ何も言わない**（全部の行に「まだ0件」が並ぶと、
+ * 肝心の行が埋もれる。`MODEL_SIZE_ADVICE` と同じ考え方）。
+ * 数える機能でなければ（抽出・生成・相談など）何も言わない。
+ */
+function verdictNoteFor(
+  registry: AIRegistry,
+  feature: AssignableFeature,
+  verdicts: readonly VerdictCount[]
+): string | undefined {
+  const counted = asVerdictFeature(feature);
+  if (!counted) return undefined;
+  const assigned = registry.assignments()[feature];
+  const providerId = assigned?.provider ?? registry.selectedProviderId;
+  const model = assigned?.model ?? registry.selectedModel;
+  if (!providerId || !model) return undefined;
+  const count = findVerdictCount(verdicts, providerId, model, counted);
+  if (!count) return undefined;
+  return `${model} の指摘：${describeVerdictCount(count)}`;
+}
+
 /** どの機能の割当を変えるか。いまの割当を各行に出す */
 async function pickFeature(
-  registry: AIRegistry
+  registry: AIRegistry,
+  verdicts: readonly VerdictCount[]
 ): Promise<AssignableFeature | undefined> {
   const assignments = registry.assignments();
 
@@ -89,15 +126,22 @@ async function pickFeature(
         const provider = assigned
           ? registry.getProvider(assigned.provider)
           : undefined;
+        // **モデルの大きさで結果が変わる機能だけ、その場で言う**
+        // （作者の裁定 2026-09-06）。全部の行に説明を付けると、
+        // 肝心の1行が埋もれる。作者が採った率（6.49.7）は、
+        // 判断の記録がある行にだけ並べる
+        const detail = [
+          MODEL_SIZE_ADVICE[feature],
+          verdictNoteFor(registry, feature, verdicts),
+        ]
+          .filter((text): text is string => Boolean(text))
+          .join("　");
         return {
           label: ASSIGNABLE_FEATURE_LABELS[feature],
           description: assigned
             ? `割当: ${provider?.displayName ?? assigned.provider} / ${assigned.model}`
             : "既定のAIを使う",
-          // **モデルの大きさで結果が変わる機能だけ、その場で言う**
-          // （作者の裁定 2026-09-06）。全部の行に説明を付けると、
-          // 肝心の1行が埋もれる
-          detail: MODEL_SIZE_ADVICE[feature],
+          detail: detail || undefined,
           feature,
         };
       }),

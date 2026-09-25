@@ -178,6 +178,9 @@ function toItem(
     detail: finding.message,
     confidence: "medium",
     status: "pending",
+    // **出したときのAIを持ち越す**（設計書6.49.7）。いまの割当で引き直すと、
+    // あいだに割当を替えていれば別のモデルの手柄になる
+    producedBy: finding.producer,
   };
 }
 
@@ -218,6 +221,7 @@ function toContradiction(
     status: "pending",
     openTarget: "none",
     allowRecheck: false,
+    producedBy: finding.producer,
   };
 }
 

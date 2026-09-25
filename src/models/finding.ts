@@ -82,6 +82,25 @@ export interface Finding {
    * 逸脱の指摘が「設定では」と読める形で戻ってしまう。
    */
   compared?: FindingComparison;
+  /**
+   * どのAIが出した指摘か（設計書6.49.7）。
+   *
+   * **作者が採った率をモデルごとに数えるために要る。** 置き場から戻した
+   * 指摘を何日か後に採ったとき、その時点の割当を引くと、あいだに割当を
+   * 替えていれば別のモデルの手柄になる。出したときに控えておく。
+   *
+   * **番号（`id`）には混ぜない。** 同じ箇所の同じ直しを別のモデルが出したら、
+   * 作者にとっては同じ指摘である（二重に並べない）。
+   *
+   * 0.89.6 までの記録には無い（そのときは数えない）。
+   */
+  producer?: FindingProducer;
+}
+
+/** 指摘を出したAI（`Finding.producer`） */
+export interface FindingProducer {
+  providerId: string;
+  model: string;
 }
 
 /** 左右に並べる指摘の中身（`Finding.compared`） */
@@ -224,6 +243,7 @@ function toFindingLine(value: unknown): FindingLine | undefined {
       category: toCategory(record.category),
       label: str(record.label),
       compared: toComparison(record.compared),
+      producer: toProducer(record.producer),
     };
   }
 
@@ -373,6 +393,21 @@ function toComparison(value: unknown): FindingComparison | undefined {
     right,
     note: str(record.note),
   };
+}
+
+/**
+ * 指摘を出したAI（`Finding.producer`）を読む。
+ *
+ * **片方でも欠けていれば読まない**（`undefined`）。モデルの名前だけ、
+ * プロバイダだけでは、どのモデルの手柄か決められない。
+ */
+function toProducer(value: unknown): FindingProducer | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  const providerId = str(record.providerId);
+  const model = str(record.model);
+  if (!providerId || !model) return undefined;
+  return { providerId, model };
 }
 
 function toCategory(value: unknown): FindingCategory {

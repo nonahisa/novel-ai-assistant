@@ -45,7 +45,14 @@ import {
 // **判断のあと、シーンメモの横の一覧にも効かせる**（設計書6.96.5）。
 // あちらは本文の保存でしか読み直さないので、知らせないと片方だけ残る
 import { refreshSceneMemoFindings, SCENE_MEMO_VIEW_TYPE } from "./sceneMemoPanel";
-import type { FindingStatus } from "../models/finding";
+import type { FindingProducer, FindingStatus } from "../models/finding";
+// 作者が採った・退けたを、指摘を出したモデルごとに数える（設計書6.49.7）
+import {
+  recordVerdictSubject,
+  verdictFeatureOf,
+  type VerdictStatus,
+} from "../core/verdictTally";
+import { appendVerdict } from "./verdictStore";
 import {
   countIncoming,
   describeBadgeTooltip,
@@ -305,6 +312,12 @@ export interface ProposalViewItem {
     replacement: string[];
     expectedHash: string;
   };
+  /**
+   * どのAIが出した指摘か（設計書6.49.7）。**届いたときに `replaceContents` が
+   * 付ける**（置き場から戻したものは、残しておいた値を持って来る）。
+   * 無ければ採った・退けたを数えない。
+   */
+  producedBy?: FindingProducer;
 }
 
 /**
@@ -411,6 +424,8 @@ export interface ContradictionViewItem {
    * ことにならないのに、確かめたように見える。
    */
   allowRecheck?: boolean;
+  /** どのAIが出した指摘か（設計書6.49.7。`ProposalViewItem.producedBy` と同じ） */
+  producedBy?: FindingProducer;
 }
 
 /**
@@ -518,6 +533,13 @@ export interface RecordUpdateViewItem {
    * 同じ描画を使い回すために持たせる（無ければこれまでどおり「反映する」）。
    */
   applyLabel?: string;
+  /**
+   * どのAIが出した案か（設計書6.49.7）。**伏線の候補・回収の候補だけが持つ**
+   * （`verdictFeatureOf` が数える分類）。設定資料の更新は承認待ちのファイルから
+   * 読み直すことがあり、出したAIを後から確かめられないので付けない。
+   * `source`（どの話から来たか）・`origin`（外部AIか）とは別の話である。
+   */
+  producedBy?: FindingProducer;
 }
 
 type OutgoingMessage = IssuesMessage | RunningMessage;
@@ -935,6 +957,11 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       受け止めて記録へ落とす）。
     */
     if (!options.restored) {
+      this.stampProducer(category, [
+        ...(contents.items ?? []),
+        ...(contents.contradictions ?? []),
+        ...(contents.recordUpdates ?? []),
+      ]);
       const drafts = [
         ...(contents.items ?? []),
         ...(contents.contradictions ?? []),
@@ -2046,7 +2073,14 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     });
     // **片付いたことは残す。** 残さないと、次に開いたときに置き場から
     // 同じ食い違いが戻ってきて、伏線へ移したはずのものをまた見ることになる
-    await this.rememberDecision(work, item, "dismissed", "伏線として登録した");
+    await this.rememberDecision(
+      work,
+      item,
+      "dismissed",
+      "伏線として登録した",
+      // 採ったとも退けたとも数えない（6.49.7）
+      false
+    );
 
     notifyDone("伏線として登録しました（伏線の一覧で見られます）。");
   }
@@ -2583,6 +2617,11 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     );
     // 承認待ちが1件減ったので、メニューの印を数え直してもらう
     if (outcome.ok) this.onCountsChanged?.();
+    // 伏線の候補を登録した・回収済みにした（設計書6.49.7。出したAIが
+    // 付いているものだけ数えるので、設定資料の更新は数えない）
+    if (outcome.ok && this.work) {
+      await this.countVerdict(this.work, update, "accepted");
+    }
     return { handled: true, dropped: outcome.dropped ?? 0 };
   }
 
@@ -2858,6 +2897,66 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   }
 
   /**
+   * 届いた指摘に、出したAIを付ける（設計書6.49.7）。
+   *
+   * **いまの割当を引く。** 検知は同じ機能の鍵で同じ割当を引いて走っており、チャンクの覚え（キャッシュ）の鍵にも
+   * プロバイダとモデルが入っているので、届いた指摘はこのモデルが出した
+   * ものである。検知の口ごとに受け渡しを足すと、口を足した人が書き忘れる
+   * ——提案パネルへ渡る道はここ1本なので、ここで付ける。
+   *
+   * **残る穴**：検知の最中に作者が割当を替えると、替えた先のモデルの手柄になる。
+   *
+   * 数えない分類（`verdictFeatureOf` が `undefined`）と、既に付いているもの
+   * （置き場から戻したもの）には触らない。
+   */
+  private stampProducer(
+    category: string,
+    rows: ReadonlyArray<
+      ProposalViewItem | ContradictionViewItem | RecordUpdateViewItem
+    >
+  ): void {
+    const feature = verdictFeatureOf(category);
+    if (!feature || !this.ai || rows.length === 0) return;
+    const resolved = this.ai.resolve(feature);
+    if (!resolved?.provider.id || !resolved.model) return;
+    const producer: FindingProducer = {
+      providerId: resolved.provider.id,
+      model: resolved.model,
+    };
+    for (const row of rows) {
+      if (!row.producedBy) row.producedBy = producer;
+    }
+  }
+
+  /**
+   * 採った・退けたを1件数える（設計書6.49.7）。
+   *
+   * **編集者モードでは数えない。** 編集部は本文を書き換えず提案として置く
+   * （適用が「採った」にならない）のに、見送りは「退けた」として残るので、
+   * 数えると退けた側へ偏る。そもそも「作者が採った率」である。
+   */
+  private async countVerdict(
+    work: WorkEntry,
+    row: ProposalViewItem | ContradictionViewItem | RecordUpdateViewItem,
+    status: VerdictStatus
+  ): Promise<void> {
+    if (isEditorMode()) return;
+    const producer = row.producedBy;
+    const feature = verdictFeatureOf(this.category);
+    if (!producer || !feature) return;
+    const subject = verdictSubjectOf(work.folderPath, this.category, row);
+    if (!subject) return;
+    await appendVerdict(work, {
+      time: new Date().toISOString(),
+      subject,
+      providerId: producer.providerId,
+      model: producer.model,
+      feature,
+      status,
+    });
+  }
+
+  /**
    * 作者の判断を、数日残す置き場へ足す（設計書6.96.4）。
    *
    * **追記するだけで、本文にも台帳にも触らない。** 採る・退けるの中身は
@@ -2870,8 +2969,25 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     item: ProposalViewItem | ContradictionViewItem,
     /** **`pending` は「戻した」** ——判断そのものを取り消す（6.96.4） */
     status: FindingStatus,
-    note = ""
+    note = "",
+    /**
+     * 採った・退けたの数（6.49.7）に入れるか。**矛盾を伏線として登録した
+     * ときだけ `false`**——「矛盾ではない」でも「指摘が当たった」でもなく、
+     * 意図した違和感だったという別の判断なので、どちらにも数えない
+     */
+    countAsVerdict = true
   ): Promise<void> {
+    if (countAsVerdict) {
+      await this.countVerdict(
+        work,
+        item,
+        status === "accepted"
+          ? "accepted"
+          : status === "dismissed"
+            ? "dismissed"
+            : "retracted"
+      );
+    }
     const draft = findingDraftOf(this.category, item);
     if (!draft) return;
     await recordFindingDecision(work, draft, status, note, item.findingId);
@@ -3207,6 +3323,16 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       target: log.target,
       suggestion: log.suggestion,
     });
+    /*
+      **手で直して片付いたものは「採った」に数える**（設計書6.49.7）。
+      作者が本文を書き直したということは、指摘が当たっていたということで
+      ある。矛盾・逸脱は「適用」の道が無いので、数えなければ採った側が
+      いつまでも0件になる。
+    */
+    const row = [...this.items, ...this.contradictions].find(
+      (entry) => entry === target
+    );
+    if (row) await this.countVerdict(work, row, "accepted");
   }
 
   /** 再チェックの結果を書き添える（状態は変えない） */
@@ -3367,6 +3493,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       );
       // 承認待ちが1件減ったので、メニューの印を数え直してもらう
       if (outcome.ok) this.onCountsChanged?.();
+      if (outcome.ok && this.work) {
+        await this.countVerdict(this.work, update, "dismissed");
+      }
       return;
     }
 
@@ -3686,6 +3815,8 @@ function findingDraftOf(
       message: [item.reason, item.detail].filter(Boolean).join("："),
       category: kind,
       label: category,
+      // 出したAI（設計書6.49.7）。置き場から戻して採ったときにも数えられるように
+      producer: item.producedBy,
     };
   }
 
@@ -3711,7 +3842,30 @@ function findingDraftOf(
       right: item.textSays,
       note: item.note,
     },
+    producer: item.producedBy,
   };
+}
+
+/**
+ * 採った・退けたの記録（設計書6.49.7）で、その1件を指す番号。
+ *
+ * **本文の指摘は、置き場の番号と同じものを使う**（`identitiesOfRow` の先頭）。
+ * 置き場から戻した指摘と検知し直した指摘が同じ番号になるので、
+ * 採ってから戻したときに正しく打ち消せる。
+ *
+ * 伏線の候補（設定資料の更新と同じ形）は置き場の番号を持たないので、
+ * 中身から作る。画面の番号（`f:チャンク:並び`）は並びに依り、
+ * 同じ候補を2回検知すると別の番号になるので使わない。
+ */
+function verdictSubjectOf(
+  workFolder: string,
+  category: string,
+  row: ProposalViewItem | ContradictionViewItem | RecordUpdateViewItem
+): string | undefined {
+  if ("changes" in row) {
+    return recordVerdictSubject(category, row.name, row.changes);
+  }
+  return identitiesOfRow(workFolder, category, row)[0];
 }
 
 /** 伏線の短い名に使う長さ。一覧の見出しになるので、長いと折り返す */

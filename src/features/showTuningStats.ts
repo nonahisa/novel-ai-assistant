@@ -31,7 +31,14 @@ import { openGeneratedMarkdown } from "../views/openDocument";
  * 測ったのはモデルの性質であって作品の性質ではないので、作者の作品と
  * 一緒にGitHubへ持ち歩かせる理由が無い。
  */
-export async function showTuningStats(registry: AIRegistry): Promise<void> {
+export async function showTuningStats(
+  registry: AIRegistry,
+  /**
+   * 表のあとに足す節（作者が採った指摘の率。設計書6.49.7）。
+   * 作品の記録を読むのは呼ぶ側の仕事なので、組み上がった文だけを受け取る
+   */
+  appendix = ""
+): Promise<void> {
   /*
     プロバイダIDを表示名へ直す。
 
@@ -61,7 +68,10 @@ export async function showTuningStats(registry: AIRegistry): Promise<void> {
   );
 
   // どの画面で読むかは作者の割り当てに任せる（`openGeneratedMarkdown`）
-  await openGeneratedMarkdown(TUNING_STATS_TITLE, markdown);
+  await openGeneratedMarkdown(
+    TUNING_STATS_TITLE,
+    appendix ? `${markdown.trimEnd()}\n\n${appendix}` : markdown
+  );
 }
 
 /**

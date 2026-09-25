@@ -110,6 +110,10 @@ const MARKDOWN_ALLOWED = new Set([
   // ターゲットシートを `設定/ターゲットシート.md` として書き出す（設計書6.108）。
   // **画面に出す文言は持たない**——通知は `features/targetSheet.ts` の側にある
   "src/core/targetSheetDoc.ts",
+  // 作者が採った指摘の率を、AIチューニングの記録（Markdownの文書）の
+  // 末尾の節として組む（設計書6.49.7）。**画面の選択肢に出す1行
+  // （`describeVerdictCount`）には記号を入れていない**
+  "src/core/verdictTally.ts",
   /*
     MCPサーバーのツールの説明文（設計書6.87.8）。
 

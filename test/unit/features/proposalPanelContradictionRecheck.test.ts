@@ -241,6 +241,9 @@ describe("再チェックが引く割当", () => {
     ]);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const id = (panel as any).items[0].id as string;
+    // **届いたときにも割当を引く**（出したAIを控えるため。設計書6.49.7）。
+    // ここで見たいのは再チェックが引く割当なので、届いたぶんは数えない
+    resolvedFeatures.length = 0;
     await pressRecheck(panel, id);
 
     expect(resolvedFeatures).toEqual(["typo"]);
@@ -250,6 +253,8 @@ describe("再チェックが引く割当", () => {
     const panel = panelWithView();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     panel.showContradictions(work, [contradiction as any]);
+    // 届いたときに引いたぶん（設計書6.49.7）は数えない。上の試験と同じ
+    resolvedFeatures.length = 0;
     await pressRecheck(panel, contradictionsOf(panel)[0].id);
 
     expect(resolvedFeatures).toEqual(["contradiction"]);

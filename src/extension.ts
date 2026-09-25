@@ -50,9 +50,11 @@ import { SUPPORTED_EXTENSIONS, WorkEntry } from "./models/types";
 import {
   AIRegistry,
   ASSIGNABLE_FEATURES,
+  ASSIGNABLE_FEATURE_LABELS,
   runSetupWizard,
   type AssignableFeature,
 } from "./ai/registry";
+import { registerTuningNudge } from "./features/tuningNudge";
 import {
   extractCharacters,
   saveDirtyDocumentsBeforeExtraction,
@@ -1252,6 +1254,10 @@ export async function activate(
   // 同期状態が変わっても本文は変わらないので、再走査はせず描き直すだけにする
   gitSync.onDidChange(() => treeProvider.redraw());
   const aiRegistry = new AIRegistry(context);
+  // 測っていないモデルに切り替えたら、AIチューニングを一言勧める（設計書6.49.8）。
+  // 選ぶ道（AI設定・機能別割当・大きいモデルの案内）はどれも選択の変更の
+  // 合図を鳴らすので、見張るのはその1か所
+  context.subscriptions.push(registerTuningNudge(context, aiRegistry));
 
   // 端末ID。「どの環境で書いたか」を区別するのに使う（設計書5.5.2）。
   // Gitへは同期しない。全環境が同じIDを名乗ると区別できなくなる
@@ -4069,7 +4075,9 @@ export async function activate(
   context.subscriptions.push(
     registerCommand("novelai.assignFeatureAI", async () => {
       const { assignFeatureAI } = await import("./features/assignFeatureAI.js");
-      await assignFeatureAI(aiRegistry);
+      const { loadVerdictCounts } = await import("./features/verdictStore.js");
+      // 各行に「作者が採った率」を添える（設計書6.49.7）。書庫の全作品の合計
+      await assignFeatureAI(aiRegistry, await loadVerdictCounts(registry.list()));
     })
   );
 
@@ -4130,7 +4138,22 @@ export async function activate(
     // **測り直さない**ので、作品もAIの呼び出しも要らない
     registerCommand("novelai.showTuningStats", async () => {
       const { showTuningStats } = await import("./features/showTuningStats.js");
-      await showTuningStats(aiRegistry);
+      const { verdictStatsSection } = await import("./features/verdictStore.js");
+      // 表のあとに「作者が採った指摘の率」を足す（設計書6.49.7）。
+      // 表示名はプロバイダ自身と割当の表から引く（写しを作らない）
+      const labels = new Map<string, string>(
+        aiRegistry
+          .listProviders()
+          .map((provider) => [provider.id, provider.displayName])
+      );
+      await showTuningStats(
+        aiRegistry,
+        await verdictStatsSection(
+          registry.list(),
+          (id) => labels.get(id) ?? id,
+          (feature) => ASSIGNABLE_FEATURE_LABELS[feature]
+        )
+      );
     })
   );
 

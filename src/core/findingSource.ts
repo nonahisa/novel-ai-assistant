@@ -6,6 +6,7 @@ import {
   type Finding,
   type FindingCategory,
   type FindingComparison,
+  type FindingProducer,
 } from "../models/finding";
 
 /**
@@ -132,6 +133,11 @@ export interface FindingDraft {
   label: string;
   /** 左右に並べる指摘（矛盾・逸脱）。置き換えの指摘は持たない */
   compared?: FindingComparison;
+  /**
+   * どのAIが出した指摘か（設計書6.49.7）。**番号には混ぜない**
+   * （`findingIdOf` は見ない）——同じ直しを別のモデルが出しても同じ指摘である
+   */
+  producer?: FindingProducer;
 }
 
 /**
@@ -209,6 +215,7 @@ export function buildFinding(
     category: draft.category,
     label: draft.label,
     compared: draft.compared,
+    producer: draft.producer,
   };
 }
 
