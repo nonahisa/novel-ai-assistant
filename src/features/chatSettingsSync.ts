@@ -9,7 +9,7 @@ import {
 } from "../ai/outputLimit";
 import { CharacterStore } from "../core/characterStore";
 import { appendChatLog } from "../core/chatLog";
-import { PendingUpdateStore } from "../core/pendingUpdates";
+import { PendingUpdateStore, type PendingUpdate } from "../core/pendingUpdates";
 import {
   chatHistoryDigest,
   formatChatConversation,
@@ -19,10 +19,12 @@ import {
   type VerifiedChatDecisions,
 } from "../core/chatSettingsSync";
 import {
-  buildNewCharacterRecords,
   buildPlotCharacterUpdates,
+  type PlotCharacterPlan,
   type PlotCharacterSkip,
 } from "../core/plotCharacterSync";
+import { describeSkipped } from "./plotCharacterSync";
+import { stageCharacterPlan } from "./stageCharacterPlan";
 import {
   logFailure,
   logStep,
@@ -347,42 +349,43 @@ export async function applyChatToSettings(
   }
 
   const verified = outcome.verified;
-  const plan = buildPlotCharacterUpdates(verified.entries, loaded.characters);
-
-  if (plan.updates.length > 0 || plan.creations.length > 0) {
-    try {
-      const store = new PendingUpdateStore(work);
-      // 出どころを添えて積む。AIが本文から読んだものと、相談で作者が
-      // 決めたものとでは、承認するときの見方が変わる
-      if (plan.updates.length > 0) {
-        await store.stage(plan.updates, { source: "chat" });
-      }
-      // 資料にまだ無い人は**新規の人物案**として積む。台帳へは書かない
-      // ——承認したときに `applyPendingUpdates` が採番して作る
-      if (plan.creations.length > 0) {
-        await store.stage(buildNewCharacterRecords(plan.creations), {
-          source: "chat",
-          kind: "creation",
-        });
-      }
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      logFailure("相談から人物の更新案を積めませんでした", {
-        作品: work.title,
-        詳細: detail,
-      });
-      void vscode.window.showWarningMessage(
-        `相談からの更新案を保留できませんでした: ${detail}`
-      );
-      // 覚え書きを残さない。もう一度押せばやり直せる
-      return { ...EMPTY, failed: true };
-    }
+  let plan: PlotCharacterPlan<PendingUpdate>;
+  try {
+    const store = new PendingUpdateStore(work);
+    /*
+      **承認待ちも突き合わせる**（設計書6.72。作者の判断、2026-09-25
+      「入れる」）。名前を直す案（主人公 → 相馬 誠）が承認待ちのうちは、
+      資料に「相馬 誠」はまだいない。名前だけで突き合わせると、相談が
+      拾った「相馬 誠」を新規に積み、先に承認すると同じ人が2人になる。
+      規則はプロットからの反映（6.4.9）と同じ部品が持つ。
+      読めないまま進めると同じことが起きるので、読めなければ止める
+      （拾ったものが無ければ、突き合わせる相手も要らないので読まない）
+    */
+    const pending =
+      verified.entries.length > 0 ? (await store.loadAll()).updates : [];
+    plan = buildPlotCharacterUpdates(verified.entries, loaded.characters, pending);
+    // 積み方もプロットからの反映と同じ部品を通る（直す案の上に重ねたら、
+    // その案の出どころと理由を残す）
+    await stageCharacterPlan(work, store, plan, pending, "chat");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    logFailure("相談から人物の更新案を積めませんでした", {
+      作品: work.title,
+      詳細: detail,
+    });
+    void vscode.window.showWarningMessage(
+      `相談からの更新案を保留できませんでした: ${detail}`
+    );
+    // 覚え書きを残さない。もう一度押せばやり直せる
+    return { ...EMPTY, failed: true };
   }
 
   await writeSyncDigest(work, STATE_FILE, STATE_KEY, digest, "相談反映");
 
   const result: ChatSettingsSyncResult = {
-    staged: plan.updates.length,
+    // 承認待ちの直す案へ重ねたものも「既存人物の更新案」に数える
+    // （相談の拾い出しは役名を持たないので、直す案を新しく置くことは無い）
+    staged: plan.updates.length + plan.pendingOverlays.length + plan.renames.length,
     creations: plan.creations.map((entry) => entry.name),
     skipped: plan.skipped,
     rejected: verified.rejected,
@@ -498,22 +501,9 @@ function describeNotes(result: ChatSettingsSyncResult): string[] {
     lines.push(`${placeholder}件は、中身が空だったため見送りました。`);
   }
 
-  const confirmed = result.skipped
-    .filter((entry) => entry.reason === "authorConfirmed")
-    .map((entry) => entry.name);
-  const ambiguous = result.skipped
-    .filter((entry) => entry.reason === "ambiguous")
-    .map((entry) => entry.name);
-  if (confirmed.length > 0) {
-    lines.push(
-      `${confirmed.join("、")}は、作者が確定させた人物なので変えていません。`
-    );
-  }
-  if (ambiguous.length > 0) {
-    lines.push(
-      `${ambiguous.join("、")}は、同じ呼び名の人物が資料に複数居るため当てられませんでした。`
-    );
-  }
+  // 突き合わせで積まなかったもの。**言い方はプロットからの反映と揃える**
+  // （規則が同じ部品にあるので、同じ理由を別の言葉で言わない）
+  lines.push(...describeSkipped(result.skipped));
 
   if (result.dropped > 0) {
     lines.push(

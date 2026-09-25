@@ -27,6 +27,12 @@ const state = vi.hoisted(() => ({
   discard: vi.fn(async () => undefined),
   write: vi.fn(async () => ({ ok: true }) as { ok: boolean; reason?: string }),
   mark: vi.fn(async () => true),
+  /** 置いた名前を直す案の記録（見送られたあと、反映の側が置き直さないため） */
+  recordOffers: vi.fn(async () => undefined),
+}));
+
+vi.mock("../../../src/features/roleRenameOffers", () => ({
+  recordRoleRenameOffers: state.recordOffers,
 }));
 
 vi.mock("../../../src/core/textFile", () => ({
@@ -354,6 +360,11 @@ describe("資料の役名の人物に名前を入れる", () => {
     expect((state.characters[0] as Character).name).toBe("主人公");
     expect(announced.join("")).toContain("主人公→相馬 誠");
     expect(announced.join("")).toContain("名前を直す案");
+    // 置いたことを記録する。作者が見送ったあと、plot.md の保存で
+    // 「プロットからの反映」が同じ案を置き直さないため（設計書6.4.9）
+    expect(state.recordOffers).toHaveBeenCalledWith(work, [
+      { id: "char_001", from: "主人公", to: "相馬 誠" },
+    ]);
   });
 
   test("作者が確定させた人物・作者が決めた呼称も、案に出すだけで中身はそのまま", async () => {

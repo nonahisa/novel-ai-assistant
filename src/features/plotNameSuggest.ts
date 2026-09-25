@@ -56,6 +56,7 @@ import { warnWithLog } from "../views/notify";
 import { reportAIError } from "./reportAIError";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { markPlotCharactersSynced } from "./plotCharacterSync";
+import { recordRoleRenameOffers } from "./roleRenameOffers";
 import { pickOrigin } from "./nameCheck";
 import {
   logFailure,
@@ -568,7 +569,14 @@ async function stagePendingCharacters(
       }
 
       if (target.ledger) {
-        const staged = await stageRename(store, ledger.characters, pending.updates, target, candidate);
+        const staged = await stageRename(
+          work,
+          store,
+          ledger.characters,
+          pending.updates,
+          target,
+          candidate
+        );
         if (staged) result.renamed.push(staged);
         else result.changed.push(target.role);
         continue;
@@ -608,6 +616,7 @@ async function stagePendingCharacters(
  *   上書きで消してしまう。出どころも先の案のものを引き継ぐ
  */
 async function stageRename(
+  work: WorkEntry,
   store: PendingUpdateStore,
   characters: readonly Character[],
   pending: readonly PendingUpdate[],
@@ -634,6 +643,12 @@ async function stageRename(
     source: previous ? previous.source : "plot",
     reason: previous?.reason ? `${previous.reason}／${reason}` : reason,
   });
+  // **置いたことを覚える**（設計書6.4.9）。作者がこの案を見送ったあと
+  // plot.md を保存すると、「主人公（相馬 誠）」の行を見たプロットからの
+  // 反映が、同じ案を置き直してしまう
+  await recordRoleRenameOffers(work, [
+    { id: current.id, from: current.name, to: candidate.name },
+  ]);
   return { from: current.name, to: candidate.name };
 }
 

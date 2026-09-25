@@ -221,11 +221,60 @@ export interface PlotCharacterSkip {
    *   抽出と同じく、こちらからは書き換えない
    * ambiguous: 同じ呼び名の人物が複数居て、寄せ先を決められない
    * sameRole: 「役名（名前）」の行で、名前の人物は居ないが、**役名の人物が
-   *   資料か承認待ちに居る**。同じ人を新規に積むと2人になるので積まない
+   *   資料か承認待ちに居る**。同じ人を新規に積むと2人になるので積まない。
+   *   名前を直す案も置けなかった（役名の人物が複数・別名で当たっただけ・
+   *   別の名前へ直す案が承認待ち・承認待ちの新規案）
+   * renameOffered: 役名の人物を直す案を**前に一度置いている**（作者が見送った）。
+   *   保存のたびに同じ案を積み直さない
    */
-  reason: "authorConfirmed" | "ambiguous" | "sameRole";
-  /** sameRole のときの役名（作者への案内に使う） */
+  reason: "authorConfirmed" | "ambiguous" | "sameRole" | "renameOffered";
+  /** sameRole・renameOffered のときの役名（作者への案内に使う） */
   role?: string;
+}
+
+/**
+ * 役名の人物を名前に直す案を置いた、という1件（「主人公 → 相馬 誠」）。
+ * **一度置いた組は二度置かない**ための鍵にする（設計書6.4.9）
+ */
+export interface RoleRenameOffer {
+  /** 資料の人物のID */
+  id: string;
+  /** 直す前の名前（資料の役名） */
+  from: string;
+  /** 直した名前 */
+  to: string;
+}
+
+/**
+ * 置いた案を比べる鍵。名前の表記ゆれ（空白・全角半角）で別物にしない。
+ * 区切り文字を自前で決めず `JSON.stringify` で綴じる（`plotCharactersDigest` と同じ）
+ */
+export function roleRenameOfferKey(offer: RoleRenameOffer): string {
+  return JSON.stringify([offer.id, normalizeName(offer.from), normalizeName(offer.to)]);
+}
+
+/** 役名の人物の名前を直す案1件（`buildPlotCharacterUpdates` の答え） */
+export interface PlotRoleRename<
+  P extends PendingCharacterProposal = PendingCharacterProposal,
+> {
+  /** 直す案（承認待ちへ積む写し） */
+  character: Character;
+  /**
+   * 同じ人物の更新案（抽出など）が承認待ちにあれば、その案。**その上に
+   * 重ねてある**——更新案のファイルは人物のIDで付くので、資料から作り直すと
+   * 先の案を上書きで消す。積むときは出どころと理由も引き継ぐ
+   */
+  base?: P;
+  from: string;
+  to: string;
+}
+
+export interface PlotCharacterUpdateOptions {
+  /**
+   * その組の直す案を、前に一度置いたか（`roleRenameOfferKey` で引く）。
+   * 置いた案が承認待ちにも無く、資料もまだ役名のままなら、作者が見送ったと読む
+   */
+  renameOffered?: (offer: RoleRenameOffer) => boolean;
 }
 
 /**
@@ -253,6 +302,11 @@ export interface PlotCharacterPlan<
    * 積むときは元の案の出どころと理由を引き継ぐ（`proposal` を返すのはそのため）
    */
   pendingOverlays: Array<{ proposal: P; character: Character }>;
+  /**
+   * 資料の役名の人物（「主人公」）を、行に書かれた名前に直す案
+   * （作者の判断、2026-09-25「直す案を置く」）。「役名（名前）」の行だけが持つ
+   */
+  renames: PlotRoleRename<P>[];
   skipped: PlotCharacterSkip[];
 }
 
@@ -276,24 +330,39 @@ export interface PlotCharacterPlan<
  *
  * 1. 承認待ちの更新案に、その名前の人物がいる（名前を直す案）
  *    → 新規にしない。紹介文が変わっていれば、その案の上に重ねる
- * 2. 「役名（名前）」の行で、資料か承認待ちの新規案に**役名の人物**がいる
+ * 2. 「役名（名前）」の行で、**資料に役名だけの人物がちょうど1人**いる
+ *    → その人物を名前に直す案を置く（`renames`。作者の判断、2026-09-25
+ *    「直す案を置く」）。案の形は名前の候補（`buildRoleRenameProposal`）と同じ
+ *    ——ただし前に同じ組の案を置いていれば（作者が見送った）、置き直さない
+ *    （`renameOffered`）
+ * 3. 2で直せないが、資料か承認待ちの新規案に**役名の人物**がいる
  *    → 新規にしない（`sameRole`）。どちらを残すかは作者が資料で決める
  *
  * 役名の人物が**集団の呼び名（モブ）**なら、その中の1人に名前を付けた
  * ことになるので、今までどおり新規に積む（名前の候補の対象から外す
  * `plotNameTargets.ts` と同じ見方）。
+ *
+ * **相談からの反映（6.72）も、ここを通る。** 相談の拾い出しは役名を持たない
+ * ので、効くのは1だけ。規則を2か所に持たない（片方だけ直すと、経路で
+ * 挙動が変わる）。
  */
 export function buildPlotCharacterUpdates<
   P extends PendingCharacterProposal = PendingCharacterProposal,
 >(
   entries: readonly PlotCharacterEntry[],
   existing: readonly Character[],
-  pending: readonly P[] = []
+  pending: readonly P[] = [],
+  options: PlotCharacterUpdateOptions = {}
 ): PlotCharacterPlan<P> {
   const updates: Character[] = [];
   const creations: PlotCharacterEntry[] = [];
   const pendingOverlays: PlotCharacterPlan<P>["pendingOverlays"] = [];
   const skipped: PlotCharacterSkip[] = [];
+  // 直す案の候補。**行を全部見てから**決める（下の「取り合い」を参照）
+  const renameCandidates: Array<{
+    entry: PlotCharacterEntry;
+    rename: PlotRoleRename<P>;
+  }> = [];
 
   const ledgerIds = new Set(existing.map((character) => character.id));
   // 更新案は、資料に本人が居るものだけを見る。本人が消えた案は承認の
@@ -326,9 +395,27 @@ export function buildPlotCharacterUpdates<
         }
         continue;
       }
-      if (entry.role && hasRoleHolder(entry.role, existing, pendingCreations)) {
-        skipped.push({ name: entry.name, reason: "sameRole", role: entry.role });
-        continue;
+      if (entry.role) {
+        const rename = planRoleRename(entry, entry.role, existing, proposals, pendingCreations);
+        if (
+          rename &&
+          options.renameOffered?.({
+            id: rename.character.id,
+            from: rename.from,
+            to: rename.to,
+          })
+        ) {
+          skipped.push({ name: entry.name, reason: "renameOffered", role: entry.role });
+          continue;
+        }
+        if (rename) {
+          renameCandidates.push({ entry, rename });
+          continue;
+        }
+        if (hasRoleHolder(entry.role, existing, pendingCreations)) {
+          skipped.push({ name: entry.name, reason: "sameRole", role: entry.role });
+          continue;
+        }
       }
       creations.push(entry);
       continue;
@@ -358,7 +445,127 @@ export function buildPlotCharacterUpdates<
     updates.push(proposal);
   }
 
-  return { updates, creations, pendingOverlays, skipped };
+  /*
+    **同じ人物へ2つの案が向かうなら、直す案は置かない**（取り合い）。
+    更新案のファイルは人物のIDで付くので、後に積んだ方が先の方を上書きで
+    消す。「主人公（相馬 誠）」と「主人公（早瀬 陸）」が並んでいる、
+    「主人公：〜」の行も残っている、のどちらも作者の書きかけで、
+    どれが正しいかはこちらで決められない
+  */
+  const claimed = new Map<string, number>();
+  for (const { rename } of renameCandidates) {
+    const id = rename.character.id;
+    claimed.set(id, (claimed.get(id) ?? 0) + 1);
+  }
+  const updatedIds = new Set(updates.map((character) => character.id));
+  const renames: PlotRoleRename<P>[] = [];
+  for (const { entry, rename } of renameCandidates) {
+    const id = rename.character.id;
+    if ((claimed.get(id) ?? 0) > 1 || updatedIds.has(id)) {
+      skipped.push({ name: entry.name, reason: "sameRole", role: entry.role });
+      continue;
+    }
+    renames.push(rename);
+  }
+
+  return { updates, creations, pendingOverlays, renames, skipped };
+}
+
+/**
+ * 「役名（名前）」の行から、資料の役名の人物を直す案を作る。置けなければ undefined。
+ *
+ * 置くのは次をすべて満たすときだけ（どれか1つでも崩れると、別の人の名前を
+ * 変える案になりうる）：
+ *
+ * - 資料で役名に当たる人物（モブを除く）が**ちょうど1人**で、その人の
+ *   **名前そのものが役名**（「主人公」）。別名に「主人公」を持つだけの
+ *   「灯」は、既に名前のある人物なので直さない
+ * - 承認待ちの新規案に、同じ役名の人物がいない（どちらが本人か決められない）
+ * - その人物の更新案が承認待ちにあるなら、それがまだ役名のまま
+ *   （**別の名前へ直す案**なら、上から重ねない。作者が承認の画面で選ぶ）
+ *
+ * `autoGenerated: false` の人物や `authorLocked` の呼称を持つ人物でも置く
+ * （名前の候補と同じ。案に出すだけで、承認するまで資料は変わらない。
+ * 実装ルール2）。ただし**紹介文は、作者が確定させた人物には重ねない**
+ * ——プロットからの反映は、確定した人物の紹介文を変える案を出さない（上の
+ * 名前で当たった行と同じ扱い）。
+ */
+function planRoleRename<P extends PendingCharacterProposal>(
+  entry: PlotCharacterEntry,
+  role: string,
+  existing: readonly Character[],
+  proposals: readonly P[],
+  pendingCreations: readonly Character[]
+): PlotRoleRename<P> | undefined {
+  const holders = findCharactersByAppellation(existing, role).filter(
+    (character) => !character.isMob
+  );
+  if (holders.length !== 1) return undefined;
+  const holder = holders[0];
+  if (normalizeName(holder.name) !== normalizeName(role)) return undefined;
+  const pendingHolders = findCharactersByAppellation(pendingCreations, role).filter(
+    (character) => !character.isMob
+  );
+  if (pendingHolders.length > 0) return undefined;
+
+  const previous = proposals.find((proposal) => proposal.character.id === holder.id);
+  if (previous && normalizeName(previous.character.name) !== normalizeName(holder.name)) {
+    return undefined;
+  }
+  const base = previous ? previous.character : holder;
+  const character = buildRoleRenameProposal(base, { name: entry.name, reading: "" });
+  // plot.md は読みを書かない。**役名の読み（「しゅじんこう」）を新しい名前に
+  // 残さない**——名前の候補は選んだ名前の読みを入れるが、ここには入れる読みが無い
+  if (normalizeName(base.name) !== normalizeName(entry.name)) character.reading = null;
+
+  const summary = clampSummary(entry.summary);
+  if (summary && holder.autoGenerated && base.autoGenerated) {
+    character.summary = summary;
+  }
+  return {
+    character,
+    ...(previous ? { base: previous } : {}),
+    from: holder.name,
+    to: entry.name,
+  };
+}
+
+/**
+ * 設定資料の**名前が役名だけの人物**（「主人公」）を、選んだ名前に直す更新案
+ * （作者の裁定、2026-09-25 午前）。名前の候補（6.4.8）とプロットからの
+ * 反映（6.4.9）の両方が使う——**置く案の形を1か所で決める**。
+ *
+ * 変えるのは3つだけ：名前を選んだ名前に、読みを選んだ名前の読みに、
+ * **元の役名は役割の欄へ**（空ならそのまま入れ、書いてあれば頭に足す。
+ * 既に含まれていれば足さない）。新しい名前と同じ別名があれば外す。
+ *
+ * **ほかの欄は1つも変えない。** 呼称（`authorLocked` のものも）・関係・
+ * 作者メモ・`autoGenerated` はそのまま——これは**更新案**で、作者が承認する
+ * まで資料は変わらない（実装ルール2。`autoGenerated: false` の人物でも、
+ * 名前を自動で書き換えはしない。案として出すだけ）。
+ * ほかの人物の呼称・関係に残る元の役名は、ここでは直さない
+ * （本文ごとの付け替えは名前の点検 6.37.3 の仕事）。
+ *
+ * 呼び出し側のレコードは書き換えない（写しを返す）。
+ *
+ * 以前は `plotNameTargets.ts` にあった（あちらから再輸出している）。
+ */
+export function buildRoleRenameProposal(
+  character: Character,
+  pick: { name: string; reading: string }
+): Character {
+  const proposal = structuredClone(character);
+  const oldName = character.name.trim();
+  const name = pick.name.trim();
+  const reading = pick.reading.trim();
+  const role = character.role?.trim() ?? "";
+
+  proposal.name = name;
+  if (reading) proposal.reading = reading;
+  proposal.role = !role ? oldName : role.includes(oldName) ? role : `${oldName}。${role}`;
+  const key = normalizeName(name);
+  proposal.aliases = character.aliases.filter((alias) => normalizeName(alias) !== key);
+  return proposal;
 }
 
 /**

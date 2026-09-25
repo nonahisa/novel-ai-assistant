@@ -29,6 +29,14 @@ const state = vi.hoisted(() => ({
   loadErrors: [] as unknown[],
   stage: vi.fn(async () => undefined),
   logged: [] as unknown[],
+  /** 既に積んである承認待ち（名前を直す案など。設計書6.4.9） */
+  pending: [] as Array<{
+    kind?: string;
+    character: unknown;
+    filePath: string;
+    source?: string;
+    reason?: string;
+  }>,
 }));
 
 vi.mock("../../../src/core/characterStore", () => ({
@@ -42,6 +50,9 @@ vi.mock("../../../src/core/characterStore", () => ({
 vi.mock("../../../src/core/pendingUpdates", () => ({
   PendingUpdateStore: class {
     stage = state.stage;
+    async loadAll() {
+      return { updates: state.pending, errors: [] };
+    }
   },
 }));
 
@@ -398,6 +409,7 @@ describe("相談を資料へ反映する", () => {
     state.logged = [];
     state.stage.mockClear();
     state.loadErrors = [];
+    state.pending = [];
     state.characters = [character("char_001", "灯", "主人公")];
 
     workspace.fs = {
@@ -552,6 +564,98 @@ describe("相談を資料へ反映する", () => {
 
     expect(result.skipped).toEqual([{ name: "灯", reason: "ambiguous" }]);
     expect(state.stage).not.toHaveBeenCalled();
+  });
+
+  /*
+    名前の候補やプロットからの反映で「主人公 → 相馬 誠」に直す案が
+    承認待ちにあるうちに、相談が「相馬 誠」を拾ったとき（作者の判断、
+    2026-09-25「入れる」）。資料にはまだ「主人公」しかいないので、
+    名前だけで突き合わせると新規に積み、先に承認すると同じ人が2人になる
+  */
+  describe("名前を直す案が承認待ちのとき", () => {
+    const hero = character("char_002", "主人公", "冒険者試験に落ちた");
+    const reason = "プロットモードで選んだ名前に直します（主人公 → 相馬 誠）。";
+    const SOMA: WorkChatTurn[] = [
+      turn("author", "相馬 誠の年齢は17歳にします。"),
+      turn("assistant", "承知しました。"),
+    ];
+
+    beforeEach(() => {
+      state.characters = [character("char_001", "灯", "主人公"), hero];
+      state.pending = [
+        {
+          filePath: "char_002.json",
+          source: "plot",
+          reason,
+          character: {
+            ...hero,
+            name: "相馬 誠",
+            reading: "そうま まこと",
+            role: "主人公",
+          },
+        },
+      ];
+    });
+
+    test("同じ人を新規に積まず、決まったことを直す案に重ねる（出どころと理由は残す）", async () => {
+      const ai = testAi(
+        answer([
+          {
+            name: "相馬 誠",
+            decided: "年齢は17歳。",
+            evidence: "相馬 誠の年齢は17歳にします",
+          },
+        ])
+      );
+
+      const result = await run(ai, SOMA);
+
+      expect(result.creations).toEqual([]);
+      expect(result.staged).toBe(1);
+      expect(state.stage).toHaveBeenCalledTimes(1);
+      const [staged, options] = state.stage.mock.calls[0] as unknown as [
+        Character[],
+        { source?: string; kind?: string; reason?: string },
+      ];
+      expect(staged).toHaveLength(1);
+      expect(staged[0]).toMatchObject({
+        id: "char_002",
+        name: "相馬 誠",
+        reading: "そうま まこと",
+        summary: "年齢は17歳。",
+      });
+      expect(options.kind).toBeUndefined();
+      // 「相談から」で塗らない。名前を直す理由が承認の画面から消える
+      expect(options.source).toBe("plot");
+      expect(options.reason).toBe(reason);
+    });
+
+    test("承認待ちが読めなければ、積まずに止める（覚え書きも残さない）", async () => {
+      const failing = vi.fn(async () => {
+        throw new Error("読めません");
+      });
+      const { PendingUpdateStore } = await import("../../../src/core/pendingUpdates");
+      const original = PendingUpdateStore.prototype.loadAll;
+      PendingUpdateStore.prototype.loadAll = failing as typeof original;
+      try {
+        const ai = testAi(
+          answer([
+            {
+              name: "相馬 誠",
+              decided: "年齢は17歳。",
+              evidence: "相馬 誠の年齢は17歳にします",
+            },
+          ])
+        );
+        const result = await run(ai, SOMA);
+
+        expect(result.failed).toBe(true);
+        expect(state.stage).not.toHaveBeenCalled();
+        expect(disk.has(statePath)).toBe(false);
+      } finally {
+        PendingUpdateStore.prototype.loadAll = original;
+      }
+    });
   });
 
   test("根拠が会話に無いものは積まず、見送った件数を伝える", async () => {

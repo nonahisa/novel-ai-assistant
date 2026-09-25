@@ -5,9 +5,7 @@ import { PendingUpdateStore, type PendingUpdate } from "../core/pendingUpdates";
 import { parsePlotMarkdown } from "../core/plotDoc";
 import { readPlotText } from "../core/plotFile";
 import {
-  buildNewCharacterRecords,
   buildPlotCharacterUpdates,
-  inheritPendingCreationFields,
   parsePlotCharacters,
   plotCharactersDigest,
   type PlotCharacterPlan,
@@ -15,6 +13,8 @@ import {
 } from "../core/plotCharacterSync";
 import { logFailure, useLogFile } from "../core/logger";
 import { readSyncDigest, writeSyncDigest } from "./syncDigest";
+import { readRoleRenameOffers } from "./roleRenameOffers";
+import { stageCharacterPlan } from "./stageCharacterPlan";
 
 /**
  * plot.md の「主要登場人物」を、設定資料の更新案として積む（設計書6.4.9）。
@@ -44,6 +44,11 @@ export interface PlotCharacterSyncResult {
   staged: number;
   /** 資料にまだ無い名前 */
   creations: string[];
+  /**
+   * 資料の役名の人物を名前に直す案として積んだもの（元の名前 → 名前）。
+   * `staged` にも数えてある
+   */
+  renamed: Array<{ from: string; to: string }>;
   /** 読めなかった行の数 */
   unparsed: number;
   /** 積まなかったものと理由 */
@@ -68,6 +73,7 @@ export interface PlotCharacterSyncOptions {
 const EMPTY: PlotCharacterSyncResult = {
   staged: 0,
   creations: [],
+  renamed: [],
   unparsed: 0,
   skipped: [],
   unchanged: false,
@@ -106,37 +112,12 @@ export async function syncPlotCharacters(
     // 相馬 誠）が承認待ちのうちは、資料に「相馬 誠」はまだいない。
     // 読めないまま進めると同じ人を新規に積むので、読めなければ止める
     const pending = (await store.loadAll()).updates;
-    plan = buildPlotCharacterUpdates(parsed.entries, loaded.characters, pending);
-
-    // 出どころを添えて積む。AIの読みと、作者が書いた文とでは、
-    // 承認するときの見方が変わる
-    if (plan.updates.length > 0) {
-      await store.stage(plan.updates, { source: "plot" });
-    }
-    // 承認待ちの案の上に重ねたものは、**元の案の出どころと理由を残す**。
-    // 「プロットから」で塗ると、名前の候補で置いた理由（主人公 → 相馬 誠）が
-    // 承認の画面から消える
-    for (const overlay of plan.pendingOverlays) {
-      await store.stage([overlay.character], {
-        source: overlay.proposal.source,
-        reason: overlay.proposal.reason,
-      });
-    }
-    // 資料にまだ無い人は**新規の人物案**として積む。台帳へは書かない
-    // ——承認したときに `applyPendingUpdates` が採番して作る
-    if (plan.creations.length > 0) {
-      // 名前の候補から選んで置いた案（設計書6.4.8）は読みを持つが、
-      // plot.md は読みを書かない。**積み直しで読みを消さない**
-      await store.stage(
-        inheritPendingCreationFields(
-          buildNewCharacterRecords(plan.creations),
-          pending
-            .filter((entry) => entry.kind === "creation")
-            .map((entry) => entry.character)
-        ),
-        { source: "plot", kind: "creation" }
-      );
-    }
+    plan = buildPlotCharacterUpdates(parsed.entries, loaded.characters, pending, {
+      // 前に置いた直す案（作者が見送ったもの）は置き直さない
+      renameOffered: await readRoleRenameOffers(work),
+    });
+    // 積み方は相談からの反映（6.72）と同じ部品を通る
+    await stageCharacterPlan(work, store, plan, pending, "plot");
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     // **記録の直前に書き先を向ける**（0.43.3 と同じ）
@@ -155,8 +136,9 @@ export async function syncPlotCharacters(
   await writeDigest(work, digest);
 
   const result: PlotCharacterSyncResult = {
-    staged: plan.updates.length + plan.pendingOverlays.length,
+    staged: plan.updates.length + plan.pendingOverlays.length + plan.renames.length,
     creations: plan.creations.map((entry) => entry.name),
+    renamed: plan.renames.map((rename) => ({ from: rename.from, to: rename.to })),
     unparsed: parsed.unparsed.length,
     skipped: plan.skipped,
     unchanged: false,
@@ -190,6 +172,14 @@ function announce(result: PlotCharacterSyncResult, force: boolean): void {
       `プロットから人物${total}件の${detail}を積みました` +
         "（「設定資料更新分反映」で確認できます）。"
     );
+    // 名前が変わる案は、紹介文の更新とは重さが違う。**どの人の名前を
+    // どう直すのか**を、承認の画面を開く前に見えるようにする
+    if (result.renamed.length > 0) {
+      parts.push(
+        `${result.renamed.map((entry) => `${entry.from}→${entry.to}`).join("、")}は、` +
+          "資料の人物の名前を直す案です（承認するまで資料は変わりません）。"
+      );
+    }
   }
 
   // **拾えなかったものを黙って捨てない。** ただし、これだけのときに
@@ -213,8 +203,14 @@ function announce(result: PlotCharacterSyncResult, force: boolean): void {
   void vscode.window.showInformationMessage([...parts, ...notes].join(""));
 }
 
-/** 積まなかった理由を、作者の言葉で1文ずつにする */
-function describeSkipped(skipped: readonly PlotCharacterSkip[]): string[] {
+/**
+ * 積まなかった理由を、作者の言葉で1文ずつにする。
+ *
+ * **相談からの反映（6.72）もこれを使う**（突き合わせの規則が同じなので、
+ * 見送りの言い方も揃える。相談の拾い出しは役名を持たないので、
+ * 役名の2つの理由は相談からは出てこない）
+ */
+export function describeSkipped(skipped: readonly PlotCharacterSkip[]): string[] {
   const lines: string[] = [];
   const confirmed = skipped
     .filter((entry) => entry.reason === "authorConfirmed")
@@ -239,6 +235,14 @@ function describeSkipped(skipped: readonly PlotCharacterSkip[]): string[] {
     lines.push(
       `${entry.name}は、設定資料か承認待ちに役名「${entry.role ?? ""}」の人物がいるため、` +
         `新しい人物としては積んでいません（その人物の名前を「${entry.name}」に直すと揃います）。`
+    );
+  }
+  // 前に置いた直す案を見送られた（設計書6.4.9）。置き直さないことを言う
+  // ——黙ると、plot.md に名前を書いたのに資料へ出てこない理由が分からない
+  for (const entry of skipped.filter((item) => item.reason === "renameOffered")) {
+    lines.push(
+      `${entry.name}は、役名「${entry.role ?? ""}」の人物の名前を直す案を前に置いたため、` +
+        "置き直していません（直す場合は、設定資料でその人物の名前を直してください）。"
     );
   }
   return lines;

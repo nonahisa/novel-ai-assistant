@@ -371,7 +371,46 @@ describe("plot.md の保存で人物の更新案を積む", () => {
     expect(options.reason).toBe(reason);
   });
 
-  test("資料に役名の人物がいれば、直す案が無くても新規に積まず、そう添える", async () => {
+  /*
+    資料に「主人公」がいて、直す案が無いとき（作者の判断、2026-09-25
+    「直す案を置く」）。0.87.4 は知らせるだけだった。**名前の候補と同じ形の
+    直す案を、承認待ちへ置く**
+  */
+  test("資料に役名の人物がいて直す案が無ければ、名前を直す案を置く", async () => {
+    state.characters = [
+      character("char_001", "灯", "主人公"),
+      character("char_002", "主人公", "冒険者試験に落ちた"),
+    ];
+    state.plotText = plot(
+      ["- 灯：主人公", "- 主人公（相馬 誠）：試験に落ちた新人"].join("\n")
+    );
+
+    const result = await syncPlotCharacters(work);
+
+    expect(result.creations).toEqual([]);
+    expect(result.skipped).toEqual([]);
+    expect(result.renamed).toEqual([{ from: "主人公", to: "相馬 誠" }]);
+    const renameCall = state.stage.mock.calls.find(
+      (call) => ((call as unknown as [Character[]])[0][0]?.id ?? "") === "char_002"
+    ) as unknown as [Character[], { source?: string; kind?: string; reason?: string }];
+    expect(renameCall).toBeDefined();
+    const [records, options] = renameCall;
+    expect(records).toEqual([
+      {
+        ...character("char_002", "相馬 誠", "試験に落ちた新人"),
+        role: "主人公",
+      },
+    ]);
+    // 更新案（kind を持たない）。ファイル名は人物のIDで付く
+    expect(options.kind).toBeUndefined();
+    expect(options.source).toBe("plot");
+    expect(options.reason).toContain("主人公 → 相馬 誠");
+    expect(announced.join("")).toContain("主人公→相馬 誠");
+    // 台帳は書き換えていない
+    expect((state.characters[1] as Character).name).toBe("主人公");
+  });
+
+  test("置いた直す案を作者が見送ったら、次の保存で置き直さない", async () => {
     state.characters = [
       character("char_001", "灯", "主人公"),
       character("char_002", "主人公", "冒険者試験に落ちた"),
@@ -379,15 +418,41 @@ describe("plot.md の保存で人物の更新案を積む", () => {
     state.plotText = plot(
       ["- 灯：主人公", "- 主人公（相馬 誠）：冒険者試験に落ちた"].join("\n")
     );
+    await syncPlotCharacters(work);
+    expect(state.stage).toHaveBeenCalledTimes(1);
 
-    const result = await syncPlotCharacters(work, { force: true });
+    // 作者が承認の画面で見送った（承認待ちは空のまま、資料も「主人公」のまま）。
+    // 別の行を書き換えて保存する
+    state.stage.mockClear();
+    announced = [];
+    state.pending = [];
+    state.plotText = plot(
+      ["- 灯：主人公。幽霊が見える。", "- 主人公（相馬 誠）：冒険者試験に落ちた"].join("\n")
+    );
 
+    const result = await syncPlotCharacters(work);
+
+    const renamedAgain = state.stage.mock.calls.some(
+      (call) => ((call as unknown as [Character[]])[0][0]?.id ?? "") === "char_002"
+    );
+    expect(renamedAgain).toBe(false);
+    expect(result.renamed).toEqual([]);
     expect(result.creations).toEqual([]);
-    expect(state.stage).not.toHaveBeenCalled();
     expect(result.skipped).toEqual([
-      { name: "相馬 誠", reason: "sameRole", role: "主人公" },
+      { name: "相馬 誠", reason: "renameOffered", role: "主人公" },
     ]);
-    expect(announced.join("")).toContain("「主人公」");
+  });
+
+  test("名前を変えて書き直したら、新しい名前で直す案を置く", async () => {
+    state.characters = [character("char_002", "主人公", "冒険者試験に落ちた")];
+    state.plotText = plot("- 主人公（相馬 誠）：冒険者試験に落ちた");
+    await syncPlotCharacters(work);
+    state.stage.mockClear();
+
+    state.plotText = plot("- 主人公（早瀬 陸）：冒険者試験に落ちた");
+    const result = await syncPlotCharacters(work);
+
+    expect(result.renamed).toEqual([{ from: "主人公", to: "早瀬 陸" }]);
   });
 
   test("書き足す前の欄が反映済みなら、書き足したあとの欄を反映済みにする", async () => {
