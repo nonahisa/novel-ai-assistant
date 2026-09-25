@@ -179,6 +179,24 @@ export function parseTypoCheckResult(text: string): TypoCheckResult | null {
   return null;
 }
 
+/** 検算に渡す、その作品について分かっていること */
+export interface TypoValidationOptions {
+  /**
+   * この作品が文語体で書かれているか（`looksArchaicText` の判定。設計書6.8.14）。
+   *
+   * **文語の一覧（`isArchaicForm`）は、これが true のときだけ効かせる**
+   * （作者の裁定、2026-09-26 朝。精査の粗 R17）。一覧には「居る」「無い」や
+   * 旧字の印（已・迄 など）が入っていて、現代文の作品に当てると本物の
+   * 誤変換（「お金が居る」→「要る」、「自已」→「自己」）まで落としていた。
+   *
+   * **判定はチャンクではなく作品全体で決め、呼び出し側から渡す。** チャンクの
+   * 本文で決めると、同じ作品の中で話ごとに効いたり効かなかったりする
+   * （`looksArchaicText` は500字未満や旧字が5つ未満だと文語と言わない）。
+   * 渡さなければ現代文として扱う。
+   */
+  archaicWork?: boolean;
+}
+
 /**
  * @param protectedNames 固有名詞辞書（人物・場所・能力・組織の name + aliases）。
  *   プロンプトでも渡しているが、指示に従わないモデルがあるため
@@ -194,8 +212,10 @@ export function validateTypoIssues(
    * **固有名詞の辞書とは別に要る。** 方言・口癖は固有名詞ではないので、
    * 人物や場所をいくら抽出しても入ってこない（実データで確かめた）。
    */
-  keepWords: KeepWord[] = []
+  keepWords: KeepWord[] = [],
+  options: TypoValidationOptions = {}
 ): TypoValidationResult {
+  const archaicWork = options.archaicWork === true;
   const accepted: AcceptedTypoIssue[] = [];
   const rejected: RejectedTypoIssue[] = [];
 
@@ -543,7 +563,9 @@ export function validateTypoIssues(
     // 作者の作品に、戦前の文語体で書かれた自分史がある。そこで
     // 「然し」→「しかし」「聯隊」→「連隊」「与へて呉れた」→「与えてくれた」
     // が返った。**どれも正しい日本語で、直せば元の文書が壊れる**
-    if (isArchaicForm(target)) {
+    // **文語体の作品のときだけ**（R17）。現代文の作品では「お金が居る」の
+    // 「居る」は本物の誤変換で、一覧で落とすと見逃しになる
+    if (archaicWork && isArchaicForm(target)) {
       rejected.push({
         line: issue.line,
         target: issue.target,
@@ -847,6 +869,10 @@ export function onlyScriptDifference(
  *
  * 文語の作品を書く作者のために、いずれ**作品ごとの「直さない語」**を
  * 持たせたい。この一覧はその代わりの、最低限の防ぎである。
+ *
+ * **検算で使うのは文語体の作品のときだけ**（`TypoValidationOptions.archaicWork`。
+ * 作者の裁定、2026-09-26 朝）。「居る」「無い」や已・迄は現代文にも誤変換として
+ * 現れ（「お金が居る」「自已」）、作品を問わず落とすと見逃しになっていた。
  */
 const ARCHAIC_FORMS = [
   // 接続詞・副詞

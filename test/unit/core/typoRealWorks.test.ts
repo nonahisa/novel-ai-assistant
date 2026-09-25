@@ -126,12 +126,81 @@ describe("正しい文語・旧字を「誤変換」として直そうとする"
     }
   );
 
-  test("検証の流れの中でも弾かれる", () => {
+  test("文語体の作品では、検証の流れの中でも弾かれる", () => {
     const text = "然し間もなく平静を取り戻した。";
-    const result = judge(text, "然し", "しかし");
+    const result = validateTypoIssues(
+      { issues: [issue({ original: text, target: "然し", suggestion: "しかし" })] },
+      chunkOf(text),
+      [],
+      [],
+      { archaicWork: true }
+    );
 
     expect(result.accepted).toHaveLength(0);
     expect(result.rejected[0].reason).toBe("archaic_form");
+  });
+});
+
+/**
+ * **文語の一覧は、文語体の作品にだけ効かせる**（作者の裁定、2026-09-26 朝。
+ * 精査の粗 R17）。
+ *
+ * 一覧には「居る」「無い」や、旧字の印（已・迄 など）が入っている。
+ * 作品の文体を見ずに当てていたので、現代文の作品の本物の誤変換
+ * （「お金が居る」→「要る」、「自已」→「自己」）まで「文語だから」と
+ * 落としていた——**見逃し**である。
+ */
+describe("文語の一覧は、文語体の作品にだけ効かせる（R17）", () => {
+  function judgeIn(
+    archaicWork: boolean,
+    text: string,
+    target: string,
+    suggestion: string
+  ) {
+    return validateTypoIssues(
+      { issues: [issue({ original: text, target, suggestion })] },
+      chunkOf(text),
+      [],
+      [],
+      { archaicWork }
+    );
+  }
+
+  test.each([
+    ["お金が居るんだ。", "居る", "要る"],
+    ["自已紹介をした。", "自已紹介", "自己紹介"],
+  ])("現代文の作品なら通す: %s の「%s」→「%s」", (text, target, suggestion) => {
+    const result = judgeIn(false, text, target, suggestion);
+
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toHaveLength(1);
+  });
+
+  test.each([
+    ["お金が居るんだ。", "居る", "要る"],
+    ["自已紹介をした。", "自已紹介", "自己紹介"],
+    ["然し間もなく平静を取り戻した。", "然し", "しかし"],
+  ])("文語体の作品なら今までどおり落とす: %s", (text, target, suggestion) => {
+    const result = judgeIn(true, text, target, suggestion);
+
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected[0].reason).toBe("archaic_form");
+  });
+
+  /**
+   * **指定が無ければ現代文として扱う。** 文体を知らない呼び出しが一覧を
+   * 効かせると、R17 の見逃しがそのまま残る。製品の3つの入口（誤字脱字の
+   * 実行・AIチューニングの精度・MCP の検算）はどれも明示して渡す
+   */
+  test("文体を渡さなければ、一覧は効かない", () => {
+    const text = "お金が居るんだ。";
+    const result = validateTypoIssues(
+      { issues: [issue({ original: text, target: "居る", suggestion: "要る" })] },
+      chunkOf(text),
+      []
+    );
+
+    expect(result.accepted).toHaveLength(1);
   });
 });
 

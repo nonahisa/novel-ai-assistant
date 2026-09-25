@@ -201,15 +201,18 @@ describe("整えた本文を、本文へ入れてよいかの検証", () => {
 
   /**
    * **長さに比例させる**（本体の裁定、2026-09-06）。会話の多い場面を
-   * まとめて口述すると、正しく整えただけで「」は何組も増える。
+   * まとめて口述すると、会話の中の誤変換の直しも増える。
    * 固定の3組では、長い口述が必ず引っかかった。
+   *
+   * **数えるのは中の言葉が元に無い組**（R18、2026-09-26）。元は「あ」だけ
+   * なので、「い」を括った組は作った会話として数えられる。
    */
   test("許す組数は、長さに比例して増える（100字につき1組）", () => {
     expect(dictationQuoteAllowance(800)).toBe(8);
 
     const long = "あ".repeat(800);
-    const eightPairs = "「あ」".repeat(8) + "あ".repeat(800 - 24);
-    const ninePairs = "「あ」".repeat(9) + "あ".repeat(800 - 27);
+    const eightPairs = "「い」".repeat(8) + "あ".repeat(800 - 24);
+    const ninePairs = "「い」".repeat(9) + "あ".repeat(800 - 27);
 
     expect(
       validateDictationClean(long, { text: eightPairs, notes: [] }).ok
@@ -219,9 +222,9 @@ describe("整えた本文を、本文へ入れてよいかの検証", () => {
     );
   });
 
-  test("鍵括弧が増えすぎたら入れない", () => {
-    // 100字の口述で許すのは3組。4組は多すぎる
-    const quotes = "「あ」".repeat(dictationQuoteAllowance(100) + 1);
+  test("元に無い言葉の会話が増えすぎたら入れない", () => {
+    // 100字の口述で許すのは3組。4組は多すぎる（元は「あ」だけなので「い」は作った会話）
+    const quotes = "「い」".repeat(dictationQuoteAllowance(100) + 1);
     const checked = validateDictationClean(original, {
       text: quotes + "あ".repeat(100 - quotes.length),
       notes: [],
@@ -230,6 +233,107 @@ describe("整えた本文を、本文へ入れてよいかの検証", () => {
     expect(checked.ok).toBe(false);
     expect(checked.ok === false && checked.reason).toContain("鍵括弧");
     expect(checked.ok === false && checked.reason).toContain("4組");
+  });
+
+  /**
+   * **「」を足した・閉じただけの違いは「変えすぎ」に数えない**（作者の裁定、
+   * 2026-09-26 朝。精査の粗 R18）。
+   *
+   * 会話の多い場面を口述して正しく整えると、「」は会話の数だけ増える。
+   * 組の増減を数えていたので、正しく括るほど止まっていた。
+   * 数えるのは**括弧の中の言葉が元に無い**組（作った・言い換えた会話）だけ。
+   */
+  describe("括弧の足し引きだけの違いは数えない（R18）", () => {
+    /** 会話12組の口述。300字弱なので、組の増減で見ると許されるのは3組 */
+    const lines = [
+      "おはよう",
+      "おはようございます今日は早いですね",
+      "ちょっと用事があってね",
+      "どんな用事ですか",
+      "内緒だよ",
+      "教えてくださいよ",
+      "駅前の本屋に行くんだ",
+      "あの古い本屋ですか",
+      "そうだよ頼んでいた本が届いたらしい",
+      "いいなあ僕も行っていいですか",
+      "もちろんいいよ",
+      "じゃあ支度してきます",
+    ];
+    const spoken = lines.map((line) => `${line}と言った`).join("");
+    const quoted = lines.map((line) => `「${line}」と言った。`).join("\n");
+
+    test("会話を「」で正しく括っただけなら、何組増えても通す", () => {
+      expect(spoken.length).toBeLessThan(300);
+      expect(dictationQuoteAllowance(spoken.length)).toBe(3);
+
+      const checked = validateDictationClean(spoken, { text: quoted, notes: [] });
+
+      expect(checked.ok).toBe(true);
+    });
+
+    test("会話の中に句読点を入れただけでも、括っただけとみなす", () => {
+      const punctuated = quoted
+        .replace("おはようございます今日は", "おはようございます。今日は")
+        .replace("そうだよ頼んで", "そうだよ、頼んで");
+
+      expect(
+        validateDictationClean(spoken, { text: punctuated, notes: [] }).ok
+      ).toBe(true);
+    });
+
+    test("開いたまま閉じ忘れた「」を閉じただけなら通す", () => {
+      const unclosed = lines.map((line) => `「${line}と言った。`).join("\n");
+
+      expect(
+        validateDictationClean(unclosed, { text: quoted, notes: [] }).ok
+      ).toBe(true);
+    });
+
+    test("『』を足しただけでも数えない", () => {
+      const original = "彼は銀河鉄道の夜という本を読んだ" + "あ".repeat(90);
+      const cleaned = "彼は『銀河鉄道の夜』という本を読んだ。" + "あ".repeat(90);
+
+      expect(validateDictationClean(original, { text: cleaned, notes: [] }).ok).toBe(
+        true
+      );
+    });
+
+    test("会話の中の言葉を大きく変えたら、今までどおり止める", () => {
+      // 長さはほぼ同じまま、12組の会話の中身をすべて別の言葉にした
+      const rewritten = lines
+        .map((line) => `「${"ん".repeat(line.length)}」と言った。`)
+        .join("\n");
+      const checked = validateDictationClean(spoken, {
+        text: rewritten,
+        notes: [],
+      });
+
+      expect(checked.ok).toBe(false);
+      expect(checked.ok === false && checked.reason).toContain("鍵括弧");
+      expect(checked.ok === false && checked.reason).toContain("12組");
+    });
+
+    test("会話の中の誤変換を数か所直すくらいは通す", () => {
+      const fixed = quoted
+        .replace("駅前の本屋に行くんだ", "駅前の本屋へ行くんだ")
+        .replace("内緒だよ", "内緒だよね");
+
+      expect(validateDictationClean(spoken, { text: fixed, notes: [] }).ok).toBe(
+        true
+      );
+    });
+
+    test("元の会話を消したら数える", () => {
+      const original = lines.map((line) => `「${line}」と言った。`).join("");
+      // 会話の中身を落として、括弧だけを残した（長さの比の下限には掛からない形）
+      const emptied = lines
+        .map((line) => `「${"ん".repeat(line.length)}」と言った。`)
+        .join("");
+
+      expect(
+        validateDictationClean(original, { text: emptied, notes: [] }).ok
+      ).toBe(false);
+    });
   });
 
   test("元が空なら、比を取らずに断る（NaNを返さない）", () => {

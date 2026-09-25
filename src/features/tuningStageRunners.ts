@@ -67,6 +67,7 @@ import {
 import { useSmallModelTypoPrompt } from "../ai/capability";
 import {
   parseTypoCheckResult,
+  looksArchaicText,
   summarizeRejectReasons,
   validateTypoIssues,
 } from "../core/typoCheckValidation";
@@ -720,7 +721,10 @@ async function runAccuracyStage(context: StageContext): Promise<StageOutcome> {
     parsed,
     sampleChunk(TUNING_ACCURACY_BODY),
     [...TUNING_WORK_PROPER_NOUNS],
-    []
+    [],
+    // **文体の判定も製品と同じ道で決める**（R17）。同梱の文は現代文なので
+    // 文語の一覧は効かない——製品で現代文の作品を検算するのと同じ形になる
+    { archaicWork: looksArchaicText(TUNING_ACCURACY_BODY) }
   );
   const score = scoreTypoAccuracy(validated.accepted);
   // **何で点が動いたかを残す**（作者の画面には数だけを出す）

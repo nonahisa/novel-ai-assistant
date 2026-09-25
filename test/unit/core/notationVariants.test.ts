@@ -84,6 +84,115 @@ describe("かな⇔漢字の表記ゆれ", () => {
   });
 });
 
+/**
+ * **より長い語の一部は拾わない**（作者の裁定、2026-09-26 朝。精査の粗 R16）。
+ *
+ * 実機（09-21・09-25）で、`すぐ ↔ 直ぐ` の `直ぐ` が「**真っ直ぐ**向かう」
+ * だった。「真っ直ぐ」は「まっすぐ（まっすぐな道）」という別の語で、
+ * 「すぐ（直ちに）」に揃えると意味の違う語を書き換えることになる。
+ *
+ * 裁定は「前後の字を見て、より長い語の一部なら拾わない」で、**例外の一覧に
+ * 足す形にはしない**。線引きはここに並べた具体例で決めた。
+ */
+describe("より長い語の一部は拾わない（R16）", () => {
+  function kanjiForm(groups: ReturnType<typeof detectNotationVariants>, kanji: string) {
+    return group(groups, kanji)?.forms.find((form) => form.surface === kanji);
+  }
+
+  test("「真っ直ぐ」の中の「直ぐ」は拾わない", () => {
+    const groups = detectNotationVariants(
+      [source("すぐに行く。真っ直ぐ向かうとはバカな奴だ。")],
+      { properNouns: [] }
+    );
+
+    // 「直ぐ」が1件も残らないので、揺れていない
+    expect(group(groups, "直ぐ")).toBeUndefined();
+  });
+
+  test("「まっすぐ」の中の「すぐ」も拾わない", () => {
+    const groups = detectNotationVariants(
+      [source("直ぐに行く。まっすぐな道を歩いた。")],
+      { properNouns: [] }
+    );
+
+    expect(group(groups, "すぐ")).toBeUndefined();
+  });
+
+  test("ふつうの文の中の「直ぐ」「すぐ」は拾い続ける", () => {
+    const groups = detectNotationVariants(
+      [
+        source(
+          "直ぐに行く。すぐに戻る。もうすぐ夜だ。真っ直ぐ向かう。まっすぐな道。"
+        ),
+      ],
+      { properNouns: [] }
+    );
+
+    const found = group(groups, "直ぐ");
+    expect(found).toBeDefined();
+    // 真っ直ぐ・まっすぐの2件を除いて、直ぐ1件・すぐ2件
+    expect(kanjiForm(groups, "直ぐ")?.occurrences).toHaveLength(1);
+    expect(
+      found?.forms.find((form) => form.surface === "すぐ")?.occurrences
+    ).toHaveLength(2);
+  });
+
+  /**
+   * **前が漢字でも、それだけでは弾かない。** 「今直ぐ」は「今すぐ」の漢字表記で、
+   * 本物の揺れである。前の字が漢字かどうかでは「真直ぐ（っを送らない
+   * 真っ直ぐ）」と「今直ぐ」を分けられないので、送り仮名の付いた語は
+   * 促音（っ）だけを手掛かりにする。
+   */
+  test("「今直ぐ」は「今すぐ」の揺れとして拾う", () => {
+    const groups = detectNotationVariants(
+      [source("今直ぐ来い。今すぐだ。")],
+      { properNouns: [] }
+    );
+
+    expect(kanjiForm(groups, "直ぐ")?.occurrences).toHaveLength(1);
+  });
+
+  test("「素直に」「正直に」は「直ぐ」と関わらない", () => {
+    const groups = detectNotationVariants(
+      [source("素直に話す。正直に言う。すぐ行く。")],
+      { properNouns: [] }
+    );
+
+    expect(group(groups, "直ぐ")).toBeUndefined();
+  });
+
+  /**
+   * **漢字1字の語は、隣が漢字なら熟語の一部である。** 「高尚」「和尚」
+   * 「時期尚早」「尚更」の「尚」を「なお」に揃えると語が壊れる。
+   */
+  test("漢字1字の「尚」は、熟語の中なら拾わない", () => {
+    const groups = detectNotationVariants(
+      [source("高尚な話だ。和尚が来た。時期尚早だ。尚更だ。なお、雨だ。")],
+      { properNouns: [] }
+    );
+
+    expect(group(groups, "尚")).toBeUndefined();
+  });
+
+  test("ひとり立ちの「尚」は拾う", () => {
+    const groups = detectNotationVariants(
+      [source("尚、明日は休みだ。なお、雨だ。高尚な話だ。")],
+      { properNouns: [] }
+    );
+
+    expect(kanjiForm(groups, "尚")?.occurrences).toHaveLength(1);
+  });
+
+  test("カタカナの促音（ッ）の後ろも、語の続きとみなす", () => {
+    const groups = detectNotationVariants(
+      [source("直ぐ行く。マッすぐ進め。")],
+      { properNouns: [] }
+    );
+
+    expect(group(groups, "すぐ")).toBeUndefined();
+  });
+});
+
 describe("固有名詞のひらがな・カタカナ揺れ", () => {
   test("登録名がカタカナで、本文にひらがな表記が出ていれば組にする", () => {
     const groups = detectNotationVariants(

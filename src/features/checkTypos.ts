@@ -49,6 +49,7 @@ import {
   summarizeRejectReasons,
   validateTypoIssues,
   type AcceptedTypoIssue,
+  type TypoValidationOptions,
 } from "../core/typoCheckValidation";
 import {
   appliedFixKey,
@@ -331,16 +332,19 @@ export async function checkTypos(
   // 語り手の一人称・文語体かどうか・直さない語。これまでは渡しておらず、
   // モデルが知りようのないことをコード側で後から弾いていた。
   // **コードの検証は外さない。** ここは「生まれる数を減らす」ためである
-  const styleNote = buildStyleNote(
-    collectWorkStyle({
-      // 全話を繋いで見る。1話だけでは一人称も文語かも決められない。
-      // **シーンメモは落とす**（`splitIntoChunks` が本文から消すのと同じ）。
-      // 作者の覚え書きを地の文と読むと、人称の判定を誤る
-      bodyText: sources.map((source) => blankMemoLines(source.body)).join("\n"),
-      narrativePerson: await readNarrativePerson(work),
-      keepWords: keepWords.map((entry) => entry.word),
-    })
-  );
+  const workStyle = collectWorkStyle({
+    // 全話を繋いで見る。1話だけでは一人称も文語かも決められない。
+    // **シーンメモは落とす**（`splitIntoChunks` が本文から消すのと同じ）。
+    // 作者の覚え書きを地の文と読むと、人称の判定を誤る
+    bodyText: sources.map((source) => blankMemoLines(source.body)).join("\n"),
+    narrativePerson: await readNarrativePerson(work),
+    keepWords: keepWords.map((entry) => entry.word),
+  });
+  const styleNote = buildStyleNote(workStyle);
+  // **文語の一覧は、文語体の作品にだけ効かせる**（R17）。判定はAIへ伝える
+  // 作法と同じもの（作品全体）を使う——チャンクごとに決めると、同じ作品の
+  // 中で話によって効いたり効かなかったりする
+  const validationOptions = { archaicWork: workStyle.archaic };
 
   // **本文を空にしてプロンプトを組み、その字数を固定費とする**（設計書6.27.10）。
   // 辞書は作品が育つほど伸び、作法も条件で長さが変わる。見込みの定数を
@@ -603,7 +607,8 @@ export async function checkTypos(
             keepWords,
             dismissed,
             appliedFixKeys,
-            issues
+            issues,
+            validationOptions
           );
           rejectedCount += tally.rejected;
           alreadyAppliedCount += tally.alreadyApplied;
@@ -734,7 +739,8 @@ export async function checkTypos(
               keepWords,
               dismissed,
               appliedFixKeys,
-              issues
+              issues,
+              validationOptions
             );
             rejectedCount += tally.rejected;
             alreadyAppliedCount += tally.alreadyApplied;
@@ -887,9 +893,17 @@ export function collectIssues(
   keepWords: KeepWord[],
   dismissed: Set<string>,
   appliedFixKeys: ReadonlySet<string>,
-  out: TypoCheckIssue[]
+  out: TypoCheckIssue[],
+  /** 作品について分かっていること（文語体か。R17）。渡さなければ現代文として扱う */
+  validationOptions: TypoValidationOptions = {}
 ): TypoCollectTally {
-  const validated = validateTypoIssues(result, chunk, protectedNames, keepWords);
+  const validated = validateTypoIssues(
+    result,
+    chunk,
+    protectedNames,
+    keepWords,
+    validationOptions
+  );
   const label = describeChunkFile(chunk.filePath, chunk);
   let rejectedCount = validated.rejected.length;
   let alreadyApplied = 0;

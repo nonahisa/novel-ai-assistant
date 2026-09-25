@@ -15,10 +15,12 @@ import { stripCodeFence } from "./synopsisValidation";
  *
  * - **長さの比**（0.6〜1.5倍）: 句読点と改行が入るぶん少し伸び、
  *   言いよどみが取れるぶん少し縮む。桁で変わるなら整文ではない
- * - **鍵括弧の増減**: 会話をくくるのは正しい仕事なので増えてよいが、
- *   何十組も増えるのは、地の文を台詞に作り替えたということ。
- *   **許す組数は長さに比例させる**（100字につき1組、最低3組）——
- *   固定の3組では、会話の多い長い口述を1回で整えたときに必ず引っかかる
+ * - **中の言葉が変わった会話の組数**（`countChangedDialogues`）: 会話を
+ *   「」でくくるのは正しい仕事なので、**括っただけ・閉じただけの組は数えない**
+ *   （作者の裁定、2026-09-26 朝。それまでは組数の増減を数えていて、正しく
+ *   括るほど止まっていた）。中の言葉が元に無い組は、会話を作った・言い換えた
+ *   ということなので数える。**許す組数は長さに比例させる**（100字につき1組、
+ *   最低3組）——誤変換を会話の中で直すことはあるので、0組にはしない
  * - **空でない**: 空文字を本文へ書き込むと、口述した分が丸ごと消える
  *
  * **AIの言葉そのもの（「えーと」など）で判断しない。** プロンプトに書いた
@@ -33,19 +35,20 @@ export const DICTATION_MIN_LENGTH_RATIO = 0.6;
 /** 整えた本文の長さの上限（元に対する比） */
 export const DICTATION_MAX_LENGTH_RATIO = 1.5;
 /**
- * 鍵括弧（「」）の増減として許す組数の下限。
+ * 中の言葉が変わった会話（`countChangedDialogues`）として許す組数の下限。
  *
- * 短い口述でも、会話がいくつか入ることはある。ここを下回らせない。
+ * 短い口述でも、会話の中の誤変換を直すことはある。ここを下回らせない。
  */
 export const DICTATION_MIN_QUOTE_ALLOWANCE = 3;
 /** 何字につき1組ぶん許すか */
 export const DICTATION_QUOTE_ALLOWANCE_PER_CHARS = 100;
 
 /**
- * その長さの口述で、鍵括弧が何組まで増減してよいか。
+ * その長さの口述で、中の言葉が変わった会話を何組まで許すか。
  *
  * **長さに比例させる**（本体の裁定、2026-09-06）。会話の多い場面を
- * まとめて口述すると、正しく整えただけで「」は何組も増える。
+ * まとめて口述すると、会話の中の誤変換の直しも増える。括っただけの組は
+ * そもそも数えない（R18、2026-09-26）。
  */
 export function dictationQuoteAllowance(chars: number): number {
   return Math.max(
@@ -98,20 +101,93 @@ export type DictationCleanCheck =
   /** 置き換えない理由。**作者にそのまま見せる文言**にしてある */
   | { ok: false; reason: string };
 
+/** 開き括弧 → 対になる閉じ括弧。会話の「」と、書名や会話の中の会話の『』 */
+const BRACKET_PAIRS: Readonly<Record<string, string>> = { "「": "」", "『": "』" };
+const CLOSING_BRACKETS = new Set(Object.values(BRACKET_PAIRS));
+
+/** 括弧の中身をくらべる前に落とす字（括弧・句読点・空白・改行） */
+const IGNORED_IN_COMPARISON = /[「」『』、。，．,.！？!?…‥―—・\s　]/gu;
+
 /**
- * 会話の組数。会話を作り替えていないかを見るのに使う。
+ * くらべるための形。**括弧・句読点・空白を落とす。**
  *
- * **開きと閉じの多いほうを組数とする。** 片方だけ増えるのは組み損ねで
- * あって、数え落とすと「地の文を台詞に作り替えた」を見逃す。
+ * 整文がしてよいのは句読点と改行を入れることなので、それらの違いは
+ * 「言葉が変わった」に数えない。
  */
-function countDialogues(text: string): number {
-  let open = 0;
-  let close = 0;
-  for (const character of text) {
-    if (character === "「") open++;
-    else if (character === "」") close++;
+function comparable(text: string): string {
+  return text.replace(IGNORED_IN_COMPARISON, "");
+}
+
+interface BracketScan {
+  /** 対になった括弧の中身（入れ子なら内側も外側も） */
+  contents: string[];
+  /** 対にならなかった括弧の数（開いたまま・閉じだけ・種類違い） */
+  unmatched: number;
+}
+
+/** 本文の括弧を、対になったものと、ならなかったものに分ける */
+function scanBrackets(text: string): BracketScan {
+  const contents: string[] = [];
+  const stack: Array<{ open: string; at: number }> = [];
+  let unmatched = 0;
+
+  for (let at = 0; at < text.length; at++) {
+    const character = text[at];
+    if (character in BRACKET_PAIRS) {
+      stack.push({ open: character, at });
+      continue;
+    }
+    if (!CLOSING_BRACKETS.has(character)) continue;
+    const top = stack[stack.length - 1];
+    if (top && BRACKET_PAIRS[top.open] === character) {
+      stack.pop();
+      contents.push(text.slice(top.at + 1, at));
+    } else {
+      unmatched++;
+    }
   }
-  return Math.max(open, close);
+
+  return { contents, unmatched: unmatched + stack.length };
+}
+
+/**
+ * **括弧の中の言葉が、元に無い**組の数（作者の裁定、2026-09-26 朝。精査の粗 R18）。
+ *
+ * これまでは「」の**組数の増減**を数えていた。会話の多い場面を口述して正しく
+ * 整えると、「」は会話の数だけ増える——**正しく括るほど「変えすぎ」になって
+ * 置き換えが止まっていた。**
+ *
+ * 裁定は「**「」を足した・閉じただけの違いは数えない。語の増減は今までどおり
+ * 見張る**」。そこで組ごとに中身を見る。
+ *
+ * - **整えた側の組**：中身（括弧・句読点・空白を落とした形）が元の本文に
+ *   そのまま入っていれば、元の言葉を括っただけである。入っていなければ、
+ *   会話の言葉を作った・言い換えたので数える
+ * - **元の側の組**：中身が整えた本文にそのまま残っていれば数えない。
+ *   残っていなければ、会話の言葉を消した・言い換えたので数える
+ * - **対にならない括弧**：元より増えた分だけ数える（開いたままの「を
+ *   ばらまくのは括ったことにならない）。閉じ忘れを閉じた分は減るので数えない
+ *
+ * **両側の多いほうを取る。** 会話を1つ言い換えると、整えた側にも元の側にも
+ * 「無い」組が1つずつ出る。足すと1か所の直しを2組と数えてしまう。
+ *
+ * 語の増減そのもの（地の文を足した・削った）は、長さの比が見張る。
+ */
+export function countChangedDialogues(original: string, cleaned: string): number {
+  const before = scanBrackets(original);
+  const after = scanBrackets(cleaned);
+  const originalFlat = comparable(original);
+  const cleanedFlat = comparable(cleaned);
+
+  const invented = after.contents.filter(
+    (content) => !originalFlat.includes(comparable(content))
+  ).length;
+  const lost = before.contents.filter(
+    (content) => !cleanedFlat.includes(comparable(content))
+  ).length;
+  const strayBrackets = Math.max(0, after.unmatched - before.unmatched);
+
+  return Math.max(invented, lost) + strayBrackets;
 }
 
 /**
@@ -154,13 +230,14 @@ export function validateDictationClean(
     };
   }
 
-  const dialogueDelta = countDialogues(cleaned) - countDialogues(original);
-  if (Math.abs(dialogueDelta) > dictationQuoteAllowance(before)) {
+  // 括っただけの組は数えない（R18）。数えるのは中の言葉が変わった組
+  const changedDialogues = countChangedDialogues(original, cleaned);
+  if (changedDialogues > dictationQuoteAllowance(before)) {
     return {
       ok: false,
       reason:
-        `会話の鍵括弧が${Math.abs(dialogueDelta)}組${dialogueDelta > 0 ? "増え" : "減り"}ました。` +
-        "地の文と会話が作り替えられた可能性があるため、置き換えませんでした。",
+        `鍵括弧の中の言葉が元と違う会話が${changedDialogues}組ありました。` +
+        "会話が作り替えられた可能性があるため、置き換えませんでした。",
     };
   }
 

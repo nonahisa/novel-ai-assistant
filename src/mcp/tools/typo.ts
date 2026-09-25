@@ -279,7 +279,9 @@ function validateAgainst(
     // 検算は長さの都合が無い——201件目の固有名詞を誤字と言われたとき、
     // 辞書を切っていると弾けない
     context.protectedNames,
-    context.style.keepWords
+    context.style.keepWords,
+    // 文語の一覧は文語体の作品にだけ効かせる（R17。製品と同じく作品全体で判定）
+    { archaicWork: context.style.archaic }
   );
   return {
     chunkId,

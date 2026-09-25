@@ -319,9 +319,12 @@ function detectKanaKanjiVariants(
   const groups: NotationVariantGroup[] = [];
 
   for (const pair of KANA_KANJI_PAIRS) {
+    // **より長い語の一部は拾わない**（`isPartOfLongerWord`。R16）。
+    // この一覧は「語」を揃えるためのもので、部分一致のままだと
+    // 「真っ直ぐ」の中の「直ぐ」を「すぐ」の揺れとして挙げてしまう
     const forms = collectForms(sources, [
-      { surface: pair.kanji },
-      { surface: pair.kana, exclude: pair.exclude },
+      { surface: pair.kanji, skip: isPartOfLongerWord },
+      { surface: pair.kana, exclude: pair.exclude, skip: isPartOfLongerWord },
     ]);
     if (forms.length < 2) continue;
 
@@ -523,10 +526,70 @@ function findSingleFullWidthOccurrences(
   return found;
 }
 
+/**
+ * 拾った語が、**前後の字と一続きの、より長い語の一部か**
+ * （作者の裁定、2026-09-26 朝。精査の粗 R16）。
+ *
+ * 実機で `すぐ ↔ 直ぐ` の「直ぐ」が「**真っ直ぐ**向かう」だった。「真っ直ぐ」は
+ * 「まっすぐ（曲がらない）」という別の語で、「すぐ（直ちに）」へ揃えると
+ * 意味の違う語を書き換える。
+ *
+ * **例外の一覧に足す形にはしない**（裁定）。「真っ直ぐ」を足しても
+ * 「まっすぐ」「マッすぐ」が残り、語を1つ見つけるたびに足すことになる。
+ * 前後の字の**種類**で決める。線引きは `test/unit/core/notationVariants.test.ts`
+ * の「より長い語の一部は拾わない（R16）」に具体例で並べてある。
+ *
+ * ## 手掛かり1：直前が促音（っ・ッ）
+ *
+ * **語は促音から始まらない。** 促音は次の字と組んで1拍をなすので、その後ろに
+ * 来る字は必ず同じ語の続きである（真っ直ぐ・まっすぐ）。一方、ふつうの文の
+ * 「すぐ」「直ぐ」の前は、助詞や句読点や別の語の終わり（もうすぐ・今直ぐ）で、
+ * 促音にはならない。
+ *
+ * ## 手掛かり2：漢字1字の語で、隣が漢字
+ *
+ * 「尚」のように漢字1字だけの語は、隣に漢字があれば熟語の一部である
+ * （高尚・和尚・時期尚早・尚更）。ひとり立ちの「尚」は「尚、」「尚も」の
+ * ように、かなや句読点が隣に来る。
+ *
+ * ## 前が漢字というだけでは弾かない
+ *
+ * **送り仮名の付いた語（直ぐ・良い）は、前の字が漢字でも弾かない。**
+ * 「今直ぐ」は「今すぐ」の漢字表記で、本物の揺れである。前の字の種類では
+ * 「今直ぐ」と「真直ぐ（っを送らない真っ直ぐ）」を分けられず、分けるには
+ * 語の一覧が要る——それは裁定が退けた形なので、「真直ぐ」は拾ったままにする
+ * （促音を送る「真っ直ぐ」のほうがずっと多く、実機で見つかったのもこちら）。
+ */
+export function isPartOfLongerWord(
+  lineText: string,
+  column: number,
+  surface: string
+): boolean {
+  const before = column > 0 ? lineText[column - 1] : "";
+  const after = lineText[column + surface.length] ?? "";
+
+  if (before === "っ" || before === "ッ") return true;
+
+  if (surface.length === 1 && isKanjiChar(surface)) {
+    return isKanjiChar(before) || isKanjiChar(after);
+  }
+  return false;
+}
+
+/** CJK統合漢字と「々」。熟語の続きを見るためのもの */
+function isKanjiChar(char: string): boolean {
+  return char !== "" && /[一-鿿㐀-䶿々]/u.test(char);
+}
+
 /** 出現のあった表記だけを、多い順に返す */
 function collectForms(
   sources: NotationSource[],
-  candidates: Array<{ surface: string; exclude?: string[] }>
+  candidates: Array<{
+    surface: string;
+    exclude?: string[];
+    /** 拾った位置を捨てるかどうか（より長い語の一部なら true） */
+    skip?: (lineText: string, column: number, surface: string) => boolean;
+  }>
 ): NotationVariantForm[] {
   return candidates
     .map((candidate) => ({
@@ -535,6 +598,13 @@ function collectForms(
         sources,
         candidate.surface,
         candidate.exclude
+      ).filter(
+        (occurrence) =>
+          !candidate.skip?.(
+            occurrence.lineText,
+            occurrence.column,
+            candidate.surface
+          )
       ),
     }))
     .filter((form) => form.occurrences.length > 0)

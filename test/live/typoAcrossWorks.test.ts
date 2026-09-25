@@ -9,6 +9,7 @@ import {
 } from "../../src/prompts/typoCheck";
 import {
   PARTICLE_CHARS,
+  looksArchaicText,
   parseTypoCheckResult,
   validateTypoIssues,
 } from "../../src/core/typoCheckValidation";
@@ -268,6 +269,11 @@ describe.skipIf(!ROOT)(
             rejected: 0,
           };
           perWork.set(work.name, workStat);
+          // **文語の一覧は文語体の作品にだけ効かせる**（R17）。製品と同じく、
+          // 送る話だけでなく作品の全話で判定する
+          const archaicWork = looksArchaicText(
+            work.files.map((file) => fs.readFileSync(file, "utf-8")).join("\n")
+          );
 
           for (const filePath of files) {
             filesSeen++;
@@ -303,7 +309,8 @@ describe.skipIf(!ROOT)(
               parsed,
               chunk,
               dictionary[work.name] ?? [],
-              keepWords[work.name] ?? []
+              keepWords[work.name] ?? [],
+              { archaicWork }
             );
 
             // rejected の順は raw.issues と同じなので、raw.issues の複製から

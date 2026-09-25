@@ -76,6 +76,11 @@ export interface WorkStyle {
   narrativeStyle: string;
   styleNote: string;
   keepWords: KeepWord[];
+  /**
+   * 文語体の作品か（`looksArchaicText`）。誤字脱字の検算で、文語の一覧を
+   * 効かせるかを決める（R17。製品の `checkTypos.ts` と同じ判定）
+   */
+  archaic: boolean;
 }
 
 /**
@@ -97,15 +102,14 @@ export function collectStyle(folder: string): WorkStyle {
 
   const keepWords = readKeepWords(folder);
 
-  const styleNote = buildStyleNote(
-    collectWorkStyle({
-      bodyText: bodies.join("\n"),
-      narrativePerson: narrativeStyle,
-      keepWords: keepWords.map((entry) => entry.word),
-    })
-  );
+  const facts = collectWorkStyle({
+    bodyText: bodies.join("\n"),
+    narrativePerson: narrativeStyle,
+    keepWords: keepWords.map((entry) => entry.word),
+  });
+  const styleNote = buildStyleNote(facts);
 
-  return { narrativeStyle, styleNote, keepWords };
+  return { narrativeStyle, styleNote, keepWords, archaic: facts.archaic };
 }
 
 /** 作者が「直さない」と決めた語。壊れていても直さない・止めない（守る語が無い状態で進む） */

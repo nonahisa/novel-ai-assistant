@@ -216,3 +216,52 @@ describe("落とした指摘の理由を残す", () => {
     expect(logged.join("\n")).not.toContain("除外");
   });
 });
+
+/**
+ * **作品の文体を、検算まで届ける**（精査の粗 R17、2026-09-26）。
+ *
+ * 誤字脱字の実行は、作品全体で決めた「文語体か」を `collectIssues` の
+ * 最後の引数で検算へ渡す。渡し忘れると、文語体の作品でも一覧が効かず、
+ * 祖父の自分史の「然し」を「しかし」へ直す案が通ってしまう。
+ */
+describe("文語体かどうかを検算へ渡す（R17）", () => {
+  const issueOf = (target: string, suggestion: string, original: string) =>
+    response([
+      { line: 1, original, target, suggestion, reason: "誤変換", confidence: "high" },
+    ]);
+
+  test("文語体の作品なら、文語の一覧で落として内訳に残す", () => {
+    const out: unknown[] = [];
+    const tally = collectIssues(
+      issueOf("然し", "しかし", "然し間もなく平静を取り戻した。"),
+      singleChunk("然し間もなく平静を取り戻した。"),
+      [],
+      [],
+      new Set<string>(),
+      new Set<string>(),
+      out as never[],
+      { archaicWork: true }
+    );
+
+    expect(out).toHaveLength(0);
+    expect(tally.rejected).toBe(1);
+    expect(logged.join("\n")).toContain("文語・旧字");
+  });
+
+  test("現代文の作品なら、「お金が居る」の誤変換を通す", () => {
+    const out: unknown[] = [];
+    const tally = collectIssues(
+      issueOf("居る", "要る", "お金が居るんだ。"),
+      singleChunk("お金が居るんだ。"),
+      [],
+      [],
+      new Set<string>(),
+      new Set<string>(),
+      out as never[],
+      { archaicWork: false }
+    );
+
+    expect(out).toHaveLength(1);
+    expect(tally.rejected).toBe(0);
+  });
+});
