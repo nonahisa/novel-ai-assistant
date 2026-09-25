@@ -6,6 +6,7 @@ import {
   resolveOutputTokensForPlanning,
   truncatedOutputAdvice,
 } from "../ai/outputLimit";
+import type { GenerateResult } from "../ai/types";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { withCancellableProgress } from "../views/progress";
 import {
@@ -155,7 +156,9 @@ export async function runDictationClean(
     "dictationClean"
   );
 
-  let response: { text: string; truncated?: boolean } | undefined;
+  let response:
+    | Pick<GenerateResult, "text" | "outputCappedByWindow"> & { truncated?: boolean }
+    | undefined;
   await withCancellableProgress(
     "口述で入れた文を整えています",
     async (_progress, token) => {
@@ -206,7 +209,7 @@ export async function runDictationClean(
     // 作者は直らない操作を繰り返すことになる
     void warnWithLog(
       truncated
-        ? truncatedOutputAdvice(outputLimit)
+        ? truncatedOutputAdvice(outputLimit, response)
         : "整えた本文を読み取れませんでした。本文は書き換えていません。"
     );
     return;

@@ -684,7 +684,23 @@ async function runMeasurement(
     要らない（申告の読めないさくら・ChatGPT では、断られた文から読む）。
   */
   if (scope === "work") {
-    await runWorkTuning(resolved.provider, resolved.model);
+    /*
+      **モデルの大きさだけは引く**——精度の段が、製品と同じく 20B で頼み方を
+      選び分ける（`useSmallModelTypoPrompt`）。取れなくても止めない：製品と
+      同じく、手元のAIを小さい側・クラウドを大きい側として扱う。
+    */
+    let modelInfo: Awaited<ReturnType<AIRegistry["modelInfoFor"]>>;
+    try {
+      modelInfo = await registry.modelInfoFor(resolved.provider.id, resolved.model);
+    } catch (error) {
+      logStep(
+        `仕事に近い形の測定：モデルの大きさを取れませんでした（${
+          error instanceof Error ? error.message : String(error)
+        }）。手元のAIは小さい側、クラウドは大きい側の頼み方で測ります。`
+      );
+      modelInfo = undefined;
+    }
+    await runWorkTuning(resolved.provider, resolved.model, modelInfo);
     return;
   }
 

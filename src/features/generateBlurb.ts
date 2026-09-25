@@ -225,7 +225,7 @@ export async function generateWorkBlurb(
       runaway
         ? WHITESPACE_RUNAWAY_ADVICE
         : truncated
-          ? truncatedOutputAdvice(outputLimit)
+          ? truncatedOutputAdvice(outputLimit, response)
           : "応答を読み取れませんでした。"
     );
     return;
@@ -390,7 +390,7 @@ export async function generateCatchphrases(
         runaway
           ? WHITESPACE_RUNAWAY_ADVICE
           : truncated
-            ? truncatedOutputAdvice(outputLimit)
+            ? truncatedOutputAdvice(outputLimit, response)
             : leaked.length > 0
               ? "使える案が返りませんでした（読者層の呼び名がそのまま入った案は落としました）。"
               : `${CATCHPHRASE_MAX_CHARS}字以内の案が返りませんでした。`,

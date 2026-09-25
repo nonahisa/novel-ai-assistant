@@ -21,8 +21,8 @@
  * 書いた創作で、誤りをわざと混ぜてある**——誤りが無い文では指摘の一覧が
  * 空になり、答えの短い測定に戻ってしまう。
  *
- * **ここに置いた誤りの答え合わせはしない。** 精度を測る段は別に足す
- * （そのときにこの一覧を使えるよう、置いた誤りは下に書き出してある）。
+ * **置いた誤りの答え合わせは、精度の段がする**（`core/tuningAccuracy.ts`。
+ * 置いた誤りは下に書き出してある）。時間の段は答え合わせをしない。
  *
  * VS Code API に依存しない。
  */
@@ -64,10 +64,10 @@ export const TUNING_WORK_PARAGRAPHS: readonly string[] = [
 /**
  * わざと置いた誤り（段落の番号は0始まり）。
  *
- * **いまは誰も読まない。** 精度を測る段を足すとき、見逃しと誤検出の
+ * **精度の段（`core/tuningAccuracy.ts`）の答え**である。見逃しと誤検出の
  * 両方を数える材料になる（CLAUDE.md「見逃しと誤検出の両方を測る」）。
- * 文を直したら、ここも必ず直す（`test/unit/core/tuningWorkSample.test.ts`
- * が、誤りが本当に文の中にあることを確かめる）。
+ * 文を直したら、ここも必ず直し、`TUNING_WORK_SAMPLE_VERSION` を上げる
+ * （`test/unit/core/tuningWorkSample.test.ts` が、誤りが本当に文の中にあることを確かめる）。
  */
 export const TUNING_WORK_PLANTED_TYPOS: readonly {
   readonly paragraph: number;
@@ -82,6 +82,15 @@ export const TUNING_WORK_PLANTED_TYPOS: readonly {
   { paragraph: 2, target: "以外だった", suggestion: "意外だった" },
   { paragraph: 3, target: "話を効いて", suggestion: "話を聞いて" },
 ];
+
+/**
+ * 同梱の文と置いた誤りの版。**文か誤りの一覧を直したら上げる。**
+ *
+ * 精度の段の結果は、この版と一緒に台帳へ残る（`core/tuningAccuracy.ts`）。
+ * 文が変われば「7件中何件」の意味も変わるので、版の違う結果は古い結果として
+ * 扱う（プロンプトの `_VERSION` と同じ考え方。規則4）。
+ */
+export const TUNING_WORK_SAMPLE_VERSION = "1";
 
 /**
  * 固有名詞の辞書に渡す語。**製品と同じく辞書を渡す**——空だと

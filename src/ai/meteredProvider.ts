@@ -5,6 +5,7 @@ import {
   type GenerateParams,
   type GenerateResult,
   type ModelInfo,
+  type OutputWindowCap,
   type ProviderId,
 } from "./types";
 import { appendUsageLog } from "../core/usageLog";
@@ -214,6 +215,8 @@ export class MeteredProvider implements AIProvider {
     // まで省く
     let params = requested;
     let overflow: AIError | undefined;
+    /** 関所が1回の応答の上限を縮めた回だけ入る（応答へも付けて返す） */
+    let windowCap: OutputWindowCap | undefined;
     if (!skipsContextGuard(requested.meta?.feature)) {
       const fit: ContextFitInput = {
         systemChars: requested.systemPrompt.length,
@@ -230,6 +233,7 @@ export class MeteredProvider implements AIProvider {
       overflow = contextOverflow({ ...fit, outputTokens });
       if (!overflow && outputTokens < fit.outputTokens) {
         params = this.withOutputLimit(requested, outputTokens, fit);
+        windowCap = params.outputCappedByWindow;
       }
     }
     if (overflow) {
@@ -283,7 +287,14 @@ export class MeteredProvider implements AIProvider {
       await this.recordSpeed(params.model, result);
       await this.recordCharsPerToken(params, result);
       await this.recordFeatureOutput(params, result);
-      return result;
+      /*
+        **縮めたことを応答に付けて返す**（0.89.6 の担当の報告 #5）。切り詰めの
+        案内は呼び出し側が組むが、呼び出し側は関所が縮めたことを知らない。
+        付けないと「設定の上限を大きくして」と、直らない操作を勧めてしまう。
+      */
+      return windowCap !== undefined
+        ? { ...result, outputCappedByWindow: windowCap }
+        : result;
     } catch (error) {
       this.record(params, {
         elapsedMs: Date.now() - started,
@@ -420,13 +431,20 @@ export class MeteredProvider implements AIProvider {
           `1回の応答の上限を入る分（この回は${tokens.toLocaleString("ja-JP")}トークン）まで縮めて送ります`
       );
     }
+    const maxOutputTokens = Math.min(params.maxOutputTokens ?? tokens, tokens);
     return {
       ...params,
-      maxOutputTokens: Math.min(params.maxOutputTokens ?? tokens, tokens),
+      maxOutputTokens,
       plannedOutputTokens:
         params.plannedOutputTokens === undefined
           ? undefined
           : Math.min(params.plannedOutputTokens, tokens),
+      // 縮めた印（AIへは送らない）。上限を使い切った空を自分で断るプロバイダが、
+      // 「設定の上限を大きくして」と言わずに済むように渡す（報告 #5）
+      outputCappedByWindow: {
+        contextWindow: fit.contextWindow ?? 0,
+        tokens: maxOutputTokens,
+      },
     };
   }
 

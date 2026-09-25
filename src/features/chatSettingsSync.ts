@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import type { AIRegistry } from "../ai/registry";
-import { AIError, recoveryForAIError } from "../ai/types";
+import { AIError, recoveryForAIError, type GenerateResult } from "../ai/types";
 import {
   resolveOutputLimitForSend,
   resolveOutputTokensForPlanning,
@@ -232,7 +232,7 @@ export async function applyChatToSettings(
    * 同じ会話を何度も送り直すことになる。
    */
   let outcome:
-    | { kind: "truncated"; text: string }
+    | { kind: "truncated"; text: string; response: GenerateResult }
     | { kind: "malformed"; text: string }
     | { kind: "ok"; verified: VerifiedChatDecisions };
   try {
@@ -280,7 +280,7 @@ export async function applyChatToSettings(
           ので、読み取りの失敗として扱うと「AIの気まぐれ」に見えてしまう。
         */
         if (response.truncated) {
-          return { kind: "truncated" as const, text: response.text };
+          return { kind: "truncated" as const, text: response.text, response };
         }
         const parsed = parseChatSettingsSync(response.text);
         // **読めなかったことを、0件として飲み込まない。**
@@ -327,7 +327,7 @@ export async function applyChatToSettings(
       ここで足すのは、この機能でできる絞り方だけである。
     */
     void vscode.window.showWarningMessage(
-      `${truncatedOutputAdvice(outputLimit)}` +
+      `${truncatedOutputAdvice(outputLimit, outcome.response)}` +
         "会話が長いときは、反映したい範囲まで新しい相談を始めてください。"
     );
     return { ...EMPTY, failed: true };

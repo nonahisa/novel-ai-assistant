@@ -14,6 +14,8 @@ import {
   findVerdictCount,
   type VerdictCount,
 } from "../core/verdictTally";
+import { modelTuning } from "../core/modelTuning";
+import { describeTypoAccuracyHint } from "../core/tuningAccuracy";
 import { cancelItem } from "../views/dialogs";
 import { notifyDone } from "../views/notify";
 
@@ -108,8 +110,21 @@ function verdictNoteFor(
   const model = assigned?.model ?? registry.selectedModel;
   if (!providerId || !model) return undefined;
   const count = findVerdictCount(verdicts, providerId, model, counted);
-  if (!count) return undefined;
-  return `${model} の指摘：${describeVerdictCount(count)}`;
+  /*
+    **誤字脱字には、AIチューニングで測った精度の目安も並べる**（設計書6.49.9）。
+    **作者の実データ（採った率）が主で、こちらは添え物**——同梱の文は4段落・
+    誤り7つしかないので、1件で大きく動く。だから後ろに置き、「目安」と名乗る。
+    採った率が無いモデルでも、目安だけは出す（測ったのに見えない値を作らない）
+  */
+  const hint =
+    feature === "typo"
+      ? describeTypoAccuracyHint(modelTuning(providerId, model))
+      : undefined;
+  if (!count) return hint !== undefined ? `${model}：${hint}` : undefined;
+  return (
+    `${model} の指摘：${describeVerdictCount(count)}` +
+    (hint !== undefined ? `／${hint}` : "")
+  );
 }
 
 /** どの機能の割当を変えるか。いまの割当を各行に出す */

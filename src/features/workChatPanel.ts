@@ -2101,10 +2101,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         // `"needFiles": [],` がそのまま並んでいた
         this.postError(
           result.truncated
-            ? truncatedOutputAdvice(outputLimit)
+            ? truncatedOutputAdvice(outputLimit, result)
             : answer.source === "raw"
               ? "AIの返事を読み取れませんでした（形式が崩れています）。" +
-                truncatedOutputAdvice(outputLimit)
+                truncatedOutputAdvice(outputLimit, result)
               : "返事が空でした。もう一度お試しください。",
           undefined,
           // 答えが無くても、手順の当たりは生きている（下の catch と同じ理由）
@@ -2243,7 +2243,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           type: "note",
           message:
             "この返事は途中で切れています（読み取れたところまでを出しました）。" +
-            truncatedOutputAdvice(outputLimit),
+            truncatedOutputAdvice(outputLimit, result),
         });
       }
       /*

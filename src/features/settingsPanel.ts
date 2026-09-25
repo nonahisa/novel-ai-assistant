@@ -2847,7 +2847,7 @@ export class SettingsPanel {
           type: "error",
           // 文言は `ai/outputLimit.ts` が持つ（判定の置き場を2つにしない）。
           // ここで足すのは、この画面でできる絞り方だけ
-          message: `${truncatedOutputAdvice(outputLimit)}観点を絞ると通ることがあります。`,
+          message: `${truncatedOutputAdvice(outputLimit, result)}観点を絞ると通ることがあります。`,
         });
         return undefined;
       }

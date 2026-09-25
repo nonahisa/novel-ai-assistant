@@ -18,6 +18,7 @@ import {
   bundledFeatureOutputKeys,
 } from "../../../src/core/bundledTuning";
 import { OUTPUT_RESERVE_TOKENS } from "../../../src/ai/contextGuard";
+import { lookupCallSpeeds } from "../../../src/ai/runTimeEstimate";
 
 /**
  * 出力に見込むトークン数を、**実測から決める**（作者の裁定、2026-09-19）。
@@ -537,5 +538,72 @@ describe("モデルの違う実測を混ぜない", () => {
       expect(sent, `${providerId}/${model}`).toBeGreaterThanOrEqual(seed);
       expect(sent, `${providerId}/${model}`).toBeLessThanOrEqual(16384);
     }
+  });
+});
+
+/**
+ * **まだ信じない回数の実測が、同梱の初期値を隠していた**（0.89.6 の担当の報告 #3）。
+ *
+ * 0.89.6 で字/トークンの側（`mergeBundledTuning`）に直したのと同じ形の穴が、
+ * 出力の見込みの側に残っていた。普段の呼び出しは1回ごとに台帳へ1件積む。
+ * 1件目が入った途端、`featureOutputTuning` は作者の行を返して同梱を見なく
+ * なる——ところが読む側（`featureOutputCeiling`・`lookupCallSpeeds`）は
+ * 3件に満たない実測を信じないので、**同梱した 8,753 も使われず、設定値
+ * （16,384）や当て推量（8,192）へ戻っていた。** 同梱の意味が最初の1回で消える。
+ *
+ * 直し方も同じ：しきい値に届くまでは同梱を返す。**台帳の生の値は消さない**
+ * ので、届けば作者の実測に替わる。
+ */
+describe("まだ信じない回数の実測は、同梱の初期値を隠さない", () => {
+  const bundledCeiling = (feature: string): number =>
+    Math.ceil(
+      (bundledFeatureOutput(feature)!.outputTokens * FEATURE_OUTPUT_MARGIN) / 1024
+    ) * 1024;
+
+  it("1回ぶんの実測が入っても、見込みは同梱から出る（この不具合そのもの）", async () => {
+    installSettings({ maxOutputTokens: 16384 });
+    const before = featureOutputCeiling("typo_check", PROVIDER, MODEL);
+    expect(before).toBe(bundledCeiling("typo_check"));
+
+    await recordFeatureOutputTokens("typo_check", PROVIDER, MODEL, 500, false);
+
+    expect(featureOutputCeiling("typo_check", PROVIDER, MODEL)).toBe(before);
+    expect(resolveOutputTokensForSend(PROVIDER, MODEL, "typo_check")).toBe(before);
+    expect(resolveOutputTokensForPlanning(PROVIDER, MODEL, "typo_check")).toBe(before);
+  });
+
+  it("台帳の生の値は数え続け、しきい値に届けば作者の実測に替わる", async () => {
+    installSettings({ maxOutputTokens: 16384 });
+    await recordSamples("typo_check", 500, MIN_FEATURE_OUTPUT_SAMPLES - 1);
+    // 同梱の件数を数え始めにしない（3件に届くのは作者の実測が3回たまったとき）
+    const entry = tuningStoreContents()[
+      featureOutputKey("typo_check", PROVIDER, MODEL)
+    ] as Record<string, unknown>;
+    expect(entry.outputTokenSamples).toBe(MIN_FEATURE_OUTPUT_SAMPLES - 1);
+    expect(featureOutputCeiling("typo_check", PROVIDER, MODEL)).toBe(
+      bundledCeiling("typo_check")
+    );
+
+    await recordFeatureOutputTokens("typo_check", PROVIDER, MODEL, 500, false);
+    // 500 × 1.25 → 1,024刻みで 1,024
+    expect(featureOutputCeiling("typo_check", PROVIDER, MODEL)).toBe(1024);
+  });
+
+  it("切り詰められた印は、同梱より強い（要る量を知らないので設定値へ）", async () => {
+    installSettings({ maxOutputTokens: 16384 });
+    await recordFeatureOutputTokens("typo_check", PROVIDER, MODEL, 16384, true);
+
+    expect(featureOutputCeiling("typo_check", PROVIDER, MODEL)).toBeUndefined();
+    expect(resolveOutputTokensForSend(PROVIDER, MODEL, "typo_check")).toBe(16384);
+  });
+
+  it("所要時間の見積もりも、1回ぶんの実測で同梱の目安を失わない", async () => {
+    await recordFeatureOutputTokens("typo_check", PROVIDER, MODEL, 500, false);
+
+    const speeds = lookupCallSpeeds(PROVIDER, MODEL, "typo_check");
+    expect(speeds.basis).toBe("bundled-max");
+    expect(speeds.outputTokensPerCall).toBe(
+      bundledFeatureOutput("typo_check")!.outputTokens
+    );
   });
 });

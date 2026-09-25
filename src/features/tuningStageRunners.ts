@@ -6,6 +6,7 @@ import {
   recoveryForAIError,
   type AIProvider,
   type GenerateResult,
+  type ModelInfo,
 } from "../ai/types";
 import { CONTEXT_GUARD_EXEMPT_FEATURE } from "../ai/contextGuard";
 import { isLocalProvider } from "../ai/otherLocalAi";
@@ -58,9 +59,23 @@ import {
 import {
   TYPO_CHECK_SCHEMA,
   TYPO_CHECK_SYSTEM_PROMPT,
+  TYPO_CHECK_SYSTEM_PROMPT_SMALL,
   TYPO_CHECK_TEMPERATURE,
   buildTypoCheckPrompt,
+  typoPromptVersion,
 } from "../prompts/typoCheck";
+import { useSmallModelTypoPrompt } from "../ai/capability";
+import {
+  parseTypoCheckResult,
+  summarizeRejectReasons,
+  validateTypoIssues,
+} from "../core/typoCheckValidation";
+import {
+  TUNING_ACCURACY_BODY,
+  describeTypoAccuracyScore,
+  scoreTypoAccuracy,
+  typoAccuracyRecord,
+} from "../core/tuningAccuracy";
 import { withCancellableProgress } from "../views/progress";
 import { errorWithLog } from "../views/notify";
 import { confirmPaidUsage, ollamaEndpoint } from "./aiConnectivity";
@@ -105,6 +120,15 @@ export interface StageContext {
    * かもしれないことを言う。
    */
   readonly readLoadedModels?: () => Promise<readonly OllamaLoadedModel[] | undefined>;
+  /**
+   * モデルの大きさ（API が教える `parameterSize` とティア）。取れなければ無い。
+   *
+   * **精度の段が、製品と同じ頼み方を選ぶために使う**——誤字脱字は 20B 未満へ
+   * P-09 1.1、それ以上へ 1.2 を送る（`ai/capability.ts` の
+   * `useSmallModelTypoPrompt`）。無いときは製品と同じく、手元のAIを小さい側、
+   * クラウドを大きい側として扱う。
+   */
+  readonly modelInfo?: Pick<ModelInfo, "parameterSize" | "tier">;
 }
 
 /**
@@ -238,24 +262,29 @@ export async function runTuningStages(
 async function sendTypoSample(
   context: StageContext,
   body: string,
-  options: { readonly disableThinking: boolean; readonly roomyOutput?: boolean }
+  options: {
+    readonly disableThinking: boolean;
+    readonly roomyOutput?: boolean;
+    /**
+     * 小さいモデル向けの頼み方（P-09 1.1）を送るか。**精度の段だけが渡す**
+     * （製品と同じ選び分けで答え合わせするため）。省くと大きいモデル向け
+     * （時間の段は 0.89.13 のときの送り方のまま）。
+     */
+    readonly forSmallModel?: boolean;
+  }
 ): Promise<GenerateResult> {
-  const chunk: Chunk = {
-    filePath: "",
-    index: 0,
-    text: body,
-    startLine: 0,
-    chapterStart: null,
-    chapterEnd: null,
-    hash: "",
-  };
+  const chunk = sampleChunk(body);
   const userPrompt = buildTypoCheckPrompt({
     chunkTextWithLineNumbers: withLineNumbers(chunk),
     properNounDictionary: [...TUNING_WORK_PROPER_NOUNS],
+    forSmallModel: options.forSmallModel,
   });
   const providerId = context.provider.id;
   return context.provider.generate({
-    systemPrompt: TYPO_CHECK_SYSTEM_PROMPT,
+    systemPrompt:
+      options.forSmallModel === true
+        ? TYPO_CHECK_SYSTEM_PROMPT_SMALL
+        : TYPO_CHECK_SYSTEM_PROMPT,
     userPrompt,
     model: context.model,
     temperature: TYPO_CHECK_TEMPERATURE,
@@ -283,6 +312,22 @@ async function sendTypoSample(
     meta: { feature: TUNING_WORK_FEATURE },
     signal: context.signal,
   });
+}
+
+/**
+ * 同梱の文を1つのチャンクにしたもの。**送る形と検算の形を同じにする**
+ * ——別々に組むと、行番号の数え方が食い違って検算が指摘を捨てる。
+ */
+function sampleChunk(body: string): Chunk {
+  return {
+    filePath: "",
+    index: 0,
+    text: body,
+    startLine: 0,
+    chapterStart: null,
+    chapterEnd: null,
+    hash: "",
+  };
 }
 
 /** 返ってきた応答から、思考について見えたこと */
@@ -604,7 +649,95 @@ async function readResidency(context: StageContext): Promise<Residency> {
   };
 }
 
-/* ── 段3：読める長さの申告 ───────────────────────── */
+/* ── 段3：誤字脱字の精度の目安 ─────────────────────── */
+
+/** ログに写す、読み取れなかった答えの長さ */
+const ACCURACY_LOG_EXCERPT_CHARS = 300;
+
+/**
+ * 同梱の文を**製品の誤字脱字と同じ道**で送り、置いた誤りの当たりと誤検出を
+ * 数える（設計書6.49.9。答え合わせは `core/tuningAccuracy.ts`）。
+ *
+ * **製品と同じ道**とは3つ——頼み方の選び分け（20B 以上は P-09 1.2、未満は
+ * 1.1）・形式の強制・検算（`validateTypoIssues`）。検算を飛ばして数えると、
+ * 作者の画面には出ない指摘まで誤検出に数え、製品に無い悪さを測ったことに
+ * なる（CLAUDE.md の失敗5）。
+ *
+ * **数えられなかった回は覚えない。** 答えが切れた・読めなかったときに
+ * 「0件」と書くと、測れなかったことが「1件も拾わない」に化ける。
+ */
+async function runAccuracyStage(context: StageContext): Promise<StageOutcome> {
+  const label = "誤字脱字の精度の目安";
+  const forSmallModel = useSmallModelTypoPrompt({
+    tier: context.modelInfo?.tier,
+    providerId: context.provider.id,
+    parameterSize: context.modelInfo?.parameterSize,
+  });
+  const promptVersion = typoPromptVersion(forSmallModel);
+
+  let result: GenerateResult;
+  try {
+    result = await sendTypoSample(context, TUNING_ACCURACY_BODY, {
+      disableThinking: true,
+      forSmallModel,
+    });
+  } catch (error) {
+    return failedOutcome(label, error);
+  }
+
+  if (result.truncated || result.text.trim().length === 0) {
+    logStep(
+      `仕事に近い形の測定：精度の答えが${result.truncated ? "途中で切れました" : "空でした"}` +
+        `（P-09 ${promptVersion}）。数えません。`
+    );
+    return {
+      summary:
+        `${label}は数えられませんでした（答えが` +
+        `${result.truncated ? "途中で切れました" : "空でした"}）。`,
+    };
+  }
+  const parsed = parseTypoCheckResult(result.text);
+  if (parsed === null) {
+    logStep(
+      `仕事に近い形の測定：精度の答えを読み取れませんでした（P-09 ${promptVersion}）。` +
+        `答えの頭: ${result.text.slice(0, ACCURACY_LOG_EXCERPT_CHARS)}`
+    );
+    return { summary: `${label}は数えられませんでした（答えを読み取れませんでした）。` };
+  }
+
+  // **検算は製品のものをそのまま使う**（書き換えない。作者の辞書と
+  // 直さない語の代わりに、同梱の文の辞書を渡す）
+  const validated = validateTypoIssues(
+    parsed,
+    sampleChunk(TUNING_ACCURACY_BODY),
+    [...TUNING_WORK_PROPER_NOUNS],
+    []
+  );
+  const score = scoreTypoAccuracy(validated.accepted);
+  // **何で点が動いたかを残す**（作者の画面には数だけを出す）
+  logStep(
+    `仕事に近い形の測定：精度（P-09 ${promptVersion}）→ 当たり ${score.hits}/${score.total}` +
+      ` / 直し方が違う ${score.wrongFixes} / 誤検出 ${score.falsePositives}` +
+      ` / 検算で落とした ${validated.rejected.length}` +
+      (validated.rejected.length > 0
+        ? `（${summarizeRejectReasons(validated.rejected)}）`
+        : "") +
+      (score.missed.length > 0
+        ? ` / 拾えなかった: ${score.missed.map((typo) => typo.target).join("・")}`
+        : "") +
+      (score.falsePositiveItems.length > 0
+        ? ` / 誤検出: ${score.falsePositiveItems
+            .map((item) => `${item.target}→${item.suggestion}`)
+            .join("・")}`
+        : "")
+  );
+  return {
+    summary: describeTypoAccuracyScore(score),
+    record: typoAccuracyRecord(score, forSmallModel, nowIso()),
+  };
+}
+
+/* ── 段4：読める長さの申告 ───────────────────────── */
 
 /** 断らせる回と確かめの回に送る、短い問い（答えは「はい」だけで済む） */
 const DECLARED_PROBE_SYSTEM = "問いに一言で答えてください。";
@@ -701,6 +834,7 @@ async function runDeclaredLimitStage(context: StageContext): Promise<StageOutcom
 export const STAGE_RUNNERS: Readonly<Record<TuningStageId, StageRunner>> = {
   thinking: runThinkingStage,
   work: runWorkStage,
+  accuracy: runAccuracyStage,
   declaredLimit: runDeclaredLimitStage,
 };
 
@@ -712,7 +846,12 @@ export const STAGE_RUNNERS: Readonly<Record<TuningStageId, StageRunner>> = {
  * **有料AIでは、測る前に回数を示す**（作品の決まり「確認は処理量とコストを
  * 示してから」）。段ごとの回数と合計は段の一覧から組む。
  */
-export async function runWorkTuning(provider: AIProvider, model: string): Promise<void> {
+export async function runWorkTuning(
+  provider: AIProvider,
+  model: string,
+  /** モデルの大きさ（精度の段が頼み方を選ぶ。`StageContext.modelInfo`） */
+  modelInfo?: Pick<ModelInfo, "parameterSize" | "tier">
+): Promise<void> {
   const target: TuningStageTarget = {
     providerId: provider.id,
     local: isLocalProvider(provider.id),
@@ -743,6 +882,7 @@ export async function runWorkTuning(provider: AIProvider, model: string): Promis
           target,
           signal: controller.signal,
           report: (message) => progress.report({ message }),
+          ...(modelInfo !== undefined ? { modelInfo } : {}),
           // 載っているモデルを読めるのは Ollama だけ（`/api/ps`）。
           // 宛先の組み立てと通信の口は、管理外の負荷の見張り
           // （`features/localAiGate.ts`）と同じ書き方にする
@@ -795,8 +935,9 @@ async function offerStageProposals(
   const key = modelTuningKey(providerId, model);
   const prefix = result.cancelled ? "（途中で中止しました）" : "";
   const recordedNote = result.recorded
-    ? "1000字あたりの秒数と、考えるモデルかどうかは、押さなくても記録に残しました" +
-      "（押す前の所要時間の見込みと、出力の見込みに使います）。"
+    ? "1000字あたりの秒数・考えるモデルかどうか・誤字脱字の精度の目安は、押さなくても" +
+      "記録に残しました（押す前の所要時間の見込みと出力の見込みに使い、精度の目安は" +
+      "機能別のAIの割り当てに並べます）。"
     : "";
   const { proposal } = result;
   const parts: string[] = [];

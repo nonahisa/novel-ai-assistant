@@ -337,6 +337,30 @@ export interface ModelTuning {
   /** その文を受け取った時刻（ISO 8601） */
   readonly contextDeclaredAt?: string;
   /**
+   * **誤字脱字の精度の目安**（設計書6.49.9。`core/tuningAccuracy.ts`）。
+   * 同梱の短い文に置いた誤りのうち、正しく直した数・置いた数・誤りでない
+   * 所への指摘の数・場所は合ったが直し方が違った数。
+   *
+   * **確認なしで保存する参考値**（速さ・1000字あたりの秒数と同じ流儀）。
+   * 呼び出しの振る舞いは何も変えない。機能別のAIの割り当ての誤字脱字の行に
+   * 「目安」として並ぶ。**0も読む**（1件も当たらなかった・誤検出が無かった
+   * のは、れっきとした中身である）。
+   */
+  readonly typoAccuracyHits?: number;
+  readonly typoAccuracyTotal?: number;
+  readonly typoAccuracyFalsePositives?: number;
+  readonly typoAccuracyWrongFixes?: number;
+  /**
+   * 送った頼み方の版（P-09）と、小さいモデル向けを送ったか。**版が変わった
+   * 結果は古い結果として扱う**（`isTypoAccuracyCurrent`）。
+   */
+  readonly typoAccuracyPromptVersion?: string;
+  readonly typoAccuracySmallPrompt?: boolean;
+  /** 同梱の文の版（`TUNING_WORK_SAMPLE_VERSION`）。文が変われば数の意味も変わる */
+  readonly typoAccuracySampleVersion?: string;
+  /** 精度を測った時刻（ISO 8601） */
+  readonly typoAccuracyMeasuredAt?: string;
+  /**
    * この行に**同梱の初期値が混ざっている**か（`core/bundledTuning.ts`）。
    *
    * **読むときにだけ付く印で、台帳には書かない。** `writeModelTuning` が
@@ -734,6 +758,21 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
     const thinkingMeasuredAt = nonEmptyText(entry.thinkingMeasuredAt);
     const contextDeclared = nonEmptyText(entry.contextDeclared);
     const contextDeclaredAt = nonEmptyText(entry.contextDeclaredAt);
+    /*
+      **誤字脱字の精度の目安**（6.49.9）。数は0を読む（当たり0件・誤検出0件は
+      中身である）。置いた数だけは0を読まない（0件中は測りにならない）
+    */
+    const typoAccuracyHits = nonNegativeInteger(entry.typoAccuracyHits);
+    const typoAccuracyTotal = positiveNumber(entry.typoAccuracyTotal);
+    const typoAccuracyFalsePositives = nonNegativeInteger(entry.typoAccuracyFalsePositives);
+    const typoAccuracyWrongFixes = nonNegativeInteger(entry.typoAccuracyWrongFixes);
+    const typoAccuracyPromptVersion = nonEmptyText(entry.typoAccuracyPromptVersion);
+    const typoAccuracySmallPrompt =
+      typeof entry.typoAccuracySmallPrompt === "boolean"
+        ? entry.typoAccuracySmallPrompt
+        : undefined;
+    const typoAccuracySampleVersion = nonEmptyText(entry.typoAccuracySampleVersion);
+    const typoAccuracyMeasuredAt = nonEmptyText(entry.typoAccuracyMeasuredAt);
 
     const tuning: ModelTuning = {
       // **持っている欄だけを置く。** `undefined` を常に置くと、書き戻した
@@ -765,6 +804,14 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
       ...(thinkingMeasuredAt !== undefined ? { thinkingMeasuredAt } : {}),
       ...(contextDeclared !== undefined ? { contextDeclared } : {}),
       ...(contextDeclaredAt !== undefined ? { contextDeclaredAt } : {}),
+      ...(typoAccuracyHits !== undefined ? { typoAccuracyHits } : {}),
+      ...(typoAccuracyTotal !== undefined ? { typoAccuracyTotal } : {}),
+      ...(typoAccuracyFalsePositives !== undefined ? { typoAccuracyFalsePositives } : {}),
+      ...(typoAccuracyWrongFixes !== undefined ? { typoAccuracyWrongFixes } : {}),
+      ...(typoAccuracyPromptVersion !== undefined ? { typoAccuracyPromptVersion } : {}),
+      ...(typoAccuracySmallPrompt !== undefined ? { typoAccuracySmallPrompt } : {}),
+      ...(typoAccuracySampleVersion !== undefined ? { typoAccuracySampleVersion } : {}),
+      ...(typoAccuracyMeasuredAt !== undefined ? { typoAccuracyMeasuredAt } : {}),
     };
     // 何も読めなかった項目は、持っていても引く値が無い
     if (Object.keys(tuning).length === 0) continue;
@@ -789,6 +836,13 @@ function positiveNumber(value: unknown): number | undefined {
 /** 0以上の有限数のときだけ返す（0に意味がある欄のため） */
 function nonNegativeNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+/** 0以上の整数のときだけ返す（件数の欄のため。小数の件数は手で書き換えたもの） */
+function nonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
     ? value
     : undefined;
 }

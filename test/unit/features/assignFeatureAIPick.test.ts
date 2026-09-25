@@ -8,6 +8,9 @@ import {
 } from "../../../src/ai/registry";
 import type { AIProvider, ModelInfo, ProviderId } from "../../../src/ai/types";
 import { statusBarMessages, window } from "../support/vscodeStub";
+import { useMemoryTuningStore } from "../support/tuningStore";
+import { TYPO_CHECK_VERSION } from "../../../src/prompts/typoCheck";
+import { TUNING_WORK_SAMPLE_VERSION } from "../../../src/core/tuningWorkSample";
 
 /**
  * 「機能ごとにAIを割り当てる」の選択画面（設計書6.28.7の1）。
@@ -80,7 +83,9 @@ let shown: string[] = [];
 /** 何番目の選択肢を選ぶか（問いごと。undefined は閉じる） */
 let picks: Array<number | undefined> = [];
 
-beforeEach(() => {
+beforeEach(async () => {
+  // 台帳は毎回空から（精度の目安のテストが置いた値を持ち越さない）
+  await useMemoryTuningStore({});
   rounds = [];
   shown = [];
   picks = [];
@@ -168,6 +173,87 @@ describe("機能の一覧", () => {
       .filter((item) => item.detail !== undefined)
       .map((item) => item.label);
     expect(withDetail).toEqual(["設定資料の抽出", "誤字脱字"]);
+  });
+});
+
+/**
+ * 誤字脱字の行に、AIチューニングで測った**精度の目安**を並べる（設計書6.49.9）。
+ *
+ * **作者が採った率が主で、目安は添え物**。同梱の文は4段落しかないので、
+ * 1件で大きく動く。頼み方の版が変わった結果は、古いと言って出す。
+ */
+describe("誤字脱字の精度の目安", () => {
+  const ASSIGNED = {
+    [KEY_ASSIGNMENTS]: { typo: { provider: "gemini", model: "gemini-2.5" } },
+  };
+  function measured(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      "gemini/gemini-2.5": {
+        typoAccuracyHits: 5,
+        typoAccuracyTotal: 7,
+        typoAccuracyFalsePositives: 1,
+        typoAccuracyWrongFixes: 0,
+        typoAccuracyPromptVersion: TYPO_CHECK_VERSION,
+        typoAccuracySmallPrompt: false,
+        typoAccuracySampleVersion: TUNING_WORK_SAMPLE_VERSION,
+        typoAccuracyMeasuredAt: "2026-09-26T00:00:00.000Z",
+        ...overrides,
+      },
+    };
+  }
+  function typoDetail(): string | undefined {
+    return rounds[0].find((item) => item.label === "誤字脱字")?.detail;
+  }
+
+  test("作者の判断が無ければ、目安だけを「目安」と名乗って出す", async () => {
+    await useMemoryTuningStore(measured());
+    const { registry } = setup(ASSIGNED);
+    picks = [undefined];
+
+    await assignFeatureAI(registry);
+
+    expect(typoDetail()).toContain("gemini-2.5：目安（同梱の短い文で測定）：7件中5件・誤検出1");
+  });
+
+  test("作者が採った率があれば、そちらを先に出し、目安は後ろに添える", async () => {
+    await useMemoryTuningStore(measured());
+    const { registry } = setup(ASSIGNED);
+    picks = [undefined];
+
+    await assignFeatureAI(registry, [
+      { providerId: "gemini", model: "gemini-2.5", feature: "typo", accepted: 20, dismissed: 5 },
+    ]);
+
+    const detail = typoDetail() ?? "";
+    expect(detail).toContain("作者が採った率 80%（25件中）");
+    expect(detail).toContain("目安（同梱の短い文で測定）：7件中5件・誤検出1");
+    expect(detail.indexOf("作者が採った率")).toBeLessThan(detail.indexOf("目安"));
+  });
+
+  test("頼み方の版が変わる前の結果は、古いと言って出す", async () => {
+    await useMemoryTuningStore(measured({ typoAccuracyPromptVersion: "0.9" }));
+    const { registry } = setup(ASSIGNED);
+    picks = [undefined];
+
+    await assignFeatureAI(registry);
+
+    expect(typoDetail()).toContain("古い結果");
+  });
+
+  test("ほかの機能の行には出さない", async () => {
+    await useMemoryTuningStore(measured());
+    const { registry } = setup({
+      [KEY_ASSIGNMENTS]: {
+        typo: { provider: "gemini", model: "gemini-2.5" },
+        proofread: { provider: "gemini", model: "gemini-2.5" },
+      },
+    });
+    picks = [undefined];
+
+    await assignFeatureAI(registry);
+
+    const proofread = rounds[0].find((item) => item.label === "推敲");
+    expect(proofread?.detail ?? "").not.toContain("目安");
   });
 });
 

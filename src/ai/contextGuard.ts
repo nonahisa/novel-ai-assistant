@@ -2,7 +2,7 @@ import {
   resolveTokensPerChar,
   type CharsPerTokenMeasurement,
 } from "../core/sizeBudget";
-import { AIError } from "./types";
+import { AIError, type OutputWindowCap } from "./types";
 
 /**
  * 送るものがモデルの上限に入るかを、送る直前に確かめる（設計書6.27.10）。
@@ -148,6 +148,26 @@ export function outputTokensWithinWindow(
   }
   if (input.outputTokens < limit) return input.outputTokens;
   return Math.max(minimumOutputTokens, limit - inputTokensOf(input));
+}
+
+/**
+ * 関所が1回の応答の上限を縮めた回について、作者へ添える一文
+ * （0.89.6 の担当の報告 #5）。
+ *
+ * **「設定の上限を大きくして」と言わないための文である。** 縮めたのは読める
+ * 長さのせいで、設定を上げても関所はまた同じ値まで縮める。直らない操作へ
+ * 導かないよう、上げても変わらないことをはっきり言う。
+ *
+ * 切り詰めの案内（`ai/outputLimit.ts`）と、上限を使い切った空を自分で断る
+ * プロバイダ（`ai/sakuraProvider.ts`）の両方が使う（言い方を2か所に写さない）。
+ */
+export function describeWindowCappedOutput(cap: OutputWindowCap): string {
+  return (
+    `このモデルが読める長さは${cap.contextWindow.toLocaleString("ja-JP")}トークンしか` +
+    "ないため、送る前に1回の応答の上限を、指示と本文の残り" +
+    `（約${cap.tokens.toLocaleString("ja-JP")}トークン）まで縮めてありました。` +
+    "設定の「1回の応答の上限」を大きくしても変わりません。"
+  );
 }
 
 /** 入るかどうかを見積もる。判断だけで、副作用は持たない */

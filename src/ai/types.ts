@@ -202,6 +202,16 @@ export interface GenerateParams {
    * だけ返す（返事を落とすと会話が噛み合わなくなる）。
    */
   onToolCall?: (call: AIToolCall) => string | undefined;
+  /**
+   * 送る前の関所が、**読める長さに合わせて1回の応答の上限を縮めた**印
+   * （`ai/meteredProvider.ts` だけが入れる。**AIへは送らない**）。
+   *
+   * 縮めた回が上限で切られたとき、「設定の上限を大きくして」と言うのは嘘に
+   * なる——設定を上げても、関所はまた同じ値まで縮める（0.89.6 の担当の
+   * 報告 #5）。上限を使い切った空を自分で断るプロバイダ（さくら）が、
+   * 案内を書き分けるために見る。
+   */
+  outputCappedByWindow?: OutputWindowCap;
   signal?: AbortSignal;
   /**
    * この呼び出しが何であるか。**AIへは送らない。**
@@ -297,6 +307,23 @@ export interface GenerateResult {
   truncated: boolean;
   /** 所要時間（ミリ秒） */
   elapsedMs: number;
+  /**
+   * 送る前の関所が1回の応答の上限を縮めて送った回だけ入る
+   * （`GenerateParams.outputCappedByWindow` と同じ中身）。切り詰めの案内
+   * （`ai/outputLimit.ts` の `truncatedOutputAdvice`）が、これを見て
+   * 「上限を上げても変わらない」と言い分ける。
+   */
+  outputCappedByWindow?: OutputWindowCap;
+}
+
+/**
+ * 関所が縮めた1回の応答の上限と、その理由になった読める長さ（トークン）。
+ */
+export interface OutputWindowCap {
+  /** そのモデルが読める長さ */
+  readonly contextWindow: number;
+  /** 縮めた先の、1回の応答の上限 */
+  readonly tokens: number;
 }
 
 export interface ConnectionTestResult {

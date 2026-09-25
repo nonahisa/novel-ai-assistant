@@ -36,7 +36,7 @@ export { predictWorkSeconds, type WorkRate };
 export const TUNING_WORK_FEATURE = "ai_tuning_work";
 
 /** 段の名前。**並べる順は `TUNING_STAGES` が決める** */
-export type TuningStageId = "thinking" | "work" | "declaredLimit";
+export type TuningStageId = "thinking" | "work" | "accuracy" | "declaredLimit";
 
 /** どのAIを測るか（段が「このAIで走るか」「何回送るか」を決める材料） */
 export interface TuningStageTarget {
@@ -80,7 +80,10 @@ const DECLARED_LIMIT_PROVIDERS: ReadonlySet<string> = new Set([
  *    読み込まれる（読み込みの時間は、時間の測定に混ぜない）
  * 2. **仕事に近い時間**。誤字脱字と同じ形で、短い文と長い文を1回ずつ送る。
  *    手元のAIでは、その前に測る形の1回を入れる（数えない）
- * 3. **読める長さの申告**。断られた文から読み、収まる要求が通ることで
+ * 3. **誤字脱字の精度の目安**。同梱の文（4段落）を1回で送り、置いた誤り
+ *    7つの当たりと誤検出を数える（`core/tuningAccuracy.ts`）。時間の段の
+ *    あとに置く——手元のAIは、そこでもうモデルが載っている
+ * 4. **読める長さの申告**。断られた文から読み、収まる要求が通ることで
  *    確かめる（さくら・ChatGPT だけ）
  */
 export const TUNING_STAGES: readonly TuningStageSpec[] = [
@@ -102,6 +105,13 @@ export const TUNING_STAGES: readonly TuningStageSpec[] = [
       1回ごとの固定の時間が数十秒ずれる（実接続 2026-09-26、gemma4:e4b）。
     */
     maxCalls: (target) => (target.local ? 3 : 2),
+  },
+  {
+    id: "accuracy",
+    label: "誤字脱字の精度の目安",
+    appliesTo: () => true,
+    // 4段落を1回で送る（製品の誤字脱字もチャンクごとに1回）
+    maxCalls: () => 1,
   },
   {
     id: "declaredLimit",

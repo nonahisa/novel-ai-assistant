@@ -12,6 +12,7 @@ import {
 import { fetchJson } from "./httpClient";
 import { toOpenAIJsonSchema } from "./jsonSchema";
 import { resolveMaxOutputTokens } from "./outputLimit";
+import { describeWindowCappedOutput } from "./contextGuard";
 import { forgetSecret, logLine, registerSecret } from "../core/logger";
 import {
   resolveContextWindow,
@@ -463,9 +464,17 @@ export class SakuraProvider implements ApiKeyProvider {
         `finish_reason=${choice.finish_reason ?? "unknown"}` +
         (reasoningChars > 0 ? ` / 考えた量 ${reasoningChars}字` : "");
       if (choice.finish_reason === "length") {
+        /*
+          **上限を縮めたのが送る前の関所なら、設定の話をしない**（0.89.6 の
+          担当の報告 #5）。読める長さに合わせて縮めた上限は、設定を上げても
+          また同じ値まで縮まる。直らない操作へ導かない。
+        */
+        const cap = params.outputCappedByWindow;
         throw new AIError(
           "AIが答えを書く前に、1回の応答の上限を使い切りました（考える途中で止まった可能性があります）。" +
-            "設定の「1回の応答の上限」を大きくするか、別のモデルをお試しください。",
+            (cap !== undefined
+              ? `${describeWindowCappedOutput(cap)}別のモデルをお試しください。`
+              : "設定の「1回の応答の上限」を大きくするか、別のモデルをお試しください。"),
           "bad_response",
           detail
         );

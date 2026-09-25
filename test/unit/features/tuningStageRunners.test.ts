@@ -88,7 +88,11 @@ import {
 import {
   TYPO_CHECK_SCHEMA,
   TYPO_CHECK_SYSTEM_PROMPT,
+  TYPO_CHECK_SYSTEM_PROMPT_SMALL,
+  TYPO_CHECK_VERSION,
+  TYPO_CHECK_VERSION_SMALL,
 } from "../../../src/prompts/typoCheck";
+import { TUNING_WORK_PLANTED_TYPOS } from "../../../src/core/tuningWorkSample";
 import { SAKURA_CONTEXT_WINDOW } from "../../../src/ai/sakuraProvider";
 import {
   tuningWrites,
@@ -116,6 +120,13 @@ interface FakeBehavior {
   failWhenThinkingOff?: () => AIError;
   /** 1回目だけ、この時間がかかる（読み込みの再現） */
   firstCallMs?: number;
+  /** 精度の段（4段落すべてを送る回）だけ、この答えを返す */
+  accuracyAnswer?: { text: string; truncated?: boolean };
+}
+
+/** 精度の段の回か（4段落すべてが入っている） */
+function isAccuracyCall(params: GenerateParams): boolean {
+  return TUNING_WORK_PARAGRAPHS.every((paragraph) => params.userPrompt.includes(paragraph));
 }
 
 const LLM_JP_TEXT =
@@ -157,6 +168,13 @@ function fakeProvider(
       }
       if (params.disableThinking && behavior.failWhenThinkingOff) {
         throw behavior.failWhenThinkingOff();
+      }
+      if (behavior.accuracyAnswer !== undefined && isAccuracyCall(params)) {
+        return {
+          text: behavior.accuracyAnswer.text,
+          truncated: behavior.accuracyAnswer.truncated === true,
+          elapsedMs: 1000,
+        };
       }
       // 長い回は2〜4段落目、読み込ませる回は3段落目だけ、短い回は1段落目
       const body = params.userPrompt.includes(TUNING_WORK_PARAGRAPHS[1])
@@ -235,7 +253,13 @@ describe("製品の誤字脱字と同じ形で送る", () => {
     await runTuningStages(context(provider, "gemma4:e4b"));
     expect(calls.length).toBeGreaterThan(0);
     for (const call of calls) {
-      expect(call.systemPrompt).toBe(TYPO_CHECK_SYSTEM_PROMPT);
+      /*
+        **精度の段は、製品と同じく大きさで頼み方を選ぶ**（手元の e4b は
+        小さい側＝P-09 1.1）。時間の段は 0.89.13 のときの送り方のまま
+      */
+      expect(call.systemPrompt).toBe(
+        isAccuracyCall(call) ? TYPO_CHECK_SYSTEM_PROMPT_SMALL : TYPO_CHECK_SYSTEM_PROMPT
+      );
       expect(call.jsonSchema).toBe(TYPO_CHECK_SCHEMA);
       // 関所は素通りさせない（製品と同じ検査を通す）
       expect(call.meta?.feature).toBe(TUNING_WORK_FEATURE);
@@ -273,8 +297,8 @@ describe("測った値を覚える", () => {
       )
     );
     expect(result.recorded).toBe(true);
-    // 思考の見分け2回＋測る形で読み込ませる1回＋短い・長い2回
-    expect(calls).toHaveLength(5);
+    // 思考の見分け2回＋測る形で読み込ませる1回＋短い・長い2回＋精度1回
+    expect(calls).toHaveLength(6);
   });
 
   test("止める指定が効かないモデルは、思考のぶんを台帳に残す", async () => {
@@ -308,6 +332,130 @@ describe("測った値を覚える", () => {
     const ledger = modelTuningRaw("sakura", "preview/Qwen3.6-35B-A3B");
     expect(ledger?.thinkingOffWorks).toBe(true);
     expect(ledger?.thinkingOverheadTokens).toBeUndefined();
+  });
+});
+
+/**
+ * 誤字脱字の精度の目安（設計書6.49.9。作者の承認、2026-09-25）。
+ *
+ * **製品と同じ道で送り、検算を通した指摘だけを、当たりと誤検出の両方で数える。**
+ */
+describe("誤字脱字の精度の目安", () => {
+  /** 置いた誤りのうち、先頭から n 件を正しく直し、誤りでない所へ fp 件を指摘する答え */
+  function answer(n: number, fp: number, ungrounded = 0): string {
+    const issues = [
+      ...TUNING_WORK_PLANTED_TYPOS.slice(0, n).map((typo) => ({
+        line: typo.paragraph + 1,
+        original: typo.target,
+        target: typo.target,
+        suggestion: typo.suggestion,
+        reason: "誤変換",
+        confidence: "high",
+      })),
+      ...Array.from({ length: fp }, () => ({
+        line: 3,
+        original: "古い海図",
+        target: "古い",
+        suggestion: "古びた",
+        reason: "誤変換",
+        confidence: "low",
+      })),
+      // 本文に無い引用（検算が捨てる。作者の画面に出ないので誤検出に数えない）
+      ...Array.from({ length: ungrounded }, () => ({
+        line: 2,
+        original: "本文に無い文",
+        target: "無い",
+        suggestion: "ない",
+        reason: "誤変換",
+        confidence: "high",
+      })),
+    ];
+    return JSON.stringify({ issues });
+  }
+
+  test("当たりと誤検出を数え、頼み方の版と一緒に台帳へ残す（押さなくても）", async () => {
+    const provider = fakeProvider(
+      "ollama",
+      false,
+      {
+        thinks: false,
+        offWorks: true,
+        fixedMs: 1000,
+        perCharMs: 1,
+        accuracyAnswer: { text: answer(5, 1, 2) },
+      },
+      []
+    );
+    const result = await runTuningStages(context(provider, "gemma4:e4b"));
+
+    const ledger = modelTuningRaw("ollama", "gemma4:e4b");
+    expect(ledger?.typoAccuracyHits).toBe(5);
+    expect(ledger?.typoAccuracyTotal).toBe(TUNING_WORK_PLANTED_TYPOS.length);
+    // 検算が捨てた2件は数えない（作者の画面には出ない）
+    expect(ledger?.typoAccuracyFalsePositives).toBe(1);
+    // 手元の、大きさの分からないモデルは小さい側（製品と同じ選び分け）
+    expect(ledger?.typoAccuracyPromptVersion).toBe(TYPO_CHECK_VERSION_SMALL);
+    expect(ledger?.typoAccuracySmallPrompt).toBe(true);
+    const text = result.summaries.join("");
+    expect(text).toContain("目安");
+    expect(text).toContain("誤りでない所への指摘は1件");
+  });
+
+  test("20B 以上と分かっているモデルには、大きいモデル向けの頼み方で測る", async () => {
+    const calls: GenerateParams[] = [];
+    const provider = fakeProvider(
+      "ollama",
+      false,
+      { thinks: false, offWorks: true, fixedMs: 1000, perCharMs: 1 },
+      calls
+    );
+    await runTuningStages({
+      ...context(provider, "gemma4:26b"),
+      modelInfo: { parameterSize: "25.2B", tier: "standard" },
+    });
+    const accuracy = calls.filter(isAccuracyCall);
+    expect(accuracy).toHaveLength(1);
+    expect(accuracy[0].systemPrompt).toBe(TYPO_CHECK_SYSTEM_PROMPT);
+    expect(modelTuningRaw("ollama", "gemma4:26b")?.typoAccuracyPromptVersion).toBe(
+      TYPO_CHECK_VERSION
+    );
+  });
+
+  test("何も指摘しないモデルは 0件 と残る（満点にならない）", async () => {
+    const provider = fakeProvider(
+      "sakura",
+      false,
+      {
+        thinks: false,
+        offWorks: true,
+        fixedMs: 1000,
+        perCharMs: 1,
+        accuracyAnswer: { text: '{"issues":[]}' },
+      },
+      []
+    );
+    await runTuningStages(context(provider, "preview/gemma-4-31B-it"));
+    const ledger = modelTuningRaw("sakura", "preview/gemma-4-31B-it");
+    expect(ledger?.typoAccuracyHits).toBe(0);
+    expect(ledger?.typoAccuracyFalsePositives).toBe(0);
+  });
+
+  test("答えが切れた・読めなかった回は覚えない（測れなかったことを 0件 にしない）", async () => {
+    for (const accuracyAnswer of [
+      { text: '{"issues":[{"line":1', truncated: true },
+      { text: "ここに誤りはありません。" },
+    ]) {
+      await useMemoryTuningStore({});
+      const provider = fakeProvider(
+        "sakura",
+        false,
+        { thinks: false, offWorks: true, fixedMs: 1000, perCharMs: 1, accuracyAnswer },
+        []
+      );
+      const result = await runTuningStages(context(provider, "preview/Kimi-K2.6"));
+      expect(modelTuningRaw("sakura", "preview/Kimi-K2.6")?.typoAccuracyHits).toBeUndefined();
+      expect(result.summaries.join("")).toContain("数えられませんでした");
+    }
   });
 });
 
@@ -348,8 +496,8 @@ describe("手元のAIは、読み込みの1回を測りから外す", () => {
     );
     await runTuningStages(context(provider, "preview/gemma-4-31B-it"));
     const typoCalls = calls.filter((call) => call.userPrompt.includes("誤字・脱字"));
-    // 思考の見分け2回＋短い・長い2回
-    expect(typoCalls).toHaveLength(4);
+    // 思考の見分け2回＋短い・長い2回＋精度1回
+    expect(typoCalls).toHaveLength(5);
   });
 
   test("前の段が失敗して載っていなければ、時間の段が1回読み込ませてから測る", async () => {
@@ -380,8 +528,8 @@ describe("手元のAIは、読み込みの1回を測りから外す", () => {
     };
 
     await runTuningStages(context(provider, "gemma4:26b"));
-    // 思考2（失敗）＋読み込み1＋短い・長い2
-    expect(calls).toHaveLength(5);
+    // 思考2（失敗）＋読み込み1＋短い・長い2＋精度1
+    expect(calls).toHaveLength(6);
     const ledger = modelTuningRaw("ollama", "gemma4:26b");
     // 読み込みの60秒は混ざっていない
     expect(ledger?.workFixedSeconds).toBe(5);

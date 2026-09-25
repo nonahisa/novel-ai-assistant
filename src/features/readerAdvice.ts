@@ -243,7 +243,7 @@ export async function requestReaderAdvice(
           outcome = {
             kind: "failed",
             message: response.truncated
-              ? truncatedOutputAdvice(outputLimit)
+              ? truncatedOutputAdvice(outputLimit, response)
               : "AIの答えを読み取れませんでした。もう一度お試しください。",
           };
           return;

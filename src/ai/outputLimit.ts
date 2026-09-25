@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
-import { OUTPUT_RESERVE_TOKENS } from "./contextGuard";
+import { OUTPUT_RESERVE_TOKENS, describeWindowCappedOutput } from "./contextGuard";
+import type { GenerateResult } from "./types";
 import { modelTuning, unsuppressedThinkingTokens } from "../core/modelTuning";
 import {
   featureOutputCeiling,
@@ -310,7 +311,26 @@ export function resolveOutputTokensForSend(
  * 「設定の『1回の応答の上限』を大きくして」と言うのは**嘘**である
  * ——大きくしても実測で頭打ちのままで、作者は直らない操作を繰り返す。
  */
-export function truncatedOutputAdvice(limit: OutputTokenLimit): string {
+export function truncatedOutputAdvice(
+  limit: OutputTokenLimit,
+  /**
+   * 切り詰められた応答（`outputCappedByWindow` だけを見る）。
+   *
+   * **送る前の関所が上限を縮めた回は、何より先にそう言う**（0.89.6 の担当の
+   * 報告 #5）。上限の出どころが設定でも実測でも、実際に送ったのは関所が
+   * 縮めた値で、設定を上げても測り直しても変わらない。渡さない呼び出しは
+   * これまでどおり。
+   */
+  response?: Pick<GenerateResult, "outputCappedByWindow">
+): string {
+  const cap = response?.outputCappedByWindow;
+  if (cap !== undefined) {
+    return (
+      "応答が出力上限で切り詰められました。" +
+      describeWindowCappedOutput(cap) +
+      "送る量を減らすか、もっと長く読めるモデルをお試しください。"
+    );
+  }
   if (limit.source === "機能の実測") {
     return (
       "応答が出力上限で切り詰められました。上限は、この機能がこれまでに" +

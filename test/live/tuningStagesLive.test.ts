@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import { describe, expect, test } from "vitest";
-import { workspace } from "../unit/support/vscodeStub";
+import { window, workspace } from "../unit/support/vscodeStub";
+import { disposeLog } from "../../src/core/logger";
 import { useMemoryTuningStore } from "../unit/support/tuningStore";
 import { MeteredProvider } from "../../src/ai/meteredProvider";
 import { OllamaProvider } from "../../src/ai/ollamaProvider";
@@ -12,6 +13,8 @@ import {
   vscodeFileReaderForTests,
 } from "../../src/core/fileRead";
 import { runTuningStages } from "../../src/features/tuningStageRunners";
+import { plannedStages } from "../../src/core/tuningStages";
+import { describeTypoAccuracyRecord } from "../../src/core/tuningAccuracy";
 import { readOllamaPsWith } from "../../src/core/gpuLoad";
 import { localFetch } from "../../src/ai/fetchTimeouts";
 
@@ -47,6 +50,18 @@ const TARGETS = (process.env.NOVELAI_TUNING_LIVE ?? "")
   });
 
 const SAKURA_BUDGET = Number(process.env.NOVELAI_SAKURA_BUDGET ?? "40");
+
+/**
+ * 走らせる段を絞る（任意。`accuracy` なら精度の目安だけ）。
+ *
+ *   $env:NOVELAI_TUNING_STAGES = "accuracy"
+ *
+ * 決めていなければ、製品と同じく全部の段を走らせる。
+ */
+const STAGE_FILTER = (process.env.NOVELAI_TUNING_STAGES ?? "")
+  .split(",")
+  .map((entry) => entry.trim())
+  .filter((entry) => entry.length > 0);
 
 /** さくらへ送った回数（プロバイダの中の再試行も含む） */
 let sakuraPosts = 0;
@@ -100,21 +115,51 @@ describe.skipIf(TARGETS.length === 0)("AIチューニング：仕事に近い形
       setFileReaderForTests(vscodeFileReaderForTests());
       await useMemoryTuningStore({});
       installBudgetedFetch();
+      /*
+        **操作ログの行を控える**（何を拾えず、何を誤りでない所へ指摘したかは
+        作者の画面には出さず、ログにだけ書く）。代役の出力窓は捨てるので、
+        書き先を差し替えてから最初の1行を書かせる
+      */
+      const logLines: string[] = [];
+      disposeLog();
+      window.createOutputChannel = (() => ({
+        appendLine: (line: string) => {
+          logLines.push(line);
+        },
+        show() {},
+        dispose() {},
+      })) as unknown as typeof window.createOutputChannel;
 
       const report: Record<string, unknown> = {};
       for (const target of TARGETS) {
         const provider = providerFor(target.providerId);
         const startedPosts = sakuraPosts;
         const started = Date.now();
+        const stageTarget = {
+          providerId: target.providerId,
+          local: target.providerId === "ollama",
+        };
+        /*
+          **モデルの大きさは製品と同じ口から引く**（入口 `measureContext` は
+          `registry.modelInfoFor` → `getModel`）。精度の段が 20B で頼み方を
+          選び分けるので、渡さないと製品と違う頼み方で測ることになる
+        */
+        // 取れなくても止めない（製品の入口と同じ。手元は小さい側・クラウドは大きい側）
+        const info = provider.getModel
+          ? await provider.getModel(target.model).catch(() => undefined)
+          : undefined;
+        const stages = plannedStages(stageTarget).filter(
+          (stage) => STAGE_FILTER.length === 0 || STAGE_FILTER.includes(stage.id)
+        );
         const result = await runTuningStages({
           provider,
           model: target.model,
-          target: {
-            providerId: target.providerId,
-            local: target.providerId === "ollama",
-          },
+          target: stageTarget,
           signal: new AbortController().signal,
           report: () => {},
+          ...(info !== undefined
+            ? { modelInfo: { parameterSize: info.parameterSize, tier: info.tier } }
+            : {}),
           // 製品と同じく、Ollama では測った直後に載っているモデルを見る
           ...(target.providerId === "ollama"
             ? {
@@ -124,7 +169,7 @@ describe.skipIf(TARGETS.length === 0)("AIチューニング：仕事に近い形
                   ),
               }
             : {}),
-        });
+        }, stages);
         const ledger = modelTuningRaw(target.providerId, target.model);
         report[`${target.providerId}/${target.model}`] = {
           所要秒: Math.round((Date.now() - started) / 1000),
@@ -142,7 +187,11 @@ describe.skipIf(TARGETS.length === 0)("AIチューニング：仕事に近い形
             outputTokensPerSecond: ledger?.outputTokensPerSecond,
             inputTokensPerSecond: ledger?.inputTokensPerSecond,
             charsPerToken: ledger?.charsPerToken,
+            誤字脱字の精度: describeTypoAccuracyRecord(ledger),
+            直し方が違う: ledger?.typoAccuracyWrongFixes,
           },
+          大きさ: info?.parameterSize ?? null,
+          精度のログ: logLines.filter((line) => line.includes("精度")),
           止まった理由: result.fatal?.message,
         };
         console.log(JSON.stringify(report[`${target.providerId}/${target.model}`], null, 2));

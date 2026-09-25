@@ -195,7 +195,8 @@ export interface FeatureOutputTuning {
 /**
  * その機能の記録。**同梱の初期値（`core/bundledTuning.ts`）を混ぜて返す。**
  *
- * **作者の実測が常に勝つ。** モデルの側（`mergeBundledTuning`）は欄ごとに
+ * **作者の実測が常に勝つ**——ただし、しきい値（`MIN_FEATURE_OUTPUT_SAMPLES`）に
+ * 届いて使える実測になってから（下の本文に理由）。モデルの側（`mergeBundledTuning`）は欄ごとに
  * 埋めるが、こちらは**行ごと**である——`outputTokens` と
  * `outputTokenSamples` は必ず一緒に書かれる対なので、片方だけ同梱から
  * 借りると「作者の最大値を、同梱の件数で信じる」という、どちらの実測でも
@@ -209,9 +210,30 @@ export function featureOutputTuning(
   if (feature === undefined || feature.length === 0) return undefined;
 
   const own = featureOutputTuningRaw(feature, providerId, model);
-  if (own !== undefined) return own;
-
   const seed = bundledFeatureOutput(feature);
+  if (own !== undefined) {
+    /*
+      **まだ信じない回数の実測は、同梱を隠さない**（0.89.6 の担当の報告 #3。
+      字/トークンの `mergeBundledTuning` と同じ直し方）。
+
+      普段の呼び出しは1回ごとに台帳へ1件積む。1件目で作者の行を返すと、
+      読む側（`featureOutputCeiling`・`ai/runTimeEstimate.ts`）はしきい値に
+      満たない実測を信じないので、**同梱の値も使われずに設定値や当て推量へ
+      戻っていた**——同梱した意味が最初の1回で消える。しきい値に届くまでは
+      同梱が当て推量の代わりを続ける。**台帳の生の値は消さない**（書き込み側の
+      `recordFeatureOutputTokens` は素の台帳を読んで数え続ける）ので、届けば
+      作者の実測に替わる——守り2「作者の実測が常に勝つ」は、**使える実測に
+      なってから**勝つ、と読む。
+
+      **切り詰められた印は、件数に関係なく作者の行を返す。** 「上限以上に
+      要る」という証拠で、同梱の最大より強い（見込みを出さず設定値に任せる）。
+    */
+    const trusted =
+      own.outputTruncated === true ||
+      (own.outputTokenSamples ?? 0) >= MIN_FEATURE_OUTPUT_SAMPLES;
+    if (trusted || !seed) return own;
+  }
+
   if (!seed) return undefined;
   // **同梱の表に平均は無い**（集計したのが最大だけだった）。無いままにする
   // ——ここで最大を平均として置くと、時間の見積もりが同梱の最大に戻る

@@ -33,14 +33,23 @@ const OLLAMA = { providerId: "ollama", local: true } as const;
 const GEMINI = { providerId: "gemini", local: false } as const;
 
 describe("段の並びと回数", () => {
-  test("並びは「思考の見分け → 仕事に近い時間 → 読める長さの申告」", () => {
+  test("並びは「思考の見分け → 仕事に近い時間 → 精度の目安 → 読める長さの申告」", () => {
     // 思考の見分けが先——手元のAIでは、ここでモデルが読み込まれる。
-    // 読み込みの時間を時間の段に混ぜないための順である
+    // 読み込みの時間を時間の段に混ぜないための順である。精度の目安は
+    // 時間の段のあと（手元のAIではモデルがもう載っている）
     expect(TUNING_STAGES.map((stage) => stage.id)).toEqual([
       "thinking",
       "work",
+      "accuracy",
       "declaredLimit",
     ]);
+  });
+
+  test("精度の目安は、どのAIでも1回（有料AIの確認に出す）", () => {
+    for (const target of [SAKURA, OLLAMA, GEMINI]) {
+      const accuracy = plannedStages(target).find((stage) => stage.id === "accuracy");
+      expect(accuracy?.maxCalls(target)).toBe(1);
+    }
   });
 
   test("読める長さの申告は、申告が当て推量のプロバイダ（さくら・ChatGPT）だけ", () => {
@@ -58,20 +67,21 @@ describe("段の並びと回数", () => {
   });
 
   test("回数は段ごとの最大の合計。手元のAIは読み込みの1回を足す", () => {
-    // さくら：思考2＋時間2＋申告2
-    expect(plannedCallCount(SAKURA)).toBe(6);
-    // Ollama：思考2＋時間3（読み込みの1回）
-    expect(plannedCallCount(OLLAMA)).toBe(5);
-    // Gemini：思考2＋時間2
-    expect(plannedCallCount(GEMINI)).toBe(4);
+    // さくら：思考2＋時間2＋精度1＋申告2
+    expect(plannedCallCount(SAKURA)).toBe(7);
+    // Ollama：思考2＋時間3（読み込みの1回）＋精度1
+    expect(plannedCallCount(OLLAMA)).toBe(6);
+    // Gemini：思考2＋時間2＋精度1
+    expect(plannedCallCount(GEMINI)).toBe(5);
   });
 
   test("確認に出す内訳は、段ごとの回数と合計の両方を言う", () => {
     const text = describeStagePlan(SAKURA);
     expect(text).toContain("考えるモデルかの見分け 2回");
     expect(text).toContain("仕事に近い形の時間 2回");
+    expect(text).toContain("誤字脱字の精度の目安 1回");
     expect(text).toContain("読める長さの申告 2回");
-    expect(text).toContain("合わせて最大 6 回");
+    expect(text).toContain("合わせて最大 7 回");
     // 少なく見せる側へ倒さない。途中で決まれば少なく済むことを断る
     expect(text).toContain("これより少なく済みます");
   });
@@ -86,7 +96,7 @@ describe("段の並びと回数", () => {
         maxCalls: () => 3,
       },
     ];
-    expect(plannedCallCount(GEMINI, extra)).toBe(7);
+    expect(plannedCallCount(GEMINI, extra)).toBe(plannedCallCount(GEMINI) + 3);
     expect(describeStagePlan(GEMINI, extra)).toContain("精度 3回");
   });
 });
