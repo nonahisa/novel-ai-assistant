@@ -1,10 +1,11 @@
 import {
   TYPO_CHECK_SCHEMA,
   TYPO_CHECK_SYSTEM_PROMPT,
+  TYPO_CHECK_SYSTEM_PROMPT_SMALL,
   TYPO_CHECK_TEMPERATURE,
-  TYPO_CHECK_VERSION,
   TYPO_DICTIONARY_LIMIT,
   buildTypoCheckPrompt,
+  typoPromptVersion,
 } from "../../prompts/typoCheck";
 import {
   parseTypoCheckResult,
@@ -147,6 +148,32 @@ export interface TypoPromptInput {
   filePath: string;
   numCtx: number;
   chunkIndex?: number;
+  /**
+   * どちらのモデル向けの版を返すか（P-09 1.2、設計書6.8.20）。
+   * `large`（既定。1.2）・`small`（1.1 の文そのまま）。
+   */
+  modelSize?: string;
+}
+
+/**
+ * 版を決める。
+ *
+ * **MCP の既定は大きいモデル向けである。** 製品はモデルの大きさから自動で
+ * 決める（`ai/capability.ts` の `useSmallModelTypoPrompt`。20B 未満は small）が、
+ * MCP は外部AIが自分でモデルを選ぶので、大きさを当てにいかない（矛盾検知の
+ * `suppression` と同じ考え）。小さいモデルを製品と同じ条件で測るなら `small` を渡す。
+ *
+ * **知らない値は黙って丸めない**（打ち間違いに気づかないまま記録が残る）。
+ */
+function forSmallModelOf(choice: string | undefined): boolean {
+  if (choice === undefined) return false;
+  const name = String(choice).trim();
+  if (name === "" || name === "large") return false;
+  if (name === "small") return true;
+  throw new McpToolError(
+    `知らないモデルの大きさです: ${name}` +
+      "（選べるのは large＝大きいモデル向けの 1.2・small＝小さいモデル向けの 1.1 の文）"
+  );
 }
 
 export function typoPrompt(input: TypoPromptInput): TypoPromptResult {
@@ -156,10 +183,14 @@ export function typoPrompt(input: TypoPromptInput): TypoPromptResult {
     input.filePath,
     input.numCtx
   );
+  const forSmallModel = forSmallModelOf(input.modelSize);
 
   return {
-    promptVersion: TYPO_CHECK_VERSION,
-    systemPrompt: TYPO_CHECK_SYSTEM_PROMPT,
+    // **送った版を記録に出す**（キャッシュの鍵も同じ名前。small は 1.1）
+    promptVersion: typoPromptVersion(forSmallModel),
+    systemPrompt: forSmallModel
+      ? TYPO_CHECK_SYSTEM_PROMPT_SMALL
+      : TYPO_CHECK_SYSTEM_PROMPT,
     schema: TYPO_CHECK_SCHEMA,
     temperature: TYPO_CHECK_TEMPERATURE,
     styleNote: context.style.styleNote,
@@ -170,7 +201,7 @@ export function typoPrompt(input: TypoPromptInput): TypoPromptResult {
     dictionaryLimit: TYPO_DICTIONARY_LIMIT,
     validateWith: VALIDATE_WITH,
     chunks: selectChunks(chunks, input.chunkIndex).map((chunk) =>
-      promptForChunk(input.filePath, chunk, maxChars, context)
+      promptForChunk(input.filePath, chunk, maxChars, context, forSmallModel)
     ),
   };
 }
@@ -179,7 +210,8 @@ function promptForChunk(
   relative: string,
   chunk: Chunk,
   maxChars: number,
-  context: TypoContext
+  context: TypoContext,
+  forSmallModel: boolean
 ): TypoChunkPrompt {
   return {
     chunkId: chunkIdOf(relative, chunk, maxChars),
@@ -195,6 +227,7 @@ function promptForChunk(
         TYPO_DICTIONARY_LIMIT
       ),
       styleNote: context.style.styleNote,
+      forSmallModel,
     }),
   };
 }
@@ -294,7 +327,8 @@ export async function typoRun(
       // **製品と同じ鍵**（`features/checkTypos.ts` の `cacheKeyBase`）。
       // ずらすと、拡張機能が貯めたぶんをこちらが使えない
       feature: "typo_check",
-      promptVersion: TYPO_CHECK_VERSION,
+      // 送った版と同じ名前（small は 1.1）。製品の `cacheKeyBase` と揃う
+      promptVersion: prompts.promptVersion,
       hashOf: (chunkId) => chunkFromId(input.folder, chunkId).hash,
       // 製品が貯めているのは読み取ったあとの形（`parseTypoCheckResult`）
       parse: (responseText) => parseTypoCheckResult(responseText),

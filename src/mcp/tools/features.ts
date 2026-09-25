@@ -222,6 +222,8 @@ const TEMPERATURE_INPUT = {
  */
 const OPTIONS_TABLE =
   "feature ごとの追加の指定（※は要るもの）。" +
+  "typo: modelSize（large〈既定〉＝大きいモデル向けの版／" +
+  "small＝小さいモデル向けの版〈1.1 の文〉。製品は 20B 未満のモデルに small を送る）。" +
   "foreshadow: mode（detect＝配置を拾う〈既定〉／resolve＝回収を見る）。" +
   "contradiction: categories（light〈既定〉／all／区分名そのもの。" +
   "「状態」「人物,時系列」のように1つでも並びでも指せる）・" +
@@ -535,6 +537,11 @@ const CARRY_OVER_SCHEMA = z.union([z.number(), z.string()]);
  * （`tools/contradiction.ts`）が持っている。**写しを作らない。**
  */
 const SUPPRESSION_SCHEMA = z.string();
+/**
+ * 誤字脱字の版（P-09 1.2、設計書6.8.20）。**ここも形だけを見る。**
+ * 選べる名前（large・small）の表は `forSmallModelOf`（`tools/typo.ts`）が持つ。
+ */
+const MODEL_SIZE_SCHEMA = z.string();
 const MODE_SCHEMA: z.ZodType<ForeshadowMode> = z.enum(["detect", "resolve"]);
 
 /**
@@ -543,14 +550,23 @@ const MODE_SCHEMA: z.ZodType<ForeshadowMode> = z.enum(["detect", "resolve"]);
  */
 const FEATURES: Record<FeatureName, FeatureEntry> = {
   typo: {
-    prompt: (input) => typoPrompt(chunkArgs(input)),
+    prompt: (input) =>
+      typoPrompt({
+        ...chunkArgs(input),
+        modelSize: option(input, "modelSize", MODEL_SIZE_SCHEMA),
+      }),
     validate: (input) =>
       typoValidate({
         folder: input.folder,
         chunkId: needChunkId(input),
         response: needResponse(input),
       }),
-    run: (input) => typoRun({ ...chunkArgs(input), ...runnerArgs(input) }),
+    run: (input) =>
+      typoRun({
+        ...chunkArgs(input),
+        modelSize: option(input, "modelSize", MODEL_SIZE_SCHEMA),
+        ...runnerArgs(input),
+      }),
   },
   proofread: {
     // 語り手の名前が地の文に出る所（設計書6.9.2）。AIを使わずに、作品

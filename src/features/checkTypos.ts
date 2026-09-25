@@ -36,11 +36,14 @@ import {
   TYPO_DICTIONARY_LIMIT,
   TYPO_CHECK_SCHEMA,
   TYPO_CHECK_SYSTEM_PROMPT,
+  TYPO_CHECK_SYSTEM_PROMPT_SMALL,
   TYPO_CHECK_TEMPERATURE,
   TYPO_CHECK_VERSION,
   buildTypoCheckPrompt,
+  typoPromptVersion,
   type TypoCheckResult,
 } from "../prompts/typoCheck";
+import { useSmallModelTypoPrompt } from "../ai/capability";
 import {
   parseTypoCheckResult,
   summarizeRejectReasons,
@@ -210,6 +213,22 @@ export async function checkTypos(
   if (!modelInfo) return undefined;
 
   const contextWindow = modelInfo.contextWindow;
+
+  /*
+    **小さいモデルには 1.1 の文をそのまま送る**（P-09 1.2、設計書6.8.20）。
+    書き方を揃える指示は、e4b では誤検出を増やした。境目は矛盾検知の抑制と
+    同じ（`ai/capability.ts`）。**鍵の版も送った文に合わせる**——小さいモデルは
+    1.1 のままなので、作者が貯めた処理済みが飛ばない
+  */
+  const forSmallModel = useSmallModelTypoPrompt({
+    tier: modelInfo.tier,
+    providerId: resolved.provider.id,
+    parameterSize: modelInfo.parameterSize,
+  });
+  const systemPrompt = forSmallModel
+    ? TYPO_CHECK_SYSTEM_PROMPT_SMALL
+    : TYPO_CHECK_SYSTEM_PROMPT;
+  const promptVersion = typoPromptVersion(forSmallModel);
   // **応答の見込みに実測を使う**（設計書6.65.16の2）。台帳に書ける量の
   // 実測があればそれ、無ければ既定の見込み（8,192）を上限とする
   const outputTuning = { providerId: resolved.provider.id, model: resolved.model };
@@ -327,11 +346,12 @@ export async function checkTypos(
   // 辞書は作品が育つほど伸び、作法も条件で長さが変わる。見込みの定数を
   // 置くと必ず追い越されるので、実際に送る形のまま測る
   const overheadChars =
-    TYPO_CHECK_SYSTEM_PROMPT.length +
+    systemPrompt.length +
     buildTypoCheckPrompt({
       chunkTextWithLineNumbers: "",
       properNounDictionary: protectedNames.slice(0, TYPO_DICTIONARY_LIMIT),
       styleNote,
+      forSmallModel,
     }).length;
 
   // 大きさの決め方は1か所へ集めてある（設計書6.23）。固定費を差し引いてから決める
@@ -398,7 +418,7 @@ export async function checkTypos(
   await cache.load();
   const cacheKeyBase = {
     feature: "typo_check",
-    promptVersion: TYPO_CHECK_VERSION,
+    promptVersion,
     providerId: resolved.provider.id,
     model: resolved.model,
   };
@@ -502,7 +522,7 @@ export async function checkTypos(
   logStep(
     `誤字脱字検知を開始: ${work.title} / ${resolved.provider.displayName} / ` +
       `${resolved.model} / ${chunks.length}チャンク / ` +
-      `${describeChunkSettings(chunkSettings)} / v${TYPO_CHECK_VERSION}`
+      `${describeChunkSettings(chunkSettings)} / v${promptVersion}`
   );
   if (pendingOfferLog) logStep(pendingOfferLog);
 
@@ -615,11 +635,12 @@ export async function checkTypos(
           chunkTextWithLineNumbers: bodyWithLines,
           properNounDictionary: dictionary,
           styleNote,
+          forSmallModel,
         });
 
         const callAI = () =>
           resolved.provider.generate({
-            systemPrompt: TYPO_CHECK_SYSTEM_PROMPT,
+            systemPrompt,
             userPrompt,
             model: resolved.model,
             temperature: TYPO_CHECK_TEMPERATURE,

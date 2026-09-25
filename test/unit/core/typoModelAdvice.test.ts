@@ -28,25 +28,34 @@ function read(relative: string): string {
 
 describe("誤字脱字に向くモデルの案内", () => {
   test("手元の大きいモデルと、外部AIの両方を挙げる", () => {
-    // 「12bにする」だけでは、鍵を持っている作者の道が閉じる
-    expect(TYPO_MODEL_ADVICE).toContain("gemma4:12b");
-    expect(TYPO_MODEL_ADVICE).toContain("Gemini");
-    // 何を見逃すのかを言う（言わないと、勧めの理由が伝わらない）
+    // 「26bにする」だけでは、鍵を持っている作者の道が閉じる。
+    // 2026-09-26 の比べ（確実19件）で 12b は5件だったので、勧めを 26b へ上げた
+    expect(TYPO_MODEL_ADVICE).toContain("gemma4:26b");
+    expect(TYPO_MODEL_ADVICE).not.toContain("gemma4:12b 以上");
+    expect(TYPO_MODEL_ADVICE).toContain("Kimi-K2.6");
+    // 何を見逃すのか・どれだけ違うのかを数で言う（言わないと、勧めの理由が伝わらない）
     expect(TYPO_MODEL_ADVICE).toMatch(/4B|4b/);
-    expect(TYPO_MODEL_ADVICE).toContain("2026-09-06");
+    expect(TYPO_MODEL_ADVICE).toContain("19件");
+    expect(TYPO_MODEL_ADVICE).toContain("2026-09-26");
+  });
+
+  test("既定のモデルは変えない（作者の判断 2026-09-26「このまま」）", () => {
+    expect(read("core/requirements.ts")).toContain('RECOMMENDED_CHAT_MODEL = "gemma4:e4b"');
   });
 
   test("機能別AI割当の「誤字脱字」の説明が、この定数を読む", () => {
     const source = read("features/assignFeatureAI.ts");
     expect(source).toContain("TYPO_MODEL_ADVICE");
     // 写しを作らない（文言をそのまま書き込んでいない）
-    expect(source).not.toContain("gemma4:12b");
+    expect(source).not.toContain("gemma4:26b");
+    expect(source).not.toContain("Kimi-K2.6");
   });
 
   test("Ollamaのセットアップの説明も、この定数を読む", () => {
     const source = read("features/setupOllama.ts");
     expect(source).toContain("TYPO_MODEL_ADVICE");
-    expect(source).not.toContain("gemma4:12b");
+    expect(source).not.toContain("gemma4:26b");
+    expect(source).not.toContain("Kimi-K2.6");
   });
 });
 

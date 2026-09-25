@@ -40,7 +40,14 @@ export type TypoRejectionReason =
   /** 修正案にMarkdownの記号が入っている（直しではなく注釈） */
   | "markdown_in_suggestion"
   /** 修正案が対象より大幅に長い（語の直しではなく、文の書き換え） */
-  | "rewrites_span";
+  | "rewrites_span"
+  /**
+   * 違いが空白だけで、取ってよい空白ではない
+   * （行頭の字下げ・感嘆符のあと・行末・英字の間。または空白を足す直し）
+   */
+  | "whitespace_only"
+  /** 当てると括弧が消える（閉じ括弧を句点に替えるなど） */
+  | "bracket_removed";
 
 export interface RejectedTypoIssue {
   line: number | null;
@@ -62,6 +69,13 @@ export interface AcceptedTypoIssue {
    * 作者が見る `reason` にも「（範囲を1字広げました）」と出す。
    */
   rangeExtended?: boolean;
+  /**
+   * 修正案が抱えていた前後の文を、こちらで外したか（`trimCarriedContext`）。
+   *
+   * `rangeExtended` と同じく、**AIの言い分をそのまま採らなかった**と分かるようにする。
+   * 作者が見る `reason` にも「（修正案から前後の文を外しました）」と出す。
+   */
+  contextTrimmed?: boolean;
 }
 
 export interface TypoValidationResult {
@@ -94,6 +108,8 @@ const REJECT_REASON_LABELS: Record<TypoRejectionReason, string> = {
   same_as_original: "修正案が原文のまま",
   markdown_in_suggestion: "修正案にMarkdownの記号",
   rewrites_span: "文の書き換え",
+  whitespace_only: "空白だけの直し",
+  bracket_removed: "括弧が消える",
 };
 
 /**
@@ -275,8 +291,10 @@ export function validateTypoIssues(
     let target = issue.target;
     let original = issue.original;
     let rangeExtended = false;
+    // 本文のその行。取れなければ抜粋で代用する（検査そのものを飛ばさないため）
+    const lineText = lineTextOf(chunk, issue.line) ?? issue.original;
     const range = checkParticleRange(
-      lineTextOf(chunk, issue.line) ?? issue.original,
+      lineText,
       issue.original,
       issue.target,
       issue.suggestion
@@ -300,13 +318,29 @@ export function validateTypoIssues(
     // 作者の10作品で測ったところ、通った62件のうち**25件がこれだった**
     // （「保険」→「保険」、「跨いだ」→「跨いだ」）。押しても何も起きないのに、
     // 作者は1件ずつ見て消さなければならない（2026-08-17）
-    if (
-      normalizeForComparison(target) === normalizeForComparison(issue.suggestion)
-    ) {
+    if (target === issue.suggestion) {
       rejected.push({
         line: issue.line,
         target: issue.target,
         reason: "no_change",
+      });
+      continue;
+    }
+
+    // **違いが空白だけのもの。** 以前は空白を消してから比べていたため、
+    // 文中に紛れ込んだ全角空白を取る直し（「、　」→「、」）を**必ず**
+    // 「直しにならない」として捨てていた（正解つきの台で測って見つかった、
+    // 2026-09-26）。取ってよい空白かどうかを、本文のその行で決める
+    const whitespaceOnly =
+      normalizeForComparison(target) === normalizeForComparison(issue.suggestion);
+    if (
+      whitespaceOnly &&
+      !isStraySpaceRemoval(lineText, original, target, issue.suggestion)
+    ) {
+      rejected.push({
+        line: issue.line,
+        target: issue.target,
+        reason: "whitespace_only",
       });
       continue;
     }
@@ -348,6 +382,77 @@ export function validateTypoIssues(
       continue;
     }
 
+    // **修正案が前後の句を抱えてくる。** 直した語だけでなく、その前後の
+    // 本文まで修正案に入れてくるモデルがある（さくら gemma-4-31B-it：
+    // 「身体をの」→「身体の緊張を無理やり」）。そのまま当てると抱えた句が
+    // 二重に残るので、これまでは捨てていた——**正しく見つけた9件が
+    // すべて捨てられていた**（正解つきの台、2026-09-26）。
+    //
+    // 抱えた句が本文と字どおり一致するなら、それを外した残りが本当の直しで
+    // ある。**外して当てた結果は、修正案で前後の句ごと置き換えた結果と
+    // 1字も違わない**ので、本文を壊さない。外した残りが誤字脱字の直しの形
+    // （数字の足し引き・入れ替え）をしていなければ、言い換えなので捨てる
+    let suggestion = issue.suggestion;
+    let contextTrimmed = false;
+    if (!whitespaceOnly) {
+      const carried = trimCarriedContext(lineText, original, target, suggestion);
+      if (carried.kind === "not_a_typo_fix") {
+        rejected.push({
+          line: issue.line,
+          target: issue.target,
+          reason: "duplicates_context",
+        });
+        continue;
+      }
+      if (carried.kind === "trimmed") {
+        suggestion = carried.suggestion;
+        contextTrimmed = true;
+        // 外した残りに対して、先に済ませた検査をやり直す
+        if (target === suggestion) {
+          rejected.push({
+            line: issue.line,
+            target: issue.target,
+            reason: "no_change",
+          });
+          continue;
+        }
+        if (isPronounSwap(target, suggestion)) {
+          rejected.push({
+            line: issue.line,
+            target: issue.target,
+            reason: "pronoun_change",
+          });
+          continue;
+        }
+      }
+    }
+
+    // **足す字が、本文のすぐ隣にもうある。** 「痛」→「痛い」と返ったが、
+    // 本文はすでに「痛い。」で、当てると「痛いい」になる（さくら gpt-oss-120b。
+    // 誤検出の確かめ、2026-09-26）。助詞1字の場合は `checkParticleRange` が
+    // 同じことを見ている。ここはそれを字の種類を問わず広げたもの
+    if (!whitespaceOnly && addsWhatIsAlreadyThere(lineText, original, target, suggestion)) {
+      rejected.push({
+        line: issue.line,
+        target: issue.target,
+        reason: "no_change",
+      });
+      continue;
+    }
+
+    // **当てると括弧が消える直しは通さない。** 台詞の閉じ括弧を句点に替える案
+    // （「…だそうです」」→「…だそうです。」）が確信度「低」で返った
+    // （gemma4:e4b。誤検出の確かめ、2026-09-26）。括弧は台詞の区切りで、
+    // 消えると前後の地の文まで台詞に読める。**足すのは通す**（閉じ忘れの直し）
+    if (removesBracket(target, suggestion)) {
+      rejected.push({
+        line: issue.line,
+        target: issue.target,
+        reason: "bracket_removed",
+      });
+      continue;
+    }
+
     // **誤字脱字の直しは、語を1つ直すものである。**
     // 対象より大幅に長い修正案は、語の直しではなく文の書き換えであり、
     // 当てると前後が二重に残る。
@@ -355,7 +460,7 @@ export function validateTypoIssues(
     // **実データ147件で測って決めた**（2026-08-21）。ここまでの検査を
     // 通った80件のうち、伸びは75件が+3以内。そこから +7 / +12 / +18 /
     // +23 / +26 と飛び、**その5件すべてが本文を壊した。**
-    if (issue.suggestion.length - target.length > MAX_SUGGESTION_GROWTH) {
+    if (suggestion.length - target.length > MAX_SUGGESTION_GROWTH) {
       rejected.push({
         line: issue.line,
         target: issue.target,
@@ -370,14 +475,9 @@ export function validateTypoIssues(
     // **実データで4か所の原稿が壊れた**（2026-08-21、作者が実機で発見）
     // **本文のその行で確かめる。** AIの抜粋は対象のすぐ後ろで切れて
     // いることがあり、それだけを見ると重なりを見つけられない
-    if (
-      wouldDuplicateContext(
-        lineTextOf(chunk, issue.line) ?? original,
-        original,
-        target,
-        issue.suggestion
-      )
-    ) {
+    // **前後の句を外したあとも、もう一度確かめる**（外し方が本文と
+    // 偶然ずれた場合の保険。ここを通らないものは当てない）
+    if (wouldDuplicateContext(lineText, original, target, suggestion)) {
       rejected.push({
         line: issue.line,
         target: issue.target,
@@ -388,8 +488,24 @@ export function validateTypoIssues(
 
     // **末尾の句読点を足すだけの指摘は誤字ではない。**
     // 台詞の終わりに「。」を足す提案が返るが、日本語の小説では
-    // **台詞の末尾に句点を打たない**のが普通である
-    if (onlyTrailingPunctuation(target, issue.suggestion)) {
+    // **台詞の末尾に句点を打たない**のが普通である。
+    //
+    // **ただし地の文の行末の句点抜けは、本物の入力ミスである**
+    // （2026-09-26）。プロンプトは「明らかな入力ミス」を拾えと言いながら、
+    // ここで一律に捨てていた。台詞の外で、行末に句点を1つ足すものだけ通す
+    // （`isNarrationLineEndPeriod`）。**空白だけの直しはここを通さない**
+    // ——句読点のあとの空白を取る直しが「末尾の句読点だけ」に見えるため
+    if (
+      !whitespaceOnly &&
+      onlyTrailingPunctuation(target, suggestion) &&
+      !isNarrationLineEndPeriod(
+        textBeforeLine(chunk, issue.line),
+        lineText,
+        original,
+        target,
+        suggestion
+      )
+    ) {
       rejected.push({
         line: issue.line,
         target: issue.target,
@@ -401,7 +517,7 @@ export function validateTypoIssues(
     // **読みが同じで書き方だけ違うものは、表記ゆれであって誤字ではない。**
     // プロンプトで「表記ゆれは別機能で扱う」と断っているのに返ってくる
     // （「ハメになった」→「はめになった」、「2回転」→「二回転」）
-    if (onlyScriptDifference(target, issue.suggestion)) {
+    if (onlyScriptDifference(target, suggestion)) {
       rejected.push({
         line: issue.line,
         target: issue.target,
@@ -427,7 +543,7 @@ export function validateTypoIssues(
     // 推敲で `"suggestion": "空文字"` が返り、押すと本文がその3文字に
     // 置き換わるところだった（2026-08-17、実データ）。
     // 誤字脱字は直し方が必ずあるはずなので、指摘ごと落とす
-    if (isPlaceholderText(issue.suggestion)) {
+    if (isPlaceholderText(suggestion)) {
       rejected.push({
         line: issue.line,
         target: issue.target,
@@ -440,16 +556,19 @@ export function validateTypoIssues(
       line: issue.line,
       original,
       target,
-      suggestion: issue.suggestion,
-      // **範囲を広げたことを作者に見せる。** 黙って直すと、画面の
-      // 「対象」がAIの言い分と違っている理由が分からない
-      reason: rangeExtended
-        ? `${issue.reason}（範囲を1字広げました）`
-        : issue.reason,
+      suggestion,
+      // **範囲を広げたこと・前後の文を外したことを作者に見せる。**
+      // 黙って直すと、画面の「対象」「修正案」がAIの言い分と違っている
+      // 理由が分からない
+      reason:
+        issue.reason +
+        (rangeExtended ? "（範囲を1字広げました）" : "") +
+        (contextTrimmed ? "（修正案から前後の文を外しました）" : ""),
       confidence: VALID_CONFIDENCE.has(issue.confidence)
         ? (issue.confidence as "high" | "medium" | "low")
         : "low",
       ...(rangeExtended ? { rangeExtended: true } : {}),
+      ...(contextTrimmed ? { contextTrimmed: true } : {}),
     });
   }
 
@@ -811,10 +930,45 @@ function parseIssue(raw: unknown): ExtractedTypoIssue | null {
   };
 }
 
+/**
+ * 前後の余分な空白を落とす。**全角空白は落とさない。**
+ *
+ * `trim()` は全角空白（U+3000）も落とす。文中に紛れた全角空白を取る直し
+ * （target「、　」→ suggestion「、」）は、ここで target が「、」に削られ、
+ * 修正案と同じになって必ず捨てられていた（正解つきの台、2026-09-26）。
+ * 落とすのは、JSONの書き方で紛れる半角空白・タブ・改行だけにする。
+ */
 function cleanRequiredString(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const cleaned = value.trim();
-  return cleaned || null;
+  const cleaned = decodeByteTokens(value).replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "");
+  // 空白しか無いものは、中身が無いのと同じに扱う（全角空白だけ、も含む）
+  return cleaned.trim() ? cleaned : null;
+}
+
+/**
+ * 字の代わりに書かれたバイトの札（`<0xE3><0x80><0x80>`）を字へ戻す。
+ *
+ * **手元の小さいモデルが、全角空白をこの形で書いてくる**（`gemma4:e4b`、
+ * 正解つきの台で第2話「角が、　パチパチと」を正しく見つけたのに、
+ * target が「角が、<0xE3><0x80><0x80>パチパチと」だった。2026-09-26）。
+ * 本文との照合（`normalizeForComparison`）はこの札を消してから比べるので
+ * 引用は通るが、当てる段では字が合わず、空白の直しとしても読めなかった。
+ *
+ * **UTF-8 として読めるときだけ戻す。** 読めない並びはそのまま残す
+ * （後の照合が「本文に無い引用」として落とす）。
+ */
+function decodeByteTokens(text: string): string {
+  return text.replace(/(?:<0x[0-9A-Fa-f]{2}>)+/g, (run) => {
+    const bytes = Uint8Array.from(
+      run.match(/<0x([0-9A-Fa-f]{2})>/g) ?? [],
+      (token) => parseInt(token.slice(3, 5), 16)
+    );
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      return run;
+    }
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -913,6 +1067,306 @@ function overlapLength(
     }
   }
   return 0;
+}
+
+/**
+ * 前後の句を抱えた修正案の見立て（`trimCarriedContext`）。
+ *
+ * - `none`：抱えていない。修正案は対象だけの直しとして、これまでどおり見る
+ * - `trimmed`：抱えていた句を外した。`suggestion` が対象だけの直し
+ * - `not_a_typo_fix`：抱えているが、外した残りが誤字脱字の直しの形をしていない
+ *   （言い換え）。**そのまま当てると本文が二重になる**ので捨てる
+ */
+export type CarriedContextCheck =
+  | { kind: "none" }
+  | { kind: "trimmed"; suggestion: string }
+  | { kind: "not_a_typo_fix" };
+
+/**
+ * 1字でも、重なれば必ず抱え込みだと言える記号。
+ *
+ * 句点・読点・括弧が二重になる直し（「行う。。」）を作者が望むことはない。
+ * **三点リーダーとダッシュは入れない**——「……」「――」は2つ重ねて使う
+ * のが普通で、1字の一致は偶然でありうる。
+ */
+const CARRY_MARKS = new Set([
+  "。",
+  "、",
+  "，",
+  "．",
+  "！",
+  "？",
+  "!",
+  "?",
+  "「",
+  "」",
+  "『",
+  "』",
+  "（",
+  "）",
+  "(",
+  ")",
+]);
+
+/**
+ * 修正案が抱えてきた前後の句を外す（設計書6.8.11 の続き）。
+ *
+ * **さくらの gemma-4-31B-it が、直した語の前後まで修正案に書いてくる。**
+ *
+ * ```
+ * 本文:   言い聞かせて、身体をの緊張を無理やり解いていく。
+ * target:        身体をの
+ * suggestion:    身体の緊張を無理やり        ← 後ろの「緊張を無理やり」を抱えている
+ * ```
+ *
+ * 修正案の**先頭が対象の直前の本文と**、**末尾が対象の直後の本文と**
+ * 字どおり一致するなら、その部分は抱えてきた句である。外した残り（「身体の」）
+ * で対象を置き換えた結果は、**修正案で前後の句ごと置き換えた結果と
+ * 1字も違わない**——だから外しても本文は壊れない。
+ *
+ * **2字以上の一致から抱え込みとみる**（`wouldDuplicateContext` と同じ理由。
+ * 1字だと助詞の偶然の一致がある）。ただし句読点・括弧は1字でもみる。
+ * どちらかの側で抱え込みと決まったら、もう片方は1字の一致でも外す
+ * （片側に句を抱えるモデルは、反対側の句点も抱えてくる：「今は８歳である。」）。
+ *
+ * **外した残りが誤字脱字の直しの形でなければ捨てる**（`isTypoShapedEdit`）。
+ * 実際に原稿を壊しかけた「会わすぐらい」→「夢で会わせるくらいのことは…」は、
+ * 外しても「会わす→会わせる」「ぐらい→くらい」の言い換えである。
+ */
+export function trimCarriedContext(
+  /** 本文のその行そのもの */
+  lineText: string,
+  /** AIの抜粋。当てる位置を決めるのに使う（適用処理と同じ手順） */
+  original: string,
+  target: string,
+  suggestion: string
+): CarriedContextCheck {
+  const originalAt = lineText.indexOf(original);
+  const targetInOriginal = original.indexOf(target);
+  if (originalAt < 0 || targetInOriginal < 0) return { kind: "none" };
+
+  const at = originalAt + targetInOriginal;
+  const before = lineText.slice(0, at);
+  const after = lineText.slice(at + target.length);
+
+  const head = tailHeadOverlap(before, suggestion);
+  // 後ろは、前で外した残りの中だけで探す（前後で同じ字を2度数えない）
+  const tail = tailHeadOverlap(suggestion.slice(head), after);
+
+  const headCarried =
+    head >= MIN_DUPLICATE_OVERLAP ||
+    (head === 1 && CARRY_MARKS.has(suggestion[0]));
+  const tailCarried =
+    tail >= MIN_DUPLICATE_OVERLAP ||
+    (tail === 1 && CARRY_MARKS.has(suggestion[suggestion.length - 1]));
+  if (!headCarried && !tailCarried) return { kind: "none" };
+
+  const core = suggestion.slice(head, suggestion.length - tail);
+  if (!core || !isTypoShapedEdit(target, core)) {
+    return { kind: "not_a_typo_fix" };
+  }
+  return { kind: "trimmed", suggestion: core };
+}
+
+/** `left` の末尾と `right` の先頭が、最長で何字重なるか（1字から数える） */
+function tailHeadOverlap(left: string, right: string): number {
+  const max = Math.min(left.length, right.length);
+  for (let length = max; length >= 1; length--) {
+    if (left.slice(left.length - length) === right.slice(0, length)) {
+      return length;
+    }
+  }
+  return 0;
+}
+
+/**
+ * 対象と修正案の違いが、誤字脱字の直しの形をしているか。
+ *
+ * 先頭と末尾の共通部分を除いた「消す字」「足す字」の数で見る。
+ * 正解つきの台で、正しい直しは次の範囲に収まっていた（2026-09-26）。
+ *
+ * - 消すだけ（衍字）：4字まで（「いただいただける」→「いただける」で3字）
+ * - 足すだけ（脱字）：2字まで（「くだい」→「ください」で1字）
+ * - 入れ替え（誤字・誤変換）：消す字も足す字も2字まで（「拾い」→「離し」）
+ *
+ * **前後の句を外したときにだけ使う。** 句を抱えてくる答えは、こちらで
+ * 解釈し直しているので、形のはっきりしたものだけを通す。
+ */
+export function isTypoShapedEdit(target: string, suggestion: string): boolean {
+  const shorter = Math.min(target.length, suggestion.length);
+  let prefix = 0;
+  while (prefix < shorter && target[prefix] === suggestion[prefix]) prefix++;
+  let suffix = 0;
+  while (
+    suffix < shorter - prefix &&
+    target[target.length - 1 - suffix] ===
+      suggestion[suggestion.length - 1 - suffix]
+  ) {
+    suffix++;
+  }
+  const removed = target.length - prefix - suffix;
+  const inserted = suggestion.length - prefix - suffix;
+  if (removed === 0 && inserted === 0) return true; // 同じ。後の検査が「直しにならない」で捨てる
+  if (inserted === 0) return removed <= 4;
+  if (removed === 0) return inserted <= 2;
+  return removed <= 2 && inserted <= 2;
+}
+
+/**
+ * 空白を取る直しのうち、取ってよい空白か。
+ *
+ * **文中に紛れ込んだ空白は、本物の入力ミスである**（第2話「角が、　パチパチと」）。
+ * ただし空白には、作法として置くものがある。次の空白は取らない。
+ *
+ * - **行頭の字下げ**
+ * - **感嘆符・疑問符のあと**（「！　」「？　」は作法。`writingStyleCheck.ts` が見る）
+ * - **行末**（見えず、害も無い。直しても作者の手間が増えるだけ）
+ * - **英字・数字の隣**（「画面に Hello World」の語の区切り）
+ *
+ * **空白を足す直しも通さない。** 空白の有無は書き方の選択であって、
+ * 足さないと誤りになる空白は無い。
+ */
+export function isStraySpaceRemoval(
+  lineText: string,
+  original: string,
+  target: string,
+  suggestion: string
+): boolean {
+  if (suggestion.length >= target.length) return false;
+
+  let prefix = 0;
+  while (
+    prefix < suggestion.length &&
+    target[prefix] === suggestion[prefix]
+  ) {
+    prefix++;
+  }
+  // 残りは末尾どうしで揃っているはず（消した字だけが違う）
+  if (target.slice(target.length - (suggestion.length - prefix)) !== suggestion.slice(prefix)) {
+    return false;
+  }
+  const removed = target.slice(prefix, target.length - (suggestion.length - prefix));
+  if (!removed || !/^[ 　\t]+$/u.test(removed)) return false;
+
+  const originalAt = lineText.indexOf(original);
+  const targetInOriginal = original.indexOf(target);
+  if (originalAt < 0 || targetInOriginal < 0) return false;
+  const from = originalAt + targetInOriginal + prefix;
+  const before = lineText.slice(0, from);
+  const after = lineText.slice(from + removed.length);
+
+  // 行頭の字下げ・行末の空白
+  if (!/\S/u.test(before) || !/\S/u.test(after)) return false;
+  const previous = before[before.length - 1];
+  const next = after[0];
+  if ("！？!?".includes(previous)) return false;
+  if (/[A-Za-z0-9]/.test(previous) || /[A-Za-z0-9]/.test(next)) return false;
+  return true;
+}
+
+/**
+ * 修正案が「対象＋字」または「字＋対象」で、足す字が本文のすぐ隣にもうあるか。
+ *
+ * そのまま当てると、同じ字が2度並ぶ（「痛い。」の「痛」→「痛い」で「痛いい。」）。
+ * 本文はすでに直った形なので、直しにならない。
+ */
+export function addsWhatIsAlreadyThere(
+  lineText: string,
+  original: string,
+  target: string,
+  suggestion: string
+): boolean {
+  const originalAt = lineText.indexOf(original);
+  const targetInOriginal = original.indexOf(target);
+  if (originalAt < 0 || targetInOriginal < 0) return false;
+  const at = originalAt + targetInOriginal;
+  if (suggestion.length > target.length && suggestion.startsWith(target)) {
+    const added = suggestion.slice(target.length);
+    if (lineText.startsWith(added, at + target.length)) return true;
+  }
+  if (suggestion.length > target.length && suggestion.endsWith(target)) {
+    const added = suggestion.slice(0, suggestion.length - target.length);
+    if (lineText.slice(0, at).endsWith(added)) return true;
+  }
+  return false;
+}
+
+/** 数を減らしてはいけない括弧（台詞・引用・補足の区切り） */
+const BRACKETS = ["「", "」", "『", "』", "（", "）", "(", ")", "【", "】", "〈", "〉", "《", "》"];
+
+/** 修正案で、どれかの括弧が減るか（足すのは閉じ忘れの直しなので構わない） */
+export function removesBracket(target: string, suggestion: string): boolean {
+  const count = (text: string, mark: string) => text.split(mark).length - 1;
+  return BRACKETS.some((mark) => count(suggestion, mark) < count(target, mark));
+}
+
+/** 台詞を開く括弧と閉じる括弧 */
+const OPEN_QUOTES = "「『（(";
+const CLOSE_QUOTES = "」』）)";
+
+/**
+ * 地の文の行末に、句点を1つ足す直しか。
+ *
+ * **台詞の末尾に句点を打たないのは日本語の小説の決まり**なので、
+ * 句点を足す直しは `punctuation_only` として捨ててきた。ところが
+ * 地の文の行末で句点が抜けているのは、**本物の入力ミス**である
+ * （第10話「部下がそのまま移住してきたそうだ」）。
+ *
+ * 次をすべて満たすものだけを通す。
+ *
+ * - 修正案が、対象の後ろに「。」を1つ足しただけ
+ * - 対象が行の終わりまで届いている（行の途中に句点を足す直しではない）
+ * - 対象の最後の字が、文字（漢字・かな・英数字）。「……」「！」のあとには足さない
+ * - **台詞の中ではない**：この行の手前（同じチャンクの前の行を含む）から数えて、
+ *   開き括弧がすべて閉じている
+ */
+export function isNarrationLineEndPeriod(
+  /** 同じチャンクの、この行より前の本文。台詞が行をまたいでいるかを見る */
+  textBefore: string,
+  lineText: string,
+  original: string,
+  target: string,
+  suggestion: string
+): boolean {
+  if (suggestion !== `${target}。`) return false;
+
+  const originalAt = lineText.indexOf(original);
+  const targetInOriginal = original.indexOf(target);
+  if (originalAt < 0 || targetInOriginal < 0) return false;
+  const end = originalAt + targetInOriginal + target.length;
+  if (/\S/u.test(lineText.slice(end))) return false;
+
+  const last = target[target.length - 1];
+  if (
+    !/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー々〆A-Za-z0-9０-９Ａ-Ｚａ-ｚ]/u.test(
+      last
+    )
+  ) {
+    return false;
+  }
+
+  // 括弧の深さを数える。閉じすぎは0で止める（前の話の閉じ忘れなどを
+  // 引きずらないため）。**この行の中で閉じすぎたら台詞の続き**とみる
+  let depth = 0;
+  for (const char of textBefore) {
+    if (OPEN_QUOTES.includes(char)) depth++;
+    else if (CLOSE_QUOTES.includes(char)) depth = Math.max(0, depth - 1);
+  }
+  for (const char of lineText.slice(0, end)) {
+    if (OPEN_QUOTES.includes(char)) depth++;
+    else if (CLOSE_QUOTES.includes(char)) {
+      depth--;
+      if (depth < 0) return false;
+    }
+  }
+  return depth === 0;
+}
+
+/** チャンクの中で、その行より前の本文（台詞が行をまたぐかを見るため） */
+function textBeforeLine(chunk: Chunk, line: number): string {
+  const index = line - chunk.startLine - 1;
+  if (index <= 0) return "";
+  return chunk.text.split("\n").slice(0, index).join("\n");
 }
 
 /**

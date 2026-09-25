@@ -126,6 +126,19 @@ export function capabilityProfile(input: CapabilityInput): CapabilityProfile {
  * クラウドにとっては 1.6＝ゆるめる、である。取れないのに大きいモデルと
  * みなすと、**モデル情報が取れなかった日だけ誤検出が増える**ことになる。
  */
+/**
+ * 誤字脱字検知で、小さいモデル向けの版（P-09 の 1.1 の文そのまま）を送るか。
+ *
+ * **境目は矛盾検知の抑制と同じ**（`LARGE_MODEL_MIN_BILLIONS`、大きさが取れない
+ * ときの扱いも同じ）。P-09 1.2 の書き方を揃える指示は、`gemma4:e4b`（8B）では
+ * 誤検出を 13 → 29 に増やし、`gemma4:26b` とさくらの Kimi-K2.6 では増やさなかった
+ * （正解つきの台、2026-09-26。設計書6.8.20）。12b は測っていないので、
+ * 境目の下＝これまでの文に置く。
+ */
+export function useSmallModelTypoPrompt(input: CapabilityInput): boolean {
+  return suppressUncertain(input);
+}
+
 function suppressUncertain(input: CapabilityInput): boolean {
   const billions = parameterSizeInBillions(input.parameterSize);
   if (billions !== undefined) return billions < LARGE_MODEL_MIN_BILLIONS;

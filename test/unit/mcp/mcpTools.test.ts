@@ -16,7 +16,12 @@ import {
   typoRun,
   typoValidate,
 } from "../../../src/mcp/tools/typo";
-import { TYPO_CHECK_VERSION } from "../../../src/prompts/typoCheck";
+import {
+  TYPO_CHECK_SYSTEM_PROMPT,
+  TYPO_CHECK_SYSTEM_PROMPT_SMALL,
+  TYPO_CHECK_VERSION,
+  TYPO_CHECK_VERSION_SMALL,
+} from "../../../src/prompts/typoCheck";
 import {
   chatPrompt,
   chatRun,
@@ -241,6 +246,26 @@ describe("typo", () => {
     expect(result.chunks).toHaveLength(1);
     expect(result.chunks[0].chunkId).toContain("004_よあけ.txt");
     expect(result.chunks[0].userPrompt).toContain("まず最初に");
+  });
+
+  test("modelSize: small で、小さいモデル向けの版（1.1 の文）を返す", () => {
+    // 製品は 20B 未満のモデルへ small を送る（P-09 1.2）。MCP は呼ぶ側に選ばせる
+    const large = typoPrompt({ folder: WORK, filePath: "本文/004_よあけ.txt", numCtx: NUM_CTX });
+    const small = typoPrompt({
+      folder: WORK,
+      filePath: "本文/004_よあけ.txt",
+      numCtx: NUM_CTX,
+      modelSize: "small",
+    });
+
+    expect(large.systemPrompt).toBe(TYPO_CHECK_SYSTEM_PROMPT);
+    expect(large.promptVersion).toBe(TYPO_CHECK_VERSION);
+    expect(small.systemPrompt).toBe(TYPO_CHECK_SYSTEM_PROMPT_SMALL);
+    expect(small.promptVersion).toBe(TYPO_CHECK_VERSION_SMALL);
+    expect(small.chunks[0].userPrompt).not.toContain("【target と suggestion の書き方】");
+    expect(() =>
+      typoPrompt({ folder: WORK, filePath: "本文/004_よあけ.txt", numCtx: NUM_CTX, modelSize: "tiny" })
+    ).toThrow(/知らないモデルの大きさ/);
   });
 
   test("固有名詞の辞書と、作品の書き方をプロンプトへ載せる", () => {

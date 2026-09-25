@@ -4,8 +4,30 @@ import {
   capabilityProfile,
   describeCapability,
   describeContradictionCapabilityForAuthor,
+  useSmallModelTypoPrompt,
   type CapabilityProfile,
 } from "../../../src/ai/capability";
+
+describe("誤字脱字で、小さいモデル向けの版（1.1 の文）を送るか（P-09 1.2）", () => {
+  test("小さいモデル（e4b は 8B）には小さいモデル向けを送る", () => {
+    // 書き方を揃える指示は e4b で誤検出を増やした（設計書6.8.20）
+    expect(
+      useSmallModelTypoPrompt({ tier: "standard", providerId: "ollama", parameterSize: "8.0B" })
+    ).toBe(true);
+  });
+
+  test("26b（25.2B）以上には、大きいモデル向けを送る", () => {
+    expect(
+      useSmallModelTypoPrompt({ tier: "high", providerId: "ollama", parameterSize: "25.2B" })
+    ).toBe(false);
+  });
+
+  test("大きさの分からないクラウドは大きいモデル向け、手元は小さいモデル向け（矛盾検知と同じ落とし方）", () => {
+    expect(useSmallModelTypoPrompt({ providerId: "sakura" })).toBe(false);
+    expect(useSmallModelTypoPrompt({ providerId: "claude" })).toBe(false);
+    expect(useSmallModelTypoPrompt({ providerId: "ollama" })).toBe(true);
+  });
+});
 // **境目は `types.ts` にある**（0.71.3で1つにまとめた）。`capability.ts` は
 // `types.ts` を import する側なので、逆向きには置けない
 import { inferTier, LARGE_MODEL_MIN_BILLIONS } from "../../../src/ai/types";

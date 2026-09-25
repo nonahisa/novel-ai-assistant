@@ -1,6 +1,13 @@
 import { describe, expect, test } from "vitest";
 import { withLineNumbers, type Chunk } from "../../../src/core/chunker";
-import { buildTypoCheckPrompt } from "../../../src/prompts/typoCheck";
+import {
+  TYPO_CHECK_SYSTEM_PROMPT,
+  TYPO_CHECK_SYSTEM_PROMPT_SMALL,
+  TYPO_CHECK_VERSION,
+  TYPO_CHECK_VERSION_SMALL,
+  buildTypoCheckPrompt,
+  typoPromptVersion,
+} from "../../../src/prompts/typoCheck";
 import { locateBody } from "../../../src/core/episodeChunks";
 
 function makeChunk(text: string, startLine: number): Chunk {
@@ -47,6 +54,50 @@ describe("誤字脱字検知のプロンプト組み立て", () => {
       properNounDictionary: [],
     });
     expect(prompt).toContain("（まだ登録されていません）");
+  });
+});
+
+describe("大きいモデル向けと小さいモデル向けの2つの版（P-09 1.2）", () => {
+  const base = {
+    chunkTextWithLineNumbers: "1: 本文",
+    properNounDictionary: [],
+  };
+
+  test("大きいモデル向け（既定）は、検算と揃えた書き方を渡す", () => {
+    const prompt = buildTypoCheckPrompt(base);
+    // 検算が通す形（空白・行末の句点・入力ミス）と、捨てる形（台詞の句点・字下げ）
+    expect(prompt).toContain("紛れ込んだ空白は、空白とその直前の1字を target にする");
+    expect(prompt).toContain("地の文の行末の句点抜け");
+    expect(prompt).toContain("台詞（「」の中）の末尾に句点を足すこと");
+    expect(prompt).toContain("入力ミス");
+    expect(prompt).toContain("target の外にある前後の文字を suggestion に入れないこと");
+    expect(prompt).toContain("ら抜き言葉・い抜き言葉（会話文でも地の文でも");
+  });
+
+  test("大きいモデル向けも、確信の強さは 1.1 のまま（low で出してよいとは言わない）", () => {
+    // 「low で出してよい」は Kimi-K2.6 で誤検出を 2→14 に増やした（設計書6.8.20）
+    const prompt = buildTypoCheckPrompt(base);
+    expect(prompt).toContain("確信が持てないものは指摘しないこと");
+    expect(prompt).not.toContain("low で出してかまいません");
+    expect(prompt).not.toContain("前後の流れと合わない語の書き誤り");
+    expect(TYPO_CHECK_SYSTEM_PROMPT).toContain("確信が持てないものは指摘しない");
+  });
+
+  test("小さいモデル向けは 1.1 の文のまま（書き方の指示を足さない）", () => {
+    // 書き方の指示を足した版は、e4b で文まるごとの言い換えを増やした（設計書6.8.20）
+    const prompt = buildTypoCheckPrompt({ ...base, forSmallModel: true });
+    expect(prompt).toContain("確信が持てないものは指摘しないこと");
+    expect(prompt).toContain("誤っている語のみ");
+    expect(prompt).not.toContain("【target と suggestion の書き方】");
+    expect(TYPO_CHECK_SYSTEM_PROMPT_SMALL).toContain("確信が持てないものは指摘しない");
+    expect(TYPO_CHECK_SYSTEM_PROMPT_SMALL).not.toContain("根拠が本文にある");
+  });
+
+  test("版の名前：大きいモデル向けは 1.2、小さいモデル向けは 1.1（文が同じなので処理済みを飛ばさない）", () => {
+    expect(typoPromptVersion(false)).toBe(TYPO_CHECK_VERSION);
+    expect(typoPromptVersion(true)).toBe(TYPO_CHECK_VERSION_SMALL);
+    expect(TYPO_CHECK_VERSION_SMALL).toBe("1.1");
+    expect(TYPO_CHECK_VERSION).not.toBe(TYPO_CHECK_VERSION_SMALL);
   });
 });
 
