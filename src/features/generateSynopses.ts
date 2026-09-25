@@ -47,6 +47,7 @@ import {
 } from "../core/logger";
 import { renameEpisodeFile } from "../core/episodeRename";
 import { confirmFormatFit } from "./formatFitPrompt";
+import type { FeatureRunResult } from "../core/proofreadingSuite";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import { estimateCallsTimeFor } from "../ai/runTimeEstimate";
 import { describeCallTimeEstimate } from "../core/etaEstimate";
@@ -80,25 +81,25 @@ const PREVIOUS_SYNOPSES_LIMIT = 3;
 export async function generateSynopses(
   work: WorkEntry,
   registry: AIRegistry
-): Promise<boolean> {
+): Promise<FeatureRunResult> {
   useLogFile(work.folderPath);
 
   // 短編では1件しか作れず、感情曲線も線にならない（設計書6.4.5）
-  if (!(await confirmFormatFit(work, "episodeSynopses"))) return false;
+  if (!(await confirmFormatFit(work, "episodeSynopses"))) return "cancelled";
 
   const resolved = await ensureConfigured(registry, "generate");
-  if (!resolved) return false;
+  if (!resolved) return "failed";
 
   const scan = await scanWork(work);
   if (scan.episodes.length === 0) {
     vscode.window.showWarningMessage("本文ファイルが見つかりません。");
-    return false;
+    return "failed";
   }
 
   const loaded = await loadEpisodeBodies(scan.episodes);
   if (loaded.bodies.length === 0) {
     vscode.window.showWarningMessage("あらすじを作れる本文がありません。");
-    return false;
+    return "failed";
   }
 
   const store = new SynopsisStore(work);
@@ -108,7 +109,7 @@ export async function generateSynopses(
   } catch (error) {
     // 壊れたJSONを空として扱うと、作者が書き直したあらすじが消える
     reportStoreError(error);
-    return false;
+    return "failed";
   }
 
   set = await syncStaleFileNamesAndTitles(store, set, loaded.bodies);
@@ -161,7 +162,7 @@ export async function generateSynopses(
     vscode.window.showInformationMessage(
       "すべての話のあらすじが最新です。本文を変えた話だけを作り直します。"
     );
-    return true;
+    return "done";
   }
 
   // **繋がるかを、費用の確認より先に確かめる**（設計書6.51）。
@@ -177,7 +178,7 @@ export async function generateSynopses(
       resolved.model
     ))
   ) {
-    return false;
+    return "failed";
   }
 
   /*
@@ -222,7 +223,7 @@ export async function generateSynopses(
     // どの作品かを確認画面に出す（ノートPCの実機、2026-09-23）
     { remember: { id: "ai.run.generateSynopses" }, work }
   );
-  if (!confirmed) return false;
+  if (!confirmed) return "cancelled";
 
   // 人物名は表記を揃えるために渡す。モブは名前が普通名詞になりがちで、
   // あらすじの文中に混ざると読みにくい
@@ -377,7 +378,7 @@ export async function generateSynopses(
     await store.save(set);
   } catch (error) {
     reportStoreError(error);
-    return false;
+    return "failed";
   }
 
   if (subtitleCandidates.length > 0 && !cancelled) {
@@ -389,7 +390,10 @@ export async function generateSynopses(
     failures,
     cancelled,
   });
-  return failures.length < pending.length;
+  // 途中で止めた回は、作れたぶんを保存したうえで「取りやめ」と返す
+  // （精査 R15。済んだと言うと、まとめ実行も案内も先へ進んでしまう）
+  if (cancelled) return "cancelled";
+  return failures.length < pending.length ? "done" : "failed";
 }
 
 /**

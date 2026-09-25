@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import type { FeatureRunResult } from "../core/proofreadingSuite";
 import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
 import { WorkEntry } from "../models/types";
@@ -299,10 +300,10 @@ export async function extractCharacters(
   work: WorkEntry,
   registry: AIRegistry,
   options: ExtractCharactersOptions = {}
-): Promise<boolean> {
+): Promise<FeatureRunResult> {
   const saveKinds = new Set<ExtractKind>(options.kinds ?? ALL_EXTRACT_KINDS);
   const resolved = await ensureConfigured(registry, "extract");
-  if (!resolved) return false;
+  if (!resolved) return "failed";
 
   // モデル情報はチャンクサイズを決めるのに使う。
   // 取得できないまま既定値で進むと、本来より細かく分割され、
@@ -315,7 +316,7 @@ export async function extractCharacters(
     model: resolved.model,
     actionLabel: "設定資料の抽出",
   });
-  if (!modelInfo) return false;
+  if (!modelInfo) return "failed";
 
   const contextWindow = modelInfo.contextWindow;
   // **応答の見込みに実測を使う**（設計書6.65.16の2）。台帳に書ける量の
@@ -373,7 +374,7 @@ export async function extractCharacters(
   const scan = await scanWork(work);
   if (scan.episodes.length === 0) {
     vscode.window.showWarningMessage("本文ファイルが見つかりません。");
-    return false;
+    return "failed";
   }
 
   // 1話が短い作品では、本文より指示のほうが大きい（実データで2〜3倍）。
@@ -436,12 +437,12 @@ export async function extractCharacters(
       kind: "warning",
       remember: { id: "conflict.skip.extractCharacters" },
     });
-    if (proceed !== "run") return false;
+    if (proceed !== "run") return "cancelled";
   }
 
   if (chunks.length === 0) {
     vscode.window.showWarningMessage("処理できる本文がありません。");
-    return false;
+    return "failed";
   }
 
   const store = new CharacterStore(work);
@@ -449,7 +450,7 @@ export async function extractCharacters(
     await vscode.window.showWarningMessage(
       "未保存の人物設定があります。人物設定を保存してから、もう一度実行してください。"
     );
-    return false;
+    return "failed";
   }
   const loaded = await store.loadAll();
 
@@ -469,7 +470,7 @@ export async function extractCharacters(
       });
       await vscode.window.showTextDocument(doc);
     }
-    return false;
+    return "failed";
   }
 
   // 書き先はここで作品へ向けておく。接続の確認で止まったときの記録は
@@ -515,7 +516,7 @@ export async function extractCharacters(
         resolved.model
       ))
     ) {
-      return false;
+      return "failed";
     }
 
     /*
@@ -577,7 +578,7 @@ export async function extractCharacters(
         work,
       }
     );
-    if (!confirmed) return false;
+    if (!confirmed) return "cancelled";
   }
 
   /*
@@ -1015,7 +1016,7 @@ export async function extractCharacters(
     notifyDone(
       "設定資料の抽出を中止しました。完了済みの処理は次回再利用されます。"
     );
-    return false;
+    return "cancelled";
   }
 
   /** 承認待ちに回した更新の件数。要約で作者へ知らせる */
@@ -1083,7 +1084,7 @@ export async function extractCharacters(
       await vscode.window.showWarningMessage(
         "保存直前に未保存の人物設定が見つかりました。作者の変更を保護するため、抽出結果は保存しませんでした。"
       );
-      return false;
+      return "failed";
     }
     try {
       await store.saveAll(newCharacters);
@@ -1154,7 +1155,7 @@ export async function extractCharacters(
           `novelai.${resolved.provider.id}`
         );
       }
-      return false;
+      return "failed";
     }
   }
 
@@ -1315,7 +1316,7 @@ export async function extractCharacters(
 
   // ここまで来ていれば人物・能力・場所の保存を試みている。
   // 保存件数が0でも、既存の設定から資料は作り直せる
-  return true;
+  return "done";
 }
 
 /**

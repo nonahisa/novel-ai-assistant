@@ -218,6 +218,16 @@ export interface CheckCommandOutcome {
   readonly reason?: string;
 }
 
+/**
+ * 機能の関数が返す、走った結果（設定資料の抽出・各話あらすじ。精査 R15）。
+ *
+ * **真偽では取りやめと失敗を分けられない。** 確認で断った回も走って失敗した
+ * 回も同じ `false` で、まとめ実行と案内の内訳が取りやめを「失敗しました」と
+ * 言っていた（設計書6.104「見分けが付かないまま残っているもの」）。
+ * コマンドの登録がこれを `CHECK_*` へ読み替える。
+ */
+export type FeatureRunResult = "done" | "cancelled" | "failed";
+
 /** 結果を出さずに終わった（まとめ実行はここで止まる） */
 export const CHECK_CANCELLED: CheckCommandOutcome = { kind: "cancelled" };
 

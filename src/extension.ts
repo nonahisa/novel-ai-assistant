@@ -4589,7 +4589,7 @@ export async function activate(
           // 抽出後の「提案を見る」を提案パネルへ通す（設計書6.57.1）
           proposalPanel,
         });
-        if (!saved) return;
+        if (saved !== "done") return;
 
         // 保存した種別の資料（Markdown）だけを作り直す
         await generateSettingsDocs(work, { kinds: [kind] });
@@ -4680,17 +4680,18 @@ export async function activate(
 
         // 抽出したJSONから資料Markdownまで一度に作る。
         // 抽出結果の要約はすでに出しているので、成功は再通知しない。
-        if (extracted) {
+        if (extracted === "done") {
           await generateSettingsDocs(work, { silent: true });
           return CHECK_COMPLETED;
         }
         /*
-          **抽出できなかった回を「済んだ」と言わない。** `extractCharacters`
-          が返すのは真偽だけで、AIが未設定だったのか・確認で取りやめたのか・
-          走って失敗したのかを見分けられない。**失敗と名乗る**——
-          まとめ実行は失敗では止まらないので、残りの段はこれまでどおり走る。
-          見分けが付くようにするのは、あちらの戻り値を変える別の作業である。
+          **抽出できなかった回を「済んだ」と言わない。** 確認で断った・途中で
+          中止した回は取りやめ、AIが未設定・本文が無い・保存に失敗した回は
+          失敗と名乗る（精査 R15。以前は真偽だけで、取りやめも「失敗しました」
+          と内訳に出ていた）。まとめ実行は失敗では止まらないので、残りの段は
+          これまでどおり走る
         */
+        if (extracted === "cancelled") return CHECK_CANCELLED;
         return CHECK_FAILED;
       }
     )
@@ -6040,13 +6041,14 @@ export async function activate(
         treeProvider.refresh(work.id);
 
         // JSONのままでは作者が読めない。読める資料まで作って初めて完成する
-        if (generated) {
+        if (generated === "done") {
           await generateSettingsDocs(work, { silent: true });
           return CHECK_COMPLETED;
         }
-        // **作れなかった回を「済んだ」と言わない。** `generateSynopses` が
-        // 返すのは真偽だけで、形式が合わなかったのか・AIが未設定だったのか・
-        // 走って失敗したのかを見分けられない（`extractSettings` と同じ）
+        // **作れなかった回を「済んだ」と言わない。** 形式の確認や実行の確認で
+        // 断った・途中で中止した回は取りやめ、それ以外は失敗（精査 R15。
+        // `extractSettings` と同じ）
+        if (generated === "cancelled") return CHECK_CANCELLED;
         return CHECK_FAILED;
       }
     )
