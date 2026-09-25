@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { CharacterStore } from "../core/characterStore";
-import { PendingUpdateStore } from "../core/pendingUpdates";
+import { PendingUpdateStore, type PendingUpdate } from "../core/pendingUpdates";
 import { parsePlotMarkdown } from "../core/plotDoc";
 import { readPlotText } from "../core/plotFile";
 import {
@@ -10,6 +10,7 @@ import {
   inheritPendingCreationFields,
   parsePlotCharacters,
   plotCharactersDigest,
+  type PlotCharacterPlan,
   type PlotCharacterSkip,
 } from "../core/plotCharacterSync";
 import { logFailure, useLogFile } from "../core/logger";
@@ -98,52 +99,63 @@ export async function syncPlotCharacters(
     return { ...EMPTY };
   }
 
-  const plan = buildPlotCharacterUpdates(parsed.entries, loaded.characters);
+  const store = new PendingUpdateStore(work);
+  let plan: PlotCharacterPlan<PendingUpdate>;
+  try {
+    // **承認待ちも突き合わせる**（設計書6.4.9）。名前を直す案（主人公 →
+    // 相馬 誠）が承認待ちのうちは、資料に「相馬 誠」はまだいない。
+    // 読めないまま進めると同じ人を新規に積むので、読めなければ止める
+    const pending = (await store.loadAll()).updates;
+    plan = buildPlotCharacterUpdates(parsed.entries, loaded.characters, pending);
 
-  if (plan.updates.length > 0 || plan.creations.length > 0) {
-    try {
-      const store = new PendingUpdateStore(work);
-      // 出どころを添えて積む。AIの読みと、作者が書いた文とでは、
-      // 承認するときの見方が変わる
-      if (plan.updates.length > 0) {
-        await store.stage(plan.updates, { source: "plot" });
-      }
-      // 資料にまだ無い人は**新規の人物案**として積む。台帳へは書かない
-      // ——承認したときに `applyPendingUpdates` が採番して作る
-      if (plan.creations.length > 0) {
-        // 名前の候補から選んで置いた案（設計書6.4.8）は読みを持つが、
-        // plot.md は読みを書かない。**積み直しで読みを消さない**
-        const pending = (await store.loadAll()).updates
-          .filter((entry) => entry.kind === "creation")
-          .map((entry) => entry.character);
-        await store.stage(
-          inheritPendingCreationFields(
-            buildNewCharacterRecords(plan.creations),
-            pending
-          ),
-          { source: "plot", kind: "creation" }
-        );
-      }
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      // **記録の直前に書き先を向ける**（0.43.3 と同じ）
-      useLogFile(work.folderPath);
-      logFailure("プロットから人物の更新案を積めませんでした", {
-        作品: work.title,
-        詳細: detail,
-      });
-      void vscode.window.showWarningMessage(
-        `プロットからの更新案を保留できませんでした: ${detail}`
-      );
-      // 覚え書きを残さない。次の保存でもう一度試す
-      return { ...EMPTY };
+    // 出どころを添えて積む。AIの読みと、作者が書いた文とでは、
+    // 承認するときの見方が変わる
+    if (plan.updates.length > 0) {
+      await store.stage(plan.updates, { source: "plot" });
     }
+    // 承認待ちの案の上に重ねたものは、**元の案の出どころと理由を残す**。
+    // 「プロットから」で塗ると、名前の候補で置いた理由（主人公 → 相馬 誠）が
+    // 承認の画面から消える
+    for (const overlay of plan.pendingOverlays) {
+      await store.stage([overlay.character], {
+        source: overlay.proposal.source,
+        reason: overlay.proposal.reason,
+      });
+    }
+    // 資料にまだ無い人は**新規の人物案**として積む。台帳へは書かない
+    // ——承認したときに `applyPendingUpdates` が採番して作る
+    if (plan.creations.length > 0) {
+      // 名前の候補から選んで置いた案（設計書6.4.8）は読みを持つが、
+      // plot.md は読みを書かない。**積み直しで読みを消さない**
+      await store.stage(
+        inheritPendingCreationFields(
+          buildNewCharacterRecords(plan.creations),
+          pending
+            .filter((entry) => entry.kind === "creation")
+            .map((entry) => entry.character)
+        ),
+        { source: "plot", kind: "creation" }
+      );
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+    useLogFile(work.folderPath);
+    logFailure("プロットから人物の更新案を積めませんでした", {
+      作品: work.title,
+      詳細: detail,
+    });
+    void vscode.window.showWarningMessage(
+      `プロットからの更新案を保留できませんでした: ${detail}`
+    );
+    // 覚え書きを残さない。次の保存でもう一度試す
+    return { ...EMPTY };
   }
 
   await writeDigest(work, digest);
 
   const result: PlotCharacterSyncResult = {
-    staged: plan.updates.length,
+    staged: plan.updates.length + plan.pendingOverlays.length,
     creations: plan.creations.map((entry) => entry.name),
     unparsed: parsed.unparsed.length,
     skipped: plan.skipped,
@@ -218,7 +230,15 @@ function describeSkipped(skipped: readonly PlotCharacterSkip[]): string[] {
   }
   if (ambiguous.length > 0) {
     lines.push(
-      `${ambiguous.join("、")}は、同じ呼び名の人物が資料に複数居るため当てられませんでした。`
+      `${ambiguous.join("、")}は、同じ呼び名の人物が資料か承認待ちに複数居るため当てられませんでした。`
+    );
+  }
+  // 役名の人物がいるので新規にしなかった（設計書6.4.9）。黙って飛ばすと、
+  // 名前を入れたのに資料へ出てこない理由が分からない
+  for (const entry of skipped.filter((item) => item.reason === "sameRole")) {
+    lines.push(
+      `${entry.name}は、設定資料か承認待ちに役名「${entry.role ?? ""}」の人物がいるため、` +
+        `新しい人物としては積んでいません（その人物の名前を「${entry.name}」に直すと揃います）。`
     );
   }
   return lines;
