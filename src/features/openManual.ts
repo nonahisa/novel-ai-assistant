@@ -4,9 +4,10 @@ import {
   visibleEntries,
   type ActionItem,
 } from "../views/actionList";
-import { STEP_MENU, STEP_REFERENCED_COMMANDS } from "../views/stepMenu";
+import { STEP_MENU } from "../views/stepMenu";
 import { canRunProcesses } from "../core/runtime";
 import { EXTRA_GUIDE } from "./featureGuide";
+import { entranceOf } from "./actionEntrance";
 import { openGeneratedMarkdown } from "../views/openDocument";
 
 /**
@@ -175,66 +176,14 @@ function actionLine(action: ActionItem, noteLocation = true): string {
  * 無いものを「ある」と書く**ことになる（作者の指示「マニュアル更新も
  * お願いします」2026-09-02）。
  *
- * **どこにあるかは、手で書かずに導く。** 簡単ステップメニューが参照して
- * いるか（`STEP_REFERENCED_COMMANDS`）で見分けられる——参照されていれば
- * そちらから、いなければ設定管理の説明のリンクから使う操作である。
- * 手で書くと、置き場所を変えたときにマニュアルだけが古いままになる。
+ * 入口の導き方と例外の表は `actionEntrance.ts` にある——**相談の目次も
+ * 同じものを引く**（0.86.10 の担当の報告。目次だけが入口を持たず、
+ * AIがメニューに無い道を案内していた）。
  */
 function whereToFind(action: ActionItem): string {
-  if (!action.hiddenFromActionList) return "";
-  const special = SPECIAL_ENTRANCES[action.command];
-  if (special) return special;
-  return STEP_REFERENCED_COMMANDS.includes(action.command)
-    ? "（簡単ステップメニューから）"
-    : "（設定管理の説明のリンクから）";
+  const entrance = entranceOf(action);
+  return entrance ? `（${entrance.text}）` : "";
 }
-
-/**
- * 導き方では当てられない入口（作者の指定、2026-09-03）。
- *
- * `whereToFind` は「簡単ステップメニューが参照しているか」で入口を当てる。
- * ふつうはそれで足りるが、**相談の画面だけは入口がメニューの外にある**——
- * 横の細いパネル（本文の右クリックから開く）の「メインに表示」ボタンが、
- * 大きく開くいちばん近い道である。導きに任せると「簡単ステップメニューから」
- * とだけ書き、その道が案内から消える。
- *
- * **例外はここへ集める。** 説明文（`detail`）へ書き足す手もあるが、
- * detail はメニューのホバーとAIへ渡す説明にも出るので、
- * マニュアルの都合の一文が3か所に散らばることになる。
- */
-const SPECIAL_ENTRANCES: Readonly<Record<string, string>> = {
-  "novelai.openChatPanel":
-    "（横の「AIに相談」パネルの「メインに表示」ボタンから。" +
-    "簡単ステップメニューにもあります）",
-  // 入口をエディターの中へ一本化した（作者の指定、2026-09-04）。
-  // 導き方（簡単ステップメニューにあるか）では当てられない場所にある
-  "novelai.exportEpub":
-    "（EPUBエディターの中の「EPUBを書き出す」ボタンから）",
-  /*
-    **2026-09-23 のメニューの組み直しで画面から外したもの**（作者の裁定）。
-    どれも入口がメニューの外（原稿エディター・作家タイプ診断・矛盾検知の
-    中）にあり、導き方に任せると「設定管理の説明のリンクから」と、
-    存在しない道を書いてしまう。
-  */
-  "novelai.openSceneMemos":
-    "（原稿エディターの右クリックから。簡単ステップメニューにもあります）",
-  "novelai.openVertical":
-    "（原稿エディターの上のバー「縦書き」か、本文の右クリックから）",
-  "novelai.readManuscriptAloud": "（原稿エディターの上のバー「読み上げ」から）",
-  "novelai.dictationClean":
-    "（原稿エディターの下段「口述」→「整える」から。普通のエディターではコマンドパレットから）",
-  "novelai.addRuby": "（原稿エディターの上のバー「ルビ」か、右クリックから）",
-  "novelai.addEmphasis": "（原稿エディターの上のバー「傍点」か、右クリックから）",
-  "novelai.copyForPosting":
-    "（原稿エディターの上のバー「投稿用にコピー」か、右クリックから。簡単ステップメニューにもあります）",
-  "novelai.setAdvicePolicy":
-    "（「作家タイプ診断」の「助言の受け方」から。コマンドパレットにもあります）",
-  "novelai.setAuthorReaderType":
-    "（「作家タイプ診断」の「読者としての好み」から。コマンドパレットにもあります）",
-  "novelai.checkFactContradictions":
-    "（「矛盾検知」を押して「話どうしの照合だけ」を選ぶ。コマンドパレットにもあります）",
-  "novelai.diagnoseWeb": "（コマンドパレットから。ブラウザ版の確かめ用）",
-};
 
 /**
  * 説明文を、マニュアルの1行へ収める形に直す。

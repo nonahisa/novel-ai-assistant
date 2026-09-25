@@ -857,3 +857,65 @@ describe("対話式プロット作成（ほかの案・確かめ直し・まと�
     expect(h.prompts).toHaveLength(3);
   });
 });
+
+/**
+ * 人称の項目に「誰の目で語るか」が入った答え（0.86.12 の担当の報告。e4b が
+ * 【物語の視点と語り手】の答えを人称へ書いた）。書く前に形だけを残し、
+ * 誰かの部分はあらすじへ回して、作者へ示す（`settleNarrativePerson`）。
+ */
+describe("人称の項目には書き方の形だけを書く", () => {
+  test("「ここまでをプロットに書く」：人称には形だけ、誰かはあらすじへ回し、そう示す", async () => {
+    const h = harness([
+      turn({
+        topic: "物語の視点と語り手",
+        question: "主人公は誰の目で語られますか？",
+        section: "narrativePerson",
+        candidates: [
+          "主人公である新人ケースワーカー・ユキの一人称",
+          "班長の三人称一元",
+          "神視点",
+        ],
+      }),
+      turn({ topic: "主人公", question: "主人公は誰ですか？", section: "mainCharacters" }),
+    ]);
+
+    await h.panel.startPlotInterview(WORK);
+    await h.reply(IDEA);
+    await h.reply("主人公である新人ケースワーカー・ユキの一人称");
+    await h.reply(PLOT_WRITE_OPTION);
+
+    const sections = parsePlotMarkdown(readPlot()).sections;
+    expect(sections.narrativePerson).toBe("一人称");
+    expect(sections.outline).toContain(
+      "- 視点の人物：主人公である新人ケースワーカー・ユキの一人称"
+    );
+    // 主要登場人物には置かない（「視点の人物」という人物が資料へ積まれる）
+    expect(sections.mainCharacters).not.toContain("視点の人物");
+    const note = h.posted.find(
+      (message) => message.type === "note" && message.message?.includes("【人称】")
+    );
+    expect(note?.message).toContain("「一人称」だけを書き");
+  });
+
+  test("形だけの答え（「三人称一元」）は、そのまま人称へ書き、断りも出さない", async () => {
+    const h = harness([
+      turn({
+        topic: "人称",
+        question: "どの人称で書きますか？",
+        section: "narrativePerson",
+        candidates: ["一人称", "三人称一元", "三人称多元"],
+      }),
+      turn({ topic: "主人公", question: "主人公は誰ですか？", section: "mainCharacters" }),
+    ]);
+
+    await h.panel.startPlotInterview(WORK);
+    await h.reply(IDEA);
+    await h.reply("三人称一元");
+    await h.reply(PLOT_WRITE_OPTION);
+
+    expect(parsePlotMarkdown(readPlot()).sections.narrativePerson).toBe("三人称一元");
+    expect(
+      h.posted.some((message) => message.type === "note" && message.message?.includes("【人称】"))
+    ).toBe(false);
+  });
+});

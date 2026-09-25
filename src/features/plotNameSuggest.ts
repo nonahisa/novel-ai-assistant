@@ -16,7 +16,12 @@ import {
 } from "../core/abilityStore";
 import { PendingUpdateStore, type PendingUpdate } from "../core/pendingUpdates";
 import { buildNameEntries } from "../core/nameCollision";
-import { planNameOrigin, type NameOriginPlan } from "../core/nameOriginFit";
+import {
+  originToRemember,
+  planNameOrigin,
+  type NameOriginPlan,
+} from "../core/nameOriginFit";
+import { readRememberedNameOrigin } from "../core/nameOriginStore";
 import { normalizeName } from "../core/characterMerge";
 import {
   buildNewCharacterRecords,
@@ -57,7 +62,7 @@ import { reportAIError } from "./reportAIError";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { markPlotCharactersSynced } from "./plotCharacterSync";
 import { recordRoleRenameOffers } from "./roleRenameOffers";
-import { pickOrigin } from "./nameCheck";
+import { describeOriginPlan, pickOrigin, rememberOrigin } from "./nameCheck";
 import {
   logFailure,
   logStep,
@@ -197,8 +202,11 @@ export async function suggestPlotNames(
   const resolved = await ensureConfigured(registry, "generate");
   if (!resolved) return undefined;
 
+  // 名前点検と同じく、この作品で覚えている系統を使う（設計書6.37.2）
+  const remembered = await readRememberedNameOrigin(work);
   const origin = await pickOrigin(
-    `名前の系統（${chosenTargets.length}人に${PLOT_NAME_SUGGEST_COUNT}件ずつ候補を出します）`
+    `名前の系統（${chosenTargets.length}人に${PLOT_NAME_SUGGEST_COUNT}件ずつ候補を出します）`,
+    remembered
   );
   if (origin === undefined) return undefined;
 
@@ -223,7 +231,8 @@ export async function suggestPlotNames(
     work,
     loaded.characters,
     file.text,
-    origin === "auto" ? undefined : origin
+    origin === "auto" ? undefined : origin,
+    remembered
   );
   const plan = material.plan;
 
@@ -357,10 +366,15 @@ export async function suggestPlotNames(
       dropped: person?.dropped ?? [],
     });
   }
+  // 最初に決まった系統を覚える（名前点検と同じ決め方・同じ置き場所）
+  await rememberOrigin(
+    work,
+    originToRemember(plan, remembered, screened.origin, kept),
+    "プロットの名前の候補"
+  );
   view.note =
-    `系統：${screened.origin ?? plan.choices.join("・")}（${
-      plan.chosen ? "作者が選んだ系統" : plan.basis
-    }）。人物ごとに1つ選んで［入れる］を押すと、プロットの行に「役名（名前）」の形で書き足し、` +
+    // 書き方は名前点検と揃える（覚えている系統なら変え方も添える）
+    `${describeOriginPlan(plan, screened.origin)}。人物ごとに1つ選んで［入れる］を押すと、プロットの行に「役名（名前）」の形で書き足し、` +
     (chosenTargets.some((target) => target.ledger)
       ? "設定資料には新規の人物として（資料に役名だけの人物がいれば、その名前を直す案として）承認待ちに置きます。"
       : "設定資料には新規の人物として承認待ちに置きます。") +
@@ -696,7 +710,8 @@ async function collectMaterial(
   work: WorkEntry,
   characters: readonly Character[],
   plotText: string,
-  chosen: NameOrigin | undefined
+  chosen: NameOrigin | undefined,
+  remembered: NameOrigin | undefined
 ): Promise<Material> {
   const [abilities, locations, organizations, pending] = await Promise.all([
     createAbilityStore(work).loadAll(),
@@ -724,6 +739,7 @@ async function collectMaterial(
   const setting = settingFromPlotText(plotText);
   const plan = planNameOrigin({
     chosen,
+    remembered,
     existingNames: people.map((character) => character.name),
     setting,
   });

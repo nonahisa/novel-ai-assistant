@@ -1,4 +1,7 @@
+import * as fs from "node:fs";
+import * as nodePath from "node:path";
 import { z } from "zod";
+import { AIWRITER_DIR, CONFIG_FILE } from "../../models/types";
 import {
   NAME_ORIGINS,
   NAME_SUGGEST_COUNT,
@@ -10,7 +13,11 @@ import {
   parseNameSuggestAnswer,
   type NameOrigin,
 } from "../../prompts/nameSuggest";
-import { fitNameCandidates, planNameOrigin } from "../../core/nameOriginFit";
+import {
+  fitNameCandidates,
+  parseNameOrigin,
+  planNameOrigin,
+} from "../../core/nameOriginFit";
 import { parseCharacter } from "../../models/character";
 import { parseAbility } from "../../models/ability";
 import { parseLocation } from "../../models/location";
@@ -108,6 +115,26 @@ function readSetting(folder: string): string {
 }
 
 /**
+ * 作品の設定（`.aiwriter/config.json` の `nameOrigin`）に覚えている系統。
+ * 無い・読めなければ undefined（製品の `readRememberedNameOrigin` と同じ扱い）
+ */
+function rememberedOrigin(folder: string): NameOrigin | undefined {
+  try {
+    const raw: unknown = JSON.parse(
+      fs.readFileSync(
+        nodePath.join(nodePath.resolve(folder), AIWRITER_DIR, CONFIG_FILE),
+        "utf8"
+      )
+    );
+    return typeof raw === "object" && raw !== null
+      ? parseNameOrigin((raw as Record<string, unknown>).nameOrigin)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * 系統の決め方。**製品と同じ材料**（人物の名前だけ・付け替える本人を除く・
  * 世界観の節）で決める——`prompt` と `validate` が別々に呼ばれても、同じ
  * 作品なら同じ決め方になる
@@ -115,6 +142,9 @@ function readSetting(folder: string): string {
 function originPlan(input: NamePromptInput, entries: ReturnType<typeof readNameEntries>) {
   return planNameOrigin({
     chosen: input.origin as NameOrigin | undefined,
+    // 作品で覚えている系統も製品と同じく使う（設計書6.37.2）。**読むだけで、
+    // ここからは覚えない**——外からの呼び出しは何も書き換えない約束である
+    remembered: rememberedOrigin(input.folder),
     existingNames: entries
       .filter((entry) => entry.kind === "character" && entry.name !== input.characterName)
       .map((entry) => entry.name),

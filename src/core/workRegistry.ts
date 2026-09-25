@@ -15,6 +15,7 @@ import {
 import { atomicWriteFile } from "./atomicWrite";
 import { buildPlotTemplate } from "./plotTemplate";
 import { parseWorkKind } from "./workKind";
+import { parseNameOrigin } from "./nameOriginFit";
 import { canRegisterWork, describeWorkLimit } from "./editorMode";
 import { currentMode } from "./actorContext";
 import { parseSeriesConfig } from "./seriesLink";
@@ -929,6 +930,8 @@ export function parseWorkConfig(raw: unknown): WorkConfig {
   // 作品の種類（設計書6.109）。**知らない値は無かったことにする**（投げない）
   // ——新しい版で種類が増えたあと古い版で開いても、作品は開ける
   const kind = parseWorkKind(value.kind);
+  // 名前の系統（設計書6.37.2）。`kind` と同じく、知らない値は無かったことにする
+  const nameOrigin = parseNameOrigin(value.nameOrigin);
 
   return {
     schemaVersion: (value.schemaVersion as string).trim(),
@@ -941,6 +944,7 @@ export function parseWorkConfig(raw: unknown): WorkConfig {
     ...(announce ? { announce } : {}),
     ...(series ? { series } : {}),
     ...(kind ? { kind } : {}),
+    ...(nameOrigin ? { nameOrigin } : {}),
   };
 }
 

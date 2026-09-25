@@ -585,6 +585,184 @@ export function validatePlotSummary(
   return { ok: true, contents, restored, marked, dropped };
 }
 
+/** 人称の項目から回した1件 */
+export interface MovedNarrator {
+  /** 人称に残した書き方の形（「一人称」）。答えに形が無ければ空 */
+  form: string;
+  /** 回した答え（作者の言葉のまま） */
+  answer: string;
+}
+
+/** 誰の目かを回す先の項目と、その行の名前 */
+export const NARRATOR_SECTION: PlotDialogueSection = "outline";
+export const NARRATOR_TOPIC = "視点の人物";
+
+/**
+ * 人称の書き方の形。「一人称」「三人称一元」「三人称多元視点」「神視点」など。
+ * 長いものから当てる（「三人称一元視点」を「三人称」で切らない）
+ */
+const PERSON_FORM =
+  /(?:一人称|二人称|三人称)(?:[一多単]元|客観|全知|限定|複数)?(?:視点)?|神の?視点|全知視点|客観視点|[一多単]元視点/gu;
+
+/** 形を置き換えた印。**本文に出ない字**（下の見分けで、形の場所を指すためだけに使う） */
+const FORM_MARK = "〓";
+
+/**
+ * 「誰の目か」を言う形。印の前にある語が人物なら、その答えは誰かを含む
+ * （「ユキの〓」「ユキ視点」「ユキに寄り添う」「主人公の目で」）
+ */
+const WHO_MARKERS = new RegExp(
+  `の目|の視点|視点|に寄り添|から見|が語|の語り|の${FORM_MARK}|${FORM_MARK}`,
+  "gu"
+);
+
+/** 語り手の一人称（僕・俺…）。「僕の一人称」は形の言い方で、誰かではない */
+const NARRATOR_PRONOUNS =
+  /僕|俺|私|わたし|あたし|ぼく|おれ|オレ|ボク|わし|拙者|うち|自分|わたくし|吾輩|我輩/gu;
+
+/** 人物ではなく書き方を言う語（「複数の人物の視点を切り替える」「一人の人物に焦点を当てる」） */
+const STYLE_WORDS =
+  /複数|それぞれ|各|全員|交互|切り替|章ごと|場面ごと|誰か|一人の|ひとりの|特定の|モノローグ|カメラ|ナレーション|ナレーター|スタイル|シーン|パート|語る|語り|描く|描き|書く|書き|見る|見た|目線/u;
+
+/**
+ * 誰とも決めていない言い方。「一人称（主人公の視点）」「三人称全知（神の視点）」は
+ * 書き方の形を言い足しただけで、誰の話かは決めていない（手元の gemma4:e4b の
+ * 候補、2026-09-25）。**これだけなら動かさない**
+ */
+const GENERIC_NARRATORS = new Set([
+  "主人公",
+  "主人公たち",
+  "神",
+  "人物",
+  "登場人物",
+  "主要人物",
+  "語り手",
+  "視点人物",
+  "彼",
+  "彼女",
+  "彼ら",
+]);
+
+/** 名前らしいカタカナ（書き方の語は `STYLE_WORDS` で先に外す） */
+const KATAKANA_NAME = /[\p{Script=Katakana}ー]{2,}/u;
+
+/** 人物だと言える語か（空・書き方の語・誰とも決めていない言い方は違う） */
+function isSpecificNarrator(text: string): boolean {
+  return Boolean(text) && !STYLE_WORDS.test(text) && !GENERIC_NARRATORS.has(text);
+}
+
+/** 「誰の目か」の語を、人物の部分だけに削る */
+function cleanNarrator(text: string): string {
+  return text
+    .split(FORM_MARK)
+    .join("")
+    .replace(/[（）()「」『』【】、。，．,.・\s]/gu, "")
+    .replace(NARRATOR_PRONOUNS, "")
+    .replace(/^(?:で|は|が|を|の|と|に|も)+/u, "")
+    .replace(/(?:である|です|の|で|が|は|を|と|に)+$/u, "");
+}
+
+/** 答え1つが「誰の目か」を含むか */
+function namesNarrator(answer: string): boolean {
+  const marked = answer.replace(PERSON_FORM, FORM_MARK);
+  // 印の前の語（同じ句の中）が人物か
+  let from = 0;
+  for (const match of marked.matchAll(WHO_MARKERS)) {
+    const before = marked.slice(from, match.index).split(/[、。，,;；]/u).pop() ?? "";
+    from = (match.index ?? 0) + match[0].length;
+    if (isSpecificNarrator(cleanNarrator(before))) return true;
+  }
+  /*
+    括弧の中に名前を書いた形（「一人称（主人公・ユキ）」）。括弧の中は説明の
+    ことが多い（「淡々とした語り口」）ので、**名前らしいカタカナ**があるときだけ
+  */
+  for (const match of marked.matchAll(/[（(]([^（）()]*)[）)]/gu)) {
+    for (const part of match[1].split(/[・、，,\s]+/u)) {
+      const token = cleanNarrator(part);
+      if (isSpecificNarrator(token) && KATAKANA_NAME.test(token)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 人称の項目に入った「誰の目か」を、別の項目へ回す（0.86.12 の担当の報告）。
+ *
+ * 手元の gemma4:e4b は「主人公は誰の目で語りますか」の答えを人称の項目
+ * （`narrativePerson`）へ書く。P-43 の項目の説明に「書き方の形だけ」と書いても
+ * 守られない回がある（`plotInterview.ts` の `PLOT_DIALOGUE_SECTIONS`）。
+ * 人称は**書き方の形だけ**（一人称・三人称一元…）で、推敲・誤字脱字の検知・
+ * 執筆再開の資料がそのまま読む項目なので、人名や立場が混ざると困る。
+ *
+ * - 人称の項目には**形だけ**を残す（答えに形が無ければ、項目ごと空にする）
+ * - 誰かを含む答えは、**作者の言葉のまま**あらすじへ「- 視点の人物：〜」で足す。
+ *   主要登場人物へ置かないのは、あちらの「- 名前：説明」の行を「プロットの
+ *   人物を資料へ反映」が人物として読み、「視点の人物」という人物ができるため
+ * - 形だけの答え（「一人称（僕）」「三人称一元視点で淡々と描く」）は動かさない
+ * - **何度通しても同じ結果**（回した行はもう人称に無い）。まとめの見せる前と、
+ *   書く前の両方で通すため
+ *
+ * 回したものは `moved` で返す——呼び手が作者へ示す（黙って動かさない）。
+ */
+export function settleNarrativePerson(
+  contents: ReadonlyMap<PlotDialogueSection, string>
+): { contents: Map<PlotDialogueSection, string>; moved: MovedNarrator[] } {
+  const result = new Map(contents);
+  const moved: MovedNarrator[] = [];
+  const person = contents.get("narrativePerson");
+  if (!person) return { contents: result, moved };
+
+  const kept: string[] = [];
+  for (const line of person.split(/\r?\n/u)) {
+    const head = /^\s*(?:[-・*]\s*)?/u.exec(line)?.[0] ?? "";
+    const body = line.slice(head.length).trim();
+    // 「物語の視点と語り手：〜」のように名前が付いていれば、答えは「：」の後ろ
+    const colon = body.search(/[：:]/u);
+    const answer = colon >= 0 ? body.slice(colon + 1).trim() : body;
+    if (!answer || !namesNarrator(answer)) {
+      kept.push(line);
+      continue;
+    }
+    const forms = [...new Set(answer.match(PERSON_FORM) ?? [])];
+    moved.push({ form: forms.join("・"), answer });
+  }
+  if (moved.length === 0) return { contents: result, moved };
+
+  const bullet = kept.some((line) => /^\s*-\s/u.test(line));
+  const forms = moved
+    .map((item) => item.form)
+    .filter((form) => form && !kept.some((line) => line.includes(form)));
+  const lines = [...kept, ...[...new Set(forms)].map((form) => (bullet ? `- ${form}` : form))]
+    .filter((line) => line.trim());
+  if (lines.length > 0) {
+    result.set("narrativePerson", lines.join("\n"));
+  } else {
+    result.delete("narrativePerson");
+  }
+
+  const before = result.get(NARRATOR_SECTION) ?? "";
+  const added = moved
+    .map((item) => `- ${NARRATOR_TOPIC}：${item.answer}`)
+    .filter((line) => !before.split(/\r?\n/u).includes(line));
+  if (added.length > 0) {
+    result.set(NARRATOR_SECTION, before ? `${before}\n${added.join("\n")}` : added.join("\n"));
+  }
+  return { contents: result, moved };
+}
+
+/** 回したことを作者へ示す一言（書く前・まとめを見せたあとに出す） */
+export function describeMovedNarrators(moved: readonly MovedNarrator[]): string {
+  const lines = moved.map((item) =>
+    item.form
+      ? `・「${item.answer}」→【人称】には「${item.form}」だけを書き、この答えは【あらすじ】の「${NARRATOR_TOPIC}」へ回します`
+      : `・「${item.answer}」→ 書き方の形（一人称・三人称など）が無いので【人称】には書かず、【あらすじ】の「${NARRATOR_TOPIC}」へ回します`
+  );
+  return [
+    "【人称】は書き方の形（一人称・三人称一元など）だけを書く項目なので、誰の目で語るかは別の項目へ回しました。",
+    ...lines,
+  ].join("\n");
+}
+
 /**
  * 1行を、文と**文末の**括弧書きのまとまりに分ける。**つなげ直すと元の行に戻る**
  * （どの文字もどれかのまとまりに入る）。

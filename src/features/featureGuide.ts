@@ -8,6 +8,7 @@ import {
   type ActionSection,
 } from "../views/actionList";
 import { canRunProcesses } from "../core/runtime";
+import { entranceOf } from "./actionEntrance";
 import {
   selectGuideBundles,
   DEFAULT_BUNDLE_BUDGET,
@@ -181,7 +182,7 @@ function guideEntries<T extends ActionItem | ActionSection>(
  * いけない**ことなので、質問の中身にかかわらず常に渡す。
  */
 export function buildFeatureIndex(): string {
-  const lines: string[] = ["【詳細メニューの操作（これで全部）】"];
+  const lines: string[] = ["【詳細メニューの操作】"];
 
   // **画面に無い操作を案内させない。** 環境によって出さない操作があるので、
   // 一覧も同じ規則で絞る（`isItemVisibleInRuntime`）。絞り方は
@@ -189,22 +190,53 @@ export function buildFeatureIndex(): string {
   // 説明が無い（またはその逆の）操作ができる
   const allowsProcesses = canRunProcesses();
 
+  /*
+    **詳細メニューから外した操作は、分類の下に並べない**（0.86.10 の担当の報告）。
+    外す前の分類の下に名前が残っていると、AIはそれを写して「詳細メニューの
+    『原稿整備』→『ルビ付与』」と案内し、作者が開いても見つからない。
+    名前は欠かさず（欠けると「その機能はありません」と答える）、下の
+    【詳細メニューに無い操作】へ、実際の入口ごとにまとめて出す。
+    **入口ごとに1行へまとめる**のは、目次を毎回送るため——操作ごとに案内を
+    付けると、それだけで数百字伸びる。1つずつの案内は説明の束が持つ。
+  */
+  const byPlace = new Map<string, string[]>();
+  const pushHidden = (item: ActionItem): boolean => {
+    const entrance = entranceOf(item);
+    if (!entrance) return false;
+    const names = byPlace.get(entrance.place) ?? [];
+    names.push(nameOnly(item, "").slice(1));
+    byPlace.set(entrance.place, names);
+    return true;
+  };
+
   for (const group of ACTION_TREE) {
-    lines.push(`■ ${group.label}`);
+    const groupLines: string[] = [];
     for (const entry of guideEntries(group.entries, allowsProcesses)) {
       if (entry.kind === "action") {
-        lines.push(nameOnly(entry, ""));
+        if (!pushHidden(entry)) groupLines.push(nameOnly(entry, ""));
         continue;
       }
-      lines.push(`  ▸ ${entry.label}`);
-      for (const item of guideEntries(entry.items, allowsProcesses)) {
-        lines.push(nameOnly(item, "  "));
-      }
+      const itemLines = guideEntries(entry.items, allowsProcesses)
+        .filter((item) => !pushHidden(item))
+        .map((item) => nameOnly(item, "  "));
+      // 中身が全部メニューの外なら、小分類の見出しも出さない（画面と同じ）
+      if (itemLines.length > 0) groupLines.push(`  ▸ ${entry.label}`, ...itemLines);
     }
+    if (groupLines.length > 0) lines.push(`■ ${group.label}`, ...groupLines);
   }
+
+  const hidden =
+    byPlace.size > 0
+      ? [
+          "【詳細メニューに無い操作（入口ごと。目次はここまでで全部）】",
+          // 区切りは読点。「・」「／」は操作名の中に出る（「投稿用変換・コピー」「検索索引作成／更新」）
+          ...[...byPlace].map(([place, names]) => `・${place}：${names.join("、")}`),
+        ].join("\n")
+      : "";
 
   return [
     lines.join("\n"),
+    ...(hidden ? [hidden] : []),
     "",
     // メニューに無いもの（パネルの中のボタン・黙って働く振る舞い）も、
     // 名前だけは毎回渡す。ここが抜けると「そんな機能はありません」になる
@@ -637,7 +669,14 @@ function describeAction(action: ActionItem, indent: string): string {
   */
   const needs = prerequisiteNoteOf(action);
   const tail = needs ? ` ${needs}` : "";
-  return `${indent}  - ${action.label}${note}${mark}: ${detail}${tail}`;
+  /*
+    **詳細メニューから外した操作には、実際の入口を添える**（0.86.10 の担当の報告）。
+    束の見出しは「■ 作品執筆 → 原稿整備」のように外す前の分類のままなので、
+    添えないと、AIはその見出しを道順として写す
+  */
+  const entrance = entranceOf(action);
+  const where = entrance ? `（詳細メニューには無い。入口：${entrance.text}）` : "";
+  return `${indent}  - ${action.label}${note}${mark}${where}: ${detail}${tail}`;
 }
 
 /**

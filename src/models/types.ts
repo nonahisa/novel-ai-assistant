@@ -183,6 +183,15 @@ export interface WorkConfig {
    * `announce` と同じ理由で任意にしてある。
    */
   kind?: WorkKindKey;
+  /**
+   * 名前の候補の系統（設計書6.37.2。「ドイツ」「フランス」など）。**省略できる。**
+   * カタカナの作品で最初に決まった系統を覚え、次の候補もそれで揃える。
+   *
+   * 型は文字列にしてある——系統の並びは `prompts/nameSuggest.ts` が持ち、
+   * `models` はそちらを引けない。読むときに `core/nameOriginFit.ts` の
+   * `parseNameOrigin` で確かめ、知らない値は無かったことにする。
+   */
+  nameOrigin?: string;
 }
 
 /**

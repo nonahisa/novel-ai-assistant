@@ -30,6 +30,15 @@ import {
  * - 英字の名前は、AIが付けたひらがなの読みからカタカナに直す
  *   （読みが無ければ落とす）。**直したことは作者へ見せる**
  *
+ *
+ * ## カタカナの作品の系統は、作品ごとに覚える（作者の裁定、2026-09-25 昼）
+ *
+ * カタカナの作品では系統をAIに選ばせるので、**同じ作品でも回ごとに変わった**
+ * （gemma4:e4b で、ギルドの作品がフランス → ドイツ）。最初に決まった系統
+ * （AIが選んだもの、または作者が選んだもの）を作品の設定に覚え、次からは
+ * それ1つで出す。変えるときは作者が系統を選び直す（選んだものを覚え直す）。
+ * 覚える・読むのは `nameOriginStore.ts`、ここは**決め方だけ**を持つ。
+ *
  * VS Code API に依存しない（MCP の束からも使う）。
  */
 
@@ -46,6 +55,30 @@ export interface NameOriginPlan {
   basis: string;
   /** 作者が系統を選んだか */
   chosen: boolean;
+  /** この作品で覚えている系統を使ったか（`remembered` を渡して、それで決めた） */
+  remembered?: boolean;
+  /**
+   * 系統を覚える作品か。**カタカナの作品で、コードが1つに決められない**
+   * （AIに選ばせる）ときだけ true。漢字の作品・世界観に系統が書いてある作品は、
+   * 毎回同じ決め方で同じ系統になるので覚えなくてよい
+   */
+  fixable?: boolean;
+}
+
+/** 覚えている系統を使ったときの根拠（画面とAIへの指示の両方に出る） */
+export const REMEMBERED_ORIGIN_BASIS = "この作品で前に決まった系統";
+
+/**
+ * 設定ファイルに書かれた系統を読む。**知らない値は無かったことにする**
+ * （作品の種類 `kind` と同じ扱い。新しい版で系統が増えたあと古い版で開いても、
+ * 作品は開ける）。
+ */
+export function parseNameOrigin(raw: unknown): NameOrigin | undefined {
+  if (typeof raw !== "string") return undefined;
+  const value = raw.trim();
+  return (NAME_ORIGINS as readonly string[]).includes(value)
+    ? (value as NameOrigin)
+    : undefined;
 }
 
 /** 系統ごとの表記。朝鮮はどちらでも書かれるので決めない */
@@ -131,23 +164,79 @@ function scriptOfExistingName(name: string): NameScript | undefined {
  * 系統をどう決めるか。
  *
  * @param chosen 作者が選んだ系統（「指定なし」なら undefined）
+ * @param remembered この作品で覚えている系統（`nameOriginStore.ts`）。
+ *   **カタカナの作品で、コードが1つに決められないときだけ**使う。人物名や
+ *   世界観で決まる作品では、覚えているものより作品の実際を採る
  * @param existingNames 既にある**人物**の名前（付け替える本人は除く）
  * @param setting 世界観・舞台の節（`plot.md`）
  */
 export function planNameOrigin(input: {
   chosen?: NameOrigin;
+  remembered?: NameOrigin;
   existingNames: readonly string[];
   setting: string;
 }): NameOriginPlan {
+  // 作者が選んだときも、覚える作品かどうかは作品の実際から決める
+  const auto = planAutomatically(input.existingNames, input.setting);
+  const fixable = auto.script === "katakana" && auto.choices.length > 1;
+
   if (input.chosen) {
     return {
       choices: [input.chosen],
       script: scriptOfOrigin(input.chosen),
       basis: "作者が選んだ系統",
       chosen: true,
+      fixable,
     };
   }
+  if (fixable && input.remembered && auto.choices.includes(input.remembered)) {
+    return {
+      choices: [input.remembered],
+      script: "katakana",
+      basis: REMEMBERED_ORIGIN_BASIS,
+      chosen: false,
+      remembered: true,
+      fixable,
+    };
+  }
+  return { ...auto, fixable };
+}
 
+/**
+ * 系統を覚え直すなら、その系統（覚えなくてよければ undefined）。
+ *
+ * - 覚える作品（`fixable`）でなければ覚えない
+ * - **作者が選んだカタカナの系統は、覚えている系統を置き換える**
+ *   （作者の裁定「変えるときは作者が選び直す」）。和風・中華のような漢字の
+ *   系統は、カタカナの作品で1人だけ別の出自にしたい回なので覚えない
+ * - AIが選んだ系統は、**まだ何も覚えていないときだけ**、候補が1つでも残った
+ *   ときに覚える（全部落ちた回の名乗りは当てにならない）
+ *
+ * @param current いま覚えている系統
+ * @param fitted 揃えた系統（`fitNameCandidates` の `origin`）
+ * @param kept 残った候補の数
+ */
+export function originToRemember(
+  plan: NameOriginPlan,
+  current: NameOrigin | undefined,
+  fitted: NameOrigin | undefined,
+  kept: number
+): NameOrigin | undefined {
+  if (!plan.fixable || plan.remembered) return undefined;
+  const origin = plan.chosen ? plan.choices[0] : fitted;
+  if (!origin || scriptOfOrigin(origin) !== "katakana" || origin === current) {
+    return undefined;
+  }
+  if (!plan.chosen && (current !== undefined || kept === 0)) return undefined;
+  return origin;
+}
+
+/** 人物名と世界観だけから決める（作者の選択・覚えている系統を見ない） */
+function planAutomatically(
+  existingNames: readonly string[],
+  setting: string
+): NameOriginPlan {
+  const input = { existingNames, setting };
   let kanji = 0;
   let katakana = 0;
   for (const name of input.existingNames) {

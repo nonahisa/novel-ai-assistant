@@ -44,9 +44,14 @@ import {
 } from "../prompts/nameSuggest";
 import {
   fitNameCandidates,
+  originToRemember,
   planNameOrigin,
   type NameOriginPlan,
 } from "../core/nameOriginFit";
+import {
+  readRememberedNameOrigin,
+  rememberNameOrigin,
+} from "../core/nameOriginStore";
 import { buildNameCheckPanelHtml } from "../views/nameCheckPanelHtml";
 import { withCancellableProgress } from "../views/progress";
 import { reportAIError } from "./reportAIError";
@@ -344,7 +349,9 @@ export async function suggestNames(
   const resolved = await ensureConfigured(registry, "generate");
   if (!resolved) return;
 
-  const origin = await pickOrigin();
+  // この作品で覚えている系統（カタカナの作品。作者の裁定、2026-09-25 昼）
+  const remembered = await readRememberedNameOrigin(work);
+  const origin = await pickOrigin(undefined, remembered);
   if (origin === undefined) return;
 
   // **繋がるかを、費用の確認より先に確かめる**（設計書6.51）。
@@ -379,7 +386,8 @@ export async function suggestNames(
   const material = await collectSuggestMaterial(
     work,
     character,
-    origin === "auto" ? undefined : origin
+    origin === "auto" ? undefined : origin,
+    remembered
   );
   const plan = material.plan;
   let responseText: string | undefined;
@@ -477,6 +485,12 @@ export async function suggestNames(
   });
   const dropped = [...fitted.dropped, ...screened.dropped];
   const originNote = describeOriginPlan(plan, fitted.origin);
+  // 最初に決まった系統を覚える（次からはそれ1つで出す）
+  await rememberOrigin(
+    work,
+    originToRemember(plan, remembered, fitted.origin, screened.kept.length),
+    "名前の候補"
+  );
 
   void panel.webview.postMessage({
     type: "candidates",
@@ -543,7 +557,37 @@ export function describeOriginPlan(
   origin: NameOrigin | undefined
 ): string {
   const label = origin ?? plan.choices.join("・");
-  return `系統：${label}（${plan.basis}）`;
+  // 覚えている系統で出した回は、変え方も添える（黙って同じ系統に縛らない）
+  const change = plan.remembered ? "。変えるときは、系統を選び直してください" : "";
+  return `系統：${label}（${plan.basis}${change}）`;
+}
+
+/**
+ * 系統を作品の設定に覚える（`originToRemember` が決めたときだけ）。
+ *
+ * **覚えられなくても候補は出す**——次の回に系統が変わりうるだけなので、
+ * ログに残して続ける。プロットの名前の候補（P-45）も同じ口を使う。
+ */
+export async function rememberOrigin(
+  work: WorkEntry,
+  origin: NameOrigin | undefined,
+  label: string
+): Promise<void> {
+  if (!origin) return;
+  const result = await rememberNameOrigin(work, origin);
+  if (result.ok) {
+    logStep(`${label}：この作品の系統を「${origin}」と覚えました（次からはこの系統で揃えます）`);
+    return;
+  }
+  logFailure(`${label}：系統を覚えられませんでした`, {
+    作品: work.title,
+    系統: origin,
+    理由:
+      result.reason === "missing"
+        ? "作品の設定ファイル（.aiwriter/config.json）がありません"
+        : "作品の設定ファイルを読み書きできません",
+    詳細: result.detail ?? "",
+  });
 }
 
 /**
@@ -576,22 +620,30 @@ function logNameSuggestEnd(counts: {
  * **プロットの名前の候補（P-45）も同じ選び方を使う**（`plotNameSuggest.ts`）
  *
  * @param title 選ぶ画面の題。省略すると名前の点検のもの
+ * @param remembered この作品で覚えている系統。あれば「指定なし」の説明に出す
  */
 export async function pickOrigin(
-  title = `名前の系統（${NAME_SUGGEST_COUNT}件の候補を出します）`
+  title = `名前の系統（${NAME_SUGGEST_COUNT}件の候補を出します）`,
+  remembered?: NameOrigin
 ): Promise<NameOrigin | "auto" | undefined> {
   const items: Array<{
     label: string;
+    description?: string;
     detail?: string;
     origin: NameOrigin | "auto";
   }> = [
     {
       label: "$(wand) 指定なし（作品に合わせる）",
-      detail: "いまある人物名（漢字かカタカナか）と世界観から系統を決め、その1つに揃えます",
+      detail: remembered
+        ? `カタカナの名前の作品では、前に決まった「${remembered}」で揃えます。` +
+          "変えるときは、下から系統を選んでください（次からはその系統で揃えます）"
+        : "いまある人物名（漢字かカタカナか）と世界観から系統を決め、その1つに揃えます",
       origin: "auto",
     },
     ...NAME_ORIGINS.map((origin) => ({
       label: origin,
+      // どれが覚えている系統かを見せる（選び直すときの手がかり）
+      ...(origin === remembered ? { description: "この作品で覚えている系統" } : {}),
       origin: origin as NameOrigin,
     })),
   ];
@@ -618,7 +670,8 @@ interface SuggestMaterial {
 async function collectSuggestMaterial(
   work: WorkEntry,
   character: Character,
-  chosen: NameOrigin | undefined
+  chosen: NameOrigin | undefined,
+  remembered: NameOrigin | undefined
 ): Promise<SuggestMaterial> {
   const [characters, abilities, locations, organizations] = await Promise.all([
     new CharacterStore(work).loadAll(),
@@ -648,6 +701,7 @@ async function collectSuggestMaterial(
   */
   const plan = planNameOrigin({
     chosen,
+    remembered,
     existingNames: characters.characters
       .filter((entry) => entry.id !== character.id)
       .map((entry) => entry.name),

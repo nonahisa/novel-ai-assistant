@@ -51,8 +51,10 @@ import {
   type PlotFrameKey,
 } from "../core/plotDialogueStyles";
 import {
+  describeMovedNarrators,
   describePlotDialogueFailure,
   describeRetryNote,
+  settleNarrativePerson,
   validatePlotDialogueAnswer,
   validatePlotSummary,
   type PlotDialogueTurn,
@@ -200,6 +202,10 @@ import {
 } from "../core/abilityStore";
 import type { Chatter } from "../core/chatter";
 import { detectRunIntent, relatedChatRun } from "../core/chatIntent";
+import {
+  describeExecutionClaim,
+  findExecutionClaim,
+} from "../core/chatExecutionClaim";
 import { findTextRange } from "../core/textLocate";
 import { applyChatEdit, readChatEditTarget } from "./applyChatEdit";
 import {
@@ -2240,6 +2246,27 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
             truncatedOutputAdvice(outputLimit),
         });
       }
+      /*
+        **実行したふりの答えには、断りを添える**（0.86.10 の担当の報告。旧名で
+        頼まれた gemma4:26b が「診断を実行します」と答えた）。相談のAIは操作を
+        動かせない。P-21 で頼んでも守られないので、言い切りをコードで見る
+        （`core/chatExecutionClaim.ts`）。答えは書き換えない——何と言ったかは
+        作者に見えているほうがよい。
+        - **実行ボタンが付いた回は見ない**（押せば本当に始まる）
+        - **創作の相談は見ない**（「主人公が作戦を実行します」のような作品の話を、
+          操作の言い切りと取り違えない）。操作の相談か、作業を頼まれた回だけ
+      */
+      const claim =
+        !others.run && (guide.topic !== "craft" || intended)
+          ? findExecutionClaim(answer.reply)
+          : undefined;
+      if (claim) {
+        logStep(`相談: 実行したふりの答えに断りを添えた（${claim}）`);
+        this.postAll({
+          type: "note",
+          message: describeExecutionClaim(claim),
+        });
+      }
       // 答えを見せてから書く。書き込みで手間取っても、返事は先に読める
       if (edit) await this.applyStagedEdit(edit.id);
 
@@ -4074,11 +4101,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       return;
     }
 
-    dialogue.summary = result.value.contents;
+    // 人称に入った「誰の目か」は、見せる前に回す（見せたものと書くものを揃える）
+    const settled = settleNarrativePerson(result.value.contents);
+    dialogue.summary = settled.contents;
     this.postPlotAnswer(
       dialogue,
       describePlotSummary(
-        result.value.contents,
+        settled.contents,
         result.value.restored,
         result.value.marked,
         result.value.dropped
@@ -4086,6 +4115,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       authorText,
       [PLOT_WRITE_SUMMARY_OPTION, PLOT_CONTINUE_OPTION, PLOT_END_OPTION]
     );
+    if (settled.moved.length > 0) {
+      this.postAll({ type: "note", message: describeMovedNarrators(settled.moved) });
+    }
   }
 
   /**
@@ -4307,6 +4339,18 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     contents: ReadonlyMap<PlotDialogueSection, string>,
     note: string
   ): Promise<void> {
+    /*
+      **人称の項目には書き方の形だけを書く**（0.86.12 の担当の報告。e4b が
+      「誰の目で語るか」の答えを人称へ書いた）。誰かの部分はあらすじへ回し、
+      **書く前に作者へ示す**。決まったことをそのまま書く道も、まとめで書く道も
+      ここを通るので、ここで1度だけ通す（まとめは見せる前にも通してあり、
+      そのときは何も動かない）
+    */
+    const settled = settleNarrativePerson(contents);
+    if (settled.moved.length > 0) {
+      this.postAll({ type: "note", message: describeMovedNarrators(settled.moved) });
+    }
+    contents = settled.contents;
     const plot = await this.readPlot(dialogue.work);
     const plan = planSectionWrite(
       contents,
