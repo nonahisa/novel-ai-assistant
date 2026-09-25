@@ -932,10 +932,12 @@ describe("人物抽出フロー", () => {
     });
     state.generate.mockResolvedValue(successfulResult("灯"));
 
-    await expect(extractCharacters(work, testRegistry())).resolves.toBe(true);
+    await expect(extractCharacters(work, testRegistry())).resolves.toBe("done");
   });
 
-  test("確認で中止したらfalseを返す", async () => {
+  // 以前は真偽で false を返し、取りやめも「失敗しました」と内訳に出ていた
+  // （精査 R15）。取りやめは取りやめと返す
+  test("確認で中止したら取りやめ（cancelled）を返す", async () => {
     Object.assign(window, {
       showInformationMessage: vi.fn(async () => "中止"),
       showWarningMessage: vi.fn(async () => undefined),
@@ -948,7 +950,7 @@ describe("人物抽出フロー", () => {
       ),
     });
 
-    await expect(extractCharacters(work, testRegistry())).resolves.toBe(false);
+    await expect(extractCharacters(work, testRegistry())).resolves.toBe("cancelled");
     expect(state.generate).not.toHaveBeenCalled();
   });
 
@@ -2192,7 +2194,7 @@ describe("人物抽出フロー", () => {
       installWindow(undefined);
 
       await expect(extractCharacters(realWork, testRegistry())).resolves.toBe(
-        false
+        "cancelled"
       );
 
       expect(
@@ -2226,7 +2228,7 @@ describe("人物抽出フロー", () => {
         ),
       ]);
 
-      expect(outcome).toBe(true);
+      expect(outcome).toBe("done");
     });
 
     test("戻ったあとで押されたボタンも、ちゃんと効く", async () => {
