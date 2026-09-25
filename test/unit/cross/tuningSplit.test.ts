@@ -25,7 +25,8 @@ import {
  *
  * ここで守るのは4点である。
  *
- * 1. 選ぶ画面に3つ並び、**どれも待ち時間の目安を言う**こと
+ * 1. 選ぶ画面に4つ並び（2026-09-26 に「仕事に近い形で測る」を足した）、
+ *    **どれも待ち時間の目安を言う**こと
  * 2. 「読める長さだけ」では書ける長さを測らず、その逆も同じこと
  * 3. 「両方」は**これまでと同じ順**で測ること
  * 4. **測らなかったほうの台帳の値が残る**こと
@@ -211,8 +212,11 @@ beforeEach(async () => {
 });
 
 describe("何を測るかを選ぶ", () => {
-  test("3つ並び、どれも待ち時間の目安を言う", () => {
+  test("4つ並び、どれも待ち時間の目安を言う", () => {
+    // 「仕事に近い形で測る」がいちばん上（設計書6.49.9。回数が少なく、
+    // 待ち時間を実際の機能に近い形で決められる）
     expect(TUNING_SCOPE_CHOICES.map((choice) => choice.scope)).toEqual([
+      "work",
       "input",
       "output",
       "both",
@@ -223,14 +227,20 @@ describe("何を測るかを選ぶ", () => {
       expect(choice.detail).toMatch(/分|時間/);
       expect(choice.label.length).toBeGreaterThan(0);
     }
+    const byScope = (scope: string) =>
+      TUNING_SCOPE_CHOICES.find((choice) => choice.scope === scope)!;
+    // 仕事に近い形は、何を測るのか（待ち時間・1000字あたり・考えるモデルか）を言う
+    expect(byScope("work").detail).toContain("待ち時間");
+    expect(byScope("work").detail).toContain("1000字あたり");
+    expect(byScope("work").detail).toContain("考えるモデル");
     // 書ける長さのほうは、長くかかることと手元のAIだけであることを言う
-    const output = TUNING_SCOPE_CHOICES[1];
+    const output = byScope("output");
     expect(output.detail).toContain("1時間");
     expect(output.detail).toContain("手元のAI");
     // 読める長さのほうは、数分で終わると言う
-    expect(TUNING_SCOPE_CHOICES[0].detail).toContain("数分");
+    expect(byScope("input").detail).toContain("数分");
     // 両方は「これまでと同じ」であることを言う
-    expect(TUNING_SCOPE_CHOICES[2].detail).toContain("これまでと同じ");
+    expect(byScope("both").detail).toContain("これまでと同じ");
   });
 
   test("画面に出す言葉にMarkdownの記号を混ぜない", () => {
@@ -258,13 +268,17 @@ describe("何を測るかを選ぶ", () => {
   });
 
   test("選んだものが、そのまま範囲として返る", async () => {
-    const showQuickPick = vi.fn(async (given: unknown[]) => given[1]);
+    // 3つ目（0始まりで2）が「書ける長さだけ」
+    const showQuickPick = vi.fn(async (given: unknown[]) => given[2]);
     Object.assign(window, { showQuickPick });
 
     expect(await askTuningScope()).toBe("output");
   });
 
   test("どちらを走らせるかの判断", () => {
+    // 仕事に近い形は、読める長さも書ける長さも測らない（別の段の並びで測る）
+    expect(measuresInput("work")).toBe(false);
+    expect(measuresOutput("work")).toBe(false);
     expect(measuresInput("input")).toBe(true);
     expect(measuresOutput("input")).toBe(false);
     expect(measuresInput("output")).toBe(false);
@@ -312,6 +326,48 @@ describe("読める長さだけ測る", () => {
     expect(tuning.measuredOutputTokens).toBe(4321);
     expect(tuning.outputTokensPerSecond).toBe(12.5);
     expect(tuning.speedSource).toBe("tuning");
+  });
+
+  test("仕事に近い形で測ってあれば、待ち時間は×3でなくそちらから見立てる", async () => {
+    // 設計書6.49.9。合言葉の時間の3倍は、答えがほぼ空の測定からの当て推量
+    installSettings({});
+    await useMemoryTuningStore({
+      "ollama/gemma4:12b": { workFixedSeconds: 30, workSecondsPer1000Chars: 40 },
+    });
+    const showInformationMessage = answerWith("設定に反映");
+
+    await measureContext(registry, "default", undefined, "input");
+
+    // 30 + 40 × 20 = 830秒 → ×1.5 = 1,245 → 30秒刻みで 1,260秒（手元の上限1800以内）
+    expect(ledger().timeoutSeconds).toBe(1260);
+    expect(noticeText(showInformationMessage)).toContain(
+      "仕事に近い形の測定から見立てた値"
+    );
+  });
+
+  test("仕事に近い形で測っていなければ、これまでどおり×3", async () => {
+    installSettings({});
+    const showInformationMessage = answerWith("設定に反映");
+
+    await measureContext(registry, "default", undefined, "input");
+
+    expect(noticeText(showInformationMessage)).not.toContain("仕事に近い形");
+  });
+});
+
+describe("仕事に近い形で測る", () => {
+  test("合言葉も書ける量も頼まず、誤字脱字と同じ形の文だけを送る", async () => {
+    installSettings({});
+    answerWith("そのままにする");
+
+    await measureContext(registry, "default", undefined, "work");
+
+    expect(inputCalls()).toEqual([]);
+    expect(outputCalls()).toEqual([]);
+    expect(state.calls.length).toBeGreaterThan(0);
+    for (const call of state.calls) {
+      expect(call.userPrompt).toContain("誤字・脱字・変換ミス");
+    }
   });
 });
 

@@ -24,6 +24,31 @@
  */
 
 /**
+ * 1回の呼び出しにかかる時間の見込み（AIチューニングの「仕事に近い形の
+ * 測定」から。設計書6.49.9）。
+ *
+ * **所要時間 ＝ 1回ごとに決まってかかるぶん ＋ 本文1000字あたりの秒数 × 字数/1000。**
+ * 本文の字数で数える（指示の字数は含めない）。指示は毎回同じなので、
+ * その読み込みと答えの外枠は「決まってかかるぶん」に入る。
+ *
+ * **ここに置くのは、時間の見積もりの式を1か所にするため**（測る側の
+ * `core/tuningStages.ts` もここから引く。逆向きに引くと、段の一覧 →
+ * チャンクの段 → この見積もり → 段の一覧、と輪になる）。
+ */
+export interface WorkRate {
+  /** 1回ごとに決まってかかる秒数 */
+  readonly fixedSeconds: number;
+  /** 本文1000字あたりの秒数 */
+  readonly secondsPer1000Chars: number;
+}
+
+/** その字数の本文を1回送ると、何秒かかる見込みか */
+export function predictWorkSeconds(rate: WorkRate, bodyChars: number): number {
+  const chars = Number.isFinite(bodyChars) && bodyChars > 0 ? bodyChars : 0;
+  return rate.fixedSeconds + (rate.secondsPer1000Chars * chars) / 1000;
+}
+
+/**
  * 残りの見当を出し始めるまでの件数。
  *
  * **1件では、たまたま速かった回と区別が付かない。** 立ち上がりの遅れ
@@ -125,7 +150,7 @@ export function estimateRunMs(
  * - `partial`……読み込みの速さは実測だが、書く側は決め打ちの秒数で埋めた
  * - `fixed`……速さを測っていないので、機能ごとの決め打ちの秒数だけで出した
  */
-export type CallTimeSource = "measured" | "partial" | "fixed";
+export type CallTimeSource = "measured" | "partial" | "fixed" | "tuning";
 
 /**
  * 書く側で、何を測っていないか（`partial`／`fixed` のときだけ持つ）。
@@ -296,6 +321,7 @@ export function describeCallTimeEstimate(estimate: CallTimeEstimate): string {
  */
 function callTimeSourceLabel(estimate: CallTimeEstimate): string {
   if (estimate.source === "measured") return "これまでの実測から";
+  if (estimate.source === "tuning") return WORK_RATE_LABEL;
   const missing =
     estimate.unmeasured === "amount"
       ? "1回に書く量はまだ測っていないので"
@@ -333,15 +359,65 @@ export function mergeCallTimeEstimates(
       ? "fixed"
       : "partial";
   if (source === "measured") return { ms, source };
+  /*
+    **実測と「1000字あたり何秒」だけなら、弱いほうの名乗りにする**
+    （設計書6.49.9）。決め打ちは混ざっていないので「決め打ちの見込み」とは
+    言わない——言うと、測った値を否定することになる。
+  */
+  if (
+    estimates.every(
+      (estimate) => estimate.source === "measured" || estimate.source === "tuning"
+    )
+  ) {
+    return { ms, source: "tuning" };
+  }
   const kinds = new Set(
     estimates
-      .filter((estimate) => estimate.source !== "measured")
+      .filter(
+        (estimate) => estimate.source !== "measured" && estimate.source !== "tuning"
+      )
       .map((estimate) => estimate.unmeasured ?? "both")
   );
   const unmeasured: CallTimeUnmeasured =
     kinds.size === 1 ? [...kinds][0] : "both";
   return { ms, source, unmeasured };
 }
+
+/**
+ * **AIチューニングの「1000字あたり何秒」から**見積もる（設計書6.49.9）。
+ *
+ * 1回ごとに「決まってかかる秒数 ＋ 1000字あたりの秒数 × 字数/1000」を
+ * 回数ぶん足す。式は `core/tuningStages.ts` の `predictWorkSeconds` の1か所。
+ *
+ * **使うのは、ほかに実測の見積もりが無いときだけ**（呼び出し側が決める。
+ * `ai/runTimeEstimate.ts`）。この速さは誤字脱字と同じ形の短い文で測った
+ * もので、その機能のこの機械での普段の量（平均）のほうが当たる。無いときの
+ * 決め打ちや同梱の最大よりは、この機械で実際に書かせた時間のほうが当たる。
+ *
+ * @returns 見積もり。字数が1件も無ければ undefined
+ */
+export function estimateCallsTimeFromWorkRate(
+  inputChars: readonly number[],
+  rate: WorkRate
+): CallTimeEstimate | undefined {
+  if (inputChars.length === 0) return undefined;
+  const seconds = inputChars.reduce(
+    (total, chars) => total + predictWorkSeconds(rate, chars),
+    0
+  );
+  if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
+  return { ms: seconds * 1000, source: "tuning" };
+}
+
+/**
+ * 「1000字あたり何秒」から出した見積もりの名乗り。
+ *
+ * **どう測った値かを言う**——誤字脱字と同じ形の短い文で測ったもので、
+ * ほかの機能では答えの量が違う。そこを隠すと、抽出のように答えの長い
+ * 機能で短めに出た数字を、作者が実測と同じ重さで読む。
+ */
+const WORK_RATE_LABEL =
+  "AIチューニングで測った1000字あたりの秒数から。誤字脱字と同じ形で測った目安です";
 
 function positiveOrUndefined(value: number | undefined): number | undefined {
   return value !== undefined && Number.isFinite(value) && value > 0
@@ -362,7 +438,12 @@ export type RunTimeEstimateBasis =
   /** この機械の実測の**最大**。実測ではあるが、必ず多めに出る */
   | "max"
   /** 同梱の表の**最大**（`core/bundledTuning.ts`）。この機械では測っていない */
-  | "bundled-max";
+  | "bundled-max"
+  /**
+   * AIチューニングの「1000字あたり何秒」（設計書6.49.9）。この機械の実測だが、
+   * 誤字脱字と同じ形の短い文で測ったもの
+   */
+  | "tuning";
 
 /**
  * 押す前の見積もりを、**出どころつきで**言う（実装ルール6の例外条件3）。
@@ -455,4 +536,6 @@ const RUN_TIME_BASIS_LABEL: Readonly<Record<RunTimeEstimateBasis, string>> = {
   average: "これまでの実測から",
   max: "これまでの実測の最大から。多めに見ています",
   "bundled-max": "同梱の目安から。多めに見ています",
+  // 確認画面の目安（`describeCallTimeEstimate`）と同じ言い方にする
+  tuning: WORK_RATE_LABEL,
 };

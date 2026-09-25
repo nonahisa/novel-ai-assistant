@@ -19,6 +19,7 @@ import {
   resolveOutputTokensForSend,
 } from "./outputLimit";
 import { recordFeatureOutputTokens } from "../core/featureOutputTokens";
+import { TUNING_WORK_FEATURE } from "../core/tuningStages";
 import { endsInWhitespaceRunaway } from "../core/truncatedResponse";
 import { logStep } from "../core/logger";
 import { AiQueueAbortError, acquireCall } from "../core/aiSequence";
@@ -699,6 +700,9 @@ export class MeteredProvider implements AIProvider {
     const feature = params.meta?.feature;
     if (feature === undefined || feature.length === 0) return;
     if (skipsContextGuard(feature)) return;
+    // AIチューニングの仕事に近い形の測定（同梱の短い文への答え）も、
+    // どの機能の普段の量でもない（`core/tuningStages.ts` に理由）
+    if (feature === TUNING_WORK_FEATURE) return;
     /*
       **空白だけの行で埋まった回は、量も印も残さない**（残課題8）。
 

@@ -2,11 +2,17 @@ import {
   describeRunTimeEstimate,
   describeRunTimeRange,
   estimateCallsTime,
+  estimateCallsTimeFromWorkRate,
   inputReadMs,
   type CallTimeEstimate,
   type RunTimeEstimateBasis,
+  type WorkRate,
 } from "../core/etaEstimate";
-import { modelTuning } from "../core/modelTuning";
+import {
+  modelTuning,
+  unsuppressedThinkingTokens,
+  workRateOf,
+} from "../core/modelTuning";
 import { resolveTokensPerChar } from "../core/sizeBudget";
 import {
   MIN_FEATURE_OUTPUT_SAMPLES,
@@ -67,6 +73,30 @@ export function estimateRunTimeText(params: {
     params.inputChars !== undefined && params.inputChars.length === params.count
       ? params.inputChars
       : undefined;
+
+  /*
+    **普段の量（平均）がまだ無いときは、AIチューニングの「1000字あたり
+    何秒」を使う**（設計書6.49.9）。
+
+    下の読み込みの下限や同梱の最大より、この機械でこのモデルに誤字脱字と
+    同じ形の答えを実際に書かせた時間のほうが当たる。平均が貯まれば
+    そちらが勝つ（その機能のこの機械での普段の量なので）。
+  */
+  if (
+    speeds.outputTokensAverage === undefined &&
+    inputs !== undefined &&
+    speeds.workRate !== undefined
+  ) {
+    const tuned = estimateCallsTimeFromWorkRate(inputs, speeds.workRate);
+    if (tuned !== undefined) {
+      return describeRunTimeEstimate({
+        count: params.count,
+        unit,
+        ms: tuned.ms,
+        basis: "tuning",
+      });
+    }
+  }
 
   /*
     **書く量の平均がまだ無く、読み込みだけが実測で分かるときは、最大を
@@ -150,6 +180,19 @@ export function estimateCallsTimeFor(params: {
   readonly fallbackSecondsPerCall: number;
 }): CallTimeEstimate | undefined {
   const speeds = lookupCallSpeeds(params.providerId, params.model, params.feature);
+  /*
+    **書く側が測れていないときは、AIチューニングの「1000字あたり何秒」を
+    先に見る**（設計書6.49.9）。決め打ちの秒数（`fallbackSecondsPerCall`）へ
+    落ちるより、この機械で実際に書かせた時間のほうが当たる。書く量の平均と
+    書き出しの速さが揃っていれば、そちら（その機能の普段の量）が勝つ。
+  */
+  const outputMeasured =
+    speeds.outputTokensAverage !== undefined &&
+    speeds.outputTokensPerSecond !== undefined;
+  if (!outputMeasured && speeds.workRate !== undefined) {
+    const tuned = estimateCallsTimeFromWorkRate(params.inputChars, speeds.workRate);
+    if (tuned !== undefined) return tuned;
+  }
   return estimateCallsTime({
     inputChars: params.inputChars,
     tokensPerChar: speeds.tokensPerChar,
@@ -186,6 +229,8 @@ export interface CallSpeeds {
   readonly outputTokensAverage?: number;
   readonly tokensPerChar: number;
   readonly basis: RunTimeEstimateBasis;
+  /** AIチューニングの「1000字あたり何秒」（設計書6.49.9）。測っていなければ無い */
+  readonly workRate?: WorkRate;
 }
 
 export function lookupCallSpeeds(
@@ -218,10 +263,19 @@ export function lookupCallSpeeds(
       : output?.bundled === true
         ? "bundled-max"
         : "max";
+  /*
+    **止められない思考のぶんを、同梱の最大に足す**（設計書6.49.9）。同梱の
+    表は別のモデルで測った答えの量で、このモデルが答えの前に考えるぶんは
+    入っていない。この機械でこのモデルの実測（平均・最大）には思考が
+    もう入っているので、そちらには足さない（二重に数える）。
+  */
+  const thinking =
+    output?.bundled === true ? unsuppressedThinkingTokens(tuning) : 0;
   return {
     inputTokensPerSecond: tuning?.inputTokensPerSecond,
     outputTokensPerSecond: tuning?.outputTokensPerSecond,
-    outputTokensPerCall: average ?? max,
+    outputTokensPerCall:
+      average ?? (max !== undefined ? max + thinking : undefined),
     outputTokensAverage: average,
     /*
       **字→トークンは、チャンクを決めるのと同じ換算を使う**（設計書6.77）。
@@ -231,5 +285,6 @@ export function lookupCallSpeeds(
     */
     tokensPerChar: resolveTokensPerChar(tuning),
     basis,
+    workRate: workRateOf(tuning),
   };
 }

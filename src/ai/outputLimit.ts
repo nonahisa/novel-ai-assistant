@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { OUTPUT_RESERVE_TOKENS } from "./contextGuard";
-import { modelTuning } from "../core/modelTuning";
+import { modelTuning, unsuppressedThinkingTokens } from "../core/modelTuning";
 import {
   featureOutputCeiling,
   featureOutputTuning,
@@ -92,7 +92,8 @@ export function resolveOutputTokensForPlanning(
   feature?: string
 ): number {
   const configured = resolveMaxOutputTokens();
-  const measured = modelTuning(providerId, model)?.measuredOutputTokens;
+  const tuning = modelTuning(providerId, model);
+  const measured = tuning?.measuredOutputTokens;
   /*
     **機能ごとの実測**（`core/featureOutputTokens.ts`。設計書6.77の第3段）。
 
@@ -100,7 +101,18 @@ export function resolveOutputTokensForPlanning(
     **同じ呼び出しについて別々の値**を持っていた。実測があるなら、
     計画も関所も実送信の上限もそこから引く——それが割れの元を断つ。
   */
-  const expected = featureOutputCeiling(feature, providerId, model);
+  const expected = withThinkingOverhead(
+    featureOutputCeiling(feature, providerId, model),
+    feature,
+    providerId,
+    model
+  );
+  /*
+    **止められない思考のぶんを、当て推量の見込みにも足す**（設計書6.49.9）。
+    機能の実測も書ける量の実測も無いときの 8,192 は、思考を考えに入れて
+    いない数字である。
+  */
+  const reserve = OUTPUT_RESERVE_TOKENS + unsuppressedThinkingTokens(tuning);
   /*
     **2つの実測は、意味が違うので両方を見る。**
 
@@ -115,11 +127,34 @@ export function resolveOutputTokensForPlanning(
   const ceiling =
     expected !== undefined
       ? Math.min(expected, measured ?? expected)
-      : (measured ?? OUTPUT_RESERVE_TOKENS);
+      : (measured ?? reserve);
   if (expected !== undefined) {
     noteFeatureCeiling(feature, providerId, model, expected);
   }
   return Math.min(configured, ceiling);
+}
+
+/**
+ * 機能の見込みに、**止められない思考のぶん**を足す（設計書6.49.9）。
+ *
+ * **足すのは、見込みが同梱の表から来たときだけ。** 同梱の表は作者の機械の
+ * 別のモデルで測った「答えの量」で、このモデルが答えの前に考えるぶんは
+ * 入っていない——そのまま上限として送ると、考える途中で上限を使い切って
+ * 答えが空になる（比べ 2026-09-25〜26 の Qwen3.6・Kimi がそれだった）。
+ * **このモデル自身の実測から出た見込みには足さない。** 実測の出力トークン数
+ * には思考のぶんがもう入っているので、足すと二重に数える。
+ */
+function withThinkingOverhead(
+  expected: number | undefined,
+  feature: string | undefined,
+  providerId: string,
+  model: string
+): number | undefined {
+  if (expected === undefined) return undefined;
+  if (featureOutputTuning(feature, providerId, model)?.bundled !== true) {
+    return expected;
+  }
+  return expected + unsuppressedThinkingTokens(modelTuning(providerId, model));
 }
 
 /**
@@ -240,7 +275,12 @@ export function resolveOutputLimitForSend(
     だから見込みには余裕を上乗せしてあり、それでも足りなかったときは
     切り詰められたことが台帳へ残って、**次の回から設定値へ戻る。**
   */
-  const expected = featureOutputCeiling(feature, providerId, model);
+  const expected = withThinkingOverhead(
+    featureOutputCeiling(feature, providerId, model),
+    feature,
+    providerId,
+    model
+  );
 
   // **いちばん小さい制約が効く。** 出どころを一緒に持ち回るのは、
   // 切り詰めの案内で同じ判定をもう一度書かないため

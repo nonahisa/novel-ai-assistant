@@ -16,6 +16,11 @@
 
 /** どこまで測るか */
 export type TuningScope =
+  /**
+   * 仕事に近い形で、待ち時間・1000字あたりの秒数・考えるモデルか・
+   * （さくら・ChatGPT は）読める長さの申告を測る（数回。設計書6.49.9）
+   */
+  | "work"
   /** 読める長さと待ち時間だけ（数分） */
   | "input"
   /** 1回に書ける長さだけ（長い。手元のAIのみ） */
@@ -39,6 +44,16 @@ export interface TuningScopeChoice {
 }
 
 export const TUNING_SCOPE_CHOICES: readonly TuningScopeChoice[] = [
+  /*
+    **いちばん上に置く**（設計書6.49.9）。回数が少なく（数回）、待ち時間を
+    実際の機能に近い形で決められるので、最初に押すのはこれでよい。
+  */
+  {
+    scope: "work",
+    label: "仕事に近い形で測る",
+    detail:
+      "数分で終わります（遅いモデルでは十数分）。誤字脱字と同じ形の短い文を数回送り、待ち時間と1000字あたりの秒数、考えるモデルかどうかを測ります。",
+  },
   {
     scope: "input",
     label: "読める長さだけ測る",
@@ -61,12 +76,12 @@ export const TUNING_SCOPE_CHOICES: readonly TuningScopeChoice[] = [
 
 /** その回に、読める長さ（と待ち時間）を測るか */
 export function measuresInput(scope: TuningScope): boolean {
-  return scope !== "output";
+  return scope === "input" || scope === "both";
 }
 
 /** その回に、1回に書ける長さを測るか */
 export function measuresOutput(scope: TuningScope): boolean {
-  return scope !== "input";
+  return scope === "output" || scope === "both";
 }
 
 /**

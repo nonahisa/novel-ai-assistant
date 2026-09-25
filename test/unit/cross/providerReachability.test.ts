@@ -33,6 +33,12 @@ const ALLOWED_WITHOUT_REACHABILITY = new Map<string, string>([
     "解決済みのプロバイダを引数で受け取る部品。AIを選ぶ入口は呼び出し側（提案パネル）が持つ",
   ],
   [
+    "tuningStageRunners.ts",
+    // AIチューニングの「仕事に近い形で測る」（設計書6.49.9）。入口の
+    // `measureContext.ts` が `confirmProviderReachable` を通してから渡す
+    "解決済みのプロバイダを引数で受け取る部品。AIを選ぶ入口と起こす導線は呼び出し側（measureContext.ts）が持つ",
+  ],
+  [
     "chatterComment.ts",
     // 独り言（設計書6.21.4）。**作者が頼んでいない発言のために**
     // 「AIを起動しますか」とは聞けない。繋がらなければ黙る

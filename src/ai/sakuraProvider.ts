@@ -473,8 +473,17 @@ export class SakuraProvider implements ApiKeyProvider {
       throw new AIError("AIから空の応答が返りました。", "bad_response", detail);
     }
 
+    /*
+      **考えた中身を、思考の欄として返す**（設計書6.49.9）。AIチューニングが
+      「思考を止める指定が効いたか」を見分けるのに要る。これまでは捨てて
+      いたので、止まっていないモデルも止まったように見えた。答え（`text`）
+      には混ぜない。
+    */
+    const reasoning =
+      choice.message?.reasoning ?? choice.message?.reasoning_content ?? "";
     return {
       text,
+      ...(reasoning.length > 0 ? { thinking: reasoning } : {}),
       usage: {
         inputTokens: response.usage?.prompt_tokens ?? 0,
         outputTokens: response.usage?.completion_tokens ?? 0,

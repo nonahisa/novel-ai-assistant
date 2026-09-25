@@ -15,6 +15,8 @@ import {
 // 住んでいるので、モデルの表を読むときに読み飛ばす必要がある
 import { FEATURE_OUTPUT_KEY_PREFIX } from "./featureOutputTokens";
 import { MIN_CHARS_PER_TOKEN_SAMPLES } from "./sizeBudget";
+import { WORK_REFERENCE_CHARS, WORK_TIME_MARGIN } from "./tuningStages";
+import { predictWorkSeconds, type WorkRate } from "./etaEstimate";
 // **書けたかどうかの札は、ここから配る。** 台帳を使う側（測定・普段の
 // 呼び出し）は `modelTuning.ts` しか見ないので、置き場のファイル名まで
 // 知らせずに済ませる
@@ -262,6 +264,78 @@ export interface ModelTuning {
   readonly speedMeasuredAt?: string;
   /** 測った時刻（ISO 8601）。古い測定だと分かるように残す */
   readonly measuredAt?: string;
+  /**
+   * 本文1000字あたりの秒数（小数1桁。設計書6.49.9）。
+   *
+   * **誤字脱字と同じ形で、同梱の文を読ませて測る**（`core/tuningStages.ts`
+   * の `fitWorkRate`）。合言葉で測った時間の3倍（6.49.3）は、答えがほぼ
+   * 空の測定から実際の機能の時間を当てていた。こちらは実際と同じ種類の
+   * 答えを書かせた時間である。
+   *
+   * **確認なしで保存する参考値**（速さ・字/トークンと同じ流儀）。使い道は
+   * 2つ——押す前の所要時間の見込み（`ai/runTimeEstimate.ts`）と、待ち時間の
+   * 見立て（`recommendTimeoutFromWorkRate`。こちらは作者が「反映」を押した
+   * ときだけ台帳の待ち時間になる）。
+   */
+  readonly workSecondsPer1000Chars?: number;
+  /**
+   * 1回ごとに決まってかかる秒数（小数1桁）。**0もありうる**——短い回と
+   * 長い回の差が測りの揺れに埋もれたとき、長い回の時間をすべて字数の
+   * せいにして0にする（`fitWorkRate`。長めに出る側へ倒す）。
+   */
+  readonly workFixedSeconds?: number;
+  /** 上の2つを測った時刻（ISO 8601）。速さ（`speedMeasuredAt`）とは別に動く */
+  readonly workMeasuredAt?: string;
+  /**
+   * その時間を測ったとき、**測るモデルのほかのモデルも Ollama に載っていた**か
+   * （設計書6.49.9。Ollama のときだけ入る）。
+   *
+   * 前に使ったモデルが居残っていると、測るモデルが GPU に入りきらずに遅く
+   * 出る（別の担当の測り直しで、gemma4:12b が124秒→765秒になった）。
+   * **作者の機械のモデルを勝手に下ろさない**ので、下ろさずに印を付ける。
+   * `true` の測定は、時間が長めに出ているかもしれない。
+   */
+  readonly workOtherModelsLoaded?: boolean;
+  /**
+   * その時間を測ったとき、**測るモデルが GPU と CPU に分けて載っていた**か
+   * （Ollama の `/api/ps` の `size` が `size_vram` より大きい。`core/gpuLoad.ts`）。
+   */
+  readonly workSplitAcrossCpu?: boolean;
+  /**
+   * 思考を止める指定を**送らない**とき、思考が出たか（設計書6.49.9）。
+   *
+   * **`false` も読む**——「考えないモデルだと確かめた」という中身である。
+   */
+  readonly thinkingSeen?: boolean;
+  /**
+   * 思考を止める指定（Ollama の `think: false`、さくらの
+   * `chat_template_kwargs`）が**効いたか**。考えるモデルのときだけ入る。
+   *
+   * **覚えるのは、返ってきた応答で見えたことだけ**（規則5）。止める指定を
+   * 送った回が失敗しても「効かない」とは書かない。
+   */
+  readonly thinkingOffWorks?: boolean;
+  /**
+   * 止められないモデルが、1回ごとに思考へ使うと見るトークン数。
+   *
+   * **出力の見込みに足す**（`unsuppressedThinkingTokens`）——ただし、
+   * そのモデル自身の実測から出た見込みには足さない。実測の出力トークン数には
+   * 思考のぶんがもう入っているので、足すと二重に数える。
+   */
+  readonly thinkingOverheadTokens?: number;
+  /** 思考を見分けた時刻（ISO 8601） */
+  readonly thinkingMeasuredAt?: string;
+  /**
+   * `contextWindow` を**サーバー自身が述べた**ときの、その文の写し
+   * （設計書6.49.9。同梱の表の `contextDeclared` と同じ意味）。
+   *
+   * 断られた文から読み、その長さに収まる要求が通ったことを確かめたうえで、
+   * 作者が「反映」を押したときだけ入る。どこから来た数字かを後から辿れる
+   * ように、文をそのまま持つ。
+   */
+  readonly contextDeclared?: string;
+  /** その文を受け取った時刻（ISO 8601） */
+  readonly contextDeclaredAt?: string;
   /**
    * この行に**同梱の初期値が混ざっている**か（`core/bundledTuning.ts`）。
    *
@@ -526,6 +600,10 @@ const TIMEOUT_STEP_SECONDS = 30;
  * **測定の出力は合言葉2つだけで、極端に短い。** 生成にかかる時間の
  * 大半は出力側なので、入力の処理時間しか測っていないこの数字を
  * そのまま使うと、実際の機能では必ず足りない。
+ *
+ * **仕事に近い形で測ってあるモデルでは使わない**（2026-09-26。
+ * `recommendTimeoutFromWorkRate` に理由）。これは測っていないモデルの
+ * ための、当て推量の残りである。
  */
 const RESPONSE_TIME_MARGIN = 3;
 
@@ -631,6 +709,31 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
       (method) => method === entry.contextMeasuredBy
     );
     const measuredAt = nonEmptyText(entry.measuredAt);
+    /*
+      **仕事に近い形の測定（設計書6.49.9）。** 1000字あたりの秒数は0を
+      読まない（0秒では見込みにならない）が、固定の秒数は0を読む
+      （`fitWorkRate` がわざと0にすることがある）。
+    */
+    const workSecondsPer1000Chars = positiveNumber(entry.workSecondsPer1000Chars);
+    const workFixedSeconds = nonNegativeNumber(entry.workFixedSeconds);
+    const workMeasuredAt = nonEmptyText(entry.workMeasuredAt);
+    const workOtherModelsLoaded =
+      typeof entry.workOtherModelsLoaded === "boolean"
+        ? entry.workOtherModelsLoaded
+        : undefined;
+    const workSplitAcrossCpu =
+      typeof entry.workSplitAcrossCpu === "boolean" ? entry.workSplitAcrossCpu : undefined;
+    // **`false` も読む**（天井の印と同じ理由。確かめた中身である）
+    const thinkingSeen =
+      typeof entry.thinkingSeen === "boolean" ? entry.thinkingSeen : undefined;
+    const thinkingOffWorks =
+      typeof entry.thinkingOffWorks === "boolean"
+        ? entry.thinkingOffWorks
+        : undefined;
+    const thinkingOverheadTokens = positiveNumber(entry.thinkingOverheadTokens);
+    const thinkingMeasuredAt = nonEmptyText(entry.thinkingMeasuredAt);
+    const contextDeclared = nonEmptyText(entry.contextDeclared);
+    const contextDeclaredAt = nonEmptyText(entry.contextDeclaredAt);
 
     const tuning: ModelTuning = {
       // **持っている欄だけを置く。** `undefined` を常に置くと、書き戻した
@@ -651,6 +754,17 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
       ...(contextLimitedByRate !== undefined ? { contextLimitedByRate } : {}),
       ...(contextMeasuredBy !== undefined ? { contextMeasuredBy } : {}),
       ...(measuredAt !== undefined ? { measuredAt } : {}),
+      ...(workSecondsPer1000Chars !== undefined ? { workSecondsPer1000Chars } : {}),
+      ...(workFixedSeconds !== undefined ? { workFixedSeconds } : {}),
+      ...(workMeasuredAt !== undefined ? { workMeasuredAt } : {}),
+      ...(workOtherModelsLoaded !== undefined ? { workOtherModelsLoaded } : {}),
+      ...(workSplitAcrossCpu !== undefined ? { workSplitAcrossCpu } : {}),
+      ...(thinkingSeen !== undefined ? { thinkingSeen } : {}),
+      ...(thinkingOffWorks !== undefined ? { thinkingOffWorks } : {}),
+      ...(thinkingOverheadTokens !== undefined ? { thinkingOverheadTokens } : {}),
+      ...(thinkingMeasuredAt !== undefined ? { thinkingMeasuredAt } : {}),
+      ...(contextDeclared !== undefined ? { contextDeclared } : {}),
+      ...(contextDeclaredAt !== undefined ? { contextDeclaredAt } : {}),
     };
     // 何も読めなかった項目は、持っていても引く値が無い
     if (Object.keys(tuning).length === 0) continue;
@@ -668,6 +782,13 @@ export function parseModelTuning(raw: unknown): Map<string, ModelTuning> {
  */
 function positiveNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
+}
+
+/** 0以上の有限数のときだけ返す（0に意味がある欄のため） */
+function nonNegativeNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
     ? value
     : undefined;
 }
@@ -704,6 +825,62 @@ export function recommendTimeoutSeconds(
   const raw = longestResponseSeconds * RESPONSE_TIME_MARGIN;
   const rounded = Math.ceil(raw / TIMEOUT_STEP_SECONDS) * TIMEOUT_STEP_SECONDS;
   return Math.min(ceilingSeconds, Math.max(MIN_TIMEOUT_SECONDS, rounded));
+}
+
+/**
+ * **仕事に近い形の測定**から、設定してよい待ち時間を決める（設計書6.49.9）。
+ *
+ * 自動で決めるチャンクのいちばん大きい段（`WORK_REFERENCE_CHARS`＝20,000字）を
+ * 1回送ったときの見込みに、余白（`WORK_TIME_MARGIN`＝1.5倍）を掛ける。
+ * 下限・上限・30秒刻みは `recommendTimeoutSeconds` と同じ。
+ *
+ * **×3（`RESPONSE_TIME_MARGIN`）を置き換える理由**：×3 は、答えが合言葉
+ * 2つしかない測定から「実際の機能は答えが長いぶん遅い」を当て推量で
+ * 見込む倍率だった。こちらは誤字脱字と同じ形の答えを実際に書かせた時間
+ * なので、答えの長さのぶんは既に測りの中にある。モデルごとの「答えを
+ * 書く速さの違い」（GPU と CPU に分けて載るモデルは書き出しが遅い）も、
+ * 当て推量でなく実測で入る。
+ *
+ * @param ceilingSeconds プロバイダの上限（`maxTimeoutSeconds(providerId)`）
+ */
+export function recommendTimeoutFromWorkRate(
+  rate: WorkRate,
+  ceilingSeconds: number = MAX_TIMEOUT_SECONDS
+): number {
+  const predicted = predictWorkSeconds(rate, WORK_REFERENCE_CHARS);
+  if (!Number.isFinite(predicted) || predicted <= 0) return MIN_TIMEOUT_SECONDS;
+  const rounded =
+    Math.ceil((predicted * WORK_TIME_MARGIN) / TIMEOUT_STEP_SECONDS) *
+    TIMEOUT_STEP_SECONDS;
+  return Math.min(ceilingSeconds, Math.max(MIN_TIMEOUT_SECONDS, rounded));
+}
+
+/**
+ * 台帳の「仕事に近い形の測定」。測っていなければ undefined。
+ *
+ * **同梱は無い**——機械の地力で決まる値なので、作者自身の実測だけが入る
+ * （規則6の例外の外。出力の速さと同じ）。
+ */
+export function workRateOf(tuning: ModelTuning | undefined): WorkRate | undefined {
+  const perK = tuning?.workSecondsPer1000Chars;
+  if (perK === undefined) return undefined;
+  return { fixedSeconds: tuning?.workFixedSeconds ?? 0, secondsPer1000Chars: perK };
+}
+
+/**
+ * **止められない思考**のぶん、出力の見込みへ足すトークン数（設計書6.49.9）。
+ *
+ * 思考を止める指定が効かないと確かめたモデルだけ。効くモデル・考えない
+ * モデル・まだ見分けていないモデルは0（これまでどおり）。
+ *
+ * **足してよいのは、そのモデル自身の実測から出ていない見込みだけ**
+ * （同梱の表や、当て推量の既定）。モデル自身の出力の実測には思考のぶんが
+ * もう入っているので、足すと二重に数える——呼び出し側
+ * （`ai/outputLimit.ts`・`ai/runTimeEstimate.ts`）がそこを分ける。
+ */
+export function unsuppressedThinkingTokens(tuning: ModelTuning | undefined): number {
+  if (tuning?.thinkingOffWorks !== false) return 0;
+  return tuning.thinkingOverheadTokens ?? 0;
 }
 
 const CONFIG_SECTION = "novelai";

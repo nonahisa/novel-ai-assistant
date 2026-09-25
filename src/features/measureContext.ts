@@ -63,13 +63,15 @@ import {
   modelTuningKey,
   modelTuningRaw,
   raiseTimeoutCeilingForProbe,
+  recommendTimeoutFromWorkRate,
   recommendTimeoutSeconds,
   resolveTimeoutSeconds,
   saveModelTuning,
+  workRateOf,
   type ModelTuning,
-  type TuningWriteOutcome,
 } from "../core/modelTuning";
 import { TUNING_STORE_FILE } from "../core/modelTuningStore";
+import { parseDeclaredContextLimit } from "../core/tuningStages";
 import { outputTokensPerSecond } from "../core/tuningStats";
 import {
   measuresOutput,
@@ -79,6 +81,8 @@ import {
 import { cancelItem } from "../views/dialogs";
 import { withCancellableProgress } from "../views/progress";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
+import { runWorkTuning } from "./tuningStageRunners";
+import { describeTuningWriteFailure } from "./tuningWriteFailure";
 import { readChunkSettings } from "./chunkSettings";
 import { errorWithLog } from "../views/notify";
 
@@ -671,6 +675,16 @@ async function runMeasurement(
       resolved.model
     ))
   ) {
+    return;
+  }
+
+  /*
+    **仕事に近い形で測るときは、ここで分かれる**（設計書6.49.9）。段の
+    並びは `features/tuningStageRunners.ts` が持つ。読める長さの申告値は
+    要らない（申告の読めないさくら・ChatGPT では、断られた文から読む）。
+  */
+  if (scope === "work") {
+    await runWorkTuning(resolved.provider, resolved.model);
     return;
   }
 
@@ -1409,6 +1423,19 @@ async function runMeasurement(
             // 失敗にせず「入らなかった」と数えて探索を続ける
             if (error instanceof AIError && error.kind === "context_overflow") {
               outcome = "関所で止まった";
+              /*
+                **サーバーが自分の長さを述べていれば、ログに残す**（設計書
+                6.49.9）。ここでは覚えない——覚えるのは「仕事に近い形で
+                測る」の段で、収まる要求が通ることを確かめてからである
+                （規則5「覚えるのは通ったときだけ」）。
+              */
+              const declared = parseDeclaredContextLimit(error.detail ?? "");
+              if (declared !== undefined) {
+                logStep(
+                  `読める長さの測定：${size}字 → サーバーは読める長さを ${declared} トークンと述べました` +
+                    "（ここでは覚えません。「仕事に近い形で測る」で確かめて覚えます）"
+                );
+              }
             } else if (countErrorAsTooLong(low > 0, error)) {
               // **エラーで打ち切らない。** より短い長さで「両方」が返って
               // いるのだから、接続も鍵も生きている。ここで止めると
@@ -2339,10 +2366,22 @@ async function offerToSave(input: {
   const tokens = probeCharsToTokens(input.low, input.measured);
   // **上限はプロバイダごと**（手元1800秒・クラウド600秒。2026-09-23）。
   // 手元のAIへ600秒を書くと、読む側は1800秒まで許すのに台帳の値で切れる
-  const timeoutSeconds = recommendTimeoutSeconds(
-    input.longestResponseSeconds,
-    maxTimeoutSeconds(input.providerId)
-  );
+  /*
+    **仕事に近い形で測ってあれば、そちらから見立てる**（設計書6.49.9）。
+    合言葉の時間の3倍は、答えがほぼ空の測定から実際の機能を当て推量で
+    見込んだもので、モデルごとの書き出しの遅さを知らない。素の台帳から
+    読む（同梱には無い値なので、どちらでも同じだが、作者の実測だと明示する）。
+  */
+  const workRate = workRateOf(modelTuningRaw(input.providerId, input.model));
+  const timeoutSeconds =
+    workRate !== undefined
+      ? recommendTimeoutFromWorkRate(workRate, maxTimeoutSeconds(input.providerId))
+      : recommendTimeoutSeconds(
+          input.longestResponseSeconds,
+          maxTimeoutSeconds(input.providerId)
+        );
+  const timeoutBasis =
+    workRate !== undefined ? "（仕事に近い形の測定から見立てた値）" : "";
   // 上限を書いてよいのは、申告値を取れないプロバイダだけ
   const writesContext = CONTEXT_TUNABLE_PROVIDERS.has(input.providerId);
 
@@ -2368,7 +2407,7 @@ async function offerToSave(input: {
       (writesContext
         ? `読める長さ 約${tokens.toLocaleString("ja-JP")}トークンと、`
         : "") +
-      `待ち時間 ${timeoutSeconds}秒 です。` +
+      `待ち時間 ${timeoutSeconds}秒${timeoutBasis} です。` +
       `測った長さ ${input.low.toLocaleString("ja-JP")}字 も記録に残り、` +
       "チャンクの大きさを決めるのに使います。" +
       (writesContext
@@ -2458,39 +2497,6 @@ async function offerToSave(input: {
       "ほかのモデルには影響しません。"
   );
   return true;
-}
-
-/**
- * 台帳へ書けなかった理由を、作者の言葉にする（作者の報告、2026-09-19）。
- *
- * **札をそのまま出さない。** `unreadable` と `lost` では打つ手がまるで
- * 違う——前者は台帳のファイルを直すまで何度測っても入らないし、後者は
- * 開いている窓を1つにすれば入る。区別を伝えないと、作者は「また12分
- * 測る」以外の手を思いつけない。
- */
-function describeTuningWriteFailure(outcome: TuningWriteOutcome): string {
-  switch (outcome) {
-    case "written":
-      return "";
-    case "unreadable":
-      return (
-        `AIチューニングの記録（拡張機能の保管庫の ${TUNING_STORE_FILE}）が` +
-        "読めない形になっているため、上書きせずに止めました。" +
-        "中身を直すか、詳細メニューの「AIチューニング記録削除」で" +
-        "作り直してから測り直してください。"
-      );
-    case "no_store":
-      return (
-        "AIチューニングの記録の置き場が使えないため、書けませんでした。" +
-        "拡張機能を入れ直すか、VS Code を開き直してから測り直してください。"
-      );
-    case "lost":
-      return (
-        "AIチューニングの記録へ書いても残りませんでした。" +
-        "ほかの VS Code の窓が同じ記録を書いている可能性があります。" +
-        "窓を1つにしてから測り直してください。"
-      );
-  }
 }
 
 function reportFailure(error: unknown): void {
