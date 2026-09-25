@@ -167,7 +167,8 @@ describe("作品一覧の行", () => {
     const roots = await provider.getChildren();
     const item = provider.getTreeItem(roots[0]);
 
-    expect(item.label).toBe(abbreviateTitle(longTitle));
+    // 読み込めないことの印は題の前に出る（精査 R14）。題そのものは同じく省略する
+    expect(item.label).toBe(`［⚠読み込めません］${abbreviateTitle(longTitle)}`);
     expect(tooltipText(item.tooltip)).toContain(longTitle);
   });
 });

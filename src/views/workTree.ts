@@ -9,7 +9,7 @@ import {
   isCollectedFile,
 } from "../core/episodeLabel";
 import { workTypeContextValue } from "../core/workTypeVisibility";
-import { abbreviateTitle } from "../core/abbreviateTitle";
+import { workRowLabel } from "../core/workRowLabel";
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
 import { resolveWorkKind, type WorkKindKey } from "../core/workKind";
@@ -334,23 +334,31 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
     if (node.type === "work") {
       const { work, stats } = node;
-      // **作品名は省略して出す**（作者の裁定、2026-09-06）。長い題は行の幅を
-      // 使い切り、右に添えた字数・同期の印が幅の外へ押し出されて読めなくなる。
-      // 全文はホバーに出しているので、確かめる場所は残っている
+      // **作品名は省略して出す**（作者の裁定、2026-09-06）。全文はホバーに
+      // 出しているので、確かめる場所は残っている。
+      //
+      // **印（同期・競合・読み込めない）は題の前に置く**（精査 R14、作者の
+      // 裁定 2026-09-26）。行は後ろから切れるので、説明の後ろに添えた印は
+      // 長い題に押し出されて読めなかった。字数は説明（後ろ）のまま
+      // （`core/workRowLabel.ts`）
       const item = new vscode.TreeItem(
-        abbreviateTitle(work.title),
+        workRowLabel(work.title, node.loadError ? ["⚠読み込めません"] : []),
         vscode.TreeItemCollapsibleState.Collapsed
       );
+      // **行の id を作品で固定する。** id の無い行を VS Code は名前で覚えるので、
+      // 印が名前に入った今は、印が増減するたびに別の行と見なして畳んでしまう
+      // （章・メモの枝と同じく作品IDから作る。ほかの行と重ならない頭を付ける）
+      item.id = `work:${work.id}`;
       // タイプを織り込む（設計書6.70.1）。右クリックの `when` はこれを見る。
       // 物語でない種類（エッセイ・歌詞）は後ろに種類も付く（6.109.7）
       item.contextValue = workTypeContextValue("work", node.format, node.kind);
       item.iconPath = new vscode.ThemeIcon("book");
 
       // 走査に失敗した作品は、字数の代わりに理由を出す。
-      // 0字と表示すると「書いていない」と読めてしまう
+      // 0字と表示すると「書いていない」と読めてしまう。印は名前の頭に
+      // 出したので、説明は空にする（同じことを2度言わない）
       if (node.loadError) {
         item.iconPath = new vscode.ThemeIcon("warning");
-        item.description = "⚠ 読み込めません";
         item.tooltip = new vscode.MarkdownString(
           [
             `**${work.title}**`,
@@ -365,23 +373,29 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         return item;
       }
       // 未解決の競合は最優先で気づかせる。放置するとAI処理で原稿が壊れる
-      const conflictNote =
+      // ——だから同期の印より前に置く
+      const conflictMark =
         stats.conflictedCount > 0
-          ? ` / ⚠競合 ${stats.conflictedCount}件`
-          : "";
-      // GitHubとの差は「記録待ち2・送信待ち6」の形で短く添える（設計書5.5.17）。
+          ? `⚠競合${stats.conflictedCount}件`
+          : undefined;
+      // GitHubとの差は「記録待ち2・送信待ち6」の形で短く出す（設計書5.5.17）。
       // 別の環境へ移る前に気づけるかどうかが分かれ目になる（設計書5.5.1）。
       // **数はその作品のぶんだけ**——書庫では置き場ぜんぶの数が全部の行に並ぶ
       const badge = this.syncBadge?.(work.id);
       const workMeasure = measureKindCounts(node.kind, stats.totals)?.detail;
-      const syncNote = badge ? ` / ${badge}` : "";
+      const marks = [conflictMark, badge];
+      item.label = workRowLabel(work.title, marks);
       item.description = `${stats.fileCount}ファイル / ${modeLabel}${formatCount(
         pickCount(stats.totals, mode)
-      )}字${conflictNote}${syncNote}`;
+      )}字`;
       item.tooltip = new vscode.MarkdownString(
         [
           `**${work.title}**`,
           "",
+          // 題の前の［］が何かを、ここで言う（印は短くしか書けない）
+          marks.some((mark) => mark)
+            ? "_題の前の［］は、同期や競合で手当てが要るものの印です（内訳は下）。_\n"
+            : null,
           `- 純文字数: ${formatCount(stats.totals.net)} 字`,
           `- 総文字数: ${formatCount(stats.totals.gross)} 字`,
           `- 原稿用紙換算: 約 ${formatCount(

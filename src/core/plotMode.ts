@@ -388,24 +388,85 @@ export function misnamedEpisodePlotNotice(
 }
 
 /**
- * 予定の話を足すときの、既定の話数。
+ * 連番から「飛び離れている」とみなす隔たり（精査 R11⑥、作者の裁定 2026-09-26）。
  *
- * **書いた話と予定の話の、最後の次。** 予定を続けて足すとき、毎回
- * 同じ番号を勧めて「既にあります」と言われるのを避ける。
+ * **連番の最後より100話以上先の話数は、既定の話数を決めるときに数えない。**
+ * 確認用コピーに第9999話（同期の確認の試験の話）があり、既定が「10000」に
+ * なっていた。番外編を少し先の番号（連番が20話なら第25話）に置く書き方は
+ * あるので、少しの欠けは許して続きとみなす。100にしたのは、ふつうの連載で
+ * 番外編や欠番がそこまで先へ離れることはまず無く、試験や仮置きの番号
+ * （9999・1000）はそれより確実に遠いからである。**外すのは既定の話数の
+ * 計算からだけ**で、入力欄ではどの話数も打てる。
  */
+export const OUTLYING_EPISODE_GAP = 100;
+
+/**
+ * 予定の話を足すときの、既定の話数と、数えなかった話数。
+ *
+ * **1話から続く連番（少しの欠けは許す）の最後の次。** 予定を続けて足すとき、
+ * 毎回同じ番号を勧めて「既にあります」と言われるのを避ける。連番の最後から
+ * `OUTLYING_EPISODE_GAP` 以上離れた話数と、それより先の話数は数えない
+ * ——飛び離れた先で番号が続いていても、そこは作者の連番ではない。
+ *
+ * 合本は範囲で見る（1〜10話の合本の次は第11話）。
+ */
+export function plannedEpisodeDefault(
+  episodes: readonly EpisodeFile[],
+  plotChapters: Iterable<number>
+): { next: number; outlying: number[] } {
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const episode of episodes) {
+    const start = episode.chapterStart ?? episode.chapterEnd;
+    const end = episode.chapterEnd ?? episode.chapterStart;
+    if (start === null || end === null) continue;
+    ranges.push({ start: Math.min(start, end), end: Math.max(start, end) });
+  }
+  for (const chapter of plotChapters) {
+    ranges.push({ start: chapter, end: chapter });
+  }
+  ranges.sort((a, b) => a.start - b.start || a.end - b.end);
+
+  let last = 0;
+  let cut = ranges.length;
+  for (let index = 0; index < ranges.length; index++) {
+    const range = ranges[index];
+    if (range.start - last >= OUTLYING_EPISODE_GAP) {
+      cut = index;
+      break;
+    }
+    if (range.end > last) last = range.end;
+  }
+
+  // 同じ話数が本文とプロットの両方にあっても、説明には1度だけ出す
+  const outlying = [
+    ...new Set(ranges.slice(cut).map((range) => range.start)),
+  ];
+  return { next: last + 1, outlying };
+}
+
+/** 予定の話を足すときの、既定の話数（`plannedEpisodeDefault` の数だけ） */
 export function nextPlannedEpisodeNumber(
   episodes: readonly EpisodeFile[],
   plotChapters: Iterable<number>
 ): number {
-  let last = 0;
-  for (const episode of episodes) {
-    const end = episode.chapterEnd ?? episode.chapterStart;
-    if (end !== null && end > last) last = end;
-  }
-  for (const chapter of plotChapters) {
-    if (chapter > last) last = chapter;
-  }
-  return last + 1;
+  return plannedEpisodeDefault(episodes, plotChapters).next;
+}
+
+/**
+ * 既定の話数に数えなかった話数を、入力欄の説明に添える一言にする。
+ *
+ * **なぜその既定なのかを言う。** 黙って外すと、作者から見れば「第9999話が
+ * 無かったことにされた」のか分からない。長く並べないよう、3件までを出して
+ * 残りは件数で言う。
+ */
+export function describeOutlyingEpisodes(
+  outlying: readonly number[],
+  noun: string
+): string {
+  if (outlying.length === 0) return "";
+  const shown = outlying.slice(0, 3).map((chapter) => `第${chapter}${noun}`);
+  const rest = outlying.length - shown.length;
+  return `${shown.join("・")}${rest > 0 ? `ほか${rest}件` : ""}は離れているので数えていません。`;
 }
 
 /**

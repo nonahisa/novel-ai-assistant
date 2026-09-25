@@ -2,6 +2,10 @@ import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
 import { openEpubEditorPanel } from "../../../src/features/epubEditorPanel";
 import { emptyCharacter } from "../../../src/models/character";
+import {
+  defaultBackCoverLayout,
+  defaultCoverLayout,
+} from "../../../src/models/book";
 import { BAKED_COVER_FILES } from "../../../src/core/coverBake";
 import type { WorkEntry } from "../../../src/models/types";
 import {
@@ -553,6 +557,170 @@ describe("焼いた表紙のプレビュー（設計書6.65.8）", () => {
     expect(back.html).toContain(BAKED_COVER_FILES.back);
     expect(back.compose).toBeUndefined();
     expect(back.note).toContain("焼いた画像を表示中");
+  });
+});
+
+/**
+ * 焼いたあとに合成の欄を変えたとき（精査 R19、作者の裁定 2026-09-26）。
+ *
+ * 焼いた画像があるあいだ、プレビューは焼いた画像のままで、題名の向きを
+ * 変えても「焼く」まで絵が変わらなかった（実機確認、2026-09-21）。
+ * **変えるたびに見本だけを描き直す**。ファイルへ焼くのは今までどおり
+ * 「焼く」を押したときで、本に入るのは焼いた画像のままなので、
+ * **「まだ焼いていません」と印を出す**（見本を本の中身と取り違えない）。
+ */
+describe("焼いたあとに合成の欄を変えたとき（精査 R19）", () => {
+  const PNG = `data:image/png;base64,${btoa(
+    String.fromCharCode(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0)
+  )}`;
+
+  beforeEach(() => {
+    put("本文/第1話.txt", "あ\n\nい");
+    putBytes("素材/表紙.png", [0x89, 0x50]);
+    putBytes("素材/裏表紙.png", [0x89, 0x50]);
+  });
+
+  /** 題名だけ横書きにした表紙の合成指定（ほかは既定のまま） */
+  function horizontalTitle(): Record<string, unknown> {
+    const layout = defaultCoverLayout();
+    return { ...layout, title: { ...layout.title, vertical: false } };
+  }
+
+  test("題名の向きを変えると、見本の合成に切り替わり「まだ焼いていません」と出る", async () => {
+    writeBook({ title: "氷の街", coverImagePath: "素材/表紙.png" });
+    putBytes(`設定/書籍/${BAKED_COVER_FILES.front}`, [0x89, 0x50]);
+
+    await open();
+    expect(page("表紙").compose).toBeUndefined();
+
+    await send({ type: "change", config: { coverLayout: horizontalTitle() } });
+
+    const cover = page("表紙") as PreviewPage & { unbaked?: boolean };
+    // 見本は canvas で描き直す（焼いた画像ではなく）
+    expect(cover.compose).toBe("front");
+    expect(cover.unbaked).toBe(true);
+    expect(cover.note).toContain("まだ焼いていません");
+    // 本に入るのは前に焼いた画像だと、同じ場所で言う
+    expect(cover.note).toContain("焼いた画像が入ります");
+    // 合成の欄の横の注記も同じことを言い、「消す」の入口は残す
+    expect(latest().compose.front.baked?.note).toContain("まだ焼いていません");
+    // **ファイルは焼き直さない**（焼くのは押したときだけ）
+    expect(shown.join("\n")).not.toContain("焼きました");
+  });
+
+  /**
+   * **未保存の下書きの控え（6.65.7）に、覚えた見た目を混ぜない。** 覚えるのは
+   * パネルの中だけで、欄を変えただけでは保存も焼きも起きない。
+   */
+  test("欄を変えても、設計図も焼いた画像も書き換えない", async () => {
+    writeBook({ title: "氷の街", coverImagePath: "素材/表紙.png" });
+    putBytes(`設定/書籍/${BAKED_COVER_FILES.front}`, [0x89, 0x50]);
+    const bookPath = diskPath(path.join(work.folderPath, "設定", "書籍", "book.json"));
+    const bakedPath = diskPath(
+      path.join(work.folderPath, "設定", "書籍", BAKED_COVER_FILES.front)
+    );
+    const bookBefore = disk.get(bookPath);
+    const bakedBefore = disk.get(bakedPath);
+
+    await open();
+    await send({ type: "change", config: { coverLayout: horizontalTitle() } });
+
+    expect(disk.get(bookPath)).toBe(bookBefore);
+    expect(disk.get(bakedPath)).toBe(bakedBefore);
+    // 本の設計図に余計な項目が混ざっていない（保存すると控えも本体もこの形）
+    await send({ type: "save", config: {} });
+    const saved = JSON.parse(
+      new TextDecoder().decode(disk.get(bookPath) as Uint8Array)
+    ) as Record<string, unknown>;
+    expect(Object.keys(saved)).not.toContain("bakedLooks");
+  });
+
+  test("題名の文字を変えても、見本に切り替わる", async () => {
+    writeBook({ title: "氷の街", coverImagePath: "素材/表紙.png" });
+    putBytes(`設定/書籍/${BAKED_COVER_FILES.front}`, [0x89, 0x50]);
+
+    await open();
+    await send({ type: "change", config: { title: "炎の街" } });
+
+    expect(page("表紙").compose).toBe("front");
+  });
+
+  test("元に戻すと、焼いた画像の面に戻る", async () => {
+    writeBook({ title: "氷の街", coverImagePath: "素材/表紙.png" });
+    putBytes(`設定/書籍/${BAKED_COVER_FILES.front}`, [0x89, 0x50]);
+
+    await open();
+    await send({ type: "change", config: { coverLayout: horizontalTitle() } });
+    await send({ type: "change", config: { coverLayout: defaultCoverLayout() } });
+
+    const cover = page("表紙") as PreviewPage & { unbaked?: boolean };
+    expect(cover.compose).toBeUndefined();
+    expect(cover.unbaked).toBeFalsy();
+    expect(cover.note).toContain("焼いた画像を表示中");
+  });
+
+  test("焼き直すと、焼いた画像の面に戻る", async () => {
+    writeBook({ title: "氷の街", coverImagePath: "素材/表紙.png" });
+    putBytes(`設定/書籍/${BAKED_COVER_FILES.front}`, [0x89, 0x50]);
+
+    await open();
+    await send({ type: "change", config: { coverLayout: horizontalTitle() } });
+    await send({
+      type: "bake",
+      side: "front",
+      dataUrl: PNG,
+      config: { coverLayout: horizontalTitle() },
+    });
+
+    expect(page("表紙").compose).toBeUndefined();
+    expect(page("表紙").note).toContain("焼いた画像を表示中");
+    expect(latest().compose.front.baked?.note).not.toContain("まだ焼いていません");
+  });
+
+  test("表紙に関わらない欄を変えても、焼いた画像のまま", async () => {
+    writeBook({ title: "氷の街", coverImagePath: "素材/表紙.png" });
+    putBytes(`設定/書籍/${BAKED_COVER_FILES.front}`, [0x89, 0x50]);
+
+    await open();
+    await send({ type: "change", config: { collapseBlankLines: false } });
+
+    expect(page("表紙").compose).toBeUndefined();
+  });
+
+  test("裏表紙も同じ（変えれば見本、表紙は焼いた画像のまま）", async () => {
+    writeBook({
+      title: "氷の街",
+      coverImagePath: "素材/表紙.png",
+      backCoverImagePath: "素材/裏表紙.png",
+    });
+    putBytes(`設定/書籍/${BAKED_COVER_FILES.front}`, [0x89, 0x50]);
+    putBytes(`設定/書籍/${BAKED_COVER_FILES.back}`, [0x89, 0x50]);
+
+    await open();
+    const layout = defaultBackCoverLayout();
+    await send({
+      type: "change",
+      config: {
+        backCoverLayout: { ...layout, title: { ...layout.title, visible: true } },
+      },
+    });
+
+    expect(page("裏表紙").compose).toBe("back");
+    expect(page("裏表紙").note).toContain("まだ焼いていません");
+    // 表紙の指定は変えていないので、表紙は焼いた画像のまま
+    expect(page("表紙").compose).toBeUndefined();
+  });
+
+  test("元イラストの指定を消したら、見本は描けないので焼いた画像を出す", async () => {
+    // 本に入るのは焼いた画像で、描き直す下絵が無い
+    writeBook({ title: "氷の街", coverImagePath: "素材/表紙.png" });
+    putBytes(`設定/書籍/${BAKED_COVER_FILES.front}`, [0x89, 0x50]);
+
+    await open();
+    await send({ type: "change", config: { coverImagePath: null } });
+
+    expect(page("表紙").html).toContain(BAKED_COVER_FILES.front);
+    expect(page("表紙").compose).toBeUndefined();
   });
 });
 

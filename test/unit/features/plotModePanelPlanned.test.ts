@@ -47,6 +47,17 @@ describe("予定の話を足す", () => {
     expect(body).toContain("validateInput");
   });
 
+  /*
+    既定の話数は、飛び離れた話数を外した連番の次（精査 R11⑥）。数え方そのものは
+    `plannedEpisode.test.ts` が見る。ここはパネルがその数を使い、外した話数を
+    入力欄の説明に添えていることだけを見る。
+  */
+  it("既定の話数は飛び離れた話数を外した次で、外した話数を説明に添える", () => {
+    expect(body).toContain("plannedEpisodeDefault(");
+    expect(body).toContain("describeOutlyingEpisodes(");
+    expect(body).not.toContain("nextPlannedEpisodeNumber(");
+  });
+
   it("本文を読めなかったときは足さない", () => {
     const guard = body.indexOf("episodesLoaded");
     const write = body.indexOf("createEpisodePlot(");

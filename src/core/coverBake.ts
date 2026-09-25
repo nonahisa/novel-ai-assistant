@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "./paths";
-import { BOOK_DIR } from "../models/book";
+import { BOOK_DIR, type BookConfig } from "../models/book";
 import { atomicWriteFile } from "./atomicWrite";
 import { imageMediaType } from "./epubPackage";
 
@@ -311,6 +311,55 @@ export function describeBakedPreview(at: Date): string {
     `焼いた画像を表示中（${describeBakedAt(at)}）。` +
     "合成をやり直すには焼き直してください。"
   );
+}
+
+/**
+ * 焼いたあとに合成の欄を変え、**見本を描き直しているとき**の一言
+ * （精査 R19、作者の裁定 2026-09-26。設計書6.65.9の14）。
+ *
+ * 見えているのは変えたあとの見本で、**本に入るのは前に焼いた画像のまま**
+ * である。見本を本の中身と取り違えないよう、「まだ焼いていません」を先に言う。
+ */
+export function describeUnbakedPreview(at: Date, bakeLabel: string): string {
+  return (
+    "まだ焼いていません。いま見えているのは欄を変えたあとの見本で、" +
+    `本には${describeBakedAt(at)}に焼いた画像が入ります。` +
+    `「${bakeLabel}」を押すと入れ替わります。`
+  );
+}
+
+/**
+ * 表紙・裏表紙の見た目を決めるものを、比べられる1つの文字列にする
+ * （精査 R19。設計書6.65.9の14）。
+ *
+ * **画面の描画（`drawCover`）が読むものと同じ範囲**を入れる：元イラストの
+ * 場所・その面の合成指定（文字ごとの出す／置き場所／大きさ／色／縦横と、
+ * 余白の色）・重ねる4つの文字（題名・作者名・イラストレーター名・レーベル名）。
+ * 本文の組み方のような表紙に関わらない欄は入れない——入れると、関係の無い
+ * 欄を触っただけで「まだ焼いていません」に切り替わる。
+ *
+ * 焼いた画像に何が焼かれているかはファイルからは読めないので、
+ * **焼いた時点（またはパネルを開いた時点）のこの値と、いまの値を比べる**。
+ */
+export function coverLookKey(
+  config: Pick<
+    BookConfig,
+    | "title"
+    | "author"
+    | "illustrator"
+    | "label"
+    | "coverImagePath"
+    | "backCoverImagePath"
+    | "coverLayout"
+    | "backCoverLayout"
+  >,
+  side: CoverSide
+): string {
+  return JSON.stringify({
+    image: side === "back" ? config.backCoverImagePath : config.coverImagePath,
+    layout: side === "back" ? config.backCoverLayout : config.coverLayout,
+    texts: [config.title, config.author, config.illustrator, config.label],
+  });
 }
 
 /**

@@ -4,7 +4,9 @@ import type { EpisodeFile, WorkEntry } from "../../../src/models/types";
 import type { Chapter } from "../../../src/models/chapter";
 import {
   buildPlotEpisodeRows,
+  describeOutlyingEpisodes,
   nextPlannedEpisodeNumber,
+  plannedEpisodeDefault,
   parsePlannedEpisodeNumber,
   plannedEpisodePlotChapters,
 } from "../../../src/core/plotMode";
@@ -115,6 +117,66 @@ describe("予定の話数の決め方", () => {
       chapterEnd: 10,
     });
     expect(nextPlannedEpisodeNumber([collected], [])).toBe(11);
+  });
+
+  /*
+    **飛び離れた話数は既定に数えない**（精査 R11⑥、作者の裁定 2026-09-26）。
+    確認用コピーに第9999話（同期の確認の試験の話）があり、既定が「10000」に
+    なっていた。1話から続く連番の最後の次を既定にする。
+  */
+  test("1〜20話と第9999話がある置き場では、既定は21", () => {
+    const twenty = Array.from({ length: 20 }, (_, index) => written(index + 1));
+    const far = written(9999);
+
+    expect(nextPlannedEpisodeNumber([...twenty, far], [])).toBe(21);
+    // 単話プロットの側にだけある飛び離れた話数も同じ
+    expect(nextPlannedEpisodeNumber(twenty, [9999])).toBe(21);
+    // 外した話数は、入力欄の説明に出すために返す
+    expect(plannedEpisodeDefault([...twenty, far], [9999]).outlying).toEqual([
+      9999,
+    ]);
+  });
+
+  test("番外編が連番の少し先（第25話）にあれば、数える", () => {
+    const twenty = Array.from({ length: 20 }, (_, index) => written(index + 1));
+
+    expect(nextPlannedEpisodeNumber([...twenty, written(25)], [])).toBe(26);
+    expect(nextPlannedEpisodeNumber(twenty, [25])).toBe(26);
+    expect(plannedEpisodeDefault(twenty, [25]).outlying).toEqual([]);
+  });
+
+  test("線は「連番の最後より100話以上先」。99話先までは数える", () => {
+    const twenty = Array.from({ length: 20 }, (_, index) => written(index + 1));
+
+    expect(nextPlannedEpisodeNumber(twenty, [20 + 99])).toBe(120);
+    expect(nextPlannedEpisodeNumber(twenty, [20 + 100])).toBe(21);
+  });
+
+  test("飛び離れた先にある話は、まとめて外す（その先で続いていても）", () => {
+    const five = Array.from({ length: 5 }, (_, index) => written(index + 1));
+
+    const result = plannedEpisodeDefault([...five, written(9999)], [10000, 10001]);
+    expect(result.next).toBe(6);
+    expect(result.outlying).toEqual([9999, 10000, 10001]);
+  });
+
+  test("合本は範囲の終わりから次を測る（1〜10話の合本と第11話は続いている）", () => {
+    const collected = episode({
+      fileName: "001-010.txt",
+      chapterStart: 1,
+      chapterEnd: 10,
+    });
+    expect(nextPlannedEpisodeNumber([collected, written(11)], [])).toBe(12);
+  });
+
+  test("外した話数は、入力欄の説明で短く言う", () => {
+    expect(describeOutlyingEpisodes([], "話")).toBe("");
+    expect(describeOutlyingEpisodes([9999], "話")).toBe(
+      "第9999話は離れているので数えていません。"
+    );
+    expect(describeOutlyingEpisodes([500, 9999, 10000, 10001], "話")).toBe(
+      "第500話・第9999話・第10000話ほか1件は離れているので数えていません。"
+    );
   });
 
   test("本文のある話数には予定を足せない", () => {

@@ -50,7 +50,9 @@ import {
   BAKED_COVER_FILES,
   bakedCoverInfo,
   deleteBakedCover,
+  coverLookKey,
   describeBakedPreview,
+  describeUnbakedPreview,
   readImageDataUrl,
   saveBakedCover,
   type CoverSide,
@@ -177,6 +179,26 @@ interface PanelState {
    * 指定のある話について数える。
    */
   paragraphs: Map<string, number>;
+  /**
+   * 焼いた画像に焼かれているはずの見た目（`coverLookKey`。精査 R19、
+   * 設計書6.65.9の14）。**いまの欄の値がこれと違えば、プレビューは見本を
+   * 描き直して「まだ焼いていません」と出す。**
+   *
+   * 焼いたPNGからは何が焼かれているかを読めないので、**焼いたときの値を
+   * 覚える**。開いた時点では保存済みの設計図（`saved`）の値を置く——保存した
+   * 設計図と焼いた画像が揃っていると見なす（ここが違っていても、いままでどおり
+   * 焼いた日時の注記が出るだけで、見本に切り替わらない）。**覚えるのは
+   * パネルの中だけ**で、設計図にも下書きの控え（`book.json.draft`）にも入れない。
+   */
+  bakedLooks: Record<CoverSide, string>;
+}
+
+/** 保存済みの設計図から、焼いた画像の見た目の基準を作る（開いた時点） */
+function initialBakedLooks(saved: BookConfig): Record<CoverSide, string> {
+  return {
+    front: coverLookKey(saved, "front"),
+    back: coverLookKey(saved, "back"),
+  };
 }
 
 /** プレビューに使う本文の材料。パネルを開いたときに1度だけ集める */
@@ -379,6 +401,7 @@ export async function openEpubEditorPanel(
     existing.current = current;
     existing.source = source;
     existing.paragraphs = paragraphs;
+    existing.bakedLooks = initialBakedLooks(saved);
     existing.panel.reveal();
     existing.panel.webview.postMessage({
       type: "book",
@@ -409,6 +432,7 @@ export async function openEpubEditorPanel(
     saved,
     source,
     paragraphs,
+    bakedLooks: initialBakedLooks(saved),
   };
 
   openPanels.set(work.id, state);
@@ -1337,6 +1361,11 @@ async function bakeCover(
     return;
   }
 
+  // **焼いた見た目を覚え直す**（精査 R19）。焼く知らせには画面のいまの欄が
+  // 添えてあり、受け口で `state.current` へ取り込み済みなので、焼けたものは
+  // いまの値である。覚え直さないと、焼いた直後も「まだ焼いていません」が残る
+  state.bakedLooks[side] = coverLookKey(state.current, side);
+
   const unsaved = isDirty(state)
     ? "（合成の指定はまだ未保存です。「保存」で book.json へ残ります）"
     : "";
@@ -2074,6 +2103,31 @@ async function countPlacedEpisodes(
 }
 
 /**
+ * 焼いた画像があるのに、そのあとで表紙の見た目を決める欄を変えたか
+ * （精査 R19、作者の裁定 2026-09-26「変えるたびに画面の見本を描き直す」）。
+ *
+ * 真なら、プレビューは焼いた画像ではなく**見本（合成の canvas）を描き直し**、
+ * 「まだ焼いていません」と出す。ファイルへ焼くのは今までどおり「焼く」を
+ * 押したときだけで、書き出しに入るのも焼いた画像のままである。
+ *
+ * **元イラストの指定が無ければ偽**——見本を描く下絵が無いので、本に入る
+ * 焼いた画像を出す（いままでどおり）。
+ */
+function showsUnbakedLook(
+  state: PanelState,
+  side: CoverSide,
+  baked: BakedPreview | null
+): boolean {
+  if (!baked) return false;
+  const relative =
+    side === "back"
+      ? state.current.backCoverImagePath
+      : state.current.coverImagePath;
+  if (!relative) return false;
+  return coverLookKey(state.current, side) !== state.bakedLooks[side];
+}
+
+/**
  * 合成の欄を使えるか、使えないなら理由（設計書6.65.8）。
  *
  * **元イラストが無いときは、欄を消さずに畳んで理由を出す**
@@ -2092,10 +2146,13 @@ function composeState(
       : state.current.coverImagePath;
 
   // 焼いた画像は**元イラストの指定が無くても残っている**（本にも入る）。
-  // 消す道は、合成の欄が畳まれていても押せるところに置く（設計書6.65.8）
+  // 消す道は、合成の欄が畳まれていても押せるところに置く（設計書6.65.8）。
+  // 焼いたあとに欄を変えていれば、見本を描き直していることを言う（R19）
   const bakedNote = baked
     ? {
-        note: describeBakedPreview(baked.bakedAt),
+        note: showsUnbakedLook(state, side, baked)
+          ? describeUnbakedPreview(baked.bakedAt, `${label}を焼く`)
+          : describeBakedPreview(baked.bakedAt),
         fileName: BAKED_COVER_FILES[side],
       }
     : null;
@@ -2136,6 +2193,12 @@ interface PreviewPage {
    * ここに「書き出しと同じ断片」というものが無い（設計書6.65.8）。
    */
   compose?: CoverSide;
+  /**
+   * 焼いたあとに合成の欄を変え、見本を描き直している面か（精査 R19）。
+   * 画面は面の見出しに「まだ焼いていません」の印を付ける。本に入るのは
+   * 焼いた画像のままなので、見本を本の中身と取り違えさせない。
+   */
+  unbaked?: boolean;
   /**
    * 本の並びの何行目の面か（設計書6.65.15の段C）。
    *
@@ -2281,6 +2344,18 @@ function coverPage(
   baked: BakedPreview | null
 ): PreviewPage {
   const config = state.current;
+  if (baked && showsUnbakedLook(state, "front", baked)) {
+    // 焼いたあとに欄を変えた（精査 R19）。**見本だけを描き直す**——本に
+    // 入るのは焼いた画像のままなので、印（`unbaked`）と注記でそう言う
+    return {
+      label: "表紙",
+      html: "",
+      compose: "front",
+      unbaked: true,
+      note: describeUnbakedPreview(baked.bakedAt, "表紙を焼く"),
+      vertical,
+    };
+  }
   if (baked) {
     return {
       label: "表紙",
@@ -2487,6 +2562,19 @@ function backCoverPage(
   vertical: boolean,
   baked: BakedPreview | null
 ): PreviewPage | null {
+  if (baked && showsUnbakedLook(state, "back", baked)) {
+    // 表紙と同じ（精査 R19）。見本を描き直し、まだ焼いていないと言う
+    return {
+      label: "裏表紙",
+      html: "",
+      compose: "back",
+      unbaked: true,
+      note:
+        "本の最終面（奥付の後ろ）になります。" +
+        describeUnbakedPreview(baked.bakedAt, "裏表紙を焼く"),
+      vertical,
+    };
+  }
   if (baked) {
     return {
       label: "裏表紙",

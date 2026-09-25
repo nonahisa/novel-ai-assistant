@@ -2239,8 +2239,11 @@ function renderPages() {
     // **見ているものが本に入らないことを、その場で言う。**
     // 添える言葉はここに書いた定文（記号を含まない）なので、
     // エスケープを通すのは拡張機能側から届く見出しだけでよい
+    // 焼いたあとに欄を変えた合成の面は、見本を描き直している（精査 R19）。
+    // 本に入るのは前に焼いた画像なので、その場で印を付ける
     caption.innerHTML = escapeHtml(page.label)
-      + (page.suspended ? '（保留中：本には入りません）' : '');
+      + (page.suspended ? '（保留中：本には入りません）' : '')
+      + (page.unbaked ? '（まだ焼いていません）' : '');
     frame.appendChild(caption);
 
     const sheet = document.createElement('div');

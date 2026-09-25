@@ -15,7 +15,8 @@ import {
   listPlotHeadings,
   misnamedEpisodePlotNotice,
   misnamedEpisodePlots,
-  nextPlannedEpisodeNumber,
+  describeOutlyingEpisodes,
+  plannedEpisodeDefault,
   parsePlannedEpisodeNumber,
   plannedEpisodePlotChapters,
   unusedPlotSections,
@@ -581,12 +582,17 @@ class PlotModePanel {
     const plotChapters = this.plotChapters;
     const noun = this.unitNoun;
 
+    // 飛び離れた話数（試験の第9999話など）は既定に数えない（設計書6.4.8 の7）。
+    // 外したものがあれば、なぜその既定なのかを説明に添える
+    const suggestion = plannedEpisodeDefault(episodes, plotChapters);
+    const outlyingNote = describeOutlyingEpisodes(suggestion.outlying, noun);
     const numberText = await askText({
       title: `予定の${noun}を足す（1/2）：何${noun}目にしますか`,
       prompt:
         `本文のまだ無い${noun}数を入れてください。既定は最後の${noun}の次です。` +
+        (outlyingNote ? outlyingNote : "") +
         "本文のファイルは作りません（単話プロットだけを作ります）。",
-      value: String(nextPlannedEpisodeNumber(episodes, plotChapters)),
+      value: String(suggestion.next),
       validateInput: (text) =>
         parsePlannedEpisodeNumber(text, episodes, plotChapters).problem ?? null,
     });

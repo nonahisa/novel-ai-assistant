@@ -10,9 +10,12 @@ import {
   describeBakedAt,
   describeBakedPreview,
   describeCoverUse,
+  describeUnbakedPreview,
+  coverLookKey,
   readCoverSource,
   saveBakedCover,
 } from "../../../src/core/coverBake";
+import { parseBookConfig, type BookConfig } from "../../../src/models/book";
 import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 
 /**
@@ -322,6 +325,72 @@ describe("焼いた画像を見せているときの注記", () => {
     expect(text).toContain("焼いた画像を表示中");
     expect(text).toContain("2026年9月3日 14:05");
     expect(text).toContain("焼き直");
+  });
+
+  test("見本を描き直しているときは、まだ焼いていないことと本に入るものを言う", () => {
+    const text = describeUnbakedPreview(new Date(2026, 8, 3, 14, 5), "表紙を焼く");
+
+    expect(text.startsWith("まだ焼いていません")).toBe(true);
+    expect(text).toContain("2026年9月3日 14:05に焼いた画像が入ります");
+    expect(text).toContain("「表紙を焼く」");
+  });
+});
+
+/**
+ * 表紙の見た目の鍵（精査 R19、設計書6.65.9の14）。
+ *
+ * 焼いた画像と今の欄が揃っているかを比べるためのもの。**描画が読むもの
+ * だけ**を入れ、表紙に関わらない欄では変わらないことを見る。
+ */
+describe("表紙の見た目の鍵（coverLookKey）", () => {
+  const base = parseBookConfig({ title: "氷の街", coverImagePath: "素材/表紙.png" }, "氷の街");
+
+  test("題名の向き・題名の文字・元イラストで変わる", () => {
+    const key = coverLookKey(base, "front");
+    const horizontal = {
+      ...base,
+      coverLayout: {
+        ...base.coverLayout,
+        title: { ...base.coverLayout.title, vertical: false },
+      },
+    };
+
+    expect(coverLookKey(horizontal, "front")).not.toBe(key);
+    expect(coverLookKey({ ...base, title: "炎の街" }, "front")).not.toBe(key);
+    expect(coverLookKey({ ...base, coverImagePath: "素材/別.png" }, "front")).not.toBe(key);
+  });
+
+  test("表紙に関わらない欄と、もう片方の面の指定では変わらない", () => {
+    const key = coverLookKey(base, "front");
+
+    // 本の設計図まるごと（表紙に関わらない欄も持つ形）を渡しても、鍵は同じ
+    const unrelated: BookConfig = { ...base, collapseBlankLines: !base.collapseBlankLines };
+    expect(coverLookKey(unrelated, "front")).toBe(key);
+    expect(
+      coverLookKey(
+        {
+          ...base,
+          backCoverLayout: {
+            ...base.backCoverLayout,
+            frameBackground: "#ffffff",
+          },
+        },
+        "front"
+      )
+    ).toBe(key);
+  });
+
+  test("裏表紙は裏表紙の指定で変わる", () => {
+    const key = coverLookKey(base, "back");
+    expect(
+      coverLookKey(
+        {
+          ...base,
+          backCoverLayout: { ...base.backCoverLayout, frameBackground: "#ffffff" },
+        },
+        "back"
+      )
+    ).not.toBe(key);
   });
 });
 
