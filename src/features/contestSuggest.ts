@@ -197,6 +197,16 @@ export async function suggestContestsByAI(
   // **外したものは黙って落とさない**（記録にも残す）
   for (const note of validated.notes) logStep(`応募先の提案の検算：${note}`);
 
+  // **「合う公募なし」は正しい答え**（残課題 F8）。失敗として知らせない
+  if (validated.suggestions.length === 0) {
+    logStep(`応募先の提案：候補${candidates.length}件のうち、合う公募は無いという答え`);
+    void vscode.window.showInformationMessage(
+      "合う公募は見つかりませんでした（AIが候補の募集内容と作品の概要を読み比べた結果です）。" +
+        "完成予定から公募を選ぶ画面では、AIを使わずに候補を見られます。"
+    );
+    return CHECK_COMPLETED;
+  }
+
   const byId = new Map(candidates.map((candidate) => [candidate.id, candidate.entry]));
   const picked = await vscode.window.showQuickPick(
     [...suggestionItems(validated.suggestions, byId), cancelItem()],

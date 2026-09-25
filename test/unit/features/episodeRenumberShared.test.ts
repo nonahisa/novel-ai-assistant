@@ -205,6 +205,93 @@ describe("名前だけの独立コミット", () => {
     expect(run.calls.some((args) => args[0] === "commit")).toBe(false);
   });
 
+  /**
+   * **200話規模の作品で、コマンドの長さの上限を超えない**（残課題 F2、設計書6.67）。
+   *
+   * Windows では1回の起動に渡せるコマンドの長さが 32,767 字まで
+   * （CreateProcess の上限）。付け替えたファイルを全部1回の git へ並べると、
+   * 作者の本作（219話）の日本語の長い題では上限に届く。届くと git が
+   * 起動せず、付け替え自体は済んだのに「名前だけのコミット」が失敗する。
+   */
+  test("219話・日本語の長いファイル名でも、どの git の命令も上限を超えない", async () => {
+    window.showInformationMessage = async () => "コミットする";
+    const longWork: WorkEntry = {
+      ...work,
+      folderPath: path.join(
+        "C:",
+        "Users",
+        "author",
+        "Documents",
+        "小説",
+        "長編ファンタジー作品の置き場"
+      ),
+    };
+    const subtitle = "雪の降る街で出会った少女と約束の場所へ向かう旅路の途中で";
+    const fileOf = (n: number) => `第${n}話　${subtitle}.txt`;
+    const renames: EpisodeRename[] = Array.from({ length: 219 }, (_, index) => {
+      const oldNumber = 219 - index;
+      const newNumber = oldNumber + 1;
+      return {
+        fromPath: path.join(longWork.folderPath, "本文", fileOf(oldNumber)),
+        toPath: path.join(longWork.folderPath, "本文", fileOf(newNumber)),
+        fromFileName: fileOf(oldNumber),
+        toFileName: fileOf(newNumber),
+        oldNumber,
+        newNumber,
+      };
+    });
+    const allPaths = renames.flatMap((entry) => [entry.fromPath, entry.toPath]);
+
+    /** 渡された命令の、Windows 上の長さの見積もり（引数を引用符で囲み空白で繋ぐ） */
+    const commandLength = (args: readonly string[]) =>
+      "git.exe".length + args.reduce((total, arg) => total + arg.length + 3, 0);
+    // **見積もりが本当に上限を超える台であること**を先に確かめる
+    // （超えない台で通っても、何も確かめたことにならない）
+    expect(commandLength(["commit", "-m", "調整", "--", ...allPaths])).toBeGreaterThan(32_767);
+
+    /** 命令ごとに、名指しされたパス（引数か、標準入力のNUL区切り） */
+    const calls: Array<{ args: string[]; paths: string[] }> = [];
+    const pathsOf = (args: readonly string[], input?: string): string[] => {
+      if (args.includes("--pathspec-from-file=-")) {
+        return (input ?? "").split(NUL).filter((entry) => entry.length > 0);
+      }
+      const dashes = args.indexOf("--");
+      return dashes >= 0 ? args.slice(dashes + 1) : [];
+    };
+    const run: GitCommandRunner = async (args, _cwd, _timeout, options) => {
+      const named = pathsOf(args, options?.input);
+      calls.push({ args, paths: named });
+      if (args.includes("--is-inside-work-tree")) return { code: 0, stdout: "true", stderr: "" };
+      if (args.includes("--show-toplevel")) {
+        return { code: 0, stdout: longWork.folderPath, stderr: "" };
+      }
+      if (args[0] === "ls-files") {
+        // 全部が既に記録されている（Gitの知っている話）
+        return {
+          code: 0,
+          stdout: named
+            .map((entry) => `${path.relative(longWork.folderPath, entry).replace(/\\/g, "/")}${NUL}`)
+            .join(""),
+          stderr: "",
+        };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+
+    await offerIndependentRenameCommit(longWork, renames, "第1話を挿入したため、話数を調整", run);
+
+    for (const call of calls) {
+      expect(commandLength(call.args), `${call.args[0]} が長すぎる`).toBeLessThan(32_767);
+    }
+    // **名前の変更は1つのコミットにまとめる**（分けると GitHub 上で改名が割れる）
+    const commits = calls.filter((call) => call.args[0] === "commit");
+    expect(commits).toHaveLength(1);
+    expect(new Set(commits[0].paths)).toEqual(new Set(allPaths));
+    // ステージしたものも、付け替えた全部
+    const added = calls.filter((call) => call.args[0] === "add").flatMap((call) => call.paths);
+    expect(new Set(added)).toEqual(new Set(allPaths));
+  });
+
   test("断ると、何もステージしない", async () => {
     window.showInformationMessage = async () => undefined;
     const run = runner([...noRemoteRepoResponses(), lsFiles("本文/004.txt")]);

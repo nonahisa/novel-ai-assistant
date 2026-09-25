@@ -83,6 +83,14 @@ const EMPHASIS_AS_RUBY = /[|｜]([^|｜《》\r\n]+)《([・･]+)》/g;
  * 捕獲の番号まで含めて意味があるので、**組み合わせるときは順番を変えない**。
  */
 
+/**
+ * 拡張機能の記法 `{漢字|かんじ}`・`{{強調}}`。Word の取り込みが、本文の
+ * `{ } |` が記法として読まれてしまう箇所を探すのに使う（`docxToMarkdown.ts`、
+ * 設計書6.85）。**変換と同じ規則で探さないと、変換で消える箇所を見落とす**
+ */
+export const INTERNAL_RUBY_SOURCE = INTERNAL.source;
+export const INTERNAL_EMPHASIS_SOURCE = EMPHASIS_INTERNAL.source;
+
 /** `｜漢字《かんじ》`。捕獲は［親文字, 読み］の2つ */
 export const SITE_RUBY_BAR_SOURCE = SITE_BAR.source;
 

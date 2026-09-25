@@ -298,8 +298,10 @@ async function foldBoth(
     folded = await foldDivergence(
       { registry: deps.registry, run: deps.run },
       { root: target.root, label: target.label, upstream: status.upstream },
-      // **選ぶ画面は開かない。** 作者は何も押していない（設計書6.15.1）
-      { authorChoice: "stop" }
+      // **選ぶ画面は開かない。** 作者は何も押していない（設計書6.15.1）。
+      // **記録もしない**——統計だけが変わった置き場で「合わせる前の自動保存」
+      // を記録して送っていた（残課題 F6）
+      { authorChoice: "stop", automatic: true }
     );
   } finally {
     resume?.();

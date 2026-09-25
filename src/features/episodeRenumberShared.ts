@@ -3,8 +3,10 @@ import type { EpisodeFile, WorkEntry } from "../models/types";
 import * as path from "../core/paths";
 import { fromUri } from "../core/paths";
 import {
+  commitPaths,
   readSyncStatus,
   runGit,
+  runGitForPaths,
   type GitCommandRunner,
   type GitSyncStatus,
 } from "../core/git";
@@ -215,16 +217,15 @@ export async function offerIndependentRenameCommit(
   if (answer !== "コミットする") return;
 
   const paths = tracked.flatMap((rename) => [rename.fromPath, rename.toPath]);
-  const added = await run(["add", "--", ...paths], root, LOCAL_TIMEOUT_MS);
+  // **200話規模だと、全部を1回の命令に並べると Windows の長さの上限に届く**
+  // （残課題 F2、設計書6.67）。ステージは何回に分けても同じなので束に分け、
+  // コミットは1つのまま、長すぎるときだけパスを標準入力で渡す
+  const added = await runGitForPaths(run, ["add"], paths, root, LOCAL_TIMEOUT_MS);
   if (added.code !== 0) {
     reportGitFailure("追加", added.stderr || added.stdout);
     return;
   }
-  const committed = await run(
-    ["commit", "-m", message, "--", ...paths],
-    root,
-    LOCAL_TIMEOUT_MS
-  );
+  const committed = await commitPaths(run, message, paths, root, LOCAL_TIMEOUT_MS);
   if (committed.code !== 0) {
     reportGitFailure("記録", committed.stderr || committed.stdout);
     return;
@@ -247,8 +248,11 @@ async function trackedRenames(
   root: string,
   run: GitCommandRunner
 ): Promise<EpisodeRename[]> {
-  const result = await run(
-    ["ls-files", "-z", "--", ...done.map((rename) => rename.fromPath)],
+  // 問い合わせも、話数が多ければ束に分ける（答えは繋げば同じ）
+  const result = await runGitForPaths(
+    run,
+    ["ls-files", "-z"],
+    done.map((rename) => rename.fromPath),
     root,
     LOCAL_TIMEOUT_MS
   );

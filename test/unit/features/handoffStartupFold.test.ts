@@ -226,6 +226,72 @@ describe("開いたときの点検：名前の上では重ならないが、合�
   });
 });
 
+/**
+ * **自動の経路では記録（コミット）しない**（設計書6.15.1、引継ぎ書 B15 の残る疑問、残課題 F6）。
+ *
+ * 執筆量の記録（`.aiwriter/stats/`）は保存のたびに書き換わるので、点検は
+ * 「未記録の変更」に数えない（5.5.13）。それで「未記録なし」と判断して
+ * 合わせに進むと、合わせる側（`foldDivergence`）は統計も数えて
+ * 「合わせる前の自動保存」を記録し、送っていた。作者が何も押していないのに
+ * 作者の名前で記録が1つ増えて GitHub へ出ていく。
+ */
+describe("開いたときの点検：統計だけが変わった置き場", { timeout: 30_000 }, () => {
+  test("合わせる前の自動保存を記録せずに合わせて送り、統計の変更は未記録のまま残す", async () => {
+    // 統計のファイルは既に記録されている（端末ごとに1つ）
+    write(root, "短編/.aiwriter/stats/pc.json", '{"days":[]}\n');
+    git(root, "add", "-A");
+    git(root, "commit", "-qm", "統計");
+    git(root, "push", "-q", "origin", "main");
+
+    pushFromOtherMachine("短編/本文/第2話.txt", "別のPCで書いた話\n");
+    // こちらでも書いて記録した（送ってはいない）
+    write(root, "短編/本文/第1話.txt", "いち\nに\nこちら\nし\nご\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-qm", "こちらで書いた");
+    // 保存のたびに書き換わる統計（未記録）
+    write(root, "短編/.aiwriter/stats/pc.json", '{"days":[{"date":"2026-09-25","net":120}]}\n');
+
+    await runStartupHandoff(deps());
+
+    const subjects = git(root, "log", "--format=%s").split("\n");
+    expect(subjects.some((subject) => subject.includes("合わせる前の自動保存"))).toBe(false);
+    // 合わせて送り終えている
+    expect(read("短編/本文/第2話.txt")).toBe("別のPCで書いた話\n");
+    expect(read("短編/本文/第1話.txt")).toBe("いち\nに\nこちら\nし\nご\n");
+    expect(remoteHead()).toBe(git(root, "rev-parse", "HEAD").trim());
+    // 統計は書き換えたまま、記録されずに残っている（次に作者が記録するとき一緒に入る）
+    expect(read("短編/.aiwriter/stats/pc.json")).toContain("2026-09-25");
+    expect(git(root, "status", "--porcelain").trim()).toContain(".aiwriter/stats/pc.json");
+    expect(walkCalls).toEqual([]);
+  });
+
+  test("合わせてみてぶつかり、元へ戻したときも、統計の書き換えは消えない", async () => {
+    // 記録せずに合わせるようになったので、`merge --abort` が未記録の統計を
+    // 巻き込んで消さないことを確かめておく
+    write(root, "短編/.aiwriter/stats/pc.json", '{"days":[]}\n');
+    git(root, "add", "-A");
+    git(root, "commit", "-qm", "統計");
+    git(root, "push", "-q", "origin", "main");
+
+    pushFromOtherMachine("短編/本文/第1話.txt", "いち\nに\nむこう\nし\nご\n");
+    renameHere(
+      "短編/本文/第1話.txt",
+      "短編/本文/第一話.txt",
+      "いち\nに\nこちら\nし\nご\n"
+    );
+    write(root, "短編/.aiwriter/stats/pc.json", '{"days":[{"date":"2026-09-25","net":120}]}\n');
+    const before = git(root, "rev-parse", "HEAD").trim();
+
+    await runStartupHandoff(deps());
+
+    expect(git(root, "rev-parse", "HEAD").trim()).toBe(before);
+    expect(fs.existsSync(nodePath.join(root, ".git", "MERGE_HEAD"))).toBe(false);
+    expect(read("短編/.aiwriter/stats/pc.json")).toContain("2026-09-25");
+    expect(read("短編/本文/第一話.txt")).toBe("いち\nに\nこちら\nし\nご\n");
+    expect(walkCalls).toEqual([]);
+  });
+});
+
 describe("開いたときの点検：名前を変えても、ぶつからなければ合わせて送る", { timeout: 30_000 }, () => {
   test("向こうの直しを、名前を変えた先へ入れて送る", async () => {
     pushFromOtherMachine("短編/本文/第1話.txt", "いち\nに\nむこう\nし\nご\n");

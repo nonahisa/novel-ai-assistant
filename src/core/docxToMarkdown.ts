@@ -1,4 +1,5 @@
 import { unzipSync } from "fflate";
+import { INTERNAL_EMPHASIS_SOURCE, INTERNAL_RUBY_SOURCE } from "./ruby";
 
 /**
  * Word（.docx）の本文を Markdown にする（設計書6.85）。
@@ -33,8 +34,9 @@ import { unzipSync } from "fflate";
  *
  * 本文に `{` `}` `|` が入っていると、こちらが足す記法の印と紛れる。
  * **それでも全角へ寄せたりはしない**——変換で本文を変えたら、それは
- * もう作者の原稿ではない。紛れる恐れがあることを `skipped` で1回だけ
- * 伝えて、直すかどうかは作者に委ねる。
+ * もう作者の原稿ではない。代わりに、**あとで投稿サイト向けに変換したとき
+ * 本当にルビ・傍点として読まれてしまう行**を行番号で返し（`notationClashLines`）、
+ * 直すかどうかは作者に委ねる（残課題 F3。探し方は `findNotationClashLines`）。
  *
  * VS Code API に依存しない（単体テストできる）。
  */
@@ -60,8 +62,14 @@ export interface DocxConversion {
   rubyCount: number;
   /** `{{強調}}` にした傍点の件数（続いた run はまとめて1件） */
   emphasisCount: number;
-  /** 落としたもの・気をつけてほしいことを、作者に読める言葉で */
+  /** 落としたもの（画像・表など）を、作者に読める言葉で */
   skipped: string[];
+  /**
+   * 本文の `{ } |` が記法の形になっていて、投稿サイト向けに変換すると
+   * ルビ・傍点として読まれてしまう行（1から数えた .md の行番号）。
+   * **`skipped` には入れない**——その字は .md に入っている
+   */
+  notationClashLines: number[];
 }
 
 /**
@@ -95,11 +103,30 @@ export function docxToMarkdown(bytes: Uint8Array): DocxConversion {
 
   const decoder = new TextDecoder();
   const styles = files[STYLES_PART];
-  const builder = new DocumentBuilder(
-    styles ? headingStyleIds(decoder.decode(styles)) : new Map()
-  );
-  scanXml(decoder.decode(document), builder);
-  const conversion = builder.finish();
+  const headings: ReadonlyMap<string, number> = styles
+    ? headingStyleIds(decoder.decode(styles))
+    : new Map();
+  const documentXml = decoder.decode(document);
+  const builder = new DocumentBuilder(headings, REAL_MARKS);
+  scanXml(documentXml, builder);
+  const built = builder.finish();
+
+  /*
+    **記法の印を、本文に出てこない字へ差し替えた写しをもう1つ組む。**
+    同じ走査を印だけ変えて通すので、写しは本文と1字ずつ同じ位置になる。
+    こちらが足した印の位置は写しから分かり、それ以外の場所で記法が
+    読めたら、それは本文の `{ } |` が作った形である（run が割れて
+    いても、段落を組み上げたあとで比べるので拾える）
+  */
+  const shadow = new DocumentBuilder(headings, SHADOW_MARKS);
+  scanXml(documentXml, shadow);
+  const conversion: DocxConversion = {
+    ...built,
+    notationClashLines: findNotationClashLines(
+      built.markdown,
+      shadow.finish().markdown
+    ),
+  };
 
   /*
     **1文字も取れなかったら断る。** 0字の .md を作って「変換しました」と
@@ -382,6 +409,100 @@ function trimXmlSpace(text: string): string {
 }
 
 /** 段落の中の一片。傍点かどうかだけを分けて持つ */
+/** 記法の印。本物と、紛れを探すための写しで差し替える */
+interface NotationMarks {
+  rubyOpen: string;
+  rubySeparator: string;
+  rubyClose: string;
+  emphasisOpen: string;
+  emphasisClose: string;
+}
+
+const REAL_MARKS: NotationMarks = {
+  rubyOpen: "{",
+  rubySeparator: "|",
+  rubyClose: "}",
+  emphasisOpen: "{{",
+  emphasisClose: "}}",
+};
+
+/**
+ * 写しに使う印。**私用領域の字**（U+E000〜U+E004）で、本文の文字にも記法にも
+ * 当たらない。本物の印と**字数を同じにする**（位置をずらさないため）
+ */
+const SHADOW_MARKS: NotationMarks = {
+  rubyOpen: "\uE000",
+  rubySeparator: "\uE001",
+  rubyClose: "\uE002",
+  emphasisOpen: "\uE003\uE003",
+  emphasisClose: "\uE004\uE004",
+};
+
+/** 写しの中の、こちらが足したルビと傍点 */
+const SHADOW_RUBY = /\uE000[^\uE000-\uE004]*\uE001[^\uE000-\uE004]*\uE002/gu;
+const SHADOW_EMPHASIS = /\uE003\uE003[^\uE000-\uE004]*\uE004\uE004/gu;
+
+/**
+ * 本文の `{ } |` が記法として読まれてしまう行を探す（残課題 F3）。
+ *
+ * **変換と同じ規則（`ruby.ts` の記法）で本文を読み、読めた箇所が
+ * こちらの足した印とぴったり重なるかを見る。** ずれがあれば、その行は
+ * 投稿サイト向けの変換で作者の意図と違う形になる——本文の `{a|b}` が
+ * ルビになって字が消える、本文の `|` でこちらのルビが読めなくなる、
+ * 本文の `{ }` がこちらのルビを包んで傍点になる、のどれか。
+ *
+ * `{c}` や `a|b` のように記法の形にならない字は、変換でも残るので数えない。
+ *
+ * @param markdown 本物の印で組んだ .md
+ * @param shadow 同じ文書を `SHADOW_MARKS` で組んだもの（字数が同じ）
+ */
+export function findNotationClashLines(markdown: string, shadow: string): number[] {
+  const realLines = markdown.split("\n");
+  const shadowLines = shadow.split("\n");
+  const clashes: number[] = [];
+  realLines.forEach((line, index) => {
+    if (!/[{}|]/.test(line)) return;
+    const read = new Set([
+      ...spansOf(line, new RegExp(INTERNAL_RUBY_SOURCE, "g")),
+      ...spansOf(line, new RegExp(INTERNAL_EMPHASIS_SOURCE, "g")),
+    ]);
+    const added = new Set([
+      ...spansOf(shadowLines[index] ?? "", SHADOW_RUBY),
+      ...spansOf(shadowLines[index] ?? "", SHADOW_EMPHASIS),
+    ]);
+    const same =
+      read.size === added.size && [...read].every((span) => added.has(span));
+    if (!same) clashes.push(index + 1);
+  });
+  return clashes;
+}
+
+/**
+ * 紛れの行を、作者に見せる短い言葉にする（「3・15・40行目」）。
+ * 行が多いときは先頭の5つだけ並べて残りを数で言う（通知が画面を覆わないように）。
+ */
+export function describeNotationClashLines(lines: readonly number[]): string {
+  const shown = lines.slice(0, 5).join("・");
+  return `${shown}行目${lines.length > 5 ? ` ほか${lines.length - 5}行` : ""}`;
+}
+
+/**
+ * 紛れがあったことの知らせ（取り込み・持ち込みの両方で同じ言い方にする）。
+ * **入らなかったものとは別に言う**——字は .md に入っている。気をつけるのは、
+ * あとで投稿サイト向けに変換したときである。
+ */
+export const NOTATION_CLASH_ADVICE =
+  "本文の { } | がルビ・傍点の書き方と同じ形になっています。" +
+  "投稿サイト向けに変換すると記法として読まれ、字が消えます（本文はそのままです）";
+
+/** 正規表現が読めた範囲を「始まり:終わり」の形で並べる */
+function spansOf(line: string, pattern: RegExp): string[] {
+  pattern.lastIndex = 0;
+  return [...line.matchAll(pattern)].map(
+    (match) => `${match.index}:${match.index + match[0].length}`
+  );
+}
+
 interface Piece {
   text: string;
   emphasized: boolean;
@@ -467,14 +588,15 @@ class DocumentBuilder implements XmlSink {
   private comments = 0;
   /** `#` にせず地の文にした、深い見出し（`heading 4` 以降）の段落数 */
   private deepHeadings = 0;
-  /** 本文に `{` `}` `|` が居たか（記法の印と紛れる） */
-  private notationClash = false;
 
   /**
    * @param headingStyles `word/styles.xml` から引いた styleId → 見出しの深さ。
    *   空でもよい（そのときは `Heading1` のような名前だけが頼りになる）
    */
-  constructor(private readonly headingStyles: ReadonlyMap<string, number>) {}
+  constructor(
+    private readonly headingStyles: ReadonlyMap<string, number>,
+    private readonly marks: NotationMarks
+  ) {}
 
   open(name: string, attributes: Readonly<Record<string, string>>): void {
     const parent = this.stack[this.stack.length - 1];
@@ -635,7 +757,7 @@ class DocumentBuilder implements XmlSink {
     this.capture.text += text;
   }
 
-  finish(): DocxConversion {
+  finish(): Omit<DocxConversion, "notationClashLines"> {
     // 走査の途中で終わっても、書きかけの段落は落とさない
     if (this.pieces) this.flushParagraph();
 
@@ -668,12 +790,6 @@ class DocumentBuilder implements XmlSink {
     if (this.deepHeadings > 0) {
       skipped.push(`見出し4以下は地の文にしました ${this.deepHeadings}段落`);
     }
-    if (this.notationClash) {
-      skipped.push(
-        "本文に { } | があるため記法と紛れる可能性があります（本文はそのままにしてあります）"
-      );
-    }
-
     return {
       markdown: lines.length > 0 ? `${lines.join("\n")}\n` : "",
       rubyCount: this.rubyCount,
@@ -700,10 +816,6 @@ class DocumentBuilder implements XmlSink {
     const text = capture.preserve ? capture.text : trimXmlSpace(capture.text);
     if (!text) return;
 
-    // 記法の印と紛れる字は、**本文の文字のときだけ**数える
-    // （こちらが足す `{` `|` `}` は当然ぶつからない）
-    if (/[{}|]/.test(text)) this.notationClash = true;
-
     if (this.ruby && this.ruby.part === "reading") {
       this.ruby.reading += text;
       return;
@@ -727,7 +839,11 @@ class DocumentBuilder implements XmlSink {
     }
     this.rubyCount += 1;
     // ルビの印は傍点で包まない（`{{...}}` の中に `{...|...}` を入れない）
-    this.append(`{${ruby.base}|${ruby.reading}}`, false);
+    const marks = this.marks;
+    this.append(
+      `${marks.rubyOpen}${ruby.base}${marks.rubySeparator}${ruby.reading}${marks.rubyClose}`,
+      false
+    );
   }
 
   private append(text: string, emphasized: boolean): void {
@@ -781,7 +897,7 @@ class DocumentBuilder implements XmlSink {
       }
       if (!group) continue;
       this.emphasisCount += 1;
-      out += `{{${group}}}`;
+      out += `${this.marks.emphasisOpen}${group}${this.marks.emphasisClose}`;
     }
     return out;
   }

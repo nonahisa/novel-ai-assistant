@@ -1,7 +1,11 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
 import { AtomicWriteFileError, atomicWriteFile } from "../core/atomicWrite";
-import { docxToMarkdown } from "../core/docxToMarkdown";
+import {
+  NOTATION_CLASH_ADVICE,
+  describeNotationClashLines,
+  docxToMarkdown,
+} from "../core/docxToMarkdown";
 import { pathExists } from "../core/fileSystem";
 import { timestampedFileNameCandidates } from "../core/timestampedFileName";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
@@ -42,6 +46,8 @@ interface FileResult {
   ruby: number;
   emphasis: number;
   skipped: string[];
+  /** 本文の { } | が記法の形になっている .md の行（残課題 F3） */
+  clashLines: number[];
 }
 
 export async function convertDocxToMarkdown(
@@ -115,6 +121,7 @@ export async function convertDocxToMarkdown(
             ruby: converted.rubyCount,
             emphasis: converted.emphasisCount,
             skipped: converted.skipped,
+            clashLines: converted.notationClashLines,
           });
         } catch (error) {
           // **1件失敗しても残りは進める。** 途中で止めると、どこまで
@@ -346,6 +353,15 @@ async function reportResult(
     .map((entry) => `${entry.name}：${entry.skipped.join("、")}`);
   if (dropped.length > 0) {
     notes.push(`入らなかったもの → ${summarize(dropped, " / ")}`);
+  }
+  // **入らなかったものとは別に言う**（残課題 F3）。字は .md に入っていて、
+  // 気をつけるのはあとで投稿サイト向けに変換するときである。どの行かまで
+  // 言わないと、作者は探しようがない
+  const clashes = done
+    .filter((entry) => entry.clashLines.length > 0)
+    .map((entry) => `${entry.name}：${describeNotationClashLines(entry.clashLines)}`);
+  if (clashes.length > 0) {
+    notes.push(`${NOTATION_CLASH_ADVICE} → ${summarize(clashes, " / ")}（.md の行番号）。`);
   }
   if (failed.length > 0) {
     // **落としたもの側と同じ揃え方にする。** 片方だけ全部並べると、

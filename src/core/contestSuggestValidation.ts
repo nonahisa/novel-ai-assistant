@@ -61,6 +61,12 @@ export function validateContestSuggestions(
 ): { suggestions: ContestSuggestion[]; notes: string[] } | undefined {
   const parsed = parseJson(text);
   if (!parsed || !Array.isArray(parsed.suggestions)) return undefined;
+  // **空の配列は「合う公募なし」という正しい答え**（残課題 F8）。プロンプトが
+  // 「合う候補が無ければ空の配列に」と頼んでいる。読めなかったときと同じ
+  // undefined にすると、頼んだとおりに答えたAIを失敗として扱うことになる。
+  // 挙げたものが検算で全部落ちたときは、下で今までどおり undefined にする
+  // （それは「無い」という答えではなく、読める答えが無かった）
+  if (parsed.suggestions.length === 0) return { suggestions: [], notes: [] };
 
   const byId = new Map(candidates.map((candidate) => [idKey(candidate.id), candidate]));
   const byName = new Map(candidates.map((candidate) => [nameKey(candidate.name), candidate]));

@@ -44,6 +44,8 @@ export interface WordManuscript {
   readonly emphasisCount: number;
   /** 変換で入らなかったもの（画像・表など）。作者に見せる言葉 */
   readonly skipped: readonly string[];
+  /** 本文の { } | が記法の形になっている行（残課題 F3。`docxToMarkdown` の同名の欄） */
+  readonly notationClashLines: readonly number[];
   /** 本文の純文字数 */
   readonly charCount: number;
 }
@@ -63,6 +65,7 @@ export function readWordManuscript(bytes: Uint8Array, fileName: string): WordMan
     rubyCount: converted.rubyCount,
     emphasisCount: converted.emphasisCount,
     skipped: converted.skipped,
+    notationClashLines: converted.notationClashLines,
     charCount: countEpisodeChars(converted.markdown, { ext: ".md", excludeRuby: false }).net,
   };
 }

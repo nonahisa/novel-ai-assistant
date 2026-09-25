@@ -270,6 +270,30 @@ describe("一括変換（設計書6.85）", () => {
     expect(info).toContain("画像 1件");
   });
 
+  /**
+   * 残課題 F3。**入らなかったものとは別に、どの行かまで言う。** 以前は
+   * 「入らなかったもの → 本文に { } | があるため…」と、入っているのに
+   * 入らなかった欄へ混ぜて、場所も言わなかった。
+   */
+  test("本文の { } | が記法の形になっている行は、入らなかったものと分けて行番号で伝える", async () => {
+    put(
+      path.join("本文", "第1話.docx"),
+      docxOf(
+        "<w:p><w:r><w:t>ふつうの行</w:t></w:r></w:p>" +
+          "<w:p><w:r><w:t>式は {a|b} と書く</w:t></w:r></w:p>"
+      )
+    );
+
+    await convertDocxToMarkdown(work);
+
+    const info = textOf("info");
+    expect(info).toContain("第1話.docx：2行目");
+    expect(info).toContain("投稿サイト向けに変換すると記法として読まれ");
+    expect(info).not.toContain("入らなかったもの");
+    // 本文は変えない
+    expect(read(path.join("本文", "第1話.md"))).toBe("ふつうの行\n式は {a|b} と書く\n");
+  });
+
   test("確認で取りやめたら、1件も作らない", async () => {
     put(path.join("本文", "第1話.docx"), docxOf("<w:p><w:r><w:t>本文</w:t></w:r></w:p>"));
     window.showWarningMessage = (async (message: string) => {
