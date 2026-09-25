@@ -352,3 +352,73 @@ describe("その話の語り手", () => {
     expect(found.slips.map((slip) => slip.line)).toEqual([8]);
   });
 });
+
+describe("一人称の少ない話（2026-09-25 午後の3巡目の見逃し）", () => {
+  /*
+    実測：初恋相手の王女の第3話は、地の文の一人称が「俺」5・「僕」2・「わし」1
+    （0.63）。「俺が」を名前に1つ替えると 4/7＝0.57 になり、下限 0.6 を割って
+    話ごと not_narrator_episode で飛ばしていた（仕込み3件のうち見逃した1件）。
+    **よじれそのものが、語り手の一人称を1つ減らす**。同じ数の形で押さえる
+  */
+  const FEW_FIRST_PERSONS =
+    `${ore(4)}\n` +
+    "　こんなところで相沢が膝をつくわけにはいかない。\n" +
+    "　僕の番だ、と少年の手紙は結ばれていた。\n" +
+    "　僕の名を呼ぶ声がした、とも書いてあった。\n" +
+    "　わしの知ったことではない、と老人の返事は短い。";
+
+  test("よじれ1か所で割合が線を割る話でも、そのよじれを拾う", () => {
+    const found = findNarratorNameSlips({
+      text: FEW_FIRST_PERSONS,
+      narrator: NARRATOR,
+      people: [HARUTO, CHINATSU],
+    });
+    expect(found.skipped).toBeUndefined();
+    expect(found.slips.map((slip) => [slip.line, slip.original, slip.suggestion])).toEqual([
+      [5, "相沢が", "俺が"],
+    ]);
+  });
+
+  test("数え直しても、実際の一人称が下限（3回）に届かない話は見ない", () => {
+    const text =
+      `${ore(2)}\n` +
+      "　こんなところで相沢が膝をつくわけにはいかない。\n" +
+      "　相沢は立ち上がった。";
+    const found = findNarratorNameSlips({
+      text,
+      narrator: NARRATOR,
+      people: [HARUTO, CHINATSU],
+    });
+    expect(found).toEqual({ slips: [], skipped: "not_narrator_episode" });
+  });
+
+  test("多視点の章（千夏の「私」が多く、心の声の「俺」が混じる）では、数え直しても拾わない", () => {
+    const text =
+      Array.from(
+        { length: 6 },
+        (_, index) => `　私は窓口で伝票を数えた。${index}`
+      ).join("\n") +
+      "\n　俺には関係ない、と誰かの声が聞こえた気がした。\n" +
+      "　俺なら行く、と書いた紙が落ちていた。\n" +
+      "　俺も、と言いかけて口をつぐむ客がいた。\n" +
+      "　春人は今日も坂を上っている。\n" +
+      "　春人が来るのは夕方だ。";
+    const found = findNarratorNameSlips({
+      text,
+      narrator: NARRATOR,
+      people: [HARUTO, CHINATSU],
+    });
+    expect(found).toEqual({ slips: [], skipped: "not_narrator_episode" });
+  });
+
+  test("多すぎるかは、実際に書かれた一人称の数で見る（数え直した数では緩めない）", () => {
+    // 「俺」5回に名前2回：数え直すと7回だが、許すのは実際の5回に対する1回まで
+    const text = `${ore(5)}\n　相沢は笑った。\n　相沢が走った。`;
+    const found = findNarratorNameSlips({
+      text,
+      narrator: NARRATOR,
+      people: [HARUTO, CHINATSU],
+    });
+    expect(found).toEqual({ slips: [], skipped: "too_many" });
+  });
+});

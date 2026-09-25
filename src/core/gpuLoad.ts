@@ -11,7 +11,9 @@
  * - `nvidia-smi`（NVIDIA の GPU のときだけ）：使用率と、GPU のメモリの使用量・全体
  * - Ollama の `/api/ps`：いま読み込まれているモデルと、それが GPU に載せた量
  *   （**Ollama 自身が載せた分は「ほかのアプリ」から差し引く**——前の実行で
- *   こちらが載せたモデルが、しばらく残っているのはふつうのことだから）
+ *   こちらが載せたモデルが、しばらく残っているのはふつうのことだから）。
+ *   **GPU に入りきらず CPU と分けて載せたモデルがあれば、メモリの線は見ない**
+ *   （空いたメモリをそのモデルが埋め、申告も当てにならない。`isSplitAcrossCpu`）
  *
  * ## 閾値（2026-09-25 に作者の機械で実測。RTX 4060 Ti 8GB）
  *
@@ -155,8 +157,27 @@ export function parseNvidiaSmi(stdout: string): GpuSample[] {
 /** Ollama に読み込まれているモデル1つ */
 export interface OllamaLoadedModel {
   readonly name: string;
+  /**
+   * 載せた量の全体（バイト。`/api/ps` の `size`）。**分けて載せたかの判定にだけ使う**
+   * ——値そのものは当てにならない（gemma4:26b で 1.2GB と答えた。下の `isSplitAcrossCpu`）。
+   * 応答に無ければ省く
+   */
+  readonly sizeBytes?: number;
   /** GPU に載せた量（バイト） */
   readonly sizeVramBytes: number;
+}
+
+/**
+ * GPU に入りきらず、CPU と分けて載せたモデルか（`size` が `size_vram` より大きい）。
+ *
+ * **分けて載せたモデルは、読み込むときに空いている GPU のメモリをほぼ埋める**
+ * ので、そのあいだは GPU の使用量から「ほかのアプリ」の分を読めない。しかも
+ * 申告の量が当てにならない（2026-09-25 実測：gemma4:26b は GPU を約6.5GB 使って
+ * いるのに、`size` 1.2GB・`size_vram` 0.9GB と答えた）。`size` が無い応答では
+ * 決められないので、分けていないものとして扱う（今までどおり）。
+ */
+export function isSplitAcrossCpu(model: OllamaLoadedModel): boolean {
+  return model.sizeBytes !== undefined && model.sizeBytes > model.sizeVramBytes;
 }
 
 /** `/api/ps` の応答を読む。形が違えば undefined */
@@ -175,7 +196,15 @@ export function parseOllamaPs(value: unknown): OllamaLoadedModel[] | undefined {
           ? record.model
           : "";
     const vram = typeof record.size_vram === "number" ? record.size_vram : 0;
-    loaded.push({ name, sizeVramBytes: Math.max(0, vram) });
+    const size =
+      typeof record.size === "number" && Number.isFinite(record.size)
+        ? Math.max(0, record.size)
+        : undefined;
+    loaded.push({
+      name,
+      ...(size !== undefined ? { sizeBytes: size } : {}),
+      sizeVramBytes: Math.max(0, vram),
+    });
   }
   return loaded;
 }
@@ -273,7 +302,13 @@ export function judgeExternalLoad(input: ExternalLoadInput): ExternalLoadJudgeme
   if (!settling && utilization >= GPU_BUSY_UTILIZATION_PERCENT) {
     reasons.push(`GPU の使用率が ${Math.round(utilization)}% です`);
   }
-  const watchesMemory = input.providerId !== "lmstudio";
+  // **Ollama が GPU と CPU に分けて載せたモデルがあれば、メモリの線を見ない**
+  // （2026-09-25 午後。`isSplitAcrossCpu`）。空いたメモリをそのモデルが埋めて
+  // いるので、使用量はほかのアプリの量を表さず、申告も当てにならない。
+  // 26b を使うたびに「ほかのアプリが 6.7GB」と読んで警告していた
+  const splitModels = (input.ollamaModels ?? []).filter(isSplitAcrossCpu);
+  const isLmStudio = input.providerId === "lmstudio";
+  const watchesMemory = !isLmStudio && splitModels.length === 0;
   if (watchesMemory && otherMiB >= limitMiB) {
     reasons.push(
       `ほかのアプリが GPU のメモリを ${gib(otherMiB)} 使っています（全体 ${gib(totalMiB)}）`
@@ -291,7 +326,14 @@ export function judgeExternalLoad(input: ExternalLoadInput): ExternalLoadJudgeme
     }）、` +
     `メモリ ${Math.round(usedMiB)}/${Math.round(totalMiB)}MiB、` +
     `ほかのアプリ ${Math.round(otherMiB)}MiB（線 ${limitMiB}MiB` +
-    `${watchesMemory ? "" : "、LM Studio へ送るので見ない"}）、${ollamaText}`;
+    `${
+      isLmStudio
+        ? "、LM Studio へ送るので見ない"
+        : splitModels.length > 0
+          ? `、${splitModels.map((model) => model.name).join("・")} を Ollama が GPU と CPU に分けて` +
+            "載せているので見ない"
+          : ""
+    }）、${ollamaText}`;
 
   return { external: reasons.length > 0, reasons, summary };
 }

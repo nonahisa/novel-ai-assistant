@@ -73,7 +73,7 @@ describe("Ollama の /api/ps の読み取り", () => {
       ],
     });
     expect(models).toEqual([
-      { name: "gemma4:e4b", sizeVramBytes: 3253731328 },
+      { name: "gemma4:e4b", sizeBytes: 3253731328, sizeVramBytes: 3253731328 },
       { name: "x:1b", sizeVramBytes: 0 },
     ]);
     expect(parseOllamaPs({ models: [] })).toEqual([]);
@@ -160,7 +160,10 @@ describe("管理の外の負荷とみなすか（実測の数字で）", () => {
 
   test("札を取らない使い手が読み込んでいる途中は、一覧の申告が少なく「ほかのアプリ」に見える", () => {
     // 実測（2026-09-25、別の担当が gemma4:26b を回していたとき）：メモリ 7,630MiB、
-    // 一覧は gemma4:26b の 881MiB だけ。差し引いても 6.7GB 残るので気づく
+    // 一覧は gemma4:26b の 881MiB だけ。差し引いても 6.7GB 残るので気づく。
+    // **同じ日の午後に、これは読み込みの途中ではなく「GPU と CPU に分けて載せた
+    // 26b が残っている」形だったと分かった**（下の「分けて載せたモデル」）。
+    // ここでは応答に size が無い（分けたかを決められない）ときの今までの扱いを押さえる
     const judgement = judgeExternalLoad({
       gpuSamples: [[gpu(7630, 0)], [gpu(7630, 0)], [gpu(7630, 0)]],
       ollamaModels: [{ name: "gemma4:26b", sizeVramBytes: 881 * 1024 * 1024 }],
@@ -354,5 +357,81 @@ describe("直前の管理下の送信の名残（設計書6.76.2、作者の判�
     ).toBe(true);
     // 時計のずれで「未来に送り終えた」と読めたら、終えた直後として扱う
     expect((await probe(async () => 1_002_000)).external).toBe(false);
+  });
+});
+
+describe("Ollama が GPU と CPU に分けて載せたモデル（2026-09-25 午後の3巡目）", () => {
+  /*
+    実測（作者の機械 RTX 4060 Ti 8GB・Ollama 0.34.2）：gemma4:26b（ファイル 17.3GB）を
+    文脈16,384 で載せると、GPU 全体は 1,148MiB → 7,723MiB に増えるのに、`/api/ps` は
+    size 1,227,557,434・size_vram 902,960,248（約0.9GB）と答える。差の約6.7GB を
+    「ほかのアプリ」と読んで、26b を使うたびに警告していた（18回中17回）。
+    **size と size_vram の両方が実際より小さく、差し引きでは直せない**。
+    分けて載せたモデルは、読み込むときに空いている GPU のメモリをほぼ埋めるので、
+    そのあいだは使用量からほかのアプリの分を読めない
+  */
+  const GEMMA26B_SPLIT = {
+    name: "gemma4:26b",
+    sizeBytes: 1227557434,
+    sizeVramBytes: 902960248,
+  };
+
+  test("26b が残っているだけ（7,723MiB・使用率 0%）では騒がない", () => {
+    const judgement = judgeExternalLoad({
+      gpuSamples: [[gpu(7723, 0)], [gpu(7723, 0)], [gpu(7723, 0)]],
+      ollamaModels: [GEMMA26B_SPLIT],
+      providerId: "ollama",
+    });
+    expect(judgement.external).toBe(false);
+    expect(judgement.reasons).toEqual([]);
+    // ログには、メモリの線を見なかったことと、その理由を残す
+    expect(judgement.summary).toContain("GPU と CPU に分けて");
+  });
+
+  test("26b のあとに e4b を送る前の測定（まだ 26b が載っている）でも騒がない", () => {
+    // 実測の3巡目のログ：7,565〜7,779MiB・gemma4:26b(0.8〜0.9GB)
+    for (const used of [7565, 7632, 7779]) {
+      const judgement = judgeExternalLoad({
+        gpuSamples: [[gpu(used, 2)], [gpu(used, 0)], [gpu(used, 0)]],
+        ollamaModels: [GEMMA26B_SPLIT],
+        providerId: "ollama",
+      });
+      expect(judgement.external, `${used}MiB`).toBe(false);
+    }
+  });
+
+  test("分けて載せていても、使用率の線は今までどおり見る（ほかの使い手が生成している）", () => {
+    const judgement = judgeExternalLoad({
+      gpuSamples: [[gpu(7723, 97)], [gpu(7723, 96)], [gpu(7723, 90)]],
+      ollamaModels: [GEMMA26B_SPLIT],
+      providerId: "ollama",
+    });
+    expect(judgement.external).toBe(true);
+    expect(judgement.reasons).toEqual(["GPU の使用率が 96% です"]);
+  });
+
+  test("GPU にすべて載ったモデル（size と size_vram が同じ）なら、メモリの線は今までどおり", () => {
+    // 実測：gemma4:e4b は size と size_vram が同じ 3,254,161,242（5,393MiB のとき）。
+    // そこへほかのアプリが 3GB 以上を足していれば気づく
+    const judgement = judgeExternalLoad({
+      gpuSamples: [[gpu(8100, 0)], [gpu(8100, 0)], [gpu(8100, 0)]],
+      ollamaModels: [
+        { name: "gemma4:e4b", sizeBytes: 3254161242, sizeVramBytes: 3254161242 },
+      ],
+      providerId: "ollama",
+    });
+    expect(judgement.external).toBe(true);
+    expect(judgement.reasons[0]).toContain("ほかのアプリが GPU のメモリ");
+  });
+
+  test("/api/ps の size も読む（分けて載せたかの判定に使う）", () => {
+    expect(
+      parseOllamaPs({
+        models: [
+          { name: "gemma4:26b", size: 1227557434, size_vram: 902960248 },
+          { name: "old", size_vram: 5 },
+        ],
+      })
+    ).toEqual([GEMMA26B_SPLIT, { name: "old", sizeVramBytes: 5 }]);
   });
 });

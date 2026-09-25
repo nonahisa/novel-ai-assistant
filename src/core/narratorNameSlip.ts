@@ -25,8 +25,9 @@ import { countNarrationFirstPersons } from "./workStyleFacts";
  * 2. **その話も**、その一人称で語られている（多視点の作品で、千夏の「私」の章に
  *    出る「春人は」を拾わないため）。**さらに場面ごとに**確かめ、場面の区切り
  *    （「◆◇◆◇」「＊＊＊」。`sceneBreaks.ts`）の後の三人称の場面は見ない
- *    （2026-09-25 の2回目）
- * 3. 名前の形が、ほかの人物の名前・別名と重ならない（兄妹で同じ苗字なら苗字は見ない）
+ *    （2026-09-25 の2回目）。割合を見るときは、**よじれの候補を語り手の一人称として
+ *    数え直す**（よじれ自身が一人称を1つ減らすため。`narratorShareHolds`）
+ * 3.名前の形が、ほかの人物の名前・別名と重ならない（兄妹で同じ苗字なら苗字は見ない）
  * 4. 見つかった数が、その話の一人称の数に比べて少ない（多ければ、三人称の地の文に
  *    心の声の「俺」が混じる書き方なので、よじれではなく作者の文体である）
  *
@@ -160,6 +161,24 @@ export function findNarratorNameSlips(options: {
   const { narrator } = options;
   // シーンメモは本文ではない。**行は消さずに空にする**（行番号を保つ）
   const body = blankMemoLines(options.text);
+  const rawLines = body.split("\n");
+
+  const forms = narratorNameForms(narrator, options.people);
+  const pattern = forms.length > 0 ? slipPattern(forms) : null;
+  // 台詞は**入れ子を数えて**伏せる（`quotedSpans.ts`）。「…『死の谷』…」の』で
+  // 台詞が閉じたと見ると、残りの台詞を地の文として拾う（教科書チート18話）
+  const maskedLines = maskQuoted(body, "　").split("\n");
+  /** 行の範囲にある、よじれの候補の数（語り手の判定で一人称として数え直す分） */
+  const candidatesIn = (start: number, end: number): number => {
+    if (!pattern) return 0;
+    let found = 0;
+    for (let index = start; index < end; index++) {
+      const masked = maskedLines[index] ?? "";
+      if (/^\s*#/u.test(masked)) continue;
+      for (const _ of masked.matchAll(pattern)) found += 1;
+    }
+    return found;
+  };
 
   // **その話が、本当にその語り手の一人称で語られているか。** 多視点の作品で、
   // 千夏の「私」の章に出る「春人は」は、よじれではない
@@ -169,12 +188,11 @@ export function findNarratorNameSlips(options: {
   for (const count of counts.values()) total += count;
   if (
     hits < MIN_EPISODE_FIRST_PERSON_HITS ||
-    hits / total < MIN_EPISODE_FIRST_PERSON_SHARE
+    !narratorShareHolds(hits, total, candidatesIn(0, rawLines.length))
   ) {
     return { slips: [], skipped: "not_narrator_episode" };
   }
 
-  const rawLines = body.split("\n");
   // **場面ごとに、その場面が語り手の一人称かを確かめる**（2026-09-25 の2回目）。
   // 一人称の話の後半に「◆◇◆◇」を挟んで三人称の場面が続くと、話の単位の判定を
   // 越えてそこの名前を拾っていた（教科書チート127話）
@@ -189,22 +207,18 @@ export function findNarratorNameSlips(options: {
     for (const count of sceneCounts.values()) sceneTotal += count;
     if (
       own < MIN_SCENE_FIRST_PERSON_HITS ||
-      own / sceneTotal < MIN_EPISODE_FIRST_PERSON_SHARE
+      !narratorShareHolds(own, sceneTotal, candidatesIn(scene.start, scene.end))
     ) {
       continue;
     }
     scenes.push(scene);
+    // **ここは数え直さない**（多すぎるかの判定は、実際に書かれた一人称の数で見る）
     sceneHits += own;
   }
   if (scenes.length === 0) return { slips: [], skipped: "not_narrator_episode" };
 
-  const forms = narratorNameForms(narrator, options.people);
-  if (forms.length === 0) return { slips: [], skipped: "no_name_form" };
-  const pattern = slipPattern(forms);
+  if (!pattern) return { slips: [], skipped: "no_name_form" };
 
-  // 台詞は**入れ子を数えて**伏せる（`quotedSpans.ts`）。「…『死の谷』…」の』で
-  // 台詞が閉じたと見ると、残りの台詞を地の文として拾う（教科書チート18話）
-  const maskedLines = maskQuoted(body, "　").split("\n");
   const slips: NarratorNameSlip[] = [];
   for (const scene of scenes) {
     for (let index = scene.start; index < scene.end; index++) {
@@ -236,6 +250,26 @@ export function findNarratorNameSlips(options: {
   const allowed = Math.max(1, Math.floor(sceneHits / FIRST_PERSON_PER_SLIP));
   if (slips.length > allowed) return { slips: [], skipped: "too_many" };
   return { slips };
+}
+
+/**
+ * 地の文の一人称のうち、語り手のものが一定の割合を占めるか。
+ *
+ * **よじれの候補を、語り手の一人称として数え直してから割合を見る**
+ * （2026-09-25 午後の3巡目）。よじれは「俺は」を「相沢は」と書いたものなので、
+ * それ自体が語り手の一人称を1つ減らす。一人称の少ない話では、それだけで割合が
+ * 線を割り、話ごと「語り手の話ではない」と飛ばしていた（初恋相手の王女の第3話：
+ * 「俺」5・ほか3 の 0.63 が、1か所のよじれで 4/7＝0.57 になり、下限 0.6 を割った）。
+ *
+ * **下限の数（`MIN_EPISODE_FIRST_PERSON_HITS` など）は数え直さない。** 名前だけで
+ * 「語り手の話」に仕立てると、三人称の章で主語に立つ名前を拾いかねない。
+ * 実際に書かれた一人称が下限に届いたうえで、割合だけを直す。
+ */
+function narratorShareHolds(own: number, total: number, candidates: number): boolean {
+  const recounted = own + candidates;
+  const recountedTotal = total + candidates;
+  if (recountedTotal === 0) return false;
+  return recounted / recountedTotal >= MIN_EPISODE_FIRST_PERSON_SHARE;
 }
 
 /**
