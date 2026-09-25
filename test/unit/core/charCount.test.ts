@@ -154,6 +154,48 @@ describe("原稿用紙換算", () => {
 });
 
 /**
+ * 「約N枚」を禁則つきで数える（2026-09-26 精査 R9。設計書6.3.1）。
+ *
+ * それまでは行ごとに「字数÷20の切り上げ」だけで、行頭の句読点・閉じ括弧を
+ * 考えていなかった。公募の納品用の組み方（`manuscriptGrid.ts` の
+ * `breakIntoLines`。PDF の「公募の納品用」と同じもの）で行を割るようにした。
+ * **表示の枚数が変わるのは、次の3つの形の行があるときだけ**である。
+ */
+describe("原稿用紙換算は禁則を考えて行を割る", () => {
+  test("20マスのあとの句読点は、行末の外へぶら下げて1行に収める", () => {
+    // 割り算では21字＝2行。原稿用紙では「。」を最後のマスの外へ出すので1行
+    expect(countManuscriptLines("あ".repeat(20) + "。")).toBe(1);
+    expect(countManuscriptLines("あ".repeat(20) + "、")).toBe(1);
+  });
+
+  test("行頭に来る閉じ括弧は前の字ごと送るので、行が増えることがある", () => {
+    // 21字目の「」」は行頭に置けない。前の「あ」ごと次の行へ送ると
+    // 1行目は19マス、2行目は20マス、残り1字で3行になる（割り算では40字＝2行）
+    const line = "あ".repeat(20) + "」" + "い".repeat(19);
+    expect(countManuscriptLines(line)).toBe(3);
+  });
+
+  test("行の途中の半角数字1〜2字は縦中横で1マスに入る", () => {
+    // 原稿用紙は縦書きなので、「12」は1マス。割り算では21字＝2行
+    expect(countManuscriptLines("あ".repeat(18) + "12" + "あ")).toBe(1);
+  });
+
+  test("20マスに収まる行は、今までと数が変わらない", () => {
+    // 句読点も括弧も、20マスに収まっていれば送りもぶら下げも起きない
+    expect(countManuscriptLines("「" + "あ".repeat(17) + "。」")).toBe(1);
+    expect(countManuscriptLines("あ".repeat(19) + "。")).toBe(1);
+  });
+
+  test("作品の枚数の表示が変わる例：21字目が「。」の段落が20個", () => {
+    // 割り算の行数では 20段落×2行＝40行＝2枚。ぶら下げると20行＝1枚
+    const text = Array.from({ length: 20 }, () => "あ".repeat(20) + "。").join("\n");
+    const counts = countChars(text);
+    expect(counts.manuscriptLines).toBe(20);
+    expect(toManuscriptPages(counts.manuscriptLines)).toBe(1);
+  });
+});
+
+/**
  * 傍点の印は本文ではない（実機確認リスト A-9 の代わり）。
  *
  * **2026-09-08に実機で見つけた不具合の再現。** `stripRuby` という同じ名前の
