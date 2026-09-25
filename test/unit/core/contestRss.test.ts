@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { CONTEST_RSS_URL, contestsFromRss } from "../../../src/core/contestRss";
 import { parseRssFeed } from "../../../src/core/rssFeed";
+import { readDeadlines } from "../../../src/core/contestDeadline";
 
 /**
  * ツクリテミライの RSS から公募を読む（設計書6.3.6.2）。
@@ -91,5 +92,83 @@ describe("RSS の item を公募として読む", () => {
   test("分類は見出し（section）に入れる", () => {
     const [aozora] = listings().listings;
     expect(aozora.section).toBe("漫画・小説");
+  });
+});
+
+/**
+ * 締切の専用欄 `<kobo:deadline date=… time=… timezone=…/>` を先に読む
+ * （2026-09-26 精査 R10。引継ぎ書 8章【メモ】2026-09-23 深夜）。
+ *
+ * 作者がサイトに頼んで足してもらった欄。説明の先頭の「〆切：」でも読めて
+ * いたが、専用欄のほうが確実で時刻も取れる。**欄が無い・壊れているときは、
+ * 今までどおり説明の「〆切：」で読む。**
+ */
+const KOBO_FEED = [
+  '<?xml version="1.0" encoding="UTF-8"?>',
+  '<rss version="2.0" xmlns:kobo="https://tsukuritemirai.com/kobo/ns"><channel>',
+  "<title>作り物の公募一覧</title>",
+  "<item>",
+  "<title>第1回 こもれび小説賞</title>",
+  "<link>https://tsukuritemirai.com/kobo/k1</link>",
+  // 説明の「〆切」は日付として読めない書き方でも、専用欄から読む
+  "<description>木漏れ日の物語を募集。 〆切 : 年明けすぐ</description>",
+  '<kobo:deadline date="2027-01-08" time="23:59" timezone="Asia/Tokyo"/>',
+  "</item>",
+  "<item>",
+  "<title>第2回 ゆうなぎ文芸賞</title>",
+  "<link>https://tsukuritemirai.com/kobo/k2</link>",
+  // 説明に「〆切」が無くても、専用欄があれば公募として読む
+  "<description>夕凪の短編を募集。</description>",
+  '<kobo:deadline date="2026-12-15"/>',
+  "</item>",
+  "<item>",
+  "<title>第3回 あさつゆ大賞</title>",
+  "<link>https://tsukuritemirai.com/kobo/k3</link>",
+  // 専用欄が壊れていれば、説明の「〆切」へ戻る
+  "<description>朝露の物語を募集。 〆切 : WEB応募：2026年11月30日</description>",
+  '<kobo:deadline date="2026-13-45" time="25:99"/>',
+  "</item>",
+  "</channel></rss>",
+].join("\n");
+
+function koboListings() {
+  const parsed = parseRssFeed(KOBO_FEED);
+  if (!parsed.ok) throw new Error(parsed.reason);
+  return contestsFromRss(parsed);
+}
+
+describe("締切の専用欄 kobo:deadline", () => {
+  test("専用欄の日付と時刻を読む（説明の「〆切」が日付として読めなくても）", () => {
+    const [komorebi] = koboListings().listings;
+    expect(komorebi.name).toBe("第1回 こもれび小説賞");
+    expect(komorebi.deadlines).toEqual(["2027-01-08"]);
+    expect(komorebi.deadlineText).toBe("2027-01-08 23:59");
+  });
+
+  test("説明に「〆切」が無くても、専用欄があれば公募として読む", () => {
+    const result = koboListings();
+    const yunagi = result.listings.find((entry) => entry.name.includes("ゆうなぎ"));
+    expect(yunagi?.deadlines).toEqual(["2026-12-15"]);
+    expect(yunagi?.deadlineText).toBe("2026-12-15");
+    expect(result.skipped).toBe(0);
+  });
+
+  test("専用欄が壊れていれば、説明の「〆切」で読む", () => {
+    const asatsuyu = koboListings().listings.find((entry) => entry.name.includes("あさつゆ"));
+    expect(asatsuyu?.deadlines).toEqual(["2026-11-30"]);
+    expect(asatsuyu?.deadlineText).toContain("2026年11月30日");
+  });
+
+  test("置き場へ保存して読み戻しても、締切の日付が変わらない", () => {
+    // 置き場（`contestInbox.ts`）は締切の日付を deadlineText から読み直す。
+    // 専用欄の日付を deadlines にだけ入れると、読み戻したときに消える
+    for (const listing of koboListings().listings) {
+      expect(readDeadlines(listing.deadlineText), listing.name).toEqual(listing.deadlines);
+    }
+  });
+
+  test("専用欄の無いフィードは、今までと同じに読む", () => {
+    const [aozora] = listings().listings;
+    expect(aozora.deadlineText).toBe("WEB応募：2026年10月31日");
   });
 });

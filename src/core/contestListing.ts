@@ -84,6 +84,13 @@ export interface ContestCardInput extends ContestCardText {
   readonly url?: string | null;
   readonly section?: string | null;
   readonly source: ContestSource;
+  /**
+   * 説明の外で分かっている締切（RSS の専用欄 `kobo:deadline` から作った
+   * 「2027-01-08 23:59」）。あれば説明の「〆切：」より先に採り、説明に
+   * 「〆切：」が無くても公募として読む。**日付は `readDeadlines` で読める形で渡す**
+   * ——置き場は締切の日付をこの原文から読み直すので、読めない形だと保存で消える
+   */
+  readonly deadlineText?: string | null;
 }
 
 /** 名前・欄の長さの上限（長い文を流し込ませない。画面に出すのは要所だけ） */
@@ -148,9 +155,10 @@ export function parseContestCard(input: ContestCardInput): ContestListing | null
   // `readDeadlines`・`readCharLimit` の中で揃える
   const text = cutTrailer(input.text.slice(0, MAX_TEXT));
   const fields = readFields(text);
-  if (!fields.has("deadline")) return null;
+  const knownDeadline = clean(input.deadlineText ?? "", MAX_FIELD) || null;
+  if (!knownDeadline && !fields.has("deadline")) return null;
 
-  const deadlineText = fields.get("deadline") ?? null;
+  const deadlineText = knownDeadline ?? fields.get("deadline") ?? null;
   const labeledChars = fields.get("chars") ?? null;
   const charText = labeledChars ?? charCandidates(text, name);
   return {

@@ -1,5 +1,5 @@
 import { parseContestCard, type ContestListing } from "./contestListing";
-import type { RssFeedResult } from "./rssFeed";
+import type { RssDeadline, RssFeedResult } from "./rssFeed";
 
 /**
  * ツクリテミライの公募一覧の RSS（設計書6.3.6.2）。
@@ -26,7 +26,11 @@ export const CONTEST_RSS_LABEL = "ツクリテミライの小説の公募一覧�
  * - リンクは link（**サイトの公募の詳しいページ**。一覧に公式のリンクは無い）
  * - 分類（category）は見出しにする
  *
- * 締切の欄の無い item は公募と読まない（`skipped` に数える）。
+ * - **締切は専用欄 `kobo:deadline` を先に読む**（2026-09-26 精査 R10）。説明の
+ *   先頭の「〆切：」でも読めるが、専用欄は日付の形が決まっていて時刻も持つ。
+ *   欄が無い・壊れているときは、今までどおり説明の「〆切：」で読む
+ *
+ * 締切の欄（専用欄も説明の「〆切：」も）の無い item は公募と読まない（`skipped` に数える）。
  */
 export function contestsFromRss(feed: Extract<RssFeedResult, { ok: true }>): {
   listings: ContestListing[];
@@ -41,9 +45,22 @@ export function contestsFromRss(feed: Extract<RssFeedResult, { ok: true }>): {
       url: item.link ?? (item.guid && /^https?:\/\//u.test(item.guid) ? item.guid : null),
       section: item.categories.length > 0 ? item.categories.join("・") : null,
       source: "tsukuritemirai",
+      deadlineText: item.deadline ? deadlineTextOf(item.deadline) : null,
     });
     if (listing) listings.push(listing);
     else skipped++;
   }
   return { listings, skipped };
+}
+
+/**
+ * 専用欄を、画面に出す締切の原文にする（「2027-01-08 23:59」）。
+ * 日本時間でないときだけ時間帯を添える（締切の日付は日本の暦で比べているため、
+ * 黙って落とすと別の時間帯の締切を1日読み違える）
+ */
+function deadlineTextOf(deadline: RssDeadline): string {
+  const time = deadline.time ? ` ${deadline.time}` : "";
+  const zone =
+    deadline.timezone && deadline.timezone !== "Asia/Tokyo" ? `（${deadline.timezone}）` : "";
+  return `${deadline.date}${time}${zone}`;
 }

@@ -6,7 +6,8 @@
  * - 拡張機能の本体は Node で動き、**DOMParser が無い**。ブラウザ版には有るが、
  *   2つの道で読み方を分けると、片方を直した日に食い違う
  * - 読むのは RSS の `item` の決まった欄（title・link・guid・description・
- *   pubDate・atom:updated・category）だけで、XML の全部を解く必要は無い。
+ *   pubDate・atom:updated・category、ツクリテミライの締切の専用欄 kobo:deadline）
+ *   だけで、XML の全部を解く必要は無い。
  *   **外部のライブラリを足さない**（配布前の監査の手間と、ブラウザ版の束の重さを増やさない）
  *
  * 読めるもの：CDATA、実体参照（名前の5つ・10進・16進）、説明の中の HTML
@@ -29,6 +30,22 @@ export interface RssItem {
   /** `atom:updated` */
   readonly updated: string | null;
   readonly categories: readonly string[];
+  /**
+   * ツクリテミライの締切の専用欄 `<kobo:deadline date="2027-01-08" time="23:59"
+   * timezone="Asia/Tokyo"/>`（作者がサイトに頼んで足してもらった。2026-09-23）。
+   * **日付が暦として正しいときだけ**入れる。時刻は形が正しいときだけ。
+   * 欄が無い・壊れているときは null（説明の「〆切：」で読む側へ戻す）
+   */
+  readonly deadline: RssDeadline | null;
+}
+
+export interface RssDeadline {
+  /** YYYY-MM-DD */
+  readonly date: string;
+  /** HH:MM。無ければ null */
+  readonly time: string | null;
+  /** 「Asia/Tokyo」など。無ければ null */
+  readonly timezone: string | null;
 }
 
 export type RssFeedResult =
@@ -84,6 +101,7 @@ export function parseRssFeed(xml: string): RssFeedResult {
       pubDate: clean(elementText(inner, "pubDate") ?? "") || null,
       updated: clean(elementText(inner, "atom:updated") ?? "") || null,
       categories: elementTexts(inner, "category").map(clean).filter(Boolean),
+      deadline: koboDeadline(inner),
     });
   }
   return {
@@ -94,6 +112,40 @@ export function parseRssFeed(xml: string): RssFeedResult {
     items,
     skipped,
   };
+}
+
+/**
+ * 締切の専用欄（`kobo:deadline`）の属性を読む。中身ではなく属性に値がある。
+ * 暦にない日付（13月・45日）は読まない——説明の「〆切：」へ戻すほうが確か
+ */
+function koboDeadline(xml: string): RssDeadline | null {
+  const tag = /<kobo:deadline(\s[^>]*?)?\/?>/iu.exec(xml);
+  if (!tag) return null;
+  const attributes = new Map<string, string>();
+  const pattern = /([a-z_][\w.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/giu;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(tag[1] ?? "")) !== null) {
+    attributes.set(match[1].toLowerCase(), clean(decodeXmlEntities(match[2] ?? match[3] ?? "")));
+  }
+  const date = attributes.get("date") ?? "";
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(date);
+  if (!parts) return null;
+  const [year, month, day] = [Number(parts[1]), Number(parts[2]), Number(parts[3])];
+  const calendar = new Date(Date.UTC(year, month - 1, day));
+  if (
+    calendar.getUTCFullYear() !== year ||
+    calendar.getUTCMonth() !== month - 1 ||
+    calendar.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  const rawTime = attributes.get("time") ?? "";
+  const clock = /^(\d{1,2}):(\d{2})$/u.exec(rawTime);
+  const time =
+    clock && Number(clock[1]) <= 23 && Number(clock[2]) <= 59
+      ? `${clock[1].padStart(2, "0")}:${clock[2]}`
+      : null;
+  return { date, time, timezone: attributes.get("timezone") || null };
 }
 
 /** 名前の付いた要素の中身（最初の1つ）。無ければ null */
