@@ -73,9 +73,38 @@ describe("同梱する実測の一覧", () => {
       // 天井に当たった測定の値は「そこまでは確かめた」下限でしかない。
       // それを上限として配ると、**実際より大きい値**になりうる
       expect(seed.contextHitCeiling, key).toBe(false);
-      // どこから来た数字かを辿れるように、測った字数も添える
-      expect(seed.measuredChars, key).toBeGreaterThan(0);
+      // どこから来た数字かを辿れるように、測った字数か、サーバー自身が
+      // 述べた文のどちらかを添える
+      if (seed.contextDeclared !== undefined) {
+        // **数字が文の中に実在すること。** 写し間違いを通さない
+        expect(seed.contextDeclared, key).toContain(String(seed.contextWindow));
+      } else {
+        expect(seed.measuredChars, key).toBeGreaterThan(0);
+      }
     }
+  });
+
+  /**
+   * **サーバー自身が述べた長さ**（比べ 2026-09-25〜26）。
+   *
+   * llm-jp と Phi は、出力の上限を大きく送ったときの400の本文に、自分の
+   * 読める長さを書いてきた。字を詰めて測る測定より確かな値である
+   * （向こうの設定そのもの）。**文をそのまま持つ**——どこから来た数字かを
+   * 後から辿れるように。
+   */
+  it("サーバーが述べた長さは、その文と一緒に載せる（2026-09-26）", () => {
+    for (const model of [
+      "llm-jp-3.1-8x13b-instruct4",
+      "preview/Phi-4-mini-instruct-cpu",
+    ]) {
+      const seed = bundledTuning("sakura", model);
+      expect(seed?.contextWindow, model).toBe(4096);
+      expect(seed?.contextDeclared, model).toContain("4096");
+      expect(seed?.measuredAt, model).toBe("2026-09-26");
+    }
+    // 字/トークンは実際に5回送って測った最小値（製品と同じ切り捨て）
+    expect(bundledTuning("sakura", "llm-jp-3.1-8x13b-instruct4")?.charsPerToken).toBe(1.712);
+    expect(bundledTuning("sakura", "preview/Phi-4-mini-instruct-cpu")?.charsPerToken).toBe(1.235);
   });
 
   /**
@@ -133,13 +162,15 @@ describe("同梱する実測の一覧", () => {
   /**
    * **推測を載せない。** 「gemma-4 系だから同じはず」という当てはめは
    * 実測ではないので、規則6の例外（測らないと分からない値の初期値）の
-   * 範囲を出る。載っているのは実際に測った4件だけである。
+   * 範囲を出る。載っているのは実際に測った6件だけである。
    */
-  it("載せているのは、実際に測った4件だけ", () => {
+  it("載せているのは、実際に測った6件だけ", () => {
     expect(bundledTuningKeys().sort()).toEqual([
       "ollama/gemma4:12b",
       "ollama/qwen3:8b",
       "sakura/gpt-oss-120b",
+      "sakura/llm-jp-3.1-8x13b-instruct4",
+      "sakura/preview/Phi-4-mini-instruct-cpu",
       "sakura/preview/gemma-4-31B-it",
     ]);
   });

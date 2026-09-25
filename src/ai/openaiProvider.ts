@@ -378,8 +378,24 @@ export class OpenAIProvider implements ApiKeyProvider {
  */
 export function isChatModel(id: string): boolean {
   const lower = id.toLowerCase();
-  return !NON_CHAT_HINTS.some((hint) => lower.includes(hint));
+  if (NON_CHAT_HINTS.some((hint) => lower.includes(hint))) return false;
+  return !EMBEDDING_FAMILY.test(lower);
 }
+
+/**
+ * 名前に `embedding` を含まない埋め込み用の系統（さくらの
+ * `multilingual-e5-large`、2026-09-26）。
+ *
+ * E5 は埋め込み専用の系統名で、文章を書かせても返らない。一覧に出ていると
+ * 機能別AI割当などで選べてしまい、選んだあとで初めて失敗する（Ollama の
+ * `bge-m3` と同じ事情。設計書6.28.10）。
+ *
+ * **語として区切れているときだけ落とす**（`-e5-` や先頭の `e5-`）。
+ * `includes("e5")` にすると、版や日付の数字（`…-2025-…`）とは当たらなくても、
+ * 名前の一部にたまたま含まれるモデルを消しうる——判断が付かないものは残す
+ * （`NON_CHAT_HINTS` と同じ方針）。
+ */
+const EMBEDDING_FAMILY = /(^|[-_/])e5([-_]|$)/;
 
 /**
  * 「送ったものが上限に入らない」ときだけ現れる定型文。
@@ -402,6 +418,23 @@ const CONTEXT_OVERFLOW_PATTERNS: readonly RegExp[] = [
   /exceeds .*context/i,
   /too many tokens/i,
   /prompt is too long/i,
+  /*
+    **`max_model_len`**（さくら Phi-4-mini-instruct-cpu の実測、2026-09-26）。
+
+    > max_tokens=11264 cannot be greater than max_model_len=max_total_tokens=4096.
+
+    「maximum context length」の言い回しを持たないので、比べ（09-25）では
+    `bad_response` に丸められ、分けて送り直す道に乗らなかった。
+    `max_model_len` は vLLM 系のサーバーが持つ**そのモデルの最大の長さ**
+    という設定の名前で、長さの話以外には現れない。
+
+    **規則5との折り合い**：ここでも「どの指定が悪いか」は当てにいかない
+    （この文は `max_tokens` を名指ししているが、それを読んで外したりはしない）。
+    見ているのは、上限超えのときにだけ出る定型の語で、分類が変えるのは
+    「本文を分けて送り直すか」だけである。**記憶は書き換えない**ので、
+    取り違えても失うものは無い（1回ぶん刻み直すだけ）。
+  */
+  /max_model_len/i,
 ];
 
 /**

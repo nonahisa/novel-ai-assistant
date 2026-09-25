@@ -959,3 +959,160 @@ describe("関所で止めた回の記録", () => {
     expect(usageCalls[0][1].elapsedMs).toBe(0);
   });
 });
+
+/**
+ * **出力の見込みだけで、読める長さに届くモデル**（さくら llm-jp・Phi、
+ * 比べ 2026-09-25〜26）。
+ *
+ * 4,096トークンしか読めないモデルへ、出力の上限 11,264 を送っていた。
+ * 長さを正しく4,096と知っても、**関所は「入らない」と断り、逃げ道は本文を
+ * 半分に割り続ける**——出力の見込みだけで上限を超えているので、本文を
+ * いくら割っても入らない。10話すべてが失敗する形は変わらない。
+ *
+ * そのときに限って、**出力の上限を「読める長さ − 入力」まで縮めて送る。**
+ * 4,096しか読めないモデルは、どう頼んでも 11,264 は書けないので、縮めて
+ * 失うものは無い。見込みが上限に届いていないとき（ふつうの大きいモデル）は
+ * 縮めない——そちらは本文を割るほうが、応答を切らずに済む。
+ */
+describe("出力の見込みだけで上限に届くモデル（さくら 2026-09-26）", () => {
+  /** llm-jp の実測の字/トークン（2026-09-26、5回ぶんの最小値） */
+  const LLM_JP = { charsPerToken: 1.712, charsPerTokenSamples: 5 };
+
+  function small(onGenerate: (params: GenerateParams) => void): AIProvider {
+    return {
+      id: "sakura",
+      displayName: "さくらのAI",
+      isPaid: true,
+      isConfigured: async () => true,
+      testConnection: async () => ({ ok: true, message: "" }),
+      listModels: async () => [],
+      generate: async (params: GenerateParams): Promise<GenerateResult> => {
+        onGenerate(params);
+        return { text: "{}", truncated: false, elapsedMs: 1 };
+      },
+      getModel: async (id: string): Promise<ModelInfo | undefined> => ({
+        id,
+        displayName: id,
+        contextWindow: 4096,
+        parameterSize: null,
+        capabilities: [],
+        tier: "light",
+      }),
+    };
+  }
+
+  test("入力が入るなら、出力の上限を残りまで縮めて送る", async () => {
+    const seen: GenerateParams[] = [];
+    const wrapped = new MeteredProvider(small((p) => seen.push(p)));
+
+    await wrapped.generate({
+      systemPrompt: "あ".repeat(700),
+      userPrompt: "い".repeat(700),
+      // 同梱の字/トークンが無いモデル名にする（見積りを 0.7 に揃えるため）
+      model: "まだ測っていない小さいモデル",
+      temperature: 0,
+      maxOutputTokens: 11264,
+      plannedOutputTokens: 11264,
+    });
+
+    expect(seen).toHaveLength(1);
+    const allowed = 4096 - tokensFor(1400);
+    expect(seen[0].maxOutputTokens).toBe(allowed);
+    expect(seen[0].plannedOutputTokens).toBe(allowed);
+  });
+
+  test("出力の上限が渡されなくても、縮めた値を明示して送る", async () => {
+    // 渡されないとプロバイダは設定値（16,384）を送る。それでは同じ400になる
+    const seen: GenerateParams[] = [];
+    const wrapped = new MeteredProvider(small((p) => seen.push(p)));
+
+    await wrapped.generate({
+      systemPrompt: "あ".repeat(700),
+      userPrompt: "い".repeat(700),
+      // 同梱の字/トークンが無いモデル名にする（見積りを 0.7 に揃えるため）
+      model: "まだ測っていない小さいモデル",
+      temperature: 0,
+    });
+
+    expect(seen[0].maxOutputTokens).toBe(4096 - tokensFor(1400));
+  });
+
+  test("縮めると応答の床（1,024）を割るなら、これまでどおり入らないと断る", async () => {
+    // 逃げ道（本文を割る）へ回す。床より小さい上限で送っても、応答は切れる
+    let called = 0;
+    const wrapped = new MeteredProvider(small(() => called++));
+
+    await expect(
+      wrapped.generate({
+        systemPrompt: "あ".repeat(700),
+        userPrompt: "い".repeat(1500),
+        // 同梱の字/トークンが無いモデル名にする（見積りを 0.7 に揃えるため）
+      model: "まだ測っていない小さいモデル",
+        temperature: 0,
+        maxOutputTokens: 11264,
+      })
+    ).rejects.toMatchObject({ kind: "context_overflow" });
+    expect(called).toBe(0);
+  });
+
+  test("出力の見込みが上限に届いていなければ、縮めずに断る（本文を割る）", async () => {
+    // 3,000 は 4,096 に届かない。入力を割れば入る形なので、応答を削らない
+    let called = 0;
+    const wrapped = new MeteredProvider(small(() => called++));
+
+    await expect(
+      wrapped.generate({
+        systemPrompt: "あ".repeat(700),
+        userPrompt: "い".repeat(700),
+        // 同梱の字/トークンが無いモデル名にする（見積りを 0.7 に揃えるため）
+      model: "まだ測っていない小さいモデル",
+        temperature: 0,
+        maxOutputTokens: 3000,
+      })
+    ).rejects.toMatchObject({ kind: "context_overflow" });
+    expect(called).toBe(0);
+  });
+
+  test("チャンクの計画でも、出力の見込みは読める長さの半分までにする", () => {
+    // 見込み 11,264 のまま差し引くと本文の割当が負になり、下限で止まる。
+    // 関所は残りを出力へ回すので、計画も同じ考え方で本文へ場所を残す
+    const capped = planChunkBudget({
+      contextWindow: 4096,
+      overheadChars: 500,
+      measured: LLM_JP,
+      outputTokens: 11264,
+      requestedChars: 20000,
+    });
+    const halved = planChunkBudget({
+      contextWindow: 4096,
+      overheadChars: 500,
+      measured: LLM_JP,
+      outputTokens: 2048,
+      requestedChars: 20000,
+    });
+
+    expect(capped).toEqual(halved);
+    // 半分にしたぶん、本文の場所が空いている
+    expect(capped.reason).not.toBe("minimum");
+  });
+
+  test("見込みが上限に届かないモデルの計画は、半分へ丸めない", () => {
+    // 見込み 3,000 は 4,096 に届かないので、そのまま差し引く
+    const asIs = planChunkBudget({
+      contextWindow: 4096,
+      overheadChars: 500,
+      measured: LLM_JP,
+      outputTokens: 3000,
+      requestedChars: 20000,
+    });
+    const halved = planChunkBudget({
+      contextWindow: 4096,
+      overheadChars: 500,
+      measured: LLM_JP,
+      outputTokens: 2048,
+      requestedChars: 20000,
+    });
+
+    expect(asIs.chunkChars).toBeLessThan(halved.chunkChars);
+  });
+});

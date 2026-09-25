@@ -69,6 +69,34 @@ describe("作者の実測が、常に勝つ", () => {
   });
 
   /**
+   * **再現**（さくら llm-jp、2026-09-26 の実接続）：1回目の呼び出しが通ると、
+   * 字/トークンの実測が**1回ぶん**台帳へ入る。すると同梱の値が隠れ、読む側
+   * （`resolveCharsPerToken`）は5回に満たない実測を信じないので、**当て推量の
+   * 0.7 へ戻っていた。** 4,096しか読めないモデルでは、2つ目のチャンクから
+   * 関所が「指示だけで上限に届く」と断り、残りが全部失敗した。
+   *
+   * 5回に満たない実測は、製品がまだ使わない値である。その間は同梱の値が
+   * 「当て推量の代わり」を続ける——**作者の実測が勝つのは、使える実測に
+   * なってから**（守り2の趣旨は変えない）。台帳の生の値は消さないので、
+   * 数え続けて5回に達すれば、そちらに替わる。
+   */
+  test("まだ信じられない回数の実測は、同梱の値を隠さない", async () => {
+    await useMemoryTuningStore({
+      "sakura/gpt-oss-120b": { charsPerToken: 1.3, charsPerTokenSamples: 1 },
+    });
+
+    const tuning = modelTuning("sakura", "gpt-oss-120b");
+    expect(tuning?.charsPerToken).toBe(1.065);
+    expect(tuning?.charsPerTokenSamples).toBe(5);
+    expect(tuning?.bundledFields).toContain("charsPerToken");
+    // 台帳のほうは書き換えない（数え続けるため）
+    expect(tuningStoreContents()["sakura/gpt-oss-120b"]).toEqual({
+      charsPerToken: 1.3,
+      charsPerTokenSamples: 1,
+    });
+  });
+
+  /**
    * **欄ごとに埋める。** 台帳の欄は別々に育つ——速さは普段の呼び出しから、
    * 読める長さは測定から入る。行ごと差し替えると「速さだけ測ってある」
    * モデルが同梱の字/トークンを受け取れない。

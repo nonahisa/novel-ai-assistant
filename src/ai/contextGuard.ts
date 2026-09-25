@@ -98,12 +98,61 @@ export interface ContextFitResult {
   fits: boolean;
 }
 
+/** 指示と本文が要ると見込むトークン数（出力は含まない） */
+function inputTokensOf(input: ContextFitInput): number {
+  return Math.ceil(
+    (input.systemChars + input.userChars) * resolveTokensPerChar(input.measured)
+  );
+}
+
+/**
+ * 関所が数える（そして実際に送る）出力トークン数（比べ 2026-09-25〜26）。
+ *
+ * **出力の見込みだけで読める長さに届くときは、残りを全部出力に回す。**
+ * それ以外は、渡された見込みをそのまま返す。
+ *
+ * ## なぜ要るか
+ *
+ * さくらの llm-jp と Phi は4,096トークンしか読めないのに、誤字脱字検知は
+ * 出力の上限 11,264 を送っていた。長さを正しく4,096と知っても、関所は
+ * 「入らない」と断り、逃げ道（`features/chunkRetry.ts`）は本文を割り続ける
+ * ——**出力の見込みだけで上限を超えているので、本文をいくら割っても入らない。**
+ * 4,096しか読めないモデルは、どう頼んでも 11,264 は書けないので、縮めて
+ * 失うものは無い。
+ *
+ * ## 見込みが上限に届かないときは縮めない
+ *
+ * 大きいモデルで「入力＋出力」が溢れたときは、これまでどおり本文を割る。
+ * そちらは割れば入り、応答の上限を削らずに済む——削ると、抽出のJSONが
+ * 途中で切れてチャンクが丸ごと捨てられる。**入力を割っても解決しない形の
+ * ときだけ**出力を削る、という線引きである。
+ *
+ * ## 床を割るなら床で数える
+ *
+ * 残りが `minimumOutputTokens`（`ai/outputLimit.ts` の1,024）に満たないときは
+ * 床の値を返す。関所はその値で「入らない」と断り、上限超えの数字
+ * （`AIError.overflow`）も**床で数えたもの**になる。逃げ道はその数字から
+ * 本文を削る量を決めるので、11,264 のまま数えると「1文字も送れない」と
+ * 諦めてしまう。
+ *
+ * `minimumOutputTokens` を引数でもらうのは、この葉のモジュールを
+ * VS Code に依存させないため（`outputLimit.ts` は設定を読む）。
+ */
+export function outputTokensWithinWindow(
+  input: ContextFitInput,
+  minimumOutputTokens: number
+): number {
+  const limit = input.contextWindow;
+  if (limit === undefined || !Number.isFinite(limit) || limit <= 0) {
+    return input.outputTokens;
+  }
+  if (input.outputTokens < limit) return input.outputTokens;
+  return Math.max(minimumOutputTokens, limit - inputTokensOf(input));
+}
+
 /** 入るかどうかを見積もる。判断だけで、副作用は持たない */
 export function checkContextFit(input: ContextFitInput): ContextFitResult {
-  const needTokens =
-    Math.ceil(
-      (input.systemChars + input.userChars) * resolveTokensPerChar(input.measured)
-    ) + input.outputTokens;
+  const needTokens = inputTokensOf(input) + input.outputTokens;
 
   const limit = input.contextWindow;
   if (limit === undefined || !Number.isFinite(limit) || limit <= 0) {

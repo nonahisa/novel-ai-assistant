@@ -8,8 +8,16 @@ import {
   type ProviderId,
 } from "./types";
 import { appendUsageLog } from "../core/usageLog";
-import { contextOverflow, skipsContextGuard } from "./contextGuard";
-import { resolveOutputTokensForSend } from "./outputLimit";
+import {
+  contextOverflow,
+  outputTokensWithinWindow,
+  skipsContextGuard,
+  type ContextFitInput,
+} from "./contextGuard";
+import {
+  MINIMUM_OUTPUT_TOKENS,
+  resolveOutputTokensForSend,
+} from "./outputLimit";
 import { recordFeatureOutputTokens } from "../core/featureOutputTokens";
 import { endsInWhitespaceRunaway } from "../core/truncatedResponse";
 import { logStep } from "../core/logger";
@@ -194,26 +202,35 @@ export class MeteredProvider implements AIProvider {
    * **失敗しても記録してから投げ直す。** うまくいった回だけ残すと、
    * 「答えが返らなかった理由」を後から追えない（設計書6.20.2と同じ考え方）。
    */
-  async generate(params: GenerateParams): Promise<GenerateResult> {
+  async generate(requested: GenerateParams): Promise<GenerateResult> {
     let started = Date.now();
 
     // **入らないものは送らない**（設計書6.27.10）。送ってしまうと
     // Ollama は黙って切り捨て、クラウドは料金を取ってから断る。
     //
     // 唯一の例外が読める長さの測定である（`skipsContextGuard` に理由）。
-    // 三項で書いてあるのは、素通りするときに上限の問い合わせ
-    // （LM Studio では毎回の1往復）まで省くため
-    const overflow = skipsContextGuard(params.meta?.feature)
-      ? undefined
-      : contextOverflow({
-          systemChars: params.systemPrompt.length,
-          userChars: params.userPrompt.length,
-          outputTokens: this.outputTokensFor(params),
-          contextWindow: await this.contextWindowOf(params.model),
-          // **チャンクを決めたのと同じ台帳を見る**（設計書6.77）。
-          // 実測が無ければ `resolveTokensPerChar` が従来の 0.7 を返す
-          measured: modelTuning(this.inner.id, params.model),
-        });
+    // 素通りするときは、上限の問い合わせ（LM Studio では毎回の1往復）
+    // まで省く
+    let params = requested;
+    let overflow: AIError | undefined;
+    if (!skipsContextGuard(requested.meta?.feature)) {
+      const fit: ContextFitInput = {
+        systemChars: requested.systemPrompt.length,
+        userChars: requested.userPrompt.length,
+        outputTokens: this.outputTokensFor(requested),
+        contextWindow: await this.contextWindowOf(requested.model),
+        // **チャンクを決めたのと同じ台帳を見る**（設計書6.77）。
+        // 実測が無ければ `resolveTokensPerChar` が従来の 0.7 を返す
+        measured: modelTuning(this.inner.id, requested.model),
+      };
+      // **出力の見込みだけで上限に届くなら、残りを出力に回す**
+      // （`outputTokensWithinWindow` に理由。比べ 2026-09-25〜26）
+      const outputTokens = outputTokensWithinWindow(fit, MINIMUM_OUTPUT_TOKENS);
+      overflow = contextOverflow({ ...fit, outputTokens });
+      if (!overflow && outputTokens < fit.outputTokens) {
+        params = this.withOutputLimit(requested, outputTokens, fit);
+      }
+    }
     if (overflow) {
       // **送らなかったことも記録に残す。** 記録に何も出ないと、作者からは
       // 「押したのに何も起きなかった」としか見えない
@@ -369,6 +386,47 @@ export class MeteredProvider implements AIProvider {
       second ??
       resolveOutputTokensForSend(this.inner.id, params.model, params.meta?.feature)
     );
+  }
+
+  /** 出力の上限を縮めて送ったと記録したモデル。**同じモデル・同じ見込みでは一度だけ書く** */
+  private readonly loggedOutputFit = new Set<string>();
+
+  /**
+   * 出力の上限を `tokens` まで縮めた呼び出しを作る（比べ 2026-09-25〜26。
+   * `contextGuard.ts` の `outputTokensWithinWindow` に理由）。
+   *
+   * **実上限と見込みの両方を縮める。** 実上限はクラウドがそのまま送る値、
+   * 見込みは Ollama が `num_ctx` を確保する値で、どちらが効くかは
+   * プロバイダ次第である（`outputTokensFor`）。**実上限は必ず明示する**
+   * ——渡されない呼び出しでは、プロバイダが設定値（16,384）を送り、
+   * 縮めた意味が無くなる。
+   *
+   * **黙って縮めない。** 1回の応答の上限が変わると、長い答えが途中で
+   * 切れることがありうる。モデルごとに一度だけ操作ログへ出す。
+   */
+  private withOutputLimit(
+    params: GenerateParams,
+    tokens: number,
+    fit: ContextFitInput
+  ): GenerateParams {
+    const note = `${params.model}:${fit.outputTokens}`;
+    if (!this.loggedOutputFit.has(note)) {
+      this.loggedOutputFit.add(note);
+      logStep(
+        `モデル「${params.model}」は読める長さが` +
+          `${(fit.contextWindow ?? 0).toLocaleString("ja-JP")}トークンで、` +
+          `出力の見込み（${fit.outputTokens.toLocaleString("ja-JP")}トークン）だけで埋まるため、` +
+          `1回の応答の上限を入る分（この回は${tokens.toLocaleString("ja-JP")}トークン）まで縮めて送ります`
+      );
+    }
+    return {
+      ...params,
+      maxOutputTokens: Math.min(params.maxOutputTokens ?? tokens, tokens),
+      plannedOutputTokens:
+        params.plannedOutputTokens === undefined
+          ? undefined
+          : Math.min(params.plannedOutputTokens, tokens),
+    };
   }
 
   /** 上限が分からないと記録したモデル。**同じモデルでは一度だけ書く** */

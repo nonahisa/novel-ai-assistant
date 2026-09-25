@@ -55,6 +55,11 @@ const LABEL = "さくらのAI Engine";
  * 設定はプロバイダに1つしか無く、`gpt-oss-120b`（131,072）と31Bのモデルを
  * 行き来すると必ずどちらかが合わない。台帳はモデルごとなので食い違わない。
  *
+ * **台帳にも設定にも無ければ、同梱の値を見る**（`core/bundledTuning.ts`）。
+ * `/v1/models/{id}` も404で長さを教えない（2026-09-26）。4,096しか読めない
+ * モデル（llm-jp・Phi）を 32,000 と扱って全話400にしたのが、同梱に載せた
+ * きっかけである。
+ *
  * export しているのは、3社ぶんの読み順を試験が突き合わせるため。
  */
 export const SAKURA_CONTEXT_WINDOW: ContextWindowSource = {
@@ -67,9 +72,46 @@ interface ModelListResponse {
   data?: Array<{ id?: string; owned_by?: string }>;
 }
 
+/**
+ * 思考を止める指定（比べ 2026-09-25〜26）。
+ *
+ * **再現**：考えるタイプのモデル（Qwen3.6-35B-A3B・Kimi-K2.7-Code・Kimi-K2.6）が、
+ * 考える途中で出力の上限（11,264）を使い切り、答えが空で返った
+ * （`finish_reason=length`）。Ollama へは `think: false` を送っているのに、
+ * さくらへは思考を止める指定を何も送っていなかった。
+ *
+ * **実測（2026-09-26、要約用の短い問い）で効いたもの**：
+ *
+ * | 指定 | Qwen3.6 | Kimi-K2.6 | Kimi-K2.7-Code |
+ * |---|---|---|---|
+ * | 何も送らない | 考えた（1,801トークン） | — | — |
+ * | `reasoning_effort: "none"` | 止まった | **考えが答えの欄へ流れ出た** | 止まらなかった |
+ * | `chat_template_kwargs` の `enable_thinking: false` | 止まった | — | — |
+ * | `chat_template_kwargs` の `thinking: false` | — | 止まった | 答えの欄へ流れ出た（スキーマを付けると止まった） |
+ *
+ * 形式の強制（`response_format` の JSON スキーマ）を付けた本番の形では、
+ * 3つとも答えの欄に JSON だけが返った。**`reasoning_effort` は送らない**
+ * ——K2.6 で独り言が答えに混ざる。
+ *
+ * **モデル名で分けずに、2つの鍵を一緒に送る。** 会話の雛形（chat template）
+ * は知らない鍵を読まないので、Qwen 系は `enable_thinking` だけを、Kimi 系は
+ * `thinking` だけを読む。gpt-oss・gemma-4・llm-jp・Phi にも送って、断られない
+ * ことを確かめた（2026-09-26）。名前で分けると、新しいモデルが出るたびに表が
+ * 古くなる（規則6）。
+ */
+const THINKING_OFF_TEMPLATE_KWARGS: Readonly<Record<string, boolean>> = {
+  enable_thinking: false,
+  thinking: false,
+};
+
 interface ChatResponse {
   choices?: Array<{
-    message?: { content?: string | null };
+    message?: {
+      content?: string | null;
+      /** 考えた中身（vLLM は `reasoning`、古い版は `reasoning_content`） */
+      reasoning?: string | null;
+      reasoning_content?: string | null;
+    };
     finish_reason?: string;
   }>;
   usage?: {
@@ -118,6 +160,16 @@ export class SakuraProvider implements ApiKeyProvider {
   };
 
   private modelCache = new Map<string, ModelInfo>();
+
+  /**
+   * 思考を止める指定（`chat_template_kwargs`）を**外すと通った**モデル。
+   *
+   * **通ったときだけ書く**（規則5）。この起動のあいだだけ覚える——
+   * 断るモデルはいまのところ見つかっておらず（2026-09-26、9モデル）、
+   * 起動し直すたびに1回だけ400をもらうほうが、保存した記憶が古くなって
+   * 思考を止められなくなるより害が小さい。
+   */
+  private readonly thinkingOffRejected = new Set<string>();
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -297,13 +349,31 @@ export class SakuraProvider implements ApiKeyProvider {
       };
     }
 
+    // **思考を止める**（比べ 2026-09-25〜26。下の定数に理由）。断られたと
+    // 分かっているモデルには、最初から付けない
+    const sendsThinkingOff =
+      params.disableThinking === true &&
+      !this.thinkingOffRejected.has(params.model);
+    if (sendsThinkingOff) {
+      body.chat_template_kwargs = { ...THINKING_OFF_TEMPLATE_KWARGS };
+    }
+
     // **断られた指定だけを外して出し直す。**
     // どれが駄目かをエラー文から当てにいかず、1つずつ外して試す
     // （GeminiでもAnthropicでも同じ手を使っている）
     let response: ChatResponse | undefined;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 4; attempt++) {
       try {
         response = await this.post(body, headers, params.model, params.signal);
+        // **覚えるのは通ったときだけ**（CLAUDE.md 規則5）。付けて送った
+        // のに外した状態で通ったなら、このモデルは受け付けないと分かった
+        if (sendsThinkingOff && body.chat_template_kwargs === undefined) {
+          this.thinkingOffRejected.add(params.model);
+          logLine(
+            `さくらのAI Engine：思考を止める指定（chat_template_kwargs）を外すと通りました` +
+              `（モデル: ${params.model}）。この起動のあいだは付けずに送ります。`
+          );
+        }
         break;
       } catch (error) {
         // **上限超えは、指定を外して出し直しても直らない。** 先に見て
@@ -333,6 +403,27 @@ export class SakuraProvider implements ApiKeyProvider {
           delete body.temperature;
           continue;
         }
+        /*
+          **思考を止める指定は、400なら理由を問わず外して試す**（規則5）。
+          ほかの2つと違って本文の言い回しを見ない——OpenAI互換の口には
+          本来無い欄なので、断るサーバーが何と書くかは分からない
+          （「Extra inputs are not permitted」のように欄の名前すら出さない
+          ものもある）。外しても通らなければ、原因は別にある（残高不足など）
+          ので、上の「通ったときだけ覚える」によって記憶は変わらない。
+        */
+        if (
+          body.chat_template_kwargs !== undefined &&
+          error instanceof AIError &&
+          error.kind === "bad_response" &&
+          error.status === 400
+        ) {
+          delete body.chat_template_kwargs;
+          logLine(
+            `さくらのAI Engine：思考を止める指定を付けた要求が受け付けられなかったため、` +
+              `外して再試行します（モデル: ${params.model}）。応答: ${error.detail ?? "（本文なし）"}`
+          );
+          continue;
+        }
         throw error;
       }
     }
@@ -353,11 +444,28 @@ export class SakuraProvider implements ApiKeyProvider {
 
     const text = choice.message?.content ?? "";
     if (!text.trim()) {
-      throw new AIError(
-        "AIから空の応答が返りました。",
-        "bad_response",
-        `finish_reason=${choice.finish_reason ?? "unknown"}`
-      );
+      /*
+        **上限で切られた空は、直し方が違う**（比べ 2026-09-25〜26）。
+        考えるタイプのモデルが、考える途中で出力の上限を使い切ると、答えの
+        欄は空のまま `finish_reason=length` で返る。「空の応答」とだけ言うと、
+        作者は何をすればよいか分からない。考えた量（`reasoning`）は捨てずに
+        長さだけ残す——中身は本文の読みなので、ログへ写さない。
+      */
+      const reasoningChars =
+        (choice.message?.reasoning ?? choice.message?.reasoning_content ?? "")
+          .length;
+      const detail =
+        `finish_reason=${choice.finish_reason ?? "unknown"}` +
+        (reasoningChars > 0 ? ` / 考えた量 ${reasoningChars}字` : "");
+      if (choice.finish_reason === "length") {
+        throw new AIError(
+          "AIが答えを書く前に、1回の応答の上限を使い切りました（考える途中で止まった可能性があります）。" +
+            "設定の「1回の応答の上限」を大きくするか、別のモデルをお試しください。",
+          "bad_response",
+          detail
+        );
+      }
+      throw new AIError("AIから空の応答が返りました。", "bad_response", detail);
     }
 
     return {

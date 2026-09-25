@@ -256,7 +256,22 @@ export function planChunkBudget(options: {
   const overheadTokens = Math.ceil(
     options.overheadChars * resolveTokensPerChar(options.measured)
   );
-  const forBody = options.contextWindow - overheadTokens - options.outputTokens;
+  /*
+    **出力の見込みだけで読める長さに届くときは、半分を出力に見込む**
+    （比べ 2026-09-25〜26。さくらの llm-jp・Phi は4,096しか読めないのに、
+    誤字脱字の見込みは 11,264 あった）。
+
+    そのまま差し引くと本文の割当が負になり、いつも下限で止まる。送る直前の
+    関所は、こういうモデルでは残りを全部出力に回す（`ai/contextGuard.ts` の
+    `outputTokensWithinWindow`）ので、計画のほうも**本文に場所を残す**。
+    半分に置くのは、指示と本文、応答のどちらにも偏らせない中立の線として。
+    見込みが上限に届かないモデルでは、これまでと1トークンも変わらない。
+  */
+  const outputTokens =
+    options.outputTokens >= options.contextWindow
+      ? Math.floor(options.contextWindow / 2)
+      : options.outputTokens;
+  const forBody = options.contextWindow - overheadTokens - outputTokens;
   // 見積りは外れることがあるので1割の余裕を持たせる（`contextSizeForPrompt` と同じ）
   const usableTokens = Math.floor(forBody / 1.1);
   const fits = Math.floor(usableTokens * charsPerToken);

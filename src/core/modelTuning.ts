@@ -14,6 +14,7 @@ import {
 // 機能ごとの行の印だけを借りる（実体は引き込まない）。同じファイルに
 // 住んでいるので、モデルの表を読むときに読み飛ばす必要がある
 import { FEATURE_OUTPUT_KEY_PREFIX } from "./featureOutputTokens";
+import { MIN_CHARS_PER_TOKEN_SAMPLES } from "./sizeBudget";
 // **書けたかどうかの札は、ここから配る。** 台帳を使う側（測定・普段の
 // 呼び出し）は `modelTuning.ts` しか見ないので、置き場のファイル名まで
 // 知らせずに済ませる
@@ -318,6 +319,33 @@ function mergeBundledTuning(
     fields.push(name);
   };
 
+  /*
+    **まだ信じられない回数の実測は、同梱の字/トークンを隠さない**
+    （さくら llm-jp の実接続、2026-09-26）。
+
+    普段の呼び出しは、通るたびに字/トークンを1回ぶん台帳へ積む。1回目が
+    入った途端に同梱の値が隠れると、読む側（`resolveCharsPerToken`）は
+    5回に満たない実測を信じないので、**当て推量の 0.7 へ戻る**——同梱した
+    意味が、最初の呼び出し1回で消えていた。4,096しか読めないモデルでは、
+    2つ目のチャンクから関所が「指示だけで上限に届く」と断った。
+
+    5回に満たない実測は、製品がまだ使わない値である。その間は同梱の値が
+    当て推量の代わりを続ける。**台帳の生の値は消さない**（書き込み側の
+    `recordCharsPerToken` は素の台帳を読んで数え続ける）ので、5回に達すれば
+    作者の実測に替わる——守り2「作者の実測が常に勝つ」は、**使える実測に
+    なってから**勝つ、と読む。
+  */
+  if (
+    seed.charsPerToken !== undefined &&
+    typeof filled.charsPerToken === "number" &&
+    !(
+      typeof filled.charsPerTokenSamples === "number" &&
+      filled.charsPerTokenSamples >= MIN_CHARS_PER_TOKEN_SAMPLES
+    )
+  ) {
+    delete filled.charsPerToken;
+    delete filled.charsPerTokenSamples;
+  }
   fill("charsPerToken", seed.charsPerToken);
   fill("measuredChars", seed.measuredChars);
   fill("contextHitCeiling", seed.contextHitCeiling);

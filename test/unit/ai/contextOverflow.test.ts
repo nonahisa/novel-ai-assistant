@@ -40,6 +40,18 @@ describe("上限超えの400を見分ける", () => {
     ["さくらの実測の本文", REAL_BODY],
     ["トークン数の言い方", "This model has too many tokens in the request"],
     ["Anthropic系の言い方", "prompt is too long: 210000 tokens"],
+    // さくら llm-jp-3.1-8x13b-instruct4 の実測の本文（2026-09-26）
+    [
+      "出力の上限が長さを超えた（llm-jp）",
+      "'max_tokens' or 'max_completion_tokens' is too large: 11264. This model's maximum context length is 4096 tokens and your request has 16 input tokens (11264 > 4096 - 16). None",
+    ],
+    // さくら preview/Phi-4-mini-instruct-cpu の実測の本文（2026-09-26）。
+    // 「maximum context length」の言い回しを持たないので、比べ（09-25）で
+    // bad_response に丸められ、分けて送り直す道に乗らなかった
+    [
+      "出力の上限が長さを超えた（Phi）",
+      "max_tokens=11264 cannot be greater than max_model_len=max_total_tokens=4096. Please request fewer output tokens. (parameter=max_tokens, value=11264)",
+    ],
   ])("%s は上限超えとして扱う", (_name, body) => {
     expect(classifyContextOverflow(400, body)).toBe(true);
   });
@@ -193,6 +205,27 @@ describe("プロバイダが返す失敗の種別", () => {
     await expect(provider.generate(params)).rejects.toMatchObject({
       kind: "context_overflow",
     });
+  });
+
+  test("さくら：Phi の言い回しの上限超えも context_overflow で返る", async () => {
+    // 実測の本文そのもの（2026-09-26）
+    stubFetch(
+      JSON.stringify({
+        error: {
+          message:
+            "max_tokens=11264 cannot be greater than max_model_len=max_total_tokens=4096. Please request fewer output tokens. (parameter=max_tokens, value=11264)",
+          type: "BadRequestError",
+          param: "max_tokens",
+          code: 400,
+        },
+        model: "preview/Phi-4-mini-instruct-cpu",
+      })
+    );
+    const provider = new SakuraProvider(fakeContext());
+
+    await expect(
+      provider.generate({ ...params, model: "preview/Phi-4-mini-instruct-cpu" })
+    ).rejects.toMatchObject({ kind: "context_overflow" });
   });
 
   test("さくら：残高不足の400は bad_response のまま", async () => {

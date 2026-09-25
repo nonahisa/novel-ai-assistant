@@ -98,6 +98,21 @@ export interface BundledTuning {
    */
   readonly contextHitCeiling?: boolean;
   /**
+   * `contextWindow` を**サーバー自身が述べた**ときの、その文の写し
+   * （比べ 2026-09-25〜26 で開けた道）。
+   *
+   * さくらの llm-jp と Phi は、出力の上限を大きく送ったときの400の本文に
+   * 「maximum context length is 4096 tokens」「max_model_len=4096」と、
+   * **自分の読める長さを書いてきた。** 字を詰めて測る測定（`measuredChars`）
+   * は通った字数から逆算した値だが、こちらは向こうの設定そのもので、
+   * より確かである。どこから来た数字かを後から辿れるように、文をそのまま
+   * 持つ（`measuredChars` を持たない行は、これが出どころの印になる）。
+   *
+   * **一覧APIの申告ではない。** さくらの `/v1/models` は長さを返さない
+   * ので、守り5（APIの申告を上書きしない）の相手はここにも居ない。
+   */
+  readonly contextDeclared?: string;
+  /**
    * 測った日（ISO 8601 の日付）。
    *
    * **古くなったら黙って使わない**（作者の守り4）ための手がかり。
@@ -140,6 +155,38 @@ const BUNDLED: Readonly<Record<string, BundledTuning>> = {
     contextWindow: 138_597,
     contextHitCeiling: false,
     measuredAt: "2026-09-13",
+  },
+  /*
+    **4,096しか読めない2つ**（誤字脱字検知の比べ、2026-09-25〜26）。
+
+    どのモデルも既定の 32,000 として扱っていたため、出力の上限 11,264 を
+    送って**10話すべてが HTTP 400** になった。長さは一覧APIには無く、
+    サーバーが400の本文で述べた（`contextDeclared` に写しを持つ）。
+
+    字/トークンは、誤字脱字検知のプロンプト（1,500字のチャンク）を5話ぶん
+    実際に送り、`usage.prompt_tokens` から製品と同じ式（`recordCharsPerToken`
+    ＝（指示＋本文の字数）÷ 入力トークン、小数3桁で切り捨て、最小値）で
+    出した。**4,096の窓では、当て推量の 0.7 だと指示だけで窓が埋まる**
+    ——誤字脱字の指示（約2,100字）を 0.7 で数えると約3,000トークンになり、
+    本文も応答も入らない見積りになる。
+  */
+  "sakura/llm-jp-3.1-8x13b-instruct4": {
+    // 5回の実測：1.730・1.719・1.712・1.719・1.736
+    charsPerToken: 1.712,
+    contextWindow: 4096,
+    contextHitCeiling: false,
+    contextDeclared:
+      "This model's maximum context length is 4096 tokens and your request has 16 input tokens (11264 > 4096 - 16).",
+    measuredAt: "2026-09-26",
+  },
+  "sakura/preview/Phi-4-mini-instruct-cpu": {
+    // 5回の実測：1.237・1.240・1.235・1.249・1.252
+    charsPerToken: 1.235,
+    contextWindow: 4096,
+    contextHitCeiling: false,
+    contextDeclared:
+      "max_tokens=11264 cannot be greater than max_model_len=max_total_tokens=4096. Please request fewer output tokens.",
+    measuredAt: "2026-09-26",
   },
   /*
     `sakura/preview/Qwen3.6-35B-A3B` は**読める長さを測っていない**ので、
