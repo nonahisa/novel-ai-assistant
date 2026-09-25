@@ -178,6 +178,7 @@ const FIELD_LABELS: Record<string, string> = {
   summary: "紹介",
   role: "役割",
   personality: "性格",
+  speechStyle: "口調",
   appearance: "外見",
   gender: "性別",
   affiliation: "所属",

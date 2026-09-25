@@ -148,6 +148,23 @@ export interface PersonalityFacet {
   supersededBy?: string;
 }
 
+/**
+ * 口調の1つの面（作者の裁定、2026-09-25 昼。設計書6.5.10）。
+ *
+ * **形は性格の面と同じにしてある。** 口調も、同時に成り立つ特徴を重ねて
+ * 描かれる——第1話で「語尾に『〜っす』」、第5話で「目上には敬語」と
+ * 読めたら、変わったのではなく別の面が見えただけである。上書き型にすると
+ * 性格で起きたのと同じく、後の話の一面が前の話の読みを押し流す。
+ *
+ * `evidence` は**その人物の台詞の逐語引用**で、抽出の検算が本文の台詞の中に
+ * 実在することを確かめてから入れる（CLAUDE.md 規則3）。
+ *
+ * `supersededBy` は性格と同じく作者が「この面から変わった」と決めた印の
+ * 置き場として読めるようにしてある（手で書いた資料でも壊れないように）。
+ * いまは画面から立てる口が無い。
+ */
+export type SpeechStyleFacet = PersonalityFacet;
+
 export interface FirstPersonVariant {
   form: string;
   context: string | null;
@@ -207,6 +224,19 @@ export interface Character {
    * **古い形の資料には無い**ので、読み込みで空配列を補う。
    */
   personalityFacets: PersonalityFacet[];
+  /**
+   * 口調（作者の裁定、2026-09-25 昼）。一人称・語尾・口癖・話し方の特徴を短く。
+   *
+   * 矛盾検知は「口調が設定と食い違わないか」を見るのに、照らす資料が
+   * どこにも無かった（縛りの洗い出し8番）。本体は性格と同じく、過去の面を
+   * 除いた面を「／」でつないだ文章として持つ。
+   */
+  speechStyle: string | null;
+  /**
+   * 口調の面。`SpeechStyleFacet` を参照。
+   * **古い形の資料には無い**ので、読み込みで空配列を補う。
+   */
+  speechStyleFacets: SpeechStyleFacet[];
   appearance: string | null;
   physical: CharacterPhysical | null;
   firstPerson: {
@@ -287,6 +317,8 @@ export function emptyCharacter(id: string, name: string): Character {
     role: null,
     personality: null,
     personalityFacets: [],
+    speechStyle: null,
+    speechStyleFacets: [],
     appearance: null,
     physical: null,
     firstPerson: { default: null, variants: [] },
@@ -329,6 +361,9 @@ export function normalizeCharacter(raw: Partial<Character>): Character {
     aliases: raw.aliases ?? [],
     distinctFrom: raw.distinctFrom ?? [],
     personalityFacets: raw.personalityFacets ?? [],
+    // 口調の欄（2026-09-25）が無い古い資料も、そのまま読めるようにする
+    speechStyle: raw.speechStyle ?? null,
+    speechStyleFacets: raw.speechStyleFacets ?? [],
     firstPerson: raw.firstPerson ?? base.firstPerson,
     addressTerms: raw.addressTerms ?? [],
     relations: raw.relations ?? [],
@@ -355,7 +390,7 @@ export function parseCharacter(raw: unknown): Character {
   optionalStringArray(value.aliases, "aliases");
   for (const key of [
     "reading", "romaji", "icon", "summary", "gender", "affiliation",
-    "role", "personality", "appearance",
+    "role", "personality", "speechStyle", "appearance",
     "defaultSecondPerson", "evidence",
   ]) {
     optionalNullableString(value[key], key);
@@ -476,20 +511,13 @@ export function parseCharacter(raw: unknown): Character {
   const personalityFacets = optionalObjectArray(
     value.personalityFacets,
     "personalityFacets",
-    (entry, path) => {
-      requireNonEmptyString(entry.value, `${path}.value`);
-      optionalNumberArray(entry.chapters, `${path}.chapters`);
-      optionalNullableString(entry.evidence, `${path}.evidence`);
-      optionalString(entry.supersededBy, `${path}.supersededBy`);
-      const facet: PersonalityFacet = {
-        value: entry.value as string,
-        chapters: (entry.chapters as number[] | undefined) ?? [],
-        evidence: (entry.evidence as string | null | undefined) ?? null,
-      };
-      const supersededBy = (entry.supersededBy as string | undefined)?.trim();
-      if (supersededBy) facet.supersededBy = supersededBy;
-      return facet;
-    }
+    parseFacet
+  );
+  // 口調の面（2026-09-25）。性格の面と同じ形・同じ理由で、壊れた形は止める
+  const speechStyleFacets = optionalObjectArray(
+    value.speechStyleFacets,
+    "speechStyleFacets",
+    parseFacet
   );
   const abilities = optionalObjectArray(value.abilities, "abilities", (entry, path) => {
     requireNonEmptyString(entry.name, `${path}.name`);
@@ -533,12 +561,32 @@ export function parseCharacter(raw: unknown): Character {
     rejectedRelations,
     distinctFrom,
     personalityFacets,
+    speechStyleFacets,
     abilities,
     conflicts,
     changes,
     aiNotes: parseAiNotes(value.aiNotes),
     customFields: parseCustomFieldValues(value.customFields),
   } as Partial<Character>);
+}
+
+/** 性格・口調の面を1つ読む。壊れた形は読み込みエラーにする */
+function parseFacet(
+  entry: Record<string, unknown>,
+  path: string
+): PersonalityFacet {
+  requireNonEmptyString(entry.value, `${path}.value`);
+  optionalNumberArray(entry.chapters, `${path}.chapters`);
+  optionalNullableString(entry.evidence, `${path}.evidence`);
+  optionalString(entry.supersededBy, `${path}.supersededBy`);
+  const facet: PersonalityFacet = {
+    value: entry.value as string,
+    chapters: (entry.chapters as number[] | undefined) ?? [],
+    evidence: (entry.evidence as string | null | undefined) ?? null,
+  };
+  const supersededBy = (entry.supersededBy as string | undefined)?.trim();
+  if (supersededBy) facet.supersededBy = supersededBy;
+  return facet;
 }
 
 function invalid(path: string): never {

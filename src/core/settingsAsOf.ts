@@ -4,6 +4,7 @@ import {
   personalityAsOf,
   personalityRevealedAfter,
 } from "./personalityFacets";
+import { speechStyleAsOf, speechStyleRevealedAfter } from "./speechStyle";
 
 /**
  * 性格を面で巻き戻せる記録か（2026-09-24 夜）。
@@ -26,6 +27,27 @@ function personalityRecord(
   return {
     personality: source.personality,
     personalityFacets: source.personalityFacets as PersonalityFacet[],
+  };
+}
+
+/**
+ * 口調を面で巻き戻せる記録か（2026-09-25）。性格と同じ理由で、面を見ないと
+ * 後の話で初めて見えた口調の面まで前の話の材料に混ざる。
+ */
+function speechStyleRecord(
+  record: object
+): { speechStyle: string | null; speechStyleFacets: PersonalityFacet[] } | undefined {
+  const source = record as {
+    speechStyle?: unknown;
+    speechStyleFacets?: unknown;
+  };
+  if (!Array.isArray(source.speechStyleFacets)) return undefined;
+  if (typeof source.speechStyle !== "string" && source.speechStyle !== null) {
+    return undefined;
+  }
+  return {
+    speechStyle: source.speechStyle,
+    speechStyleFacets: source.speechStyleFacets as PersonalityFacet[],
   };
 }
 
@@ -154,6 +176,7 @@ export function recordAsOf<T extends object>(
 
   const rolled = { ...record } as Record<string, unknown>;
   const facetSource = personalityRecord(record);
+  const speechSource = speechStyleRecord(record);
   for (const field of fields) {
     const current = rolled[field];
     if (typeof current !== "string" && current !== null) continue;
@@ -161,6 +184,14 @@ export function recordAsOf<T extends object>(
     // られている）は、これまでどおり変化の記録で巻き戻す
     if (field === "personality" && facetSource && chapter !== null) {
       const asOf = personalityAsOf(facetSource, chapter);
+      if (asOf !== undefined) {
+        rolled[field] = asOf;
+        continue;
+      }
+    }
+    // 口調も面で巻き戻す（2026-09-25。性格と同じ）
+    if (field === "speechStyle" && speechSource && chapter !== null) {
+      const asOf = speechStyleAsOf(speechSource, chapter);
       if (asOf !== undefined) {
         rolled[field] = asOf;
         continue;
@@ -211,11 +242,21 @@ export function factsRevealedAfter<T extends object>(
 
   const found: FutureFact[] = [];
   const facetSource = personalityRecord(record);
+  const speechSource = speechStyleRecord(record);
   for (const field of fields) {
     // 性格は面で見る。変化の記録（作者が決めたもの）は面と同じ値の写しなので、
     // 両方から拾うと同じ事実が2件並ぶ
     if (field === "personality" && facetSource) {
       const revealed = personalityRevealedAfter(facetSource, chapter);
+      if (revealed !== undefined) {
+        for (const facet of revealed) {
+          found.push({ field, value: facet.value, chapter: facet.chapter });
+        }
+        continue;
+      }
+    }
+    if (field === "speechStyle" && speechSource) {
+      const revealed = speechStyleRevealedAfter(speechSource, chapter);
       if (revealed !== undefined) {
         for (const facet of revealed) {
           found.push({ field, value: facet.value, chapter: facet.chapter });

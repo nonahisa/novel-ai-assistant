@@ -46,6 +46,8 @@ export const CHARACTER_AS_OF_FIELDS = [
   "summary",
   "role",
   "personality",
+  // 口調（2026-09-25）。矛盾検知が「口調が設定と食い違わないか」を見る材料
+  "speechStyle",
   "appearance",
   "gender",
   "affiliation",

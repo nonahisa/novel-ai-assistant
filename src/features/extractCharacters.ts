@@ -41,6 +41,7 @@ import {
   type CorrectedRelationRecord,
   type DroppedAliasRecord,
   type DroppedRelationRecord,
+  type DroppedSpeechStyleRecord,
   type RejectedCharacterCandidate,
   type RelationRejectionReason,
 } from "../core/characterExtractionValidation";
@@ -139,6 +140,8 @@ interface ValidationFixCounts {
   droppedRelations: DroppedRelationRecord[];
   /** 向きが逆だった親族関係を直したもの */
   correctedRelations: CorrectedRelationRecord[];
+  /** 根拠の台詞が本文の台詞に無い・指示の写しとして外した口調（2026-09-25） */
+  droppedSpeechStyles: DroppedSpeechStyleRecord[];
 }
 
 function collectValidationFixes(
@@ -153,6 +156,7 @@ function collectValidationFixes(
   target.droppedRelativeAliases.push(...validated.droppedRelativeAliases);
   target.droppedRelations.push(...validated.droppedRelations);
   target.correctedRelations.push(...validated.correctedRelations);
+  target.droppedSpeechStyles.push(...validated.droppedSpeechStyles);
 }
 
 interface ExtractionSummaryCounts {
@@ -612,6 +616,7 @@ export async function extractCharacters(
     droppedRelativeAliases: [],
     droppedRelations: [],
     correctedRelations: [],
+    droppedSpeechStyles: [],
   };
   /**
    * 既存レコードの名前・別名。切れた別名（「母親さ」）を弾く裏付けに使う。
@@ -1691,6 +1696,32 @@ function describeValidationFixes(fixes: ValidationFixCounts): string {
     lines.push(
       `関係の向きを ${fixes.correctedRelations.length}件 直しました（${shown}${rest}）`
     );
+  }
+  // 口調（2026-09-25）。**人物は残し、口調の欄だけを外した分**を見せる。
+  // 理由で行を分けるのは関係と同じ——指示の写しと根拠の無い読みとでは、
+  // 次に直す場所（プロンプトか、照合の網か）が違う
+  const speechDropLabels: ReadonlyArray<[
+    (entry: DroppedSpeechStyleRecord) => boolean,
+    string,
+  ]> = [
+    [
+      (entry) => entry.reason === "instruction_echo",
+      "指示の言葉がそのまま返ってきた口調",
+    ],
+    [
+      (entry) => entry.reason !== "instruction_echo",
+      "根拠の台詞が本文の台詞に見当たらない口調",
+    ],
+  ];
+  for (const [matches, label] of speechDropLabels) {
+    const entries = fixes.droppedSpeechStyles.filter(matches);
+    if (entries.length === 0) continue;
+    const shown = entries
+      .slice(0, 3)
+      .map((entry) => `${entry.characterName} の「${entry.speechStyle}」`)
+      .join("、");
+    const rest = entries.length > 3 ? ` ほか${entries.length - 3}件` : "";
+    lines.push(`${label}を ${entries.length}件 外しました（${shown}${rest}）`);
   }
 
   return lines.length > 0 ? `\n${lines.join("\n")}` : "";

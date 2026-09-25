@@ -80,6 +80,12 @@ export function unifyCharacters(
       // 性格の面（2026-09-24 夜）は両方から引き継ぐ。同じ面は話数を合わせて
       // 1つにする。吸収される側の面を落とすと、見えた話と根拠が消える
       personalityFacets: unifyPersonalityFacets(keep, absorb),
+      // 口調（2026-09-25）も性格と同じく、本体は残す側、面は両方から引き継ぐ
+      speechStyle: keep.speechStyle ?? absorb.speechStyle ?? null,
+      speechStyleFacets: unifyFacets(
+        keep.speechStyleFacets ?? [],
+        absorb.speechStyleFacets ?? []
+      ),
       appearance: keep.appearance ?? absorb.appearance,
       physical: keep.physical ?? absorb.physical,
       firstPerson: {
@@ -148,11 +154,16 @@ function unifyPersonalityFacets(
   keep: Character,
   absorb: Character
 ): Character["personalityFacets"] {
+  return unifyFacets(keep.personalityFacets ?? [], absorb.personalityFacets ?? []);
+}
+
+/** 面（性格・口調）を1つにまとめる。値が同じ面は話数を合わせ、根拠は先のものを残す */
+function unifyFacets(
+  keepFacets: Character["personalityFacets"],
+  absorbFacets: Character["personalityFacets"]
+): Character["personalityFacets"] {
   const merged: Character["personalityFacets"] = [];
-  for (const facet of [
-    ...(keep.personalityFacets ?? []),
-    ...(absorb.personalityFacets ?? []),
-  ]) {
+  for (const facet of [...keepFacets, ...absorbFacets]) {
     const found = merged.find(
       (entry) => normalizeSpacing(entry.value) === normalizeSpacing(facet.value)
     );

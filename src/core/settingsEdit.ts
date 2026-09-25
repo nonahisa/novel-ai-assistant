@@ -45,6 +45,8 @@ export interface RecordEdits {
   relations?: string;
   role?: string;
   personality?: string;
+  /** 口調（2026-09-25） */
+  speechStyle?: string;
   appearance?: string;
   category?: string;
   description?: string;
@@ -117,6 +119,8 @@ export function applyCharacterEdits(
     reading: nullableText(character.reading, edits.reading),
     role: nullableText(character.role, edits.role),
     personality: nullableText(character.personality, edits.personality),
+    // 古い資料には口調の欄が無い（読み込みで null を補っている）
+    speechStyle: nullableText(character.speechStyle ?? null, edits.speechStyle),
     appearance: nullableText(character.appearance, edits.appearance),
     authorNotes: plainText(character.authorNotes, edits.authorNotes),
     exportNote: plainText(character.exportNote, edits.exportNote),

@@ -140,8 +140,10 @@ describe("登場人物抽出の品質ゲート", () => {
     // 5.5で指示を縮めた（2026-09-19）。**規則は減らしていない**——削ったのは
     // 理由の説明・重複した例・二重に書いていた規則だけで、8,298字→7,184字。
     // 測定台では、どの数字も悪化しなかった（プロンプト設計書 P-04a の経過）。
+    // 5.6で口調（speechStyle・speechEvidence）を足し、種族・魔物・品物・
+    // 人でない登場人物を世界観へ出す規則を足した（2026-09-25 昼の裁定）。
     // 版が変わるとキャッシュが無効になり、次回の抽出でAIを呼び直す
-    expect(CHARACTER_EXTRACT_VERSION).toBe("5.5");
+    expect(CHARACTER_EXTRACT_VERSION).toBe("5.6");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.properties)
       .toHaveProperty("entityType");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.required)
@@ -179,8 +181,9 @@ describe("登場人物抽出の品質ゲート", () => {
 
   test("上限を足してもプロンプトの版は上げない", () => {
     // 版を上げるとキャッシュが全部無効になり、作品全体を再処理させる。
-    // スキーマの上限はプロンプトの文言を変えていないので、上げる理由が無い
-    expect(CHARACTER_EXTRACT_VERSION).toBe("5.5");
+    // スキーマの上限はプロンプトの文言を変えていないので、上げる理由が無い。
+    // （5.6 へ上げたのは口調と世界観の規則でプロンプトの文言が変わったため）
+    expect(CHARACTER_EXTRACT_VERSION).toBe("5.6");
   });
 
   test("関係を必須にして、名前や外見から分からない結びつきを残せるようにする", () => {

@@ -200,6 +200,29 @@ export function characterSchema(): Record<string, unknown> {
         required: ["value"],
       },
     },
+    // 口調（2026-09-25）。外部のAIにも、性格と同じ積み方であることを見せる
+    speechStyle: {
+      type: ["string", "null"],
+      description:
+        "口調。一人称・語尾・口癖・話し方の特徴を短く。" +
+        "**同時に成り立つ面を「／」でつなぐ**（speechStyleFacets の面から作られる）",
+    },
+    speechStyleFacets: {
+      type: "array",
+      description:
+        "**口調の面。** 口調は上書きせず、話ごとに見えた面を積み重ねる。" +
+        "evidence はその人物の台詞の逐語引用",
+      items: {
+        type: "object",
+        properties: {
+          value: { type: "string", minLength: 1 },
+          chapters: { type: "array", items: { type: "integer", minimum: 0 } },
+          evidence: { type: ["string", "null"] },
+          supersededBy: { type: "string" },
+        },
+        required: ["value"],
+      },
+    },
     appearance: { type: ["string", "null"] },
     physical: { type: ["object", "null"] },
     firstPerson: {

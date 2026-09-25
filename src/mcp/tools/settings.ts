@@ -306,6 +306,8 @@ export interface SettingsValidateResult {
     /** 推測・断りで、関係になっていなかった関係（測定台が数える） */
     droppedRelations: unknown[];
     correctedRelations: unknown[];
+    /** 口調の欄だけ外したもの（根拠の台詞が無い・指示の写し。2026-09-25） */
+    droppedSpeechStyles: unknown[];
   };
   /** 能力・場所・組織・世界観。**製品の集約が数えたそのまま** */
   settings: {
@@ -384,6 +386,7 @@ function validateAgainst(
       droppedRelativeAliases: people.droppedRelativeAliases,
       droppedRelations: people.droppedRelations,
       correctedRelations: people.correctedRelations,
+      droppedSpeechStyles: people.droppedSpeechStyles,
     },
     settings: {
       abilities: [...gathered.abilities],

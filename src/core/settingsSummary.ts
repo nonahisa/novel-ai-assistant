@@ -60,6 +60,8 @@ export function describeCharacter(
   push(lines, "所属", character.affiliation);
   push(lines, "役割", character.role);
   push(lines, "性格", character.personality);
+  // 口調（2026-09-25）。矛盾検知・相談の材料になる。古い資料には無い
+  push(lines, "口調", character.speechStyle ?? null);
   push(lines, "外見", character.appearance);
   push(lines, "一人称", character.firstPerson.default);
 

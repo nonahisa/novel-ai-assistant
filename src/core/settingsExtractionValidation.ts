@@ -348,6 +348,52 @@ export function validateExtractedOrganizations(
 }
 
 /**
+ * 世界観として拾わせる「もの」の案内（作者の裁定、2026-09-25 昼。設計書6.5.11）。
+ *
+ * 種族・魔物・固有の品物・人でない登場人物は、新しい分類を作らず世界観に
+ * 含める。**プロンプトはこの表から規則の文を組み、検算は同じ表で指示の写しを
+ * 見張る**（CLAUDE.md「繰り返し起きた失敗」3番：指示の言葉が答えの中身として
+ * 返る）。写しを2か所に書くと、片方だけ直したときに見張りが外れる。
+ */
+export const WORLD_THING_GUIDES = [
+  {
+    kind: "種族・生き物・魔物",
+    examples: "「ドワーフ」「雷竜」",
+    aspects: "特徴・生態・強さ・人との関わり",
+  },
+  {
+    kind: "固有の品物・道具",
+    examples: "聖剣・魔導具・形見・特別な薬",
+    aspects: "何ができるか・誰の物か",
+  },
+  {
+    kind: "人でない登場人物",
+    examples: "喋る魔物・使い魔・精霊など",
+    aspects: "何者か",
+  },
+] as const;
+
+/**
+ * 世界観の説明が、上の案内の言葉の写しか。
+ *
+ * 見るのは**説明がまるごと案内の言葉**のときだけにする（前後の句点・括弧は
+ * 無視する）。案内の語が説明の一部に入っているだけなら本物の中身がある
+ * ——「雷竜の特徴は…」を落とすと、正しく拾えた魔物の説明まで消える。
+ */
+export function isWorldGuideEcho(description: string | null | undefined): boolean {
+  const text = normalizeForComparison(description ?? "").replace(
+    /^[「『（(]+|[」』）)。．.]+$/gu,
+    ""
+  );
+  if (!text) return false;
+  return WORLD_THING_GUIDES.some((guide) =>
+    [guide.kind, guide.examples, guide.aspects].some(
+      (phrase) => normalizeForComparison(phrase) === text
+    )
+  );
+}
+
+/**
  * 世界観の抽出結果を検証する。
  *
  * **他の種別と違い、名前が本文に実在するかは確かめない。**
@@ -379,6 +425,11 @@ export function validateExtractedWorldItems(
     // 中身の無い見出しだけを資料に並べても、作者には何も伝わらない
     if (!isMeaningfulValue(item.description)) {
       rejected.push({ name: item.name, reason: "not_worldview" });
+      continue;
+    }
+    // 種族・品物の案内（2026-09-25）が、説明の代わりにそのまま返ってきたもの
+    if (isWorldGuideEcho(item.description)) {
+      rejected.push({ name: item.name, reason: "instruction_echo" });
       continue;
     }
     if (isEventDescription(item.name, item.description)) {

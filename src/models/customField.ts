@@ -80,6 +80,7 @@ export const MAX_CUSTOM_FIELDS = 20;
 const RESERVED_KEYS = new Set([
   "id", "name", "aliases", "reading", "romaji", "icon", "iconSource",
   "summary", "affiliation", "role", "personality", "personalityFacets",
+  "speechStyle", "speechStyleFacets",
   "appearance", "physical",
   "firstPerson", "defaultSecondPerson", "addressTerms", "relations",
   "abilities", "appearedChapters", "status", "spoilerLevel", "gender",

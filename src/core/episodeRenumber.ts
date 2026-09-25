@@ -958,6 +958,11 @@ export function renumberCharacter(
         ...facet,
         chapters: counter.list(facet.chapters),
       })),
+      // 口調の面（2026-09-25）も、見えた話を付け替える
+      speechStyleFacets: (character.speechStyleFacets ?? []).map((facet) => ({
+        ...facet,
+        chapters: counter.list(facet.chapters),
+      })),
     },
     changed: counter.changed,
   };

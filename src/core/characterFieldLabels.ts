@@ -25,6 +25,7 @@ export const CHARACTER_FIELD_LABELS: Record<string, string> = {
   reading: "読み",
   role: "役割",
   personality: "性格",
+  speechStyle: "口調",
   appearance: "外見",
   age: "年齢",
   height: "身長",

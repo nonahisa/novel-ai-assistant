@@ -164,16 +164,45 @@ export function addPersonalityFacet(
   chapters: readonly number[],
   evidence: string | null
 ): boolean {
+  if (!target.personalityFacets) target.personalityFacets = [];
+  const holder: FacetHolder = {
+    facets: target.personalityFacets,
+    body: target.personality,
+  };
+  const changed = addFacetTo(holder, value, chapters, evidence);
+  target.personality = holder.body;
+  return changed;
+}
+
+/**
+ * 面の一覧と、それをつないだ本体の組。性格と口調（2026-09-25）が同じ規則で
+ * 積むので、項目の名前から切り離して持つ。`addFacetTo` が直に書き換える。
+ */
+export interface FacetHolder {
+  facets: PersonalityFacet[];
+  body: string | null;
+}
+
+/**
+ * 面を1つ足す（規則は `addPersonalityFacet` の説明のとおり）。
+ * **渡した組を書き換える。** 何か変わったら true。
+ */
+export function addFacetTo(
+  holder: FacetHolder,
+  value: string,
+  chapters: readonly number[],
+  evidence: string | null
+): boolean {
   const text = value.trim();
   if (!text) return false;
   const quote = evidence?.trim() || null;
   const dated = sortedChapters(chapters);
 
   // 面の仕組みより前に入った本体の値は、話を持たない最初の面にする。
-  // 捨てると、以前に読めた性格が次の抽出で本体から消える
-  seedFacetsFromBody(target);
+  // 捨てると、以前に読めた値が次の抽出で本体から消える
+  seedFacetsFromBody(holder);
 
-  const facets = target.personalityFacets;
+  const facets = holder.facets;
   const key = comparable(text);
   const same = facets.find((facet) => comparable(facet.value) === key);
   if (same) return noteFacet(same, dated, quote);
@@ -189,13 +218,13 @@ export function addPersonalityFacet(
     // 書き直したほうの根拠を添える。値と根拠が食い違ったまま残さない
     if (quote) refined.evidence = quote;
     if (!refined.supersededBy) {
-      target.personality = refineInBody(target.personality, from, text);
+      holder.body = refineInBody(holder.body, from, text);
     }
     return true;
   }
 
   facets.push({ value: text, chapters: dated, evidence: quote });
-  target.personality = appendToBody(target.personality, text);
+  holder.body = appendToBody(holder.body, text);
   return true;
 }
 
@@ -220,11 +249,10 @@ function noteFacet(
 }
 
 /** 面が空で本体にだけ値があるなら、その値を話を持たない面にする */
-function seedFacetsFromBody(target: Character): void {
-  if (!target.personalityFacets) target.personalityFacets = [];
-  if (target.personalityFacets.length > 0) return;
-  for (const segment of segmentsOf(target.personality)) {
-    target.personalityFacets.push({ value: segment, chapters: [], evidence: null });
+function seedFacetsFromBody(holder: FacetHolder): void {
+  if (holder.facets.length > 0) return;
+  for (const segment of segmentsOf(holder.body)) {
+    holder.facets.push({ value: segment, chapters: [], evidence: null });
   }
 }
 

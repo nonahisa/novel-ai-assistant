@@ -245,8 +245,12 @@ export function isUnchangingField(field: string): boolean {
  * - 変化の値で本体を入れ替えない（`adoptableValueOfField`）
  * - 要確認として数えない（`heldChangesOfField`）
  * 本体を動かすのは、面を足す処理と作者の操作だけにする。
+ *
+ * 口調（2026-09-25。`speechStyle.ts`）も同じ積み方をする。マージは口調を
+ * 変化・食い違いへ記録しないが、外から持ち込まれた記録があっても本体を
+ * 入れ替えないよう、ここにも並べておく。
  */
-const ACCUMULATING_FIELDS = new Set(["personality"]);
+const ACCUMULATING_FIELDS = new Set(["personality", "speechStyle"]);
 
 export function isAccumulatingField(field: string): boolean {
   return ACCUMULATING_FIELDS.has(field);

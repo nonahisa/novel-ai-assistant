@@ -8,6 +8,12 @@ import {
 import { stripHonorific } from "./nameHonorific";
 import { familyNameCandidates } from "./familyName";
 import { chaptersForCandidate, isGroundedInChunk } from "./groundedEvidence";
+import {
+  clampSpeechStyle,
+  isSpeechStyleEcho,
+  speechQuoteProblem,
+  type SpeechStyleRejectionReason,
+} from "./speechStyle";
 import type {
   CharacterExtractResult,
   ExtractedCharacter,
@@ -104,6 +110,19 @@ export interface DroppedRelationRecord {
   reason: RelationRejectionReason;
 }
 
+/**
+ * 口調を落としたことの記録（2026-09-25）。**人物は残し、口調の欄だけを外す。**
+ * 黙って消さないので、報告に出すために持つ。
+ */
+export interface DroppedSpeechStyleRecord {
+  characterName: string;
+  /** AIが書いてきた口調（落とした値そのまま） */
+  speechStyle: string;
+  /** AIが根拠として写してきた台詞（無ければ null） */
+  speechEvidence: string | null;
+  reason: SpeechStyleRejectionReason;
+}
+
 /** 向きが逆だった関係を直した記録（設計書6.18） */
 export interface CorrectedRelationRecord {
   characterName: string;
@@ -144,6 +163,11 @@ export interface CharacterValidationResult {
   droppedRelations: DroppedRelationRecord[];
   /** 向きが逆だった親族関係を直したもの（相手「お母さん」に「息子」） */
   correctedRelations: CorrectedRelationRecord[];
+  /**
+   * 口調の欄だけを外したもの（2026-09-25）。根拠の台詞が本文の台詞に
+   * 無い・指示の言葉の写し、のどちらか。人物そのものは受け入れている。
+   */
+  droppedSpeechStyles: DroppedSpeechStyleRecord[];
 }
 
 export interface CharacterValidationOptions {
@@ -297,6 +321,7 @@ export function validateCharacterExtractResult(
   const droppedRelativeAliases: DroppedAliasRecord[] = [];
   const droppedRelations: DroppedRelationRecord[] = [];
   const correctedRelations: CorrectedRelationRecord[] = [];
+  const droppedSpeechStyles: DroppedSpeechStyleRecord[] = [];
   const rawCharacters: unknown = result.characters;
 
   if (!Array.isArray(rawCharacters)) {
@@ -309,6 +334,7 @@ export function validateCharacterExtractResult(
       droppedRelativeAliases,
       droppedRelations,
       correctedRelations,
+      droppedSpeechStyles,
     };
   }
 
@@ -414,17 +440,31 @@ export function validateCharacterExtractResult(
 
   for (const character of survived) {
     const names = groundingNames.get(character) ?? [character.name];
+    const knownRecordNames = options.knownRecordNames ?? [];
     if (
-      !isGroundedInChunk(
-        names,
-        character.evidence,
-        chunk.text,
-        options.knownRecordNames ?? []
-      )
+      !isGroundedInChunk(names, character.evidence, chunk.text, knownRecordNames)
     ) {
-      rejected.push({ name: character.name, reason: "ungrounded" });
-      continue;
+      // **口調の根拠の台詞でも、この話にいることの裏付けになる**（2026-09-25）。
+      // 口調の欄を足したあと、gemma4:26b が人物の引用を名前だけ（「太志」）や
+      // 言い換え（「自称天使が、」→本文は「自称天使は」）で返し、台詞のほうは
+      // 逐語で写してくる回が増えた（作品の写し3作で、根拠なしが前後2回とも
+      // 1〜2件→6件）。台詞も本文からの逐語引用で、名前の照合は同じく掛かる
+      // ので、捏造を通す穴にはならない。通ったら、資料に残す根拠も台詞に替える
+      // （言い換えた引用を「抽出根拠」として残さない）
+      const speechQuote = character.speechEvidence?.trim();
+      if (
+        !speechQuote ||
+        !isGroundedInChunk(names, speechQuote, chunk.text, knownRecordNames)
+      ) {
+        rejected.push({ name: character.name, reason: "ungrounded" });
+        continue;
+      }
+      character.evidence = speechQuote;
     }
+
+    // 口調は、根拠の台詞が本文の台詞の中にあるときだけ残す（2026-09-25）。
+    // **人物ごとは落とさない**——口調が読めなかっただけで、人物は本文にいる
+    checkSpeechStyle(character, chunk.text, droppedSpeechStyles);
 
     // 話数は、引用が本文のどの位置にあるかで決める。
     // 複数の話をまとめて送っているとき、チャンク全体の話数を付けると
@@ -448,7 +488,50 @@ export function validateCharacterExtractResult(
     droppedRelativeAliases,
     droppedRelations,
     correctedRelations,
+    droppedSpeechStyles,
   };
+}
+
+/**
+ * 口調の欄を検算する（2026-09-25。`core/speechStyle.ts`）。**渡した候補を書き換える。**
+ *
+ * - 値が空・不在文（「記述なし」）→ 黙って外す（空欄と同じ。報告に出す値が無い）
+ * - 指示の言葉・例の写し → 外して記録（`instruction_echo`）
+ * - 根拠の台詞が無い・本文に無い・地の文 → 外して記録
+ * - 通ったら長さの上限で切る（捨てずに切る。紹介と同じ）
+ *
+ * 根拠の引用（`speechEvidence`）は、通ったときだけ残す。マージが面の根拠として持つ。
+ */
+function checkSpeechStyle(
+  character: ExtractedCharacter,
+  chunkText: string,
+  dropped: DroppedSpeechStyleRecord[]
+): void {
+  const value = character.speechStyle?.trim();
+  const quote = character.speechEvidence?.trim() || null;
+  const clear = (): void => {
+    delete character.speechStyle;
+    delete character.speechEvidence;
+  };
+  if (!value || !isMeaningfulValue(value)) {
+    clear();
+    return;
+  }
+  const reason: SpeechStyleRejectionReason | null = isSpeechStyleEcho(value, chunkText)
+    ? "instruction_echo"
+    : speechQuoteProblem(quote, chunkText);
+  if (reason !== null) {
+    dropped.push({
+      characterName: character.name,
+      speechStyle: value,
+      speechEvidence: quote,
+      reason,
+    });
+    clear();
+    return;
+  }
+  character.speechStyle = clampSpeechStyle(value);
+  character.speechEvidence = quote;
 }
 
 /**
@@ -985,6 +1068,8 @@ export const EXTRACTED_TEXT_FIELDS = [
   "role",
   "personality",
   "appearance",
+  "speechStyle",
+  "speechEvidence",
   "firstPerson",
   "defaultSecondPerson",
   "evidence",

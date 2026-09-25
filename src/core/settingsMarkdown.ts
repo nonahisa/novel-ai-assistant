@@ -500,6 +500,18 @@ function describeCharacter(
       : "";
     lines.push(`- **性格**: ${facets || character.personality}`);
   }
+  if (character.speechStyle) {
+    // 口調（2026-09-25）も性格と同じ書き方にする。面の形は同じなので、
+    // 性格の面を調べる関数へ口調の組を渡して見る
+    const speech = {
+      personality: character.speechStyle,
+      personalityFacets: character.speechStyleFacets ?? [],
+    };
+    const facets = isBodyComposedOfFacets(speech)
+      ? describePersonalityFacets(activeFacets(speech.personalityFacets))
+      : "";
+    lines.push(`- **口調**: ${facets || character.speechStyle}`);
+  }
   if (character.appearance) lines.push(`- **外見**: ${character.appearance}`);
   if (character.firstPerson.default) {
     const variants = character.firstPerson.variants

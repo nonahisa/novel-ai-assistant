@@ -66,6 +66,7 @@ import {
   formatChapters,
 } from "../core/settingsMarkdown";
 import {
+  PERSONALITY_SEPARATOR,
   activeFacets,
   markPersonalityChange,
   restorePersonalityFacet,
@@ -902,6 +903,8 @@ export class SettingsPanel {
           // ものを作者が決める口。変化の行より先に置く——面は毎回積まれる
           // ので、何が積まれたかを先に見られるようにする
           ...personalityFacetLines(character.personalityFacets ?? []),
+          // 口調の面（2026-09-25）。どの話のどの台詞から読んだかを見せる
+          ...speechStyleFacetLines(character.speechStyleFacets ?? []),
           ...referenceLines(
             character.conflicts,
             character.evidence,
@@ -927,6 +930,8 @@ export class SettingsPanel {
           field("aliases", "別名（読点区切り）", character.aliases.join("、")),
           field("role", "役割", character.role),
           field("personality", "性格", character.personality, true),
+          // 口調（2026-09-25）。面が積まれても、欄には「／」でつないだ全体が出る
+          field("speechStyle", "口調", character.speechStyle ?? null, true),
           field("appearance", "外見", character.appearance, true),
           // 関係（作者の依頼「B3」、2026-09-22 未明）。**それまで画面に欄が無く**、
           // 抽出が入れた誤り（「ターナ=父の娘」）を直す手段がどこにも無かった。
@@ -2928,6 +2933,35 @@ function referenceLines(
  * 面が1つだけで過去の面も無いときは出さない。本体の欄と同じことを
  * 2度並べるだけになる。
  */
+/**
+ * 口調の面（2026-09-25）。**見せるだけで、操作は付けない。**
+ * 性格と違って「作中の変化にする」口はまだ無い（口調が変わったと決める
+ * 操作は、要るかどうかを作者が確かめてから足す）。欄を直せば本体は変わる。
+ *
+ * 面が1つだけのときは出さない——欄と同じことを2度並べるだけになる。
+ * 根拠の台詞を添えるのは、話者の取り違え（別人の台詞から読んだ口調）を
+ * 作者が見抜けるようにするため。
+ */
+function speechStyleFacetLines(
+  facets: readonly PersonalityFacet[]
+): DetailView["reference"] {
+  const active = activeFacets(facets);
+  if (active.length < 2) return [];
+  return [
+    {
+      label: "口調の面",
+      value: active
+        .map((facet) => {
+          const chapters =
+            facet.chapters.length > 0 ? `（${formatChapters(facet.chapters)}）` : "";
+          const quote = facet.evidence ? `「${facet.evidence.replace(/^[「『]|[」』]$/gu, "")}」` : "";
+          return `${facet.value}${chapters}${quote}`;
+        })
+        .join(PERSONALITY_SEPARATOR),
+    },
+  ];
+}
+
 function personalityFacetLines(
   facets: readonly PersonalityFacet[]
 ): DetailView["reference"] {

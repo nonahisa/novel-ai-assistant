@@ -66,6 +66,7 @@ export type CharacterExportField =
   | "age"
   | "role"
   | "personality"
+  | "speechStyle"
   | "appearance"
   | "looks"
   | "clothing"
@@ -149,6 +150,7 @@ const CHARACTER_FIELD_LABELS: Record<CharacterExportField, string> = {
   age: "年齢",
   role: "役割",
   personality: "性格",
+  speechStyle: "口調",
   appearance: "外見",
   looks: "容姿（身長・体格・髪・目・肌・特徴）",
   clothing: "服装",
@@ -366,6 +368,8 @@ const CHARACTER_AS_OF_FIELDS = [
   "summary",
   "role",
   "personality",
+  // 口調（2026-09-25）。面で巻き戻す（`settingsAsOf.ts`）
+  "speechStyle",
   "appearance",
   "gender",
   "affiliation",
@@ -840,6 +844,11 @@ function describeCharacter(
   if (has(fields, "role") && character.role) bullet("役割", character.role);
   if (has(fields, "personality") && character.personality) {
     bullet("性格", character.personality);
+  }
+  // 口調（2026-09-25）。設計書6.14の「キャラクター設定資料」「映像化向け」に
+  // ある列。古い資料には欄が無い
+  if (has(fields, "speechStyle") && character.speechStyle) {
+    bullet("口調", character.speechStyle);
   }
   if (has(fields, "appearance") && character.appearance) {
     bullet("外見", character.appearance);

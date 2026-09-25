@@ -4,6 +4,12 @@ import {
   EXAMPLE_PERSON,
   EXAMPLE_SUMMARY,
 } from "../core/exampleNames";
+import { WORLD_THING_GUIDES } from "../core/settingsExtractionValidation";
+import {
+  SPEECH_STYLE_ASPECTS,
+  SPEECH_STYLE_EXAMPLE,
+  SPEECH_STYLE_MAX_CHARS,
+} from "../core/speechStyle";
 
 /**
  * P-04a 設定抽出（チャンク単位）
@@ -34,7 +40,13 @@ import {
 //      しまう（実データで発生した）」のような**理由**と、同じ規則を言い直した
 //      2つ目の例、および人物節と共通節で二重に書いていた evidence の規則である。
 //      **規則の本体はすべて残してある。**
-export const CHARACTER_EXTRACT_VERSION = "5.5";
+// 5.6: 人物に口調（speechStyle）と、その根拠の台詞（speechEvidence）を足した
+//      （作者の裁定、2026-09-25 昼。縛りの洗い出し8番）。あわせて、種族・生き物・
+//      魔物・固有の品物・人でない登場人物を**世界観の項目として出す**規則を足し、
+//      「出さない」「人物レコードを作らない」で行き先が無かったもの（同9番）に
+//      受け皿を示した。人でない登場人物は、固有の名前で呼ばれる個体なら人物、
+//      種類の名前でしか呼ばれないものは世界観（設計書6.5.11）
+export const CHARACTER_EXTRACT_VERSION = "5.6";
 
 /**
  * 送るときの温度。本文から拾うだけだが、書きぶりの揺れを少しだけ許す。
@@ -101,6 +113,10 @@ export function buildCharacterExtractPrompt(
     input.knownWorldNames && input.knownWorldNames.length > 0
       ? input.knownWorldNames.join("、")
       : "（まだ登録されていません）";
+  // 種族・品物の案内は検算と同じ表から組む（写しを見張るため。`WORLD_THING_GUIDES`）
+  const worldThingLines = WORLD_THING_GUIDES.map(
+    (guide) => `   ・${guide.kind}（${guide.examples}）：${guide.aspects}`
+  ).join("\n");
   const abilityTermNote = input.abilityTerm
     ? `この作品では能力を「${input.abilityTerm}」と総称します。abilitySystem.abilityTerm には同じ語を使ってください。`
     : `abilitySystem.abilityTerm には、**作品世界の中で能力を総称している語**を、本文の表記のまま入れてください。
@@ -135,6 +151,12 @@ ${knownWorld}
 - 一人称・二人称などの代名詞、汎用的な役職語、家族関係語、集団、場所、組織、種族、
   生物種は人物レコードを作らないこと。人物名が本文から確認できない話者に、
   仮の名前や説明的な名前を発明してレコードを作らないこと。
+  種族・生物種・魔物は、人物ではなく**世界観**に出すこと（【世界観の抽出ルール】7番）。
+- **人でない登場人物**（喋る魔物・使い魔・精霊・幽霊・人形・AIなど）の扱い：
+  ・**固有の名前で呼ばれる個体**（例：使い魔の「クロ」）は、人でなくても人物として
+    出すこと（entityType は person）。その種族・種類の説明は世界観にも出すこと。
+  ・**種類の名前でしか呼ばれないもの**（「ゴブリン」「スライム」）は、喋っていても
+    人物にしないこと。世界観に出すこと。
 - 同一人物が別の呼称で登場する場合（本名／通称／あだ名／役職）、既知の登場人物と
   照合し、同一と判断できる場合は既知の名前を name とし、別呼称を aliases に入れること。
   判断できない場合は新規人物として扱うこと。
@@ -182,6 +204,14 @@ ${knownWorld}
   ・**次のものから推論してはならない。**
     名前の響き／性別／作品のジャンル／似た型の他作品の人物。
   ・**相反する面が見えるなら、無理に1つへ丸めず両方書くこと。**
+
+- **speechStyle（口調）は、その人物の台詞に表れる話し方を${SPEECH_STYLE_MAX_CHARS}字以内で短く書くこと。**
+  ${SPEECH_STYLE_ASPECTS.join("、")}など、**台詞から実際に読み取れる特徴**を書く。
+  良い例：「${SPEECH_STYLE_EXAMPLE}」
+  ・speechEvidence には、**その人物自身の台詞を本文からそのまま1つ**写すこと。
+  ・地の文の描写（「ぶっきらぼうに言った」）だけを根拠にしてはならない。
+  ・台詞が無い人物、話し方に特徴が読み取れない人物は、speechStyle と speechEvidence を null にすること。
+  ・性格を書く欄ではない。口調は「どう話すか」、personality は「どういう人か」である。
 
 - personality 以外の項目は、本文に手掛かりが無ければ推測で埋めてはならない。
   「〜だろう」「〜と思われる」と書きたくなる内容は null にすること。
@@ -236,6 +266,7 @@ ${knownWorld}
    使い手を特定できない場合は空配列にすること。
 5. 剣術・話術のような一般的な技量は、作品世界で特別な力として
    扱われている場合にのみ抽出すること。単に「腕が立つ」程度なら抽出しないこと。
+   **品物・道具そのもの（「聖剣」「転移の指輪」）は能力ではない。** 世界観へ出すこと。
 6. ${abilityTermNote}
 
 【組織の抽出ルール】
@@ -256,7 +287,7 @@ ${knownWorld}
    ・都市・街・国土そのもの（「王都」「港町」）→ 場所へ
    ・地域・領地（「魔境」「スカラ子爵領」）→ 場所へ
    ・建物・施設（「王宮」「闘技場」）→ 場所へ
-   ・魔物・生物（「赤熊」「雷竜」）→ 出さない
+   ・魔物・生物・種族（「赤熊」「雷竜」）→ 世界観へ
    ・技・現象（「血の奔流」）→ 能力へ
    迷ったら「そこに所属する人がいるか」で決めること。
 7. 同じ名前を場所と組織の両方に出さないこと。どちらか一方にすること。
@@ -299,6 +330,11 @@ ${knownWorld}
    既知なら「戦闘における装備の価値」を作らない）。
 6. evidence には、その項目の根拠になる本文の一節を**そのまま**入れること。
    **引用に見出しを含める必要はない**。
+7. **次のものも世界観として出すこと。** 人物・組織・能力には入れない。
+${worldThingLines}
+   これらの category は term にすること。name には、2番の見出しの代わりに
+   **本文の呼び名をそのまま**入れてよい（「雷竜」「転移の指輪」）。
+   **一族・家（「〇〇家」）は種族ではなく組織である。** 世界観へ移さないこと。
 
 【すべてに共通のルール】
 - reading（読み仮名）は、**名前に漢字が含まれる場合だけ**ひらがなで書くこと。
@@ -309,7 +345,8 @@ ${knownWorld}
   詳細は他の項目に分けて書く。
 - 各レコードには、本文からそのまま抜き出した短い evidence を必ず付けること。
   evidence は説明や要約ではなく、その名称（人物は本文上の呼称でもよい）を
-  含む逐語引用にすること。
+  含む逐語引用にすること。**名前だけを書いてはならない**（名前を含む一文を写す）。
+  人物の evidence は speechEvidence（台詞）とは別に、その人物が出てくる一節を写すこと。
   （世界観だけは例外で、見出しを含まない引用でよい。上の世界観の規則を参照）
 - 該当するものが本文になければ、空配列を返すこと。無理に埋めないこと。
 
@@ -377,6 +414,13 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           role: { type: ["string", "null"] },
           personality: { type: ["string", "null"] },
           appearance: { type: ["string", "null"] },
+          // 口調（2026-09-25）。上限はコードでも切る（`clampSpeechStyle`）
+          speechStyle: {
+            type: ["string", "null"],
+            maxLength: SPEECH_STYLE_MAX_CHARS,
+          },
+          // 口調の根拠。**台詞の中に実在するかを検算が確かめる**
+          speechEvidence: { type: ["string", "null"] },
           firstPerson: { type: ["string", "null"] },
           defaultSecondPerson: { type: ["string", "null"] },
           addressTerms: {
@@ -426,6 +470,9 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           "role",
           "personality",
           "appearance",
+          // 口調も同じ理由で必須にする（null は許す）
+          "speechStyle",
+          "speechEvidence",
           "relations",
           "evidence",
         ],
@@ -570,6 +617,10 @@ export interface ExtractedCharacter {
   role?: string | null;
   personality?: string | null;
   appearance?: string | null;
+  /** 口調（一人称・語尾・口癖・話し方の特徴）。検算を通ったものだけが残る */
+  speechStyle?: string | null;
+  /** 口調の根拠になる、その人物の台詞の逐語引用 */
+  speechEvidence?: string | null;
   firstPerson?: string | null;
   defaultSecondPerson?: string | null;
   addressTerms?: Array<{

@@ -50,6 +50,7 @@ import {
   addPersonalityFacet,
   migratePersonalityFacets,
 } from "./personalityFacets";
+import { addSpeechStyleFacet } from "./speechStyle";
 
 /**
  * 抽出結果を既存の人物一覧へマージする。
@@ -507,6 +508,25 @@ function addExtractedPersonality(
 }
 
 /**
+ * 抽出した口調を、面として足す（作者の裁定、2026-09-25 昼）。
+ *
+ * 性格と同じく `fillOrConflict` を通さない。口調も同時に成り立つ特徴を
+ * 重ねて描かれるので、上書き型の規則では前の話の読みが押し流される。
+ * 値と根拠の台詞は、抽出の検算（`checkSpeechStyle`）が確かめてある。
+ */
+function addExtractedSpeechStyle(
+  target: Character,
+  incoming: string | null | undefined,
+  chapters: number[],
+  evidence: string | null
+): boolean {
+  const value = incoming?.trim();
+  if (!value) return false;
+  if (!isMeaningfulValue(value)) return false;
+  return addSpeechStyleFacet(target, value, chapters, evidence);
+}
+
+/**
  * このマージで新たに「要確認」になった変化（作者の裁定、2026-09-23）。
  *
  * **マージの前後を比べて数える。** 要確認は、話数の違う値を積む道
@@ -701,6 +721,15 @@ function applyExtracted(
   changed =
     addExtractedPersonality(target, ex.personality, validChapters, evidence) ||
     changed;
+  // 口調も面として積む（2026-09-25）。根拠は人物の引用ではなく、
+  // **検算が本文の台詞の中に実在すると確かめた台詞**を持たせる
+  changed =
+    addExtractedSpeechStyle(
+      target,
+      ex.speechStyle,
+      validChapters,
+      ex.speechEvidence?.trim() || null
+    ) || changed;
   changed =
     fillOrConflict(target, "appearance", ex.appearance, validChapters, conflicts, evidence) ||
     changed;

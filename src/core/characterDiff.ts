@@ -145,6 +145,8 @@ const TEXT_FIELDS: Array<{
   { label: "別名", read: (c) => c.aliases.join("、"), leaves: aliasLeaves },
   { label: "役割", read: (c) => c.role ?? "" },
   { label: "性格", read: (c) => c.personality ?? "" },
+  // 口調（2026-09-25）。古い資料には無いので空として比べる
+  { label: "口調", read: (c) => c.speechStyle ?? "" },
   { label: "外見", read: (c) => c.appearance ?? "" },
   { label: "一人称", read: (c) => c.firstPerson.default ?? "" },
   {
