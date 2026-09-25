@@ -2,16 +2,24 @@
 // いま向いているログ（無ければ保管庫）へ書く（窓の札と同じ扱い）
 import * as vscode from "vscode";
 import * as path from "../core/paths";
-import { AiQueueAbortError, currentRunLabel } from "../core/aiSequence";
+import {
+  AiQueueAbortError,
+  currentRunLabel,
+  currentRunScope,
+  runScopeAvailable,
+  setRunScopeCarrier,
+} from "../core/aiSequence";
 import { setLocalAiGate, type LocalAiGate, type LocalAiGateRequest } from "../core/localAiGate";
 import {
+  LOCAL_AI_INTERRUPT_FILE,
   LOCAL_AI_LEASE_DIRECTORY,
   LOCAL_AI_LEASE_FILE,
-  ProcessLease,
+  LOCAL_AI_RUN_LEASE_FILE,
   holderPhrase,
   leaseWaitingMessage,
   type LeaseRecord,
 } from "../core/localAiLease";
+import { CrossProcessTurn } from "../core/localAiCrossTurn";
 import {
   LOAD_WAIT_RECHECK_MS,
   LoadCheckSchedule,
@@ -38,8 +46,10 @@ import { currentRunControl, type RunControl } from "./localAiRunControl";
  * あるときはキューを管理し、管理下にない場合は警告を出す」。
  *
  * 1. **管理下（別の窓・開発ホスト・MCP サーバー）**：保管庫の札
- *    （`core/localAiLease.ts`）で順番を取る。待っているあいだは
- *    「別の窓の「〜」の完了を待っています…」と出し、中止できる
+ *    （`core/localAiCrossTurn.ts`。一括処理のまとまりと1回の送信の2段）で
+ *    順番を取る。**一括処理どうしは窓をまたいで待ち、相談などの単発は別の窓の
+ *    一括処理のチャンクの合間に入る**（同じ窓の中と同じ扱い。6.76 の決めごと13）。
+ *    待っているあいだは「別の窓の「〜」の完了を待っています…」と出し、中止できる
  * 2. **管理外（ほかのアプリ）**：札を新しく取ったとき（と、持ち続けているあいだは
  *    5分ごと）に GPU の負荷を見て、高ければ［待つ］［このまま送る］［やめる］を問う
  *
@@ -126,8 +136,22 @@ function sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
 
 type NodeParts = typeof import("../core/localAiLeaseNode.js");
 
+/**
+ * この送信は一括処理の1チャンクか、単発か。
+ *
+ * 一括処理の本体は `features/aiTurn.ts` が印（`withinRunScope`）を持たせて
+ * 走らせるので、印があれば一括処理である。**印の仕組みが入っていない**
+ * （Node の部品を読み込む前の一瞬）ときは、0.86.13 までと同じく
+ * 「このプロセスで一括処理が札を持っているか」で見分ける（相談も一括処理に
+ * 見えて、別の窓の一括処理を待つ——今までと同じで、悪くはならない）。
+ */
+function runOfThisCall(): string | undefined {
+  if (runScopeAvailable()) return currentRunScope();
+  return currentRunLabel();
+}
+
 class ExtensionLocalAiGate implements LocalAiGate {
-  private leaseLoading: Promise<ProcessLease | undefined> | undefined;
+  private leaseLoading: Promise<CrossProcessTurn | undefined> | undefined;
   private node: NodeParts | undefined;
   private readonly schedule = new LoadCheckSchedule();
   /** nvidia-smi が入っていない機械。**以後は呼ばない** */
@@ -146,18 +170,24 @@ class ExtensionLocalAiGate implements LocalAiGate {
     logLine(message);
   }
 
-  private lease(): Promise<ProcessLease | undefined> {
+  lease(): Promise<CrossProcessTurn | undefined> {
     this.leaseLoading ??= (async () => {
       try {
         const node = await import("../core/localAiLeaseNode.js");
         this.node = node;
-        const filePath = path.join(
-          this.storageRoot,
-          LOCAL_AI_LEASE_DIRECTORY,
-          LOCAL_AI_LEASE_FILE
-        );
-        return new ProcessLease(
-          node.nodeLeaseEnvironment(filePath, (message) => logLine(message)),
+        // 一括処理の本体に印を持たせる仕組み（`aiTurn.ts` が使う）
+        setRunScopeCarrier(node.createRunScopeCarrier());
+        const directory = path.join(this.storageRoot, LOCAL_AI_LEASE_DIRECTORY);
+        const log = (message: string): void => logLine(message);
+        return new CrossProcessTurn(
+          {
+            send: node.nodeLeaseEnvironment(path.join(directory, LOCAL_AI_LEASE_FILE), log),
+            run: node.nodeLeaseEnvironment(path.join(directory, LOCAL_AI_RUN_LEASE_FILE), log),
+            interrupt: node.nodeLeaseEnvironment(
+              path.join(directory, LOCAL_AI_INTERRUPT_FILE),
+              log
+            ),
+          },
           {
             pid: node.currentPid(),
             host: "extension",
@@ -165,9 +195,10 @@ class ExtensionLocalAiGate implements LocalAiGate {
             ...(this.windowName ? { windowName: this.windowName } : {}),
           },
           {
-            // **一括処理の札（6.76）を持っている間は離さない**（別の窓と交互に流さない）
-            keepWhile: () => currentRunLabel() !== undefined,
-            onDropped: () => this.schedule.leaseDropped(),
+            // **一括処理の札（6.76）を持っている間は、まとまりの札を離さない**
+            // （別の窓の一括処理と交互に流さない）。送信の札は合間ごとに離す
+            keepRunWhile: () => currentRunLabel() !== undefined,
+            onIdle: () => this.schedule.leaseDropped(),
           }
         );
       } catch (error) {
@@ -185,8 +216,12 @@ class ExtensionLocalAiGate implements LocalAiGate {
     const lease = await this.lease();
     if (!lease) return () => undefined;
 
-    const label = currentRunLabel() ?? SINGLE_CALL_LABEL;
-    const control = currentRunControl();
+    const run = runOfThisCall();
+    const kind = run !== undefined ? "run" : "single";
+    const label = run ?? SINGLE_CALL_LABEL;
+    // **単発は一括処理の進捗へ出さない。** 一括処理の最中に押した相談の待ちを
+    // 一括処理の進捗へ出すと、GPU の警告の［やめる］で一括処理まで止めてしまう
+    const control = kind === "run" ? currentRunControl() : undefined;
     const abort = combinedAbort(request.signal);
     let display: WaitDisplay | undefined;
     const onWait = (holder: LeaseRecord): void => {
@@ -206,7 +241,7 @@ class ExtensionLocalAiGate implements LocalAiGate {
 
     let entry;
     try {
-      entry = await lease.enter(label, { signal: abort.signal, onWait });
+      entry = await lease.enter(label, { kind, signal: abort.signal, onWait });
     } finally {
       display?.close();
     }
@@ -236,7 +271,7 @@ class ExtensionLocalAiGate implements LocalAiGate {
   }
 
   runEnded(): void {
-    void this.leaseLoading?.then((lease) => lease?.releaseIfIdle());
+    void this.leaseLoading?.then((lease) => lease?.runEnded());
   }
 
   async dispose(): Promise<void> {
@@ -385,9 +420,13 @@ export function startLocalAiGate(
     vscode.workspace.name ?? undefined
   );
   setLocalAiGate(gate);
+  // **先に読み込んでおく。** 一括処理か単発かを見分ける印の仕組みは Node の部品に
+  // あり、最初の送信まで待つと、起動直後に始めた一括処理が印を持たずに走る
+  void gate.lease();
   return {
     dispose: () => {
       setLocalAiGate(undefined);
+      setRunScopeCarrier(undefined);
       void gate.dispose().catch(() => undefined);
     },
   };

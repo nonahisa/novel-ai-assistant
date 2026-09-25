@@ -16,7 +16,11 @@ import {
   setExternalClientName,
 } from "./tools/accessLog";
 import { assertExternalAccessAllowed } from "./tools/permission";
-import { withLocalAiNotes, withLocalAiSession } from "./localAiTurn";
+import {
+  localAiSessionKind,
+  withLocalAiNotes,
+  withLocalAiSession,
+} from "./localAiTurn";
 import {
   FEATURE_LABELS,
   FEATURE_NAMES,
@@ -190,14 +194,17 @@ function tool<Args>(
     try {
       /*
         **手元の Ollama へ送るなら、ほかの窓と順番を取る**（設計書6.76.1）。
-        道具の呼び出し1回を1つの実行とみなし、最初に送るときに札を取って
-        返るまで持つ。送らない道具では何も起きない。待ったこと・管理外の
-        負荷の疑い・札が無いことは、結果に1行添える（止めない）
+        チャンクを回す `novel.run` は一括処理として、最初に送るときに
+        まとまりの札を取って返るまで持つ。それ以外（1回だけ送るもの）は
+        単発として、別の窓の一括処理の合間に入る（`localAiSessionKind`）。
+        送らない道具では何も起きない。待ったこと・管理外の負荷の疑い・
+        札が無いことは、結果に1行添える（止めない）
       */
       const { value, notes } = await withLocalAiSession(
         sessionLabel(name, args),
         extra?.signal,
-        async () => await handler(args)
+        async () => await handler(args),
+        localAiSessionKind(name, args)
       );
       recordExternalAccess({ tool: name, args, ok: true });
       return ok(withStaleNote(withLocalAiNotes(value, notes), checkBundleStaleness()));

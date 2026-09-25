@@ -23,6 +23,12 @@ const BROWSER_EXTERNAL_BUILTINS = [
   "node:fs",
   "node:path",
   "node:child_process",
+  /*
+    手元のAIの順番待ち（設計書6.76.1）が「一括処理の中か」を運ぶのに使う
+    （`core/localAiLeaseNode.ts`）。門が `canRunProcesses()` で確かめてから
+    動的に読むので、ブラウザでは読み込まれない
+  */
+  "node:async_hooks",
   "child_process",
   /*
     **`undici` はNodeにしか無い**（設計書6.63）。

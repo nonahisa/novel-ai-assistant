@@ -345,6 +345,67 @@ describe("同じプロセスの中", () => {
   });
 });
 
+describe("離してすぐ取り直す（送信の札はチャンクごとに離す。6.76.1 の追記）", () => {
+  test("離した札の片づけが済むまで取りにいかない（消えかけの自分の札を拾わない）", async () => {
+    const machine = new FakeMachine();
+    // 片づけ（removeIfSame）を手で進める機械にする
+    const env = machine.env();
+    let finishRemoval: (() => void) | undefined;
+    const slowEnv: LeaseEnvironment = {
+      ...env,
+      ops: {
+        ...env.ops,
+        removeIfSame: async (text) => {
+          await new Promise<void>((resolve) => {
+            finishRemoval = resolve;
+          });
+          return env.ops.removeIfSame(text);
+        },
+      },
+    };
+    machine.alive.add(101);
+    const a = new ProcessLease(slowEnv, { pid: 101, host: "extension", token: "token-101" });
+    const b = machine.process(202);
+
+    (await a.enter("1チャンク目")).release();
+    // 片づけが済まないうちに、2チャンク目を取りにいく
+    let aDone = false;
+    const again = a.enter("2チャンク目").then((entry) => {
+      aDone = true;
+      return entry;
+    });
+    await turns();
+    expect(aDone).toBe(false);
+    finishRemoval?.();
+    const entry = await again;
+    expect(entry.kind).toBe("held");
+    // 取り直した札が、ちゃんとファイルに残っている（拾ってすぐ消えた、ではない）
+    expect(parseLease(machine.file!.text)?.label).toBe("2チャンク目");
+    // B は取れない（2つが同時に送らない）
+    let bDone = false;
+    void b.enter("相談").then(() => {
+      bDone = true;
+    });
+    await turns();
+    expect(bDone).toBe(false);
+  });
+
+  test("あとから並んだ者にも、待たせている相手をすぐ知らせる", async () => {
+    const machine = new FakeMachine();
+    const a = machine.process(101);
+    const b = machine.process(202);
+    await a.enter("誤字脱字の検知");
+    const first: LeaseRecord[] = [];
+    void b.enter("相談", { onWait: (holder) => first.push(holder) });
+    await turns();
+    expect(first).toHaveLength(1);
+    const late: LeaseRecord[] = [];
+    void b.enter("単発の生成", { onWait: (holder) => late.push(holder) });
+    await turns();
+    expect(late.map((holder) => holder.label)).toEqual(["誤字脱字の検知"]);
+  });
+});
+
 describe("札の読み書きと言い方", () => {
   test("書いたものが読める。欠けたもの・壊れたものは読まない", () => {
     const record: LeaseRecord = {

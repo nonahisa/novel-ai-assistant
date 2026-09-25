@@ -185,6 +185,49 @@ export function pendingRunCount(): number {
   return runLane.pending();
 }
 
+/**
+ * 「いま一括処理の中の呼び出しか」を、**非同期の流れに乗せて**運ぶ口（設計書6.76.1）。
+ *
+ * 手元のAIの門は、別の窓と順番を取るときに「一括処理の1チャンク」と
+ * 「相談などの単発」を分けて扱う（単発は別の窓の一括処理の合間に入れる）。
+ * `currentRunLabel()` は「このプロセスで一括処理が札を持っているか」しか
+ * 分からず、**一括処理の最中に押された相談も一括処理に見えてしまう**。
+ * そこで札を取った処理の中だけに印を持たせる。
+ *
+ * 運ぶ仕組み（Node の `AsyncLocalStorage`）はブラウザ版に無いので、ここは
+ * 差し込み口だけにして、中身は門が起動時に入れる（`core/localAiLeaseNode.ts`
+ * を動的 import で。CLAUDE.md 規則7）。**差し込まれていなければ、呼ぶ側は
+ * 従来の `currentRunLabel()` で見分ける。**
+ */
+export interface RunScopeCarrier {
+  run<T>(label: string, fn: () => T): T;
+  current(): string | undefined;
+}
+
+let runScopeCarrier: RunScopeCarrier | undefined;
+
+export function setRunScopeCarrier(carrier: RunScopeCarrier | undefined): void {
+  runScopeCarrier = carrier;
+}
+
+/** 運ぶ仕組みが差し込まれているか */
+export function runScopeAvailable(): boolean {
+  return runScopeCarrier !== undefined;
+}
+
+/**
+ * 一括処理の本体を、印を持たせて走らせる（`features/aiTurn.ts` が札を取ったあとに呼ぶ）。
+ * 差し込まれていなければ、そのまま走らせる。
+ */
+export function withinRunScope<T>(label: string, fn: () => T): T {
+  return runScopeCarrier ? runScopeCarrier.run(label, fn) : fn();
+}
+
+/** いまの呼び出しが属する一括処理の名前。一括処理の外なら undefined */
+export function currentRunScope(): string | undefined {
+  return runScopeCarrier?.current();
+}
+
 /** 試験用。実際の経路では使わない */
 export function resetAiSequence(): void {
   callLane.reset();

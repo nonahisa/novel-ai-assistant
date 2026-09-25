@@ -42,9 +42,20 @@
 
 import { AiQueueAbortError } from "./aiSequence";
 
-/** 保管庫の中の置き場（`globalStorage/<拡張機能ID>/local-ai/lease.json`） */
+/**
+ * 保管庫の中の置き場（`globalStorage/<拡張機能ID>/local-ai/`）。
+ *
+ * - `lease.json`：**1回の送信**の札（いま手元のAIへ送っている者）
+ * - `run.json`：**一括処理のまとまり**の札（`localAiCrossTurn.ts`。0.86.13 より後）
+ * - `interrupt.json`：別のプロセスの単発が「合間に入れてほしい」と出す印
+ *
+ * `lease.json` の名前を変えないのは、0.86.13 の窓（一括処理のあいだずっと
+ * `lease.json` を持つ）と混ざっても、**実際の送信どうしは必ず1本になる**ようにするため。
+ */
 export const LOCAL_AI_LEASE_DIRECTORY = "local-ai";
 export const LOCAL_AI_LEASE_FILE = "lease.json";
+export const LOCAL_AI_RUN_LEASE_FILE = "run.json";
+export const LOCAL_AI_INTERRUPT_FILE = "interrupt.json";
 
 /**
  * 生存の印を打ち直す間隔（ミリ秒）。
@@ -255,9 +266,11 @@ export interface ProcessLeaseOptions {
   /**
    * 使う者が0になっても、札を持ち続けるか。
    *
-   * 拡張機能の側は**一括処理の札（6.76）を持っている間は離さない**。
-   * チャンクの合間ごとに離すと、別の窓と A1,B1,A2,B2… と交互に流れ、
-   * Ollama の読み込み直しが往復する（6.76 で実行の札を足したのと同じ理由）。
+   * **一括処理のまとまりの札（`run.json`）だけに使う**——一括処理（6.76 の
+   * 実行の札）を持っている間は離さない。チャンクの合間ごとに離すと、別の窓の
+   * 一括処理と A1,B1,A2,B2… と交互に流れ、Ollama の読み込み直しが往復する。
+   * 1回の送信の札（`lease.json`）には使わない——合間ごとに離すから、
+   * 別の窓の相談が合間に入れる（6.76.1）。
    */
   readonly keepWhile?: () => boolean;
   /** 札を離したとき（管理外の負荷の「しばらく出さない」を解くのに使う） */
@@ -293,6 +306,13 @@ export class ProcessLease {
   private waiters = 0;
   private acquiring: Promise<LoopOutcome> | undefined;
   private readonly waitListeners = new Set<(holder: LeaseRecord) => void>();
+  /**
+   * いま待たせている相手（取りにいっている最中だけ）。**あとから並んだ者にも
+   * すぐ知らせる**ため——相手が替わったときにしか知らせない作りなので、
+   * 後から来た者は相手を知らないまま待つことになる（待ちの表示が出ない・
+   * 単発が「合間に入れてほしい」の印を出せない）
+   */
+  private currentHolder: LeaseRecord | undefined;
   private heartbeat: { stop(): void } | undefined;
   private pendingRemoval: Promise<void> | undefined;
 
@@ -324,9 +344,11 @@ export class ProcessLease {
 
     this.waiters += 1;
     if (onWait) this.waitListeners.add(onWait);
+    if (onWait && this.currentHolder) onWait(this.currentHolder);
     try {
       this.acquiring ??= this.acquireLoop(label).finally(() => {
         this.acquiring = undefined;
+        this.currentHolder = undefined;
       });
       const outcome = await raceAbort(this.acquiring, signal);
       if (outcome.kind === "unavailable") {
@@ -425,6 +447,13 @@ export class ProcessLease {
     const started = this.env.now();
     let waitedFor: LeaseRecord | undefined;
     for (;;) {
+      /*
+        **離した札の片づけが済むまで、取りにいかない。** 送信の札はチャンクの
+        合間ごとに離して取り直すので、消している最中の自分の古い札を
+        「自分の札が残っていた」と拾い直し、その直後に消えてしまう形が
+        毎チャンク起こりうる（拾ったつもりで持っていない＝別のプロセスと重なる）
+      */
+      if (this.pendingRemoval) await this.pendingRemoval;
       if (this.waiters === 0) return { kind: "abandoned" };
 
       const record: LeaseRecord = {
@@ -515,6 +544,7 @@ export class ProcessLease {
       // 持たれている。相手が替わったときだけ知らせる（毎回言うとログが埋まる）
       if (parsed && parsed.token !== waitedFor?.token) {
         waitedFor = parsed;
+        this.currentHolder = parsed;
         for (const listener of this.waitListeners) listener(parsed);
       }
       await this.env.sleep(LEASE_POLL_MS);
@@ -565,7 +595,7 @@ export class ProcessLease {
 }
 
 /** 待ちを中止で抜ける。**待っている本体は止めない**（ほかの者が同じものを待っている） */
-function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+export function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return promise;
   if (signal.aborted) return Promise.reject(new AiQueueAbortError());
   return new Promise<T>((resolve, reject) => {

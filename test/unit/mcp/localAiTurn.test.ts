@@ -4,12 +4,15 @@ import * as path from "path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { GLOBAL_STORAGE_ENV } from "../../../src/mcp/globalStorage";
 import {
+  MCP_RUN_FEATURES,
   NO_LEDGER_NOTE,
   enterLocalAi,
+  localAiSessionKind,
   resetLocalAiLeaseForTest,
   withLocalAiNotes,
   withLocalAiSession,
 } from "../../../src/mcp/localAiTurn";
+import { FEATURE_NAMES } from "../../../src/core/mcpFeatures";
 import { parseLease, serializeLease } from "../../../src/core/localAiLease";
 import { resetAiSequence } from "../../../src/core/aiSequence";
 
@@ -46,13 +49,40 @@ function leaseFile(): string {
   return path.join(storage, "local-ai", "lease.json");
 }
 
+function runFile(): string {
+  return path.join(storage, "local-ai", "run.json");
+}
+
+function interruptFile(): string {
+  return path.join(storage, "local-ai", "interrupt.json");
+}
+
+/** 別の窓が持っている札（持ち主はこの試験のプロセス＝生きている、合言葉だけ違う） */
+function otherWindowHolds(file: string, label: string): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(
+    file,
+    serializeLease({
+      version: 1,
+      token: "window",
+      pid: process.pid,
+      host: "extension",
+      windowName: "作品A",
+      label,
+      startedAt: new Date().toISOString(),
+    })
+  );
+}
+
 describe("道具の呼び出し1回を1つの実行として札を持つ", () => {
   test("最初に送るときに取り、道具が返るまで持ち、返ったら消す", async () => {
     const { value, notes } = await withLocalAiSession("誤字脱字の検知", undefined, async () => {
       const leave1 = await enterLocalAi(ENDPOINT);
+      // 送っているあいだは送信の札も持つ
+      expect(parseLease(fs.readFileSync(leaseFile(), "utf8"))?.pid).toBe(process.pid);
       leave1();
-      // チャンクの合間でも離さない（別の窓と交互に流さない）
-      const record = parseLease(fs.readFileSync(leaseFile(), "utf8"));
+      // チャンクの合間でも**まとまりの札は**離さない（別の窓の一括処理と交互に流さない）
+      const record = parseLease(fs.readFileSync(runFile(), "utf8"));
       expect(record).toMatchObject({ host: "mcp", label: "誤字脱字の検知", pid: process.pid });
       const leave2 = await enterLocalAi(ENDPOINT);
       leave2();
@@ -63,6 +93,7 @@ describe("道具の呼び出し1回を1つの実行として札を持つ", () =>
     // **返った時点で消えている**（待たずに見る）。実機で、返事を受けた呼び出し元が
     // すぐサーバーを終わらせ、札が残って次の者が見切るまで待たされた
     expect(fs.existsSync(leaseFile())).toBe(false);
+    expect(fs.existsSync(runFile())).toBe(false);
   });
 
   test("別の窓が持っていれば待ち、待ったことを結果に1行添える", async () => {
@@ -132,6 +163,85 @@ describe("道具の呼び出し1回を1つの実行として札を持つ", () =>
     const { notes } = await withLocalAiSession("mcp.version", undefined, async () => 1);
     expect(notes).toEqual([]);
     expect(fs.existsSync(leaseFile())).toBe(false);
+  });
+});
+
+describe("一括処理か単発か（6.76.1 の追記）", () => {
+  test("novel.run のうち、話やチャンクを回す feature だけを一括処理にする", () => {
+    // 一覧を変えたら、設計書 6.76.1 の理由も直す
+    expect([...MCP_RUN_FEATURES].sort()).toEqual(
+      ["contradiction", "factContradiction", "foreshadow", "proofread", "settings", "typo"].sort()
+    );
+    // 一覧の名前は、すべて本物の feature である（綴り違いで黙って単発にならない）
+    for (const feature of MCP_RUN_FEATURES) {
+      expect(FEATURE_NAMES).toContain(feature);
+    }
+    expect(localAiSessionKind("novel.run", { feature: "typo" })).toBe("run");
+    expect(localAiSessionKind("novel.run", { feature: "chat" })).toBe("single");
+    expect(localAiSessionKind("novel.run", { feature: "synopsis" })).toBe("single");
+    expect(localAiSessionKind("novel.run", {})).toBe("single");
+    expect(localAiSessionKind("ollama.generate", { feature: "typo" })).toBe("single");
+    expect(localAiSessionKind("novel.prompt", { feature: "typo" })).toBe("single");
+  });
+
+  test("単発は、別の窓の一括処理がまとまりの札を持っていても待たずに送る", async () => {
+    otherWindowHolds(runFile(), "誤字脱字の検知");
+    const { notes } = await withLocalAiSession(
+      "相談",
+      undefined,
+      async () => {
+        (await enterLocalAi(ENDPOINT))();
+      },
+      "single"
+    );
+    expect(notes).toEqual([]);
+    // 相手のまとまりの札はそのまま
+    expect(parseLease(fs.readFileSync(runFile(), "utf8"))?.token).toBe("window");
+  });
+
+  test("一括処理は、別の窓の一括処理が終わるまで待つ（送信の札が空いていても）", async () => {
+    otherWindowHolds(runFile(), "推敲");
+    let sent = false;
+    const running = withLocalAiSession("誤字脱字の検知", undefined, async () => {
+      const leave = await enterLocalAi(ENDPOINT);
+      sent = true;
+      leave();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(sent).toBe(false);
+    fs.unlinkSync(runFile());
+    const { notes } = await running;
+    expect(sent).toBe(true);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatch(/^別の窓（作品A）の「推敲」の完了を\d+秒待ってから送りました。$/);
+  });
+
+  test("単発が送信の札を待つあいだは「合間に入れてほしい」の印を出し、送るときに下げる", async () => {
+    otherWindowHolds(leaseFile(), "誤字脱字の検知");
+    let sent = false;
+    const running = withLocalAiSession(
+      "相談",
+      undefined,
+      async () => {
+        const leave = await enterLocalAi(ENDPOINT);
+        sent = true;
+        leave();
+      },
+      "single"
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(sent).toBe(false);
+    expect(parseLease(fs.readFileSync(interruptFile(), "utf8"))).toMatchObject({
+      host: "mcp",
+      label: "相談",
+      pid: process.pid,
+    });
+    // 別の窓の一括処理がチャンクを送り終えた
+    fs.unlinkSync(leaseFile());
+    await running;
+    expect(sent).toBe(true);
+    // 印は残さない（残すと別の窓の一括処理が譲り続ける）。返った時点で消えている
+    expect(fs.existsSync(interruptFile())).toBe(false);
   });
 });
 

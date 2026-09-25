@@ -1,7 +1,9 @@
 import { promises as fs } from "node:fs";
 import nodePath from "node:path";
 import { execFile } from "node:child_process";
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { LeaseEnvironment, LeaseFileOps } from "./localAiLease";
+import type { RunScopeCarrier } from "./aiSequence";
 import { NVIDIA_SMI_ARGS } from "./gpuLoad";
 
 /**
@@ -177,4 +179,18 @@ export function runNvidiaSmi(timeoutMs = 3000): Promise<NvidiaSmiResult> {
       }
     );
   });
+}
+
+/**
+ * 「いま一括処理の中か」を運ぶ仕組み（`aiSequence.ts` の `RunScopeCarrier`）。
+ *
+ * `AsyncLocalStorage` は `await` やタイマーをまたいで値を運ぶので、一括処理の
+ * 本体から呼ばれた送信だけが印を持ち、画面から押された相談は持たない。
+ */
+export function createRunScopeCarrier(): RunScopeCarrier {
+  const storage = new AsyncLocalStorage<string>();
+  return {
+    run: (label, fn) => storage.run(label, fn),
+    current: () => storage.getStore(),
+  };
 }

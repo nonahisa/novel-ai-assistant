@@ -3,6 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
+  createRunScopeCarrier,
   isProcessAlive,
   nodeLeaseEnvironment,
   nodeLeaseFileOps,
@@ -109,5 +110,24 @@ describe("本物の fs で2つのプロセスが取り合う", () => {
     entry.release();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(fs.existsSync(file)).toBe(false);
+  });
+});
+
+describe("「一括処理の中か」を運ぶ仕組み（6.76.1 の追記）", () => {
+  test("await とタイマーをまたいで運び、並んで走る別の流れには漏れない", async () => {
+    const carrier = createRunScopeCarrier();
+    const seen: Array<string | undefined> = [];
+    const run = carrier.run("誤字脱字の検知", async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      seen.push(carrier.current());
+    });
+    // 同時に走る、印の外の流れ（画面から押された相談）
+    const other = (async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      seen.push(carrier.current());
+    })();
+    await Promise.all([run, other]);
+    expect(seen).toEqual([undefined, "誤字脱字の検知"]);
+    expect(carrier.current()).toBeUndefined();
   });
 });

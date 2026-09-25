@@ -53,9 +53,14 @@ vi.mock("../../../src/views/progress", () => ({
 const { withAiTurn, withAiTurnProgress } = await import(
   "../../../src/features/aiTurn"
 );
-const { acquireRun, currentRunLabel, resetAiSequence } = await import(
-  "../../../src/core/aiSequence"
-);
+const {
+  acquireRun,
+  currentRunLabel,
+  currentRunScope,
+  resetAiSequence,
+  setRunScopeCarrier,
+} = await import("../../../src/core/aiSequence");
+const { createRunScopeCarrier } = await import("../../../src/core/localAiLeaseNode");
 
 /** 次のマイクロタスクまで待つ */
 async function settle(): Promise<void> {
@@ -217,5 +222,61 @@ describe("進捗をまたいで札を持つ（withAiTurn）", () => {
     ).rejects.toThrow("途中で落ちました");
 
     expect(currentRunLabel()).toBeUndefined();
+  });
+});
+
+describe("一括処理の本体に「一括処理の中」の印を持たせる（6.76.1 の追記）", () => {
+  test("札を取った処理の中だけが印を持つ。外から並んで来た呼び出しは持たない", async () => {
+    setRunScopeCarrier(createRunScopeCarrier());
+    try {
+      let inside: string | undefined;
+      let outsideDuringRun: string | undefined = "未確認";
+      let resume: () => void = () => undefined;
+      const paused = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const running = withAiTurnProgress(
+        "誤字脱字を検知しています",
+        { label: "誤字脱字の検知" },
+        async () => {
+          await paused;
+          // await をまたいでも印が残る（チャンクの送信は await の先で起きる）
+          inside = currentRunScope();
+        }
+      );
+      await settle();
+      // 一括処理の最中に、画面から押された相談（札を取らない呼び出し）
+      outsideDuringRun = currentRunScope();
+      resume();
+      await running;
+      expect(inside).toBe("誤字脱字の検知");
+      expect(outsideDuringRun).toBeUndefined();
+      expect(currentRunScope()).toBeUndefined();
+    } finally {
+      setRunScopeCarrier(undefined);
+    }
+  });
+
+  test("まとめ実行の中の機能（alreadyHeld）は、札の持ち主の名前で印を持つ", async () => {
+    setRunScopeCarrier(createRunScopeCarrier());
+    try {
+      let inner: string | undefined;
+      await withAiTurn({ label: "校正をまとめて実行" }, async () => {
+        await withAiTurnProgress("推敲しています", { label: "推敲", alreadyHeld: true }, async () => {
+          inner = currentRunScope();
+        });
+      });
+      expect(inner).toBe("校正をまとめて実行");
+    } finally {
+      setRunScopeCarrier(undefined);
+    }
+  });
+
+  test("運ぶ仕組みが入っていなければ、印は無い（呼ぶ側は従来の見分け方へ戻る）", async () => {
+    let inside: string | undefined = "未確認";
+    await withAiTurn({ label: "推敲" }, async () => {
+      inside = currentRunScope();
+    });
+    expect(inside).toBeUndefined();
   });
 });

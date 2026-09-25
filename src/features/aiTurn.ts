@@ -3,6 +3,7 @@ import {
   AiQueueAbortError,
   acquireRun,
   currentRunLabel,
+  withinRunScope,
 } from "../core/aiSequence";
 import { withCancellableProgress } from "../views/progress";
 import { localAiGate } from "../core/localAiGate";
@@ -100,6 +101,18 @@ async function takeTurn(
   }
 }
 
+/**
+ * 一括処理の本体に「一括処理の中」の印を持たせて走らせる（設計書6.76.1）。
+ *
+ * 手元のAIの門は、この印のある送信だけを「一括処理の1チャンク」として扱い、
+ * 別の窓の一括処理とは順番を待たせ、印の無い送信（相談など）は別の窓の
+ * 一括処理の合間へ入れる。**札を持っている者の名前**を印にする（校正の
+ * まとめ実行の中の各機能は、まとめ実行の名前で待たせる。6.76 の決めごと14）。
+ */
+function asRun<T>(label: string, run: () => Promise<T>): Promise<T> {
+  return withinRunScope(currentRunLabel() ?? label, run);
+}
+
 /** 中止の合図（`CancellationToken`）を `AbortSignal` へ橋渡しする */
 function signalOf(token: vscode.CancellationToken): AbortSignal {
   const controller = new AbortController();
@@ -129,7 +142,7 @@ export async function withAiTurnProgress(
     try {
       // **もう持っているなら、取りにいかない**（自分の札を自分で待つ形を作らない）
       if (options.alreadyHeld) {
-        await task(progress, token);
+        await asRun(options.label, () => task(progress, token));
         return;
       }
       const release = await takeTurn(options.label, signalOf(token), (message) =>
@@ -140,7 +153,7 @@ export async function withAiTurnProgress(
         return;
       }
       try {
-        await task(progress, token);
+        await asRun(options.label, () => task(progress, token));
       } finally {
         release();
         notifyRunEnded();
@@ -165,7 +178,7 @@ export async function withAiTurn<T>(
   run: () => Promise<T>
 ): Promise<T | undefined> {
   // **もう持っているなら、取りにいかない**（上と同じ理由）
-  if (options.alreadyHeld) return await run();
+  if (options.alreadyHeld) return await asRun(options.label, run);
 
   const holder = currentRunLabel();
   const release =
@@ -183,7 +196,7 @@ export async function withAiTurn<T>(
     return undefined;
   }
   try {
-    return await run();
+    return await asRun(options.label, run);
   } finally {
     release();
     notifyRunEnded();
