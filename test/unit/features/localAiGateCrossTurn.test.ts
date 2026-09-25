@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { Uri } from "vscode";
 import { startLocalAiGate } from "../../../src/features/localAiGate";
 import { localAiGate } from "../../../src/core/localAiGate";
@@ -86,14 +86,18 @@ describe("一括処理の1チャンクと単発を見分ける", () => {
       );
       leave();
     });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    // チャンクの合間：送信の札は離し、まとまりの札は持っている
-    expect(fs.existsSync(file("lease.json"))).toBe(false);
+    // チャンクの合間：送信の札は離し、まとまりの札は持っている。
+    // 札の片づけは非同期なので、決め打ちの待ち時間ではなく消えるまで見に行く
+    // （20ミリ秒の決め打ちは、ほかの検査と並んで重いときに間に合わず揺れた）
+    await vi.waitFor(() => expect(fs.existsSync(file("lease.json"))).toBe(false), {
+      timeout: 2000,
+    });
     expect(fs.existsSync(file("run.json"))).toBe(true);
     releaseRun();
     localAiGate()!.runEnded();
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(fs.existsSync(file("run.json"))).toBe(false);
+    await vi.waitFor(() => expect(fs.existsSync(file("run.json"))).toBe(false), {
+      timeout: 2000,
+    });
   });
 
   test("同じ窓で一括処理が札を持っている最中の相談は、単発として扱う（まとまりの札を取らない）", async () => {
