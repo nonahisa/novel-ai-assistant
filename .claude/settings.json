@@ -8,6 +8,11 @@
             "type": "command",
             "command": "node .claude/hooks/sessionStart.mjs",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "node scripts/cleanup.mjs --quiet",
+            "timeout": 60
           }
         ]
       }
