@@ -43,7 +43,7 @@ import { runRequest, runResult } from "../mcp/tools/runRequest";
 import { handleRunRequest } from "../features/runRequestHandler";
 import { createRunRequestDeps } from "../features/runRequestRunners";
 import { RUN_REQUEST_DIRECTORY, runStateFileName } from "../core/runRequest";
-import { RECOMMENDED_CHAT_MODEL } from "../core/requirements";
+import type { GenerateParams } from "../ai/types";
 
 const COMMANDS = [
   "novelai.addWork",
@@ -952,9 +952,13 @@ async function runCase(
  * 読み書きする（「新しく作るだけ」の錠が本物のファイル装置で効くか）・確認は
  * `vscode.window.showWarningMessage` のモーダルを差し替えて中身を見る。
  *
- * **手元の Ollama に薦めるモデル（`RECOMMENDED_CHAT_MODEL`）があるときだけ**、作者が「走らせる」を押した
- * 道も通す（製品の誤字脱字検知を本物のAIで回し、結果を `run.result` で読む）。
- * 無ければ省く（CI には Ollama が無い）。
+ * **AIは作り物で閉じる**（ほかの統合テストと同じ。2026-09-26）。以前は手元の
+ * Ollama に薦めるモデルがあると本物へ送っていたため、測定の担当が共通の札で
+ * Ollama を1つずつ使っている最中に札の外でモデルが載り、時間の数字を汚した。
+ * **Ollama の有無で、この試験の通り方を変えない。** 作者が「走らせる」を押した
+ * 道も毎回通す（製品の誤字脱字検知を作り物のAIで回し、結果を `run.result` で読む）。
+ * 本物のAIでの誤字脱字の出来は `npm run test:ollama`（`test/live/typoAcrossWorks.test.ts`）
+ * の側で測る。
  */
 async function checkRunRequestRoundTrip(): Promise<void> {
   const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "novel-ai-assistant-run-"));
@@ -997,7 +1001,51 @@ async function checkRunRequestRoundTrip(): Promise<void> {
       },
       subscriptions: [],
     } as unknown as vscode.ExtensionContext;
-    const aiRegistry = new AIRegistry(fakeContext);
+    // 1. の「未設定」は本物の割当で確かめる（何も選んでいない AIRegistry）。
+    // 2. 以降は作り物のAIへ差し替える——本物の割当に Ollama を選ぶと、
+    // 走らせたときに手元の Ollama へ本当に送ってしまう
+    const realRegistry = new AIRegistry(fakeContext);
+    const sent: GenerateParams[] = [];
+    const fakeProvider = {
+      // 作者の設定した手元のAIに見立てる（無料の扱い・確認の文言を本物と同じ道で組む）
+      id: "ollama",
+      displayName: "作り物のAI",
+      isPaid: false,
+      isConfigured: async () => true,
+      testConnection: async () => ({ ok: true, message: "作り物" }),
+      listModels: async () => [runModelInfo()],
+      getModel: async () => runModelInfo(),
+      generate: async (params: GenerateParams) => {
+        sent.push(params);
+        return {
+          text: JSON.stringify({
+            issues: [
+              {
+                line: 1,
+                original: body,
+                target: "学校え",
+                suggestion: "学校へ",
+                reason: "助詞の誤り",
+                confidence: "high",
+              },
+            ],
+          }),
+        };
+      },
+    };
+    const fakeRegistry = {
+      resolve: () => ({ provider: fakeProvider, model: RUN_FIXTURE_MODEL }),
+      resolveModelInfo: async () => runModelInfo(),
+      listProviders: () => [fakeProvider],
+    } as unknown as AIRegistry;
+    let active: AIRegistry = realRegistry;
+    // 受け口は作るときに割当を1つ受け取るので、中身だけを差し替えられる形にして渡す
+    const aiRegistry = {
+      resolve: (...args: Parameters<AIRegistry["resolve"]>) => active.resolve(...args),
+      resolveModelInfo: (...args: Parameters<AIRegistry["resolveModelInfo"]>) =>
+        active.resolveModelInfo(...args),
+      listProviders: () => active.listProviders(),
+    } as unknown as AIRegistry;
 
     const modals: Array<{ message: string; detail: string }> = [];
     const warnings: string[] = [];
@@ -1043,12 +1091,12 @@ async function checkRunRequestRoundTrip(): Promise<void> {
     assert.equal(refused.status, "refused");
     assert.match(refused.nextAction ?? "", /AI設定/u);
 
-    // ── 2. 作者の設定したAI（手元の Ollama）で、作者が断る
-    await aiRegistry.select("ollama", RECOMMENDED_CHAT_MODEL);
+    // ── 2. 作者の設定したAI（作り物の手元のAI）で、作者が断る
+    active = fakeRegistry;
     answer = undefined;
     const second = await runRequest({ folder: workFolder, feature: "typo" }, mcpDeps);
     assert.equal(modals.length, 1, "確認のモーダルが出ていません");
-    for (const expected of ["claude-code", work.title, "誤字脱字の検知", RECOMMENDED_CHAT_MODEL, "無料"]) {
+    for (const expected of ["claude-code", work.title, "誤字脱字の検知", RUN_FIXTURE_MODEL, "無料"]) {
       assert.ok(modals[0].detail.includes(expected) || modals[0].message.includes(expected), `確認に「${expected}」がありません:\n${modals[0].detail}`);
     }
     assert.equal(runResult({ folder: workFolder, requestId: second.requestId }, mcpDeps).status, "declined");
@@ -1060,31 +1108,23 @@ async function checkRunRequestRoundTrip(): Promise<void> {
     assert.equal(modals.length, 1, "使い回した合言葉で確認が出ました");
     assert.ok(warnings.some((message) => message.includes("1回しか")), warnings.join("\n"));
 
-    // ── 3. 手元の Ollama に薦めるモデルがあれば、走らせて結果を読む
-    let hasModel = false;
-    try {
-      const response = await fetch("http://localhost:11434/api/tags");
-      const tags = (await response.json()) as { models?: Array<{ name: string }> };
-      hasModel = (tags.models ?? []).some((model) => model.name === RECOMMENDED_CHAT_MODEL);
-    } catch {
-      hasModel = false;
-    }
-    if (!hasModel) {
-      console.log(`SKIP 手元の Ollama に ${RECOMMENDED_CHAT_MODEL} が無いため、走らせる道は省略`);
-    } else {
-      answer = "走らせる";
-      const third = await runRequest({ folder: workFolder, feature: "typo" }, mcpDeps);
-      const read = runResult({ folder: workFolder, requestId: third.requestId }, mcpDeps);
-      assert.equal(read.status, "done", `走り終えていません: ${JSON.stringify(read)}`);
-      assert.equal(read.result?.provider.id, "ollama");
-      assert.equal(read.result?.model, RECOMMENDED_CHAT_MODEL);
-      assert.ok(read.result?.promptVersion, "プロンプトの版がありません");
-      console.log(
-        `run.result（手元の Ollama ${RECOMMENDED_CHAT_MODEL}）: 指摘 ${read.result?.findings.length}件 / ` +
-          `落とした ${read.result?.dropped.count}件 / 失敗 ${read.result?.failures.count}件\n` +
-          JSON.stringify(read.result?.findings, null, 2)
-      );
-    }
+    // 断った回までは、AIへ1回も送っていない
+    assert.equal(sent.length, 0, "作者が断ったのにAIへ送りました");
+
+    // ── 3. 作者が「走らせる」を押し、結果を読む
+    answer = "走らせる";
+    const third = await runRequest({ folder: workFolder, feature: "typo" }, mcpDeps);
+    const read = runResult({ folder: workFolder, requestId: third.requestId }, mcpDeps);
+    assert.equal(read.status, "done", `走り終えていません: ${JSON.stringify(read)}`);
+    assert.equal(read.result?.provider.id, "ollama");
+    assert.equal(read.result?.model, RUN_FIXTURE_MODEL);
+    assert.ok(read.result?.promptVersion, "プロンプトの版がありません");
+    assert.equal(sent.length, 1, "作り物のAIへ1回だけ送るはず");
+    // 製品の検算を通った指摘が、作品フォルダーからの相対パスで返る
+    assert.equal(read.result?.findings.length, 1, JSON.stringify(read.result));
+    const finding = read.result?.findings[0] as { target?: string; filePath?: string } | undefined;
+    assert.equal(finding?.target, "学校え");
+    assert.equal(finding?.filePath, path.join("本文", "001.txt"));
 
     // **原稿は1文字も変わらない。** 結果は作品の外（保管庫）にだけある
     assert.equal(await fs.readFile(episodePath, "utf8"), beforeBody);
@@ -1099,6 +1139,20 @@ async function checkRunRequestRoundTrip(): Promise<void> {
     // 消す最中に書かれると ENOTEMPTY で落ちる（2026-09-25、配布前の検査で1度落ちた）ので、少し待ってやり直す
     await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
+}
+
+/** 外部AIからの依頼の試験で使う、作り物のモデルの名前（本物のモデル名にしない） */
+const RUN_FIXTURE_MODEL = "fixture-run-model";
+
+function runModelInfo() {
+  return {
+    id: RUN_FIXTURE_MODEL,
+    displayName: RUN_FIXTURE_MODEL,
+    contextWindow: 32768,
+    parameterSize: "31B",
+    capabilities: [],
+    tier: "high" as const,
+  };
 }
 
 async function listFilesRecursive(dir: string): Promise<string[]> {

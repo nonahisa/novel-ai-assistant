@@ -235,10 +235,20 @@ export async function scanCollection(
     };
   }
 
+  // **自分が作品なら、その作品の置き場（本文・設定）は子の作品にしない。**
+  // 本文フォルダーに `001.txt` があるだけで「話を直に並べた作品」に見え、
+  // ふつうの作品を登録し直すたびに「作品にも書庫にも見えます」と問われていた
+  // （2026-09-26、統合テストを書いていて判明）。「中の1件」を選ぶと、
+  // 本文フォルダーが別の作品として登録されてしまう
+  const ownFolders = self.isWork
+    ? await structureFolderKeys(root)
+    : new Set<string>();
+
   const works: WorkCandidate[] = [];
   for (const name of entries) {
     if (SKIPPED_DIRS.has(name) || name.startsWith(".")) continue;
     const folderPath = path.join(root, name);
+    if (ownFolders.has(path.folderKeyForComparison(folderPath))) continue;
     if (!(await isDirectory(folderPath))) continue;
 
     const judged = await looksLikeWork(folderPath);
@@ -266,6 +276,68 @@ export async function scanCollection(
   return self.isWork
     ? { kind: "work_with_children", works }
     : { kind: "collection", works };
+}
+
+/**
+ * 作品の構成に含まれる、直下のフォルダー（比べるための鍵）。
+ *
+ * **設定ファイルが指す場所を先に見る。** 作者は本文フォルダーの名前を
+ * 変えられる（`manuscriptDir`。設計書5.1）ので、「本文」という名前だけで
+ * 外すと、「原稿」に話を置いた作品でまた問うことになる。
+ *
+ * **既定の名前も合わせて外す。** 設定ファイルが無い作品は既定の名前しか
+ * ありえず、名前を変えた作品に「本文」が残っていても、それは作品ではない
+ * （作品の中に「本文」という名の別の作品を置く形は考えない）。
+ *
+ * 本文を `原稿/本編` のように深い場所へ置いた作品では、**入り口の `原稿` を
+ * 外す。** 見ているのは直下の1階層だけで、その下まで作品かを問わないため。
+ *
+ * **作品の根そのもの（`.` など）を指す値は外す対象にしない。** 外すものが
+ * 無いのではなく、根の下の章フォルダーと、書庫に並んだ作品とを、ここでは
+ * 見分けられない（5.7.6。書庫の直下に設定ファイルが残った形と同じになる）。
+ */
+async function structureFolderKeys(root: string): Promise<Set<string>> {
+  const dirs = [
+    ...(await configuredDirs(root)),
+    DEFAULT_MANUSCRIPT_DIR,
+    DEFAULT_SETTINGS_DIR,
+  ];
+  const keys = new Set<string>();
+  for (const dir of dirs) {
+    if (path.isAbsolute(dir)) continue;
+    const relative = path.relative(root, path.resolve(root, dir));
+    if (!relative || path.goesOutside(root, relative)) continue;
+    const first = relative.split(/[\\/]/u)[0];
+    if (!first) continue;
+    keys.add(path.folderKeyForComparison(path.join(root, first)));
+  }
+  return keys;
+}
+
+/**
+ * 設定ファイルに書かれた本文・設定の置き場。読めなければ空。
+ *
+ * **ここでは厳しく検めない。** 走査は登録の前の見当付けで、壊れた設定
+ * ファイルを直す場でも、それを理由に止める場でもない（登録の側が
+ * `parseWorkConfig` で検めて、読めない理由を作者へ出す）。読めなければ
+ * 既定の名前だけで外す。
+ */
+async function configuredDirs(root: string): Promise<string[]> {
+  let raw: unknown;
+  try {
+    const bytes = await vscode.workspace.fs.readFile(
+      path.toUri(path.join(root, AIWRITER_DIR, CONFIG_FILE))
+    );
+    raw = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return [];
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return [];
+  const value = raw as Record<string, unknown>;
+  return [value.manuscriptDir, value.settingsDir]
+    .filter((dir): dir is string => typeof dir === "string")
+    .map((dir) => dir.trim())
+    .filter((dir) => dir.length > 0);
 }
 
 /**

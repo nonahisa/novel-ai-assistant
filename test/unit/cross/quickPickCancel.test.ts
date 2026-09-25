@@ -13,9 +13,18 @@ import { join } from "node:path";
  * ボタンを自分で出すので、項目として足すとかえって紛らわしい。
  */
 
+/**
+ * **統合テスト（`src/test/`）は見ない。** あちらは選択画面を出すのではなく、
+ * 押せない選択画面を差し替えて「出たか」を数える側である（2026-09-26。
+ * ふつうの作品の登録で問いが出ないことを見張るために差し替えた）。
+ * 作者の目に触れる画面はそこに無い。
+ */
+const TEST_SOURCES = "src/test";
+
 function sources(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
+    if (path.split("\\").join("/") === TEST_SOURCES) continue;
     if (statSync(path).isDirectory()) sources(path, out);
     else if (name.endsWith(".ts")) out.push(path.split("\\").join("/"));
   }

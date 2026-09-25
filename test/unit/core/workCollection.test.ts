@@ -6,6 +6,7 @@ import {
   writeFile,
   stat as nodeStat,
   readdir as nodeReaddir,
+  readFile as nodeReadFile,
 } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -45,6 +46,17 @@ workspace.fs = {
     try {
       const names = await nodeReaddir(uri.fsPath);
       return names.map((name) => [name, 1]);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new FileSystemError("見つかりません", "FileNotFound");
+      }
+      throw error;
+    }
+  },
+  // 作品の設定ファイル（本文・設定の置き場）を読むため
+  readFile: async (uri: { fsPath: string }) => {
+    try {
+      return new Uint8Array(await nodeReadFile(uri.fsPath));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         throw new FileSystemError("見つかりません", "FileNotFound");
@@ -255,6 +267,94 @@ describe("scanCollection", () => {
     const plain = path.join(root, "ふつうの作品");
     await makeWork(root, "ふつうの作品", { config: true, manuscript: true });
     expect((await scanCollection(plain, none)).kind).toBe("single_work");
+  });
+
+  /**
+   * **ふつうの作品を登録し直すたびに問われていた**（2026-09-26、統合テストを
+   * 書いていた担当が見つけた）。
+   *
+   * 作品の本文フォルダーに `001.txt` があると、本文フォルダー自身が
+   * 「話数ファイルが直下に並んだ作品」に見え、`work_with_children` になっていた。
+   * 「中の1件を登録する」を選ぶと、本文フォルダーが別の作品として登録される。
+   */
+  describe("作品の構成に含まれる置き場を、子の作品に数えない", () => {
+    async function writeConfig(
+      folder: string,
+      dirs: { manuscriptDir?: string; settingsDir?: string } = {}
+    ): Promise<void> {
+      await mkdir(path.join(folder, ".aiwriter"), { recursive: true });
+      await writeFile(
+        path.join(folder, ".aiwriter", "config.json"),
+        JSON.stringify({
+          schemaVersion: "0.1",
+          workTitle: path.basename(folder),
+          manuscriptDir: dirs.manuscriptDir ?? "本文",
+          settingsDir: dirs.settingsDir ?? "設定",
+          createdAt: "2026-09-26T00:00:00.000Z",
+        }),
+        "utf-8"
+      );
+    }
+
+    it("本文フォルダーに話がある作品は、1作品と言う", async () => {
+      const work = path.join(root, "本文に話がある作品");
+      await mkdir(path.join(work, "本文"), { recursive: true });
+      await mkdir(path.join(work, "設定"), { recursive: true });
+      await writeConfig(work);
+      await writeFile(path.join(work, "本文", "001.txt"), "本文", "utf-8");
+      await writeFile(path.join(work, "本文", "002.txt"), "本文", "utf-8");
+      // 設定フォルダーにも話の名前に見えるファイルが置かれることがある
+      await writeFile(path.join(work, "設定", "プロローグ.md"), "案", "utf-8");
+
+      expect((await scanCollection(work, none)).kind).toBe("single_work");
+    });
+
+    it("設定ファイルが無くても、本文フォルダーを子の作品にしない", async () => {
+      // 作者が手で並べた作品（本文フォルダーがあるので作品と見なされる）
+      const work = path.join(root, "手で並べた話のある作品");
+      await mkdir(path.join(work, "本文"), { recursive: true });
+      await writeFile(path.join(work, "本文", "001.txt"), "本文", "utf-8");
+
+      expect((await scanCollection(work, none)).kind).toBe("single_work");
+    });
+
+    it("本文フォルダーの名前を変えた作品は、設定ファイルの指す場所で見る", async () => {
+      // 名前の決め打ちだけでは「原稿」を子の作品と取り違える
+      const work = path.join(root, "名前を変えた作品");
+      await mkdir(path.join(work, "原稿"), { recursive: true });
+      await mkdir(path.join(work, "資料"), { recursive: true });
+      await writeConfig(work, { manuscriptDir: "原稿", settingsDir: "資料" });
+      await writeFile(path.join(work, "原稿", "001.txt"), "本文", "utf-8");
+      await writeFile(path.join(work, "資料", "エピローグ.md"), "案", "utf-8");
+
+      expect((await scanCollection(work, none)).kind).toBe("single_work");
+    });
+
+    it("本文を深い場所に置いた作品は、その入り口のフォルダーを外す", async () => {
+      const work = path.join(root, "深い本文の作品");
+      await mkdir(path.join(work, "原稿", "本編"), { recursive: true });
+      await writeConfig(work, { manuscriptDir: "原稿/本編" });
+      await writeFile(path.join(work, "原稿", "本編", "001.txt"), "本文", "utf-8");
+      // 入り口の「原稿」に、あとがきの話を直に置いている
+      await writeFile(path.join(work, "原稿", "001.txt"), "本文", "utf-8");
+
+      expect((await scanCollection(work, none)).kind).toBe("single_work");
+    });
+
+    it("作品の中に別の作品を入れていれば、これまでどおり問う", async () => {
+      // 本当に入れ子にしている形は、機械には決められない（5.7.6）
+      const work = path.join(root, "外伝を抱えた作品");
+      await mkdir(path.join(work, "本文"), { recursive: true });
+      await writeConfig(work);
+      await writeFile(path.join(work, "本文", "001.txt"), "本文", "utf-8");
+      await makeWork(work, "外伝", { config: true, manuscript: true });
+
+      const scan = await scanCollection(work, none);
+      expect(scan.kind).toBe("work_with_children");
+      if (scan.kind !== "work_with_children") return;
+      // 本文フォルダーは並べない
+      expect(scan.works.map((w) => w.title)).toEqual(["外伝"]);
+    });
   });
 
   it("作品が無ければその旨を返す", async () => {

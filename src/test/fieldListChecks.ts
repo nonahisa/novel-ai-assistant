@@ -449,21 +449,39 @@ async function checkTypoVerdictsRecorded(shared: { root?: string; work?: WorkEnt
   shared.root = root;
   const workFolder = path.join(root, "採否の作品");
   await scaffoldWorkFolder(workFolder, "採否の作品");
-
-  /*
-    **本文を置く前に登録する。** 本文フォルダーに話のファイルがある作品を
-    「フォルダから追加」すると、本文フォルダー自身が作品に見えて
-    「作品にも書庫にも見えます」の選択が出る（この試験を書いていて見つけた。
-    直さずにリーダーへ報告済み、2026-09-26）。選択は押せないので、
-    ここでは空の本文のうちに登録して、その問いを通らない形にする
-  */
-  const registered = (await vscode.commands.executeCommand("novelai.addWork", {
-    folderPath: workFolder,
-    title: "採否の作品",
-  })) as WorkEntry | undefined;
-  assert.ok(registered?.id, "作品を登録できませんでした");
   const episodePath = path.join(workFolder, "本文", "001.txt");
   await fs.writeFile(episodePath, "　彼は学校え行った。\n　空はとても青かた。\n", "utf8");
+
+  /*
+    **本文を置いてから登録する**（作者と同じ順）。以前は、本文フォルダーに話の
+    ファイルがあると本文フォルダー自身が作品に見え、「作品にも書庫にも
+    見えます」の選択が出て止まった（この試験を書いていて見つけ、
+    `workCollection.ts` で作品の置き場を子の作品から外して直した。2026-09-26）。
+    **ここがその直しの見張りも兼ねる。** 選択の画面は押せず、出れば登録が
+    返ってこないので、選択の画面を差し替えて「出たか」を数える（出たら
+    取り消して返し、名指しで落とす）
+  */
+  const quickPickDescriptor = Object.getOwnPropertyDescriptor(vscode.window, "showQuickPick");
+  assert.ok(quickPickDescriptor?.configurable, "showQuickPick をテスト用に差し替えられません");
+  const asked: string[] = [];
+  Object.defineProperty(vscode.window, "showQuickPick", {
+    configurable: true,
+    value: async (_items: unknown, options?: { title?: string }) => {
+      asked.push(options?.title ?? "（題なし）");
+      return undefined;
+    },
+  });
+  let registered: WorkEntry | undefined;
+  try {
+    registered = (await vscode.commands.executeCommand("novelai.addWork", {
+      folderPath: workFolder,
+      title: "採否の作品",
+    })) as WorkEntry | undefined;
+  } finally {
+    Object.defineProperty(vscode.window, "showQuickPick", quickPickDescriptor);
+  }
+  assert.deepEqual(asked, [], `ふつうの作品の登録で選択を問われました: ${asked.join(" / ")}`);
+  assert.ok(registered?.id, "作品を登録できませんでした");
   shared.work = registered;
 
   const sent: GenerateParams[] = [];
