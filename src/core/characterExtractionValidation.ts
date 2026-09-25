@@ -10,8 +10,10 @@ import { familyNameCandidates } from "./familyName";
 import { chaptersForCandidate, isGroundedInChunk } from "./groundedEvidence";
 import {
   clampSpeechStyle,
+  firstPersonsMissingFromQuote,
   isSpeechStyleEcho,
   speechQuoteProblem,
+  withoutFirstPersonClaims,
   type SpeechStyleRejectionReason,
 } from "./speechStyle";
 import type {
@@ -121,6 +123,11 @@ export interface DroppedSpeechStyleRecord {
   /** AIが根拠として写してきた台詞（無ければ null） */
   speechEvidence: string | null;
   reason: SpeechStyleRejectionReason;
+  /**
+   * 一部だけ外して残した口調（`first_person_unquoted` で、一人称のほかにも
+   * 読みがあったとき）。無ければ口調ごと外した
+   */
+  kept?: string;
 }
 
 /** 向きが逆だった関係を直した記録（設計書6.18） */
@@ -528,6 +535,33 @@ function checkSpeechStyle(
       reason,
     });
     clear();
+    return;
+  }
+
+  // **書いた一人称が根拠の台詞に無ければ、一人称の部分だけ外す**（3巡目の
+  // 測定、2026-09-25）。gemma4:26b がエルシーの口調に、同じ作品のプラムの
+  // 一人称「ウチ」を書いた。根拠の台詞には一人称が無かった。一人称は台詞で
+  // 確かめられる中身なので、確かめられないものは資料に残さない。
+  //
+  // **口調ごとは捨てない。** 語尾・敬語などの残りは、台詞の検算を通った読みで
+  // ある。一人称を外すと何も残らないときだけ口調ごと外す。どちらにしたかは
+  // 記録に残す（`kept` の有無。黙って書き換えたことにしない）
+  if (firstPersonsMissingFromQuote(value, quote).length > 0) {
+    const rest = withoutFirstPersonClaims(value);
+    const keeps = rest.length > 0 && isMeaningfulValue(rest);
+    dropped.push({
+      characterName: character.name,
+      speechStyle: value,
+      speechEvidence: quote,
+      reason: "first_person_unquoted",
+      ...(keeps ? { kept: rest } : {}),
+    });
+    if (!keeps) {
+      clear();
+      return;
+    }
+    character.speechStyle = clampSpeechStyle(rest);
+    character.speechEvidence = quote;
     return;
   }
   character.speechStyle = clampSpeechStyle(value);

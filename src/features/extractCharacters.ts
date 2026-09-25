@@ -1709,8 +1709,16 @@ function describeValidationFixes(fixes: ValidationFixCounts): string {
       "指示の言葉がそのまま返ってきた口調",
     ],
     [
-      (entry) => entry.reason !== "instruction_echo",
+      (entry) =>
+        entry.reason !== "instruction_echo" &&
+        entry.reason !== "first_person_unquoted",
       "根拠の台詞が本文の台詞に見当たらない口調",
+    ],
+    // 一人称だけを外した分（3巡目の測定、2026-09-25）。口調の残りは資料に
+    // 入っている（`kept`）ので、「口調を外した」とは分けて見せる
+    [
+      (entry) => entry.reason === "first_person_unquoted",
+      "口調のうち、根拠の台詞に無い一人称",
     ],
   ];
   for (const [matches, label] of speechDropLabels) {

@@ -82,7 +82,13 @@ export type SpeechStyleRejectionReason =
   /** 引用は本文にあるが、台詞（「」『』）の中ではない */
   | "not_dialogue"
   /** 指示の言葉・例の写し */
-  | "instruction_echo";
+  | "instruction_echo"
+  /**
+   * 口調に書いた一人称が、根拠の台詞のどれにも無い（3巡目の測定、2026-09-25）。
+   * **一人称の部分だけを外す。** 残りが無ければ口調ごと外す
+   * （`firstPersonsMissingFromQuote`）
+   */
+  | "first_person_unquoted";
 
 /**
  * 口調の値が、指示の言葉か例の写しか。
@@ -184,6 +190,153 @@ export function speechQuoteProblem(
   return fragments.some((fragment) => whole.includes(fragment))
     ? "not_dialogue"
     : "quote_not_found";
+}
+
+/**
+ * 一人称として読む語（3巡目の測定、2026-09-25）。
+ *
+ * **口調の値が「一人称は俺で」のように括弧なしで書いたときだけ使う。**
+ * 括弧でくくった語（「一人称は「ウチ」」）は、この一覧に無くても一人称として
+ * 読む。長いものから順に照らす（「俺様」を「俺」と読まない）。
+ */
+const FIRST_PERSON_WORDS = [
+  "わたくし", "それがし", "あたくし", "俺様", "吾輩", "我輩", "拙者", "小生",
+  "わたし", "あたし", "あたい", "おいら", "オイラ", "わらわ", "ワタシ", "アタシ",
+  "自分", "麻呂", "おれ", "オレ", "ぼく", "ボク", "うち", "ウチ", "わし", "ワシ",
+  "われ", "ワレ", "わい", "ワイ", "わて", "俺", "僕", "私", "儂", "我", "妾",
+  "某", "麿", "朕", "余",
+] as const;
+
+/**
+ * 漢字の一人称の読み。台詞がかなで書かれていても同じ一人称とみなすために使う
+ * （口調「一人称は「俺」」・台詞「おれが行く」）。
+ *
+ * **1字の読み（「余」→「よ」）は入れない。** 「よ」はどの台詞にもあるので、
+ * 入れると確かめたことにならない。
+ */
+const FIRST_PERSON_READINGS: Readonly<Record<string, readonly string[]>> = {
+  俺: ["おれ"],
+  俺様: ["おれさま"],
+  僕: ["ぼく"],
+  私: ["わたし", "わたくし", "あたし"],
+  儂: ["わし"],
+  我: ["われ"],
+  吾輩: ["わがはい"],
+  我輩: ["わがはい"],
+  自分: ["じぶん"],
+  拙者: ["せっしゃ"],
+  某: ["それがし"],
+  妾: ["わらわ", "あたし"],
+  小生: ["しょうせい"],
+  麻呂: ["まろ"],
+  麿: ["まろ"],
+};
+
+/** 比べる形：互換文字をそろえ、カタカナをひらがなへ（「ウチ」と「うち」を同じに） */
+function kanaFolded(text: string): string {
+  return text
+    .normalize("NFKC")
+    .replace(/[ァ-ヶ]/gu, (char) =>
+      String.fromCharCode(char.charCodeAt(0) - 0x60)
+    );
+}
+
+/** 括弧でくくった一人称の並び（「僕」「俺」／「僕」や「俺」） */
+const QUOTED_TERMS = String.raw`(?:[「『][^」』「『]{1,8}[」』](?:[やと、・]|か|または)?)+`;
+const WORD_ALTERNATION = [...FIRST_PERSON_WORDS]
+  .sort((left, right) => right.length - left.length)
+  .join("|");
+/** 「一人称は「ウチ」」「一人称：『わし』」「一人称は俺で」 */
+const CLAIM_AFTER_LABEL = new RegExp(
+  String.raw`一人称(?:は|が)?[：:]?\s*(?:(${QUOTED_TERMS})|(${WORD_ALTERNATION})(?=[でをと、。，,\s（(]|$))`,
+  "gu"
+);
+/** 「「拙者」という一人称」 */
+const CLAIM_BEFORE_LABEL = new RegExp(
+  String.raw`(${QUOTED_TERMS})という一人称`,
+  "gu"
+);
+
+function termsIn(quoted: string): string[] {
+  return [...quoted.matchAll(/[「『]([^」』「『]{1,8})[」』]/gu)]
+    .map((match) => match[1].trim())
+    .filter((term) => term.length > 0);
+}
+
+/**
+ * 口調の値に書かれた一人称（書いていなければ空）。
+ *
+ * **「一人称」という語と一緒に書かれたものだけを読む。** 口調の中の括弧は
+ * 語尾や口癖の例にも使われる（「語尾に「〜だよ」」）ので、括弧だけを
+ * 見ると一人称でないものまで拾う。「一人称は不明」のような書き方は読まない。
+ */
+export function claimedFirstPersons(value: string): string[] {
+  const found: string[] = [];
+  const add = (term: string): void => {
+    if (!found.includes(term)) found.push(term);
+  };
+  for (const match of value.matchAll(CLAIM_AFTER_LABEL)) {
+    if (match[1]) termsIn(match[1]).forEach(add);
+    else if (match[2]) add(match[2]);
+  }
+  for (const match of value.matchAll(CLAIM_BEFORE_LABEL)) {
+    termsIn(match[1]).forEach(add);
+  }
+  return found;
+}
+
+/**
+ * 口調に書いた一人称のうち、根拠の台詞のどこにも無いもの。
+ *
+ * **根拠の台詞だけを見る**（本文全体は見ない）。実測（gemma4:26b、3巡目）で、
+ * エルシーの口調に同じ作品のプラムの一人称「ウチ」が書かれた。本文全体を
+ * 見ると、プラムの台詞にあるので通ってしまう——別人の一人称の取り違えは
+ * まさにそういう形で起きる。
+ *
+ * 台詞がかなで書かれていても、漢字の一人称の読みと同じなら通す
+ * （`FIRST_PERSON_READINGS`）。ひらがなとカタカナの違いも同じとみなす。
+ */
+export function firstPersonsMissingFromQuote(
+  value: string,
+  quote: string | null | undefined
+): string[] {
+  const claimed = claimedFirstPersons(value);
+  if (claimed.length === 0) return [];
+  const spoken = kanaFolded(quote ?? "");
+  return claimed.filter((term) => {
+    const folded = kanaFolded(term);
+    const forms = new Set<string>([folded]);
+    for (const reading of FIRST_PERSON_READINGS[term] ?? []) forms.add(reading);
+    for (const [kanji, readings] of Object.entries(FIRST_PERSON_READINGS)) {
+      if (readings.includes(folded)) forms.add(kanji);
+    }
+    return ![...forms].some((form) => spoken.includes(form));
+  });
+}
+
+/** 一人称の書き方を、後ろに続く「で、」「を使い、」ごと外すための形 */
+const CLAIM_CLAUSE_AFTER_LABEL = new RegExp(
+  String.raw`一人称(?:は|が)?[：:]?\s*(?:${QUOTED_TERMS}|(?:${WORD_ALTERNATION})(?=[でをと、。，,\s（(]|$))(?:を使い分け(?:る|て)|を使(?:う|い)|で)?[。、，,]?`,
+  "gu"
+);
+const CLAIM_CLAUSE_BEFORE_LABEL = new RegExp(
+  String.raw`${QUOTED_TERMS}という一人称(?:を使(?:う|い)|で)?[。、，,]?`,
+  "gu"
+);
+
+/**
+ * 口調の値から、一人称を書いた部分だけを外す（残りの読みは残す）。
+ *
+ * 一人称は台詞で確かめられる数少ない中身だが、語尾・敬語・話し方の読みは
+ * 別の読みである。**一人称が確かめられなかっただけで、口調ごと捨てない**
+ * （捨てると、台詞の検算を通った読みまで失う）。
+ */
+export function withoutFirstPersonClaims(value: string): string {
+  return value
+    .replace(CLAIM_CLAUSE_AFTER_LABEL, "")
+    .replace(CLAIM_CLAUSE_BEFORE_LABEL, "")
+    .replace(/^[\s、。，,]+/u, "")
+    .trim();
 }
 
 /**
