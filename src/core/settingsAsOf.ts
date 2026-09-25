@@ -204,7 +204,76 @@ export function recordAsOf<T extends object>(
       chapter
     );
   }
+  /*
+    **変化の履歴も、その話の時点へ切り詰める**（2026-09-25 精査 F1）。
+
+    項目の値だけを巻き戻して `changes` を丸ごと残すと、`describeCharacter`
+    がそれを「変化（role）: 両腕の剣士（第1話）→ 片腕の剣士（第4話）」と
+    書き出し、**第2話の材料にまだ起きていない変化が載っていた。** AIは
+    それを根拠に「第2話で両腕なのは第4話と矛盾」と言いうる。
+
+    「あとで分かる事実」（6.10.4）は `factsRevealedAfter` が**巻き戻す前の
+    記録**から別に拾うので、ここで削っても失われない。
+
+    **登場話数（`appearedChapters`）はここでは切り詰めない。** 「登場話:
+    第1〜5話」は先の話に出ることを示すが、値の食い違いの根拠にはならない。
+    切り詰めると、先の話にも出る人物すべての材料の文字列が変わり、矛盾検知の
+    答えの使い回しがほぼ全部飛ぶ（変化を持つ人物だけに留めた）。
+  */
+  rolled.changes = changesAsOf(changes, chapter);
   return rolled as T;
+}
+
+/**
+ * 変化の履歴に、第N話より**先の話**の記録が含まれるか。
+ *
+ * 矛盾検知が「先の話の変化を材料から削った回」だけキャッシュの鍵に印を
+ * 付けるために見る（`promptVersionWithAsOfChanges`）。話数の分からない記録は
+ * 「それ以前」扱いなので数えない。
+ */
+export function hasChangesAfter(
+  changes: readonly { chapters: readonly number[] }[] | undefined,
+  chapter: number | null
+): boolean {
+  if (chapter === null || !changes) return false;
+  return changes.some((change) =>
+    change.chapters.some((at) => Number.isFinite(at) && at > chapter)
+  );
+}
+
+/**
+ * 話数の並びを、第N話までに切り詰める。`null` なら絞らない。
+ *
+ * もとは設定資料エクスポート（`settingsExportProfiles.ts`）の中にあった。
+ * 矛盾検知の材料も同じ切り詰めが要るので、2か所で食い違わないようここへ出した。
+ */
+export function chaptersAsOf(
+  chapters: readonly number[],
+  chapter: number | null
+): number[] {
+  if (chapter === null) return [...chapters];
+  return chapters.filter((at) => Number.isFinite(at) && at <= chapter);
+}
+
+/**
+ * 第N話までに書かれた変化だけを残す。残した変化の話数も第N話までに切り詰める
+ * ——「第2・6話」のままだと、第6話にも同じ値で書かれることが先に分かってしまう。
+ */
+export function changesAsOf<T extends { chapters: number[] }>(
+  changes: readonly T[],
+  chapter: number | null
+): T[] {
+  if (chapter === null) return [...changes];
+  return changes
+    .filter((change) => {
+      const known = change.chapters.filter((at) => Number.isFinite(at));
+      // 話数の記録が無い値は「それ以前」。落とすと作者が書いた値が消える
+      return known.length === 0 || Math.min(...known) <= chapter;
+    })
+    .map((change) => ({
+      ...change,
+      chapters: chaptersAsOf(change.chapters, chapter),
+    }));
 }
 
 /** あとの話で分かった事実の1件 */

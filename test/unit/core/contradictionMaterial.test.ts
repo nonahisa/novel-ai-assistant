@@ -5,6 +5,7 @@ import {
   createContradictionMaterial,
   describeMissedCharacters,
   mergeMissedCharactersByEpisode,
+  promptVersionWithAsOfChanges,
   promptVersionWithCarryOver,
   promptVersionWithNarrator,
   promptVersionWithStoryDates,
@@ -196,6 +197,70 @@ describe("その話の時点で分かっていることだけ（設計書6.10.3�
     // 判明した話まで来れば出す
     const atFourth = built.relevantFor("月島は俯いたままだった。", 4);
     expect(atFourth.characters).toContain("退学扱い");
+  });
+
+  /*
+    精査で再現した漏れ（2026-09-25 F1）。項目の値は巻き戻っていたが、
+    変化の履歴（`changes`）を丸ごと残して `describeCharacter` へ渡していた
+    ので、「変化（role）: 両腕の剣士（第1話）→ 片腕の剣士（第4話）」の行に
+    **まだ起きていない変化**が載っていた。変化が1件の形では、その1件ごと
+    項目が空になって人物ごと落ちるので、この漏れは見えなかった
+  */
+  test("先の話で起きる変化は、変化の行にも載らない（変化が2件以上）", () => {
+    const akari = person({
+      id: "char_001",
+      name: "月島 灯",
+      role: "片腕の剣士",
+      chapters: [1, 2, 3, 4, 5],
+      changes: [
+        change("role", "両腕の剣士", [1]),
+        change("role", "片腕の剣士", [4]),
+      ],
+    });
+    const built = material({ people: [akari] });
+
+    const atSecond = built.relevantFor("月島は剣を握った。", 2);
+    expect(atSecond.characters).toContain("両腕の剣士");
+    expect(atSecond.characters).not.toContain("片腕");
+    expect(atSecond.characters).not.toContain("第4話");
+
+    // 起きた話まで来れば、変化として載る
+    const atFourth = built.relevantFor("月島は剣を握った。", 4);
+    expect(atFourth.characters).toContain("両腕の剣士");
+    expect(atFourth.characters).toContain("片腕の剣士");
+
+    // 削った回だけ鍵に印が付く（漏れた材料で出した答えを使い回さない）
+    expect(atSecond.trimmedFutureChanges).toBe(true);
+    expect(atFourth.trimmedFutureChanges).toBe(false);
+    expect(promptVersionWithAsOfChanges("1.7", true)).toBe("1.7:asof1");
+    // 削らなかった回の鍵は、これまでと1文字も変わらない
+    expect(promptVersionWithAsOfChanges("1.7", false)).toBe("1.7");
+  });
+
+  test("先の話にも続いて書かれた値は、その話までの話数だけを示す", () => {
+    const akari = person({
+      id: "char_001",
+      name: "月島 灯",
+      role: "片腕の剣士",
+      chapters: [1, 2, 3],
+      changes: [
+        change("role", "見習いの剣士", [1]),
+        change("role", "両腕の剣士", [2, 6]),
+        change("role", "片腕の剣士", [7]),
+      ],
+    });
+
+    const atThird = material({ people: [akari] }).relevantFor(
+      "月島は剣を握った。",
+      3
+    );
+    const changeLine = atThird.characters
+      .split("\n")
+      .find((line) => line.startsWith("変化（role）"));
+    expect(changeLine).toContain("見習いの剣士（第1話）→ 両腕の剣士（第2話）");
+    // 第6話にも同じ値で書かれていることは、第3話の時点ではまだ分からない
+    expect(changeLine).not.toContain("6");
+    expect(atThird.characters).not.toContain("片腕");
   });
 
   test("その話までに登場していない人物は渡さない", () => {

@@ -11,7 +11,12 @@ import {
   type WorldItem,
 } from "../models/world";
 import { changedFields, changesOfField } from "./recordChanges";
-import { hasAppearedBy, recordAsOf } from "./settingsAsOf";
+import {
+  chaptersAsOf,
+  changesAsOf,
+  hasAppearedBy,
+  recordAsOf,
+} from "./settingsAsOf";
 import {
   aiNoteLines,
   describeChangeValues,
@@ -1342,9 +1347,10 @@ function heading(depth: number, name: string, reading: string | null): string {
 }
 
 /** 話数の一覧を、第N話までに切り詰める */
+/** 本体は `settingsAsOf.ts`（矛盾検知の材料と同じ切り詰めを使う） */
 function chaptersUpTo(chapters: number[], chapter: number | null): number[] {
   if (chapter === null) return chapters;
-  return chapters.filter((at) => Number.isFinite(at) && at <= chapter);
+  return chaptersAsOf(chapters, chapter);
 }
 
 /** 記録の始まりが第N話までにあるか。記録が無ければ判断できないので通す */
@@ -1356,23 +1362,8 @@ function upTo(value: number, chapter: number | null): boolean {
   return chapter === null || value <= chapter;
 }
 
-/** 第N話までに書かれた変化だけを残す */
-function changesUpTo<T extends { chapters: number[] }>(
-  changes: readonly T[],
-  chapter: number | null
-): T[] {
-  if (chapter === null) return [...changes];
-  return changes
-    .filter((change) => {
-      const known = change.chapters.filter((at) => Number.isFinite(at));
-      // 話数の記録が無い値は「それ以前」。落とすと作者が書いた値が消える
-      return known.length === 0 || Math.min(...known) <= chapter;
-    })
-    .map((change) => ({
-      ...change,
-      chapters: chaptersUpTo(change.chapters, chapter),
-    }));
-}
+/** 第N話までに書かれた変化だけを残す（本体は `settingsAsOf.ts`） */
+const changesUpTo = changesAsOf;
 
 /**
  * 見出しでまとめる。

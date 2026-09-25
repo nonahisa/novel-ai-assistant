@@ -6,6 +6,7 @@ import { detectNarrator, type NarratorHint } from "./narrator";
 import {
   appearsIn,
   hasAppearedBy,
+  hasChangesAfter,
   isEmptyAfterRollback,
   recordAsOf,
 } from "./settingsAsOf";
@@ -106,6 +107,15 @@ export interface RelevantSettings {
    * 言うだけの欄である。
    */
   narrator: NarratorHint | null;
+  /**
+   * **載せた人物の変化の履歴から、先の話のぶんを削ったか**（2026-09-25 精査 F1）。
+   *
+   * 0.89.0 までは削っておらず、先の話の変化が材料に漏れていた。キャッシュの
+   * 鍵は「設定全体の指紋＋チャンク」でチャンクごとの材料を含まないので、
+   * **削った回だけ鍵に印を付けて作り直させる**（`promptVersionWithAsOfChanges`）。
+   * 削らなかった回の材料は以前と1文字も変わらないので、処理済みはそのまま使える。
+   */
+  trimmedFutureChanges: boolean;
 }
 
 /**
@@ -272,12 +282,22 @@ export function createContradictionMaterial(options: {
       // **ここで残った人物が、実際に材料へ載る人物である。** 語り手を
       // 名指しするとき（下）に、この並びだけを見る——載っていない人物を
       // 「地の文の『俺』はこの人です」と言うわけにはいかない
-      const pickedCharacters = [...seenCharacters]
+      const pickedSources = [...seenCharacters]
         .map((id) => characterById.get(id))
         .filter((item) => item !== undefined)
         .filter((item) => hasAppearedBy(item.appearedChapters, chapter))
-        .map((item) => recordAsOf(item, CHARACTER_AS_OF_FIELDS, chapter))
-        .filter((item) => !isEmptyAfterRollback(item, CHARACTER_AS_OF_FIELDS));
+        .map((item) => ({
+          source: item,
+          asOf: recordAsOf(item, CHARACTER_AS_OF_FIELDS, chapter),
+        }))
+        .filter(
+          (item) => !isEmptyAfterRollback(item.asOf, CHARACTER_AS_OF_FIELDS)
+        );
+      const pickedCharacters = pickedSources.map((item) => item.asOf);
+      // 載せた人物のうち、変化の履歴に先の話のぶんがあったか（鍵の印に使う）
+      const trimmedFutureChanges = pickedSources.some((item) =>
+        hasChangesAfter(item.source.changes, chapter)
+      );
       const characterText = pickedCharacters
         .map((item) => describeCharacter(item, []))
         .join("\n\n");
@@ -381,6 +401,7 @@ export function createContradictionMaterial(options: {
         ),
         missedCharacters,
         narrator,
+        trimmedFutureChanges,
       };
     },
     namesIn(text) {
@@ -632,6 +653,24 @@ export function promptVersionWithNarrator(
     JSON.stringify([narrator.firstPerson, narrator.name])
   ).slice(0, 16);
   return `${promptVersion}:narrator${fingerprint}`;
+}
+
+/**
+ * キャッシュの鍵（プロンプトの版）へ、「先の話の変化を材料から削った」印を
+ * 付ける（2026-09-25 精査 F1）。
+ *
+ * 0.89.0 までの答えは、先の話の変化が漏れた材料で出したものである。鍵は
+ * 設定全体の指紋でできていてチャンクごとの材料を含まないので、印を付けないと
+ * **漏れた材料で出した答えが使い回され続ける。** 版を上げると漏れの無かった
+ * チャンクまで道連れで飛ぶので、`promptVersionWithNarrator` と同じ作法で、
+ * 削った回だけ印を付ける。
+ */
+export function promptVersionWithAsOfChanges(
+  promptVersion: string,
+  trimmedFutureChanges: boolean
+): string {
+  if (!trimmedFutureChanges) return promptVersion;
+  return `${promptVersion}:asof1`;
 }
 
 /**

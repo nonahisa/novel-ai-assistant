@@ -42,6 +42,7 @@ import {
   createContradictionMaterial,
   describeMissedCharacters,
   mergeMissedCharactersByEpisode,
+  promptVersionWithAsOfChanges,
   promptVersionWithCarryOver,
   promptVersionWithNarrator,
   promptVersionWithStoryDates,
@@ -1607,22 +1608,35 @@ export async function checkContradictions(
   function keyWithPastScenes(base: CacheKeyBase, chunk: Chunk): CacheKeyBase {
     const scenes = pastScenesFor(chunk);
     const carried = carryOverFor(chunk);
-    const narrator = materialFor(chunk).narrator;
+    const { narrator, trimmedFutureChanges } = materialFor(chunk);
     // 日付の欄も出る回と出ない回があるので、版ではなくここで区別する
     // （日付の読めない作品の処理済みを道連れにしない。6.10.9）
     const dates = storyDatesFor(chunk);
-    if (!scenes && !carried.text && !narrator && !dates) return base;
+    // 先の話の変化を材料から削った回は、0.89.0 までの漏れた材料で出した
+    // 答えを使い回さない（2026-09-25 精査 F1）
+    if (
+      !scenes &&
+      !carried.text &&
+      !narrator &&
+      !dates &&
+      !trimmedFutureChanges
+    ) {
+      return base;
+    }
     return {
       ...base,
-      promptVersion: promptVersionWithStoryDates(
-        promptVersionWithNarrator(
-          promptVersionWithCarryOver(
-            promptVersionWithPastScenes(base.promptVersion, scenes),
-            carried.text
+      promptVersion: promptVersionWithAsOfChanges(
+        promptVersionWithStoryDates(
+          promptVersionWithNarrator(
+            promptVersionWithCarryOver(
+              promptVersionWithPastScenes(base.promptVersion, scenes),
+              carried.text
+            ),
+            narrator
           ),
-          narrator
+          dates
         ),
-        dates
+        trimmedFutureChanges
       ),
     };
   }

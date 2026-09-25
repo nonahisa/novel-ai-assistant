@@ -124,6 +124,27 @@ describe("レコードごと巻き戻す", () => {
     expect(rolled.name).toBe("フミカ");
   });
 
+  /** 精査 F1（2026-09-25）。値だけ戻して履歴を残すと、材料の変化の行から漏れる */
+  it("変化の履歴も、その時点までに切り詰める（話数の分からない記録は残す）", () => {
+    const record = {
+      role: "片腕の剣士",
+      appearance: null,
+      changes: [
+        change("role", "両腕の剣士", [1, 5]),
+        change("role", "片腕の剣士", [4]),
+        change("appearance", "黒髪", []),
+      ],
+    };
+    const rolled = recordAsOf(record, fields, 2);
+    expect(rolled.changes).toEqual([
+      change("role", "両腕の剣士", [1]),
+      change("appearance", "黒髪", []),
+    ]);
+    // 元の記録はそのまま（「あとで分かる事実」はこちらから拾う）
+    expect(record.changes).toHaveLength(3);
+    expect(record.changes[0].chapters).toEqual([1, 5]);
+  });
+
   it("元のレコードを書き換えない", () => {
     const record = {
       role: "転校生",
