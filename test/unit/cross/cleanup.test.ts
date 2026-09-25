@@ -297,6 +297,15 @@ describe("試験用プロセスの判定", () => {
     expect(r.action).toBe("keep");
   });
 
+  it("常用の「たゆたう鉛_確認用」のブラウザ版は、何時間たっても止めない", () => {
+    const [r] = judgeProcesses(
+      [{ pid: 12, parentPid: 1, start: iso(30 * HOUR), commandLine: "node node_modules/@vscode/test-web/out/server/index.js --port 3112 C:\\Users\\a\\Documents\\確認用コピー\\たゆたう鉛_確認用" }],
+      { now }
+    );
+    expect(r.action).toBe("keep");
+    expect(r.reason).toContain("たゆたう鉛_確認用");
+  });
+
   it("12時間以上たったブラウザ版の試験サーバーは止める（\\ の書き方でも見つける）", () => {
     const judged = judgeProcesses(
       [

@@ -409,6 +409,12 @@ export function judgeProcesses(procs, options) {
       keep("この片づけ自身か、その親");
       continue;
     }
+    // 常用の「ブラウザ版VS Code（たゆたう鉛_確認用）」は、作者が何時間開いたままでも止めない
+    // （起動設定を残すのと同じ考え。2026-09-25、本体の取り込みで足した）
+    if (String(proc.commandLine ?? "").includes(KEEP_LAUNCH_MARK)) {
+      keep("常用のブラウザ版（たゆたう鉛_確認用）");
+      continue;
+    }
     const started = proc.start ? Date.parse(proc.start) : NaN;
     if (!Number.isFinite(started)) {
       keep("起動時刻が読めない");
