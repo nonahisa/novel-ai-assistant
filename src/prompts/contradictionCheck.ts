@@ -59,7 +59,34 @@ import type { NarratorHint } from "../core/narrator";
 //      **ここは版を上げる。** 語り手（1.6のまま）や作中の日付（同）と違い、
 //      **どの作品のどのチャンクでも文面が変わる**ので、印では区別できない。
 //      処理済みは一度だけ作り直しになる
-export const CONTRADICTION_CHECK_VERSION = "1.7";
+// 1.8: **台詞を、話している人物の設定の「一人称」「口調」と照らすよう書いた**
+//      （3巡目の測定、2026-09-25。設計書6.10.1・プロンプト設計書 P-12）。人物に口調の欄を足した
+//      （6.5.11）のに、口調の仕込み3件を e4b 0/3・26b 1/3 しか拾わなかった。
+//      【検証項目】の「人物」は「一人称、口調…」と1語並べていただけで、
+//      原則2の「成長による口調の変化は矛盾ではない」だけが強く効いていた。
+//      原則2に「きっかけが描かれていない違いは挙げる」を足し、【判断の注意】に
+//      台詞ごとの照らし方を、読み取る段（asThem）に「設定の一人称と口調のまま」を書いた。
+//      **どの作品のどのチャンクでも文面が変わる**ので版を上げる
+export const CONTRADICTION_CHECK_VERSION = "1.8";
+
+/**
+ * 口調の照らし方の指示（1.8）。**そのまま答えに返ってくる前提で置く**
+ * （CLAUDE.md「繰り返し起きた失敗」3番）。検算（`contradictionValidation.ts`
+ * の `echoesInstruction`）が、答えの欄がこれらの写しなら落とす。
+ */
+export const SPEECH_CHECK_ITEM =
+  "台詞は、話している人物の設定の「一人称」「口調」と照らし合わせる";
+export const SPEECH_PRINCIPLE_NOTE =
+  "ただし、きっかけが本文に描かれていないのに、台詞の一人称や口調がその人物の設定と違うものは挙げること。";
+export const SPEECH_JUDGE_NOTE =
+  "台詞ごとに、誰が話しているかを地の文から確かめ、その人物の設定の「一人称」「口調」と比べること。一人称や語尾がその人物の設定と違い、本文にきっかけ（成長や関係の変化など）が描かれていなければ、人物の食い違いとして挙げてください。settingSays には設定の口調を、textSays には台詞の言い方を書いてください。";
+
+/** 答えの欄が写しかどうかを見る、プロンプトに書いた口調の指示の全部 */
+export const SPEECH_INSTRUCTION_TEXTS: readonly string[] = [
+  SPEECH_CHECK_ITEM,
+  SPEECH_PRINCIPLE_NOTE,
+  SPEECH_JUDGE_NOTE,
+];
 
 /**
  * 送るときの温度。事実の突き合わせなので揺らさない。
@@ -94,6 +121,7 @@ export const CONTRADICTION_CHECK_SYSTEM_PROMPT = `あなたは日本語の小説
 ${LOOSE_PRINCIPLE_1}
 2. **作中で意図的に描かれた変化を矛盾と呼ばないこと。** 成長による口調の変化、
    秘密が明かされること、関係の変化に伴う呼び方の変化は矛盾ではない。
+   ${SPEECH_PRINCIPLE_NOTE}
 3. **未回収の伏線は矛盾ではない。**
 4. **設定側が古い可能性を常に残すこと。** 断定せず、「設定ではこうなっている」
    「本文ではこうなっている」を並べるだけにする。
@@ -140,7 +168,7 @@ export const LIGHT_CATEGORIES: readonly ContradictionCategory[] = [
 ];
 
 const CHECK_ITEMS: Record<ContradictionCategory, string> = {
-  人物: "一人称、口調、性格、外見、能力が設定と食い違わないか",
+  人物: `一人称、口調、性格、外見、能力が設定と食い違わないか。${SPEECH_CHECK_ITEM}`,
   呼称:
     "ある人物が別の人物を呼ぶ呼び方が、確立された呼称と食い違わないか。" +
     "ただし喧嘩・他人行儀になる場面・第三者の目がある場面など、" +
@@ -357,6 +385,7 @@ ${items}
 - 作中で意図的に描かれた変化（成長による口調の変化、設定の秘密が明かされる等）を
   矛盾と誤認しないこと。判断がつかない場合は confidence を low とし、
   「意図的な変化の可能性」を note に記載すること。
+- ${SPEECH_JUDGE_NOTE}
 - 未回収の伏線は矛盾ではありません。
 - **設定側が誤っている可能性も考慮し、指摘は断定形にしないこと。**
 - 上に設定が示されていない事柄については、何も指摘しないこと。
@@ -382,7 +411,7 @@ still true of them — their body, what they carry, where they are, what carried
 earlier episodes. Do this for every person in the material above.
 
 - who：その人物の名前（材料に載っている正式名称）
-- asThem：**その人物になりきって、いまの自分の身の上を一人称で言う**（「俺は〜」「私は〜」）。
+- asThem：**その人物になりきって、設定の一人称と口調のまま、いまの自分の身の上を言う**。
   体の具合・身につけているもの・どこに居るか・前の話から続いていることを、
   **材料の言葉を写すのではなく、その人の口から出る言葉に言い直してください。**
 

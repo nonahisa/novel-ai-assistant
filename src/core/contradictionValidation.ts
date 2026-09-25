@@ -2,6 +2,7 @@ import type { Chunk } from "./chunker";
 import { normalizeForComparison } from "./groundedEvidence";
 import {
   CONTRADICTION_CATEGORIES,
+  SPEECH_INSTRUCTION_TEXTS,
   type ContradictionCategory,
 } from "../prompts/contradictionCheck";
 
@@ -50,7 +51,29 @@ export interface RejectedContradiction {
     /** 設定と本文に同じことが書いてある */
     | "not_different"
     /** 設定の側が「設定が無い」と言っている */
-    | "no_setting";
+    | "no_setting"
+    /** 設定・本文の欄が、プロンプトに書いた指示の写し（1.8 の口調の指示） */
+    | "instruction_echo";
+}
+
+/**
+ * 答えの欄が、プロンプトに書いた口調の指示（1.8）の写しか。
+ *
+ * **指示の言葉は、答えの中身として返ってくる**（CLAUDE.md「繰り返し起きた
+ * 失敗」3番）。「台詞は、話している人物の設定の…と照らし合わせる」を
+ * `textSays` に写した指摘は、何が食い違ったのかを述べていない。
+ *
+ * 写しと見るのは、欄が指示の文を丸ごと含むときと、欄全体が指示の文の
+ * 一部をそのまま切り出したもの（8字以上）のとき。短い一致（「一人称」）は
+ * 本物の指摘にも出るので見ない。
+ */
+export function echoesInstruction(text: string): boolean {
+  const field = normalizeForComparison(text);
+  if (!field) return false;
+  return SPEECH_INSTRUCTION_TEXTS.some((instruction) => {
+    const guide = normalizeForComparison(instruction);
+    return field.includes(guide) || ([...field].length >= 8 && guide.includes(field));
+  });
 }
 
 /**
@@ -77,8 +100,15 @@ export interface RejectedContradiction {
  * 書いているのに、どの語にも当たらず通っていた（第1話の余計な指摘と、
  * 作者の作品の「矛盾というよりは…表現である」）。
  */
+/*
+ * 2026-09-25 に「合致している」「矛盾点はない」「矛盾は指摘しない」を足した。
+ * 矛盾検知で口調を照らすよう頼んだ（P-12 1.8）あと、gemma4:e4b が台詞を
+ * 1つずつ挙げ、**設定の欄に**「この発言は設定と合致している」「口調の矛盾は
+ * 指摘しない」と書いてきた（同じ理由で、設定の欄も否定の網に掛けるようにした。
+ * `validateContradictions`）。
+ */
 const DENIAL_PATTERN =
-  /((矛盾|食い違い?)(で)?は?(あり)?(し)?(て)?(い)?(ない|ませ|なく)|矛盾というより|一致してい(る|ます)(?!の?か|ため|ので|から)|問題(は)?(あり)?ませ|整合(性)?(は|が)?(取|と)れて(いる|います)(?!の?か|ため|ので|から)|整合してい(る|ます)(?!の?か|ため|ので|から)|齟齬(は)?(あり)?(ませ|ない)|破綻(は)?(し)?(て)?(い)?(ない|ませ))/;
+  /((矛盾|食い違い?)(で)?は?(あり)?(し)?(て)?(い)?(ない|ませ|なく)|(矛盾|食い違い?)(点|箇所)(は|が)?(あり)?(ない|ませ)|(矛盾|食い違い?)(点|箇所)?は?指摘し(ない|ませ)|矛盾というより|(一致|合致)してい(る|ます)(?!の?か|ため|ので|から)|問題(は)?(あり)?ませ|整合(性)?(は|が)?(取|と)れて(いる|います)(?!の?か|ため|ので|から)|整合してい(る|ます)(?!の?か|ため|ので|から)|齟齬(は)?(あり)?(ませ|ない)|破綻(は)?(し)?(て)?(い)?(ない|ませ))/;
 
 /**
  * 断定を避けた否定——「矛盾とは言えません」「矛盾とは断定できません」。
@@ -246,6 +276,31 @@ export function parseContradictionResult(
   return null;
 }
 
+/** 引用の外側に付いた括弧・引用符（中身を照らすときは外す） */
+const OUTER_QUOTES = /^[「『"“]+|[」』"”]+$/gu;
+
+/**
+ * 引用が本文にあれば、本文に実在する形の引用を返す。無ければ undefined。
+ *
+ * まず書かれたまま照らし、無ければ**外側の括弧を外して**照らす
+ * （2026-09-25）。AIは台詞の途中だけを「」で包んで返すことがある——
+ * 本文が「依頼料がかかるだろうが。俺はオカネが…」のとき、
+ * 「俺はオカネが減るのは大嫌いなんだよ」と包むと、開き括弧の位置が本文と
+ * 合わない。実測（gemma4:26b）で、口調の正しい指摘が2件ともこの形で
+ * 落ちていた。**外すのは外側だけ**で、中身は本文に逐語で無ければ落とす。
+ * 外して通したときは、外した形を引用として持つ（画面で本文の位置を
+ * 探すのに使うので、本文に無い形のまま残さない）。
+ */
+function excerptInChunk(
+  excerpt: string,
+  normalizedChunk: string
+): string | undefined {
+  if (normalizedChunk.includes(normalizeForComparison(excerpt))) return excerpt;
+  const inner = excerpt.trim().replace(OUTER_QUOTES, "").trim();
+  if (!inner || inner === excerpt.trim()) return undefined;
+  return normalizedChunk.includes(normalizeForComparison(inner)) ? inner : undefined;
+}
+
 export function validateContradictions(
   raw: unknown,
   chunk: Chunk
@@ -288,7 +343,11 @@ export function validateContradictions(
     // **「これは矛盾ではありません」と書いてある指摘を通さない。**
     // 配列があると何か埋めようとするモデルがあり、実データで
     // 補足に「矛盾していません」と書いた指摘が返ってきた
-    if (deniesContradiction(`${textSays} ${asString(item.note)}`)) {
+    //
+    // **設定の欄も見る**（2026-09-25）。gemma4:e4b が設定の欄に「この発言は
+    // 設定と合致している」と書いた指摘を並べてきた。設定の欄は設定を述べる
+    // 所で、そこで食い違いを否定しているなら指摘として成り立たない
+    if (deniesContradiction(`${settingSays} ${textSays} ${asString(item.note)}`)) {
       rejected.push({ raw: item, reason: "self_denied" });
       continue;
     }
@@ -296,6 +355,12 @@ export function validateContradictions(
     // 照らし合わせる相手が無いのだから、それは矛盾ではない
     if (lacksSetting(settingSays)) {
       rejected.push({ raw: item, reason: "no_setting" });
+      continue;
+    }
+    // **口調の指示（1.8）を写しただけの欄を通さない。** 何が食い違ったのかを
+    // 述べていない（`echoesInstruction`）
+    if (echoesInstruction(settingSays) || echoesInstruction(textSays)) {
+      rejected.push({ raw: item, reason: "instruction_echo" });
       continue;
     }
     // 設定と本文に同じことが書いてあれば、食い違っていない
@@ -317,14 +382,15 @@ export function validateContradictions(
     }
     // **引用が本文に実在するかを見る。** 材料側（設定やあらすじ）の文を
     // そのまま引いて「本文にこうある」と言うことがある
-    if (!normalizedChunk.includes(normalizeForComparison(excerpt))) {
+    const found = excerptInChunk(excerpt, normalizedChunk);
+    if (found === undefined) {
       rejected.push({ raw: item, reason: "excerpt_not_found" });
       continue;
     }
 
     accepted.push({
       line,
-      excerpt,
+      excerpt: found,
       category: category as ContradictionCategory,
       settingSays,
       textSays,

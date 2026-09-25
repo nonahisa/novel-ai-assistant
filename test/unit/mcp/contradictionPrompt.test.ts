@@ -181,7 +181,7 @@ describe("MCP の options.suppression", () => {
     const built = promptFor();
 
     expect(built.systemPrompt).toBe(CONTRADICTION_CHECK_SYSTEM_PROMPT);
-    expect(built.promptVersion).toBe("1.7");
+    expect(built.promptVersion).toBe("1.8");
     // 空文字は打ち間違いとみなさず、既定へ倒す
     expect(promptFor("")).toEqual(built);
   });
@@ -191,7 +191,7 @@ describe("MCP の options.suppression", () => {
     const built = promptFor("strict");
 
     expect(built.systemPrompt).toBe(CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT);
-    expect(built.promptVersion).toBe("1.7:strict");
+    expect(built.promptVersion).toBe("1.8:strict");
   });
 
   test("loose と明示しても、既定と同じ", () => {
@@ -216,6 +216,10 @@ describe("過去の場面の抜粋（設計書6.74）", () => {
    *
    * 下の期待値は 0.32.3（version 1.4）時点の出力をそのまま写したもの。
    * **意図して文面を変えたときだけ**、理由を添えて書き換えること。
+   *
+   * 1.8（2026-09-25）で書き換えた：台詞を人物の設定の「一人称」「口調」と
+   * 照らすよう、検証項目の「人物」・判断の注意・asThem に書き足した
+   * （口調の仕込みを e4b 0/3・26b 1/3 しか拾わなかったため。P-12）。
    */
   const GOLDEN_WITHOUT_PAST_SCENES = `以下の小説本文が、確立された設定と矛盾していないか検証してください。
 
@@ -236,7 +240,7 @@ describe("過去の場面の抜粋（設計書6.74）", () => {
 
 
 【検証項目】
-1. 人物：一人称、口調、性格、外見、能力が設定と食い違わないか
+1. 人物：一人称、口調、性格、外見、能力が設定と食い違わないか。台詞は、話している人物の設定の「一人称」「口調」と照らし合わせる
 2. 状態：既に死亡・離脱した人物が登場していないか、負傷や状態変化が引き継がれているか
 3. 時系列：季節、時刻、経過日数、人物の年齢が矛盾していないか
 
@@ -244,6 +248,7 @@ describe("過去の場面の抜粋（設計書6.74）", () => {
 - 作中で意図的に描かれた変化（成長による口調の変化、設定の秘密が明かされる等）を
   矛盾と誤認しないこと。判断がつかない場合は confidence を low とし、
   「意図的な変化の可能性」を note に記載すること。
+- 台詞ごとに、誰が話しているかを地の文から確かめ、その人物の設定の「一人称」「口調」と比べること。一人称や語尾がその人物の設定と違い、本文にきっかけ（成長や関係の変化など）が描かれていなければ、人物の食い違いとして挙げてください。settingSays には設定の口調を、textSays には台詞の言い方を書いてください。
 - 未回収の伏線は矛盾ではありません。
 - **設定側が誤っている可能性も考慮し、指摘は断定形にしないこと。**
 - 上に設定が示されていない事柄については、何も指摘しないこと。
@@ -269,7 +274,7 @@ still true of them — their body, what they carry, where they are, what carried
 earlier episodes. Do this for every person in the material above.
 
 - who：その人物の名前（材料に載っている正式名称）
-- asThem：**その人物になりきって、いまの自分の身の上を一人称で言う**（「俺は〜」「私は〜」）。
+- asThem：**その人物になりきって、設定の一人称と口調のまま、いまの自分の身の上を言う**。
   体の具合・身につけているもの・どこに居るか・前の話から続いていることを、
   **材料の言葉を写すのではなく、その人の口から出る言葉に言い直してください。**
 
