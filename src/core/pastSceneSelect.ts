@@ -3,7 +3,7 @@ import { sha1Text } from "./hash";
 import type { ExcerptSource } from "./mentionExcerpts";
 // **葉の部品から取る**（`retrievalCorpus` は台帳を読むために
 // VS Code APIを引き込む。ここは純粋関数だけで居たい）
-import { passageHash, splitPassages } from "./passages";
+import { PASSAGE_OVERLAP, passageHash, splitPassages } from "./passages";
 import { passagesWithin, rankByNearest, type VectorLookup } from "./semanticRank";
 import { referenceBudgetChars } from "./sizeBudget";
 
@@ -305,26 +305,33 @@ export class PastSceneIndex {
     const top = ranked.slice(0, maxScenes);
 
     const chosen: string[] = [];
+    const chosenHashes = new Set<string>();
     let total = 0;
     // 詰めるのは点の高い順、出すのは話数の順（下の sort）
     for (const id of top) {
       const at = this.orderOf(id);
+      // **同じ本文の場面は1回だけ**（残課題 R8）。別の出典に同じ文章が
+      // あると（再掲・書き写し）、同じ記述が2回渡り、AIには2か所に
+      // 書かれた事実に見える
+      if (chosenHashes.has(this.scenes[at].hash)) continue;
       const text = render(this.scenes[at]);
       const size = chosen.length === 0 ? text.length : SEPARATOR.length + text.length;
       // **1件も入らないなら、はみ出させずに諦める。** 世界観と違って
       // 空でよい材料なので、上限を破ってまで渡す理由が無い
       if (total + size > maxChars) break;
       chosen.push(id);
+      chosenHashes.add(this.scenes[at].hash);
       total += size;
     }
     if (chosen.length === 0) return empty;
 
     const meaningCount = chosen.filter((id) => meaningOnly.has(id)).length;
     return {
-      text: chosen
-        .sort((left, right) => this.orderOf(left) - this.orderOf(right))
-        .map((id) => render(this.scenes[this.orderOf(id)]))
-        .join(SEPARATOR),
+      text: this.renderJoined(
+        chosen
+          .map((id) => this.orderOf(id))
+          .sort((left, right) => left - right)
+      ),
       byName: chosen.length - meaningCount,
       byMeaning: meaningCount,
     };
@@ -392,6 +399,75 @@ export class PastSceneIndex {
   private orderOf(id: string): number {
     return this.orderById.get(id) ?? 0;
   }
+
+  /**
+   * 選んだ場面（元の並び順の番号、昇順）を、渡す文字列にする。
+   *
+   * **隣り合う場面は、重なりを除いて1つの抜粋にまとめる**（残課題 R8）。
+   * 場面は隣と100字重ねて切ってあるので（`passages.ts`）、両方が選ばれると
+   * 重なりの行が続けて2回渡っていた（ギルド第10・15・18話）。AIには同じ
+   * 記述が2回あるように見え、字数の枠もそのぶん無駄になる。
+   *
+   * まとめるのは、並び順が続き、同じ出典（札と話数が同じ）で、**前の場面の
+   * 終わりの行と次の場面の頭の行が実際に重なっている**ときだけ。重なりが
+   * 見つからなければ、これまでどおり別の抜粋として渡す（本文を黙って削らない）。
+   */
+  private renderJoined(orders: readonly number[]): string {
+    const blocks: Array<{ scene: PastScene; text: string; last: number }> = [];
+    for (const at of orders) {
+      const scene = this.scenes[at];
+      const previous = blocks[blocks.length - 1];
+      if (
+        previous &&
+        previous.last === at - 1 &&
+        previous.scene.label === scene.label &&
+        previous.scene.chapter === scene.chapter
+      ) {
+        const joined = joinOverlapping(previous.text, scene.text);
+        if (joined !== undefined) {
+          previous.text = joined;
+          previous.last = at;
+          continue;
+        }
+      }
+      blocks.push({ scene, text: scene.text, last: at });
+    }
+    return blocks
+      .map((block) => render({ ...block.scene, text: block.text }))
+      .join(SEPARATOR);
+  }
+}
+
+/**
+ * 隣り合う2つの場面を、重なった行を1回にしてつなぐ。重ならなければ undefined。
+ *
+ * 行の前後の空白は揃えて比べる（場面は切ったあと `trim` してあるので、
+ * 次の場面の頭の行だけ字下げが落ちていることがある）。切り方は行ごとの
+ * 持ち越し（`splitPassages`：終わりから数えて重なりの字数に届くまで）なので、
+ * **持ち越しうる行数の中で、いちばん長い重なり**を採る。それより長く合うのは
+ * 本文がたまたま同じ行を繰り返しているときで、削ると本文の行が消える。
+ */
+function joinOverlapping(first: string, second: string): string | undefined {
+  const head = first.split("\n");
+  const tail = second.split("\n");
+  // 持ち越しうる行数（`splitPassages` の持ち越しと同じ数え方）
+  let carried = 0;
+  let carriedLength = 0;
+  for (let i = head.length - 1; i >= 0 && carriedLength < PASSAGE_OVERLAP; i--) {
+    carriedLength += head[i].length + 1;
+    carried++;
+  }
+  for (let k = Math.min(carried, tail.length); k >= 1; k--) {
+    let same = true;
+    for (let i = 0; i < k; i++) {
+      if (head[head.length - k + i].trim() !== tail[i].trim()) {
+        same = false;
+        break;
+      }
+    }
+    if (same) return [...head, ...tail.slice(k)].join("\n");
+  }
+  return undefined;
 }
 
 /**

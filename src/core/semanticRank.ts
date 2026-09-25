@@ -119,6 +119,14 @@ export interface SimilarPair {
   a: string;
   b: string;
   score: number;
+  /**
+   * この組の片側（`near`。`a` か `b`）と同じ場面・隣の場面が、ほかにも近い
+   * 相手（`id`）を持っていた分（残課題 R8、2026-09-26）。**近い順。**
+   *
+   * 同じ場面を何組も並べず1組へまとめるが、相手は捨てずにここへ残す。
+   * 無ければ省く。
+   */
+  others?: Array<{ near: string; id: string; score: number }>;
 }
 
 export interface PairOptions {
@@ -142,6 +150,13 @@ export interface PairOptions {
  * 場面は100字ずつ重ねて切ってある（`passages.ts`）。そのため1か所の
  * 似た記述が、隣り合う2〜3個の場面の組として何度も並ぶ。**どちらの側も
  * 既に採った組の隣なら、同じ重なりとして捨てる。**
+ *
+ * ## 同じ場面が片側に出る組も1組にまとめる（残課題 R8）
+ *
+ * **片側だけ**が既に採った組の場面（か隣）なら、相手だけ替えた同じ話である。
+ * 並べると、ありふれた場面1つが一覧の上を埋める。組は増やさず、相手を
+ * 先に採った組の `others` へ残す（黙って捨てない）。上限（`limit`）は
+ * 本物の組で数える。
  *
  * ## 総当たり
  *
@@ -187,9 +202,8 @@ export async function findSimilarPairs(
   }
   trim();
 
-  const chosen: Array<{ left: PairItem; right: PairItem; score: number }> = [];
+  const chosen: ChosenPair[] = [];
   for (const entry of pool) {
-    if (chosen.length >= options.limit) break;
     const left = usable[entry.i].item;
     const right = usable[entry.j].item;
     const duplicate = chosen.some(
@@ -198,9 +212,71 @@ export async function findSimilarPairs(
         (isNeighbor(other.left, right) && isNeighbor(other.right, left))
     );
     if (duplicate) continue;
-    chosen.push({ left, right, score: entry.score });
+    /*
+      **片側だけが既に採った組の場面（か、その隣）でも、1組へまとめる**
+      （残課題 R8）。隣どうしの畳みは両側が隣のときしか効かないので、
+      ありふれた場面が1つあると、相手だけ替えて何組でも上位を埋める
+      （ギルド第1話の同じ場面が上位12組の5組）。相手は捨てず、先に採った
+      組の `others` に残す。先に採った組のほうが近い（`pool` は近い順）
+    */
+    if (foldIntoChosen(chosen, left, right, entry.score)) continue;
+    // 上限は**本物の組**で数える。まとめた相手で枠を使い切らない
+    if (chosen.length >= options.limit) continue;
+    chosen.push({ left, right, score: entry.score, others: [] });
   }
-  return chosen.map(({ left, right, score }) => ({ a: left.id, b: right.id, score }));
+  return chosen.map(({ left, right, score, others }) => ({
+    a: left.id,
+    b: right.id,
+    score,
+    ...(others.length > 0
+      ? {
+          others: others.map((other) => ({
+            near: other.near.id,
+            id: other.partner.id,
+            score: other.score,
+          })),
+        }
+      : {}),
+  }));
+}
+
+/** 採った組。まとめた相手は、隣の判定に使えるよう場面ごと持つ */
+interface ChosenPair {
+  left: PairItem;
+  right: PairItem;
+  score: number;
+  others: Array<{ near: PairItem; partner: PairItem; score: number }>;
+}
+
+/**
+ * 片側が既に採った組の場面（か、その隣）なら、もう片側をその組の `others` へ
+ * 足して true を返す。どちらの側でも当たるときは、先に採った組の左を優先する
+ * （並びを揺らさない）。
+ */
+function foldIntoChosen(
+  chosen: ChosenPair[],
+  left: PairItem,
+  right: PairItem,
+  score: number
+): boolean {
+  for (const pair of chosen) {
+    for (const side of [pair.left, pair.right]) {
+      const partner = isNeighbor(side, left)
+        ? right
+        : isNeighbor(side, right)
+          ? left
+          : undefined;
+      if (!partner) continue;
+      // 同じ相手（と重なった隣）を二度数えない
+      const known =
+        isNeighbor(pair.left, partner) ||
+        isNeighbor(pair.right, partner) ||
+        pair.others.some((other) => isNeighbor(other.partner, partner));
+      if (!known) pair.others.push({ near: side, partner, score });
+      return true;
+    }
+  }
+  return false;
 }
 
 function isNeighbor(a: PairItem, b: PairItem): boolean {

@@ -327,6 +327,19 @@ export function validateTypoIssues(
       continue;
     }
 
+    // **括弧でくくった中身の無い言葉**（「（特に修正なし）」）。言い方の一覧
+    // （下の `isPlaceholderText`）に無い言い方でも、形で落とす（失敗3）。
+    // 前後の句を外す手当て（`trimCarriedContext`）より先に見る——外し方が
+    // 本文と偶然ずれると、中身の無い言葉が別の形に化けて残るため
+    if (isBracketedNonAnswer(lineText, target, issue.suggestion)) {
+      rejected.push({
+        line: issue.line,
+        target: issue.target,
+        reason: "placeholder_suggestion",
+      });
+      continue;
+    }
+
     // **違いが空白だけのもの。** 以前は空白を消してから比べていたため、
     // 文中に紛れ込んだ全角空白を取る直し（「、　」→「、」）を**必ず**
     // 「直しにならない」として捨てていた（正解つきの台で測って見つかった、
@@ -1298,6 +1311,81 @@ const BRACKETS = ["「", "」", "『", "』", "（", "）", "(", ")", "【", "�
 export function removesBracket(target: string, suggestion: string): boolean {
   const count = (text: string, mark: string) => text.split(mark).length - 1;
   return BRACKETS.some((mark) => count(suggestion, mark) < count(target, mark));
+}
+
+/**
+ * 修正案まるごとをくくる括弧の対（`isBracketedNonAnswer`）。
+ *
+ * 鉤括弧（「」『』）は入れない。台詞の直しは台詞ごと返ってくるのが普通で、
+ * 中の言葉が本文の言い換えになっていることもある（そちらは言い換えの検査が見る）。
+ */
+const ENCLOSING_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ["（", "）"],
+  ["(", ")"],
+  ["【", "】"],
+  ["［", "］"],
+  ["[", "]"],
+  ["〔", "〕"],
+  ["〈", "〉"],
+  ["《", "》"],
+];
+
+/**
+ * 括弧が無くても「直さない」と言っている形（**補助**。主は括弧の形で見る）。
+ *
+ * 「問題なし」「なし」は入れない。誤字の直しの答えとしてありうる
+ * （「問題なひ」→「問題なし」）。直す対象を名指しする語（修正・誤字…）か
+ * 「特に」を伴うものだけにする。
+ */
+const NON_ANSWER_PHRASE =
+  /^(?:特に|とくに)?(?:修正|変更|訂正|誤字脱字|誤字|脱字|指摘|直し)(?:は|も)?(?:なし|無し|ありません|不要|しません|の必要なし|の必要はありません)$|^(?:特に|とくに)(?:なし|無し|ありません|問題なし|問題ありません)$/u;
+
+/**
+ * 修正案が「（特に修正なし）」のように、**括弧でくくった中身の無い言葉**か
+ * （2026-09-26）。
+ *
+ * CLAUDE.md の失敗3（指示の言葉が答えとして返ってくる）の形である。
+ * `placeholderText.ts` の一覧は括弧を外して言い方と突き合わせるが、言い方は
+ * いくらでも変わる（「特に修正なし」は一覧に無く、通っていた）。そこで
+ * **言い方ではなく形で見る**：修正案まるごとが括弧でくくられ、しかも
+ * **中の言葉が本文のその行に無い**なら、本文から来た直しではない。
+ *
+ * 落とさないもの（本文の括弧を直す正しい直し）：
+ *
+ * - 対象そのものが同じ括弧を持つ（「（たぶんあ）」→「（たぶんな）」、
+ *   抜けた閉じ括弧を足す「（笑いながら」→「（笑いながら）」）。括弧は本文から来ている
+ * - 中の言葉が本文のその行にある（本文の語を括弧でくくる直し）
+ *
+ * 括弧でくくっていないものは、`NON_ANSWER_PHRASE` の形だけを補助として見る
+ * （これも本文のその行にあれば落とさない）。
+ */
+export function isBracketedNonAnswer(
+  lineText: string,
+  target: string,
+  suggestion: string
+): boolean {
+  const body = suggestion.trim();
+  const haystack = normalizeForComparison(lineText);
+  const inLine = (text: string): boolean =>
+    haystack.includes(normalizeForComparison(text));
+
+  const pair = ENCLOSING_PAIRS.find(
+    ([open, close]) =>
+      body.length >= open.length + close.length &&
+      body.startsWith(open) &&
+      body.endsWith(close)
+  );
+  if (pair) {
+    const [open, close] = pair;
+    // 対象が同じ括弧を持つなら、括弧は本文から来ている（括弧の直し）
+    if (target.includes(open) || target.includes(close)) return false;
+    const inner = body.slice(open.length, body.length - close.length).trim();
+    // 中にも同じ括弧があるなら、まるごとくくった形ではない（「（a）と（b）」）
+    if (inner.includes(open) || inner.includes(close)) return false;
+    if (!normalizeForComparison(inner)) return true;
+    return !inLine(inner);
+  }
+  return NON_ANSWER_PHRASE.test(body) && !inLine(body);
 }
 
 /** 台詞を開く括弧と閉じる括弧 */

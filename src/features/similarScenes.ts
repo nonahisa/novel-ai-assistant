@@ -111,8 +111,11 @@ export async function findSimilarScenes(
         }
       )
   );
+  // 同じ場面が片側に出る組は1組へまとめている（R8）。まとめた数も残す
+  const folded = pairs.reduce((sum, pair) => sum + (pair.others?.length ?? 0), 0);
   logStep(
     `似た場面の検出：${comparable.length}場面から${pairs.length}組` +
+      (folded > 0 ? `（同じ場面の相手${folded}件をまとめた）` : "") +
       `（近さ${SIMILAR_SCENE_MIN}以上・${((Date.now() - started) / 1000).toFixed(1)}秒` +
       (cancelled ? "・途中で中止" : "") +
       "）"
@@ -152,14 +155,54 @@ function toPickItem(
   const a = byId.get(pair.a);
   const b = byId.get(pair.b);
   if (!a || !b) return [];
+  const others = describeOthers(pair, byId);
   return [
     {
       label: `${sceneLabel(a)} ↔ ${sceneLabel(b)}`,
-      description: `近さ ${pair.score.toFixed(2)}`,
-      detail: `「${snippet(a.text, 40)}」／「${snippet(b.text, 40)}」`,
+      description:
+        `近さ ${pair.score.toFixed(2)}` +
+        (others.count > 0 ? `・ほかに${others.count}場面とも近い` : ""),
+      detail:
+        `「${snippet(a.text, 40)}」／「${snippet(b.text, 40)}」` +
+        (others.text ? `　${others.text}` : ""),
       pair: { a, b },
     },
   ];
+}
+
+/** まとめた相手をいくつまで名前で出すか。多いと1行に収まらない */
+const OTHERS_SHOWN = 4;
+
+/**
+ * 1組へまとめた相手（`SimilarPair.others`。残課題 R8）を、どの場面の相手かが
+ * 分かる形で1行にする。**まとめたことを黙らない**——同じ場面が何組にも
+ * 並ぶのをやめた代わりに、相手の話数はここで読める。
+ */
+function describeOthers(
+  pair: SimilarPair,
+  byId: ReadonlyMap<string, RetrievalItem>
+): { count: number; text: string } {
+  const others = pair.others ?? [];
+  if (others.length === 0) return { count: 0, text: "" };
+  const byNear = new Map<string, string[]>();
+  for (const other of others) {
+    const partner = byId.get(other.id);
+    if (!partner) continue;
+    const list = byNear.get(other.near) ?? [];
+    list.push(sceneLabel(partner));
+    byNear.set(other.near, list);
+  }
+  const parts: string[] = [];
+  for (const [nearId, labels] of byNear) {
+    const near = byId.get(nearId);
+    if (!near) continue;
+    const shown = labels.slice(0, OTHERS_SHOWN).join("・");
+    const rest = labels.length - OTHERS_SHOWN;
+    parts.push(
+      `${sceneLabel(near)}はほかに ${shown}${rest > 0 ? ` ほか${rest}場面` : ""} とも近い`
+    );
+  }
+  return { count: others.length, text: parts.join("／") };
 }
 
 /**

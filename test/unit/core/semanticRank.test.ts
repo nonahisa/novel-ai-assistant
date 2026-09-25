@@ -124,7 +124,25 @@ describe("findSimilarPairs（別の話どうしの、近い場面の組）", () 
   });
 
   test("近い順に並び、上限で切る", async () => {
-    const pairs = await findSimilarPairs(items, lookup, { minScore: 0, limit: 2 });
+    // 場面を分け合わない3組（R8 の畳みで1組にまとまらないように、
+    // どの場面も1つの組にしか出ない作り物にしてある）
+    const separate = [
+      { id: "1-0", hash: "p", group: "第1話", position: 0 },
+      { id: "2-0", hash: "p2", group: "第2話", position: 0 },
+      { id: "3-0", hash: "q", group: "第3話", position: 0 },
+      { id: "4-0", hash: "q2", group: "第4話", position: 0 },
+      { id: "5-0", hash: "r", group: "第5話", position: 0 },
+      { id: "6-0", hash: "r2", group: "第6話", position: 0 },
+    ];
+    const apart = lookupOf({
+      p: vec(1, 0, 0),
+      p2: vec(0.99, 0.1, 0),
+      q: vec(0, 1, 0),
+      q2: vec(0, 0.95, 0.3),
+      r: vec(0, 0, 1),
+      r2: vec(0.2, 0, 0.9),
+    });
+    const pairs = await findSimilarPairs(separate, apart, { minScore: 0.5, limit: 2 });
     expect(pairs).toHaveLength(2);
     expect(pairs[0].score).toBeGreaterThanOrEqual(pairs[1].score);
   });

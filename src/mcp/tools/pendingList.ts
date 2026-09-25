@@ -138,6 +138,11 @@ export interface PendingListItem {
   changes: Array<{ label: string; before: string; after: string }>;
   /** 作者が退けた関係に当たって、案から外される関係（人物だけ） */
   skippedRejectedRelations?: Array<{ name: string; relation: string }>;
+  /**
+   * 作者が誤りとして落とした値に当たって、案から外される値（人物だけ。
+   * 落とす前に置かれた案で起きる。2026-09-26）
+   */
+  skippedRejectedValues?: Array<{ field: string; value: string }>;
 }
 
 export interface PendingListResult {
@@ -340,6 +345,9 @@ function listCharacters(
       changes: changesOf(item.diff.changes),
       ...(item.skippedRejected.length > 0
         ? { skippedRejectedRelations: item.skippedRejected }
+        : {}),
+      ...(item.skippedRejectedValues.length > 0
+        ? { skippedRejectedValues: item.skippedRejectedValues }
         : {}),
     })),
     ...assembled.stale.map((update): PendingListItem => ({

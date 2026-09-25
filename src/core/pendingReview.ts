@@ -11,6 +11,7 @@ import {
 import { findCharactersByAppellation } from "./plotCharacterSync";
 import { diffCharacter, summarizeDiff, type CharacterDiff } from "./characterDiff";
 import { settlePendingRelations } from "./rejectedRelations";
+import { settlePendingRejectedValues } from "./recordChanges";
 import {
   pendingSourceLabel,
   readKind,
@@ -125,12 +126,19 @@ export function comparePendingSettingsUpdates(
  * 外から読む側（MCP `pending.list`）は、「ある」はずの案が画面に並ばない
  * わけを知りたいので、理由を名前で返す。文言は `STALE_REASON_LABELS`。
  */
-export type StaleReason = "duplicateName" | "missing" | "noChange";
+export type StaleReason =
+  | "duplicateName"
+  | "missing"
+  | "noChange"
+  /** 変わるはずだった欄が、どれも作者が誤りとして落とした値だった */
+  | "rejectedValuesOnly";
 
 export const STALE_REASON_LABELS: Record<StaleReason, string> = {
   duplicateName: "同じ名前の人物が、もう台帳に居ます（新しく作る案は要りません）",
   missing: "対象の記録が台帳にありません（まとめた・消した）",
   noChange: "取り込んでも、いまの記録から何も変わりません",
+  rejectedValuesOnly:
+    "変わるはずだった値が、どれも作者が誤りとして落とした値でした（除いたら何も変わりません）",
 };
 
 /** 人物の案1件を、確認できる形に組んだもの */
@@ -144,6 +152,11 @@ export interface CharacterReviewItem {
    * （作者の裁定、2026-09-23）。**黙って外さない**——承認の説明に件数を出す
    */
   skippedRejected: Array<{ name: string; relation: string }>;
+  /**
+   * 積んだあとに作者が「誤り」として落とした値に当たったため、更新案から
+   * 外した値（2026-09-26）。**黙って外さない**——承認の説明に件数を出す
+   */
+  skippedRejectedValues: Array<{ field: string; value: string }>;
 }
 
 /**
@@ -189,6 +202,8 @@ export function assembleCharacterReview(
         update,
         current: undefined,
         skippedRejected: [],
+        // 新規案は台帳に居ないので、落とした記録も無い
+        skippedRejectedValues: [],
         // 何が入るのかを、更新案と同じ並びで見せる。
         // 比べる相手は空のレコード（すべてが「追加」になる）
         diff: diffCharacter(
@@ -210,16 +225,23 @@ export function assembleCharacterReview(
     // 退けた記録そのものは台帳の側に合わせる（作者の裁定、2026-09-23）。
     // 外さないと、写しの中で「足される関係」に見え、承認すると戻ってしまう
     const settled = settlePendingRelations(current, update.character, characters);
-    const diff = diffCharacter(current, settled.character, customFields);
+    // **積んだあとに作者が誤りとして落とした値**も同じ形で外す（2026-09-26）。
+    // 外部AIの提案は置くときに取り下げるが、落とす前に置かれた案は写しの
+    // まま並び、承認すると誤りの値が本体へ戻る
+    const values = settlePendingRejectedValues(current, settled.character);
+    const diff = diffCharacter(current, values.character, customFields);
     if (diff.changes.length === 0) {
-      drop(update, "noChange");
+      // 落とした値だけの案だったなら、そう名乗る（「何も変わらない」だけでは、
+      // 外から読む側に「なぜ消えたか」が分からない）
+      drop(update, values.skipped.length > 0 ? "rejectedValuesOnly" : "noChange");
       continue;
     }
     items.push({
-      update: { ...update, character: settled.character },
+      update: { ...update, character: values.character },
       current,
       diff,
       skippedRejected: settled.skipped,
+      skippedRejectedValues: values.skipped,
     });
   }
 
@@ -327,10 +349,15 @@ export function describeCharacterReviewItem(item: CharacterReviewItem): string {
   const base = label ? `${label}：${summary}` : summary;
   const reason = item.update.reason?.trim();
   const withReason = reason ? `${base}（理由：${clampReason(reason)}）` : base;
-  // 退けた関係を外したことを黙らない（`settlePendingRelations`）
-  return item.skippedRejected.length > 0
-    ? `${withReason}（作者が退けた関係 ${item.skippedRejected.length}件は入れません）`
-    : withReason;
+  // 退けた関係・落とした値を外したことを黙らない
+  // （`settlePendingRelations`・`settlePendingRejectedValues`）
+  const withRelations =
+    item.skippedRejected.length > 0
+      ? `${withReason}（作者が退けた関係 ${item.skippedRejected.length}件は入れません）`
+      : withReason;
+  return item.skippedRejectedValues.length > 0
+    ? `${withRelations}——作者が誤りとして落とした値なので除きました（${item.skippedRejectedValues.length}件）`
+    : withRelations;
 }
 
 /** 人物以外の案の一行。種類を先に出す（人物と取り違えないため） */
