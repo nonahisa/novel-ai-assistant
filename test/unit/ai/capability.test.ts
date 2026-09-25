@@ -2,9 +2,11 @@ import { describe, expect, test } from "vitest";
 import {
   capabilityCacheTag,
   capabilityProfile,
+  contradictionSpeechCheck,
   describeCapability,
   describeContradictionCapabilityForAuthor,
   useSmallModelTypoPrompt,
+  describeSpeechCheckSkipped,
   type CapabilityProfile,
 } from "../../../src/ai/capability";
 
@@ -415,6 +417,10 @@ describe("矛盾検知の実行前に出す、地力の断り", () => {
     "\nこのモデルでは、確信の持てない箇所は指摘しません。\n" +
     "小さいモデルで疑わしい箇所まで挙げさせると、当たりは増えずに\n" +
     "見当違いの指摘だけが増えるためです（実測）。";
+  /** 抑制を残すときは、口調を照らさないことも続けて言う（P-12 1.9、2026-09-26） */
+  const SPEECH_TEXT =
+    "\nこのモデルには台詞の口調の食い違いを探させていません（小さいモデルでは誤検出が多いため）。" +
+    `口調も見るなら ${LARGE_MODEL_MIN_BILLIONS}B 以上のモデルを割り当ててください。`;
   /** 抑制をゆるめたときの断り */
   const LOOSE_TEXT =
     "\nこのモデルでは、確信が持てない箇所も挙げます。\n" +
@@ -479,8 +485,28 @@ describe("矛盾検知の実行前に出す、地力の断り", () => {
       warnDeviationIneffective: false,
     });
 
-    expect(narrowed).toBe(`${NARROW_TEXT}\n${STRICT_TEXT}`);
-    expect(full).toBe(STRICT_TEXT);
+    expect(narrowed).toBe(`${NARROW_TEXT}\n${STRICT_TEXT}\n${SPEECH_TEXT}`);
+    expect(full).toBe(`${STRICT_TEXT}\n${SPEECH_TEXT}`);
+  });
+
+  test("口調を照らさない断りは、抑制を残すときだけ（送る側と同じ判定）", () => {
+    for (const suppress of [true, false]) {
+      const text = describeContradictionCapabilityForAuthor({
+        narrowContradictionCategories: false,
+        suppressUncertainContradictions: suppress,
+        narrowDeviationTypes: false,
+        warnDeviationIneffective: false,
+      });
+      expect(text.includes("口調の食い違いを探させていません")).toBe(
+        !contradictionSpeechCheck(suppress)
+      );
+    }
+    expect(contradictionSpeechCheck(true)).toBe(false);
+    expect(contradictionSpeechCheck(false)).toBe(true);
+    // 照らした回は空（結果の断りの並びから消える）
+    expect(describeSpeechCheckSkipped(true)).toBe("");
+    // 内輪の呼び名（P-12 など）を作者向けの文に入れない
+    expect(describeSpeechCheckSkipped(false)).not.toMatch(/P-\d/);
   });
 
   test("文言と並びを変えない（切り出しただけ）", () => {

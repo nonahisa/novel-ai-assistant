@@ -328,7 +328,9 @@ async function runFeature(
           count: result.rejectedCount,
           notes: [
             `本文に無い引用など ${result.rejectedCount}件`,
-            ...[result.verifyNote, result.missedNote].filter(Boolean),
+            // 口調を照らさなかった断り（P-12 1.9）も、突き合わせなかった人物と
+            // 同じ並びに出す——外部AIが「口調は合っていた」と読まないように
+            ...[result.verifyNote, result.missedNote, result.speechNote].filter(Boolean),
           ],
         },
         failures: {

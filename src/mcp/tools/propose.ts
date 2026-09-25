@@ -10,6 +10,7 @@ import {
   pendingFileName,
 } from "../../core/pendingUpdateFormat";
 import { withoutRejectedRelations } from "../../core/rejectedRelations";
+import { isRejectedValue } from "../../core/recordChanges";
 import {
   PENDING_SETTINGS_KINDS,
   type PendingSettingsKind,
@@ -82,6 +83,10 @@ const CHANGES_SCHEMA = z.looseObject({
   affiliation: z.string().optional().describe("所属（組織名・部署名）"),
   role: z.string().optional().describe("作中での役どころ"),
   personality: z.string().optional().describe("性格"),
+  speechStyle: z
+    .string()
+    .optional()
+    .describe("口調（一人称・語尾・口癖など、台詞に表れる話し方を短く）"),
   appearance: z.string().optional().describe("外見"),
   relations: z
     .array(z.object({ name: z.string(), relation: z.string() }))
@@ -116,7 +121,19 @@ const CHANGES_SCHEMA = z.looseObject({
   region: z.string().optional().describe("地域（場所）"),
 });
 
-/** 白名簿。**ここに無い鍵は断る**（黙って落とさない） */
+/** 作者が落とした値を取り下げたときの理由（返り値と断り文句で同じ言葉を使う） */
+const REJECTED_VALUE_REASON =
+  "作者が誤りとして落とした値なので出しません（設定資料の「誤りとして落とした値」に残っています）";
+
+/**
+ * 白名簿。**ここに無い鍵は断る**（黙って落とさない）。
+ *
+ * `speechStyle`（口調）は 2026-09-26 に足した（残課題 R3）。`personality` と同じ
+ * 「作者が読んで判断できる文章」で、同じ扱い（空で消させない・作者の落とした値を
+ * 立て直さない）にする。面（`speechStyleFacets`）は外から触らせない——承認の
+ * 画面は本体の欄の差分（「口調」の行）で見せ、面は作者が欄を直したときと同じく
+ * 製品側が扱う。
+ */
 const ALLOWED_FIELDS = [
   "summary",
   "aliases",
@@ -124,6 +141,7 @@ const ALLOWED_FIELDS = [
   "affiliation",
   "role",
   "personality",
+  "speechStyle",
   "appearance",
   "relations",
 ] as const;
@@ -179,6 +197,11 @@ export interface SettingsProposeResult {
    * **黙って落とさない**——返さないと、呼んだ側は通ったと思い込む
    */
   skippedRejectedRelations: Array<{ name: string; relation: string }>;
+  /**
+   * 作者が「誤り」として落とした値（`rejectedValues`）に一致したため、
+   * 取り下げた欄（2026-09-26）。**黙って落とさない**——理由を添えて返す
+   */
+  skippedRejectedValues: Array<{ field: string; value: string; reason: string }>;
   /** 作者が次にすること */
   nextStep: string;
   note: string;
@@ -266,7 +289,33 @@ export function settingsPropose(
   const kind = existing ? undefined : ("creation" as const);
 
   const skippedRejectedRelations: Array<{ name: string; relation: string }> = [];
-  const changedFields = applyChanges(base, changes, records, skippedRejectedRelations);
+  const skippedRejectedValues: SettingsProposeResult["skippedRejectedValues"] = [];
+  const changedFields = applyChanges(
+    base,
+    changes,
+    records,
+    skippedRejectedRelations,
+    skippedRejectedValues
+  );
+
+  /*
+    **提案が作者の落とした値だけだったら、置かずに断る**（退けた関係と同じ）。
+    置いても承認の画面には何も並ばず、呼んだ側は「置けた」と思い込む。
+    退けた関係も混ざっていれば、下の関係の断りに任せる（両方を1文に畳まない）。
+  */
+  if (
+    changedFields.length === 0 &&
+    skippedRejectedValues.length > 0 &&
+    skippedRejectedRelations.length === 0
+  ) {
+    throw new McpToolError(
+      `${skippedRejectedValues
+        .map((item) => `${item.field}「${item.value}」`)
+        .join("、")}は、${REJECTED_VALUE_REASON}。` +
+        "承認待ちへは置きませんでした。どうしても必要なら作者に頼んでください" +
+        "（作者が設定資料パネルで［誤りの印を外す］を押すと、提案できるようになります）。"
+    );
+  }
 
   /*
     **提案が退けた関係だけだったら、置かずに断る。** 置いても承認の画面には
@@ -328,12 +377,16 @@ export function settingsPropose(
     name: validated.name,
     changedFields,
     skippedRejectedRelations,
+    skippedRejectedValues,
     nextStep:
       "VS Code の詳細メニュー「設定資料更新分反映」で採否を決めます。作者が採るまで反映されません。",
     note:
       "台帳（設定/characters）は書き換えていません。" +
       (skippedRejectedRelations.length > 0
         ? `作者が退けた関係 ${skippedRejectedRelations.length}件は足していません（skippedRejectedRelations）。`
+        : "") +
+      (skippedRejectedValues.length > 0
+        ? `作者が誤りとして落とした値 ${skippedRejectedValues.length}件は出していません（skippedRejectedValues）。`
         : ""),
   };
 }
@@ -382,7 +435,9 @@ function applyChanges(
   /** 台帳の顔ぶれ。退けた関係の相手を、相関図と同じ規則で引き当てるのに使う */
   characters: readonly Character[],
   /** 退けた関係に一致して足さなかったものを積む先 */
-  skippedRejected: Array<{ name: string; relation: string }>
+  skippedRejected: Array<{ name: string; relation: string }>,
+  /** 作者が落とした値に一致して取り下げた欄を積む先 */
+  skippedValues: SettingsProposeResult["skippedRejectedValues"]
 ): string[] {
   const changed: string[] = [];
 
@@ -425,6 +480,17 @@ function applyChanges(
       throw new McpToolError(
         `${field} が空です。値を消す提案は受け付けません（消すのは作者の操作です）。`
       );
+    }
+    /*
+      **作者が誤りとして落とした値は立て直さない**（2026-09-26）。抽出のマージ
+      （`characterMerge.ts` の `fillOrConflict`）と同じ判定（`isRejectedValue`。
+      前後の空白だけを揃えた文字どおりの一致）を使う——写しを書くと、どこまでを
+      同じ値と見るかが2か所でずれる。**欄ごと取り下げ、理由を返す**。ほかの欄の
+      提案は置く
+    */
+    if (isRejectedValue(target, field, trimmed)) {
+      skippedValues.push({ field, value: trimmed, reason: REJECTED_VALUE_REASON });
+      continue;
     }
     if (target[field] === trimmed) continue;
     target[field] = trimmed;

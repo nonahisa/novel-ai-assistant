@@ -209,9 +209,57 @@ export function describeContradictionCapabilityForAuthor(
         "見当違いの指摘だけが増えるためです（実測）。"
       : "\nこのモデルでは、確信が持てない箇所も挙げます。\n" +
         "どちらが正しいかは作者が決めるので、黙って見逃すより出します。",
+    // **口調を照らさないことも黙らない**（P-12 1.9、2026-09-26）。判定は
+    // プロンプトへ送る側と同じ関数（`contradictionSpeechCheck`）を通す
+    prefixedLine(
+      describeSpeechCheckSkipped(
+        contradictionSpeechCheck(profile.suppressUncertainContradictions)
+      )
+    ),
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/**
+ * 矛盾検知で、**台詞の口調の食い違いまで探させるか**（P-12 1.9）。
+ *
+ * 口調の指示は抑制版と一対で外す——小さいモデル（抑制を残す側）は口調の指示で
+ * 余計な指摘が増え、答え付きの台の当たりが減った。**送る側（プロンプトに口調の
+ * 指示を入れるか）と、知らせる側（口調は照らしていないと言うか）は、必ず
+ * これを通す。** 片方だけ条件を書き写すと、送っていないのに黙る／送ったのに
+ * 「照らしていない」と言う、の食い違いが起きる。
+ *
+ * 受けるのは「抑制を残すか」だけにしてある。製品はモデルの大きさから
+ * （`suppressUncertainContradictions`）、MCP は呼ぶ側の選んだ `strict` から
+ * 決めるので、どちらの入口からも同じ関数で決められる。
+ */
+export function contradictionSpeechCheck(suppressUncertain: boolean): boolean {
+  return !suppressUncertain;
+}
+
+/**
+ * 口調を照らさなかった回に、**結果と一緒に**出す一言（作者向け）。
+ * 照らした回は空文字（呼び出し側で `.filter(Boolean)` して消える形を保つ）。
+ *
+ * 「矛盾なし」と出たとき、作者には**口調を見て問題が無かったのか、見て
+ * いないのか**が区別できない（`missedNote` と同じ考え方）。実行前の確認にも
+ * 同じ文を出す（`describeContradictionCapabilityForAuthor`）が、まとめ実行では
+ * 確認を飛ばすので、結果の側にも要る。
+ *
+ * 文中の「20B」は `LARGE_MODEL_MIN_BILLIONS`（抑制の境目）から組む。直書きすると、
+ * 実測で線を引き直したときに案内だけが古い境目を言い続ける。
+ */
+export function describeSpeechCheckSkipped(speechCheck: boolean): string {
+  return speechCheck
+    ? ""
+    : "このモデルには台詞の口調の食い違いを探させていません（小さいモデルでは誤検出が多いため）。" +
+        `口調も見るなら ${LARGE_MODEL_MIN_BILLIONS}B 以上のモデルを割り当ててください。`;
+}
+
+/** 確認文の並び（段落ごとに空行を挟む形）へ入れるための前置き。空なら空のまま */
+function prefixedLine(text: string): string {
+  return text ? `\n${text}` : "";
 }
 
 /**

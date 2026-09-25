@@ -5859,6 +5859,9 @@ export async function activate(
       // 「見て問題が無かった」と区別が付かない。落ちた話が0なら空文字
       tail: [
         result.missedNote,
+        // **口調を照らさなかったことも黙らない**（P-12 1.9）。小さいモデルでは
+        // 口調の指示を送らないので、「口調は合っていた」と読まれないようにする
+        result.speechNote,
         result.issues.length > 0
           ? "本文は書き換えていません。 設定と本文のどちらを直すかは作者が決めてください。"
           : "",

@@ -6,6 +6,12 @@ import {
   MISATTRIBUTED_KEY,
 } from "../../../src/prompts/settingsEnrich";
 import { SUMMARY_MAX_CHARS } from "../../../src/core/summaryLimit";
+import {
+  isSpeechStyleEcho,
+  SPEECH_STYLE_ASPECTS,
+  SPEECH_STYLE_EXAMPLE,
+  SPEECH_STYLE_MAX_CHARS,
+} from "../../../src/core/speechStyle";
 
 describe("項目を充実させる提案", () => {
   test("種別ごとに提案する項目を決める", () => {
@@ -43,6 +49,30 @@ describe("項目を充実させる提案", () => {
     ]);
     // null は許す。「読み取れなかった」と明示させるため
     expect(schema.properties.role.type).toEqual(["string", "null"]);
+  });
+
+  test("人物の口調も提案させる（設計書6.5.11。抽出と同じ上限・同じ言葉の並び）", () => {
+    const field = ENRICHABLE_FIELDS.character.find(
+      (entry) => entry.key === "speechStyle"
+    );
+    expect(field?.label).toBe("口調");
+    expect(field?.maxChars).toBe(SPEECH_STYLE_MAX_CHARS);
+    // 例の文は載せない（例の口癖が別の人物の口調に混ざって返ってきた）
+    expect(field?.hint).not.toContain(SPEECH_STYLE_EXAMPLE);
+    // 説明の語の並びがそのまま返ってきたら、受け取る側の見張りが落とす
+    // （指示の言葉は答えの中身として返ってくる前提で書く）
+    const echoed = SPEECH_STYLE_ASPECTS.slice(0, 3).join("、");
+    expect(field?.hint).toContain(echoed);
+    expect(isSpeechStyleEcho(echoed)).toBe(true);
+
+    const schema = buildEnrichSchema("character") as {
+      properties: Record<string, { maxLength?: number }>;
+    };
+    expect(schema.properties.speechStyle.maxLength).toBe(SPEECH_STYLE_MAX_CHARS);
+    // 人物以外には聞かない
+    expect(ENRICHABLE_FIELDS.ability.map((entry) => entry.key)).not.toContain(
+      "speechStyle"
+    );
   });
 
   test("文字数の上限をスキーマに載せる", () => {

@@ -3,6 +3,10 @@ import type { SettingsKind } from "../core/settingsSummary";
 import type { SettingsTarget } from "./settingsChat";
 import type { CustomFieldDefinition } from "../models/customField";
 import { SUMMARY_MAX_CHARS } from "../core/summaryLimit";
+import {
+  SPEECH_STYLE_ASPECTS,
+  SPEECH_STYLE_MAX_CHARS,
+} from "../core/speechStyle";
 
 /**
  * P-20 設定項目の充実
@@ -22,12 +26,13 @@ import { SUMMARY_MAX_CHARS } from "../core/summaryLimit";
  *
  * ## 変更履歴
  *
+ * - 2.1 人物の提案する項目に口調（speechStyle）を足した（設計書6.5.11）
  * - 2.0 「AIで再読込」へ（設計書6.31）。作者の**留意点**を受け取り、
  *   混入と判断した記述を `misattributed` として分けて返させる。
  *   留意点が空なら、従来（1.1）と同じ「項目の充実」として動く
  * - 1.1 変化の関与度を紹介へどこまで書くかを指示
  */
-export const SETTINGS_ENRICH_VERSION = "2.0";
+export const SETTINGS_ENRICH_VERSION = "2.1";
 
 /**
  * はじいた記述の置き場所。
@@ -92,6 +97,23 @@ export const ENRICHABLE_FIELDS: Record<SettingsKind, EnrichableField[]> = {
         "悪い例：傲慢）。名前・性別・ジャンルから推論してはならない。" +
         "複数の面があれば併記する",
       multiline: true,
+    },
+    /*
+      **口調**（2.1、2026-09-26。設計書6.5.11 の「まだ届いていないところ」）。
+      抽出（P-04a 5.6）と同じ言葉の並び（`SPEECH_STYLE_ASPECTS`）から説明を組み、
+      上限も同じにする。**例の文は載せない**——例の口癖が別の人物の口調に
+      混ざって返ってきた（抽出の実測）。並びがそのまま返ってきたものは、
+      受け取る側（`isSpeechStyleEcho`）で落とす
+    */
+    {
+      key: "speechStyle",
+      label: "口調",
+      hint:
+        `その人物の台詞に表れる話し方。${SPEECH_STYLE_ASPECTS.join("、")}など、` +
+        "**台詞から実際に読み取れる特徴**を短く書く。" +
+        "地の文の描写（「ぶっきらぼうに言った」）からは書かない。" +
+        "台詞が無い・特徴が読み取れないなら null",
+      maxChars: SPEECH_STYLE_MAX_CHARS,
     },
     {
       key: "appearance",

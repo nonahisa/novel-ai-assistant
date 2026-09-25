@@ -27,6 +27,8 @@ import {
   type ContradictionMaterial,
 } from "../../core/contradictionMaterial";
 import type { NarratorHint } from "../../core/narrator";
+// 製品と同じ判定を使う（`notice.ts` も同じ所から読む。`vscode` へは届かない）
+import { contradictionSpeechCheck } from "../../ai/capability";
 import {
   buildStoryDateSources,
   describeStoryDates,
@@ -571,6 +573,13 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
   chunks: ContradictionChunkPrompt[];
   /** 材料が無くて飛ばしたチャンク。**黙って落とさない** */
   skipped: Array<{ chunkId: string; reason: string }>;
+  /**
+   * 台詞の口調の食い違いまで探させたか（P-12 1.9）。`strict` では false。
+   * **false の回の「矛盾なし」は、口調を見ていない**
+   */
+  speechCheck: boolean;
+  /** 口調を照らさなかったことの断り。照らした回は空文字 */
+  speechNote: string;
 } {
   const settings = loadSettings(input.folder, input.numCtx);
   const { chunks, maxChars } = chunksOfWorkFile(
@@ -580,6 +589,12 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
   );
   const categories = categoriesOf(input.categories);
   const suppression = suppressionOf(input.suppression);
+  /*
+    **口調を照らすかは、製品と同じ関数で決める**（P-12 1.9）。送る側と
+    返り値の `speechCheck`・`speechNote` が同じ値を見るので、「送っていないのに
+    照らしたと返す」食い違いは起きない。
+  */
+  const speechCheck = contradictionSpeechCheck(suppression === "strict");
   const carryOver = carryOverReader(input.folder, carryOverOf(input.carryOver));
   // **チャンクごとに読み直さない**（作品ぜんぶで1回。設計書6.10.9）
   const storyDates = storyDatesOf(settings, carryOver);
@@ -625,8 +640,8 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
         // **地の文の「俺」が誰かを名指しする**（設計書6.10.6）。
         // 名指しできなければ undefined で、欄そのものが出ない
         narrator: material.narrator ?? undefined,
-        // **口調の指示は、抑制版と一対で外す**（P-12 1.9。製品と同じ組み合わせ）
-        speechCheck: suppression !== "strict",
+        // **口調の指示は、抑制版と一対で外す**（P-12 1.9。製品と同じ関数で決める）
+        speechCheck,
       }),
     });
   }
@@ -646,7 +661,24 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
     validateWith: VALIDATE_WITH,
     chunks: prompts,
     skipped,
+    speechCheck,
+    speechNote: speechNoteFor(speechCheck),
   };
+}
+
+/**
+ * 口調を照らさなかった回の断り（MCP 向け）。照らした回は空文字。
+ *
+ * 作者向けの文（`describeSpeechCheckSkipped`）の「20B 以上を割り当てて」は、
+ * MCP では呼ぶ側が `suppression` で選んでいるので当たらない。同じ判定の結果を、
+ * 呼ぶ側が取れる操作で言い直す。
+ */
+function speechNoteFor(speechCheck: boolean): string {
+  return speechCheck
+    ? ""
+    : "suppression: strict では、台詞の口調の食い違いを探させていません" +
+        "（小さいモデルでは誤検出が多いため。製品も抑制を残すモデルでは同じ）。" +
+        "口調も見るなら suppression を loose にしてください。";
 }
 
 export interface ContradictionValidateResult {
@@ -712,6 +744,13 @@ export async function contradictionRun(input: ContradictionRunInput): Promise<
   RunOutcome<ContradictionChunkPrompt, ContradictionValidateResult> & {
     /** 突き合わせなかった人物。**空でも欄は出す**（黙って落とさない） */
     missed: ContradictionMissedChunk[];
+    /**
+     * 台詞の口調の食い違いまで探させたか（P-12 1.9）。`runner` が `claude` 以外
+     * だとプロンプトは返らないので、ここにも出す（`missed` と同じ理由）
+     */
+    speechCheck: boolean;
+    /** 口調を照らさなかったことの断り。照らした回は空文字 */
+    speechNote: string;
   }
 > {
   const prompts = contradictionPrompt(input);
@@ -766,5 +805,10 @@ export async function contradictionRun(input: ContradictionRunInput): Promise<
         toolReply: replyToContradictionToolCall,
       })
   );
-  return { ...outcome, missed };
+  return {
+    ...outcome,
+    missed,
+    speechCheck: prompts.speechCheck,
+    speechNote: prompts.speechNote,
+  };
 }

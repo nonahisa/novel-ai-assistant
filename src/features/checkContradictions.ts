@@ -29,8 +29,10 @@ import { measureParts } from "../core/usageLog";
 import {
   capabilityCacheTag,
   capabilityProfile,
+  contradictionSpeechCheck,
   describeCapability,
   describeContradictionCapabilityForAuthor,
+  describeSpeechCheckSkipped,
 } from "../ai/capability";
 import { resolveModelInfoOrWarn } from "./chunkSettings";
 import { collectManuscriptChunks } from "./manuscriptChunks";
@@ -221,6 +223,15 @@ export interface ContradictionRunResult {
    * 操作ログ（`logStep`）にある。
    */
   missedNote: string;
+  /**
+   * **台詞の口調を照らさなかったことの断り**（P-12 1.9、2026-09-26）。
+   * 口調の指示を送った回は空文字。
+   *
+   * 小さいモデルには口調の指示を送らないので、口調の食い違いは結果に出ない。
+   * これが無いと作者には「口調は合っていた」と見える（`missedNote` と同じ考え方）。
+   * 判定はプロンプトへ送る側と同じ `contradictionSpeechCheck` を通す。
+   */
+  speechNote: string;
 }
 
 export interface CheckContradictionsOptions extends SuiteAwareOptions {
@@ -430,8 +441,11 @@ export async function checkContradictions(
     ? CONTRADICTION_CHECK_SYSTEM_PROMPT_STRICT
     : CONTRADICTION_CHECK_SYSTEM_PROMPT;
   // **口調の指示も、抑制版と一対で外す**（P-12 1.9）。小さいモデルは
-  // 口調の指示で余計な指摘が増え、答え付きの台の当たりが減った
-  const speechCheck = !capability.suppressUncertainContradictions;
+  // 口調の指示で余計な指摘が増え、答え付きの台の当たりが減った。
+  // 判定は結果の断り（`speechNote`）と同じ関数を通す
+  const speechCheck = contradictionSpeechCheck(
+    capability.suppressUncertainContradictions
+  );
   // 地力の足りないモデルでは観点を絞る。1回の負荷を下げないと検出漏れが増える
   const categories: readonly ContradictionCategory[] =
     capability.narrowContradictionCategories
@@ -1366,6 +1380,7 @@ export async function checkContradictions(
     processedChunks,
     verifyNote,
     missedNote,
+    speechNote: describeSpeechCheckSkipped(speechCheck),
   };
 
   /**

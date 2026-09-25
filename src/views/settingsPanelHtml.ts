@@ -1499,13 +1499,15 @@ button.danger:hover {
           });
           line.appendChild(button);
         }
-        // 値ごとの操作（2026-09-26 深夜）。食い違いの値の1つを「こちらは誤り」
-        // として一度で落とす。**送る値は拡張機能側が組んだものをそのまま返す**
+        // 値ごとの操作（2026-09-26）。食い違いの値の1つを「こちらは誤り」
+        // として一度で落とす札と、落とした値の「誤りの印を外す」札。
+        // **どちらかは kind で決まる**（送る種別をそのまま使う）。
+        // **送る値は拡張機能側が組んだものをそのまま返す**
         // （札の文字から切り出すと、頭だけ見せた長い値で取り違える）
         if (entry.valueActions) {
           for (const valueAction of entry.valueActions) {
             const valueButton = document.createElement("button");
-            valueButton.className = "action secondary drop-conflict-value";
+            valueButton.className = "action secondary value-action";
             valueButton.textContent = valueAction.label;
             valueButton.title = valueAction.title;
             valueButton.addEventListener("click", () => {

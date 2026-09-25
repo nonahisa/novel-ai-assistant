@@ -501,6 +501,177 @@ describe("novel.propose——退けた関係", () => {
   });
 });
 
+/**
+ * 作者が誤りとして落とした値（`rejectedValues`。2026-09-26 深夜）を、
+ * 外部AIの提案が立て直さない（2026-09-26 の積み残し1）。
+ *
+ * **再現**：抽出のマージ（`fillOrConflict`）は落とした値を入れないのに、
+ * `novel.propose` は素通しで承認待ちへ置いていた。作者が承認の画面で
+ * 見落とすと、落としたはずの値が本体へ戻る。
+ */
+describe("novel.propose——作者が誤りとして落とした値", () => {
+  function giveRecord(folder: string, extra: Record<string, unknown>): void {
+    const file = nodePath.join(folder, "設定", "characters", "char_0001.json");
+    const record = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+    fs.writeFileSync(file, JSON.stringify({ ...record, ...extra }, null, 2), "utf8");
+  }
+
+  const DROPPED = {
+    field: "role",
+    value: "リーダー格の男性。",
+    chapters: [1],
+    rejectedAt: "2026-09-26T00:00:00.000Z",
+  };
+
+  it("落とした値の欄は取り下げ、理由つきで返す。ほかの欄は置く", () => {
+    const folder = workCopy();
+    giveRecord(folder, { rejectedValues: [DROPPED] });
+
+    const result = settingsPropose({
+      folder,
+      name: "少年",
+      changes: {
+        role: "リーダー格の男性。",
+        summary: "父の船を待ちながら、港の灯を守っている。",
+      },
+      reason: "第1話から。",
+    });
+
+    expect(result.changedFields).toEqual(["summary"]);
+    expect(result.skippedRejectedValues).toEqual([
+      {
+        field: "role",
+        value: "リーダー格の男性。",
+        reason: expect.stringContaining("作者が誤りとして落とした値"),
+      },
+    ]);
+    expect(result.note).toContain("skippedRejectedValues");
+    const character = parseCharacter(
+      unwrapPendingCharacter(readPending(folder, "char_0001.json"))
+    );
+    // 落とした値は承認待ちの案に入っていない
+    expect(character.role).toBeNull();
+    expect(character.summary).toBe("父の船を待ちながら、港の灯を守っている。");
+  });
+
+  it("前後の空白だけが違っても、落とした値として扱う（文字どおりの一致）", () => {
+    const folder = workCopy();
+    giveRecord(folder, { rejectedValues: [DROPPED] });
+    const result = settingsPropose({
+      folder,
+      name: "少年",
+      changes: { role: "　リーダー格の男性。 ", summary: "港の灯を守る。" },
+      reason: "第1話から。",
+    });
+    expect(result.changedFields).toEqual(["summary"]);
+    expect(result.skippedRejectedValues).toHaveLength(1);
+  });
+
+  it("言い方が違えば落とした値とは見ない（似た言い方まで寄せない）", () => {
+    const folder = workCopy();
+    giveRecord(folder, { rejectedValues: [DROPPED] });
+    const result = settingsPropose({
+      folder,
+      name: "少年",
+      changes: { role: "リーダー格の少年。" },
+      reason: "第1話から。",
+    });
+    expect(result.changedFields).toEqual(["role"]);
+    expect(result.skippedRejectedValues).toEqual([]);
+  });
+
+  it("別の欄で落とした値なら、この欄では止めない", () => {
+    const folder = workCopy();
+    giveRecord(folder, { rejectedValues: [{ ...DROPPED, field: "summary" }] });
+    const result = settingsPropose({
+      folder,
+      name: "少年",
+      changes: { role: "リーダー格の男性。" },
+      reason: "第1話から。",
+    });
+    expect(result.changedFields).toEqual(["role"]);
+  });
+
+  it("提案が落とした値だけなら、置かずに断る（作者が落とした値です、と言う）", () => {
+    const folder = workCopy();
+    giveRecord(folder, { rejectedValues: [DROPPED] });
+    expect(() =>
+      settingsPropose({
+        folder,
+        name: "少年",
+        changes: { role: "リーダー格の男性。" },
+        reason: "第1話から。",
+      })
+    ).toThrow(/作者が誤りとして落とした値/);
+    expect(fs.existsSync(pendingDir(folder))).toBe(false);
+  });
+
+  it("口調（speechStyle）で落とした値も立て直さない", () => {
+    const folder = workCopy();
+    giveRecord(folder, {
+      rejectedValues: [
+        { ...DROPPED, field: "speechStyle", value: "語尾に「〜ッス」を付ける。" },
+      ],
+    });
+    const result = settingsPropose({
+      folder,
+      name: "少年",
+      changes: {
+        speechStyle: "語尾に「〜ッス」を付ける。",
+        role: "灯台の当番",
+      },
+      reason: "第2話から。",
+    });
+    expect(result.changedFields).toEqual(["role"]);
+    expect(result.skippedRejectedValues.map((item) => item.field)).toEqual([
+      "speechStyle",
+    ]);
+  });
+});
+
+describe("novel.propose——口調（speechStyle）", () => {
+  it("性格と同じく文の欄として受け、承認待ちの案に入る", () => {
+    const folder = workCopy();
+    const before = ledgerFingerprint(folder);
+    const result = settingsPropose({
+      folder,
+      name: "少年",
+      changes: { speechStyle: "一人称は「ぼく」。目上には丁寧に話す。" },
+      reason: "第2話の台詞「ぼくが灯を守ります」から。",
+    });
+    expect(ledgerFingerprint(folder)).toBe(before);
+    expect(result.changedFields).toEqual(["speechStyle"]);
+    const character = parseCharacter(
+      unwrapPendingCharacter(readPending(folder, "char_0001.json"))
+    );
+    expect(character.speechStyle).toBe("一人称は「ぼく」。目上には丁寧に話す。");
+    // 承認の画面（製品の差分）に「口調」の行が出る
+    const original = parseCharacter(
+      JSON.parse(
+        fs.readFileSync(
+          nodePath.join(folder, "設定", "characters", "char_0001.json"),
+          "utf8"
+        )
+      )
+    );
+    expect(
+      diffCharacter(original, character).changes.map((change) => change.label)
+    ).toContain("口調");
+  });
+
+  it("空の口調は受けない（値を消すのは作者の操作）", () => {
+    const folder = workCopy();
+    expect(() =>
+      settingsPropose({
+        folder,
+        name: "少年",
+        changes: { speechStyle: "  " },
+        reason: "第2話から。",
+      })
+    ).toThrow(/speechStyle が空/);
+  });
+});
+
 describe("novel.propose——台帳に無い名前", () => {
   it("creation として new_… に置き、IDは仮のまま", () => {
     const folder = workCopy();

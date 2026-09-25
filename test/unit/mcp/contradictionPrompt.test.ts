@@ -219,6 +219,25 @@ describe("MCP の options.suppression", () => {
     }
   });
 
+  test("口調を照らしたかを返り値に出す（strict では照らしていないと言う）", () => {
+    // 「矛盾なし」が口調を見ての答えか、見ていない答えかを呼ぶ側が区別できるように
+    const strict = promptFor("strict");
+    const loose = promptFor();
+
+    expect(strict.speechCheck).toBe(false);
+    expect(strict.speechNote).toContain("口調の食い違いを探させていません");
+    expect(strict.speechNote).toContain("loose");
+    expect(loose.speechCheck).toBe(true);
+    expect(loose.speechNote).toBe("");
+    // 送ったものと返り値が食い違わない（口調の指示の有無と一対）
+    expect(strict.chunks.some((chunk) => chunk.userPrompt.includes(SPEECH_CHECK_ITEM))).toBe(
+      strict.speechCheck
+    );
+    expect(loose.chunks.every((chunk) => chunk.userPrompt.includes(SPEECH_CHECK_ITEM))).toBe(
+      loose.speechCheck
+    );
+  });
+
   test("loose と明示しても、既定と同じ", () => {
     expect(promptFor("loose")).toEqual(promptFor());
   });
@@ -955,6 +974,27 @@ describe("落とした人物を言う（設計書6.10.6）", () => {
     });
 
     expect(outcome.missed).toEqual([]);
+  });
+
+  test("口調を照らしたかも run の結果に出る（ollama・sampling はプロンプトを返さない）", async () => {
+    const strict = await contradictionRun({
+      folder,
+      filePath: "本文/003_窓口の椅子.txt",
+      numCtx: 16384,
+      runner: "claude",
+      suppression: "strict",
+    });
+    const loose = await contradictionRun({
+      folder,
+      filePath: "本文/003_窓口の椅子.txt",
+      numCtx: 16384,
+      runner: "claude",
+    });
+
+    expect(strict.speechCheck).toBe(false);
+    expect(strict.speechNote).toContain("口調の食い違いを探させていません");
+    expect(loose.speechCheck).toBe(true);
+    expect(loose.speechNote).toBe("");
   });
 
   /*
