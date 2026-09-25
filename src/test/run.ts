@@ -1090,7 +1090,9 @@ async function checkRunRequestRoundTrip(): Promise<void> {
     );
   } finally {
     Object.defineProperty(vscode.window, "showWarningMessage", warningDescriptor);
-    await fs.rm(temporaryRoot, { recursive: true, force: true });
+    // 走らせた機能のログ（.aiwriter/logs）の書き込みが、終わった直後にまだ続いていることがある。
+    // 消す最中に書かれると ENOTEMPTY で落ちる（2026-09-25、配布前の検査で1度落ちた）ので、少し待ってやり直す
+    await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }
 
