@@ -4,6 +4,7 @@ import type { WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
 import {
   fetchRemote,
+  isAutoWrittenLine,
   keepSideOfConflict,
   readSyncStatus,
   runGit,
@@ -169,6 +170,17 @@ export interface FoldOptions {
    * 「重ならない」と判断したまま、実際に合わせるとぶつかることがある
    */
   authorChoice?: "walk" | "stop";
+  /**
+   * 作者が押していない自動の経路（開いたときの点検）から呼ぶか。
+   *
+   * **自動の経路では記録（コミット）しない**（設計書6.15.1）。真のときは
+   * 「合わせる前の自動保存」をしない。点検は執筆量の記録（`.aiwriter/stats/`）
+   * を未記録に数えないので、統計だけが変わった置き場ではここまで来る
+   * （残課題 F6）。統計は未記録のまま合わせ、次に作者が記録するときに入る。
+   * 統計のほかに未記録があれば、合わせずに断る（点検が手前で止めているはずで、
+   * ここへ来たら状態が変わったということ）
+   */
+  automatic?: boolean;
 }
 
 export async function resolveDivergence(
@@ -357,6 +369,21 @@ export async function foldDivergence(
   useRootLog(deps, root);
   const report = (message: string) => options.progress?.report({ message });
 
+  // **自動の経路では、統計のほかに未記録があれば合わせない。** 書きかけを
+  // 履歴へ入れないため（6.15.1）。退避の枝を作る前に見る（断るなら枝は要らない）
+  if (options.automatic) {
+    const authored = await countAuthoredPending(root, run);
+    if (authored === undefined || authored > 0) {
+      return {
+        ok: false,
+        reason:
+          authored === undefined
+            ? "作業ツリーの状態を読めなかったため、自動では合わせませんでした。"
+            : `記録していない変更が${authored}件あるため、自動では合わせませんでした。`,
+      };
+    }
+  }
+
   report("退避の枝を作っています…");
   const backup = backupBranchName();
   const branched = await run(["branch", backup], root, 15_000);
@@ -368,7 +395,8 @@ export async function foldDivergence(
   }
 
   report("未記録の変更を記録しています…");
-  const pending = await countTrackableFiles(root, run);
+  // 自動の経路では記録しない（上で、残っているのは統計だけだと確かめてある）
+  const pending = options.automatic ? 0 : await countTrackableFiles(root, run);
   if (pending > 0) {
     if (!(await hasCommitIdentity(root, run))) {
       return {
@@ -562,6 +590,26 @@ export async function foldDivergence(
     settingsBulkResolved,
     manuscriptConflicts,
   };
+}
+
+/**
+ * 作者が書いた未記録の変更の数。**拡張機能が自動で書く統計は数えない**
+ * （点検の `parseStatusPorcelain` と同じ線引き。`isAutoWrittenLine`）。
+ * 状態を読めなければ undefined（数えられないものを0と言わない）。
+ */
+async function countAuthoredPending(
+  root: string,
+  run: GitCommandRunner
+): Promise<number | undefined> {
+  const result = await run(
+    ["status", "--porcelain", "--untracked-files=all"],
+    root,
+    15_000
+  );
+  if (result.code !== 0) return undefined;
+  return result.stdout
+    .split(/\r?\n/)
+    .filter((line) => line.trim().length > 0 && !isAutoWrittenLine(line)).length;
 }
 
 /** 既定の見比べ。**画面が要るので、使うときだけ読み込む** */

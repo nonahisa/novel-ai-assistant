@@ -299,23 +299,71 @@ describe("落とすもの（設計書6.85）", () => {
   });
 });
 
-describe("記法との紛れ（設計書6.85）", () => {
-  test("本文に { } | があれば、1回だけ知らせる（本文は変えない）", () => {
+/**
+ * 本文の `{ } |` が、あとで投稿サイト向けに変換したときにルビ・傍点として
+ * 読まれてしまう箇所（残課題 F3）。
+ *
+ * **本文は書き換えない**（6.85）。代わりに、**変換で本当に記法として読まれる
+ * 行だけ**を行番号で返す。以前は `{ } |` が1字でもあれば「紛れる可能性」と
+ * 1回言うだけで、どこなのかも分からず、しかも「入らなかったもの」の欄に
+ * 混ざっていた（入っているのに）。
+ */
+describe("記法との紛れ（設計書6.85、残課題 F3）", () => {
+  test("本文の {a|b} がルビの形になっている行を、行番号で返す（本文は変えない）", () => {
     const inner =
-      `<w:p>${run("式は {a|b} と書く")}</w:p><w:p>${run("もう一度 {c}")}</w:p>`;
+      `<w:p>${run("ふつうの行")}</w:p>` +
+      `<w:p>${run("式は {a|b} と書く")}</w:p>` +
+      `<w:p>${run("もう一度 {c}")}</w:p>`;
     const result = docxToMarkdown(docx(body(inner)));
 
-    expect(result.markdown).toBe("式は {a|b} と書く\nもう一度 {c}\n");
-    const notes = result.skipped.filter((note) => note.includes("{"));
-    expect(notes).toHaveLength(1);
+    expect(result.markdown).toBe("ふつうの行\n式は {a|b} と書く\nもう一度 {c}\n");
+    expect(result.notationClashLines).toEqual([2]);
+    // **入らなかったものの欄には混ぜない**（入っている）
+    expect(result.skipped.some((note) => note.includes("{"))).toBe(false);
   });
 
-  test("記法の印そのものは、紛れの知らせを出さない", () => {
+  test("run が割れていても、つながって記法の形になれば拾う", () => {
+    // Word は校閲や言語の指定で run を気まぐれに割る
+    const result = docxToMarkdown(docx(body(`<w:p>${run("{雪")}${run("|ゆき}")}</w:p>`)));
+    expect(result.markdown).toBe("{雪|ゆき}\n");
+    expect(result.notationClashLines).toEqual([1]);
+  });
+
+  test("{{ }} で傍点の形になっている行も拾う", () => {
+    const result = docxToMarkdown(docx(body(`<w:p>${run("これは {{大事}} です")}</w:p>`)));
+    expect(result.notationClashLines).toEqual([1]);
+  });
+
+  test("記法の形にならない { } | は知らせない（誤報を出さない）", () => {
+    const inner =
+      `<w:p>${run("もう一度 {c}")}</w:p>` +
+      `<w:p>${run("a|b の区切り")}</w:p>` +
+      `<w:p>${run("{ だけ")}</w:p>`;
+    expect(docxToMarkdown(docx(body(inner))).notationClashLines).toEqual([]);
+  });
+
+  test("記法の印そのもの（Word のルビ・圏点から作ったもの）は、紛れとして数えない", () => {
     const result = docxToMarkdown(
-      docx(body(`<w:p>${ruby("漢字", "かんじ")}${dotted("大事")}</w:p>`))
+      docx(body(`<w:p>${ruby("漢字", "かんじ")}${dotted("大事")}${ruby("雪", "ゆき")}</w:p>`))
     );
 
+    expect(result.markdown).toBe("{漢字|かんじ}{{大事}}{雪|ゆき}\n");
+    expect(result.notationClashLines).toEqual([]);
     expect(result.skipped).toEqual([]);
+  });
+
+  test("本文の { } がこちらのルビを包んで傍点の形になるときも拾う", () => {
+    const result = docxToMarkdown(
+      docx(body(`<w:p>${run("{")}${ruby("漢字", "かんじ")}${run("}")}</w:p>`))
+    );
+    expect(result.markdown).toBe("{{漢字|かんじ}}\n");
+    expect(result.notationClashLines).toEqual([1]);
+  });
+
+  test("傍点の中に本文の | があり、ルビの形になるときも拾う", () => {
+    const result = docxToMarkdown(docx(body(`<w:p>${dotted("雪|ゆき")}</w:p>`)));
+    expect(result.markdown).toBe("{{雪|ゆき}}\n");
+    expect(result.notationClashLines).toEqual([1]);
   });
 });
 

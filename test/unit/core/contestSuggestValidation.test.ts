@@ -118,10 +118,24 @@ describe("提案を確かめる", () => {
     expect(CONTEST_SUGGEST_LIMITS.suggestions).toBe(5);
   });
 
-  test("JSON でない・欄が無い・1件も残らないときは undefined（使わない）", () => {
+  test("JSON でない・欄が無い・挙げたものが1件も残らないときは undefined（使わない）", () => {
     expect(validateContestSuggestions("これはJSONではありません", CANDIDATES)).toBeUndefined();
     expect(validateContestSuggestions(answer({ items: [] }), CANDIDATES)).toBeUndefined();
-    expect(validateContestSuggestions(answer({ suggestions: [] }), CANDIDATES)).toBeUndefined();
+    expect(
+      validateContestSuggestions(answer({ suggestions: [{ id: "C9", reason: "無い候補" }] }), CANDIDATES)
+    ).toBeUndefined();
+  });
+
+  /**
+   * **空の配列は「合う公募なし」という正しい答え**（残課題 F8）。プロンプトが
+   * そう頼んでいる。「読めなかった」（undefined）と同じにすると、頼んだとおりに
+   * 答えたAIを失敗として扱う。
+   */
+  test("空の配列は、読めた0件として返す（読めなかったとは分ける）", () => {
+    expect(validateContestSuggestions(answer({ suggestions: [] }), CANDIDATES)).toEqual({
+      suggestions: [],
+      notes: [],
+    });
   });
 
   test("コードの柵（```json）で包まれて返っても読む", () => {

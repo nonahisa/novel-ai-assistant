@@ -33,9 +33,27 @@ export interface ChatDecisionRejection {
   reason: "placeholder" | "ungrounded";
 }
 
+/**
+ * 短い同意（「うん」「OK」）で通した1件と、**どの案を認めたのか**。
+ *
+ * 結びつけるのはAIではなくコードである（実装ルール3）——引用に写された
+ * AIの案が会話のどの発言か、その**すぐ次**が作者の同意だけの発言か、を
+ * 発言の並びで確かめる。記録に残して、承認待ちに並んだ案の出どころを
+ * 後から追えるようにする。
+ */
+export interface ChatAgreementBinding {
+  name: string;
+  /** 作者が同意した、直前のAIの発言（全文） */
+  proposal: string;
+  /** 作者の同意の発言（「うん」など、そのまま） */
+  agreement: string;
+}
+
 export interface VerifiedChatDecisions {
   entries: PlotCharacterEntry[];
   rejected: ChatDecisionRejection[];
+  /** 短い同意で通したもの。**通常の照合で通ったものは入らない** */
+  agreements: ChatAgreementBinding[];
 }
 
 /**
@@ -150,6 +168,7 @@ export function verifyChatDecisions(
 ): VerifiedChatDecisions {
   const entries: PlotCharacterEntry[] = [];
   const rejected: ChatDecisionRejection[] = [];
+  const agreements: ChatAgreementBinding[] = [];
   const normalizedConversation = normalizeForComparison(
     formatChatConversation(turns)
   );
@@ -171,7 +190,10 @@ export function verifyChatDecisions(
       continue;
     }
 
-    const segments = evidenceSegments(decision.evidence);
+    // **話し手の札を外してから照らす**（残課題 F9）。会話は札を付けて
+    // AIへ渡しているので、AIは「作者: 17歳でいこう」と札ごと写してくる。
+    // 作者の発言だけの母材には札が無く、札つきのままでは必ず落ちていた
+    const segments = evidenceSegments(stripSpeakerTags(decision.evidence));
     const grounded = segments.some((segment) =>
       normalizedConversation.includes(segment)
     );
@@ -180,15 +202,143 @@ export function verifyChatDecisions(
     const fromAuthor = segments.some((segment) =>
       normalizedAuthorSaid.includes(segment)
     );
-    if (!grounded || !fromAuthor) {
-      rejected.push({ name, reason: "ungrounded" });
+    if (grounded && fromAuthor) {
+      entries.push({ name, summary: decided });
       continue;
     }
 
+    // 作者の発言側が短い同意（「うん」）だけのときは、照合に使える断片が
+    // 残らない（4字未満は誤一致の元なので捨てている）。**直前のAIの案に
+    // 作者が同意した**ことを発言の並びで確かめられたときだけ通す
+    const bound = grounded
+      ? bindAgreement(decision.evidence, segments, turns)
+      : undefined;
+    if (!bound) {
+      rejected.push({ name, reason: "ungrounded" });
+      continue;
+    }
     entries.push({ name, summary: decided });
+    agreements.push({ name, ...bound });
   }
 
-  return { entries, rejected };
+  return { entries, rejected, agreements };
+}
+
+/**
+ * 引用から話し手の札（「作者:」「AI:」）を外し、区切りに置き換える。
+ *
+ * 札は `formatChatConversation` が付けたもので、発言の中身ではない。
+ * 区切り（改行）にするのは、1行に2人分を写した引用（「AI: …？ 作者: うん」）
+ * を発言ごとの断片に割るため。
+ */
+function stripSpeakerTags(evidence: string): string {
+  return evidence.replace(/(?:作者|AI)[ \t　]*[:：]/gu, "\n");
+}
+
+/**
+ * 同意だけの返事として数える言葉（比べる形は `agreementKey`）。
+ *
+ * **並べた言葉の組み合わせだけ**を同意とみなす（「うん、それで」は通る）。
+ * 「うーん」「いや」「NO」のような返事は、短くても同意ではない。
+ * 迷う言葉は入れない——入れ損ねた同意は落ちるだけ（作者が承認待ちで
+ * 足せる）だが、入れすぎると断った案が作者の決定として積まれる。
+ */
+const AGREEMENT_WORDS: readonly string[] = [
+  "うん",
+  "うむ",
+  "はい",
+  "ええ",
+  "ok",
+  "okay",
+  "おk",
+  "オッケー",
+  "オーケー",
+  "いいね",
+  "いいよ",
+  "いいです",
+  "了解",
+  "了解です",
+  "賛成",
+  "同意",
+  "採用",
+  "それで",
+  "それだ",
+  "それです",
+  "それでいい",
+  "それでいこう",
+  "それでお願いします",
+  "決まり",
+  "よし",
+  "そうしよう",
+  "そうします",
+  "お願いします",
+];
+
+const AGREEMENT_KEYS = new Set(AGREEMENT_WORDS.map(agreementKey));
+
+/**
+ * 同意の言葉を比べる形。全角半角と大小をそろえ、空白と句読点・感嘆符を落とす。
+ * **長音（ー）は落とさない**——落とすと「うーん」が「うん」になる。
+ */
+function agreementKey(text: string): string {
+  return text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\s　。、，,.．！？!?…・「」『』"'“”‘’（）()〜~]/gu, "");
+}
+
+/** その発言が、同意の言葉だけでできているか（「うん、それで」も通す） */
+function isAgreementOnly(text: string): boolean {
+  const key = agreementKey(text);
+  if (!key) return false;
+  // 先頭から、並べた言葉で割り切れるかを見る（短い言葉の組み合わせ）
+  const reachable = new Array<boolean>(key.length + 1).fill(false);
+  reachable[0] = true;
+  for (let start = 0; start < key.length; start++) {
+    if (!reachable[start]) continue;
+    for (const word of AGREEMENT_KEYS) {
+      if (key.startsWith(word, start)) reachable[start + word.length] = true;
+    }
+  }
+  return reachable[key.length];
+}
+
+/**
+ * 引用が「AIの案」と「そのすぐ次の作者の同意」を写しているかを、
+ * **発言の並びで**確かめる。確かめられたら、どの案に同意したかを返す。
+ *
+ * 条件は3つ。すべてコードで見る（AIの「作者が同意した」は信用しない）。
+ *   1. 引用の断片（4字以上）が、あるAIの発言 i の中にある
+ *   2. 発言 i のすぐ次が作者の発言で、それが同意の言葉だけでできている
+ *   3. 引用の中に、その同意の発言が（札や句読点を除いて）そのまま写されている
+ *
+ * **すぐ次に限る。** 間に別の案が挟まると、「うん」がどの案への返事か
+ * 決められない（16歳の案への「うん」を、17歳の案の同意として積まない）。
+ */
+function bindAgreement(
+  evidence: string,
+  segments: readonly string[],
+  turns: readonly WorkChatTurn[]
+): { proposal: string; agreement: string } | undefined {
+  const quotedPieces = new Set(
+    stripSpeakerTags(evidence)
+      .split(/[\r\n。！？!?]+/u)
+      .map(agreementKey)
+      .filter((piece) => piece.length > 0)
+  );
+  for (let index = 0; index + 1 < turns.length; index++) {
+    const proposal = turns[index];
+    const reply = turns[index + 1];
+    if (proposal.role !== "assistant" || reply.role !== "author") continue;
+    if (!isAgreementOnly(reply.text)) continue;
+    if (!quotedPieces.has(agreementKey(reply.text))) continue;
+    const normalizedProposal = normalizeForComparison(proposal.text);
+    if (!segments.some((segment) => normalizedProposal.includes(segment))) {
+      continue;
+    }
+    return { proposal: proposal.text, agreement: reply.text };
+  }
+  return undefined;
 }
 
 /**

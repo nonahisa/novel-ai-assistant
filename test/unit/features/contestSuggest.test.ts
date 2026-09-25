@@ -25,6 +25,7 @@ const { storeContests } = await import("../../../src/core/contestInbox");
 const { parseContestCard } = await import("../../../src/core/contestListing");
 const { invalidateWorkGoals } = await import("../../../src/core/workGoalsStore");
 const { parseWorkGoals } = await import("../../../src/models/workGoals");
+const { CHECK_COMPLETED } = await import("../../../src/core/proofreadingSuite");
 const { FileSystemError, Uri, window, workspace } = await import("../support/vscodeStub");
 import type { WorkEntry } from "../../../src/models/types";
 import type { AIRegistry } from "../../../src/ai/registry";
@@ -264,5 +265,21 @@ describe("応募先の提案", () => {
     await suggestContestsByAI(MAIN, deps());
     expect(pickItems).toEqual([]);
     expect(informed.join("\n")).toContain("AIの提案を読み取れませんでした");
+  });
+
+  /**
+   * **「合う公募なし」は正しい答え**（残課題 F8）。プロンプトは「合う候補が
+   * 無ければ空の配列に」と頼んでいる。頼んだとおりに答えたのを「読み取れ
+   * ませんでした」と言うと、作者はAIが壊れていると受け取る。
+   */
+  test("AIが「合う公募なし」（空の配列）と答えたら、失敗ではなく見つからなかったと伝える", async () => {
+    seedInbox();
+    aiAnswer = JSON.stringify({ suggestions: [] });
+    const outcome = await suggestContestsByAI(MAIN, deps());
+    expect(pickItems).toEqual([]);
+    const said = informed.join("\n");
+    expect(said).toContain("合う公募は見つかりませんでした");
+    expect(said).not.toContain("読み取れませんでした");
+    expect(outcome).toBe(CHECK_COMPLETED);
   });
 });

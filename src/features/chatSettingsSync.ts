@@ -349,6 +349,15 @@ export async function applyChatToSettings(
   }
 
   const verified = outcome.verified;
+  // **短い同意で通したものは、どの案に同意したのかを記録に残す**（残課題 F9）。
+  // 承認待ちに並んだ案が「AIの案への『うん』」から来たことを、作者も
+  // 開発側も後から追えるようにする
+  for (const bound of verified.agreements) {
+    logStep(
+      `相談を資料へ反映：「${bound.name}」は、AIの案「${bound.proposal.slice(0, 80)}」への` +
+        `作者の同意「${bound.agreement}」を根拠に拾いました`
+    );
+  }
   let plan: PlotCharacterPlan<PendingUpdate>;
   try {
     const store = new PendingUpdateStore(work);

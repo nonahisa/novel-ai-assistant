@@ -311,6 +311,157 @@ describe("P-32の答えを検証する", () => {
 });
 
 /**
+ * 残課題 F9。**正しい引用が照合で落ちていた**2つの形。
+ *
+ * 1. 話し手の札つきの引用（「作者: 17歳でいこう」）。会話はAIへ「作者:」
+ *    「AI:」の札を付けて渡しているので、AIは札ごと写してくる。作者の発言
+ *    だけを並べた照合の母材には札が無いので、「作者が言った」ことの照合に落ちた
+ * 2. 短い同意（「うん」「OK」）。4字未満の断片は誤一致の元なので照合に
+ *    使わない。AIの案に作者が「うん」と答えて決まった設定は、作者の発言側の
+ *    断片が1つも残らず落ちた
+ */
+describe("P-32の答えを検証する：札つきの引用と短い同意（F9）", () => {
+  test("「作者:」の札を付けたまま写した引用も、作者の発言として照らす", () => {
+    const result = verifyChatDecisions(
+      [
+        {
+          name: "灯",
+          decided: "年齢は17歳。",
+          evidence: "作者: 灯の年齢は17歳にします。",
+        },
+      ],
+      CONVERSATION
+    );
+
+    expect(result.rejected).toEqual([]);
+    expect(result.entries).toEqual([{ name: "灯", summary: "年齢は17歳。" }]);
+  });
+
+  test("札を付けてもAIの発言は作者の発言にならない", () => {
+    const result = verifyChatDecisions(
+      [
+        {
+          name: "灯",
+          decided: "年齢は16歳",
+          // AIの案に「作者:」の札を貼っただけ
+          evidence: "作者: 16歳か17歳が収まりがよさそうです",
+        },
+      ],
+      CONVERSATION
+    );
+
+    expect(result.entries).toEqual([]);
+    expect(result.rejected).toEqual([{ name: "灯", reason: "ungrounded" }]);
+  });
+
+  /** AIが年齢を1つだけ出し、作者が「うん」とだけ返した相談 */
+  const AGREED: WorkChatTurn[] = [
+    turn("author", "灯の年齢で迷っています。"),
+    turn("assistant", "灯は17歳にしてはどうでしょう。港町の学校に通う年頃です。"),
+    turn("author", "うん"),
+    turn("assistant", "では17歳で進めます。"),
+  ];
+
+  test("直前のAIの案に作者が「うん」と答えたなら、その案を認めた印として通し、どの案かを結びつけて返す", () => {
+    const result = verifyChatDecisions(
+      [
+        {
+          name: "灯",
+          decided: "年齢は17歳。",
+          evidence: "AI: 灯は17歳にしてはどうでしょう。\n作者: うん",
+        },
+      ],
+      AGREED
+    );
+
+    expect(result.rejected).toEqual([]);
+    expect(result.entries).toEqual([{ name: "灯", summary: "年齢は17歳。" }]);
+    // **どの案を認めたのかをコードが結びつける**（AIの言い分ではなく、発言の並びで）
+    expect(result.agreements).toEqual([
+      {
+        name: "灯",
+        proposal: "灯は17歳にしてはどうでしょう。港町の学校に通う年頃です。",
+        agreement: "うん",
+      },
+    ]);
+  });
+
+  test("「OK」「はい」のような同意も同じに扱う", () => {
+    for (const reply of ["OK", "はい。", "ＯＫ！", "いいね"]) {
+      const turns = [...AGREED];
+      turns[2] = turn("author", reply);
+      const result = verifyChatDecisions(
+        [
+          {
+            name: "灯",
+            decided: "年齢は17歳。",
+            evidence: `AI: 灯は17歳にしてはどうでしょう。\n作者: ${reply}`,
+          },
+        ],
+        turns
+      );
+      expect(result.entries, reply).toHaveLength(1);
+    }
+  });
+
+  test("同意がその案の直後でなければ、認めた印にしない", () => {
+    const turns: WorkChatTurn[] = [
+      turn("assistant", "灯は17歳にしてはどうでしょう。"),
+      turn("author", "うーん、もう少し考えたいです。"),
+      turn("assistant", "では16歳という手もあります。"),
+      turn("author", "うん"),
+    ];
+    const result = verifyChatDecisions(
+      [
+        {
+          name: "灯",
+          decided: "年齢は17歳。",
+          // 「うん」は16歳の案への返事であって、17歳の案への返事ではない
+          evidence: "AI: 灯は17歳にしてはどうでしょう。\n作者: うん",
+        },
+      ],
+      turns
+    );
+
+    expect(result.entries).toEqual([]);
+    expect(result.rejected).toEqual([{ name: "灯", reason: "ungrounded" }]);
+  });
+
+  test("短い返事が同意でなければ（「いや」「NO」）、認めた印にしない", () => {
+    for (const reply of ["いや", "NO", "やだ", "うーん"]) {
+      const turns = [...AGREED];
+      turns[2] = turn("author", reply);
+      const result = verifyChatDecisions(
+        [
+          {
+            name: "灯",
+            decided: "年齢は17歳。",
+            evidence: `AI: 灯は17歳にしてはどうでしょう。\n作者: ${reply}`,
+          },
+        ],
+        turns
+      );
+      expect(result.entries, reply).toEqual([]);
+    }
+  });
+
+  test("引用に同意の言葉が無ければ、AIの案だけでは通さない", () => {
+    const result = verifyChatDecisions(
+      [
+        {
+          name: "灯",
+          decided: "年齢は17歳。",
+          evidence: "灯は17歳にしてはどうでしょう。",
+        },
+      ],
+      AGREED
+    );
+
+    expect(result.entries).toEqual([]);
+  });
+});
+
+/**
  * AIの答えが読めなかった回（0.32.6のレビュー）。
  *
  * 壊れたJSONは黙って空配列になっていたので、「読めなかった」と

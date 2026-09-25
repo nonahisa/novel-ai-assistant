@@ -25,11 +25,21 @@ export interface GitCommandResult {
   stderr: string;
 }
 
+/** 実行口に添えられるもの */
+export interface GitRunOptions {
+  /**
+   * 標準入力へ流す文字列。**パスの一覧を命令の外で渡すために使う**
+   * （`--pathspec-from-file=-`。`runGitForPaths` の下の説明）。
+   */
+  input?: string;
+}
+
 /** テストで差し替えるための実行口 */
 export type GitCommandRunner = (
   args: string[],
   cwd: string,
-  timeoutMs: number
+  timeoutMs: number,
+  options?: GitRunOptions
 ) => Promise<GitCommandResult>;
 
 /** ローカルだけで完結する問い合わせの上限。すぐ返るはず */
@@ -44,9 +54,9 @@ const FETCH_TIMEOUT_MS = 30_000;
  * **シェルを介さない**（`execFile`）。作品フォルダーのパスには空白も
  * 日本語も入るため、シェル経由にすると引用の取り扱いで事故る。
  */
-export const runGit: GitCommandRunner = (args, cwd, timeoutMs) =>
+export const runGit: GitCommandRunner = (args, cwd, timeoutMs, options) =>
   new Promise((resolve) => {
-    execFile(
+    const child = execFile(
       "git",
       args,
       {
@@ -81,7 +91,112 @@ export const runGit: GitCommandRunner = (args, cwd, timeoutMs) =>
         resolve({ code: 0, stdout: stdout ?? "", stderr: stderr ?? "" });
       }
     );
+    // **渡すものが無いときも閉じる。** 開いたままだと、標準入力を読む
+    // 命令（`--pathspec-from-file=-`）が入力の終わりを待ち続ける
+    child.stdin?.end(options?.input ?? "");
   });
+
+/**
+ * 1回の命令に並べてよいパスの字数の目安。
+ *
+ * **Windows では、1回の起動に渡せるコマンドの長さが 32,767 字まで**
+ * （CreateProcess の上限。日本語も1字は1字）。git の実行ファイルの場所・
+ * 引用符・空白・ほかの引数のぶんを差し引いて、余裕を大きく取る。
+ * 超えると git が起動すらせず、エラーの文面も「長すぎる」とは言わない。
+ */
+export const COMMAND_LINE_PATH_BUDGET = 24_000;
+
+/** パス1つが命令の中で占める字数（前後の引用符と区切りの空白を足す） */
+function commandLineCost(entry: string): number {
+  return entry.length + 3;
+}
+
+/**
+ * パスの一覧を、1回の命令に収まる束に分ける（設計書6.67、残課題 F2）。
+ *
+ * 1つだけで目安を超えるパスも、その1つで1束にする（落とさない）。
+ */
+export function splitPathsForCommandLine(
+  entries: readonly string[],
+  budget: number = COMMAND_LINE_PATH_BUDGET
+): string[][] {
+  const batches: string[][] = [];
+  let current: string[] = [];
+  let used = 0;
+  for (const entry of entries) {
+    const cost = commandLineCost(entry);
+    if (current.length > 0 && used + cost > budget) {
+      batches.push(current);
+      current = [];
+      used = 0;
+    }
+    current.push(entry);
+    used += cost;
+  }
+  if (current.length > 0) batches.push(current);
+  return batches;
+}
+
+/**
+ * パスを名指しする命令（`add`・`ls-files` など）を、長さの上限に収まる
+ * 束に分けて走らせる。
+ *
+ * **分けてよい命令にだけ使う。** 何回に分けても結果が同じもの（ステージ・
+ * 問い合わせ）に限る。`commit` を分けると記録が割れる（`commitPaths` を使う）。
+ * 出力は束の順に繋ぐ。1つでも失敗したら、そこで止めてその結果を返す。
+ */
+export async function runGitForPaths(
+  run: GitCommandRunner,
+  baseArgs: readonly string[],
+  entries: readonly string[],
+  cwd: string,
+  timeoutMs: number
+): Promise<GitCommandResult> {
+  let stdout = "";
+  let stderr = "";
+  for (const batch of splitPathsForCommandLine(entries)) {
+    const result = await run([...baseArgs, "--", ...batch], cwd, timeoutMs);
+    if (result.code !== 0) return result;
+    stdout += result.stdout;
+    stderr += result.stderr;
+  }
+  return { code: 0, stdout, stderr };
+}
+
+/**
+ * 名指ししたパスだけを1つのコミットにする（`git commit -m … -- パス…`）。
+ *
+ * **分けられない。** 名前の変更を2つのコミットに割ると、GitHub 上で改名が
+ * 途切れて見える。そこで、並べると長すぎるときだけ**パスを標準入力で渡す**
+ * （`--pathspec-from-file=- --pathspec-file-nul`。区切りはNUL——日本語の
+ * ファイル名に改行は入らないが、区切りの取り違えの余地を残さない）。
+ * 短いときは今までどおり命令に並べる。標準入力の道は git 2.26 以降にしか
+ * 無いので、要らないときにまで古い git を締め出さない。
+ *
+ * パスを添えたコミットは、索引に別の仕事で載っていたものを巻き込まない
+ * （`--only` の働き）。標準入力で渡しても同じである。
+ */
+export async function commitPaths(
+  run: GitCommandRunner,
+  message: string,
+  entries: readonly string[],
+  cwd: string,
+  timeoutMs: number,
+  /** 目安の字数。試験で標準入力の道を短いパスで通すために差し替えられる */
+  budget: number = COMMAND_LINE_PATH_BUDGET
+): Promise<GitCommandResult> {
+  const total = entries.reduce((sum, entry) => sum + commandLineCost(entry), 0);
+  if (total <= budget) {
+    return run(["commit", "-m", message, "--", ...entries], cwd, timeoutMs);
+  }
+  return run(
+    ["commit", "-m", message, "--pathspec-from-file=-", "--pathspec-file-nul"],
+    cwd,
+    timeoutMs,
+    // **区切りのNULは生で書かない**（CLAUDE.md。`sourceHygiene.test.ts` が見る）
+    { input: entries.join(String.fromCharCode(0)) }
+  );
+}
 
 /**
  * 分かれているとき、同じ箇所で衝突しているファイル（設計書5.5.18）。

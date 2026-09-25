@@ -7,6 +7,7 @@ import { episodePathFor } from "../core/bookStore";
 import { nextChapterNumber, parseEpisodeFileName } from "../core/episodeParser";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { scanWork } from "../core/scanner";
+import { NOTATION_CLASH_ADVICE, describeNotationClashLines } from "../core/docxToMarkdown";
 import { readTextFile } from "../core/textFile";
 import {
   bodyFingerprint,
@@ -305,6 +306,10 @@ async function addToWork(
     `題：${doc.heading ?? "（見出しがありません）"}`,
     `字数：${doc.charCount}字${kept.length > 0 ? `（${kept.join("・")}を保存）` : ""}`,
     ...(doc.skipped.length > 0 ? [`入らないもの：${doc.skipped.join("、")}`] : []),
+    // 入らないものとは別に言う（字は入る。気をつけるのは投稿サイト向けの変換。残課題 F3）
+    ...(doc.notationClashLines.length > 0
+      ? [`${NOTATION_CLASH_ADVICE}：${describeNotationClashLines(doc.notationClashLines)}`]
+      : []),
     "",
     ...(naming.named.length > 0
       ? [
