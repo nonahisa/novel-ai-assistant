@@ -103,6 +103,59 @@ describe("指定が無いときの系統をコードで決める", () => {
     expect(plan.choices.length).toBeGreaterThan(5);
   });
 
+  describe("現代・近代の話は和風と見立てる（作者の裁定、2026-09-25 午前）", () => {
+    /*
+      作者の実例（現代ダンジョン）で、系統をAIに見立てさせると e4b も 26b も
+      ドイツと見立てた。0.87.0 ではプロットモード（P-45）の指示文にだけ
+      「現代ものは和風と見立てて」と書いていたが、名前点検（P-29）には無かった。
+      **コードが決めて、両方が同じ決め方を使う**
+    */
+    test("人物名の手がかりが無く、世界観が現代なら和風に決め、根拠を返す", () => {
+      const plan = planNameOrigin({
+        existingNames: [],
+        setting: "- 現代。各地にダンジョンが出現した",
+      });
+      expect(plan.choices).toEqual(["和風"]);
+      expect(plan.script).toBe("kanji");
+      expect(plan.chosen).toBe(false);
+      expect(plan.basis).toContain("「現代」");
+      expect(plan.basis).toContain("日本の話");
+    });
+
+    test.each([
+      ["近代の港町。蒸気船が行き交う", "近代"],
+      ["東京の下町の商店街", "東京"],
+      ["昭和の終わりの地方都市", "昭和"],
+      ["大日本帝国の末期", "日本"],
+      ["現代ファンタジー。高校に魔法部がある", "現代"],
+    ])("「%s」は和風（手がかりの語：%s）", (setting, word) => {
+      const plan = planNameOrigin({ existingNames: [], setting });
+      expect(plan.choices).toEqual(["和風"]);
+      expect(plan.basis).toContain(`「${word}」`);
+    });
+
+    test.each([
+      "異世界に転移した現代日本の高校生",
+      "現代のロンドン。アメリカから来た探偵",
+      "現代によく似た架空の国",
+      "近代化を進める王国",
+    ])("外国や架空の世界の語があれば見立てない：「%s」", (setting) => {
+      const plan = planNameOrigin({ existingNames: [], setting });
+      expect(plan.choices).not.toEqual(["和風"]);
+    });
+
+    test("人物名がカタカナ中心なら、現代でも人物名を採る（書いてある名前のほうが実際）", () => {
+      const plan = planNameOrigin({ existingNames: GUILD, setting: "現代の東京" });
+      expect(plan.script).toBe("katakana");
+      expect(plan.choices).not.toContain("和風");
+    });
+
+    test("作者が系統を選べば、現代でもそれを使う", () => {
+      const plan = planNameOrigin({ chosen: "北欧", existingNames: [], setting: "現代" });
+      expect(plan.choices).toEqual(["北欧"]);
+    });
+  });
+
   test("作者が選んだ系統は、そのまま使う", () => {
     const plan = planNameOrigin({ chosen: "ドイツ", existingNames: IJIME, setting: "" });
     expect(plan).toMatchObject({ choices: ["ドイツ"], script: "katakana", chosen: true });

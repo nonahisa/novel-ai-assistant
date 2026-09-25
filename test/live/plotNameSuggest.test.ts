@@ -5,6 +5,8 @@ import * as nodePath from "node:path";
 import { expect, test, vi } from "vitest";
 import { FileSystemError, window, workspace } from "../unit/support/vscodeStub";
 import { OllamaProvider } from "../../src/ai/ollamaProvider";
+import { CharacterStore } from "../../src/core/characterStore";
+import { emptyCharacter } from "../../src/models/character";
 import type { WorkEntry } from "../../src/models/types";
 import { LIVE_MODEL, SKIP_REASON, liveWorkPath } from "./support/liveEnv";
 
@@ -79,7 +81,10 @@ test.skipIf(!source)(
   `プロットの役名だけの人物に、名前の候補を出して入れる（${LIVE_MODEL}）${source ? "" : `——${SKIP_REASON}`}`,
   { timeout: 900_000 },
   async () => {
-    const root = await fs.mkdtemp(nodePath.join(os.tmpdir(), "plot-names-"));
+    // 写しの置き場。PROBE_TMP があればその下（スクラッチパッドなど）
+    const base = process.env.PROBE_TMP || os.tmpdir();
+    await fs.mkdir(base, { recursive: true });
+    const root = await fs.mkdtemp(nodePath.join(base, "plot-names-"));
     try {
       const work: WorkEntry = {
         id: "w_probe",
@@ -168,6 +173,23 @@ test.skipIf(!source)(
         return list.find((item) => item.origin === wanted);
       }) as never;
 
+      /*
+        PROBE_LEDGER_ROLES（「主人公,班長」）：写しの資料に、その役名を名前に持つ
+        人物を置く（作者の裁定、2026-09-25 午前）。候補を選んで入れると、
+        新規の人物ではなく、その人物の名前を直す更新案が承認待ちに入るはず
+      */
+      const ledgerRoles = (process.env.PROBE_LEDGER_ROLES ?? "")
+        .split(",")
+        .map((role) => role.trim())
+        .filter(Boolean);
+      for (const [index, role] of ledgerRoles.entries()) {
+        await new CharacterStore(work).saveOrUpdate({
+          ...emptyCharacter(`char_${String(index + 1).padStart(3, "0")}`, role),
+          summary: `資料に役名のまま置かれた人物（${role}）`,
+        });
+      }
+      if (ledgerRoles.length > 0) log(`（資料に置いた役名の人物）${ledgerRoles.join("・")}`);
+
       const provider = new OllamaProvider();
       state.provider = provider;
       const plotFile = nodePath.join(root, "設定", "plot.md");
@@ -208,6 +230,22 @@ test.skipIf(!source)(
       const pending = await fs.readdir(pendingDir);
       log(`承認待ち：${pending.join("、")}`);
       for (const pick of picks) {
+        const target = result!.session.targets.find((entry) => entry.id === pick.id);
+        if (target?.ledger) {
+          // 資料の役名の人物：名前を直す更新案（ファイル名は人物のID）
+          const body = JSON.parse(
+            await fs.readFile(nodePath.join(pendingDir, `${target.ledger.id}.json`), "utf8")
+          );
+          log(
+            `  ${target.ledger.id}.json：${target.ledger.name}→${body.character.name}／読み ${body.character.reading}／役割 ${body.character.role}／出どころ ${body.source}／理由 ${body.reason}`
+          );
+          expect(body.kind).toBeUndefined();
+          expect(body.character.name).toBe(pick.name);
+          expect(body.character.role).toContain(target.ledger.name);
+          expect(body.character.reading).toBeTruthy();
+          expect(pending).not.toContain(`new_${pick.name.replace(/\s/g, "")}.json`);
+          continue;
+        }
         // ファイル名は空白を抜いた名前（`pendingFileName`）
         const staged = pending.find((name) => name === `new_${pick.name.replace(/\s/g, "")}.json`);
         expect(staged, `${pick.name} が承認待ちに無い`).toBeDefined();

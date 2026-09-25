@@ -86,10 +86,16 @@ export class PendingUpdateStore {
    * @param options.kind 新規案なら `"creation"`。**ファイル名を名前で作る**
    *   ——新規案のIDは仮なので、IDで名付けると別の名前の案どうしが
    *   同じファイルを取り合って、先に積んだ案が黙って消える
+   * @param options.reason なぜそう提案するか（承認の画面にそのまま出る）。
+   *   プロットモードで選んだ名前に資料の人物を直す案が使う（設計書6.4.8）
    */
   async stage(
     characters: Character[],
-    options: { source?: PendingUpdateSource; kind?: PendingUpdateKind } = {}
+    options: {
+      source?: PendingUpdateSource;
+      kind?: PendingUpdateKind;
+      reason?: string;
+    } = {}
   ): Promise<void> {
     if (characters.length === 0) return;
     await vscode.workspace.fs.createDirectory(
@@ -105,6 +111,7 @@ export class PendingUpdateStore {
       const payload = buildPendingPayload(character, {
         kind: options.kind,
         source,
+        reason: options.reason,
       });
       const body = `${JSON.stringify(payload, null, 2)}\n`;
       // 保留ファイルは作者の原稿ではないので、上書きしてよい。

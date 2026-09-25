@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  MODERN_JAPAN_HINT,
   PLOT_NAME_SUGGEST_COUNT,
   PLOT_NAME_SUGGEST_HINTS,
   buildPlotNameSuggestPrompt,
@@ -45,17 +44,23 @@ describe("プロンプト", () => {
     }
   });
 
-  it("系統を決める手がかりが無いときだけ、現代ものは和風と見立てるよう添える", () => {
-    // 実例（現代ダンジョン）で e4b も 26b もドイツと見立てた（2026-09-25）
-    expect(prompt).toContain(MODERN_JAPAN_HINT);
-    const chosen = buildPlotNameSuggestPrompt({
-      workTitle: "題",
-      setting: "",
+  it("現代ものの和風の見立ては、コードが決めた系統と根拠として渡す（指示文で頼まない）", () => {
+    // 実例（現代ダンジョン）で e4b も 26b もドイツと見立てた（2026-09-25）。
+    // 1.1 から見立てはコード（`planNameOrigin`）が行い、名前点検と同じ決め方にする
+    const setting = "現代。各地にダンジョンが出現した";
+    const modern = buildPlotNameSuggestPrompt({
+      workTitle: "現代ダンジョンのインフラ担当",
+      setting,
       existingNames: [],
       people: PEOPLE,
-      plan: planNameOrigin({ chosen: "北欧", existingNames: [], setting: "" }),
+      plan: planNameOrigin({ existingNames: [], setting }),
     });
-    expect(chosen).not.toContain(MODERN_JAPAN_HINT);
+    expect(modern).toContain("【系統】\n和風（この作品に合わせて決めました。根拠：世界観に「現代」とあり");
+    expect(modern).toContain("origin と、各候補の origin には「和風」と書いてください。");
+    // 手がかりの無い作品にも、和風へ寄せる一文を添えない（決め方を2つにしない）
+    for (const text of [modern, prompt]) {
+      expect(text).not.toContain("和風と見立ててください");
+    }
   });
 
   it("材料が無い欄は「（未設定）」と書く", () => {

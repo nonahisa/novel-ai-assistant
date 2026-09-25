@@ -23,12 +23,20 @@ import {
  *
  * - **響きの重なりはコードで落とす**（`screenNameCandidates`）。頼むだけでは守られない
  * - **系統はコードが先に決めて渡す**（`planNameOrigin`）。答えの頭で1つ名乗らせ、
- *   **全員を同じ系統で揃える**（人物ごとに系統が変わると、作品の世界が割れる）
+ *   **全員を同じ系統で揃える**（人物ごとに系統が変わると、作品の世界が割れる）。
+ *   現代・近代の話を和風と見立てるのも、そこでコードが行う（1.1）
  * - 表記の指示・指示語のなぞりの弾き方・候補の読み方は P-29 の部品をそのまま使う
  *
  * プロンプトを変更したら version を上げること。
+ *
+ * 変更履歴
+ * - 1.1: 「現代・近代の話は和風と見立てて」の一文を指示文から外した。
+ *   見立てはコードが先に行い（`planNameOrigin`。名前点検の P-29 と同じ決め方）、
+ *   決まった系統と根拠を【系統】の欄で渡す（作者の裁定、2026-09-25 午前）。
+ *   指示文にも残すと、コードが決めなかった作品（外国の語がある現代もの）で
+ *   AIにだけ和風へ寄せる手がかりを渡すことになり、決め方が2つになる
  */
-export const PLOT_NAME_SUGGEST_VERSION = "1.0";
+export const PLOT_NAME_SUGGEST_VERSION = "1.1";
 
 /** 送るときの温度。P-29 と同じく広く出させる。当たり外れは作者が選ぶ */
 export const PLOT_NAME_SUGGEST_TEMPERATURE = 0.8;
@@ -81,18 +89,6 @@ export interface PlotNameSuggestPromptInput {
   plan: NameOriginPlan;
 }
 
-/**
- * 系統を決める手がかりが無いときの、現代ものの見立て。
- *
- * 作者の実例（現代ダンジョンのインフラ担当。世界観は「現代。各地に
- * ダンジョンが出現した」、主人公は電気工事士の資格を目指す）で、
- * gemma4:e4b も gemma4:26b も**ドイツ**と見立て、全員にドイツの名前を出した
- * （2026-09-25）。日本語で書かれた現代ものは、国の名前が書かれていなければ
- * 日本の話である。
- */
-export const MODERN_JAPAN_HINT =
-  "世界観に外国や架空の世界と書かれていない現代・近代の話なら、日本の話として和風と見立ててください。";
-
 function value(text: string): string {
   return text.trim() || UNSET_MATERIAL;
 }
@@ -108,7 +104,6 @@ export function buildPlotNameSuggestPrompt(input: PlotNameSuggestPromptInput): s
     : `【系統】\n指定なし（${plan.basis}）。作品の世界観に合う系統を、` +
       `${plan.choices.join("・")}のいずれか1つと見立て、` +
       `全員をその1つだけで出してください。複数を混ぜないこと。\n` +
-      (plan.choices.includes("和風") ? `${MODERN_JAPAN_HINT}\n` : "") +
       `見立てた系統を先に origin に書き、各候補の origin にも同じものを書いてください。`;
 
   const people = input.people

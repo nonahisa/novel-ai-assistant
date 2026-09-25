@@ -614,6 +614,7 @@ function renderNames() {
         '<span class="role">' + escapeHtml(person.role) + "</span>" +
         (person.summary ? '<span class="summary">' + escapeHtml(person.summary) + "</span>" : "") +
         (person.unsure ? '<span class="unsure">' + escapeHtml(person.unsure) + "</span>" : "") +
+        (person.ledger ? '<span class="unsure">' + escapeHtml(person.ledger) + "</span>" : "") +
         rows.join("") +
         (person.candidates.length === 0
           ? '<span class="empty">使える候補が残りませんでした。もう一度出すと、違う候補が出ます。</span>'

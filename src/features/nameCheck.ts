@@ -318,8 +318,11 @@ async function collectOccurrences(
  * **衝突の判定はコードで行う**（`screenNameCandidates`）。プロンプトで
  * 「避けて」と書いても守られない前提で、当たった候補は理由つきで落とす。
  * **キャッシュしない**——同じ人物へ何度も頼むのは、違う候補が欲しい場面である。
+ *
+ * 外へ出しているのは、実接続の測定（`test/live/nameSuggest.test.ts`）が
+ * 製品と同じ道を通すため。画面からは上の受け口（`suggest`）だけが呼ぶ。
  */
-async function suggestNames(
+export async function suggestNames(
   panel: vscode.WebviewPanel,
   work: WorkEntry,
   registry: AIRegistry,
@@ -473,11 +476,16 @@ async function suggestNames(
     excludeId: character.id,
   });
   const dropped = [...fitted.dropped, ...screened.dropped];
+  const originNote = describeOriginPlan(plan, fitted.origin);
 
   void panel.webview.postMessage({
     type: "candidates",
     data: {
       characterId,
+      // **どの系統で揃えたかと、その根拠を画面に出す**（作者の裁定、2026-09-25
+      // 午前）。「指定なし」でコードが和風と決めた理由が見えないと、
+      // 作者は外国の名前が出ない理由が分からない
+      originNote,
       kept: screened.kept,
       dropped: dropped.map((entry) => ({
         name: entry.candidate.name,
@@ -503,10 +511,7 @@ async function suggestNames(
 
   const notes: string[] = [];
   if (fitted.dropped.length > 0) {
-    notes.push(
-      `${fitted.dropped.length}件は系統・表記が揃わないため` +
-        `（この作品は${fitted.origin ?? plan.choices.join("・")}で揃えます）`
-    );
+    notes.push(`${fitted.dropped.length}件は系統・表記が揃わないため`);
   }
   if (screened.dropped.length > 0) {
     notes.push(`${screened.dropped.length}件は既にある名前と響きが重なるため`);
@@ -518,11 +523,27 @@ async function suggestNames(
       (notes.length > 0
         ? `候補 ${parsed.length}件のうち、${notes.join("、")}落としました（理由は画面に出ています）。`
         : "") +
+        // 系統で落としたときは、なぜその系統なのかも添える
+        (fitted.dropped.length > 0 ? `${originNote}。` : "") +
         (fitted.converted.length > 0
           ? `英字で返った${fitted.converted.length}件は、読みからカタカナに直しました。`
           : "")
     );
   }
+}
+
+/**
+ * どの系統で揃えたかと、その根拠の一言（画面と通知に出す）。
+ *
+ * 「系統：和風（世界観に「現代」とあり、…日本の話と見立てました）」。
+ * 作者が選んだ系統なら根拠は「作者が選んだ系統」になる。
+ */
+export function describeOriginPlan(
+  plan: NameOriginPlan,
+  origin: NameOrigin | undefined
+): string {
+  const label = origin ?? plan.choices.join("・");
+  return `系統：${label}（${plan.basis}）`;
 }
 
 /**

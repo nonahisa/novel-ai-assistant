@@ -121,6 +121,7 @@ button.primary {
 .candidate { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
 .candidate .meta { font-size: 12px; color: var(--vscode-descriptionForeground); flex: 1; }
 .dropped { font-size: 12px; color: var(--vscode-descriptionForeground); padding: 2px 0; }
+.origin-note { font-size: 12px; color: var(--vscode-descriptionForeground); padding: 0 0 4px; }
 .ai-note { font-size: 11px; color: var(--vscode-descriptionForeground); }
 </style>
 </head>
@@ -274,7 +275,12 @@ function candidatesHtml(person) {
     ? '<div class="empty">残った候補がありませんでした。もう一度出すか、系統を変えてください。</div>'
     : '';
 
-  return box + kept + empty + dropped + '</div>';
+  // どの系統で揃えたかと、その根拠（「指定なし」でコードが決めた理由を見せる）
+  const origin = found.originNote
+    ? '<div class="origin-note">' + escapeHtml(found.originNote) + '</div>'
+    : '';
+
+  return box + origin + kept + empty + dropped + '</div>';
 }
 
 function renderPeople() {

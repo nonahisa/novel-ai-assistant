@@ -24,6 +24,7 @@ import {
 } from "../core/plotCharacterSync";
 import { classifyRoleName } from "../core/plotRoleNames";
 import {
+  buildRoleRenameProposal,
   findRoleOnlyCharacters,
   insertNamesIntoPlot,
   settingFromPlotText,
@@ -78,7 +79,10 @@ import {
  *    改行の保持・退避→新規作成
  * 2. **設定資料**：新規の人物として**承認待ちへ置くだけ**（名前・読み・役割・説明）。
  *    台帳へは作者が承認したときに入る（プロットからの反映 6.4.9 と同じ道）。
- *    同じ名前の人物が資料か承認待ちに既にいれば置かない
+ *    同じ名前の人物が資料か承認待ちに既にいれば置かない。
+ *    **資料に名前が役名だけの同じ人物（「主人公」）がいれば、新規ではなく
+ *    その人物の名前を直す更新案**にする（作者の裁定、2026-09-25 午前。
+ *    名前を 主人公 → 相馬 誠、元の役名は役割の欄へ、読みを入れる）
  *
  * **キャッシュしない**（P-29 と同じ。同じ人物へ何度も頼むのは、違う候補が
  * 欲しい場面である）。
@@ -104,6 +108,11 @@ export interface PlotNamesView {
     summary: string;
     /** 役名か迷った人物に添える一言。言い切れる人物は空 */
     unsure: string;
+    /**
+     * 設定資料に役名だけの同じ人物がいるときの一言（選んだ名前に直す案を
+     * 承認待ちへ置くと伝える）。いなければ空
+     */
+    ledger: string;
     candidates: Array<{ name: string; reading: string; note: string }>;
     dropped: PlotNameDrop[];
   }>;
@@ -336,6 +345,9 @@ export async function suggestPlotNames(
       role: target.role,
       summary: target.summary,
       unsure: target.kind === "unsure" ? `役名か迷いました（${target.reason}）` : "",
+      ledger: target.ledger
+        ? `設定資料の「${target.ledger.name}」を、選んだ名前に直す案を承認待ちに置きます（元の役名は役割の欄へ）`
+        : "",
       candidates: list.map((candidate) => ({
         name: candidate.name,
         reading: candidate.reading,
@@ -348,7 +360,10 @@ export async function suggestPlotNames(
     `系統：${screened.origin ?? plan.choices.join("・")}（${
       plan.chosen ? "作者が選んだ系統" : plan.basis
     }）。人物ごとに1つ選んで［入れる］を押すと、プロットの行に「役名（名前）」の形で書き足し、` +
-    "設定資料には新規の人物として承認待ちに置きます。選ばない人物はそのままです。";
+    (chosenTargets.some((target) => target.ledger)
+      ? "設定資料には新規の人物として（資料に役名だけの人物がいれば、その名前を直す案として）承認待ちに置きます。"
+      : "設定資料には新規の人物として承認待ちに置きます。") +
+    "選ばない人物はそのままです。";
 
   logEnd({ failed: false, cancelled: false, people: chosenTargets.length, kept, dropped });
   return {
@@ -424,7 +439,7 @@ export async function applyPlotNames(
   }
 
   const applied = picks.filter((pick) => inserted.applied.includes(pick));
-  const staged = await stagePendingCreations(work, applied);
+  const staged = await stagePendingCharacters(work, applied);
   // 反映済みの印を追いつかせる（同じ人を読みの無い案で積み直さない）
   try {
     await markPlotCharactersSynced(work, session.file.text, inserted.text);
@@ -439,8 +454,13 @@ export async function applyPlotNames(
   logStep(
     `プロットの名前を書き足しました: ${work.title} / ${applied
       .map((pick) => `${pick.role}→${pick.name}`)
-      .join("・")} / 承認待ちへ ${staged.staged.length}件` +
-      (staged.skipped.length > 0 ? ` / 置かなかった ${staged.skipped.join("・")}` : "")
+      .join("・")} / 承認待ちへ 新規 ${staged.staged.length}件・名前を直す案 ${
+        staged.renamed.length
+      }件` +
+      (staged.skipped.length > 0 ? ` / 置かなかった ${staged.skipped.join("・")}` : "") +
+      (staged.changed.length > 0
+        ? ` / 資料の人物が変わっていて置かなかった ${staged.changed.join("・")}`
+        : "")
   );
 
   const notes = [
@@ -453,9 +473,21 @@ export async function applyPlotNames(
       `設定資料には新規の人物${staged.staged.length}人を承認待ちに置きました（「設定資料更新分反映」で確認できます）。`
     );
   }
+  if (staged.renamed.length > 0) {
+    notes.push(
+      `設定資料にいた${staged.renamed
+        .map((entry) => `${entry.from}→${entry.to}`)
+        .join("、")}は、名前を直す案を承認待ちに置きました（承認するまで資料は変わりません。「設定資料更新分反映」で確認できます）。`
+    );
+  }
   if (staged.skipped.length > 0) {
     notes.push(
       `${staged.skipped.join("、")}は、同じ名前の人物が資料か承認待ちにいるため置いていません。`
+    );
+  }
+  if (staged.changed.length > 0) {
+    notes.push(
+      `${staged.changed.join("、")}は、資料の人物が候補を出したときと変わっているため、名前を直す案を置いていません。`
     );
   }
   if (staged.error) {
@@ -477,19 +509,33 @@ export async function applyPlotNames(
   return true;
 }
 
+/** 承認待ちへ置いた結果 */
+interface StagedPlotNames {
+  /** 新規の人物として置いた名前 */
+  staged: string[];
+  /** 資料の役名の人物を直す案として置いたもの（元の名前 → 選んだ名前） */
+  renamed: Array<{ from: string; to: string }>;
+  /** 同じ名前の人物が資料か承認待ちにいるため、置かなかった名前 */
+  skipped: string[];
+  /** 資料の人物が候補を出したときと変わっていたため、置かなかった役名 */
+  changed: string[];
+  error?: string;
+}
+
 /**
- * 承認待ちへ新規の人物として置く。
+ * 承認待ちへ置く。
  *
+ * - 資料に役名だけの同じ人物がいれば（`target.ledger`）、**その人物の名前を
+ *   直す更新案**（作者の裁定、2026-09-25 午前）。いなければ**新規の人物**
  * - **同じ名前の人物が資料か承認待ちにいれば置かない**（二重に作らない）
  * - プロットから役名だけで積まれていた古い新規案（「主人公」）は片付ける——
  *   名前を入れたあとも残すと、承認したときに「主人公」と「相馬 誠」の2人ができる
  */
-async function stagePendingCreations(
+async function stagePendingCharacters(
   work: WorkEntry,
   picks: ReadonlyArray<{ target: PlotRoleTarget; candidate: NameCandidate }>
-): Promise<{ staged: string[]; skipped: string[]; error?: string }> {
-  const staged: string[] = [];
-  const skipped: string[] = [];
+): Promise<StagedPlotNames> {
+  const result: StagedPlotNames = { staged: [], renamed: [], skipped: [], changed: [] };
   try {
     const store = new PendingUpdateStore(work);
     const [ledger, pending] = await Promise.all([
@@ -503,8 +549,10 @@ async function stagePendingCreations(
     for (const { target, candidate } of picks) {
       const key = normalizeName(candidate.name);
       const exists =
-        findCharactersByAppellation(ledger.characters, candidate.name).length > 0 ||
-        creations.some((entry) => normalizeName(entry.character.name) === key);
+        findCharactersByAppellation(ledger.characters, candidate.name).some(
+          // 直す本人は「同じ名前の別人」ではない（別名に選んだ名前を持っていることがある）
+          (character) => character.id !== target.ledger?.id
+        ) || creations.some((entry) => normalizeName(entry.character.name) === key);
       const roleKey = normalizeName(target.role);
       // 片付けるのは**プロットから積んだ案だけ**。抽出や相談から来た案は
       // 本文の根拠を持っていることがあり、作者が見ずに消してよいものではない
@@ -515,14 +563,22 @@ async function stagePendingCreations(
         )
       );
       if (exists) {
-        skipped.push(candidate.name);
+        result.skipped.push(candidate.name);
         continue;
       }
+
+      if (target.ledger) {
+        const staged = await stageRename(store, ledger.characters, pending.updates, target, candidate);
+        if (staged) result.renamed.push(staged);
+        else result.changed.push(target.role);
+        continue;
+      }
+
       const [record] = buildNewCharacterRecords([
         { name: candidate.name, summary: target.summary, role: target.role },
       ]);
       records.push({ ...record, reading: candidate.reading || null });
-      staged.push(candidate.name);
+      result.staged.push(candidate.name);
     }
 
     if (records.length > 0) {
@@ -531,14 +587,54 @@ async function stagePendingCreations(
     for (const filePath of new Set(stale.map((entry) => entry.filePath))) {
       await store.discard(filePath);
     }
-    return { staged, skipped };
+    return result;
   } catch (error) {
     logFailure("プロットの名前を承認待ちへ置けませんでした", {
       作品: work.title,
       詳細: messageOf(error),
     });
-    return { staged: [], skipped, error: messageOf(error) };
+    return { ...result, staged: [], renamed: [], error: messageOf(error) };
   }
+}
+
+/**
+ * 資料の役名の人物（「主人公」）を、選んだ名前に直す更新案を置く。
+ * **置けなければ undefined**（資料の人物が消えた・名前が変わった）。
+ *
+ * - 台帳は書き換えない。作者が承認したときに入る（実装ルール2。
+ *   `autoGenerated: false` の人物も、`authorLocked` の呼称を持つ人物も、案に出すだけ）
+ * - **同じ人物の更新案が既に承認待ちにあれば、その案の上に重ねる。**
+ *   更新案のファイルは人物のIDで付くので、重ねずに置くと先の案（抽出など）を
+ *   上書きで消してしまう。出どころも先の案のものを引き継ぐ
+ */
+async function stageRename(
+  store: PendingUpdateStore,
+  characters: readonly Character[],
+  pending: readonly PendingUpdate[],
+  target: PlotRoleTarget,
+  candidate: NameCandidate
+): Promise<{ from: string; to: string } | undefined> {
+  const current = characters.find((character) => character.id === target.ledger?.id);
+  // 候補を待つあいだに作者が名前を付けていたら、上から別の名前を重ねない
+  if (!current || current.name !== target.ledger?.name) return undefined;
+
+  const previous = pending.find(
+    (entry) => entry.kind !== "creation" && entry.character.id === current.id
+  );
+  const base = previous ? previous.character : current;
+  const proposal = buildRoleRenameProposal(base, {
+    name: candidate.name,
+    reading: candidate.reading,
+  });
+  const reason =
+    `プロットモードで選んだ名前に直します（${current.name} → ${candidate.name}）。` +
+    "元の役名は役割の欄へ移します。";
+  await store.stage([proposal], {
+    // 出どころ無しを渡すと、`stage` が先の案のファイルから引き継ぐ
+    source: previous ? previous.source : "plot",
+    reason: previous?.reason ? `${previous.reason}／${reason}` : reason,
+  });
+  return { from: current.name, to: candidate.name };
 }
 
 /** 対象を選ばせる。**全員を選んだ状態で出し、作者が外す**（迷うものも含める） */
@@ -547,7 +643,12 @@ async function pickTargets(
 ): Promise<PlotRoleTarget[] | undefined> {
   const items = targets.map((target) => ({
     label: target.role,
-    description: target.kind === "unsure" ? "役名か迷いました" : "",
+    description: [
+      target.kind === "unsure" ? "役名か迷いました" : "",
+      target.ledger ? "設定資料にいる人物の名前を直す案になります" : "",
+    ]
+      .filter(Boolean)
+      .join("・"),
     detail: target.summary || "（説明なし）",
     picked: true,
     target,
