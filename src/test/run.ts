@@ -38,6 +38,7 @@ import { emptyAbility } from "../models/ability";
 import type { WorkEntry } from "../models/types";
 import { CHARACTER_EXTRACT_VERSION } from "../prompts/characterExtract";
 import { assertFetchPatch, describeFetchPatch, probeFetchPatch } from "./fetchPatch";
+import { runFieldListChecks } from "./fieldListChecks";
 import { runRequest, runResult } from "../mcp/tools/runRequest";
 import { handleRunRequest } from "../features/runRequestHandler";
 import { createRunRequestDeps } from "../features/runRequestRunners";
@@ -875,6 +876,10 @@ export async function run(): Promise<void> {
       assertFetchPatch(report);
     }
   );
+
+  // 実機確認リストの項目のうち、機械で確かめられる部分（2026-09-26）。
+  // 作品を本物のコマンドで登録する項目があるので、ほかの項目のあとに回す
+  await runFieldListChecks((name, test) => runCase(name, failures, test));
 
   if (failures.length > 0) {
     throw new Error(`Integration tests failed:\n${failures.join("\n")}`);
