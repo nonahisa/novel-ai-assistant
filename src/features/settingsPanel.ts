@@ -176,6 +176,8 @@ import { renderMarkdownLite } from "../core/markdownLite";
 import { withCancellableProgress } from "../views/progress";
 import { cancelItem } from "../views/dialogs";
 import { logFailure, logStep, useLogFile } from "../core/logger";
+import { knownChaptersOf, unknownCitedChapters } from "../core/chapterCitations";
+import { scanWork } from "../core/scanner";
 import { appendChatLog, summarizeMaterials } from "../core/chatLog";
 import * as path from "../core/paths";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
@@ -1733,9 +1735,18 @@ export class SettingsPanel {
 
     const current = record as unknown as Record<string, unknown>;
     const proposals: FieldProposal[] = [];
+    // **無い話を根拠にした値は出さない**（2026-09-25 精査 F5）。作者の実機で、
+    // 2話しかない作品に「第17話を根拠に文佳の祖母」と返ってきた
+    const knownChapters = await this.knownChapters();
+    const unknownCitations: Array<{ label: string; chapters: number[] }> = [];
     for (const field of enrichableFields(kind, this.customFields)) {
       const proposed = clampField(field, parsed[field.key]);
       if (!proposed) continue;
+      const unknown = unknownCitedChapters(proposed, knownChapters);
+      if (unknown.length > 0) {
+        unknownCitations.push({ label: field.label, chapters: unknown });
+        continue;
+      }
       // 追加項目の値は customFields の中にある
       const before = field.custom
         ? (record as Character).customFields[field.key] ?? ""
@@ -1760,12 +1771,29 @@ export class SettingsPanel {
       excerpts
     );
 
+    // 落とした提案は黙って消さない。画面には項目と話数だけ、値はログへ
+    // （値をそのまま画面に出すと、無い話の記述を読ませることになる）
+    let citationNotice = "";
+    if (unknownCitations.length > 0) {
+      useLogFile(this.work.folderPath);
+      logFailure("再読込の提案のうち、作品に無い話を挙げていたもの", {
+        項目: unknownCitations.map(
+          (entry) => `${entry.label}：第${entry.chapters.join("・")}話`
+        ),
+        応答: text,
+      });
+      citationNotice = `（作品に無い話を挙げていた提案（${unknownCitations
+        .map((entry) => `${entry.label}：第${entry.chapters.join("・")}話`)
+        .join("、")}）は除きました）`;
+    }
+    const notice = `${misattributed.droppedNotice}${citationNotice}`;
+
     if (proposals.length === 0 && misattributed.items.length === 0) {
       this.post({
         type: "error",
         message:
           "本文から新しく書ける内容は見つかりませんでした。抜粋の範囲に手掛かりが無いようです。" +
-          misattributed.droppedNotice,
+          notice,
       });
       return;
     }
@@ -1786,8 +1814,27 @@ export class SettingsPanel {
       // 行き先を選べるのは人物だけ。belongsTo は人物の呼び名を前提にしており、
       // 場所や能力の項目（region・cost など）は人物レコードに置き場所が無い
       placeable: kind === "character",
-      notice: misattributed.droppedNotice,
+      notice,
     });
+  }
+
+  /**
+   * 作品の話数（F5 の照合に使う）。読めなければ空——空なら照合しない
+   * （`unknownCitedChapters`）。**提案そのものは止めない。**
+   *
+   * 話数の求め方は増やさず、一覧・統計と同じ `scanWork` の読みを使う。
+   */
+  private async knownChapters(): Promise<Set<number>> {
+    try {
+      const scan = await scanWork(this.work);
+      return knownChaptersOf(scan.episodes);
+    } catch (error) {
+      useLogFile(this.work.folderPath);
+      logFailure("再読込の話数の照合に使う話の一覧を読めなかった（照合せずに続行）", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return new Set();
+    }
   }
 
   /**
