@@ -96,7 +96,12 @@ class FakeMachine {
     this.alive.add(pid);
     const state = { running: false, idle: 0 };
     const turn = new CrossProcessTurn(
-      { send: this.env("lease"), run: this.env("run"), interrupt: this.env("interrupt") },
+      {
+        send: this.env("lease"),
+        run: this.env("run"),
+        interrupt: this.env("interrupt"),
+        lastSend: this.ops("last-send"),
+      },
       {
         pid,
         host,
@@ -224,7 +229,10 @@ describe("別の窓の一括処理の合間に、単発が入る", () => {
     const b = machine.process(202, "mcp");
     a.state.running = true;
     held(await a.turn.enter("設定資料の抽出", { kind: "run" })).release();
+    // 送信の札は、送り終えた時刻を残してから消える（6.76.2）。消え終わるのを待つ
+    await a.turn.whenSettled();
     expect(machine.holder("run")?.pid).toBe(101);
+    expect(machine.files.has("lease")).toBe(false);
 
     const entry = held(await b.turn.enter("ollama.generate", { kind: "single" }));
     expect(entry.waitedMs).toBe(0);
@@ -473,5 +481,118 @@ describe("管理外の負荷を見る合図（fresh）", () => {
     a.state.running = false;
     a.turn.runEnded();
     expect(a.state.idle).toBe(1);
+  });
+});
+
+describe("最後に管理下の送信が終わった時刻（6.76.2、直前の生成の名残で騒がない）", () => {
+  test("送信の札を離すとき時刻を残し、別のプロセスから読める。送るたびに打ち直す", async () => {
+    const machine = new FakeMachine();
+    const a = machine.process(101, "mcp");
+    const b = machine.process(202);
+    expect(await b.turn.lastSendEndedMs()).toBeUndefined();
+
+    const first = held(await a.turn.enter("ollama.generate", { kind: "single" }));
+    machine.advance(4_000);
+    const firstEnded = machine.now;
+    first.release();
+    await turns();
+    expect(await b.turn.lastSendEndedMs()).toBe(firstEnded);
+
+    machine.advance(60_000);
+    const second = held(await a.turn.enter("ollama.generate", { kind: "single" }));
+    machine.advance(2_000);
+    const secondEnded = machine.now;
+    second.release();
+    await turns();
+    expect(await b.turn.lastSendEndedMs()).toBe(secondEnded);
+  });
+
+  test("一括処理のチャンクも、送り終えるたびに残す（まとまりの札は持ったまま）", async () => {
+    const machine = new FakeMachine();
+    const a = machine.process(101);
+    const b = machine.process(202, "mcp");
+    a.state.running = true;
+    const chunk = held(await a.turn.enter("誤字脱字の検知", { kind: "run" }));
+    machine.advance(9_000);
+    const ended = machine.now;
+    chunk.release();
+    await turns();
+    expect(a.turn.holdsRun()).toBe(true);
+    expect(await b.turn.lastSendEndedMs()).toBe(ended);
+  });
+
+  test("時刻を残してから送信の札を消す（次に取った者が読むときには、もう残っている）", async () => {
+    const machine = new FakeMachine();
+    const base = machine.ops("last-send");
+    const leaseWhenStamped: boolean[] = [];
+    const stampOps: LeaseFileOps = {
+      ...base,
+      tryCreate: async (text) => {
+        leaseWhenStamped.push(machine.files.has("lease"));
+        return await base.tryCreate(text);
+      },
+      touch: async () => {
+        leaseWhenStamped.push(machine.files.has("lease"));
+        await base.touch();
+      },
+    };
+    machine.alive.add(101);
+    const turn = new CrossProcessTurn(
+      {
+        send: machine.env("lease"),
+        run: machine.env("run"),
+        interrupt: machine.env("interrupt"),
+        lastSend: stampOps,
+      },
+      { pid: 101, host: "mcp", token: "token-101" }
+    );
+    for (let i = 0; i < 2; i += 1) {
+      const entry = held(await turn.enter("ollama.generate", { kind: "single" }));
+      machine.advance(1_000);
+      entry.release();
+      await turn.whenSettled();
+    }
+    // 1回目は作る、2回目は作れずに時刻を打つ（tryCreate → touch）。どれも札が残っているうち
+    expect(leaseWhenStamped).toEqual([true, true, true]);
+    expect(machine.files.has("lease")).toBe(false);
+  });
+
+  test("時刻が読めなければ undefined（呼ぶ側は今までどおり使用率も見る）。台帳が無くても送れる", async () => {
+    const machine = new FakeMachine();
+    machine.alive.add(101);
+    const broken: LeaseFileOps = {
+      ...machine.ops("last-send"),
+      read: async () => {
+        throw new Error("読めない");
+      },
+      touch: async () => {
+        throw new Error("書けない");
+      },
+    };
+    const turn = new CrossProcessTurn(
+      {
+        send: machine.env("lease"),
+        run: machine.env("run"),
+        interrupt: machine.env("interrupt"),
+        lastSend: broken,
+      },
+      { pid: 101, host: "mcp", token: "token-101" }
+    );
+    for (let i = 0; i < 2; i += 1) {
+      const entry = held(await turn.enter("ollama.generate", { kind: "single" }));
+      entry.release();
+      await turn.whenSettled();
+    }
+    // 残せなくても送信の札は消える（次の者を待たせない）
+    expect(machine.files.has("lease")).toBe(false);
+    expect(await turn.lastSendEndedMs()).toBeUndefined();
+
+    const without = new CrossProcessTurn(
+      { send: machine.env("lease"), run: machine.env("run"), interrupt: machine.env("interrupt") },
+      { pid: 101, host: "mcp", token: "token-102" }
+    );
+    held(await without.enter("ollama.generate", { kind: "single" })).release();
+    await without.whenSettled();
+    expect(await without.lastSendEndedMs()).toBeUndefined();
   });
 });

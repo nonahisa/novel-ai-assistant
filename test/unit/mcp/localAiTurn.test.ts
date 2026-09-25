@@ -57,6 +57,10 @@ function interruptFile(): string {
   return path.join(storage, "local-ai", "interrupt.json");
 }
 
+function lastSendFile(): string {
+  return path.join(storage, "local-ai", "last-send.json");
+}
+
 /** 別の窓が持っている札（持ち主はこの試験のプロセス＝生きている、合言葉だけ違う） */
 function otherWindowHolds(file: string, label: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -94,6 +98,24 @@ describe("道具の呼び出し1回を1つの実行として札を持つ", () =>
     // すぐサーバーを終わらせ、札が残って次の者が見切るまで待たされた
     expect(fs.existsSync(leaseFile())).toBe(false);
     expect(fs.existsSync(runFile())).toBe(false);
+  });
+
+  test("送り終えた時刻を保管庫に残してから返る（別の窓・MCP が直前の生成の名残を見分ける。6.76.2）", async () => {
+    const before = Date.now();
+    await withLocalAiSession(
+      "ollama.generate",
+      undefined,
+      async () => {
+        const leave = await enterLocalAi(ENDPOINT);
+        leave();
+      },
+      "single"
+    );
+    // **返った時点で残っている**（返事を受けた呼び出し元がすぐサーバーを終わらせても）
+    const stamp = fs.statSync(lastSendFile());
+    // ファイルの時刻の細かさの分だけ緩める
+    expect(stamp.mtimeMs).toBeGreaterThanOrEqual(before - 2_000);
+    expect(stamp.mtimeMs).toBeLessThanOrEqual(Date.now() + 2_000);
   });
 
   test("別の窓が持っていれば待ち、待ったことを結果に1行添える", async () => {

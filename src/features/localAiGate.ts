@@ -12,6 +12,7 @@ import {
 import { setLocalAiGate, type LocalAiGate, type LocalAiGateRequest } from "../core/localAiGate";
 import {
   LOCAL_AI_INTERRUPT_FILE,
+  LOCAL_AI_LAST_SEND_FILE,
   LOCAL_AI_LEASE_DIRECTORY,
   LOCAL_AI_LEASE_FILE,
   LOCAL_AI_RUN_LEASE_FILE,
@@ -187,6 +188,7 @@ class ExtensionLocalAiGate implements LocalAiGate {
               path.join(directory, LOCAL_AI_INTERRUPT_FILE),
               log
             ),
+            lastSend: node.nodeLeaseFileOps(path.join(directory, LOCAL_AI_LAST_SEND_FILE)),
           },
           {
             pid: node.currentPid(),
@@ -295,8 +297,12 @@ class ExtensionLocalAiGate implements LocalAiGate {
   ): Promise<ExternalLoadJudgement | undefined> {
     const node = this.node;
     if (!node) return undefined;
+    const lease = await this.leaseLoading;
     try {
       const result = await probeExternalLoad(providerId, {
+        // **直前に管理下の誰かが送り終えたばかりなら、使用率の名残で騒がない**
+        // （別の窓・MCP・この窓。台帳が読めなければ今までどおり）
+        ...(lease ? { lastManagedSendEndedMs: () => lease.lastSendEndedMs() } : {}),
         runNvidiaSmi: async () => {
           if (this.nvidiaSmiMissing) return undefined;
           const smi = await node.runNvidiaSmi();
@@ -326,7 +332,9 @@ class ExtensionLocalAiGate implements LocalAiGate {
    * 管理外の負荷を見て、高ければ作者に問う（設計書6.76.2）。
    *
    * **札を持ってから見る。** 札が取れた＝管理下の誰も送っていない、なので、
-   * そのとき GPU が忙しいなら原因は管理の外にある。
+   * そのとき GPU が忙しいなら原因は管理の外にある。ただし**管理下の誰かが
+   * 送り終えた直後は、使用率に生成の名残が出る**ので、その数秒は使用率の線を
+   * 見ない（台帳 `last-send.json` の時刻で見分ける。`MANAGED_SEND_SETTLE_MS`）。
    */
   private async checkExternalLoad(
     request: LocalAiGateRequest,

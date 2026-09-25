@@ -3,6 +3,7 @@ import {
   GPU_BUSY_UTILIZATION_PERCENT,
   LOAD_CHECK_INTERVAL_MS,
   LOAD_WARNING_SNOOZE_MS,
+  MANAGED_SEND_SETTLE_MS,
   LoadCheckSchedule,
   externalLoadMessage,
   judgeExternalLoad,
@@ -262,5 +263,96 @@ describe("いつ見るか・警告をいつまで出さないか", () => {
     // 実行が終わっても、数分のうちは出さない
     expect(schedule.due(LOAD_WARNING_SNOOZE_MS - 1, true)).toBe(false);
     expect(schedule.due(LOAD_WARNING_SNOOZE_MS, true)).toBe(true);
+  });
+});
+
+describe("直前の管理下の送信の名残（設計書6.76.2、作者の判断 2026-09-25「直す」）", () => {
+  /*
+    実機（0.87.3 の担当の報告）：MCP の一括処理 A の2話目の頭で、直前の生成の名残の
+    98%/98%/0% を読み、「管理外の負荷の疑い」を添えた。**札が空いた直後の使用率は、
+    管理下の誰かが送り終えたばかりの名残である**。直前の送信から間もないときは、
+    使用率の線を見ない
+  */
+  const AFTERGLOW = [[gpu(5288, 98)], [gpu(5288, 98)], [gpu(5288, 0)]];
+  const OURS = [{ name: "gemma4:e4b", sizeVramBytes: 3063 * 1024 * 1024 }];
+
+  test("直前の送信から間もない（0.8秒）ときは、使用率で警告しない", () => {
+    const judgement = judgeExternalLoad({
+      gpuSamples: AFTERGLOW,
+      ollamaModels: OURS,
+      providerId: "ollama",
+      sinceManagedSendMs: 800,
+    });
+    expect(judgement.external).toBe(false);
+    expect(judgement.reasons).toEqual([]);
+    // ログには、見なかったことと、その理由（経過）を残す
+    expect(judgement.summary).toContain("使用率の線は見ない");
+    expect(judgement.summary).toContain("0.8秒");
+  });
+
+  test("十分に経ってからは、今までどおり使用率で警告する", () => {
+    const judgement = judgeExternalLoad({
+      gpuSamples: AFTERGLOW,
+      ollamaModels: OURS,
+      providerId: "ollama",
+      sinceManagedSendMs: MANAGED_SEND_SETTLE_MS,
+    });
+    expect(judgement.external).toBe(true);
+    expect(judgement.reasons).toEqual(["GPU の使用率が 98% です"]);
+  });
+
+  test("最後の送信が分からない（台帳が読めない・古い窓）ときは今までどおり", () => {
+    const judgement = judgeExternalLoad({
+      gpuSamples: AFTERGLOW,
+      ollamaModels: OURS,
+      providerId: "ollama",
+    });
+    expect(judgement.external).toBe(true);
+  });
+
+  test("間もなくても、メモリの線は今までどおり見る（Ollama の申告分を差し引いている）", () => {
+    const judgement = judgeExternalLoad({
+      gpuSamples: [[gpu(7630, 98)], [gpu(7630, 98)], [gpu(7630, 0)]],
+      ollamaModels: [{ name: "gemma4:26b", sizeVramBytes: 881 * 1024 * 1024 }],
+      providerId: "ollama",
+      sinceManagedSendMs: 500,
+    });
+    expect(judgement.external).toBe(true);
+    expect(judgement.reasons).toHaveLength(1);
+    expect(judgement.reasons[0]).toContain("ほかのアプリが GPU のメモリ");
+  });
+
+  test("線そのもの：3秒（実測の最長 0.53秒に、nvidia-smi の標本の幅と測る0.6秒を足した余裕）", () => {
+    expect(MANAGED_SEND_SETTLE_MS).toBe(3000);
+  });
+
+  test("測るとき、台帳の最後の送信の時刻から経過を出す。読めなければ今までどおり", async () => {
+    const outputs = [
+      "G, 5288 MiB, 8188 MiB, 98 %",
+      "G, 5288 MiB, 8188 MiB, 98 %",
+      "G, 5288 MiB, 8188 MiB, 0 %",
+    ];
+    const probe = (lastEnded: () => Promise<number | undefined>) => {
+      let calls = 0;
+      return probeExternalLoad("ollama", {
+        runNvidiaSmi: async () => outputs[calls++],
+        readOllamaPs: async () => OURS,
+        sleep: async () => undefined,
+        now: () => 1_000_800,
+        lastManagedSendEndedMs: lastEnded,
+      });
+    };
+    expect((await probe(async () => 1_000_000)).external).toBe(false);
+    expect((await probe(async () => 1_000_800 - MANAGED_SEND_SETTLE_MS)).external).toBe(true);
+    expect((await probe(async () => undefined)).external).toBe(true);
+    expect(
+      (
+        await probe(async () => {
+          throw new Error("読めない");
+        })
+      ).external
+    ).toBe(true);
+    // 時計のずれで「未来に送り終えた」と読めたら、終えた直後として扱う
+    expect((await probe(async () => 1_002_000)).external).toBe(false);
   });
 });

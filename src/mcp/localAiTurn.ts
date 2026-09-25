@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { acquireCall, acquireRun, currentRunLabel } from "../core/aiSequence";
 import {
   LOCAL_AI_INTERRUPT_FILE,
+  LOCAL_AI_LAST_SEND_FILE,
   LOCAL_AI_LEASE_DIRECTORY,
   LOCAL_AI_LEASE_FILE,
   LOCAL_AI_RUN_LEASE_FILE,
@@ -20,6 +21,7 @@ import {
 import {
   currentPid,
   nodeLeaseEnvironment,
+  nodeLeaseFileOps,
   runNvidiaSmi,
 } from "../core/localAiLeaseNode";
 import type { FeatureName } from "../core/mcpFeatures";
@@ -155,6 +157,7 @@ function crossTurn(): CrossProcessTurn | null {
       send: nodeLeaseEnvironment(nodePath.join(directory, LOCAL_AI_LEASE_FILE), log),
       run: nodeLeaseEnvironment(nodePath.join(directory, LOCAL_AI_RUN_LEASE_FILE), log),
       interrupt: nodeLeaseEnvironment(nodePath.join(directory, LOCAL_AI_INTERRUPT_FILE), log),
+      lastSend: nodeLeaseFileOps(nodePath.join(directory, LOCAL_AI_LAST_SEND_FILE)),
     },
     { pid: currentPid(), host: "mcp", token: randomUUID() },
     {
@@ -306,7 +309,7 @@ async function enterCrossTurn(
 
   if (entry.fresh && !session.checkedLoad) {
     session.checkedLoad = true;
-    await noteExternalLoad(session, endpoint);
+    await noteExternalLoad(session, endpoint, turn);
   }
   return entry;
 }
@@ -316,10 +319,17 @@ async function enterCrossTurn(
  * 問えない）。手元の宛先のときだけ見る——別の機械の Ollama なら、この機械の
  * GPU は関係が無い。
  */
-async function noteExternalLoad(session: Session, endpoint: string): Promise<void> {
+async function noteExternalLoad(
+  session: Session,
+  endpoint: string,
+  turn: CrossProcessTurn
+): Promise<void> {
   if (!isLocalEndpoint(endpoint)) return;
   try {
     const judgement = await probeExternalLoad("ollama", {
+      // **直前に管理下の誰かが送り終えたばかりなら、使用率の名残で騒がない**
+      // （実機で、一括処理の2話目の頭に 98%/98%/0% を読んで疑いを添えた）
+      lastManagedSendEndedMs: () => turn.lastSendEndedMs(),
       runNvidiaSmi: async () => {
         if (nvidiaSmiMissing) return undefined;
         const smi = await runNvidiaSmi();

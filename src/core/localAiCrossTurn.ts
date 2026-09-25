@@ -50,10 +50,13 @@ import {
   judgeLease,
   parseLease,
   raceAbort,
+  readLastSendEndedMs,
   serializeLease,
+  stampLastSend,
   type EnterLeaseOptions,
   type LeaseEntry,
   type LeaseEnvironment,
+  type LeaseFileOps,
   type LeaseIdentity,
   type LeaseRecord,
 } from "./localAiLease";
@@ -66,6 +69,11 @@ export interface CrossTurnEnvironments {
   readonly run: LeaseEnvironment;
   /** 単発の「合間に入れてほしい」の印（`interrupt.json`） */
   readonly interrupt: LeaseEnvironment;
+  /**
+   * 最後に送り終えた時刻の台帳（`last-send.json`）。**省けば残さず、読めば
+   * いつも「分からない」**（管理外の負荷は今までどおり測る。試験や古い組み立て）
+   */
+  readonly lastSend?: LeaseFileOps;
 }
 
 export interface CrossTurnOptions {
@@ -294,12 +302,36 @@ export class CrossProcessTurn {
         if (!this.sendLease.isHeld()) onIdle?.();
       },
     });
+    const lastSend = envs.lastSend;
     this.sendLease = new ProcessLease(envs.send, identity, {
       onDropped: () => {
         if (!this.runLease.isHeld()) onIdle?.();
       },
+      /*
+        **送信の札を離すたびに、送り終えた時刻を残す**（6.76.2）。札を消す前に
+        残すので、次に札を取った者（別の窓・MCP・このプロセス）が負荷を測る
+        ときには、もう新しい時刻になっている。送信の札はチャンクの合間ごとに
+        離すので、一括処理のチャンクも1つずつ残る
+      */
+      ...(lastSend ? { beforeRemove: () => stampLastSend(lastSend) } : {}),
     });
     this.marker = new InterruptMarker(envs.interrupt, identity);
+  }
+
+  /**
+   * 管理下の誰か（この拡張機能・別の窓・MCP）が最後に手元のAIへ送り終えた時刻
+   * （ミリ秒）。**台帳が無い・まだ誰も送っていない・読めないときは undefined**
+   * ——呼ぶ側は今までどおり使用率も見る（黙って見逃す側へ倒さない）。
+   */
+  async lastSendEndedMs(): Promise<number | undefined> {
+    const ops = this.envs.lastSend;
+    if (!ops) return undefined;
+    try {
+      return await readLastSendEndedMs(ops);
+    } catch (error) {
+      this.envs.send.log?.(`最後に送り終えた時刻を読めません（${describe(error)}）`);
+      return undefined;
+    }
   }
 
   /** このプロセスが一括処理のまとまりの札を持っているか（試験と診断用） */

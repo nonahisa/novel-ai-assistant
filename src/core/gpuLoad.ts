@@ -34,6 +34,9 @@
  *    LM Studio が載せた分を差し引く手だてが無く、こちらが前に載せたモデルで
  *    毎回騒ぐことになる
  *
+ * ただし**管理下の誰かが送り終えて間もない（`MANAGED_SEND_SETTLE_MS`）ときは、
+ * 1の線を見ない**——直前の生成の名残で使用率が高く出るため（2026-09-25 追記）。
+ *
  * **VS Code にも Node にも依存させない。** コマンドの実行と通信は外から渡す。
  */
 
@@ -63,6 +66,35 @@ export const OTHER_VRAM_RATIO = 0.375;
 /** 使用率を測る回数と間隔 */
 export const UTILIZATION_SAMPLES = 3;
 export const UTILIZATION_SAMPLE_GAP_MS = 300;
+
+/**
+ * 管理下の誰か（この拡張機能・別の窓・MCP）が手元のAIへ送り終えてから、
+ * **使用率の線を見ない長さ**（ミリ秒）。メモリの線は見る。
+ *
+ * ## なぜ要るか
+ *
+ * 札が空いた直後に測ると、**直前の生成の名残**で使用率が高く出る。実機（0.87.3）
+ * では MCP の一括処理の2話目の頭で 98%/98%/0% を読み、「管理外の負荷の疑い」を
+ * 添えた。0.87.3 で単発が一括処理の合間に入れるようになり、窓でモーダルの警告が
+ * 出る場面が増えうる（作者の判断 2026-09-25「直す」）。
+ *
+ * ## 3秒にした理由（2026-09-25 に作者の機械で実測。RTX 4060 Ti・gemma4:e4b）
+ *
+ * nvidia-smi を 0.1秒ごとに流しながら、生成を10回（短い文・文脈4,096 を6回、
+ * 原稿6,000字・文脈16,384 を4回）投げ、応答が返った時刻からの使用率を見た。
+ *
+ * - 名残が 50% 以上だった最後の読み取りは、応答の 0.08〜0.53秒後
+ *   （この GPU は使用率を約0.5秒ごとにしか更新せず、直前の値を持ち越す）
+ * - 製品と同じ測り方（0.3秒おきに3回・中央値）を当てはめると、応答の直後に
+ *   測り始めたときだけ 80〜97% と出て、**0.5秒後以降に測り始めれば10回とも 0%**
+ *
+ * 実測の最長 0.53秒に対して、NVIDIA の説明では使用率の標本の幅が機種により
+ * 最長1秒あること、測るのに 0.6秒かかること、応答から札を離すまでの遅れを見込み、
+ * 余裕を取って3秒にした。**見逃す側の損は小さい**——送り終えて3秒のうちに
+ * ほかのアプリが GPU を使い始めた場合だけで、メモリの線と、実行の途中の
+ * 見直し（5分ごと）は効いたままである。
+ */
+export const MANAGED_SEND_SETTLE_MS = 3000;
 
 /** 実行の途中で見直す間隔（ミリ秒）。**毎チャンクでは呼ばない** */
 export const LOAD_CHECK_INTERVAL_MS = 5 * 60_000;
@@ -156,6 +188,12 @@ export interface ExternalLoadInput {
   readonly ollamaModels: readonly OllamaLoadedModel[] | undefined;
   /** どちらへ送るか。LM Studio のときはメモリの線を使わない（上の断り書き） */
   readonly providerId: string;
+  /**
+   * 管理下の誰かが最後に送り終えてからの経過（ミリ秒）。**分からなければ undefined**
+   * （台帳が読めない・古い版の窓しか送っていない）——今までどおり使用率も見る。
+   * `MANAGED_SEND_SETTLE_MS` 未満なら、使用率の線を見ない（直前の生成の名残）
+   */
+  readonly sinceManagedSendMs?: number;
 }
 
 export interface ExternalLoadJudgement {
@@ -227,7 +265,12 @@ export function judgeExternalLoad(input: ExternalLoadInput): ExternalLoadJudgeme
   const limitMiB = otherVramLimitMiB(totalMiB);
 
   const reasons: string[] = [];
-  if (utilization >= GPU_BUSY_UTILIZATION_PERCENT) {
+  // **直前の生成の名残は見ない。** メモリの線は Ollama の申告分を差し引いて
+  // いるので、直後でも今までどおり見てよい（名残で膨らむのは使用率だけ）
+  const settling =
+    input.sinceManagedSendMs !== undefined &&
+    input.sinceManagedSendMs < MANAGED_SEND_SETTLE_MS;
+  if (!settling && utilization >= GPU_BUSY_UTILIZATION_PERCENT) {
     reasons.push(`GPU の使用率が ${Math.round(utilization)}% です`);
   }
   const watchesMemory = input.providerId !== "lmstudio";
@@ -239,7 +282,13 @@ export function judgeExternalLoad(input: ExternalLoadInput): ExternalLoadJudgeme
 
   const summary =
     `GPU 使用率 ${utilizations.map((value) => `${Math.round(value)}%`).join("/")}` +
-    `（中央値 ${Math.round(utilization)}%、線 ${GPU_BUSY_UTILIZATION_PERCENT}%）、` +
+    `（中央値 ${Math.round(utilization)}%、線 ${GPU_BUSY_UTILIZATION_PERCENT}%` +
+    `${
+      settling
+        ? `——直前の送信の終わりから${((input.sinceManagedSendMs ?? 0) / 1000).toFixed(1)}秒なので、` +
+          "名残とみなして使用率の線は見ない"
+        : ""
+    }）、` +
     `メモリ ${Math.round(usedMiB)}/${Math.round(totalMiB)}MiB、` +
     `ほかのアプリ ${Math.round(otherMiB)}MiB（線 ${limitMiB}MiB` +
     `${watchesMemory ? "" : "、LM Studio へ送るので見ない"}）、${ollamaText}`;
@@ -293,6 +342,13 @@ export interface LoadProbeTools {
   /** Ollama の `/api/ps` を読む。読めなければ undefined */
   readonly readOllamaPs: () => Promise<readonly OllamaLoadedModel[] | undefined>;
   readonly sleep: (ms: number) => Promise<void>;
+  /**
+   * 管理下の誰かが最後に送り終えた時刻（ミリ秒）。台帳（`local-ai/last-send.json`）
+   * から読む。**無い・読めない・失敗したら undefined**（今までどおり使用率も見る）
+   */
+  readonly lastManagedSendEndedMs?: () => Promise<number | undefined>;
+  /** 時計（試験用。省けば `Date.now`） */
+  readonly now?: () => number;
 }
 
 /**
@@ -306,6 +362,9 @@ export async function probeExternalLoad(
   tools: LoadProbeTools
 ): Promise<ExternalLoadJudgement & { nvidiaSmiFound: boolean }> {
   const ollamaModelsPromise = tools.readOllamaPs().catch(() => undefined);
+  // **測り始める前に**経過を出す（測るあいだの0.6秒を足さない——名残を
+  // 読むのは1回目と2回目なので、始めの時点で決めるほうが取りこぼさない）
+  const sinceManagedSendMs = await readSinceManagedSend(tools);
   const gpuSamples: GpuSample[][] = [];
   let nvidiaSmiFound = true;
   for (let index = 0; index < UTILIZATION_SAMPLES; index += 1) {
@@ -319,9 +378,29 @@ export async function probeExternalLoad(
   }
   const ollamaModels = await ollamaModelsPromise;
   return {
-    ...judgeExternalLoad({ gpuSamples, ollamaModels, providerId }),
+    ...judgeExternalLoad({
+      gpuSamples,
+      ollamaModels,
+      providerId,
+      ...(sinceManagedSendMs !== undefined ? { sinceManagedSendMs } : {}),
+    }),
     nvidiaSmiFound,
   };
+}
+
+/** 最後に管理下の送信が終わってからの経過。分からなければ undefined */
+async function readSinceManagedSend(tools: LoadProbeTools): Promise<number | undefined> {
+  if (!tools.lastManagedSendEndedMs) return undefined;
+  let ended: number | undefined;
+  try {
+    ended = await tools.lastManagedSendEndedMs();
+  } catch {
+    // 台帳が読めない。**今までどおり測る**（黙って見逃す側へ倒さない）
+    return undefined;
+  }
+  if (ended === undefined || !Number.isFinite(ended)) return undefined;
+  // 時計の細かさのずれで「未来に送り終えた」と読めたら、終えた直後として扱う
+  return Math.max(0, (tools.now ?? Date.now)() - ended);
 }
 
 /**

@@ -48,6 +48,8 @@ import { AiQueueAbortError } from "./aiSequence";
  * - `lease.json`：**1回の送信**の札（いま手元のAIへ送っている者）
  * - `run.json`：**一括処理のまとまり**の札（`localAiCrossTurn.ts`。0.86.13 より後）
  * - `interrupt.json`：別のプロセスの単発が「合間に入れてほしい」と出す印
+ * - `last-send.json`：**最後に管理下の送信が終わった時刻**（ファイルの最終更新時刻）。
+ *   管理外の負荷を測るとき、直前の生成の名残を見分けるのに使う（6.76.2。0.87.3 より後）
  *
  * `lease.json` の名前を変えないのは、0.86.13 の窓（一括処理のあいだずっと
  * `lease.json` を持つ）と混ざっても、**実際の送信どうしは必ず1本になる**ようにするため。
@@ -56,6 +58,38 @@ export const LOCAL_AI_LEASE_DIRECTORY = "local-ai";
 export const LOCAL_AI_LEASE_FILE = "lease.json";
 export const LOCAL_AI_RUN_LEASE_FILE = "run.json";
 export const LOCAL_AI_INTERRUPT_FILE = "interrupt.json";
+export const LOCAL_AI_LAST_SEND_FILE = "last-send.json";
+
+/**
+ * `last-send.json` の中身。**中身は書き換えない**（時刻はファイルの最終更新時刻で
+ * 持つ——札の生存の印と同じ。中身を上書きしないので、読む側が書きかけを見ない）。
+ * 中身は、フォルダーを開いた人が何のファイルか分かるようにするための断り書きだけ。
+ */
+export const LAST_SEND_STAMP_TEXT = `${JSON.stringify(
+  {
+    version: 1,
+    note: "手元のAIへの送信が最後に終わった時刻は、このファイルの最終更新時刻です（GPU の負荷の見立てに使います）。",
+  },
+  null,
+  2
+)}\n`;
+
+/**
+ * 送り終えた時刻を残す。無ければ作り、あれば時刻だけ打ち直す。
+ *
+ * 作ろうとした瞬間に別のプロセスが作っていても、打ち直せば同じことになる。
+ * 失敗は呼ぶ側がログへ残す（残せなくても送信は止めない）。
+ */
+export async function stampLastSend(ops: LeaseFileOps): Promise<void> {
+  if (await ops.tryCreate(LAST_SEND_STAMP_TEXT)) return;
+  await ops.touch();
+}
+
+/** 最後に送り終えた時刻（ミリ秒）。**まだ無ければ undefined**。読めなければ投げる */
+export async function readLastSendEndedMs(ops: LeaseFileOps): Promise<number | undefined> {
+  const current = await ops.read();
+  return current?.mtimeMs;
+}
 
 /**
  * 生存の印を打ち直す間隔（ミリ秒）。
@@ -275,6 +309,14 @@ export interface ProcessLeaseOptions {
   readonly keepWhile?: () => boolean;
   /** 札を離したとき（管理外の負荷の「しばらく出さない」を解くのに使う） */
   readonly onDropped?: () => void;
+  /**
+   * 札のファイルを**消す前に**済ませること（送信の札で「送り終えた時刻」を残す）。
+   *
+   * 消したあとに残すと、待っていた別のプロセスがその隙に札を取って負荷を測り、
+   * 古い時刻を読んで直前の生成の名残を見分けられない。失敗しても札は消す
+   * （ログへ残す。次の者を待たせない）。
+   */
+  readonly beforeRemove?: () => Promise<void>;
 }
 
 type LoopOutcome =
@@ -394,12 +436,24 @@ export class ProcessLease {
     this.heldText = undefined;
     this.users = 0;
     if (text === undefined) return;
+    await this.runBeforeRemove();
     try {
       await this.env.ops.removeIfSame(text);
     } catch (error) {
       this.env.log?.(`手元のAIの札を片づけられませんでした：${describe(error)}`);
     }
     this.options.onDropped?.();
+  }
+
+  /** `beforeRemove` を呼ぶ。**失敗しても投げない**（札は消す） */
+  private async runBeforeRemove(): Promise<void> {
+    const before = this.options.beforeRemove;
+    if (!before) return;
+    try {
+      await before();
+    } catch (error) {
+      this.env.log?.(`手元のAIの札を離す前の記録を残せませんでした：${describe(error)}`);
+    }
   }
 
   private releaser(): () => void {
@@ -421,8 +475,11 @@ export class ProcessLease {
     // 待たせる理由は無い。消せなくても、生存の印が古くなれば相手が奪える。
     // ただし終わる直前のプロセス（MCP は道具を返したら殺されうる）のために、
     // 消し終わりを `whenSettled` で待てるようにしておく
-    const removal = this.env.ops
-      .removeIfSame(text)
+    // `beforeRemove` が無ければ、今までどおりすぐ消しにかかる（余計な待ちを挟まない）
+    const removing = this.options.beforeRemove
+      ? this.runBeforeRemove().then(() => this.env.ops.removeIfSame(text))
+      : this.env.ops.removeIfSame(text);
+    const removal = removing
       .then(() => undefined)
       .catch((error: unknown) => {
         this.env.log?.(`手元のAIの札を消せませんでした：${describe(error)}`);
