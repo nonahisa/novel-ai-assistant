@@ -13,6 +13,9 @@ import { episodePathFor } from "./bookStore";
 import { episodeTitle, episodeUnit, formatChapterLabel } from "./episodeLabel";
 import type { WorkFormatKey } from "./workFormat";
 import { parseEpisodePlot } from "./episodePlotDoc";
+import { episodePlotChapterFromFileName, episodePlotFileName } from "./resumeSheet";
+import { EPISODE_PLOT_MOVING_PREFIX } from "./episodePlotOrder";
+import { episodeNumberFromHint } from "./locateEpisode";
 import {
   sumForeshadowCounts,
   ZERO_FORESHADOW_COUNTS,
@@ -326,6 +329,62 @@ export function plannedEpisodePlotChapters(
   return [...new Set(plotChapters)]
     .filter((chapter) => !isChapterWritten(episodes, chapter))
     .sort((left, right) => left - right);
+}
+
+/** 名前の形が違う単話プロット1件 */
+export interface MisnamedEpisodePlot {
+  name: string;
+  /** 直せば並ぶ名前（`第N話.md`）。話数が読めない・既にその名前があれば null */
+  suggested: string | null;
+}
+
+/**
+ * 単話プロットの置き場にある、`第N話.md` の形でない .md（精査 R11 ③）。
+ *
+ * **読む側で別の形を覚えない。** 開く・作る・並べ替える側はどれも
+ * `episodePlotFileName` の名前を探すので、一覧にだけ `episode_0005.md` を
+ * 並べると、押したときに別の（空の）第5話を作ることになる。並べずに、
+ * 名前を直せば並ぶことを知らせる。**名前は勝手に変えない**（作者のファイル）。
+ *
+ * 直す先の話数は `episodeNumberFromHint`（数字が2つ以上ある名前は読まない）で
+ * 読み、読めなければ出さない——推測で話数を決めない。
+ */
+export function misnamedEpisodePlots(fileNames: readonly string[]): MisnamedEpisodePlot[] {
+  const present = new Set(fileNames);
+  const result: MisnamedEpisodePlot[] = [];
+  for (const name of fileNames) {
+    if (!/\.md$/iu.test(name)) continue;
+    // 並べ替えの途中の一時名は、わざと形から外してある（`episodePlotOrder.ts`）
+    if (name.startsWith(EPISODE_PLOT_MOVING_PREFIX)) continue;
+    if (episodePlotChapterFromFileName(name) !== null) continue;
+    const chapter = episodeNumberFromHint(name);
+    const candidate = chapter === undefined ? null : episodePlotFileName(chapter);
+    result.push({
+      name,
+      suggested: candidate && !present.has(candidate) ? candidate : null,
+    });
+  }
+  return result;
+}
+
+/** 知らせに名前を並べる数（多いと知らせが読めなくなる） */
+const MISNAMED_NOTICE_LIMIT = 5;
+
+/** プロットモードの上に出す知らせ。無ければ null */
+export function misnamedEpisodePlotNotice(
+  misnamed: readonly MisnamedEpisodePlot[]
+): string | null {
+  if (misnamed.length === 0) return null;
+  const shown = misnamed
+    .slice(0, MISNAMED_NOTICE_LIMIT)
+    .map((entry) =>
+      entry.suggested ? `${entry.name}（「${entry.suggested}」にすると並びます）` : entry.name
+    );
+  const rest = misnamed.length - shown.length;
+  return (
+    `単話プロットの置き場に、名前が「第N話.md」の形でないため並べていないファイルがあります：` +
+    `${shown.join("、")}${rest > 0 ? `、ほか${rest}件` : ""}。名前は変えていません。`
+  );
 }
 
 /**

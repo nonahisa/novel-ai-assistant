@@ -54,3 +54,22 @@ describe("予定の話を足す", () => {
     expect(guard).toBeLessThan(write);
   });
 });
+
+/**
+ * 名前の形が違う単話プロット（`episode_0005.md`）を、黙って消えたように
+ * 見せない（2026-09-26 精査 R11 ③）。並べる判定は core の
+ * `misnamedEpisodePlots`（`test/unit/core/misnamedEpisodePlots.test.ts`）、
+ * ここはパネルがそれを知らせに出し、**名前を変えない**ことだけを見る。
+ */
+describe("名前の形が違う単話プロット", () => {
+  const body = bodyOf("plotModePanel.ts", "private async existingEpisodePlots(");
+
+  it("置き場を読んだときに、形の違う名前を知らせに足す", () => {
+    expect(body).toContain("misnamedEpisodePlots(");
+    expect(body).toContain("this.notices.push(");
+  });
+
+  it("名前を直す書き込みはしない（作者のファイル）", () => {
+    expect(body).not.toMatch(/rename|atomicWriteFile|writeTextFile|fs\.write/);
+  });
+});

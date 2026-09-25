@@ -13,6 +13,8 @@ import {
   buildPlotEpisodeRows,
   episodePlotGoalHead,
   listPlotHeadings,
+  misnamedEpisodePlotNotice,
+  misnamedEpisodePlots,
   nextPlannedEpisodeNumber,
   parsePlannedEpisodeNumber,
   plannedEpisodePlotChapters,
@@ -1000,6 +1002,14 @@ class PlotModePanel {
       const chapter = episodePlotChapterFromFileName(name);
       if (chapter !== null) found.add(chapter);
     }
+    // 形の違う名前（手で置いた `episode_0005.md` など）は並べないが、
+    // 黙って消えたように見せない（精査 R11 ③）
+    const misnamed = misnamedEpisodePlotNotice(
+      misnamedEpisodePlots(
+        entries.filter(([, type]) => type === vscode.FileType.File).map(([name]) => name)
+      )
+    );
+    if (misnamed) this.notices.push(misnamed);
     return [...found].sort((left, right) => left - right);
   }
 
