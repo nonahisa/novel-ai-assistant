@@ -9,8 +9,13 @@ import {
 import type { AiNote } from "../models/aiNote";
 import type { CustomFieldDefinition } from "../models/customField";
 import { membersOf, type Organization } from "../models/organization";
-import type { RecordChange, RecordConflict } from "../models/jsonValidation";
+import type {
+  ConflictObservation,
+  RecordChange,
+  RecordConflict,
+} from "../models/jsonValidation";
 import { changedFields, changesOfField, sortChanges } from "./recordChanges";
+import { describeResemblance } from "./characterResemblance";
 import {
   WORLD_CATEGORIES,
   WORLD_CATEGORY_LABELS,
@@ -615,7 +620,7 @@ export function describeConflictValues(conflict: RecordConflict): string {
   // 話数を持たなかった頃のデータに新しい値が足されると、記録は一部の値にしか
   // 付かない。**記録のある値だけを並べると、既にあった食い違いが表示から消える。**
   // 値は必ず全部出す。記録の無いものは「それ以前」として扱う
-  const missing = conflict.values
+  const missing: ConflictObservation[] = conflict.values
     .filter((value) => !observations.some((item) => item.value === value))
     .map((value) => ({ value, chapters: [] as number[] }));
 
@@ -624,7 +629,12 @@ export function describeConflictValues(conflict: RecordConflict): string {
     .map((item) => {
       const chapters =
         item.chapters.length > 0 ? formatChapters(item.chapters) : "それ以前";
-      return `${item.value}（${chapters}）`;
+      // 別の人物の記述に似ていた値には、その相手を添える（精査 F4）。
+      // 「変化かもしれない」とだけ出すと、取り違えだと作者が見抜けない
+      const resembles = item.resembles
+        ? `。${describeResemblance(item.resembles)}`
+        : "";
+      return `${item.value}（${chapters}${resembles}）`;
     })
     // 全角の閉じ括弧が右に余白を持つので、矢印の前に空白は入れない
     .join("→ ");

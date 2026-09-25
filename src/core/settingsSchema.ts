@@ -102,6 +102,11 @@ function commonProperties(idPattern: string): Record<string, unknown> {
                   type: ["string", "null"],
                   description: "その値を読み取った本文の引用。無いこともある",
                 },
+                resembles: {
+                  type: ["string", "null"],
+                  description:
+                    "この値が似ていた別の人物の名前。取り違えかもしれないので、自動で作中の変化へ畳まない",
+                },
               },
               required: ["value"],
             },

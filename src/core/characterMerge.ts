@@ -31,6 +31,7 @@ import {
 import {
   findChange,
   hasChange,
+  noteResemblance,
   recordChangeChapters,
   recordObservation,
   type ConflictObservation,
@@ -51,6 +52,7 @@ import {
   migratePersonalityFacets,
 } from "./personalityFacets";
 import { addSpeechStyleFacet } from "./speechStyle";
+import { findResemblingCharacter } from "./characterResemblance";
 
 /**
  * 抽出結果を既存の人物一覧へマージする。
@@ -284,7 +286,8 @@ export function mergeExtractedCharacters(
         ex,
         item.chapters,
         conflicts,
-        otherRecordNames(result, c)
+        otherRecordNames(result, c),
+        result
       );
       result.push(c);
       added.push(c.name);
@@ -393,7 +396,8 @@ export function mergeExtractedCharacters(
       data,
       item.chapters,
       conflicts,
-      otherRecordNames(result, match)
+      otherRecordNames(result, match),
+      result
     );
     if (migrated || applied) {
       if (!updated.includes(match.name)) updated.push(match.name);
@@ -625,7 +629,12 @@ function applyExtracted(
    * ほかの既存レコードの名前（空白を落とした形）。
    * **そこに載っている名前は別名として取り込まない**（設計書6.5.9）。
    */
-  otherRecordNames: ReadonlySet<string> = new Set()
+  otherRecordNames: ReadonlySet<string> = new Set(),
+  /**
+   * 同じ作品の人物（自分を含んでよい）。**新しい値が別の人物の記述に
+   * 似ていないか**を照らし合わせるのに使う（精査 F4。`fillOrConflict`）
+   */
+  everyone: readonly Character[] = []
 ): boolean {
   let changed = false;
   const validChapters = chapters.filter(Number.isFinite);
@@ -696,7 +705,8 @@ function applyExtracted(
       clampSummary(ex.summary),
       validChapters,
       conflicts,
-      evidence
+      evidence,
+      everyone
     ) || changed;
   changed =
     fillOrConflict(target, "affiliation", ex.affiliation, validChapters, conflicts, evidence) ||
@@ -731,8 +741,15 @@ function applyExtracted(
       ex.speechEvidence?.trim() || null
     ) || changed;
   changed =
-    fillOrConflict(target, "appearance", ex.appearance, validChapters, conflicts, evidence) ||
-    changed;
+    fillOrConflict(
+      target,
+      "appearance",
+      ex.appearance,
+      validChapters,
+      conflicts,
+      evidence,
+      everyone
+    ) || changed;
 
   // 一人称
   if (ex.firstPerson) {
@@ -947,7 +964,12 @@ function fillOrConflict(
    * 見抜けるのは、どの一節から読んだのかが分かるときだけである。
    * 手で入れる経路（`insertFieldValue`）には根拠が無いので既定は null
    */
-  evidence: string | null = null
+  evidence: string | null = null,
+  /**
+   * 同じ作品の人物。**渡されたときだけ、別の人物の記述に似ていないかを見る**
+   * （精査 F4）。手で入れる経路（`insertFieldValue`）は作者の操作なので渡さない
+   */
+  everyone: readonly Character[] = []
 ): boolean {
   const value = incoming?.trim();
   if (!value) return false;
@@ -1005,12 +1027,24 @@ function fillOrConflict(
   }
   if (foldable && current.includes(value)) return false;
 
-  // ここから先は本当に違う値。話数が重ならなければ作中の変化として扱う。
+  // ここから先は本当に違う値。
+  //
+  // **同じ話の別の人物の記述に似ていたら、作中の変化に積まない**（精査 F4、
+  // 作者の判断 2026-09-25）。同じ場面から2人ぶんの記述が出て、片方がこの人物
+  // にも書き込まれた見込みが高い。変化に積むと、起きていない変化が年表に載り、
+  // 本体まで別人の記述に入れ替わる。食い違いとして作者の判断へ回し、
+  // 似ていた相手の名前を添える（`core/characterResemblance.ts`）
+  const resembles = foldable
+    ? findResemblingCharacter(target, everyone, field, value, chapters)
+    : undefined;
+
+  // 話数が重ならなければ作中の変化として扱う。
   // **両方の話数が分かっているときだけ。** 片方でも分からないと前後を
   // 決められず、作者が手で書いた値をAIの読みで押し流しかねない
   const currentChapters = chaptersOfValue(target.changes, field, current);
   if (
     foldable &&
+    !resembles &&
     currentChapters?.length &&
     chapters.length &&
     !overlaps(currentChapters, chapters)
@@ -1027,7 +1061,10 @@ function fillOrConflict(
     // 同じ値が別の話にも出てきたら、話数だけを足す。
     // 根拠も値ごとに残す——畳んだときに本体へ入れてよいかを決めるのに使う
     const noted = recordObservation(already, value, chapters, evidence);
-    if (!isNewValue) return noted;
+    const marked = resembles
+      ? noteResemblance(already, value, resembles.name)
+      : false;
+    if (!isNewValue) return noted || marked;
     conflicts.push({
       characterName: target.name,
       field,
@@ -1053,7 +1090,10 @@ function fillOrConflict(
         { value: current, chapters: [...(currentChapters ?? [])] },
         findChange(target.changes, field, current)?.evidence ?? null
       ),
-      withEvidence({ value, chapters: [...chapters] }, evidence),
+      {
+        ...withEvidence({ value, chapters: [...chapters] }, evidence),
+        ...(resembles ? { resembles: resembles.name } : {}),
+      },
     ],
   });
   conflicts.push({

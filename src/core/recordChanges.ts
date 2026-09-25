@@ -278,6 +278,11 @@ export function isFoldableConflict(conflict: RecordConflict): boolean {
   const entries = observationsOf(conflict);
   if (entries.length < 2) return false;
 
+  // **別の人物の記述に似ていた値があれば畳まない**（精査 F4、作者の判断
+  // 2026-09-25）。話数が重ならなくても、同じ場面から2人ぶんの記述が出て
+  // 取り違えた見込みが高い。畳むと、別人の記述が年表へ流れる
+  if (conflict.observations?.some((item) => item.resembles)) return false;
+
   // **話数の分かる値が2つ以上あること。**
   // 「変わった」と言うには、違う時点での値を2つ見る必要がある。
   // 片方の話数が分からないと前後を決められず、作者が手で書いた値を

@@ -110,6 +110,16 @@ export interface ConflictObservation {
    * 畳んだ時点で「根拠なし」になり、本体へ入れられなくなる
    */
   evidence?: string | null;
+  /**
+   * この値が似ていた**別の人物の名前**（精査 F4、作者の判断 2026-09-25）。
+   *
+   * 同じ話の別の人物の同じ項目の記述に似ていたので、作中の変化に積まずに
+   * 食い違いとして止めた値に付く（`core/characterResemblance.ts`）。
+   * 資料には「〇〇の記述と似ています」と添える。**付いている食い違いは
+   * 自動で変化へ畳まない**（`recordChanges.ts` の `isFoldableConflict`）——
+   * 畳むと、別人の記述がまた年表へ流れる。古いデータには無い
+   */
+  resembles?: string;
 }
 
 /** 設定と本文の食い違い（作中での変化かもしれない）を表す共通の構造 */
@@ -161,6 +171,24 @@ export function recordObservation(
   return true;
 }
 
+/**
+ * 食い違いの値に「別の人物の記述に似ていた」印を付ける（精査 F4）。
+ * **既に付いていれば置き換えない**（最初に似ていた相手を残す）。
+ * 値が記録に無ければ何もしない。何か変わったら true。
+ */
+export function noteResemblance(
+  conflict: RecordConflict,
+  value: string,
+  name: string
+): boolean {
+  const label = name.trim();
+  if (!label) return false;
+  const found = conflict.observations?.find((item) => item.value === value);
+  if (!found || found.resembles) return false;
+  found.resembles = label;
+  return true;
+}
+
 function sortedUnique(chapters: number[]): number[] {
   return [...new Set(chapters)].sort((a, b) => a - b);
 }
@@ -203,6 +231,8 @@ export function mergeConflicts(
     for (const item of conflict.observations ?? []) {
       // 値ごとの根拠も運ぶ。落とすと、畳んだときに本体を動かせなくなる
       recordObservation(found, item.value, item.chapters, item.evidence ?? null);
+      // 別の人物に似ていた印も運ぶ。落とすと、次の抽出で変化へ畳まれる
+      if (item.resembles) noteResemblance(found, item.value, item.resembles);
     }
     // 作者のメモは片方を捨てない
     const notes = [found.note, conflict.note]
@@ -384,12 +414,16 @@ export function parseConflicts(
         requireNonEmptyString(item.value, `${itemPath}.value`);
         optionalNumberArray(item.chapters, `${itemPath}.chapters`);
         optionalNullableString(item.evidence, `${itemPath}.evidence`);
+        optionalNullableString(item.resembles, `${itemPath}.resembles`);
         const evidence = (item.evidence as string | null | undefined)?.trim();
+        const resembles = (item.resembles as string | null | undefined)?.trim();
         return {
           value: item.value as string,
           chapters: (item.chapters as number[] | undefined) ?? [],
           // 根拠が無いときは項目ごと置かない（古いデータと同じ形のまま）
           ...(evidence ? { evidence } : {}),
+          // 別の人物に似ていた印も、無いときは置かない
+          ...(resembles ? { resembles } : {}),
         };
       }
     );
