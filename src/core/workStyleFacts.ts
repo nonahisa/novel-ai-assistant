@@ -158,12 +158,53 @@ export function countNarrationFirstPersons(
   // 長い候補から取り除きながら数える。「私たち」を「私」と数えないため
   let rest = narration;
   for (const word of FIRST_PERSON_CANDIDATES) {
+    const pattern = kanaPronounPattern(word);
+    if (pattern) {
+      let hits = 0;
+      rest = rest.replace(pattern, () => {
+        hits++;
+        return "\u0000";
+      });
+      if (hits > 0) counts.set(word, hits);
+      continue;
+    }
     const parts = rest.split(word);
     const hits = parts.length - 1;
     if (hits > 0) counts.set(word, hits);
     rest = parts.join("\u0000");
   }
   return counts;
+}
+
+/**
+ * 仮名で書く一人称を、**語の中の字の並びで数えない**ための形（推敲の比べ、2026-09-26）。
+ *
+ * 字の並びで数えていたので、「僕」が語る教科書チート6話の地の文で
+ * 「交わして」「出くわした」の「わし」、「うちの村」「考えているうちに」の
+ * 「うち」を一人称と数え、僕 5・うち 3・わし 2 で**語り手の一人称が6割に届かず**、
+ * 推敲の視点の札が `not_first_person_scene` で落ち、語り手の名前のよじれも
+ * 「語り手の話ではない」として探されなかった。
+ *
+ * - **一人称の後ろには助詞か句読点が続く**（「わしは」「おれの」）。「わして」
+ *   「わした」「おれた（倒れた）」「ぼくじょう」は語の一部なので数えない。
+ *   「ら」は続けない——「ぼくら」「あたしら」は複数で、語り手の一人称ではない
+ * - **「うち」だけは「の」「に」「で」を続けない。** どの語り手も「うちの村」
+ *   「うちに泊まる」と家の意味で使い、「〜しているうちに」は時の意味である。
+ *   前に平仮名が付く形（「そのうち」「今のうち」）も数えない。「うち」で語る
+ *   語り手は「うちは」「うちが」で数えられる
+ *
+ * 漢字の候補（僕・俺・私・自分など）は今までどおり字で数える（`undefined` を返す）。
+ */
+const KANA_PRONOUN_NEXT = "はがもをとへや、。，．！？!?…」』）)\\s　";
+function kanaPronounPattern(word: string): RegExp | undefined {
+  if (!/^\p{Script=Hiragana}+$/u.test(word)) return undefined;
+  if (word === "うち") {
+    return new RegExp(
+      `(?<!\\p{Script=Hiragana})うち(?=[${KANA_PRONOUN_NEXT}]|$)`,
+      "gu"
+    );
+  }
+  return new RegExp(`${word}(?=[${KANA_PRONOUN_NEXT}のにで]|$)`, "gu");
 }
 
 /**

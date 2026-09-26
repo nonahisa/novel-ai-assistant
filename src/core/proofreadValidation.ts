@@ -5,7 +5,7 @@ import { nonJouyouKanjiIn } from "./jouyouKanji";
 import { opensOnyomiCompound } from "./onyomiReading";
 import { suggestsOpeningKanji } from "./notationVariants";
 import { isKeptWord, type KeepWord } from "../models/keepWord";
-import { maskQuoted, removeQuoted } from "./quotedSpans";
+import { maskQuoted, quotedSpans, removeQuoted } from "./quotedSpans";
 import { sceneRanges } from "./sceneBreaks";
 import { narrationFirstPersonOf } from "./workStyleFacts";
 import {
@@ -135,7 +135,18 @@ export interface RejectedProofreadIssue {
      * 「年齢への言及」「確信が言い切られています」のような、誰の心の話でも
      * ない指摘。説明が空なら、誰の心かを確かめられないので同じく落とす
      */
-    | "no_other_mind";
+    | "no_other_mind"
+    /**
+     * 「漢字ひらき」の札だが、**原文に漢字が無いか、説明が挙げた漢字が原文に無い**
+     * （しかも修正案が空）。ひらく字の無い所に貼った札で、どこを直すのか分からない
+     * （推敲の比べ、2026-09-26。説明を「「事」が形式名詞…」と使い回していた）
+     */
+    | "kanji_not_in_original"
+    /**
+     * 「視点」の札だが、**語り手に見える様子**（表情・顔つき・反応・態度）を
+     * 書いた文である（推敲の比べ、2026-09-26）
+     */
+    | "observable";
 }
 
 const LEVELS = new Set(["high", "medium", "low"]);
@@ -775,7 +786,9 @@ export function hasLongSentenceAround(
 export function hasRepetitionNearby(
   lines: readonly string[],
   lineIndex: number,
-  original: string
+  original: string,
+  /** AIの説明。「」で挙げた語を、本文の近くで数え直すのに使う（下の `quotedWordRepeats`） */
+  explanation = ""
 ): boolean {
   if (hasRepetition(original)) return true;
   const found = locateInLines(lines, lineIndex, original);
@@ -809,6 +822,35 @@ export function hasRepetitionNearby(
     const piece = body.slice(start, start + REPEAT_MIN_LENGTH);
     if (!contentChar.test(piece)) continue;
     if (haystack.includes(piece)) return true;
+  }
+  return quotedWordRepeats(explanation, body, `${haystack}\n${body}`);
+}
+
+/**
+ * 説明が「」で挙げた語が、**写した範囲にあり、近くに2回以上出る**か
+ * （推敲の比べ、2026-09-26）。
+ *
+ * 3字の窓だけで数えると、**2字の熟語（「説明」）と仮名だけの語（「そのまま」）の
+ * 繰り返しは数えられない。** 教科書チート5話の「説明した。…基礎的な説明から…
+ * 説明する。」と、8話の「そのまま…そのまま…そのまま」が `not_repeated` で落ちた。
+ * プロンプトは同語反復の説明に「繰り返されている語と、何回出るか」を頼んでいるので、
+ * **挙げた語を本文で数え直す**（AIの言う回数は使わない）。
+ *
+ * 語の長さの下限は3字の窓と同じ考え方：漢字か片仮名を含む語は2字から、
+ * 仮名だけの語は4字から（「した」「ている」はどの段落にも出る）。
+ */
+const QUOTED_WORD = /[「『]([^」』]{2,12})[」』]/gu;
+function quotedWordRepeats(
+  explanation: string,
+  body: string,
+  nearby: string
+): boolean {
+  for (const matched of explanation.matchAll(QUOTED_WORD)) {
+    const word = matched[1].replace(/\s/gu, "");
+    const hasContent = /[\p{Script=Han}\p{Script=Katakana}]/u.test(word);
+    if (Array.from(word).length < (hasContent ? 2 : 4)) continue;
+    if (!body.includes(word)) continue;
+    if (nearby.split(word).length - 1 >= 2) return true;
   }
   return false;
 }
@@ -984,6 +1026,18 @@ const VIEWPOINT_SCENE_MIN_FIRST_PERSON = 2;
  */
 const NARRATOR_GUESS =
   /(のか[、。，]|だろうか|らしい|らしく|ようだ|ようで|ように見え|ように思え|みたいだ|みたいに|そうだった|そうだ[。、]|かもしれ|に違いな|はずだ|気がし|だろう(?!と)|でしょう(?!と)|か(は|も)?(知ら|分から|わから|判ら)ない)/u;
+/**
+ * 語り手に**見える・聞こえる様子**を書いている文（推敲の比べ、2026-09-26）。
+ *
+ * Kimi-K2.6 が「怒りに満ちた表情で牙を剥きだした」「さっきまでの照れた反応とは
+ * 違って、ちょっと怒気がこもっている」「今は般若もかくやという顔をしている」を
+ * 視点の札で挙げた。心の語（怒り・照れ）が入っていても、それは顔つき・反応・
+ * 声の調子として語り手の目と耳に届いたもので、知り得ない心ではない。
+ * **「声」だけは入れない**——「声には出さなかったが、本当は怖かった」は本物の
+ * 視点のずれで、「声」の一字で落とすと見逃す。
+ */
+const OBSERVABLE =
+  /(表情|顔つき|顔色|顔を|顔で|顔に|顔が|目つき|眼差し|まなざし|口調|声色|声音|怒気|様子|反応|態度|仕草|素振り|笑顔|笑み)/u;
 /** 説明の側が「推測している」と言っているもの（e4b が「無意識なのか」をこう説明した） */
 const EXPLANATION_GUESS = /(推測|推し量|推量|推察)/u;
 
@@ -1045,12 +1099,11 @@ function viewpointRejection(
   ) {
     return "inner_voice";
   }
-  if (
-    NARRATOR_GUESS.test(sentenceAround(line, at, found ? original.length : line.length)) ||
-    EXPLANATION_GUESS.test(explanation)
-  ) {
+  const sentence = sentenceAround(line, at, found ? original.length : line.length);
+  if (NARRATOR_GUESS.test(sentence) || EXPLANATION_GUESS.test(explanation)) {
     return "narrator_guess";
   }
+  if (OBSERVABLE.test(sentence)) return "observable";
   if (NARRATOR_OWN_MIND.test(explanation)) return "narrator_own_mind";
   // 説明が空・札の名前だけなら、誰の心の話かを確かめられない（原文だけでは決めない）
   if (
@@ -1082,6 +1135,27 @@ function lineHolding(
     if (at >= 0) return { index, at };
   }
   return undefined;
+}
+
+/**
+ * 写した範囲が、本文の行の中で**台詞の「」の内側**にあるか（推敲の比べ、2026-09-26）。
+ *
+ * AIは台詞の中身を括弧を付けずに写してくる（「おとなしいのに、何でみんな
+ * 警戒してるの？」）。`isDialogueOnly` は原文だけを見るので、これを地の文と取る。
+ * **見るのは「」だけ**——『』は地の文で題や名前を括るのにも使う（『死の谷』）。
+ */
+function liesInDialogue(
+  chunkLines: readonly string[],
+  lineIndex: number,
+  original: string
+): boolean {
+  const found = lineHolding(chunkLines, lineIndex, original);
+  if (!found) return false;
+  const text = chunkLines[found.index];
+  const end = found.at + original.length;
+  return quotedSpans(text).some(
+    (span) => text[span.start] === "「" && span.start < found.at && end <= span.end
+  );
 }
 
 /** その行を含む場面（区切りと話の境で割る）の地の文が、一人称で語られているか */
@@ -1165,6 +1239,32 @@ export function withNonJouyouNote(
     `${explanation}（参考：${listed}は常用漢字表` +
     "（平成22年内閣告示第2号）に無い字です）"
   );
+}
+
+/**
+ * 漢字ひらきの指摘が、**ひらく字の無い所を指している**か（推敲の比べ、2026-09-26）。
+ *
+ * さくらの gemma-4-31B-it は説明を「「事」が形式名詞として使われています」と
+ * 使い回し、「事」の無い文にも同じ札を貼った。Kimi-K2.6 も「「暫く」は副詞で…」を
+ * 「暫く」の無い文に貼った。修正案が空だと、作者には**どこの何をひらくのか分からない**。
+ *
+ * 1. 原文に漢字が1字も無ければ、ひらくものが無い
+ * 2. 説明が「」『』で漢字を含む語を挙げていて、**そのどれも原文に無い**なら、
+ *    別の所の話である。読みの添え書き（「所謂（いわゆる）」）と「〜」は除いて比べる
+ *
+ * 説明が語を挙げていなければ決めない（落とさない）。
+ */
+function pointsAtNoKanji(original: string, explanation: string): boolean {
+  const han = /\p{Script=Han}/u;
+  if (!han.test(original)) return true;
+  const named = Array.from(explanation.matchAll(/[「『]([^」』]+)[」』]/gu), (m) =>
+    m[1]
+      .replace(/[（(][^）)]*[）)]/gu, "")
+      .replace(/[〜～]/gu, "")
+      .trim()
+  ).filter((word) => han.test(word));
+  if (named.length === 0) return false;
+  return named.every((word) => !original.includes(word));
 }
 
 export function parseProofreadResult(
@@ -1276,20 +1376,30 @@ export function validateProofreadIssues(
     // 長文と同じく、**写した範囲の近く（同じ段落と前後の段落）まで見る**
     if (
       reason === "同語反復" &&
-      !hasRepetitionNearby(chunkLines, line - firstLine, original)
+      !hasRepetitionNearby(
+        chunkLines,
+        line - firstLine,
+        original,
+        asString(item.explanation)
+      )
     ) {
       rejected.push({ raw: item, reason: "not_repeated" });
       continue;
     }
     // **台詞の中の繰り返しは人物の話し方である。** 方言も、わざと崩した
     // 喋りも、強調の反復も、直したら人物が変わってしまう
-    if (reason === "同語反復" && isDialogueOnly(original)) {
+    // **括弧を付けずに写した台詞の中身も台詞である**（推敲の比べ、2026-09-26）。
+    // 原文だけでは地の文に見えるので、本文の行の中で括弧の内側かを確かめる
+    const spokenLine = (): boolean =>
+      isDialogueOnly(original) ||
+      liesInDialogue(chunkLines, line - firstLine, original);
+    if (reason === "同語反復" && spokenLine()) {
       rejected.push({ raw: item, reason: "dialogue_voice" });
       continue;
     }
     // **視点は地の文の話である**（1.10）。台詞で他人の気持ちを言い切るのは
     // その人物の思い込みであって、語りのずれではない
-    if (reason === "視点" && isDialogueOnly(original)) {
+    if (reason === "視点" && spokenLine()) {
       rejected.push({ raw: item, reason: "not_narration" });
       continue;
     }
@@ -1407,6 +1517,17 @@ export function validateProofreadIssues(
         normalizeForComparison(usableSuggestion)
     ) {
       rejected.push({ raw: item, reason: "no_change" });
+      continue;
+    }
+    // **ひらく字の無い所に貼った漢字ひらきは出さない**（推敲の比べ、2026-09-26）。
+    // 修正案が空のときだけ見る——修正案のある指摘は、上の関門が修正案そのものを
+    // 確かめている。空の指摘まで落とすのではない（下の作者の裁定）
+    if (
+      reason === "漢字ひらき" &&
+      !usableSuggestion &&
+      pointsAtNoKanji(original, asString(item.explanation))
+    ) {
+      rejected.push({ raw: item, reason: "kanji_not_in_original" });
       continue;
     }
     /*

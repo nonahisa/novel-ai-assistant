@@ -61,6 +61,32 @@ describe("語り手の一人称を数える", () => {
     expect(counts.get("俺")).toBeUndefined();
   });
 
+  it("仮名の一人称を、語の中の字の並びで数えない（推敲の比べ、2026-09-26）", () => {
+    // 教科書チート6話の地の文。「僕」の語りなのに、「交わして」「出くわした」の
+    // 「わし」と、「うちの村」の「うち」を一人称と数え、僕 5・うち 3・わし 2 で
+    // 「一人称の場面ではない」と判断していた（視点の札が not_first_person_scene で落ちた）
+    const counts = countNarrationFirstPersons(
+      "　おばあさんと軽く言葉を交わして別れると、子どもたちに出くわした。" +
+        "うちの村は裕福じゃない。考えているうちに着いた。そのうち分かるだろう。" +
+        "僕は驚いた。"
+    );
+    expect(counts.get("わし")).toBeUndefined();
+    expect(counts.get("うち")).toBeUndefined();
+    expect(counts.get("僕")).toBe(1);
+  });
+
+  it("仮名の一人称は、助詞や句読点が続く形なら数える", () => {
+    const counts = countNarrationFirstPersons(
+      "　うちは走った。うちが先に着いた。わしは歩いた。わしの杖を置いた。" +
+        "おれは黙った。ぼくの番だ。わたしも行く。"
+    );
+    expect(counts.get("うち")).toBe(2);
+    expect(counts.get("わし")).toBe(2);
+    expect(counts.get("おれ")).toBe(1);
+    expect(counts.get("ぼく")).toBe(1);
+    expect(counts.get("わたし")).toBe(1);
+  });
+
   it("「私たち」を「私」と数えない", () => {
     // 長い候補から取り除いていく。複数形は語り手の一人称ではない
     const text = Array.from(

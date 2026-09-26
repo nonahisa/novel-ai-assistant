@@ -410,6 +410,33 @@ describe("視点の札を絞る（2026-09-25 の2回目）", () => {
     expect(result.rejected.map((entry) => entry.reason)).toEqual(["narrator_guess"]);
   });
 
+  /**
+   * 推敲の比べ（2026-09-26、教科書チート）で Kimi-K2.6 が挙げた3件は、どれも
+   * **語り手に見える・聞こえる様子**だった（「怒りに満ちた表情で牙を剥きだした」
+   * 「さっきまでの照れた反応とは違って、ちょっと怒気がこもっている」
+   * 「今は般若もかくやという顔をしている」）。顔つき・反応・声の調子は、一人称の
+   * 語り手が見て書けるもので、知り得ない心ではない。作り例で写す
+   */
+  test("語り手に見える様子（表情・顔・反応・態度）は、知り得ない心ではない（observable）", () => {
+    const text =
+      `${ORE_SCENE}\n` +
+      "　騎士は怒りに満ちた表情で剣を抜いた。\n" +
+      "　さっきまでの照れた反応とは違って、千夏の声には怒気がこもっている。\n" +
+      "　普段は大人しげだったのに、今は鬼のような顔をしている。";
+    const cases: Array<[number, string, string]> = [
+      [15, "怒りに満ちた表情で剣を抜いた。", "「俺」の語りなのに、騎士の「怒り」が言い切られています"],
+      [16, "さっきまでの照れた反応とは違って", "「俺」の語りなのに、千夏の「照れた」心が書かれています"],
+      [17, "今は鬼のような顔をしている。", "「俺」の語りなのに、千夏の怒りの心が書かれています"],
+    ];
+    for (const [line, original, explanation] of cases) {
+      const result = viewpoint(line, original, explanation, text);
+      expect({ line, reasons: result.rejected.map((entry) => entry.reason) }).toEqual({
+        line,
+        reasons: ["observable"],
+      });
+    }
+  });
+
   test("段落の途中で視点が移る指摘は残す", () => {
     const text = `${ORE_SCENE}\n　千夏は窓の外を見て、明日は晴れると信じていた。`;
     const result = viewpoint(

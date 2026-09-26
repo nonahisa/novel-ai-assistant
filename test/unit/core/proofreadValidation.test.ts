@@ -142,6 +142,81 @@ describe("漢字ひらき・語尾単調（1.5で追加）", () => {
     expect(result.accepted).toHaveLength(1);
   });
 
+  /**
+   * 推敲の比べ（2026-09-26、教科書チート10話）で、さくらの gemma-4-31B-it と
+   * Kimi-K2.6 が、**ひらく字の無い所**に漢字ひらきの札を貼って返した。
+   * 説明は「「〜事」という形式名詞が漢字で書かれています」「「暫く」は副詞で…」
+   * だが、原文（「記憶が戻って混乱しているらしい」「フッと、目の前にぼんやりと光る」）
+   * にその字は無く、修正案も空。**画面には、どこを直すのか分からない指摘が並ぶ。**
+   * 修正案が空のときだけ、説明が挙げた漢字が原文にあるかを見る（修正案のある
+   * 指摘は、修正案そのものを手前の関門が確かめている）。
+   */
+  test("説明が挙げた漢字が原文に無く、修正案も空なら落とす", () => {
+    const text = chunkOf(
+      "記憶が戻って混乱しているらしい。フッと、目の前にぼんやりと光る。しあいやろ！"
+    );
+    const result = validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 11,
+            original: "記憶が戻って混乱しているらしい",
+            suggestion: "",
+            reason: "漢字ひらき",
+            explanation: "「〜事」という形式名詞が漢字で書かれています。",
+            confidence: "high",
+          },
+          {
+            line: 11,
+            original: "フッと、目の前にぼんやりと光る",
+            suggestion: "",
+            reason: "漢字ひらき",
+            explanation: "「暫く」は副詞で、漢字表記よりひらがなが自然です",
+            confidence: "high",
+          },
+          {
+            // 原文に漢字が1字も無い（ひらくものが無い）
+            line: 11,
+            original: "しあいやろ！",
+            suggestion: "",
+            reason: "漢字ひらき",
+            explanation: "誤記です",
+            confidence: "high",
+          },
+        ],
+      },
+      text
+    );
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected.map((entry) => entry.reason)).toEqual([
+      "kanji_not_in_original",
+      "kanji_not_in_original",
+      "kanji_not_in_original",
+    ]);
+  });
+
+  test("説明が読みを添えて挙げた漢字（「所謂（いわゆる）」）が原文にあれば、空でも通す", () => {
+    const result = validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 11,
+            original: "所謂、彼は殆ど",
+            suggestion: "",
+            reason: "漢字ひらき",
+            explanation: "「所謂（いわゆる）」と「殆ど」で読みが詰まります",
+            confidence: "high",
+          },
+        ],
+      },
+      kanji
+    );
+
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toHaveLength(1);
+  });
+
   test("語尾単調は、修正案が空のまま通る", () => {
     // **どの文をどう変えるかは文体そのもの**なので、作者が決める
     const result = validateProofreadIssues(
@@ -372,6 +447,103 @@ describe("実データで見つかった、通してはいけない提案", () =
       expect(result.accepted).toHaveLength(1);
     });
 
+    /**
+     * 推敲の比べ（2026-09-26、教科書チート5話・8話）で、本物の繰り返しが
+     * not_repeated で落ちた。範囲の外で数えるのが「漢字か片仮名を含む3字」だけなので、
+     * **2字の熟語（説明）と、仮名だけの語（そのまま）の繰り返しは数えられなかった。**
+     * 説明が「」で挙げた語が本文の近くに2回以上あれば、繰り返しとして通す。
+     */
+    const episode5 = {
+      filePath: "episode_0005.txt",
+      index: 0,
+      text: [
+        "　僕はしどろもどろになりながら説明した。授業で習った基礎的な説明から始めて、マシンガンのように説明する。",
+        "",
+        "　父上はそのまま、はしゃぐリナを振り回し、そのままストンと地面に降ろした。リナはそのまま義母さんに抱きつく。",
+        "",
+        // 件数の上限（1000字あたり5件）で2件目が切られないよう、字数を足す
+        `　${"遠くの山に雲がかかっていた。".repeat(30)}`,
+      ].join("\n"),
+      startLine: 134,
+      chapterStart: 5,
+      chapterEnd: 5,
+      hash: "ep5",
+      segments: [],
+    } as unknown as Chunk;
+
+    test("説明が挙げた2字の熟語・仮名の語が近くで繰り返されていれば通す", () => {
+      const result = validateProofreadIssues(
+        {
+          issues: [
+            {
+              confidence: "medium",
+              explanation: "「説明」が135行の一文だけで3回出ています",
+              line: 135,
+              original: "マシンガンのように説明する",
+              reason: "同語反復",
+              suggestion: "",
+            },
+            {
+              confidence: "medium",
+              explanation: "「そのまま」が2文で3回出ています",
+              line: 137,
+              original: "そのままストンと地面に降ろした",
+              reason: "同語反復",
+              suggestion: "",
+            },
+          ],
+        },
+        episode5
+      );
+
+      expect(result.rejected).toEqual([]);
+      expect(result.accepted).toHaveLength(2);
+    });
+
+    test("説明が挙げた語が、写した範囲に無い・近くに1回しか無い・短い仮名なら通さない", () => {
+      const result = validateProofreadIssues(
+        {
+          issues: [
+            {
+              // 「授業」は近くに1回しか無い
+              confidence: "medium",
+              explanation: "「授業」が繰り返されています",
+              line: 135,
+              original: "授業で習った基礎的な",
+              reason: "同語反復",
+              suggestion: "",
+            },
+            {
+              // 挙げた語が写した範囲に無い（別の所の話）
+              confidence: "medium",
+              explanation: "「説明」が3回出ています",
+              line: 137,
+              original: "義母さんに抱きつく",
+              reason: "同語反復",
+              suggestion: "",
+            },
+            {
+              // 仮名3字以下はどの段落にも出るので数えない
+              confidence: "medium",
+              explanation: "「した」が繰り返されています",
+              line: 135,
+              original: "しどろもどろになりながら",
+              reason: "同語反復",
+              suggestion: "",
+            },
+          ],
+        },
+        episode5
+      );
+
+      expect(result.accepted).toEqual([]);
+      expect(result.rejected.map((entry) => entry.reason)).toEqual([
+        "not_repeated",
+        "not_repeated",
+        "not_repeated",
+      ]);
+    });
+
     test("近くに繰り返しの無い「同語反復」は、今までどおり落とす", () => {
       // 1件目は前後の段落にも無い語。2件目は「になった」だけが23行目と
       // 重なる——**仮名だけの3字の一致は数えない**。どの段落にも出るので、
@@ -509,6 +681,37 @@ describe("実データで見つかった、通してはいけない提案", () =
           ],
         },
         chunkOf(line)
+      );
+
+      expect(result.accepted).toHaveLength(0);
+      expect(result.rejected[0].reason).toBe("dialogue_voice");
+    });
+
+    /**
+     * 推敲の比べ（2026-09-26、教科書チート9話）で、Kimi-K2.6 と Qwen3.6 が
+     * 台詞の中身を**括弧を付けずに**写して同語反復の札を貼った（「骨喰牛はその
+     * ゾンビやスケルトンを食べるおとなしい魔物だよ」「おとなしいのに、何でみんな
+     * 警戒してるの？」）。原文だけを見ると地の文に見えるので、本文の行の中で
+     * 台詞の括弧の内側にあるかを確かめる
+     */
+    test("括弧を付けずに写した台詞の中身も、本文で台詞の内側なら弾く", () => {
+      const text = chunkOf(
+        "「骨喰牛はおとなしい魔物だよ」\n「おとなしいのに、何でみんな警戒してるの？」"
+      );
+      const result = validateProofreadIssues(
+        {
+          issues: [
+            {
+              line: 12,
+              original: "おとなしいのに、何でみんな警戒してるの？",
+              suggestion: "",
+              reason: "同語反復",
+              explanation: "「おとなしい」が2文で2回出ています",
+              confidence: "medium",
+            },
+          ],
+        },
+        text
       );
 
       expect(result.accepted).toHaveLength(0);
