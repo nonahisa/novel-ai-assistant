@@ -1155,6 +1155,47 @@ export function tunedContextWindow(
   return tuned;
 }
 
+/** 読める長さの出どころ。`declared` は申告（作者の num_ctx 指定で絞ったものを含む） */
+export type ContextWindowOrigin = "declared" | "measured";
+
+/**
+ * **申告するプロバイダ（Ollama）で、作者の実測を申告より先に使う**
+ * （作者の裁定、2026-09-26 夕。残課題 J3。設計書 6.49.6）。
+ *
+ * `/api/show` の申告はモデルが学習した長さであって、**作者の機械に載る
+ * 長さではない。** `gemma4:26b` は 262,144 と申告しながらメモリに載らな
+ * かった（6.28.11）。実装ルール6の「作者自身の実測が常に勝つ」と同じ
+ * 向きで、測ってあれば実測を使う。
+ *
+ * `resolveContextWindow`（申告しないプロバイダの読み順）には混ぜない。
+ * あちらは「台帳 → 設定 → 同梱 → 既定」で、申告という段が無い。
+ *
+ * - **申告を超えては使わない。** 学習した長さを超えた num_ctx を渡しても
+ *   読めない。測定は申告を天井にするので、超える値は手書きか写し間違い
+ * - **天井に届いた測定は申告を使う。** 台帳のトークン数は送った字数の
+ *   換算で、応答の枠のぶん申告より少し短い。「読めた」と確かめたのに
+ *   絞ることになる
+ * - 小さすぎる値（`MIN_CONTEXT_WINDOW` 未満）・壊れた値は使わない
+ *
+ * 台帳は**作者の実測だけ**を渡すこと（`modelTuningRaw`）。同梱の値は
+ * 手元のモデルには置かない決まりだが、ここで混ぜない形にしておく。
+ */
+export function preferMeasuredContextWindow(
+  declared: number,
+  tuning: ModelTuning | undefined
+): { tokens: number; origin: ContextWindowOrigin } {
+  const measured = tuning?.contextWindow;
+  const usable =
+    measured !== undefined &&
+    Number.isFinite(measured) &&
+    measured >= MIN_CONTEXT_WINDOW &&
+    tuning?.contextHitCeiling !== true &&
+    measured < declared;
+  return usable
+    ? { tokens: measured, origin: "measured" }
+    : { tokens: declared, origin: "declared" };
+}
+
 /**
  * 測って分かった待ち時間（秒）。無ければ undefined。
  *

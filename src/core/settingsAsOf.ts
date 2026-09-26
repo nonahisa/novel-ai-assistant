@@ -4,7 +4,12 @@ import {
   personalityAsOf,
   personalityRevealedAfter,
 } from "./personalityFacets";
-import { speechStyleAsOf, speechStyleRevealedAfter } from "./speechStyle";
+import {
+  authorSpeechStyleAsOf,
+  isAuthorSpeechStyleChange,
+  speechStyleAsOf,
+  speechStyleRevealedAfter,
+} from "./speechStyle";
 
 /**
  * 性格を面で巻き戻せる記録か（2026-09-24 夜）。
@@ -189,6 +194,19 @@ export function recordAsOf<T extends object>(
         continue;
       }
     }
+    /*
+      **作者が「第N話から口調が変わった」と記録していれば、それが先**
+      （作者の裁定、2026-09-26 夕。J9）。記録した話からは、材料の口調を
+      記録した値にする——前の口調のままの面を載せると、AIは変わった後の
+      台詞を「設定と食い違う」と読む。記録より前の話は、下の面で巻き戻す
+    */
+    if (field === "speechStyle" && chapter !== null) {
+      const recorded = authorSpeechStyleAsOf(changes, chapter);
+      if (recorded !== undefined) {
+        rolled[field] = recorded;
+        continue;
+      }
+    }
     // 口調も面で巻き戻す（2026-09-25。性格と同じ）
     if (field === "speechStyle" && speechSource && chapter !== null) {
       const asOf = speechStyleAsOf(speechSource, chapter);
@@ -198,7 +216,11 @@ export function recordAsOf<T extends object>(
       }
     }
     rolled[field] = valueAsOf(
-      changes,
+      // 作者の口調の記録（J9）は上で見た。ここへ混ぜると、面で巻き戻せない
+      // 資料で「記録した話より前は、まだ分かっていない」と読まれ、口調が消える
+      field === "speechStyle"
+        ? changes.filter((change) => !isAuthorSpeechStyleChange(change))
+        : changes,
       field,
       (current as string | null) ?? null,
       chapter

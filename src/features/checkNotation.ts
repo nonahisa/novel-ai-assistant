@@ -6,6 +6,7 @@ import { readTextFile } from "../core/textFile";
 import { episodeBodySources } from "../core/episodeChunks";
 import {
   detectNotationVariants,
+  dialogueOnlySurfaces,
   type NotationSource,
   type NotationVariantGroup,
 } from "../core/notationVariants";
@@ -424,7 +425,7 @@ async function pickGroups(
 ): Promise<NotationVariantGroup[] | undefined> {
   const items = groups.map((group) => ({
     label: group.label,
-    description: describeForms(group),
+    description: describeNotationForms(group),
     detail: exampleOf(group),
     group,
   }));
@@ -458,15 +459,25 @@ async function pickGroups(
  * 並べると「3 4回 / 5 2回 / ３ 1回…」と最大20個になって読めない。
  * 作者が知りたいのは「直す箇所がどれだけあるか」である。
  */
-function describeForms(group: NotationVariantGroup): string {
+export function describeNotationForms(group: NotationVariantGroup): string {
   if (group.kind === "digit_width") {
     const { half, full } = digitWidthCounts(group);
     return `半角 ${half}件／全角 ${full}件`;
   }
+  // 台詞の中にしか出ない書き方には、わざとかもしれないと添える（J11）。
+  // 並べ方と件数は変えない——揃えるかどうかは作者が決める
+  const dialogueOnly = new Set(dialogueOnlySurfaces(group));
   return group.forms
-    .map((form) => `${form.surface} ${form.occurrences.length}回`)
+    .map(
+      (form) =>
+        `${form.surface} ${form.occurrences.length}回` +
+        (dialogueOnly.has(form.surface) ? DIALOGUE_ONLY_NOTE : "")
+    )
     .join(" / ");
 }
+
+/** 台詞の中だけに出る書き方へ添える言葉（J11） */
+const DIALOGUE_ONLY_NOTE = "（台詞の中だけ。わざとかもしれません）";
 
 /**
  * 組ごとに聞くか、多い方でまとめて決めるか（設計書6.8.9）。

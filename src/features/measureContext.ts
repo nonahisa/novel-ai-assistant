@@ -140,16 +140,6 @@ const FALLBACK_CONTEXT_WINDOW = 8192;
 const MIN_CEILING_TOKENS = 256 * 1024;
 
 /**
- * 測った**上限**を台帳へ書いてよいプロバイダ。
- *
- * **申告値を取れないプロバイダだけ**が対象である。Ollama・Gemini・
- * Claude はモデル側から上限を取れるので、こちらが上書きすると
- * 「取れる正しい値」を測定値で潰すことになる（参考表示にとどめる）。
- *
- * **待ち時間のほうは6つとも書く。** こちらはどのAIでも取りようがなく、
- * 実際に切れているのはローカルの小さいモデルとクラウドの両方である。
- */
-/**
  * 申告の文脈長が**当て推量**であるプロバイダ（設計書6.62.1）。
  *
  * ここは作者が設定（`novelai.sakura.contextWindow` など）に書いた値を
@@ -165,10 +155,36 @@ const GUESSED_CONTEXT_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>([
   "openai",
 ]);
 
+/**
+ * 測った**上限**を台帳へ書いてよいプロバイダ。
+ *
+ * 申告値を取れないプロバイダ（さくら・LM Studio・ChatGPT）と、**Ollama**。
+ *
+ * **Ollama は申告するが、作者の実測を先に使う**（作者の裁定、2026-09-26 夕。
+ * 残課題 J3。設計書 6.49.6）。申告は学習した長さで、作者の機械に載る長さ
+ * ではない（`gemma4:26b` は 262,144 と申告して載らなかった。6.28.11）。
+ * 読む側（`ollamaProvider` の `withMeasured`）は、実測が申告より短いときだけ
+ * 使い、申告を超えては使わない。
+ *
+ * Gemini・Claude は入れない。クラウドの申告は機械に左右されないので、
+ * 測定値で潰す理由が無い（参考表示にとどめる）。
+ *
+ * **待ち時間のほうは6つとも書く。** こちらはどのAIでも取りようがなく、
+ * 実際に切れているのはローカルの小さいモデルとクラウドの両方である。
+ */
 const CONTEXT_TUNABLE_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>([
   "sakura",
   "lmstudio",
   "openai",
+  "ollama",
+]);
+
+/**
+ * 読める長さを**自分で申告する**うえで、実測も台帳へ書くプロバイダ（J3）。
+ * 確認の文面で「申告より長くは使いません」と断るのに使う。
+ */
+const DECLARING_TUNABLE_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>([
+  "ollama",
 ]);
 
 /**
@@ -707,7 +723,10 @@ async function runMeasurement(
   const modelInfo = target
     ? await registry.modelInfoFor(target.providerId, target.model)
     : await registry.resolveModelInfo(feature);
-  const declaredTokens = modelInfo?.contextWindow;
+  // **天井は、実測を当てる前の申告で置く**（J3）。実測の当たった
+  // `contextWindow` で置くと、一度短く測れたモデルを二度と長く測れない
+  const declaredTokens =
+    modelInfo?.declaredContextWindow ?? modelInfo?.contextWindow;
 
   /*
     **書ける長さだけを測るときは、ここで分かれる**（作者の依頼、2026-09-13）。
@@ -2427,7 +2446,11 @@ async function offerToSave(input: {
       `測った長さ ${input.low.toLocaleString("ja-JP")}字 も記録に残り、` +
       "チャンクの大きさを決めるのに使います。" +
       (writesContext
-        ? ""
+        ? DECLARING_TUNABLE_PROVIDERS.has(input.providerId)
+          ? // J3：実測は申告より短いときだけ効く。天井に届いたなら申告のまま
+            "読める長さは、このAIが申告する長さより短いときだけ、測った値を使います" +
+            "（申告より長くは使いません）。"
+          : ""
         : "読める長さそのものは、このAIが申告する値を使い続けます" +
           "（測った長さは記録に残すだけです）。"),
     "設定に反映",

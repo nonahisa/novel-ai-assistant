@@ -1,6 +1,7 @@
 import { OKURIGANA_GROUPS } from "./okuriganaVariants";
 import { tcyRuns } from "./tateChuYoko";
 import { FULLWIDTH_DIGITS } from "./digitWidth";
+import { quotedSpans } from "./quotedSpans";
 /**
  * 表記ゆれ検知（P-13）の判定部分。
  *
@@ -609,6 +610,49 @@ function collectForms(
     }))
     .filter((form) => form.occurrences.length > 0)
     .sort((left, right) => right.occurrences.length - left.occurrences.length);
+}
+
+/**
+ * その出現が台詞（「」『』）の中か。見分け方は `quotedSpans` に任せる
+ * （入れ子・閉じ忘れの扱いを1か所に揃えるため）。
+ *
+ * **行の中だけで見る。** 出現は行ごとに拾っており、行をまたぐ台詞の続きは
+ * 分からない。閉じない台詞は行末までを台詞と見る（`quotedSpans` の既定）。
+ */
+function isInsideDialogue(
+  occurrence: NotationOccurrence,
+  length: number
+): boolean {
+  return quotedSpans(occurrence.lineText).some(
+    (span) =>
+      span.start < occurrence.column &&
+      occurrence.column + length <= span.end
+  );
+}
+
+/**
+ * **台詞の中にしか出ない書き方**（作者の裁定、2026-09-26 夕。残課題 J11）。
+ *
+ * 6歳の子の台詞だけ「だいじょうぶ」と平仮名にする、のような書き分けは
+ * わざとのことがある。一覧の件数だけでは見分けられないので、手がかりを
+ * 添える。**並べ方・件数・揃える先の既定は変えない**——わざとかどうかは
+ * 作者が決める。
+ *
+ * 挙げるのは、**ほかの書き方が地の文に1度でも出ている**ときだけ。どれも
+ * 台詞の中だけなら、書き分けの手がかりにならない。
+ *
+ * 数字の組（幅でまとめて出す）は見ない。
+ */
+export function dialogueOnlySurfaces(group: NotationVariantGroup): string[] {
+  if (group.kind === "digit_width") return [];
+  const inDialogueOnly = (form: NotationVariantForm): boolean =>
+    form.occurrences.length > 0 &&
+    form.occurrences.every((occurrence) =>
+      isInsideDialogue(occurrence, form.surface.length)
+    );
+  const onlyInDialogue = group.forms.filter(inDialogueOnly);
+  const someoneInNarration = group.forms.some((form) => !inDialogueOnly(form));
+  return someoneInNarration ? onlyInDialogue.map((form) => form.surface) : [];
 }
 
 /** 本文から、その表記が出てくる場所をすべて拾う */

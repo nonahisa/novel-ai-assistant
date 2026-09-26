@@ -784,6 +784,17 @@ export function formatModelContext(model: ModelInfo): string {
   if (model.loaded === false && model.maxContextWindow) {
     return `文脈 最大${formatContext(model.maxContextWindow)}（選ぶと読み込みます）`;
   }
+  // **実測を使っているときは名乗る**（J3、2026-09-26）。申告より短い数字が
+  // 黙って出ると、作者には「申告が変わった」のか「測った値」なのか分からない
+  if (
+    model.contextWindowSource === "measured" &&
+    model.declaredContextWindow !== undefined
+  ) {
+    return (
+      `文脈 ${formatContext(model.contextWindow)}` +
+      `（実測。申告 ${formatContext(model.declaredContextWindow)}）`
+    );
+  }
   return `文脈 ${formatContext(model.contextWindow)}`;
 }
 

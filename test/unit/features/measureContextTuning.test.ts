@@ -265,8 +265,9 @@ describe("測り直しのために延ばした待ち時間", () => {
     expect(entry.timeoutSeconds).not.toBe(360);
     expect(entry.measuredChars).toBeGreaterThan(0);
     expect(typeof entry.measuredAt).toBe("string");
-    // Ollamaは上限を `/api/show` から取れるので、測った値で潰さない
-    expect(entry.contextWindow).toBeUndefined();
+    // Ollamaでも測った長さを記録する（作者の裁定、2026-09-26 夕。J3）。
+    // 申告より短いときだけ読む側が使う（`preferMeasuredContextWindow`）
+    expect(entry.contextWindow).toBeGreaterThan(0);
   });
 
   /**

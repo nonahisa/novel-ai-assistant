@@ -12,6 +12,7 @@ import {
 import { parseNotationAdvice } from "../../core/notationAdviceValidation";
 import {
   detectNotationVariants,
+  dialogueOnlySurfaces,
   foldSubsumedGroups,
   type NotationSource,
 } from "../../core/notationVariants";
@@ -151,20 +152,25 @@ export function notationDetect(input: { folder: string; limit?: number }) {
       "どちらへ揃えるかを問うときは novel.prompt / novel.run（feature: notation）へ、" +
       "この groups の1件をそのまま渡してください。",
     total: groups.length,
-    groups: groups.slice(0, input.limit ?? DEFAULT_LIMIT).map((group) => ({
-      kind: group.kind,
-      key: group.key,
-      label: group.label,
-      forms: group.forms.map((form) => ({
-        surface: form.surface,
-        count: form.occurrences.length,
-        // **出現例は少しだけ。** 全部渡すと、組が多い作品で
-        // 返りが本文より大きくなる
-        excerpts: form.occurrences
-          .slice(0, EXCERPT_LIMIT)
-          .map((occurrence) => occurrence.lineText.trim()),
-      })),
-    })),
+    groups: groups.slice(0, input.limit ?? DEFAULT_LIMIT).map((group) => {
+      // 台詞の中にしか出ない書き方（J11）。製品の一覧と同じ手がかりを渡す
+      const dialogueOnly = new Set(dialogueOnlySurfaces(group));
+      return {
+        kind: group.kind,
+        key: group.key,
+        label: group.label,
+        forms: group.forms.map((form) => ({
+          surface: form.surface,
+          count: form.occurrences.length,
+          ...(dialogueOnly.has(form.surface) ? { dialogueOnly: true } : {}),
+          // **出現例は少しだけ。** 全部渡すと、組が多い作品で
+          // 返りが本文より大きくなる
+          excerpts: form.occurrences
+            .slice(0, EXCERPT_LIMIT)
+            .map((occurrence) => occurrence.lineText.trim()),
+        })),
+      };
+    }),
   };
 }
 

@@ -84,7 +84,10 @@ import {
   promoteConflictToChanges,
   undoRejectedValue,
 } from "../core/recordChanges";
-import { isSpeechStyleEcho } from "../core/speechStyle";
+import {
+  isSpeechStyleEcho,
+  recordSpeechStyleChange,
+} from "../core/speechStyle";
 import type {
   RecordChange,
   RecordConflict,
@@ -179,7 +182,7 @@ import {
 import { buildSettingsPanelHtml } from "../views/settingsPanelHtml";
 import { renderMarkdownLite } from "../core/markdownLite";
 import { withCancellableProgress } from "../views/progress";
-import { cancelItem } from "../views/dialogs";
+import { askText, cancelItem } from "../views/dialogs";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { knownChaptersOf, unknownCitedChapters } from "../core/chapterCitations";
 import { scanWork } from "../core/scanner";
@@ -330,6 +333,8 @@ interface DetailView {
      * - `markPersonalityChange`：積んだ性格の面のうち、作中で変わったものを
      *   作者が決める（2026-09-24 夜）
      * - `restorePersonalityFacet`：過去の面にしたものを、いまも成り立つ面へ戻す
+     * - `markSpeechStyleChange`：「第N話から口調が変わった」を作者が記録する
+     *   （2026-09-26 夕。J9）
      *
      * **どちらの操作かは画面側で判断させない。** `kind` をそのまま
      * メッセージの種別として送らせる（行の見出しから当てさせると、
@@ -343,7 +348,8 @@ interface DetailView {
         | "dropChanges"
         | "confirmChanges"
         | "markPersonalityChange"
-        | "restorePersonalityFacet";
+        | "restorePersonalityFacet"
+        | "markSpeechStyleChange";
     };
     /**
      * 値ごとに添える操作（作者の裁定、2026-09-26 深夜）。2種類ある。
@@ -929,6 +935,8 @@ export class SettingsPanel {
           ...personalityFacetLines(character.personalityFacets ?? []),
           // 口調の面（2026-09-25）。どの話のどの台詞から読んだかを見せる
           ...speechStyleFacetLines(character.speechStyleFacets ?? []),
+          // 「第N話から口調が変わった」を記録する口（J9）
+          ...speechStyleChangeLines(character),
           ...referenceLines(
             character.conflicts,
             character.evidence,
@@ -1229,6 +1237,9 @@ export class SettingsPanel {
           return;
         case "restorePersonalityFacet":
           await this.handleRestorePersonalityFacet(message.id);
+          return;
+        case "markSpeechStyleChange":
+          await this.handleMarkSpeechStyleChange(message.id);
           return;
         case "retire":
           await this.handleRetire(message.kind, message.id);
@@ -1721,6 +1732,63 @@ export class SettingsPanel {
       id,
       `性格の「${chosen.value}」を、いまも成り立つ面へ戻しました。` +
         "変化の記録は残してあります（要らなければ「誤りを落とす」から落とせます）。"
+    );
+  }
+
+  /**
+   * 「第N話から口調が変わった」を作者が記録する（作者の裁定、2026-09-26 夕。
+   * 残課題 J9。設計書 6.5.11）。記録の形は `recordSpeechStyleChange`。
+   *
+   * 保存は `persist`（人物は `saveOrUpdate`＝退避してから作り直す）。
+   */
+  private async handleMarkSpeechStyleChange(id: string): Promise<void> {
+    const character = this.characters.find((entry) => entry.id === id);
+    if (!character) {
+      this.post({ type: "error", message: "選択した設定が見つかりません。" });
+      return;
+    }
+    const chapterText = await askText({
+      title: `${character.name}：口調が変わった話（1/2）`,
+      prompt: "第何話から口調が変わりましたか（数字で）",
+      placeHolder: "例：8",
+      ignoreFocusOut: true,
+      validateInput: (text) =>
+        parseChapterNumber(text) === undefined
+          ? "1以上の整数を入れてください"
+          : undefined,
+    });
+    if (chapterText === undefined) return;
+    const chapter = parseChapterNumber(chapterText);
+    if (chapter === undefined) return;
+
+    const value = await askText({
+      title: `${character.name}：第${chapter}話からの口調（2/2）`,
+      prompt:
+        "変わった後の口調を書いてください（一人称・語尾・話し方など）。" +
+        "前の口調は、そのまま記録に残ります",
+      value: character.speechStyle ?? "",
+      ignoreFocusOut: true,
+      validateInput: (text) =>
+        text.trim() ? undefined : "口調を入れてください",
+    });
+    if (value === undefined) return;
+
+    const updated = recordSpeechStyleChange(character, chapter, value);
+    if (!updated) {
+      await this.reloadAfterSave(
+        "character",
+        id,
+        `第${chapter}話には、別の口調の記録がすでにあります。` +
+          "「変化（speechStyle）」の行の「誤りを落とす」で落としてから、もう一度記録してください。"
+      );
+      return;
+    }
+    await this.persist("character", updated);
+    await this.reloadAfterSave(
+      "character",
+      id,
+      `${character.name}の口調が第${chapter}話から「${value.trim()}」に変わったと記録しました。` +
+        `矛盾検知は第${chapter}話から、この口調で台詞を照らします（前の口調との違いは指摘させません）。`
     );
   }
 
@@ -3239,9 +3307,55 @@ function shortValueLabel(value: string): string {
  * 2度並べるだけになる。
  */
 /**
+ * 話数の入力を読む。「８」「第8話」のような書き方も受ける（全角は NFKC で
+ * 半角へ）。1以上の整数でなければ undefined。
+ */
+function parseChapterNumber(text: string): number | undefined {
+  const digits = text
+    .normalize("NFKC")
+    .trim()
+    .replace(/^第/u, "")
+    .replace(/話$/u, "")
+    .trim();
+  if (!/^\d+$/u.test(digits)) return undefined;
+  const chapter = Number(digits);
+  return Number.isSafeInteger(chapter) && chapter >= 1 ? chapter : undefined;
+}
+
+/**
+ * 「第N話から口調が変わった」を記録する行（作者の裁定、2026-09-26 夕。J9）。
+ *
+ * 性格の「作中の変化にする」は面どうしを結ぶが、口調は**変わった後の口調が
+ * まだ面として読まれていない**ことが多い（変わった話を抽出していない等）。
+ * だから面を選ばせず、何話からか・変わった後の口調を作者が書く。記録した
+ * ものは「変化（speechStyle）」の行に出て、そこの「誤りを落とす」で落とせる。
+ *
+ * 口調の欄も面も空の人物には出さない（台詞の無い人物に毎回並ぶと読まれない）。
+ * 欄を直せば口調が入り、行が出る。
+ */
+function speechStyleChangeLines(character: Character): DetailView["reference"] {
+  const hasSpeech =
+    Boolean(character.speechStyle?.trim()) ||
+    (character.speechStyleFacets ?? []).length > 0;
+  if (!hasSpeech) return [];
+  return [
+    {
+      label: "口調の変化",
+      value:
+        "作中で口調が変わった話を記録できます。記録した話からは、矛盾検知が記録した口調で台詞を照らします",
+      action: {
+        label: "第N話から変わったと記録する",
+        field: "speechStyle",
+        kind: "markSpeechStyleChange" as const,
+      },
+    },
+  ];
+}
+
+/**
  * 口調の面（2026-09-25）。**見せるだけで、操作は付けない。**
- * 性格と違って「作中の変化にする」口はまだ無い（口調が変わったと決める
- * 操作は、要るかどうかを作者が確かめてから足す）。欄を直せば本体は変わる。
+ * 口調が変わったことは、面を結ばずに「口調の変化」の行から記録する（J9。
+ * `speechStyleChangeLines`）。欄を直せば本体は変わる。
  *
  * 面が1つだけのときは出さない——欄と同じことを2度並べるだけになる。
  * 根拠の台詞を添えるのは、話者の取り違え（別人の台詞から読んだ口調）を
@@ -3599,6 +3713,16 @@ type PanelMessage =
   /** 過去の面にした性格を、いまも成り立つ面へ戻す（押し間違いの取り消し） */
   | {
       type: "restorePersonalityFacet";
+      kind: SettingsKind;
+      id: string;
+      field: string;
+    }
+  /**
+   * 「第N話から口調が変わった」を作者が記録する（2026-09-26 夕。J9）。
+   * 何話からか・変わった後の口調は、押した先で入れさせる（`field` は常に口調）
+   */
+  | {
+      type: "markSpeechStyleChange";
       kind: SettingsKind;
       id: string;
       field: string;

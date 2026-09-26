@@ -25,7 +25,12 @@ import {
 import { OUTPUT_RESERVE_TOKENS } from "./contextGuard";
 import { logLine } from "../core/logger";
 import { withAiWork } from "../core/aiActivity";
-import { modelTuning, resolveTimeoutMs } from "../core/modelTuning";
+import {
+  modelTuning,
+  modelTuningRaw,
+  preferMeasuredContextWindow,
+  resolveTimeoutMs,
+} from "../core/modelTuning";
 import { customEndpointNotice } from "../core/endpointNotice";
 
 const DEFAULT_ENDPOINT = "http://localhost:11434";
@@ -38,6 +43,18 @@ const DEFAULT_ENDPOINT = "http://localhost:11434";
  * 8192 に落ちるだけで、いまより悪くはならない。**
  */
 const UNKNOWN_CONTEXT_WINDOW = 8192;
+
+/**
+ * 実測を使ったことは、モデルごとに1度だけログへ書く。`getModel` は
+ * 呼び出しのたびに通るので、毎回書くとログがその行で埋まる。
+ */
+const notedMeasured = new Set<string>();
+
+function noteMeasuredOnce(message: string): void {
+  if (notedMeasured.has(message)) return;
+  notedMeasured.add(message);
+  logLine(message);
+}
 
 /**
  * 作者が明示した `num_ctx`（設計書6.58）。指定が無ければ undefined。
@@ -332,14 +349,18 @@ export class OllamaProvider implements AIProvider {
       if (cached) {
         // キャッシュには `getModel()` 経由でも入る。あちらは絞らないので、
         // 一覧へ出す前にここでも確かめる
-        if (isGenerationModel(name, cached.capabilities)) infos.push(cached);
+        if (isGenerationModel(name, cached.capabilities)) {
+          infos.push(this.withMeasured(cached));
+        }
         continue;
       }
       try {
         const info = await this.showModel(name);
         // 詳細は覚えておく（`getModel()` が使う）が、一覧へは出さない
         this.modelCache.set(name, info);
-        if (isGenerationModel(name, info.capabilities)) infos.push(info);
+        if (isGenerationModel(name, info.capabilities)) {
+          infos.push(this.withMeasured(info));
+        }
       } catch {
         // 詳細が取れなくても一覧からは落とさない。
         // ただし名前から用途が明らかなものは落とす
@@ -405,6 +426,11 @@ export class OllamaProvider implements AIProvider {
         **上限を1つにすれば、関所・分割・送信の3つが自動的に揃う。**
       */
       contextWindow: effectiveContextWindow(contextWindow, configuredNumCtx()),
+      // 実測を当てる前の値（J3）。実測は覚えずに、渡すたびに当てる（`withMeasured`）
+      declaredContextWindow: effectiveContextWindow(
+        contextWindow,
+        configuredNumCtx()
+      ),
       parameterSize,
       capabilities: res.capabilities ?? [],
       tier: inferTier(parameterSize, "ollama"),
@@ -416,14 +442,47 @@ export class OllamaProvider implements AIProvider {
 
   async getModel(name: string): Promise<ModelInfo | undefined> {
     const cached = this.modelCache.get(name);
-    if (cached) return cached;
+    if (cached) return this.withMeasured(cached);
     try {
       const info = await this.showModel(name);
       this.modelCache.set(name, info);
-      return info;
+      return this.withMeasured(info);
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * **作者の実測が申告より短ければ、そちらを使う**（作者の裁定、2026-09-26 夕。
+   * 残課題 J3。設計書 6.49.6）。決まりは `preferMeasuredContextWindow`。
+   *
+   * **覚えた情報には当てず、渡すたびに当てる。** 台帳は測り終えた瞬間に
+   * 変わるが、`modelCache` は窓を開き直すまで残る。覚えた値に当てると、
+   * 測った直後の機能が古い長さのまま分割する。台帳の読みは軽い（設定の
+   * 読み取りだけ）。
+   *
+   * 関所（`meteredProvider`）・分割・送る `num_ctx` の3つはどれも
+   * `contextWindow` を見るので、ここ1か所で揃う（6.58.4 と同じ形）。
+   */
+  private withMeasured(info: ModelInfo): ModelInfo {
+    const declared = info.declaredContextWindow ?? info.contextWindow;
+    const chosen = preferMeasuredContextWindow(
+      declared,
+      modelTuningRaw(this.id, info.id)
+    );
+    if (chosen.origin === "measured") {
+      // 名乗る。数字が申告と違う理由を、ログからも追えるようにする
+      noteMeasuredOnce(
+        `Ollama：${info.id} の読める長さは、作者の実測 ${chosen.tokens} トークンを使います` +
+          `（申告 ${declared}。AIチューニングの記録から）。`
+      );
+    }
+    return {
+      ...info,
+      contextWindow: chosen.tokens,
+      declaredContextWindow: declared,
+      contextWindowSource: chosen.origin,
+    };
   }
 
   /**

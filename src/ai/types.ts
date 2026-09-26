@@ -24,8 +24,21 @@ export interface ModelInfo {
   /** Ollamaなら "gemma4:e4b" のようなタグ */
   id: string;
   displayName: string;
-  /** モデルが宣言するコンテキスト長（トークン） */
+  /**
+   * 使うコンテキスト長（トークン）。ふつうはモデルが宣言する値。
+   * Ollama では作者の実測が申告より短ければそちらになる（J3。`contextWindowSource`）
+   */
   contextWindow: number;
+  /**
+   * 実測を当てる前の申告（作者の num_ctx 指定で絞ったもの）。**Ollama だけが入れる。**
+   *
+   * 読める長さの測り直しは、ここを天井にする。`contextWindow` を天井にすると、
+   * 一度短く測れた（その日たまたまメモリが混んでいた）モデルは、二度と
+   * それより長く測れなくなる。
+   */
+  declaredContextWindow?: number;
+  /** `contextWindow` の出どころ。入れるのは Ollama だけ（ほかは申告か設定） */
+  contextWindowSource?: "declared" | "measured";
   /** パラメータ数の表記（"8.0B" など）。取得できなければ null */
   parameterSize: string | null;
   /** ツール呼び出し・思考モードなどの対応状況 */

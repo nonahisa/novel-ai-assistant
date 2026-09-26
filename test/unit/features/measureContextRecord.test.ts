@@ -196,12 +196,11 @@ describe("測った結果が台帳へ入ったかどうか", () => {
   });
 
   /**
-   * **Ollama では、測った長さを「読める長さ」として使わない**
-   * （`CONTEXT_TUNABLE_PROVIDERS` に入っていない。申告値のほうが正しい）。
+   * **Ollama では、測った長さは申告より短いときだけ使う**
+   * （作者の裁定、2026-09-26 夕。J3。それまでは申告だけを使っていた）。
    *
    * それを断らずに「設定として覚えます」とだけ言うと、作者は測った
-   * 138,714字がそのまま効くと読む。**何を記録して何を記録しないかを
-   * 確認の文面で先に言う。**
+   * 138,714字がそのまま効くと読む。**申告との関係を確認の文面で先に言う。**
    */
   test("確認の文面が、記録する欄と記録しない欄を分けて伝える", async () => {
     installSettings({ "ollama.timeoutSeconds": 900 });
@@ -214,7 +213,9 @@ describe("測った結果が台帳へ入ったかどうか", () => {
       shown.filter((message) => message.includes("反映するのは"))
     );
     expect(confirm.length).toBeGreaterThan(0);
-    // 申告値を持つ相手では、測った長さは「読める長さの設定」にはならない
-    expect(confirm.some((message) => message.includes("申告"))).toBe(true);
+    // 申告値を持つ相手では、申告より長くは使わないことを断る
+    expect(
+      confirm.some((message) => message.includes("申告より長くは使いません"))
+    ).toBe(true);
   });
 });

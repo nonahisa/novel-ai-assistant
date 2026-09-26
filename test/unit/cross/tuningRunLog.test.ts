@@ -146,14 +146,16 @@ describe("測った結果を、記録へ1行残す", () => {
     expect(line).toContain("記録しました");
   });
 
-  test("Ollamaは、読める長さを記録しない理由まで残す", async () => {
-    // 申告値をAPIから取れるので台帳へは書かない。黙ると、作者には
-    // 「測ったのに反映されない」としか見えない
+  test("Ollamaも、読める長さを記録したと残す（J3）", async () => {
+    // 作者の裁定（2026-09-26 夕。残課題 J3）で、Ollama でも測った長さを台帳へ
+    // 書き、申告より短いときに使うようになった。記録の行もそれに合わせる
+    // （申告しか使わないプロバイダの断りは `core/runLog.ts` に残っている）
     answerWith("設定に反映");
 
     await measureContext(registry, "default", undefined, "input");
 
-    expect(tuningLine()).toContain("読める長さはAIの申告値を使うため記録しません");
+    expect(tuningLine()).toContain("記録しました（読める長さと待ち時間）");
+    expect(tuningLine()).not.toContain("申告値を使うため記録しません");
   });
 
   test("反映しなかった回は「記録なし」と理由が残り、「記録しました」とは書かれない", async () => {
