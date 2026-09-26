@@ -3612,6 +3612,8 @@ export async function activate(
     registerCommand("novelai.renameWork", async (node?: WorkNode) => {
       const work = await resolveWork(node, registry, {
         title: "名前を変える作品を選択",
+        // 作品に手を加える操作なので、直前の作品を選ばれた状態にしない（J13 の広げ、2026-09-26）
+        preferLast: false,
       });
       if (!work) return;
       // 一覧の更新は `registry.onDidChange` が受け持つ（登録・解除と同じ）
@@ -6308,7 +6310,7 @@ export async function activate(
   // 保持が原則なので、同期にも保存にも自動の変換は足していない
   context.subscriptions.push(
     registerCommand("novelai.unifyEol", async (node?: WorkRef) => {
-      const work = await resolveWork(node, registry);
+      const work = await resolveWork(node, registry, { preferLast: false }); // 原稿の改行を書き換えるので既定にしない
       if (!work) return;
       const { unifyEol } = await import("./features/eolUnify.js");
       await unifyEol(work);
@@ -6508,7 +6510,7 @@ export async function activate(
   */
   context.subscriptions.push(
     registerCommand("novelai.postNewEpisode", async (node?: WorkNode) => {
-      const work = await resolveWork(node, registry);
+      const work = await resolveWork(node, registry, { preferLast: false }); // 投稿に使うので既定にしない
       if (!work) return CHECK_CANCELLED;
       if (!(await saveDirtyDocumentsBeforeExtraction(work, "投稿の準備"))) {
         return CHECK_CANCELLED;
@@ -7452,8 +7454,8 @@ interface ResolveWorkOptions {
    * 選ぶ一覧で、**直前に使った作品を一番上・選ばれた状態**にする
    * （作者の裁定 J13、2026-09-26）。決まった作品は「直前の作品」として覚える。
    *
-   * いまは検知（誤字脱字・推敲・矛盾）と伏線の操作だけが付ける。
-   * 作者の裁定がこの範囲だったため。
+   * **既定で付く**（省けば true。作者の裁定 J13 の広げ、2026-09-26「作品を選ぶ操作すべてに広げる」）。
+   * 作品に手を加える操作（作品名の変更・改行の統一・投稿）だけ false を渡し、押し間違いで別の作品に手を入れないようにする。
    */
   preferLast?: boolean;
 }
@@ -7591,7 +7593,7 @@ async function resolveWork(
   */
   if (
     work &&
-    options.preferLast &&
+    (options.preferLast ?? true) &&
     registry.list().length > 1 &&
     lastWorkMemory?.get() !== work.id
   ) {
@@ -7655,7 +7657,7 @@ async function resolveWorkUnrouted(
       （補足付きの一覧〈annotate〉は「溜まっている作品を上」の並びを
       持っているので、ここでは触らない。いま preferLast と併せて使う所は無い）
     */
-    const { ordered, lastFirst } = options.preferLast
+    const { ordered, lastFirst } = (options.preferLast ?? true)
       ? orderByLastWork(works, lastWorkMemory?.get())
       : { ordered: works, lastFirst: false };
     const picked = await vscode.window.showQuickPick(
