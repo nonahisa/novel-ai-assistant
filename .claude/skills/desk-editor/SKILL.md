@@ -13,7 +13,7 @@ description: 原稿エディターを Claude のデスクトップアプリの�
 
 | 段 | 中身 | 状態 |
 |---|---|---|
-| 1 | 作品を開いて書き、保存できる | 試作中（2026-09-26） |
+| 1 | 作品を開いて書き、保存できる | 試作済み（2026-09-26。確認用コピーの写しで、書き足した1行だけが変わり文字コード・改行も保たれることを確かめた） |
 | 2 | 同期（GitHub。いまの同期と同じ git の操作を読み書き役が行う） | 未着手 |
 | 3 | AIとの連携（下の「Claude が手伝うとき」と、エディターから手元の Ollama・さくらの機能を呼ぶ） | 未着手 |
 
@@ -38,8 +38,11 @@ description: 原稿エディターを Claude のデスクトップアプリの�
 
 ## 起動
 
-- `.claude/launch.json` の `desk` の設定を、右の枠の `preview_start`（名前 `desk`）で開く。作品フォルダーは設定の引数で渡す
-- 設定の中身・ポート・引数は、試作が出来たらここへ書く
+- `.claude/launch.json` の `desk` の設定を、右の枠の `preview_start`（名前 `desk`）で開く。中身は `node desk/start.mjs --work <作品フォルダー> --port 4870`（環境変数 `NOVELAI_DESK_WORK`・`NOVELAI_DESK_PORT` でも渡せる）。`.claude/launch.json` は git の管理外で、**担当の作業場からは書けない**（リーダーが足す）
+- `desk/start.mjs` は起こすたびに束（`desk/dist/desk.mjs`、Node だけで動く1ファイル）を作り直す。esbuild が無い機械では今ある束で起こす
+- 画面の上の帯で話を選び、Ctrl+S か「保存」で保存。未保存のまま移る・閉じるときは確かめる
+- 作り（2026-09-26 の試作、0.89.26 の後、設計書 6.112）：`desk/server.mjs`（読み書き役。Host・Origin が自分でない要求、作品フォルダーの外、JSON でない書き込みは断る）／`desk/pageShim.mjs`（`acquireVsCodeApi` の代役と上の帯）／`desk/vscodeShim.mjs`（`vscode` の代役。保存は拡張機能と同じ `writeTextFilePreservingFormat` をこの代役越しに使う）
+- 試作の残り：話の一覧は .txt／.md を並べるだけ（作品の登録を使わない）／色は明るい1組だけ／`manuscriptEditorHtml.ts` が `views/actionList.ts` を読むので束に要らない部品が入る（文言を core へ切り出せば軽くなる）
 
 ## Claude が手伝うとき
 
