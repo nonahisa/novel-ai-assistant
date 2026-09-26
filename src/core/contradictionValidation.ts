@@ -1,5 +1,6 @@
 import type { Chunk } from "./chunker";
 import { normalizeForComparison } from "./groundedEvidence";
+import { decodeByteFallback } from "./byteFallback";
 import {
   CONTRADICTION_CATEGORIES,
   SPEECH_INSTRUCTION_TEXTS,
@@ -107,8 +108,17 @@ export function echoesInstruction(text: string): boolean {
  * 指摘しない」と書いてきた（同じ理由で、設定の欄も否定の網に掛けるようにした。
  * `validateContradictions`）。
  */
+/*
+ * 2026-09-26 に「（設定の〜）に一致。」「〜として適切。」を足した（文の終わりで言い切った
+ * 形だけ）。さくら Qwen3.6-35B-A3B が台詞を1つずつ挙げ、補足にこの形で食い違いを
+ * 打ち消した指摘が、作者の作品の写しの第6話だけで57件通っていた。「一致しない」
+ * 「一致しているため」は文の終わりの形ではないので当たらない。
+ * 同じ日に「設定通り。」「問題なし。」「このエントリは不要」も足した（さくら Kimi-K2.6 が
+ * 本文の欄に考えを書き連ね、「設定通り。問題なし。このエントリは不要。削除する。」で
+ * 終わる指摘が通っていた）。「問題ないが〜」「設定通りなら〜」は文の終わりではないので当たらない。
+ */
 const DENIAL_PATTERN =
-  /((矛盾|食い違い?)(で)?は?(あり)?(し)?(て)?(い)?(ない|ませ|なく)|(矛盾|食い違い?)(点|箇所)(は|が)?(あり)?(ない|ませ)|(矛盾|食い違い?)(点|箇所)?は?指摘し(ない|ませ)|矛盾というより|(一致|合致)してい(る|ます)(?!の?か|ため|ので|から)|問題(は)?(あり)?ませ|整合(性)?(は|が)?(取|と)れて(いる|います)(?!の?か|ため|ので|から)|整合してい(る|ます)(?!の?か|ため|ので|から)|齟齬(は)?(あり)?(ませ|ない)|破綻(は)?(し)?(て)?(い)?(ない|ませ))/;
+  /((矛盾|食い違い?)(で)?は?(あり)?(し)?(て)?(い)?(ない|ませ|なく)|(矛盾|食い違い?)(点|箇所)(は|が)?(あり)?(ない|ませ)|(矛盾|食い違い?)(点|箇所)?は?指摘し(ない|ませ)|矛盾というより|(一致|合致)してい(る|ます)(?!の?か|ため|ので|から)|[にと](一致|合致)(する|します)?(。|$)|として(適切|自然|妥当)(である|です|だ)?(。|$)|設定(の)?(通|どお)り(。|$)|問題(は)?(なし|ない)(。|$)|(この)?(エントリ|指摘|項目)は不要|問題(は)?(あり)?ませ|整合(性)?(は|が)?(取|と)れて(いる|います)(?!の?か|ため|ので|から)|整合してい(る|ます)(?!の?か|ため|ので|から)|齟齬(は)?(あり)?(ませ|ない)|破綻(は)?(し)?(て)?(い)?(ない|ませ))/;
 
 /**
  * 断定を避けた否定——「矛盾とは言えません」「矛盾とは断定できません」。
@@ -326,9 +336,12 @@ export function validateContradictions(
       continue;
     }
 
-    const excerpt = asString(item.excerpt);
-    const settingSays = asString(item.settingSays);
-    const textSays = asString(item.textSays);
+    // **バイトの札（`<0xE3><0x80><0x80>`）は字へ戻してから持つ**（2026-09-26 の比べ）。
+    // 照合（`normalizeForComparison`）は札を落として比べるので通るが、戻さないと
+    // 作者の画面に札のまま出る（gemma4:31b が全角空白をこの形で書いた）
+    const excerpt = decodeByteFallback(asString(item.excerpt));
+    const settingSays = decodeByteFallback(asString(item.settingSays));
+    const textSays = decodeByteFallback(asString(item.textSays));
     const category = normalizeCategory(asString(item.category));
     const line = typeof item.line === "number" ? Math.round(item.line) : NaN;
 
@@ -394,7 +407,7 @@ export function validateContradictions(
       category: category as ContradictionCategory,
       settingSays,
       textSays,
-      note: asString(item.note),
+      note: decodeByteFallback(asString(item.note)),
       // 読めない値は low に寄せる。**強い指摘として扱わない**
       severity: level(item.severity),
       confidence: level(item.confidence),

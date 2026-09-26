@@ -6,6 +6,7 @@ import {
   describeMissedCharacters,
   mergeMissedCharactersByEpisode,
   promptVersionWithAsOfChanges,
+  promptVersionWithAsOfWorld,
   promptVersionWithCarryOver,
   promptVersionWithNarrator,
   promptVersionWithStoryDates,
@@ -358,6 +359,44 @@ describe("世界観（設計書6.27.6の穴2）", () => {
     // 全部は入らないが、材料が空になることはない
     expect(relevant.worldview.length).toBeGreaterThan(0);
     expect(relevant.worldview).not.toBe(items.map(describeWorldItem).join("\n\n"));
+  });
+
+  /*
+    **先の話で初めて出る世界観を、前の話の材料へ載せない**（2026-09-26 の比べ。6.10.3）。
+    人物と場所は話数で絞っていたのに、世界観だけ作品全体から選んでいた。作者の作品の写し
+    （教科書チート）では、第1話の世界観70項目のうち67項目が先の話で初めて出るもので、
+    e4b が第2話に第11話の「黒い聖霊は教会から悪魔と呼ばれる」を持ち出し、Qwen が第1話に
+    第3話の「異世界では教科書が存在しない」を持ち出して、それぞれ誤検出になった
+  */
+  test("先の話で初めて出る世界観は、前の話の材料に載らない（話数の無い項目は残す）", () => {
+    const early = { ...world({ id: "world_010", name: "灯りの契約", description: "灯りあれで光る" }), appearedChapters: [2] };
+    const later = { ...world({ id: "world_011", name: "悪魔の呼称", description: "黒い聖霊は悪魔と呼ばれる" }), appearedChapters: [11] };
+    const unknown = world({ id: "world_012", name: "門限", description: "日没で閉じる" });
+    const m = material({ worldItems: [early, later, unknown] });
+
+    const ep2 = m.relevantFor("誰も彼もが黙って歩いていた。", 2);
+    expect(ep2.worldview).toBe([early, unknown].map(describeWorldItem).join("\n\n"));
+    expect(ep2.trimmedFutureWorld).toBe(true);
+
+    // その話で出た項目・話数の分からない項目は残り、全部が分かっている回は印が付かない
+    const ep11 = m.relevantFor("誰も彼もが黙って歩いていた。", 11);
+    expect(ep11.worldview).toBe([early, later, unknown].map(describeWorldItem).join("\n\n"));
+    expect(ep11.trimmedFutureWorld).toBe(false);
+
+    // 話数の読めないチャンクは今までどおり全部（どこまでが「まだ」かを決められない）
+    expect(m.relevantFor("誰も彼もが黙って歩いていた。", null).trimmedFutureWorld).toBe(false);
+  });
+
+  test("先の話の世界観しか無い回は、それだけでは材料にしない", () => {
+    const later = { ...world({ id: "world_011", name: "悪魔の呼称", description: "黒い聖霊は悪魔と呼ばれる" }), appearedChapters: [11] };
+    const relevant = material({ worldItems: [later] }).relevantFor("誰もいない廊下。", 2);
+    expect(relevant.worldview).toBe("");
+    expect(relevant.hasAnything).toBe(false);
+  });
+
+  test("世界観を削った回だけ、キャッシュの鍵に印が付く", () => {
+    expect(promptVersionWithAsOfWorld("1.9:x", false)).toBe("1.9:x");
+    expect(promptVersionWithAsOfWorld("1.9:x", true)).toBe("1.9:x:asofw1");
   });
 
   test("参照資料の見込みは、上限と全文の小さいほう", () => {

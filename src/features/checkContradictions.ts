@@ -45,6 +45,7 @@ import {
   describeMissedCharacters,
   mergeMissedCharactersByEpisode,
   promptVersionWithAsOfChanges,
+  promptVersionWithAsOfWorld,
   promptVersionWithCarryOver,
   promptVersionWithNarrator,
   promptVersionWithStoryDates,
@@ -1628,35 +1629,40 @@ export async function checkContradictions(
   function keyWithPastScenes(base: CacheKeyBase, chunk: Chunk): CacheKeyBase {
     const scenes = pastScenesFor(chunk);
     const carried = carryOverFor(chunk);
-    const { narrator, trimmedFutureChanges } = materialFor(chunk);
+    const { narrator, trimmedFutureChanges, trimmedFutureWorld } = materialFor(chunk);
     // 日付の欄も出る回と出ない回があるので、版ではなくここで区別する
     // （日付の読めない作品の処理済みを道連れにしない。6.10.9）
     const dates = storyDatesFor(chunk);
     // 先の話の変化を材料から削った回は、0.89.0 までの漏れた材料で出した
-    // 答えを使い回さない（2026-09-25 精査 F1）
+    // 答えを使い回さない（2026-09-25 精査 F1）。先の話の世界観を外した回も
+    // 同じ（2026-09-26 の比べ。0.89.18 までは世界観だけ話数で絞っていなかった）
     if (
       !scenes &&
       !carried.text &&
       !narrator &&
       !dates &&
-      !trimmedFutureChanges
+      !trimmedFutureChanges &&
+      !trimmedFutureWorld
     ) {
       return base;
     }
     return {
       ...base,
-      promptVersion: promptVersionWithAsOfChanges(
-        promptVersionWithStoryDates(
-          promptVersionWithNarrator(
-            promptVersionWithCarryOver(
-              promptVersionWithPastScenes(base.promptVersion, scenes),
-              carried.text
+      promptVersion: promptVersionWithAsOfWorld(
+        promptVersionWithAsOfChanges(
+          promptVersionWithStoryDates(
+            promptVersionWithNarrator(
+              promptVersionWithCarryOver(
+                promptVersionWithPastScenes(base.promptVersion, scenes),
+                carried.text
+              ),
+              narrator
             ),
-            narrator
+            dates
           ),
-          dates
+          trimmedFutureChanges
         ),
-        trimmedFutureChanges
+        trimmedFutureWorld
       ),
     };
   }

@@ -116,6 +116,15 @@ export interface RelevantSettings {
    * 削らなかった回の材料は以前と1文字も変わらないので、処理済みはそのまま使える。
    */
   trimmedFutureChanges: boolean;
+  /**
+   * **先の話で初めて出る世界観の項目を、材料から外したか**（2026-09-26 の比べ）。
+   *
+   * 人物と場所は話数で絞っていたのに、世界観だけ作品全体から選んでいた
+   * （6.10.3 の「その話の時点で分かっていることだけ」が世界観に届いていなかった）。
+   * 鍵は設定全体の指紋でできているので、外した回だけ印を付けて作り直させる
+   * （`promptVersionWithAsOfWorld`。`trimmedFutureChanges` と同じ作法）。
+   */
+  trimmedFutureWorld: boolean;
 }
 
 /**
@@ -381,27 +390,47 @@ export function createContradictionMaterial(options: {
         .map((item) => describeLocation(item))
         .join("\n\n");
 
+      /*
+        **世界観も、その話までに出た項目だけにする**（6.10.3。2026-09-26 の比べ）。
+
+        世界観は人物・場所と違って話数で絞っておらず、上限の範囲で作品全体から
+        選んでいた。作者の作品の写し（教科書チート、第1〜10話）では、どの話でも
+        載った世界観の7〜9割が**先の話で初めて出る項目**で（第1話は70項目中67）、
+        それを根拠にした誤検出が出た（第2話に第11話の「黒い聖霊は教会から悪魔と
+        呼ばれる」、第1話に第3話の「異世界では教科書が存在しない」）。
+        **話数の記録が無い項目は残す**（人物・場所と同じく、分からないものを
+        消すと作者が手で書いた項目が黙って消える）。
+      */
+      const knownWorldItems = worldItems.filter((item) =>
+        hasAppearedBy(item.appearedChapters, chapter)
+      );
+
       return {
         characters: characterText,
         locations: locationText,
         // **世界観にも上限を置く**（設計書6.27.6の穴2）。上限内なら
         // 全項目が元の並び順で入るので、いまの作品では従来と同じ文字列になる
-        worldview: selectWorldview({
-          items: worldItems,
-          chunkText: text,
-          chapter,
-          // **上限はモデルによって変わる**（設計書6.27.10）。固定30,000字だと
-          // 小さいモデルでは資料だけで上限を使い切る
-          maxChars: worldviewMax,
-        }),
+        worldview:
+          knownWorldItems.length === 0
+            ? ""
+            : selectWorldview({
+                items: knownWorldItems,
+                chunkText: text,
+                chapter,
+                // **上限はモデルによって変わる**（設計書6.27.10）。固定30,000字だと
+                // 小さいモデルでは資料だけで上限を使い切る
+                maxChars: worldviewMax,
+              }),
         // 世界観は誰が出ていても効くので、それだけでも材料になる。
         // 上限で絞っても1件は必ず残るので、項目があるかどうかで見てよい
+        // （**その話までに出た項目で**数える。先の話の項目しか無ければ材料にしない）
         hasAnything: Boolean(
-          characterText || locationText || worldItems.length > 0
+          characterText || locationText || knownWorldItems.length > 0
         ),
         missedCharacters,
         narrator,
         trimmedFutureChanges,
+        trimmedFutureWorld: knownWorldItems.length !== worldItems.length,
       };
     },
     namesIn(text) {
@@ -671,6 +700,23 @@ export function promptVersionWithAsOfChanges(
 ): string {
   if (!trimmedFutureChanges) return promptVersion;
   return `${promptVersion}:asof1`;
+}
+
+/**
+ * キャッシュの鍵（プロンプトの版）へ、「先の話で初めて出る世界観を材料から外した」
+ * 印を付ける（2026-09-26 の比べ。`promptVersionWithAsOfChanges` と同じ作法）。
+ *
+ * 0.89.18 までの答えは、先の話の世界観が混ざった材料で出したものである。版を
+ * 上げると、世界観に話数の記録が無い作品や外すものが無かったチャンクまで道連れで
+ * 飛ぶので、外した回だけ印を付ける。`asof1` とは別の印にする——変化の履歴を
+ * 削った回はすでに `asof1` で作り直されており、同じ印では今回の変更が効かない。
+ */
+export function promptVersionWithAsOfWorld(
+  promptVersion: string,
+  trimmedFutureWorld: boolean
+): string {
+  if (!trimmedFutureWorld) return promptVersion;
+  return `${promptVersion}:asofw1`;
 }
 
 /**
