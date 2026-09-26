@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import {
   EXTRACT_MODEL_ADVICE,
+  FORESHADOW_MODEL_ADVICE,
   TYPO_MODEL_ADVICE,
 } from "../../../src/core/requirements";
 
@@ -87,5 +88,24 @@ describe("設定資料の抽出に向くモデルの案内", () => {
     expect(source).toContain("EXTRACT_MODEL_ADVICE");
     // 写しを作らない（文言をそのまま書き込んでいない）
     expect(source).not.toContain("26B");
+  });
+});
+
+/**
+ * 伏線（検知と回収の確認）も、大きいモデルを勧める（2026-09-26 の測定。設計書6.35.8）。
+ * 回収の確認で、既定の e4b は回収のある21件中0件——張った箇所そのものを返し続けた。
+ * **既定は変えない**（誤字脱字と同じ）。選ぶところで一言添えるだけ。
+ */
+describe("伏線に向くモデルの案内", () => {
+  test("手元の大きいモデルと外部AIの両方を挙げ、数と日付で理由を言う", () => {
+    expect(FORESHADOW_MODEL_ADVICE).toContain("gemma4:26b");
+    expect(FORESHADOW_MODEL_ADVICE).toContain("Kimi-K2.6");
+    expect(FORESHADOW_MODEL_ADVICE).toContain("21件");
+    expect(FORESHADOW_MODEL_ADVICE).toContain("2026-09-26");
+  });
+
+  test("機能別AI割当の「伏線」の説明が、この定数を読む", () => {
+    const source = read("features/assignFeatureAI.ts");
+    expect(source).toContain("foreshadow: FORESHADOW_MODEL_ADVICE");
   });
 });

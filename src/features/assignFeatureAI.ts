@@ -7,7 +7,11 @@ import {
   type AssignableFeature,
   type ProviderAndModelPick,
 } from "../ai/registry";
-import { EXTRACT_MODEL_ADVICE, TYPO_MODEL_ADVICE } from "../core/requirements";
+import {
+  EXTRACT_MODEL_ADVICE,
+  FORESHADOW_MODEL_ADVICE,
+  TYPO_MODEL_ADVICE,
+} from "../core/requirements";
 import {
   asVerdictFeature,
   describeVerdictCount,
@@ -89,6 +93,8 @@ const MODEL_SIZE_ADVICE: Partial<Record<AssignableFeature, string>> = {
   typo: TYPO_MODEL_ADVICE,
   // 抽出は、モデルを替えるだけで人物の分裂が止まった（実機確認A-18）
   extract: EXTRACT_MODEL_ADVICE,
+  // 伏線の回収の確認は、既定の 4B 級では1件も通らなかった（2026-09-26 の測定）
+  foreshadow: FORESHADOW_MODEL_ADVICE,
 };
 
 /**

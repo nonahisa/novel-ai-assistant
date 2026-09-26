@@ -615,6 +615,69 @@ describe("張った箇所の近くを回収と言い張る（位置で見る）"
     expect(result.accepted[0]).toMatchObject({ id: "foreshadow_103", chapter: 10 });
   });
 
+  test("張った話の中で、張った箇所より前の文は回収ではない（Kimi-K2.6 の実物の答え）", () => {
+    /**
+     * 教科書チート第5話の写し（2026-09-26 の測定）。奇病の伏線は
+     * パッケの台詞（下の3行目）で張られる。**その前の行**を「奇病が実際に
+     * 起きた」と回収に挙げてきた。張る前に回収はできない（張った話より前の
+     * 話を対象から外しているのと同じ理由。設計書6.35.3）ので、同じ話の中でも
+     * 張った箇所より前は回収として通さない。通すと台帳が第5話で閉じ、
+     * 第15話の本当の回収（熱中症と分かる）が提案されなくなる
+     */
+    const CH5 = [
+      "　背負われた男は、意識はあるようだが顔色が蒼白く、ぐったりしているようだ。",
+      "",
+      "「あれはおそらく、最近流行りの奇病でしょう。暑いところで仕事をすると、ああなる者が増えてきているようです」",
+      "",
+      "　なるほど。みんな同じ症状なんだとしたら、感染症か何かだろうか。",
+    ].join("\n");
+    const ch5: Chunk = {
+      filePath: "C:/works/005.txt",
+      index: 0,
+      text: CH5,
+      startLine: 0,
+      chapterStart: 5,
+      chapterEnd: 5,
+      hash: "hash-ch5",
+    };
+    const open = [
+      {
+        id: "foreshadow_007",
+        plantedQuote: "暑いところで仕事をすると、ああなる者が増えてきているようです",
+        plantedChapter: 5,
+      },
+    ];
+
+    const before = validateForeshadowResolutions(
+      {
+        resolutions: [
+          {
+            id: "foreshadow_007",
+            quote: "背負われた男は、意識はあるようだが顔色が蒼白く、ぐったりしているようだ",
+            note: "暑さで倒れる奇病が、治療院で実際に患者として持ち込まれた",
+          },
+        ],
+      },
+      ch5,
+      open
+    );
+    expect(before.accepted).toEqual([]);
+    expect(before.rejected[0].reason).toBe("before_planted");
+
+    // 張った箇所より後の行は、これまでどおり同じ話の中の回収として通す
+    const after = validateForeshadowResolutions(
+      {
+        resolutions: [
+          { id: "foreshadow_007", quote: "みんな同じ症状なんだとしたら、感染症か何かだろうか", note: "" },
+        ],
+      },
+      ch5,
+      open
+    );
+    expect(after.rejected).toEqual([]);
+    expect(after.accepted[0]).toMatchObject({ id: "foreshadow_007", chapter: 5 });
+  });
+
   test("張った話数が分からない記録では、チャンクの中の張った文の位置をすべて張った箇所とみなす", () => {
     // 話数が無いと「どれが張った箇所か」を決められない。取り違えて
     // 台帳を閉じるより、回収を1回見送るほうが害が小さい
@@ -711,5 +774,90 @@ describe("未回収の集合の指紋", () => {
     expect(openForeshadowsFingerprint([record])).not.toBe(
       openForeshadowsFingerprint([{ ...record, note: "書き足した示唆" }])
     );
+  });
+});
+
+describe("台詞の途中を括弧で包んだ引用（外側の括弧を外して照らす）", () => {
+  /**
+   * 教科書チート 第2話・第18話の写し（2026-09-26 の測定で gemma4:e4b が返した形）。
+   * AIは台詞の途中だけを抜いて『』「」で包み直す。開き括弧の位置が本文と
+   * 合わないので、書かれたままでは本文に無い——中身は逐語で在るのに落ちていた
+   * （矛盾検知の `excerptInChunk` と同じ穴。設計書6.35.2）。
+   */
+  const TEXT =
+    "『灯りであるか？　吾輩ならばその願いを叶えることができるのである。汝の願いはあと２つ残っているのであるが、汝は灯りを求めるか？』\n" +
+    "\n" +
+    "「やはり、灯りの神術ぐらいで枯渇するようなら、元々の霊力量はさほどではない可能性が高いな。イントは訓練が終わるまで、神術を使うのは禁止だ」";
+  const bracketChunk: Chunk = {
+    filePath: "C:/works/002.txt",
+    index: 0,
+    text: TEXT,
+    startLine: 0,
+    chapterStart: 2,
+    chapterEnd: 2,
+    hash: "hash-bracket",
+  };
+
+  test("配置：包み直した台詞は、括弧を外した中身が本文に在れば通す", () => {
+    const result = validateForeshadowCandidates(
+      {
+        foreshadows: [
+          {
+            label: "願いの残り数と灯り",
+            note: "願いが残り2つあることが示されている",
+            quote: "『汝の願いはあと２つ残っているのであるが、汝は灯りを求めるか？』",
+          },
+        ],
+      },
+      bracketChunk
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    // 画面で本文の位置を探すのに使うので、**本文に在る形**で持つ
+    expect(result.accepted[0].quote).toBe(
+      "汝の願いはあと２つ残っているのであるが、汝は灯りを求めるか？"
+    );
+    expect(result.accepted[0].chapter).toBe(2);
+  });
+
+  test("回収：包み直した台詞も、括弧を外した中身が本文に在れば通す", () => {
+    const result = validateForeshadowResolutions(
+      {
+        resolutions: [
+          {
+            id: "foreshadow_031",
+            quote:
+              "「灯りの神術ぐらいで枯渇するようなら、元々の霊力量はさほどではない可能性が高いな。」",
+            note: "霊力量が多くないと明かされた",
+          },
+        ],
+      },
+      bracketChunk,
+      [{ id: "foreshadow_031", plantedQuote: "願いはあと２つ", plantedChapter: 2 }]
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    expect(result.accepted[0].quote).toBe(
+      "灯りの神術ぐらいで枯渇するようなら、元々の霊力量はさほどではない可能性が高いな。"
+    );
+  });
+
+  test("外すのは外側の括弧だけ。中身を言い換えていれば落とす", () => {
+    const result = validateForeshadowCandidates(
+      {
+        foreshadows: [
+          {
+            label: "天使の言葉",
+            note: "特別な言葉がある",
+            // 本文は「…残っているのであるが」。語尾を変えて包み直した形
+            quote: "『汝の願いはあと２つ残っているのであるな』",
+          },
+        ],
+      },
+      bracketChunk
+    );
+
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected[0].reason).toBe("quote_not_found");
   });
 });

@@ -118,8 +118,8 @@ export function validateForeshadowCandidates(
     }
 
     const label = asString(item.label);
-    const quote = asString(item.quote);
-    if (!label || !quote) {
+    const rawQuote = asString(item.quote);
+    if (!label || !rawQuote) {
       rejected.push({ raw: item, reason: "shape" });
       continue;
     }
@@ -133,18 +133,20 @@ export function validateForeshadowCandidates(
     // 指示語をなぞっただけの引用は、このあとの逐語照合で落ちる。
     // 逆に、ヒント語（「何を示唆しているか」など日本語として自然な句）が
     // たまたま入った**本物の引用**を、ここで捨ててはいけない
-    if (isPlaceholderText(quote)) {
+    if (isPlaceholderText(rawQuote)) {
       rejected.push({ raw: item, reason: "placeholder" });
       continue;
     }
 
     // **引用が本文に実在するかを見る。** 実在しなければ、その候補が
-    // 何を指しているのか作者には確かめようがない
-    const at = locateQuoteInChunk(chunk, quote);
-    if (!at) {
+    // 何を指しているのか作者には確かめようがない。台詞の途中を括弧で
+    // 包み直した形は、外側の括弧を外して照らす（`groundQuote`）
+    const grounded = groundQuote(chunk, rawQuote);
+    if (!grounded) {
       rejected.push({ raw: item, reason: "quote_not_found" });
       continue;
     }
+    const { quote, at } = grounded;
 
     const shortLabel = shortenLabel(label);
     const normalizedLabel = normalizeForComparison(shortLabel);
@@ -192,6 +194,8 @@ export type ResolutionRejectReason =
   | "unknown_id"
   /** 張った箇所そのものを「回収」と言い張ってきた */
   | "planted_echo"
+  /** 張った話の中で、張った箇所より前の文を「回収」と言ってきた（張る前に回収はできない） */
+  | "before_planted"
   | "duplicate";
 
 export interface RejectedResolution {
@@ -236,8 +240,8 @@ export function validateForeshadowResolutions(
     }
 
     const id = asString(item.id);
-    const quote = asString(item.quote);
-    if (!id || !quote) {
+    const rawQuote = asString(item.quote);
+    if (!id || !rawQuote) {
       rejected.push({ raw: item, reason: "shape" });
       continue;
     }
@@ -248,17 +252,18 @@ export function validateForeshadowResolutions(
     }
     // **引用は「本文に在るか」で決める**（配置の検知と同じ理由）。
     // 指示語をなぞっただけの引用は、このあとの逐語照合で落ちる
-    if (isPlaceholderText(quote)) {
+    if (isPlaceholderText(rawQuote)) {
       rejected.push({ raw: item, reason: "placeholder" });
       continue;
     }
     // **回収の根拠こそ照合する**（設計書6.35.3）。誤って回収済みの印が
-    // 付くと、作者は安心して回収を忘れる
-    const at = locateQuoteInChunk(chunk, quote);
-    if (!at) {
+    // 付くと、作者は安心して回収を忘れる。括弧の包み直しは配置と同じく外す
+    const grounded = groundQuote(chunk, rawQuote);
+    if (!grounded) {
       rejected.push({ raw: item, reason: "quote_not_found" });
       continue;
     }
+    const { quote, at } = grounded;
     // 張った箇所そのものは回収ではない。同じ話も検知の対象にしたので、
     // 張った文が同じチャンクに居る——AIがそれを指してくることがある。
     // **文字列の一致ではなく、本文の中の位置で見る**（`plantedEchoFree`）
@@ -266,8 +271,8 @@ export function validateForeshadowResolutions(
     const place = entry
       ? plantedEchoFree(chunk, quote, entry.plantedQuote, entry.plantedChapter ?? null)
       : at;
-    if (!place) {
-      rejected.push({ raw: item, reason: "planted_echo" });
+    if (!place || place === "before_planted") {
+      rejected.push({ raw: item, reason: place ?? "planted_echo" });
       continue;
     }
     if (seen.has(id)) {
@@ -313,15 +318,17 @@ export function validateForeshadowResolutions(
  * - 近すぎる：張った箇所と**同じ行**（改行から改行まで。小説では1段落）に掛かる。
  *   行が違えば、同じ話の中の回収として通す（短い話では同じ話の中で張って回収する）
  * - 張った文がこのチャンクに無ければ（あとの話だけのチャンク）、位置では落とさない
+ * - 張った話の中で**張った箇所より前**にしか無ければ落とす（張る前に回収はできない）
  *
- * @returns 張った箇所から離れた出どころ。すべて張った箇所に掛かるなら undefined
+ * @returns 張った箇所から離れた出どころ。すべて張った箇所に掛かるなら undefined、
+ *   張った箇所より前にしか無ければ `"before_planted"`
  */
 function plantedEchoFree(
   chunk: Chunk,
   quote: string,
   plantedQuote: string,
   plantedChapter: number | null
-): { filePath: string; chapter: number | null } | undefined {
+): { filePath: string; chapter: number | null } | "before_planted" | undefined {
   const text = chunk.text;
   const index = normalizedWithPositions(text);
   const segments = segmentsOf(chunk);
@@ -339,6 +346,7 @@ function plantedEchoFree(
     )
     .map((span) => lineRange(text, span));
 
+  let sawBefore = false;
   for (const span of findSpans(index, quote)) {
     const near = plantedLines.some(
       (line) => span.start < line.end && span.end > line.start
@@ -349,11 +357,30 @@ function plantedEchoFree(
     const segment = segments.find(
       (candidate) => span.start >= candidate.start && span.end <= candidate.end
     );
+    // **張った話の中で、張った箇所より前は回収ではない**（2026-09-26）。張る前に
+    // 回収はできない——張った話より前の話を対象から外している（`foreshadowTargets.ts`）
+    // のと同じ理由を、話の中の位置にも当てる。教科書チート19話の測定で、Kimi-K2.6 が
+    // 奇病の伏線（パッケの台詞で張る）に、**その直前の行**（患者が運び込まれる描写）を
+    // 回収として返し、通っていた。通すと台帳がその話で閉じ、10話あとの本当の回収
+    // （熱中症と分かる場面）が提案されなくなる（製品は伏線1件に回収を1つしか出さない）。
+    // 張った箇所より**後**の行は、これまでどおり同じ話の中の回収として通す
+    const before =
+      segment !== undefined &&
+      plantedLines.some(
+        (line) => line.start >= segment.start && line.start < segment.end
+      ) &&
+      plantedLines
+        .filter((line) => line.start >= segment.start && line.start < segment.end)
+        .every((line) => span.end <= line.start);
+    if (before) {
+      sawBefore = true;
+      continue;
+    }
     return segment
       ? { filePath: segment.filePath, chapter: segment.chapterStart }
       : { filePath: chunk.filePath, chapter: null };
   }
-  return undefined;
+  return sawBefore ? "before_planted" : undefined;
 }
 
 /** 内訳が、その話数を含むか。話数の分からない内訳は「含むかもしれない」とみなす */
@@ -428,6 +455,37 @@ function lineRange(
   const start = text.lastIndexOf("\n", span.start - 1) + 1;
   const next = text.indexOf("\n", span.end);
   return { start, end: next < 0 ? text.length : next };
+}
+
+/** 引用の外側に付いた括弧・引用符（矛盾検知の `excerptInChunk` と同じ並び） */
+const OUTER_QUOTES = /^[「『"“]+|[」』"”]+$/gu;
+
+/**
+ * 引用を本文と照らし、本文に在る形の引用とその場所を返す。無ければ undefined。
+ *
+ * まず書かれたまま照らし、無ければ**外側の括弧を外して**照らす（2026-09-26）。
+ * AIは台詞の途中だけを抜いて「」『』で包み直す——本文が
+ * 『灯りであるか？　…汝の願いはあと２つ残っているのであるが、汝は灯りを求めるか？』
+ * のとき、『汝の願いはあと２つ…求めるか？』と返すと、開き括弧の位置が本文と
+ * 合わない。教科書チート19話の測定（gemma4:e4b）で、配置の正しい候補と
+ * 回収の答えがこの形で落ちていた。矛盾検知は 2026-09-25 に同じ穴を塞いでいる。
+ *
+ * **外すのは外側だけ**で、中身は本文に逐語で無ければ落とす。外して通したときは
+ * **外した形を引用として持つ**——台帳の張った引用や画面の本文の位置探しは
+ * この文字列で本文を探すので、本文に無い形のまま残さない。
+ */
+function groundQuote(
+  chunk: Chunk,
+  quote: string
+):
+  | { quote: string; at: { filePath: string; chapter: number | null } }
+  | undefined {
+  const at = locateQuoteInChunk(chunk, quote);
+  if (at) return { quote, at };
+  const inner = quote.trim().replace(OUTER_QUOTES, "").trim();
+  if (!inner || inner === quote.trim()) return undefined;
+  const innerAt = locateQuoteInChunk(chunk, inner);
+  return innerAt ? { quote: inner, at: innerAt } : undefined;
 }
 
 /**
@@ -595,6 +653,7 @@ const REJECT_REASON_LABELS: Record<string, string> = {
   quote_not_found: "引用が本文に無い",
   unknown_id: "実在しない伏線番号",
   planted_echo: "張った箇所そのもの",
+  before_planted: "張った箇所より前",
   duplicate: "既にあるものと重なり",
 };
 

@@ -172,7 +172,8 @@ describe("機能の一覧", () => {
       .slice(0, -1)
       .filter((item) => item.detail !== undefined)
       .map((item) => item.label);
-    expect(withDetail).toEqual(["設定資料の抽出", "誤字脱字"]);
+    // 伏線は 2026-09-26 の測定で足した（回収の確認で既定の 4B 級が21件中0件）
+    expect(withDetail).toEqual(["設定資料の抽出", "誤字脱字", "伏線の検知"]);
   });
 });
 
