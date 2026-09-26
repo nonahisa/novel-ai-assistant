@@ -146,7 +146,13 @@ export interface RejectedProofreadIssue {
      * 「視点」の札だが、**語り手に見える様子**（表情・顔つき・反応・態度）を
      * 書いた文である（推敲の比べ、2026-09-26）
      */
-    | "observable";
+    | "observable"
+    /**
+     * 「漢字ひらき」の札で、**形式名詞**（言う事・その時・大切な物・行く所）を
+     * ひらこうとしている（作者の裁定、2026-09-26 午後）。漢字とかなのどちらで
+     * 書くかは揃え方の話で、揃えたいときは表記ゆれの機能に任せる
+     */
+    | "formal_noun";
 }
 
 const LEVELS = new Set(["high", "medium", "low"]);
@@ -1267,6 +1273,97 @@ function pointsAtNoKanji(original: string, explanation: string): boolean {
   return named.every((word) => !original.includes(word));
 }
 
+/**
+ * 形式名詞として使われる字と、ひらいた形（作者の裁定、2026-09-26 午後）。
+ *
+ * 裁定が名指ししたのは「事→こと」で、同じ種類（前の語を受けて名詞の働きを
+ * するだけの字）に限って並べた。「様（よう）」「内（うち）」「程（ほど）」は
+ * 中身のある名詞（王様・家の内）としても前の語を受けるので、形だけでは
+ * 見分けられず、入れていない。
+ */
+const FORMAL_NOUN_READINGS: Readonly<Record<string, readonly string[]>> = {
+  事: ["こと"],
+  時: ["とき"],
+  物: ["もの"],
+  所: ["ところ"],
+  訳: ["わけ"],
+  為: ["ため"],
+  筈: ["はず"],
+};
+
+/**
+ * 漢字ひらきの指摘が、**形式名詞をひらくだけ**のものか（作者の裁定、2026-09-26 午後）。
+ *
+ * 推敲では出さない。頼み方で止めても小さいモデルは守らないので、検算で落とす。
+ *
+ * **形式名詞の使い方か**は、前後の字で見る——前がかな（言う事・その時・彼の事）で、
+ * 前後に漢字が続かない（事件・時計・物語・所謂・台所は熟語の一字）。
+ * 原文は短い範囲で写るので、端の字は行の中の前後を見る。
+ *
+ * - 修正案があれば、**ひらいた漢字がすべて形式名詞の字**で、その読みが
+ *   修正案にあるときだけ落とす。「出来る事」→「できること」のように別の語も
+ *   一緒にひらく案は、そちらのひらきが正しいので残す
+ * - 修正案が空なら、説明が「」で挙げた漢字の語がすべて形式名詞の字で、
+ *   原文にその使い方があるときだけ落とす（語を挙げずに「形式名詞」と書いた説明も同じ）
+ *
+ * **知っていて落とす取りこぼし**：「食べ物」のように、かなに続く字で終わる
+ * 複合語の「物」も形式名詞と同じ形に見える。ひらくかどうかは揃え方の話である
+ * ことに変わりはないので、落としてよい側に倒した。
+ */
+export function opensFormalNoun(
+  original: string,
+  suggestion: string,
+  explanation: string,
+  lineText = ""
+): boolean {
+  const han = /[\p{Script=Han}々]/u;
+  const kana = /[\p{Script=Hiragana}\p{Script=Katakana}ー]/u;
+  const offset = lineText.indexOf(original);
+  const charAt = (index: number): string | undefined => {
+    if (index >= 0 && index < original.length) return original[index];
+    if (offset < 0) return undefined;
+    return lineText[offset + index];
+  };
+  // 原文の中で、形式名詞として使われている字
+  const formalChars = new Set<string>();
+  for (let index = 0; index < original.length; index++) {
+    const char = original[index];
+    if (!(char in FORMAL_NOUN_READINGS)) continue;
+    const before = charAt(index - 1);
+    const after = charAt(index + 1);
+    if (before === undefined || !kana.test(before)) continue;
+    if (after !== undefined && han.test(after)) continue;
+    formalChars.add(char);
+  }
+  if (formalChars.size === 0) return false;
+
+  const count = (text: string, char: string): number =>
+    Array.from(text).filter((c) => c === char).length;
+
+  if (suggestion && !isPlaceholderText(suggestion, true)) {
+    // ひらいた（修正案で数が減った）漢字
+    const opened = new Set(
+      Array.from(original).filter(
+        (char) => han.test(char) && count(suggestion, char) < count(original, char)
+      )
+    );
+    if (opened.size === 0) return false;
+    return Array.from(opened).every(
+      (char) =>
+        formalChars.has(char) &&
+        FORMAL_NOUN_READINGS[char].some((reading) => suggestion.includes(reading))
+    );
+  }
+
+  const named = Array.from(explanation.matchAll(/[「『]([^」』]+)[」』]/gu), (m) =>
+    m[1].replace(/[（(][^）)]*[）)]/gu, "").replace(/[〜～]/gu, "")
+  )
+    .map((word) => Array.from(word).filter((char) => han.test(char)))
+    .filter((chars) => chars.length > 0);
+  if (named.length === 0) return /形式名詞/u.test(explanation);
+  return named.every((chars) => chars.every((char) => formalChars.has(char)));
+}
+
 export function parseProofreadResult(
   text: string
 ): { issues: unknown[] } | null {
@@ -1433,6 +1530,20 @@ export function validateProofreadIssues(
       opensOnyomiCompound(original, suggestion)
     ) {
       rejected.push({ raw: item, reason: "onyomi_compound" });
+      continue;
+    }
+    // **形式名詞のひらき（事→こと）は推敲では出さない**（作者の裁定、2026-09-26 午後）。
+    // 揃え方の話なので表記ゆれの機能に任せる。頼み方では止まらないので検算で落とす
+    if (
+      reason === "漢字ひらき" &&
+      opensFormalNoun(
+        original,
+        suggestion,
+        asString(item.explanation),
+        chunkLines[line - firstLine] ?? ""
+      )
+    ) {
+      rejected.push({ raw: item, reason: "formal_noun" });
       continue;
     }
     // **札ではなく中身を見る。** 語彙や文体の話が、許した札を着て入ってくる。

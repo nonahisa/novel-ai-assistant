@@ -11,12 +11,41 @@ import {
   replyToContradictionToolCall,
   type ContradictionCategory,
 } from "../../prompts/contradictionCheck";
+import * as nodePath from "node:path";
 import {
+  buildKnownAtIndex,
   parseContradictionResult,
   validateContradictions,
   type AcceptedContradiction,
   type RejectedContradiction,
 } from "../../core/contradictionValidation";
+// 過去の場面の抜粋と検証の段は、製品と同じ組み立てを通す（2026-09-26）
+import {
+  appendVerifyNote,
+  buildContradictionPastSceneIndex,
+  buildContradictionVerifyUserPrompt,
+  describeKnownAt,
+  selectContradictionPastScenes,
+} from "../../core/contradictionAssembly";
+import { pastSceneMaxChars, type PastSceneIndex } from "../../core/pastSceneSelect";
+import { excerptSourcesOfEpisode } from "../../core/excerptSourceOf";
+import type { ExcerptSource } from "../../core/mentionExcerpts";
+import { parseEpisodeFileName } from "../../core/episodeParser";
+import { parseEpisodeMetadata } from "../../core/metadataParser";
+import { isWorkInfoFile } from "../../core/workInfoFile";
+import {
+  CONTRADICTION_VERIFY_SCHEMA,
+  CONTRADICTION_VERIFY_SYSTEM_PROMPT,
+  CONTRADICTION_VERIFY_TEMPERATURE,
+  type VerifyRejectReason,
+} from "../../prompts/contradictionVerify";
+import {
+  describeVerifyResults,
+  parseVerifyOutcome,
+  undecidedOutcome,
+  type VerifyOutcome,
+} from "../../core/contradictionVerifyValidation";
+import { askSampling } from "./sampling";
 import {
   buildContradictionTermIndex,
   carryOverBodyText,
@@ -49,7 +78,10 @@ import {
   chunkFromId,
   chunkIdOf,
   chunksOfWorkFile,
+  describeError,
+  listBodyFiles,
   orderedEpisodeBodies,
+  readBody,
   readSettingsFile,
   readSettingsRecords,
   selectChunks,
@@ -57,6 +89,7 @@ import {
 import { ollamaGenerate } from "./ollama";
 import {
   runByRunner,
+  temperatureFor,
   type RunOutcome,
   type RunnerKind,
   validateWith,
@@ -97,6 +130,11 @@ interface Settings {
    * ことが多い。
    */
   synopses: ReadonlyArray<{ chapter: number | null; synopsis: string }>;
+  /**
+   * **どの値が何話で分かるか**の索引（設計書6.10.5）。検証の段で使う。
+   * 製品と同じ `buildKnownAtIndex` で組む
+   */
+  knownAt: Map<string, number[]>;
   unreadable: number;
 }
 
@@ -166,8 +204,114 @@ function loadSettings(folder: string, numCtx: number): Settings {
     // **読み取りは呼ぶ側でやる**（設計書6.10.9）。ここはあらすじを渡すだけで、
     // 日付を読むのは本文と一緒に1回だけ（作品ぜんぶで1度）
     synopses,
+    knownAt: buildKnownAtIndex(people.records),
     unreadable: people.unreadable + places.unreadable + worldItems.unreadable,
   };
+}
+
+/**
+ * 過去の場面を引く元の本文（設計書6.74）。**製品の `loadExcerptSources` と同じ割り方**
+ * （`excerptSourcesOfEpisode`）を通す——合本は話ごとに分かれ、シーンメモは伏せる。
+ *
+ * 製品は作品の走査（`scanner.ts`）が並べた順に読む。ここはファイル名から同じ
+ * 並び（種別 → 話数 → ファイル名）を作る。**日付で名付けた話の並びは写していない**
+ * （走査は日付順に話数を振り直すが、MCP はファイル名の話数しか読まない）。
+ *
+ * 競合マーカーの残るファイルと作品情報（`about.txt`）は外す（製品と同じ）。
+ */
+function pastSceneSourcesOf(folder: string): ExcerptSource[] {
+  const kindOrder: Record<string, number> = {
+    プロローグ: 0,
+    本編: 1,
+    幕間: 1,
+    エピローグ: 2,
+    不明: 3,
+  };
+  const files: Array<{ filePath: string; fileName: string; text: string }> = [];
+  for (const filePath of listBodyFiles(folder)) {
+    let text: string;
+    try {
+      text = readBody(folder, filePath);
+    } catch {
+      // 読めないファイルで止めない（競合マーカーのあるものもここ）
+      continue;
+    }
+    const fileName = nodePath.basename(filePath);
+    if (isWorkInfoFile(fileName, text)) continue;
+    files.push({ filePath, fileName, text });
+  }
+  const episodes = files.map((file) => {
+    const parsed = parseEpisodeFileName(file.fileName);
+    const meta = parseEpisodeMetadata(file.text);
+    return {
+      file,
+      episode: {
+        filePath: file.filePath,
+        fileName: file.fileName,
+        metaTitle: meta.title,
+        // ファイル名にサブタイトルが無ければメタデータのタイトルを使う（走査と同じ）
+        subtitle: parsed.subtitle ?? meta.title,
+        kind: parsed.kind,
+        chapterStart: parsed.chapterStart,
+        chapterEnd: parsed.chapterEnd,
+      },
+    };
+  });
+  episodes.sort((left, right) => {
+    const ka = kindOrder[left.episode.kind] ?? 3;
+    const kb = kindOrder[right.episode.kind] ?? 3;
+    if (ka !== kb) return ka - kb;
+    const na = left.episode.chapterStart;
+    const nb = right.episode.chapterStart;
+    if (na === null && nb === null) {
+      return left.file.fileName.localeCompare(right.file.fileName, "ja");
+    }
+    if (na === null) return 1;
+    if (nb === null) return -1;
+    if (na !== nb) return na - nb;
+    return left.file.fileName.localeCompare(right.file.fileName, "ja");
+  });
+  return episodes.flatMap(({ file, episode }) =>
+    excerptSourcesOfEpisode(episode, file.text)
+  );
+}
+
+/**
+ * 過去の場面の索引と、1チャンクに渡せる字数（設計書6.74）。
+ *
+ * **字数はモデルの上限に対する割合**（製品は `pastSceneMaxChars(contextWindow)`）。
+ * MCP の口ではモデルの上限が分からないので、読み込む長さ（`numCtx`）で測る。
+ *
+ * **意味の近さでは引かない。** 製品は作者が「検知にもベクトル検索を使う」を
+ * 入れたときだけ意味でも引く（既定は切）。MCP は既定の側に揃える。
+ *
+ * **組めなくても続ける**（製品と同じ）。過去の場面は補助の材料である。
+ */
+interface PastSceneLookup {
+  index: PastSceneIndex | undefined;
+  maxChars: number;
+}
+
+function pastSceneLookupOf(
+  folder: string,
+  chunks: readonly Chunk[],
+  numCtx: number
+): PastSceneLookup {
+  const maxChars = pastSceneMaxChars(numCtx);
+  try {
+    return {
+      index: buildContradictionPastSceneIndex(
+        pastSceneSourcesOf(folder),
+        chunks.map((chunk) => chunk.chapterStart)
+      ),
+      maxChars,
+    };
+  } catch (error) {
+    process.stderr.write(
+      `矛盾検知：過去の場面の索引を組めませんでした: ${describeError(error)}\n`
+    );
+    return { index: undefined, maxChars };
+  }
 }
 
 /**
@@ -431,6 +575,13 @@ export interface ContradictionChunkMaterial {
    * 空の回は、経過日数を突き合わせずに出した答えである。
    */
   storyDates: string;
+  /**
+   * **前の話の関連場面の抜粋**（設計書6.74）。無ければ空文字。
+   *
+   * 製品は送っていたのに、MCP は 0.89.25 まで送っていなかった（2026-09-26 に揃えた）。
+   * 引き方は製品と同じ関数（`selectContradictionPastScenes`）
+   */
+  pastScenes: string;
 }
 
 export interface ContradictionMaterialInput {
@@ -460,6 +611,8 @@ export function contradictionMaterial(input: ContradictionMaterialInput): {
   const carryOver = carryOverReader(input.folder, carryOverOf(input.carryOver));
   // **チャンクごとに読み直さない**（作品ぜんぶで1回。設計書6.10.9）
   const storyDates = storyDatesOf(settings, carryOver);
+  // 過去の場面の索引も作品ぜんぶで1回だけ組む（製品と同じ）
+  const pastScenes = pastSceneLookupOf(input.folder, chunks, input.numCtx);
 
   return {
     settingsCount: {
@@ -476,7 +629,8 @@ export function contradictionMaterial(input: ContradictionMaterialInput): {
         maxChars,
         settings,
         carryOver,
-        storyDates
+        storyDates,
+        pastScenes
       )
     ),
   };
@@ -489,7 +643,9 @@ function materialForChunk(
   settings: Settings,
   carryOver: CarryOverLookup,
   /** 作品ぜんぶで1回だけ読んだ日付（設計書6.10.9） */
-  storyDates: readonly StoryDate[]
+  storyDates: readonly StoryDate[],
+  /** 作品ぜんぶで1回だけ組んだ過去の場面の索引（設計書6.74） */
+  pastScenes: PastSceneLookup
 ): ContradictionChunkMaterial {
   // **引き継ぐのは人物を索引で見つけるためだけ**（設計書6.10.6）。
   // この本文そのものはプロンプトへ入らない
@@ -522,6 +678,13 @@ function materialForChunk(
     // **まとめたチャンクは、いちばん前の話に合わせる**（`previousSynopses`
     // と同じ基準。設計書6.10.3）
     storyDates: storyDatesFor(storyDates, chunk.chapterStart),
+    // **検索語は、この本文に出た名前**（引き継いだ前の話の名前ではない。製品と同じ）
+    pastScenes: selectContradictionPastScenes(
+      pastScenes.index,
+      chunk,
+      settings.material.namesIn(chunk.text),
+      pastScenes.maxChars
+    ).text,
   };
 }
 
@@ -598,6 +761,8 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
   const carryOver = carryOverReader(input.folder, carryOverOf(input.carryOver));
   // **チャンクごとに読み直さない**（作品ぜんぶで1回。設計書6.10.9）
   const storyDates = storyDatesOf(settings, carryOver);
+  // 過去の場面の索引も作品ぜんぶで1回だけ組む（製品と同じ）
+  const pastScenes = pastSceneLookupOf(input.folder, chunks, input.numCtx);
 
   const prompts: ContradictionChunkPrompt[] = [];
   const skipped: Array<{ chunkId: string; reason: string }> = [];
@@ -608,7 +773,8 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
       maxChars,
       settings,
       carryOver,
-      storyDates
+      storyDates,
+      pastScenes
     );
     if (!material.hasAnything) {
       // **材料なしで問わない。** 照らし合わせる相手が無いと、
@@ -634,6 +800,9 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
         worldviewSummary: material.worldviewSummary,
         previousSynopses: material.previousSynopses,
         categories,
+        // **前の話の関連場面**（設計書6.74）。製品と同じ関数で引いたもの。
+        // 無ければ空文字で、欄そのものが出ない
+        pastScenes: material.pastScenes,
         // **日付の引き算はこちらで済ませて渡す**（設計書6.10.9）。
         // 読み取れなければ空文字で、欄そのものが出ない
         storyDates: material.storyDates,
@@ -686,6 +855,16 @@ export interface ContradictionValidateResult {
   chapterLabel: string;
   accepted: AcceptedContradiction[];
   rejected: RejectedContradiction[];
+  /**
+   * 検証の段（P-12b）で取り下げた指摘（`novel.run` の ollama／sampling だけ）。
+   * **黙って消さない**——何を根拠に消したのかが残らないと、見逃しなのか
+   * 検証が消しすぎたのかを切り分けられない
+   */
+  verifyRejected?: Array<{
+    excerpt: string;
+    reason: VerifyRejectReason | "理由なし";
+    explanation: string;
+  }>;
 }
 
 export function contradictionValidate(input: {
@@ -751,6 +930,11 @@ export async function contradictionRun(input: ContradictionRunInput): Promise<
     speechCheck: boolean;
     /** 口調を照らさなかったことの断り。照らした回は空文字 */
     speechNote: string;
+    /**
+     * 検証の段（P-12b）の結果の一言（`describeVerifyResults`。製品のログと同じ文）。
+     * `claude` では検証を通していないことを断る
+     */
+    verifyNote: string;
   }
 > {
   const prompts = contradictionPrompt(input);
@@ -774,11 +958,11 @@ export async function contradictionRun(input: ContradictionRunInput): Promise<
     **ここはチャンクキャッシュを渡さない**（設計書6.87.17）。
 
     製品（`features/checkContradictions.ts`）の鍵には、材料の指紋・モデルの
-    地力の印・**チャンクごとに渡す過去場面の抜粋**まで混ざっている。こちらは
-    過去場面を送っていないので**プロンプトそのものが製品と違う**——同じ鍵で
-    貯めると、製品が「過去場面つきで出した答え」と取り違える。指紋抜きの鍵で
-    貯めれば取り違えはしないが、今度は拡張機能と永久に当たらない鍵が積み上がる。
-    どちらも良くないので、揃えられるようになるまで貯めない。
+    地力の印・**チャンクごとに渡す過去場面の抜粋**まで混ざっている。過去場面は
+    2026-09-26 から製品と同じ関数で引いて送るようになったが、材料の指紋と
+    地力の印はここで組んでいない（地力はモデルの素性から決まり、MCP は知らない）。
+    指紋抜きの鍵で貯めると、拡張機能と永久に当たらない鍵が積み上がるので、
+    揃えられるようになるまで貯めない。
   */
   // 行き先ごとの分岐は `runByRunner` が持つ（設計書6.87.12）
   const outcome = await runByRunner(
@@ -805,10 +989,136 @@ export async function contradictionRun(input: ContradictionRunInput): Promise<
         toolReply: replyToContradictionToolCall,
       })
   );
-  return {
-    ...outcome,
+  const extras = {
     missed,
     speechCheck: prompts.speechCheck,
     speechNote: prompts.speechNote,
   };
+  if (outcome.runner === "claude") {
+    // **2段のうち1段しか渡せないことを黙らない**（`factContradiction` と同じ）
+    return {
+      ...outcome,
+      note: `${outcome.note} ${VERIFY_SKIPPED_NOTE}`,
+      ...extras,
+      verifyNote: VERIFY_SKIPPED_NOTE,
+    };
+  }
+
+  /*
+    **検証の段（P-12b、設計書6.10.5）を製品と同じく通す**（2026-09-26）。
+
+    本文を読む段は1回で何十行も見るので、1件ずつを吟味する余裕が無い。
+    製品は見つけた指摘を1件だけ見せて問い直し、取り下げたものを出さない。
+    ここを通さないと、**MCP で測った誤検出の数が製品の数ではない**。
+  */
+  const verified = await verifyContradictionResults(input, prompts, outcome.results);
+  return {
+    ...outcome,
+    results: verified.results,
+    ...extras,
+    verifyNote: verified.note,
+  };
+}
+
+/** `claude` の道では検証の段を通せないことの断り */
+const VERIFY_SKIPPED_NOTE =
+  "この道では、見つけた指摘を1件ずつ問い直す検証の段（P-12b）を通していません" +
+  "（製品は通します）。製品と同じ数を測るなら runner を ollama か sampling にしてください。";
+
+/**
+ * 検証の段を回す（製品の `verify` と同じプロンプト・同じ読み方）。
+ *
+ * **判定できなかったら通す。** 通信の失敗や読めない答えで本物の指摘を消さない
+ * （製品と同じ）。
+ */
+async function verifyContradictionResults(
+  input: ContradictionRunInput,
+  prompts: ReturnType<typeof contradictionPrompt>,
+  results: readonly ContradictionValidateResult[]
+): Promise<{ results: ContradictionValidateResult[]; note: string }> {
+  const ask = verifyAskerOf(input);
+  const temperature = temperatureFor(input, CONTRADICTION_VERIFY_TEMPERATURE);
+  const settings = loadSettings(input.folder, input.numCtx);
+  const labelOf = new Map(
+    prompts.chunks.map((chunk) => [chunk.chunkId, chunk.chapterLabel])
+  );
+  const verifyRejected: Array<{ reason?: VerifyRejectReason }> = [];
+  let undecided = 0;
+
+  const out: ContradictionValidateResult[] = [];
+  for (const result of results) {
+    const chunk = chunkFromId(input.folder, result.chunkId);
+    const kept: AcceptedContradiction[] = [];
+    const dropped: NonNullable<ContradictionValidateResult["verifyRejected"]> = [];
+    for (const issue of result.accepted) {
+      let outcome: VerifyOutcome;
+      try {
+        const reply = await ask({
+          systemPrompt: CONTRADICTION_VERIFY_SYSTEM_PROMPT,
+          userPrompt: buildContradictionVerifyUserPrompt({
+            chapterLabel: labelOf.get(result.chunkId) ?? result.chapterLabel,
+            chunk,
+            issue,
+            settingKnownAt: describeKnownAt(settings.knownAt, issue.settingSays),
+          }),
+          schema: CONTRADICTION_VERIFY_SCHEMA,
+          temperature,
+        });
+        outcome = parseVerifyOutcome(reply.text);
+      } catch (error) {
+        outcome = undecidedOutcome(`検証できませんでした（${describeError(error)}）`);
+      }
+      if (outcome.undecided) undecided++;
+      if (!outcome.keep) {
+        verifyRejected.push({ reason: outcome.reason });
+        dropped.push({
+          excerpt: issue.excerpt,
+          reason: outcome.reason ?? "理由なし",
+          explanation: outcome.explanation,
+        });
+        continue;
+      }
+      // 検証で分かったことは、作者の判断材料になる（製品と同じ）
+      kept.push({ ...issue, note: appendVerifyNote(issue.note, outcome.explanation) });
+    }
+    out.push({ ...result, accepted: kept, verifyRejected: dropped });
+  }
+  return { results: out, note: describeVerifyResults(verifyRejected, undecided) };
+}
+
+/** 行き先を1つの呼び方に揃える（`runByRunner` は2段に分かれた道を回せない） */
+function verifyAskerOf(
+  input: ContradictionRunInput
+): (params: {
+  systemPrompt: string;
+  userPrompt: string;
+  schema: unknown;
+  temperature: number;
+}) => Promise<{ text: string }> {
+  if (input.runner === "sampling") {
+    return async (params) => {
+      const reply = await askSampling({
+        folder: input.folder,
+        systemPrompt: params.systemPrompt,
+        userPrompt: params.userPrompt,
+        temperature: params.temperature,
+      });
+      return { text: reply.text };
+    };
+  }
+  const model = input.model;
+  if (!model) {
+    throw new McpToolError("runner が ollama のときは model が要ります。");
+  }
+  return async (params) =>
+    ollamaGenerate({
+      endpoint: input.endpoint,
+      model,
+      systemPrompt: params.systemPrompt,
+      userPrompt: params.userPrompt,
+      schema: params.schema,
+      numCtx: input.numCtx,
+      allowRemote: input.allowRemote,
+      temperature: params.temperature,
+    });
 }

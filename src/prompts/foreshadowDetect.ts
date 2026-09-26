@@ -13,7 +13,13 @@
  * プロンプトを変更したら version を上げること。
  * キャッシュのキーに含まれており、版が変わると再処理される。
  */
-export const FORESHADOW_DETECT_VERSION = "1.0";
+/*
+ * 1.1（作者の裁定、2026-09-26 午後）：範囲を絞った。比べの誤検出の見直しで、
+ * どのモデルも挙げたのが「骨竜狩りをする」「明日は忙しくなるな」のような
+ * **作中で語られた予定**だった。伏線の定義を1文置き、予定・段取りと
+ * その場で説明が済んだ仕組みを「取り出さないもの」へ足した。
+ */
+export const FORESHADOW_DETECT_VERSION = "1.1";
 
 /**
  * 送るときの温度。取り出すだけの仕事なので揺らさない。
@@ -74,6 +80,23 @@ export const FORESHADOW_DETECT_HINTS: readonly string[] = [
   QUOTE_HINT,
 ];
 
+/**
+ * 伏線の定義（1.1）。**示唆の欄にそのまま写してくる**前提で、検証側
+ * （`foreshadowValidation.ts`）はこれを含む示唆を空にする（候補は残す）。
+ */
+export const FORESHADOW_DETECT_DEFINITION =
+  "読者にまだ明かされていない意味を持ち、後の話で明かされたり効いてきたりする記述";
+
+/**
+ * 取り出さないもの（1.1）。**モデルがこの言葉を名前や示唆に書いてきたら、
+ * それは自分で「外すもの」と分類した候補**なので、検証側が候補ごと落とす。
+ * 文言と検査を別々に書かないために、ここに1か所で持つ。
+ */
+export const FORESHADOW_DETECT_EXCLUDED: readonly string[] = [
+  "作中で既に語られた予定・段取り",
+  "その場で説明が済んだ仕組み",
+];
+
 export function buildForeshadowDetectPrompt(
   input: ForeshadowDetectInput
 ): string {
@@ -83,6 +106,9 @@ export function buildForeshadowDetectPrompt(
       : "（まだ登録されていません）";
 
   return `以下の小説本文から、**後の展開を予告・示唆している記述**を取り出してください。
+
+【伏線とは】
+${FORESHADOW_DETECT_DEFINITION}のこと。**読者にまだ明かされていないものだけ**を拾うこと。
 
 【対象本文】（${input.chapterLabel}）
 ${input.chunkText}
@@ -97,6 +123,8 @@ ${known}
 
 【取り出さないもの】
 - その場で説明が済んでいる記述（後の話へ持ち越されないもの）
+- ${FORESHADOW_DETECT_EXCLUDED[0]}（「〜しに行く」「明日〜する」など。語られたとおりに起きるだけで、伏せられた意味の無いもの）
+- ${FORESHADOW_DETECT_EXCLUDED[1]}（世界の決まり・魔物や術の性質など、その場で読者に明かされたもの）
 - 単なる情景や動作の描写
 - 誤字脱字・言い回しの善し悪し（別の機能で扱います）
 

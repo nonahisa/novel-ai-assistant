@@ -217,6 +217,116 @@ describe("漢字ひらき・語尾単調（1.5で追加）", () => {
     expect(result.accepted).toHaveLength(1);
   });
 
+  /**
+   * **形式名詞の漢字ひらき（事→こと）は推敲では出さない**（作者の裁定、2026-09-26 午後）。
+   *
+   * 「言う事」「その時」は、漢字で書くかかなで書くかの**揃え方の話**で、
+   * 揃えたいときは表記ゆれの機能に任せる。頼み方で止めても小さいモデルは
+   * 守らないので、検算で落とす。
+   */
+  describe("形式名詞の漢字ひらき", () => {
+    test.each([
+      ["彼の言う事は正しい。", "彼の言う事は正しい", "彼の言うことは正しい", "「事」は形式名詞です"],
+      ["その時、雨が降った。", "その時、雨が降った", "そのとき、雨が降った", "「時」はひらくと読みやすくなります"],
+      ["大切な物を失った。", "大切な物を失った", "大切なものを失った", "「物」は形式名詞です"],
+      ["行く所が無い。", "行く所が無い", "行くところが無い", "「所」は形式名詞です"],
+    ])("%s のひらきは落とす", (text, original, suggestion, explanation) => {
+      const result = validateProofreadIssues(
+        {
+          issues: [
+            { line: 11, original, suggestion, reason: "漢字ひらき", explanation, confidence: "high" },
+          ],
+        },
+        chunkOf(text)
+      );
+
+      expect(result.accepted).toEqual([]);
+      expect(result.rejected.map((entry) => entry.reason)).toEqual(["formal_noun"]);
+    });
+
+    test("修正案が空でも、説明が形式名詞の字を挙げ、原文でその使い方なら落とす", () => {
+      const result = validateProofreadIssues(
+        {
+          issues: [
+            {
+              line: 11,
+              original: "そんな事を言うな",
+              suggestion: "",
+              reason: "漢字ひらき",
+              explanation: "「事」が形式名詞として使われています",
+              confidence: "high",
+            },
+          ],
+        },
+        chunkOf("そんな事を言うな。")
+      );
+
+      expect(result.rejected.map((entry) => entry.reason)).toEqual(["formal_noun"]);
+    });
+
+    test("原文の頭の字も、行の前の字を見て形式名詞と分かれば落とす", () => {
+      // 原文は短い範囲で写るので、「事」の前の字が原文の外にあることがある
+      const result = validateProofreadIssues(
+        {
+          issues: [
+            {
+              line: 11,
+              original: "事は忘れない",
+              suggestion: "ことは忘れない",
+              reason: "漢字ひらき",
+              explanation: "「事」は形式名詞です",
+              confidence: "high",
+            },
+          ],
+        },
+        chunkOf("あの日の事は忘れない。")
+      );
+
+      expect(result.rejected.map((entry) => entry.reason)).toEqual(["formal_noun"]);
+    });
+
+    test.each([
+      // 熟語の一字（物語・事件）は形式名詞ではない
+      ["物語を読んだ。", "物語を読んだ", "ものがたりを読んだ", "「物語」で読みが詰まります"],
+      // 形式名詞と別の語を一緒にひらく案は、別の語のひらきが正しいので残す
+      ["出来る事をする。", "出来る事をする", "できることをする", "「出来る」はひらくのが一般的です"],
+      // 「所謂」の「所」は形式名詞ではない
+      ["所謂、彼は。", "所謂、彼は", "いわゆる、彼は", "「所謂（いわゆる）」で読みが詰まります"],
+    ])("%s は形式名詞のひらきではないので残す", (text, original, suggestion, explanation) => {
+      const result = validateProofreadIssues(
+        {
+          issues: [
+            { line: 11, original, suggestion, reason: "漢字ひらき", explanation, confidence: "high" },
+          ],
+        },
+        chunkOf(text)
+      );
+
+      expect(result.rejected).toEqual([]);
+      expect(result.accepted).toHaveLength(1);
+    });
+
+    test("漢字ひらき以外の札には掛けない", () => {
+      const result = validateProofreadIssues(
+        {
+          issues: [
+            {
+              line: 11,
+              original: "彼の言う事は正しい",
+              suggestion: "彼の言うことは正しい",
+              reason: "冗長",
+              explanation: "重なっています",
+              confidence: "high",
+            },
+          ],
+        },
+        chunkOf("彼の言う事は正しい。")
+      );
+
+      expect(result.rejected.map((entry) => entry.reason)).not.toContain("formal_noun");
+    });
+  });
+
   test("語尾単調は、修正案が空のまま通る", () => {
     // **どの文をどう変えるかは文体そのもの**なので、作者が決める
     const result = validateProofreadIssues(

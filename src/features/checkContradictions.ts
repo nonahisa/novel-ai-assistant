@@ -23,7 +23,6 @@ import {
   describeWholeReadConsent,
   WHOLE_READ_CONSENT_LABEL,
 } from "../core/wholeReadConsent";
-import { linesAround } from "../core/factContradiction";
 import { ChunkCache, type CacheKeyBase } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
 import {
@@ -75,13 +74,20 @@ import { SynopsisStore } from "../core/synopsisStore";
 import { settingsFingerprint } from "../core/settingsSummary";
 import { worldviewMaxChars } from "../core/worldviewSelect";
 import {
-  anyPastSceneReachable,
   buildPastScenes,
   pastSceneMaxChars,
   promptVersionWithPastScenes,
-  PastSceneIndex,
+  type PastSceneIndex,
   type PastSceneSemantic,
 } from "../core/pastSceneSelect";
+// 過去の場面の抜粋と検証の段の組み立ては、MCP と同じものを通す（2026-09-26）
+import {
+  appendVerifyNote,
+  buildContradictionPastSceneIndex,
+  buildContradictionVerifyUserPrompt,
+  describeKnownAt,
+  selectContradictionPastScenes,
+} from "../core/contradictionAssembly";
 import {
   checkVectorsNote,
   describeVectorUnavailable,
@@ -103,7 +109,6 @@ import {
   type ContradictionCategory,
 } from "../prompts/contradictionCheck";
 import {
-  buildContradictionVerifyPrompt,
   CONTRADICTION_VERIFY_SCHEMA,
   CONTRADICTION_VERIFY_SYSTEM_PROMPT,
   CONTRADICTION_VERIFY_TEMPERATURE,
@@ -116,7 +121,7 @@ import {
   undecidedOutcome,
   type VerifyOutcome,
 } from "../core/contradictionVerifyValidation";
-import { buildKnownAtIndex, lookupKnownAtValue,
+import { buildKnownAtIndex,
   contradictionKey,
   parseContradictionResult,
   sortContradictions,
@@ -1302,7 +1307,7 @@ export async function checkContradictions(
                 filePath: at.filePath,
                 line: at.line,
                 // 検証で分かったことは、作者の判断材料になる
-                note: appendNote(entry.issue.note, outcome.explanation),
+                note: appendVerifyNote(entry.issue.note, outcome.explanation),
               });
             }
           }
@@ -1473,15 +1478,13 @@ export async function checkContradictions(
     // **名前が1つも出ないチャンクでは、名前では引かない。** 検索語が無いまま
     // 引くと無関係な場面が並び、従来より悪くなる（＝そのときは従来と同じ入力）。
     // 意味の近さで引くのは索引を渡したときだけで、下限より遠い場面は入れない
-    const detail = pastSceneIndex
-      ? pastSceneIndex.selectWithDetail({
-          chapter: chunk.chapterStart,
-          terms: settings.namesIn(chunk.text),
-          maxChars: pastSceneBudget,
-          // 索引を渡していなければ見られない（意味の近さを測るときだけ使う）
-          chunkText: chunk.text,
-        })
-      : { text: "", byName: 0, byMeaning: 0 };
+    // 引き方は MCP と同じ関数（`core/contradictionAssembly.ts`）
+    const detail = selectContradictionPastScenes(
+      pastSceneIndex,
+      chunk,
+      settings.namesIn(chunk.text),
+      pastSceneBudget
+    );
     pastSceneTally.byName += detail.byName;
     pastSceneTally.byMeaning += detail.byMeaning;
     if (detail.byMeaning > 0) pastSceneTally.chunksWithMeaning++;
@@ -1727,15 +1730,13 @@ export async function checkContradictions(
     try {
       const response = await provider.generate({
         systemPrompt: CONTRADICTION_VERIFY_SYSTEM_PROMPT,
-        userPrompt: buildContradictionVerifyPrompt({
+        // 組み立ては MCP と同じ関数（`core/contradictionAssembly.ts`）
+        userPrompt: buildContradictionVerifyUserPrompt({
           chapterLabel: describeChunkScope(chunk, (filePath) =>
             chapterLabelByFile.get(filePath)
           ),
-          contextWithLineNumbers: excerptAround(chunk, issue.line),
-          excerpt: issue.excerpt,
-          settingSays: issue.settingSays,
-          textSays: issue.textSays,
-          category: issue.category,
+          chunk,
+          issue,
           // 指摘には「どの項目の話か」が付いてこないので、値だけで引く。
           // 以前は "role" 決め打ちで、外見や状態の指摘では当たらなかった
           settingKnownAt: settings.knownAtFor(issue.settingSays),
@@ -1769,24 +1770,6 @@ export async function checkContradictions(
       return undecidedOutcome("検証できませんでした");
     }
   }
-}
-
-/**
- * 該当行の前後を、行番号付きで切り出す。
- *
- * **切り出しそのものは `core/factContradiction.ts` に置いてある。**
- * 事実の照合（6.88の第4段）はチャンクではなくファイルから同じものを
- * 切り出すので、番号の振り方が2か所で食い違うと、片方だけ1行ずれる。
- */
-function excerptAround(chunk: Chunk, line: number, around = 6): string {
-  return linesAround(chunk.text, line, around, chunk.startLine + 1);
-}
-
-/** 検証で分かったことを、もとの補足へ足す */
-function appendNote(note: string, explanation: string): string {
-  const extra = explanation.trim();
-  if (!extra) return note;
-  return note.trim() ? `${note.trim()}（検証: ${extra}）` : `検証: ${extra}`;
 }
 
 /** 同じ箇所の同じ指摘が、重なったチャンクから二重に出ることがある */
@@ -1971,11 +1954,8 @@ async function collectSettings(
       // **多すぎると、1件ずつの吟味が薄まる。** 近い先の話から順に絞る
       return lines.slice(0, 20).join("\n");
     },
-    knownAtFor(value) {
-      const chapters = lookupKnownAtValue(knownAt, value);
-      if (chapters.length === 0) return "";
-      return chapters.map((at) => `第${at}話`).join("、");
-    },
+    // 書き方は MCP と同じ関数（`core/contradictionAssembly.ts`）
+    knownAtFor: (value) => describeKnownAt(knownAt, value),
     synopsesBefore(chapter) {
       if (chapter === null) return "";
       // **その話より前だけを渡す。** 後の話を渡すと、まだ書かれていない
@@ -2054,10 +2034,8 @@ function collectPastScenes(
   semantic?: PastSceneSemantic
 ): PastSceneIndex | undefined {
   try {
-    const scenes = buildPastScenes(sources);
-    if (scenes.length === 0) return undefined;
-    if (!anyPastSceneReachable(scenes, chunkChapters)) return undefined;
-    return new PastSceneIndex(scenes, semantic);
+    // 組み方は MCP と同じ関数（`core/contradictionAssembly.ts`）
+    return buildContradictionPastSceneIndex(sources, chunkChapters, semantic);
   } catch (error) {
     logFailure("矛盾検知：過去の場面の索引づくり", {
       詳細: error instanceof Error ? error.message : String(error),
