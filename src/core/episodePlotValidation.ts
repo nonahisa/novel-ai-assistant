@@ -436,6 +436,9 @@ export function validateEpisodePlotContrast(
       rawItem = copied;
       rawExcerpt = "";
     }
+    // **箇条書きの欄と引用の欄に、同じ行を写してきたら引用だけ外す**
+    // （2026-09-26、さくら Kimi-K2.6。`sameBulletInBoth`）
+    if (sameBulletInBoth(rawItem, rawExcerpt, input)) rawExcerpt = "";
 
     // **札の貼り違いを直す**（`isMislabeledAbsence`）。付け替えてから
     // 打ち消しの網を当てる——網は種別ごとに違うので、先に当てると
@@ -680,6 +683,29 @@ function bulletCopiedAsExcerpt(
   if (!matchPlotItem(excerpt, input.items)) return undefined;
   if (lineOfExcerpt(input.text, excerpt) !== null) return undefined;
   return excerpt;
+}
+
+/**
+ * 箇条書きの欄に行を書き、**引用の欄にも同じ行を写してきた**答えか。
+ *
+ * 2026-09-26 の逸脱の測り直し（さくら Kimi-K2.6、教科書チートの写しの第3話）で、
+ * 助ける人を入れ替えた行に「主筋の改変」を付け、理由も正しく言い当てていたのに、
+ * 引用の欄にその行を写したせいで「本文に無い引用」として落ちた。**行は指せている**
+ * ので、写しただけの引用を外して指摘は残す（作者に本文に無い字は読ませない）。
+ *
+ * 外すのは、引用が本文に無く、**箇条書きの欄と同じ行に当たる**ときだけ。
+ * 別の行に当たる引用は、どちらを言いたいのか推し量れないのでこれまでどおり捨てる。
+ */
+function sameBulletInBoth(
+  plotItem: string,
+  excerpt: string,
+  input: { items: readonly EpisodePlotItem[]; text: string }
+): boolean {
+  if (!plotItem || !excerpt) return false;
+  if (lineOfExcerpt(input.text, excerpt) !== null) return false;
+  const item = matchPlotItem(plotItem, input.items);
+  const copied = matchPlotItem(excerpt, input.items);
+  return item !== undefined && copied !== undefined && item.line === copied.line;
 }
 
 /**

@@ -23,8 +23,10 @@ import { referenceBudgetChars } from "../core/sizeBudget";
 // （`mcp/tools/episode.ts`）が別々に持っていると、外から測ったときに
 // 製品と違う量を送ることになる
 import {
+  DEVIATION_MAX_CHAPTER_CHARS,
   PLOT_MAX_CHARS,
   describePlotTrim,
+  nearbyDeviationSynopses,
   trimPlotForDeviation,
 } from "../core/plotForDeviation";
 import { readPlotText } from "../core/plotFile";
@@ -112,9 +114,6 @@ export interface DeviationRunResult {
   plotTrimmedNote?: string;
   cancelled: boolean;
 }
-
-/** 1回で渡す本文の上限。長い話はここで切る */
-const MAX_CHAPTER_CHARS = 12_000;
 
 /**
  * プロットにまわしてよい、モデルの上限に対する割合（設計書6.77の第2段、6.27.4）。
@@ -417,7 +416,10 @@ export async function checkDeviations(
       async function ask(episode: Episode): Promise<unknown | undefined> {
         try {
           const bodyWithLines = withLineNumbers(episode.text);
-          const surroundingSynopses = nearbySynopses(synopses, episode.chapter);
+          const surroundingSynopses = nearbyDeviationSynopses(
+            synopses,
+            episode.chapter
+          );
           const userPrompt = buildDeviationCheckPrompt({
             chapterLabel: episode.label,
             plot: plotText,
@@ -661,7 +663,8 @@ async function collectEpisodes(
     // 切ったあとの先頭だけしか見ないことになる
     for (const source of episodeBodySources(episode.filePath, text, episode)) {
       // **長い話は切る。** 切ったことは指摘の行番号から分かる
-      const body = source.body.slice(0, MAX_CHAPTER_CHARS);
+      // （上限は MCP の道具と同じ値を `core/plotForDeviation.ts` から取る）
+      const body = source.body.slice(0, DEVIATION_MAX_CHAPTER_CHARS);
       if (!body.trim()) continue;
       out.push({
         filePath: source.filePath,
@@ -691,26 +694,6 @@ async function loadSynopses(
     // あらすじが無くても逸脱は見られる。前後の繋がりが弱くなるだけ
     return [];
   }
-}
-
-/**
- * 前後の話のあらすじ。
- *
- * **前後だけにする。** 全部渡すと入力が膨らむうえ、離れた話との
- * 食い違いまで「この話の逸脱」として挙げてくる。
- */
-function nearbySynopses(
-  synopses: Array<{ chapter: number | null; synopsis: string }>,
-  chapter: number | null
-): string {
-  if (chapter === null) return "";
-  return synopses
-    .filter(
-      (item) =>
-        item.chapter !== null && Math.abs(item.chapter - chapter) <= 2
-    )
-    .map((item) => `第${item.chapter}話: ${item.synopsis}`)
-    .join("\n");
 }
 
 /** 行番号を振る。`chunker.ts` の同名関数は Chunk 用なのでここに持つ */

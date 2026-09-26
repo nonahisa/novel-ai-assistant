@@ -18,7 +18,9 @@ import {
   DEVIATION_CHECK_TEMPERATURE,
   DEVIATION_CHECK_VERSION,
   DEVIATION_TYPES,
+  LIGHT_DEVIATION_TYPES,
   buildDeviationCheckPrompt,
+  deviationBudget,
 } from "../../prompts/deviationCheck";
 import {
   parseDeviationResult,
@@ -27,6 +29,8 @@ import {
 } from "../../core/deviationValidation";
 import {
   describePlotTrim,
+  deviationBodyOf,
+  nearbyDeviationSynopses,
   trimPlotForDeviation,
 } from "../../core/plotForDeviation";
 import {
@@ -239,10 +243,47 @@ export function synopsisValidate(input: {
 
 const DEVIATION_VALIDATE_WITH = validateWith("deviation");
 
-/** 1話で挙げてよい件数。**製品と同じ考え方で、多すぎると読まれない** */
-const DEVIATION_MAX_ISSUES = 5;
+export interface DeviationPromptInput extends EpisodePromptInput {
+  /**
+   * どちらのモデル向けに尋ねるか。`large`（既定）＝「逸脱」と「間延び」の2つ、
+   * `small` ＝「逸脱」だけ（製品が20B未満のモデルへ送る形）。
+   */
+  modelSize?: string;
+}
 
-export function deviationPrompt(input: EpisodePromptInput) {
+/**
+ * 小さいモデル向けに尋ねるか。
+ *
+ * **MCP の既定は大きいモデル向けである。** 製品はモデルの大きさから自動で
+ * 決める（`ai/capability.ts` の `narrowDeviationTypes`。20B 未満は「逸脱」だけ）が、
+ * MCP は外部AIが自分でモデルを選ぶので、大きさを当てにいかない（誤字脱字の
+ * `modelSize`・矛盾検知の `suppression` と同じ考え）。小さいモデルを製品と同じ
+ * 条件で測るなら `small` を渡す。
+ *
+ * 2026-09-26 まではこの選択が無く、いつも2つとも尋ねていた。e4b・12b を
+ * 製品と違う頼み方で測ることになっていた。
+ *
+ * **知らない値は黙って丸めない**（打ち間違いに気づかないまま記録が残る）。
+ */
+function deviationForSmallModelOf(choice: string | undefined): boolean {
+  if (choice === undefined) return false;
+  const name = String(choice).trim();
+  if (name === "" || name === "large") return false;
+  if (name === "small") return true;
+  throw new McpToolError(
+    `知らないモデルの大きさです: ${name}` +
+      "（選べるのは large＝「逸脱」と「間延び」・small＝「逸脱」だけ）"
+  );
+}
+
+/** 検算と同じ本文。**プロンプトと検算で別々に作らない**（照らす相手がずれる） */
+function deviationEpisodeOf(input: EpisodePromptInput) {
+  const episode = readEpisode(input.folder, input.filePath, input.chapter);
+  return { ...episode, body: deviationBodyOf(episode.body) };
+}
+
+export function deviationPrompt(input: DeviationPromptInput) {
+  const forSmallModel = deviationForSmallModelOf(input.modelSize);
   const plot = readPlotMarkdown(input.folder);
   if (!plot) {
     // **プロットが無ければ、逸脱は測れない。** 黙って空のプロットで
@@ -252,21 +293,15 @@ export function deviationPrompt(input: EpisodePromptInput) {
         "プロットが無いままでは測れません。"
     );
   }
-  const episode = readEpisode(input.folder, input.filePath, input.chapter);
-  const synopses = readSynopses(input.folder);
-
-  // 前後の話のあらすじ。無ければ空文字（製品と同じ）
-  const surrounding =
-    episode.chapter === null
-      ? ""
-      : synopses
-          .filter(
-            (item) =>
-              item.chapter !== null &&
-              Math.abs(item.chapter - episode.chapter!) === 1
-          )
-          .map((item) => `第${item.chapter}話：${item.synopsis}`)
-          .join("\n");
+  const episode = deviationEpisodeOf(input);
+  // 前後の話のあらすじ。**製品と同じ部品で組む**（前後2話ずつ・その話を含む）
+  const surrounding = nearbyDeviationSynopses(
+    readSynopses(input.folder),
+    episode.chapter
+  );
+  // 見る観点と件数の上限も製品と同じ決め方にする
+  const types = forSmallModel ? LIGHT_DEVIATION_TYPES : DEVIATION_TYPES;
+  const maxIssues = deviationBudget(episode.body.length);
 
   /*
     **プロットも製品と同じところで切る**（`core/plotForDeviation.ts`、0.66.4）。
@@ -282,13 +317,17 @@ export function deviationPrompt(input: EpisodePromptInput) {
   const plotTrim = trimPlotForDeviation(plot);
 
   return {
-    promptVersion: DEVIATION_CHECK_VERSION,
+    // 観点を絞った回は印を付ける（製品のキャッシュの鍵の `light:` と同じ意味）
+    promptVersion: forSmallModel
+      ? `${DEVIATION_CHECK_VERSION}:light`
+      : DEVIATION_CHECK_VERSION,
     systemPrompt: DEVIATION_CHECK_SYSTEM_PROMPT,
     schema: DEVIATION_CHECK_SCHEMA,
     temperature: DEVIATION_CHECK_TEMPERATURE,
     validateWith: DEVIATION_VALIDATE_WITH,
     chapterLabel: episode.label,
-    maxIssues: DEVIATION_MAX_ISSUES,
+    types,
+    maxIssues,
     /** プロットの全体の字数（切る前） */
     plotChars: plot.length,
     /** 実際に送った字数 */
@@ -306,8 +345,8 @@ export function deviationPrompt(input: EpisodePromptInput) {
         chunkOfEpisode(input.filePath, episode.body)
       ),
       surroundingSynopses: surrounding,
-      types: DEVIATION_TYPES,
-      maxIssues: DEVIATION_MAX_ISSUES,
+      types,
+      maxIssues,
     }),
   };
 }
@@ -318,7 +357,8 @@ export function deviationValidate(input: {
   chapter?: number;
   response: string;
 }) {
-  const episode = readEpisode(input.folder, input.filePath, input.chapter);
+  // **送ったのと同じ本文で照らす**（シーンメモを伏せ、長い話は切ったもの）
+  const episode = deviationEpisodeOf(input);
   const plot = readPlotMarkdown(input.folder);
   if (!plot) {
     throw new McpToolError(
@@ -443,7 +483,7 @@ export async function synopsisRun(input: EpisodePromptInput & RunnerInput) {
   );
 }
 
-export async function deviationRun(input: EpisodePromptInput & RunnerInput) {
+export async function deviationRun(input: DeviationPromptInput & RunnerInput) {
   const prompt = deviationPrompt(input);
   const outcome = await runOnce(input, prompt, (response) =>
     deviationValidate({ ...input, response })

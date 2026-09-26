@@ -12,6 +12,8 @@
  * （`scripts/coreEntries.mjs`。`test/unit/cross/mcpReach.test.ts` が見張る）。
  */
 
+import { blankMemoLines } from "./sceneMemo";
+
 /**
  * プロットにまわしてよい字数の頭打ち。
  *
@@ -76,4 +78,47 @@ export function describePlotTrim(
     `プロットが長いため先頭 ${usedChars.toLocaleString("ja-JP")}字だけを使いました` +
     `（全体 ${totalChars.toLocaleString("ja-JP")}字）`
   );
+}
+
+/*
+  ── 話の本文と、前後のあらすじ（2026-09-26）──
+
+  プロットの切り方と同じく、**製品と MCP の両方がここを通る**。逸脱の測り直し
+  （2026-09-26）で、MCP の道具が製品と違うものを送っていたと分かった——
+  前後のあらすじは前後1話ずつ（製品は2話ずつ、その話を含む）で、区切りも
+  「：」（製品は「: 」）、シーンメモを伏せず、長い話も切っていなかった。
+  **写しを2つ持つと、片方だけ直ってずれる**ので1か所にした。
+*/
+
+/** 1回で渡す本文の上限。長い話はここで切る（切ったことは指摘の行番号から分かる） */
+export const DEVIATION_MAX_CHAPTER_CHARS = 12_000;
+
+/**
+ * AIへ渡す話の本文。
+ *
+ * **シーンメモは空行にする**（設計書6.40.2）。逸脱の検知はチャンクに割らず、
+ * 読んだ本文をそのまま送るので、ここで伏せる。**行ごと落とさない**のは、
+ * 指摘の行番号が元の本文とずれないようにするため。
+ */
+export function deviationBodyOf(body: string): string {
+  return blankMemoLines(body).slice(0, DEVIATION_MAX_CHAPTER_CHARS);
+}
+
+/**
+ * 前後の話のあらすじ。
+ *
+ * **前後2話ずつにする（その話も含む）。** 全部渡すと入力が膨らむうえ、離れた話との
+ * 食い違いまで「この話の逸脱」として挙げてくる。
+ */
+export function nearbyDeviationSynopses(
+  synopses: ReadonlyArray<{ chapter: number | null; synopsis: string }>,
+  chapter: number | null
+): string {
+  if (chapter === null) return "";
+  return synopses
+    .filter(
+      (item) => item.chapter !== null && Math.abs(item.chapter - chapter) <= 2
+    )
+    .map((item) => `第${item.chapter}話: ${item.synopsis}`)
+    .join("\n");
 }

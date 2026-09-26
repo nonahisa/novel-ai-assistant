@@ -112,6 +112,24 @@ const LEGITIMATE_PURPOSE =
 const DEFERS_TO_AUTHOR =
   /(かどうか|か否か|かもしれ|確認が必要|確認をお|要確認|ご確認|確認して|確かめ|検討が必要|判断が(難し|つ)|判断(でき|し(かね|きれ))|判断を(委ね|お願い)|意図的か|不明で|(分|わ)かりませ)/;
 
+/**
+ * プロットと本文が**食い違っていると言い切っている**言い回し（2026-09-26）。
+ *
+ * - 「プロットでは〜だが、本文では〜」の対比（単話プロットの照合の
+ *   `PLOT_VERSUS_TEXT_PATTERN` と同じ形）
+ * - 「プロットと異なり」「プロットと食い違って」「プロットと矛盾し」
+ *
+ * **これがあれば、後ろに添えた「〜伏線として機能する可能性がある」は否定ではない。**
+ * 逸脱の測り直し（教科書チートの写し、さくら Kimi-K2.6）で、プロットの死因
+ * （交通事故）と本文（心臓発作）の食い違いを言い当てた指摘が、末尾の一言で
+ * `self_denied` に落ちていた。食い違いの中身を言った上での「こういう働きも
+ * ありうる」は作者へ判断を添えただけで、逸脱であることを取り消していない。
+ * 「逸脱ではありません」のように言い切って打ち消していれば、これまでどおり落とす
+ * （`DENIED_OUTRIGHT` を先に見る）。
+ */
+const AFFIRMS_DEVIATION =
+  /(プロット|あらすじ)(で|に)は[^。．\n]*?(が|のに|けど|けれど|ものの|一方|に対し(て)?)[、，,]?\s*本文(で|に)は|(プロット|あらすじ)と(は)?(異な|食い違|矛盾し|逆)/;
+
 /** 肯定の言い回しが、すぐ後ろで打ち消されているか */
 const NEGATED_AFTER = /^.{0,12}?(ない|ませ|ぬ)/su;
 
@@ -131,8 +149,12 @@ export function deniesDeviation(reason: string): boolean {
   if (DEFERS_TO_AUTHOR.test(reason)) return false;
 
   // 「AはプロットB、しかしCは逸脱」のように向きが混ざるので、節ごとに見る
-  for (const clause of reason.split(/[。、．，\n！？!?]+/u)) {
-    if (DENIED_OUTRIGHT.test(clause)) return true;
+  const clauses = reason.split(/[。、．，\n！？!?]+/u);
+  // 言い切った打ち消し（「逸脱ではありません」）は、何が書いてあっても否定
+  if (clauses.some((clause) => DENIED_OUTRIGHT.test(clause))) return true;
+  // 食い違いを言い切っていれば、添えた「〜として」の一言では否定にしない
+  if (AFFIRMS_DEVIATION.test(reason)) return false;
+  for (const clause of clauses) {
     if (assertsWithout(clause, AGREES_WITH_PLOT)) return true;
     if (assertsWithout(clause, LEGITIMATE_PURPOSE)) return true;
   }

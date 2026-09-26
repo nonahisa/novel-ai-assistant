@@ -224,6 +224,7 @@ const OPTIONS_TABLE =
   "feature ごとの追加の指定（※は要るもの）。" +
   "typo: modelSize（large〈既定〉＝大きいモデル向けの版／" +
   "small＝小さいモデル向けの版〈1.1 の文〉。製品は 20B 未満のモデルに small を送る）。" +
+  "deviation: modelSize（large〈既定〉＝逸脱と間延び／small＝逸脱だけ。製品は 20B 未満のモデルに small）。" +
   "foreshadow: mode（detect＝配置を拾う〈既定〉／resolve＝回収を見る）。" +
   "contradiction: categories（light〈既定〉／all／区分名そのもの。" +
   "「状態」「人物,時系列」のように1つでも並びでも指せる）・" +
@@ -664,10 +665,19 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
       }),
   },
   deviation: {
-    prompt: (input) => deviationPrompt(episodeArgs(input)),
+    prompt: (input) =>
+      deviationPrompt({
+        ...episodeArgs(input),
+        modelSize: option(input, "modelSize", MODEL_SIZE_SCHEMA),
+      }),
     validate: (input) =>
       deviationValidate({ ...episodeArgs(input), response: needResponse(input) }),
-    run: (input) => deviationRun({ ...episodeArgs(input), ...runnerArgs(input) }),
+    run: (input) =>
+      deviationRun({
+        ...episodeArgs(input),
+        modelSize: option(input, "modelSize", MODEL_SIZE_SCHEMA),
+        ...runnerArgs(input),
+      }),
   },
   episodePlot: {
     prompt: (input) => episodePlotPrompt(episodePlotArgs(input)),
