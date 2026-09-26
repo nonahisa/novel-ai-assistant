@@ -28,6 +28,8 @@ const state = vi.hoisted(() => ({
   characters: [] as unknown[],
   loadErrors: [] as unknown[],
   stage: vi.fn(async () => undefined),
+  /** 人物の資料へ直接書いたもの（J14）。`saveOrUpdate` の代わり */
+  saved: vi.fn(async (_character: unknown) => undefined),
   logged: [] as unknown[],
   /** 既に積んである承認待ち（名前を直す案など。設計書6.4.9） */
   pending: [] as Array<{
@@ -43,6 +45,9 @@ vi.mock("../../../src/core/characterStore", () => ({
   CharacterStore: class {
     async loadAll() {
       return { characters: state.characters, errors: state.loadErrors };
+    }
+    async saveOrUpdate(character: unknown) {
+      return state.saved(character);
     }
   },
 }));
@@ -1002,5 +1007,170 @@ describe("相談を資料へ反映する", () => {
     const entry = state.logged[0] as { panel: string; reply: string };
     expect(entry.panel).toBe("相談パネル");
     expect(entry.reply).toContain("灯");
+  });
+});
+
+/**
+ * 相談から人物の資料へ**直接**書く（作者の裁定 J14、2026-09-26）。
+ *
+ * 承認待ちの道は残し、どちらにするかは作者が押して選ぶ。書くのは紹介文と
+ * 食い違いの記録だけで、既にある紹介文は上書きしない（実装ルール2）。
+ */
+describe("相談から人物の資料へ直接書く", () => {
+  const disk = new Map<string, Uint8Array>();
+  let announced: string[] = [];
+  let asked: unknown[] = [];
+
+  beforeEach(() => {
+    disk.clear();
+    announced = [];
+    asked = [];
+    failures.length = 0;
+    hooks.beforeSend = () => undefined;
+    state.logged = [];
+    state.stage.mockClear();
+    state.saved.mockReset();
+    state.saved.mockImplementation(async () => undefined);
+    state.loadErrors = [];
+    state.pending = [];
+    // 紹介文がまだ空の人物（直接書ける）
+    state.characters = [character("char_001", "灯", "")];
+
+    workspace.fs = {
+      createDirectory: async () => undefined,
+      readFile: async (uri: { fsPath: string }) => {
+        const bytes = disk.get(uri.fsPath);
+        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+        return bytes;
+      },
+      writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
+        disk.set(uri.fsPath, bytes);
+      },
+      rename: async (from: { fsPath: string }, to: { fsPath: string }) => {
+        const bytes = disk.get(from.fsPath);
+        if (!bytes) throw new FileSystemError("missing", "FileNotFound");
+        disk.set(to.fsPath, bytes);
+        disk.delete(from.fsPath);
+      },
+      delete: async (uri: { fsPath: string }) => {
+        disk.delete(uri.fsPath);
+      },
+    } as unknown as typeof workspace.fs;
+    Object.assign(commands, { executeCommand: vi.fn(async () => undefined) });
+    window.showInformationMessage = (async (message: string) => {
+      announced.push(message);
+      return undefined;
+    }) as typeof window.showInformationMessage;
+    window.showWarningMessage = (async (message: string) => {
+      announced.push(message);
+      return undefined;
+    }) as typeof window.showWarningMessage;
+  });
+
+  const DECISION = answer([
+    {
+      name: "灯",
+      decided: "年齢は17歳。故郷は港町。",
+      evidence: "灯の年齢は17歳にします",
+    },
+  ]);
+
+  /** 作者の選び方を差し替えて走らせる */
+  function runWith(mode: "direct" | "pending") {
+    const ai = testAi(DECISION);
+    return applyChatToSettings(work, CONVERSATION, {
+      ...(ai.deps as unknown as Parameters<typeof applyChatToSettings>[2]),
+      chooseWriteMode: async (summary) => {
+        asked.push(summary);
+        return mode;
+      },
+    });
+  }
+
+  test("「直接書く」を選ぶと、紹介文を資料へ書き、承認待ちには積まない", async () => {
+    const result = await runWith("direct");
+
+    expect(asked).toHaveLength(1);
+    expect(state.saved).toHaveBeenCalledTimes(1);
+    const saved = state.saved.mock.calls[0][0] as Character;
+    expect(saved.id).toBe("char_001");
+    expect(saved.summary).toBe("年齢は17歳。故郷は港町。");
+    expect(state.stage).not.toHaveBeenCalled();
+    expect(result.written?.filled).toEqual(["灯"]);
+    expect(announced.join("")).toContain("資料へ書きました");
+  });
+
+  test("「承認待ちに積む」を選ぶと、これまでどおり承認待ちだけ（資料は変わらない）", async () => {
+    const result = await runWith("pending");
+
+    expect(state.saved).not.toHaveBeenCalled();
+    expect(state.stage).toHaveBeenCalledTimes(1);
+    expect(result.written).toBeUndefined();
+    expect(result.staged).toBe(1);
+  });
+
+  test("選ばずに閉じたら、承認待ちに倒す（作者が押すまで書かない）", async () => {
+    // 既定の確認（ダイアログ）は、閉じると undefined が返る
+    await run(testAi(DECISION));
+
+    expect(state.saved).not.toHaveBeenCalled();
+    expect(state.stage).toHaveBeenCalledTimes(1);
+  });
+
+  test("既にある紹介文と食い違うなら上書きせず、食い違いとして残す", async () => {
+    state.characters = [character("char_001", "灯", "主人公。弓使い")];
+
+    const result = await runWith("direct");
+
+    const saved = state.saved.mock.calls[0][0] as Character;
+    expect(saved.summary).toBe("主人公。弓使い");
+    expect(
+      saved.conflicts.find((conflict) => conflict.field === "summary")?.values
+    ).toEqual(["主人公。弓使い", "年齢は17歳。故郷は港町。"]);
+    expect(result.written?.conflicted).toEqual(["灯"]);
+  });
+
+  test("作者のメモ・書き出し用の注記は書き換えない", async () => {
+    state.characters = [
+      {
+        ...character("char_001", "灯", ""),
+        authorNotes: "作者のメモ",
+        exportNote: "書き出し用",
+      },
+    ];
+
+    await runWith("direct");
+
+    const saved = state.saved.mock.calls[0][0] as Character;
+    expect(saved.authorNotes).toBe("作者のメモ");
+    expect(saved.exportNote).toBe("書き出し用");
+  });
+
+  test("作者が確定させた人物（autoGenerated: false）は書かない", async () => {
+    state.characters = [
+      { ...character("char_001", "灯", ""), autoGenerated: false },
+    ];
+
+    await runWith("direct");
+
+    expect(state.saved).not.toHaveBeenCalled();
+    // 直接書けるものが無いので、訊きもしない
+    expect(asked).toHaveLength(0);
+  });
+
+  test("書けなかった人物（外で書き換えられていた等）は、承認待ちへ回す", async () => {
+    state.saved.mockImplementation(async () => {
+      throw new Error("読み込み後に外部で変更されています");
+    });
+
+    const result = await runWith("direct");
+
+    expect(state.stage).toHaveBeenCalledTimes(1);
+    const [staged] = state.stage.mock.calls[0] as unknown as [Character[]];
+    expect(staged[0].id).toBe("char_001");
+    expect(result.written?.fellBack).toEqual(["灯"]);
+    expect(
+      failures.some((item) => item.context.includes("直接書けなかった"))
+    ).toBe(true);
   });
 });

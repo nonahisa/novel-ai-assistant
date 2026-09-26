@@ -767,17 +767,27 @@ describe("重複レコードの防止", () => {
   });
 
   test("同じ呼称なのに別レコードなら候補として挙げる", () => {
+    // 名前どうしがつながっている（「ターナ」と「ターナ先生」）ので、
+    // 別名の取り違えだけの組ではない（J12 で消すのは、つながりの無い組だけ）
     const a = emptyCharacter("char_001", "ターナ先生");
-    const b = emptyCharacter("char_002", "別名");
+    const b = emptyCharacter("char_002", "ターナ");
     b.aliases = ["ターナ先生"];
 
     const result = mergeExtractedCharacters([a, b], []);
 
     expect(
-      result.mergeCandidates.some(
-        (c) => c.reason === "same_name" && c.names.includes("ターナ先生")
-      )
+      result.mergeCandidates.some((c) => c.names.includes("ターナ先生"))
     ).toBe(true);
+  });
+
+  test("相手の名前が別名に入っているだけで、名前のつながりが無い組は挙げない（J12）", () => {
+    const a = emptyCharacter("char_001", "ターナ先生");
+    const b = emptyCharacter("char_002", "マイナ");
+    b.aliases = ["ターナ先生"];
+
+    const result = mergeExtractedCharacters([a, b], []);
+
+    expect(result.mergeCandidates).toEqual([]);
   });
 
   test("別人を勝手に統合しない", () => {

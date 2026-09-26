@@ -4,6 +4,7 @@ import { scanWork } from "../core/scanner";
 import { readWorkFormat } from "../core/workFormatStore";
 import { readWorkGoalsOrEmpty } from "../core/workGoalsStore";
 import { buildEpisodeCountTable } from "../core/episodeCharTable";
+import { currentCountMode } from "../core/countSettings";
 import { readTextFile } from "../core/textFile";
 import { episodeBodySources } from "../core/episodeChunks";
 import { blankMemoLines } from "../core/sceneMemo";
@@ -86,6 +87,9 @@ async function collectWritten(
   const { summary } = buildEpisodeCountTable([...episodes], {
     format: await readWorkFormat(work),
     perEpisodeGoal: goals.perEpisodeChars,
+    // **作品一覧・執筆統計と同じ数え方**（J1、作者の裁定 2026-09-26）。
+    // 輪の数字だけ純で固定だと、同じ作品で画面ごとに違う字数が出る
+    countMode: currentCountMode(),
   });
 
   // **合本は中の話を数える。** ファイルの数で言うと、219話の作品が
@@ -95,15 +99,15 @@ async function collectWritten(
     0
   );
   if (counted > 0) written.episodes = counted;
-  if (summary.totalNet > 0) written.chars = summary.totalNet;
+  if (summary.totalChars > 0) written.chars = summary.totalChars;
 
   // **1話ずつのファイルが無ければ、長さの癖は言えない**（合本1件では
   // 中央値も最短・最長も、その1ファイルの数字にしかならない）
-  if (summary.medianNet > 0 && summary.shortest && summary.longest) {
+  if (summary.medianChars > 0 && summary.shortest && summary.longest) {
     written.length = {
-      typical: Math.round(summary.medianNet),
-      shortest: summary.shortest.net,
-      longest: summary.longest.net,
+      typical: Math.round(summary.medianChars),
+      shortest: summary.shortest.chars,
+      longest: summary.longest.chars,
     };
   }
 

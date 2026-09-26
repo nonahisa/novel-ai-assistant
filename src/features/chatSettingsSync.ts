@@ -26,6 +26,10 @@ import {
 import { describeSkipped } from "./plotCharacterSync";
 import { stageCharacterPlan } from "./stageCharacterPlan";
 import {
+  hasPendingPart,
+  planDirectCharacterWrites,
+} from "../core/chatDirectWrite";
+import {
   logFailure,
   logStep,
   responseExcerptForLog,
@@ -84,11 +88,40 @@ export interface ChatSettingsSyncDeps {
    * 何を使うのかを型で言い切るためである。
    */
   ai: Pick<AIRegistry, "resolve">;
+  /**
+   * 資料へ直接書くか、承認待ちに積むかを作者に訊く（J14）。
+   * 省略すると確認のダイアログを出す（試験では差し替える）。
+   * **答えが無い（閉じた）ときは承認待ち**——これまでと同じ道で、何も失わない
+   */
+  chooseWriteMode?: (summary: DirectWriteSummary) => Promise<"direct" | "pending">;
+}
+
+/** 直接書く前の確認に出す内訳 */
+export interface DirectWriteSummary {
+  /** 紹介文を埋める人物 */
+  filled: string[];
+  /** 食い違いとして残す人物 */
+  conflicted: string[];
+  /** 新しく作る人物 */
+  created: string[];
+  /** 直接は書けず、承認待ちへ回す件数 */
+  toPending: number;
 }
 
 export interface ChatSettingsSyncResult {
   /** 既存人物の更新案として積んだ件数 */
   staged: number;
+  /**
+   * 資料へ直接書いた内訳（J14）。承認待ちを選んだときは無い。
+   * `staged`・`creations` は、直接書いたときは**承認待ちへ回した分だけ**を数える
+   */
+  written?: {
+    filled: string[];
+    conflicted: string[];
+    created: string[];
+    /** 書けずに承認待ちへ回した人物（外で書き換えられていた等） */
+    fellBack: string[];
+  };
   /** 新規の人物案として積んだ名前 */
   creations: string[];
   /** 突合で積まなかったもの（作者確定・複数一致） */
@@ -169,7 +202,10 @@ export async function applyChatToSettings(
   // 読めない人物設定があるまま突き合わせると、「資料に居ない」と判断して
   // 同じ人物の新規案を出してしまう。**AIを呼ぶ前に確かめる**（無駄な課金を
   // させない）。覚え書きも残さず、直したあとにやり直せるようにする
-  const loaded = await new CharacterStore(work).loadAll();
+  // 同じ入れ物で書く（J14）。読んだときのハッシュを覚えているので、AIを
+  // 待つあいだに外で書き換えられた人物は、書き込みの時点で止まる
+  const characterStore = new CharacterStore(work);
+  const loaded = await characterStore.loadAll();
   if (loaded.errors.length > 0) {
     void vscode.window.showWarningMessage(
       `読み込めない人物設定が ${loaded.errors.length} 件あるため、` +
@@ -201,7 +237,7 @@ export async function applyChatToSettings(
     calls: 1,
     detail:
       "いま画面にある会話をAIへ送り、作者が決めた人物の設定を拾い出します。\n" +
-      "拾ったものは承認待ちに積まれるだけで、設定資料はまだ変わりません。",
+      "拾ったあと、資料へ直接書くか承認待ちに積むかを選べます（選ぶまで資料は変わりません）。",
   });
   if (!ok) return { ...EMPTY, failed: true };
 
@@ -359,6 +395,9 @@ export async function applyChatToSettings(
     );
   }
   let plan: PlotCharacterPlan<PendingUpdate>;
+  /** 承認待ちへ積んだ分（直接書いたときは、書けなかった分だけ） */
+  let stagedPlan: PlotCharacterPlan<PendingUpdate>;
+  let written: ChatSettingsSyncResult["written"];
   try {
     const store = new PendingUpdateStore(work);
     /*
@@ -373,9 +412,52 @@ export async function applyChatToSettings(
     const pending =
       verified.entries.length > 0 ? (await store.loadAll()).updates : [];
     plan = buildPlotCharacterUpdates(verified.entries, loaded.characters, pending);
+
+    /*
+      **資料へ直接書くか、承認待ちに積むかを作者が選ぶ**（J14、作者の裁定
+      2026-09-26）。直接書けるものが1件も無ければ訊かない（承認待ちだけ）。
+      何を直接書き、何を承認待ちへ回すか——実装ルール2の守り——は
+      `core/chatDirectWrite.ts` が決める
+    */
+    const direct = planDirectCharacterWrites(
+      plan,
+      loaded.characters,
+      pending
+        .filter((entry) => entry.kind === "creation")
+        .map((entry) => entry.character)
+    );
+    const directCount = direct.writes.length + direct.creations.length;
+    const mode =
+      directCount === 0
+        ? "pending"
+        : await (deps.chooseWriteMode ?? askWriteMode)({
+            filled: direct.filled,
+            conflicted: direct.conflicted,
+            created: direct.creations.map((character) => character.name),
+            toPending: countPlan(direct.toPending),
+          });
+
+    if (mode === "direct") {
+      const fellBack = await writeDirectly(characterStore, plan, direct);
+      stagedPlan = fellBack.plan;
+      written = {
+        filled: direct.filled.filter((name) => !fellBack.names.includes(name)),
+        conflicted: direct.conflicted.filter(
+          (name) => !fellBack.names.includes(name)
+        ),
+        created: direct.creations
+          .map((character) => character.name)
+          .filter((name) => !fellBack.names.includes(name)),
+        fellBack: fellBack.names,
+      };
+    } else {
+      stagedPlan = plan;
+    }
     // 積み方もプロットからの反映と同じ部品を通る（直す案の上に重ねたら、
     // その案の出どころと理由を残す）
-    await stageCharacterPlan(work, store, plan, pending, "chat");
+    if (hasPendingPart(stagedPlan)) {
+      await stageCharacterPlan(work, store, stagedPlan, pending, "chat");
+    }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     logFailure("相談から人物の更新案を積めませんでした", {
@@ -394,8 +476,12 @@ export async function applyChatToSettings(
   const result: ChatSettingsSyncResult = {
     // 承認待ちの直す案へ重ねたものも「既存人物の更新案」に数える
     // （相談の拾い出しは役名を持たないので、直す案を新しく置くことは無い）
-    staged: plan.updates.length + plan.pendingOverlays.length + plan.renames.length,
-    creations: plan.creations.map((entry) => entry.name),
+    staged:
+      stagedPlan.updates.length +
+      stagedPlan.pendingOverlays.length +
+      stagedPlan.renames.length,
+    creations: stagedPlan.creations.map((entry) => entry.name),
+    ...(written ? { written } : {}),
     skipped: plan.skipped,
     rejected: verified.rejected,
     dropped: trimmed.dropped,
@@ -423,6 +509,110 @@ export async function applyChatToSettings(
   return result;
 }
 
+/** 承認待ちへ積む件数（新規・更新・直す案・重ねたもの） */
+function countPlan(plan: PlotCharacterPlan<PendingUpdate>): number {
+  return (
+    plan.updates.length +
+    plan.creations.length +
+    plan.pendingOverlays.length +
+    plan.renames.length
+  );
+}
+
+const DIRECT_LABEL = "資料へ直接書く";
+const PENDING_LABEL = "承認待ちに積む";
+
+/**
+ * 直接書くか、承認待ちに積むかを訊く（J14）。
+ *
+ * **作者が押すまで書かない。** 閉じたら承認待ち（これまでと同じ道）に倒す
+ * ——拾い出しには料金がかかっていることがあり、閉じただけで捨てると
+ * 同じ会話をもう一度送り直すことになる。
+ */
+async function askWriteMode(
+  summary: DirectWriteSummary
+): Promise<"direct" | "pending"> {
+  const lines: string[] = [];
+  if (summary.filled.length > 0) {
+    lines.push(`紹介文を書く：${summary.filled.join("、")}`);
+  }
+  if (summary.created.length > 0) {
+    lines.push(`新しく作る：${summary.created.join("、")}`);
+  }
+  if (summary.conflicted.length > 0) {
+    lines.push(
+      `食い違いとして残す（資料の紹介文は変えません）：${summary.conflicted.join("、")}`
+    );
+  }
+  if (summary.toPending > 0) {
+    lines.push(
+      `直接は書けないため承認待ちへ回す：${summary.toPending}件（名前を直す案・作者が確定させた人物など）`
+    );
+  }
+  const answer = await vscode.window.showInformationMessage(
+    "相談で決まった人物の設定を、資料へ直接書きますか？",
+    {
+      modal: true,
+      detail:
+        `${lines.join("\n")}\n\n` +
+        "「承認待ちに積む」を選ぶと、これまでどおり「設定資料更新分反映」で" +
+        "1件ずつ確かめてから入ります。作者のメモ・書き出し用の注記は書き換えません。",
+    },
+    DIRECT_LABEL,
+    PENDING_LABEL
+  );
+  return answer === DIRECT_LABEL ? "direct" : "pending";
+}
+
+/**
+ * 直接書く。**書けなかった人物は承認待ちへ回す**（黙って捨てない）。
+ *
+ * 人物の保存は必ず `saveOrUpdate`（既存は退避してから作り直す。`save` を
+ * 直に呼ぶと、既存ファイルの上書きになって必ず失敗する）。読んだときの
+ * ハッシュと違えば、書き込みの前に止まる——AIを待つあいだに作者が
+ * 資料を直していたら、その直しを押し流さない。
+ */
+async function writeDirectly(
+  store: CharacterStore,
+  plan: PlotCharacterPlan<PendingUpdate>,
+  direct: ReturnType<typeof planDirectCharacterWrites<PendingUpdate>>
+): Promise<{ plan: PlotCharacterPlan<PendingUpdate>; names: string[] }> {
+  const fallback: PlotCharacterPlan<PendingUpdate> = {
+    ...direct.toPending,
+    updates: [...direct.toPending.updates],
+    creations: [...direct.toPending.creations],
+  };
+  const names: string[] = [];
+
+  for (const record of direct.writes) {
+    try {
+      await store.saveOrUpdate(record);
+    } catch (error) {
+      logFailure("相談から人物へ直接書けなかった（承認待ちへ回す）", {
+        人物: record.name,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+      const proposal = plan.updates.find((update) => update.id === record.id);
+      if (proposal) fallback.updates.push(proposal);
+      names.push(record.name);
+    }
+  }
+  for (const record of direct.creations) {
+    try {
+      await store.saveOrUpdate(record);
+    } catch (error) {
+      logFailure("相談から人物を作れなかった（承認待ちへ回す）", {
+        人物: record.name,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+      const entry = plan.creations.find((item) => item.name === record.name);
+      if (entry) fallback.creations.push(entry);
+      names.push(record.name);
+    }
+  }
+  return { plan: fallback, names };
+}
+
 /** 記録用の短い要約。積んだものと落としたものの両方を残す */
 function describeForLog(
   entries: ReadonlyArray<{ name: string; summary: string }>,
@@ -432,6 +622,12 @@ function describeForLog(
     `拾い出し ${entries.length}件 / 更新案 ${result.staged}件 / ` +
       `新規案 ${result.creations.length}件`,
   ];
+  if (result.written) {
+    lines.push(
+      `直接書いた：紹介文 ${result.written.filled.length}件 / 新規 ${result.written.created.length}件 / ` +
+        `食い違い ${result.written.conflicted.length}件 / 書けず承認待ちへ ${result.written.fellBack.length}件`
+    );
+  }
   for (const entry of entries) lines.push(`- ${entry.name}: ${entry.summary}`);
   for (const item of result.rejected) {
     lines.push(`- 見送り（${item.reason}）: ${item.name}`);
@@ -452,6 +648,25 @@ function announce(work: WorkEntry, result: ChatSettingsSyncResult): void {
   const created = result.creations.length;
   const total = result.staged + created;
   const notes = describeNotes(result);
+
+  // 直接書いたときは、書いたものを先に言う（J14）
+  if (result.written) {
+    const message = [describeDirectWrite(result.written, total), ...notes].join("");
+    if (total === 0) {
+      void vscode.window.showInformationMessage(message);
+      return;
+    }
+    void vscode.window
+      .showInformationMessage(message, "承認待ちを確認")
+      .then((answer) => {
+        if (answer !== "承認待ちを確認") return;
+        void vscode.commands.executeCommand("novelai.applyPendingUpdates", {
+          type: "work",
+          work,
+        });
+      });
+    return;
+  }
 
   if (total === 0) {
     void vscode.window.showInformationMessage(
@@ -484,6 +699,38 @@ function announce(work: WorkEntry, result: ChatSettingsSyncResult): void {
         work,
       });
     });
+}
+
+/**
+ * 直接書いた結果の一文（J14）。**相談パネルの会話の場にも同じ文を残す**
+ * （通知は消えるので、何をしたのかが会話から追えなくなる）。
+ */
+export function describeDirectWrite(
+  written: NonNullable<ChatSettingsSyncResult["written"]>,
+  pendingCount: number
+): string {
+  const parts: string[] = [];
+  const wrote = written.filled.length + written.created.length;
+  if (wrote > 0) {
+    parts.push(
+      `相談から人物${wrote}件を資料へ書きました` +
+        `（紹介文${written.filled.length}件・新規${written.created.length}件）。`
+    );
+  }
+  if (written.conflicted.length > 0) {
+    parts.push(
+      `${written.conflicted.join("、")}は資料の紹介文と食い違うため、上書きせず食い違いとして残しました。`
+    );
+  }
+  if (written.fellBack.length > 0) {
+    parts.push(
+      `${written.fellBack.join("、")}は書けなかったため承認待ちへ回しました（詳しくはログ）。`
+    );
+  }
+  if (pendingCount > 0) {
+    parts.push(`直接は書けない${pendingCount}件は承認待ちに積みました。`);
+  }
+  return parts.length > 0 ? parts.join("") : "資料へ書くものはありませんでした。";
 }
 
 /**

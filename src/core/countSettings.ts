@@ -1,5 +1,4 @@
 import * as vscode from "vscode";
-import type { CharCounts } from "../models/types";
 
 /**
  * 文字数の数え方の設定（設計書6.4）。
@@ -15,7 +14,10 @@ import type { CharCounts } from "../models/types";
  * 「今日の増分」が数え方の変更ぶんだけ跳ねることになる。
  */
 
-export type CountMode = "net" | "gross";
+// 型と選び分けは VS Code に依存しない所に置き、ここから書き出し直す（J1。
+// 画面なしで数える `episodeCharTable.ts` も同じ選び分けを使うため）
+import type { CountMode } from "./countMode";
+export { pickCount, type CountMode } from "./countMode";
 
 export const DEFAULT_COUNT_MODE: CountMode = "net";
 
@@ -31,11 +33,6 @@ export function currentCountMode(): CountMode {
       .getConfiguration("novelai")
       .get<string>("countMode", DEFAULT_COUNT_MODE)
   );
-}
-
-/** 数え方に合わせて、どちらの数字を出すか選ぶ */
-export function pickCount(counts: CharCounts, mode: CountMode): number {
-  return mode === "gross" ? counts.gross : counts.net;
 }
 
 /**

@@ -74,6 +74,39 @@ export function pickHintedWork(
 }
 
 /**
+ * 作品を選ぶ一覧で、**直前に使った作品を一番上へ出す**（作者の裁定 J13、
+ * 2026-09-26）。
+ *
+ * ## なぜ一覧を出したまま先頭へ置くのか
+ *
+ * 作者の希望は「直前の作品を既定にして、変えたいときだけ選び直す」。
+ * 一覧を出さずに直前の作品で走らせると、作品を替えたつもりで替え忘れたとき
+ * 別の作品で検知が走る。**一覧は出し、先頭に置く**——VS Code の一覧は
+ * 先頭が選ばれた状態で開くので、Enter だけで進める。
+ *
+ * ## なぜ残りの順を変えないのか
+ *
+ * 作品の並び（登録順や「溜まっている作品を上」）は、それぞれの呼び出し側が
+ * 理由を持って決めている。ここで動かすのは直前の1件だけにする。
+ *
+ * 登録から外れたIDは当てにしない（`pickHintedWork` と同じ理由）。
+ */
+export function orderByLastWork<T extends { id: string }>(
+  works: readonly T[],
+  lastWorkId: string | undefined
+): { ordered: T[]; lastFirst: boolean } {
+  const index =
+    lastWorkId === undefined
+      ? -1
+      : works.findIndex((work) => work.id === lastWorkId);
+  if (index < 0) return { ordered: [...works], lastFirst: false };
+  return {
+    ordered: [works[index], ...works.filter((_, i) => i !== index)],
+    lastFirst: true,
+  };
+}
+
+/**
  * 作品を**推し量って**決めたときの、決め方（作者の裁定、2026-09-23）。
  *
  * - `"tree"`：作品一覧（ツリー）で選ばれていた

@@ -5,6 +5,7 @@ import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { toManuscriptPages } from "../core/charCount";
 import { buildEpisodeCountTable } from "../core/episodeCharTable";
+import { currentCountMode } from "../core/countSettings";
 import { scanWork } from "../core/scanner";
 import {
   aggregate,
@@ -227,6 +228,22 @@ export async function refreshWritingStatsPanel(
   await offerCelebration(panel, work);
 }
 
+/**
+ * 開いている執筆統計をすべて作り直す。
+ *
+ * **数え方（純／総）を変えたときに呼ぶ**（J1）。作品一覧と下の帯は
+ * その場で描き直るので、統計だけ古い数え方のまま残ると、変えた直後に
+ * 画面どうしの数字が食い違う。
+ */
+export async function refreshOpenWritingStatsPanels(
+  works: readonly WorkEntry[],
+  deviceId: string
+): Promise<void> {
+  for (const work of works) {
+    if (openPanels.has(work.id)) await refreshWritingStatsPanel(work, deviceId);
+  }
+}
+
 async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
   const scanned = await scanWork(work);
   const sets = await new WritingStatsStore(work, deviceId).loadAll();
@@ -260,6 +277,10 @@ async function buildStatsPanelData(work: WorkEntry, deviceId: string) {
     perEpisodeGoal: goals.perEpisodeChars,
     kind,
     texts: await episodeTextsFor(kind, scanned.episodes),
+    // **作品一覧・下の帯と同じ数え方**（J1、作者の裁定 2026-09-26）。
+    // 純で固定していたため、総文字数を選んでいる作者には画面ごとに
+    // 違う数字が出ていた。日次・週次の執筆量は純で固定のまま（countSettings.ts）
+    countMode: currentCountMode(),
   });
   const contest = buildContestProgress(goals, scanned.stats.totals.net, today);
   const siteRecords = await readSiteRecords(work);

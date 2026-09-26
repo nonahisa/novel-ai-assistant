@@ -91,8 +91,11 @@ describe("数え方を読む場所は1か所だけ", () => {
 
   it("純と総の選び分けを自前で書いていない", () => {
     // `mode === "gross" ? counts.gross : counts.net` を各所に書くと、
-    // 新しい画面を足したときに書き忘れる
+    // 新しい画面を足したときに書き忘れる。選び分けは VS Code に依存しない
+    // `countMode.ts` の1か所に置く（J1。`countSettings.ts` は書き出し直すだけ）
     const offenders = collect("src")
+      .filter((file) => !file.endsWith("core/countMode.ts"))
+      // 設定値の読み取り・印（「総」）の選び分けは、こちらに残っている
       .filter((file) => !file.endsWith("core/countSettings.ts"))
       .filter((file) =>
         /===\s*"gross"\s*\?/.test(readFileSync(file, "utf-8"))

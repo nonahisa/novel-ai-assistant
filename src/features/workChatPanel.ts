@@ -210,6 +210,7 @@ import { findTextRange } from "../core/textLocate";
 import { applyChatEdit, readChatEditTarget } from "./applyChatEdit";
 import {
   applyChatToSettings,
+  describeDirectWrite,
   type ChatSettingsSyncResult,
 } from "./chatSettingsSync";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
@@ -4881,6 +4882,8 @@ function describeChatSync(result: ChatSettingsSyncResult): string {
   if (result.failed) return "資料への反映は行いませんでした。";
 
   const total = result.staged + result.creations.length;
+  // 直接書いたとき（J14）は、書いたものを会話の場にも残す
+  if (result.written) return describeDirectWrite(result.written, total);
   if (total === 0) return "相談から反映できる決定は見つかりませんでした。";
   return (
     `相談から人物${total}件の更新案を積みました` +

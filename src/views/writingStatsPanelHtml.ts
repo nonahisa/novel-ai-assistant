@@ -1363,12 +1363,12 @@ function renderEpisodes() {
   const summary = state.episodes.summary;
   document.getElementById('episode-cards').innerHTML = [
     card('話数', formatCount(summary.countedFiles) + '話',
-      summary.conflictedFiles > 0 ? '競合 ' + summary.conflictedFiles + '件は未集計' : '合計 ' + formatCount(summary.totalNet) + '字', null),
-    card('平均', formatCount(summary.averageNet) + '字',
-      '中央値 ' + formatCount(summary.medianNet) + '字', null),
-    card('いちばん長い話', summary.longest ? formatCount(summary.longest.net) + '字' : '—',
+      summary.conflictedFiles > 0 ? '競合 ' + summary.conflictedFiles + '件は未集計' : '合計 ' + formatCount(summary.totalChars) + '字', null),
+    card('平均', formatCount(summary.averageChars) + '字',
+      '中央値 ' + formatCount(summary.medianChars) + '字', null),
+    card('いちばん長い話', summary.longest ? formatCount(summary.longest.chars) + '字' : '—',
       summary.longest ? (summary.longest.chapterLabel || summary.longest.fileName) : '', null),
-    card('いちばん短い話', summary.shortest ? formatCount(summary.shortest.net) + '字' : '—',
+    card('いちばん短い話', summary.shortest ? formatCount(summary.shortest.chars) + '字' : '—',
       summary.shortest ? (summary.shortest.chapterLabel || summary.shortest.fileName) : '', null),
   ].concat(
     // 種類の目安（設計書6.109.7）。小説では来ないので、カードは4枚のまま
@@ -1378,7 +1378,9 @@ function renderEpisodes() {
   ).join('');
 
   const rows = state.episodes.rows;
-  const maxNet = rows.reduce((max, row) => Math.max(max, row.net), 0) || 1;
+  const maxNet = rows.reduce((max, row) => Math.max(max, row.chars), 0) || 1;
+  // 列の見出しは、数えた数え方に合わせる（J1。作品一覧・下の帯と同じ設定）
+  const countHead = summary.countMode === 'gross' ? '総文字数' : '純文字数';
   const table = document.getElementById('episode-table');
   if (rows.length === 0) {
     table.innerHTML = '<div class="empty">本文ファイルがありません。</div>';
@@ -1396,7 +1398,7 @@ function renderEpisodes() {
   const hasMeasure = rows.some((row) => row.measure);
   table.innerHTML = collectedNote +
     '<table><thead><tr>' +
-    '<th class="nowrap">話</th><th class="episode-title">タイトル</th><th class="num nowrap">純文字数</th><th class="num nowrap">原稿用紙</th>' +
+    '<th class="nowrap">話</th><th class="episode-title">タイトル</th><th class="num nowrap">' + countHead + '</th><th class="num nowrap">原稿用紙</th>' +
     (hasMeasure ? '<th class="num measure">目安</th>' : '') +
     '<th class="num nowrap">平均比</th><th>長さ</th></tr></thead><tbody>' +
     rows.map((row) => {
@@ -1414,11 +1416,11 @@ function renderEpisodes() {
       return '<tr class="clickable" data-path="' + escapeHtml(row.filePath) + '">' +
         '<td class="nowrap">' + escapeHtml(row.chapterLabel || '—') + '</td>' +
         '<td class="episode-title">' + escapeHtml(row.title || row.fileName) + collected + '</td>' +
-        '<td class="num nowrap">' + formatCount(row.net) + '</td>' +
+        '<td class="num nowrap">' + formatCount(row.chars) + '</td>' +
         '<td class="num nowrap">約' + formatCount(row.pages) + '枚</td>' +
         (hasMeasure ? '<td class="num measure">' + escapeHtml(row.measure || '—') + '</td>' : '') +
         '<td class="num nowrap">' + Math.round(row.ratio * 100) + '%</td>' +
-        '<td><div class="mini">' + meterSvg(Math.round((row.net / maxNet) * 100), '') +
+        '<td><div class="mini">' + meterSvg(Math.round((row.chars / maxNet) * 100), '') +
         '</div>' + flag + '</td></tr>';
     }).join('') +
     '</tbody></table>';

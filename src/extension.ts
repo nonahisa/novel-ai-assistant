@@ -243,7 +243,11 @@ import {
 } from "./features/checkTypos";
 // 完了通知の件数は、提案パネルの見出しと同じ数え方をする（設計書6.8）
 import { describeCheckRunCounts } from "./core/checkRunCounts";
-import { markInferredWork, pickHintedWork } from "./core/workTarget";
+import {
+  markInferredWork,
+  orderByLastWork,
+  pickHintedWork,
+} from "./core/workTarget";
 import type { IncomingCount } from "./core/proposalBuckets";
 import {
   checkNotation,
@@ -349,6 +353,7 @@ import {
 } from "./features/celebrations";
 import {
   openWritingStatsPanel,
+  refreshOpenWritingStatsPanels,
   refreshWritingStatsPanel,
 } from "./features/writingStatsPanel";
 import {
@@ -1892,6 +1897,12 @@ export async function activate(
     // **選んだ作品だけを数える**（設計書6.29）。詳細メニューの合算とは別
     (counter, workId) => actionDecorations.countOfWork(workId, counter)
   );
+  // 「直前に使った作品」はステップメニューの「選択作品」と同じもの（J13）。
+  // selectWork を通すのは、覚えた作品が最上段の表示にもすぐ出るようにするため
+  lastWorkMemory = {
+    get: () => stepProvider.selectedWork()?.id,
+    set: (id) => stepProvider.selectWork(id),
+  };
   const stepView = vscode.window.createTreeView("novelai.steps", {
     treeDataProvider: stepProvider,
   });
@@ -2646,6 +2657,13 @@ export async function activate(
       } else {
         treeProvider.redraw();
       }
+      // 執筆統計の「話ごとの文字数」も同じ数え方に従う（J1）。開いていれば描き直す
+      void refreshOpenWritingStatsPanels(registry.list(), deviceId).catch(
+        (error: unknown) =>
+          logFailure("数え方の変更：執筆統計を描き直せなかった", {
+            詳細: error instanceof Error ? error.message : String(error),
+          })
+      );
     }),
     vscode.workspace.onDidSaveTextDocument((document) => {
       updateStatusBar();
@@ -4818,7 +4836,7 @@ export async function activate(
     registerCommand(
       "novelai.openForeshadows",
       async (node?: WorkNode) => {
-        const work = await resolveWork(node, registry);
+        const work = await resolveWork(node, registry, { preferLast: true });
         if (!work) return;
         await openForeshadows(work);
       }
@@ -4840,7 +4858,7 @@ export async function activate(
     registerCommand(
       "novelai.setForeshadowStatus",
       async (node?: WorkNode) => {
-        const work = await resolveWork(node, registry);
+        const work = await resolveWork(node, registry, { preferLast: true });
         if (!work) return;
         await setForeshadowStatus(work);
       }
@@ -4851,7 +4869,7 @@ export async function activate(
     registerCommand(
       "novelai.checkForeshadows",
       async (node?: WorkNode, options?: CheckRunOptions) => {
-        const work = await resolveWork(node, registry);
+        const work = await resolveWork(node, registry, { preferLast: true });
         if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文から伏線を拾ってしまう
@@ -4924,7 +4942,7 @@ export async function activate(
           （2026-09-21）。隣り合う機能なのにこちらだけ何も返さず、
           取りやめたことが呼んだ側へ伝わらなかった（設計書6.104）。
         */
-        const work = await resolveWork(node, registry);
+        const work = await resolveWork(node, registry, { preferLast: true });
         if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文で回収を判定してしまう
@@ -5029,7 +5047,7 @@ export async function activate(
     registerCommand(
       "novelai.checkTypos",
       async (node?: WorkNode, options?: CheckRunOptions) => {
-        const work = await resolveWork(node, registry);
+        const work = await resolveWork(node, registry, { preferLast: true });
         if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を検知してしまう
@@ -5513,7 +5531,7 @@ export async function activate(
     registerCommand(
       "novelai.checkProofread",
       async (node?: WorkNode, options?: CheckRunOptions) => {
-        const work = await resolveWork(node, registry);
+        const work = await resolveWork(node, registry, { preferLast: true });
         if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を推敲してしまう
@@ -5733,7 +5751,7 @@ export async function activate(
     registerCommand(
       "novelai.checkContradictions",
       async (node?: WorkNode, options?: CheckRunOptions) => {
-        const work = await resolveWork(node, registry);
+        const work = await resolveWork(node, registry, { preferLast: true });
         if (!work) return CHECK_CANCELLED;
 
         if (isSuiteConfirmed(options)) {
@@ -5884,7 +5902,7 @@ export async function activate(
     registerCommand(
       "novelai.checkFactContradictions",
       async (node?: WorkNode, options?: CheckRunOptions) => {
-        const work = await resolveWork(node, registry);
+        const work = await resolveWork(node, registry, { preferLast: true });
         if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文から事実を抜いてしまう
@@ -7430,7 +7448,27 @@ interface ResolveWorkOptions {
    */
   annotate?: (work: WorkEntry) => Promise<{ note?: string; order?: number }>;
   title?: string;
+  /**
+   * 選ぶ一覧で、**直前に使った作品を一番上・選ばれた状態**にする
+   * （作者の裁定 J13、2026-09-26）。決まった作品は「直前の作品」として覚える。
+   *
+   * いまは検知（誤字脱字・推敲・矛盾）と伏線の操作だけが付ける。
+   * 作者の裁定がこの範囲だったため。
+   */
+  preferLast?: boolean;
 }
+
+/**
+ * 「直前に使った作品」を覚える口（J13）。
+ *
+ * **覚える場所は簡単ステップメニューの「選択作品」1つだけ。** 機能ごとに
+ * 別々に覚えると、誤字脱字で選んだ作品と伏線で選んだ作品がずれ、
+ * どちらが「直前」なのか作者から見えなくなる。ステップメニューは
+ * `activate()` の中にしか無いので、起動のときに預ける（預ける前は覚えない）。
+ */
+let lastWorkMemory:
+  | { get(): string | undefined; set(id: string): void }
+  | undefined;
 
 /**
  * コマンドへ「この作品で」と指定するための最小の入れ物。
@@ -7543,6 +7581,22 @@ async function resolveWork(
   const work = await resolveWorkUnrouted(node, registry, options);
   // 取りやめたときは向け直さない（何も起きていないので、記録も無い）
   if (work) useLogFile(work.folderPath);
+  /*
+    **決まった作品を「直前の作品」として覚える**（J13）。一覧から選んだときに
+    限らず、右クリックや作品一覧の選択で決まったときも覚える——作者から見て
+    「直前に使った作品」はどの決め方でも同じ作品だから。
+    変わらないときは書かない（ステップメニューの描き直しを起こさない）。
+    **1作品しか無いときは覚えない**——選ぶ場面が無いので覚える意味が無く、
+    これまでの振る舞い（ステップメニューの表示を含む）を変えないため
+  */
+  if (
+    work &&
+    options.preferLast &&
+    registry.list().length > 1 &&
+    lastWorkMemory?.get() !== work.id
+  ) {
+    lastWorkMemory?.set(work.id);
+  }
   return work;
 }
 
@@ -7594,11 +7648,26 @@ async function resolveWorkUnrouted(
 
   const title = options.title ?? "作品を選択";
   if (!options.annotate) {
+    /*
+      **直前の作品を一番上へ**（J13）。VS Code の一覧は先頭が選ばれた状態で
+      開くので、同じ作品なら Enter だけで進める。一覧を出さずに進めないのは、
+      作品を替えたつもりで替え忘れたとき、別の作品で検知が走るため。
+      （補足付きの一覧〈annotate〉は「溜まっている作品を上」の並びを
+      持っているので、ここでは触らない。いま preferLast と併せて使う所は無い）
+    */
+    const { ordered, lastFirst } = options.preferLast
+      ? orderByLastWork(works, lastWorkMemory?.get())
+      : { ordered: works, lastFirst: false };
     const picked = await vscode.window.showQuickPick(
       [
-        ...works.map((w) => ({
+        ...ordered.map((w, index) => ({
           label: abbreviateTitle(w.title),
-          description: w.folderPath,
+          // 先頭に置いた理由を見せる。黙って並びが変わると、作者には
+          // 登録順が崩れたように見える
+          description:
+            lastFirst && index === 0
+              ? `前回の作品　${w.folderPath}`
+              : w.folderPath,
           // 省略したときだけ全文を添える。短い題にまで2行目を足すと、
           // 選ぶだけの窓が縦に伸びて読みにくくなる
           detail: isAbbreviated(w.title) ? w.title : undefined,

@@ -192,7 +192,9 @@ export interface MergeCandidate {
   matchedReading?: string;
   /**
    * どれくらい確からしいか。
-   * 姓の共有や別名の汚染で並んだかもしれない組は "weak" にする。
+   * 姓の共有で並んだかもしれない組は "weak" にする。
+   * **別名の汚染だけで並んだ組は、候補そのものから外す**（作者の裁定 J12、
+   * 2026-09-26。それまでは "weak" で注記付きだった）。
    *
    * "medium" は敬称を外した姓の一致（honorific_family_name）。
    * 同じ姓を持つレコードが1件しか無いことを確かめてあるので "weak" よりは
@@ -205,7 +207,10 @@ export interface MergeCandidate {
 
 /** 姓の共有かもしれないときに添える一言 */
 const WEAK_FAMILY_NAME_NOTE = "姓の共有かもしれません";
-/** 別名に相手の名前が入っているだけかもしれないときに添える一言 */
+/**
+ * 別名に相手の名前が入っているだけかもしれない印。
+ * J12 から画面には出ない（その一致は根拠にしない）。見分けの印として残す
+ */
 const WEAK_ALIAS_NOTE = "別名に相手の名前が混ざっただけかもしれません";
 /** 代名詞・家族関係語のように、誰にでも使う呼び方で並んだときに添える一言 */
 const WEAK_GENERIC_WORD_NOTE = "誰にでも使う呼び方です。別人かもしれません";
@@ -1539,8 +1544,10 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
 
   for (let i = 0; i < characters.length; i++) {
     for (let j = i + 1; j < characters.length; j++) {
-      const a = characters[i];
-      const b = characters[j];
+      // 別名の取り違えを見つけたら、その別名を外した写しに差し替える（J12。下）
+      let a = characters[i];
+      let b = characters[j];
+      let index: ReadonlyMap<string, string[]> = appellations;
 
       // 作者が「別人だ」と決めた組は、候補に出さない（設計書6.5.8）。
       // **出すと、操作メニューの「重複をまとめる」に永久に1件が残る。**
@@ -1556,13 +1563,30 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
       const keys = new Map(
         (appellations.get(a.id) ?? []).map((name) => [normalizeName(name), name])
       );
-      const matched = (appellations.get(b.id) ?? []).find((name) =>
-        keys.has(normalizeName(name))
-      );
-      if (matched !== undefined) {
+      /*
+        **別名の取り違えだけで一致した呼び名は、根拠にしない**（作者の裁定 J12、
+        2026-09-26）。0.40.9 からは注記付きで残していたが、作者が読むたびに
+        「別人」と判断するだけの行だった。汚染そのものは資料の編集で直す。
+
+        一致した呼び名を**すべて**見るのは、1つ目が汚染でも2つ目が
+        まっとうな一致のことがあるため（1つ目だけで捨てると本当の重複を落とす）。
+        どの一致も汚染なら same_name としては出さず、下の別の理由
+        （省略・敬称・読み など）を調べに進む——ほかの理由が重なる組は残す
+      */
+      const matchedShown = (appellations.get(b.id) ?? [])
+        .filter((name) => keys.has(normalizeName(name)))
         // 表示は a 側の書き方に寄せる。同じ呼び名の表記ゆれを2つ並べない
-        const shown = keys.get(normalizeName(matched)) ?? matched;
-        const weakNote = weakSameNameNote(shown, a, b, sharedCounts);
+        .map((name) => keys.get(normalizeName(name)) ?? name);
+      const usable = matchedShown
+        .map((shown) => ({
+          shown,
+          weakNote: weakSameNameNote(shown, a, b, sharedCounts),
+        }))
+        .filter((match) => match.weakNote !== WEAK_ALIAS_NOTE);
+      // 確信度の高い一致を先に使う（弱い注記の付かないもの）
+      const best = usable.find((match) => !match.weakNote) ?? usable[0];
+      if (best !== undefined) {
+        const { shown, weakNote } = best;
         candidates.push({
           names: [a.name, b.name],
           ids: [a.id, b.id],
@@ -1572,6 +1596,38 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
           ...(weakNote ? { weakNote } : {}),
         });
         continue;
+      }
+
+      /*
+        汚染とみた呼び名は、**下の理由を調べるときにも使わない**（J12）。
+        使うと、相手のフルネームを別名に持つ人が、その別名と相手の名前の
+        組み合わせで省略・姓名の理由に掛かり、消したはずの組が理由を
+        変えて戻ってくる。名前そのものは消さない（相手の名前が汚染の元でも、
+        その人自身の名前である）
+      */
+      const contaminated = new Set(
+        matchedShown
+          .filter(
+            (shown) =>
+              weakSameNameNote(shown, a, b, sharedCounts) === WEAK_ALIAS_NOTE
+          )
+          .map(normalizeName)
+      );
+      if (contaminated.size > 0) {
+        a = withoutContaminatedAliases(a, contaminated);
+        b = withoutContaminatedAliases(b, contaminated);
+        const cleaned = new Map(appellations);
+        index = cleaned;
+        for (const character of [a, b]) {
+          cleaned.set(
+            character.id,
+            (appellations.get(character.id) ?? []).filter(
+              (name) =>
+                !contaminated.has(normalizeName(name)) ||
+                normalizeName(name) === normalizeName(character.name)
+            )
+          );
+        }
       }
 
       // 主たる名前どうしが同じで、それが誰にでも使う呼び方だった組。
@@ -1617,7 +1673,7 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
       // 実データで第4話だけ「フミカ」と書かれ、「密倉文佳」（読み「みくらふみか」）
       // とは**別名が漢字ばかりで突き合わせる道が無く**、候補にすら出なかった。
       // 読みは `fillReading` がひらがなで持つので、かなの側を揃えれば比べられる
-      const reading = readingMatchPair(a, b, appellations);
+      const reading = readingMatchPair(a, b, index);
       if (reading) {
         candidates.push({
           names: [reading.kana.name, reading.owner.name],
@@ -1857,6 +1913,26 @@ function countSharedAppellations(
     }
   }
   return counts;
+}
+
+/**
+ * 汚染とみた別名を外した**写し**（J12）。元のレコードには触らない
+ * （候補を探すだけで、資料は書き換えない）。
+ *
+ * 自分の名前と同じ呼び名は外さない——汚染の元は相手の別名の側にある。
+ */
+function withoutContaminatedAliases(
+  character: Character,
+  contaminated: ReadonlySet<string>
+): Character {
+  const own = normalizeName(character.name);
+  const aliases = character.aliases.filter((alias) => {
+    const key = normalizeName(alias);
+    return !contaminated.has(key) || key === own;
+  });
+  return aliases.length === character.aliases.length
+    ? character
+    : { ...character, aliases };
 }
 
 /** 姓とみなせる件数。これ以上のレコードが同じ呼び名を持てば家名を疑う */

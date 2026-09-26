@@ -12,6 +12,7 @@ import {
   isCollectedFile,
 } from "./episodeLabel";
 import type { WorkFormatKey } from "./workFormat";
+import { pickCount, type CountMode } from "./countMode";
 
 /**
  * 話ごとの文字数一覧（設計書6.3）。
@@ -32,6 +33,11 @@ export interface EpisodeCountRow {
   title: string | null;
   net: number;
   gross: number;
+  /**
+   * 設定の数え方（純／総）で数えた字数（J1）。**画面に出す・比べるのはこちら。**
+   * `net`・`gross` は両方を見せたい所のために残してある
+   */
+  chars: number;
   /** 原稿用紙の枚数（20字×20行） */
   pages: number;
   /** 基準に対する比。1.0が基準ちょうど（基準は `summary.basis`） */
@@ -71,6 +77,13 @@ export interface EpisodeCountSummary {
    * 数字の出どころを黙って変えない。
    */
   collectedFiles: number;
+  /** この一覧を数えた数え方（J1）。画面の列の見出しを合わせるのに使う */
+  countMode: EpisodeCountMode;
+  /** 設定の数え方で数えた合計・平均・中央値（J1）。画面と三つの輪はこちらを使う */
+  totalChars: number;
+  averageChars: number;
+  medianChars: number;
+  /** 純文字数の合計・平均・中央値（数え方の設定にかかわらず純） */
   totalNet: number;
   totalPages: number;
   averageNet: number;
@@ -104,6 +117,14 @@ export const LONG_RATIO = 2.0;
  */
 export const MIN_FILES_FOR_FLAGS = 4;
 
+/**
+ * 数え方。選び分けは `core/countMode.ts` の1か所を通す（設定を読む
+ * `countSettings.ts` は `vscode` を持つので、ここでは読まない）。
+ */
+export type EpisodeCountMode = CountMode;
+
+const charsOf = pickCount;
+
 export function buildEpisodeCountTable(
   episodes: EpisodeFile[],
   options: {
@@ -119,14 +140,26 @@ export function buildEpisodeCountTable(
      * 台本・エッセイでは渡さなくてよい
      */
     texts?: ReadonlyMap<string, string>;
+    /**
+     * 数え方（J1、作者の裁定 2026-09-26）。**作品一覧・下の帯と同じ設定を渡す。**
+     * 平均比・長短の印・最長最短も、この数え方で比べる——表の数字と印の
+     * 数え方が食い違うと、「3,000字なのに短い」のような出方になる。
+     * 省略すると純文字数（これまでどおり）
+     */
+    countMode?: EpisodeCountMode;
   } = {}
 ): {
   rows: EpisodeCountRow[];
   summary: EpisodeCountSummary;
 } {
   const { format, perEpisodeGoal, kind, texts } = options;
+  const countMode: EpisodeCountMode = options.countMode ?? "net";
   const counted = episodes.filter((episode) => !episode.hasConflictMarkers);
   const totalNet = counted.reduce((sum, episode) => sum + episode.counts.net, 0);
+  const totalChars = counted.reduce(
+    (sum, episode) => sum + charsOf(episode.counts, countMode),
+    0
+  );
 
   // **合本は平均の母集団に入れない**（設計書6.3）。合本の `net` は中の全話の
   // 合計なので、1行として混ぜると平均が跳ね上がり、普通の話が軒並み
@@ -135,11 +168,13 @@ export function buildEpisodeCountTable(
   const population = counted.filter(
     (episode) => !isCollectedFile(episode.collectedCount)
   );
-  const average =
+  const averageOf = (pick: (counts: CharCounts) => number): number =>
     population.length > 0
-      ? population.reduce((sum, episode) => sum + episode.counts.net, 0) /
+      ? population.reduce((sum, episode) => sum + pick(episode.counts), 0) /
         population.length
       : 0;
+  const average = averageOf((counts) => charsOf(counts, countMode));
+  const averageNet = averageOf((counts) => counts.net);
 
   // **目標を決めていれば目標が基準。** 作者が「1話3,000字」と決めているのに
   // 平均と比べても、全部が短い作品では「どれも平均どおり」としか出ない
@@ -157,7 +192,8 @@ export function buildEpisodeCountTable(
 
   const rows: EpisodeCountRow[] = episodes.map((episode) => {
     const chapterLabel = formatChapterLabel(episode, format);
-    const ratio = basisChars > 0 ? episode.counts.net / basisChars : 0;
+    const chars = charsOf(episode.counts, countMode);
+    const ratio = basisChars > 0 ? chars / basisChars : 0;
     // 合本の行には長短を言わない。中の全話の合計は1話ぶんの長さではない
     const collected = isCollectedFile(episode.collectedCount);
     return {
@@ -167,6 +203,7 @@ export function buildEpisodeCountTable(
       title: episodeTitle(episode, chapterLabel),
       net: episode.counts.net,
       gross: episode.counts.gross,
+      chars,
       pages: toManuscriptPages(episode.counts.manuscriptLines),
       ratio,
       flag:
@@ -192,7 +229,7 @@ export function buildEpisodeCountTable(
   // 73万字の合本を「いちばん長い話」と呼んでも、作者の役に立たない
   const sorted = countedRows
     .filter((row) => row.collectedCount === null)
-    .sort((left, right) => left.net - right.net);
+    .sort((left, right) => left.chars - right.chars);
 
   return {
     rows,
@@ -202,14 +239,21 @@ export function buildEpisodeCountTable(
       countedFiles: countedRows.length,
       conflictedFiles: rows.length - countedRows.length,
       collectedFiles: countedRows.length - sorted.length,
+      countMode,
+      totalChars,
+      averageChars: Math.round(average),
+      medianChars: median(sorted.map((row) => row.chars)),
       totalNet,
       // 枚数は行数を合算してから換算する。ファイルごとに切り上げると
       // 端数が積み上がって実際より多くなる（設計書6.3.1）
       totalPages: toManuscriptPages(
         counted.reduce((sum, episode) => sum + episode.counts.manuscriptLines, 0)
       ),
-      averageNet: Math.round(average),
-      medianNet: median(sorted.map((row) => row.net)),
+      averageNet: Math.round(averageNet),
+      // 並びは設定の数え方の順なので、純の中央値は純で並べ直してから取る
+      medianNet: median(
+        sorted.map((row) => row.net).sort((left, right) => left - right)
+      ),
       longest: sorted.length > 0 ? sorted[sorted.length - 1] : null,
       shortest: sorted.length > 0 ? sorted[0] : null,
       totalMeasure: totalMeasure?.detail ?? null,

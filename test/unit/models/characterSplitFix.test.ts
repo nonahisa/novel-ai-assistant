@@ -404,15 +404,52 @@ describe("⑤重複の候補に根拠を出す", () => {
     );
   });
 
-  test("別名に相手の名前が混ざっただけの組は確信度を落とす", () => {
+  /**
+   * **別名の取り違えだけが理由の組は、候補から消す**（作者の裁定 J12、
+   * 2026-09-26）。0.40.9 からは注記付きで残していたが、作者が読むたびに
+   * 「別人」と判断するだけの行で、一覧が長くなるだけだった。
+   * 別名の汚染そのものは資料の編集で直す（候補に出しても直らない）
+   */
+  test("別名に相手の名前が混ざっただけの組は、候補に出さない", () => {
     const candidates = findMergeCandidates([
       character("char_001", "三門太志", { aliases: ["太志"] }),
       character("char_006", "文佳", { aliases: ["三門太志"] }),
     ]);
 
-    expect(candidates[0].confidence).toBe("weak");
-    expect(describeMergeCandidate(candidates[0])).toBe(
-      "「三門太志」が両方にあります（別名に相手の名前が混ざっただけかもしれません）"
+    expect(candidates).toEqual([]);
+  });
+
+  test("ほかの呼び名でも一致していれば、その理由で残す", () => {
+    // 「三門太志」は汚染だが、「太志」も両方にある（こちらは汚染とは言えない）
+    const candidates = findMergeCandidates([
+      character("char_001", "三門太志", { aliases: ["太志"] }),
+      character("char_006", "文佳", { aliases: ["三門太志", "太志"] }),
+    ]);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].matchedName).toBe("太志");
+    expect(describeMergeCandidate(candidates[0])).not.toContain(
+      "混ざっただけ"
+    );
+  });
+
+  test("別名の取り違えのほかの理由（省略・敬称など）が重なる組は残す", () => {
+    // 「太志くん」は「太志」に敬称を足した形（suffix）。別名の「三門太志」は汚染
+    const candidates = findMergeCandidates([
+      character("char_001", "太志", { aliases: [] }),
+      character("char_006", "太志くん", { aliases: ["太志"] }),
+    ]);
+    expect(candidates).toHaveLength(1);
+
+    const contaminatedAndSuffix = findMergeCandidates([
+      character("char_001", "三門太志", { aliases: ["太志"] }),
+      character("char_006", "太志くん", { aliases: ["三門太志"] }),
+    ]);
+    expect(contaminatedAndSuffix).toHaveLength(1);
+    // 残す理由は汚染した別名ではなく、「太志」と「太志くん」のつながり
+    expect(contaminatedAndSuffix[0].matchedName).not.toBe("三門太志");
+    expect(describeMergeCandidate(contaminatedAndSuffix[0])).not.toContain(
+      "混ざっただけ"
     );
   });
 });
