@@ -1,10 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   buildForeshadowDetectPrompt,
-  FORESHADOW_DETECT_DEFINITION,
-  FORESHADOW_DETECT_EXCLUDED,
   FORESHADOW_DETECT_HINTS,
-  FORESHADOW_DETECT_VERSION,
   FORESHADOW_DETECT_SCHEMA,
   FORESHADOW_DETECT_SYSTEM_PROMPT,
   FORESHADOW_LABEL_MAX_CHARS,
@@ -144,109 +141,6 @@ describe("P-25 配置の検知", () => {
       );
 
       expect(result.accepted).toHaveLength(0);
-    });
-  });
-
-  /**
-   * **範囲を絞る**（作者の裁定、2026-09-26 午後）。比べで、どのモデルも挙げた誤検出が
-   * 「骨竜狩りをする」「明日は忙しくなるな」のような**作中で語られた予定**だった。
-   * 予定・段取りと、その場で説明が済んだ仕組みは外し、読者にまだ明かされていない
-   * ものだけを拾わせる。
-   */
-  describe("範囲を絞る（1.1）", () => {
-    const chunk: Chunk = {
-      filePath: "C:/works/003.txt",
-      index: 0,
-      text: "明日は骨竜狩りをしに行く。銀の懐中時計を、彼はしまい込んだ。",
-      startLine: 0,
-      chapterStart: 3,
-      chapterEnd: 3,
-      hash: "h",
-    };
-
-    test("予定・段取りと説明済みの仕組みを外し、明かされていないものだけを頼む", () => {
-      const prompt = buildForeshadowDetectPrompt(input);
-      expect(prompt).toContain(FORESHADOW_DETECT_DEFINITION);
-      for (const excluded of FORESHADOW_DETECT_EXCLUDED) {
-        expect(prompt, excluded).toContain(excluded);
-      }
-      expect(prompt).toContain("「〜しに行く」");
-      expect(prompt).toContain("「明日〜する」");
-      expect(prompt).toContain("読者にまだ明かされていないものだけ");
-    });
-
-    test("頼み方を変えたので版が上がっている（控えを使い回さない）", () => {
-      expect(FORESHADOW_DETECT_VERSION).not.toBe("1.0");
-    });
-
-    test("外すものの言葉を示唆に書いてきたら、候補ごと落とす", () => {
-      // モデル自身が「予定・段取り」と分類したものを、伏線として出さない
-      for (const excluded of FORESHADOW_DETECT_EXCLUDED) {
-        const result = validateForeshadowCandidates(
-          {
-            foreshadows: [
-              {
-                label: "骨竜狩り",
-                note: `${excluded}です`,
-                quote: "明日は骨竜狩りをしに行く",
-              },
-            ],
-          },
-          chunk
-        );
-        expect(result.accepted, excluded).toHaveLength(0);
-        expect(result.rejected[0].reason).toBe("excluded_echo");
-      }
-    });
-
-    test("外すものの言葉を名前に書いてきても落とす", () => {
-      const result = validateForeshadowCandidates(
-        {
-          foreshadows: [
-            {
-              label: FORESHADOW_DETECT_EXCLUDED[0],
-              note: "",
-              quote: "明日は骨竜狩りをしに行く",
-            },
-          ],
-        },
-        chunk
-      );
-      expect(result.accepted).toHaveLength(0);
-    });
-
-    test("伏線の定義を写しただけの示唆は空にし、候補は残す", () => {
-      const result = validateForeshadowCandidates(
-        {
-          foreshadows: [
-            {
-              label: "銀の懐中時計",
-              note: `${FORESHADOW_DETECT_DEFINITION}です。`,
-              quote: "銀の懐中時計を、彼はしまい込んだ",
-            },
-          ],
-        },
-        chunk
-      );
-      expect(result.accepted).toHaveLength(1);
-      expect(result.accepted[0].note).toBe("");
-    });
-
-    test("ふつうの示唆に「予定」の語が入っていても落とさない", () => {
-      const result = validateForeshadowCandidates(
-        {
-          foreshadows: [
-            {
-              label: "銀の懐中時計",
-              note: "狩りの予定の裏で、時計の持ち主が伏せられている",
-              quote: "銀の懐中時計を、彼はしまい込んだ",
-            },
-          ],
-        },
-        chunk
-      );
-      expect(result.accepted).toHaveLength(1);
-      expect(result.accepted[0].note).not.toBe("");
     });
   });
 });

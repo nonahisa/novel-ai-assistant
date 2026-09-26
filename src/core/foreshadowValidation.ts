@@ -4,8 +4,6 @@ import { normalizeForComparison } from "./groundedEvidence";
 import { isPlaceholderText } from "./placeholderText";
 import { sha256Text } from "./hash";
 import {
-  FORESHADOW_DETECT_DEFINITION,
-  FORESHADOW_DETECT_EXCLUDED,
   FORESHADOW_DETECT_HINTS,
   FORESHADOW_LABEL_MAX_CHARS,
 } from "../prompts/foreshadowDetect";
@@ -49,12 +47,7 @@ export type ForeshadowRejectReason =
   /** 引用が本文に無い */
   | "quote_not_found"
   /** 既に台帳にある、または同じ回で二重に出た */
-  | "duplicate"
-  /**
-   * 名前か示唆に、P-25 の「取り出さないもの」の言葉を書いてきた（1.1）。
-   * モデル自身が「予定・段取り」「説明が済んだ仕組み」と分類した候補である
-   */
-  | "excluded_echo";
+  | "duplicate";
 
 export interface RejectedForeshadow {
   raw: unknown;
@@ -136,14 +129,6 @@ export function validateForeshadowCandidates(
       rejected.push({ raw: item, reason: "placeholder" });
       continue;
     }
-    // **「取り出さないもの」の言葉を書いてきたら、候補ごと落とす**（P-25 1.1）。
-    // 指示の言葉は答えの中身として返ってくる（失敗3）——ここでは、モデルが
-    // 自分で「外すもの」と分類したことを名前や示唆で白状している。
-    // 丸ごと含むときだけ見るので、「予定」の一語が入っただけの示唆は落ちない
-    if (echoesExcluded(label) || echoesExcluded(asString(item.note))) {
-      rejected.push({ raw: item, reason: "excluded_echo" });
-      continue;
-    }
     // **引用は「本文に在るか」で決める。** ヒント語を含むかは見ない——
     // 指示語をなぞっただけの引用は、このあとの逐語照合で落ちる。
     // 逆に、ヒント語（「何を示唆しているか」など日本語として自然な句）が
@@ -178,10 +163,7 @@ export function validateForeshadowCandidates(
     accepted.push({
       label: shortLabel,
       // 示唆は補足なので、中身が無ければ空にするだけで候補は残す
-      // 伏線の定義（1.1）を写しただけの示唆は、何を示唆しているかを言っていない
-      note: containsHint(asString(item.note), FORESHADOW_DETECT_DEFINITION)
-        ? ""
-        : usableNote(asString(item.note), FORESHADOW_DETECT_HINTS),
+      note: usableNote(asString(item.note), FORESHADOW_DETECT_HINTS),
       quote,
       filePath: at.filePath,
       chapter: at.chapter,
@@ -626,23 +608,6 @@ function isEmptyAnswer(text: string, hints: readonly string[]): boolean {
   return hints.some((hint) => body === normalizeForHintMatch(hint));
 }
 
-/**
- * 長い指示の文を**丸ごと含む**か（P-25 1.1）。
- *
- * `isEmptyAnswer` は短いヒント語を「丸ごと同じ」でしか見ない（自然な句なので
- * 本物の説明にも現れる）。定義や「取り出さないもの」は1文ぶんの長さがあり、
- * 本物の説明にそのまま入ることはまず無いので、含むかで見てよい。
- */
-function containsHint(text: string, hint: string): boolean {
-  const body = normalizeForHintMatch(text);
-  const target = normalizeForHintMatch(hint);
-  return body.length > 0 && target.length > 0 && body.includes(target);
-}
-
-function echoesExcluded(text: string): boolean {
-  return FORESHADOW_DETECT_EXCLUDED.some((hint) => containsHint(text, hint));
-}
-
 /** 中身の無い言葉が来たら、空にする（書いてあることにしない） */
 function usableNote(note: string, hints: readonly string[]): string {
   return isEmptyAnswer(note, hints) ? "" : note;
@@ -690,7 +655,6 @@ const REJECT_REASON_LABELS: Record<string, string> = {
   planted_echo: "張った箇所そのもの",
   before_planted: "張った箇所より前",
   duplicate: "既にあるものと重なり",
-  excluded_echo: "取り出さないものの言葉",
 };
 
 /**
