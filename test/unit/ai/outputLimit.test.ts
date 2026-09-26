@@ -91,9 +91,11 @@ describe("resolveOutputTokensForPlanning", () => {
       measuredOutputTokens: 6500,
     });
 
-    // さくらの同名モデルは測っていないので、既定の見込みへ落ちる
+    // さくらの同名モデルは測っていないので、既定の見込みへ落ちる。
+    // 同梱の表で「思考を止められない（2,560トークン）」と分かっているので、
+    // 既定の 8,192 にそのぶんが乗る（2026-09-26。手元の 6,500 は混ざらない）
     expect(resolveOutputTokensForPlanning("sakura", "gpt-oss-120b")).toBe(
-      8192
+      8192 + 2560
     );
   });
 });

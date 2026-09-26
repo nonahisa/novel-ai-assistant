@@ -304,6 +304,9 @@ describe("読める長さが短いモデル（比べ 2026-09-25〜26）", () => 
   test.each([
     ["llm-jp-3.1-8x13b-instruct4", 4096],
     ["preview/Phi-4-mini-instruct-cpu", 4096],
+    // サーバーが述べた長さ（AIチューニングの申告の段、2026-09-26）
+    ["preview/Qwen3.6-35B-A3B", 262_144],
+    ["preview/Kimi-K2.6", 262_144],
   ])("%s は %d トークンとして扱う", async (model, expected) => {
     const provider = new SakuraProvider(fakeContext());
 
@@ -313,7 +316,7 @@ describe("読める長さが短いモデル（比べ 2026-09-25〜26）", () => 
   test("長さを持っていないモデルは、これまでどおり既定で扱う", async () => {
     const provider = new SakuraProvider(fakeContext());
 
-    expect((await provider.getModel("preview/Qwen3.6-35B-A3B"))?.contextWindow).toBe(
+    expect((await provider.getModel("preview/まだ測っていないモデル"))?.contextWindow).toBe(
       SAKURA_CONTEXT_WINDOW.fallback
     );
   });

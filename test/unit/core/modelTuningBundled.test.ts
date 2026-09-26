@@ -53,7 +53,7 @@ describe("台帳が空のとき", () => {
   test("測っていないモデルには、これまでどおり何も返さない", async () => {
     await useMemoryTuningStore({});
 
-    expect(modelTuning("ollama", "gemma4:e4b")).toBeUndefined();
+    expect(modelTuning("ollama", "llama3.2:3b")).toBeUndefined();
   });
 });
 
@@ -136,12 +136,12 @@ describe("一覧にも並ぶ", () => {
 
   test("作者が測った行は、そのまま並ぶ", async () => {
     await useMemoryTuningStore({
-      "ollama/gemma4:e4b": { outputTokensPerSecond: 11.4 },
+      "ollama/llama3.2:3b": { outputTokensPerSecond: 11.4 },
     });
 
     const table = allModelTuning();
-    expect(table.get("ollama/gemma4:e4b")?.outputTokensPerSecond).toBe(11.4);
-    expect(table.get("ollama/gemma4:e4b")?.bundled).toBeUndefined();
+    expect(table.get("ollama/llama3.2:3b")?.outputTokensPerSecond).toBe(11.4);
+    expect(table.get("ollama/llama3.2:3b")?.bundled).toBeUndefined();
   });
 });
 

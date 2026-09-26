@@ -270,6 +270,19 @@ export interface TypoAccuracyRecord {
   readonly typoAccuracyMeasuredAt?: string;
 }
 
+/**
+ * 読む側が受け取る形。台帳の欄に、**どの欄が同梱から来たか**の印
+ * （`ModelTuning.bundledFields`）を添えたもの。`ModelTuning` をそのまま渡せる。
+ */
+export type TypoAccuracyReadable = TypoAccuracyRecord & {
+  readonly bundledFields?: readonly string[];
+};
+
+/** 精度の目安が同梱の表から来たか（`core/bundledTuning.ts` の `typoAccuracy`） */
+function fromBundledTypoAccuracy(record: TypoAccuracyReadable): boolean {
+  return record.bundledFields?.includes("typoAccuracyHits") === true;
+}
+
 /** 測った結果を、台帳へ書く形にする */
 export function typoAccuracyRecord(
   score: TypoAccuracyScore,
@@ -349,9 +362,11 @@ function trapNote(record: TypoAccuracyRecord, withTotal: boolean): string {
  *
  * 例：「誤字脱字：7件中5件・誤検出1件（うち罠1/4）（2026-09-26・P-09 1.2）」
  */
-export function describeTypoAccuracyRecord(record: TypoAccuracyRecord | undefined): string | undefined {
+export function describeTypoAccuracyRecord(record: TypoAccuracyReadable | undefined): string | undefined {
   if (!hasTypoAccuracy(record)) return undefined;
   const notes = [
+    // 作者の機械で測ったものではないことを、日付より先に言う
+    fromBundledTypoAccuracy(record) ? "同梱の測定" : "",
     dateOf(record.typoAccuracyMeasuredAt),
     record.typoAccuracyPromptVersion !== undefined
       ? `P-09 ${record.typoAccuracyPromptVersion}`
@@ -373,12 +388,25 @@ export function describeTypoAccuracyRecord(record: TypoAccuracyRecord | undefine
  * ときは、そちらが主で、これは添え物である（並べ方は呼び出し側）。
  * 古い結果は、古いと言って出す（黙って出すと、いまの頼み方の結果に見える）。
  */
-export function describeTypoAccuracyHint(record: TypoAccuracyRecord | undefined): string | undefined {
+export function describeTypoAccuracyHint(record: TypoAccuracyReadable | undefined): string | undefined {
   if (!hasTypoAccuracy(record)) return undefined;
   const numbers =
     `${record.typoAccuracyTotal}件中${record.typoAccuracyHits}件・` +
     `誤検出${record.typoAccuracyFalsePositives}` +
     trapNote(record, false);
+  /*
+    **同梱の値は「同梱の測定（日付）」と名乗る**（2026-09-26）。作者の機械で
+    測っていないのに、作者が測った目安と同じ顔で並べない。同梱の値は
+    いまの版のものしか混ざらない（`core/modelTuning.ts`）ので、古い結果の
+    断りは要らない。
+  */
+  if (fromBundledTypoAccuracy(record)) {
+    const date = dateOf(record.typoAccuracyMeasuredAt);
+    return (
+      `目安（同梱の測定${date !== "" ? `（${date}）` : ""}・同梱の短い文）：` +
+      numbers
+    );
+  }
   return isTypoAccuracyCurrent(record)
     ? `目安（同梱の短い文で測定）：${numbers}`
     : `目安（同梱の短い文で測定）：${numbers}（頼み方か文が変わる前の古い結果。測り直せます）`;

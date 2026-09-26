@@ -52,6 +52,18 @@
  * 作者が設定に書いた値は、これまでどおり同梱より常に先に来る（守り2）。
  * 同梱が割り込むのは、**これまで当て推量の既定へ落ちていた場所だけ**である。
  *
+ * ## 考えるモデルの性質と、誤字脱字の精度の目安（2026-09-26 に足した）
+ *
+ * AIチューニングの「仕事に近い形で測る」（設計書6.49.9）で測れた値のうち、
+ * **機械に依らないもの**だけを足した。時間（1000字あたりの秒数）と
+ * 待ち時間は、同じ測定で取れていても載せない（回線・GPU で変わる）。
+ *
+ * - 考えるモデルか・止める指定が効くか・思考に使うトークン数
+ *   （`thinking*`）。台帳にどれか1つでもあれば、同梱は1つも使わない
+ * - 誤字脱字の精度の目安（`typoAccuracy`）。台帳に精度の欄が1つでもあれば
+ *   使わない。**頼み方か文の版が変わったら使わない**（`isTypoAccuracyCurrent`）。
+ *   画面には「同梱の測定」と名乗って出る（`describeTypoAccuracyHint`）
+ *
  * VS Code APIに依存しない。
  */
 
@@ -113,11 +125,75 @@ export interface BundledTuning {
    */
   readonly contextDeclared?: string;
   /**
+   * **考えるモデルの性質**（AIチューニングの「考えるモデルかの見分け」の段。
+   * 設計書6.49.9）。台帳の `thinkingSeen`・`thinkingOffWorks`・
+   * `thinkingOverheadTokens` と**同じ名前・同じ意味**である。
+   *
+   * **ローカルも載せてよい**——思考を出すか、止める指定が効くかは、モデルと
+   * その会話の雛形の性質で、作者の機械の地力とは関係ない（字/トークンと同じ
+   * 扱い）。思考に使うトークン数も「何トークン考えるか」であって、何秒かでは
+   * ない。
+   *
+   * **3つはひとまとまりで混ぜる**（`core/modelTuning.ts` の
+   * `mergeBundledTuning`）。台帳にどれか1つでもあれば、同梱のほうは1つも
+   * 使わない——「見分けたのは作者の機械、止める指定の効き目は同梱」と
+   * 混ざると、どの見分けの結論なのか読めなくなる。
+   *
+   * 効くのは `thinkingOffWorks: false` の行だけで、出力の見込みに
+   * `thinkingOverheadTokens` を足す（`unsuppressedThinkingTokens`）。
+   * 足すのは見込みが同梱の表か当て推量から来たときだけ、という 0.89.13 の
+   * 決まりは読む側（`ai/outputLimit.ts`・`ai/runTimeEstimate.ts`）が持って
+   * おり、ここから来た値にもそのまま効く（二重に数えない）。
+   */
+  readonly thinkingSeen?: boolean;
+  readonly thinkingOffWorks?: boolean;
+  readonly thinkingOverheadTokens?: number;
+  /** 思考を見分けた日（ISO 8601）。行の `measuredAt` とは別の回の測定のことがある */
+  readonly thinkingMeasuredAt?: string;
+  /**
+   * **誤字脱字の精度の目安**（AIチューニングの精度の段。設計書6.49.9）。
+   *
+   * 台帳の `typoAccuracy*` と同じ中身を、1つにまとめて持つ。**頼み方（P-09）
+   * の版か同梱の文の版が、いまのものと違えば使わない**
+   * （`isTypoAccuracyCurrent`。当たりは頼み方と文で動くので、版が違えば別の
+   * 測りものである）。
+   */
+  readonly typoAccuracy?: BundledTypoAccuracy;
+  /**
    * 測った日（ISO 8601 の日付）。
    *
    * **古くなったら黙って使わない**（作者の守り4）ための手がかり。
    * `preview/` の付くモデルは、同じ名前で中身が入れ替わる。
    */
+  readonly measuredAt: string;
+}
+
+/**
+ * 同梱する、誤字脱字の精度の目安（1回ぶん）。
+ *
+ * 欄の意味は台帳の `typoAccuracy*`（`core/tuningAccuracy.ts` の
+ * `TypoAccuracyRecord`）と同じ。ここでは名前の頭の `typoAccuracy` を省いた。
+ */
+export interface BundledTypoAccuracy {
+  /** 置いた誤りのうち、正しく直した数 */
+  readonly hits: number;
+  /** 置いた誤りの数 */
+  readonly total: number;
+  /** 誤りでない所への指摘の数（罠に掛かったものを含む） */
+  readonly falsePositives: number;
+  /** 場所は合ったが直し方が違った数 */
+  readonly wrongFixes: number;
+  /** 掛かった罠の数（誤検出の内訳） */
+  readonly trapHits: number;
+  /** 置いた罠の数 */
+  readonly trapTotal: number;
+  /** 送った頼み方の版（P-09 の `typoPromptVersion`） */
+  readonly promptVersion: string;
+  /** 小さいモデル向けの頼み方を送ったか（版の比べ先を決める） */
+  readonly smallPrompt: boolean;
+  /** 同梱の文の版（`TUNING_WORK_SAMPLE_VERSION`） */
+  readonly sampleVersion: string;
+  /** 測った時刻（ISO 8601。作者の機械の暦で日付を出すので、時差まで書く） */
   readonly measuredAt: string;
 }
 
@@ -137,8 +213,21 @@ const BUNDLED: Readonly<Record<string, BundledTuning>> = {
   "sakura/preview/gemma-4-31B-it": {
     charsPerToken: 1.383,
     measuredChars: 339_804,
+    /*
+      **サーバーが述べた長さ（262,144）より大きく見えるが、数え方が違う**
+      （2026-09-26 に確かめた。値は変えていない）。
+
+      サーバーの 262,144 は**本物のトークン**で数えた長さである。こちらの
+      273,001 は製品の換算（字 ÷（字/トークン × 0.9））で数えたトークンで、
+      1割多めに数える側に倒してある。製品がこの値まで詰めて送る本文は
+      339,804字で、本物のトークンに直すと 339,804 ÷ 1.383 ≒ 245,700——
+      **サーバーの長さより小さい**。製品の読み順では安全側に収まっている。
+    */
     contextWindow: 273_001,
     contextHitCeiling: false,
+    // 考えない（止める指定を送らなくても思考が出なかった）。2026-09-26
+    thinkingSeen: false,
+    thinkingMeasuredAt: "2026-09-26",
     measuredAt: "2026-09-13",
   },
   "sakura/gpt-oss-120b": {
@@ -154,6 +243,36 @@ const BUNDLED: Readonly<Record<string, BundledTuning>> = {
     */
     contextWindow: 138_597,
     contextHitCeiling: false,
+    /*
+      **考えるのに、止める指定が効かない**（2026-09-26。会話の雛形が
+      `enable_thinking`・`thinking` を読まない）。止める指定を送らない回の
+      思考は約3,893字で、見分けの段が 2,560トークンと見積もった。
+      出力の見込みにこのぶんを足さないと、考える途中で上限を使い切り、
+      答えが空で返る。
+    */
+    thinkingSeen: true,
+    thinkingOffWorks: false,
+    thinkingOverheadTokens: 2560,
+    thinkingMeasuredAt: "2026-09-26",
+    /*
+      精度の目安は2回測って揺れた（どちらも当たり 6/7）。1回目は口語の台詞の
+      罠（「左です」→「左に」）に掛かって誤検出1、2回目は誤検出0だった。
+      **悪いほうの回を載せる**——目安は作者に注意を促すためのもので、
+      2回に1回掛かった罠は作者の作品でも掛かりうる。良いほうを載せると、
+      罠に掛からないモデルに見える。
+    */
+    typoAccuracy: {
+      hits: 6,
+      total: 7,
+      falsePositives: 1,
+      wrongFixes: 0,
+      trapHits: 1,
+      trapTotal: 5,
+      promptVersion: "1.2",
+      smallPrompt: false,
+      sampleVersion: "2",
+      measuredAt: "2026-09-26T06:28:15+09:00",
+    },
     measuredAt: "2026-09-13",
   },
   /*
@@ -177,6 +296,9 @@ const BUNDLED: Readonly<Record<string, BundledTuning>> = {
     contextHitCeiling: false,
     contextDeclared:
       "This model's maximum context length is 4096 tokens and your request has 16 input tokens (11264 > 4096 - 16).",
+    // 考えない（止める指定を送らなくても思考が出なかった）
+    thinkingSeen: false,
+    thinkingMeasuredAt: "2026-09-26",
     measuredAt: "2026-09-26",
   },
   "sakura/preview/Phi-4-mini-instruct-cpu": {
@@ -189,10 +311,59 @@ const BUNDLED: Readonly<Record<string, BundledTuning>> = {
     measuredAt: "2026-09-26",
   },
   /*
-    `sakura/preview/Qwen3.6-35B-A3B` は**読める長さを測っていない**ので、
-    行ごと置いていない。「同じさくらの preview だから 31B と同じはず」は
-    推測であり、この表の約束（実測だけ）を外れる。
+    **サーバーが述べた長さ 262,144 の2つ**（AIチューニングの「読める長さの
+    申告」の段、2026-09-26。その長さに収まる要求がもう1回通ることまで
+    確かめた）。
+
+    **262,144 は本物のトークンで数えた長さで、そのまま載せて安全側になる。**
+    製品は本文のトークン数を「字 ÷（字/トークン × 0.9）」で多めに数える
+    （字/トークンが測れていない間は 0.7 の当て推量で、さらに多めに数える）。
+    多めに数えたトークンが 262,144 に収まるなら、本物のトークンは必ずそれより
+    少ない。
+
+    **字/トークンは載せていない。** 測れたのは誤字脱字の頼み方を送った1〜2回
+    だけで、指示の字が多い形では字/トークンが高めに出る（同じ回の 31B は
+    1.61、表の 1.383 より2割高い）。高めの値を配ると本文のトークン数を
+    少なく数える側に倒れるので、5回以上を本文の多い形で測るまで置かない。
   */
+  "sakura/preview/Qwen3.6-35B-A3B": {
+    contextWindow: 262_144,
+    contextHitCeiling: false,
+    contextDeclared:
+      "max_tokens=2000000 cannot be greater than max_model_len=max_total_tokens=262144. Please request fewer output tokens.",
+    // 考える（止める指定を送らない回の思考は約7,878字）。止める指定が効く
+    thinkingSeen: true,
+    thinkingOffWorks: true,
+    thinkingMeasuredAt: "2026-09-26",
+    /*
+      精度の目安は載せない。測ったのは文の版1（罠なし）だけで、いまの版2の
+      結果が無い——版の違う結果は、いまの頼み方と文の結果ではない。
+    */
+    measuredAt: "2026-09-26",
+  },
+  "sakura/preview/Kimi-K2.6": {
+    contextWindow: 262_144,
+    contextHitCeiling: false,
+    contextDeclared:
+      "max_tokens=2000000 cannot be greater than max_model_len=max_total_tokens=262144. Please request fewer output tokens.",
+    // 考える（止める指定を送らない回の思考は約2,133字）。止める指定が効く
+    thinkingSeen: true,
+    thinkingOffWorks: true,
+    thinkingMeasuredAt: "2026-09-26",
+    typoAccuracy: {
+      hits: 6,
+      total: 7,
+      falsePositives: 0,
+      wrongFixes: 0,
+      trapHits: 0,
+      trapTotal: 5,
+      promptVersion: "1.2",
+      smallPrompt: false,
+      sampleVersion: "2",
+      measuredAt: "2026-09-26T06:29:14+09:00",
+    },
+    measuredAt: "2026-09-26",
+  },
 
   /* ── Ollama（手元）。字/トークンだけ ──────────────────
      読める長さは載せない——VRAM 次第で、機械が変われば別の値になる。 */
@@ -203,6 +374,51 @@ const BUNDLED: Readonly<Record<string, BundledTuning>> = {
   "ollama/gemma4:12b": {
     charsPerToken: 1.383,
     measuredAt: "2026-09-13",
+  },
+  /*
+    **考えるモデルの性質と誤字脱字の精度の目安だけ**（2026-09-26）。
+    どちらもモデルの性質で、機械の地力に依らない。時間（1000字あたりの
+    秒数）と待ち時間は、同じ測定で取れていても載せない——GPU に入りきるか
+    （26b は作者の機械で CPU と分けて載った）で何倍も変わる。
+  */
+  "ollama/gemma4:e4b": {
+    // 考える（止める指定を送らない回の思考は約846字）。止める指定が効く
+    thinkingSeen: true,
+    thinkingOffWorks: true,
+    thinkingMeasuredAt: "2026-09-26",
+    typoAccuracy: {
+      hits: 3,
+      total: 7,
+      falsePositives: 0,
+      wrongFixes: 0,
+      trapHits: 0,
+      trapTotal: 5,
+      // 8.0B なので小さいモデル向けの頼み方（P-09 1.1）が行った
+      promptVersion: "1.1",
+      smallPrompt: true,
+      sampleVersion: "2",
+      measuredAt: "2026-09-26T06:29:55+09:00",
+    },
+    measuredAt: "2026-09-26",
+  },
+  "ollama/gemma4:26b": {
+    // 考える（止める指定を送らない回の思考は約2,642字）。止める指定が効く
+    thinkingSeen: true,
+    thinkingOffWorks: true,
+    thinkingMeasuredAt: "2026-09-26",
+    typoAccuracy: {
+      hits: 5,
+      total: 7,
+      falsePositives: 0,
+      wrongFixes: 0,
+      trapHits: 0,
+      trapTotal: 5,
+      promptVersion: "1.2",
+      smallPrompt: false,
+      sampleVersion: "2",
+      measuredAt: "2026-09-26T06:31:27+09:00",
+    },
+    measuredAt: "2026-09-26",
   },
 };
 

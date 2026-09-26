@@ -5,6 +5,7 @@ import {
   bundledContextWindow,
   bundledTuningByKey,
   bundledTuningKeys,
+  type BundledTypoAccuracy,
 } from "./bundledTuning";
 import {
   tuningStoreTable,
@@ -17,6 +18,10 @@ import { FEATURE_OUTPUT_KEY_PREFIX } from "./featureOutputTokens";
 import { MIN_CHARS_PER_TOKEN_SAMPLES } from "./sizeBudget";
 import { WORK_REFERENCE_CHARS, WORK_TIME_MARGIN } from "./tuningStages";
 import { predictWorkSeconds, type WorkRate } from "./etaEstimate";
+// 同梱の精度の目安を混ぜるとき、**いまの頼み方と文の版か**を確かめる。
+// 版の比べ方は精度の側の1か所だけに置く（写しを作ると、片方だけ直したときに
+// 古い結果が「いまの結果」の顔で並ぶ）
+import { isTypoAccuracyCurrent, type TypoAccuracyRecord } from "./tuningAccuracy";
 // **書けたかどうかの札は、ここから配る。** 台帳を使う側（測定・普段の
 // 呼び出し）は `modelTuning.ts` しか見ないので、置き場のファイル名まで
 // 知らせずに済ませる
@@ -416,7 +421,7 @@ function mergeBundledTuning(
 
   const filled: Record<string, unknown> = { ...(entry ?? {}) };
   const fields: string[] = [];
-  const fill = (name: string, value: number | boolean | undefined): void => {
+  const fill = (name: string, value: number | boolean | string | undefined): void => {
     if (value === undefined) return;
     if (filled[name] !== undefined) return;
     filled[name] = value;
@@ -465,6 +470,51 @@ function mergeBundledTuning(
   }
 
   /*
+    **考えるモデルの性質は、ひとまとまりで混ぜる**（2026-09-26）。
+
+    欄ごとに埋めると、「作者の機械では考えないと見分けた（`thinkingSeen:
+    false`）のに、同梱の『止められない・2,560トークン』が足される」ような
+    行ができる。見分けは3つで1つの結論なので、台帳にどれか1つでもあれば
+    同梱は使わない（作者の実測が勝つ）。
+  */
+  if (
+    seed.thinkingSeen !== undefined &&
+    filled.thinkingSeen === undefined &&
+    filled.thinkingOffWorks === undefined &&
+    filled.thinkingOverheadTokens === undefined
+  ) {
+    fill("thinkingSeen", seed.thinkingSeen);
+    fill("thinkingOffWorks", seed.thinkingOffWorks);
+    fill("thinkingOverheadTokens", seed.thinkingOverheadTokens);
+    fill("thinkingMeasuredAt", seed.thinkingMeasuredAt);
+  }
+
+  /*
+    **誤字脱字の精度の目安も、ひとまとまりで**（2026-09-26）。
+
+    台帳に精度の欄が1つでもあれば使わない——作者の機械の結果が古い版の
+    ものでも、そちらが「古い結果。測り直せます」と出るほうが正しい
+    （同梱で黙って差し替えると、作者が測った事実が見えなくなる）。
+    **同梱のほうが古い版なら使わない**（守り4。頼み方か文が変われば、
+    同じ「7件中N件」でも別の測りものである）。
+  */
+  const typo = typoAccuracyFromBundle(seed.typoAccuracy);
+  if (
+    typo !== undefined &&
+    isTypoAccuracyCurrent(typo) &&
+    !Object.keys(filled).some(
+      (name) => name.startsWith("typoAccuracy") && filled[name] !== undefined
+    )
+  ) {
+    for (const [name, value] of Object.entries(typo) as [
+      string,
+      string | number | boolean,
+    ][]) {
+      fill(name, value);
+    }
+  }
+
+  /*
     **`contextWindow` は、ここでは混ぜない**（作者の裁定、2026-09-19）。
 
     混ぜると `tunedContextWindow` がこの行から拾い、読み順の先頭
@@ -491,6 +541,31 @@ function mergeBundledTuning(
  * チャンクの大きさは当て推量（0.7）のままで、**入れた意味が無い。**
  */
 const BUNDLED_CHARS_PER_TOKEN_SAMPLES = 5;
+
+/**
+ * 同梱の精度の目安を、台帳の欄の名前（`typoAccuracy*`）へ並べ直す。
+ *
+ * **台帳と同じ名前にそろえる**のは、読む側（`describeTypoAccuracyHint`・
+ * 記録の一覧）を同梱のために分けないため。どこから来たかは
+ * `bundledFields` で見分ける。
+ */
+function typoAccuracyFromBundle(
+  seed: BundledTypoAccuracy | undefined
+): Required<TypoAccuracyRecord> | undefined {
+  if (seed === undefined) return undefined;
+  return {
+    typoAccuracyHits: seed.hits,
+    typoAccuracyTotal: seed.total,
+    typoAccuracyFalsePositives: seed.falsePositives,
+    typoAccuracyWrongFixes: seed.wrongFixes,
+    typoAccuracyTrapHits: seed.trapHits,
+    typoAccuracyTrapTotal: seed.trapTotal,
+    typoAccuracyPromptVersion: seed.promptVersion,
+    typoAccuracySmallPrompt: seed.smallPrompt,
+    typoAccuracySampleVersion: seed.sampleVersion,
+    typoAccuracyMeasuredAt: seed.measuredAt,
+  };
+}
 
 /**
  * 待ち時間の下限。**いまの既定（180秒）を下回らせない。**
@@ -946,6 +1021,24 @@ export function workRateOf(tuning: ModelTuning | undefined): WorkRate | undefine
 export function unsuppressedThinkingTokens(tuning: ModelTuning | undefined): number {
   if (tuning?.thinkingOffWorks !== false) return 0;
   return tuning.thinkingOverheadTokens ?? 0;
+}
+
+/**
+ * 上の思考のぶんが**どこから来たか**の断り（同梱の守り3「出どころを見せる」）。
+ * 足すものが無ければ undefined。
+ *
+ * 作者の機械で見分けていないのに、同梱の値で出力の上限が増えることがある
+ * （さくらの gpt-oss-120b）。黙って増やすと、なぜ上限がその数なのか読めない。
+ */
+export function describeThinkingOverheadSource(
+  tuning: ModelTuning | undefined
+): string | undefined {
+  if (unsuppressedThinkingTokens(tuning) <= 0) return undefined;
+  if (tuning?.bundledFields?.includes("thinkingOverheadTokens") === true) {
+    const at = tuning.thinkingMeasuredAt;
+    return at !== undefined ? `同梱の初期値（${at} 測定）` : "同梱の初期値";
+  }
+  return "この機械の実測";
 }
 
 const CONFIG_SECTION = "novelai";

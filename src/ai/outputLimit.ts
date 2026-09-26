@@ -1,7 +1,11 @@
 import * as vscode from "vscode";
 import { OUTPUT_RESERVE_TOKENS, describeWindowCappedOutput } from "./contextGuard";
 import type { GenerateResult } from "./types";
-import { modelTuning, unsuppressedThinkingTokens } from "../core/modelTuning";
+import {
+  describeThinkingOverheadSource,
+  modelTuning,
+  unsuppressedThinkingTokens,
+} from "../core/modelTuning";
 import {
   featureOutputCeiling,
   featureOutputTuning,
@@ -129,6 +133,9 @@ export function resolveOutputTokensForPlanning(
     expected !== undefined
       ? Math.min(expected, measured ?? expected)
       : (measured ?? reserve);
+  if (expected === undefined && measured === undefined) {
+    noteThinkingOverhead(providerId, model);
+  }
   if (expected !== undefined) {
     noteFeatureCeiling(feature, providerId, model, expected);
   }
@@ -155,7 +162,32 @@ function withThinkingOverhead(
   if (featureOutputTuning(feature, providerId, model)?.bundled !== true) {
     return expected;
   }
+  noteThinkingOverhead(providerId, model);
   return expected + unsuppressedThinkingTokens(modelTuning(providerId, model));
+}
+
+/**
+ * 思考のぶんを足したことを、**出どころと一緒に一度だけ**記録に残す
+ * （同梱の守り3「出どころを見せる」。2026-09-26）。
+ *
+ * 同梱の表で「止められない」と分かっているモデル（さくらの gpt-oss-120b）は、
+ * 作者が一度も測っていなくても上限が増える。何を根拠に増えたのかを、
+ * 見込みの1行（`noteFeatureCeiling`）と同じ操作ログへ出す。
+ */
+const notedThinkingOverheads = new Set<string>();
+
+function noteThinkingOverhead(providerId: string, model: string): void {
+  const tuning = modelTuning(providerId, model);
+  const source = describeThinkingOverheadSource(tuning);
+  if (source === undefined) return;
+  const tokens = unsuppressedThinkingTokens(tuning);
+  const note = `${providerId}/${model}:${tokens}:${source}`;
+  if (notedThinkingOverheads.has(note)) return;
+  notedThinkingOverheads.add(note);
+  logLine(
+    `出力の見込み：${model} は思考を止める指定が効かないので、1回あたり` +
+      `${tokens.toLocaleString("ja-JP")}トークンの思考のぶんを足します（${source}）。`
+  );
 }
 
 /**

@@ -226,8 +226,21 @@ describe("申告しないプロバイダは、同梱の実測を既定より先�
   });
 
   test("測っていないモデルは、これまでどおり既定", () => {
-    // 同じさくらでも、Qwen3.6 は読める長さを測っていない。
+    // 同じさくらでも、表に無いモデルは読める長さを測っていない。
     // **「同じ系統だから同じはず」で当てない**（同梱表の約束）
+    withWrittenSettings({});
+    expect(
+      resolveContextWindow(
+        "sakura",
+        "preview/まだ測っていないモデル",
+        SAKURA_CONTEXT_WINDOW
+      )
+    ).toBe(32000);
+  });
+
+  test("サーバーが述べた長さを同梱したモデルは、既定より先にそれを使う（2026-09-26）", () => {
+    // Qwen3.6 は以前ここで「測っていないモデル」の例だった。AIチューニングの
+    // 申告の段で、サーバー自身が 262,144 と述べた
     withWrittenSettings({});
     expect(
       resolveContextWindow(
@@ -235,7 +248,16 @@ describe("申告しないプロバイダは、同梱の実測を既定より先�
         "preview/Qwen3.6-35B-A3B",
         SAKURA_CONTEXT_WINDOW
       )
-    ).toBe(32000);
+    ).toBe(262_144);
+    // 作者が設定に書けば、これまでどおりそちらが勝つ
+    withWrittenSettings({ [SAKURA_CONTEXT_WINDOW.settingKey]: 64000 });
+    expect(
+      resolveContextWindow(
+        "sakura",
+        "preview/Qwen3.6-35B-A3B",
+        SAKURA_CONTEXT_WINDOW
+      )
+    ).toBe(64000);
   });
 
   test("同梱の文脈長を持つのは、申告しないプロバイダの行だけ", () => {

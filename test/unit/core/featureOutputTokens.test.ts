@@ -412,7 +412,12 @@ describe("モデルの違う実測を混ぜない", () => {
         REASONING.model,
         "contradiction_check"
       )
-    ).toBe(OUTPUT_RESERVE_TOKENS);
+      /*
+        既定の見込みに、同梱の表の「思考を止められない」ぶん（gpt-oss-120b は
+        2,560トークン。2026-09-26）が乗る。モデルAの 714 が来ていないことは
+        変わらない
+      */
+    ).toBe(OUTPUT_RESERVE_TOKENS + 2560);
     expect(
       resolveOutputTokensForSend(
         REASONING.providerId,
