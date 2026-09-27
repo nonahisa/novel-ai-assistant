@@ -143,9 +143,9 @@ export async function refreshPlotMode(filePath: string): Promise<void> {
 }
 
 /**
- * plot.md を**普通のエディタ**で開く（設計書6.4.8）。
+ * plot.md を開く（設計書6.4.8）。ふつうは作者の既定の画面、行へ飛ぶときだけテキストエディター。
  *
- * ここだけ `openInDefaultEditor`（`vscode.open`）を使わない。目次から
+ * 行へ飛ぶときだけ `openInDefaultEditor`（`vscode.open`）を使わない。目次から
  * 行へ飛ばすには `TextEditor` の実体が要るためで、`vscode.open` は
  * 何も返さない（`views/openDocument.ts` の但し書きどおりの場面）。
  */
@@ -153,6 +153,21 @@ async function showPlotDocument(
   plotFile: string,
   line?: number
 ): Promise<void> {
+  /*
+    **行へ飛ばないときは、作者の既定の画面で開く**（作者の報告、2026-09-27
+    「ほとんどはMDエディターで開くのですが、これだけテキストエディターで
+    ひらきました」）。ほかの .md は `vscode.open` で作者の既定（新しい
+    Markdown 編集画面など）に開くのに、ここだけテキストエディターを名指しして
+    いたので揃っていなかった。行へ飛ぶ（目次・書き足した行を見せる）ときだけ、
+    `TextEditor` の実体が要るのでテキストエディターで開く
+  */
+  if (line === undefined) {
+    await openInDefaultEditor(plotFile, {
+      viewColumn: vscode.ViewColumn.One,
+      preview: false,
+    });
+    return;
+  }
   const document = await vscode.workspace.openTextDocument(
     paths.toUri(plotFile)
   );
@@ -160,7 +175,7 @@ async function showPlotDocument(
     viewColumn: vscode.ViewColumn.One,
     preview: false,
   });
-  if (line === undefined) return;
+  // ここへ来るのは行へ飛ぶときだけ（上で既定の画面へ回した）
 
   // 行番号は1始まりで受け取る（画面に出ている数字と揃える）
   const at = new vscode.Position(
