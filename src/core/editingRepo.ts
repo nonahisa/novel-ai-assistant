@@ -40,9 +40,13 @@ function lineKey(raw: string): string {
   }
 }
 
-/** 混ぜる前に落とす行か。競合マーカーと空行だけを落とす */
+/**
+ * 混ぜる前に落とす行か。競合マーカーと空行だけを落とす。
+ * `|||||||` は、gitの設定（`merge.conflictStyle=diff3`）で共通の祖先を
+ * 並べるときに出る印である。作者の端末の設定次第で出るので、これも落とす
+ */
 function isDroppable(line: string): boolean {
-  return line === "" || /^(<<<<<<<|=======|>>>>>>>)/.test(line);
+  return line === "" || /^(<<<<<<<|\|\|\|\|\|\|\||=======|>>>>>>>)/.test(line);
 }
 
 export interface MergeResult {
@@ -60,6 +64,9 @@ export interface MergeResult {
  *
  * 競合マーカーの行は落とす。gitが解決しきれなかった痕跡を持ち込むと、
  * 読み込み側（`parseProposalLines`）で毎回捨てることになる。
+ * **印の行だけを落とし、印に挟まれた両側の行は残す**ので、印つきのまま
+ * 記録されてしまった追記型の記録を `mergeProposalJsonl(text, "")` で
+ * 片づけることもできる（`features/resolveDivergence.ts`）。
  */
 export function mergeProposalJsonl(
   target: string,

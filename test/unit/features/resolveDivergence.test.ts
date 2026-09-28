@@ -738,6 +738,89 @@ describe("設定資料と本文の自動合流", { timeout: 30_000 }, () => {
     expect(status()).not.toContain("behind");
   });
 
+  /**
+   * `history/` の下の記録は、編集履歴に限らずすべて書き足すだけである
+   * （MCPの利用とノックの `external.jsonl`、AIの指摘への判断 `ai-verdicts.jsonl`）。
+   *
+   * 作者の手元で、2台がそれぞれ `external.jsonl` へ1行ずつ足して分かれ、
+   * 開くたびに「競合マーカーが残っていました」で戻され続けた（2026-09-28）。
+   * **開いたときの点検と同じ指定**（選ぶ画面へ進まない・自動）で確かめる。
+   */
+  test.each([
+    "短編/.aiwriter/history/external.jsonl",
+    "短編/.aiwriter/history/ai-verdicts.jsonl",
+  ])("history の記録（%s）が両方で書き足されても、両方の行を残して合わせる", async (記録) => {
+    const もと = '{"at":"2026-09-01T00:00:00.000Z","tool":"土台"}\n';
+    分岐を作る(
+      [[記録, もと]],
+      [[記録, もと + '{"at":"2026-09-05T00:00:00.000Z","tool":"むこうの機械"}\n']],
+      [[記録, もと + '{"at":"2026-09-03T00:00:00.000Z","tool":"こちらの機械"}\n']]
+    );
+
+    const result = await foldDivergence(
+      deps(),
+      { root, label: "短編", upstream: "origin/main" },
+      { authorChoice: "stop", automatic: true }
+    );
+
+    expect(result).toMatchObject({ ok: true });
+    const 中身 = fs.readFileSync(nodePath.join(root, 記録), "utf8");
+    expect(中身).toContain("むこうの機械");
+    expect(中身).toContain("こちらの機械");
+    expect(中身.trim().split("\n")).toHaveLength(3);
+    expect(中身).not.toContain("<<<<<<<");
+    expect(status()).not.toContain("behind");
+    expect(git(root, "status", "--porcelain").trim()).toBe("");
+  });
+
+  test("競合の印ごと記録された history の記録が届いたら、印の行だけ落として両方の行を残す", async () => {
+    // 以前に別の道具で合わせたとき、印が残ったまま記録されて届く形。
+    // 衝突にはならないので、上の片づけを通らず検査で止まっていた
+    const 記録 = "短編/.aiwriter/history/external.jsonl";
+    const もと = '{"tool":"土台"}\n';
+    const 印つき = [
+      '{"tool":"土台"}',
+      "<<<<<<< HEAD",
+      '{"tool":"むこうの機械"}',
+      "=======",
+      '{"tool":"こちらの機械"}',
+      ">>>>>>> origin/main",
+      "",
+    ].join("\n");
+    分岐を作る([[記録, もと]], [[記録, 印つき]], [["短編/本文/第2話.txt", "こちら。\n"]]);
+
+    const result = await foldDivergence(
+      deps(),
+      { root, label: "短編", upstream: "origin/main" },
+      { authorChoice: "stop", automatic: true }
+    );
+
+    expect(result).toMatchObject({ ok: true });
+    const 中身 = fs.readFileSync(nodePath.join(root, 記録), "utf8");
+    expect(中身).toBe(
+      '{"tool":"土台"}\n{"tool":"むこうの機械"}\n{"tool":"こちらの機械"}\n'
+    );
+    expect(git(root, "status", "--porcelain").trim()).toBe("");
+  });
+
+  test("競合の印つきで届いた本文は、これまでどおり止めて戻す（検査を緩めない）", async () => {
+    const 本文 = "短編/本文/第3話.txt";
+    const 印つき = ["<<<<<<< HEAD", "むこう。", "=======", "こちら。", ">>>>>>> x", ""].join("\n");
+    分岐を作る([[本文, "もと。\n"]], [[本文, 印つき]], [["短編/本文/第2話.txt", "こちら。\n"]]);
+
+    const result = await foldDivergence(
+      deps(),
+      { root, label: "短編", upstream: "origin/main" },
+      { authorChoice: "stop", automatic: true }
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("競合マーカー");
+    expect(fs.readFileSync(nodePath.join(root, 本文), "utf8")).toBe("もと。\n");
+    expect(status()).toContain("behind");
+  });
+
   test("承認待ちの提案がぶつかったら、この端末の側を残す", async () => {
     // AIの提案で、まだ資料になっていない。**作り直せるので訊かない**（5.5.18）
     const 提案 = "短編/.aiwriter/pending-characters/char_001.json";

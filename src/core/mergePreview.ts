@@ -113,15 +113,21 @@ export function isAutoWrittenPath(filePath: string): boolean {
  * 混ぜるのは `editingRepo.ts` の `mergeProposalJsonl`（`lineKey` で同じ行を
  * 1つに畳む純粋関数）。実際に走らせるのは `features/resolveDivergence.ts`。
  *
- * **名指しの3つだけにする。** `.aiwriter/` の下の `.jsonl` を一律に混ぜると、
- * あとから追記型でない台帳が増えたときに黙って混ざる。
+ * **`history/` の直下の `.jsonl` と、提案・ロックの2つだけにする。**
+ * `.aiwriter/` の下の `.jsonl` を一律に混ぜると、あとから追記型でない台帳が
+ * 増えたときに黙って混ざる。`history/` は「記録の置き場」として決めてあり、
+ * 置かれているもの（編集履歴 `edits.jsonl`・外からの利用とノック
+ * `external.jsonl`・AIの指摘への判断 `ai-verdicts.jsonl`）はすべて1行1件の
+ * 追記である。名指しにしていたため `external.jsonl` が漏れ、2台で書き足す
+ * たびに合わせる処理が止まった（2026-09-28）。**`history/` へ台帳を足すときは、
+ * 追記だけの形にすること。**
  */
 export function isAppendOnlyPath(filePath: string): boolean {
   // Windowsの区切り（\）を / に揃える。符号で書くのは、正規表現の中の
   // 円記号が読みにくいためである
   const normalized = filePath.replace(/[\u005C]/g, "/");
   return (
-    /(^|\/)\.aiwriter\/history\/edits\.jsonl$/.test(normalized) ||
+    /(^|\/)\.aiwriter\/history\/[^/]+\.jsonl$/.test(normalized) ||
     /(^|\/)\.aiwriter\/proposals\/proposals\.jsonl$/.test(normalized) ||
     /(^|\/)\.aiwriter\/locks\/locks\.jsonl$/.test(normalized)
   );

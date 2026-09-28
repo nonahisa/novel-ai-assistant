@@ -188,10 +188,23 @@ describe("追記型の見分け", () => {
     expect(isAppendOnlyPath("短編/.aiwriter/locks/locks.jsonl")).toBe(true);
   });
 
+  test("history の下の .jsonl はすべて追記型である（外からの利用・AIへの判断）", () => {
+    // 2台で `external.jsonl` へ書き足すたびに合わせるのが止まった（2026-09-28）
+    expect(isAppendOnlyPath("短編/.aiwriter/history/external.jsonl")).toBe(true);
+    expect(isAppendOnlyPath("短編/.aiwriter/history/ai-verdicts.jsonl")).toBe(
+      true
+    );
+  });
+
   test("設定資料と、自動で書かれるものは追記型ではない", () => {
     // ここを広く取ると、追記型でないものまで行ごと混ざる
     expect(isAppendOnlyPath("短編/設定/characters/x.json")).toBe(false);
     expect(isAppendOnlyPath("短編/.aiwriter/stats/x.json")).toBe(false);
+    // history の直下の .jsonl だけ。下のフォルダーや別の形は含めない
+    expect(isAppendOnlyPath("短編/.aiwriter/history/sub/x.jsonl")).toBe(false);
+    expect(isAppendOnlyPath("短編/.aiwriter/history/x.json")).toBe(false);
+    expect(isAppendOnlyPath("短編/.aiwriter/findings.jsonl")).toBe(false);
+    expect(isAppendOnlyPath("短編/本文/history/x.jsonl")).toBe(false);
   });
 
   test("Windowsの区切りでも同じに見る", () => {

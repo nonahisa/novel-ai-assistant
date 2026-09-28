@@ -16,6 +16,7 @@ import { commitAll, countTrackableFiles, hasCommitIdentity } from "../core/gitSe
 import { buildSyncTarget, worksInside } from "../core/syncTarget";
 import {
   describeMergePreview,
+  isAppendOnlyPath,
   mergeTreeArgs,
   parseMergeTree,
   type MergePreview,
@@ -553,6 +554,19 @@ export async function foldDivergence(
 
   report("取り込んだ中身を確かめています…");
   const incoming = await stagedFiles(root, run);
+  // 印つきのまま記録されて届いた追記型の記録は、印の行だけ落として両方の行を
+  // 残す。**衝突にはならないので上の片づけを通らず**、検査で毎回止まっていた。
+  // 追記型に限るので、原稿や設定資料の印はこれまでどおり下の検査が止める
+  const cleaned = await cleanAppendOnlyMarkers(root, incoming, run);
+  if (cleaned === undefined) {
+    return await abort(root, run, "競合の印が残った記録を片づけられませんでした");
+  }
+  if (cleaned.length > 0) {
+    resolved.push(...cleaned);
+    logStep(
+      `競合の印つきで届いた追記型の記録 ${cleaned.length}件は、印の行を落として両方の行を残しました`
+    );
+  }
   const markers = await filesWithMarkers(root, incoming);
   const after = await fingerprints(root, run);
   const guard = guardResult(
@@ -684,6 +698,45 @@ async function mergeAppendOnly(
 
   const added = await run(["add", "--", file], root, 15_000);
   return added.code === 0;
+}
+
+/**
+ * 取り込んだファイルのうち、**追記型の記録で競合の印が残っているもの**を
+ * 印の行だけ落として書き戻す。片づけたファイル名を返し、失敗なら undefined。
+ *
+ * 別の道具（VS Code のソース管理など）で合わせたときに印が残ったまま
+ * 記録され、それが届く形がある。追記型なので、印に挟まれた両側の行は
+ * どちらも正しい記録であり、落とすのは印の行だけでよい（`mergeProposalJsonl`）。
+ * 書き戻し方は `mergeAppendOnly` と同じ（機械の記録なので、原稿用の経路は通さない）。
+ */
+async function cleanAppendOnlyMarkers(
+  root: string,
+  incoming: readonly string[],
+  run: GitCommandRunner
+): Promise<string[] | undefined> {
+  const cleaned: string[] = [];
+  for (const file of incoming.filter(isAppendOnlyPath)) {
+    const bytes = await readBytes(paths.join(root, file));
+    if (!bytes) continue;
+    const text = new TextDecoder().decode(bytes);
+    if (!containsConflictMarkers(text)) continue;
+    try {
+      await vscode.workspace.fs.writeFile(
+        paths.toUri(paths.join(root, file)),
+        new TextEncoder().encode(mergeProposalJsonl(text, "").text)
+      );
+    } catch (error) {
+      logFailure("競合の印が残った記録を片づけられなかった", {
+        ファイル: file,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
+    const added = await run(["add", "--", file], root, 15_000);
+    if (added.code !== 0) return undefined;
+    cleaned.push(file);
+  }
+  return cleaned;
 }
 
 /**
