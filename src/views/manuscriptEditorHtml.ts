@@ -2174,6 +2174,224 @@ ruby > rt {
     write.focus();
   }
 
+  /* menu-clipboard:start */
+  /*
+    ── 右クリックの「切り取り」「コピー」「貼り付け」（作者の裁定、2026-09-28） ──
+
+    品書きは自前なので、ブラウザの品書きにある3つが無かった。
+
+    **本文を変えるのは、打鍵と同じ道だけ。** 消すのも入れるのも
+    execCommand（delete・insertText）で面を変え、その input の知らせが
+    いつもの送り（send・composeSend → postEdit）に乗る。届いたかの返事・
+    離れる前の送り（6.25.9）もそのまま効き、Ctrl+Z の履歴からも外れない。
+
+    **切り取りは execCommand("cut") を使わない。** Ctrl+X の直し（0.90.2）と
+    同じ落とし穴で、切り取りの知らせの最中の delete は入れ子として断られる。
+    ここでは「写す（copy）→ 終わってから消す（delete）」を順に呼ぶ。
+
+    **貼り付けは拡張機能にクリップボードを読んでもらう。** 画面の中から
+    クリップボードを読むことは許されていない（execCommand("paste") は断られる）。
+  */
+
+  /** 品書きを開いた時点の選択（LF空間）。カーソルだけなら start と end が同じ */
+  function menuRange() {
+    if (composeOn) return composeMenuAt;
+    const start = write.selectionStart;
+    const end = write.selectionEnd;
+    if (typeof start !== "number" || typeof end !== "number") return null;
+    return { start: start, end: end };
+  }
+
+  /**
+   * 面へ焦点を戻し、品書きを開いた時点の選択を置き直す。
+   *
+   * 品書きを押すと焦点が面から外れる（組んで書く面は選択まで外れる）。
+   * 戻さないと、execCommand が面ではないところへ効く。
+   */
+  function menuRefocus(at) {
+    if (composeOn) {
+      compose.focus();
+      composeRestoreCaret(at);
+      return;
+    }
+    write.focus();
+    if (at) write.setSelectionRange(at.start, at.end);
+  }
+
+  /** いまの面の本文（貼り付けを待つ間に変わったかを見る） */
+  function menuFaceText() {
+    return composeOn ? composeTextNow() : write.value;
+  }
+
+  /**
+   * 画面の中で写す。写せたら true。
+   *
+   * execCommand("copy") は Ctrl+C と同じ copy の知らせを立てるので、
+   * 組んで書く面では同じ3つの形（字・ルビつき・記法）が載る。
+   */
+  function menuCopyHere(at) {
+    menuRefocus(at);
+    try {
+      return document.execCommand("copy") === true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /** 画面の中で写せなかったときに、拡張機能へ頼む字（字だけ） */
+  function menuPlainOf(at) {
+    const source = menuFaceText().slice(at.start, at.end);
+    return composeOn
+      ? composeCopyPayloads(source, composeNotation, composeCopyEmphasis).plain
+      : source;
+  }
+
+  /** 拡張機能への「写して」の便の番号。返事（clipboardWritten）と突き合わせる */
+  let clipboardWriteSeq = 0;
+
+  function menuAskWrite(text) {
+    clipboardWriteSeq += 1;
+    vscode.postMessage({ type: "clipboardWrite", text: text, id: clipboardWriteSeq });
+    return clipboardWriteSeq;
+  }
+
+  function menuCopy() {
+    const at = menuRange();
+    if (!at || at.end <= at.start) return;
+    if (menuCopyHere(at)) return;
+    const text = menuPlainOf(at);
+    if (!text) {
+      note.textContent = "選んだところを写せませんでした。Ctrl+C を試してください";
+      return;
+    }
+    // コピーだけなら返事を待たない（写せなくても本文は変わらない）
+    menuAskWrite(text);
+  }
+
+  /** 拡張機能が写し終わるのを待つ長さ。ふだんの往復は0.1秒に満たない */
+  const CUT_WAIT_MS = 4000;
+  const CUT_FAILED =
+    "切り取れませんでした（字は消していません）。" +
+    "Ctrl+C のあと Delete キーで消してください";
+  /** 拡張機能に写してもらっている切り取り。返事が来るまで消さない */
+  let menuCutWanted = null;
+
+  function menuCut() {
+    const at = menuRange();
+    if (!at || at.end <= at.start) return;
+    if (menuCopyHere(at)) {
+      // execCommand は写し終えてから戻るので、すぐ消してよい
+      menuDeleteRange(at);
+      return;
+    }
+    /*
+      **画面の中で写せなかったら、拡張機能が写し終わったと返すまで消さない。**
+      写せなかったのに消すと、字がクリップボードにも原稿にも残らない
+      （実装ルール1）。返事が来ない・失敗したときは消さずに知らせる。
+    */
+    const text = menuPlainOf(at);
+    if (!text) {
+      note.textContent = CUT_FAILED;
+      return;
+    }
+    if (menuCutWanted) clearTimeout(menuCutWanted.timer);
+    const id = menuAskWrite(text);
+    menuCutWanted = {
+      id: id,
+      at: at,
+      before: menuFaceText(),
+      timer: setTimeout(function () {
+        if (!menuCutWanted || menuCutWanted.id !== id) return;
+        // 待ちが過ぎたら諦める。消していないと知らせた後なので、遅れて届いた返事でも消さない
+        menuCutWanted = null;
+        note.textContent = CUT_FAILED;
+      }, CUT_WAIT_MS),
+    };
+  }
+
+  /** 拡張機能が写し終わったか（clipboardWritten）。写せていれば、そこで消す */
+  function takeClipboardWritten(message) {
+    const wanted = menuCutWanted;
+    if (!wanted || !message || message.id !== wanted.id) return;
+    menuCutWanted = null;
+    clearTimeout(wanted.timer);
+    // 待つ間に本文が変わっていたら、控えた位置は当てにならない
+    if (message.ok !== true || menuFaceText() !== wanted.before) {
+      note.textContent = CUT_FAILED;
+      return;
+    }
+    menuDeleteRange(wanted.at);
+  }
+
+  /** 写し終わった範囲を消す。消すのは打鍵と同じ道（delete → input の知らせ → 送る） */
+  function menuDeleteRange(at) {
+    // copy の知らせや待ちの間に選択が外れることがあるので、置き直してから消す
+    menuRefocus(at);
+    if (composeOn) {
+      if (composeTryDelete()) return;
+      note.textContent =
+        "切り取った字を消せませんでした（写すことはできています）。" +
+        "Delete キーで消してください";
+      return;
+    }
+    let deleted = false;
+    try {
+      deleted = document.execCommand("delete") === true;
+    } catch (error) {
+      deleted = false;
+    }
+    if (deleted) return;
+    // 断られたら直接消す。input の知らせは立たないので、ここで送る
+    write.setRangeText("", at.start, at.end, "end");
+    send();
+  }
+
+  /** 拡張機能にクリップボードを読んでもらっている間の、貼る場所 */
+  let menuPasteWanted = null;
+
+  function menuPaste() {
+    menuPasteWanted = { at: menuRange(), before: menuFaceText() };
+    vscode.postMessage({ type: "clipboardRead" });
+  }
+
+  /** 拡張機能が読んだクリップボードの字（clipboardText）を、面へ入れる */
+  function takeClipboardText(message) {
+    const wanted = menuPasteWanted;
+    menuPasteWanted = null;
+    if (!wanted) return;
+    const text = message && typeof message.text === "string" ? message.text : "";
+    if (!text) {
+      note.textContent = "クリップボードに貼れる字がありません";
+      return;
+    }
+    // 待つ間に本文が変わっていたら、控えた位置は当てにならない。いまのカーソルへ入れる
+    let at = menuFaceText() === wanted.before ? wanted.at : null;
+    if (composeOn) {
+      if (!at) at = composeSelectionNow();
+      if (!at) {
+        note.textContent = "貼る場所が分からなくなりました。もう一度貼り付けてください";
+        return;
+      }
+      menuRefocus(at);
+      // 平文として入れる（Ctrl+V と同じ入れ方。送るのも同じ）
+      composeInsertPlain(text);
+      return;
+    }
+    menuRefocus(at);
+    // textarea の本文はLF空間。CRLF のまま入れると、送る本文の位置がずれる
+    const plain = text.split("\\r\\n").join("\\n").split("\\r").join("\\n");
+    let inserted = false;
+    try {
+      inserted = document.execCommand("insertText", false, plain) === true;
+    } catch (error) {
+      inserted = false;
+    }
+    if (inserted) return;
+    write.setRangeText(plain, write.selectionStart, write.selectionEnd, "end");
+    send();
+  }
+  /* menu-clipboard:end */
+
   /* ── 右クリック ────────────────────── */
   let menuTerm = null;
 
@@ -2204,6 +2422,13 @@ ruby > rt {
       r.className = "rule";
       menu.appendChild(r);
     }
+
+    // **先頭は切り取り・コピー・貼り付け**（作者の裁定、2026-09-28）。
+    // ブラウザの品書きと同じ並び。選んでいなければ前の2つは押せない
+    add("切り取り", menuCut, hasSelection);
+    add("コピー", menuCopy, hasSelection);
+    add("貼り付け", menuPaste);
+    rule();
 
     if (term) {
       // **用語の名前は出さない**（作者の依頼、2026-08-28
@@ -2662,6 +2887,12 @@ ${RESUME_WRITING_LABEL ? `
     } else if (message.type === "editApplied") {
       // 送った便が文書へ入ったか（設計書6.25.9）
       takeEditApplied(message);
+    } else if (message.type === "clipboardText") {
+      // 右クリックの「貼り付け」で頼んだクリップボードの字
+      takeClipboardText(message);
+    } else if (message.type === "clipboardWritten") {
+      // 右クリックの「切り取り」で、拡張機能に写してもらった返事
+      takeClipboardWritten(message);
     } else if (message.type === "readingPlan") {
       aloudTakePlan(message);
     } else if (message.type === "showReading") {

@@ -900,6 +900,18 @@ type Incoming =
    * VS Code エディタへ貼ると字だけになる。記法で貼りたいときの逃げ道。
    */
   | { type: "copyNotation"; text: string }
+  /**
+   * 右クリックの「貼り付け」（作者の裁定、2026-09-28）。画面の中からは
+   * クリップボードを読めないので、こちらで読んで `clipboardText` で返す。
+   * **本文へ入れるのは画面**（打鍵と同じ送りで `edit` が来る）
+   */
+  | { type: "clipboardRead" }
+  /**
+   * 右クリックの「コピー」「切り取り」で、画面の中の copy が断られたときの逃げ道。
+   * 写したら `clipboardWritten`（`id` と成否）を返す——**切り取りは、成功の返事が
+   * 来るまで字を消さない**（写せなかったのに消すと字がどこにも残らない）
+   */
+  | { type: "clipboardWrite"; text: string; id?: number }
   | { type: "openTerm"; id: string; kind: TermKind }
   /**
    * 右クリックの時点で、**開いている**資料パネルへ該当項目を出す
@@ -1740,6 +1752,43 @@ export class ManuscriptEditorProvider
             `選んだ${message.text.length.toLocaleString("ja-JP")}字を、` +
               "ルビと傍点の記法のままクリップボードへ入れました。"
           );
+          break;
+        }
+
+        case "clipboardRead": {
+          // 読めなければ空で返す（画面が「貼れる字がありません」と出す）。
+          // 返さないと、画面は頼んだまま待ち続ける
+          let text = "";
+          try {
+            text = await vscode.env.clipboard.readText();
+          } catch (error) {
+            logLine(
+              `原稿エディター：クリップボードを読めませんでした（${
+                error instanceof Error ? error.message : String(error)
+              }）`
+            );
+          }
+          await panel.webview.postMessage({ type: "clipboardText", text });
+          break;
+        }
+
+        case "clipboardWrite": {
+          let ok = false;
+          if (typeof message.text === "string" && message.text.length > 0) {
+            try {
+              await vscode.env.clipboard.writeText(message.text);
+              ok = true;
+            } catch (error) {
+              logLine(
+                `原稿エディター：クリップボードへ写せませんでした（${
+                  error instanceof Error ? error.message : String(error)
+                }）`
+              );
+            }
+          }
+          if (typeof message.id === "number") {
+            await panel.webview.postMessage({ type: "clipboardWritten", id: message.id, ok });
+          }
           break;
         }
 

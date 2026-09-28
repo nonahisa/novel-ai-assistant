@@ -33,6 +33,10 @@ export async function runManuscriptTypingChecks(runCase: RunCase): Promise<void>
     "原稿エディター：画面を閉じても、文書へ入った字は未保存のまま残り、保存の流れに乗る",
     checkTypedTextSurvivesClose
   );
+  await runCase(
+    "原稿エディター：右クリックの貼り付け・コピーは拡張機能がクリップボードを読み書きし、切り取り・貼り付けの本文は打鍵と同じ便で文書へ入る",
+    checkClipboardMenu
+  );
 }
 
 interface FakePanel {
@@ -189,6 +193,59 @@ async function checkTypedTextReachesDocument(): Promise<void> {
     assert.equal(saved.replace(/\r\n/g, "\n"), "一行目の字\n二行目");
   } finally {
     view.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}
+
+/**
+ * 右クリックの「切り取り」「コピー」「貼り付け」（設計書6.25）。
+ *
+ * 画面の中の動き（写す→消す、控えた位置へ入れる）は単体テスト
+ * （manuscriptEditorClipboardMenu.test.ts）で見ている。ここでは拡張機能の側——
+ * **クリップボードを読んで返すこと・写すこと**と、その後に画面が送る本文が
+ * 打鍵と同じ `edit` 便で文書へ入ること——を本物のホストで確かめる。
+ * 作者のクリップボードは、終わったら元へ戻す。
+ */
+async function checkClipboardMenu(): Promise<void> {
+  const saved = await vscode.env.clipboard.readText();
+  const { root, document, view } = await openEmptyManuscript();
+  try {
+    await view.receive({ type: "edit", text: "あいうえお", seq: 1 });
+    await waitFor(() => ackOf(view.posted, 1), "1便目の「入った」");
+
+    // 切り取り：画面の copy が断られたときは、拡張機能に写してもらう
+    await view.receive({ type: "clipboardWrite", text: "いう", id: 7 });
+    assert.equal(await vscode.env.clipboard.readText(), "いう", "クリップボードへ写っていません");
+    // 写し終わった返事（画面はこれが来てから消す）
+    const written = await waitFor(
+      () =>
+        view.posted.find(
+          (message) => (message as { type?: string })?.type === "clipboardWritten"
+        ) as { id: number; ok: boolean } | undefined,
+      "写し終わった返事"
+    );
+    assert.deepEqual({ id: written.id, ok: written.ok }, { id: 7, ok: true });
+    // 画面は選んだところを消し、打鍵と同じ便で送る
+    await view.receive({ type: "edit", text: "あえお", seq: 2 });
+    await waitFor(() => ackOf(view.posted, 2), "切り取った後の「入った」");
+    assert.equal(document.getText(), "あえお", "切り取りが文書へ入っていません");
+
+    // 貼り付け：拡張機能がクリップボードを読んで返す
+    await view.receive({ type: "clipboardRead" });
+    const reply = await waitFor(
+      () =>
+        view.posted.find(
+          (message) => (message as { type?: string })?.type === "clipboardText"
+        ) as { type: string; text: string } | undefined,
+      "クリップボードの字の返事"
+    );
+    assert.equal(reply.text, "いう", "読んだクリップボードの字が違います");
+    await view.receive({ type: "edit", text: "あいうえお", seq: 3 });
+    await waitFor(() => ackOf(view.posted, 3), "貼り付けた後の「入った」");
+    assert.equal(document.getText(), "あいうえお", "貼り付けが文書へ入っていません");
+  } finally {
+    view.close();
+    await vscode.env.clipboard.writeText(saved);
     await fs.rm(root, { recursive: true, force: true });
   }
 }
