@@ -24,7 +24,58 @@
  * 同じである。**畳んだほうが、当てる回数も減る。**
  */
 
-export type ApplyText = (text: string) => Promise<void>;
+export type ApplyText<T = string> = (item: T) => Promise<void>;
+
+/**
+ * 画面から届いた1便（設計書6.25.9）。
+ *
+ * `seq` は画面が付けた便の番号。**入ったかどうかを、この番号で画面へ返す。**
+ * 番号の無い便（番号を付ける前の画面）には返さない。
+ */
+export interface SentEdit {
+  text: string;
+  seq?: number;
+}
+
+/** 画面へ返す「入ったか」の知らせ */
+export interface EditAck {
+  type: "editApplied";
+  seq: number;
+  ok: boolean;
+}
+
+/**
+ * 1便を当てて、**入ったかどうかを画面へ返す**（設計書6.25.9）。
+ *
+ * 作者の報告（2026-09-28）：「×ボタンで消したら400文字ぐらいが消えました」。
+ * 打った字は画面にだけあり、文書は空のままだった。**当てられなかったときに
+ * 画面が何も知らない**と、字は画面にだけ残り、作者は保存できていると
+ * 思ったまま閉じる。
+ *
+ * - 当てる処理が投げても止めない（`onError` へ渡し、ok:false を返す）。
+ *   投げたまま順番待ちへ返すと、その間に畳まれた次の便が当たらずに残る
+ * - 返すのは、当て終わったあと。当てる前に返すと「入った」と偽ることになる
+ *
+ * @returns 入ったか（変わる所が無かったときも true）
+ */
+export async function applySentEdit(
+  item: SentEdit,
+  apply: (text: string) => Promise<boolean>,
+  report: (ack: EditAck) => void,
+  onError: (error: unknown) => void
+): Promise<boolean> {
+  let ok = false;
+  try {
+    ok = await apply(item.text);
+  } catch (error) {
+    ok = false;
+    onError(error);
+  }
+  if (typeof item.seq === "number") {
+    report({ type: "editApplied", seq: item.seq, ok });
+  }
+  return ok;
+}
 
 /**
  * 順番待ちの窓口を作る。
@@ -32,11 +83,11 @@ export type ApplyText = (text: string) => Promise<void>;
  * 返した関数は、**当て終わるまで次を当てない**。当てている間に呼ばれた
  * ぶんは最後の1つだけが残る。
  */
-export function createEditQueue(apply: ApplyText): ApplyText {
-  let queued: string | undefined;
+export function createEditQueue<T = string>(apply: ApplyText<T>): ApplyText<T> {
+  let queued: T | undefined;
   let applying = false;
 
-  return async (text: string): Promise<void> => {
+  return async (text: T): Promise<void> => {
     queued = text;
     if (applying) return;
 

@@ -48,7 +48,12 @@ import {
   toLf,
   toLfOffset,
 } from "../core/eolSpace";
-import { createEditQueue } from "../core/editQueue";
+import {
+  applySentEdit,
+  createEditQueue,
+  type EditAck,
+  type SentEdit,
+} from "../core/editQueue";
 import { createBurstGate } from "../core/burstGate";
 import {
   currentCountMode,
@@ -862,7 +867,11 @@ type Incoming =
        */
       saved?: SavedAppearance;
     }
-  | { type: "edit"; text: string }
+  /**
+   * 打たれた本文（LF空間）。`seq` は画面が付けた便の番号で、
+   * **入ったかどうかをこの番号で返す**（`editApplied`。設計書6.25.9）
+   */
+  | { type: "edit"; text: string; seq?: number }
   | { type: "count"; text: string }
   | { type: "ruby"; text: string; start: number; end: number }
   | { type: "emphasis"; text: string; start: number; end: number }
@@ -1606,13 +1615,42 @@ export class ManuscriptEditorProvider
      */
     /** 自分の書き換えを文書へ当てている最中か（外からの変更と見分ける） */
     let selfEditing = false;
-    const queueEdit = createEditQueue(async (text) => {
-      selfEditing = true;
+    /**
+     * **入ったかどうかを、便の番号で画面へ返す**（設計書6.25.9。作者の報告、
+     * 2026-09-28「×ボタンで消したら400文字ぐらいが消えました」）。
+     *
+     * 画面は、返事の来ない便があると帯を出して送り直す。こちらが入れられ
+     * なかったときも ok:false で返し、**画面にだけ字が残っている**ことを
+     * 作者に見える形にする。
+     */
+    const reportApplied = (ack: EditAck): void => {
       try {
-        await this.applyEdit(document, text);
+        void Promise.resolve(panel.webview.postMessage(ack)).catch(() => {
+          /* 閉じたあとに届いた便。返す先はもう無い */
+        });
+      } catch {
+        // 閉じた画面へは返せない（閉じる直前に送った便が遅れて着いたとき）
+      }
+    };
+    const queueEdit = createEditQueue<SentEdit>(async (item) => {
+      selfEditing = true;
+      let ok = false;
+      try {
+        ok = await applySentEdit(
+          item,
+          (text) => this.applyEdit(document, text),
+          reportApplied,
+          (error) =>
+            logLine(
+              `原稿エディタ：打った内容を文書へ当てる途中で失敗しました：${
+                error instanceof Error ? error.message : String(error)
+              }`
+            )
+        );
       } finally {
         selfEditing = false;
       }
+      if (!ok) this.warnEditRejected(document);
     });
 
     panel.webview.onDidReceiveMessage(async (message: Incoming) => {
@@ -1667,7 +1705,11 @@ export class ManuscriptEditorProvider
           break;
 
         case "edit":
-          await queueEdit(message.text);
+          await queueEdit(
+            typeof message.seq === "number"
+              ? { text: message.text, seq: message.seq }
+              : { text: message.text }
+          );
           break;
 
         case "count":
@@ -2047,10 +2089,16 @@ export class ManuscriptEditorProvider
     logLine(text);
   }
 
+  /**
+   * 画面の本文を文書へ当てる。
+   *
+   * @returns 文書が画面の本文になったか（変わる所が無かったときも true）。
+   *   画面へ「入ったか」を返すのに使う（設計書6.25.9）
+   */
   private async applyEdit(
     document: vscode.TextDocument,
     next: string
-  ): Promise<void> {
+  ): Promise<boolean> {
     // **差分はLF空間で取り、位置だけを文書の空間へ戻す**（core/eolSpace.ts）。
     // 文書ぜんたいをCRLFへ揃えてから差分を取ると、LFだけの行が混ざった
     // ファイルでは、その行から打った位置までが丸ごと差分になり、
@@ -2060,7 +2108,7 @@ export class ManuscriptEditorProvider
       next,
       document.eol === vscode.EndOfLine.CRLF
     );
-    if (!edit) return;
+    if (!edit) return true;
 
     const change = new vscode.WorkspaceEdit();
     change.replace(
@@ -2080,6 +2128,38 @@ export class ManuscriptEditorProvider
         `原稿エディタ：打った内容を文書へ当てられませんでした（${edit.start}〜${edit.end}）。`
       );
     }
+    return applied;
+  }
+
+  /** 最後に「入れられませんでした」と知らせた時刻（原稿ごと） */
+  private readonly editRejectedNotified = new Map<string, number>();
+
+  /**
+   * 打った字を文書へ入れられなかったことを、作者に知らせる（設計書6.25.9）。
+   *
+   * **ログだけでは足りない。** 作者はログを見ないまま閉じる（2026-09-28 の
+   * 報告では、画面にだけ残った字が×で消えた）。画面の帯（届かない便を
+   * 見張っている）と同じことを、VS Code の知らせでも出す——画面の側が
+   * 動いていない場合にも見えるようにするため。
+   *
+   * **1分に1回まで。** 打つたびに失敗していると、語ごとに知らせが積もる。
+   */
+  private warnEditRejected(document: vscode.TextDocument): void {
+    const key = document.uri.toString();
+    const now = Date.now();
+    const last = this.editRejectedNotified.get(key);
+    if (last !== undefined && now - last < 60_000) return;
+    this.editRejectedNotified.set(key, now);
+    const name = paths.basename(fromUri(document.uri));
+    void this.logForDocument(
+      document,
+      `原稿エディタ：${name} へ打った字を入れられませんでした。画面にだけ字が残っています`
+    );
+    void vscode.window.showWarningMessage(
+      `原稿エディターで打った字を「${name}」へ入れられませんでした。` +
+        "画面の字はまだ原稿ファイルに入っていません。閉じる前に、画面の上に出ている" +
+        "「本文をコピー」で控えてください。"
+    );
   }
 
   private async sendCount(

@@ -51,7 +51,10 @@ describe("原稿エディタが外の変更に追いつく", () => {
       /if \(!selfEditing && !undone && event\.contentChanges\.length > 0\)/
     );
     // 自分の applyEdit のあいだだけ selfEditing が立つ
-    expect(code).toMatch(/selfEditing = true;[\s\S]*?await this\.applyEdit\(document, text\);[\s\S]*?selfEditing = false;/);
+    // （当てるのは applySentEdit 経由。入ったかを画面へ返すため。設計書6.25.9）
+    expect(code).toMatch(
+      /selfEditing = true;[\s\S]*?\(text\) => this\.applyEdit\(document, text\)[\s\S]*?selfEditing = false;/
+    );
   });
 
   /**

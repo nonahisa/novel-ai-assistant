@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createEditQueue } from "../../../src/core/editQueue";
+import {
+  applySentEdit,
+  createEditQueue,
+  type EditAck,
+  type SentEdit,
+} from "../../../src/core/editQueue";
 
 /**
  * 打たれた本文を1つずつ順に当てる（設計書6.25.2）。
@@ -108,5 +113,76 @@ describe("順番待ち", () => {
       applied.push(text);
     });
     expect(applied).toEqual([]);
+  });
+
+  it("本文と便の番号を組にしても、畳み方は同じ", async () => {
+    const applied: SentEdit[] = [];
+    const gate = deferred();
+    let first = true;
+    const queue = createEditQueue<SentEdit>(async (item) => {
+      applied.push(item);
+      if (first) {
+        first = false;
+        await gate.promise;
+      }
+    });
+    void queue({ text: "あ", seq: 1 });
+    await Promise.resolve();
+    void queue({ text: "あい", seq: 2 });
+    void queue({ text: "あいう", seq: 3 });
+    gate.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(applied).toEqual([
+      { text: "あ", seq: 1 },
+      { text: "あいう", seq: 3 },
+    ]);
+  });
+});
+
+/**
+ * 打った字が文書へ入ったかを、画面へ返す（作者の報告、2026-09-28
+ * 「×ボタンで消したら400文字ぐらいが消えました」。設計書6.25.9）。
+ *
+ * **入れられなかったことを画面が知らないと、字は画面にだけ残る。**
+ * 作者は保存できていると思ったまま閉じる。
+ */
+describe("入ったかを画面へ返す", () => {
+  function run(apply: (text: string) => Promise<boolean>, seq?: number) {
+    const acks: EditAck[] = [];
+    const errors: unknown[] = [];
+    const done = applySentEdit(
+      { text: "打った字", ...(seq === undefined ? {} : { seq }) },
+      apply,
+      (ack) => acks.push(ack),
+      (error) => errors.push(error)
+    );
+    return { done, acks, errors };
+  }
+
+  it("入ったら ok を返す", async () => {
+    const { done, acks } = run(async () => true, 7);
+    await expect(done).resolves.toBe(true);
+    expect(acks).toEqual([{ type: "editApplied", seq: 7, ok: true }]);
+  });
+
+  it("**入れられなかったら、黙らずに ok:false を返す**", async () => {
+    const { done, acks } = run(async () => false, 8);
+    await expect(done).resolves.toBe(false);
+    expect(acks).toEqual([{ type: "editApplied", seq: 8, ok: false }]);
+  });
+
+  it("途中で投げられても止まらず、ok:false を返して理由を渡す", async () => {
+    const { done, acks, errors } = run(async () => {
+      throw new Error("文書が閉じられていた");
+    }, 9);
+    await expect(done).resolves.toBe(false);
+    expect(acks).toEqual([{ type: "editApplied", seq: 9, ok: false }]);
+    expect(String(errors[0])).toContain("文書が閉じられていた");
+  });
+
+  it("番号の無い便（古い画面から）には返さない", async () => {
+    const { done, acks } = run(async () => true);
+    await expect(done).resolves.toBe(true);
+    expect(acks).toEqual([]);
   });
 });

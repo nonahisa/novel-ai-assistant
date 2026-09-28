@@ -794,6 +794,24 @@ ruby > rt {
   white-space: nowrap;
 }
 #cheer:empty { display: none; }
+/* ── 打った字が原稿ファイルに届いていないときの帯（設計書6.25.9） ──
+   **普段は出ない。** 送った本文に「入った」という返事が来ないまま待ちが
+   過ぎたとき（または入れられなかったと返ってきたとき）だけ出る。
+   字が画面にだけ残っていることを、閉じる前に作者の目へ入れるためのもの
+   なので、下の帯（#note）の控えめな色ではなく、警告の色で上に出す */
+#unsent {
+  flex: 0 0 auto;
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+  color: var(--vscode-inputValidation-errorForeground, var(--vscode-foreground));
+  border-bottom: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+}
+#unsent.open { display: flex; }
+#unsent button { flex: 0 0 auto; }
 </style>
 </head>
 <body class="vertical">
@@ -814,6 +832,11 @@ ruby > rt {
   <button id="smaller" title="文字を小さく">ー</button>
   <button id="bigger" title="文字を大きく">＋</button>
   <div class="gap"></div>
+</div>
+
+<div id="unsent" role="alert">
+  <span id="unsentText">打った字が、まだ原稿ファイルに入っていません。このまま閉じると消えます。</span>
+  <button id="unsentCopy" title="この画面の本文をまるごとクリップボードへ写します。メモ帳などへ貼って控えてください">本文をコピー</button>
 </div>
 
 <div id="aloud">
@@ -889,6 +912,10 @@ ruby > rt {
   let latestMarks = null;
   const menu = document.getElementById("menu");
   const note = document.getElementById("note");
+  /** 打った字が原稿ファイルに届いていないときの帯（設計書6.25.9） */
+  const unsentBar = document.getElementById("unsent");
+  const unsentText = document.getElementById("unsentText");
+  const unsentCopyButton = document.getElementById("unsentCopy");
   /** 下段の字数（作品／このファイル／今日。作者の指示、2026-08-29） */
   const countsLabel = document.getElementById("counts");
   /** 目標に届いた日の一言（設計書6.3.8）。字数と一緒に届く */
@@ -1461,13 +1488,13 @@ ruby > rt {
   }
 
   /* ── 打たれたら、変わったことだけを伝える ── */
-  write.addEventListener("input", function () {
+  write.addEventListener("input", function (event) {
     // **目印は本文が変わった時点でずれる。** 新しいものが届くまで隠す。
     // 出したままにすると、1文字打つたびに色が横へずれて見える
     marks.classList.add("stale");
     // **変換中は送らない。** 確定前の文字を本文へ入れると、
-    // 確定のたびに二重に入る
-    if (composing) return;
+    // 確定のたびに二重に入る（印が立ったままなら、ここで下ろす）
+    if (holdForComposition(event, "打つ")) return;
     send();
   });
 
@@ -1568,6 +1595,42 @@ ruby > rt {
   }
 
   let composing = false;
+  /* composing-heal:start */
+  /**
+   * 打鍵を「変換中」として待たせるか。**印が立ったまま戻らないときは下ろす**
+   * （設計書6.25.9。作者の報告、2026-09-28）。
+   *
+   * 印は compositionstart で立ち、compositionend で下りる。**終わりの合図が
+   * 落ちると、以後の打鍵はすべて「変換中」として捨てられる**——画面には字が
+   * 見えているのに、文書へは1字も届かない。窓の切り替え・スリープ・焦点の
+   * 移動の最中に変換していると、合図が来ないことがある。
+   *
+   * 打鍵の知らせ（input）は、自分が変換中かどうかを isComposing で持っている。
+   * **それが「変換中ではない」と言うなら、合図を取りこぼしている。** 印を
+   * 下ろして送る。isComposing を持たない知らせ（古い環境）は、これまでどおり
+   * 待たせる（本当に変換中なら、送ると二重に入る）。
+   *
+   * 変換中に外から届いて溜めていた本文は捨てる。確定のあとに片づける決まり
+   * （compositionend）と同じで、**打った本文のほうを優先する**。
+   *
+   * @param where 記録に出す面の名前
+   * @returns 待たせるなら true
+   */
+  function holdForComposition(event, where) {
+    if (!composing) return false;
+    if (!event || event.isComposing !== false) return true;
+    composing = false;
+    pending = null;
+    composePending = null;
+    vscode.postMessage({
+      type: "log",
+      text:
+        "原稿エディタ（" + where + "）：変換の終わりの合図（compositionend）が届かないまま" +
+        "打鍵が続いたので、変換中の印を下ろして送ります",
+    });
+    return false;
+  }
+  /* composing-heal:end */
   write.addEventListener("compositionstart", function () { composing = true; });
   write.addEventListener("compositionend", function () {
     composing = false;
@@ -1596,13 +1659,194 @@ ruby > rt {
    * **実際に送るのは「変換を確定したとき」＝語ごと**なので、
    * 打鍵のたびに送ることにはならない。
    */
-  function send() {
-    if (write.value === current) return;
+  function send(force) {
+    // force：同じ本文でも送り直す（返事の来ない便の送り直し。設計書6.25.9）
+    if (!force && write.value === current) return;
     current = write.value;
     rememberSent(current);
-    vscode.postMessage({ type: "edit", text: current });
+    postEdit(current);
     updateCount();
   }
+
+  /* unsent:start */
+  /*
+    ── 打った字が文書へ届いたかを確かめる（設計書6.25.9） ──
+
+    作者の報告（2026-09-28、ノートPC）：「×ボタンで消したら400文字ぐらいが
+    消えました。自動保存がきいていません」。打った字は画面にだけあり、
+    文書（VS Code が保存するもの）は空のままだった。**画面は送りっぱなしで、
+    届いたかを知る道が無かった**——届かなくても何も出ないので、作者は
+    保存できていると思ったまま閉じた。
+
+    そこで便に番号を付け、拡張機能から「入った／入れられなかった」を
+    返してもらう（editApplied）。返事の来ない便があるまま待ちが過ぎたら、
+    **警告の帯を出して送り直す**。帯には「本文をコピー」を置く——
+    拡張機能の側が動いていないと、送り直しても届かないためである。
+  */
+  /** 返事を待つ長さ。ふだんの往復は0.1秒に満たないので、ここまで来たら異常 */
+  const UNSENT_WAIT_MS = 4000;
+  /** 最後に付けた便の番号 */
+  let editSeq = 0;
+  /**
+   * 返事を待っている便。since は**返事の来ない最初の便を送った時刻**で、
+   * 打ち続けても延ばさない（延ばすと、打っている間はいつまでも知らせない）。
+   */
+  let unconfirmed = null;
+  let unsentTimer = null;
+
+  /** 打った本文を文書へ送る。**送るのは必ずここを通す** */
+  function postEdit(text) {
+    editSeq += 1;
+    if (unconfirmed === null) unconfirmed = { seq: editSeq, since: Date.now() };
+    else unconfirmed.seq = editSeq;
+    vscode.postMessage({ type: "edit", text: text, seq: editSeq });
+    // 見回りが予約済みなら延ばさない（最初の便から数える）
+    if (unsentTimer === null) {
+      armUnsentCheck(UNSENT_WAIT_MS - (Date.now() - unconfirmed.since));
+    }
+  }
+
+  function armUnsentCheck(ms) {
+    if (unsentTimer !== null) clearTimeout(unsentTimer);
+    unsentTimer = setTimeout(checkUnsent, Math.max(0, ms));
+  }
+
+  /** 拡張機能から届いた「入った／入れられなかった」 */
+  function takeEditApplied(message) {
+    if (typeof message.seq !== "number") return;
+    if (!message.ok) {
+      // 入れられなかった。**待たずに知らせる**（送り直しは見回りに任せる）
+      showUnsent();
+      if (unconfirmed !== null) armUnsentCheck(UNSENT_WAIT_MS);
+      return;
+    }
+    if (unconfirmed === null) return;
+    if (message.seq >= unconfirmed.seq) {
+      unconfirmed = null;
+      if (unsentTimer !== null) {
+        clearTimeout(unsentTimer);
+        unsentTimer = null;
+      }
+      hideUnsent();
+      return;
+    }
+    // 古い便に返事が来た＝道は通っている。新しい便は往復の途中なので待ち直す
+    unconfirmed.since = Date.now();
+    armUnsentCheck(UNSENT_WAIT_MS);
+  }
+
+  /** 見回り。返事の来ない便が待ちを過ぎていたら、帯を出して送り直す */
+  function checkUnsent() {
+    unsentTimer = null;
+    if (unconfirmed === null) return;
+    const waited = Date.now() - unconfirmed.since;
+    if (waited < UNSENT_WAIT_MS) {
+      armUnsentCheck(UNSENT_WAIT_MS - waited);
+      return;
+    }
+    showUnsent();
+    /*
+      **本当に変換中なら送り直さない**（確定前の字が二重に入る）。確定すれば
+      そのとき送られる。印が立ちっぱなしのときは、打鍵か焦点の移動で下りる
+    */
+    if (composing) {
+      armUnsentCheck(UNSENT_WAIT_MS);
+      return;
+    }
+    // 同じ本文でも送り直す（前の便が途中で落ちたかもしれない）
+    if (composeOn) composeSend(true);
+    else send(true);
+    armUnsentCheck(UNSENT_WAIT_MS);
+  }
+
+  function showUnsent() {
+    unsentBar.classList.add("open");
+  }
+
+  function hideUnsent() {
+    if (!unsentBar.classList.contains("open")) return;
+    unsentBar.classList.remove("open");
+    unsentText.textContent =
+      "打った字が、まだ原稿ファイルに入っていません。このまま閉じると消えます。";
+    note.textContent = "打った字が原稿に入りました";
+  }
+
+  /**
+   * **画面を離れる前に、未送信の字を送る**（設計書6.25.9）。
+   *
+   * タブの×を押すと、押した瞬間に焦点が画面の外へ出る（blur）。その時点で
+   * 送れば、閉じる前に文書へ入り、VS Code の保存（自動保存・閉じる前の確認）に
+   * 乗る。**変換中の印が立ったままでも下ろして送る**——焦点が外れれば
+   * 日本語入力の変換は終わっている。
+   */
+  function flushUnsent(reason) {
+    if (composing) {
+      composing = false;
+      pending = null;
+      composePending = null;
+      vscode.postMessage({
+        type: "log",
+        text:
+          "原稿エディタ：" + reason + "とき、変換中の印が立ったままでした。" +
+          "印を下ろして送ります",
+      });
+    }
+    if (composeOn) composeSend();
+    else send();
+  }
+
+  window.addEventListener("blur", function () {
+    flushUnsent("焦点が画面の外へ出た");
+  });
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden") flushUnsent("画面が隠れた");
+  });
+  window.addEventListener("pagehide", function () {
+    flushUnsent("画面を閉じる");
+  });
+  /*
+    **Ctrl+S の前に送る。** 保存は VS Code が文書に対して行うので、画面にしか
+    無い字は保存されない（作者の「コントロールSしても文字が変わらなかった」）。
+    VS Code の受け口は窓（window）で聞いているので、文書（document）で
+    先に受けて送っておく。**変換中の Ctrl+S は日本語入力に任せる**
+  */
+  document.addEventListener(
+    "keydown",
+    function (event) {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      if (event.key !== "s" && event.key !== "S") return;
+      if (event.isComposing) return;
+      flushUnsent("保存する");
+    },
+    true
+  );
+
+  /**
+   * 帯の「本文をコピー」。**拡張機能を通さずに写す**——届かないときは、
+   * 拡張機能の側が動いていないことがあるため（頼んでも返事が来ない）。
+   */
+  function copyForRescue() {
+    const text = composeOn ? composeDomToNotation(compose) : write.value;
+    const box = document.createElement("textarea");
+    box.value = text;
+    box.style.position = "fixed";
+    box.style.opacity = "0";
+    document.body.appendChild(box);
+    box.select();
+    let copied = false;
+    try {
+      copied = document.execCommand("copy") === true;
+    } catch (error) {
+      copied = false;
+    }
+    document.body.removeChild(box);
+    unsentText.textContent = copied
+      ? "本文（" + text.length + "字）をクリップボードへ写しました。" +
+        "メモ帳などへ貼って控えてから、この画面を閉じて開き直してください。"
+      : "写せませんでした。本文を選んで Ctrl+C で写してください。";
+  }
+  unsentCopyButton.addEventListener("click", copyForRescue);
+  /* unsent:end */
 
   /**
    * 拡張機能から届いた本文を、打っている面へ入れるかどうか決める。
@@ -2415,6 +2659,9 @@ ${RESUME_WRITING_LABEL ? `
         頼み直さないと、押したのに読み始めないまま終わる。
       */
       if (aloudOn || aloudStartAt !== null) aloudAskPlan();
+    } else if (message.type === "editApplied") {
+      // 送った便が文書へ入ったか（設計書6.25.9）
+      takeEditApplied(message);
     } else if (message.type === "readingPlan") {
       aloudTakePlan(message);
     } else if (message.type === "showReading") {
@@ -3750,15 +3997,16 @@ ${RESUME_WRITING_LABEL ? `
    * **打つ面の値も揃えておく。** 面を出たあと、そのまま続けて打てるように
    * するためで、字数の数え直し（updateCount）もこの値を見ている。
    */
-  function composeSend() {
+  function composeSend(force) {
     // DOMは打たれるたびに変わる。**位置の一覧は必ず数え直す**
     composeInvalidate();
     const text = composeDomToNotation(compose);
-    if (text === current) return;
+    // force：同じ本文でも送り直す（返事の来ない便の送り直し。設計書6.25.9）
+    if (!force && text === current) return;
     current = text;
     rememberSent(text);
     write.value = text;
-    vscode.postMessage({ type: "edit", text: text });
+    postEdit(text);
     updateCount();
   }
 
@@ -3823,10 +4071,11 @@ ${RESUME_WRITING_LABEL ? `
     composeScheduleHighlight();
   }
 
-  compose.addEventListener("input", function () {
+  compose.addEventListener("input", function (event) {
     composeInvalidate();
-    // **変換中は送らない**（確定前の文字を本文へ入れると二重に入る）
-    if (composing) return;
+    // **変換中は送らない**（確定前の文字を本文へ入れると二重に入る）。
+    // 変換の終わりの合図を取りこぼして印が立ったままなら、ここで下ろす
+    if (holdForComposition(event, "組んで書く")) return;
     // 打った字が、字を揃えるための印の中へ入ってしまっていたら外す
     composeUnwrapStaleMarks();
     composeSend();
@@ -4183,11 +4432,31 @@ ${RESUME_WRITING_LABEL ? `
     data.setData("text/html", payloads.html);
     data.setData(COMPOSE_NOTATION_FLAVOR, payloads.notation);
     if (!andDelete) return;
+    // 消すのはブラウザに任せる（自前で消すと取り消し履歴から外れる）
+    if (composeTryDelete()) return;
+    /*
+      **切り取りの知らせが終わってから、もう一度消す**（作者の報告、
+      2026-09-28「Ctrl+Xができません」）。VS Code の中では Ctrl+X が
+      document.execCommand("cut") として画面へ届き、この知らせはその**最中**に
+      来る。ここで execCommand("delete") を呼ぶと、Chromium は入れ子の
+      execCommand として黙って断る（false）——写すだけで字が消えなかった。
+      1周まわせば入れ子ではなくなる。選択は写したときのものへ戻してから消す
+    */
+    setTimeout(function () {
+      composeRestoreCaret(at);
+      if (composeTryDelete()) return;
+      note.textContent =
+        "切り取った字を消せませんでした（写すことはできています）。" +
+        "Delete キーで消してください";
+    }, 0);
+  }
+
+  /** 選んでいるところを消す。断られたら false（本文は壊れない） */
+  function composeTryDelete() {
     try {
-      // 消すのはブラウザに任せる（自前で消すと取り消し履歴から外れる）
-      document.execCommand("delete");
+      return document.execCommand("delete") === true;
     } catch (error) {
-      /* 消せない環境では、選んだまま残る（本文は壊れない） */
+      return false;
     }
   }
 

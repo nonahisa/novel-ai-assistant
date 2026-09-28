@@ -39,6 +39,7 @@ import type { WorkEntry } from "../models/types";
 import { CHARACTER_EXTRACT_VERSION } from "../prompts/characterExtract";
 import { assertFetchPatch, describeFetchPatch, probeFetchPatch } from "./fetchPatch";
 import { runFieldListChecks } from "./fieldListChecks";
+import { runManuscriptTypingChecks } from "./manuscriptTyping";
 import { runRequest, runResult } from "../mcp/tools/runRequest";
 import { handleRunRequest } from "../features/runRequestHandler";
 import { createRunRequestDeps } from "../features/runRequestRunners";
@@ -876,6 +877,9 @@ export async function run(): Promise<void> {
       assertFetchPatch(report);
     }
   );
+
+  // 原稿エディターで打った字が文書へ届いて消えないこと（2026-09-28。設計書6.25.9）
+  await runManuscriptTypingChecks((name, test) => runCase(name, failures, test));
 
   // 実機確認リストの項目のうち、機械で確かめられる部分（2026-09-26）。
   // 作品を本物のコマンドで登録する項目があるので、ほかの項目のあとに回す

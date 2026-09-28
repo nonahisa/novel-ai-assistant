@@ -1301,7 +1301,11 @@ describe("画面の約束", () => {
     expect(code).toContain('compose.addEventListener("compositionstart"');
     expect(code).toContain('compose.addEventListener("compositionend"');
     const input = code.slice(code.indexOf('compose.addEventListener("input"'));
-    expect(input.slice(0, 300)).toContain("if (composing) return;");
+    // 印が立ったまま戻らないときに下ろす判定を通す（設計書6.25.9。
+    // 動きは test/unit/views/manuscriptEditorUnsent.test.ts が確かめる）
+    expect(input.slice(0, 400)).toContain(
+      'if (holdForComposition(event, "組んで書く")) return;'
+    );
   });
 
   /** 右クリック・ホバーは、位置から用語を引く（この面に用語の要素は無い） */
@@ -2197,10 +2201,10 @@ describe("変換中の字に色を置かない（作者の依頼、2026-09-24）
 describe("巻き込まれた印を、打ったあとに外す", () => {
   it("打たれたら外す（変換中を除く）", () => {
     const listener = html.slice(
-      html.indexOf('compose.addEventListener("input", function () {')
+      html.indexOf('compose.addEventListener("input", function (event) {')
     );
-    const body = listener.slice(0, 400);
-    expect(body).toContain("if (composing) return;");
+    const body = listener.slice(0, 500);
+    expect(body).toContain('if (holdForComposition(event, "組んで書く")) return;');
     expect(body).toContain("composeUnwrapStaleMarks();");
     // 変換中に触らないことは、関数の側でも念を押してある
     const unwrap = html.slice(html.indexOf("function composeUnwrapStaleMarks("));
