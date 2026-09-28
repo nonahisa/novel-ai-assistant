@@ -98,15 +98,16 @@ function runOpenMenu(options: { term: boolean; hasSelection: boolean }): {
 }
 
 describe("右クリックの品書きの並び", () => {
-  it("**先頭に「切り取り」「コピー」「貼り付け」と区切り線、設定資料はその下**", () => {
+  it("**用語の上では設定資料が先頭、その次に「切り取り」「コピー」「貼り付け」と区切り線**（作者の依頼、2026-09-28）", () => {
     const { items } = runOpenMenu({ term: true, hasSelection: true });
-    expect(items.slice(0, 4).map((item) => (item.kind === "rule" ? "―" : item.label))).toEqual([
+    expect(items.slice(0, 6).map((item) => (item.kind === "rule" ? "―" : item.label))).toEqual([
+      "設定資料を見る",
+      "―",
       "切り取り",
       "コピー",
       "貼り付け",
       "―",
     ]);
-    expect(items[4].label).toBe("設定資料を見る");
     // これまでの項目は残っている
     const labels = items.map((item) => item.label);
     expect(labels).toContain("ルビを振る");
