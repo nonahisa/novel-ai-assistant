@@ -38,6 +38,11 @@ export interface GitSyncMonitorLike extends vscode.Disposable {
    * 設計書6.15.1）。**代役は持たない**——ブラウザ版には git が無い
    */
   isOperating?(): boolean;
+  /**
+   * 取り込み・送信の前に待つもの（自動の送り直しの試行）を渡す。
+   * **代役は持たない**（同じ理由）
+   */
+  setBeforeOperation?(wait: (() => Promise<unknown>) | undefined): void;
 }
 
 /**

@@ -6,7 +6,11 @@ vi.mock("../../../src/core/logger", () => ({
   useLogFile: vi.fn(),
 }));
 
-import { AutoResender, type AutoResendSettings } from "../../../src/features/autoResend";
+import {
+  AutoResender,
+  WAIT_LIMIT_MS,
+  type AutoResendSettings,
+} from "../../../src/features/autoResend";
 import type { GitCommandRunner, GitSyncStatus } from "../../../src/core/git";
 import type { GitSyncMonitorLike } from "../../../src/features/gitSyncStub";
 import type { WorkEntry } from "../../../src/models/types";
@@ -56,6 +60,8 @@ let repo: {
 };
 /** 呼ばれた git（副コマンドの並び） */
 let calls: string[][];
+/** 立っていれば、push はこれが解けるまで返らない */
+let pushGate: Promise<void> | undefined;
 
 const fakeGit: GitCommandRunner = async (args) => {
   calls.push(args);
@@ -82,6 +88,8 @@ const fakeGit: GitCommandRunner = async (args) => {
       : { code: 1, stdout: "", stderr: "" };
   }
   if (args[0] === "push") {
+    // 送信が長引く場面（回線が詰まっている）を作る
+    if (pushGate) await pushGate;
     if (!repo.online) {
       return {
         code: 128,
@@ -136,6 +144,7 @@ const pushes = (): string[][] => calls.filter((args) => args[0] === "push");
 beforeEach(() => {
   repo = { behind: 0, ahead: 2, online: false, merging: false };
   calls = [];
+  pushGate = undefined;
   cached = new Map(works.map((work) => [work.id, tracked(0, 2)]));
   refreshed = [];
   operating = false;
@@ -326,6 +335,117 @@ describe("いつ試すか", () => {
     cached = new Map(works.map((work) => [work.id, tracked(0, 2)]));
     clock += 60_000;
     await resender.heartbeat();
+    expect(pushes()).toHaveLength(1);
+  });
+});
+
+describe("送り直しの最中に同期が押されたら（逆向きの排他）", () => {
+  const tick = () => new Promise((done) => setTimeout(done, 10));
+
+  /**
+   * `extension.ts` のコマンドの入口と同じ順：**先に「同期中」と数えてから**
+   * 送り直しを待ち、それから本体を走らせる
+   */
+  async function runSyncCommand(
+    resender: AutoResender,
+    body: () => Promise<void>,
+    limitMs?: number
+  ): Promise<string> {
+    busy = true;
+    try {
+      const waited = await resender.whenIdle(limitMs);
+      await body();
+      return waited;
+    } finally {
+      busy = false;
+    }
+  }
+
+  function gate(): () => void {
+    let release: () => void = () => undefined;
+    pushGate = new Promise<void>((done) => {
+      release = done;
+    });
+    return () => release();
+  }
+
+  test("試行が終わるのを待ってから始め、待つあいだは窓でなくステータスバーで言う", async () => {
+    repo.online = true;
+    const release = gate();
+    const resender = makeResender();
+    const order: string[] = [];
+
+    const attempt = resender.attempt("interval").then(() => {
+      order.push("送り直し");
+    });
+    await tick();
+    expect(pushes()).toHaveLength(1);
+
+    const command = runSyncCommand(resender, async () => {
+      order.push("同期");
+    });
+    await tick();
+    // まだ送り直しが終わっていないので、同期は始まっていない
+    expect(order).toEqual([]);
+    expect(statusBarMessages.map((one) => one.text).join("\n")).toContain(
+      "送れていなかった分を送っています"
+    );
+    expect(windowsShown).toEqual([]);
+
+    release();
+    expect(await command).toBe("waited");
+    await attempt;
+    expect(order).toEqual(["送り直し", "同期"]);
+  });
+
+  test("上限を超えたら待つのをやめて始め、ログに1行残す", async () => {
+    // 返ってこない送信（回線が詰まっている）
+    pushGate = new Promise<void>(() => undefined);
+    const resender = makeResender();
+    void resender.attempt("interval");
+    await tick();
+
+    let started = false;
+    const waited = await runSyncCommand(
+      resender,
+      async () => {
+        started = true;
+      },
+      30
+    );
+    expect(waited).toBe("timeout");
+    expect(started).toBe(true);
+    expect(windowsShown).toEqual([]);
+    expect(vi.mocked(logFailure).mock.calls.map((call) => call[0])).toContain(
+      "自動の送り直しを待ちきれず、同期を先に始めた"
+    );
+  });
+
+  test("上限は30秒", () => {
+    expect(WAIT_LIMIT_MS).toBe(30_000);
+  });
+
+  test("試行が走っていなければ待たず、何も出さない", async () => {
+    const resender = makeResender();
+    expect(await resender.whenIdle()).toBe("idle");
+    expect(statusBarMessages).toEqual([]);
+  });
+
+  test("同期が待っているあいだは、送り直しの次の試行を始めない", async () => {
+    repo.online = true;
+    const release = gate();
+    const resender = makeResender();
+    const first = resender.attempt("interval");
+    await tick();
+
+    const command = runSyncCommand(resender, async () => {
+      // 同期の本体が走っている最中に鼓動が来ても、試さない
+      clock += 60 * 60_000;
+      expect(await resender.attempt("interval")).toBeUndefined();
+    });
+    release();
+    await first;
+    await command;
     expect(pushes()).toHaveLength(1);
   });
 });

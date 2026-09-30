@@ -87,12 +87,21 @@ export type ResendTrigger = "interval" | "wake" | "wake-retry" | "focus";
 /** スリープ明けに、間隔に関わらず試す回数（起きた直後＋次の鼓動） */
 const WAKE_ATTEMPTS = 2;
 
+/**
+ * 同期の操作が、走っている送り直しを待つ上限（ミリ秒）。
+ *
+ * `git push` の時間切れ（`core/git.ts` の `FETCH_TIMEOUT_MS`）と同じ30秒。
+ * 回線が詰まって送信が長引いても、作者が押した同期をそれより長くは止めない。
+ */
+export const WAIT_LIMIT_MS = 30_000;
+
 export class AutoResender implements vscode.Disposable {
   private lastBeatAt: number | undefined;
   /** git を実際に呼んだ最後の時刻。**送るものが無かった回は数えない** */
   private lastAttemptAt: number | undefined;
   private wakeAttemptsLeft = 0;
-  private inFlight = false;
+  /** 走っている試行。無ければ undefined */
+  private current: Promise<ResendAttempt> | undefined;
   /**
    * 置き場ごとの、続けて失敗した回数と直前の理由。
    *
@@ -159,7 +168,7 @@ export class AutoResender implements vscode.Disposable {
    * **例外を外へ出さない。** 鼓動から呼ばれるので、投げると誰も受け止めない。
    */
   async attempt(trigger: ResendTrigger): Promise<ResendAttempt | undefined> {
-    if (this.inFlight) return undefined;
+    if (this.current) return undefined;
     if (!this.settings().enabled) return undefined;
     if (this.busy()) return undefined;
 
@@ -172,7 +181,68 @@ export class AutoResender implements vscode.Disposable {
     if (targets.length === 0) return undefined;
 
     this.lastAttemptAt = this.now();
-    this.inFlight = true;
+    // **走っている試行を掴んでおく。** 作者が同期を押したら、同期の側が
+    // これを待ってから始める（`whenIdle`）
+    const running = this.runTargets(targets, works, trigger);
+    this.current = running;
+    try {
+      return await running;
+    } finally {
+      this.current = undefined;
+    }
+  }
+
+  /**
+   * 試行が走っていれば、終わるまで待つ（上限 `WAIT_LIMIT_MS`）。
+   *
+   * **同期の系の操作と、見張りの取り込み／送信の入口で呼ぶ。** 送り直しの
+   * 最中に作者が同期を押すと、同じ置き場へ git が2本走る。git 自身の
+   * ロックで原稿は壊れないが、片方が「別の git が動いている」で落ちうる。
+   *
+   * **窓は出さない**——作者は押しただけで、手を止めさせる場面ではない。
+   * 待つあいだはステータスバーで言う。**上限を超えたら待つのをやめて進む**
+   * （送信が回線待ちで長引いても、作者の操作を止め続けない）。ログに1行残す。
+   *
+   * @returns 待たなかった／待ち終えた／上限で打ち切った
+   */
+  async whenIdle(
+    limitMs: number = WAIT_LIMIT_MS
+  ): Promise<"idle" | "waited" | "timeout"> {
+    const running = this.current;
+    if (!running) return "idle";
+
+    const notice = vscode.window.setStatusBarMessage(
+      "$(sync~spin) 送れていなかった分を送っています…"
+    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        running.then(
+          () => "waited" as const,
+          () => "waited" as const
+        ),
+        new Promise<"timeout">((resolve) => {
+          timer = setTimeout(() => resolve("timeout"), limitMs);
+        }),
+      ]);
+      if (result === "timeout") {
+        logFailure("自動の送り直しを待ちきれず、同期を先に始めた", {
+          待った秒数: Math.round(limitMs / 1000),
+        });
+      }
+      return result;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      notice.dispose();
+    }
+  }
+
+  /** 置き場を順に送り、済んだら知らせる。**例外は外へ出さない** */
+  private async runTargets(
+    targets: ResendTarget<WorkEntry>[],
+    works: readonly WorkEntry[],
+    trigger: ResendTrigger
+  ): Promise<ResendAttempt> {
     const outcome: ResendAttempt = { sent: [], failed: [], skipped: [] };
     try {
       for (const target of targets) {
@@ -184,8 +254,6 @@ export class AutoResender implements vscode.Disposable {
       logFailure("自動の送り直しで例外", {
         詳細: error instanceof Error ? error.message : String(error),
       });
-    } finally {
-      this.inFlight = false;
     }
 
     const message = describeResent(outcome.sent);

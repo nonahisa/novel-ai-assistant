@@ -859,6 +859,7 @@ export class GitSyncMonitor implements vscode.Disposable {
     // 走っている間は自動の送り直しを控えさせる（`isOperating`）
     this.operating += 1;
     try {
+      await this.waitBeforeOperation();
       return await this.runPull(work, afterRecording);
     } finally {
       this.operating -= 1;
@@ -878,6 +879,27 @@ export class GitSyncMonitor implements vscode.Disposable {
 
   /** いま走っている取り込み・送信の数（入れ子の呼び直しも数える） */
   private operating = 0;
+
+  /**
+   * 取り込み・送信の前に待つもの（自動の送り直しの試行。設計書6.15.1）。
+   *
+   * **組み立ての順番の都合で、あとから渡す。** 送り直しの係は見張りを
+   * 受け取って作られるので、見張りの作成時にはまだ存在しない。
+   */
+  private beforeOperation: (() => Promise<unknown>) | undefined;
+
+  setBeforeOperation(wait: (() => Promise<unknown>) | undefined): void {
+    this.beforeOperation = wait;
+  }
+
+  /** 待つものがあれば待つ。**待てなくても操作は止めない** */
+  private async waitBeforeOperation(): Promise<void> {
+    try {
+      await this.beforeOperation?.();
+    } catch {
+      // 待ちの失敗で作者の操作を止めない（待つ側がログを残す）
+    }
+  }
 
   private async runPull(
     work: WorkEntry,
@@ -1190,6 +1212,7 @@ ${reason}` : ""}`,
   async push(work: WorkEntry): Promise<boolean> {
     this.operating += 1;
     try {
+      await this.waitBeforeOperation();
       return await this.runPush(work);
     } finally {
       this.operating -= 1;

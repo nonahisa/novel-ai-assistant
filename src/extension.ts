@@ -748,6 +748,12 @@ export async function activate(
   let syncCommandsRunning = 0;
   /** 開いたときの点検が走っているか（これも自動の送り直しを控えさせる） */
   let startupHandoffRunning = false;
+  /**
+   * 自動の送り直しの試行が走っていれば、終わるまで待つ（上限30秒）。
+   * 同期の系の操作は、始める前にこれを通す——同じ置き場へ git を
+   * 2本走らせないため。送り直しの係ができるまでは空のまま
+   */
+  let waitForResend: (() => Promise<unknown>) | undefined;
 
   /**
    * 種類の関門（設計書6.109.7）。
@@ -894,6 +900,9 @@ export async function activate(
       const syncBusy = isSyncBusyCommand(command);
       if (syncBusy) syncCommandsRunning += 1;
       try {
+        // **数を増やしてから待つ。** 先に数えておけば、待っている間に
+        // 送り直しの次の試行が始まることはない
+        if (syncBusy && waitForResend) await waitForResend();
         const returned = await callback.apply(thisArg, args);
         /*
           **成功して返ったときだけ知らせる**（設計書6.104）。
@@ -6926,6 +6935,10 @@ export async function activate(
         afterSent: () => handoff.refreshUnsentMark(deps),
       });
       context.subscriptions.push(resender);
+      // 逆向きの排他：同期の操作・見張りの取り込み／送信は、走っている
+      // 送り直しを待ってから始める（上限30秒。窓は出さない）
+      waitForResend = () => resender.whenIdle();
+      gitSync.setBeforeOperation?.(waitForResend);
 
       // 起動の所要時間（設計書6.107）。点検は回線の速さに左右されるので、
       // 始まりと終わりの両方を残さないと「遅いのは点検か、その手前か」が
