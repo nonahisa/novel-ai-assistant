@@ -344,7 +344,10 @@ server.registerTool(
         太り、繋ぐたびの費用になる。走査はどのみち最初に呼ばれる
       */
       "設定資料・各話あらすじ・プロット・単話プロットが揃っているかも返します" +
-      "（prerequisites）。",
+      "（prerequisites）。" +
+      // 単話プロットの機能は options.plotPath を求めるのに、場所を知る手立てが
+      // 無かった（2026-10-01）。説明は1文だけ——一覧は繋ぐたびに読まれる
+      "単話プロットの場所は episodePlots（options.plotPath に使う）。",
     inputSchema: WORK_SCAN_INPUT,
   },
   tool("novel.scan", workScan)

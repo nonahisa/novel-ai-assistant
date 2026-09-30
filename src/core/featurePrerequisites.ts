@@ -125,7 +125,18 @@ export interface PrerequisiteStatus {
   readonly makeLabel: string;
   /** これが無いと通せない feature */
   readonly blocks: readonly FeatureName[];
+  /**
+   * 揃っていない理由（`ready: false` のときだけ。言えるものだけ）。
+   *
+   * **ファイルはあるのに揃っていない、があり得る**——単話プロットは
+   * ひな形のままでは揃っていない（`novel.prompt` が断る）。「無い」とだけ
+   * 返すと、ファイルを見た外部AIが「あるのに」と迷う。
+   */
+  readonly reason?: string;
 }
+
+/** 前提ごとの、揃っていない理由。言えるものだけ入れる */
+export type PrerequisiteReasons = Readonly<Partial<Record<Prerequisite, string>>>;
 
 /**
  * 前提の種類の並び（`novel.scan` の返り順）。
@@ -147,17 +158,22 @@ export function featuresNeeding(kind: Prerequisite): readonly FeatureName[] {
 
 /** いま揃っているものから、4種類ぶんの姿を組む */
 export function prerequisiteStatuses(
-  present: Iterable<Prerequisite>
+  present: Iterable<Prerequisite>,
+  reasons: PrerequisiteReasons = {}
 ): readonly PrerequisiteStatus[] {
   const have = new Set(present);
   return PREREQUISITE_KINDS.map((kind) => {
     const info = prerequisiteInfo(kind);
+    const ready = have.has(kind);
+    const reason = ready ? undefined : reasons[kind];
     return {
       kind,
       label: info.label,
-      ready: have.has(kind),
+      ready,
       makeLabel: info.makeLabel,
       blocks: featuresNeeding(kind),
+      // 揃っているものに理由は付けない（古い理由が残って見えないように）
+      ...(reason ? { reason } : {}),
     };
   });
 }
@@ -173,6 +189,8 @@ export function prerequisiteStatuses(
 export function featurePrerequisiteRefusal(input: {
   readonly feature: FeatureName;
   readonly missing: readonly Prerequisite[];
+  /** 揃っていない理由（言えるものだけ）。`novel.scan` と同じ文を出す */
+  readonly reasons?: PrerequisiteReasons;
 }): string {
   const infos = input.missing.map(prerequisiteInfo);
   const names = infos.map((info) => `「${info.label}」`).join("と");
@@ -180,6 +198,15 @@ export function featurePrerequisiteRefusal(input: {
   const lines = [
     `${FEATURE_LABELS[input.feature]}（feature: ${input.feature}）には${names}が要りますが、` +
       "この作品にはまだありません。",
+    /*
+      **ファイルがあるのに断られる場合は、理由を添える**（単話プロットが
+      ひな形のまま等）。「まだありません」だけだと、ファイルを見た外部AIは
+      「あるのに」と迷う
+    */
+    ...input.missing.flatMap((kind) => {
+      const reason = input.reasons?.[kind];
+      return reason ? [`${prerequisiteInfo(kind).label}：${reason}`] : [];
+    }),
     /*
       **強調の記号を使わない**（`plainTextUi.test.ts`）。読むのは外部AIだが、
       この文はそのまま作者へ転記されることがある。地の文で言い切る

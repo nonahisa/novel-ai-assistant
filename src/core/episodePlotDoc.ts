@@ -144,6 +144,31 @@ export function isEpisodePlotWritten(doc: EpisodePlotDoc): boolean {
 }
 
 /**
+ * AIを掛けられないとき、その理由。掛けられるなら undefined。
+ *
+ * **外部AIの口（MCP）で「揃っているか」を言う場所は2つある**——走査
+ * （`novel.scan` の prerequisites）と、プロンプトを組む所（`novel.prompt`
+ * の episodePlot）。走査はファイルが**ある**かだけを見ていたので、
+ * ひな形のままの単話プロットを「揃っている」と返し、続く prompt が
+ * 「展開がまだ書かれていません」と断る食い違いが起きた（2026-10-01、
+ * ノートPCのセッションが作者の原稿相談で踏んだ）。**判定も理由の文も
+ * ここ1つにして、両方から呼ぶ。**
+ *
+ * **ひな形のままかどうかを分けて言う。** 3つの欄がどれも空なら作者は
+ * まだ手を付けていない（作っただけ）。視点や目標だけ書いてあるなら、
+ * 足りないのは展開だけである——直す所が違うので、言い方も変える。
+ */
+export function episodePlotUnwrittenReason(
+  doc: EpisodePlotDoc
+): string | undefined {
+  if (isEpisodePlotWritten(doc)) return undefined;
+  if (doc.blanks.length === EPISODE_PLOT_SECTION_LABELS.length) {
+    return "ひな形のままです（視点・目標・展開のどれもまだ書かれていません）。";
+  }
+  return "展開（箇条書き）がまだ書かれていません。";
+}
+
+/**
  * 「設計を検査」（P-27）の確認に添える説明。
  *
  * **何を送るのかを、押す前に言い切る。** ここで送るのは箇条書きだけで、

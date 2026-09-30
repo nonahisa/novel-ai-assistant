@@ -845,5 +845,25 @@ describe("作品へ書き出す", () => {
   });
 });
 
+/**
+ * 本物の雛形の中身（2026-10-01）。
+ *
+ * ノートPCのセッションが作者の原稿相談を受けたとき、MCP の道具を通すより
+ * 先にファイルを直接読みかけた。直接読むと、作者が作品ごとに決めた許可を
+ * 素通りし、読んだ記録にも残らない。**その決まりが雛形から消えないこと**を見る。
+ */
+describe("雛形に、原稿は道具を通して読む決まりがある", () => {
+  test("scan → prompt → validate の順と、直接読むと許可を素通りする理由", async () => {
+    const root = nodePath.resolve(__dirname, "..", "..", "..");
+    const text = await fsp.readFile(
+      nodePath.join(root, AI_INSTRUCTION_TEMPLATE_PATH),
+      "utf8"
+    );
+    expect(text).toContain("直接開いて読まない");
+    expect(text).toMatch(/novel\.scan.*→.*novel\.prompt.*→.*novel\.validate/);
+    expect(text).toContain("素通り");
+  });
+});
+
 /** 雛形の代わり（本物の中身はここでは問わない。**そのまま置かれるか**を見る） */
 const TEMPLATE = "# この作品を扱うAIへの指示書\n\n決まりを書く。\n";

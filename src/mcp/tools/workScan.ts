@@ -8,7 +8,12 @@ import {
   prerequisiteStatuses,
   type PrerequisiteStatus,
 } from "../../core/featurePrerequisites";
-import { presentPrerequisites } from "./prerequisiteState";
+import {
+  episodePlotEntries,
+  presentPrerequisites,
+  prerequisiteReasons,
+  type EpisodePlotEntry,
+} from "./prerequisiteState";
 import { FOLDER_INPUT, bodyDirOf, listBodyFiles, readBody } from "./shared";
 
 /**
@@ -61,6 +66,14 @@ export interface WorkScanResult {
    * `ready: false` の feature を呼ぶと、`novel.run` などは**実行せずに断る**。
    */
   prerequisites: readonly PrerequisiteStatus[];
+  /**
+   * 単話プロットの場所（あるものだけ。話数の順。2026-10-01）。
+   *
+   * **`options.plotPath` の出どころ。** episodePlot の機能は plotPath を
+   * 求めるのに、呼ぶ側がその場所を知る手立てが無かった。`written: false`
+   * のものを渡すと `novel.prompt` は断る（理由は `reason` と同じ文）。
+   */
+  episodePlots: EpisodePlotEntry[];
 }
 
 export function workScan(input: { folder: string }): WorkScanResult {
@@ -133,7 +146,21 @@ export function workScan(input: { folder: string }): WorkScanResult {
     skipped,
     workInfoFiles,
     prerequisites: prerequisiteStatuses(
-      presentPrerequisites(input.folder, PREREQUISITE_KINDS)
+      presentPrerequisites(input.folder, PREREQUISITE_KINDS),
+      prerequisiteReasons(input.folder, PREREQUISITE_KINDS)
     ),
+    episodePlots: readEpisodePlotEntries(input.folder),
   };
+}
+
+/**
+ * 走査は読むだけの道具なので、単話プロットが読めなくても**走査ぜんたいは
+ * 止めない**（本文の一覧のほうが大事）。置き場そのものが読めなければ空にする。
+ */
+function readEpisodePlotEntries(folder: string): EpisodePlotEntry[] {
+  try {
+    return episodePlotEntries(folder);
+  } catch {
+    return [];
+  }
 }

@@ -45,7 +45,7 @@ import {
   validateEpisodePlotCheck,
 } from "../../core/episodePlotValidation";
 import {
-  isEpisodePlotWritten,
+  episodePlotUnwrittenReason,
   parseEpisodePlot,
 } from "../../core/episodePlotDoc";
 import { parseSynopsisSet } from "../../models/synopsis";
@@ -430,12 +430,12 @@ function readEpisodePlotDoc(input: EpisodePlotPromptInput) {
     );
   }
   const doc = parseEpisodePlot(text);
-  if (!isEpisodePlotWritten(doc)) {
-    // **空のまま問わない。** 展開が書かれていないものに「緩みは？」と
-    // 聞くと、書いていないこと自体を指摘として並べ始める
-    throw new McpToolError(
-      "単話プロットに、展開（箇条書き）がまだ書かれていません。"
-    );
+  // **空のまま問わない。** 展開が書かれていないものに「緩みは？」と
+  // 聞くと、書いていないこと自体を指摘として並べ始める。
+  // 判定は `novel.scan` と同じ関数（食い違わせない。`episodePlotDoc.ts`）
+  const unwritten = episodePlotUnwrittenReason(doc);
+  if (unwritten) {
+    throw new McpToolError(`この単話プロットは${unwritten}`);
   }
   return doc;
 }

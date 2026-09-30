@@ -6,8 +6,17 @@ import {
   hasSynopsisEpisodes,
   hasWrittenPlot,
 } from "../../core/prerequisiteCheck";
-import { EPISODE_PLOTS_DIR } from "../../core/resumeSheet";
+import {
+  EPISODE_PLOTS_DIR,
+  episodePlotChapterFromFileName,
+} from "../../core/resumeSheet";
+import {
+  episodePlotUnwrittenReason,
+  parseEpisodePlot,
+} from "../../core/episodePlotDoc";
+import type { PrerequisiteReasons } from "../../core/featurePrerequisites";
 import type { Prerequisite } from "../../core/prerequisites";
+import { DEFAULT_SETTINGS_DIR } from "../../models/types";
 import { parseCharacter } from "../../models/character";
 import { parseLocation } from "../../models/location";
 import { parseWorldItem } from "../../models/world";
@@ -94,16 +103,136 @@ function hasSynopsis(folder: string): boolean {
   return hasSynopsisEpisodes(parseSynopsisSet(raw).episodes.length);
 }
 
+/**
+ * 単話プロットが揃っているか。
+ *
+ * **ファイルがあるだけでは揃っていない**（2026-10-01）。以前はファイルの
+ * 有無だけを見ていたので、ひな形のままの単話プロットを「揃っている」と
+ * 返し、続く `novel.prompt` が「展開がまだ書かれていません」と断る
+ * 食い違いが起きた。**判定は prompt と同じ関数**（`episodePlotUnwrittenReason`）。
+ *
+ * **1つでも書かれていれば揃っている**（6.94.6 の粗さは変えない——どの話を
+ * 見るかは前提を見たあとに決まる）。どの話が書かれているかは
+ * `novel.scan` の `episodePlots` が1件ずつ返す。
+ *
+ * 画面の関門（`features/prerequisiteGate.ts`）はファイルの有無だけを見た
+ * ままである。画面ではそのあと機能がモーダルで断るので、作者が材料の
+ * 無いまま結果を受け取ることは無い。
+ */
 function hasEpisodePlots(folder: string): boolean {
+  return episodePlotShortfall(episodePlotEntries(folder)) === undefined;
+}
+
+/** 単話プロット1件の姿（`novel.scan` の `episodePlots`） */
+export interface EpisodePlotEntry {
+  /**
+   * 作品フォルダーからの相対パス（区切りは `/`）。
+   * **`novel.prompt` などの `options.plotPath` にそのまま渡せる**
+   */
+  plotPath: string;
+  /** 話数。ファイル名（`第N話.md`）から読めなければ null（推測で埋めない） */
+  chapter: number | null;
+  /**
+   * 展開が書かれているか（`novel.prompt` が通るか）。
+   * 読めなかったものは null——書かれているかどうか分からない
+   */
+  written: boolean | null;
+  /** 通らない理由（書かれていない・読めなかった） */
+  reason?: string;
+}
+
+/**
+ * 単話プロットの置き場にあるものを、話数の順に1件ずつ見る。
+ *
+ * **中身まで読む。** 置き場は作者が話ごとに作るもので、数も大きさも
+ * 小さい（1話に1つ、数百字）。
+ */
+export function episodePlotEntries(folder: string): EpisodePlotEntry[] {
   const settings = settingsDirOf(folder);
-  if (!settings) return false;
+  if (!settings) return [];
   const directory = nodePath.join(settings, EPISODE_PLOTS_DIR);
   // 置き場そのものが無い＝1つも作っていない（画面の関門と同じ扱い）
-  if (!fs.existsSync(directory)) return false;
-  return hasEpisodePlotFile(
-    fs
-      .readdirSync(directory, { withFileTypes: true })
-      .filter((entry) => entry.isFile())
-      .map((entry) => entry.name)
+  if (!fs.existsSync(directory)) return [];
+  const names = fs
+    .readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name)
+    // 何を単話プロットと数えるかは画面の関門と同じ規則（`prerequisiteCheck.ts`）
+    .filter((name) => hasEpisodePlotFile([name]));
+
+  const entries = names.map((name): EpisodePlotEntry => {
+    const plotPath = [DEFAULT_SETTINGS_DIR, EPISODE_PLOTS_DIR, name].join("/");
+    const chapter = episodePlotChapterFromFileName(name);
+    let text: string;
+    try {
+      // **prompt と同じ読み方をする**（`episode.ts` の `readEpisodePlotDoc`）。
+      // 読み方が違うと、同じファイルで判定が割れる
+      text = fs.readFileSync(nodePath.join(directory, name), "utf8");
+    } catch (error) {
+      return {
+        plotPath,
+        chapter,
+        written: null,
+        reason: `読めませんでした（${
+          error instanceof Error ? error.message : String(error)
+        }）。`,
+      };
+    }
+    const reason = episodePlotUnwrittenReason(parseEpisodePlot(text));
+    return reason
+      ? { plotPath, chapter, written: false, reason }
+      : { plotPath, chapter, written: true };
+  });
+
+  // 話数の読めるものを先に小さい順、読めないものは名前順で後ろへ
+  return entries.sort((a, b) => {
+    if (a.chapter !== null && b.chapter !== null) return a.chapter - b.chapter;
+    if (a.chapter !== null) return -1;
+    if (b.chapter !== null) return 1;
+    return a.plotPath.localeCompare(b.plotPath);
+  });
+}
+
+/**
+ * 単話プロットが揃っていない理由。揃っていれば undefined。
+ *
+ * **読めなかったものは揃っている扱い**（`hasPrerequisite` と同じ 6.94.6 の
+ * 決まり）。読めないことを理由に断ると、壊れたファイルが1つある作品では
+ * 何も呼べなくなる。
+ */
+export function episodePlotShortfall(
+  entries: readonly EpisodePlotEntry[]
+): string | undefined {
+  if (entries.some((entry) => entry.written !== false)) return undefined;
+  if (entries.length === 0) return "単話プロットのファイルがまだありません。";
+  if (entries.length === 1) {
+    return `${entries[0].plotPath} はありますが、${entries[0].reason ?? ""}`;
+  }
+  return (
+    `${entries.length}件ありますが、どれも展開（箇条書き）が書かれていません。` +
+    "話ごとの様子は novel.scan の episodePlots にあります。"
   );
+}
+
+/**
+ * 揃っていない前提の理由（`novel.scan` と、機能の断り文句に添える）。
+ *
+ * **いまは単話プロットだけ。** ほかの3つは「ファイルが無い／中身が無い」の
+ * どちらでも作る操作が同じなので、名前と作る操作で足りている。
+ */
+export function prerequisiteReasons(
+  folder: string,
+  kinds: Iterable<Prerequisite>
+): PrerequisiteReasons {
+  const reasons: Partial<Record<Prerequisite, string>> = {};
+  for (const kind of new Set(kinds)) {
+    if (kind !== "episodePlot") continue;
+    try {
+      const reason = episodePlotShortfall(episodePlotEntries(folder));
+      if (reason) reasons.episodePlot = reason;
+    } catch {
+      // 理由が言えないだけで、判定そのものは `hasPrerequisite` が持つ
+    }
+  }
+  return reasons;
 }

@@ -107,9 +107,39 @@ export const DETECT_FEATURES = ["notation", "name", "proofread"] as const;
 /** AIへ渡す材料だけを組む機能（`novel.material`） */
 export const MATERIAL_FEATURES = ["contradiction"] as const;
 
+/**
+ * 一覧で呼び名に添える、何を見るのかの一言（2026-10-01）。
+ *
+ * **呼び名だけでは、どれを呼べばよいか選べない。** ノートPCのセッションが
+ * 作者の原稿相談で、いちばん合う機能（opening）に気づかなかった——
+ * 「冒頭診断」だけでは、第1話の書き出しのつかみを見る機能だと分からない。
+ *
+ * **数語に留める。** 一覧は繋ぐたびに読まれる（`tools/list` は費用）。
+ * 詳しい中身はプロンプト設計書にあり、ここは選ぶための手がかりだけ。
+ */
+export const FEATURE_HINTS: Record<FeatureName, string> = {
+  typo: "誤変換・脱字",
+  proofread: "文の直し案",
+  notation: "同じ語の書き分け",
+  contradiction: "設定資料と本文の食い違い",
+  factContradiction: "話をまたぐ事実の食い違い",
+  foreshadow: "配置と回収",
+  deviation: "プロットと本文のずれ・間延び",
+  episodePlot: "1話の展開の停滞・重複",
+  settings: "人物・場所・世界観の案",
+  synopsis: "サブタイトル案つき",
+  plotReverse: "各話あらすじから筋を起こす",
+  chapter: "章の区切りと章名の案",
+  blurb: "作品の紹介文の案",
+  catchphrase: "3案",
+  opening: "第1話冒頭のつかみ・5W1H",
+  name: "響きが重ならない人物名",
+  chat: "作品についての質問・講評",
+};
+
 /** 一覧に出す1行（`feature` の説明）。**長くしない**——AIが毎回読む */
 export function featureListText(names: readonly FeatureName[]): string {
   return names
-    .map((name) => `${name}＝${FEATURE_LABELS[name]}`)
+    .map((name) => `${name}＝${FEATURE_LABELS[name]}：${FEATURE_HINTS[name]}`)
     .join("／");
 }

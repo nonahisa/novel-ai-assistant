@@ -11,6 +11,7 @@ import {
   featureOfCommand,
 } from "../../../src/core/featurePrerequisites";
 import { ACTION_PREREQUISITES } from "../../../src/core/prerequisites";
+import { buildEpisodePlotTemplate } from "../../../src/core/resumeSheet";
 
 /**
  * 外部AIにも、順路と代わりの道を届ける（設計書6.94、0.67.3）。
@@ -259,5 +260,95 @@ describe("前提の表は1つだけ（写しを作らない）", () => {
     for (const command of Object.values(FEATURE_COMMANDS)) {
       expect(command).toMatch(/^novelai\./);
     }
+  });
+});
+
+/**
+ * 単話プロットの「揃っている」を、novel.prompt の判定と揃える（2026-10-01）。
+ *
+ * ノートPCのセッションが作者の原稿相談で踏んだ食い違い：scan は
+ * `episodePlot` を ready: true と返したのに、その話の単話プロットは
+ * ひな形のままで、続く novel.prompt（feature=episodePlot）は
+ * 「展開がまだ書かれていません」と断った。scan はファイルが**ある**か
+ * だけを見ていて、prompt は**書かれている**かを見ていたためである。
+ */
+describe("単話プロットの判定は、scan と prompt で食い違わない", () => {
+  const PLOT_PATH = "設定/episode-plots/第1話.md";
+
+  function withEpisodePlot(
+    text: string,
+    run: (folder: string) => void
+  ): void {
+    withBareWork((folder) => {
+      const directory = nodePath.join(folder, "設定", "episode-plots");
+      fs.mkdirSync(directory, { recursive: true });
+      fs.writeFileSync(nodePath.join(directory, "第1話.md"), text, "utf8");
+      run(folder);
+    });
+  }
+
+  test("ひな形のままなら、scan は ready: false と理由を返す", () => {
+    withEpisodePlot(buildEpisodePlotTemplate(1), (folder) => {
+      const status = workScan({ folder }).prerequisites.find(
+        (item) => item.kind === "episodePlot"
+      );
+      expect(status?.ready).toBe(false);
+      expect(status?.reason).toMatch(/ひな形のまま/);
+
+      // prompt も同じく断る（食い違わない）
+      expect(() =>
+        novelPrompt({
+          folder,
+          feature: "episodePlot",
+          options: { plotPath: PLOT_PATH },
+        })
+      ).toThrow(/ひな形のまま/);
+    });
+  });
+
+  test("scan は単話プロットの場所を、書かれているかと一緒に返す", () => {
+    withEpisodePlot(buildEpisodePlotTemplate(1), (folder) => {
+      expect(workScan({ folder }).episodePlots).toEqual([
+        {
+          plotPath: PLOT_PATH,
+          chapter: 1,
+          written: false,
+          reason: expect.stringMatching(/ひな形のまま/),
+        },
+      ]);
+    });
+  });
+
+  test("展開が書かれていれば ready で、返った場所をそのまま prompt に渡せる", () => {
+    const written = buildEpisodePlotTemplate(1).replace(
+      "## 展開（箇条書き）\n- ",
+      "## 展開（箇条書き）\n- 少年が防波堤に立つ"
+    );
+    withEpisodePlot(written, (folder) => {
+      const scan = workScan({ folder });
+      expect(
+        scan.prerequisites.find((item) => item.kind === "episodePlot")?.ready
+      ).toBe(true);
+      expect(scan.episodePlots).toEqual([
+        { plotPath: PLOT_PATH, chapter: 1, written: true },
+      ]);
+
+      const prompt = novelPrompt({
+        folder,
+        feature: "episodePlot",
+        options: { plotPath: scan.episodePlots[0].plotPath },
+      }) as { itemCount: number };
+      expect(prompt.itemCount).toBe(1);
+    });
+  });
+
+  test("単話プロットが1つも無ければ、場所の一覧は空で理由は「まだありません」", () => {
+    withBareWork((folder) => {
+      const scan = workScan({ folder });
+      expect(scan.episodePlots).toEqual([]);
+      expect(
+        scan.prerequisites.find((item) => item.kind === "episodePlot")?.reason
+      ).toMatch(/まだありません/);
+    });
   });
 });

@@ -20,7 +20,10 @@ import {
   OLLAMA_INPUT,
   RUNNER_INPUT,
 } from "./shared";
-import { presentPrerequisites } from "./prerequisiteState";
+import {
+  presentPrerequisites,
+  prerequisiteReasons,
+} from "./prerequisiteState";
 import { assertRunner, responseInput, type RunnerKind } from "./run";
 import { typoPrompt, typoRun, typoValidate } from "./typo";
 import {
@@ -855,7 +858,12 @@ function assertPrerequisites(input: FeatureCallInput): void {
   );
   if (missing.length === 0) return;
   throw new McpToolError(
-    featurePrerequisiteRefusal({ feature: input.feature, missing })
+    featurePrerequisiteRefusal({
+      feature: input.feature,
+      missing,
+      // `novel.scan` と同じ理由の文を添える（ひな形のまま、など）
+      reasons: prerequisiteReasons(input.folder, missing),
+    })
   );
 }
 
