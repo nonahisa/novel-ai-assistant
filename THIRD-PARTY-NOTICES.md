@@ -140,7 +140,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ---
 
-## undici 7.29.0
+## undici 7.30.0
 
 - ライセンス: MIT
 - 配布元: https://undici.nodejs.org
