@@ -2318,7 +2318,8 @@ describe("写すときの3つの形", () => {
     const copy = html.slice(html.indexOf("function composeCopyNotation("));
     expect(copy.slice(0, 1600)).toContain("composeCopyEmphasis");
     const host = readFileSync("src/features/manuscriptEditor.ts", "utf8");
-    expect(host).toContain("copyEmphasis: await copyEmphasis,");
+    expect(host).toContain("const emphasis = await copyEmphasis;");
+    expect(host).toContain("copyEmphasis: emphasis,");
     expect(host).toContain(".then(copyEmphasisFor)");
   });
 

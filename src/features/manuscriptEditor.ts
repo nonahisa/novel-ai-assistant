@@ -1292,10 +1292,6 @@ export class ManuscriptEditorProvider
     let initialAppearance: ManuscriptAppearance | undefined;
 
     const send = async (): Promise<void> => {
-      // **画面へはLF区切りで渡す**（core/eolSpace.ts）。textareaは値を
-      // LFへ正規化するので、CRLFのまま渡すと本文・用語の位置・組んで書く面の
-      // 安全弁がすべて1行ごとに1文字ずつずれる（実際にずれていた）
-      const text = toLf(document.getText());
       const found = await this.deps.highlighter.indexFor(
         fromUri(document.uri)
       );
@@ -1308,6 +1304,19 @@ export class ManuscriptEditorProvider
       */
       const format = found ? await readWorkFormat(found.work) : undefined;
       const noteLike = isNoteStyleTarget(fromUri(document.uri), format);
+      const emphasis = await copyEmphasis;
+      /*
+        **本文は、待ちが全部済んでから読む**（ノートPCの観測、2026-09-30）。
+        先頭で読んでいたときは、先の便が上の待ちで遅れて後の便に追い越され、
+        画面へ1字古い本文が遅れて届いた。画面はそれを外からの変更と見て組み直し、
+        カーソルがずれ、「！」」が「」！」と入った。読んでから postMessage まで
+        待ちを挟まなければ、あとから届く便ほど本文が新しい。
+
+        **画面へはLF区切りで渡す**（core/eolSpace.ts）。textareaは値を
+        LFへ正規化するので、CRLFのまま渡すと本文・用語の位置・組んで書く面の
+        安全弁がすべて1行ごとに1文字ずつずれる（実際にずれていた）
+      */
+      const text = toLf(document.getText());
       await panel.webview.postMessage({
         type: "update",
         text,
@@ -1323,7 +1332,7 @@ export class ManuscriptEditorProvider
         // **組んで書く面も、この記法で組む**（画面側に写しを持たせない）
         notation,
         // 写したときの傍点の書き方（素のテキストの側。設計書6.12.8）
-        copyEmphasis: await copyEmphasis,
+        copyEmphasis: emphasis,
         /*
           **組み上がりのHTMLはもう送らない**（0.25.2）。
           送り先だった「読む」面・「並べる」面は、0.24.14で切り替えの
