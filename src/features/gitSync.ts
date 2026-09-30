@@ -184,6 +184,11 @@ export function canFetch(status: GitSyncStatus): boolean {
  * 取り込みと送信は必ず作者がボタンを押したときに実行する。
  * 自動pullは執筆中の原稿を巻き込みうるし、自動pushは書きかけの文章を
  * 外部へ送ってしまう。どちらも取り消しにくい。
+ *
+ * **例外が1つある——記録済みで送れていない分の送り直し**（作者の裁定、
+ * 2026-10-01。`autoResend.ts`）。送るのは作者が一度「送る」と決めて
+ * 記録まで済ませた分だけで、書きかけ（未記録）は出ていかない。
+ * 取り込みと合流は、いまも作者が押したときだけである。
  */
 
 /** 自動fetchの最小間隔の既定値（分） */
@@ -851,6 +856,33 @@ export class GitSyncMonitor implements vscode.Disposable {
    *   同じ問いを延々と出さないためである。
    */
   async pull(work: WorkEntry, afterRecording = false): Promise<boolean> {
+    // 走っている間は自動の送り直しを控えさせる（`isOperating`）
+    this.operating += 1;
+    try {
+      return await this.runPull(work, afterRecording);
+    } finally {
+      this.operating -= 1;
+    }
+  }
+
+  /**
+   * 取り込みや送信が走っているか（設計書6.15.1、自動の送り直し）。
+   *
+   * **コマンドの札だけでは足りない。** 「未取得です」の知らせの［取り込む］は
+   * コマンドを通らずにここの `pull` を呼ぶので、札を見ても走っていることが
+   * 分からない。同じ置き場へ git を2本走らせないために、ここでも数える。
+   */
+  isOperating(): boolean {
+    return this.operating > 0;
+  }
+
+  /** いま走っている取り込み・送信の数（入れ子の呼び直しも数える） */
+  private operating = 0;
+
+  private async runPull(
+    work: WorkEntry,
+    afterRecording: boolean
+  ): Promise<boolean> {
     // **取り込みで改行が書き換わりうることを、先に伝える**（設計書5.5.1）
     await this.warnAutoCrlfOnce(work);
 
@@ -1156,6 +1188,15 @@ ${reason}` : ""}`,
 
   /** 送信する（作者の操作が起点） */
   async push(work: WorkEntry): Promise<boolean> {
+    this.operating += 1;
+    try {
+      return await this.runPush(work);
+    } finally {
+      this.operating -= 1;
+    }
+  }
+
+  private async runPush(work: WorkEntry): Promise<boolean> {
     const status =
       this.statuses.get(work.id) ??
       (await this.refresh(work, { fetch: false, notify: false }));

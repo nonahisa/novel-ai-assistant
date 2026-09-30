@@ -33,6 +33,11 @@ export interface GitSyncMonitorLike extends vscode.Disposable {
   ): void;
   /** ファイル更新の知らせを、終わるまでためる（設計書5.5.18） */
   beginBatchedFileNotices?(): () => Promise<void>;
+  /**
+   * 取り込み・送信が走っているか（自動の送り直しを控えるのに使う。
+   * 設計書6.15.1）。**代役は持たない**——ブラウザ版には git が無い
+   */
+  isOperating?(): boolean;
 }
 
 /**

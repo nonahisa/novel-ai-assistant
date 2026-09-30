@@ -388,6 +388,8 @@ code --install-extension ".\novel-ai-assistant-$($v.TrimStart('v')).vsix" --forc
 |---|---|---|
 | `novelai.git.autoFetch` | `true` | 別の環境の変更を自動で取得する。**取得だけで、原稿は書き換わりません** |
 | `novelai.git.autoFetchIntervalMinutes` | `10` | 自動取得の最小間隔 |
+| `novelai.git.autoResend` | `true` | 記録済みで送れていない分を、回線が戻ったら自動で送り直す。**送るだけで、取り込みや合流はしません** |
+| `novelai.git.autoResendIntervalMinutes` | `5` | 自動の送り直しを試す間隔（分） |
 | `novelai.git.syncCache` | `false` | 抽出キャッシュをGitの同期対象にするか |
 | `novelai.vectorSearch.enabled` | `false` | 相談で使う意味検索（ベクトルDB）を使うか |
 | `novelai.vectorSearch.model` | `bge-m3` | 意味検索に使う埋め込みモデル（変更すると索引は作り直し） |

@@ -226,6 +226,7 @@ import { readerKind, type ReaderKind } from "./core/fileRead";
 import { describeProcessesBlocked } from "./core/processAvailability";
 import { exclusiveLabelOf } from "./core/exclusiveCommands";
 import { beginCommand, endCommand } from "./core/runningCommands";
+import { isSyncBusyCommand } from "./core/autoResendPlan";
 import { handleStaleBundleFailure } from "./features/staleBundleNotice";
 // nextSetupStep, runSetupStep も core/git.ts 経由。動的importする
 
@@ -737,6 +738,18 @@ export async function activate(
   const runningCommands = new Set<string>();
 
   /**
+   * いま走っている同期の系の操作の数（設計書6.15.1、自動の送り直し）。
+   *
+   * `runningCommands` は2本目を断る操作しか覚えない（「取り込む」「送る」は
+   * 塞いでいない）。自動の送り直しは、同期の系が1つでも走っていれば
+   * 控える——同じ置き場へ git を2本走らせないため。数で持つのは、塞いで
+   * いない操作が同時に2本走りうるからである。
+   */
+  let syncCommandsRunning = 0;
+  /** 開いたときの点検が走っているか（これも自動の送り直しを控えさせる） */
+  let startupHandoffRunning = false;
+
+  /**
    * 種類の関門（設計書6.109.7）。
    *
    * エッセイ・歌詞の作品では、人物・筋・伏線を扱う操作を右クリック・
@@ -878,6 +891,8 @@ export async function activate(
         );
         return undefined;
       }
+      const syncBusy = isSyncBusyCommand(command);
+      if (syncBusy) syncCommandsRunning += 1;
       try {
         const returned = await callback.apply(thisArg, args);
         /*
@@ -920,6 +935,7 @@ export async function activate(
         // **失敗しても、途中で止めても必ず解く。** 解き忘れると、その操作が
         // 二度と押せなくなる（重複起動より重い壊れ方）
         endCommand(runningCommands, command);
+        if (syncBusy) syncCommandsRunning -= 1;
       }
     });
 
@@ -6896,11 +6912,34 @@ export async function activate(
       // 動的importを待てないので、読み込み済みの関数を掴んでおく
       beforeClose = () => handoff.noticeBeforeClose(deps);
 
+      /*
+        **記録済みで送れていない分を、回線が戻ったら送り直す**（作者の裁定、
+        2026-10-01。`features/autoResend.ts`）。送るだけで、取り込みや合流は
+        しない。同期の系の操作・開いたときの点検・見張りの取り込み／送信が
+        走っている間は控える。
+      */
+      const { AutoResender } = await import("./features/autoResend.js");
+      const resender = new AutoResender({
+        registry,
+        monitor: gitSync,
+        isSyncBusy: () => syncCommandsRunning > 0 || startupHandoffRunning,
+        afterSent: () => handoff.refreshUnsentMark(deps),
+      });
+      context.subscriptions.push(resender);
+
       // 起動の所要時間（設計書6.107）。点検は回線の速さに左右されるので、
       // 始まりと終わりの両方を残さないと「遅いのは点検か、その手前か」が
       // 分からない
       startupTiming.mark("点検 開始");
-      await handoff.runStartupHandoff(deps);
+      startupHandoffRunning = true;
+      // 見張りは点検より先に始める。点検が落ちても送り直しは効くようにする
+      // （点検が走っている間は `isSyncBusy` が控えさせる）
+      resender.start();
+      try {
+        await handoff.runStartupHandoff(deps);
+      } finally {
+        startupHandoffRunning = false;
+      }
       noteStartupHandoffDone("点検 終了");
     })().catch((error) => {
       // 点検で落ちても拡張機能の起動は止めない

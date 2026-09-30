@@ -2176,6 +2176,17 @@
           "minimum": 1,
           "description": "自動fetchの最小間隔（分）。前回からこの時間が経つまでは取りに行かない。"
         },
+        "novelai.git.autoResend": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "記録済みで GitHub へ送れていない分を、回線が戻ったら自動で送り直す。\n\n・送るのは記録済みの分だけ。記録していない書きかけは送らない\n・取り込みや合流はしない。別の環境のほうが進んでいるとき、競合や合流の途中、同期の最中は送らない\n・失敗しても知らせは出さず、次の機会にまた試す（ログには残す）\n・スリープから戻ったときと、ウィンドウへ戻ったときにも試す"
+        },
+        "novelai.git.autoResendIntervalMinutes": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "description": "送れていない分があるときに、自動で送り直しを試す間隔（分）。"
+        },
         "novelai.vectorSearch.enabled": {
           "type": "boolean",
           "default": false,

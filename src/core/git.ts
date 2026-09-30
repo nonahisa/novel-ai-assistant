@@ -739,6 +739,36 @@ export async function push(
 }
 
 /**
+ * 合流（merge）・取り込み直し（cherry-pick）・打ち消し（revert）の途中か。
+ *
+ * **途中の置き場は、自動では送らない**（設計書6.15.1、自動の送り直し）。
+ * 競合が残っていれば `unmerged` で分かるが、競合を解いたあと記録する前の
+ * 合流は `unmerged` が0になる。そこで送ると、作者がまだ確かめていない
+ * 段階の履歴が出ていく。
+ *
+ * 取り込み直し（rebase）の途中はHEADが枝から外れる（`detached`）ので、
+ * `readSyncStatus` の時点で分かる。ここでは見ない。
+ *
+ * **読めなかったら「途中」とみなす**——送らない側へ倒す。
+ */
+export async function readOperationInProgress(
+  cwd: string,
+  run: GitCommandRunner = runGit
+): Promise<string | undefined> {
+  for (const ref of ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"]) {
+    const result = await run(
+      ["rev-parse", "-q", "--verify", ref],
+      cwd,
+      LOCAL_TIMEOUT_MS
+    );
+    // 0 は「ある」、1 は「無い」（-q で黙って1を返す）。それ以外は読めていない
+    if (result.code === 0) return ref;
+    if (result.code !== 1) return `${ref}（読めませんでした）`;
+  }
+  return undefined;
+}
+
+/**
  * `rev-list --left-right --count <upstream>...HEAD` の出力を読む。
  *
  * 左が上流にだけあるコミット（＝この環境が遅れている数）、
