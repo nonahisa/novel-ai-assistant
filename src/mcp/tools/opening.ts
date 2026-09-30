@@ -2,16 +2,19 @@ import {
   OPENING_CHECK_SCHEMA,
   OPENING_CHECK_SYSTEM_PROMPT,
   OPENING_CHECK_TEMPERATURE,
-  OPENING_CHECK_VERSION,
   OPENING_EXCERPT_MAX_CHARS,
   buildOpeningCheckPrompt,
+  openingCheckPromptVersion,
+  openingReaderLabel,
   parseOpeningCheck,
 } from "../../prompts/openingCheck";
 import { isBlankPlotSection, parsePlotMarkdown } from "../../core/plotDoc";
+import { publicityReaderMark } from "../../core/publicityReader";
 import {
   McpToolError,
   orderedEpisodeBodies,
   readPlotMarkdown,
+  readPublicityReader,
   workTitleOf,
 } from "./shared";
 import {
@@ -75,9 +78,17 @@ export function openingPrompt(input: OpeningPromptInput) {
   const opening = readOpening(input.folder);
   const plot = readPlotMarkdown(input.folder);
   const sections = plot ? parsePlotMarkdown(plot).sections : undefined;
+  // **読者は製品と同じ材料・同じ優先順位**（狙い → 読者像。1.2）。
+  // ここだけ違えると、測った「直す方向」が製品と違う宛先で作られる（失敗5）
+  const reader = readPublicityReader(input.folder);
 
   return {
-    promptVersion: OPENING_CHECK_VERSION,
+    promptVersion: openingCheckPromptVersion(publicityReaderMark(reader)),
+    /**
+     * 直す方向を向けた読者。無ければ null——**方向は頼んでいない**
+     * （検算も方向を捨てる。製品と同じ）
+     */
+    reader: openingReaderLabel(reader) ?? null,
     systemPrompt: OPENING_CHECK_SYSTEM_PROMPT,
     schema: OPENING_CHECK_SCHEMA,
     temperature: OPENING_CHECK_TEMPERATURE,
@@ -91,6 +102,7 @@ export function openingPrompt(input: OpeningPromptInput) {
       genre: plotValue(sections?.genre),
       logline: plotValue(sections?.logline),
       openingText: opening.text,
+      reader,
     }),
   };
 }
@@ -100,7 +112,11 @@ export function openingValidate(input: { folder: string; response: string }) {
   // **ほめる欄の引用は、送ったのと同じ冒頭と照合する**（プロンプト設計書1.9）。
   // 照合せずに通すと、製品では落ちる作り物の引用がここでは残る——
   // 製品に無い振る舞いを外から見せることになる
-  const result = parseOpeningCheck(input.response, readOpening(input.folder).text);
+  // **直す方向も、プロンプトを組んだときと同じ読者の有無で読む**（1.2）。
+  // 読者の無い作品で方向を通すと、製品では出ない方向がここでだけ見える
+  const result = parseOpeningCheck(input.response, readOpening(input.folder).text, {
+    directionsRequested: readPublicityReader(input.folder) !== undefined,
+  });
   if (!result) {
     throw new McpToolError(
       "応答を読み取れませんでした（冒頭診断のスキーマに沿っていません。JSONの形か、項目が合っていません）。"

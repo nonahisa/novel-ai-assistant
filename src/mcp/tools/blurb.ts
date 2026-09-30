@@ -12,8 +12,6 @@ import {
   buildBlurbPrompt,
   buildCatchphrasePrompt,
 } from "../../prompts/blurb";
-import * as fs from "node:fs";
-import * as nodePath from "node:path";
 import {
   blurbReaderLeakNote,
   measureBlurb,
@@ -22,23 +20,18 @@ import {
   screenCatchphrases,
 } from "../../core/blurbValidation";
 import { parseSynopsisSet } from "../../models/synopsis";
-import { decodeBytes } from "../../core/textDecode";
-import { TARGET_SHEET_FILE } from "../../core/targetSheetDoc";
 import {
   findReaderTypeLabels,
-  publicityReaderFromSheet,
   publicityReaderMark,
   publicityReaderNotice,
-  type PublicityReader,
 } from "../../core/publicityReader";
 import {
   McpToolError,
   SYNOPSES_FILE,
   orderedEpisodeBodies,
   readPlotMarkdown,
-  readReaderProfile,
+  readPublicityReader,
   readSettingsFile,
-  settingsDirOf,
   workTitleOf,
 } from "./shared";
 import {
@@ -112,33 +105,6 @@ function readSynopses(folder: string): string[] {
   }
 }
 
-/**
- * 狙いの読者（0.82.5。設計書6.6.5）。**製品と同じ優先順位**で決める
- * ——ターゲットシートの狙い → 読者像 → 無し。ここだけ添えないと、
- * 測った紹介文が製品と違う材料で作られたことになる（CLAUDE.md の失敗5）。
- *
- * **読めなければ添えない（止めない）。** 読者はどの機能でも「あれば足す」材料で、
- * 読めないシートのせいで紹介文が作れなくなるほうが困る（`readReaderProfile` と同じ）。
- */
-function readPublicityReader(folder: string): PublicityReader | undefined {
-  return publicityReaderFromSheet(
-    readTargetSheetText(folder),
-    readReaderProfile(folder)
-  );
-}
-
-/** `設定/ターゲットシート.md` の中身。無ければ（読めなければ）undefined */
-function readTargetSheetText(folder: string): string | undefined {
-  const settings = settingsDirOf(folder);
-  if (!settings) return undefined;
-  const file = nodePath.join(settings, TARGET_SHEET_FILE);
-  if (!fs.existsSync(file)) return undefined;
-  try {
-    return decodeBytes(fs.readFileSync(file)).text;
-  } catch {
-    return undefined;
-  }
-}
 
 export function blurbPrompt(input: BlurbPromptInput) {
   const synopses = readSynopses(input.folder);

@@ -33,6 +33,18 @@ const ADVICE_PROMPTS: Array<[string, string]> = [
     "冒頭診断（P-24）",
     buildOpeningCheckPrompt({ workTitle: "作品", genre: "", logline: "", openingText: "本文" }),
   ],
+  [
+    // 1.2 の「直す方向」は読者があるときだけ頼む。**頼む文面にも件数を強いる語を入れない**
+    // （作者の言葉「無理してひねり出さなくても良いですよ」）
+    "冒頭診断・読者に向けて直す方向（P-24 1.2）",
+    buildOpeningCheckPrompt({
+      workTitle: "作品",
+      genre: "",
+      logline: "",
+      openingText: "本文",
+      reader: { source: "aim", types: ["light"], reason: "" },
+    }),
+  ],
   ["読者の反応の助言（P-40）", buildReaderAdvicePrompt({ workTitle: "作品", materials: [] })],
   ["読者の反応の約束（P-40・相談と共有）", READER_ADVICE_GUIDELINES],
   [

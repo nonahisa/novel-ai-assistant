@@ -12,6 +12,11 @@ import { decodeBytes } from "../../core/textDecode";
 import { parseEpisodeFileName } from "../../core/episodeParser";
 import { isWorkInfoFile } from "../../core/workInfoFile";
 import { parseReaderProfile } from "../../core/readerProfileParse";
+import { TARGET_SHEET_FILE } from "../../core/targetSheetDoc";
+import {
+  publicityReaderFromSheet,
+  type PublicityReader,
+} from "../../core/publicityReader";
 import {
   READER_PROFILE_FILE,
   type ReaderProfile,
@@ -409,6 +414,36 @@ export function readReaderProfile(folder: string): ReaderProfile | undefined {
   if (raw === undefined) return undefined;
   try {
     return parseReaderProfile(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 狙いの読者（0.82.5。設計書6.6.5）。**製品と同じ優先順位**で決める
+ * ——ターゲットシートの狙い → 読者像 → 無し。ここだけ添えないと、
+ * 測った紹介文が製品と違う材料で作られたことになる（CLAUDE.md の失敗5）。
+ *
+ * **読めなければ添えない（止めない）。** 読者はどの機能でも「あれば足す」材料で、
+ * 読めないシートのせいで本来の仕事が止まるほうが困る（`readReaderProfile` と同じ）。
+ *
+ * 紹介文・キャッチコピーと冒頭診断（直す方向）の両方が読むので、ここに1つだけ置く。
+ */
+export function readPublicityReader(folder: string): PublicityReader | undefined {
+  return publicityReaderFromSheet(
+    readTargetSheetText(folder),
+    readReaderProfile(folder)
+  );
+}
+
+/** `設定/ターゲットシート.md` の中身。無ければ（読めなければ）undefined */
+function readTargetSheetText(folder: string): string | undefined {
+  const settings = settingsDirOf(folder);
+  if (!settings) return undefined;
+  const file = nodePath.join(settings, TARGET_SHEET_FILE);
+  if (!fs.existsSync(file)) return undefined;
+  try {
+    return decodeBytes(fs.readFileSync(file)).text;
   } catch {
     return undefined;
   }

@@ -133,6 +133,97 @@ describe("冒頭診断（P-24）", () => {
     expect(result.advice).toBe("");
     expect(result.adviceAnswered).toBe(true);
   });
+
+  /**
+   * 読者に向けて直す方向（P-24 1.2）。**製品と同じ読者・同じ検算**を通す
+   * （紹介文と同じ優先順位：狙い → 読者像）。
+   */
+  function realFragment(folder: string): string {
+    const prompt = openingPrompt({ folder });
+    const body = prompt.userPrompt.split(/【冒頭本文】[^\n]*\n/)[1] ?? "";
+    const line = body.split("\n").find((text) => text.trim().length >= 12) ?? "";
+    return line.trim().slice(0, 12);
+  }
+
+  function responseWith(directions: unknown): string {
+    return JSON.stringify({
+      elements: [{ element: "いつ", conveyed: true, note: "根拠" }],
+      hook: { present: true, note: "謎" },
+      strengths: [],
+      advice: "",
+      directions,
+    });
+  }
+
+  test("読者像があれば読者を添え、版に読者の印を混ぜ、方向を頼む", () => {
+    const prompt = openingPrompt({ folder: WORK });
+    expect(prompt.reader).toMatch(/^読者像（/);
+    expect(prompt.promptVersion).toMatch(/^1\.2\|reader:/);
+    expect(prompt.promptVersion).not.toContain("reader:none");
+    expect(prompt.userPrompt).toContain("【この作品の読者】");
+    expect(prompt.schema.required).toContain("directions");
+  });
+
+  test("ターゲットシートの狙いを、読者像より先に使う", () => {
+    const folder = copiedWork();
+    fs.writeFileSync(
+      nodePath.join(folder, "設定", "ターゲットシート.md"),
+      [
+        "# ターゲットシート",
+        "",
+        `<!-- ${TARGET_SHEET_MARKER} -->`,
+        AUTHOR_BLOCK_BEGIN,
+        "狙い：すきま層",
+        "理由：通勤中に読める話にしたい",
+        AUTHOR_BLOCK_END,
+        "",
+      ].join("\n"),
+      "utf8"
+    );
+    const prompt = openingPrompt({ folder });
+    expect(prompt.reader).toBe("狙いの読者（すきま層）");
+    expect(prompt.promptVersion).toContain("aim:light");
+  });
+
+  test("**0件の方向は、読めた答えとして通る**", () => {
+    const result = openingValidate({ folder: WORK, response: responseWith([]) });
+    expect(result.directionsRequested).toBe(true);
+    expect(result.directionsAnswered).toBe(true);
+    expect(result.directions).toEqual([]);
+  });
+
+  test("方向は製品と同じ検算を通る（本文に無い引用・例文を落とす）", () => {
+    const real = realFragment(WORK);
+    expect(real.length).toBe(12);
+    const result = openingValidate({
+      folder: WORK,
+      response: responseWith([
+        { direction: "謎を先に見せる", quote: real, why: "この読者は早い謎で掴まれる" },
+        { direction: "別の方向", quote: "この本文には無い作り物の一文です", why: "理由" },
+        { direction: "書き出しを変える", quote: real, why: "たとえば「世界が終わった朝だった。」と始める" },
+      ]),
+    });
+    expect(result.directions.map((item) => item.direction)).toEqual(["謎を先に見せる"]);
+    expect(result.directionsDropped.notFound).toBe(1);
+    expect(result.directionsDropped.exampleLike).toBe(1);
+  });
+
+  test("読者が無い作品では方向を頼まず、返っても捨てる（製品と同じ）", () => {
+    const folder = copiedWork();
+    fs.rmSync(nodePath.join(folder, "設定", "読者像.json"));
+    const prompt = openingPrompt({ folder });
+    expect(prompt.reader).toBeNull();
+    expect(prompt.promptVersion).toContain("reader:none");
+    expect(prompt.userPrompt).not.toContain("【この作品の読者】");
+
+    const real = realFragment(folder);
+    const result = openingValidate({
+      folder,
+      response: responseWith([{ direction: "謎を先に見せる", quote: real, why: "理由" }]),
+    });
+    expect(result.directionsRequested).toBe(false);
+    expect(result.directions).toEqual([]);
+  });
 });
 
 describe("名前の候補（P-29）", () => {

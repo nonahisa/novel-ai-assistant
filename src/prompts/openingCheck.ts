@@ -1,5 +1,17 @@
 import { isPlaceholderText } from "../core/placeholderText";
 import {
+  OPENING_DIRECTION_HINTS,
+  OPENING_DIRECTION_NAME_MAX_CHARS,
+  OPENING_DIRECTIONS_MAX,
+  readOpeningDirections,
+  type OpeningDirection,
+} from "../core/openingDirections";
+import {
+  publicityReaderLabels,
+  type PublicityReader,
+} from "../core/publicityReader";
+import { buildPublicityReaderPrompt } from "./publicityReader";
+import {
   isNoAdviceFiller,
   readGroundedPraise,
   verbatimIn,
@@ -44,9 +56,38 @@ import {
  * 本文の引用と「なぜ効いているか」つきで頼むようにした。**引用は本文と
  * 照合し、無いものは落とす**（規則3。`core/praise.ts`）。
  *
+ * ## 読者に向けて直す方向（1.2）
+ *
+ * 作者の問い（2026-10-01）「冒頭のフックを強くできないか」に、1.1 の総評は
+ * 診断で止まって答えられなかった。作者の裁定：**読者タイプを踏まえて、
+ * 直す方向を数件並べる。例文・書き直し案は出さないまま。**
+ *
+ * - 読者は紹介文・キャッチコピーと**同じ材料・同じ優先順位**（ターゲットシートの
+ *   狙い → 読者像。`core/publicityReader.ts`）。**読者が決まっていなければ
+ *   方向を頼まない**——宛先の無い「読者に効く方向」はAIが読者を当て推量で
+ *   決めることになる（紹介文が「読者層に合わせて」とだけ言わないのと同じ）
+ * - 1件は「方向の短い名前・本文の根拠の引用・この読者になぜ効くか」。
+ *   **最大4件、下限なし**（作者の言葉「無理してひねり出さなくても良いですよ」）。
+ *   冒頭がすでに届いていれば0件が答え
+ * - 例文・書き直した文・指示語のなぞりはコードで落とす（`core/openingDirections.ts`）
+ * - 6要素と引きの判定は、読者によらず本文だけから行わせる（読者を渡したせいで
+ *   判定が動くと、狙いを変えただけで「伝わる」が「伝わらない」に変わる）
+ *
  * プロンプトを変更したら version を上げること。
  */
-export const OPENING_CHECK_VERSION = "1.1";
+export const OPENING_CHECK_VERSION = "1.2";
+
+/**
+ * 版の文字列に読者の印を混ぜる（規則4。紹介文の `blurbPromptVersion` と同じ形）。
+ *
+ * 冒頭診断は答えを控えないが、**MCP で測った答えがどの読者に向けたものか**を
+ * 版の文字列で区別できるようにする。
+ *
+ * @param readerMark `publicityReaderMark()` の返り値（無ければ "none"）
+ */
+export function openingCheckPromptVersion(readerMark: string): string {
+  return `${OPENING_CHECK_VERSION}|reader:${readerMark}`;
+}
 
 /**
  * 送るときの温度。判定と根拠を出すだけなので揺らす理由が無い。0にしないのは、同じ言い回しが6要素に並ぶのを避けるため。
@@ -83,7 +124,9 @@ export const OPENING_CHECK_SYSTEM_PROMPT = `あなたは日本語の小説の冒
 
 【絶対に守る原則】
 1. 文章を書き直さないこと。改善案・書き換え案・例文を一切出さないこと。
-   あなたが出すのは「伝わっているか」の判定と、その根拠だけです。
+   あなたが出すのは「伝わっているか」の判定と、その根拠と、
+   頼まれたときだけ「直す方向」の短い名前とその理由までです。
+   文を書くのは作者です。
 2. 判定の根拠は、本文に実際に書かれている記述から取ること。
    本文に書かれていないことを推測で補わないこと。
 3. 作品世界の設定（造語、固有名詞、独自の言い回し）を誤りとして扱わないこと。
@@ -98,9 +141,45 @@ export interface OpeningCheckPromptInput {
   logline: string;
   /** 第1話の冒頭（先頭 OPENING_EXCERPT_MAX_CHARS 字） */
   openingText: string;
+  /**
+   * この作品の読者（ターゲットシートの狙い → 読者像。`resolvePublicityReader`）。
+   * **無ければ直す方向を頼まない**（1.2）
+   */
+  reader?: PublicityReader;
 }
 
+/**
+ * 読者の塊のあとに添える、冒頭診断での使い方。
+ *
+ * 塊の前置き（紹介文と共用）は「言い方を選ぶ目安に」と書いてあるので、
+ * ここでは**何に使い、何に使わないか**を言い直す。判定まで読者で動くと、
+ * 狙いを変えただけで5W1Hの答えが変わる。
+ */
+const READER_USE_NOTE = `この冒頭診断では、上の読者を「5. 直す方向」で、この読者にとってなぜ効くかを言うためにだけ使ってください。
+5W1Hと引きの判定は、読者によらず本文だけから行ってください。`;
+
+/** 読者があるときの「5.」。**下限を書かない**（1.9。0件も普通の答え） */
+function directionsInstruction(): string {
+  return `5. 直す方向：【この作品の読者】に、この冒頭がもっと届くようにする方向を、
+   本文に根拠があって、出す理由のあるものだけ directions に入れてください。
+   多くても${OPENING_DIRECTIONS_MAX}件までです。数を埋めるために作らないこと。
+   この冒頭がすでにこの読者に届いていて、挙げる理由が無ければ、
+   directions は空の配列にしてください。それも普通の答えです。
+   - direction：${OPENING_DIRECTION_HINTS.direction}（${OPENING_DIRECTION_NAME_MAX_CHARS}字以内）
+   - quote：${OPENING_DIRECTION_HINTS.quote}を、40字以内で逐語で引用する（言い換えない）
+   - why：${OPENING_DIRECTION_HINTS.why}
+   方向は「何をどちらへ動かすか」までに留め、文そのものは書かないこと。
+   例文・書き換えた文・台詞の案を書かないこと。本文に無い文をかぎ括弧で書かないこと。`;
+}
+
+/** 読者が無いときの「5.」。欄は required なので、空で返すことだけを頼む */
+const NO_DIRECTIONS_INSTRUCTION = `5. directions は空の配列にしてください（この作品の読者が決まっていないため、今回は頼みません）。`;
+
 export function buildOpeningCheckPrompt(input: OpeningCheckPromptInput): string {
+  const readerBlock = buildPublicityReaderPrompt(input.reader);
+  const readerSection = readerBlock
+    ? `\n${readerBlock}\n\n${READER_USE_NOTE}\n`
+    : "";
   return `次の小説の冒頭を読み、読者に何が伝わるかを診断してください。
 
 【作品タイトル】
@@ -111,7 +190,7 @@ ${input.genre.trim() || UNSET_MATERIAL}
 
 【ログライン】
 ${input.logline.trim() || UNSET_MATERIAL}
-
+${readerSection}
 【冒頭本文】（第1話の先頭${OPENING_EXCERPT_MAX_CHARS}字まで）
 ${input.openingText}
 
@@ -137,13 +216,14 @@ ${input.openingText}
    2文以内で、2点以上は書かないこと。
    直すべき所が見当たらなければ、advice は空にしてください。
    直す所を無理に探して作らないこと。
+${readerBlock ? directionsInstruction() : NO_DIRECTIONS_INSTRUCTION}
 
 【注意】
 - 6要素がすべて揃っている必要はありません。冒頭で伏せるのは技法です。
   作者が意図して伏せていると読めるものは、欠点として扱わず、
   conveyed を false にしたうえで note の先頭に「意図的な保留」と書いてください。
-- 直し方・書き換え案・例文を書かないこと。
-  総評も「〜が伝わっていない」という指摘までに留めること。
+- どの欄にも、書き換え案・例文を書かないこと。
+  総評は「〜が伝わっていない」という指摘までに留めること。
 - 造語・固有名詞・独自の言い回しを誤りとして扱わないこと。
   読者が知らない名前が出てくること自体は欠点ではありません。
 - 6要素と引きの note には、「なし」「特になし」とだけ書かないこと。
@@ -197,8 +277,24 @@ export const OPENING_CHECK_SCHEMA = {
       },
     },
     advice: { type: "string" },
+    // **読者が無い回も欄は持つ（required）。** 回ごとにスキーマを変えると、
+    // 製品と MCP で形が揃っているかを確かめる手間が倍になる。読者が無い回は
+    // プロンプトで空を頼み、返ってきても読み取り側が捨てる（`directionsRequested`）
+    directions: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          direction: { type: "string" },
+          quote: { type: "string" },
+          why: { type: "string" },
+        },
+        required: ["direction", "quote", "why"],
+        additionalProperties: false,
+      },
+    },
   },
-  required: ["elements", "hook", "strengths", "advice"],
+  required: ["elements", "hook", "strengths", "advice", "directions"],
   additionalProperties: false,
 } as const;
 
@@ -240,6 +336,34 @@ export interface OpeningCheckResult {
   strengths: PraiseItem[];
   /** 引用が本文に見つからず落としたほめ言葉の数。**黙って減らさない** */
   strengthsDropped: number;
+  /**
+   * 直す方向を頼んだ回か（読者が決まっていた回）。
+   *
+   * **頼んでいない回の方向は捨てる**——宛先の読者が無いまま書かれた方向を、
+   * 読者に向けたものと同じ顔で出さない。画面は「読者を決めると出せます」と案内する
+   */
+  directionsRequested: boolean;
+  /**
+   * 読者に向けて直す方向。**照合と例文の検査を通ったものだけ**（規則3）。
+   * **0件は普通の答え**（1.9）
+   */
+  directions: OpeningDirection[];
+  /** 方向の欄が応答に在ったか。0件の答えと、欄ごと返らなかったことを分ける */
+  directionsAnswered: boolean;
+  /** 落とした方向の数。**黙って減らさない** */
+  directionsDropped: {
+    notFound: number;
+    exampleLike: number;
+    overLimit: number;
+  };
+}
+
+export interface ParseOpeningCheckOptions {
+  /**
+   * 直す方向を頼んだか（プロンプトへ読者を渡したか）。
+   * **既定は頼んでいない**——渡し忘れたときに、宛先の無い方向を出さない側へ倒す
+   */
+  directionsRequested?: boolean;
 }
 
 /**
@@ -255,7 +379,8 @@ export interface OpeningCheckResult {
  */
 export function parseOpeningCheck(
   text: string,
-  openingText = ""
+  openingText = "",
+  options: ParseOpeningCheckOptions = {}
 ): OpeningCheckResult | undefined {
   const source = extractJson(text);
   if (!source) return undefined;
@@ -273,6 +398,11 @@ export function parseOpeningCheck(
 
   const praise = readGroundedPraise(parsed.strengths, verbatimIn(openingText));
   const advice = cleanNote(parsed.advice);
+  const requested = options.directionsRequested === true;
+  // 頼んでいない回は読まない（照合もしない）。欄が在っても捨てる
+  const directions = requested
+    ? readOpeningDirections(parsed.directions, openingText)
+    : undefined;
   return {
     elements,
     hook: readHook(parsed.hook),
@@ -280,7 +410,31 @@ export function parseOpeningCheck(
     adviceAnswered: typeof parsed.advice === "string",
     strengths: praise.items,
     strengthsDropped: praise.notFound,
+    directionsRequested: requested,
+    directions: directions?.items ?? [],
+    directionsAnswered: requested && Array.isArray(parsed.directions),
+    directionsDropped: {
+      notFound: directions?.notFound ?? 0,
+      exampleLike: directions?.exampleLike ?? 0,
+      overLimit: directions?.overLimit ?? 0,
+    },
   };
+}
+
+/**
+ * 画面・ログ・MCP の返り値で使う、見た読者の言い方。
+ *
+ * 狙い（作者が選んだ）と読者像（診断の結果）は重みが違うので、どちらかを添える。
+ * 読者が無ければ `undefined`。
+ */
+export function openingReaderLabel(
+  reader: PublicityReader | undefined
+): string | undefined {
+  if (!reader) return undefined;
+  const labels = publicityReaderLabels(reader);
+  return reader.source === "aim"
+    ? `狙いの読者（${labels}）`
+    : `読者像（${labels}）`;
 }
 
 function readElements(value: unknown): OpeningElementJudgement[] {

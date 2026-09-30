@@ -12,11 +12,19 @@ vi.mock("vscode", () => ({
 import {
   buildOpeningCheckPrompt,
   OPENING_CHECK_SCHEMA,
+  OPENING_CHECK_VERSION,
   OPENING_ELEMENTS,
   OPENING_EXCERPT_MAX_CHARS,
+  openingCheckPromptVersion,
+  openingReaderLabel,
   parseOpeningCheck,
   type OpeningCheckResult,
 } from "../../../src/prompts/openingCheck";
+import {
+  OPENING_DIRECTION_HINTS,
+  OPENING_DIRECTIONS_MAX,
+} from "../../../src/core/openingDirections";
+import type { PublicityReader } from "../../../src/core/publicityReader";
 import { renderOpeningCheck } from "../../../src/features/checkOpening";
 
 /**
@@ -163,6 +171,7 @@ describe("構造化出力のスキーマ", () => {
     requiresAll(OPENING_CHECK_SCHEMA);
     requiresAll(OPENING_CHECK_SCHEMA.properties.elements.items);
     requiresAll(OPENING_CHECK_SCHEMA.properties.hook);
+    requiresAll(OPENING_CHECK_SCHEMA.properties.directions.items);
   });
 
   test("要素名は6つに限る", () => {
@@ -416,5 +425,171 @@ describe("助言の構え（1.9）：無理に言わない・ほめる所は省�
     expect(prompt).toContain("strengths");
     expect(prompt).toContain("なぜ効いている");
     expect(OPENING_CHECK_SCHEMA.required).toContain("strengths");
+  });
+});
+
+/**
+ * 読者に向けて直す方向（1.2。作者の裁定 2026-10-01）。
+ *
+ * 「読者タイプを踏まえて、直す方向を数件並べる。例文・書き直し案は出さないまま」
+ * 「無理してひねり出さなくても良いですよ」——0件は普通の答えである。
+ */
+describe("読者に向けて直す方向（1.2）", () => {
+  const opening =
+    "開架の夜、図書塔の灯が一つずつ消えていく。\n" +
+    "灯は母の遺した手紙を胸に抱えたまま、最上階の扉の前に立っていた。\n" +
+    "読めない文字で書かれたその手紙だけが、母と彼女を繋いでいる。";
+
+  const reader: PublicityReader = {
+    source: "aim",
+    types: ["light"],
+    reason: "通勤中に読める話にしたい",
+  };
+
+  function withDirections(directions: unknown, advice: unknown = ""): string {
+    return JSON.stringify({
+      ...(allConveyed() as Record<string, unknown>),
+      advice,
+      strengths: [],
+      ...(directions === undefined ? {} : { directions }),
+    });
+  }
+
+  function readWith(directions: unknown, advice: unknown = ""): OpeningCheckResult {
+    const result = parseOpeningCheck(withDirections(directions, advice), opening, {
+      directionsRequested: true,
+    });
+    if (!result) throw new Error("読み取れませんでした");
+    return result;
+  }
+
+  function reportWith(result: OpeningCheckResult, readerLabel?: string): string {
+    return renderOpeningCheck({
+      workTitle: "図書塔の魔女",
+      excerptChars: 120,
+      readerLabel,
+      result,
+    });
+  }
+
+  const good = {
+    direction: "手紙の謎を先に見せる",
+    quote: "読めない文字で書かれたその手紙",
+    why: "隙間に読む読者は最初の数行で続きを決めるので、謎が早いほど掴める。",
+  };
+
+  test("**0件の応答が検査を通る**（失敗・空応答として扱わない）", () => {
+    const result = readWith([]);
+    expect(result.directionsRequested).toBe(true);
+    expect(result.directionsAnswered).toBe(true);
+    expect(result.directions).toEqual([]);
+
+    const markdown = reportWith(result, "狙いの読者（すきま層）");
+    expect(markdown).toContain("## 狙いの読者（すきま層）に向けて直す方向");
+    expect(markdown).toContain("いま直す方向として挙げる所はありませんでした");
+    expect(markdown).not.toContain("直す方向が返りませんでした");
+    expect(markdown).not.toContain("総評が返りませんでした");
+    // 総評も自然なまま（方向の節と食い違わない）
+    expect(markdown).toContain("直すべき所は見当たりません。");
+    expect(markdown).not.toContain("下に挙げます");
+  });
+
+  test("方向は、根拠の引用と読者への理由つきで並ぶ", () => {
+    const result = readWith([good]);
+    expect(result.directions).toEqual([good]);
+    const markdown = reportWith(result, "狙いの読者（すきま層）");
+    expect(markdown).toContain("- 手紙の謎を先に見せる（根拠：「読めない文字で書かれたその手紙」）");
+    expect(markdown).toContain("隙間に読む読者は");
+    expect(markdown).toContain("どう書くかは作者が決めてください");
+    // 総評が空でも、方向があれば食い違わない言い方にする
+    expect(markdown).toContain("下に挙げます");
+  });
+
+  test("例文入りの方向は弾き、弾いたことを書く", () => {
+    const result = readWith([
+      good,
+      {
+        direction: "書き出しを変える",
+        quote: "開架の夜、図書塔の灯が一つずつ消えていく",
+        why: "たとえば「塔の灯が、ひとつ残らず死んだ。」と始めると引きが強まる。",
+      },
+      { direction: "例文", quote: "開架の夜", why: "例文：灯が消えた。" },
+    ]);
+    expect(result.directions).toEqual([good]);
+    expect(result.directionsDropped.exampleLike).toBe(2);
+    const markdown = reportWith(result, "狙いの読者（すきま層）");
+    expect(markdown).not.toContain("ひとつ残らず死んだ");
+    expect(markdown).toContain("例文や書き換えた文を含んでいたもの 2件は外しました");
+  });
+
+  test("根拠の引用が本文に無ければ弾く", () => {
+    const result = readWith([
+      { ...good, quote: "塔の鐘が十三回鳴った" },
+    ]);
+    expect(result.directions).toEqual([]);
+    expect(result.directionsDropped.notFound).toBe(1);
+    const markdown = reportWith(result, "狙いの読者（すきま層）");
+    expect(markdown).not.toContain("十三回");
+    expect(markdown).toContain("根拠の引用が本文に見つからないもの 1件");
+  });
+
+  test("欄ごと返らなければ「返りませんでした」（0件と取り違えない）", () => {
+    const result = readWith(undefined);
+    expect(result.directionsAnswered).toBe(false);
+    expect(reportWith(result, "狙いの読者（すきま層）")).toContain(
+      "直す方向が返りませんでした"
+    );
+  });
+
+  test("読者を渡していない回は、方向が返っても捨てて案内だけ出す", () => {
+    const result = parseOpeningCheck(withDirections([good]), opening);
+    expect(result?.directionsRequested).toBe(false);
+    expect(result?.directions).toEqual([]);
+    const markdown = reportWith(result as OpeningCheckResult);
+    expect(markdown).toContain("## 読者に向けて直す方向");
+    expect(markdown).toContain("「ターゲット読者」で狙いの読者を決めると");
+    expect(markdown).not.toContain("手紙の謎を先に見せる");
+  });
+
+  test("プロンプト：読者があれば読者の塊と方向の頼みを足す。下限を書かず、0件を普通の答えと言う", () => {
+    const prompt = buildOpeningCheckPrompt({
+      workTitle: "作品",
+      genre: "",
+      logline: "",
+      openingText: "本文",
+      reader,
+    });
+    expect(prompt).toContain("【この作品の読者】");
+    expect(prompt).toContain("すきま層");
+    expect(prompt).toContain("directions");
+    expect(prompt).toContain(`多くても${OPENING_DIRECTIONS_MAX}件まで`);
+    expect(prompt).toContain("それも普通の答えです");
+    expect(prompt).toContain("数を埋めるために作らないこと");
+    expect(prompt).not.toMatch(/(最低|少なくとも)/u);
+    // 判定まで読者で動かさない
+    expect(prompt).toContain("読者によらず本文だけから");
+    // 欄の説明はコードの見張りと同じ文字列（返ってきたら弾ける）
+    for (const hint of Object.values(OPENING_DIRECTION_HINTS)) {
+      expect(prompt).toContain(hint);
+    }
+  });
+
+  test("プロンプト：読者が無ければ方向を頼まない（空の配列を頼むだけ）", () => {
+    const prompt = buildOpeningCheckPrompt({
+      workTitle: "作品",
+      genre: "",
+      logline: "",
+      openingText: "本文",
+    });
+    expect(prompt).not.toContain("【この作品の読者】");
+    expect(prompt).toContain("directions は空の配列にしてください");
+    expect(prompt).not.toContain(OPENING_DIRECTION_HINTS.why);
+  });
+
+  test("版の文字列に読者の印が混ざる", () => {
+    expect(OPENING_CHECK_VERSION).toBe("1.2");
+    expect(openingCheckPromptVersion("aim:light")).toBe("1.2|reader:aim:light");
+    expect(openingReaderLabel(reader)).toBe("狙いの読者（すきま層）");
+    expect(openingReaderLabel(undefined)).toBeUndefined();
   });
 });

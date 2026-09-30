@@ -14,13 +14,20 @@ import {
   buildOpeningCheckPrompt,
   OPENING_CHECK_SCHEMA,
   OPENING_CHECK_SYSTEM_PROMPT,
-  OPENING_CHECK_VERSION,
   OPENING_ELEMENTS,
   OPENING_EXCERPT_MAX_CHARS,
+  openingCheckPromptVersion,
+  openingReaderLabel,
   parseOpeningCheck,
   type OpeningCheckResult,
   type OpeningElementJudgement,
 } from "../prompts/openingCheck";
+import {
+  publicityReaderMark,
+  type PublicityReader,
+} from "../core/publicityReader";
+import { TARGET_READER_ENTRY_TITLE } from "../prompts/readerTarget";
+import { loadPublicityReader } from "./publicityReader";
 import { openGeneratedMarkdown } from "../views/openDocument";
 import { withCancellableProgress } from "../views/progress";
 /*
@@ -150,7 +157,7 @@ export async function checkOpening(
     try {
       logStep(
         `冒頭診断を開始: ${work.title} / ${resolved.provider.displayName} / ` +
-          `${resolved.model} / v${OPENING_CHECK_VERSION}`
+          `${resolved.model} / v${openingCheckPromptVersion(publicityReaderMark(material.reader))}`
       );
       const response = await resolved.provider.generate({
         systemPrompt: OPENING_CHECK_SYSTEM_PROMPT,
@@ -159,6 +166,7 @@ export async function checkOpening(
           genre: material.genre,
           logline: material.logline,
           openingText: material.openingText,
+          reader: material.reader,
         }),
         model: resolved.model,
         // 判定と根拠を出すだけなので、揺らす理由が無い。
@@ -207,7 +215,10 @@ export async function checkOpening(
   if (responseText === undefined) return CHECK_CANCELLED;
 
   // 送った冒頭を渡す。**ほめる欄の引用は、この本文と照合して残す**（1.9）
-  const result = parseOpeningCheck(responseText, material.openingText);
+  // **読者を渡した回だけ、直す方向を読む**（1.2。宛先の無い方向は出さない）
+  const result = parseOpeningCheck(responseText, material.openingText, {
+    directionsRequested: material.reader !== undefined,
+  });
   if (!result) {
     // **応答の中身は捨てない。** 通知には出さなくても、ログには残す
     logFailure("冒頭診断", {
@@ -227,6 +238,7 @@ export async function checkOpening(
     renderOpeningCheck({
       workTitle: work.title,
       excerptChars: material.openingText.length,
+      readerLabel: openingReaderLabel(material.reader),
       result,
     }),
     undefined,
@@ -240,6 +252,11 @@ interface OpeningMaterial {
   openingText: string;
   genre: string;
   logline: string;
+  /**
+   * 直す方向を向ける読者（1.2）。紹介文と同じ材料・同じ優先順位
+   * （`loadPublicityReader`）。**無ければ方向を頼まない**
+   */
+  reader: PublicityReader | undefined;
 }
 
 /**
@@ -280,6 +297,8 @@ async function collectOpening(
     // プロットが無くても診断はできる。材料が1つ減るだけなので止めない
     genre: plotValue(sections.genre),
     logline: plotValue(sections.logline),
+    // 読めなくても止めない（`loadPublicityReader` の約束。読めなかったことはログへ）
+    reader: await loadPublicityReader(work, "冒頭診断"),
   };
 }
 
@@ -292,6 +311,11 @@ export interface OpeningCheckReport {
   workTitle: string;
   /** 実際に見た冒頭の字数。**末尾の断りに出す** */
   excerptChars: number;
+  /**
+   * 直す方向を向けた読者の言い方（`openingReaderLabel`）。
+   * 読者が決まっていなければ undefined（方向の節は案内だけになる）
+   */
+  readerLabel?: string;
   result: OpeningCheckResult;
 }
 
@@ -364,6 +388,8 @@ export function renderOpeningCheck(report: OpeningCheckReport): string {
   lines.push("", "## 総評", "");
   lines.push(adviceLine(report.result));
 
+  lines.push("", ...directionLines(report));
+
   lines.push(
     "",
     "---",
@@ -409,9 +435,56 @@ function strengthLines(result: OpeningCheckResult): string[] {
  */
 function adviceLine(result: OpeningCheckResult): string {
   if (result.advice) return result.advice;
-  return result.adviceAnswered
-    ? "直すべき所は見当たりません。"
-    : "総評が返りませんでした。";
+  if (!result.adviceAnswered) return "総評が返りませんでした。";
+  // 直す所は無いが、読者に向けて強められる方向はある——という答えもある（1.2）。
+  // 「見当たりません」だけだと、下の方向の節と食い違って読める
+  return result.directions.length > 0
+    ? "直すべき所は見当たりません。読者に向けてさらに強められる方向を、下に挙げます。"
+    : "直すべき所は見当たりません。";
+}
+
+/**
+ * 読者に向けて直す方向の節（1.2）。
+ *
+ * **0件は「挙げる所は無い」という答え**として書く（1.9。作者の言葉
+ * 「無理してひねり出さなくても良いですよ」）。欄ごと返らなかったときとは分ける。
+ * 読者が決まっていなければ、決めれば出せることだけを案内する。
+ */
+function directionLines(report: OpeningCheckReport): string[] {
+  const result = report.result;
+  if (!result.directionsRequested || !report.readerLabel) {
+    return [
+      "## 読者に向けて直す方向",
+      "",
+      `「${TARGET_READER_ENTRY_TITLE}」で狙いの読者を決めると、その読者に向けて直す方向も挙げます。`,
+    ];
+  }
+  const lines = [`## ${report.readerLabel}に向けて直す方向`, ""];
+  if (result.directions.length > 0) {
+    for (const item of result.directions) {
+      lines.push(`- ${item.direction}（根拠：「${item.quote}」）——${item.why}`);
+    }
+    lines.push("", "示しているのは方向だけです。どう書くかは作者が決めてください。");
+  } else if (result.directionsAnswered) {
+    lines.push("この読者に向けて、いま直す方向として挙げる所はありませんでした。");
+  } else {
+    lines.push("直す方向が返りませんでした。");
+  }
+
+  // 落とした数は黙らずに書く（ほめる欄と同じ。AIが挙げたのに見えない理由を残す）
+  const dropped = result.directionsDropped;
+  const notes: string[] = [];
+  if (dropped.notFound > 0) {
+    notes.push(`根拠の引用が本文に見つからないもの ${dropped.notFound}件`);
+  }
+  if (dropped.exampleLike > 0) {
+    notes.push(`例文や書き換えた文を含んでいたもの ${dropped.exampleLike}件`);
+  }
+  if (dropped.overLimit > 0) {
+    notes.push(`上限を超えたもの ${dropped.overLimit}件`);
+  }
+  if (notes.length > 0) lines.push("", `${notes.join("、")}は外しました。`);
+  return lines;
 }
 
 function elementMark(judgement: OpeningElementJudgement | undefined): string {
