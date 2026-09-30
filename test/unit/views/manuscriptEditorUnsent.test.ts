@@ -411,6 +411,61 @@ describe("届かないときの知らせの帯", () => {
     const bar = html.slice(html.indexOf('id="unsent"'), html.indexOf('id="unsentCopy"') + 200);
     expect(bar).toContain("本文をコピー");
   });
+
+  /*
+    作者の依頼（2026-10-01）：上の赤い帯を、下の欄の「打った字が原稿に
+    入りました」と同じ場所へ赤字で出す。上に帯が出ると本文が押し下がり、
+    書いている行が動く。
+  */
+  it("**知らせは下の欄（#foot）に、「原稿に入りました」と同じ場所へ出す**", () => {
+    const foot = html.slice(html.indexOf('<div id="foot">'), html.indexOf("</div>", html.indexOf('<div id="foot">')));
+    expect(foot).toContain('id="unsent"');
+    expect(foot).toContain('role="alert"');
+    expect(foot).toContain('id="unsentCopy"');
+    // 「入りました」の #note の直前に置く（出ている間は #note の場所を使う）
+    expect(foot.indexOf('id="unsent"')).toBeLessThan(foot.indexOf('id="note"'));
+    // 上の帯（本文の上）には、もう置かない
+    const surface = html.indexOf('<div id="surface">');
+    expect(html.indexOf('id="unsent"')).toBeGreaterThan(surface);
+  });
+
+  it("赤字はテーマの色から取る（暗いテーマでも読める）", () => {
+    const css = html.slice(html.indexOf("#unsent {"), html.indexOf("}", html.indexOf("#unsent {")));
+    expect(css).toContain("var(--vscode-errorForeground");
+    // 帯（背景の塗り）にはしない
+    expect(css).not.toContain("background:");
+  });
+
+  it("**知らせを出したとき・下ろしたときに、記録へ1行ずつ残す**（いつ出たかを後から確かめる）", () => {
+    const h = unsentHarness();
+    h.postEdit("打った字");
+    h.advance(5_000);
+    expect(h.bannerOpen()).toBe(true);
+    // 送り直しても、出したままなら記録は増やさない
+    h.advance(10_000);
+    const shown = h.logs().filter((text) => /知らせを出しました/.test(text));
+    expect(shown, "出したときの記録が無い").toHaveLength(1);
+    expect(shown[0]).toMatch(/返事が\d+秒/);
+
+    const last = h.edits().at(-1)!;
+    h.receive({ type: "editApplied", seq: last.seq, ok: true });
+    const hidden = h.logs().filter((text) => /知らせを下ろしました/.test(text));
+    expect(hidden, "下ろしたときの記録が無い").toHaveLength(1);
+  });
+
+  it("入れられなかったと返ってきたときは、その理由で記録する", () => {
+    const h = unsentHarness();
+    h.postEdit("あ");
+    h.receive({ type: "editApplied", seq: 1, ok: false });
+    expect(h.logs().some((text) => /知らせを出しました/.test(text) && /入れられなかった/.test(text))).toBe(true);
+  });
+
+  it("出ていないときに届いた返事では、下ろした記録を書かない", () => {
+    const h = unsentHarness();
+    h.postEdit("あ");
+    h.receive({ type: "editApplied", seq: 1, ok: true });
+    expect(h.logs()).toEqual([]);
+  });
 });
 
 /* ── Ctrl+X（切り取り）──────────────────────────────── */

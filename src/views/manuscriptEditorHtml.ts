@@ -775,9 +775,11 @@ ruby > rt {
   padding: 3px 10px;
   border-top: 1px solid var(--vscode-panel-border);
   font-size: 11px;
-  opacity: 0.85;
   flex-wrap: wrap;
 }
+/* **控えめにするのは、いつも出ているものだけ。** 欄ごと薄くすると、
+   届かないときの赤字（#unsent）まで薄くなり、読みにくくなる */
+#foot > :not(#unsent) { opacity: 0.85; }
 /* **字数は控えめに出す。** 書いている最中にいつも視界へ入るものなので、
    読みにいったときだけ読める濃さにしておく（数えるのが目的ではない） */
 #counts {
@@ -794,24 +796,36 @@ ruby > rt {
   white-space: nowrap;
 }
 #cheer:empty { display: none; }
-/* ── 打った字が原稿ファイルに届いていないときの帯（設計書6.25.9） ──
+/* ── 打った字が原稿ファイルに届いていないときの知らせ（設計書6.25.9） ──
    **普段は出ない。** 送った本文に「入った」という返事が来ないまま待ちが
    過ぎたとき（または入れられなかったと返ってきたとき）だけ出る。
    字が画面にだけ残っていることを、閉じる前に作者の目へ入れるためのもの
-   なので、下の帯（#note）の控えめな色ではなく、警告の色で上に出す */
+   なので、#note の控えめな色ではなく**赤字**で出す。
+
+   **置き場所は下の欄の、「打った字が原稿に入りました」（#note）と同じ所**
+   （作者の依頼、2026-10-01）。はじめは本文の上に帯で出していたが、帯が
+   出るたびに本文が押し下がり、書いている行が動いた。届いたら同じ場所に
+   「入りました」が出るので、出た知らせと片づいた知らせが1か所で読める。
+
+   色は VS Code のテーマの「エラーの字の色」から取る（明るいテーマでも
+   暗いテーマでも読める色をテーマ側が選んでいる）。背景は塗らない */
 #unsent {
-  flex: 0 0 auto;
   display: none;
   align-items: center;
-  gap: 10px;
-  padding: 6px 10px;
-  font-size: 12px;
-  background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
-  color: var(--vscode-inputValidation-errorForeground, var(--vscode-foreground));
-  border-bottom: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+  gap: 8px;
+  font-weight: 600;
+  color: var(--vscode-errorForeground, #f14c4c);
 }
-#unsent.open { display: flex; }
-#unsent button { flex: 0 0 auto; }
+#unsent.open { display: inline-flex; }
+/* 出ている間は、同じ場所の #note（古い一言が残っていることがある）を隠す */
+#unsent.open + #note { display: none; }
+/* ボタンは欄の高さに収める（出たときに欄が伸びると、本文の面が縮んで動く） */
+#unsent button {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: normal;
+  padding: 0 6px;
+}
 </style>
 </head>
 <body class="vertical">
@@ -832,11 +846,6 @@ ruby > rt {
   <button id="smaller" title="文字を小さく">ー</button>
   <button id="bigger" title="文字を大きく">＋</button>
   <div class="gap"></div>
-</div>
-
-<div id="unsent" role="alert">
-  <span id="unsentText">打った字が、まだ原稿ファイルに入っていません。このまま閉じると消えます。</span>
-  <button id="unsentCopy" title="この画面の本文をまるごとクリップボードへ写します。メモ帳などへ貼って控えてください">本文をコピー</button>
 </div>
 
 <div id="aloud">
@@ -882,6 +891,10 @@ ruby > rt {
 <div id="foot">
   <span id="counts"></span>
   <span id="cheer"></span>
+  <span id="unsent" role="alert">
+    <span id="unsentText">打った字が、まだ原稿ファイルに入っていません。このまま閉じると消えます。</span>
+    <button id="unsentCopy" title="この画面の本文をまるごとクリップボードへ写します。メモ帳などへ貼って控えてください">本文をコピー</button>
+  </span>
   <span id="note"></span>
 </div>
 
@@ -912,7 +925,7 @@ ruby > rt {
   let latestMarks = null;
   const menu = document.getElementById("menu");
   const note = document.getElementById("note");
-  /** 打った字が原稿ファイルに届いていないときの帯（設計書6.25.9） */
+  /** 打った字が原稿ファイルに届いていないときの知らせ（下の欄に赤字。設計書6.25.9） */
   const unsentBar = document.getElementById("unsent");
   const unsentText = document.getElementById("unsentText");
   const unsentCopyButton = document.getElementById("unsentCopy");
@@ -1206,11 +1219,15 @@ ruby > rt {
   }
 
   dirButton.addEventListener("click", function () {
+    // **向きを変える前に、見ていた場所を字で控える**（view-anchor。
+    // 組み直すとスクロールが先頭へ戻る）
+    const anchor = viewTakePress();
     vertical = vertical === false;
     // **向きを変えたら読み上げを止める**（設計書6.42）。組み直しで光っている
     // 場所の測り直しが要るうえ、切り替えの最中に声だけが続くと落ち着かない
     aloudFinish();
     paint();
+    viewRestore(anchor);
     remember();
   });
 
@@ -1218,13 +1235,24 @@ ruby > rt {
      **既存の切り替えと同じ流儀**（帯のボタン1つ、押されている間は .on）。
      note風は見せ方だけの話なので、本文には一切触らない */
   noteStyleButton.addEventListener("click", function () {
+    // 折り返し幅が変わると、見えている字もずれる。控えてから組み直す
+    const anchor = viewTakePress();
     noteStyle = !noteStyle;
     // 折り返し幅が変わる。重ねた色の枠を測り直す（向き・大きさと同じ理由）
     paint();
+    viewRestore(anchor);
     remember();
   });
 
+  /**
+   * 貼り付け後の面を開く前に控えた場所。**開いている間は書く面が隠れて
+   * 測れない**うえ、隠れた面はスクロールを失うので、閉じたときに戻す
+   */
+  let viewBeforeNotePv = null;
+
   notePvButton.addEventListener("click", function () {
+    const anchor = viewTakePress();
+    if (!notePv) viewBeforeNotePv = anchor;
     notePv = !notePv;
     /*
       **開いているあいだだけ組ませる。** 本文ぜんたいをHTMLへ組むのは、
@@ -1234,6 +1262,11 @@ ruby > rt {
     vscode.postMessage({ type: "notePreview", on: notePv });
     // 面を出し入れすると、打つ面の折り返し幅が変わる（枠を測り直す）
     paint();
+    // 閉じたら、開く前に見ていた場所へ戻す（開いた側は書く面が隠れている）
+    if (!notePv) {
+      viewRestore(viewBeforeNotePv || anchor);
+      viewBeforeNotePv = null;
+    }
   });
 
   document.getElementById("latest").addEventListener("click", function () {
@@ -1419,14 +1452,22 @@ ruby > rt {
     });
   });
 
+  /*
+    字の大きさを変えると、行の長さも行の数も変わり、同じスクロール量が
+    別の字を指す。向きの切り替えと同じく、字で控えてから組み直す（view-anchor）
+  */
   document.getElementById("bigger").addEventListener("click", function () {
+    const anchor = viewTakePress();
     size = Math.min(40, size + 1);
     paint();
+    viewRestore(anchor);
     remember();
   });
   document.getElementById("smaller").addEventListener("click", function () {
+    const anchor = viewTakePress();
     size = Math.max(9, size - 1);
     paint();
+    viewRestore(anchor);
     remember();
   });
 
@@ -1680,7 +1721,7 @@ ruby > rt {
 
     そこで便に番号を付け、拡張機能から「入った／入れられなかった」を
     返してもらう（editApplied）。返事の来ない便があるまま待ちが過ぎたら、
-    **警告の帯を出して送り直す**。帯には「本文をコピー」を置く——
+    **赤字の知らせを出して送り直す**。知らせには「本文をコピー」を置く——
     拡張機能の側が動いていないと、送り直しても届かないためである。
   */
   /** 返事を待つ長さ。ふだんの往復は0.1秒に満たないので、ここまで来たら異常 */
@@ -1716,7 +1757,7 @@ ruby > rt {
     if (typeof message.seq !== "number") return;
     if (!message.ok) {
       // 入れられなかった。**待たずに知らせる**（送り直しは見回りに任せる）
-      showUnsent();
+      showUnsent("拡張機能が「入れられなかった」と返した（便" + message.seq + "）");
       if (unconfirmed !== null) armUnsentCheck(UNSENT_WAIT_MS);
       return;
     }
@@ -1727,7 +1768,7 @@ ruby > rt {
         clearTimeout(unsentTimer);
         unsentTimer = null;
       }
-      hideUnsent();
+      hideUnsent(message.seq);
       return;
     }
     // 古い便に返事が来た＝道は通っている。新しい便は往復の途中なので待ち直す
@@ -1735,7 +1776,7 @@ ruby > rt {
     armUnsentCheck(UNSENT_WAIT_MS);
   }
 
-  /** 見回り。返事の来ない便が待ちを過ぎていたら、帯を出して送り直す */
+  /** 見回り。返事の来ない便が待ちを過ぎていたら、知らせを出して送り直す */
   function checkUnsent() {
     unsentTimer = null;
     if (unconfirmed === null) return;
@@ -1744,7 +1785,9 @@ ruby > rt {
       armUnsentCheck(UNSENT_WAIT_MS - waited);
       return;
     }
-    showUnsent();
+    showUnsent(
+      "返事が" + Math.round(waited / 1000) + "秒来ない（便" + unconfirmed.seq + "まで未確認）"
+    );
     /*
       **本当に変換中なら送り直さない**（確定前の字が二重に入る）。確定すれば
       そのとき送られる。印が立ちっぱなしのときは、打鍵か焦点の移動で下りる
@@ -1759,13 +1802,39 @@ ruby > rt {
     armUnsentCheck(UNSENT_WAIT_MS);
   }
 
-  function showUnsent() {
+  /*
+    **出したとき・下ろしたときに、拡張機能の記録（操作ログ）へ1行残す**
+    （作者の依頼、2026-10-01）。画面の知らせは消えれば跡が残らず、実機で
+    「いつ出たか・どれだけ出ていたか」を後から確かめられなかった。
+    **出たままの間は書き足さない**——見回りは4秒ごとに送り直すので、
+    そのたびに書くと記録が埋まる。焦点の有無でも止めない（まれにしか
+    起きず、起きたときこそ跡が要る）。
+  */
+  /** 知らせを出した時刻（下ろしたときに、出ていた長さを添える） */
+  let unsentShownAt = null;
+
+  function showUnsent(reason) {
+    if (unsentBar.classList.contains("open")) return;
     unsentBar.classList.add("open");
+    unsentShownAt = Date.now();
+    vscode.postMessage({
+      type: "log",
+      text: "打った字が原稿に入っていない知らせを出しました。理由：" + reason,
+    });
   }
 
-  function hideUnsent() {
+  function hideUnsent(seq) {
     if (!unsentBar.classList.contains("open")) return;
     unsentBar.classList.remove("open");
+    const shownFor =
+      unsentShownAt === null ? null : Math.round((Date.now() - unsentShownAt) / 1000);
+    unsentShownAt = null;
+    vscode.postMessage({
+      type: "log",
+      text:
+        "打った字が原稿に入ったので、知らせを下ろしました（便" + seq + "まで入った" +
+        (shownFor === null ? "" : "／出ていた長さ" + shownFor + "秒") + "）",
+    });
     unsentText.textContent =
       "打った字が、まだ原稿ファイルに入っていません。このまま閉じると消えます。";
     note.textContent = "打った字が原稿に入りました";
@@ -1822,7 +1891,7 @@ ruby > rt {
   );
 
   /**
-   * 帯の「本文をコピー」。**拡張機能を通さずに写す**——届かないときは、
+   * 知らせの「本文をコピー」。**拡張機能を通さずに写す**——届かないときは、
    * 拡張機能の側が動いていないことがあるため（頼んでも返事が来ない）。
    */
   function copyForRescue() {
@@ -1976,6 +2045,341 @@ ruby > rt {
     else if (rect.bottom > box.bottom) top = rect.bottom - box.bottom + slack;
     return { left: left, top: top };
   }
+
+  /* view-anchor:start */
+  /*
+    ── 見た目を切り替えても、見ていた場所を保つ（作者の依頼、2026-10-01） ──
+
+    縦書き⇔横書き・字の大きさ・note風・貼り付け後・書体を変えると、
+    paint() で組み直され、見えている場所が先頭へ戻っていた（向きを変えると
+    スクロールの意味そのものが変わる——縦書きでは左右、横書きでは上下）。
+    長い話の途中で切り替えると、書いていた場所を探し直すことになる。
+
+    そこで、切り替える前に**本文の何文字目を見ていたか**を控え、組み直した
+    あとにその字が見える所へ動かす。**ピクセルではなく字で控える**のは、
+    向きや字の大きさが変わるとピクセルの位置は別の字を指すためである。
+
+    - カーソルが画面に見えていれば、カーソルの字を控える（戻すときは
+      見える所まで動かすだけ。offRect と同じ「はみ出しぶんだけ」）
+    - 見えていなければ、画面の先頭に見えていた字を控え、戻すときも
+      画面の先頭側へ置く（読んでいた続きが、同じ向きに並ぶように）
+    - 焦点と選択は、どちらの場合も元へ戻す（カーソルは画面の外のままでよい）
+
+    採寸（字の箱を測る）は下の view-measure にある。ここは測った箱から
+    どこへ動かすかを決めるだけ。
+  */
+  /** 押した瞬間に控えたもの。押したあとは焦点がボタンへ移り、組んで書く面では選択も外れる */
+  let viewAtPress = null;
+  /** 押した瞬間の控えを使ってよい長さ。押したまま離れた古い控えを、次の切り替えで使わない */
+  const VIEW_PRESS_FRESH_MS = 5000;
+  /** 書体は選ぶ画面を経て届くので、控えを長めに持つ */
+  const VIEW_FONT_FRESH_MS = 120000;
+  /** 書体のボタンを押した瞬間の控え（書体が変わった知らせが届いたときに使う） */
+  let viewAtFontPress = null;
+  /** いま当たっている書体（本文と一緒に毎回届くので、変わったときだけ控えて戻す） */
+  let viewFontApplied = null;
+  /**
+   * 画面の先頭側へ置くときに空ける幅。**縁にほぼ付ける。** 余白を広く取ると、
+   * その手前の行がまるごと見えてしまい、次に控えるときはその行が先頭になる
+   * ——字の大きさを続けて押すたびに、1行ずつ前へずれていく。
+   * 0にしないのは、測れる字の箱が字形より少し狭く、縁に付けると字の端が
+   * 欠けて見えるため（実機に近い画面で確かめた）。行の送り（最小で約17px）
+   * より十分小さいので、手前の行がまるごと入ることはない
+   */
+  const VIEW_LEAD = 8;
+
+  function viewFace() {
+    return composeOn ? compose : write;
+  }
+
+  /** いまの選択（記法の位置）。組んで書く面で本文の外にあれば null */
+  function viewSelection() {
+    if (composeOn) return composeSelectionNow();
+    return { start: write.selectionStart, end: write.selectionEnd };
+  }
+
+  /** test を満たす最初の位置（test は位置について単調）。無ければ length */
+  function viewSearchFirst(length, test) {
+    let low = 0;
+    let high = length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (test(middle)) high = middle;
+      else low = middle + 1;
+    }
+    return low;
+  }
+
+  /**
+   * 画面の先頭に見えている最初の字。
+   *
+   * **縁で半分切れている行は数えない。** 半分の行を先頭として控えると、
+   * 戻すときにその行を余白ぶん内側へ置くので、押すたびに1行弱ずつ
+   * 前へずれていく（字の大きさを続けて押すと目に見えてずれた）。
+   */
+  function viewFirstVisible(measure) {
+    const box = measure.container.getBoundingClientRect();
+    const found = viewSearchFirst(measure.length, function (at) {
+      const rect = measure.rectAt(at);
+      if (!rect) return false;
+      // 縦書きは行が右から左へ並ぶ。右端の内側に収まった最初の行が先頭
+      return measure.vertical ? rect.right <= box.right + 1 : rect.top >= box.top - 1;
+    });
+    return Math.max(0, Math.min(found, Math.max(0, measure.length - 1)));
+  }
+
+  /** 見ていた場所を控える。面が隠れていて測れなければ null */
+  function viewHold() {
+    const face = viewFace();
+    const measure = viewMeasure(face);
+    if (!measure) return null;
+    try {
+      const selection = viewSelection();
+      let offset = null;
+      let kind = "top";
+      if (selection) {
+        const rect = measure.rectAt(selection.start);
+        const off = rect ? offRect(measure.container, rect) : null;
+        if (off && off.left === 0 && off.top === 0) {
+          offset = selection.start;
+          kind = "caret";
+        }
+      }
+      if (offset === null) offset = viewFirstVisible(measure);
+      return {
+        face: composeOn ? "compose" : "write",
+        offset: offset,
+        kind: kind,
+        selection: selection
+          ? { start: selection.start, end: selection.end }
+          : null,
+        focus: document.activeElement === face,
+      };
+    } catch (error) {
+      // 測れなければ控えない（切り替えそのものは続ける）
+      return null;
+    } finally {
+      measure.done();
+    }
+  }
+
+  /** 控えた字が見える所へ動かす */
+  function viewScrollTo(anchor) {
+    if (anchor.face !== (composeOn ? "compose" : "write")) return;
+    const measure = viewMeasure(viewFace());
+    if (!measure) return;
+    try {
+      const rect = measure.rectAt(anchor.offset);
+      if (!rect) return;
+      let left = 0;
+      let top = 0;
+      if (anchor.kind === "caret") {
+        const off = offRect(measure.container, rect);
+        left = off.left;
+        top = off.top;
+      } else {
+        const box = measure.container.getBoundingClientRect();
+        // 先頭側の縁から VIEW_LEAD だけ内側へ。縦書きの先頭は右、横書きは上
+        if (measure.vertical) left = rect.right - box.right + VIEW_LEAD;
+        else top = rect.top - box.top - VIEW_LEAD;
+      }
+      if (left !== 0 || top !== 0) measure.scrollBy(left, top);
+    } catch (error) {
+      /* 測れなければ動かさない（本文は壊れない） */
+    } finally {
+      measure.done();
+    }
+  }
+
+  /** 組み直したあとに、控えた場所・焦点・選択を戻す */
+  function viewRestore(anchor) {
+    if (!anchor) return;
+    // 面が入れ替わっていたら（打つ面⇔組んで書く面）、位置の意味が違う
+    if (anchor.face !== (composeOn ? "compose" : "write")) return;
+    const face = viewFace();
+    if (anchor.focus) {
+      try {
+        face.focus({ preventScroll: true });
+      } catch (error) {
+        /* 焦点を戻せなくても、場所は戻す */
+      }
+    }
+    if (anchor.selection) {
+      if (composeOn) composeRestoreCaret(anchor.selection);
+      else {
+        try {
+          write.setSelectionRange(anchor.selection.start, anchor.selection.end);
+        } catch (error) {
+          /* 範囲外なら諦める */
+        }
+      }
+    }
+    viewScrollTo(anchor);
+    /*
+      **1拍あとにもう一度合わせる。** 書体の読み込みや採寸の予約
+      （scheduleAlignMarks）で、組みがもう一度動くことがある。すでに
+      見えていれば動かない（はみ出しぶんだけ足すので）。
+    */
+    requestAnimationFrame(function () {
+      viewScrollTo(anchor);
+    });
+  }
+
+  /** 押した瞬間の控えを取り出す。無い・古いときは今の場所を控える */
+  function viewTakePress() {
+    const pressed = viewAtPress;
+    viewAtPress = null;
+    if (pressed && Date.now() - pressed.at <= VIEW_PRESS_FRESH_MS) return pressed.anchor;
+    return viewHold();
+  }
+
+  function viewHoldOnPress() {
+    viewAtPress = { anchor: viewHold(), at: Date.now() };
+  }
+
+  for (const button of [
+    dirButton,
+    noteStyleButton,
+    notePvButton,
+    document.getElementById("bigger"),
+    document.getElementById("smaller"),
+  ]) {
+    button.addEventListener("mousedown", viewHoldOnPress);
+  }
+  document.getElementById("font").addEventListener("mousedown", function () {
+    viewAtFontPress = { anchor: viewHold(), at: Date.now() };
+  });
+
+  /** 書体が変わった知らせのときの控え（押した瞬間のものが新しければそれ） */
+  function viewTakeFontPress() {
+    const pressed = viewAtFontPress;
+    viewAtFontPress = null;
+    if (pressed && Date.now() - pressed.at <= VIEW_FONT_FRESH_MS) return pressed.anchor;
+    return viewHold();
+  }
+  /* view-anchor:end */
+
+  /* view-measure:start */
+  /*
+    字の箱を測る道具。面ごとに測り方が違う。
+
+    - 組んで書く面：本文がDOMにあるので、記法の位置を DOM の位置へ直し、
+      範囲の箱を測る（composeNudgeIntoView と同じ）
+    - 打つ面（textarea）：中の字の位置は測れない。**同じ組み方の写しの面**を
+      一時的に作り、同じだけ転がして字の箱を測る。写しは見えない
+      （visibility:hidden）ので、画面はちらつかない。測り終えたら外す
+  */
+  function viewMeasure(face) {
+    if (!face || face.getClientRects().length === 0) return null;
+    const vertical =
+      String(getComputedStyle(face).writingMode).indexOf("vertical") === 0;
+    return face === compose
+      ? viewMeasureCompose(vertical)
+      : viewMeasureWrite(vertical);
+  }
+
+  function viewMeasureCompose(vertical) {
+    const atoms = composeCurrentAtoms();
+    const length = atoms.length === 0 ? 0 : atoms[atoms.length - 1].end;
+    return {
+      vertical: vertical,
+      length: length,
+      container: compose,
+      rectAt: function (at) {
+        if (length === 0) return null;
+        const head = composeOffsetToPoint(atoms, Math.max(0, Math.min(at, length)));
+        if (!head) return null;
+        const range = document.createRange();
+        range.setStart(head.node, head.offset);
+        // 字1つぶんの箱にする（幅0の箱は、行の頭や空行で測れないことがある）
+        if (head.node.nodeType === 3 && head.offset < head.node.nodeValue.length) {
+          range.setEnd(head.node, head.offset + 1);
+        } else {
+          range.setEnd(head.node, head.offset);
+        }
+        let rect = range.getBoundingClientRect();
+        if (!rect || (rect.width === 0 && rect.height === 0)) {
+          const host = head.node.nodeType === 1 ? head.node : head.node.parentElement;
+          if (!host) return null;
+          rect = host.getBoundingClientRect();
+        }
+        return rect;
+      },
+      scrollBy: function (left, top) {
+        compose.scrollLeft += left;
+        compose.scrollTop += top;
+      },
+      done: function () {},
+    };
+  }
+
+  /** 写しの面に写す組み方。**折り返し幅が1つでも違うと、別の字を測る** */
+  const VIEW_MIRROR_STYLES = [
+    "writingMode", "textOrientation", "direction", "fontFamily", "fontSize",
+    "fontWeight", "fontStyle", "fontVariant", "fontFeatureSettings", "fontKerning",
+    "letterSpacing", "wordSpacing", "lineHeight", "textIndent", "textAlign",
+    "textTransform", "whiteSpace", "overflowWrap", "wordBreak", "lineBreak",
+    "tabSize", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+  ];
+
+  function viewMeasureWrite(vertical) {
+    const styles = getComputedStyle(write);
+    const mirror = document.createElement("div");
+    for (const name of VIEW_MIRROR_STYLES) mirror.style[name] = styles[name];
+    mirror.style.position = "absolute";
+    mirror.style.left = write.offsetLeft + "px";
+    mirror.style.top = write.offsetTop + "px";
+    mirror.style.boxSizing = "border-box";
+    mirror.style.margin = "0";
+    mirror.style.border = "0";
+    // スクロールバーのぶんを除いた幅と高さ（alignMarksBox と同じ事情）
+    mirror.style.width = write.clientWidth + "px";
+    mirror.style.height = write.clientHeight + "px";
+    mirror.style.overflow = "hidden";
+    mirror.style.visibility = "hidden";
+    mirror.style.pointerEvents = "none";
+    mirror.setAttribute("aria-hidden", "true");
+    const text = write.value;
+    const node = document.createTextNode(text);
+    mirror.appendChild(node);
+    write.parentNode.appendChild(mirror);
+    mirror.scrollLeft = write.scrollLeft;
+    mirror.scrollTop = write.scrollTop;
+    const length = text.length;
+    /** 改行の上では幅のある箱が取れない。近くの改行でない字で測る */
+    function charAt(at) {
+      if (at < length && text[at] !== "\\n") return at;
+      if (at > 0 && text[at - 1] !== "\\n") return at - 1;
+      let next = at;
+      while (next < length && text[next] === "\\n") next++;
+      return next < length ? next : -1;
+    }
+    return {
+      vertical: vertical,
+      length: length,
+      container: mirror,
+      rectAt: function (at) {
+        const index = charAt(Math.max(0, Math.min(at, length)));
+        if (index < 0) return null;
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + 1);
+        return range.getBoundingClientRect();
+      },
+      scrollBy: function (left, top) {
+        write.scrollLeft += left;
+        write.scrollTop += top;
+        mirror.scrollLeft = write.scrollLeft;
+        mirror.scrollTop = write.scrollTop;
+        // 打つ面を動かしたので、重ね敷きの見えている場所も合わせる
+        syncMarksScroll();
+      },
+      done: function () {
+        if (mirror.parentNode) mirror.parentNode.removeChild(mirror);
+      },
+    };
+  }
+  /* view-measure:end */
 
   /** 変換が確定したあとに、待たせていた書き換えを片づける */
   function flushPending() {
@@ -2820,10 +3224,21 @@ ${RESUME_WRITING_LABEL ? `
         composeScheduleHighlight();
       }
       if (message.fontFamily) {
+        /*
+          **書体が変わったときだけ、見ていた場所を控えて戻す**（view-anchor）。
+          書体の名前は本文が届くたびに添えてくるので、同じなら何もしない
+          ——打鍵のたびに画面を動かすことになる。最初の1回（まだ何も
+          当てていない）は開いたところなので、戻す場所が無い。
+        */
+        const fontChanged =
+          viewFontApplied !== null && viewFontApplied !== message.fontFamily;
+        const anchor = fontChanged ? viewTakeFontPress() : null;
+        viewFontApplied = message.fontFamily;
         document.documentElement.style.setProperty(
           "--novelai-font",
           message.fontFamily
         );
+        if (anchor) viewRestore(anchor);
       }
       /* **印（ダッシュ・三点リーダ）の書体は別に受ける**（設計書6.34）。
          空で届くことがある（既定にまかせる設定）ので、そのときは変数ごと
