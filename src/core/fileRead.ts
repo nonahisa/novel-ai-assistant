@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "./paths";
 import { canRunProcesses } from "./runtime";
+import { MANUSCRIPT_TREE_DEPTH } from "./manuscriptFolderRule";
 
 /**
  * **読むだけ**の口を1つにまとめる（設計書6.107、5.8）。
@@ -83,8 +84,15 @@ export type TreeAccept = (
   fullPath: string
 ) => boolean;
 
-/** 潜る深さの上限。想定外の深い階層で無限に走査しないため（走査の元の値） */
-const DEFAULT_TREE_DEPTH = 5;
+/**
+ * 潜る深さの上限。想定外の深い階層で無限に走査しないため（走査の元の値）。
+ *
+ * **値は本文の置き場の決め方（`manuscriptFolderRule.ts`）と同じものを使う。**
+ * 深さが食い違うと、下見では「原稿あり」なのに一括読みでは0件、という形が
+ * 作れてしまう。**関数にしてあるのは、読み込みの順番に左右されないため**
+ * （呼ばれた時点で読む。モジュールの循環があっても `undefined` にならない）
+ */
+const defaultTreeDepth = (): number => MANUSCRIPT_TREE_DEPTH;
 
 export interface FileReader {
   readFile(filePath: string): Promise<Uint8Array>;
@@ -187,7 +195,7 @@ const vscodeReader: FileReader = {
       return [name, kind] as [string, FileKind];
     });
   },
-  async readTextTree(dirPath, accept, maxDepth = DEFAULT_TREE_DEPTH) {
+  async readTextTree(dirPath, accept, maxDepth = defaultTreeDepth()) {
     const result: TreeFile[] = [];
     const walk = async (current: string, depth: number): Promise<void> => {
       if (depth > maxDepth) return;
@@ -259,7 +267,7 @@ async function createNodeReader(): Promise<FileReader> {
      * 混んだ拡張機能ホストでは `await` から戻るまでが待ち時間なので、
      * 回数そのものを減らすことに意味がある（1作品＝1回）。
      */
-    async readTextTree(dirPath, accept, maxDepth = DEFAULT_TREE_DEPTH) {
+    async readTextTree(dirPath, accept, maxDepth = defaultTreeDepth()) {
       const result: TreeFile[] = [];
       const walk = (current: string, depth: number): void => {
         if (depth > maxDepth) return;

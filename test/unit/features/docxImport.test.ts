@@ -100,10 +100,14 @@ function installDisk(): void {
       disk.delete(uri.fsPath);
     },
     stat: async (uri: { fsPath: string }) => {
-      if (disk.has(uri.fsPath)) return { mtime: 0, size: 1 };
+      // **種類も返す**（本物の `stat` は必ず返す）。本文の置き場の決め方
+      // （`manuscriptFolderRule.ts`）は「フォルダーか」を種類で見る
+      if (disk.has(uri.fsPath)) return { type: FileType.File, mtime: 0, size: 1 };
       const prefix = uri.fsPath + separator;
       for (const key of disk.keys()) {
-        if (key.startsWith(prefix)) return { mtime: 0, size: 0 };
+        if (key.startsWith(prefix)) {
+          return { type: FileType.Directory, mtime: 0, size: 0 };
+        }
       }
       throw new FileSystemError("missing", "FileNotFound");
     },

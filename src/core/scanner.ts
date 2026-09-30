@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 import * as path from "./paths";
 import {
   EpisodeFile,
-  SUPPORTED_EXTENSIONS,
   WorkEntry,
   WorkKindKey,
   WorkStats,
@@ -10,16 +9,17 @@ import {
 import { addCounts, emptyCounts } from "./charCount";
 import { countEpisodeChars, episodeBodyForCount } from "./episodeCharCount";
 import { parseEpisodeFileName } from "./episodeParser";
-import { PLOT_FILE, readWorkConfig, workPaths } from "./workRegistry";
-import { AI_INSTRUCTION_TARGETS } from "./aiInstructions";
-import { SYNOPSIS_FILE } from "./synopsisDoc";
-import { TARGET_SHEET_FILE } from "./targetSheetDoc";
+import { readWorkConfig, workPaths } from "./workRegistry";
 import { parseEpisodeMetadata } from "./metadataParser";
-import { isConflictSideFile } from "./conflictFile";
 import { isWorkInfoFile } from "./workInfoFile";
 import { parseCollectedFile, type CollectedEpisode } from "./collectedFile";
 import { memoBadgeText, parseMemos } from "./sceneMemo";
-import { fileReader, isNotFound } from "./fileRead";
+import { fileReader } from "./fileRead";
+import { resolveManuscriptDir } from "./manuscriptFolder";
+import {
+  acceptManuscriptEntry,
+  isKnownNonManuscript,
+} from "./manuscriptFolderRule";
 import { detectEol } from "./eolAudit";
 import type { Eol } from "../models/types";
 
@@ -81,9 +81,10 @@ export interface ScanTiming {
 /**
  * 作品の本文ファイルを走査し、話数解析と文字数計測を行う。
  *
- * 本文フォルダが存在しない場合は、作品フォルダ直下を対象にする。
- * カクヨム等からDLしたファイルをそのまま入れたフォルダを
- * 登録するケースを想定している。
+ * 本文フォルダが存在しない場合（空で、直下に原稿がある場合も）は、
+ * 作品フォルダ直下を対象にする。カクヨム等からDLしたファイルを
+ * そのまま入れたフォルダを登録するケースを想定している。
+ * 判定は `resolveManuscriptDir`（`manuscriptFolder.ts`）。
  */
 export async function scanWork(work: WorkEntry): Promise<{
   episodes: EpisodeFile[];
@@ -147,18 +148,13 @@ export async function scanWork(work: WorkEntry): Promise<{
     本文の読みが1.1秒に落ちたあとも**下ごしらえだけで46秒**かかっていた
     （作者の実機、0.75.0 の計測）。読み口を先に用意して、同じ口で訊く。
 
-    **フォルダーのときだけ本文フォルダーを見る。** 同じ名前のファイルが
-    あっても、その中は歩けない。
+    **どこを歩くかは `resolveManuscriptDir` が決める**（`manuscriptFolder.ts`）。
+    新しい話の置き先や取り込みも同じ関数を通るので、走査だけが別の場所を
+    見ることはない。**空の本文フォルダーは「無い」のと同じに扱う**——git が
+    空のフォルダーを運ばないため、機械ごとに有無が違い、見え方が割れていた
+    （机のPCで第1話が見えなかった件）。
   */
-  let targetDir = p.root;
-  try {
-    const manuscriptStat = await reader.stat(p.manuscript);
-    if (manuscriptStat.type === "directory") targetDir = p.manuscript;
-  } catch (error) {
-    // 無ければ作品の根を読む（これまでどおり）。**それ以外の失敗は投げる**
-    // ——`pathExists` もそうしていた。読めない事情を握りつぶさない
-    if (!isNotFound(error)) throw error;
-  }
+  const targetDir = await resolveManuscriptDir(p, reader);
   /*
     **下ごしらえは、本文の読みとは別に数える**（設計書6.107。0.74.11）。
     作品設定の読み込み・本文フォルダーの有無・読み口の用意は、どれも
@@ -176,7 +172,7 @@ export async function scanWork(work: WorkEntry): Promise<{
   const bulkStartedAt = performance.now();
   const files = await reader.readTextTree(
     targetDir,
-    acceptForScan(p.settings)
+    acceptManuscriptEntry(p.settings)
   );
   const bulkMs = performance.now() - bulkStartedAt;
   /*
@@ -517,125 +513,6 @@ function compareEpisodes(a: EpisodeFile, b: EpisodeFile): number {
   if (nb === null) return -1;
   if (na !== nb) return na - nb;
   return a.fileName.localeCompare(b.fileName, "ja");
-}
-
-/**
- * 原稿として拾うフォルダー・ファイルか（`reader.readTextTree` へ渡す）。
- *
- * **歩き方は読み口が持ち、何を拾うかはここが決める**（設計書6.107）。
- * `.` で始まる名前と深さの上限は読み口の側で落ちる。
- */
-const SKIP_DIRS = new Set([
-  ".aiwriter",
-  ".git",
-  "node_modules",
-  "exports",
-  // **名前でも外したままにする。** 設定フォルダーを別の名前にした作品に
-  // 「設定」という名前のフォルダーが残っていても、これまで数えていなかった
-  // （外すのをやめると、その作品の話数が増える）
-  "設定",
-]);
-
-/**
- * 原稿として拾う選り分けを、作品の設定フォルダーの場所から作る。
- *
- * **設定フォルダーは場所で外す**（0.81.1）。`config.json` の `settingsDir` で
- * 名前を変えられるのに、名前の決め打ち（`設定`）でしか外していなかったため、
- * 別の名前にした作品では人物・世界観・メモの .md がすべて話に数えられた
- * （ノートPCの実機確認、2026-09-23）。
- */
-function acceptForScan(settingsDir: string) {
-  const settingsKey = path.normalizeForComparison(settingsDir);
-  return (
-    name: string,
-    kind: "file" | "directory",
-    fullPath: string
-  ): boolean => {
-    if (kind === "directory") {
-      if (SKIP_DIRS.has(name)) return false;
-      return path.normalizeForComparison(fullPath) !== settingsKey;
-    }
-    // 競合を「両方を残す」で解決したときの退避ファイルは原稿ではない。
-    // 拾うと同じ話数の本文が2つある状態になる
-    if (isConflictSideFile(name)) return false;
-    const ext = path.extname(name).toLowerCase();
-    return (SUPPORTED_EXTENSIONS as readonly string[]).includes(ext);
-  };
-}
-
-/** `filePath` が `dir` の直下にあるか（章フォルダーの中は含めない） */
-function isDirectChild(dir: string, filePath: string): boolean {
-  return (
-    path.normalizeForComparison(path.dirname(filePath)) ===
-    path.normalizeForComparison(dir)
-  );
-}
-
-/**
- * リポジトリの決まりもののファイル（`README.md`・`LICENSE.txt`・`CHANGELOG.md`）。
- *
- * GitHub で作品を管理すると作品の根に置かれる。**名前の頭だけで決める**
- * （`README_ja.md`・`LICENSE-CC.txt` のような変わり種も同じもの）。
- */
-const REPOSITORY_FILE = /^(?:readme|license|licence|changelog)(?:[._-]|$)/i;
-
-/**
- * AIへの指示書のうち、作品の根に置かれるもの（`AGENTS.md`・`GEMINI.md`）。
- *
- * **置き先の表（`AI_INSTRUCTION_TARGETS`）から作る。** 名前を写すと、
- * 置き先が増えたときにここだけ取り残される。フォルダーの中に置くもの
- * （`.claude/skills/…`・`.aiwriter/…`）は、`.` 始まりで元から歩かない。
- */
-const ROOT_INSTRUCTION_FILES = new Set(
-  AI_INSTRUCTION_TARGETS.map((target) => target.instructionPath)
-    .filter((instructionPath) => !/[\\/]/.test(instructionPath))
-    .map((name) => name.toLowerCase())
-);
-
-/**
- * 設定フォルダーの直下にこの拡張機能が作るファイル（プロット・紹介文・
- * ターゲットシート）。**定数から作る**（名前を写さない）。
- *
- * 設定フォルダーはふつう丸ごと歩かない（`acceptForScan`）ので、これが
- * 効くのは**設定フォルダーを本文と同じ場所にした作品**（`settingsDir` を
- * 「.」や本文フォルダーにした形）だけである。
- */
-const SETTINGS_GENERATED_FILES = new Set(
-  [PLOT_FILE, SYNOPSIS_FILE, TARGET_SHEET_FILE].map((name) =>
-    name.toLowerCase()
-  )
-);
-
-/**
- * はっきり原稿でないと分かるファイルか（0.81.1）。
- *
- * **話数が読めないことを理由には外さない。** 作者の作品には、話数の名前と
- * 並んで `続き.txt`（本文）を根に置いたものがある。外すのは
- * 「作者の原稿ではありえない名前」の短い一覧だけで、「メモ」「about」
- * 「あとがき」「番外編」「続き」は**外さない**（原稿かもしれない）。
- *
- * - 作品の根を歩いたとき、根の直下の README・LICENSE・CHANGELOG と AIへの指示書
- * - 設定フォルダーの直下の、この拡張機能が作るファイル
- *
- * 本文フォルダーの中と章フォルダーの中は、名前で外さない。作者が
- * 「ここが原稿」と決めた場所である。
- *
- * @param rootDir 作品の根を歩いているときだけ、その根。本文フォルダーを歩くときは undefined
- */
-function isKnownNonManuscript(
-  filePath: string,
-  rootDir: string | undefined,
-  settingsDir: string
-): boolean {
-  const name = path.basename(filePath);
-  const lower = name.toLowerCase();
-  if (rootDir !== undefined && isDirectChild(rootDir, filePath)) {
-    if (REPOSITORY_FILE.test(name)) return true;
-    if (ROOT_INSTRUCTION_FILES.has(lower)) return true;
-  }
-  return (
-    SETTINGS_GENERATED_FILES.has(lower) && isDirectChild(settingsDir, filePath)
-  );
 }
 
 /**

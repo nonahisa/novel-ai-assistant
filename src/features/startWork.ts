@@ -2,6 +2,7 @@ import * as path from "../core/paths";
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { pathExists } from "../core/fileSystem";
+import { resolveManuscriptDir } from "../core/manuscriptFolder";
 import { buildPlotTemplate } from "../core/plotTemplate";
 import { manuscriptViewTypeFor } from "../core/manuscriptViewTypes";
 import { PLOT_FILE, readWorkConfig, workPaths } from "../core/workRegistry";
@@ -233,8 +234,9 @@ export async function createFirstEpisodeFile(
 ): Promise<string | undefined> {
   const config = await readWorkConfig(work);
   const p = workPaths(work, config);
-  // 本文フォルダーを持たない形で登録された作品では作品ルートへ置く
-  const manuscriptDir = (await pathExists(p.manuscript)) ? p.manuscript : p.root;
+  // 本文フォルダーを持たない形で登録された作品では作品ルートへ置く。
+  // 判定は一覧の走査と同じ関数（空の本文フォルダーの扱いも揃う）
+  const manuscriptDir = await resolveManuscriptDir(p);
 
   const settings = vscode.workspace.getConfiguration("novelai");
   const filePath = path.join(

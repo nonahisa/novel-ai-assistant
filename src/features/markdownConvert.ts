@@ -10,7 +10,7 @@ import {
 } from "../core/markdownConversion";
 import type { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
-import { pathExists } from "../core/fileSystem";
+import { resolveManuscriptDir } from "../core/manuscriptFolder";
 import {
   readTextFile,
   writeTextFilePreservingFormat,
@@ -390,8 +390,9 @@ export async function convertToMarkdown(work: WorkEntry): Promise<boolean> {
 /**
  * 本文の置き場。
  *
- * **本文フォルダーが無ければ、作品フォルダーの直下を見る**
- * （`scanner.ts` と同じ扱い。話数ファイルを直に置く作者がいる）。
+ * **本文フォルダーが無ければ（空で、直下に原稿があっても）、作品フォルダーの
+ * 直下を見る**。判定は一覧の走査と同じ `resolveManuscriptDir`（話数ファイルを
+ * 直に置く作者がいる）。
  */
 async function manuscriptFolder(work: WorkEntry): Promise<string> {
   let config;
@@ -400,8 +401,7 @@ async function manuscriptFolder(work: WorkEntry): Promise<string> {
   } catch {
     config = undefined;
   }
-  const paths = workPaths(work, config);
-  return (await pathExists(paths.manuscript)) ? paths.manuscript : paths.root;
+  return resolveManuscriptDir(workPaths(work, config));
 }
 
 async function countPlainText(folder: string): Promise<number> {

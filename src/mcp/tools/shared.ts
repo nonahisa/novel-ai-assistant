@@ -7,6 +7,7 @@ import {
   SUPPORTED_EXTENSIONS,
 } from "../../models/types";
 import { goesOutside } from "../../core/pathText";
+import { resolveManuscriptDirSync } from "../../core/manuscriptFolderRule";
 import { decodeBytes } from "../../core/textDecode";
 import { parseEpisodeFileName } from "../../core/episodeParser";
 import { isWorkInfoFile } from "../../core/workInfoFile";
@@ -149,14 +150,51 @@ export function resolveInsideFolder(folder: string, relative: string): string {
   return candidate;
 }
 
-/** 本文の置き場所。`本文/` が無ければ作品フォルダーの直下 */
+/**
+ * 本文の置き場所。`本文/` が無ければ作品フォルダーの直下。
+ *
+ * **決め方は拡張機能と同じもの**（`core/manuscriptFolderRule.ts`）を通す。
+ * `本文/` が空で、直下に原稿があるなら直下を見る——git は空のフォルダーを
+ * 運ばないので、機械ごとに `本文/` の有無が違い、見え方が割れていた
+ * （机のPCで第1話が見えなかった件）。読むのは Node の同期の `fs`。
+ */
 export function bodyDirOf(folder: string): string {
   const base = nodePath.resolve(folder);
   if (!fs.existsSync(base)) {
     throw new McpToolError(`作品フォルダーが見つかりません: ${folder}`);
   }
-  const manuscripts = nodePath.join(base, DEFAULT_MANUSCRIPT_DIR);
-  return fs.existsSync(manuscripts) ? manuscripts : base;
+  return resolveManuscriptDirSync(
+    {
+      root: base,
+      manuscript: nodePath.join(base, DEFAULT_MANUSCRIPT_DIR),
+      settings: nodePath.join(base, DEFAULT_SETTINGS_DIR),
+    },
+    {
+      kind(location) {
+        try {
+          const info = fs.statSync(location);
+          return info.isDirectory() ? "directory" : info.isFile() ? "file" : "other";
+        } catch (error) {
+          // 見つからないときだけ「無い」。それ以外は投げる（拡張機能と同じ）
+          if ((error as { code?: unknown }).code === "ENOENT") return "missing";
+          throw error;
+        }
+      },
+      list(location) {
+        try {
+          return fs.readdirSync(location, { withFileTypes: true }).map(
+            (entry) =>
+              [
+                entry.name,
+                entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other",
+              ] as const
+          );
+        } catch {
+          return undefined;
+        }
+      },
+    }
+  );
 }
 
 /**

@@ -553,13 +553,22 @@ describe("作品の根を歩くとき", () => {
    * どのフォルダーへ入るかを決めるのは読み口へ渡す選り分けなので、
    * 歩き方を作り物に差し替えると、確かめたいところを素通りする。
    */
-  function stubWorkTree(tree: Record<string, string>) {
+  function stubWorkTree(
+    tree: Record<string, string>,
+    /**
+     * 中身の無いフォルダー（相対パス）。**git は空のフォルダーを運ばない**ので、
+     * 登録した機械にだけ `本文/` が空のまま残る形を作るのに使う
+     */
+    emptyDirs: readonly string[] = []
+  ) {
     const files = new Map<string, string>();
     for (const [rel, text] of Object.entries(tree)) {
       files.set(`${ROOT}/${rel}`, text);
     }
+    const empties = emptyDirs.map((rel) => `${ROOT}/${rel}`);
     const isDirectory = (at: string): boolean =>
-      [...files.keys()].some((file) => file.startsWith(`${at}/`));
+      empties.includes(at) ||
+      [...files.keys(), ...empties].some((entry) => entry.startsWith(`${at}/`));
     const readDirectory = vi.fn(async (uri: { fsPath: string }) => {
       const at = key(uri.fsPath);
       const seen = new Map<string, FileType>();
@@ -568,6 +577,11 @@ describe("作品の根を歩くとき", () => {
         const rest = file.slice(at.length + 1);
         const [head, ...tail] = rest.split("/");
         seen.set(head, tail.length > 0 ? FileType.Directory : FileType.File);
+      }
+      for (const dir of empties) {
+        if (!dir.startsWith(`${at}/`)) continue;
+        const [head] = dir.slice(at.length + 1).split("/");
+        if (!seen.has(head)) seen.set(head, FileType.Directory);
       }
       return [...seen.entries()];
     });
@@ -699,6 +713,76 @@ describe("作品の根を歩くとき", () => {
     expect(skipped(result)).toEqual(
       ["plot.md", "synopsis.md", "ターゲットシート.md"].sort()
     );
+  });
+
+  /*
+    **空の本文フォルダーが、直下の原稿を隠していた**（机のPCで第1話が
+    見えなかった件）。config.json は `manuscriptDir: 本文` なのに原稿は
+    作品の直下にあり、登録した機械にだけ空の `本文/` が残っていた。git は
+    空のフォルダーを運ばないので、別の機械では直下を歩いて見えていた。
+    **機械ごとに見え方が変わらないこと**を押さえる。
+  */
+  test("空の本文フォルダーがあっても、直下の原稿を拾う（フォルダーが無いときと同じ）", async () => {
+    const tree = {
+      ".aiwriter/config.json": configJson("設定"),
+      "001.txt": "灯が歩いた。",
+      "002.txt": "川を渡った。",
+    };
+    stubWorkTree(tree, ["本文"]);
+    const withEmpty = await scanWork(work);
+
+    stubWorkTree(tree);
+    const without = await scanWork(work);
+
+    expect(names(withEmpty)).toEqual(["001.txt", "002.txt"]);
+    expect(key(withEmpty.manuscriptDir)).toBe(ROOT);
+    // **フォルダーの有無で結果が変わらない**
+    expect(names(withEmpty)).toEqual(names(without));
+    expect(key(withEmpty.manuscriptDir)).toBe(key(without.manuscriptDir));
+  });
+
+  test("本文フォルダーに1件でも原稿があれば、これまでどおりそちらだけを歩く", async () => {
+    stubWorkTree({
+      ".aiwriter/config.json": configJson("設定"),
+      "本文/001.txt": "灯が歩いた。",
+      "下書き.txt": "根の下書き。",
+    });
+
+    const result = await scanWork(work);
+
+    expect(names(result)).toEqual(["001.txt"]);
+    expect(key(result.manuscriptDir)).toBe(`${ROOT}/本文`);
+  });
+
+  test("本文フォルダーの原稿が章フォルダーの中だけでも、本文フォルダーを歩く", async () => {
+    stubWorkTree({
+      ".aiwriter/config.json": configJson("設定"),
+      "本文/第一章/001.txt": "灯が歩いた。",
+      "下書き.txt": "根の下書き。",
+    });
+
+    const result = await scanWork(work);
+
+    expect(names(result)).toEqual(["001.txt"]);
+    expect(key(result.manuscriptDir)).toBe(`${ROOT}/本文`);
+  });
+
+  test("登録したばかりの作品（空の本文フォルダー、直下は README だけ）は本文フォルダーのまま", async () => {
+    // 新しい話は本文フォルダーへ置きたい。README は原稿ではないので、
+    // これを理由に直下へ切り替えない
+    stubWorkTree(
+      {
+        ".aiwriter/config.json": configJson("設定"),
+        "README.md": "# 作品\n",
+        "設定/人物.md": "## 灯\n",
+      },
+      ["本文"]
+    );
+
+    const result = await scanWork(work);
+
+    expect(result.stats.fileCount).toBe(0);
+    expect(key(result.manuscriptDir)).toBe(`${ROOT}/本文`);
   });
 
   // ─── ここから下は、既存の作品の話数が変わらないことを守る ───

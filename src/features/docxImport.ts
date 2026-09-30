@@ -6,7 +6,7 @@ import {
   describeNotationClashLines,
   docxToMarkdown,
 } from "../core/docxToMarkdown";
-import { pathExists } from "../core/fileSystem";
+import { resolveManuscriptDir } from "../core/manuscriptFolder";
 import { timestampedFileNameCandidates } from "../core/timestampedFileName";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import type { WorkEntry } from "../models/types";
@@ -196,8 +196,9 @@ async function chooseFolder(work?: WorkEntry): Promise<string | undefined> {
 /**
  * 本文の置き場。
  *
- * **本文フォルダーが無ければ、作品フォルダーの直下を見る**
- * （`markdownConvert.ts` と同じ扱い。原稿を直に置く作者がいる）。
+ * **本文フォルダーが無ければ（空で、直下に原稿があっても）、作品フォルダーの
+ * 直下を見る**。判定は一覧の走査と同じ `resolveManuscriptDir`（原稿を直に
+ * 置く作者がいる）。
  */
 async function manuscriptFolder(work: WorkEntry): Promise<string> {
   let config;
@@ -206,8 +207,7 @@ async function manuscriptFolder(work: WorkEntry): Promise<string> {
   } catch {
     config = undefined;
   }
-  const paths = workPaths(work, config);
-  return (await pathExists(paths.manuscript)) ? paths.manuscript : paths.root;
+  return resolveManuscriptDir(workPaths(work, config));
 }
 
 /**

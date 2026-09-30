@@ -186,6 +186,7 @@ import {
   withProgress,
 } from "./views/progress";
 import { pathExists } from "./core/fileSystem";
+import { resolveManuscriptDir } from "./core/manuscriptFolder";
 import { describeTuningScope } from "./core/tuningScope";
 import {
   disposeLog,
@@ -3994,10 +3995,10 @@ export async function activate(
         const config = await readWorkConfig(work);
         const p = workPaths(work, config);
 
-        // 本文フォルダを持たない既存作品では、作品ルートへ話数を追加する
-        const manuscriptDir = (await pathExists(p.manuscript))
-          ? p.manuscript
-          : p.root;
+        // 本文フォルダを持たない既存作品では、作品ルートへ話数を追加する。
+        // **一覧の走査と同じ関数で決める**——空の本文フォルダーが残って
+        // いても、原稿が直下にあれば直下へ足す（一覧に出る場所と揃える）
+        const manuscriptDir = await resolveManuscriptDir(p);
 
         const episodes = await treeProvider.getEpisodes(work);
         const parsed = episodes.map((e) =>

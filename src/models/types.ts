@@ -207,3 +207,11 @@ export const CONFIG_FILE = "config.json";
 export const DEFAULT_MANUSCRIPT_DIR = "本文";
 export const DEFAULT_SETTINGS_DIR = "設定";
 export const SUPPORTED_EXTENSIONS = [".txt", ".md"] as const;
+/**
+ * プロットのファイル名。設定フォルダーの直下に置く。
+ *
+ * `core/workRegistry.ts` から出しているのは写し（再輸出）。ここへ置いたのは、
+ * 本文の置き場の決め方（`core/manuscriptFolderRule.ts`）が `vscode` を
+ * 持ち込まずに参照するため（MCP の束にも入る）
+ */
+export const PLOT_FILE = "plot.md";

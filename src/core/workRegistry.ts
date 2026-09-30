@@ -7,6 +7,7 @@ import {
   CONFIG_SCHEMA_VERSION,
   DEFAULT_MANUSCRIPT_DIR,
   DEFAULT_SETTINGS_DIR,
+  PLOT_FILE,
   WorkAnnounceConfig,
   WorkConfig,
   WorkEntry,
@@ -1171,8 +1172,13 @@ export async function scaffoldWorkFolder(
   }
 }
 
-/** プロットのファイル名。設定フォルダーの直下に置く */
-export const PLOT_FILE = "plot.md";
+/**
+ * プロットのファイル名。設定フォルダーの直下に置く。
+ *
+ * **定義は `models/types.ts`**（`vscode` を持ち込まない場所に置くため）。
+ * ここから読んでいる呼び手が多いので、同じ名前で出し続ける
+ */
+export { PLOT_FILE };
 
 async function writeIfAbsent(filePath: string, content: string): Promise<void> {
   const uri = path.toUri(filePath);
