@@ -53,7 +53,53 @@ export interface AcceptedProofreadIssue {
    * 行が確定する `locateProofreadIssue` まで実体のまま持ち回る。
    */
   monotony?: MonotonousRun;
+  /**
+   * AIは修正案を書いたが、**検算が空にした**ときの理由（2026-10-01 の記録の不具合4）。
+   *
+   * 修正案だけを空にして指摘を残す扱い（作者の裁定、2026-09-17）は変えない。
+   * ただ、黙って空にすると「AIが修正案を書かなかった」のか「書いたが危なくて
+   * 外した」のかが結果から分からない（CLAUDE.md の失敗2「推敲は修正案が10件中
+   * 10件空」を測るときにも、この2つを分けて数えられない）。
+   *
+   * 初めから空だったもの、語尾単調・視点（プロンプトで "" を頼み、コードでも
+   * 必ず空にする札）には付けない。
+   */
+  suggestionCleared?: SuggestionClearedReason;
 }
+
+/**
+ * 修正案を空にした理由。
+ *
+ * - `placeholder`：「空文字」「なし」など、空のつもりの書き写し（注記は付けない）
+ * - `drops_tail`：原文の後ろを落としている（`dropsOriginalTail`）
+ * - `ambiguous_in_line`：原文がその行に2か所以上ある（`isAmbiguousInLine`）
+ * - `new_kanji`：漢字ひらきなのに原文に無い漢字が入る（`introducesNewKanji`）
+ * - `paraphrase`：漢字ひらきなのに言い換えている（`paraphrasesInsteadOfOpening`）
+ */
+export type SuggestionClearedReason =
+  | "placeholder"
+  | "drops_tail"
+  | "ambiguous_in_line"
+  | "new_kanji"
+  | "paraphrase";
+
+/**
+ * 修正案を外したことを、作者へ見える説明に添える一言。
+ *
+ * **画面は `explanation` しか出さない**ので、ここへ添えないと作者には
+ * 「修正案の無い指摘」としか見えない。`placeholder` は AI が空のつもりで
+ * 書いたものなので、外したことにはならず添えない。
+ */
+const SUGGESTION_CLEARED_NOTE: Record<
+  Exclude<SuggestionClearedReason, "placeholder">,
+  string
+> = {
+  drops_tail: "（修正案は原文の後ろを落としていたので外しました）",
+  ambiguous_in_line:
+    "（同じ字句がこの行に2か所あり、どちらへ当てるか決められないので修正案を外しました）",
+  new_kanji: "（修正案がひらいた形ではなかったので外しました）",
+  paraphrase: "（修正案がひらいた形ではなく言い換えだったので外しました）",
+};
 
 export interface RejectedProofreadIssue {
   raw: unknown;
@@ -152,7 +198,15 @@ export interface RejectedProofreadIssue {
      * ひらこうとしている（作者の裁定、2026-09-26 午後）。漢字とかなのどちらで
      * 書くかは揃え方の話で、揃えたいときは表記ゆれの機能に任せる
      */
-    | "formal_noun";
+    | "formal_noun"
+    /**
+     * 「漢字ひらき」の札で、AIの修正案が**原文の漢字を1字もひらいていない**
+     * （2026-10-01 の記録。台詞の「痛いところ」→「痛いとこ」）。
+     * 修正案そのものが「ここにひらく字は無い」と言っているので、指摘ごと落とす。
+     * 修正案だけ空にして残すと、作者には「ひらがなにできます」とだけ出て、
+     * どこの何をひらくのか分からない
+     */
+    | "opens_no_kanji";
 }
 
 const LEVELS = new Set(["high", "medium", "low"]);
@@ -620,6 +674,22 @@ export function introducesNewKanji(
   );
   return Array.from(suggestion).some(
     (char) => kanji.test(char) && !inOriginal.has(char)
+  );
+}
+
+/**
+ * 修正案が、原文の漢字を**1字でもひらいているか**（2026-10-01 の記録）。
+ *
+ * 字ごとに数を比べ、修正案で減った漢字があればひらいたとみなす。読みの辞書は
+ * 使わない（`paraphrasesInsteadOfOpening` と同じ理由）。言い換えでも漢字が
+ * 減っていれば「その字をひらく指摘」としては正しいので、ここでは真を返す。
+ */
+export function opensAnyKanji(original: string, suggestion: string): boolean {
+  const han = /[\p{Script=Han}々]/u;
+  const count = (text: string, char: string): number =>
+    Array.from(text).filter((c) => c === char).length;
+  return Array.from(new Set(Array.from(original))).some(
+    (char) => han.test(char) && count(suggestion, char) < count(original, char)
   );
 }
 
@@ -1609,17 +1679,25 @@ export function validateProofreadIssues(
     // 修正案だけ空にする（作者の裁定、2026-09-17）
     // **視点の修正案も、コードで必ず空にする**（1.10）。わざと視点を移す
     // 書き方があり、直すかどうか・どう直すかは作者が決める
+    // **空にした理由を残す**（2026-10-01 の記録の不具合4）。黙って空にすると、
+    // AIが書かなかったのか検算が外したのかが分からない
+    const clearedBy: SuggestionClearedReason | undefined =
+      !suggestion || reason === "語尾単調" || reason === "視点"
+        ? undefined
+        : isPlaceholderText(suggestion, true)
+          ? "placeholder"
+          : dropsOriginalTail(original, suggestion)
+            ? "drops_tail"
+            : isAmbiguousInLine(chunkLines[line - firstLine] ?? "", original)
+              ? "ambiguous_in_line"
+              : reason === "漢字ひらき" && introducesNewKanji(original, suggestion)
+                ? "new_kanji"
+                : reason === "漢字ひらき" &&
+                    paraphrasesInsteadOfOpening(original, suggestion)
+                  ? "paraphrase"
+                  : undefined;
     const usableSuggestion =
-      reason === "語尾単調" ||
-      reason === "視点" ||
-      isPlaceholderText(suggestion, true) ||
-      dropsOriginalTail(original, suggestion) ||
-      isAmbiguousInLine(chunkLines[line - firstLine] ?? "", original) ||
-      (reason === "漢字ひらき" && introducesNewKanji(original, suggestion)) ||
-      (reason === "漢字ひらき" &&
-        paraphrasesInsteadOfOpening(original, suggestion))
-        ? ""
-        : suggestion;
+      reason === "語尾単調" || reason === "視点" || clearedBy ? "" : suggestion;
     // 原文と同じものを「修正案」として返してくる。押しても何も起きない。
     // **空は別物**（直し方を作者に委ねる指摘であって、間違いではない）
     if (
@@ -1628,6 +1706,20 @@ export function validateProofreadIssues(
         normalizeForComparison(usableSuggestion)
     ) {
       rejected.push({ raw: item, reason: "no_change" });
+      continue;
+    }
+    // **漢字ひらきの修正案が、原文の漢字を1字もひらいていない**（2026-10-01 の記録）。
+    // 「痛いところ」→「痛いとこ」は言い換えとして修正案だけ空になり、指摘は
+    // 「ひらがなにできます」のまま通っていた。AI自身の案が「ひらく字は無い」と
+    // 言っているので指摘ごと落とす。**ひらいた字が1つでもあれば落とさない**
+    // （「然し」→「でも」は「然し」をひらく指摘として正しい。作者の裁定、2026-09-17）
+    if (
+      reason === "漢字ひらき" &&
+      suggestion &&
+      clearedBy !== "placeholder" &&
+      !opensAnyKanji(original, suggestion)
+    ) {
+      rejected.push({ raw: item, reason: "opens_no_kanji" });
       continue;
     }
     // **ひらく字の無い所に貼った漢字ひらきは出さない**（推敲の比べ、2026-09-26）。
@@ -1687,6 +1779,10 @@ export function validateProofreadIssues(
     // 連続の先頭の文を引用にする。`heads` は「…」で切ってあるので使えない
     // （引用は本文に実在する文字列でなければならない）
     const anchor = run?.first ?? "";
+    const clearedNote =
+      clearedBy && clearedBy !== "placeholder"
+        ? SUGGESTION_CLEARED_NOTE[clearedBy]
+        : "";
 
     passed.push({
       line: run ? run.startLine : line,
@@ -1700,15 +1796,16 @@ export function validateProofreadIssues(
       // ファイルの行が決まる `locateProofreadIssue` で組む
       explanation: run
         ? ""
-        : reason === "漢字ひらき"
-          ? // 漢字ひらきには、常用漢字表との照合結果を参考として添える
-            withNonJouyouNote(asString(item.explanation), original)
-          : reason === "視点"
-            ? // 視点には、いつも「わざとなら」の断りを添える（1.11）
-              withIntentNote(asString(item.explanation))
-            : asString(item.explanation),
+        : (reason === "漢字ひらき"
+            ? // 漢字ひらきには、常用漢字表との照合結果を参考として添える
+              withNonJouyouNote(asString(item.explanation), original)
+            : reason === "視点"
+              ? // 視点には、いつも「わざとなら」の断りを添える（1.11）
+                withIntentNote(asString(item.explanation))
+              : asString(item.explanation)) + clearedNote,
       confidence: level(item.confidence),
       ...(run ? { monotony: run } : {}),
+      ...(clearedBy ? { suggestionCleared: clearedBy } : {}),
     });
   }
 
