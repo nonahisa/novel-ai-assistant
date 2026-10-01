@@ -139,9 +139,9 @@ const MAX_NUM_CTX = 10_000_000;
 /**
  * どの機能か。
  *
- * **名前の意味を書くのは `novel.run` の1本だけ**にしてある（`options` と
- * 同じ理由）。16の呼び名を3本に写すと、それだけで千字に届く——一覧は
- * 1度にぜんぶ届くので、隣の道具を指すほうが確かである。
+ * **名前の意味を書くのは `novel.run` と `novel.prompt` の2本**にしてある
+ * （`validate` は prompt／run が返した chunkId で来るので、隣を指す）。
+ * 全部に写すと千字に届く——一覧は1度にぜんぶ届く。
  */
 const FEATURE_INPUT = {
   feature: z
@@ -271,7 +271,9 @@ function optionsInput(describe: string) {
 
 export const NOVEL_PROMPT_INPUT = {
   ...FOLDER_INPUT,
-  ...FEATURE_INPUT,
+  // 入口になるのは prompt（作者の裁定 2026-10-01）。一覧が run にしか無いと、
+  // prompt から入った外部AIは名前だけで機能を選ぶことになる（opening が埋もれた）
+  ...FEATURE_INPUT_WITH_LABELS,
   ...TARGET_INPUT,
   ...optionsInput(OPTIONS_SEE_RUN),
 };

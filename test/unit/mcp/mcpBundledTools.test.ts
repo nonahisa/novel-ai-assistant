@@ -8,6 +8,7 @@ import {
   FILE_TARGET_FEATURES as MEASURE_FILE_TARGETS,
 } from "../../../scripts/measureScoring.mjs";
 import {
+  FEATURE_HINTS,
   FEATURE_LABELS,
   FEATURE_NAMES,
   FILE_TARGET_FEATURES,
@@ -364,6 +365,15 @@ describe("入力の形", () => {
       z.object(NOVEL_VALIDATE_INPUT).safeParse({ folder: WORK, response: "{}" })
         .success
     ).toBe(false);
+  });
+
+  it("novel.prompt の feature の説明に、機能ごとの一言が載る（opening が埋もれない）", () => {
+    const text = JSON.stringify(
+      z.toJSONSchema(z.object(NOVEL_PROMPT_INPUT)).properties?.feature
+    );
+    // 呼び名と一言は製品側の定義（core/mcpFeatures.ts）から。文言を写していない
+    expect(text).toContain(`opening＝${FEATURE_LABELS.opening}：${FEATURE_HINTS.opening}`);
+    expect(text).toContain(FEATURE_HINTS.typo);
   });
 
   it("detect と material は、扱える feature しか受けない", () => {

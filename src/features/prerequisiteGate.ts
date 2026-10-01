@@ -19,7 +19,16 @@ import { createLocationStore, createWorldStore } from "../core/abilityStore";
 import { SynopsisStore } from "../core/synopsisStore";
 import { readPlotText } from "../core/plotFile";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
-import { EPISODE_PLOTS_DIR } from "../core/resumeSheet";
+import {
+  EPISODE_PLOTS_DIR,
+  episodePlotChapterFromFileName,
+} from "../core/resumeSheet";
+import {
+  episodePlotShortfall,
+  judgeEpisodePlotText,
+  type EpisodePlotJudgement,
+} from "../core/episodePlotDoc";
+import { readTextFile } from "../core/textFile";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import { findAction, type ActionItem } from "../views/actionList";
 import { logFailure, useLogFile } from "../core/logger";
@@ -117,21 +126,30 @@ async function hasSettings(work: WorkEntry): Promise<boolean> {
   });
 }
 
+/** 単話プロットの置き場の様子。ファイルの有無だけでなく、中身まで見る */
+interface EpisodePlotStatus {
+  /** 揃っていない理由。揃っていれば undefined */
+  shortfall: string | undefined;
+  /** ひな形のままのファイル（開いて書いてもらう先）。話数の順 */
+  unwrittenFiles: string[];
+}
+
 /**
- * 単話プロットが1つでもあるか。
+ * 単話プロットが揃っているか。**中身まで見る**（2026-10-01、作者の裁定）。
  *
- * **この判定は粗い。1つでもあれば通す。** どの話を検査するかは関門を
- * 抜けたあとに選ばせる作りなので、関門の時点では「第何話ぶんが要るか」が
- * まだ決まっていない。そのため、第3話を検査したいのに第1話ぶんしか
- * 無い場合は、ここを素通りする。
+ * 以前はファイルが1つでもあれば通していたので、作っただけで展開が空の
+ * ひな形でも先へ進み、機能の側のモーダルで初めて断られていた。外部AIの口
+ * （`novel.scan`・`novel.prompt`）は中身まで見ていたので、**判定は同じ関数**
+ * （`core/episodePlotDoc.ts` の `judgeEpisodePlotText`・`episodePlotShortfall`）を通す。
  *
- * **承知のうえで直さない**（2026-09-18 の裁定）。
- * 話数を先に訊けば判定はできるが、それは関門が機能の役目を先取りすること
- * になり、問いが1つ増える。素通りしたあとは `checkEpisodePlot.ts` が
- * 「第3話の単話プロットがまだありません。」と正しく断るので、作者が
- * 行き止まりに置き去りにされることはない。
+ * **粗さは変えない。1つでも書かれていれば通す。** どの話を検査するかは関門を
+ * 抜けたあとに選ばせる作りで、関門の時点では「第何話ぶんが要るか」がまだ
+ * 決まっていない（2026-09-18 の裁定）。選んだ話が空なら `checkEpisodePlot.ts`
+ * が正しく断る。**読めないファイルは「揃っている」扱い**（6.94.6）。
  */
-async function hasEpisodePlot(work: WorkEntry): Promise<boolean> {
+async function readEpisodePlotStatus(
+  work: WorkEntry
+): Promise<EpisodePlotStatus> {
   const config = await readWorkConfig(work);
   const directory = path.join(
     workPaths(work, config).settings,
@@ -142,14 +160,70 @@ async function hasEpisodePlot(work: WorkEntry): Promise<boolean> {
     entries = await vscode.workspace.fs.readDirectory(path.toUri(directory));
   } catch {
     // 置き場そのものが無い＝1つも作っていない。記録には残さない
-    return false;
+    return { shortfall: episodePlotShortfall([]), unwrittenFiles: [] };
   }
-  return hasEpisodePlotFile(
-    entries
-      .filter(([, type]) => type === vscode.FileType.File)
-      .map(([name]) => name)
-  );
+  const names = entries
+    .filter(([, type]) => type === vscode.FileType.File)
+    .map(([name]) => name)
+    // 何を単話プロットと数えるかは `core/prerequisiteCheck.ts` の規則
+    .filter((name) => hasEpisodePlotFile([name]))
+    .sort(
+      (a, b) =>
+        (episodePlotChapterFromFileName(a) ?? Number.MAX_SAFE_INTEGER) -
+          (episodePlotChapterFromFileName(b) ?? Number.MAX_SAFE_INTEGER) ||
+        a.localeCompare(b)
+    );
+
+  const judged: Array<EpisodePlotJudgement & { plotPath: string; file: string }> =
+    [];
+  for (const name of names) {
+    const file = path.join(directory, name);
+    try {
+      judged.push({
+        plotPath: name,
+        file,
+        ...judgeEpisodePlotText((await readTextFile(file)).text),
+      });
+    } catch {
+      // 読めないことを理由に止めない（`hasPrerequisite` の決まり）
+      judged.push({ plotPath: name, file, written: null });
+    }
+  }
+  return {
+    shortfall: episodePlotShortfall(judged),
+    unwrittenFiles: judged
+      .filter((entry) => entry.written === false)
+      .map((entry) => entry.file),
+  };
 }
+
+async function hasEpisodePlot(work: WorkEntry): Promise<boolean> {
+  return (await readEpisodePlotStatus(work)).shortfall === undefined;
+}
+
+/**
+ * ひな形のままの単話プロットで止め、書く場所（そのファイル）へ案内する。
+ *
+ * **「作る」道は出さない。** ファイルは既にある——作り直しても同じひな形が
+ * 増えるだけで、作者に要るのは「ここへ書く」である。
+ *
+ * @returns 作者がファイルを開いたか
+ */
+export async function stopForUnwrittenEpisodePlot(
+  shortfall: string,
+  file: string
+): Promise<boolean> {
+  const answer = await vscode.window.showWarningMessage(
+    "単話プロットの展開がまだ書かれていません。",
+    { modal: true, detail: `${shortfall}\n「展開（箇条書き）」を書いてから実行してください。` },
+    UNWRITTEN_OPEN_LABEL
+  );
+  if (answer !== UNWRITTEN_OPEN_LABEL) return false;
+  await vscode.commands.executeCommand("vscode.open", path.toUri(file));
+  return true;
+}
+
+export const UNWRITTEN_OPEN_LABEL = "単話プロットのファイルを開く";
 
 /**
  * 押した操作の前提を見て、足りなければ道を出す。
@@ -167,6 +241,19 @@ export async function checkPrerequisites(
   const missing = missingPrerequisites(needs, present);
   // 揃っていれば何も出さない。余計な確認を増やさない
   if (missing.length === 0) return "proceed";
+
+  // 先に作るべきものが無いときに限り、ひな形のままの単話プロットは
+  // 「作る」ではなく「書く」へ案内する（ファイルは既にある）
+  if (missing[0] === "episodePlot") {
+    const status = await readEpisodePlotStatus(work);
+    if (status.shortfall && status.unwrittenFiles.length > 0) {
+      await stopForUnwrittenEpisodePlot(
+        status.shortfall,
+        status.unwrittenFiles[0]
+      );
+      return "handled";
+    }
+  }
 
   return await askPrerequisiteRoute(item, work, missing);
 }

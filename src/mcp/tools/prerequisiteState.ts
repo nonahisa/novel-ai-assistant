@@ -11,8 +11,8 @@ import {
   episodePlotChapterFromFileName,
 } from "../../core/resumeSheet";
 import {
-  episodePlotUnwrittenReason,
-  parseEpisodePlot,
+  episodePlotShortfall,
+  judgeEpisodePlotText,
 } from "../../core/episodePlotDoc";
 import type { PrerequisiteReasons } from "../../core/featurePrerequisites";
 import type { Prerequisite } from "../../core/prerequisites";
@@ -115,9 +115,8 @@ function hasSynopsis(folder: string): boolean {
  * 見るかは前提を見たあとに決まる）。どの話が書かれているかは
  * `novel.scan` の `episodePlots` が1件ずつ返す。
  *
- * 画面の関門（`features/prerequisiteGate.ts`）はファイルの有無だけを見た
- * ままである。画面ではそのあと機能がモーダルで断るので、作者が材料の
- * 無いまま結果を受け取ることは無い。
+ * 画面の関門（`features/prerequisiteGate.ts`）も同じ判定を通す
+ * （`core/episodePlotDoc.ts` の `judgeEpisodePlotText`・`episodePlotShortfall`）。
  */
 function hasEpisodePlots(folder: string): boolean {
   return episodePlotShortfall(episodePlotEntries(folder)) === undefined;
@@ -178,10 +177,7 @@ export function episodePlotEntries(folder: string): EpisodePlotEntry[] {
         }）。`,
       };
     }
-    const reason = episodePlotUnwrittenReason(parseEpisodePlot(text));
-    return reason
-      ? { plotPath, chapter, written: false, reason }
-      : { plotPath, chapter, written: true };
+    return { plotPath, chapter, ...judgeEpisodePlotText(text) };
   });
 
   // 話数の読めるものを先に小さい順、読めないものは名前順で後ろへ
@@ -193,26 +189,8 @@ export function episodePlotEntries(folder: string): EpisodePlotEntry[] {
   });
 }
 
-/**
- * 単話プロットが揃っていない理由。揃っていれば undefined。
- *
- * **読めなかったものは揃っている扱い**（`hasPrerequisite` と同じ 6.94.6 の
- * 決まり）。読めないことを理由に断ると、壊れたファイルが1つある作品では
- * 何も呼べなくなる。
- */
-export function episodePlotShortfall(
-  entries: readonly EpisodePlotEntry[]
-): string | undefined {
-  if (entries.some((entry) => entry.written !== false)) return undefined;
-  if (entries.length === 0) return "単話プロットのファイルがまだありません。";
-  if (entries.length === 1) {
-    return `${entries[0].plotPath} はありますが、${entries[0].reason ?? ""}`;
-  }
-  return (
-    `${entries.length}件ありますが、どれも展開（箇条書き）が書かれていません。` +
-    "話ごとの様子は novel.scan の episodePlots にあります。"
-  );
-}
+// 判定は core に1つ（画面の関門と共通）。ここからも引き続き呼べるようにしておく
+export { episodePlotShortfall };
 
 /**
  * 揃っていない前提の理由（`novel.scan` と、機能の断り文句に添える）。

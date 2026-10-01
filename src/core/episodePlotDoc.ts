@@ -168,6 +168,44 @@ export function episodePlotUnwrittenReason(
   return "展開（箇条書き）がまだ書かれていません。";
 }
 
+/** 単話プロット1件の判定（書かれているか。読めなかったものは null） */
+export interface EpisodePlotJudgement {
+  written: boolean | null;
+  /** 書かれていないときの理由 */
+  reason?: string;
+}
+
+/**
+ * 単話プロットの本文から、書かれているかを判定する。
+ *
+ * **画面の関門と外部AIの口が同じ関数を通る**（写すと判定が割れる）。
+ */
+export function judgeEpisodePlotText(text: string): EpisodePlotJudgement {
+  const reason = episodePlotUnwrittenReason(parseEpisodePlot(text));
+  return reason ? { written: false, reason } : { written: true };
+}
+
+/**
+ * 単話プロットが揃っていない理由。揃っていれば undefined。
+ *
+ * **1つでも書かれていれば揃っている**（6.94.6 の粗さ。どの話を見るかは
+ * 前提を見たあとに決まる）。**読めなかったものは揃っている扱い**——
+ * 読めないことを理由に断ると、壊れたファイルが1つある作品では何も呼べなくなる。
+ */
+export function episodePlotShortfall(
+  entries: readonly (EpisodePlotJudgement & { plotPath: string })[]
+): string | undefined {
+  if (entries.some((entry) => entry.written !== false)) return undefined;
+  if (entries.length === 0) return "単話プロットのファイルがまだありません。";
+  if (entries.length === 1) {
+    return `${entries[0].plotPath} はありますが、${entries[0].reason ?? ""}`;
+  }
+  return (
+    `${entries.length}件ありますが、どれも展開（箇条書き）が書かれていません。` +
+    "話ごとの様子は novel.scan の episodePlots にあります。"
+  );
+}
+
 /**
  * 「設計を検査」（P-27）の確認に添える説明。
  *

@@ -11,6 +11,8 @@ import {
   askPrerequisiteRoute,
   checkPrerequisites,
   prerequisiteRoute,
+  stopForUnwrittenEpisodePlot,
+  UNWRITTEN_OPEN_LABEL,
 } from "../../../src/features/prerequisiteGate";
 import { findAction, prerequisiteNoteOf } from "../../../src/views/actionList";
 import { buildGuideBundles } from "../../../src/core/featureGuide";
@@ -310,5 +312,49 @@ describe("前提の1行", () => {
     expect(manual).toContain("先に「プロット」が要ります。");
     expect(manual).toContain("先に「各話あらすじ」が要ります。");
     expect(manual).toContain("先に「単話プロット」が要ります。");
+  });
+});
+
+describe("ひな形のままの単話プロットで止める（2026-10-01）", () => {
+  const originalWarning = window.showWarningMessage;
+  afterEach(() => {
+    window.showWarningMessage = originalWarning;
+  });
+
+  it("展開がまだ書かれていないと告げ、ファイルを開く道を出す", async () => {
+    let message = "";
+    let buttons: unknown[] = [];
+    window.showWarningMessage = (async (text: string, ...rest: unknown[]) => {
+      message = text;
+      buttons = rest.slice(1);
+      return undefined;
+    }) as unknown as typeof window.showWarningMessage;
+
+    const opened = await stopForUnwrittenEpisodePlot(
+      "ひな形のままです。",
+      "C:/works/試作/設定/episode-plots/第1話.md"
+    );
+
+    expect(opened).toBe(false);
+    expect(message).toContain("展開がまだ書かれていません");
+    expect(buttons).toEqual([UNWRITTEN_OPEN_LABEL]);
+  });
+
+  it("押せば、そのファイルを開く", async () => {
+    window.showWarningMessage = (async () =>
+      UNWRITTEN_OPEN_LABEL) as unknown as typeof window.showWarningMessage;
+    const calls: unknown[][] = [];
+    commands.executeCommand = (async (...args: unknown[]) => {
+      calls.push(args);
+      return undefined;
+    }) as typeof commands.executeCommand;
+
+    const opened = await stopForUnwrittenEpisodePlot(
+      "ひな形のままです。",
+      "C:/works/試作/設定/episode-plots/第1話.md"
+    );
+
+    expect(opened).toBe(true);
+    expect(calls[0][0]).toBe("vscode.open");
   });
 });
