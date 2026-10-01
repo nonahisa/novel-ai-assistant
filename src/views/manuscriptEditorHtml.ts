@@ -778,8 +778,14 @@ ruby > rt {
   flex-wrap: wrap;
 }
 /* **控えめにするのは、いつも出ているものだけ。** 欄ごと薄くすると、
-   届かないときの赤字（#unsent）まで薄くなり、読みにくくなる */
-#foot > :not(#unsent) { opacity: 0.85; }
+   届かないときの赤字（#unsent・保存できなかった #saveFail）まで薄くなり、読みにくくなる */
+#foot > :not(#unsent):not(#saveFail) { opacity: 0.85; }
+/* ［保存］（設計書6.25.9）。欄の高さに収める（押すたびに欄が伸びると本文の面が動く） */
+#saveCheck {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 0 8px;
+}
 /* **字数は控えめに出す。** 書いている最中にいつも視界へ入るものなので、
    読みにいったときだけ読める濃さにしておく（数えるのが目的ではない） */
 #counts {
@@ -809,6 +815,8 @@ ruby > rt {
 
    色は VS Code のテーマの「エラーの字の色」から取る（明るいテーマでも
    暗いテーマでも読める色をテーマ側が選んでいる）。背景は塗らない */
+/* 保存できなかった知らせ（#saveFail）も同じ出し方にする（作者の裁定、2026-10-01） */
+#saveFail,
 #unsent {
   display: none;
   align-items: center;
@@ -816,11 +824,12 @@ ruby > rt {
   font-weight: 600;
   color: var(--vscode-errorForeground, #f14c4c);
 }
-#unsent.open { display: inline-flex; }
+#unsent.open, #saveFail.open { display: inline-flex; }
 /* 出ている間は、同じ場所の #note（古い一言が残っていることがある）を隠す */
 #unsent.open + #note { display: none; }
+#saveFail.open ~ #note { display: none; }
 /* ボタンは欄の高さに収める（出たときに欄が伸びると、本文の面が縮んで動く） */
-#unsent button {
+#unsent button, #saveFail button {
   flex: 0 0 auto;
   font-size: 11px;
   font-weight: normal;
@@ -921,6 +930,11 @@ ruby > rt {
 <div id="foot">
   <span id="counts"></span>
   <span id="cheer"></span>
+  <button id="saveCheck" title="打った字を原稿へ送ってから保存し、保存できたかを確かめます（Ctrl+S と違い、保存できなかったときに知らせます）">保存</button>
+  <span id="saveFail" role="alert">
+    <span id="saveFailText"></span>
+    <button id="saveFailCopy" title="この画面の本文をまるごとクリップボードへ写します。メモ帳などへ貼って控えてください">本文をコピー</button>
+  </span>
   <span id="unsent" role="alert">
     <span id="unsentText">打った字が、まだ原稿ファイルに入っていません。このまま閉じると消えます。</span>
     <button id="unsentCopy" title="この画面の本文をまるごとクリップボードへ写します。メモ帳などへ貼って控えてください">本文をコピー</button>
@@ -2403,6 +2417,123 @@ ruby > rt {
   });
   /* unsent:end */
 
+  /* saveButton:start */
+  /*
+    ── ［保存］：保存できたかを確かめる（作者の裁定、2026-10-01。設計書6.25.9） ──
+    拡張機能ホストが起動し直すと、画面は生きたまま受け手を失い、打った字が
+    届かないまま残る（2026-10-01 ノートPCで約100字）。画面には自分でファイルを
+    書く力が無いので、無理やり書くことはできない。代わりに、**保存できたかを
+    確実に知らせる**。
+
+    押すと、いまの本文を postEdit（ふだんの打鍵と同じ便）で送り、続けて同じ
+    便の番号で保存を頼む（saveRequest）。拡張機能はその番号までの便を当て
+    終わってから保存し、成否と字数を返す（saveResult）。3秒たっても返事が
+    無ければ、受け手が居ないと見て赤字で知らせる。
+
+    届かなかった知らせ（#unsent）の関数には手を入れない。写す処理
+    （copyTextDirect）・画面の本文（screenText）・控え（keepRescue）は同じ物を使う。
+    Ctrl+S の振る舞いは変えない（このボタンは別の道）。
+  */
+  /** 返事を待つ長さ。拡張機能の側は便を待つのに2秒まで使う（core/manuscriptSave.ts） */
+  const SAVE_WAIT_MS = 3000;
+  /** 「保存しました」を出しておく長さ */
+  const SAVE_NOTE_MS = 5000;
+  const saveButton = document.getElementById("saveCheck");
+  const saveFailBar = document.getElementById("saveFail");
+  const saveFailText = document.getElementById("saveFailText");
+  const saveFailCopyButton = document.getElementById("saveFailCopy");
+  /** いま返事を待っている保存の番号（押すたびに新しい便を送るので、回ごとに違う） */
+  let saveAskedSeq = null;
+  let saveTimer = null;
+  let saveNoteTimer = null;
+  /** 出している「保存しました」の文（ほかの一言で上書きされていたら消さない） */
+  let saveNoteText = null;
+
+  function askSave() {
+    /*
+      **同じ本文でも送り直す**（force）。前の便が受け手の居ないところへ
+      消えていても、ここで送った便が届けば入る。変換中は送らない——確定前の
+      字が二重に入る。確定すれば、そのとき送られる
+    */
+    if (!composing) {
+      if (composeOn) composeSend(true);
+      else send(true);
+    }
+    const seq = editSeq;
+    // 届かなかったときに、ウィンドウの再読み込みで取り戻せるように控える
+    keepRescue(screenText());
+    saveAskedSeq = seq;
+    vscode.postMessage({ type: "saveRequest", seq: seq });
+    if (saveTimer !== null) clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveNoAnswer, SAVE_WAIT_MS);
+  }
+  saveButton.addEventListener("click", askSave);
+
+  function showSaveFail(text) {
+    saveFailText.textContent = text;
+    saveFailBar.classList.add("open");
+  }
+
+  function hideSaveFail() {
+    saveFailBar.classList.remove("open");
+  }
+
+  function saveNoAnswer() {
+    saveTimer = null;
+    keepRescue(screenText());
+    showSaveFail(
+      "保存できませんでした（拡張機能に届いていません）。本文をコピーで控えてから、" +
+        "コマンドパレット（Ctrl+Shift+P）で「開発者: ウィンドウの再読み込み」を" +
+        "実行してください。開き直した画面で、打った字を戻せます" +
+        "（タブを閉じると、この控えは消えます）。"
+    );
+    // 受け手が居なければ届かないが、届けば記録に残る（遅れて戻ったときの手がかり）
+    vscode.postMessage({
+      type: "log",
+      text:
+        "［保存］を押しましたが、" + Math.round(SAVE_WAIT_MS / 1000) +
+        "秒たっても拡張機能から返事がありません（便" + saveAskedSeq + "）。再読み込みを案内しました",
+    });
+  }
+
+  /** 拡張機能から届いた保存の結果 */
+  function takeSaveResult(message) {
+    if (typeof message.seq !== "number" || message.seq !== saveAskedSeq) return;
+    saveAskedSeq = null;
+    if (saveTimer !== null) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    if (message.ok !== true) {
+      const reason = typeof message.reason === "string" ? message.reason : "理由が分かりません";
+      showSaveFail(
+        "保存できませんでした：" + reason + "。本文をコピーで控えてから、" +
+          "もう一度［保存］を押すか、Ctrl+S を試してください。"
+      );
+      return;
+    }
+    hideSaveFail();
+    const chars = typeof message.chars === "number" ? message.chars : 0;
+    saveNoteText = "保存しました（" + chars + "字）";
+    note.textContent = saveNoteText;
+    if (saveNoteTimer !== null) clearTimeout(saveNoteTimer);
+    saveNoteTimer = setTimeout(function () {
+      saveNoteTimer = null;
+      if (note.textContent === saveNoteText) note.textContent = "";
+      saveNoteText = null;
+    }, SAVE_NOTE_MS);
+  }
+
+  saveFailCopyButton.addEventListener("click", function () {
+    const text = screenText();
+    saveFailText.textContent = copyTextDirect(text)
+      ? "本文（" + text.length + "字）をクリップボードへ写しました。メモ帳などへ貼って" +
+        "控えてから、「開発者: ウィンドウの再読み込み」を実行してください" +
+        "（タブを閉じると、画面の控えは消えます）。"
+      : "写せませんでした。本文を選んで Ctrl+C で写してください。";
+  });
+  /* saveButton:end */
+
   /**
    * 拡張機能から届いた本文を、打っている面へ入れるかどうか決める。
    *
@@ -3796,6 +3927,9 @@ ${RESUME_WRITING_LABEL ? `
     } else if (message.type === "editApplied") {
       // 送った便が文書へ入ったか（設計書6.25.9）
       takeEditApplied(message);
+    } else if (message.type === "saveResult") {
+      // ［保存］の結果（設計書6.25.9）
+      takeSaveResult(message);
     } else if (message.type === "reopenAccepted" || message.type === "reopenResult") {
       // ［開き直す］の返事（設計書6.25.9）
       takeReopenReply(message);

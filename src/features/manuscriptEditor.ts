@@ -54,6 +54,13 @@ import {
   type EditAck,
   type SentEdit,
 } from "../core/editQueue";
+import {
+  SAVE_APPLY_WAIT_MS,
+  createAppliedTracker,
+  describeSaveResult,
+  runSaveRequest,
+  type AppliedTracker,
+} from "../core/manuscriptSave";
 import { createBurstGate } from "../core/burstGate";
 import {
   currentCountMode,
@@ -1062,6 +1069,12 @@ type Incoming =
    * **入ったかどうかをこの番号で返す**（`editApplied`。設計書6.25.9）
    */
   | { type: "edit"; text: string; seq?: number }
+  /**
+   * 画面の［保存］（設計書6.25.9。作者の裁定 2026-10-01）。`seq` は直前に
+   * 送った edit の番号で、**その便まで当て終わってから保存する**。結果は
+   * `saveResult` で返す
+   */
+  | { type: "saveRequest"; seq: number }
   | { type: "count"; text: string }
   | { type: "ruby"; text: string; start: number; end: number }
   | { type: "emphasis"; text: string; start: number; end: number }
@@ -1858,6 +1871,11 @@ export class ManuscriptEditorProvider
     /** 自分の書き換えを文書へ当てている最中か（外からの変更と見分ける） */
     let selfEditing = false;
     /**
+     * どの便まで当て終えたか（［保存］が、頼まれた便まで待ってから保存する
+     * ために使う。設計書6.25.9、作者の裁定 2026-10-01）
+     */
+    const appliedTracker = createAppliedTracker();
+    /**
      * **入ったかどうかを、便の番号で画面へ返す**（設計書6.25.9。作者の報告、
      * 2026-09-28「×ボタンで消したら400文字ぐらいが消えました」）。
      *
@@ -1868,6 +1886,7 @@ export class ManuscriptEditorProvider
     const reportApplied = (ack: EditAck): void => {
       // 窓の札の「最後に入った時刻」。札を書き直す合図にはしない（打鍵のたびに来る）
       if (ack.ok) entry.status.lastAppliedAt = new Date();
+      appliedTracker.markApplied(ack.seq, ack.ok);
       try {
         void Promise.resolve(panel.webview.postMessage(ack)).catch(() => {
           /* 閉じたあとに届いた便。返す先はもう無い */
@@ -1979,6 +1998,10 @@ export class ManuscriptEditorProvider
 
         case "count":
           await this.sendCount(panel, message.text, document, measureKind);
+          break;
+
+        case "saveRequest":
+          await this.saveFromButton(document, panel, message.seq, appliedTracker);
           break;
 
         case "ruby":
@@ -2454,6 +2477,41 @@ export class ManuscriptEditorProvider
    *
    * **1分に1回まで。** 打つたびに失敗していると、語ごとに知らせが積もる。
    */
+  /**
+   * 画面の［保存］（設計書6.25.9。作者の裁定 2026-10-01）。
+   *
+   * **頼まれた便まで当て終わってから保存する**（順序と判定は
+   * `core/manuscriptSave.ts`）。保存は VS Code の `document.save()` に任せる
+   * ——文字コード・改行の保持と、外での変更との突き合わせは VS Code の
+   * 保存の道がすでに持っている（Ctrl+S と同じ道。原稿へ自前で書かない）。
+   *
+   * 結果は字数つきで画面へ返し、操作ログへ1行残す。返せなくても（画面が
+   * 閉じた）記録は残す。
+   */
+  private async saveFromButton(
+    document: vscode.TextDocument,
+    panel: vscode.WebviewPanel,
+    seq: number,
+    tracker: AppliedTracker
+  ): Promise<void> {
+    const result = await runSaveRequest(typeof seq === "number" ? seq : 0, {
+      waitApplied: (target) => tracker.waitFor(target, SAVE_APPLY_WAIT_MS),
+      isDirty: () => document.isDirty,
+      save: () => Promise.resolve(document.save()),
+      // 下の欄の「このファイル」と同じ数え方（画面に出す数と食い違わせない）
+      chars: () => countForDisplay(toLf(document.getText()), extensionOf(document)),
+    });
+    await this.logForDocument(
+      document,
+      `原稿エディタ：${paths.basename(fromUri(document.uri))} を${describeSaveResult(result)}`
+    );
+    try {
+      await panel.webview.postMessage(result);
+    } catch {
+      // 閉じた画面へは返せない。記録は上で残した
+    }
+  }
+
   private warnEditRejected(document: vscode.TextDocument): void {
     const key = document.uri.toString();
     const now = Date.now();
