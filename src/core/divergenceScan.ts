@@ -4,7 +4,7 @@ import {
   mergeTreeArgs,
   parseMergeTree,
 } from "./mergePreview";
-import { isSettingsJsonPath } from "./settingsConflictRule";
+import { decideSettingsConflict, isSettingsJsonPath } from "./settingsConflictRule";
 import type { DivergenceConflicts, GitCommandRunner } from "./git";
 
 /**
@@ -66,6 +66,76 @@ export async function readDivergenceConflicts(
     return undefined;
   }
   return classifyConflicts(preview.conflicts);
+}
+
+/**
+ * 見比べ（`walkConflicts`）の入口をどう始めるか（作者の裁定、2026-10-01 案2）。
+ *
+ * 確認の窓（［保存・同期］の［同期する］や、分岐合流の［合わせる］）で
+ * 先に選んでもらい、**続けて出ていた入口の窓を省く。**
+ *
+ * - `newest`：設定資料は更新時刻の新しいほうへまとめて寄せ、本文だけ1件ずつ
+ * - `oneByOne`：設定資料も本文も1件ずつ
+ * - `manuscriptsOnly`：確認の窓では「選ぶ設定資料は無い」と見込んでいた。
+ *   **見込みが外れて設定資料が出たら、入口の窓で訊く**（訊いていないことを決めない）
+ */
+export type ConflictWalkStart = "newest" | "oneByOne" | "manuscriptsOnly";
+
+/**
+ * 設定資料の衝突のうち、**規則で決まらず作者が選ぶ見込みのもの**を机上で調べる
+ * （作者の裁定、2026-10-01 案2）。
+ *
+ * 合わせる側（`foldDivergence`）は、合流の途中で索引の3つの版（祖先・こちら・
+ * 向こう）を読んで `decideSettingsConflict` にかける。ここでは同じ3つの版を
+ * **合流を始めずに**コミットから読む（祖先＝`merge-base`）。判断は同じ関数なので、
+ * 見込みと実際は食い違わない（名前を変えたファイルのように版を取れないものは、
+ * 選ぶ側に数える）。
+ *
+ * **落ちたら undefined。** 表示とボタンの出し分けのための数字であって、
+ * 取れないことは同期を止める理由にならない。
+ */
+export async function readUndecidedSettings(
+  root: string,
+  upstream: string,
+  settings: readonly string[],
+  run: GitCommandRunner
+): Promise<string[] | undefined> {
+  if (settings.length === 0) return [];
+  const mergeBase = await run(["merge-base", "HEAD", upstream], root, MERGE_TREE_TIMEOUT_MS);
+  if (mergeBase.code !== 0) return undefined;
+  const baseCommit = mergeBase.stdout.trim();
+  if (baseCommit === "") return undefined;
+
+  const show = async (rev: string, file: string): Promise<string | undefined> => {
+    const result = await run(["show", `${rev}:${file}`], root, MERGE_TREE_TIMEOUT_MS);
+    return result.code === 0 ? result.stdout : undefined;
+  };
+
+  const undecided: string[] = [];
+  for (const file of settings) {
+    const ours = await show("HEAD", file);
+    const theirs = await show(upstream, file);
+    if (ours === undefined || theirs === undefined) {
+      // 片方に無い（名前の変更・削除とぶつかった）。**比べられないものは選ぶ側**
+      undecided.push(file);
+      continue;
+    }
+    const base = await show(baseCommit, file);
+    if (decideSettingsConflict({ base, ours, theirs }).side === "conflict") {
+      undecided.push(file);
+    }
+  }
+  return undecided;
+}
+
+/**
+ * 作者が選ぶ見込みの設定資料の件数。**調べていなければ全部を数える**（安全な側）
+ */
+export function settingsToChooseCount(
+  conflicts: DivergenceConflicts | undefined
+): number {
+  if (!conflicts) return 0;
+  return (conflicts.undecidedSettings ?? conflicts.settings).length;
 }
 
 /**

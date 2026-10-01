@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   STARTUP_CHECK_LIMIT,
   orderStartupTargets,
+  overlapForAuthor,
   overlappingChangedFiles,
   planHandoff,
 } from "../../../src/core/handoffPlan";
@@ -231,5 +232,53 @@ describe("起動時の点検の順番と間引き", () => {
       0
     );
     expect(checked).toHaveLength(1);
+  });
+});
+
+/**
+ * 「重なり」は、自動で片づかないものだけに絞る（作者の裁定、2026-10-01 案1）。
+ *
+ * 名前が1つでも重なると「訊く」に回っていたため、書き足すだけの記録
+ * （履歴・提案・ロック）や自動で書かれるファイル、規則で決まる設定資料でも
+ * 開いた瞬間に止まっていた。これらは合わせる側（`foldDivergence`）が
+ * 機械で片づけ、作者が選ぶものが出たら戻して訊く（`authorChoice: "stop"`）。
+ */
+describe("作者に訊く重なりだけを残す", () => {
+  test("書き足すだけの記録と自動で書かれるものは、重なりから外す", () => {
+    expect(
+      overlapForAuthor([
+        "短編/.aiwriter/history/edits.jsonl",
+        "短編/.aiwriter/proposals/proposals.jsonl",
+        "短編/.aiwriter/stats/pc.json",
+        "短編/設定/characters.md",
+      ])
+    ).toEqual([]);
+  });
+
+  test("設定資料は外す（合わせる側が規則で決め、決まらなければ戻して訊く）", () => {
+    expect(overlapForAuthor(["短編/設定/characters/char_001_太志.json"])).toEqual([]);
+  });
+
+  test("本文が重なれば、訊く側へ残す", () => {
+    expect(
+      overlapForAuthor([
+        "短編/.aiwriter/history/edits.jsonl",
+        "短編/本文/第1話.txt",
+      ])
+    ).toEqual(["短編/本文/第1話.txt"]);
+  });
+
+  test("調べられなかった印は、訊く側へ残す（安全な側へ倒す）", () => {
+    expect(overlapForAuthor(["（調べられませんでした）"])).toEqual([
+      "（調べられませんでした）",
+    ]);
+  });
+
+  test("書き足すだけの記録だけが重なるなら、黙って揃える", () => {
+    const action = planHandoff({
+      status: tracked({ behind: 1, ahead: 1 }),
+      overlap: overlapForAuthor(["短編/.aiwriter/history/edits.jsonl"]),
+    });
+    expect(action.kind).toBe("fold");
   });
 });

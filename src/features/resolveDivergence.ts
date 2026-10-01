@@ -21,8 +21,15 @@ import {
   parseMergeTree,
   type MergePreview,
 } from "../core/mergePreview";
-import { classifyConflicts } from "../core/divergenceScan";
-import { decideSettingsConflict } from "../core/settingsConflictRule";
+import {
+  classifyConflicts,
+  readUndecidedSettings,
+  type ConflictWalkStart,
+} from "../core/divergenceScan";
+import {
+  decideSettingsConflict,
+  type SettingsConflictDecision,
+} from "../core/settingsConflictRule";
 import {
   containsConflictMarkers,
   describeGuardFailure,
@@ -30,6 +37,8 @@ import {
   unexpectedChanges,
 } from "../core/mergeGuard";
 import { sha256Bytes } from "../core/hash";
+import { fromLfText, toLf } from "../core/eolSpace";
+import { detectJsonFileFormat } from "../core/jsonFileFormat";
 import {
   logFailure,
   logStep,
@@ -120,7 +129,11 @@ export interface FoldTarget {
 /** 規則で決めた1件 */
 export interface SettingsResolution {
   file: string;
-  side: "ours" | "theirs";
+  /**
+   * `merged` は、両側の変更を項目ごとに合わせた中身を置いた
+   * （同じ資料を引き継いでいて、変えた項目が重ならなかった。案3、2026-10-01）
+   */
+  side: "ours" | "theirs" | "merged";
   reason: string;
 }
 
@@ -156,6 +169,8 @@ export type ConflictWalker = (input: {
   label: string;
   files: string[];
   run: GitCommandRunner;
+  /** 確認の窓で選んだ始め方。あれば入口の窓を出さない（案2） */
+  start?: ConflictWalkStart;
 }) => Promise<WalkConflictsResult>;
 
 export interface FoldOptions {
@@ -182,6 +197,14 @@ export interface FoldOptions {
    * ここへ来たら状態が変わったということ）
    */
   automatic?: boolean;
+  /**
+   * 見比べの始め方（作者の裁定、2026-10-01 案2）。
+   *
+   * 確認の窓（［同期する］・［合わせる］）で先に選んでもらったものを、
+   * 見比べ（`walk`）へそのまま渡す。**入口の窓を続けて出さないため。**
+   * 渡さなければ、これまでどおり入口の窓で訊く
+   */
+  start?: ConflictWalkStart;
 }
 
 export async function resolveDivergence(
@@ -212,7 +235,18 @@ export async function resolveDivergence(
       const preview = parseMergeTree(
         await run(mergeTreeArgs("HEAD", status.upstream), root, 60_000)
       );
-      return { kind: "ready" as const, status, preview };
+      // 規則で決まらない設定資料があるか（案2）。確認の窓のボタンが変わる。
+      // 調べられなければ undefined（設定資料は全部、選ぶ側に数える）
+      const undecidedSettings =
+        preview.kind === "unsupported" || preview.kind === "failed"
+          ? undefined
+          : await readUndecidedSettings(
+              root,
+              status.upstream,
+              classifyConflicts(preview.conflicts).settings,
+              run
+            );
+      return { kind: "ready" as const, status, preview, undecidedSettings };
     }
   );
   if (!outcome) return;
@@ -230,7 +264,7 @@ export async function resolveDivergence(
     return;
   }
 
-  const { status, preview } = outcome;
+  const { status, preview, undecidedSettings } = outcome;
   if (preview.kind === "unsupported" || preview.kind === "failed") {
     void vscode.window.showWarningMessage(describeMergePreview(preview));
     logFailure("分岐の判定に失敗", { 置き場: label, 詳細: preview.detail ?? "" });
@@ -238,8 +272,16 @@ export async function resolveDivergence(
   }
 
   // **作者のものが衝突していても、もう行き止まりにしない**（設計書5.5.18）。
-  // 何が起きるかを先に見せ、押されたら1件ずつ選んでもらう
-  if (!(await confirm(label, status.behind, status.ahead, preview))) return;
+  // 何が起きるかを先に見せ、押されたら1件ずつ選んでもらう。
+  // **選び方もこの窓で訊く**（案2、2026-10-01）——見比べの入口の窓を続けて出さない
+  const start = await confirm(
+    label,
+    status.behind,
+    status.ahead,
+    preview,
+    undecidedSettings
+  );
+  if (!start) return;
 
   const result = await withCancellableProgress(
     "分かれた分を合わせています…",
@@ -247,7 +289,7 @@ export async function resolveDivergence(
       foldDivergence(
         deps,
         { root, label, upstream: status.upstream },
-        { progress }
+        { progress, start }
       )
   );
   if (!result) return;
@@ -289,9 +331,14 @@ export function describeDivergenceConfirm(input: {
   appendOnly?: number;
   /** 規則で揃える見込みの設定資料の件数 */
   settings?: number;
+  /**
+   * 規則で決まらず、作者が選ぶ見込みの設定資料の件数（案2、2026-10-01）。
+   * 1件以上なら、窓に選び方のボタン（新しいほうへ／1件ずつ）を並べる
+   */
+  settingsToChoose?: number;
   /** 作者が1件ずつ選ぶことになる本文の件数 */
   manuscripts?: number;
-}): { message: string; detail: string } {
+}): { message: string; detail: string; buttons: string[] } {
   const lines = [
     `・GitHubの側にある${input.behind}件を取り込みます`,
     `・こちらの${input.ahead}件はそのまま残ります`,
@@ -306,16 +353,27 @@ export function describeDivergenceConfirm(input: {
       `・追記型${input.appendOnly}件（履歴・提案・ロック）は、両方の行を残します`
     );
   }
+  const toChoose = input.settingsToChoose ?? 0;
   if (input.settings && input.settings > 0) {
     lines.push(
       `・食い違う設定資料${input.settings}件は、` +
-        "作者が書いた部分が同じなら新しいほうへ揃えます"
+        "作者が書いた部分が重ならなければ、両方の変更を合わせて新しいほうへ揃えます"
+    );
+  }
+  if (toChoose > 0) {
+    lines.push(
+      `・そのうち作者が書いた部分が両方で違う設定資料${toChoose}件は、` +
+        "押したボタンで決めます（新しいほうへまとめて／1件ずつ）"
     );
   }
   if (input.manuscripts && input.manuscripts > 0) {
     lines.push(
       `・同じ箇所を両方で書き換えた本文${input.manuscripts}件は、1件ずつお選びいただきます`
     );
+  }
+  if (toChoose > 0 || (input.manuscripts ?? 0) > 0) {
+    // 見比べの入口の窓が言っていたこと（案2で窓を1つにまとめたので、ここへ移す）
+    lines.push("・途中でやめると、合わせるのをやめて元の状態へ戻します");
   }
   lines.push("・合わせる前に、未記録の変更を記録します");
   lines.push("・戻せるように、退避の枝を作ります");
@@ -325,16 +383,34 @@ export function describeDivergenceConfirm(input: {
     detail:
       `${lines.join("\n")}\n\n` +
       "GitHubへは送信しません。送信は「同期」から改めて行ってください。",
+    buttons: toChoose > 0 ? [MERGE_NEWEST, MERGE_ONE_BY_ONE] : [MERGE],
   };
 }
 
-/** 押す前に、何が起きるかを見せる */
+/** 確認の窓のボタン。**押された文字で分けるので、定数を1か所に置く** */
+const MERGE = "合わせる";
+const MERGE_NEWEST = "合わせる（設定資料は新しいほうへ）";
+const MERGE_ONE_BY_ONE = "合わせる（1件ずつ選ぶ）";
+
+/** 押されたボタンを見比べの始め方へ。押さずに閉じたら undefined（合わせない） */
+function mergeChoiceOf(answer: string | undefined): ConflictWalkStart | undefined {
+  if (answer === MERGE_NEWEST) return "newest";
+  if (answer === MERGE_ONE_BY_ONE) return "oneByOne";
+  if (answer === MERGE) return "manuscriptsOnly";
+  return undefined;
+}
+
+/**
+ * 押す前に、何が起きるかを見せる。**選び方もここで訊く**（案2、2026-10-01）。
+ * 押さずに閉じたら undefined（合わせない）
+ */
 async function confirm(
   label: string,
   behind: number,
   ahead: number,
-  preview: MergePreview
-): Promise<boolean> {
+  preview: MergePreview,
+  undecidedSettings: readonly string[] | undefined
+): Promise<ConflictWalkStart | undefined> {
   const classified = classifyConflicts(preview.conflicts);
   const text = describeDivergenceConfirm({
     label,
@@ -343,14 +419,16 @@ async function confirm(
     autoWritten: classified.autoWritten.length,
     appendOnly: classified.appendOnly.length,
     settings: classified.settings.length,
+    // 調べられなかったら全部を選ぶ側に数える（安全な側）
+    settingsToChoose: (undecidedSettings ?? classified.settings).length,
     manuscripts: classified.manuscripts.length,
   });
   const answer = await vscode.window.showInformationMessage(
     text.message,
     { modal: true, detail: text.detail },
-    "合わせる"
+    ...text.buttons
   );
-  return answer === "合わせる";
+  return mergeChoiceOf(answer);
 }
 
 /**
@@ -482,7 +560,11 @@ export async function foldDivergence(
         undecided.push(file);
         continue;
       }
-      if (!(await keepSideOfConflict(root, file, decision.side, run))) {
+      const settled =
+        decision.side === "merged"
+          ? await placeMergedSettings(root, file, decision.text, run)
+          : await keepSideOfConflict(root, file, decision.side, run);
+      if (!settled) {
         return await abort(root, run, `${file} を確定できませんでした`);
       }
       resolved.push(file);
@@ -494,7 +576,13 @@ export async function foldDivergence(
       // **黙って片方へ寄せたことにしない。** どちらを採ったかを1行ずつ残す
       logStep(
         `設定資料の衝突：${file} → ` +
-          `${decision.side === "ours" ? "こちら" : "別環境"}（${decision.reason}）`
+          `${
+            decision.side === "ours"
+              ? "こちら"
+              : decision.side === "theirs"
+                ? "別環境"
+                : "両方を合わせた"
+          }（${decision.reason}）`
       );
     }
 
@@ -515,7 +603,13 @@ export async function foldDivergence(
       const walk = options.walk ?? defaultWalk;
       let walked: WalkConflictsResult;
       try {
-        walked = await walk({ root, label, files: forAuthor, run });
+        walked = await walk({
+          root,
+          label,
+          files: forAuthor,
+          run,
+          start: options.start,
+        });
       } catch (error) {
         return await abort(
           root,
@@ -627,12 +721,12 @@ async function countAuthoredPending(
 }
 
 /** 既定の見比べ。**画面が要るので、使うときだけ読み込む** */
-const defaultWalk: ConflictWalker = async ({ root, label, files, run }) => {
+const defaultWalk: ConflictWalker = async ({ root, label, files, run, start }) => {
   const { walkConflicts } = await import("./resolveConflicts.js");
   return walkConflicts(
     { id: root, title: label, folderPath: root },
     files,
-    { run }
+    { run, start }
   );
 };
 
@@ -641,7 +735,7 @@ async function decideForFile(
   root: string,
   file: string,
   run: GitCommandRunner
-): Promise<{ side: "ours" | "theirs" | "conflict"; reason: string }> {
+): Promise<SettingsConflictDecision> {
   const base = await showStage(root, file, 1, run);
   const ours = await showStage(root, file, 2, run);
   const theirs = await showStage(root, file, 3, run);
@@ -696,6 +790,50 @@ async function mergeAppendOnly(
     return false;
   }
 
+  const added = await run(["add", "--", file], root, 15_000);
+  return added.code === 0;
+}
+
+/**
+ * 設定資料の1件を、**両側の変更を項目ごとに合わせた中身**で確定させる
+ * （案3、2026-10-01）。
+ *
+ * 片側を残すとき（`keepSideOfConflict`）は git が索引から書き戻すが、
+ * 合わせた中身はどちらの版にも無いので、**その場で組んだものを置いて
+ * `git add` する**（`mergeAppendOnly` と同じ形）。
+ *
+ * **作者のデータを上書きしていないか**——置くのは合流の途中の作業ツリーで、
+ * gitが競合の印つきで書いたファイルの上である（作者が書いた版そのものではない）。
+ * 中身は `decideSettingsConflict` が「作者の項目を相手の値で書き換えない」
+ * 規則で組んだもの。巻き戻したいときは、外側の `merge --abort` と退避の枝が効く。
+ *
+ * **改行は、いま作業ツリーにあるファイルに合わせる**（`jsonFileFormat.ts` と
+ * 同じ考え方）。Windows で git が CRLF にして取り出していれば CRLF で置く——
+ * LF で置くと、次に保存したとき全行が差分になる。
+ */
+async function placeMergedSettings(
+  root: string,
+  file: string,
+  text: string,
+  run: GitCommandRunner
+): Promise<boolean> {
+  const target = paths.join(root, file);
+  const current = await readBytes(target);
+  const body = current
+    ? fromLfText(toLf(text), detectJsonFileFormat(current).useCrlf)
+    : text;
+  try {
+    await vscode.workspace.fs.writeFile(
+      paths.toUri(target),
+      new TextEncoder().encode(body)
+    );
+  } catch (error) {
+    logFailure("設定資料の合わせた中身を置けなかった", {
+      ファイル: file,
+      詳細: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
   const added = await run(["add", "--", file], root, 15_000);
   return added.code === 0;
 }
@@ -815,10 +953,16 @@ export function describeFoldSuccess(
     const theirs = result.settingsAutoResolved.filter(
       (one) => one.side === "theirs"
     ).length;
-    const ours = result.settingsAutoResolved.length - theirs;
+    // 両方の変更を項目ごとに合わせた分（案3）。**片方へ寄せたとは言わない**
+    const merged = result.settingsAutoResolved.filter(
+      (one) => one.side === "merged"
+    ).length;
+    const ours = result.settingsAutoResolved.length - theirs - merged;
     parts.push(
       `設定資料 ${result.settingsAutoResolved.length}件は新しいほうに揃えました` +
-        `（別環境 ${theirs}件・こちら ${ours}件）`
+        `（別環境 ${theirs}件・こちら ${ours}件` +
+        (merged > 0 ? `・両方を合わせた ${merged}件` : "") +
+        "）"
     );
   }
   if (result.settingsBulkResolved > 0) {

@@ -1,4 +1,5 @@
 import type { GitSyncStatus } from "./git";
+import { classifyConflicts } from "./divergenceScan";
 
 /**
  * 機械を行き来したときに、置き場ごとに何をするかを決める（設計書6.15.1）。
@@ -152,6 +153,28 @@ export function overlappingChangedFiles(
     out.push(file);
   }
   return out;
+}
+
+/**
+ * 重なったファイルのうち、**作者に訊かないと片づかないもの**だけを残す
+ * （作者の裁定、2026-10-01 案1）。**純粋関数。**
+ *
+ * 名前が1つでも重なると「訊く」に回していたため、書き足すだけの記録
+ * （履歴・提案・ロック）、自動で書かれるファイル、設定資料でも開いた瞬間に
+ * 止まっていた。分け方は合わせる側と同じ `classifyConflicts` に任せる
+ * （写しを作らない）。
+ *
+ * - 自動で書かれるもの・追記型 → 外す（合わせる側が機械で片づける）
+ * - **設定資料 → 外す。** 合わせる側が規則で決め、作者が選ぶものが出たら
+ *   合わせるのをやめて戻し、「訊く」に回す（`foldDivergence` の
+ *   `authorChoice: "stop"`。開いたときの点検は必ずこれで呼ぶ）
+ * - 本文と、それ以外の分からないもの → 残す。**本文は行で混ぜない**
+ *   （どちらの文章が消えたか作者が気づけないため）
+ *
+ * 「調べられなかった」印もここで残る（設定資料にも追記型にも当たらない）。
+ */
+export function overlapForAuthor(overlap: readonly string[]): string[] {
+  return classifyConflicts(overlap).manuscripts;
 }
 
 function normalizeGitPath(filePath: string): string {

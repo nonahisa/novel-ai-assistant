@@ -1,6 +1,7 @@
 import type { GitSyncStatus } from "./git";
 import type { WorkEntry } from "../models/types";
 import { divergenceLine } from "./gitSyncStatusText";
+import { settingsToChooseCount, type ConflictWalkStart } from "./divergenceScan";
 
 /**
  * 「作品をすべて同期する」で、置き場ごとに何をするかを決める（設計書5.5.14）。
@@ -239,6 +240,86 @@ export function describeSyncSkips(plans: readonly SyncTargetPlan[]): string {
     )
     .join("\n");
   return `\n\n次は同期しません。\n${detail}`;
+}
+
+/** 確認の窓のボタン。**押された文字で分けるので、定数を1か所に置く** */
+const SYNC = "同期する";
+const SYNC_NEWEST = "同期する（設定資料は新しいほうへ）";
+const SYNC_ONE_BY_ONE = "同期する（1件ずつ選ぶ）";
+
+/**
+ * 同期の確認の窓に出す中身（作者の裁定、2026-10-01 案2）。
+ *
+ * 作者の報告（2026-09-27）：別の機械で変えた分との合流が3クリックかかる
+ * （［保存・同期］→［同期する］→ 見比べの入口［全部、新しいほうを採る］）。
+ *
+ * **選ぶ設定資料があるときだけ**、この窓に選び方のボタンを並べて、
+ * 続けて出ていた入口の窓を省く。無ければ「同期する」1つ。
+ * 入口の窓が言っていたこと（作者が選ぶ件数・途中でやめたら戻すこと・
+ * 退避の枝）は、ここへ移す。**本文は今までどおり1件ずつ選ぶ。**
+ */
+export function describeSyncConfirm(
+  doing: readonly SyncTargetPlan[],
+  all: readonly SyncTargetPlan[]
+): { message: string; detail: string; buttons: string[] } {
+  const lines = doing.map(
+    (plan) => `・${describeTargetWorks(plan.target)}：${describePlan(plan)}`
+  );
+  const sending = doing.filter((plan) => plan.push).length;
+
+  let settings = 0;
+  let manuscripts = 0;
+  for (const plan of doing) {
+    const status = plan.target.status;
+    if (!plan.pull || status.kind !== "tracked") continue;
+    settings += settingsToChooseCount(status.conflicts);
+    manuscripts += status.conflicts?.manuscripts.length ?? 0;
+  }
+
+  const choosing: string[] = [];
+  if (settings > 0 || manuscripts > 0) {
+    choosing.push(
+      `作者が選ぶものがあります（設定資料 ${settings}件・本文 ${manuscripts}件）。`
+    );
+    if (settings > 0) {
+      choosing.push(
+        "設定資料は、押したボタンで決めます（新しいほうへまとめて／1件ずつ）。"
+      );
+    }
+    if (manuscripts > 0) choosing.push("本文は1件ずつお選びいただきます。");
+    choosing.push(
+      "途中でやめると、合わせるのをやめて元の状態へ戻します。" +
+        "合わせる前に退避の枝を作るので、あとから丸ごと戻せます。"
+    );
+  }
+
+  return {
+    message: `${doing.length}か所を同期します。`,
+    detail:
+      `${lines.join("\n")}\n\n` +
+      (choosing.length > 0 ? `${choosing.join("\n")}\n\n` : "") +
+      (sending > 0
+        ? `${sending}か所はGitHubへ送信します。\n`
+        : "GitHubへは送信しません（送り先が未設定です）。\n") +
+      "記録の説明は、日付から自動で付けます。" +
+      describeSyncSkips(all),
+    buttons: settings > 0 ? [SYNC_NEWEST, SYNC_ONE_BY_ONE] : [SYNC],
+  };
+}
+
+/**
+ * 押されたボタンを、見比べの始め方へ直す。**押さずに閉じたら undefined**（同期しない）。
+ *
+ * 「同期する」1つのときは `manuscriptsOnly`——選ぶ設定資料は無いと見込んだ
+ * ので、見込みが外れたら入口の窓で訊く（`ConflictWalkStart`）。
+ */
+export function syncChoiceOf(
+  answer: string | undefined
+): ConflictWalkStart | undefined {
+  if (answer === SYNC_NEWEST) return "newest";
+  if (answer === SYNC_ONE_BY_ONE) return "oneByOne";
+  if (answer === SYNC) return "manuscriptsOnly";
+  return undefined;
 }
 
 /**

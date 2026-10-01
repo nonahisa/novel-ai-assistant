@@ -315,6 +315,75 @@ describe("全部、新しいほうを採る", { timeout: 30_000 }, () => {
 });
 
 /**
+ * 入口の窓を省く（作者の裁定、2026-10-01 案2）。
+ *
+ * ［保存・同期］の確認の窓（または「分岐合流」の確認の窓）で、もう
+ * 「設定資料は新しいほうへ／1件ずつ」を選んでもらっている。続けて同じ問いの
+ * 窓を出すと、作者の言う「3クリック」の1つになる。
+ */
+describe("確認の窓で選んだあとは、入口の窓を出さない", { timeout: 30_000 }, () => {
+  beforeEach(() => {
+    setUpConflict();
+  }, 30_000);
+
+  const 入口 = (text: string) => text.includes("同じ箇所を両方で書き換えたものが");
+
+  test("「新しいほうへ」を選んであれば、設定資料はそのまま一括で片づける", async () => {
+    picks.push("こちらを採用");
+
+    const result = await walkConflicts(scope(), [人物ファイル, 原稿ファイル], {
+      provider: new ConflictContentProvider(),
+      start: "newest",
+    });
+
+    expect(shown.filter(入口)).toEqual([]);
+    expect(result.aborted).toBe(false);
+    expect(result.bulkResolved).toEqual([人物ファイル]);
+    expect(result.resolved).toEqual([原稿ファイル]);
+    expect(read(人物ファイル)).toContain("むこうの紹介");
+  });
+
+  test("「1件ずつ」を選んであれば、設定資料も見比べに回す", async () => {
+    answers.push("次へ");
+    picks.push("こちらを採用");
+
+    const result = await walkConflicts(scope(), [人物ファイル, 原稿ファイル], {
+      provider: new ConflictContentProvider(),
+      start: "oneByOne",
+    });
+
+    expect(shown.filter(入口)).toEqual([]);
+    expect(result.resolved).toEqual([人物ファイル, 原稿ファイル]);
+  });
+
+  test("選ぶ設定資料が無い見込みで、原稿だけなら入口を出さない", async () => {
+    picks.push("こちらを採用");
+
+    const result = await walkConflicts(scope(), [原稿ファイル], {
+      provider: new ConflictContentProvider(),
+      start: "manuscriptsOnly",
+    });
+
+    expect(shown.filter(入口)).toEqual([]);
+    expect(result.resolved).toEqual([原稿ファイル]);
+  });
+
+  test("見込みが外れて設定資料が出たら、黙って決めずに入口の窓で訊く", async () => {
+    // 確認の窓では「選ぶ設定資料は無い」と言っていた。**訊いていないことを決めない**
+    answers.push("1件ずつ選ぶ");
+    answers.push("次へ");
+    picks.push("こちらを採用");
+
+    await walkConflicts(scope(), [人物ファイル, 原稿ファイル], {
+      provider: new ConflictContentProvider(),
+      start: "manuscriptsOnly",
+    });
+
+    expect(shown.filter(入口)).toHaveLength(1);
+  });
+});
+
+/**
  * 押す前に見せる中身。
  *
  * **ファイル名の羅列をやめた。** 13作品ぶんの分岐では、名前を8件並べても

@@ -14,6 +14,7 @@ import {
 } from "../core/git";
 import {
   orderStartupTargets,
+  overlapForAuthor,
   overlappingChangedFiles,
   planHandoff,
   type HandoffAction,
@@ -231,7 +232,10 @@ async function readOverlap(
     // 中身は使わないが、**空でない**ことが「訊く」へ倒す合図になる
     return ["（調べられませんでした）"];
   }
-  return overlappingChangedFiles(sides.local, sides.remote);
+  // **自動で片づくものは「重なり」に数えない**（案1、2026-10-01）。
+  // 設定資料も外す——合わせる側が規則で決め、作者が選ぶものが出たら
+  // 戻して「訊く」に回す（`foldBoth` の `authorChoice: "stop"`）
+  return overlapForAuthor(overlappingChangedFiles(sides.local, sides.remote));
 }
 
 /** リモートだけ進んでいる。**黙って取る**（作者の裁定） */

@@ -11,17 +11,22 @@ import {
 } from "../core/git";
 import { commitAll, countTrackableFiles, hasCommitIdentity } from "../core/gitSetup";
 import { buildSyncTarget } from "../core/syncTarget";
-import { readDivergenceConflicts } from "../core/divergenceScan";
+import {
+  readDivergenceConflicts,
+  readUndecidedSettings,
+  type ConflictWalkStart,
+} from "../core/divergenceScan";
 import { canFetch, pullBeforeRecording } from "./gitSync";
 import { foldDivergence } from "./resolveDivergence";
 import {
   actionablePlans,
   afterCommit,
   describeOutcomes,
-  describePlan,
+  describeSyncConfirm,
   describeSyncSkips,
   describeTargetWorks,
   planSyncAll,
+  syncChoiceOf,
   syncCommitMessage,
   type FoldSummary,
   type SyncTargetOutcome,
@@ -110,7 +115,8 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
     return;
   }
 
-  if (!(await confirm(doing, plans))) return;
+  const start = await confirm(doing, plans);
+  if (!start) return;
 
   // **同期の最中は、設定資料の見張りとファイル更新の知らせを黙らせる**
   // （設計書5.5.18）。gitの書き込みで置き場の数だけ問いが並ぶのを防ぐ
@@ -130,7 +136,7 @@ export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
               doing.length
             }）`,
           });
-          done.push(await runPlan(deps, plan, progress));
+          done.push(await runPlan(deps, plan, progress, start));
         }
         return done;
       }
@@ -198,7 +204,17 @@ async function collectStates(
         status.upstream,
         deps.run ?? runGit
       );
-      if (conflicts) status = { ...status, conflicts };
+      if (conflicts) {
+        // **規則で決まらない設定資料があるか**まで見る（案2）。確認の窓に
+        // 選び方のボタンを並べるかどうかが、これで決まる
+        const undecidedSettings = await readUndecidedSettings(
+          status.root,
+          status.upstream,
+          conflicts.settings,
+          deps.run ?? runGit
+        );
+        status = { ...status, conflicts: { ...conflicts, undecidedSettings } };
+      }
     }
 
     const target = buildSyncTarget(root, deps.registry.list());
@@ -219,31 +235,24 @@ async function collectStates(
   return states;
 }
 
-/** 何が起きるかを見せて、1回だけ確認する */
+/**
+ * 何が起きるかを見せて、1回だけ確認する。
+ *
+ * **選ぶ設定資料があれば、選び方もここで訊く**（作者の裁定、2026-10-01 案2）。
+ * 続けて見比べの入口の窓が出ていたのを、この1つにまとめた。
+ * 押さずに閉じたら undefined（同期しない）。
+ */
 async function confirm(
   doing: readonly SyncTargetPlan[],
   all: readonly SyncTargetPlan[]
-): Promise<boolean> {
-  const lines = doing.map(
-    (plan) => `・${describeTargetWorks(plan.target)}：${describePlan(plan)}`
-  );
-  const sending = doing.filter((plan) => plan.push).length;
-
+): Promise<ConflictWalkStart | undefined> {
+  const text = describeSyncConfirm(doing, all);
   const answer = await vscode.window.showInformationMessage(
-    `${doing.length}か所を同期します。`,
-    {
-      modal: true,
-      detail:
-        `${lines.join("\n")}\n\n` +
-        (sending > 0
-          ? `${sending}か所はGitHubへ送信します。\n`
-          : "GitHubへは送信しません（送り先が未設定です）。\n") +
-        "記録の説明は、日付から自動で付けます。" +
-        describeSyncSkips(all),
-    },
-    "同期する"
+    text.message,
+    { modal: true, detail: text.detail },
+    ...text.buttons
   );
-  return answer === "同期する";
+  return syncChoiceOf(answer);
 }
 
 /**
@@ -259,7 +268,8 @@ async function confirm(
 async function runPlan(
   deps: SyncAllDeps,
   plan: SyncTargetPlan,
-  progress?: { report(value: { message?: string }): void }
+  progress?: { report(value: { message?: string }): void },
+  start?: ConflictWalkStart
 ): Promise<SyncTargetOutcome> {
   const outcome: SyncTargetOutcome = {
     plan,
@@ -346,7 +356,7 @@ async function runPlan(
       // 「『分かれた分を合わせる』でお試しください」と案内するだけでは、
       // 作者にとってそこが行き止まりだった
       if (result.failure.kind === "diverged") {
-        const folded = await foldHere(deps, plan, progress);
+        const folded = await foldHere(deps, plan, progress, start);
         if (!folded.ok) {
           outcome.error = folded.reason;
           outcome.diverged = true;
@@ -400,7 +410,8 @@ async function runPlan(
 async function foldHere(
   deps: SyncAllDeps,
   plan: SyncTargetPlan,
-  progress?: { report(value: { message?: string }): void }
+  progress?: { report(value: { message?: string }): void },
+  start?: ConflictWalkStart
 ): Promise<
   { ok: true; summary: FoldSummary } | { ok: false; reason: string }
 > {
@@ -416,7 +427,8 @@ async function foldHere(
       label: describeTargetWorks(plan.target),
       upstream: status.upstream,
     },
-    { progress }
+    // 確認の窓で選んだ始め方を渡す。**入口の窓をもう一度出さない**（案2）
+    { progress, start }
   );
   if (!result.ok) return { ok: false, reason: result.reason };
 

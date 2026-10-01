@@ -211,6 +211,14 @@ export async function commitPaths(
 export interface DivergenceConflicts {
   /** 設定資料のJSON。規則で決まることが多い（`settingsConflictRule.ts`） */
   settings: string[];
+  /**
+   * `settings` のうち、**規則で決まらず作者が選ぶ見込みのもの**（2026-10-01 案2）。
+   *
+   * 確認の窓に「設定資料は新しいほうへ／1件ずつ」を並べるかどうかを決める。
+   * 机上で3つの版を読んで規則にかけた結果なので、調べなかった・調べられなかった
+   * ときは undefined（呼び出し側は `settings` 全部を選ぶ側に数える。安全な側）
+   */
+  undecidedSettings?: string[];
   /** 本文。**同じ箇所を両方で書いたものだけ**がここに来る */
   manuscripts: string[];
   /** 拡張機能が自動で書くもの。この端末の側を残す */

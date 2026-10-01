@@ -4,10 +4,12 @@ import {
   afterCommit,
   describeOutcomes,
   describePlan,
+  describeSyncConfirm,
   describeSyncSkips,
   describeTargetWorks,
   planSyncAll,
   planSyncTarget,
+  syncChoiceOf,
   syncCommitMessage,
   type SyncTargetState,
 } from "../../../src/core/syncAllPlan";
@@ -303,5 +305,98 @@ describe("記録の結果を、次の手順へ翻訳する", () => {
     expect(afterCommit({ ok: false })).toMatchObject({
       error: "記録できませんでした: （詳細なし）",
     });
+  });
+});
+
+/**
+ * 確認の窓を1つにまとめる（作者の裁定、2026-10-01 案2）。
+ *
+ * 作者の報告（2026-09-27）：別の機械で変えた分との合流が3クリックかかる。
+ * ［保存・同期］→［同期する］→ 見比べの入口［全部、新しいほうを採る］。
+ * **選ぶ設定資料があるときだけ**、確認の窓に選び方のボタンを並べ、
+ * 入口の窓を省く。無ければ「同期する」1つ。
+ */
+describe("同期の確認の窓", () => {
+  function diverged(conflicts: {
+    settings?: string[];
+    undecidedSettings?: string[];
+    manuscripts?: string[];
+  }): SyncTargetState {
+    return state({
+      status: tracked({
+        behind: 2,
+        ahead: 1,
+        conflicts: {
+          settings: conflicts.settings ?? [],
+          undecidedSettings: conflicts.undecidedSettings,
+          manuscripts: conflicts.manuscripts ?? [],
+          autoWritten: [],
+          appendOnly: [],
+        },
+      }),
+    });
+  }
+
+  test("選ぶ設定資料があれば、確認の窓で選び方まで訊く", () => {
+    const plans = planSyncAll([
+      diverged({
+        settings: ["短編/設定/characters/a.json"],
+        undecidedSettings: ["短編/設定/characters/a.json"],
+      }),
+    ]);
+    const text = describeSyncConfirm(actionablePlans(plans), plans);
+
+    expect(text.buttons).toEqual([
+      "同期する（設定資料は新しいほうへ）",
+      "同期する（1件ずつ選ぶ）",
+    ]);
+    expect(syncChoiceOf(text.buttons[0])).toBe("newest");
+    expect(syncChoiceOf(text.buttons[1])).toBe("oneByOne");
+    // 入口の窓が言っていたことは、こちらへ移す（件数・戻し方）
+    expect(text.detail).toContain("設定資料 1件");
+    expect(text.detail).toContain("退避の枝");
+  });
+
+  test("設定資料の衝突が規則で決まる見込みなら、ボタンは「同期する」1つ", () => {
+    const plans = planSyncAll([
+      diverged({
+        settings: ["短編/設定/characters/a.json"],
+        undecidedSettings: [],
+      }),
+    ]);
+    const text = describeSyncConfirm(actionablePlans(plans), plans);
+
+    expect(text.buttons).toEqual(["同期する"]);
+    expect(syncChoiceOf("同期する")).toBe("manuscriptsOnly");
+  });
+
+  test("本文だけが衝突するなら「同期する」1つで、1件ずつ選ぶことを書いておく", () => {
+    const plans = planSyncAll([diverged({ manuscripts: ["短編/本文/第1話.txt"] })]);
+    const text = describeSyncConfirm(actionablePlans(plans), plans);
+
+    expect(text.buttons).toEqual(["同期する"]);
+    expect(text.detail).toContain("本文 1件");
+    expect(text.detail).toContain("途中でやめると");
+  });
+
+  test("見込みを調べられなかった設定資料は、選ぶ側に数える（安全な側）", () => {
+    const plans = planSyncAll([
+      diverged({ settings: ["短編/設定/characters/a.json"] }),
+    ]);
+    const text = describeSyncConfirm(actionablePlans(plans), plans);
+
+    expect(text.buttons).toHaveLength(2);
+  });
+
+  test("送信の有無は、これまでどおり書く", () => {
+    const plans = planSyncAll([diverged({})]);
+    const text = describeSyncConfirm(actionablePlans(plans), plans);
+
+    expect(text.message).toBe("1か所を同期します。");
+    expect(text.detail).toContain("1か所はGitHubへ送信します");
+  });
+
+  test("押さずに閉じたら、同期しない", () => {
+    expect(syncChoiceOf(undefined)).toBeUndefined();
   });
 });

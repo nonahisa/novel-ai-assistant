@@ -25,6 +25,7 @@ import {
 import { countChars, formatCount } from "../core/charCount";
 import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
 import { lastAuthorOf } from "../core/git";
+import type { ConflictWalkStart } from "../core/divergenceScan";
 import { cancelItem } from "../views/dialogs";
 import { openInDefaultEditor } from "../views/openDocument";
 
@@ -107,6 +108,12 @@ export interface WalkConflictsOptions {
   run?: GitCommandRunner;
   /** 省略時は `useConflictProvider` で登録されたものを使う */
   provider?: ConflictContentProvider;
+  /**
+   * 確認の窓で先に選んだ始め方（作者の裁定、2026-10-01 案2）。
+   * あれば入口の窓（全部、新しいほうを採る／1件ずつ選ぶ）を出さない。
+   * `manuscriptsOnly` で設定資料が出てきたときだけは、入口の窓で訊く
+   */
+  start?: ConflictWalkStart;
 }
 
 /**
@@ -531,15 +538,7 @@ export async function walkConflicts(
   }
 
   const settingsFiles = files.filter((file) => isSettingsJsonPath(file));
-  // 一括で片づけられるものが無ければ、そのボタンは出さない。
-  // **押しても何も減らないボタンは、迷わせるだけである**
-  const buttons =
-    settingsFiles.length > 0 ? [KEEP_ALL_NEWEST, ONE_BY_ONE] : [ONE_BY_ONE];
-  const start = await vscode.window.showInformationMessage(
-    describeWalkStart(files),
-    { modal: true, detail: describeWalkStartDetail(files) },
-    ...buttons
-  );
+  const start = await chooseStart(files, settingsFiles, options.start);
   if (start !== KEEP_ALL_NEWEST && start !== ONE_BY_ONE) {
     return { resolved, bulkResolved, aborted: true };
   }
@@ -597,6 +596,33 @@ export async function walkConflicts(
 }
 
 /**
+ * 入口でどちらの道を行くか。押されたボタンの文字（取りやめなら undefined）を返す。
+ *
+ * **確認の窓で選んであれば、窓を出さない**（作者の裁定、2026-10-01 案2）。
+ * ただし確認の窓が「選ぶ設定資料は無い」と見込んでいた（`manuscriptsOnly`）のに
+ * 設定資料が来たら、**訊いていないことを決めずに**これまでどおり窓で訊く。
+ */
+async function chooseStart(
+  files: readonly string[],
+  settingsFiles: readonly string[],
+  chosen: ConflictWalkStart | undefined
+): Promise<string | undefined> {
+  if (chosen === "newest") return KEEP_ALL_NEWEST;
+  if (chosen === "oneByOne") return ONE_BY_ONE;
+  if (chosen === "manuscriptsOnly" && settingsFiles.length === 0) return ONE_BY_ONE;
+
+  // 一括で片づけられるものが無ければ、そのボタンは出さない。
+  // **押しても何も減らないボタンは、迷わせるだけである**
+  const buttons =
+    settingsFiles.length > 0 ? [KEEP_ALL_NEWEST, ONE_BY_ONE] : [ONE_BY_ONE];
+  return await vscode.window.showInformationMessage(
+    describeWalkStart(files),
+    { modal: true, detail: describeWalkStartDetail(files) },
+    ...buttons
+  );
+}
+
+/**
  * 設定資料の1件を、**更新時刻の新しいほう**で確定させる。
  *
  * **確定できたときだけ true。** 片方の版が無い（追加と削除がぶつかった）
@@ -612,8 +638,8 @@ async function keepNewestSide(
   const theirs = await showStage(scope.folderPath, relativePath, 3, run);
   if (ours === undefined || theirs === undefined) return false;
 
+  // 更新時刻だけで決めるので、必ずどちらかの側になる（決めないことは無い）
   const decision = decideByUpdatedAt(ours, theirs);
-  if (decision.side === "conflict") return false;
   if (!(await keepSideOfConflict(scope.folderPath, relativePath, decision.side, run))) {
     logFailure("設定資料をまとめて確定できなかった", {
       ファイル: relativePath,

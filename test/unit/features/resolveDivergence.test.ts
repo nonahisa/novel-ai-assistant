@@ -431,6 +431,41 @@ describe("合わせる前の確認に出す中身", () => {
     expect(text.detail).toContain("退避の枝");
     expect(text.detail).toContain("GitHubへは送信しません");
   });
+
+  /*
+    確認［合わせる］と見比べの入口の窓を1つにまとめる（作者の裁定、2026-10-01 案2）。
+    「分岐合流」から入ったときも、窓は1つで済むようにする
+  */
+  test("選ぶ設定資料があれば、確認の窓に選び方のボタンを並べる", () => {
+    const text = describeDivergenceConfirm({
+      label: "いじめられっ子",
+      behind: 1,
+      ahead: 1,
+      autoWritten: 0,
+      settingsToChoose: 2,
+      manuscripts: 1,
+    });
+
+    expect(text.buttons).toEqual([
+      "合わせる（設定資料は新しいほうへ）",
+      "合わせる（1件ずつ選ぶ）",
+    ]);
+    expect(text.detail).toContain("設定資料2件");
+    expect(text.detail).toContain("途中でやめると");
+  });
+
+  test("選ぶ設定資料が無ければ、ボタンは「合わせる」1つ", () => {
+    const text = describeDivergenceConfirm({
+      label: "いじめられっ子",
+      behind: 1,
+      ahead: 1,
+      autoWritten: 0,
+      settings: 3,
+      manuscripts: 1,
+    });
+
+    expect(text.buttons).toEqual(["合わせる"]);
+  });
 });
 
 /**
@@ -561,6 +596,59 @@ describe("設定資料と本文の自動合流", { timeout: 30_000 }, () => {
       "こちらのメモ"
     );
     expect(status()).not.toContain("behind");
+  });
+
+  test("同じ資料の別々の項目が変わっただけなら、両方を合わせて訊かない（案3）", async () => {
+    分岐を作る(
+      [[人物ファイル, 人物({ summary: "もと", updatedAt: "2026-09-01T00:00:00.000Z" })]],
+      [[人物ファイル, 人物({ summary: "むこうの紹介", updatedAt: "2026-09-05T00:00:00.000Z" })]],
+      [
+        [
+          人物ファイル,
+          人物({ summary: "もと", authorNotes: "こちらのメモ", updatedAt: "2026-09-03T00:00:00.000Z" }),
+        ],
+      ]
+    );
+    const walked: string[][] = [];
+
+    const result = await 合わせる(async (input) => {
+      walked.push(input.files);
+      return { resolved: [], bulkResolved: [], aborted: true };
+    });
+
+    expect(walked).toEqual([]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.settingsAutoResolved.map((one) => one.side)).toEqual(["merged"]);
+    const merged = JSON.parse(
+      fs.readFileSync(nodePath.join(root, 人物ファイル), "utf8")
+    ) as Record<string, unknown>;
+    expect(merged.summary).toBe("むこうの紹介");
+    expect(merged.authorNotes).toBe("こちらのメモ");
+    expect(git(root, "status", "--porcelain").trim()).toBe("");
+  });
+
+  test("確認の窓で選んだ選び方を、見比べへそのまま渡す（案2）", async () => {
+    分岐を作る(
+      [[人物ファイル, 人物({ summary: "もと", updatedAt: "2026-09-01T00:00:00.000Z" })]],
+      [[人物ファイル, 人物({ summary: "もと", authorNotes: "むこうのメモ", updatedAt: "2026-09-05T00:00:00.000Z" })]],
+      [[人物ファイル, 人物({ summary: "もと", authorNotes: "こちらのメモ", updatedAt: "2026-09-03T00:00:00.000Z" })]]
+    );
+    const starts: unknown[] = [];
+
+    await foldDivergence(
+      deps(),
+      { root, label: "短編", upstream: "origin/main" },
+      {
+        start: "newest",
+        walk: async (input) => {
+          starts.push(input.start);
+          return こちらを選ぶ(input);
+        },
+      }
+    );
+
+    expect(starts).toEqual(["newest"]);
   });
 
   test("作者が途中でやめたら、全部戻す", async () => {
