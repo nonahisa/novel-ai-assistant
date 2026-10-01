@@ -1289,7 +1289,33 @@ export async function activate(
     (workId) => describeSyncBadge(gitSync.statusFor(workId)),
     (workId) => describeSyncTooltip(gitSync.statusFor(workId)),
     noteFirstWorkListRender,
-    setWorksLoading
+    setWorksLoading,
+    {
+      /*
+        **前回の一覧の控え**（設計書6.107）。開いた瞬間に前回の値で行を出し、
+        走査が終われば差し替える。置き場は登録簿と同じ globalState
+        （作品フォルダーには書かない。この端末で早く出すためだけの控え）。
+      */
+      snapshot: context.globalState,
+      /*
+        **控えで描いた時刻は、走査で描いた時刻と別の印にする。**
+        「作品一覧の初回描画」はこれまでどおり走査が終わった時刻で、
+        整備もそちらの合図で起きる（控えで描いただけでは起こさない——
+        走査と取り合うため）。
+      */
+      onSnapshotRender: (shown, total) => {
+        try {
+          startupTiming.mark(
+            "作品一覧の控え描画",
+            shown === total ? `控え ${shown}` : `控え ${shown}／作品 ${total}`
+          );
+        } catch (error) {
+          logFailure("起動の所要時間の記録", {
+            詳細: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+    }
   );
   // 同期状態が変わっても本文は変わらないので、再走査はせず描き直すだけにする
   gitSync.onDidChange(() => treeProvider.redraw());

@@ -40,6 +40,14 @@ import { SynopsisStore } from "../core/synopsisStore";
 import { synopsisKey } from "../models/synopsis";
 import { WorkRegistry } from "../core/workRegistry";
 import {
+  WORK_LIST_SNAPSHOT_KEY,
+  buildWorkListSnapshot,
+  readWorkListSnapshot,
+  snapshotEntryFor,
+  type WorkListSnapshotEntry,
+  type WorkListSnapshotStore,
+} from "../core/workListSnapshot";
+import {
   currentCountMode,
   pickCount,
   countModeLabel,
@@ -57,6 +65,29 @@ import {
  * 増やすかどうかは、この形で測り直してから決める。
  */
 const SCAN_CONCURRENCY = 4;
+
+/** 1作品の走査結果（一覧が持つぶん） */
+interface LoadedWork {
+  episodes: EpisodeFile[];
+  stats: WorkStats;
+  /** 設定ファイルに書かれた種類（設計書6.109。走査が読んだものを借りる） */
+  configuredKind?: WorkKindKey;
+}
+
+/** 前回の一覧の控え（設計書6.107）を使うための口 */
+export interface WorkTreeSnapshotOptions {
+  /** 控えの置き場（拡張機能の保管庫）。無ければ控えを使わない */
+  snapshot?: WorkListSnapshotStore;
+  /**
+   * 控えで一覧を描いたときに1回だけ呼ぶ。起動の計測で、**控えで描いた
+   * 時刻と走査で描いた時刻を分けて**記録するため（`onFirstRender` は
+   * これまでどおり走査で描き終えたときに来る）。
+   *
+   * @param shown 控えの数字で出した作品の数
+   * @param total 一覧に出した作品の数（控えに無い作品も含む）
+   */
+  onSnapshotRender?: (shown: number, total: number) => void;
+}
 
 export type TreeNode =
   | WorkNode
@@ -87,7 +118,16 @@ export class WorkNode {
      */
     public readonly format?: WorkFormatKey,
     /** 作品の種類（設計書6.109）。吹き出しの目安（台本の分数など）に使う */
-    public readonly kind?: WorkKindKey
+    public readonly kind?: WorkKindKey,
+    /**
+     * 走査の前に控えから出した行か（設計書6.107）。走査の結果なら `undefined`。
+     *
+     * - `"stale"`：前回の値を出している。**最新だと思わせない**よう行に
+     *   「前回の値」と添える
+     * - `"pending"`：控えに無い作品（前回のあとに登録した等）。数字が無いので
+     *   「読み込み中」とだけ出す
+     */
+    public readonly snapshot?: "stale" | "pending"
   ) {}
 }
 
@@ -183,15 +223,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   readonly onDidLoadWork = this._onDidLoadWork.event;
 
   /** 走査結果のキャッシュ（作品ID -> 結果） */
-  private cache = new Map<
-    string,
-    {
-      episodes: EpisodeFile[];
-      stats: WorkStats;
-      /** 設定ファイルに書かれた種類（設計書6.109。走査が読んだものを借りる） */
-      configuredKind?: WorkKindKey;
-    }
-  >();
+  private cache = new Map<string, LoadedWork>();
 
   /**
    * 各話あらすじ（作品ID -> 話ごとの本文）。
@@ -252,6 +284,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
    *   （`setContext`）を付け外しする。**`views` から `setContext` を
    *   直接呼ばない**（`onFirstRender` と同じ理由）ので、口だけを渡してもらう。
    *   第2引数は走査する作品の数（案内に添える）
+   * @param snapshotOptions 前回の一覧の控え（設計書6.107）。`snapshot` が
+   *   無ければ控えを使わず、これまでどおり走査を待って出す
    */
   constructor(
     private readonly registry: WorkRegistry,
@@ -261,10 +295,46 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     private readonly onLoadingChanged?: (
       loading: boolean,
       count: number
-    ) => void
+    ) => void,
+    private readonly snapshotOptions: WorkTreeSnapshotOptions = {}
   ) {
     registry.onDidChange(() => this.refresh());
   }
+
+  /**
+   * 控えを使おうとしたか（起動で1回だけ）。
+   *
+   * **控えを出すのは最初の1回だけ。** 2回目以降の描き直しで出すと、
+   * 走査の済んだ一覧が古い数字へ戻ってしまう。
+   */
+  private snapshotTried = false;
+
+  /**
+   * 控えを出したあと、裏の走査で組み上がった行（設計書6.107）。
+   *
+   * 走査が終わると描き直しを求め、VS Code が呼び直した `getChildren` で
+   * **これをそのまま返す**（作品を読み直さない）。1回使ったら捨てる。
+   */
+  private warmedRoot: TreeNode[] | undefined;
+
+  /**
+   * 一覧の世代。`refresh()` のたびに進める。
+   *
+   * 裏の走査のあいだに作品が増減・解除されたら、その走査の行は
+   * もう正しくない。世代が変わっていれば `warmedRoot` に載せない。
+   */
+  private rootGeneration = 0;
+
+  /** 最後に保管庫へ書いた控えの中身（同じなら書き直さない） */
+  private lastSavedSnapshot: string | undefined;
+
+  /**
+   * 走っている最中の走査（作品ID -> 走査）。
+   *
+   * 控えの行を開くと、裏の走査と同じ作品をもう一度読みにいく。
+   * **同じ作品の走査が重なったら、先に走っているほうを待つ。**
+   */
+  private inflight = new Map<string, Promise<LoadedWork>>();
 
   /**
    * いま走っている作品一覧の走査の数。
@@ -293,13 +363,18 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private scanTimings: ScanTiming[] = [];
 
   refresh(workId?: string): void {
+    // 裏の走査の行は、もう正しくないかもしれない（設計書6.107）
+    this.rootGeneration += 1;
+    this.warmedRoot = undefined;
     if (workId) {
+      this.inflight.delete(workId);
       this.cache.delete(workId);
       this.synopses.delete(workId);
       this.chapters.delete(workId);
       this.posting.delete(workId);
       this.memos.delete(workId);
     } else {
+      this.inflight.clear();
       this.cache.clear();
       this.synopses.clear();
       this.chapters.clear();
@@ -372,6 +447,20 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         );
         return item;
       }
+      // 控えに無い作品（設計書6.107）。数字が無いので、0字と出さずに待ちを伝える
+      if (node.snapshot === "pending") {
+        item.description = "読み込み中…";
+        item.tooltip = new vscode.MarkdownString(
+          [
+            `**${work.title}**`,
+            "",
+            "いま作品の中を読み込んでいます。",
+            "",
+            `\`${work.folderPath}\``,
+          ].join("\n")
+        );
+        return item;
+      }
       // 未解決の競合は最優先で気づかせる。放置するとAI処理で原稿が壊れる
       // ——だから同期の印より前に置く
       const conflictMark =
@@ -385,13 +474,19 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       const workMeasure = measureKindCounts(node.kind, stats.totals)?.detail;
       const marks = [conflictMark, badge];
       item.label = workRowLabel(work.title, marks);
-      item.description = `${stats.fileCount}ファイル / ${modeLabel}${formatCount(
-        pickCount(stats.totals, mode)
-      )}字`;
+      // 控えの値は**頭に「前回の値」と付ける**（設計書6.107）。行は後ろから
+      // 切れるので、後ろに添えると長い作品名の行で読めなくなる
+      const stale = node.snapshot === "stale";
+      item.description = `${stale ? "（前回の値）" : ""}${
+        stats.fileCount
+      }ファイル / ${modeLabel}${formatCount(pickCount(stats.totals, mode))}字`;
       item.tooltip = new vscode.MarkdownString(
         [
           `**${work.title}**`,
           "",
+          stale
+            ? "_前回開いたときの値です。いま読み直しており、終われば差し替わります。_\n"
+            : null,
           // 題の前の［］が何かを、ここで言う（印は短くしか書けない）
           marks.some((mark) => mark)
             ? "_題の前の［］は、同期や競合で手当てが要るものの印です（内訳は下）。_\n"
@@ -659,6 +754,23 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     if (!node) {
       const works = this.registry.list();
       /*
+        **裏の走査で組み上がった行があれば、それを返す**（設計書6.107）。
+        控えを出したあと、走査が終わって描き直しを求めた回である。
+        作品を読み直さない（読み終えたばかりなので）。
+      */
+      const warmed = this.warmedRoot;
+      if (warmed) {
+        this.warmedRoot = undefined;
+        return warmed;
+      }
+      /*
+        **控えがあれば、走査を待たずに出す**（設計書6.107）。ノートPCでは
+        走査が終わるまで14〜105秒、1行も出なかった。走査は裏で回し、
+        終わったら描き直しを求めて差し替える。
+      */
+      const quick = this.renderFromSnapshot(works);
+      if (quick) return quick;
+      /*
         **走査のあいだ、案内を「読み込んでいます」に差し替える**（設計書6.1.2）。
 
         `getChildren` は全作品を読み終えるまで返らず、そのあいだツリーは
@@ -673,26 +785,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       if (scanning) this.noteLoading(true, works.length);
       try {
         const nodes = await this.scanAll(works);
-        /*
-          **初回の描画が終わったことを、1回だけ知らせる**（設計書6.107）。
-
-          `return` の直前に置く——作品ごとの走査（`load`）が終わって
-          ノードが揃った時点が「作品一覧が出るまで」に当たる。
-
-          **計測のために一覧を壊さない。** 知らせ先が落ちても、
-          起動の数字が1行残らないだけで、作品一覧は出す。
-        */
-        if (!this.firstRenderNotified) {
-          this.firstRenderNotified = true;
-          try {
-            // **走査の内訳も一緒に渡す**（設計書6.107）。一覧が出るまでの
-            // 時間のうち、読みと数え・解析がどれだけを占めたかが分かる
-            this.onFirstRender?.(summarizeScanTimings(this.scanTimings));
-          } catch {
-            // 知らせ先（extension.ts）で記録済み。ここでは一覧を優先する
-          }
-          this.scanTimings = [];
-        }
+        this.finishScan(nodes);
         return nodes;
       } finally {
         // **途中で失敗しても印を落とす。** 落とし忘れると、
@@ -801,6 +894,158 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     }
 
     return [];
+  }
+
+  /**
+   * 全作品の走査が終わったときの後始末。
+   *
+   * **初回の描画が終わったことを、1回だけ知らせる**（設計書6.107）。
+   * 作品ごとの走査が終わってノードが揃った時点が「作品一覧が出るまで」に
+   * 当たる。控えを先に出した起動でも、この合図は**走査が終わった時点**で
+   * 来る——控えで描いた時刻は `onSnapshotRender` で別に知らせる。整備
+   * （`maintenanceTrigger`）はこの合図で起きるので、控えで描いただけでは
+   * 起きない（走査と取り合わないため）。
+   *
+   * **計測のために一覧を壊さない。** 知らせ先が落ちても、
+   * 起動の数字が1行残らないだけで、作品一覧は出す。
+   */
+  private finishScan(nodes: readonly TreeNode[]): void {
+    if (!this.firstRenderNotified) {
+      this.firstRenderNotified = true;
+      try {
+        // **走査の内訳も一緒に渡す**（設計書6.107）。一覧が出るまでの
+        // 時間のうち、読みと数え・解析がどれだけを占めたかが分かる
+        this.onFirstRender?.(summarizeScanTimings(this.scanTimings));
+      } catch {
+        // 知らせ先（extension.ts）で記録済み。ここでは一覧を優先する
+      }
+      this.scanTimings = [];
+    }
+    this.saveSnapshot(nodes);
+  }
+
+  /**
+   * 控えから一覧を組む（起動で1回だけ。設計書6.107）。
+   *
+   * 使えないとき（保管庫が無い・控えが空か壊れている・登録簿の作品に
+   * 1つも当たらない・もう走査で描いた）は `undefined` を返し、呼び手は
+   * これまでどおり走査を待つ。
+   *
+   * **並びと顔ぶれは登録簿に従う。** 控えにだけある作品（解除した作品）は
+   * 出さず、控えに無い作品は「読み込み中」の行で出す。
+   */
+  private renderFromSnapshot(works: readonly WorkEntry[]): TreeNode[] | undefined {
+    const store = this.snapshotOptions.snapshot;
+    if (!store || this.snapshotTried || this.firstRenderNotified) return undefined;
+    this.snapshotTried = true;
+    if (works.length === 0) return undefined;
+
+    const snapshot = readWorkListSnapshot(store);
+    let shown = 0;
+    const nodes = works.map((work) => {
+      const entry = snapshotEntryFor(work, snapshot);
+      if (!entry) {
+        return new WorkNode(
+          work,
+          { fileCount: 0, totals: emptyCounts(), conflictedCount: 0 },
+          undefined,
+          undefined,
+          undefined,
+          "pending"
+        );
+      }
+      shown += 1;
+      return new WorkNode(
+        work,
+        {
+          fileCount: entry.fileCount,
+          totals: { ...entry.totals },
+          conflictedCount: entry.conflictedCount,
+        },
+        undefined,
+        entry.format,
+        // 種類は控えたときに決めたもの（設定ファイルを読み直さない。6.109）
+        entry.kind,
+        "stale"
+      );
+    });
+    // 1件も当たらなければ、「読み込み中」だけが並ぶ一覧になる。
+    // それなら走査を待つ従来の出し方（「N作品を読み込み中」の案内）のほうが分かる
+    if (shown === 0) return undefined;
+
+    try {
+      this.snapshotOptions.onSnapshotRender?.(shown, works.length);
+    } catch {
+      // 計測のために一覧を壊さない（onFirstRender と同じ扱い）
+    }
+    void this.warmUp(works);
+    return nodes;
+  }
+
+  /**
+   * 控えを出したあと、裏で全作品を走査する（設計書6.107）。
+   *
+   * 走査のあいだは「読み込み中」の印を立てる（行は出ているが、数字が
+   * 古いことを一覧の見出しでも伝える）。終わったら行を `warmedRoot` に
+   * 置いて描き直しを求める——VS Code が呼び直した `getChildren` が
+   * それを返す。
+   */
+  private async warmUp(works: readonly WorkEntry[]): Promise<void> {
+    const generation = this.rootGeneration;
+    this.noteLoading(true, works.length);
+    try {
+      const nodes = await this.scanAll(works);
+      this.finishScan(nodes);
+      // 走査のあいだに作品が増減・解除されたら、この行は使わない
+      // （`refresh()` が描き直しを求めており、次の描画で走査し直す）
+      if (generation === this.rootGeneration) this.warmedRoot = nodes;
+    } finally {
+      this.noteLoading(false, works.length);
+      this._onDidChangeTreeData.fire();
+    }
+  }
+
+  /**
+   * 走査の結果を控えに書く（設計書6.107）。
+   *
+   * **読めなかった作品は控えない**（次の起動で「読み込み中」の行になる。
+   * 理由の文は走査のたびに変わりうるので、古い理由を出さない）。
+   * **中身が前回書いたものと同じなら書かない**——同期の印が変わるたびに
+   * 一覧は描き直されるので、そのたびに保管庫へ書くことになる。
+   * 書けなくても一覧は止めない（次の起動が走査を待つだけ）。
+   */
+  private saveSnapshot(nodes: readonly TreeNode[]): void {
+    const store = this.snapshotOptions.snapshot;
+    if (!store) return;
+    const entries: WorkListSnapshotEntry[] = [];
+    for (const node of nodes) {
+      if (node.type !== "work" || node.loadError || node.snapshot) continue;
+      entries.push({
+        id: node.work.id,
+        folderPath: node.work.folderPath,
+        fileCount: node.stats.fileCount,
+        totals: { ...node.stats.totals },
+        conflictedCount: node.stats.conflictedCount,
+        ...(node.format ? { format: node.format } : {}),
+        ...(node.kind ? { kind: node.kind } : {}),
+      });
+    }
+    const key = JSON.stringify(entries);
+    if (key === this.lastSavedSnapshot) return;
+    this.lastSavedSnapshot = key;
+    try {
+      void Promise.resolve(
+        store.update(
+          WORK_LIST_SNAPSHOT_KEY,
+          buildWorkListSnapshot(entries, new Date().toISOString())
+        )
+      ).catch(() => {
+        // 書けなければ、次の起動は走査を待つだけ。もう一度書けるよう印を戻す
+        this.lastSavedSnapshot = undefined;
+      });
+    } catch {
+      this.lastSavedSnapshot = undefined;
+    }
   }
 
   /**
@@ -1008,14 +1253,28 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     return nodes;
   }
 
-  private async load(work: WorkEntry) {
+  private load(work: WorkEntry): Promise<LoadedWork> {
     const cached = this.cache.get(work.id);
-    if (cached) return cached;
+    if (cached) return Promise.resolve(cached);
+    // 同じ作品の走査が走っていれば、それを待つ（控えの行を開いたとき。6.107）
+    const running = this.inflight.get(work.id);
+    if (running) return running;
+    const scan = this.scanAndCache(work);
+    this.inflight.set(work.id, scan);
+    // `refresh()` のあとに始まった走査の札を消さない（同じものだけ外す）
+    const clear = (): void => {
+      if (this.inflight.get(work.id) === scan) this.inflight.delete(work.id);
+    };
+    scan.then(clear, clear);
+    return scan;
+  }
+
+  private async scanAndCache(work: WorkEntry): Promise<LoadedWork> {
     const result = await scanWork(work);
     // **初回の描画までに走ったものだけ控える**（設計書6.107）。
     // キャッシュに載せないのは、計測が走査1回ごとの値だからである
     if (!this.firstRenderNotified) this.scanTimings.push(result.timing);
-    const value = {
+    const value: LoadedWork = {
       episodes: result.episodes,
       stats: result.stats,
       configuredKind: result.configuredKind,
