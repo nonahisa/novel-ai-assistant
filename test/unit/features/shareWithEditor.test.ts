@@ -12,7 +12,7 @@ import { isNestedLocation, isSameLocation } from "../../../src/core/locationComp
 import { RECOVERY_DIRECTORY_NAME } from "../../../src/core/atomicWrite";
 import { workPaths } from "../../../src/core/workRegistry";
 import { resolveManuscriptDir } from "../../../src/core/manuscriptFolder";
-import type { WorkEntry } from "../../../src/models/types";
+import type { WorkConfig, WorkEntry } from "../../../src/models/types";
 
 /**
  * 編集部へ渡す（設計書5.6.11）。
@@ -389,6 +389,39 @@ describe("copyForEditor", () => {
       expect(await readCopied("001.txt")).toBe("　第一話。\r\n");
     });
 
+    test("渡し先に元からあった無関係の memo.txt は、送り直しても消えない", async () => {
+      // 作者が既存のフォルダーを渡し先に選んだ場合。原稿に見える名前でも、
+      // この機能が写したものでなければ触らない
+      await fsp.mkdir(destination, { recursive: true });
+      await fsp.writeFile(nodePath.join(destination, "memo.txt"), "作者のメモ", "utf8");
+      await putRootStyleWork();
+
+      await share();
+      await fsp.rm(nodePath.join(root, "002.txt"));
+      await share();
+
+      expect(await readCopied("memo.txt")).toBe("作者のメモ");
+      expect(await copied("002.txt")).toBe(false);
+    });
+
+    test("控えが無い初回は、渡し先の直下から何も消さない", async () => {
+      await fsp.mkdir(destination, { recursive: true });
+      await fsp.writeFile(nodePath.join(destination, "009.txt"), "まえから", "utf8");
+      await fsp.mkdir(nodePath.join(destination, "下書き"), { recursive: true });
+      await fsp.writeFile(
+        nodePath.join(destination, "下書き", "a.md"),
+        "まえから",
+        "utf8"
+      );
+      await putRootStyleWork();
+
+      await share();
+
+      expect(await readCopied("009.txt")).toBe("まえから");
+      expect(await readCopied(nodePath.join("下書き", "a.md"))).toBe("まえから");
+      expect(await copied("001.txt")).toBe(true);
+    });
+
     test("**元の作品フォルダーは1バイトも変わらない**", async () => {
       await putRootStyleWork();
 
@@ -401,6 +434,33 @@ describe("copyForEditor", () => {
         expect(after.get(relative), relative).toBe(bytes);
       }
     });
+  });
+
+  test("`manuscriptDir: \".\"` の作品でも、編集用フォルダーごと消さずに原稿だけを写す", async () => {
+    // 置き換えるフォルダーの名前が「.」になる。以前は編集用フォルダーを
+    // `.git` ごと消し、作品の根をまるごと（キャッシュまで）写していた
+    await put(nodePath.join(".aiwriter", "config.json"), '{"manuscriptDir":"."}');
+    await put(nodePath.join(".aiwriter", "cache", "chunks.json"), "[]");
+    await put("001.txt", "いち");
+    await put("README.md", "# 説明\n");
+    await put(nodePath.join("設定", "plot.md"), "# プロット\n");
+    await fsp.mkdir(nodePath.join(destination, ".git"), { recursive: true });
+    await fsp.writeFile(nodePath.join(destination, ".git", "HEAD"), "ref", "utf8");
+
+    const config: WorkConfig = {
+      schemaVersion: "1",
+      workTitle: "氷の街",
+      manuscriptDir: ".",
+      settingsDir: "設定",
+      createdAt: "2026-10-01T00:00:00.000Z",
+    };
+    await copyForEditor(workPaths(work(), config), destination, ".", "設定");
+
+    expect(await readCopied(nodePath.join(".git", "HEAD"))).toBe("ref");
+    expect(await readCopied("001.txt")).toBe("いち");
+    expect(await copied("README.md")).toBe(false);
+    expect(await copied(nodePath.join(".aiwriter", "cache"))).toBe(false);
+    expect(await copied(nodePath.join("設定", "plot.md"))).toBe(true);
   });
 
   test("本文フォルダーで書く作品へ戻したら、編集用の直下に残った古い話は消える", async () => {

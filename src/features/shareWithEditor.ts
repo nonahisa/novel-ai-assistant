@@ -300,19 +300,23 @@ export async function copyForEditor(
     }
   }
 
-  // 2. 編集用の直下に残った、前に写した原稿を消す。
+  // 2. 前回この機能が直下へ写した原稿のうち、今回は写さないものを消す。
   // 作品側で消した話・本文フォルダーへ移した話が残ると、編集部は無い話を
-  // 校閲することになる。**編集部は原稿へ書かない**ので、消して失うものは無い。
-  // 選び方は写すときと同じ（README や AIへの指示書は原稿ではないので残す）
-  const destinationSettings = path.join(destination, settingsName);
-  for (const relative of await listRootManuscripts(
-    destination,
-    destinationSettings
-  )) {
-    await vscode.workspace.fs.delete(
-      path.toUri(path.join(destination, relative)),
-      { useTrash: false }
-    );
+  // 校閲することになる。
+  //
+  // **消すのは控えに載っているものだけ。** 編集用の直下を「原稿に見える
+  // 名前」で選んで消すと、作者が既存のフォルダーを渡し先に選んでいたとき、
+  // そこにあった無関係の .txt/.md まで消える。控えが無い（初回・控えが
+  // 読めない）ときは、直下からは何も消さない
+  const rootCopies = manuscriptAtRoot
+    ? await listRootManuscripts(paths.root, paths.settings)
+    : [];
+  const keep = new Set(rootCopies.map(manifestKey));
+  for (const previous of await readShareManifest(destination)) {
+    if (keep.has(manifestKey(previous))) continue;
+    const target = path.join(destination, ...previous.split("/"));
+    if (!(await exists(target))) continue;
+    await vscode.workspace.fs.delete(path.toUri(target), { useTrash: false });
   }
 
   // 3. 写す
@@ -336,22 +340,21 @@ export async function copyForEditor(
   // まるごと写さない**——キャッシュ・ログ・書庫の `.git` まで付いていく。
   // 編集部の側も `config.json` は同じ（`manuscriptDir: 本文`）で、本文
   // フォルダーが無いので同じ決め方で直下を歩き、同じ話が見える
-  if (manuscriptAtRoot) {
-    for (const relative of await listRootManuscripts(
-      paths.root,
-      paths.settings
-    )) {
-      const target = path.join(destination, relative);
-      await vscode.workspace.fs.createDirectory(
-        path.toUri(path.dirname(target))
-      );
-      await vscode.workspace.fs.copy(
-        path.toUri(path.join(paths.root, relative)),
-        path.toUri(target),
-        { overwrite: true }
-      );
-    }
+  for (const relative of rootCopies) {
+    const target = path.join(destination, relative);
+    await vscode.workspace.fs.createDirectory(
+      path.toUri(path.dirname(target))
+    );
+    await vscode.workspace.fs.copy(
+      path.toUri(path.join(paths.root, relative)),
+      path.toUri(target),
+      { overwrite: true }
+    );
   }
+  // **写し終えてから控える。** 途中で失敗したときに「写した」と控えると、
+  // 次の回に写っていないものを消しにいく（存在を確かめるので害は無いが、
+  // 控えと実物がずれる）
+  await writeShareManifest(destination, rootCopies);
 
   for (const relative of SHARED_FILES) {
     const source = path.join(paths.root, relative);
@@ -372,6 +375,70 @@ export async function copyForEditor(
   await mergeProposalsInto(
     path.join(destination, PROPOSAL_RELATIVE),
     await readTextIfAny(path.join(paths.root, PROPOSAL_RELATIVE))
+  );
+}
+
+/**
+ * 直下へ写した原稿の控え（編集用フォルダーの中に置く）。
+ *
+ * 送り直すときに消してよいのは「前回この機能が写したもの」だけである。
+ * それを知る手段がこの控えしか無い。
+ */
+const SHARE_MANIFEST_RELATIVE = path.join(
+  ".aiwriter",
+  "editor-share-manifest.json"
+);
+
+/** 控えの中の道は `/` 区切りで持つ（Windows と他の機械で同じ形にする） */
+function manifestKey(relative: string): string {
+  return relative.replace(/\\/g, "/");
+}
+
+/**
+ * 前回の控えを読む。**無い・読めない・形が違うときは空**（何も消さない側へ倒す）。
+ *
+ * この控えは作者のデータではなく、この機能が書くものなので、壊れていたら
+ * 次に写したときに書き直してよい。ただし壊れた控えを手がかりに消すことはしない。
+ */
+async function readShareManifest(destination: string): Promise<string[]> {
+  const text = await readTextIfAny(
+    path.join(destination, SHARE_MANIFEST_RELATIVE)
+  );
+  if (text.trim().length === 0) return [];
+  try {
+    const parsed: unknown = JSON.parse(text);
+    const files =
+      typeof parsed === "object" && parsed !== null
+        ? (parsed as Record<string, unknown>).files
+        : undefined;
+    if (!Array.isArray(files)) return [];
+    // `..` を含む道や絶対パスは、編集用フォルダーの外を指しうるので使わない
+    return files.filter(
+      (entry): entry is string =>
+        typeof entry === "string" &&
+        entry.length > 0 &&
+        !entry.startsWith("/") &&
+        !/^[A-Za-z]:/.test(entry) &&
+        !entry.split("/").some((part) => part === ".." || part === "")
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function writeShareManifest(
+  destination: string,
+  files: readonly string[]
+): Promise<void> {
+  const target = path.join(destination, SHARE_MANIFEST_RELATIVE);
+  await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(target)));
+  // **場所を覚えるだけの控えである**（`writePointer` と同じ考え方）。失っても
+  // 次の回に直下を消さないだけで、原稿は壊れない
+  await vscode.workspace.fs.writeFile(
+    path.toUri(target),
+    new TextEncoder().encode(
+      `${JSON.stringify({ files: files.map(manifestKey) }, null, 2)}\n`
+    )
   );
 }
 
