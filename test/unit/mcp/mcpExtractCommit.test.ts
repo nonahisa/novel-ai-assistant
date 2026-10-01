@@ -291,6 +291,28 @@ describe("novel.extract.commit——新しい記録の保存", () => {
   });
 });
 
+describe("novel.extract.commit——何もない作品", () => {
+  it("設定/ がまだ無い作品でも、新しい記録として保存する（承認待ちは0件）", () => {
+    const folder = makeWork();
+    fs.rmSync(nodePath.join(folder, "設定"), { recursive: true, force: true });
+    stashBoth(folder);
+
+    const result = extractCommit({ folder });
+
+    expect(result.created.character.sort()).toEqual(["岩男", "灯"].sort());
+    expect(result.created.location.sort()).toEqual(["港町", "灯台"].sort());
+    expect(result.pendingCount).toBe(0);
+    expect(
+      filesIn(nodePath.join(folder, "設定", "characters")).filter((name) =>
+        name.endsWith(".json")
+      )
+    ).toHaveLength(2);
+    expect(fs.existsSync(nodePath.join(folder, ".aiwriter", "pending-characters"))).toBe(
+      false
+    );
+  });
+});
+
 describe("novel.extract.commit——止まるところ・捨てるところ", () => {
   it("本文が変わったチャンクの貯めは捨てる（その話から作るはずの記録は作らない）", () => {
     const folder = makeWork();
