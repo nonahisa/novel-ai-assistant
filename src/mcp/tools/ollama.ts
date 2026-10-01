@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { bundledTuningByKey, type BundledTuning } from "../../core/bundledTuning";
+import { decodeByteFallback } from "../../core/byteFallback";
 import {
   applyStreamLine,
   emptyStreamedChat,
@@ -186,7 +187,14 @@ export async function ollamaGenerate(
   }
 
   return {
-    text: streamed.content,
+    /*
+      **バイトの札を字へ戻してから返す**（製品の `ai/ollamaProvider.ts` と
+      同じ関数。2026-10-01 実機確認）。gemma4:e4b は全角空白を
+      `<0xE3><0x80><0x80>` のまま返すことがあり、戻さずに渡すと検算を
+      そのまま通って結果（冒頭診断の引用・設定資料の欄）へ出た。
+      MCP の Ollama の道はすべてここを通るので、戻すのもここ1か所にする
+    */
+    text: decodeByteFallback(streamed.content),
     model: input.model,
     endpoint,
     elapsedMs: Date.now() - startedAt,

@@ -137,3 +137,45 @@ describe("MCP の ollama.generate に道具を渡す", () => {
     expect(sentBodies).toHaveLength(2);
   });
 });
+
+describe("MCP の道でもバイトの札を字へ戻す（2026-10-01 実機確認）", () => {
+  /*
+    gemma4:e4b が全角空白を `<0xE3><0x80><0x80>` のまま返し、冒頭診断の
+    strengths[].quote や設定資料の性格・根拠の欄へそのまま出た。製品
+    （`ai/ollamaProvider.ts`）は `decodeByteFallback` で戻しているが、
+    MCP の道は戻していなかった。**検算より前に**戻っていることを見る
+  */
+  test("ollama.generate の text は字に戻っている", async () => {
+    replies = [textLine('{"quote":"「<0xE3><0x80><0x80>囮だ」"}')];
+
+    const result = await ollamaGenerate(input);
+
+    expect(result.text).toBe('{"quote":"「　囮だ」"}');
+  });
+
+  test("novel.run（runOnce）の検算には字に戻ってから渡る", async () => {
+    replies = [textLine('{"quote":"<0xE5><0x9B><0xAE>"}')];
+    const { runOnce } = await import("../../../src/mcp/tools/run");
+    const seen: string[] = [];
+
+    const outcome = await runOnce(
+      { runner: "ollama", model: "test-model", folder: "." } as Parameters<
+        typeof runOnce
+      >[0],
+      {
+        systemPrompt: "指示",
+        schema: undefined,
+        userPrompt: "本文",
+        temperature: 0,
+        validateWith: "test",
+      },
+      (response) => {
+        seen.push(response);
+        return response;
+      }
+    );
+
+    expect(seen).toEqual(['{"quote":"囮"}']);
+    expect(outcome).toMatchObject({ runner: "ollama", result: '{"quote":"囮"}' });
+  });
+});
