@@ -100,10 +100,30 @@ export interface WindowCard {
    * どの作品を相手にしているかが読めない。**古い版の札には無い**（空で埋める）。
    */
   works: string[];
+  /**
+   * 相談パネル（「AIに相談する」）で選んでいる作品（残課題 R7、2026-10-01）。
+   * 選んでいない・登録から外れたときは `null`。
+   *
+   * **`works` とは別の話である。** `works` は窓が開いているフォルダーから
+   * 当てた作品で、書庫を開いた窓では何作も並ぶ。外のセッションが知りたいのは
+   * 「いま作者がどの作品の相談をしているか」なので、パネルの選択をそのまま書く。
+   *
+   * **題だけでなく id も書く。** 題は作者が変えられるし、同じ題の作品も
+   * 登録できるので、MCP の他の道具（`works.list`）と突き合わせる鍵は id になる。
+   *
+   * **古い版の札には無い**（`parseWindowCard` が `null` で埋める）。
+   */
+  chatWork: ChatWorkRef | null;
   /** この窓で拡張機能が起動した時刻（ISO） */
   startedAt: string;
   /** 最後に札を打ち直した時刻（ISO）。**古さの判定はこれだけで決める** */
   updatedAt: string;
+}
+
+/** 札に載せる作品の名指し（id と題だけ。作品の中身は載せない） */
+export interface ChatWorkRef {
+  id: string;
+  title: string;
 }
 
 export interface WindowCardInput {
@@ -118,6 +138,8 @@ export interface WindowCardInput {
   machineName?: string | null;
   /** 省略は「作品を開いていない」（空） */
   works?: readonly string[];
+  /** 省略は「相談パネルで作品を選んでいない」（`null`） */
+  chatWork?: ChatWorkRef | null;
   startedAt: Date;
   now: Date;
 }
@@ -135,6 +157,9 @@ export function buildWindowCard(input: WindowCardInput): WindowCard {
     folders: [...input.folders],
     machineName: input.machineName ?? null,
     works: [...(input.works ?? [])],
+    chatWork: input.chatWork
+      ? { id: input.chatWork.id, title: input.chatWork.title }
+      : null,
     startedAt: input.startedAt.toISOString(),
     updatedAt: input.now.toISOString(),
   };
@@ -188,6 +213,22 @@ export function worksOpenInWindow(
     .map((work) => work.title);
 }
 
+/**
+ * 相談パネルが覚えている作品の id を、札に載せる形にする。
+ *
+ * **登録簿に無い id は `null`**——覚えた作品が登録から外れていても、
+ * 消えた作品を「相談中」と名乗らない。題は登録簿の**いまの**題を使う
+ * （覚えるのは id だけなので、題を変えても古い題が残らない）。
+ */
+export function chatWorkOf(
+  works: ReadonlyArray<{ id: string; title: string }>,
+  id: string | undefined
+): ChatWorkRef | null {
+  if (!id) return null;
+  const found = works.find((work) => work.id === id);
+  return found ? { id: found.id, title: found.title } : null;
+}
+
 /** 札のファイル名。**プロセス番号だけで決める**（1窓1ファイル） */
 export function windowCardFileName(pid: number): string {
   return `${pid}.json`;
@@ -199,6 +240,15 @@ export function serializeWindowCard(card: WindowCard): string {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+/** 相談中の作品の項目を読む。無ければ `null`、形が違えば `false`（壊れた札） */
+function parseChatWork(value: unknown): ChatWorkRef | null | false {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) return false;
+  const ref = value as Record<string, unknown>;
+  if (typeof ref.id !== "string" || typeof ref.title !== "string") return false;
+  return { id: ref.id, title: ref.title };
 }
 
 /**
@@ -248,6 +298,9 @@ export function parseWindowCard(text: string): WindowCard | undefined {
     return undefined;
   }
   if (value.works !== undefined && !isStringArray(value.works)) return undefined;
+  // 0.94.x で足した項目も、無ければ埋める（理由は上の2項目と同じ）
+  const chatWork = parseChatWork(value.chatWork);
+  if (chatWork === false) return undefined;
   return {
     schema: WINDOW_CARD_SCHEMA,
     pid: value.pid,
@@ -259,6 +312,7 @@ export function parseWindowCard(text: string): WindowCard | undefined {
     folders: value.folders,
     machineName: typeof value.machineName === "string" ? value.machineName : null,
     works: value.works ?? [],
+    chatWork,
     startedAt: value.startedAt,
     updatedAt: value.updatedAt,
   };

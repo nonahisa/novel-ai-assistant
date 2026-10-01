@@ -687,8 +687,31 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * ファイルを開いていないときに相談する作品。
    *
    * 覚えておかないと、質問のたびに選び直すことになる。
+   * **変えるときは `setSelectedWorkId` を通す**（覚え直しと知らせを漏らさない）。
    */
   private selectedWorkId: string | undefined;
+
+  /**
+   * 選んだ作品を VS Code を閉じても覚えておく先（残課題 R7、2026-10-01）。
+   *
+   * **簡単ステップメニューと同じ置き場（`globalState`）。** 置き場を
+   * 作品フォルダーにしないのは、どの作品の相談をしているかが画面の前の
+   * 作者の都合で、作品の事実ではないから（同期すると別の機械の選択が混ざる）。
+   * 渡されていないあいだ（試験など）は、これまでどおりパネルの中だけで覚える。
+   */
+  private selectedWorkMemory:
+    | { get(): string | undefined; set(id: string): void }
+    | undefined;
+
+  /**
+   * 選び直したときの知らせ。窓の札（MCP の `windows.list`）が聞いて書き直す。
+   *
+   * **選び直したときだけ鳴らす。** ファイルを開くたびに変わる「いまの作品」
+   * （`currentWorkId`）で鳴らすと、エディターを切り替えるたびに保管庫へ
+   * 書くことになる。
+   */
+  private readonly selectedWorkChanged = new vscode.EventEmitter<void>();
+  readonly onDidChangeSelectedWork = this.selectedWorkChanged.event;
 
   /**
    * 該当箇所に掛ける色。
@@ -715,6 +738,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     if (this.highlightTimer) clearTimeout(this.highlightTimer);
     this.highlight.dispose();
     this.selectionListener?.dispose();
+    this.selectedWorkChanged.dispose();
     // 大きい画面は自分で作ったものなので、自分で片づける
     this.panel?.dispose();
   }
@@ -3206,7 +3230,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       (works.length === 1 ? works[0] : undefined);
     if (!chosen) return undefined;
 
-    this.selectedWorkId = chosen.id;
+    this.setSelectedWorkId(chosen.id);
     return {
       work: chosen,
       kind: "workOnly",
@@ -3236,7 +3260,44 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   currentWorkId(): string | undefined {
     const filePath = this.documentPath(this.lastEditor);
     const opened = filePath ? this.findWork(filePath) : undefined;
-    return opened?.id ?? this.selectedWorkId;
+    return opened?.id ?? this.selectedWork()?.id;
+  }
+
+  /**
+   * 選んである作品（登録簿にあるものだけ）。
+   *
+   * **登録から外れた作品は返さない。** 覚えた id は前の起動のものかもしれず、
+   * その間に作品が登録から外れていることがある。消えた作品を指したまま
+   * 相談したり、札に「相談中」と書いたりしない。
+   */
+  selectedWork(): WorkEntry | undefined {
+    const id = this.selectedWorkId;
+    if (!id) return undefined;
+    return this.registry.list().find((work) => work.id === id);
+  }
+
+  /**
+   * 選んだ作品を覚えておく先を渡す（拡張機能の起動時に一度だけ。残課題 R7）。
+   *
+   * **覚えていた作品を、次に開いたときの既定にする。** 登録から外れているか
+   * どうかは、ここではなく使うたびに確かめる（`selectedWork`・`workOnlyContext`）
+   * ——登録簿は起動のあとでも変わるので、ここで1回見るだけでは足りない。
+   */
+  setSelectedWorkMemory(memory: {
+    get(): string | undefined;
+    set(id: string): void;
+  }): void {
+    this.selectedWorkMemory = memory;
+    const remembered = memory.get();
+    if (remembered && !this.selectedWorkId) this.selectedWorkId = remembered;
+  }
+
+  /** 選んだ作品を変える。**同じ作品なら何もしない**（書き直しを増やさない） */
+  private setSelectedWorkId(id: string): void {
+    if (this.selectedWorkId === id) return;
+    this.selectedWorkId = id;
+    this.selectedWorkMemory?.set(id);
+    this.selectedWorkChanged.fire();
   }
 
   /**
@@ -3259,7 +3320,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       { title: "どの作品について相談しますか", ignoreFocusOut: true }
     );
     if (!picked || !("work" in picked)) return;
-    this.selectedWorkId = picked.work.id;
+    this.setSelectedWorkId(picked.work.id);
     await this.postContext();
   }
 
@@ -3516,7 +3577,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * 何について相談しているのかがパネルに出ない。
    */
   async focusWork(work: WorkEntry): Promise<void> {
-    this.selectedWorkId = work.id;
+    this.setSelectedWorkId(work.id);
     // 別の作品を開いたまま新規作成した場合、そちらが優先されてしまう。
     // 作りたてのほうを見るために、覚えているエディターを手放す
     this.lastEditor = undefined;

@@ -568,6 +568,15 @@ const STEP_GROUPS_KEY = "novelai.steps.expandedGroups";
 const STEP_WORK_KEY = "novelai.stepMenu.selectedWorkId";
 
 /**
+ * 相談パネル（「AIに相談する」）で選んでいる作品の記憶先（残課題 R7、2026-10-01）。
+ *
+ * **簡単ステップメニューと同じ置き場・同じ流儀（IDだけ）。** 鍵は分ける——
+ * メニューで作品を切り替えたときに、相談中の作品まで黙って変わると、
+ * 会話と資料の反映先が食い違う（`historyWorkId` の話）。
+ */
+const CHAT_WORK_KEY = "novelai.workChat.selectedWorkId";
+
+/**
  * 起動の数字を書き出すまでに、開いたときの点検を待つ上限（設計書6.107）。
  *
  * **点検は回線しだいでいつまでも終わらない。** 待ちきると、作者が
@@ -2381,6 +2390,12 @@ export async function activate(
       await panel.reloadRecordFromChat(kind, recordId, notes);
     },
   }, advicePolicies, writerProfiles);
+  // 選んだ作品を VS Code を閉じても覚えておく（残課題 R7）。
+  // 登録から外れた作品かどうかは、パネルが使うたびに確かめる
+  workChatPanel.setSelectedWorkMemory({
+    get: () => context.globalState.get<string>(CHAT_WORK_KEY),
+    set: (id) => void context.globalState.update(CHAT_WORK_KEY, id),
+  });
   // 相談パネルへ落とされたバックアップが、どの作品にも当たらなかったとき
   // （B13）。**メニューの「バックアップから取り込む」と同じ道へ渡す**——
   // 渡さないと、作者に同じファイルをもう一度選び直させることになる
@@ -2620,6 +2635,10 @@ export async function activate(
     // 札の「開いている作品」は登録簿から引く。作品を足し外ししたら書き直す
     listWorks: () => registry.list(),
     onDidChangeWorks: registry.onDidChange,
+    // 相談パネルで選んでいる作品（残課題 R7）。外から「いまどの作品の相談か」を
+    // 見えるようにする。書き直すのは選び直したときだけ
+    chatWorkId: () => workChatPanel.selectedWork()?.id,
+    onDidChangeChatWork: workChatPanel.onDidChangeSelectedWork,
   });
   if (windowCard) {
     context.subscriptions.push(windowCard);

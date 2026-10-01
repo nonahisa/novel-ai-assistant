@@ -7,6 +7,7 @@ import {
   WINDOW_CARD_DIRECTORY,
   WINDOW_CARD_HEARTBEAT_MS,
   buildWindowCard,
+  chatWorkOf,
   serializeWindowCard,
   shortMachineName,
   windowCardFileName,
@@ -102,6 +103,16 @@ export interface WindowCardOptions {
   listWorks?: () => readonly WorkEntry[];
   /** 登録簿が変わったとき。札の `works` が変わるので書き直す */
   onDidChangeWorks?: vscode.Event<void>;
+  /**
+   * 相談パネルで選んでいる作品の id（札の `chatWork`。残課題 R7）。
+   * 登録簿に無ければ札には載せない（`chatWorkOf`）。
+   */
+  chatWorkId?: () => string | undefined;
+  /**
+   * 相談パネルで作品を選び直したとき。**このときだけ書き直す**——
+   * エディターの切り替えのたびには書かない（保管庫への書き込みを増やさない）
+   */
+  onDidChangeChatWork?: vscode.Event<void>;
 }
 
 export function startWindowCard(
@@ -125,10 +136,8 @@ export function startWindowCard(
     queue = queue.then(async () => {
       if (closed) return;
       try {
-        const identity = await readWindowIdentity(
-          context,
-          options.listWorks?.() ?? []
-        );
+        const works = options.listWorks?.() ?? [];
+        const identity = await readWindowIdentity(context, works);
         const card = buildWindowCard({
           pid,
           extensionVersion,
@@ -141,6 +150,7 @@ export function startWindowCard(
           ),
           machineName: identity.machineName,
           works: identity.works,
+          chatWork: chatWorkOf(works, options.chatWorkId?.()),
           startedAt,
           now: new Date(),
         });
@@ -165,6 +175,7 @@ export function startWindowCard(
     () => void write()
   );
   const worksWatch = options.onDidChangeWorks?.(() => void write());
+  const chatWorkWatch = options.onDidChangeChatWork?.(() => void write());
 
   const close = (): Promise<void> => {
     if (closed) return queue;
@@ -172,6 +183,7 @@ export function startWindowCard(
     clearInterval(timer);
     folderWatch.dispose();
     worksWatch?.dispose();
+    chatWorkWatch?.dispose();
     queue = queue.then(async () => {
       try {
         await vscode.workspace.fs.delete(path.toUri(target), {

@@ -14,6 +14,7 @@ import {
   shortMachineName,
   windowCardFileName,
   worksOpenInWindow,
+  chatWorkOf,
   type WindowCard,
 } from "../../../src/core/windowCard";
 import { GLOBAL_STORAGE_ENV, mcpGlobalStorageRoot } from "../../../src/mcp/globalStorage";
@@ -79,6 +80,8 @@ describe("札の組み立て（buildWindowCard）", () => {
       // 渡さなければ「取れなかった」「作品を開いていない」
       machineName: null,
       works: [],
+      // 相談パネルで作品を選んでいない
+      chatWork: null,
       startedAt: "2026-09-23T09:00:00.000Z",
       updatedAt: "2026-09-23T10:00:00.000Z",
     });
@@ -467,5 +470,47 @@ describe("windows.list と mcp.version が機械の名前を返す", () => {
       server.indexOf('"windows.list"')
     );
     expect(versionTool).toContain("machineName: mcpMachineName()");
+  });
+});
+
+describe("相談パネルで選んでいる作品（chatWork。残課題 R7）", () => {
+  const works = [
+    { id: "work-a", title: "灯台", folderPath: "C:/書庫/灯台" },
+    { id: "work-b", title: "港町", folderPath: "C:/書庫/港町" },
+  ];
+
+  it("札に id と題が載り、読み戻せる", () => {
+    const built = buildWindowCard({
+      pid: 8,
+      extensionVersion: "0.94.3",
+      vscodeVersion: "1.138.0",
+      appName: "Visual Studio Code",
+      workspaceName: "書庫",
+      developmentHost: false,
+      folders: ["C:/書庫"],
+      chatWork: { id: "work-b", title: "港町" },
+      startedAt: new Date("2026-09-23T09:00:00.000Z"),
+      now: NOW,
+    });
+    expect(built.chatWork).toEqual({ id: "work-b", title: "港町" });
+    expect(parseWindowCard(serializeWindowCard(built))).toEqual(built);
+  });
+
+  it("登録簿にある作品だけを札に載せる（外れた作品は null）", () => {
+    expect(chatWorkOf(works, "work-b")).toEqual({ id: "work-b", title: "港町" });
+    expect(chatWorkOf(works, "removed")).toBeNull();
+    expect(chatWorkOf(works, undefined)).toBeNull();
+  });
+
+  it("古い版の札（項目が無い）は null で埋める。形が違えば壊れた札", () => {
+    const old = JSON.parse(serializeWindowCard(card())) as Record<string, unknown>;
+    delete old.chatWork;
+    expect(parseWindowCard(JSON.stringify(old))?.chatWork).toBeNull();
+    expect(
+      parseWindowCard(JSON.stringify({ ...card(), chatWork: "港町" }))
+    ).toBeUndefined();
+    expect(
+      parseWindowCard(JSON.stringify({ ...card(), chatWork: { id: "work-b" } }))
+    ).toBeUndefined();
   });
 });
