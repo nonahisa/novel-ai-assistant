@@ -1,4 +1,8 @@
-import type { ExtractedCharacter } from "../prompts/characterExtract";
+import {
+  CHARACTER_EXTRACT_VERSION,
+  type ExtractedCharacter,
+} from "../prompts/characterExtract";
+import type { CacheKeyBase } from "./chunkCacheStore";
 import { sha1Text } from "./hash";
 
 /**
@@ -152,4 +156,57 @@ export function promptVersionWithKnownCast(
   // 区切りは名前に現れない文字（改行）にする。「相沢 春人」の空白を
   // 区切りと取り違えない
   return `${promptVersion}:cast${sha1Text(names.join("\n")).slice(0, 16)}`;
+}
+
+/**
+ * 次のチャンクへ渡す既知名。直前までに得た別名も含める。
+ *
+ * **ここでは切らない。** この一覧は裏付け（切れた別名を弾く照合）にも
+ * 使っており、そちらは作品の全員が要る。プロンプトへ渡すぶんの上限は
+ * `buildKnownCharacterNamesForPrompt` が受け持つ。
+ *
+ * **`features/extractCharacters.ts` から移した**（2026-10-02）。外部AIの
+ * 抽出を資料へ保存する道（`core/externalExtractMerge.ts`）が、製品と同じ
+ * 検算の裏付けを組むのに要る。写しを置くと、trim や重複の扱いが2か所でずれる。
+ */
+export function buildKnownCharacterNames(
+  existing: Array<{ name: string; aliases: string[] }>,
+  extracted: Array<{ data: ExtractedCharacter }>
+): string[] {
+  const names = [
+    ...existing.flatMap((character) => [character.name, ...character.aliases]),
+    ...extracted.flatMap((item) => [
+      item.data.name,
+      ...(Array.isArray(item.data.aliases) ? item.data.aliases : []),
+    ]),
+  ]
+    .map((name) => name.trim())
+    .filter(Boolean);
+  return [...new Set(names)];
+}
+
+/**
+ * 人物抽出の使い回しの鍵（設計書6.27.6。顔ぶれは 2026-09-24 夜から）。
+ *
+ * 内容ハッシュ・AIサービス・モデル・プロンプト版に、**既に分かっている
+ * 人物の顔ぶれ**を足す（`promptVersionWithKnownCast`）。未処理の件数を
+ * 数える所と、答えを引く所・書く所が**同じ鍵**を使うよう、ここ1か所で作る
+ * ——別々に組むと、確認画面の見積もりと実際に送る件数が食い違う。
+ *
+ * `features/extractCharacters.ts` から移した（2026-10-02。あちらは再輸出）。
+ */
+export function characterExtractCacheKey(
+  providerId: string,
+  model: string,
+  characters: Array<{ name: string; aliases: string[] }>
+): CacheKeyBase {
+  return {
+    feature: "character_extract",
+    promptVersion: promptVersionWithKnownCast(
+      CHARACTER_EXTRACT_VERSION,
+      characters
+    ),
+    providerId,
+    model,
+  };
 }

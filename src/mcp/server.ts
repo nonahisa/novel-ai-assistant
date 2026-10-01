@@ -55,6 +55,11 @@ import {
 } from "./tools/ollama";
 import { SETTINGS_PROPOSE_INPUT, novelPropose } from "./tools/propose";
 import {
+  EXTRACT_COMMIT_INPUT,
+  extractCommit,
+  type ExtractCommitInput,
+} from "./tools/extractCommit";
+import {
   PENDING_LIST_INPUT,
   pendingListTool,
   type PendingListInput,
@@ -108,11 +113,12 @@ import {
  * そちらを直に呼ぶ（`test/unit/mcp/mcpTools.test.ts`）。混ぜると、
  * ツールの中身を確かめるのに stdio を立てなければならなくなる。
  *
- * **道具は21本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
+ * **道具は22本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
  * 0.75.x で `windows.list`、0.82.1 で `setup.request`、0.83.x で `schedule.milestones`、
  * 0.85.0 で `notices.recent` と `works.list`、0.85.1 で `pending.list`、
  * 0.88 の次の版で `run.request` と `run.result`（設計書6.87.22）、
- * 0.94.7 の次の版で `ai.settings` を足した。0.66.7 の時点では10本）。
+ * 0.94.7 の次の版で `ai.settings`、0.95.4 の次の版で `novel.extract.commit`
+ * を足した。0.66.7 の時点では10本）。
  * ほかに**プロンプトが1つ**（`setup`。Claude Code では `/` から選べる。6.87.18）。
  * 56本あったものを
  * `feature` を引数に取る形へ束ねた——**AI は繋いだ瞬間にこの一覧を読む**ので、
@@ -123,6 +129,8 @@ import {
  * `test/unit/cross/mcpReach.test.ts` が、この入口から辿って届かないことを見張る。
  *
  * **読む・測る・提案するだけ**（6.87.7）。原稿も設定資料も書き換えない。
+ * **例外は `novel.extract.commit` の保存だけ**（作者の裁定、2026-10-02）——
+ * 新しい資料のファイルを作るだけで、既存のファイルは書き換えない。
  */
 
 const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
@@ -514,6 +522,28 @@ server.registerTool(
     inputSchema: SETTINGS_PROPOSE_INPUT,
   },
   tool("novel.propose", novelPropose)
+);
+
+/*
+  **6.87.7「MCP は資料を書き換えない」の例外は、この道具の保存だけ**
+  （作者の裁定、2026-10-02「何もない状態からであれば承認は不要」）。
+  新しいファイルを作るだけで、既存のファイルは1バイトも変えない
+  （既存の記録への変更は承認待ちへ置く）。中身は `tools/extractCommit.ts`
+*/
+server.registerTool(
+  "novel.extract.commit",
+  {
+    title: "外部AIの設定資料の抽出を、資料へ保存する",
+    description:
+      "拡張機能の［設定資料を抽出］と同じ保存をします。" +
+      "novel.validate（feature: settings、stash: true）や novel.run（settings、runner: sampling）で貯めた答えを、" +
+      "製品と同じ検算とマージに通し、**新しい記録（人物・能力・場所・組織・世界観）は 設定/ へ保存、" +
+      "既存の記録への変更は承認待ち**（.aiwriter/pending-characters/・pending-settings/）へ置きます。" +
+      "既存のファイルは書き換えず、同じ名前が既にあれば断って refused で返します。" +
+      "読めない設定ファイルがあれば何も書かずに止めます。dryRun: true で、書かずに内訳だけを返します。",
+    inputSchema: EXTRACT_COMMIT_INPUT,
+  },
+  tool("novel.extract.commit", (args: ExtractCommitInput) => extractCommit(args))
 );
 
 server.registerTool(

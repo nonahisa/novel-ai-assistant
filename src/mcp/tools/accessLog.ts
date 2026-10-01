@@ -98,6 +98,12 @@ export function exposureOf(
     tool === "run.request" ||
     tool === "ollama.models" ||
     tool === "novel.propose" ||
+    /*
+      `novel.extract.commit`（2026-10-02）も**原稿は1文字も外へ出ない**——
+      呼び出し元が先に渡した答えを資料へ保存するだけで、返すのは件数と
+      作った記録の名前（呼び出し元が抽出したもの）だけである
+    */
+    tool === "novel.extract.commit" ||
     tool === "novel.notice" ||
     tool === "guide.spotlight" ||
     /*
@@ -227,6 +233,21 @@ function detailOf(
     return target ? `承認待ちへ置いた（${target}）` : "承認待ちへ置いた";
   }
   /*
+    抽出の答えを資料へ保存した回（2026-10-02）。**何件作り、何件を承認待ちへ
+    置き、何件断ったか**を残す——6.87.7 の例外として資料へ書く道なので、
+    作者があとから「外から何が増えたか」を追えるようにする。名前は残さない
+  */
+  if (tool === "novel.extract.commit") {
+    const counts = extractCommitCountsOf(result);
+    const head =
+      args?.dryRun === true
+        ? "抽出の保存の内訳を見た（書いていない）"
+        : "抽出の結果を資料へ保存した";
+    return counts
+      ? `${head} 新規 ${counts.created}件・承認待ち ${counts.pending}件・断り ${counts.refused}件`
+      : head;
+  }
+  /*
     画面を指した回（0.75.6）。**何を指したかを残す**——`feature` を
     取らない道具なので、ここを書かないと記録が「guide.spotlight」だけになり、
     作者にはどの項目を光らせようとしたのか分からない。
@@ -280,6 +301,26 @@ function detailOf(
   if (typeof args?.chunkId === "string") parts.push(args.chunkId);
   if (typeof args?.chapter === "number") parts.push(`第${args.chapter}話`);
   return parts.join(" ");
+}
+
+/** 抽出を保存した回の返り値から、件数だけを読む。形が違えば `undefined` */
+function extractCommitCountsOf(
+  result: unknown
+): { created: number; pending: number; refused: number } | undefined {
+  if (typeof result !== "object" || result === null) return undefined;
+  const record = result as Record<string, unknown>;
+  if (
+    typeof record.createdCount !== "number" ||
+    typeof record.pendingCount !== "number" ||
+    !Array.isArray(record.refused)
+  ) {
+    return undefined;
+  }
+  return {
+    created: record.createdCount,
+    pending: record.pendingCount,
+    refused: record.refused.length,
+  };
 }
 
 /** 指摘を置いた回の返り値から、件数だけを読む。形が違えば `undefined` */

@@ -295,6 +295,12 @@ export const NOVEL_VALIDATE_INPUT = {
   */
   filePath: TARGET_INPUT.filePath,
   chapter: TARGET_INPUT.chapter,
+  stash: z
+    .boolean()
+    .optional()
+    .describe(
+      "settings だけ。true なら検算が通った答えを貯め、novel.extract.commit で資料へ保存できるようにします"
+    ),
   ...optionsInput(OPTIONS_SEE_RUN),
 };
 
@@ -355,6 +361,8 @@ export interface FeatureCallInput {
   model?: string;
   allowRemote?: boolean;
   temperature?: number;
+  /** `novel.validate`（settings）で、検算が通った答えを貯める（2026-10-02） */
+  stash?: boolean;
   options?: Record<string, unknown>;
 }
 
@@ -711,6 +719,7 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
         folder: input.folder,
         chunkId: needChunkId(input),
         response: needResponse(input),
+        stash: input.stash,
       }),
     run: (input) => settingsRun({ ...chunkArgs(input), ...runnerArgs(input) }),
   },
@@ -926,6 +935,15 @@ export function novelPrompt(input: FeatureCallInput): unknown {
 }
 
 export function novelValidate(input: FeatureCallInput): unknown {
+  /*
+    **貯めるのは設定資料の抽出だけ**（2026-10-02）。ほかの機能で黙って
+    無視すると、呼んだ側は「貯めた」と思い込み、保存で何も出てこない
+  */
+  if (input.stash === true && input.feature !== "settings") {
+    throw new McpToolError(
+      `stash は設定資料の抽出（feature: settings）だけで使えます。${who(input)} の答えは貯めません。`
+    );
+  }
   return FEATURES[input.feature].validate(input);
 }
 

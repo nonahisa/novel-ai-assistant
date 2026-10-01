@@ -88,6 +88,12 @@ export const CORE_ENTRY_NAMES = [
     `settingsEnrich` を足すときに画面から切り出した）。製品と MCP が同じものを通る
   */
   "settingsEnrichCheck",
+  /*
+    設定資料の抽出の「取り出したあと」（2026-10-02、作者の裁定で MCP から
+    抽出を資料へ保存する道 `novel.extract.commit` を足すときに切り出した）。
+    検算 → 集める → マージの順を、製品と MCP が同じものを通る
+  */
+  "externalExtractMerge",
 ];
 
 /**

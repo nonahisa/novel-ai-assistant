@@ -3,14 +3,8 @@ import {
   mergeAbilitySystemRules,
   type RejectedSettingCandidate,
 } from "../core/settingsExtractionValidation";
-import {
-  mergeExtractedAbilities,
-  mergeExtractedLocations,
-  mergeExtractedOrganizations,
-  mergeExtractedWorldItems,
-  organizationsFromAffiliations,
-  type SettingMergeCandidate,
-} from "../core/settingsMerge";
+import type { SettingMergeCandidate } from "../core/settingsMerge";
+import { planSettingsMerge } from "../core/externalExtractMerge";
 import {
   AbilitySystemStore,
   createAbilityStore,
@@ -123,46 +117,28 @@ export class SettingsExtractionAccumulator extends SettingsExtractionCollector {
     const existingWorld =
       this.worldItems.length > 0 ? (await worldStore.loadAll()).records : [];
 
-    const abilityMerge = mergeExtractedAbilities(
-      existingAbilities,
-      this.abilities
-    );
-    const locationMerge = mergeExtractedLocations(
-      existingLocations,
-      this.locations
-    );
-    const organizationMerge = mergeExtractedOrganizations(
-      existingOrganizations,
-      this.organizations
-    );
-    // 所属から作る分は、抽出できた組織を足したあとに見る。
-    // 先に見ると、AIが説明付きで返した組織を名前だけで作ってしまう
-    const fromAffiliations = organizationsFromAffiliations(
-      organizationMerge.organizations,
-      [...this.affiliations],
-      // 地名を所属に書かれても組織を作らないよう、場所の一覧を渡す
-      locationMerge.locations
-    );
-
-    const worldMerge = mergeExtractedWorldItems(existingWorld, this.worldItems);
-
-    const changedAbilities = abilityMerge.abilities.filter((ability) =>
-      abilityMerge.changedIds.includes(ability.id)
-    );
-    const changedLocations = locationMerge.locations.filter((location) =>
-      locationMerge.changedIds.includes(location.id)
-    );
-    const changedOrganizationIds = new Set([
-      ...organizationMerge.changedIds,
-      ...fromAffiliations.changedIds,
-    ]);
-    const changedOrganizations = fromAffiliations.organizations.filter(
-      (organization) => changedOrganizationIds.has(organization.id)
-    );
-
-    const changedWorldItems = worldMerge.items.filter((item) =>
-      worldMerge.changedIds.includes(item.id)
-    );
+    /*
+      **マージの並びは core にある**（`planSettingsMerge`。2026-10-02）。
+      外部AIの抽出を資料へ保存する道（MCP `novel.extract.commit`）が
+      同じ並びを通るので、ここに写しを持たない。
+    */
+    const plan = planSettingsMerge(this.candidates(), {
+      abilities: existingAbilities,
+      locations: existingLocations,
+      organizations: existingOrganizations,
+      world: existingWorld,
+    });
+    const {
+      abilityMerge,
+      locationMerge,
+      organizationMerge,
+      fromAffiliations,
+      worldMerge,
+    } = plan;
+    const changedAbilities = plan.changed.abilities;
+    const changedLocations = plan.changed.locations;
+    const changedOrganizations = plan.changed.organizations;
+    const changedWorldItems = plan.changed.world;
 
     if (saves("abilities") && changedAbilities.length > 0) {
       await abilityStore.saveAll(changedAbilities);

@@ -40,6 +40,9 @@ import {
   validateWith,
 } from "./run";
 import type { RunOutcome } from "./run";
+import { readExtractStash, stashExtractAnswer } from "./extractStash";
+import { replayChunksOf } from "./extractCommit";
+import { ExtractionReplay } from "../../core/externalExtractMerge";
 
 /**
  * 設定資料の抽出（P-04a）を外から呼ぶ（設計書6.87.8 の4）。
@@ -253,12 +256,75 @@ function promptForChunk(
   };
 }
 
-const NO_EXTRA = {
+interface ExtraKnown {
+  abilities: string[];
+  locations: string[];
+  organizations: string[];
+  world: string[];
+}
+
+const NO_EXTRA: ExtraKnown = {
   abilities: [],
   locations: [],
   organizations: [],
   world: [],
 };
+
+/**
+ * 貯め場所（`extractStash.ts`）に入っている答えから、受け入れた人物と
+ * 集めた能力・場所・組織・世界観の名前を拾う（2026-10-02）。
+ *
+ * **製品では、前のチャンクで見つけた名前が次の「既知」へ育つ。** 外部AIが
+ * 1チャンクずつ `prompt` → `validate`（stash）と回すとき、貯めた分を既知へ
+ * 足せば、製品と同じ育ち方に近づく。拾い方は保存（`novel.extract.commit`）と
+ * 同じ再生（`ExtractionReplay`）を通す——検算に落ちた名前まで既知に混ぜない。
+ *
+ * **読めない貯め場所でプロンプトを止めない。** ここは「あれば足す」材料で、
+ * 読めないことは保存のとき（`novel.extract.commit`）に断る。
+ */
+function stashedKnown(folder: string): {
+  people: Array<{ data: { name: string; aliases?: string[] } }>;
+  extra: ExtraKnown;
+} {
+  let stashed;
+  try {
+    stashed = readExtractStash(folder);
+  } catch {
+    return { people: [], extra: NO_EXTRA };
+  }
+  if (stashed.length === 0) return { people: [], extra: NO_EXTRA };
+  const { chunks } = replayChunksOf(folder, stashed);
+  const replay = new ExtractionReplay(
+    {
+      characters: readSettingsRecords(folder, SETTINGS_SUBDIRS.characters, parseCharacter)
+        .records,
+      abilities: readSettingsRecords(folder, SETTINGS_SUBDIRS.abilities, parseAbility)
+        .records,
+      locations: readSettingsRecords(folder, SETTINGS_SUBDIRS.locations, parseLocation)
+        .records,
+      organizations: readSettingsRecords(
+        folder,
+        SETTINGS_SUBDIRS.organizations,
+        parseOrganization
+      ).records,
+      world: readSettingsRecords(folder, SETTINGS_SUBDIRS.world, parseWorldItem).records,
+    },
+    new SettingsExtractionCollector()
+  );
+  for (const item of chunks) replay.accept(item.parsed, item.chunk);
+  const gathered = replay.settings.candidates();
+  return {
+    people: replay.extracted.map((person) => ({
+      data: { name: person.data.name, aliases: person.data.aliases ?? [] },
+    })),
+    extra: {
+      abilities: gathered.abilities.map((entry) => entry.data.name),
+      locations: gathered.locations.map((entry) => entry.data.name),
+      organizations: gathered.organizations.map((entry) => entry.data.name),
+      world: gathered.worldItems.map((entry) => entry.data.name),
+    },
+  };
+}
 
 export function settingsPrompt(
   input: SettingsPromptInput
@@ -269,6 +335,8 @@ export function settingsPrompt(
     input.filePath,
     input.numCtx
   );
+  // 貯めた分の名前を既知へ足す（製品で既知名が育つのと揃える）
+  const known = stashedKnown(input.folder);
 
   return {
     promptVersion: CHARACTER_EXTRACT_VERSION,
@@ -278,7 +346,14 @@ export function settingsPrompt(
     validateWith: VALIDATE_WITH,
     note: ACROSS_CHUNKS_NOTE,
     chunks: selectChunks(chunks, input.chunkIndex).map((chunk) =>
-      promptForChunk(input.filePath, chunk, maxChars, stored, [], NO_EXTRA)
+      promptForChunk(
+        input.filePath,
+        chunk,
+        maxChars,
+        stored,
+        known.people,
+        known.extra
+      )
     ),
   };
 }
@@ -409,21 +484,49 @@ export function settingsValidate(input: {
   folder: string;
   chunkId: string;
   response: string;
-}): SettingsValidateResult {
+  /**
+   * 検算が通った答えを貯める（2026-10-02）。貯めた分は
+   * `novel.extract.commit` が拡張機能の抽出と同じ形で資料へ保存する
+   */
+  stash?: boolean;
+}): SettingsValidateResult & { stashed?: true } {
   const parsed = parseResult(input.response);
   if (!parsed) {
     throw new McpToolError(
       "応答を読み取れませんでした（設定資料の抽出のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
     );
   }
-  return validateAgainst(
+  const chunk = chunkFromId(input.folder, input.chunkId);
+  if (!input.stash) {
+    return validateAgainst(
+      input.chunkId,
+      chunk,
+      parsed,
+      readStored(input.folder),
+      new SettingsExtractionCollector()
+    );
+  }
+  /*
+    **貯めるときは、貯めた分の人物を「AIに見せた顔ぶれ」に入れて検算する。**
+    `prompt` が貯めた分の名前を既知として渡しているので、その名前で返った
+    人物を根拠なしとして落とすと、見せた画面と検算が食い違う。
+    保存のときは貯めた答えから検算し直すので、ここの結果は報告用である。
+  */
+  const result = validateAgainst(
     input.chunkId,
-    chunkFromId(input.folder, input.chunkId),
+    chunk,
     parsed,
     readStored(input.folder),
-    new SettingsExtractionCollector()
+    new SettingsExtractionCollector(),
+    stashedKnown(input.folder).people
   );
+  stashExtractAnswer(input.folder, input.chunkId, chunk, parsed);
+  return { ...result, stashed: true, note: `${result.note}${STASHED_NOTE}` };
 }
+
+const STASHED_NOTE =
+  "この答えを貯めました。novel.extract.commit で、拡張機能の［設定資料を抽出］と同じ形で資料へ保存できます" +
+  "（新しい記録は保存、既存の記録への変更は承認待ち）。";
 
 export interface SettingsRunInput extends SettingsPromptInput {
   runner: RunnerKind;
@@ -550,6 +653,16 @@ export async function settingsRun(
       accumulator,
       extractedPeople
     );
+    /*
+      **sampling の答えは貯める**（2026-10-02）。チャンクキャッシュは
+      モデル名の分からない答えを貯めない（`run.ts`）ので、ここで貯めないと
+      `novel.extract.commit` で保存する道が無い。Ollama の道は今回の
+      対象に入れていない（作者の裁定は外部AIが抽出を代わりに行う道。
+      手元のAIなら拡張機能の［設定資料を抽出］で同じ保存ができる）
+    */
+    if (input.runner === "sampling") {
+      stashExtractAnswer(input.folder, item.chunkId, chunk, parsed);
+    }
     for (const person of result.characters.accepted) {
       const data = (person as { data?: { name?: string; aliases?: string[] } })
         .data;
