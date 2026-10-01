@@ -4,6 +4,7 @@ import {
   NOTICE_LOG_MAX_AGE_MS,
   NOTICE_LOG_MAX_ENTRIES,
   NOTICE_LOG_SCHEMA,
+  NOTICE_RECORD_MAX_CHARS,
   NOTICE_TEXT_MAX_CHARS,
   answerChoice,
   clipNoticeText,
@@ -25,7 +26,8 @@ import { redactSecrets } from "../../../src/core/logger";
  * **見張りたいのは4つ。**
  *
  * 1. **記録が上限（500件・7日）を超えて膨らまないこと**
- * 2. **キーらしき文字は伏せ、長い文は200字で切ること**（先に伏せてから切る）
+ * 2. **キーらしき文字は伏せ、長い文は記録の上限（4,000字）で切ること**（先に伏せてから切る）。
+ *    一覧の既定は200字の要約、full で全文（2026-10-01）
  * 3. **読む側の絞り込み（since・contains・pid・limit）が効くこと**
  * 4. 壊れた記録で読みが止まらないこと
  */
@@ -146,14 +148,32 @@ describe("呼び出しから中身を取る（describeNoticeCall）", () => {
     expect(described.items).toEqual(["押す"]);
   });
 
-  it("説明やボタンが長ければ、それも切って印を付ける", () => {
+  it("200字を超える文や説明も、記録には全文を残す（2026-10-01、後半が読めなかった）", () => {
     const described = describeNoticeCall(
       "info",
-      ["短い", { modal: true, detail: "う".repeat(300) }],
+      ["え".repeat(300), { modal: true, detail: "う".repeat(300) }],
+      same
+    );
+    expect(described.truncated).toBe(false);
+    expect(described.message).toBe("え".repeat(300));
+    expect(described.detail).toBe("う".repeat(300));
+  });
+
+  it(`文と説明を合わせて${NOTICE_RECORD_MAX_CHARS}字を超えたら切る。説明にも要約ぶんは残す`, () => {
+    const described = describeNoticeCall(
+      "info",
+      ["え".repeat(NOTICE_RECORD_MAX_CHARS + 100), { modal: true, detail: "う".repeat(500) }],
       same
     );
     expect(described.truncated).toBe(true);
+    expect(Array.from(described.message)).toHaveLength(NOTICE_RECORD_MAX_CHARS + 1);
     expect(Array.from(described.detail ?? "")).toHaveLength(NOTICE_TEXT_MAX_CHARS + 1);
+  });
+
+  it("ボタンの名前は今までどおり200字で切る", () => {
+    const described = describeNoticeCall("info", ["短い", "ぼ".repeat(300)], same);
+    expect(described.truncated).toBe(true);
+    expect(Array.from(described.items[0])).toHaveLength(NOTICE_TEXT_MAX_CHARS + 1);
   });
 
   it("押されたボタンの名前（閉じただけなら null）", () => {
@@ -275,6 +295,33 @@ describe("絞り込み（selectNotices）", () => {
     const result = selectNotices(files, { limit: 1 }, NOW);
     expect(result.notices).toHaveLength(1);
     expect(result.matched).toBe(3);
+  });
+
+  it("既定は文と説明を200字の要約で返し、full なら記録の全文を返す", () => {
+    const longFiles = [
+      file({
+        notices: [
+          entry({ message: "長".repeat(300), detail: "説".repeat(250), items: ["押す"] }),
+        ],
+      }),
+    ];
+    const [summary] = selectNotices(longFiles, {}, NOW).notices;
+    expect(Array.from(summary.message)).toHaveLength(NOTICE_TEXT_MAX_CHARS + 1);
+    expect(Array.from(summary.detail ?? "")).toHaveLength(NOTICE_TEXT_MAX_CHARS + 1);
+    expect(summary.truncated).toBe(true);
+
+    const [full] = selectNotices(longFiles, { full: true }, NOW).notices;
+    expect(full.message).toBe("長".repeat(300));
+    expect(full.detail).toBe("説".repeat(250));
+    expect(full.truncated).toBe(false);
+    // 要約にしても、元の記録は書き換えない
+    expect(longFiles[0].notices[0].message).toBe("長".repeat(300));
+  });
+
+  it("短い知らせは、既定でも full でも同じ形", () => {
+    expect(selectNotices(files, {}, NOW).notices).toEqual(
+      selectNotices(files, { full: true }, NOW).notices
+    );
   });
 
   it("limit は 1〜500 に収める", () => {

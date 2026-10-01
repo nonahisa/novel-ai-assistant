@@ -150,6 +150,36 @@ describe("notices.recent", () => {
     expect(result.unreadable).toEqual([{ file: "300-1.json", reason: "記録の形になっていません" }]);
   });
 
+  /*
+    2026-10-01 の実機確認で、AIチューニングの終わりの知らせが先頭200字で
+    切られ、後半（罠の一文・どの段で止まったか）が読めなかった。
+    **既定は今までどおり200字の要約、full: true で記録の全文**を返す。
+  */
+  it("既定は200字の要約のまま、full: true なら記録の全文を返す", () => {
+    const long = `${"前".repeat(150)}${"後".repeat(150)}止まった段：3段目`;
+    writeNoticeFile(
+      "100-1.json",
+      serializeNoticeLog(log(100, [["2026-09-24T09:00:00.000Z", long]]))
+    );
+    const summary = noticesRecent({}, NOW).notices[0];
+    expect(Array.from(summary.message)).toHaveLength(201);
+    expect(summary.message.endsWith("…")).toBe(true);
+    expect(summary.truncated).toBe(true);
+
+    const full = noticesRecent({ full: true }, NOW).notices[0];
+    expect(full.message).toBe(long);
+    expect(full.truncated).toBe(false);
+  });
+
+  it("contains は要約で隠れた後半の文字でも探せる", () => {
+    const long = `${"前".repeat(300)}止まった段：3段目`;
+    writeNoticeFile(
+      "100-1.json",
+      serializeNoticeLog(log(100, [["2026-09-24T09:00:00.000Z", long]]))
+    );
+    expect(noticesRecent({ contains: "止まった段" }, NOW).matched).toBe(1);
+  });
+
   it("記録が1つも無くても失敗にしない", () => {
     const result = noticesRecent({}, NOW);
     expect(result.notices).toEqual([]);

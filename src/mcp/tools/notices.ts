@@ -21,7 +21,8 @@ import { mcpMachineName } from "./windows";
  * 絞り込んで返す。記録を消すのも直すのも拡張機能の側で、ここは1バイトも
  * 書かない（`windows.list` と同じ）。
  *
- * **作品を取らない。** 記録にあるのは知らせの文（先頭200字、キーは伏せ字）・
+ * **作品を取らない。** 記録にあるのは知らせの文（4,000字まで。既定で返すのは
+ * 先頭200字の要約、`full: true` で全文。キーは伏せ字）・
  * 種類・ボタン・時刻・窓だけで、作品フォルダーを1つも開かない。
  * 許可（6.87.10）の対象外で、原稿の出方は `none`。
  *
@@ -50,6 +51,10 @@ export const NOTICES_RECENT_INPUT = {
     .int()
     .optional()
     .describe("この窓（windows.list の pid）の知らせだけ"),
+  full: z
+    .boolean()
+    .optional()
+    .describe("true なら文と説明を全文で返す（省けば先頭200字）"),
 };
 
 export interface NoticesRecentInput {
@@ -57,6 +62,7 @@ export interface NoticesRecentInput {
   limit?: number;
   contains?: string;
   pid?: number;
+  full?: boolean;
 }
 
 export interface NoticesRecentResult {
@@ -74,7 +80,9 @@ export interface NoticesRecentResult {
 
 const NOTE =
   "拡張機能が出した知らせ（右下の通知と、画面中央の確認）の記録です。" +
-  "message は先頭200字まで（truncated が true なら切っています）、キーらしき文字は伏せています。" +
+  "message と detail は先頭200字まで（truncated が true なら切っています）。" +
+  "full: true で全文（記録は1件4,000字まで）。contains は全文から探します。" +
+  "キーらしき文字は伏せています。" +
   "answer が null の知らせは、まだ閉じられていません（右下に残っているか、窓が先に閉じた）。" +
   "answer.choice は押されたボタンの名前で、閉じただけなら null です。" +
   "記録は7日・窓ごとに500件まで。この機械の保管庫にあるので、別の機械の知らせは出ません。";

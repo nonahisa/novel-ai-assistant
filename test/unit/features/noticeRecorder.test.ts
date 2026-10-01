@@ -7,6 +7,7 @@ import {
   type NoticeTarget,
 } from "../../../src/features/noticeRecorder";
 import { redactSecrets } from "../../../src/core/logger";
+import { NOTICE_RECORD_MAX_CHARS } from "../../../src/core/noticeLog";
 
 /**
  * 知らせを1か所で受ける仕掛け（MCP の `notices.recent`。作者の承認、2026-09-24）。
@@ -140,14 +141,18 @@ describe("溜める箱（NoticeBuffer）", () => {
     expect(buffer.snapshot()[0].answer).toBeNull();
   });
 
-  it("キーらしき文字は伏せ、長い文は切る", () => {
+  it("キーらしき文字は伏せ、長い文は全文を残す（上限を超えた分だけ切る）", () => {
     const buffer = new NoticeBuffer(redactSecrets, clock);
     buffer.add({ severity: "error", args: ["鍵 ghp_abcdefghijklmnopqrstu を読めません"] });
     buffer.add({ severity: "info", args: ["本".repeat(1000)] });
-    const [secret, long] = buffer.snapshot();
+    buffer.add({ severity: "info", args: ["長".repeat(NOTICE_RECORD_MAX_CHARS + 10)] });
+    const [secret, long, tooLong] = buffer.snapshot();
     expect(secret.message).toBe("鍵 ghp_*** を読めません");
-    expect(long.truncated).toBe(true);
-    expect(Array.from(long.message).length).toBeLessThanOrEqual(201);
+    // 2026-10-01：200字で切っていたため、終わりの知らせの後半が読めなかった
+    expect(long.truncated).toBe(false);
+    expect(long.message).toBe("本".repeat(1000));
+    expect(tooLong.truncated).toBe(true);
+    expect(Array.from(tooLong.message)).toHaveLength(NOTICE_RECORD_MAX_CHARS + 1);
   });
 
   it("中身を渡しても、箱の中は書き換わらない（書き出し中に答えが来ても混ざらない）", () => {

@@ -41,13 +41,26 @@ export const NOTICE_LOG_MAX_ENTRIES = 500;
 export const NOTICE_LOG_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
 
 /**
- * 知らせの文を記録へ残す長さの上限（字）。
+ * 一覧で返す要約の長さ（字）。ボタンの名前を記録へ残す上限も兼ねる。
  *
- * **知らせの文そのものは残してよいが、長い文は切る。** 知らせに原稿の
- * 一部（選んだ語・抜き出した行など）が混ざることがあり、長く残すほど
- * 本文が保管庫へ溜まる。どの知らせか見分けるには先頭200字で足りる。
+ * **どの知らせか見分けるには先頭200字で足りる。** `notices.recent` の
+ * 既定の返り値はこの長さに切る（`full: true` を渡したときだけ全文）。
  */
 export const NOTICE_TEXT_MAX_CHARS = 200;
+
+/**
+ * 知らせ1件の文と説明を記録へ残す長さの上限（字。文と説明の合計）。
+ *
+ * **2026-09-24 から 10-01 までは記録する時点で200字に切っていた。** すると
+ * AIチューニングの終わりのような長い知らせの後半（罠の一文・どの段で
+ * 止まったか）が、実機確認で読めなかった。そこで記録には全文を残し、
+ * 切るのは読む側（一覧の要約）へ移した。
+ *
+ * **それでも上限は置く。** 知らせに原稿の一部が混ざることがあり、長く
+ * 残すほど本文が保管庫へ溜まる。4,000字は、長い終わりの知らせを丸ごと
+ * 収めて余る量。件数の上限（500件）と合わせて、記録が膨らみすぎない。
+ */
+export const NOTICE_RECORD_MAX_CHARS = 4000;
 
 /** 読むときの既定の件数（`limit` を省いたとき） */
 export const NOTICE_DEFAULT_LIMIT = 50;
@@ -114,15 +127,16 @@ export type RedactFunction = (text: string) => string;
  */
 export function clipNoticeText(
   text: string,
-  redact: RedactFunction
+  redact: RedactFunction,
+  maxChars: number = NOTICE_TEXT_MAX_CHARS
 ): { text: string; truncated: boolean } {
   const redacted = redact(text);
   const chars = Array.from(redacted);
-  if (chars.length <= NOTICE_TEXT_MAX_CHARS) {
+  if (chars.length <= maxChars) {
     return { text: redacted, truncated: false };
   }
   return {
-    text: `${chars.slice(0, NOTICE_TEXT_MAX_CHARS).join("")}…`,
+    text: `${chars.slice(0, maxChars).join("")}…`,
     truncated: true,
   };
 }
@@ -155,26 +169,36 @@ export function describeNoticeCall(
   redact: RedactFunction
 ): Omit<NoticeEntry, "seq" | "at" | "answer"> {
   let truncated = false;
-  const clip = (text: string): string => {
-    const result = clipNoticeText(text, redact);
+  const clip = (text: string, maxChars: number): string => {
+    const result = clipNoticeText(text, redact, maxChars);
     if (result.truncated) truncated = true;
     return result.text;
   };
 
-  const message = clip(typeof args[0] === "string" ? args[0] : String(args[0] ?? ""));
+  const message = clip(
+    typeof args[0] === "string" ? args[0] : String(args[0] ?? ""),
+    NOTICE_RECORD_MAX_CHARS
+  );
+  // 説明は文の残りの枠まで。**ただし要約ぶん（200字）は必ず残す**——文が
+  // 上限いっぱいでも、説明が丸ごと消えると何の知らせか分からなくなる
+  const detailBudget = Math.max(
+    NOTICE_TEXT_MAX_CHARS,
+    NOTICE_RECORD_MAX_CHARS - Array.from(message).length
+  );
   let rest = args.slice(1);
   let modal = false;
   let detail: string | null = null;
   const first = rest[0];
   if (isObject(first) && typeof first.title !== "string") {
     modal = first.modal === true;
-    detail = typeof first.detail === "string" ? clip(first.detail) : null;
+    detail = typeof first.detail === "string" ? clip(first.detail, detailBudget) : null;
     rest = rest.slice(1);
   }
   const items: string[] = [];
   for (const item of rest) {
     const title = itemTitle(item);
-    if (title !== undefined) items.push(clip(title));
+    // ボタンの名前は画面でも短い。長いのは作品名などが混ざったときだけなので200字で切る
+    if (title !== undefined) items.push(clip(title, NOTICE_TEXT_MAX_CHARS));
   }
   return { severity, modal, message, detail, items, truncated };
 }
@@ -315,6 +339,11 @@ export interface NoticeQuery {
   contains?: string;
   /** この窓（拡張機能ホストのプロセス番号）の知らせだけ */
   pid?: number;
+  /**
+   * `true` なら文と説明を記録の全文で返す。省けば200字の要約
+   * （一覧で数十件を返すとき、長い知らせが返り値を埋めないように）。
+   */
+  full?: boolean;
 }
 
 export interface NoticeView extends NoticeEntry {
@@ -324,7 +353,28 @@ export interface NoticeView extends NoticeEntry {
 }
 
 /**
+ * 一覧向けに、文と説明を200字の要約へ切る。**記録そのものは書き換えない。**
+ *
+ * `truncated` は「記録した時点で切った」か「要約で切った」かのどちらか。
+ * 伏せ字は記録した時点で済んでいるので、ここでは伏せない（何もしない関数を
+ * 渡す）。ボタンの名前は記録した時点で200字以内に収まっている。
+ */
+function summarizeNotice(notice: NoticeEntry): NoticeEntry {
+  const keep = (text: string): string => text;
+  const message = clipNoticeText(notice.message, keep);
+  const detail = notice.detail === null ? null : clipNoticeText(notice.detail, keep);
+  return {
+    ...notice,
+    message: message.text,
+    detail: detail === null ? null : detail.text,
+    truncated: notice.truncated || message.truncated || (detail?.truncated ?? false),
+  };
+}
+
+/**
  * 記録を絞り込んで、**新しい順**に並べる。
+ *
+ * `contains` は**記録の全文**で探す（要約で隠れる後半の語でも見つかる）。
  *
  * `matched` は件数の上限で切る前の数——「50件出たが、本当は何件あったか」が
  * 分からないと、絞り込みを狭めるべきかどうか決められない。
@@ -358,7 +408,7 @@ export function selectNotices(
         continue;
       }
       views.push({
-        ...notice,
+        ...(query.full === true ? notice : summarizeNotice(notice)),
         pid: file.pid,
         machineName: file.machineName,
         extensionVersion: file.extensionVersion,
