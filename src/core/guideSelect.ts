@@ -86,10 +86,10 @@ export function selectGuideBundles(input: {
   budget?: number;
 }): GuideSelection {
   const budget = input.budget ?? DEFAULT_BUNDLE_BUDGET;
-  const grams = evidenceGrams([
-    input.question,
-    ...(input.recentAuthorTurns ?? []),
-  ]);
+  const grams = withoutCommonGrams(
+    evidenceGrams([input.question, ...(input.recentAuthorTurns ?? [])]),
+    input.bundles
+  );
 
   const terms = featureNameTermsIn([
     input.question,
@@ -173,6 +173,47 @@ export function evidenceGrams(sources: readonly string[]): Set<string> {
     }
   }
   return grams;
+}
+
+/**
+ * 「束の半分を超えて出る組み」を数えない判定を始める束の数。
+ *
+ * 束が少ないと、「多くの束に出る」が語の性質なのか偶然なのか区別できない
+ * （3束のうち2束に出た、では何も言えない）。製品の束は29（2026-10-01）。
+ */
+const COMMON_GRAM_MIN_BUNDLES = 10;
+
+/**
+ * 束の**半分を超えて**出てくる組みを、証拠から外す（2026-10-01）。
+ *
+ * ## なぜ外すか
+ *
+ * 「この作品で、塩不足の問題は何話から何話までで解決されますか。」が
+ * 「GitHub作品管理」の束に当たり、操作の相談と判定されて目次（約4KB）が
+ * 付いた（Sonnet が内部AIの代わりに撃った測定。docs/measurements/
+ * 2026-10-01-sonnet-as-internal-ai.md の不具合11）。当たった組みは
+ * 「作品」と「解決」（「競合解決」）の2つ。**「作品」は29束のうち20束に
+ * 出る**——どの束にも出る語は、どの束を指しているかの証拠にならない。
+ * 作者は作品の中身を訊くときにこそ「この作品で」と言う。
+ *
+ * 外れるのは（2026-10-01の束で）「作品」「AI」「本文」「設定」「管理」。
+ * どれも語の一部として残る組み（「設定資料」の「定資」「資料」）や、
+ * 言い回しの判定（`chatTopic.ts` の `HOWTO_PHRASES`）で操作の相談は拾える。
+ *
+ * **一覧を手で持たずに、束から数える。** 束は機能を足すたびに変わるので、
+ * 手で持つと「新しい束に出る語」で同じことがまた起きる。
+ */
+function withoutCommonGrams(
+  grams: ReadonlySet<string>,
+  bundles: readonly GuideBundle[]
+): Set<string> {
+  if (bundles.length < COMMON_GRAM_MIN_BUNDLES) return new Set(grams);
+  const kept = new Set<string>();
+  for (const gram of grams) {
+    const appears = bundles.filter((bundle) => bundle.text.includes(gram)).length;
+    if (appears * 2 <= bundles.length) kept.add(gram);
+  }
+  return kept;
 }
 
 /**

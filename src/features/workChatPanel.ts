@@ -145,6 +145,7 @@ import {
   joinWorkChatSystemPrompt,
   lastAuthorTurnsOf,
   workChatFeatureGuide,
+  workChatOverviewFocus,
   workChatReaderBlocks,
 } from "../core/workChatMaterials";
 import {
@@ -1889,7 +1890,11 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       this.paidConfirmedFor = paidKey;
     }
 
-    const context = await this.resolveContext();
+    // 全体像の各話あらすじは問いに合わせて選ぶ（`formatChatOverview` の `focus`）。
+    // 直前の作者の発言を拾うので、履歴へ今回の質問を積む前に組む
+    const context = await this.resolveContext(
+      workChatOverviewFocus(question, this.history)
+    );
     if (context) useLogFile(context.work.folderPath);
 
     // **質問に近い場面を作品全体から探して足す。**
@@ -3228,7 +3233,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * 複数あるときは、作者が選ぶまで決めない（別の作品の資料を
    * 抽出し始めては困る）。選んだ作品は覚えておく。
    */
-  private async workOnlyContext(): Promise<ResolvedContext | undefined> {
+  private async workOnlyContext(
+    focus: readonly string[] = []
+  ): Promise<ResolvedContext | undefined> {
     const works = this.registry.list();
     if (works.length === 0) return undefined;
 
@@ -3246,7 +3253,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       excerpt: "",
       truncated: false,
       fromSelection: false,
-      reference: await this.buildReference(chosen, "workOnly"),
+      reference: await this.buildReference(chosen, "workOnly", focus),
     };
   }
 
@@ -4470,7 +4477,13 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     }
   }
 
-  private async resolveContext(): Promise<ResolvedContext | undefined> {
+  /**
+   * @param focus 全体像の各話あらすじを選ぶ手がかり（今回の問いと直前の発言）。
+   *   問いを送るとき以外（画面の表示・メモの保存など）は空でよい
+   */
+  private async resolveContext(
+    focus: readonly string[] = []
+  ): Promise<ResolvedContext | undefined> {
     const editor = this.lastEditor;
     const filePath = this.documentPath(editor);
     const work = filePath ? this.findWork(filePath) : undefined;
@@ -4478,7 +4491,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     // **ファイルを開いていなくても相談できるようにする。**
     // 以前はここで undefined を返しており、作品を開いていないだけで
     // 起動ボタンも材料も出なかった（作者の指摘、2026-08-15）
-    if (!work || !filePath) return this.workOnlyContext();
+    if (!work || !filePath) return this.workOnlyContext(focus);
 
     const config = await readWorkConfig(work);
     const settingsDirName = path.basename(workPaths(work, config).settings);
@@ -4536,7 +4549,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       excerpt: excerpt.text,
       truncated: excerpt.truncated,
       fromSelection: Boolean(selection.trim()),
-      reference: await this.buildReference(work, kind),
+      reference: await this.buildReference(work, kind, focus),
     };
   }
 
@@ -4687,7 +4700,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
 
   private async buildReference(
     work: WorkEntry,
-    kind: ChatContextKind
+    kind: ChatContextKind,
+    focus: readonly string[] = []
   ): Promise<string[]> {
     if (kind === "outside") return [];
 
@@ -4697,7 +4711,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     // 「この作品はどういう話か」に答えられず、作者から
     // 「作品全体を読み込んでほしい」という指摘を受けた（2026-08-15）。
     // 全文は渡せないので、**畳んだ形**で渡す。詳しい場面は検索が拾う。
-    const overview = await this.buildOverview(work);
+    const overview = await this.buildOverview(work, focus);
     if (overview) blocks.push(overview);
 
     // 設定資料そのものを開いているときは、画面の内容と重なるので名前は省く
@@ -4728,7 +4742,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * 話数の一覧は上限を設ける。219話の作品でそのまま並べると
    * 4,000字を超え、肝心の本文の抜粋が入らなくなる。
    */
-  private async buildOverview(work: WorkEntry): Promise<string | undefined> {
+  private async buildOverview(
+    work: WorkEntry,
+    focus: readonly string[]
+  ): Promise<string | undefined> {
     let episodes: FileHint[] = [];
     try {
       episodes = await this.episodeHints(work);
@@ -4741,7 +4758,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       if (text) documents.push({ ...document, text });
     }
     // 組み方（話数の上限・省略の断り・文書の切り詰め）は core（MCP の相談と同じもの）
-    return formatChatOverview({ episodes, documents });
+    // 長い各話あらすじから載せる話は、問いに合わせて選ぶ（2026-10-01）
+    return formatChatOverview({ episodes, documents, focus });
   }
 
   private async readSettingsFile(

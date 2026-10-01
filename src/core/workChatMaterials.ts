@@ -43,6 +43,20 @@ export function lastAuthorTurnsOf(history: readonly WorkChatTurn[]): string[] {
 }
 
 /**
+ * 全体像（`formatChatOverview`）で、長い各話あらすじから載せる話を選ぶ手がかり
+ * （2026-10-01）。今回の問いと、直前の作者の発言。
+ *
+ * 「それは何話？」のような追い質問は、話題（「塩不足」）を直前の発言が
+ * 持っている。使い方の束を選ぶときと同じ考え方で、同じ範囲を見る。
+ */
+export function workChatOverviewFocus(
+  question: string,
+  history: readonly WorkChatTurn[]
+): string[] {
+  return [question, ...lastAuthorTurnsOf(history)];
+}
+
+/**
  * 使い方の束（目次＋関係しそうな説明＋手順書き）と、システムプロンプトの
  * 使い方の節を入れるか。
  *

@@ -36,6 +36,7 @@ import {
   characterNamesBlock,
   joinWorkChatSystemPrompt,
   workChatFeatureGuide,
+  workChatOverviewFocus,
   workChatReaderBlocks,
 } from "../../core/workChatMaterials";
 import { readerReactionChatBlockFromLedger } from "../../core/readerAdviceChat";
@@ -556,7 +557,7 @@ function chatContextOf(
 }
 
 /** 作品の全体像（製品と同じ組み方）。材料が何も無ければ undefined */
-function overviewOf(folder: string): string | undefined {
+function overviewOf(folder: string, focus: readonly string[]): string | undefined {
   const settings = settingsDirOf(folder);
   const documents: Array<{ label: string; file: string; text: string }> = [];
   for (const document of CHAT_OVERVIEW_DOCUMENTS) {
@@ -570,7 +571,8 @@ function overviewOf(folder: string): string | undefined {
       // 無い文書は載せないだけ（製品と同じ）
     }
   }
-  return formatChatOverview({ episodes: episodeHintsOf(folder), documents });
+  // 長い各話あらすじから載せる話は、問いに合わせて選ぶ（製品と同じ手がかり）
+  return formatChatOverview({ episodes: episodeHintsOf(folder), documents, focus });
 }
 
 /**
@@ -650,7 +652,10 @@ export function chatPrompt(
   }
 
   // 全体像は製品と同じく材料の先頭に置く（`buildReference` の並び）
-  const overview = input.overview === false ? undefined : overviewOf(input.folder);
+  const overview =
+    input.overview === false
+      ? undefined
+      : overviewOf(input.folder, workChatOverviewFocus(input.question, history));
   // 設定資料そのものを指しているときは、画面の内容と重なるので名前は省く（製品と同じ）
   const reference = [
     ...(overview ? [overview] : []),
