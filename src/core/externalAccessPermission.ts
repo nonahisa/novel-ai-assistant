@@ -182,6 +182,17 @@ const SHARED_KEY_TOOLS: Readonly<Record<string, string>> = {
 export const FINDING_PROPOSE_KEY = "novel.propose.finding";
 
 /**
+ * **提案パネルの指摘を読む鍵**（MCP `pending.list` の `kind: "finding"`。作者の裁定、2026-10-01）。
+ *
+ * **承認待ちの更新案を読む鍵（`pending.list`）とは分ける。** 更新案が渡すのは
+ * 設定資料の記述だが、指摘は**原稿の引用**（直す箇所の原文）を渡す。承認待ちを
+ * 読ませると決めた作者が、原稿の引用まで外へ出すと決めたことにはならない
+ * ——鍵を同じにすると、許したあとで足した読み方が黙って通る。
+ * 断った回はノックとしてこの鍵で残り、作者が許せば次から通る。`*` は通る。
+ */
+export const FINDING_LIST_KEY = "pending.list.finding";
+
+/**
  * その呼び出しの許可の鍵。
  *
  * **ここが唯一の決め方。** 許可を確かめる側（`mcp/tools/permission.ts`）と
@@ -195,12 +206,14 @@ export function permissionKeyOf(
   tool: string,
   feature: unknown,
   /**
-   * 引数の `kind`（`novel.propose` だけが見る。2026-10-01）。
-   * `"finding"` なら指摘を置く鍵（`FINDING_PROPOSE_KEY`）になる
+   * 引数の `kind`（`novel.propose` と `pending.list` だけが見る。2026-10-01）。
+   * `"finding"` なら指摘を置く鍵（`FINDING_PROPOSE_KEY`）・指摘を読む鍵
+   * （`FINDING_LIST_KEY`）になる
    */
   kind?: unknown
 ): string {
   if (tool === "novel.propose" && kind === "finding") return FINDING_PROPOSE_KEY;
+  if (tool === "pending.list" && kind === "finding") return FINDING_LIST_KEY;
   const shared = SHARED_KEY_TOOLS[tool];
   if (shared) return shared;
   if (!FEATURE_KEYED_TOOLS.has(tool)) return tool;

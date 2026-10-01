@@ -3,9 +3,12 @@ import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "../core/workRegistry";
 import {
+  DEFAULT_FINDINGS_RETENTION_DAYS,
+  visibleFindings,
+} from "../core/findingPanelState";
+import {
   FINDINGS_FILE_NAME,
   expiredFindingIds,
-  isFindingExpired,
   parseFindingLines,
   resolveFindings,
   type Finding,
@@ -54,7 +57,7 @@ const FINDINGS_FILE = FINDINGS_FILE_NAME;
 export function findingsRetentionDays(): number {
   return vscode.workspace
     .getConfiguration("novelai")
-    .get<number>("findings.retentionDays", 3);
+    .get<number>("findings.retentionDays", DEFAULT_FINDINGS_RETENTION_DAYS);
 }
 
 export class FindingStore {
@@ -201,27 +204,15 @@ export class FindingStore {
   }
 }
 
-/**
- * 並べてよい指摘だけを残す（設計書6.96.4）。
- *
- * **期限切れは隠すだけで、ファイルからは消さない。** 消えるのは
- * 「古い指摘を片づける」を作者が押したときだけである——機械が勝手に
- * 消すと、時計がずれていたときや、ノートPCを久しぶりに開いたときに
- * **作者が見る前に消える**。
- *
- * 判断の済んだものも並べない。採ったものはもう本文に入っており、
- * 退けたものは作者が「要らない」と言ったものである。
- *
- * @param now 試験のために外から渡す。既定はいまの時刻
- */
-export function visibleFindings(
-  findings: readonly FindingView[],
-  retentionDays: number,
-  now: Date = new Date()
-): FindingView[] {
-  return findings.filter(
-    (finding) =>
-      finding.status === "pending" &&
-      !isFindingExpired(finding.time, retentionDays, now)
-  );
-}
+/*
+  **並べてよい指摘を決める関数は `core/findingPanelState.ts` に在る**
+  （2026-10-01）。外から提案パネルの中身を読む道（MCP `pending.list` の
+  `kind: "finding"`）が同じ関数を通すため、`vscode` に触らない側へ移した。
+  ここで使う側（`primeFindings`・`sceneMemoPanel`）の書き方は変えない。
+
+  **期限切れは隠すだけで、ファイルからは消さない。** 消えるのは
+  「古い指摘を片づける」を作者が押したときだけである——機械が勝手に
+  消すと、時計がずれていたときや、ノートPCを久しぶりに開いたときに
+  **作者が見る前に消える**。
+*/
+export { visibleFindings };

@@ -4,6 +4,7 @@ import { AIWRITER_DIR } from "../../models/types";
 import {
   DENIED,
   EXTERNAL_PERMISSION_FILE,
+  FINDING_LIST_KEY,
   FINDING_PROPOSE_KEY,
   externalAccessDeniedMessage,
   isSamplingAllowed,
@@ -91,7 +92,7 @@ export function assertExternalAccessAllowed(args: unknown, tool: string): void {
  * **断られた鍵と作者が許可する鍵がずれて、いくら許可しても通らない。**
  */
 export function accessKeyOf(args: unknown, tool: string): string {
-  // `kind` は `novel.propose` の指摘の道だけが見る（設定資料の案と鍵を分ける）
+  // `kind` は `novel.propose`・`pending.list` の指摘の道だけが見る（設定資料の案と鍵を分ける）
   return permissionKeyOf(tool, fieldOf(args, "feature"), fieldOf(args, "kind"));
 }
 
@@ -99,6 +100,9 @@ export function accessKeyOf(args: unknown, tool: string): string {
 export function describeKey(key: string): string {
   if (key === FINDING_PROPOSE_KEY) {
     return `指摘を提案パネルへ置くこと（${key}）`;
+  }
+  if (key === FINDING_LIST_KEY) {
+    return `提案パネルの指摘を読むこと（${key}）`;
   }
   const label = FEATURE_LABELS[key as FeatureName];
   return label ? `${label}（feature: ${key}）` : key;

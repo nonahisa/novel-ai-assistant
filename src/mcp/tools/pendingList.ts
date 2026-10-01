@@ -46,6 +46,8 @@ import {
   readSettingsRecords,
 } from "./shared";
 import { PARSERS as RECORD_PARSERS, SUBDIRS as RECORD_SUBDIRS } from "./proposeRecord";
+import { DEFAULT_FINDINGS_RETENTION_DAYS } from "../../core/findingPanelState";
+import { findingList, type FindingListResult } from "./findingList";
 
 /**
  * 承認待ちの更新案を読む（`pending.list`。0.85.1、作者の承認 2026-09-24）。
@@ -74,10 +76,11 @@ type SourceName = typeof EXTRACTION | PendingUpdateSource;
 export const PENDING_LIST_INPUT = {
   ...FOLDER_INPUT,
   kind: z
-    .enum(["character", "ability", "organization", "location", "world"])
+    .enum(["character", "ability", "organization", "location", "world", "finding"])
     .optional()
     .describe(
-      "種類で絞る（人物 character・能力 ability・組織 organization・場所 location・世界観 world）。省略すると全部"
+      "種類で絞る（人物 character・能力 ability・組織 organization・場所 location・世界観 world）。省略すると全部。" +
+        "finding＝承認待ちの代わりに提案パネルの指摘（誤字脱字・推敲・矛盾など）を状態つきで返す（未処理・採用・却下・期限切れ・陳腐化。出どころとモデルごとの集計つき）"
     ),
   source: z
     .enum([EXTRACTION, "plot", "chat", "external"])
@@ -92,13 +95,46 @@ export const PENDING_LIST_INPUT = {
     .max(MAX_LIMIT)
     .optional()
     .describe(`返す件数の上限（既定 ${DEFAULT_LIMIT}）。数える件数（counts）は絞る前のまま`),
+  retentionDays: z
+    .number()
+    .int()
+    .min(0)
+    .max(3650)
+    .optional()
+    .describe(
+      `kind: finding のとき、期限切れと見なす日数（既定 ${DEFAULT_FINDINGS_RETENTION_DAYS}。0 は無期限）。作者が設定を変えていれば同じ値を渡すと画面と揃う`
+    ),
 };
 
 export interface PendingListInput {
   folder: string;
-  kind?: SettingsKind;
+  kind?: SettingsKind | "finding";
   source?: SourceName;
   limit?: number;
+  retentionDays?: number;
+}
+
+/**
+ * `pending.list` の入口（2026-10-01）。
+ *
+ * **`kind: "finding"` なら提案パネルの指摘を読む**（`findingList`）。
+ * 道具を新しく1本足さずにここへ載せたのは、どちらも「提案パネルに何が
+ * 並ぶか」を外から読む口だから（設定資料の更新案も提案パネルに並ぶ）。
+ * 道具の一覧は外部AIが繋ぐたびに読むので、1本ずつ増やすとその分だけ重くなる。
+ * **許可の鍵は分ける**（`FINDING_LIST_KEY`）——指摘は原稿の引用を渡す。
+ */
+export function pendingListTool(input: PendingListInput & { kind: "finding" }): FindingListResult;
+export function pendingListTool(input: PendingListInput): PendingListResult | FindingListResult;
+export function pendingListTool(input: PendingListInput): PendingListResult | FindingListResult {
+  if (input.kind === "finding") {
+    return findingList({
+      folder: input.folder,
+      source: input.source,
+      limit: input.limit ?? DEFAULT_LIMIT,
+      retentionDays: input.retentionDays,
+    });
+  }
+  return pendingList(input);
 }
 
 /**

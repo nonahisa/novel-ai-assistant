@@ -127,7 +127,9 @@ export function exposureOf(
   /*
     走査・検算・検出・材料——抜粋と名前と件数が渡る。
     `pending.list`（0.85.1）も同じ重さ：本文は返さないが、承認待ちの案の
-    名前・理由・変わる欄の前と後（＝設定資料の記述）が呼び出し元へ渡る
+    名前・理由・変わる欄の前と後（＝設定資料の記述）が呼び出し元へ渡る。
+    `kind: "finding"`（提案パネルの指摘。2026-10-01）も同じ重さ：直す箇所の
+    原文を**短く切った引用**だけが渡り、本文をまとめては返さない
   */
   if (
     tool === "pending.list" ||
@@ -254,6 +256,12 @@ function detailOf(
     記録が道具の名前だけになる。**絞り方だけ**を残す（中身は残さない）
   */
   if (tool === "pending.list") {
+    // 提案パネルの指摘を読んだ回（2026-10-01）。中身も件数も残さない（何を読んだかだけ）
+    if (args?.kind === "finding") {
+      return args?.source === "external"
+        ? "提案パネルの指摘を読んだ（外部AIの分）"
+        : "提案パネルの指摘を読んだ";
+    }
     const kind =
       typeof args?.kind === "string"
         ? PENDING_KIND_SHORT_LABELS[args.kind as PendingSettingsKind | "character"]

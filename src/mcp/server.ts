@@ -52,7 +52,7 @@ import {
 import { SETTINGS_PROPOSE_INPUT, novelPropose } from "./tools/propose";
 import {
   PENDING_LIST_INPUT,
-  pendingList,
+  pendingListTool,
   type PendingListInput,
 } from "./tools/pendingList";
 import {
@@ -509,10 +509,11 @@ server.registerTool(
       "**提案パネルと同じ組み立てで**1件ずつ返します（種類・名前・出どころ・理由・" +
       "変わる欄の前と後・古い案か・読めない案か）。" +
       "status が pending のものがパネルに並び、stale は「設定資料更新分反映」で片付けられる古い案です。" +
-      "**読むだけで、承認も見送りも片付けもしません。** kind・source で絞り、limit で件数を決めます。",
+      "**読むだけで、承認も見送りも片付けもしません。** kind・source で絞り、limit で件数を決めます。" +
+      "kind: finding で提案パネルの指摘（作者が採ったか・退けたか）を読みます（許可は別の鍵 pending.list.finding）。",
     inputSchema: PENDING_LIST_INPUT,
   },
-  tool("pending.list", (args: PendingListInput) => pendingList(args))
+  tool("pending.list", (args: PendingListInput) => pendingListTool(args))
 );
 
 server.registerTool(

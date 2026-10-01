@@ -5,6 +5,7 @@ import { ExternalAccessPermissionStore } from "../core/externalAccessPermissionS
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import {
   ALL_TOOLS,
+  FINDING_LIST_KEY,
   FINDING_PROPOSE_KEY,
   clientKeyOf,
   type ExternalClientPermission,
@@ -301,6 +302,7 @@ function legacyNote(legacy: boolean): string {
 function describeAccessKey(key: string): string {
   // 指摘を置く鍵（2026-10-01）。鍵の文字だけでは何を許すのか読めない
   if (key === FINDING_PROPOSE_KEY) return `指摘を提案パネルへ置くこと（${key}）`;
+  if (key === FINDING_LIST_KEY) return `提案パネルの指摘を読むこと（${key}）`;
   const label = FEATURE_LABELS[key as FeatureName];
   return label ? `${label}（${key}）` : key;
 }
