@@ -95,7 +95,7 @@ export function plotReversePrompt(input: PlotReversePromptInput) {
     throw new McpToolError(
       "各話あらすじ（設定/chapter_synopses.json）がまだありません。" +
         "あらすじが無いと、冒頭だけを見て中盤以降を推測することになり、" +
-        "本文に無い筋書きが混ざります。先に episode.synopsisRun で各話あらすじを作ってください。"
+        "本文に無い筋書きが混ざります。先に novel.run（feature: synopsis）で各話あらすじを作ってください。"
     );
   }
 
