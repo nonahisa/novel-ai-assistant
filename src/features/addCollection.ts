@@ -160,7 +160,8 @@ async function askWhichToRegister(
         choice: "children" as const,
       },
       {
-        label: `$(book) 「${name}」そのものを1作品として登録する`,
+        // ブラウザ版では作業フォルダーの最上位に名前が無い（「」と出ていた。2026-10-02）
+        label: `$(book) ${name ? `「${name}」` : "このフォルダー"}そのものを1作品として登録する`,
         detail: "このフォルダー全体で1つの作品として扱います",
         choice: "self" as const,
       },

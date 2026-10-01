@@ -193,16 +193,21 @@ export function judgeEpisodePlotText(text: string): EpisodePlotJudgement {
  * 読めないことを理由に断ると、壊れたファイルが1つある作品では何も呼べなくなる。
  */
 export function episodePlotShortfall(
-  entries: readonly (EpisodePlotJudgement & { plotPath: string })[]
+  entries: readonly (EpisodePlotJudgement & { plotPath: string })[],
+  options: { forExternalAi?: boolean } = {}
 ): string | undefined {
   if (entries.some((entry) => entry.written !== false)) return undefined;
   if (entries.length === 0) return "単話プロットのファイルがまだありません。";
   if (entries.length === 1) {
     return `${entries[0].plotPath} はありますが、${entries[0].reason ?? ""}`;
   }
+  // 道具名の案内は外部AIの口にだけ足す。画面の関門にも同じ文が出るので、
+  // 既定では付けない（2026-10-01、ブラウザ版の実機確認で画面に出ていた）
   return (
     `${entries.length}件ありますが、どれも展開（箇条書き）が書かれていません。` +
-    "話ごとの様子は novel.scan の episodePlots にあります。"
+    (options.forExternalAi
+      ? "話ごとの様子は novel.scan の episodePlots にあります。"
+      : "")
   );
 }
 

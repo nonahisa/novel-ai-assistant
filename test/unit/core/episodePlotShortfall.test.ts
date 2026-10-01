@@ -53,4 +53,15 @@ describe("episodePlotShortfall", () => {
       ])
     ).toContain("2件ありますが");
   });
+
+  it("画面へ出す文に、外部AI向けの道具名（novel.scan）を入れない", () => {
+    const two = [
+      { plotPath: "a.md", written: false as const },
+      { plotPath: "b.md", written: false as const },
+    ];
+    expect(episodePlotShortfall(two)).not.toContain("novel.scan");
+    expect(episodePlotShortfall(two, { forExternalAi: true })).toContain(
+      "novel.scan の episodePlots"
+    );
+  });
 });

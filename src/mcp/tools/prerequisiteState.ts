@@ -206,7 +206,9 @@ export function prerequisiteReasons(
   for (const kind of new Set(kinds)) {
     if (kind !== "episodePlot") continue;
     try {
-      const reason = episodePlotShortfall(episodePlotEntries(folder));
+      const reason = episodePlotShortfall(episodePlotEntries(folder), {
+        forExternalAi: true,
+      });
       if (reason) reasons.episodePlot = reason;
     } catch {
       // 理由が言えないだけで、判定そのものは `hasPrerequisite` が持つ
