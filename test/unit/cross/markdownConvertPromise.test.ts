@@ -25,6 +25,8 @@ import { resolve } from "node:path";
 const FILES = [
   "src/features/markdownConvert.ts",
   "src/views/actionList.ts",
+  // メニューの説明（操作の木）は 2026-10-01 に core へ移した
+  "src/core/actionTree.ts",
   "src/features/ruby.ts",
   // 0.51.8 で5か所目が見つかった（`.txt` でルビを押したときの断り）
   "src/features/manuscriptEditor.ts",

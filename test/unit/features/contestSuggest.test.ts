@@ -211,6 +211,9 @@ describe("隠し機能の入口", () => {
   test("詳細メニュー・簡単ステップには載せず、コマンドパレットと相談からだけ呼ぶ", () => {
     expect(readFileSync(path.join(root, "src/views/actionList.ts"), "utf8")).not.toContain("novelai.suggestContests");
     expect(readFileSync(path.join(root, "src/views/stepMenu.ts"), "utf8")).not.toContain("novelai.suggestContests");
+    // 操作の木と簡単ステップの定義は 2026-10-01 に core へ移した（画面のファイルだけ見ると素通りする）
+    expect(readFileSync(path.join(root, "src/core/actionTree.ts"), "utf8")).not.toContain("novelai.suggestContests");
+    expect(readFileSync(path.join(root, "src/core/stepDefs.ts"), "utf8")).not.toContain("novelai.suggestContests");
     const manifest = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as {
       contributes: { commands: { command: string }[] };
     };

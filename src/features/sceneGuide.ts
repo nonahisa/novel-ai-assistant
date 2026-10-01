@@ -3,7 +3,7 @@ import { startTour } from "../core/guidedTour";
 import { PROCEDURES, type Procedure } from "../core/procedures";
 import { findAction, REQUIRES_WORK_HINT } from "../views/actionList";
 import { cancelItem, isCancelItem } from "../views/dialogs";
-import { procedureActionLookup } from "./featureGuide";
+import { procedureActionLookup } from "../core/featureGuide";
 
 /**
  * 場面別案内——ヘルプから、場面を選んで画面で案内してもらう

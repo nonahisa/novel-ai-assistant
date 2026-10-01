@@ -16,7 +16,7 @@ import {
 } from "../../../src/core/dictationCleanValidation";
 import { applyDictationText } from "../../../src/features/dictationClean";
 import { EndOfLine, WorkspaceEdit, workspace } from "../support/vscodeStub";
-import { EXTRA_GUIDE, buildGuideBundles } from "../../../src/features/featureGuide";
+import { EXTRA_GUIDE, buildGuideBundles } from "../../../src/core/featureGuide";
 import { allActions } from "../../../src/views/actionList";
 import { COMMAND_FEATURES } from "../../../src/core/workTypeVisibility";
 

@@ -6,8 +6,8 @@ import {
 } from "../views/actionList";
 import { STEP_MENU } from "../views/stepMenu";
 import { canRunProcesses } from "../core/runtime";
-import { EXTRA_GUIDE } from "./featureGuide";
-import { entranceOf } from "./actionEntrance";
+import { EXTRA_GUIDE } from "../core/featureGuide";
+import { entranceOf } from "../core/actionEntrance";
 import { openGeneratedMarkdown } from "../views/openDocument";
 
 /**

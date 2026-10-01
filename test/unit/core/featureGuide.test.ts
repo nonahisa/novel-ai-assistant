@@ -4,7 +4,7 @@ import {
   buildFeatureIndex,
   buildGuideBundles,
   EXTRA_GUIDE,
-} from "../../../src/features/featureGuide";
+} from "../../../src/core/featureGuide";
 import { ACTION_TREE } from "../../../src/views/actionList";
 
 /**

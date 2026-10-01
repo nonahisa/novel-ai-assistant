@@ -5,7 +5,7 @@ import {
   buildFeatureIndex,
   buildGuideBundles,
   NO_INDEX_NOTICE,
-} from "../../../src/features/featureGuide";
+} from "../../../src/core/featureGuide";
 import {
   buildWorkChatSystemPrompt,
   WORK_CHAT_SYSTEM_PROMPT,

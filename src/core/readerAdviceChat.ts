@@ -22,7 +22,23 @@ export async function readerReactionChatBlockFor(
   loadLedger: () => Promise<PostingLedger>
 ): Promise<{ text: string; sites: string[] } | undefined> {
   if (!questionMentionsReaderReaction(question)) return undefined;
-  const materials = buildReaderAdviceMaterials(await loadLedger());
+  const ledger = await loadLedger();
+  return readerReactionChatBlockFromLedger(question, () => ledger);
+}
+
+/**
+ * 上と同じ判断を、台帳を**同期で**読める呼び手のために（2026-10-01。残課題 R6）。
+ *
+ * 外から呼ぶ相談（`mcp/tools/chat.ts`）は Node の `fs` で台帳を同期で読み、
+ * プロンプトの組み立ても同期である。**判断（読者の反応の話か・材料の組み方）は
+ * この1か所**にあり、上の非同期版もここを通る——写しを作らないため。
+ */
+export function readerReactionChatBlockFromLedger(
+  question: string,
+  loadLedger: () => PostingLedger
+): { text: string; sites: string[] } | undefined {
+  if (!questionMentionsReaderReaction(question)) return undefined;
+  const materials = buildReaderAdviceMaterials(loadLedger());
   return {
     text: buildReaderReactionChatBlock(materials),
     sites: materials.map((material) => material.siteLabel),

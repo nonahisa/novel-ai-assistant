@@ -5,7 +5,7 @@ import {
   noteCopyMessage,
 } from "../../../src/core/postingConvert";
 import { postingCopyTargets } from "../../../src/core/postingCopyTargets";
-import { EXTRA_GUIDE, buildGuideBundles } from "../../../src/features/featureGuide";
+import { EXTRA_GUIDE, buildGuideBundles } from "../../../src/core/featureGuide";
 import { toNoteMarkdown } from "../../../src/core/noteMarkdown";
 import { toSiteNotation } from "../../../src/core/ruby";
 

@@ -10,7 +10,7 @@ import {
   parseWorkChatAnswer,
 } from "../../../src/prompts/workChat";
 import { detectChatTopic } from "../../../src/core/chatTopic";
-import { buildGuideBundles } from "../../../src/features/featureGuide";
+import { buildGuideBundles } from "../../../src/core/featureGuide";
 import { applyWriterStyleSignals } from "../../../src/core/writerStyle";
 import type { WriterProfile } from "../../../src/core/writerProfileStore";
 import { BASE_SYSTEM_PROMPT } from "../../../src/prompts/characterExtract";

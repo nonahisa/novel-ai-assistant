@@ -29,8 +29,28 @@ import { isWorkInfoFile } from "../../core/workInfoFile";
 import { decodeBytes } from "../../core/textDecode";
 import { buildAdvicePolicyPrompt } from "../../prompts/advicePolicy";
 import { buildWriterStylePrompt } from "../../prompts/writerStyle";
-import { buildReaderTypePrompt } from "../../prompts/readerTarget";
 import { scoreAnswers, type AdviceProfile } from "../../core/advicePolicy";
+// 画面の状態に依らない材料の組み方は、製品の相談パネルと同じものを通る（R6）
+import {
+  WORK_CHAT_HISTORY_TURNS,
+  characterNamesBlock,
+  joinWorkChatSystemPrompt,
+  workChatFeatureGuide,
+  workChatReaderBlocks,
+} from "../../core/workChatMaterials";
+import { readerReactionChatBlockFromLedger } from "../../core/readerAdviceChat";
+import {
+  classifyChatContext,
+  describeChatContext,
+  type ChatContextKind,
+} from "../../core/chatContext";
+import {
+  emptyPostingLedger,
+  readPostingLedger,
+  POSTING_FILE,
+  type PostingLedger,
+} from "../../models/posting";
+import { DEFAULT_SETTINGS_DIR } from "../../models/types";
 import {
   readAdviceProfile,
   readWriterProfile,
@@ -47,7 +67,6 @@ import {
   WRITER_REVISE_STREAK_NEEDED,
 } from "../../core/writerStyle";
 import { parseCharacter } from "../../models/character";
-import { parseLocation } from "../../models/location";
 import {
   McpToolError,
   SETTINGS_SUBDIRS,
@@ -109,12 +128,34 @@ import {
  *
  * **渡さなければ、その軸は1字も送らない。** これは製品の決まりそのもので
  * （設計書6.90.1）、未診断の作者はまさにその状態である。
+ *
+ * ---
+ *
+ * **材料は製品の相談パネルと同じ関数で組む**（2026-10-01。残課題 R6）。
+ * 以前は「使い方の束」も「読者を決めていないことの断り」「読者の区分の一覧」も
+ * 渡しておらず、外から測ると製品に無い答えを見ることになっていた
+ * （CLAUDE.md の失敗5）。組み方は `core/workChatMaterials.ts` に1つだけ置く。
+ *
+ * | 材料 | 製品 | ここ |
+ * |---|---|---|
+ * | 使い方の束（目次・説明・手順書き）と使い方の節 | 話題で切り替え | **同じ**（`featureIndex: false` のときだけ外す） |
+ * | 読者（宣言／決めていない断り／区分の一覧） | 作品があれば | **同じ** |
+ * | 読者の反応（PV・ブクマ等の話のとき） | `設定/投稿状態.json` | **同じ**（同じファイルを読む） |
+ * | 登場人物の名前（端役を除く・60人まで） | 見出しつき1行 | **同じ** |
+ * | 画面の種類と説明（【いま開いている画面】） | 開いているファイルから | **同じ判定**（`filePath` から。無ければ「作品全体」） |
+ * | 覚えておくやり取りの数 | 12 | **同じ** |
+ *
+ * **意図して違うもの**（画面の状態や、作品フォルダーの外にあるもの）:
+ *
+ * - 抜粋：製品はカーソルの前後・選択範囲。ここは画面が無いので**先頭から** `EXCERPT_LIMIT` 字
+ * - 質問に近い場面（意味検索）：索引が作品フォルダーの外にあるので**使わない**
+ * - 作品名：製品は登録した題名。ここは登録の台帳を読まないので**フォルダー名**
+ * - 全体像：製品は作品が決まれば毎回。ここは `overview: true` のときだけ
+ *   （過去の測定と比べられるように既定を変えていない）
+ * - 助言方針・執筆スタイル：製品は `globalState`。ここは渡された答えか控え（上の表）
  */
 
 const VALIDATE_WITH = validateWith("chat");
-
-/** 相談で渡す材料の上限。**長い作品で本文が押し出されないように** */
-const REFERENCE_LIMIT = 60;
 
 /** 本文の抜粋の上限（字）。製品の相談も、開いている画面の一部だけを渡す */
 const EXCERPT_LIMIT = 4000;
@@ -158,9 +199,33 @@ export interface ChatDiagnosisReport {
   writerStyle: boolean;
   /** 執筆スタイルをどこから取ったか（渡された答えか、拡張機能の控えか） */
   writerStyleSource?: "input" | "mirror";
+  /** 読者の宣言（読者像）を足したか。false でも「決めていない」ことは渡している */
   readerType: boolean;
+  /** 読者の区分の一覧を添えたか（読者の話をしている回だけ。製品と同じ） */
+  readerGlossary: boolean;
+  /** 読者の反応の材料を添えたか（PV・ブクマ等の話をしている回だけ。製品と同じ） */
+  readerReaction: boolean;
   /** 送らなかった軸と、その理由 */
   omitted: string[];
+}
+
+/**
+ * 渡した使い方の束の内訳（製品が操作ログへ残すものと同じ項目）。
+ *
+ * **答えがおかしいときに、説明が届いていたのかを切り分けるため**に返す。
+ * 製品も `相談: 使い方の説明 …` として同じものを記録している。
+ */
+export interface ChatFeatureGuideReport {
+  /** 話題（`craft` なら目次を落とした回） */
+  topic: string;
+  /** 束を選んだ理由 */
+  reason: string;
+  /** 選んだ束の名前 */
+  selected: string[];
+  /** 渡した手順書きの題。渡さなかった回は無い */
+  procedure?: string;
+  /** 束の字数 */
+  chars: number;
 }
 
 export interface ChatPromptResult {
@@ -171,10 +236,12 @@ export interface ChatPromptResult {
   temperature: number;
   validateWith: string;
   userPrompt: string;
-  /** 材料として添えた語（登場人物・場所の名前）。`overview` を渡すと全体像の塊が先頭に入る */
+  /** 材料の塊（登場人物の名前。製品と同じ形）。`overview` を渡すと全体像の塊が先頭に入る */
   reference: string[];
   /** 作品の全体像（話の一覧・紹介文・プロット）を添えたか */
   overview: boolean;
+  /** 渡した使い方の束。`featureIndex: false` で外した回は null */
+  featureGuide: ChatFeatureGuideReport | null;
   diagnoses: ChatDiagnosisReport;
 }
 
@@ -185,6 +252,14 @@ export interface ChatPromptInput {
   history?: WorkChatTurn[];
   adviceAnswers?: number[];
   writerStyle?: Record<string, unknown>;
+  /**
+   * 使い方の束（操作の目次・関係しそうな説明・手順書き）とシステムプロンプトの
+   * 使い方の節を渡すか。
+   *
+   * **省くと製品と同じ**（2026-10-01。残課題 R6）——話題で切り替え、創作の相談
+   * では目次を落とす。`true` も同じ扱い。**`false` を渡したときだけ外す**
+   * （以前の既定。作品の相談だけを測りたいとき、過去の測定と比べるとき）。
+   */
   featureIndex?: boolean;
   /**
    * 作品の全体像（話の一覧と各話のファイルの場所・紹介文・プロット）を添えるか。
@@ -227,6 +302,8 @@ function buildDiagnosisBlocks(
     advicePolicy: false,
     writerStyle: false,
     readerType: false,
+    readerGlossary: false,
+    readerReaction: false,
     omitted,
   };
 
@@ -286,25 +363,75 @@ function buildDiagnosisBlocks(
     }
   }
 
-  const readerProfile = readReaderProfile(folder);
-  const readerBlock = buildReaderTypePrompt(readerProfile);
-  if (readerBlock) {
-    blocks.push(readerBlock);
-    report.readerType = true;
-  } else {
-    omitted.push("ターゲット読者（設定/読者像.json に宣言がありません）");
+  /*
+    ターゲット読者。**選び方は製品と同じ関数**（`workChatReaderBlocks`）——
+    決めていなければ決めていないことだけを渡し、読者の話をしている回には
+    区分の一覧を添える。以前は宣言が無ければ何も足さず、AIはこの拡張機能の
+    区分を知らないまま一般論で答えていた（製品では 2026-09-21 に直した形）。
+  */
+  const reader = workChatReaderBlocks(readReaderProfile(folder), input.question);
+  blocks.push(...reader.blocks);
+  report.readerType = reader.declared;
+  report.readerGlossary = reader.glossary;
+  if (!reader.declared) {
+    omitted.push(
+      "ターゲット読者（設定/読者像.json に宣言が無いので、決めていないことだけを渡しました）"
+    );
+  }
+
+  // 読者の反応（製品と同じ判断。台帳は同じファイルを読む）
+  const reaction = readerReactionBlockOf(folder, input.question);
+  if (reaction.block) {
+    blocks.push(reaction.block);
+    report.readerReaction = true;
+  } else if (reaction.failure) {
+    omitted.push(reaction.failure);
   }
 
   return { blocks, report };
 }
 
 /**
- * 材料（登場人物・場所の名前）。
+ * 読者の反応の材料（設計書6.79.7.3）。判断は製品と同じ
+ * （`readerReactionChatBlockFromLedger`）。
  *
- * **製品の相談は、開いている画面に応じて材料を詰める。** ここは外から
- * 呼ぶ口なので、**作品に居る人物と場所の名前**という、いちばん外さない
- * ところに絞る。意味検索（RAG）は使わない——あれは索引を作ってあることが
- * 前提で、索引は作品フォルダーの外に在る。
+ * **台帳が無ければ空の台帳として扱う**（製品の `PostingStore.load` と同じ。
+ * 記録が無いことだけは渡す——渡さないと、AIは一般論の数字で答えを埋める）。
+ * **壊れていたら足さずに理由を返す**（製品も足さずに記録へ残す。直さない）。
+ * 読者の反応の話でなければ台帳を開かない。
+ */
+function readerReactionBlockOf(
+  folder: string,
+  question: string
+): { block?: string; failure?: string } {
+  const loadLedger = (): PostingLedger => {
+    const settings = settingsDirOf(folder);
+    if (!settings) return emptyPostingLedger();
+    const file = nodePath.join(settings, POSTING_FILE);
+    if (!fs.existsSync(file)) return emptyPostingLedger();
+    return readPostingLedger(JSON.parse(decodeBytes(fs.readFileSync(file)).text))
+      .ledger;
+  };
+  try {
+    const found = readerReactionChatBlockFromLedger(question, loadLedger);
+    return found ? { block: found.text } : {};
+  } catch (error) {
+    return {
+      failure: `読者の反応（設定/${POSTING_FILE} を読めませんでした: ${
+        error instanceof Error ? error.message : String(error)
+      }）`,
+    };
+  }
+}
+
+/**
+ * 登場人物の名前の塊。**製品と同じ形**（`characterNamesBlock`。端役を除き、
+ * 見出しつきの1行・60人まで）。
+ *
+ * 以前は人物と場所を1件1行で並べ、端役も含めていた。製品は場所を渡さず、
+ * 端役も外すので、外から測ると材料が違っていた（R6 で揃えた）。
+ * 意味検索（RAG）は使わない——あれは索引を作ってあることが前提で、
+ * 索引は作品フォルダーの外に在る。
  */
 function collectReference(folder: string): string[] {
   const people = readSettingsRecords(
@@ -312,15 +439,12 @@ function collectReference(folder: string): string[] {
     SETTINGS_SUBDIRS.characters,
     parseCharacter
   );
-  const places = readSettingsRecords(
-    folder,
-    SETTINGS_SUBDIRS.locations,
-    parseLocation
+  const block = characterNamesBlock(
+    people.records
+      .filter((record) => !record.isMob)
+      .map((record) => record.name)
   );
-  return [
-    ...people.records.map((record) => `登場人物: ${record.name}`),
-    ...places.records.map((record) => `場所: ${record.name}`),
-  ].slice(0, REFERENCE_LIMIT);
+  return block ? [block] : [];
 }
 
 /**
@@ -337,13 +461,24 @@ function collectReference(folder: string): string[] {
  * 名前だけで並べる（製品も読めないファイルを0字の話として一覧に残す）。
  */
 export function episodeHintsOf(folder: string): FileHint[] {
+  return episodeEntriesOf(folder).map(({ path, label }) => ({ path, label }));
+}
+
+/**
+ * 話の一覧に、話数の始まりを添えたもの。**【いま開いている画面】の説明**
+ * （製品の `describeChatContext` に渡す「第N話」）にだけ使う。
+ * 並べ方と表示名は `episodeHintsOf` と同じ（そちらもここから作る）。
+ */
+function episodeEntriesOf(
+  folder: string
+): Array<FileHint & { chapterStart: number | null }> {
   let files: string[];
   try {
     files = listBodyFiles(folder);
   } catch {
     return [];
   }
-  const hints: FileHint[] = [];
+  const hints: Array<FileHint & { chapterStart: number | null }> = [];
   for (const relative of files) {
     const fileName = nodePath.basename(relative);
     const parsed = parseEpisodeFileName(fileName);
@@ -377,9 +512,44 @@ export function episodeHintsOf(folder: string): FileHint[] {
         chapterStart,
         chapterEnd,
       }),
+      chapterStart,
     });
   }
   return hints;
+}
+
+/**
+ * 【いま開いている画面】の種類と説明。**判定は製品と同じ関数**
+ * （`classifyChatContext`・`describeChatContext`）。
+ *
+ * - `filePath` が無い：製品で作品を選んでファイルを開いていない相談と同じ
+ *   「作品全体」（以前は「作品のファイル以外」と名乗りながら人物名を渡していた）
+ * - 本文かどうかは話の一覧に在るかで決める（製品は走査の結果で決める。同じ考え）
+ * - 本文なら「第N話 の本文」。話数の始まりは製品と同じく合本でも最初の話
+ */
+function chatContextOf(
+  folder: string,
+  workTitle: string,
+  filePath: string | undefined
+): { kind: ChatContextKind; label: string } {
+  if (!filePath) {
+    return { kind: "workOnly", label: describeChatContext("workOnly", workTitle) };
+  }
+  const relative = filePath.split(/[\\/]/).filter(Boolean).join("/");
+  const episode = episodeEntriesOf(folder).find((entry) => entry.path === relative);
+  const kind = classifyChatContext({
+    relativePath: relative,
+    settingsDirName: DEFAULT_SETTINGS_DIR,
+    isEpisode: episode !== undefined,
+  });
+  const chapterLabel =
+    episode?.chapterStart !== null && episode?.chapterStart !== undefined
+      ? `第${episode.chapterStart}話`
+      : null;
+  return {
+    kind,
+    label: describeChatContext(kind, nodePath.basename(relative), chapterLabel),
+  };
 }
 
 /** 作品の全体像（製品と同じ組み方）。材料が何も無ければ undefined */
@@ -446,14 +616,26 @@ export function chatPrompt(
 ): ChatPromptResult {
   const now = new Date();
   const { blocks, report } = buildDiagnosisBlocks(input.folder, input, now);
+  const history = input.history ?? [];
 
-  // **目次は既定で入れない。** 入れると「操作の話」へ寄りやすく、
-  // 作品の相談の出来ばえを測るのに邪魔になる（製品は画面から渡す）
+  /*
+    **使い方の束は製品と同じ関数で選ぶ**（R6）。話題で切り替え、創作の相談
+    では目次を落とし、システムプロンプトの使い方の節も外す——切り替えの
+    条件は製品と同じ1つ（`featureIndex`）。
+
+    `featureIndex: false` のときだけ渡さない。以前はこれが既定で、
+    「入れると操作の話へ寄りやすい」ので外していたが、それでは製品と
+    違う材料で測ることになる（CLAUDE.md の失敗5）。
+  */
+  const guide =
+    input.featureIndex === false ? undefined : workChatFeatureGuide(input.question, history);
   const base = buildWorkChatSystemPrompt({
-    featureIndex: input.featureIndex === true,
+    featureIndex: guide?.featureIndex ?? false,
   });
-  const systemPrompt =
-    blocks.length === 0 ? base : `${base}\n\n${blocks.join("\n\n")}`;
+  const systemPrompt = joinWorkChatSystemPrompt(base, blocks);
+
+  const workTitle = input.folder.split(/[\\/]/).filter(Boolean).pop() ?? "";
+  const context = chatContextOf(input.folder, workTitle, input.filePath);
 
   let excerpt = "";
   let truncated = false;
@@ -465,9 +647,10 @@ export function chatPrompt(
 
   // 全体像は製品と同じく材料の先頭に置く（`buildReference` の並び）
   const overview = input.overview === true ? overviewOf(input.folder) : undefined;
+  // 設定資料そのものを指しているときは、画面の内容と重なるので名前は省く（製品と同じ）
   const reference = [
     ...(overview ? [overview] : []),
-    ...collectReference(input.folder),
+    ...(context.kind === "settingsDoc" ? [] : collectReference(input.folder)),
   ];
 
   return {
@@ -477,20 +660,31 @@ export function chatPrompt(
     temperature: WORK_CHAT_TEMPERATURE,
     validateWith: VALIDATE_WITH,
     userPrompt: buildWorkChatPrompt({
-      workTitle: input.folder.split(/[\\/]/).filter(Boolean).pop() ?? "",
-      contextKind: input.filePath ? "manuscript" : "outside",
-      contextLabel: input.filePath ?? "作品のファイル以外",
+      workTitle,
+      contextKind: context.kind,
+      contextLabel: context.label,
       excerpt,
       excerptTruncated: truncated,
       fromSelection: false,
       reference,
       requestedFiles: followUp.requestedFiles,
       missingFiles: followUp.missingFiles,
-      history: input.history ?? [],
+      // 覚えておく数も製品と同じ（長い履歴をそのまま送らない）
+      history: history.slice(-WORK_CHAT_HISTORY_TURNS),
       question: input.question,
+      ...(guide ? { featureGuide: guide.text } : {}),
     }),
     reference,
     overview: overview !== undefined,
+    featureGuide: guide
+      ? {
+          topic: guide.topic,
+          reason: guide.reason,
+          selected: guide.selected,
+          ...(guide.procedure ? { procedure: guide.procedure } : {}),
+          chars: guide.text.length,
+        }
+      : null,
     diagnoses: report,
   };
 }

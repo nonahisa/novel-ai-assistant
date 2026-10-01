@@ -1,5 +1,5 @@
-import type { ActionItem } from "../views/actionList";
-import { STEP_REFERENCED_COMMANDS } from "../views/stepMenu";
+import type { ActionItem } from "./actionTree";
+import { STEP_REFERENCED_COMMANDS } from "./stepDefs";
 
 /**
  * 詳細メニューに**出さない**操作（`hiddenFromActionList`）の、実際の入口

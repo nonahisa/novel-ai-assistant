@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   buildFeatureIndex,
   buildGuideBundles,
-} from "../../../src/features/featureGuide";
+} from "../../../src/core/featureGuide";
 import { ACTION_TREE, type ActionItem } from "../../../src/views/actionList";
 
 /**

@@ -103,8 +103,9 @@ describe("質問の数の言い方", () => {
     resolve(__dirname, "../../../src/features/writerDiagnosis.ts"),
     "utf8"
   );
+  // 操作の木は core にある（2026-10-01。`views/actionList.ts` は画面だけ）
   const menu = readFileSync(
-    resolve(__dirname, "../../../src/views/actionList.ts"),
+    resolve(__dirname, "../../../src/core/actionTree.ts"),
     "utf8"
   );
 

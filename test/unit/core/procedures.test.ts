@@ -13,7 +13,7 @@ import {
   findAction,
   prerequisiteNoteOf,
 } from "../../../src/views/actionList";
-import { buildFeatureGuideForQuestion } from "../../../src/features/featureGuide";
+import { buildFeatureGuideForQuestion } from "../../../src/core/featureGuide";
 
 /**
  * 手順書き——よくある仕事の「順番と判断」（`src/core/procedures.ts`）。

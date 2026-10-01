@@ -159,7 +159,7 @@ export function detectChatTopic(input: {
   question: string;
   /** 直前の作者の発言。無ければ空 */
   recentAuthorTurns?: string[];
-  /** 使い方の説明の束（`features/featureGuide.ts` の `buildGuideBundles()`） */
+  /** 使い方の説明の束（`core/featureGuide.ts` の `buildGuideBundles()`） */
   bundles?: readonly GuideBundle[];
 }): ChatTopic {
   const bundles = input.bundles ?? [];

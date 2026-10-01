@@ -42,6 +42,8 @@ describe("パネルの名前", () => {
       "src/views/proposalPanelHtml.ts",
       "src/extension.ts",
       "src/views/actionList.ts",
+      // 操作の木（メニューの名前と説明）は 2026-10-01 に core へ移した
+      "src/core/actionTree.ts",
     ]) {
       expect(readFileSync(file, "utf-8"), file).not.toContain("AI指摘");
     }

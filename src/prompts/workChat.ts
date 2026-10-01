@@ -51,7 +51,7 @@ import { closeTruncatedJson } from "../core/truncatedResponse";
 //      「不要な記事の内容まで一括で乗っていそうな気配を感じています」）。
 //      話題の見分けは `core/chatTopic.ts`。目次を渡さない回は、代わりに
 //      「操作のことでしたら、もう一度そう言ってお尋ねください」と聞き返させる
-//      （`features/featureGuide.ts` の NO_INDEX_NOTICE）
+//      （`core/featureGuide.ts` の NO_INDEX_NOTICE）
 // 3.11: edit の説明を実態へ合わせた（作者の裁定、2026-09-21「頼んでいるの
 //      だから、書き込みはした上で次へ行くべきでは？」）。押されるまで待つ形を
 //      やめたので、**「作者がボタンを押したときだけ反映されます」は嘘になった。**
@@ -258,7 +258,7 @@ ${RUNNABLE_LIST}
  * 創作の相談では目次ごと外す（`core/chatTopic.ts`、設計書6.27.9）。
  *
  * 外した回には、代わりに末尾の資料側へ聞き返しの断りが入る
- * （`features/featureGuide.ts` の `NO_INDEX_NOTICE`）。**切り替える条件は
+ * （`core/featureGuide.ts` の `NO_INDEX_NOTICE`）。**切り替える条件は
  * 1つにする**——2つに割れると、片方だけ直る日が来る。
  */
 const FEATURE_GUIDE_SECTION = `【この拡張機能の使い方を聞かれたとき】
@@ -389,7 +389,7 @@ export interface WorkChatInput {
   question: string;
   /**
    * この拡張機能の操作の目次と、質問に関係しそうな説明
-   * （`features/featureGuide.ts` の `buildFeatureGuideForQuestion`）。
+   * （`core/featureGuide.ts` の `buildFeatureGuideForQuestion`）。
    *
    * **名前は毎回、全部渡す。** 判定を外して名前ごと落とすと、
    * 「その機能はありません」と嘘を答える。目次だけなら約1,600字で、

@@ -3,7 +3,7 @@ import {
   buildFeatureGuideForQuestion,
   buildFeatureIndex,
   buildGuideBundles,
-} from "../../../src/features/featureGuide";
+} from "../../../src/core/featureGuide";
 import { TARGET_READER_ENTRY_TITLE } from "../../../src/prompts/readerTarget";
 
 /**

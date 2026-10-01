@@ -136,12 +136,17 @@ import { chatExamplesFor } from "../core/chatExamples";
 import { notifyDone } from "../views/notify";
 import { buildAdvicePolicyPrompt } from "../prompts/advicePolicy";
 import { buildWriterStylePrompt } from "../prompts/writerStyle";
+import { questionMentionsReader } from "../prompts/readerTarget";
+// 画面の状態に依らない材料の組み方は core にあり、MCP の相談も同じものを通る
+// （2026-10-01。残課題 R6。写しを置くと片方だけ古くなる）
 import {
-  buildReaderTypeGlossaryPrompt,
-  buildReaderTypePrompt,
-  buildReaderTypeUnknownPrompt,
-  questionMentionsReader,
-} from "../prompts/readerTarget";
+  WORK_CHAT_HISTORY_TURNS,
+  characterNamesBlock,
+  joinWorkChatSystemPrompt,
+  lastAuthorTurnsOf,
+  workChatFeatureGuide,
+  workChatReaderBlocks,
+} from "../core/workChatMaterials";
 import {
   buildExcerpt,
   classifyChatContext,
@@ -214,10 +219,7 @@ import {
   type ChatSettingsSyncResult,
 } from "./chatSettingsSync";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
-import {
-  buildFeatureGuideForQuestion,
-  procedureActionLookup,
-} from "./featureGuide";
+import { procedureActionLookup } from "../core/featureGuide";
 import { startTourByKey } from "../core/guidedTour";
 import {
   prepareRetrieval,
@@ -305,8 +307,8 @@ const EXCERPT_CHARS = 4_000;
  * 既存の抜粋の上限と同じ量に収まる。
  */
 const RELATED_MAX_CHARS = 8_000;
-/** 覚えておくやり取りの数。増やすほど入力が伸びて料金がかかる */
-const HISTORY_TURNS = 12;
+/** 覚えておくやり取りの数（MCP の相談と同じ値を使うので core に置いた） */
+const HISTORY_TURNS = WORK_CHAT_HISTORY_TURNS;
 /** 該当箇所の印を残す時間。見つけたあとは要らないので消す */
 const HIGHLIGHT_MS = 8_000;
 
@@ -881,10 +883,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * 作者の最後の発言も選ぶ材料にする。**AIは呼ばない**（字面の照合だけ）。
    */
   private featureGuideFor(question: string) {
-    return buildFeatureGuideForQuestion({
-      question,
-      recentAuthorTurns: this.lastAuthorTurns(),
-    });
+    // 組み方は core（MCP の相談も同じものを通る。`core/workChatMaterials.ts`）
+    return workChatFeatureGuide(question, this.history);
   }
 
   /**
@@ -892,10 +892,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * 積んだあとだと、今回の質問そのものが返る。
    */
   private lastAuthorTurns(): string[] {
-    const lastAuthorTurn = [...this.history]
-      .reverse()
-      .find((turn) => turn.role === "author");
-    return lastAuthorTurn ? [lastAuthorTurn.text] : [];
+    return lastAuthorTurnsOf(this.history);
   }
 
   /** 当たった手順書きの鍵だけ（AIに接続できなかった道で使う） */
@@ -1115,19 +1112,18 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     */
     if (work) {
       const readerProfile = await this.readerProfileFor(work);
-      const readerBlock = buildReaderTypePrompt(readerProfile);
-      if (readerBlock) {
+      // 選び方は core（MCP の相談も同じものを通る）。ここは記録だけを書く
+      const reader = workChatReaderBlocks(readerProfile, question);
+      if (reader.declared) {
         for (const line of readerTypeChatLogLines(readerProfile)) logStep(line);
-        blocks.push(readerBlock);
       } else {
         logStep("相談: 読者タイプは未診断（決めていないことだけを渡した）");
-        blocks.push(buildReaderTypeUnknownPrompt());
       }
       // 読者の話をしている回だけ、隣の区分と比べられるように一覧を添える
-      if (questionMentionsReader(question)) {
+      if (reader.glossary) {
         logStep("相談: 読者タイプの区分一覧を添えた（読者の話のため）");
-        blocks.push(buildReaderTypeGlossaryPrompt());
       }
+      blocks.push(...reader.blocks);
 
       /*
         **読者の反応（PV・離脱・ブクマ・評価）の話なら、その材料を足す**
@@ -1155,7 +1151,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       }
     }
 
-    return blocks.length === 0 ? base : `${base}\n\n${blocks.join("\n\n")}`;
+    return joinWorkChatSystemPrompt(base, blocks);
   }
 
   /**
@@ -1942,7 +1938,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // ここにしか無い
       // 目次を渡さない回（創作の相談）は、使い方の節も外す。
       // **切り替えは1つの条件で**——2つに割れると、片方だけ直る日が来る
-      const withFeatureIndex = guide.topic !== "craft";
+      const withFeatureIndex = guide.featureIndex;
       // 読者像だけは作品ごとのファイルにあるので待つ（開いているあいだは
       // 控えを使い回すので、読むのは作品ごとに1回きり）
       const systemPrompt = await this.buildSystemPrompt(
@@ -4700,11 +4696,9 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         const names = loaded.characters
           .filter((character) => !character.isMob)
           .map((character) => character.name);
-        if (names.length > 0) {
-          blocks.push(
-            `${CHARACTER_NAMES_HEADING}${names.slice(0, 60).join("、")}`
-          );
-        }
+        // 塊の形は core（MCP の相談も同じものを通る）
+        const namesBlock = characterNamesBlock(names);
+        if (namesBlock) blocks.push(namesBlock);
       } catch {
         // 設定資料が無い作品もある。名前が無いだけで相談はできる
       }

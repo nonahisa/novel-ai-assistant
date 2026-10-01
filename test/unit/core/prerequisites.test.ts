@@ -13,7 +13,7 @@ import {
   prerequisiteRoute,
 } from "../../../src/features/prerequisiteGate";
 import { findAction, prerequisiteNoteOf } from "../../../src/views/actionList";
-import { buildGuideBundles } from "../../../src/features/featureGuide";
+import { buildGuideBundles } from "../../../src/core/featureGuide";
 import { buildUserManual } from "../../../src/features/openManual";
 import type { WorkEntry } from "../../../src/models/types";
 

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { window } from "vscode";
 import { PROCEDURES } from "../../../src/core/procedures";
 import { startTour } from "../../../src/core/guidedTour";
-import { procedureActionLookup } from "../../../src/features/featureGuide";
+import { procedureActionLookup } from "../../../src/core/featureGuide";
 import {
   pickScene,
   SCENE_GUIDE_COMMAND,

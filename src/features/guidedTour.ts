@@ -10,7 +10,7 @@ import {
   type TourState,
 } from "../core/guidedTour";
 import { logStep } from "../core/logger";
-import { procedureActionLookup } from "./featureGuide";
+import { procedureActionLookup } from "../core/featureGuide";
 import {
   describeSpotlight,
   type ActionSpotlight,

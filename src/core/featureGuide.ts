@@ -6,21 +6,21 @@ import {
   visibleEntries,
   type ActionItem,
   type ActionSection,
-} from "../views/actionList";
-import { canRunProcesses } from "../core/runtime";
+} from "./actionTree";
+import { canRunProcesses } from "./runtime";
 import { entranceOf } from "./actionEntrance";
 import {
   selectGuideBundles,
   DEFAULT_BUNDLE_BUDGET,
   type GuideBundle,
   type GuideSelection,
-} from "../core/guideSelect";
-import { detectChatTopic, type ChatTopic } from "../core/chatTopic";
+} from "./guideSelect";
+import { detectChatTopic, type ChatTopic } from "./chatTopic";
 import {
   renderProcedure,
   selectProcedure,
   type ProcedureActionInfo,
-} from "../core/procedures";
+} from "./procedures";
 
 /**
  * 「この拡張機能の使い方」をAIへ渡すための説明を組み立てる。

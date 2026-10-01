@@ -238,13 +238,27 @@ describe("相談の画面に繋がっている", () => {
     "utf8"
   );
 
+  /*
+    選び方は 2026-10-01 に core（`core/workChatMaterials.ts`）へ出した。
+    MCP の相談も同じものを通るようにするため（残課題 R6）。パネルは
+    そこを呼び、記録だけを書く。
+  */
+  const materials = readFileSync(
+    resolve(__dirname, "../../../src/core/workChatMaterials.ts"),
+    "utf8"
+  );
+
+  test("パネルは、core の選び方を通す", () => {
+    expect(panel).toContain("workChatReaderBlocks(readerProfile, question)");
+  });
+
   test("読者像が無いときは、決めていないことを渡す", () => {
-    expect(panel).toContain("buildReaderTypeUnknownPrompt()");
+    expect(materials).toContain("buildReaderTypeUnknownPrompt()");
   });
 
   test("読者の話のときだけ、一覧を添える", () => {
-    expect(panel).toContain("questionMentionsReader(question)");
-    expect(panel).toContain("buildReaderTypeGlossaryPrompt()");
+    expect(materials).toContain("questionMentionsReader(question)");
+    expect(materials).toContain("buildReaderTypeGlossaryPrompt()");
   });
 
   /**
@@ -253,7 +267,7 @@ describe("相談の画面に繋がっている", () => {
    * 一度も届かなくなる
    */
   test("一覧の判定は、診断の有無の枝の外にある", () => {
-    const block = panel.slice(panel.indexOf("const readerBlock ="));
+    const block = materials.slice(materials.indexOf("const readerBlock ="));
     const decision = block.indexOf("questionMentionsReader(question)");
     const otherwise = block.indexOf("buildReaderTypeUnknownPrompt()");
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildFeatureGuideForQuestion,
   buildGuideBundles,
-} from "../../../src/features/featureGuide";
+} from "../../../src/core/featureGuide";
 import { FEATURE_NAME_TERMS } from "../../../src/core/guideSelect";
 
 /**
