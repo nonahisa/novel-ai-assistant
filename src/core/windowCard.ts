@@ -2,6 +2,12 @@ import { AIWRITER_DIR } from "../models/types";
 // `paths.ts` ではなく純粋な部分を直に指す——ここは MCP の束からも読まれ、
 // `vscode` へ届いてはいけない（`mcpReach.test.ts` が見張る）
 import { isPathInside, isSamePath } from "./pathText";
+import {
+  describeManuscriptEditorsCard,
+  parseManuscriptEditorsCard,
+  type ManuscriptEditorsCard,
+  type ManuscriptEditorsCardView,
+} from "./manuscriptEditorStatus";
 
 /**
  * 窓の札（MCP の道具 `windows.list`。作者の依頼、2026-09-22）。
@@ -114,6 +120,13 @@ export interface WindowCard {
    * **古い版の札には無い**（`parseWindowCard` が `null` で埋める）。
    */
   chatWork: ChatWorkRef | null;
+  /**
+   * 原稿エディターの未送信の状態（作者の裁定、2026-10-01。設計書6.25.9）。
+   * 形は `core/manuscriptEditorStatus.ts`。**本文は載せない。**
+   *
+   * **古い版の札には無い**（`parseWindowCard` が `null` で埋める）。
+   */
+  manuscripts: ManuscriptEditorsCard | null;
   /** この窓で拡張機能が起動した時刻（ISO） */
   startedAt: string;
   /** 最後に札を打ち直した時刻（ISO）。**古さの判定はこれだけで決める** */
@@ -140,6 +153,8 @@ export interface WindowCardInput {
   works?: readonly string[];
   /** 省略は「相談パネルで作品を選んでいない」（`null`） */
   chatWork?: ChatWorkRef | null;
+  /** 省略は「原稿エディターの状態を集めていない」（`null`） */
+  manuscripts?: ManuscriptEditorsCard | null;
   startedAt: Date;
   now: Date;
 }
@@ -160,6 +175,7 @@ export function buildWindowCard(input: WindowCardInput): WindowCard {
     chatWork: input.chatWork
       ? { id: input.chatWork.id, title: input.chatWork.title }
       : null,
+    manuscripts: input.manuscripts ?? null,
     startedAt: input.startedAt.toISOString(),
     updatedAt: input.now.toISOString(),
   };
@@ -238,6 +254,50 @@ export function serializeWindowCard(card: WindowCard): string {
   return `${JSON.stringify(card, null, 2)}\n`;
 }
 
+/**
+ * 札の中身が変わったかを比べる鍵。**打ち直しの時刻と「最後に届いた時刻」は除く。**
+ *
+ * 原稿エディターの状態を載せてから、札を書き直すきっかけが増えた（知らせの
+ * 出し下げ・タブの開け閉め）。「最後に届いた時刻」は打鍵のたびに進むので、
+ * それで書き直すと打鍵のたびに保管庫へ書くことになる。**時刻の項目は、
+ * 何か別の理由で書くとき（と5分ごとの打ち直し）に一緒に載れば足りる。**
+ */
+export function windowCardChangeKey(card: WindowCard): string {
+  const manuscripts = card.manuscripts
+    ? {
+        ...card.manuscripts,
+        lastHeardAt: null,
+        editors: card.manuscripts.editors.map((editor) => ({
+          ...editor,
+          lastHeardAt: null,
+          lastAppliedAt: null,
+        })),
+      }
+    : null;
+  return JSON.stringify({ ...card, updatedAt: "", manuscripts });
+}
+
+/**
+ * 札を書くかを決める門。**中身が変わったときだけ通す**（`windowCardChangeKey`）。
+ * 5分ごとの打ち直しは `force` で必ず通す（`updatedAt` を進めるのが目的）。
+ */
+export interface WindowCardWriteGate {
+  shouldWrite(card: WindowCard, options?: { force?: boolean }): boolean;
+  /** 書けたあとに呼ぶ（書けなかった札を「書いた」ことにしない） */
+  wrote(card: WindowCard): void;
+}
+
+export function createWindowCardWriteGate(): WindowCardWriteGate {
+  let last: string | undefined;
+  return {
+    shouldWrite: (card, options) =>
+      options?.force === true || windowCardChangeKey(card) !== last,
+    wrote: (card) => {
+      last = windowCardChangeKey(card);
+    },
+  };
+}
+
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
@@ -301,6 +361,9 @@ export function parseWindowCard(text: string): WindowCard | undefined {
   // 0.94.x で足した項目も、無ければ埋める（理由は上の2項目と同じ）
   const chatWork = parseChatWork(value.chatWork);
   if (chatWork === false) return undefined;
+  // 0.94.x（原稿エディターの未送信の状態）も、無ければ null で埋める
+  const manuscripts = parseManuscriptEditorsCard(value.manuscripts);
+  if (manuscripts === false) return undefined;
   return {
     schema: WINDOW_CARD_SCHEMA,
     pid: value.pid,
@@ -313,12 +376,15 @@ export function parseWindowCard(text: string): WindowCard | undefined {
     machineName: typeof value.machineName === "string" ? value.machineName : null,
     works: value.works ?? [],
     chatWork,
+    manuscripts,
     startedAt: value.startedAt,
     updatedAt: value.updatedAt,
   };
 }
 
-export interface WindowCardView extends WindowCard {
+export interface WindowCardView extends Omit<WindowCard, "manuscripts"> {
+  /** 原稿エディターの状態に、読んだ時点の秒数を添えたもの */
+  manuscripts: ManuscriptEditorsCardView | null;
   /**
    * たぶん閉じた（`updatedAt` が `WINDOW_CARD_STALE_AFTER_MS` より古い）。
    *
@@ -343,14 +409,18 @@ export function describeWindowCards(
   now: Date
 ): WindowCardView[] {
   const views = cards.map((card): WindowCardView => {
+    const manuscripts = card.manuscripts
+      ? describeManuscriptEditorsCard(card.manuscripts, now)
+      : null;
     const at = Date.parse(card.updatedAt);
     if (Number.isNaN(at)) {
-      return { ...card, probablyClosed: true, minutesSinceUpdate: null };
+      return { ...card, manuscripts, probablyClosed: true, minutesSinceUpdate: null };
     }
     // 先の時刻（機械の時計のずれ）は「いま打ち直した」とみなす
     const elapsed = Math.max(0, now.getTime() - at);
     return {
       ...card,
+      manuscripts,
       probablyClosed: elapsed > WINDOW_CARD_STALE_AFTER_MS,
       minutesSinceUpdate: Math.floor(elapsed / 60_000),
     };

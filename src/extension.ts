@@ -454,6 +454,9 @@ import {
   refreshAllManuscriptCounts,
   refreshManuscriptCounts,
   refreshManuscriptKinds,
+  collectManuscriptEditorsCard,
+  onDidChangeManuscriptStatus,
+  watchManuscriptTabs,
   type ManuscriptEditorDeps,
 } from "./features/manuscriptEditor";
 // 「本文が見つからない」ときの文言は1か所に置く（`features/ruby.ts` と共用）
@@ -2666,8 +2669,16 @@ export async function activate(
     // 見えるようにする。書き直すのは選び直したときだけ
     chatWorkId: () => workChatPanel.selectedWork()?.id,
     onDidChangeChatWork: workChatPanel.onDidChangeSelectedWork,
+    // 原稿エディターの未送信の状態（作者の裁定 2026-10-01。設計書6.25.9）。
+    // 拡張機能ホストが起動し直したあと字が届かなかった件を、外から見えるようにする。
+    // 書き直すのは状態が変わったときだけ（札の門が中身の同じ書き込みを止める）
+    manuscripts: () =>
+      collectManuscriptEditorsCard((filePath) => workOfPath(registry, filePath)),
+    onDidChangeManuscripts: onDidChangeManuscriptStatus,
   });
   if (windowCard) {
+    // 受け持っていない原稿エディター（起動し直す前の画面）をタブから拾う
+    context.subscriptions.push(watchManuscriptTabs());
     context.subscriptions.push(windowCard);
     closeWindowCard = windowCard.close;
   }

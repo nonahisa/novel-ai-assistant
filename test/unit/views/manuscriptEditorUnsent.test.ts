@@ -885,3 +885,107 @@ describe("組んで書く面の切り取り（Ctrl+X）", () => {
     expect(result.deleted, "写すだけで字が消えていない").toBe(true);
   });
 });
+
+/* ── 未送信の状態を拡張機能へ知らせる（窓の札に載せる。作者の裁定 2026-10-01） ── */
+
+describe("未送信の状態を拡張機能へ知らせる（MCP の windows.list の窓の札）", () => {
+  type Status = {
+    unsent: boolean;
+    stage: number;
+    shownMs: number | null;
+    pendingEdits: number;
+    lengthGap: number | null;
+    rescueKept: boolean;
+  };
+  function statuses(h: UnsentHarness): Status[] {
+    return h
+      .posted()
+      .filter((message) => message.type === "unsentStatus")
+      .map((message) => message.status as Status);
+  }
+
+  it("知らせを出したとき・2段目へ変わったとき・下ろしたときに1回ずつ送る", () => {
+    const h = unsentHarness();
+    h.postEdit("打った字");
+    h.advance(5_000);
+    expect(statuses(h)).toHaveLength(1);
+    expect(statuses(h)[0]).toMatchObject({ unsent: true, stage: 1 });
+    // 送り直しの見回り（4秒ごと）や秒の数え上げのたびには送らない
+    h.advance(20_000);
+    expect(statuses(h)).toHaveLength(1);
+    // 30秒で2段目
+    h.advance(10_000);
+    expect(statuses(h)).toHaveLength(2);
+    expect(statuses(h)[1]).toMatchObject({ unsent: true, stage: 2 });
+    // 届いたら下ろす
+    const last = h.edits().at(-1)!;
+    h.receive({ type: "editApplied", seq: last.seq, ok: true });
+    h.advance(0);
+    expect(statuses(h)).toHaveLength(3);
+    expect(statuses(h)[2]).toMatchObject({ unsent: false, stage: 0, pendingEdits: 0 });
+  });
+
+  it("ふだんの打鍵（すぐ届く）では、1回も送らない", () => {
+    const h = unsentHarness();
+    for (let i = 1; i <= 5; i++) {
+      h.postEdit("あ".repeat(i));
+      h.receive({ type: "editApplied", seq: i, ok: true });
+    }
+    h.advance(20_000);
+    expect(statuses(h)).toEqual([]);
+  });
+
+  it("返事の来ていない便の数・画面と文書の字数の差・控えの有無・出ていた長さを載せる", () => {
+    const h = unsentHarness({ text: "打った字" });
+    h.update({ type: "update", text: "打", docKey: "c:/灯台/第1話.txt" });
+    h.postEdit("打っ");
+    h.advance(1_000);
+    h.postEdit("打った");
+    h.advance(1_000);
+    h.postEdit("打った字");
+    h.advance(2_500);
+    const [status] = statuses(h);
+    expect(status.unsent).toBe(true);
+    expect(status.pendingEdits).toBeGreaterThanOrEqual(3);
+    // 画面「打った字」4字－最後に届いた文書「打」1字
+    expect(status.lengthGap).toBe(3);
+    // 文書の鍵が分かっているので、画面の状態へ控えている
+    expect(status.rescueKept).toBe(true);
+    expect(typeof status.shownMs).toBe("number");
+  });
+
+  it("**本文は載せない**（数と真偽だけ）", () => {
+    const h = unsentHarness({ text: "港の灯りが消えたあと" });
+    h.update({ type: "update", text: "港", docKey: "c:/灯台/第1話.txt" });
+    h.postEdit("港の灯りが消えたあと");
+    h.advance(35_000);
+    const sent = h.posted().filter((message) => message.type === "unsentStatus");
+    expect(sent.length).toBeGreaterThan(0);
+    for (const message of sent) {
+      expect(Object.keys(message).sort()).toEqual(["status", "type"]);
+      expect(JSON.stringify(message)).not.toContain("港");
+      for (const value of Object.values(message.status as Record<string, unknown>)) {
+        expect(["number", "boolean"]).toContain(value === null ? "number" : typeof value);
+      }
+    }
+  });
+
+  it("開いたときに前回の控えが見つかったら、控えがあることを知らせる", () => {
+    const store: StateStore = {
+      state: {
+        rescue: {
+          docKey: "c:/灯台/第1話.txt",
+          text: "前回入らなかった字",
+          at: 0,
+          baseLength: 0,
+          baseHash: "",
+        },
+      },
+    };
+    const h = unsentHarness({ store, now: 1_000 });
+    h.update({ type: "update", text: "", docKey: "c:/灯台/第1話.txt" });
+    h.advance(0);
+    expect(statuses(h)).toHaveLength(1);
+    expect(statuses(h)[0]).toMatchObject({ unsent: false, rescueKept: true });
+  });
+});

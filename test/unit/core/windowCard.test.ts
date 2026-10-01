@@ -82,6 +82,8 @@ describe("札の組み立て（buildWindowCard）", () => {
       works: [],
       // 相談パネルで作品を選んでいない
       chatWork: null,
+      // 原稿エディターの状態を集めていない
+      manuscripts: null,
       startedAt: "2026-09-23T09:00:00.000Z",
       updatedAt: "2026-09-23T10:00:00.000Z",
     });

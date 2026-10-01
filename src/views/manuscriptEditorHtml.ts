@@ -1811,6 +1811,48 @@ ruby > rt {
   let unconfirmed = null;
   let unsentTimer = null;
 
+  /*
+    ── 未送信の状態を拡張機能へ知らせる（作者の裁定、2026-10-01） ──
+    MCP の windows.list の窓の札に載せ、外のセッションが「どの原稿で、
+    何段目の知らせが何秒出ているか」を読めるようにする。2026-10-01 ノートPCで、
+    拡張機能ホストが起動し直したあと約100字が届かず、作者が気づくまで
+    外から分からなかったため。
+    **送るのは、知らせの出し下げ・段・控えの有無が変わったときだけ**（打鍵の
+    たびには送らない）。続けて変わったとき（控えを消してから知らせを下ろす等）は
+    1周まわしてまとめる。**本文は送らない**——数と真偽だけ。
+    受け手が居ない（ホストが起動し直した）ときは、この知らせも届かない。
+    そのことは拡張機能の側が「最後に届いた時刻」とタブの一覧から推し量る。
+  */
+  /** 「入った」と返事の来た便のうち、いちばん新しい番号 */
+  let lastAckedSeq = 0;
+  /** 最後に送った状態の鍵（段と控えの有無）。同じなら送らない */
+  let statusSentKey = "0|false";
+  let statusTimer = null;
+
+  function scheduleUnsentStatus() {
+    if (statusTimer !== null) return;
+    statusTimer = setTimeout(deliverUnsentStatus, 0);
+  }
+
+  function deliverUnsentStatus() {
+    statusTimer = null;
+    const rescueKept = !!(vscode.getState() || {}).rescue;
+    const key = unsentStage + "|" + rescueKept;
+    if (key === statusSentKey) return;
+    statusSentKey = key;
+    vscode.postMessage({
+      type: "unsentStatus",
+      status: {
+        unsent: unsentStage > 0,
+        stage: unsentStage,
+        shownMs: unsentShownAt === null ? null : Date.now() - unsentShownAt,
+        pendingEdits: unconfirmed === null ? 0 : Math.max(0, editSeq - lastAckedSeq),
+        lengthGap: lastDocText === null ? null : screenText().length - lastDocText.length,
+        rescueKept: rescueKept,
+      },
+    });
+  }
+
   /** 打った本文を文書へ送る。**送るのは必ずここを通す** */
   function postEdit(text) {
     editSeq += 1;
@@ -1839,6 +1881,7 @@ ruby > rt {
       if (unconfirmed !== null) armUnsentCheck(UNSENT_WAIT_MS);
       return;
     }
+    if (message.seq > lastAckedSeq) lastAckedSeq = message.seq;
     if (unconfirmed === null) return;
     if (message.seq >= unconfirmed.seq) {
       unconfirmed = null;
@@ -1906,6 +1949,7 @@ ruby > rt {
     });
     // 画面が作り直されても取り戻せるように、いまの本文を控える
     keepRescue(screenText());
+    scheduleUnsentStatus();
     paintUnsent();
     if (unsentTick !== null) clearTimeout(unsentTick);
     unsentTick = setTimeout(tickUnsent, 1000);
@@ -1931,6 +1975,7 @@ ruby > rt {
           "打った字が" + Math.round(shown / 1000) + "秒たっても原稿に入らないので、" +
           "知らせを開き直す案内に変えました",
       });
+      scheduleUnsentStatus();
     }
     unsentReopenButton.hidden = unsentStage !== 2;
     unsentReopenButton.disabled = !unsentCopied || reopenAsked;
@@ -1961,6 +2006,7 @@ ruby > rt {
     const shownFor =
       unsentShownAt === null ? null : Math.round((Date.now() - unsentShownAt) / 1000);
     unsentShownAt = null;
+    scheduleUnsentStatus();
     vscode.postMessage({
       type: "log",
       text:
@@ -2191,6 +2237,8 @@ ruby > rt {
     if (rescue) next.rescue = rescue;
     else delete next.rescue;
     vscode.setState(next);
+    // 控えの有無が変わったかは、送る側で確かめる（同じなら送らない）
+    scheduleUnsentStatus();
   }
 
   /** 返事の来ていない本文を控える */
@@ -2273,6 +2321,8 @@ ruby > rt {
     rescueOffer = rescue;
     rescueConfirming = false;
     paintRescue();
+    // 開いたときに控えが見つかったことも、窓の札へ載せる
+    scheduleUnsentStatus();
     vscode.postMessage({
       type: "log",
       text:

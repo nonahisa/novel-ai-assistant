@@ -8,11 +8,13 @@ import {
   WINDOW_CARD_HEARTBEAT_MS,
   buildWindowCard,
   chatWorkOf,
+  createWindowCardWriteGate,
   serializeWindowCard,
   shortMachineName,
   windowCardFileName,
   worksOpenInWindow,
 } from "../core/windowCard";
+import type { ManuscriptEditorsCard } from "../core/manuscriptEditorStatus";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { canRunProcesses } from "../core/runtime";
 import { logLine } from "../core/logger";
@@ -113,6 +115,16 @@ export interface WindowCardOptions {
    * エディターの切り替えのたびには書かない（保管庫への書き込みを増やさない）
    */
   onDidChangeChatWork?: vscode.Event<void>;
+  /**
+   * 原稿エディターの未送信の状態（札の `manuscripts`。作者の裁定、2026-10-01）。
+   * 本文は載せない（`core/manuscriptEditorStatus.ts`）。
+   */
+  manuscripts?: () => ManuscriptEditorsCard;
+  /**
+   * 原稿エディターの状態が変わったとき（知らせの出し下げ・段・控え・開け閉め・
+   * タブの出入り）。**中身が変わっていなければ書かない**（札の門で止める）
+   */
+  onDidChangeManuscripts?: vscode.Event<void>;
 }
 
 export function startWindowCard(
@@ -131,8 +143,14 @@ export function startWindowCard(
   // 書き込みを1本の列に並べる。**打ち直しと消去が追い越し合うと、
   // 消したあとに札が生き返る**
   let queue: Promise<void> = Promise.resolve();
+  /*
+    **中身が変わったときだけ書く門**（作者の裁定、2026-10-01）。原稿エディターの
+    状態を載せてから、書き直すきっかけ（タブの出入りなど）が増えた。5分ごとの
+    打ち直しと起動のときだけは必ず書く（`updatedAt` を進めるのが目的）
+  */
+  const gate = createWindowCardWriteGate();
 
-  const write = (): Promise<void> => {
+  const write = (force = false): Promise<void> => {
     queue = queue.then(async () => {
       if (closed) return;
       try {
@@ -151,14 +169,17 @@ export function startWindowCard(
           machineName: identity.machineName,
           works: identity.works,
           chatWork: chatWorkOf(works, options.chatWorkId?.()),
+          manuscripts: options.manuscripts?.() ?? null,
           startedAt,
           now: new Date(),
         });
+        if (!gate.shouldWrite(card, { force })) return;
         await vscode.workspace.fs.createDirectory(path.toUri(directory));
         await atomicWriteFile(
           target,
           new TextEncoder().encode(serializeWindowCard(card))
         );
+        gate.wrote(card);
       } catch (error) {
         logLine(
           "窓の札を保管庫へ書けませんでした（MCP の windows.list にこの窓が出ません）：" +
@@ -169,13 +190,14 @@ export function startWindowCard(
     return queue;
   };
 
-  void write();
-  const timer = setInterval(() => void write(), WINDOW_CARD_HEARTBEAT_MS);
+  void write(true);
+  const timer = setInterval(() => void write(true), WINDOW_CARD_HEARTBEAT_MS);
   const folderWatch = vscode.workspace.onDidChangeWorkspaceFolders(
     () => void write()
   );
   const worksWatch = options.onDidChangeWorks?.(() => void write());
   const chatWorkWatch = options.onDidChangeChatWork?.(() => void write());
+  const manuscriptsWatch = options.onDidChangeManuscripts?.(() => void write());
 
   const close = (): Promise<void> => {
     if (closed) return queue;
@@ -184,6 +206,7 @@ export function startWindowCard(
     folderWatch.dispose();
     worksWatch?.dispose();
     chatWorkWatch?.dispose();
+    manuscriptsWatch?.dispose();
     queue = queue.then(async () => {
       try {
         await vscode.workspace.fs.delete(path.toUri(target), {

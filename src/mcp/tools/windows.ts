@@ -67,7 +67,12 @@ export function windowsList(now: Date = new Date()): WindowsListResult {
   const note =
     `probablyClosed は、札が ${staleMinutes} 分より長く打ち直されていない窓です` +
     "（閉じたときに札を消し損ねたもの。眠っていた窓は起きれば戻ります）。" +
-    "札はこの機械の保管庫にあるので、別の機械の窓は出ません（machineName がこの機械）。";
+    "札はこの機械の保管庫にあるので、別の機械の窓は出ません（machineName がこの機械）。" +
+    "manuscripts は原稿エディターの未送信の状態です（unsent・stage・unsentSeconds・" +
+    "pendingEdits・lengthGap・rescueKept。本文は載りません）。札は状態が変わったときと" +
+    "5分ごとにしか書き直さないので、silentSeconds（最後に画面から何か届いてからの秒数）は" +
+    "実際より最大5分ほど長く出ることがあります。stateUnknown が true なら、この拡張機能ホストが" +
+    "受け持っていない原稿エディターがあり（orphanTabs）、その状態は分かりません。";
 
   if (!root) {
     return {

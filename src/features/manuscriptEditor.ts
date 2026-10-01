@@ -98,6 +98,14 @@ import {
 import { auditEol, describeEolMismatch } from "../core/eolAudit";
 import { countSiteNotation } from "../core/ruby";
 import { notifyDone, suggestAction } from "../views/notify";
+import {
+  buildManuscriptEditorsCard,
+  manuscriptLocation,
+  parseManuscriptStatusMessage,
+  type ManuscriptEditorsCard,
+  type ManuscriptStatusReport,
+  type ManuscriptTabSnapshot,
+} from "../core/manuscriptEditorStatus";
 
 /**
  * 原稿エディタ（設計書6.25）。
@@ -232,8 +240,138 @@ const openManuscripts = new Map<
      * （2026-09-12、9巡目に実機で確認）。
      */
     applyAppearance(next: ManuscriptAppearance): void;
+    /**
+     * 未送信の状態（窓の札に載せる。作者の裁定、2026-10-01）。
+     * 画面からの知らせと、こちらで記録する時刻を持つ。**本文は持たない。**
+     */
+    status: ManuscriptEditorStatusState;
   }
 >();
+
+/** 原稿エディター1つぶんの、窓の札に載せる状態（設計書6.25.9・6.87.17） */
+interface ManuscriptEditorStatusState {
+  /** 画面から最後に届いた状態（`unsentStatus`）。まだなら undefined */
+  report?: ManuscriptStatusReport;
+  reportedAt?: Date;
+  /** こちらが最後に「入った」（editApplied の ok）と返した時刻 */
+  lastAppliedAt?: Date;
+  /** この画面から何か届いた最後の時刻 */
+  lastHeardAt?: Date;
+}
+
+/*
+  ── 窓の札へ原稿エディターの状態を載せる（作者の裁定、2026-10-01） ──
+
+  2026-10-01 ノートPCで、拡張機能ホストが起動し直したあと打った約100字が
+  原稿に届かず、作者が気づくまで外から分からなかった。画面の知らせは
+  作者の目にしか届かないので、MCP の windows.list の札に載せる。
+
+  **札を書き直すきっかけは「変わったとき」だけ**（画面からの状態・開け閉め・
+  タブの出入り）。「最後に届いた時刻」と「最後に入った時刻」は打鍵のたびに
+  進むが、それでは知らせない——札の門（`windowCardChangeKey`）も時刻を除いて
+  比べるので、何か別の理由で書くときと5分ごとの打ち直しに一緒に載る。
+*/
+
+/** 原稿エディターのどれかから最後に何か届いた時刻（閉じた画面のぶんも残す） */
+let lastHeardFromAnyManuscript: Date | undefined;
+const statusListeners = new Set<() => void>();
+
+function fireManuscriptStatusChanged(): void {
+  for (const listener of [...statusListeners]) {
+    try {
+      listener();
+    } catch {
+      // 札を書く側の失敗で、原稿エディターを止めない
+    }
+  }
+}
+
+/**
+ * 原稿エディターの状態が変わったとき（窓の札を書き直す合図）。
+ * `vscode.Event<void>` と同じ形で渡せる。
+ */
+export function onDidChangeManuscriptStatus(listener: () => void): vscode.Disposable {
+  statusListeners.add(listener);
+  return { dispose: () => void statusListeners.delete(listener) };
+}
+
+/**
+ * タブの出入りを見張る（受け持っていない原稿エディターを札に書くため）。
+ *
+ * **拡張機能ホストが起動し直すと、生きている画面に `resolveCustomTextEditor` が
+ * 呼ばれ直さない**ので、新しいホストはタブの一覧からしか、その画面があることを
+ * 知れない。タブの切り替えでも知らせは来るが、札の門が中身の変わらない書き込みを
+ * 止める。
+ */
+export function watchManuscriptTabs(): vscode.Disposable {
+  try {
+    return vscode.window.tabGroups.onDidChangeTabs(() =>
+      fireManuscriptStatusChanged()
+    );
+  } catch {
+    // タブを読めない環境（古いVS Code・試験の代役）では見張らない
+    return { dispose: () => undefined };
+  }
+}
+
+/** 原稿エディターのタブ（縦書き・横書きの入口のもの）。前に出ているかも添える */
+function manuscriptEditorTabs(): Array<{ uri: vscode.Uri; visible: boolean }> {
+  try {
+    const found: Array<{ uri: vscode.Uri; visible: boolean }> = [];
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        const input: unknown = tab.input;
+        if (
+          input instanceof vscode.TabInputCustom &&
+          (input.viewType === MANUSCRIPT_EDITOR_VIEW_TYPE ||
+            input.viewType === MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE)
+        ) {
+          found.push({ uri: input.uri, visible: tab.isActive });
+        }
+      }
+    }
+    return found;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 窓の札に載せる、原稿エディターの状態（`core/manuscriptEditorStatus.ts`）。
+ *
+ * - **受け持っている画面**：台帳（`openManuscripts`）にあるもの
+ * - **受け持っていない画面**：原稿エディターのタブはあるのに台帳に無いもの。
+ *   拡張機能ホストが起動し直したあとの画面か、再読み込みのあとまだ作られて
+ *   いない背景のタブ。どちらか見分ける手だてが無いので「状態は不明」と書く
+ *
+ * @param workOf 作品の引き方（文書の場所を作品からの相対にする）
+ */
+export function collectManuscriptEditorsCard(
+  workOf: (filePath: string) => WorkEntry | undefined
+): ManuscriptEditorsCard {
+  const where = (uri: vscode.Uri): { work: string | null; location: string } => {
+    const filePath = fromUri(uri);
+    return manuscriptLocation(filePath, uri.toString(), workOf(filePath));
+  };
+  const editors = [...openManuscripts.values()].map((entry) => ({
+    ...where(entry.document.uri),
+    report: entry.status.report,
+    reportedAt: entry.status.reportedAt,
+    lastAppliedAt: entry.status.lastAppliedAt,
+    lastHeardAt: entry.status.lastHeardAt,
+  }));
+  const tabs: ManuscriptTabSnapshot[] = manuscriptEditorTabs().map((tab) => ({
+    key: manuscriptLedgerKey(tab.uri),
+    ...where(tab.uri),
+    visible: tab.visible,
+  }));
+  return buildManuscriptEditorsCard({
+    editors,
+    tabs,
+    ownedKeys: openManuscripts.keys(),
+    lastHeardAt: lastHeardFromAnyManuscript,
+  });
+}
 
 /**
  * 次に開く原稿へ持って行く見た目（設計書6.25.5）。
@@ -1034,6 +1172,12 @@ type Incoming =
    * `parseManuscriptRescue` で確かめる
    */
   | { type: "reopen"; rescue?: unknown }
+  /**
+   * 未送信の状態が変わった（知らせの出し下げ・段・控えの有無。作者の裁定、
+   * 2026-10-01）。窓の札（MCP の `windows.list`）に載せる。形は信用せず
+   * `parseManuscriptStatusMessage` で確かめる
+   */
+  | { type: "unsentStatus"; status?: unknown }
   /** カーソル行の**上**に `// ` の行を挿す（設計書6.40.3） */
   | { type: "addMemo"; line: number }
   /** シーンメモのパネルを横に開く（設計書6.40.4） */
@@ -1509,11 +1653,15 @@ export class ManuscriptEditorProvider
         }
         applyAppearanceNow(next);
       },
+      status: {} as ManuscriptEditorStatusState,
     };
     openManuscripts.set(key, entry);
+    // 窓の札に「受け持っている原稿エディター」が増えた
+    fireManuscriptStatusChanged();
     panel.onDidDispose(() => {
       // 同じ文書が開き直されていたら、そちらの札を消さない
       if (openManuscripts.get(key) === entry) openManuscripts.delete(key);
+      fireManuscriptStatusChanged();
     });
 
     const subscriptions: vscode.Disposable[] = [];
@@ -1718,6 +1866,8 @@ export class ManuscriptEditorProvider
      * 作者に見える形にする。
      */
     const reportApplied = (ack: EditAck): void => {
+      // 窓の札の「最後に入った時刻」。札を書き直す合図にはしない（打鍵のたびに来る）
+      if (ack.ok) entry.status.lastAppliedAt = new Date();
       try {
         void Promise.resolve(panel.webview.postMessage(ack)).catch(() => {
           /* 閉じたあとに届いた便。返す先はもう無い */
@@ -1748,7 +1898,25 @@ export class ManuscriptEditorProvider
     });
 
     panel.webview.onDidReceiveMessage(async (message: Incoming) => {
+      /*
+        **この画面から何か届いた時刻を覚える**（窓の札。作者の裁定 2026-10-01）。
+        届かなくなった（拡張機能ホストが受け取れない）ことを外から推し量るため。
+        札を書き直す合図にはしない——打鍵のたびに保管庫へ書くことになる
+      */
+      const heardAt = new Date();
+      entry.status.lastHeardAt = heardAt;
+      lastHeardFromAnyManuscript = heardAt;
       switch (message.type) {
+        case "unsentStatus": {
+          // 決めた項目だけを拾う（本文が混ざっていても札へ流さない）
+          const report = parseManuscriptStatusMessage(message.status);
+          if (!report) break;
+          entry.status.report = report;
+          entry.status.reportedAt = heardAt;
+          fireManuscriptStatusChanged();
+          break;
+        }
+
         case "ready":
           /*
             **開くときの見た目は、最初の update に添えて渡す**（設計書6.25.5）。
