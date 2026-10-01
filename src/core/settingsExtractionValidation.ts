@@ -199,7 +199,7 @@ export function validateExtractedAbilities(
       continue;
     }
     const ability = normalizeExtractedAbility(entry);
-    if (!isValidSettingName(ability.name)) {
+    if (!isValidAbilityName(ability.name)) {
       rejected.push({ name: ability.name, reason: "invalid_name" });
       continue;
     }
@@ -873,6 +873,40 @@ export function isValidSettingName(name: string): boolean {
   // 文がそのまま名前になっているものを弾く
   if (SENTENCE_PUNCTUATION.test(name)) return false;
   return true;
+}
+
+/**
+ * 末尾の括弧の中に引数を持つ能力名（「インスタンス（火針,32）」）。
+ * 括弧の外と、括弧の中の文として読める区切り（句点・感嘆符・改行など）を分けて見る。
+ */
+const BRACKETED_ARGUMENT_NAME = /^([^（(）)]+)[（(]([^（(）)]+)[）)]$/u;
+/** 引数の区切りとして許すのは読点とカンマだけ。句点や「！」があれば文である */
+const ARGUMENT_SENTENCE_PUNCTUATION = /[。.．！？!?；;：:\r\n]/u;
+const MAX_ARGUMENT_LENGTH = 20;
+
+/**
+ * 能力名として通してよいか。
+ *
+ * 場所・組織と同じ規則に、1つだけ例外を足す——**末尾の括弧の中の「、」「,」**。
+ * 術式を関数呼び出しの形で名付ける作品があり（既知の能力「インスタンス（小火）」、
+ * 本文に「インスタンス（火針,32）」）、括弧の中の区切りは引数であって文ではない
+ * （2026-10-01 の測定で、本文に16回出る名前が `invalid_name` で落ちた）。
+ *
+ * 能力に限ったのは、所属から組織を作る経路（`settingsMerge`）が同じ判定を
+ * 根拠の照合なしに使っており、そこは厳しいままにしておきたいから。
+ * 捏造した名前への守りは変わらない——括弧の外は従来の規則をそのまま通し、
+ * 名前が本文に実在するかの照合（`isGroundedInChunk`）もこのあとに残る。
+ */
+export function isValidAbilityName(name: string): boolean {
+  if (isValidSettingName(name)) return true;
+  if (!name || name.length > MAX_NAME_LENGTH) return false;
+  const matched = BRACKETED_ARGUMENT_NAME.exec(name);
+  if (!matched) return false;
+  const head = matched[1].trim();
+  const argument = matched[2].trim();
+  if (!isValidSettingName(head)) return false;
+  if (!argument || argument.length > MAX_ARGUMENT_LENGTH) return false;
+  return !ARGUMENT_SENTENCE_PUNCTUATION.test(argument);
 }
 
 function nullableString(value: unknown): string | null {

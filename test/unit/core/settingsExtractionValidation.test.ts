@@ -61,6 +61,44 @@ describe("能力の検証", () => {
     expect(result.rejected[0]?.reason).toBe("invalid_name");
   });
 
+  // 実データ（2026-10-01 測定・不具合10）：術式を関数呼び出しの形で
+  // 名付ける作品がある（既知の能力に「インスタンス（小火）」）。括弧の中の
+  // 「,」「、」と数字は引数であって、文の区切りではない
+  test.each(["インスタンス（火針,32）", "インスタンス（壁、20）", "インスタンス(火針, 32)"])(
+    "括弧の中に引数を持つ能力名 %s を受理する",
+    (name) => {
+      const line = `「${name}」と唱えた`;
+      const result = validateExtractedAbilities(
+        [{ name, evidence: line }],
+        { ...chunk, text: `${line}。\n火の針が飛んだ。` }
+      );
+
+      expect(result.rejected).toEqual([]);
+      expect(result.accepted).toHaveLength(1);
+    }
+  );
+
+  test.each([
+    // 括弧の外が文になっているもの
+    "灯火を唱えると、光が灯る（強）",
+    // 括弧の中が文になっているもの
+    "灯火（光が灯る。暗い）",
+    // 括弧の外が空・プレースホルダー
+    "（火針,32）",
+    "null（火針,32）",
+    // 括弧が末尾で閉じていない
+    "インスタンス（火針,32）を唱える、",
+  ])("括弧の引数を口実に文や空の名前 %s は通さない", (name) => {
+    const line = `「${name}」と唱えた`;
+    const result = validateExtractedAbilities(
+      [{ name, evidence: line }],
+      { ...chunk, text: `${line}。` }
+    );
+
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected).toEqual([{ name, reason: "invalid_name" }]);
+  });
+
   test.each(["null", "不明", "なし", "特になし"])(
     "プレースホルダー名 %s を除外する",
     (name) => {
