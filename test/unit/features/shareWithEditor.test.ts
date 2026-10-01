@@ -11,6 +11,7 @@ import {
 import { isNestedLocation, isSameLocation } from "../../../src/core/locationCompare";
 import { RECOVERY_DIRECTORY_NAME } from "../../../src/core/atomicWrite";
 import { workPaths } from "../../../src/core/workRegistry";
+import { resolveManuscriptDir } from "../../../src/core/manuscriptFolder";
 import type { WorkEntry } from "../../../src/models/types";
 
 /**
@@ -300,6 +301,121 @@ describe("copyForEditor", () => {
     expect(await readCopied(nodePath.join("設定", "plot.md"))).toBe(lf);
   });
 
+  /**
+   * 原稿が作品の直下にある作品（「現代ダンジョンのインフラ担当」の形）。
+   *
+   * `config.json` は `manuscriptDir: 本文` なのに、原稿は直下に置いてあり、
+   * 登録した機械にだけ空の `本文/` が残っている。**本文フォルダーしか
+   * 写さないと、編集部には本文が1つも渡らない**（空のフォルダーを写すだけ）。
+   */
+  describe("原稿が作品の直下にある作品", () => {
+    const putRootStyleWork = async (): Promise<void> => {
+      await put(nodePath.join(".aiwriter", "config.json"), '{"manuscriptDir":"本文"}');
+      await fsp.mkdir(nodePath.join(root, "本文"), { recursive: true });
+      await put("001.txt", "　第一話。\r\n");
+      await put("002.txt", "　第二話。\n");
+      await put(nodePath.join("第2章", "003.txt"), "　第三話。\n");
+      // 原稿として拾わないもの。走査と同じ外し方で、写さない
+      await put("README.md", "# 作品の説明\n");
+      await put("LICENSE.txt", "ライセンス\n");
+      await put("AGENTS.md", "AIへの指示\n");
+      await put(nodePath.join("設定", "plot.md"), "# プロット\n");
+    };
+
+    test("直下の原稿が、同じ相対位置へ写る", async () => {
+      await putRootStyleWork();
+
+      await share();
+
+      expect(await readCopied("001.txt")).toBe("　第一話。\r\n");
+      expect(await readCopied("002.txt")).toBe("　第二話。\n");
+      expect(await readCopied(nodePath.join("第2章", "003.txt"))).toBe(
+        "　第三話。\n"
+      );
+      // 設定資料はこれまでどおり
+      expect(await copied(nodePath.join("設定", "plot.md"))).toBe(true);
+    });
+
+    test("README・LICENSE・AIへの指示書は写さない", async () => {
+      await putRootStyleWork();
+
+      await share();
+
+      expect(await copied("README.md")).toBe(false);
+      expect(await copied("LICENSE.txt")).toBe(false);
+      expect(await copied("AGENTS.md")).toBe(false);
+    });
+
+    test("編集部の側で作品として開くと、同じ決め方で同じ話が見える", async () => {
+      await putRootStyleWork();
+
+      await share();
+
+      // 編集部の手元の config.json も `manuscriptDir: 本文`。
+      // 写した先で同じ決め方を通すと、直下を歩くことになる
+      // （`workPaths` の既定の本文フォルダーも「本文」）
+      const editorPaths = workPaths({ ...work(), folderPath: destination });
+      const resolved = await resolveManuscriptDir(editorPaths);
+      expect(resolved).toBe(editorPaths.root);
+      expect(await readCopied(nodePath.join(".aiwriter", "config.json"))).toContain(
+        '"manuscriptDir":"本文"'
+      );
+    });
+
+    test("作品側で消した話は、送り直すと編集用からも消える", async () => {
+      await putRootStyleWork();
+      await share();
+      expect(await copied("002.txt")).toBe(true);
+
+      await fsp.rm(nodePath.join(root, "002.txt"));
+      await share();
+
+      expect(await copied("001.txt")).toBe(true);
+      expect(await copied("002.txt")).toBe(false);
+    });
+
+    test("前に本文フォルダーで渡していた話は、直下へ移したあと編集用から消える", async () => {
+      // 古い写しが `本文/` に残ると、編集部の側では本文フォルダーに原稿が
+      // あることになり、直下の今の原稿が見えなくなる
+      await put(nodePath.join("本文", "001.txt"), "ふるい");
+      await share();
+      expect(await copied(nodePath.join("本文", "001.txt"))).toBe(true);
+
+      await fsp.rm(nodePath.join(root, "本文", "001.txt"));
+      await putRootStyleWork();
+      await share();
+
+      expect(await copied(nodePath.join("本文", "001.txt"))).toBe(false);
+      expect(await readCopied("001.txt")).toBe("　第一話。\r\n");
+    });
+
+    test("**元の作品フォルダーは1バイトも変わらない**", async () => {
+      await putRootStyleWork();
+
+      const before = await snapshot(root);
+      await share();
+      const after = await snapshot(root);
+
+      expect([...after.keys()].sort()).toEqual([...before.keys()].sort());
+      for (const [relative, bytes] of before) {
+        expect(after.get(relative), relative).toBe(bytes);
+      }
+    });
+  });
+
+  test("本文フォルダーで書く作品へ戻したら、編集用の直下に残った古い話は消える", async () => {
+    // 逆向き。直下の古い写しが残ると、git に載って編集部の目に入る
+    await put("001.txt", "ふるい");
+    await share();
+    expect(await copied("001.txt")).toBe(true);
+
+    await fsp.rm(nodePath.join(root, "001.txt"));
+    await put(nodePath.join("本文", "001.txt"), "あたらしい");
+    await share();
+
+    expect(await copied("001.txt")).toBe(false);
+    expect(await readCopied(nodePath.join("本文", "001.txt"))).toBe("あたらしい");
+  });
 });
 
 /**

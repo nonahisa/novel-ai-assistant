@@ -20,6 +20,12 @@ import {
   SHARED_FILES,
 } from "../core/editingRepo";
 import { isNestedLocation } from "../core/locationCompare";
+import { resolveManuscriptDir } from "../core/manuscriptFolder";
+import {
+  acceptManuscriptEntry,
+  isKnownNonManuscript,
+  MANUSCRIPT_TREE_DEPTH,
+} from "../core/manuscriptFolderRule";
 import { pickNewFolderParent } from "./pickFolder";
 import { RECOVERY_DIRECTORY_NAME } from "../core/atomicWrite";
 import { logFailure, useLogFile } from "../core/logger";
@@ -260,31 +266,91 @@ export async function copyForEditor(
 ): Promise<void> {
   await vscode.workspace.fs.createDirectory(path.toUri(destination));
 
+  /*
+    **本文の場所は、走査と同じ決め方で決める**（`resolveManuscriptDir`）。
+    以前は本文フォルダーを決め打ちで写していたため、`manuscriptDir: 本文` の
+    まま原稿を直下に置いた作品では、空の `本文/` を写すだけで**本文が1つも
+    渡らなかった**（「現代ダンジョンのインフラ担当」）。走査と別の決め方を
+    持つと、作者の一覧に出る話と編集部へ渡る話が食い違う。
+  */
+  const manuscriptLocation = await resolveManuscriptDir(paths);
+  const manuscriptAtRoot = sameLocation(manuscriptLocation, paths.root);
+
+  const settingsName = settingsDir ?? path.basename(paths.settings);
   const replaced = replacedDirectories(
     manuscriptDir ?? path.basename(paths.manuscript),
-    settingsDir ?? path.basename(paths.settings)
+    settingsName
   );
   const sources = new Map([
     [path.basename(paths.manuscript), paths.manuscript],
     [path.basename(paths.settings), paths.settings],
   ]);
 
+  // 1. 置き換えるフォルダーを、編集用の側から先に消す
   for (const name of replaced) {
-    const source = sources.get(name) ?? path.join(paths.root, name);
-    if (!(await exists(source))) continue;
     const target = path.join(destination, name);
+    // **編集用フォルダーそのものは消さない。** `manuscriptDir: "."` の作品だと
+    // 名前が「.」になり、消すと `.git` ごと編集用リポジトリが無くなる
+    if (sameLocation(target, destination)) continue;
     if (await exists(target)) {
       await vscode.workspace.fs.delete(path.toUri(target), {
         recursive: true,
         useTrash: false,
       });
     }
+  }
+
+  // 2. 編集用の直下に残った、前に写した原稿を消す。
+  // 作品側で消した話・本文フォルダーへ移した話が残ると、編集部は無い話を
+  // 校閲することになる。**編集部は原稿へ書かない**ので、消して失うものは無い。
+  // 選び方は写すときと同じ（README や AIへの指示書は原稿ではないので残す）
+  const destinationSettings = path.join(destination, settingsName);
+  for (const relative of await listRootManuscripts(
+    destination,
+    destinationSettings
+  )) {
+    await vscode.workspace.fs.delete(
+      path.toUri(path.join(destination, relative)),
+      { useTrash: false }
+    );
+  }
+
+  // 3. 写す
+  for (const name of replaced) {
+    const source = sources.get(name) ?? path.join(paths.root, name);
+    const target = path.join(destination, name);
+    if (sameLocation(target, destination)) continue;
+    // **直下で書く作品の本文フォルダーは写さない。** 中に原稿が無い
+    // （だから直下と決まった）ので、写しても空のフォルダーが行くだけ
+    if (manuscriptAtRoot && sameLocation(source, paths.manuscript)) continue;
+    if (!(await exists(source))) continue;
     await vscode.workspace.fs.copy(
       path.toUri(source),
       path.toUri(target),
       { overwrite: true }
     );
     await removeRecoveryDirectories(target);
+  }
+
+  // 直下で書く作品は、原稿を1つずつ同じ相対位置へ写す。**作品の根を
+  // まるごと写さない**——キャッシュ・ログ・書庫の `.git` まで付いていく。
+  // 編集部の側も `config.json` は同じ（`manuscriptDir: 本文`）で、本文
+  // フォルダーが無いので同じ決め方で直下を歩き、同じ話が見える
+  if (manuscriptAtRoot) {
+    for (const relative of await listRootManuscripts(
+      paths.root,
+      paths.settings
+    )) {
+      const target = path.join(destination, relative);
+      await vscode.workspace.fs.createDirectory(
+        path.toUri(path.dirname(target))
+      );
+      await vscode.workspace.fs.copy(
+        path.toUri(path.join(paths.root, relative)),
+        path.toUri(target),
+        { overwrite: true }
+      );
+    }
   }
 
   for (const relative of SHARED_FILES) {
@@ -307,6 +373,54 @@ export async function copyForEditor(
     path.join(destination, PROPOSAL_RELATIVE),
     await readTextIfAny(path.join(paths.root, PROPOSAL_RELATIVE))
   );
+}
+
+function sameLocation(a: string, b: string): boolean {
+  return path.normalizeForComparison(a) === path.normalizeForComparison(b);
+}
+
+/**
+ * 作品の根から歩いたときに、原稿として拾うファイルを並べる（根からの相対パス）。
+ *
+ * **選び方は走査と同じ部品を使う**（`acceptManuscriptEntry`・
+ * `isKnownNonManuscript`、深さは `MANUSCRIPT_TREE_DEPTH`、`.` で始まる名前は
+ * 飛ばす）。ここで別の選び方をすると、作者の一覧に出る話と編集部へ渡る話が
+ * 食い違う。README・LICENSE・AIへの指示書・設定フォルダー・`.aiwriter` は
+ * 入らない。
+ *
+ * 中身は読まない（写すのは `copy` に任せ、バイトをそのまま運ぶ）。
+ */
+async function listRootManuscripts(
+  root: string,
+  settings: string
+): Promise<string[]> {
+  const accept = acceptManuscriptEntry(settings);
+  const result: string[] = [];
+  const walk = async (current: string, depth: number): Promise<void> => {
+    if (depth > MANUSCRIPT_TREE_DEPTH) return;
+    let entries: Array<[string, vscode.FileType]>;
+    try {
+      entries = await vscode.workspace.fs.readDirectory(path.toUri(current));
+    } catch {
+      // 編集用フォルダーがまだ無い（初回）・読めないフォルダーは「無い」とみなす。
+      // 一括読み（`readTextTree`）も同じく飛ばす
+      return;
+    }
+    for (const [name, type] of entries) {
+      if (name.startsWith(".")) continue;
+      const full = path.join(current, name);
+      if (type === vscode.FileType.Directory) {
+        if (!accept(name, "directory", full)) continue;
+        await walk(full, depth + 1);
+      } else if (type === vscode.FileType.File) {
+        if (!accept(name, "file", full)) continue;
+        if (isKnownNonManuscript(full, root, settings)) continue;
+        result.push(path.relative(root, full));
+      }
+    }
+  };
+  await walk(root, 0);
+  return result;
 }
 
 /**
