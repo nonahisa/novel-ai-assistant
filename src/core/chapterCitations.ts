@@ -64,7 +64,11 @@ function kanjiToNumber(text: string): number | undefined {
   return total + current;
 }
 
-function toChapterNumber(raw: string): number | undefined {
+/**
+ * 話数の文字（算用数字・全角・漢数字）を数へ。読めなければ undefined。
+ * 単話プロットの下書き（`episodePlotDraft.ts`）も同じ読み方をする
+ */
+export function toChapterNumber(raw: string): number | undefined {
   const digits = toHalfWidthDigits(raw);
   if (/^[0-9]+$/u.test(digits)) return Number(digits);
   return kanjiToNumber(raw);

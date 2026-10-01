@@ -14,6 +14,7 @@ import { findLatestEpisode } from "../core/latestEpisode";
 import { readTextFile } from "../core/textFile";
 import {
   collectedLabelIndex,
+  isCollectedFile,
   episodeTitle,
   episodeUnit,
   formatChapterLabel,
@@ -55,6 +56,13 @@ import {
 } from "../core/resumeSheet";
 import { parseMemos } from "../core/sceneMemo";
 import { parseEpisodePlot } from "../core/episodePlotDoc";
+import {
+  episodePlotDraft,
+  outlineNeedsEpisodeLength,
+  type EpisodeLength,
+  type EpisodePlotDraft,
+} from "../core/episodePlotDraft";
+import { readWorkGoalsOrEmpty } from "../core/workGoalsStore";
 import {
   prepareRetrieval,
   searchScenesByMeaning,
@@ -321,7 +329,11 @@ async function createEpisodePlotFile(
 
   // 作品の人称（設計書6.36.2。作者の依頼、2026-09-23）。**新しく作るときだけ**
   // 視点の問いかけの下に添える。既にあるプロットは上で開くだけで、書き足さない
-  const narration = narrativePersonText(await plotTextForTemplate(work));
+  const plotText = await plotTextForTemplate(work);
+  const narration = narrativePersonText(plotText);
+  // あらすじのうち、この話に当たる所（作者の裁定 2026-09-27）。これも新しく
+  // 作るときだけで、決められなければ何も入れない
+  const draft = await outlineDraftFor(work, plotText, chapter);
 
   try {
     await vscode.workspace.fs.createDirectory(path.toUri(directory));
@@ -330,7 +342,7 @@ async function createEpisodePlotFile(
     await atomicWriteFile(
       filePath,
       new TextEncoder().encode(
-        buildEpisodePlotTemplate(chapter, plan?.title, narration)
+        buildEpisodePlotTemplate(chapter, plan?.title, narration, draft)
       ),
       { mode: "create" }
     );
@@ -378,6 +390,65 @@ async function plotTextForTemplate(work: WorkEntry): Promise<string> {
   } catch {
     return "";
   }
+}
+
+/**
+ * 雛形の「展開」に引く、あらすじのこの話に当たる所（`episodePlotDraft`）。
+ *
+ * **失敗しても雛形は作る。** 下書きは「あると助かる」もので、無くても
+ * 単話プロットは書ける（人称と同じ扱い）。読めなかったことは記録に残す。
+ */
+async function outlineDraftFor(
+  work: WorkEntry,
+  plotText: string,
+  chapter: number
+): Promise<EpisodePlotDraft | null> {
+  const outline = parsePlotMarkdown(plotText).sections.outline ?? "";
+  if (isBlankPlotSection(outline)) return null;
+  try {
+    // 1話の長さは幕ごとのあらすじでだけ要る。走査はそのときだけ
+    const length = outlineNeedsEpisodeLength(outline)
+      ? await episodeLengthOf(work)
+      : null;
+    return episodePlotDraft(outline, chapter, length);
+  } catch (error) {
+    useLogFile(work.folderPath);
+    logFailure("単話プロット：あらすじから下書きを引けなかった", {
+      work: work.title,
+      詳細: messageOf(error),
+    });
+    return null;
+  }
+}
+
+/**
+ * 1話の長さ：作品の目標（1話あたり）→ 書いた話の平均。
+ *
+ * **スケジュールの1話の字数（`resolveCharsPerEpisode`）と同じ順。** 平均は
+ * 合本・競合の残る話・0字の話を外して取る（字数の一覧と同じ母集団）。
+ * どちらも無ければ null——幕のどこに当たるかを決められない。
+ */
+async function episodeLengthOf(work: WorkEntry): Promise<EpisodeLength | null> {
+  const goals = await readWorkGoalsOrEmpty(work);
+  if (goals.perEpisodeChars && goals.perEpisodeChars > 0) {
+    return { chars: goals.perEpisodeChars, source: "goal" };
+  }
+  const { episodes } = await scanWork(work);
+  const mode = currentCountMode();
+  const counted = episodes
+    .filter(
+      (episode) =>
+        !episode.hasConflictMarkers && !isCollectedFile(episode.collectedCount)
+    )
+    .map((episode) => pickCount(episode.counts, mode))
+    .filter((chars) => chars > 0);
+  if (counted.length === 0) return null;
+  return {
+    chars: Math.round(
+      counted.reduce((sum, chars) => sum + chars, 0) / counted.length
+    ),
+    source: "average",
+  };
 }
 
 /**

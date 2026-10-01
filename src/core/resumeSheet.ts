@@ -557,7 +557,13 @@ export function buildEpisodePlotTemplate(
    * 読むので、作者が消さずに残してもAIへ問いかけとして渡らない。
    * 作品で決めた人称を思い出す手がかりであって、この話の視点の答えではない。
    */
-  narration = ""
+  narration = "",
+  /**
+   * plot.md の「あらすじ」のうち、この話に当たる所（`episodePlotDraft`。作者の
+   * 裁定 2026-09-27）。あれば「展開」の空の箇条書きの代わりに、出どころの1行と
+   * 引いた行を置く。無ければ（決められなければ）いつもの空欄のまま
+   */
+  draft: { note: string; lines: readonly string[] } | null = null
 ): string {
   // 改行が入ると見出しが2行に割れ、2行目が本文として読まれる
   const flat = title.replace(/\s+/g, " ").trim();
@@ -575,9 +581,9 @@ export function buildEpisodePlotTemplate(
     "（この話で何が変わりますか。読者に何を渡しますか）",
     "",
     "## 展開（箇条書き）",
-    "- ",
-    "- ",
-    "- ",
+    ...(draft && draft.lines.length > 0
+      ? [draft.note, ...draft.lines]
+      : ["- ", "- ", "- "]),
     "",
   ].join("\n");
 }
