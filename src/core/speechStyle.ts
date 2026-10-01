@@ -89,7 +89,13 @@ export type SpeechStyleRejectionReason =
    * **一人称の部分だけを外す。** 残りが無ければ口調ごと外す
    * （`firstPersonsMissingFromQuote`）
    */
-  | "first_person_unquoted";
+  | "first_person_unquoted"
+  /**
+   * 同じ応答の中で、別の人物の口調の根拠にも同じ台詞が使われている
+   * （作者の裁定、2026-10-01。同じ台詞がマイナとターナの両方の根拠に並んだ）。
+   * どちらの台詞か決められないので、どちらの案も入れない
+   */
+  | "shared_quote";
 
 /**
  * 口調の値が、指示の言葉か例の写しか。

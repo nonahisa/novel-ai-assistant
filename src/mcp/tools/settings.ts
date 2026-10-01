@@ -306,6 +306,8 @@ export interface SettingsValidateResult {
     /** 推測・断りで、関係になっていなかった関係（測定台が数える） */
     droppedRelations: unknown[];
     correctedRelations: unknown[];
+    /** 名前と合わない読みを外したもの（2026-10-01） */
+    droppedReadings: unknown[];
     /** 口調の欄だけ外したもの（根拠の台詞が無い・指示の写し。2026-09-25） */
     droppedSpeechStyles: unknown[];
   };
@@ -387,6 +389,7 @@ function validateAgainst(
       droppedRelations: people.droppedRelations,
       correctedRelations: people.correctedRelations,
       droppedSpeechStyles: people.droppedSpeechStyles,
+      droppedReadings: people.droppedReadings,
     },
     settings: {
       abilities: [...gathered.abilities],

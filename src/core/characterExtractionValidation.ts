@@ -5,6 +5,7 @@ import {
   KINSHIP_WORDS,
   PRONOUN_WORDS,
 } from "./genericPersonWords";
+import { isReadingInconsistentWithName } from "./readingCheck";
 import { stripHonorific } from "./nameHonorific";
 import { familyNameCandidates } from "./familyName";
 import { chaptersForCandidate, isGroundedInChunk } from "./groundedEvidence";
@@ -130,6 +131,16 @@ export interface DroppedSpeechStyleRecord {
   kept?: string;
 }
 
+/**
+ * 名前と合わない読みを外した記録（作者の裁定、2026-10-01）。**人物は残し、読みの欄だけを
+ * 外す。** 別名の読みが本人の読みに入る取り違えを、黙って消さずに報告へ出すために持つ。
+ */
+export interface DroppedReadingRecord {
+  characterName: string;
+  /** AIが書いてきた読み（落とした値そのまま） */
+  reading: string;
+}
+
 /** 向きが逆だった関係を直した記録（設計書6.18） */
 export interface CorrectedRelationRecord {
   characterName: string;
@@ -175,6 +186,8 @@ export interface CharacterValidationResult {
    * 無い・指示の言葉の写し、のどちらか。人物そのものは受け入れている。
    */
   droppedSpeechStyles: DroppedSpeechStyleRecord[];
+  /** 名前と合わない読みを外したもの（作者の裁定、2026-10-01）。人物は受け入れている */
+  droppedReadings: DroppedReadingRecord[];
 }
 
 export interface CharacterValidationOptions {
@@ -329,6 +342,7 @@ export function validateCharacterExtractResult(
   const droppedRelations: DroppedRelationRecord[] = [];
   const correctedRelations: CorrectedRelationRecord[] = [];
   const droppedSpeechStyles: DroppedSpeechStyleRecord[] = [];
+  const droppedReadings: DroppedReadingRecord[] = [];
   const rawCharacters: unknown = result.characters;
 
   if (!Array.isArray(rawCharacters)) {
@@ -342,6 +356,7 @@ export function validateCharacterExtractResult(
       droppedRelations,
       correctedRelations,
       droppedSpeechStyles,
+      droppedReadings,
     };
   }
 
@@ -469,6 +484,15 @@ export function validateCharacterExtractResult(
       character.evidence = speechQuote;
     }
 
+    // 読みが名前と食い違うもの（別名の読みが入った）は、読みの欄だけ外す。
+    // 作者が書いた読みへは触れない：ここで外すのはAIの候補の値だけで、
+    // 既存レコードの値はマージ側で守られる（CLAUDE.md 規則2）
+    const reading = character.reading?.trim();
+    if (reading && isReadingInconsistentWithName(character.name, reading)) {
+      droppedReadings.push({ characterName: character.name, reading });
+      delete character.reading;
+    }
+
     // 口調は、根拠の台詞が本文の台詞の中にあるときだけ残す（2026-09-25）。
     // **人物ごとは落とさない**——口調が読めなかっただけで、人物は本文にいる
     checkSpeechStyle(character, chunk.text, droppedSpeechStyles);
@@ -486,6 +510,8 @@ export function validateCharacterExtractResult(
     });
   }
 
+  dropSharedSpeechQuotes(accepted, droppedSpeechStyles);
+
   return {
     accepted,
     rejected,
@@ -496,7 +522,43 @@ export function validateCharacterExtractResult(
     droppedRelations,
     correctedRelations,
     droppedSpeechStyles,
+    droppedReadings,
   };
+}
+
+/**
+ * 同じ応答の中で、同じ根拠の台詞が別の人物の口調の根拠にも使われていたら、
+ * その口調の案はどちらも入れない（作者の裁定、2026-10-01）。
+ *
+ * マイナとターナの両方の根拠に同じ台詞が並んだ例がある。台詞は片方のものでしかなく、
+ * コードには**どちらの台詞か決められない**ので、決めずに両方外す。
+ * 比べるのは根拠の台詞全体が（空白・括弧の揺れを除いて）同じときだけで、
+ * 一部が重なる程度では外さない（誤検出を避ける）。人物そのものは残す。
+ */
+function dropSharedSpeechQuotes(
+  accepted: AcceptedCharacterCandidate[],
+  dropped: DroppedSpeechStyleRecord[]
+): void {
+  const byQuote = new Map<string, ExtractedCharacter[]>();
+  for (const { data } of accepted) {
+    if (!data.speechStyle || !data.speechEvidence) continue;
+    const key = data.speechEvidence.replace(/[\s　「」『』（）()]/g, "");
+    if (!key) continue;
+    byQuote.set(key, [...(byQuote.get(key) ?? []), data]);
+  }
+  for (const owners of byQuote.values()) {
+    if (new Set(owners.map((owner) => owner.name)).size < 2) continue;
+    for (const owner of owners) {
+      dropped.push({
+        characterName: owner.name,
+        speechStyle: owner.speechStyle ?? "",
+        speechEvidence: owner.speechEvidence ?? null,
+        reason: "shared_quote",
+      });
+      delete owner.speechStyle;
+      delete owner.speechEvidence;
+    }
+  }
 }
 
 /**

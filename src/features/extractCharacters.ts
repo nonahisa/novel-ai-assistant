@@ -42,6 +42,7 @@ import {
   type CorrectedRelationRecord,
   type DroppedAliasRecord,
   type DroppedRelationRecord,
+  type DroppedReadingRecord,
   type DroppedSpeechStyleRecord,
   type RejectedCharacterCandidate,
   type RelationRejectionReason,
@@ -49,7 +50,12 @@ import {
 import {
   describeRejectedNarrators,
   describeRejectedNarratorsForLog,
+  selectNewNarratorNames,
 } from "../core/rejectedNarratorNotice";
+import {
+  readNotifiedNarrators,
+  rememberNotifiedNarrators,
+} from "../core/narratorNoticeStore";
 import {
   BASE_SYSTEM_PROMPT,
   CHARACTER_EXTRACT_SCHEMA,
@@ -143,6 +149,8 @@ interface ValidationFixCounts {
   correctedRelations: CorrectedRelationRecord[];
   /** 根拠の台詞が本文の台詞に無い・指示の写しとして外した口調（2026-09-25） */
   droppedSpeechStyles: DroppedSpeechStyleRecord[];
+  /** 名前と合わない読みを外したもの（作者の裁定、2026-10-01） */
+  droppedReadings: DroppedReadingRecord[];
 }
 
 function collectValidationFixes(
@@ -158,6 +166,7 @@ function collectValidationFixes(
   target.droppedRelations.push(...validated.droppedRelations);
   target.correctedRelations.push(...validated.correctedRelations);
   target.droppedSpeechStyles.push(...validated.droppedSpeechStyles);
+  target.droppedReadings.push(...validated.droppedReadings);
 }
 
 interface ExtractionSummaryCounts {
@@ -210,6 +219,11 @@ interface ExtractionSummaryCounts {
   mobs: number;
   /** 既存人物への更新のうち、承認待ちに回した人数 */
   pendingUpdates: number;
+  /**
+   * 語り手を捨てた断りを、すでに画面に出した呼び名（作者の裁定、2026-10-01）。
+   * 同じ呼び名は2回目から画面の断りへ並べない（操作ログには毎回残る）
+   */
+  notifiedNarrators: ReadonlySet<string>;
 }
 
 /** 作品内の未保存文書を保存し、成功を再検査できた場合だけ実行を許可する。 */
@@ -618,6 +632,7 @@ export async function extractCharacters(
     droppedRelations: [],
     correctedRelations: [],
     droppedSpeechStyles: [],
+    droppedReadings: [],
   };
   /**
    * 既存レコードの名前・別名。切れた別名（「母親さ」）を弾く裏付けに使う。
@@ -1053,6 +1068,7 @@ export async function extractCharacters(
     validationFixes,
     mobs: merged?.characters.filter((character) => character.isMob).length ?? 0,
     pendingUpdates: 0,
+    notifiedNarrators: await readNotifiedNarrators(work),
   };
 
   // 既存人物への変更は、その場では書き込まずに保留へ回す。
@@ -1139,9 +1155,15 @@ export async function extractCharacters(
           ? "保存状態を確定できない人物があります。" +
             "保存先と回復ファイルを手動で照合してください。\n"
           : "";
+      const failedSummary = buildExtractionSummary(baseCounts);
+      await rememberNotifiedNarrators(
+        work,
+        baseCounts.notifiedNarrators,
+        selectNewNarratorNames(baseCounts.rejected, baseCounts.notifiedNarrators)
+      );
       const action = await vscode.window.showErrorMessage(
         `${classification}${protectionMessage}\n${reconciliationMessage}` +
-          buildExtractionSummary(baseCounts) +
+          failedSummary +
           (recovery ? `\n対応: ${recovery}` : ""),
         ...actions
       );
@@ -1240,6 +1262,13 @@ export async function extractCharacters(
   if (narratorLog) logStep(narratorLog);
 
   const summary = buildExtractionSummary(baseCounts) + settingsNotice;
+  // いま画面へ出す断りに入った呼び名を覚える（次回から出さない）。
+  // 先に文面を組んでから覚えるので、今回の断りには必ず載る
+  await rememberNotifiedNarrators(
+    work,
+    baseCounts.notifiedNarrators,
+    selectNewNarratorNames(baseCounts.rejected, baseCounts.notifiedNarrators)
+  );
   const recovery = describeFailureRecoveries(failures);
   // 接続断で打ち切った場合、件数だけ見せても理由が伝わらないので先頭で明示する
   const connectivityNotice = connectivityLost
@@ -1465,7 +1494,10 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
   // 名前が決められずに落ちた語り手らしき人物は、**件数だけでは伝わらない**。
   // 一人称の作品ではAIが外見まで読み取っていても「僕」としか呼べず、
   // 丸ごと消える（作者の報告、2026-09-24）。捨てたものが無ければ何も出さない
-  const narratorDetail = describeRejectedNarrators(counts.rejected);
+  const narratorDetail = describeRejectedNarrators(
+    counts.rejected,
+    counts.notifiedNarrators
+  );
   // 統合候補は自動では反映しないので、作者が気づけるよう本文に出す
   const candidateDetail =
     counts.mergeCandidates.length > 0
@@ -1712,8 +1744,15 @@ function describeValidationFixes(fixes: ValidationFixCounts): string {
     [
       (entry) =>
         entry.reason !== "instruction_echo" &&
-        entry.reason !== "first_person_unquoted",
+        entry.reason !== "first_person_unquoted" &&
+        entry.reason !== "shared_quote",
       "根拠の台詞が本文の台詞に見当たらない口調",
+    ],
+    // 同じ台詞が別の人物の根拠にも使われていた分（2026-10-01）。
+    // どちらの台詞か決められないので、どちらの案も入れていない
+    [
+      (entry) => entry.reason === "shared_quote",
+      "根拠の台詞が別の人物の口調の根拠と同じだった口調",
     ],
     // 一人称だけを外した分（3巡目の測定、2026-09-25）。口調の残りは資料に
     // 入っている（`kept`）ので、「口調を外した」とは分けて見せる
@@ -1731,6 +1770,20 @@ function describeValidationFixes(fixes: ValidationFixCounts): string {
       .join("、");
     const rest = entries.length > 3 ? ` ほか${entries.length - 3}件` : "";
     lines.push(`${label}を ${entries.length}件 外しました（${shown}${rest}）`);
+  }
+  // 名前と合わない読み（別名の読みが入ったもの。2026-10-01）。読みの欄だけ外し、人物は残す
+  if (fixes.droppedReadings.length > 0) {
+    const shown = fixes.droppedReadings
+      .slice(0, 3)
+      .map((entry) => `${entry.characterName} の「${entry.reading}」`)
+      .join("、");
+    const rest =
+      fixes.droppedReadings.length > 3
+        ? ` ほか${fixes.droppedReadings.length - 3}件`
+        : "";
+    lines.push(
+      `名前と合わない読みを ${fixes.droppedReadings.length}件 外しました（${shown}${rest}）`
+    );
   }
 
   return lines.length > 0 ? `\n${lines.join("\n")}` : "";

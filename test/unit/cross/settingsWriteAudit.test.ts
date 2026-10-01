@@ -45,6 +45,8 @@ const OVERWRITE_ALLOWED: Record<string, string> = {
   "chunkCache.ts": "処理済みチャンクの控え。再実行で作り直せる",
   "vectorIndex.ts": "意味検索の索引。作り直せる",
   "extractedIndexStore.ts": "抽出済みの話の記録。再抽出で作り直せる",
+  "narratorNoticeStore.ts":
+    "語り手の断りを出した呼び名の覚書。消えても断りがもう一度出るだけで、作者の書いたものは失われない",
   "writingStatsStore.ts": "端末ごとの執筆量。読むときに合算する（5.5.6）",
   "sessionStore.ts":
     "最終編集環境の記録（5.5.2）。端末ごとに分けてあり、次に開いたときに書き直される",

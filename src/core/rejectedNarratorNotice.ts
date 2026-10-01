@@ -83,15 +83,49 @@ export function collectRejectedNarrators(
 }
 
 /**
+ * 画面の断りに新しく出る呼び名（覚えていないもの）。
+ * 出したあとに覚えるのは、この名前だけでよい。
+ */
+export function selectNewNarratorNames(
+  rejected: readonly RejectedCharacterCandidate[],
+  notified: ReadonlySet<string>
+): string[] {
+  return collectRejectedNarrators(rejected)
+    .map((narrator) => narrator.name)
+    .filter((name) => !notified.has(name));
+}
+
+/**
+ * 覚書（`.aiwriter/narrator-notified.json`）の読み込み。**壊れていても空として扱う**
+ * ——覚えていないだけなら、断りがもう一度出るだけで、何も失われない。
+ */
+export function parseNotifiedNarrators(raw: unknown): Set<string> {
+  if (typeof raw !== "object" || raw === null) return new Set();
+  const names = (raw as { names?: unknown }).names;
+  if (!Array.isArray(names)) return new Set();
+  return new Set(
+    names.filter(
+      (name): name is string => typeof name === "string" && name.length > 0
+    )
+  );
+}
+
+/**
  * 完了報告へ添える文面。**捨てたものが無ければ空文字**を返す
  * （毎回出る断り書きは読まれなくなる）。
  *
  * 先頭を改行で始めるのは、`buildExtractionSummary` の他の明細と揃えるため。
  */
 export function describeRejectedNarrators(
-  rejected: readonly RejectedCharacterCandidate[]
+  rejected: readonly RejectedCharacterCandidate[],
+  notified: ReadonlySet<string> = new Set()
 ): string {
-  const narrators = collectRejectedNarrators(rejected);
+  // 一度画面に出した呼び名は出さない（作者の裁定、2026-10-01）。作者が資料へ
+  // 書き足したあとも抽出のたびに同じ断りが出て、読まれなくなるため。
+  // 操作ログ側は毎回全件を残す（`describeRejectedNarratorsForLog`）
+  const narrators = collectRejectedNarrators(rejected).filter(
+    (narrator) => !notified.has(narrator.name)
+  );
   if (narrators.length === 0) return "";
   const shown = narrators.slice(0, SHOWN_LIMIT);
   const lines = shown.map(
