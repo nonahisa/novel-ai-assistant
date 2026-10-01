@@ -6,7 +6,7 @@ import {
   nextCharacterId,
   type CharacterTextField,
 } from "../models/character";
-import { ExtractedCharacter } from "../prompts/characterExtract";
+import type { ExtractedCharacter } from "../prompts/characterExtract";
 import { clampSummary } from "./summaryLimit";
 import { createRejectedRelationMatcher } from "./rejectedRelations";
 import { fillReading, toDictionaryReading } from "./reading";
