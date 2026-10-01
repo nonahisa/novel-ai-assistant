@@ -294,7 +294,7 @@ function buildDiagnosisBlocks(
   folder: string,
   input: ChatPromptInput,
   now: Date
-): { blocks: string[]; report: ChatDiagnosisReport } {
+): { blocks: string[]; report: ChatDiagnosisReport; readerReminder?: string } {
   const blocks: string[] = [];
   const omitted: string[] = [];
   const report: ChatDiagnosisReport = {
@@ -387,7 +387,11 @@ function buildDiagnosisBlocks(
     omitted.push(reaction.failure);
   }
 
-  return { blocks, report };
+  return {
+    blocks,
+    report,
+    ...(reader.reminder ? { readerReminder: reader.reminder } : {}),
+  };
 }
 
 /**
@@ -614,7 +618,8 @@ export function chatPrompt(
   followUp: ChatFollowUpMaterial = {}
 ): ChatPromptResult {
   const now = new Date();
-  const { blocks, report } = buildDiagnosisBlocks(input.folder, input, now);
+  // 読者の要点は問いの直前へ（製品と同じ。残課題 M7）
+  const { blocks, report, readerReminder } = buildDiagnosisBlocks(input.folder, input, now);
   const history = input.history ?? [];
 
   /*
@@ -672,6 +677,7 @@ export function chatPrompt(
       history: history.slice(-WORK_CHAT_HISTORY_TURNS),
       question: input.question,
       ...(guide ? { featureGuide: guide.text } : {}),
+      ...(readerReminder ? { readerReminder } : {}),
     }),
     reference,
     overview: overview !== undefined,

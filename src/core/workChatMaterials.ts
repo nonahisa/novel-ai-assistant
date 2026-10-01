@@ -2,6 +2,7 @@ import type { WorkChatTurn } from "../prompts/workChat";
 import {
   buildReaderTypeGlossaryPrompt,
   buildReaderTypePrompt,
+  buildReaderTypeReminder,
   buildReaderTypeUnknownPrompt,
   questionMentionsReader,
 } from "../prompts/readerTarget";
@@ -73,13 +74,29 @@ export function workChatFeatureGuide(
 export function workChatReaderBlocks(
   profile: ReaderProfile | undefined,
   question: string
-): { blocks: string[]; declared: boolean; glossary: boolean } {
+): {
+  blocks: string[];
+  declared: boolean;
+  glossary: boolean;
+  /**
+   * 問いの直前（ユーザープロンプト側）へ置く読者の要点。**読者の話をしている
+   * 回で、読者が決まっているときだけ**（`buildReaderTypeReminder`）。
+   * 絞り方は区分の一覧と同じ1つの条件——読者の話でない回の答えを動かさない。
+   */
+  reminder?: string;
+} {
   const blocks: string[] = [];
   const readerBlock = buildReaderTypePrompt(profile);
   blocks.push(readerBlock ?? buildReaderTypeUnknownPrompt());
   const glossary = questionMentionsReader(question);
   if (glossary) blocks.push(buildReaderTypeGlossaryPrompt());
-  return { blocks, declared: readerBlock !== undefined, glossary };
+  const reminder = glossary ? buildReaderTypeReminder(profile) : undefined;
+  return {
+    blocks,
+    declared: readerBlock !== undefined,
+    glossary,
+    ...(reminder ? { reminder } : {}),
+  };
 }
 
 /**

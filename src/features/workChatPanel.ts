@@ -1065,9 +1065,11 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
      * 人柄・やり方・宛先は話題に関わらず送る
      */
     question: string
-  ): Promise<string> {
+  ): Promise<{ systemPrompt: string; readerReminder?: string }> {
     const base = buildWorkChatSystemPrompt({ featureIndex });
     const blocks: string[] = [];
+    // システムプロンプトではなく、問いの直前（ユーザープロンプト側）へ置く要点
+    let readerReminder: string | undefined;
     const now = new Date();
 
     // **何を足したかを必ず記録する**——方針が効いているかを作者が確かめる
@@ -1123,6 +1125,11 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       if (reader.glossary) {
         logStep("相談: 読者タイプの区分一覧を添えた（読者の話のため）");
       }
+      // 要点を問いの直前にも置く（残課題 M7。小さいモデルが末尾の段を読み落とした）
+      if (reader.reminder) {
+        readerReminder = reader.reminder;
+        logStep("相談: 読者タイプの要点を問いの直前にも置いた（読者の話のため）");
+      }
       blocks.push(...reader.blocks);
 
       /*
@@ -1151,7 +1158,10 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       }
     }
 
-    return joinWorkChatSystemPrompt(base, blocks);
+    return {
+      systemPrompt: joinWorkChatSystemPrompt(base, blocks),
+      ...(readerReminder ? { readerReminder } : {}),
+    };
   }
 
   /**
@@ -1941,7 +1951,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       const withFeatureIndex = guide.featureIndex;
       // 読者像だけは作品ごとのファイルにあるので待つ（開いているあいだは
       // 控えを使い回すので、読むのは作品ごとに1回きり）
-      const systemPrompt = await this.buildSystemPrompt(
+      const { systemPrompt, readerReminder } = await this.buildSystemPrompt(
         context?.work,
         withFeatureIndex,
         question
@@ -2002,6 +2012,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
           history: this.history.slice(-HISTORY_TURNS),
           question,
           featureGuide: guide.text,
+          ...(readerReminder ? { readerReminder } : {}),
         });
         const historyChars = this.history
           .slice(-HISTORY_TURNS)

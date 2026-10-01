@@ -418,3 +418,45 @@ ${readerNote(basis.source, adviceDiagnosisDate(basis.updatedAt))}
 
 ${READER_TYPE_PROMPTS[resolveReaderType(basis.scores)]}`;
 }
+
+/** 問いの直前へ置く読者の要点の見出し（テストが位置を探すのに使う） */
+export const READER_TYPE_REMINDER_HEADING = "【この相談で向ける読者】";
+
+/**
+ * 読者の話をしている回に、**問いの直前**へもう一度置く読者の要点（残課題 M7、
+ * 2026-10-01 の測定）。
+ *
+ * gemma4:e4b では、作品の全体像（約3,800字、ユーザープロンプト側）を添えると、
+ * システムプロンプトの末尾にある【この作品の読者】が答えから落ちた（読者を
+ * 名指しした問いで、宣言が使われたのは 8回中4回。全体像を外すと 8回中7回）。
+ * 段そのものは残したまま、**要点だけを問いの近くへ写す**——遠い段を読まなく
+ * ても向け先が分かるように。
+ *
+ * - 足すのは名前と一言と「助言の向き」の行だけ。全文を2か所に置くと送る量が
+ *   増え、言い回しの違う2つの段をAIが別々の指示と読む恐れがある
+ * - 文は `READER_TYPE_PROMPTS` から切り出す（写しを書かない）
+ * - 決めていなければ `undefined`。「まだ決めていません」は問いの近くへ
+ *   写さない——決めていない作品で全体像に即して答えるのは押し出しでは
+ *   ない（M7 の結果2）ので、変える理由が測れていない
+ */
+export function buildReaderTypeReminder(
+  profile: ReaderProfile | undefined
+): string | undefined {
+  const basis = chatReaderBasis(profile);
+  if (!basis) return undefined;
+  const id = resolveReaderType(basis.scores);
+  const lines = READER_TYPE_PROMPTS[id].split("\n");
+  const summary = lines[1] ?? "";
+  const direction = lines.find((line) => line.startsWith("- 助言の向き：")) ?? "";
+  const origin =
+    basis.source === "declared"
+      ? "作者がこの読者に向けて書いていると答えています"
+      : "本文から推定した向き先です（読み違えていることがあります）";
+  return [
+    `${READER_TYPE_REMINDER_HEADING}${READER_TYPES[id].label}（${origin}）`,
+    summary,
+    direction.replace(/^- /, ""),
+  ]
+    .filter((line) => line.trim() !== "")
+    .join("\n");
+}

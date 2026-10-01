@@ -98,7 +98,12 @@ import { closeTruncatedJson } from "../core/truncatedResponse";
 // 3.21: 道順の例に出すメニュー名を、2026-09-24 の組み直しに合わせた
 //       （「執筆支援」を工程の束に割った。例は「自己校正 → 校正・校閲」）。
 //       指示の中身は変えていないが、送る本文が変わる
-export const WORK_CHAT_VERSION = "3.21";
+// 3.22: 読者の話をしている回（質問に「読者」）で読者が決まっていれば、その要点
+//       （名前・一言・助言の向き）を【作者からの相談】のすぐ上にも置く（残課題
+//       M7、2026-10-01 の測定）。gemma4:e4b では、作品の全体像を添えると
+//       システムプロンプトの末尾の【この作品の読者】が答えから落ちていた。
+//       読者の話でない回の送る本文は変わらない
+export const WORK_CHAT_VERSION = "3.22";
 
 /**
  * 送るときの温度。相談は考えを広げる場なので、抽出よりは揺らす。
@@ -400,6 +405,15 @@ export interface WorkChatInput {
    * 作品の相談では触れないよう、プロンプトで釘を刺している。
    */
   featureGuide?: string;
+  /**
+   * 読者の話をしている回に、問いの直前へ置く読者の要点
+   * （`core/workChatMaterials.ts` の `workChatReaderBlocks` が返す `reminder`）。
+   *
+   * システムプロンプトの末尾の【この作品の読者】は残したまま、要点だけを
+   * 問いの近くへもう一度置く。小さいモデル（gemma4:e4b）は、作品の全体像を
+   * 添えると遠い段を読まなくなった（残課題 M7、2026-10-01 の測定）。
+   */
+  readerReminder?: string;
 }
 
 export function buildWorkChatPrompt(input: WorkChatInput): string {
@@ -475,6 +489,11 @@ export function buildWorkChatPrompt(input: WorkChatInput): string {
       .map((turn) => `${turn.role === "author" ? "作者" : "あなた"}: ${turn.text}`)
       .join("\n");
     blocks.push(`【これまでのやり取り】\n${history}`);
+  }
+
+  // 問いのすぐ上に置く。全体像や履歴より前だと、また押し出される
+  if (input.readerReminder?.trim()) {
+    blocks.push(input.readerReminder.trim());
   }
 
   blocks.push(`【作者からの相談】\n${input.question.trim()}`);

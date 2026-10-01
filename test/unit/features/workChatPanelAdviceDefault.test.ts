@@ -51,7 +51,7 @@ interface PromptBuilder {
     work: WorkEntry | undefined,
     featureIndex: boolean,
     question: string
-  ): Promise<string>;
+  ): Promise<{ systemPrompt: string; readerReminder?: string }>;
 }
 
 function panelWith(policies: AdvicePolicyStore): PromptBuilder {
@@ -74,7 +74,7 @@ describe("作品が決まらない相談の助言方針", () => {
     const policies = new AdvicePolicyStore(memento());
     await policies.setDefault(PROFILE);
 
-    const prompt = await panelWith(policies).buildSystemPrompt(
+    const { systemPrompt: prompt } = await panelWith(policies).buildSystemPrompt(
       undefined,
       false,
       "書き出しに迷っています"
@@ -86,7 +86,7 @@ describe("作品が決まらない相談の助言方針", () => {
   test("既定も無ければ、何も足さない（推測で埋めない）", async () => {
     const policies = new AdvicePolicyStore(memento());
 
-    const prompt = await panelWith(policies).buildSystemPrompt(
+    const { systemPrompt: prompt } = await panelWith(policies).buildSystemPrompt(
       undefined,
       false,
       "書き出しに迷っています"
