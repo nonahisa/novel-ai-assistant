@@ -154,8 +154,9 @@ function harness(options: { composeOn?: boolean; text?: string } = {}): Harness 
     ${save}
     return {
       receive: (message) => {
-        if (message.type === "saveResult") takeSaveResult(message);
-        else if (message.type === "editApplied") takeEditApplied(message);
+        // 本体の受け口と同じ振り分け（editApplied は takeEditApplied へも渡す）
+        if (message.type === "editApplied") takeEditApplied(message);
+        takeSaveMessage(message);
       },
       update: (message) => { current = message.text; rescueTakeUpdate(message); },
     };
@@ -206,8 +207,75 @@ describe("画面の［保存］ボタン", () => {
     expect(foot).toMatch(/<\/span>\s*<span id="note">/);
   });
 
-  it("拡張機能からの返事（saveResult）を受け取る口がある", () => {
-    expect(code).toMatch(/message\.type === "saveResult"[\s\S]{0,200}takeSaveResult\(message\)/);
+  it("本体の受け口が、受付・結果・届いた返事を保存ボタンの振り分けへ渡す", () => {
+    const start = code.indexOf('window.addEventListener("message"');
+    const handler = code.slice(start, code.indexOf("\n  });", start));
+    expect(handler).toMatch(/message\.type === "saveAccepted"[\s\S]{0,200}takeSaveMessage\(message\)/);
+    expect(handler).toMatch(/takeEditApplied\(message\);[\s\S]{0,200}takeSaveMessage\(message\)/);
+  });
+
+  it("受付が来たら「保存しています…」を出し、結果は3秒を過ぎても待つ", () => {
+    const h = harness();
+    h.update({ type: "update", docKey: "doc", text: "古い本文" });
+    h.click("saveCheck");
+    const seq = h.posted().find((m) => m.type === "saveRequest")?.seq;
+    h.receive({ type: "saveAccepted", seq });
+    expect(h.note()).toBe("保存しています…");
+    // 保存に時間がかかっても「届いていません」は出さない
+    h.advance(10000);
+    expect(h.failOpen()).toBe(false);
+    h.receive({ type: "saveResult", seq, ok: true, chars: 50 });
+    expect(h.note()).toBe("保存しました（50字）");
+  });
+
+  it("受付のあと30秒たっても結果が無ければ、もう一度押すか Ctrl+S を案内する", () => {
+    const h = harness();
+    h.update({ type: "update", docKey: "doc", text: "古い本文" });
+    h.click("saveCheck");
+    const seq = h.posted().find((m) => m.type === "saveRequest")?.seq;
+    h.receive({ type: "saveAccepted", seq });
+    h.advance(29900);
+    expect(h.failOpen()).toBe(false);
+    h.advance(200);
+    expect(h.failOpen()).toBe(true);
+    expect(h.failText()).toMatch(/保存の返事がありません/);
+    expect(h.failText()).toMatch(/もう一度［保存］を押すか、Ctrl\+S/);
+    expect(h.note()).not.toBe("保存しています…");
+  });
+
+  it("「届いていません」のあと受付が遅れて来たら、赤字を下ろして保存を待つ", () => {
+    const h = harness();
+    h.update({ type: "update", docKey: "doc", text: "古い本文" });
+    h.click("saveCheck");
+    const seq = h.posted().find((m) => m.type === "saveRequest")?.seq;
+    h.advance(3100);
+    expect(h.failOpen()).toBe(true);
+    h.receive({ type: "saveAccepted", seq });
+    expect(h.failOpen()).toBe(false);
+    expect(h.note()).toBe("保存しています…");
+  });
+
+  it("「届いていません」のあと打った字が届いた返事が来たら、赤字を下ろして押し直しを促す", () => {
+    const h = harness();
+    h.update({ type: "update", docKey: "doc", text: "古い本文" });
+    h.click("saveCheck");
+    h.advance(3100);
+    expect(h.failOpen()).toBe(true);
+    const seq = h.posted().find((m) => m.type === "edit")?.seq;
+    h.receive({ type: "editApplied", seq, ok: true });
+    expect(h.failOpen()).toBe(false);
+    expect(h.note()).toMatch(/もう一度［保存］を押してください/);
+  });
+
+  it("「保存できなかった」の赤字は、打った字が届いただけでは下ろさない（保存できた証拠ではない）", () => {
+    const h = harness();
+    h.update({ type: "update", docKey: "doc", text: "古い本文" });
+    h.click("saveCheck");
+    const seq = h.posted().find((m) => m.type === "saveRequest")?.seq;
+    h.receive({ type: "saveAccepted", seq });
+    h.receive({ type: "saveResult", seq, ok: false, reason: "読み取り専用のファイルです" });
+    h.receive({ type: "editApplied", seq, ok: true });
+    expect(h.failOpen()).toBe(true);
   });
 
   for (const composeOn of [true, false]) {
@@ -251,7 +319,7 @@ describe("画面の［保存］ボタン", () => {
     expect(h.note()).toBe("");
   });
 
-  it("3秒たっても返事が無ければ、保存できなかったと赤字で出し、コピーと再読み込みを案内する", () => {
+  it("3秒たっても受付が無ければ、保存できなかったと赤字で出し、コピーと再読み込みを案内する", () => {
     const h = harness({ text: "届かない本文" });
     h.update({ type: "update", docKey: "doc", text: "古い本文" });
     h.click("saveCheck");

@@ -2494,7 +2494,18 @@ export class ManuscriptEditorProvider
     seq: number,
     tracker: AppliedTracker
   ): Promise<void> {
-    const result = await runSaveRequest(typeof seq === "number" ? seq : 0, {
+    const target = typeof seq === "number" ? seq : 0;
+    /*
+      **受け取ったその場で受付を返す**（本体の判断、2026-10-01）。画面は受付を
+      3秒、結果を30秒待つ。結果だけを返すと、保存に時間がかかったときに
+      「拡張機能に届いていません」と誤って出る
+    */
+    try {
+      await panel.webview.postMessage({ type: "saveAccepted", seq: target });
+    } catch {
+      // 閉じた画面へは返せない。保存は続ける（頼まれた保存はする）
+    }
+    const result = await runSaveRequest(target, {
       waitApplied: (target) => tracker.waitFor(target, SAVE_APPLY_WAIT_MS),
       isDirty: () => document.isDirty,
       save: () => Promise.resolve(document.save()),

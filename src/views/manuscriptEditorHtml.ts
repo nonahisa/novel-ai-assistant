@@ -2434,10 +2434,21 @@ ruby > rt {
     （copyTextDirect）・画面の本文（screenText）・控え（keepRescue）は同じ物を使う。
     Ctrl+S の振る舞いは変えない（このボタンは別の道）。
   */
-  /** 返事を待つ長さ。拡張機能の側は便を待つのに2秒まで使う（core/manuscriptSave.ts） */
-  const SAVE_WAIT_MS = 3000;
+  /*
+    **返事は2段で待つ**（本体の判断、2026-10-01）。拡張機能は頼みを受け取った
+    その場で受付（saveAccepted）を返し、保存が済んでから結果（saveResult）を
+    返す。1段で3秒待つと、保存そのものに時間がかかったとき（大きい原稿・
+    ブラウザ版の遠いファイル）に、届いているのに「届いていません」と出て
+    しまうため。受付が3秒来なければ届いていない、受付のあと30秒結果が
+    来なければ保存の返事が無い、と分けて知らせる。
+  */
+  /** 受付を待つ長さ。ふだんの往復は0.1秒に満たない */
+  const SAVE_ACCEPT_WAIT_MS = 3000;
+  /** 受付のあと、結果を待つ長さ */
+  const SAVE_RESULT_WAIT_MS = 30000;
   /** 「保存しました」を出しておく長さ */
   const SAVE_NOTE_MS = 5000;
+  const SAVING_TEXT = "保存しています…";
   const saveButton = document.getElementById("saveCheck");
   const saveFailBar = document.getElementById("saveFail");
   const saveFailText = document.getElementById("saveFailText");
@@ -2448,6 +2459,12 @@ ruby > rt {
   let saveNoteTimer = null;
   /** 出している「保存しました」の文（ほかの一言で上書きされていたら消さない） */
   let saveNoteText = null;
+  /**
+   * 出している赤字の種類。"unreached"（受付が来ない）・"noResult"（結果が来ない）・
+   * "failed"（保存できなかったと返った）。打った字が届いた返事で下ろせるのは
+   * unreached だけ——届いたのは拡張機能が動いている証拠だが、保存できた証拠ではない
+   */
+  let saveFailKind = null;
 
   function askSave() {
     /*
@@ -2465,23 +2482,31 @@ ruby > rt {
     saveAskedSeq = seq;
     vscode.postMessage({ type: "saveRequest", seq: seq });
     if (saveTimer !== null) clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveNoAnswer, SAVE_WAIT_MS);
+    saveTimer = setTimeout(saveNoAnswer, SAVE_ACCEPT_WAIT_MS);
   }
   saveButton.addEventListener("click", askSave);
 
-  function showSaveFail(text) {
+  function showSaveFail(kind, text) {
+    saveFailKind = kind;
     saveFailText.textContent = text;
     saveFailBar.classList.add("open");
   }
 
   function hideSaveFail() {
+    saveFailKind = null;
     saveFailBar.classList.remove("open");
+  }
+
+  /** 「保存しています…」が残っていたら下ろす（ほかの一言は消さない） */
+  function clearSavingNote() {
+    if (note.textContent === SAVING_TEXT) note.textContent = "";
   }
 
   function saveNoAnswer() {
     saveTimer = null;
     keepRescue(screenText());
     showSaveFail(
+      "unreached",
       "保存できませんでした（拡張機能に届いていません）。本文をコピーで控えてから、" +
         "コマンドパレット（Ctrl+Shift+P）で「開発者: ウィンドウの再読み込み」を" +
         "実行してください。開き直した画面で、打った字を戻せます" +
@@ -2491,12 +2516,38 @@ ruby > rt {
     vscode.postMessage({
       type: "log",
       text:
-        "［保存］を押しましたが、" + Math.round(SAVE_WAIT_MS / 1000) +
+        "［保存］を押しましたが、" + Math.round(SAVE_ACCEPT_WAIT_MS / 1000) +
         "秒たっても拡張機能から返事がありません（便" + saveAskedSeq + "）。再読み込みを案内しました",
     });
   }
 
-  /** 拡張機能から届いた保存の結果 */
+  /** 受付が届いた。ここからは保存の結果を長めに待つ */
+  function takeSaveAccepted(message) {
+    if (typeof message.seq !== "number" || message.seq !== saveAskedSeq) return;
+    if (saveTimer !== null) clearTimeout(saveTimer);
+    // 遅れて受付が来た（3秒を過ぎた）なら、「届いていません」は誤りだったので下ろす
+    if (saveFailKind === "unreached") hideSaveFail();
+    note.textContent = SAVING_TEXT;
+    saveTimer = setTimeout(saveNoResult, SAVE_RESULT_WAIT_MS);
+  }
+
+  function saveNoResult() {
+    saveTimer = null;
+    clearSavingNote();
+    keepRescue(screenText());
+    showSaveFail(
+      "noResult",
+      "保存の返事がありません。もう一度［保存］を押すか、Ctrl+S を試してください。"
+    );
+    vscode.postMessage({
+      type: "log",
+      text:
+        "［保存］の受付のあと、" + Math.round(SAVE_RESULT_WAIT_MS / 1000) +
+        "秒たっても保存の結果が返りません（便" + saveAskedSeq + "）",
+    });
+  }
+
+  /** 拡張機能から届いた保存の結果（待ちが切れたあとに届いても受け取る） */
   function takeSaveResult(message) {
     if (typeof message.seq !== "number" || message.seq !== saveAskedSeq) return;
     saveAskedSeq = null;
@@ -2504,9 +2555,11 @@ ruby > rt {
       clearTimeout(saveTimer);
       saveTimer = null;
     }
+    clearSavingNote();
     if (message.ok !== true) {
       const reason = typeof message.reason === "string" ? message.reason : "理由が分かりません";
       showSaveFail(
+        "failed",
         "保存できませんでした：" + reason + "。本文をコピーで控えてから、" +
           "もう一度［保存］を押すか、Ctrl+S を試してください。"
       );
@@ -2532,6 +2585,28 @@ ruby > rt {
         "（タブを閉じると、画面の控えは消えます）。"
       : "写せませんでした。本文を選んで Ctrl+C で写してください。";
   });
+
+  /**
+   * 「届いていません」を出したあとで、打った字が届いた返事（editApplied の ok）が
+   * 来たら、拡張機能は動いている。赤字を下ろし、押し直しを促す。
+   * **届いた返事の受け口（takeEditApplied）には手を入れず、ここで別に聞く**
+   */
+  function saveHearEditApplied(message) {
+    if (message.ok !== true || saveFailKind !== "unreached") return;
+    hideSaveFail();
+    note.textContent = "拡張機能に届くようになりました。もう一度［保存］を押してください";
+  }
+
+  /*
+    ［保存］の返事の振り分け。本体の受け口（window の message）から呼ぶ。
+    受け口を2つにしないのは、受け口が1つだと決めて確かめているテストが
+    あるため（最初の message の受け口を本体のものとして読む）
+  */
+  function takeSaveMessage(message) {
+    if (message.type === "saveAccepted") takeSaveAccepted(message);
+    else if (message.type === "saveResult") takeSaveResult(message);
+    else if (message.type === "editApplied") saveHearEditApplied(message);
+  }
   /* saveButton:end */
 
   /**
@@ -3927,9 +4002,11 @@ ${RESUME_WRITING_LABEL ? `
     } else if (message.type === "editApplied") {
       // 送った便が文書へ入ったか（設計書6.25.9）
       takeEditApplied(message);
-    } else if (message.type === "saveResult") {
-      // ［保存］の結果（設計書6.25.9）
-      takeSaveResult(message);
+      // 「届いていません」の赤字を、届いた返事で下ろす（［保存］。設計書6.25.9）
+      takeSaveMessage(message);
+    } else if (message.type === "saveAccepted" || message.type === "saveResult") {
+      // ［保存］の受付と結果（設計書6.25.9）
+      takeSaveMessage(message);
     } else if (message.type === "reopenAccepted" || message.type === "reopenResult") {
       // ［開き直す］の返事（設計書6.25.9）
       takeReopenReply(message);
