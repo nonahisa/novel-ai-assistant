@@ -433,6 +433,50 @@ describe("⑤重複の候補に根拠を出す", () => {
     );
   });
 
+  /**
+   * 一致した呼び名が、組の2人以外の登録済み人物の名前そのものなら、
+   * 別名の汚染として扱う（作者の裁定。実データ「文佳＋太志」）
+   */
+  test("一致した呼び名が第三者の名前そのものなら、その理由だけの組は出さない", () => {
+    const candidates = findMergeCandidates([
+      character("char_001", "三門太志", { aliases: ["太志"] }),
+      character("char_006", "文佳", { aliases: ["密倉文佳", "三門太志"] }),
+      character("char_007", "圭織", { aliases: ["三門太志"] }),
+    ]);
+    // 文佳＋圭織は「三門太志」だけで繋がっている（第三者 char_001 の名前）
+    expect(
+      candidates.some(
+        (c) => c.ids.includes("char_006") && c.ids.includes("char_007")
+      )
+    ).toBe(false);
+  });
+
+  test("第三者の名前のほかに、まっとうな一致があれば残す", () => {
+    const candidates = findMergeCandidates([
+      character("char_001", "三門太志", { aliases: [] }),
+      character("char_006", "文佳", { aliases: ["三門太志", "ふみちゃん"] }),
+      character("char_007", "密倉文佳", { aliases: ["三門太志", "文佳"] }),
+    ]);
+    const pair = candidates.find(
+      (c) => c.ids.includes("char_006") && c.ids.includes("char_007")
+    );
+    expect(pair).toBeDefined();
+    expect(pair?.matchedName).not.toBe("三門太志");
+  });
+
+  test("第三者がいても、名前のつながった組（密倉文佳＋文佳）は出る", () => {
+    const candidates = findMergeCandidates([
+      character("char_001", "三門太志", { aliases: [] }),
+      character("char_005", "密倉文佳", { aliases: ["文佳"] }),
+      character("char_006", "文佳", {}),
+    ]);
+    expect(
+      candidates.some(
+        (c) => c.ids.includes("char_005") && c.ids.includes("char_006")
+      )
+    ).toBe(true);
+  });
+
   test("別名の取り違えのほかの理由（省略・敬称など）が重なる組は残す", () => {
     // 「太志くん」は「太志」に敬称を足した形（suffix）。別名の「三門太志」は汚染
     const candidates = findMergeCandidates([

@@ -1580,7 +1580,7 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
       const usable = matchedShown
         .map((shown) => ({
           shown,
-          weakNote: weakSameNameNote(shown, a, b, sharedCounts),
+          weakNote: weakSameNameNote(shown, a, b, sharedCounts, characters),
         }))
         .filter((match) => match.weakNote !== WEAK_ALIAS_NOTE);
       // 確信度の高い一致を先に使う（弱い注記の付かないもの）
@@ -1609,7 +1609,7 @@ export function findMergeCandidates(characters: Character[]): MergeCandidate[] {
         matchedShown
           .filter(
             (shown) =>
-              weakSameNameNote(shown, a, b, sharedCounts) === WEAK_ALIAS_NOTE
+              weakSameNameNote(shown, a, b, sharedCounts, characters) === WEAK_ALIAS_NOTE
           )
           .map(normalizeName)
       );
@@ -1952,7 +1952,9 @@ function weakSameNameNote(
   matched: string,
   a: Character,
   b: Character,
-  sharedCounts: Map<string, number>
+  sharedCounts: Map<string, number>,
+  /** 登録済みの全員。組の2人以外の名前を調べるために使う */
+  all: readonly Character[] = []
 ): string | undefined {
   const key = normalizeName(matched);
   const nameA = normalizeName(a.name);
@@ -1984,6 +1986,24 @@ function weakSameNameNote(
   const namesRelated =
     nameA.endsWith(nameB) || nameB.endsWith(nameA) || nameA === nameB;
   if (equalsWholeName && !namesRelated) return WEAK_ALIAS_NOTE;
+
+  // 一致した呼び名が、組の2人以外の登録済み人物の名前そのものでも、
+  // 別名の汚染とみる（作者の裁定。実データで「文佳」の別名と「太志」の別名に
+  // 3人目の「三門太志」が混ざり、その1語だけで組が出ていた）。
+  // **2人のどちらかの名前と同じ呼び名は対象外**——同じ人物が3件に割れている
+  // ときに、本当の重複を落とさないため
+  if (
+    key !== nameA &&
+    key !== nameB &&
+    all.some(
+      (other) =>
+        other.id !== a.id &&
+        other.id !== b.id &&
+        normalizeName(other.name) === key
+    )
+  ) {
+    return WEAK_ALIAS_NOTE;
+  }
 
   return undefined;
 }
