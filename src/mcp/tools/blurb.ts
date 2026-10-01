@@ -39,6 +39,7 @@ import {
   validateWith,
   type RunnerInput,
 } from "./run";
+import { stashBlurb } from "./synopsisStash";
 
 /**
  * 作品紹介文（P-06）とキャッチコピー（P-08）を外から呼ぶ（0.66.0）。
@@ -131,12 +132,34 @@ export function blurbPrompt(input: BlurbPromptInput) {
   };
 }
 
-export function blurbValidate(input: { response: string }) {
+export function blurbValidate(input: {
+  response: string;
+  /** `stash` のときだけ要る（貯め場所の作品） */
+  folder?: string;
+  /** 検算が通った答えを貯め、`novel.synopsis.commit` で保存できるようにする（2026-10-02） */
+  stash?: boolean;
+}) {
   const parsed = parseBlurbResponse(input.response);
   if (!parsed) {
     throw new McpToolError(
       "応答を読み取れませんでした（紹介文のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
     );
+  }
+  if (input.stash === true) {
+    if (!input.folder) {
+      throw new McpToolError("紹介文を貯めるには folder が要ります。");
+    }
+    /*
+      **字数が目安から外れていても貯める。** 製品も字数を超えた紹介文を
+      捨てずに見せ、作者が「採用」を選べば書く（`generateBlurb.ts`）。
+      外れたことは返り値の tooShort／tooLong と note で伝わる
+    */
+    stashBlurb(input.folder, {
+      blurb: parsed.blurb,
+      promptVersion: blurbPromptVersion(
+        publicityReaderMark(readPublicityReader(input.folder))
+      ),
+    });
   }
   const measured = measureBlurb(parsed.blurb);
   // **層の呼び名が出ていないかを見る**（プロンプトへ書いて渡すので、
@@ -160,7 +183,12 @@ export function blurbValidate(input: { response: string }) {
     targetChars: { min: BLURB_MIN_CHARS, max: BLURB_MAX_CHARS },
     /** 紹介文に出ていた層の呼び名（無ければ空） */
     readerLabels: findReaderTypeLabels(parsed.blurb),
-    note: readerLeak ? `${readerLeak}${lengthNote}` : lengthNote,
+    ...(input.stash === true ? { stashed: true } : {}),
+    note:
+      (readerLeak ? `${readerLeak}${lengthNote}` : lengthNote) +
+      (input.stash === true
+        ? "この紹介文を貯めました。novel.synopsis.commit（kind: blurb）で、設定/synopsis.md がまだ無ければ作れます。"
+        : ""),
   };
 }
 

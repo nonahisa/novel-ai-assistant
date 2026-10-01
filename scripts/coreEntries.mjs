@@ -94,6 +94,12 @@ export const CORE_ENTRY_NAMES = [
     検算 → 集める → マージの順を、製品と MCP が同じものを通る
   */
   "externalExtractMerge",
+  /*
+    各話あらすじの「話ごとの本文」（2026-10-02、外部AIのあらすじを資料へ
+    保存する道 `novel.synopsis.commit` を足すときに `episodeBodies.ts` から
+    切り出した）。製品と MCP が同じ本文・同じハッシュを持つ
+  */
+  "episodeBodyParts",
 ];
 
 /**

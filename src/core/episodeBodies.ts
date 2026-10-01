@@ -1,9 +1,6 @@
 import type { EpisodeFile } from "../models/types";
 import { readTextFile } from "./textFile";
-import { parseEpisodeMetadata } from "./metadataParser";
-import { parseCollectedFile } from "./collectedFile";
-import { hashText } from "./textFile";
-import { blankMemoLines } from "./sceneMemo";
+import { splitEpisodeBodyParts } from "./episodeBodyParts";
 
 /**
  * 話ごとの本文を取り出す。
@@ -59,35 +56,14 @@ export async function loadEpisodeBodies(
       continue;
     }
 
-    const collected = parseCollectedFile(content.text);
-    if (collected) {
-      for (const inner of collected) {
-        const body = blankMemoLines(inner.body);
-        if (!body.trim()) continue;
-        bodies.push({
-          file,
-          chapter: inner.chapter,
-          title: inner.title,
-          body,
-          // **ハッシュもメモを抜いた本文から取る。** メモを直しただけで
-          // あらすじを作り直すと、AIを無駄に呼ぶことになる
-          hash: hashText(body),
-          insideCollected: true,
-        });
-      }
-      continue;
-    }
-
-    const body = blankMemoLines(parseEpisodeMetadata(content.text).body);
-    if (!body.trim()) continue;
-    bodies.push({
-      file,
+    // 話ごとに分ける・メモを消す・ハッシュを取るのは `episodeBodyParts.ts`
+    // （外部AIのあらすじを保存する道と同じものを通す。2026-10-02）
+    for (const part of splitEpisodeBodyParts(content.text, {
       chapter: file.chapterStart,
       title: file.subtitle ?? file.metaTitle,
-      body,
-      hash: hashText(body),
-      insideCollected: false,
-    });
+    })) {
+      bodies.push({ file, ...part });
+    }
   }
 
   return { bodies, conflicted };

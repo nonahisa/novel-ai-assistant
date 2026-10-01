@@ -70,6 +70,11 @@ import {
   type RunnerInput,
   validateWith,
 } from "./run";
+import {
+  needsSubtitleOf,
+  resolveEpisodeForSynopsis,
+  stashEpisodeSynopsis,
+} from "./synopsisStash";
 
 /**
  * 話ごとに見る3つ——**各話あらすじ（P-06）・プロット逸脱（P-11）・
@@ -229,6 +234,8 @@ export function synopsisValidate(input: {
   filePath: string;
   chapter?: number;
   response: string;
+  /** 検算が通った答えを貯め、`novel.synopsis.commit` で保存できるようにする（2026-10-02） */
+  stash?: boolean;
 }) {
   // **解析も製品のもの**（前後に説明が付くモデルがある）
   const parsed = parseSynopsisResult(input.response);
@@ -237,7 +244,44 @@ export function synopsisValidate(input: {
       "応答を読み取れませんでした（あらすじのスキーマに沿っていません。JSONの形か、項目が合っていません）。"
     );
   }
-  return validateSynopsisResult(parsed);
+  const validated = validateSynopsisResult(parsed);
+  if (input.stash !== true) return validated;
+
+  /*
+    **空のあらすじは貯めない。** 製品も「あらすじが空でした」として、その話を
+    失敗に数えて保存しない（`generateSynopses.ts`）。
+  */
+  if (!validated.synopsis) {
+    throw new McpToolError(
+      "あらすじが空でした。貯めていません（製品でも空のあらすじは保存しません）。作り直してください。"
+    );
+  }
+  /*
+    **ハッシュと版は、製品が控えるものと同じ組み立てで取る。** 本文はシーンメモを
+    消したもの（`loadEpisodeBodies` と同じ）、版はサブタイトルを提案する話かを
+    製品と同じ判定で決めて組む——ここで食い違うと、保存したあらすじを製品が
+    「本文が変わった」「版が違う」と読んで作り直す
+  */
+  const episode = resolveEpisodeForSynopsis(input.folder, input.filePath, input.chapter);
+  stashEpisodeSynopsis(input.folder, {
+    filePath: input.filePath,
+    chapter: episode.chapter,
+    sourceHash: episode.hash,
+    promptVersion: synopsisPromptVersion({
+      needsSubtitle: needsSubtitleOf(episode),
+      readerTypeMark: readerTypeCacheMark(readReaderProfile(input.folder)),
+    }),
+    synopsis: validated.synopsis,
+    emotion: validated.emotion,
+  });
+  return {
+    ...validated,
+    stashed: true,
+    note:
+      "この答えを貯めました。novel.synopsis.commit（kind: episodes）で、" +
+      "拡張機能の［各話あらすじ］と同じ形で 設定/chapter_synopses.json へ保存できます" +
+      "（まだあらすじの無い話だけを足します）。サブタイトルの案は貯めていません。",
+  };
 }
 
 /* ── プロット逸脱（P-11）────────────────────────────── */

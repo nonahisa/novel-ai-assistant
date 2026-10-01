@@ -104,6 +104,12 @@ export function exposureOf(
       作った記録の名前（呼び出し元が抽出したもの）だけである
     */
     tool === "novel.extract.commit" ||
+    /*
+      `novel.synopsis.commit`（2026-10-02）も同じ——呼び出し元が先に渡した
+      あらすじ・紹介文を資料へ保存するだけで、返すのは件数と話の呼び名
+      （断った紹介文は、呼び出し元が書いたものをそのまま返す）
+    */
+    tool === "novel.synopsis.commit" ||
     tool === "novel.notice" ||
     tool === "guide.spotlight" ||
     /*
@@ -245,6 +251,26 @@ function detailOf(
         : "抽出の結果を資料へ保存した";
     return counts
       ? `${head} 新規 ${counts.created}件・承認待ち ${counts.pending}件・断り ${counts.refused}件`
+      : head;
+  }
+  /*
+    あらすじ・紹介文を資料へ保存した回（2026-10-02）。抽出の保存と同じく、
+    **何件足し、何件断ったか**だけを残す（あらすじの中身は残さない）
+  */
+  if (tool === "novel.synopsis.commit") {
+    const what = args?.kind === "blurb" ? "作品紹介文" : "各話あらすじ";
+    const head =
+      args?.dryRun === true
+        ? `${what}の保存の内訳を見た（書いていない）`
+        : `${what}を資料へ保存した`;
+    const record =
+      typeof result === "object" && result !== null
+        ? (result as Record<string, unknown>)
+        : undefined;
+    return record &&
+      typeof record.createdCount === "number" &&
+      Array.isArray(record.refused)
+      ? `${head} 新規 ${record.createdCount}件・断り ${record.refused.length}件`
       : head;
   }
   /*

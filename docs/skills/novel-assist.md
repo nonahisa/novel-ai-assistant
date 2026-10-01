@@ -41,11 +41,13 @@
 
 **設定資料の抽出を代わりに行ったときだけ、資料へ保存できる。** `novel.validate`（`feature: settings`）に `stash: true` を付けて答えを貯める（`novel.run` の `runner: sampling` は自動で貯まる）。貯め終えたら `novel.extract.commit` を呼ぶ——拡張機能の［設定資料を抽出］と同じ検算とマージを通し、**新しい記録はそのまま保存、既存の記録への変更は承認待ち**へ置く。既存のファイルは書き換えない。先に `dryRun: true` で内訳を見て、作者に伝えてから保存するとよい。**話の順（第1話から）に回す**——保存は話の順で検算し直すので、後ろの話を先に読んで覚えた名前で答えると、前の話では本文に根拠が無いとして落ちることがある。
 
+**各話あらすじ・作品紹介文も、代わりに作ったときだけ資料へ保存できる。** `novel.validate`（`feature: synopsis`／`blurb`）に `stash: true` を付けて答えを貯め、`novel.synopsis.commit` を呼ぶ。`kind: episodes` は `設定/chapter_synopses.json` へ**まだあらすじの無い話だけ**を足す——既にある話は（作者が書いたものも、拡張機能が作ったものも）変えずに `refused` で返す。`kind: blurb` は `設定/synopsis.md` が**無いときだけ**作り、あれば断って紹介文をそのまま返すので、作者に見せて決めてもらう。答えたあとに本文が変わった話は捨てられる（`discarded`）。これも先に `dryRun: true` で内訳を見るとよい。
+
 本文（`.txt`／`.md`）は**書き換えない**。直したい箇所があれば、道具の指摘として作者に見せる。
 
 ## 道具の早見表
 
-**道具は22本で、何をするかは `feature` の引数で決まる**（0.66.7）。ほとんどの用は `novel.run` に `feature` を渡せば足りる。
+**道具は23本で、何をするかは `feature` の引数で決まる**（0.66.7）。ほとんどの用は `novel.run` に `feature` を渡せば足りる。
 
 | したいこと | 道具 |
 |---|---|
@@ -60,6 +62,7 @@
 | プロンプトだけ・検算だけ | `novel.prompt`／`novel.validate`（同じ `feature` で） |
 | 設定資料の更新案を置く（人物。能力・組織・場所・世界観は `recordKind` を渡す） | `novel.propose` |
 | 代わりに行った設定資料の抽出を、資料へ保存する | `novel.extract.commit`（`novel.validate` の `stash: true` で貯めた答えを保存。**新しい記録は保存、既存の記録への変更は承認待ち**。`dryRun: true` で内訳だけ） |
+| 代わりに作った各話あらすじ・作品紹介文を、資料へ保存する | `novel.synopsis.commit`（`novel.validate`（`synopsis`／`blurb`）の `stash: true` で貯めた答えを保存。`kind: episodes` は**まだ無い話だけ足す**、`kind: blurb` は `synopsis.md` が**無いときだけ作る**。`dryRun: true` で内訳だけ） |
 | 作者の承認を待っている更新案（提案パネルに並ぶもの）を読む | `pending.list`（**読むだけ**。提案パネルと同じ組み立てで、種類・名前・出どころ・理由・変わる欄の前と後を返す。`status` が `stale` のものは画面に並ばない古い案。`kind`・`source`・`limit` で絞る。0.85.1） |
 | **実行前に画面へ出る断りを、走らせずに読む** | `novel.notice`（`feature` とモデルを渡す。**AIは呼ばず、本文も読まない**。0.72.0） |
 | **押す場所を作者の画面で光らせる** | `guide.spotlight`（`command` か `label`。**2回点滅するだけで、操作は実行しない**。0.75.6） |

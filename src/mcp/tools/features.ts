@@ -299,7 +299,8 @@ export const NOVEL_VALIDATE_INPUT = {
     .boolean()
     .optional()
     .describe(
-      "settings だけ。true なら検算が通った答えを貯め、novel.extract.commit で資料へ保存できるようにします"
+      "settings・synopsis・blurb だけ。true なら検算が通った答えを貯め、" +
+        "settings は novel.extract.commit、synopsis・blurb は novel.synopsis.commit で資料へ保存できるようにします"
     ),
   ...optionsInput(OPTIONS_SEE_RUN),
 };
@@ -361,7 +362,7 @@ export interface FeatureCallInput {
   model?: string;
   allowRemote?: boolean;
   temperature?: number;
-  /** `novel.validate`（settings）で、検算が通った答えを貯める（2026-10-02） */
+  /** `novel.validate`（settings・synopsis・blurb）で、検算が通った答えを貯める（2026-10-02） */
   stash?: boolean;
   options?: Record<string, unknown>;
 }
@@ -741,7 +742,11 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
         needsSubtitle: option(input, "needsSubtitle", z.boolean()),
       }),
     validate: (input) =>
-      synopsisValidate({ ...episodeArgs(input), response: needResponse(input) }),
+      synopsisValidate({
+        ...episodeArgs(input),
+        response: needResponse(input),
+        stash: input.stash,
+      }),
     run: (input) =>
       synopsisRun({
         ...episodeArgs(input),
@@ -762,7 +767,12 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
   },
   blurb: {
     prompt: (input) => blurbPrompt({ folder: input.folder }),
-    validate: (input) => blurbValidate({ response: needResponse(input) }),
+    validate: (input) =>
+      blurbValidate({
+        folder: input.folder,
+        response: needResponse(input),
+        stash: input.stash,
+      }),
     run: (input) => blurbRun({ folder: input.folder, ...runnerArgs(input) }),
   },
   catchphrase: {
@@ -934,14 +944,18 @@ export function novelPrompt(input: FeatureCallInput): unknown {
   return FEATURES[input.feature].prompt(input);
 }
 
+/** `novel.validate` の `stash: true` を受け付ける機能 */
+const STASHABLE_FEATURES: readonly FeatureName[] = ["settings", "synopsis", "blurb"];
+
 export function novelValidate(input: FeatureCallInput): unknown {
   /*
-    **貯めるのは設定資料の抽出だけ**（2026-10-02）。ほかの機能で黙って
-    無視すると、呼んだ側は「貯めた」と思い込み、保存で何も出てこない
+    **貯めるのは、資料へ保存する道のある機能だけ**（2026-10-02）——設定資料の
+    抽出（novel.extract.commit）と、各話あらすじ・作品紹介文（novel.synopsis.commit）。
+    ほかの機能で黙って無視すると、呼んだ側は「貯めた」と思い込み、保存で何も出てこない
   */
-  if (input.stash === true && input.feature !== "settings") {
+  if (input.stash === true && !STASHABLE_FEATURES.includes(input.feature)) {
     throw new McpToolError(
-      `stash は設定資料の抽出（feature: settings）だけで使えます。${who(input)} の答えは貯めません。`
+      `stash は設定資料の抽出・各話あらすじ・作品紹介文（feature: ${STASHABLE_FEATURES.join("／")}）だけで使えます。${who(input)} の答えは貯めません。`
     );
   }
   return FEATURES[input.feature].validate(input);

@@ -60,6 +60,11 @@ import {
   type ExtractCommitInput,
 } from "./tools/extractCommit";
 import {
+  SYNOPSIS_COMMIT_INPUT,
+  synopsisCommit,
+  type SynopsisCommitInput,
+} from "./tools/synopsisCommit";
+import {
   PENDING_LIST_INPUT,
   pendingListTool,
   type PendingListInput,
@@ -113,12 +118,12 @@ import {
  * そちらを直に呼ぶ（`test/unit/mcp/mcpTools.test.ts`）。混ぜると、
  * ツールの中身を確かめるのに stdio を立てなければならなくなる。
  *
- * **道具は22本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
+ * **道具は23本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
  * 0.75.x で `windows.list`、0.82.1 で `setup.request`、0.83.x で `schedule.milestones`、
  * 0.85.0 で `notices.recent` と `works.list`、0.85.1 で `pending.list`、
  * 0.88 の次の版で `run.request` と `run.result`（設計書6.87.22）、
- * 0.94.7 の次の版で `ai.settings`、0.95.4 の次の版で `novel.extract.commit`
- * を足した。0.66.7 の時点では10本）。
+ * 0.94.7 の次の版で `ai.settings`、0.95.4 の次の版で `novel.extract.commit`、
+ * 0.95.5 の次の版で `novel.synopsis.commit` を足した。0.66.7 の時点では10本）。
  * ほかに**プロンプトが1つ**（`setup`。Claude Code では `/` から選べる。6.87.18）。
  * 56本あったものを
  * `feature` を引数に取る形へ束ねた——**AI は繋いだ瞬間にこの一覧を読む**ので、
@@ -129,8 +134,9 @@ import {
  * `test/unit/cross/mcpReach.test.ts` が、この入口から辿って届かないことを見張る。
  *
  * **読む・測る・提案するだけ**（6.87.7）。原稿も設定資料も書き換えない。
- * **例外は `novel.extract.commit` の保存だけ**（作者の裁定、2026-10-02）——
- * 新しい資料のファイルを作るだけで、既存のファイルは書き換えない。
+ * **例外は `novel.extract.commit` と `novel.synopsis.commit` の保存だけ**
+ * （作者の裁定、2026-10-02）——新しい資料のファイル・まだ無い話のあらすじを
+ * 作るだけで、既にある資料・あらすじは書き換えない。
  */
 
 const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
@@ -544,6 +550,28 @@ server.registerTool(
     inputSchema: EXTRACT_COMMIT_INPUT,
   },
   tool("novel.extract.commit", (args: ExtractCommitInput) => extractCommit(args))
+);
+
+/*
+  **6.87.7 の例外の2つ目**（作者の裁定、2026-10-02「何もない状態からであれば
+  承認は不要」）。各話あらすじは**まだ無い話だけ**を足し（既にある話は変えない）、
+  作品紹介文は `設定/synopsis.md` が**無いときだけ**作る。中身は `tools/synopsisCommit.ts`
+*/
+server.registerTool(
+  "novel.synopsis.commit",
+  {
+    title: "外部AIの各話あらすじ・作品紹介文を、資料へ保存する",
+    description:
+      "拡張機能の［各話あらすじ］［作品紹介文］と同じ形で保存します。" +
+      "novel.validate（feature: synopsis／blurb、stash: true）で貯めた答えを使います。" +
+      "kind: episodes は 設定/chapter_synopses.json へ**まだあらすじの無い話だけ**を足し、" +
+      "既にある話は変えずに refused で返します（ファイルを書き直すときは元を退避します）。" +
+      "kind: blurb は 設定/synopsis.md が**無いときだけ**作り、あれば断ります。" +
+      "本文が変わった貯めは捨てて discarded で返し、読めないファイルがあれば何も書かずに止めます。" +
+      "dryRun: true で、書かずに内訳だけを返します。",
+    inputSchema: SYNOPSIS_COMMIT_INPUT,
+  },
+  tool("novel.synopsis.commit", (args: SynopsisCommitInput) => synopsisCommit(args))
 );
 
 server.registerTool(
