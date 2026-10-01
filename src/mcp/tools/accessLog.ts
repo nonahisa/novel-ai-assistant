@@ -82,6 +82,11 @@ export function exposureOf(
     tool === "windows.list" ||
     tool === "notices.recent" ||
     tool === "works.list" ||
+    /*
+      `ai.settings`（作者の裁定 2026-10-01）も**保管庫の割り当ての写しと
+      チューニングの記録を読むだけ**で、作品フォルダーを1つも開かない
+    */
+    tool === "ai.settings" ||
     tool === "setup.request" ||
     /*
       `run.request`（設計書6.87.22）は**依頼の札を保管庫へ置いて URI を開くだけ**で、

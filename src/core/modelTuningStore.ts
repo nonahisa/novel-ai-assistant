@@ -3,6 +3,7 @@ import { atomicWriteFile } from "./atomicWrite";
 import { fileReader } from "./fileRead";
 import { logLine } from "./logger";
 import * as path from "./paths";
+import { TUNING_STORE_FILE } from "./tuningStoreNames";
 
 /**
  * AIチューニングの台帳の**置き場**（設計書6.49）。
@@ -40,8 +41,13 @@ import * as path from "./paths";
  * 変わっていない」）。ここが扱うのは**作者自身の実測だけ**である。
  */
 
-/** 台帳のファイル名。**保管庫の直下に置く**（生成文書とは別の階） */
-export const TUNING_STORE_FILE = "model-tuning.json";
+/*
+  台帳のファイル名（`TUNING_STORE_FILE`）。**値の実体は `core/tuningStoreNames.ts`**
+  ——MCP の `ai.settings` もこのファイルを読むが、ここは `vscode` に届くので
+  借りられない。名前を2か所に書くと、片方だけ変えたときに MCP が黙って
+  空の台帳を読む。ここでも使うので、冒頭で import して再輸出する
+*/
+export { TUNING_STORE_FILE };
 
 /**
  * 書き込みが**実際に入ったか**（作者の報告、2026-09-19）。

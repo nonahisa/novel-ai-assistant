@@ -182,6 +182,10 @@ const PROCESS_ALLOWED: ReadonlyMap<string, string> = new Map([
     "features/worksSnapshot.ts",
     "登録簿の写し（MCP の works.list）。入口で canRunProcesses() を見て、ブラウザでは何もせずに戻る（process.pid は その後ろでだけ読む）",
   ],
+  [
+    "features/aiAssignmentsSnapshot.ts",
+    "AIの割り当ての写し（MCP の ai.settings）。入口で canRunProcesses() を見て、ブラウザでは何もせずに戻る（process.pid は その後ろでだけ読む）",
+  ],
 ]);
 
 /**

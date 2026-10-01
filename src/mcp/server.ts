@@ -72,6 +72,7 @@ import {
   type NoticesRecentInput,
 } from "./tools/notices";
 import { worksList } from "./tools/works";
+import { aiSettings } from "./tools/aiSettings";
 import {
   SETUP_REQUEST_INPUT,
   setupRequest,
@@ -103,10 +104,11 @@ import {
  * そちらを直に呼ぶ（`test/unit/mcp/mcpTools.test.ts`）。混ぜると、
  * ツールの中身を確かめるのに stdio を立てなければならなくなる。
  *
- * **道具は20本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
+ * **道具は21本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
  * 0.75.x で `windows.list`、0.82.1 で `setup.request`、0.83.x で `schedule.milestones`、
  * 0.85.0 で `notices.recent` と `works.list`、0.85.1 で `pending.list`、
- * 0.88 の次の版で `run.request` と `run.result`（設計書6.87.22）を足した。0.66.7 の時点では10本）。
+ * 0.88 の次の版で `run.request` と `run.result`（設計書6.87.22）、
+ * 0.94.7 の次の版で `ai.settings` を足した。0.66.7 の時点では10本）。
  * ほかに**プロンプトが1つ**（`setup`。Claude Code では `/` から選べる。6.87.18）。
  * 56本あったものを
  * `feature` を引数に取る形へ束ねた——**AI は繋いだ瞬間にこの一覧を読む**ので、
@@ -330,6 +332,22 @@ server.registerTool(
     **引数を渡さない**（`windows.list` と同じ）。作品フォルダーを1つも開かない。
   */
   tool("works.list", () => worksList())
+);
+
+server.registerTool(
+  "ai.settings",
+  {
+    title: "AIの設定（割り当てとチューニングの記録）",
+    description:
+      "いま既定のAI、機能ごとのAIの割り当て（機能→プロバイダ・モデル。拡張機能が書いた写しで、writtenAt が写しの時刻）と、" +
+      "AIチューニングの記録（モデルごとの読める長さ・1000字あたりの秒数・誤字脱字の精度の目安・測った日・古い結果の印）を返します。" +
+      "**読むだけで、鍵は返さず、作品の中身も読みません。**",
+  },
+  /*
+    **引数を渡さない**（`works.list` と同じ）。作品フォルダーを1つも開かず、
+    割り当ても記録も書き換えない。
+  */
+  tool("ai.settings", () => aiSettings())
 );
 
 server.registerTool(

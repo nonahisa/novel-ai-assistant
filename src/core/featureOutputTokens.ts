@@ -1,6 +1,10 @@
 import { bundledFeatureOutput } from "./bundledTuning";
 import { tuningStoreTable, writeTuningEntry } from "./modelTuningStore";
 import { logLine } from "./logger";
+// 鍵の頭は `vscode` に依存しない所へ置いた（MCP の `ai.settings` も借りる）。
+// ここでも使うので import を併記する（再輸出だけではこのファイルの中で使えない）
+import { FEATURE_OUTPUT_KEY_PREFIX } from "./tuningStoreNames";
+export { FEATURE_OUTPUT_KEY_PREFIX };
 
 /**
  * **機能ごと**の「1回の応答に何トークン書くか」の台帳（設計書6.77の第3段）。
@@ -73,16 +77,19 @@ import { logLine } from "./logger";
  * 同じものを2つ目のファイルへ書き直すと、直すときに片方だけ直る。
  */
 
-/**
- * 機能の行に付ける、鍵の頭。
+/*
+ * 機能の行に付ける、鍵の頭（`FEATURE_OUTPUT_KEY_PREFIX`）。
  *
  * **モデルの鍵（`プロバイダID/モデル名`）と混ざらないようにする印。**
  * `core/modelTuning.ts` の `parseModelTuning` はこの頭を持つ行を読み飛ばす
  * ので、モデルの一覧（AIチューニングの実測一覧）に機能の行が紛れ込むことは
  * ない。**消す画面（`features/forgetTuning.ts`）には出る**——あちらは生の
  * 鍵を並べるので、「出力見込み / typo_check」として選んで消せる。
+ * MCP の `ai.settings` も同じ理由で読み飛ばす。
+ *
+ * **値の実体は `core/tuningStoreNames.ts`**（このファイルは `vscode` に届くので、
+ * MCP の束から借りられない）。冒頭で import して再輸出している。
  */
-export const FEATURE_OUTPUT_KEY_PREFIX = "出力見込み/";
 
 /**
  * 台帳を引くときの鍵（`出力見込み/<プロバイダID>/<モデル名>/<機能名>`）。

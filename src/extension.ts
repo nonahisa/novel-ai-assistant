@@ -477,6 +477,7 @@ import { startWindowCard } from "./features/windowCard";
 import { startLocalAiGate } from "./features/localAiGate";
 import { startNoticeRecorder } from "./features/noticeRecorder";
 import { startWorksSnapshot } from "./features/worksSnapshot";
+import { startAiAssignmentsSnapshot } from "./features/aiAssignmentsSnapshot";
 import {
   reviewProposals,
   toggleReviewLock,
@@ -2686,6 +2687,24 @@ export async function activate(
     onDidChangeWorks: registry.onDidChange,
   });
   if (worksSnapshot) context.subscriptions.push(worksSnapshot);
+
+  // ─── AIの割り当ての写し（MCP の ai.settings。作者の裁定 2026-10-01） ───
+  // 既定のAIと機能ごとの割り当ても globalState にあって外から読めないので、
+  // 起動時と変わるたびに保管庫へ写す。**写すのはプロバイダとモデルの名前だけ**で、
+  // 割り当てを書き換える道は作らない
+  const aiAssignmentsSnapshot = startAiAssignmentsSnapshot(context, {
+    readSource: () => ({
+      defaultProvider: aiRegistry.selectedProviderId,
+      defaultModel: aiRegistry.selectedModel,
+      assignments: aiRegistry.assignments(),
+      features: ASSIGNABLE_FEATURES.map((key) => ({
+        key,
+        label: ASSIGNABLE_FEATURE_LABELS[key],
+      })),
+    }),
+    onDidChange: aiRegistry.onDidChangeSelection,
+  });
+  if (aiAssignmentsSnapshot) context.subscriptions.push(aiAssignmentsSnapshot);
 
   // ─── 助言方針の控え（設計書6.86.7） ───
   // **取り込んでから書き出す。** 外部AI経由の相談で動いた推定は
