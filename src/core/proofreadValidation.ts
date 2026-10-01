@@ -1602,13 +1602,35 @@ export function validateProofreadIssues(
       rejected.push({ raw: item, reason: "onyomi_compound" });
       continue;
     }
+    // **空にした理由を残す**（2026-10-01 の記録の不具合4）。黙って空にすると、
+    // AIが書かなかったのか検算が外したのかが分からない。
+    // **形式名詞の判定より前に決める**——捨てる修正案（後ろを落とした断片など）で
+    // 形式名詞を判定すると、断片で消えた別の漢字を「一緒にひらいた」と読み違え、
+    // 形式名詞の指摘が修正案だけ空になって通っていた（1.12 の 26b の測定）
+    const clearedBy: SuggestionClearedReason | undefined =
+      !suggestion || reason === "語尾単調" || reason === "視点"
+        ? undefined
+        : isPlaceholderText(suggestion, true)
+          ? "placeholder"
+          : dropsOriginalTail(original, suggestion)
+            ? "drops_tail"
+            : isAmbiguousInLine(chunkLines[line - firstLine] ?? "", original)
+              ? "ambiguous_in_line"
+              : reason === "漢字ひらき" && introducesNewKanji(original, suggestion)
+                ? "new_kanji"
+                : reason === "漢字ひらき" &&
+                    paraphrasesInsteadOfOpening(original, suggestion)
+                  ? "paraphrase"
+                  : undefined;
     // **形式名詞のひらき（事→こと）は推敲では出さない**（作者の裁定、2026-09-26 午後）。
     // 揃え方の話なので表記ゆれの機能に任せる。頼み方では止まらないので検算で落とす
+    // 捨てる修正案は空として渡す（説明が挙げた漢字で判定する道に入る）。ただし
+    // 原文がその行に2か所あるだけの案は、ひらき方としては正しいので判定に使う
     if (
       reason === "漢字ひらき" &&
       opensFormalNoun(
         original,
-        suggestion,
+        clearedBy && clearedBy !== "ambiguous_in_line" ? "" : suggestion,
         asString(item.explanation),
         chunkLines[line - firstLine] ?? ""
       )
@@ -1679,23 +1701,7 @@ export function validateProofreadIssues(
     // 修正案だけ空にする（作者の裁定、2026-09-17）
     // **視点の修正案も、コードで必ず空にする**（1.10）。わざと視点を移す
     // 書き方があり、直すかどうか・どう直すかは作者が決める
-    // **空にした理由を残す**（2026-10-01 の記録の不具合4）。黙って空にすると、
-    // AIが書かなかったのか検算が外したのかが分からない
-    const clearedBy: SuggestionClearedReason | undefined =
-      !suggestion || reason === "語尾単調" || reason === "視点"
-        ? undefined
-        : isPlaceholderText(suggestion, true)
-          ? "placeholder"
-          : dropsOriginalTail(original, suggestion)
-            ? "drops_tail"
-            : isAmbiguousInLine(chunkLines[line - firstLine] ?? "", original)
-              ? "ambiguous_in_line"
-              : reason === "漢字ひらき" && introducesNewKanji(original, suggestion)
-                ? "new_kanji"
-                : reason === "漢字ひらき" &&
-                    paraphrasesInsteadOfOpening(original, suggestion)
-                  ? "paraphrase"
-                  : undefined;
+    // `clearedBy` は形式名詞の判定の手前で決めてある
     const usableSuggestion =
       reason === "語尾単調" || reason === "視点" || clearedBy ? "" : suggestion;
     // 原文と同じものを「修正案」として返してくる。押しても何も起きない。

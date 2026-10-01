@@ -72,6 +72,38 @@ describe("漢字ひらきで、修正案が漢字を1つもひらいていない
   });
 });
 
+/*
+  1.12 で gemma4:26b を撃ったとき（教科書チート第1話）、形式名詞の指摘が
+  **使えない修正案（後ろを落とした断片・言い換え）を付けて**届き、修正案だけ
+  空になって「「事（こと）」が形式名詞として使われています」のまま通った。
+  形式名詞の判定が、捨てる前の修正案（ほかの漢字も消えている断片）を見て
+  「別の語もひらいている」と読み違えていたため。捨てる修正案は空として見る
+*/
+describe("使えない修正案を付けた形式名詞のひらき", () => {
+  test("後ろを落とした断片の修正案でも、形式名詞のひらきとして落とす", () => {
+    const original =
+      "だが、現実には高校に入ってから両親が勉強を教えてくれた事は一度もない。";
+    const chunk = chunkOf(`　${original}`);
+    const result = validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 1,
+            original,
+            suggestion: "教えてくれたこと",
+            reason: "漢字ひらき",
+            explanation: "「事（こと）」が形式名詞として使われています",
+            confidence: "low",
+          },
+        ],
+      },
+      chunk
+    );
+    expect(result.accepted).toEqual([]);
+    expect(result.rejected.map((r) => r.reason)).toEqual(["formal_noun"]);
+  });
+});
+
 describe("修正案を空にしたら、理由を残す", () => {
   test("言い換え（然し→でも）：指摘は残し、理由と注記を付ける", () => {
     const chunk = chunkOf("然し、彼は来なかった。");
