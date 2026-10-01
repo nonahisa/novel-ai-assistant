@@ -168,6 +168,138 @@ export function validateChapterNames(
   return { names, rejected };
 }
 
+/**
+ * 提案の区切りが、いまの章立てとどう関わるか（作者の裁定 2026-10-01、判断 i）。
+ *
+ *   - `same`：既存の区切りと同じ話から始まる（承認すると改名になる）
+ *   - `moved`：既存の区切りを別の話へ動かす（`fromEpisode` がいまの開始）
+ *   - `new`：まだ区切りの無いところに置く
+ *
+ * **作者が決めた区切りを動かす提案も、落とさずに残す。** ただし動かすことが
+ * 分かるように印を付ける——印が無いと、作者は「新しい章が足される」と
+ * 思って承認し、自分の決めた区切りが変わったことに気づけない
+ * （測定記録 2026-10-01 の不具合14）。
+ */
+export type ChapterBoundary =
+  | { kind: "same"; existingName: string }
+  | { kind: "moved"; fromEpisode: number; fromName: string }
+  | { kind: "new" };
+
+/** いまの章立ての1件。開始の話が分からない章は `startEpisode: null` */
+export interface CurrentChapterStart {
+  name: string;
+  startEpisode: number | null;
+}
+
+/**
+ * 提案の各区切りを、いまの章立てと照らして分類する。
+ *
+ * **判定はコードが行う**（規則3）。AIに「動かしたか」を答えさせると、
+ * 動かしていても「同じ」と書いてくる余地が残る。
+ *
+ * 「動かした」と見なすのは、次の両方を満たす組だけである。
+ *
+ *   1. 既存の開始が提案に無く、提案の開始が既存に無い（どちらも相手が居ない）
+ *   2. **2つの間に、残る区切り（`same`）が挟まっていない**——挟まっていれば、
+ *      間の章を飛び越えて動かしたことになり、それはもう「同じ区切りの移動」
+ *      ではない（新しい区切りと、消える区切りである）
+ *
+ * 組は**近いものから**決める。1つの既存の区切りは1つの提案の元にしかしない
+ * （第100話の区切りを、第99話と第101話の2つへ同時に動かすことは無い）。
+ *
+ * @returns 提案と同じ順に並べた分類
+ */
+export function classifyChapterBoundaries(
+  candidates: ReadonlyArray<{ startEpisode: number }>,
+  current: readonly CurrentChapterStart[]
+): ChapterBoundary[] {
+  const existing = new Map<number, string>();
+  for (const chapter of current) {
+    // 開始の話が分からない章は、どの提案とも比べようがない
+    if (chapter.startEpisode === null) continue;
+    if (!existing.has(chapter.startEpisode)) {
+      existing.set(chapter.startEpisode, chapter.name);
+    }
+  }
+
+  const proposed = new Set(candidates.map((entry) => entry.startEpisode));
+  const anchors = [...proposed].filter((start) => existing.has(start));
+  const looseExisting = [...existing.keys()].filter(
+    (start) => !proposed.has(start)
+  );
+  const looseProposed = [...proposed].filter((start) => !existing.has(start));
+
+  const pairs: Array<{ from: number; to: number; distance: number }> = [];
+  for (const from of looseExisting) {
+    for (const to of looseProposed) {
+      const low = Math.min(from, to);
+      const high = Math.max(from, to);
+      if (anchors.some((anchor) => anchor > low && anchor < high)) continue;
+      pairs.push({ from, to, distance: high - low });
+    }
+  }
+  // 近い組から決める。並びが同じなら若い話数から（結果を毎回同じにする）
+  pairs.sort(
+    (left, right) =>
+      left.distance - right.distance ||
+      left.to - right.to ||
+      left.from - right.from
+  );
+
+  const movedTo = new Map<number, number>();
+  const usedFrom = new Set<number>();
+  for (const pair of pairs) {
+    if (usedFrom.has(pair.from) || movedTo.has(pair.to)) continue;
+    usedFrom.add(pair.from);
+    movedTo.set(pair.to, pair.from);
+  }
+
+  return candidates.map((entry): ChapterBoundary => {
+    const sameName = existing.get(entry.startEpisode);
+    if (sameName !== undefined) {
+      return { kind: "same", existingName: sameName };
+    }
+    const from = movedTo.get(entry.startEpisode);
+    if (from !== undefined) {
+      return {
+        kind: "moved",
+        fromEpisode: from,
+        fromName: existing.get(from) ?? "",
+      };
+    }
+    return { kind: "new" };
+  });
+}
+
+/**
+ * 分類を短い1行にする（提案パネル・MCPの返り値で同じ文言を使う）。
+ *
+ * **短く言う**——提案パネルの1件は数行しか無く、長い断りは読み飛ばされる。
+ */
+export function describeChapterBoundary(
+  boundary: ChapterBoundary,
+  labelOf: (episode: number) => string
+): string {
+  switch (boundary.kind) {
+    case "same":
+      return "既存の区切りと同じ";
+    case "moved":
+      return movedBoundaryText(labelOf(boundary.fromEpisode));
+    case "new":
+      return "新しい区切り";
+  }
+}
+
+/**
+ * 「動かす」の印の文言。提案パネルとMCPで**同じ言い方にする**
+ * （言い回しが2つあると、作者が同じことだと気づきにくい）。
+ *
+ * @param fromLabel いまの開始の話の見出し（「第102話」）
+ */
+export function movedBoundaryText(fromLabel: string): string {
+  return `既存の区切りを動かします（いま${fromLabel}から）`;
+}
+
 /** 却下の理由を、作者が読める日本語にする */
 const REJECT_REASON_LABELS: Record<ChapterProposalRejectReason, string> = {
   shape: "形が違う",

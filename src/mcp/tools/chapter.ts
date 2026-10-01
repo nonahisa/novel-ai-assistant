@@ -8,6 +8,8 @@ import {
   type ChapterProposeEpisode,
 } from "../../prompts/chapterPropose";
 import {
+  classifyChapterBoundaries,
+  describeChapterBoundary,
   parseChapterProposeResult,
   validateChapterNames,
   validateChapterProposal,
@@ -195,14 +197,36 @@ export function chapterValidate(input: ChapterPromptInput & { response: string }
     parsed,
     episodes.map((episode) => episode.number)
   );
+  /*
+    **既存の区切りを動かす提案も落とさず、印を付けて返す**（作者の裁定
+    2026-10-01、判断 i）。印はコードが付ける——AIの「尊重しました」は
+    検算では確かめようがない（測定記録の不具合14）。
+  */
+  const boundaries = classifyChapterBoundaries(
+    result.accepted,
+    currentChapters(input.folder, episodes)
+  );
+  const labelOf = (number: number): string =>
+    episodes.find((episode) => episode.number === number)?.label ??
+    `第${number}話`;
   return {
     mode: "chapters" as const,
-    chapters: result.accepted,
+    chapters: result.accepted.map((candidate, index) => ({
+      ...candidate,
+      /** いまの章立てとの関係（`same`／`moved`／`new`） */
+      boundary: boundaries[index],
+      /** 同じことを1行で。`moved` は作者が決めた区切りを書き換える */
+      boundaryNote: describeChapterBoundary(boundaries[index], labelOf),
+    })),
+    /** 作者が決めた区切りを動かす提案の数。**反映する前に作者へ確かめる** */
+    movedCount: boundaries.filter((entry) => entry.kind === "moved").length,
     /** 落とした提案と、その理由。**黙って減らさない** */
     rejected: result.rejected,
     note:
       "区切りは、実在する話数だけに限って通しました" +
       "（AIが出した番号をそのまま使ってはいません）。" +
+      "作者が決めた区切りを動かす提案は落とさず、boundary.kind を moved にしています" +
+      "（反映する前に作者へ確かめてください）。" +
       "設定/章立て.json は書き換えていません。",
   };
 }

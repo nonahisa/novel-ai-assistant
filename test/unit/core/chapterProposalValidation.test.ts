@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
+  classifyChapterBoundaries,
+  describeChapterBoundary,
   describeChapterRejectReasons,
   parseChapterProposeResult,
   validateChapterNames,
@@ -256,5 +258,102 @@ describe("章名だけの提案の検証", () => {
     );
     expect(names).toEqual([]);
     expect(rejected.map((entry) => entry.reason)).toEqual(["placeholder"]);
+  });
+});
+
+/**
+ * 既存の区切りとの照合（作者の裁定 2026-10-01、判断 i。測定記録の不具合14）。
+ *
+ * **作者が決めた章の始まりを動かす提案も、落とさずに残して印を付ける。**
+ * 印はコードが付ける（AIに「動かしたか」を答えさせない。規則3）。
+ */
+describe("既存の区切りとの照合", () => {
+  const current = [
+    { name: "第一章", startEpisode: 1 },
+    { name: "第二章", startEpisode: 50 },
+    { name: "第三章", startEpisode: 102 },
+    { name: "第四章", startEpisode: 128 },
+  ];
+
+  test("第102話→第100話・第128話→第129話は「動かす」の印、同じ区切りは印なし", () => {
+    const boundaries = classifyChapterBoundaries(
+      [1, 50, 100, 129].map((startEpisode) => ({ startEpisode })),
+      current
+    );
+    expect(boundaries).toEqual([
+      { kind: "same", existingName: "第一章" },
+      { kind: "same", existingName: "第二章" },
+      { kind: "moved", fromEpisode: 102, fromName: "第三章" },
+      { kind: "moved", fromEpisode: 128, fromName: "第四章" },
+    ]);
+  });
+
+  test("まだ章の無い範囲への提案は「新しい区切り」", () => {
+    const boundaries = classifyChapterBoundaries(
+      [1, 30].map((startEpisode) => ({ startEpisode })),
+      [{ name: "第一章", startEpisode: 1 }]
+    );
+    expect(boundaries).toEqual([
+      { kind: "same", existingName: "第一章" },
+      { kind: "new" },
+    ]);
+  });
+
+  test("章立てが空なら、どれも新しい区切り", () => {
+    const boundaries = classifyChapterBoundaries(
+      [1, 6].map((startEpisode) => ({ startEpisode })),
+      []
+    );
+    expect(boundaries.map((entry) => entry.kind)).toEqual(["new", "new"]);
+  });
+
+  test("残る区切りをまたいで「動かした」とは見なさない", () => {
+    // 第10話の区切りは残る。その向こうの第60話を、手前の第5話へ
+    // 動かしたことにはしない（間の章ごと飛び越えてしまう）
+    const boundaries = classifyChapterBoundaries(
+      [5, 10].map((startEpisode) => ({ startEpisode })),
+      [
+        { name: "甲", startEpisode: 10 },
+        { name: "乙", startEpisode: 60 },
+      ]
+    );
+    expect(boundaries).toEqual([
+      { kind: "new" },
+      { kind: "same", existingName: "甲" },
+    ]);
+  });
+
+  test("開始の話が分からない章は照合に使わない", () => {
+    const boundaries = classifyChapterBoundaries(
+      [{ startEpisode: 3 }],
+      [{ name: "迷子の章", startEpisode: null }]
+    );
+    expect(boundaries).toEqual([{ kind: "new" }]);
+  });
+
+  test("1つの既存の区切りを、2つの提案の元にしない", () => {
+    const boundaries = classifyChapterBoundaries(
+      [99, 101].map((startEpisode) => ({ startEpisode })),
+      [{ name: "第三章", startEpisode: 100 }]
+    );
+    expect(
+      boundaries.filter((entry) => entry.kind === "moved")
+    ).toHaveLength(1);
+  });
+
+  test("動かす提案の文言は短く、いまの開始の話を言う", () => {
+    const labelOf = (number: number) => `第${number}話`;
+    expect(
+      describeChapterBoundary(
+        { kind: "moved", fromEpisode: 102, fromName: "第三章" },
+        labelOf
+      )
+    ).toBe("既存の区切りを動かします（いま第102話から）");
+    expect(describeChapterBoundary({ kind: "new" }, labelOf)).toBe(
+      "新しい区切り"
+    );
+    expect(
+      describeChapterBoundary({ kind: "same", existingName: "第一章" }, labelOf)
+    ).toBe("既存の区切りと同じ");
   });
 });

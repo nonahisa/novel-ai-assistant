@@ -3,6 +3,7 @@ import type { EpisodeFile, WorkEntry } from "../models/types";
 import {
   findChapterStartingAt,
   withChapterStartingAt,
+  withoutChapterStartingAt,
   type Chapter,
   type ChapterSet,
 } from "../models/chapter";
@@ -49,7 +50,9 @@ import {
   type ChapterProposeEpisode,
 } from "../prompts/chapterPropose";
 import {
+  classifyChapterBoundaries,
   describeChapterRejectReasons,
+  movedBoundaryText,
   parseChapterProposeResult,
   validateChapterNames,
   validateChapterProposal,
@@ -90,6 +93,9 @@ import { confirmRun, notifyDone, warnWithLog } from "../views/notify";
 
 /** 出す章名の案の数。**多すぎる選択肢は選べない** */
 const NAME_SUGGESTION_LIMIT = 3;
+
+/** 区切りを動かす提案の確認で押すボタン */
+const MOVE_CHAPTER_LABEL = "動かす";
 
 /** 提案パネルに出すときの分類名 */
 export const CHAPTER_PROPOSAL_CATEGORY = "章立て";
@@ -142,15 +148,42 @@ export class ChapterProposalApplier {
   async apply(entry: {
     name: string;
     startEpisodePath: string;
+    /**
+     * 既存の区切りを動かす提案なら、いまの開始の話（作者の裁定 2026-10-01）。
+     *
+     * **元の区切りを外してから置く。** 外さずに足すと、元の章の頭の数話だけが
+     * 別の章として切り出される（第100話→第102話の2話だけの章ができる）。
+     * 作者への確認は呼ぶ側（提案パネルの承認）が済ませてから来る。
+     */
+    movedFromPath?: string;
   }): Promise<{ ok: boolean; reason?: string }> {
-    const next: ChapterSet = {
-      ...this.set,
-      chapters: withChapterStartingAt(
+    let chapters: Chapter[];
+    if (entry.movedFromPath === undefined) {
+      chapters = withChapterStartingAt(
         this.set.chapters,
         entry.startEpisodePath,
         entry.name
-      ),
-    };
+      );
+    } else {
+      const from = findChapterStartingAt(this.set.chapters, entry.movedFromPath);
+      if (!from) {
+        // **元の区切りが無いまま足さない。** 外で消された・別の提案で
+        // 既に動かした区切りを、黙って「新しい章」に化けさせない
+        return {
+          ok: false,
+          reason:
+            "動かす元の区切りが章立てにありません（外で変わったか、既に動かしています）。" +
+            "作品一覧を更新してから、もう一度章立てを提案させてください。",
+        };
+      }
+      chapters = movedChapters(
+        this.set.chapters,
+        from.startEpisodePath,
+        entry.startEpisodePath,
+        entry.name
+      );
+    }
+    const next: ChapterSet = { ...this.set, chapters };
 
     try {
       await this.store.save(next);
@@ -198,6 +231,34 @@ export class ChapterProposalApplier {
 }
 
 /**
+ * 区切りを動かした章立てを作る。
+ *
+ * **元の章の位置で入れ替える**（台帳の並びを崩さない）。動かした先に
+ * 既に別の章が始まっていれば（別の提案を先に承認したなど）、元を外して
+ * その章の改名にする——同じ話から2つの章を始めると台帳が読めなくなる
+ * （`assertUniqueStarts`）。
+ */
+function movedChapters(
+  chapters: readonly Chapter[],
+  fromPath: string,
+  toPath: string,
+  name: string
+): Chapter[] {
+  if (findChapterStartingAt(chapters, toPath)) {
+    return withChapterStartingAt(
+      withoutChapterStartingAt(chapters, fromPath),
+      toPath,
+      name
+    );
+  }
+  // 名前と開始の検査は `withChapterStartingAt` に任せる（空を弾く）
+  const [placed] = withChapterStartingAt([], toPath, name);
+  return chapters.map((chapter) =>
+    chapter.startEpisodePath === fromPath ? placed : chapter
+  );
+}
+
+/**
  * 提案パネルの1件に並べる説明。
  *
  * **どの話から始まるかを最初に出す。** 章の名前は見出しに出ているので、
@@ -211,8 +272,18 @@ export function describeChapterProposal(input: {
   existingName?: string;
   /** 合本の途中を指しているか（承認しても入らない） */
   insideCollected?: boolean;
+  /**
+   * 既存の区切りを動かす提案なら、いまの開始（作者の裁定 2026-10-01）。
+   * 新しい区切り・同じ区切りでは渡さない（印を付けない）
+   */
+  movedFrom?: { label: string; name: string };
 }): string[] {
   const lines = [`${input.label}から始まります`];
+  if (input.movedFrom) {
+    // **押す前に言う。** 作者が決めた区切りが変わるので、新しい章が
+    // 足されるだけだと思わせない
+    lines.push(movedBoundaryText(input.movedFrom.label));
+  }
   if (input.insideCollected) {
     // **押す前に言う。** 押してから断られるより、先に道筋が分かるほうがよい
     lines.push(INSIDE_COLLECTED_REASON);
@@ -565,10 +636,21 @@ function showChapterProposals(
   const applier = new ChapterProposalApplier(material.store, material.set);
   const byId = new Map<
     string,
-    { name: string; startEpisodePath: string; insideCollected: boolean }
+    {
+      name: string;
+      startEpisodePath: string;
+      /** 開始の話の見出し（確認の文言に使う） */
+      label: string;
+      insideCollected: boolean;
+      /** 既存の区切りを動かす提案なら、いまの開始（確認に使う） */
+      movedFrom?: { path: string; label: string; name: string };
+    }
   >();
 
-  const items: RecordUpdateViewItem[] = candidates.map((candidate) => {
+  // **動かすかどうかはコードが決める**（規則3。作者の裁定 2026-10-01）
+  const boundaries = classifyChapterBoundaries(candidates, material.current);
+
+  const items: RecordUpdateViewItem[] = candidates.map((candidate, index) => {
     const episode = material.episodeOf(candidate.startEpisode);
     const startEpisodePath = episodePathFor(
       work.folderPath,
@@ -587,7 +669,28 @@ function showChapterProposals(
       同じ案をもう一度出したときは、これまでどおり1つに畳まれる。
     */
     const id = `ch:${candidate.startEpisode}:${candidate.name}`;
-    byId.set(id, { name: candidate.name, startEpisodePath, insideCollected });
+    const boundary = boundaries[index];
+    const fromPath =
+      boundary.kind === "moved"
+        ? material.current.find(
+            (chapter) => chapter.startEpisode === boundary.fromEpisode
+          )?.startEpisodePath
+        : undefined;
+    const movedFrom =
+      boundary.kind === "moved" && fromPath !== undefined
+        ? {
+            path: fromPath,
+            label: material.labelOf(boundary.fromEpisode),
+            name: boundary.fromName,
+          }
+        : undefined;
+    byId.set(id, {
+      name: candidate.name,
+      startEpisodePath,
+      label: material.labelOf(candidate.startEpisode),
+      insideCollected,
+      movedFrom,
+    });
 
     return {
       id,
@@ -598,6 +701,7 @@ function showChapterProposals(
         existingName: findChapterStartingAt(applier.chapters, startEpisodePath)
           ?.name,
         insideCollected,
+        movedFrom,
       }),
       source: episode.fileName,
       status: "pending" as const,
@@ -616,7 +720,29 @@ function showChapterProposals(
       if (entry.insideCollected) {
         return { ok: false, reason: INSIDE_COLLECTED_REASON };
       }
-      const result = await applier.apply(entry);
+      if (entry.movedFrom) {
+        // **作者が決めた区切りを書き換えるので、一度確かめる**（規則2）。
+        // パネルの「章にする」だけでは、動かすことまで頼んだとは言えない
+        const choice = await vscode.window.showWarningMessage(
+          `章「${entry.movedFrom.name}」の始まりを、` +
+            `${entry.movedFrom.label}から${entry.label}へ動かします。`,
+          {
+            modal: true,
+            detail:
+              "作者が決めた章の区切りを書き換えます。" +
+              `名前は「${entry.name}」になります。`,
+          },
+          MOVE_CHAPTER_LABEL
+        );
+        if (choice !== MOVE_CHAPTER_LABEL) {
+          return { ok: false, reason: "取りやめました（章立ては変えていません）。" };
+        }
+      }
+      const result = await applier.apply({
+        name: entry.name,
+        startEpisodePath: entry.startEpisodePath,
+        ...(entry.movedFrom ? { movedFromPath: entry.movedFrom.path } : {}),
+      });
       // 一覧の折りたたみは台帳から作られるので、入ったらすぐ作り直す
       if (result.ok) options.onChaptersChanged?.();
       return result;
@@ -630,7 +756,15 @@ function showChapterProposals(
 /** AIへ渡す材料と、提案を読み解くための手掛かり */
 interface ChapterMaterial {
   episodes: ChapterProposeEpisode[];
-  current: Array<{ name: string; startEpisode: number | null }>;
+  /**
+   * いまの章立て。`startEpisodePath` は区切りを動かす提案を承認するときに、
+   * 元の区切りを外すのに使う（話数だけでは台帳の章を指せない）
+   */
+  current: Array<{
+    name: string;
+    startEpisode: number | null;
+    startEpisodePath: string;
+  }>;
   /** 台帳。承認のときに使い回す（読み込み時のハッシュを持っているため） */
   store: ChapterStore;
   set: ChapterSet;
@@ -891,6 +1025,7 @@ async function collectMaterial(
       // 開始の話が見つからない章もそのまま渡す（黙って消さない）。
       // 話数が分からないことは、プロンプト側が言葉で伝える
       startEpisode: startNumberOf(chapter, rangeByStart),
+      startEpisodePath: chapter.startEpisodePath,
     })),
     store,
     set,

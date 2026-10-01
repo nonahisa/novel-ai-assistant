@@ -220,6 +220,58 @@ describe("提案の承認と台帳への書き込み", () => {
       "王都の章",
     ]);
   });
+
+  test("区切りを動かす提案は、元の区切りを外して新しい話から始める（第102話→第100話）", async () => {
+    disk.set(
+      chaptersPath,
+      utf8(
+        JSON.stringify({
+          schemaVersion: "1",
+          chapters: [
+            { name: "第一章", startEpisodePath: "本文/001.txt" },
+            { name: "第三章", startEpisodePath: "本文/102.txt" },
+          ],
+        })
+      )
+    );
+    const applier = await applierOf();
+
+    expect(
+      await applier.apply({
+        name: "第三章　嵐",
+        startEpisodePath: "本文/100.txt",
+        movedFromPath: "本文/102.txt",
+      })
+    ).toEqual({ ok: true });
+
+    // **元の区切りを残さない。** 残すと第100話・第101話だけの章ができる
+    expect(saved()).toEqual([
+      { name: "第一章", startEpisodePath: "本文/001.txt" },
+      { name: "第三章　嵐", startEpisodePath: "本文/100.txt" },
+    ]);
+  });
+
+  test("動かす元の区切りが台帳から消えていたら、書かずに断る", async () => {
+    disk.set(
+      chaptersPath,
+      utf8(
+        JSON.stringify({
+          schemaVersion: "1",
+          chapters: [{ name: "第一章", startEpisodePath: "本文/001.txt" }],
+        })
+      )
+    );
+    const before = disk.get(chaptersPath);
+    const applier = await applierOf();
+
+    const result = await applier.apply({
+      name: "第三章　嵐",
+      startEpisodePath: "本文/100.txt",
+      movedFromPath: "本文/102.txt",
+    });
+    expect(result.ok).toBe(false);
+    expect(disk.get(chaptersPath)).toEqual(before);
+  });
 });
 
 describe("提案パネルに出す1件の文言", () => {
@@ -240,6 +292,20 @@ describe("提案パネルに出す1件の文言", () => {
     });
     expect(lines.join("\n")).toContain("第一章");
     expect(lines.join("\n")).toContain("名前");
+  });
+
+  test("既存の区切りを動かす提案には、いまの開始の話を添えて印を付ける", () => {
+    const lines = describeChapterProposal({
+      label: "第100話",
+      reason: "",
+      movedFrom: { label: "第102話", name: "第三章" },
+    });
+    expect(lines).toContain("既存の区切りを動かします（いま第102話から）");
+  });
+
+  test("新しい区切り・同じ区切りには「動かす」の印を付けない", () => {
+    const lines = describeChapterProposal({ label: "第30話", reason: "" });
+    expect(lines.join("\n")).not.toContain("動かします");
   });
 
   test("理由が空なら、その行を出さない（空の行を並べない）", () => {

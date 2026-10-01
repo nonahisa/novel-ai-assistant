@@ -364,6 +364,47 @@ describe("章立て（P-31）", () => {
     expect(result.rejected.length).toBeGreaterThan(0);
   });
 
+  test("**既存の区切りを動かす提案は残して印を付ける**（作者の裁定 2026-10-01）", () => {
+    const folder = copiedWork();
+    fs.writeFileSync(
+      nodePath.join(folder, "設定", "章立て.json"),
+      JSON.stringify({
+        schemaVersion: "1",
+        chapters: [
+          { name: "灯の章", startEpisodePath: "本文/collected.txt" },
+          { name: "夜明けの章", startEpisodePath: "本文/004_よあけ.txt" },
+        ],
+      }),
+      "utf8"
+    );
+    const result = chapterValidate({
+      folder,
+      response: JSON.stringify({
+        chapters: [
+          { name: "灯の章", startEpisode: 1 },
+          { name: "便りの章", startEpisode: 3 },
+        ],
+      }),
+    });
+    if (result.mode !== "chapters") throw new Error("形が違う");
+    // **落とさない**
+    expect(result.chapters.map((chapter) => chapter.startEpisode)).toEqual([
+      1, 3,
+    ]);
+    expect(result.chapters[0].boundary).toEqual({
+      kind: "same",
+      existingName: "灯の章",
+    });
+    expect(result.chapters[1].boundary).toEqual({
+      kind: "moved",
+      fromEpisode: 4,
+      fromName: "夜明けの章",
+    });
+    expect(result.chapters[1].boundaryNote).toBe(
+      "既存の区切りを動かします（いま第4話から）"
+    );
+  });
+
   test("名前だけのときは、区切りを動かさない", () => {
     const result = chapterValidate({
       folder: WORK,
