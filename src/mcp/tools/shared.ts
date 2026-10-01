@@ -42,7 +42,27 @@ import { decideChunkSize, type Chunk } from "../../core/chunker";
  */
 
 /** 作者に見せる、その場で直せる失敗。転送層が `isError` にして返す */
-export class McpToolError extends Error {}
+export class McpToolError extends Error {
+  /**
+   * @param detail 機械の読める中身（任意）。転送層が文章の**あとに**別の
+   *   text として返す（`mcpToolErrorDetail`）。前提の断りの `nextStep` が
+   *   これで、外部AIが日本語を読み解かずに次の呼び出しを決められる
+   *   （2026-10-01、不具合17）。文章は先頭のまま変えないので、
+   *   文章だけを読む呼び出し元は今までどおり動く
+   */
+  constructor(
+    message: string,
+    readonly detail?: Readonly<Record<string, unknown>>
+  ) {
+    super(message);
+  }
+}
+
+/** 失敗に添える機械の読める中身（JSON の文字列）。無ければ undefined */
+export function mcpToolErrorDetail(error: unknown): string | undefined {
+  if (!(error instanceof McpToolError) || !error.detail) return undefined;
+  return JSON.stringify(error.detail, null, 2);
+}
 
 /**
  * 設定資料の置き場所（`設定/` の下）。

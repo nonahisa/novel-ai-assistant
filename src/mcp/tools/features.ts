@@ -11,8 +11,10 @@ import {
 } from "../../core/mcpFeatures";
 import {
   featureNeeds,
+  featurePrerequisiteDetail,
   featurePrerequisiteRefusal,
   missingFeaturePrerequisites,
+  prerequisitesToInspect,
 } from "../../core/featurePrerequisites";
 import {
   FOLDER_INPUT,
@@ -892,10 +894,16 @@ function chatArgs(input: FeatureCallInput): {
 function assertPrerequisites(input: FeatureCallInput): void {
   const needs = featureNeeds(input.feature);
   if (needs.length === 0) return;
-  const missing = missingFeaturePrerequisites(
-    input.feature,
-    presentPrerequisites(input.folder, needs)
+  /*
+    次の一手を決めるために、下書きを作る feature の前提まで見る
+    （プロット逆算は各話あらすじが要る。2026-10-01、不具合17）。
+    何を見るかは core が決める（ここへ書き写さない）
+  */
+  const present = presentPrerequisites(
+    input.folder,
+    prerequisitesToInspect(input.feature)
   );
+  const missing = missingFeaturePrerequisites(input.feature, present);
   if (missing.length === 0) return;
   throw new McpToolError(
     featurePrerequisiteRefusal({
@@ -903,7 +911,10 @@ function assertPrerequisites(input: FeatureCallInput): void {
       missing,
       // `novel.scan` と同じ理由の文を添える（ひな形のまま、など）
       reasons: prerequisiteReasons(input.folder, missing),
-    })
+      present,
+    }),
+    // 同じ断りを機械の読める形でも返す（nextStep。外部AIが続けて呼べるように）
+    { ...featurePrerequisiteDetail({ feature: input.feature, missing, present }) }
   );
 }
 

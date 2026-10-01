@@ -179,6 +179,171 @@ export function prerequisiteStatuses(
 }
 
 /**
+ * 前提を作る手助けとして、外部AIが呼べる feature（2026-10-01、不具合17）。
+ *
+ * **案を返すだけで、置くのは作者である**（6.87.7）。プロット逆算は
+ * `設定/plot.md` を書き換えず、下書きを返して終わる——だから次の一手は
+ * 「下書きを作り、作者に見せ、作者が承認してから置く」になる。
+ *
+ * **画面の関門（`features/prerequisiteGate.ts`）には無い道である。** 画面は
+ * プロットが無ければ「プロット自力作成」だけを出す。作る操作の名前は
+ * `PREREQUISITES.makeLabel` から引き（画面と同じ表）、ここが持つのは
+ * 「外部AIが下書きを手伝える feature」の対応だけにする。
+ *
+ * **載せないもの。** 設定資料・各話あらすじは、外部AIの出した案を作者が
+ * 置く道が一括では無い（あらすじは置き場へ届ける口が無い。設定資料は
+ * 1記録ずつ `novel.propose` で承認待ちへ置けるが、作品まるごとを
+ * 外から回すより、作者が「一括抽出」を1回押すほうが速く確か）。
+ * 単話プロットは作者の構想そのものなので、AIに起こさせない。
+ */
+const PREREQUISITE_DRAFT_FEATURES: Readonly<
+  Partial<Record<Prerequisite, FeatureName>>
+> = {
+  plot: "plotReverse",
+};
+
+/**
+ * 断ったあとの、次の一手（機械の読める形。`novel.prompt`／`novel.run` の
+ * 断りに添えて返す）。
+ *
+ * **1つだけ返す**（CLAUDE.md の実装ルール5「種別ごとに次の操作を1つ示す」）。
+ * 代わりの feature（`featureAlternative`）は別の欄で返す——あちらは
+ * 「前提を作らずに別の機能で済ます」道で、こちらは「前提を作る」道である。
+ */
+export interface PrerequisiteNextStep {
+  /** どの前提を作る一手か */
+  readonly prerequisite: Prerequisite;
+  /**
+   * 外部AIがそのまま呼べる feature（下書きを作るだけのもの）。
+   * 無ければ作者の画面の操作しか無い
+   */
+  readonly feature?: FeatureName;
+  /** 何をするかの一文。**作者が行う／作者が承認する**ことを必ず書く */
+  readonly action: string;
+}
+
+/**
+ * その前提を作る、次の一手。
+ *
+ * @param present いま揃っている前提。下書きを作る feature 自身の前提を
+ *   見るのに使う——**揃っていない feature を勧めると、呼んだ先でまた断られる**
+ *   （プロット逆算は各話あらすじが要る）
+ */
+export function prerequisiteNextStep(
+  kind: Prerequisite,
+  present: Iterable<Prerequisite>
+): PrerequisiteNextStep {
+  const info = prerequisiteInfo(kind);
+  const byAuthor = `作者が画面の「${info.makeLabel}」で${info.label}を作る`;
+  const draft = PREREQUISITE_DRAFT_FEATURES[kind];
+  if (draft) {
+    const draftMissing = missingFeaturePrerequisites(draft, present);
+    if (draftMissing.length === 0) {
+      return {
+        prerequisite: kind,
+        feature: draft,
+        action:
+          `${FEATURE_LABELS[draft]}（feature: ${draft}）で${info.label}の下書きを作り、作者に見せる。` +
+          "置くのは作者が承認してから（外部AIは作品を書き換えません）。" +
+          `${byAuthor}こともできます。`,
+      };
+    }
+    // 下書きの道が閉じているわけを添える。黙って省くと、外部AIは
+    // その feature を試して、もう一度断られる
+    const names = draftMissing
+      .map((missing) => `「${prerequisiteInfo(missing).label}」`)
+      .join("と");
+    return {
+      prerequisite: kind,
+      action:
+        `${byAuthor}（外部AIは作品を書き換えません）。` +
+        `${FEATURE_LABELS[draft]}（feature: ${draft}）で下書きを作るには、先に${names}が要ります。`,
+    };
+  }
+  return {
+    prerequisite: kind,
+    action: `${byAuthor}（外部AIは作品を書き換えません）。`,
+  };
+}
+
+/**
+ * 断りの次の一手を決めるために、揃っているかを見ておく前提。
+ *
+ * feature 自身の前提に、**下書きを作る feature の前提**を足したもの。
+ * 呼ぶ側（MCP）はファイルを読んで揃っているかを見るので、何を見るかを
+ * ここで決めておく（見る対象を MCP 側に書き写さない）。
+ */
+export function prerequisitesToInspect(
+  feature: FeatureName
+): readonly Prerequisite[] {
+  const needs = featureNeeds(feature);
+  const drafts = needs.flatMap((kind) => {
+    const draft = PREREQUISITE_DRAFT_FEATURES[kind];
+    return draft ? featureNeeds(draft) : [];
+  });
+  return [...new Set([...needs, ...drafts])];
+}
+
+/**
+ * 断りに添える、機械の読める中身。外部AIが続けて呼べるように返す。
+ *
+ * 文章（`featurePrerequisiteRefusal`）と**同じものを別の形で**持つ。
+ * 文章だけだと、外部AIは「次に何を呼べばよいか」を日本語から拾うことになる。
+ */
+export interface FeaturePrerequisiteDetail {
+  readonly refusal: "prerequisite";
+  readonly feature: FeatureName;
+  readonly missing: readonly Prerequisite[];
+  readonly nextStep: PrerequisiteNextStep;
+  readonly alternative?: { readonly feature: FeatureName };
+}
+
+export function featurePrerequisiteDetail(input: {
+  readonly feature: FeatureName;
+  readonly missing: readonly Prerequisite[];
+  readonly present: Iterable<Prerequisite>;
+}): FeaturePrerequisiteDetail {
+  const alternative = featureAlternative(input.feature);
+  return {
+    refusal: "prerequisite",
+    feature: input.feature,
+    missing: input.missing,
+    // 足りないものが複数あっても、一手は最初の1つ（画面の関門と同じ。
+    // 作者が順に片づけられる）
+    nextStep: prerequisiteNextStep(input.missing[0], input.present),
+    ...(alternative ? { alternative: { feature: alternative.feature } } : {}),
+  };
+}
+
+/** 次の一手の1行（断りの文の中に置く） */
+export function nextStepLine(step: PrerequisiteNextStep): string {
+  return `次にやること：${step.action}`;
+}
+
+/**
+ * 関門を抜けたあと、**機能の中で**前提の欠けが分かったときの一手。
+ *
+ * 関門は「1つでも書かれていれば揃っている」と粗く見る（6.94.6）。だから
+ * ほかの話の単話プロットは書けていて、選んだ話だけがひな形のまま、という
+ * 断りは機能の中で起きる。その断りにも同じ一手を添える——関門の断りにだけ
+ * 一手があると、外部AIは2度目の断りで行き止まる。
+ *
+ * 揃っている前提は分からないので空として扱う（下書きの feature は勧めない
+ * 側へ倒す。呼べないものを勧めない）。
+ */
+export function inlinePrerequisiteRefusal(
+  feature: FeatureName,
+  kind: Prerequisite
+): { readonly line: string; readonly detail: FeaturePrerequisiteDetail } {
+  const detail = featurePrerequisiteDetail({
+    feature,
+    missing: [kind],
+    present: [],
+  });
+  return { line: nextStepLine(detail.nextStep), detail };
+}
+
+/**
  * 前提が足りないときの断り文句（外部AI向け）。
  *
  * **3つを必ず言う**（作者の指示）。①足りないもの ②それを作る操作の名前と、
@@ -191,6 +356,12 @@ export function featurePrerequisiteRefusal(input: {
   readonly missing: readonly Prerequisite[];
   /** 揃っていない理由（言えるものだけ）。`novel.scan` と同じ文を出す */
   readonly reasons?: PrerequisiteReasons;
+  /**
+   * いま揃っている前提（`prerequisitesToInspect` の分だけ見ればよい）。
+   * 次の一手で下書きの feature を勧めてよいかを決める。省くと「揃っていない」
+   * 側へ倒す——呼べない feature を勧めるより、作者の操作を示すほうが安全
+   */
+  readonly present?: Iterable<Prerequisite>;
 }): string {
   const infos = input.missing.map(prerequisiteInfo);
   const names = infos.map((info) => `「${info.label}」`).join("と");
@@ -213,6 +384,17 @@ export function featurePrerequisiteRefusal(input: {
     */
     `作るのは${makes}で、この操作は作者が画面で行います` +
       "（外部AIは作品を書き換えません）。",
+    /*
+      **次の一手を1つ**（2026-10-01、不具合17。実装ルール5）。上の行は
+      「何が要るか」までで、外部AIは次に何を呼べばよいかを決められなかった
+    */
+    nextStepLine(
+      featurePrerequisiteDetail({
+        feature: input.feature,
+        missing: input.missing,
+        present: input.present ?? [],
+      }).nextStep
+    ),
   ];
 
   const alternative = featureAlternative(input.feature);

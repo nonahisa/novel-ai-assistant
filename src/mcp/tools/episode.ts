@@ -48,6 +48,7 @@ import {
   episodePlotUnwrittenReason,
   parseEpisodePlot,
 } from "../../core/episodePlotDoc";
+import { inlinePrerequisiteRefusal } from "../../core/featurePrerequisites";
 import { parseSynopsisSet } from "../../models/synopsis";
 import { parseCharacter } from "../../models/character";
 import { withLineNumbers, type Chunk } from "../../core/chunker";
@@ -288,9 +289,13 @@ export function deviationPrompt(input: DeviationPromptInput) {
   if (!plot) {
     // **プロットが無ければ、逸脱は測れない。** 黙って空のプロットで
     // 問うと、AIが「筋書きが無い」ことを逸脱として挙げ始める
+    // ふつうは関門（`assertPrerequisites`）が先に断る。ここへ来るのは
+    // 読めないプロットを「揃っている」と扱った場合など。同じ一手を添える
+    const refusal = inlinePrerequisiteRefusal("deviation", "plot");
     throw new McpToolError(
       "プロット（設定/plot.md）が見つかりません。逸脱はプロットと突き合わせる機能なので、" +
-        "プロットが無いままでは測れません。"
+        `プロットが無いままでは測れません。\n${refusal.line}`,
+      { ...refusal.detail }
     );
   }
   const episode = deviationEpisodeOf(input);
@@ -435,7 +440,11 @@ function readEpisodePlotDoc(input: EpisodePlotPromptInput) {
   // 判定は `novel.scan` と同じ関数（食い違わせない。`episodePlotDoc.ts`）
   const unwritten = episodePlotUnwrittenReason(doc);
   if (unwritten) {
-    throw new McpToolError(`この単話プロットは${unwritten}`);
+    // 次の一手を添える（関門の断りと同じもの。不具合17）
+    const refusal = inlinePrerequisiteRefusal("episodePlot", "episodePlot");
+    throw new McpToolError(`この単話プロットは${unwritten}\n${refusal.line}`, {
+      ...refusal.detail,
+    });
   }
   return doc;
 }

@@ -9,7 +9,11 @@ import {
   withStaleNote,
   type BundleStaleness,
 } from "./staleness";
-import { McpToolError, describeError } from "./tools/shared";
+import {
+  McpToolError,
+  describeError,
+  mcpToolErrorDetail,
+} from "./tools/shared";
 import { VALIDATE_NOTE } from "./tools/run";
 import {
   recordExternalAccess,
@@ -147,7 +151,19 @@ function fail(error: unknown, staleness?: BundleStaleness): CallToolResult {
   const message = staleness?.stale
     ? `${base}\n${staleBundleLine(staleness.reason)}`
     : base;
-  return { content: [{ type: "text", text: message }], isError: true };
+  /*
+    **機械の読める中身は、文章のあとに別の text で返す**（2026-10-01、
+    不具合17。前提の断りの nextStep）。文章の先頭は変えないので、
+    1つ目の text だけを読む呼び出し元は今までどおり動く
+  */
+  const detail = mcpToolErrorDetail(error);
+  return {
+    content: [
+      { type: "text", text: message },
+      ...(detail ? [{ type: "text" as const, text: detail }] : []),
+    ],
+    isError: true,
+  };
 }
 
 /**
