@@ -546,7 +546,10 @@ server.registerTool(
       "製品と同じ検算とマージに通し、**新しい記録（人物・能力・場所・組織・世界観）は 設定/ へ保存、" +
       "既存の記録への変更は承認待ち**（.aiwriter/pending-characters/・pending-settings/）へ置きます。" +
       "既存のファイルは書き換えず、同じ名前が既にあれば断って refused で返します。" +
-      "読めない設定ファイルがあれば何も書かずに止めます。dryRun: true で、書かずに内訳だけを返します。",
+      "読めない設定ファイルがあれば何も書かずに止めます。dryRun: true で、書かずに内訳と、" +
+      "新しい人物のまとめ直しの材料（materials。names・offset・limit で絞れる）を返します。" +
+      "novel.validate（settingsEnrich、options.fromExtract、stash: true）で貯めたまとめがあれば、" +
+      "新しい人物の本体の欄（性格・外見など）へ入れて保存します（面と話ごとの値は残します。既存の記録には当てません）。",
     inputSchema: EXTRACT_COMMIT_INPUT,
   },
   tool("novel.extract.commit", (args: ExtractCommitInput) => extractCommit(args))

@@ -63,6 +63,10 @@ import {
 import { pastSceneSourcesOf } from "./contradiction";
 import { CHARACTER_PROPOSE_FIELDS } from "./propose";
 import { runOnce, validateWith, type RunnerInput } from "./run";
+import { planExtractCommit } from "./extractCommit";
+import { recordFingerprint, stashExtractEnrich } from "./extractEnrichStash";
+import { isBodyComposedOfFacets } from "../../core/personalityFacets";
+import { CUSTOM_FIELD_PREFIX } from "../../core/settingsEdit";
 
 /**
  * 「AIで再読込」（P-20、設計書6.31.1）を外から呼ぶ（作者の裁定、2026-10-01）。
@@ -115,6 +119,13 @@ export interface SettingsEnrichInput {
   id?: string;
   /** 作者の留意点（設計書6.31.1）。原文のまま渡す */
   notes?: string;
+  /**
+   * 台帳の記録ではなく、**抽出の貯めから保存する予定の新しい人物**を対象にする
+   * （2026-10-02、作者の裁定「保存の前にまとめて、承認なしで入れる」）
+   */
+  fromExtract?: boolean;
+  /** `fromExtract` のときだけ。検算に通った値を、保存のときのまとめとして貯める */
+  stash?: boolean;
 }
 
 const SUBDIR_OF: Record<SettingsKind, string> = {
@@ -215,6 +226,7 @@ interface EnrichTarget {
  * 考えで、取り違えたまま承認されると別人の資料が書き換わる。
  */
 function loadTarget(input: SettingsEnrichInput): EnrichTarget {
+  if (input.fromExtract) return loadStagedTarget(input);
   const kind = input.recordKind ?? "character";
   const name = input.name?.trim();
   const id = input.id?.trim();
@@ -244,6 +256,93 @@ function loadTarget(input: SettingsEnrichInput): EnrichTarget {
     searchTermsFor(kind, record)
   );
   return { kind, record, customFields, characters, excerpts };
+}
+
+/**
+ * まだ保存していない新しい人物を、まとめ直しの対象として揃える（2026-10-02）。
+ *
+ * レコードは `novel.extract.commit` と**同じ関数**（`planExtractCommit`）で組む。
+ * 別の道で組むと、まとめ直したレコードと保存するレコードが食い違う。
+ *
+ * **既存の記録は断る。** そちらへの変更は承認待ちへ回る道で、作者が見る前の
+ * 案をまとめで書き換えることになる。通常の再読込（`fromExtract` なし）を使う。
+ * **人物だけ。** 人物以外は話ごとの値を残す欄（`changes`）を持たないので、
+ * まとめると抽出で読んだ元の値が消える（実装ルール2「値は消えない」）。
+ */
+function loadStagedTarget(input: SettingsEnrichInput): EnrichTarget {
+  const kind = input.recordKind ?? "character";
+  if (kind !== "character") {
+    throw new McpToolError(
+      "保存の前のまとめ直し（options.fromExtract）は、新しい人物（recordKind: character）だけで使えます。"
+    );
+  }
+  const name = input.name?.trim();
+  const id = input.id?.trim();
+  if (!name && !id) {
+    throw new McpToolError(
+      "保存の前のまとめ直し（options.fromExtract）には options.name（新しい人物の名前）か options.id が要ります" +
+        "（novel.extract.commit の dryRun が返す materials の name・id）。"
+    );
+  }
+  const plan = planExtractCommit(input.folder);
+  const matches = (character: Character): boolean =>
+    id ? character.id === id : character.name === name;
+  const record = plan.result.characters.created.find(matches);
+  if (!record) {
+    const existing = [
+      ...plan.result.characters.updated,
+      ...plan.baseline.characters,
+    ].some(matches);
+    throw new McpToolError(
+      existing
+        ? `「${id ?? name}」は台帳に既にある記録です（既存の記録への変更は承認待ちへ回るので、保存の前のまとめ直しは使えません。` +
+            "options.fromExtract を外した再読込で、承認待ちへ置く案を作ってください）。"
+        : `保存する予定の新しい人物に「${id ?? name}」が見当たりません` +
+            "（novel.extract.commit の dryRun が返す materials の名前を、別名ではなくそのまま渡してください）。"
+    );
+  }
+  /*
+    【現在の設定】の組織の構成員と、はじいた記述の行き先を引くための顔ぶれ。
+    台帳の人物（承認待ちの案があればそちら）に、新しい人物を足したもの
+  */
+  const updated = new Map(plan.result.characters.updated.map((item) => [item.id, item]));
+  const characters = [
+    ...plan.baseline.characters.map((item) => updated.get(item.id) ?? item),
+    ...plan.result.characters.created,
+  ];
+  const customFields = readCustomFields(input.folder);
+  const excerpts = collectMentionExcerpts(
+    pastSceneSourcesOf(input.folder),
+    searchTermsFor(kind, record)
+  );
+  return { kind, record, customFields, characters, excerpts };
+}
+
+/**
+ * まとめた値を本体へ入れても、元の値が別の欄に残るか（実装ルール2「値は消えない」）。
+ *
+ * - 性格・口調：本体が面をつないだものなら、面（話数と根拠つき）が残る
+ * - そのほかの項目：話ごとの値の記録（`changes`）に同じ値があれば残る
+ * - 作者が足した項目：残す欄が無い（空欄を埋めるときだけ入れる）
+ */
+function originalKeptElsewhere(
+  character: Character,
+  key: string,
+  custom: boolean,
+  before: string
+): boolean {
+  if (before.length === 0) return true;
+  if (custom) return false;
+  if (key === "personality") return isBodyComposedOfFacets(character);
+  if (key === "speechStyle") {
+    return isBodyComposedOfFacets({
+      personality: character.speechStyle,
+      personalityFacets: character.speechStyleFacets,
+    });
+  }
+  return character.changes.some(
+    (change) => change.field === key && change.value === before
+  );
 }
 
 export function settingsEnrichPrompt(input: SettingsEnrichInput) {
@@ -279,6 +378,14 @@ export function settingsEnrichPrompt(input: SettingsEnrichInput) {
     excerptCount: excerpts.length,
     excerptChars: excerpts.reduce((total, excerpt) => total + excerpt.text.length, 0),
     userPrompt,
+    ...(input.fromExtract
+      ? {
+          fromExtract: true as const,
+          nextStep:
+            "答えを novel.validate（feature: settingsEnrich、同じ options、stash: true）で検算すると、" +
+            "通った値がまとめとして貯まり、novel.extract.commit がこの人物の本体の欄へ入れて保存します。",
+        }
+      : {}),
     note:
       "本文の抜粋は、名前と別名が出る場面を作品全体から均等に選んだものです" +
       "（画面は意味検索を先に試します。MCP では使いません）。",
@@ -324,6 +431,10 @@ export function settingsEnrichValidate(
     excerptText,
     knownChapters: knownChaptersOfWork(input.folder),
   });
+
+  if (input.fromExtract) {
+    return stagedSummaryOf(input, target, checked, parsed, excerptText);
+  }
 
   const proposeFields: readonly string[] =
     kind === "character" ? CHARACTER_PROPOSE_FIELDS : EXTERNAL_PROPOSE_FIELDS[kind];
@@ -419,6 +530,90 @@ export function settingsEnrichValidate(
       : "承認待ちへ置ける提案はありません。",
     note:
       "台帳（設定/）にも承認待ちにも書いていません。はじいた記述の行き先（挿入・新規）は、設定資料パネルの「AIで再読込」でだけ選べます。",
+  };
+}
+
+/** まとめに入れない提案の理由（`fromExtract`） */
+const NOT_KEPT_REASON =
+  "いまの値を残す欄がありません（まとめると抽出で読んだ値が消えるので、入れません）";
+
+/**
+ * 保存の前のまとめ直し（`fromExtract`）の検算の結果（2026-10-02）。
+ *
+ * 検算は台帳の再読込と**同じ関数**（`checkEnrichProposals`）を通ったもの。
+ * 違うのは採り方だけ——製品は空欄を埋める提案だけを既定で選ぶが、ここは作者の
+ * 裁定で**置き換えも入れる**（抽出で積んだ値を解説としてまとめ直すのが目的）。
+ * ただし元の値が面・話ごとの値に残る欄に限る（`originalKeptElsewhere`）。
+ */
+function stagedSummaryOf(
+  input: SettingsEnrichInput,
+  target: EnrichTarget,
+  checked: ReturnType<typeof checkEnrichProposals>,
+  parsed: Record<string, unknown>,
+  excerptText: string
+) {
+  const { kind, record, customFields } = target;
+  const character = record as Character;
+  const edits: Record<string, string> = {};
+  const notStashed: NotProposed[] = [];
+  for (const { field, before, after } of checked.proposals) {
+    if (!originalKeptElsewhere(character, field.key, field.custom === true, before)) {
+      notStashed.push({ field: field.key, label: field.label, after, reason: NOT_KEPT_REASON });
+      continue;
+    }
+    // 鍵は設定資料パネルの反映と同じ形（作者が足した項目は接頭辞つき。`toRecordEdits`）
+    edits[field.custom ? `${CUSTOM_FIELD_PREFIX}${field.key}` : field.key] = after;
+  }
+
+  const hasEdits = Object.keys(edits).length > 0;
+  const stashed = input.stash === true && hasEdits;
+  if (stashed) {
+    stashExtractEnrich(input.folder, {
+      recordKind: kind,
+      name: record.name,
+      recordHash: recordFingerprint(record),
+      edits,
+    });
+  }
+
+  const misattributed = parseMisattributedValues(
+    parsed[MISATTRIBUTED_KEY],
+    excerptText,
+    misattributedAllowedFields(kind, customFields)
+  );
+  return {
+    recordKind: kind,
+    id: record.id,
+    name: record.name,
+    fromExtract: true as const,
+    /** いまの値（抽出で積んだもの）と、まとめた値 */
+    proposals: checked.proposals.map(({ field, before, after }) => ({
+      field: field.key,
+      label: field.label,
+      before,
+      after,
+    })),
+    /** 保存のとき本体の欄へ入れる値（貯めたもの。貯めなければ入れる予定の値） */
+    edits,
+    notStashed,
+    /** はじいた記述。**まとめには入れない**（行き先は設定資料パネルで作者が選ぶ） */
+    misattributed: misattributed.entries.map((entry) => ({
+      ...entry,
+      destination: resolveMisattributedDestination(entry.belongsTo, target.characters),
+    })),
+    dropped: {
+      unknownCitations: checked.unknownCitations,
+      speechEchoes: checked.speechEchoes,
+      misattributed: droppedTotal(misattributed.dropped),
+    },
+    stashed,
+    nextStep: stashed
+      ? "まとめを貯めました。novel.extract.commit で保存すると、この人物の本体の欄へ入ります（面と話ごとの値は残ります）。"
+      : !hasEdits
+        ? "入れられるまとめがありません（検算で落ちたか、いまの値と同じでした）。この人物は抽出の値のまま保存されます。"
+        : "貯めていません。stash: true を付けて検算し直すと、保存のときに入ります。",
+    note:
+      "製品の「AIで再読込」と同じ検算を通しました。台帳（設定/）にも承認待ちにも書いていません。",
   };
 }
 

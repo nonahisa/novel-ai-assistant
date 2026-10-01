@@ -259,6 +259,7 @@ const OPTIONS_TABLE =
   "name: characterName※（いまの名前）・origin。" +
   "settingsEnrich: name※か id※（台帳の記録）・recordKind（character〈既定〉／ability／organization／location／world）・notes（作者の留意点）。" +
   "結果の proposeArgs を novel.propose へ渡すと承認待ちへ置けます（run は書きません）。" +
+  "fromExtract: true なら、抽出の貯めから保存する予定の新しい人物が対象（validate の stash で、保存の前のまとめとして貯まる）。" +
   "chapter: nameOnly。" +
   "catchphrase: blurb・rejected。";
 
@@ -299,8 +300,8 @@ export const NOVEL_VALIDATE_INPUT = {
     .boolean()
     .optional()
     .describe(
-      "settings・synopsis・blurb だけ。true なら検算が通った答えを貯め、" +
-        "settings は novel.extract.commit、synopsis・blurb は novel.synopsis.commit で資料へ保存できるようにします"
+      "settings・synopsis・blurb と settingsEnrich（options.fromExtract のとき）だけ。true なら検算が通った答えを貯め、" +
+        "settings と settingsEnrich は novel.extract.commit、synopsis・blurb は novel.synopsis.commit で資料へ保存できるようにします"
     ),
   ...optionsInput(OPTIONS_SEE_RUN),
 };
@@ -731,6 +732,8 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
       settingsEnrichValidate({
         ...settingsEnrichArgs(input),
         response: needResponse(input),
+        // 貯めるのは保存の前のまとめ直し（fromExtract）だけ。断りは `novelValidate`
+        stash: input.stash,
       }),
     run: (input) =>
       settingsEnrichRun({ ...settingsEnrichArgs(input), ...runnerArgs(input) }),
@@ -829,6 +832,7 @@ function settingsEnrichArgs(input: FeatureCallInput): {
   name?: string;
   id?: string;
   notes?: string;
+  fromExtract?: boolean;
 } {
   return {
     folder: input.folder,
@@ -836,6 +840,7 @@ function settingsEnrichArgs(input: FeatureCallInput): {
     name: option(input, "name", z.string()),
     id: option(input, "id", z.string()),
     notes: option(input, "notes", z.string()),
+    fromExtract: option(input, "fromExtract", z.boolean()),
   };
 }
 
@@ -953,9 +958,24 @@ export function novelValidate(input: FeatureCallInput): unknown {
     抽出（novel.extract.commit）と、各話あらすじ・作品紹介文（novel.synopsis.commit）。
     ほかの機能で黙って無視すると、呼んだ側は「貯めた」と思い込み、保存で何も出てこない
   */
+  /*
+    AIで再読込は、**保存の前のまとめ直し（options.fromExtract）だけ**貯められる
+    （2026-10-02）。台帳の記録への再読込は承認待ちへ置く道（novel.propose）で、
+    貯めても保存する道が無い
+  */
+  if (input.stash === true && input.feature === "settingsEnrich") {
+    if (input.options?.fromExtract !== true) {
+      throw new McpToolError(
+        `${who(input)} で stash を使えるのは、保存の前のまとめ直し（options.fromExtract: true）だけです。` +
+          "台帳の記録への再読込は、結果の proposeArgs を novel.propose へ渡してください。"
+      );
+    }
+    return FEATURES[input.feature].validate(input);
+  }
   if (input.stash === true && !STASHABLE_FEATURES.includes(input.feature)) {
     throw new McpToolError(
-      `stash は設定資料の抽出・各話あらすじ・作品紹介文（feature: ${STASHABLE_FEATURES.join("／")}）だけで使えます。${who(input)} の答えは貯めません。`
+      `stash は設定資料の抽出・各話あらすじ・作品紹介文（feature: ${STASHABLE_FEATURES.join("／")}）と、` +
+        `保存の前のまとめ直し（settingsEnrich の options.fromExtract）だけで使えます。${who(input)} の答えは貯めません。`
     );
   }
   return FEATURES[input.feature].validate(input);
