@@ -35,11 +35,13 @@ import { FOLDER_INPUT, McpToolError } from "./shared";
  *
  * ## ラベルは、解かずにそのまま渡す
  *
- * ラベルとコマンドIDの対応表（`ACTION_TREE`）は `views/actionList.ts` に
- * あり、**あれは `vscode` を静的 import している**ので、この束からは読めない
- * （実装ルール7。`mcpReach.test.ts` が見張っている）。
- * **対応表の写しを `core` へ作らない**——117項目を二重に持つと、
- * 片方だけが古くなる日が必ず来る。名前のまま書いて、**持っている側で解く。**
+ * ラベルとコマンドIDの対応表（`ACTION_TREE`）は 0.94.4 から
+ * `core/actionTree.ts` にあり、`vscode` に依存しないので**この束からも読める**。
+ * それでも**ここでは解かない**——光らせるのは拡張機能の側で、そちらは
+ * 同じ木を読んで解く（`spotlightRequestWatcher.ts`）。ここで解くと、
+ * 返す `command` が変わり、知らない名前を断るかどうかという振る舞いも
+ * 変わる。**対応表の写しも作らない**（二重に持つと片方だけが古くなる）。
+ * 名前のまま書いて、**光らせる側で解く。**
  */
 
 export const GUIDE_SPOTLIGHT_INPUT = {

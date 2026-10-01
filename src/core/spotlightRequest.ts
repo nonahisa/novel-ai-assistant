@@ -45,9 +45,9 @@ export interface SpotlightRequestEntry {
    * 光らせる項目の表示名。`command` で頼まれたときは空。
    *
    * **ラベルからコマンドIDを引くのは、読む側（拡張機能）である。**
-   * 対応表を持っているのは `views/actionList.ts` の `ACTION_TREE` だけで、
-   * あれは `vscode` を引き込むので MCP の束からは読めない。**写しを
-   * 作らずに済ませる**ために、名前のまま渡して向こうで解く。
+   * 対応表は `core/actionTree.ts` の `ACTION_TREE` だけが持つ（0.94.4 で
+   * `views` から移り、MCP の束からも読めるようになった）。それでも書く側は
+   * 解かずに名前のまま渡す——光らせる側が同じ木で解けば足り、写しも要らない。
    */
   label: string;
 }

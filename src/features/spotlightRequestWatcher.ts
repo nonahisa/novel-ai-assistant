@@ -138,9 +138,11 @@ export class SpotlightRequestWatcher {
       return undefined;
     }
     /*
-      **ラベルはここで解く。** 対応表（`ACTION_TREE`）を持っているのは
-      この側だけで、MCP の束からは読めない（`vscode` を引き込むため）。
-      写しを作らずに済ませる代わりに、解けなかったことをログへ残す。
+      **ラベルはここで解く。** 対応表（`ACTION_TREE`。`core/actionTree.ts`）は
+      MCP の束からも読めるが、光らせるのはこの側なので、解くのもここに
+      寄せる（MCP は名前のまま置く）。解けなかったことはログへ残す。
+      **同じラベルが2つあるとき（一覧に出ない隠れた道）は、先に並ぶ
+      一覧の項目が光る**（`spotlightFromAI.test.ts` が見張っている）。
     */
     const found = findMenuCommandByLabel(entry.label, menuEntries());
     if (!found) {

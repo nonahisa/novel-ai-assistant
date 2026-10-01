@@ -23,6 +23,11 @@ import type {
 } from "../../../src/features/actionSpotlight";
 import { findAction, menuEntries } from "../../../src/views/actionList";
 import type { WorkEntry } from "../../../src/models/types";
+import {
+  allActions,
+  menuEntries as coreMenuEntries,
+} from "../../../src/core/actionTree";
+import { findMenuCommandByLabel } from "../../../src/core/menuMentions";
 
 /**
  * AI の答えで、メニュー項目を2回点滅させる（設計書6.104。0.75.6）。
@@ -221,6 +226,39 @@ describe("外部（MCP guide.spotlight）", () => {
     expect(IGNORED_PATHS).toContain(".aiwriter/history/spotlight.jsonl");
     // 隣の記録（原稿がどこまで外へ出たか）は**同期する**
     expect(IGNORED_PATHS).not.toContain(".aiwriter/history/external.jsonl");
+  });
+
+  test("操作の木のラベルで頼むと、そのラベルのまま届き、木の側で同じ操作へ解ける", () => {
+    /*
+      **MCP は対応表の写しを持たない**（`core/actionTree.ts` が唯一の表）。
+      ラベルで頼まれたときに、返す名前と見張りが解く操作が、木と
+      食い違わないことを全項目で確かめる。ラベルが重なると、後ろの
+      項目はラベルでは指せなくなる。
+
+      **一覧に出ない項目（`hiddenFromActionList`）は、出ている項目と同じ
+      ラベルを持ってよい**——いまは「矛盾検知」が2つある（入口と、
+      事実の照合だけを走らせる隠れた道）。ラベルで頼まれたら、作者に
+      見えているほう（先に並ぶ入口）が光るのが正しい。
+    */
+    const entries = coreMenuEntries();
+    const visible = allActions().filter((item) => !item.hiddenFromActionList);
+    const labels = visible.map((item) => item.label.trim());
+    const duplicated = labels.filter((label, at) => labels.indexOf(label) !== at);
+    expect(duplicated).toEqual([]);
+
+    for (const item of allActions()) {
+      const result = guideSpotlight({ folder, label: item.label });
+      expect(result.label).toBe(item.label.trim());
+      expect(result.command).toBe("");
+      const resolved = findMenuCommandByLabel(result.label, entries);
+      const shown = visible.find(
+        (other) => other.label.trim() === item.label.trim()
+      );
+      expect(resolved).toBe(shown ? shown.command : item.command);
+    }
+    expect(findMenuCommandByLabel("矛盾検知", entries)).toBe(
+      "novelai.checkContradictions"
+    );
   });
 
   test("サーバーに登録してあり、記録も取られる", () => {
