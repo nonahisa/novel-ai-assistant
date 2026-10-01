@@ -429,6 +429,31 @@ describe("助言の構え（1.9）：無理に言わない・ほめる所は省�
 });
 
 /**
+ * 総評は診断だけ（1.3。作者の裁定 2026-10-01）。
+ * 直し方・改善の方向は「直す方向」の節にまとめ、総評と中身を重ねない。
+ * 機械で見分けるのは難しいので、守らせる場所はプロンプトの指示である。
+ */
+describe("総評は診断だけ（1.3）", () => {
+  const input = { workTitle: "作品", genre: "", logline: "", openingText: "本文" };
+  const reader: PublicityReader = { source: "aim", types: ["light"], reason: "通勤" };
+
+  test.each([
+    ["読者なし", input],
+    ["読者あり", { ...input, reader }],
+  ])("総評の指示に「直す方向は別の節へ」が入る（%s）", (_name, value) => {
+    const prompt = buildOpeningCheckPrompt(value);
+    expect(prompt).toContain("直す方向は別の節へ");
+    expect(prompt).toContain("何が伝わり、何が効いているか");
+    // 1.2 までの「いちばん効く直しどころを書く」指示は残さない
+    expect(prompt).not.toContain("いちばん効く直しどころ");
+  });
+
+  test("版は 1.3", () => {
+    expect(OPENING_CHECK_VERSION).toBe("1.3");
+  });
+});
+
+/**
  * 読者に向けて直す方向（1.2。作者の裁定 2026-10-01）。
  *
  * 「読者タイプを踏まえて、直す方向を数件並べる。例文・書き直し案は出さないまま」
@@ -587,8 +612,8 @@ describe("読者に向けて直す方向（1.2）", () => {
   });
 
   test("版の文字列に読者の印が混ざる", () => {
-    expect(OPENING_CHECK_VERSION).toBe("1.2");
-    expect(openingCheckPromptVersion("aim:light")).toBe("1.2|reader:aim:light");
+    expect(OPENING_CHECK_VERSION).toBe("1.3");
+    expect(openingCheckPromptVersion("aim:light")).toBe("1.3|reader:aim:light");
     expect(openingReaderLabel(reader)).toBe("狙いの読者（すきま層）");
     expect(openingReaderLabel(undefined)).toBeUndefined();
   });

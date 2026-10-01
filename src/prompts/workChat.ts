@@ -109,7 +109,7 @@ import { closeTruncatedJson } from "../core/truncatedResponse";
 //       目次が付いていた。`guideSelect.ts`）。②長い各話あらすじは先頭2,000字で
 //       切らず、問いに出る話数・語に近い話を選んで同じ字数に収める（219話の作品で
 //       第16話までしか届いていなかった。`chatFileRequest.ts`）
-export const WORK_CHAT_VERSION = "3.23";
+export const WORK_CHAT_VERSION = "3.24";
 
 /**
  * 送るときの温度。相談は考えを広げる場なので、抽出よりは揺らす。

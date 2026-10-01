@@ -158,7 +158,7 @@ describe("冒頭診断（P-24）", () => {
   test("読者像があれば読者を添え、版に読者の印を混ぜ、方向を頼む", () => {
     const prompt = openingPrompt({ folder: WORK });
     expect(prompt.reader).toMatch(/^読者像（/);
-    expect(prompt.promptVersion).toMatch(/^1\.2\|reader:/);
+    expect(prompt.promptVersion).toMatch(/^1\.3\|reader:/);
     expect(prompt.promptVersion).not.toContain("reader:none");
     expect(prompt.userPrompt).toContain("【この作品の読者】");
     expect(prompt.schema.required).toContain("directions");

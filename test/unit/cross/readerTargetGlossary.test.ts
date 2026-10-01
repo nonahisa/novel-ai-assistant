@@ -207,9 +207,17 @@ describe("読者について聞かれた回に、一覧を添える", () => {
     }
   });
 
-  /** どれか1つを勝手に「この作品の読者」だと決めさせない */
-  test("AIに決めさせない", () => {
-    expect(buildReaderTypeGlossaryPrompt()).toContain("決めないでください");
+  /**
+   * 作者の裁定（2026-10-01）：決めていない作品でも「どんな読者に向いていますか」には
+   * 区分を挙げてよい。ただし「本文からの見立てです」と断り、作者が決めた読者としては扱わない。
+   * 一律の「決めないでください」は、この問いへの答えとぶつかっていた。
+   */
+  test("AIに決めさせない：見立てとして断れば挙げてよい", () => {
+    const prompt = buildReaderTypeGlossaryPrompt();
+    expect(prompt).not.toContain("決めないでください");
+    expect(prompt).toContain("本文からの見立てです");
+    expect(prompt).toContain("作者が決めた読者として扱わない");
+    expect(prompt).toContain("向いていますか");
   });
 
   /**
