@@ -1,6 +1,10 @@
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
-import type { Finding, FindingView } from "../models/finding";
+import {
+  describeFindingOrigin,
+  type Finding,
+  type FindingView,
+} from "../models/finding";
 import { readTextFile } from "../core/textFile";
 import { locateFindings } from "../core/findingLocation";
 import { findingFilePath, findingRestoreOf } from "../core/findingSource";
@@ -44,7 +48,7 @@ export async function primeSavedFindings(
   );
   if (saved.length === 0) return 0;
 
-  const texts = await readTexts(work, saved);
+  const { texts, hashes } = await readTexts(work, saved);
   const located = locateFindings(saved, texts);
   if (located.length === 0) return 0;
 
@@ -63,14 +67,17 @@ export async function primeSavedFindings(
     // **押しても何も起きない口を作らない**のと同じ考え方である
     if (!restore) continue;
     const filePath = findingFilePath(work.folderPath, finding.file);
+    const origin = originOf(finding, hashes.get(finding.file));
     if (restore.shape === "item") {
-      push(items, restore.panelCategory, toItem(finding, filePath, restore.panelCategory));
+      push(items, restore.panelCategory, {
+        ...toItem(finding, filePath, restore.panelCategory),
+        ...origin,
+      });
     } else {
-      push(
-        contradictions,
-        restore.panelCategory,
-        toContradiction(finding, filePath, restore.panelCategory)
-      );
+      push(contradictions, restore.panelCategory, {
+        ...toContradiction(finding, filePath, restore.panelCategory),
+        ...origin,
+      });
     }
   }
 
@@ -111,16 +118,52 @@ export function handOverFinding(
   const restore = findingRestoreOf(finding);
   if (!restore) return false;
   const filePath = findingFilePath(work.folderPath, finding.file);
+  // シーンメモからの1件は本文のハッシュを持って来ないので、出どころの札だけを付ける
+  const origin = originOf(finding, undefined);
   if (restore.shape === "item") {
     panel.showRestoredFindings(work, restore.panelCategory, {
-      items: [toItem(finding, filePath, restore.panelCategory)],
+      items: [{ ...toItem(finding, filePath, restore.panelCategory), ...origin }],
     });
   } else {
     panel.showRestoredFindings(work, restore.panelCategory, {
-      contradictions: [toContradiction(finding, filePath, restore.panelCategory)],
+      contradictions: [
+        { ...toContradiction(finding, filePath, restore.panelCategory), ...origin },
+      ],
     });
   }
   return true;
+}
+
+/**
+ * 外から置かれた指摘の札と添え書き（MCP `novel.propose` の `kind: "finding"`。2026-10-01）。
+ *
+ * **中のAIの指摘には何も足さない**（空のオブジェクト）。
+ *
+ * **置いたときの指紋と、いまの本文のハッシュが違えば添え書きを出す**（設計書5.4.4
+ * 「ファイル全体のハッシュが変わった場合…再チェックを推奨」）。**当てるのは止めない**
+ * ——位置はいま原文で探し直してあり（6.96.3）、当てる直前にも原文を照らす。
+ * ハッシュで止めると、同じ話の指摘を1つ当てた瞬間に残りが全部当てられなくなる。
+ *
+ * @param currentHash いまの本文のハッシュ。分からなければ `undefined`（比べない）
+ */
+export function originOf(
+  finding: Finding,
+  currentHash: string | undefined
+): { originLabel?: string; originNote?: string } {
+  if (!finding.origin) return {};
+  const changed =
+    currentHash !== undefined &&
+    finding.fingerprint !== undefined &&
+    finding.fingerprint.fileHash !== currentHash;
+  return {
+    originLabel: describeFindingOrigin(finding.origin),
+    ...(changed
+      ? {
+          originNote:
+            "置いたあとで原稿が変わっています。位置は引用で探し直しました（当てる前に本文を確かめてください）。",
+        }
+      : {}),
+  };
 }
 
 /**
@@ -134,17 +177,20 @@ export function handOverFinding(
 async function readTexts(
   work: WorkEntry,
   findings: readonly FindingView[]
-): Promise<Map<string, string>> {
+): Promise<{ texts: Map<string, string>; hashes: Map<string, string> }> {
   const texts = new Map<string, string>();
+  // 外から置かれた指摘の指紋と比べるため（`originOf`）。読んだついでに控える
+  const hashes = new Map<string, string>();
   for (const file of new Set(findings.map((finding) => finding.file))) {
     try {
       const content = await readTextFile(findingFilePath(work.folderPath, file));
       texts.set(file, content.text);
+      hashes.set(file, content.hash);
     } catch {
       // 移した・消した・まだ同期されていない。**騒がずに見送る**
     }
   }
-  return texts;
+  return { texts, hashes };
 }
 
 /**

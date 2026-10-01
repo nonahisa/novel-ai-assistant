@@ -160,13 +160,24 @@ function fileOf(args: Record<string, unknown> | undefined): string {
       ? (options as Record<string, unknown>).plotPath
       : undefined;
   const candidate = args?.filePath ?? args?.plotPath ?? inOptions;
-  return typeof candidate === "string" ? candidate : "";
+  if (typeof candidate === "string") return candidate;
+  /*
+    指摘を置いた回（`novel.propose` の `kind: "finding"`）は `chunkId` だけを持つ。
+    `本文/001.txt#1-0@3000` の `#` より前がファイル（`parseChunkId` と同じ読み方）
+  */
+  if (args?.kind === "finding" && typeof args?.chunkId === "string") {
+    const at = args.chunkId.lastIndexOf("@");
+    const hash = args.chunkId.lastIndexOf("#", at);
+    return hash > 0 ? args.chunkId.slice(0, hash) : "";
+  }
+  return "";
 }
 
 function modelOf(args: Record<string, unknown> | undefined): string {
-  return args?.runner === "ollama" && typeof args?.model === "string"
-    ? args.model
-    : "";
+  if (args?.runner === "ollama" && typeof args?.model === "string") return args.model;
+  // 指摘を置いた回は、置いた側が申告したモデル（パネルの行にも出る名前）
+  if (args?.kind === "finding" && typeof args?.model === "string") return args.model;
+  return "";
 }
 
 /**
@@ -177,7 +188,8 @@ function modelOf(args: Record<string, unknown> | undefined): string {
 function detailOf(
   tool: string,
   args: Record<string, unknown> | undefined,
-  failure: string | undefined
+  failure: string | undefined,
+  result?: unknown
 ): string {
   if (failure) return failure;
   /*
@@ -185,6 +197,19 @@ function detailOf(
     人物の名前までは入れるが、**`changes` の中身は入れない**——記録が
     資料の写しになると、同期先に同じ文が二重に載る。
   */
+  /*
+    指摘を提案パネルへ置いた回（2026-10-01）。**置いた件数と落とした件数**を
+    残す——作者が知りたいのは「外から何件積まれたか」で、中身（本文の引用）は
+    入れない（記録が原稿の写しになる）。件数は道具の返り値から読む
+  */
+  if (tool === "novel.propose" && args?.kind === "finding") {
+    const feature = typeof args?.feature === "string" ? args.feature : "";
+    const counts = findingCountsOf(result);
+    const head = feature ? `指摘を提案パネルへ置いた（${feature}）` : "指摘を提案パネルへ置いた";
+    return counts
+      ? `${head} 置いた ${counts.placed}件・落とした ${counts.notPlaced}件`
+      : head;
+  }
   if (tool === "novel.propose") {
     const name = typeof args?.name === "string" ? args.name : "";
     /*
@@ -249,6 +274,18 @@ function detailOf(
   return parts.join(" ");
 }
 
+/** 指摘を置いた回の返り値から、件数だけを読む。形が違えば `undefined` */
+function findingCountsOf(
+  result: unknown
+): { placed: number; notPlaced: number } | undefined {
+  if (typeof result !== "object" || result === null) return undefined;
+  const record = result as Record<string, unknown>;
+  if (typeof record.placedCount !== "number" || typeof record.notPlacedCount !== "number") {
+    return undefined;
+  }
+  return { placed: record.placedCount, notPlaced: record.notPlacedCount };
+}
+
 /**
  * 書き足す場所。**同期される側**（`cache/` と `logs/` だけが除外）。
  */
@@ -274,6 +311,11 @@ export interface RecordAccessInput {
    * 作者が知りたいことである。原稿は1文字も出ていないので `none` で残す。
    */
   denied?: boolean;
+  /**
+   * 道具の返り値（成功したときだけ）。**件数を読むためだけに使う**
+   * （指摘を置いた回の「置いた N件・落とした N件」）。中身は記録に写さない
+   */
+  result?: unknown;
 }
 
 /**
@@ -303,7 +345,7 @@ export function recordExternalAccess(input: RecordAccessInput): boolean {
       ——ノックの画面（6.87.14）はここを見て、その機能だけを許す。
       決め方は `permissionKeyOf` に1つだけ（許可を確かめる側と同じもの）。
     */
-    key: permissionKeyOf(input.tool, args?.feature),
+    key: permissionKeyOf(input.tool, args?.feature, args?.kind),
     client: clientName,
     file: fileOf(args),
     // 断った回は原稿が1文字も出ていないので `none`
@@ -312,7 +354,7 @@ export function recordExternalAccess(input: RecordAccessInput): boolean {
     ok: input.ok,
     detail: input.denied
       ? EXTERNAL_ACCESS_DENIED_DETAIL
-      : detailOf(input.tool, args, input.failure),
+      : detailOf(input.tool, args, input.failure, input.result),
   };
 
   try {

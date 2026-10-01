@@ -64,6 +64,9 @@ const { renderItem } = ((): { renderItem: Render } => {
     extractFunction(html, "renderRecordChanges"),
     extractFunction(html, "doneLabel"),
     extractFunction(html, "renderRecordUpdate"),
+    // 外から置かれた指摘の札と添え書き（2026-10-01）。誤字脱字・矛盾の行が使う
+    extractFunction(html, "renderOriginBadge"),
+    extractFunction(html, "renderOriginNote"),
     extractFunction(html, "renderContradiction"),
     extractFunction(html, "canKeep"),
     extractFunction(html, "renderBlock"),
@@ -310,5 +313,31 @@ describe("設定資料の更新に出るボタン", () => {
 
   test("反映したあとは、押せるボタンが無い", () => {
     expect(buttonsOf(recordUpdate({ status: "applied" }))).toEqual([]);
+  });
+});
+
+/*
+  **外から置かれた指摘を、行で見分けられる**（作者の裁定、2026-10-01）。
+  札が出ないと、外部AIの指摘と中のAIの指摘が同じ見た目で並び、どちらの
+  出来かを作者が比べられない。**押せるボタンは変えない**（当てる道は同じ）。
+*/
+describe("外から置かれた指摘の札", () => {
+  const label = "外部AI（claude-code・claude-sonnet-4-5）";
+
+  test("誤字脱字の行に出どころの札と添え書きが出て、ボタンは変わらない", () => {
+    const rendered = renderItem(
+      typoIssue({ originLabel: label, originNote: "置いたあとで原稿が変わっています" })
+    );
+    expect(rendered).toContain(label);
+    expect(rendered).toContain("置いたあとで原稿が変わっています");
+    expect(buttonsOf(typoIssue({ originLabel: label }))).toEqual(
+      buttonsOf(typoIssue())
+    );
+  });
+
+  test("矛盾の行にも出る。中のAIの指摘には出ない", () => {
+    expect(renderItem(contradictionIssue({ originLabel: label }))).toContain(label);
+    expect(renderItem(contradictionIssue())).not.toContain("外部AI");
+    expect(renderItem(typoIssue())).not.toContain("badge origin");
   });
 });

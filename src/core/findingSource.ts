@@ -1,4 +1,9 @@
-import * as path from "./paths";
+/*
+  **`paths` ではなく `pathText` を読む**（2026-10-01）。`paths` は `toUri` のために
+  `vscode` を読み込むので、外から指摘を置く道（MCP の束）がここを通ると
+  束が起動した瞬間に落ちる。使うのは文字列の組み立てだけである
+*/
+import * as path from "./pathText";
 import { relocateQuote } from "./relocateQuote";
 import { FACT_CONTRADICTION_CATEGORY } from "./factContradiction";
 import {
@@ -6,6 +11,8 @@ import {
   type Finding,
   type FindingCategory,
   type FindingComparison,
+  type FindingFingerprint,
+  type FindingOrigin,
   type FindingProducer,
 } from "../models/finding";
 
@@ -138,6 +145,22 @@ export interface FindingDraft {
    * （`findingIdOf` は見ない）——同じ直しを別のモデルが出しても同じ指摘である
    */
   producer?: FindingProducer;
+  /** 外から置いた指摘の出どころ（`Finding.origin`）。**番号には混ぜない** */
+  origin?: FindingOrigin;
+  /** 置いたときの本文の指紋（`Finding.fingerprint`） */
+  fingerprint?: FindingFingerprint;
+}
+
+/**
+ * 左右に並べる指摘（矛盾・逸脱）を、置き場の `message` に入れる1文にする。
+ *
+ * **提案パネル（`describeContradiction`）と、外から指摘を置く道
+ * （MCP `novel.propose` の `kind: "finding"`）が同じものを通す。** 写しを
+ * 置くと、同じ指摘が2通りの文で残る。
+ */
+export function describeComparison(compared: FindingComparison): string {
+  const sentence = `${compared.leftLabel}：${compared.left}／${compared.rightLabel}：${compared.right}`;
+  return compared.note ? `${sentence}（補足：${compared.note}）` : sentence;
 }
 
 /**
@@ -216,6 +239,9 @@ export function buildFinding(
     label: draft.label,
     compared: draft.compared,
     producer: draft.producer,
+    // 中のAIの指摘は持たない。**無い鍵は書かない**（置き場の行を太らせない）
+    ...(draft.origin ? { origin: draft.origin } : {}),
+    ...(draft.fingerprint ? { fingerprint: draft.fingerprint } : {}),
   };
 }
 

@@ -5,6 +5,7 @@ import { ExternalAccessPermissionStore } from "../core/externalAccessPermissionS
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import {
   ALL_TOOLS,
+  FINDING_PROPOSE_KEY,
   clientKeyOf,
   type ExternalClientPermission,
 } from "../core/externalAccessPermission";
@@ -298,6 +299,8 @@ function legacyNote(legacy: boolean): string {
  * 0.66.6 までの古い名前（`typo.run`）は表に無いので、そのまま出す。
  */
 function describeAccessKey(key: string): string {
+  // 指摘を置く鍵（2026-10-01）。鍵の文字だけでは何を許すのか読めない
+  if (key === FINDING_PROPOSE_KEY) return `指摘を提案パネルへ置くこと（${key}）`;
   const label = FEATURE_LABELS[key as FeatureName];
   return label ? `${label}（${key}）` : key;
 }

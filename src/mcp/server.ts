@@ -217,7 +217,8 @@ function tool<Args>(
         async () => await handler(args),
         localAiSessionKind(name, args)
       );
-      recordExternalAccess({ tool: name, args, ok: true });
+      // 返り値も渡す（件数を記録へ残す道具がある。中身は写さない）
+      recordExternalAccess({ tool: name, args, ok: true, result: value });
       return ok(withStaleNote(withLocalAiNotes(value, notes), checkBundleStaleness()));
     } catch (error) {
       const result = fail(error, checkBundleStaleness());
@@ -479,8 +480,13 @@ server.registerTool(
 server.registerTool(
   "novel.propose",
   {
-    title: "設定資料の更新案を、承認待ちへ置く",
+    title: "設定資料の更新案・指摘を、作者の判断待ちへ置く",
     description:
+      /*
+        **指摘の道（kind: finding、2026-10-01）は1文だけ足す。** 引数の意味は
+        入力の形の側に書いてあり、ここへ写すと一覧に同じ文が二重に載る
+      */
+      "kind: finding なら、誤字脱字・推敲・矛盾の指摘を**こちらで検算し直し、通ったものだけ**を提案パネルへ置きます（当てるのは作者）。" +
       "設定資料の**更新案を承認待ちへ置きます**（人物は `.aiwriter/pending-characters/`、" +
       "能力・組織・場所・世界観は `.aiwriter/pending-settings/`）。" +
       "**台帳（設定/ の下）は書き換えません。** 作者が VS Code の「設定資料更新分反映」で採ったときに、" +

@@ -21,7 +21,8 @@ import { diffChars, type DiffSegment } from "../core/inlineDiff";
 import type { DiffEntry } from "../core/characterDiff";
 import { KeepWordStore } from "../core/keepWordStore";
 import { validateKeepWord } from "../models/keepWord";
-import { explainProofreadReason } from "../core/proofreadValidation";
+// 「なぜ読みにくいか」の一文。外から指摘を置く道（MCP）も同じものを通す
+import { proposalDetail } from "../core/proofreadValidation";
 import { manualActor, recordEdit } from "../core/actorContext";
 import { isEditorMode } from "../core/actorContext";
 import { ProposalStore } from "../core/proposalStore";
@@ -34,6 +35,7 @@ import { acceptProposal, rejectProposal } from "./reviewProposals";
 // （`replaceContents`）。検知ごとに写しを作ると、検知を足した人が
 // 記録を忘れる形になる
 import {
+  describeComparison,
   findingCategoryOf,
   findingIdOf,
   type FindingDraft,
@@ -318,6 +320,16 @@ export interface ProposalViewItem {
    * 無ければ採った・退けたを数えない。
    */
   producedBy?: FindingProducer;
+  /**
+   * 外から置かれた指摘の出どころ（「外部AI（claude-code・モデル名）」。2026-10-01）。
+   * **置き場から戻したものだけが持つ**（`primeFindings.ts` が付ける）。行の見出しに札で出す
+   */
+  originLabel?: string;
+  /**
+   * 外から置かれた指摘への添え書き（置いたあとで原稿が変わった、など。設計書5.4.4）。
+   * **赤で出さない**——当てられないという意味ではなく、確かめてほしいという意味
+   */
+  originNote?: string;
 }
 
 /**
@@ -426,6 +438,10 @@ export interface ContradictionViewItem {
   allowRecheck?: boolean;
   /** どのAIが出した指摘か（設計書6.49.7。`ProposalViewItem.producedBy` と同じ） */
   producedBy?: FindingProducer;
+  /** 外から置かれた指摘の出どころ（`ProposalViewItem.originLabel` と同じ） */
+  originLabel?: string;
+  /** 外から置かれた指摘への添え書き（`ProposalViewItem.originNote` と同じ） */
+  originNote?: string;
 }
 
 /**
@@ -3746,8 +3762,14 @@ function describeRecheckNote(
  * 補足（逸脱の行範囲など）は、あれば後ろへ添える。
  */
 function describeContradiction(item: ContradictionViewItem): string {
-  const compared = `${item.leftLabel}：${item.settingSays}／${item.rightLabel}：${item.textSays}`;
-  return item.note ? `${compared}（補足：${item.note}）` : compared;
+  // 組み方は core に1つだけ（外から指摘を置く道も同じ文で残す）
+  return describeComparison({
+    leftLabel: item.leftLabel,
+    left: item.settingSays,
+    rightLabel: item.rightLabel,
+    right: item.textSays,
+    note: item.note,
+  });
 }
 
 /**
@@ -3885,28 +3907,6 @@ function foreshadowLabelOf(item: ContradictionViewItem): string {
     ? `${source.slice(0, FORESHADOW_LABEL_MAX)}…`
     : source;
 }
-
-/**
- * 「なぜ読みにくいか」の一文を決める。
- *
- * **AIの説明を優先し、使えなければ種類ごとの決まり文句へ落ちる。**
- * 「空文字」「なし」のような、指示の言葉がそのまま返ってくる形は
- * この作品で繰り返し起きている（`CLAUDE.md`）ので、種類の一語を
- * なぞっただけのものも使えないものとして扱う。
- */
-function proposalDetail(issue: {
-  reason: string;
-  explanation?: string;
-}): string | undefined {
-  const written = issue.explanation?.trim();
-  if (written && written !== issue.reason && !PLACEHOLDER.test(written)) {
-    return written;
-  }
-  return explainProofreadReason(issue.reason);
-}
-
-/** 中身の無い言い方。これが来たら説明として扱わない */
-const PLACEHOLDER = /^(なし|無し|空文字|特になし|説明)$/;
 
 /**
  * 単話プロットと本文の照合（P-28）の1件に添える注記。

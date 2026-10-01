@@ -332,6 +332,16 @@ body.show-low .issue.low { display: flex; }
 /* 縮まないと、上の塊に押し出されて結局はみ出す */
 .issue .actions { flex-shrink: 0; }
 .badge.cat { border-color: var(--vscode-focusBorder); }
+/* 外から置かれた指摘（2026-10-01）。中のAIの指摘と見分けるための札。
+   色は文字の色のまま、枠だけ変える（確信度の札と色で取り違えないように） */
+.badge.origin { border-style: dashed; border-color: var(--vscode-textLink-foreground); }
+/* 外から置かれた指摘への添え書き。当てられないという意味ではないので赤にしない */
+.origin-note {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  border-left: 2px dashed var(--vscode-textLink-foreground);
+  padding-left: 8px;
+}
 </style>
 </head>
 <body>
@@ -777,6 +787,19 @@ function renderRecordUpdate(item) {
   );
 }
 
+// 外から置かれた指摘の札（2026-10-01）。中のAIの指摘には何も出さない
+function renderOriginBadge(item) {
+  return item.originLabel
+    ? '<span class="badge origin" title="拡張機能の外のAIが置いた指摘です">' + escapeHtml(item.originLabel) + '</span>'
+    : '';
+}
+
+function renderOriginNote(item) {
+  return item.originNote
+    ? '<div class="origin-note">' + escapeHtml(item.originNote) + '</div>'
+    : '';
+}
+
 function renderContradiction(item) {
   const classes = ['issue', 'contradiction'];
   if (item.confidence === 'low') classes.push('low');
@@ -804,6 +827,7 @@ function renderContradiction(item) {
     escapeHtml(item.fileName) + ' ' + item.line + '行目</span>' +
     '<span class="badge cat">' + escapeHtml(item.category) + '</span>' +
     '<span class="badge ' + item.confidence + '">' + CONFIDENCE_LABEL[item.confidence] + '</span>' +
+    renderOriginBadge(item) +
     // **片付いた理由は1つではない**（設計書6.35.4）。伏線として登録した
     // ものは「無視しました」ではない。理由が添えてあればそちらを出す
     (item.status === 'dismissed'
@@ -827,6 +851,7 @@ function renderContradiction(item) {
       : '') +
     '</div>' +
     note +
+    renderOriginNote(item) +
     recheckNote +
     '</div>' +
     (canAct
@@ -959,9 +984,11 @@ function renderItem(item) {
     '<span class="location" data-action="jump" data-id="' + item.id + '">' +
     escapeHtml(item.fileName) + ' ' + item.line + '行目</span>' +
     '<span class="badge ' + item.confidence + '">' + CONFIDENCE_LABEL[item.confidence] + '</span>' +
+    renderOriginBadge(item) +
     statusText +
     '</div>' +
     body +
+    renderOriginNote(item) +
     statusDetail +
     recheckNote +
     adviceNote +

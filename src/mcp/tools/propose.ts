@@ -17,6 +17,12 @@ import {
 } from "../../core/pendingSettingsMerge";
 import { recordPropose, type RecordProposeResult } from "./proposeRecord";
 import {
+  FINDING_PROPOSE_INPUT,
+  findingPropose,
+  type FindingProposeInput,
+  type FindingProposeResult,
+} from "./proposeFinding";
+import {
   FOLDER_INPUT,
   McpToolError,
   SETTINGS_SUBDIRS,
@@ -150,6 +156,13 @@ type AllowedField = (typeof ALLOWED_FIELDS)[number];
 
 export const SETTINGS_PROPOSE_INPUT = {
   ...FOLDER_INPUT,
+  /*
+    **道具を増やさずに、指摘を置く種類を足した**（作者の裁定、2026-10-01）。
+    道具を足すと一覧が太り、繋ぐたびの費用になる（`server.ts` の冒頭）。
+    `name`・`changes`・`reason` は設定資料の道でしか使わないので、
+    形の上では省けるようにして、要るかどうかは道ごとに断る
+  */
+  ...FINDING_PROPOSE_INPUT,
   recordKind: z
     .enum(["character", "ability", "organization", "location", "world"])
     .optional()
@@ -160,17 +173,19 @@ export const SETTINGS_PROPOSE_INPUT = {
     ),
   name: z
     .string()
+    .optional()
     .describe(
       "記録の名前（別名では引き当てません）。人物は、台帳に居れば更新案、居なければ新規案になります"
     ),
-  changes: CHANGES_SCHEMA.describe(
+  changes: CHANGES_SCHEMA.optional().describe(
     // 受け付ける欄は下に並んでいるので、ここでは繰り返さない（一覧を小さく保つ）
     "変えたい欄だけを入れます。ここに無い鍵は断ります"
   ),
   reason: z
     .string()
+    .optional()
     .describe(
-      "なぜそう提案するか。作者が採否を決める材料なので、省略も空も断ります"
+      "なぜそう提案するか。作者が採否を決める材料なので、設定資料の案では省略も空も断ります"
     ),
 };
 
@@ -207,8 +222,19 @@ export interface SettingsProposeResult {
   note: string;
 }
 
-export interface NovelProposeInput extends SettingsProposeInput {
+/**
+ * `novel.propose` が受け取る引数。**形は1つ**で、`kind` で道が分かれる。
+ *
+ * 設定資料の道（`kind` 省略）は `name`・`changes`・`reason` が要り、
+ * 指摘の道（`kind: "finding"`）は `feature`・`chunkId`・`response` が要る。
+ * どちらも形の上では省けるので、足りなければ道ごとに名前を挙げて断る。
+ */
+export interface NovelProposeInput extends FindingProposeInput {
+  kind?: "settings" | "finding";
   recordKind?: "character" | PendingSettingsKind;
+  name?: string;
+  changes?: Record<string, unknown>;
+  reason?: string;
 }
 
 /**
@@ -218,24 +244,61 @@ export interface NovelProposeInput extends SettingsProposeInput {
  * 人物以外は `recordPropose`（`pending-settings/`。0.83.10）。道を1本の
  * 関数に混ぜないのは、人物の道に1文字も触らずに済ませるため——人物の
  * 承認待ちは包みの形も置き場も違い、新規案・関係・退けた関係を持つ。
+ *
+ * **指摘（`kind: "finding"`）は `findingPropose`**（2026-10-01）。置き場は
+ * 提案パネルが読む `.aiwriter/findings.jsonl` で、設定資料の道とは何も共有しない。
  */
+export function novelPropose(
+  input: NovelProposeInput & { kind: "finding" }
+): FindingProposeResult;
 export function novelPropose(
   input: NovelProposeInput & { recordKind: PendingSettingsKind }
 ): RecordProposeResult;
 export function novelPropose(
   input: NovelProposeInput
-): SettingsProposeResult | RecordProposeResult;
+): SettingsProposeResult | RecordProposeResult | FindingProposeResult;
 export function novelPropose(
   input: NovelProposeInput
-): SettingsProposeResult | RecordProposeResult {
+): SettingsProposeResult | RecordProposeResult | FindingProposeResult {
+  if (input.kind === "finding") return findingPropose(input);
+  if (input.kind !== undefined && input.kind !== "settings") {
+    throw new McpToolError(
+      `kind は settings（設定資料の更新案）か finding（指摘）のどちらかです: ${String(input.kind)}`
+    );
+  }
+  const settings = settingsInputOf(input);
   const kind = input.recordKind ?? "character";
-  if (kind === "character") return settingsPropose(input);
+  if (kind === "character") return settingsPropose(settings);
   if (!(PENDING_SETTINGS_KINDS as readonly string[]).includes(kind)) {
     throw new McpToolError(
       `recordKind は character・${PENDING_SETTINGS_KINDS.join("・")} のどれかです: ${String(kind)}`
     );
   }
-  return recordPropose({ ...input, recordKind: kind });
+  return recordPropose({ ...settings, recordKind: kind });
+}
+
+/**
+ * 設定資料の道に要る引数を揃える。**足りなければ名前を挙げて断る。**
+ *
+ * 形の上で省けるようにしたのは指摘の道のため（2026-10-01）で、設定資料の道の
+ * 断り方は変えない——空の `name`・`reason` はこれまでどおり各道が断る。
+ */
+function settingsInputOf(input: NovelProposeInput): SettingsProposeInput {
+  const missing = (["name", "changes", "reason"] as const).filter(
+    (key) => input[key] === undefined
+  );
+  if (missing.length > 0) {
+    throw new McpToolError(
+      `設定資料の更新案には ${missing.join("・")} が要ります。` +
+        "指摘（誤字脱字・推敲・矛盾）を提案パネルへ置くなら kind: \"finding\" を渡してください。"
+    );
+  }
+  return {
+    folder: input.folder,
+    name: input.name ?? "",
+    changes: input.changes ?? {},
+    reason: input.reason ?? "",
+  };
 }
 
 export function settingsPropose(

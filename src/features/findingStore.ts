@@ -3,6 +3,7 @@ import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "../core/workRegistry";
 import {
+  FINDINGS_FILE_NAME,
   expiredFindingIds,
   isFindingExpired,
   parseFindingLines,
@@ -37,7 +38,8 @@ import {
  * 検算だけを取り出して試せる。
  */
 
-const FINDINGS_FILE = "findings.jsonl";
+// 名前は models に1つだけ（MCP の `novel.propose` も同じ場所へ足す）
+const FINDINGS_FILE = FINDINGS_FILE_NAME;
 
 /**
  * 期限の設定を読む。**読んでよいのはこのファイルだけ**（設計書6.58）。

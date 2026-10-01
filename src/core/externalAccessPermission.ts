@@ -168,6 +168,20 @@ const SHARED_KEY_TOOLS: Readonly<Record<string, string>> = {
 };
 
 /**
+ * **指摘を提案パネルへ置く鍵**（MCP `novel.propose` の `kind: "finding"`。作者の裁定、2026-10-01）。
+ *
+ * **設定資料の更新案（`novel.propose`）とは鍵を分ける。** 置く先も重さも違う——
+ * 更新案は「設定資料更新分反映」で差分を見てから採るが、指摘は提案パネルの
+ * ［適用］1回で原稿が書き換わる。更新案を許した作者が、原稿の直しまで外から
+ * 置かせると決めたことにはならない。
+ *
+ * **後から許せば載る**：許可の無い回はノックとして記録され（鍵はこれ）、
+ * 作者がノックの画面で許せば、同じ呼び出しが次から通る。
+ * 全部の道具を許した接続元（`*`）には、これも含まれる。
+ */
+export const FINDING_PROPOSE_KEY = "novel.propose.finding";
+
+/**
  * その呼び出しの許可の鍵。
  *
  * **ここが唯一の決め方。** 許可を確かめる側（`mcp/tools/permission.ts`）と
@@ -177,7 +191,16 @@ const SHARED_KEY_TOOLS: Readonly<Record<string, string>> = {
  * @param feature 引数の `feature`。文字列でなければ道具の名前を鍵にする
  *   （＝許可されていない鍵になり、断る側に倒れる）
  */
-export function permissionKeyOf(tool: string, feature: unknown): string {
+export function permissionKeyOf(
+  tool: string,
+  feature: unknown,
+  /**
+   * 引数の `kind`（`novel.propose` だけが見る。2026-10-01）。
+   * `"finding"` なら指摘を置く鍵（`FINDING_PROPOSE_KEY`）になる
+   */
+  kind?: unknown
+): string {
+  if (tool === "novel.propose" && kind === "finding") return FINDING_PROPOSE_KEY;
   const shared = SHARED_KEY_TOOLS[tool];
   if (shared) return shared;
   if (!FEATURE_KEYED_TOOLS.has(tool)) return tool;

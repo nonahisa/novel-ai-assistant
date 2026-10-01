@@ -26,6 +26,15 @@
  * 本文が1行ずれただけで同じ指摘が別物になり、退けたはずのものが復活する。
  */
 
+/**
+ * 置き場のファイル名（`.aiwriter/` の直下）。
+ *
+ * **拡張機能（`features/findingStore.ts`）と MCP（`mcp/tools/proposeFinding.ts`）が
+ * 同じ名前を見る。** 写しを置くと、片方だけ名前を変えた日に外から置いた指摘が
+ * 画面へ届かなくなる（しかも何のエラーも出ない）。
+ */
+export const FINDINGS_FILE_NAME = "findings.jsonl";
+
 /** 指摘の種類。**画面で分けるためではなく、出どころを残すため** */
 export type FindingCategory =
   | "typo"
@@ -95,12 +104,63 @@ export interface Finding {
    * 0.89.6 までの記録には無い（そのときは数えない）。
    */
   producer?: FindingProducer;
+  /**
+   * 外から置かれた指摘か（MCP `novel.propose` の `kind: "finding"`。作者の裁定、2026-10-01）。
+   *
+   * **無ければ、拡張機能の中のAIが出したもの。** 外部AI（Claude Code など）が
+   * 内部AIの代わりに回した指摘を、提案パネルの行で見分けられるように持つ。
+   * `producer` とは分ける——あちらは採った率を数える鍵で、モデル名が分からない
+   * ときは持てない。こちらは名乗り（接続元）だけでも持つ。
+   *
+   * **番号（`id`）には混ぜない。** 同じ箇所の同じ直しを中と外の両方が出したら、
+   * 作者にとっては同じ指摘である。
+   */
+  origin?: FindingOrigin;
+  /**
+   * 置いたときの本文の指紋（設計書5.4.4）。外から置いた指摘だけが持つ。
+   *
+   * **当てるかどうかの鍵ではない。** 位置は開くたびに原文で探し直し
+   * （6.96.3）、当てる直前にもう一度原文を照らす。ここは「置いたあとで
+   * 原稿が変わったか」を作者に添えて見せるためにある——1つ当てただけで
+   * 同じ話の残りが全部止まる形にはしない。
+   */
+  fingerprint?: FindingFingerprint;
 }
 
 /** 指摘を出したAI（`Finding.producer`） */
 export interface FindingProducer {
   providerId: string;
   model: string;
+}
+
+/** 外から置いた指摘の出どころ（`Finding.origin`） */
+export interface FindingOrigin {
+  kind: "external";
+  /** 接続元の名乗り（`claude-code` など）。**自己申告**なので身元の証明ではない */
+  client: string;
+  /** 置いた側が申告したモデル名。分からなければ空 */
+  model: string;
+}
+
+/** 置いたときの本文の指紋（`Finding.fingerprint`） */
+export interface FindingFingerprint {
+  /** ファイル全体のハッシュ（`readTextFile` の `hash` と同じ作り方） */
+  fileHash: string;
+  /** 検算したチャンクのハッシュ。無ければ空 */
+  chunkHash: string;
+}
+
+/**
+ * 出どころを、提案パネルの行に出す言葉にする。
+ *
+ * 「外部AI（claude-code・claude-sonnet-4-5）」のように、**接続元とモデルを
+ * 並べる**。名乗りが無ければ「名乗りなし」と書く——空にすると、何から
+ * 来たのか分からない行になる。
+ */
+export function describeFindingOrigin(origin: FindingOrigin): string {
+  const client = origin.client.trim() || "名乗りなし";
+  const model = origin.model.trim();
+  return model ? `外部AI（${client}・${model}）` : `外部AI（${client}）`;
 }
 
 /** 左右に並べる指摘の中身（`Finding.compared`） */
@@ -244,6 +304,8 @@ function toFindingLine(value: unknown): FindingLine | undefined {
       label: str(record.label),
       compared: toComparison(record.compared),
       producer: toProducer(record.producer),
+      origin: toOrigin(record.origin),
+      fingerprint: toFingerprint(record.fingerprint),
     };
   }
 
@@ -408,6 +470,29 @@ function toProducer(value: unknown): FindingProducer | undefined {
   const model = str(record.model);
   if (!providerId || !model) return undefined;
   return { providerId, model };
+}
+
+/**
+ * 外から置いた印（`Finding.origin`）を読む。
+ *
+ * **知らない種類は読まない**（`undefined`）。読めないものを「中のAI」と
+ * 見なすのは、出どころを消すのと同じだが、ここで勝手に「外部AI」と
+ * 名乗らせるよりはよい——種類はいま `external` の1つしか無い。
+ */
+function toOrigin(value: unknown): FindingOrigin | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.kind !== "external") return undefined;
+  return { kind: "external", client: str(record.client), model: str(record.model) };
+}
+
+/** 置いたときの指紋（`Finding.fingerprint`）を読む。ファイルの指紋が無ければ読まない */
+function toFingerprint(value: unknown): FindingFingerprint | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  const fileHash = str(record.fileHash);
+  if (!fileHash) return undefined;
+  return { fileHash, chunkHash: str(record.chunkHash) };
 }
 
 function toCategory(value: unknown): FindingCategory {

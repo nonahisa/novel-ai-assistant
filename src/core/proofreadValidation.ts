@@ -1864,3 +1864,29 @@ export function explainProofreadReason(reason: string): string | undefined {
       return undefined;
   }
 }
+
+/**
+ * 「なぜ読みにくいか」の一文を決める（提案パネルの `detail`）。
+ *
+ * **AIの説明を優先し、使えなければ種類ごとの決まり文句へ落ちる。**
+ * 「空文字」「なし」のような、指示の言葉がそのまま返ってくる形は
+ * この作品で繰り返し起きている（`CLAUDE.md`）ので、種類の一語を
+ * なぞっただけのものも使えないものとして扱う。
+ *
+ * **提案パネルと、外から指摘を置く道（MCP `novel.propose`）が同じものを通す**
+ * ——写しを置くと、置いた指摘と検知した指摘で説明が食い違い、
+ * 同じ指摘が2通りの文で並ぶ（2026-10-01 に `proposalPanel.ts` から移した）。
+ */
+export function proposalDetail(issue: {
+  reason: string;
+  explanation?: string;
+}): string | undefined {
+  const written = issue.explanation?.trim();
+  if (written && written !== issue.reason && !PLACEHOLDER_EXPLANATION.test(written)) {
+    return written;
+  }
+  return explainProofreadReason(issue.reason);
+}
+
+/** 中身の無い言い方。これが来たら説明として扱わない */
+const PLACEHOLDER_EXPLANATION = /^(なし|無し|空文字|特になし|説明)$/;
