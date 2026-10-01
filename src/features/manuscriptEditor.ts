@@ -248,6 +248,58 @@ const openManuscripts = new Map<
 const pendingAppearance = new Map<string, ManuscriptAppearance>();
 
 /**
+ * 原稿に入らなかった字の控え（設計書6.25.9）。画面が作り、画面が使う。
+ *
+ * `baseLength`・`baseHash` は**その本文の元になった文書**（画面に最後に
+ * 届いた本文）の字数と指紋。戻すときに今の文書と比べ、控えたあとで原稿が
+ * 外で変わっていたら確かめる。指紋の計算は画面側にあり、こちらは運ぶだけ。
+ */
+export interface ManuscriptRescue {
+  docKey: string;
+  text: string;
+  at: number;
+  baseLength: number;
+  baseHash: string;
+}
+
+/**
+ * 画面から届いた控えの形を確かめる。**別の文書の控えは受け取らない**
+ * （`docKey` が開いている文書と違えば捨てる）。
+ */
+export function parseManuscriptRescue(
+  value: unknown,
+  docKey: string
+): ManuscriptRescue | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  if (
+    record.docKey !== docKey ||
+    typeof record.text !== "string" ||
+    typeof record.at !== "number" ||
+    typeof record.baseLength !== "number" ||
+    typeof record.baseHash !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    docKey,
+    text: record.text,
+    at: record.at,
+    baseLength: record.baseLength,
+    baseHash: record.baseHash,
+  };
+}
+
+/**
+ * ［開き直す］で新しい画面へ持って行く控え（設計書6.25.9）。
+ *
+ * **文書の場所をキーに置き、開いた画面が `ready` のときに1回だけ取り出す**
+ * （`pendingAppearance` と同じ形）。拡張機能の中のメモリにしか置かない——
+ * 拡張機能ホストが起き直す場合は、画面の状態（`setState`）のほうが残る。
+ */
+const pendingRescue = new Map<string, ManuscriptRescue>();
+
+/**
  * 原稿エディタで最後にカーソルがあった場所（設計書6.40.4）。
  *
  * シーンメモの「次へ」「戻る」が、どこを起点にするかを決めるために持つ。
@@ -974,6 +1026,14 @@ type Incoming =
    * ログには必ず残す。
    */
   | { type: "log"; text: string }
+  /**
+   * 打った字が原稿に入らないまま、作者が［開き直す］を押した（設計書6.25.9）。
+   *
+   * `rescue` は画面が控えた本文。**タブを閉じて開き直すと画面の状態は
+   * 引き継がれない**ので、こちらで預かって新しい画面へ渡す。形は信用せず
+   * `parseManuscriptRescue` で確かめる
+   */
+  | { type: "reopen"; rescue?: unknown }
   /** カーソル行の**上**に `// ` の行を挿す（設計書6.40.3） */
   | { type: "addMemo"; line: number }
   /** シーンメモのパネルを横に開く（設計書6.40.4） */
@@ -1290,6 +1350,11 @@ export class ManuscriptEditorProvider
      * 大きさや向きを、打鍵のたびに送り返す値が押し戻してしまう。
      */
     let initialAppearance: ManuscriptAppearance | undefined;
+    /**
+     * ［開き直す］で前の画面から預かった控え（設計書6.25.9）。
+     * 最初の `update` に1回だけ添える。
+     */
+    let carriedRescue: ManuscriptRescue | undefined;
 
     const send = async (): Promise<void> => {
       const found = await this.deps.highlighter.indexFor(
@@ -1366,9 +1431,17 @@ export class ManuscriptEditorProvider
           ここへ置く。添えなければ今までどおり。
         */
         ...(undoCaret === undefined ? {} : { undoCaret }),
+        /*
+          **どの文書かを画面へ知らせる**（設計書6.25.9）。画面は原稿に
+          入らなかった字を控えるときにこれを添え、開き直したときに同じ
+          文書の控えだけを使う
+        */
+        docKey: key,
+        ...(carriedRescue ? { rescue: carriedRescue } : {}),
       });
       // 添えるのは最初の1回だけ（送り直すたびに当て直させない）
       initialAppearance = undefined;
+      carriedRescue = undefined;
       undoCaret = undefined;
       await this.sendCount(panel, text, document, measureKind);
     };
@@ -1687,6 +1760,9 @@ export class ManuscriptEditorProvider
             carry: takeCarriedAppearance(pendingAppearance, key),
             ...readOrientation(this.orientation),
           });
+          // ［開き直す］で預かった控えも、立ち上がりの1回だけ取り出す
+          carriedRescue = pendingRescue.get(key);
+          pendingRescue.delete(key);
           await send();
           webviewReady = true;
           // 開くのを待ってもらっていた「この行を示す」を、ここで出す
@@ -1862,6 +1938,14 @@ export class ManuscriptEditorProvider
 
         case "log":
           await this.logForDocument(document, `原稿エディタ：${message.text}`);
+          break;
+
+        case "reopen":
+          await this.reopenForRescue(
+            document,
+            panel,
+            parseManuscriptRescue(message.rescue, key)
+          );
           break;
 
         case "addMemo":
@@ -2849,6 +2933,70 @@ export class ManuscriptEditorProvider
     await this.deps.rebaseline(work);
     notifyDone(`${fileName} を作りました。`);
     await this.openAsManuscript(filePath, from);
+  }
+
+  /**
+   * 打った字が原稿に入らない画面を、同じ文書のまま開き直す（設計書6.25.9）。
+   *
+   * **押せる時点で、ここへ届いている。** 届いたことをまず返す（画面は返事が
+   * 来なければ「ウィンドウの再読み込み」を案内する）。
+   *
+   * **閉じるのは VS Code の普通の閉じ方（タブを閉じる）で行う。** 文書に
+   * 未保存の変更があれば、VS Code が保存するかを訊く。`panel.dispose()` で
+   * 黙って閉じると、未保存の文書をどう扱うかを作者が選べない。
+   * 取りやめられたら開き直さず、画面へ「開き直せなかった」を返す。
+   *
+   * 控えは `pendingRescue` に置き、新しい画面が立ち上がるときに渡す
+   * ——**タブを閉じると画面の状態（setState）は引き継がれない**ため。
+   */
+  private async reopenForRescue(
+    document: vscode.TextDocument,
+    panel: vscode.WebviewPanel,
+    rescue: ManuscriptRescue | undefined
+  ): Promise<void> {
+    await panel.webview.postMessage({ type: "reopenAccepted" });
+    const key = manuscriptLedgerKey(document.uri);
+    const column = panel.viewColumn;
+    const tab = vscode.window.tabGroups.all
+      .flatMap((group) => group.tabs)
+      .find(
+        (candidate) =>
+          candidate.input instanceof vscode.TabInputCustom &&
+          candidate.input.viewType === this.viewType &&
+          manuscriptLedgerKey(candidate.input.uri) === key
+      );
+    if (!tab) {
+      await this.logForDocument(
+        document,
+        "原稿エディタ：開き直そうとしましたが、この原稿のタブが見つかりませんでした"
+      );
+      await panel.webview.postMessage({ type: "reopenResult", ok: false });
+      return;
+    }
+    if (rescue) pendingRescue.set(key, rescue);
+    await this.logForDocument(
+      document,
+      `原稿エディタ：打った字が原稿に入らないため、開き直します（控え${
+        rescue ? `${rescue.text.length}字` : "なし"
+      }）`
+    );
+    const closed = await vscode.window.tabGroups.close(tab);
+    if (!closed) {
+      // 保存の確認で取りやめた等。控えは画面の状態に残っている
+      pendingRescue.delete(key);
+      await this.logForDocument(
+        document,
+        "原稿エディタ：開き直しを取りやめました（タブが閉じられませんでした）"
+      );
+      await panel.webview.postMessage({ type: "reopenResult", ok: false });
+      return;
+    }
+    await vscode.commands.executeCommand(
+      "vscode.openWith",
+      document.uri,
+      this.viewType,
+      column
+    );
   }
 
   /**

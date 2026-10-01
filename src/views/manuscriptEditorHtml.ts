@@ -826,6 +826,29 @@ ruby > rt {
   font-weight: normal;
   padding: 0 6px;
 }
+#unsent button[hidden] { display: none; }
+/* ── 前回、原稿に入らなかった字の案内（設計書6.25.9） ──
+   **開いた直後にだけ出る**（打っている最中には出ないので、本文が押し
+   下がっても書いている行は動かない）。黙って書き戻さず、作者に選ばせる。
+   作者の目へ確実に入れたいので、下の欄ではなく本文の上に置く */
+#rescue {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--vscode-errorForeground, #f14c4c);
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+#rescue.open { display: flex; }
+#rescue span { font-weight: 600; }
+#rescue button {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 0 6px;
+}
 </style>
 </head>
 <body class="vertical">
@@ -870,6 +893,13 @@ ruby > rt {
   <span id="aloudNote"></span>
 </div>
 
+<div id="rescue" role="alert">
+  <span id="rescueText"></span>
+  <button id="rescueRestore" title="前回原稿に入らなかった本文を、いまの原稿へ戻します">戻す</button>
+  <button id="rescueDiscard" title="控えを捨てます。原稿はいまのままです">捨てる</button>
+  <button id="rescueCopy" title="控えの本文をまるごとクリップボードへ写します">本文をコピー</button>
+</div>
+
 <div id="surface">
   <div id="aloudmarks" aria-hidden="true"></div>
   <div id="marks" aria-hidden="true"></div>
@@ -894,6 +924,7 @@ ruby > rt {
   <span id="unsent" role="alert">
     <span id="unsentText">打った字が、まだ原稿ファイルに入っていません。このまま閉じると消えます。</span>
     <button id="unsentCopy" title="この画面の本文をまるごとクリップボードへ写します。メモ帳などへ貼って控えてください">本文をコピー</button>
+    <button id="unsentReopen" hidden disabled title="この原稿を原稿エディターで開き直します。先に「本文をコピー」で控えてください（開き直すと、この画面の字は消えます）">開き直す</button>
   </span>
   <span id="note"></span>
 </div>
@@ -929,6 +960,13 @@ ruby > rt {
   const unsentBar = document.getElementById("unsent");
   const unsentText = document.getElementById("unsentText");
   const unsentCopyButton = document.getElementById("unsentCopy");
+  const unsentReopenButton = document.getElementById("unsentReopen");
+  /** 前回、原稿に入らなかった字の案内（本文の上。設計書6.25.9） */
+  const rescueBar = document.getElementById("rescue");
+  const rescueText = document.getElementById("rescueText");
+  const rescueRestoreButton = document.getElementById("rescueRestore");
+  const rescueDiscardButton = document.getElementById("rescueDiscard");
+  const rescueCopyButton = document.getElementById("rescueCopy");
   /** 下段の字数（作品／このファイル／今日。作者の指示、2026-08-29） */
   const countsLabel = document.getElementById("counts");
   /** 目標に届いた日の一言（設計書6.3.8）。字数と一緒に届く */
@@ -1162,8 +1200,14 @@ ruby > rt {
     // 消した面（reading・split）は書かない——古い state に残っていても読まない
     // 名前は composeState（compose は組んで書く面の要素。隠さない）
     const composeState = composeOn || composeWanted;
+    /*
+      **原稿に入らなかった字の控え（rescue）は持ち越す**（設計書6.25.9）。
+      覚え直すたびに丸ごと書き換えるので、ここで拾わないと、見た目を
+      変えただけで控えが消える
+    */
+    const keptRescue = (vscode.getState() || {}).rescue;
     vscode.setState({ vertical, size, compose: composeState,
-      noteStyle: noteStyle });
+      noteStyle: noteStyle, rescue: keptRescue });
     /*
       **拡張機能にも知らせる**（作者の依頼、2026-09-12。設計書6.25.5）。
       「← 前の話」「次の話 →」は新しい画面を開くので、覚えた state は
@@ -1723,9 +1767,41 @@ ruby > rt {
     返してもらう（editApplied）。返事の来ない便があるまま待ちが過ぎたら、
     **赤字の知らせを出して送り直す**。知らせには「本文をコピー」を置く——
     拡張機能の側が動いていないと、送り直しても届かないためである。
+
+    **知らせは段階で出す**（作者の裁定、2026-10-01「段階で出す」）。
+    0.94.0 で、拡張機能ホストが起動し直したあと約100字が一度も届かなかった
+    （受け取る相手がいなかった）。知らせとコピーは出ていたが、作者の声は
+    「消えない。製品版だとどう対処するのか。ユーザーが対応に迷いそう」。
+    1段目は「送り直しています（N秒）」——たいていはここで片づく。
+    30秒たっても片づかなければ2段目「入りません」へ変え、控えてから
+    開き直す道（［開き直す］）を並べる。
+
+    **返事の来ない本文は、画面の状態（vscode.setState）へ控える。**
+    VS Code はウィンドウの再読み込みや再起動のとき、開いていた原稿エディターの
+    状態を保存して作り直した画面へ渡す（カスタムエディターの直列化が
+    webview の state を持ち越す。1.138 の本体で確かめた）。作り直された
+    画面は控えを見つけ、黙って書き戻さずに「戻す／捨てる」を訊く。
   */
   /** 返事を待つ長さ。ふだんの往復は0.1秒に満たないので、ここまで来たら異常 */
   const UNSENT_WAIT_MS = 4000;
+  /** 知らせを出してから、2段目（入りません・開き直す）へ変えるまでの長さ */
+  const UNSENT_ESCALATE_MS = 30000;
+  /** ［開き直す］を頼んでから、拡張機能の返事を待つ長さ */
+  const REOPEN_WAIT_MS = 3000;
+  /** これより古い控えは出さない（何の字か作者が覚えていない） */
+  const RESCUE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+  /** 知らせの段。0＝出ていない／1＝送り直し中／2＝入らない（開き直す） */
+  let unsentStage = 0;
+  /** 秒の数え上げの予約 */
+  let unsentTick = null;
+  /**
+   * 知らせが出てから「本文をコピー」で写したか。**写すまで［開き直す］を
+   * 押させない**——開き直すと、この画面にしか無い字が消える
+   */
+  let unsentCopied = false;
+  /** ［開き直す］を頼んだ（文言を秒の数え上げで上書きしない） */
+  let reopenAsked = false;
+  let reopenTimer = null;
   /** 最後に付けた便の番号 */
   let editSeq = 0;
   /**
@@ -1741,6 +1817,8 @@ ruby > rt {
     if (unconfirmed === null) unconfirmed = { seq: editSeq, since: Date.now() };
     else unconfirmed.seq = editSeq;
     vscode.postMessage({ type: "edit", text: text, seq: editSeq });
+    // 知らせが出ている間は、打ち足した字も控えに入れる（届いていないので）
+    if (unsentStage > 0) keepRescue(text);
     // 見回りが予約済みなら延ばさない（最初の便から数える）
     if (unsentTimer === null) {
       armUnsentCheck(UNSENT_WAIT_MS - (Date.now() - unconfirmed.since));
@@ -1768,6 +1846,8 @@ ruby > rt {
         clearTimeout(unsentTimer);
         unsentTimer = null;
       }
+      // 全部届いた。控えはもう要らない
+      dropRescue();
       hideUnsent(message.seq);
       return;
     }
@@ -1817,15 +1897,67 @@ ruby > rt {
     if (unsentBar.classList.contains("open")) return;
     unsentBar.classList.add("open");
     unsentShownAt = Date.now();
+    unsentStage = 1;
+    unsentCopied = false;
+    reopenAsked = false;
     vscode.postMessage({
       type: "log",
       text: "打った字が原稿に入っていない知らせを出しました。理由：" + reason,
     });
+    // 画面が作り直されても取り戻せるように、いまの本文を控える
+    keepRescue(screenText());
+    paintUnsent();
+    if (unsentTick !== null) clearTimeout(unsentTick);
+    unsentTick = setTimeout(tickUnsent, 1000);
+  }
+
+  /** 秒の数え上げ。出ている間だけ1秒ごとに描き直す */
+  function tickUnsent() {
+    unsentTick = null;
+    if (unsentStage === 0) return;
+    paintUnsent();
+    unsentTick = setTimeout(tickUnsent, 1000);
+  }
+
+  /** いまの段に合わせて、知らせの文と［開き直す］を描く */
+  function paintUnsent() {
+    if (unsentStage === 0) return;
+    const shown = unsentShownAt === null ? 0 : Date.now() - unsentShownAt;
+    if (unsentStage === 1 && shown >= UNSENT_ESCALATE_MS) {
+      unsentStage = 2;
+      vscode.postMessage({
+        type: "log",
+        text:
+          "打った字が" + Math.round(shown / 1000) + "秒たっても原稿に入らないので、" +
+          "知らせを開き直す案内に変えました",
+      });
+    }
+    unsentReopenButton.hidden = unsentStage !== 2;
+    unsentReopenButton.disabled = !unsentCopied || reopenAsked;
+    // 写したあとの文・開き直しの経過は、数え上げで上書きしない
+    if (unsentCopied || reopenAsked) return;
+    unsentText.textContent =
+      unsentStage === 1
+        ? "打った字を原稿へ送り直しています（" + Math.floor(shown / 1000) + "秒）"
+        : "打った字が原稿に入りません。本文をコピーで控えてから、開き直してください。";
   }
 
   function hideUnsent(seq) {
     if (!unsentBar.classList.contains("open")) return;
     unsentBar.classList.remove("open");
+    unsentStage = 0;
+    unsentCopied = false;
+    reopenAsked = false;
+    if (unsentTick !== null) {
+      clearTimeout(unsentTick);
+      unsentTick = null;
+    }
+    if (reopenTimer !== null) {
+      clearTimeout(reopenTimer);
+      reopenTimer = null;
+    }
+    unsentReopenButton.hidden = true;
+    unsentReopenButton.disabled = true;
     const shownFor =
       unsentShownAt === null ? null : Math.round((Date.now() - unsentShownAt) / 1000);
     unsentShownAt = null;
@@ -1868,11 +2000,26 @@ ruby > rt {
     flushUnsent("焦点が画面の外へ出た");
   });
   document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "hidden") flushUnsent("画面が隠れた");
+    if (document.visibilityState === "hidden") {
+      flushUnsent("画面が隠れた");
+      keepIfUnconfirmed();
+    }
   });
   window.addEventListener("pagehide", function () {
     flushUnsent("画面を閉じる");
+    keepIfUnconfirmed();
   });
+
+  /**
+   * 隠れる・閉じる瞬間に、まだ返事の来ていない便があれば控える。
+   *
+   * 見回り（4秒）より先に画面が消えると、控える機会が無い。焦点が外れる
+   * たび（blur）には控えない——ふだんは返事がすぐ来るので、そのたびに
+   * 本文を丸ごと写して消すだけになる。
+   */
+  function keepIfUnconfirmed() {
+    if (unconfirmed !== null) keepRescue(screenText());
+  }
   /*
     **Ctrl+S の前に送る。** 保存は VS Code が文書に対して行うので、画面にしか
     無い字は保存されない（作者の「コントロールSしても文字が変わらなかった」）。
@@ -1895,7 +2042,34 @@ ruby > rt {
    * 拡張機能の側が動いていないことがあるため（頼んでも返事が来ない）。
    */
   function copyForRescue() {
-    const text = composeOn ? composeDomToNotation(compose) : write.value;
+    const text = screenText();
+    const copied = copyTextDirect(text);
+    if (copied) unsentCopied = true;
+    unsentText.textContent = copied
+      ? "本文（" + text.length + "字）をクリップボードへ写しました。" +
+        "メモ帳などへ貼って控えてから、この画面を閉じて開き直してください。"
+      : "写せませんでした。本文を選んで Ctrl+C で写してください。";
+    paintUnsent();
+  }
+  unsentCopyButton.addEventListener("click", copyForRescue);
+  /*
+    **自分で Ctrl+C で写したときも、控えたことにする。** 「本文をコピー」が
+    断られた環境では、手で写すしかない。そのまま［開き直す］が押せないと、
+    知らせの中で行き止まりになる
+  */
+  document.addEventListener("copy", function () {
+    if (unsentStage === 0 || unsentCopied) return;
+    unsentCopied = true;
+    paintUnsent();
+  });
+
+  /** いま画面にある本文（記法のまま。組んで書く面でも打つ面でも） */
+  function screenText() {
+    return composeOn ? composeDomToNotation(compose) : write.value;
+  }
+
+  /** 拡張機能を通さずにクリップボードへ写す。写せたら true */
+  function copyTextDirect(text) {
     const box = document.createElement("textarea");
     box.value = text;
     box.style.position = "fixed";
@@ -1909,12 +2083,274 @@ ruby > rt {
       copied = false;
     }
     document.body.removeChild(box);
-    unsentText.textContent = copied
-      ? "本文（" + text.length + "字）をクリップボードへ写しました。" +
-        "メモ帳などへ貼って控えてから、この画面を閉じて開き直してください。"
-      : "写せませんでした。本文を選んで Ctrl+C で写してください。";
+    return copied;
   }
-  unsentCopyButton.addEventListener("click", copyForRescue);
+
+  /*
+    ── ［開き直す］ ──
+    拡張機能が生きていれば、同じ文書を原稿エディターで開き直してもらう。
+    **タブを閉じて開き直すと、画面の状態（控え）は新しい画面へ引き継がれない**
+    ので、控えを便に添えて渡し、拡張機能から新しい画面へ持って行ってもらう。
+
+    拡張機能へ届かない状態では頼んでも動かない。届いたかは返事
+    （reopenAccepted）で判断し、来なければ自分で開き直す手順を文で出す。
+    案内するのは**ウィンドウの再読み込み**——タブを閉じる道と違い、VS Code が
+    画面の状態を持ち越すので、開き直した画面に取り戻しの案内が出る。
+  */
+  function askReopen() {
+    if (!unsentCopied || reopenAsked) return;
+    reopenAsked = true;
+    keepRescue(screenText());
+    const state = vscode.getState() || {};
+    vscode.postMessage({ type: "reopen", rescue: state.rescue || null });
+    unsentText.textContent = "開き直しを頼んでいます…";
+    paintUnsent();
+    if (reopenTimer !== null) clearTimeout(reopenTimer);
+    reopenTimer = setTimeout(reopenNoAnswer, REOPEN_WAIT_MS);
+  }
+  unsentReopenButton.addEventListener("click", askReopen);
+
+  function reopenNoAnswer() {
+    reopenTimer = null;
+    unsentText.textContent =
+      "拡張機能に届きません。控えた本文が手元にあるのを確かめてから、" +
+      "コマンドパレット（Ctrl+Shift+P）で「開発者: ウィンドウの再読み込み」を" +
+      "実行してください。開き直した画面で、打った字を戻せます。";
+    vscode.postMessage({
+      type: "log",
+      text:
+        "開き直しを頼みましたが、" + Math.round(REOPEN_WAIT_MS / 1000) +
+        "秒たっても拡張機能から返事がありません。再読み込みを案内しました",
+    });
+  }
+
+  /** 拡張機能から届いた、開き直しの返事 */
+  function takeReopenReply(message) {
+    if (reopenTimer !== null) {
+      clearTimeout(reopenTimer);
+      reopenTimer = null;
+    }
+    if (message.type === "reopenAccepted") {
+      unsentText.textContent =
+        "開き直しています…（保存するかを訊かれたら、選んでください）";
+      return;
+    }
+    // reopenResult：開き直せなかった（保存の確認で取りやめた等）
+    if (message.ok === false) {
+      reopenAsked = false;
+      unsentText.textContent =
+        "開き直せませんでした。控えた本文を確かめてから、もう一度［開き直す］を押してください。";
+      paintUnsent();
+    }
+  }
+
+  /*
+    ── 控え（rescue）──
+    中身：docKey（どの文書か）・text（画面の本文）・at（控えた時刻）・
+    baseLength と baseHash（**その本文の元になった文書**＝最後に拡張機能
+    から届いた本文の字数とハッシュ）。戻すときに今の文書と比べ、控えた
+    あとで原稿が外で変わっていないかを確かめるのに使う。
+  */
+  /** いま開いている文書の鍵（拡張機能が update に添える） */
+  let docKey = null;
+  /** 最後に拡張機能から届いた本文 */
+  let lastDocText = null;
+  /** ハッシュは本文が変わったときだけ計算し直す（4万字を打つたびに数えない） */
+  let hashedText = null;
+  let hashedValue = "";
+  /** 最後に控えた本文（同じなら書き直さない） */
+  let rescueSavedText = null;
+  /** 開いたときの判断を済ませたか（判断は1回きり） */
+  let rescueChecked = false;
+  /** 出している案内の控え */
+  let rescueOffer = null;
+  /** 「外で変わっています」の確かめを出しているか */
+  let rescueConfirming = false;
+
+  /** 本文の指紋（FNV-1a 32ビット）。照合だけに使うので、これで足りる */
+  function textHash(text) {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return ("0000000" + hash.toString(16)).slice(-8);
+  }
+
+  function docHash() {
+    if (lastDocText === null) return "";
+    if (hashedText !== lastDocText) {
+      hashedText = lastDocText;
+      hashedValue = textHash(lastDocText);
+    }
+    return hashedValue;
+  }
+
+  function writeRescue(rescue) {
+    const next = Object.assign({}, vscode.getState() || {});
+    if (rescue) next.rescue = rescue;
+    else delete next.rescue;
+    vscode.setState(next);
+  }
+
+  /** 返事の来ていない本文を控える */
+  function keepRescue(text) {
+    // どの文書のものか分からない控えは、取り戻すときに照合できない
+    if (docKey === null) return;
+    if (text === rescueSavedText) return;
+    rescueSavedText = text;
+    writeRescue({
+      docKey: docKey,
+      text: text,
+      at: Date.now(),
+      baseLength: lastDocText === null ? -1 : lastDocText.length,
+      baseHash: docHash(),
+    });
+  }
+
+  /**
+   * 全部届いたので控えを消す。
+   *
+   * **案内を出している間は消さない。** 作者がまだ「戻す／捨てる」を
+   * 選んでいない控えを、打ち始めた字が届いただけで消すと、もう一度
+   * 画面が作り直されたときに取り戻せない。
+   */
+  function dropRescue() {
+    rescueSavedText = null;
+    if (rescueOffer !== null) return;
+    const state = vscode.getState();
+    if (!state || !state.rescue) return;
+    writeRescue(null);
+  }
+
+  function rescueUsable(rescue) {
+    if (!rescue || typeof rescue !== "object") return false;
+    if (typeof rescue.text !== "string" || typeof rescue.at !== "number") return false;
+    // 別の文書の控えは使わない
+    if (rescue.docKey !== docKey) return false;
+    return Date.now() - rescue.at <= RESCUE_MAX_AGE_MS;
+  }
+
+  /** 控えと文書で違うところの長さ（頭と尻の一致を除いた、長いほう） */
+  function diffLength(a, b) {
+    let head = 0;
+    const max = Math.min(a.length, b.length);
+    while (head < max && a[head] === b[head]) head++;
+    let tail = 0;
+    while (
+      tail < max - head &&
+      a[a.length - 1 - tail] === b[b.length - 1 - tail]
+    ) {
+      tail++;
+    }
+    return Math.max(a.length - head - tail, b.length - head - tail);
+  }
+
+  /**
+   * 拡張機能から本文が届いた（update）。文書の鍵と本文を覚え、
+   * **開いて最初の1回だけ**、控えから取り戻すかを判断する。
+   */
+  function rescueTakeUpdate(message) {
+    if (typeof message.docKey === "string") docKey = message.docKey;
+    if (typeof message.text === "string") lastDocText = message.text;
+    if (rescueChecked || lastDocText === null) return;
+    rescueChecked = true;
+    const saved = (vscode.getState() || {}).rescue;
+    // 拡張機能が持って来た控え（［開き直す］で新しい画面になったとき）
+    const carried = message.rescue;
+    const candidates = [saved, carried].filter(rescueUsable);
+    candidates.sort(function (a, b) {
+      return b.at - a.at;
+    });
+    const rescue = candidates.length > 0 ? candidates[0] : null;
+    if (rescue === null || rescue.text === lastDocText) {
+      // 使えない控え（別の文書・古い・もう入っている）は片づける
+      if (saved) writeRescue(null);
+      return;
+    }
+    // 拡張機能から来た控えも、ここで画面の状態へ移す（もう一度作り直されても残す）
+    if (rescue !== saved) writeRescue(rescue);
+    rescueOffer = rescue;
+    rescueConfirming = false;
+    paintRescue();
+    vscode.postMessage({
+      type: "log",
+      text:
+        "前回原稿に入らなかった字の控えが見つかりました（控えの本文" +
+        rescue.text.length + "字／文書" + lastDocText.length + "字）。戻すかを訊いています",
+    });
+  }
+
+  function paintRescue() {
+    if (rescueOffer === null) {
+      rescueBar.classList.remove("open");
+      return;
+    }
+    rescueBar.classList.add("open");
+    if (rescueConfirming) {
+      rescueText.textContent =
+        "控えたあとで原稿が変わっています。戻すと、その変更が消えるかもしれません。";
+      rescueRestoreButton.textContent = "それでも戻す";
+      return;
+    }
+    rescueText.textContent =
+      "前回、原稿に入らなかった字があります（" +
+      diffLength(rescueOffer.text, lastDocText === null ? "" : lastDocText) +
+      "字の差）。";
+    rescueRestoreButton.textContent = "戻す";
+  }
+
+  /** ［戻す］。**ふだんの打鍵と同じ便（postEdit）で送る** */
+  function rescueRestore() {
+    if (rescueOffer === null) return;
+    const now = lastDocText === null ? "" : lastDocText;
+    const unchanged =
+      rescueOffer.baseLength === now.length && rescueOffer.baseHash === textHash(now);
+    if (!unchanged && !rescueConfirming) {
+      // 控えたあとで外から変わった。押した瞬間には戻さず、確かめる
+      rescueConfirming = true;
+      paintRescue();
+      return;
+    }
+    const text = rescueOffer.text;
+    rescueOffer = null;
+    rescueConfirming = false;
+    writeRescue(null);
+    paintRescue();
+    write.value = text;
+    if (composeOn) composeApplyText(text);
+    if (composeOn) composeSend(true);
+    else send(true);
+    note.textContent = "前回入らなかった字を戻しました";
+    vscode.postMessage({
+      type: "log",
+      text:
+        "控えから戻しました（" + text.length + "字" +
+        (unchanged ? "" : "。控えたあとで原稿が変わっていたのを確かめたうえで") + "）",
+    });
+  }
+  rescueRestoreButton.addEventListener("click", rescueRestore);
+
+  rescueDiscardButton.addEventListener("click", function () {
+    if (rescueOffer === null) return;
+    const length = rescueOffer.text.length;
+    rescueOffer = null;
+    rescueConfirming = false;
+    writeRescue(null);
+    paintRescue();
+    vscode.postMessage({
+      type: "log",
+      text: "前回原稿に入らなかった字の控え（" + length + "字）を捨てました",
+    });
+  });
+
+  rescueCopyButton.addEventListener("click", function () {
+    if (rescueOffer === null) return;
+    const copied = copyTextDirect(rescueOffer.text);
+    rescueText.textContent = copied
+      ? "控えの本文（" + rescueOffer.text.length + "字）をクリップボードへ写しました。"
+      : "写せませんでした。";
+  });
   /* unsent:end */
 
   /**
@@ -3205,6 +3641,12 @@ ${RESUME_WRITING_LABEL ? `
         composeWanted = false;
         composeEnter();
       }
+      /*
+        **前回、原稿に入らなかった字の控えを見る**（設計書6.25.9）。
+        面を組み終えてから見る——［戻す］は組んだ面へ当てるので、面が
+        決まる前に案内を出すと、押した先がまだ無いことがある
+      */
+      rescueTakeUpdate(message);
       if (typeof message.marks === "string") {
         latestMarks = { forText: message.text, html: message.marks };
         applyMarksIfMatch();
@@ -3304,6 +3746,9 @@ ${RESUME_WRITING_LABEL ? `
     } else if (message.type === "editApplied") {
       // 送った便が文書へ入ったか（設計書6.25.9）
       takeEditApplied(message);
+    } else if (message.type === "reopenAccepted" || message.type === "reopenResult") {
+      // ［開き直す］の返事（設計書6.25.9）
+      takeReopenReply(message);
     } else if (message.type === "clipboardText") {
       // 右クリックの「貼り付け」で頼んだクリップボードの字
       takeClipboardText(message);

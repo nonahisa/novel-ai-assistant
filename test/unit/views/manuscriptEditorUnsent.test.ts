@@ -153,24 +153,51 @@ interface UnsentHarness {
   note(): string;
   forcedSends(): number;
   setVisibility(state: string): void;
+  /** 拡張機能から届いた本文（update）を受ける */
+  update(message: Record<string, unknown>): void;
+  /** 画面のボタンを押す（unsentCopy・unsentReopen・rescueRestore など） */
+  click(name: string): void;
+  button(name: string): { hidden: boolean; disabled: boolean; textContent: string };
+  unsentText(): string;
+  rescueOpen(): boolean;
+  rescueText(): string;
+  posted(): Array<Record<string, unknown>>;
+  clipboard(): string;
+  now(): number;
 }
 
-function unsentHarness(options: { composeOn?: boolean; text?: string } = {}): UnsentHarness {
+/** 画面の状態（vscode.setState）の置き場。画面を作り直しても同じ物を渡す */
+interface StateStore {
+  state?: unknown;
+}
+
+function unsentHarness(
+  options: { composeOn?: boolean; text?: string; store?: StateStore; now?: number } = {}
+): UnsentHarness {
   const block = markedBlock("unsent");
   expect(block, "届いたかを確かめる仕組み（unsent）が画面に無い").not.toBe("");
+  const store: StateStore = options.store ?? {};
   const env = {
-    now: 0,
+    now: options.now ?? 0,
     timers: [] as Array<{ at: number; fn: () => void; id: number }>,
     nextId: 1,
     posted: [] as Array<{ type: string; text?: string; seq?: number }>,
     windowHandlers: {} as Record<string, Array<(event: unknown) => void>>,
     documentHandlers: {} as Record<string, Array<(event: unknown) => void>>,
     bar: fakeClassList(),
+    rescueBar: fakeClassList(),
     noteText: "",
     forced: 0,
     text: options.text ?? "打った字",
     composeOn: options.composeOn ?? true,
     visibility: "visible",
+    store,
+    clicks: {} as Record<string, () => void>,
+    buttons: {} as Record<string, { hidden: boolean; disabled: boolean; textContent: string }>,
+    unsentText: { textContent: "" },
+    rescueText: { textContent: "" },
+    clipboard: "",
+    lastBox: null as null | { value: string },
   };
   const api = new Function(
     "env",
@@ -179,14 +206,37 @@ function unsentHarness(options: { composeOn?: boolean; text?: string } = {}): Un
     let pending = null;
     let composePending = null;
     let composeOn = env.composeOn;
-    const vscode = { postMessage: (message) => env.posted.push(message) };
+    // 画面の状態は JSON で写して持つ（VS Code も直列化して持つ）
+    const vscode = {
+      postMessage: (message) => env.posted.push(message),
+      getState: () =>
+        env.store.state === undefined ? undefined : JSON.parse(JSON.stringify(env.store.state)),
+      setState: (value) => { env.store.state = JSON.parse(JSON.stringify(value)); },
+    };
     const note = {
       get textContent() { return env.noteText; },
       set textContent(value) { env.noteText = value; },
     };
+    function fakeButton(name) {
+      const button = {
+        hidden: false,
+        disabled: false,
+        textContent: "",
+        title: "",
+        addEventListener: (type, fn) => { if (type === "click") env.clicks[name] = fn; },
+      };
+      env.buttons[name] = button;
+      return button;
+    }
     const unsentBar = { classList: env.bar };
-    const unsentText = { textContent: "" };
-    const unsentCopyButton = { addEventListener() {} };
+    const unsentText = env.unsentText;
+    const unsentCopyButton = fakeButton("unsentCopy");
+    const unsentReopenButton = fakeButton("unsentReopen");
+    const rescueBar = { classList: env.rescueBar };
+    const rescueText = env.rescueText;
+    const rescueRestoreButton = fakeButton("rescueRestore");
+    const rescueDiscardButton = fakeButton("rescueDiscard");
+    const rescueCopyButton = fakeButton("rescueCopy");
     const Date = { now: () => env.now };
     function setTimeout(fn, ms) {
       const id = env.nextId++;
@@ -206,6 +256,17 @@ function unsentHarness(options: { composeOn?: boolean; text?: string } = {}): Un
       addEventListener: (type, fn) => {
         (env.documentHandlers[type] = env.documentHandlers[type] || []).push(fn);
       },
+      // 「本文をコピー」が使う写し方（隠した textarea を選んで copy）
+      createElement: () => ({ value: "", style: {}, select() {} }),
+      body: {
+        appendChild: (box) => { env.lastBox = box; },
+        removeChild: () => {},
+      },
+      execCommand: (command) => {
+        if (command !== "copy" || env.lastBox === null) return false;
+        env.clipboard = env.lastBox.value;
+        return true;
+      },
     };
     let current = "";
     // 本物の send / composeSend と同じ約束：同じ本文なら送らない、force なら送る
@@ -217,12 +278,21 @@ function unsentHarness(options: { composeOn?: boolean; text?: string } = {}): Un
     }
     function send(force) { composeSend(force); }
     function composeDomToNotation() { return env.text; }
+    function composeApplyText(text) { env.text = text; }
     const compose = {};
-    const write = { get value() { return env.text; } };
+    const write = {
+      get value() { return env.text; },
+      set value(text) { env.text = text; },
+    };
     ${block}
     return {
       postEdit: (text) => { current = text; postEdit(text); },
-      receive: (message) => takeEditApplied(message),
+      receive: (message) => {
+        if (message && message.type === "reopenAccepted") takeReopenReply(message);
+        else if (message && message.type === "reopenResult") takeReopenReply(message);
+        else takeEditApplied(message);
+      },
+      update: (message) => { current = message.text; rescueTakeUpdate(message); },
       setComposing: (value) => { composing = value; },
       composing: () => composing,
     };
@@ -230,6 +300,7 @@ function unsentHarness(options: { composeOn?: boolean; text?: string } = {}): Un
   )(env) as {
     postEdit(text: string): void;
     receive(message: unknown): void;
+    update(message: Record<string, unknown>): void;
     setComposing(value: boolean): void;
     composing(): boolean;
   };
@@ -269,6 +340,23 @@ function unsentHarness(options: { composeOn?: boolean; text?: string } = {}): Un
     setVisibility(state) {
       env.visibility = state;
     },
+    update: (message) => api.update(message),
+    click(name) {
+      const button = env.buttons[name];
+      expect(button, `${name} のボタンが無い`).toBeDefined();
+      // 押せないボタンは押しても何も起きない（本物の disabled と同じ）
+      if (button.disabled || button.hidden) return;
+      const fn = env.clicks[name];
+      expect(fn, `${name} を押したときの動きが無い`).toBeDefined();
+      fn();
+    },
+    button: (name) => env.buttons[name],
+    unsentText: () => env.unsentText.textContent,
+    rescueOpen: () => env.rescueBar.contains("open"),
+    rescueText: () => env.rescueText.textContent,
+    posted: () => env.posted as Array<Record<string, unknown>>,
+    clipboard: () => env.clipboard,
+    now: () => env.now,
   };
 }
 
@@ -465,6 +553,270 @@ describe("届かないときの知らせの帯", () => {
     h.postEdit("あ");
     h.receive({ type: "editApplied", seq: 1, ok: true });
     expect(h.logs()).toEqual([]);
+  });
+});
+
+/* ── 知らせを段階で出す（作者の裁定 2026-10-01「段階で出す」）───────── */
+
+/*
+  実際に起きたこと（2026-10-01、ノートPC、0.94.0）：拡張機能ホストが
+  起動し直したあと、画面で打った約100字が一度もファイルへ届かなかった。
+  知らせと「本文をコピー」は出ていたが、作者の声は「消えない。製品版だと
+  どう対処するのか。ユーザーが対応に迷いそう」。
+*/
+describe("届かない知らせを段階で出す", () => {
+  it("**出た直後は「送り直しています（N秒）」と数え上げる**", () => {
+    const h = unsentHarness();
+    h.postEdit("打った字");
+    h.advance(5_000);
+    expect(h.bannerOpen()).toBe(true);
+    expect(h.unsentText()).toMatch(/打った字を原稿へ送り直しています（\d+秒）/);
+    const first = Number(/（(\d+)秒）/.exec(h.unsentText())![1]);
+    h.advance(10_000);
+    const later = Number(/（(\d+)秒）/.exec(h.unsentText())![1]);
+    expect(later - first, "秒数が数え上がっていない").toBeGreaterThanOrEqual(9);
+    // 出た直後から「本文をコピー」は押せる。［開き直す］はまだ出さない
+    expect(h.button("unsentReopen").hidden).toBe(true);
+  });
+
+  it("**30秒たっても消えなければ、「入りません」の段に変えて［開き直す］を並べる**", () => {
+    const h = unsentHarness();
+    h.postEdit("打った字");
+    // 知らせは4秒で出る。そこから数えて29秒
+    h.advance(4_000);
+    expect(h.bannerOpen()).toBe(true);
+    h.advance(29_000);
+    expect(h.unsentText(), "まだ30秒たっていない").toMatch(/送り直しています/);
+    h.advance(2_000);
+    expect(h.unsentText()).toContain(
+      "打った字が原稿に入りません。本文をコピーで控えてから、開き直してください。"
+    );
+    expect(h.button("unsentReopen").hidden).toBe(false);
+    // 段が変わったことを記録へ残す
+    expect(h.logs().some((text) => /開き直す案内/.test(text))).toBe(true);
+  });
+
+  it("**［開き直す］はコピーを済ませるまで押せない**（押すと画面の字が消えるため）", () => {
+    const h = unsentHarness({ text: "控えたい字" });
+    h.postEdit("控えたい字");
+    h.advance(40_000);
+    expect(h.button("unsentReopen").disabled).toBe(true);
+    h.click("unsentReopen");
+    expect(h.posted().some((message) => message.type === "reopen")).toBe(false);
+
+    h.click("unsentCopy");
+    expect(h.clipboard()).toBe("控えたい字");
+    // コピー後の文は今までどおり
+    expect(h.unsentText()).toContain("クリップボードへ写しました");
+    expect(h.button("unsentReopen").disabled).toBe(false);
+    // 秒の数え上げでコピー後の文を上書きしない
+    h.advance(5_000);
+    expect(h.unsentText()).toContain("クリップボードへ写しました");
+  });
+
+  it("**［開き直す］は拡張機能へ頼む。返事が来なければ、自分で開き直す手順を文で案内する**", () => {
+    const h = unsentHarness({ text: "控えたい字" });
+    h.update({ type: "update", docKey: "k", text: "元" });
+    h.postEdit("控えたい字");
+    h.advance(40_000);
+    h.click("unsentCopy");
+    h.click("unsentReopen");
+    const asked = h.posted().filter((message) => message.type === "reopen");
+    expect(asked).toHaveLength(1);
+    // 拡張機能が生きていれば、新しい画面へ控えを持って行けるように添える
+    expect((asked[0].rescue as { text: string }).text).toBe("控えたい字");
+    h.advance(5_000);
+    expect(h.unsentText()).toMatch(/ウィンドウの再読み込み/);
+    expect(h.logs().some((text) => /開き直し/.test(text) && /返事/.test(text))).toBe(true);
+  });
+
+  it("拡張機能が開き直しを受けたなら、自分で開き直す案内は出さない", () => {
+    const h = unsentHarness({ text: "控えたい字" });
+    h.update({ type: "update", docKey: "k", text: "元" });
+    h.postEdit("控えたい字");
+    h.advance(40_000);
+    h.click("unsentCopy");
+    h.click("unsentReopen");
+    h.receive({ type: "reopenAccepted" });
+    h.advance(5_000);
+    expect(h.unsentText()).not.toMatch(/ウィンドウの再読み込み/);
+    expect(h.unsentText()).toMatch(/開き直しています/);
+  });
+
+  it("届いて知らせを下ろしたら、段も［開き直す］も元へ戻す", () => {
+    const h = unsentHarness();
+    h.postEdit("打った字");
+    h.advance(40_000);
+    const last = h.edits().at(-1)!;
+    h.receive({ type: "editApplied", seq: last.seq, ok: true });
+    expect(h.bannerOpen()).toBe(false);
+    expect(h.button("unsentReopen").hidden).toBe(true);
+    // 次に出たときは、また1段目から
+    h.postEdit("打った字を足した");
+    h.advance(5_000);
+    expect(h.unsentText()).toMatch(/送り直しています/);
+  });
+});
+
+/* ── 開き直したときに取り戻す ─────────────────────────── */
+
+describe("開き直したときに、原稿に入らなかった字を取り戻す", () => {
+  const DOC = "元の本文";
+  const TYPED = "元の本文に打ち足した字";
+
+  /** 返事の来ない便があるまま、画面が消える（拡張機能ホストが起き直した） */
+  function lostScreen(store: StateStore, now = 0): UnsentHarness {
+    const h = unsentHarness({ store, text: TYPED, now });
+    h.update({ type: "update", docKey: "doc-1", text: DOC });
+    h.postEdit(TYPED);
+    h.advance(5_000);
+    return h;
+  }
+
+  it("**返事の来ない便があるまま画面を作り直すと、控えから取り戻しの案内が出る**", () => {
+    const store: StateStore = {};
+    lostScreen(store);
+    const reopened = unsentHarness({ store, text: DOC, now: 60_000 });
+    reopened.update({ type: "update", docKey: "doc-1", text: DOC });
+    expect(reopened.rescueOpen(), "控えがあるのに案内が出ない").toBe(true);
+    expect(reopened.rescueText()).toContain("前回、原稿に入らなかった字があります");
+    expect(reopened.rescueText()).toContain("7字の差");
+    // **黙って書き戻さない**
+    expect(reopened.edits()).toEqual([]);
+  });
+
+  it("**返事が来れば、控えは消える**", () => {
+    const store: StateStore = {};
+    const h = lostScreen(store);
+    expect((store.state as { rescue?: unknown }).rescue, "控えていない").toBeDefined();
+    const last = h.edits().at(-1)!;
+    h.receive({ type: "editApplied", seq: last.seq, ok: true });
+    expect((store.state as { rescue?: unknown }).rescue).toBeUndefined();
+
+    const reopened = unsentHarness({ store, text: TYPED, now: 60_000 });
+    reopened.update({ type: "update", docKey: "doc-1", text: TYPED });
+    expect(reopened.rescueOpen()).toBe(false);
+  });
+
+  it("返事がすぐ来るふだんの打鍵では、控えを書かない（打つたびに本文を写さない）", () => {
+    const store: StateStore = {};
+    const h = unsentHarness({ store, text: TYPED });
+    h.update({ type: "update", docKey: "doc-1", text: DOC });
+    h.postEdit(TYPED);
+    h.receive({ type: "editApplied", seq: 1, ok: true });
+    expect((store.state as { rescue?: unknown } | undefined)?.rescue).toBeUndefined();
+  });
+
+  it("**届いた文書の本文と同じなら、案内を出さない**（控えも片づける）", () => {
+    const store: StateStore = {};
+    lostScreen(store);
+    const reopened = unsentHarness({ store, text: TYPED, now: 60_000 });
+    reopened.update({ type: "update", docKey: "doc-1", text: TYPED });
+    expect(reopened.rescueOpen()).toBe(false);
+    expect((store.state as { rescue?: unknown }).rescue).toBeUndefined();
+  });
+
+  it("別の文書を開いたときは、控えを使わない", () => {
+    const store: StateStore = {};
+    lostScreen(store);
+    const other = unsentHarness({ store, text: "別の話", now: 60_000 });
+    other.update({ type: "update", docKey: "doc-2", text: "別の話" });
+    expect(other.rescueOpen()).toBe(false);
+  });
+
+  it("7日より古い控えは出さない", () => {
+    const store: StateStore = {};
+    lostScreen(store);
+    const late = unsentHarness({ store, text: DOC, now: 8 * 24 * 60 * 60 * 1000 });
+    late.update({ type: "update", docKey: "doc-1", text: DOC });
+    expect(late.rescueOpen()).toBe(false);
+  });
+
+  it("**［戻す］は、控えの本文をふだんの打鍵と同じ便（postEdit）で送る**", () => {
+    const store: StateStore = {};
+    lostScreen(store);
+    const reopened = unsentHarness({ store, text: DOC, now: 60_000 });
+    reopened.update({ type: "update", docKey: "doc-1", text: DOC });
+    reopened.click("rescueRestore");
+    expect(reopened.edits().map((edit) => edit.text)).toEqual([TYPED]);
+    expect(reopened.rescueOpen()).toBe(false);
+    expect((store.state as { rescue?: unknown }).rescue).toBeUndefined();
+  });
+
+  it("**控えたあとで原稿が外で変わっていたら、戻す前に確かめる**", () => {
+    const store: StateStore = {};
+    lostScreen(store);
+    const reopened = unsentHarness({ store, text: "元の本文（外で直した）", now: 60_000 });
+    reopened.update({ type: "update", docKey: "doc-1", text: "元の本文（外で直した）" });
+    expect(reopened.rescueOpen()).toBe(true);
+    reopened.click("rescueRestore");
+    expect(reopened.edits(), "確かめずに戻した").toEqual([]);
+    expect(reopened.rescueText()).toContain(
+      "控えたあとで原稿が変わっています。戻すと、その変更が消えるかもしれません"
+    );
+    // もう一度押せば戻す
+    reopened.click("rescueRestore");
+    expect(reopened.edits().map((edit) => edit.text)).toEqual([TYPED]);
+  });
+
+  it("［捨てる］は、送らずに控えを消す", () => {
+    const store: StateStore = {};
+    lostScreen(store);
+    const reopened = unsentHarness({ store, text: DOC, now: 60_000 });
+    reopened.update({ type: "update", docKey: "doc-1", text: DOC });
+    reopened.click("rescueDiscard");
+    expect(reopened.edits()).toEqual([]);
+    expect(reopened.rescueOpen()).toBe(false);
+    expect((store.state as { rescue?: unknown }).rescue).toBeUndefined();
+  });
+
+  it("［本文をコピー］は控えの本文を写す（案内は閉じない）", () => {
+    const store: StateStore = {};
+    lostScreen(store);
+    const reopened = unsentHarness({ store, text: DOC, now: 60_000 });
+    reopened.update({ type: "update", docKey: "doc-1", text: DOC });
+    reopened.click("rescueCopy");
+    expect(reopened.clipboard()).toBe(TYPED);
+    expect(reopened.rescueOpen()).toBe(true);
+  });
+
+  it("**拡張機能が開き直したときは、拡張機能が持って来た控えでも案内を出す**", () => {
+    // タブを閉じて開き直すと、画面の状態は新しい画面へ引き継がれない
+    const reopened = unsentHarness({ store: {}, text: DOC, now: 60_000 });
+    reopened.update({
+      type: "update",
+      docKey: "doc-1",
+      text: DOC,
+      rescue: { docKey: "doc-1", text: TYPED, at: 50_000, baseLength: DOC.length, baseHash: "" },
+    });
+    expect(reopened.rescueOpen()).toBe(true);
+  });
+
+  it("案内は開いたときの1回だけ判断する（打つたびに届く本文で出し直さない）", () => {
+    const store: StateStore = {};
+    lostScreen(store);
+    const reopened = unsentHarness({ store, text: DOC, now: 60_000 });
+    reopened.update({ type: "update", docKey: "doc-1", text: DOC });
+    reopened.click("rescueDiscard");
+    reopened.update({ type: "update", docKey: "doc-1", text: DOC });
+    expect(reopened.rescueOpen()).toBe(false);
+  });
+});
+
+describe("取り戻しの案内と［開き直す］が画面にある", () => {
+  it("案内は本文の上に置く", () => {
+    const rescue = html.indexOf('id="rescue"');
+    expect(rescue).toBeGreaterThan(0);
+    expect(rescue).toBeLessThan(html.indexOf('<div id="surface">'));
+    for (const id of ["rescueRestore", "rescueDiscard", "rescueCopy"]) {
+      expect(html).toContain(`id="${id}"`);
+    }
+    expect(html).toContain('id="unsentReopen"');
+  });
+
+  it("画面の覚え（remember）が、控えを消さない", () => {
+    const source = functionSource("remember", "vscode.postMessage(");
+    expect(source).toContain("rescue");
   });
 });
 
