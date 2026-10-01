@@ -77,6 +77,10 @@ import {
   outputReserveTokens,
   promptCharsOf,
 } from "./measureNumCtx.mjs";
+import {
+  listBodyFiles,
+  loadResolveManuscriptDir,
+} from "./measureBodyFiles.mjs";
 
 /**
  * 測れる行き先。
@@ -115,10 +119,6 @@ const WHOLE_WORK_FEATURES = ["factContradiction"];
  */
 const DEFAULT_NUM_CTX = 32768;
 
-/** 本文として読むもの（`models/types.ts` の `SUPPORTED_EXTENSIONS`） */
-const BODY_EXTENSIONS = [".txt", ".md"];
-/** 本文の置き場所（`models/types.ts` の `DEFAULT_MANUSCRIPT_DIR`） */
-const MANUSCRIPT_DIR = "本文";
 /** 許可の印の置き場所（`models/types.ts` の `AIWRITER_DIR`） */
 const AIWRITER_DIR = ".aiwriter";
 const PERMISSION_FILE = "external-access.json";
@@ -324,26 +324,6 @@ function clearChunkCache(work) {
   });
 }
 
-/**
- * 本文のファイルを並べる（`mcp/tools/shared.ts` の `listBodyFiles` と同じ切り方）。
- *
- * **束へは訊かない。** 訊くには `work.scan` の許可が要り、測る道具以外を
- * 許すことになる——写しを自分で数えれば、許可は測る道具だけで済む。
- */
-function listBodyFiles(work) {
-  const manuscripts = path.join(work, MANUSCRIPT_DIR);
-  const dir = fs.existsSync(manuscripts) ? manuscripts : work;
-  return fs
-    .readdirSync(dir, { withFileTypes: true })
-    .filter((entry) => entry.isFile())
-    .map((entry) => entry.name)
-    .filter((name) =>
-      BODY_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext))
-    )
-    .sort((a, b) => a.localeCompare(b, "ja"))
-    .map((name) => path.relative(work, path.join(dir, name)));
-}
-
 /* ── 呼び方を、道具の入力の形から決める ─────────────────── */
 
 /**
@@ -421,7 +401,8 @@ function planCalls(schema, context) {
   }
   if (!("filePath" in properties)) return [{ label: "（作品ぜんたい）", args: base }];
 
-  const files = listBodyFiles(context.work);
+  // 本文の場所の決め方は製品から借りたもの（`measureBodyFiles.mjs`）
+  const files = listBodyFiles(context.work, context.resolveManuscriptDirSync);
   if (files.length === 0) {
     throw new Error(`本文が1つもありません: ${context.work}`);
   }
@@ -805,9 +786,25 @@ async function main() {
     if (!schema) {
       throw new Error(`${planTool} が tools/list にありません。`);
     }
+    /*
+      **本文の場所の決め方は製品から借りる**（`core/manuscriptFolderRule.ts`）。
+      話ごとに回す feature のときだけ要るので、そのときだけ束から読む
+      ——作品ぜんたいを1回見る機能を、束ね直しの手間で止めない。
+    */
+    let resolveManuscriptDirSync = null;
+    if (FILE_TARGET_FEATURES.includes(options.feature)) {
+      const borrowedRule = await loadResolveManuscriptDir();
+      resolveManuscriptDirSync = borrowedRule.resolveManuscriptDirSync;
+      if (borrowedRule.stale) {
+        console.warn(
+          "※ dist/core-bundle.mjs が src/core/manuscriptFolderRule.ts より古いようです（npm run bundle:core で束ね直してください）。"
+        );
+      }
+    }
     const buildCalls = (numCtx) =>
       planCalls(schema, {
         work,
+        resolveManuscriptDirSync,
         feature: options.feature,
         model: options.model,
         numCtx,

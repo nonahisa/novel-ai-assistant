@@ -31,6 +31,8 @@ import { markFontFor } from "../src/core/markFont";
 import { memoColorVars } from "../src/core/sceneMemo";
 import { TERM_COLORS } from "../src/core/termColors";
 import { copyEmphasisFor } from "../src/core/postingCopyTargets";
+import { resolveManuscriptDirAsync } from "../src/core/manuscriptFolderRule";
+import { DEFAULT_MANUSCRIPT_DIR, DEFAULT_SETTINGS_DIR } from "../src/models/types";
 import { DESK_PAGE_SHIM } from "./pageShim.mjs";
 
 /** 起動の引数 `--work <作品フォルダー> --port <番号>` を読む */
@@ -48,12 +50,24 @@ const TEXT_EXTENSIONS = new Set([".txt", ".md"]);
 const SKIP_DIRECTORIES = new Set(["node_modules", "設定", "資料"]);
 
 /**
- * 話の一覧。`本文/` があればその下だけ、無ければ作品フォルダーの下を見る。
- * 試作なので作品の登録（scanWork）は使わず、.txt / .md を並べるだけにする。
+ * 話の一覧。試作なので作品の登録（scanWork）は使わず、.txt / .md を並べるだけにする。
+ *
+ * **どこから並べるかは拡張機能と同じ決め方を通す**（`core/manuscriptFolderRule.ts`。
+ * 設計書5.1 の末尾）。以前は「`本文/` があればその下だけ」の写しを持っていて、
+ * 空の `本文/` があり原稿が直下にある作品（git は空のフォルダーを運ばないので、
+ * 登録した機械にだけ空の `本文/` が残る）で、一覧が空になっていた。
+ * 変えたのは並べ始める場所だけで、歩き方と保存は元のまま。
  */
-async function listEpisodes(workRoot) {
-  const bodyRoot = nodePath.join(workRoot, "本文");
-  const start = (await isDirectory(bodyRoot)) ? bodyRoot : workRoot;
+export async function listEpisodes(workRoot) {
+  const root = nodePath.resolve(workRoot);
+  const start = await resolveManuscriptDirAsync(
+    {
+      root,
+      manuscript: nodePath.join(root, DEFAULT_MANUSCRIPT_DIR),
+      settings: nodePath.join(root, DEFAULT_SETTINGS_DIR),
+    },
+    nodeAsyncIo
+  );
   const found = [];
   async function walk(dir, depth) {
     if (depth > 3) return;
@@ -76,6 +90,34 @@ async function listEpisodes(workRoot) {
   await walk(start, 0);
   return found.sort((a, b) => a.localeCompare(b, "ja", { numeric: true }));
 }
+
+/**
+ * 本文の場所を決めるための読み手（MCP の `bodyDirOf` と同じ扱い）。
+ * 見つからないときだけ「無い」。それ以外の失敗は投げる——読めない事情を
+ * 握りつぶして直下へ切り替えない（呼び手の要求の処理が失敗として返す）。
+ */
+const nodeAsyncIo = {
+  async kind(location) {
+    try {
+      const info = await fs.stat(location);
+      return info.isDirectory() ? "directory" : info.isFile() ? "file" : "other";
+    } catch (error) {
+      if (error && error.code === "ENOENT") return "missing";
+      throw error;
+    }
+  },
+  async list(location) {
+    try {
+      const entries = await fs.readdir(location, { withFileTypes: true });
+      return entries.map((entry) => [
+        entry.name,
+        entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other",
+      ]);
+    } catch {
+      return undefined;
+    }
+  },
+};
 
 async function isDirectory(target) {
   try {

@@ -77,6 +77,12 @@ export const CORE_ENTRY_NAMES = [
     全文を送っており、切ったことも知らせていなかった（MCP で測って分かった）。
   */
   "plotForDeviation",
+  /*
+    本文の場所の決め方（0.94.1 で1か所へ寄せた。設計書5.1 の末尾）。
+    **測定台（`scripts/measure.mjs`）がここから借りる**——台本の中に
+    古い判定の写しが残り、空の `本文/` と直下の原稿の作品で0件を返していた。
+  */
+  "manuscriptFolderRule",
 ];
 
 /**
