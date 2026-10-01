@@ -244,9 +244,21 @@ describe("相談の聞き直し（runner: sampling）", () => {
 });
 
 describe("全体像（options.overview）", () => {
-  test("既定では添えない（これまでどおり）", () => {
+  /*
+    **既定は製品と同じく添える**（2026-10-01。残課題 R6、本体の裁定）。
+    製品の相談は作品が決まれば毎回全体像を渡すので、省いたときに添えないと
+    製品と違う材料で測ることになる（CLAUDE.md の失敗5）。
+  */
+  test("省くと、製品と同じく添える", () => {
     const folder = work();
     const result = chatPrompt({ folder, question: "どうですか" });
+    expect(result.overview).toBe(true);
+    expect(result.userPrompt).toContain("【作品の全体像】");
+  });
+
+  test("false を渡したときだけ外す（以前の既定。過去の測定と比べるとき）", () => {
+    const folder = work();
+    const result = chatPrompt({ folder, question: "どうですか", overview: false });
     expect(result.overview).toBe(false);
     expect(result.userPrompt).not.toContain("【作品の全体像】");
   });

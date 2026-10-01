@@ -144,14 +144,13 @@ import {
  * | 登場人物の名前（端役を除く・60人まで） | 見出しつき1行 | **同じ** |
  * | 画面の種類と説明（【いま開いている画面】） | 開いているファイルから | **同じ判定**（`filePath` から。無ければ「作品全体」） |
  * | 覚えておくやり取りの数 | 12 | **同じ** |
+ * | 作品の全体像（話の一覧・紹介文・プロット） | 作品が決まれば毎回 | **同じ**（`overview: false` のときだけ外す） |
  *
  * **意図して違うもの**（画面の状態や、作品フォルダーの外にあるもの）:
  *
  * - 抜粋：製品はカーソルの前後・選択範囲。ここは画面が無いので**先頭から** `EXCERPT_LIMIT` 字
  * - 質問に近い場面（意味検索）：索引が作品フォルダーの外にあるので**使わない**
  * - 作品名：製品は登録した題名。ここは登録の台帳を読まないので**フォルダー名**
- * - 全体像：製品は作品が決まれば毎回。ここは `overview: true` のときだけ
- *   （過去の測定と比べられるように既定を変えていない）
  * - 助言方針・執筆スタイル：製品は `globalState`。ここは渡された答えか控え（上の表）
  */
 
@@ -236,7 +235,7 @@ export interface ChatPromptResult {
   temperature: number;
   validateWith: string;
   userPrompt: string;
-  /** 材料の塊（登場人物の名前。製品と同じ形）。`overview` を渡すと全体像の塊が先頭に入る */
+  /** 材料の塊（全体像と登場人物の名前。製品と同じ形・同じ並び）。`overview: false` なら全体像は入らない */
   reference: string[];
   /** 作品の全体像（話の一覧・紹介文・プロット）を添えたか */
   overview: boolean;
@@ -264,11 +263,11 @@ export interface ChatPromptInput {
   /**
    * 作品の全体像（話の一覧と各話のファイルの場所・紹介文・プロット）を添えるか。
    *
-   * **既定は添えない**（これまでどおり）。製品の相談は作品のファイルを
-   * 開いているときに必ず添えるが、MCP は材料を絞って測る口として作って
-   * きたので、既定を変えると過去の測定と比べられなくなる。製品と同じ
-   * 材料で測りたいときに `true` を渡す。組み方は製品と同じ
-   * （`core/chatFileRequest.ts` の `formatChatOverview`）。
+   * **省くと製品と同じく添える**（2026-10-01。残課題 R6、本体の裁定）。
+   * 製品の相談は作品が決まれば毎回添えるので、以前の既定（添えない）では
+   * 製品と違う材料で測ることになっていた（CLAUDE.md の失敗5）。
+   * **`false` を渡したときだけ外す**（過去の測定と比べるとき）。
+   * 組み方は製品と同じ（`core/chatFileRequest.ts` の `formatChatOverview`）。
    */
   overview?: boolean;
 }
@@ -646,7 +645,7 @@ export function chatPrompt(
   }
 
   // 全体像は製品と同じく材料の先頭に置く（`buildReference` の並び）
-  const overview = input.overview === true ? overviewOf(input.folder) : undefined;
+  const overview = input.overview === false ? undefined : overviewOf(input.folder);
   // 設定資料そのものを指しているときは、画面の内容と重なるので名前は省く（製品と同じ）
   const reference = [
     ...(overview ? [overview] : []),

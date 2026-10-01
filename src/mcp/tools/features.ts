@@ -239,7 +239,7 @@ const OPTIONS_TABLE =
   "synopsis: needsSubtitle。" +
   "episodePlot: plotPath※（単話プロットの相対パス）・chapterLabel。" +
   "chat: question※・history・adviceAnswers・writerStyle・featureIndex・" +
-  "overview（true で作品の全体像＝話の一覧と各話の場所・紹介文・プロットを添える。製品と同じ材料）。" +
+  "overview（省くと作品の全体像＝話の一覧と各話の場所・紹介文・プロットを添える。false で外す。製品と同じ材料）。" +
   /*
     ollama／sampling は、AIが求めたファイル（needFiles）を読んで1回だけ聞き直す
     （0.85.1。製品と同じ）。claude の道はプロンプトを返すだけなので往復しない
