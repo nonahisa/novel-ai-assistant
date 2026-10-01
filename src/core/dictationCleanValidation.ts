@@ -59,6 +59,26 @@ export function dictationQuoteAllowance(chars: number): number {
 /** 通知に出す「直した点」の件数 */
 export const DICTATION_NOTES_SHOWN = 3;
 
+/**
+ * 通知に出す「直した点」の1件の字数（2026-10-01）。
+ *
+ * AIの返す点は口述した語句を引用しうる。知らせの文は記録（notices.recent。
+ * 作品ごとの許可を通らない）へ1,000字まで残るので、1件を短く切って、
+ * 原稿に近い語が長く残らないようにする。
+ */
+export const DICTATION_NOTE_MAX_CHARS = 40;
+
+/** 通知に出す「直した点」の並び（件数と1件の字数を切ったもの） */
+export function dictationNotesForNotice(notes: readonly string[]): string[] {
+  return notes
+    .slice(0, DICTATION_NOTES_SHOWN)
+    .map((note) =>
+      note.length > DICTATION_NOTE_MAX_CHARS
+        ? `${note.slice(0, DICTATION_NOTE_MAX_CHARS)}…`
+        : note
+    );
+}
+
 export interface DictationCleanResult {
   text: string;
   notes: string[];

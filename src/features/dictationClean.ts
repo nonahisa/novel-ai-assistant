@@ -17,7 +17,7 @@ import {
   DICTATION_MIN_CHARS,
 } from "../prompts/dictationClean";
 import {
-  DICTATION_NOTES_SHOWN,
+  dictationNotesForNotice,
   parseDictationCleanResult,
   validateDictationClean,
 } from "../core/dictationCleanValidation";
@@ -332,7 +332,7 @@ async function announceApplied(
   /** 整えた文書。**`undo` を撃つ前に、いま開いているものと突き合わせる** */
   target: vscode.Uri
 ): Promise<void> {
-  const shown = notes.slice(0, DICTATION_NOTES_SHOWN);
+  const shown = dictationNotesForNotice(notes);
   const detail = shown.length > 0 ? `\n直した点：${shown.join(" / ")}` : "";
   const headline = `口述を整えました（${before}字→${after}字）。`;
 

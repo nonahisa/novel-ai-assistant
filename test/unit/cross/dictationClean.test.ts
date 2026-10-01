@@ -10,10 +10,27 @@ import {
 import {
   DICTATION_MAX_LENGTH_RATIO,
   DICTATION_MIN_LENGTH_RATIO,
+  DICTATION_NOTE_MAX_CHARS,
+  DICTATION_NOTES_SHOWN,
+  dictationNotesForNotice,
   dictationQuoteAllowance,
   parseDictationCleanResult,
   validateDictationClean,
 } from "../../../src/core/dictationCleanValidation";
+
+describe("通知に出す「直した点」は件数と1件の字数を切る（記録に口述の語が長く残らない。2026-10-01）", () => {
+  test("長い点は40字で切って「…」を付け、短い点はそのまま", () => {
+    const long = "あ".repeat(DICTATION_NOTE_MAX_CHARS + 25);
+    const shown = dictationNotesForNotice(["句点を足した", long]);
+    expect(shown[0]).toBe("句点を足した");
+    expect(shown[1]).toBe(`${"あ".repeat(DICTATION_NOTE_MAX_CHARS)}…`);
+  });
+
+  test("件数は DICTATION_NOTES_SHOWN まで", () => {
+    const notes = Array.from({ length: DICTATION_NOTES_SHOWN + 2 }, (_, i) => `点${i}`);
+    expect(dictationNotesForNotice(notes)).toHaveLength(DICTATION_NOTES_SHOWN);
+  });
+});
 import { applyDictationText } from "../../../src/features/dictationClean";
 import { EndOfLine, WorkspaceEdit, workspace } from "../support/vscodeStub";
 import { EXTRA_GUIDE, buildGuideBundles } from "../../../src/core/featureGuide";
