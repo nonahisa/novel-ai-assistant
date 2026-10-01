@@ -225,6 +225,13 @@ interface ComposeApi {
       vertical?: boolean;
     }
   ): "before" | "after" | null;
+  /** 字の見張り（作者の実機報告、2026-10-01） */
+  composeShownPlainText(root: FakeNode): string;
+  composePlainMismatch(
+    root: FakeNode,
+    notation: string,
+    mode?: Mode
+  ): { shown: string; shownCount: number; builtCount: number } | null;
 }
 
 /** 用語の位置（`collectTermSpans` が渡してくるもののうち、判定が見る分だけ） */
@@ -245,7 +252,8 @@ const api = new Function(
     " composeTermForOffset, pickMenuTerm," +
     " composeCopyPayloads, composePastePick, COMPOSE_NOTATION_FLAVOR," +
     " memoIsLine, memoPartsOf, memoClassFor, composeMarkIsStale," +
-    " composeMarkRangeOf, composeEscapeAfterArrow };"
+    " composeMarkRangeOf, composeEscapeAfterArrow," +
+    " composeShownPlainText, composePlainMismatch };"
 )() as ComposeApi;
 
 /** 記法から組み立てたDOM（偽） */
@@ -920,15 +928,29 @@ describe("組み立てたDOMの形", () => {
     ]);
   });
 
-  it("かたまりは data-src をそのまま出す（中の字ではなく記法）", () => {
-    // 中の字を書き換えても、記法（data-src）のほうが本文になる
+  it("かたまりは data-src をそのまま出す（中の字が組んだときのままなら）", () => {
+    const line = element("p", [
+      text("あ"),
+      element("ruby", [text("漢"), element("rt", [text("かん")])], {
+        "data-src": "{漢|かん}",
+      }),
+    ]);
+    expect(api.composeDomToNotation(fragment([line]))).toBe("あ{漢|かん}");
+  });
+
+  /**
+   * 0.94.0 までは「中の字を書き換えても記法が本文」だった。それでは
+   * **画面に見えている字が本文から落ちる**（作者の実機報告、2026-10-01）。
+   * 中の字が記法と違えば、見えている字で記法を組み直す
+   */
+  it("中の字が記法と違えば、見えている字で記法を組み直す", () => {
     const line = element("p", [
       text("あ"),
       element("ruby", [text("別"), element("rt", [text("べつ")])], {
         "data-src": "{漢|かん}",
       }),
     ]);
-    expect(api.composeDomToNotation(fragment([line]))).toBe("あ{漢|かん}");
+    expect(api.composeDomToNotation(fragment([line]))).toBe("あ{別|べつ}");
   });
 });
 
@@ -2375,5 +2397,300 @@ describe("貼り付けは、自前の形を先に読む", () => {
 
   it("クリップボードが読めないときは空文字（本文を壊さない）", () => {
     expect(api.composePastePick(null)).toBe("");
+  });
+});
+
+/**
+ * **画面に見えている字は、必ず本文に入る**（作者の実機報告、2026-10-01）。
+ *
+ * 縦書きの組んで書く面で打った約100字（段落2つ）が、画面には見えていたのに
+ * ファイルにも「本文をコピー」の写しにも入っていなかった。写しは
+ * composeDomToNotation の結果そのものなので、**DOM の読み方が字を
+ * 落としていないか**を、contenteditable・IME・スリープ明けが作りうる形を
+ * 並べて確かめる。
+ *
+ * 比べるのは「見えている素の字」（テキスト節点をすべてつないだもの）と、
+ * 「記法の本文を素の字へ戻したもの」（ルビは親文字＋読み仮名、傍点は
+ * 親文字）。改行と空白は形によって揺れるので除いて比べる——ここで見たいのは
+ * **字が落ちていないか**だけである。
+ */
+describe("見えている字は、記法の本文に必ず入る", () => {
+  /** 見えている素の字（rt の読み仮名も画面に出ているので数える） */
+  function shownPlain(node: FakeNode): string {
+    if (node.nodeType === 3) return node.nodeValue ?? "";
+    if (node.nodeType !== 1 && node.nodeType !== 11) return "";
+    let value = "";
+    for (const kid of node.childNodes) value += shownPlain(kid);
+    return value;
+  }
+
+  /** 記法の本文を素の字へ戻す */
+  function notationPlain(value: string, mode?: Mode): string {
+    let plain = "";
+    for (const line of value.split("\n")) {
+      for (const part of api.composeParts(line, mode)) {
+        if (part.kind === "text") plain += part.src;
+        else if (part.kind === "ruby") plain += part.base + part.reading;
+        else plain += part.base;
+      }
+    }
+    return plain;
+  }
+
+  /** 改行と空白（&nbsp; を含む）を除く */
+  function squash(value: string): string {
+    return value.replace(/[\s ]/g, "");
+  }
+
+  function expectNoLoss(root: FakeNode, mode?: Mode): string {
+    const notation = api.composeDomToNotation(root);
+    expect(squash(notationPlain(notation, mode))).toBe(squash(shownPlain(root)));
+    return notation;
+  }
+
+  const LONG_A =
+    "夜明けの坂を上りきると、町の屋根がいっせいに光った。灯はそこで足を止め、" +
+    "背負った荷を下ろして息を整えた。";
+  const LONG_B =
+    "風が変わった。遠くで鐘が鳴り、誰かが名前を呼んでいる気がした。" +
+    "振り返っても、坂の下には朝靄しかなかった。";
+
+  it("Enter で生まれた div が、段落の中に入れ子になっている", () => {
+    const root = fragment([
+      element("p", [
+        text("前の行"),
+        element("div", [text(LONG_A)]),
+        element("div", [text(LONG_B)]),
+      ]),
+    ]);
+    expect(expectNoLoss(root)).toBe("前の行\n" + LONG_A + "\n" + LONG_B);
+  });
+
+  it("div の中に p が入れ子になっている", () => {
+    const root = fragment([
+      element("div", [element("p", [text(LONG_A)]), element("p", [text(LONG_B)])]),
+    ]);
+    expectNoLoss(root);
+  });
+
+  it("br だけの行を挟んだ段落", () => {
+    const root = fragment([
+      element("p", [text(LONG_A)]),
+      element("div", [element("br")]),
+      element("div", [text(LONG_B), element("br")]),
+    ]);
+    expect(expectNoLoss(root)).toBe(LONG_A + "\n\n" + LONG_B);
+  });
+
+  it("確定した字が span（style 付き・data-* 無し）に包まれている", () => {
+    const root = fragment([
+      element("p", [
+        text("あ"),
+        element("span", [text(LONG_A)], { style: "font-size: 16px;" }),
+        element("span", [element("span", [text(LONG_B)])]),
+      ]),
+    ]);
+    expect(expectNoLoss(root)).toBe("あ" + LONG_A + LONG_B);
+  });
+
+  it("font・b・i・u・mark・未知のタグに包まれている", () => {
+    const root = fragment([
+      element("p", [
+        element("font", [text("一")], { color: "#000" }),
+        element("b", [text("二")]),
+        element("i", [text("三")]),
+        element("u", [text("四")]),
+        element("mark", [text("五")]),
+        element("x-unknown", [text("六")]),
+      ]),
+    ]);
+    expect(expectNoLoss(root)).toBe("一二三四五六");
+  });
+
+  it("根の直下（入れ物の外）にテキスト節点がある", () => {
+    const root = fragment([
+      element("p", [text("あ")]),
+      text(LONG_A),
+      element("p", [text("い")]),
+      text(LONG_B),
+    ]);
+    expectNoLoss(root);
+  });
+
+  it("根の直下のテキストだけ（入れ物が1つも無い）", () => {
+    const root = fragment([text(LONG_A), element("br"), text(LONG_B)]);
+    expect(expectNoLoss(root)).toBe(LONG_A + "\n" + LONG_B);
+  });
+
+  it("ルビ・傍点の外（前後）に打った字", () => {
+    const line = api.composeBuildLine("あ{漢|かん}い{{強調}}う", fakeDoc);
+    line.childNodes.push(text(LONG_A));
+    line.childNodes.unshift(text(LONG_B));
+    expect(expectNoLoss(fragment([line]))).toBe(
+      LONG_B + "あ{漢|かん}い{{強調}}う" + LONG_A
+    );
+  });
+
+  it("縦中横・三点リーダ・ダッシュの素の span の中に打った字", () => {
+    const line = api.composeBuildLine("3月12日……――", fakeDoc);
+    // 素の span（data-src なし）の中へ字が入った形
+    for (const kid of line.childNodes) {
+      if (kid.nodeType === 1) kid.childNodes.push(text("字"));
+    }
+    expectNoLoss(fragment([line]));
+  });
+
+  it("付箋の行の中に打った字", () => {
+    const root = build("// あとで直す\nふつうの行");
+    root.childNodes[0].childNodes.push(text(LONG_A));
+    expectNoLoss(root);
+  });
+
+  it("コメント節点は見えないので数えない（落としてよい）", () => {
+    const comment: FakeNode = {
+      nodeType: 8,
+      nodeName: "#comment",
+      nodeValue: "見えない",
+      childNodes: [],
+    };
+    const root = fragment([element("p", [text("あ"), comment, text("い")])]);
+    expect(api.composeDomToNotation(root)).toBe("あい");
+  });
+
+  /* ── かたまり（ルビ・傍点）の中 ── */
+
+  it("ルビの親文字の側（rt の手前）に字が入った", () => {
+    const line = api.composeBuildLine("あ{漢|かん}い", fakeDoc);
+    const ruby = line.childNodes[1];
+    ruby.childNodes.splice(1, 0, text(LONG_A));
+    expectNoLoss(fragment([line]));
+  });
+
+  it("ルビの読み仮名（rt）の中に字が入った", () => {
+    const line = api.composeBuildLine("{漢|かん}", fakeDoc);
+    const rt = line.childNodes[0].childNodes[1];
+    rt.childNodes.push(text("じ"));
+    expect(expectNoLoss(fragment([line]))).toBe("{漢|かんじ}");
+  });
+
+  it("ルビの後ろ（ruby 要素の最後の子）に字が入った", () => {
+    const line = api.composeBuildLine("{漢|かん}", fakeDoc);
+    line.childNodes[0].childNodes.push(text(LONG_A));
+    // rt より後ろの字は、ルビの付かない普通の字に見える。ルビの後ろの平文になる
+    expect(expectNoLoss(fragment([line]))).toBe("{漢|かん}" + LONG_A);
+  });
+
+  it("ルビの後ろに Enter の入れ物ごと入った（2段落）", () => {
+    const line = api.composeBuildLine("{漢|かん}", fakeDoc);
+    line.childNodes[0].childNodes.push(
+      element("div", [text(LONG_A)]),
+      element("div", [text(LONG_B)])
+    );
+    expect(expectNoLoss(fragment([line]))).toBe(
+      "{漢|かん}\n" + LONG_A + "\n" + LONG_B
+    );
+  });
+
+  it("傍点の中に字が入った", () => {
+    const line = api.composeBuildLine("{{強調}}", fakeDoc);
+    line.childNodes[0].childNodes.push(text("した"));
+    expect(expectNoLoss(fragment([line]))).toBe("{{強調した}}");
+  });
+
+  it("傍点の中に長い字が入った（記法として読めなくても字は残す）", () => {
+    const line = api.composeBuildLine("{{強調}}", fakeDoc);
+    line.childNodes[0].childNodes.push(text(LONG_A));
+    expectNoLoss(fragment([line]));
+  });
+
+  it("組み直したかたまりには印が付く（中の字が組んだときのままなら付かない）", () => {
+    const line = api.composeBuildLine("{漢|かん}{{強調}}", fakeDoc);
+    const before = api.composeAtoms(fragment([line]));
+    expect(before.some((atom) => (atom as { repaired?: boolean }).repaired)).toBe(false);
+    line.childNodes[1].childNodes.push(text("点"));
+    const after = api.composeAtoms(fragment([line]));
+    expect(after.map((atom) => (atom as { repaired?: boolean }).repaired)).toEqual([
+      false,
+      true,
+    ]);
+  });
+
+  it("投稿サイトの記法（.txt）のルビ・傍点の中に字が入った", () => {
+    const line = api.composeBuildLine("｜漢《かん》《《強調》》", fakeDoc, "site");
+    line.childNodes[0].childNodes.splice(1, 0, text("字"));
+    line.childNodes[1].childNodes.push(text("点"));
+    expect(expectNoLoss(fragment([line]), "site")).toBe(
+      "｜漢字《かん》《《強調点》》"
+    );
+  });
+
+  it("かたまりの中が組んだときのままなら、記法をそのまま出す", () => {
+    const value = "あ{漢|かん}い{{強調}}う\n｜x";
+    expect(round(value)).toBe(value);
+  });
+});
+
+/**
+ * 字の見張り（作者の実機報告、2026-10-01）。直列化がまだ知らない形で字を
+ * 落としても、**本文と画面の字数を別の道で数えて**気づけるようにする。
+ */
+describe("本文と画面の字数の見張り", () => {
+  it("組んだときのままなら食い違わない（記法の印は数えない）", () => {
+    const value = "あ{漢|かん}い{{強調}}う\n\n3月12日……――\n// メモ";
+    const root = build(value);
+    expect(api.composePlainMismatch(root, api.composeDomToNotation(root))).toBeNull();
+    const site = "｜漢《かん》《《強調》》漢字《かんじ》";
+    const siteRoot = build(site, "site");
+    expect(
+      api.composePlainMismatch(siteRoot, api.composeDomToNotation(siteRoot), "site")
+    ).toBeNull();
+  });
+
+  it("かたまりの中に字が入っても、直列化が拾うので食い違わない", () => {
+    const line = api.composeBuildLine("{漢|かん}", fakeDoc);
+    line.childNodes[0].childNodes.push(text("見えている字"));
+    const root = fragment([line]);
+    expect(api.composePlainMismatch(root, api.composeDomToNotation(root))).toBeNull();
+  });
+
+  it("本文に入っていない字があれば、両方の字数と画面の字を返す", () => {
+    const root = fragment([
+      element("p", [text("あい")]),
+      element("p", [element("br")]),
+      element("div", [text("うえ"), element("br"), text("お")]),
+    ]);
+    // 直列化が「お」を落としたつもりの本文
+    const found = api.composePlainMismatch(root, "あい\n\nうえ");
+    expect(found).toEqual({
+      shown: "あい\n\nうえ\nお",
+      shownCount: 5,
+      builtCount: 4,
+    });
+  });
+
+  it("画面の字はかたまりの中も読む（読み仮名を含め、rp は除く）", () => {
+    const root = fragment([
+      element("p", [
+        element(
+          "ruby",
+          [text("漢"), element("rp", [text("(")]), element("rt", [text("かん")])],
+          { "data-src": "{漢|かん}" }
+        ),
+      ]),
+    ]);
+    expect(api.composeShownPlainText(root)).toBe("漢かん");
+  });
+
+  it("送る前と「本文をコピー」で見張る", () => {
+    // 送る前：同じ本文なら送らずに戻るので、その手前で見張る
+    const send = code.slice(code.indexOf("function composeSend("));
+    const watchAt = send.indexOf("composeWatchPlain(text);");
+    expect(watchAt).toBeGreaterThan(0);
+    expect(watchAt).toBeLessThan(send.indexOf("if (!force && text === current) return;"));
+    // 本文をコピー：食い違っていれば画面の字も写す
+    expect(code).toContain("const rescue = rescueCopyText();");
+    expect(code).toContain(
+      "const mismatch = composePlainMismatch(compose, text, composeNotation);"
+    );
   });
 });

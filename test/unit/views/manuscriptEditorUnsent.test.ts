@@ -172,7 +172,14 @@ interface StateStore {
 }
 
 function unsentHarness(
-  options: { composeOn?: boolean; text?: string; store?: StateStore; now?: number } = {}
+  options: {
+    composeOn?: boolean;
+    text?: string;
+    store?: StateStore;
+    now?: number;
+    /** 本文と画面の字の食い違い（見張りが返すもの） */
+    mismatch?: { shown: string; shownCount: number; builtCount: number } | null;
+  } = {}
 ): UnsentHarness {
   const block = markedBlock("unsent");
   expect(block, "届いたかを確かめる仕組み（unsent）が画面に無い").not.toBe("");
@@ -198,6 +205,7 @@ function unsentHarness(
     rescueText: { textContent: "" },
     clipboard: "",
     lastBox: null as null | { value: string },
+    mismatch: options.mismatch ?? null,
   };
   const api = new Function(
     "env",
@@ -279,6 +287,9 @@ function unsentHarness(
     function send(force) { composeSend(force); }
     function composeDomToNotation() { return env.text; }
     function composeApplyText(text) { env.text = text; }
+    // 本文と画面の字の見張り（本物は組んで書く面の DOM を数える）
+    let composeNotation = "curly";
+    function composePlainMismatch() { return env.mismatch; }
     const compose = {};
     const write = {
       get value() { return env.text; },
@@ -612,6 +623,34 @@ describe("届かない知らせを段階で出す", () => {
     // 秒の数え上げでコピー後の文を上書きしない
     h.advance(5_000);
     expect(h.unsentText()).toContain("クリップボードへ写しました");
+  });
+
+  /** 作者の実機報告（2026-10-01）：見えていた字がコピーにも入っていなかった */
+  it("本文と画面の字数が食い違えば、画面に見えていた字も一緒に写す", () => {
+    const h = unsentHarness({
+      text: "本文",
+      mismatch: { shown: "本文\n見えていた字", shownCount: 8, builtCount: 2 },
+    });
+    h.postEdit("本文");
+    h.advance(40_000);
+    h.click("unsentCopy");
+    expect(h.clipboard().startsWith("本文\n\n")).toBe(true);
+    expect(h.clipboard()).toContain("画面に見えていた字");
+    expect(h.clipboard().endsWith("本文\n見えていた字")).toBe(true);
+    expect(h.unsentText()).toContain("画面に見えていた字も後ろに付けてあります");
+    expect(h.logs().some((text) => /食い違っていたので、画面の字も一緒に写しました/.test(text))).toBe(true);
+  });
+
+  it("書く面（textarea）では見張らず、本文だけを写す", () => {
+    const h = unsentHarness({
+      composeOn: false,
+      text: "本文",
+      mismatch: { shown: "別の字", shownCount: 3, builtCount: 2 },
+    });
+    h.postEdit("本文");
+    h.advance(40_000);
+    h.click("unsentCopy");
+    expect(h.clipboard()).toBe("本文");
   });
 
   it("**［開き直す］は拡張機能へ頼む。返事が来なければ、自分で開き直す手順を文で案内する**", () => {

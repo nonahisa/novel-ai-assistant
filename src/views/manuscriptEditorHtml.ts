@@ -2102,14 +2102,45 @@ ruby > rt {
    * 拡張機能の側が動いていないことがあるため（頼んでも返事が来ない）。
    */
   function copyForRescue() {
-    const text = screenText();
+    const rescue = rescueCopyText();
+    const text = rescue.text;
     const copied = copyTextDirect(text);
     if (copied) unsentCopied = true;
     unsentText.textContent = copied
       ? "本文（" + text.length + "字）をクリップボードへ写しました。" +
+        (rescue.withShown
+          ? "本文と画面の字が食い違っていたので、画面に見えていた字も後ろに付けてあります。"
+          : "") +
         "メモ帳などへ貼って控えてから、この画面を閉じて開き直してください。"
       : "写せませんでした。本文を選んで Ctrl+C で写してください。";
     paintUnsent();
+  }
+
+  /**
+   * 「本文をコピー」で写すもの（作者の実機報告、2026-10-01）。
+   *
+   * ふだんは記法つきの本文だけ。組んで書く面で、**本文の字数と画面の字数が
+   * 食い違っていたら、画面に見えている字（記法なし）も後ろに付ける**——
+   * 本文の組み立てがまだ知らない形で字を落としても、写しからは失わない。
+   */
+  function rescueCopyText() {
+    const text = screenText();
+    if (!composeOn) return { text: text, withShown: false };
+    const mismatch = composePlainMismatch(compose, text, composeNotation);
+    if (!mismatch) return { text: text, withShown: false };
+    vscode.postMessage({
+      type: "log",
+      text:
+        "原稿エディタ（組んで書く）：本文をコピーしたとき、本文の字数（" +
+        mismatch.builtCount + "字）と画面の字数（" + mismatch.shownCount +
+        "字）が食い違っていたので、画面の字も一緒に写しました",
+    });
+    return {
+      text:
+        text + "\\n\\n――ここから下は、画面に見えていた字（ルビ・傍点の記法なし）――\\n" +
+        mismatch.shown,
+      withShown: true,
+    };
   }
   unsentCopyButton.addEventListener("click", copyForRescue);
   /*
@@ -4639,10 +4670,145 @@ ${RESUME_WRITING_LABEL ? `
     state.open = true;
   }
 
+  /** 節点の中の素の字（テキスト節点をつないだもの。正規化済み） */
+  function composePlainOf(node) {
+    if (node.nodeType === 3) {
+      const raw = node.nodeValue === undefined || node.nodeValue === null
+        ? ""
+        : node.nodeValue;
+      return composeNormalizeText(raw);
+    }
+    if (node.nodeType !== 1 && node.nodeType !== 11) return "";
+    const kids = node.childNodes;
+    if (!kids) return "";
+    let value = "";
+    for (let i = 0; i < kids.length; i++) value += composePlainOf(kids[i]);
+    return value;
+  }
+
+  /**
+   * かたまりの記法（data-src）を部品へ戻す。どちらの記法で書かれたかは
+   * かたまり自身は持っていないので、**両方で読んで、1つのかたまりとして
+   * 丸ごと当たったほう**を使う。当たらなければ null（判断できない）。
+   */
+  function composeChunkOriginal(src, isRuby) {
+    const want = isRuby ? "ruby" : "emphasis";
+    const modes = ["curly", "site"];
+    for (const mode of modes) {
+      const parts = composeParts(src, mode);
+      if (parts.length === 1 && parts[0].kind === want && parts[0].src === src) {
+        return { part: parts[0], mode: mode };
+      }
+    }
+    return null;
+  }
+
+  /** 組み直した記法が、狙ったとおりの1つのかたまりとして読めるか */
+  function composeChunkReads(value, mode, isRuby, base, reading) {
+    const parts = composeParts(value, mode);
+    if (parts.length !== 1 || parts[0].src !== value) return false;
+    if (parts[0].kind !== (isRuby ? "ruby" : "emphasis")) return false;
+    if (parts[0].base !== base) return false;
+    return !isRuby || parts[0].reading === reading;
+  }
+
+  /**
+   * かたまり（ルビ・傍点）が本文として出す字（作者の実機報告、2026-10-01）。
+   *
+   * **ふだんは data-src（記法そのもの）を出す。** 組んだときのままなら、
+   * 中の字は記法と同じものだからである。
+   *
+   * ところが contenteditable は、編集できないかたまりの**中へ**字を入れる
+   * ことがある（行末のルビの後ろで変換したとき、ruby 要素の最後の子として
+   * 字が入る。rt の後ろの字は**ルビの付かない普通の字と同じに見える**）。
+   * 0.94.0 までは中を見ずに data-src を出していたので、**画面に見えている
+   * 字が本文にもコピーにも入らなかった**（縦書きで打った約100字が消えた）。
+   *
+   * そこで、**中の字が組んだときと違えば、見えている字から記法を組み直す。**
+   *
+   * - 親文字・読み仮名の側に字が増減した → 記法の中の親文字・読み仮名を
+   *   見えている字に置き換える（記法の書き方は元のまま）
+   * - ルビの読み仮名（rt）より後ろに置かれた節点 → ルビの後ろの普通の字
+   *   として、呼び出し側で読む（afterFrom）
+   * - 組み直した記法が1つのかたまりとして読めない（記法の印が混ざった等）→
+   *   **素の字のまま平文で出す**。記法は崩れても、字は失わない
+   * - 中身が丸ごと空 → 元の記法を出す（見えないものを消したことにしない）
+   *
+   * @returns text … 本文として出す字、repaired … 組み直したか、
+   *   afterFrom … ルビの後ろとして読む最初の子の番号（無ければ -1）
+   */
+  function composeChunkText(node, src) {
+    const isRuby = node.nodeName === "RUBY";
+    const kids = node.childNodes ? node.childNodes : [];
+    let base = "";
+    // 読み仮名。変数名を reading にしない（消した「読む」面の印と同じ綴りに
+    // なり、manuscriptEditorHtml.test.ts の見張りに掛かる）
+    let kana = "";
+    let seenRt = false;
+    let afterFrom = -1;
+    for (let i = 0; i < kids.length; i++) {
+      const kid = kids[i];
+      const name = kid.nodeName;
+      if (isRuby && name === "RP") continue; // 括弧は ruby が組めない環境の飾り
+      if (isRuby && name === "RT") {
+        kana += composePlainOf(kid);
+        seenRt = true;
+        continue;
+      }
+      if (isRuby && seenRt) {
+        afterFrom = i;
+        break;
+      }
+      base += composePlainOf(kid);
+    }
+    const intact = { text: src, repaired: false, afterFrom: afterFrom };
+    if (base === "" && kana === "") return intact;
+    const original = composeChunkOriginal(src, isRuby);
+    if (original === null) return intact;
+    const part = original.part;
+    if (base === part.base && (!isRuby || kana === part.reading)) return intact;
+
+    const repaired = { text: "", repaired: true, afterFrom: afterFrom };
+    const at = src.indexOf(part.base);
+    if (at >= 0) {
+      let next = src.slice(0, at) + base;
+      let rest = src.slice(at + part.base.length);
+      if (isRuby) {
+        const readAt = rest.lastIndexOf(part.reading);
+        if (readAt >= 0) {
+          rest = rest.slice(0, readAt) + kana + rest.slice(readAt + part.reading.length);
+        } else {
+          rest = null;
+        }
+      }
+      if (rest !== null) {
+        next += rest;
+        if (composeChunkReads(next, original.mode, isRuby, base, kana)) {
+          repaired.text = next;
+          return repaired;
+        }
+      }
+    }
+    // .txt の縦線なしルビは親文字が漢字だけのときしか読めない。縦線を付けて試す
+    if (isRuby && original.mode === "site") {
+      const piped = "｜" + base + "《" + kana + "》";
+      if (composeChunkReads(piped, "site", true, base, kana)) {
+        repaired.text = piped;
+        return repaired;
+      }
+    }
+    repaired.text = base + kana;
+    return repaired;
+  }
+
   function composeCollect(node, atoms, state) {
+    composeCollectFrom(node, 0, atoms, state);
+  }
+
+  function composeCollectFrom(node, from, atoms, state) {
     const kids = node.childNodes;
     if (!kids) return;
-    for (let i = 0; i < kids.length; i++) {
+    for (let i = from; i < kids.length; i++) {
       const kid = kids[i];
       if (kid.nodeType === 3) {
         composePutText(atoms, state, kid, node, i);
@@ -4651,20 +4817,25 @@ ${RESUME_WRITING_LABEL ? `
       if (kid.nodeType !== 1) continue;
       const src = kid.getAttribute ? kid.getAttribute("data-src") : null;
       if (src !== null && src !== undefined && src !== "") {
-        // かたまり（ルビ・傍点）。**中は見ない**——記法そのものを持っている。
+        // かたまり（ルビ・傍点）。ふだんは記法そのもの（data-src）を出す。
+        // 中の字が組んだときと違うときだけ組み直す（composeChunkText）。
         // 三点リーダはかたまりではない（素の span なので、下の
         // 「知らない要素は中の文字を拾う」経路で平文として数えられる）
+        const chunk = composeChunkText(kid, src);
         atoms.push({
           kind: "chunk",
           node: kid,
           parent: node,
           index: i,
-          text: src,
+          text: chunk.text,
           start: state.at,
-          end: state.at + src.length,
+          end: state.at + chunk.text.length,
+          repaired: chunk.repaired,
         });
-        state.at += src.length;
+        state.at += chunk.text.length;
         state.open = true;
+        // ルビの読み仮名より後ろに入った字は、ルビの後ろの普通の字として読む
+        if (chunk.afterFrom >= 0) composeCollectFrom(kid, chunk.afterFrom, atoms, state);
         continue;
       }
       if (kid.nodeName === "BR") {
@@ -5227,6 +5398,81 @@ ${RESUME_WRITING_LABEL ? `
         : composeArrowGoesForward(at.key, at.vertical === true);
     return forward ? "after" : "before";
   }
+
+  /* ── 字の見張り（作者の実機報告、2026-10-01） ──
+     画面には見えていた約100字が、本文にもコピーにも入らなかった。直列化
+     （composeDomToNotation）の読み落としは直したが、**まだ知らない形が
+     あるかもしれない**。そこで、組み立てた本文と画面の字を**別々の道で**
+     数えて突き合わせる。食い違ったら記録を残し、「本文をコピー」は画面の
+     字も一緒に写す（記法が崩れても字は失わない）。 */
+
+  /**
+   * 画面に見えている素の字（ルビの読み仮名も見えているので含める）。
+   * 行の入れ物と途中の br で改行する（写したものを作者が読めるように）。
+   * **かたまりも中の字を読む**——記法（data-src）には頼らない。
+   */
+  function composeShownPlainText(root) {
+    const out = { text: "", open: false };
+    composeShownWalk(root, out);
+    return out.text;
+  }
+
+  function composeShownWalk(node, out) {
+    const kids = node.childNodes;
+    if (!kids) return;
+    for (let i = 0; i < kids.length; i++) {
+      const kid = kids[i];
+      if (kid.nodeType === 3) {
+        out.text += composePlainOf(kid);
+        out.open = true;
+        continue;
+      }
+      if (kid.nodeType !== 1) continue;
+      if (kid.nodeName === "RP") continue;
+      if (kid.nodeName === "BR") {
+        if (i !== kids.length - 1) out.text += "\\n";
+        continue;
+      }
+      if (composeIsBlock(kid.nodeName)) {
+        if (out.open) out.text += "\\n";
+        out.open = true;
+      }
+      composeShownWalk(kid, out);
+    }
+  }
+
+  /** 記法の本文を素の字へ戻す（ルビは親文字＋読み仮名、傍点は親文字） */
+  function composeNotationPlain(text, mode) {
+    const lines = composeNormalizeNewlines(text).split("\\n");
+    let plain = "";
+    for (const line of lines) {
+      for (const part of composeParts(line, mode)) {
+        if (part.kind === "ruby") plain += part.base + part.reading;
+        else if (part.kind === "emphasis") plain += part.base;
+        else plain += part.src;
+      }
+      plain += "\\n";
+    }
+    return plain;
+  }
+
+  /** 空白と改行を除いた字数（入れ物の形で揺れるものは数えない） */
+  function composeSolidLength(value) {
+    return value.replace(/[\\s\\u00A0]/g, "").length;
+  }
+
+  /**
+   * 組み立てた本文と画面の字を突き合わせる。
+   *
+   * @returns 食い違っていなければ null。食い違っていれば両方の字数と画面の字
+   */
+  function composePlainMismatch(root, notation, mode) {
+    const shown = composeShownPlainText(root);
+    const shownCount = composeSolidLength(shown);
+    const builtCount = composeSolidLength(composeNotationPlain(notation, mode));
+    if (shownCount === builtCount) return null;
+    return { shown: shown, shownCount: shownCount, builtCount: builtCount };
+  }
   /* compose:end */
 
   /**
@@ -5351,10 +5597,59 @@ ${RESUME_WRITING_LABEL ? `
    * **打つ面の値も揃えておく。** 面を出たあと、そのまま続けて打てるように
    * するためで、字数の数え直し（updateCount）もこの値を見ている。
    */
+  /**
+   * 前に記録した食い違い。**同じ食い違いを打鍵のたびに記録しない**
+   * （組み直したかたまりの数と、両方の字数で見分ける）
+   */
+  let composeWatchLast = "";
+
+  /**
+   * 本文の字と画面の字を見張る（作者の実機報告、2026-10-01）。
+   *
+   * - ルビ・傍点の中に字が入っていて、見えている字で記法を組み直した
+   * - 組み立てた本文の字数と、画面に見えている字数が食い違った
+   *
+   * のどちらかなら、操作ログへ1行残す。**本文は変えない**（組み直しは
+   * 直列化の側で済んでいる。ここは記録だけ）。
+   */
+  function composeWatchPlain(text) {
+    const atoms = composeCurrentAtoms();
+    let repaired = 0;
+    for (const atom of atoms) {
+      if (atom.repaired) repaired++;
+    }
+    const mismatch = composePlainMismatch(compose, text, composeNotation);
+    const key = repaired + "/" +
+      (mismatch ? mismatch.builtCount + "/" + mismatch.shownCount : "");
+    if (key === composeWatchLast) return;
+    composeWatchLast = key;
+    if (repaired > 0) {
+      vscode.postMessage({
+        type: "log",
+        text:
+          "原稿エディタ（組んで書く）：ルビ・傍点の中に字が入っていたので、" +
+          "見えている字で記法を組み直しました（" + repaired + "か所）",
+      });
+    }
+    if (mismatch) {
+      vscode.postMessage({
+        type: "log",
+        text:
+          "原稿エディタ（組んで書く）：本文の字数（" + mismatch.builtCount +
+          "字）と画面に見えている字数（" + mismatch.shownCount +
+          "字）が食い違っています（空白・改行を除く）。" +
+          "「本文をコピー」では画面の字も一緒に写します",
+      });
+    }
+  }
+
   function composeSend(force) {
     // DOMは打たれるたびに変わる。**位置の一覧は必ず数え直す**
     composeInvalidate();
     const text = composeDomToNotation(compose);
+    // **送らずに戻る前に見張る。** 字が本文へ入らないときは本文が変わらず、
+    // 下の「同じ本文なら送らない」で黙って戻ってしまう（2026-10-01の症状）
+    composeWatchPlain(text);
     // force：同じ本文でも送り直す（返事の来ない便の送り直し。設計書6.25.9）
     if (!force && text === current) return;
     current = text;
