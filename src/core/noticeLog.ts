@@ -49,18 +49,21 @@ export const NOTICE_LOG_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
 export const NOTICE_TEXT_MAX_CHARS = 200;
 
 /**
- * 知らせ1件の文と説明を記録へ残す長さの上限（字。文と説明の合計）。
+ * 知らせの**文（message）だけ**を記録へ残す長さの上限（字）。
  *
  * **2026-09-24 から 10-01 までは記録する時点で200字に切っていた。** すると
  * AIチューニングの終わりのような長い知らせの後半（罠の一文・どの段で
- * 止まったか）が、実機確認で読めなかった。そこで記録には全文を残し、
- * 切るのは読む側（一覧の要約）へ移した。
+ * 止まったか）が、実機確認で読めなかった。そこで文は1,000字まで残し、
+ * 一覧で返すときの200字の要約は読む側が作る。
  *
- * **それでも上限は置く。** 知らせに原稿の一部が混ざることがあり、長く
- * 残すほど本文が保管庫へ溜まる。4,000字は、長い終わりの知らせを丸ごと
- * 収めて余る量。件数の上限（500件）と合わせて、記録が膨らみすぎない。
+ * **説明（detail）とボタンは200字のまま。** 走査（2026-10-01）では、原稿の
+ * 段落をそのまま知らせに入れる箇所は無かったが、作品紹介文の確認のように
+ * **AIが原稿から書いた文は説明に入る**。`notices.recent` は作品ごとの許可を
+ * 通らない（原稿の出方は `none`）ので、説明を伸ばすと許可の素通りになる。
+ * 文の側にも、AIが処理を断った理由のように原稿に触れた語が載りうるが、
+ * 原稿の段落そのものではないので1,000字までは許す（司令塔の判断）。
  */
-export const NOTICE_RECORD_MAX_CHARS = 4000;
+export const NOTICE_RECORD_MAX_CHARS = 1000;
 
 /** 読むときの既定の件数（`limit` を省いたとき） */
 export const NOTICE_DEFAULT_LIMIT = 50;
@@ -179,19 +182,14 @@ export function describeNoticeCall(
     typeof args[0] === "string" ? args[0] : String(args[0] ?? ""),
     NOTICE_RECORD_MAX_CHARS
   );
-  // 説明は文の残りの枠まで。**ただし要約ぶん（200字）は必ず残す**——文が
-  // 上限いっぱいでも、説明が丸ごと消えると何の知らせか分からなくなる
-  const detailBudget = Math.max(
-    NOTICE_TEXT_MAX_CHARS,
-    NOTICE_RECORD_MAX_CHARS - Array.from(message).length
-  );
   let rest = args.slice(1);
   let modal = false;
   let detail: string | null = null;
   const first = rest[0];
   if (isObject(first) && typeof first.title !== "string") {
     modal = first.modal === true;
-    detail = typeof first.detail === "string" ? clip(first.detail, detailBudget) : null;
+    // 説明は200字のまま（AIが原稿から書いた文が入る。NOTICE_RECORD_MAX_CHARS の断り書き）
+    detail = typeof first.detail === "string" ? clip(first.detail, NOTICE_TEXT_MAX_CHARS) : null;
     rest = rest.slice(1);
   }
   const items: string[] = [];
@@ -340,8 +338,9 @@ export interface NoticeQuery {
   /** この窓（拡張機能ホストのプロセス番号）の知らせだけ */
   pid?: number;
   /**
-   * `true` なら文と説明を記録の全文で返す。省けば200字の要約
+   * `true` なら文を記録の全文（1,000字まで）で返す。省けば200字の要約
    * （一覧で数十件を返すとき、長い知らせが返り値を埋めないように）。
+   * 説明は記録の時点で200字なので、どちらでも同じ。
    */
   full?: boolean;
 }
@@ -357,7 +356,8 @@ export interface NoticeView extends NoticeEntry {
  *
  * `truncated` は「記録した時点で切った」か「要約で切った」かのどちらか。
  * 伏せ字は記録した時点で済んでいるので、ここでは伏せない（何もしない関数を
- * 渡す）。ボタンの名前は記録した時点で200字以内に収まっている。
+ * 渡す）。説明とボタンの名前は記録した時点で200字以内だが、200字を超える
+ * 説明を持つ記録が来ても一覧で長く返さないよう、説明も同じく切る。
  */
 function summarizeNotice(notice: NoticeEntry): NoticeEntry {
   const keep = (text: string): string => text;

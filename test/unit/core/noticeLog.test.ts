@@ -26,8 +26,8 @@ import { redactSecrets } from "../../../src/core/logger";
  * **見張りたいのは4つ。**
  *
  * 1. **記録が上限（500件・7日）を超えて膨らまないこと**
- * 2. **キーらしき文字は伏せ、長い文は記録の上限（4,000字）で切ること**（先に伏せてから切る）。
- *    一覧の既定は200字の要約、full で全文（2026-10-01）
+ * 2. **キーらしき文字は伏せ、文は1,000字・説明とボタンは200字で切ること**（先に伏せてから切る）。
+ *    一覧の既定は200字の要約、full で文の全文（2026-10-01）
  * 3. **読む側の絞り込み（since・contains・pid・limit）が効くこと**
  * 4. 壊れた記録で読みが止まらないこと
  */
@@ -148,25 +148,30 @@ describe("呼び出しから中身を取る（describeNoticeCall）", () => {
     expect(described.items).toEqual(["押す"]);
   });
 
-  it("200字を超える文や説明も、記録には全文を残す（2026-10-01、後半が読めなかった）", () => {
-    const described = describeNoticeCall(
-      "info",
-      ["え".repeat(300), { modal: true, detail: "う".repeat(300) }],
-      same
-    );
+  it("200字を超える文も、記録には全文を残す（2026-10-01、後半が読めなかった）", () => {
+    const described = describeNoticeCall("info", ["え".repeat(300)], same);
     expect(described.truncated).toBe(false);
     expect(described.message).toBe("え".repeat(300));
-    expect(described.detail).toBe("う".repeat(300));
   });
 
-  it(`文と説明を合わせて${NOTICE_RECORD_MAX_CHARS}字を超えたら切る。説明にも要約ぶんは残す`, () => {
+  it(`文は${NOTICE_RECORD_MAX_CHARS}字を超えたら切る`, () => {
     const described = describeNoticeCall(
       "info",
-      ["え".repeat(NOTICE_RECORD_MAX_CHARS + 100), { modal: true, detail: "う".repeat(500) }],
+      ["え".repeat(NOTICE_RECORD_MAX_CHARS + 100)],
+      same
+    );
+    expect(NOTICE_RECORD_MAX_CHARS).toBe(1000);
+    expect(described.truncated).toBe(true);
+    expect(Array.from(described.message)).toHaveLength(NOTICE_RECORD_MAX_CHARS + 1);
+  });
+
+  it("説明は今までどおり200字で切る（AIが原稿から書いた紹介文などが入るため）", () => {
+    const described = describeNoticeCall(
+      "info",
+      ["短い", { modal: true, detail: "う".repeat(300) }],
       same
     );
     expect(described.truncated).toBe(true);
-    expect(Array.from(described.message)).toHaveLength(NOTICE_RECORD_MAX_CHARS + 1);
     expect(Array.from(described.detail ?? "")).toHaveLength(NOTICE_TEXT_MAX_CHARS + 1);
   });
 
@@ -310,6 +315,7 @@ describe("絞り込み（selectNotices）", () => {
     expect(Array.from(summary.detail ?? "")).toHaveLength(NOTICE_TEXT_MAX_CHARS + 1);
     expect(summary.truncated).toBe(true);
 
+    // full は記録をそのまま返す（説明は記録の時点で200字なので、ふつうは伸びない）
     const [full] = selectNotices(longFiles, { full: true }, NOW).notices;
     expect(full.message).toBe("長".repeat(300));
     expect(full.detail).toBe("説".repeat(250));

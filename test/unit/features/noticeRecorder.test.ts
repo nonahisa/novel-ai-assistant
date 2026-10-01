@@ -155,6 +155,14 @@ describe("溜める箱（NoticeBuffer）", () => {
     expect(Array.from(tooLong.message)).toHaveLength(NOTICE_RECORD_MAX_CHARS + 1);
   });
 
+  it("説明（detail）は200字で切る（作品紹介文の確認など、AIが原稿から書いた文が入る）", () => {
+    const buffer = new NoticeBuffer(redactSecrets, clock);
+    buffer.add({ severity: "info", args: ["紹介文", { modal: true, detail: "紹".repeat(400) }] });
+    const [entry] = buffer.snapshot();
+    expect(entry.truncated).toBe(true);
+    expect(Array.from(entry.detail ?? "")).toHaveLength(201);
+  });
+
   it("中身を渡しても、箱の中は書き換わらない（書き出し中に答えが来ても混ざらない）", () => {
     const buffer = new NoticeBuffer(redactSecrets, clock);
     const seq = buffer.add({ severity: "info", args: ["x", "はい"] });
