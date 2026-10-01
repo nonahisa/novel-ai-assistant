@@ -365,6 +365,19 @@ describe("助言の構え（1.9）：無理に言わない・ほめる所は省�
     }
   });
 
+  test("総評の指示の言葉（直す方向は別の節へ）が返ってきたら、その文だけ落とす（1.3）", () => {
+    const echoOnly = parseOpeningCheck(
+      withStrengths("直す方向は別の節へ。5. で扱います", []),
+      opening
+    );
+    expect(echoOnly?.advice).toBe("");
+    const mixed = parseOpeningCheck(
+      withStrengths("謎の提示が早く、読者は塔の異変に引き込まれます。直す方向は別の節へ。", []),
+      opening
+    );
+    expect(mixed?.advice).toBe("謎の提示が早く、読者は塔の異変に引き込まれます。");
+  });
+
   test("続きのある本物の助言は、埋め草と見なさない", () => {
     const advice = "直すべき所はほぼ見当たりませんが、「なぜ」の手がかりがもう一つあると読み進めやすくなります。";
     const result = parseOpeningCheck(withStrengths(advice, []), opening);

@@ -405,7 +405,7 @@ export function parseOpeningCheck(
   if (elements.length === 0) return undefined;
 
   const praise = readGroundedPraise(parsed.strengths, verbatimIn(openingText));
-  const advice = cleanNote(parsed.advice);
+  const advice = dropAdviceInstructionEcho(cleanNote(parsed.advice));
   const requested = options.directionsRequested === true;
   // 頼んでいない回は読まない（照合もしない）。欄が在っても捨てる
   const directions = requested
@@ -493,6 +493,22 @@ function cleanNote(value: unknown): string {
   const body = value.trim().replace(/\s+/g, " ");
   if (!body) return "";
   return isPlaceholderText(body, true) ? "" : body;
+}
+
+/**
+ * 総評の指示の言葉がそのまま返ってきた文を落とす（1.3）。
+ *
+ * 「直す方向は別の節へ」は advice に書くなという指示だが、指示の言葉は
+ * 答えとして返ってくる（CLAUDE.md の失敗3）。診断の文は残し、なぞった文だけ外す。
+ */
+const ADVICE_INSTRUCTION_ECHO = /別の節へ|5\.\s*で扱います/;
+
+function dropAdviceInstructionEcho(advice: string): string {
+  if (!ADVICE_INSTRUCTION_ECHO.test(advice)) return advice;
+  return (advice.match(/[^。！？]+[。！？]?/g) ?? [])
+    .filter((sentence) => !ADVICE_INSTRUCTION_ECHO.test(sentence))
+    .join("")
+    .trim();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
