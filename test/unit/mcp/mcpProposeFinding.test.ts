@@ -257,7 +257,10 @@ describe("検算を通った指摘だけが置かれる", () => {
     const line = readLines(folder)[0];
     if (line.kind !== "finding") throw new Error("指摘の行ではない");
     expect(line.label).toBe("推敲");
-    expect(line.message).toBe("冗長：同じ意味が重なっている");
+    // 推敲 1.12 から、検算が修正案を外したときは説明に理由が添わる（提案パネルと同じ組み方）
+    expect(line.message).toBe(
+      "冗長：同じ意味が重なっている（修正案は原文の後ろを落としていたので外しました）"
+    );
   });
 
   it("矛盾も置ける（左右を分けたまま）", () => {
