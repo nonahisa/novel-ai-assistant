@@ -51,15 +51,7 @@ import {
   describeRejectedRelation,
   forgetRejectedRelation,
 } from "../core/rejectedRelations";
-import {
-  describeAbility,
-  describeCharacter,
-  describeLocation,
-  describeOrganization,
-  describeWorldItem,
-  KIND_LABELS,
-  type SettingsKind,
-} from "../core/settingsSummary";
+import { KIND_LABELS, type SettingsKind } from "../core/settingsSummary";
 import {
   describeChangeValues,
   describeConflictValues,
@@ -84,10 +76,7 @@ import {
   promoteConflictToChanges,
   undoRejectedValue,
 } from "../core/recordChanges";
-import {
-  isSpeechStyleEcho,
-  recordSpeechStyleChange,
-} from "../core/speechStyle";
+import { recordSpeechStyleChange } from "../core/speechStyle";
 import type {
   RecordChange,
   RecordConflict,
@@ -120,8 +109,6 @@ import {
   truncatedOutputAdvice,
 } from "../ai/outputLimit";
 import { loadExcerptSources } from "../core/manuscriptSources";
-import { expandNameVariants } from "../core/termIndex";
-import { evidencePhrases } from "../core/groundedEvidence";
 import {
   AIRegistry,
   ensureConfigured,
@@ -152,8 +139,21 @@ import {
   buildEnrichSchema,
   enrichableFields,
   MISATTRIBUTED_KEY,
-  type EnrichableField,
+  SETTINGS_ENRICH_TEMPERATURE,
 } from "../prompts/settingsEnrich";
+/*
+  再読込の検算と材料の語は core にある（2026-10-01）。MCP の `settingsEnrich` も
+  同じものを通る——画面の中に書いたままだと、外から測るには写しを作るしかない。
+  `searchTermsFor` は以前ここから輸出していたので、名前を変えずに出し直す
+*/
+import {
+  checkEnrichProposals,
+  describeEnrichTarget,
+  misattributedAllowedFields,
+  parseEnrichResult,
+  searchTermsFor,
+} from "../core/settingsEnrichCheck";
+export { searchTermsFor } from "../core/settingsEnrichCheck";
 import {
   droppedTotal,
   insertMisattributedValue,
@@ -163,7 +163,6 @@ import {
   type MisattributedDestination,
   type MisattributedValue,
 } from "../core/misattributedValues";
-import { isMeaningfulValue } from "../core/characterExtractionValidation";
 import { CustomFieldStore } from "../core/customFieldStore";
 import {
   emptyCustomFieldSet,
@@ -173,18 +172,14 @@ import {
 } from "../models/customField";
 import { PendingSettingsUpdateStore } from "../core/pendingSettingsUpdates";
 import { describePendingUpdateCounts } from "../core/pendingSettingsMerge";
-import { clampSummary, SUMMARY_MAX_CHARS } from "../core/summaryLimit";
-import {
-  describeInvolvement,
-  scoreChanges,
-  stripInvolvementNote,
-} from "../core/changeSignificance";
+import { SUMMARY_MAX_CHARS } from "../core/summaryLimit";
+import { describeInvolvement, scoreChanges } from "../core/changeSignificance";
 import { buildSettingsPanelHtml } from "../views/settingsPanelHtml";
 import { renderMarkdownLite } from "../core/markdownLite";
 import { withCancellableProgress } from "../views/progress";
 import { askText, cancelItem } from "../views/dialogs";
 import { logFailure, logStep, useLogFile } from "../core/logger";
-import { knownChaptersOf, unknownCitedChapters } from "../core/chapterCitations";
+import { knownChaptersOf } from "../core/chapterCitations";
 import { scanWork } from "../core/scanner";
 import { appendChatLog, summarizeMaterials } from "../core/chatLog";
 import * as path from "../core/paths";
@@ -1942,57 +1937,31 @@ export class SettingsPanel {
       return;
     }
 
-    const current = record as unknown as Record<string, unknown>;
-    const proposals: FieldProposal[] = [];
-    // **無い話を根拠にした値は出さない**（2026-09-25 精査 F5）。作者の実機で、
-    // 2話しかない作品に「第17話を根拠に文佳の祖母」と返ってきた
-    const knownChapters = await this.knownChapters();
-    const unknownCitations: Array<{ label: string; chapters: number[] }> = [];
-    /** 口調の提案が指示の言葉の写しだったもの（黙って消さず、件数を知らせる） */
-    let speechEchoes = 0;
-    for (const field of enrichableFields(kind, this.customFields)) {
-      const proposed = clampField(field, parsed[field.key]);
-      if (!proposed) continue;
-      /*
-        **口調は、抽出と同じ見張りで指示の写しを落とす**（2026-09-26。
-        設計書6.5.11）。説明の語の並び（「一人称、語尾、口癖」）がそのまま
-        返ってくる形は、抽出で実際に起きている（CLAUDE.md の失敗3番）。
-        本文の抜粋を渡すので、例の口癖が本文に無いのに入った形も見る
-      */
-      if (
-        kind === "character" &&
-        !field.custom &&
-        field.key === "speechStyle" &&
-        isSpeechStyleEcho(
-          proposed,
-          excerpts.map((excerpt) => excerpt.text).join("\n")
-        )
-      ) {
-        speechEchoes += 1;
-        continue;
-      }
-      const unknown = unknownCitedChapters(proposed, knownChapters);
-      if (unknown.length > 0) {
-        unknownCitations.push({ label: field.label, chapters: unknown });
-        continue;
-      }
-      // 追加項目の値は customFields の中にある
-      const before = field.custom
-        ? (record as Character).customFields[field.key] ?? ""
-        : asText(current[field.key]);
-      if (before === proposed) continue;
-      proposals.push({
+    // **検算は core の1か所**（`checkEnrichProposals`。MCP の `settingsEnrich` と共用）。
+    // 無い話を根拠にした値（F5）と、口調の指示の写し（6.5.11）はそこで落ち、
+    // 項目と数だけが返る
+    const { proposals: checked, unknownCitations, speechEchoes } =
+      checkEnrichProposals({
+        kind,
+        record,
+        customFields: this.customFields,
+        parsed,
+        excerptText: excerpts.map((excerpt) => excerpt.text).join("\n"),
+        knownChapters: await this.knownChapters(),
+      });
+    const proposals: FieldProposal[] = checked.map(
+      ({ field, before, after, fillsBlank }) => ({
         // 反映するときに、既定の項目と同じ経路で書き戻せるようにする
         key: field.custom ? `${CUSTOM_FIELD_PREFIX}${field.key}` : field.key,
         label: field.label,
         before,
-        after: proposed,
+        after,
         multiline: field.multiline === true,
         // 空欄を埋める提案だけを既定で選ぶ。
         // 作者が書いた内容の置き換えは、必ず自分で選んでもらう
-        selected: before.length === 0,
-      });
-    }
+        selected: fillsBlank,
+      })
+    );
 
     const misattributed = this.buildMisattributed(
       kind,
@@ -2088,11 +2057,9 @@ export class SettingsPanel {
     raw: unknown,
     excerpts: MentionExcerpt[]
   ): { items: MisattributedValue[]; droppedNotice: string } {
-    const allowed = enrichableFields(kind, this.customFields)
-      .map((field) => field.key)
-      // 行き先は人物レコードなので、人物が持たない項目は置けない。
-      // 場所の「地域」を人物へ入れる道を作らない
-      .filter((key) => kind !== "character" || isCharacterTextField(key));
+    // 行き先は人物レコードなので、人物が持たない項目は置けない
+    // （表は core。MCP の `settingsEnrich` と共用）
+    const allowed = misattributedAllowedFields(kind, this.customFields);
 
     const parsed = parseMisattributedValues(
       raw,
@@ -2597,21 +2564,12 @@ export class SettingsPanel {
     kind: SettingsKind,
     record: SettingsRecord
   ): string {
-    if (kind === "character") {
-      return describeCharacter(record as Character, this.customFields);
-    }
-    if (kind === "ability") {
-      return describeAbility(record as Ability, this.abilitySystem);
-    }
-    if (kind === "organization") {
-      const organization = record as Organization;
-      return describeOrganization(
-        organization,
-        membersOf(organization, this.characters)
-      );
-    }
-    if (kind === "world") return describeWorldItem(record as WorldItem);
-    return describeLocation(record as Location);
+    // 組み方は core の1か所（MCP の `settingsEnrich` と同じ【現在の設定】になる）
+    return describeEnrichTarget(kind, record, {
+      customFields: this.customFields,
+      abilitySystem: this.abilitySystem,
+      characters: this.characters,
+    });
   }
 
   /**
@@ -2892,7 +2850,7 @@ export class SettingsPanel {
             model: resolved.model,
             // 掘り下げは多少ふくらみがあってよい。抽出（0.2）より少し高くする。
             // 項目の提案は設定として書くので、控えめにする
-            temperature: jsonSchema ? 0.3 : 0.5,
+            temperature: jsonSchema ? SETTINGS_ENRICH_TEMPERATURE : 0.5,
 
             maxOutputTokens,
             plannedOutputTokens,
@@ -3059,22 +3017,6 @@ function checkField(
   return { key, label, value: on ? "1" : "", multiline: false, check: true };
 }
 
-/**
- * 本文から場面を集めるときの検索語。
- *
- * **世界観だけは名前で引けない。** 見出し（「詠唱の制約」）は
- * こちらが付けた言葉で、本文には出てこない。名前だけで引くと
- * 場面が1つも集まらず、相談も項目の充実も材料なしで動くことになる。
- * 逐語引用である evidence を手掛かりにする。
- */
-export function searchTermsFor(
-  kind: SettingsKind,
-  record: { name: string; aliases: string[]; evidence?: string | null }
-): string[] {
-  const names = expandNameVariants([record.name, ...record.aliases]);
-  if (kind !== "world") return names;
-  return [...names, ...evidencePhrases(record.evidence)];
-}
 
 /** 決まった値から選ぶ項目 */
 function choiceField(
@@ -3500,42 +3442,6 @@ function changeDropDetail(change: RecordChange): string {
   ]
     .filter((part) => part)
     .join(" / ");
-}
-
-/** AIの応答をJSONとして読む。前後に余計な文字が付くことがある */
-function parseEnrichResult(
-  text: string
-): Record<string, unknown> | undefined {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start === -1 || end <= start) return undefined;
-  try {
-    const parsed: unknown = JSON.parse(text.slice(start, end + 1));
-    if (typeof parsed !== "object" || parsed === null) return undefined;
-    return parsed as Record<string, unknown>;
-  } catch {
-    return undefined;
-  }
-}
-
-/** 提案された値を、長さの制限まで含めて整える */
-function clampField(field: EnrichableField, value: unknown): string {
-  if (typeof value !== "string") return "";
-  const text = value.trim();
-  if (!text) return "";
-  // AIは「不明」「なし」「（本文から読み取れる記述なし）」を値として返してくる。
-  // 判定は抽出側と共有する（片方だけ直しても、もう片方から入り込む）
-  if (!isMeaningfulValue(text)) return "";
-  // 材料に付けた［関与度 …］を、そのまま値へ書き写してくることがある。
-  // 指示語が答えの中身として返るのは、この作品で繰り返し起きている
-  // （`placeholderText.ts`）。資料へ載る手前で落とす
-  const body = stripInvolvementNote(text);
-  if (!body) return "";
-  return field.maxChars ? (clampSummary(body, field.maxChars) ?? "") : body;
-}
-
-function asText(value: unknown): string {
-  return typeof value === "string" ? value : "";
 }
 
 function describeError(

@@ -70,6 +70,7 @@ export const FEATURES = [
   "synopsis",
   "episodePlot",
   "settings",
+  "settingsEnrich",
   "opening",
   "name",
   "plotReverse",

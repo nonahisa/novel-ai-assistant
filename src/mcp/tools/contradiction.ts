@@ -218,8 +218,11 @@ function loadSettings(folder: string, numCtx: number): Settings {
  * （走査は日付順に話数を振り直すが、MCP はファイル名の話数しか読まない）。
  *
  * 競合マーカーの残るファイルと作品情報（`about.txt`）は外す（製品と同じ）。
+ *
+ * **AIで再読込（`settingsEnrich.ts`）も使う**（2026-10-01）。製品の再読込も
+ * 同じ `loadExcerptSources` から抜粋を集めるので、割り方の写しを作らない。
  */
-function pastSceneSourcesOf(folder: string): ExcerptSource[] {
+export function pastSceneSourcesOf(folder: string): ExcerptSource[] {
   const kindOrder: Record<string, number> = {
     プロローグ: 0,
     本編: 1,

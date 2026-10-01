@@ -154,6 +154,13 @@ const ALLOWED_FIELDS = [
 
 type AllowedField = (typeof ALLOWED_FIELDS)[number];
 
+/**
+ * 人物の白名簿（外から読む用）。AIで再読込（`settingsEnrich.ts`）が、
+ * そのまま `novel.propose` へ渡せる案だけを組むのに使う——表を写すと、
+ * 片方だけ欄が増えて「置けるはずの案が断られる」ことになる。
+ */
+export const CHARACTER_PROPOSE_FIELDS: readonly string[] = ALLOWED_FIELDS;
+
 export const SETTINGS_PROPOSE_INPUT = {
   ...FOLDER_INPUT,
   /*

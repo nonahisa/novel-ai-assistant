@@ -83,6 +83,11 @@ export const CORE_ENTRY_NAMES = [
     古い判定の写しが残り、空の `本文/` と直下の原稿の作品で0件を返していた。
   */
   "manuscriptFolderRule",
+  /*
+    AIで再読込の材料と検算（2026-10-01、作者の裁定で MCP の feature
+    `settingsEnrich` を足すときに画面から切り出した）。製品と MCP が同じものを通る
+  */
+  "settingsEnrichCheck",
 ];
 
 /**

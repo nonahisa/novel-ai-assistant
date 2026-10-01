@@ -69,6 +69,12 @@ import {
 } from "./episode";
 import { settingsPrompt, settingsRun, settingsValidate } from "./settings";
 import {
+  ENRICH_RECORD_KIND_SCHEMA,
+  settingsEnrichPrompt,
+  settingsEnrichRun,
+  settingsEnrichValidate,
+} from "./settingsEnrich";
+import {
   plotReversePrompt,
   plotReverseRun,
   plotReverseValidate,
@@ -249,6 +255,8 @@ const OPTIONS_TABLE =
   "ollama／sampling は求められたファイルを読んで1回だけ聞き直します（followUp）。" +
   "claude では往復しないので、講評など本文が要る問いは filePath でその話を渡してください。" +
   "name: characterName※（いまの名前）・origin。" +
+  "settingsEnrich: name※か id※（台帳の記録）・recordKind（character〈既定〉／ability／organization／location／world）・notes（作者の留意点）。" +
+  "結果の proposeArgs を novel.propose へ渡すと承認待ちへ置けます（run は書きません）。" +
   "chapter: nameOnly。" +
   "catchphrase: blurb・rejected。";
 
@@ -702,6 +710,17 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
       }),
     run: (input) => settingsRun({ ...chunkArgs(input), ...runnerArgs(input) }),
   },
+  settingsEnrich: {
+    prompt: (input) => settingsEnrichPrompt(settingsEnrichArgs(input)),
+    // 検算にも対象の指定が要る（同じ記録の同じ抜粋と照らし合わせるため）
+    validate: (input) =>
+      settingsEnrichValidate({
+        ...settingsEnrichArgs(input),
+        response: needResponse(input),
+      }),
+    run: (input) =>
+      settingsEnrichRun({ ...settingsEnrichArgs(input), ...runnerArgs(input) }),
+  },
   synopsis: {
     prompt: (input) =>
       synopsisPrompt({
@@ -773,6 +792,27 @@ function episodePlotArgs(input: FeatureCallInput): {
     folder: input.folder,
     plotPath: needOption(input, "plotPath", z.string().min(1)),
     chapterLabel: option(input, "chapterLabel", z.string()),
+  };
+}
+
+/**
+ * AIで再読込の対象。**name と id のどちらも無いときの断りは道具の側**
+ * （`settingsEnrich.ts` の `loadTarget`）——どちらか1つで足りるので、
+ * `needOption` では「name が要ります」と片方だけを言うことになる。
+ */
+function settingsEnrichArgs(input: FeatureCallInput): {
+  folder: string;
+  recordKind?: z.infer<typeof ENRICH_RECORD_KIND_SCHEMA>;
+  name?: string;
+  id?: string;
+  notes?: string;
+} {
+  return {
+    folder: input.folder,
+    recordKind: option(input, "recordKind", ENRICH_RECORD_KIND_SCHEMA),
+    name: option(input, "name", z.string()),
+    id: option(input, "id", z.string()),
+    notes: option(input, "notes", z.string()),
   };
 }
 
