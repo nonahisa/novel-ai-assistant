@@ -348,7 +348,13 @@ export class GitSyncMonitor implements vscode.Disposable {
       vscode.StatusBarAlignment.Right,
       101
     );
-    this.statusBar.command = "novelai.gitSync";
+    // 引数つきで呼ぶ。ステータスバーからのときだけ、手当ての要る置き場へ
+    // 絞って選ばせるため（作者の指摘、2026-10-01）
+    this.statusBar.command = {
+      title: "GitHubと同期",
+      command: "novelai.gitSync",
+      arguments: [{ fromStatusBar: true }],
+    };
     this.disposables.push(this.statusBar);
 
     // 本文を開いた時点で、その作品の状態を確かめる。

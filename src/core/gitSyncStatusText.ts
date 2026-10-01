@@ -150,6 +150,82 @@ export function describeSyncStatusBar(
   return `$(git-branch) ${parts.join(" / ")}`;
 }
 
+/** ステータスバーから押したときに出す、同期の候補（置き場1つ） */
+export interface SyncTarget<W extends { title: string }> {
+  /** 同期へ渡す作品（その置き場の先頭の作品。同期は置き場が単位） */
+  work: W;
+  /** 置き場に入っている作品ぜんぶ */
+  works: W[];
+  label: string;
+  /** 件数。例「未記録 2・送信待ち 1」 */
+  description: string;
+}
+
+/**
+ * ステータスバーから押したときの、同期の候補を作る（作者の指摘、2026-10-01）。
+ *
+ * 「未記録 2」を押すと全作品が並び、どれが未記録か分からなかった。
+ * **手当ての要る置き場だけ**を、競合・分岐のあるものを先にして返す。
+ * 数え方は `describeSyncStatusBar` と同じく**置き場ごとに1回**（書庫で11倍にしない）。
+ * 手当ての要るものが無ければ空。
+ */
+export function listSyncTargets<W extends { title: string }>(
+  entries: readonly { work: W; status: GitSyncStatus }[]
+): Array<SyncTarget<W>> {
+  const groups = new Map<
+    string,
+    { works: W[]; status: Extract<GitSyncStatus, { kind: "tracked" }> }
+  >();
+  for (const { work, status } of entries) {
+    if (status.kind !== "tracked") continue;
+    if (!needsAttention(status)) continue;
+    const found = groups.get(status.root);
+    if (found) found.works.push(work);
+    else groups.set(status.root, { works: [work], status });
+  }
+
+  const targets = [...groups.entries()].map(([root, { works, status }]) => {
+    const diverged = status.ahead > 0 && status.behind > 0;
+    const parts = [
+      status.unmerged > 0 ? `競合 ${status.unmerged}` : undefined,
+      diverged ? "分岐" : undefined,
+      status.dirty > 0 ? `未記録 ${status.dirty}` : undefined,
+      status.ahead > 0 ? `送信待ち ${status.ahead}` : undefined,
+      status.behind > 0 ? `取り込み待ち ${status.behind}` : undefined,
+    ].filter(isText);
+    const first = works[0];
+    const label =
+      works.length === 1
+        ? first.title
+        : `${basenameOf(root)}（${first.title} ほか${works.length - 1}作品）`;
+    return {
+      heavy: status.unmerged > 0 || diverged,
+      target: { work: first, works, label, description: parts.join("・") },
+    };
+  });
+
+  // 同じ重さのあいだは、元の並び（登録順）を保つ。sort は安定
+  return targets
+    .sort((a, b) => Number(b.heavy) - Number(a.heavy))
+    .map((one) => one.target);
+}
+
+function needsAttention(
+  status: Extract<GitSyncStatus, { kind: "tracked" }>
+): boolean {
+  return (
+    status.behind > 0 ||
+    status.ahead > 0 ||
+    status.dirty > 0 ||
+    status.unmerged > 0
+  );
+}
+
+function basenameOf(location: string): string {
+  const parts = location.split(/[\\/]/).filter((part) => part.length > 0);
+  return parts[parts.length - 1] ?? location;
+}
+
 /**
  * 同じ置き場を1回だけにする（設計書5.7.9）。
  *

@@ -213,6 +213,7 @@ import {
   describeSyncBadge,
   describeSyncTooltip,
   hasPendingSync,
+  listSyncTargets,
 } from "./core/gitSyncStatusText";
 import { NullGitSyncMonitor, type GitSyncMonitorLike } from "./features/gitSyncStub";
 import { canRunProcesses } from "./core/runtime";
@@ -3775,8 +3776,16 @@ export async function activate(
   context.subscriptions.push(
     registerCommand(
       "novelai.gitSync",
-      async (node?: WorkNode) => {
-        const work = await resolveWork(node, registry, {
+      async (arg?: WorkNode | { fromStatusBar: true }) => {
+        // **ステータスバーから押したときだけ**、手当ての要る置き場へ絞る
+        // （作者の指摘、2026-10-01：「未記録 2」を押すと全作品が並んだ）。
+        // コマンドパレットや詳細メニューからは、これまでどおり全作品から選ぶ
+        const fromStatusBar =
+          arg !== undefined && "fromStatusBar" in arg && arg.fromStatusBar;
+        const node = fromStatusBar ? undefined : (arg as WorkNode | undefined);
+        const work = fromStatusBar
+          ? await pickWorkNeedingSync(registry, gitSync)
+          : await resolveWork(node, registry, {
           title: "同期する作品を選択",
           // **一覧の印をそのまま使う。** この先の同期メニューは記録・送信・
           // 受け取りのどれにも進めるので、状態を丸ごと見せるのが合っている。
@@ -7728,6 +7737,52 @@ async function resolveWork(
     lastWorkMemory?.set(work.id);
   }
   return work;
+}
+
+/**
+ * ステータスバーから押された同期の対象を選ばせる。**手当ての要る置き場だけ**
+ * を並べ、1つだけなら選ばせずに進む（作者の指摘、2026-10-01）。
+ * 数え方・まとめ方は `listSyncTargets`（ステータスバーの数と同じ畳み方）。
+ */
+async function pickWorkNeedingSync(
+  registry: WorkRegistry,
+  gitSync: GitSyncMonitorLike
+): Promise<WorkEntry | undefined> {
+  const targets = listSyncTargets(
+    registry.list().flatMap((work) => {
+      const status = gitSync.statusFor(work.id);
+      return status ? [{ work, status }] : [];
+    })
+  );
+  if (targets.length === 0) {
+    vscode.window.showInformationMessage(
+      "手当ての要る作品はありません（記録・送信・取り込みはどれも済んでいます）。"
+    );
+    return undefined;
+  }
+  const chosen =
+    targets.length === 1
+      ? targets[0]
+      : await (async () => {
+          const picked = await vscode.window.showQuickPick(
+            [
+              ...targets.map((target) => ({
+                label: target.label,
+                description: target.description,
+                target,
+              })),
+              cancelItem(),
+            ],
+            {
+              title: "同期する作品を選択（手当ての要るものだけ）",
+              placeHolder: "記録・送信・取り込みの要る置き場です",
+            }
+          );
+          return picked && "target" in picked ? picked.target : undefined;
+        })();
+  if (!chosen) return undefined;
+  useLogFile(chosen.work.folderPath);
+  return chosen.work;
 }
 
 async function resolveWorkUnrouted(
