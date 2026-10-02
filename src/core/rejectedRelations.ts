@@ -33,7 +33,8 @@ import { createNameResolver, type NameResolution } from "./characterNameResolve"
  * VS Code API に依存しない（MCP の束の `novel.propose` からも使う）。
  */
 
-type Relation = { name: string; relation: string };
+/** 話数（`firstChapter`）は比べない。同じ言い方なら、話数が違っても同じ関係 */
+type Relation = { name: string; relation: string; firstChapter?: number };
 type Resolve = (name: string) => NameResolution;
 
 /**
