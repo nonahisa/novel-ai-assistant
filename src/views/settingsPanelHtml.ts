@@ -831,8 +831,8 @@ button.danger:hover {
   let pendingGrow = [];
   function growWithContent(area) {
     area.rows = 1;
-    // 高さを中身に合わせるので、内側でスクロールさせない。
-    // 行数を固定した他の欄（相談・下書き）はこれまでどおりスクロールする
+    // 高さを中身に合わせるので、内側でスクロールさせない（上限を超えたときだけ
+    // fitHeight が戻す）。行数を固定した他の欄（相談・下書き）はこれまでどおりスクロールする
     area.style.overflowY = "hidden";
     // 幅が変わったときに測り直せるよう、印を付けておく。
     // 参照を配列で抱えると、描き直しで捨てた古い欄まで残る
@@ -844,9 +844,28 @@ button.danger:hover {
     pendingGrow.push(area);
     return area;
   }
+  /*
+    伸びるのは6行ほどまで（作者の要望、2026-10-02「性格の欄が大きすぎます」）。
+    まとめ直した性格のような長い文で、欄が画面の何倍にも伸びていた。
+    超えた分は欄の中で転がせるようにする（はみ出した行を読めなくしない）
+  */
+  const GROW_MAX_LINES = 6;
+  function growMaxPx(area) {
+    const style = getComputedStyle(area);
+    let line = parseFloat(style.lineHeight);
+    // "normal" のときは数値が取れないので、字の大きさから見積もる
+    if (!(line > 0)) line = (parseFloat(style.fontSize) || 13) * 1.5;
+    const pad =
+      (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+    return Math.round(line * GROW_MAX_LINES + pad);
+  }
   function fitHeight(area) {
     area.style.height = "auto";
-    area.style.height = area.scrollHeight + 2 + "px";
+    const want = area.scrollHeight + 2;
+    const max = growMaxPx(area);
+    const over = want > max;
+    area.style.height = (over ? max : want) + "px";
+    area.style.overflowY = over ? "auto" : "hidden";
   }
   function applyPendingGrow() {
     for (const area of pendingGrow) fitHeight(area);

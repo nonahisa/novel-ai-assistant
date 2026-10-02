@@ -348,6 +348,16 @@ describe("入力欄の高さ", () => {
     expect(body).toContain("body.rows = 8");
   });
 
+  test("伸びるのは上限（6行ほど）まで。超えたら欄の中で転がす（作者の要望、2026-10-02「性格の欄が大きすぎます」）", () => {
+    const body = script();
+    const at = body.indexOf("function fitHeight");
+    expect(at).toBeGreaterThan(0);
+    const fit = body.slice(at, at + 900);
+    expect(body).toContain("GROW_MAX_LINES = 6");
+    // 上限を超えたときだけ内側のスクロールを戻す（はみ出した行を読めるように）
+    expect(fit).toContain('area.style.overflowY = over ? "auto" : "hidden"');
+  });
+
   test("幅が変わったら測り直す", () => {
     // 狭めると折り返しが増えるのに高さは固定のままで、
     // 内側のスクロールも切ってあるため、はみ出した行が読めなくなる
