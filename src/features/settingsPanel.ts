@@ -2627,7 +2627,7 @@ export class SettingsPanel {
         }
       }
 
-      const names = searchTermsFor(kind, record);
+      const names = searchTermsFor(kind, record, this.characters);
       const terms = await this.expandSearchTerms(hint, record.name);
       const query = buildSearchQuery(hint, terms, record.name);
 
@@ -2740,7 +2740,7 @@ export class SettingsPanel {
     // ほかの記録の名前の中の一致（「ルド王国」の「ルド」）は除く（2026-10-02）
     return collectMentionExcerpts(
       this.excerptSources,
-      searchTermsFor(kind, record),
+      searchTermsFor(kind, record, this.characters),
       {
         otherNames: otherRecordNamesFor(record, [
           ...this.characters,

@@ -22,6 +22,7 @@ import { clampSummary } from "./summaryLimit";
 import { isSpeechStyleEcho } from "./speechStyle";
 import { unknownCitedChapters } from "./chapterCitations";
 import { expandNameVariants } from "./termIndex";
+import { normalizeName, sharedNameParts } from "./characterMerge";
 import { evidencePhrases } from "./groundedEvidence";
 
 /**
@@ -47,12 +48,26 @@ export type EnrichRecord = Character | Ability | Organization | Location | World
  * こちらが付けた言葉で、本文には出てこない。名前だけで引くと
  * 場面が1つも集まらず、相談も項目の充実も材料なしで動くことになる。
  * 逐語引用である evidence を手掛かりにする。
+ *
+ * **人物は、切り出した部分のうち家名は引かない**（`characters` を渡したとき。
+ * 2026-10-02）。教科書チートで「フォー・シーゲン」の「シーゲン」が一家の別人も
+ * 含めて294回当たり、本人の「フォー」（3回）の場面が均等に間引く中で落ちた。
+ * 家名の見分け方は抽出のマージと同じ（`sharedNameParts`。2種類以上の名と組む部分、
+ * 爵位だけで呼ばれる名前の家名）。**作者が名前・別名に書いた呼び方はそのまま残す。**
+ * 家名でしか呼ばれない人物は抜粋が減るが、家名の場面へ戻すと別人の値が混ざる
  */
 export function searchTermsFor(
   kind: SettingsKind,
-  record: { name: string; aliases: string[]; evidence?: string | null }
+  record: { name: string; aliases: string[]; evidence?: string | null },
+  characters?: readonly Character[]
 ): string[] {
-  const names = expandNameVariants([record.name, ...record.aliases]);
+  const written = [record.name, ...record.aliases];
+  let names = expandNameVariants(written);
+  if (kind === "character" && characters) {
+    const family = sharedNameParts(characters, written);
+    const kept = new Set(written.map((name) => name.trim()));
+    names = names.filter((name) => kept.has(name) || !family.has(normalizeName(name)));
+  }
   if (kind !== "world") return names;
   return [...names, ...evidencePhrases(record.evidence)];
 }

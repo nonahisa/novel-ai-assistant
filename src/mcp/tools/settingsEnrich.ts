@@ -272,7 +272,7 @@ function loadTarget(input: SettingsEnrichInput): EnrichTarget {
   // 本文の割り方は製品の `loadExcerptSources` と同じ（`excerptSourcesOfEpisode`）
   const excerpts = collectMentionExcerpts(
     pastSceneSourcesOf(input.folder),
-    searchTermsFor(kind, record),
+    searchTermsFor(kind, record, characters),
     { otherNames: otherNamesOf(input.folder, record, characters) }
   );
   return { kind, record, customFields, characters, excerpts };
@@ -333,7 +333,7 @@ function loadStagedTarget(input: SettingsEnrichInput): EnrichTarget {
   const customFields = readCustomFields(input.folder);
   const excerpts = collectMentionExcerpts(
     pastSceneSourcesOf(input.folder),
-    searchTermsFor(kind, record),
+    searchTermsFor(kind, record, characters),
     { otherNames: otherNamesOf(input.folder, record, characters) }
   );
   return { kind, record, customFields, characters, excerpts };
