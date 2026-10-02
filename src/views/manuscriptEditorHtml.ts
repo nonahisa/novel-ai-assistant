@@ -1928,6 +1928,7 @@ ruby > rt {
 
   /** 拡張機能から届いた「入った／入れられなかった」 */
   function takeEditApplied(message) {
+    hearFromHost();
     if (typeof message.seq !== "number") return;
     if (!message.ok) {
       // 入れられなかった。**待たずに知らせる**（送り直しは見回りに任せる）
@@ -1990,6 +1991,33 @@ ruby > rt {
   /** 知らせを出した時刻（下ろしたときに、出ていた長さを添える） */
   let unsentShownAt = null;
 
+  /*
+    **拡張機能から最後に何か届いた時刻**（作者の画面、2026-10-02 21:4x）。
+    拡張機能ホストが起動し直すと、この画面は受け手を失う（新しい拡張機能へは
+    つながらない）。そのとき2段目に［開き直す］を出しても、拡張機能に頼む
+    作りなので押しても動かない。「開き直してください」だけの文を読んだ作者は
+    タブを閉じて開き直し、画面の控え（rescue）まで失う。
+    知らせを出してから何も届いていなければ「相手がいない」と見て、
+    ［開き直す］を出さずにウィンドウの再読み込みを案内する。
+  */
+  let hostHeardAt = null;
+
+  function hearFromHost() {
+    hostHeardAt = Date.now();
+  }
+
+  /** 知らせを出してから、拡張機能から何も届いていないか */
+  function hostSilent() {
+    if (unsentShownAt === null) return false;
+    return hostHeardAt === null || hostHeardAt < unsentShownAt;
+  }
+
+  /** 相手がいないときの2段目の文（タブを閉じる道へ誘わない） */
+  const UNSENT_NO_HOST_TEXT =
+    "打った字が原稿に入りません。拡張機能の更新や再起動で、つながりが切れたのかもしれません。" +
+    "［本文をコピー］で控えてから、Ctrl+Shift+P →「開発者: ウィンドウの再読み込み」を" +
+    "してください（タブは閉じないでください。開き直したときに［戻す］で取り戻せます）。";
+
   function showUnsent(reason) {
     if (unsentBar.classList.contains("open")) return;
     unsentBar.classList.add("open");
@@ -2031,14 +2059,18 @@ ruby > rt {
       });
       scheduleUnsentStatus();
     }
-    unsentReopenButton.hidden = unsentStage !== 2;
+    // 相手がいないときは［開き直す］を出さない（押しても動かない。hostSilent）
+    unsentReopenButton.hidden = unsentStage !== 2 || hostSilent();
     unsentReopenButton.disabled = !unsentCopied || reopenAsked;
     // 写したあとの文・開き直しの経過は、数え上げで上書きしない
     if (unsentCopied || reopenAsked) return;
     unsentText.textContent =
       unsentStage === 1
         ? "打った字を原稿へ送り直しています（" + Math.floor(shown / 1000) + "秒）"
-        : "打った字が原稿に入りません。本文をコピーで控えてから、開き直してください。";
+        : hostSilent()
+          ? UNSENT_NO_HOST_TEXT
+          : "打った字が原稿に入りません。［本文をコピー］で控えてから、［開き直す］を押してください" +
+            "（タブは閉じないでください。閉じると控えが消えます）。";
   }
 
   function hideUnsent(seq) {
@@ -2151,7 +2183,15 @@ ruby > rt {
         (rescue.withShown
           ? "本文と画面の字が食い違っていたので、画面に見えていた字も後ろに付けてあります。"
           : "") +
-        "メモ帳などへ貼って控えてから、この画面を閉じて開き直してください。"
+        /*
+          **「この画面を閉じて開き直す」とは書かない**（2026-10-02）。タブを
+          閉じると画面の控え（rescue）が消える。相手がいなければ再読み込み、
+          いれば［開き直す］（控えを新しい画面へ持って行く）へ案内する
+        */
+        (hostSilent()
+          ? "メモ帳などへ貼って控えてから、Ctrl+Shift+P →「開発者: ウィンドウの再読み込み」を" +
+            "してください（タブは閉じないでください）。"
+          : "メモ帳などへ貼って控えてから、［開き直す］を押してください。")
       : "写せませんでした。本文を選んで Ctrl+C で写してください。";
     paintUnsent();
   }
@@ -2257,6 +2297,7 @@ ruby > rt {
 
   /** 拡張機能から届いた、開き直しの返事 */
   function takeReopenReply(message) {
+    hearFromHost();
     if (reopenTimer !== null) {
       clearTimeout(reopenTimer);
       reopenTimer = null;
@@ -2384,6 +2425,7 @@ ruby > rt {
    * **開いて最初の1回だけ**、控えから取り戻すかを判断する。
    */
   function rescueTakeUpdate(message) {
+    hearFromHost();
     if (typeof message.docKey === "string") docKey = message.docKey;
     if (typeof message.text === "string") lastDocText = message.text;
     if (rescueChecked || lastDocText === null) return;
@@ -3930,6 +3972,8 @@ ${RESUME_WRITING_LABEL ? `
   /* ── 拡張機能からの知らせ ──────────── */
   window.addEventListener("message", function (event) {
     const message = event.data;
+    // 何か届けば、拡張機能はつながっている（2段目の案内の出し分け。hostSilent）
+    hearFromHost();
     if (message.type === "update") {
       /*
         **開くときの見た目を当てる**（設計書6.25.5）。

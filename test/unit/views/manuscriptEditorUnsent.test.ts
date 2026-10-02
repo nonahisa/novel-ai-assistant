@@ -575,6 +575,13 @@ describe("届かないときの知らせの帯", () => {
   知らせと「本文をコピー」は出ていたが、作者の声は「消えない。製品版だと
   どう対処するのか。ユーザーが対応に迷いそう」。
 */
+/** 拡張機能が生きていることを知らせる（入れられなかったという返事が届く） */
+function hearFromHost(h: UnsentHarness): void {
+  const last = h.edits().at(-1)!;
+  h.receive({ type: "editApplied", seq: last.seq, ok: false });
+  h.advance(1_000);
+}
+
 describe("届かない知らせを段階で出す", () => {
   it("**出た直後は「送り直しています（N秒）」と数え上げる**", () => {
     const h = unsentHarness();
@@ -590,7 +597,14 @@ describe("届かない知らせを段階で出す", () => {
     expect(h.button("unsentReopen").hidden).toBe(true);
   });
 
-  it("**30秒たっても消えなければ、「入りません」の段に変えて［開き直す］を並べる**", () => {
+  /**
+   * 作者の画面（2026-10-02 21:4x、机のPC）：拡張機能が自動更新で起動し直し、
+   * つながりが切れて30秒たつと「本文をコピーで控えてから、開き直してください」と
+   * 灰色の［開き直す］が出た。［開き直す］は拡張機能に頼む作りで、相手が
+   * いないと動かない。この文のままだと作者はタブを閉じて開き直し、画面の控え
+   * （setState の rescue）まで失う。
+   */
+  it("**30秒たっても消えず、拡張機能から何も届いていなければ、ウィンドウの再読み込みを案内する**", () => {
     const h = unsentHarness();
     h.postEdit("打った字");
     // 知らせは4秒で出る。そこから数えて29秒
@@ -599,18 +613,52 @@ describe("届かない知らせを段階で出す", () => {
     h.advance(29_000);
     expect(h.unsentText(), "まだ30秒たっていない").toMatch(/送り直しています/);
     h.advance(2_000);
-    expect(h.unsentText()).toContain(
-      "打った字が原稿に入りません。本文をコピーで控えてから、開き直してください。"
-    );
-    expect(h.button("unsentReopen").hidden).toBe(false);
+    const text = h.unsentText();
+    expect(text).toContain("打った字が原稿に入りません。");
+    expect(text).toContain("拡張機能の更新や再起動");
+    expect(text).toContain("［本文をコピー］で控えてから");
+    expect(text).toContain("Ctrl+Shift+P");
+    expect(text).toContain("「開発者: ウィンドウの再読み込み」");
+    expect(text).toContain("タブは閉じないでください");
+    expect(text).toContain("［戻す］");
+    // 「開き直してください」だけの案内には戻さない（タブを閉じる道へ誘う）
+    expect(text).not.toContain("本文をコピーで控えてから、開き直してください");
+    // 相手のいない［開き直す］は出さない（押しても動かない灰色のボタンを見せない）
+    expect(h.button("unsentReopen").hidden).toBe(true);
     // 段が変わったことを記録へ残す
     expect(h.logs().some((text) => /開き直す案内/.test(text))).toBe(true);
+  });
+
+  it("相手がいないままコピーしたら、閉じて開き直す道ではなく再読み込みを案内する", () => {
+    const h = unsentHarness({ text: "控えたい字" });
+    h.postEdit("控えたい字");
+    h.advance(40_000);
+    h.click("unsentCopy");
+    expect(h.clipboard()).toBe("控えたい字");
+    expect(h.unsentText()).toContain("クリップボードへ写しました");
+    expect(h.unsentText()).toContain("ウィンドウの再読み込み");
+    expect(h.unsentText()).not.toContain("閉じて開き直して");
+    expect(h.button("unsentReopen").hidden).toBe(true);
+  });
+
+  it("**拡張機能から返事が届いている（入れられなかった等）なら、［開き直す］を並べる**", () => {
+    const h = unsentHarness();
+    h.postEdit("打った字");
+    h.advance(35_000);
+    const last = h.edits().at(-1)!;
+    h.receive({ type: "editApplied", seq: last.seq, ok: false });
+    h.advance(1_000);
+    expect(h.unsentText()).toContain("打った字が原稿に入りません。");
+    expect(h.unsentText()).toContain("［開き直す］");
+    expect(h.button("unsentReopen").hidden).toBe(false);
   });
 
   it("**［開き直す］はコピーを済ませるまで押せない**（押すと画面の字が消えるため）", () => {
     const h = unsentHarness({ text: "控えたい字" });
     h.postEdit("控えたい字");
     h.advance(40_000);
+    hearFromHost(h);
+    expect(h.button("unsentReopen").hidden).toBe(false);
     expect(h.button("unsentReopen").disabled).toBe(true);
     h.click("unsentReopen");
     expect(h.posted().some((message) => message.type === "reopen")).toBe(false);
@@ -658,6 +706,7 @@ describe("届かない知らせを段階で出す", () => {
     h.update({ type: "update", docKey: "k", text: "元" });
     h.postEdit("控えたい字");
     h.advance(40_000);
+    hearFromHost(h);
     h.click("unsentCopy");
     h.click("unsentReopen");
     const asked = h.posted().filter((message) => message.type === "reopen");
@@ -674,6 +723,7 @@ describe("届かない知らせを段階で出す", () => {
     h.update({ type: "update", docKey: "k", text: "元" });
     h.postEdit("控えたい字");
     h.advance(40_000);
+    hearFromHost(h);
     h.click("unsentCopy");
     h.click("unsentReopen");
     h.receive({ type: "reopenAccepted" });

@@ -113,6 +113,12 @@ import {
   type ManuscriptStatusReport,
   type ManuscriptTabSnapshot,
 } from "../core/manuscriptEditorStatus";
+import {
+  MANUSCRIPT_RESOLVE_GRACE_MS,
+  confirmDisconnectedTabs,
+  unresolvedActiveTabs,
+  type ManuscriptTabLook,
+} from "../core/manuscriptDisconnect";
 
 /**
  * 原稿エディタ（設計書6.25）。
@@ -318,6 +324,120 @@ export function watchManuscriptTabs(): vscode.Disposable {
   } catch {
     // タブを読めない環境（古いVS Code・試験の代役）では見張らない
     return { dispose: () => undefined };
+  }
+}
+
+/**
+ * この拡張機能ホストで、つながりに来た（`resolveCustomTextEditor` が呼ばれた）
+ * 原稿の鍵（`manuscriptLedgerKey`）。縦書き・横書きの入口で共有する。
+ *
+ * **台帳（`openManuscripts`）とは別に持つ。** 台帳へ載せるのは作品の種類を
+ * 引くなどの await のあとなので、つながりに来てから数秒載らないことがある。
+ * 台帳で判定すると、つながっている画面を「切れた」と見てしまう。こちらは
+ * `resolveCustomTextEditor` の先頭（最初の await より前）で記録する。
+ * 閉じても消さない——閉じたタブは一覧から消えるので判定に出てこない。
+ */
+const resolvedManuscriptKeys = new Set<string>();
+
+/** 切れた原稿エディターの知らせの、既定のボタン */
+const RELOAD_WINDOW_ITEM = "ウィンドウを再読み込み";
+
+/**
+ * つながりの切れた原稿エディターを見張り、見つけたら知らせる
+ * （作者の裁定、2026-10-02「起動し直したら、開いていた原稿エディターを
+ * 開き直す」。設計書6.25.9）。判定の決まりは `core/manuscriptDisconnect.ts`。
+ *
+ * **起動した直後と、タブが変わるたびに見る。** 背景に回っていた切れた画面は、
+ * 作者が前に出したときに初めて見られる（背景のタブは、ふつうに開いた
+ * ウィンドウでもまだつながっていないので、見分けられない）。
+ *
+ * **勧めるのはウィンドウの再読み込み。** 再読み込みなら画面の控え（`setState` の
+ * `rescue`）が残り、開き直したときに［戻す］で打った字を取り戻せる。タブを
+ * 閉じて開き直すと控えが消えるので、その道は勧めない。
+ */
+export function watchDisconnectedManuscripts(): vscode.Disposable {
+  const warned = new Set<string>();
+  let pending: ReturnType<typeof setTimeout> | undefined;
+  let disposed = false;
+
+  const look = (): Array<ManuscriptTabLook & { uri: vscode.Uri }> =>
+    manuscriptEditorTabs().map((tab) => ({
+      key: manuscriptLedgerKey(tab.uri),
+      active: tab.visible,
+      uri: tab.uri,
+    }));
+
+  const check = (): void => {
+    // 見張りの猶予が走っている間は重ねない（タブの知らせは保存のたびにも来る）。
+    // 猶予が切れたときに、あとから前に出たタブを見直す
+    if (disposed || pending) return;
+    const earlier = unresolvedActiveTabs(look(), resolvedManuscriptKeys).filter(
+      (key) => !warned.has(key)
+    );
+    if (earlier.length === 0) return;
+    pending = setTimeout(() => {
+      pending = undefined;
+      if (disposed) return;
+      const tabs = look();
+      const lost = confirmDisconnectedTabs({
+        earlier,
+        tabs,
+        resolved: resolvedManuscriptKeys,
+        warned,
+      });
+      if (lost.length > 0) {
+        for (const key of lost) warned.add(key);
+        const names = lost.map((key) => {
+          const found = tabs.find((tab) => tab.key === key);
+          return found ? paths.basename(fromUri(found.uri)) : key;
+        });
+        void warnDisconnected(names);
+      }
+      // 猶予の間に別のタブが前に出ていたら、そちらを見直す
+      check();
+    }, MANUSCRIPT_RESOLVE_GRACE_MS);
+  };
+
+  check();
+  let subscription: vscode.Disposable | undefined;
+  try {
+    subscription = vscode.window.tabGroups.onDidChangeTabs(() => check());
+  } catch {
+    // タブを読めない環境（古いVS Code・試験の代役）では見張らない
+  }
+  return {
+    dispose: () => {
+      disposed = true;
+      if (pending) clearTimeout(pending);
+      pending = undefined;
+      subscription?.dispose();
+    },
+  };
+}
+
+async function warnDisconnected(names: readonly string[]): Promise<void> {
+  logLine(
+    `原稿エディター：つながりの切れた画面を見つけた（${names.length}件。拡張機能ホストの起動し直しの見込み）`
+  );
+  /*
+    **モーダルにして、再読み込みを既定のボタンにする。** 画面の下の欄の赤字は
+    4秒で出るが、作者はそのまま打ち続け、タブを閉じて控えを失うことがある。
+    右下の知らせは見落とされやすいので、手を止めてもらう。
+  */
+  const choice = await vscode.window.showWarningMessage(
+    "拡張機能が更新・再起動されたため、開いていた原稿エディターとのつながりが切れました。",
+    {
+      modal: true,
+      detail:
+        `対象：${names.join("、")}\n\n` +
+        "このままでは、打った字が原稿に入りません。ウィンドウを再読み込みすると、つなぎ直せます。" +
+        "届いていなかった字は、開き直したときに［戻す］で取り戻せます。\n\n" +
+        "タブは閉じないでください（閉じると、届いていなかった字の控えが消えます）。",
+    },
+    RELOAD_WINDOW_ITEM
+  );
+  if (choice === RELOAD_WINDOW_ITEM) {
+    await vscode.commands.executeCommand("workbench.action.reloadWindow");
   }
 }
 
@@ -1444,6 +1564,8 @@ export class ManuscriptEditorProvider
     panel: vscode.WebviewPanel,
     _token: vscode.CancellationToken
   ): Promise<void> {
+    // つながりに来たことを、最初の await より前に記録する（`watchDisconnectedManuscripts`）
+    resolvedManuscriptKeys.add(manuscriptLedgerKey(document.uri));
     panel.webview.options = { enableScripts: true };
     /*
       **作品の種類は、画面を組み立てる前に決める**（設計書6.70・6.109）。台本は
