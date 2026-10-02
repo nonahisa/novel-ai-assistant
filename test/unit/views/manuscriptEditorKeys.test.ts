@@ -62,6 +62,8 @@ function harness(
     text?: string;
     caret?: number;
     size?: number;
+    /** 組んで書く面で選んでいる範囲（記法の位置） */
+    composeRange?: { start: number; end: number };
   } = {}
 ): Harness {
   const keys = markedBlock("keys");
@@ -75,6 +77,7 @@ function harness(
     selection: options.selection ?? "",
     text: options.text ?? "",
     caret: options.caret ?? 0,
+    composeRange: options.composeRange ?? null,
     composeOn: options.composeOn ?? false,
     size: options.size ?? 16,
     listeners: {} as Record<string, Listener[]>,
@@ -164,7 +167,7 @@ function harness(
     function aloudNudgeWriteIntoView() { env.calls.push("nudgeWrite"); }
     function aloudFinish() { aloudOn = false; env.calls.push("aloudFinish"); }
     function composeTextNow() { return env.text; }
-    function composeSelectionNow() { return { start: env.caret, end: env.caret }; }
+    function composeSelectionNow() { return env.composeRange || { start: env.caret, end: env.caret }; }
     function composeRestoreCaret(at) { env.composeSel = { start: at.start, end: at.end }; }
     function composeNudgeIntoView() { env.calls.push("nudgeCompose"); return true; }
     function composeHighlightsUsable() { return true; }
@@ -444,6 +447,19 @@ describe("Ctrl+F で本文を探す（組んで書く面）", () => {
     h.click("findClose");
     expect(h.composeMark()).toBeNull();
     expect(h.composeSelection()).toEqual({ start: 9, end: 11 });
+  });
+
+  it("ルビ付きの語を選んで開くと、読みを混ぜずに記法のまま欄へ入れる", () => {
+    // 画面の字（getSelection）は「漢字かんじ」になる。記法の位置で切り出す
+    const h = harness({
+      composeOn: true,
+      text: "｜漢字《かんじ》と漢字",
+      selection: "漢字かんじ",
+      composeRange: { start: 0, end: 8 },
+    });
+    h.key({ key: "f", ctrlKey: true });
+    expect(h.findCount()).toBe("1／1");
+    expect(h.composeMark()).toEqual({ start: 0, end: 8 });
   });
 });
 

@@ -6749,6 +6749,18 @@ ${RESUME_WRITING_LABEL ? `
     return typeof write.selectionStart === "number" ? write.selectionStart : 0;
   }
 
+  /**
+   * 選んでいる語を**記法のまま**取る。組んで書く面の画面の字（getSelection）は
+   * ルビの読みまで混ざる（「漢字かんじ」）ので、記法の位置で切り出す
+   */
+  function findPickedNow() {
+    if (composeOn) {
+      const at = composeSelectionNow();
+      return at && at.end > at.start ? composeTextNow().slice(at.start, at.end) : "";
+    }
+    return selectionText();
+  }
+
   /** 当たる所の頭をすべて。重ならないように語の長さずつ進む */
   function findAll(text, word) {
     const hits = [];
@@ -6861,7 +6873,7 @@ ${RESUME_WRITING_LABEL ? `
       document.body.classList.add("finding");
       document.body.classList.add("findmark");
       // 1行の短い語を選んでいれば、それを探す語にする（ブラウザの検索と同じ）
-      const picked = selectionText();
+      const picked = findPickedNow();
       if (picked && picked.length <= 100 && picked.indexOf(String.fromCharCode(10)) < 0) {
         findInput.value = picked;
       }
