@@ -285,7 +285,24 @@ header h1 { font-size: 14px; margin: 0 8px 0 0; }
     return out;
   }
 
+  /*
+    札（月の見出し・月曜の日付）と重ならない高さを返す。重なるあいだ1行ぶん下げる。
+    今日が月の頭だと「今日」の札が「10月」と同じ高さに来て読めなかった（2026-10-01 の実機）
+  */
+  function freeLabelTop(want, taken) {
+    var y = want;
+    for (var guard = 0; guard < 20; guard++) {
+      var hit = taken.some(function (top) { return Math.abs(top - y) < 13; });
+      if (!hit) return y;
+      var below = Math.max.apply(null, taken.filter(function (top) { return Math.abs(top - y) < 13; }));
+      y = below + 13;
+    }
+    return y;
+  }
+
   function drawLines(body, withLabels) {
+    // 今日の札を重ねないよう、置いた札の高さを覚える
+    var labelTops = [];
     // 休み（割合0）の日は薄い帯。続く休みは1本にまとめる（要素を増やしすぎない）
     var rest = board.restDays || [];
     for (var i = 0; i < rest.length; i++) {
@@ -313,6 +330,7 @@ header h1 { font-size: 14px; margin: 0 8px 0 0; }
         var p = key.split("-");
         var label = el("div", "axis-label month", (p[1] === "01" || key === monthStarts()[0] ? p[0] + "年" : "") + Number(p[1]) + "月");
         label.style.top = (yOf(key) + 1) + "px"; body.appendChild(label);
+        labelTops.push(yOf(key) + 1);
       }
     });
     if (withLabels && px() >= 8) {
@@ -323,12 +341,13 @@ header h1 { font-size: 14px; margin: 0 8px 0 0; }
         if (px() < 24 && (Number(key.slice(8)) <= 3 || Number(addDays(key, 2).slice(8)) <= 2)) continue;
         var tick = el("div", "axis-label", md(key) + "（月）");
         tick.style.top = yOf(key) + "px"; body.appendChild(tick);
+        labelTops.push(yOf(key));
       }
     }
     var today = el("div", "today-line"); today.style.top = yOf(board.today) + "px"; body.appendChild(today);
     if (withLabels) {
       var label = el("div", "axis-label today", "今日 " + md(board.today));
-      label.style.top = (yOf(board.today) + 2) + "px"; body.appendChild(label);
+      label.style.top = freeLabelTop(yOf(board.today) + 2, labelTops) + "px"; body.appendChild(label);
     }
   }
 
