@@ -597,6 +597,38 @@ describe("関係（相手の名前）を絞る", () => {
     expect(built).toContain("白鳥（同僚）");
   });
 
+  test("第N話より後に始まった関係は、その時点の資料に出さない（2026-10-02）", () => {
+    const base = withPartner();
+    const data: SettingsExportData = {
+      ...base,
+      characters: [
+        {
+          ...base.characters[0],
+          relations: [
+            { name: "白鳥", relation: "同僚", firstChapter: 1 },
+            { name: "白鳥", relation: "元婚約者", firstChapter: 7 },
+          ],
+        },
+        ...base.characters.slice(1),
+      ],
+    };
+
+    const at3 = buildExportMarkdown("editorial", data, { ...OPTIONS, chapter: 3 });
+    expect(at3).toContain("白鳥（同僚）");
+    expect(at3).not.toContain("白鳥（元婚約者）");
+    // 全話ぶんなら両方
+    const all = buildExportMarkdown("editorial", data, { ...OPTIONS, chapter: null });
+    expect(all).toContain("白鳥（元婚約者）");
+  });
+
+  test("話数の無い関係は、時点を絞っても今までどおり出す", () => {
+    const built = buildExportMarkdown("editorial", withPartner(), {
+      ...OPTIONS,
+      chapter: 1,
+    });
+    expect(built).toContain("白鳥（同僚）");
+  });
+
   test("資料に居ない名前は、時点を絞ったときだけ落とす", () => {
     // 引き当てられない以上、その相手がいつ出るのかを言えない。
     // **確実に判定できないものは、出さない側へ倒す**（設計書6.75）

@@ -168,9 +168,10 @@ describe("抽出のマージ（再現：退けた関係が次の抽出で戻ら�
       },
     ]);
     const maina = result.characters.find((c) => c.id === "char_001");
+    // 新しく足した関係には拾った話が付く（2026-10-02）
     expect(maina?.relations).toEqual([
       { name: "ターナ", relation: "母" },
-      { name: "リナ", relation: "友人" },
+      { name: "リナ", relation: "友人", firstChapter: 3 },
     ]);
     expect(result.skippedRejectedRelations).toEqual([
       { characterName: "マイナ", name: "ターナ", relation: "父の娘" },
@@ -208,7 +209,7 @@ describe("抽出のマージ（再現：退けた関係が次の抽出で戻ら�
     const maina = result.characters.find((c) => c.id === "char_001");
     expect(maina?.relations).toEqual([
       { name: "ターナ", relation: "母" },
-      { name: "ターナ", relation: "父の娘" },
+      { name: "ターナ", relation: "父の娘", firstChapter: 3 },
     ]);
     expect(result.skippedRejectedRelations).toEqual([]);
   });

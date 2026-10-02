@@ -1,4 +1,8 @@
-import type { Character } from "../models/character";
+import {
+  relationFirstChapter,
+  type Character,
+  type CharacterRelation,
+} from "../models/character";
 import type { Ability } from "../models/ability";
 import type { Location } from "../models/location";
 import type { Organization } from "../models/organization";
@@ -495,7 +499,7 @@ export function editedAliases(
   return [...new Set(parts)];
 }
 
-type Relation = { name: string; relation: string };
+type Relation = CharacterRelation;
 
 /**
  * 関係欄に出す形。**1行に1つ「相手=関係」**（作者の依頼「B3」、2026-09-22 未明）。
@@ -520,6 +524,10 @@ export function formatRelationsForEdit(relations: readonly Relation[]): string {
  *   関係が保存のたびに消える
  * - **相手側の関係は変えない。** 関係はそれぞれの人物のレコードから見た言葉で
  *   （「母」の相手側は「娘」）、逆の言葉はコードには決められない
+ * - **触らなかった行は、始まった話（`firstChapter`）を引き継ぐ**（2026-10-02）。
+ *   欄は「相手=関係」の文字しか持たないので、そのまま作り直すと、別の行を
+ *   1つ直しただけで抽出が記録した話数が全部消え、相関図の「第N話まで」が
+ *   効かなくなる。**書き換えた行・新しい行には付けない**——作者の関係である
  */
 export function editedRelations(
   current: Relation[],
@@ -546,7 +554,11 @@ export function editedRelations(
     const key = `${name}\u0000${relation}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    result.push({ name, relation });
+    const kept = current.find(
+      (entry) => entry.name.trim() === name && entry.relation.trim() === relation
+    );
+    const first = kept ? relationFirstChapter(kept) : null;
+    result.push(first === null ? { name, relation } : { name, relation, firstChapter: first });
   }
   return result;
 }
@@ -560,11 +572,28 @@ export function editedRelations(
  */
 export function describeRelationEditHint(
   name: string,
-  incoming: ReadonlyArray<{ fromName: string; relation: string }>
+  incoming: ReadonlyArray<{ fromName: string; relation: string }>,
+  /**
+   * この人物の関係（2026-10-02）。始まった話の分かるものだけ説明に並べる。
+   * 欄そのものに書かないのは、「相手=関係」の書式を崩さないため
+   * （`editedRelations` が読めなくなる）
+   */
+  own: ReadonlyArray<CharacterRelation> = []
 ): string {
   const lines = [
     "1行に1つ「相手=関係」の形で書きます（例：ターナ=母）。関係はこの人物から見た相手の続柄・立場です。",
   ];
+  const dated = own.filter((entry) => relationFirstChapter(entry) !== null);
+  if (dated.length > 0) {
+    lines.push(
+      "抽出が最初に読んだ話（相関図の「第N話まで」に使います。書き換えた行の話数は消えます）："
+    );
+    for (const entry of dated) {
+      lines.push(
+        `・${entry.name}=${entry.relation}（第${relationFirstChapter(entry)}話から）`
+      );
+    }
+  }
   if (incoming.length > 0) {
     lines.push(
       "相手側の記録（ここでは変わりません。直すときは相手の人物を開きます）："

@@ -1,5 +1,5 @@
 import type { Ability, AbilitySystem } from "../models/ability";
-import type { Character } from "../models/character";
+import { relationFirstChapter, type Character } from "../models/character";
 import type { CustomFieldDefinition } from "../models/customField";
 import type { AiNote } from "../models/aiNote";
 import type { RecordConflict } from "../models/jsonValidation";
@@ -939,6 +939,16 @@ function describeCharacter(
       .filter((relation) =>
         mentionAllowed(mentions.characters, relation.name, profile, chapter)
       )
+      // **第N話より後に始まった関係は出さない**（2026-10-02）。第3話までの
+      // 資料に、第8話で「元婚約者」になったことが載らないように。
+      // 話数の無い関係（作者が書いたもの・話数を記録する前の資料）は
+      // 今までどおり出す——呼称は「分からなければ出さない」だが、関係は
+      // 話数の記録が始まったばかりで、古い資料の関係が時点の資料から
+      // 全部消えてしまうため
+      .filter((relation) => {
+        const first = relationFirstChapter(relation);
+        return first === null || upTo(first, chapter);
+      })
       .map((relation) => `${relation.name}（${relation.relation}）`)
       .join("、");
     if (relations) bullet("関係", relations);

@@ -245,7 +245,24 @@ export function characterSchema(): Record<string, unknown> {
         "**この人物が他の人物をどう呼ぶか。** 呼ばれ方ではなく呼び方である。" +
         "authorLocked: true の項目は変更しないこと",
     },
-    relations: { type: "array" },
+    // 関係が始まった話（2026-10-02）。製品の抽出が記録する欄なので、
+    // 外部のAIには「書かない・消さない」とだけ伝える
+    relations: {
+      type: "array",
+      description:
+        "この人物から見た相手との関係（name: 相手、relation: 続柄・立場）。" +
+        "firstChapter は抽出が最初にその関係を読んだ話で、製品が記録する。" +
+        "**firstChapter を書き足さないこと。あるものは消さないこと**",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string", minLength: 1 },
+          relation: { type: "string", minLength: 1 },
+          firstChapter: { type: "integer", minimum: 0 },
+        },
+        required: ["name", "relation"],
+      },
+    },
     // 作者が退けた関係（2026-09-23）。外部のAIにも見せる——見せないと、
     // 作者が消した関係をAIが足し戻しても、なぜいけないのかが読み取れない
     rejectedRelations: {

@@ -226,8 +226,9 @@ describe("②同じ相手との関係の重複をまとめる", () => {
       ]
     );
 
+    // 話数の無かった古い関係にも、拾った話が付く（2026-10-02）
     expect(result.characters[0].relations).toEqual([
-      { name: "ばあさん", relation: "祖母" },
+      { name: "ばあさん", relation: "祖母", firstChapter: 2 },
     ]);
   });
 

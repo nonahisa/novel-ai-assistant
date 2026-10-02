@@ -645,7 +645,21 @@ function applyRelations(
     // その相手の最初の位置に、提案の関係をまとめて入れる
     if (placed.has(name)) continue;
     placed.add(name);
-    next.push(...accepted.filter((item) => item.name === name));
+    // 文字どおり同じ関係は、いまの記録をそのまま残す——抽出が記録した
+    // 始まった話（`firstChapter`、2026-10-02）を、同じ言葉の提案で消さない。
+    // 外部AIは話数を知らないので、新しい関係には付けない
+    next.push(
+      ...accepted
+        .filter((item) => item.name === name)
+        .map(
+          (item) =>
+            target.relations.find(
+              (entry) =>
+                entry.name.trim() === item.name &&
+                entry.relation.trim() === item.relation
+            ) ?? item
+        )
+    );
   }
   for (const item of accepted) {
     if (!placed.has(item.name)) next.push(item);

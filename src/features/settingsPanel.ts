@@ -973,7 +973,8 @@ export class SettingsPanel {
             ),
             hint: describeRelationEditHint(
               character.name,
-              incomingRelations(this.characters, id)
+              incomingRelations(this.characters, id),
+              character.relations
             ),
             // 退けた関係（2026-09-23）。消した・言葉を変えた関係を、次の抽出と
             // 外部AIの提案が足さないための記録。ここで見て、取り消せる

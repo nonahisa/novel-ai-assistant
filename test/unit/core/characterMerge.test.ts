@@ -546,7 +546,10 @@ describe("登場人物マージ", () => {
 
     const result = mergeExtractedCharacters([existing], [extracted, extracted]);
 
-    expect(result.characters[0].relations).toEqual([{ name: "澪", relation: "友人" }]);
+    // 拾った話（2026-10-02）も1つにまとまる
+    expect(result.characters[0].relations).toEqual([
+      { name: "澪", relation: "友人", firstChapter: 2 },
+    ]);
   });
 
   test("有限の話数だけを保存する", () => {

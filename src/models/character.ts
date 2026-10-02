@@ -100,6 +100,34 @@ export const REJECTED_RELATION_VIAS: readonly RejectedRelationVia[] = [
 ];
 
 /**
+ * 人物から見た、ほかの人物との関係（「白鳥=婚約者」）。
+ *
+ * `firstChapter` は**抽出がこの関係を最初に拾った話**（作者の裁定、
+ * 2026-10-02「関係にも話数を持たせる」）。相関図の「第N話まで」で、関係の
+ * 線を第N話の時点へ巻き戻すのに使う（設計書6.38.2）。
+ *
+ * - **AIには書かせない。** 抽出はチャンク（話）ごとなので、どの話で拾ったかは
+ *   コードが知っている。プロンプトは変えていない（`characterMerge.ts`）
+ * - **作者が書いた関係には付けない。** 無いときは「いつからか分からない」で、
+ *   図では両端が出ていれば引く（今までどおり）。古い資料もそのまま読める
+ * - まとめて送ったチャンク（複数話）で拾ったものは、いちばん前の話にする
+ *   ——どの話かまでは分からないので、図で隠れすぎない側へ倒す
+ */
+export interface CharacterRelation {
+  name: string;
+  relation: string;
+  firstChapter?: number;
+}
+
+/** 関係が始まった話。分からなければ null */
+export function relationFirstChapter(relation: {
+  firstChapter?: number | null;
+}): number | null {
+  const at = relation.firstChapter;
+  return typeof at === "number" && Number.isFinite(at) ? at : null;
+}
+
+/**
  * 作者が退けた関係（作者の裁定、2026-09-23「退けた関係を記録する」）。
  *
  * **次の抽出・外部AIの提案に、同じ関係を足させないための記録である。**
@@ -268,7 +296,7 @@ export interface Character {
   };
   defaultSecondPerson: string | null;
   addressTerms: AddressTerm[];
-  relations: Array<{ name: string; relation: string }>;
+  relations: CharacterRelation[];
   /**
    * 作者が退けた関係（作者の裁定、2026-09-23）。`RejectedRelation` を参照。
    * 抽出のマージと `novel.propose` は、ここに一致する関係を足さない。
@@ -505,7 +533,21 @@ export function parseCharacter(raw: unknown): Character {
   const relations = optionalObjectArray(value.relations, "relations", (entry, path) => {
     requireNonEmptyString(entry.name, `${path}.name`);
     requireNonEmptyString(entry.relation, `${path}.relation`);
-    return { name: entry.name as string, relation: entry.relation as string };
+    // 関係が始まった話（2026-10-02）。**壊れた形は読み込みエラーにする**——
+    // 黙って捨てると、作者に知らせないまま図の巻き戻しが効かなくなる
+    optionalNumberArray(
+      entry.firstChapter === undefined ? undefined : [entry.firstChapter],
+      `${path}.firstChapter`
+    );
+    const relation: CharacterRelation = {
+      name: entry.name as string,
+      relation: entry.relation as string,
+    };
+    // 無いときは欄ごと置かない（古い資料の形をそのまま保つ）
+    if (entry.firstChapter !== undefined) {
+      relation.firstChapter = entry.firstChapter as number;
+    }
+    return relation;
   });
   // 退けた関係（2026-09-23）。**壊れた形は読み込みエラーにする。**
   // 黙って空にすると、作者が消した関係が次の抽出で戻る

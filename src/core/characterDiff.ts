@@ -1,4 +1,8 @@
-import type { Character } from "../models/character";
+import {
+  relationFirstChapter,
+  type Character,
+  type CharacterRelation,
+} from "../models/character";
 import type { CustomFieldDefinition } from "../models/customField";
 
 /**
@@ -74,10 +78,24 @@ function addressLeaves(character: Character): Leaf[] {
 
 function relationLeaves(character: Character): Leaf[] {
   return character.relations.map((relation) => ({
+    // 鍵には話数を入れない。✕で落とす鍵（`dropDiffEntries`）が話数で変わると、
+    // 話数が付いただけの関係が「消えて足される」ように見える
     key: relationEntryKey(relation.name, relation.relation),
-    text: `${relation.name}=${relation.relation}`,
+    text: relationText(relation),
     locked: false,
   }));
+}
+
+/**
+ * 差分に出す関係の書き方。**始まった話も出す**（2026-10-02）。
+ *
+ * 出さないと、古い関係に話数が付いただけの更新は差分が空になり、
+ * 承認待ちで「変更なし」として捨てられる——既存の資料が話数を持てない。
+ */
+function relationText(relation: CharacterRelation): string {
+  const first = relationFirstChapter(relation);
+  const base = `${relation.name}=${relation.relation}`;
+  return first === null ? base : `${base}（第${first}話から）`;
 }
 
 function aliasLeaves(character: Character): Leaf[] {
@@ -151,7 +169,7 @@ const TEXT_FIELDS: Array<{
   { label: "一人称", read: (c) => c.firstPerson.default ?? "" },
   {
     label: "関係",
-    read: (c) => c.relations.map((r) => `${r.name}=${r.relation}`).join("、"),
+    read: (c) => c.relations.map(relationText).join("、"),
     leaves: relationLeaves,
   },
   {

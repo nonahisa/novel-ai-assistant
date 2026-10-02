@@ -1,4 +1,4 @@
-import type { Character } from "../models/character";
+import { relationFirstChapter, type Character } from "../models/character";
 import {
   createNameResolver,
   type UnresolvedReason,
@@ -51,9 +51,9 @@ export interface RelationLabel {
   /**
    * 何話から使われた言葉か。分からなければ null。
    *
-   * 話数を持つのは呼称（`AddressForm.firstChapter`）だけである。関係
-   * （`relations`）は名前と言葉しか持たず、抽出のマージも話数を残さない
-   * （`characterMerge.ts` は関係を `changes` へ積まない）ので、常に null
+   * 呼称は `AddressForm.firstChapter`、関係は `CharacterRelation.firstChapter`
+   * （抽出が最初に拾った話。2026-10-02 から `characterMerge.ts` が記録する）。
+   * 作者が書いた関係と、話数を記録する前の資料の関係は null
    */
   firstChapter: number | null;
 }
@@ -234,7 +234,15 @@ export function buildRelationGraph(characters: Character[]): RelationGraph {
 
   for (const character of characters) {
     for (const relation of character.relations ?? []) {
-      link(character, relation.name, null, "relation", relation.relation, null);
+      // 話数の無い関係は null（「第N話まで」でも両端が出ていれば引く）
+      link(
+        character,
+        relation.name,
+        null,
+        "relation",
+        relation.relation,
+        relationFirstChapter(relation)
+      );
     }
     for (const term of character.addressTerms ?? []) {
       for (const form of term.forms ?? []) {

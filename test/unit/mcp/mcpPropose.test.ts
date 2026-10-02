@@ -295,7 +295,7 @@ describe("novel.propose——関係（relations）", () => {
   /** 作り物の人物に関係を持たせる（写した一時フォルダーの中だけで） */
   function giveRelations(
     folder: string,
-    relations: Array<{ name: string; relation: string }>
+    relations: Array<{ name: string; relation: string; firstChapter?: number }>
   ): void {
     const file = nodePath.join(folder, "設定", "characters", "char_0001.json");
     const record = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
@@ -327,6 +327,31 @@ describe("novel.propose——関係（relations）", () => {
     expect(character.relations).toEqual([
       { name: "ターナ", relation: "母" },
       { name: "リナ", relation: "友人" },
+    ]);
+  });
+
+  it("同じ言葉の関係は、抽出が記録した始まった話を残す。新しい関係には付けない（2026-10-02）", () => {
+    const folder = workCopy();
+    giveRelations(folder, [
+      { name: "ターナ", relation: "母", firstChapter: 2 },
+    ]);
+    settingsPropose({
+      folder,
+      name: "少年",
+      changes: {
+        relations: [
+          { name: "ターナ", relation: "母" },
+          { name: "ターナ", relation: "育ての親" },
+        ],
+      },
+      reason: "第5話で育てられた経緯が出るため。",
+    });
+    const character = parseCharacter(
+      unwrapPendingCharacter(readPending(folder, "char_0001.json"))
+    );
+    expect(character.relations).toEqual([
+      { name: "ターナ", relation: "母", firstChapter: 2 },
+      { name: "ターナ", relation: "育ての親" },
     ]);
   });
 
