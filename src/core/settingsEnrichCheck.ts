@@ -57,6 +57,26 @@ export function searchTermsFor(
   return [...names, ...evidencePhrases(record.evidence)];
 }
 
+/**
+ * 場面を集めるときに「その名前の中の一致は除く」ための、ほかの記録の名前
+ * （`collectMentionExcerpts` の `otherNames`。2026-10-02）。
+ *
+ * 「教皇」が「教皇庁」に、「ルド」が「ルド王国」に当たると、抜粋が別の記録の
+ * 場面で埋まる。人物・場所・組織・能力の名前と別名を、本文での呼び方へ広げて渡す。
+ * **世界観は入れない。** 見出しはこちらが付けた言葉で、本文の語ではない。
+ * 対象の記録自身は除く（同じ id。自分の別名で自分の場面を隠さない）。
+ */
+export function otherRecordNamesFor(
+  target: { id: string },
+  records: ReadonlyArray<{ id: string; name: string; aliases: string[] }>
+): string[] {
+  return expandNameVariants(
+    records
+      .filter((record) => record.id !== target.id)
+      .flatMap((record) => [record.name, ...record.aliases])
+  );
+}
+
 /** 「現在の設定」の欄に渡す文章を組むのに要るもの */
 export interface EnrichDescribeContext {
   /** 作者が足した項目（人物のときだけ効く） */

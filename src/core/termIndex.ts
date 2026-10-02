@@ -69,6 +69,50 @@ export function expandNameVariants(names: string[]): string[] {
   return [...expanded];
 }
 
+/** カタカナの語の続き（長音符を含む） */
+const KATAKANA_CHAR = /[\p{Script=Katakana}ー]/u;
+
+/**
+ * 本文の `start`〜`end` に当たった名前が、**長いカタカナ語の一部ではない**か。
+ *
+ * 「フォー」が「フォートラン」に、「ルド」が「ギルド」に当たり、抜粋が
+ * 別の語の場面で埋まった（2026-10-02、教科書チート219話の「AIで再読込」）。
+ * カタカナ語は前後にカタカナが続けば1つの語になるので、名前の端がカタカナで
+ * その外側にもカタカナが続く一致は、別の語とみなす。
+ *
+ * **漢字には広げない。** 「相沢様」「相沢家」「教皇猊下」は本人の場面で、
+ * 前後の漢字続きで落とすと見逃しが増える（「街灯」の「灯」のような雑音は、
+ * 件数と字数の上限で抑える。`mentionExcerpts.ts` の `buildEntries`）。
+ * 中黒（・）はカタカナではないので、「フォー・シーゲン」の「シーゲン」は当たる。
+ *
+ * 添字は UTF-16 のまま見る。前後が代理対の片割れのときは判定が偽になる
+ * だけで、カタカナは代理対に無いので取り違えは起きない。
+ */
+export function isStandaloneName(text: string, start: number, end: number): boolean {
+  const name = text.slice(start, end);
+  if (!name) return false;
+  const before = text[start - 1] ?? "";
+  const after = text[end] ?? "";
+  if (KATAKANA_CHAR.test(name[0]) && before && KATAKANA_CHAR.test(before)) {
+    return false;
+  }
+  if (KATAKANA_CHAR.test(name[name.length - 1]) && after && KATAKANA_CHAR.test(after)) {
+    return false;
+  }
+  return true;
+}
+
+/** 本文に名前が、長いカタカナ語の一部としてでなく出てくるか（`isStandaloneName`） */
+export function containsStandaloneName(text: string, name: string): boolean {
+  if (!name) return false;
+  let at = text.indexOf(name);
+  while (at >= 0) {
+    if (isStandaloneName(text, at, at + name.length)) return true;
+    at = text.indexOf(name, at + 1);
+  }
+  return false;
+}
+
 interface TrieNode {
   children: Map<string, TrieNode>;
   fail: TrieNode | null;

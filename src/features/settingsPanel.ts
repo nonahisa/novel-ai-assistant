@@ -150,6 +150,7 @@ import {
   checkEnrichProposals,
   describeEnrichTarget,
   misattributedAllowedFields,
+  otherRecordNamesFor,
   parseEnrichResult,
   searchTermsFor,
 } from "../core/settingsEnrichCheck";
@@ -2735,10 +2736,19 @@ export class SettingsPanel {
       }
     }
     // フルネームで登録されていても、本文には片方しか出てこないことが多い。
-    // 広げないと、その人物の場面がほとんど集まらない
+    // 広げないと、その人物の場面がほとんど集まらない。
+    // ほかの記録の名前の中の一致（「ルド王国」の「ルド」）は除く（2026-10-02）
     return collectMentionExcerpts(
       this.excerptSources,
-      searchTermsFor(kind, record)
+      searchTermsFor(kind, record),
+      {
+        otherNames: otherRecordNamesFor(record, [
+          ...this.characters,
+          ...this.abilities,
+          ...this.locations,
+          ...this.organizations,
+        ]),
+      }
     );
   }
 

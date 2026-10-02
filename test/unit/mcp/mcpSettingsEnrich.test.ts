@@ -238,6 +238,46 @@ describe("プロンプトは製品と同じ材料で組む", () => {
     expect(prompt.userPrompt).toContain("あたし、もう行くね");
   });
 
+  test("ほかの記録の名前の中の一致と、長いカタカナ語の一部の一致は抜粋に入れない", () => {
+    // 2026-10-02：「フォー」が「フォートラン」に当たり、抜粋が別の語の場面で埋まった
+    const folder = makeWork();
+    fs.writeFileSync(
+      nodePath.join(folder, "本文", "003_商会.txt"),
+      // 抜粋は一致の前後200字ずつなので、長い行で場面を離す
+      "美咲商会の看板が風に鳴った。\n" +
+        `${"波".repeat(500)}\n` +
+        "美咲は商会の前で足を止めた。\n",
+      "utf8"
+    );
+    const organizations = nodePath.join(folder, "設定", "organizations");
+    fs.mkdirSync(organizations, { recursive: true });
+    fs.writeFileSync(
+      nodePath.join(organizations, "org_0001.json"),
+      JSON.stringify({ schemaVersion: "0.1", id: "org_0001", name: "美咲商会" }),
+      "utf8"
+    );
+    const prompt = novelPrompt(call(folder, { name: "美咲" })) as Record<string, unknown>;
+
+    expect(prompt.userPrompt).not.toContain("看板が風に鳴った");
+    expect(prompt.userPrompt).toContain("商会の前で足を止めた");
+  });
+
+  test("カタカナの別名は、長いカタカナ語の中では当てない", () => {
+    const folder = makeWork();
+    const file = nodePath.join(folder, "設定", "characters", "char_0001.json");
+    const misaki = JSON.parse(fs.readFileSync(file, "utf8"));
+    fs.writeFileSync(file, JSON.stringify({ ...misaki, aliases: ["ミサ"] }), "utf8");
+    fs.writeFileSync(
+      nodePath.join(folder, "本文", "003_祭.txt"),
+      "ミサイルが空を裂いた。\n",
+      "utf8"
+    );
+    const prompt = novelPrompt(call(folder, { name: "美咲" })) as Record<string, unknown>;
+
+    expect(prompt.userPrompt).not.toContain("ミサイル");
+    expect(prompt.userPrompt).toContain("あたし、もう行くね");
+  });
+
   test("id でも指せる", () => {
     const folder = makeWork();
     const prompt = novelPrompt(call(folder, { id: "char_0002" })) as Record<string, unknown>;

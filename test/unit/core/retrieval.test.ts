@@ -160,6 +160,21 @@ describe("検索の組み立て", () => {
     expect(got.map((c) => c.item.id)).toEqual(["m1"]);
   });
 
+  test("指定の語が長いカタカナ語の一部としてしか出ない材料は除く", () => {
+    // 「ルド」が「ギルド」に当たり、本人の出ない場面が渡った（2026-10-02）
+    const mixed = [
+      item("g1", "ギルドで嫉妬が渦巻いた"),
+      item("r1", "ルドは嫉妬した"),
+    ];
+    const index = new Bm25Index(mixed.map((i) => ({ id: i.id, text: i.text })));
+    const got = retrieve(
+      { items: mixed, bm25: index, query: "嫉妬" },
+      { maxChars: 1000, mustInclude: ["ルド"] }
+    );
+
+    expect(got.map((c) => c.item.id)).toEqual(["r1"]);
+  });
+
   test("母集団を狭めた相談でも、語句一致が取りこぼさない", () => {
     // 設計書6.27.6の穴4の再現。
     //
