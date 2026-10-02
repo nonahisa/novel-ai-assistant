@@ -14,6 +14,7 @@ import {
   editedRelations,
 } from "../../../src/core/settingsEdit";
 import { planCharacterSave } from "../../../src/core/externalExtractMerge";
+import { recordRemovedRelations } from "../../../src/core/rejectedRelations";
 import {
   emptyCharacter,
   parseCharacter,
@@ -261,6 +262,22 @@ describe("承認の差分：話数だけ変わる更新も見える", () => {
     expect(change?.after).toContain("第2話から");
     // ✕で落とす鍵は話数で変えない（言い方が同じなら同じ葉）
     expect(change?.entries?.every((entry) => entry.state === "kept")).toBe(true);
+  });
+});
+
+describe("承認：話数が付いただけの関係を「退けた関係」にしない", () => {
+  test("前後で言葉が同じなら、消えたことにしない", () => {
+    // 承認（applyPendingUpdates）は前後を比べて消えた関係を退けた記録へ積む。
+    // 話数の差で「消えた」と読むと、承認した関係が次の抽出から足されなくなる
+    const rejected = recordRemovedRelations({
+      before: [{ name: "白鳥", relation: "婚約者" }],
+      after: [{ name: "白鳥", relation: "婚約者", firstChapter: 2 }],
+      rejected: [],
+      characters: [person("char_001", "灯"), person("char_002", "白鳥")],
+      via: "extraction",
+      now: "2026-10-02T00:00:00.000Z",
+    });
+    expect(rejected).toEqual([]);
   });
 });
 
