@@ -1933,6 +1933,9 @@ ruby > rt {
     if (!message.ok) {
       // 入れられなかった。**待たずに知らせる**（送り直しは見回りに任せる）
       showUnsent("拡張機能が「入れられなかった」と返した（便" + message.seq + "）");
+      // 返事をくれた相手はいる。知らせを出した時刻より後に聞いたことにする
+      // （同じ瞬間でも時計が1ms進むと「相手がいない」側に倒れるため）
+      hearFromHost();
       if (unconfirmed !== null) armUnsentCheck(UNSENT_WAIT_MS);
       return;
     }
