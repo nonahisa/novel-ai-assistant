@@ -193,7 +193,7 @@ async function checkTypedTextReachesDocument(): Promise<void> {
     assert.equal(saved.replace(/\r\n/g, "\n"), "一行目の字\n二行目");
   } finally {
     view.close();
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }
 
@@ -246,7 +246,7 @@ async function checkClipboardMenu(): Promise<void> {
   } finally {
     view.close();
     await vscode.env.clipboard.writeText(saved);
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }
 
@@ -264,6 +264,6 @@ async function checkTypedTextSurvivesClose(): Promise<void> {
     assert.equal(await document.save(), true, "保存できませんでした");
     assert.equal(await fs.readFile(file, "utf8"), "閉じる前に打った字");
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }
