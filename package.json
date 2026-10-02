@@ -85,6 +85,89 @@
         "priority": "option"
       }
     ],
+    "keybindings": [
+      {
+        "key": "ctrl+alt+t",
+        "mac": "cmd+alt+t",
+        "command": "novelai.checkTyposForFile",
+        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "args": {
+          "source": "manuscriptEditor"
+        }
+      },
+      {
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p",
+        "command": "novelai.checkProofread",
+        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "args": {
+          "source": "manuscriptEditor"
+        }
+      },
+      {
+        "key": "ctrl+alt+h",
+        "mac": "cmd+alt+h",
+        "command": "novelai.checkNotation",
+        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "args": {
+          "source": "manuscriptEditor"
+        }
+      },
+      {
+        "key": "ctrl+alt+a",
+        "mac": "cmd+alt+a",
+        "command": "novelai.runProofreadingSuite",
+        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "args": {
+          "source": "manuscriptEditor"
+        }
+      },
+      {
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m",
+        "command": "novelai.openSceneMemos",
+        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "args": {
+          "source": "manuscriptEditor"
+        }
+      },
+      {
+        "key": "ctrl+alt+n",
+        "mac": "cmd+alt+n",
+        "command": "novelai.nextSceneMemo",
+        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "args": {
+          "source": "manuscriptEditor"
+        }
+      },
+      {
+        "key": "ctrl+alt+b",
+        "mac": "cmd+alt+b",
+        "command": "novelai.prevSceneMemo",
+        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "args": {
+          "source": "manuscriptEditor"
+        }
+      },
+      {
+        "key": "ctrl+alt+i",
+        "mac": "cmd+alt+i",
+        "command": "novelai.addSceneMemo",
+        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "args": {
+          "source": "manuscriptEditor"
+        }
+      },
+      {
+        "key": "ctrl+alt+c",
+        "mac": "cmd+alt+c",
+        "command": "novelai.openChat",
+        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "args": {
+          "source": "manuscriptEditor"
+        }
+      }
+    ],
     "viewsContainers": {
       "activitybar": [
         {

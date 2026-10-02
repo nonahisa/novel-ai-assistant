@@ -487,3 +487,83 @@ describe("既存のキーを壊さない", () => {
     expect(code).toMatch(/flushUnsent\("保存する"\)/);
   });
 });
+
+/**
+ * Ctrl+Alt+頭文字は VS Code の正式なキー割り当て（package.json の
+ * keybindings。設計書6.25.10）で受ける。**画面はキーを止めずに本体へ渡し、
+ * 渡す前に打ちかけの字とカーソルの行を送っておく**——検知が画面と違う本文を
+ * 読んだり、シーンメモが前の行へ足されたりしないように。
+ */
+describe("Ctrl+Alt+頭文字は本体のキー割り当てへ渡す", () => {
+  const LETTERS = ["t", "p", "h", "a", "m", "n", "b", "i", "c"];
+
+  it("9つとも止めない（既定の動きも伝わりも）", () => {
+    const h = harness({ selection: "語" });
+    for (const letter of LETTERS) {
+      const event = h.key({
+        key: letter,
+        code: "Key" + letter.toUpperCase(),
+        ctrlKey: true,
+        altKey: true,
+      });
+      expect(event.prevented, letter).toBe(false);
+      expect(event.stopped, letter).toBe(false);
+    }
+  });
+
+  it("渡す前に、打ちかけの字とカーソルの行を送る", () => {
+    const h = harness();
+    h.key({ key: "i", code: "KeyI", ctrlKey: true, altKey: true });
+    expect(h.calls()).toContain("flush:キー操作を本体へ渡す");
+    expect(h.posted()).toContainEqual({ type: "caret", line: 7 });
+  });
+
+  it("作者が別のキーへ変えても同じ（Ctrl+Alt の組み合わせなら送ってから渡す）", () => {
+    const h = harness();
+    const event = h.key({ key: "q", code: "KeyQ", ctrlKey: true, altKey: true });
+    expect(h.calls()).toContain("flush:キー操作を本体へ渡す");
+    expect(event.prevented || event.stopped).toBe(false);
+  });
+
+  it("変換中は何もしない（日本語入力に任せる）", () => {
+    const h = harness();
+    const event = h.key({
+      key: "t",
+      code: "KeyT",
+      ctrlKey: true,
+      altKey: true,
+      isComposing: true,
+    });
+    expect(h.calls()).toEqual([]);
+    expect(h.posted()).toEqual([]);
+    expect(event.prevented || event.stopped).toBe(false);
+  });
+
+  it("Ctrl と Alt だけを押した瞬間には送らない", () => {
+    const h = harness();
+    h.key({ key: "Control", code: "ControlLeft", ctrlKey: true, altKey: true });
+    h.key({ key: "Alt", code: "AltLeft", ctrlKey: true, altKey: true });
+    expect(h.calls()).toEqual([]);
+  });
+
+  it("AltGr で字が出る配列（独・波など）では、字を優先して本体へ渡さない", () => {
+    // Windows では AltGr が Ctrl+Alt として届く。字が出るキーで本体の
+    // 割り当てまで走ると、字を打っただけで検知が始まる
+    const h = harness();
+    const event = h.key({ key: "ą", code: "KeyA", ctrlKey: true, altKey: true });
+    expect(event.stopped).toBe(true);
+    // 字は入れる（既定の動きは止めない）
+    expect(event.prevented).toBe(false);
+    const digit = h.key({ key: "{", code: "Digit7", ctrlKey: true, altKey: true });
+    expect(digit.stopped).toBe(true);
+    expect(digit.prevented).toBe(false);
+  });
+
+  it("Ctrl+Alt+矢印・Ctrl+Alt+F は前後の話・検索に化けない", () => {
+    const h = harness();
+    h.key({ key: "ArrowDown", code: "ArrowDown", ctrlKey: true, altKey: true });
+    h.key({ key: "f", code: "KeyF", ctrlKey: true, altKey: true });
+    expect(h.posted().filter((m) => m.type !== "caret")).toEqual([]);
+    expect(h.bodyHas("finding")).toBe(false);
+  });
+});

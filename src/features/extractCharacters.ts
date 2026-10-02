@@ -220,21 +220,34 @@ interface ExtractionSummaryCounts {
   notifiedNarrators: ReadonlySet<string>;
 }
 
-/** 作品内の未保存文書を保存し、成功を再検査できた場合だけ実行を許可する。 */
+/**
+ * 作品内の未保存文書を保存し、成功を再検査できた場合だけ実行を許可する。
+ *
+ * `askInPicker` は原稿エディターのキー（Ctrl+Alt+T など。設計書6.25.10）から
+ * 呼んだときに立てる。**右下の知らせには Enter が届かない**——焦点は原稿に
+ * 残ったままで、Enter を押すと本文に改行が入る。原稿を打っている最中に押す
+ * キーなので未保存は毎回のように起きる。ほかの確認と同じ画面上部の選択窓で
+ * 訊き、先頭（Enter）を「保存して実行」にする（作者の要望、2026-10-02）。
+ * **メニューからの道は変えない**（作者が覚えている出方を崩さない）。
+ */
 export async function saveDirtyDocumentsBeforeExtraction(
   work: WorkEntry,
   /** 中止時の文言に埋め込む、実行しようとしている処理名 */
-  actionLabel = "設定資料の抽出"
+  actionLabel = "設定資料の抽出",
+  options: { askInPicker?: boolean } = {}
 ): Promise<boolean> {
   const dirtyDocuments = dirtyDocumentsInside(work.folderPath);
   if (dirtyDocuments.length === 0) return true;
 
-  const answer = await vscode.window.showWarningMessage(
-    `未保存の変更が ${dirtyDocuments.length} 件あります。保存してから実行しますか？`,
-    "保存して実行",
-    "中止"
-  );
-  if (answer !== "保存して実行") return false;
+  const question = `未保存の変更が ${dirtyDocuments.length} 件あります。保存してから実行しますか？`;
+  const accepted = options.askInPicker
+    ? await confirmRun(question, "保存して実行", { work })
+    : (await vscode.window.showWarningMessage(
+        question,
+        "保存して実行",
+        "中止"
+      )) === "保存して実行";
+  if (!accepted) return false;
 
   for (const document of dirtyDocuments) {
     if (!document.save || !(await document.save())) {

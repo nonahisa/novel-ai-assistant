@@ -47,12 +47,14 @@ export interface ScopeCandidate {
  * - `first`……**はじめの何話かだけ**（作者の依頼、2026-09-20）。
  *   「まず10話だけ試して、この設定でまともな指摘が出るか見る」ためにある。
  *   モデルを替えて比べたい時期に、比べるたび全話へ賭けるのでは試せない
+ * - `current`……**原稿エディターで開いている話だけ**（設計書6.25.10）。
+ *   原稿エディターのキー（Ctrl+Alt+P など）から呼んだときだけ並ぶ
  */
-export type ScopeKind = "all" | "changed" | "first";
+export type ScopeKind = "all" | "changed" | "first" | "current";
 
 export interface ScopeChoice {
   kind: ScopeKind;
-  /** `changed` / `first` のときの対象。`all` なら undefined（絞らない） */
+  /** `changed` / `first` / `current` のときの対象。`all` なら undefined（絞らない） */
   filePaths?: string[];
 }
 

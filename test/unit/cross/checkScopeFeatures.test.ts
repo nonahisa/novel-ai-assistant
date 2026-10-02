@@ -272,3 +272,88 @@ describe("前回の検知のあとに書いた話が無いとき", () => {
     expect(await chooseWithNothingNew(false)).toBeUndefined();
   });
 });
+
+/**
+ * 原稿エディターのキー（Ctrl+Alt+P など。設計書6.25.10）から呼んだときは、
+ * **「この話だけ」を先頭に置く**（作者の要望、2026-10-02「ポップアップが出る
+ * ショートカットキー → Enter で操作が終了するのが理想」）。VS Code の選択窓は
+ * 先頭が選ばれた状態で開くので、Enter だけで開いている話が対象になる。
+ */
+describe("原稿エディターから呼んだときの範囲", () => {
+  const episodes = Array.from({ length: 3 }, (_, i) => ({
+    filePath: `C:/works/試しの作品/原稿/${String(i + 1).padStart(3, "0")}.txt`,
+  }));
+  const current = episodes[1].filePath;
+
+  beforeEach(() => {
+    notifyMocks.pickWithMemory.mockClear();
+    notifyMocks.confirmRun.mockClear();
+    scannerMocks.scanWork.mockResolvedValue({ episodes });
+  });
+
+  async function choose(
+    currentFile: string,
+    lastCheckedAt?: number
+  ): Promise<unknown> {
+    const originalFs = workspace.fs;
+    workspace.fs = {
+      readFile: async () => {
+        if (lastCheckedAt === undefined) throw new Error("無い");
+        return new TextEncoder().encode(
+          JSON.stringify({ checkedAt: lastCheckedAt })
+        );
+      },
+      stat: async () => ({ mtime: 500 }),
+    };
+    try {
+      return await chooseScope(work, "proofread", { currentFile });
+    } finally {
+      workspace.fs = originalFs;
+    }
+  }
+
+  function passedValues(): Array<string | undefined> {
+    return notifyMocks.pickWithMemory.mock.calls[0][0].items.map(
+      (item) => item.value
+    );
+  }
+
+  test("一度も検知していなくても訊き、先頭は「この話だけ」", async () => {
+    // 前は「全体」しか無いので訊かずに全体へ進んでいた。キーから呼んだのに
+    // 黙って全話ぶん走ると、量も料金も作者の思ったものと違う
+    await choose(current);
+    expect(notifyMocks.pickWithMemory).toHaveBeenCalledTimes(1);
+    expect(passedValues()[0]).toBe("current");
+    expect(passedValues()).toContain("all");
+  });
+
+  test("覚えた選び方では素通りしない（キーから押したら、まず開いている話）", async () => {
+    await choose(current);
+    expect(notifyMocks.pickWithMemory.mock.calls[0][0].remember).toBeUndefined();
+    const first = notifyMocks.pickWithMemory.mock.calls[0][0].items[0];
+    expect(first.noRemember).toBe(true);
+  });
+
+  test("「この話だけ」を選ぶと、その話だけを返す", async () => {
+    notifyMocks.pickWithMemory.mockResolvedValueOnce("current");
+    expect(await choose(current)).toEqual({
+      kind: "current",
+      filePaths: [current],
+    });
+  });
+
+  test("前回のあとに書いた話が無くても「前回…ありません」を挟まない", async () => {
+    await choose(current, 1000);
+    expect(notifyMocks.confirmRun).not.toHaveBeenCalled();
+    expect(passedValues()[0]).toBe("current");
+  });
+
+  test("作品の話でない場所を渡されたら、今までどおり（この話を足さない）", async () => {
+    await choose("C:/works/別の作品/001.txt");
+    expect(notifyMocks.pickWithMemory).not.toHaveBeenCalled();
+  });
+
+  test("完了の知らせに「この話」と添える", () => {
+    expect(describeChosenScope("current")).toContain("この話");
+  });
+});

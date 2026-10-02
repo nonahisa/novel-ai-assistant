@@ -6532,6 +6532,7 @@ ${RESUME_WRITING_LABEL ? `
                         Ctrl+Shift+B〈ビルド〉・E〈エクスプローラー〉・D〈デバッグ〉
                         のような画面全体の割当は避けた）
       Ctrl+ホイール・Ctrl+＋／Ctrl+－・Ctrl+0   本文の字の大きさ
+      Ctrl+Alt+文字     ここでは受けず、本体のキー割り当てへ渡す（設計書6.25.10）
 
     ## 受け方
     **文書（document）で、先に（capture）受けて、既定の動きと伝わりの両方を
@@ -6578,6 +6579,17 @@ ${RESUME_WRITING_LABEL ? `
   function keyStop(event) {
     event.preventDefault();
     event.stopPropagation();
+  }
+
+  /**
+   * Ctrl+Alt で、刻印と違う字が出ているか（AltGr の字）。刻印の分かる
+   * 文字・数字のキーだけを見る（記号のキーは配列ごとに刻印が違い、決められない）
+   */
+  function keyAltGrText(key, code) {
+    if (key.length !== 1) return false;
+    const stamp = /^(?:Key|Digit)(.)$/.exec(code);
+    if (!stamp) return false;
+    return key.toLowerCase() !== stamp[1].toLowerCase();
   }
 
   /** 入力欄・選び欄の中か（検索の欄・読み上げの速さなど） */
@@ -6632,6 +6644,36 @@ ${RESUME_WRITING_LABEL ? `
           line: caretLine(),
           noCreate: true,
         });
+        return;
+      }
+
+      /*
+        **Ctrl+Alt+文字は、本体（VS Code）のキー割り当てへ渡す**（作者の裁定、
+        2026-10-02。設計書6.25.10）。誤字脱字・推敲・シーンメモなどは
+        package.json の割り当てで受けるので、作者が「キーボード ショートカット」
+        で変えられる。ここでは**止めずに**、渡す前に2つだけ送っておく。
+        - 打ちかけの字（flushUnsent）——検知が画面と違う本文を読まないように
+        - カーソルの行——シーンメモを足す・次へ進むときの起点。ふだんは少し
+          遅れて送っている（notifyCaret）ので、押した瞬間の行とずれうる
+        作者が別の文字へ変えても効くよう、文字を決め打ちしない。
+        見るのは**字のキー（key が1字）だけ**——Ctrl・Alt そのもの、矢印や
+        F キーは今までどおり素通り（Ctrl+Alt+→ は本体の「隣のグループへ」）
+      */
+      if (ctrl && event.altKey && key.length === 1) {
+        /*
+          **AltGr で字が出る配列（独・波など）では、字を優先する。** Windows では
+          AltGr が Ctrl+Alt として届き、本体へ渡すと字を打っただけで検知が
+          始まる。字（key）がキーの刻印（code）と違えば AltGr の字とみなし、
+          本体へは渡さない（字は入れるので既定の動きは止めない）。
+          mac の Cmd+Option は Option で字が変わっても打たれないので見ない
+        */
+        if (event.ctrlKey && !event.metaKey && keyAltGrText(key, code)) {
+          event.stopPropagation();
+          return;
+        }
+        flushUnsent("キー操作を本体へ渡す");
+        const line = caretLine();
+        if (line > 0) vscode.postMessage({ type: "caret", line: line });
         return;
       }
 

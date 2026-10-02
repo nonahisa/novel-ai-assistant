@@ -156,11 +156,18 @@ export async function recordCheck(
  *
  * **聞く意味があるときだけ聞く。** 選べるものが「全体」しか無ければ聞かない。
  *
+ * **原稿エディターのキーから呼んだとき（`currentFile`）は必ず訊き、
+ * 「この話だけ」を先頭に置く**（作者の要望、2026-10-02「ポップアップが出る
+ * ショートカットキー → Enter で操作が終了するのが理想」。設計書6.25.10）。
+ * VS Code の選択窓は先頭が選ばれた状態で開くので、Enter だけで開いている話が
+ * 対象になる。広げたいときは下から選べる。
+ *
  * @returns 取りやめなら undefined
  */
 export async function chooseScope(
   work: WorkEntry,
-  feature: ScopeFeature
+  feature: ScopeFeature,
+  options: { currentFile?: string } = {}
 ): Promise<ScopeChoice | undefined> {
   const lastCheckedAt = await readLastCheck(work, feature);
 
@@ -178,8 +185,45 @@ export async function chooseScope(
     return { kind: "all" };
   }
 
+  // **作品の話として見つかったときだけ**「この話だけ」を並べる。作品の外の
+  // ファイルを渡されたら、今までどおりの訊き方へ戻す（見ていない話を
+  // 「この話」と呼ばない）
+  const current = options.currentFile
+    ? candidates.find((candidate) =>
+        path.isSamePath(candidate.filePath, options.currentFile as string)
+      )
+    : undefined;
+
   const changed = changedSince(candidates, lastCheckedAt);
   const kinds = scopeKinds(candidates.length, changed.length, lastCheckedAt);
+  if (current) {
+    /*
+      **覚えた選び方では素通りしない**（`remember` を渡さない）。メニューから
+      「以降は全体で」と決めてあっても、原稿で押したキーで黙って全話ぶん
+      走ると、量も料金も作者の思ったものと違う。「前回…ありません」も挟まない
+      ——開いている話を見るのに、前回の時刻は関係が無い
+    */
+    const picked = await pickWithMemory<ScopeKind>({
+      items: [
+        currentPick(current.filePath),
+        ...kinds.map((kind) =>
+          scopePick(kind, candidates.length, changed.length)
+        ),
+        cancelItem(),
+      ],
+      title: "どこまで見ますか",
+      placeHolder: "Enter で開いている話だけを見ます",
+    });
+    if (!picked) return undefined;
+    if (picked === "current") {
+      return { kind: "current", filePaths: [current.filePath] };
+    }
+    if (picked === "changed") return { kind: "changed", filePaths: changed };
+    if (picked === "first") {
+      return { kind: "first", filePaths: firstEpisodes(candidates) };
+    }
+    return { kind: "all" };
+  }
   if (kinds.length <= 1) {
     // **1件も無いときは、その旨を伝えて止める。**
     // 黙って全体を見ると、作者は「差分だけのはずが全部出た」と思う
@@ -227,6 +271,18 @@ export async function chooseScope(
   if (picked === "changed") return { kind: "changed", filePaths: changed };
   if (picked === "first") return { kind: "first", filePaths: trial };
   return { kind: "all" };
+}
+
+/** 「この話だけ」の選択肢。原稿エディターのキーから呼んだときだけ先頭に並ぶ */
+function currentPick(filePath: string): MemorablePick<ScopeKind> {
+  return {
+    label: `$(file) この話だけ（${path.basename(filePath)}）`,
+    detail: "原稿エディターで開いている話だけを見ます。",
+    value: "current",
+    // **覚えない。** 覚えると、メニューから押したときも開いている話だけに
+    // なりうる（メニューには「この話」が並ばないので、選び直せない）
+    noRemember: true,
+  };
 }
 
 /** 1行ぶんの選択肢。**どれだけ減るのかを数で示す** */
@@ -280,9 +336,15 @@ function scopePick(
 export async function resolveCheckScope(
   work: WorkEntry,
   feature: ScopeFeature,
-  options: { suiteConfirmed?: boolean } = {}
+  options: {
+    suiteConfirmed?: boolean;
+    /** 原稿エディターのキーから呼んだときの、開いている話（設計書6.25.10） */
+    currentFile?: string;
+  } = {}
 ): Promise<ScopeChoice | undefined> {
-  if (!options.suiteConfirmed) return chooseScope(work, feature);
+  if (!options.suiteConfirmed) {
+    return chooseScope(work, feature, { currentFile: options.currentFile });
+  }
 
   // **飛ばした判断はログへ残す**（確認を省略したときと同じ扱い）。
   // 残さないと、あとから「なぜ全話ぶん走ったのか」を追えない
@@ -303,6 +365,7 @@ export async function resolveCheckScope(
 export function describeChosenScope(kind: ScopeKind): string {
   if (kind === "changed") return "（前回から書いた分）";
   if (kind === "first") return `（はじめの${TRIAL_EPISODE_COUNT}話）`;
+  if (kind === "current") return "（この話）";
   return "";
 }
 

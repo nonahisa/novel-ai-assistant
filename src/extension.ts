@@ -461,7 +461,11 @@ import {
   type ManuscriptEditorDeps,
 } from "./features/manuscriptEditor";
 // 「本文が見つからない」ときの文言は1か所に置く（`features/ruby.ts` と共用）
-import { warnManuscriptNotOpen } from "./features/manuscriptTab";
+import {
+  activeForeignManuscriptTabUri,
+  warnManuscriptNotOpen,
+} from "./features/manuscriptTab";
+import { isManuscriptKeyArgs, workForFile } from "./core/manuscriptKeys";
 import { registeredPostingSites } from "./features/postingCopyRegistered";
 import { showEditHistory } from "./features/editHistoryPanel";
 import { toggleExternalAccessPermission } from "./features/externalAccessPermission";
@@ -649,10 +653,33 @@ function isFromEarlierSession(iso: string): boolean {
  */
 async function saveBeforeCheck(
   work: WorkEntry,
-  actionLabel: string
+  actionLabel: string,
+  /** 原稿エディターのキーから呼ばれた節点なら、確認を Enter で進める形にする */
+  node?: unknown
 ): Promise<CheckCommandOutcome | undefined> {
-  const saved = await saveDirtyDocumentsBeforeExtraction(work, actionLabel);
+  const saved = await saveDirtyDocumentsBeforeExtraction(work, actionLabel, {
+    askInPicker: manuscriptKeyFileOf(node) !== undefined,
+  });
   return saved ? undefined : CHECK_CANCELLED;
+}
+
+/**
+ * 原稿エディターのキー（package.json の keybindings。設計書6.25.10）から
+ * 呼ばれたコマンドへ渡した節点と、そのとき開いていた原稿の場所。
+ *
+ * **節点そのものは普通の作品・話の節点と同じ形にする。** 関門（種類・前提）も
+ * 作品の決め方（`resolveWork`）も、作品一覧の右クリックと同じ道を通るので、
+ * 確認の出方や「直前の作品」の覚え方が入口で変わらない。キーから来たことは
+ * ここに控え、Enter で進める形にしたい所（保存の確認・範囲の先頭・相談の
+ * 作品）だけが見る。WeakMap なので、節点を捨てれば控えも消える。
+ */
+const manuscriptKeyFiles = new WeakMap<object, string>();
+
+/** キーから来た節点なら、そのとき開いていた原稿の場所 */
+function manuscriptKeyFileOf(node: unknown): string | undefined {
+  return typeof node === "object" && node !== null
+    ? manuscriptKeyFiles.get(node)
+    : undefined;
 }
 
 export async function activate(
@@ -886,12 +913,68 @@ export async function activate(
    */
   let onCommandFinished: ((command: string) => void) | undefined;
 
+  /**
+   * 原稿エディターのキーから来た印（`{ source: "manuscriptEditor" }`）を、
+   * **前面の原稿の作品・話の節点**へ直す（設計書6.25.10）。
+   *
+   * - 「この話の誤字脱字」は話の節点（`EpisodeNode`）を受けるので、話まで引く
+   * - ほかは作品の節点（右クリックと同じ形）
+   * - 前面が原稿エディターでない・登録した作品の中に無いときは、印を外して
+   *   **今までどおりの道**（作品を訊く）へ戻す。推し量って別の作品で走らせない。
+   *   話を引けない誤字脱字だけは、ここで一言出して止める（黙ると壊れて見える）
+   *
+   * @returns コマンドへ渡す引数。止めるなら undefined
+   */
+  const resolveManuscriptKeyArgs = async (
+    command: string,
+    args: unknown[]
+  ): Promise<unknown[] | undefined> => {
+    const rest = args.slice(1);
+    const uri = activeForeignManuscriptTabUri()
+      ? undefined
+      : activeManuscriptTabUri();
+    const filePath = uri ? fromUri(uri) : undefined;
+    const work = filePath ? workForFile(registry.list(), filePath) : undefined;
+
+    if (command === "novelai.checkTyposForFile") {
+      const episode =
+        work && filePath
+          ? (await treeProvider.getEpisodes(work)).find((item) =>
+              path.isSamePath(item.filePath, filePath)
+            )
+          : undefined;
+      if (!work || !filePath || !episode) {
+        void vscode.window.showInformationMessage(
+          "開いている原稿が、登録した作品の話として見つかりませんでした。" +
+            "作品一覧から話を開いてから押してください。"
+        );
+        return undefined;
+      }
+      const node = new EpisodeNode(work, episode);
+      manuscriptKeyFiles.set(node, filePath);
+      return [node, ...rest];
+    }
+
+    if (!work || !filePath) return [undefined, ...rest];
+    const ref: WorkRef = { type: "work", work };
+    manuscriptKeyFiles.set(ref, filePath);
+    return [ref, ...rest];
+  };
+
   const registerCommand: typeof vscode.commands.registerCommand = (
     command,
     callback,
     thisArg
   ) =>
     vscode.commands.registerCommand(command, async (...args: unknown[]) => {
+      // **原稿エディターのキーから来た印は、関門より先に節点へ直す**
+      // （設計書6.25.10）。印のままだと、関門が作品を見つけられずに
+      // 「作品を選択」を出す
+      if (isManuscriptKeyArgs(args[0])) {
+        const resolved = await resolveManuscriptKeyArgs(command, args);
+        if (!resolved) return undefined;
+        args = resolved;
+      }
       // 種類の関門（設計書6.109.7）は前提の関門より先に通す。歌詞の作品で
       // 「先に人物を抽出しますか」と訊いても意味が無い
       const kindGate = await guardWorkKind(command, args);
@@ -2527,11 +2610,24 @@ export async function activate(
     // アイコンを増やすと、同じ絵柄が並んで何のアイコンか分からなくなる
     // （実機で指摘、2026-08-15）。左サイドバーの中に置き、
     // メニューと本文の右クリックから開く形にした
-    registerCommand("novelai.openChat", async () => {
-      // 呼ぶ前に、今開いている本文を確実に覚えさせる。
-      // このコマンド自体はエディターのフォーカスを奪わないが、
-      // パネルを開いた時点で activeTextEditor は取れなくなる
-      workChatPanel.trackEditor(vscode.window.activeTextEditor);
+    registerCommand("novelai.openChat", async (node?: unknown) => {
+      /*
+        **原稿エディターのキー（Ctrl+Alt+C）からは、その原稿の作品で相談する**
+        （設計書6.25.10）。原稿エディターは `TextEditor` を持たないので、
+        下の `trackEditor` では前に開いていた素のエディターの作品のまま残る。
+        違う作品のときだけ切り替える（同じなら、覚えている本文を手放さない）
+      */
+      if (manuscriptKeyFileOf(node) !== undefined) {
+        const work = (node as WorkRef).work;
+        if (workChatPanel.currentWorkId() !== work.id) {
+          await workChatPanel.focusWork(work);
+        }
+      } else {
+        // 呼ぶ前に、今開いている本文を確実に覚えさせる。
+        // このコマンド自体はエディターのフォーカスを奪わないが、
+        // パネルを開いた時点で activeTextEditor は取れなくなる
+        workChatPanel.trackEditor(vscode.window.activeTextEditor);
+      }
       await vscode.commands.executeCommand(`${WORK_CHAT_VIEW_ID}.focus`);
     }),
     // 本文の領域に大きく開く（作者の要望、2026-08-28）。
@@ -5114,6 +5210,18 @@ export async function activate(
       async (node?: WorkRef) => {
         const work = await resolveWork(node, registry);
         if (!work) return CHECK_CANCELLED;
+        /*
+          **原稿エディターのキー（Ctrl+Alt+A）からは、保存の確認を先に済ませる**
+          （設計書6.25.10）。中の検知はそれぞれ「未保存の変更があります」を
+          右下の知らせで訊くが、そこには Enter が届かない。ここで保存して
+          おけば、中の検知は未保存を見つけずに進む
+        */
+        if (
+          manuscriptKeyFileOf(node) !== undefined &&
+          (await saveBeforeCheck(work, "校正の一括実行", node))
+        ) {
+          return CHECK_CANCELLED;
+        }
         await runProofreadingSuite(work, {
           memento: context.globalState,
           // 内訳は提案パネルの残り件数から数える（設計書6.37.3）。
@@ -5218,7 +5326,7 @@ export async function activate(
         if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を数えてしまう
-        const unsaved = await saveBeforeCheck(work, "表記ゆれの検知");
+        const unsaved = await saveBeforeCheck(work, "表記ゆれの検知", node);
         if (unsaved) return unsaved;
 
         const result = await checkNotation(work);
@@ -5647,15 +5755,17 @@ export async function activate(
         if (!work) return CHECK_CANCELLED;
 
         // 未保存のまま読むと、画面と違う本文を推敲してしまう
-        const unsaved = await saveBeforeCheck(work, "推敲");
+        const unsaved = await saveBeforeCheck(work, "推敲", node);
         if (unsaved) return unsaved;
 
         const suiteConfirmed = isSuiteConfirmed(options);
         // **まとめ実行が札を持っているなら、機能側は取らない**（設計書6.76）
         const suiteHoldsRun = isSuiteHoldingRun(options);
-        // **範囲を選べるのは誤字脱字だけではない**（設計書6.8.7）
+        // **範囲を選べるのは誤字脱字だけではない**（設計書6.8.7）。
+        // 原稿エディターのキー（Ctrl+Alt+P）からは「この話だけ」が先頭に並ぶ
         const scope = await resolveCheckScope(work, "proofread", {
           suiteConfirmed,
+          currentFile: manuscriptKeyFileOf(node),
         });
         if (!scope) return CHECK_CANCELLED;
         const result = await withPanelProgress(work, "推敲", (onProgress) =>
@@ -6085,8 +6195,13 @@ export async function activate(
         if (!node) return;
         const work = node.work;
 
-        // 未保存のまま読むと、画面と違う本文を検知してしまう
-        if (!(await saveDirtyDocumentsBeforeExtraction(work, "誤字脱字の検知")))
+        // 未保存のまま読むと、画面と違う本文を検知してしまう。
+        // 原稿エディターのキーから来たときは、Enter で進む選択窓で訊く
+        if (
+          !(await saveDirtyDocumentsBeforeExtraction(work, "誤字脱字の検知", {
+            askInPicker: manuscriptKeyFileOf(node) !== undefined,
+          }))
+        )
           return;
 
         const result = await withPanelProgress(

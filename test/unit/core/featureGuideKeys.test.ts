@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { buildGuideBundles, EXTRA_GUIDE } from "../../../src/core/featureGuide";
+import { MANUSCRIPT_KEY_BINDINGS } from "../../../src/core/manuscriptKeys";
 
 /**
  * 原稿エディターのキー操作（設計書6.25.10）は、メニューの項目に無いので
@@ -21,6 +22,19 @@ describe("原稿エディターのキー操作の説明", () => {
     }
     // 変換のキーを奪わないことは、作者が気にする点なので書いておく
     expect(EXTRA_GUIDE).toContain("F6〜F10");
+  });
+
+  test("Ctrl+Alt+頭文字の9つと、変え方が載っている（設計書6.25.10）", () => {
+    for (const entry of MANUSCRIPT_KEY_BINDINGS) {
+      expect(EXTRA_GUIDE, entry.command).toContain(entry.label);
+      // package.json の表記（ctrl+alt+t）を、画面の書き方（Ctrl+Alt+T）にして探す
+      const shown = "Ctrl+Alt+" + entry.key.slice(-1).toUpperCase();
+      expect(EXTRA_GUIDE, entry.command).toContain(shown);
+    }
+    // 作者が自分で変えられることと、その探し方
+    expect(EXTRA_GUIDE).toContain("キーボード ショートカット");
+    expect(EXTRA_GUIDE).toContain("Ctrl+K Ctrl+S");
+    expect(EXTRA_GUIDE).toContain("小説執筆");
   });
 
   test("束として選べる", () => {
