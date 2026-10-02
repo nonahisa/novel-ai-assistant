@@ -31,6 +31,7 @@ import {
   checkEnrichProposals,
   describeEnrichTarget,
   misattributedAllowedFields,
+  otherRecordNamesFor,
   parseEnrichResult,
   searchTermsFor,
   type EnrichRecord,
@@ -149,6 +150,24 @@ function readRecords(folder: string, kind: SettingsKind): EnrichRecord[] {
   return readSettingsRecords(folder, subdir, parseLocation).records;
 }
 
+/**
+ * ほかの記録の名前（その名前の中の一致を抜粋から除く。製品の
+ * `evenlySampledExcerpts` と同じ顔ぶれ）。人物は呼び出し側の一覧を使う——
+ * 保存の前のまとめ直しでは、まだ台帳に無い新しい人物も入れたいため
+ */
+function otherNamesOf(
+  folder: string,
+  record: EnrichRecord,
+  characters: readonly Character[]
+): string[] {
+  return otherRecordNamesFor(record, [
+    ...characters,
+    ...(["ability", "location", "organization"] as const).flatMap((kind) =>
+      readRecords(folder, kind)
+    ),
+  ]);
+}
+
 /** 追加項目の定義。**読めなければ空**（製品の表示用の読み方と同じ） */
 function readCustomFields(folder: string): CustomFieldDefinition[] {
   const raw = readSettingsFile(folder, CUSTOM_FIELDS_FILE);
@@ -253,7 +272,8 @@ function loadTarget(input: SettingsEnrichInput): EnrichTarget {
   // 本文の割り方は製品の `loadExcerptSources` と同じ（`excerptSourcesOfEpisode`）
   const excerpts = collectMentionExcerpts(
     pastSceneSourcesOf(input.folder),
-    searchTermsFor(kind, record)
+    searchTermsFor(kind, record, characters),
+    { otherNames: otherNamesOf(input.folder, record, characters) }
   );
   return { kind, record, customFields, characters, excerpts };
 }
@@ -313,7 +333,8 @@ function loadStagedTarget(input: SettingsEnrichInput): EnrichTarget {
   const customFields = readCustomFields(input.folder);
   const excerpts = collectMentionExcerpts(
     pastSceneSourcesOf(input.folder),
-    searchTermsFor(kind, record)
+    searchTermsFor(kind, record, characters),
+    { otherNames: otherNamesOf(input.folder, record, characters) }
   );
   return { kind, record, customFields, characters, excerpts };
 }

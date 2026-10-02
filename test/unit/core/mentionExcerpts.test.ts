@@ -127,3 +127,112 @@ describe("均等な間引き", () => {
     expect(sampleEvenly([1, 2, 3], 0)).toEqual([]);
   });
 });
+
+/*
+  短い名前が長い語の一部に当たる取り違え（2026-10-02、教科書チート219話の
+  「AIで再読込」）。人物「フォー・シーゲン」の抜粋16件がすべて「フォートラン」の
+  場面で、「ルド」には本人の名前が一度も出ない抜粋が19〜22件返った。
+  見逃し（本人の場面が落ちる）と誤検出（別の語の場面が混ざる）の両方を見る
+*/
+describe("短い名前を長い語の一部として拾わない", () => {
+  const FOUR = ["フォー・シーゲン", "フォー"];
+
+  test("「フォー」の抜粋に「フォートラン」の場面を入れない", () => {
+    const sources = [
+      episode("第10話", ["フォートランの城門が開いた。"]),
+      episode("第20話", ["フォートラン軍が進んだ。"]),
+      episode("第131話", ["フォーは剣を抜いた。"]),
+    ];
+
+    const excerpts = collectMentionExcerpts(sources, FOUR, { windowChars: 4 });
+
+    expect(excerpts.map((item) => item.label)).toEqual(["第131話"]);
+  });
+
+  test("「ルド」を「ギルド」「フィールド」「ルドルフ」の中で当てない", () => {
+    const sources = [
+      episode("第1話", ["ギルドの扉を押した。"]),
+      episode("第2話", ["フィールドに出た。"]),
+      episode("第3話", ["ルドルフが笑った。"]),
+      episode("第4話", ["ルドは黙っていた。"]),
+    ];
+
+    const excerpts = collectMentionExcerpts(sources, ["ルド"], { windowChars: 4 });
+
+    expect(excerpts.map((item) => item.label)).toEqual(["第4話"]);
+  });
+
+  test("敬称・括弧・読点・行頭・行末に続く本人の名前は落とさない", () => {
+    const lines = [
+      "フォーさんが来た。",
+      "「フォー様、どうぞ」",
+      "「フォー」と呼んだ。",
+      "フォー、待って。",
+      "それはフォー",
+      "フォー殿は笑った。",
+    ];
+    const sources = lines.map((line, index) => episode(`第${index + 1}話`, [line]));
+
+    const excerpts = collectMentionExcerpts(sources, FOUR, { windowChars: 2 });
+
+    expect(excerpts).toHaveLength(lines.length);
+  });
+
+  test("中黒・空白で続く姓名の片方は当てる（「フォー・シーゲン」の「シーゲン」）", () => {
+    const sources = [episode("第1話", ["フォー・シーゲンが名乗った。"])];
+
+    const excerpts = collectMentionExcerpts(sources, ["シーゲン"], { windowChars: 2 });
+
+    expect(excerpts).toHaveLength(1);
+  });
+
+  test("漢字の名前は前後に漢字が続いても当てる（「相沢様」「相沢家」を落とさない）", () => {
+    const sources = [
+      episode("第1話", ["相沢様がお見えです。"]),
+      episode("第2話", ["相沢家の門をくぐった。"]),
+    ];
+
+    const excerpts = collectMentionExcerpts(sources, ["相沢"], { windowChars: 2 });
+
+    expect(excerpts).toHaveLength(2);
+  });
+
+  test("ほかの記録の名前の中にある一致は除く（漢字でも効く）", () => {
+    const sources = [
+      episode("第1話", ["教皇庁の鐘が鳴った。"]),
+      episode("第2話", ["教皇は祈りを捧げた。"]),
+    ];
+
+    const excerpts = collectMentionExcerpts(sources, ["教皇"], {
+      windowChars: 2,
+      otherNames: ["教皇庁"],
+    });
+
+    expect(excerpts.map((item) => item.label)).toEqual(["第2話"]);
+  });
+
+  test("ほかの記録と同じ呼び方でも、自分の呼び方は消さない", () => {
+    const sources = [episode("第1話", ["スカラが頷いた。"])];
+
+    const excerpts = collectMentionExcerpts(sources, ["スカラ侯爵", "スカラ"], {
+      windowChars: 2,
+      otherNames: ["スカラ", "ウニト・スカラ"],
+    });
+
+    expect(excerpts).toHaveLength(1);
+  });
+
+  test("ほかの記録の名前で隠れない所の本人の名前は残る", () => {
+    const sources = [
+      episode("第1話", ["ルドの国では、ルド王国の旗が揺れていた。"]),
+    ];
+
+    const excerpts = collectMentionExcerpts(sources, ["ルド"], {
+      windowChars: 2,
+      otherNames: ["ルド王国"],
+    });
+
+    expect(excerpts).toHaveLength(1);
+    expect(excerpts[0].text).toContain("ルドの国");
+  });
+});

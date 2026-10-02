@@ -1,4 +1,4 @@
-import { TermIndex, type TermEntry } from "./termIndex";
+import { TermIndex, isStandaloneName, type TermEntry } from "./termIndex";
 
 /**
  * 本文から「その用語が出てくる場面」だけを抜き出す。
@@ -45,6 +45,15 @@ export interface ExcerptOptions {
   maxExcerpts?: number;
   /** 全体の文字数上限。モデルの文脈長に収めるため */
   maxTotalChars?: number;
+  /**
+   * ほかの記録（別の人物・場所・組織・能力・世界観）の名前と別名。
+   *
+   * 索引に並べて入れ、その名前の中に含まれる一致を除くために使う
+   * （「教皇庁」の中の「教皇」、「ルド王国」の中の「ルド」）。重なりは
+   * 左から長い方が勝つ（`resolveOverlaps`）ので、長い別の名前の影に入る。
+   * 自分の名前・別名と同じ字面のものは入れない（共有する呼び方で自分が消える）
+   */
+  otherNames?: string[];
 }
 
 /** 抜粋全体の文字数の上限。確保するコンテキスト長の計算にも使う */
@@ -79,11 +88,25 @@ export function collectMentionExcerpts(
 
   const entries = buildEntries(terms);
   if (entries.length === 0) return [];
-  const index = new TermIndex(entries);
+  const own = new Set(entries.map((entry) => entry.text));
+  const index = new TermIndex([
+    ...entries,
+    ...buildEntries(options.otherNames ?? [], OTHER_ID).filter(
+      (entry) => !own.has(entry.text)
+    ),
+  ]);
 
   const windows: Window[] = [];
   for (const source of sources) {
-    const matches = index.find(source.text);
+    // 別の記録の名前に隠れた一致と、長いカタカナ語の一部の一致は捨てる
+    // （「フォー」と「フォートラン」。`isStandaloneName`）
+    const matches = index
+      .find(source.text)
+      .filter(
+        (match) =>
+          match.entry.id === MENTION_ID &&
+          isStandaloneName(source.text, match.start, match.end)
+      );
     if (matches.length === 0) continue;
 
     const half = Math.floor(windowChars / 2);
@@ -120,7 +143,10 @@ export function collectMentionExcerpts(
  * 「街灯」のような無関係の一致は混ざるが、
  * 件数と文字数の上限で抑えられるので、取りこぼすより害が小さい。
  */
-function buildEntries(terms: string[]): TermEntry[] {
+const MENTION_ID = "mention";
+const OTHER_ID = "other";
+
+function buildEntries(terms: string[], id: string = MENTION_ID): TermEntry[] {
   const seen = new Set<string>();
   const entries: TermEntry[] = [];
   for (const term of terms) {
@@ -131,7 +157,7 @@ function buildEntries(terms: string[]): TermEntry[] {
     entries.push({
       text,
       kind: "character",
-      id: "mention",
+      id,
       canonicalName: text,
     });
   }

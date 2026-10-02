@@ -1,4 +1,5 @@
 import { Bm25Index } from "./bm25";
+import { containsStandaloneName } from "./termIndex";
 import type { RetrievalItem, RetrievalSource } from "./retrievalCorpus";
 import type { VectorIndex } from "./vectorIndex";
 
@@ -141,8 +142,10 @@ function filterItems(
   if (options.mustInclude && options.mustInclude.length > 0) {
     const terms = options.mustInclude.filter((term) => term.trim());
     if (terms.length > 0) {
+      // 長いカタカナ語の一部（「ギルド」の「ルド」）は名前の一致に数えない
+      // （2026-10-02。抜粋選びの `collectMentionExcerpts` と同じ境目）
       pool = pool.filter((item) =>
-        terms.some((term) => item.text.includes(term))
+        terms.some((term) => containsStandaloneName(item.text, term))
       );
     }
   }
