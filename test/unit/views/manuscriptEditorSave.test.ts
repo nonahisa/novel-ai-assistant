@@ -44,6 +44,8 @@ interface Harness {
   update(message: Record<string, unknown>): void;
   advance(ms: number): void;
   posted(): Array<Record<string, unknown>>;
+  /** 画面で押したキー（document の keydown を順に呼ぶ） */
+  key(init: Record<string, unknown>): void;
   note(): string;
   failOpen(): boolean;
   failText(): string;
@@ -66,6 +68,7 @@ function harness(options: { composeOn?: boolean; text?: string } = {}): Harness 
     composeOn: options.composeOn ?? true,
     store: {} as { state?: unknown },
     clicks: {} as Record<string, () => void>,
+    keydowns: [] as Array<(event: Record<string, unknown>) => void>,
     elements: {} as Record<string, Record<string, unknown>>,
     clipboard: "",
     lastBox: null as null | { value: string },
@@ -123,7 +126,7 @@ function harness(options: { composeOn?: boolean; text?: string } = {}): Harness 
     const window = { addEventListener: () => {} };
     const document = {
       visibilityState: "visible",
-      addEventListener: () => {},
+      addEventListener: (type, fn) => { if (type === "keydown") env.keydowns.push(fn); },
       getElementById: (id) => element(id),
       createElement: () => ({ value: "", style: {}, select() {} }),
       body: {
@@ -187,6 +190,17 @@ function harness(options: { composeOn?: boolean; text?: string } = {}): Harness 
       env.now = until;
     },
     posted: () => env.posted,
+    key(init) {
+      const event = {
+        isComposing: false,
+        altKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        preventDefault() {},
+        ...init,
+      };
+      for (const fn of env.keydowns) fn(event);
+    },
     note: () => env.noteText,
     failOpen: () =>
       (env.elements["saveFail"]?.classList as FakeClassList | undefined)?.contains("open") ===
@@ -212,6 +226,27 @@ describe("画面の［保存］ボタン", () => {
     const handler = code.slice(start, code.indexOf("\n  });", start));
     expect(handler).toMatch(/message\.type === "saveAccepted"[\s\S]{0,200}takeSaveMessage\(message\)/);
     expect(handler).toMatch(/takeEditApplied\(message\);[\s\S]{0,200}takeSaveMessage\(message\)/);
+  });
+
+  it("Ctrl+S でも［保存］と同じく保存を頼み、結果を下の欄に出す（作者の報告 2026-10-02「反応がない」）", () => {
+    const h = harness();
+    h.update({ type: "update", docKey: "doc", text: "古い本文" });
+    h.key({ key: "s", ctrlKey: true });
+    const requests = h.posted().filter((m) => m.type === "saveRequest");
+    expect(requests).toHaveLength(1);
+    h.receive({ type: "saveAccepted", seq: requests[0].seq });
+    expect(h.note()).toBe("保存しています…");
+    h.receive({ type: "saveResult", seq: requests[0].seq, ok: true, chars: 12 });
+    expect(h.note()).toBe("保存しました（12字）");
+  });
+
+  it("変換中の Ctrl+S・Alt つき・ほかのキーでは保存を頼まない", () => {
+    const h = harness();
+    h.key({ key: "s", ctrlKey: true, isComposing: true });
+    h.key({ key: "s", ctrlKey: true, altKey: true });
+    h.key({ key: "a", ctrlKey: true });
+    h.key({ key: "s" });
+    expect(h.posted().filter((m) => m.type === "saveRequest")).toHaveLength(0);
   });
 
   it("受付が来たら「保存しています…」を出し、結果は3秒を過ぎても待つ", () => {

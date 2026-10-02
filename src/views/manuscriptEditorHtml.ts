@@ -2463,7 +2463,7 @@ ruby > rt {
 
     届かなかった知らせ（#unsent）の関数には手を入れない。写す処理
     （copyTextDirect）・画面の本文（screenText）・控え（keepRescue）は同じ物を使う。
-    Ctrl+S の振る舞いは変えない（このボタンは別の道）。
+    Ctrl+S も同じ askSave を呼ぶ（下の keydown。0.95.7）。
   */
   /*
     **返事は2段で待つ**（本体の判断、2026-10-01）。拡張機能は頼みを受け取った
@@ -2516,6 +2516,22 @@ ruby > rt {
     saveTimer = setTimeout(saveNoAnswer, SAVE_ACCEPT_WAIT_MS);
   }
   saveButton.addEventListener("click", askSave);
+  /*
+    **Ctrl+S でも同じ道を通す**（作者の報告、2026-10-02「コントロールSで反応が
+    ありません」）。VS Code 本体の保存は画面に何も出さないので、押しても
+    効いたか分からなかった。本体の保存はそのまま走らせ（preventDefault しない）、
+    こちらは保存を頼んで結果を下の欄に出す。変換中は日本語入力に任せる
+  */
+  document.addEventListener(
+    "keydown",
+    function (event) {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      if (event.key !== "s" && event.key !== "S") return;
+      if (event.isComposing) return;
+      askSave();
+    },
+    true
+  );
 
   function showSaveFail(kind, text) {
     saveFailKind = kind;
