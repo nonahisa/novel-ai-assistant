@@ -92,3 +92,28 @@ describe("次の話へ", () => {
     ).toEqual({ kind: "open", index: 6 });
   });
 });
+
+describe("Alt+↑／Alt+↓ から（noCreate。作者の裁定 2026-10-02）", () => {
+  it("本文のある最終話でも、キーからは作らずに「最後の話です。」と伝える", () => {
+    // キーは誤って押しやすい。ボタン（「次の話 →」）は従来どおり作る
+    expect(
+      planNeighborStep({ ...at(18), direction: "next", noCreate: true })
+    ).toEqual({ kind: "notice", message: "最後の話です。" });
+  });
+
+  it("途中の話・最初の話・白紙の最終話の扱いは、ボタンと同じ", () => {
+    expect(
+      planNeighborStep({ ...at(5), direction: "next", noCreate: true })
+    ).toEqual({ kind: "open", index: 6 });
+    expect(
+      planNeighborStep({ ...at(0), direction: "prev", noCreate: true })
+    ).toEqual({ kind: "notice", message: "最初の話です。" });
+    expect(
+      planNeighborStep({
+        ...at(18, { blank: true }),
+        direction: "next",
+        noCreate: true,
+      })
+    ).toEqual({ kind: "notice", message: "最新話です。" });
+  });
+});

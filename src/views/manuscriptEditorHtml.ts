@@ -38,6 +38,7 @@
  */
 
 import { MANUSCRIPT_FONTS } from "../core/manuscriptFonts";
+import { MANUSCRIPT_SIZE_DEFAULT } from "../core/manuscriptAppearance";
 import { NOTATION_RULES } from "../core/manuscriptRender";
 import { MEMO_LINE_PATTERN, MEMO_TAG_CLASS_MAP } from "../core/sceneMemo";
 import { TCY_RUN_PATTERN } from "../core/tateChuYoko";
@@ -187,6 +188,44 @@ body.aloud #aloud { display: flex; }
 }
 /* 使えない理由と、その場で起きたこと（声が止まった等）を出す */
 #aloudNote { opacity: 0.85; }
+
+/* ── 本文を探す列（Ctrl+F。作者の裁定、2026-10-02。設計書6.25） ─────
+   読み上げの列と同じく、使わないあいだは列ごと畳む */
+#find {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+body.finding #find { display: flex; }
+#findInput {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 2px 6px;
+  width: 16em;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: 3px;
+  background: var(--vscode-input-background, var(--vscode-editor-background));
+  color: var(--vscode-input-foreground, var(--vscode-foreground));
+}
+#findCount { opacity: 0.85; min-width: 5em; }
+/* **見つけた所の塗りは、読み上げの層（#aloudmarks）を借りる**（打つ面）。
+   選択にも焦点にも触らずに色を置けるのはこの層だけである。
+   組んで書く面と覚えた見た目の面（notepv）では出さない */
+body.findmark:not(.compose):not(.notepv) #aloudmarks { display: block; }
+#aloudmarks .mark-find {
+  /* 読み上げ（水色）・用語（文字色）・メモ（黄）と見分けがつく橙。
+     半透明にして、明るいテーマでも暗いテーマでも字が読めるようにする */
+  background-color: rgba(255, 140, 0, 0.4);
+}
+/* 組んで書く面。**規則を分ける**——::highlight を知らない環境では、
+   同じ規則に並べたほかの選択子まで丸ごと捨てられる */
+::highlight(novelai-find) {
+  background-color: rgba(255, 140, 0, 0.4);
+}
 
 /* ── 本文の面 ─────────────────────────── */
 /* **下段。** 道具箱（上）とは役目が違う——上は「いま見ている原稿をどう見るか」、
@@ -902,6 +941,14 @@ ruby > rt {
   <span id="aloudNote"></span>
 </div>
 
+<div id="find" role="search">
+  <input id="findInput" type="text" placeholder="本文を探す" title="探す語。Enter で次、Shift+Enter で前、Esc で閉じて見つけた所へ戻ります" />
+  <button id="findPrev" title="前を探す（Shift+Enter）">↑ 前</button>
+  <button id="findNext" title="次を探す（Enter）">↓ 次</button>
+  <span id="findCount"></span>
+  <button id="findClose" title="閉じて、見つけた所を選びます（Esc）">閉じる</button>
+</div>
+
 <div id="rescue" role="alert">
   <span id="rescueText"></span>
   <button id="rescueRestore" title="前回原稿に入らなかった本文を、いまの原稿へ戻します">戻す</button>
@@ -1514,19 +1561,12 @@ ruby > rt {
     字の大きさを変えると、行の長さも行の数も変わり、同じスクロール量が
     別の字を指す。向きの切り替えと同じく、字で控えてから組み直す（view-anchor）
   */
+  // **キー（Ctrl+＋／Ctrl+－）・Ctrl+ホイールと同じ道**（sizeSet。下の keys）
   document.getElementById("bigger").addEventListener("click", function () {
-    const anchor = viewTakePress();
-    size = Math.min(40, size + 1);
-    paint();
-    viewRestore(anchor);
-    remember();
+    sizeSet(size + 1);
   });
   document.getElementById("smaller").addEventListener("click", function () {
-    const anchor = viewTakePress();
-    size = Math.max(9, size - 1);
-    paint();
-    viewRestore(anchor);
-    remember();
+    sizeSet(size - 1);
   });
 
   document.getElementById("ruby").addEventListener("click", function () {
@@ -6479,6 +6519,440 @@ ${RESUME_WRITING_LABEL ? `
       end: at.end,
     });
   }
+
+  /* keys:start */
+  /*
+    ── キーで呼ぶ操作（作者の裁定、2026-10-02。設計書6.25） ──
+      Ctrl+F            本文を探す（下の find）
+      Alt+↑／Alt+↓     前の話・次の話
+      Ctrl+Shift+R      ルビ
+      Ctrl+Shift+K      傍点（K は「圏点」の頭文字。VS Code では「行を消す」だが、
+                        それは文字を打つエディターに焦点があるときだけ効く割当で、
+                        この画面に焦点があるときは本体に何も起きない。
+                        Ctrl+Shift+B〈ビルド〉・E〈エクスプローラー〉・D〈デバッグ〉
+                        のような画面全体の割当は避けた）
+      Ctrl+ホイール・Ctrl+＋／Ctrl+－・Ctrl+0   本文の字の大きさ
+
+    ## 受け方
+    **文書（document）で、先に（capture）受けて、既定の動きと伝わりの両方を
+    止める。** VS Code は画面の中のキーを窓（window）で拾って本体へ送り、
+    本体の割当（Ctrl+＝の全体の拡大など）を走らせる。既定を止めるだけでは
+    本体へ送られてしまうので、窓へ届く前に止める。
+
+    ## 奪わないもの
+    - **変換中のキーは一切奪わない**（isComposing／composing）。
+      F6〜F10（日本語入力の変換）も、本体の F1・F5・F11・F12・Ctrl+P・
+      Ctrl+Shift+P も使わない
+    - Ctrl+S（保存を頼む）と Esc（品書きを閉じる）は、それぞれの受け口のまま。
+      ここでは見ない
+    - 素の矢印・Shift+矢印は、組んで書く面の矢印の扱い（入り込みの見張り）のまま
+  */
+  /** 字の大きさの範囲。core/manuscriptAppearance.ts の SIZE_MIN／SIZE_MAX と揃える */
+  const KEY_SIZE_MIN = 9;
+  const KEY_SIZE_MAX = 40;
+  /** Ctrl+0 で戻す大きさ（core/manuscriptAppearance.ts の既定と同じ値が入る） */
+  const KEY_SIZE_DEFAULT = ${MANUSCRIPT_SIZE_DEFAULT};
+  /**
+   * ホイールを何ぶん回したら1つ変えるか。ふつうのマウスは1目盛りで100が来る。
+   * トラックパッドのつまむ動きは細かい値が続けて来るので、溜めてから1つ動かす
+   * （来るたびに動かすと、少しつまんだだけで最大まで飛ぶ）
+   */
+  const KEY_WHEEL_STEP = 100;
+  let keyWheelCarry = 0;
+
+  /**
+   * 字の大きさを変える。**ボタン（＋／ー）もキーもホイールも、ここを通る。**
+   * 字で見ていた場所を控えてから組み直し（view-anchor）、原稿ごとに覚えて
+   * 次の話へも持って行く（remember。設計書6.25.5）
+   */
+  function sizeSet(next) {
+    const clamped = Math.max(KEY_SIZE_MIN, Math.min(KEY_SIZE_MAX, next));
+    if (clamped === size) return;
+    const anchor = viewTakePress();
+    size = clamped;
+    paint();
+    viewRestore(anchor);
+    remember();
+  }
+
+  function keyStop(event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  /** 入力欄・選び欄の中か（検索の欄・読み上げの速さなど） */
+  function keyInField(event) {
+    const tag = event.target && event.target.tagName;
+    return tag === "INPUT" || tag === "SELECT";
+  }
+
+  /**
+   * ルビ・傍点をキーで頼む。**選んでいなければ頼まずに一言出す。**
+   * ボタンからの道（askRuby／askEmphasis）はそのまま通す——
+   * 選んでいない打つ面でも拡張機能へ頼みが行き、向こうで案内が出る
+   */
+  function keyNotation(kind) {
+    if (selectionText() === "") {
+      note.textContent =
+        kind === "ruby"
+          ? "ルビを振る文字を選んでから押してください"
+          : "傍点を付ける文字を選んでから押してください";
+      return;
+    }
+    if (kind === "ruby") askRuby();
+    else askEmphasis();
+  }
+
+  document.addEventListener(
+    "keydown",
+    function (event) {
+      if (event.isComposing || composing) return;
+      const key = String(event.key || "");
+      const code = String(event.code || "");
+      const ctrl = event.ctrlKey || event.metaKey;
+
+      /*
+        **前の話・次の話。** 開く前に、まだ届いていない打鍵を送る
+        （flushUnsent。焦点が外れるときと同じ作法）。キーからは最終話の先へ
+        新しい話を作らない（noCreate。拡張機能側の planNeighborStep）。
+        選び欄の中の Alt+↓ は、その欄を開く操作なので奪わない
+      */
+      if (
+        event.altKey &&
+        !ctrl &&
+        !event.shiftKey &&
+        (key === "ArrowUp" || key === "ArrowDown") &&
+        !keyInField(event)
+      ) {
+        keyStop(event);
+        flushUnsent("前後の話へ移る");
+        vscode.postMessage({
+          type: "openNeighbor",
+          direction: key === "ArrowUp" ? "prev" : "next",
+          line: caretLine(),
+          noCreate: true,
+        });
+        return;
+      }
+
+      if (!ctrl || event.altKey) return;
+
+      if (!event.shiftKey && (key === "f" || key === "F" || code === "KeyF")) {
+        keyStop(event);
+        findOpen();
+        return;
+      }
+
+      // Shift つきでは key が大文字で来る。配列に左右されない code で見る
+      if (event.shiftKey && (code === "KeyR" || key === "R")) {
+        if (keyInField(event)) return;
+        keyStop(event);
+        keyNotation("ruby");
+        return;
+      }
+      if (event.shiftKey && (code === "KeyK" || key === "K")) {
+        if (keyInField(event)) return;
+        keyStop(event);
+        keyNotation("emphasis");
+        return;
+      }
+
+      /*
+        **字の大きさ。** 日本語の配列では「＋」が「;」の Shift 側にあるので、
+        Shift の有無を問わず ; = + を「大きく」にする（英語配列の Ctrl+= も
+        同じキー）。テンキーの＋－も来る
+      */
+      if (key === "+" || key === "=" || key === ";" || code === "NumpadAdd") {
+        keyStop(event);
+        sizeSet(size + 1);
+        return;
+      }
+      if (key === "-" || key === "_" || code === "NumpadSubtract") {
+        keyStop(event);
+        sizeSet(size - 1);
+        return;
+      }
+      if (!event.shiftKey && (key === "0" || code === "Numpad0")) {
+        keyStop(event);
+        sizeSet(KEY_SIZE_DEFAULT);
+      }
+    },
+    true
+  );
+
+  /*
+    **Ctrl+ホイールも本文の字の大きさだけを変える。** そのままにすると、
+    画面の中の拡大（字だけでなく道具の帯まで大きくなる）や、VS Code 全体の
+    拡大へ渡る。受け身（passive）扱いだと既定を止められないので明示する
+  */
+  document.addEventListener(
+    "wheel",
+    function (event) {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      keyStop(event);
+      // 行・頁の単位で来る環境（deltaMode 1・2）は、画素へ直してから溜める
+      const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? 800 : 1;
+      const delta = (Number(event.deltaY) || 0) * unit;
+      if (delta === 0) return;
+      // 向きが変わったら、溜めていた分は捨てる（戻したのに反対へ動かない）
+      if ((delta < 0) !== (keyWheelCarry < 0)) keyWheelCarry = 0;
+      keyWheelCarry += delta;
+      // 手前へ回す（deltaY が負）と大きく。ふつうのズームと同じ向き
+      while (keyWheelCarry <= -KEY_WHEEL_STEP) {
+        keyWheelCarry += KEY_WHEEL_STEP;
+        sizeSet(size + 1);
+      }
+      while (keyWheelCarry >= KEY_WHEEL_STEP) {
+        keyWheelCarry -= KEY_WHEEL_STEP;
+        sizeSet(size - 1);
+      }
+    },
+    { capture: true, passive: false }
+  );
+  /* keys:end */
+
+  /* find:start */
+  /*
+    ── 本文を探す（Ctrl+F。作者の裁定、2026-10-02。設計書6.25） ──
+    **VS Code の検索の小窓（enableFindWidget）は使わない。** 打つ面には、
+    用語の色を重ねるために本文の透明な写し（#marks）が載っており、ブラウザの
+    検索はこれも本文として数える——同じ所が2回ずつ当たり、写しの側へ当たると
+    写しだけが転がって、色の重ねが本文とずれる。そこで探すのは自前で行う。
+
+    - 探すのは**記法の本文**（打つ面の値・組んで書く面の記法）。どちらの面も
+      同じ位置で数えるので、面を替えても同じ所が当たる
+    - **探している間は、原稿の選択にも焦点にも触らない。** 選んだまま
+      Enter を押すと、見つけた語が改行に置き換わる（原稿が壊れる）。
+      見つけた所は塗るだけにして（読み上げと同じ層・同じ仕掛け）、
+      閉じたときに初めて、そこを選んで原稿へ戻る
+    - 縦書きでも横書きでも、塗った所が見えるまで面を転がす
+      （読み上げの aloudNudgeWriteIntoView／composeNudgeIntoView）
+  */
+  const findInput = document.getElementById("findInput");
+  const findCountLabel = document.getElementById("findCount");
+  let findIsOpen = false;
+  /** 探し始めた位置（開いたときのカーソル）。打つたびにここから探し直す */
+  let findFrom = 0;
+  /** いま塗っている所（記法の位置）。無ければ null */
+  let findHit = null;
+
+  /** いま面が持っている本文（記法） */
+  function findTextNow() {
+    return composeOn ? composeTextNow() : write.value;
+  }
+
+  function findCaretNow() {
+    if (composeOn) {
+      const at = composeSelectionNow();
+      return at ? at.start : 0;
+    }
+    return typeof write.selectionStart === "number" ? write.selectionStart : 0;
+  }
+
+  /** 当たる所の頭をすべて。重ならないように語の長さずつ進む */
+  function findAll(text, word) {
+    const hits = [];
+    if (!word) return hits;
+    let at = text.indexOf(word);
+    while (at >= 0) {
+      hits.push(at);
+      at = text.indexOf(word, at + word.length);
+    }
+    return hits;
+  }
+
+  function findClearMark() {
+    aloudClearWriteMark();
+    if (composeHighlightsUsable()) {
+      try {
+        CSS.highlights.delete("novelai-find");
+      } catch (error) {
+        /* 消せなくても本文は変わらない */
+      }
+    }
+  }
+
+  /** 見つけた所を塗って、見えるところまで転がす。選択と焦点には触らない */
+  function findPaint(start, end) {
+    findClearMark();
+    if (composeOn) {
+      if (composeHighlightsUsable()) {
+        try {
+          const atoms = composeCurrentAtoms();
+          const head = composeOffsetToPoint(atoms, start);
+          const tail = composeOffsetToPoint(atoms, end);
+          if (head && tail) {
+            const range = document.createRange();
+            range.setStart(head.node, head.offset);
+            range.setEnd(tail.node, tail.offset);
+            CSS.highlights.set("novelai-find", new Highlight(range));
+          }
+        } catch (error) {
+          /* 色が置けなくても、転がすことはできる */
+        }
+      }
+      composeNudgeIntoView(start);
+      return;
+    }
+    const text = write.value;
+    while (aloudMarks.firstChild) {
+      aloudMarks.removeChild(aloudMarks.firstChild);
+    }
+    aloudMarks.appendChild(document.createTextNode(text.slice(0, start)));
+    const span = document.createElement("span");
+    span.className = "mark-find";
+    span.textContent = text.slice(start, end);
+    aloudMarks.appendChild(span);
+    aloudMarks.appendChild(document.createTextNode(text.slice(end)));
+    // 塗る前に枠と位置を合わせておかないと、下の採寸が別の場所を測る
+    alignMarksBox();
+    syncMarksScroll();
+    aloudNudgeWriteIntoView(span);
+  }
+
+  /**
+   * 探す。step は 0（開いた位置から探し直す）・1（次）・-1（前）。
+   * 端まで来たら反対の端へ回る
+   */
+  function findGo(step) {
+    const word = findInput.value;
+    findClearMark();
+    if (!word) {
+      findHit = null;
+      findCountLabel.textContent = "";
+      return;
+    }
+    const hits = findAll(findTextNow(), word);
+    if (hits.length === 0) {
+      findHit = null;
+      findCountLabel.textContent = "見つかりません";
+      return;
+    }
+    let index = -1;
+    if (step === 0 || findHit === null) {
+      index = hits.findIndex(function (at) { return at >= findFrom; });
+      if (index < 0) index = 0;
+    } else if (step > 0) {
+      index = hits.findIndex(function (at) { return at > findHit.start; });
+      if (index < 0) index = 0;
+    } else {
+      for (let i = hits.length - 1; i >= 0; i--) {
+        if (hits[i] < findHit.start) {
+          index = i;
+          break;
+        }
+      }
+      if (index < 0) index = hits.length - 1;
+    }
+    findHit = { start: hits[index], end: hits[index] + word.length };
+    findCountLabel.textContent = index + 1 + "／" + hits.length;
+    findPaint(findHit.start, findHit.end);
+  }
+
+  function findOpen() {
+    if (!findIsOpen) {
+      // 読み上げと同じ塗りの層を使うので、読み上げは終える（向きを変えたときと同じ）
+      if (aloudOn) aloudFinish();
+      findIsOpen = true;
+      findFrom = findCaretNow();
+      findHit = null;
+      // 列（finding）と塗りの層（findmark）は別の札にする。閉じるときに、
+      // 列を畳んだあとの組みで、もう一度塗って測るため（findClose）
+      document.body.classList.add("finding");
+      document.body.classList.add("findmark");
+      // 1行の短い語を選んでいれば、それを探す語にする（ブラウザの検索と同じ）
+      const picked = selectionText();
+      if (picked && picked.length <= 100 && picked.indexOf(String.fromCharCode(10)) < 0) {
+        findInput.value = picked;
+      }
+      if (findInput.value) findGo(0);
+    }
+    findInput.focus();
+    findInput.select();
+  }
+
+  /** 閉じる。見つけた所があれば、そこを選んで原稿へ戻る */
+  function findClose() {
+    if (!findIsOpen) return;
+    findIsOpen = false;
+    document.body.classList.remove("finding");
+    findClearMark();
+    const hit = findHit;
+    findHit = null;
+    /*
+      **列を畳むと面の高さが変わり、縦書きでは行が組み直される**——見えていた
+      所が画面の外へ出ることがある。さらに打つ面は、焦点を入れて選び直すと
+      転がりが先頭へ戻ることがある（どちらも右の枠の Chromium で確かめた）。
+      そこで、選んだあとに**もう一度塗って測り、そこまで転がしてから塗りを外す**
+      （塗りの層は findmark の間だけ出ている）
+    */
+    if (composeOn) {
+      compose.focus();
+      if (hit) {
+        composeRestoreCaret(hit);
+        composeNudgeIntoView(hit.start);
+      }
+      document.body.classList.remove("findmark");
+      return;
+    }
+    write.focus();
+    if (hit) {
+      try {
+        write.setSelectionRange(hit.start, hit.end);
+      } catch (error) {
+        /* 範囲外なら置かない（本文は壊れない） */
+      }
+      findPaint(hit.start, hit.end);
+      findClearMark();
+    }
+    document.body.classList.remove("findmark");
+  }
+
+  findInput.addEventListener("keydown", function (event) {
+    /*
+      **変換中の Enter は、語を確定するためのもの。** ここで探すと、
+      確定した瞬間に次へ飛ぶ（keyCode 229 は変換中の打鍵を表す古い印）
+    */
+    if (event.isComposing || event.keyCode === 229) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      findGo(event.shiftKey ? -1 : 1);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      findClose();
+    }
+  });
+  // 打つたびに探し直す。変換中は確定を待つ（候補を出している間は動かさない）
+  findInput.addEventListener("input", function (event) {
+    if (event.isComposing) return;
+    findGo(0);
+  });
+  findInput.addEventListener("compositionend", function () {
+    findGo(0);
+  });
+  document.getElementById("findNext").addEventListener("click", function () {
+    findGo(1);
+  });
+  document.getElementById("findPrev").addEventListener("click", function () {
+    findGo(-1);
+  });
+  document.getElementById("findClose").addEventListener("click", findClose);
+  /*
+    **本文が変わったら塗りを外す。** 塗りは本文を写して作っているので、
+    打ったあとも残すと別の字に色が付く。次を押せば今の本文で探し直す
+  */
+  function findOnEdit() {
+    if (findIsOpen && findHit !== null) {
+      findClearMark();
+      findHit = null;
+    }
+  }
+  write.addEventListener("input", findOnEdit);
+  compose.addEventListener("input", findOnEdit);
+  /* find:end */
 
   /* ══ 読み上げ（音読推敲。設計書6.42） ═══════════════════ */
 

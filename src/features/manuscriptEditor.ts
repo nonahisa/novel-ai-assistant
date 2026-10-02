@@ -583,6 +583,12 @@ export function planNeighborStep(input: {
   count: number;
   direction: "prev" | "next";
   currentIsBlank: boolean;
+  /**
+   * 最終話の先へ**新しい話を作らない**（Alt+↑／Alt+↓ から来たとき。
+   * 作者の裁定、2026-10-02）。キーは手が滑って押しやすく、押しただけで
+   * ファイルが1つ増えるのは困る。作るのはボタン（「次の話 →」）だけにする
+   */
+  noCreate?: boolean;
 }): NeighborStep {
   if (input.direction === "prev") {
     if (input.at === 0) return { kind: "notice", message: "最初の話です。" };
@@ -592,6 +598,7 @@ export function planNeighborStep(input: {
   // 最終話。白紙なら作らない（「最新話を書く」と同じ考え方。
   // 押すたびに空のファイルが増えるのを避ける）
   if (input.currentIsBlank) return { kind: "notice", message: "最新話です。" };
+  if (input.noCreate) return { kind: "notice", message: "最後の話です。" };
   return { kind: "create" };
 }
 
@@ -1168,6 +1175,8 @@ type Incoming =
        * どの話に居るかがカーソルの位置でしか分からない（設計書6.25.5）。
        */
       line?: number;
+      /** 最終話の先へ新しい話を作らない（Alt+↑／Alt+↓ から。planNeighborStep） */
+      noCreate?: boolean;
     }
   /**
    * 画面側で起きたことを記録する（設計書6.34）。
@@ -2109,7 +2118,8 @@ export class ManuscriptEditorProvider
           await this.openNeighborEpisode(
             document,
             message.direction,
-            message.line ?? 0
+            message.line ?? 0,
+            message.noCreate === true
           );
           break;
 
@@ -3050,7 +3060,8 @@ export class ManuscriptEditorProvider
   private async openNeighborEpisode(
     document: vscode.TextDocument,
     direction: "prev" | "next",
-    caretLine = 0
+    caretLine = 0,
+    noCreate = false
   ): Promise<void> {
     const current = fromUri(document.uri);
 
@@ -3098,6 +3109,7 @@ export class ManuscriptEditorProvider
       count: episodes.length,
       direction,
       currentIsBlank: isBlankText(document.getText()),
+      noCreate,
     });
     if (step.kind === "notice") {
       void vscode.window.showInformationMessage(step.message);

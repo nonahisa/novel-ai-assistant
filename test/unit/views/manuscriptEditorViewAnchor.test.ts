@@ -362,9 +362,25 @@ describe("切り替えのボタンが、控えと戻しを通る", () => {
   });
 
   it("字の大きさ・note風・貼り付け後も同じ仕組みに乗る", () => {
+    /*
+      字の大きさは、ボタン・キー（Ctrl+＋／Ctrl+－／Ctrl+0）・Ctrl+ホイールが
+      同じ sizeSet を通る（2026-10-02）。控えと戻しは sizeSet の中で見る
+    */
+    for (const id of ["bigger", "smaller"]) {
+      expect(listenerSource(`document.getElementById("${id}")`, "click")).toMatch(
+        /sizeSet\(size [+-] 1\)/
+      );
+    }
+    const start = code.indexOf("  function sizeSet(next) {");
+    expect(start, "sizeSet が見つからない").toBeGreaterThan(0);
+    const sizeSet = code.slice(start, code.indexOf("\n  }", start));
+    const hold = sizeSet.indexOf("viewTakePress()");
+    const paint = sizeSet.indexOf("paint()");
+    const restore = sizeSet.indexOf("viewRestore(");
+    expect(hold, "sizeSet が控えていない").toBeGreaterThan(0);
+    expect(hold).toBeLessThan(paint);
+    expect(paint).toBeLessThan(restore);
     for (const [owner, id] of [
-      ["document.getElementById(\"bigger\")", "bigger"],
-      ["document.getElementById(\"smaller\")", "smaller"],
       ["noteStyleButton", "noteStyle"],
       ["notePvButton", "notePv"],
     ] as const) {
