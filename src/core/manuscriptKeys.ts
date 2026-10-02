@@ -44,7 +44,12 @@ export interface ManuscriptKeyBinding {
   readonly label: string;
 }
 
-/** 作者の裁定の表（2026-10-02）。package.json と食い違うと試験が止める */
+/**
+ * 作者の裁定の表（2026-10-02）。package.json と食い違うと試験が止める。
+ * 前のメモ・メモを足すは、本体の Ctrl+Alt+B（セカンダリ サイド バー）・
+ * Ctrl+Alt+I（Copilot Chat）と重なったので、Shift を足した形にした
+ * （作者の裁定「重ならないキーに変える」。Shift は逆向き・仲間の印）
+ */
 export const MANUSCRIPT_KEY_BINDINGS: readonly ManuscriptKeyBinding[] = [
   {
     key: "ctrl+alt+t",
@@ -69,12 +74,12 @@ export const MANUSCRIPT_KEY_BINDINGS: readonly ManuscriptKeyBinding[] = [
     label: "次のシーンメモへ",
   },
   {
-    key: "ctrl+alt+b",
+    key: "ctrl+alt+shift+n",
     command: "novelai.prevSceneMemo",
     label: "前のシーンメモへ",
   },
   {
-    key: "ctrl+alt+i",
+    key: "ctrl+alt+shift+m",
     command: "novelai.addSceneMemo",
     label: "ここにシーンメモを足す",
   },

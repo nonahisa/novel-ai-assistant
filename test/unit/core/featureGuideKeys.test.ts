@@ -28,7 +28,10 @@ describe("原稿エディターのキー操作の説明", () => {
     for (const entry of MANUSCRIPT_KEY_BINDINGS) {
       expect(EXTRA_GUIDE, entry.command).toContain(entry.label);
       // package.json の表記（ctrl+alt+t）を、画面の書き方（Ctrl+Alt+T）にして探す
-      const shown = "Ctrl+Alt+" + entry.key.slice(-1).toUpperCase();
+      const shown = entry.key
+        .split("+")
+        .map((part) => (part.length === 1 ? part.toUpperCase() : part[0].toUpperCase() + part.slice(1)))
+        .join("+");
       expect(EXTRA_GUIDE, entry.command).toContain(shown);
     }
     // 作者が自分で変えられることと、その探し方

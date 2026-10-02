@@ -47,8 +47,8 @@ const EXPECTED: Record<string, string> = {
   "ctrl+alt+a": "novelai.runProofreadingSuite",
   "ctrl+alt+m": "novelai.openSceneMemos",
   "ctrl+alt+n": "novelai.nextSceneMemo",
-  "ctrl+alt+b": "novelai.prevSceneMemo",
-  "ctrl+alt+i": "novelai.addSceneMemo",
+  "ctrl+alt+shift+n": "novelai.prevSceneMemo",
+  "ctrl+alt+shift+m": "novelai.addSceneMemo",
   "ctrl+alt+c": "novelai.openChat",
 };
 
