@@ -223,9 +223,9 @@ svg {
 <div id="layout">
   <aside id="filters">
     <div class="filter">
-      <span class="filter-title">登場話数の下限</span>
-      <input type="range" id="minChapters" min="0" max="0" value="0">
-      <div class="sub" id="minChaptersValue"></div>
+      <span class="filter-title">第N話までの相関図</span>
+      <input type="range" id="upToChapter" min="1" max="1" value="1">
+      <div class="sub" id="upToChapterValue"></div>
     </div>
     <div class="filter">
       <span class="filter-title">出す線</span>
@@ -283,8 +283,8 @@ const el = {
   exportSvg: document.getElementById("export"),
   wide: document.getElementById("wide"),
   filters: document.getElementById("filters"),
-  minChapters: document.getElementById("minChapters"),
-  minChaptersValue: document.getElementById("minChaptersValue"),
+  upToChapter: document.getElementById("upToChapter"),
+  upToChapterValue: document.getElementById("upToChapterValue"),
   kindRelation: document.getElementById("kindRelation"),
   kindAddress: document.getElementById("kindAddress"),
   affiliations: document.getElementById("affiliations"),
@@ -314,7 +314,7 @@ function sendFilter() {
   }
   post("filter", {
     filter: {
-      minChapters: Number(el.minChapters.value),
+      upToChapter: Number(el.upToChapter.value),
       kinds: kinds,
       affiliations: affiliations,
       showIsolated: el.showIsolated.checked,
@@ -367,10 +367,10 @@ el.exportSvg.addEventListener("click", function () { exportSvg(); });
 
 // 動かしている最中は数字だけ直す。放したときに引き直す——
 // つまみを動かすたびに図を作り直させると、拡張機能との往復が溢れる
-el.minChapters.addEventListener("input", function () {
-  el.minChaptersValue.textContent = el.minChapters.value + "話以上を出す";
+el.upToChapter.addEventListener("input", function () {
+  el.upToChapterValue.textContent = upToChapterText(Number(el.upToChapter.value));
 });
-el.minChapters.addEventListener("change", sendFilter);
+el.upToChapter.addEventListener("change", sendFilter);
 el.kindRelation.addEventListener("change", sendFilter);
 el.kindAddress.addEventListener("change", sendFilter);
 el.showIsolated.addEventListener("change", sendFilter);
@@ -451,13 +451,24 @@ function render() {
   applySides();
 }
 
+/** つまみの数字の読み方。最終話なら、そう添える（既定で全部出ている印） */
+function upToChapterText(chapter) {
+  if (data && chapter >= data.lastChapter) return "第" + chapter + "話まで（最終話）";
+  return "第" + chapter + "話まで";
+}
+
 function renderFilters() {
   const filter = data.filter;
-  el.minChapters.max = String(Math.max(1, data.maxChapters));
-  if (document.activeElement !== el.minChapters) {
-    el.minChapters.value = String(filter.minChapters);
+  // 話数の記録が1つも無い作品では絞れない。消さずに押せなくして理由を出す
+  el.upToChapter.disabled = data.lastChapter <= 0;
+  el.upToChapter.max = String(Math.max(1, data.lastChapter));
+  if (document.activeElement !== el.upToChapter) {
+    el.upToChapter.value = String(Math.max(1, filter.upToChapter));
   }
-  el.minChaptersValue.textContent = filter.minChapters + "話以上を出す";
+  el.upToChapterValue.textContent =
+    data.lastChapter <= 0
+      ? "登場話数の記録が無いため、話数では絞れません"
+      : upToChapterText(filter.upToChapter);
   el.kindRelation.checked = filter.kinds.indexOf("relation") !== -1;
   el.kindAddress.checked = filter.kinds.indexOf("address") !== -1;
   el.showIsolated.checked = Boolean(filter.showIsolated);

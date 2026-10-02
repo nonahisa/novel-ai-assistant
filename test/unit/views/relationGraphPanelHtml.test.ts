@@ -62,8 +62,10 @@ describe("画面の入口", () => {
   });
 
   it("絞り込みが4つそろっている", () => {
-    // 登場話数の下限／関係・呼称／所属／名前で探す（設計書6.38.2）
-    expect(html).toContain('id="minChapters"');
+    // 第N話まで／関係・呼称／所属／名前で探す（設計書6.38.2）
+    expect(html).toContain('id="upToChapter"');
+    // 下限のつまみは消した（作者の要望、2026-10-02「下限ではなく上限」）
+    expect(html).not.toContain('id="minChapters"');
     expect(html).toContain('id="kindRelation"');
     expect(html).toContain('id="kindAddress"');
     expect(html).toContain('id="affiliations"');

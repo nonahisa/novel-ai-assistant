@@ -10,6 +10,8 @@ import {
   egoGraph,
   filterRelationGraph,
   isolatedNodes,
+  lastChapterOf,
+  normalizeUpToChapter,
   restrictUnresolved,
   UNRESOLVED_ID_PREFIX,
   type RelationGraph,
@@ -53,6 +55,71 @@ function address(
   };
 }
 
+/** 呼称の1形態を、使い始めた話数つきで作る */
+function addressForm(term: string, firstChapter: number | null) {
+  return {
+    term,
+    category: null,
+    context: null,
+    firstChapter,
+    lastChapter: null,
+    status: "current" as const,
+    evidence: null,
+  };
+}
+
+describe("最終話", () => {
+  test("登場話数の件数ではなく、話番号のいちばん後ろを返す", () => {
+    // 第1話と第5話に出た人物1人だけなら、最終話は5（件数の2ではない）
+    const graph = buildRelationGraph([
+      character("char_001", "灯", { appearedChapters: [1, 5] }),
+    ]);
+    expect(lastChapterOf(graph)).toBe(5);
+  });
+
+  test("呼称が始まった話も数える", () => {
+    const graph = buildRelationGraph([
+      character("char_001", "灯", {
+        appearedChapters: [1, 2],
+        addressTerms: [
+          {
+            targetName: "月島",
+            targetId: null,
+            authorLocked: false,
+            forms: [addressForm("先生", 8)],
+          },
+        ],
+      }),
+      character("char_002", "月島", { appearedChapters: [1] }),
+    ]);
+    expect(lastChapterOf(graph)).toBe(8);
+  });
+
+  test("つまみの値：最終話以上は「最終話まで」（null）へ寄せる", () => {
+    // 数字のまま持つと、資料が増えたときに古い最終話で図が止まる
+    expect(normalizeUpToChapter(19, 19)).toBeNull();
+    expect(normalizeUpToChapter(25, 19)).toBeNull();
+    expect(normalizeUpToChapter(null, 19)).toBeNull();
+    expect(normalizeUpToChapter(undefined, 19)).toBeNull();
+    expect(normalizeUpToChapter(Number.NaN, 19)).toBeNull();
+  });
+
+  test("つまみの値：途中の話はそのまま、1より前は第1話", () => {
+    expect(normalizeUpToChapter(5, 19)).toBe(5);
+    expect(normalizeUpToChapter(4.6, 19)).toBe(5);
+    expect(normalizeUpToChapter(0, 19)).toBe(1);
+  });
+
+  test("つまみの値：話数の記録が無い作品では絞らない", () => {
+    expect(normalizeUpToChapter(3, 0)).toBeNull();
+  });
+
+  test("話数の記録が1つも無ければ0", () => {
+    const graph = buildRelationGraph([character("char_001", "灯")]);
+    expect(lastChapterOf(graph)).toBe(0);
+  });
+});
+
 describe("辺のまとめ方", () => {
   test("向きの違う関係が1本にまとまる", () => {
     // A→B「師匠」とB→A「弟子」で線を2本引くと、同じ2人の間に
@@ -71,8 +138,21 @@ describe("辺のまとめ方", () => {
     expect([edge.a, edge.b]).toEqual(["char_001", "char_002"]);
     expect(edge.weight).toBe(2);
     expect(edge.labels).toEqual([
-      { from: "char_001", to: "char_002", kind: "relation", text: "師匠" },
-      { from: "char_002", to: "char_001", kind: "relation", text: "弟子" },
+      // 関係は話数を持たない（`relations` は名前と言葉だけ）
+      {
+        from: "char_001",
+        to: "char_002",
+        kind: "relation",
+        text: "師匠",
+        firstChapter: null,
+      },
+      {
+        from: "char_002",
+        to: "char_001",
+        kind: "relation",
+        text: "弟子",
+        firstChapter: null,
+      },
     ]);
   });
 
@@ -387,29 +467,162 @@ describe("絞り込み", () => {
     expect(result.graph.edges[0].labels[0].text).toBe("先生");
   });
 
-  test("登場話数の下限で落とすと、相手の辺も消える", () => {
+  test("第N話までに出ていない人物は落ちる", () => {
     const result = filterRelationGraph(buildRelationGraph(sample()), {
-      minChapters: 3,
+      upToChapter: 6,
+      showIsolated: true,
+    });
+    // 第7話が初登場の「顔だけの人」は、第6話までの図にはまだ居ない
+    expect(result.graph.nodes.map((node) => node.id)).toEqual([
+      "char_001",
+      "char_002",
+    ]);
+  });
+
+  test("初登場が第N話より後なら、そのあと何話出ていても落ち、相手の辺も消える", () => {
+    const graph = buildRelationGraph([
+      character("char_001", "灯", {
+        appearedChapters: [1, 2],
+        relations: [{ name: "月島", relation: "師匠" }],
+      }),
+      character("char_002", "月島", { appearedChapters: [3, 4, 5, 6] }),
+    ]);
+    const result = filterRelationGraph(graph, {
+      upToChapter: 2,
       showIsolated: true,
     });
     expect(result.graph.nodes.map((node) => node.id)).toEqual(["char_001"]);
     expect(result.graph.edges).toEqual([]);
   });
 
+  test("飛び飛びに登場していても、初登場が第N話までなら残る", () => {
+    const graph = buildRelationGraph([
+      character("char_001", "灯", { appearedChapters: [1, 3] }),
+    ]);
+    const result = filterRelationGraph(graph, {
+      upToChapter: 2,
+      showIsolated: true,
+    });
+    expect(result.graph.nodes.map((node) => node.id)).toEqual(["char_001"]);
+    // 大きさは第2話までの登場話数で数える（第3話はまだ来ていない）
+    expect(result.graph.nodes[0].chapterCount).toBe(1);
+  });
+
+  test("話数の記録がある呼称は、第N話より後に始まったものを引かない", () => {
+    const graph = buildRelationGraph([
+      character("char_001", "灯", {
+        appearedChapters: [1, 2, 3, 4, 5],
+        addressTerms: [
+          {
+            targetName: "月島",
+            targetId: null,
+            authorLocked: false,
+            forms: [addressForm("月島さん", 1), addressForm("先生", 5)],
+          },
+        ],
+      }),
+      character("char_002", "月島", { appearedChapters: [1, 5] }),
+    ]);
+    const atThree = filterRelationGraph(graph, { upToChapter: 3 });
+    expect(atThree.graph.edges).toHaveLength(1);
+    expect(atThree.graph.edges[0].labels.map((label) => label.text)).toEqual([
+      "月島さん",
+    ]);
+    expect(atThree.graph.edges[0].weight).toBe(1);
+
+    const atFive = filterRelationGraph(graph, { upToChapter: 5 });
+    expect(atFive.graph.edges[0].labels.map((label) => label.text)).toEqual([
+      "月島さん",
+      "先生",
+    ]);
+  });
+
+  test("呼称がまだ1つも始まっていなければ、その線は引かない", () => {
+    const graph = buildRelationGraph([
+      character("char_001", "灯", {
+        appearedChapters: [1, 2, 3],
+        addressTerms: [
+          {
+            targetName: "月島",
+            targetId: null,
+            authorLocked: false,
+            forms: [addressForm("先生", 3)],
+          },
+        ],
+      }),
+      character("char_002", "月島", { appearedChapters: [1] }),
+    ]);
+    const result = filterRelationGraph(graph, { upToChapter: 2 });
+    expect(result.graph.edges).toEqual([]);
+    // 線が無くなった2人は孤立として畳む（消えたのではない）
+    expect(result.hiddenIsolated.map((node) => node.name)).toEqual([
+      "灯",
+      "月島",
+    ]);
+  });
+
+  test("話数の記録が無い関係と呼称は、両端が出ていれば引く", () => {
+    // 関係（relations）は話数を持たない。呼称も firstChapter が空のものがある。
+    // 分からないものを消すと、作者が手で書いた線が黙って消える
+    const result = filterRelationGraph(buildRelationGraph(sample()), {
+      upToChapter: 1,
+    });
+    expect(result.graph.edges).toHaveLength(1);
+    expect(
+      result.graph.edges[0].labels.map((label) => label.text).sort()
+    ).toEqual(["先生", "師匠"].sort());
+  });
+
+  test("話数を指定しなければ全部出て、最終話を指定したときと同じになる", () => {
+    const graph = buildRelationGraph(sample());
+    const all = filterRelationGraph(graph, { showIsolated: true });
+    const atLast = filterRelationGraph(graph, {
+      upToChapter: lastChapterOf(graph),
+      showIsolated: true,
+    });
+    expect(all.graph.nodes.map((node) => node.id)).toEqual([
+      "char_001",
+      "char_002",
+      "char_003",
+    ]);
+    expect(atLast).toEqual(all);
+  });
+
+  test("登場話数の記録が無い人物は、どの話でも出す", () => {
+    // 古い資料や作者が手で足した人物。分からないものを消さない
+    const graph = buildRelationGraph([
+      character("char_001", "灯", {
+        appearedChapters: [1],
+        relations: [{ name: "月島", relation: "師匠" }],
+      }),
+      character("char_002", "月島", {}),
+    ]);
+    const result = filterRelationGraph(graph, { upToChapter: 1 });
+    expect(result.graph.nodes.map((node) => node.id)).toEqual([
+      "char_001",
+      "char_002",
+    ]);
+  });
+
   test("仮ノードは登場話数では落とさない", () => {
     // 登場話数が空なのは資料が無いからで、条件に外れたわけではない
     const graph = buildRelationGraph([
       character("char_001", "灯", {
-        appearedChapters: [1, 2, 3],
+        appearedChapters: [2, 3],
         relations: [{ name: "名も無き剣士", relation: "恩人" }],
       }),
     ]);
-    const result = filterRelationGraph(graph, { minChapters: 2 });
+    const result = filterRelationGraph(graph, { upToChapter: 2 });
     expect(result.graph.nodes.map((node) => node.provisional)).toEqual([
       false,
       true,
     ]);
     expect(result.graph.unresolved).toHaveLength(1);
+
+    // 呼んだ側がまだ出ていなければ、仮ノードも一緒に消える
+    const before = filterRelationGraph(graph, { upToChapter: 1 });
+    expect(before.graph.nodes).toEqual([]);
+    expect(before.graph.unresolved).toEqual([]);
   });
 
   test("所属で絞る", () => {
@@ -531,6 +744,7 @@ describe("注記の件数（設計書6.38.5）", () => {
           name: "灯",
           affiliation: null,
           chapterCount: 1,
+          appearedChapters: [1],
           provisional: false,
         },
       ],

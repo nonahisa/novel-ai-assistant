@@ -3,6 +3,7 @@ import {
   createNameResolver,
   type UnresolvedReason,
 } from "./characterNameResolve";
+import { chaptersAsOf, hasAppearedBy } from "./settingsAsOf";
 
 /**
  * 人物相関図の材料を組み立てる（設計書6.38.1）。
@@ -26,6 +27,12 @@ export interface RelationNode {
   /** 登場話数。ノードの大きさに使う */
   chapterCount: number;
   /**
+   * 登場した話（昇順・重複なし）。「第N話まで」の絞り込みと最終話の割り出しに使う。
+   * `chapterCount` は件数なので、「第N話までに出たか」も「最終話は何話か」も
+   * そこからは分からない。仮ノードは空
+   */
+  appearedChapters: number[];
+  /**
    * 資料に無い相手か（設計書6.38.5）。
    *
    * 名前でも別名でも人物レコードに当たらなかった相手は、黙って落とさず
@@ -41,6 +48,14 @@ export interface RelationLabel {
   kind: RelationLabelKind;
   /** 関係なら「師匠」、呼称なら「先生」 */
   text: string;
+  /**
+   * 何話から使われた言葉か。分からなければ null。
+   *
+   * 話数を持つのは呼称（`AddressForm.firstChapter`）だけである。関係
+   * （`relations`）は名前と言葉しか持たず、抽出のマージも話数を残さない
+   * （`characterMerge.ts` は関係を `changes` へ積まない）ので、常に null
+   */
+  firstChapter: number | null;
 }
 
 /**
@@ -105,6 +120,7 @@ export function buildRelationGraph(characters: Character[]): RelationGraph {
       name: character.name,
       affiliation: trimmedOrNull(character.affiliation),
       chapterCount: (character.appearedChapters ?? []).length,
+      appearedChapters: normalizeChapters(character.appearedChapters ?? []),
       provisional: false,
     };
     byId.set(node.id, node);
@@ -114,7 +130,7 @@ export function buildRelationGraph(characters: Character[]): RelationGraph {
   const resolve = createNameResolver(characters);
   const edges = new Map<string, RelationEdge>();
   /** 辺の中の言葉の重複よけ。同じ言葉で太さを水増ししない */
-  const seenLabels = new Set<string>();
+  const seenLabels = new Map<string, RelationLabel>();
   const unresolved: UnresolvedTarget[] = [];
   const seenUnresolved = new Set<string>();
 
@@ -122,20 +138,40 @@ export function buildRelationGraph(characters: Character[]): RelationGraph {
     fromId: string,
     toId: string,
     kind: RelationLabelKind,
-    text: string
+    text: string,
+    firstChapter: number | null
   ): void => {
     const [a, b] = fromId < toId ? [fromId, toId] : [toId, fromId];
     const edgeKey = keyOf([a, b]);
     const labelKey = keyOf([a, b, kind, fromId, text]);
-    if (seenLabels.has(labelKey)) return;
-    seenLabels.add(labelKey);
+    const seen = seenLabels.get(labelKey);
+    if (seen) {
+      // 同じ言葉が別の話数で2度書かれていたら、早いほうを採る。
+      // 話数の分からない側（null）は「それ以前」として勝つ——
+      // `hasAppearedBy` と同じく、分からないものは隠さない側へ倒す
+      if (
+        seen.firstChapter !== null &&
+        (firstChapter === null || firstChapter < seen.firstChapter)
+      ) {
+        seen.firstChapter = firstChapter;
+      }
+      return;
+    }
 
     let edge = edges.get(edgeKey);
     if (!edge) {
       edge = { a, b, weight: 0, labels: [] };
       edges.set(edgeKey, edge);
     }
-    edge.labels.push({ from: fromId, to: toId, kind, text });
+    const label: RelationLabel = {
+      from: fromId,
+      to: toId,
+      kind,
+      text,
+      firstChapter,
+    };
+    seenLabels.set(labelKey, label);
+    edge.labels.push(label);
     edge.weight = edge.labels.length;
   };
 
@@ -144,7 +180,8 @@ export function buildRelationGraph(characters: Character[]): RelationGraph {
     rawTargetName: string,
     targetId: string | null,
     kind: RelationLabelKind,
-    rawText: string
+    rawText: string,
+    firstChapter: number | null
   ): void => {
     const targetName = (rawTargetName ?? "").trim();
     const text = (rawText ?? "").trim();
@@ -160,7 +197,7 @@ export function buildRelationGraph(characters: Character[]): RelationGraph {
     if (resolved.id) {
       // 自分を呼ぶ言葉は輪にしない。図では点にしかならず、太さだけが増える
       if (resolved.id === from.id) return;
-      addEdge(from.id, resolved.id, kind, text);
+      addEdge(from.id, resolved.id, kind, text, firstChapter);
       return;
     }
 
@@ -171,12 +208,13 @@ export function buildRelationGraph(characters: Character[]): RelationGraph {
         name: targetName,
         affiliation: null,
         chapterCount: 0,
+        appearedChapters: [],
         provisional: true,
       };
       byId.set(provisionalId, node);
       nodes.push(node);
     }
-    addEdge(from.id, provisionalId, kind, text);
+    addEdge(from.id, provisionalId, kind, text, firstChapter);
 
     // 件数として出すのは「誰が・誰を・どの種類で」の組。呼び方が3通り
     // あっても、資料に足りていない相手は1人である
@@ -196,11 +234,21 @@ export function buildRelationGraph(characters: Character[]): RelationGraph {
 
   for (const character of characters) {
     for (const relation of character.relations ?? []) {
-      link(character, relation.name, null, "relation", relation.relation);
+      link(character, relation.name, null, "relation", relation.relation, null);
     }
     for (const term of character.addressTerms ?? []) {
       for (const form of term.forms ?? []) {
-        link(character, term.targetName, term.targetId, "address", form.term);
+        link(
+          character,
+          term.targetName,
+          term.targetId,
+          "address",
+          form.term,
+          typeof form.firstChapter === "number" &&
+            Number.isFinite(form.firstChapter)
+            ? form.firstChapter
+            : null
+        );
       }
     }
   }
@@ -320,8 +368,16 @@ export function isolatedNodes(graph: RelationGraph): RelationNode[] {
 export const NO_AFFILIATION_KEY = "";
 
 export interface RelationGraphFilter {
-  /** 登場話数の下限。仮ノードは登場話数を持たないので対象外 */
-  minChapters?: number;
+  /**
+   * 第N話までの図にする（作者の要望、2026-10-02「下限ではなく上限」）。
+   * 未指定・null なら絞らない（＝最終話まで）。
+   *
+   * 人物は「第N話までに初登場したか」、呼称は「第N話までに使われ始めたか」で
+   * 見る。話数の記録が無いもの（登場話数が空の人物・関係・初出の分からない
+   * 呼称）は落とさない——分からないものを消すと、作者が手で書いたものが
+   * 黙って図から消える（`settingsAsOf.ts` の `hasAppearedBy` と同じ倒し方）
+   */
+  upToChapter?: number | null;
   /** 出す辺の種類。空や未指定なら両方 */
   kinds?: RelationLabelKind[];
   /**
@@ -353,7 +409,7 @@ export function filterRelationGraph(
   filter: RelationGraphFilter = {}
 ): FilteredRelationGraph {
   const kinds = filter.kinds && filter.kinds.length > 0 ? filter.kinds : null;
-  const minChapters = filter.minChapters ?? 0;
+  const upTo = filter.upToChapter ?? null;
   const affiliations = filter.affiliations
     ? new Set(filter.affiliations)
     : null;
@@ -361,7 +417,7 @@ export function filterRelationGraph(
   const keptReal = new Set<string>();
   for (const node of graph.nodes) {
     if (node.provisional) continue;
-    if (node.chapterCount < minChapters) continue;
+    if (!hasAppearedBy(node.appearedChapters, upTo)) continue;
     if (
       affiliations &&
       !affiliations.has(node.affiliation ?? NO_AFFILIATION_KEY)
@@ -373,9 +429,10 @@ export function filterRelationGraph(
 
   const edges: RelationEdge[] = [];
   for (const edge of graph.edges) {
-    const labels = kinds
-      ? edge.labels.filter((label) => kinds.includes(label.kind))
-      : edge.labels;
+    const labels = edge.labels.filter(
+      (label) =>
+        (!kinds || kinds.includes(label.kind)) && labelStartedBy(label, upTo)
+    );
     if (labels.length === 0) continue;
     // 仮ノードは相手が残っていれば残す
     const aOk = isUnresolvedId(edge.a)
@@ -396,13 +453,14 @@ export function filterRelationGraph(
 
   const nodes: RelationNode[] = [];
   const hiddenIsolated: RelationNode[] = [];
-  for (const node of graph.nodes) {
-    if (node.provisional) {
+  for (const original of graph.nodes) {
+    if (original.provisional) {
       // 相手ごと消えた仮ノードは、指す先が無いので出さない
-      if (linked.has(node.id)) nodes.push(node);
+      if (linked.has(original.id)) nodes.push(original);
       continue;
     }
-    if (!keptReal.has(node.id)) continue;
+    if (!keptReal.has(original.id)) continue;
+    const node = nodeAsOf(original, upTo);
     if (linked.has(node.id) || filter.showIsolated) {
       nodes.push(node);
       continue;
@@ -475,6 +533,84 @@ export function countUnresolved(graph: RelationGraph): UnresolvedCounts {
       .map((entry) => entry.targetName)
   );
   return { unresolvedCount: shown.size, ambiguousCount: ambiguous.size };
+}
+
+/**
+ * その言葉は、第N話までに使われ始めていたか。
+ *
+ * **「第N話の時点で使われているか」ではない。** 図は「第N話までに起きた
+ * こと」を見るので、第3話で使われなくなった呼び方も第5話までの図に残す
+ * （`addressPairs.ts` の時点の判定とは向きが違うので流用しない）
+ */
+function labelStartedBy(label: RelationLabel, upTo: number | null): boolean {
+  return hasAppearedBy(
+    label.firstChapter === null ? [] : [label.firstChapter],
+    upTo
+  );
+}
+
+/**
+ * ノードを第N話の時点の形にする。大きさ（登場話数）も第N話までで数え直す
+ * ——第2話までの図で、第9話までの登場回数の大きさを見せない
+ */
+function nodeAsOf(node: RelationNode, upTo: number | null): RelationNode {
+  if (upTo === null) return node;
+  const appearedChapters = chaptersAsOf(node.appearedChapters, upTo);
+  if (appearedChapters.length === node.appearedChapters.length) return node;
+  return {
+    ...node,
+    appearedChapters,
+    chapterCount: appearedChapters.length,
+  };
+}
+
+/**
+ * 図の最終話（「第N話まで」のつまみの上限）。
+ *
+ * 登場した話と、呼称が使われ始めた話のいちばん後ろ。**登場話数の件数の
+ * 最大ではない**——飛び飛びに出る人物しか居ない作品では、件数では最終話に
+ * 届かない。話数の記録が1つも無ければ0
+ */
+export function lastChapterOf(graph: RelationGraph): number {
+  let last = 0;
+  for (const node of graph.nodes) {
+    for (const at of node.appearedChapters) last = Math.max(last, at);
+  }
+  for (const edge of graph.edges) {
+    for (const label of edge.labels) {
+      if (label.firstChapter !== null) last = Math.max(last, label.firstChapter);
+    }
+  }
+  return last;
+}
+
+/**
+ * つまみの値を「第N話まで」の絞り込みへ直す。`null` は「最終話まで」。
+ *
+ * **最終話（以上）を選んだら `null` にする。** 数字のまま持つと、抽出で
+ * 新しい話の人物が増えたとき、作者が触っていないのに図が古い最終話で
+ * 止まり、増えた人物が黙って隠れる（所属の絞り込みで、あとから増えた
+ * 所属を選んだことにして出すのと同じ考え方）。資料が減って最終話を
+ * 超えた値も、同じく最終話へ寄せる。
+ */
+export function normalizeUpToChapter(
+  value: number | null | undefined,
+  last: number
+): number | null {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+  if (last <= 0) return null;
+  const rounded = Math.round(value);
+  if (rounded >= last) return null;
+  return Math.max(1, rounded);
+}
+
+/** 登場話数を昇順・重複なし・数値だけにそろえる */
+function normalizeChapters(chapters: readonly number[]): number[] {
+  return [...new Set(chapters.filter((at) => Number.isFinite(at)))].sort(
+    (left, right) => left - right
+  );
 }
 
 function sortEdges(edges: RelationEdge[]): RelationEdge[] {

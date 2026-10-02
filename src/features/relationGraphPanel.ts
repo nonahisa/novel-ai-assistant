@@ -15,6 +15,8 @@ import {
   egoGraph,
   filterRelationGraph,
   isUnresolvedId,
+  lastChapterOf,
+  normalizeUpToChapter,
   restrictUnresolved,
   NO_AFFILIATION_KEY,
   type RelationGraph,
@@ -155,7 +157,8 @@ export function stepCenterHistory(
 
 /** 画面へ送る絞り込み。画面から返ってくる形でもある */
 interface FilterView {
-  minChapters: number;
+  /** 第N話まで。画面へ送るときは「最終話まで」も最終話の番号にして送る */
+  upToChapter: number;
   kinds: RelationLabelKind[];
   affiliations: string[];
   showIsolated: boolean;
@@ -176,7 +179,11 @@ class RelationGraphPanel {
   private history: CenterHistory = EMPTY_CENTER_HISTORY;
   private showSecondRing = false;
 
-  private minChapters = 0;
+  /**
+   * 第N話まで。null は「最終話まで」（既定。作者の要望、2026-10-02）。
+   * 最終話を選んだら null に戻す——資料が増えても図が追いつく
+   */
+  private upToChapter: number | null = null;
   private kinds: RelationLabelKind[] = ["relation", "address"];
   /** 選んでいる所属。null は「全部」（まだ触っていない） */
   private affiliations: string[] | null = null;
@@ -307,8 +314,11 @@ class RelationGraphPanel {
     }
     this.knownAffiliations = new Set(keys);
 
-    const max = this.maxChapters();
-    if (this.minChapters > max) this.minChapters = max;
+    // 資料が減って最終話を超えた値は、最終話へ寄せる
+    this.upToChapter = normalizeUpToChapter(
+      this.upToChapter,
+      this.lastChapter()
+    );
     this.post();
   }
 
@@ -319,7 +329,10 @@ class RelationGraphPanel {
           this.post();
           return;
         case "filter":
-          this.minChapters = Math.max(0, Math.round(message.filter.minChapters));
+          this.upToChapter = normalizeUpToChapter(
+            message.filter.upToChapter,
+            this.lastChapter()
+          );
           this.kinds = message.filter.kinds;
           this.affiliations = message.filter.affiliations;
           this.showIsolated = message.filter.showIsolated;
@@ -429,11 +442,9 @@ class RelationGraphPanel {
       }));
   }
 
-  private maxChapters(): number {
-    return this.base.nodes.reduce(
-      (max, node) => Math.max(max, node.chapterCount),
-      0
-    );
+  /** 図の最終話（つまみの上限）。登場話数の件数ではなく話番号で見る */
+  private lastChapter(): number {
+    return lastChapterOf(this.base);
   }
 
   private post(): void {
@@ -442,8 +453,9 @@ class RelationGraphPanel {
 
   private build(): GraphView {
     const options = this.affiliationOptions();
+    const lastChapter = this.lastChapter();
     const filter: RelationGraphFilter = {
-      minChapters: this.minChapters,
+      upToChapter: this.upToChapter,
       kinds: this.kinds,
       affiliations: this.affiliations ?? undefined,
       showIsolated: this.showIsolated,
@@ -493,13 +505,13 @@ class RelationGraphPanel {
       canOpenRecord,
       showSecondRing: this.showSecondRing,
       filter: {
-        minChapters: this.minChapters,
+        upToChapter: this.upToChapter ?? lastChapter,
         kinds: this.kinds,
         affiliations: this.affiliations ?? options.map((entry) => entry.key),
         showIsolated: this.showIsolated,
       },
       affiliations: options,
-      maxChapters: this.maxChapters(),
+      lastChapter,
       hiddenIsolated: {
         count: filtered.hiddenIsolated.length,
         names: filtered.hiddenIsolated.map((node: RelationNode) => node.name),
@@ -546,7 +558,7 @@ class RelationGraphPanel {
     if (this.mode === "ego" && this.centerId) {
       return (
         "この人物は、いまの絞り込みでは図に居ません。" +
-        "登場話数の下限を下げるか、所属の選び直しをしてください。"
+        "「第N話まで」を後ろの話へ動かすか、所属の選び直しをしてください。"
       );
     }
     return "絞り込みに合う人物が居ません。条件をゆるめてください。";
@@ -576,7 +588,8 @@ interface GraphView {
   showSecondRing: boolean;
   filter: FilterView;
   affiliations: Array<{ key: string; label: string; count: number }>;
-  maxChapters: number;
+  /** 図の最終話。話数の記録が1つも無ければ0（つまみを押せなくする） */
+  lastChapter: number;
   hiddenIsolated: { count: number; names: string[] };
   unresolvedCount: number;
   ambiguousCount: number;
