@@ -22,7 +22,11 @@ import {
   stripMemoLines,
   type SceneMemo,
 } from "../../../src/core/sceneMemo";
-import { sceneMemoToMarkdown } from "../../../src/core/sceneMemoMarkdown";
+import {
+  SCENE_MEMO_FORMER_TITLES,
+  SCENE_MEMO_TITLE,
+  sceneMemoToMarkdown,
+} from "../../../src/core/sceneMemoMarkdown";
 import { countChars, countManuscriptLines } from "../../../src/core/charCount";
 import { splitIntoChunks, withLineNumbers } from "../../../src/core/chunker";
 import { convertForPosting } from "../../../src/core/postingConvert";
@@ -421,7 +425,7 @@ describe("Markdownで書き出す（6.40.4）", () => {
       totalCount: MEMOS.length,
       placeOf,
     });
-    expect(markdown).toContain("# シーンメモ：試作");
+    expect(markdown).toContain("# 校正・メモ：試作");
     expect(markdown).toContain("メモ 4件");
     expect(markdown).toContain("## 第1話");
     expect(markdown).toContain("- 2行目：**TODO** 一つ目");
@@ -440,6 +444,16 @@ describe("Markdownで書き出す（6.40.4）", () => {
       placeOf,
     });
     expect(markdown).toContain("メモ 1件（絞り込み前は 4件）");
+  });
+
+  /**
+   * 画面の名前（校正・メモパネル。0.96.6）と書き出す紙の名前を揃える
+   * （作者の裁定、2026-10-03）。古い名前は、置き場に残った写しを片づける
+   * ためだけに覚えておく
+   */
+  it("紙の名前は「校正・メモ」。古い「シーンメモ」は片づけの対象として持つ", () => {
+    expect(SCENE_MEMO_TITLE).toBe("校正・メモ");
+    expect(SCENE_MEMO_FORMER_TITLES).toEqual(["シーンメモ"]);
   });
 
   it("1件も無ければ、その旨だけを出す", () => {

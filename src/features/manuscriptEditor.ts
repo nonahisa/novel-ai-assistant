@@ -841,6 +841,33 @@ export async function addMemoToOpenManuscript(): Promise<boolean> {
 }
 
 /**
+ * 前面の原稿エディターに、選んでいる語へルビ・傍点を付ける頼みを出させる
+ * （傍点のキー Ctrl+Alt+K。設計書6.25.10）。
+ *
+ * **選んでいる語は画面の中にしかない**（原稿エディターは `TextEditor` を
+ * 持たない）ので、こちらでは付けられない。画面へ送り返し、画面がキーの道
+ * （選んでいなければ一言出す）を通して、右クリックと同じ頼みを送ってくる。
+ *
+ * @returns 前面に原稿エディターがあって送れたら true。無ければ呼んだ側が
+ *   素のエディターの道へ回る
+ */
+export function askNotationInActiveManuscript(kind: "ruby" | "emphasis"): boolean {
+  for (const open of openManuscripts.values()) {
+    let active = false;
+    try {
+      active = open.panel.active;
+    } catch {
+      // 閉じかけの面は読めないことがある。飛ばす
+      continue;
+    }
+    if (!active) continue;
+    void open.panel.webview.postMessage({ type: "askNotation", kind });
+    return true;
+  }
+  return false;
+}
+
+/**
  * 読み上げのために原稿を開いて、列を出す（設計書6.42。詳細メニューの入口）。
  *
  * **どの原稿を読むかは、作者が「いま見ているもの」に合わせる。** 探す順は3つ。

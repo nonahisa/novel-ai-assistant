@@ -84,6 +84,17 @@ export const MANUSCRIPT_KEY_BINDINGS: readonly ManuscriptKeyBinding[] = [
     label: "ここにメモを足す",
   },
   { key: "ctrl+alt+c", command: "novelai.openChat", label: "AIに相談する" },
+  /*
+    傍点（K は圏点）。前は画面の中で Ctrl+Shift+K を受けていたが、Notion の
+    デスクトップアプリが Windows 全体で取っていて届かなかった（作者の実機、
+    2026-10-03。裁定「既定のキーを変える」）。ほかと同じ Ctrl+Alt+頭文字にし、
+    作者が「キーボード ショートカット」で変えられる形へ揃えた
+  */
+  {
+    key: "ctrl+alt+k",
+    command: "novelai.addEmphasis",
+    label: "選んだ語に傍点を付ける",
+  },
 ];
 
 /**

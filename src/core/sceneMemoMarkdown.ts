@@ -11,8 +11,21 @@ import type { SceneMemo } from "./sceneMemo";
  * VS Code APIに依らない純粋関数として置く。
  */
 
-/** 書き出す文書の呼び名（置き場と掃除は 6.17.7 に乗る） */
-export const SCENE_MEMO_TITLE = "シーンメモ";
+/**
+ * 書き出す文書の呼び名（置き場と掃除は 6.17.7 に乗る）。見出し・紙の名前
+ * （`校正・メモ_<日付>.md`）・片づけの鍵を兼ねる。
+ *
+ * 画面の名前（校正・メモパネル。0.96.6）に揃えた（作者の裁定、2026-10-03）。
+ * 「・」（U+30FB）は Windows・Git・ブラウザ版の置き場のどれでもファイル名に使える
+ */
+export const SCENE_MEMO_TITLE = "校正・メモ";
+
+/**
+ * 前に使っていた呼び名。**片づけのためだけに覚えておく**——新しい名前では
+ * 古い名前の写しを拾えず、置き場に残り続けるため（`openGeneratedMarkdown`
+ * の `formerKinds`）
+ */
+export const SCENE_MEMO_FORMER_TITLES: readonly string[] = ["シーンメモ"];
 
 /** 話の呼び名（「第3話」＋題）。どちらも無ければ空でよい */
 export interface SceneMemoPlace {

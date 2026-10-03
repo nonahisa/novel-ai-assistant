@@ -50,11 +50,13 @@ const EXPECTED: Record<string, string> = {
   "ctrl+alt+shift+n": "novelai.prevSceneMemo",
   "ctrl+alt+shift+m": "novelai.addSceneMemo",
   "ctrl+alt+c": "novelai.openChat",
+  // 傍点（K は圏点）。2026-10-03 に画面の Ctrl+Shift+K から移した
+  "ctrl+alt+k": "novelai.addEmphasis",
 };
 
 describe("原稿エディターのキー割り当て（package.json）", () => {
-  test("9件あり、裁定の表と同じ組み合わせ", () => {
-    expect(ours).toHaveLength(9);
+  test("10件あり、裁定の表と同じ組み合わせ", () => {
+    expect(ours).toHaveLength(10);
     const actual = Object.fromEntries(
       ours.map((binding) => [binding.key, binding.command])
     );
@@ -116,5 +118,20 @@ describe("原稿エディターのキー割り当て（package.json）", () => {
     for (const binding of bindings) {
       expect(forbidden.test(binding.key), binding.key).toBe(false);
     }
+  });
+});
+
+describe("傍点のキー（Ctrl+Alt+K）の受け先", () => {
+  const extension = readFileSync("src/extension.ts", "utf8");
+  const editor = readFileSync("src/features/manuscriptEditor.ts", "utf8");
+
+  test("novelai.addEmphasis は、前面が原稿エディターならそちらへ頼みを送る", () => {
+    // 原稿エディターは TextEditor を持たないので、素のエディター向けの
+    // addEmphasis だけでは「Markdownを開いてください」で終わる
+    expect(extension).toMatch(
+      /registerCommand\("novelai\.addEmphasis",[\s\S]{0,300}askNotationInActiveManuscript\("emphasis"\)[\s\S]{0,200}addEmphasis\(\)/
+    );
+    expect(editor).toMatch(/export function askNotationInActiveManuscript\(/);
+    expect(editor).toMatch(/type: "askNotation"/);
   });
 });

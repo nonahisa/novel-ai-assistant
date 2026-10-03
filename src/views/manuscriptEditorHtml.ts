@@ -3691,10 +3691,10 @@ ruby > rt {
     // **ルビは選んでいなくても押せる。** 選択が無ければ拡張機能側が
     // 直前の漢字のまとまりを拾う（傍点は選んだ範囲そのものに付けるので、
     // 選択が要る）
-    add("ルビを振る", askRuby);
-    add("傍点を付ける", askEmphasis, hasSelection);
+    add("ルビ振り", askRuby);
+    add("傍点つけ", askEmphasis, hasSelection);
     rule();
-    add("投稿サイト用にコピー", function () {
+    add("コピー（投稿サイト用）", function () {
       // **品書きから使う行を渡す。** 組んで書く面では、押した瞬間には
       // 選択が外れている（設計書6.12.1）
       //
@@ -3709,15 +3709,15 @@ ruby > rt {
         end: at ? at.end : -1
       });
     });
-    // **記法のままコピー**（作者に確かめていない仮置き。設計書6.12.8）。
+    // **コピー（記法のまま）**（設計書6.12.8）。
     // 普通のコピー（Ctrl+C）は貼り先に合わせて形が変わるので、素の
     // VS Code エディタへ貼ると字だけになる。記法で貼りたいときの逃げ道
-    add("記法のままコピー", function () {
+    add("コピー（記法のまま）", function () {
       const text = menuSelectedNotation();
       if (!text) return;
       vscode.postMessage({ type: "copyNotation", text: text });
     }, hasSelection);
-    add("選んだところをAIに相談", function () {
+    add("AI相談（選択範囲）", function () {
       // 組んで書く面では、品書きを開いた時点の選択を使う。
       // **押した瞬間には選択が消えている**（画面の他所を押すと外れる）ので、
       // textarea のように押されてから読むことができない
@@ -3731,16 +3731,16 @@ ruby > rt {
 
     /* ── シーンメモ（設計書6.40.3・6.40.4） ── */
     rule();
-    add("ここにメモを足す", function () {
+    add("メモ追加", function () {
       // **カーソル行の「上」に挿す**（設計書6.40.3）。いま書いている行の
       // 下に入ると、続きを打つたびに付箋が押し下げられる
       vscode.postMessage({ type: "addMemo", line: menuCaretLine() });
     });
-    add("校正・メモパネルを横に開く", function () {
+    add("校正・メモパネルを開く", function () {
       vscode.postMessage({ type: "openMemos" });
     });
     // 単話プロット（設計書6.36）も「横に資料を開く」項目なので、同じ区切りに置く
-    add("単話プロットを横に開く", function () {
+    add("単話プロットを開く", function () {
       vscode.postMessage({ type: "openEpisodePlot", line: menuCaretLine() });
     });
 ${RESUME_WRITING_LABEL ? `
@@ -4207,6 +4207,15 @@ ${RESUME_WRITING_LABEL ? `
       else if (!message.appearance.compose && composeOn) composeLeave();
       // 当てた見た目は、この原稿の覚えにする（開き直しても残す）
       remember();
+    } else if (message.type === "askNotation") {
+      /*
+        **本体のキー割り当て（傍点の Ctrl+Alt+K）から届く頼み**（設計書6.25.10）。
+        選んでいる語はこの画面にしか無いので、キーの道（keyNotation：
+        選んでいなければ一言出す）を通して、右クリックと同じ頼みを送る。
+        変換中は触らない（キーの受け口と同じ決まり）
+      */
+      if (composing) return;
+      keyNotation(message.kind === "ruby" ? "ruby" : "emphasis");
     } else if (message.type === "revealLine") {
       revealLine(message.line);
     } else if (message.type === "select" && composeOn) {
@@ -6589,12 +6598,13 @@ ${RESUME_WRITING_LABEL ? `
     ── キーで呼ぶ操作（作者の裁定、2026-10-02。設計書6.25） ──
       Ctrl+F            本文を探す（下の find）
       Alt+↑／Alt+↓     前の話・次の話
-      Ctrl+Shift+R      ルビ
-      Ctrl+Shift+K      傍点（K は「圏点」の頭文字。VS Code では「行を消す」だが、
-                        それは文字を打つエディターに焦点があるときだけ効く割当で、
-                        この画面に焦点があるときは本体に何も起きない。
-                        Ctrl+Shift+B〈ビルド〉・E〈エクスプローラー〉・D〈デバッグ〉
-                        のような画面全体の割当は避けた）
+      Ctrl+Shift+R      ルビ（Ctrl+Shift+B〈ビルド〉・E〈エクスプローラー〉・
+                        D〈デバッグ〉のような画面全体の割当は避けた）
+      Ctrl+Alt+K        傍点（K は「圏点」の頭文字）。**ここでは受けない**——
+                        下の Ctrl+Alt+文字と同じく本体の割当（package.json）で
+                        受け、本体から askNotation が届く。前は Ctrl+Shift+K を
+                        ここで受けていたが、Notion のデスクトップアプリが
+                        Windows 全体で取っていて届かなかった（2026-10-03）
       Ctrl+ホイール・Ctrl+＋／Ctrl+－・Ctrl+0   本文の字の大きさ
       Ctrl+Alt+文字     ここでは受けず、本体のキー割り当てへ渡す（設計書6.25.10）
 
@@ -6754,12 +6764,6 @@ ${RESUME_WRITING_LABEL ? `
         if (keyInField(event)) return;
         keyStop(event);
         keyNotation("ruby");
-        return;
-      }
-      if (event.shiftKey && (code === "KeyK" || key === "K")) {
-        if (keyInField(event)) return;
-        keyStop(event);
-        keyNotation("emphasis");
         return;
       }
 

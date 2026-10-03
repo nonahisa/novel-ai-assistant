@@ -24,6 +24,7 @@ import {
   type SceneMemo,
 } from "../core/sceneMemo";
 import {
+  SCENE_MEMO_FORMER_TITLES,
   SCENE_MEMO_TITLE,
   sceneMemoToMarkdown,
 } from "../core/sceneMemoMarkdown";
@@ -780,7 +781,8 @@ class SceneMemoPanel {
         placeOf: (memo) => this.labelOf(memo),
       }),
       { preview: false },
-      { work: this.work }
+      // 前の名前（シーンメモ）の写しも片づける（2026-10-03 に名前を変えた）
+      { work: this.work, formerKinds: SCENE_MEMO_FORMER_TITLES }
     );
   }
 

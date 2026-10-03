@@ -110,8 +110,28 @@ describe("右クリックの品書きの並び", () => {
     ]);
     // これまでの項目は残っている
     const labels = items.map((item) => item.label);
-    expect(labels).toContain("ルビを振る");
-    expect(labels).toContain("記法のままコピー");
+    expect(labels).toContain("ルビ振り");
+    expect(labels).toContain("コピー（記法のまま）");
+  });
+
+  it("名前は短く、名詞止めにそろえる（作者の案、2026-10-03）", () => {
+    const { items } = runOpenMenu({ term: false, hasSelection: true });
+    const labels = items.filter((item) => item.kind === "item").map((item) => item.label);
+    expect(labels).toEqual([
+      "切り取り",
+      "コピー",
+      "貼り付け",
+      "ルビ振り",
+      "傍点つけ",
+      "コピー（投稿サイト用）",
+      "コピー（記法のまま）",
+      "AI相談（選択範囲）",
+      "メモ追加",
+      "校正・メモパネルを開く",
+      "単話プロットを開く",
+      // 詳細メニューの名前をそのまま使う（actionTree の novelai.resumeWriting）
+      "執筆再開用資料生成",
+    ]);
   });
 
   it("用語の上でなくても、先頭は同じ3つ", () => {

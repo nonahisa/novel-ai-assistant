@@ -6,7 +6,9 @@ import {
   findSameGeneratedFile,
   GENERATED_DIR,
   pruneGeneratedFiles,
+  RETIRED_GENERATED_PRUNE_POLICY,
   sanitizeNamePart,
+  type GeneratedPrunePolicy,
   writeGeneratedFile,
 } from "../core/generatedFiles";
 import { workPaths } from "../core/workRegistry";
@@ -107,7 +109,16 @@ export async function openGeneratedMarkdown(
   displayName: string,
   content: string,
   options?: vscode.TextDocumentShowOptions,
-  location?: { work?: WorkEntry; reuseSameDay?: boolean }
+  location?: {
+    work?: WorkEntry;
+    reuseSameDay?: boolean;
+    /**
+     * この読み物が前に使っていた名前。**同じ置き場の、その名前の写しを
+     * 全部片づける**（名前を変えたあと、古い名前の写しが残り続けないように。
+     * 2026-10-03「シーンメモ」→「校正・メモ」）
+     */
+    formerKinds?: readonly string[];
+  }
 ): Promise<void> {
   const directory = generatedDirectoryFor(location?.work);
   if (directory) {
@@ -128,6 +139,13 @@ export async function openGeneratedMarkdown(
 
       const target = await writeGeneratedFile(directory, displayName, content);
       await pruneGeneratedFilesQuietly(directory, displayName);
+      for (const former of location?.formerKinds ?? []) {
+        await pruneGeneratedFilesQuietly(
+          directory,
+          former,
+          RETIRED_GENERATED_PRUNE_POLICY
+        );
+      }
       await openInDefaultEditor(target, options);
       return;
     } catch (error) {
@@ -197,10 +215,11 @@ function generatedDirectoryFor(work?: WorkEntry): string | undefined {
  */
 async function pruneGeneratedFilesQuietly(
   directory: string,
-  kind: string
+  kind: string,
+  policy?: GeneratedPrunePolicy
 ): Promise<void> {
   try {
-    await pruneGeneratedFiles(directory, kind);
+    await pruneGeneratedFiles(directory, kind, policy);
   } catch (error) {
     logFailure("生成文書の整理", {
       種類: kind,

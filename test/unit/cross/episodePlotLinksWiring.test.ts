@@ -23,7 +23,7 @@ describe("E：原稿エディタから単話プロットを右の列に開く", 
 
   test("上のバーと右クリックの両方にある", () => {
     expect(html).toContain('id="episodePlot"');
-    expect(html).toContain("単話プロットを横に開く");
+    expect(html).toContain('add("単話プロットを開く"');
     // どちらもカーソルの行を添える（合本ではどの話かが位置でしか分からない）
     expect(html).toContain('type: "openEpisodePlot", line: caretLine()');
     expect(html).toContain('type: "openEpisodePlot", line: menuCaretLine()');

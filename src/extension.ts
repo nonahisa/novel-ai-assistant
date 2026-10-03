@@ -449,6 +449,7 @@ import {
   ManuscriptEditorProvider,
   activeManuscriptTabUri,
   addMemoToOpenManuscript,
+  askNotationInActiveManuscript,
   insertMemoLineAbove,
   isInsideWork,
   openManuscriptForReading,
@@ -6452,7 +6453,15 @@ export async function activate(
 
   context.subscriptions.push(
     registerCommand("novelai.addRuby", addRuby),
-    registerCommand("novelai.addEmphasis", addEmphasis),
+    /*
+      **前面が原稿エディターなら、そちらへ頼む**（傍点のキー Ctrl+Alt+K。
+      設計書6.25.10）。原稿エディターは TextEditor を持たないので、素の
+      エディター向けの addEmphasis だけでは「Markdownを開いて」で終わる
+    */
+    registerCommand("novelai.addEmphasis", async () => {
+      if (askNotationInActiveManuscript("emphasis")) return;
+      await addEmphasis();
+    }),
     // **貼り付け先は1度だけ訊く**（設計書6.12.4）。登録済みの投稿先を
     // 先頭に並べたいが、画面側は作品を知らないので、どの作品かはここで引く
     registerCommand("novelai.copyForPosting", async () => {

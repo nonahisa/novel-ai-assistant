@@ -6,6 +6,7 @@ import {
   generatedNamePrefix,
   isSameGeneratedContent,
   pruneGeneratedFiles,
+  RETIRED_GENERATED_PRUNE_POLICY,
   sameDayGeneratedNames,
   selectFilesToPrune,
   writeGeneratedFile,
@@ -347,6 +348,52 @@ describe("置き場への書き出しと片付け", () => {
         "本文"
       )
     ).resolves.toBeUndefined();
+  });
+
+  /**
+   * 読み物の名前を変えたとき（「シーンメモ」→「校正・メモ」、2026-10-03）、
+   * **古い名前の写しは新しい名前では拾えない**ので、残り続ける。古い名前は
+   * 二度と作らないので、件数を残さず全部片づける。
+   */
+  test("使わなくなった名前の写しは、生成した名前の形のものだけ全部消す", async () => {
+    place("シーンメモ_2026-08-28_1000.md", AT.getTime() - 60_000);
+    place("シーンメモ_2026-08-29_1429.md", AT.getTime() - 1_000);
+    // 作者が手で置いたもの・新しい名前のもの・ほかの種類は触らない
+    place("シーンメモ_自分用.md", AT.getTime() - 60_000);
+    place("校正・メモ_2026-08-29_1430.md", AT.getTime());
+    place("伏線の一覧_2026-08-29_1430.md", AT.getTime());
+
+    const removed = await pruneGeneratedFiles(
+      DIRECTORY,
+      "シーンメモ",
+      RETIRED_GENERATED_PRUNE_POLICY,
+      AT
+    );
+
+    expect(removed).toBe(2);
+    expect(names()).toEqual([
+      "シーンメモ_自分用.md",
+      "伏線の一覧_2026-08-29_1430.md",
+      "校正・メモ_2026-08-29_1430.md",
+    ]);
+  });
+
+  test("片づけは置き場（.aiwriter/generated）の中だけを読み、本文の `//` のメモに触れない", async () => {
+    // 本文は作品の直下にあり、置き場の外。読みにも行かない
+    const episode = "C:\\works\\ある作品\\episode_0001.md";
+    const body = new TextEncoder().encode("本文\n// シーンメモ：ここを直す\n続き\n");
+    files.set(key(episode), { bytes: body, mtime: AT.getTime() - 60_000 });
+    place("シーンメモ_2026-08-28_1000.md", AT.getTime() - 60_000);
+
+    await pruneGeneratedFiles(DIRECTORY, "シーンメモ", RETIRED_GENERATED_PRUNE_POLICY, AT);
+
+    expect(deleted).toEqual(["シーンメモ_2026-08-28_1000.md"]);
+    expect(files.get(key(episode))?.bytes).toBe(body);
+    // 読んだ置き場は generated だけ
+    const readDirectory = workspace.fs.readDirectory as unknown as {
+      mock: { calls: Array<[{ fsPath: string }]> };
+    };
+    expect(readDirectory.mock.calls.map(([uri]) => uri.fsPath)).toEqual([key(DIRECTORY)]);
   });
 });
 

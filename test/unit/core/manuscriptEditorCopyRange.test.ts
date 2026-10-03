@@ -98,8 +98,8 @@ describe("画面から範囲が届く道", () => {
     "utf8"
   );
 
-  test("右クリックの「投稿サイト用にコピー」が、選択の位置を添えて送る", () => {
-    const menu = html.slice(html.indexOf('add("投稿サイト用にコピー"'));
+  test("右クリックの「コピー（投稿サイト用）」が、選択の位置を添えて送る", () => {
+    const menu = html.slice(html.indexOf('add("コピー（投稿サイト用）"'));
 
     expect(menu.slice(0, 700)).toContain("menuSelection()");
     expect(menu.slice(0, 700)).toContain('type: "copyForPosting"');
@@ -115,9 +115,9 @@ describe("画面から範囲が届く道", () => {
     expect(feature).toContain("fromLfOffset(whole, selection.start)");
   });
 
-  test("「記法のままコピー」は、選んでいるときだけ押せる", () => {
+  test("「コピー（記法のまま）」は、選んでいるときだけ押せる", () => {
     // 選択が無ければ写すものが無い（全文は普通のコピーとメニューの口で足りる）
-    const item = html.slice(html.indexOf('add("記法のままコピー"'));
+    const item = html.slice(html.indexOf('add("コピー（記法のまま）"'));
 
     expect(item.slice(0, 400)).toContain('type: "copyNotation"');
     expect(item.slice(0, 400)).toContain("hasSelection");

@@ -6,7 +6,8 @@ import { buildManuscriptEditorHtml } from "../../../src/views/manuscriptEditorHt
  *
  * - Ctrl+F … 本文を探す（自前の検索の列。打つ面・組んで書く面の両方）
  * - Alt+↑／Alt+↓ … 前の話・次の話（キーからは新しい話を作らない）
- * - Ctrl+Shift+R … ルビ／Ctrl+Shift+K … 傍点
+ * - Ctrl+Shift+R … ルビ（傍点は Ctrl+Alt+K。本体のキー割り当てで受け、
+ *   画面へ「傍点を頼む」が届く。2026-10-03 に Ctrl+Shift+K から変えた）
  * - Ctrl+ホイール・Ctrl+＋／Ctrl+－・Ctrl+0 … 本文の字の大きさ
  *
  * 画面へ渡る本物のスクリプトから、キーの区切り（keys）と検索の区切り
@@ -291,14 +292,26 @@ describe("Alt+↑／Alt+↓ で前の話・次の話", () => {
   });
 });
 
-describe("Ctrl+Shift+R でルビ、Ctrl+Shift+K で傍点", () => {
+describe("Ctrl+Shift+R でルビ（傍点は Ctrl+Alt+K）", () => {
   it("選んでいれば、ボタンと同じ道で頼む", () => {
     const h = harness({ selection: "漢字" });
     const ruby = h.key({ key: "R", code: "KeyR", ctrlKey: true, shiftKey: true });
-    const emph = h.key({ key: "K", code: "KeyK", ctrlKey: true, shiftKey: true });
-    expect(h.calls()).toEqual(["askRuby", "askEmphasis"]);
+    expect(h.calls()).toEqual(["askRuby"]);
     expect(ruby.prevented && ruby.stopped).toBe(true);
-    expect(emph.prevented && emph.stopped).toBe(true);
+  });
+
+  it("Ctrl+Shift+K は画面で受けない（Notion などの常駐アプリが Windows 全体で取るため、2026-10-03）", () => {
+    const h = harness({ selection: "漢字" });
+    const emph = h.key({ key: "K", code: "KeyK", ctrlKey: true, shiftKey: true });
+    expect(h.calls()).toEqual([]);
+    expect(emph.prevented || emph.stopped).toBe(false);
+  });
+
+  it("Ctrl+Alt+K は止めずに本体へ渡す（package.json の割り当てが傍点を頼み返す）", () => {
+    const h = harness({ selection: "漢字" });
+    const emph = h.key({ key: "k", code: "KeyK", ctrlKey: true, altKey: true });
+    expect(h.calls()).toEqual(["flush:キー操作を本体へ渡す"]);
+    expect(emph.prevented || emph.stopped).toBe(false);
   });
 
   it("選んでいなければ頼まずに一言出す", () => {
@@ -306,8 +319,6 @@ describe("Ctrl+Shift+R でルビ、Ctrl+Shift+K で傍点", () => {
     h.key({ key: "R", code: "KeyR", ctrlKey: true, shiftKey: true });
     expect(h.calls()).toEqual([]);
     expect(h.note()).toBe("ルビを振る文字を選んでから押してください");
-    h.key({ key: "K", code: "KeyK", ctrlKey: true, shiftKey: true });
-    expect(h.note()).toBe("傍点を付ける文字を選んでから押してください");
   });
 
   it("組んで書く面でも同じ（選択の有無で分ける）", () => {
@@ -547,9 +558,9 @@ describe("既存のキーを壊さない", () => {
  * 読んだり、シーンメモが前の行へ足されたりしないように。
  */
 describe("Ctrl+Alt+頭文字は本体のキー割り当てへ渡す", () => {
-  const LETTERS = ["t", "p", "h", "a", "m", "n", "b", "i", "c"];
+  const LETTERS = ["t", "p", "h", "a", "m", "n", "b", "i", "c", "k"];
 
-  it("9つとも止めない（既定の動きも伝わりも）", () => {
+  it("どれも止めない（既定の動きも伝わりも）", () => {
     const h = harness({ selection: "語" });
     for (const letter of LETTERS) {
       const event = h.key({
@@ -617,5 +628,20 @@ describe("Ctrl+Alt+頭文字は本体のキー割り当てへ渡す", () => {
     h.key({ key: "f", code: "KeyF", ctrlKey: true, altKey: true });
     expect(h.posted().filter((m) => m.type !== "caret")).toEqual([]);
     expect(h.bodyHas("finding")).toBe(false);
+  });
+});
+
+/**
+ * Ctrl+Alt+K（傍点）は本体のキー割り当てで `novelai.addEmphasis` を呼ぶ。
+ * 選んでいる語は画面の中にしか無いので、拡張機能は前面の原稿エディターへ
+ * 「傍点を頼んで」（askNotation）と送り返し、画面がキーの道（keyNotation）を通す。
+ */
+describe("本体から届く「傍点を頼んで」（askNotation）", () => {
+  it("本体の受け口が keyNotation へ渡す。変換中は何もしない", () => {
+    const start = code.indexOf('window.addEventListener("message"');
+    const handler = code.slice(start, code.indexOf("\n  });", start));
+    expect(handler).toMatch(
+      /message\.type === "askNotation"[\s\S]{0,300}if \(composing\) return;[\s\S]{0,200}keyNotation\(/
+    );
   });
 });
