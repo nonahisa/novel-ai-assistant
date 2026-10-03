@@ -223,7 +223,7 @@ const RECORD_INPUT = z.object({
   writer: z
     .string()
     .min(1)
-    .describe("書き手の id。**文書のパス records/<書き手のid>/items/... から読む**（記録の欄からは読まない）"),
+    .describe("書き手の id。文書のパス records/<書き手のid>/items/... から読む（記録の欄からは読まない）"),
   kind: z.enum(["memo", "verdict"]),
   by: z.string().optional().describe("使わない（書き手はパスの writer で決める）"),
   at: z.string().optional(),
