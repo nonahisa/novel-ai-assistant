@@ -2517,6 +2517,14 @@ ruby > rt {
   function keepRescue(text) {
     // どの文書のものか分からない控えは、取り戻すときに照合できない
     if (docKey === null) return;
+    /*
+      **帯を出している控えは上書きしない**（リーダーの指示、2026-10-04。設計書6.25.9）。
+      控えの欄は1つなので、帯が開いたまま Ctrl+S・未送信の知らせ・保存の返事が
+      無いときにここで画面の字を書くと、帯の控え（重なって入らなかった字・前回
+      入らなかった字）が状態から消え、再読み込みしたときに取り戻せなくなる。
+      帯を閉じれば（戻す・捨てる）、従来どおり控える
+    */
+    if (rescueOffer !== null) return;
     if (text === rescueSavedText) return;
     rescueSavedText = text;
     writeRescue({

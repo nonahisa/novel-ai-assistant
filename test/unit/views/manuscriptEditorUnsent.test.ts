@@ -428,6 +428,42 @@ describe("便に元の本文の指紋を添える", () => {
     expect(h.rescueOpen()).toBe(false);
   });
 
+  /*
+    **帯を出している控えは、画面の状態から上書きしない**（リーダーの指示、2026-10-04）。
+    控えの欄は1つなので、帯が開いたまま未送信の知らせなどで画面の字を控えると、
+    帯の控えが状態から消え、再読み込みしたときに取り戻せなくなっていた
+  */
+  const rescueTextIn = (store: { state?: unknown }) =>
+    (store.state as { rescue?: { text: string } } | undefined)?.rescue?.text;
+
+  it("重なった控えの帯が開いている間は、未送信の知らせが出ても状態の控えを上書きしない／閉じたあとは従来どおり控える", () => {
+    const store: { state?: unknown } = {};
+    const h = conflicted(store);
+    h.postEdit("前の字と強調。い");
+    h.advance(5_000);
+    expect(h.bannerOpen(), "未送信の知らせが出る場面になっていない").toBe(true);
+    expect(rescueTextIn(store)).toBe("前の字と《《強調》》あ。");
+    h.click("rescueDiscard");
+    h.postEdit("前の字と強調。いう");
+    expect(rescueTextIn(store)).toBe("前の字と強調。いう");
+  });
+
+  it("開いたときに出る「前回の控え」の帯も、開いている間は上書きしない／閉じたあとは従来どおり控える", () => {
+    const store: { state?: unknown } = {
+      state: { rescue: { docKey: "doc", text: "前回の控え", at: 0, baseLength: 1, baseHash: "x" } },
+    };
+    const h = unsentHarness({ store });
+    h.update({ type: "update", docKey: "doc", text: "原稿" });
+    expect(h.rescueOpen()).toBe(true);
+    h.postEdit("原稿あ");
+    h.advance(5_000);
+    expect(h.bannerOpen(), "未送信の知らせが出る場面になっていない").toBe(true);
+    expect(rescueTextIn(store)).toBe("前回の控え");
+    h.click("rescueDiscard");
+    h.postEdit("原稿あい");
+    expect(rescueTextIn(store)).toBe("原稿あい");
+  });
+
   it("前回の控えの帯が出ているときは押しのけず、片づいてから出す", () => {
     const store: { state?: unknown } = {
       state: { rescue: { docKey: "doc", text: "前回の控え", at: 0, baseLength: 1, baseHash: "x" } },
