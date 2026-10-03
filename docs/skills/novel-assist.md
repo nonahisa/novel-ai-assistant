@@ -67,6 +67,7 @@
 
 **取り込む**（「スマホの分を入れて」）
 
+0. **先に、作者にその作品を VS Code で保存してもらう。** 道具からは VS Code の未保存の書きかけが見えないので、開いている話に未保存の変更があると、取り込んだあとで保存の衝突が出る
 1. ArtifactData の `list` で `records` を読む。`imported: true` のものは飛ばしてよい。`works/owner` を `get` して持ち主の id を得る（無ければ、作者にページを一度開いてもらう）
 2. `outbox.import` を呼ぶ：`folder`・`ownerId`・`records`（各文書の id を `id` に入れ、欄はそのまま）。**記録は1回の呼び出しにまとめて渡す**（同じ話のメモを分けて渡すと、2回目は「本文が変わった」で断られる）
 3. 返事の `status` が `imported` と `already` の記録に、ArtifactData の `update` で `imported: true` を付ける（ページで灰色になる）。`refused` は残し、理由（`reason`）を作者に伝える

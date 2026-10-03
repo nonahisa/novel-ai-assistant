@@ -271,9 +271,19 @@ textarea {
     });
   }
 
-  function memoBox(placeholder, onSave) {
+  /*
+    保管庫が動くたびに一覧を組み直すので、打ちかけのメモを鍵ごとに控えて戻す
+    （ほかの人の記録が届いただけで、打っている途中の文が消えないように）
+  */
+  var drafts = {};
+
+  function memoBox(key, placeholder, onSave) {
     var box = el("div", "memo");
     var area = document.createElement("textarea");
+    area.id = "memo-" + key.replace(/[^A-Za-z0-9_-]/g, "_");
+    area.setAttribute("data-key", key);
+    area.value = drafts[key] || "";
+    area.addEventListener("input", function () { drafts[key] = area.value; });
     area.placeholder = placeholder;
     area.setAttribute("aria-label", placeholder);
     var save = el("button", "", "メモを残す");
@@ -281,7 +291,12 @@ textarea {
     save.addEventListener("click", async function () {
       var text = area.value.trim();
       if (!text) return;
-      if (await onSave(text, save)) area.value = "";
+      if (await onSave(text, save)) {
+        delete drafts[key];
+        var current = document.querySelector('textarea[data-key="' + CSS.escape(key) + '"]');
+        if (current) current.value = "";
+        area.value = "";
+      }
     });
     box.appendChild(area);
     box.appendChild(save);
@@ -303,6 +318,8 @@ textarea {
 
   function render() {
     var work = state.work;
+    var active = document.activeElement;
+    var focusedKey = active && active.getAttribute ? active.getAttribute("data-key") : null;
     listEl.textContent = "";
     if (!work) {
       titleEl.textContent = "出先の原稿箱";
@@ -370,7 +387,7 @@ textarea {
           });
           item.appendChild(buttons);
         }
-        item.appendChild(memoBox("この指摘へのメモ", function (text, button) {
+        item.appendChild(memoBox("f:" + str(f.id), "この指摘へのメモ", function (text, button) {
           return addRecord(Object.assign({ kind: "memo", text: text }, base), button);
         }));
         var recs = el("div", "records");
@@ -381,7 +398,7 @@ textarea {
 
       var tail = el("div", "finding");
       tail.appendChild(el("div", "label", findings.length ? "この話へのメモ（末尾に入ります）" : "指摘はありません。この話へのメモ（末尾に入ります）"));
-      tail.appendChild(memoBox("この話へのメモ", function (text, button) {
+      tail.appendChild(memoBox("e:" + group.file, "この話へのメモ", function (text, button) {
         return addRecord({ kind: "memo", text: text, episode: group.file, baseHash: group.hash }, button);
       }));
       var tailRecs = el("div", "records");
@@ -391,6 +408,16 @@ textarea {
 
       listEl.appendChild(section);
     });
+
+    // 打っていた欄へ、組み直したあとも入力の位置を戻す
+    if (focusedKey) {
+      var again = document.querySelector('textarea[data-key="' + CSS.escape(focusedKey) + '"]');
+      if (again) {
+        var end = again.value.length;
+        again.focus();
+        try { again.setSelectionRange(end, end); } catch (error) { /* 位置を戻せなくても入力は残る */ }
+      }
+    }
   }
 
   async function start() {
