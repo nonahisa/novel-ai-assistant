@@ -582,9 +582,24 @@ class SceneMemoPanel {
         case "prev":
           await this.jump(message.type);
           return;
-        case "reveal":
+        case "reveal": {
+          // **押した行を先に光らせる**（「次へ」の jump と同じ理由。2026-10-03）。
+          // カーソルの知らせが返るまでの間、前の行が光ったままだと
+          // どの行へ飛んだのかが本文の光りと結びつかない
+          const pressed = this.memos.find(
+            (memo) =>
+              memo.line === message.line &&
+              paths.pathKeyForComparison(memo.filePath) ===
+                paths.pathKeyForComparison(message.filePath)
+          );
+          if (pressed) {
+            this.activeKey = memoKey(pressed);
+            this.currentFile = message.filePath;
+            this.post();
+          }
           await this.reveal(message.filePath, message.line);
           return;
+        }
         case "done":
           await this.markDone(message.filePath, message.line, message.raw);
           return;

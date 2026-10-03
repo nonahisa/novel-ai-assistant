@@ -11,16 +11,19 @@
  *   既に入っている（`npm run test:web` が使う）。テスト用の VS Code も
  *   統合テストと同じ `.vscode-test/` のものを使い、無ければ同じ関数で取り寄せる
  * - **作者の原稿には触らない。** 作品は一時フォルダーへ毎回作り、終わったら消す
+ * - **起こした VS Code は必ず止める。** 失敗・時間切れ・途中で止めたときも残さない
+ *   （`cleanup.ts`。1件ごとの片づけと、走りの最初と最後の片づけの2段）
  * - **1件ごとに作品も VS Code も作り直す。** 遅くても、前の件の残り（開いたタブ・
  *   保管庫の札）に引きずられないほうを取る
  */
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { downloadAndUnzipVSCode } from "@vscode/test-electron";
 import { _electron, type ElectronApplication, type Page } from "playwright-core";
+import { recordLaunch, stopLaunch } from "./cleanup";
 import { waitUntil } from "./wait";
 import { CLEAR_NOTIFICATIONS_KEY, clearNotifications, closeDialog, dialogText } from "./workbenchDom";
 
@@ -83,6 +86,9 @@ export interface E2ESession {
  */
 async function launch(episodes: readonly FixtureEpisode[]): Promise<E2ESession> {
   const root = await mkdtemp(path.join(tmpdir(), "novelai-e2e-"));
+  // **起こす前に台帳へ載せる。** 起動の途中で時間切れになっても、走りの最後の
+  // 片づけ（globalSetup）が引数の一時フォルダー名で拾って止める
+  await recordLaunch({ root });
   // 書庫の形（書庫の中に作品が1つ）。作品フォルダーそのものを開くと、
   // 本文フォルダーが作品に見えて「作品か書庫か」を訊かれることがある
   const library = path.join(root, "書庫");
@@ -180,30 +186,48 @@ async function launch(episodes: readonly FixtureEpisode[]): Promise<E2ESession> 
     ],
     env: cleanEnv(),
     timeout: 60_000,
+  }).catch(async (error: unknown) => {
+    await stopLaunch({ root });
+    throw error;
   });
-  await keepOutOfTheWay(app);
-  const page = await app.firstWindow();
-  // 窓が裏にあっても、画面の中では「焦点がある」として振る舞わせる（下の説明）
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true });
-  // ワークベンチが組み上がるまで待つ（ここまでは拡張機能と関係が無い）
-  await page.locator(".monaco-workbench").waitFor({ timeout: 60_000 });
-  await keepOutOfTheWay(app);
+  const pid = app.process().pid;
+  if (pid !== undefined) await recordLaunch({ root, pid });
 
-  const session: E2ESession = { app, page, root, workFolder, manuscriptFolder };
+  let page: Page | undefined;
+  const session = (): E2ESession => {
+    if (!page) throw new Error("VS Code の窓がまだ開いていません");
+    return { app, page, root, workFolder, manuscriptFolder };
+  };
   try {
-    await registerWork(session);
+    await keepOutOfTheWay(app);
+    page = await app.firstWindow();
+    // 窓が裏にあっても、画面の中では「焦点がある」として振る舞わせる（下の説明）
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    // ワークベンチが組み上がるまで待つ（ここまでは拡張機能と関係が無い）
+    await page.locator(".monaco-workbench").waitFor({ timeout: 60_000 });
+    await keepOutOfTheWay(app);
+    await registerWork(session());
   } catch (error) {
     // 呼び手（withVsCode）の片づけはまだ始まっていないので、ここで写真を残して閉じる
-    const shot = await saveScreenshot(page, "作品の登録");
+    const shot = page ? await saveScreenshot(page, "起動と作品の登録") : undefined;
     if (shot && error instanceof Error) error.message += `\n画面の写真: ${shot}`;
-    await app.close().catch(() => undefined);
-    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }).catch(
-      () => undefined
-    );
+    await closeAndStop(app, { root, pid });
     throw error;
   }
-  return session;
+  return session();
+}
+
+/**
+ * 閉じて、**残ったものをプロセスの木ごと止め**、一時フォルダーを消す。
+ * `app.close()` は VS Code が応えないと戻らないことがあるので、待つのは20秒まで
+ */
+async function closeAndStop(app: ElectronApplication, entry: { root: string; pid?: number }): Promise<void> {
+  await Promise.race([
+    app.close().catch(() => undefined),
+    new Promise((resolve) => setTimeout(resolve, 20_000)),
+  ]);
+  await stopLaunch(entry);
 }
 
 /**
@@ -420,10 +444,8 @@ export async function withVsCode(
     }
     throw new Error(String(error) + note);
   } finally {
-    await session.app.close().catch(() => undefined);
-    // Windows は閉じた直後にファイルを掴んでいることがあるので、何度か試す
-    await rm(session.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }).catch(
-      () => undefined
-    );
+    // 閉じたあと、残ったプロセスを木ごと止めて一時フォルダーを消す（cleanup.ts）。
+    // ここが届かない時間切れ・途中で止めたときは、走りの最後の片づけが拾う
+    await closeAndStop(session.app, { root: session.root, pid: session.app.process().pid });
   }
 }

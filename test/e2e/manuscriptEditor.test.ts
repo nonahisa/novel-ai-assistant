@@ -15,6 +15,8 @@ import {
   footText,
   openEpisode,
   placeCaretAfter,
+  revealFlashLit,
+  selectionCollapsed,
 } from "./support/manuscriptFrame";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
@@ -115,6 +117,16 @@ test("Ctrl+/ でカーソル行の上に // の行が入り、F8 で次のメモ
         async () => /\/\/.*\n+二行目の文。/.test(await composeText(frame)),
         "Ctrl+/ でメモの行が画面に入る"
       );
+      // 足したメモの行では、**印のあと（行の末尾）**から打ち始められる。行の頭だと
+      // 打った字が「//」の前に入って印が壊れる
+      let memoCaret: Awaited<ReturnType<typeof caretPosition>>;
+      await waitUntil(async () => {
+        memoCaret = await caretPosition(frame);
+        return !!memoCaret && memoCaret.lineText.startsWith("//") && memoCaret.column === memoCaret.lineText.length;
+      }, "Ctrl+/ のあと、カーソルがメモの行の末尾に来る").catch((error: unknown) => {
+        throw new Error(`${String(error)}（カーソル：${JSON.stringify(memoCaret)}）`);
+      });
+      expect(await selectionCollapsed(frame), "Ctrl+/ のあとで行が選ばれています").toBe(true);
       await saveAndWaitFor(
         session,
         (text) => /^\/\/.*\n二行目の文。$/m.test(text),
@@ -133,13 +145,18 @@ test("Ctrl+/ でカーソル行の上に // の行が入り、F8 で次のメモ
         async () => ((await caretPosition(frame))?.lineText ?? "").startsWith("//"),
         "F8 でメモの行へ動く"
       );
-      // 飛んだ先の行は**行ごと選ばれて**示される。そのまま打つと行が置き換わるので、
-      // End で選択を畳んで行末から打つ
-      await session.page.keyboard.press("End");
+      // 飛んだ先は**行を選ばず、行の頭にカーソルだけ**（作者の裁定、2026-10-03）。
+      // 選ばれていると、そのまま打った字で行が置き換わる
+      expect(await selectionCollapsed(frame), "F8 の先で行が選ばれています").toBe(true);
+      expect((await caretPosition(frame))?.column).toBe(0);
+      // 飛んだ行はしばらく光り、数秒で消える
+      expect(await revealFlashLit(frame), "F8 の先の行が光っていません").toBe(true);
+      await waitUntil(async () => !(await revealFlashLit(frame)), "飛んだ行の光りが数秒で消える", 10_000);
       await session.page.keyboard.insertText("印");
       await saveAndWaitFor(session, (text) => text.includes("印"), "F8 の先で打った字がファイルに入る");
       const after = (await fileText(session)).split("\n");
-      expect(after[1]).toMatch(/^\/\/.*印/);
+      // 打った字は行の頭に入り、メモの行は消えない
+      expect(after[1]).toMatch(/^印\/\//);
       expect(after[0]).toBe("一行目の文。");
 
       // もう一度 F8 → その次のメモ（もとからあった「// 先のメモ」）

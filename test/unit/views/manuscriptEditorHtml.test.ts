@@ -474,16 +474,17 @@ describe("その行を示す", () => {
 
   it("revealLine を受け取る", () => {
     expect(code).toContain('message.type === "revealLine"');
-    expect(code).toContain("function revealLine(line)");
+    expect(code).toContain("function revealLine(line, caret)");
   });
 
   /**
    * 縦書きと横書きで転がす向きが違う。Chromium の
-   * 「焦点を当てると選択まで転がす」振る舞いに任せて吸収している。
+   * 「焦点を当てるとカーソルまで転がす」振る舞いに任せて吸収している。
+   * **行は選ばない**（2026-10-03。動きは manuscriptEditorRevealCaret.test.ts）。
    */
-  it("選び直してから、焦点を入れ直して転がす", () => {
+  it("カーソルを置いてから、焦点を入れ直して転がす", () => {
     expect(code).toMatch(
-      /setSelectionRange\(start, end\)[\s\S]{0,300}write\.blur\(\);\s*write\.focus\(\);/
+      /setSelectionRange\(at, at\)[\s\S]{0,300}write\.blur\(\);\s*write\.focus\(\);/
     );
   });
 
@@ -496,7 +497,7 @@ describe("その行を示す", () => {
    * 見えている場所は元のままである。
    */
   it("組んで書く面は、自分で画面を動かす", () => {
-    const reveal = code.slice(code.indexOf("function revealLine(line)"));
+    const reveal = code.slice(code.indexOf("function revealLine(line, caret)"));
     expect(reveal.slice(0, 1500)).toContain("composeNudgeIntoView(start)");
 
     const nudge = code.slice(code.indexOf("function composeNudgeIntoView("));
@@ -508,7 +509,7 @@ describe("その行を示す", () => {
 
   /** 位置を測れずに動かせなかったことを、黙って終わらせない */
   it("動かせなかったら、記録に残す", () => {
-    const reveal = code.slice(code.indexOf("function revealLine(line)"));
+    const reveal = code.slice(code.indexOf("function revealLine(line, caret)"));
     expect(reveal.slice(0, 1500)).toContain("画面を動かせませんでした");
   });
 });

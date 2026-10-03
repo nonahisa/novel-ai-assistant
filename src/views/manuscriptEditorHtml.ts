@@ -226,6 +226,22 @@ body.findmark:not(.compose):not(.notepv) #aloudmarks { display: block; }
 ::highlight(novelai-find) {
   background-color: rgba(255, 140, 0, 0.4);
 }
+/* **飛んだ行の光り**（作者の裁定、2026-10-03。設計書6.25.11）。数秒で消える。
+   打つ面は探すと同じ層（#aloudmarks）を借りる。
+   色は**校正・メモパネルの「いまの行」と同じテーマの色**
+   （list.activeSelectionBackground）——パネルで光った行と、本文で光った行が
+   同じ色なので、どれへ飛んだかが目で結べる。そのままでは濃くて字が沈むので、
+   半分ほど透かす。color-mix を知らない環境のために、先に透けた青を置く */
+body.revealmark:not(.compose):not(.notepv) #aloudmarks { display: block; }
+#aloudmarks .mark-reveal {
+  background-color: rgba(0, 120, 215, 0.3);
+  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0078d4) 45%, transparent);
+}
+/* 組んで書く面。**規則を分ける**（上の novelai-find と同じ理由） */
+::highlight(novelai-reveal) {
+  background-color: rgba(0, 120, 215, 0.3);
+  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0078d4) 45%, transparent);
+}
 
 /* ── 本文の面 ─────────────────────────── */
 /* **下段。** 道具箱（上）とは役目が違う——上は「いま見ている原稿をどう見るか」、
@@ -3427,20 +3443,109 @@ ruby > rt {
   }
   /* counts:end */
 
+  /* revealLine:start */
+  /*
+    ── 飛んだ行の光り（作者の裁定、2026-10-03。設計書6.25.11） ──
+
+    F8 やパネルの行から飛んだあと、**どこへ来たのかが分からない**
+    （カーソルの細い線しか無い）。飛んだ行をしばらく塗って見せる。
+
+    **選択では見せない。** 選択は「次に打った字が置き換える範囲」なので、
+    行を選んだまま打つとメモの行や本文の1行が消える（0.97.1 まで実際に
+    そうなっていた）。塗りは読み上げ・探すと同じく、選択にも取り消しの
+    履歴にも触らない層で置く——打つ面は #aloudmarks、組んで書く面は
+    CSS Custom Highlight API（novelai-reveal）。
+
+    **打ち始めたら消す。** 打つ面の層は本文の写しなので、字が増えると
+    塗りが別の字の上へずれる。組んで書く面も同じ見え方にそろえる。
+  */
+  /** 光らせておく長さ（ミリ秒）。目で追える長さで、打ち始める前には消える */
+  const REVEAL_FLASH_MS = 2500;
+  let revealFlashTimer = null;
+  /** 打つ面で塗った span。層がまだこちらのものかを確かめるのに使う */
+  let revealFlashSpan = null;
+  /** 組んで書く面で光らせているか */
+  let revealFlashLit = false;
+
+  function revealFlashClear() {
+    if (revealFlashTimer === null && revealFlashSpan === null && !revealFlashLit) return;
+    if (revealFlashTimer !== null) {
+      clearTimeout(revealFlashTimer);
+      revealFlashTimer = null;
+    }
+    if (revealFlashSpan !== null) {
+      // **層が別の塗り（読み上げ・探す）に替わっていたら消さない。**
+      // 消すと、読んでいる文や見つけた所の色まで落ちる
+      if (revealFlashSpan.parentNode === aloudMarks) aloudClearWriteMark();
+      revealFlashSpan = null;
+    }
+    document.body.classList.remove("revealmark");
+    if (revealFlashLit) {
+      revealFlashLit = false;
+      try {
+        CSS.highlights.delete("novelai-reveal");
+      } catch (error) {
+        /* 消せなくても本文は変わらない */
+      }
+    }
+  }
+
+  /** 打つ面で、start〜end を光らせて見えるところまで転がす */
+  function revealFlashWrite(start, end) {
+    const text = write.value;
+    while (aloudMarks.firstChild) {
+      aloudMarks.removeChild(aloudMarks.firstChild);
+    }
+    aloudMarks.appendChild(document.createTextNode(text.slice(0, start)));
+    const span = document.createElement("span");
+    span.className = "mark-reveal";
+    span.textContent = text.slice(start, end);
+    aloudMarks.appendChild(span);
+    aloudMarks.appendChild(document.createTextNode(text.slice(end)));
+    revealFlashSpan = span;
+    // 層を出してから測る（隠れたままだと位置が0で返る）
+    document.body.classList.add("revealmark");
+    alignMarksBox();
+    syncMarksScroll();
+    aloudNudgeWriteIntoView(span);
+  }
+
+  /** 組んで書く面で、start〜end を光らせる */
+  function revealFlashCompose(start, end) {
+    if (!composeHighlightsUsable()) return;
+    try {
+      const atoms = composeCurrentAtoms();
+      const head = composeOffsetToPoint(atoms, start);
+      const tail = composeOffsetToPoint(atoms, end);
+      if (!head || !tail) return;
+      const range = document.createRange();
+      range.setStart(head.node, head.offset);
+      range.setEnd(tail.node, tail.offset);
+      CSS.highlights.set("novelai-reveal", new Highlight(range));
+      revealFlashLit = true;
+    } catch (error) {
+      /* 光らせられなくても、カーソルは置けている */
+    }
+  }
+
+  // 2つの面のどちらで打っても消す（面ごとの打鍵の受け口とは別に足す）
+  [write, compose].forEach(function (face) {
+    face.addEventListener("input", revealFlashClear);
+  });
+
   /**
-   * その行を打つ面で示す（提案パネルの「飛ぶ」。作者の依頼、2026-08-28）。
+   * その行を示す（提案パネル・校正・メモパネル・F8 の「飛ぶ」。作者の依頼、2026-08-28）。
    *
-   * **選び直してから焦点を当て直す。** Chromium は焦点を受け取るときに、
-   * 選択のあるところまで面を転がす。縦書き（左右に流れる）と横書き
-   * （上下に流れる）で「どちらへ動かすか」が違うのを、その振る舞いに
-   * まかせて吸収している——自前で scrollLeft/scrollTop を出すと、
-   * 向きごとに別の式を持つことになる。
+   * **カーソルを置くだけで、選ばない**（作者の裁定、2026-10-03）。行の頭に置く。
+   * caret が "end" のときだけ行の末尾に置く——メモの行を足した直後
+   * （Ctrl+/）は、印のあとから打ち始めるため。どこへ来たかは光りで見せる。
    *
-   * この手が効かない環境が出たら、その行の頭に範囲を作って
-   * getBoundingClientRect で測り、はみ出しぶんを足し引きする手
-   * （組んで書く面の composeNudgeIntoView と同じ考え方）へ切り替えること。
+   * 打つ面は**焦点を当て直す**。Chromium は焦点を受け取るときに、カーソルの
+   * あるところまで面を転がす。光りを置けたときは、塗った span を測って
+   * はみ出しぶんも動かす（探すの findPaint と同じ。縦書き・横書きで式を
+   * 分けずに済む）。
    */
-  function revealLine(line) {
+  function revealLine(line, caret) {
     const text = write.value;
     // 行番号は1始まり（拡張機能側の指摘と同じ数え方）
     const wanted = Math.max(0, (typeof line === "number" ? line : 1) - 1);
@@ -3456,12 +3561,15 @@ ruby > rt {
     }
     let end = text.indexOf("\\n", start);
     if (end < 0) end = text.length;
+    const at = caret === "end" ? end : start;
 
+    revealFlashClear();
     if (composeOn) {
       // 組んで書く面には textarea が無い。**記法の位置は同じ**なので、
       // カーソルの置き直しはこちらの道具（設計書6.34）をそのまま使う
       compose.focus();
-      composeRestoreCaret({ start: start, end: end });
+      composeRestoreCaret({ start: at, end: at });
+      revealFlashCompose(start, end);
       /*
         **選択を置くだけでは、画面が転がらない**（作者の報告、2026-08-29
         「誤字脱字パネルから本文に飛びません」）。打つ面（textarea）は
@@ -3477,19 +3585,24 @@ ruby > rt {
           text: "組んで書く：" + line + "行目の位置を測れず、画面を動かせませんでした",
         });
       }
-      return;
+    } else {
+      write.focus();
+      try {
+        write.setSelectionRange(at, at);
+      } catch (e) {
+        /* 範囲外なら諦める（本文は壊れない） */
+      }
+      // 焦点を入れ直して、カーソルのところまで転がしてもらう
+      write.blur();
+      write.focus();
+      // 読み上げ・探すが層を使っているあいだは借りない（その色を消してしまう）
+      if (!aloudOn && !findIsOpen) revealFlashWrite(start, end);
     }
-
-    write.focus();
-    try {
-      write.setSelectionRange(start, end);
-    } catch (e) {
-      /* 範囲外なら諦める（本文は壊れない） */
+    if (revealFlashSpan !== null || revealFlashLit) {
+      revealFlashTimer = setTimeout(revealFlashClear, REVEAL_FLASH_MS);
     }
-    // 焦点を入れ直して、選んだところまで転がしてもらう
-    write.blur();
-    write.focus();
   }
+  /* revealLine:end */
 
   /* menu-clipboard:start */
   /*
@@ -4333,7 +4446,7 @@ ${RESUME_WRITING_LABEL ? `
       if (composing) return;
       keyNotation(message.kind === "ruby" ? "ruby" : "emphasis");
     } else if (message.type === "revealLine") {
-      revealLine(message.line);
+      revealLine(message.line, message.caret);
     } else if (message.type === "select" && composeOn) {
       /*
         ルビを入れたあと、入れた場所を選び直す（組んで書く面）。
@@ -5410,7 +5523,8 @@ ${RESUME_WRITING_LABEL ? `
    * ログには**同じ人物が6回続けて**送られていた。
    *
    * 原因は**残っている選択**である。誤字脱字パネルから本文へ飛ぶと
-   * （revealLine）、その行がまるごと選ばれたままになる。以前の判定は
+   * （revealLine）、その行がまるごと選ばれたままになっていた（2026-10-03 からは
+   * 行を選ばずカーソルだけ置くが、作者が選んだ範囲は残りうる）。以前の判定は
    * 「選択が空でなければ、選択に重なる最初の用語」だったので、
    * **その行に人物が1人いると、以後どこを押してもその人物**になった。
    *

@@ -107,6 +107,28 @@ export async function placeCaretAfter(frame: Frame, needle: string): Promise<voi
 }
 
 /**
+ * 組んで書く面の選択が畳まれているか（カーソルだけで、字を選んでいないか）。
+ *
+ * 行へ飛んだあとに**行が選ばれていない**ことを見る（作者の裁定、2026-10-03）。
+ * 選ばれていると、そのまま打った字で行が置き換わる。
+ */
+export async function selectionCollapsed(frame: Frame): Promise<boolean> {
+  return frame.evaluate(() => {
+    const selection = window.getSelection();
+    return !!selection && selection.rangeCount > 0 && selection.isCollapsed;
+  });
+}
+
+/** 飛んだ行の光り（組んで書く面の `novelai-reveal`）が出ているか */
+export async function revealFlashLit(frame: Frame): Promise<boolean> {
+  return frame.evaluate(() => {
+    const registry = (globalThis as unknown as { CSS?: { highlights?: { has(name: string): boolean } } }).CSS
+      ?.highlights;
+    return !!registry && registry.has("novelai-reveal");
+  });
+}
+
+/**
  * いまのカーソルの位置を、**本文の中の文字で**表す（行の字と、その行の中の何字目か）。
  *
  * DOM の節点そのものは、保存のあと描き直されると別物になるので比べられない。

@@ -16,6 +16,7 @@ import {
   memoPanelFrame,
   openEpisode,
   placeCaretAfter,
+  selectionCollapsed,
 } from "./support/manuscriptFrame";
 import { withVsCode } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
@@ -38,6 +39,7 @@ test("校正・メモパネルの行を押すと、左の原稿へ戻ってそ�
       return panel !== undefined && (await panel.locator("button.go").count()) > 0;
     }, "校正・メモパネルにメモの行が出る", 30_000);
     if (!panel) throw new Error("校正・メモパネルが見つかりません");
+    const memoPanel = panel;
 
     const groupsBefore = await editorGroupTabs(page);
     expect(groupsBefore.length, `列が2つになっていません：${JSON.stringify(groupsBefore)}`).toBe(2);
@@ -79,15 +81,22 @@ test("校正・メモパネルの行を押すと、左の原稿へ戻ってそ�
     expect(shown, "左の原稿が空白になりました").toContain("一行目の文。");
     expect(shown).toContain("五行目の文。");
 
-    // 念押し：示された行で字を打つと、その行に入る（焦点が左の原稿へ戻っていて、
-    // 2枚目へ打っていない）。示された行は行ごと選ばれているので、End で畳んでから打つ
-    await page.keyboard.press("End");
+    // 示された行は**選ばれず、行の頭にカーソルだけ**（作者の裁定、2026-10-03）。
+    // 押した行はパネルでも光る（.memo.active）
+    expect(await selectionCollapsed(frames[0]), "パネルから飛んだ先で行が選ばれています").toBe(true);
+    expect((await caretPosition(frames[0]))?.column).toBe(0);
+    await waitUntil(
+      async () => (await memoPanel.locator(".memo.active", { hasText: "見張りのメモ" }).count()) === 1,
+      "校正・メモパネルで押した行が光る"
+    );
+
+    // 念押し：示された行で字を打つと、その行の頭に入る（焦点が左の原稿へ戻っていて、
+    // 2枚目へ打っていない）
     await page.keyboard.insertText("印");
     await page.keyboard.press("Control+KeyS");
     const file = path.join(session.manuscriptFolder, EPISODE);
     await waitUntil(async () => (await readFile(file, "utf8")).includes("印"), "示された行で打った字がファイルに入る");
     const lines = (await readFile(file, "utf8")).replace(/\r\n/g, "\n").split("\n");
-    expect(lines[2]).toMatch(/見張りのメモ/);
-    expect(lines[2]).toContain("印");
+    expect(lines[2]).toMatch(/^印\/\/ 見張りのメモ/);
   });
 });

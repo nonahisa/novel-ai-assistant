@@ -205,6 +205,9 @@ const openManuscripts = new KeyedLedger<OpenManuscript>((entry) => {
   }
 });
 
+/** 行へ飛んだときのカーソルの置き場（行の頭か、末尾か） */
+export type RevealCaret = "head" | "end";
+
 /** 台帳に載せる、開いている原稿エディター1枚ぶん */
 interface OpenManuscript {
   panel: vscode.WebviewPanel;
@@ -214,8 +217,12 @@ interface OpenManuscript {
    * **画面が動き出す前に頼まれることがある**（開いた直後に飛んでくる）。
    * まだ `ready` が来ていなければ覚えておき、来たときに出す。
    * 送っても捨てられるだけなので、待つほかにやりようがない。
+   *
+   * **画面は行を選ばず、カーソルを置いて行をしばらく光らせる**（作者の裁定、
+   * 2026-10-03。設計書6.25.11）。`caret` は置き場で、既定は行の頭。
+   * メモの行を足した直後だけ "end"（印のあとから打ち始める）。
    */
-  revealLine(line: number): void;
+  revealLine(line: number, caret?: RevealCaret): void;
   /**
    * 下段の字数を測り直す（作者の指示、2026-08-29）。
    *
@@ -791,9 +798,10 @@ export async function insertMemoLineAbove(
   }
 
   // 挿した行へカーソルを送る（原稿エディタで開いていれば）。
-  // **打ち始められる場所に居ないと、付箋を足した意味がない**
+  // **打ち始められる場所に居ないと、付箋を足した意味がない**——行の頭に
+  // 置くと打った字が「//」の前に入って印が壊れるので、**末尾**（印のあと）に置く
   if (options.reveal !== false) {
-    openManuscripts.get(manuscriptLedgerKey(document.uri))?.revealLine(index + 1);
+    openManuscripts.get(manuscriptLedgerKey(document.uri))?.revealLine(index + 1, "end");
   }
   return true;
 }
@@ -1829,11 +1837,11 @@ export class ManuscriptEditorProvider
      * `whenReady` と同じ事情）。
      */
     let webviewReady = false;
-    let pendingReveal: number | undefined;
+    let pendingReveal: { line: number; caret: RevealCaret } | undefined;
     /** 読み上げの列を頼まれたが、画面がまだ動き出していない（設計書6.42） */
     let pendingReading = false;
-    const revealLineNow = (line: number): void => {
-      void panel.webview.postMessage({ type: "revealLine", line });
+    const revealLineNow = (line: number, caret: RevealCaret): void => {
+      void panel.webview.postMessage({ type: "revealLine", line, caret });
     };
     const showReadingNow = (): void => {
       void panel.webview.postMessage({ type: "showReading" });
@@ -1846,12 +1854,26 @@ export class ManuscriptEditorProvider
     const key = manuscriptLedgerKey(document.uri);
     const entry = {
       panel,
-      revealLine: (line: number): void => {
+      revealLine: (line: number, caret: RevealCaret = "head"): void => {
         if (!webviewReady) {
-          pendingReveal = line;
+          pendingReveal = { line, caret };
           return;
         }
-        revealLineNow(line);
+        /*
+          **本文の便が待っていたら、先に送ってから示す**（2026-10-03）。
+          メモの行を足した直後（Ctrl+/）は、本文の便（scheduleSend の120ミリ秒）
+          より先に「この行を示す」が画面へ着き、あとから着いた本文で組み直す
+          ときに、カーソルが元の位置（字数で数えた所）へ戻されていた
+        */
+        if (sendTimer) {
+          clearTimeout(sendTimer);
+          sendTimer = undefined;
+          void send()
+            .catch(() => undefined)
+            .then(() => revealLineNow(line, caret));
+          return;
+        }
+        revealLineNow(line, caret);
       },
       showReading: (): void => {
         if (!webviewReady) {
@@ -2196,9 +2218,9 @@ export class ManuscriptEditorProvider
           webviewReady = true;
           // 開くのを待ってもらっていた「この行を示す」を、ここで出す
           if (pendingReveal !== undefined) {
-            const line = pendingReveal;
+            const { line, caret } = pendingReveal;
             pendingReveal = undefined;
-            revealLineNow(line);
+            revealLineNow(line, caret);
           }
           // 待ってもらっていた「前の話の見た目を当てる」を、ここで出す
           if (pendingApply) {

@@ -97,7 +97,9 @@ export async function revealTextLocation(
     });
     const lineIndex = Math.min(Math.max(line - 1, 0), doc.lineCount - 1);
     const range = doc.lineAt(lineIndex).range;
-    editor.selection = new vscode.Selection(range.start, range.end);
+    // **行を選ばず、行の頭にカーソルだけ置く**（作者の裁定、2026-10-03。
+    // 設計書6.25.11）。選んだまま打つと、その行が打った字に置き換わる
+    editor.selection = new vscode.Selection(range.start, range.start);
     editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
     // **どの列を選んだかも残す。** 「右の画面が動く」のような訴えは、
     // 選んだ列が記録に無いと画面側と拡張機能側のどちらの話か分からない

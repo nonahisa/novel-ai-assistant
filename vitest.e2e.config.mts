@@ -13,6 +13,9 @@ export default defineConfig({
   test: {
     include: ["test/e2e/**/*.test.ts"],
     environment: "node",
+    // 走りの最初と最後に、残ったテスト用 VS Code と一時フォルダーを片づける
+    // （時間切れ・途中で止めたときは1件ごとの片づけが届かない。2026-10-03 に2つ残った）
+    globalSetup: ["test/e2e/support/globalSetup.ts"],
     // VS Code を1つずつ起こす。並べると打鍵と焦点が取り合いになる
     fileParallelism: false,
     // 起動（初回は取り寄せを含む）＋操作。1件で数十秒かかる
