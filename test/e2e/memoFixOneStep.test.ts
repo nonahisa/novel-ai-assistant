@@ -32,7 +32,7 @@ import {
 } from "./support/sampleFinding";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { clearNotifications, dialogText, editorGroupTabs } from "./support/workbenchDom";
+import { clearNotifications, dialogText, editorGroupTabs, pressWorkbenchKey } from "./support/workbenchDom";
 
 const EPISODE = "001_駅.txt";
 const TEXT = ["　終電を逃した駅のホームに、雨の音だけが残っていた。", "　近づいてみると、男は以外にも若かった。", "　ホームの時計が、零時を指していた。", ""].join("\n");
@@ -105,7 +105,8 @@ async function openMemoPanel(page: Page): Promise<Frame> {
 }
 
 async function openProposals(page: Page): Promise<Frame> {
-  await page.keyboard.press(OPEN_PROPOSALS_PRESS);
+  // 校正・メモパネル（WebView）が焦点を持っているので、本体へ戻してから押す（workbenchDom.ts）
+  await pressWorkbenchKey(page, OPEN_PROPOSALS_PRESS);
   let proposals: Frame | undefined;
   await waitUntil(
     async () => {
