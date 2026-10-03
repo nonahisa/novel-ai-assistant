@@ -462,9 +462,18 @@ function describeLabel(label) {
   return from + " → " + to + "「" + label.text + "」";
 }
 
+/** 線に指を置いたときの説明。関係は1つずつ、呼び方は詳細と同じ対で */
 function edgeTitle(edge) {
   const lines = [];
-  for (const label of edge.labels) lines.push(describeLabel(label));
+  for (const label of edge.labels) {
+    if (label.kind === "relation") lines.push(describeLabel(label));
+  }
+  if (data.filter.kinds.indexOf("address") !== -1) {
+    const rows = addressPairRows(
+      edge, edge.a, nameOf(edge.a), nameOf(edge.b), limitedUpTo()
+    );
+    for (const row of rows) lines.push(row);
+  }
   return lines.join("\\n");
 }
 
@@ -696,7 +705,7 @@ function renderGraph() {
         "text-anchor": "middle",
         "dominant-baseline": "middle",
       });
-      label.textContent = shortLabel(edge);
+      label.textContent = pairLabel(edge, orientFrom(edge));
       svg.appendChild(label);
     }
   }
@@ -776,14 +785,90 @@ function findEdge(a, b) {
   return null;
 }
 
-/** 線の上に置く短いラベル。両方向を、向きの矢印で分けて出す */
-function shortLabel(edge) {
-  const parts = [];
+/*
+  ── 呼び合い（作者の要望、2026-10-03「人物相関図の説明に呼び合いも必要です」）──
+  2人が互いを何と呼ぶかを、片方ずつではなく対で見せる。片方しか記録が
+  無いときは「記録なし」と書く——1行だけ出すと、もう片方が抜けているのか
+  見落としなのかが読めない。
+  届いた辺は、第N話までの絞り込みを拡張機能側で済ませてある（呼び方は
+  firstChapter が第N話までのものだけ）。ここは並べ方を決めるだけ。
+  test/unit/views/relationGraphPanelHtml.test.ts がこの区切りを切り出して呼ぶ。
+*/
+/* pairs:start */
+/** fromId から toId へ向かう言葉を、関係と呼び方に分けて集める */
+function wordsFrom(edge, fromId, kind) {
+  const out = [];
   for (const label of edge.labels) {
-    const arrow = label.from === edge.a ? "→" : "←";
-    parts.push(arrow + label.text);
+    if (label.kind === kind && label.from === fromId) out.push(label.text);
   }
-  return parts.join(" ");
+  return out;
+}
+
+function otherEnd(edge, id) {
+  return edge.a === id ? edge.b : edge.a;
+}
+
+/**
+ * 呼び合いの2行。先に fromId から、次に相手から。
+ * upTo は「第N話まで」に絞っているときの N（絞っていなければ null）。
+ * どちらにも無ければ1行で済ませる（2行とも「記録なし」は読みにくい）
+ */
+function addressPairRows(edge, fromId, fromName, toName, upTo) {
+  const toId = otherEnd(edge, fromId);
+  const forward = wordsFrom(edge, fromId, "address");
+  const backward = wordsFrom(edge, toId, "address");
+  if (forward.length === 0 && backward.length === 0) {
+    return [upTo === null
+      ? "どちらからの呼び方も記録なし"
+      : "どちらからの呼び方も第" + upTo + "話までに記録なし"];
+  }
+  function row(speaker, listener, words) {
+    if (words.length === 0) {
+      return upTo === null
+        ? "（" + speaker + "からの呼び方は記録なし）"
+        : "（" + speaker + "からの呼び方は第" + upTo + "話までに記録なし）";
+    }
+    return speaker + "は" + listener + "を" +
+      words.map(function (word) { return "『" + word + "』"; }).join("") + "と呼ぶ";
+  }
+  return [row(fromName, toName, forward), row(toName, fromName, backward)];
+}
+
+/**
+ * 線の上と「つながっている人」に置く短いラベル。fromId から見て
+ * →（fromId から相手へ）／←（相手から fromId へ）の対にする。
+ * 関係はそのまま、呼び方は『』で囲む
+ */
+function pairLabel(edge, fromId) {
+  const toId = otherEnd(edge, fromId);
+  function half(id) {
+    const relations = wordsFrom(edge, id, "relation");
+    const addresses = wordsFrom(edge, id, "address");
+    return relations.join("・") +
+      addresses.map(function (word) { return "『" + word + "』"; }).join("");
+  }
+  const forward = half(fromId);
+  const backward = half(toId);
+  return "→" + (forward || "（記録なし）") + "／←" + (backward || "（記録なし）");
+}
+/* pairs:end */
+
+/**
+ * 線のラベルをどちらから見るか。個人中心図では中心の人から（→は
+ * 「中心の人から相手へ」と読める）。中心に触れない2次の線は、辺の a から
+ */
+function orientFrom(edge) {
+  if (data.mode === "ego" && (edge.a === data.centerId || edge.b === data.centerId)) {
+    return data.centerId;
+  }
+  return edge.a;
+}
+
+/** 第N話までに絞っているときの N。最終話までなら null */
+function limitedUpTo() {
+  if (!data || data.lastChapter <= 0) return null;
+  const upTo = data.filter.upToChapter;
+  return upTo < data.lastChapter ? upTo : null;
 }
 
 function nodeTitle(node) {
@@ -818,7 +903,15 @@ function renderSide() {
       title.textContent = nameOf(edge.a) + " と " + nameOf(edge.b);
       el.side.appendChild(title);
       appendLabels(edge, "relation", "関係");
-      appendLabels(edge, "address", "呼び方");
+      // 呼称を出さない絞り込みのときは、呼び合いの見出しごと出さない
+      // （呼称が無いのではなく、見せていないだけなので「記録なし」と書けない）
+      if (data.filter.kinds.indexOf("address") !== -1) {
+        el.side.appendChild(heading("呼び合い"));
+        const rows = addressPairRows(
+          edge, edge.a, nameOf(edge.a), nameOf(edge.b), limitedUpTo()
+        );
+        for (const text of rows) el.side.appendChild(sideRow(text));
+      }
       const close = document.createElement("button");
       close.textContent = "選択を外す";
       close.addEventListener("click", function () {
@@ -846,6 +939,10 @@ function renderSide() {
       el.side.appendChild(sideRow("登場話数：" + center.chapterCount));
     }
     el.side.appendChild(heading("つながっている人"));
+    const centerName = center ? center.name : data.centerName;
+    el.side.appendChild(sideRow(
+      "→は" + centerName + "から相手へ、←は相手から" + centerName + "へ。『』は呼び方です。"
+    ));
     const neighbours = neighboursOf(data.centerId);
     if (neighbours.length === 0) {
       el.side.appendChild(sideRow("関係も呼称も見つかりません。"));
@@ -860,7 +957,7 @@ function renderSide() {
         post("center", { id: entry.id });
       });
       row.appendChild(link);
-      row.appendChild(document.createTextNode(" " + shortLabel(entry.edge)));
+      row.appendChild(document.createTextNode(" " + pairLabel(entry.edge, data.centerId)));
       el.side.appendChild(row);
     }
     return;
@@ -872,7 +969,20 @@ function renderSide() {
   el.side.appendChild(sideRow("人物 " + data.graph.nodes.length + "人"));
   el.side.appendChild(sideRow("つながり " + data.graph.edges.length + "本"));
   el.side.appendChild(
-    sideRow("線を押すと、関係と呼び方の一覧が出ます。人物を押すと、その人を中心にした図に変わります。")
+    sideRow("線を押すと、2人の関係と呼び合いが出ます。人物を押すと、その人を中心にした図に変わります。")
+  );
+  el.side.appendChild(heading("呼び合いの見方"));
+  el.side.appendChild(
+    sideRow(
+      "2人が互いを何と呼ぶかを「AはBを『〇〇』と呼ぶ／BはAを『△△』と呼ぶ」の対で並べます。" +
+        "片方しか記録が無いときは「（Bからの呼び方は記録なし）」と出します。"
+    )
+  );
+  el.side.appendChild(
+    sideRow(
+      "第N話までに絞っているときは、その話までに使い始めた呼び方だけを出します。" +
+        "人物を押した図では、線の上に「→中心の人から相手へ／←相手から中心の人へ」の順で書きます。"
+    )
   );
 }
 

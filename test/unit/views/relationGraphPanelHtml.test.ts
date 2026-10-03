@@ -292,6 +292,171 @@ describe("脇を畳んで、図を広くする", () => {
 });
 
 /**
+ * 呼び合い（作者の要望、2026-10-03「人物相関図の説明に呼び合いも必要です」）。
+ *
+ * 2人が互いを何と呼ぶかを、片方ずつではなく**対**で見せる。片方しか記録が
+ * 無いときは、無いことが分かるように書く（黙って1行だけ出すと、もう片方が
+ * 抜けているのか、そもそも呼ばないのかが読めない）。
+ *
+ * 組み立ては画面のスクリプトの中にある（pairs:start〜end）。ここでは
+ * その部分を切り出して、そのまま呼んで確かめる。
+ */
+describe("呼び合いを対で見せる", () => {
+  const pairSource = script.slice(
+    script.indexOf("/* pairs:start */"),
+    script.indexOf("/* pairs:end */")
+  );
+
+  interface Label {
+    from: string;
+    to: string;
+    kind: "relation" | "address";
+    text: string;
+    firstChapter: number | null;
+  }
+  interface Edge {
+    a: string;
+    b: string;
+    weight: number;
+    labels: Label[];
+  }
+  interface PairApi {
+    addressPairRows(
+      edge: Edge,
+      fromId: string,
+      fromName: string,
+      toName: string,
+      upTo: number | null
+    ): string[];
+    pairLabel(edge: Edge, fromId: string): string;
+  }
+
+  const api = (() => {
+    if (pairSource.length === 0) return null;
+    return new Function(pairSource + "\nreturn { addressPairRows, pairLabel };")() as PairApi;
+  })();
+
+  function label(from: string, to: string, kind: Label["kind"], text: string): Label {
+    return { from, to, kind, text, firstChapter: null };
+  }
+
+  it("組み立ての区切りがある", () => {
+    expect(api).not.toBeNull();
+  });
+
+  it("両方向の呼び方を、AはBを／BはAをの対で並べる", () => {
+    const edge: Edge = {
+      a: "a",
+      b: "b",
+      weight: 2,
+      labels: [label("a", "b", "address", "先生"), label("b", "a", "address", "リナ")],
+    };
+    expect(api?.addressPairRows(edge, "a", "リナ", "ゲルト", null)).toEqual([
+      "リナはゲルトを『先生』と呼ぶ",
+      "ゲルトはリナを『リナ』と呼ぶ",
+    ]);
+    // 向きは渡した人から。逆から見れば逆の順に並ぶ
+    expect(api?.addressPairRows(edge, "b", "ゲルト", "リナ", null)).toEqual([
+      "ゲルトはリナを『リナ』と呼ぶ",
+      "リナはゲルトを『先生』と呼ぶ",
+    ]);
+  });
+
+  it("片方しか記録が無いときは、無いことを書く", () => {
+    const edge: Edge = {
+      a: "a",
+      b: "b",
+      weight: 1,
+      labels: [label("a", "b", "address", "先生")],
+    };
+    expect(api?.addressPairRows(edge, "a", "リナ", "ゲルト", null)).toEqual([
+      "リナはゲルトを『先生』と呼ぶ",
+      "（ゲルトからの呼び方は記録なし）",
+    ]);
+  });
+
+  it("第N話までに絞っているときは、その時点で無いと書く", () => {
+    const edge: Edge = {
+      a: "a",
+      b: "b",
+      weight: 1,
+      labels: [label("b", "a", "address", "お嬢")],
+    };
+    expect(api?.addressPairRows(edge, "a", "リナ", "ゲルト", 3)).toEqual([
+      "（リナからの呼び方は第3話までに記録なし）",
+      "ゲルトはリナを『お嬢』と呼ぶ",
+    ]);
+  });
+
+  it("同じ向きに呼び方が複数あれば、1行にまとめる", () => {
+    const edge: Edge = {
+      a: "a",
+      b: "b",
+      weight: 2,
+      labels: [label("a", "b", "address", "先生"), label("a", "b", "address", "ゲルトさん")],
+    };
+    expect(api?.addressPairRows(edge, "a", "リナ", "ゲルト", null)[0]).toBe(
+      "リナはゲルトを『先生』『ゲルトさん』と呼ぶ"
+    );
+  });
+
+  it("関係だけの線では、呼び方が無いと1行で書く", () => {
+    const edge: Edge = {
+      a: "a",
+      b: "b",
+      weight: 1,
+      labels: [label("a", "b", "relation", "師匠")],
+    };
+    expect(api?.addressPairRows(edge, "a", "リナ", "ゲルト", null)).toEqual([
+      "どちらからの呼び方も記録なし",
+    ]);
+  });
+
+  it("個人中心図の線のラベルも、渡した人から見た対で書く", () => {
+    const edge: Edge = {
+      a: "a",
+      b: "b",
+      weight: 4,
+      labels: [
+        label("a", "b", "relation", "弟子"),
+        label("b", "a", "relation", "師匠"),
+        label("a", "b", "address", "先生"),
+        label("b", "a", "address", "リナ"),
+      ],
+    };
+    expect(api?.pairLabel(edge, "a")).toBe("→弟子『先生』／←師匠『リナ』");
+    expect(api?.pairLabel(edge, "b")).toBe("→師匠『リナ』／←弟子『先生』");
+  });
+
+  it("線のラベルでも、片方が空なら記録なしと書く", () => {
+    const edge: Edge = {
+      a: "a",
+      b: "b",
+      weight: 1,
+      labels: [label("b", "a", "address", "お嬢")],
+    };
+    expect(api?.pairLabel(edge, "a")).toBe("→（記録なし）／←『お嬢』");
+  });
+
+  it("線の詳細は、呼び方を対で出す", () => {
+    const side = script.slice(script.indexOf("function renderSide"), script.indexOf("function sideRow"));
+    expect(side).toContain("addressPairRows(");
+    expect(side).toContain("呼び合い");
+  });
+
+  it("個人中心図の線と「つながっている人」は、中心から見た対で出す", () => {
+    expect(script).toContain("pairLabel(entry.edge, data.centerId)");
+    expect(script).toContain("label.textContent = pairLabel(edge, orientFrom(edge));");
+  });
+
+  it("「この図について」に、呼び合いの見方がある", () => {
+    const side = script.slice(script.indexOf("function renderSide"), script.indexOf("function sideRow"));
+    expect(side).toContain("呼び合い");
+    expect(side).toContain("記録なし");
+  });
+});
+
+/**
  * 中心の履歴（設計書6.38.3）と、マウスの戻る・進むボタン
  * （作者の依頼、2026-09-10）。
  *
