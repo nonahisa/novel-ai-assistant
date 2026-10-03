@@ -80,18 +80,6 @@ export const GENERATED_PRUNE_POLICY: GeneratedPrunePolicy = {
   maxAgeDays: 30,
 };
 
-/**
- * 使わなくなった名前（読み物の名前を変えた前の名前）の写しを片づける加減。
- *
- * **1枚も残さない。** 古い名前ではもう作らないので、新しいものから何枚かを
- * 残す理由が無い。消すのはこの仕組みが作った名前の形のものだけで、
- * 作者が手で置いたものは今までどおり触らない（`isGeneratedName`）
- */
-export const RETIRED_GENERATED_PRUNE_POLICY: GeneratedPrunePolicy = {
-  keep: 0,
-  maxAgeDays: 0,
-};
-
 /** 掃除の判断に要る、ファイル1つ分の情報 */
 export interface GeneratedFileEntry {
   name: string;

@@ -732,6 +732,79 @@ export function raiseTimeoutCeilingForProbe(): () => void {
 }
 
 /**
+ * **測定の探索のあいだだけ**使う、1回の呼び出しで待つ秒数の上限（作者の裁定、
+ * 2026-10-03。設計書6.49.3）。
+ *
+ * 読める長さ・書ける量の探索は、時間切れを「その長さ（量）は測れない／書けない」
+ * として扱って先へ進む。実機（LM Studio・gemma-4-e4b、2026-09-06）では書ける量の
+ * 探索で3回続けて時間切れになり、1回300秒ずつ待って全体が33分かかった。
+ *
+ * 短く切ると、遅い機械では実際より短い長さ・少ない量が出る。**それは安全側
+ * である**——短い値で送れば応答は切れにくく、時間切れの混じった結果は
+ * もともと上限としては使わない（読める長さは打ち切った回より大きい前回の値を
+ * 置き換えない、書ける量は `outputMeasureTimedOut` の印で上限に使わない）。
+ *
+ * **ふだんの機能の待ち時間は変えない。** 線を掛けるのは探索の間だけで、
+ * 測っているモデルだけである（`shortenTimeoutForProbeSearch`）。
+ */
+export const PROBE_SEARCH_TIMEOUT_SECONDS = 120;
+
+/**
+ * 探索の最中のモデルと、そのモデルへ掛けている1回の待ち時間の上限（秒）。
+ *
+ * **モデルごとに持つ。** 1つの旗にすると、測っているあいだに別のモデルで
+ * 走らせた誤字脱字まで120秒で切れる。
+ */
+const probeSearchCaps = new Map<string, number>();
+
+/**
+ * 探索のあいだ、そのモデルへの1回の待ち時間を `seconds` 以下に抑える。
+ * 返った関数で元へ戻す（呼び出し側は `finally` で必ず呼ぶ）。
+ *
+ * もともとの待ち時間がこれより短ければ、そちらのまま（延ばしはしない）。
+ */
+export function shortenTimeoutForProbeSearch(
+  providerId: string,
+  model: string,
+  seconds: number = PROBE_SEARCH_TIMEOUT_SECONDS
+): () => void {
+  const key = modelTuningKey(providerId, model);
+  const before = probeSearchCaps.get(key);
+  probeSearchCaps.set(key, seconds);
+  return () => {
+    if (before === undefined) probeSearchCaps.delete(key);
+    else probeSearchCaps.set(key, before);
+  };
+}
+
+/**
+ * 探索の途中で待ち時間を延ばしたとき、線も同じ秒数まで上げる。
+ *
+ * **これが無いと、延ばした値が効かない。** 読める長さの探索は、時間切れの
+ * 回を待ち時間を倍にして1回だけ測り直す（台帳へ書く）。線が120秒のままだと、
+ * 台帳に240秒と書いても読む側（`resolveTimeoutSeconds`）が120秒で切る。
+ * 探索の最中でなければ何もしない。
+ */
+export function widenProbeSearchTimeout(
+  providerId: string,
+  model: string,
+  seconds: number
+): void {
+  const key = modelTuningKey(providerId, model);
+  const current = probeSearchCaps.get(key);
+  if (current === undefined) return;
+  probeSearchCaps.set(key, Math.max(current, seconds));
+}
+
+/** いま、そのモデルに掛かっている探索の線（秒）。探索の最中でなければ undefined */
+export function probeSearchTimeoutCap(
+  providerId: string,
+  model: string
+): number | undefined {
+  return probeSearchCaps.get(modelTuningKey(providerId, model));
+}
+
+/**
  * これを下回るコンテキスト長は、台帳に入っていても使わない。
  *
  * **`novelai.modelTuning` は `object` の設定なので、`minimum` が効かない**
@@ -1290,6 +1363,19 @@ export function resolveTimeoutSeconds(
   providerId: string,
   model: string,
   fallbackSeconds: number = MIN_TIMEOUT_SECONDS
+): number {
+  // **探索の線は、どの出どころ（台帳・設定・既定）にも同じく掛ける**
+  // （`PROBE_SEARCH_TIMEOUT_SECONDS`）。ふだんは掛かっていない
+  const cap = probeSearchTimeoutCap(providerId, model);
+  const usual = usualTimeoutSeconds(providerId, model, fallbackSeconds);
+  return cap === undefined ? usual : Math.min(usual, cap);
+}
+
+/** 探索の線を掛ける前の待ち時間。台帳 → 設定 → 既定 の順 */
+function usualTimeoutSeconds(
+  providerId: string,
+  model: string,
+  fallbackSeconds: number
 ): number {
   const tuned = tunedTimeoutSeconds(providerId, model);
   if (tuned !== undefined) return tuned;

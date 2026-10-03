@@ -75,6 +75,42 @@ describe("相談の時間切れの案内は、そのAIの上限で言う", () =>
   });
 
   /**
+   * **案内は、実際に待った秒数で言う**（作者の裁定、2026-10-03。引継ぎ書 A10）。
+   *
+   * プロバイダごとの設定（`novelai.gemini.timeoutSeconds` など）は上限で
+   * 挟まれないので、900と書けば900秒待つ。それなのに「いまの上限（600秒）に
+   * 達しました」と出ていた。**設定はそのまま効かせ、文だけを実際に合わせる。**
+   */
+  test("設定で上限より長く待ったなら、待った秒数で言い、上限に「達した」とは言わない", () => {
+    const text = workChatTimeoutAdvice({
+      currentSeconds: 900,
+      maxSeconds: 600,
+      canRaise: false,
+      sentChars: 30000,
+      historyChars: 0,
+      ceilingSetting: { setting: "novelai.cloudMaxTimeoutSeconds", maxSeconds: 1800 },
+    });
+    expect(text).toContain("900秒");
+    expect(text).not.toContain("上限（600秒）に達しました");
+    // まだ延ばせる限り（1800秒）の手前なので、上限を延ばす設定は示してよい
+    expect(text).toContain("novelai.cloudMaxTimeoutSeconds");
+  });
+
+  test("実際に待った秒数が延ばせる限り以上なら、上限を延ばす設定は示さない", () => {
+    const text = workChatTimeoutAdvice({
+      currentSeconds: 2400,
+      maxSeconds: 600,
+      canRaise: false,
+      sentChars: 30000,
+      historyChars: 0,
+      ceilingSetting: { setting: "novelai.cloudMaxTimeoutSeconds", maxSeconds: 1800 },
+    });
+    expect(text).toContain("2400秒");
+    expect(text).not.toContain("novelai.cloudMaxTimeoutSeconds");
+    expect(text).toContain("より速いAI");
+  });
+
+  /**
    * **呼び出し側が決め打ちの上限を渡していないこと。** 札（`timeoutAction`）と
    * 案内の両方が `maxTimeoutSeconds` を通らないと、札は1800秒を勧めるのに
    * 案内は600秒で「延ばせない」と言う食い違いになる。

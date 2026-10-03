@@ -5,6 +5,7 @@ import { AIError } from "../../../src/ai/types";
 import type { GenerateParams, GenerateResult } from "../../../src/ai/types";
 import {
   maxTimeoutSeconds,
+  PROBE_SEARCH_TIMEOUT_SECONDS,
   resolveTimeoutSeconds,
 } from "../../../src/core/modelTuning";
 import {
@@ -501,16 +502,42 @@ describe("測定のあいだの待ち時間", () => {
   /** 台帳が既に600秒のモデル（実機の gemma4:e4b と同じ状態） */
   const before = { timeoutSeconds: 600 };
 
-  test("**600秒からでも延ばせて、その値が実際に効く**", async () => {
+  /*
+    **測定のあいだは、1回の待ち時間を120秒に抑える**（作者の裁定、2026-10-03。
+    設計書6.49.3）。台帳が600秒でも、探索の回は120秒で切る。時間切れに
+    なったら倍（240秒）にして1回だけ測り直す——**倍にした値が120秒の線で
+    挟まれずに効く**ことまで見る（書いたのに効かない、を作らない）。
+  */
+  test("**探索の回は120秒で切り、時間切れなら倍にした値が実際に効く**", async () => {
     state.limitChars = 1_000_000;
     state.timeoutAboveChars = 20_000;
     // 1回だけ時間切れ。延ばして測り直せば通る＝「遅かっただけ」のモデル
     state.timeoutTimes = 1;
     const { notice } = await measure({ before });
 
+    expect(state.timeoutSecondsSeen[0]).toBe(PROBE_SEARCH_TIMEOUT_SECONDS);
     // **書けただけでは足りない。** 読む側の線で挟まれていないことを見る
-    expect(Math.max(...state.timeoutSecondsSeen)).toBe(1200);
-    expect(notice).toContain("待ち時間を一時的に 1200 秒へ");
+    expect(Math.max(...state.timeoutSecondsSeen)).toBe(240);
+    expect(notice).toContain("待ち時間を一時的に 240 秒へ");
+  });
+
+  test("もともと120秒より短い待ち時間は、そこから倍にする", async () => {
+    state.limitChars = 1_000_000;
+    state.timeoutAboveChars = 20_000;
+    state.timeoutTimes = 1;
+    await measure({ before: { timeoutSeconds: 90 } });
+
+    expect(state.timeoutSecondsSeen[0]).toBe(90);
+    expect(Math.max(...state.timeoutSecondsSeen)).toBe(180);
+  });
+
+  test("測り終えたら、ふだんの待ち時間（台帳の600秒）へ戻る", async () => {
+    state.limitChars = 1_000_000;
+    state.timeoutAboveChars = 20_000;
+    state.timeoutTimes = 1;
+    await measure({ before, answer: "そのままにする" });
+
+    expect(resolveTimeoutSeconds("ollama", "gemma4:e4b")).toBe(600);
   });
 
   /*

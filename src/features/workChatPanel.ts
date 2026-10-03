@@ -4863,7 +4863,8 @@ const HISTORY_SHARE_FOR_CLEAR = 0.25;
  *
  * 共通の案内（`recoveryForAIError`）を使わない理由は2つ。
  * 1. 待ち時間が既に上限（`maxTimeoutSeconds`。手元1800秒・クラウド600秒）
- *    なら、延ばせない。**文言の秒数は `maxSeconds` から出す**（決め打ちしない）
+ *    なら、延ばせない。**文言の秒数は `maxSeconds` から出す**（決め打ちしない）。
+ *    設定で上限より長く待ったときは、**実際に待った秒数**で言う（2026-10-03）
  * 2. 相談はチャンクに分けないので、「1チャンクの文字数」は効かない
  *
  * **実際に効く操作を1つだけ言う**（実装ルール5）。上限未満なら延ばす
@@ -4875,7 +4876,10 @@ const HISTORY_SHARE_FOR_CLEAR = 0.25;
  * クラウドなら料金も下がるため。
  */
 export function workChatTimeoutAdvice(input: {
-  /** いま効いている待ち時間（`resolveTimeoutSeconds`。上限で抑えた後の値） */
+  /**
+   * 実際に待った秒数（`resolveTimeoutSeconds`）。台帳の値は上限で抑えた後だが、
+   * プロバイダごとの設定の値は抑えないので、上限を超えていることがある
+   */
   currentSeconds: number;
   maxSeconds: number;
   /** 延ばす札が出ているか */
@@ -4901,15 +4905,34 @@ export function workChatTimeoutAdvice(input: {
 
   const sentChars = input.sentChars;
   const historyChars = input.historyChars ?? 0;
-  const ceiling = input.ceilingSetting;
+  /*
+    **上限を延ばす設定を示すのは、実際に待った秒数がまだ延ばせる限りより
+    短いときだけ**（作者の裁定、2026-10-03。引継ぎ書 A10）。プロバイダごとの
+    設定（`novelai.gemini.timeoutSeconds` など）は上限で挟まれないので、
+    1800秒以上を書いた人に「上限を延ばせます」と言っても何も変わらない。
+  */
+  const ceiling =
+    input.ceilingSetting &&
+    input.currentSeconds < input.ceilingSetting.maxSeconds
+      ? input.ceilingSetting
+      : undefined;
   const sentNote =
     sentChars !== undefined && sentChars > 0
       ? `（この相談で送った量は${formatChars(sentChars)}字）。`
       : "。";
+  /*
+    **秒数は、実際に待った秒数で言う**（同じ裁定）。設定に上限より長い値が
+    書いてあればその秒数だけ待つ（設定はそのまま効かせる）ので、上限の
+    秒数で「達しました」と言うと食い違う。
+  */
+  const overCeiling = input.currentSeconds > input.maxSeconds;
   const head =
-    (ceiling
-      ? `待ち時間はいまの上限（${input.maxSeconds}秒）に達しました`
-      : `待ち時間はすでに上限（${input.maxSeconds}秒）で、これ以上は延ばせません`) +
+    (overCeiling
+      ? `設定どおり${input.currentSeconds}秒待ちましたが、返りませんでした` +
+        `（ふだんの上限${input.maxSeconds}秒より長い設定です）`
+      : ceiling
+        ? `待ち時間はいまの上限（${input.maxSeconds}秒）に達しました`
+        : `待ち時間はすでに上限（${input.maxSeconds}秒）で、これ以上は延ばせません`) +
     sentNote;
 
   if (
@@ -4932,7 +4955,7 @@ export function workChatTimeoutAdvice(input: {
   }
   return (
     head +
-    "このAIでは、この量の相談が上限の時間内に終わりません。" +
+    "このAIでは、この量の相談が待ち時間のうちに終わりません。" +
     "より速いAIを選んでください（パネルの上に出ているAIの名前を押すと、" +
     "AIの設定を開けます）。"
   );

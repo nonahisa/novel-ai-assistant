@@ -197,7 +197,7 @@ describe("残る2つの入口も、同じ1段の訊き方を通る", () => {
 
   const entries = [
     {
-      name: "作品一覧の右クリック（本文を投稿サイト用にコピー）",
+      name: "作品一覧の右クリック（コピー（投稿サイト用））",
       body: () =>
         bodyOf(
           "src/features/episodeCopy.ts",

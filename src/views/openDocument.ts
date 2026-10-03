@@ -6,9 +6,7 @@ import {
   findSameGeneratedFile,
   GENERATED_DIR,
   pruneGeneratedFiles,
-  RETIRED_GENERATED_PRUNE_POLICY,
   sanitizeNamePart,
-  type GeneratedPrunePolicy,
   writeGeneratedFile,
 } from "../core/generatedFiles";
 import { workPaths } from "../core/workRegistry";
@@ -113,8 +111,9 @@ export async function openGeneratedMarkdown(
     work?: WorkEntry;
     reuseSameDay?: boolean;
     /**
-     * この読み物が前に使っていた名前。**同じ置き場の、その名前の写しを
-     * 全部片づける**（名前を変えたあと、古い名前の写しが残り続けないように。
+     * この読み物が前に使っていた名前。**同じ置き場の、その名前の写しも
+     * ほかの写しと同じ決まり（20件・30日）で片づける**（名前を変えたあと、
+     * 古い名前の写しは新しい名前の掃除に拾われず残り続けるため。
      * 2026-10-03「シーンメモ」→「校正・メモ」）
      */
     formerKinds?: readonly string[];
@@ -139,12 +138,10 @@ export async function openGeneratedMarkdown(
 
       const target = await writeGeneratedFile(directory, displayName, content);
       await pruneGeneratedFilesQuietly(directory, displayName);
+      // 古い名前も、ほかの写しと同じ決まり（20件・30日）で片づける。
+      // 古い名前ではもう作らないので、30日で自然に消える（作者の裁定、2026-10-03）
       for (const former of location?.formerKinds ?? []) {
-        await pruneGeneratedFilesQuietly(
-          directory,
-          former,
-          RETIRED_GENERATED_PRUNE_POLICY
-        );
+        await pruneGeneratedFilesQuietly(directory, former);
       }
       await openInDefaultEditor(target, options);
       return;
@@ -215,11 +212,10 @@ function generatedDirectoryFor(work?: WorkEntry): string | undefined {
  */
 async function pruneGeneratedFilesQuietly(
   directory: string,
-  kind: string,
-  policy?: GeneratedPrunePolicy
+  kind: string
 ): Promise<void> {
   try {
-    await pruneGeneratedFiles(directory, kind, policy);
+    await pruneGeneratedFiles(directory, kind);
   } catch (error) {
     logFailure("生成文書の整理", {
       種類: kind,

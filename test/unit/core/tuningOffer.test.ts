@@ -43,6 +43,21 @@ describe("反映を訊く知らせの並び", () => {
     expect(message.split("待ち時間 300秒").length - 1).toBe(1);
   });
 
+  /** 書ける量も1文目に出す（作者の裁定、2026-10-03）。押す前に記録してある */
+  test("記録済みの値（書ける量）も、1文目の中に並べる", () => {
+    const withOutput = tuningOfferMessage({
+      cancelled: false,
+      modelKey: "ollama/gemma4:e4b",
+      apply: ["待ち時間 300秒"],
+      recorded: ["書ける量 約9,645トークン（記録済み）"],
+      summary: LONG_SUMMARY,
+      notes: [],
+    });
+    const head = withOutput.slice(0, withOutput.indexOf("。") + 1);
+    expect(head).toContain("待ち時間 300秒");
+    expect(head).toContain("書ける量 約9,645トークン（記録済み）");
+  });
+
   test("中止したときは、先頭でそう言う", () => {
     const cancelled = tuningOfferMessage({
       cancelled: true,

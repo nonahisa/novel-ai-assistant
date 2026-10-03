@@ -6,7 +6,6 @@ import {
   generatedNamePrefix,
   isSameGeneratedContent,
   pruneGeneratedFiles,
-  RETIRED_GENERATED_PRUNE_POLICY,
   sameDayGeneratedNames,
   selectFilesToPrune,
   writeGeneratedFile,
@@ -352,26 +351,31 @@ describe("置き場への書き出しと片付け", () => {
 
   /**
    * 読み物の名前を変えたとき（「シーンメモ」→「校正・メモ」、2026-10-03）、
-   * **古い名前の写しは新しい名前では拾えない**ので、残り続ける。古い名前は
-   * 二度と作らないので、件数を残さず全部片づける。
+   * **古い名前の写しは新しい名前では拾えない**ので、別に片づける。
+   * 決まりはほかの写しと同じ20件・30日（作者の裁定、2026-10-03。0.96.9 では
+   * 全部消していた）。古い名前ではもう作らないので、30日で自然に消える。
    */
-  test("使わなくなった名前の写しは、生成した名前の形のものだけ全部消す", async () => {
+  test("使わなくなった名前の写しは、ほかの写しと同じく30日を過ぎたものだけ消す", async () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    place("シーンメモ_2026-07-20_1000.md", AT.getTime() - 40 * DAY);
     place("シーンメモ_2026-08-28_1000.md", AT.getTime() - 60_000);
     place("シーンメモ_2026-08-29_1429.md", AT.getTime() - 1_000);
     // 作者が手で置いたもの・新しい名前のもの・ほかの種類は触らない
-    place("シーンメモ_自分用.md", AT.getTime() - 60_000);
+    place("シーンメモ_自分用.md", AT.getTime() - 40 * DAY);
     place("校正・メモ_2026-08-29_1430.md", AT.getTime());
     place("伏線の一覧_2026-08-29_1430.md", AT.getTime());
 
     const removed = await pruneGeneratedFiles(
       DIRECTORY,
       "シーンメモ",
-      RETIRED_GENERATED_PRUNE_POLICY,
+      undefined,
       AT
     );
 
-    expect(removed).toBe(2);
+    expect(removed).toBe(1);
     expect(names()).toEqual([
+      "シーンメモ_2026-08-28_1000.md",
+      "シーンメモ_2026-08-29_1429.md",
       "シーンメモ_自分用.md",
       "伏線の一覧_2026-08-29_1430.md",
       "校正・メモ_2026-08-29_1430.md",
@@ -379,15 +383,16 @@ describe("置き場への書き出しと片付け", () => {
   });
 
   test("片づけは置き場（.aiwriter/generated）の中だけを読み、本文の `//` のメモに触れない", async () => {
+    const DAY = 24 * 60 * 60 * 1000;
     // 本文は作品の直下にあり、置き場の外。読みにも行かない
     const episode = "C:\\works\\ある作品\\episode_0001.md";
     const body = new TextEncoder().encode("本文\n// シーンメモ：ここを直す\n続き\n");
-    files.set(key(episode), { bytes: body, mtime: AT.getTime() - 60_000 });
-    place("シーンメモ_2026-08-28_1000.md", AT.getTime() - 60_000);
+    files.set(key(episode), { bytes: body, mtime: AT.getTime() - 40 * DAY });
+    place("シーンメモ_2026-07-20_1000.md", AT.getTime() - 40 * DAY);
 
-    await pruneGeneratedFiles(DIRECTORY, "シーンメモ", RETIRED_GENERATED_PRUNE_POLICY, AT);
+    await pruneGeneratedFiles(DIRECTORY, "シーンメモ", undefined, AT);
 
-    expect(deleted).toEqual(["シーンメモ_2026-08-28_1000.md"]);
+    expect(deleted).toEqual(["シーンメモ_2026-07-20_1000.md"]);
     expect(files.get(key(episode))?.bytes).toBe(body);
     // 読んだ置き場は generated だけ
     const readDirectory = workspace.fs.readDirectory as unknown as {

@@ -394,36 +394,40 @@ describe("本文の字の大きさ", () => {
   });
 });
 
+/*
+  表題は「表示倍率」（作者の指示、2026-10-03。0.96.16）。0.96.5 では「字 125%」と
+  出していたが、「字」だけでは何の数字か分からなかった。
+*/
 describe("下の欄に字の拡大率を出す（作者の依頼、2026-10-03）", () => {
-  it("Ctrl+＝で上がり、Ctrl+0 で「字 100%」へ戻る", () => {
+  it("Ctrl+＝で上がり、Ctrl+0 で「表示倍率 100%」へ戻る", () => {
     const h = harness({ size: 16 });
     h.key({ key: "=", code: "Equal", ctrlKey: true });
     // 字数がまだ届いていなくても、拡大率だけは出る
-    expect(h.counts()).toBe("字 106%");
+    expect(h.counts()).toBe("表示倍率 106%");
     h.key({ key: "=", code: "Equal", ctrlKey: true });
     h.key({ key: "=", code: "Equal", ctrlKey: true });
     h.key({ key: "=", code: "Equal", ctrlKey: true });
-    expect(h.counts()).toBe("字 125%");
+    expect(h.counts()).toBe("表示倍率 125%");
     h.key({ key: "0", code: "Digit0", ctrlKey: true });
-    expect(h.counts()).toBe("字 100%");
+    expect(h.counts()).toBe("表示倍率 100%");
   });
 
   it("Ctrl+－・Ctrl+ホイールでも追う", () => {
     const h = harness({ size: 16 });
     h.key({ key: "-", code: "Minus", ctrlKey: true });
-    expect(h.counts()).toBe("字 94%");
+    expect(h.counts()).toBe("表示倍率 94%");
     h.wheel({ ctrlKey: true, deltaY: -100, deltaMode: 0 });
     h.wheel({ ctrlKey: true, deltaY: -100, deltaMode: 0 });
-    expect(h.counts()).toBe("字 106%");
+    expect(h.counts()).toBe("表示倍率 106%");
   });
 
   it("＋／－のボタンでも追う（組んで書く面でも同じ）", () => {
     const h = harness({ size: 16, composeOn: true });
     h.click("bigger");
-    expect(h.counts()).toBe("字 106%");
+    expect(h.counts()).toBe("表示倍率 106%");
     h.click("smaller");
     h.click("smaller");
-    expect(h.counts()).toBe("字 94%");
+    expect(h.counts()).toBe("表示倍率 94%");
   });
 
   it("本物の paint は下の欄を出し直す（開いたとき・前の話からの引き継ぎもここを通る）", () => {

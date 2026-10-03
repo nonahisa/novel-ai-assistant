@@ -707,10 +707,23 @@ describe("分類のツールチップ", () => {
  * 探す場所なので、そこでは補足が付いていたほうが見つけやすい。
  */
 describe("メニュー名は短く、補足はツールチップへ", () => {
+  /*
+    **例外は1つだけ：「コピー（投稿サイト用）」**（作者の裁定、2026-10-03）。
+    作品一覧の話の右クリック・原稿エディターの右クリック・コマンドと名前を
+    揃えるための名前で、括弧は補足ではなく名前の一部（原稿エディターの
+    右クリックの「コピー（記法のまま）」と対になる）。詳細メニューには
+    出さない操作（`hiddenFromActionList`）なので、狭いビューで切れる心配も無い。
+  */
+  const PAREN_IN_NAME = new Set(["novelai.copyForPosting"]);
+
   test("操作の名前に括弧の補足を入れない", () => {
-    const withParen = allActions().filter((action) =>
-      action.label.includes("（")
+    const withParen = allActions().filter(
+      (action) => action.label.includes("（") && !PAREN_IN_NAME.has(action.command)
     );
+    for (const command of PAREN_IN_NAME) {
+      const action = allActions().find((entry) => entry.command === command);
+      expect(action?.hiddenFromActionList, command).toBe(true);
+    }
 
     expect(
       withParen.map((action) => action.label),
@@ -1197,7 +1210,7 @@ describe("原稿整備と投稿・出力", () => {
   test("投稿・出力には、外へ出す操作だけが並ぶ", () => {
     const commands = shownCommands("投稿・出力");
 
-    // 投稿の案内が先頭。「投稿用変換・コピー」は画面から外した（問5 A）が、
+    // 投稿の案内が先頭。「コピー（投稿サイト用）」は画面から外した（問5 A）が、
     // 木には残り、原稿エディターと簡単ステップメニューから使う
     expect(commands[0]).toBe("novelai.postNewEpisode");
     expect(sectionCommands("投稿・出力")).toContain("novelai.copyForPosting");

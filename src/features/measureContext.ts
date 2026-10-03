@@ -64,11 +64,14 @@ import {
   modelTuning,
   modelTuningKey,
   modelTuningRaw,
+  PROBE_SEARCH_TIMEOUT_SECONDS,
   raiseTimeoutCeilingForProbe,
   recommendTimeoutFromWorkRate,
   recommendTimeoutSeconds,
   resolveTimeoutSeconds,
   saveModelTuning,
+  shortenTimeoutForProbeSearch,
+  widenProbeSearchTimeout,
   workRateOf,
   type ModelTuning,
 } from "../core/modelTuning";
@@ -1026,6 +1029,17 @@ async function runMeasurement(
     }
   };
 
+  /*
+    **探索のあいだだけ、1回の待ち時間を120秒までに抑える**（作者の裁定、
+    2026-10-03。`PROBE_SEARCH_TIMEOUT_SECONDS`）。探索が終わったら
+    （どの終わり方でも）すぐ戻す——このあとの反映の確認やチャンクの見立ては
+    ふだんの待ち時間で読む。時間切れで倍にしたときは線も一緒に上げる
+    （`widenProbeSearchTimeout`）。
+  */
+  const restoreProbeSearchTimeout = shortenTimeoutForProbeSearch(
+    resolved.provider.id,
+    resolved.model
+  );
   await withCancellableProgress(
     "AIチューニング：読める長さと待ち時間を測っています",
     async (progress, token) => {
@@ -1289,6 +1303,13 @@ async function runMeasurement(
                 );
                 if (raised !== undefined && (await raiseTimeout(raised))) {
                   raisedTimeoutSeconds = raised;
+                  // 探索の線（120秒）も同じ秒数まで上げる。上げないと、
+                  // 台帳へ書いた値が読む側で120秒に切られて効かない
+                  widenProbeSearchTimeout(
+                    resolved.provider.id,
+                    resolved.model,
+                    raised
+                  );
                   logStep(
                     `読める長さの測定：${size}字 → ${seconds}秒で時間切れ。` +
                       `${tuningKey} の待ち時間を ${raised} 秒へ延ばして測り直します。`
@@ -1516,7 +1537,7 @@ async function runMeasurement(
         state = nextProbeSize(round, fitted);
       }
     }
-  );
+  ).finally(restoreProbeSearchTimeout);
 
   // どちらの出口でも、延ばした待ち時間は外側の `finally` が戻す
   //
@@ -1661,7 +1682,7 @@ async function runMeasurement(
     ないように思う」という指摘を受けた（作者の指摘、2026-09-03）。
     詳しくは `measureOutputLimit` の中にある。
   */
-  const outputSummary =
+  const output =
     // 「読める長さだけ」を選んだときは、ここへ来ない（作者の依頼、2026-09-13）
     measuresOutput(scope) &&
     !cancelled &&
@@ -1675,8 +1696,8 @@ async function runMeasurement(
           // `UNKNOWN_CONTEXT_WINDOW`）と同じ値に倒す
           declaredTokens ?? FALLBACK_CONTEXT_WINDOW
         )
-      : "";
-  const summary = inputSummary + outputSummary;
+      : NO_OUTPUT_RESULT;
+  const summary = inputSummary + output.summary;
 
   const applied = await offerToSave({
     providerId: resolved.provider.id,
@@ -1705,6 +1726,8 @@ async function runMeasurement(
     previousChars: ledgerAfter?.measuredChars,
     // **台帳の `contextWindow` は、チャンクを決める側と同じ換算で書く**
     measured: measuredAfter,
+    // 書ける量も1文目に出す（作者の裁定、2026-10-03）。押す前に記録済み
+    output,
   });
   /*
     **測った値と、記録したかどうかを、1行に残す**（作者の裁定、2026-09-19）。
@@ -1770,7 +1793,8 @@ async function runOutputOnly(
     return;
   }
 
-  const summary = await measureOutputLimit(
+  // 反映を訊かない道なので、使うのは一文だけ
+  const { summary } = await measureOutputLimit(
     provider,
     model,
     // 取れないときは、これまでの既定（`ollamaProvider.ts` の
@@ -1786,6 +1810,44 @@ async function runOutputOnly(
 }
 
 /**
+ * 書ける量の測定の結果（作者の裁定、2026-10-03）。
+ *
+ * **数字を文から取り出せる形で返す。** 反映を訊く知らせの1文目に書ける量を
+ * 出すため。書ける量は押す前に台帳へ記録してあるので、1文目では
+ * 「記録済み」と断る（`describeOutputForOffer`）。
+ */
+interface OutputLimitResult {
+  /** 結果の一文。測れなかったときは空文字 */
+  readonly summary: string;
+  /** 書けた出力トークン数。測れなかった・台帳へ記録しなかったときは undefined */
+  readonly recordedTokens?: number;
+  /** 時間切れの回があったか（あれば、1回の応答の上限には使わない） */
+  readonly timedOut: boolean;
+}
+
+/** 測れなかったときの結果 */
+const NO_OUTPUT_RESULT: OutputLimitResult = { summary: "", timedOut: false };
+
+/**
+ * 反映を訊く知らせの1文目に並べる、書ける量の一項目。出さないなら undefined。
+ *
+ * **押す前に記録してあることを、同じ項目の中で言う。** 「反映しますか：…・
+ * 書ける量 約Nトークン」とだけ並べると、押すと入る値に読める。
+ */
+export function describeOutputForOffer(
+  output: { recordedTokens?: number; timedOut: boolean } | undefined
+): string | undefined {
+  if (output?.recordedTokens === undefined) return undefined;
+  return (
+    `書ける量 約${output.recordedTokens.toLocaleString("ja-JP")}トークン` +
+    (output.timedOut
+      ? // 1文目に収めるので「。」を使わない（通知の先頭の1文で用が足りるように）
+        "（記録済み・時間切れの回があるため上限には使わない）"
+      : "（記録済み）")
+  );
+}
+
+/**
  * **1回の応答でどれだけ書けるか**を測る（設計書6.61・6.65.14）。
  *
  * 組み立てと数え方と言葉は `core/outputProbe.ts` にあり、ここは入力側と
@@ -1793,15 +1855,16 @@ async function runOutputOnly(
  * （`core/modelTuning.ts`）へ実測の出力トークン数を保存し、まとめ送信の
  * 上限（`features/chunkSettings.ts`）へ繋ぐところまでを持つ**（6.65.14）。
  *
- * @returns 結果の一文。測れなかったときは空文字（**入力側の結果には
- * 触らない**——ここで何が起きても、読める長さの報告は出す）
+ * @returns 結果の一文と、反映を訊く知らせの1文目に出す数字。測れなかった
+ * ときは一文が空文字（**入力側の結果には触らない**——ここで何が起きても、
+ * 読める長さの報告は出す）
  */
 async function measureOutputLimit(
   provider: AIProvider,
   model: string,
   /** まとめ送信の上限を導くのに要る、このモデルのコンテキスト長（設計書6.65.14の2） */
   contextWindow: number
-): Promise<string> {
+): Promise<OutputLimitResult> {
   const maxOutputTokens = resolveMaxOutputTokens();
   /*
     頼める行数の上限。
@@ -1846,9 +1909,21 @@ async function measureOutputLimit(
   /** 時間切れになったいちばん短い行数。これ以上は試していない（2026-10-03） */
   let timedOutLines: number | undefined;
 
+  /*
+    **探索のあいだだけ、1回の待ち時間を120秒までに抑える**（作者の裁定、
+    2026-10-03。`PROBE_SEARCH_TIMEOUT_SECONDS`）。時間切れ1回につき300秒
+    待って、測定全体が33分かかった（2026-09-06）。探索が終わったら
+    （どの終わり方でも）すぐ戻す——このあとのまとめ送信の上限の見立て
+    （`readChunkSettings`）はふだんの待ち時間で読む。
+  */
+  const restoreProbeSearchTimeout = shortenTimeoutForProbeSearch(
+    provider.id,
+    model
+  );
   logStep(
     `書ける量の測定を開始: 上限 ${ceilingLines} 行 / ` +
-      `出力上限の設定 ${maxOutputTokens} トークン`
+      `出力上限の設定 ${maxOutputTokens} トークン / ` +
+      `1回の待ち時間 ${resolveTimeoutSeconds(provider.id, model)} 秒`
   );
 
   await withCancellableProgress(
@@ -1973,7 +2048,8 @@ async function measureOutputLimit(
                 ? round.current
                 : Math.min(timedOutLines, round.current);
             logStep(
-              `書ける量の測定：${round.current}行 → ${seconds}秒で時間切れ。` +
+              `書ける量の測定：${round.current}行 → ${seconds}秒で時間切れ` +
+                `（待ち時間 ${resolveTimeoutSeconds(provider.id, model)} 秒）。` +
                 "書き切れなかったものとして数えます" +
                 `（${round.current}行以上は、このあと試しません）。`
             );
@@ -2003,7 +2079,7 @@ async function measureOutputLimit(
         state = nextOutputProbeSize(round, completed);
       }
     }
-  );
+  ).finally(restoreProbeSearchTimeout);
 
   /*
     **途中でやめたときに「1行も書けなかった」と言わない。**
@@ -2014,8 +2090,10 @@ async function measureOutputLimit(
   */
   if (stopped && low <= 0) {
     logStep(`書ける量の測定を終了: ${rounds}回 / 測り切れませんでした。`);
-    return "";
+    return NO_OUTPUT_RESULT;
   }
+  /** 台帳へ記録できた書ける量（反映を訊く知らせの1文目に出す） */
+  let recordedTokens: number | undefined;
 
   /*
     **測り終えたら、台帳へ保存する**（設計書6.65.14の1）。
@@ -2079,6 +2157,7 @@ async function measureOutputLimit(
           "測った結果を記録できませんでした。" +
           describeTuningWriteFailure(outcome);
       } else {
+        recordedTokens = bestTokens;
         // **保存した直後の台帳を読み直す。** まとめ送信の上限がどう変わったかは
         // `chunkSettings.ts`（唯一の決め手）に訊かないと分からない——ここで
         // 独自に計算すると、決め方が2か所に散る（設計書6.58.3と同じ理由）
@@ -2116,7 +2195,11 @@ async function measureOutputLimit(
     (timedOut
       ? "途中で時間切れになった回があるため、この値は1回の応答の上限としては" +
         "使いません（送る量の見立てにだけ使います）。" +
-        describeOutputTimeoutSkip(timedOutLines)
+        describeOutputTimeoutSkip(timedOutLines) +
+        // **短く切って測ったことを隠さない**（2026-10-03）。遅いモデルでは、
+        // 待てば書ける量も時間切れに数えている
+        `測定のあいだは1回の待ち時間を ${PROBE_SEARCH_TIMEOUT_SECONDS} 秒までに` +
+        "抑えているので、遅いモデルでは実際より少なく出ます。"
       : "") +
     // **速度も一緒に見せる**（作者の要望、2026-09-06）。ここで出しておくと、
     // 一覧を開かなくても「いま測ったモデルが速いのか」がその場で分かる
@@ -2131,7 +2214,7 @@ async function measureOutputLimit(
     // これまでどおり「参考値だけ」であることを伝える
     (mergeCapMessage || "書ける量は今回の参考値で、設定には入れません。");
   logStep(`書ける量の測定を終了: ${rounds}回 / ${summary}`);
-  return summary;
+  return { summary, recordedTokens, timedOut };
 }
 
 /**
@@ -2383,6 +2466,8 @@ async function offerToSave(input: {
    * 換算が違って二重にずれる（`probeCharsToTokens`）。
    */
   measured?: CharsPerTokenMeasurement;
+  /** 書ける量の測定の結果。測っていなければ省く（1文目に出さない） */
+  output?: OutputLimitResult;
 }): Promise<boolean> {
   const prefix = input.cancelled ? "（途中で中止しました）" : "";
 
@@ -2458,7 +2543,10 @@ async function offerToSave(input: {
   /*
     **要点（どのモデルへ、何を）を先頭に置く**（実機確認リスト D-1、0.96.15。
     `core/tuningOffer.ts`）。経過と断り書きは削らずに後ろへ回す。
+    書ける量も1文目に並べる（作者の裁定、2026-10-03）が、押す前に記録して
+    あるので、押すと入る値とは分けて言う（`describeOutputForOffer`）。
   */
+  const outputItem = describeOutputForOffer(input.output);
   const answer = await vscode.window.showInformationMessage(
     tuningOfferMessage({
       cancelled: input.cancelled,
@@ -2468,6 +2556,7 @@ async function offerToSave(input: {
         `待ち時間 ${timeoutSeconds}秒${timeoutBasis}`,
         `測った長さ ${input.low.toLocaleString("ja-JP")}字`,
       ],
+      recorded: outputItem !== undefined ? [outputItem] : [],
       summary: input.summary,
       notes: [
         "測った長さは、チャンクの大きさを決めるのに使います。",

@@ -218,18 +218,22 @@ describe("測り直しのために延ばした待ち時間", () => {
 
     await measureContext(registry);
 
-    // 時間切れを1回起こしたので、180秒が倍の360秒まで延びているはず
+    // 時間切れを1回起こしたので、倍に延びているはず。**探索のあいだは
+    // 1回の待ち時間を120秒までに抑える**（2026-10-03。設計書6.49.3）ので、
+    // 設定の180秒ではなく120秒が倍の240秒になる
     expect(state.failNextWithTimeout).toBe(false);
-    expect(raisedTo(tuningWrites, KEY, 360)).toBe(true);
+    expect(raisedTo(tuningWrites, KEY, 240)).toBe(true);
     // **そのうえで、鍵ごと消えていること。** 中身の無い項目を残すと、
     // 作者には「測ったのに何も入っていない」と読める
     expect(tuningTable()[KEY]).toBeUndefined();
   });
 
   test("反映しなければ、元の待ち時間へ戻す（ほかの欄は残す）", async () => {
-    installSettings({ "ollama.timeoutSeconds": 180 });
+    // 探索の線（120秒）より短い値で比べる。どちらも線より長いと、
+    // 両方とも120秒に抑えられて、どちらを倍にしたか見分けられない
+    installSettings({ "ollama.timeoutSeconds": 90 });
     await installTuning({
-      [KEY]: { contextWindow: 8192, timeoutSeconds: 200, memo: "作者の覚書" },
+      [KEY]: { contextWindow: 8192, timeoutSeconds: 100, memo: "作者の覚書" },
       // ほかのモデルの項目は、いかなる場合も触らない
       "ollama/gemma4:e4b": { timeoutSeconds: 240 },
     });
@@ -237,12 +241,12 @@ describe("測り直しのために延ばした待ち時間", () => {
 
     await measureContext(registry);
 
-    // **台帳の200秒のほうを倍にする**（設定の180秒ではない）。
+    // **台帳の100秒のほうを倍にする**（設定の90秒ではない）。
     // 台帳が設定に勝つのだから、延ばす元も台帳の値でなければ辻褄が合わない
-    expect(raisedTo(tuningWrites, KEY, 400)).toBe(true);
+    expect(raisedTo(tuningWrites, KEY, 200)).toBe(true);
     expect(tuningTable()[KEY]).toEqual({
       contextWindow: 8192,
-      timeoutSeconds: 200,
+      timeoutSeconds: 100,
       memo: "作者の覚書",
     });
     expect(tuningTable()["ollama/gemma4:e4b"]).toEqual({
@@ -257,12 +261,13 @@ describe("測り直しのために延ばした待ち時間", () => {
 
     await measureContext(registry);
 
-    expect(raisedTo(tuningWrites, KEY, 360)).toBe(true);
+    // 探索の線（120秒）の倍（2026-10-03。設計書6.49.3）
+    expect(raisedTo(tuningWrites, KEY, 240)).toBe(true);
     const entry = tuningTable()[KEY] as Record<string, unknown>;
     // 応答は一瞬で返る作りなので、見立ては下限（180秒）に落ち着く。
-    // **測り直しのために書いた360秒が残っていないこと**が要点である
+    // **測り直しのために書いた240秒が残っていないこと**が要点である
     expect(entry.timeoutSeconds).toBe(recommendTimeoutSeconds(0));
-    expect(entry.timeoutSeconds).not.toBe(360);
+    expect(entry.timeoutSeconds).not.toBe(240);
     expect(entry.measuredChars).toBeGreaterThan(0);
     expect(typeof entry.measuredAt).toBe("string");
     // Ollamaでも測った長さを記録する（作者の裁定、2026-09-26 夕。J3）。

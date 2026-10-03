@@ -23,14 +23,22 @@ export function tuningOfferMessage(input: {
   modelKey: string;
   /** 押すと台帳へ入る値（「待ち時間 300秒」の形） */
   apply: readonly string[];
+  /**
+   * 押さなくても既に記録した値（「書ける量 約N トークン（記録済み）」の形。
+   * 作者の裁定、2026-10-03）。**1文目に並べる**——書ける量は数値として
+   * 先頭に要るが、押すと入る値ではないので、項目の中で記録済みと断る。
+   * 省略または空なら出さない
+   */
+  recorded?: readonly string[];
   /** 測った経過 */
   summary: string;
   /** 反映の仕方についての断り書き（プロバイダごとの違いなど） */
   notes: readonly string[];
 }): string {
   const prefix = input.cancelled ? "（途中で中止しました）" : "";
+  const items = [...input.apply, ...(input.recorded ?? [])];
   return (
-    `${prefix}${input.modelKey} に反映しますか：${input.apply.join("・")}。` +
+    `${prefix}${input.modelKey} に反映しますか：${items.join("・")}。` +
     input.summary +
     `記録先は拡張機能の保管庫の ${TUNING_STORE_FILE} です（VS Code の設定ではありません）。` +
     "ほかのモデルには影響しません。" +

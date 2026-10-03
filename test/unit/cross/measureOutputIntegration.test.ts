@@ -9,6 +9,10 @@ import {
 } from "../../../src/ai/types";
 import { CONTEXT_GUARD_EXEMPT_FEATURE } from "../../../src/ai/contextGuard";
 import { OUTPUT_PROBE_SYSTEM_PROMPT } from "../../../src/core/outputProbe";
+import {
+  PROBE_SEARCH_TIMEOUT_SECONDS,
+  resolveTimeoutSeconds,
+} from "../../../src/core/modelTuning";
 
 /**
  * AIチューニングは、読める長さのあとに**書ける量**も測る（設計書6.61）。
@@ -51,6 +55,11 @@ const state = vi.hoisted(() => ({
   outputMs: 0,
   /** 止めた時計。送った回だけ `outputMs` のぶん進める */
   clockMs: 1_700_000_000_000,
+  /**
+   * 出力の測定の各回に効いていた待ち時間（秒）。プロバイダは呼び出しごとに
+   * `resolveTimeoutSeconds` を読むので、同じものを読んで控える
+   */
+  outputTimeoutSeen: [] as number[],
 }));
 
 const log = vi.hoisted(() => ({
@@ -85,6 +94,9 @@ vi.mock("../../../src/ai/registry", () => ({
         const asked = /0001 から順に (\d+) 行/.exec(params.userPrompt)?.[1];
         if (asked !== undefined) {
           state.outputRounds += 1;
+          state.outputTimeoutSeen.push(
+            resolveTimeoutSeconds(state.providerId, "gemma4:12b")
+          );
           // **時計を進めるのはここだけ。** 速度の分母（所要時間）を
           // 決め打ちにしたいので、送った回だけ決まった量を進める
           state.clockMs += state.outputMs;
@@ -217,6 +229,7 @@ beforeEach(() => {
   state.outputRounds = 0;
   state.outputMs = 0;
   state.clockMs = 1_700_000_000_000;
+  state.outputTimeoutSeen = [];
   log.steps = [];
   log.failures = [];
 });
@@ -468,6 +481,112 @@ describe("書ける量と一緒に、出力の速度を測る", () => {
     // 呼び出しで採った」という札だけ残ると、一覧が読めなくなる
     expect(tuning.speedSource).toBeUndefined();
     expect(tuning.speedMeasuredAt).toBeUndefined();
+  });
+});
+
+/**
+ * **測定のあいだだけ、1回の待ち時間を120秒に抑える**（作者の裁定、2026-10-03。
+ * 設計書6.49.3）。
+ *
+ * 実機（LM Studio・gemma-4-e4b、2026-09-06）では書ける量の測定で3回続けて
+ * 時間切れになり、1回300秒ずつ待って全体が33分かかった。時間切れは
+ * 「その量は書けない」と数えるので、短く切れば値は小さく（安全側へ）出る。
+ */
+describe("測定のあいだの、1回の待ち時間", () => {
+  test("書ける量の各回は120秒までしか待たず、測り終えたら元の待ち時間へ戻る", async () => {
+    installSettings({});
+    await useMemoryTuningStore({
+      "ollama/gemma4:12b": { timeoutSeconds: 600 },
+    });
+    answerWith("そのままにする");
+
+    await measureContext(registry);
+
+    expect(state.outputTimeoutSeen.length).toBeGreaterThan(0);
+    expect(PROBE_SEARCH_TIMEOUT_SECONDS).toBe(120);
+    for (const seconds of state.outputTimeoutSeen) {
+      expect(seconds).toBe(PROBE_SEARCH_TIMEOUT_SECONDS);
+    }
+    // **ふだんの機能へは持ち込まない**
+    expect(resolveTimeoutSeconds("ollama", "gemma4:12b")).toBe(600);
+  });
+
+  test("もともと120秒より短い待ち時間は、延ばさない", async () => {
+    installSettings({ "ollama.timeoutSeconds": 90 });
+    await useMemoryTuningStore({});
+    answerWith("そのままにする");
+
+    await measureContext(registry);
+
+    for (const seconds of state.outputTimeoutSeen) {
+      expect(seconds).toBe(90);
+    }
+  });
+
+  test("時間切れの回があったら、何秒で切って測ったかを結果に添える", async () => {
+    state.outputErrors = { 1: new AIError("時間切れです。", "timeout") };
+    installSettings({});
+    await useMemoryTuningStore({});
+    const { showInformationMessage } = answerWith("そのままにする");
+
+    await measureContext(registry);
+
+    expect(noticeText(showInformationMessage)).toContain(
+      `1回の待ち時間を ${PROBE_SEARCH_TIMEOUT_SECONDS} 秒`
+    );
+  });
+});
+
+/**
+ * **反映を訊く知らせの1文目に、書ける量も出す**（作者の裁定、2026-10-03）。
+ *
+ * 0.96.15 で要点を先頭へ寄せたが、書ける量は経過の文の中にしか無かった。
+ * 書ける量は押す前に記録してあるので、「押すと入る」と読めないように断る。
+ */
+describe("反映を訊く知らせの1文目", () => {
+  function firstSentence(showInformationMessage: ReturnType<typeof vi.fn>): string {
+    const offer = String(showInformationMessage.mock.calls[0]?.[0] ?? "");
+    return offer.slice(0, offer.indexOf("。") + 1);
+  }
+
+  test("書ける量のトークン数が、記録済みと分かる形で入る", async () => {
+    installSettings({});
+    await useMemoryTuningStore({});
+    const { showInformationMessage } = answerWith("そのままにする");
+
+    await measureContext(registry);
+
+    const tokens = ledger().measuredOutputTokens as number;
+    const head = firstSentence(showInformationMessage);
+    expect(head).toContain("に反映しますか");
+    expect(head).toContain(`書ける量 約${tokens.toLocaleString("ja-JP")}トークン`);
+    expect(head).toContain("記録済み");
+  });
+
+  test("時間切れの回があったら、上限には使わないことも1文目で言う", async () => {
+    state.outputErrors = { 1: new AIError("時間切れです。", "timeout") };
+    installSettings({});
+    await useMemoryTuningStore({});
+    const { showInformationMessage } = answerWith("そのままにする");
+
+    await measureContext(registry);
+
+    const head = firstSentence(showInformationMessage);
+    expect(head).toContain("書ける量 約");
+    expect(head).toContain("上限には使わない");
+  });
+
+  test("クラウドのAI（書ける量を測らない）では、書ける量を出さない", async () => {
+    state.providerId = "sakura";
+    state.isPaid = true;
+    state.declaredContextWindow = 131072;
+    installSettings({});
+    await useMemoryTuningStore({});
+    const { showInformationMessage } = answerWith("そのままにする");
+
+    await measureContext(registry);
+
+    expect(firstSentence(showInformationMessage)).not.toContain("書ける量");
   });
 });
 
