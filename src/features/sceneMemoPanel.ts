@@ -211,7 +211,7 @@ export async function jumpSceneMemo(
   );
   if (rows.length === 0) {
     void vscode.window.showInformationMessage(
-      `「${work.title}」の本文にシーンメモはありません。` +
+      `「${work.title}」の本文にメモはありません。` +
         `${MEMO_HINT}。`
     );
     return;
@@ -317,7 +317,7 @@ async function collectMemos(work: WorkEntry): Promise<CollectedMemos> {
     } catch (error) {
       // **数えて残す。** 黙って落とすと、その話のメモが無いことにされる
       notices.push(`${episode.fileName} を読めませんでした。`);
-      logFailure("シーンメモ：本文の読み込み", {
+      logFailure("校正・メモパネル：本文の読み込み", {
         ファイル: episode.filePath,
         詳細: messageOf(error),
       });
@@ -450,7 +450,7 @@ class SceneMemoPanel {
 
     this.panel = vscode.window.createWebviewPanel(
       SCENE_MEMO_VIEW_TYPE,
-      `シーンメモ: ${work.title}`,
+      `校正・メモパネル: ${work.title}`,
       // **原稿エディタの横へ開く**（作者の指示）。書きながら見るものなので、
       // 本文の上に重なっては用をなさない
       vscode.ViewColumn.Beside,
@@ -527,9 +527,9 @@ class SceneMemoPanel {
       this.post();
     } catch (error) {
       const detail = messageOf(error);
-      logFailure("シーンメモ", { 作品: this.work.title, 内容: detail });
+      logFailure("校正・メモパネル", { 作品: this.work.title, 内容: detail });
       void vscode.window.showErrorMessage(
-        `シーンメモを読み込めませんでした。${detail}`
+        `校正・メモパネルを読み込めませんでした。${detail}`
       );
     }
   }
@@ -605,9 +605,9 @@ class SceneMemoPanel {
       }
     } catch (error) {
       const detail = messageOf(error);
-      logFailure("シーンメモ", { 作品: this.work.title, 内容: detail });
+      logFailure("校正・メモパネル", { 作品: this.work.title, 内容: detail });
       void vscode.window.showErrorMessage(
-        `シーンメモでエラーが起きました。${detail}`
+        `校正・メモパネルでエラーが起きました。${detail}`
       );
     }
   }
@@ -703,7 +703,7 @@ class SceneMemoPanel {
       // 作品のログファイルへ残す（49 の指摘、2026-09-08）
       useLogFile(this.work.folderPath);
       logLine(
-        `シーンメモ：${filePath} の ${line}行目を消せませんでした（${result.reason}）。`
+        `校正・メモパネル：${filePath} の ${line}行目のメモを消せませんでした（${result.reason}）。`
       );
       void vscode.window.showWarningMessage(
         describeWriteFailure(result.reason)
@@ -892,7 +892,7 @@ class SceneMemoPanel {
     void this.panel.webview.postMessage({
       type: "memos",
       data: {
-        title: `シーンメモ：${this.work.title}`,
+        title: `校正・メモパネル：${this.work.title}`,
         countsLabel:
           (currentKey ? `この話 ${currentCount}件／` : "") +
           `作品 ${this.memos.length}件` +
@@ -915,7 +915,7 @@ class SceneMemoPanel {
         notice: this.notices.join(" "),
         emptyMessage:
           total === 0
-            ? `この作品にシーンメモはありません。${MEMO_HINT}（読者向けの出力とAIには渡りません）。`
+            ? `この作品にメモはありません。${MEMO_HINT}（読者向けの出力とAIには渡りません）。`
             : "絞り込みに当てはまるものがありません。",
         colors: { ...colorsFor(), ...findingColorVars(isDarkTheme()) },
       },

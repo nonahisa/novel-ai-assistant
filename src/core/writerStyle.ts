@@ -893,7 +893,7 @@ function keepWritingAdvice(style: WriterStyle): TutorialAdvice {
   if (style.plan === "improviser") {
     steps.push({
       command: "novelai.openSceneMemos",
-      label: "シーンメモを開く",
+      label: "校正・メモパネルを開く",
       why:
         "即興派と答えていただいたためです。書きながら置いた付箋を" +
         "一覧して、話をまたいで飛べます",
@@ -1081,7 +1081,7 @@ function unstickAdvice(style: WriterStyle): TutorialAdvice {
   if (style.plan === "improviser") {
     steps.push({
       command: "novelai.openSceneMemos",
-      label: "シーンメモを開く",
+      label: "校正・メモパネルを開く",
       why:
         "即興派と答えていただいたためです。書きながら置いた付箋に、" +
         "次に書くことが残っていることがあります",

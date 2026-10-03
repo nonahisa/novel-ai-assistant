@@ -153,7 +153,7 @@ export function findingList(input: FindingListInput): FindingListResult {
     items: matching.slice(0, input.limit),
     stateLabels: { ...FINDING_PANEL_STATE_LABELS },
     nextStep:
-      "採否は作者が VS Code の提案パネル（またはシーンメモ）で決めます。",
+      "採否は作者が VS Code の提案パネル（または校正・メモパネル）で決めます。",
     note:
       "読むだけです。採用・却下・片づけはしていません。状態の決め方は提案パネルと同じ関数を通しています。" +
       `期限切れは ${retentionDays === 0 ? "無期限（隠さない）" : `${retentionDays}日`} で判定しました` +

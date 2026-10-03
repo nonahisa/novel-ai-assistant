@@ -754,10 +754,10 @@ export async function insertMemoLineAbove(
   if (!(await vscode.workspace.applyEdit(change))) {
     // **黙って終わらない。** 押しても何も起きないときの手がかりを残す
     logLine(
-      `シーンメモ：${fromUri(document.uri)} の ${index + 1}行目に付箋を挿せませんでした。`
+      `メモ：${fromUri(document.uri)} の ${index + 1}行目に付箋を挿せませんでした。`
     );
     void vscode.window.showWarningMessage(
-      "シーンメモの行を挿せませんでした。もう一度お試しください。"
+      "メモの行を挿せませんでした。もう一度お試しください。"
     );
     return false;
   }
@@ -968,7 +968,7 @@ export async function removeMemoLineInOpenManuscript(
   change.delete(document.uri, document.lineAt(index).rangeIncludingLineBreak);
   if (!(await vscode.workspace.applyEdit(change))) {
     logLine(
-      `原稿エディタ：シーンメモの行を消せませんでした（${filePath} ${line}行目）。`
+      `原稿エディタ：メモの行を消せませんでした（${filePath} ${line}行目）。`
     );
     return { kind: "changed" };
   }

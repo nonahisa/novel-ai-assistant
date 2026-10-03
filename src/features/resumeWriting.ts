@@ -607,7 +607,7 @@ async function loadOpenMemos(
       }
     } catch (error) {
       notices.push(
-        `${episode.fileName} のシーンメモを読めませんでした：${messageOf(error)}`
+        `${episode.fileName} のメモを読めませんでした：${messageOf(error)}`
       );
     }
   }

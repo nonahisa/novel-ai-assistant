@@ -131,9 +131,9 @@ export const EXTRA_GUIDE = `
 - Ctrl+Alt+P: 推敲（範囲を訊く窓では「この話だけ」が先頭）
 - Ctrl+Alt+H: 表記ゆれ検知
 - Ctrl+Alt+A: 校正一括実行
-- Ctrl+Alt+M: シーンメモ一覧を横に開く
-- Ctrl+Alt+N / Ctrl+Alt+Shift+N: 次のシーンメモへ / 前のシーンメモへ
-- Ctrl+Alt+Shift+M: ここにシーンメモを足す（カーソルの行の上）
+- Ctrl+Alt+M: 校正・メモパネルを開く（原稿の横に）
+- Ctrl+Alt+N / Ctrl+Alt+Shift+N: 次のメモへ / 前のメモへ
+- Ctrl+Alt+Shift+M: ここにメモを足す（カーソルの行の上）
 - Ctrl+Alt+C: AIに相談する（開いている原稿の作品で）
 - Ctrl+Alt+… のキーは、原稿エディターを開いているときだけ効き、開いている原稿の作品・話を対象にする。押したあとに出る窓は先頭が選ばれた状態で開くので Enter で進み（未保存の確認は［保存して実行］、AIの料金・量の確認は［実行］が先頭）、Esc でいつでも取りやめられる。表記ゆれの「揃えたい組」だけは、勝手に直さないよう何も選ばれていないので、選んでから Enter
 - Ctrl+Alt+… のキーは自分で変えられる。VS Code の「キーボード ショートカット」（Ctrl+K Ctrl+S）を開き、「小説執筆」と打って探す（mac は Cmd+Alt+…）

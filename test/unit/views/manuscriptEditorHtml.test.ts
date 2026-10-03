@@ -813,12 +813,12 @@ describe("シーンメモの見え方", () => {
   it("メモの行に載せると、チップに全文が出る", () => {
     expect(code).toContain("function memoElementAt(");
     expect(code).toContain('fillTip(parts.tag, "memo", parts.text');
-    expect(code).toContain('memo: "シーンメモ"');
+    expect(code).toContain('memo: "メモ"');
   });
 
   it("右クリックの品書きに、メモを足す・横に開くがある", () => {
     expect(code).toContain("ここにメモを足す");
-    expect(code).toContain("シーンメモを横に開く");
+    expect(code).toContain("校正・メモパネルを横に開く");
     expect(code).toContain('type: "addMemo", line: menuCaretLine()');
     expect(code).toContain('type: "openMemos"');
   });

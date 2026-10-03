@@ -66,22 +66,22 @@ export const MANUSCRIPT_KEY_BINDINGS: readonly ManuscriptKeyBinding[] = [
   {
     key: "ctrl+alt+m",
     command: "novelai.openSceneMemos",
-    label: "シーンメモ一覧",
+    label: "校正・メモパネルを開く",
   },
   {
     key: "ctrl+alt+n",
     command: "novelai.nextSceneMemo",
-    label: "次のシーンメモへ",
+    label: "次のメモへ",
   },
   {
     key: "ctrl+alt+shift+n",
     command: "novelai.prevSceneMemo",
-    label: "前のシーンメモへ",
+    label: "前のメモへ",
   },
   {
     key: "ctrl+alt+shift+m",
     command: "novelai.addSceneMemo",
-    label: "ここにシーンメモを足す",
+    label: "ここにメモを足す",
   },
   { key: "ctrl+alt+c", command: "novelai.openChat", label: "AIに相談する" },
 ];

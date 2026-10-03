@@ -937,7 +937,7 @@ ruby > rt {
   <label class="pick">声
     <select id="aloudVoice" title="読み上げに使う声。この端末に入っている日本語の声だけが並びます"></select>
   </label>
-  <button id="aloudMark" title="いま読んでいる文の上にシーンメモの印を置いて、一時停止します">⚑ 引っかかった</button>
+  <button id="aloudMark" title="いま読んでいる文の上にメモの印を置いて、一時停止します">⚑ 引っかかった</button>
   <span id="aloudNote"></span>
 </div>
 
@@ -3736,7 +3736,7 @@ ruby > rt {
       // 下に入ると、続きを打つたびに付箋が押し下げられる
       vscode.postMessage({ type: "addMemo", line: menuCaretLine() });
     });
-    add("シーンメモを横に開く", function () {
+    add("校正・メモパネルを横に開く", function () {
       vscode.postMessage({ type: "openMemos" });
     });
     // 単話プロット（設計書6.36）も「横に資料を開く」項目なので、同じ区切りに置く
@@ -3947,7 +3947,7 @@ ${RESUME_WRITING_LABEL ? `
     organization: "組織",
     // 付箋のチップ（設計書6.40.3）。行の中では小さく出ているので、
     // 全文はここで読む
-    memo: "シーンメモ",
+    memo: "メモ",
   };
 
   /**

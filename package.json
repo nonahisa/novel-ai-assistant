@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを引き受けるVSCode拡張機能で、AIは提案するだけで原稿は書き換えません（無料の手元AIだけでも使えます）。※現在テスト中です。",
-  "version": "0.96.5",
+  "version": "0.96.6",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -1221,7 +1221,7 @@
       },
       {
         "command": "novelai.openSceneMemos",
-        "title": "シーンメモ一覧",
+        "title": "校正・メモパネルを開く",
         "category": "小説執筆",
         "icon": "$(note)"
       },
@@ -1233,19 +1233,19 @@
       },
       {
         "command": "novelai.nextSceneMemo",
-        "title": "次のシーンメモへ",
+        "title": "次のメモへ",
         "category": "小説執筆",
         "icon": "$(arrow-right)"
       },
       {
         "command": "novelai.prevSceneMemo",
-        "title": "前のシーンメモへ",
+        "title": "前のメモへ",
         "category": "小説執筆",
         "icon": "$(arrow-left)"
       },
       {
         "command": "novelai.addSceneMemo",
-        "title": "ここにシーンメモを足す",
+        "title": "ここにメモを足す",
         "category": "小説執筆",
         "icon": "$(add)"
       },

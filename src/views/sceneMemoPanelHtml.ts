@@ -32,7 +32,7 @@ export function buildSceneMemoPanelHtml(
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; style-src ${cspSource} 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>シーンメモ</title>
+<title>校正・メモパネル</title>
 <style nonce="${nonce}">
 * { box-sizing: border-box; }
 body {
@@ -185,7 +185,7 @@ h2 {
 </head>
 <body>
 <header>
-  <h1 id="title">シーンメモ</h1>
+  <h1 id="title">校正・メモパネル</h1>
   <div id="counts"></div>
   <div class="row-controls">
     <button id="prev" title="ひとつ前のメモへ飛びます（話をまたぎます）">← 戻る</button>
