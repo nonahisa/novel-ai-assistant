@@ -157,11 +157,35 @@ export async function commandPaletteLabels(page: Page, query: string): Promise<s
 }
 
 /**
+ * **VS Code 本体向けのキー**（使い捨ての keybindings.json に書いた Ctrl+Alt+Shift+F<n> など）を、
+ * 本体に焦点を戻してから押す。
+ *
+ * WebView（校正・メモパネル・人物相関図など）を開くと、焦点が WebView の中へ移る。そのまま
+ * Playwright でキーを送ると、**本体のキー割り当てに届かない**（Keyboard Shortcuts
+ * Troubleshooting のログに「Received keydown event」の行が1行も出ない。`document.hasFocus()` は偽か、
+ * 焦点が iframe）。2026-10-03、ノートPCで `commandNames`／`memoFixOneStep` が落ちて分かった
+ * （同じテストが母艦では通る。届くかどうかは WebView の読み込みの進み方しだい）。
+ *
+ * `window.focus()` は**画面の中だけの操作**で、OS の前面は取らない（`vscodeApp.ts` の
+ * `keepOutOfTheWay` の決まりを崩さない。`page.bringToFront()` は使わない）。
+ */
+export async function pressWorkbenchKey(page: Page, chord: string): Promise<void> {
+  await page.evaluate(() => {
+    // iframe（WebView）に焦点があれば外す。焦点が本体の入力欄などにあるときは触らない
+    const active = document.activeElement;
+    if (active && active.tagName === "IFRAME") (active as HTMLElement).blur();
+    window.focus();
+  });
+  await page.keyboard.press(chord);
+}
+
+/**
  * キーボード ショートカットの画面で `query` を探し、並んだ行の
  * 「コマンドの名前」と「キー」を返す（画面は開いたまま）。
  *
  * 開くのは `OPEN_KEYBINDINGS_KEY`（使い捨ての keybindings.json に足す）。
  * **Ctrl+K Ctrl+S の2段のキーは、焦点が WebView（パネル）の中にあると届かなかった**
+ * （1段のキーでも同じ。`pressWorkbenchKey` で本体へ焦点を戻してから押す）
  */
 export async function keybindingsEditorRows(page: Page, query: string): Promise<Array<{ command: string; keys: string }>> {
   const search = page
@@ -169,7 +193,7 @@ export async function keybindingsEditorRows(page: Page, query: string): Promise<
     .first();
   // 開いていなければ開く（2回目からは探す語だけ入れ替える）
   if ((await search.count()) === 0 || !(await search.isVisible())) {
-    await page.keyboard.press(OPEN_KEYBINDINGS_PRESS);
+    await pressWorkbenchKey(page, OPEN_KEYBINDINGS_PRESS);
   }
   await search.waitFor({ state: "visible", timeout: 10_000 });
   await search.click();
