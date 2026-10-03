@@ -78,13 +78,38 @@ export interface E2ESession {
   workFolder: string;
   /** 本文フォルダー */
   manuscriptFolder: string;
+  /**
+   * 録画を始めたとみなす時刻（`Date.now()`。録画するときだけ）。
+   * 窓が開いた直後に取るので、本当の録り始めとは1秒足らずずれることがある
+   */
+  videoStartedAt?: number;
+}
+
+/**
+ * 起こし方の追加の指定。**どれも省けば、画面の自動テストの既定のまま**
+ * （広報の動画を撮る台本 `test/e2e/promo/` が使う。設計書6.114）。
+ */
+export interface LaunchOptions {
+  /** 使い捨ての settings.json へ足す（同じ名前は上書き） */
+  settings?: Record<string, unknown>;
+  /** 使い捨ての keybindings.json へ足す行 */
+  keybindings?: readonly Record<string, unknown>[];
+  /**
+   * 録画する（Playwright の `recordVideo`）。**`dir` は一時フォルダーの外にする**
+   * ——片づけで一時フォルダーごと消えるため
+   */
+  recordVideo?: { dir: string; size: { width: number; height: number } };
+  /** 窓の中身の大きさを固定する（録画の画角を揃えるため） */
+  windowSize?: { width: number; height: number };
+  /** 作品の題（既定は `E2E_WORK_TITLE`）。動画ではパネルの見出しに写る */
+  workTitle?: string;
 }
 
 /**
  * 作品を一時フォルダーへ作り、VS Code を起こして作品を登録するところまで。
  * 呼び手は `withVsCode` を使う（片づけと失敗時の写真を引き受けるため）。
  */
-async function launch(episodes: readonly FixtureEpisode[]): Promise<E2ESession> {
+async function launch(episodes: readonly FixtureEpisode[], options: LaunchOptions = {}): Promise<E2ESession> {
   const root = await mkdtemp(path.join(tmpdir(), "novelai-e2e-"));
   // **起こす前に台帳へ載せる。** 起動の途中で時間切れになっても、走りの最後の
   // 片づけ（globalSetup）が引数の一時フォルダー名で拾って止める
@@ -92,7 +117,8 @@ async function launch(episodes: readonly FixtureEpisode[]): Promise<E2ESession> 
   // 書庫の形（書庫の中に作品が1つ）。作品フォルダーそのものを開くと、
   // 本文フォルダーが作品に見えて「作品か書庫か」を訊かれることがある
   const library = path.join(root, "書庫");
-  const workFolder = path.join(library, E2E_WORK_TITLE);
+  const workTitle = options.workTitle ?? E2E_WORK_TITLE;
+  const workFolder = path.join(library, workTitle);
   const manuscriptFolder = path.join(workFolder, "本文");
   await mkdir(manuscriptFolder, { recursive: true });
   for (const episode of episodes) {
@@ -131,6 +157,7 @@ async function launch(episodes: readonly FixtureEpisode[]): Promise<E2ESession> 
         // 確認の画面（モーダル）を OS のダイアログでなく VS Code の中に描かせる。
         // OS のダイアログは Playwright から読めず、作者の画面の前面にも出てしまう
         "window.dialogStyle": "custom",
+        ...options.settings,
       },
       null,
       2
@@ -144,10 +171,11 @@ async function launch(episodes: readonly FixtureEpisode[]): Promise<E2ESession> 
         {
           key: REGISTER_WORK_KEY,
           command: "novelai.addWork",
-          args: { folderPath: workFolder, title: E2E_WORK_TITLE },
+          args: { folderPath: workFolder, title: workTitle },
         },
         { key: SHOW_VERSION_KEY, command: "novelai.showVersion" },
         { key: CLEAR_NOTIFICATIONS_KEY, command: "notifications.clearAll" },
+        ...(options.keybindings ?? []),
       ],
       null,
       2
@@ -186,6 +214,7 @@ async function launch(episodes: readonly FixtureEpisode[]): Promise<E2ESession> 
     ],
     env: cleanEnv(),
     timeout: 60_000,
+    ...(options.recordVideo ? { recordVideo: options.recordVideo } : {}),
   }).catch(async (error: unknown) => {
     await stopLaunch({ root });
     throw error;
@@ -194,20 +223,23 @@ async function launch(episodes: readonly FixtureEpisode[]): Promise<E2ESession> 
   if (pid !== undefined) await recordLaunch({ root, pid });
 
   let page: Page | undefined;
+  let videoStartedAt: number | undefined;
   const session = (): E2ESession => {
     if (!page) throw new Error("VS Code の窓がまだ開いていません");
-    return { app, page, root, workFolder, manuscriptFolder };
+    return { app, page, root, workFolder, manuscriptFolder, videoStartedAt };
   };
   try {
     await keepOutOfTheWay(app);
     page = await app.firstWindow();
+    if (options.recordVideo) videoStartedAt = Date.now();
     // 窓が裏にあっても、画面の中では「焦点がある」として振る舞わせる（下の説明）
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true });
     // ワークベンチが組み上がるまで待つ（ここまでは拡張機能と関係が無い）
     await page.locator(".monaco-workbench").waitFor({ timeout: 60_000 });
     await keepOutOfTheWay(app);
-    await registerWork(session());
+    if (options.windowSize) await resizeWindows(app, options.windowSize);
+    await registerWork(session(), workTitle);
   } catch (error) {
     // 呼び手（withVsCode）の片づけはまだ始まっていないので、ここで写真を残して閉じる
     const shot = page ? await saveScreenshot(page, "起動と作品の登録") : undefined;
@@ -302,6 +334,32 @@ async function moveWindowsAway(app: ElectronApplication): Promise<void> {
 }
 
 /**
+ * 窓の**中身**の大きさを固定する（録画の画角。枠や題の帯の厚みに左右されないよう
+ * `setContentSize` を使う）。位置には触らないので、上の「外へ置き直す」とぶつからない
+ */
+export async function resizeWindows(app: ElectronApplication, size: { width: number; height: number }): Promise<void> {
+  /*
+    **頼んだ大きさにならないことがある。** 画面の外（-20000）に置いた窓へ
+    `setContentSize(1280, 720)` を頼むと、1302×776 になった（2026-10-03。画面の
+    拡大率が違う2枚の画面がある機械で）。そこで、なった大きさを測り、ずれの分だけ
+    頼む値を足し引きして、何度か合わせ直す
+  */
+  await app.evaluate(({ BrowserWindow }, wanted) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed()) continue;
+      if (win.isMaximized()) win.unmaximize();
+      let ask = { ...wanted };
+      for (let attempt = 0; attempt < 6; attempt++) {
+        win.setContentSize(ask.width, ask.height);
+        const [width, height] = win.getContentSize();
+        if (width === wanted.width && height === wanted.height) break;
+        ask = { width: ask.width + (wanted.width - width), height: ask.height + (wanted.height - height) };
+      }
+    }
+  }, size);
+}
+
+/**
  * **`ELECTRON_RUN_AS_NODE` を外した環境。** VS Code のターミナルから走らせると
  * 親から引き継ぎ、起こした `Code.exe` が Electron ではなく Node として立ち上がって
  * 即終了する（統合テスト・ブラウザ版テストと同じ罠。実際に踏んでいる）。
@@ -376,7 +434,7 @@ async function pressUntilToast(
  * （`novelai.showVersion`）の確認の画面は、登録簿から引いた作品名を「（作品: …）」と
  * 添える。確認の画面と知らせは本文を塞ぐので、読んだら閉じる。
  */
-async function registerWork(session: E2ESession): Promise<void> {
+async function registerWork(session: E2ESession, workTitle: string): Promise<void> {
   const { page } = session;
   const config = path.join(session.workFolder, ".aiwriter", "config.json");
   // 拡張機能がまだ起きていなければ、知らせが出るまで押し直す（登録はすでにあれば
@@ -388,7 +446,7 @@ async function registerWork(session: E2ESession): Promise<void> {
   await clearNotifications(page);
   const version = await readVersionDialog(page, "登録簿の読み返し");
   // 作品フォルダーの名前も同じなので、登録簿から引いた形「作品: …」で見る
-  if (!version.includes(`作品: ${E2E_WORK_TITLE}`)) {
+  if (!version.includes(`作品: ${workTitle}`)) {
     throw new Error(
       `作品を登録したのに登録簿に入っていません（登録が消える不具合の再発。設計書5.7.8）。版の知らせ：${version}`
     );
@@ -425,11 +483,14 @@ async function saveScreenshot(page: Page, name: string): Promise<string | undefi
 export async function withVsCode(
   name: string,
   episodes: readonly FixtureEpisode[],
-  body: (session: E2ESession) => Promise<void>
-): Promise<void> {
-  const session = await launch(episodes);
+  body: (session: E2ESession) => Promise<void>,
+  options: LaunchOptions = {}
+): Promise<{ videoPath?: string }> {
+  const session = await launch(episodes, options);
+  // 動画の道は閉じる前に控える（閉じたあとに書き終わる。置き場は一時フォルダーの外）
   try {
     await body(session);
+    return { videoPath: await session.page.video()?.path() };
   } catch (error) {
     const shot = await saveScreenshot(session.page, name);
     const note = shot ? `\n画面の写真: ${shot}` : "\n（写真を撮れませんでした）";

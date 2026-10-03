@@ -2413,6 +2413,7 @@
     "test:integration:latest": "npm run build && npm run compile:integration && node scripts/runIntegrationTests.mjs --vscode=stable",
     "test:web": "npm run build && node scripts/buildWebTests.mjs && node scripts/runWebTests.mjs",
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.mts",
+    "promo:record": "npm run build && vitest run --config vitest.promo.config.mts",
     "check:env": "node scripts/checkEnv.mjs",
     "check": "npm run check:deps && npm run typecheck && npm run typecheck:tests && npm run test:unit && npm run build",
     "ci": "npm run check:deps && npm run typecheck && npm run typecheck:tests && npm run test:unit && npm run test:quality && npm run test:coverage && npm run build && npm run test:integration && npm audit --audit-level=moderate",
