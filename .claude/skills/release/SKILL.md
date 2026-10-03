@@ -36,7 +36,10 @@ node scripts/checkMarketplace.mjs
 $env:ELECTRON_RUN_AS_NODE = $null
 npm run package:vsix      # 全リリースゲート（check → bundle:core → integration → web → audit）＋ vsce package
 npm run verify:vsix       # 内容・隔離インストール・版の照合。SHA-256 が出る
+npm run test:e2e          # 画面の自動テスト（ゲートの外。Marketplace へ出す版では必ず通す）
 ```
+
+- **画面の自動テスト（`test:e2e`）はゲート（`check:release`）に入っていない**（安定を見てから入れる。設計書6.113）。**Marketplace へ出す版では必ず走らせ、Release ノートに件数を書く。** 落ちたら出さずに原因を読む（スキル `e2e`）。走らせたあと、`novelai-e2e-` の `Code.exe` が残っていないことを確かめる
 
 - 出力の `release/novel-ai-assistant-<版>.vsix` と、バイト数・ファイル数・SHA-256 を控える
 - VSIX に **`dist/mcp-server.mjs` は入り、`.mcp.json` は入らない**のが正しい（0.67.1 で方針を変えた。設計書6.87.8）。**束が無いと、作品へ書き出した MCP の登録が存在しないファイルを指す**——手元にリポジトリのある作者だけ繋がり、配布版では黙って繋がらなかった

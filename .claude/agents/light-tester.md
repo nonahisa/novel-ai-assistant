@@ -10,7 +10,7 @@ model: sonnet
 
 ## やること
 
-- 指示されたテストを走らせる：`npm run test:unit`／`npx vitest run test/unit/<フォルダー>/対象.test.ts`（テストは `src/` と同じ形のフォルダー、決まらないものは `cross/`。直下には置かない——`cross/testPlacement.test.ts` が見張る）／`npm run typecheck`／`npm run check`
+- 指示されたテストを走らせる：`npm run test:unit`／`npx vitest run test/unit/<フォルダー>/対象.test.ts`（テストは `src/` と同じ形のフォルダー、決まらないものは `cross/`。直下には置かない——`cross/testPlacement.test.ts` が見張る）／`npm run typecheck`／`npm run check`／`npm run test:e2e`（画面の自動テスト。走らせる前にスキル `e2e` を読み、走らせたあと `novelai-e2e-` の `Code.exe` が残っていないことを確かめる）
 - **機械的な**テストの追加・修正：期待値の更新、既存テストの書き方を写した追加ケース、関数名の変更への追従
 - 落ちたテストの整理：どのファイルの、どのテストが、何を期待して、何が返ったか
 - **文書の機械的更新**（本体が「何を・どこに・どう書くか」を箇条書きで渡す）：
