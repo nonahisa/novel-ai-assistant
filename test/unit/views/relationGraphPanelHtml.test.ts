@@ -147,7 +147,6 @@ describe("用語の色", () => {
  */
 describe("図を、画面ぎりぎりまで大きく出す", () => {
   it("幅と高さの両方に収める指定になっている", () => {
-    // 縦横比を保ったまま、幅と高さの小さいほうに合わせる
     expect(html).toContain('preserveAspectRatio="xMidYMid meet"');
     const rule = html.slice(html.indexOf("svg {"), html.indexOf("svg {") + 400);
     expect(rule).toContain("width: 100%;");
@@ -157,9 +156,114 @@ describe("図を、画面ぎりぎりまで大きく出す", () => {
     expect(html).not.toContain("height: auto;");
   });
 
-  it("図の入れ物が、余りを詰めて中央へ置く", () => {
-    expect(html).toContain("#canvas { flex: 1; min-width: 0; overflow: auto;");
-    expect(html).toContain("padding: 8px; display: flex; }");
+  /**
+   * 2026-10-03 に変えた。以前は最小280画素＋欄のスクロールで小ささを
+   * しのいでいたが、右側が欄の外に切れて横スクロールでしか見えなかった
+   * （作者の画面）。いまは欄いっぱいに広げ、見せる範囲は viewBox で決める。
+   */
+  it("欄はスクロールさせず、図を欄いっぱいに広げる", () => {
+    expect(html).toContain(
+      "#canvas { flex: 1; min-width: 0; overflow: hidden; position: relative; display: flex; }"
+    );
+    const rule = html.slice(html.indexOf("svg {"), html.indexOf("svg {") + 400);
+    expect(rule).toContain("position: absolute;");
+    expect(rule).not.toContain("min-width");
+    expect(rule).not.toContain("min-height");
+  });
+
+  it("配置の幅と高さを、SVGの大きさの属性にしない", () => {
+    // 属性で大きさを決めると、CSSの100%と食い違って欄からはみ出す
+    expect(script).not.toContain('setAttribute("width", String(layout.width))');
+    expect(script).not.toContain('"0 0 " + layout.width');
+  });
+});
+
+/**
+ * 拡大・縮小と移動（設計書6.38.2。作者の要望、2026-10-03「相関図の図を
+ * 拡大したい」）。計算そのものは core/relationGraphViewport.ts の単体テストと、
+ * 写しの同値テスト（cross/relationGraphViewportCopy.test.ts）が見る。
+ * ここで見るのは、画面の操作が計算に結ばれているかだけ。
+ */
+describe("拡大・縮小と移動", () => {
+  it("隅に［－］［＋］［全体を合わせる］がある", () => {
+    expect(html).toContain('id="zoomOut"');
+    expect(html).toContain('id="zoomIn"');
+    expect(html).toContain('id="zoomFit"');
+    expect(html).toContain(">全体を合わせる<");
+    expect(html).toContain('id="zoomValue"');
+  });
+
+  it("Ctrl＋ホイールでマウスの位置を中心に拡大し、既定（VS Code全体の拡大）を止める", () => {
+    const at = script.indexOf('el.canvas.addEventListener(\n  "wheel"');
+    expect(at).toBeGreaterThan(0);
+    const handler = script.slice(at, at + 1400);
+    expect(handler).toContain("event.ctrlKey || event.metaKey");
+    expect(handler).toContain("event.preventDefault()");
+    expect(handler).toContain("wheelZoomFactor(event.deltaY, event.deltaMode)");
+    expect(handler).toContain("event.clientX - rect.left");
+    expect(handler).toContain("{ passive: false }");
+  });
+
+  it("素のホイールは図を動かす", () => {
+    const at = script.indexOf('el.canvas.addEventListener(\n  "wheel"');
+    const handler = script.slice(at, at + 1400);
+    expect(handler).toContain("panViewBox(viewBox, -dx, -dy, canvasSize, contentBox)");
+  });
+
+  it("引いただけのときは、点や線を押したことにしない", () => {
+    expect(script).toContain("DRAG_THRESHOLD");
+    expect(script).toContain("if (drag.moving) dragMoved = true;");
+    // 捕獲の段で click を止める（点・線の受け手より先に走る）
+    const at = script.indexOf('el.graph.addEventListener(\n  "click"');
+    expect(at).toBeGreaterThan(0);
+    const handler = script.slice(at, at + 300);
+    expect(handler).toContain("event.stopPropagation()");
+    expect(handler).toContain("true\n);");
+  });
+
+  it("押した直後には捕まえない（ただのクリックを点や線へ届かせる）", () => {
+    const down = script.slice(
+      script.indexOf('el.graph.addEventListener("pointerdown"'),
+      script.indexOf('el.graph.addEventListener("pointermove"')
+    );
+    expect(down).not.toContain("setPointerCapture");
+  });
+
+  it("左ボタンだけで引く（戻る・進むのボタンを取らない）", () => {
+    expect(script).toContain("if (event.button !== 0 || !graphShown()) return;");
+  });
+
+  it("別の図が届いたら全体を合わせ、同じ図の引き直しでは寄せた所を保つ", () => {
+    expect(script).toContain("const key = viewKeyOf(data);");
+    expect(script).toContain("followFit = true;");
+    const keyOf = script.slice(script.indexOf("function viewKeyOf"), script.indexOf("function viewKeyOf") + 300);
+    expect(keyOf).toContain("next.mode");
+    expect(keyOf).toContain("next.centerId");
+    expect(keyOf).toContain("next.filter");
+    expect(keyOf).toContain("next.showSecondRing");
+  });
+
+  it("名前で探して描き直しても、見ている範囲を変えない", () => {
+    // renderGraph の最後で、追従中でなければ今の範囲をそのまま当て直す
+    expect(script).toContain("if (viewBox === null || followFit) {");
+  });
+
+  it("欄の大きさが変わったら追従する（「図を広く」もここを通る）", () => {
+    expect(script).toContain("new ResizeObserver(");
+    expect(script).toContain("resizeViewBox(viewBox, canvasSize, next)");
+  });
+
+  it("Ctrl+＋／－／0 を、原稿エディターと同じキーで受ける", () => {
+    expect(script).toContain('key === "+" || key === "=" || key === ";" || code === "NumpadAdd"');
+    expect(script).toContain('key === "-" || key === "_" || code === "NumpadSubtract"');
+    expect(script).toContain('key === "0" || code === "Numpad0"');
+  });
+
+  it("書き出すのは図の全体で、拡大中の切り抜きではない", () => {
+    const at = script.indexOf("function exportSvg");
+    const body = script.slice(at, at + 2400);
+    expect(body).toContain('clone.setAttribute("viewBox"');
+    expect(body).toContain('clone.setAttribute("width"');
   });
 });
 

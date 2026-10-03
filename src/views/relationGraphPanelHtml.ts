@@ -1,4 +1,5 @@
 import { TERM_COLORS } from "../core/termColors";
+import { ZOOM_LIMITS } from "../core/relationGraphViewport";
 
 /**
  * 人物相関図の画面（設計書6.38.4）。
@@ -103,10 +104,11 @@ button.on {
   overflow-y: auto;
   border-right: 1px solid var(--vscode-panel-border);
 }
-/* 図は、余った幅と高さの真ん中へ置く（設計書6.38.4）。
-   中央寄せは justify-content ではなく子の margin:auto で行う——はみ出したとき、
-   justify-content:center だと左と上へあふれた分がスクロールで届かなくなる */
-#canvas { flex: 1; min-width: 0; overflow: auto; padding: 8px; display: flex; }
+/* 図は欄いっぱいに広げ、見せる範囲は viewBox で決める（拡大・縮小と移動。
+   設計書6.38.2）。欄そのものはスクロールさせない——スクロールと図の移動が
+   2つあると、どちらで動いているのか作者に分からなくなる。
+   材料が無いときの案内（.empty）は margin:auto で真ん中へ置く */
+#canvas { flex: 1; min-width: 0; overflow: hidden; position: relative; display: flex; }
 #side {
   width: 280px;
   min-width: 220px;
@@ -169,20 +171,44 @@ footer {
   color: var(--vscode-descriptionForeground);
   min-height: 26px;
 }
-/* 幅と高さの、小さいほうに合わせて目一杯まで広げる（設計書6.38.4）。
-   height:auto は横幅にだけ合わせるので、設定資料の隣に開いたときのように
-   横が狭い窓では、縦が余っているのに図が小さいままだった。
-   縦横比は preserveAspectRatio="xMidYMid meet" が保つ */
+/* 欄いっぱいに広げる（設計書6.38.4）。図の大きさは viewBox が決めるので、
+   最小の幅・高さも、幅・高さの属性も持たない（以前は最小280画素と
+   欄のスクロールで小ささをしのいでいたが、拡大できるようになって要らなくなった）。
+   viewBox の縦横比は欄に揃えるので、preserveAspectRatio は保険として残す。
+   touch-action: none は、タッチやペンで引いたときにブラウザのスクロールへ
+   取られないため */
 svg {
+  position: absolute;
+  inset: 0;
   display: block;
-  margin: auto;
   width: 100%;
   height: 100%;
   max-width: 100%;
   max-height: 100%;
-  /* これより小さいと名前が読めない。下回ったときだけ #canvas のスクロールが効く */
-  min-width: 280px;
-  min-height: 280px;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+svg.dragging { cursor: grabbing; }
+/* 拡大・縮小のボタン。図の右下の隅に重ねる */
+#zoom {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 4px;
+  background: var(--vscode-editor-background);
+}
+#zoom button { padding: 2px 10px; }
+#zoomValue {
+  min-width: 3.6em;
+  text-align: center;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
 }
 /* 図の中の見た目。書き出したSVGにも同じ規則を写すので、
    目印として class の頭を g- で揃えてある（script の svgCss を参照） */
@@ -249,6 +275,12 @@ svg {
   <main id="canvas">
     <div class="empty" id="empty"></div>
     <svg id="graph" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg>
+    <div id="zoom">
+      <button id="zoomOut" title="図を小さくします（Ctrl+－。Ctrl+ホイールを奥へ回しても同じ）">－</button>
+      <span id="zoomValue" title="図の全体がちょうど収まる大きさを100%とした倍率です"></span>
+      <button id="zoomIn" title="図を大きくします（Ctrl+＋。Ctrl+ホイールを手前へ回すと、マウスの位置を中心に大きくなります）">＋</button>
+      <button id="zoomFit" title="図の全体が欄にちょうど収まる大きさへ戻します（Ctrl+0）">全体を合わせる</button>
+    </div>
   </main>
   <aside id="side"></aside>
 </div>
@@ -273,6 +305,26 @@ let sidesHidden = false;
 /** 畳んでいるあいだに線を押したので、右の詳細だけを仮に出している */
 let sideTemporary = false;
 
+/*
+  拡大・縮小と移動（設計書6.38.2。作者の要望、2026-10-03）。
+  見せる範囲は viewBox だけで決める。null は「まだ描いていない」。
+*/
+/** いま見せている範囲（図の座標） */
+let viewBox = null;
+/** 図の全体がちょうど収まる範囲。倍率はこれを1として数える */
+let fitBox = null;
+/** 図の全体（配置の枠と、実際に描いた名前のはみ出しを合わせたもの） */
+let contentBox = null;
+/** 欄の大きさ（画素）。マウスの位置を図の座標へ直すのに使う */
+let canvasSize = { w: 0, h: 0 };
+/**
+ * 「全体を合わせる」に付いて行っているか。手で寄せたり動かしたり
+ * するまでは、欄の大きさが変わるたびに合わせ直す
+ */
+let followFit = true;
+/** どの図を見ているか。変わったときだけ「全体を合わせる」へ戻す */
+let viewKey = "";
+
 const el = {
   title: document.getElementById("title"),
   toAll: document.getElementById("toAll"),
@@ -293,7 +345,13 @@ const el = {
   showIsolated: document.getElementById("showIsolated"),
   isolatedNote: document.getElementById("isolatedNote"),
   empty: document.getElementById("empty"),
+  canvas: document.getElementById("canvas"),
   graph: document.getElementById("graph"),
+  zoom: document.getElementById("zoom"),
+  zoomIn: document.getElementById("zoomIn"),
+  zoomOut: document.getElementById("zoomOut"),
+  zoomFit: document.getElementById("zoomFit"),
+  zoomValue: document.getElementById("zoomValue"),
   side: document.getElementById("side"),
   notice: document.getElementById("notice"),
 };
@@ -535,20 +593,23 @@ function arcPath(center, radius, start, end) {
 function renderGraph() {
   if (!data) return;
   const layout = data.layout;
-  const svg = el.graph;
-  svg.replaceChildren();
+  const root = el.graph;
+  root.replaceChildren();
 
   if (data.graph.nodes.length === 0) {
     el.empty.textContent = data.emptyMessage;
     el.empty.style.display = "block";
-    svg.style.display = "none";
+    root.style.display = "none";
+    el.zoom.style.display = "none";
     return;
   }
   el.empty.style.display = "none";
-  svg.style.display = "block";
-  svg.setAttribute("viewBox", "0 0 " + layout.width + " " + layout.height);
-  svg.setAttribute("width", String(layout.width));
-  svg.setAttribute("height", String(layout.height));
+  root.style.display = "block";
+  el.zoom.style.display = "flex";
+  // 中身は1つの束にまとめる。外周の名前がどこまではみ出したかを
+  // この束の getBBox で測り、「全体を合わせる」に含めるため
+  const svg = svgNode("g", { id: "scene" });
+  root.appendChild(svg);
 
   const keyword = el.search.value.trim();
   let found = 0;
@@ -690,6 +751,17 @@ function renderGraph() {
   el.searchNote.textContent = keyword
     ? (found > 0 ? found + "人が当たりました" : "当たる人が居ません")
     : "";
+
+  // 描き直しても見ている範囲は変えない（名前で探すたびに全体へ戻ると、
+  // 寄せて探していた所を見失う）。戻すのは図そのものが変わったときだけ
+  contentBox = measureContent();
+  if (viewBox === null || followFit) {
+    fitToCanvas();
+  } else {
+    canvasSize = measureCanvas();
+    fitBox = fitViewBox(contentBox, canvasSize, FIT_MARGIN);
+    applyViewBox();
+  }
 }
 
 function isProvisional(id) {
@@ -829,6 +901,354 @@ function neighboursOf(id) {
   return out;
 }
 
+/*
+  ── 拡大・縮小と移動の計算 ──────────────────────────────
+  core/relationGraphViewport.ts の写し（このスクリプトは TypeScript を
+  読めない）。離れていないことは test/unit/cross/relationGraphViewportCopy.test.ts
+  が同じ入力で比べて見張る。直すときは core と両方を直す。
+*/
+/* viewport:start */
+const ZOOM_LIMITS = ${JSON.stringify(ZOOM_LIMITS)};
+const WHEEL_SENSITIVITY = 0.002;
+const WHEEL_LINE_PX = 40;
+const WHEEL_PAGE_PX = 800;
+
+function fitViewBox(content, canvas, margin) {
+  const w = content.w + margin * 2;
+  const h = content.h + margin * 2;
+  if (!(canvas.w > 0) || !(canvas.h > 0)) {
+    return { x: content.x - margin, y: content.y - margin, w: w, h: h };
+  }
+  const unit = Math.max(w / canvas.w, h / canvas.h);
+  const vw = canvas.w * unit;
+  const vh = canvas.h * unit;
+  return {
+    x: content.x - margin - (vw - w) / 2,
+    y: content.y - margin - (vh - h) / 2,
+    w: vw,
+    h: vh,
+  };
+}
+
+function zoomOf(vb, fit) {
+  if (!(vb.w > 0)) return 1;
+  return fit.w / vb.w;
+}
+
+function zoomViewBoxAt(vb, factor, pointer, canvas, fit) {
+  if (!(canvas.w > 0) || !(canvas.h > 0) || !(factor > 0)) return vb;
+  const current = zoomOf(vb, fit);
+  const target = Math.min(ZOOM_LIMITS.max, Math.max(ZOOM_LIMITS.min, current * factor));
+  if (Math.abs(target - current) < 1e-9) return vb;
+  const w = fit.w / target;
+  const h = (w * canvas.h) / canvas.w;
+  const gx = vb.x + (pointer.x * vb.w) / canvas.w;
+  const gy = vb.y + (pointer.y * vb.h) / canvas.h;
+  return {
+    x: gx - (pointer.x * w) / canvas.w,
+    y: gy - (pointer.y * h) / canvas.h,
+    w: w,
+    h: h,
+  };
+}
+
+function wheelZoomFactor(deltaY, deltaMode) {
+  const unit = deltaMode === 1 ? WHEEL_LINE_PX : deltaMode === 2 ? WHEEL_PAGE_PX : 1;
+  const delta = (Number(deltaY) || 0) * unit;
+  if (delta === 0) return 1;
+  return Math.exp(-delta * WHEEL_SENSITIVITY);
+}
+
+function clampViewBoxToContent(vb, content) {
+  const cx = vb.x + vb.w / 2;
+  const cy = vb.y + vb.h / 2;
+  const nx = Math.min(content.x + content.w, Math.max(content.x, cx));
+  const ny = Math.min(content.y + content.h, Math.max(content.y, cy));
+  if (nx === cx && ny === cy) return vb;
+  return { x: nx - vb.w / 2, y: ny - vb.h / 2, w: vb.w, h: vb.h };
+}
+
+function panViewBox(vb, dx, dy, canvas, content) {
+  if (!(canvas.w > 0) || !(canvas.h > 0)) return vb;
+  return clampViewBoxToContent(
+    {
+      x: vb.x - (dx * vb.w) / canvas.w,
+      y: vb.y - (dy * vb.h) / canvas.h,
+      w: vb.w,
+      h: vb.h,
+    },
+    content
+  );
+}
+
+function resizeViewBox(vb, before, after) {
+  if (!(before.w > 0) || !(after.w > 0) || !(after.h > 0)) return vb;
+  const unit = vb.w / before.w;
+  const w = after.w * unit;
+  const h = after.h * unit;
+  const cx = vb.x + vb.w / 2;
+  const cy = vb.y + vb.h / 2;
+  return { x: cx - w / 2, y: cy - h / 2, w: w, h: h };
+}
+/* viewport:end */
+
+/** 外周の名前が縁に貼り付かないための余白（図の単位） */
+const FIT_MARGIN = 12;
+/** ボタンとキーで1回に変える倍率 */
+const ZOOM_STEP = 1.25;
+/** これより動いたら「引いた」とみなし、点や線を押したことにしない（画素） */
+const DRAG_THRESHOLD = 4;
+
+/** 欄の大きさ。背面のタブでは0になる（そのときは計算を進めない） */
+function measureCanvas() {
+  const rect = el.canvas.getBoundingClientRect();
+  return { w: rect.width, h: rect.height };
+}
+
+/**
+ * 図の全体。配置の枠（拡張機能が決めた幅と高さ）に、実際に描いた中身の
+ * 外接の四角を合わせる——長い名前は枠の外へはみ出すことがあり、枠だけに
+ * 合わせると右端の名前が切れる（作者の画面で起きていたこと）
+ */
+function measureContent() {
+  const layout = data.layout;
+  let x1 = 0;
+  let y1 = 0;
+  let x2 = layout.width;
+  let y2 = layout.height;
+  const scene = document.getElementById("scene");
+  if (scene) {
+    try {
+      const box = scene.getBBox();
+      if (box.width > 0 && box.height > 0) {
+        x1 = Math.min(x1, box.x);
+        y1 = Math.min(y1, box.y);
+        x2 = Math.max(x2, box.x + box.width);
+        y2 = Math.max(y2, box.y + box.height);
+      }
+    } catch (error) {
+      // 描く前で測れないときは、配置の枠だけで合わせる
+    }
+  }
+  return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+}
+
+function applyViewBox() {
+  if (viewBox === null || fitBox === null) return;
+  el.graph.setAttribute(
+    "viewBox",
+    viewBox.x + " " + viewBox.y + " " + viewBox.w + " " + viewBox.h
+  );
+  el.zoomValue.textContent = Math.round(zoomOf(viewBox, fitBox) * 100) + "%";
+  const zoom = zoomOf(viewBox, fitBox);
+  el.zoomIn.disabled = zoom >= ZOOM_LIMITS.max - 1e-6;
+  el.zoomOut.disabled = zoom <= ZOOM_LIMITS.min + 1e-6;
+}
+
+/** 「全体を合わせる」。欄の大きさに図がちょうど収まる倍率へ */
+function fitToCanvas() {
+  if (!data || contentBox === null) return;
+  canvasSize = measureCanvas();
+  fitBox = fitViewBox(contentBox, canvasSize, FIT_MARGIN);
+  viewBox = fitBox;
+  followFit = true;
+  applyViewBox();
+}
+
+/** 欄の中の点（画素）を中心に、倍率を factor 倍する */
+function zoomBy(factor, pointer) {
+  if (viewBox === null || fitBox === null) return;
+  const next = zoomViewBoxAt(viewBox, factor, pointer, canvasSize, fitBox);
+  viewBox = clampViewBoxToContent(next, contentBox);
+  followFit = false;
+  applyViewBox();
+}
+
+function zoomAtCenter(factor) {
+  zoomBy(factor, { x: canvasSize.w / 2, y: canvasSize.h / 2 });
+}
+
+function graphShown() {
+  return Boolean(data) && data.graph.nodes.length > 0 && viewBox !== null;
+}
+
+el.zoomIn.addEventListener("click", function () { zoomAtCenter(ZOOM_STEP); });
+el.zoomOut.addEventListener("click", function () { zoomAtCenter(1 / ZOOM_STEP); });
+el.zoomFit.addEventListener("click", function () { fitToCanvas(); });
+
+/*
+  ホイール。
+  - Ctrl（Mac は Cmd）＋ホイール：マウスの位置を中心に拡大・縮小。
+    トラックパッドのピンチも、Chromium では Ctrl 付きの wheel で届くので
+    ここで一緒に効く。既定を止めないと VS Code 全体の拡大へ渡る
+  - 素のホイール：図を動かす（縦。Shift を押すと横。トラックパッドの
+    2本指は縦横そのまま）。欄にはもうスクロールが無いので、回しても
+    何も起きないより、地図と同じく図が動くほうが迷わない
+  受け身（passive）扱いだと既定を止められないので明示する。
+*/
+el.canvas.addEventListener(
+  "wheel",
+  function (event) {
+    if (!graphShown()) return;
+    event.preventDefault();
+    const rect = el.canvas.getBoundingClientRect();
+    if (event.ctrlKey || event.metaKey) {
+      zoomBy(wheelZoomFactor(event.deltaY, event.deltaMode), {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      });
+      return;
+    }
+    const unit = event.deltaMode === 1 ? WHEEL_LINE_PX : event.deltaMode === 2 ? WHEEL_PAGE_PX : 1;
+    let dx = (Number(event.deltaX) || 0) * unit;
+    let dy = (Number(event.deltaY) || 0) * unit;
+    if (event.shiftKey && dx === 0) {
+      dx = dy;
+      dy = 0;
+    }
+    // 下へ回すと、ページを下へ送るのと同じく図は上へ動く
+    viewBox = panViewBox(viewBox, -dx, -dy, canvasSize, contentBox);
+    followFit = false;
+    applyViewBox();
+  },
+  { passive: false }
+);
+
+/*
+  ドラッグで図を動かす。
+  点や線を押す操作を壊さないよう、少し（DRAG_THRESHOLD）動くまでは何も
+  しない。動いたら「引いた」とし、離したあとに来る click を握りつぶす
+  ——動かしただけで中心の人物が替わると、寄せた所から別の図へ飛ばされる。
+  マウスの戻る・進むボタン（3・4）は既存の mouseup が受けるので、左ボタン
+  だけを見る。
+*/
+let drag = null;
+let dragMoved = false;
+
+el.graph.addEventListener("pointerdown", function (event) {
+  dragMoved = false;
+  if (event.button !== 0 || !graphShown()) return;
+  drag = {
+    id: event.pointerId,
+    x: event.clientX,
+    y: event.clientY,
+    start: viewBox,
+    moving: false,
+  };
+});
+
+el.graph.addEventListener("pointermove", function (event) {
+  if (drag === null || event.pointerId !== drag.id) return;
+  const dx = event.clientX - drag.x;
+  const dy = event.clientY - drag.y;
+  if (!drag.moving) {
+    if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+    drag.moving = true;
+    // 引き始めてから捕まえる。押した直後に捕まえると、ただのクリックも
+    // 図そのもの宛てになり、点や線の click が届かなくなる
+    try {
+      el.graph.setPointerCapture(event.pointerId);
+    } catch (error) {
+      // 捕まえられなくても、欄の中で動かすぶんには困らない
+    }
+    el.graph.classList.add("dragging");
+  }
+  viewBox = panViewBox(drag.start, dx, dy, canvasSize, contentBox);
+  followFit = false;
+  applyViewBox();
+});
+
+function endDrag(event) {
+  if (drag === null || event.pointerId !== drag.id) return;
+  if (drag.moving) dragMoved = true;
+  drag = null;
+  el.graph.classList.remove("dragging");
+}
+el.graph.addEventListener("pointerup", endDrag);
+el.graph.addEventListener("pointercancel", endDrag);
+
+// 引いたあとの click は、点にも線にも届かせない（捕獲の段で止める）
+el.graph.addEventListener(
+  "click",
+  function (event) {
+    if (!dragMoved) return;
+    dragMoved = false;
+    event.stopPropagation();
+    event.preventDefault();
+  },
+  true
+);
+
+/*
+  キー。原稿エディターの字の大きさ（Ctrl+＋／－／0）と同じ形にする。
+  日本語の配列では「＋」が「;」の Shift 側にあるので、; = + を「大きく」。
+  名前で探す欄やつまみで打っているあいだは、そちらに任せる
+*/
+document.addEventListener(
+  "keydown",
+  function (event) {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    if (!graphShown()) return;
+    const target = event.target;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+    const key = event.key;
+    const code = event.code;
+    if (key === "+" || key === "=" || key === ";" || code === "NumpadAdd") {
+      event.preventDefault();
+      event.stopPropagation();
+      zoomAtCenter(ZOOM_STEP);
+      return;
+    }
+    if (key === "-" || key === "_" || code === "NumpadSubtract") {
+      event.preventDefault();
+      event.stopPropagation();
+      zoomAtCenter(1 / ZOOM_STEP);
+      return;
+    }
+    if (!event.shiftKey && (key === "0" || code === "Numpad0")) {
+      event.preventDefault();
+      event.stopPropagation();
+      fitToCanvas();
+    }
+  },
+  true
+);
+
+/*
+  欄の大きさが変わったとき（窓の大きさ・「図を広く」・脇の詳細の仮出し）。
+  全体を合わせているあいだは合わせ直し、手で寄せているあいだは寄せ具合と
+  見ている真ん中を保つ。
+*/
+if (typeof ResizeObserver === "function") {
+  new ResizeObserver(function () {
+    if (!graphShown()) return;
+    const next = measureCanvas();
+    if (!(next.w > 0) || !(next.h > 0)) return;
+    if (followFit) {
+      fitToCanvas();
+      return;
+    }
+    viewBox = resizeViewBox(viewBox, canvasSize, next);
+    canvasSize = next;
+    fitBox = fitViewBox(contentBox, canvasSize, FIT_MARGIN);
+    applyViewBox();
+  }).observe(el.canvas);
+}
+
+/**
+ * どの図を見ているかの鍵。同じ図が届き直しただけ（資料の保存で引き直した
+ * とき）なら、寄せていた所を保つ。全体図か個人中心図か・中心の人・
+ * 絞り込み・2次の有無のどれかが変われば、別の図として「全体を合わせる」へ
+ */
+function viewKeyOf(next) {
+  return JSON.stringify([
+    next.mode,
+    next.mode === "ego" ? next.centerId : null,
+    next.filter,
+    Boolean(next.showSecondRing),
+  ]);
+}
+
 /**
  * 図の見た目の規則を集める。
  *
@@ -884,6 +1304,17 @@ function exportSvg() {
     " background: var(--vscode-editor-background); }\\n" + svgCss();
   clone.insertBefore(style, clone.firstChild);
   clone.setAttribute("xmlns", SVG_NS);
+  // 拡大して見ていても、書き出すのは図の全体（いま見えている切り抜きではない）。
+  // 画面では欄いっぱいに広げているので、外で開いたときの大きさも付け直す
+  const whole = contentBox !== null ? contentBox : {
+    x: 0, y: 0, w: data.layout.width, h: data.layout.height,
+  };
+  const full = fitViewBox(whole, { w: 0, h: 0 }, FIT_MARGIN);
+  clone.setAttribute("viewBox", full.x + " " + full.y + " " + full.w + " " + full.h);
+  clone.setAttribute("width", String(Math.ceil(full.w)));
+  clone.setAttribute("height", String(Math.ceil(full.h)));
+  clone.removeAttribute("class");
+  clone.removeAttribute("style");
   post("export", { svg: new XMLSerializer().serializeToString(clone) });
 }
 
@@ -893,6 +1324,13 @@ window.addEventListener("message", function (event) {
   if (message.type === "graph") {
     // 中心や絞り込みが変わると、選んでいた線は図に無いことがある
     data = message.data;
+    // 別の図になったら「全体を合わせる」から（開いたとき・絞り込みを
+    // 変えたとき・中心を替えたとき）。描き終えてから測るので、ここでは印だけ
+    const key = viewKeyOf(data);
+    if (key !== viewKey) {
+      viewKey = key;
+      followFit = true;
+    }
     if (selectedEdge && !findEdge(selectedEdge.a, selectedEdge.b)) {
       selectedEdge = null;
       sideTemporary = false;
