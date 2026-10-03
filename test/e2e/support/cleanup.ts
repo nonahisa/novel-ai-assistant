@@ -46,11 +46,44 @@ interface LaunchEntry {
   pid?: number;
   /** 1件ごとの片づけが済んだ（走りの最後に見直さなくてよい） */
   done?: boolean;
+  /**
+   * 起こした走り（vitest の親プロセス）の PID。**同じ作業場で同時に走っている
+   * ほかの走りの VS Code を、こちらの片づけが止めないため**に持つ（下の sweepLaunches）
+   */
+  owner?: number;
+}
+
+/**
+ * 走りの親プロセスの PID を、テストの側（子のプロセス）へ渡す環境変数。
+ * globalSetup が親で設定し、そのあとに作られる子が受け継ぐ
+ */
+const RUN_OWNER_ENV = "NOVELAI_E2E_RUN_OWNER";
+
+/** この走りを、台帳の持ち主として名乗る（globalSetup が最初に呼ぶ） */
+export function claimRunOwnership(): void {
+  process.env[RUN_OWNER_ENV] = String(process.pid);
+}
+
+function runOwner(): number | undefined {
+  const owner = Number(process.env[RUN_OWNER_ENV]);
+  return Number.isInteger(owner) && owner > 0 ? owner : undefined;
+}
+
+/** その PID のプロセスがまだ居るか（居るかを訊くだけで、止めはしない） */
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // 居るが触る権限が無い（EPERM）のは「居る」
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 /** 起こす前・起こした直後に台帳へ書き足す（同じ根が2行になってもよい） */
 export async function recordLaunch(entry: LaunchEntry): Promise<void> {
-  await appendFile(LEDGER, JSON.stringify(entry) + "\n", "utf8");
+  const owner = entry.owner ?? runOwner();
+  await appendFile(LEDGER, JSON.stringify(owner === undefined ? entry : { ...entry, owner }) + "\n", "utf8");
 }
 
 async function readLedger(): Promise<LaunchEntry[]> {
@@ -140,7 +173,16 @@ export async function stopLaunch(entry: LaunchEntry): Promise<void> {
   }
 }
 
-/** 台帳に載ったもののうち、片づけ済みでないものを止めて消し、台帳も消す（走りの最初と最後） */
+/**
+ * 台帳に載ったもののうち、片づけ済みでないものを止めて消し、台帳も消す（走りの最初と最後）。
+ *
+ * **同じ作業場で同時に走っているほかの走りの分には触らない**（2026-10-04）。
+ * 持ち主の走りがまだ居る行を止めると、その走りの VS Code が試験の途中で
+ * 落ちる——2本を20秒ずらして同時に走らせると、6回中5回「Target page, context
+ * or browser has been closed」で落ちた。持ち主が居なくなった行（途中で止められた
+ * 走りの残り）と、持ち主の無い行（この手当ての前の台帳）は、これまでどおり片づける。
+ * ほかの走りの行が残るときは、台帳を消さない（その走りの最後の片づけが読む）。
+ */
 export async function sweepLaunches(): Promise<void> {
   const entries = await readLedger();
   const byRoot = new Map<string, LaunchEntry>();
@@ -150,12 +192,18 @@ export async function sweepLaunches(): Promise<void> {
       root: entry.root,
       pid: entry.pid ?? known?.pid,
       done: (entry.done ?? false) || (known?.done ?? false),
+      owner: entry.owner ?? known?.owner,
     });
   }
+  let othersRunning = false;
   for (const entry of byRoot.values()) {
     if (entry.done) continue;
+    if (entry.owner !== undefined && entry.owner !== process.pid && processAlive(entry.owner)) {
+      othersRunning = true;
+      continue;
+    }
     await stopLaunch(entry);
     console.error(`[E2E] 残っていたテスト用 VS Code と一時フォルダーを片づけました: ${entry.root}`);
   }
-  await rm(LEDGER, { force: true }).catch(() => undefined);
+  if (!othersRunning) await rm(LEDGER, { force: true }).catch(() => undefined);
 }

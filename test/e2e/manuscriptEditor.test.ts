@@ -8,6 +8,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Frame } from "playwright-core";
 import { expect, test } from "vitest";
 import { findAction } from "../../src/core/actionTree";
 import {
@@ -282,6 +283,44 @@ async function waitDirtyQuickly(session: E2ESession): Promise<void> {
   }
 }
 
+/**
+ * 本体の選び直し（傍点を外したあとの `select`）が画面に当たるまで待つ（2026-10-04、揺れの調べ）。
+ *
+ * `selectText` は、作者が見えている語を選ぶのと同じく、選択を**傍点のかたまりの中の字**
+ * に置く。かたまりは編集できない（`contenteditable="false"`）ので、**そこへ打った字は
+ * ブラウザが黙って捨てる**（`beforeinput` だけが起きて `input` が起きない。確かめた）。
+ * 本体は外し終えると、外した語を選び直す知らせを送り、画面はそれで選択を
+ * かたまりの外（かたまり全体）へ移す。その知らせは Ctrl+Alt+K の10〜17ミリ秒後に届き、
+ * このテストは20〜30ミリ秒後に打つ——余裕は10ミリ秒ほどしかなく、機械が混むと逆転して、
+ * 打った字が画面に入らないまま「控えの帯が出ない」で落ちた（本体の作業場で7回中1回）。
+ *
+ * 人の手は Ctrl+Alt+K から10ミリ秒で次の字を打てないので、ここで待つのは作者の手と
+ * 同じ時機に揃えることになる。待つのは選択だけで、画面の本文（傍点が残っている
+ * ＝見たい場面）は待たない。画面の中で細かく見るので、本文の送り直し（120ミリ秒）より
+ * ずっと早く戻る。
+ */
+async function waitSelectionOutsideChunk(frame: Frame): Promise<void> {
+  const moved = await frame.evaluate(async () => {
+    const insideChunk = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) return true;
+      const range = selection.getRangeAt(0);
+      const within = (node: Node) => {
+        const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+        return !!element?.closest('[contenteditable="false"]');
+      };
+      return within(range.startContainer) || within(range.endContainer);
+    };
+    const until = performance.now() + 5_000;
+    while (insideChunk()) {
+      if (performance.now() > until) return false;
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    return true;
+  });
+  if (!moved) throw new Error("Ctrl+Alt+K のあと、5秒待っても選択が傍点のかたまりの中から動きません（本体の選び直しが届いていません）");
+}
+
 /** 落ちたときに読む操作ログの行（当て直し・ぶつかり・保存・外からの変更） */
 async function rebaseLogLines(session: E2ESession): Promise<string> {
   try {
@@ -295,6 +334,89 @@ async function rebaseLogLines(session: E2ESession): Promise<string> {
   }
 }
 
+/**
+ * 打った字の行方を、落ちた回に読めるように控える（2026-10-04、揺れの調べ）。
+ *
+ * 本体の作業場で「強調を外した直後に同じ所へ打つ」が1回落ちたとき、画面に打った字が無く、
+ * 操作ログにも「重なった」「当て直した」が無かった。打鍵が画面（#compose）へ入らなかったのか、
+ * 入って本体へ送ったが届かなかったのか、届いた本文で上書きされたのかを、写真と失敗文だけでは
+ * 見分けられなかった。そこで画面の中の出来事（キー・入力・本体からの知らせ・焦点の出入り）を
+ * 時刻つきで控え、**落ちたときだけ**失敗文へ添える。製品には何も足さない（画面の中の
+ * イベントを外から聞くだけ）。
+ */
+async function traceInstall(frame: Frame): Promise<void> {
+  await frame.evaluate(() => {
+    const holder = window as unknown as { __e2eTrace: string[]; __e2eTraceMark: (line: string) => void };
+    holder.__e2eTrace = [];
+    const startedAt = performance.now();
+    const compose = document.getElementById("compose");
+    const record = (line: string) => holder.__e2eTrace.push(`${Math.round(performance.now() - startedAt)}ms ${line}`);
+    holder.__e2eTraceMark = record;
+    for (const name of ["keydown", "beforeinput", "input", "compositionstart", "compositionend"]) {
+      compose?.addEventListener(
+        name,
+        (event) => {
+          const detail = event as InputEvent & KeyboardEvent;
+          record(`${name} ${detail.inputType || detail.key || ""} ${JSON.stringify(compose.innerText)}`);
+        },
+        true
+      );
+    }
+    window.addEventListener(
+      "message",
+      (event) => {
+        const message = event.data as Record<string, unknown>;
+        record(
+          `本体から ${String(message.type)}` +
+            (typeof message.text === "string" ? ` ${JSON.stringify(message.text)}` : "") +
+            (message.seq !== undefined ? ` 便${String(message.seq)}` : "") +
+            (message.ok !== undefined ? ` ok=${String(message.ok)}` : "") +
+            (message.conflict ? " 重なった" : "") +
+            (message.start !== undefined ? ` 選ぶ${String(message.start)}-${String(message.end)}` : "")
+        );
+      },
+      true
+    );
+    const name = (target: EventTarget | null) => {
+      const element = target as Element | null;
+      return element ? element.id || element.tagName : "なし";
+    };
+    document.addEventListener("focusin", (event) => record(`焦点が入る ${name(event.target)}`));
+    document.addEventListener("focusout", (event) => record(`焦点が出る ${name(event.target)}`));
+  });
+}
+
+/** 控えに区切りを入れる（テストの側の操作の時機と、そのときの焦点） */
+async function traceMark(frame: Frame, label: string): Promise<void> {
+  await frame.evaluate((text) => {
+    const holder = window as unknown as { __e2eTraceMark?: (line: string) => void };
+    const active = document.activeElement;
+    holder.__e2eTraceMark?.(
+      `== ${text}（hasFocus=${String(document.hasFocus())}／焦点=${active ? active.id || active.tagName : "なし"}）`
+    );
+  }, label);
+}
+
+/** 落ちたときに失敗文へ添える：画面の出来事・本体の焦点・操作ログの全部 */
+async function traceReport(session: E2ESession, frame: Frame): Promise<string> {
+  const lines = await frame
+    .evaluate(() => (window as unknown as { __e2eTrace?: string[] }).__e2eTrace ?? [])
+    .catch(() => ["（画面の控えが読めません）"]);
+  let log: string;
+  try {
+    log = await readFile(path.join(session.workFolder, ".aiwriter", "logs", "actions.log"), "utf8");
+  } catch {
+    log = "（操作ログが読めません）";
+  }
+  const workbenchFocus = await session.page
+    .evaluate(() => {
+      const active = document.activeElement;
+      return active ? `${active.tagName}.${String(active.className).slice(0, 80)}` : "なし";
+    })
+    .catch(() => "（読めません）");
+  return `\n── 画面の出来事 ──\n${lines.join("\n")}\n── 本体の焦点 ──\n${workbenchFocus}\n── 操作ログ ──\n${log}`;
+}
+
 test("Ctrl+Alt+K で強調を外した直後、画面へ届く前に行末へ字を打っても、外した印は戻らず打った字も入る", async () => {
   await withVsCode(
     "強調を外した直後に打つ",
@@ -302,23 +424,29 @@ test("Ctrl+Alt+K で強調を外した直後、画面へ届く前に行末へ字
     async (session) => {
       const frame = await openEpisode(session.page, EPISODE, "後ろの字");
       await selectText(frame, "強調");
+      await traceInstall(frame);
+      await traceMark(frame, "Ctrl+Alt+K を押す");
       await session.page.keyboard.press("Control+Alt+KeyK");
       await waitDirtyQuickly(session);
+      await waitSelectionOutsideChunk(frame);
       // 打つ直前の画面の傍点の数（1なら、送り直しがまだ届いていない＝見たい場面）
       const emphasisBeforeTyping = await frame.locator("#compose .emphasis").count();
+      await traceMark(frame, `End を押して字を打つ（画面の傍点：${emphasisBeforeTyping}）`);
       console.info(`[E2E] 字を打つ直前の画面の傍点：${emphasisBeforeTyping}`);
       // 本体の変更（印を外した所）と重ならない所＝行末へ打つ
       await session.page.keyboard.press("End");
       await session.page.keyboard.insertText("あ");
+      await traceMark(frame, "打ち終えた");
       const expected = "前の字と強調と後ろの字。あ\n";
-      await waitUntil(async () => (await composeText(frame)).includes("後ろの字。あ"), "打った字が画面に出る");
-      await saveAndWaitFor(session, (text) => text.includes("あ"), "打った字がファイルに入る").catch(
-        async (error: unknown) => {
-          throw new Error(
-            `${String(error)}（ファイル：${JSON.stringify(await fileText(session))}／打つ直前の傍点：${emphasisBeforeTyping}／操作ログ：${await rebaseLogLines(session)}）`
-          );
-        }
+      const withTrace = async (error: unknown): Promise<never> => {
+        throw new Error(
+          `${String(error)}（ファイル：${JSON.stringify(await fileText(session))}／打つ直前の傍点：${emphasisBeforeTyping}／画面：${JSON.stringify(await composeText(frame))}／操作ログ：${await rebaseLogLines(session)}）${await traceReport(session, frame)}`
+        );
+      };
+      await waitUntil(async () => (await composeText(frame)).includes("後ろの字。あ"), "打った字が画面に出る").catch(
+        withTrace
       );
+      await saveAndWaitFor(session, (text) => text.includes("あ"), "打った字がファイルに入る").catch(withTrace);
       await waitUntil(async () => (await footText(frame, "note")).includes("保存しました"), "「保存しました」が出る");
       expect(
         await fileText(session),
@@ -350,33 +478,65 @@ test("Ctrl+Alt+K で強調を外した直後、画面へ届く前に同じ語の
     async (session) => {
       const frame = await openEpisode(session.page, EPISODE, "後ろの字");
       await selectText(frame, "強調");
+      await traceInstall(frame);
+      await traceMark(frame, "Ctrl+Alt+K を押す");
       await session.page.keyboard.press("Control+Alt+KeyK");
       await waitDirtyQuickly(session);
+      await waitSelectionOutsideChunk(frame);
       const emphasisBeforeTyping = await frame.locator("#compose .emphasis").count();
+      await traceMark(frame, `字を打つ（画面の傍点：${emphasisBeforeTyping}）`);
       console.info(`[E2E] 字を打つ直前の画面の傍点：${emphasisBeforeTyping}`);
       // 選んだままの語の上へ打つ＝本体の変更と同じ所。どちらが正しいかは機械には決められない
       await session.page.keyboard.insertText("あ");
+      await traceMark(frame, "打ち終えた");
       // 打った字は、黙って捨てずに帯で知らせる
       await waitUntil(
         async () => frame.evaluate(() => document.getElementById("rescue")?.classList.contains("open") === true),
         "打った字の控えの帯が出る"
       ).catch(async (error: unknown) => {
         throw new Error(
-          `${String(error)}（ファイル：${JSON.stringify(await fileText(session))}／打つ直前の傍点：${emphasisBeforeTyping}／画面：${JSON.stringify(await composeText(frame))}／操作ログ：${await rebaseLogLines(session)}）`
+          `${String(error)}（ファイル：${JSON.stringify(await fileText(session))}／打つ直前の傍点：${emphasisBeforeTyping}／画面：${JSON.stringify(await composeText(frame))}／操作ログ：${await rebaseLogLines(session)}）${await traceReport(session, frame)}`
         );
       });
       const bar = await frame.evaluate(() => document.getElementById("rescueText")?.textContent ?? "");
       expect(bar).toContain("重な");
-      await saveAndWaitFor(session, (text) => !text.includes("《《"), "外した印のままファイルに入る");
-      expect(await fileText(session)).toBe("前の字と強調と後ろの字。\n");
-      // ［戻す］を押せば、打った字のほうへ戻せる（本体の変更は消えるので、確かめが1段入る）
-      await frame.locator("#rescueRestore").click();
-      const confirm = await frame.evaluate(() => document.getElementById("rescueRestore")?.textContent ?? "");
-      expect(confirm).toBe("それでも戻す");
-      await frame.locator("#rescueRestore").click();
-      await waitUntil(async () => (await composeText(frame)).includes("前の字とあと後ろの字。"), "打った字が画面へ戻る");
-      await saveAndWaitFor(session, (text) => text.includes("あ"), "打った字がファイルに入る");
-      expect(await fileText(session)).toBe("前の字とあと後ろの字。\n");
+      try {
+        await traceMark(frame, "Ctrl+S（外した印のまま保存）");
+        await saveAndWaitFor(session, (text) => !text.includes("《《"), "外した印のままファイルに入る");
+        expect(await fileText(session)).toBe("前の字と強調と後ろの字。\n");
+        /*
+          **［戻す］は、断られたあとの本体の本文が画面に届いてから押す**（2026-10-04、揺れの調べ）。
+          画面は「最後に届いた本体の本文」を戻す便の元にする。本体はその本文を、変更が続くあいだ
+          120ミリ秒ずつ延ばして送るので、帯が出てから100ミリ秒ほどで押すと、元はまだ傍点を外す前の
+          本文で、本体は戻す便をもう一度「重なった」と断り、帯を出し直した（同時に走らせて16回中3回。
+          字は帯に控えたままで、消えてはいない）。人は帯を読んでから押すので、そのあいだに必ず届く。
+          届いた目印は、画面の「あ」が本体の本文（外した字だけ）に置き換わること
+        */
+        await waitUntil(
+          async () => (await composeText(frame)).includes("前の字と強調と後ろの字。"),
+          "断られたあとの本体の本文が画面に届く"
+        );
+        // ［戻す］を押せば、打った字のほうへ戻せる（本体の変更は消えるので、確かめが1段入る）
+        await traceMark(frame, "［戻す］を押す");
+        await frame.locator("#rescueRestore").click();
+        const confirm = await frame.evaluate(() => document.getElementById("rescueRestore")?.textContent ?? "");
+        expect(confirm).toBe("それでも戻す");
+        await traceMark(frame, "［それでも戻す］を押す");
+        await frame.locator("#rescueRestore").click();
+        await waitUntil(async () => (await composeText(frame)).includes("前の字とあと後ろの字。"), "打った字が画面へ戻る");
+        await traceMark(frame, "Ctrl+S（戻した字を保存）");
+        await saveAndWaitFor(session, (text) => text.includes("あ"), "打った字がファイルに入る");
+        expect(await fileText(session)).toBe("前の字とあと後ろの字。\n");
+      } catch (error) {
+        // どの段で落ちても、打った字の行方を読めるようにする
+        const barNow = await frame
+          .evaluate(() => document.getElementById("rescueText")?.textContent ?? "")
+          .catch(() => "（読めません）");
+        if (error instanceof Error) {
+          error.message += `（ファイル：${JSON.stringify(await fileText(session))}／画面：${JSON.stringify(await composeText(frame))}／帯：${JSON.stringify(barNow)}）${await traceReport(session, frame)}`;
+        }
+        throw error;
+      }
     }
   );
 });
