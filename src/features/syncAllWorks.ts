@@ -37,8 +37,8 @@ import {
   logFailure,
   logStep,
   showLog,
-  useLogFile,
 } from "../core/logger";
+import { useSyncLog } from "./syncLog";
 import { withCancellableProgress } from "../views/progress";
 import type { GitSyncMonitorLike } from "./gitSyncStub";
 
@@ -281,14 +281,13 @@ async function runPlan(
   const run = deps.run ?? runGit;
   const name = describeTargetWorks(plan.target);
   /*
-    **記録は、その置き場の作品のログファイルへ残す**（0.45.0）。向けないと
+    **記録は、その置き場のログファイルへ残す**（0.45.0）。向けないと
     出力チャンネル止まりで、VS Code を閉じると消える。
 
-    1つの置き場に複数の作品が入る（設計書5.7.9）ので、代表として先頭の
-    作品へ書く。登録済みの作品が無い置き場では向けない（書き先が無い）。
+    書庫なら**書庫のログ**（設計書5.7.9。2026-10-03 までは先頭の作品の
+    ログへ紛れていた）。登録済みの作品が無い置き場では向けない（書き先が無い）。
   */
-  const logWork = plan.target.works[0];
-  if (logWork) useLogFile(logWork.folderPath);
+  await useSyncLog(cwd, plan.target.works);
 
   // **記録より先に、早送りできるうちに取り込む**（設計書5.5.18）。
   // 遅れたまま記録すると、その1件で分岐が生まれる。単独の「同期」と

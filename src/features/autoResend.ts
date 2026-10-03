@@ -20,7 +20,8 @@ import {
 } from "../core/autoResendPlan";
 import { buildSyncTarget } from "../core/syncTarget";
 import { normalizeForComparison } from "../core/paths";
-import { logFailure, logStep, useLogFile } from "../core/logger";
+import { logFailure, logStep } from "../core/logger";
+import { useSyncLog } from "./syncLog";
 import type { GitSyncMonitorLike } from "./gitSyncStub";
 
 /**
@@ -278,7 +279,6 @@ export class AutoResender implements vscode.Disposable {
     outcome: ResendAttempt
   ): Promise<void> {
     const label = buildSyncTarget(target.root, works).label;
-    const logWork = target.works[0];
 
     // **控えは古いことがある**（端末で送った・別の道で取り込んだ）。
     // 送る前に手元の git に聞き直す。ネットワークには出ない
@@ -300,7 +300,8 @@ export class AutoResender implements vscode.Disposable {
     // **押し付け（force）はしない。** 別の環境が先に送っていれば、
     // GitHub が拒んでそこで止まる
     const result = await push(target.root, this.deps.run);
-    if (logWork) useLogFile(logWork.folderPath);
+    // 書庫なら書庫のログへ（設計書5.7.9。先頭の作品のログへ紛れさせない）
+    await useSyncLog(target.root, target.works);
     const key = target.root;
 
     if (!result.ok) {

@@ -64,7 +64,13 @@ describe("機能のログは作品のログファイルへ向ける", () => {
         (writer) => imported.includes(writer) && source.includes(`${writer}(`)
       );
       if (writes.length === 0) continue;
-      if (source.includes("useLogFile(") || source.includes("logForDocument(")) {
+      // `useSyncLog` は置き場（書庫）の同期の記録の向け先（`features/syncLog.ts`。
+      // 中で `useLogFile` を呼ぶ。設計書5.7.9）
+      if (
+        source.includes("useLogFile(") ||
+        source.includes("logForDocument(") ||
+        source.includes("useSyncLog(")
+      ) {
         continue;
       }
       // 作品が定まらないものは、理由をファイルに書いて許す

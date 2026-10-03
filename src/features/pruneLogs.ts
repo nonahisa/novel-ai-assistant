@@ -3,6 +3,7 @@ import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "../core/workRegistry";
 import { pruneLogText } from "../core/logRetention";
+import { libraryLogCandidates } from "../core/syncTarget";
 import { statsDayKey } from "../core/writingStats";
 
 /**
@@ -38,20 +39,37 @@ export async function pruneAllLogs(works: readonly WorkEntry[]): Promise<number>
   const today = statsDayKey(new Date(), 0);
   let removed = 0;
   for (const work of works) {
-    removed += await pruneWorkLogs(work, days, today);
+    removed += await pruneLogFolder(
+      path.join(workPaths(work).aiwriter, "logs"),
+      LOG_FILES,
+      days,
+      today
+    );
+  }
+  // **書庫のログ**（設計書5.7.9）。書庫の直下に置くのは同期の記録だけ
+  for (const root of libraryLogCandidates(works)) {
+    removed += await pruneLogFolder(
+      path.join(root, ".aiwriter", "logs"),
+      LIBRARY_LOG_FILES,
+      days,
+      today
+    );
   }
   return removed;
 }
 
-async function pruneWorkLogs(
-  work: WorkEntry,
+/** 書庫の直下の `.aiwriter/logs/` に置いている、日時つきのログ */
+const LIBRARY_LOG_FILES = ["actions.log"];
+
+async function pruneLogFolder(
+  dir: string,
+  fileNames: readonly string[],
   days: number,
   today: string
 ): Promise<number> {
-  const dir = path.join(workPaths(work).aiwriter, "logs");
   let removed = 0;
 
-  for (const fileName of LOG_FILES) {
+  for (const fileName of fileNames) {
     const uri = path.toUri(path.join(dir, fileName));
     try {
       const bytes = await vscode.workspace.fs.readFile(uri);

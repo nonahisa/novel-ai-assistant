@@ -117,6 +117,60 @@ export function describeCompanions(
 }
 
 /**
+ * 同期の記録（動作のログ）をどこへ書くか（設計書5.7.9「書庫のログ」）。
+ *
+ * **同期の相手は置き場（リポジトリ）であって作品ではない。** 以前は置き場の
+ * 先頭の作品（`works[0]`）のログへ書いており、書庫の同期の記録が、触っても
+ * いない作品のログに紛れていた（作者の裁定「書庫のログを1つ作る」、2026-10-03）。
+ *
+ * - **置き場そのものが登録済みの作品**（作品ごとにリポジトリを分けた形）→
+ *   その作品のログ。`library: false`
+ * - **それ以外**（書庫）→ 置き場の直下のログ。`library: true`。書庫に作品が
+ *   1つしか登録されていない間も同じ場所にする——作品を足したとたんに
+ *   置き場所が変わると、前の記録を探せなくなる
+ * - **作品が1つも登録されていない置き場**（設定の途中）→ `undefined`。
+ *   書き先を向けない（出力チャンネルにだけ出る。これまでどおり）
+ *
+ * VS Code APIに依存しない。
+ */
+export function syncLogPlace(
+  root: string,
+  works: readonly WorkEntry[]
+): { folder: string; library: boolean } | undefined {
+  if (works.length === 0) return undefined;
+  const self = works.find((work) => path.isSameFolder(work.folderPath, root));
+  if (self) return { folder: self.folderPath, library: false };
+  return { folder: root, library: true };
+}
+
+/**
+ * 書庫のログを置いているかもしれない場所（ログの掃除に使う。設計書8.3）。
+ *
+ * **作品フォルダーの1つ上**を、重ねずに並べる。書庫は「作品を並べただけ」の
+ * 浅い形と決めてある（5.7）ので、書庫の直下は作品の親である。登録済みの作品
+ * そのものは外す（その下のログは作品のログとして掃除される）。
+ *
+ * 深く入れ子にした置き場（作品の2つ以上上がリポジトリの根）は拾えない。
+ * 掃除されないだけで、ログの上限（1ファイル1MB）は効く。
+ */
+export function libraryLogCandidates(works: readonly WorkEntry[]): string[] {
+  const workKeys = new Set(
+    works.map((work) => path.folderKeyForComparison(work.folderPath))
+  );
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const work of works) {
+    const parent = parentFolderOf(work.folderPath);
+    if (!parent) continue;
+    const key = path.folderKeyForComparison(parent);
+    if (workKeys.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    result.push(parent);
+  }
+  return result;
+}
+
+/**
  * まとめる先の候補（まだリポジトリになっていないとき）。
  *
  * **作品フォルダーの1つ上を見る。** 書庫は「作品を並べただけ」の浅い形と

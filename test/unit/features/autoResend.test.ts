@@ -14,8 +14,8 @@ import {
 import type { GitCommandRunner, GitSyncStatus } from "../../../src/core/git";
 import type { GitSyncMonitorLike } from "../../../src/features/gitSyncStub";
 import type { WorkEntry } from "../../../src/models/types";
-import { logFailure, logStep } from "../../../src/core/logger";
-import { statusBarMessages, window } from "../support/vscodeStub";
+import { logFailure, logStep, useLogFile } from "../../../src/core/logger";
+import { statusBarMessages, window, workspace } from "../support/vscodeStub";
 
 /**
  * 回線が戻ったら、記録済みで送れていない分を送り直す（設計書6.15.1）。
@@ -124,6 +124,7 @@ let busy: boolean;
 let settings: AutoResendSettings;
 let clock: number;
 let afterSent: number;
+let written: Map<string, string>;
 
 function makeResender(): AutoResender {
   return new AutoResender({
@@ -156,6 +157,19 @@ beforeEach(() => {
   statusBarMessages.length = 0;
   vi.mocked(logFailure).mockClear();
   vi.mocked(logStep).mockClear();
+  vi.mocked(useLogFile).mockClear();
+  // 書庫のログの置き場（Gitから外す印を置く）。書いたものを覚えておく
+  written = new Map();
+  workspace.fs = {
+    stat: async (uri: { fsPath: string }) => {
+      if (!written.has(uri.fsPath)) throw new Error("FileNotFound");
+      return { type: 1 };
+    },
+    createDirectory: async () => undefined,
+    writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
+      written.set(uri.fsPath, new TextDecoder().decode(bytes));
+    },
+  } as unknown as typeof workspace.fs;
   const record = async (message: string) => {
     windowsShown.push(message);
     return undefined;
@@ -206,6 +220,21 @@ describe("回線が戻ったら送り直す（2026-10-01 の再現）", () => {
     const before = calls.length;
     await resender.attempt("interval");
     expect(calls.length).toBe(before);
+  });
+
+  /**
+   * 書庫の同期の記録は、先頭の作品ではなく書庫のログへ（作者の裁定、
+   * 2026-10-03。設計書5.7.9）。書庫の直下のログはGitから外す印と一緒に置く
+   */
+  test("送り直しの記録は、先頭の作品ではなく書庫のログへ書く", async () => {
+    await makeResender().attempt("interval");
+    expect(vi.mocked(useLogFile).mock.calls.map((call) => call[0])).toEqual([
+      library,
+    ]);
+    const ignore = [...written.entries()].find(([key]) =>
+      key.replace(/\\/g, "/").endsWith("書庫/.aiwriter/logs/.gitignore")
+    );
+    expect(ignore?.[1]).toBe("*\n");
   });
 
   test("押し付け（force）は決してしない", async () => {

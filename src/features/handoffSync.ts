@@ -28,7 +28,8 @@ import {
   type UnsentMarkStorage,
 } from "../core/unsentMark";
 import { buildSyncTarget } from "../core/syncTarget";
-import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
+import { logFailure, logStep, showLog } from "../core/logger";
+import { useSyncLog } from "./syncLog";
 import type { GitSyncMonitorLike } from "./gitSyncStub";
 
 /**
@@ -120,7 +121,7 @@ export async function runStartupHandoff(deps: HandoffDeps): Promise<void> {
       outcomes.push(await handleTarget(deps, target));
     } catch (error) {
       // **1つ落ちても、残りは点検する**（この作品の一括処理と同じ考え方）
-      useLogFile(target.works[0]?.folderPath ?? target.root);
+      await useSyncLog(target.root, target.works);
       logFailure("開いたときの点検で例外", {
         置き場: target.label,
         詳細: error instanceof Error ? error.message : String(error),
@@ -169,8 +170,8 @@ async function handleTarget(
   target: HandoffTarget
 ): Promise<HandoffOutcome> {
   const run = deps.run ?? runGit;
-  const work = target.works[0];
-  useLogFile(work?.folderPath ?? target.root);
+  // 書庫なら書庫のログへ（設計書5.7.9。先頭の作品のログへ紛れさせない）
+  await useSyncLog(target.root, target.works);
 
   // 取りに行く。**失敗しても止めない**——オフラインでの執筆は普通にある
   if (canFetchStatus(target.status)) {
