@@ -3524,6 +3524,10 @@ export async function activate(
         const changed = await setWorkKind(work);
         if (!changed) return CHECK_CANCELLED;
         treeProvider.refresh(work.id);
+        // 状態バーの目安（読了 約N分など）もすぐ出し直す。呼ばないと、カーソルを
+        // 動かすか開き直すまで前の種類のまま（「6字」のまま）だった（2026-10-04、
+        // ノートPCの実機確認）。覚えていた種類は書いた側が捨てているので、新しい種類で数える
+        updateStatusBar();
         // 開いている原稿の下段の目安（読了 約N分など）も新しい種類で出し直す。
         // 組み方は開き直すまで変わらない（変えたときの知らせがそう案内する）
         await refreshManuscriptKinds();

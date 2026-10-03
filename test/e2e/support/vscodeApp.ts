@@ -485,17 +485,31 @@ async function registerWork(session: E2ESession, workTitle: string): Promise<voi
   const { page } = session;
   const config = path.join(session.workFolder, ".aiwriter", "config.json");
   // 拡張機能がまだ起きていなければ、知らせが出るまで押し直す（登録はすでにあれば
-  // 断るので、何度押しても1件のまま。断りの知らせも「登録」を含む）
+  // 断るので、何度押しても1件のはず。断りの知らせも「登録」を含む）。
+  // **「はず」を信じない**——押し直しが重なると二重に入った（2026-10-04）ので、
+  // 下で登録簿が1件であることまで読み返す
   await pressUntilToast(page, REGISTER_WORK_PRESS, "登録", "作品の登録");
   await waitUntil(() => existsSync(config), `${config} ができる`);
   // 登録のあと、遅れて消える形の見張り（製品側は2秒まで見張る）を待ってから読み返す
   await page.waitForTimeout(2_500);
   await clearNotifications(page);
   const version = await readVersionDialog(page, "登録簿の読み返し");
-  // 作品フォルダーの名前も同じなので、登録簿から引いた形「作品: …」で見る
-  if (!version.includes(`作品: ${workTitle}`)) {
+  /*
+    作品フォルダーの名前も同じなので、登録簿から引いた形「（作品: …）」で見る。
+    **1件だけであることまで確かめる**（2026-10-04）。登録のキーは知らせが出るまで
+    押し直すので、同じフォルダーが2回登録されると「作品: 題・題」になる
+    （ノートPCの実機確認で、50ミリ秒おきの2回の登録が2件になった）。
+    含まれるかだけを見ていると、この二重を見逃す
+  */
+  const registered = /（作品: ([^）]*)）/.exec(version)?.[1]?.split("・") ?? [];
+  if (!registered.includes(workTitle)) {
     throw new Error(
       `作品を登録したのに登録簿に入っていません（登録が消える不具合の再発。設計書5.7.8）。版の知らせ：${version}`
+    );
+  }
+  if (registered.length !== 1) {
+    throw new Error(
+      `この窓の作品が1件ではありません（${registered.length}件。同じフォルダーの二重登録の再発）。版の知らせ：${version}`
     );
   }
   // 起動のときの案内（はじめまして）などが残っていれば閉じる
