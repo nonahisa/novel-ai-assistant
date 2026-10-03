@@ -169,6 +169,39 @@ describe("outbox.pack——送る中身", () => {
   });
 });
 
+describe("ページの雛形——Claude に聞く（決まり6）", () => {
+  const repo = nodePath.join(__dirname, "..", "..", "..");
+  const page = fs.readFileSync(nodePath.join(repo, "media", "outbox", "outbox.html"), "utf8");
+
+  it("sample が無い見え方では道を出さない・答えは textContent で出す", () => {
+    expect(page).toContain('window.claude.use("sample")');
+    expect(page).toContain("if (state.sample) item.appendChild(askBox(");
+    // 答えも保管庫の中身も HTML として差し込まない
+    expect(page).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
+  });
+
+  it("頼み方に、判断材料を示すだけで本文を書き換えないことを書く", () => {
+    expect(page).toContain("作者の文体を尊重し、直すかどうかの判断材料を短く示す");
+    expect(page).toContain("書き換えた本文を作らない");
+  });
+
+  it("呼ぶたびに止め口を新しく作り、拒否されたら道を隠す", () => {
+    expect(page).toMatch(/var ctl = new AbortController\(\);[\s\S]*signal: ctl\.signal/);
+    expect(page).toContain('"not_granted"');
+  });
+
+  it("答えは保管庫へ自動では書かない（書くのは［メモを残す］の addRecord だけ）", () => {
+    const askPart = page.slice(page.indexOf("var DEFAULT_QUESTION"), page.indexOf("function render()"));
+    expect(askPart.length).toBeGreaterThan(0);
+    expect(askPart).not.toMatch(/addRecord|\.set\(|\.add\(|\.update\(/);
+  });
+
+  it("スキルの publish の capabilities に sample がある", () => {
+    const skill = fs.readFileSync(nodePath.join(repo, "docs", "skills", "novel-assist.md"), "utf8");
+    expect(skill).toContain('"user": {}, "sample": {}}');
+  });
+});
+
 describe("outbox.import——メモ", () => {
   it("話の末尾へ // の行として入れる", () => {
     writeBody("一行目\n二行目\n");
