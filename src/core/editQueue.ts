@@ -35,6 +35,11 @@ export type ApplyText<T = string> = (item: T) => Promise<void>;
 export interface SentEdit {
   text: string;
   seq?: number;
+  /**
+   * 元にした本文の指紋（`core/screenEditRebase.ts`。作者の裁定「塞ぐ」、2026-10-04）。
+   * 本体の変更が画面へ届く前に打った便でも、その変更を戻さずに当て直すために使う
+   */
+  base?: string;
 }
 
 /** 画面へ返す「入ったか」の知らせ */
@@ -42,7 +47,17 @@ export interface EditAck {
   type: "editApplied";
   seq: number;
   ok: boolean;
+  /**
+   * 打った所が、画面のまだ知らない本体の変更と重なったので**当てなかった**
+   * （設計書6.25.9）。`ok` は true（送り直しても同じなので、送り直させない）。
+   * `text` は当てなかった画面の本文——画面はこれを控えて帯で知らせる
+   */
+  conflict?: true;
+  text?: string;
 }
+
+/** 1便を当てた結果。`"conflict"` は当てずに画面へ控えさせる（`EditAck.conflict`） */
+export type ApplyOutcome = boolean | "conflict";
 
 /**
  * 1便を当てて、**入ったかどうかを画面へ返す**（設計書6.25.9）。
@@ -56,46 +71,79 @@ export interface EditAck {
  *   投げたまま順番待ちへ返すと、その間に畳まれた次の便が当たらずに残る
  * - 返すのは、当て終わったあと。当てる前に返すと「入った」と偽ることになる
  *
- * @returns 入ったか（変わる所が無かったときも true）
+ * - 当てずに控えさせる（`"conflict"`）ときは、ok:true と打った本文を添えて返す
+ *   （ok:false にすると画面は4秒ごとに送り直し、同じ理由で当たらないまま回り続ける）
+ *
+ * @returns 入ったか（変わる所が無かったときも true）。当てずに控えさせたときは `"conflict"`
  */
 export async function applySentEdit(
   item: SentEdit,
-  apply: (text: string) => Promise<boolean>,
+  apply: (text: string) => Promise<ApplyOutcome>,
   report: (ack: EditAck) => void,
   onError: (error: unknown) => void
-): Promise<boolean> {
-  let ok = false;
+): Promise<ApplyOutcome> {
+  let outcome: ApplyOutcome = false;
   try {
-    ok = await apply(item.text);
+    outcome = await apply(item.text);
   } catch (error) {
-    ok = false;
+    outcome = false;
     onError(error);
   }
   if (typeof item.seq === "number") {
-    report({ type: "editApplied", seq: item.seq, ok });
+    report(
+      outcome === "conflict"
+        ? { type: "editApplied", seq: item.seq, ok: true, conflict: true, text: item.text }
+        : { type: "editApplied", seq: item.seq, ok: outcome }
+    );
   }
-  return ok;
+  return outcome;
+}
+
+/**
+ * 当てている間に届いた2便を1つに畳む（設計書6.25.9）。
+ *
+ * 後の便の元が前の便の本文なら、**前の便の元を引き継いで**1つにする——
+ * 後の便の元だけを持たせると、前の便で打った字が「もう入った」ことになり、
+ * 当て直しの道で落ちる。つながっていなければ畳まない（`undefined`。順に当てる）。
+ * 指紋の無い便どうしは今までどおり後の便だけを残す。
+ */
+export function combineSentEdits(
+  older: SentEdit,
+  newer: SentEdit,
+  fingerprint: (text: string) => string
+): SentEdit | undefined {
+  if (older.base === undefined && newer.base === undefined) return newer;
+  if (older.base === undefined || newer.base === undefined) return undefined;
+  if (newer.base !== fingerprint(older.text)) return undefined;
+  return { ...newer, base: older.base };
 }
 
 /**
  * 順番待ちの窓口を作る。
  *
  * 返した関数は、**当て終わるまで次を当てない**。当てている間に呼ばれた
- * ぶんは最後の1つだけが残る。
+ * ぶんは畳む——`combine` が無ければ最後の1つだけが残る。`combine` が
+ * `undefined` を返したら畳まずに後ろへ並べる（届いた順に当てる）。
  */
-export function createEditQueue<T = string>(apply: ApplyText<T>): ApplyText<T> {
-  let queued: T | undefined;
+export function createEditQueue<T = string>(
+  apply: ApplyText<T>,
+  combine?: (older: T, newer: T) => T | undefined
+): ApplyText<T> {
+  const queued: T[] = [];
   let applying = false;
 
   return async (text: T): Promise<void> => {
-    queued = text;
+    const last = queued.length > 0 ? queued[queued.length - 1] : undefined;
+    const combined =
+      last === undefined ? undefined : combine ? combine(last, text) : text;
+    if (combined !== undefined) queued[queued.length - 1] = combined;
+    else queued.push(text);
     if (applying) return;
 
     applying = true;
     try {
-      while (queued !== undefined) {
-        const next = queued;
-        queued = undefined;
+      while (queued.length > 0) {
+        const next = queued.shift() as T;
         await apply(next);
       }
     } finally {
