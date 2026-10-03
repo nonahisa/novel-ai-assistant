@@ -1313,6 +1313,12 @@ ruby > rt {
     // **大きさも向きもここで変わる。** どちらも折り返し幅を変えるので、
     // 重ねた色の枠を測り直す（実機の報告、2026-08-28）
     scheduleAlignMarks();
+    /*
+      **下の欄の拡大率もここで出し直す。** 字の大きさを変える道（＋／－・
+      キー・ホイール・Ctrl+0・開いたときの見た目・前の話からの引き継ぎ）は
+      どれも paint を通るので、ここ1か所なら更新を取りこぼさない
+    */
+    paintCounts();
     dirButton.textContent = vertical !== false ? "横書きにする" : "縦書きにする";
     dirButton.classList.toggle("on", vertical !== false);
     /*
@@ -1562,12 +1568,14 @@ ruby > rt {
     別の字を指す。向きの切り替えと同じく、字で控えてから組み直す（view-anchor）
   */
   // **キー（Ctrl+＋／Ctrl+－）・Ctrl+ホイールと同じ道**（sizeSet。下の keys）
+  /* sizeButtons:start */
   document.getElementById("bigger").addEventListener("click", function () {
     sizeSet(size + 1);
   });
   document.getElementById("smaller").addEventListener("click", function () {
     sizeSet(size - 1);
   });
+  /* sizeButtons:end */
 
   document.getElementById("ruby").addEventListener("click", function () {
     askRuby();
@@ -3286,6 +3294,7 @@ ruby > rt {
      ルビの扱いも向こうが持っているので、ここで数え直すと**上の帯の数字と
      食い違う**——同じ画面に違う字数が2つ出るのがいちばん困る。 */
 
+  /* counts:start */
   /** このファイルの字数（拡張機能が数えた値） */
   let footFile = null;
   /**
@@ -3335,8 +3344,16 @@ ruby > rt {
         "この話で今日 " + (footToday > 0 ? "+" : "") + groupDigits(footToday) + "字"
       );
     }
+    /*
+      **字の拡大率は、字数が届く前から出す**（作者の依頼、2026-10-03）。
+      ＋／－やCtrl+ホイールで変えても、いまどれだけ大きくしているかが
+      画面のどこにも出ていなかった。字数と違って画面側だけで決まる値なので、
+      届くのを待たない。基準は Ctrl+0 で戻る既定の大きさ（＝100%）
+    */
+    parts.push("字 " + Math.round((size / ${MANUSCRIPT_SIZE_DEFAULT}) * 100) + "%");
     countsLabel.textContent = parts.join(" ／ ");
   }
+  /* counts:end */
 
   /**
    * その行を打つ面で示す（提案パネルの「飛ぶ」。作者の依頼、2026-08-28）。

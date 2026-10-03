@@ -43,6 +43,8 @@ interface Harness {
   calls(): string[];
   note(): string;
   size(): number;
+  /** 下の欄（字数と拡大率）の文字 */
+  counts(): string;
   bodyHas(name: string): boolean;
   findCount(): string;
   /** 打つ面に置いた見つけた所の塗り（span の中の字） */
@@ -68,8 +70,12 @@ function harness(
 ): Harness {
   const keys = markedBlock("keys");
   const find = markedBlock("find");
+  const counts = markedBlock("counts");
+  const sizeButtons = markedBlock("sizeButtons");
   expect(keys, "キーの区切り（keys）が画面に無い").not.toBe("");
   expect(find, "検索の区切り（find）が画面に無い").not.toBe("");
+  expect(counts, "下の欄の区切り（counts）が画面に無い").not.toBe("");
+  expect(sizeButtons, "大きさのボタンの区切り（sizeButtons）が画面に無い").not.toBe("");
   const env = {
     posted: [] as Array<Record<string, unknown>>,
     calls: [] as string[],
@@ -193,8 +199,13 @@ function harness(
     function askEmphasis() { env.calls.push("askEmphasis"); }
     function viewTakePress() { return "anchor"; }
     function viewRestore() {}
-    function paint() { env.calls.push("paint:" + size); }
+    // 本物の paint は下の欄（paintCounts）を出し直す。代わりも同じにする
+    // （本物がそうしていることは「paint が paintCounts を通る」で確かめる）
+    function paint() { env.calls.push("paint:" + size); paintCounts(); }
     function remember() { env.size = size; env.calls.push("remember:" + size); }
+    const countsLabel = element("counts");
+    ${counts}
+    ${sizeButtons}
     ${keys}
     ${find}
     `
@@ -240,6 +251,7 @@ function harness(
     calls: () => env.calls,
     note: () => env.noteText,
     size: () => env.size,
+    counts: () => String(env.elements["counts"]?.textContent ?? ""),
     bodyHas: (name) => env.bodyClasses.has(name),
     findCount: () => String(env.elements["findCount"]?.textContent ?? ""),
     writeMark: () => env.writeMarkText,
@@ -368,6 +380,46 @@ describe("本文の字の大きさ", () => {
     const h = harness({ size: 16 });
     h.key({ key: "-", ctrlKey: true, isComposing: true });
     expect(h.size()).toBe(16);
+  });
+});
+
+describe("下の欄に字の拡大率を出す（作者の依頼、2026-10-03）", () => {
+  it("Ctrl+＝で上がり、Ctrl+0 で「字 100%」へ戻る", () => {
+    const h = harness({ size: 16 });
+    h.key({ key: "=", code: "Equal", ctrlKey: true });
+    // 字数がまだ届いていなくても、拡大率だけは出る
+    expect(h.counts()).toBe("字 106%");
+    h.key({ key: "=", code: "Equal", ctrlKey: true });
+    h.key({ key: "=", code: "Equal", ctrlKey: true });
+    h.key({ key: "=", code: "Equal", ctrlKey: true });
+    expect(h.counts()).toBe("字 125%");
+    h.key({ key: "0", code: "Digit0", ctrlKey: true });
+    expect(h.counts()).toBe("字 100%");
+  });
+
+  it("Ctrl+－・Ctrl+ホイールでも追う", () => {
+    const h = harness({ size: 16 });
+    h.key({ key: "-", code: "Minus", ctrlKey: true });
+    expect(h.counts()).toBe("字 94%");
+    h.wheel({ ctrlKey: true, deltaY: -100, deltaMode: 0 });
+    h.wheel({ ctrlKey: true, deltaY: -100, deltaMode: 0 });
+    expect(h.counts()).toBe("字 106%");
+  });
+
+  it("＋／－のボタンでも追う（組んで書く面でも同じ）", () => {
+    const h = harness({ size: 16, composeOn: true });
+    h.click("bigger");
+    expect(h.counts()).toBe("字 106%");
+    h.click("smaller");
+    h.click("smaller");
+    expect(h.counts()).toBe("字 94%");
+  });
+
+  it("本物の paint は下の欄を出し直す（開いたとき・前の話からの引き継ぎもここを通る）", () => {
+    const start = code.indexOf("function paint() {");
+    const end = code.indexOf("\n  }\n", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(code.slice(start, end)).toContain("paintCounts();");
   });
 });
 
