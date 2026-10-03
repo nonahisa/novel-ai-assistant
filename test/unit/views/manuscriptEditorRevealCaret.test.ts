@@ -39,6 +39,7 @@ interface Env {
   composeCarets: Array<{ start: number; end: number }>;
   marks: FakeNode[];
   bodyClasses: Set<string>;
+  lineClasses: Set<string>;
   highlights: Map<string, unknown>;
   listeners: Record<string, Array<() => void>>;
   now: number;
@@ -58,6 +59,7 @@ function harness(options: { composeOn?: boolean; text?: string } = {}) {
     composeCarets: [],
     marks: [],
     bodyClasses: new Set(),
+    lineClasses: new Set(),
     highlights: new Map(),
     listeners: {},
     now: 0,
@@ -82,6 +84,15 @@ function harness(options: { composeOn?: boolean; text?: string } = {}) {
       addEventListener: listen("write"),
     };
     const compose = { focus() {}, addEventListener: listen("compose") };
+    // 組んで書く面の行の入れ物（compose の直下の子）。class だけを見る
+    const lineElement = {
+      parentNode: compose,
+      classList: {
+        add: (name) => env.lineClasses.add(name),
+        remove: (name) => env.lineClasses.delete(name),
+      },
+    };
+    const textNode = { parentNode: lineElement };
     const aloudMarks = {
       get firstChild() { return env.marks[0] || null; },
       removeChild(node) { env.marks.splice(env.marks.indexOf(node), 1); node.parentNode = null; },
@@ -120,7 +131,7 @@ function harness(options: { composeOn?: boolean; text?: string } = {}) {
     function composeNudgeIntoView() { return true; }
     function composeHighlightsUsable() { return true; }
     function composeCurrentAtoms() { return []; }
-    function composeOffsetToPoint(atoms, offset) { return { node: {}, offset }; }
+    function composeOffsetToPoint(atoms, offset) { return { node: textNode, offset }; }
     function alignMarksBox() {}
     function syncMarksScroll() {}
     function aloudNudgeWriteIntoView() {}
@@ -249,12 +260,14 @@ describe("組んで書く面で行へ飛ぶ", () => {
     expect(h.env.composeCarets.at(-1)).toEqual({ start: 4, end: 4 });
   });
 
-  it("飛んだ行をしばらく光らせ、数秒で消す", () => {
+  it("飛んだ行をしばらく光らせ（字の塗りと行の枠）、数秒で消す", () => {
     const h = harness({ composeOn: true });
     h.revealLine(2);
     expect(h.env.highlights.has("novelai-reveal")).toBe(true);
+    expect(h.env.lineClasses.has("reveal-line")).toBe(true);
     h.advance(6000);
     expect(h.env.highlights.has("novelai-reveal")).toBe(false);
+    expect(h.env.lineClasses.has("reveal-line")).toBe(false);
   });
 
   it("打ち始めたら光りを消す", () => {
@@ -262,6 +275,7 @@ describe("組んで書く面で行へ飛ぶ", () => {
     h.revealLine(2);
     h.fire("compose", "input");
     expect(h.env.highlights.has("novelai-reveal")).toBe(false);
+    expect(h.env.lineClasses.has("reveal-line")).toBe(false);
   });
 });
 
@@ -276,5 +290,8 @@ describe("受け口と色", () => {
     // ::highlight を知らない環境で、ほかの選択子まで捨てられないように
     expect(css).toMatch(/\n::highlight\(novelai-reveal\) \{[^}]*var\(--vscode-/);
     expect(css).toContain("body.revealmark:not(.compose):not(.notepv) #aloudmarks");
+    // 薄い塗りだけでは短い行・メモの行の上で見えないので、枠でも囲む
+    expect(css).toMatch(/#aloudmarks \.mark-reveal \{[^}]*outline: 2px solid var\(--vscode-focusBorder/);
+    expect(css).toMatch(/#compose p\.reveal-line, #compose div\.reveal-line \{[^}]*outline: 2px solid var\(--vscode-focusBorder/);
   });
 });

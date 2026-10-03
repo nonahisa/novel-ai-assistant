@@ -228,19 +228,27 @@ body.findmark:not(.compose):not(.notepv) #aloudmarks { display: block; }
 }
 /* **飛んだ行の光り**（作者の裁定、2026-10-03。設計書6.25.11）。数秒で消える。
    打つ面は探すと同じ層（#aloudmarks）を借りる。
-   色は**校正・メモパネルの「いまの行」と同じテーマの色**
-   （list.activeSelectionBackground）——パネルで光った行と、本文で光った行が
-   同じ色なので、どれへ飛んだかが目で結べる。そのままでは濃くて字が沈むので、
-   半分ほど透かす。color-mix を知らない環境のために、先に透けた青を置く */
+   色は**テーマの焦点の枠の色**（focusBorder。VS Code が「いまここ」を示す
+   青）。字の下を薄く塗るだけでは、短い行やメモの行（蛍光黄色の帯）の上で
+   ほとんど見えなかった（画面の自動テストの写真で確かめた）ので、**枠で囲む**。
+   color-mix を知らない環境のために、先に透けた青を置く */
 body.revealmark:not(.compose):not(.notepv) #aloudmarks { display: block; }
 #aloudmarks .mark-reveal {
-  background-color: rgba(0, 120, 215, 0.3);
-  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0078d4) 45%, transparent);
+  background-color: rgba(0, 120, 215, 0.25);
+  background-color: color-mix(in srgb, var(--vscode-focusBorder, #0078d4) 25%, transparent);
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  border-radius: 2px;
 }
-/* 組んで書く面。**規則を分ける**（上の novelai-find と同じ理由） */
+/* 組んで書く面。**規則を分ける**（上の novelai-find と同じ理由）。
+   ::highlight には枠が描けないので、枠は行の入れ物（.reveal-line）に付ける */
 ::highlight(novelai-reveal) {
-  background-color: rgba(0, 120, 215, 0.3);
-  background-color: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #0078d4) 45%, transparent);
+  background-color: rgba(0, 120, 215, 0.25);
+  background-color: color-mix(in srgb, var(--vscode-focusBorder, #0078d4) 25%, transparent);
+}
+#compose p.reveal-line, #compose div.reveal-line {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: 1px;
+  border-radius: 2px;
 }
 
 /* ── 本文の面 ─────────────────────────── */
@@ -3466,9 +3474,19 @@ ruby > rt {
   let revealFlashSpan = null;
   /** 組んで書く面で光らせているか */
   let revealFlashLit = false;
+  /**
+   * 組んで書く面で枠を付けた行の入れ物。**class しか触らない**——ノードを
+   * 足し引きすると記法への直列化がずれる（composeRepaintMemos と同じ決まり）
+   */
+  let revealFlashLine = null;
 
   function revealFlashClear() {
-    if (revealFlashTimer === null && revealFlashSpan === null && !revealFlashLit) return;
+    if (
+      revealFlashTimer === null &&
+      revealFlashSpan === null &&
+      !revealFlashLit &&
+      revealFlashLine === null
+    ) return;
     if (revealFlashTimer !== null) {
       clearTimeout(revealFlashTimer);
       revealFlashTimer = null;
@@ -3480,6 +3498,10 @@ ruby > rt {
       revealFlashSpan = null;
     }
     document.body.classList.remove("revealmark");
+    if (revealFlashLine !== null) {
+      revealFlashLine.classList.remove("reveal-line");
+      revealFlashLine = null;
+    }
     if (revealFlashLit) {
       revealFlashLit = false;
       try {
@@ -3512,12 +3534,19 @@ ruby > rt {
 
   /** 組んで書く面で、start〜end を光らせる */
   function revealFlashCompose(start, end) {
-    if (!composeHighlightsUsable()) return;
     try {
       const atoms = composeCurrentAtoms();
       const head = composeOffsetToPoint(atoms, start);
       const tail = composeOffsetToPoint(atoms, end);
       if (!head || !tail) return;
+      // 行の入れ物（compose の直下の子）に枠。空の行でも枠は見える
+      let line = head.node;
+      while (line && line.parentNode !== compose) line = line.parentNode;
+      if (line && line.classList) {
+        line.classList.add("reveal-line");
+        revealFlashLine = line;
+      }
+      if (!composeHighlightsUsable()) return;
       const range = document.createRange();
       range.setStart(head.node, head.offset);
       range.setEnd(tail.node, tail.offset);
@@ -3598,7 +3627,7 @@ ruby > rt {
       // 読み上げ・探すが層を使っているあいだは借りない（その色を消してしまう）
       if (!aloudOn && !findIsOpen) revealFlashWrite(start, end);
     }
-    if (revealFlashSpan !== null || revealFlashLit) {
+    if (revealFlashSpan !== null || revealFlashLit || revealFlashLine !== null) {
       revealFlashTimer = setTimeout(revealFlashClear, REVEAL_FLASH_MS);
     }
   }
