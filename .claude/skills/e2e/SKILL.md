@@ -20,6 +20,9 @@ npm run typecheck:tests                            # 型（test/e2e/tsconfig.jso
 
 - **`npm run check` には入らない。** 画面に関わる変更をしたら、`check` のあとに自分で走らせる
 - 窓を見ながら直したいときだけ `$env:NOVELAI_E2E_SHOW = "1"`（**作者の画面の前面に出る**ので、作者が作業中なら使わない）
+- 遅い機械・狭い画面の落ち方を手元で写すなら `$env:NOVELAI_E2E_WINDOW = "1024x640"`（全件の窓の大きさ。ノートPCで毎回落ちた件はこの大きさと CPU の負荷で再現した）
+- 同じ作業場で2本同時に走らせても、相手の VS Code は止めない（台帳に走りの親の PID を書く）。それでも窓の取り合いで揺れるので、数を数えるときは1本ずつ
+- 吹き出し（タブの場所の表示など）がボタンに重なると押せない。押す前に `dismissWorkbenchHover`
 - 版を替えるなら `NOVELAI_E2E_VSCODE`（`VSCODE_` で始めない——起動前に全部落とすため）
 
 ## 部品（`test/e2e/support/`）
