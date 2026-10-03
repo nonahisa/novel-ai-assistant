@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを引き受けるVSCode拡張機能で、AIは提案するだけで原稿は書き換えません（無料の手元AIだけでも使えます）。※現在テスト中です。",
-  "version": "0.97.5",
+  "version": "0.97.6",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -309,7 +309,9 @@
             "media": {
               "markdown": "media/walkthrough/prepareWork.md"
             },
-            "completionEvents": ["onContext:novelai.hasWorks"]
+            "completionEvents": [
+              "onContext:novelai.hasWorks"
+            ]
           },
           {
             "id": "write",
@@ -2066,13 +2068,48 @@
           "type": "object",
           "default": {},
           "properties": {
-            "sun": { "type": "number", "minimum": 0, "maximum": 10, "description": "日曜の割合" },
-            "mon": { "type": "number", "minimum": 0, "maximum": 10, "description": "月曜の割合" },
-            "tue": { "type": "number", "minimum": 0, "maximum": 10, "description": "火曜の割合" },
-            "wed": { "type": "number", "minimum": 0, "maximum": 10, "description": "水曜の割合" },
-            "thu": { "type": "number", "minimum": 0, "maximum": 10, "description": "木曜の割合" },
-            "fri": { "type": "number", "minimum": 0, "maximum": 10, "description": "金曜の割合" },
-            "sat": { "type": "number", "minimum": 0, "maximum": 10, "description": "土曜の割合" }
+            "sun": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10,
+              "description": "日曜の割合"
+            },
+            "mon": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10,
+              "description": "月曜の割合"
+            },
+            "tue": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10,
+              "description": "火曜の割合"
+            },
+            "wed": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10,
+              "description": "水曜の割合"
+            },
+            "thu": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10,
+              "description": "木曜の割合"
+            },
+            "fri": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10,
+              "description": "金曜の割合"
+            },
+            "sat": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10,
+              "description": "土曜の割合"
+            }
           },
           "additionalProperties": false,
           "markdownDescription": "曜日ごとに、平日・土日の割合を上書きする（例：水曜は書かない → `{ \"wed\": 0 }`）。\n\n・書いていない曜日は、平日・土日の割合のまま\n・祝日は、曜日にかかわらず祝日の割合"

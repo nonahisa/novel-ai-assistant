@@ -107,7 +107,7 @@ const GIF_BUDGET_BYTES = 5 * 1024 * 1024;
 
 /**
  * MP4 から GIF を作る。**5MB を超えたら、こま数と幅を落として作り直す**
- * （12fps・960px → 10fps・800px → 8fps・720px）。最後の段でも超えたら、そのまま残す
+ * （15fps・800px から 8fps・720px まで、下の段の順）。最後の段でも超えたら、そのまま残す
  */
 export async function toGif(
   binary: string,
@@ -115,9 +115,14 @@ export async function toGif(
   gif: string
 ): Promise<{ fps: number; width: number; bytes: number }> {
   const palette = gif.replace(/\.gif$/i, ".palette.png");
+  // **幅よりこま数を先に守る。** 矢印のカーソルや星は動きが速く、こま数が少ないとカクつく。
+  // 動かない画面の上で小さな物が動く絵なので、こま数を上げても大きさはあまり増えない
   const steps = [
-    { fps: 12, width: 960 },
+    { fps: 15, width: 800 },
+    { fps: 12, width: 800 },
+    { fps: 12, width: 720 },
     { fps: 10, width: 800 },
+    { fps: 10, width: 720 },
     { fps: 8, width: 720 },
   ];
   let last = { fps: 0, width: 0, bytes: 0 };

@@ -29,7 +29,19 @@ import { resizeWindows, withVsCode, type FixtureEpisode } from "../support/vscod
 import { waitUntil } from "../support/wait";
 import { clearNotifications } from "../support/workbenchDom";
 import { durationSeconds, findFfmpeg, toGif, toMp4 } from "./support/encode";
-import { hideCaption, hideTitleCard, pulseAt, showCaption, showKeyBadge, showTitleCard } from "./support/overlay";
+import {
+  clickWithCursor,
+  hideCaption,
+  hideCursor,
+  hideTitleCard,
+  moveCursorTo,
+  parkCursor,
+  showCaption,
+  showCursor,
+  showKeyBadge,
+  showTitleCard,
+  type CaptionPlace,
+} from "./support/overlay";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 /** 録ったままの動画と MP4 の置き場（`.gitignore` の `/release/` の下。repo に入れない） */
@@ -214,6 +226,51 @@ async function contentSize(app: ElectronApplication): Promise<{ width: number; h
   });
 }
 
+/**
+ * 字幕の帯の置き場：左の原稿エディターの真ん中、本文の下の空いた所。
+ * 下の真ん中だと、原稿エディターの下のボタン（「最新話を書く」「保存」）にかかった。
+ * 見本の本文は8行で、帯の高さまでは届かない
+ */
+const CAPTION_PLACE: CaptionPlace = { left: "25%", bottom: "16%" };
+
+/**
+ * 描いたカーソルの置き場（窓の幅・高さに対する割合）。キー操作のあいだはここへ退かす。
+ * 右のパネルの下の空いた所——指摘の行にも、本文にも、字幕にも、右上のキーの札にもかからない
+ */
+const CURSOR_PARK = { x: 0.9, y: 0.93 };
+
+/** 割合で指した点を、ワークベンチの文書の座標（Playwright と重ねる要素が使う単位）へ */
+async function viewportPoint(page: Page, at: { x: number; y: number }): Promise<{ x: number; y: number }> {
+  return page.evaluate((at) => ({ x: Math.round(window.innerWidth * at.x), y: Math.round(window.innerHeight * at.y) }), at);
+}
+
+/**
+ * 組んで書く面の `needle` の真ん中を、ワークベンチの文書の座標で返す（カーソルを字の上へ運ぶため）。
+ * 原稿エディターは WebView の iframe の中なので、字の位置（iframe の中の座標）に、
+ * iframe の左上（`frameElement().boundingBox()`。Playwright は入れ子でも一番外の座標で返す）を足す
+ */
+async function textCenter(frame: Frame, needle: string): Promise<{ x: number; y: number }> {
+  const inner = await frame.evaluate((text) => {
+    const compose = document.getElementById("compose");
+    if (!compose) return undefined;
+    const walker = document.createTreeWalker(compose, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const at = (node.textContent ?? "").indexOf(text);
+      if (at < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, at + text.length);
+      const rect = range.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    }
+    return undefined;
+  }, needle);
+  if (!inner) throw new Error(`組んで書く面に「${needle}」が見つかりません`);
+  const box = await (await frame.frameElement()).boundingBox();
+  if (!box) throw new Error("原稿エディターの枠の位置が取れません");
+  return { x: box.x + inner.x, y: box.y + inner.y };
+}
+
 /** 原稿エディターのカーソルが、`text` を含む行へ来るまで待つ */
 async function waitCaretOnLine(page: Page, text: string, label: string): Promise<void> {
   await waitUntil(
@@ -237,6 +294,8 @@ test("場面2「直す」を撮る", async () => {
   let videoStartedAt = 0;
   let sceneStartedAt = 0;
   let sceneEndedAt = 0;
+  /** 見せ場の時刻（場面の頭から）。撮ったあと、カーソルと星が写ったこまを抜いて確かめるため */
+  const marks: { label: string; ms: number }[] = [];
 
   const { videoPath } = await withVsCode(
     "広報・直す",
@@ -283,6 +342,10 @@ test("場面2「直す」を撮る", async () => {
       await placeCaretAfter(frame, "終電を逃した");
       // マウスは原稿の空いた所（本文の下）へ。メモの行の上に残ると、メモの吹き出しが写る
       await page.mouse.move(320, 600);
+      // 描いた矢印は、表題の下で先に置いておく（表題が薄れるのと一緒に見えてくる）
+      const park = await viewportPoint(page, CURSOR_PARK);
+      await showCursor(page, park.x, park.y);
+      const mark = (label: string) => marks.push({ label, ms: Date.now() - sceneStartedAt });
 
       // 表題は2.5秒は見せる
       const shown = Date.now() - sceneStartedAt;
@@ -290,30 +353,37 @@ test("場面2「直す」を撮る", async () => {
       await hideTitleCard(page);
 
       // 1. 一覧
-      await showCaption(page, "メモと校正の指摘を、話の順に一覧");
-      await hold(page, 4_500);
+      await showCaption(page, "メモと校正の指摘を、話の順に一覧", CAPTION_PLACE);
+      await hold(page, 5_500);
 
       // 2. 押すと、その行へ
       const row = memoPanel.locator("button.go", { hasText: "以外" }).first();
-      const box = await row.boundingBox();
-      await showCaption(page, "押すと、その行へ");
-      await hold(page, 900);
-      if (box) await pulseAt(page, box.x + Math.min(box.width / 2, 120), box.y + box.height / 2);
-      await row.click();
-      // 押したあと、マウスを原稿の空いた所へ逃がす。パネルの上に残ると、行が並び替わった
-      // あとに別の行がなぞられた（下線の）ままに写る
+      await showCaption(page, "押すと、その行へ", CAPTION_PLACE);
+      await hold(page, 700);
+      mark("パネルの行へカーソルが動き始める");
+      await clickWithCursor(page, row);
+      mark("パネルの行を押した（星）");
+      // 押したあと、本当のマウスは原稿の空いた所へ逃がす。パネルの上に残ると、行が並び替わった
+      // あとに別の行がなぞられた（下線の）ままに写る。描いた矢印は押した所に残す
       await page.mouse.move(320, 600);
       await waitCaretOnLine(page, "以外", "原稿エディターのカーソルが誤字の行へ動く");
-      await hold(page, 3_000);
+      await hold(page, 3_400);
 
       // 3. 打ち直す
-      await showCaption(page, "誤字を、その場で打ち直す");
-      await hold(page, 700);
+      await showCaption(page, "誤字を、その場で打ち直す", CAPTION_PLACE);
+      await hold(page, 600);
+      const typo = await textCenter(frame, "以外");
+      mark("誤字の上へカーソルが動き始める");
+      await moveCursorTo(page, typo.x, typo.y);
+      mark("誤字の上にカーソル");
+      await hold(page, 300);
       await selectText(frame, "以外");
-      await hold(page, 700);
+      await hold(page, 500);
+      // 字を打つあいだは、矢印を邪魔にならない所へ退かす
+      await parkCursor(page, park.x, park.y);
       for (const char of "意外") {
         await page.keyboard.insertText(char);
-        await hold(page, 320);
+        await hold(page, 360);
       }
       await page.keyboard.press("Control+KeyS");
       const file = path.join(session.manuscriptFolder, EPISODE_1);
@@ -321,27 +391,28 @@ test("場面2「直す」を撮る", async () => {
         async () => (await readFile(file, "utf8")).includes("男は意外にも若かった"),
         "打ち直した字がファイルに入る"
       );
-      await hold(page, 1_200);
+      await hold(page, 1_500);
       // 直した指摘は、保存すると一覧から消える（原文が本文に無くなるため）
       await waitUntil(
         async () => (await memoPanel.locator("button.go", { hasText: "以外" }).count()) === 0,
         "直した指摘が一覧から消える"
       );
-      await showCaption(page, "直した指摘は、一覧から消える");
-      await hold(page, 2_800);
+      await showCaption(page, "直した指摘は、一覧から消える", CAPTION_PLACE);
+      await hold(page, 3_600);
 
       // 4. F8 で次のメモへ
-      await showCaption(page, "F8 で、次のメモへ");
-      await hold(page, 800);
+      await showCaption(page, "F8 で、次のメモへ", CAPTION_PLACE);
+      await hold(page, 900);
       await showKeyBadge(page, "F8");
       await page.keyboard.press("F8");
       await waitCaretOnLine(page, "雨の描写", "F8 で次のメモの行へ動く");
-      await hold(page, 3_200);
+      await hold(page, 4_000);
 
       // 結び
       await hideCaption(page);
       await showTitleCard(page, "統合小説執筆環境", "VS Code の拡張機能");
-      await hold(page, 2_200);
+      await hideCursor(page);
+      await hold(page, 2_700);
       // ここで切る。このあと窓を閉じる途中のこま（大きさが崩れる）を動画に入れない
       sceneEndedAt = Date.now();
     },
@@ -385,6 +456,8 @@ test("場面2「直す」を撮る", async () => {
       `[広報] 頭を切った位置: ${startSeconds.toFixed(2)} 秒`,
       `[広報] MP4: ${mp4}（${seconds?.toFixed(1) ?? "?"} 秒・${await megabytes(mp4)} MB）`,
       `[広報] GIF: ${gif}（${gifInfo.fps}fps・幅${gifInfo.width}px・${await megabytes(gif)} MB）`,
+      // MP4 は場面の頭から 0.4 秒内側で始まるので、その分を引いた時刻（こまを抜くときに使う）
+      ...marks.map((m) => `[広報] MP4 の ${Math.max(0, m.ms / 1000 - 0.4).toFixed(2)} 秒: ${m.label}`),
     ].join("\n") + "\n"
   );
 });
