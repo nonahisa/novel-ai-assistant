@@ -2009,12 +2009,43 @@ ruby > rt {
     });
   }
 
+  /*
+    ── 便の元の本文（設計書6.25.9。作者の裁定「塞ぐ」、2026-10-04） ──
+    本体の側で文書が変わってから、その本文が画面へ届くまで（本体は120ミリ秒
+    まとめてから送る）に打つと、画面の全文はまだその変更を知らない。全文の差を
+    そのまま当てると、本体の変更（傍点を外した・提案を当てた等）が戻っていた。
+
+    そこで便に「どの本文を元にしたか」の指紋（base）を添える。元は、
+    **直前に自分が送った本文**か、**最後に取り込んだ本体の本文**（画面の字が
+    それと同じになったとき）。本体は元が今の文書と違えば、打った所だけを
+    当て直す（core/screenEditRebase.ts）。
+
+    **変換中に届いて取り込まなかった本文は元にしない**（pending・composePending を
+    捨てた道）。取り込んでいない本文を元にすると、本体の変更を画面が「消した」
+    ことになる。
+  */
+  /** いまの画面の字の元になった本文（null＝まだ何も届いていない） */
+  let editBase = null;
+  /** その指紋（本体の textFingerprint と同じ計算：FNV-1a 32ビット＋字数） */
+  let editBaseKey = null;
+
+  function setEditBase(text) {
+    if (text === editBase) return;
+    editBase = text;
+    editBaseKey = textHash(text) + ":" + text.length;
+  }
+
   /** 打った本文を文書へ送る。**送るのは必ずここを通す** */
   function postEdit(text) {
     editSeq += 1;
     if (unconfirmed === null) unconfirmed = { seq: editSeq, since: Date.now() };
     else unconfirmed.seq = editSeq;
-    vscode.postMessage({ type: "edit", text: text, seq: editSeq });
+    const message = { type: "edit", text: text, seq: editSeq };
+    // 元が分からない（本体の本文がまだ届いていない）便は、今までどおり差を当ててもらう
+    if (editBaseKey !== null) message.base = editBaseKey;
+    vscode.postMessage(message);
+    // 次の便の元は、いま送った本文
+    setEditBase(text);
     // 知らせが出ている間は、打ち足した字も控えに入れる（届いていないので）
     if (unsentStage > 0) keepRescue(text);
     // 見回りが予約済みなら延ばさない（最初の便から数える）
@@ -2032,6 +2063,16 @@ ruby > rt {
   function takeEditApplied(message) {
     hearFromHost();
     if (typeof message.seq !== "number") return;
+    /*
+      **打った所が、まだ届いていない本体の変更と重なって入らなかった**
+      （設計書6.25.9）。届いたことには変わりないので送り直さない（送り直しても
+      同じ理由で入らない）。打った本文を控えて帯で知らせ、［戻す］で選べるようにする。
+      **控えは返事の扱いより先に置く**——全部届いたときの片づけ（dropRescue）は、
+      帯を出している控えを消さない
+    */
+    if (message.conflict === true && typeof message.text === "string") {
+      offerConflict(message.text);
+    }
     if (!message.ok) {
       // 入れられなかった。**待たずに知らせる**（送り直しは見回りに任せる）
       showUnsent("拡張機能が「入れられなかった」と返した（便" + message.seq + "）");
@@ -2563,12 +2604,82 @@ ruby > rt {
     });
   }
 
+  /**
+   * 帯を出している控えがあるときに届いた「重なって入らなかった」本文。
+   * 控えの欄は1つなので、出ている控えを押しのけずに待たせ、片づいたら出す
+   */
+  let conflictWaiting = null;
+
+  /**
+   * 打った所が、まだ届いていない本体の変更と重なって原稿に入らなかった
+   * （設計書6.25.9）。**黙って捨てない**——打った本文を控えて帯を出し、
+   * ［戻す］（本体の変更は消える。確かめを1段挟む）・［捨てる］・［本文をコピー］を
+   * 選ばせる。画面の字は、このあと届く本体の本文に置き換わる。
+   */
+  function offerConflict(text) {
+    if (rescueOffer !== null && !rescueOffer.conflict) {
+      conflictWaiting = text;
+      vscode.postMessage({
+        type: "log",
+        text:
+          "打った字（" + text.length + "字）が原稿に入らなかったので控えました。" +
+          "前回の控えの帯が出ているので、片づいてから出します",
+      });
+      return;
+    }
+    const offer = {
+      docKey: docKey,
+      text: text,
+      at: Date.now(),
+      // 元の文書は控えない：［戻す］は必ず「それでも戻す」の確かめを通す
+      baseLength: -1,
+      baseHash: "",
+      conflict: true,
+    };
+    rescueOffer = offer;
+    rescueConfirming = false;
+    // 画面が作り直されても取り戻せるように、画面の状態へも置く
+    if (docKey !== null) writeRescue(offer);
+    paintRescue();
+    vscode.postMessage({
+      type: "log",
+      text:
+        "打った字が、まだ届いていない変更と重なって原稿に入らなかったので、" +
+        "控えて帯を出しました（控えの本文" + text.length + "字）",
+    });
+  }
+
+  /** 控えの帯が片づいたあと、待たせていた「重なって入らなかった」本文を出す */
+  function showWaitingConflict() {
+    if (conflictWaiting === null) return;
+    const text = conflictWaiting;
+    conflictWaiting = null;
+    offerConflict(text);
+  }
+
   function paintRescue() {
     if (rescueOffer === null) {
       rescueBar.classList.remove("open");
       return;
     }
     rescueBar.classList.add("open");
+    if (rescueOffer.conflict) {
+      rescueRestoreButton.title = "打った字のほうへ原稿を戻します（拡張機能が先に入れた変更は消えます）";
+      if (rescueConfirming) {
+        rescueText.textContent =
+          "戻すと、拡張機能が先に入れた変更（傍点を外す・提案を当てる等）が消えます。";
+        rescueRestoreButton.textContent = "それでも戻す";
+        return;
+      }
+      rescueText.textContent =
+        "打った字が、拡張機能の変更（傍点を外す・提案を当てる等）と同じ所に重なったので、" +
+        "原稿へ入れずに控えました（" +
+        diffLength(rescueOffer.text, lastDocText === null ? "" : lastDocText) +
+        "字の差）。［戻す］で打った字のほうへ戻せます。";
+      rescueRestoreButton.textContent = "戻す";
+      return;
+    }
+    rescueRestoreButton.title = "前回原稿に入らなかった本文を、いまの原稿へ戻します";
     if (rescueConfirming) {
       rescueText.textContent =
         "控えたあとで原稿が変わっています。戻すと、その変更が消えるかもしれません。";
@@ -2595,21 +2706,29 @@ ruby > rt {
       return;
     }
     const text = rescueOffer.text;
+    const conflict = rescueOffer.conflict === true;
     rescueOffer = null;
     rescueConfirming = false;
     writeRescue(null);
     paintRescue();
+    /*
+      **戻すのは作者が選んだ全文**なので、元は最後に届いた本体の本文にする
+      （設計書6.25.9）。打っていた本文の鎖を元にすると、本体は「打った所だけ」を
+      当て直そうとして、選んだ全文にならない
+    */
+    if (lastDocText !== null) setEditBase(lastDocText);
     write.value = text;
     if (composeOn) composeApplyText(text);
     if (composeOn) composeSend(true);
     else send(true);
-    note.textContent = "前回入らなかった字を戻しました";
+    note.textContent = conflict ? "打った字のほうへ戻しました" : "前回入らなかった字を戻しました";
     vscode.postMessage({
       type: "log",
       text:
         "控えから戻しました（" + text.length + "字" +
         (unchanged ? "" : "。控えたあとで原稿が変わっていたのを確かめたうえで") + "）",
     });
+    showWaitingConflict();
   }
   rescueRestoreButton.addEventListener("click", rescueRestore);
 
@@ -2622,8 +2741,9 @@ ruby > rt {
     paintRescue();
     vscode.postMessage({
       type: "log",
-      text: "前回原稿に入らなかった字の控え（" + length + "字）を捨てました",
+      text: "原稿に入らなかった字の控え（" + length + "字）を捨てました",
     });
+    showWaitingConflict();
   });
 
   rescueCopyButton.addEventListener("click", function () {
@@ -2876,10 +2996,12 @@ ruby > rt {
       if (text !== write.value) pending = text;
       return;
     }
-    if (write.value === text) return;
+    // 画面の字が届いた本文と同じ＝取り込んだ。次の便の元にする（設計書6.25.9）
+    if (write.value === text) { setEditBase(text); return; }
     logRebuildFromIncoming("打つ", text, write.value.length);
     forgetSent();
     replaceKeepingCaret(text, undoCaret);
+    setEditBase(text);
   }
 
   /**
@@ -4309,8 +4431,11 @@ ${RESUME_WRITING_LABEL ? `
       if (composeOn) {
         // 記法そのものが変わったときは、本文が同じでも組み直す
         // （面を開いたまま原稿の種類が変わるのは稀だが、変わったら組みも変わる）
-        if (notationChanged) composeApplyText(message.text);
-        else composeTakeIncoming(message.text, undoCaret);
+        if (notationChanged) {
+          composeApplyText(message.text);
+          // 届いた本文で組み直した（次の便の元。設計書6.25.9）
+          setEditBase(message.text);
+        } else composeTakeIncoming(message.text, undoCaret);
       } else takeIncoming(message.text, undoCaret);
       // 覚えていた「組んで書く」は、本文が届いてから開く。
       // **一度きりにする**——安全弁で断られたときに、届くたび試し直さない
@@ -6075,7 +6200,8 @@ ${RESUME_WRITING_LABEL ? `
       return;
     }
     const shown = composeDomToNotation(compose);
-    if (composeNormalizeNewlines(text) === shown) return;
+    // 画面の字が届いた本文と同じ＝取り込んだ。次の便の元にする（設計書6.25.9）
+    if (composeNormalizeNewlines(text) === shown) { setEditBase(text); return; }
     logRebuildFromIncoming("組んで書く", text, shown.length);
     forgetSent();
     write.value = text;
@@ -6089,6 +6215,8 @@ ${RESUME_WRITING_LABEL ? `
       composeWantSelect = { start: at, end: at };
     }
     composeApplyText(text);
+    // 届いた本文で組み直した（組めずに打つ面へ戻ったときも、打つ面がこの本文になる）
+    setEditBase(text);
   }
 
   /**

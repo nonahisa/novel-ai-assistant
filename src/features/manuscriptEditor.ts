@@ -58,10 +58,17 @@ import {
 } from "../core/eolSpace";
 import {
   applySentEdit,
+  combineSentEdits,
   createEditQueue,
+  type ApplyOutcome,
   type EditAck,
   type SentEdit,
 } from "../core/editQueue";
+import {
+  createScreenEditLedger,
+  textFingerprint,
+  type ScreenEditLedger,
+} from "../core/screenEditRebase";
 import {
   SAVE_APPLY_WAIT_MS,
   createAppliedTracker,
@@ -1290,7 +1297,16 @@ type Incoming =
    * 打たれた本文（LF空間）。`seq` は画面が付けた便の番号で、
    * **入ったかどうかをこの番号で返す**（`editApplied`。設計書6.25.9）
    */
-  | { type: "edit"; text: string; seq?: number }
+  | {
+      type: "edit";
+      text: string;
+      seq?: number;
+      /**
+       * 元にした本文の指紋（`core/screenEditRebase.ts`。設計書6.25.9）。
+       * 本体の変更が画面へ届く前に打たれた便でも、その変更を戻さないために使う
+       */
+      base?: string;
+    }
   /**
    * 画面の［保存］（設計書6.25.9。作者の裁定 2026-10-01）。`seq` は直前に
    * 送った edit の番号で、**その便まで当て終わってから保存する**。結果は
@@ -1738,6 +1754,12 @@ export class ManuscriptEditorProvider
      * 最初の `update` に1回だけ添える。
      */
     let carriedRescue: ManuscriptRescue | undefined;
+    /**
+     * 画面の便の「元の本文」の控え帳（設計書6.25.9。作者の裁定「塞ぐ」、2026-10-04）。
+     * 画面へ送った本文と、当て終えた画面の本文を覚える。本体の変更が画面へ
+     * 届く前に打たれた便を、その変更を戻さずに当て直すために使う
+     */
+    const ledger: ScreenEditLedger = createScreenEditLedger();
 
     const send = async (): Promise<void> => {
       const found = await this.deps.highlighter.indexFor(
@@ -1765,6 +1787,8 @@ export class ManuscriptEditorProvider
         安全弁がすべて1行ごとに1文字ずつずれる（実際にずれていた）
       */
       const text = toLf(document.getText());
+      // 画面はこの本文を取り込めば、次の便の元にする（指紋で送ってくる）
+      ledger.rememberSent(text);
       await panel.webview.postMessage({
         type: "update",
         text,
@@ -2159,26 +2183,67 @@ export class ManuscriptEditorProvider
         // 閉じた画面へは返せない（閉じる直前に送った便が遅れて着いたとき）
       }
     };
-    const queueEdit = createEditQueue<SentEdit>(async (item) => {
-      selfEditing = true;
-      let ok = false;
-      try {
-        ok = await applySentEdit(
-          item,
-          (text) => this.applyEdit(document, text),
-          reportApplied,
-          (error) =>
-            logLine(
-              `原稿エディタ：打った内容を文書へ当てる途中で失敗しました：${
-                error instanceof Error ? error.message : String(error)
-              }`
-            )
+    /**
+     * 1便を当てる（設計書6.25.9。作者の裁定「塞ぐ」、2026-10-04）。
+     *
+     * 便の元の本文が今の文書と違えば、**画面がまだ知らない変更**（傍点を外した・
+     * 提案を当てた・メモの行を足した等。画面へは `scheduleSend` の120ミリ秒で
+     * 遅れて届く）がある。そのまま差を当てると、その変更が戻る。打った所だけを
+     * 今の文書へ当て直し、重なって当て直せなければ当てずに画面へ控えさせる。
+     */
+    const applyScreenEdit = async (item: SentEdit): Promise<ApplyOutcome> => {
+      // 読んでから当てるまで待ちを挟まない（間に本体の変更が入ると、判断が古くなる）
+      const decision = ledger.decide(item, toLf(document.getText()));
+      if (decision.kind === "conflict") {
+        ledger.rememberRejected(item.text, decision.baseKey);
+        void this.logForDocument(
+          document,
+          decision.reason === "overlap"
+            ? `原稿エディタ：打った字が、画面へまだ届いていない変更と同じ所に重なったので、原稿へ入れずに画面の控えへ回しました（${item.text.length}字。画面の［戻す］で打った字のほうへ戻せます）`
+            : `原稿エディタ：打った字の元になった本文が分からないので、原稿へ入れずに画面の控えへ回しました（${item.text.length}字。画面の［戻す］で打った字のほうへ戻せます）`
         );
-      } finally {
-        selfEditing = false;
+        // 画面へ今の本文を届ける（届かないと、画面は古い本文の上に打ち続ける）
+        scheduleSend();
+        return "conflict";
       }
-      if (!ok) this.warnEditRejected(document);
-    });
+      const ok = await this.applyEdit(document, decision.text);
+      if (ok) {
+        ledger.rememberApplied(item.text);
+        if (decision.rebased) {
+          void this.logForDocument(
+            document,
+            "原稿エディタ：画面へまだ届いていない変更があったので、打った字をその変更のあとの本文へ当て直しました"
+          );
+        }
+      } else {
+        ledger.rememberRejected(item.text, decision.baseKey);
+      }
+      return ok;
+    };
+    const queueEdit = createEditQueue<SentEdit>(
+      async (item) => {
+        selfEditing = true;
+        let outcome: ApplyOutcome = false;
+        try {
+          outcome = await applySentEdit(
+            item,
+            () => applyScreenEdit(item),
+            reportApplied,
+            (error) =>
+              logLine(
+                `原稿エディタ：打った内容を文書へ当てる途中で失敗しました：${
+                  error instanceof Error ? error.message : String(error)
+                }`
+              )
+          );
+        } finally {
+          selfEditing = false;
+        }
+        if (outcome === false) this.warnEditRejected(document);
+      },
+      // 当てている間に届いた便は、元の本文をつなげて畳む（core/editQueue.ts）
+      (older, newer) => combineSentEdits(older, newer, textFingerprint)
+    );
 
     panel.webview.onDidReceiveMessage(async (message: Incoming) => {
       /*
@@ -2253,11 +2318,11 @@ export class ManuscriptEditorProvider
           break;
 
         case "edit":
-          await queueEdit(
-            typeof message.seq === "number"
-              ? { text: message.text, seq: message.seq }
-              : { text: message.text }
-          );
+          await queueEdit({
+            text: message.text,
+            ...(typeof message.seq === "number" ? { seq: message.seq } : {}),
+            ...(typeof message.base === "string" ? { base: message.base } : {}),
+          });
           break;
 
         case "count":

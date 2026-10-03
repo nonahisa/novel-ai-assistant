@@ -264,3 +264,119 @@ test(".txt の原稿で《《強調》》の語を選んで Ctrl+Alt+K を押し
     }
   );
 });
+
+/**
+ * 本体が文書を変えてから画面へ届くまで（`scheduleSend` の120ミリ秒）に打たれたとき
+ * の見張り（作者の裁定「塞ぐ」、2026-10-04。設計書6.25.9）。
+ *
+ * 0.98.2 までは、画面は打った字を全文で送り、本体は文書との差をそのまま当てていた。
+ * 画面の全文はまだ本体の変更（傍点を外した等）を知らないので、打った字の便が
+ * その変更を戻していた。
+ */
+async function waitDirtyQuickly(session: E2ESession): Promise<void> {
+  // 印は細かく（10ミリ秒ごとに）見て、見えたらすぐ打つ（100ミリ秒刻みだと送り直しが届いてしまう）
+  const until = Date.now() + 15_000;
+  while (!(await tabIsDirty(session.page, EPISODE))) {
+    if (Date.now() > until) throw new Error("Ctrl+Alt+K で文書が変わりません（タブが未保存になりません）");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+/** 落ちたときに読む操作ログの行（当て直し・ぶつかり・保存・外からの変更） */
+async function rebaseLogLines(session: E2ESession): Promise<string> {
+  try {
+    const log = await readFile(path.join(session.workFolder, ".aiwriter", "logs", "actions.log"), "utf8");
+    return log
+      .split(/\r?\n/)
+      .filter((line) => /当て直|重な|［保存］|外で変わった|当てられ/.test(line))
+      .join(" ／ ");
+  } catch {
+    return "（操作ログが読めません）";
+  }
+}
+
+test("Ctrl+Alt+K で強調を外した直後、画面へ届く前に行末へ字を打っても、外した印は戻らず打った字も入る", async () => {
+  await withVsCode(
+    "強調を外した直後に打つ",
+    [{ name: EPISODE, text: "前の字と《《強調》》と後ろの字。\n" }],
+    async (session) => {
+      const frame = await openEpisode(session.page, EPISODE, "後ろの字");
+      await selectText(frame, "強調");
+      await session.page.keyboard.press("Control+Alt+KeyK");
+      await waitDirtyQuickly(session);
+      // 打つ直前の画面の傍点の数（1なら、送り直しがまだ届いていない＝見たい場面）
+      const emphasisBeforeTyping = await frame.locator("#compose .emphasis").count();
+      console.info(`[E2E] 字を打つ直前の画面の傍点：${emphasisBeforeTyping}`);
+      // 本体の変更（印を外した所）と重ならない所＝行末へ打つ
+      await session.page.keyboard.press("End");
+      await session.page.keyboard.insertText("あ");
+      const expected = "前の字と強調と後ろの字。あ\n";
+      await waitUntil(async () => (await composeText(frame)).includes("後ろの字。あ"), "打った字が画面に出る");
+      await saveAndWaitFor(session, (text) => text.includes("あ"), "打った字がファイルに入る").catch(
+        async (error: unknown) => {
+          throw new Error(
+            `${String(error)}（ファイル：${JSON.stringify(await fileText(session))}／打つ直前の傍点：${emphasisBeforeTyping}／操作ログ：${await rebaseLogLines(session)}）`
+          );
+        }
+      );
+      await waitUntil(async () => (await footText(frame, "note")).includes("保存しました"), "「保存しました」が出る");
+      expect(
+        await fileText(session),
+        `外した強調の印が、打った字の便で戻されました（打つ直前の傍点：${emphasisBeforeTyping}／操作ログ：${await rebaseLogLines(session)}）`
+      ).toBe(expected);
+      /*
+        打つ直前に傍点が残っていた（＝本体の変更がまだ画面へ届いていなかった）回は、
+        本体が当て直しの道を通ったはず。届いたあとに打った回は、ふつうの道で通る
+        （その回はこの見張りの場面を外しているが、落とさずに上の記録で分かる）
+      */
+      if (emphasisBeforeTyping === 1) {
+        expect(await rebaseLogLines(session), "当て直しの道を通っていません").toContain("当て直しました");
+      }
+      // 画面も両方を含む本文へ揃う（傍点は消え、打った字は残る）
+      await waitUntil(
+        async () =>
+          (await composeText(frame)).includes("前の字と強調と後ろの字。あ") &&
+          (await frame.locator("#compose .emphasis").count()) === 0,
+        "画面が、印を外して字を足した本文へ揃う"
+      );
+    }
+  );
+});
+
+test("Ctrl+Alt+K で強調を外した直後、画面へ届く前に同じ語の上へ打つと、外した印は戻らず、打った字は控えとして［戻す］の帯に残る", async () => {
+  await withVsCode(
+    "強調を外した直後に同じ所へ打つ",
+    [{ name: EPISODE, text: "前の字と《《強調》》と後ろの字。\n" }],
+    async (session) => {
+      const frame = await openEpisode(session.page, EPISODE, "後ろの字");
+      await selectText(frame, "強調");
+      await session.page.keyboard.press("Control+Alt+KeyK");
+      await waitDirtyQuickly(session);
+      const emphasisBeforeTyping = await frame.locator("#compose .emphasis").count();
+      console.info(`[E2E] 字を打つ直前の画面の傍点：${emphasisBeforeTyping}`);
+      // 選んだままの語の上へ打つ＝本体の変更と同じ所。どちらが正しいかは機械には決められない
+      await session.page.keyboard.insertText("あ");
+      // 打った字は、黙って捨てずに帯で知らせる
+      await waitUntil(
+        async () => frame.evaluate(() => document.getElementById("rescue")?.classList.contains("open") === true),
+        "打った字の控えの帯が出る"
+      ).catch(async (error: unknown) => {
+        throw new Error(
+          `${String(error)}（ファイル：${JSON.stringify(await fileText(session))}／打つ直前の傍点：${emphasisBeforeTyping}／画面：${JSON.stringify(await composeText(frame))}／操作ログ：${await rebaseLogLines(session)}）`
+        );
+      });
+      const bar = await frame.evaluate(() => document.getElementById("rescueText")?.textContent ?? "");
+      expect(bar).toContain("重な");
+      await saveAndWaitFor(session, (text) => !text.includes("《《"), "外した印のままファイルに入る");
+      expect(await fileText(session)).toBe("前の字と強調と後ろの字。\n");
+      // ［戻す］を押せば、打った字のほうへ戻せる（本体の変更は消えるので、確かめが1段入る）
+      await frame.locator("#rescueRestore").click();
+      const confirm = await frame.evaluate(() => document.getElementById("rescueRestore")?.textContent ?? "");
+      expect(confirm).toBe("それでも戻す");
+      await frame.locator("#rescueRestore").click();
+      await waitUntil(async () => (await composeText(frame)).includes("前の字とあと後ろの字。"), "打った字が画面へ戻る");
+      await saveAndWaitFor(session, (text) => text.includes("あ"), "打った字がファイルに入る");
+      expect(await fileText(session)).toBe("前の字とあと後ろの字。\n");
+    }
+  );
+});

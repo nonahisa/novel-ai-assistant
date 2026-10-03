@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { textFingerprint } from "../../../src/core/screenEditRebase";
 import { buildManuscriptEditorHtml } from "../../../src/views/manuscriptEditorHtml";
 
 /**
@@ -370,6 +371,78 @@ function unsentHarness(
     now: () => env.now,
   };
 }
+
+/**
+ * 便の元の本文（設計書6.25.9。作者の裁定「塞ぐ」、2026-10-04）。本体の変更が
+ * 画面へ届く前に打った便でも、その変更を戻さないために、便に元の指紋を添える。
+ */
+describe("便に元の本文の指紋を添える", () => {
+  it("元が分からない最初の便には添えず、次の便には直前に送った本文の指紋を添える（本体と同じ計算）", () => {
+    const h = unsentHarness();
+    h.postEdit("あ");
+    h.postEdit("あい");
+    const edits = h.posted().filter((message) => message.type === "edit");
+    expect(edits[0]).not.toHaveProperty("base");
+    expect(edits[1].base).toBe(textFingerprint("あ"));
+  });
+
+  function conflicted(store: { state?: unknown } = {}) {
+    const h = unsentHarness({ store });
+    h.update({ type: "update", docKey: "doc", text: "前の字と強調。" });
+    h.postEdit("前の字と《《強調》》あ。");
+    const seq = h.edits()[0].seq;
+    h.receive({ type: "editApplied", seq, ok: true, conflict: true, text: "前の字と《《強調》》あ。" });
+    return h;
+  }
+
+  it("重なって入らなかった返事が来たら、打った本文を控えて帯を出す（黙って捨てない）", () => {
+    const store: { state?: unknown } = {};
+    const h = conflicted(store);
+    expect(h.rescueOpen()).toBe(true);
+    expect(h.rescueText()).toContain("重な");
+    // 画面が作り直されても取り戻せるように、画面の状態へも控える
+    expect((store.state as { rescue?: { text: string; conflict: boolean } }).rescue).toMatchObject({
+      text: "前の字と《《強調》》あ。",
+      conflict: true,
+    });
+    expect(h.logs().some((line) => line.includes("重なって原稿に入らなかった"))).toBe(true);
+  });
+
+  it("重なった便は送り直さない（送り直しても同じ理由で入らない）", () => {
+    const h = conflicted();
+    h.advance(60_000);
+    expect(h.edits()).toHaveLength(1);
+    expect(h.bannerOpen()).toBe(false);
+  });
+
+  it("［戻す］は確かめを1段挟み、選んだ全文を、最後に届いた本体の本文を元にして送る", () => {
+    const h = conflicted();
+    h.click("rescueRestore");
+    expect(h.button("rescueRestore").textContent).toBe("それでも戻す");
+    expect(h.edits()).toHaveLength(1);
+    h.click("rescueRestore");
+    const edits = h.posted().filter((message) => message.type === "edit");
+    expect(edits).toHaveLength(2);
+    expect(edits[1].text).toBe("前の字と《《強調》》あ。");
+    expect(edits[1].base).toBe(textFingerprint("前の字と強調。"));
+    expect(h.rescueOpen()).toBe(false);
+  });
+
+  it("前回の控えの帯が出ているときは押しのけず、片づいてから出す", () => {
+    const store: { state?: unknown } = {
+      state: { rescue: { docKey: "doc", text: "前回の控え", at: 0, baseLength: 1, baseHash: "x" } },
+    };
+    const h = unsentHarness({ store });
+    h.update({ type: "update", docKey: "doc", text: "原稿" });
+    expect(h.rescueText()).toContain("前回");
+    h.postEdit("原稿あ");
+    h.receive({ type: "editApplied", seq: h.edits()[0].seq, ok: true, conflict: true, text: "原稿あ" });
+    expect(h.rescueText()).toContain("前回");
+    h.click("rescueDiscard");
+    expect(h.rescueOpen()).toBe(true);
+    expect(h.rescueText()).toContain("重な");
+  });
+});
 
 describe("打った字が文書へ届いたかを確かめる（設計書6.25.9）", () => {
   it("送る便には番号を付ける", () => {
