@@ -110,6 +110,29 @@ describe("相談の時間切れの案内は、そのAIの上限で言う", () =>
     expect(text).toContain("より速いAI");
   });
 
+  // 0.96.17：括弧が2つ続いていた（「…長い設定です）（この相談で送った量は…）。」）
+  test("上限より長い設定のときも、括弧は1つにまとめる", () => {
+    const text = workChatTimeoutAdvice({
+      currentSeconds: 900,
+      maxSeconds: 600,
+      canRaise: false,
+      sentChars: 30000,
+      historyChars: 0,
+    });
+    expect(text).not.toContain("）（");
+    expect(text).toContain(
+      "設定どおり900秒待ちましたが、返りませんでした" +
+        "（ふだんの上限600秒より長い設定で、この相談で送った量は30,000字）。"
+    );
+    // 送った量が分からなければ、上限の括弧だけで閉じる
+    const unknown = workChatTimeoutAdvice({
+      currentSeconds: 900,
+      maxSeconds: 600,
+      canRaise: false,
+    });
+    expect(unknown).toContain("（ふだんの上限600秒より長い設定です）。");
+  });
+
   /**
    * **呼び出し側が決め打ちの上限を渡していないこと。** 札（`timeoutAction`）と
    * 案内の両方が `maxTimeoutSeconds` を通らないと、札は1800秒を勧めるのに

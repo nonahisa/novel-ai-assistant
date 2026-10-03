@@ -84,7 +84,7 @@ const SPECIAL_ENTRANCES: Readonly<Record<string, ActionEntrance>> = {
   "novelai.copyForPosting": {
     place: IN_MANUSCRIPT_EDITOR,
     text:
-      "原稿エディターの上のバー「投稿用にコピー」か、右クリックから。" +
+      "原稿エディターの上のバー「コピー（投稿サイト用）」か、右クリックから。" +
       "簡単ステップメニューにもあります",
   },
   "novelai.setAdvicePolicy": {

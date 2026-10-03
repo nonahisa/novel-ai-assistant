@@ -45,10 +45,8 @@ export interface ManuscriptKeyBinding {
 }
 
 /**
- * 作者の裁定の表（2026-10-02）。package.json と食い違うと試験が止める。
- * 前のメモ・メモを足すは、本体の Ctrl+Alt+B（セカンダリ サイド バー）・
- * Ctrl+Alt+I（Copilot Chat）と重なったので、Shift を足した形にした
- * （作者の裁定「重ならないキーに変える」。Shift は逆向き・仲間の印）
+ * 作者の裁定の表（2026-10-02、メモとルビは 2026-10-03 に変えた）。
+ * package.json と食い違うと試験が止める。
  */
 export const MANUSCRIPT_KEY_BINDINGS: readonly ManuscriptKeyBinding[] = [
   {
@@ -68,18 +66,26 @@ export const MANUSCRIPT_KEY_BINDINGS: readonly ManuscriptKeyBinding[] = [
     command: "novelai.openSceneMemos",
     label: "校正・メモパネルを開く",
   },
+  /*
+    メモの3つは、同時押しを減らした（作者の裁定、2026-10-03「キーが押しにくい」）。
+    F8／Shift+F8 は VS Code の「次の問題・前の問題」と同じ形で、本体の側は
+    素のエディターが前面のときだけ効くので奪い合わない。F8 は日本語入力の
+    変換（半角カナ）にも使うので、変換中は画面が本体へ渡さない
+    （manuscriptEditorHtml.ts のキーの区切り）。Ctrl+/ は「行をコメントにする」
+    と同じ指の形で、メモの印 // と揃う
+  */
   {
-    key: "ctrl+alt+n",
+    key: "f8",
     command: "novelai.nextSceneMemo",
     label: "次のメモへ",
   },
   {
-    key: "ctrl+alt+shift+n",
+    key: "shift+f8",
     command: "novelai.prevSceneMemo",
     label: "前のメモへ",
   },
   {
-    key: "ctrl+alt+shift+m",
+    key: "ctrl+/",
     command: "novelai.addSceneMemo",
     label: "ここにメモを足す",
   },
@@ -94,6 +100,15 @@ export const MANUSCRIPT_KEY_BINDINGS: readonly ManuscriptKeyBinding[] = [
     key: "ctrl+alt+k",
     command: "novelai.addEmphasis",
     label: "選んだ語に傍点を付ける",
+  },
+  /*
+    ルビ。前は画面の中で Ctrl+Shift+R を受けていた。傍点と同じ形にしてほしい
+    という作者の依頼（2026-10-03）で、Ctrl+Alt+R にして本体の割り当てへ移した
+  */
+  {
+    key: "ctrl+alt+r",
+    command: "novelai.addRuby",
+    label: "選んだ語にルビを振る",
   },
 ];
 

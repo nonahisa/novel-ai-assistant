@@ -6,8 +6,8 @@ import { buildManuscriptEditorHtml } from "../../../src/views/manuscriptEditorHt
  *
  * - Ctrl+F … 本文を探す（自前の検索の列。打つ面・組んで書く面の両方）
  * - Alt+↑／Alt+↓ … 前の話・次の話（キーからは新しい話を作らない）
- * - Ctrl+Shift+R … ルビ（傍点は Ctrl+Alt+K。本体のキー割り当てで受け、
- *   画面へ「傍点を頼む」が届く。2026-10-03 に Ctrl+Shift+K から変えた）
+ * - ルビ（Ctrl+Alt+R）・傍点（Ctrl+Alt+K）・メモ（Ctrl+/・F8・Shift+F8）は
+ *   本体のキー割り当てで受ける。画面は止めずに渡す（2026-10-03）
  * - Ctrl+ホイール・Ctrl+＋／Ctrl+－・Ctrl+0 … 本文の字の大きさ
  *
  * 画面へ渡る本物のスクリプトから、キーの区切り（keys）と検索の区切り
@@ -292,45 +292,86 @@ describe("Alt+↑／Alt+↓ で前の話・次の話", () => {
   });
 });
 
-describe("Ctrl+Shift+R でルビ（傍点は Ctrl+Alt+K）", () => {
-  it("選んでいれば、ボタンと同じ道で頼む", () => {
+/*
+  ルビ・傍点はどちらも本体のキー割り当て（Ctrl+Alt+R・Ctrl+Alt+K）で受け、
+  本体から「頼んで」（askNotation）が届く。画面ではキーを受けない
+  （作者の依頼 2026-10-03「傍点と同じ形に」。古い Ctrl+Shift+R は残さない）
+*/
+describe("ルビ・傍点のキーは画面で受けない（本体の割り当てへ渡す）", () => {
+  it("Ctrl+Shift+R・Ctrl+Shift+K は画面で受けない（古いキーを残さない）", () => {
     const h = harness({ selection: "漢字" });
     const ruby = h.key({ key: "R", code: "KeyR", ctrlKey: true, shiftKey: true });
-    expect(h.calls()).toEqual(["askRuby"]);
-    expect(ruby.prevented && ruby.stopped).toBe(true);
-  });
-
-  it("Ctrl+Shift+K は画面で受けない（Notion などの常駐アプリが Windows 全体で取るため、2026-10-03）", () => {
-    const h = harness({ selection: "漢字" });
     const emph = h.key({ key: "K", code: "KeyK", ctrlKey: true, shiftKey: true });
     expect(h.calls()).toEqual([]);
+    expect(h.note()).toBe("");
+    expect(ruby.prevented || ruby.stopped).toBe(false);
     expect(emph.prevented || emph.stopped).toBe(false);
   });
 
-  it("Ctrl+Alt+K は止めずに本体へ渡す（package.json の割り当てが傍点を頼み返す）", () => {
+  it("Ctrl+Alt+R・Ctrl+Alt+K は止めずに本体へ渡す（package.json の割り当てが頼み返す）", () => {
     const h = harness({ selection: "漢字" });
+    const ruby = h.key({ key: "r", code: "KeyR", ctrlKey: true, altKey: true });
     const emph = h.key({ key: "k", code: "KeyK", ctrlKey: true, altKey: true });
-    expect(h.calls()).toEqual(["flush:キー操作を本体へ渡す"]);
+    expect(h.calls()).toEqual([
+      "flush:キー操作を本体へ渡す",
+      "flush:キー操作を本体へ渡す",
+    ]);
+    expect(ruby.prevented || ruby.stopped).toBe(false);
     expect(emph.prevented || emph.stopped).toBe(false);
   });
+});
 
-  it("選んでいなければ頼まずに一言出す", () => {
-    const h = harness({ selection: "" });
-    h.key({ key: "R", code: "KeyR", ctrlKey: true, shiftKey: true });
+/*
+  メモのキー（作者の裁定 2026-10-03「同時押しを減らす」）。Ctrl+/ で足す、
+  F8／Shift+F8 で次・前。Ctrl+Alt+文字と同じく本体の割り当てで受けるので、
+  画面は止めずに渡し、渡す前に打ちかけの字とカーソルの行を送る
+  （送らないと、メモが押す前の行へ足される）
+*/
+describe("メモのキー（Ctrl+/・F8・Shift+F8）は送ってから本体へ渡す", () => {
+  const KEYS: Array<Record<string, unknown>> = [
+    { key: "/", code: "Slash", ctrlKey: true },
+    { key: "F8", code: "F8" },
+    { key: "F8", code: "F8", shiftKey: true },
+  ];
+
+  it("止めずに渡し、渡す前に打ちかけの字とカーソルの行を送る", () => {
+    for (const init of KEYS) {
+      const h = harness();
+      const event = h.key(init);
+      expect(h.calls(), JSON.stringify(init)).toContain("flush:キー操作を本体へ渡す");
+      expect(h.posted(), JSON.stringify(init)).toContainEqual({ type: "caret", line: 7 });
+      expect(event.prevented || event.stopped, JSON.stringify(init)).toBe(false);
+    }
+  });
+
+  it("変換中の F8（半角カナ）は本体へ渡さない。変換は止めない", () => {
+    // 変換中の keydown は key が "Process" で来ることがあるので、code で見る
+    for (const init of [
+      { key: "Process", code: "F8", isComposing: true },
+      { key: "F8", code: "F8", shiftKey: true, isComposing: true },
+    ]) {
+      const h = harness();
+      const event = h.key(init);
+      expect(event.stopped, JSON.stringify(init)).toBe(true);
+      expect(event.prevented, JSON.stringify(init)).toBe(false);
+      expect(h.calls()).toEqual([]);
+      expect(h.posted()).toEqual([]);
+    }
+  });
+
+  it("変換中の Ctrl+/ も何もしない（送らない）", () => {
+    const h = harness();
+    h.key({ key: "/", code: "Slash", ctrlKey: true, isComposing: true });
     expect(h.calls()).toEqual([]);
-    expect(h.note()).toBe("ルビを振る文字を選んでから押してください");
+    expect(h.posted()).toEqual([]);
   });
 
-  it("組んで書く面でも同じ（選択の有無で分ける）", () => {
-    const h = harness({ composeOn: true, selection: "語" });
-    h.key({ key: "R", code: "KeyR", ctrlKey: true, shiftKey: true });
-    expect(h.calls()).toEqual(["askRuby"]);
-  });
-
-  it("変換中・Shift 無し（Ctrl+R）では何もしない", () => {
-    const h = harness({ selection: "漢字" });
-    h.key({ key: "R", code: "KeyR", ctrlKey: true, shiftKey: true, isComposing: true });
-    h.key({ key: "r", code: "KeyR", ctrlKey: true });
+  it("ほかの F キーには触らない（変換の F6・F7・F9・F10 も）", () => {
+    const h = harness();
+    for (const key of ["F6", "F7", "F9", "F10"]) {
+      const event = h.key({ key, code: key, isComposing: true });
+      expect(event.prevented || event.stopped, key).toBe(false);
+    }
     expect(h.calls()).toEqual([]);
   });
 });
@@ -540,7 +581,7 @@ describe("既存のキーを壊さない", () => {
     expect(h.posted()).toEqual([]);
   });
 
-  it("F1・F5・F6〜F10・Ctrl+P・Ctrl+Shift+P は使わない", () => {
+  it("F1・F5・F6〜F12・Ctrl+P・Ctrl+Shift+P の既定の動きを止めない", () => {
     const h = harness({ selection: "語" });
     for (const key of ["F1", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"]) {
       expect(h.key({ key }).prevented).toBe(false);
@@ -562,7 +603,7 @@ describe("既存のキーを壊さない", () => {
  * 読んだり、シーンメモが前の行へ足されたりしないように。
  */
 describe("Ctrl+Alt+頭文字は本体のキー割り当てへ渡す", () => {
-  const LETTERS = ["t", "p", "h", "a", "m", "n", "b", "i", "c", "k"];
+  const LETTERS = ["t", "p", "h", "a", "m", "n", "b", "i", "c", "k", "r"];
 
   it("どれも止めない（既定の動きも伝わりも）", () => {
     const h = harness({ selection: "語" });

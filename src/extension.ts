@@ -6460,12 +6460,16 @@ export async function activate(
   );
 
   context.subscriptions.push(
-    registerCommand("novelai.addRuby", addRuby),
     /*
-      **前面が原稿エディターなら、そちらへ頼む**（傍点のキー Ctrl+Alt+K。
-      設計書6.25.10）。原稿エディターは TextEditor を持たないので、素の
-      エディター向けの addEmphasis だけでは「Markdownを開いて」で終わる
+      **前面が原稿エディターなら、そちらへ頼む**（ルビのキー Ctrl+Alt+R・
+      傍点のキー Ctrl+Alt+K。設計書6.25.10）。原稿エディターは TextEditor を
+      持たないので、素のエディター向けの addRuby／addEmphasis だけでは
+      「原稿を開いて」で終わる
     */
+    registerCommand("novelai.addRuby", async () => {
+      if (askNotationInActiveManuscript("ruby")) return;
+      await addRuby();
+    }),
     registerCommand("novelai.addEmphasis", async () => {
       if (askNotationInActiveManuscript("emphasis")) return;
       await addEmphasis();

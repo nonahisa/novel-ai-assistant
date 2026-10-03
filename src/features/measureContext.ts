@@ -482,18 +482,6 @@ export function estimateProbeTokens(
 const ERROR_EXCERPT_CHARS = 200;
 
 /**
- * 測定が途中で終わっても要る後始末を、外側へ渡すための入れ物。
- *
- * **`finally` で必ず戻したい**が、戻す処理は測定の中で組み立てられる
- * （延ばす前の値を知っているのはあちらだけ）。ここへ置いておけば、
- * どんな終わり方をしても外側が拾える。
- */
-interface TuningCleanup {
-  /** 延ばした待ち時間を戻す。台帳へ反映したときは消される */
-  restoreTimeout?: () => Promise<void>;
-}
-
-/**
  * 何を測るかを訊く（設計書6.27.11。作者の依頼、2026-09-13）。
  *
  * **押したらすぐ始める形をやめた。** 読める長さは数分、書ける長さは
@@ -579,13 +567,12 @@ async function resolveMeasureTarget(
  * AIチューニングの入口。
  *
  * **後始末のためだけの殻である。** 中身は `runMeasurement` にあり、
- * ここは「延ばした待ち時間を必ず戻す」ことだけを引き受ける。
+ * ここは「上げた待ち時間の上限を必ず戻す」ことと、投げた失敗をログと
+ * 通知へ出すこと（規則5「エラーの本文を捨てない」）だけを引き受ける。
  *
- * 以前は戻す処理を出口ごと（失敗・中止・非反映）に置いていた。
- * **通知や設定の書き込みが投げた瞬間に、倍にした待ち時間が残る**——
- * そのモデルの全機能が以後その秒数を待つようになり、しかも
- * `logFailure` を通らないので理由がどこにも残らなかった
- * （規則5「エラーの本文を捨てない」）。
+ * 時間切れの測り直しで延ばす待ち時間は、台帳へ書かずメモリの中の線で
+ * 持つ（`widenProbeSearchTimeout`）。測定の途中で VS Code が落ちても
+ * 台帳には何も残らない。
  */
 export async function measureContext(
   registry: AIRegistry,
@@ -619,7 +606,6 @@ export async function measureContext(
   // **ここで先に決める。** 中で失敗しても、その失敗がファイルに残る
   if (workFolderPath) useLogFile(workFolderPath);
 
-  const cleanup: TuningCleanup = {};
   /*
     **測定のあいだだけ、待ち時間の上限を上げる**（作者の依頼、2026-09-13）。
 
@@ -628,23 +614,20 @@ export async function measureContext(
     待たない——書いたのに効かない状態になる。
 
     ここで上げたぶんは `finally` が必ず戻す。台帳のほうは、反映しても
-    `recommendTimeoutSeconds` がふだんの上限で挟み、反映しなければ元の値へ
-    戻すので、**測定のあいだ延ばした値がふだんの呼び出しへ持ち込まれることは
+    `recommendTimeoutSeconds` がふだんの上限で挟み、反映しなければ書かない
+    ので、**測定のあいだ延ばした値がふだんの呼び出しへ持ち込まれることは
     ない。**（2026-09-23 から手元のAIはふだんの上限も1800秒なので、上がるのは
     クラウドだけ。600秒の話はクラウドのこと）
   */
   const restoreTimeoutCeiling = raiseTimeoutCeilingForProbe();
   try {
-    await runMeasurement(registry, feature, cleanup, scope, target);
+    await runMeasurement(registry, feature, scope, target);
   } catch (error) {
     // 測定そのものの失敗は `runMeasurement` が中で捌く。ここへ来るのは
     // 通知や設定の書き込みが投げたとき——黙って消さず、ログと通知へ出す
     reportFailure(error);
   } finally {
-    // **台帳より先に上限を戻す。** 戻す書き込み（`restoreTimeout`）が
-    // 何秒を読むかは、線が元へ戻ってからのほうが素直である
     restoreTimeoutCeiling();
-    await cleanup.restoreTimeout?.();
   }
 }
 
@@ -662,8 +645,6 @@ async function runMeasurement(
    * 1秒も変わらない**（作者には「測ったのに直らない」としか見えない）。
    */
   feature: AssignableFeature | "default",
-  /** 延ばした待ち時間を戻す手を、外側（`measureContext`）へ預ける入れ物 */
-  cleanup: TuningCleanup,
   /** 何を測るか。「両方」のときの道筋は、これまでと同じである */
   scope: TuningScope,
   /** 名指しで測るモデル。無ければ割当先（`measureContext` の説明） */
@@ -923,13 +904,6 @@ async function runMeasurement(
    * 終える。何字でどう止まったのかは、結果の文面で必ず言う。
    */
   let probeStop: ProbeStop | undefined;
-  /**
-   * 延ばす前に台帳へ入っていた待ち時間。**`undefined` は「欄が無かった」。**
-   *
-   * 「延ばしたかどうか」はこの値では判定できない（元から欄が無かった場合と
-   * 区別が付かない）ので、必ず `raisedTimeoutSeconds` のほうで見る。
-   */
-  let timeoutBeforeRaise: number | undefined;
   let failure: unknown;
   /**
    * `num_ctx` を下限まで下げても載らなかったときの失敗。
@@ -940,94 +914,6 @@ async function runMeasurement(
    */
   let loadFailure: AIError | undefined;
   let cancelled = false;
-
-  /**
-   * 待ち時間を延ばして台帳へ書く。書けたら true。
-   *
-   * **書けなくても測定は続ける。** 設定の書き込みが失敗する環境
-   * （読み取り専用の設定など）はありうるが、そのために測定そのものを
-   * 落とすほどのことではない。延ばせなかったのなら、この回は
-   * これまでどおり「入らない」と数えて先へ進む。
-   *
-   * **ほかの欄は `saveModelTuning` が守る**（生の設定値へ、この欄だけを
-   * 差し替える）。ここで現在値を読んで丸ごと書き戻すと、作者が手で書いた
-   * 読めない欄まで巻き添えで消える。
-   */
-  const raiseTimeout = async (seconds: number): Promise<boolean> => {
-    // **素の台帳を読む。** ここで読むのは「元へ戻す値」であり、
-    // 同梱の初期値が混ざると、作者が書いていない値へ戻すことになる
-    const current = modelTuningRaw(resolved.provider.id, resolved.model);
-    try {
-      const outcome = await saveModelTuning(
-        resolved.provider.id,
-        resolved.model,
-        { timeoutSeconds: seconds }
-      );
-      /*
-        **台帳が受け取らなかったなら、延ばせていない**（作者の報告、
-        2026-09-19）。書き込みは書けなくても例外を投げないので、
-        ここで札を見ないと「延ばした」ことにしてしまう——結果の文面に
-        「待ち時間を一時的に◯秒へ延ばして測り直しました」と出るのに、
-        プロバイダが読む値は1秒も変わっていない、という嘘になる。
-      */
-      if (outcome !== "written") {
-        logStep(
-          "読める長さの測定：待ち時間を延ばせませんでした" +
-            `（${describeTuningWriteFailure(outcome)}）。`
-        );
-        return false;
-      }
-      // **書けたときだけ覚える。** 書けていないのに戻しにいくと、
-      // 作者が自分で入れた値をこちらが消してしまう
-      timeoutBeforeRaise = current?.timeoutSeconds;
-      // ここから先はどんな終わり方をしても戻す。外側の `finally` が拾う
-      cleanup.restoreTimeout = restoreTimeout;
-      return true;
-    } catch (error) {
-      logStep(
-        "読める長さの測定：待ち時間を延ばせませんでした" +
-          `（${error instanceof Error ? error.message : String(error)}）。`
-      );
-      return false;
-    }
-  };
-
-  /**
-   * 延ばした待ち時間を、延ばす前へ戻す。
-   *
-   * **押していないのに設定が変わっているのは、この作品の原則
-   * （作者が押したときだけ書く）に反する。** 測り直しのために一時的に
-   * 書き換えるのは構わないが、反映されなかった終わり方——断られた・
-   * 中止した・失敗した——のすべてで元へ戻す。
-   *
-   * 元が「欄が無かった」なら `undefined` を渡して欄ごと消させる
-   * （`saveModelTuning` の約束）。ほかの欄はあちらが守る。
-   *
-   * **ここから外へ例外を出さない。** 呼ぶのは `finally` の中であり、
-   * ここで投げると本来の失敗を覆い隠してしまう。
-   */
-  const restoreTimeout = async (): Promise<void> => {
-    if (raisedTimeoutSeconds === undefined) return;
-    try {
-      await saveModelTuning(resolved.provider.id, resolved.model, {
-        timeoutSeconds: timeoutBeforeRaise,
-      });
-      logStep(
-        `読める長さの測定：反映しなかったので、${tuningKey} の待ち時間を` +
-          (timeoutBeforeRaise === undefined
-            ? "測る前（設定なし）"
-            : `${timeoutBeforeRaise}秒`) +
-          "へ戻しました。"
-      );
-    } catch (error) {
-      // **戻せなかったことは黙らない。** 延ばした値が残ったままになる
-      logStep(
-        `読める長さの測定：延ばした待ち時間（${raisedTimeoutSeconds}秒）を` +
-          `戻せませんでした。${tuningKey} に残っています` +
-          `（${error instanceof Error ? error.message : String(error)}）。`
-      );
-    }
-  };
 
   /*
     **探索のあいだだけ、1回の待ち時間を120秒までに抑える**（作者の裁定、
@@ -1282,9 +1168,11 @@ async function runMeasurement(
             // **時間切れは「長すぎた」とは限らない。** 待ち時間の設定が
             // このモデルに合っていないだけかもしれず、そのまま
             // 「入らない」と数えると実効の上限を実際より短く見積もる。
-            // **台帳へ先に書いてから測り直す**——`generate` に待ち時間を
-            // 渡す口が無いので、プロバイダが読む値を変えるしかない。
-            // 台帳はモデルごとなので、ほかのモデルには影響しない
+            // `generate` に待ち時間を渡す口が無いので、プロバイダが読む値
+            // （`resolveTimeoutSeconds`）を探索の線で変えて測り直す。
+            // **台帳へは書かない**——書いてから戻す作りでは、測定の途中で
+            // VS Code が落ちると短い測り直しの値が残り、ふだんの機能が
+            // その秒数で切れた（台帳600秒のモデルに240秒。0.96.17 で直した）
             if (error instanceof AIError && error.kind === "timeout") {
               const waited = resolveTimeoutSeconds(
                 resolved.provider.id,
@@ -1301,10 +1189,10 @@ async function runMeasurement(
                   waited,
                   PROBE_MAX_TIMEOUT_SECONDS
                 );
-                if (raised !== undefined && (await raiseTimeout(raised))) {
+                if (raised !== undefined) {
                   raisedTimeoutSeconds = raised;
-                  // 探索の線（120秒）も同じ秒数まで上げる。上げないと、
-                  // 台帳へ書いた値が読む側で120秒に切られて効かない
+                  // 探索の線（120秒）を、この秒数で待つ線に変える。
+                  // 探索が終われば `restoreProbeSearchTimeout` で消える
                   widenProbeSearchTimeout(
                     resolved.provider.id,
                     resolved.model,
@@ -1754,10 +1642,6 @@ async function runMeasurement(
       cancelled,
     })
   );
-
-  // 反映したなら、戻す相手がもう無い（見立てた秒数で上書きされている）。
-  // 反映しなかったときは後始末を残したままにして、外側の `finally` に任せる
-  if (applied) cleanup.restoreTimeout = undefined;
 }
 
 /**

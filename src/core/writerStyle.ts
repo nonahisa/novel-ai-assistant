@@ -986,7 +986,7 @@ function publishAdvice(style: WriterStyle): TutorialAdvice {
   const steps: TutorialStep[] = [
     {
       command: "novelai.copyForPosting",
-      label: "投稿サイト用に変換してコピーする",
+      label: "コピー（投稿サイト用）",
       why:
         "ルビ・傍点をサイトごとの記法へ読み替えて、クリップボードへ入れます。" +
         "原稿は書き換えません",

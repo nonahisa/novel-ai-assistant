@@ -54,6 +54,35 @@ describe("コピー（投稿サイト用）の説明", () => {
     expect(editor).toContain('add("コピー（投稿サイト用）"');
   });
 
+  /*
+    0.96.17：パレットに同じ名前が2つ並んでいた。作品一覧用（copyBodyForPosting）は
+    話の節点が無いと何もしないので、前例（openEpisode）どおりパレットから隠す。
+    上のバーのボタンと手順の札も同じ調子の名前へ揃える
+  */
+  test("コマンドパレットには1つだけ出る（作品一覧用は隠す）", () => {
+    const manifest = JSON.parse(readFileSync("package.json", "utf8")) as {
+      contributes: { menus: { commandPalette: Array<{ command: string; when?: string }> } };
+    };
+    const palette = manifest.contributes.menus.commandPalette;
+    expect(palette.find((entry) => entry.command === "novelai.copyBodyForPosting")?.when).toBe(
+      "false"
+    );
+    expect(palette.find((entry) => entry.command === "novelai.copyForPosting")).toBeUndefined();
+  });
+
+  test("上のバーのボタン・入口の案内・手順の札も「コピー（投稿サイト用）」", () => {
+    const editor = readFileSync("src/views/manuscriptEditorHtml.ts", "utf8");
+    expect(editor).toMatch(/<button id="copy"[^>]*>コピー（投稿サイト用）<\/button>/);
+    const entrance = readFileSync("src/core/actionEntrance.ts", "utf8");
+    expect(entrance).toContain("上のバー「コピー（投稿サイト用）」");
+    const style = readFileSync("src/core/writerStyle.ts", "utf8");
+    expect(style).toMatch(/command: "novelai\.copyForPosting",\s*label: "コピー（投稿サイト用）"/);
+    for (const text of [editor, entrance, style]) {
+      expect(text).not.toContain("投稿用にコピー");
+      expect(text).not.toContain("投稿サイト用に変換してコピーする");
+    }
+  });
+
   test("傍点の有無で訊き方が変わる、という古い説明が残っていない", () => {
     expect(item).toBeDefined();
     expect(item?.detail).not.toContain("傍点が入っているときだけ");

@@ -46,17 +46,20 @@ const EXPECTED: Record<string, string> = {
   "ctrl+alt+h": "novelai.checkNotation",
   "ctrl+alt+a": "novelai.runProofreadingSuite",
   "ctrl+alt+m": "novelai.openSceneMemos",
-  "ctrl+alt+n": "novelai.nextSceneMemo",
-  "ctrl+alt+shift+n": "novelai.prevSceneMemo",
-  "ctrl+alt+shift+m": "novelai.addSceneMemo",
+  // メモの3つは同時押しを減らした（作者の裁定、2026-10-03）
+  f8: "novelai.nextSceneMemo",
+  "shift+f8": "novelai.prevSceneMemo",
+  "ctrl+/": "novelai.addSceneMemo",
   "ctrl+alt+c": "novelai.openChat",
   // 傍点（K は圏点）。2026-10-03 に画面の Ctrl+Shift+K から移した
   "ctrl+alt+k": "novelai.addEmphasis",
+  // ルビ。2026-10-03 に画面の Ctrl+Shift+R から移した（傍点と同じ形に）
+  "ctrl+alt+r": "novelai.addRuby",
 };
 
 describe("原稿エディターのキー割り当て（package.json）", () => {
-  test("10件あり、裁定の表と同じ組み合わせ", () => {
-    expect(ours).toHaveLength(10);
+  test("11件あり、裁定の表と同じ組み合わせ", () => {
+    expect(ours).toHaveLength(11);
     const actual = Object.fromEntries(
       ours.map((binding) => [binding.key, binding.command])
     );
@@ -105,7 +108,7 @@ describe("原稿エディターのキー割り当て（package.json）", () => {
     }
   });
 
-  test("mac は Cmd+Alt に読み替える", () => {
+  test("mac は Ctrl を Cmd に読み替える（F8 はそのまま）", () => {
     for (const binding of ours) {
       expect(binding.mac, binding.command).toBe(
         binding.key.replace(/^ctrl\+/, "cmd+")
@@ -113,15 +116,20 @@ describe("原稿エディターのキー割り当て（package.json）", () => {
     }
   });
 
-  test("変換のキー（F6〜F10）と本体の F1・F5・F11・F12・Ctrl+P・Ctrl+Shift+P を使わない", () => {
-    const forbidden = /(^|\+)(f1|f5|f6|f7|f8|f9|f10|f11|f12)$|^ctrl\+p$|^ctrl\+shift\+p$/;
+  /*
+    F8 は日本語入力の変換（半角カナ）にも使うが、作者の裁定（2026-10-03）で
+    メモの行き来に使う。変換中は画面が本体へ渡さない（manuscriptEditorKeys.test.ts
+    「変換中の F8 は本体へ渡さない」）。ほかの変換のキーは今までどおり使わない
+  */
+  test("変換のキー（F6・F7・F9・F10）と本体の F1・F5・F11・F12・Ctrl+P・Ctrl+Shift+P を使わない", () => {
+    const forbidden = /(^|\+)(f1|f5|f6|f7|f9|f10|f11|f12)$|^ctrl\+p$|^ctrl\+shift\+p$/;
     for (const binding of bindings) {
       expect(forbidden.test(binding.key), binding.key).toBe(false);
     }
   });
 });
 
-describe("傍点のキー（Ctrl+Alt+K）の受け先", () => {
+describe("ルビ・傍点のキー（Ctrl+Alt+R・Ctrl+Alt+K）の受け先", () => {
   const extension = readFileSync("src/extension.ts", "utf8");
   const editor = readFileSync("src/features/manuscriptEditor.ts", "utf8");
 
@@ -133,5 +141,11 @@ describe("傍点のキー（Ctrl+Alt+K）の受け先", () => {
     );
     expect(editor).toMatch(/export function askNotationInActiveManuscript\(/);
     expect(editor).toMatch(/type: "askNotation"/);
+  });
+
+  test("novelai.addRuby も同じ形（ルビのキー Ctrl+Alt+R）", () => {
+    expect(extension).toMatch(
+      /registerCommand\("novelai\.addRuby",[\s\S]{0,300}askNotationInActiveManuscript\("ruby"\)[\s\S]{0,200}addRuby\(\)/
+    );
   });
 });

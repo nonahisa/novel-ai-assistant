@@ -906,7 +906,7 @@ ruby > rt {
   <button id="ruby" title="選んだ文字にルビを振ります">ルビ</button>
   <button id="emph" title="選んだ文字に傍点を付けます">傍点</button>
   <div class="sep"></div>
-  <button id="copy" title="投稿サイトの記法に直してコピーします">投稿用にコピー</button>
+  <button id="copy" title="投稿サイトの記法に直してコピーします">コピー（投稿サイト用）</button>
   <button id="aloudToggle" title="読み上げの操作を出し入れします。耳で聞くと、目では気づかないリズムの悪さや誤字が見つかります">読み上げ</button>
   <button id="episodePlot" title="この話の単話プロットを右の列に開きます。無ければ作るかを訊きます。前後の話へ移ると、右の単話プロットもその話のものに切り替わります">単話プロット</button>
   <div class="sep note-only"></div>
@@ -6603,13 +6603,12 @@ ${RESUME_WRITING_LABEL ? `
     ── キーで呼ぶ操作（作者の裁定、2026-10-02。設計書6.25） ──
       Ctrl+F            本文を探す（下の find）
       Alt+↑／Alt+↓     前の話・次の話
-      Ctrl+Shift+R      ルビ（Ctrl+Shift+B〈ビルド〉・E〈エクスプローラー〉・
-                        D〈デバッグ〉のような画面全体の割当は避けた）
-      Ctrl+Alt+K        傍点（K は「圏点」の頭文字）。**ここでは受けない**——
-                        下の Ctrl+Alt+文字と同じく本体の割当（package.json）で
-                        受け、本体から askNotation が届く。前は Ctrl+Shift+K を
-                        ここで受けていたが、Notion のデスクトップアプリが
-                        Windows 全体で取っていて届かなかった（2026-10-03）
+      Ctrl+Alt+R／K     ルビ／傍点。**ここでは受けない**——下の Ctrl+Alt+文字と
+                        同じく本体の割当（package.json）で受け、本体から
+                        askNotation が届く（2026-10-03。前は Ctrl+Shift+R・K を
+                        ここで受けていた）
+      Ctrl+/・F8・Shift+F8   メモを足す・次・前。本体の割当で受ける（同じ日。
+                        同時押しを減らした）。渡す前に打ちかけの字と行を送る
       Ctrl+ホイール・Ctrl+＋／Ctrl+－・Ctrl+0   本文の字の大きさ
       Ctrl+Alt+文字     ここでは受けず、本体のキー割り当てへ渡す（設計書6.25.10）
 
@@ -6621,8 +6620,9 @@ ${RESUME_WRITING_LABEL ? `
 
     ## 奪わないもの
     - **変換中のキーは一切奪わない**（isComposing／composing）。
-      F6〜F10（日本語入力の変換）も、本体の F1・F5・F11・F12・Ctrl+P・
-      Ctrl+Shift+P も使わない
+      F6・F7・F9・F10（日本語入力の変換）も、本体の F1・F5・F11・F12・Ctrl+P・
+      Ctrl+Shift+P も使わない。F8 だけはメモの「次へ」に使う（作者の裁定）ので、
+      変換中の F8 は本体へ渡さない（下の keyHoldImeF8。半角カナへの変換は止めない）
     - Ctrl+S（保存を頼む）と Esc（品書きを閉じる）は、それぞれの受け口のまま。
       ここでは見ない
     - 素の矢印・Shift+矢印は、組んで書く面の矢印の扱い（入り込みの見張り）のまま
@@ -6658,6 +6658,17 @@ ${RESUME_WRITING_LABEL ? `
   function keyStop(event) {
     event.preventDefault();
     event.stopPropagation();
+  }
+
+  /**
+   * 本体のキー割り当てへ渡す前に、打ちかけの字（検知が画面と違う本文を
+   * 読まないように）とカーソルの行（メモを足す・次へ進む起点。ふだんは
+   * 少し遅れて送っているので、押した瞬間の行とずれうる）を送っておく
+   */
+  function keyHandOver() {
+    flushUnsent("キー操作を本体へ渡す");
+    const line = caretLine();
+    if (line > 0) vscode.postMessage({ type: "caret", line: line });
   }
 
   /**
@@ -6750,9 +6761,21 @@ ${RESUME_WRITING_LABEL ? `
           event.stopPropagation();
           return;
         }
-        flushUnsent("キー操作を本体へ渡す");
-        const line = caretLine();
-        if (line > 0) vscode.postMessage({ type: "caret", line: line });
+        keyHandOver();
+        return;
+      }
+
+      /*
+        **メモのキー（Ctrl+/・F8・Shift+F8）も本体の割り当てで受ける**
+        （作者の裁定、2026-10-03「同時押しを減らす」）。Ctrl+Alt+文字と同じく
+        止めずに渡し、渡す前に打ちかけの字とカーソルの行を送る——送らないと、
+        メモが押す前の行へ足され、次のメモを探す起点もずれる
+      */
+      if (
+        (ctrl && !event.altKey && !event.shiftKey && (code === "Slash" || key === "/")) ||
+        (!ctrl && !event.altKey && (code === "F8" || key === "F8"))
+      ) {
+        keyHandOver();
         return;
       }
 
@@ -6761,14 +6784,6 @@ ${RESUME_WRITING_LABEL ? `
       if (!event.shiftKey && (key === "f" || key === "F" || code === "KeyF")) {
         keyStop(event);
         findOpen();
-        return;
-      }
-
-      // Shift つきでは key が大文字で来る。配列に左右されない code で見る
-      if (event.shiftKey && (code === "KeyR" || key === "R")) {
-        if (keyInField(event)) return;
-        keyStop(event);
-        keyNotation("ruby");
         return;
       }
 
@@ -6794,6 +6809,21 @@ ${RESUME_WRITING_LABEL ? `
     },
     true
   );
+
+  /*
+    **変換中の F8 は本体へ渡さない**（keyHoldImeF8）。F8 は日本語入力で
+    「半角カナにする」キーでもあり、そのまま本体へ届くと、変換しただけで
+    次のメモへ飛ぶ。既定の動き（変換）は止めず、伝わりだけを止める。
+    変換中は key が "Process" で来ることがあるので code で見る。
+    先に受ける（capture）側で止めると、打つ面・組んで書く面そのものの受け口まで
+    届かなくなるので、ここは後で受ける（bubble）側に置く。本体へ送る窓（window）
+    より先に文書（document）を通るので、ここで止めれば本体へは届かない
+  */
+  document.addEventListener("keydown", function keyHoldImeF8(event) {
+    if (!(event.isComposing || composing || event.keyCode === 229)) return;
+    if (String(event.code || "") !== "F8") return;
+    event.stopPropagation();
+  });
 
   /*
     **Ctrl+ホイールも本文の字の大きさだけを変える。** そのままにすると、

@@ -84,6 +84,8 @@ const state = vi.hoisted(() => ({
    * はっきり分けたい場面で要る。
    */
   declaredTokens: 262_144,
+  /** 送るたびに呼ぶ。測定の途中の台帳を控えるのに使う */
+  onCall: undefined as (() => void) | undefined,
 }));
 
 vi.mock("../../../src/core/logger", () => ({
@@ -114,6 +116,7 @@ vi.mock("../../../src/ai/registry", () => ({
         state.timeoutSecondsSeen.push(
           resolveTimeoutSeconds("ollama", "gemma4:e4b")
         );
+        state.onCall?.();
         if (
           state.timeoutAboveChars !== undefined &&
           promptChars > state.timeoutAboveChars &&
@@ -315,6 +318,7 @@ beforeEach(() => {
   state.cancelAtTick = undefined;
   state.progress = [];
   state.declaredTokens = 262_144;
+  state.onCall = undefined;
 
   /*
     **待ちは刻みの回数で見る。** 分あたりの上限に当たったあとの60秒を
@@ -529,6 +533,38 @@ describe("測定のあいだの待ち時間", () => {
 
     expect(state.timeoutSecondsSeen[0]).toBe(90);
     expect(Math.max(...state.timeoutSecondsSeen)).toBe(180);
+  });
+
+  /*
+    **測り直しのために台帳を書き換えない**（2026-10-03。0.96.17）。前は台帳へ
+    240秒を書いて測り直し、終わってから600秒へ戻していた。測定の途中で
+    VS Code が落ちると240秒のまま残り、ふだんの機能が240秒で切れる。
+    途中の台帳を送るたびに控え、落ちた瞬間の状態を見る
+  */
+  test("**測り直しの最中も、台帳の待ち時間は600秒のまま（途中で落ちても残らない）**", async () => {
+    state.limitChars = 1_000_000;
+    state.timeoutAboveChars = 20_000;
+    state.timeoutTimes = 1;
+    const seen: unknown[] = [];
+    state.onCall = () => seen.push(ledger().timeoutSeconds);
+    await measure({ before, answer: "そのままにする" });
+
+    // 延ばした値は実際に効いている（線で効かせる）
+    expect(Math.max(...state.timeoutSecondsSeen)).toBe(240);
+    // それでも、送ったどの瞬間にも台帳は600秒のまま
+    expect(seen.length).toBeGreaterThan(1);
+    expect(new Set(seen)).toEqual(new Set([600]));
+  });
+
+  test("台帳に待ち時間が無いモデルでも、測り直しの最中に欄を作らない", async () => {
+    state.limitChars = 1_000_000;
+    state.timeoutAboveChars = 20_000;
+    state.timeoutTimes = 1;
+    const seen: unknown[] = [];
+    state.onCall = () => seen.push(ledger().timeoutSeconds);
+    await measure({ answer: "そのままにする" });
+
+    expect(new Set(seen)).toEqual(new Set([undefined]));
   });
 
   test("測り終えたら、ふだんの待ち時間（台帳の600秒）へ戻る", async () => {

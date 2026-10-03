@@ -7,16 +7,18 @@ import { AIError, type GenerateParams, type GenerateResult } from "../../../src/
  * AIチューニングが**設定へ手を出す範囲**（設計書6.49）。
  *
  * 測り直しのために待ち時間を一時的に延ばすのは構わない——`generate` に
- * 秒数を渡す口が無いので、プロバイダの読む値を変えるしかない。
- * **だが、作者が「設定に反映」を押さなかったら、設定は測る前のままへ戻す。**
- * 押していないのに値が変わっているのは、この作品の原則
- * （作者が押したときだけ書く）に反する。
+ * 秒数を渡す口が無いので、プロバイダの読む値（`resolveTimeoutSeconds`）を
+ * 変えるしかない。**ただし台帳へは書かない**（0.96.17）。押していないのに
+ * 値が変わっているのは、この作品の原則（作者が押したときだけ書く）に反し、
+ * 書いてから戻す作りでは測定の途中で VS Code が落ちると戻せなかった。
  */
 
 const state = vi.hoisted(() => ({
   /** 次の1回だけ時間切れにする */
   failNextWithTimeout: false,
   generateCalls: 0,
+  /** 送るたびの、プロバイダが読む待ち時間（秒）。延ばした値が効いたかを見る */
+  timeoutsSeen: [] as number[],
   /** `ensureConfigured` が受け取った機能キー */
   requestedFeatures: [] as unknown[],
   /** 機能キーごとの割当先。無ければ `default` を使う */
@@ -40,6 +42,9 @@ vi.mock("../../../src/ai/registry", () => ({
         isPaid: assigned.isPaid,
         generate: async (params: GenerateParams): Promise<GenerateResult> => {
           state.generateCalls += 1;
+          state.timeoutsSeen.push(
+            resolveTimeoutSeconds(assigned.providerId, assigned.model)
+          );
           if (state.failNextWithTimeout) {
             state.failNextWithTimeout = false;
             throw new AIError("応答がタイムアウトしました。", "timeout");
@@ -88,7 +93,10 @@ vi.mock("../../../src/views/progress", () => ({
 }));
 
 import { measureContext } from "../../../src/features/measureContext";
-import { recommendTimeoutSeconds } from "../../../src/core/modelTuning";
+import {
+  recommendTimeoutSeconds,
+  resolveTimeoutSeconds,
+} from "../../../src/core/modelTuning";
 import {
   fsTiming,
   tuningStoreContents,
@@ -170,6 +178,7 @@ function answerWith(answer: string): { showErrorMessage: ReturnType<typeof vi.fn
 beforeEach(() => {
   state.failNextWithTimeout = true;
   state.generateCalls = 0;
+  state.timeoutsSeen = [];
   state.requestedFeatures = [];
   state.assignments = { default: OLLAMA };
 });
@@ -222,9 +231,11 @@ describe("測り直しのために延ばした待ち時間", () => {
     // 1回の待ち時間を120秒までに抑える**（2026-10-03。設計書6.49.3）ので、
     // 設定の180秒ではなく120秒が倍の240秒になる
     expect(state.failNextWithTimeout).toBe(false);
-    expect(raisedTo(tuningWrites, KEY, 240)).toBe(true);
-    // **そのうえで、鍵ごと消えていること。** 中身の無い項目を残すと、
-    // 作者には「測ったのに何も入っていない」と読める
+    expect(state.timeoutsSeen).toContain(240);
+    // **延ばした値は台帳へ一度も書かない**（0.96.17）。書けば、途中で
+    // VS Code が落ちたときに残る。項目も作らない
+    expect(raisedTo(tuningWrites, KEY, 240)).toBe(false);
+    expect(tuningWrites).toEqual([]);
     expect(tuningTable()[KEY]).toBeUndefined();
   });
 
@@ -243,7 +254,9 @@ describe("測り直しのために延ばした待ち時間", () => {
 
     // **台帳の100秒のほうを倍にする**（設定の90秒ではない）。
     // 台帳が設定に勝つのだから、延ばす元も台帳の値でなければ辻褄が合わない
-    expect(raisedTo(tuningWrites, KEY, 200)).toBe(true);
+    expect(state.timeoutsSeen).toContain(200);
+    // 延ばした値は台帳へ書かない（0.96.17）
+    expect(raisedTo(tuningWrites, KEY, 200)).toBe(false);
     expect(tuningTable()[KEY]).toEqual({
       contextWindow: 8192,
       timeoutSeconds: 100,
@@ -261,8 +274,9 @@ describe("測り直しのために延ばした待ち時間", () => {
 
     await measureContext(registry);
 
-    // 探索の線（120秒）の倍（2026-10-03。設計書6.49.3）
-    expect(raisedTo(tuningWrites, KEY, 240)).toBe(true);
+    // 探索の線（120秒）の倍（2026-10-03。設計書6.49.3）。効いたが、台帳へは書かない
+    expect(state.timeoutsSeen).toContain(240);
+    expect(raisedTo(tuningWrites, KEY, 240)).toBe(false);
     const entry = tuningTable()[KEY] as Record<string, unknown>;
     // 応答は一瞬で返る作りなので、見立ては下限（180秒）に落ち着く。
     // **測り直しのために書いた240秒が残っていないこと**が要点である
@@ -278,14 +292,13 @@ describe("測り直しのために延ばした待ち時間", () => {
   /**
    * **例外で抜けても、倍にした値を残さない。**
    *
-   * 戻す処理が「失敗・中止・非反映」の3経路にしか無いと、通知や設定の
-   * 書き込みが投げた瞬間に360秒が残る。そのモデルの**全機能**が以後
-   * 360秒待つようになり、しかも理由がどこにも残らない。
+   * 延ばした値は台帳へ書かないので、反映の書き込みが投げても台帳は
+   * 測る前のまま。失敗はログと通知へ出す（規則5）。
    */
-  test("反映の書き込みが失敗しても、待ち時間は元へ戻り、失敗が報告される", async () => {
+  test("反映の書き込みが失敗しても、待ち時間は元のままで、失敗が報告される", async () => {
     installSettings({ "ollama.timeoutSeconds": 180 });
-    // 1回目＝測り直しのために延ばす書き込み、2回目＝反映の書き込み
-    await installTuning({}, { failTuningWriteAt: 2 });
+    // 台帳への書き込みは反映の1回だけ（延ばすときには書かない）
+    await installTuning({}, { failTuningWriteAt: 1 });
     const { showErrorMessage } = answerWith("設定に反映");
 
     await measureContext(registry);

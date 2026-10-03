@@ -4916,24 +4916,27 @@ export function workChatTimeoutAdvice(input: {
     input.currentSeconds < input.ceilingSetting.maxSeconds
       ? input.ceilingSetting
       : undefined;
-  const sentNote =
+  const sentAmount =
     sentChars !== undefined && sentChars > 0
-      ? `（この相談で送った量は${formatChars(sentChars)}字）。`
-      : "。";
+      ? `この相談で送った量は${formatChars(sentChars)}字`
+      : undefined;
   /*
     **秒数は、実際に待った秒数で言う**（同じ裁定）。設定に上限より長い値が
     書いてあればその秒数だけ待つ（設定はそのまま効かせる）ので、上限の
     秒数で「達しました」と言うと食い違う。
+    上限より長い設定の断りと送った量は、**1つの括弧にまとめる**（0.96.17。
+    「…長い設定です）（この相談で送った量は…）」と括弧が2つ続いて読みにくかった）
   */
   const overCeiling = input.currentSeconds > input.maxSeconds;
-  const head =
-    (overCeiling
-      ? `設定どおり${input.currentSeconds}秒待ちましたが、返りませんでした` +
-        `（ふだんの上限${input.maxSeconds}秒より長い設定です）`
-      : ceiling
+  const head = overCeiling
+    ? `設定どおり${input.currentSeconds}秒待ちましたが、返りませんでした` +
+      (sentAmount
+        ? `（ふだんの上限${input.maxSeconds}秒より長い設定で、${sentAmount}）。`
+        : `（ふだんの上限${input.maxSeconds}秒より長い設定です）。`)
+    : (ceiling
         ? `待ち時間はいまの上限（${input.maxSeconds}秒）に達しました`
         : `待ち時間はすでに上限（${input.maxSeconds}秒）で、これ以上は延ばせません`) +
-    sentNote;
+      (sentAmount ? `（${sentAmount}）。` : "。");
 
   if (
     sentChars !== undefined &&

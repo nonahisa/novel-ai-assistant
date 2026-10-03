@@ -755,7 +755,21 @@ export const PROBE_SEARCH_TIMEOUT_SECONDS = 120;
  * **モデルごとに持つ。** 1つの旗にすると、測っているあいだに別のモデルで
  * 走らせた誤字脱字まで120秒で切れる。
  */
-const probeSearchCaps = new Map<string, number>();
+const probeSearchCaps = new Map<string, ProbeSearchLine>();
+
+/**
+ * 探索の線。ふだんは上限（`seconds` 以下に抑える）として掛かる。
+ *
+ * **時間切れで延ばしたあとは、その秒数をそのまま使う**（`widened`）。
+ * 延ばした値を台帳へ書いて効かせていた頃は、測定の途中で VS Code が
+ * 落ちると、短い測り直しの値（240秒）が台帳に残り、ふだんの機能が
+ * その秒数で切れた（台帳600秒のモデル。2026-10-03、0.96.17 で直した）。
+ * 線はメモリの中にしか無いので、落ちれば一緒に消える。
+ */
+interface ProbeSearchLine {
+  readonly seconds: number;
+  readonly widened: boolean;
+}
 
 /**
  * 探索のあいだ、そのモデルへの1回の待ち時間を `seconds` 以下に抑える。
@@ -770,7 +784,7 @@ export function shortenTimeoutForProbeSearch(
 ): () => void {
   const key = modelTuningKey(providerId, model);
   const before = probeSearchCaps.get(key);
-  probeSearchCaps.set(key, seconds);
+  probeSearchCaps.set(key, { seconds, widened: false });
   return () => {
     if (before === undefined) probeSearchCaps.delete(key);
     else probeSearchCaps.set(key, before);
@@ -778,11 +792,12 @@ export function shortenTimeoutForProbeSearch(
 }
 
 /**
- * 探索の途中で待ち時間を延ばしたとき、線も同じ秒数まで上げる。
+ * 探索の途中で待ち時間を延ばす。**台帳には書かず、線だけを上げる。**
  *
- * **これが無いと、延ばした値が効かない。** 読める長さの探索は、時間切れの
- * 回を待ち時間を倍にして1回だけ測り直す（台帳へ書く）。線が120秒のままだと、
- * 台帳に240秒と書いても読む側（`resolveTimeoutSeconds`）が120秒で切る。
+ * 読める長さの探索は、時間切れの回を待ち時間を倍にして1回だけ測り直す。
+ * 延ばしたあとは、台帳・設定の値によらずこの秒数を待つ（台帳が90秒の
+ * モデルでも180秒で測り直せるように、上限ではなく「この秒数」として持つ）。
+ * 探索が終われば `shortenTimeoutForProbeSearch` の戻しで消える。
  * 探索の最中でなければ何もしない。
  */
 export function widenProbeSearchTimeout(
@@ -793,7 +808,10 @@ export function widenProbeSearchTimeout(
   const key = modelTuningKey(providerId, model);
   const current = probeSearchCaps.get(key);
   if (current === undefined) return;
-  probeSearchCaps.set(key, Math.max(current, seconds));
+  probeSearchCaps.set(key, {
+    seconds: current.widened ? Math.max(current.seconds, seconds) : seconds,
+    widened: true,
+  });
 }
 
 /** いま、そのモデルに掛かっている探索の線（秒）。探索の最中でなければ undefined */
@@ -801,7 +819,7 @@ export function probeSearchTimeoutCap(
   providerId: string,
   model: string
 ): number | undefined {
-  return probeSearchCaps.get(modelTuningKey(providerId, model));
+  return probeSearchCaps.get(modelTuningKey(providerId, model))?.seconds;
 }
 
 /**
@@ -1366,9 +1384,11 @@ export function resolveTimeoutSeconds(
 ): number {
   // **探索の線は、どの出どころ（台帳・設定・既定）にも同じく掛ける**
   // （`PROBE_SEARCH_TIMEOUT_SECONDS`）。ふだんは掛かっていない
-  const cap = probeSearchTimeoutCap(providerId, model);
+  const line = probeSearchCaps.get(modelTuningKey(providerId, model));
+  // 時間切れで延ばしたあとは、その秒数をそのまま待つ（`widenProbeSearchTimeout`）
+  if (line?.widened) return line.seconds;
   const usual = usualTimeoutSeconds(providerId, model, fallbackSeconds);
-  return cap === undefined ? usual : Math.min(usual, cap);
+  return line === undefined ? usual : Math.min(usual, line.seconds);
 }
 
 /** 探索の線を掛ける前の待ち時間。台帳 → 設定 → 既定 の順 */

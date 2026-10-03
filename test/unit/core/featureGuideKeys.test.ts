@@ -14,18 +14,25 @@ describe("原稿エディターのキー操作の説明", () => {
       "Ctrl+S",
       "Ctrl+F",
       "Alt+↑",
-      "Ctrl+Shift+R",
       "Ctrl+0",
     ]) {
       expect(EXTRA_GUIDE, key).toContain(key);
     }
-    // 傍点は Ctrl+Alt+K へ移した（2026-10-03）。古いキーを案内に残さない
-    expect(EXTRA_GUIDE).not.toContain("Ctrl+Shift+K");
-    // 変換のキーを奪わないことは、作者が気にする点なので書いておく
-    expect(EXTRA_GUIDE).toContain("F6〜F10");
+    // 傍点・ルビ・メモのキーは 2026-10-03 に変えた。古いキーを案内に残さない
+    for (const old of [
+      "Ctrl+Shift+K",
+      "Ctrl+Shift+R",
+      "Ctrl+Alt+Shift+M",
+      "Ctrl+Alt+N",
+      "Ctrl+Alt+Shift+N",
+    ]) {
+      expect(EXTRA_GUIDE, old).not.toContain(old);
+    }
+    // 変換のキーとの関わりは、作者が気にする点なので書いておく
+    expect(EXTRA_GUIDE).toContain("変換中");
   });
 
-  test("Ctrl+Alt+頭文字の10個と、変え方が載っている（設計書6.25.10）", () => {
+  test("割り当ての11個と、変え方が載っている（設計書6.25.10）", () => {
     for (const entry of MANUSCRIPT_KEY_BINDINGS) {
       expect(EXTRA_GUIDE, entry.command).toContain(entry.label);
       // package.json の表記（ctrl+alt+t）を、画面の書き方（Ctrl+Alt+T）にして探す
