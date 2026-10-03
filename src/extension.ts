@@ -3156,6 +3156,29 @@ export async function activate(
     return entry;
   }
 
+  /**
+   * 新しく作った作品フォルダーを登録簿へ足す。
+   *
+   * 登録簿へ書いても残らなければ `add` が投げる（設計書5.7.8。0.97.3）。
+   * フォルダーはもうできているので、「フォルダー登録」で選び直せば登録できる
+   * ことを添えて知らせる（黙って消えるより、やり直せる形にする）。
+   */
+  async function addCreatedWork(
+    folderPath: string,
+    title: string
+  ): Promise<WorkEntry | undefined> {
+    try {
+      return await registry.add(folderPath, title);
+    } catch (error) {
+      vscode.window.showErrorMessage(
+        `作品フォルダは作りましたが、登録できませんでした。` +
+          `「フォルダー登録」で「${folderPath}」を選ぶと登録できます。\n` +
+          (error instanceof Error ? error.message : String(error))
+      );
+      return undefined;
+    }
+  }
+
   context.subscriptions.push(
     registerCommand("novelai.addWork", async (argument?: unknown) => {
       // **場所と作品名を引数で渡せる**（設計書5.8.13）。ブラウザ版の実動テスト
@@ -3317,7 +3340,7 @@ export async function activate(
       return CHECK_FAILED;
     }
 
-    const entry = await registry.add(folderPath, title.trim());
+    const entry = await addCreatedWork(folderPath, title.trim());
     if (!entry) return CHECK_FAILED;
 
     /*

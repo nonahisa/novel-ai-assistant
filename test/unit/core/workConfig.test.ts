@@ -246,12 +246,20 @@ describe("作品設定", () => {
         readFile: async (uri: { fsPath: string }) =>
           new Uint8Array(await readHostFile(uri.fsPath)),
       };
-      const makeContext = () => ({
-        globalState: {
-          get: <T>(_key: string, defaultValue: T): T => defaultValue,
-          update: vi.fn(async () => undefined),
-        },
-      });
+      // 書いた値は覚える（0.97.3 から、登録簿は書いたあと読み返して確かめる。
+      // 何も覚えない作り物だと「書いても残らなかった」として失敗になる）
+      const makeContext = () => {
+        let stored: unknown;
+        return {
+          globalState: {
+            get: <T>(_key: string, defaultValue: T): T =>
+              (stored as T | undefined) ?? defaultValue,
+            update: vi.fn(async (_key: string, value: unknown) => {
+              stored = value;
+            }),
+          },
+        };
+      };
 
       await new workRegistry.WorkRegistry(makeContext() as never)
         .addExisting(root, "既存作");

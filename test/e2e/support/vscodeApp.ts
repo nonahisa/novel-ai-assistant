@@ -362,44 +362,39 @@ async function pressUntilToast(
 /**
  * 作り物の作品を登録する（使い捨ての keybindings.json に書いたキーを押す）。
  *
- * **先に拡張機能を起こし、起動のときの書き込みが済んでから登録する。**
- * 登録のキーで拡張機能を起こすと、登録簿（VS Code の globalState）への保存と、
- * 起動のときの globalState への書き込み（「はじめまして」の案内の状態など）が
- * 同じ瞬間に並ぶ。そのとき4回に1回ほど、**「登録しました」と出たのに登録簿から
- * 消えている**ことがあった（2026-10-03。原稿エディターの下の欄に「作品 N字」が出ず、
- * F8 で「作品が登録されていません」）。製品の側の懸念として報告済み。
+ * **登録のキーで拡張機能を起こす**（先に起こして待つ、をしない）。起動のときの
+ * globalState への書き込み（「はじめまして」の案内の状態など）と、登録簿への保存が
+ * 同じ瞬間に並ぶ形をわざと通す。
  *
- * **登録できたことは、登録簿を読み返して確かめる**——「版を表示」
+ * 0.97.2 までは、4回に1回ほど**「登録しました」と出たのに登録簿から
+ * 消えていた**（2026-10-03。VS Code の globalState が、先に書いた別の鍵の送り返しで
+ * 手元の塊を丸ごと差し替えるため。設計書5.7.8）。0.97.3 で登録簿は書いたあと
+ * 読み返して確かめるようにしたので、**ここで消えていたら製品の不具合として落とす**
+ * （やり直して隠さない。再発の見張り）。
+ *
+ * 登録できたことは、登録簿を読み返して確かめる——「版を表示」
  * （`novelai.showVersion`）の確認の画面は、登録簿から引いた作品名を「（作品: …）」と
- * 添えるので、それに作品名が出るまで登録をやり直す（登録はすでにあれば断るので、
- * 何度押しても1件のまま）。確認の画面と知らせは本文を塞ぐので、読んだら閉じる。
+ * 添える。確認の画面と知らせは本文を塞ぐので、読んだら閉じる。
  */
 async function registerWork(session: E2ESession): Promise<void> {
   const { page } = session;
-  // 1. 拡張機能を起こす（版の確認の画面が出たら起きている）
-  await readVersionDialog(page, "拡張機能が起きる");
-  // 2. 起動のときの案内（はじめまして）が出たら閉じる。閉じると案内の状態が
-  //    書かれるので、登録より先に済ませておく。出ない版でも先へ進める
-  await waitUntil(
-    async () => (await page.locator(".notification-toast", { hasText: "はじめまして" }).count()) > 0,
-    "起動のときの案内",
-    10_000
-  ).catch(() => undefined);
-  await clearNotifications(page);
-
-  // 3. 登録して、登録簿を読み返す
   const config = path.join(session.workFolder, ".aiwriter", "config.json");
-  for (let attempt = 1; ; attempt++) {
-    await pressUntilToast(page, REGISTER_WORK_PRESS, "登録", "作品の登録");
-    await waitUntil(() => existsSync(config), `${config} ができる`);
-    await clearNotifications(page);
-    const version = await readVersionDialog(page, "登録簿の読み返し");
-    // 作品フォルダーの名前も同じなので、登録簿から引いた形「作品: …」で見る
-    if (version.includes(`作品: ${E2E_WORK_TITLE}`)) return;
-    if (attempt >= 3) {
-      throw new Error(`作品を登録しても登録簿に入りません（3回試しました）。版の知らせ：${version}`);
-    }
+  // 拡張機能がまだ起きていなければ、知らせが出るまで押し直す（登録はすでにあれば
+  // 断るので、何度押しても1件のまま。断りの知らせも「登録」を含む）
+  await pressUntilToast(page, REGISTER_WORK_PRESS, "登録", "作品の登録");
+  await waitUntil(() => existsSync(config), `${config} ができる`);
+  // 登録のあと、遅れて消える形の見張り（製品側は2秒まで見張る）を待ってから読み返す
+  await page.waitForTimeout(2_500);
+  await clearNotifications(page);
+  const version = await readVersionDialog(page, "登録簿の読み返し");
+  // 作品フォルダーの名前も同じなので、登録簿から引いた形「作品: …」で見る
+  if (!version.includes(`作品: ${E2E_WORK_TITLE}`)) {
+    throw new Error(
+      `作品を登録したのに登録簿に入っていません（登録が消える不具合の再発。設計書5.7.8）。版の知らせ：${version}`
+    );
   }
+  // 起動のときの案内（はじめまして）などが残っていれば閉じる
+  await clearNotifications(page);
 }
 
 /** 写真を残す場所。一時フォルダーの根は片づけで消すので、別に取る */

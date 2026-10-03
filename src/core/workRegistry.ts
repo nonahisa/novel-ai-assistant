@@ -24,6 +24,11 @@ import { fileReader, isNotFound } from "./fileRead";
 import { AI_INSTRUCTION_TARGETS } from "./aiInstructions";
 import { logFailure } from "./logger";
 import {
+  LATE_CHECK_DELAYS_MS,
+  updateVerified,
+  watchForLateLoss,
+} from "./verifiedMemento";
+import {
   detectJsonFileFormat,
   formatJsonForFile,
   type JsonFileFormat,
@@ -131,7 +136,27 @@ export class WorkRegistry {
   private readonly _onDidChange = new vscode.EventEmitter<void>();
   readonly onDidChange = this._onDidChange.event;
 
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  /**
+   * この窓で最近した変更（設計書5.7.8。0.97.3）。
+   *
+   * 書いたあとしばらく、**遅れて届いた古い塊で消えていないか**を見張る
+   * （`verifiedMemento.ts`）。見張りが当て直すのは、そのとき**まだ見張りの
+   * 期間にある変更を、した順に全部**——「足した」あとに「外した」なら外れたまま
+   * になり、見張りが足し戻すことはない。
+   */
+  private recentChanges: Array<{
+    change: (works: WorkEntry[]) => WorkEntry[];
+    until: number;
+  }> = [];
+
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    /** 試験から見張りの時機を差し替える。製品では渡さない */
+    private readonly options: {
+      lateCheckDelays?: readonly number[];
+      wait?: (ms: number) => Promise<void>;
+    } = {}
+  ) {}
 
   /**
    * 旧版ですでに登録済みの作品にも、安全な冪等migrationを適用する。
@@ -300,9 +325,73 @@ export class WorkRegistry {
     return this.list().find((w) => w.id === id);
   }
 
-  private async save(works: WorkEntry[]): Promise<void> {
-    await this.context.globalState.update(STORAGE_KEY, works);
+  /**
+   * 登録簿を変える唯一の口（設計書5.7.8。0.97.3）。
+   *
+   * **書く直前に読み直して、変えたいことだけを当てる。** 以前は呼び手が
+   * 先に読んだ写しを丸ごと書き戻しており、`addExisting` のように読んでから
+   * 書くまでにファイルの読み書きを待つ所では、そのあいだの別の変更
+   * （登録の解除など）を古い写しで消しうった。
+   *
+   * **書いたら読み返して確かめる**（`updateVerified`）。VS Code の globalState は
+   * 先に書いた別の鍵の送り返しで手元の塊が丸ごと差し替わることがあり、
+   * 起動直後の登録が「登録しました」と出たのに消えていた（2026-10-03、
+   * 画面の自動テストで見つかった）。何度書いても残らなければ投げる——
+   * 黙って消えるより、「登録できませんでした」と出るほうがやり直せる。
+   *
+   * @param change 何度当てても同じ結果になる形で書く（無ければ足す・あれば外す）
+   */
+  private async mutate(
+    change: (works: WorkEntry[]) => WorkEntry[]
+  ): Promise<void> {
+    const now = Date.now();
+    this.recentChanges = this.recentChanges.filter((r) => r.until > now);
+    const delays = this.options.lateCheckDelays ?? LATE_CHECK_DELAYS_MS;
+    // 見張りの最後の1回より少し長く覚えておく
+    const watchSpanMs = delays.length > 0 ? Math.max(...delays) + 1000 : 0;
+    this.recentChanges.push({ change, until: now + watchSpanMs });
+
+    await updateVerified<WorkEntry[]>(this.context.globalState, STORAGE_KEY, [], change);
     this._onDidChange.fire();
+
+    if (delays.length === 0) return;
+    /*
+      **待たない。** 見張りは登録の終わりを遅らせない。当て直すのは、
+      見に行ったその時点でまだ期間にある変更すべて（した順）。
+    */
+    void watchForLateLoss<WorkEntry[]>(
+      this.context.globalState,
+      STORAGE_KEY,
+      [],
+      (works) => this.applyRecentChanges(works),
+      {
+        delays,
+        wait: this.options.wait,
+        onRepaired: () => {
+          logFailure("登録簿の書き込みが遅れて消えたので当て直した", {
+            詳細: "VS Code の globalState で、先の書き込みの送り返しが後から届いた",
+          });
+          this._onDidChange.fire();
+        },
+        onFailed: (error) => {
+          logFailure("登録簿の書き込みが遅れて消え、当て直せなかった", {
+            詳細: error instanceof Error ? error.message : String(error),
+          });
+        },
+      }
+    );
+  }
+
+  /** 見張りの期間にある変更を、した順に当てる */
+  private applyRecentChanges(works: WorkEntry[]): WorkEntry[] {
+    /*
+      期間を過ぎた変更は当てない。ずっと前に足した作品を別の窓が外していたら、
+      それはもう作者の意思なので、こちらの古い変更で足し戻さない
+    */
+    const now = Date.now();
+    return this.recentChanges
+      .filter((r) => r.until > now)
+      .reduce((current, r) => r.change(current), works);
   }
 
   /**
@@ -365,7 +454,7 @@ export class WorkRegistry {
       registeredAt: new Date().toISOString(),
     };
 
-    await this.save([...works, entry]);
+    await this.mutate(appendEntry(entry));
     return entry;
   }
 
@@ -421,7 +510,9 @@ export class WorkRegistry {
       );
     }
 
-    await this.save([...works, entry]);
+    // **ここで先に読んだ `works` を書き戻さない。** 上の読み書きを待つあいだに
+    // 別の変更（登録の解除など）が入りうる。読み直して足すだけにする（0.97.3）
+    await this.mutate(appendEntry(entry));
     return entry;
   }
 
@@ -444,19 +535,29 @@ export class WorkRegistry {
     if (trimmed.length === 0 || trimmed === target.title) return target;
 
     const renamed: WorkEntry = { ...target, title: trimmed };
-    await this.save(works.map((w) => (w.id === id ? renamed : w)));
+    await this.mutate((current) =>
+      current.map((w) => (w.id === id ? { ...w, title: trimmed } : w))
+    );
     return renamed;
   }
 
   /** 登録を解除する（フォルダ本体は削除しない） */
   async remove(id: string): Promise<void> {
-    const works = this.context.globalState.get<WorkEntry[]>(STORAGE_KEY, []);
-    await this.save(works.filter((w) => w.id !== id));
+    await this.mutate((current) => current.filter((w) => w.id !== id));
   }
 
   refresh(): void {
     this._onDidChange.fire();
   }
+}
+
+/**
+ * 登録簿へ1件足す変更。**もう在れば何もしない**（書き直し・見張りで
+ * 何度当てても1件のまま。`verifiedMemento.ts` の約束）。
+ */
+function appendEntry(entry: WorkEntry): (works: WorkEntry[]) => WorkEntry[] {
+  return (works) =>
+    works.some((w) => w.id === entry.id) ? works : [...works, entry];
 }
 
 /**
