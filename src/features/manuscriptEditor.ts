@@ -34,6 +34,7 @@ import {
 } from "../core/manuscriptRender";
 import {
   resolveInitialAppearance,
+  settleCarriedAppearance,
   takeCarriedAppearance,
 } from "../core/manuscriptAppearance";
 import type {
@@ -3523,7 +3524,34 @@ export class ManuscriptEditorProvider
       同じ話の2枚目ができる。見た目は上の `carryAppearance` が生きている画面へ
       直に当てるので、入口が違っても縦横は引き継がれる。
     */
-    await openManuscriptFile(paths.toUri(filePath), this.viewType, column);
+    const opened = await openManuscriptFile(
+      paths.toUri(filePath),
+      this.viewType,
+      column
+    );
+    if (opened.reused) await this.settleCarried(filePath);
+  }
+
+  /**
+   * 前に出すだけで済んだとき、その原稿へ置いた見た目を片づける（設計書6.25.11）。
+   *
+   * 台帳に無い背景のタブは、前に出すと画面が立ち上がって `ready` で見た目を
+   * 取り出すことがある。**`openWith` が戻った時点ではまだ取り出されていない**
+   * （台帳へ載るのも `ready` も後から非同期に来る）ので、すぐ消すと引き継ぎが
+   * 落ちる。台帳に載るのを少し待ち、載ればその画面へ直に当て
+   * （`ready` の前なら画面側が待つ）、載らなければ捨てる。
+   */
+  private async settleCarried(filePath: string): Promise<void> {
+    const key = manuscriptLedgerKey(filePath);
+    // 何も置いていない（生きている画面へ直に当て済み等）なら待つ理由が無い
+    if (!pendingAppearance.has(key)) return;
+    const live = await waitFor(() => openManuscripts.get(key));
+    const outcome = settleCarriedAppearance(pendingAppearance, key, live);
+    if (outcome === "discarded") {
+      logLine(
+        `原稿エディタ：${filePath} のタブを前に出しましたが、画面が立ち上がらなかったため、前の話の見た目は引き継がずに捨てました（後日開いたときに古い見た目が当たらないように）。`
+      );
+    }
   }
 
   /**

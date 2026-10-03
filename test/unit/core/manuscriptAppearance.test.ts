@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MANUSCRIPT_SIZE_DEFAULT,
   resolveInitialAppearance,
+  settleCarriedAppearance,
   takeCarriedAppearance,
 } from "../../../src/core/manuscriptAppearance";
 import type { ManuscriptAppearance } from "../../../src/core/manuscriptAppearance";
@@ -143,6 +144,41 @@ describe("takeCarriedAppearance", () => {
   it("置かれていない原稿では何も返さない", () => {
     const pending = new Map<string, ManuscriptAppearance>();
     expect(takeCarriedAppearance(pending, "c:/works/001.md")).toBeUndefined();
+  });
+});
+
+describe("settleCarriedAppearance（前に出すだけだったときの始末。設計書6.25.11）", () => {
+  const key = "c:/works/002.md";
+
+  it("タブがあって前に出しただけで、画面が立ち上がらなかったら、置いた見た目は残らない", () => {
+    const pending = new Map<string, ManuscriptAppearance>([[key, carried]]);
+    expect(settleCarriedAppearance(pending, key, undefined)).toBe("discarded");
+    // 残すと、後日この原稿を新しく開いたときに古い見た目が当たる
+    expect(pending.has(key)).toBe(false);
+  });
+
+  it("前に出したことで画面が立ち上がった（台帳に載った）なら、その画面へ直に当てる", () => {
+    const pending = new Map<string, ManuscriptAppearance>([[key, carried]]);
+    const applied: ManuscriptAppearance[] = [];
+    const live = { applyAppearance: (next: ManuscriptAppearance) => applied.push(next) };
+    expect(settleCarriedAppearance(pending, key, live)).toBe("applied");
+    expect(applied).toEqual([carried]);
+    expect(pending.has(key)).toBe(false);
+  });
+
+  it("立ち上がった画面が先に取っていったなら、二重に当てない", () => {
+    const pending = new Map<string, ManuscriptAppearance>();
+    const applied: ManuscriptAppearance[] = [];
+    const live = { applyAppearance: (next: ManuscriptAppearance) => applied.push(next) };
+    expect(settleCarriedAppearance(pending, key, live)).toBe("none");
+    expect(applied).toEqual([]);
+  });
+
+  it("ほかの原稿に置いた見た目には触らない", () => {
+    const other = "c:/works/003.md";
+    const pending = new Map<string, ManuscriptAppearance>([[other, carried]]);
+    expect(settleCarriedAppearance(pending, key, undefined)).toBe("none");
+    expect(pending.get(other)).toEqual(carried);
   });
 });
 

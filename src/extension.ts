@@ -7081,9 +7081,12 @@ export async function activate(
         // 新規作成した回は「保存でファイル数が変わった回」に当たるため、
         // 執筆量の基準を置き直す（`novelai.addEpisode` と同じ理由、設計書6.3.2）
         await progress.rebaseline(node.work);
+        // 開く向きは作品の種類で決まる（`novelai.addEpisode` と同じ。設計書6.70。
+        // 台本は縦書き）。横書きの入口に決め打ちすると、台本の作品で
+        // 差し込んだ話だけが横書きで開く
         await openManuscriptFile(
           result.newFilePath,
-          MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+          manuscriptViewTypeFor(await readWorkKind(node.work))
         );
       }
     }),

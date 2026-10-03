@@ -55,9 +55,11 @@ const SIZE_MAX = 40;
  * （実機、2026-09-15。A-13の項目20）。
  *
  * **`carry` が入っているのは、作者が入口を選び直していないときだけである。**
- * メニューの「縦書きで開く」（`novelai.openVertical`）は `vscode.openWith` を
- * 呼ぶだけで引き継ぎを置かない。だから「引き継ぎがあるなら、それが
- * 作者のいま見ている向きだ」と読んでよい。
+ * メニューの「縦書きで開く」（`novelai.openVertical`）は引き継ぎを置かない
+ * ——0.96.10 からは `openManuscriptVertical` が受け持ち、その原稿のタブが
+ * 既にあれば前に出して画面の中で縦へ切り替え、無ければ縦の入口で開く。
+ * どちらの道も `pendingAppearance` には触れない。だから「引き継ぎがあるなら、
+ * それが作者のいま見ている向きだ」と読んでよい。
  *
  * @param carry 前の話から持って来た見た目（設計書6.25.5）。
  *   前後の話・最新話・MD化で開き直したときだけ入る
@@ -104,6 +106,38 @@ export function takeCarriedAppearance(
   if (!carried) return undefined;
   pending.delete(key);
   return carried;
+}
+
+/**
+ * 前に出すだけで済んだあと、その原稿へ置いた見た目を**必ず**片づける
+ * （設計書6.25.11）。
+ *
+ * 台帳に無いがタブはある原稿（拡張機能ホストが起き直したあとの背景のタブ等）へ
+ * 「次の話 →」で移ると、見た目は `pendingAppearance` に置かれ、開く共通の口は
+ * そのタブを前に出すだけで終わる。前に出したことで画面が立ち上がれば、その画面が
+ * `ready` で取り出す。**立ち上がらなければ誰も取りに来ず**、後日その原稿を
+ * 新しく開いたときに古い見た目（縦横・大きさ）が当たる。
+ *
+ * - 既に誰かが取っていった → 何もしない（`"none"`。二重に当てない）
+ * - 残っていて、立ち上がった画面がある → その画面へ直に当てる（`"applied"`。
+ *   `ready` の前なら画面側が当てるのを待つ）
+ * - 残っていて、画面が無い → 捨てる（`"discarded"`）
+ *
+ * **期限で失効させる形は採らない。** 期限の内に同じ原稿を別の道で開き直すと
+ * 古い見た目が当たる窓が残り、「取り残しが確実に起きない」を満たさない。
+ */
+export function settleCarriedAppearance(
+  pending: Map<string, ManuscriptAppearance>,
+  key: string,
+  live: { applyAppearance(next: ManuscriptAppearance): void } | undefined
+): "none" | "applied" | "discarded" {
+  const leftover = takeCarriedAppearance(pending, key);
+  if (!leftover) return "none";
+  if (live) {
+    live.applyAppearance(leftover);
+    return "applied";
+  }
+  return "discarded";
 }
 
 /**

@@ -80,4 +80,42 @@ describe("原稿を開く道は1本", () => {
     const command = bodyOf(extension.slice(at), "registerCommand(");
     expect(command).toContain("openManuscriptFile(");
   });
+
+  /*
+    新しく作った話を開く入口は、作品の種類で決める（設計書6.70。台本は縦書き）。
+    `novelai.insertEpisodeBefore` だけが横書きの入口に決め打ちしていた
+    （0.96.10 の担当の懸念）。`addEpisode` と同じ決め方に揃っていることを見る。
+  */
+  test.each(["novelai.addEpisode", "novelai.insertEpisodeBefore"])(
+    "%s は、新しい話を作品の種類で決まる入口で開く",
+    (commandId) => {
+      const extension = withoutComments(readFileSync(join(SRC, "extension.ts"), "utf8"));
+      const at = extension.search(
+        new RegExp(`registerCommand\\(\\s*"${commandId.replace(/\./g, "\\.")}"`)
+      );
+      expect(at).toBeGreaterThan(-1);
+      const command = bodyOf(extension.slice(at), "registerCommand(");
+      expect(command).toContain("openManuscriptFile(");
+      expect(command).toContain("manuscriptViewTypeFor(");
+      expect(command).not.toContain("MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE");
+    }
+  );
+
+  /*
+    前に出すだけで済んだ（新しい面ができなかった）ときに、置いた見た目を
+    取り残さない（設計書6.25.11）。始末の規則は core 側の純関数で確かめ、
+    ここでは「前後の話へ移る道が、前に出したときにその始末を呼ぶ」ことを見る。
+  */
+  test("前後の話へ移る道は、前に出しただけのとき置いた見た目を始末する", () => {
+    const editor = withoutComments(
+      readFileSync(join(SRC, "features/manuscriptEditor.ts"), "utf8")
+    );
+    const body = bodyOf(editor, "private async openAsManuscript(");
+    expect(body).toContain(".reused");
+    expect(body).toContain("this.settleCarried(");
+    const settle = bodyOf(editor, "private async settleCarried(");
+    // 台帳に載るのを待ってから始末する（すぐ消すと、立ち上がりかけの画面の引き継ぎが落ちる）
+    expect(settle).toContain("waitFor(");
+    expect(settle).toContain("settleCarriedAppearance(");
+  });
 });
