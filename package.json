@@ -2152,6 +2152,13 @@
           "scope": "machine",
           "markdownDescription": "AIチューニングで測った、モデルごとの上限と待ち時間。\n\n・測った値は拡張機能の保管庫にある。ここに残っていても使われない\n・消すときは詳細メニューの「AIチューニング記録削除」\n\n[セットアップ（必要なものを入れる）…](command:novelai.runFullSetup)\n\n[機能別AI割当…](command:novelai.assignFeatureAI)"
         },
+        "novelai.cloudMaxTimeoutSeconds": {
+          "type": "number",
+          "default": 600,
+          "minimum": 600,
+          "maximum": 1800,
+          "markdownDescription": "クラウドのAIの、1回の呼び出しで待つ時間の上限（秒）。\n\n・Gemini・さくらのAI・ChatGPT・Claude などに効く\n・既定は600秒。最大1800秒まで延ばせる\n・相談パネルで「待ち時間はいまの上限に達しました」と出たときに延ばす\n・延ばしたあとは、時間切れの下に出る札か、各AIの「タイムアウト」の設定で待ち時間そのものを延ばす\n・手元のAI（Ollama・LM Studio）の上限は1800秒で、この設定では変わらない"
+        },
         "novelai.mergeChunkChars": {
           "type": "number",
           "default": 6000,

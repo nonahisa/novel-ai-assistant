@@ -84,6 +84,7 @@ import { AIRegistry } from "../ai/registry";
 import { AIError, recoveryForAIError } from "../ai/types";
 import {
   maxTimeoutSeconds,
+  raisableTimeoutCeiling,
   resolveTimeoutSeconds,
   saveModelTuning,
   timeoutSettingKey,
@@ -2347,6 +2348,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
                     // 「もう延ばせません」と言ってしまう
                     maxSeconds: maxTimeoutSeconds(resolved.provider.id),
                     canRaise: actions !== undefined,
+                    // 上限そのものを設定で延ばせるか（クラウドのAI。2026-10-03）
+                    ceilingSetting: raisableTimeoutCeiling(resolved.provider.id),
                     sentChars: sent?.total,
                     historyChars: sent?.history,
                   })
@@ -4865,7 +4868,11 @@ const HISTORY_SHARE_FOR_CLEAR = 0.25;
  *
  * **実際に効く操作を1つだけ言う**（実装ルール5）。上限未満なら延ばす
  * （札は `timeoutAction` が出す）。上限なら、履歴が重いときは「最初から」、
- * そうでなければ別のAIを選ぶ。サービス名は書かない。
+ * 上限そのものを設定で延ばせるならその設定（作者の裁定、2026-10-03）、
+ * どちらでもなければ別のAIを選ぶ。サービス名は書かない。
+ *
+ * 「最初から」を先にするのは、送る量が減ればどのAIでも速くなり、
+ * クラウドなら料金も下がるため。
  */
 export function workChatTimeoutAdvice(input: {
   /** いま効いている待ち時間（`resolveTimeoutSeconds`。上限で抑えた後の値） */
@@ -4873,6 +4880,10 @@ export function workChatTimeoutAdvice(input: {
   maxSeconds: number;
   /** 延ばす札が出ているか */
   canRaise: boolean;
+  /**
+   * 上限そのものを延ばせる設定（`raisableTimeoutCeiling`）。延ばせなければ省く
+   */
+  ceilingSetting?: { setting: string; maxSeconds: number };
   /** 切れた回に送った量（システムプロンプト＋本体）。分からなければ省く */
   sentChars?: number;
   /** そのうち、これまでのやり取りの字数 */
@@ -4890,11 +4901,16 @@ export function workChatTimeoutAdvice(input: {
 
   const sentChars = input.sentChars;
   const historyChars = input.historyChars ?? 0;
-  const head =
-    `待ち時間はすでに上限（${input.maxSeconds}秒）で、これ以上は延ばせません` +
-    (sentChars !== undefined && sentChars > 0
+  const ceiling = input.ceilingSetting;
+  const sentNote =
+    sentChars !== undefined && sentChars > 0
       ? `（この相談で送った量は${formatChars(sentChars)}字）。`
-      : "。");
+      : "。";
+  const head =
+    (ceiling
+      ? `待ち時間はいまの上限（${input.maxSeconds}秒）に達しました`
+      : `待ち時間はすでに上限（${input.maxSeconds}秒）で、これ以上は延ばせません`) +
+    sentNote;
 
   if (
     sentChars !== undefined &&
@@ -4905,6 +4921,13 @@ export function workChatTimeoutAdvice(input: {
       head +
       `そのうち${formatChars(historyChars)}字はこれまでのやり取りです。` +
       "「最初から」を押して会話を空にすると、そのぶんを送らずに済みます。"
+    );
+  }
+  if (ceiling) {
+    return (
+      head +
+      `設定の「${ceiling.setting}」で、上限を最大${ceiling.maxSeconds}秒まで延ばせます` +
+      "（延ばしたあとにもう一度時間切れになると、待ち時間を延ばす札が出ます）。"
     );
   }
   return (

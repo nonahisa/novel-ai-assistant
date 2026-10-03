@@ -44,6 +44,37 @@ describe("相談の時間切れの案内は、そのAIの上限で言う", () =>
   });
 
   /**
+   * **上限に当たっても、設定で延ばせるなら「延ばせません」と言わない**
+   * （作者の裁定「上げられるようにする」、2026-10-03）。実際に効く操作——
+   * 設定の名前と、どこまで延ばせるか——を言う（実装ルール5）
+   */
+  test("クラウドのAIが上限に当たり、設定で延ばせるなら、その設定を示す", () => {
+    const text = workChatTimeoutAdvice({
+      currentSeconds: 600,
+      maxSeconds: 600,
+      canRaise: false,
+      sentChars: 30000,
+      historyChars: 0,
+      ceilingSetting: { setting: "novelai.cloudMaxTimeoutSeconds", maxSeconds: 1800 },
+    });
+    expect(text).toContain("novelai.cloudMaxTimeoutSeconds");
+    expect(text).toContain("1800秒");
+    expect(text).not.toContain("これ以上は延ばせません");
+  });
+
+  test("設定でも延ばしきったなら、これまでどおり別の手を示す", () => {
+    const text = workChatTimeoutAdvice({
+      currentSeconds: 1800,
+      maxSeconds: 1800,
+      canRaise: false,
+      sentChars: 30000,
+      historyChars: 0,
+    });
+    expect(text).toContain("これ以上は延ばせません");
+    expect(text).toContain("より速いAI");
+  });
+
+  /**
    * **呼び出し側が決め打ちの上限を渡していないこと。** 札（`timeoutAction`）と
    * 案内の両方が `maxTimeoutSeconds` を通らないと、札は1800秒を勧めるのに
    * 案内は600秒で「延ばせない」と言う食い違いになる。
@@ -55,5 +86,7 @@ describe("相談の時間切れの案内は、そのAIの上限で言う", () =>
     );
     expect(source).not.toMatch(/\bMAX_TIMEOUT_SECONDS\b/);
     expect(source).toMatch(/maxTimeoutSeconds\(/);
+    // 延ばせる設定も同じ1か所（`core/modelTuning.ts`）から引く
+    expect(source).toMatch(/raisableTimeoutCeiling\(/);
   });
 });

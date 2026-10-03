@@ -400,6 +400,7 @@ code --install-extension ".\novel-ai-assistant-$($v.TrimStart('v')).vsix" --forc
 | `novelai.sakura.timeoutSeconds` | `180` | さくらのAI Engineの1回の呼び出しのタイムアウト |
 | `novelai.sakura.contextWindow` | `32000` | さくらのAI Engineのコンテキスト長。**実際に合わせてください** |
 | `novelai.claude.timeoutSeconds` | `300` | Claudeの1回の呼び出しのタイムアウト |
+| `novelai.cloudMaxTimeoutSeconds` | `600` | クラウドのAIで待つ時間の上限。最大1800秒まで延ばせます |
 | `novelai.maxOutputTokens` | `16384` | 1回の応答で受け取る最大トークン数（**出力は入力より単価が高い**） |
 | `novelai.chunkSizeMode` | `モデルによって可変` | AIへ1回に送る本文の量の決め方。既定はコンテキスト長から自動 |
 | `novelai.chunkChars` | `0`（指定なし） | 1チャンクの文字数。**「文字数を指定する」のときだけ使います** |

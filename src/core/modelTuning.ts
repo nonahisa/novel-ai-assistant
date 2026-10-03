@@ -618,7 +618,52 @@ export const LOCAL_MAX_TIMEOUT_SECONDS = 1800;
 export function maxTimeoutSeconds(providerId: string): number {
   return isLocalProviderId(providerId)
     ? LOCAL_MAX_TIMEOUT_SECONDS
-    : MAX_TIMEOUT_SECONDS;
+    : cloudTimeoutCeilingSeconds();
+}
+
+/**
+ * クラウドのAIの待ち時間の上限を延ばす設定（`novelai.` を除く名前。作者の
+ * 裁定「上げられるようにする」、2026-10-03）。
+ *
+ * 既定は `MAX_TIMEOUT_SECONDS`（600秒）のまま。**延ばせるのは測定の上限
+ * （`PROBE_MAX_TIMEOUT_SECONDS`、1800秒）まで**——測定で確かめられる長さを
+ * 超えて待たせても、返る見込みは測れない。手元のAIは既に1800秒なので、
+ * この設定は効かない。
+ *
+ * **読むのは `maxTimeoutSeconds` の中だけ**（上限を読む所の1か所。設計書6.58）。
+ */
+export const CLOUD_TIMEOUT_CEILING_SETTING = "cloudMaxTimeoutSeconds";
+
+function cloudTimeoutCeilingSeconds(): number {
+  const configured = vscode.workspace
+    .getConfiguration(CONFIG_SECTION)
+    .get<unknown>(CLOUD_TIMEOUT_CEILING_SETTING, MAX_TIMEOUT_SECONDS);
+  // `package.json` の minimum/maximum は手で書いた値には効かないので、ここでも挟む
+  if (typeof configured !== "number" || !Number.isFinite(configured)) {
+    return MAX_TIMEOUT_SECONDS;
+  }
+  return Math.min(
+    PROBE_MAX_TIMEOUT_SECONDS,
+    Math.max(MAX_TIMEOUT_SECONDS, Math.round(configured))
+  );
+}
+
+/**
+ * 上限に当たっても、**設定でまだ延ばせるなら**その設定の名前と延ばせる限り。
+ * 延ばせない（手元のAI・既に限りまで延ばした）なら `undefined`。
+ *
+ * 時間切れの案内が「これ以上は延ばせません」と言う前に見る（実装ルール5
+ * 「作者が次に取れる操作を1つ示す」）。
+ */
+export function raisableTimeoutCeiling(
+  providerId: string
+): { setting: string; maxSeconds: number } | undefined {
+  if (isLocalProviderId(providerId)) return undefined;
+  if (cloudTimeoutCeilingSeconds() >= PROBE_MAX_TIMEOUT_SECONDS) return undefined;
+  return {
+    setting: `${CONFIG_SECTION}.${CLOUD_TIMEOUT_CEILING_SETTING}`,
+    maxSeconds: PROBE_MAX_TIMEOUT_SECONDS,
+  };
 }
 
 /**
@@ -1215,9 +1260,14 @@ export function tunedTimeoutSeconds(
   if (tuned === undefined) return undefined;
   const ceiling = timeoutCeilingSeconds(providerId);
   if (tuned > ceiling) {
+    // 設定で延ばせるなら、その設定の名前を添える（実装ルール5）
+    const raisable = raisableTimeoutCeiling(providerId);
     noteOnce(
       `AIチューニング：${modelTuningKey(providerId, model)} の待ち時間 ` +
-        `${tuned} 秒は長すぎるため、${ceiling} 秒までに抑えます。`
+        `${tuned} 秒は長すぎるため、${ceiling} 秒までに抑えます。` +
+        (raisable && ceiling < raisable.maxSeconds
+          ? `上限は設定 ${raisable.setting} で最大 ${raisable.maxSeconds} 秒まで延ばせます。`
+          : "")
     );
     return ceiling;
   }
