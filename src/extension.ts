@@ -453,6 +453,7 @@ import {
   insertMemoLineAbove,
   isInsideWork,
   openManuscriptForReading,
+  openManuscriptVertical,
   refreshAllManuscriptCounts,
   refreshManuscriptCounts,
   refreshManuscriptKinds,
@@ -465,6 +466,7 @@ import {
 // 「本文が見つからない」ときの文言は1か所に置く（`features/ruby.ts` と共用）
 import {
   activeForeignManuscriptTabUri,
+  openManuscriptFile,
   warnManuscriptNotOpen,
 } from "./features/manuscriptTab";
 import { isManuscriptKeyArgs, workForFile } from "./core/manuscriptKeys";
@@ -1885,12 +1887,22 @@ export async function activate(
         warnManuscriptNotOpen();
         return;
       }
-      await vscode.commands.executeCommand(
-        "vscode.openWith",
-        uri,
-        MANUSCRIPT_EDITOR_VIEW_TYPE
-      );
+      // 既にタブがあれば2枚目を作らず、そのタブを縦書きへ切り替える（6.25.11）
+      await openManuscriptVertical(uri);
     }),
+    /*
+      作品一覧の話の行を押したとき（設計書6.25.11）。**パレットには出さない**
+      （木の行が場所と入口を渡して呼ぶ）。行の `command` に `vscode.openWith` を
+      直に書くと、同じ話が別の入口・別の列で開いているときに2枚目ができる。
+      共通の口を挟むために、ここで受ける。
+    */
+    registerCommand(
+      "novelai.openEpisode",
+      async (uri?: vscode.Uri, viewType?: string) => {
+        if (!uri) return;
+        await openManuscriptFile(uri, viewType ?? manuscriptViewTypeFor(undefined));
+      }
+    ),
     /*
       原稿を読み上げる（音読推敲。設計書6.42）。
 
@@ -4287,11 +4299,7 @@ export async function activate(
         await progress.rebaseline(work);
         // **本文は原稿エディタで開く**（作者の指定、2026-08-29。作品一覧の
         // クリックと同じ既定に揃える）。向きは種類で決まる（台本は縦書き）
-        await vscode.commands.executeCommand(
-          "vscode.openWith",
-          path.toUri(filePath),
-          manuscriptViewTypeFor(kind)
-        );
+        await openManuscriptFile(filePath, manuscriptViewTypeFor(kind));
       }
     )
   );
@@ -7073,9 +7081,8 @@ export async function activate(
         // 新規作成した回は「保存でファイル数が変わった回」に当たるため、
         // 執筆量の基準を置き直す（`novelai.addEpisode` と同じ理由、設計書6.3.2）
         await progress.rebaseline(node.work);
-        await vscode.commands.executeCommand(
-          "vscode.openWith",
-          path.toUri(result.newFilePath),
+        await openManuscriptFile(
+          result.newFilePath,
           MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
         );
       }

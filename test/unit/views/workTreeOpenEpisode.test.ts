@@ -105,7 +105,8 @@ describe("一覧から話を開く", () => {
       arguments: unknown[];
     };
 
-    expect(command.command).toBe("vscode.openWith");
+    // 同じ話のタブがあれば前に出すだけにする共通の口を通す（設計書6.25.11）
+    expect(command.command).toBe("novelai.openEpisode");
     expect(command.arguments[1]).toBe(MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE);
   });
 

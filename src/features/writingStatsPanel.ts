@@ -1,7 +1,6 @@
 import * as vscode from "vscode";
 import { wideViewColumn } from "./editorColumn";
 // ブラウザ版でも同じ場所を指すため、`node:path` ではなくこちらを使う
-import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { toManuscriptPages } from "../core/charCount";
 import { buildEpisodeCountTable } from "../core/episodeCharTable";
@@ -38,6 +37,7 @@ import { logFailure, useLogFile } from "../core/logger";
 import { episodeUnit } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
 import { manuscriptViewTypeFor } from "../core/manuscriptViewTypes";
+import { openManuscriptFile } from "./manuscriptTab";
 import { readWorkKind } from "../core/workKindStore";
 import type { WorkKindKey } from "../core/workKind";
 import { readTextFile } from "../core/textFile";
@@ -200,10 +200,12 @@ export async function openWritingStatsPanel(
         `views/workTree.ts` の話の行と**同じコマンド・同じ入口ID**を使う。
         向きの既定（脚本だけ縦書き）も `manuscriptViewTypeFor` が持っている
         ので、ここで決め直さない。
+
+        **その話が既に開いていれば、そのタブを前に出す**（6.25.11）。入口と
+        「パネルの隣」は、タブが無いときの既定である。
       */
-      await vscode.commands.executeCommand(
-        "vscode.openWith",
-        path.toUri(parsed.filePath),
+      await openManuscriptFile(
+        parsed.filePath,
         // 向きは種類で決まる（設計書6.109。台本だけ縦書き）
         manuscriptViewTypeFor(await readWorkKind(work)),
         // 統計を見ながら本文を開くので、パネルの隣に出す（従来どおり）

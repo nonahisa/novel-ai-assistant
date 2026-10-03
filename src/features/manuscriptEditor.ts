@@ -23,6 +23,11 @@ import {
   manuscriptViewTypeFor,
 } from "../core/manuscriptViewTypes";
 import {
+  existingManuscriptTab,
+  manuscriptLedgerKey,
+  openManuscriptFile,
+} from "./manuscriptTab";
+import {
   collectTermSpans,
   notationModeFor,
   renderTermMarks,
@@ -164,25 +169,12 @@ export {
   MANUSCRIPT_EDITOR_VIEW_TYPE,
 };
 
-/**
- * 台帳の鍵（作者の報告、2026-08-29「誤字脱字パネルから本文に飛びません」）。
- *
- * **登録・削除・照会を、この1本に通す。** 以前は登録側が
- * `document.uri.toString()`、照会側が `paths.toUri(filePath).toString()` で
- * 別々に組み立てていた。同じファイルでも、Windowsのドライブ文字の大小
- * （`c:` と `C:`）や、日本語を含む道の百分率符号化の仕方が経路によって
- * 違えば、文字列は一致しない。**開いているのに「開いていない」と判定され、
- * 押しても何も起きない**という終わり方になる。
- *
- * 比べ方は、この作品がほかの場所で使っているもの（`samePath`）と揃える。
- */
-export function manuscriptLedgerKey(
-  location: string | vscode.Uri
-): string {
-  const filePath =
-    typeof location === "string" ? location : fromUri(location);
-  return paths.pathKeyForComparison(filePath);
-}
+/*
+  台帳の鍵と、原稿を開く共通の口は `manuscriptTab.ts` にある（2026-10-03。
+  作品一覧・統計・第1話の作成など、この大きなファイルを取り込まない所からも
+  同じ口を通すため）。鍵はこれまでどおりの名前で再輸出する。
+*/
+export { manuscriptLedgerKey };
 
 /**
  * いま開いている原稿エディタ（原稿の場所 → その画面）。
@@ -454,40 +446,6 @@ async function warnDisconnected(names: readonly string[]): Promise<void> {
   );
   if (choice === RELOAD_WINDOW_ITEM) {
     await vscode.commands.executeCommand("workbench.action.reloadWindow");
-  }
-}
-
-/**
- * その原稿の、原稿エディターのタブ（あれば入口と列）。
- *
- * 同じ原稿のタブが2つあれば、**その列で前に出ているもの**を選ぶ
- * （作者がいま見ている面）。どれも背景なら、最初に見つかったもの。
- * タブを読めない環境では undefined（これまでどおりの開き方へ）。
- */
-function existingManuscriptTab(
-  key: string
-): { viewType: string; column: vscode.ViewColumn } | undefined {
-  try {
-    let fallback: { viewType: string; column: vscode.ViewColumn } | undefined;
-    for (const group of vscode.window.tabGroups.all) {
-      for (const tab of group.tabs) {
-        const input: unknown = tab.input;
-        if (
-          !(input instanceof vscode.TabInputCustom) ||
-          (input.viewType !== MANUSCRIPT_EDITOR_VIEW_TYPE &&
-            input.viewType !== MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE) ||
-          manuscriptLedgerKey(input.uri) !== key
-        ) {
-          continue;
-        }
-        const found = { viewType: input.viewType, column: group.viewColumn };
-        if (tab.isActive) return found;
-        fallback ??= found;
-      }
-    }
-    return fallback;
-  } catch {
-    return undefined;
   }
 }
 
@@ -868,6 +826,34 @@ export function askNotationInActiveManuscript(kind: "ruby" | "emphasis"): boolea
 }
 
 /**
+ * 「縦書き表示」（`novelai.openVertical`）で原稿を縦書きにして見せる。
+ *
+ * その原稿のタブが無ければ、これまでどおり縦書きの入口で開く。
+ * **あれば、そのタブを前に出して画面の中で縦書きへ切り替える**
+ * （作者の裁定、2026-10-03。設計書6.25.11）。
+ */
+export async function openManuscriptVertical(uri: vscode.Uri): Promise<void> {
+  const key = manuscriptLedgerKey(uri);
+  const { reused } = await openManuscriptFile(uri, MANUSCRIPT_EDITOR_VIEW_TYPE);
+  if (!reused) return;
+  /*
+    **既にタブがあった**（横書きの入口で開いている等）。そのタブを前に出した
+    だけなので、縦書きは画面の中で切り替える——画面の［縦書きにする］と
+    同じ結果になる。縦書きの入口でもう1枚開くと、同じ原稿の2枚目ができる
+    （作者の裁定、2026-10-03。設計書6.25.11）。
+  */
+  const live = await waitFor(() => openManuscripts.get(key));
+  const now = live?.appearance();
+  if (!live || !now) {
+    logLine(
+      `原稿エディタ：${fromUri(uri)} のタブを前に出しましたが、画面の見た目を読めなかったため縦書きへ切り替えていません。画面の［縦書きにする］を押してください。`
+    );
+    return;
+  }
+  if (!now.vertical) live.applyAppearance({ ...now, vertical: true });
+}
+
+/**
  * 読み上げのために原稿を開いて、列を出す（設計書6.42。詳細メニューの入口）。
  *
  * **どの原稿を読むかは、作者が「いま見ているもの」に合わせる。** 探す順は3つ。
@@ -900,15 +886,13 @@ export async function openManuscriptForReading(work: WorkEntry): Promise<void> {
     return;
   }
 
-  // タブが既にあれば、その入口と列で前に出す（同じ原稿の2枚目を作らない。6.25.11）
-  const existing = existingManuscriptTab(key);
-  await vscode.commands.executeCommand(
-    "vscode.openWith",
-    paths.toUri(filePath),
+  // タブが既にあれば、その入口と列で前に出す（同じ原稿の2枚目を作らない。
+  // 6.25.11）。共通の口がそれを判断する
+  await openManuscriptFile(
+    filePath,
     // 向きの既定はタイプが決める（設計書6.70。脚本だけ縦書き）。
     // **ここで別の決め方をしない**——作品一覧から開いたときと同じ入口にする
-    existing?.viewType ?? manuscriptViewTypeFor(await kindOf(work)),
-    existing?.column
+    manuscriptViewTypeFor(await kindOf(work))
   );
   /*
     **台帳に載るまで待つ**（`revealLine` と同じ事情。開いた直後はまだ載らない）。
@@ -2548,12 +2532,7 @@ export class ManuscriptEditorProvider
     */
     const choice = columnForLocation(filePath);
     logLine(`原稿エディタ：${filePath} を開きます（${choice.reason}）。`);
-    await vscode.commands.executeCommand(
-      "vscode.openWith",
-      uri,
-      viewType,
-      choice.column
-    );
+    await openManuscriptFile(uri, viewType, choice.column);
     /*
       **台帳に載るまで待つ。**
 
@@ -2595,15 +2574,8 @@ export class ManuscriptEditorProvider
     const key = manuscriptLedgerKey(filePath);
     const existing = existingManuscriptTab(key);
     if (!existing) return undefined;
-    logLine(
-      `原稿エディタ：${filePath} のタブが${existing.column}列目にあるので、そのタブを前に出します（入口: ${existing.viewType}）。`
-    );
-    await vscode.commands.executeCommand(
-      "vscode.openWith",
-      paths.toUri(filePath),
-      existing.viewType,
-      existing.column
-    );
+    // 前に出すのは共通の口に任せる（タブの入口と列を使う。記録もそちらが残す）
+    await openManuscriptFile(filePath, existing.viewType, existing.column);
     const shown = await waitFor(() => openManuscripts.get(key));
     if (!shown) {
       // 拡張機能ホストが起動し直したあとの面は、つながり直さない。
@@ -3544,12 +3516,14 @@ export class ManuscriptEditorProvider
     const column = from
       ? openManuscripts.get(manuscriptLedgerKey(from.uri))?.panel.viewColumn
       : undefined;
-    await vscode.commands.executeCommand(
-      "vscode.openWith",
-      paths.toUri(filePath),
-      this.viewType,
-      column
-    );
+    /*
+      **移る先の話が既に別の入口・別の列で開いていれば、そのタブを前に出す**
+      （作者の裁定、2026-10-03。設計書6.25.11）。入口と列は「タブが無いとき」の
+      既定で、あるときは共通の口がタブの入口と列を使う——ここで決め打つと、
+      同じ話の2枚目ができる。見た目は上の `carryAppearance` が生きている画面へ
+      直に当てるので、入口が違っても縦横は引き継がれる。
+    */
+    await openManuscriptFile(paths.toUri(filePath), this.viewType, column);
   }
 
   /**

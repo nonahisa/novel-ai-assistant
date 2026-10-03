@@ -257,6 +257,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   // ── 執筆の場 ──
   "novelai.resumeWriting": "allTypes",
   "novelai.openVertical": "allTypes",
+  // 作品一覧の話の行から呼ぶ（設計書6.25.11）。パレットには出さない
+  "novelai.openEpisode": "allTypes",
   "novelai.readManuscriptAloud": "allTypes",
   "novelai.addRuby": "allTypes",
   "novelai.addEmphasis": "allTypes",

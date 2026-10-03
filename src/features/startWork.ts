@@ -5,6 +5,7 @@ import { pathExists } from "../core/fileSystem";
 import { resolveManuscriptDir } from "../core/manuscriptFolder";
 import { buildPlotTemplate } from "../core/plotTemplate";
 import { manuscriptViewTypeFor } from "../core/manuscriptViewTypes";
+import { openManuscriptFile } from "./manuscriptTab";
 import { PLOT_FILE, readWorkConfig, workPaths } from "../core/workRegistry";
 import {
   firstEpisodeFileName,
@@ -259,11 +260,8 @@ export async function createFirstEpisodeFile(
   }
 
   // **本文は原稿エディタで開く**（作者の指定、2026-08-29。作品一覧の
-  // クリックと同じ既定に揃える）。向きは種類で決まる（台本だけ縦書き）
-  await vscode.commands.executeCommand(
-    "vscode.openWith",
-    path.toUri(filePath),
-    manuscriptViewTypeFor(kind)
-  );
+  // クリックと同じ既定に揃える）。向きは種類で決まる（台本だけ縦書き）。
+  // 既にあった第1話が別の入口で開いていれば、そのタブを前に出す（6.25.11）
+  await openManuscriptFile(filePath, manuscriptViewTypeFor(kind));
   return filePath;
 }

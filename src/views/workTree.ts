@@ -621,9 +621,14 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       **例外は台本**（設計書6.70・6.109）。台本は縦書きで組むのが普通なので、
       向きの既定を `manuscriptViewTypeFor` に決めさせる（開く場所ごとに
       違う既定を持たない）。
+
+      **`vscode.openWith` を直に書かない**（作者の裁定、2026-10-03。設計書6.25.11）。
+      同じ話が別の入口（縦と横）や別の列で開いていると、VS Code は2枚目を作る。
+      `novelai.openEpisode` が共通の口を通し、タブがあればそのタブを前に出す。
+      ここで渡す入口は「タブが無いとき」の既定である。
     */
     item.command = {
-      command: "vscode.openWith",
+      command: "novelai.openEpisode",
       title: "開く",
       arguments: [toUri(ep.filePath), manuscriptViewTypeFor(node.kind)],
     };

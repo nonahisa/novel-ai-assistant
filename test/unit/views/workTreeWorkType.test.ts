@@ -205,7 +205,7 @@ describe("脚本は縦書きで開く", () => {
     const episodes = await provider.getChildren(roots[0]);
     const command = provider.getTreeItem(episodes[1]).command;
 
-    expect(command?.command).toBe("vscode.openWith");
+    expect(command?.command).toBe("novelai.openEpisode");
     expect(command?.arguments?.[1]).toBe(MANUSCRIPT_EDITOR_VIEW_TYPE);
   });
 

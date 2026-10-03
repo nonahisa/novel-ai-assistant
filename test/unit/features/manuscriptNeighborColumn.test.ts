@@ -52,9 +52,10 @@ describe("話の移動は、原稿エディタのいる列に開く", () => {
     expect(body).toContain(".panel.viewColumn");
   });
 
-  it("その列を `vscode.openWith` へ渡す（前面の列に任せない）", () => {
-    const call = body.slice(body.indexOf('"vscode.openWith"'));
-    // 引数は4つ（コマンド名・場所・画面の種類・列）
-    expect(call).toMatch(/"vscode\.openWith",\s*[^,]+,\s*this\.viewType,\s*column\s*\)/);
+  it("その列を開く口へ渡す（前面の列に任せない）", () => {
+    // 0.96.10 から、開くのは共通の口（同じ話のタブがあれば前に出すだけ。
+    // 設計書6.25.11）。入口と列は「タブが無いとき」の既定として渡す
+    const call = body.slice(body.indexOf("openManuscriptFile("));
+    expect(call).toMatch(/openManuscriptFile\(\s*[^,]+,\s*this\.viewType,\s*column\s*\)/);
   });
 });
