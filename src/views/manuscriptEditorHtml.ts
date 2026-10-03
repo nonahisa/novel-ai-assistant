@@ -4337,15 +4337,6 @@ ${RESUME_WRITING_LABEL ? `
   write.addEventListener("keyup", notifyCaret);
   compose.addEventListener("click", notifyCaret);
   compose.addEventListener("keyup", notifyCaret);
-  /*
-    **面を離れたら「知らせ済みの行」を忘れる**（設計書6.40.4。2026-10-04）。
-    「最後のカーソル」は拡張機能側で全部の面に1つだけで、ほかの面のカーソルや
-    パネルからの飛び先で上書きされる。この面へ戻って前と同じ行を押したときに
-    「同じ行だから送らない」と黙ると、起点が別の面のまま残る
-  */
-  window.addEventListener("blur", function () {
-    lastCaretLine = 0;
-  });
 
   /* ── ホバーのチップ（作者の依頼、2026-08-28） ── */
   const tip = document.getElementById("tip");
