@@ -108,6 +108,16 @@ function bundleOptions() {
     platform: "node",
     outfile: "dist/mcp-server.mjs",
     external: [],
+    /*
+      **ESM の束に `require` を持たせる**（2026-10-03、出先の原稿箱 6.115）。
+      本文の書き戻し（`core/textEncodePreserving.ts`）が使う `iconv-lite` は CommonJS で、
+      中で `require("buffer")` を呼ぶ。ESM の束には `require` が無いので、
+      読み込んだ瞬間に「Dynamic require of "buffer" is not supported」で落ちた
+      （`scripts/smokeMcp.mjs` で確かめた）。Node の組み込みだけを解決させる定番の形
+    */
+    banner: {
+      js: 'import { createRequire as __novelaiCreateRequire } from "node:module"; const require = __novelaiCreateRequire(import.meta.url);',
+    },
     logLevel: "info",
   };
 

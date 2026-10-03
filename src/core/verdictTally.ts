@@ -76,6 +76,10 @@ export function verdictFeatureOf(category: string): VerdictFeature | undefined {
  */
 export type VerdictStatus = "accepted" | "dismissed" | "retracted";
 
+/** 記録の置き場 `.aiwriter/history/ai-verdicts.jsonl`（書くのは `features/verdictStore.ts` と MCP の `outbox.import`） */
+export const VERDICT_HISTORY_DIRECTORY = "history";
+export const VERDICT_FILE_NAME = "ai-verdicts.jsonl";
+
 /** 1行1件の判断 */
 export interface VerdictLine {
   /** いつ判断したか（ISO 8601） */

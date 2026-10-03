@@ -100,6 +100,13 @@ export const CORE_ENTRY_NAMES = [
     切り出した）。製品と MCP が同じ本文・同じハッシュを持つ
   */
   "episodeBodyParts",
+  /*
+    出先の原稿箱の取り込み（2026-10-03、設計書6.115 の `outbox.import`）。
+    本文の書き戻しのバイト列の作り方（`textFile.ts` から）と、指摘1件を本文へ
+    当てる計算（提案パネルの［適用］から）を切り出した。製品と MCP が同じものを通る
+  */
+  "textEncodePreserving",
+  "findingApply",
 ];
 
 /**

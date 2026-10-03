@@ -162,6 +162,14 @@ export function findingList(input: FindingListInput): FindingListResult {
   };
 }
 
+/**
+ * 作品の置き場を読む（出先の原稿箱の取り込み `outbox.import` が、同じ読み方で
+ * 1件を引くため。6.115）
+ */
+export function readFindingViews(folder: string): FindingView[] {
+  return readViews(nodePath.join(nodePath.resolve(folder), AIWRITER_DIR, FINDINGS_FILE_NAME));
+}
+
 /** 置き場を読み、同じ番号を畳んで判断と突き合わせる。**無ければ空**（まだ何も残っていない） */
 function readViews(target: string): FindingView[] {
   let text: string;

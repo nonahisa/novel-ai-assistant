@@ -81,6 +81,13 @@ import {
 } from "./tools/spotlight";
 import { mcpMachineName, windowsList } from "./tools/windows";
 import {
+  OUTBOX_IMPORT_INPUT,
+  OUTBOX_PACK_INPUT,
+  outboxImport,
+  outboxPack,
+  type OutboxImportInput,
+} from "./tools/outbox";
+import {
   NOTICES_RECENT_INPUT,
   noticesRecent,
   type NoticesRecentInput,
@@ -118,12 +125,13 @@ import {
  * そちらを直に呼ぶ（`test/unit/mcp/mcpTools.test.ts`）。混ぜると、
  * ツールの中身を確かめるのに stdio を立てなければならなくなる。
  *
- * **道具は23本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
+ * **道具は25本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
  * 0.75.x で `windows.list`、0.82.1 で `setup.request`、0.83.x で `schedule.milestones`、
  * 0.85.0 で `notices.recent` と `works.list`、0.85.1 で `pending.list`、
  * 0.88 の次の版で `run.request` と `run.result`（設計書6.87.22）、
  * 0.94.7 の次の版で `ai.settings`、0.95.4 の次の版で `novel.extract.commit`、
- * 0.95.5 の次の版で `novel.synopsis.commit` を足した。0.66.7 の時点では10本）。
+ * 0.95.5 の次の版で `novel.synopsis.commit`、0.97.11 で `outbox.pack` と `outbox.import`
+ * （出先の原稿箱、設計書6.115）を足した。0.66.7 の時点では10本）。
  * ほかに**プロンプトが1つ**（`setup`。Claude Code では `/` から選べる。6.87.18）。
  * 56本あったものを
  * `feature` を引数に取る形へ束ねた——**AI は繋いだ瞬間にこの一覧を読む**ので、
@@ -137,6 +145,8 @@ import {
  * **例外は `novel.extract.commit` と `novel.synopsis.commit` の保存だけ**
  * （作者の裁定、2026-10-02）——新しい資料のファイル・まだ無い話のあらすじを
  * 作るだけで、既にある資料・あらすじは書き換えない。
+ * **3つ目の例外は `outbox.import`**（設計書6.115）——作者が出先で書いたメモと、
+ * 作者自身の採否だけを、製品と同じ部品で本文と提案の置き場へ入れる。
  */
 
 const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
@@ -591,6 +601,38 @@ server.registerTool(
     inputSchema: PENDING_LIST_INPUT,
   },
   tool("pending.list", (args: PendingListInput) => pendingListTool(args))
+);
+
+server.registerTool(
+  "outbox.pack",
+  {
+    title: "出先の原稿箱へ送る中身を組む",
+    description:
+      "出先の原稿箱（スマホ・タブレットで開く claude.ai のページ）へ送る中身を返します：作品の題、" +
+      "話ごとのファイル・題・本文のハッシュ、提案パネルに並んでいる校正の指摘（原文の一文・修正案）。" +
+      "**読むだけで、AIは呼ばず、本文そのものは返しません。** 書き先は nextStep にあります。",
+    inputSchema: OUTBOX_PACK_INPUT,
+  },
+  tool("outbox.pack", (args: { folder: string; retentionDays?: number }) => outboxPack(args))
+);
+
+/*
+  **6.87.7「MCP は原稿を書き換えない」の例外の3つ目**（出先の原稿箱、設計書6.115）。
+  作者が出先で書いたメモと、作者自身の採否だけを入れる。判断はコードが持ち
+  （`tools/outbox.ts`）、本文の書き方は製品と同じ部品を通す
+*/
+server.registerTool(
+  "outbox.import",
+  {
+    title: "出先の原稿箱の記録を作品へ入れる",
+    description:
+      "出先の原稿箱の保管庫の records/ の記録（id 付き）と、持ち主の id（works/owner）を受け、1件ずつ入れて結果を返します。" +
+      "メモは話の末尾（指摘に付けたメモはその行の上）へ // の行として入れ、送ったときと本文が違えば断ります。" +
+      "採否（直す・済み・採らない）は持ち主の記録だけを、提案パネルと同じ判断として記録します。" +
+      "入れた記録は覚えていて、2度目は already で返します。",
+    inputSchema: OUTBOX_IMPORT_INPUT,
+  },
+  tool("outbox.import", (args: OutboxImportInput) => outboxImport(args))
 );
 
 server.registerTool(

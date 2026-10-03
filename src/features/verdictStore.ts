@@ -4,6 +4,8 @@ import type { WorkEntry } from "../models/types";
 import { workPaths } from "../core/workRegistry";
 import { logFailure, useLogFile } from "../core/logger";
 import {
+  VERDICT_FILE_NAME,
+  VERDICT_HISTORY_DIRECTORY,
   buildVerdictStatsMarkdown,
   parseVerdictLines,
   tallyVerdicts,
@@ -36,8 +38,9 @@ import {
  * 数える記録をそこへ置かなかった理由）。
  */
 
-const VERDICT_DIRECTORY = "history";
-const VERDICT_FILE = "ai-verdicts.jsonl";
+// 名前は `core/verdictTally.ts` に1つだけ（MCP の取り込み 6.115 も同じ場所へ足す）
+const VERDICT_DIRECTORY = VERDICT_HISTORY_DIRECTORY;
+const VERDICT_FILE = VERDICT_FILE_NAME;
 
 function verdictFilePath(work: WorkEntry): string {
   return path.join(workPaths(work).aiwriter, VERDICT_DIRECTORY, VERDICT_FILE);

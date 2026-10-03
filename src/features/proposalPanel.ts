@@ -39,6 +39,7 @@ import {
   findingIdOf,
   type FindingDraft,
 } from "../core/findingSource";
+import { applyFindingToText } from "../core/findingApply";
 import {
   recordFindingDecision,
   recordFindings,
@@ -2830,13 +2831,11 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       return;
     }
 
-    const lines = file.text.split("\n");
-    const lineIndex = item.line - 1;
-    const lineText = lines[lineIndex];
-
     // 検知からここまでの間に本文が変わっている可能性がある。
-    // 該当行に original がまだ実在するかを再確認してから書き換える
-    if (lineText === undefined || !lineText.includes(item.original)) {
+    // 該当行に original がまだ実在するかを再確認してから書き換える。
+    // **当て方の計算は `core/findingApply.ts`**（MCP の取り込み 6.115 も同じものを通る）
+    const applied = applyFindingToText(file.text, item);
+    if (applied.kind === "originalMissing") {
       this.markStatus(
         id,
         "failed",
@@ -2845,23 +2844,15 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       );
       return;
     }
-
-    const originalIndexInLine = lineText.indexOf(item.original);
-    const targetIndexInOriginal = item.original.indexOf(item.target);
-    if (targetIndexInOriginal === -1) {
+    if (applied.kind === "targetMissing") {
       this.markStatus(id, "failed", "指摘の位置を特定できませんでした。");
       return;
     }
-
-    const absoluteTargetIndex = originalIndexInLine + targetIndexInOriginal;
-    lines[lineIndex] =
-      lineText.slice(0, absoluteTargetIndex) +
-      item.suggestion +
-      lineText.slice(absoluteTargetIndex + item.target.length);
+    const absoluteTargetIndex = applied.at;
 
     const result = await writeTextFilePreservingFormat(
       item.filePath,
-      lines.join("\n"),
+      applied.text,
       file,
       file.hash
     );

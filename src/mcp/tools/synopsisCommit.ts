@@ -23,9 +23,8 @@ import { buildSynopsisListMarkdown } from "../../core/synopsisMarkdown";
 import { buildEmotionCurveMarkdown } from "../../core/emotionCurve";
 import { decodeByteFallback } from "../../core/byteFallback";
 import { measureBlurb } from "../../core/blurbValidation";
-import { sha256Text } from "../../core/hash";
-import { normalizeForComparison } from "../../core/pathText";
-import { randomUuid } from "../../core/runtime";
+// 回復先の名前は製品の `atomicWrite.ts` と同じ形（`outbox.import` と共用。6.115）
+import { recoveryPathFor } from "./recoveryFile";
 import {
   FOLDER_INPUT,
   McpToolError,
@@ -415,25 +414,6 @@ function writeSynopses(
     );
   }
   return recoveryPath;
-}
-
-/**
- * 回復先の名前。**製品の `atomicWrite.ts` の `createManagedRecoveryPath` と同じ形**にする
- * （製品の世代の整理 `pruneManagedRecoveries` が同じ控えとして数えられるように）。
- * あちらは `vscode` を引くので import できず、形だけを揃えている——
- * `<置き場>/.novelai-recovery/<sha256(比べ方を揃えた道)>-<13桁の時刻>-<8桁の連番>-<uuid>.bak`
- */
-let recoverySequence = 0;
-function recoveryPathFor(target: string): string {
-  recoverySequence += 1;
-  const timestamp = String(Date.now()).padStart(13, "0");
-  const sequence = String(recoverySequence).padStart(8, "0");
-  return nodePath.join(
-    nodePath.dirname(target),
-    // 製品の `RECOVERY_DIRECTORY_NAME`（`atomicWrite.ts`）と同じ名前
-    ".novelai-recovery",
-    `${sha256Text(normalizeForComparison(target))}-${timestamp}-${sequence}-${randomUuid()}.bak`
-  );
 }
 
 /** 話数の順。話数の無いものは末尾（製品の `sortEpisodes` と同じ）。安定ソート */

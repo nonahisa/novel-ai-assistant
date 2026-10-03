@@ -110,6 +110,12 @@ export function exposureOf(
       （断った紹介文は、呼び出し元が書いたものをそのまま返す）
     */
     tool === "novel.synopsis.commit" ||
+    /*
+      `outbox.import`（出先の原稿箱、設計書6.115）も**原稿は外へ出ない**——
+      呼び出し元が持ち込んだメモと採否を作品へ入れるだけで、返すのは
+      記録ごとの結果（入れた・断った・理由）だけである
+    */
+    tool === "outbox.import" ||
     tool === "novel.notice" ||
     tool === "guide.spotlight" ||
     /*
@@ -145,6 +151,8 @@ export function exposureOf(
   */
   if (
     tool === "pending.list" ||
+    // 出先の原稿箱へ送る中身（6.115）。話の題とハッシュ、指摘の原文の一文が渡る（本文はまとめて返さない）
+    tool === "outbox.pack" ||
     // 作者のAIで走らせた結果（指摘の原文・あらすじ）が呼び出し元へ渡る（6.87.22）
     tool === "run.result" ||
     tool === "novel.scan" ||
@@ -286,6 +294,30 @@ function detailOf(
     return pointed ? `画面で指した（${pointed}）` : "画面で指した";
   }
   if (tool === "schedule.milestones") return "締切・発売日などの日付を読んだ";
+  /*
+    出先の原稿箱（6.115）。**件数だけ**を残す（メモの中身も指摘の原文も残さない）
+  */
+  if (tool === "outbox.pack") {
+    const record =
+      typeof result === "object" && result !== null
+        ? (result as Record<string, unknown>)
+        : undefined;
+    return record && Array.isArray(record.episodes) && Array.isArray(record.findings)
+      ? `出先の原稿箱へ送る中身を組んだ 話 ${record.episodes.length}件・指摘 ${record.findings.length}件`
+      : "出先の原稿箱へ送る中身を組んだ";
+  }
+  if (tool === "outbox.import") {
+    const record =
+      typeof result === "object" && result !== null
+        ? (result as Record<string, unknown>)
+        : undefined;
+    return record &&
+      typeof record.importedCount === "number" &&
+      typeof record.alreadyCount === "number" &&
+      typeof record.refusedCount === "number"
+      ? `出先の原稿箱の記録を入れた 入れた ${record.importedCount}件・入れ済み ${record.alreadyCount}件・断り ${record.refusedCount}件`
+      : "出先の原稿箱の記録を入れた";
+  }
   /*
     作者のAIで走らせる依頼（6.87.22）。**何を頼んだか**と、読んだ回は**どの依頼か**を
     残す（本文も結果の中身も残さない）

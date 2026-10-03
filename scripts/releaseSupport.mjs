@@ -32,6 +32,9 @@ export const EXPECTED_ARCHIVE_FILES = [
   "extension/media/walkthrough/localAI.md",
   "extension/media/walkthrough/prepareWork.md",
   "extension/media/walkthrough/write.md",
+  // 出先の原稿箱のページの雛形（設計書6.115）。Claude Code が利用者自身の
+  // claude.ai へ publish するときに読む。`media/**` は `.vscodeignore` で除外していない
+  "extension/media/outbox/outbox.html",
   // AI用の指示書の雛形（設計書6.87.15 柱5）。拡張機能が作品フォルダーへ
   // 書き出すときに読む。**`docs/` は丸ごと除外しているので、
   // `.vscodeignore` 側の `!` と対で見ること**
