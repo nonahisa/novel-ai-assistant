@@ -27,6 +27,7 @@ import {
   manuscriptLedgerKey,
   manuscriptTabColumns,
   openManuscriptFile,
+  revealManuscriptPanelInPlace,
 } from "./manuscriptTab";
 import {
   collectTermSpans,
@@ -85,6 +86,7 @@ import {
   rubyEditReplacement,
   rubyNotationFor,
   validateEmphasis,
+  findEmphasisSpans,
   validateRuby,
 } from "../core/ruby";
 import { postingCopySource } from "../core/episodeCopy";
@@ -805,9 +807,11 @@ export async function insertMemoLineAbove(
 export async function addMemoToOpenManuscript(): Promise<boolean> {
   const caret = lastCaret;
   if (!caret) return false;
-  const open = openManuscripts.get(manuscriptLedgerKey(caret.filePath));
+  const key = manuscriptLedgerKey(caret.filePath);
+  const open = openManuscripts.get(key);
   if (!open) return false;
-  open.panel.reveal();
+  // 列を渡して前に出す（列なしだと前面の列に2枚目ができる。6.25.11）
+  revealManuscriptPanelInPlace(open.panel, key);
   return await insertMemoLineAbove(open.document, caret.line);
 }
 
@@ -894,7 +898,8 @@ export async function openManuscriptForReading(work: WorkEntry): Promise<void> {
   const key = manuscriptLedgerKey(filePath);
   const open = openManuscripts.get(key);
   if (open) {
-    open.panel.reveal();
+    // 列を渡して前に出す（列なしだと前面の列に2枚目ができる。6.25.11）
+    revealManuscriptPanelInPlace(open.panel, key);
     open.showReading();
     return;
   }
@@ -2514,7 +2519,14 @@ export class ManuscriptEditorProvider
 
     const open = openManuscripts.get(key);
     if (open) {
-      open.panel.reveal();
+      /*
+        **列を渡して前に出す**（作者の実機、2026-10-03。3回目）。列なしの
+        `reveal()` は「いま前面の列」へ開く——校正・メモパネル（右の列）の行を
+        押すと、右の列に同じ原稿のタブができて画面がそちらへ移り、左が空白で
+        残った。新しい面は作られない（resolve されない）ので、6.25.11 の
+        「2枚目」の記録にも出なかった
+      */
+      revealManuscriptPanelInPlace(open.panel, key);
       open.revealLine(line);
       return true;
     }
@@ -2546,8 +2558,8 @@ export class ManuscriptEditorProvider
       渡しておらず、VS Code の既定どおり「いま前面の列」へ開いていた。
       シーンメモのパネル（原稿の右）から、まだ開いていない話へ飛ぶと、
       原稿がパネルの列へ飛び込んで左の面が置き去りになる。
-      **既に開いている面を前に出す道（上の `open`）は列を動かさない**ので、
-      直すのはこの「開き直す」枝だけでよい。
+      既に開いている面を前に出す道（上の `open`）も、列を渡さないと同じことが
+      起きる（0.96.19 で列を渡すようにした）。
     */
     const choice = columnForLocation(filePath);
     logLine(`原稿エディタ：${filePath} を開きます（${choice.reason}）。`);
@@ -3044,6 +3056,19 @@ export class ManuscriptEditorProvider
     const filePath = fromUri(document.uri);
 
     /*
+      **傍点の付いた所で押されたら、外す**（作者の裁定、2026-10-03。設計書6.34.2）。
+      `.txt` の確認より先に見る——`.txt` の傍点（《《強調》》）は付けられないが、
+      外すのは字を残すだけなので、どちらの書き方でも迷わない。
+    */
+    if (
+      kind === "emphasis" &&
+      message.start >= 0 &&
+      (await this.removeEmphasisIfAny(document, panel, message))
+    ) {
+      return;
+    }
+
+    /*
       **ルビは `.txt` でも入れられる**（作者の裁定、2026-09-15。0.64.6）。
       `.txt` には投稿サイトの書き方（`｜漢字《かんじ》`）で入るので、
       そのまま貼れば今までどおりルビになる——**書き方をファイルに合わせる**
@@ -3224,6 +3249,70 @@ export class ManuscriptEditorProvider
       start: lfStart,
       end: lfStart + inserted.length,
     });
+  }
+
+  /**
+   * 選んだ範囲に傍点が1字でも掛かっていれば、その傍点を外す（設計書6.34.2）。
+   *
+   * **記法だけを消して字は残す。** 掛かった傍点が複数あれば、全部を1回の
+   * 書き換えで外す（Ctrl+Z 1回で戻る）。書き換えは打鍵やルビと同じく
+   * 開いている文書への `WorkspaceEdit`（作者自身の編集なので取り消しが効く）。
+   *
+   * @returns 傍点が掛かっていた（外した・外せなかったを問わず、付ける道へは進まない）
+   */
+  private async removeEmphasisIfAny(
+    document: vscode.TextDocument,
+    panel: vscode.WebviewPanel,
+    message: { start: number; end: number }
+  ): Promise<boolean> {
+    // 画面の位置はLF空間。文書の位置へ直してから探す（ルビと同じ）
+    const original = document.getText();
+    const start = fromLfOffset(original, message.start);
+    const end = fromLfOffset(original, message.end);
+    const spans = findEmphasisSpans(
+      original,
+      start,
+      end,
+      notationModeFor(fromUri(document.uri))
+    );
+    if (spans.length === 0) return false;
+
+    // 探したのと同じ本文へ、間を置かずに当てる（読みを訊く間が無いので、
+    // ルビのような「今もその文字か」の確かめは要らない）
+    const change = new vscode.WorkspaceEdit();
+    for (const span of spans) {
+      change.replace(
+        document.uri,
+        new vscode.Range(
+          document.positionAt(span.start),
+          document.positionAt(span.end)
+        ),
+        span.base
+      );
+    }
+    if (!(await vscode.workspace.applyEdit(change))) {
+      logLine(
+        `傍点：${fromUri(document.uri)} の ${start}〜${end} の傍点を外せませんでした。`
+      );
+      void vscode.window.showWarningMessage(
+        "傍点を外せませんでした。もう一度お試しください。"
+      );
+      return true;
+    }
+
+    // 外したところ（字だけになった範囲）を選び直す。付け直したくなったら
+    // そのままもう一度押せばよい
+    const first = spans[0];
+    const last = spans[spans.length - 1];
+    const removed = spans.reduce(
+      (sum, span) => sum + (span.end - span.start - span.base.length),
+      0
+    );
+    const now = document.getText();
+    const lfStart = toLfOffset(now, first.start);
+    const lfEnd = toLfOffset(now, last.end - removed);
+    await panel.webview.postMessage({ type: "select", start: lfStart, end: lfEnd });
+    return true;
   }
 
   /**

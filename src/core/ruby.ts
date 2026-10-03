@@ -371,6 +371,80 @@ export function findEmphasis(text: string): string[] {
   return [...text.matchAll(EMPHASIS_INTERNAL)].map((match) => match[1]);
 }
 
+/** 本文の中の傍点1つ（記法そのものの範囲と、中の字） */
+export interface EmphasisSpan {
+  /** 記法の始まりの位置 */
+  start: number;
+  /** 記法の終わりの次の位置 */
+  end: number;
+  base: string;
+}
+
+/**
+ * 傍点を探すときの規則。**組んで見せる規則（`manuscriptRender.ts`）と同じ
+ * 並びにする**——作者に傍点と見えているものだけを外し、見えていないものに
+ * 触らない。ルビの規則も並べるのは、`{{強調}}` を `{強調}` というルビに、
+ * `彼《《強調》》` を縦線なしのルビに読み違えないため（捕獲1が傍点の中身）。
+ *
+ * `.txt` のなろう式（`｜強調《・・》`）は画面でもルビとして組まれるので、
+ * ここでは拾わない（ルビの読みを空にすれば外れる）。
+ */
+const EMPHASIS_SCAN: Record<"curly" | "site", RegExp> = {
+  curly: new RegExp([EMPHASIS_INTERNAL.source, INTERNAL.source].join("|"), "g"),
+  site: new RegExp(
+    [EMPHASIS_KAKUYOMU.source, SITE_BAR.source, SITE_BARE.source].join("|"),
+    "g"
+  ),
+};
+
+/**
+ * 選んだ範囲に掛かっている傍点（作者の裁定、2026-10-03。設計書6.34.2）。
+ *
+ * **1字でも掛かっていれば、その傍点まるごとを返す。** 呼ぶ側は、1つでも
+ * 返れば「外す」、空なら「付ける」と読む。一部だけの選択を「外す」側へ倒す
+ * のは、外しても字は1つも消えないが、付ける側へ倒すと記法が入れ子になって
+ * 原稿が壊れるため。記法の途中で切れた選択も、記法の端まで広げて外す
+ * （半分だけ外すと、記法の片割れが本文に残る）。
+ *
+ * カーソルだけ（範囲が空）のときは、記法の内側と両端を当たりとする
+ * （`findRubyAt` と同じ。記法の直後に置くのが自然な指し方）。
+ *
+ * @param mode `.md` は "curly"、`.txt` は "site"（`notationModeFor` と同じ分け方）
+ */
+export function findEmphasisSpans(
+  text: string,
+  start: number,
+  end: number,
+  mode: "curly" | "site"
+): EmphasisSpan[] {
+  const from = Math.min(start, end);
+  const to = Math.max(start, end);
+  const found: EmphasisSpan[] = [];
+  const pattern = EMPHASIS_SCAN[mode];
+  pattern.lastIndex = 0;
+  for (const match of text.matchAll(pattern)) {
+    // ルビに当たったぶんは飛ばす（捕獲1が空）
+    if (match[1] === undefined) continue;
+    const at = match.index ?? 0;
+    const stop = at + match[0].length;
+    const touches =
+      from === to ? at <= from && from <= stop : at < to && stop > from;
+    if (touches) found.push({ start: at, end: stop, base: match[1] });
+  }
+  return found;
+}
+
+/** 傍点の記法だけを外した文字列（字は残す）。`spans` は前から並んでいること */
+export function removeEmphasisText(text: string, spans: EmphasisSpan[]): string {
+  let result = "";
+  let last = 0;
+  for (const span of spans) {
+    result += text.slice(last, span.start) + span.base;
+    last = span.end;
+  }
+  return result + text.slice(last);
+}
+
 /**
  * `{漢字|かんじ}` と `{{強調}}` を投稿サイトの記法へ。
  *

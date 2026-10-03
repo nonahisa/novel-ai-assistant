@@ -2,9 +2,11 @@ import * as vscode from "vscode";
 import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
 import { isPlainTextManuscript } from "../core/markdownConversion";
+import { notationModeFor } from "../core/manuscriptRender";
 import { convertFolder, convertOne } from "./markdownConvert";
 import {
   describeSiteNotation,
+  findEmphasisSpans,
   findRubyAt,
   RUBY_MULTILINE_NOTE,
   fromSiteNotation,
@@ -454,6 +456,14 @@ export async function importRuby(): Promise<void> {
  * 傍点は「どこを強調したいか」が作者にしか分からない。
  */
 export async function addEmphasis(): Promise<void> {
+  /*
+    **傍点の付いた所で押されたら、外す**（作者の裁定、2026-10-03。設計書6.34.2）。
+    `.md` の確認（`.txt` なら .md 化を勧める）より先に見る——外すのは字を
+    残すだけなので、`.txt` の《《強調》》でも迷わない。
+  */
+  const current = vscode.window.activeTextEditor;
+  if (current && (await removeEmphasisInEditor(current))) return;
+
   const editor = await requireMarkdown();
   if (!editor) return;
 
@@ -475,4 +485,43 @@ export async function addEmphasis(): Promise<void> {
   await editor.edit((builder) => {
     builder.replace(range, `{{${base}}}`);
   });
+}
+
+/**
+ * 選んだ範囲（なければカーソル）に傍点が1字でも掛かっていれば、その傍点を外す。
+ *
+ * 判定は `findEmphasisSpans` の1か所（原稿エディターと同じ答え）。書き換えは
+ * `editor.edit`（作者自身の編集なので Ctrl+Z が効く）。本文でないファイルは見ない。
+ *
+ * @returns 傍点が掛かっていた（付ける道へは進まない）
+ */
+async function removeEmphasisInEditor(editor: vscode.TextEditor): Promise<boolean> {
+  const document = editor.document;
+  const filePath = fromUri(document.uri);
+  if (!filePath.toLowerCase().endsWith(".md") && !isPlainTextManuscript(filePath)) {
+    return false;
+  }
+  const text = document.getText();
+  const spans = findEmphasisSpans(
+    text,
+    document.offsetAt(editor.selection.start),
+    document.offsetAt(editor.selection.end),
+    notationModeFor(filePath)
+  );
+  if (spans.length === 0) return false;
+
+  const applied = await editor.edit((builder) => {
+    for (const span of spans) {
+      builder.replace(
+        new vscode.Range(document.positionAt(span.start), document.positionAt(span.end)),
+        span.base
+      );
+    }
+  });
+  if (!applied) {
+    void vscode.window.showWarningMessage(
+      "傍点を外せませんでした。もう一度お試しください。"
+    );
+  }
+  return true;
 }

@@ -904,7 +904,7 @@ ruby > rt {
   <button id="dir" title="縦書きと横書きを切り替えます">横書きにする</button>
   <div class="sep"></div>
   <button id="ruby" title="選んだ文字にルビを振ります">ルビ</button>
-  <button id="emph" title="選んだ文字に傍点を付けます">傍点</button>
+  <button id="emph" title="選んだ文字に傍点を付けます（傍点の付いた所なら外します）">傍点</button>
   <div class="sep"></div>
   <button id="copy" title="投稿サイトの記法に直してコピーします">コピー（投稿サイト用）</button>
   <button id="aloudToggle" title="読み上げの操作を出し入れします。耳で聞くと、目では気づかないリズムの悪さや誤字が見つかります">読み上げ</button>
@@ -1620,7 +1620,77 @@ ruby > rt {
     });
   }
 
+  /*
+    ── 傍点の付け外し（作者の裁定、2026-10-03。設計書6.34.2） ──
+    選んだ範囲に傍点が1字でも掛かっていれば外す、無ければ付ける。
+    外すのは拡張機能側（core/ruby.ts の findEmphasisSpans が同じ決まりで探す）。
+    ここで決めるのは「外す頼みか」と、右クリックの品書きの名前だけ。
+  */
+
+  /**
+   * 本文（記法のまま）の、その範囲に掛かる傍点の範囲。無ければ null。
+   * 範囲が空なら記法の内側と両端を当たりにする（findEmphasisSpans と同じ）。
+   * 記法の規則は組むときと同じもの（composeRules）を使う——画面で傍点に
+   * 見えているものだけが当たる
+   */
+  function emphasisRangeIn(text, start, end) {
+    const rules = composeRules(composeNotation);
+    const pattern = new RegExp(rules.pattern, "g");
+    let found = null;
+    let match = pattern.exec(text);
+    while (match !== null) {
+      if (match[0].length === 0) break;
+      let isEmphasis = false;
+      for (const at of rules.emphasis) {
+        if (match[at] !== undefined) isEmphasis = true;
+      }
+      if (isEmphasis) {
+        const from = match.index;
+        const stop = from + match[0].length;
+        const touches =
+          start === end
+            ? from <= start && start <= stop
+            : from < end && stop > start;
+        if (touches) {
+          found = found
+            ? { start: Math.min(found.start, from), end: Math.max(found.end, stop) }
+            : { start: from, end: stop };
+        }
+      }
+      match = pattern.exec(text);
+    }
+    return found;
+  }
+
+  /** いまの選択（組んで書く面では品書きを開いた時点の選択も）に掛かる傍点 */
+  function emphasisTarget() {
+    if (composeOn) {
+      const at = composeTargetRange();
+      if (!at) return null;
+      let text = "";
+      for (const atom of composeCurrentAtoms()) text += atom.text;
+      return emphasisRangeIn(text, at.start, at.end);
+    }
+    return emphasisRangeIn(write.value, write.selectionStart, write.selectionEnd);
+  }
+
+  /** 傍点を外す頼み。範囲は傍点の記法の位置（拡張機能が掛かる傍点を探し直す） */
+  function askEmphasisOff(range) {
+    vscode.postMessage({
+      type: "emphasis",
+      text: "",
+      start: range.start,
+      end: range.end,
+    });
+  }
+
   function askEmphasis() {
+    // 傍点が掛かっていれば外す（付け外しの切り替え）
+    const on = emphasisTarget();
+    if (on) {
+      askEmphasisOff(on);
+      return;
+    }
     if (composeOn) {
       composeAskNotation("emphasis");
       return;
@@ -3647,7 +3717,11 @@ ruby > rt {
     menuTerm = null;
   }
 
-  function openMenu(x, y, term, hasSelection) {
+  /**
+   * @param emphasisOn 右クリックした所（か選択）に掛かる傍点の範囲。あれば
+   *   「傍点つけ」の代わりに「傍点消去」を出す
+   */
+  function openMenu(x, y, term, hasSelection, emphasisOn) {
     menu.innerHTML = "";
     menuTerm = term;
 
@@ -3694,7 +3768,15 @@ ruby > rt {
     // 直前の漢字のまとまりを拾う（傍点は選んだ範囲そのものに付けるので、
     // 選択が要る）
     add("ルビ振り", askRuby);
-    add("傍点つけ", askEmphasis, hasSelection);
+    // **傍点の上では「傍点消去」**（作者の指示、2026-10-03。名前も指示どおり）。
+    // 選んでいなくても押せる——右クリックした傍点そのものを外す
+    if (emphasisOn) {
+      add("傍点消去", function () {
+        askEmphasisOff(emphasisOn);
+      });
+    } else {
+      add("傍点つけ", askEmphasis, hasSelection);
+    }
     rule();
     add("コピー（投稿サイト用）", function () {
       // **品書きから使う行を渡す。** 組んで書く面では、押した瞬間には
@@ -3833,8 +3915,36 @@ ${RESUME_WRITING_LABEL ? `
     if (term) {
       vscode.postMessage({ type: "previewTerm", id: term.id, kind: term.kind });
     }
-    openMenu(event.clientX, event.clientY, term, selectionText().length > 0);
+    openMenu(
+      event.clientX,
+      event.clientY,
+      term,
+      selectionText().length > 0,
+      emphasisAtMenu(event.target)
+    );
   });
+
+  /**
+   * 右クリックした所の傍点。**組んで書く面では、押された傍点の要素から引く**
+   * （右クリックではカーソルが動かないことがあり、選択だけでは傍点の上かが
+   * 分からない）。打つ面には要素が無いので、選択かカーソルの位置で見る
+   */
+  function emphasisAtMenu(target) {
+    if (composeOn) {
+      const el = target && target.closest ? target.closest(".emphasis") : null;
+      if (el) {
+        for (const atom of composeCurrentAtoms()) {
+          if (atom.kind === "chunk" && atom.node === el) {
+            return { start: atom.start, end: atom.end };
+          }
+        }
+      }
+      // 傍点の外で右クリックしたときは、選んだ範囲に掛かるときだけ。
+      // カーソルが傍点の隣にあるだけで「傍点消去」に変わると、押した所と食い違う
+      if (selectionText() === "") return null;
+    }
+    return emphasisTarget();
+  }
 
   document.addEventListener("click", function (event) {
     if (!menu.contains(event.target)) closeMenu();

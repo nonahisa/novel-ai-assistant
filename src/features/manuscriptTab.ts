@@ -205,7 +205,9 @@ export function manuscriptTabColumns(key: string): number[] {
  * **同じ原稿のタブが既にあれば、そのタブの入口と列で開く**（＝前に出すだけ）。
  * VS Code は、別の入口（縦と横）や別の列へ `openWith` すると、同じ原稿の
  * **2枚目の面**を作る（`supportsMultipleEditorsPerDocument: false` でも
- * 止まらない。1.138.0 で確かめた）。同じ入口・同じ列なら前に出すだけで済む。
+ * 止まらない。1.138.0 で確かめた。**テキスト型のカスタムエディターでは
+ * VS Code がこの指定を受け取らず true に決め打ちしている**——1.90／1.138／1.140 の
+ * `$registerTextEditorProvider` で確かめた）。同じ入口・同じ列なら前に出すだけで済む。
  * 2枚の面が同じ文書を抱えると、片方で打った字がもう片方へ送られ、
  * 打ちかけが入れ替わる危なさがある（規則1）。
  *
@@ -246,6 +248,36 @@ export async function openManuscriptFile(
   );
   await vscode.commands.executeCommand("vscode.openWith", uri, viewType, column);
   return { viewType, reused: false };
+}
+
+/**
+ * 開いている原稿の面を、**その面が居る列のまま**前に出す（設計書6.25.11）。
+ *
+ * **`panel.reveal()` を列なしで呼ばない。** 列が無いと VS Code は「いま前面の列」へ
+ * 開く。原稿の面は「1つしか開けないもの」（Singleton）として扱われない
+ * （テキスト型のカスタムエディターは `supportsMultipleEditorsPerDocument` が
+ * 決め打ちで true）ので、既に開いている列を探し直してくれない。校正・メモパネル
+ * （右の列）から行へ飛ぶと、右の列に同じ原稿のタブができて画面の実体がそちらへ
+ * 移り、左のタブが空白で残った（作者の実機、2026-10-03。3回目）。
+ *
+ * 列は面が覚えているもの（`viewColumn`）を使い、読めなければタブの居る列を引く。
+ * 焦点は移す（行を示したあと、そのまま打ち始められるように。これまでと同じ）。
+ */
+export function revealManuscriptPanelInPlace(
+  panel: Pick<vscode.WebviewPanel, "reveal" | "viewColumn">,
+  key: string
+): void {
+  const column = panel.viewColumn ?? existingManuscriptTab(key)?.column;
+  if (column === undefined) {
+    // どちらも読めないときだけ VS Code の既定に任せる。**理由は残す**——
+    // 2枚目が出たとき、この枝を通ったかどうかが分からないと追えない
+    logLine(
+      `原稿エディタ：${key} の面の列が読めないため、列を指定せずに前に出します（前面の列に2枚目ができることがあります）。`
+    );
+    panel.reveal(undefined, false);
+    return;
+  }
+  panel.reveal(column, false);
 }
 
 /** 記録に書く列。指定が無ければ VS Code の既定（いま前面の列）になる */

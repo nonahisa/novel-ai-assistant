@@ -1773,6 +1773,9 @@ export async function activate(
 
   const manuscriptOptions = {
     webviewOptions: { retainContextWhenHidden: true },
+    // **テキスト型のカスタムエディターでは効かない**（VS Code が true に決め打ちする。
+    // 1.90／1.138／1.140 の束で確かめた）。同じ原稿の2枚目は、開く口
+    // （`openManuscriptFile`）と前に出す口（`revealManuscriptPanelInPlace`）で防ぐ（6.25.11）
     supportsMultipleEditorsPerDocument: false,
   };
 
