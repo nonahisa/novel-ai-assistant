@@ -127,16 +127,22 @@ test("右クリック「メモ追加」で行の上に // が入り、［済み�
       const doneButtonOf = (text: string) =>
         panel.locator(".memo", { has: panel.locator("button.go", { hasText: text }) }).locator("button[data-act=done]");
 
-      /* ── カーソルの近くのメモが光る（F-45） ── */
-      await waitUntil(
-        async () => (await panel.locator(".memo.active", { hasText: "一のメモ" }).count()) === 1,
-        "1行目にカーソルを置くと、パネルで「一のメモ」が光る"
-      );
+      /*
+        ── カーソルの近くのメモが光る（F-45） ──
+        パネルを開いた**あとで**カーソルを動かして見る。開く前のカーソルの知らせは、
+        まだ無いパネルには届かない（開いた直後に光っているかは、知らせの届く順しだいで
+        揺れた。2026-10-04 の全件の走りで1回落ちた）
+      */
       await placeCaretAfter(frame, "一の三行目");
       await waitUntil(async () => {
         const active = panel.locator(".memo.active");
         return (await active.count()) === 1 && !((await active.innerText()).includes("一のメモ"));
-      }, "最後の行へカーソルを動かすと、光りがその上の足したメモへ移る");
+      }, "最後の行へカーソルを動かすと、その上の足したメモが光る");
+      await placeCaretAfter(frame, "一の一行目");
+      await waitUntil(
+        async () => (await panel.locator(".memo.active", { hasText: "一のメモ" }).count()) === 1,
+        "1行目へカーソルを動かすと、光りが「一のメモ」へ移る"
+      );
 
       /* ── ［済み］：閉じている話（ファイルが書き換わる）（F-45） ── */
       expect(await frameShowing(page, "三の一行目"), "第3話がまだ開いていないはずです").toBeUndefined();
@@ -147,6 +153,7 @@ test("右クリック「メモ追加」で行の上に // が入り、［済み�
       /* ── ［次へ →］［← 戻る］：話をまたぎ、端で回る（F-45） ── */
       // いまのメモ：第1話「一のメモ」・足した // 、第3話「三のメモA」（第2話には無い）
       await placeCaretAfter(frame, "一の三行目");
+      await settleCaret(page);
       await panel.locator("#next").click();
       // 第1話の最後のメモより後ろにはもう無いので、第2話を飛ばして第3話へ
       await waitUntil(async () => (await activeTabNames(page)).includes(EP3), "［次へ］で第2話を飛ばして第3話が前に出る");
@@ -205,7 +212,7 @@ test("開いている話の［済み］で消えたメモが、原稿エディ�
     // 作者と同じく、原稿の本文を押してから Ctrl+Z
     await placeCaretAfter(frame, "一の一行目");
     await page.keyboard.press("Control+KeyZ");
-    await waitUntil(async () => (await composeText(frame)).includes("// 一のメモ"), "Ctrl+Z で「一のメモ」が画面に戻る").catch(
+    await waitUntil(async () => (await composeText(frame)).includes("// 一のメモ"), "Ctrl+Z で「一のメモ」が画面に戻る", 5_000).catch(
       async (error: unknown) => {
         throw new Error(
           `${String(error)}（本文：${JSON.stringify(await composeText(frame))}／未保存の印：${await tabIsDirty(page, EP1)}）`
@@ -255,7 +262,8 @@ test("校正・メモパネルの［次へ］を続けて押すと、2つの話�
         await panel.locator("#next").click();
         await waitUntil(
           async () => (await activeTabNames(page)).includes(episode),
-          `${index + 1}回目の［次へ］で ${episode} が前に出る`
+          `${index + 1}回目の［次へ］で ${episode} が前に出る`,
+          8_000
         ).catch(async (error: unknown) => {
           throw new Error(`${String(error)}（前に出ているタブ：${JSON.stringify(await activeTabNames(page))}）`);
         });

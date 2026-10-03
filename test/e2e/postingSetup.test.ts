@@ -21,15 +21,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
-import {
-  answerInput,
-  fillInput,
-  pickQuickItem,
-  quickInputMessage,
-  quickInputTitle,
-  waitForQuickInput,
-  waitQuickInputClosed,
-} from "./support/quickInput";
+import { answerInput, fillInput, quickInputMessage, waitForQuickInput, waitQuickInputClosed } from "./support/quickInput";
 import {
   expandTreeRow,
   showSidebar,
@@ -40,6 +32,7 @@ import {
 } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
+import { acceptQuickPick, pickQuickPickRow, quickPickTitle, toggleQuickPickRow } from "./support/workbenchDom";
 
 const WORK_ID = "1177354054880000000";
 const NEW_EPISODE_URL = `https://kakuyomu.jp/my/works/${WORK_ID}/episodes/new`;
@@ -72,22 +65,22 @@ test("新話投稿の初回は選んだサイトだけURLを訊いて別サイ�
       /* ── 新話投稿の初回（F-67） ── */
       await treeContextMenu(page, E2E_WORK_TITLE, "新話投稿");
       await waitForQuickInput(page, "を出すサイト");
-      await pickQuickItem(page, "カクヨム");
-      await page.keyboard.press("Enter");
+      await toggleQuickPickRow(page, "カクヨム");
+      await acceptQuickPick(page);
 
       // 選んだカクヨムだけを訊く
       await waitForQuickInput(page, "の新規エピソード投稿ページ");
-      expect(await quickInputTitle(page)).toBe("カクヨム の新規エピソード投稿ページ");
+      expect(await quickPickTitle(page)).toBe("カクヨム の新規エピソード投稿ページ");
       // 別のサイトのURLは、入力欄で断る（Enter で進めない）
       await fillInput(page, "https://ncode.syosetu.com/n0000aa/");
       await waitUntil(async () => (await quickInputMessage(page)) !== "", "別のサイトのURLに断りが出る");
       await page.keyboard.press("Enter");
-      expect(await quickInputTitle(page), "別のサイトのURLで先へ進みました").toBe("カクヨム の新規エピソード投稿ページ");
+      expect(await quickPickTitle(page), "別のサイトのURLで先へ進みました").toBe("カクヨム の新規エピソード投稿ページ");
       await answerInput(page, NEW_EPISODE_URL);
 
       // ほかのサイトのURLは訊かれず、どの話まで投稿済みかを訊く
       await waitForQuickInput(page, "どの話まで投稿済みですか");
-      await pickQuickItem(page, "第3話");
+      await pickQuickPickRow(page, "第3話");
       await waitQuickInputClosed(page, "基準線を選ぶと画面が閉じる");
 
       const ledgerFile = path.join(session.workFolder, "設定", "投稿状態.json");
@@ -108,11 +101,11 @@ test("新話投稿の初回は選んだサイトだけURLを訊いて別サイ�
       await treeContextMenu(page, E2E_WORK_TITLE, "投稿サイト設定");
       await waitForQuickInput(page, "を出すサイト");
       // 登録済みのカクヨムは選ばれた状態で出る。そのまま進める
-      await page.keyboard.press("Enter");
+      await acceptQuickPick(page);
       await waitForQuickInput(page, "カクヨム の新規エピソード投稿ページ");
       await answerInput(page, NEW_EPISODE_URL);
       await waitForQuickInput(page, "の投稿サイトの情報");
-      await pickQuickItem(page, "作品ID・作品ページ・ジャンルも入れる");
+      await pickQuickPickRow(page, "作品ID・作品ページ・ジャンルも入れる");
       await waitForQuickInput(page, "カクヨム での作品ID");
       await answerInput(page, WORK_ID);
       await waitForQuickInput(page, "カクヨム の作品ページのURL");
@@ -121,7 +114,7 @@ test("新話投稿の初回は選んだサイトだけURLを訊いて別サイ�
       await answerInput(page, "ハイファンタジー");
       // 記録があるので、基準線を引き直すかを訊かれる。引き直さない
       await waitForQuickInput(page, "の投稿済みの基準線");
-      await pickQuickItem(page, "引き直さずに終わる");
+      await pickQuickPickRow(page, "引き直さずに終わる");
       await waitQuickInputClosed(page, "投稿サイト設定が閉じる");
 
       // 執筆統計に「サイトの記録」の節が出て、作品ページへのリンクが入る
@@ -151,7 +144,7 @@ test("新話投稿の初回は選んだサイトだけURLを訊いて別サイ�
       expect(await siteText()).not.toContain("最新 日間");
       await treeContextMenu(page, E2E_WORK_TITLE, "ランキング記録");
       await waitForQuickInput(page, "のランキングを記録");
-      await pickQuickItem(page, "カクヨム");
+      await pickQuickPickRow(page, "カクヨム");
       await waitForQuickInput(page, "カクヨム のランキングの種別");
       await answerInput(page, "日間");
       await waitForQuickInput(page, "カクヨム の日間の順位");

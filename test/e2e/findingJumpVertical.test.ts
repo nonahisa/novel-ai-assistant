@@ -25,14 +25,14 @@ import { caretPosition, composeText, manuscriptFrames, openEpisode, selectionCol
 import { OPEN_PROPOSALS_LAUNCH, OPEN_PROPOSALS_PRESS, proposalPanelFrame, writeSampleFinding } from "./support/sampleFinding";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
-import { activeTabNames, clearNotifications, editorGroupTabs } from "./support/workbenchDom";
+import { activeTabNames, clearNotifications, editorGroupTabs, pressWorkbenchKey } from "./support/workbenchDom";
 
 const OPENED = "001_朝.txt";
 const UNOPENED = "002_夜.txt";
 
-/** 縦書きにするキー（使い捨ての keybindings.json。`episodeNavigation.test.ts` と同じ割り当て） */
-const OPEN_VERTICAL_KEY = "ctrl+alt+shift+f5";
-const OPEN_VERTICAL_PRESS = "Control+Alt+Shift+F5";
+/** 縦書きにするキー（使い捨ての keybindings.json。F1〜F12 は埋まったので文字キーとの組） */
+const OPEN_VERTICAL_KEY = "ctrl+alt+shift+v";
+const OPEN_VERTICAL_PRESS = "Control+Alt+Shift+KeyV";
 
 const LAUNCH = {
   keybindings: [...OPEN_PROPOSALS_LAUNCH.keybindings, { key: OPEN_VERTICAL_KEY, command: "novelai.openVertical" }],
@@ -113,7 +113,7 @@ async function placeTwoFindings(session: E2ESession): Promise<void> {
 /** 提案パネルを開き、話のファイル名で指摘の場所を押す口を返す */
 async function openProposals(page: Page): Promise<(fileName: string) => Promise<void>> {
   await clearNotifications(page);
-  await page.keyboard.press(OPEN_PROPOSALS_PRESS);
+  await pressWorkbenchKey(page, OPEN_PROPOSALS_PRESS);
   let found: Frame | undefined;
   await waitUntil(async () => {
     found = await proposalPanelFrame(page);
@@ -185,7 +185,7 @@ test("縦書きで書いている話の指摘では縦書きのまま行まで�
       const { page } = session;
       await placeTwoFindings(session);
       await openEpisode(page, OPENED, "朝の終わり");
-      await page.keyboard.press(OPEN_VERTICAL_PRESS);
+      await pressWorkbenchKey(page, OPEN_VERTICAL_PRESS);
       await waitUntil(async () => {
         const frame = await frameShowing(page, "朝の終わり");
         return frame !== undefined && (await isVertical(frame));

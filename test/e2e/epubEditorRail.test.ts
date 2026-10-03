@@ -19,9 +19,10 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
-import { answerInput, pickQuickItem, quickInputTitle, runCommand, waitForQuickInput } from "./support/quickInput";
+import { answerInput, runCommand, waitForQuickInput } from "./support/quickInput";
 import { E2E_WORK_TITLE, withVsCode } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
+import { pickQuickPickRow, quickPickTitle } from "./support/workbenchDom";
 
 const EPISODES = [
   { name: "第1話_はじまり.txt", text: "一話の本文。\n" },
@@ -88,7 +89,7 @@ async function openEpubEditor(page: Page): Promise<Frame> {
   await runCommand(page, "EPUBエディター（試作）");
   // 作品を訊かれたら選ぶ（登録している作品は1つ）
   await page.waitForTimeout(500);
-  if ((await quickInputTitle(page)) !== "") await pickQuickItem(page, E2E_WORK_TITLE);
+  if ((await quickPickTitle(page)) !== undefined) await pickQuickPickRow(page, E2E_WORK_TITLE);
   let found: Frame | undefined;
   await waitUntil(async () => {
     found = await epubFrame(page);
@@ -152,7 +153,7 @@ test("EPUBエディターで、打ちかけの題名が面を移っても残り�
     await waitUntil(async () => await chapterEntry.isVisible().catch(() => false), "「この後ろに挿入」に「章区切り」が出る");
     await chapterEntry.click();
     await waitForQuickInput(page, "章区切りを入れる");
-    await pickQuickItem(page, "第3話");
+    await pickQuickPickRow(page, "第3話");
     await waitForQuickInput(page, "ここから章を始める");
     await answerInput(page, "第三章　山場");
     await railRow(epub, "目次").click();

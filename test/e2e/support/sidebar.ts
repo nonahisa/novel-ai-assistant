@@ -13,10 +13,14 @@
  */
 import type { Locator, Page } from "playwright-core";
 import { waitUntil } from "./wait";
+import { pressWorkbenchKey } from "./workbenchDom";
 
-/** 左の列を出すキー（使い捨ての keybindings.json に書く） */
-export const SHOW_SIDEBAR_KEY = "ctrl+alt+shift+f1";
-const SHOW_SIDEBAR_PRESS = "Control+Alt+Shift+F1";
+/**
+ * 左の列を出すキー（使い捨ての keybindings.json に書く）。F1〜F12 は埋まったので、
+ * 文字キーとの組にする（製品の package.json にも VS Code の既定にも無い組）
+ */
+export const SHOW_SIDEBAR_KEY = "ctrl+alt+shift+j";
+const SHOW_SIDEBAR_PRESS = "Control+Alt+Shift+KeyJ";
 
 /** 左の列を使う件が `withVsCode` の起こし方へ渡すもの */
 export const SIDEBAR_LAUNCH = {
@@ -26,7 +30,8 @@ export const SIDEBAR_LAUNCH = {
 
 /** 左の列（統合小説執筆環境）を出し、作品一覧に作品の行が出るまで待つ */
 export async function showSidebar(page: Page, workTitle: string): Promise<void> {
-  await page.keyboard.press(SHOW_SIDEBAR_PRESS);
+  // WebView を開いたあとでも本体のキー割り当てに届くよう、焦点を本体へ戻してから押す
+  await pressWorkbenchKey(page, SHOW_SIDEBAR_PRESS);
   await waitUntil(async () => (await treeRow(page, workTitle).count()) > 0, `作品一覧に「${workTitle}」の行が出る`);
 }
 

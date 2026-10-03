@@ -1,71 +1,40 @@
 /**
- * コマンドパレット・選択の画面（QuickPick）・入力欄（InputBox）を押す（設計書6.113）。
+ * コマンドパレットと入力欄（InputBox）を押す（設計書6.113）。
  *
- * 作者が詳細メニューや右クリックから始めて、上に出る選択の画面で選び、
- * 入力欄に打って Enter で進む——その道を、そのまま押す。
- * **製品にテスト専用の口を足さずに済む**（キーを割り当てなくても、
+ * 作者が詳細メニューや右クリックから始めて、上に出る入力欄に打って Enter で進む——
+ * その道を、そのまま押す。**製品にテスト専用の口を足さずに済む**（キーを割り当てなくても、
  * パレットに出るコマンドは名前で呼べる）。
  *
- * VS Code 本体の DOM に頼るので、`workbenchDom.ts` と同じく**クラス名はここだけ**に
- * 書く（`workbenchDom.ts` は別の担当も触っているので、書き足さずに分けた）。
+ * 選ぶ画面（QuickPick）の部品は `workbenchDom.ts`（`waitForQuickPick`・`pickQuickPickRow`・
+ * `toggleQuickPickRow`・`acceptQuickPick`）にある。ここに置くのは、それで足りない
+ * 「入力欄」と「題の一部で待つ」「パレットから走らせる」だけ。
+ * VS Code 本体の DOM のクラス名に頼るので、`workbenchDom.ts` と同じく版で壊れたらここを直す。
  * 確かめた版：1.138.0（2026-10-04）。
  */
 import type { Page } from "playwright-core";
 import { waitUntil } from "./wait";
+import { quickPickRows, quickPickTitle } from "./workbenchDom";
 
 const WIDGET = ".quick-input-widget";
 
-/** 選択の画面・入力欄が出ているか */
-export async function quickInputVisible(page: Page): Promise<boolean> {
-  return page
-    .locator(WIDGET)
-    .first()
-    .isVisible()
-    .catch(() => false);
-}
-
-/** 選択の画面・入力欄の題（出ていなければ空文字） */
-export async function quickInputTitle(page: Page): Promise<string> {
-  if (!(await quickInputVisible(page))) return "";
-  return ((await page.locator(`${WIDGET} .quick-input-title`).first().textContent().catch(() => "")) ?? "").trim();
-}
-
 /** 入力欄の下の説明・検証の文（出ていなければ空文字） */
 export async function quickInputMessage(page: Page): Promise<string> {
-  if (!(await quickInputVisible(page))) return "";
+  if ((await quickPickTitle(page)) === undefined) return "";
   return ((await page.locator(`${WIDGET} .quick-input-message`).first().textContent().catch(() => "")) ?? "").trim();
 }
 
-/** 選択の画面に並んでいる行の名前 */
-export async function quickPickLabels(page: Page): Promise<string[]> {
-  return page.evaluate((widget) => {
-    const root = document.querySelector(widget);
-    if (!root) return [];
-    return Array.from(root.querySelectorAll(".monaco-list-row")).map((row) =>
-      (row.querySelector(".label-name")?.textContent ?? row.getAttribute("aria-label") ?? "").trim()
-    );
-  }, WIDGET);
-}
-
-/** 題に `title` を含む選択の画面・入力欄が出るまで待つ */
+/**
+ * 題に `title` を**含む**選ぶ画面・入力欄が出るまで待つ。
+ *
+ * `waitForQuickPick` は題の完全一致で待ち、行が出揃うまで待つ。入力欄（行が無い）と、
+ * 題に作品名などが入って決め打ちしにくい画面は、こちらで待つ
+ */
 export async function waitForQuickInput(page: Page, title: string, timeoutMs = 15_000): Promise<void> {
-  await waitUntil(async () => (await quickInputTitle(page)).includes(title), `「${title}」の画面が出る`, timeoutMs).catch(
+  await waitUntil(async () => ((await quickPickTitle(page)) ?? "").includes(title), `「${title}」の画面が出る`, timeoutMs).catch(
     async (error: unknown) => {
-      throw new Error(`${String(error)}（いまの題：「${await quickInputTitle(page)}」）`);
+      throw new Error(`${String(error)}（いまの題：「${(await quickPickTitle(page)) ?? ""}」）`);
     }
   );
-}
-
-/**
- * 選択の画面で、名前に `label` を含む行を押す。
- * 複数選べる画面（canPickMany）では、押すと印が付く（付け外し）。
- */
-export async function pickQuickItem(page: Page, label: string): Promise<void> {
-  const row = page.locator(`${WIDGET} .monaco-list-row`, { hasText: label }).first();
-  await row.waitFor({ state: "visible", timeout: 10_000 }).catch(async (error: unknown) => {
-    throw new Error(`${String(error)}（並び：${(await quickPickLabels(page)).join(" / ")}）`);
-  });
-  await row.click();
 }
 
 /**
@@ -88,9 +57,9 @@ export async function fillInput(page: Page, text: string): Promise<void> {
   else await page.keyboard.insertText(text);
 }
 
-/** 選択の画面・入力欄が閉じるまで待つ */
+/** 選ぶ画面・入力欄が閉じるまで待つ */
 export async function waitQuickInputClosed(page: Page, label: string): Promise<void> {
-  await waitUntil(async () => !(await quickInputVisible(page)), label, 10_000);
+  await waitUntil(async () => (await quickPickTitle(page)) === undefined && !(await page.locator(`${WIDGET} input`).first().isVisible().catch(() => false)), label, 10_000);
 }
 
 /**
@@ -106,16 +75,16 @@ export async function runCommand(page: Page, title: string): Promise<void> {
   await input.waitFor({ state: "visible" });
   await page.keyboard.insertText(title);
   let index = -1;
+  const labels = async () => (await quickPickRows(page)).map((row) => row.label);
   await waitUntil(
     async () => {
-      const labels = await quickPickLabels(page);
-      index = labels.findIndex((name) => name === title || name.endsWith(`: ${title}`));
+      index = (await labels()).findIndex((name) => name === title || name.endsWith(`: ${title}`));
       return index >= 0;
     },
     `コマンドパレットに「${title}」が出る`,
     10_000
   ).catch(async (error: unknown) => {
-    throw new Error(`${String(error)}（並び：${(await quickPickLabels(page)).join(" / ")}）`);
+    throw new Error(`${String(error)}（並び：${(await labels()).join(" / ")}）`);
   });
-  await page.locator(`${WIDGET} .monaco-list-row`).nth(index).click();
+  await page.locator(`${WIDGET} .quick-input-list .monaco-list-row`).nth(index).click();
 }
