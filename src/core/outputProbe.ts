@@ -143,6 +143,19 @@ export function nextOutputProbeSize(
 }
 
 /**
+ * 時間切れで試さなかった量の断り（作者の裁定、2026-10-03。設計書6.49.3）。
+ *
+ * **「測れなかった」と「試さなかった」を分けて言う。** 時間切れの行数は
+ * 送ったが答えが返らなかった量、それより上は送っていない量である。
+ * どちらも「書けない」と決まったわけではない。
+ */
+export function describeOutputTimeoutSkip(timedOutLines: number | undefined): string {
+  if (timedOutLines === undefined) return "";
+  const lines = timedOutLines.toLocaleString("ja-JP");
+  return `${lines} 行は時間切れで測れず、それより長い量は試していません。`;
+}
+
+/**
  * 結果を作者へ伝える言葉。
  *
  * **トークン数を主にする。** 設定（`novelai.maxOutputTokens`）も

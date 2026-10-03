@@ -145,11 +145,22 @@ export function splitSingleCharTerms(terms: readonly RubyTerm[]): {
  *
  * **1文字の語はここでも飛ばす。** 呼び出し側が `splitSingleCharTerms` を
  * 通し忘れても本文を割らないように、二重に守る。
+ *
+ * **長い語は、振るかどうかに関わらず、出てくる場所すべてを先に取る。**
+ * 「最初の1回だけ」で長い語が1回目しか場所を取らないと、2回目の
+ * 「密倉文佳」の中の「文佳」に振って `密倉{文佳|ふみか}` と割れる
+ * （0.96.10 まで）。作者が外した語（`excluded`）も同じで、振らないが場所は
+ * 取る——外した「密倉文佳」の中へ「文佳」が入り込むのを防ぐため。
+ * こうしておくと、ある語を外しても**ほかの語の件数は変わらない**ので、
+ * 確認画面は数え直さずに引き算で済む（`excludeRubyTerms`）。
+ *
+ * @param excluded 作者が確認画面で外した語（`RubyTerm.text`）。振らない
  */
 export function planRubyInsertions(
   text: string,
   terms: readonly RubyTerm[],
-  scope: RubyScope
+  scope: RubyScope,
+  excluded: ReadonlySet<string> = new Set()
 ): RubyInsertion[] {
   const usable = terms
     .filter(
@@ -166,6 +177,7 @@ export function planRubyInsertions(
   const done = scope === "first" ? rubiedBases(text) : new Set<string>();
 
   for (const term of usable) {
+    const skip = excluded.has(term.text);
     let from = 0;
     for (;;) {
       const at = text.indexOf(term.text, from);
@@ -173,15 +185,16 @@ export function planRubyInsertions(
       const end = at + term.text.length;
       from = end;
 
-      if (scope === "first" && done.has(term.text)) break;
       if (overlaps(at, end, blocked)) continue;
       // 長い名前がすでに取った場所へ、短い名前を重ねない
       if (overlaps(at, end, taken)) continue;
-
-      found.push({ start: at, end, term });
+      // 振らない出現も場所は取る（上の説明）
       taken.push([at, end]);
+
+      if (skip) continue;
+      if (scope === "first" && done.has(term.text)) continue;
+      found.push({ start: at, end, term });
       done.add(term.text);
-      if (scope === "first") break;
     }
   }
 
@@ -249,6 +262,55 @@ function compareTermTotals(
   return a.term.text < b.term.text ? -1 : a.term.text > b.term.text ? 1 : 0;
 }
 
+/**
+ * 全話を合算した語ごとの件数（0件の語は除く）。件数の多い順。
+ *
+ * 確認画面の内訳（上位だけ）と、語ごとに外す選択肢（全部）の両方が
+ * ここから数える——別々に数えると、片方だけ直したときに食い違う。
+ */
+export function rubyTermTotals(
+  results: readonly RubyFileResult[]
+): Array<{ term: RubyTerm; count: number }> {
+  const byText = new Map<string, { term: RubyTerm; count: number }>();
+  for (const result of results) {
+    for (const entry of result.byTerm ?? []) {
+      const found = byText.get(entry.term.text);
+      if (found) {
+        found.count += entry.count;
+      } else {
+        byText.set(entry.term.text, { term: entry.term, count: entry.count });
+      }
+    }
+  }
+  return [...byText.values()]
+    .filter((entry) => entry.count > 0)
+    .sort(compareTermTotals);
+}
+
+/**
+ * 作者が外した語のぶんを、話ごとの件数から引く（作者の裁定、2026-10-03）。
+ *
+ * **数え直さずに引き算で済むのは、`planRubyInsertions` が外した語にも
+ * 場所を取らせているからである**（ある語を外しても、ほかの語の当たりは
+ * 変わらない）。読み直しの失敗などで数えられなかった話（`skipped`）は
+ * そのまま残す。
+ */
+export function excludeRubyTerms(
+  results: readonly RubyFileResult[],
+  excluded: ReadonlySet<string>
+): RubyFileResult[] {
+  if (excluded.size === 0) return [...results];
+  return results.map((result) => {
+    if (!result.byTerm) return result;
+    const byTerm = result.byTerm.filter((entry) => !excluded.has(entry.term.text));
+    return {
+      ...result,
+      count: byTerm.reduce((sum, entry) => sum + entry.count, 0),
+      byTerm,
+    };
+  });
+}
+
 /** 語ごとの件数を、確認画面に出す行数の上限 */
 const TERM_TOTAL_LINES = 12;
 
@@ -262,21 +324,7 @@ const TERM_TOTAL_LINES = 12;
 export function describeRubyTermTotals(
   results: readonly RubyFileResult[]
 ): string {
-  const byText = new Map<string, { term: RubyTerm; count: number }>();
-  for (const result of results) {
-    for (const entry of result.byTerm ?? []) {
-      const found = byText.get(entry.term.text);
-      if (found) {
-        found.count += entry.count;
-      } else {
-        byText.set(entry.term.text, { term: entry.term, count: entry.count });
-      }
-    }
-  }
-
-  const totals = [...byText.values()]
-    .filter((entry) => entry.count > 0)
-    .sort(compareTermTotals);
+  const totals = rubyTermTotals(results);
   if (totals.length === 0) return "";
 
   const lines = totals
@@ -309,8 +357,11 @@ export function buildRubyConfirm(options: {
   /** 「選んだ1話」「すべての話」など、どこへ振るか */
   scopeLabel: string;
   fileName: (filePath: string) => string;
+  /** 作者が語ごとの選択で外した語（`results` からは引いてある前提） */
+  excluded?: readonly string[];
 }): { title: string; detail: string } {
   const { results, terms, scopeLabel, fileName } = options;
+  const excluded = options.excluded ?? [];
   const total = results.reduce((sum, entry) => sum + entry.count, 0);
 
   const detail = [
@@ -326,6 +377,9 @@ export function buildRubyConfirm(options: {
     detail.push("", "語ごとの件数", byTerm);
   }
   detail.push("", "すでにルビや傍点になっているところへは振りません。");
+  if (excluded.length > 0) {
+    detail.push(describeExcludedTerms(excluded));
+  }
   if (terms.singleChar.length > 0) {
     detail.push(describeSingleCharTerms(terms.singleChar));
   }
@@ -339,6 +393,13 @@ export function buildRubyConfirm(options: {
     title: `${scopeLabel}に、${total}件のルビを振りますか？`,
     detail: detail.join("\n"),
   };
+}
+
+/** 作者が外した語を、確認画面に1行で出す（多いと読めないので5語まで） */
+export function describeExcludedTerms(texts: readonly string[]): string {
+  const shown = texts.slice(0, 5);
+  const rest = texts.length > shown.length ? `ほか${texts.length - shown.length}語` : "";
+  return `外した語（${shown.join("、")}${rest ? "、" + rest : ""}）には振りません。`;
 }
 
 /** 外した1文字の語を、確認画面に1行で出す（多いと読めないので5語まで） */

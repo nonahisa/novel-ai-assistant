@@ -1299,6 +1299,37 @@ export async function extractCharacters(
     { label: "設定資料の抽出", workFolder: work.folderPath }
   );
 
+  /*
+    **別人として分けた記録に中身が入らなかったら、取り下げを持ちかける**
+    （作者の裁定、2026-10-03。設計書6.5.8）。
+
+    「見つからなかった」と言えるのは、全話を読み切って保存まで済んだとき
+    だけである——中止（上で返っている）・失敗したチャンク・競合で外した話・
+    接続断・分あたりの上限での打ち切り・更新案の保留の失敗があれば訊かない。
+    **待たない**：完了の知らせと同じく、抽出の「動いている」札を持ったまま
+    確認の画面を開いておかない（2026-09-23 の実機と同じ理由）
+  */
+  if (
+    characterPlan &&
+    failures.length === 0 &&
+    conflicted.length === 0 &&
+    !connectivityLost &&
+    !rateLimitGaveUp &&
+    settingsNoticePrefix === ""
+  ) {
+    const updatedIds = new Set(updatedCharacters.map((record) => record.id));
+    void import("./offerSeparationRetraction.js")
+      .then(({ offerSeparationRetraction }) =>
+        offerSeparationRetraction(work, loaded.characters, updatedIds)
+      )
+      .catch((error: unknown) =>
+        logStep(
+          "分けた記録の取り下げを訊けませんでした: " +
+            (error instanceof Error ? error.message : String(error))
+        )
+      );
+  }
+
   // **取り込んだ話を書き留める**（設計書6.21.3）。
   // 独り言が「あと何話ぶん残っているか」を数えるための記録である。
   //

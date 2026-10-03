@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   applyRubyInsertions,
+  buildRubyConfirm,
   canRevertRuby,
   countByTerm,
   describeRubyResults,
   describeRubyTermTotals,
+  excludeRubyTerms,
   planRubyInsertions,
+  rubyTermTotals,
   splitSingleCharTerms,
   type RubyTerm,
 } from "../../../src/core/settingsRuby";
@@ -324,5 +327,102 @@ describe("戻せるかどうか", () => {
 
   it("振ったあとに変わっていたら戻さない", () => {
     expect(canRevertRuby({ hashAfter: "abc" }, "def")).toBe(false);
+  });
+});
+
+/**
+ * 語ごとに外す（作者の裁定、2026-10-03「語ごとに外せるようにする」）。
+ *
+ * 2文字以上の語が、別の語の一部として当たることがある（長いほうを登録して
+ * いないとき）。語ごとの件数を見て気づいたら、その語だけ外して振れる。
+ */
+describe("語ごとに外す", () => {
+  const family: RubyTerm[] = [
+    { text: "密倉文佳", reading: "みつくらふみか" },
+    { text: "文佳", reading: "ふみか" },
+    { text: "奥原", reading: "おくはら" },
+  ];
+
+  it("外した語には振らない", () => {
+    const text = "奥原と文佳が来た。";
+    const plan = planRubyInsertions(text, family, "all", new Set(["奥原"]));
+    expect(applyRubyInsertions(text, plan)).toBe("奥原と{文佳|ふみか}が来た。");
+  });
+
+  /** **外した長い語の中へ、短い語が入り込まない。** 入り込むと本文が割れる */
+  it("外した長い語の場所には、短い語も振らない", () => {
+    const text = "密倉文佳が来た。";
+    const plan = planRubyInsertions(text, family, "all", new Set(["密倉文佳"]));
+    expect(applyRubyInsertions(text, plan)).toBe(text);
+  });
+
+  /**
+   * 「最初の1回だけ」でも、2回目に出てきた長い語の中へ短い語を入れない。
+   * 0.96.10 までは長い語が最初の1回しか場所を取らず、2回目の「密倉文佳」の
+   * 中の「文佳」に振って `密倉{文佳|ふみか}` と割っていた。
+   */
+  it("最初の1回だけでも、2回目の長い語の中へ短い語を入れない", () => {
+    const text = "密倉文佳が来た。密倉文佳は笑った。";
+    const plan = planRubyInsertions(text, family, "first");
+    expect(applyRubyInsertions(text, plan)).toBe(
+      "{密倉文佳|みつくらふみか}が来た。密倉文佳は笑った。"
+    );
+  });
+
+  it("語の一覧は全話を合算し、件数の多い順に全部並べる", () => {
+    const results = [
+      {
+        filePath: "a.md",
+        count: 3,
+        byTerm: [
+          { term: family[1], count: 2 },
+          { term: family[2], count: 1 },
+        ],
+      },
+      { filePath: "b.md", count: 1, byTerm: [{ term: family[2], count: 1 }] },
+    ];
+    expect(
+      rubyTermTotals(results).map((entry) => `${entry.term.text}:${entry.count}`)
+    ).toEqual(["奥原:2", "文佳:2"]);
+  });
+
+  it("外した語の件数は、話ごとの件数からも見出しの合計からも消える", () => {
+    const results = [
+      {
+        filePath: "a.md",
+        count: 3,
+        byTerm: [
+          { term: family[1], count: 2 },
+          { term: family[2], count: 1 },
+        ],
+      },
+      { filePath: "b.md", count: 1, byTerm: [{ term: family[2], count: 1 }] },
+    ];
+    const kept = excludeRubyTerms(results, new Set(["奥原"]));
+    expect(kept.map((entry) => entry.count)).toEqual([2, 0]);
+    const { title, detail } = buildRubyConfirm({
+      results: kept,
+      terms: { usable: family, singleChar: [] },
+      scopeLabel: "すべての話（2話）",
+      fileName: (filePath) => filePath,
+      excluded: ["奥原"],
+    });
+    expect(title).toBe("すべての話（2話）に、2件のルビを振りますか？");
+    expect(detail).not.toContain("件　奥原");
+    expect(detail).toContain("外した語（奥原）には振りません。");
+  });
+
+  /** 外す前に数えた件数から引いた値と、外して数え直した値が同じであること */
+  it("外して数え直しても、引き算と同じ件数になる", () => {
+    const text = "密倉文佳と文佳と奥原。密倉文佳と奥原。";
+    for (const scope of ["first", "all"] as const) {
+      const all = planRubyInsertions(text, family, scope);
+      const before = [{ filePath: "a.md", count: all.length, byTerm: countByTerm(all) }];
+      for (const term of family) {
+        const excluded = new Set([term.text]);
+        const recount = planRubyInsertions(text, family, scope, excluded).length;
+        expect(excludeRubyTerms(before, excluded)[0].count).toBe(recount);
+      }
+    }
   });
 });

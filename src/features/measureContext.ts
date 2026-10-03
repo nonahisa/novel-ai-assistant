@@ -49,12 +49,14 @@ import {
   buildOutputProbePrompt,
   countOutputLines,
   describeOutputProbeResult,
+  describeOutputTimeoutSkip,
   nextOutputProbeSize,
   startOutputProbeState,
   MAX_OUTPUT_LINES,
   OUTPUT_PROBE_SYSTEM_PROMPT,
   type OutputProbeState,
 } from "../core/outputProbe";
+import { describeProbeProgress, maxProbeRounds } from "../core/probeRounds";
 import {
   MAX_TIMEOUT_SECONDS,
   PROBE_MAX_TIMEOUT_SECONDS,
@@ -1044,7 +1046,10 @@ async function runMeasurement(
         const round: ProbeState = state;
         const size = round.current;
         progress.report({
-          message: `${size.toLocaleString("ja-JP")} 字を送っています（${rounds}回目）…`,
+          // **あと最大何回かを添える**（作者の裁定、2026-10-03。設計書6.49.3）
+          message:
+            `${size.toLocaleString("ja-JP")} 字を送っています` +
+            `${describeProbeProgress(rounds, maxProbeRounds(round, nextProbeSize))}…`,
         });
 
         let outcome: RoundOutcome | undefined;
@@ -1838,6 +1843,8 @@ async function measureOutputLimit(
    * （`ai/outputLimit.ts` の `resolveOutputLimitForSend`）。
    */
   let timedOut = false;
+  /** 時間切れになったいちばん短い行数。これ以上は試していない（2026-10-03） */
+  let timedOutLines: number | undefined;
 
   logStep(
     `書ける量の測定を開始: 上限 ${ceilingLines} 行 / ` +
@@ -1861,9 +1868,14 @@ async function measureOutputLimit(
         const round: OutputProbeState = state;
         rounds += 1;
         progress.report({
+          // **あと最大何回かを添える**（作者の裁定、2026-10-03。設計書6.49.3）。
+          // 時間切れ1回につき待ち時間ぶん止まるので、終わりの見当が要る
           message:
             `${round.current.toLocaleString("ja-JP")} 行を頼んでいます` +
-            `（${rounds}回目）…`,
+            `${describeProbeProgress(
+              rounds,
+              maxProbeRounds(round, nextOutputProbeSize)
+            )}…`,
         });
 
         const sentAt = Date.now();
@@ -1952,9 +1964,18 @@ async function measureOutputLimit(
             // **時間切れも「その量は書けない」である。** 待っても返って
             // こない長さは、作者にとって書けないのと変わらない。
             // ここで探索を止めると、書ける量が分からないまま終わる
+            // **時間切れの量より上は試さない**（作者の裁定、2026-10-03）。
+            // 探索はこの行数を上の端にするので、以後はこれより短くしか
+            // 頼まない。「測れなかった（送って時間切れ）」と「試さなかった
+            // （送っていない）」を分けて記録に残す
+            timedOutLines =
+              timedOutLines === undefined
+                ? round.current
+                : Math.min(timedOutLines, round.current);
             logStep(
               `書ける量の測定：${round.current}行 → ${seconds}秒で時間切れ。` +
-                "書き切れなかったものとして数えます。"
+                "書き切れなかったものとして数えます" +
+                `（${round.current}行以上は、このあと試しません）。`
             );
             completed = false;
             // **数え方を台帳にも残す。** この結果は上限として使わせない
@@ -2094,7 +2115,8 @@ async function measureOutputLimit(
     // 出しているのと同じ）。時間切れ混じりの値は、送る上限には使わない
     (timedOut
       ? "途中で時間切れになった回があるため、この値は1回の応答の上限としては" +
-        "使いません（送る量の見立てにだけ使います）。"
+        "使いません（送る量の見立てにだけ使います）。" +
+        describeOutputTimeoutSkip(timedOutLines)
       : "") +
     // **速度も一緒に見せる**（作者の要望、2026-09-06）。ここで出しておくと、
     // 一覧を開かなくても「いま測ったモデルが速いのか」がその場で分かる

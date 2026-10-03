@@ -47,6 +47,8 @@ const OVERWRITE_ALLOWED: Record<string, string> = {
   "extractedIndexStore.ts": "抽出済みの話の記録。再抽出で作り直せる",
   "narratorNoticeStore.ts":
     "語り手の断りを出した呼び名の覚書。消えても断りがもう一度出るだけで、作者の書いたものは失われない",
+  "separationOfferStore.ts":
+    "分けた記録の取り下げを訊いた覚書。消えても次の抽出でもう一度訊くだけで、作者の書いたものは失われない",
   "writingStatsStore.ts": "端末ごとの執筆量。読むときに合算する（5.5.6）",
   "sessionStore.ts":
     "最終編集環境の記録（5.5.2）。端末ごとに分けてあり、次に開いたときに書き直される",

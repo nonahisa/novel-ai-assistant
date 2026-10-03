@@ -14,7 +14,9 @@ import {
   canRevertRuby,
   countByTerm,
   describeRubyResults,
+  excludeRubyTerms,
   planRubyInsertions,
+  rubyTermTotals,
   splitSingleCharTerms,
   type RubyFileResult,
   type RubyScope,
@@ -175,7 +177,8 @@ async function pickScope(
 async function confirm(
   results: readonly RubyFileResult[],
   terms: { usable: readonly RubyTerm[]; singleChar: readonly RubyTerm[] },
-  scopeLabel: string
+  scopeLabel: string,
+  excluded: readonly string[] = []
 ): Promise<boolean> {
   const total = results.reduce((sum, entry) => sum + entry.count, 0);
   if (total === 0) {
@@ -204,6 +207,7 @@ async function confirm(
     terms,
     scopeLabel,
     fileName: (filePath) => path.basename(filePath),
+    excluded,
   });
 
   const answer = await vscode.window.showWarningMessage(
@@ -363,11 +367,70 @@ export async function applySettingsRuby(
     }
   }
 
-  if (!(await confirm(results, { usable, singleChar }, target.label))) {
+  const excluded = await pickExcludedTerms(results);
+  if (!excluded) return false;
+  const kept = excludeRubyTerms(results, excluded);
+  if (excluded.size > 0) {
+    // 外したことは作品のログにも残す（あとで「なぜ振られていないのか」を追えるように）
+    useLogFile(work.folderPath);
+    logStep(`設定資料からのルビ：外した語 ${[...excluded].join("、")}`);
+  }
+
+  if (
+    !(await confirm(kept, { usable, singleChar }, target.label, [...excluded]))
+  ) {
     return false;
   }
 
-  return writeAll(work, results, usable, scope);
+  return writeAll(work, kept, usable, scope, excluded);
+}
+
+/**
+ * 語ごとに振るかを選ぶ（作者の裁定、2026-10-03「語ごとに外せるようにする」）。
+ *
+ * 2文字以上の語が、別の語の一部として当たることがある（長いほうを
+ * 登録していないとき）。それまでは語ごとの件数を見て気づき、全部やめる
+ * しかなかった。**既定は全部選んだまま**で、外した語だけ振らない。
+ *
+ * **外した語は覚えない（1回ごと）。** 外すかどうかは「今回の本文で、その語が
+ * どこに当たったか」で決まる。覚えると、別の話・別の回の正しい当たりまで
+ * 黙って飛ばす。範囲・種類の選択も覚えていないのと揃える（設計書6.12.5）。
+ *
+ * 当たった語が1つだけなら訊かない（外すことは、やめることと同じ）。
+ * 取りやめ（Esc）なら undefined。
+ */
+async function pickExcludedTerms(
+  results: readonly RubyFileResult[]
+): Promise<Set<string> | undefined> {
+  const totals = rubyTermTotals(results);
+  if (totals.length <= 1) return new Set();
+
+  type TermItem = vscode.QuickPickItem & { termText: string };
+  const items: TermItem[] = totals.map((entry) => ({
+    label: entry.term.text,
+    description: `${entry.count}件　${entry.term.reading}`,
+    picked: true,
+    termText: entry.term.text,
+  }));
+  const chosen = await vscode.window.showQuickPick<TermItem>(items, {
+    canPickMany: true,
+    title: "ルビを振る語を選んでください",
+    placeHolder:
+      "外したい語のチェックを外してください（ほかの語の一部に当たっている語など）",
+    ignoreFocusOut: true,
+  });
+  if (!chosen) return undefined;
+  if (chosen.length === 0) {
+    // **全部外したのに「見つかりませんでした」と言わない**（事実と違う）
+    void vscode.window.showInformationMessage(
+      "すべての語を外したので、ルビは振りませんでした。"
+    );
+    return undefined;
+  }
+  const keep = new Set(chosen.map((item) => item.termText));
+  return new Set(
+    totals.map((entry) => entry.term.text).filter((text) => !keep.has(text))
+  );
 }
 
 /**
@@ -396,7 +459,9 @@ async function writeAll(
   work: WorkEntry,
   results: readonly RubyFileResult[],
   terms: readonly RubyTerm[],
-  scope: RubyScope
+  scope: RubyScope,
+  /** 作者が外した語。振らないが、長い語として場所は取る（`planRubyInsertions`） */
+  excluded: ReadonlySet<string>
 ): Promise<boolean> {
   const done: AppliedRuby[] = [];
   const failed: RubyFileResult[] = [];
@@ -412,7 +477,12 @@ async function writeAll(
 
       try {
         const current = await readTextFile(entry.filePath);
-        const insertions = planRubyInsertions(current.text, terms, scope);
+        const insertions = planRubyInsertions(
+          current.text,
+          terms,
+          scope,
+          excluded
+        );
         if (insertions.length === 0) continue;
 
         const result = await writeTextFilePreservingFormat(
