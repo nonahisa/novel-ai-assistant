@@ -107,6 +107,36 @@ export async function placeCaretAfter(frame: Frame, needle: string): Promise<voi
 }
 
 /**
+ * 組んで書く面で、`needle` の字を選ぶ（その面へ焦点も移す）。
+ *
+ * 見えている字で選ぶ——記法の印（《《 》》など）が組んだ面に出ていなくても、
+ * 作者が選ぶのと同じ「見えている語」を選ぶ。`needle` は1つの字の並び
+ * （組んだ面の1つの節点の中）にあること
+ */
+export async function selectText(frame: Frame, needle: string): Promise<void> {
+  await frame.locator("#compose").click();
+  const ok = await frame.evaluate((text) => {
+    const compose = document.getElementById("compose");
+    if (!compose) return false;
+    compose.focus();
+    const walker = document.createTreeWalker(compose, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const at = (node.textContent ?? "").indexOf(text);
+      if (at < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, at + text.length);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return true;
+    }
+    return false;
+  }, needle);
+  if (!ok) throw new Error(`組んで書く面に「${needle}」が見つからず、選べません`);
+}
+
+/**
  * 組んで書く面の選択が畳まれているか（カーソルだけで、字を選んでいないか）。
  *
  * 行へ飛んだあとに**行が選ばれていない**ことを見る（作者の裁定、2026-10-03）。

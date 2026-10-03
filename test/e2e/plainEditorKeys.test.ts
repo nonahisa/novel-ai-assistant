@@ -1,0 +1,108 @@
+/**
+ * 原稿エディター以外の画面では、Ctrl+/ と F8 が VS Code のふだんの動きのまま
+ * （画面の自動テスト、設計書6.25.10・6.113）。
+ *
+ * 実機確認リスト 0.96.17 の項目を機械へ移したもの（2026-10-03）。この拡張機能の
+ * Ctrl+/（メモを足す）と F8（次のメモへ）は、**原稿エディターが前面のときだけ**効く
+ * 割り当てにしてある。素のテキストエディターで開いた話や `.md` で、本体の
+ * 「行コメント」「次の問題」を奪っていないことを見る。
+ *
+ * 原稿を素のエディターで開くため、この件だけ `workbench.editorAssociations` を空にして起こす
+ * （既定の起こし方は、原稿を横書きの原稿エディターへ関連付けている）。
+ * `.md` の「次の問題」は、本体の Markdown の検査（`markdown.validate.enabled`）に
+ * 無いファイルへのリンクを見つけさせて作る。
+ */
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { expect, test } from "vitest";
+import { withVsCode, type E2ESession } from "./support/vscodeApp";
+import { holdsFor, waitUntil } from "./support/wait";
+import {
+  focusTextEditor,
+  markerWidgetShown,
+  quickOpen,
+  textEditorCursor,
+  textEditorVisibleText,
+} from "./support/workbenchDom";
+
+const TXT = "001_はじまり.txt";
+const TXT_TEXT = "一行目の文。\n二行目の文。\n// 先のメモ\n四行目の文。\n";
+const MD = "002_つづき.md";
+const MD_TEXT = "一行目の文。\n\n[無い話へのリンク](./無い話.md)\n";
+
+async function fileText(session: E2ESession, name: string): Promise<string> {
+  return (await readFile(path.join(session.manuscriptFolder, name), "utf8")).replace(/\r\n/g, "\n");
+}
+
+/** 素のエディターで開き、本文が見えるまで待って、1行目の頭へカーソルを置く */
+async function openPlain(session: E2ESession, name: string, expected: string): Promise<void> {
+  const { page } = session;
+  await quickOpen(page, name);
+  await waitUntil(async () => (await textEditorVisibleText(page)).includes(expected), `素のエディターで「${name}」が開く`, 20_000);
+  await focusTextEditor(page);
+  await page.keyboard.press("Control+Home");
+  await waitUntil(async () => (await textEditorCursor(page))?.line === 1, `「${name}」の1行目へカーソルが来る`, 5_000);
+}
+
+test("素のテキストエディターと .md では、Ctrl+/ と F8 が本体の動き（行コメント・次の問題）のまま", async () => {
+  await withVsCode(
+    "素のエディターのキー",
+    [
+      { name: TXT, text: TXT_TEXT },
+      { name: MD, text: MD_TEXT },
+    ],
+    async (session) => {
+      const { page } = session;
+
+      // ── .txt（素のエディター）：Ctrl+/ でメモの行が入らず、F8 でメモの行へ飛ばない ──
+      await openPlain(session, TXT, "二行目の文");
+      await page.keyboard.press("Control+Slash");
+      await page.keyboard.press("F8");
+      // 素の .txt には行コメントの決まりが無いので、本体は何も足さない。
+      // この拡張機能が奪っていれば、1行目の上に「//」の行が入り、カーソルが3行目へ飛ぶ
+      await holdsFor(
+        async () => (await textEditorVisibleText(page)).split("\n")[0] === "一行目の文。",
+        "素の .txt で Ctrl+/ を押してもメモの行が入らない",
+        2_000
+      );
+      expect((await textEditorCursor(page))?.line, "素の .txt で F8 がメモの行へ飛びました").toBe(1);
+      await page.keyboard.press("Control+KeyS");
+      await holdsFor(async () => (await fileText(session, TXT)) === TXT_TEXT, "保存しても素の .txt のファイルは変わらない", 1_000);
+
+      // ── .md（素のエディター）：Ctrl+/ で <!-- --> の行コメント、F8 で次の問題 ──
+      await openPlain(session, MD, "一行目の文");
+      await page.keyboard.press("Control+Slash");
+      await waitUntil(
+        async () => /^<!--\s*一行目の文。\s*-->$/.test((await textEditorVisibleText(page)).split("\n")[0]),
+        ".md で Ctrl+/ を押すと1行目が <!-- --> で囲まれる",
+        5_000
+      );
+      await page.keyboard.press("Control+KeyS");
+      await waitUntil(
+        async () => (await fileText(session, MD)).startsWith("<!--"),
+        ".md の行コメントがファイルに入る"
+      );
+      expect((await fileText(session, MD)).split("\n")[0]).toMatch(/^<!--\s*一行目の文。\s*-->$/);
+
+      // 本体の Markdown の検査が「無いファイルへのリンク」を問題に挙げるまで、F8 を押して待つ
+      await waitUntil(
+        async () => {
+          if (await markerWidgetShown(page)) return true;
+          await page.keyboard.press("F8");
+          await page.waitForTimeout(300);
+          return markerWidgetShown(page);
+        },
+        ".md で F8 を押すと、次の問題の枠が開く",
+        30_000
+      );
+      expect((await textEditorCursor(page))?.line, "F8 の問題の行（リンクの行）へカーソルが来ていません").toBe(3);
+    },
+    {
+      settings: {
+        // 原稿を素のエディターで開く（既定の起こし方の関連付けを消す）
+        "workbench.editorAssociations": {},
+        "markdown.validate.enabled": true,
+      },
+    }
+  );
+});

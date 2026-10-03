@@ -8,7 +8,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
-import { findingId } from "../../../src/models/finding";
+import { findingId, type FindingCategory } from "../../../src/models/finding";
 
 export interface SampleFinding {
   /** 話のファイル名（作品の `本文/` の下） */
@@ -21,6 +21,12 @@ export interface SampleFinding {
   message: string;
   /** 出したAI。渡すと、採った数が `history/ai-verdicts.jsonl` に残る（6.49.7） */
   producer?: { providerId: string; model: string };
+  /**
+   * 指摘の種類と分類名。**省けば誤字脱字**（`typo`／「誤字脱字」）。
+   * 修正案の無い指摘（［提案へ］の行）を作るときに、推敲・矛盾などを渡す
+   */
+  category?: FindingCategory;
+  label?: string;
 }
 
 /** 見本の指摘の番号（置き場の判断の行が指す番号） */
@@ -30,8 +36,8 @@ export function sampleFindingId(sample: SampleFinding): string {
     sample.original,
     sample.target,
     sample.suggestion,
-    "typo",
-    "誤字脱字"
+    sample.category ?? "typo",
+    sample.label ?? "誤字脱字"
   );
 }
 
@@ -52,8 +58,8 @@ export async function writeSampleFinding(workFolder: string, sample: SampleFindi
     before: sample.text.slice(Math.max(0, at - 12), at),
     after: sample.text.slice(at + sample.original.length, at + sample.original.length + 12),
     message: sample.message,
-    category: "typo",
-    label: "誤字脱字",
+    category: sample.category ?? "typo",
+    label: sample.label ?? "誤字脱字",
     ...(sample.producer ? { producer: sample.producer } : {}),
   });
   const folder = path.join(workFolder, ".aiwriter");

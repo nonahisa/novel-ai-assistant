@@ -25,7 +25,7 @@ import { editorGroupTabs } from "./support/workbenchDom";
 const EPISODE = "001_はじまり.txt";
 const TEXT = "一行目の文。\n二行目の文。\n// 見張りのメモ\n四行目の文。\n五行目の文。\n";
 
-test("校正・メモパネルの行を押すと、左の原稿へ戻ってその行を示し、右に2枚目を作らず、左も空白にならない", async () => {
+test("校正・メモパネルの行を押すと、左の原稿へ戻ってその行を示し、右に2枚目を作らず、左も空白にならない（続けて Ctrl+/ でも）", async () => {
   await withVsCode("メモパネルの行", [{ name: EPISODE, text: TEXT }], async (session) => {
     const { page } = session;
     const frame = await openEpisode(page, EPISODE, "五行目の文");
@@ -98,5 +98,25 @@ test("校正・メモパネルの行を押すと、左の原稿へ戻ってそ�
     await waitUntil(async () => (await readFile(file, "utf8")).includes("印"), "示された行で打った字がファイルに入る");
     const lines = (await readFile(file, "utf8")).replace(/\r\n/g, "\n").split("\n");
     expect(lines[2]).toMatch(/^印\/\/ 見張りのメモ/);
+
+    /*
+      ── 同じ並びで、原稿の中で Ctrl+/（メモを足す）を押す（実機確認リスト 0.96.19）──
+      メモを足すと校正・メモパネルが読み直す。そのときも右の列に同じ話の2枚目を作らない
+    */
+    const memoLinesBefore = (await composeText(frames[0])).split("\n").filter((line) => line.startsWith("//")).length;
+    await placeCaretAfter(frames[0], "五行目");
+    await page.keyboard.press("Control+Slash");
+    await waitUntil(
+      async () =>
+        (await composeText(frames[0])).split("\n").filter((line) => line.startsWith("//")).length === memoLinesBefore + 1,
+      "Ctrl+/ でメモの行が画面に入る"
+    );
+    await holdsFor(async () => {
+      const groups = await editorGroupTabs(page);
+      return groups.flat().filter((name) => name === EPISODE).length === 1 && groups[0].includes(EPISODE);
+    }, "Ctrl+/ のあとも原稿のタブが左の列に1枚だけ").catch(async (error: unknown) => {
+      throw new Error(`${String(error)}（${await describe()}）`);
+    });
+    expect((await manuscriptFrames(page)).length, await describe()).toBe(1);
   });
 });

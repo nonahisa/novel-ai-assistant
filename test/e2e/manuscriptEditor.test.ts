@@ -9,6 +9,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
+import { findAction } from "../../src/core/actionTree";
 import {
   caretPosition,
   composeText,
@@ -17,7 +18,9 @@ import {
   placeCaretAfter,
   revealFlashLit,
   selectionCollapsed,
+  selectText,
 } from "./support/manuscriptFrame";
+import { tabIsDirty } from "./support/workbenchDom";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 
@@ -42,12 +45,20 @@ async function contextMenuNames(): Promise<string[]> {
     if (!found) throw new Error(`package.json にコマンド ${id} がありません`);
     return found.title;
   };
+  // 執筆再開の資料は、メニューの名前（actionTree）をそのまま品書きにも使う
+  const resume = findAction("novelai.resumeWriting")?.label;
+  if (!resume) throw new Error("actionTree に novelai.resumeWriting がありません");
   return [
     titleOf("novelai.addRuby"),
     titleOf("novelai.addEmphasis"),
     titleOf("novelai.copyForPosting"),
     "コピー（記法のまま）",
+    // 実機確認リスト 0.96.9 の並びの残り（短く、名詞止めにそろえた名前）
+    "AI相談（選択範囲）",
     "メモ追加",
+    "校正・メモパネルを開く",
+    "単話プロットを開く",
+    resume,
   ];
 }
 
@@ -101,7 +112,7 @@ test("下の欄に「表示倍率 100%」が出て、上の帯の［＋］で 10
   });
 });
 
-test("Ctrl+/ でカーソル行の上に // の行が入り、F8 で次のメモへ動く", async () => {
+test("Ctrl+/ でカーソル行の上に // の行が入り、F8 で次のメモへ動き、光っているあいだに打つと光りが消えて字が行の頭に入る", async () => {
   await withVsCode(
     "メモのキー",
     [{ name: EPISODE, text: "一行目の文。\n二行目の文。\n三行目の文。\n// 先のメモ\n四行目の文。\n" }],
@@ -149,10 +160,15 @@ test("Ctrl+/ でカーソル行の上に // の行が入り、F8 で次のメモ
       // 選ばれていると、そのまま打った字で行が置き換わる
       expect(await selectionCollapsed(frame), "F8 の先で行が選ばれています").toBe(true);
       expect((await caretPosition(frame))?.column).toBe(0);
-      // 飛んだ行はしばらく光り、数秒で消える
+      // 飛んだ行はしばらく光る
       expect(await revealFlashLit(frame), "F8 の先の行が光っていません").toBe(true);
-      await waitUntil(async () => !(await revealFlashLit(frame)), "飛んだ行の光りが数秒で消える", 10_000);
+      /*
+        **光っているあいだに打つ**（実機確認リスト 0.97.2）：光りがすぐ消え、打った字が
+        行の頭（メモの行なら `//` の前）に入る。光りの消える時間（2.5秒ほど）より
+        ずっと短い1秒の内に消えることを見る——自然に消えたのと見分けるため
+      */
       await session.page.keyboard.insertText("印");
+      await waitUntil(async () => !(await revealFlashLit(frame)), "光っているあいだに打つと、光りがすぐ消える", 1_000);
       await saveAndWaitFor(session, (text) => text.includes("印"), "F8 の先で打った字がファイルに入る");
       const after = (await fileText(session)).split("\n");
       // 打った字は行の頭に入り、メモの行は消えない
@@ -165,11 +181,14 @@ test("Ctrl+/ でカーソル行の上に // の行が入り、F8 で次のメモ
         async () => ((await caretPosition(frame))?.lineText ?? "").includes("先のメモ"),
         "もう一度 F8 で次のメモへ動く"
       );
+      // 打たずに置けば、飛んだ行の光りは数秒で自然に消える
+      expect(await revealFlashLit(frame), "2回目の F8 の先の行が光っていません").toBe(true);
+      await waitUntil(async () => !(await revealFlashLit(frame)), "飛んだ行の光りが数秒で消える", 10_000);
     }
   );
 });
 
-test("本文の右クリックの品書きに、ルビ・傍点（コマンドの題と同じ名前）・2つのコピー・メモ追加が並ぶ", async () => {
+test("本文の右クリックの品書きに、ルビ・傍点（コマンドの題と同じ名前）・2つのコピー・AI相談・メモと資料の4つが並ぶ", async () => {
   await withVsCode("右クリック", [{ name: EPISODE, text: "右クリックを試す行。\n" }], async (session) => {
     const frame = await openEpisode(session.page, EPISODE, "右クリックを試す行");
     await placeCaretAfter(frame, "右クリック");
@@ -185,4 +204,36 @@ test("本文の右クリックの品書きに、ルビ・傍点（コマンド�
       ).toBe(true);
     }
   });
+});
+
+test(".txt の原稿で《《強調》》の語を選んで Ctrl+Alt+K を押すと、強調の印が外れて字は残る", async () => {
+  await withVsCode(
+    "txt の強調を外す",
+    [{ name: EPISODE, text: "前の字と《《強調》》と後ろの字。\n" }],
+    async (session) => {
+      const frame = await openEpisode(session.page, EPISODE, "後ろの字");
+      // 組んだ面では印（《《 》》）は見えず、語だけが傍点つきで出る。作者と同じく見えている語を選ぶ
+      await selectText(frame, "強調");
+      await session.page.keyboard.press("Control+Alt+KeyK");
+      /*
+        外すのは本体のコマンドが文書へ当て、画面へ送り直す。**画面の傍点（.emphasis）が
+        消えてから保存する**——原稿エディターの Ctrl+S は「画面の字を原稿へ送ってから保存」
+        なので、送り直しが届く前に押すと、画面に残った古い字（傍点つき）で戻してしまう
+        （機械の速さでだけ起きる。最初はタブの未保存の印だけ待って、そうなった）
+      */
+      await waitUntil(async () => await tabIsDirty(session.page, EPISODE), "Ctrl+Alt+K で文書が変わる（タブが未保存になる）");
+      await waitUntil(
+        async () => (await frame.locator("#compose .emphasis").count()) === 0,
+        "画面の傍点が消える（送り直しが届く）"
+      );
+      await saveAndWaitFor(session, (text) => !text.includes("《《"), "強調の印が外れてファイルに入る").catch(
+        async (error: unknown) => {
+          throw new Error(
+            `${String(error)}（ファイル：${JSON.stringify(await fileText(session))}／下の欄：${await footText(frame, "note")}）`
+          );
+        }
+      );
+      expect(await fileText(session)).toBe("前の字と強調と後ろの字。\n");
+    }
+  );
 });
