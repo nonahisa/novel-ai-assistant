@@ -103,6 +103,51 @@ export interface LaunchOptions {
   windowSize?: { width: number; height: number };
   /** 作品の題（既定は `E2E_WORK_TITLE`）。動画ではパネルの見出しに写る */
   workTitle?: string;
+  /**
+   * この拡張機能の globalState へ、起こす前に置く値（鍵 → 値）。
+   *
+   * **AIの選択（`novelai.ai.provider`・`novelai.ai.model`）は globalState にしか無く**、
+   * コマンドの引数で選ばせる道も無い（選ぶのはウィザードだけで、モデル一覧を
+   * 引く通信を伴う）。キャッシュだけで済む抽出のように「AIは選ばれているが
+   * 呼ばない」状態を作るには、VS Code が読む置き場（下の `seedGlobalState`）へ
+   * 先に書いておくしかない。製品にテスト専用の口を足さずに済む
+   */
+  globalState?: Record<string, unknown>;
+  /**
+   * 作品フォルダーへ、**起こす前に**ファイルを置く（話の本文を置いたあとに呼ぶ）。
+   *
+   * 起きている VS Code の下で設定資料を書くと、見張り（`features/watchSettings.ts`）が
+   * 「拡張機能の外で変更されました」の知らせを出す。知らせ自体は止めないが、出る時機が
+   * 揺れて、その間に送ったキーが届かないことがあった（2026-10-03）。起こす前に置けば、
+   * 見張りが張られる前なので知らせは出ない
+   */
+  prepareWork?: (folders: { workFolder: string; manuscriptFolder: string }) => Promise<void>;
+}
+
+/** package.json の `publisher.name`。globalState はこの名前の行に1つの JSON で入る */
+const EXTENSION_ID = "nonahisa.novel-ai-assistant";
+
+/**
+ * VS Code の globalState の置き場（`User/globalStorage/state.vscdb`。SQLite）へ、
+ * この拡張機能の値を書く。**起こす前に呼ぶ**（起きている VS Code は手元の写しを
+ * 持っていて、あとから書いても読み直さない）。
+ *
+ * 表の形は VS Code が作るものと同じ（`ItemTable(key, value)`）。VS Code は
+ * `CREATE TABLE IF NOT EXISTS` で開くので、先に作ってあっても壊さない。
+ * `node:sqlite` は Node 24 の標準（新しい道具は足さない）。動的に読むのは、
+ * これを使わない件で読み込みの警告を出さないため
+ */
+async function seedGlobalState(userData: string, values: Record<string, unknown>): Promise<void> {
+  const folder = path.join(userData, "User", "globalStorage");
+  await mkdir(folder, { recursive: true });
+  const { DatabaseSync } = await import("node:sqlite");
+  const db = new DatabaseSync(path.join(folder, "state.vscdb"));
+  try {
+    db.exec("CREATE TABLE IF NOT EXISTS ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB)");
+    db.prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)").run(EXTENSION_ID, JSON.stringify(values));
+  } finally {
+    db.close();
+  }
 }
 
 /**
@@ -124,6 +169,7 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
   for (const episode of episodes) {
     await writeFile(path.join(manuscriptFolder, episode.name), episode.text, "utf8");
   }
+  if (options.prepareWork) await options.prepareWork({ workFolder, manuscriptFolder });
 
   const userData = path.join(root, "user-data");
   await mkdir(path.join(userData, "User"), { recursive: true });
@@ -182,6 +228,7 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
     ),
     "utf8"
   );
+  if (options.globalState) await seedGlobalState(userData, options.globalState);
 
   const executablePath = await downloadAndUnzipVSCode({
     version: E2E_VSCODE_VERSION,
