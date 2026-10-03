@@ -170,6 +170,35 @@ export function existingManuscriptTab(
 }
 
 /**
+ * その原稿の、原稿エディターのタブが居る列（縦・横の入口のもの。並びは見つけた順）。
+ *
+ * 台帳（`openManuscripts`）と違い、**拡張機能ホストを起動し直したあとも数えられる**
+ * （タブは VS Code が覚えている）。同じ原稿の面が増えたときの記録に使う（6.25.11）。
+ * タブを読めない環境では空。
+ */
+export function manuscriptTabColumns(key: string): number[] {
+  try {
+    const columns: number[] = [];
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        const input: unknown = tab.input;
+        if (
+          input instanceof vscode.TabInputCustom &&
+          (input.viewType === MANUSCRIPT_EDITOR_VIEW_TYPE ||
+            input.viewType === MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE) &&
+          manuscriptLedgerKey(input.uri) === key
+        ) {
+          columns.push(group.viewColumn);
+        }
+      }
+    }
+    return columns;
+  } catch {
+    return [];
+  }
+}
+
+/**
  * 原稿を原稿エディターで開く。**原稿を開く道はすべてここを通す**
  * （作者の裁定、2026-10-03「直す」。設計書6.25.11）。
  *
@@ -210,6 +239,20 @@ export async function openManuscriptFile(
     );
     return { viewType: existing.viewType, reused: true };
   }
+  // **新しく開くときも1行残す**（6.25.11）。2026-10-03 の実機では、同じ原稿の
+  // 2枚目が何から開いたのかを示す行が無く、この口を通ったかどうかも言えなかった
+  logLine(
+    `原稿エディタ：${fromUri(uri)} のタブが無いので、新しく開きます（入口: ${viewType}／列: ${describeColumn(column)}）。`
+  );
   await vscode.commands.executeCommand("vscode.openWith", uri, viewType, column);
   return { viewType, reused: false };
+}
+
+/** 記録に書く列。指定が無ければ VS Code の既定（いま前面の列）になる */
+function describeColumn(
+  column: vscode.ViewColumn | vscode.TextDocumentShowOptions | undefined
+): string {
+  if (column === undefined) return "指定なし（前面の列）";
+  if (typeof column === "number") return String(column);
+  return column.viewColumn === undefined ? "指定なし（前面の列）" : String(column.viewColumn);
 }

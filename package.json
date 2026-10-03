@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを引き受けるVSCode拡張機能で、AIは提案するだけで原稿は書き換えません（無料の手元AIだけでも使えます）。※現在テスト中です。",
-  "version": "0.96.17",
+  "version": "0.96.18",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -90,7 +90,7 @@
         "key": "ctrl+alt+t",
         "mac": "cmd+alt+t",
         "command": "novelai.checkTyposForFile",
-        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "when": "(activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal') && !terminalFocus && !inputFocus && !sideBarFocus && !auxiliaryBarFocus && !panelFocus",
         "args": {
           "source": "manuscriptEditor"
         }
@@ -99,7 +99,7 @@
         "key": "ctrl+alt+p",
         "mac": "cmd+alt+p",
         "command": "novelai.checkProofread",
-        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "when": "(activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal') && !terminalFocus && !inputFocus && !sideBarFocus && !auxiliaryBarFocus && !panelFocus",
         "args": {
           "source": "manuscriptEditor"
         }
@@ -108,7 +108,7 @@
         "key": "ctrl+alt+h",
         "mac": "cmd+alt+h",
         "command": "novelai.checkNotation",
-        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "when": "(activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal') && !terminalFocus && !inputFocus && !sideBarFocus && !auxiliaryBarFocus && !panelFocus",
         "args": {
           "source": "manuscriptEditor"
         }
@@ -117,7 +117,7 @@
         "key": "ctrl+alt+a",
         "mac": "cmd+alt+a",
         "command": "novelai.runProofreadingSuite",
-        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "when": "(activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal') && !terminalFocus && !inputFocus && !sideBarFocus && !auxiliaryBarFocus && !panelFocus",
         "args": {
           "source": "manuscriptEditor"
         }
@@ -126,7 +126,7 @@
         "key": "ctrl+alt+m",
         "mac": "cmd+alt+m",
         "command": "novelai.openSceneMemos",
-        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "when": "(activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal') && !terminalFocus && !inputFocus && !sideBarFocus && !auxiliaryBarFocus && !panelFocus",
         "args": {
           "source": "manuscriptEditor"
         }
@@ -135,7 +135,7 @@
         "key": "f8",
         "mac": "f8",
         "command": "novelai.nextSceneMemo",
-        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "when": "(activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal') && !terminalFocus && !inputFocus && !sideBarFocus && !auxiliaryBarFocus && !panelFocus",
         "args": {
           "source": "manuscriptEditor"
         }
@@ -144,7 +144,7 @@
         "key": "shift+f8",
         "mac": "shift+f8",
         "command": "novelai.prevSceneMemo",
-        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "when": "(activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal') && !terminalFocus && !inputFocus && !sideBarFocus && !auxiliaryBarFocus && !panelFocus",
         "args": {
           "source": "manuscriptEditor"
         }
@@ -153,7 +153,7 @@
         "key": "ctrl+/",
         "mac": "cmd+/",
         "command": "novelai.addSceneMemo",
-        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "when": "(activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal') && !terminalFocus && !inputFocus && !sideBarFocus && !auxiliaryBarFocus && !panelFocus",
         "args": {
           "source": "manuscriptEditor"
         }
@@ -162,7 +162,7 @@
         "key": "ctrl+alt+c",
         "mac": "cmd+alt+c",
         "command": "novelai.openChat",
-        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "when": "(activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal') && !terminalFocus && !inputFocus && !sideBarFocus && !auxiliaryBarFocus && !panelFocus",
         "args": {
           "source": "manuscriptEditor"
         }
@@ -171,7 +171,7 @@
         "key": "ctrl+alt+k",
         "mac": "cmd+alt+k",
         "command": "novelai.addEmphasis",
-        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "when": "(activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal') && !terminalFocus && !inputFocus && !sideBarFocus && !auxiliaryBarFocus && !panelFocus",
         "args": {
           "source": "manuscriptEditor"
         }
@@ -180,7 +180,7 @@
         "key": "ctrl+alt+r",
         "mac": "cmd+alt+r",
         "command": "novelai.addRuby",
-        "when": "activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal'",
+        "when": "(activeCustomEditorId == 'novelai.manuscriptEditor' || activeCustomEditorId == 'novelai.manuscriptEditorHorizontal') && !terminalFocus && !inputFocus && !sideBarFocus && !auxiliaryBarFocus && !panelFocus",
         "args": {
           "source": "manuscriptEditor"
         }

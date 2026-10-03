@@ -25,6 +25,7 @@ import {
 import {
   existingManuscriptTab,
   manuscriptLedgerKey,
+  manuscriptTabColumns,
   openManuscriptFile,
 } from "./manuscriptTab";
 import {
@@ -123,6 +124,7 @@ import {
 import {
   MANUSCRIPT_RESOLVE_GRACE_MS,
   confirmDisconnectedTabs,
+  sameManuscriptFaceNote,
   unresolvedActiveTabs,
   type ManuscriptTabLook,
 } from "../core/manuscriptDisconnect";
@@ -364,7 +366,14 @@ const RELOAD_WINDOW_ITEM = "ウィンドウを再読み込み";
  * `rescue`）が残り、開き直したときに［戻す］で打った字を取り戻せる。タブを
  * 閉じて開き直すと控えが消えるので、その道は勧めない。
  */
-export function watchDisconnectedManuscripts(): vscode.Disposable {
+export function watchDisconnectedManuscripts(
+  /**
+   * 作品の引き方。**記録の書き先を向けるのに使う**——起動し直した直後は書き先が
+   * まだどこへも向いておらず、2026-10-03 の実機ではこの知らせの行が出力パネルに
+   * しか残らなかった。引けなければ保管庫のログへ書く
+   */
+  workOf?: (filePath: string) => WorkEntry | undefined
+): vscode.Disposable {
   const warned = new Set<string>();
   let pending: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
@@ -400,6 +409,9 @@ export function watchDisconnectedManuscripts(): vscode.Disposable {
           const found = tabs.find((tab) => tab.key === key);
           return found ? paths.basename(fromUri(found.uri)) : key;
         });
+        // 書き先を向けてから記録する（作品が引けなければ保管庫へ倒れる）
+        const first = tabs.find((tab) => tab.key === lost[0]);
+        useLogFile(first ? workOf?.(fromUri(first.uri))?.folderPath : undefined);
         void warnDisconnected(names);
       }
       // 猶予の間に別のタブが前に出ていたら、そちらを見直す
@@ -1873,16 +1885,22 @@ export class ManuscriptEditorProvider
       **同じ原稿の2枚目なら、記録に残す**（6.25.11）。2026-10-03 の実機では、
       何が2枚目を開いたのかを示す行が1つも無く、台帳から落ちた理由を
       追えなかった。2枚目そのものは止めない——縦と横を並べて見比べたい
-      作者もいる。こちらの道（飛ぶ・読み上げ）が2枚目を作らないようにしてある
+      作者もいる。こちらの道（飛ぶ・読み上げ）が2枚目を作らないようにしてある。
+      **タブの数でも見る**——拡張機能ホストを起動し直したあとは台帳が空で、
+      切れた面の隣に同じ原稿の面がつながっても、台帳だけでは1枚目に見える
     */
     const already = openManuscripts.all(key).length;
     openManuscripts.add(key, entry);
-    if (already > 0) {
-      // 載せてから書く（ログの作品を引く await で、台帳に載るのを遅らせない）
-      void this.logForDocument(
-        document,
-        `原稿エディタ：同じ原稿の面がもう1枚開かれました（${already + 1}枚目。入口: ${this.viewType}／列: ${panel.viewColumn ?? "不明"}）`
-      );
+    const faceNote = sameManuscriptFaceNote({
+      ledgerFaces: already,
+      tabColumns: manuscriptTabColumns(key),
+      viewType: this.viewType,
+      column: panel.viewColumn,
+    });
+    if (faceNote) {
+      // 載せてから書く（ログの作品を引く await で、台帳に載るのを遅らせない）。
+      // 書き先は作品へ向けてから書く（起動し直した直後は、まだどこへも向いていない）
+      void this.logForDocument(document, faceNote);
     }
     // 窓の札に「受け持っている原稿エディター」が増えた
     fireManuscriptStatusChanged();

@@ -83,10 +83,19 @@ describe("原稿エディターのキー割り当て（package.json）", () => {
     }
   });
 
-  test("when は原稿エディター（縦・横）が前面のときだけ", () => {
+  /*
+    **前面のタブだけでなく、焦点も見る**（0.96.18）。activeCustomEditorId は
+    焦点をターミナル・入力欄・サイドバー・パネルへ移しても原稿エディターのまま
+    なので、原稿を前に出したままターミナルで Ctrl+/ や F8 を押すと、そちらの
+    既定を奪っていた。inputFocus は「焦点のある要素が入力欄か」で決まり、
+    原稿エディター（webview）に焦点があるときは立たない（VS Code の束で確かめた）。
+    「||」より「&&」が先に結び付くので、前面の2つは括弧でくくる
+  */
+  test("when は原稿エディター（縦・横）が前面で、焦点がほかの場所に無いときだけ", () => {
     const expectedWhen =
-      `activeCustomEditorId == '${MANUSCRIPT_EDITOR_VIEW_TYPE}' || ` +
-      `activeCustomEditorId == '${MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE}'`;
+      `(activeCustomEditorId == '${MANUSCRIPT_EDITOR_VIEW_TYPE}' || ` +
+      `activeCustomEditorId == '${MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE}')` +
+      " && !terminalFocus && !inputFocus && !sideBarFocus && !auxiliaryBarFocus && !panelFocus";
     for (const binding of ours) {
       expect(binding.when, binding.command).toBe(expectedWhen);
     }

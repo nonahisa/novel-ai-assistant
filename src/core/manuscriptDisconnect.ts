@@ -69,3 +69,36 @@ export function confirmDisconnectedTabs(input: {
     (key) => input.earlier.includes(key) && !input.warned.has(key)
   );
 }
+
+/**
+ * 原稿エディターの面がつながったとき、同じ原稿の面がほかにもあれば、その記録の1行
+ * （設計書6.25.11）。無ければ undefined。
+ *
+ * **台帳の数とタブの数の両方で見る。** 拡張機能ホストを起動し直したあとは
+ * 台帳が空なので、台帳だけを見ると、切れた面の隣に同じ原稿の面がつながっても
+ * 1枚目と数えて何も残らない（2026-10-03 の実機。2枚目の行は、ウィンドウを
+ * 再読み込みしたときに初めて出た）。タブは VS Code が覚えているので、
+ * 起動し直したあとでも数えられる。
+ *
+ * @param ledgerFaces この面を載せる前に、台帳に載っていた同じ原稿の面の数
+ * @param tabColumns 同じ原稿の原稿エディターのタブが居る列（この面のタブを含む）。
+ *   タブを読めない環境では空
+ */
+export function sameManuscriptFaceNote(input: {
+  ledgerFaces: number;
+  tabColumns: readonly number[];
+  viewType: string;
+  column: number | undefined;
+}): string | undefined {
+  const where = `入口: ${input.viewType}／列: ${input.column ?? "不明"}`;
+  if (input.ledgerFaces > 0) {
+    return `原稿エディタ：同じ原稿の面がもう1枚開かれました（${input.ledgerFaces + 1}枚目。${where}）`;
+  }
+  if (input.tabColumns.length < 2) return undefined;
+  const unconnected = input.tabColumns.length - 1;
+  return (
+    `原稿エディタ：同じ原稿のタブがほかにもあるところで、この面がつながりました` +
+    `（タブ${input.tabColumns.length}枚／列: ${input.tabColumns.join("・")}。` +
+    `この拡張機能とつながっていない面が${unconnected}枚。拡張機能ホストを起動し直したあとに起きます。${where}）`
+  );
+}

@@ -2796,7 +2796,9 @@ export async function activate(
   // つながりの切れた原稿エディター（拡張機能ホストの起動し直し）を見つけて、
   // ウィンドウの再読み込みを勧める（作者の裁定 2026-10-02。設計書6.25.9）。
   // 札と違ってブラウザ版でも起きうるので、札の有無に関わらず見張る
-  context.subscriptions.push(watchDisconnectedManuscripts());
+  context.subscriptions.push(
+    watchDisconnectedManuscripts((filePath) => workOfPath(registry, filePath))
+  );
 
   // ─── 手元のAIの重複起動の見張り（設計書6.76.1・6.76.2。作者の依頼 2026-09-25） ───
   // 別の窓・開発ホスト・MCP サーバーと、保管庫の札で順番を取る。札が空いて

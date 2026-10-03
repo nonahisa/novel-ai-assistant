@@ -355,6 +355,40 @@ describe("タブが既にある原稿へは、もう1枚開かない", () => {
     expect(executed[0].args[2]).toBe(3);
   });
 
+  /**
+   * 拡張機能ホストを起動し直した直後（作者の実機、2026-10-03）。新しいホストの
+   * 台帳は空で、左の面はつながっていない。行を押しても、左のタブを前に出す
+   * だけにし、パネルの列へ新しい面を作らない。左の面がつながらなければ
+   * 素のエディタへ譲る（切れた面の知らせは別の見張りが出す）
+   */
+  test("起動し直した直後（台帳が空）でも、同じ入口のタブを前に出すだけ", async () => {
+    const manuscript = {
+      input: new layout.TabInputCustom(
+        episodePath,
+        MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+      ),
+      isActive: true,
+    };
+    const panel = {
+      input: new layout.TabInputWebview("novelai.sceneMemos"),
+      isActive: true,
+    };
+    layout.groups = [
+      { viewColumn: 1, isActive: false, activeTab: manuscript, tabs: [manuscript] },
+      { viewColumn: 2, isActive: true, activeTab: panel, tabs: [panel] },
+    ];
+
+    const taken = await makeProvider().revealLine(episodePath, 210);
+
+    // openWith は1回だけ、左のタブの入口と列で（＝前に出す）
+    expect(executed).toHaveLength(1);
+    expect(executed[0].command).toBe("vscode.openWith");
+    expect(executed[0].args[1]).toBe(MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE);
+    expect(executed[0].args[2]).toBe(1);
+    // 画面とつながらなかったので引き受けない（呼んだ側が素のエディタで示す）
+    expect(taken).toBe(false);
+  });
+
   test("別の話のタブは見ない（これまでどおりの開き方）", async () => {
     const other = {
       input: new layout.TabInputCustom(
