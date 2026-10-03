@@ -737,6 +737,17 @@ describe("outbox.import——同じ指摘に持ち主の判断が重なったと
     expect(readBytes().toString("utf8")).toBe(`一行目\n${MINE}\n`);
   });
 
+  it("同じ記録が2度渡されても、重なりとは見なさず1件として入れる", () => {
+    writeBody("一行目\n彼はわらった。\n");
+    placeFindings([finding()]);
+
+    const result = outboxImport({ folder: root, ownerId: OWNER, records: [verdict(), verdict()] });
+
+    expect(result.results.map((item) => [item.id, item.status])).toEqual([["v1", "imported"]]);
+    expect(result.refusedCount).toBe(0);
+    expect(readBytes().toString("utf8")).toBe("一行目\n彼は笑った。\n");
+  });
+
   it("編集部の採否は重なりに数えない（持ち主の判断を押しのけない）", () => {
     writeBody("一行目\n彼はわらった。\n");
     placeFindings([finding()]);

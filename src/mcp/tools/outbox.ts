@@ -439,7 +439,8 @@ export function outboxImport(input: OutboxImportInput): OutboxImportResult {
       continue;
     }
     const latest = record.findingId ? latestDecision.get(record.findingId) : undefined;
-    if (latest && latest.record !== record) {
+    // 鍵（書き手/文書の id）で比べる。同じ記録が2度渡されたとき、片方を重なりにしない
+    if (latest && recordKey(latest.record) !== recordKey(record)) {
       finish(record, "refused", OVERLAP_REASON);
       continue;
     }
