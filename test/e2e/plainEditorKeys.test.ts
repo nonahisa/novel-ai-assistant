@@ -34,6 +34,56 @@ async function fileText(session: E2ESession, name: string): Promise<string> {
   return (await readFile(path.join(session.manuscriptFolder, name), "utf8")).replace(/\r\n/g, "\n");
 }
 
+/**
+ * 落ちたときに読む画面の様子（2026-10-04、2ファイル続けて走らせると落ちる揺れの調べ）。
+ * どの確かめで、何が見えていたかを失敗文へ添える——写真だけでは、見えている行の
+ * 字の並び（Monaco は行の節点を使い回すので、DOM の順と行の順がずれうる）や
+ * 焦点の在り処が分からない
+ */
+async function screenState(session: E2ESession): Promise<string> {
+  const { page } = session;
+  const detail = await page.evaluate(() => {
+    const group = document.querySelector(".editor-group-container.active");
+    const editors = group ? group.querySelectorAll(".monaco-editor").length : -1;
+    const lines = Array.from(group?.querySelectorAll(".monaco-editor .view-lines .view-line") ?? []).map(
+      (line) => `${(line as HTMLElement).style.top}:${(line as HTMLElement).innerText}`
+    );
+    const active = document.activeElement;
+    const tabs = Array.from(document.querySelectorAll(".tabs-container .tab")).map((tab) =>
+      (tab.getAttribute("aria-label") ?? "").slice(0, 40)
+    );
+    return { editors, lines, active: active ? `${active.tagName}.${String(active.className).slice(0, 60)}` : "なし", tabs };
+  });
+  const status = await page
+    .locator('[id="status.editor.selection"]')
+    .first()
+    .innerText()
+    .catch(() => "（無し）");
+  let txt = "";
+  let md = "";
+  try {
+    txt = await fileText(session, TXT);
+    md = await fileText(session, MD);
+  } catch {
+    // 読めなくても様子の残りは出す
+  }
+  return (
+    `（列の中のエディター：${detail.editors}／見えている行（top:字）：${JSON.stringify(detail.lines)}` +
+    `／焦点：${detail.active}／タブ：${JSON.stringify(detail.tabs)}／ステータスバー：${JSON.stringify(status)}` +
+    `／ファイル .txt：${JSON.stringify(txt)}／.md：${JSON.stringify(md)}）`
+  );
+}
+
+/** 確かめが落ちたら、画面の様子を添えて投げ直す */
+async function withState<T>(session: E2ESession, check: () => Promise<T>): Promise<T> {
+  try {
+    return await check();
+  } catch (error) {
+    if (error instanceof Error) error.message += await screenState(session);
+    throw error;
+  }
+}
+
 /** 素のエディターで開き、本文が見えるまで待って、1行目の頭へカーソルを置く */
 async function openPlain(session: E2ESession, name: string, expected: string): Promise<void> {
   const { page } = session;
@@ -51,7 +101,7 @@ test("素のテキストエディターと .md では、Ctrl+/ と F8 が本体�
       { name: TXT, text: TXT_TEXT },
       { name: MD, text: MD_TEXT },
     ],
-    async (session) => {
+    async (session) => withState(session, async () => {
       const { page } = session;
 
       // ── .txt（素のエディター）：Ctrl+/ でメモの行が入らず、F8 でメモの行へ飛ばない ──
@@ -96,7 +146,7 @@ test("素のテキストエディターと .md では、Ctrl+/ と F8 が本体�
         30_000
       );
       expect((await textEditorCursor(page))?.line, "F8 の問題の行（リンクの行）へカーソルが来ていません").toBe(3);
-    },
+    }),
     {
       settings: {
         // 原稿を素のエディターで開く（既定の起こし方の関連付けを消す）

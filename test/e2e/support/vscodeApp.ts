@@ -285,7 +285,8 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
     // ワークベンチが組み上がるまで待つ（ここまでは拡張機能と関係が無い）
     await page.locator(".monaco-workbench").waitFor({ timeout: 60_000 });
     await keepOutOfTheWay(app);
-    if (options.windowSize) await resizeWindows(app, options.windowSize);
+    const windowSize = options.windowSize ?? windowSizeFromEnv();
+    if (windowSize) await resizeWindows(app, windowSize);
     await registerWork(session(), workTitle);
   } catch (error) {
     // 呼び手（withVsCode）の片づけはまだ始まっていないので、ここで写真を残して閉じる
@@ -378,6 +379,19 @@ async function moveWindowsAway(app: ElectronApplication): Promise<void> {
     }
     for (const win of BrowserWindow.getAllWindows()) away(win);
   });
+}
+
+/**
+ * 環境変数 `NOVELAI_E2E_WINDOW`（例 `1024x640`）で、全件の窓の中身の大きさを決める。
+ *
+ * 指定が無ければ VS Code の既定の大きさ（**機械の画面で変わる**）で起きる。ノートPCの
+ * 狭い窓でだけ、本体の吹き出しが隣の列のボタンに重なって押せない落ち方があった
+ * （2026-10-04。こちらの機械では 1434×897 で起き、重ならずに通っていた）。
+ * 狭い窓の落ち方を手元で写すために使う。テストごとの `windowSize` が先に効く
+ */
+function windowSizeFromEnv(): { width: number; height: number } | undefined {
+  const match = /^(\d+)x(\d+)$/.exec(process.env.NOVELAI_E2E_WINDOW ?? "");
+  return match ? { width: Number(match[1]), height: Number(match[2]) } : undefined;
 }
 
 /**
