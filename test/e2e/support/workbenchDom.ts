@@ -10,6 +10,34 @@
 import type { Page } from "playwright-core";
 import { waitUntil } from "./wait";
 
+/**
+ * 本体の吹き出し（タブやパンくずにマウスを置くと出る、ファイルの場所などの表示）を消す
+ * （2026-10-04、ノートPCで設定資料パネルの［一覧を出す］が30秒押せなかった調べ）。
+ *
+ * 狭い窓では、前の操作でマウスが残った所に出た吹き出しが、隣の列の WebView の
+ * ボタンに重なる。吹き出しはクリックを受け止め（Playwright の「intercepts pointer
+ * events」）、押しに行くマウスが吹き出しの上に乗るので**消えないまま**押し直しが
+ * 続いた。1024×640 の窓で毎回起き、1434×897 では重ならずに通る。
+ *
+ * マウスを、吹き出しの出ない下のステータスバーの中ほどへ逃がし、消えるまで待つ。
+ */
+export async function dismissWorkbenchHover(page: Page): Promise<void> {
+  const size = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  await page.mouse.move(Math.round(size.width / 2), size.height - 3);
+  await waitUntil(
+    async () =>
+      page.evaluate(
+        () =>
+          !Array.from(document.querySelectorAll(".workbench-hover, .monaco-hover")).some((element) => {
+            const box = (element as HTMLElement).getBoundingClientRect();
+            return box.width > 0 && box.height > 0 && !element.classList.contains("hidden");
+          })
+      ),
+    "本体の吹き出しが消える",
+    5_000
+  );
+}
+
 /** エディターの列（グループ）ごとの、タブの名前。左の列から順に */
 export async function editorGroupTabs(page: Page): Promise<string[][]> {
   return page.evaluate(() =>

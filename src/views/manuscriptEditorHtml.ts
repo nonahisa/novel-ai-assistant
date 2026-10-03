@@ -4629,6 +4629,8 @@ ${RESUME_WRITING_LABEL ? `
       */
       composeWantSelect = { start: message.start, end: message.end };
       composeRestoreCaret(composeWantSelect);
+      // 当てた直後の選択を覚える（組み直すまでに作者が動かしたかを見分ける。composeApplyText）
+      composeWantSelectShown = composeSelectionNow();
     } else if (message.type === "select") {
       // ルビを入れたあと、入れた場所を選び直す
       write.focus();
@@ -4657,6 +4659,17 @@ ${RESUME_WRITING_LABEL ? `
   let composeMenuAt = null;
   /** 組み直したあとに選び直したい範囲（ルビを入れた直後） */
   let composeWantSelect = null;
+  /**
+   * 拡張機能の選び直し（select）を当てた直後の選択（記法の位置）。
+   *
+   * **組み直すまでに作者がカーソルを動かしていたら、選び直しは捨てる**
+   * （2026-10-04、画面の自動テストで見つけた。実装ルール1）。傍点を外した直後に
+   * End で行末へ動いて打つと、あとから届いた本文で組み直すときに選び直しが
+   * 当て直され、選択が外した語へ戻って、打った字が**その語を置き換えて**原稿へ
+   * 入っていた。遅い機械ほど本文が届くまでが長く、毎回起きた。
+   * 取り消しの置き場所（undoCaret）で選び直すときは null（そちらは必ず当てる）
+   */
+  let composeWantSelectShown = null;
   /** 届いている用語の位置（termSpans）が、どの本文に対するものか */
   let termsForText = null;
   /** 変換中に外から届いた本文。確定してから片づける */
@@ -6092,6 +6105,7 @@ ${RESUME_WRITING_LABEL ? `
     composeOn = false;
     composeMenuAt = null;
     composeWantSelect = null;
+    composeWantSelectShown = null;
     composePending = null;
     composeClearHighlights();
     compose.setAttribute("contenteditable", "false");
@@ -6221,10 +6235,27 @@ ${RESUME_WRITING_LABEL ? `
     if (typeof undoCaret === "number") {
       const at = Math.max(0, Math.min(text.length, undoCaret));
       composeWantSelect = { start: at, end: at };
+      composeWantSelectShown = null;
     }
     composeApplyText(text);
     // 届いた本文で組み直した（組めずに打つ面へ戻ったときも、打つ面がこの本文になる）
     setEditBase(text);
+  }
+
+  /**
+   * 本文が before から after へ変わったとき、before の位置の選択を after の位置へ移す。
+   * 変わり始めより前は動かさず、後ろは増減分だけずらす（打つ面の replaceKeepingCaret と同じ式）
+   */
+  function composeShiftAcross(at, before, after) {
+    let common = 0;
+    const max = Math.min(before.length, after.length);
+    while (common < max && before[common] === after[common]) common++;
+    const delta = after.length - before.length;
+    const move = function (offset) {
+      if (offset <= common) return offset;
+      return Math.max(common, Math.min(after.length, offset + delta));
+    };
+    return { start: move(at.start), end: move(at.end) };
   }
 
   /**
@@ -6234,8 +6265,7 @@ ${RESUME_WRITING_LABEL ? `
    * ——**外からの書き換えは頻繁には来ない**（AIの適用・別の窓での編集）。
    */
   function composeApplyText(text) {
-    const at = composeWantSelect || composeSelectionNow();
-    composeWantSelect = null;
+    const at = composeCaretForRebuild(text);
     const built = composeBuildChecked(text);
     if (!built) {
       // 組み直せない本文が届いた。**この面に留まらない**
@@ -6254,6 +6284,39 @@ ${RESUME_WRITING_LABEL ? `
     composeInvalidate();
     composeRestoreCaret(at);
     composeScheduleHighlight();
+  }
+
+  /**
+   * 組み直したあとに置くカーソル（記法の位置。届いた本文 text の側）。
+   * 選び直したい範囲があればそれ、無ければいまの選択。
+   */
+  function composeCaretForRebuild(text) {
+    let at = composeWantSelect || composeSelectionNow();
+    if (composeWantSelect !== null && composeWantSelectShown !== null) {
+      /*
+        **選び直しを当てたあとで作者が動かしていたら、作者のカーソルを保つ**
+        （composeWantSelectShown の説明）。選び直しの位置は届いた本文の位置だが、
+        いまのカーソルは画面の本文（届く前）の位置なので、変わった所より後ろなら
+        増減分だけずらす（打つ面の replaceKeepingCaret と同じ式）
+      */
+      const now = composeSelectionNow();
+      const moved =
+        now === null ||
+        now.start !== composeWantSelectShown.start ||
+        now.end !== composeWantSelectShown.end;
+      if (moved && now !== null) {
+        at = composeShiftAcross(now, composeDomToNotation(compose), text);
+        vscode.postMessage({
+          type: "log",
+          text:
+            "原稿エディタ（組んで書く）：選び直しのあとで動かしたカーソルを、" +
+            "届いた本文で組み直したあとも保ちました",
+        });
+      }
+    }
+    composeWantSelect = null;
+    composeWantSelectShown = null;
+    return at;
   }
 
   compose.addEventListener("input", function (event) {

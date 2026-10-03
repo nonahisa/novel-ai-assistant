@@ -358,6 +358,11 @@ async function traceInstall(frame: Frame): Promise<void> {
         (event) => {
           const detail = event as InputEvent & KeyboardEvent;
           record(`${name} ${detail.inputType || detail.key || ""} ${JSON.stringify(compose.innerText)}`);
+          // 最初の打鍵が画面に入る瞬間の傍点の数（emphasisAtFirstInput）
+          if (name === "beforeinput" && (window as unknown as { __e2eEmphasisAtInput?: number }).__e2eEmphasisAtInput === undefined) {
+            (window as unknown as { __e2eEmphasisAtInput?: number }).__e2eEmphasisAtInput =
+              compose.querySelectorAll(".emphasis").length;
+          }
         },
         true
       );
@@ -384,6 +389,17 @@ async function traceInstall(frame: Frame): Promise<void> {
     document.addEventListener("focusin", (event) => record(`焦点が入る ${name(event.target)}`));
     document.addEventListener("focusout", (event) => record(`焦点が出る ${name(event.target)}`));
   });
+}
+
+/**
+ * 最初の打鍵が画面に入った瞬間（beforeinput）に、画面に残っていた傍点の数（traceInstall のあと）。
+ *
+ * **数えるのは打つ瞬間でなければならない**（2026-10-04）。打つ前に数えると、数えてから
+ * End と打鍵までの間に本体の本文が届くことがあり（機械が混むと起きた）、その回は
+ * 便がふつうの道で入るのに「当て直しの道を通っていない」と誤って落ちた
+ */
+async function emphasisAtFirstInput(frame: Frame): Promise<number | undefined> {
+  return frame.evaluate(() => (window as unknown as { __e2eEmphasisAtInput?: number }).__e2eEmphasisAtInput);
 }
 
 /** 控えに区切りを入れる（テストの側の操作の時機と、そのときの焦点） */
@@ -457,8 +473,12 @@ test("Ctrl+Alt+K で強調を外した直後、画面へ届く前に行末へ字
         本体が当て直しの道を通ったはず。届いたあとに打った回は、ふつうの道で通る
         （その回はこの見張りの場面を外しているが、落とさずに上の記録で分かる）
       */
-      if (emphasisBeforeTyping === 1) {
-        expect(await rebaseLogLines(session), "当て直しの道を通っていません").toContain("当て直しました");
+      const emphasisAtInput = await emphasisAtFirstInput(frame);
+      if (emphasisAtInput === 1) {
+        expect(
+          await rebaseLogLines(session),
+          `当て直しの道を通っていません（打った瞬間の傍点：${emphasisAtInput}）${await traceReport(session, frame)}`
+        ).toContain("当て直しました");
       }
       // 画面も両方を含む本文へ揃う（傍点は消え、打った字は残る）
       await waitUntil(
@@ -466,6 +486,56 @@ test("Ctrl+Alt+K で強調を外した直後、画面へ届く前に行末へ字
           (await composeText(frame)).includes("前の字と強調と後ろの字。あ") &&
           (await frame.locator("#compose .emphasis").count()) === 0,
         "画面が、印を外して字を足した本文へ揃う"
+      );
+    }
+  );
+});
+
+/**
+ * 傍点を外した直後、本体の本文が画面へ届く前に**カーソルを動かした**とき（2026-10-04、
+ * ノートPCで「行末へ打つ」が毎回落ちた調べで見つけた。実装ルール1）。
+ *
+ * 本体は外し終えると「外した語を選び直す」知らせ（select）を送り、画面はそれを覚えて、
+ * あとから届く本文で組み直すときにも当て直していた。その間に作者が End で行末へ
+ * 動いても、組み直しで**選択が語へ戻り**、続けて打った字が**外した語を置き換えて**
+ * 原稿へ入った（「前の字とあと後ろの字。」。本体から見れば作者の正当な編集なので、
+ * 記録も帯も出ない）。遅い機械ほど本文が届くまでが長く、毎回起きた。
+ *
+ * 見張ること：選び直しのあとに作者が動かしたカーソルは、組み直しのあとも作者が
+ * 動かした所にある。打った字は行末に入り、外した語は残る。
+ */
+test("Ctrl+Alt+K で強調を外した直後に End で行末へ動くと、画面へ本文が届いて組み直したあとも、カーソルは行末に残り、打った字が外した語を置き換えない", async () => {
+  await withVsCode(
+    "強調を外した直後に動いてから打つ",
+    [{ name: EPISODE, text: "前の字と《《強調》》と後ろの字。\n" }],
+    async (session) => {
+      const frame = await openEpisode(session.page, EPISODE, "後ろの字");
+      await selectText(frame, "強調");
+      await traceInstall(frame);
+      await traceMark(frame, "Ctrl+Alt+K を押す");
+      await session.page.keyboard.press("Control+Alt+KeyK");
+      await waitDirtyQuickly(session);
+      await waitSelectionOutsideChunk(frame);
+      await session.page.keyboard.press("End");
+      // End のときに傍点がまだ画面にあれば、見たい場面（組み直しが End のあとに来る）
+      const emphasisAtEnd = await frame.locator("#compose .emphasis").count();
+      await traceMark(frame, `End を押した（画面の傍点：${emphasisAtEnd}）`);
+      console.info(`[E2E] End を押した直後の画面の傍点：${emphasisAtEnd}`);
+      // 本体の本文が届いて組み直されるまで待つ（傍点が消える）
+      await waitUntil(
+        async () => (await frame.locator("#compose .emphasis").count()) === 0,
+        "本体の本文が届いて、画面の傍点が消える"
+      );
+      const report = async () => `（End のときの傍点：${emphasisAtEnd}）${await traceReport(session, frame)}`;
+      const caret = await caretPosition(frame);
+      expect(
+        { caret, collapsed: await selectionCollapsed(frame) },
+        `組み直しのあと、カーソルが行末にありません${await report()}`
+      ).toEqual({ caret: { lineText: "前の字と強調と後ろの字。", column: 12 }, collapsed: true });
+      await session.page.keyboard.insertText("あ");
+      await saveAndWaitFor(session, (text) => text.includes("あ"), "打った字がファイルに入る");
+      expect(await fileText(session), `打った字が行末に入っていません${await report()}`).toBe(
+        "前の字と強調と後ろの字。あ\n"
       );
     }
   );
@@ -489,6 +559,21 @@ test("Ctrl+Alt+K で強調を外した直後、画面へ届く前に同じ語の
       // 選んだままの語の上へ打つ＝本体の変更と同じ所。どちらが正しいかは機械には決められない
       await session.page.keyboard.insertText("あ");
       await traceMark(frame, "打ち終えた");
+      /*
+        **打つ瞬間までに本体の本文が届いていた回は、見たい場面を外している**（機械が混むと
+        起きる。2026-10-04）。そのとき作者は、傍点の外れた語を選んで打ったことになるので、
+        語が打った字に置き換わり、帯は出ないのが正しい。その形を確かめて終える
+      */
+      if ((await emphasisAtFirstInput(frame)) === 0) {
+        console.info("[E2E] 打つ瞬間に本体の本文が届いていたので、ふつうの置き換えとして確かめます");
+        await saveAndWaitFor(session, (text) => text.includes("あ"), "打った字がファイルに入る");
+        expect(await fileText(session)).toBe("前の字とあと後ろの字。\n");
+        expect(
+          await frame.evaluate(() => document.getElementById("rescue")?.classList.contains("open") === true),
+          "本文が届いてから打ったのに、控えの帯が出ました"
+        ).toBe(false);
+        return;
+      }
       // 打った字は、黙って捨てずに帯で知らせる
       await waitUntil(
         async () => frame.evaluate(() => document.getElementById("rescue")?.classList.contains("open") === true),

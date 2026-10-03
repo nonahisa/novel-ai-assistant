@@ -26,7 +26,7 @@ import { answerInput, runCommand, waitForQuickInput } from "./support/quickInput
 import { charactersFolder, settingsPanelFrame, writeCharactersTo } from "./support/settingsFixture";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { pickQuickPickRow, quickPickTitle, tabIsDirty } from "./support/workbenchDom";
+import { dismissWorkbenchHover, pickQuickPickRow, quickPickTitle, tabIsDirty } from "./support/workbenchDom";
 
 const CRLF_EPISODE = "001_改行CRLF.md";
 const LF_EPISODE = "002_改行LF.md";
@@ -103,6 +103,60 @@ async function panelState(frame: Frame): Promise<{ collapsed: boolean; detail: s
   }));
 }
 
+/**
+ * 落ちたときに読む、列とタブと面の様子（2026-10-04、遅い機械で最後の段の
+ * ［一覧を出す］／［傍点］を押すところが30秒で時間切れになった調べ）。
+ * 押す相手の面が、別のタブの裏に回って見えていないのかを見分ける
+ */
+async function layoutState(session: E2ESession, frames: Record<string, Frame | undefined>): Promise<string> {
+  const { page } = session;
+  const groups = await page
+    .evaluate(() =>
+      Array.from(document.querySelectorAll(".editor-group-container")).map((group) => ({
+        active: group.classList.contains("active"),
+        tabs: Array.from(group.querySelectorAll(".tabs-container .tab")).map(
+          (tab) =>
+            ((tab.querySelector(".label-name")?.textContent ?? tab.getAttribute("aria-label") ?? "").trim()) +
+            (tab.classList.contains("active") ? "［前］" : "")
+        ),
+      }))
+    )
+    .catch(() => "（読めません）");
+  const faces: string[] = [];
+  for (const [name, frame] of Object.entries(frames)) {
+    if (!frame) {
+      faces.push(`${name}：無し`);
+      continue;
+    }
+    const state = await frame
+      .evaluate(() => {
+        const look = (id: string) => {
+          const element = document.getElementById(id) as HTMLElement | null;
+          if (!element) return `${id}=無し`;
+          const box = element.getBoundingClientRect();
+          return `${id}=${Math.round(box.width)}x${Math.round(box.height)}${element.offsetParent ? "" : "(隠れ)"}`;
+        };
+        return `${document.visibilityState}／${window.innerWidth}x${window.innerHeight}／${look("reopen")}／${look("emph")}`;
+      })
+      .catch((error: unknown) => `読めません（${String(error).slice(0, 80)}）`);
+    // どの iframe の中の面か（外側の iframe の name）。見えている面と取り違えていないかを見る
+    const outer = frame.parentFrame()?.name() ?? "";
+    faces.push(`${name}：${state}／iframe=${outer.slice(0, 8)}`);
+  }
+  // 本体の側の WebView の iframe（重なりの順・見えているか・場所）
+  const iframes = await page
+    .evaluate(() =>
+      Array.from(document.querySelectorAll("iframe.webview")).map((element) => {
+        const frameElement = element as HTMLIFrameElement;
+        const box = frameElement.getBoundingClientRect();
+        const style = getComputedStyle(frameElement.parentElement ?? frameElement);
+        return `${frameElement.name.slice(0, 8)}@${Math.round(box.left)},${Math.round(box.top)} ${Math.round(box.width)}x${Math.round(box.height)} vis=${style.visibility}/${style.display}`;
+      })
+    )
+    .catch(() => ["（読めません）"]);
+  return `（列：${JSON.stringify(groups)}／面：${faces.join("／")}／本体の iframe：${JSON.stringify(iframes)}）`;
+}
+
 /** 原稿ファイルの生の中身（改行を揃えずに読む） */
 async function rawFile(session: E2ESession, name: string): Promise<string> {
   return readFile(path.join(session.manuscriptFolder, name), "utf8");
@@ -112,12 +166,15 @@ async function rawFile(session: E2ESession, name: string): Promise<string> {
 async function rubyAndEmphasis(session: E2ESession, frame: Frame, episode: string): Promise<void> {
   const { page } = session;
   await selectText(frame, "一行目");
+  // 狭い窓では、本体の吹き出しが上の帯のボタンに重なって押せない（dismissWorkbenchHover）
+  await dismissWorkbenchHover(page);
   await frame.locator("#ruby").click();
   await waitForQuickInput(page, "「一行目」の読み");
   await answerInput(page, "いちぎょうめ");
   await waitUntil(async () => (await frame.locator("#compose ruby").count()) > 0, `${episode}：画面にルビが組まれる`);
 
   await selectText(frame, "三行目");
+  await dismissWorkbenchHover(page);
   await frame.locator("#emph").click();
   await waitUntil(async () => await tabIsDirty(page, episode), `${episode}：傍点で文書が変わる`);
   // 送り直しが画面へ届いてから保存する（manuscriptEditor.test.ts の傍点の件と同じ理由）
@@ -212,8 +269,12 @@ test("CRLF と LF の原稿で、人物の色が名前そのものに載り、�
         throw new Error(`${String(error)}（下の欄：${await footText(frame, "counts")}）`);
       });
 
+      // 落ちたときの様子に添えるため、外で持つ（下の catch）
+      let lfFrameSeen: Frame | undefined;
+      try {
       /* ── LF の原稿（これまでどおり動くか） ── */
       const lfFrame = await openEpisode(page, LF_EPISODE, "五行目の三門太志");
+      lfFrameSeen = lfFrame;
       await waitUntil(
         async () => (await coloredCharacterTerms(lfFrame)).length === expectedTerms.length,
         "LF：人物の色が3か所に付く"
@@ -224,6 +285,8 @@ test("CRLF と LF の原稿で、人物の色が名前そのものに載り、�
 
       /* ── 設定資料パネルを、ふつうの道でも開く（最後に回す。開いたあとは焦点がパネルへ移る） ── */
       // 作者が［一覧を出す］で一覧を開いたあと、ふつうの道（設定資料集閲覧）で開くと一覧が出ている
+      // 狭い窓では、タブの吹き出しがパネルの上に重なって押せない（dismissWorkbenchHover）
+      await dismissWorkbenchHover(page);
       await panel.locator("#reopen").click();
       await waitUntil(async () => !(await panelState(panel)).collapsed, "［一覧を出す］で一覧が開く");
       await runCommand(page, "設定資料集閲覧");
@@ -233,6 +296,12 @@ test("CRLF と LF の原稿で、人物の色が名前そのものに載り、�
         "ふつうの道で開いた設定資料パネルに人物の一覧が出る"
       );
       expect((await panelState(panel)).collapsed, "ふつうの道で開いたのに一覧が畳まれています").toBe(false);
+      } catch (error) {
+        if (error instanceof Error) {
+          error.message += await layoutState(session, { CRLFの原稿: frame, LFの原稿: lfFrameSeen,設定資料パネル: panel });
+        }
+        throw error;
+      }
     }
   );
 });
