@@ -7,7 +7,7 @@ import { findEmphasisSpans } from "../../../src/core/ruby";
  * 原稿エディターの傍点の付け外し（作者の裁定、2026-10-03。設計書6.34.2）。
  *
  * - 傍点の付いた所を選んで［傍点］（Ctrl+Alt+K）を押すと外れる
- * - 傍点の上で右クリックすると、品書きの「傍点つけ」が「傍点消去」に変わる
+ * - 傍点の上で右クリックすると、品書きの「傍点付与」が「傍点消去」に変わる
  *
  * 画面へ渡る本物のスクリプトを切り出して動かす（manuscriptEditorClipboardMenu.test.ts と同じやり方）。
  */
@@ -98,7 +98,7 @@ describe("右クリックの品書き：傍点の上では「傍点消去」", (
     const { items, posted } = runOpenMenu({ start: 2, end: 8 });
     const labels = items.map((item) => item.label);
     expect(labels).toContain("傍点消去");
-    expect(labels).not.toContain("傍点つけ");
+    expect(labels).not.toContain("傍点付与");
 
     const off = items.find((item) => item.label === "傍点消去");
     expect(off?.disabled).toBe(false);
@@ -106,12 +106,12 @@ describe("右クリックの品書き：傍点の上では「傍点消去」", (
     expect(posted).toEqual([{ type: "emphasis", text: "", start: 2, end: 8 }]);
   });
 
-  it("傍点の無い所では「傍点つけ」のまま（選んでいなければ押せない）", () => {
+  it("傍点の無い所では「傍点付与」のまま（選んでいなければ押せない）", () => {
     const { items } = runOpenMenu(null);
     const labels = items.map((item) => item.label);
-    expect(labels).toContain("傍点つけ");
+    expect(labels).toContain("傍点付与");
     expect(labels).not.toContain("傍点消去");
-    expect(items.find((item) => item.label === "傍点つけ")?.disabled).toBe(true);
+    expect(items.find((item) => item.label === "傍点付与")?.disabled).toBe(true);
   });
 });
 

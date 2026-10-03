@@ -1372,6 +1372,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             detail:
               "選んだ文字に傍点（強調の点）を付ける\n\n" +
               "・範囲を選んでから押す\n\n" +
+              "・傍点の付いた所なら外れる\n\n" +
               "・使えるのは Markdown（.md）のファイルだけ",
           },
         ],

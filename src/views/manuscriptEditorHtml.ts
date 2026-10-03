@@ -3719,7 +3719,7 @@ ruby > rt {
 
   /**
    * @param emphasisOn 右クリックした所（か選択）に掛かる傍点の範囲。あれば
-   *   「傍点つけ」の代わりに「傍点消去」を出す
+   *   「傍点付与」の代わりに「傍点消去」を出す
    */
   function openMenu(x, y, term, hasSelection, emphasisOn) {
     menu.innerHTML = "";
@@ -3767,7 +3767,8 @@ ruby > rt {
     // **ルビは選んでいなくても押せる。** 選択が無ければ拡張機能側が
     // 直前の漢字のまとまりを拾う（傍点は選んだ範囲そのものに付けるので、
     // 選択が要る）
-    add("ルビ振り", askRuby);
+    // 名前はコマンドの題（「ルビ付与」「傍点付与」）に揃える（作者の裁定、2026-10-03）
+    add("ルビ付与", askRuby);
     // **傍点の上では「傍点消去」**（作者の指示、2026-10-03。名前も指示どおり）。
     // 選んでいなくても押せる——右クリックした傍点そのものを外す
     if (emphasisOn) {
@@ -3775,7 +3776,7 @@ ruby > rt {
         askEmphasisOff(emphasisOn);
       });
     } else {
-      add("傍点つけ", askEmphasis, hasSelection);
+      add("傍点付与", askEmphasis, hasSelection);
     }
     rule();
     add("コピー（投稿サイト用）", function () {
