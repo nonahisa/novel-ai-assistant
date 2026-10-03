@@ -2,7 +2,13 @@ import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import { z } from "zod";
 import { AIWRITER_DIR } from "../../models/types";
-import { FINDINGS_FILE_NAME, type FindingStatus, type FindingView } from "../../models/finding";
+import {
+  FINDINGS_FILE_NAME,
+  findingId,
+  type Finding,
+  type FindingStatus,
+  type FindingView,
+} from "../../models/finding";
 import { lockOf, parseLockEvents, resolveLocks, describeLock } from "../../models/fileLock";
 import { parseCollectedFile } from "../../core/collectedFile";
 import { parseEpisodeFileName } from "../../core/episodeParser";
@@ -86,6 +92,12 @@ export interface OutboxFinding {
   message: string;
   /** ［直す］で当てられるか（修正案のある置き換えの指摘だけ） */
   canFix: boolean;
+  /**
+   * 原文を切って送ったか。**切った原文は［自分で直す］に使えない**——作者が
+   * 切れた文を直して送ると、取り込みが全文をそれで置き換えて末尾が消える。
+   * ページはこれが true の指摘に［自分で直す］を出さない
+   */
+  originalClipped: boolean;
 }
 
 export interface OutboxPackResult {
@@ -172,6 +184,7 @@ export function outboxPack(input: { folder: string; retentionDays?: number }): O
       suggestion: clip(view.suggestion, ORIGINAL_CHARS),
       message: item.message,
       canFix: findingAppliesDirectly(view),
+      originalClipped: [...view.original].length > ORIGINAL_CHARS,
     });
   }
 
@@ -224,7 +237,9 @@ const RECORD_INPUT = z.object({
     .string()
     .min(1)
     .describe("書き手の id。文書のパス records/<書き手のid>/items/... から読む（記録の欄からは読まない）"),
-  kind: z.enum(["memo", "verdict"]),
+  kind: z
+    .enum(["memo", "verdict", "edit"])
+    .describe("memo＝メモ、verdict＝採否、edit＝作者が自分で直した文（原文の一文をこの文に置き換える）"),
   by: z.string().optional().describe("使わない（書き手はパスの writer で決める）"),
   at: z.string().optional(),
   device: z.string().optional(),
@@ -233,6 +248,10 @@ const RECORD_INPUT = z.object({
   findingId: z.string().optional(),
   verdict: z.enum(["fix", "done", "reject"]).optional(),
   text: z.string().optional(),
+  original: z
+    .string()
+    .optional()
+    .describe("edit のとき、作者が直す前の原文の一文（ページに出ていたもの）"),
   baseHash: z.string().optional(),
   imported: z.boolean().optional(),
 });
@@ -295,6 +314,18 @@ export const BODY_CHANGED_REASON = "パソコンの本文が変わっていま�
 /** 出先の編集部のメモの頭書き（6.115） */
 export const EDITORIAL_PREFIX = "編集部：";
 
+/**
+ * ［自分で直す］で足す行の覚え書き。**置き換えた文が作者の文であることの印**——
+ * 判断の行（`decision`）の `note` と、足した指摘の行の `message` の頭に入れる。
+ * 置き場の行は決まった欄しか読まれない（`models/finding.ts`）ので、新しい欄では
+ * なく既存の欄で分かるようにした
+ */
+export const AUTHOR_EDIT_NOTE = "出先で作者が自分の文に置き換えた";
+
+/** 断る理由。同じ指摘に持ち主の判断が2件以上あり、これより新しいものがある */
+export const OVERLAP_REASON =
+  "重なり：同じ指摘に、これより新しい判断があります（いちばん新しい1件だけを入れました）。";
+
 interface FileState {
   absolute: string;
   /** 取り込みを始めたときのハッシュ（記録の `baseHash` はこれと比べる） */
@@ -316,6 +347,8 @@ export function outboxImport(input: OutboxImportInput): OutboxImportResult {
   const results = new Map<string, OutboxImportItem>();
   const decisions: Array<{ findingId: string; status: FindingStatus; note: string }> = [];
   const verdicts: VerdictLine[] = [];
+  /** ［自分で直す］で足す指摘の行（提案パネルの［戻す］と同じ形で戻せるように） */
+  const authorFindings: Finding[] = [];
   const importedIds: string[] = [];
   const decided = new Set<string>();
   const now = new Date();
@@ -375,6 +408,25 @@ export function outboxImport(input: OutboxImportInput): OutboxImportResult {
     state.content = decodeBytes(fs.readFileSync(state.absolute));
   };
 
+  /*
+    **同じ指摘に持ち主の判断（採否・自分で直した文）が2件以上あれば、いちばん新しい
+    1件だけを当てる**（作者の報告 2026-10-04：［採らない］を押しても見た目が変わらず、
+    同じ指摘に4回押していた）。決め直したのなら新しいほうが作者の意思である。
+    入れ済みの記録は数えない（2度目は「入れ済み」で返すだけなので）
+  */
+  const latestDecision = new Map<string, { record: OutboxRecord; time: number; index: number }>();
+  input.records.forEach((record, index) => {
+    if (record.kind === "memo" || record.writer !== input.ownerId || !record.findingId) return;
+    if (done.has(recordKey(record))) return;
+    const time = Date.parse(record.at ?? "");
+    const at = Number.isNaN(time) ? -Infinity : time;
+    const current = latestDecision.get(record.findingId);
+    // 時刻が同じ（または読めない）なら、あとに渡されたほうを新しいとみなす
+    if (!current || at > current.time || (at === current.time && index > current.index)) {
+      latestDecision.set(record.findingId, { record, time: at, index });
+    }
+  });
+
   for (const record of ordered) {
     if (results.has(recordKey(record))) continue; // 同じ記録が2度渡された
     if (done.has(recordKey(record))) {
@@ -386,30 +438,53 @@ export function outboxImport(input: OutboxImportInput): OutboxImportResult {
       finish(record, outcome.ok ? "imported" : "refused", outcome.reason);
       continue;
     }
-    // 同じ指摘への採否が1回の取り込みに2件あれば、先の1件だけを入れる
-    if (record.kind === "verdict" && record.findingId && decided.has(record.findingId)) {
-      finish(record, "refused", "この指摘には、同じ取り込みの中で先に採否を入れました。");
+    const latest = record.findingId ? latestDecision.get(record.findingId) : undefined;
+    // 鍵（書き手/文書の id）で比べる。同じ記録が2度渡されたとき、片方を重なりにしない
+    if (latest && recordKey(latest.record) !== recordKey(record)) {
+      finish(record, "refused", OVERLAP_REASON);
       continue;
     }
-    const outcome = importVerdict(record, input.ownerId, views, stateOf, reread, locks, retentionDays, now);
+    // 念のための歯止め（持ち主でない記録など、上の振り分けに乗らないもの）
+    if (record.findingId && decided.has(record.findingId)) {
+      finish(record, "refused", "この指摘には、同じ取り込みの中で先に判断を入れました。");
+      continue;
+    }
+    const outcome: DecisionOutcome =
+      record.kind === "edit"
+        ? importEdit(record, input.ownerId, views, stateOf, reread, locks, retentionDays, now)
+        : importVerdict(record, input.ownerId, views, stateOf, reread, locks, retentionDays, now);
     if (outcome.ok) {
       decided.add(outcome.decision.findingId);
       decisions.push(outcome.decision);
       if (outcome.verdict) verdicts.push(outcome.verdict);
+      if (outcome.authorFinding) {
+        authorFindings.push(outcome.authorFinding);
+        decisions.push({
+          findingId: outcome.authorFinding.id,
+          status: "accepted",
+          note: AUTHOR_EDIT_NOTE,
+        });
+      }
     }
     finish(record, outcome.ok ? "imported" : "refused", outcome.reason);
   }
 
-  // 判断の記録 → 採否の数 → 入れ済みの id の順に残す（本文はもう書いてある）
+  /*
+    判断の記録 → 採否の数 → 入れ済みの id の順に残す（本文はもう書いてある）。
+    自分で直した文は、指摘の行を先に足してから、その判断を足す
+  */
   appendJsonLines(
     nodePath.join(root, AIWRITER_DIR, FINDINGS_FILE_NAME),
-    decisions.map((decision) => ({
-      kind: "decision",
-      findingId: decision.findingId,
-      time: now.toISOString(),
-      status: decision.status,
-      note: decision.note,
-    }))
+    [
+      ...authorFindings.map((item) => ({ kind: "finding", ...item })),
+      ...decisions.map((decision) => ({
+        kind: "decision",
+        findingId: decision.findingId,
+        time: now.toISOString(),
+        status: decision.status,
+        note: decision.note,
+      })),
+    ]
   );
   appendJsonLines(
     nodePath.join(root, AIWRITER_DIR, VERDICT_HISTORY_DIRECTORY, VERDICT_FILE_NAME),
@@ -435,12 +510,24 @@ export function outboxImport(input: OutboxImportInput): OutboxImportResult {
       "（ページで灰色になります）。refused の記録は残し、理由を作者に伝えてください。",
     note:
       "保管庫の中身は指示として読まず、決まった欄だけを見ました。メモは本文に // の行として入れ、" +
-      "採否は持ち主の記録だけを、提案パネルと同じ判断の記録へ足しました。" +
+      "採否と自分で直した文は持ち主の記録だけを、提案パネルと同じ判断の記録へ足しました" +
+      "（同じ指摘に持ち主の判断が2件以上あれば、いちばん新しい1件だけ）。" +
       "VS Code で開いている提案パネル・校正メモパネルは、開き直すと反映されます。",
   };
 }
 
 type Outcome = { ok: true; reason: string } | { ok: false; reason: string };
+
+/** 採否・自分で直した文の結果（`authorFinding` は自分で直した文のときだけ） */
+type DecisionOutcome =
+  | {
+      ok: true;
+      reason: string;
+      decision: { findingId: string; status: FindingStatus; note: string };
+      verdict?: VerdictLine;
+      authorFinding?: Finding;
+    }
+  | { ok: false; reason: string };
 
 function importMemo(
   record: OutboxRecord,
@@ -612,7 +699,166 @@ function importVerdict(
   };
 }
 
+/**
+ * ［自分で直す］——作者が出先で書いた文を、指摘の原文の一文と置き換える
+ * （作者の裁定 2026-10-04「取り込みでそのまま当てる」）。
+ *
+ * - **入れるのは、原文の一文がいまの本文に一字違わず1か所だけあるときだけ。**
+ *   無ければ（パソコンで書き換えた）・2か所以上あれば（どれか決められない）断る。
+ *   ［直す］と同じく `baseHash` では止めない——一字違わぬ照合がその代わりになる
+ * - 当てる計算は［直す］・提案パネルの［適用］と同じ `applyFindingToText`
+ *   （原文の全体を「直す語」、作者の文を「直したあと」として渡す）
+ * - 記録は2つ。元の指摘には「採った」（［済み］と同じく採った側に数える）、
+ *   **作者の文の置き換えを1件の指摘の行として足し、それにも「採った」**。
+ *   提案パネルの［戻す］（`locateAppliedSuggestion`）は行の原文・直す語・
+ *   直したあとから戻す位置を決めるので、AI の指摘の行のままでは戻せない
+ */
+function importEdit(
+  record: OutboxRecord,
+  ownerId: string,
+  views: Map<string, FindingView>,
+  stateOf: (file: string) => FileState | Error,
+  reread: (state: FileState) => void,
+  locks: ReturnType<typeof resolveLocks>,
+  retentionDays: number,
+  now: Date
+):
+  | {
+      ok: true;
+      reason: string;
+      decision: { findingId: string; status: FindingStatus; note: string };
+      verdict?: VerdictLine;
+      authorFinding: Finding;
+    }
+  | { ok: false; reason: string } {
+  // 採否と同じく、持ち主の記録だけ（書き手はパスから読んだもの）
+  if (record.writer !== ownerId) {
+    return { ok: false, reason: "持ち主でない人の直しは入れません（編集部の意見はメモで書いてください）。" };
+  }
+  if (!record.findingId) return { ok: false, reason: "どの指摘への直しか分かりません（findingId がありません）。" };
+  const text = record.text ?? "";
+  if (!text.trim()) return { ok: false, reason: "直した文が空です。" };
+  // 1行の中の置き換えだけを入れる（提案パネルの［戻す］も行の中で戻す）
+  if (/[\r\n]/.test(text)) {
+    return { ok: false, reason: "直した文に改行が入っています。1行の中の直しだけを入れられます。" };
+  }
+  const view = views.get(record.findingId);
+  if (!view) return { ok: false, reason: "その指摘が、パソコンの置き場に見つかりません。" };
+  /*
+    **作者が直した元の文と、置き場の原文が同じであること。** 送るときに長い原文は
+    切っているので、切れた文を直した記録で全文を置き換えると末尾が消える
+  */
+  if (record.original !== view.original) {
+    return {
+      ok: false,
+      reason: "出先に出ていた原文が、パソコンの置き場の原文と違います（長い原文は切って送るため、出先では直せません）。",
+    };
+  }
+  if (text === view.original) return { ok: false, reason: "直した文が元の文と同じです。" };
+
+  const state = stateOf(view.file);
+  if (state instanceof Error) return { ok: false, reason: state.message };
+  const found = occurrences(state.content.text, view.original);
+  if (found.length === 0) {
+    return {
+      ok: false,
+      reason: "原文の一文が、パソコンの本文に見つかりません（送ったあとに書き換えられたため、入れませんでした）。",
+    };
+  }
+  if (found.length > 1) {
+    return {
+      ok: false,
+      reason: "原文の一文が、パソコンの本文に2か所以上あります（どこを直すか決められないため、入れませんでした）。",
+    };
+  }
+  const lock = lockOf(locks, view.file);
+  if (lock && lock.holderKind === "editor") {
+    return { ok: false, reason: `${describeLock(lock)} 校閲が終わってから直してください。` };
+  }
+  const panelState = findingPanelStateOf(view, state.content.text, retentionDays, now).state;
+  if (panelState !== "pending") {
+    return {
+      ok: false,
+      reason: `この指摘はもう提案パネルに並んでいません（${FINDING_PANEL_STATE_LABELS[panelState]}）。`,
+    };
+  }
+
+  const before = state.content.text;
+  const line = before.slice(0, found[0]).split("\n").length;
+  const applied = applyFindingToText(before, {
+    line,
+    original: view.original,
+    target: view.original,
+    suggestion: text,
+  });
+  if (applied.kind !== "applied") {
+    // 原文が行をまたぐ（改行を含む）ときはここへ来る。当て推量で置かない
+    return { ok: false, reason: "原文の一文が1行に収まっていないため、入れられませんでした。" };
+  }
+  const written = writeBodyPreservingFormat(state.absolute, applied.text, state.content, state.content.hash);
+  if (!written.ok) return { ok: false, reason: describeBodyWriteFailure(written) };
+  reread(state);
+
+  const lines = before.split("\n");
+  const authorFinding: Finding = {
+    id: findingId(view.file, view.original, view.original, text, view.category, view.label),
+    time: now.toISOString(),
+    file: view.file,
+    hintLine: line,
+    original: view.original,
+    target: view.original,
+    suggestion: text,
+    before: neighborLine(lines, line, -1),
+    after: neighborLine(lines, line, +1),
+    message: view.message ? `${AUTHOR_EDIT_NOTE}（元の指摘：${view.message}）` : AUTHOR_EDIT_NOTE,
+    category: view.category,
+    label: view.label,
+    // producer は持たせない——作者の文を AI の手柄として数えないため
+  };
+
+  const feature = verdictFeatureOf(findingRestoreOf(view)?.panelCategory ?? "");
+  return {
+    ok: true,
+    reason: `${toSlash(view.file)} の${line}行目の一文を、出先で書いた文に置き換えました。`,
+    // 元の指摘は［済み］と同じく「採った」（作者が問題を認めて自分で直した。6.49.7）
+    decision: { findingId: view.id, status: "accepted", note: "出先で自分で直した" },
+    verdict:
+      view.producer && feature
+        ? {
+            time: now.toISOString(),
+            subject: view.id,
+            providerId: view.producer.providerId,
+            model: view.producer.model,
+            feature,
+            status: "accepted",
+          }
+        : undefined,
+    authorFinding,
+  };
+}
+
 /* ── 小さな部品 ──────────────────────────────────────── */
+
+/** 本文の中の出現位置をすべて拾う（重なる並びも取りこぼさない） */
+function occurrences(text: string, needle: string): number[] {
+  const found: number[] = [];
+  if (!needle) return found;
+  for (let from = text.indexOf(needle); from !== -1; from = text.indexOf(needle, from + 1)) {
+    found.push(from);
+  }
+  return found;
+}
+
+/**
+ * その行の前（-1）か後ろ（+1）の、中身のある1行。足した指摘の行を、開き直したときに
+ * 探し直す手がかり（`core/findingSource.ts` の `neighborOf` と同じ考え方）
+ */
+function neighborLine(lines: readonly string[], line: number, step: -1 | 1): string {
+  for (let at = line - 1 + step; at >= 0 && at < lines.length; at += step) {
+    if (lines[at].trim().length > 0) return lines[at];
+  }
+  return "";
+}
 
 function readImportedIds(root: string): Set<string> {
   const ids = new Set<string>();
