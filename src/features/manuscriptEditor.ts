@@ -620,6 +620,57 @@ export function lastManuscriptCaret():
 }
 
 /**
+ * 最後に前へ出ていた原稿エディターの面（設計書6.25.11。2026-10-04）。
+ *
+ * **開いていない話へ飛ぶときの向きを決めるのに使う。** 「いま前に出ている
+ * タブ」（`activeManuscriptViewType`）だけを見ていると、提案パネルや
+ * 校正・メモパネル（右の列）の行を押したときは前にあるのがパネルなので
+ * 向きが分からず、縦書きで書いている人の次の話が横書きで開いた
+ * （画面の自動テスト `findingJumpVertical.test.ts` で見つかった）。
+ *
+ * 向き（viewType）ではなく**面そのもの**を持つのは、その面が閉じたあとに
+ * 古い向きを引き継がないため（閉じた面の向きは、もう「書いている向き」ではない）。
+ */
+let lastFrontPanel: vscode.WebviewPanel | undefined;
+
+/**
+ * 開いていない話を、どちらの入口（縦・横）で開くか——**作者がいま書いている向き**。
+ *
+ * 見る面は、前に出ている原稿エディター、無ければ最後に前へ出ていた原稿エディター
+ * （その面が閉じていれば無し）。
+ *
+ * **入口（viewType）ではなく、画面の見た目の向きで決める。** 横書きの入口で開いた
+ * 面も、画面の［縦書きにする］や「縦書きで開く」（既にタブがあれば画面の中で
+ * 切り替える。6.25.11）で縦書きになる。入口だけを見ると、縦書きで書いている
+ * 人の次の話が横書きで開く。見た目をまだ知らせていない面（開いた直後）だけ、
+ * 入口で代える。
+ *
+ * @returns 見る面が無ければ undefined（呼んだ側が作品のタイプで決める）
+ */
+function writingManuscriptViewType(): string | undefined {
+  const fromTab = activeManuscriptViewType();
+  const all = openManuscripts.values();
+  const reference =
+    all.find((open) => {
+      try {
+        return open.panel.active;
+      } catch {
+        return false;
+      }
+    }) ??
+    (lastFrontPanel
+      ? all.find((open) => open.panel === lastFrontPanel)
+      : undefined);
+  const vertical = reference?.appearance()?.vertical;
+  if (typeof vertical === "boolean") {
+    return vertical
+      ? MANUSCRIPT_EDITOR_VIEW_TYPE
+      : MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE;
+  }
+  return fromTab ?? reference?.panel.viewType;
+}
+
+/**
  * その原稿を開いている画面の、下段の字数を測り直す。
  *
  * 開いていなければ何もしない。呼ぶのは保存を記録し終えたところ1か所だけ。
@@ -1879,6 +1930,20 @@ export class ManuscriptEditorProvider
     const entry = {
       panel,
       revealLine: (line: number, caret: RevealCaret = "head"): void => {
+        /*
+          **飛んだ先を、こちらで「最後のカーソル」として覚える**（設計書6.40.4。
+          画面の自動テスト `sceneMemoJumps.test.ts` で見つかった、2026-10-04）。
+          画面のカーソルの知らせを待つと、2つの理由で古い起点が残る。
+          ・画面は同じ行に居るあいだは知らせない（`lastCaretLine`）。前に一度
+            知らせた行へ飛ばされると黙ったままで、［次へ］が前の話から数え直し、
+            同じ行へ何度も戻された（4回目の［次へ］で止まった）
+          ・開いたばかりの面の知らせは遅れて届く（2.5秒かかった例がある）
+          飛ぶ先はここで決まっているので、知らせを待つ理由が無い。
+          作者があとでカーソルを動かせば、その知らせで上書きされる
+        */
+        if (line > 0) {
+          lastCaret = { filePath: fromUri(document.uri), line };
+        }
         if (!webviewReady) {
           pendingReveal = { line, caret };
           return;
@@ -1959,8 +2024,16 @@ export class ManuscriptEditorProvider
       // **閉じた面だけを外す。** 鍵ごと消すと、同じ原稿のもう1枚が
       // 開いたまま台帳から落ちる（2026-10-03 の不具合）
       openManuscripts.remove(key, entry);
+      if (lastFrontPanel === panel) lastFrontPanel = undefined;
       fireManuscriptStatusChanged();
     });
+    // 開いた瞬間に前へ出ている面は、前に出た知らせ（onDidChangeViewState）が
+    // 来ないことがあるので、ここでも覚える
+    try {
+      if (panel.active) lastFrontPanel = panel;
+    } catch {
+      // 試験の代役など、active を読めない面では覚えない
+    }
 
     const subscriptions: vscode.Disposable[] = [];
 
@@ -2135,6 +2208,8 @@ export class ManuscriptEditorProvider
           // 前に出た面を「最後に使った面」にする（同じ原稿の面が2枚あるとき、
           // 飛ぶ先として選ぶ。6.25.11）
           openManuscripts.touch(key, entry);
+          // 開いていない話へ飛ぶときの向きは、この面に揃える（6.25.11）
+          lastFrontPanel = panel;
           const filePath = fromUri(document.uri);
           this.deps.onManuscriptShown?.(
             filePath,
@@ -2626,10 +2701,12 @@ export class ManuscriptEditorProvider
     if (viaTab !== undefined) return viaTab;
 
     // **いま開いている向きが最優先**（縦書きで書いている人の画面を横にしない）。
-    // 開いていなければ、その作品のタイプに合わせた入口で開く（設計書6.70）
+    // 前に出ているのがパネル（右の列）なら、最後に前へ出ていた原稿の向きを使う
+    // （向きは入口でなく画面の見た目で見る。`writingManuscriptViewType`）。
+    // どちらも無ければ、その作品のタイプに合わせた入口で開く（設計書6.70）
     const episodeWork = await this.registeredEpisodeWork(filePath);
     const viewType =
-      activeManuscriptViewType() ??
+      writingManuscriptViewType() ??
       (episodeWork
         ? manuscriptViewTypeFor(await kindOf(episodeWork))
         : undefined);
