@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applySentEdit,
+  combineSentEdits,
   createEditQueue,
   type EditAck,
   type SentEdit,
@@ -184,5 +185,72 @@ describe("入ったかを画面へ返す", () => {
     const { done, acks } = run(async () => true);
     await expect(done).resolves.toBe(true);
     expect(acks).toEqual([]);
+  });
+});
+
+/**
+ * 便に「元の本文の指紋」が付いてから（設計書6.25.9。作者の裁定「塞ぐ」、2026-10-04）の
+ * 畳み方と、重なって当てなかった便の返し方。
+ */
+describe("元の本文の指紋が付いた便", () => {
+  const fp = (text: string) => `指紋(${text})`;
+
+  it("後の便の元が前の便の本文なら、前の便の元を引き継いで1つに畳む", () => {
+    expect(
+      combineSentEdits({ text: "あ", seq: 1, base: fp("") }, { text: "あい", seq: 2, base: fp("あ") }, fp)
+    ).toEqual({ text: "あい", seq: 2, base: fp("") });
+  });
+
+  it("つながっていない便は畳まない（前の便で打った字を、入ったことにしない）", () => {
+    expect(
+      combineSentEdits({ text: "あ", seq: 1, base: fp("") }, { text: "外い", seq: 2, base: fp("外") }, fp)
+    ).toBeUndefined();
+  });
+
+  it("指紋の無い便どうしは、今までどおり後の便だけを残す", () => {
+    expect(combineSentEdits({ text: "あ", seq: 1 }, { text: "あい", seq: 2 }, fp)).toEqual({
+      text: "あい",
+      seq: 2,
+    });
+  });
+
+  it("畳めない便は、届いた順に当てる", async () => {
+    const applied: SentEdit[] = [];
+    const gate = deferred();
+    let first = true;
+    const queue = createEditQueue<SentEdit>(
+      async (item) => {
+        applied.push(item);
+        if (first) {
+          first = false;
+          await gate.promise;
+        }
+      },
+      (older, newer) => combineSentEdits(older, newer, fp)
+    );
+    void queue({ text: "あ", seq: 1, base: fp("") });
+    await Promise.resolve();
+    void queue({ text: "あい", seq: 2, base: fp("あ") });
+    void queue({ text: "外う", seq: 3, base: fp("外") });
+    void queue({ text: "外うえ", seq: 4, base: fp("外う") });
+    gate.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(applied).toEqual([
+      { text: "あ", seq: 1, base: fp("") },
+      { text: "あい", seq: 2, base: fp("あ") },
+      { text: "外うえ", seq: 4, base: fp("外") },
+    ]);
+  });
+
+  it("重なって当てなかった便は、ok:true と打った本文を返す（送り直させず、画面に控えさせる）", async () => {
+    const acks: EditAck[] = [];
+    const outcome = await applySentEdit(
+      { text: "打った字", seq: 5 },
+      async () => "conflict",
+      (ack) => acks.push(ack),
+      () => undefined
+    );
+    expect(outcome).toBe("conflict");
+    expect(acks).toEqual([{ type: "editApplied", seq: 5, ok: true, conflict: true, text: "打った字" }]);
   });
 });

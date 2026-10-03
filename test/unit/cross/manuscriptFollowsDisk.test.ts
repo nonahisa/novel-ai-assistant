@@ -51,9 +51,14 @@ describe("原稿エディタが外の変更に追いつく", () => {
       /if \(!selfEditing && !undone && event\.contentChanges\.length > 0\)/
     );
     // 自分の applyEdit のあいだだけ selfEditing が立つ
-    // （当てるのは applySentEdit 経由。入ったかを画面へ返すため。設計書6.25.9）
+    // （当てるのは applySentEdit 経由。入ったかを画面へ返すため。設計書6.25.9）。
+    // 2026-10-04 から、当てる中身は applyScreenEdit が決める（本体の変更を戻さない
+    // 当て直し。core/screenEditRebase.ts）。selfEditing はその呼び出しを挟む
     expect(code).toMatch(
-      /selfEditing = true;[\s\S]*?\(text\) => this\.applyEdit\(document, text\)[\s\S]*?selfEditing = false;/
+      /selfEditing = true;[\s\S]*?\(\) => applyScreenEdit\(item\)[\s\S]*?selfEditing = false;/
+    );
+    expect(code).toMatch(
+      /const applyScreenEdit = async[\s\S]*?await this\.applyEdit\(document, decision\.text\)/
     );
   });
 

@@ -180,6 +180,47 @@ textarea {
 }
 .answer.waiting { color: var(--muted); }
 .ask-note { color: var(--muted); font-size: 0.85rem; }
+/* 取り込み待ちの帯：押した時点で保存されていることを、いつも見える所で伝える */
+.tray {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--sheet);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tray-count { font-weight: 600; }
+.tray-flash { color: var(--fix); font-weight: 600; }
+.tray-how { color: var(--muted); font-size: 0.85rem; }
+/* 字の差：原文で消える字に取り消し線、直したあとで足す字に下地 */
+del.gone { color: var(--reject); text-decoration: line-through; text-decoration-thickness: 2px; }
+ins.added { color: var(--fix); background: var(--mark); text-decoration: none; font-weight: 600; padding: 0 1px; }
+/* 持ち主が決めた指摘は灰色に。取り込み済みはさらに薄く */
+.finding.decided {
+  background: var(--done-ground);
+  border-radius: 6px;
+  padding: 12px 10px;
+}
+.finding.decided.imported { opacity: 0.6; }
+.decided-state { font-size: 0.9rem; font-weight: 600; }
+.record-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.record-row button { min-height: 36px; padding: 0 12px; font-size: 0.85rem; }
+.edit-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  min-width: 0;
+}
+.edit-panel textarea { min-height: 7em; font-family: var(--font-display); }
+.edit-panel > button, .edit > button { align-self: flex-start; }
+.edit { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
@@ -188,7 +229,12 @@ textarea {
     <h1 id="title">出先の原稿箱</h1>
     <div class="sub" id="sent">パソコンから送られた話と校正の指摘が、ここに並びます。</div>
   </header>
-  <div class="notice" id="status">保管庫に接続しています…</div>
+  <div class="tray" id="tray" role="status" aria-live="polite">
+    <div class="tray-count" id="trayCount">取り込み待ちはありません</div>
+    <div class="tray-flash" id="trayFlash" hidden></div>
+    <div class="tray-how">押したもの・残したメモは、もう保存されています。原稿に入れるには、パソコンの Claude Code に「原稿箱の分を入れて」と頼んでください。</div>
+  </div>
+  <div class="notice" id="status">読み込んでいます…</div>
   <main id="list" class="stack"></main>
 </div>
 
@@ -205,7 +251,18 @@ textarea {
   var titleEl = document.getElementById("title");
   var sentEl = document.getElementById("sent");
 
-  var state = { db: null, sample: null, myId: null, isOwner: false, work: null, findings: [], records: [] };
+  var trayCountEl = document.getElementById("trayCount");
+  var trayFlashEl = document.getElementById("trayFlash");
+
+  /*
+    ownerId：作品の持ち主の id（持ち主の判断だけを「決めた状態」として見せる）。
+    localAdded：自分が足して、まだ一覧に届いていない記録（押した直後に決めた状態を見せ、
+    二度押しを防ぐ）。sending：いま足している指摘の id
+  */
+  var state = {
+    db: null, sample: null, myId: null, isOwner: false, ownerId: null,
+    work: null, findings: [], records: [], localAdded: {}, sending: {}, flashUntil: 0
+  };
 
   function el(tag, cls, text) {
     var node = document.createElement(tag);
@@ -237,8 +294,45 @@ textarea {
     statusEl.hidden = !text;
   }
 
+  // 届いた記録と、自分が足してまだ届いていない記録を合わせる
+  function allRecords() {
+    var seen = {};
+    state.records.forEach(function (r) { seen[str(r.writer) + "/" + str(r.id)] = true; });
+    var extra = Object.keys(state.localAdded).map(function (k) { return state.localAdded[k]; })
+      .filter(function (r) { return !seen[str(r.writer) + "/" + str(r.id)]; });
+    return state.records.concat(extra);
+  }
+
+  function myWaitingCount() {
+    if (!state.myId) return 0;
+    return allRecords().filter(function (r) {
+      return str(r.writer) === state.myId && r.imported !== true;
+    }).length;
+  }
+
+  /*
+    取り込み待ちの帯。このページには「送る」ボタンが無く、押した時点で保存されている。
+    それが分かるように、自分の分の取り込み待ちの数をいつも出す（作者の報告 2026-10-04
+    「どうやって送信するかもわからなかったです」）
+  */
+  function updateTray() {
+    var n = myWaitingCount();
+    trayCountEl.textContent = !state.myId
+      ? "読むだけで開いています"
+      : n > 0 ? "取り込み待ち " + n + "件（あなたの分）" : "取り込み待ちはありません";
+    var flashing = Date.now() < state.flashUntil;
+    trayFlashEl.textContent = flashing ? "保存しました（取り込み待ち " + n + "件）" : "";
+    trayFlashEl.hidden = !flashing;
+  }
+
+  function flashSaved() {
+    state.flashUntil = Date.now() + 4000;
+    updateTray();
+    setTimeout(updateTray, 4100);
+  }
+
   async function addRecord(fields, button) {
-    if (!state.db || !state.myId) return;
+    if (!state.db || !state.myId) return false;
     /*
       書き手は記録の欄に書かない。**置き場のパス records/<自分のid>/items/ が書き手**で、
       保管庫の規則（records/{self}）が本人の箱にしか書かせない。取り込みもパスから読む
@@ -255,6 +349,8 @@ textarea {
     if (fields.findingId) body.findingId = fields.findingId;
     if (fields.verdict) body.verdict = fields.verdict;
     if (fields.text) body.text = fields.text;
+    // 自分で直した文は、直す前の一文も添える（取り込みが、パソコンの原文と一字違わないかを確かめる）
+    if (fields.original) body.original = fields.original;
     if (button) button.disabled = true;
     try {
       // 書き手の箱の目印（一覧を読む側が、箱のある人を records/ から知るため）
@@ -262,14 +358,16 @@ textarea {
         await state.db.doc("records/" + state.myId).set({ writer: state.myId });
         state.boxMarked = true;
       }
-      await state.db.collection("records/" + state.myId + "/items").add(body);
+      var ref = await state.db.collection("records/" + state.myId + "/items").add(body);
+      if (ref && ref.id) state.localAdded[ref.id] = Object.assign({}, body, { id: ref.id, writer: state.myId });
       setStatus("");
+      flashSaved();
       return true;
     } catch (error) {
       var code = error && error.code;
       setStatus(code === "quota_exceeded"
-        ? "保管庫がいっぱいです。パソコンで取り込んでから、取り込み済みの記録を消してください。"
-        : "書き込めませんでした。この原稿箱を書ける立場で共有されているか、作者に確かめてください。");
+        ? "保存できる量がいっぱいです。パソコンで取り込んでから、取り込み済みの記録を消してください。"
+        : "保存できませんでした。この原稿箱を書ける立場で共有されているか、作者に確かめてください。");
       return false;
     } finally {
       if (button) button.disabled = false;
@@ -277,28 +375,74 @@ textarea {
   }
 
   function recordsFor(predicate) {
-    return state.records.filter(predicate).sort(function (a, b) {
+    return allRecords().filter(predicate).sort(function (a, b) {
       return str(a.at).localeCompare(str(b.at));
     });
   }
 
-  async function renderRecords(container, records) {
+  /*
+    その指摘への、持ち主のいちばん新しい判断（採否・自分で直した文）。
+    取り込みも同じ指摘に判断が2件以上あれば、いちばん新しい1件だけを当てる
+  */
+  function ownerDecisionOf(findingId) {
+    if (!state.ownerId) return null;
+    var list = recordsFor(function (r) {
+      return str(r.findingId) === findingId &&
+        str(r.writer) === state.ownerId &&
+        (r.kind === "verdict" || r.kind === "edit");
+    });
+    return list.length ? list[list.length - 1] : null;
+  }
+
+  function decisionLabel(r) {
+    return r.kind === "edit" ? "自分で直した" : (VERDICT_LABELS[str(r.verdict)] || "判断");
+  }
+
+  // まだ取り込まれていない自分の記録だけを消す（決め直したいとき）。取り込み済みは消さない
+  async function cancelRecord(r, button) {
+    if (!state.db || !state.myId || str(r.writer) !== state.myId || r.imported === true) return;
+    if (button) button.disabled = true;
+    try {
+      await state.db.doc("records/" + state.myId + "/items/" + str(r.id)).delete();
+      delete state.localAdded[str(r.id)];
+      setStatus("");
+      render();
+    } catch (error) {
+      setStatus("取り消せませんでした。少し待ってからもう一度押してください。");
+      if (button) button.disabled = false;
+    }
+  }
+
+  /*
+    書き手の名前は引かない（user.profiles を呼ばない）。指摘ごとに呼ぶと、組み直すたびに
+    数百回の問い合わせが重なり、スマホで「応答していません」が続いた（作者の報告 2026-10-04。
+    読み込み1回で308回）。編集部とは共有しない裁定（2026-10-03）なので「自分」か「ほかの人」で足りる
+  */
+  function renderRecords(container, records) {
     container.textContent = "";
     if (records.length === 0) return;
-    var ids = records.map(function (r) { return str(r.writer); }).filter(Boolean);
-    var user = state.user;
-    var profiles = user && ids.length ? await user.profiles(ids) : {};
     records.forEach(function (r) {
       var row = el("div", "record" + (r.imported === true ? " imported" : ""));
       var what = r.kind === "verdict"
         ? "判断：" + (VERDICT_LABELS[str(r.verdict)] || "")
-        : str(r.text);
+        : r.kind === "edit"
+          ? "自分で直した文：" + str(r.text)
+          : str(r.text);
       row.appendChild(el("div", "", what));
-      var p = profiles[str(r.writer)];
-      var who = (p && p.name) || (str(r.writer) === state.myId ? "自分" : "共有した人");
+      var mine = str(r.writer) === state.myId;
+      var who = mine ? "自分" : "ほかの人";
       var tail = [who, str(r.device), formatTime(r.at), r.imported === true ? "取り込み済み" : "取り込み待ち"]
         .filter(Boolean).join("・");
-      row.appendChild(el("div", "who", tail));
+      var line = el("div", "record-row");
+      line.appendChild(el("div", "who", tail));
+      if (mine && r.imported !== true && state.db) {
+        var cancel = el("button", "", "取り消す");
+        cancel.type = "button";
+        cancel.setAttribute("aria-label", "この記録を取り消す");
+        cancel.addEventListener("click", function () { cancelRecord(r, cancel); });
+        line.appendChild(cancel);
+      }
+      row.appendChild(line);
       container.appendChild(row);
     });
   }
@@ -336,6 +480,86 @@ textarea {
     return box;
   }
 
+  /*
+    原文と直したあとの字の差（字ごとの最長共通部分列）。原文が一文まるごと指摘の対象だと、
+    原文と「直すと：」が同じ文に見えて、どこが変わるのか読み取れなかった（作者の報告
+    2026-10-04。違いは「点々と」を消すことだけだった）。
+    返すのは [{type: "same"|"del"|"add", text}]。字は Array.from で数える（サロゲートを割らない）
+  */
+  function charDiff(a, b) {
+    var x = Array.from(a);
+    var y = Array.from(b);
+    var n = x.length;
+    var m = y.length;
+    var w = m + 1;
+    var dp = new Uint16Array((n + 1) * w);
+    for (var i = n - 1; i >= 0; i--) {
+      for (var j = m - 1; j >= 0; j--) {
+        dp[i * w + j] = x[i] === y[j]
+          ? dp[(i + 1) * w + j + 1] + 1
+          : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1]);
+      }
+    }
+    var ops = [];
+    function push(type, ch) {
+      var last = ops[ops.length - 1];
+      if (last && last.type === type) last.text += ch;
+      else ops.push({ type: type, text: ch });
+    }
+    var p = 0;
+    var q = 0;
+    while (p < n && q < m) {
+      if (x[p] === y[q]) { push("same", x[p]); p++; q++; }
+      else if (dp[(p + 1) * w + q] >= dp[p * w + q + 1]) { push("del", x[p]); p++; }
+      else { push("add", y[q]); q++; }
+    }
+    while (p < n) { push("del", x[p]); p++; }
+    while (q < m) { push("add", y[q]); q++; }
+    return ops;
+  }
+
+  /*
+    指摘の差を、印を付けて見せられるときだけ返す。修正案が無い・直す語が原文に無い・
+    変わる字が半分を超える（印だらけで読みにくい）ときは null（今までの出し方に戻す）
+  */
+  function diffOf(f) {
+    var original = str(f.original);
+    var target = str(f.target);
+    var suggestion = str(f.suggestion);
+    if (!suggestion || !target) return null;
+    var at = original.indexOf(target);
+    if (at < 0) return null;
+    var after = original.slice(0, at) + suggestion + original.slice(at + target.length);
+    var ops = charDiff(original, after);
+    var changed = 0;
+    ops.forEach(function (o) { if (o.type !== "same") changed += Array.from(o.text).length; });
+    var total = Array.from(original).length + Array.from(after).length;
+    if (changed === 0 || changed * 2 > total) return null;
+    return ops;
+  }
+
+  // 原文の側：消える字に取り消し線（足す字は出さない）
+  function diffQuoteNode(ops) {
+    var node = el("div", "quote");
+    ops.forEach(function (o) {
+      if (o.type === "same") node.appendChild(document.createTextNode(o.text));
+      else if (o.type === "del") node.appendChild(el("del", "gone", o.text));
+    });
+    return node;
+  }
+
+  // 直したあとの側：足す字に下地（消える字は出さない）
+  function diffAfterNode(ops) {
+    var to = el("div", "fixto", "直すと：");
+    var span = el("span", "quote");
+    ops.forEach(function (o) {
+      if (o.type === "same") span.appendChild(document.createTextNode(o.text));
+      else if (o.type === "add") span.appendChild(el("ins", "added", o.text));
+    });
+    to.appendChild(span);
+    return to;
+  }
+
   function quoteNode(f) {
     var node = el("div", "quote");
     var original = str(f.original);
@@ -346,6 +570,98 @@ textarea {
     node.appendChild(el("mark", "", target));
     node.appendChild(document.createTextNode(original.slice(at + target.length)));
     return node;
+  }
+
+  /*
+    ［自分で直す］（作者の裁定 2026-10-04「取り込みでそのまま当てる」）。原文の一文を
+    初めから入れた欄で作者が書き直し、［この文で直す］で記録を1件足す。原稿へ入るのは
+    パソコンで取り込んだときで、原文がパソコンの本文に一字違わず1か所だけあるときだけ。
+    開いているか・注意書きは指摘ごとに控え、打ちかけの文は drafts に控える（組み直しで消さない）
+  */
+  var edits = {};
+
+  function editState(id) {
+    if (!edits[id]) edits[id] = { open: false, note: "" };
+    return edits[id];
+  }
+
+  function editBox(f, base) {
+    var id = str(f.id);
+    var s = editState(id);
+    var key = "d:" + id;
+    var original = str(f.original);
+    var wrap = el("div", "edit");
+    var toggle = el("button", "", s.open ? "自分で直すのをやめる" : "自分で直す");
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", s.open ? "true" : "false");
+    toggle.addEventListener("click", function () {
+      s.open = !s.open;
+      s.note = "";
+      render();
+    });
+    wrap.appendChild(toggle);
+    if (!s.open) return wrap;
+
+    var panel = el("div", "edit-panel");
+    panel.appendChild(el("div", "label", "原文を書き直してください（1行の中で）。原稿へは、パソコンで取り込んだときに入ります"));
+    var area = document.createElement("textarea");
+    area.setAttribute("data-key", key);
+    area.setAttribute("aria-label", "自分で直した文");
+    area.value = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : original;
+    area.addEventListener("input", function () { drafts[key] = area.value; });
+    var row = el("div", "buttons");
+    var go = el("button", "primary", "この文で直す");
+    go.type = "button";
+    var cancel = el("button", "", "やめる");
+    cancel.type = "button";
+    var note = el("div", "ask-note", s.note);
+    note.hidden = !s.note;
+    function say(text) { s.note = text; note.textContent = text; note.hidden = !text; }
+    go.addEventListener("click", async function () {
+      var text = area.value;
+      // 空の文・元と同じ文は送らない。改行は入れない（取り込みは1行の中の直しだけを入れる）
+      if (!text.trim()) { say("直した文が空です。"); return; }
+      if (/[\r\n]/.test(text)) { say("改行は入れられません。1行の中で直してください。"); return; }
+      if (text === original) { say("元の文と同じです。直したい所を書き換えてください。"); return; }
+      if (state.sending[id]) return;
+      state.sending[id] = true;
+      go.disabled = true;
+      var ok = await addRecord(Object.assign({ kind: "edit", original: original, text: text }, base), go);
+      delete state.sending[id];
+      if (ok) {
+        delete drafts[key];
+        s.open = false;
+        s.note = "";
+      }
+      render();
+    });
+    cancel.addEventListener("click", function () {
+      s.open = false;
+      s.note = "";
+      render();
+    });
+    row.appendChild(go);
+    row.appendChild(cancel);
+    panel.appendChild(area);
+    panel.appendChild(row);
+    panel.appendChild(note);
+    wrap.appendChild(panel);
+    return wrap;
+  }
+
+  /*
+    組み直しは、続けて来る知らせを1回にまとめる。読み込みの直後は works/main・findings・
+    records・書き手の箱ごとの知らせが続けて何度も届き、そのたびに一覧をまるごと組み直していた
+    （試験台で読み込み1回に25回）。次の描画の前に1回だけ組む
+  */
+  var renderQueued = false;
+  function scheduleRender() {
+    if (renderQueued) return;
+    renderQueued = true;
+    var run = function () { renderQueued = false; render(); };
+    // 画面が隠れていると requestAnimationFrame は来ないので、短い待ちで代える
+    if (typeof requestAnimationFrame === "function" && !document.hidden) requestAnimationFrame(run);
+    else setTimeout(run, 50);
   }
 
   /*
@@ -535,6 +851,7 @@ textarea {
   }
 
   function render() {
+    updateTray();
     var work = state.work;
     var active = document.activeElement;
     var focusedKey = active && active.getAttribute ? active.getAttribute("data-key") : null;
@@ -577,33 +894,60 @@ textarea {
         .sort(function (a, b) { return (a.line || 0) - (b.line || 0); });
 
       findings.forEach(function (f) {
-        var item = el("div", "finding");
+        var fid = str(f.id);
+        /*
+          持ち主の判断（採否・自分で直した文）がある指摘は、決めた状態として灰色で見せ、
+          判断のボタンを隠す（作者の報告 2026-10-04：［採らない］を押しても見た目が変わらず、
+          同じ指摘に4回押していた）。決め直すときは、記録の［取り消す］で消す
+        */
+        var decision = ownerDecisionOf(fid);
+        var item = el("div", "finding" + (decision ? " decided" + (decision.imported === true ? " imported" : "") : ""));
         item.appendChild(el("div", "label", [str(f.label), typeof f.line === "number" ? f.line + "行目" : ""].filter(Boolean).join("・")));
-        item.appendChild(quoteNode(f));
-        if (str(f.suggestion)) {
-          var to = el("div", "fixto", "直すと：");
-          to.appendChild(el("strong", "", str(f.suggestion)));
-          item.appendChild(to);
+        if (decision) {
+          item.appendChild(el("div", "decided-state",
+            decisionLabel(decision) + "（" + (decision.imported === true ? "取り込み済み" : "取り込み待ち") + "）"));
+        }
+        var diff = diffOf(f);
+        if (diff) {
+          item.appendChild(diffQuoteNode(diff));
+          item.appendChild(diffAfterNode(diff));
+        } else {
+          item.appendChild(quoteNode(f));
+          if (str(f.suggestion)) {
+            var to = el("div", "fixto", "直すと：");
+            to.appendChild(el("strong", "", str(f.suggestion)));
+            item.appendChild(to);
+          }
         }
         if (str(f.message)) item.appendChild(el("div", "why", str(f.message)));
 
-        var base = { episode: group.file, baseHash: group.hash, findingId: str(f.id), line: f.line };
-        // 採否は作品の持ち主だけ（編集部の意見はメモで残す。6.115）
-        if (state.isOwner && state.myId) {
+        var base = { episode: group.file, baseHash: group.hash, findingId: fid, line: f.line };
+        // 採否は作品の持ち主だけ（編集部の意見はメモで残す。6.115）。決めた指摘には出さない
+        if (state.isOwner && state.myId && !decision) {
           var buttons = el("div", "buttons");
           var choices = [];
           if (f.canFix === true) choices.push(["fix", "直す", "primary"]);
           choices.push(["done", "済み", ""]);
           choices.push(["reject", "採らない", "reject"]);
+          var sending = state.sending[fid] === true;
           choices.forEach(function (c) {
             var b = el("button", c[2], c[1]);
             b.type = "button";
-            b.addEventListener("click", function () {
-              addRecord(Object.assign({ kind: "verdict", verdict: c[0] }, base), b);
+            b.disabled = sending;
+            b.addEventListener("click", async function () {
+              // 押した直後にこの指摘のボタンを全部止める（同じ指摘に採否を二重に足さない）
+              if (state.sending[fid]) return;
+              state.sending[fid] = true;
+              Array.prototype.forEach.call(buttons.querySelectorAll("button"), function (x) { x.disabled = true; });
+              await addRecord(Object.assign({ kind: "verdict", verdict: c[0] }, base), null);
+              delete state.sending[fid];
+              render();
             });
             buttons.appendChild(b);
           });
           item.appendChild(buttons);
+          // 切って送った原文は直せない（取り込みが全文を置き換えて末尾が消えるため）
+          if (str(f.original) && f.originalClipped !== true) item.appendChild(editBox(f, base));
         }
         // Claude に頼めない見え方（未対応の画面・断った人）では、道そのものを出さない
         if (state.sample) item.appendChild(askBox(f, heading));
@@ -642,7 +986,7 @@ textarea {
 
   async function start() {
     if (!window.claude || typeof window.claude.use !== "function") {
-      setStatus("この画面では保管庫が使えません。claude.ai の Claude アプリかブラウザで開いてください。");
+      setStatus("この画面では読み書きできません。claude.ai の Claude アプリかブラウザで開いてください。");
       render();
       return;
     }
@@ -654,7 +998,7 @@ textarea {
     state.user = user;
     state.sample = typeof caps[2] === "function" ? caps[2] : null;
     if (!db) {
-      setStatus("保管庫に接続できません。claude.ai にサインインしてから開いてください。");
+      setStatus("つながりません。claude.ai にサインインしてから開いてください。");
       render();
       return;
     }
@@ -666,7 +1010,9 @@ textarea {
       持ち主の id を works/owner に控える。パソコンの取り込みは、この id の記録だけを
       採否として入れる。持ち主が開いたときだけ書く
     */
+    var LOST = "読めなくなりました。開き直してください。";
     if (state.isOwner && state.myId) {
+      state.ownerId = state.myId;
       try {
         var ownerDoc = await db.doc("works/owner").get();
         var stored = ownerDoc.exists ? ownerDoc.data() : undefined;
@@ -674,19 +1020,29 @@ textarea {
       } catch (error) {
         // 控えられなくても、読み書きはできる。取り込みのときに持ち主が分からないだけ
       }
+    } else {
+      // 持ち主でない人も、持ち主が決めた指摘を灰色で見られるように id を読んでおく
+      try {
+        var owner = await db.doc("works/owner").get();
+        var data = owner.exists ? owner.data() : undefined;
+        state.ownerId = data && typeof data.id === "string" ? data.id : null;
+      } catch (error) {
+        state.ownerId = null;
+      }
     }
 
+    // 知らせのたびには組まず、scheduleRender で1回にまとめる
     db.doc("works/main").onSnapshot(function (snap) {
       state.work = snap.exists ? snap.data() : null;
-      render();
-    }, function () { setStatus("保管庫から読めなくなりました。開き直してください。"); });
+      scheduleRender();
+    }, function () { setStatus(LOST); });
     db.collection("findings").onSnapshot(function (snap) {
       state.findings = snap.docs.map(function (d) {
         var data = d.data() || {};
         return Object.assign({}, data, { id: str(data.id) || d.id });
       });
-      render();
-    }, function () { setStatus("保管庫から読めなくなりました。開き直してください。"); });
+      scheduleRender();
+    }, function () { setStatus(LOST); });
     /*
       記録は書き手ごとの箱（records/<書き手のid>/items/）にある。records/ の目印から
       箱のある人を知り、箱ごとに1回だけ購読する。書き手はパスから読む（記録の欄は見ない）
@@ -699,7 +1055,11 @@ textarea {
         byWriter[writer].forEach(function (r) { all.push(r); });
       });
       state.records = all;
-      render();
+      // 届いた記録は、自分が足した控えから外す（同じものを二重に数えない）
+      all.forEach(function (r) {
+        if (str(r.writer) === state.myId) delete state.localAdded[str(r.id)];
+      });
+      scheduleRender();
     }
     db.collection("records").onSnapshot(function (snap) {
       snap.docs.forEach(function (d) {
@@ -711,12 +1071,12 @@ textarea {
               return Object.assign({}, item.data() || {}, { id: item.id, writer: writer });
             });
             collectRecords();
-          }, function () { setStatus("保管庫から読めなくなりました。開き直してください。"); });
+          }, function () { setStatus(LOST); });
         } catch (error) {
           // パスに使えない id の目印は飛ばす（誰かが置いた壊れた目印で、ページ全体を止めない）
         }
       });
-    }, function () { setStatus("保管庫から読めなくなりました。開き直してください。"); });
+    }, function () { setStatus(LOST); });
   }
 
   render();
