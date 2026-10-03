@@ -1312,6 +1312,8 @@ function openMenu(index, x, y) {
   }
 
   menu.hidden = false;
+  // 開いた時刻を覚える（描き直しの転がりで閉じないため。下の scroll の受け手）
+  menuOpenedAt = performance.now();
   // 画面の外へはみ出させない（右端・下端で右クリックしても全部見える）
   const width = menu.offsetWidth || 168;
   const height = menu.offsetHeight || 120;
@@ -1809,7 +1811,29 @@ document.addEventListener('keydown', function (event) {
   // ドラッグ中のEscは、掴んでいる印を消すだけ（並びは変えない）
   clearDrag();
 });
-window.addEventListener('scroll', closeMenu, true);
+/*
+  **転がしたら閉じるのは、作者が転がしたときだけ**（設計書6.65.15 段D。
+  画面の自動テスト epubEditorRail.test.ts で見つかった、2026-10-04）。
+  右クリックは面を選び直して描き直す（selectBlock → renderPages）。目次が縦書きで
+  枠からあふれていると、描き直しで面が転がり、その scroll の知らせで開いた
+  3ミリ秒後に品書きが閉じていた。scroll の知らせだけでは誰が転がしたか
+  分からないので、**開いた直後の少しのあいだの scroll は描き直しのものとして見送る。**
+  そのあいだでも、作者が回したホイールでは閉じる（wheel は作者の手からしか来ない）
+*/
+const MENU_SCROLL_GRACE_MS = 400;
+let menuOpenedAt = -Infinity;
+window.addEventListener('scroll', function (event) {
+  if (performance.now() - menuOpenedAt < MENU_SCROLL_GRACE_MS) return;
+  // 品書きそのものが転がったのは、品書きを読むため（閉じない）
+  const target = event.target;
+  if (target instanceof Node && field('blockMenu').contains(target)) return;
+  closeMenu();
+}, true);
+window.addEventListener('wheel', function (event) {
+  // 品書きの中で回したのは、品書きを読むため（閉じない）
+  if (field('blockMenu').contains(event.target)) return;
+  closeMenu();
+}, { capture: true, passive: true });
 
 field('save').addEventListener('click', function () {
   post('save', { config: readForm() });
