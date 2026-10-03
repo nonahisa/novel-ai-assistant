@@ -45,5 +45,6 @@
   // `src` も入れているのは、テストから辿り着かないファイルも
   // この設定（ESM）で矛盾しないことを見ておきたいため
   "include": ["src/**/*.ts", "test/**/*.ts"],
-  "exclude": ["node_modules", "dist", "out"]
+  // 画面の自動テスト（test/e2e）は DOM の型が要るので、別の設定（test/e2e/tsconfig.json）で見る
+  "exclude": ["node_modules", "dist", "out", "test/e2e"]
 }

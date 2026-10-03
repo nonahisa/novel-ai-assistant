@@ -86,6 +86,7 @@ npm run test:unit        # 単体テスト
 npm run test:integration # VS Code 1.90.0のExtension Host
 npm run test:ollama      # 任意。ローカルOllama実接続
 npm run test:web         # ブラウザのVS Code（設計書5.8.13）。check には入らない
+npm run test:e2e         # 画面の自動テスト（Playwright で VS Code を外から押す。設計書6.113）。check には入らない
 npm run check            # 型検査＋単体テスト＋本番ビルド
 ```
 

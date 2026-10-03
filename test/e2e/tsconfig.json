@@ -1,0 +1,16 @@
+{
+  // 画面の自動テスト（E2E。設計書6.113）だけの型検査。`npm run typecheck:tests` から呼ぶ。
+  //
+  // **DOM の型を入れるので、ほかのテストと分けている。** ここのテストは
+  // 画面の中で走らせる関数（`frame.evaluate(() => document...)`）を書くので
+  // `document`・`window` の型が要る。テスト全体（tsconfig.tests-typecheck.json）へ
+  // DOM を足すと、Node の上で動く600余りの単体テストにまで「ブラウザの型」が
+  // 混ざるので、こちらだけに閉じる。
+  "extends": "../../tsconfig.tests-typecheck.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["./**/*.ts"],
+  "exclude": []
+}
