@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import "../support/sweepTimeout";
 import * as fs from "node:fs";
 import * as path from "node:path";
 

@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "fs";
 import { resolve, sep } from "path";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import "../support/sweepTimeout";
 
 /**
  * 「同じ場所か」の比べ方を1つにする（`pathText.ts` の `isSamePath`・

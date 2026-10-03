@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import "../support/sweepTimeout";
 import type { ExtensionContext } from "vscode";
 import { OllamaProvider } from "../../../src/ai/ollamaProvider";
 import {

@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { describe, expect, test } from "vitest";
+import "../support/sweepTimeout";
 
 /**
  * モデル名をコードへ散らかさない（CLAUDE.md 規則6）。

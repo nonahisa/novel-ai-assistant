@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import "../support/sweepTimeout";
 import * as fs from "node:fs";
 import {
   copyFromSeriesCandidate,
