@@ -475,7 +475,14 @@ export class WorkRegistry {
     const change = appendEntry(entry);
     await this.mutate(change);
     const stored = this.context.globalState.get<WorkEntry[]>(STORAGE_KEY, []);
-    if (stored.some((w) => w.id === entry.id)) return entry;
+    /*
+      **断るのは「同じフォルダーの別の作品に弾かれた」ときだけ。** こちらの1件が
+      見えないだけ（書き終えた直後に遅れた古い塊が届いた。0.97.3 の形）なら、
+      見張りが当て直すので登録できたとして返す——ここで黙って `undefined` を
+      返すと、「登録しました」も断りも出ないまま終わる
+    */
+    const sameFolder = findWorkByFolder(stored, entry.folderPath);
+    if (!sameFolder || sameFolder.id === entry.id) return entry;
     this.recentChanges = this.recentChanges.filter((r) => r.change !== change);
     this.blockedAsDuplicate(stored, entry.folderPath);
     return undefined;
