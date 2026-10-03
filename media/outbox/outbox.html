@@ -215,9 +215,12 @@ textarea {
 
   async function addRecord(fields, button) {
     if (!state.db || !state.myId) return;
+    /*
+      書き手は記録の欄に書かない。**置き場のパス records/<自分のid>/items/ が書き手**で、
+      保管庫の規則（records/{self}）が本人の箱にしか書かせない。取り込みもパスから読む
+    */
     var body = {
       kind: fields.kind,
-      by: state.myId,
       at: new Date().toISOString(),
       device: deviceLabel(),
       episode: fields.episode,
@@ -230,7 +233,12 @@ textarea {
     if (fields.text) body.text = fields.text;
     if (button) button.disabled = true;
     try {
-      await state.db.collection("records").add(body);
+      // 書き手の箱の目印（一覧を読む側が、箱のある人を records/ から知るため）
+      if (!state.boxMarked) {
+        await state.db.doc("records/" + state.myId).set({ writer: state.myId });
+        state.boxMarked = true;
+      }
+      await state.db.collection("records/" + state.myId + "/items").add(body);
       setStatus("");
       return true;
     } catch (error) {
@@ -253,7 +261,7 @@ textarea {
   async function renderRecords(container, records) {
     container.textContent = "";
     if (records.length === 0) return;
-    var ids = records.map(function (r) { return str(r.by); }).filter(Boolean);
+    var ids = records.map(function (r) { return str(r.writer); }).filter(Boolean);
     var user = state.user;
     var profiles = user && ids.length ? await user.profiles(ids) : {};
     records.forEach(function (r) {
@@ -262,8 +270,8 @@ textarea {
         ? "判断：" + (VERDICT_LABELS[str(r.verdict)] || "")
         : str(r.text);
       row.appendChild(el("div", "", what));
-      var p = profiles[str(r.by)];
-      var who = (p && p.name) || (str(r.by) === state.myId ? "自分" : "共有した人");
+      var p = profiles[str(r.writer)];
+      var who = (p && p.name) || (str(r.writer) === state.myId ? "自分" : "共有した人");
       var tail = [who, str(r.device), formatTime(r.at), r.imported === true ? "取り込み済み" : "取り込み待ち"]
         .filter(Boolean).join("・");
       row.appendChild(el("div", "who", tail));
@@ -464,9 +472,35 @@ textarea {
       });
       render();
     }, function () { setStatus("保管庫から読めなくなりました。開き直してください。"); });
-    db.collection("records").onSnapshot(function (snap) {
-      state.records = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data() || {}); });
+    /*
+      記録は書き手ごとの箱（records/<書き手のid>/items/）にある。records/ の目印から
+      箱のある人を知り、箱ごとに1回だけ購読する。書き手はパスから読む（記録の欄は見ない）
+    */
+    var byWriter = {};
+    var watching = {};
+    function collectRecords() {
+      var all = [];
+      Object.keys(byWriter).forEach(function (writer) {
+        byWriter[writer].forEach(function (r) { all.push(r); });
+      });
+      state.records = all;
       render();
+    }
+    db.collection("records").onSnapshot(function (snap) {
+      snap.docs.forEach(function (d) {
+        var writer = d.id;
+        if (watching[writer]) return;
+        try {
+          watching[writer] = db.collection("records/" + writer + "/items").onSnapshot(function (items) {
+            byWriter[writer] = items.docs.map(function (item) {
+              return Object.assign({}, item.data() || {}, { id: item.id, writer: writer });
+            });
+            collectRecords();
+          }, function () { setStatus("保管庫から読めなくなりました。開き直してください。"); });
+        } catch (error) {
+          // パスに使えない id の目印は飛ばす（誰かが置いた壊れた目印で、ページ全体を止めない）
+        }
+      });
     }, function () { setStatus("保管庫から読めなくなりました。開き直してください。"); });
   }
 

@@ -7,6 +7,7 @@ import { decodeBytes } from "../../../src/core/textDecode";
 import { parseFindingLines, resolveFindings, type Finding } from "../../../src/models/finding";
 import {
   BODY_CHANGED_REASON,
+  findOutboxTemplate,
   outboxImport,
   outboxPack,
   type OutboxRecord,
@@ -83,7 +84,7 @@ function memo(overrides: Partial<OutboxRecord> = {}): OutboxRecord {
   return {
     id: "r1",
     kind: "memo",
-    by: OWNER,
+    writer: OWNER,
     episode: FILE,
     text: "ここに潮の匂いを足す",
     baseHash: hashOf(),
@@ -95,7 +96,7 @@ function verdict(overrides: Partial<OutboxRecord> = {}): OutboxRecord {
   return {
     id: "v1",
     kind: "verdict",
-    by: OWNER,
+    writer: OWNER,
     findingId: "f_typo1",
     verdict: "fix",
     baseHash: hashOf(),
@@ -141,6 +142,27 @@ describe("outbox.pack——送る中身", () => {
     expect(outboxPack({ folder: root }).findings).toHaveLength(0);
   });
 
+  it("雛形の道は実在するものだけを返す（束の隣 → リポジトリの media/outbox の順）", () => {
+    // 束の隣に写してある（製品が保管庫へ写した形）
+    const storage = fs.mkdtempSync(nodePath.join(os.tmpdir(), "outbox-storage-"));
+    try {
+      fs.writeFileSync(nodePath.join(storage, "outbox.html"), "<title>x</title>");
+      expect(findOutboxTemplate(nodePath.join(storage, "mcp-server.mjs"))).toBe(
+        nodePath.join(storage, "outbox.html")
+      );
+      // 隣に無く、1つ上にも media が無ければ null（推測の道を返さない）
+      fs.rmSync(nodePath.join(storage, "outbox.html"));
+      expect(findOutboxTemplate(nodePath.join(storage, "mcp-server.mjs"))).toBeNull();
+    } finally {
+      fs.rmSync(storage, { recursive: true, force: true });
+    }
+    // リポジトリの dist から走らせた形
+    const repo = nodePath.join(__dirname, "..", "..", "..");
+    expect(findOutboxTemplate(nodePath.join(repo, "dist", "mcp-server.mjs"))).toBe(
+      nodePath.join(repo, "media", "outbox", "outbox.html")
+    );
+  });
+
   it("作品に触れない記録の重さ：pack は抜粋、import は出さない", () => {
     expect(exposureOf("outbox.pack", { folder: root })).toBe("excerpt");
     expect(exposureOf("outbox.import", { folder: root })).toBe("none");
@@ -171,7 +193,7 @@ describe("outbox.import——メモ", () => {
 
   it("持ち主でない人のメモには「編集部：」を付ける", () => {
     writeBody("一行目\n");
-    outboxImport({ folder: root, ownerId: OWNER, records: [memo({ by: EDITOR, text: "ここは早い" })] });
+    outboxImport({ folder: root, ownerId: OWNER, records: [memo({ writer: EDITOR, text: "ここは早い" })] });
     expect(readBytes().toString("utf8")).toBe("一行目\n// 編集部：ここは早い\n");
   });
 
@@ -277,12 +299,47 @@ describe("outbox.import——採否", () => {
     const result = outboxImport({
       folder: root,
       ownerId: OWNER,
-      records: [verdict({ by: EDITOR })],
+      records: [verdict({ writer: EDITOR })],
     });
 
     expect(result.results[0].status).toBe("refused");
     expect(readBytes().equals(before)).toBe(true);
     expect(findingStatus("f_typo1")).toBe("pending");
+  });
+
+  it("欄に持ち主の id が書いてあっても、パスが別の人のものなら採否は断る", () => {
+    // 編集部が記録の欄 by に持ち主の id を書いて、持ち主の採否に見せかけた形
+    writeBody("一行目\n彼はわらった。\n");
+    placeFindings([finding()]);
+    const before = readBytes();
+
+    const result = outboxImport({
+      folder: root,
+      ownerId: OWNER,
+      records: [verdict({ writer: EDITOR, by: OWNER })],
+    });
+
+    expect(result.results[0]).toMatchObject({ status: "refused", writer: EDITOR });
+    expect(readBytes().equals(before)).toBe(true);
+    expect(findingStatus("f_typo1")).toBe("pending");
+  });
+
+  it("同じ文書の id でも、書き手が違えば別の記録として扱う", () => {
+    writeBody("一行目\n");
+    const base = hashOf();
+    const result = outboxImport({
+      folder: root,
+      ownerId: OWNER,
+      records: [
+        memo({ id: "same", writer: OWNER, text: "作者", baseHash: base }),
+        memo({ id: "same", writer: EDITOR, text: "編集", baseHash: base }),
+      ],
+    });
+    expect(result.results.map((item) => [item.writer, item.status])).toEqual([
+      [OWNER, "imported"],
+      [EDITOR, "imported"],
+    ]);
+    expect(readBytes().toString("utf8")).toBe("一行目\n// 作者\n// 編集部：編集\n");
   });
 
   it("［採らない］は退けた、［済み］は採ったとして記録し、本文には触れない", () => {

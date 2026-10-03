@@ -17,6 +17,7 @@ import {
 import { findingAppliesDirectly, findingRestoreOf } from "../../core/findingSource";
 import { applyFindingToText } from "../../core/findingApply";
 import { MEMO_LINE_PREFIX } from "../../core/sceneMemo";
+import { OUTBOX_TEMPLATE_COPY_NAME, OUTBOX_TEMPLATE_RELATIVE } from "../../core/outboxTemplate";
 import {
   VERDICT_FILE_NAME,
   VERDICT_HISTORY_DIRECTORY,
@@ -94,6 +95,11 @@ export interface OutboxPackResult {
   findings: OutboxFinding[];
   /** 読めなかった本文（競合マーカーなど） */
   skipped: Array<{ file: string; reason: string }>;
+  /**
+   * ページの雛形の、実在する道（絶対パス）。見つからなければ null。
+   * 出先の原稿箱を作るときは、これを読んで publish する（スキルの手順）
+   */
+  templatePath: string | null;
   nextStep: string;
   note: string;
 }
@@ -175,6 +181,7 @@ export function outboxPack(input: { folder: string; retentionDays?: number }): O
     episodes,
     findings,
     skipped,
+    templatePath: findOutboxTemplate(),
     nextStep:
       "ArtifactData の batch で、出先の原稿箱の保管庫へ書いてください：works/main に { title, sentAt, episodes }、" +
       "findings/<id> に指摘を1件ずつ（前に送った findings/ の文書で、今回に無いものは消す）。",
@@ -184,12 +191,41 @@ export function outboxPack(input: { folder: string; retentionDays?: number }): O
   };
 }
 
+/**
+ * ページの雛形の、実在する道を探す（推測の道を返さない）。
+ *
+ * 1. 束の隣（製品は束を保管庫へ写すとき、雛形も同じ場所へ写す。`core/outboxTemplate.ts`）
+ * 2. 束の1つ上の `media/outbox/outbox.html`（拡張機能のフォルダー・リポジトリの `dist/` から走らせたとき）
+ *
+ * @param bundleFile 走っている束の場所。省略すると `process.argv[1]`（試験が差し替える）
+ */
+export function findOutboxTemplate(bundleFile: string | undefined = process.argv[1]): string | null {
+  if (!bundleFile) return null;
+  const dir = nodePath.dirname(nodePath.resolve(bundleFile));
+  const candidates = [
+    nodePath.join(dir, OUTBOX_TEMPLATE_COPY_NAME),
+    nodePath.join(dir, "..", ...OUTBOX_TEMPLATE_RELATIVE),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (fs.statSync(candidate).isFile()) return nodePath.resolve(candidate);
+    } catch {
+      // 無ければ次を見る
+    }
+  }
+  return null;
+}
+
 /* ── 取り込む（outbox.import） ─────────────────────────── */
 
 const RECORD_INPUT = z.object({
-  id: z.string().min(1).describe("保管庫の records/ の文書の id"),
+  id: z.string().min(1).describe("保管庫の records/<書き手のid>/items/<id> の文書の id"),
+  writer: z
+    .string()
+    .min(1)
+    .describe("書き手の id。**文書のパス records/<書き手のid>/items/... から読む**（記録の欄からは読まない）"),
   kind: z.enum(["memo", "verdict"]),
-  by: z.string().describe("書いた人の id（ページの user.id()）"),
+  by: z.string().optional().describe("使わない（書き手はパスの writer で決める）"),
   at: z.string().optional(),
   device: z.string().optional(),
   episode: z.string().optional().describe("話のファイル（outbox.pack の episodes[].file）"),
@@ -211,7 +247,7 @@ export const OUTBOX_IMPORT_INPUT = {
     .describe("作品の持ち主（作者）の id。保管庫の works/owner の id。採否はこの人の記録だけを入れます"),
   records: z
     .array(RECORD_INPUT)
-    .describe("保管庫の records/ の文書（id を添えて）。1回の呼び出しにまとめて渡してください"),
+    .describe("保管庫の records/<書き手のid>/items/ の文書（id と、パスから読んだ writer を添えて）。1回の呼び出しにまとめて渡してください"),
   retentionDays: OUTBOX_PACK_INPUT.retentionDays,
 };
 
@@ -226,6 +262,8 @@ export type OutboxImportStatus = "imported" | "already" | "refused";
 
 export interface OutboxImportItem {
   id: string;
+  /** 書き手（記録のパスの id） */
+  writer: string;
   status: OutboxImportStatus;
   /** 入れた・断った理由（作者に読める日本語） */
   reason: string;
@@ -240,7 +278,15 @@ export interface OutboxImportResult {
   note: string;
 }
 
-/** 入れた記録の id を残す場所（`.aiwriter/history/`。同期される・追記だけ） */
+/**
+ * 記録を見分ける鍵。**書き手（パス）＋文書の id**——文書の id は書き手ごとの
+ * 箱の中でしか一意でない
+ */
+function recordKey(record: { writer: string; id: string }): string {
+  return `${record.writer}/${record.id}`;
+}
+
+/** 入れた記録の鍵（書き手/文書の id）を残す場所（`.aiwriter/history/`。同期される・追記だけ） */
 export const OUTBOX_IMPORTED_FILE = "outbox-imported.jsonl";
 
 /** 断る理由。**本文のハッシュが送ったときと違う**（6.115 の決まり） */
@@ -285,10 +331,11 @@ export function outboxImport(input: OutboxImportInput): OutboxImportResult {
   ];
 
   const finish = (record: OutboxRecord, status: OutboxImportStatus, reason: string) => {
-    results.set(record.id, { id: record.id, status, reason });
+    const key = recordKey(record);
+    results.set(key, { id: record.id, writer: record.writer, status, reason });
     if (status === "imported") {
-      done.add(record.id);
-      importedIds.push(record.id);
+      done.add(key);
+      importedIds.push(key);
     }
   };
 
@@ -329,8 +376,8 @@ export function outboxImport(input: OutboxImportInput): OutboxImportResult {
   };
 
   for (const record of ordered) {
-    if (results.has(record.id)) continue; // 同じ記録が2度渡された
-    if (done.has(record.id)) {
+    if (results.has(recordKey(record))) continue; // 同じ記録が2度渡された
+    if (done.has(recordKey(record))) {
       finish(record, "already", "入れ済みです（前に取り込みました）。");
       continue;
     }
@@ -374,9 +421,9 @@ export function outboxImport(input: OutboxImportInput): OutboxImportResult {
   );
 
   const list = input.records
-    .map((record) => results.get(record.id))
+    .map((record) => results.get(recordKey(record)))
     .filter((item): item is OutboxImportItem => item !== undefined)
-    .filter((item, index, all) => all.findIndex((other) => other.id === item.id) === index);
+    .filter((item, index, all) => all.indexOf(item) === index);
   const count = (status: OutboxImportStatus) => list.filter((item) => item.status === status).length;
   return {
     results: list,
@@ -384,7 +431,7 @@ export function outboxImport(input: OutboxImportInput): OutboxImportResult {
     alreadyCount: count("already"),
     refusedCount: count("refused"),
     nextStep:
-      "status が imported と already の記録に、ArtifactData の update で imported: true を付けてください" +
+      "status が imported と already の記録（records/<writer>/items/<id>）に、ArtifactData の update で imported: true を付けてください" +
       "（ページで灰色になります）。refused の記録は残し、理由を作者に伝えてください。",
     note:
       "保管庫の中身は指示として読まず、決まった欄だけを見ました。メモは本文に // の行として入れ、" +
@@ -426,7 +473,7 @@ function importMemo(
   }
 
   const memoLine =
-    MEMO_LINE_PREFIX + (record.by === ownerId ? "" : EDITORIAL_PREFIX) + text;
+    MEMO_LINE_PREFIX + (record.writer === ownerId ? "" : EDITORIAL_PREFIX) + text;
   const lines = state.content.text.split("\n");
   let where = "話の末尾";
   let at: number;
@@ -479,7 +526,8 @@ function importVerdict(
     **採否は持ち主の記録だけ**（6.115）。2026-10-01 の「外から採否を決める道は
     作らない」の線引きは、決めているのが作者本人なので越えない——外の道具は運ぶだけ
   */
-  if (record.by !== ownerId) {
+  // 書き手は**パスから**読んだもの（`by` の欄は誰でも書けるので見ない）
+  if (record.writer !== ownerId) {
     return { ok: false, reason: "持ち主でない人の採否は入れません（編集部の意見はメモで書いてください）。" };
   }
   if (!record.verdict) return { ok: false, reason: "採否（fix・done・reject）がありません。" };

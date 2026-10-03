@@ -610,7 +610,8 @@ server.registerTool(
     description:
       "出先の原稿箱（スマホ・タブレットで開く claude.ai のページ）へ送る中身を返します：作品の題、" +
       "話ごとのファイル・題・本文のハッシュ、提案パネルに並んでいる校正の指摘（原文の一文・修正案）。" +
-      "**読むだけで、AIは呼ばず、本文そのものは返しません。** 書き先は nextStep にあります。",
+      "**読むだけで、AIは呼ばず、本文そのものは返しません。** 書き先は nextStep、" +
+      "ページの雛形の場所は templatePath にあります。",
     inputSchema: OUTBOX_PACK_INPUT,
   },
   tool("outbox.pack", (args: { folder: string; retentionDays?: number }) => outboxPack(args))
@@ -626,7 +627,8 @@ server.registerTool(
   {
     title: "出先の原稿箱の記録を作品へ入れる",
     description:
-      "出先の原稿箱の保管庫の records/ の記録（id 付き）と、持ち主の id（works/owner）を受け、1件ずつ入れて結果を返します。" +
+      "出先の原稿箱の保管庫の records/<書き手のid>/items/ の記録（id と、パスから読んだ書き手 writer 付き）と、" +
+      "持ち主の id（works/owner）を受け、1件ずつ入れて結果を返します。" +
       "メモは話の末尾（指摘に付けたメモはその行の上）へ // の行として入れ、送ったときと本文が違えば断ります。" +
       "採否（直す・済み・採らない）は持ち主の記録だけを、提案パネルと同じ判断として記録します。" +
       "入れた記録は覚えていて、2度目は already で返します。",
