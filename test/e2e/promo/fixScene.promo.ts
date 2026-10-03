@@ -24,17 +24,23 @@ import { fileURLToPath } from "node:url";
 import type { ElectronApplication, Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { findingId } from "../../../src/models/finding";
-import { caretPosition, manuscriptFrames, memoPanelFrame, openEpisode, placeCaretAfter } from "../support/manuscriptFrame";
+import {
+  caretPosition,
+  composeText,
+  manuscriptFrames,
+  memoPanelFrame,
+  openEpisode,
+  placeCaretAfter,
+} from "../support/manuscriptFrame";
 import { resizeWindows, withVsCode, type FixtureEpisode } from "../support/vscodeApp";
 import { waitUntil } from "../support/wait";
-import { clearNotifications } from "../support/workbenchDom";
+import { clearNotifications, dialogText, editorGroupTabs } from "../support/workbenchDom";
 import { durationSeconds, findFfmpeg, toGif, toMp4 } from "./support/encode";
 import {
   clickWithCursor,
   hideCaption,
   hideCursor,
   hideTitleCard,
-  moveCursorTo,
   parkCursor,
   showCaption,
   showCursor,
@@ -188,28 +194,6 @@ function hold(page: Page, ms: number): Promise<void> {
   return page.waitForTimeout(ms);
 }
 
-/** 組んで書く面で `needle` を選ぶ（打ち直す絵のため） */
-async function selectText(frame: Frame, needle: string): Promise<void> {
-  const ok = await frame.evaluate((text) => {
-    const compose = document.getElementById("compose");
-    if (!compose) return false;
-    compose.focus();
-    const walker = document.createTreeWalker(compose, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      const at = (node.textContent ?? "").indexOf(text);
-      if (at < 0) continue;
-      const range = document.createRange();
-      range.setStart(node, at);
-      range.setEnd(node, at + text.length);
-      const selection = window.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-      return true;
-    }
-    return false;
-  }, needle);
-  if (!ok) throw new Error(`組んで書く面に「${needle}」が見つからず、選べません`);
-}
 
 /**
  * 窓の中身の大きさ（Electron の `getContentSize`。表示倍率や画面の拡大率に左右されない単位）。
@@ -242,33 +226,6 @@ const CURSOR_PARK = { x: 0.9, y: 0.93 };
 /** 割合で指した点を、ワークベンチの文書の座標（Playwright と重ねる要素が使う単位）へ */
 async function viewportPoint(page: Page, at: { x: number; y: number }): Promise<{ x: number; y: number }> {
   return page.evaluate((at) => ({ x: Math.round(window.innerWidth * at.x), y: Math.round(window.innerHeight * at.y) }), at);
-}
-
-/**
- * 組んで書く面の `needle` の真ん中を、ワークベンチの文書の座標で返す（カーソルを字の上へ運ぶため）。
- * 原稿エディターは WebView の iframe の中なので、字の位置（iframe の中の座標）に、
- * iframe の左上（`frameElement().boundingBox()`。Playwright は入れ子でも一番外の座標で返す）を足す
- */
-async function textCenter(frame: Frame, needle: string): Promise<{ x: number; y: number }> {
-  const inner = await frame.evaluate((text) => {
-    const compose = document.getElementById("compose");
-    if (!compose) return undefined;
-    const walker = document.createTreeWalker(compose, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      const at = (node.textContent ?? "").indexOf(text);
-      if (at < 0) continue;
-      const range = document.createRange();
-      range.setStart(node, at);
-      range.setEnd(node, at + text.length);
-      const rect = range.getBoundingClientRect();
-      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-    }
-    return undefined;
-  }, needle);
-  if (!inner) throw new Error(`組んで書く面に「${needle}」が見つかりません`);
-  const box = await (await frame.frameElement()).boundingBox();
-  if (!box) throw new Error("原稿エディターの枠の位置が取れません");
-  return { x: box.x + inner.x, y: box.y + inner.y };
 }
 
 /** 原稿エディターのカーソルが、`text` を含む行へ来るまで待つ */
@@ -354,53 +311,102 @@ test("場面2「直す」を撮る", async () => {
 
       // 1. 一覧
       await showCaption(page, "メモと校正の指摘を、話の順に一覧", CAPTION_PLACE);
-      await hold(page, 5_500);
+      await hold(page, 4_500);
 
-      // 2. 押すと、その行へ
-      const row = memoPanel.locator("button.go", { hasText: "以外" }).first();
+      // 2. 押すと、その行へ——指摘の行の**場所の表示**（「第1話 雨の駅　4行目」）を押す。
+      // 行の文字（「思いのほか…」）でなく、どこへ飛ぶかが書いてある所を押す絵にする
+      const typoRow = memoPanel.locator("div.memo", {
+        has: memoPanel.locator("button.go", { hasText: "以外" }),
+      });
+      const where = typoRow.locator("span.where").first();
+      if ((await where.count()) === 0) throw new Error("誤字の指摘の行に、場所の表示がありません");
+      const whereText = (await where.innerText()).trim();
+      if (!whereText.endsWith("4行目")) throw new Error(`場所の表示が思ったものと違います: ${whereText}`);
       await showCaption(page, "押すと、その行へ", CAPTION_PLACE);
       await hold(page, 700);
-      mark("パネルの行へカーソルが動き始める");
-      await clickWithCursor(page, row);
-      mark("パネルの行を押した（星）");
+      mark("場所の表示へカーソルが動き始める");
+      await clickWithCursor(page, where, `場所の表示「${whereText}」`);
+      mark("場所の表示「4行目」を押した（星）");
       // 押したあと、本当のマウスは原稿の空いた所へ逃がす。パネルの上に残ると、行が並び替わった
       // あとに別の行がなぞられた（下線の）ままに写る。描いた矢印は押した所に残す
       await page.mouse.move(320, 600);
       await waitCaretOnLine(page, "以外", "原稿エディターのカーソルが誤字の行へ動く");
-      await hold(page, 3_400);
+      await hold(page, 2_800);
 
-      // 3. 打ち直す
-      await showCaption(page, "誤字を、その場で打ち直す", CAPTION_PLACE);
-      await hold(page, 600);
-      const typo = await textCenter(frame, "以外");
-      mark("誤字の上へカーソルが動き始める");
-      await moveCursorTo(page, typo.x, typo.y);
-      mark("誤字の上にカーソル");
-      await hold(page, 300);
-      await selectText(frame, "以外");
-      await hold(page, 500);
-      // 字を打つあいだは、矢印を邪魔にならない所へ退かす
-      await parkCursor(page, park.x, park.y);
-      for (const char of "意外") {
-        await page.keyboard.insertText(char);
-        await hold(page, 360);
-      }
-      await page.keyboard.press("Control+KeyS");
+      // 3. ［直す］——修正案のある指摘は、1手で本文に当たる（設計書6.96.5、0.97.8 の作者の裁定）。
+      // 当てる道は提案パネルの［適用］と同じ（`primeFindings.applyFindingFromMemo`）。提案パネルは前に出ず、
+      // 校正・メモパネルの上に「直しました」の帯が出て、直した指摘は一覧から消える
+      const fixButton = typoRow.locator('button[data-act="fix"]').first();
+      if ((await fixButton.innerText()).trim() !== "直す") throw new Error("誤字の指摘の行に［直す］がありません");
+      await showCaption(page, "［直す］1回で、本文が直る", CAPTION_PLACE);
+      await hold(page, 700);
+      mark("［直す］へカーソルが動き始める");
+      await clickWithCursor(page, fixButton, "［直す］");
+      mark("［直す］を押した（星）");
+      await page.mouse.move(320, 600);
       const file = path.join(session.manuscriptFolder, EPISODE_1);
       await waitUntil(
-        async () => (await readFile(file, "utf8")).includes("男は意外にも若かった"),
-        "打ち直した字がファイルに入る"
+        // 書き込みは「退避 → 新規作成」なので、その合間はファイルが無い。無いあいだは待つ
+        async () => (await readFile(file, "utf8").catch(() => "")).includes("男は意外にも若かった"),
+        "直した字がファイルに入る"
       );
-      await hold(page, 1_500);
-      // 直した指摘は、保存すると一覧から消える（原文が本文に無くなるため）
+      // 原稿エディターの面にも出ること（見ている人に本文が変わるのが見える）
+      await waitUntil(
+        async () => {
+          for (const candidate of await manuscriptFrames(page)) {
+            if ((await composeText(candidate)).includes("男は意外にも若かった")) return true;
+          }
+          return false;
+        },
+        "原稿エディターの本文が「意外」に変わる",
+        15_000
+      );
+      mark("原稿の本文が「意外」に変わった");
+      // 描いた矢印を退かす。直すと一覧の上に帯が入って行が下へずれ、押した所に残した矢印が
+      // 次の行の［済み］の上に来て、それを押しているように見えた（撮り直しで見つけた）
+      await parkCursor(page, park.x, park.y);
+      if (await dialogText(page)) throw new Error(`思いがけず確認の窓が出ています: ${await dialogText(page)}`);
+      // 原稿エディターの列に、同じ話のタブがもう1枚（素の文字のエディター）開いていないこと。
+      // 開くと原稿エディターが隠れ、行番号つきの素の画面が写る（2026-10-03、撮影で見つけた。0.97.7 で直った）
+      const groups = await editorGroupTabs(page);
+      const leftTabs = groups[0] ?? [];
+      if (leftTabs.filter((name) => name === EPISODE_1).length > 1) {
+        throw new Error(`［直す］のあと、原稿の列に同じ話のタブが重なって開きました: ${JSON.stringify(leftTabs)}`);
+      }
+      // 提案パネルは前に出ない（出ると校正・メモパネルが隠れ、帯も消えた一覧も写らない）
+      if (groups.flat().some((name) => name.startsWith("提案"))) {
+        throw new Error(`［直す］のあと、提案パネルが開きました: ${JSON.stringify(groups)}`);
+      }
+      // 「直しました」の帯が出る
+      await waitUntil(
+        async () => {
+          const band = memoPanel.locator("#fixed");
+          if (!(await band.isVisible())) return false;
+          return (await memoPanel.locator("#fixedText").innerText()).includes("意外");
+        },
+        "校正・メモパネルに「直しました」の帯が出る",
+        10_000
+      );
+      // 直した指摘は一覧から消える
       await waitUntil(
         async () => (await memoPanel.locator("button.go", { hasText: "以外" }).count()) === 0,
         "直した指摘が一覧から消える"
       );
+      await hold(page, 2_400);
       await showCaption(page, "直した指摘は、一覧から消える", CAPTION_PLACE);
-      await hold(page, 3_600);
+      await hold(page, 3_000);
 
-      // 4. F8 で次のメモへ
+      // 4. F8 で次のメモへ。F8 は原稿エディターに焦点があるときだけ効くので、
+      // 直した行（4行目）の末へカーソルを戻してから押す。描いた矢印は退かしておく
+      await parkCursor(page, park.x, park.y);
+      // 読み直しで面が作り直されることがあるので、直した本文を描いている面を探し直す
+      let editor: Frame | undefined;
+      for (const candidate of await manuscriptFrames(page)) {
+        if ((await composeText(candidate)).includes("男は意外にも若かった")) editor = candidate;
+      }
+      if (!editor) throw new Error("直した本文を描いている原稿エディターの面が見つかりません");
+      await placeCaretAfter(editor, "男は意外にも若かった。");
+      await page.mouse.move(320, 600);
       await showCaption(page, "F8 で、次のメモへ", CAPTION_PLACE);
       await hold(page, 900);
       await showKeyBadge(page, "F8");
@@ -424,7 +430,14 @@ test("場面2「直す」を撮る", async () => {
       // パネルの見出し（「校正・メモパネル：雨の駅」）に写る
       workTitle: "雨の駅",
     }
-  );
+  ).catch((error: unknown) => {
+    // 途中で止まっても、録ったままの動画（`raw/`）のどこを見ればよいかは残す
+    const offset = (sceneStartedAt - videoStartedAt) / 1000;
+    process.stdout.write(
+      marks.map((m) => `[広報] 録ったままの動画の ${(offset + m.ms / 1000).toFixed(2)} 秒: ${m.label}`).join("\n") + "\n"
+    );
+    throw error;
+  });
 
   expect(videoPath, "動画が録れていません").toBeTruthy();
   const raw = path.join(RELEASE_DIR, "fix-raw.webm");

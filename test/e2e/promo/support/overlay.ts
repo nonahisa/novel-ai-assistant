@@ -293,24 +293,100 @@ export async function burstStarsAt(page: Page, x: number, y: number): Promise<vo
   );
 }
 
-/** 押す所の指定。`offsetX` を省くと、要素の中央（幅が広ければ左から 120px） */
-export interface CursorClickOptions {
-  offsetX?: number;
+/**
+ * **台本から1行で呼ぶ「ここをカーソルで押す」。**
+ * 描いたカーソルを要素の真ん中まで滑らせ → 着いた所が本当にその要素の上かを確かめ →
+ * 星を散らし → 同じ点を本当に押す。星とカーソルの先端を、実際に押した点に揃えるため、
+ * `click` に位置を渡す。
+ *
+ * **真ん中を狙う。** 以前は幅の広い行を「左から 120px」で押していて、場所の表示や
+ * ボタンでなく行の文字（「思いのほか…」）を押す絵になった（作者の指摘、2026-10-03）。
+ *
+ * @param label 押す物の名前（外れたときの知らせに出す）
+ */
+export async function clickWithCursor(page: Page, target: Locator, label: string): Promise<void> {
+  const box = await target.boundingBox();
+  if (!box) throw new Error(`「${label}」が画面に見えていません（boundingBox が取れない）`);
+  // **字の真ん中を狙う。** 場所の表示（`span.where`）は行の幅いっぱいの箱なので、箱の真ん中は
+  // 字の右の空白になる（1回目の撮影で、矢印が「4行目」の右の何も無い所に写った）。
+  // 箱の中の字の並び（Range）の真ん中を取る。ボタンなら字の真ん中＝ボタンの真ん中
+  const text = await target.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const rect = range.getBoundingClientRect();
+    const own = element.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return undefined;
+    // 要素の左上からの位置で返す（iframe の外の座標へは、下で box を足して直す）
+    return { x: rect.left - own.left + rect.width / 2, y: rect.top - own.top + rect.height / 2 };
+  });
+  const offsetX = text?.x ?? box.width / 2;
+  const offsetY = text?.y ?? box.height / 2;
+  const point = { x: box.x + offsetX, y: box.y + offsetY };
+  await moveCursorTo(page, point.x, point.y);
+  await assertCursorOn(page, target, label);
+  await burstStarsAt(page, point.x, point.y);
+  await target.click({ position: { x: offsetX, y: offsetY } });
 }
 
 /**
- * **台本から1行で呼ぶ「ここをカーソルで押す」。**
- * 描いたカーソルを押す所まで滑らせ → 星を散らし → 同じ点を本当に押す。
- * 星とカーソルの先端を、実際に押した点に揃えるため、`click` に位置を渡す
+ * 描いたカーソルの先端が、`target` の上に乗っているかを確かめる。外れていたら撮影を止める。
+ *
+ * 「ボタンを押さずに単語を押している」絵を、**目で見る前に機械で防ぐ**ための関所。
+ * 3つ見る：
+ * 1. 先端が、いまの `boundingBox`（滑らせているあいだに行が並び替わることがあるので測り直す）の内側か
+ * 2. その点で一番上にある要素が、`target` かその中身か（`elementFromPoint`。別の要素が
+ *    重なっていたら、箱の内側でも押しているのはそちらになる）
+ * 3. その点が、要素の中の字の並びの上か（幅いっぱいの箱の、字の無い所を押していないか）
  */
-export async function clickWithCursor(page: Page, target: Locator, options: CursorClickOptions = {}): Promise<void> {
+async function assertCursorOn(page: Page, target: Locator, label: string): Promise<void> {
+  const tip = await page.evaluate(() => {
+    const outer = document.getElementById("promo-cursor");
+    if (!outer || outer.style.display === "none") return undefined;
+    return { x: Number(outer.dataset.x), y: Number(outer.dataset.y) };
+  });
+  if (!tip) throw new Error(`「${label}」を押す前に、描いたカーソルが出ていません`);
   const box = await target.boundingBox();
-  if (!box) throw new Error("押す所が画面に見えていません（boundingBox が取れない）");
-  const offsetX = options.offsetX ?? Math.min(box.width / 2, 120);
-  const offsetY = box.height / 2;
-  await moveCursorTo(page, box.x + offsetX, box.y + offsetY);
-  await burstStarsAt(page, box.x + offsetX, box.y + offsetY);
-  await target.click({ position: { x: offsetX, y: offsetY } });
+  if (!box) throw new Error(`「${label}」が画面から消えました（boundingBox が取れない）`);
+  const inside = tip.x >= box.x && tip.x <= box.x + box.width && tip.y >= box.y && tip.y <= box.y + box.height;
+  if (!inside) {
+    throw new Error(
+      `カーソルの先端 (${tip.x}, ${tip.y}) が「${label}」の上にありません（箱 ${JSON.stringify(box)}）`
+    );
+  }
+  // WebView の中の要素なら、その iframe の左上を引いて、中の座標で確かめる
+  const handle = await target.elementHandle();
+  if (!handle) throw new Error(`「${label}」の要素が取れません`);
+  try {
+    const frame = await handle.ownerFrame();
+    let origin = { x: 0, y: 0 };
+    if (frame && frame.parentFrame()) {
+      const frameBox = await (await frame.frameElement()).boundingBox();
+      if (!frameBox) throw new Error(`「${label}」の入った枠の位置が取れません`);
+      origin = { x: frameBox.x, y: frameBox.y };
+    }
+    const hit = await handle.evaluate(
+      (element, at) => {
+        const top = document.elementFromPoint(at.x, at.y);
+        // 3. 字の並びの上か（箱の中でも、字の無い空白を押していないか）。2px の遊びを持たせる
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const rect = range.getBoundingClientRect();
+        const onText =
+          rect.width === 0 ||
+          (at.x >= rect.left - 2 && at.x <= rect.right + 2 && at.y >= rect.top - 2 && at.y <= rect.bottom + 2);
+        return {
+          ok: top !== null && (top === element || element.contains(top)) && onText,
+          what: top ? `${top.tagName.toLowerCase()}.${top.className}「${(top.textContent ?? "").slice(0, 20)}」` : "なし",
+        };
+      },
+      { x: tip.x - origin.x, y: tip.y - origin.y }
+    );
+    if (!hit.ok) {
+      throw new Error(`カーソルの先端が「${label}」の字の上にありません（先端にあるもの: ${hit.what}）`);
+    }
+  } finally {
+    await handle.dispose();
+  }
 }
 
 /** 描いたカーソルを、キー操作の邪魔にならない所（呼び出し側が決めた点）へ退かす */
