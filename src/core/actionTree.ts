@@ -1206,7 +1206,10 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.importChaptersFromBackup",
-            label: "バックアップから章立て",
+            // 狭いサイドバーで切れないよう短くした（作者の裁定、2026-10-03）。
+            // 「取込」は外から持ち込む操作の言い方（バックアップ取込・編集部提案取込）
+            label: "章立て取込",
+            note: "バックアップから",
             description: "AIを使わない",
             icon: "list-tree",
             requiresWork: true,
@@ -2275,7 +2278,9 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.openSynopsisDocs",
-            label: "紹介文・あらすじ閲覧",
+            // 小分類「資料閲覧」の下なので「閲覧」を落とした（2026-10-03。
+            // 狭いサイドバーで切れないよう）。パレットの名前は「閲覧」を残す
+            label: "紹介文・あらすじ",
             icon: "preview",
             requiresWork: true,
             // **感情曲線（盛り上がりの推移）はこの文書の中の一節**であって、
@@ -2314,11 +2319,14 @@ export const ACTION_TREE: readonly ActionGroup[] = [
 
   {
     kind: "group",
-    // **束の名前は「統合小説執筆環境設定」**（作者の裁定、2026-09-23。
-    // 旧「拡張機能の設定」）。作品ごとの決めごとは作品管理へ移したので、
-    // ここに残るのは拡張機能全体の設定（設定管理・AI）と、最初に一度だけ
-    // 使う設定（初回設定。2026-09-24 B10③）である
-    label: "統合小説執筆環境設定",
+    // **束の名前は「環境設定」**（2026-10-03。旧「統合小説執筆環境設定」、
+    // その前は「拡張機能の設定」）。狭いサイドバーで「統合小説執筆…」と
+    // 切れていた（作者の裁定「長い名前を短くする」）。この拡張機能の中の
+    // メニューなので、製品名を落としても何の設定かは変わらない。
+    // 作品ごとの決めごとは作品管理へ移したので、ここに残るのは拡張機能
+    // 全体の設定（設定管理・AI）と、最初に一度だけ使う設定（初回設定。
+    // 2026-09-24 B10③）である
+    label: "環境設定",
     icon: "settings-gear",
     entries: [
       {
@@ -2481,7 +2489,9 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.showTuningStats",
-            label: "AIチューニング実測一覧",
+            // 2026-10-03 に「AIチューニング実測一覧」から短くした（狭い
+            // サイドバーで切れていた）。チューニングは測ることなので「実測」は重なる
+            label: "AIチューニング一覧",
             icon: "graph",
             requiresWork: false,
             // **AIの印は付けない。** 測った値を並べるだけで、AIを呼ばない
@@ -2494,7 +2504,9 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.forgetTuning",
-            label: "AIチューニング記録削除",
+            // 2026-10-03 に「AIチューニング記録削除」から短くした。消すのは
+            // 測った記録だけ（説明の1行目に書いてある）
+            label: "AIチューニング削除",
             icon: "trash",
             requiresWork: false,
             // 記録を消すだけで、AIは呼ばない

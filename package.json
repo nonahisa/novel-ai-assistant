@@ -584,12 +584,12 @@
       },
       {
         "command": "novelai.showTuningStats",
-        "title": "AIチューニング実測一覧",
+        "title": "AIチューニング一覧",
         "category": "小説執筆"
       },
       {
         "command": "novelai.forgetTuning",
-        "title": "AIチューニング記録削除",
+        "title": "AIチューニング削除",
         "category": "小説執筆"
       },
       {
@@ -1355,7 +1355,7 @@
       },
       {
         "command": "novelai.importChaptersFromBackup",
-        "title": "バックアップから章立て",
+        "title": "章立て取込（バックアップから）",
         "icon": "$(list-tree)",
         "category": "小説執筆"
       },
@@ -2150,7 +2150,7 @@
           "type": "object",
           "default": {},
           "scope": "machine",
-          "markdownDescription": "AIチューニングで測った、モデルごとの上限と待ち時間。\n\n・測った値は拡張機能の保管庫にある。ここに残っていても使われない\n・消すときは詳細メニューの「AIチューニング記録削除」\n\n[セットアップ（必要なものを入れる）…](command:novelai.runFullSetup)\n\n[機能別AI割当…](command:novelai.assignFeatureAI)"
+          "markdownDescription": "AIチューニングで測った、モデルごとの上限と待ち時間。\n\n・測った値は拡張機能の保管庫にある。ここに残っていても使われない\n・消すときは詳細メニューの「AIチューニング削除」\n\n[セットアップ（必要なものを入れる）…](command:novelai.runFullSetup)\n\n[機能別AI割当…](command:novelai.assignFeatureAI)"
         },
         "novelai.cloudMaxTimeoutSeconds": {
           "type": "number",

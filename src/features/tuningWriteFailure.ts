@@ -21,7 +21,7 @@ export function describeTuningWriteFailure(outcome: TuningWriteOutcome): string 
       return (
         `AIチューニングの記録（拡張機能の保管庫の ${TUNING_STORE_FILE}）が` +
         "読めない形になっているため、上書きせずに止めました。" +
-        "中身を直すか、詳細メニューの「AIチューニング記録削除」で" +
+        "中身を直すか、詳細メニューの「AIチューニング削除」で" +
         "作り直してから測り直してください。"
       );
     case "no_store":
