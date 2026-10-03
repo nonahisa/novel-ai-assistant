@@ -29,15 +29,20 @@ function width(label: string): number {
   );
 }
 
+/** 手元のVS Codeか、ブラウザ版のどちらかで画面に並ぶか */
+function shownSomewhere(item: ActionItem): boolean {
+  return isItemShownInActionList(item, true) || isItemShownInActionList(item, false);
+}
+
 function shownLabels(): string[] {
   const labels: string[] = [];
   const visit = (entry: ActionItem | ActionSection) => {
     if (entry.kind === "section") {
       labels.push(entry.label);
-      entry.items.filter(isItemShownInActionList).forEach(visit);
+      entry.items.filter(shownSomewhere).forEach(visit);
       return;
     }
-    if (isItemShownInActionList(entry)) labels.push(entry.label);
+    if (shownSomewhere(entry)) labels.push(entry.label);
   };
   for (const group of ACTION_TREE) {
     labels.push(group.label);
