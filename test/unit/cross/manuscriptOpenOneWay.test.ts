@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import "../support/sweepTimeout";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 

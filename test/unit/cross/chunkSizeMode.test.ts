@@ -1,4 +1,5 @@
 import { describe, expect, it, afterEach, beforeEach } from "vitest";
+import "../support/sweepTimeout";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {

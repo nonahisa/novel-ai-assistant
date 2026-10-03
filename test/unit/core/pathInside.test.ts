@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import "../support/sweepTimeout";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve, sep } from "node:path";
 

@@ -29,6 +29,9 @@ npm run typecheck:tests                            # 型（test/e2e/tsconfig.jso
 | `vscodeApp.ts` | `withVsCode(名前, 話の配列, 本体, 起こし方?)`——一時フォルダーに作品を作り、VS Code を画面の外で起こし、作品を登録して、終われば必ず止めて消す。失敗したら写真を `%TEMP%\novelai-e2e-screenshots\` に残す。`LaunchOptions` で settings・keybindings を足せる |
 | `manuscriptFrame.ts` | 原稿エディター（WebView）の中：`openEpisode`・`placeCaretAfter`・`caretPosition`・`composeText`・`footText`・`selectionCollapsed`・`revealFlashLit`・`memoPanelFrame` |
 | `workbenchDom.ts` | **VS Code 本体の DOM に頼るのはここ1か所**：`editorGroupTabs`（列ごとのタブ）・`quickOpen`・`clearNotifications`・`dialogText`・`closeDialog`。版で壊れたらここだけ直す |
+| `workbenchDom.ts` の続き | 選ぶ画面（QuickPick）：`waitForQuickPick`・`quickPickTitle`・`quickPickRows`・`pickQuickPickRow`・`toggleQuickPickRow`・`acceptQuickPick`（1.138 はチェック欄が `.monaco-checkbox`。決めるのは［OK］——チェックのあと Enter で戻る）。WebView を開いたあとの本体向けのキーは `pressWorkbenchKey`（焦点が iframe にあると本体のキー割り当てに届かない。ノートPCで落ちた） |
+| `settingsFixture.ts` | 設定資料の見本（人物を製品と同じファイル名で置く）・設定資料パネルの面と一覧の読み取り |
+| `LaunchOptions` の追加 | `globalState`（起こす前に `state.vscdb` へ書く。`node:sqlite`）・`prepareWork`（起こす前に作品フォルダーへ置く） |
 | `sampleFinding.ts` | 校正の指摘の見本を `.aiwriter/findings.jsonl` へ製品と同じ形で置く（**AI を呼ばない**）。提案パネルを開くキー |
 | `wait.ts` | `waitUntil`（条件が満たされるまで）・`holdsFor`（**起きないこと**を決めた時間見続ける。遅れて開く2枚目を拾う） |
 | `cleanup.ts`・`globalSetup.ts` | 起こした PID と一時フォルダーの台帳。1件ごとと走りの最初・最後に、**一時フォルダー名を引数に含むプロセスだけ**を木ごと止める |
@@ -39,7 +42,7 @@ npm run typecheck:tests                            # 型（test/e2e/tsconfig.jso
 2. `withVsCode` の中で：`openEpisode` で開く → キー（`page.keyboard.press`）・打ち込み（`keyboard.insertText`）・押す（`frame.locator(...).click()`）→ 確かめる
 3. **確かめるのは、ファイル → 画面の順。** 本文が変わったかはファイルを読む（`\r\n` を `\n` に揃える）。画面はそのあと
 4. **「起きない」ことは `holdsFor` で数秒見続ける**（2枚目のタブ・確認の窓・素のエディター）。一瞬だけ見て「無い」としない
-5. 製品のコマンドを押すキーが無いときは、**使い捨ての keybindings.json に足す**（`LaunchOptions.keybindings`）。キーは `ctrl+alt+shift+F<n>` の空いている所（F8・F10・F11・F12 は土台が、F9 は広報の台本が使用中。足す前に `test/e2e` を `ctrl+alt+shift+f` で検索する）
+5. 製品のコマンドを押すキーが無いときは、**使い捨ての keybindings.json に足す**（`LaunchOptions.keybindings`）。`ctrl+alt+shift+F1`〜`F12` は埋まった（2026-10-04）。足すときは `test/e2e` を `ctrl+alt+shift+` で検索し、使われておらず製品の `package.json` のキーとも重ならないもの（`ctrl+alt+shift+` と文字キーなど）を選ぶ
 6. 冒頭のコメントに「何を見張るか」と設計書の節・作者の指示の日付を書く
 
 ## 守ること

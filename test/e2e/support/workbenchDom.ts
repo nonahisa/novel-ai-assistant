@@ -157,11 +157,35 @@ export async function commandPaletteLabels(page: Page, query: string): Promise<s
 }
 
 /**
+ * **VS Code 本体向けのキー**（使い捨ての keybindings.json に書いた Ctrl+Alt+Shift+F<n> など）を、
+ * 本体に焦点を戻してから押す。
+ *
+ * WebView（校正・メモパネル・人物相関図など）を開くと、焦点が WebView の中へ移る。そのまま
+ * Playwright でキーを送ると、**本体のキー割り当てに届かない**（Keyboard Shortcuts
+ * Troubleshooting のログに「Received keydown event」の行が1行も出ない。`document.hasFocus()` は偽か、
+ * 焦点が iframe）。2026-10-03、ノートPCで `commandNames`／`memoFixOneStep` が落ちて分かった
+ * （同じテストが母艦では通る。届くかどうかは WebView の読み込みの進み方しだい）。
+ *
+ * `window.focus()` は**画面の中だけの操作**で、OS の前面は取らない（`vscodeApp.ts` の
+ * `keepOutOfTheWay` の決まりを崩さない。`page.bringToFront()` は使わない）。
+ */
+export async function pressWorkbenchKey(page: Page, chord: string): Promise<void> {
+  await page.evaluate(() => {
+    // iframe（WebView）に焦点があれば外す。焦点が本体の入力欄などにあるときは触らない
+    const active = document.activeElement;
+    if (active && active.tagName === "IFRAME") (active as HTMLElement).blur();
+    window.focus();
+  });
+  await page.keyboard.press(chord);
+}
+
+/**
  * キーボード ショートカットの画面で `query` を探し、並んだ行の
  * 「コマンドの名前」と「キー」を返す（画面は開いたまま）。
  *
  * 開くのは `OPEN_KEYBINDINGS_KEY`（使い捨ての keybindings.json に足す）。
  * **Ctrl+K Ctrl+S の2段のキーは、焦点が WebView（パネル）の中にあると届かなかった**
+ * （1段のキーでも同じ。`pressWorkbenchKey` で本体へ焦点を戻してから押す）
  */
 export async function keybindingsEditorRows(page: Page, query: string): Promise<Array<{ command: string; keys: string }>> {
   const search = page
@@ -169,7 +193,7 @@ export async function keybindingsEditorRows(page: Page, query: string): Promise<
     .first();
   // 開いていなければ開く（2回目からは探す語だけ入れ替える）
   if ((await search.count()) === 0 || !(await search.isVisible())) {
-    await page.keyboard.press(OPEN_KEYBINDINGS_PRESS);
+    await pressWorkbenchKey(page, OPEN_KEYBINDINGS_PRESS);
   }
   await search.waitFor({ state: "visible", timeout: 10_000 });
   await search.click();
@@ -198,6 +222,110 @@ export async function keybindingsEditorRows(page: Page, query: string): Promise<
     10_000
   );
   return rows;
+}
+
+/** 選ぶ画面（QuickPick）の1行 */
+export interface QuickPickRow {
+  /** 名前（`$(book)` のような絵の記号は字にならないので、前後の空白を落とした字だけ） */
+  label: string;
+  /** 名前の右の説明 */
+  description: string;
+  /** 複数選べる画面のチェック。チェックの無い画面では undefined */
+  checked: boolean | undefined;
+}
+
+/**
+ * 選ぶ画面（`showQuickPick`）が `title` の題で出るまで待ち、行が出揃ったら返す。
+ *
+ * **題で待つ。** 拡張機能は選ぶ画面を続けて何枚も出すので、前の画面の行を
+ * 読まないよう、題が替わったことを確かめてから読む
+ */
+export async function waitForQuickPick(page: Page, title: string, timeoutMs = 15_000): Promise<QuickPickRow[]> {
+  await waitUntil(
+    async () => (await quickPickTitle(page)) === title,
+    `選ぶ画面「${title}」が出る`,
+    timeoutMs
+  );
+  let rows: QuickPickRow[] = [];
+  let stable = 0;
+  await waitUntil(
+    async () => {
+      const now = await quickPickRows(page);
+      stable = now.length > 0 && JSON.stringify(now) === JSON.stringify(rows) ? stable + 1 : 0;
+      rows = now;
+      return stable >= 3;
+    },
+    `選ぶ画面「${title}」の行が出揃う`,
+    10_000
+  );
+  return rows;
+}
+
+/** いま出ている選ぶ画面の題。出ていなければ undefined */
+export async function quickPickTitle(page: Page): Promise<string | undefined> {
+  return page.evaluate(() => {
+    const widget = document.querySelector(".quick-input-widget") as HTMLElement | null;
+    if (!widget || widget.style.display === "none" || widget.offsetParent === null) return undefined;
+    const title = widget.querySelector(".quick-input-title")?.textContent?.trim();
+    return title || undefined;
+  });
+}
+
+/** いま出ている選ぶ画面の行（見えている行だけ。短い一覧を前提にする） */
+export async function quickPickRows(page: Page): Promise<QuickPickRow[]> {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll(".quick-input-widget .quick-input-list .monaco-list-row")).map((row) => {
+      const label = (row.querySelector(".label-name")?.textContent ?? "").trim();
+      const description = (row.querySelector(".label-description")?.textContent ?? "").trim();
+      // 複数選べる画面では、行そのものが「checkbox」の役を名乗る
+      const aria = row.getAttribute("aria-checked");
+      const checked = aria === "true" ? true : aria === "false" ? false : undefined;
+      return { label, description, checked };
+    })
+  );
+}
+
+/** 選ぶ画面で、名前に `label` を含む行を押す（1つだけ選ぶ画面なら、それで決まる） */
+export async function pickQuickPickRow(page: Page, label: string): Promise<void> {
+  await page
+    .locator(".quick-input-widget .quick-input-list .monaco-list-row", { hasText: label })
+    .first()
+    .click();
+}
+
+/**
+ * 複数選べる選ぶ画面で、名前（または説明）が `label` の行のチェックを付け外しする。
+ * 押したあと、チェックが本当に替わったことを確かめる（押し損ねを黙って通さない）。
+ *
+ * 説明でも引けるのは、話の一覧のように名前が「第2話 …」で説明がファイル名の画面があるため
+ */
+export async function toggleQuickPickRow(page: Page, label: string): Promise<void> {
+  const rows = await quickPickRows(page);
+  const index = rows.findIndex((row) => row.label === label || row.description === label);
+  if (index < 0) throw new Error(`選ぶ画面に「${label}」の行がありません（${JSON.stringify(rows)}）`);
+  const before = rows[index];
+  // チェック欄は行の中の `.monaco-checkbox`（1.138.0。古い版の `<input class="quick-input-list-checkbox">` ではない）
+  await page
+    .locator(".quick-input-widget .quick-input-list .monaco-list-row")
+    .nth(index)
+    .locator(".monaco-checkbox")
+    .first()
+    .click();
+  await waitUntil(
+    async () => (await quickPickRows(page))[index]?.checked === !before.checked,
+    `「${label}」のチェックが替わる`,
+    5_000
+  );
+}
+
+/**
+ * 複数選べる選ぶ画面を、いまのチェックのまま決める（右上の［OK］を押す）。
+ *
+ * **Enter では決めない。** チェック欄を押したあとは焦点がチェック欄にあり、
+ * Enter はそのチェック欄を付け外しする（外したはずの語が戻って決まった。1.138.0）
+ */
+export async function acceptQuickPick(page: Page): Promise<void> {
+  await page.locator(".quick-input-widget .quick-input-action .monaco-button", { hasText: "OK" }).first().click();
 }
 
 /**

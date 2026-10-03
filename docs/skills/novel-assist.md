@@ -63,8 +63,10 @@
      {"path": "findings", "write": "owner"},
      {"path": "records", "read": "view", "write": "owner"},
      {"path": "records/{self}", "write": "interact"}
-   ]}, "user": {}}
+   ]}, "user": {}, "sample": {}}
    ```
+
+   `sample` は、ページの指摘ごとの［Claude に聞く］に使う（使った分は、ページを見ている人の Claude の枠から減る。答えは保管庫にも原稿にも入らず、作者がメモに写して残すかを決める）。外すと、その道がページに出ないだけで、ほかは変わらない
 4. 返った URL を `.aiwriter/outbox.json` に `{"url": "<URL>", "createdAt": "<日時>"}` として書く
 5. 作者に一度ページを開いてもらう（持ち主が開くと、ページが保管庫の `works/owner` に持ち主の id を控える。取り込みにこれが要る）
 

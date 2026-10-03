@@ -329,6 +329,57 @@ describe("画面の［保存］ボタン", () => {
     });
   }
 
+  /*
+    **新しく伝えることが無いのに、画面の字を送り直さない**（作者の裁定「調べて直す」、
+    2026-10-03。設計書6.25.9）。本体の側で文書が変わった直後（Ctrl+Alt+K で強調を
+    外した等）は、送り直しが画面へ届くまで120ミリ秒ほどかかる。その間に Ctrl+S で
+    画面の古い字を送ると、本体はそれを「打った字」として当て、外した印を戻してから
+    保存していた（E2E で3回とも再現）。
+  */
+  for (const composeOn of [true, false]) {
+    const face = composeOn ? "組んで書く面" : "打つ面";
+    it(`${face}：画面の字が受け取った本文のままで、返事待ちの便も無ければ、Ctrl+S で本文を送らずに保存だけ頼む`, () => {
+      const h = harness({ composeOn, text: "前の字と《《強調》》と後ろの字。" });
+      h.update({ type: "update", docKey: "doc", text: "前の字と《《強調》》と後ろの字。" });
+      h.key({ key: "s", ctrlKey: true });
+      const posted = h.posted();
+      expect(posted.filter((m) => m.type === "edit"), "古い字を送り直して、本体の変更を戻してしまう").toHaveLength(0);
+      const requests = posted.filter((m) => m.type === "saveRequest");
+      expect(requests).toHaveLength(1);
+      // 便を1つも送っていないので、待つ便は無い（本体はすぐ保存できる）
+      expect(requests[0].seq).toBe(0);
+    });
+  }
+
+  it("返事の来ていない便があるときは、同じ本文でも送り直してから保存を頼む（受け手の居ないところへ消えた便を取り戻す）", () => {
+    const h = harness({ text: "打った字" });
+    h.update({ type: "update", docKey: "doc", text: "古い本文" });
+    // 打った字の便（返事はまだ来ない）
+    h.click("saveCheck");
+    const firstEdit = h.posted().filter((m) => m.type === "edit");
+    expect(firstEdit).toHaveLength(1);
+    // 本文は変わっていないが、便1の返事が無いので、Ctrl+S では送り直す
+    h.key({ key: "s", ctrlKey: true });
+    const edits = h.posted().filter((m) => m.type === "edit");
+    expect(edits).toHaveLength(2);
+    expect(edits[1].text).toBe("打った字");
+    const requests = h.posted().filter((m) => m.type === "saveRequest");
+    expect(requests[requests.length - 1].seq).toBe(edits[1].seq);
+  });
+
+  it("返事が来て片づいたあとは、同じ本文で押しても送り直さない", () => {
+    const h = harness({ text: "打った字" });
+    h.update({ type: "update", docKey: "doc", text: "古い本文" });
+    h.click("saveCheck");
+    const seq = h.posted().find((m) => m.type === "edit")?.seq;
+    h.receive({ type: "editApplied", seq, ok: true });
+    h.key({ key: "s", ctrlKey: true });
+    expect(h.posted().filter((m) => m.type === "edit")).toHaveLength(1);
+    const requests = h.posted().filter((m) => m.type === "saveRequest");
+    // 2回目は、入ったと返事のあった便の番号で頼む（本体はすぐ保存できる）
+    expect(requests[1].seq).toBe(seq);
+  });
+
   it("押したとき、画面の控え（rescue）にも本文を控える", () => {
     const h = harness({ text: "控える本文" });
     h.update({ type: "update", docKey: "doc", text: "古い本文" });
