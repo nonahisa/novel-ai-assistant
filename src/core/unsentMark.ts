@@ -21,6 +21,7 @@
  */
 
 import type { GitSyncStatus } from "./git";
+import { verifiedState } from "./verifiedMemento";
 
 /** 保存先の鍵（`globalState`。作品をまたいで共通） */
 export const UNSENT_MARK_KEY = "novelai.unsentAtClose";
@@ -73,14 +74,25 @@ export async function writeUnsentMark(
   storage: UnsentMarkStorage,
   mark: UnsentMark
 ): Promise<void> {
-  await storage.update(UNSENT_MARK_KEY, mark);
+  await putUnsentMark(storage, mark);
 }
 
 /** 印を消す。**送信が通ったときだけ呼ぶ** */
 export async function clearUnsentMark(
   storage: UnsentMarkStorage
 ): Promise<void> {
-  await storage.update(UNSENT_MARK_KEY, undefined);
+  await putUnsentMark(storage, undefined);
+}
+
+/**
+ * 印を書く**唯一の口**（設計書5.7.8）。**確かめて書く**——印が消えると、
+ * 送らずに閉じたことを次に開いたときに知らせられない（それが唯一の受け皿）
+ */
+async function putUnsentMark(
+  storage: UnsentMarkStorage,
+  mark: UnsentMark | undefined
+): Promise<void> {
+  await verifiedState(storage).update(UNSENT_MARK_KEY, mark);
 }
 
 /**

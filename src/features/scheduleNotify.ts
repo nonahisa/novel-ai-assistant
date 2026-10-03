@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import type { WorkRegistry } from "../core/workRegistry";
 import { collectScheduleNotices, scheduleNoticeText } from "../core/scheduleNotice";
 import { logFailure, useLogFile } from "../core/logger";
+import { verifiedState } from "../core/verifiedMemento";
 import { loadScheduleBoard, scheduleToday } from "./scheduleData";
 import { loadHolidays } from "./holidayImport";
 
@@ -37,8 +38,15 @@ export function startScheduleNotices(
         holidays: await loadHolidays(context),
       });
       const text = scheduleNoticeText(collectScheduleNotices(board.columns, board.today));
-      // 何も無い日も「確かめた」と残す（あとから開いたウィンドウが走査し直さない）
-      await context.globalState.update(LAST_NOTICE_KEY, today);
+      // 何も無い日も「確かめた」と残す（あとから開いたウィンドウが走査し直さない）。
+      // **確かめて書く**（設計書5.7.8。消えると同じ日に2度出る）。残せなくても知らせは出す
+      await verifiedState(context.globalState)
+        .update(LAST_NOTICE_KEY, today)
+        .catch((error: unknown) =>
+          logFailure("スケジュール：知らせた日を覚えられなかった", {
+            error: error instanceof Error ? error.message : String(error),
+          })
+        );
       if (!text) return;
       const open = "スケジュールを開く";
       const answer = await vscode.window.showInformationMessage(text, open);

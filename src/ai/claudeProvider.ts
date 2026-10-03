@@ -4,6 +4,7 @@ import { fetchJson } from "./httpClient";
 import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
 import { buildAttemptPlan, type OptionAttempt } from "./optionFallback";
 import { forgetSecret, logLine, registerSecret } from "../core/logger";
+import { verifiedState } from "../core/verifiedMemento";
 import { resolveTimeoutMs } from "../core/modelTuning";
 import { isWebRuntime } from "../core/runtime";
 
@@ -518,7 +519,16 @@ export class ClaudeProvider implements ApiKeyProvider {
    */
   private rememberSupport(model: string, support: ClaudeSupport): void {
     this.supportCache.set(model, { ...support });
-    void this.context.globalState.update(supportKey(model), { ...support });
+    // **確かめて書く**（設計書5.7.8）。消えると次の起動で、通らない指定を
+    // もう一度送ってから通ることになる。待たないので、失敗はログへ
+    verifiedState(this.context.globalState)
+      .update(supportKey(model), { ...support })
+      .catch((error: unknown) =>
+        logLine(
+          `Claude: 通った指定を覚えられませんでした（${model}）：` +
+            (error instanceof Error ? error.message : String(error))
+        )
+      );
   }
 }
 

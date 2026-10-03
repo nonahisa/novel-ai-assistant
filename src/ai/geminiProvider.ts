@@ -13,6 +13,7 @@ import {
 import { fetchJson } from "./httpClient";
 import { toGeminiSchema } from "./jsonSchema";
 import { forgetSecret, logLine, registerSecret } from "../core/logger";
+import { verifiedState } from "../core/verifiedMemento";
 import { resolveTimeoutMs } from "../core/modelTuning";
 import { customEndpointNotice } from "../core/endpointNotice";
 import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
@@ -422,7 +423,16 @@ export class GeminiProvider implements ApiKeyProvider {
    */
   private rememberSupport(model: string, support: GeminiSupport): void {
     this.supportCache.set(model, { ...support });
-    void this.context.globalState.update(supportKey(model), { ...support });
+    // **確かめて書く**（設計書5.7.8）。消えると次の起動で、通らない指定を
+    // もう一度送って無料枠を1回ぶん使う。待たないので、失敗はログへ
+    verifiedState(this.context.globalState)
+      .update(supportKey(model), { ...support })
+      .catch((error: unknown) =>
+        logLine(
+          `Gemini: 通った指定を覚えられませんでした（${model}）：` +
+            (error instanceof Error ? error.message : String(error))
+        )
+      );
   }
 
   private readonly supportCache = new Map<string, GeminiSupport>();

@@ -1,8 +1,11 @@
+// ログの書き先：作品が定まらない——勧めたかの印は作品ごとではなく環境ごとに1つ
 import * as vscode from "vscode";
 import {
   shouldOfferLibraryMerge,
   type WorkLocation,
 } from "../core/libraryHome";
+import { logLine } from "../core/logger";
+import { verifiedState } from "../core/verifiedMemento";
 
 /**
  * 2作目を書庫の外へ登録したときだけ、1度だけ、まとめるかを訊く（設計書6.97.3）。
@@ -86,7 +89,16 @@ export function offerLibraryMergeInVsCode(
     added,
     wasOffered: () => context.globalState.get<boolean>(MERGE_OFFERED_KEY, false),
     markOffered: async () => {
-      await context.globalState.update(MERGE_OFFERED_KEY, true);
+      // **確かめて書く**（設計書5.7.8。消えると同じ勧めがまた出る）。
+      // 残せなくても勧めは出す——覚えられないことで作者の操作を止めない
+      await verifiedState(context.globalState)
+        .update(MERGE_OFFERED_KEY, true)
+        .catch((error: unknown) =>
+          logLine(
+            "書庫にまとめるかを訊いたことを覚えられませんでした：" +
+              (error instanceof Error ? error.message : String(error))
+          )
+        );
     },
     notify: async (message, action) =>
       vscode.window.showInformationMessage(message, action),

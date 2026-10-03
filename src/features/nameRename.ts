@@ -31,6 +31,7 @@ import { askText, cancelItem } from "../views/dialogs";
 import { suggestAction } from "../views/notify";
 import { logFailure, useLogFile } from "../core/logger";
 import { findAction } from "../views/actionList";
+import { verifiedState } from "../core/verifiedMemento";
 
 /**
  * 名前の付け替え（設計書6.37.3）。
@@ -82,14 +83,27 @@ export async function savePendingRename(
   workId: string,
   pending: PendingRename
 ): Promise<void> {
-  await state.update(pendingRenameKey(workId), pending);
+  await writePendingRename(state, workId, pending);
 }
 
 export async function clearPendingRename(
   state: vscode.Memento,
   workId: string
 ): Promise<void> {
-  await state.update(pendingRenameKey(workId), undefined);
+  await writePendingRename(state, workId, undefined);
+}
+
+/**
+ * 待ちを書く**唯一の口**（設計書5.7.8）。**確かめて書く**——workspaceState も
+ * globalState と同じく鍵を1つの塊で持ち、送り返しで消えうる。消えると
+ * 「資料にも反映」で作者に同じ入力をもう一度させることになる。
+ */
+async function writePendingRename(
+  state: vscode.Memento,
+  workId: string,
+  pending: PendingRename | undefined
+): Promise<void> {
+  await verifiedState(state).update(pendingRenameKey(workId), pending);
 }
 
 export interface RenameCharacterOptions {

@@ -1,4 +1,5 @@
 import { isWebRuntime, randomHex } from "./runtime";
+import { verifiedState } from "./verifiedMemento";
 
 /**
  * 端末（執筆環境）の識別子。
@@ -35,8 +36,17 @@ export async function resolveDeviceId(
   if (existing && isValidDeviceId(existing)) return existing;
 
   const created = `${sanitizeHostname(hostname ?? (await currentHostname()))}-${randomHex(2)}`;
-  await storage.update(DEVICE_ID_KEY, created);
-  return created;
+  /*
+    **確かめて書く**（設計書5.7.8）。この書き込みは起動の直後で、ほかの鍵の
+    送り返しと重なりやすい。消えると次の起動で別のIDが作られ、執筆量の記録が
+    「別の端末」として分かれる。**「無ければ作る」の形で当てる**——同じころに
+    別の窓が作ったIDがあれば、そちらを使う（2つのIDで記録を割らない）。
+  */
+  return verifiedState(storage).patch<string | undefined>(
+    DEVICE_ID_KEY,
+    undefined,
+    (current) => (current && isValidDeviceId(current) ? current : created)
+  ) as Promise<string>;
 }
 
 /**

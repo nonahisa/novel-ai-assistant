@@ -4,6 +4,7 @@ import type { AIRegistry } from "../ai/registry";
 import type { ProviderId } from "../ai/types";
 import { modelTuningRaw } from "../core/modelTuning";
 import { logLine } from "../core/logger";
+import { verifiedState } from "../core/verifiedMemento";
 import {
   NUDGE_MEASURE_LABEL,
   NUDGE_MUTE_LABEL,
@@ -97,8 +98,13 @@ async function nudgeOnce(
   if (!shouldNudgeTuning(selected, { tuned, shown, muted })) return;
 
   // **出す前に覚える。** 知らせを閉じずに放っておかれても、二度目は出さない
-  shown.add(selectedModelKey(selected));
-  await context.globalState.update(SHOWN_KEY, [...shown]);
+  // **確かめて書き、そのモデルの分だけ足す**（設計書5.7.8。消えると同じ勧めがまた出る）
+  const key = selectedModelKey(selected);
+  await verifiedState(context.globalState)
+    .patch<string[]>(SHOWN_KEY, [], (current) =>
+      (current ?? []).includes(key) ? current : [...(current ?? []), key]
+    )
+    .catch(logRememberFailure);
 
   // 鍵は台帳と同じただの文字列。知らないIDなら undefined が返るだけ
   const provider = registry.getProvider(selected.providerId as ProviderId);
@@ -126,6 +132,17 @@ async function nudgeOnce(
     return;
   }
   if (picked === NUDGE_MUTE_LABEL) {
-    await context.globalState.update(MUTED_KEY, true);
+    // 作者の「今後出さない」。消えると断ったのにまた出るので、確かめて書く
+    await verifiedState(context.globalState)
+      .update(MUTED_KEY, true)
+      .catch(logRememberFailure);
   }
+}
+
+/** 呼び手は待たない（`void`）ので、覚えられなかったことはログへ残す */
+function logRememberFailure(error: unknown): void {
+  logLine(
+    "AIチューニングの勧めを覚えられませんでした：" +
+      (error instanceof Error ? error.message : String(error))
+  );
 }

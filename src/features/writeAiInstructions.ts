@@ -25,6 +25,7 @@ import { hashBytes } from "../core/hash";
 // **保管庫の場所は1か所で決める**（助言方針の控えも同じ場所へ置くため）
 import { globalStorageRoot } from "./globalStoragePath";
 import { logLine, useLogFile } from "../core/logger";
+import { verifiedState } from "../core/verifiedMemento";
 import { SERVER_NAME } from "../mcp/version";
 import { cancelItem } from "../views/dialogs";
 import { notifyDone } from "../views/notify";
@@ -370,7 +371,16 @@ async function resolveRegistration(
   if (!selected || selected.length === 0) return undefined;
 
   const chosen = fromUri(selected[0]);
-  await context.globalState.update(KEY_BUNDLE_PATH, chosen);
+  // **確かめて書く**（設計書5.7.8。消えると次も同じ場所を選ばされる）。
+  // 選んだ束はこの回の登録に使えるので、覚えられなくても進める
+  await verifiedState(context.globalState)
+    .update(KEY_BUNDLE_PATH, chosen)
+    .catch((error: unknown) =>
+      logLine(
+        "MCPサーバーの束の場所を覚えられませんでした：" +
+          (error instanceof Error ? error.message : String(error))
+      )
+    );
   return registrationFor(chosen);
 }
 

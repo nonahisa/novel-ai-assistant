@@ -1,5 +1,6 @@
 import type * as vscode from "vscode";
 import type { AuthorReaderProfile } from "./authorReaderType";
+import { verifiedState } from "./verifiedMemento";
 
 /**
  * 作者自身の読者タイプの保存先（設計書6.101）。
@@ -31,10 +32,18 @@ export class AuthorReaderTypeStore {
   }
 
   async set(profile: AuthorReaderProfile): Promise<void> {
-    await this.state.update(AUTHOR_READER_TYPE_KEY, profile);
+    await this.write(profile);
   }
 
   async clear(): Promise<void> {
-    await this.state.update(AUTHOR_READER_TYPE_KEY, undefined);
+    await this.write(undefined);
+  }
+
+  /**
+   * 書く**唯一の口**（設計書5.7.8）。**確かめて書く**——消えると作者が
+   * 9問に答えた結果が黙って無くなる
+   */
+  private async write(profile: AuthorReaderProfile | undefined): Promise<void> {
+    await verifiedState(this.state).update(AUTHOR_READER_TYPE_KEY, profile);
   }
 }

@@ -1,7 +1,10 @@
+// ログの書き先：作品が定まらない——訊いたかの印は作品ごとではなく環境ごとに1つ
 import * as vscode from "vscode";
 import { shouldOfferSeriesLink } from "../core/seriesLink";
 import { readWorkConfig } from "../core/workRegistry";
 import type { WorkEntry } from "../models/types";
+import { logLine } from "../core/logger";
+import { verifiedState } from "../core/verifiedMemento";
 
 /**
  * 書庫に作品が並んだとき、1度だけ、シリーズとしてつなぐかを訊く（6.95.4）。
@@ -87,7 +90,16 @@ export async function offerSeriesLinkInVsCode(
     addedHasSeries,
     wasOffered: () => context.globalState.get<boolean>(SERIES_OFFERED_KEY, false),
     markOffered: async () => {
-      await context.globalState.update(SERIES_OFFERED_KEY, true);
+      // **確かめて書く**（設計書5.7.8。消えると同じ問いがまた出る）。
+      // 残せなくても問いは出す——覚えられないことで作者の操作を止めない
+      await verifiedState(context.globalState)
+        .update(SERIES_OFFERED_KEY, true)
+        .catch((error: unknown) =>
+          logLine(
+            "シリーズ連結を訊いたことを覚えられませんでした：" +
+              (error instanceof Error ? error.message : String(error))
+          )
+        );
     },
     notify: async (message, action) =>
       vscode.window.showInformationMessage(message, action),

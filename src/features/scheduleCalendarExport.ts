@@ -14,6 +14,7 @@ import {
 import { atomicWriteFile } from "../core/atomicWrite";
 import { isWebRuntime } from "../core/runtime";
 import { logFailure, useLogFile } from "../core/logger";
+import { verifiedState } from "../core/verifiedMemento";
 import { globalStorageRoot } from "./globalStoragePath";
 import { goalsContestOf } from "./scheduleData";
 
@@ -104,7 +105,15 @@ export async function exportScheduleIcs(
   await vscode.workspace.fs.createDirectory(paths.toUri(paths.dirname(target)));
   // 書き出した .ics は作者のデータではなく、いつでも作り直せる。上書きの経路で書く
   await atomicWriteFile(target, new TextEncoder().encode(buildIcs(milestones, now)));
-  await context.globalState.update(LAST_ICS_KEY, target);
+  // **確かめて書く**（設計書5.7.8。消えると次の書き出しで場所を選び直すことになる）。
+  // 書き出しは済んでいるので、覚えられなくても知らせは出す
+  await verifiedState(context.globalState)
+    .update(LAST_ICS_KEY, target)
+    .catch((error: unknown) =>
+      logFailure("スケジュール：書き出した場所を覚えられなかった", {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    );
 
   const reveal = "フォルダーを開く";
   const answer = await vscode.window.showInformationMessage(

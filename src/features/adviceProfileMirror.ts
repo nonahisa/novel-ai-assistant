@@ -34,6 +34,7 @@ import {
   type WriterMirrorFile,
 } from "../core/writerProfileMirror";
 import { describeWriterStyleChange } from "../core/writerStyle";
+import { verifiedState } from "../core/verifiedMemento";
 
 /**
  * 助言方針の控えを、拡張機能の保管庫へ書き出す／取り込む
@@ -72,6 +73,22 @@ type MirrorStamps = Record<string, string>;
 
 function stampsOf(context: vscode.ExtensionContext): MirrorStamps {
   return { ...(context.globalState.get<MirrorStamps>(KEY_MIRROR_AT) ?? {}) };
+}
+
+/**
+ * 時刻の印を書く**唯一の口**（設計書5.7.8）。**確かめて書く**——印が消えると、
+ * 次の起動で古い控えを「新しい」と見て、作者の手元の方針を押し流しうる。
+ * 鍵ごとに重ねる形（`patch`）にして、別の窓が同じころに覚えた鍵を消さない。
+ */
+async function saveStamps(
+  context: vscode.ExtensionContext,
+  stamps: MirrorStamps
+): Promise<void> {
+  await verifiedState(context.globalState).patch<MirrorStamps>(
+    KEY_MIRROR_AT,
+    {},
+    (current) => ({ ...(current ?? {}), ...stamps })
+  );
 }
 
 function mirrorFilePath(context: vscode.ExtensionContext): string {
@@ -137,7 +154,7 @@ export async function importAdviceProfileMirror(
   }
 
   if (!changed) return;
-  await context.globalState.update(KEY_MIRROR_AT, stamps);
+  await saveStamps(context, stamps);
   // **黙って取り込まない。** 助言の調子が変わった理由が、ここにしか無い
   logLine(
     "相談: 外部AI経由の相談で動いた助言方針の推定を取り込みました" +
@@ -237,7 +254,7 @@ export async function refreshAdviceProfileMirror(
     );
     // **上書きの経路（指定なし）でよい。** 作者のデータではないので退避は不要
     await atomicWriteFile(target, new TextEncoder().encode(text));
-    await context.globalState.update(KEY_MIRROR_AT, stamps);
+    await saveStamps(context, stamps);
   } catch (error) {
     // **黙って失敗しない。** 効かない理由が、ここにしか残らない
     logLine(
@@ -265,6 +282,14 @@ export async function refreshAdviceProfileMirror(
 
 /** 最後に読み書きした執筆スタイルの控えの時刻 */
 const KEY_WRITER_MIRROR_AT = "novelai.writerProfileMirrorAt";
+
+/** 執筆スタイルの印を書く**唯一の口**。確かめて書く理由は助言方針の印と同じ */
+async function saveWriterStamp(
+  context: vscode.ExtensionContext,
+  updatedAt: string | undefined
+): Promise<void> {
+  await verifiedState(context.globalState).update(KEY_WRITER_MIRROR_AT, updatedAt);
+}
 
 function writerMirrorPath(context: vscode.ExtensionContext): string {
   return path.join(globalStorageRoot(context), WRITER_MIRROR_FILE);
@@ -304,7 +329,7 @@ export async function importWriterProfileMirror(
   // **`update` で書く（`set` ではない）。** `set` は診断日を今日にする
   // ——外から来た推定の反映で「作者が答えた日」を動かさない
   await profiles.update(file.profile);
-  await context.globalState.update(KEY_WRITER_MIRROR_AT, file.updatedAt);
+  await saveWriterStamp(context, file.updatedAt);
 
   logLine(
     "相談: 外部AI経由の相談で動いた執筆スタイル（直す時期）の読み取りを取り込みました"
@@ -333,7 +358,7 @@ export async function refreshWriterProfileMirror(
     if (!profile) {
       if (before) {
         await vscode.workspace.fs.delete(path.toUri(target));
-        await context.globalState.update(KEY_WRITER_MIRROR_AT, undefined);
+        await saveWriterStamp(context, undefined);
       }
       return;
     }
@@ -344,7 +369,7 @@ export async function refreshWriterProfileMirror(
         writerProfileFingerprint(profile);
     if (same) {
       // 1バイトも触らない。時刻だけ覚え直す（取り込みの比べに使う）
-      await context.globalState.update(KEY_WRITER_MIRROR_AT, before.updatedAt);
+      await saveWriterStamp(context, before.updatedAt);
       return;
     }
 
@@ -364,7 +389,7 @@ export async function refreshWriterProfileMirror(
       target,
       new TextEncoder().encode(serializeWriterMirror(next))
     );
-    await context.globalState.update(KEY_WRITER_MIRROR_AT, next.updatedAt);
+    await saveWriterStamp(context, next.updatedAt);
   } catch (error) {
     // **黙って失敗しない。** 効かない理由が、ここにしか残らない
     logLine(

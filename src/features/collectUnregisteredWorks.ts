@@ -6,6 +6,7 @@ import type { WorkRegistry } from "../core/workRegistry";
 import { isEditorMode } from "../core/actorContext";
 import { canRunProcesses } from "../core/runtime";
 import { logFailure } from "../core/logger";
+import { verifiedState } from "../core/verifiedMemento";
 import {
   describeUnregistered,
   findUnregisteredWorks,
@@ -186,8 +187,9 @@ export async function noticeUnregisteredWorks(
   const notified = context.globalState.get<string[]>(NOTIFIED_KEY, []);
   const fresh = unnotifiedFolders(found, notified);
 
-  // 覚えは、見つかっている分だけに詰め直す（登録済みになったものは忘れる）
-  await context.globalState.update(NOTIFIED_KEY, foldNotified(found));
+  // 覚えは、見つかっている分だけに詰め直す（登録済みになったものは忘れる）。
+  // **確かめて書く**（消えると、起動のたびに同じ知らせが出る。設計書5.7.8）
+  await verifiedState(context.globalState).update(NOTIFIED_KEY, foldNotified(found));
   if (fresh.length === 0) return;
 
   const action = await vscode.window.showInformationMessage(

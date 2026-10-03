@@ -25,6 +25,7 @@ import { modelPickDetail } from "../core/tuningStats";
 import { EXPERTS_BADGE } from "../core/modelExperts";
 import { notifyDone } from "../views/notify";
 import { manualModelEntryPrompt } from "./hiddenModels";
+import { verifiedState } from "../core/verifiedMemento";
 
 const KEY_PROVIDER = "novelai.ai.provider";
 const KEY_MODEL = "novelai.ai.model";
@@ -206,14 +207,27 @@ export class AIRegistry {
   }
 
   async select(providerId: ProviderId, model: string): Promise<void> {
-    await this.context.globalState.update(KEY_PROVIDER, providerId);
-    await this.context.globalState.update(KEY_MODEL, model);
-    this.selectionEmitter.fire();
+    await this.writeSelection(providerId, model);
   }
 
   async clear(): Promise<void> {
-    await this.context.globalState.update(KEY_PROVIDER, undefined);
-    await this.context.globalState.update(KEY_MODEL, undefined);
+    await this.writeSelection(undefined, undefined);
+  }
+
+  /**
+   * 既定のAIとモデルを書く**唯一の口**（設計書5.7.8）。
+   *
+   * **書いたら読み返して確かめる**（`verifiedState`）。globalState は先に書いた
+   * 別の鍵の送り返しで手元が丸ごと差し替わることがあり、確かめないと
+   * 作者の選んだAIが黙って初期へ戻る（0.97.4。登録簿と同じ形）。
+   */
+  private async writeSelection(
+    providerId: ProviderId | undefined,
+    model: string | undefined
+  ): Promise<void> {
+    const state = verifiedState(this.context.globalState);
+    await state.update(KEY_PROVIDER, providerId);
+    await state.update(KEY_MODEL, model);
     this.selectionEmitter.fire();
   }
 
@@ -231,19 +245,36 @@ export class AIRegistry {
     providerId: ProviderId,
     model: string
   ): Promise<void> {
-    const next: FeatureAssignments = {
-      ...this.assignments(),
+    await this.patchAssignments((current) => ({
+      ...current,
       [feature]: { provider: providerId, model },
-    };
-    await this.context.globalState.update(KEY_FEATURE_ASSIGNMENTS, next);
-    // 開きっぱなしのパネルのエンジン表示を追従させる（選択の変更と同じ扱い）
-    this.selectionEmitter.fire();
+    }));
   }
 
   async unassign(feature: AssignableFeature): Promise<void> {
-    const next = { ...this.assignments() };
-    delete next[feature];
-    await this.context.globalState.update(KEY_FEATURE_ASSIGNMENTS, next);
+    await this.patchAssignments((current) => {
+      const next = { ...current };
+      delete next[feature];
+      return next;
+    });
+  }
+
+  /**
+   * 機能ごとの割り当てを書く**唯一の口**。
+   *
+   * **その機能の分だけを当てる**（`patch`）。丸ごと書き戻すと、別の窓が
+   * 同じころに割り当てた別の機能を古い写しで消す。書いたら読み返して確かめる
+   * のは既定のAIと同じ理由（0.97.4）。
+   */
+  private async patchAssignments(
+    change: (current: FeatureAssignments) => FeatureAssignments
+  ): Promise<void> {
+    await verifiedState(this.context.globalState).patch<FeatureAssignments>(
+      KEY_FEATURE_ASSIGNMENTS,
+      {},
+      (current) => change(current ?? {})
+    );
+    // 開きっぱなしのパネルのエンジン表示を追従させる（選択の変更と同じ扱い）
     this.selectionEmitter.fire();
   }
 

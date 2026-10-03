@@ -1,5 +1,6 @@
 import type * as vscode from "vscode";
 import { effectiveAdviceProfile, type AdviceProfile } from "./advicePolicy";
+import { verifiedState } from "./verifiedMemento";
 
 /**
  * 助言方針の保存先（設計書6.86）。
@@ -55,8 +56,7 @@ export class AdvicePolicyStore {
   }
 
   async setDefault(profile: AdviceProfile): Promise<void> {
-    await this.state.update(ADVICE_POLICY_DEFAULT_KEY, profile);
-    this.onChange?.();
+    await this.write(ADVICE_POLICY_DEFAULT_KEY, profile);
   }
 
   /**
@@ -86,12 +86,20 @@ export class AdvicePolicyStore {
   }
 
   async set(workId: string, profile: AdviceProfile): Promise<void> {
-    await this.state.update(advicePolicyKey(workId), profile);
-    this.onChange?.();
+    await this.write(advicePolicyKey(workId), profile);
   }
 
   async clear(workId: string): Promise<void> {
-    await this.state.update(advicePolicyKey(workId), undefined);
+    await this.write(advicePolicyKey(workId), undefined);
+  }
+
+  /**
+   * 方針を書く**唯一の口**（設計書5.7.8）。**確かめて書く**——globalState は
+   * 先に書いた別の鍵の送り返しで手元が丸ごと差し替わることがあり、作者が
+   * 9問に答えた方針が黙って消える
+   */
+  private async write(key: string, profile: AdviceProfile | undefined): Promise<void> {
+    await verifiedState(this.state).update(key, profile);
     this.onChange?.();
   }
 }

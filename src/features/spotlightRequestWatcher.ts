@@ -3,6 +3,7 @@ import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "../core/workRegistry";
 import { logStep, useLogFile } from "../core/logger";
+import { verifiedState } from "../core/verifiedMemento";
 import {
   SPOTLIGHT_REQUEST_DIRECTORY,
   SPOTLIGHT_REQUEST_FILE,
@@ -172,12 +173,15 @@ export class SpotlightRequestWatcher {
     return handled?.[work.folderPath] ?? "";
   }
 
+  /**
+   * **確かめて書き、その作品の分だけを当てる**（設計書5.7.8）。消えると、
+   * 次に開いたときに古い依頼でもう一度光る
+   */
   private async remember(work: WorkEntry, at: string): Promise<void> {
-    const handled =
-      this.context.globalState.get<Record<string, string>>(HANDLED_KEY) ?? {};
-    await this.context.globalState.update(HANDLED_KEY, {
-      ...handled,
-      [work.folderPath]: at,
-    });
+    await verifiedState(this.context.globalState).patch<Record<string, string>>(
+      HANDLED_KEY,
+      {},
+      (handled) => ({ ...(handled ?? {}), [work.folderPath]: at })
+    );
   }
 }

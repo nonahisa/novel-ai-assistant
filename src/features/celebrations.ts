@@ -25,6 +25,7 @@ import {
 } from "../core/celebrationStreaks";
 import { AchievementStore } from "../core/achievementStore";
 import { logFailure, useLogFile } from "../core/logger";
+import { verifiedState } from "../core/verifiedMemento";
 import {
   mergeDailyStats,
   monthKey,
@@ -439,7 +440,8 @@ export function createCelebrationService(options: {
   settings: () => Omit<CelebrationSettings, "enabled">;
 }): CelebrationService {
   return new CelebrationService({
-    memento: options.globalState,
+    // 確かめて書く（設計書5.7.8）。消えると祝った達成をもう一度祝い、連続が途切れる
+    memento: verifiedState(options.globalState),
     works: options.works,
     loadStats: (work) => new WritingStatsStore(work, options.deviceId).loadAll(),
     loadWorkLog: (work) => new AchievementStore(work).load(),

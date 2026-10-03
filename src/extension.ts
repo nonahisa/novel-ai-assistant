@@ -198,6 +198,7 @@ import {
   useLogFile,
 } from "./core/logger";
 import { probeGeneration } from "./ai/generationProbe";
+import { setVerifiedStateReporter, verifiedState } from "./core/verifiedMemento";
 import {
   SettingsWatcher,
   notifyExternalChange,
@@ -738,6 +739,41 @@ export async function activate(
    * にある（手元とブラウザで扱いが逆になる。生成文書の置き場と同じ判定）。
    */
   const fallbackLogRoot = storageRootFrom(context.globalStorageUri);
+
+  /*
+    globalState の書き込みを確かめる包み（`core/verifiedMemento.ts`。設計書5.7.8）の
+    当て直し・失敗をログへ流す口。**書き込みより先につなぐ**——起動の途中の
+    書き込み（「はじめまして」の印など）こそ送り返しと重なりやすい。
+  */
+  setVerifiedStateReporter({
+    onRepaired: (key) =>
+      logFailure("保管庫の書き込みが遅れて消えたので当て直した", {
+        鍵: key,
+        詳細: "VS Code の globalState で、先の書き込みの送り返しが後から届いた",
+      }),
+    onFailed: (key, error) =>
+      logFailure("保管庫の書き込みが遅れて消え、当て直せなかった", {
+        鍵: key,
+        詳細: error instanceof Error ? error.message : String(error),
+      }),
+    onSkipped: (key) =>
+      logStep(`保管庫の値（${key}）がほかの所で変わっていたので、当て直さなかった`),
+  });
+  /**
+   * 待たずに覚える所（メニューの開閉・選んだ作品）。確かめて書き、
+   * **残せなかったらログに残す**——投げ捨てにすると、確かめの失敗が
+   * 誰にも受け取られない拒否になる。
+   */
+  const rememberInBackground = (key: string, value: unknown): void => {
+    verifiedState(context.globalState)
+      .update(key, value)
+      .catch((error: unknown) =>
+        logFailure("保管庫へ覚えられなかった", {
+          鍵: key,
+          詳細: error instanceof Error ? error.message : String(error),
+        })
+      );
+  };
 
   /**
    * 出した知らせの記録（MCP の notices.recent。作者の承認 2026-09-24）。
@@ -1419,7 +1455,8 @@ export async function activate(
 
   // 端末ID。「どの環境で書いたか」を区別するのに使う（設計書5.5.2）。
   // Gitへは同期しない。全環境が同じIDを名乗ると区別できなくなる
-  const deviceId = await resolveDeviceId(context.globalState);
+  // **確かめて書く**（消えると次の起動で別の端末IDが作られ、執筆量の記録が分かれる）
+  const deviceId = await resolveDeviceId(verifiedState(context.globalState));
 
   // 執筆量の記録（設計書6.3）。走査は作品一覧の結果を借りるので、
   // 保存のたびにファイルを2度読むことはない
@@ -1433,7 +1470,7 @@ export async function activate(
   // 目標の達成を祝う（設計書6.3.8）。判定は保存を記録し終えたときだけ。
   // 祝うのは執筆統計（風船・花火）と原稿エディタの下段（一言）の2か所
   const celebrations = createCelebrationService({
-    globalState: context.globalState,
+    globalState: verifiedState(context.globalState),
     works: () => registry.list(),
     deviceId,
     settings: () => ({
@@ -1754,20 +1791,17 @@ export async function activate(
     // 読み上げの声（設計書6.42）。**端末ごと**に覚える
     readAloudVoice: () => context.globalState.get<string>(READ_ALOUD_VOICE_KEY),
     saveReadAloudVoice: async (name) => {
-      await context.globalState.update(READ_ALOUD_VOICE_KEY, name);
+      await verifiedState(context.globalState).update(READ_ALOUD_VOICE_KEY, name);
     },
     markdownDeclined: () =>
       context.globalState.get<string[]>(MARKDOWN_DECLINED_KEY, []),
     declineMarkdown: async (filePath) => {
-      const declined = context.globalState.get<string[]>(
+      // 「無ければ足す」で当てる（別の窓が同じころに断った分を消さない）
+      await verifiedState(context.globalState).patch<string[]>(
         MARKDOWN_DECLINED_KEY,
-        []
+        [],
+        (declined) => (declined.includes(filePath) ? declined : [...declined, filePath])
       );
-      if (declined.includes(filePath)) return;
-      await context.globalState.update(MARKDOWN_DECLINED_KEY, [
-        ...declined,
-        filePath,
-      ]);
     },
   } satisfies ManuscriptEditorDeps;
 
@@ -1821,7 +1855,7 @@ export async function activate(
     registry,
     monitor: gitSync,
     // 「送らずに閉じた」印は作品をまたいで1つ。作品設定ではなく globalState
-    storage: context.globalState,
+    storage: verifiedState(context.globalState),
     pauseSettingsWatch: () => settingsWatcher.pause(),
     batchFileNotices: gitSync.beginBatchedFileNotices?.bind(gitSync),
   });
@@ -2008,7 +2042,7 @@ export async function activate(
     registry,
     {
       get: () => context.globalState.get<string[]>(ACTION_GROUPS_KEY, []),
-      set: (groups) => void context.globalState.update(ACTION_GROUPS_KEY, groups),
+      set: (groups) => rememberInBackground(ACTION_GROUPS_KEY, groups),
     },
     (counter) => actionDecorations.countOf(counter),
     // 登録した作品の種類（設計書6.109.7）。走査が読み終えた分だけを借りる
@@ -2054,11 +2088,11 @@ export async function activate(
     registry,
     {
       get: () => context.globalState.get<string>(STEP_WORK_KEY),
-      set: (id) => void context.globalState.update(STEP_WORK_KEY, id),
+      set: (id) => rememberInBackground(STEP_WORK_KEY, id),
     },
     {
       get: () => context.globalState.get<string[]>(STEP_GROUPS_KEY, []),
-      set: (groups) => void context.globalState.update(STEP_GROUPS_KEY, groups),
+      set: (groups) => rememberInBackground(STEP_GROUPS_KEY, groups),
     },
     // **選んだ作品だけを数える**（設計書6.29）。詳細メニューの合算とは別
     (counter, workId) => actionDecorations.countOfWork(workId, counter)
@@ -2429,7 +2463,7 @@ export async function activate(
   // **方針が変わったら、そのつど控えを書き直す**（設計書6.86.7）。
   // 控えは `globalStorage` の下に置き、MCP サーバー（VS Code の外）が読む——
   // 書き出さないと、**外部AI経由の相談だけタイプの方針も調子も効かない**
-  const advicePolicies = new AdvicePolicyStore(context.globalState, () => {
+  const advicePolicies = new AdvicePolicyStore(verifiedState(context.globalState), () => {
     void refreshAdviceProfileMirror(
       context,
       advicePolicies,
@@ -2440,7 +2474,7 @@ export async function activate(
   // 作品を変えても大きくは変わらない癖なので、作品ごとに聞き直さない
   // **答えが変わったら控えを書き直す**（2026-09-23）。外部AI経由の相談にも
   // 段取りと直す時期を自動で乗せるため（助言方針の控えと同じ置き場・同じ道）
-  const writerProfiles = new WriterProfileStore(context.globalState, () => {
+  const writerProfiles = new WriterProfileStore(verifiedState(context.globalState), () => {
     void refreshWriterProfileMirror(context, writerProfiles).catch(
       () => undefined
     );
@@ -2448,14 +2482,14 @@ export async function activate(
   // 作者自身の読者タイプ（設計書6.101）。**作品ではなく作者ごとに1つ**——
   // 「この作品は誰に届けるか」（6.91、作品ごと）とは別物で、
   // こちらは「あなた自身が読者として何を求めるか」である
-  const authorReaderTypes = new AuthorReaderTypeStore(context.globalState);
+  const authorReaderTypes = new AuthorReaderTypeStore(verifiedState(context.globalState));
 
   // 執筆スタイル（6.90）も相談へ渡す。渡すのは段取り（S1）と直す時期（S2）
   // だけで、資料の置き場・出し先は渡さない（作者の裁定、2026-09-14）。
   // ターゲット読者（6.91）は作品ごとのファイルにあるので、パネルが自分で読む
   // バックアップを選ぶ画面が、前に選んだフォルダーを覚えておく先
   // （相談パネルとメニューの取り込みで共有する。`backupPickFolder.ts`）
-  initBackupPickFolder(context.globalState);
+  initBackupPickFolder(verifiedState(context.globalState));
   const workChatPanel = new WorkChatPanel(registry, aiRegistry, {
     run: async (work, kind, filePath) => {
       // 既にコマンドとして登録されているものへ渡す。
@@ -2525,7 +2559,7 @@ export async function activate(
   // 登録から外れた作品かどうかは、パネルが使うたびに確かめる
   workChatPanel.setSelectedWorkMemory({
     get: () => context.globalState.get<string>(CHAT_WORK_KEY),
-    set: (id) => void context.globalState.update(CHAT_WORK_KEY, id),
+    set: (id) => rememberInBackground(CHAT_WORK_KEY, id),
   });
   // 相談パネルへ落とされたバックアップが、どの作品にも当たらなかったとき
   // （B13）。**メニューの「バックアップから取り込む」と同じ道へ渡す**——
@@ -3410,7 +3444,7 @@ export async function activate(
     呼び出し（下の読者の反応の受け口と同じ URI の受け口）の両方から使う。
   */
   const contestDeps: ContestImportDeps = {
-    memory: context.globalState,
+    memory: verifiedState(context.globalState),
     listWorks: () => registry.list(),
     afterSave: (work) => refreshWritingStatsPanel(work, deviceId),
   };
@@ -4486,7 +4520,7 @@ export async function activate(
         });
         if (!work) return;
         // 保管庫を渡すと、作者が外した語を覚えて次からも外したままにする
-        await exportImeDictionary(work, context.globalState);
+        await exportImeDictionary(work, verifiedState(context.globalState));
         // 書き出したので「辞書が古い」の印を消す。
         // 残ったままだと、押しても消えない印を作者が気にし続けることになる
         refreshActionBadges();
@@ -5265,7 +5299,7 @@ export async function activate(
           return CHECK_CANCELLED;
         }
         await runProofreadingSuite(work, {
-          memento: context.globalState,
+          memento: verifiedState(context.globalState),
           // 内訳は提案パネルの残り件数から数える（設計書6.37.3）。
           // 各機能の戻り値を覗くと、機能ごとに違う数え方を写すことになる
           remainingIn: (category) => proposalPanel.remainingIn(work, category),
@@ -5413,7 +5447,7 @@ export async function activate(
   ): Promise<void> => {
     // **待ちは作品ごとに1つしか持てない。** 黙って上書きすると、前の
     // 付け替えの資料が旧名のまま取り残され、対応表も消えて直しようがなくなる
-    const waiting = loadPendingRename(context.workspaceState, work.id);
+    const waiting = loadPendingRename(verifiedState(context.workspaceState), work.id);
     if (waiting) {
       /*
         **資料への反映へ、ここから進めるようにする**（2026-09-24 B10①）。
@@ -5462,7 +5496,7 @@ export async function activate(
     if (!result) return;
 
     // 資料を直すのは本文の適用が終わってから。対応表をここで預かる
-    await savePendingRename(context.workspaceState, work.id, result.pending);
+    await savePendingRename(verifiedState(context.workspaceState), work.id, result.pending);
 
     if (result.issues.length > 0) {
       proposalPanel.showResults(work, result.issues, "名前の付け替え");
@@ -5502,7 +5536,7 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
 
-        const pending = loadPendingRename(context.workspaceState, work.id);
+        const pending = loadPendingRename(verifiedState(context.workspaceState), work.id);
         if (!pending) {
           vscode.window.showInformationMessage(
             "待っている付け替えがありません。先に「人物名変更」を実行してください。"
@@ -5541,7 +5575,7 @@ export async function activate(
         // 済んだ資料は二度目に当たらない（旧い名前がもう無い）ので、
         // 直してからもう一度実行すれば、残りだけが直る
         if (result.failures.length === 0) {
-          await clearPendingRename(context.workspaceState, work.id);
+          await clearPendingRename(verifiedState(context.workspaceState), work.id);
         }
 
         highlighter.invalidate();
@@ -6877,7 +6911,7 @@ export async function activate(
     ...registerReaderStatsHelperLink(
       new ReaderStatsHelperLink({
         listWorks: () => registry.list(),
-        memory: context.globalState,
+        memory: verifiedState(context.globalState),
         afterImport: (work) => refreshWritingStatsPanel(work, deviceId),
         // 公募の一覧（ヘルパー 0.12.0）。URI の受け口は1つしか持てないので、ここで渡す
         importContests: () => importContestsFromClipboard(contestDeps, "uri"),

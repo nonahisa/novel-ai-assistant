@@ -1,6 +1,9 @@
+// ログの書き先：作品が定まらない——はじめての案内は作品を登録する前に出る、環境ごとの声かけ
 import * as vscode from "vscode";
 import { AIRegistry, runSetupWizard } from "../ai/registry";
 import { CLAUDE_CODE_EXTENSION_ID } from "../core/claudeCodeRegistration";
+import { logLine } from "../core/logger";
+import { verifiedState } from "../core/verifiedMemento";
 
 /**
  * はじめて開いたときに、使うAIを選んでもらう（作者の指示、2026-08-19）。
@@ -132,7 +135,19 @@ export function offerFirstRunSetupInVsCode(
     },
     wasShown: () => context.globalState.get<boolean>(SHOWN_KEY, false),
     markShown: async () => {
-      await context.globalState.update(SHOWN_KEY, true);
+      /*
+        **確かめて書く**（設計書5.7.8）。この印は起動の直後に書かれ、ほかの鍵の
+        送り返しと重なりやすい。消えると、次の起動でまた同じ声かけが出る。
+        残せなくても声かけは続ける（呼び手は待たないので、投げると誰も受けない）
+      */
+      await verifiedState(context.globalState)
+        .update(SHOWN_KEY, true)
+        .catch((error: unknown) =>
+          logLine(
+            "はじめての案内を出したことを覚えられませんでした：" +
+              (error instanceof Error ? error.message : String(error))
+          )
+        );
     },
     runWizard: () => runSetupWizard(registry),
     notify: async (message, ...actions) =>

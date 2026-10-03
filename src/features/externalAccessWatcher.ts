@@ -13,6 +13,7 @@ import {
 import { askAboutKnock } from "./externalAccessPermission";
 import { ExternalAccessPermissionStore } from "../core/externalAccessPermissionStore";
 import { isToolAllowed } from "../core/externalAccessPermission";
+import { verifiedState } from "../core/verifiedMemento";
 
 /**
  * 外部AIのノックを見つけて、その場で作者に尋ねる（設計書6.87.14）。
@@ -167,9 +168,15 @@ export class ExternalAccessWatcher {
     return seen?.[work.folderPath] ?? "";
   }
 
+  /**
+   * **確かめて書き、その作品の分だけを当てる**（設計書5.7.8）。消えると、
+   * 一度答えたノックをもう一度尋ねることになる
+   */
   private async remember(work: WorkEntry, at: string): Promise<void> {
-    const seen =
-      this.context.globalState.get<Record<string, string>>(SEEN_KEY) ?? {};
-    await this.context.globalState.update(SEEN_KEY, { ...seen, [work.folderPath]: at });
+    await verifiedState(this.context.globalState).patch<Record<string, string>>(
+      SEEN_KEY,
+      {},
+      (seen) => ({ ...(seen ?? {}), [work.folderPath]: at })
+    );
   }
 }

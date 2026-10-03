@@ -110,19 +110,29 @@ export async function watchForLateLoss<T>(
   hooks: {
     onRepaired?: () => void;
     onFailed?: (error: unknown) => void;
+    /**
+     * 消えていたとき、当て直してよいか。false なら当て直さずに見張りをやめる
+     * （`onSkipped` を呼ぶ）。**別の窓が同じ鍵を書き換えたのを、こちらの古い
+     * 値で踏みつぶさない**ために使う（`VerifiedState` の「値を置く」書き込み）
+     */
+    shouldRepair?: (current: T) => boolean;
+    onSkipped?: () => void;
     delays?: readonly number[];
     wait?: (ms: number) => Promise<void>;
   } = {}
 ): Promise<void> {
   const delays = hooks.delays ?? LATE_CHECK_DELAYS_MS;
-  const wait =
-    hooks.wait ??
-    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const wait = hooks.wait ?? defaultWait;
   let elapsed = 0;
   for (const at of delays) {
     await wait(Math.max(0, at - elapsed));
     elapsed = at;
-    if (intentHolds(memento.get<T>(key, defaultValue), change)) continue;
+    const current = memento.get<T>(key, defaultValue);
+    if (intentHolds(current, change)) continue;
+    if (hooks.shouldRepair && !hooks.shouldRepair(current)) {
+      hooks.onSkipped?.();
+      return;
+    }
     try {
       await updateVerified(memento, key, defaultValue, change);
       hooks.onRepaired?.();
@@ -135,4 +145,218 @@ export async function watchForLateLoss<T>(
 
 function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/**
+ * 見張りの既定の待ち方。**待ちのせいで VS Code（や試験）の終わりを
+ * 引き止めない**よう、Node では `unref` する（ブラウザでは数値が返るので何もしない）
+ */
+function defaultWait(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer: unknown = setTimeout(resolve, ms);
+    (timer as { unref?: () => void }).unref?.();
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* 守った保管庫（0.97.4）                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 包む元の保管庫。`vscode.Memento` も試験の作り物もそのまま渡せるよう、
+ * 形をゆるく受ける（`get` が既定値を見ない作り物もあるので、読むときに補う）
+ */
+export interface InnerMemento {
+  get(key: string, defaultValue?: unknown): unknown;
+  update(key: string, value: unknown): PromiseLike<void>;
+  keys?(): readonly string[];
+}
+
+/** 当て直した・当て直せなかった・見送ったを、拡張機能のログへ流す口 */
+export interface VerifiedStateReporter {
+  onRepaired?(key: string): void;
+  onFailed?(key: string, error: unknown): void;
+  /** 消えていたが、別の所で値が変わっていたので当て直さなかった */
+  onSkipped?(key: string): void;
+}
+
+let reporter: VerifiedStateReporter = {};
+
+/**
+ * ログへの口をつなぐ（拡張機能の起動時に1回）。`core` のこのファイルは
+ * `vscode` にもログにも依存させないので、外から差し込む。
+ */
+export function setVerifiedStateReporter(next: VerifiedStateReporter): void {
+  reporter = next;
+}
+
+export interface VerifiedStateOptions {
+  /** 書いたあと見に行く時機。試験では `[]` にして見張りを止める */
+  lateCheckDelays?: readonly number[];
+  wait?: (ms: number) => Promise<void>;
+}
+
+/** 見張りの期間にある書き込み1つ */
+interface RecentChange {
+  change: (current: unknown) => unknown;
+  /** 「値を置く」書き込みか（`update`）、「足す・外す」書き込みか（`patch`） */
+  kind: "set" | "patch";
+  /** 書く直前の値。値を置く書き込みで、別の窓の変更と見分けるのに使う */
+  before: unknown;
+  until: number;
+}
+
+/**
+ * globalState（と workspaceState）の**書き込みを必ず確かめる**包み（設計書5.7.8）。
+ *
+ * `vscode.Memento` と同じ形（`get`／`keys`／`update`）を持つので、
+ * 保管庫を受け取る部品（`AdvicePolicyStore` など）へそのまま渡せる。
+ *
+ * - `update(鍵, 値)`：**値を置く**。書いたら読み返し、入っていなければ置き直す
+ *   （`updateVerified`）。そのあと少しのあいだ見張り（`watchForLateLoss`）、
+ *   遅れて消えていたら置き直す。ただし**書く前の値に戻っているときだけ**——
+ *   別の窓が違う値を置いたのなら、それは作者の新しい選択なので踏みつぶさない
+ * - `patch(鍵, 既定値, 変え方)`：**足す・外す**。変え方は何度当てても同じ形で
+ *   書く（`updateVerified` の約束）。別の窓が足した分は残るので、見張りは
+ *   書く前の値を問わず当て直す
+ *
+ * **見張りは、自分の書き込みだけでなく、期間にある同じ鍵の書き込みすべてを
+ * した順に当てる。** 自分の閉包だけを当てると、作者が2秒以内に選び直した値を
+ * 前の見張りが元へ戻してしまう（A→B と選んだのに A に戻る）。
+ *
+ * 何度書いても残らなければ `MementoWriteLostError` を投げる。
+ */
+export class VerifiedState {
+  private readonly recent = new Map<string, RecentChange[]>();
+
+  constructor(
+    private readonly inner: InnerMemento,
+    private readonly options: VerifiedStateOptions = {}
+  ) {}
+
+  /** 既定値を補って読む（`get` が既定値を見ない作り物にも合わせる） */
+  private readonly io: MementoLike = {
+    get: <T>(key: string, defaultValue: T): T => {
+      const value = this.inner.get(key, defaultValue);
+      return (value === undefined ? defaultValue : value) as T;
+    },
+    update: (key: string, value: unknown) => this.inner.update(key, value),
+  };
+
+  keys(): readonly string[] {
+    return this.inner.keys?.() ?? [];
+  }
+
+  get<T>(key: string): T | undefined;
+  get<T>(key: string, defaultValue: T): T;
+  get<T>(key: string, defaultValue?: T): T | undefined {
+    return this.io.get<T | undefined>(key, defaultValue);
+  }
+
+  /** 値を置く（消すなら `undefined`）。確かめてから返る */
+  async update(key: string, value: unknown): Promise<void> {
+    const copy = value === undefined ? undefined : cloneJson(value);
+    await this.write(key, undefined, () => copy, "set");
+  }
+
+  /**
+   * いまの値に変更を当てる。**変え方は何度当てても同じ結果になる形で書く**
+   * （無ければ足す・あれば外す）。書き直しのたびに、その時点の値で呼び直す
+   *
+   * @returns 書いて確かめた値
+   */
+  async patch<T>(
+    key: string,
+    defaultValue: T,
+    change: (current: T) => T
+  ): Promise<T> {
+    return (await this.write(
+      key,
+      defaultValue,
+      change as (current: unknown) => unknown,
+      "patch"
+    )) as T;
+  }
+
+  private async write(
+    key: string,
+    defaultValue: unknown,
+    change: (current: unknown) => unknown,
+    kind: RecentChange["kind"]
+  ): Promise<unknown> {
+    const delays = this.options.lateCheckDelays ?? LATE_CHECK_DELAYS_MS;
+    const now = Date.now();
+    const before = this.io.get<unknown>(key, defaultValue);
+    const span = delays.length > 0 ? Math.max(...delays) + 1000 : 0;
+    const list = (this.recent.get(key) ?? []).filter((r) => r.until > now);
+    list.push({ change, kind, before, until: now + span });
+    this.recent.set(key, list);
+
+    const written = await updateVerified<unknown>(this.io, key, defaultValue, change);
+    if (delays.length === 0) return written;
+
+    /* 待たない。見張りは書き込みの終わりを遅らせない */
+    void watchForLateLoss<unknown>(
+      this.io,
+      key,
+      defaultValue,
+      (current) => this.applyRecent(key, current),
+      {
+        delays,
+        wait: this.options.wait,
+        shouldRepair: (current) => this.mayRepair(key, current),
+        onRepaired: () => reporter.onRepaired?.(key),
+        onFailed: (error) => reporter.onFailed?.(key, error),
+        onSkipped: () => reporter.onSkipped?.(key),
+      }
+    );
+    return written;
+  }
+
+  /** 期間にある同じ鍵の書き込みを、した順に当てる */
+  private applyRecent(key: string, current: unknown): unknown {
+    const now = Date.now();
+    const list = (this.recent.get(key) ?? []).filter((r) => r.until > now);
+    if (list.length === 0) this.recent.delete(key);
+    else this.recent.set(key, list);
+    return list.reduce((value, r) => r.change(value), current);
+  }
+
+  /**
+   * 当て直してよいか。足す・外すだけなら、別の窓の分を残したまま当てられる。
+   * **値を置く書き込みが混ざっていれば、いまの値が「こちらが書く前の値」の
+   * どれかに戻っているときだけ**（送り返しで巻き戻った形）。それ以外の値は
+   * 別の窓で作者が選んだものなので、こちらの値で上書きしない
+   */
+  private mayRepair(key: string, current: unknown): boolean {
+    const list = this.recent.get(key) ?? [];
+    if (list.every((r) => r.kind === "patch")) return true;
+    return list.some((r) => sameJson(r.before, current));
+  }
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+/** 元の保管庫ごとに1つ。**同じ鍵の書き込みを同じ包みに集める**ため */
+const instances = new WeakMap<object, VerifiedState>();
+
+/**
+ * 保管庫を守った包みにして返す（同じ保管庫には同じ包み）。
+ *
+ * **globalState・workspaceState へ書くときは、必ずこれを通す**
+ * （`test/unit/cross/mementoWrites.test.ts` が見張る）。
+ * `options` が効くのは最初に包んだときだけ（試験が先に包んで見張りを止める）。
+ */
+export function verifiedState(
+  inner: InnerMemento | VerifiedState,
+  options?: VerifiedStateOptions
+): VerifiedState {
+  if (inner instanceof VerifiedState) return inner;
+  const known = instances.get(inner);
+  if (known) return known;
+  const created = new VerifiedState(inner, options);
+  instances.set(inner, created);
+  return created;
 }

@@ -5,6 +5,7 @@ import {
   type WriterReviseStreak,
   type WriterStyle,
 } from "./writerStyle";
+import { verifiedState } from "./verifiedMemento";
 
 /**
  * 作家タイプ診断の保存先（設計書6.90）。
@@ -103,7 +104,7 @@ export class WriterProfileStore {
       style,
       updatedAt: new Date().toISOString(),
     };
-    await this.state.update(WRITER_PROFILE_KEY, profile);
+    await this.writeProfile(profile);
     this.onChange?.();
   }
 
@@ -115,7 +116,7 @@ export class WriterProfileStore {
    * ——動かすと、相談のたびに「作者が答えた日」が今日へ書き換わる。
    */
   async update(profile: WriterProfile): Promise<void> {
-    await this.state.update(WRITER_PROFILE_KEY, profile);
+    await this.writeProfile(profile);
     this.onChange?.();
   }
 
@@ -131,8 +132,8 @@ export class WriterProfileStore {
    * 声かけそのものを止めたい人は、声かけの「出さない」を押せばよい。
    */
   async clear(): Promise<void> {
-    await this.state.update(WRITER_PROFILE_KEY, undefined);
-    await this.state.update(WRITER_WELCOME_KEY, undefined);
+    await this.writeProfile(undefined);
+    await this.writeWelcome(undefined);
     // 控えからも消す（残すと、消した答えで外部AIが助言し続ける）
     this.onChange?.();
   }
@@ -144,6 +145,20 @@ export class WriterProfileStore {
   }
 
   async setWelcomeState(next: WelcomeState): Promise<void> {
-    await this.state.update(WRITER_WELCOME_KEY, next);
+    await this.writeWelcome(next);
+  }
+
+  /*
+    鍵ごとの**唯一の書く口**（設計書5.7.8）。**確かめて書く**——globalState は
+    先に書いた別の鍵の送り返しで手元が丸ごと差し替わることがあり、
+    診断の答えが消えれば5問を聞き直し、声かけの返事が消えれば
+    「二度と出さない」と答えた声かけがまた出る。
+  */
+  private async writeProfile(profile: WriterProfile | undefined): Promise<void> {
+    await verifiedState(this.state).update(WRITER_PROFILE_KEY, profile);
+  }
+
+  private async writeWelcome(next: WelcomeState | undefined): Promise<void> {
+    await verifiedState(this.state).update(WRITER_WELCOME_KEY, next);
   }
 }
