@@ -1,5 +1,4 @@
 import * as vscode from "vscode";
-import { fromUri } from "../core/paths";
 import * as path from "../core/paths";
 import { WorkEntry } from "../models/types";
 import {
@@ -85,7 +84,8 @@ import { locateAppliedSuggestion } from "../core/proposalUndo";
 // 飛び先の行は、指摘が持つ行番号ではなく引用から決め直す（設計書6.11）
 import { relocateQuote } from "../core/relocateQuote";
 import { revealTextLocation } from "./revealLocation";
-import { columnForLocation, columnOfWebviewPanel } from "./editorColumn";
+import { columnOfWebviewPanel } from "./editorColumn";
+import { reloadOpenDocumentAfterWrite } from "./reloadAfterWrite";
 import { openInDefaultEditor } from "../views/openDocument";
 import { notifyDone } from "../views/notify";
 // バックアップとの違い（設計書6.99.7）。分類名は記録の見出しと同じものを使う
@@ -1434,13 +1434,15 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   /**
    * 適用のあと本文を読み直したら、フォーカスを提案パネルへ戻す。
    *
-   * 読み直し（`revertIfOpen`）は、本文の列を前へ出さないと効かない
+   * 読み直し（`reloadOpenDocumentAfterWrite`）は、本文の列を前へ出さないと効かない
    * （VS Code の読み直しは**前面の列**の本文に掛かる）。右の列の提案パネルから
    * 押したとき、そのままだと次の「適用」を押す前にパネルを押し直すことになる。
+   * 原稿エディターで開いているときは、素のエディターを開かずに原稿エディターの
+   * タブを前へ出して読み直す（0.97.7。`reloadAfterWrite.ts`）。
    */
   private async reloadAfterApply(filePath: string): Promise<void> {
     const focused = this.editorPanelFocused();
-    await revertIfOpen(filePath);
+    await reloadOpenDocumentAfterWrite(filePath, this.work);
     if (focused && this.editorPanel) {
       this.editorPanel.reveal(this.editorPanel.viewColumn, false);
     }
@@ -3585,85 +3587,6 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     item.status = status;
     item.statusDetail = detail;
     this.postItems();
-  }
-}
-
-/**
- * 書き込み後、そのファイルがエディターで開いていれば表示を最新化する。
- *
- * `writeTextFilePreservingFormat` は「元の原稿を回復先へ退避 → 新しい内容で
- * 作り直す」手順（同じパスに新しいファイルを作り直す）で書き込む。
- * 単純な上書きと違い、この退避→作り直しの動きはVS Codeの
- * 「外部でファイルが変わったら自動的に読み直す」仕組みで拾われないことがあり、
- * 保存は成功しているのにエディターの表示だけ古いまま、という事故になる
- * （実機で発覚、2026-08-12）。ここで明示的に読み直させる。
- *
- * 対象がエディターで開かれていなければ何もしない。開いていても
- * 未保存の変更があれば触れない（`writeTextFilePreservingFormat` 側の
- * `hasUnsavedChanges` チェックで、そもそもここまで来ないはずだが念のため）。
- *
- * `revert` はスクロール位置・カーソル位置を保たない（実機で確認）ため、
- * 読み直す前の選択位置を控えておき、読み直した後に復元する。
- *
- * スクロール位置そのものを「表示範囲の先頭行をrevealRangeで指定し直す」
- * 形で厳密に復元しようとしたが、`AtTop`が実際にどこへ置くかが実機で
- * 安定せず（範囲全体を渡しても・先頭1行だけに絞っても、復元後の表示が
- * 数行分ずれた）、当てずっぽうの補正を重ねるやり方は行き詰まった
- * （2026-08-13）。そこで方針を変え、「直前の表示範囲を厳密に再現する」
- * のではなく、「編集した行がその後も画面内に見えていればそれで良い」
- * という緩い目標に切り替えた。`InCenterIfOutsideViewport`
- * は対象がすでに画面内にあれば何もしない（＝適用直前の表示位置が
- * そのまま保たれる）ため、通常のケース（適用した行を見ながら「適用」を
- * 押した直後）では一切スクロールが発生しない。対象が画面外に出ていた
- * 場合だけ、その行が見えるように寄せる。
- *
- * **`revert` 前に取得した `TextEditor` を使い回さない。** `revert` の後は
- * 別のエディターインスタンスになっていることがあり、古い参照へ
- * `selection` を代入しても反映されなかった（実機で確認）。復元は
- * 読み直した後に改めて取得したエディターに対して行う。
- */
-async function revertIfOpen(filePath: string): Promise<void> {
-  const openDoc = vscode.workspace.textDocuments.find(
-    (doc) => sameFilePath(fromUri(doc.uri), filePath) && !doc.isDirty
-  );
-  if (!openDoc) return;
-  try {
-    /*
-      **本文が開いている列を名指しし、その列を前へ出す**（2026-09-23）。
-
-      読み直しの命令（`workbench.action.files.revert`）は**前面の列**の本文に
-      掛かる。提案パネルが下段にあったころは、フォーカスが下段にあっても
-      前面の列は本文の列のままだったので `preserveFocus: true` で足りた。
-      **右の列に開くようになると、前面の列が提案パネルの列になる**——
-      フォーカスを残したままでは読み直しが提案パネルへ掛かって空振りし、
-      列を名指ししないと本文が提案パネルの列へもう1枚開く。
-      フォーカスは呼ぶ側（`reloadAfterApply`）が提案パネルへ戻す。
-    */
-    const before = await vscode.window.showTextDocument(openDoc, {
-      viewColumn: columnForLocation(filePath).column,
-      preserveFocus: false,
-      preview: false,
-    });
-    const selection = before.selection;
-
-    await vscode.commands.executeCommand("workbench.action.files.revert");
-
-    const after =
-      vscode.window.visibleTextEditors.find(
-        (candidate) => candidate.document.uri.toString() === openDoc.uri.toString()
-      ) ??
-      (await vscode.window.showTextDocument(openDoc, {
-        // 読み直す前と同じ列へ（提案パネルの列へ開かない）
-        viewColumn: before.viewColumn,
-        preserveFocus: true,
-        preview: false,
-      }));
-
-    after.selection = selection;
-    after.revealRange(selection, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-  } catch {
-    // 表示の更新に失敗しても、書き込み自体は既に成功している。
-    // 作者は手動でタブを閉じて開き直せば最新内容を見られる
   }
 }
 

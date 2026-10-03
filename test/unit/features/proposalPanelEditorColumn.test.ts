@@ -308,7 +308,10 @@ describe("本文を書き換える一括ボタンを、通知の出る右下に�
 
 describe("適用のあとの読み直しは、本文の列で行う", () => {
   const source = readFileSync("src/features/proposalPanel.ts", "utf-8");
-  const revert = source.slice(source.indexOf("async function revertIfOpen("));
+  // 読み直しの本体は 0.97.7 で `reloadAfterWrite.ts` へ移した（原稿エディターの道を足すため）。
+  // ここで見るのは素のエディターの道。原稿エディターの道は reloadAfterWrite.test.ts
+  const reloadSource = readFileSync("src/features/reloadAfterWrite.ts", "utf-8");
+  const revert = reloadSource.slice(reloadSource.indexOf("async function revertTextEditor("));
 
   test("本文が開いている列を名指しし、その列を前へ出してから読み直す", () => {
     const beforeRevert = revert.slice(
@@ -324,7 +327,7 @@ describe("適用のあとの読み直しは、本文の列で行う", () => {
     const reload = source.slice(source.indexOf("private async reloadAfterApply("));
     expect(reload.slice(0, 400)).toMatch(/editorPanel\.reveal\(/);
     // 適用の4か所とも、この口を通る
-    expect(source.match(/await revertIfOpen\(/g)).toHaveLength(1);
+    expect(source.match(/await reloadOpenDocumentAfterWrite\(/g)).toHaveLength(1);
     expect(source.match(/this\.reloadAfterApply\(item\.filePath\)/g)).toHaveLength(4);
   });
 });

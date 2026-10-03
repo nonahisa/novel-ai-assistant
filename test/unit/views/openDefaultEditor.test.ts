@@ -37,7 +37,6 @@ import { FileSystemError, Uri, commands, workspace } from "../support/vscodeStub
  * 何も返さないので置き換えられない。**なぜ例外なのかを、ここに書いておく。**
  */
 const NEEDS_EDITOR = new Map([
-  ["src/features/proposalPanel.ts", "指摘の該当行へ飛び、そこを選択する"],
   ["src/features/ruby.ts", "選んだ範囲へルビを差し込む"],
   ["src/features/workChatPanel.ts", "相談で引用した箇所を選択する"],
 ]);
