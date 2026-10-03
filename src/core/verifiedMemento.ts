@@ -289,10 +289,23 @@ export class VerifiedState {
     const before = this.io.get<unknown>(key, defaultValue);
     const span = delays.length > 0 ? Math.max(...delays) + 1000 : 0;
     const list = (this.recent.get(key) ?? []).filter((r) => r.until > now);
-    list.push({ change, kind, before, until: now + span });
+    const record: RecentChange = { change, kind, before, until: now + span };
+    list.push(record);
     this.recent.set(key, list);
 
-    const written = await updateVerified<unknown>(this.io, key, defaultValue, change);
+    let written: unknown;
+    try {
+      written = await updateVerified<unknown>(this.io, key, defaultValue, change);
+    } catch (error) {
+      /*
+        **失敗と伝えた書き込みを、あとから黙って入れない。** 記録を残すと、
+        同じ鍵の次の書き込みの見張りがこれも当て直してしまう
+      */
+      const rest = (this.recent.get(key) ?? []).filter((r) => r !== record);
+      if (rest.length === 0) this.recent.delete(key);
+      else this.recent.set(key, rest);
+      throw error;
+    }
     if (delays.length === 0) return written;
 
     /* 待たない。見張りは書き込みの終わりを遅らせない */

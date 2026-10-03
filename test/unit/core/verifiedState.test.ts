@@ -128,6 +128,27 @@ describe("値を置く（update）", () => {
       MementoWriteLostError
     );
   });
+
+  test("失敗と伝えた書き込みを、次の書き込みの見張りが黙って入れない", async () => {
+    const memento = new EchoingMemento();
+    const late = gate();
+    const state = new VerifiedState(memento, { lateCheckDelays: [100], wait: late.wait });
+    memento.sabotage = { "novelai.other": 1 };
+    await expect(
+      state.patch<string[]>("novelai.list", [], (current) => [...current.filter((x) => x !== "失敗"), "失敗"])
+    ).rejects.toBeInstanceOf(MementoWriteLostError);
+    memento.sabotage = undefined;
+
+    await state.patch<string[]>("novelai.list", [], (current) =>
+      current.includes("成功") ? current : [...current, "成功"]
+    );
+    // 遅れて消えた形を作り、見張りに当て直させる
+    await memento.update("novelai.list", []);
+    late.open();
+    await settle();
+
+    expect(state.get("novelai.list")).toEqual(["成功"]);
+  });
 });
 
 describe("足す・外す（patch）", () => {

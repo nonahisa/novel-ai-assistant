@@ -7275,7 +7275,13 @@ export async function activate(
     );
     await offerWriterDiagnosis(writerDiagnosisDeps());
     await offerFirstRunSetupInVsCode(context, aiRegistry);
-  })();
+  })().catch((error: unknown) =>
+    // 待たない道なので、ここで受けないと誰も受け取らない（AIの選択を
+    // 残せなかったとき〔設計書5.7.8〕など）。ログに残す
+    logFailure("はじめての声かけ（診断・AIの選択）", {
+      詳細: error instanceof Error ? error.message : String(error),
+    })
+  );
 
   /*
     **整備をいつ起こすか、ここで決める**（設計書6.107。0.74.9）。

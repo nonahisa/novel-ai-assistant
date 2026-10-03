@@ -206,6 +206,21 @@ describe("鍵ごとに書く口は1か所", () => {
     if (!row.guarded) expect(row.reason).toBeTruthy();
   });
 
+  test("鍵を組む関数（作品ID・モデル名を後ろに足すもの）で書く所も、書く口の1か所だけ", () => {
+    // 鍵の文字列を持たないファイルでも、関数で鍵を組めば書ける。そこを塞ぐ
+    const builders: Record<string, string[]> = {
+      advicePolicyKey: [],
+      imeExcludedKey: ["features/exportImeDictionary.ts"],
+      pendingRenameKey: ["features/nameRename.ts"],
+      supportKey: ["ai/geminiProvider.ts", "ai/claudeProvider.ts"],
+    };
+    for (const [builder, owners] of Object.entries(builders)) {
+      const pattern = new RegExp(`\\.(update|patch)(<[^>]*>)?\\(\\s*${builder}\\(`);
+      const writers = files.filter(({ code }) => pattern.test(code)).map(({ rel }) => rel);
+      expect(writers.sort()).toEqual([...owners].sort());
+    }
+  });
+
   test("守らない鍵は、許した所でだけ素のまま書かれている", () => {
     const unguarded = KEYS.filter((row) => !row.guarded).map((row) => row.writtenIn);
     // 控えは workTree.ts が、extension.ts から素のまま受け取った保管庫で書く
