@@ -437,8 +437,59 @@ export class WorkRegistry {
     return true;
   }
 
+  /**
+   * 登録の順番待ち（2026-10-04）。
+   *
+   * **登録（`add`・`addExisting`）は1件ずつ通す。** どちらも「入っているか
+   * 確かめる」→「足す」の順で、`addExisting` はそのあいだに設定ファイルと
+   * `.gitignore` の読み書きを待つ。待っているあいだに同じフォルダーの登録が
+   * もう1回来ると、2回目も確かめを通り抜け、**同じ作品が2件**入った
+   * （ノートPCの実機確認。`novelai.addWork` を50ミリ秒おきに2回呼んだ）。
+   *
+   * 列は登録簿全体で1本にする（フォルダーごとに分けない）。表記の違う同じ
+   * フォルダーを別の列に入れると、また素通りするため。登録は短く稀なので、
+   * 待たされても作者には分からない。登録の解除・題の変更は列に入れない
+   * （重なりを確かめる手順が無いので、割り込まれても困らない）。
+   */
+  private registering: Promise<unknown> = Promise.resolve();
+
+  private inRegistrationQueue<T>(task: () => Promise<T>): Promise<T> {
+    // **前の登録が失敗しても次を止めない**（失敗は前の呼び手が受け取る）
+    const run = this.registering.then(task, task);
+    this.registering = run.catch(() => undefined);
+    return run;
+  }
+
+  /**
+   * 足し終えたあと、本当にこちらの1件が入ったか（2026-10-04）。
+   *
+   * 同じ窓の二重は順番待ちで防ぐが、**別の窓**が同じフォルダーを同じころに
+   * 登録したときは、足す直前の読み直し（`appendEntry`）で弾かれて入らない。
+   * そのときは「登録しました」と言わず、重複と同じ断りを出す。
+   *
+   * **弾かれた「足す」は見張りから外す。** 残すと、先に入っていた同じ
+   * フォルダーの作品を作者が外したあと、見張りが断ったはずのこちらを
+   * 足してしまう。
+   */
+  private async appendAndConfirm(entry: WorkEntry): Promise<WorkEntry | undefined> {
+    const change = appendEntry(entry);
+    await this.mutate(change);
+    const stored = this.context.globalState.get<WorkEntry[]>(STORAGE_KEY, []);
+    if (stored.some((w) => w.id === entry.id)) return entry;
+    this.recentChanges = this.recentChanges.filter((r) => r.change !== change);
+    this.blockedAsDuplicate(stored, entry.folderPath);
+    return undefined;
+  }
+
   /** 既存フォルダを作品として登録する */
-  async add(folderPath: string, title?: string): Promise<WorkEntry | undefined> {
+  add(folderPath: string, title?: string): Promise<WorkEntry | undefined> {
+    return this.inRegistrationQueue(() => this.addNow(folderPath, title));
+  }
+
+  private async addNow(
+    folderPath: string,
+    title?: string
+  ): Promise<WorkEntry | undefined> {
     const works = this.context.globalState.get<WorkEntry[]>(STORAGE_KEY, []);
     // **保存する表記は、前後の空白と末尾の区切りだけを落とした形。**
     // 大小は変えない（作者が見るフォルダー名と一覧の表記を揃えておく）
@@ -454,12 +505,16 @@ export class WorkRegistry {
       registeredAt: new Date().toISOString(),
     };
 
-    await this.mutate(appendEntry(entry));
-    return entry;
+    return this.appendAndConfirm(entry);
   }
 
   /** 既存作品の設定を検証・必要なら作成してから登録する。 */
-  async addExisting(
+  addExisting(folderPath: string, title?: string): Promise<WorkEntry | undefined> {
+    // 順番待ちの理由は `registering` の説明（2026-10-04）
+    return this.inRegistrationQueue(() => this.addExistingNow(folderPath, title));
+  }
+
+  private async addExistingNow(
     folderPath: string,
     title?: string
   ): Promise<WorkEntry | undefined> {
@@ -512,8 +567,7 @@ export class WorkRegistry {
 
     // **ここで先に読んだ `works` を書き戻さない。** 上の読み書きを待つあいだに
     // 別の変更（登録の解除など）が入りうる。読み直して足すだけにする（0.97.3）
-    await this.mutate(appendEntry(entry));
-    return entry;
+    return this.appendAndConfirm(entry);
   }
 
   /**
@@ -554,10 +608,16 @@ export class WorkRegistry {
 /**
  * 登録簿へ1件足す変更。**もう在れば何もしない**（書き直し・見張りで
  * 何度当てても1件のまま。`verifiedMemento.ts` の約束）。
+ *
+ * **同じフォルダーの作品が在っても足さない**（2026-10-04）。id だけで
+ * 見ていたころは、同じフォルダーの2回目の登録（別の id）が素通りして
+ * 同じ作品が2件になった。足す直前の読み直しで弾く最後の砦。
  */
 function appendEntry(entry: WorkEntry): (works: WorkEntry[]) => WorkEntry[] {
   return (works) =>
-    works.some((w) => w.id === entry.id) ? works : [...works, entry];
+    works.some((w) => w.id === entry.id) || findWorkByFolder(works, entry.folderPath)
+      ? works
+      : [...works, entry];
 }
 
 /**
