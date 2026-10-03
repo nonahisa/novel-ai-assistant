@@ -110,3 +110,44 @@ function isNewer(candidate: string, current: string): boolean {
   if (Number.isNaN(right)) return true;
   return left >= right;
 }
+
+/**
+ * `.aiwriter/locks/locks.jsonl` の行を読む。
+ * 読めない行は捨てて、読める行は残す（競合で壊れた1行で全部を失わない）。
+ *
+ * `core/fileLockStore.ts` から移した（2026-10-03）——MCP の取り込み（6.115）が
+ * 校閲中かを同じ読み方で確かめるため、`vscode` に触らない側へ置く。
+ */
+export function parseLockEvents(text: string): LockEvent[] {
+  const events: LockEvent[] = [];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (/^(<<<<<<<|=======|>>>>>>>)/.test(line)) continue;
+    try {
+      const event = toEvent(JSON.parse(line));
+      if (event) events.push(event);
+    } catch {
+      // 壊れた行は捨てる
+    }
+  }
+  return events;
+}
+
+function toEvent(value: unknown): LockEvent | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  const kind = record.kind;
+  const file = typeof record.file === "string" ? record.file : "";
+  // **どのファイルの話か分からない記録は、使いようがない**
+  if ((kind !== "acquire" && kind !== "release") || !file) return undefined;
+  const holderKind = record.holderKind === "editor" ? "editor" : "author";
+  return {
+    kind,
+    file,
+    holder: typeof record.holder === "string" ? record.holder : "",
+    holderKind,
+    time: typeof record.time === "string" ? record.time : "",
+    note: typeof record.note === "string" ? record.note : "",
+  };
+}

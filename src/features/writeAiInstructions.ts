@@ -22,6 +22,10 @@ import {
 import type { AiInstructionUsage } from "../core/aiInstructionUsage";
 import { AiInstructionUsageStore } from "../core/aiInstructionUsageStore";
 import { hashBytes } from "../core/hash";
+import {
+  OUTBOX_TEMPLATE_COPY_NAME,
+  OUTBOX_TEMPLATE_RELATIVE,
+} from "../core/outboxTemplate";
 // **保管庫の場所は1か所で決める**（助言方針の控えも同じ場所へ置くため）
 import { globalStorageRoot } from "./globalStoragePath";
 import { logLine, useLogFile } from "../core/logger";
@@ -459,6 +463,8 @@ async function stableBundlePath(
 
     const bytes = await vscode.workspace.fs.readFile(path.toUri(source));
     const digest = hashBytes(bytes);
+    // 出先の原稿箱の雛形も束の隣へ写す（6.115。MCP の outbox.pack が道を返す）
+    await copyOutboxTemplate(root, path.dirname(path.dirname(source)));
     if ((await readIfExists(stamp)) === digest && (await exists(copy))) {
       return copy;
     }
@@ -479,6 +485,30 @@ async function stableBundlePath(
         errorText(error)
     );
     return source;
+  }
+}
+
+/**
+ * 出先の原稿箱のページの雛形（設計書6.115）を、写した束の隣へ置く。
+ *
+ * **束と同じ扱い**：同じ中身なら1バイトも触らない。写せなくても束の写しは
+ * 止めない（雛形が無ければ MCP は拡張機能の中を探す）。理由はログへ残す。
+ */
+async function copyOutboxTemplate(root: string, extensionRoot: string): Promise<void> {
+  try {
+    const source = path.join(extensionRoot, ...OUTBOX_TEMPLATE_RELATIVE);
+    if (!(await exists(source))) return;
+    const bytes = await vscode.workspace.fs.readFile(path.toUri(source));
+    const copy = path.join(root, OUTBOX_TEMPLATE_COPY_NAME);
+    if (await exists(copy)) {
+      const current = await vscode.workspace.fs.readFile(path.toUri(copy));
+      if (hashBytes(current) === hashBytes(bytes)) return;
+    }
+    await vscode.workspace.fs.createDirectory(path.toUri(root));
+    // 上書きの経路（指定なし）でよい。同梱物の写しで、いつでも作り直せる（束と同じ）
+    await atomicWriteFile(copy, bytes);
+  } catch (error) {
+    logLine("出先の原稿箱の雛形を拡張機能の保管庫へ写せませんでした：" + errorText(error));
   }
 }
 

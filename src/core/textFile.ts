@@ -4,8 +4,10 @@ import * as path from "./paths";
 import { hashBytes } from "./hash";
 import { decodeBytes, hasConflictMarkers } from "./textDecode";
 import type { Encoding, TextFileContent } from "./textDecode";
-import iconv = require("iconv-lite");
-import { diffArrays } from "diff";
+import {
+  encodePreservingFormat,
+  encodeTextFragment,
+} from "./textEncodePreserving";
 import {
   AtomicWriteFileError,
   atomicWriteFile,
@@ -108,22 +110,10 @@ export async function writeTextFilePreservingFormat(
     return { ok: false, reason: "modified_externally" };
   }
 
-  let out = newText.replace(/\r\n?/g, "\n");
-
-  // 末尾改行の有無を元に合わせる
-  if (original.hasTrailingNewline && !out.endsWith("\n")) {
-    out += "\n";
-  } else if (!original.hasTrailingNewline) {
-    out = out.replace(/\n+$/, "");
-  }
-
-  const bytes = encodePreservingUnchangedBytes(
-    current,
-    out,
-    original.encoding,
-    original.eol,
-    options.rewriteEol === true
-  );
+  // バイト列の作り方は `textEncodePreserving.ts`（MCP の取り込みも同じものを通る。6.115）
+  const bytes = encodePreservingFormat(current, newText, original, {
+    rewriteEol: options.rewriteEol === true,
+  });
   if (!bytes) {
     return { ok: false, reason: "encoding_error" };
   }
@@ -213,139 +203,6 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-interface EncodedToken {
-  text: string;
-  bytes: Uint8Array;
-}
-
-/**
- * 編集されていない文字の元バイト列を再利用する。
- * CP932には同じ文字へ復号される複数の符号があるため、全文再エンコードでは
- * 無変更箇所まで別バイトへ正規化されてしまう。
- *
- * @param rewriteEol 変わらなかった改行も `preferredEol` へ置き直すか。
- *   **既定は false**——改行のバイトも「変わらなかったところ」なので、
- *   そのまま置く（1文字直しただけで全行が変更扱いになるのを防ぐ）。
- */
-function encodePreservingUnchangedBytes(
-  originalBytes: Uint8Array,
-  normalizedText: string,
-  encoding: Encoding,
-  preferredEol: Eol,
-  rewriteEol = false
-): Uint8Array | undefined {
-  const tokenized = tokenizeOriginalBytes(originalBytes, encoding);
-  if (tokenized.text === normalizedText && !rewriteEol) {
-    return originalBytes.slice();
-  }
-
-  /** 変わらなかった1文字ぶんのバイト。改行だけは目標の形へ置き直せる */
-  const keep = (token: EncodedToken): Uint8Array =>
-    rewriteEol && token.text === "\n" ? eolBytes(preferredEol) : token.bytes;
-
-  const desiredTokens = Array.from(normalizedText);
-  const changes = diffArrays(
-    tokenized.tokens.map((token) => token.text),
-    desiredTokens
-  );
-  const output: Uint8Array[] = [];
-  let originalIndex = 0;
-
-  for (const change of changes) {
-    if (change.added) {
-      const encoded = encodeFragment(
-        change.value.join("").replace(/\n/g, preferredEol),
-        encoding
-      );
-      if (!encoded) return undefined;
-      output.push(encoded);
-      continue;
-    }
-
-    const count = change.value.length;
-    if (!change.removed) {
-      for (let index = 0; index < count; index += 1) {
-        output.push(keep(tokenized.tokens[originalIndex + index]));
-      }
-    }
-    originalIndex += count;
-  }
-
-  return concatenateBytes(tokenized.prefix, output);
-}
-
-/** 改行コードのバイト列。UTF-8でもShift_JISでも同じ（ASCIIの範囲） */
-function eolBytes(eol: Eol): Uint8Array {
-  if (eol === "\r\n") return new Uint8Array([0x0d, 0x0a]);
-  if (eol === "\r") return new Uint8Array([0x0d]);
-  return new Uint8Array([0x0a]);
-}
-
-function tokenizeOriginalBytes(
-  bytes: Uint8Array,
-  encoding: Encoding
-): { prefix: Uint8Array; tokens: EncodedToken[]; text: string } {
-  const bodyStart = encoding === "utf8-bom" ? 3 : 0;
-  const prefix = bytes.slice(0, bodyStart);
-  const tokens: EncodedToken[] = [];
-  let offset = bodyStart;
-
-  while (offset < bytes.length) {
-    const first = bytes[offset];
-    if (first === 0x0d) {
-      const length = bytes[offset + 1] === 0x0a ? 2 : 1;
-      tokens.push({ text: "\n", bytes: bytes.slice(offset, offset + length) });
-      offset += length;
-      continue;
-    }
-    if (first === 0x0a) {
-      tokens.push({ text: "\n", bytes: bytes.slice(offset, offset + 1) });
-      offset += 1;
-      continue;
-    }
-
-    const length = encoding === "shift_jis"
-      ? shiftJisCharacterLength(first)
-      : utf8CharacterLength(first);
-    const raw = bytes.slice(offset, Math.min(offset + length, bytes.length));
-    const text = encoding === "shift_jis"
-      ? iconv.decode(raw, "shift_jis")
-      : new TextDecoder("utf-8").decode(raw);
-    tokens.push({ text, bytes: raw });
-    offset += raw.length;
-  }
-
-  return {
-    prefix,
-    tokens,
-    text: tokens.map((token) => token.text).join(""),
-  };
-}
-
-function shiftJisCharacterLength(first: number): number {
-  return (first >= 0x81 && first <= 0x9f) || (first >= 0xe0 && first <= 0xfc)
-    ? 2
-    : 1;
-}
-
-function utf8CharacterLength(first: number): number {
-  if ((first & 0x80) === 0) return 1;
-  if ((first & 0xe0) === 0xc0) return 2;
-  if ((first & 0xf0) === 0xe0) return 3;
-  if ((first & 0xf8) === 0xf0) return 4;
-  return 1;
-}
-
-function encodeFragment(text: string, encoding: Encoding): Uint8Array | undefined {
-  if (encoding === "shift_jis") {
-    const encoded = iconv.encode(text, "shift_jis");
-    // 代替文字への置換を許すと、保存成功に見えて本文を壊してしまう。
-    return iconv.decode(encoded, "shift_jis") === text ? encoded : undefined;
-  }
-  const body = new TextEncoder().encode(text);
-  return body;
-}
-
 /**
  * 新しいファイルとして書き出すためのバイト列を作る。
  *
@@ -368,7 +225,7 @@ export function encodeForNewFile(
     normalized = normalized.replace(/\n+$/, "");
   }
 
-  const body = encodeFragment(
+  const body = encodeTextFragment(
     normalized.replace(/\n/g, original.eol),
     original.encoding
   );
@@ -379,21 +236,6 @@ export function encodeForNewFile(
   withBom.set([0xef, 0xbb, 0xbf]);
   withBom.set(body, 3);
   return withBom;
-}
-
-function concatenateBytes(
-  prefix: Uint8Array,
-  parts: Uint8Array[]
-): Uint8Array {
-  const length = parts.reduce((sum, part) => sum + part.length, prefix.length);
-  const result = new Uint8Array(length);
-  result.set(prefix);
-  let offset = prefix.length;
-  for (const part of parts) {
-    result.set(part, offset);
-    offset += part.length;
-  }
-  return result;
 }
 
 /**

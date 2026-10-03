@@ -71,6 +71,11 @@ const result = await esbuild.build({
   // **何も外に出さない。** `vscode` が混ざっていれば、ここで解決に失敗して
   // 落ちる（`external` に入れると「実行時まで待つ」に化けて気づけない）
   external: [],
+  // ESM の束に `require` を持たせる（`iconv-lite` の `require("buffer")` のため。
+  // MCP サーバーの束と同じ。`esbuild.js` の `mcp` の説明を参照）
+  banner: {
+    js: 'import { createRequire as __novelaiCreateRequire } from "node:module"; const require = __novelaiCreateRequire(import.meta.url);',
+  },
   outfile,
   metafile: true,
   sourcemap: false,
