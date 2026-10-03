@@ -1,4 +1,9 @@
-import type { EgoGraph, RelationGraph, RelationNode } from "./relationGraph";
+import {
+  shortPairLabel,
+  type EgoGraph,
+  type RelationGraph,
+  type RelationNode,
+} from "./relationGraph";
 
 /**
  * 人物相関図の配置（設計書6.38.2）。
@@ -27,12 +32,22 @@ export interface LayoutArc {
   end: number;
 }
 
-/** 辺のラベルの置き場（弦の中点） */
+/**
+ * 辺のラベルの置き場。全体図は弦の中点。個人中心図は相手の側へ寄せ、
+ * 重なるときは線に沿ってずらした位置（`layoutEgo`）
+ */
 export interface LayoutEdgeLabel {
   a: string;
   b: string;
   x: number;
   y: number;
+  /**
+   * 線の上に書く短い言葉（`shortPairLabel`）。個人中心図だけが持つ。
+   *
+   * **全体図には置かない**——線が混むので、全体図は元から線に文字を書かない
+   * （設計書6.38.2）。重なりよけに文字の幅が要るので、配置と一緒にここで決める
+   */
+  text?: string;
 }
 
 export interface GraphLayout {
@@ -205,9 +220,169 @@ export function layoutEgo(ego: EgoGraph, options: LayoutOptions): GraphLayout {
       .map((node) => positions.get(node.id))
       .filter((node): node is LayoutNode => node !== undefined),
     arcs: [],
-    edges: edgeLabels(ego.edges, positions),
+    edges: egoEdgeLabels(ego, positions),
     rings: second.length > 0 ? [inner, outer] : [inner],
   };
+}
+
+/** 線の文字の大きさ（画面の `.g-edge-label` と同じ値にしておく） */
+export const EDGE_LABEL_FONT_SIZE = 11;
+/** 人物の名前の文字の大きさ（画面の `.g-node-label`） */
+const NODE_LABEL_FONT_SIZE = 12;
+
+/**
+ * 文字の幅の見積もり（画素）。
+ *
+ * 配置は拡張機能の側で決めるので、画面で実際の幅を測れない。和文は1字が
+ * ほぼ文字の大きさの正方形、半角の英数字はその6割として数える。少し広めに
+ * 見積もっておけば、実際の幅で重なることはない。
+ */
+export function estimateTextWidth(text: string, fontSize: number): number {
+  let width = 0;
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    const half = code < 0x80 || (code >= 0xff61 && code <= 0xff9f);
+    width += half ? fontSize * 0.6 : fontSize;
+  }
+  return width;
+}
+
+interface Box {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+function boxAt(x: number, y: number, width: number, height: number): Box {
+  return {
+    left: x - width / 2,
+    right: x + width / 2,
+    top: y - height / 2,
+    bottom: y + height / 2,
+  };
+}
+
+/** 2つの箱が重なる面積。重ならなければ0 */
+function overlapArea(a: Box, b: Box): number {
+  const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+  const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+/**
+ * 中心から出る線の上で、文字を置いてみる位置（中心からの割合）。
+ *
+ * **中点（0.5）から始めない。** 中心から出る線の中点は、みな中心のまわりの
+ * 小さな円に並ぶので、相手が多いと文字が中心の近くで重なる（実機、教科書
+ * チートの「アブス」）。相手の側へ寄せた位置から試し、重なれば線に沿って
+ * 前後へずらす。
+ */
+const CENTER_EDGE_STEPS = [0.64, 0.74, 0.54, 0.82, 0.46, 0.9, 0.38];
+/** 中心に触れない線（2次の環との線）。こちらは中点から試す */
+const OTHER_EDGE_STEPS = [0.5, 0.38, 0.62, 0.28, 0.72];
+
+/**
+ * 個人中心図の線の文字の置き場と中身（作者の裁定、2026-10-03「線の文字を絞る」）。
+ *
+ * 文字は `shortPairLabel` の短い形。向きは画面の約束どおり、中心に触れる線は
+ * 中心から、触れない線は辺の a から見る。
+ *
+ * 置き方：候補の位置を順に試し、**先に置いた文字・人物の円・人物の名前**の
+ * どれとも重ならない最初の位置に置く。線に沿った候補で足りなければ、
+ * 線と直角の向きへ1行ぶんずらした位置も試す。どこでも重なるときは、
+ * 重なりのいちばん小さい位置に置く（黙って文字を消さない）。
+ * 試す順は決めてあるので、同じ材料からはいつも同じ図が出る。
+ */
+function egoEdgeLabels(
+  ego: EgoGraph,
+  positions: Map<string, LayoutNode>
+): LayoutEdgeLabel[] {
+  const obstacles: Box[] = [];
+  const centerPos = positions.get(ego.centerId);
+  for (const node of ego.nodes) {
+    const at = positions.get(node.id);
+    if (!at) continue;
+    const pad = 3;
+    obstacles.push(boxAt(at.x, at.y, (at.r + pad) * 2, (at.r + pad) * 2));
+    const nameWidth = estimateTextWidth(node.name, NODE_LABEL_FONT_SIZE);
+    const nameHeight = NODE_LABEL_FONT_SIZE + 2;
+    if (node.id === ego.centerId) {
+      // 中心の名前は円の下（画面の描き方と同じ）
+      obstacles.push(boxAt(at.x, at.y + at.r + 16, nameWidth, nameHeight));
+    } else if (centerPos && at.x >= centerPos.x) {
+      obstacles.push(
+        boxAt(at.x + at.r + 6 + nameWidth / 2, at.y, nameWidth, nameHeight)
+      );
+    } else {
+      obstacles.push(
+        boxAt(at.x - at.r - 6 - nameWidth / 2, at.y, nameWidth, nameHeight)
+      );
+    }
+  }
+
+  // 中心から出る線を先に置く。いちばん混むのがそこで、2次の線は空いた所へ回す
+  const ordered = [
+    ...ego.edges.filter((edge) => touches(edge, ego.centerId)),
+    ...ego.edges.filter((edge) => !touches(edge, ego.centerId)),
+  ];
+  const placed = new Map<string, LayoutEdgeLabel>();
+  const height = EDGE_LABEL_FONT_SIZE + 3;
+
+  for (const edge of ordered) {
+    const fromId = touches(edge, ego.centerId) ? ego.centerId : edge.a;
+    const toId = edge.a === fromId ? edge.b : edge.a;
+    const from = positions.get(fromId);
+    const to = positions.get(toId);
+    if (!from || !to) continue;
+    const text = shortPairLabel(edge, fromId);
+    const width = estimateTextWidth(text, EDGE_LABEL_FONT_SIZE) + 4;
+    const steps = fromId === ego.centerId ? CENTER_EDGE_STEPS : OTHER_EDGE_STEPS;
+
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const length = Math.hypot(dx, dy) || 1;
+    // 線と直角の向き（1行ぶんずらすときに使う）
+    const nx = -dy / length;
+    const ny = dx / length;
+    const shifts = [0, height, -height];
+
+    let best: { x: number; y: number; cost: number } | null = null;
+    search: for (const shift of shifts) {
+      for (const t of steps) {
+        const x = from.x + dx * t + nx * shift;
+        const y = from.y + dy * t + ny * shift;
+        const box = boxAt(x, y, width, height);
+        let cost = 0;
+        for (const other of obstacles) cost += overlapArea(box, other);
+        if (best === null || cost < best.cost) best = { x, y, cost };
+        if (cost === 0) break search;
+      }
+    }
+    if (!best) continue;
+    obstacles.push(boxAt(best.x, best.y, width, height));
+    placed.set(edgeKeyOf(edge.a, edge.b), {
+      a: edge.a,
+      b: edge.b,
+      x: best.x,
+      y: best.y,
+      text,
+    });
+  }
+
+  // 並びは辺の順に戻す（画面は受け取った順に描く。決定的にしておく）
+  return ego.edges
+    .map((edge) => placed.get(edgeKeyOf(edge.a, edge.b)))
+    .filter((label): label is LayoutEdgeLabel => label !== undefined);
+}
+
+function touches(edge: { a: string; b: string }, id: string): boolean {
+  return edge.a === id || edge.b === id;
+}
+
+/** 辺の鍵。idに何の字が入っていても衝突しないよう JSON にする */
+function edgeKeyOf(a: string, b: string): string {
+  return JSON.stringify([a, b]);
 }
 
 /** 登場話数を3段階の大きさへ。話数の上限は作品ごとに違うので割合で見る */

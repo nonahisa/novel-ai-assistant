@@ -381,6 +381,8 @@ export interface SettingsValidateResult {
     /** 推測・断りで、関係になっていなかった関係（測定台が数える） */
     droppedRelations: unknown[];
     correctedRelations: unknown[];
+    /** 関係の欄に入った呼び名を、呼称へ移したもの（2026-10-03） */
+    movedAddressRelations: unknown[];
     /** 名前と合わない読みを外したもの（2026-10-01） */
     droppedReadings: unknown[];
     /** 口調の欄だけ外したもの（根拠の台詞が無い・指示の写し。2026-09-25） */
@@ -463,6 +465,7 @@ function validateAgainst(
       droppedRelativeAliases: people.droppedRelativeAliases,
       droppedRelations: people.droppedRelations,
       correctedRelations: people.correctedRelations,
+      movedAddressRelations: people.movedAddressRelations,
       droppedSpeechStyles: people.droppedSpeechStyles,
       droppedReadings: people.droppedReadings,
     },

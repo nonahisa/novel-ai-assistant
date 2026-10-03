@@ -5,6 +5,8 @@ import {
 } from "../../../src/models/character";
 import { buildRelationGraph, egoGraph } from "../../../src/core/relationGraph";
 import {
+  EDGE_LABEL_FONT_SIZE,
+  estimateTextWidth,
   layoutCircle,
   layoutEgo,
   NODE_RADII,
@@ -239,5 +241,96 @@ describe("個人中心図の配置", () => {
       SIZE
     );
     expect(again).toEqual(layout);
+  });
+});
+
+/**
+ * 個人中心図の線の文字（作者の裁定、2026-10-03「線の文字を絞る」）。
+ *
+ * 実機（教科書チート、「アブス」の個人中心図）で、中心から出る線の文字が
+ * 中心の近くに集まって重なった。中心から出る線は中点がみな同じ小さな円の上に
+ * 並ぶので、文字は相手の側へ寄せ、それでも重なるなら線に沿ってずらす。
+ */
+describe("個人中心図の線の文字", () => {
+  /** 中心1人と、両向きの関係を持つ相手 n人 */
+  function crowd(n: number): Character[] {
+    const names = Array.from({ length: n }, (_, index) => `相手${index}`);
+    return [
+      character("char_000", "アブス", {
+        relations: names.flatMap((name) => [
+          { name, relation: "同席" },
+          { name, relation: "兼職男子" },
+        ]),
+      }),
+      ...names.map((name, index) =>
+        character(`char_${String(index + 1).padStart(3, "0")}`, name, {
+          relations: [{ name: "アブス", relation: "上司にあたる人" }],
+        })
+      ),
+    ];
+  }
+
+  test("線の文字は短い形で、中心から見た向きで置く", () => {
+    const layout = layoutEgo(
+      egoGraph(buildRelationGraph(crowd(3)), "char_000", 1),
+      SIZE
+    );
+    for (const label of layout.edges) {
+      expect(label.text).toBe("→同席 ほか1／←上司にあたる人");
+    }
+  });
+
+  test("中心から出る線の文字は、中点より相手の側に置く", () => {
+    const layout = layoutEgo(
+      egoGraph(buildRelationGraph(crowd(3)), "char_000", 1),
+      SIZE
+    );
+    const inner = Math.hypot(
+      layout.nodes.find((node) => node.id === "char_001")!.x - layout.center.x,
+      layout.nodes.find((node) => node.id === "char_001")!.y - layout.center.y
+    );
+    for (const label of layout.edges) {
+      const distance = Math.hypot(
+        label.x - layout.center.x,
+        label.y - layout.center.y
+      );
+      expect(distance).toBeGreaterThan(inner / 2 + 1);
+    }
+  });
+
+  test("相手が多くても、線の文字どうしが重ならない", () => {
+    const layout = layoutEgo(
+      egoGraph(buildRelationGraph(crowd(10)), "char_000", 1),
+      SIZE
+    );
+    expect(layout.edges).toHaveLength(10);
+    const boxes = layout.edges.map((label) => {
+      const width = estimateTextWidth(label.text ?? "", EDGE_LABEL_FONT_SIZE);
+      return {
+        left: label.x - width / 2,
+        right: label.x + width / 2,
+        top: label.y - EDGE_LABEL_FONT_SIZE / 2,
+        bottom: label.y + EDGE_LABEL_FONT_SIZE / 2,
+      };
+    });
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i];
+        const b = boxes[j];
+        const overlap =
+          a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+        expect(overlap, `${i} と ${j} が重なる`).toBe(false);
+      }
+    }
+  });
+
+  test("全体図の線には文字を置かない", () => {
+    const layout = layoutCircle(buildRelationGraph(crowd(3)), {
+      ...SIZE,
+      groupBy: "affiliation",
+    });
+    for (const label of layout.edges) {
+      expect(label.text).toBeUndefined();
+    }
   });
 });

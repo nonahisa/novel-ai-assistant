@@ -13,6 +13,7 @@ import {
   lastChapterOf,
   normalizeUpToChapter,
   restrictUnresolved,
+  shortPairLabel,
   UNRESOLVED_ID_PREFIX,
   type RelationGraph,
 } from "../../../src/core/relationGraph";
@@ -763,5 +764,79 @@ describe("注記の件数（設計書6.38.5）", () => {
       unresolvedCount: 0,
       ambiguousCount: 0,
     });
+  });
+});
+
+/**
+ * 線の上に置く短い言葉（作者の裁定、2026-10-03「線の文字を絞る」）。
+ *
+ * 実機（教科書チート、「アブス」の個人中心図）で、両向きの関係を全部並べた
+ * 長い文字（「→同席・兼職男子・同席／←…」）が中心の近くで重なって読めなかった。
+ * 線の上には向きごとに1つだけ置き、全部は右の「つながっている人」で読む。
+ */
+describe("線の上の短い言葉", () => {
+  function edgeOf(characters: Character[]) {
+    const graph = buildRelationGraph(characters);
+    expect(graph.edges).toHaveLength(1);
+    return graph.edges[0];
+  }
+
+  test("向きごとに1つだけ置き、残りは「ほかN」にする", () => {
+    const edge = edgeOf([
+      character("char_001", "アブス", {
+        relations: [
+          { name: "イント", relation: "同席" },
+          { name: "イント", relation: "兼職男子" },
+        ],
+        addressTerms: [address("イント", ["イント君"])],
+      }),
+      character("char_002", "イント", {
+        relations: [{ name: "アブス", relation: "上司" }],
+      }),
+    ]);
+    expect(shortPairLabel(edge, "char_001")).toBe("→同席 ほか2／←上司");
+    expect(shortPairLabel(edge, "char_002")).toBe("→上司／←同席 ほか2");
+  });
+
+  test("関係が無ければ呼び方を『』で置く", () => {
+    const edge = edgeOf([
+      character("char_001", "マイナ", {
+        addressTerms: [address("イント", ["イント君"])],
+      }),
+      character("char_002", "イント", {}),
+    ]);
+    expect(shortPairLabel(edge, "char_001")).toBe("→『イント君』／←なし");
+  });
+
+  test("長い言葉は途中で切る", () => {
+    const edge = edgeOf([
+      character("char_001", "アブス", {
+        relations: [{ name: "イント", relation: "電気について教えを受けている相手" }],
+      }),
+      character("char_002", "イント", {}),
+    ]);
+    const text = shortPairLabel(edge, "char_001");
+    expect(text).toBe("→電気について教え…／←なし");
+  });
+
+  test("全部を並べた長い形にはしない（線の上は短く）", () => {
+    const edge = edgeOf([
+      character("char_001", "アブス", {
+        relations: [
+          { name: "イント", relation: "同席" },
+          { name: "イント", relation: "兼職男子" },
+          { name: "イント", relation: "部下" },
+        ],
+      }),
+      character("char_002", "イント", {
+        relations: [
+          { name: "アブス", relation: "上司" },
+          { name: "アブス", relation: "同席" },
+        ],
+      }),
+    ]);
+    const text = shortPairLabel(edge, "char_001");
+    expect(text).not.toContain("・");
+    expect([...text].length).toBeLessThanOrEqual(24);
   });
 });

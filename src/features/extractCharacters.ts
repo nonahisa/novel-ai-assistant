@@ -35,6 +35,7 @@ import {
   type CharacterRejectionReason,
   type CharacterValidationResult,
   type CorrectedRelationRecord,
+  type MovedAddressRelationRecord,
   type DroppedAliasRecord,
   type DroppedRelationRecord,
   type DroppedReadingRecord,
@@ -141,6 +142,8 @@ interface ValidationFixCounts {
   droppedRelations: DroppedRelationRecord[];
   /** 向きが逆だった親族関係を直したもの */
   correctedRelations: CorrectedRelationRecord[];
+  /** 関係の欄に入った呼び名を、呼称へ移したもの（2026-10-03） */
+  movedAddressRelations: MovedAddressRelationRecord[];
   /** 根拠の台詞が本文の台詞に無い・指示の写しとして外した口調（2026-09-25） */
   droppedSpeechStyles: DroppedSpeechStyleRecord[];
   /** 名前と合わない読みを外したもの（作者の裁定、2026-10-01） */
@@ -159,6 +162,7 @@ function collectValidationFixes(
   target.droppedRelativeAliases.push(...validated.droppedRelativeAliases);
   target.droppedRelations.push(...validated.droppedRelations);
   target.correctedRelations.push(...validated.correctedRelations);
+  target.movedAddressRelations.push(...validated.movedAddressRelations);
   target.droppedSpeechStyles.push(...validated.droppedSpeechStyles);
   target.droppedReadings.push(...validated.droppedReadings);
 }
@@ -633,6 +637,7 @@ export async function extractCharacters(
     droppedRelativeAliases: [],
     droppedRelations: [],
     correctedRelations: [],
+    movedAddressRelations: [],
     droppedSpeechStyles: [],
     droppedReadings: [],
   };
@@ -1699,6 +1704,22 @@ function describeValidationFixes(fixes: ValidationFixCounts): string {
         : "";
     lines.push(
       `関係の向きを ${fixes.correctedRelations.length}件 直しました（${shown}${rest}）`
+    );
+  }
+  // 関係の欄に書かれていた呼び名を呼称へ移した分（2026-10-03）。
+  // 相関図の呼び合いに出るようになるので、どの呼び名を移したかを見せる
+  if (fixes.movedAddressRelations.length > 0) {
+    const entries = fixes.movedAddressRelations;
+    const shown = entries
+      .slice(0, 3)
+      .map(
+        (entry) =>
+          `${entry.characterName} から「${entry.partner}」への『${entry.term}』`
+      )
+      .join("、");
+    const rest = entries.length > 3 ? ` ほか${entries.length - 3}件` : "";
+    lines.push(
+      `関係の欄に書かれていた呼び名を、呼称へ ${entries.length}件 移しました（${shown}${rest}）`
     );
   }
   // 口調（2026-09-25）。**人物は残し、口調の欄だけを外した分**を見せる。

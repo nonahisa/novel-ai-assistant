@@ -444,9 +444,24 @@ describe("呼び合いを対で見せる", () => {
     expect(side).toContain("呼び合い");
   });
 
-  it("個人中心図の線と「つながっている人」は、中心から見た対で出す", () => {
+  it("「つながっている人」は、中心から見た対で全部を出す", () => {
     expect(script).toContain("pairLabel(entry.edge, data.centerId)");
-    expect(script).toContain("label.textContent = pairLabel(edge, orientFrom(edge));");
+  });
+
+  /**
+   * 線の上は短く（作者の裁定、2026-10-03「線の文字を絞る」）。短い言葉と
+   * 置き場は拡張機能側（core/relationGraphLayout.ts の layoutEgo）が決めて
+   * 渡すので、画面はそれを書くだけ。全部を並べる pairLabel を線に使わない
+   */
+  it("線の上には、配置が決めた短い言葉をそのまま書く", () => {
+    expect(script).toContain("label.textContent = position.text;");
+    expect(script).not.toContain("label.textContent = pairLabel(edge");
+  });
+
+  it("「つながっている人」に、線の上は短くしてあることを書く", () => {
+    const side = script.slice(script.indexOf("function renderSide"), script.indexOf("function sideRow"));
+    expect(side).toContain("向きごとに1つだけ");
+    expect(side).toContain("全部はこの一覧で読めます");
   });
 
   it("「この図について」に、呼び合いの見方がある", () => {

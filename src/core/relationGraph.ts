@@ -292,7 +292,58 @@ export function incomingRelations(
   return result;
 }
 
-/** 名前を引いた結果。結べなかったときは、その理由を添える */
+/**
+ * 線の上に置く1語の長さの上限（字）。これを超えたら切って「…」を付ける。
+ *
+ * 関係の欄には「電気について教えを受けている相手」のような説明が入ることがある。
+ * 線の上は「どんな間柄か」の見当が付けば足りる——全文は右の欄で読める。
+ */
+export const EDGE_WORD_MAX_CHARS = 8;
+
+/**
+ * 線の上に置く短い言葉（作者の裁定、2026-10-03「線の文字を絞る」。設計書6.38.2）。
+ *
+ * `fromId` から見て「→（fromId から相手へ）／←（相手から fromId へ）」の対にし、
+ * **向きごとに1語だけ**置く。残りは「ほかN」と数だけ出す。1語目は関係を
+ * 先に採り、関係が無ければ呼び方を『』で囲んで置く。向きに何も無ければ「なし」。
+ *
+ * 全部を並べていた頃は、両向きの関係を「・」でつないだ長い文字が中心の近くで
+ * 重なって読めなかった（実機、教科書チートの「アブス」）。**全部は画面右の
+ * 「つながっている人」と、線を押したときの詳細で読む。**
+ */
+export function shortPairLabel(edge: RelationEdge, fromId: string): string {
+  const toId = edge.a === fromId ? edge.b : edge.a;
+  return `→${shortHalf(edge, fromId)}／←${shortHalf(edge, toId)}`;
+}
+
+function shortHalf(edge: RelationEdge, speakerId: string): string {
+  const words: string[] = [];
+  const seen = new Set<string>();
+  const push = (word: string): void => {
+    // 同じ言葉を2度数えない（「ほか1」が実は同じ語、にしない）
+    if (seen.has(word)) return;
+    seen.add(word);
+    words.push(word);
+  };
+  for (const label of edge.labels) {
+    if (label.from === speakerId && label.kind === "relation") push(label.text);
+  }
+  for (const label of edge.labels) {
+    if (label.from === speakerId && label.kind === "address") {
+      push(`『${label.text}』`);
+    }
+  }
+  if (words.length === 0) return "なし";
+  const head = clipWord(words[0]);
+  return words.length > 1 ? `${head} ほか${words.length - 1}` : head;
+}
+
+/** 長い1語を切る。サロゲートペアを割らないよう、字の配列で数える */
+function clipWord(word: string): string {
+  const chars = [...word];
+  if (chars.length <= EDGE_WORD_MAX_CHARS) return word;
+  return `${chars.slice(0, EDGE_WORD_MAX_CHARS).join("")}…`;
+}
 
 /** どの環に居るか。0が中心、1が1次、2が2次 */
 export type EgoRing = 0 | 1 | 2;

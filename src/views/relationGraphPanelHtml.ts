@@ -693,11 +693,13 @@ function renderGraph() {
     svg.appendChild(hit);
   }
 
-  // 辺のラベル。全体図では線が混むので、個人中心図でだけ文字にする
+  // 辺のラベル。全体図では線が混むので、個人中心図でだけ文字にする。
+  // 言葉は向きごとに1つだけの短い形で、置き場と一緒に拡張機能側
+  // （core/relationGraphLayout.ts の layoutEgo）が決めて渡す——重ならない
+  // 位置を選ぶには文字の幅が要るため。全部は右の「つながっている人」で読む
   if (data.mode === "ego") {
     for (const position of layout.edges) {
-      const edge = findEdge(position.a, position.b);
-      if (!edge) continue;
+      if (!position.text) continue;
       const label = svgNode("text", {
         class: "g-edge-label",
         x: position.x,
@@ -705,7 +707,7 @@ function renderGraph() {
         "text-anchor": "middle",
         "dominant-baseline": "middle",
       });
-      label.textContent = pairLabel(edge, orientFrom(edge));
+      label.textContent = position.text;
       svg.appendChild(label);
     }
   }
@@ -835,9 +837,11 @@ function addressPairRows(edge, fromId, fromName, toName, upTo) {
 }
 
 /**
- * 線の上と「つながっている人」に置く短いラベル。fromId から見て
+ * 「つながっている人」に置く、全部を並べたラベル。fromId から見て
  * →（fromId から相手へ）／←（相手から fromId へ）の対にする。
- * 関係はそのまま、呼び方は『』で囲む
+ * 関係はそのまま、呼び方は『』で囲む。
+ * 図の線の上には使わない（長くて中心の近くで重なった。2026-10-03）——
+ * 線の上は core の shortPairLabel が作る短い形
  */
 function pairLabel(edge, fromId) {
   const toId = otherEnd(edge, fromId);
@@ -852,17 +856,6 @@ function pairLabel(edge, fromId) {
   return "→" + (forward || "（記録なし）") + "／←" + (backward || "（記録なし）");
 }
 /* pairs:end */
-
-/**
- * 線のラベルをどちらから見るか。個人中心図では中心の人から（→は
- * 「中心の人から相手へ」と読める）。中心に触れない2次の線は、辺の a から
- */
-function orientFrom(edge) {
-  if (data.mode === "ego" && (edge.a === data.centerId || edge.b === data.centerId)) {
-    return data.centerId;
-  }
-  return edge.a;
-}
 
 /** 第N話までに絞っているときの N。最終話までなら null */
 function limitedUpTo() {
@@ -941,7 +934,8 @@ function renderSide() {
     el.side.appendChild(heading("つながっている人"));
     const centerName = center ? center.name : data.centerName;
     el.side.appendChild(sideRow(
-      "→は" + centerName + "から相手へ、←は相手から" + centerName + "へ。『』は呼び方です。"
+      "→は" + centerName + "から相手へ、←は相手から" + centerName + "へ。『』は呼び方です。" +
+        "図の線の上には向きごとに1つだけ書きます（多いときは「ほか2」のように数だけ）。全部はこの一覧で読めます。"
     ));
     const neighbours = neighboursOf(data.centerId);
     if (neighbours.length === 0) {

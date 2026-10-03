@@ -1328,3 +1328,144 @@ describe("既知の人物の名前は、その話の本文に無くても落と�
     expect(result.rejected).toEqual([{ name: "月島 蓮", reason: "ungrounded" }]);
   });
 });
+
+/**
+ * 関係の欄に入った呼び名を、呼称へ移す（作者の裁定、2026-10-03「抽出側で直す」）。
+ *
+ * 実データ（教科書チート_確認用の char_008_マイナ様.json）で
+ * `{"name":"イント","relation":"呼び名は『イント君』"}` が関係に入り、呼称
+ * （addressTerms）は空だった。相関図の呼び合いは呼称しか見ないので、
+ * 「どちらからの呼び方も記録なし」になっていた。
+ */
+describe("関係の欄に入った呼び名を呼称へ移す", () => {
+  const scene: Chunk = {
+    ...chunk,
+    text:
+      "「イント君、こっちよ」とマイナ様が手を振った。\n" +
+      "「マイナ先生、おはようございます」とイントが頭を下げた。\n" +
+      "「おにいちゃん！」と妹が駆け寄った。",
+  };
+
+  function run(relation: string, name = "マイナ様", partner = "イント") {
+    return validate(
+      {
+        characters: [
+          {
+            name,
+            evidence: "マイナ様が手を振った",
+            relations: [{ name: partner, relation }],
+          },
+        ],
+      },
+      scene
+    );
+  }
+
+  test("「呼び名は『X』」は関係から外し、呼称に入れる（実データの形）", () => {
+    const result = run("呼び名は『イント君』");
+    const data = result.accepted[0].data;
+    expect(data.relations).toEqual([]);
+    expect(data.addressTerms).toEqual([
+      {
+        targetName: "イント",
+        term: "イント君",
+        category: null,
+        context: null,
+        evidence: null,
+      },
+    ]);
+    // 黙って書き換えたことにしない。移した分は報告に出す
+    expect(result.movedAddressRelations).toEqual([
+      {
+        characterName: "マイナ様",
+        partner: "イント",
+        relation: "呼び名は『イント君』",
+        term: "イント君",
+        kept: null,
+      },
+    ]);
+  });
+
+  test.each([
+    ["『イント君』と呼ぶ"],
+    ["「イント君」と呼んでいる"],
+    ["イント君と呼ぶ相手"],
+    ["呼び方は「イント君」"],
+  ])("丸ごと呼び方を書いた形 %s も移す", (relation) => {
+    const data = run(relation).accepted[0].data;
+    expect(data.relations).toEqual([]);
+    expect(data.addressTerms?.map((term) => term.term)).toEqual(["イント君"]);
+  });
+
+  test("関係語のあとに括弧で呼び方を添えた形は、関係語を残して呼び方を移す", () => {
+    const result = run("教え子（「マイナ先生」と呼ぶ）", "イント", "マイナ様");
+    const data = result.accepted[0].data;
+    expect(data.relations).toEqual([{ name: "マイナ様", relation: "教え子" }]);
+    expect(data.addressTerms?.map((term) => term.term)).toEqual(["マイナ先生"]);
+    expect(result.movedAddressRelations[0].kept).toBe("教え子");
+  });
+
+  test("「呼ばれる」（相手からの呼び方）は向きが逆なので触らない", () => {
+    const result = run("『おにいちゃん』と呼ばれる人物", "イント", "妹");
+    const data = result.accepted[0].data;
+    expect(data.relations).toEqual([
+      { name: "妹", relation: "『おにいちゃん』と呼ばれる人物" },
+    ]);
+    expect(data.addressTerms ?? []).toEqual([]);
+    expect(result.movedAddressRelations).toEqual([]);
+  });
+
+  test("呼び名が本文に無ければ移さない（AIの書いた呼び名を信用しない）", () => {
+    const result = run("呼び名は『イントちゃん』");
+    const data = result.accepted[0].data;
+    expect(data.relations).toEqual([
+      { name: "イント", relation: "呼び名は『イントちゃん』" },
+    ]);
+    expect(data.addressTerms ?? []).toEqual([]);
+  });
+
+  test("呼び名に自分の名前が入っていたら、向きが決められないので移さない", () => {
+    // マイナ様のレコードに「呼び名は『マイナ先生』」——イントがマイナを呼ぶ形で、
+    // マイナ様からイントへの呼び方ではない
+    const result = run("呼び名は『マイナ先生』");
+    expect(result.accepted[0].data.addressTerms ?? []).toEqual([]);
+    expect(result.movedAddressRelations).toEqual([]);
+  });
+
+  test("空の呼び名・指示の写しのような形は呼称にしない", () => {
+    for (const relation of ["呼び名は『』", "呼び名は『X』", "『』と呼ぶ"]) {
+      const result = run(relation);
+      expect(result.accepted[0].data.addressTerms ?? []).toEqual([]);
+      expect(result.movedAddressRelations).toEqual([]);
+    }
+  });
+
+  test("同じ呼び方が呼称に既にあれば、二重に足さない", () => {
+    const result = validate(
+      {
+        characters: [
+          {
+            name: "マイナ様",
+            evidence: "マイナ様が手を振った",
+            addressTerms: [
+              { targetName: "イント", term: "イント君", category: "愛称" },
+            ],
+            relations: [{ name: "イント", relation: "呼び名は『イント君』" }],
+          },
+        ],
+      },
+      scene
+    );
+    const data = result.accepted[0].data;
+    expect(data.relations).toEqual([]);
+    expect(data.addressTerms?.map((term) => term.term)).toEqual(["イント君"]);
+  });
+
+  test("「関係」の言葉がふつうの関係語なら触らない", () => {
+    const result = run("家庭教師");
+    expect(result.accepted[0].data.relations).toEqual([
+      { name: "イント", relation: "家庭教師" },
+    ]);
+    expect(result.movedAddressRelations).toEqual([]);
+  });
+});

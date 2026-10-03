@@ -152,6 +152,25 @@ export interface CorrectedRelationRecord {
   to: string;
 }
 
+/**
+ * 関係の欄から呼称へ移した呼び名の記録（作者の裁定、2026-10-03「抽出側で直す」）。
+ * **黙って書き換えない**ので、報告に出すために持つ。
+ */
+export interface MovedAddressRelationRecord {
+  characterName: string;
+  /** 関係の相手（＝呼ばれる側） */
+  partner: string;
+  /** AIが関係として書いてきた値（そのまま） */
+  relation: string;
+  /** 呼称へ移した呼び名 */
+  term: string;
+  /**
+   * 関係として残した語（「教え子（「マイナ先生」と呼ぶ）」の「教え子」）。
+   * 関係ごと外したときは null
+   */
+  kept: string | null;
+}
+
 export interface CharacterValidationResult {
   accepted: AcceptedCharacterCandidate[];
   rejected: RejectedCharacterCandidate[];
@@ -181,6 +200,11 @@ export interface CharacterValidationResult {
   droppedRelations: DroppedRelationRecord[];
   /** 向きが逆だった親族関係を直したもの（相手「お母さん」に「息子」） */
   correctedRelations: CorrectedRelationRecord[];
+  /**
+   * 関係の欄に書かれていた呼び名（「呼び名は『イント君』」）を、呼称へ移したもの
+   * （作者の裁定、2026-10-03）。相関図の呼び合いは呼称しか見ないため
+   */
+  movedAddressRelations: MovedAddressRelationRecord[];
   /**
    * 口調の欄だけを外したもの（2026-09-25）。根拠の台詞が本文の台詞に
    * 無い・指示の言葉の写し、のどちらか。人物そのものは受け入れている。
@@ -341,6 +365,7 @@ export function validateCharacterExtractResult(
   const droppedRelativeAliases: DroppedAliasRecord[] = [];
   const droppedRelations: DroppedRelationRecord[] = [];
   const correctedRelations: CorrectedRelationRecord[] = [];
+  const movedAddressRelations: MovedAddressRelationRecord[] = [];
   const droppedSpeechStyles: DroppedSpeechStyleRecord[] = [];
   const droppedReadings: DroppedReadingRecord[] = [];
   const rawCharacters: unknown = result.characters;
@@ -355,6 +380,7 @@ export function validateCharacterExtractResult(
       droppedRelativeAliases,
       droppedRelations,
       correctedRelations,
+      movedAddressRelations,
       droppedSpeechStyles,
       droppedReadings,
     };
@@ -457,6 +483,11 @@ export function validateCharacterExtractResult(
   // **姓の検算より後に置く。** 推測で書かれた関係でも「相手の名前」のほうは
   // 本文の呼び名で、同じ姓の人が複数いることの証拠になる
   // （`cleanSharedFamilyNameAliases`）。先に捨てるとその証拠まで消える
+  //
+  // 呼び名を呼称へ移すのも、同じ理由で姓の検算より後。**推測の網より前**に
+  // 置くのは、括弧の外に残した関係語（「教え子」）をふつうの関係として
+  // 検算させるため
+  moveAddressesFromRelations(survived, chunk.text, movedAddressRelations);
   dropSpeculativeRelations(survived, droppedRelations);
   fixRelationDirections(survived, correctedRelations);
 
@@ -521,9 +552,125 @@ export function validateCharacterExtractResult(
     droppedRelativeAliases,
     droppedRelations,
     correctedRelations,
+    movedAddressRelations,
     droppedSpeechStyles,
     droppedReadings,
   };
+}
+
+/**
+ * 関係の欄が丸ごと呼び方になっている形。1つ目の括りが呼び名。
+ *
+ * 実データ（作者の設定資料、関係1,823件を走査、2026-10-03）に出た形だけを並べる：
+ * 「呼び名は『イント君』」「『おにいちゃん』と呼ぶ」「「ヴォイド様」と呼ぶ」。
+ * 括弧の無い「おにいちゃんと呼ぶ相手」も同じ意味なので拾う。
+ *
+ * **「呼ばれる」は入れない。** 「『おにいちゃん』と呼ばれる人物」は相手が
+ * この人物をどう呼ぶかで、置くべきは相手のレコードの呼称である。相手の
+ * レコードが同じ答えにあるとは限らないので、ここでは触らない（関係のまま残る）。
+ */
+const WHOLE_ADDRESS_RELATION_PATTERNS: readonly RegExp[] = [
+  /^呼び(?:名|方)(?:は|：|:)\s*[『「]([^『』「」]+)[』」]$/u,
+  /^[『「]([^『』「」]+)[』」]と呼(?:ぶ|んでいる)(?:相手)?$/u,
+  /^([^『』「」（）()\s、。]{1,15})と呼(?:ぶ|んでいる)(?:相手)?$/u,
+];
+
+/**
+ * 関係語のあとに、括弧で呼び方を添えた形（「教え子（「マイナ先生」と呼ぶ）」
+ * 「父（クソ親父と呼ぶ）」）。1つ目の括りが関係語、2つ目が呼び名。
+ */
+const TRAILING_ADDRESS_RELATION =
+  /^(.+?)[（(][『「]?([^『』「」（）()]+?)[』」]?と呼(?:ぶ|んでいる)[）)]$/u;
+
+/**
+ * 関係の欄に入った呼び名を、呼称へ移す（作者の裁定、2026-10-03「抽出側で直す」）。
+ * **渡した候補を書き換える。**
+ *
+ * AIは「この人物が相手をどう呼ぶか」を関係として書いてくることがある
+ * （実データ `char_008_マイナ様.json` の `{"name":"イント","relation":"呼び名は『イント君』"}`。
+ * 呼称は空だった）。相関図の呼び合いは呼称しか見ないので、図には
+ * 「どちらからの呼び方も記録なし」と出ていた。
+ *
+ * **指示ではなくコードで直す**（実装ルール3）。プロンプトは変えていない——
+ * キャッシュには正規化前の答えが残り、抽出のたびにこの検算を通り直すので、
+ * プロンプトの版を上げずに直せば、AIを呼び直さずに次の抽出から呼称が埋まる
+ * （版を上げるとキャッシュが全部外れ、全話を読み直すことになる。ルール4）。
+ *
+ * 移すのは、次の3つを満たすときだけ：
+ * - 形が上の網に当たる（言い回しで「呼ぶ」と言い切っている）
+ * - **呼び名が本文にそのまま出ている**（AIの書いた呼び名を信用しない）
+ * - 呼び名に自分の名前が入っていない。入っていれば「相手が自分を呼ぶ」形の
+ *   取り違えかもしれず、向きを決められない（相手の名前も入っていれば移す）
+ *
+ * 当たらなかったものは関係のまま残す（これまでと同じ扱い）。
+ */
+function moveAddressesFromRelations(
+  characters: ExtractedCharacter[],
+  chunkText: string,
+  moved: MovedAddressRelationRecord[]
+): void {
+  for (const character of characters) {
+    if (!character.relations || character.relations.length === 0) continue;
+    const ownKey = normalizeForCompare(character.name);
+    const kept: NonNullable<ExtractedCharacter["relations"]> = [];
+    for (const relation of character.relations) {
+      const found = addressInRelation(relation.relation);
+      const term = found?.term.trim() ?? "";
+      const partnerKey = normalizeForCompare(relation.name);
+      const termKey = normalizeForCompare(term);
+      const pointsAtSelf =
+        ownKey.length > 0 &&
+        termKey.includes(ownKey) &&
+        !(partnerKey.length > 0 && termKey.includes(partnerKey));
+      if (!found || !term || !chunkText.includes(term) || pointsAtSelf) {
+        kept.push(relation);
+        continue;
+      }
+
+      const terms = character.addressTerms ?? [];
+      const already = terms.some(
+        (entry) =>
+          normalizeSpacingOnly(entry.targetName) ===
+            normalizeSpacingOnly(relation.name) && entry.term === term
+      );
+      if (!already) {
+        terms.push({
+          targetName: relation.name,
+          term,
+          category: null,
+          context: null,
+          evidence: null,
+        });
+      }
+      character.addressTerms = terms;
+      moved.push({
+        characterName: character.name,
+        partner: relation.name,
+        relation: relation.relation,
+        term,
+        kept: found.kept,
+      });
+      if (found.kept) kept.push({ name: relation.name, relation: found.kept });
+    }
+    character.relations = kept;
+  }
+}
+
+/** 関係の値から呼び名を取り出す。当たらなければ null */
+function addressInRelation(
+  relation: string
+): { term: string; kept: string | null } | null {
+  const value = relation.trim();
+  for (const pattern of WHOLE_ADDRESS_RELATION_PATTERNS) {
+    const term = pattern.exec(value)?.[1];
+    if (term !== undefined) return { term, kept: null };
+  }
+  const trailing = TRAILING_ADDRESS_RELATION.exec(value);
+  if (trailing) {
+    const keptWord = trailing[1].trim();
+    if (keptWord) return { term: trailing[2], kept: keptWord };
+  }
+  return null;
 }
 
 /**
