@@ -67,6 +67,22 @@ async function fileText(session: E2ESession): Promise<string> {
   return (await readFile(path.join(session.manuscriptFolder, EPISODE), "utf8")).replace(/\r\n/g, "\n");
 }
 
+/**
+ * 操作ログ（`.aiwriter/logs/actions.log`）のうち、保存と外からの変更の行。
+ * 落ちたときに「画面が何番の便を送ってから保存を頼んだか」を読むため
+ */
+async function saveLogLines(session: E2ESession): Promise<string> {
+  try {
+    const log = await readFile(path.join(session.workFolder, ".aiwriter", "logs", "actions.log"), "utf8");
+    return log
+      .split(/\r?\n/)
+      .filter((line) => /［保存］|外で変わった|当てられ/.test(line))
+      .join(" ／ ");
+  } catch {
+    return "（操作ログが読めません）";
+  }
+}
+
 /** Ctrl+S を押し、ファイルに `expected` が入るまで待つ */
 async function saveAndWaitFor(session: E2ESession, expected: (text: string) => boolean, label: string) {
   await session.page.keyboard.press("Control+KeyS");
@@ -206,7 +222,7 @@ test("本文の右クリックの品書きに、ルビ・傍点（コマンド�
   });
 });
 
-test(".txt の原稿で《《強調》》の語を選んで Ctrl+Alt+K を押すと、強調の印が外れて字は残る", async () => {
+test(".txt の原稿で《《強調》》の語を選んで Ctrl+Alt+K を押し、待たずに Ctrl+S を押しても、強調の印が外れた字が保存される", async () => {
   await withVsCode(
     "txt の強調を外す",
     [{ name: EPISODE, text: "前の字と《《強調》》と後ろの字。\n" }],
@@ -216,24 +232,35 @@ test(".txt の原稿で《《強調》》の語を選んで Ctrl+Alt+K を押す
       await selectText(frame, "強調");
       await session.page.keyboard.press("Control+Alt+KeyK");
       /*
-        外すのは本体のコマンドが文書へ当て、画面へ送り直す。**画面の傍点（.emphasis）が
-        消えてから保存する**——原稿エディターの Ctrl+S は「画面の字を原稿へ送ってから保存」
-        なので、送り直しが届く前に押すと、画面に残った古い字（傍点つき）で戻してしまう
-        （機械の速さでだけ起きる。最初はタブの未保存の印だけ待って、そうなった）
+        **画面へ送り直しが届くのを待たずに Ctrl+S を押す**（作者の裁定「調べて直す」、
+        2026-10-03。設計書6.25.9）。外すのは本体のコマンドが文書へ当て、少し遅れて
+        （まとめて送るので120ミリ秒ほど）画面へ送り直す。その間に押された Ctrl+S が、
+        画面に残った古い字（傍点つき）を原稿へ送り直して戻していた。
+
+        タブの未保存の印だけは待つ——本体がまだ文書へ当てていないうちに押すのは、
+        作者の手では起きない別の話になる。印は細かく（10ミリ秒ごとに）見て、
+        見えたらすぐ押す（waitUntil の100ミリ秒刻みだと、送り直しが届いてしまう）。
       */
-      await waitUntil(async () => await tabIsDirty(session.page, EPISODE), "Ctrl+Alt+K で文書が変わる（タブが未保存になる）");
-      await waitUntil(
-        async () => (await frame.locator("#compose .emphasis").count()) === 0,
-        "画面の傍点が消える（送り直しが届く）"
-      );
+      const until = Date.now() + 15_000;
+      while (!(await tabIsDirty(session.page, EPISODE))) {
+        if (Date.now() > until) throw new Error("Ctrl+Alt+K で文書が変わりません（タブが未保存になりません）");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      // 押す直前の画面の傍点の数（1なら、送り直しがまだ届いていない＝見たい場面になっている）
+      const emphasisBeforeSave = await frame.locator("#compose .emphasis").count();
+      // 通った回でも、見たい場面で押せたかを読めるように残す（0 なら、この回は場面を外した）
+      console.info(`[E2E] Ctrl+S を押す直前の画面の傍点：${emphasisBeforeSave}`);
       await saveAndWaitFor(session, (text) => !text.includes("《《"), "強調の印が外れてファイルに入る").catch(
         async (error: unknown) => {
           throw new Error(
-            `${String(error)}（ファイル：${JSON.stringify(await fileText(session))}／下の欄：${await footText(frame, "note")}）`
+            `${String(error)}（ファイル：${JSON.stringify(await fileText(session))}／押す直前の画面の傍点：${emphasisBeforeSave}／下の欄：${await footText(frame, "note")}／操作ログ：${await saveLogLines(session)}）`
           );
         }
       );
+      // 保存のあとで画面からの便が遅れて当たり、文書が戻ることもない
+      await waitUntil(async () => (await footText(frame, "note")).includes("保存しました"), "「保存しました」が出る");
       expect(await fileText(session)).toBe("前の字と強調と後ろの字。\n");
+      expect(await tabIsDirty(session.page, EPISODE), "保存のあと、文書がまた未保存になりました（古い字で戻された）").toBe(false);
     }
   );
 });
