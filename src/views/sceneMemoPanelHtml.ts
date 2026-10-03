@@ -18,8 +18,10 @@
  * 並びは**話数 → 行**で、種類では分けない。**同じ行に何件来ても、
  * 場所は1度だけ出す**（`sameLine`）。どちらの行かは `kind` で分かれ、
  * 押せるものも分かれる——付箋は「済み」（本文から消す）、指摘は
- * 「直す」（種類ごとの道へ渡す）と「見送る」（記録を足す）である。
- * **指摘を本文へ当てる口は、この画面には無い。**
+ * 修正案があれば「直す」（拡張機能が提案パネルの［適用］と同じ関数で
+ * 本文へ当てる。作者の裁定 2026-10-03）、無ければ「提案へ」（提案パネルへ
+ * 渡す）と、「見送る」（記録を足す）である。**この画面は本文を直に書かない**
+ * ——頼むだけで、当てるのも戻すのも拡張機能の側である。
  */
 export function buildSceneMemoPanelHtml(
   nonce: string,
@@ -90,6 +92,17 @@ input[type="search"] { flex: 1 1 120px; min-width: 90px; }
   border-bottom: 1px solid var(--vscode-panel-border);
 }
 #notice:empty { display: none; }
+/* ［直す］で当てた直近の1件と［戻す］（設計書6.96.5）。当てた指摘は一覧から
+   消えるので、戻す口は一覧の外のここに置く */
+#fixed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+#fixed[hidden] { display: none; }
+#fixedText { flex: 1 1 auto; min-width: 0; overflow-wrap: break-word; }
 #body { flex: 1; min-height: 0; overflow: auto; padding: 4px 0 32px; }
 #empty { padding: 20px 12px; color: var(--vscode-descriptionForeground); }
 h2 {
@@ -197,6 +210,10 @@ h2 {
   </div>
 </header>
 <div id="notice"></div>
+<div id="fixed" hidden>
+  <span id="fixedText"></span>
+  <button id="undoFix" title="直す前の本文へ戻します（指摘はまた一覧に並びます）">戻す</button>
+</div>
 <div id="body">
   <div id="empty"></div>
   <div id="list"></div>
@@ -217,6 +234,9 @@ const el = {
   query: document.getElementById("query"),
   exportMd: document.getElementById("export"),
   notice: document.getElementById("notice"),
+  fixed: document.getElementById("fixed"),
+  fixedText: document.getElementById("fixedText"),
+  undoFix: document.getElementById("undoFix"),
   empty: document.getElementById("empty"),
   list: document.getElementById("list"),
 };
@@ -244,6 +264,7 @@ el.onlyCurrent.addEventListener("click", function () {
 });
 el.tag.addEventListener("change", sendFilter);
 el.exportMd.addEventListener("click", function () { post("export"); });
+el.undoFix.addEventListener("click", function () { post("undoFix"); });
 
 /**
  * 文字で探すは、打ち終わるのを少し待ってから送る。
@@ -285,8 +306,14 @@ el.list.addEventListener("click", function (event) {
     return;
   }
   if (act === "fix") {
-    // **本文はここでは書き換えない**（設計書6.96.5）。種類ごとの道へ渡す
+    // 修正案のある指摘（設計書6.96.5）。当てるのは拡張機能の側で、
+    // 提案パネルの［適用］と同じ関数を通る。この画面は頼むだけ
     post("fix", { findingId: row.findingId });
+    return;
+  }
+  if (act === "handOver") {
+    // 修正案の無い指摘。直し方は作者が決めるので、提案パネルへ渡す
+    post("handOver", { findingId: row.findingId });
     return;
   }
   if (act === "dismiss") {
@@ -324,18 +351,24 @@ function renderTags() {
 /**
  * 押せるものを組む。**付箋と指摘で違う**（設計書6.96.5）。
  *
- * 付箋は本文から消せる。指摘は本文へ触らず、種類ごとの道へ渡すか、
- * 見送ったことを記録に足すかの2つしかない。
+ * 付箋は本文から消せる。指摘は、修正案があれば［直す］（拡張機能が
+ * 提案パネルと同じ道で当てる）、無ければ［提案へ］、それと［見送る］。
  */
 function renderActions(row) {
   const key = escapeHtml(row.key);
   if (row.kind === "finding") {
     const buttons = [];
-    // 渡す先が無ければ出さない（押しても何も起きない口を作らない）
-    if (row.canFix) {
+    // 修正案があれば［直す］（1手で本文へ当てる）、無ければ［提案へ］。
+    // 口が無ければ出さない（押しても何も起きない口を作らない）
+    if (row.fixAction === "apply") {
       buttons.push(
         '<button class="done" data-act="fix" data-key="' + key +
-          '" title="この指摘を提案の一覧へ渡します（本文はまだ変わりません）">直す</button>'
+          '" title="修正案を本文へ当てます（上に出る［戻す］で元に戻せます）">直す</button>'
+      );
+    } else if (row.fixAction === "handOver") {
+      buttons.push(
+        '<button class="done" data-act="handOver" data-key="' + key +
+          '" title="この指摘を提案パネルへ渡します（直し方は作者が決めます。本文はまだ変わりません）">提案へ</button>'
       );
     }
     buttons.push(
@@ -375,6 +408,9 @@ function render() {
   el.title.textContent = data.title;
   el.counts.textContent = data.countsLabel;
   el.notice.textContent = data.notice;
+  // ［直す］で当てた直近の1件。無ければ帯ごと隠す
+  el.fixed.hidden = !data.fixed;
+  el.fixedText.textContent = data.fixed ? data.fixed.text : "";
   el.onlyCurrent.classList.toggle("on", data.onlyCurrent === true);
   el.onlyCurrent.disabled = !data.hasCurrent;
   el.prev.disabled = data.totalCount === 0;

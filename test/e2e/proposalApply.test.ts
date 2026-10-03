@@ -15,12 +15,17 @@
  * **AI は呼ばない。** 校正の指摘は `.aiwriter/findings.jsonl` へ見本を置く
  * （広報の台本 `promo/fixScene.promo.ts` と同じ手。あちらは撮影用で、検査には入らない）。
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
-import { findingId } from "../../src/models/finding";
-import { composeText, manuscriptFrames, memoPanelFrame, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
+import { composeText, manuscriptFrames, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
+import {
+  OPEN_PROPOSALS_LAUNCH,
+  OPEN_PROPOSALS_PRESS,
+  proposalPanelFrame,
+  writeSampleFinding as placeFinding,
+} from "./support/sampleFinding";
 import { withVsCode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 import { clearNotifications, dialogText, editorGroupTabs } from "./support/workbenchDom";
@@ -29,43 +34,18 @@ const EPISODE = "001_駅.txt";
 const TEXT = ["　終電を逃した駅のホームに、雨の音だけが残っていた。", "　近づいてみると、男は以外にも若かった。", "　ホームの時計が、零時を指していた。", ""].join("\n");
 
 const ORIGINAL = "男は以外にも若かった。";
-const TARGET = "以外";
-const SUGGESTION = "意外";
 const FIXED = "男は意外にも若かった。";
 
 /** 見本の指摘を、製品が読む形（`.aiwriter/findings.jsonl`。models/finding.ts）で置く */
 async function writeSampleFinding(workFolder: string): Promise<void> {
-  const at = TEXT.indexOf(ORIGINAL);
-  if (at < 0) throw new Error("見本の指摘の原文が本文にありません");
-  const file = `本文/${EPISODE}`;
-  const line = JSON.stringify({
-    kind: "finding",
-    id: findingId(file, ORIGINAL, TARGET, SUGGESTION, "typo", "誤字脱字"),
-    // 期限（既定3日）の起点。置くたびに今の時刻にする
-    time: new Date().toISOString(),
-    file,
-    hintLine: TEXT.slice(0, at).split("\n").length,
+  await placeFinding(workFolder, {
+    episode: EPISODE,
+    text: TEXT,
     original: ORIGINAL,
-    target: TARGET,
-    suggestion: SUGGESTION,
-    before: TEXT.slice(Math.max(0, at - 12), at),
-    after: TEXT.slice(at + ORIGINAL.length, at + ORIGINAL.length + 12),
+    target: "以外",
+    suggestion: "意外",
     message: "「思いのほか」の意味なら「意外」です",
-    category: "typo",
-    label: "誤字脱字",
   });
-  const folder = path.join(workFolder, ".aiwriter");
-  await mkdir(folder, { recursive: true });
-  await writeFile(path.join(folder, "findings.jsonl"), line + "\n", "utf8");
-}
-
-/** 提案パネル（右の列の WebView）。目印は［まとめて適用］（`#applyAll`）——この面にしか無い */
-async function proposalPanelFrame(page: Page): Promise<Frame | undefined> {
-  for (const frame of page.frames()) {
-    const has = await frame.evaluate(() => document.getElementById("applyAll") !== null).catch(() => false);
-    if (has) return frame;
-  }
-  return undefined;
 }
 
 /** その話のタブが、どの列にいくつあるか */
@@ -82,20 +62,13 @@ test("原稿エディターで開いたまま提案パネルの［適用］を�
     const frame = await openEpisode(page, EPISODE, "零時を指していた");
     await placeCaretAfter(frame, "終電を逃した");
 
-    // 校正・メモパネル（右の列）を開き、指摘の［直す］で提案パネルへ渡す
-    await page.keyboard.press("Control+Alt+KeyM");
-    let memoPanel: Frame | undefined;
-    await waitUntil(
-      async () => {
-        memoPanel = await memoPanelFrame(page);
-        return memoPanel !== undefined && (await memoPanel.locator('button[data-act="fix"]').count()) > 0;
-      },
-      "校正・メモパネルに指摘の［直す］が並ぶ",
-      30_000
-    );
-    if (!memoPanel) throw new Error("校正・メモパネルが見つかりません");
+    /*
+      提案パネル（右の列）を開く。開いたときに置き場の指摘が並ぶ（`primeSavedFindings`）。
+      0.97.7 までは校正・メモパネルの［直す］で渡していたが、0.97.8 から［直す］は
+      1手で本文へ当てる（作者の裁定 2026-10-03。そちらは `memoFixOneStep.test.ts`）
+    */
     await clearNotifications(page);
-    await memoPanel.locator('button[data-act="fix"]').first().click();
+    await page.keyboard.press(OPEN_PROPOSALS_PRESS);
 
     let proposals: Frame | undefined;
     await waitUntil(
@@ -145,5 +118,5 @@ test("原稿エディターで開いたまま提案パネルの［適用］を�
     expect((await manuscriptFrames(page)).length).toBe(1);
     // ファイルの残りの行は変わっていない
     expect((await readFile(file, "utf8")).replace(/\r\n/g, "\n")).toBe(TEXT.replace(ORIGINAL, FIXED));
-  });
+  }, OPEN_PROPOSALS_LAUNCH);
 });

@@ -1,0 +1,352 @@
+import { beforeEach, describe, expect, test, vi } from "vitest";
+
+/**
+ * 校正・メモパネルの指摘の押し口（設計書6.96.5。作者の裁定 2026-10-03
+ * 「［直す］1手で本文が直る」）。
+ *
+ * - 修正案のある指摘は［直す］——当てる口（`applyFinding`）が呼ばれ、
+ *   提案パネルへは渡さない。当てたら上に［戻す］の帯が出る
+ * - 修正案の無い指摘（矛盾）は［提案へ］——これまでどおり提案パネルへ渡す
+ * - ［戻す］は戻す口（`undoFindingFix`）を呼び、帯を下げる
+ *
+ * 当てる中身（本文・記録）は `proposalPanelFixFromMemo.test.ts` が本物の
+ * 提案パネルで見る。ここは画面からの用件がどの口へ届くかだけを見る。
+ */
+
+const files = new Map<string, Uint8Array>();
+/** 画面へ送ったもの（最後の一覧を見る） */
+const posted: Array<{ type: string; data?: Record<string, unknown> }> = [];
+/** 画面からの用件を受ける耳（パネルが付ける） */
+let receive: ((message: unknown) => void) | undefined;
+
+vi.mock("vscode", () => {
+  const noop = () => undefined;
+  return {
+    commands: { executeCommand: vi.fn() },
+    window: {
+      showWarningMessage: vi.fn(() => Promise.resolve(undefined)),
+      showInformationMessage: vi.fn(() => Promise.resolve(undefined)),
+      showErrorMessage: vi.fn(),
+      activeTextEditor: undefined,
+      activeColorTheme: { kind: 1 },
+      createOutputChannel: () => ({ appendLine: noop, show: noop, dispose: noop }),
+      createWebviewPanel: () => ({
+        webview: {
+          html: "",
+          cspSource: "vscode-webview:",
+          onDidReceiveMessage: (handler: (message: unknown) => void) => {
+            receive = handler;
+            return { dispose: noop };
+          },
+          postMessage: (message: { type: string; data?: Record<string, unknown> }) => {
+            posted.push(message);
+            return Promise.resolve(true);
+          },
+        },
+        onDidDispose: () => ({ dispose: noop }),
+        reveal: noop,
+        dispose: noop,
+      }),
+    },
+    workspace: {
+      getConfiguration: () => ({ get: (_k: string, d?: unknown) => d }),
+      fs: {
+        readFile: vi.fn(async (uri: { fsPath: string }) => {
+          const bytes = files.get(uri.fsPath);
+          if (!bytes) throw new Error("FileNotFound");
+          return bytes;
+        }),
+        writeFile: vi.fn(async (uri: { fsPath: string }, bytes: Uint8Array) => {
+          files.set(uri.fsPath, bytes);
+        }),
+        createDirectory: vi.fn(async () => undefined),
+      },
+    },
+    Uri: { file: (p: string) => ({ fsPath: p }) },
+    ViewColumn: { One: 1, Beside: -2 },
+    ColorThemeKind: { Light: 1, Dark: 2, HighContrast: 3 },
+  };
+});
+
+const FILE_PATH = "C:/小説/いじめられっ子/本文/003.txt";
+const TEXT = "　彼は走つた。\n　夜が明けた。\n";
+
+vi.mock("../../../src/core/scanner", () => ({
+  scanWork: vi.fn(async () => ({
+    episodes: [
+      {
+        filePath: "C:/小説/いじめられっ子/本文/003.txt",
+        fileName: "003.txt",
+        hasConflictMarkers: false,
+      },
+    ],
+  })),
+}));
+
+vi.mock("../../../src/core/textFile", () => ({
+  readTextFile: vi.fn(async () => ({
+    text: "　彼は走つた。\n　夜が明けた。\n",
+    hash: "h",
+    encoding: "utf8",
+    eol: "\n",
+    bom: false,
+  })),
+  writeTextFilePreservingFormat: vi.fn(async () => ({ ok: true })),
+}));
+
+vi.mock("../../../src/core/workFormatStore", () => ({
+  readWorkFormat: vi.fn(async () => ({})),
+}));
+
+vi.mock("../../../src/core/episodeLabel", () => ({
+  collectedLabelIndex: () => ({ labelAt: () => "第3話" }),
+  episodeTitle: () => "",
+  formatChapterLabel: () => "第3話",
+  isCollectedFile: () => false,
+}));
+
+vi.mock("../../../src/features/manuscriptEditor", () => ({
+  lastManuscriptCaret: () => undefined,
+  removeMemoLineInOpenManuscript: vi.fn(async () => ({ kind: "notOpen" })),
+}));
+
+vi.mock("../../../src/features/revealLocation", () => ({
+  revealTextLocation: vi.fn(async () => undefined),
+}));
+
+vi.mock("../../../src/views/openDocument", () => ({
+  openGeneratedMarkdown: vi.fn(async () => undefined),
+}));
+
+import { openSceneMemoPanel } from "../../../src/features/sceneMemoPanel";
+import { FindingStore } from "../../../src/features/findingStore";
+import { findingId, type Finding } from "../../../src/models/finding";
+import type { WorkEntry } from "../../../src/models/types";
+
+const FILE = "本文/003.txt";
+
+function stored(overrides: Partial<Finding>): Finding {
+  return {
+    id: "",
+    time: new Date().toISOString(),
+    file: FILE,
+    hintLine: 1,
+    original: "",
+    target: "",
+    suggestion: "",
+    before: "",
+    after: "",
+    message: "",
+    category: "typo",
+    label: "誤字脱字",
+    ...overrides,
+  };
+}
+
+const typo = stored({
+  id: findingId(FILE, "　彼は走つた。", "走つた", "走った", "typo", "誤字脱字"),
+  original: "　彼は走つた。",
+  target: "走つた",
+  suggestion: "走った",
+  message: "促音の誤り",
+});
+
+const contradiction = stored({
+  id: findingId(FILE, "　夜が明けた。", "", "", "contradiction", "矛盾"),
+  hintLine: 2,
+  original: "　夜が明けた。",
+  message: "前の話では昼だった",
+  category: "contradiction",
+  label: "矛盾",
+});
+
+/** 1つのテストで1つの作品（パネルは作品ごとに1枚なので、番号を変える） */
+let workCount = 0;
+function newWork(): WorkEntry {
+  workCount += 1;
+  return {
+    id: `w${workCount}`,
+    title: "いじめられっ子",
+    folderPath: "C:/小説/いじめられっ子",
+    registeredAt: "2026-10-03T00:00:00.000Z",
+  };
+}
+
+const context = { subscriptions: [] as unknown[] };
+
+async function settle(): Promise<void> {
+  for (let round = 0; round < 10; round++) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+function lastData(): Record<string, unknown> {
+  const memos = posted.filter((message) => message.type === "memos");
+  return memos[memos.length - 1]?.data ?? {};
+}
+
+function rowOf(id: string): Record<string, unknown> | undefined {
+  const rows = (lastData().rows ?? []) as Array<Record<string, unknown>>;
+  return rows.find((row) => row.findingId === id);
+}
+
+beforeEach(async () => {
+  files.clear();
+  posted.length = 0;
+  receive = undefined;
+  await new FindingStore(newWorkForStore()).record([typo, contradiction]);
+});
+
+/** 置き場の場所は作品フォルダーで決まる（番号は関係ない） */
+function newWorkForStore(): WorkEntry {
+  return {
+    id: "store",
+    title: "いじめられっ子",
+    folderPath: "C:/小説/いじめられっ子",
+    registeredAt: "2026-10-03T00:00:00.000Z",
+  };
+}
+
+/**
+ * 偽の口。**本物と同じく、置き場に判断を足す**——当てた指摘は一覧から消え、
+ * 戻すとまた並ぶ（帯の出し入れはこれを見て決まる）。
+ */
+function deps() {
+  const decide = async (id: string, status: "accepted" | "pending") => {
+    await new FindingStore(newWorkForStore()).decide([
+      { findingId: id, time: new Date().toISOString(), status, note: "" },
+    ]);
+  };
+  return {
+    applyFinding: vi.fn(async (_work: WorkEntry, finding: { id: string }) => {
+      await decide(finding.id, "accepted");
+      return { ok: true as const };
+    }),
+    undoFindingFix: vi.fn(async (_work: WorkEntry, finding: { id: string }) => {
+      await decide(finding.id, "pending");
+      return { ok: true as const };
+    }),
+    handOverFinding: vi.fn(async () => true),
+  };
+}
+
+describe("修正案の有無で、押し口が分かれる", () => {
+  test("修正案のある指摘は［直す］、無い指摘は［提案へ］", async () => {
+    const work = newWork();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, deps());
+
+    expect(rowOf(typo.id)?.fixAction).toBe("apply");
+    expect(rowOf(contradiction.id)?.fixAction).toBe("handOver");
+    expect(lastData().fixed).toBeNull();
+  });
+
+  test("当てる口が無ければ、修正案があっても［提案へ］（これまでの形）", async () => {
+    const work = newWork();
+    const { handOverFinding } = deps();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, { handOverFinding });
+
+    expect(rowOf(typo.id)?.fixAction).toBe("handOver");
+  });
+});
+
+describe("［直す］は当てる口へ、［提案へ］は提案パネルへ", () => {
+  test("［直す］で当てる口が呼ばれ、提案パネルへは渡さない。帯に［戻す］が出る", async () => {
+    const work = newWork();
+    const given = deps();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, given);
+
+    receive?.({ type: "fix", findingId: typo.id });
+    await settle();
+
+    expect(given.applyFinding).toHaveBeenCalledTimes(1);
+    expect(given.applyFinding).toHaveBeenCalledWith(
+      work,
+      expect.objectContaining({ id: typo.id, line: 1, filePath: FILE_PATH })
+    );
+    expect(given.handOverFinding).not.toHaveBeenCalled();
+    expect(String((lastData().fixed as { text: string }).text)).toContain(
+      "「走つた」→「走った」"
+    );
+  });
+
+  test("［提案へ］は提案パネルへ渡し、本文へは当てない", async () => {
+    const work = newWork();
+    const given = deps();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, given);
+
+    receive?.({ type: "handOver", findingId: contradiction.id });
+    await settle();
+
+    expect(given.handOverFinding).toHaveBeenCalledTimes(1);
+    expect(given.applyFinding).not.toHaveBeenCalled();
+  });
+
+  test("修正案の無い指摘に［直す］が届いても、当てずに提案パネルへ渡す", async () => {
+    const work = newWork();
+    const given = deps();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, given);
+
+    receive?.({ type: "fix", findingId: contradiction.id });
+    await settle();
+
+    expect(given.applyFinding).not.toHaveBeenCalled();
+    expect(given.handOverFinding).toHaveBeenCalledTimes(1);
+  });
+
+  test("当てられなかったら帯を出さない", async () => {
+    const work = newWork();
+    const given = {
+      ...deps(),
+      applyFinding: vi.fn(async () => ({ ok: false as const, reason: "本文が変わっています。" })),
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, given);
+
+    receive?.({ type: "fix", findingId: typo.id });
+    await settle();
+
+    expect(lastData().fixed).toBeNull();
+  });
+});
+
+describe("［戻す］", () => {
+  test("戻す口を呼び、帯を下げる", async () => {
+    const work = newWork();
+    const given = deps();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, given);
+    receive?.({ type: "fix", findingId: typo.id });
+    await settle();
+
+    receive?.({ type: "undoFix" });
+    await settle();
+
+    expect(given.undoFindingFix).toHaveBeenCalledWith(
+      work,
+      expect.objectContaining({ id: typo.id })
+    );
+    expect(lastData().fixed).toBeNull();
+  });
+
+  test("戻す口が無ければ帯を出さない（押しても何も起きない口を作らない）", async () => {
+    const work = newWork();
+    const { applyFinding, handOverFinding } = deps();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, { applyFinding, handOverFinding });
+    receive?.({ type: "fix", findingId: typo.id });
+    await settle();
+
+    expect(lastData().fixed).toBeNull();
+  });
+});
+
+// 本文の見本（この試験の偽の本文と、指摘の原文が合っていることの念押し）
+test("見本の本文に、指摘の原文がある", () => {
+  expect(TEXT).toContain(typo.original);
+  expect(TEXT).toContain(contradiction.original);
+});

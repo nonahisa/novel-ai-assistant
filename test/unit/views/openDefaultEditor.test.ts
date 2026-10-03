@@ -38,7 +38,8 @@ import { FileSystemError, Uri, commands, workspace } from "../support/vscodeStub
  */
 const NEEDS_EDITOR = new Map([
   ["src/features/ruby.ts", "選んだ範囲へルビを差し込む"],
-  ["src/features/workChatPanel.ts", "相談で引用した箇所を選択する"],
+  // 相談の「そこを見せて」は 0.97.8 から本文へ飛ぶ1本の道（`revealLocation.ts`）を
+  // 通り、範囲も選ばなくなったので、例外から外した
 ]);
 
 function sources(dir: string, out: string[] = []): string[] {

@@ -468,6 +468,16 @@ export type RegisterForeshadow = (
 ) => Promise<{ ok: boolean; reason?: string }>;
 
 /**
+ * 校正・メモパネルから当てた・戻した結末（設計書6.96.5）。
+ *
+ * `reason` の無い失敗は、作者が確認の窓で止めたとき（言い直さない）。
+ * `detail` は済んだときの添え書き（編集者モードの「提案として送りました」など）。
+ */
+export type FindingFixOutcome =
+  | { ok: true; detail?: string }
+  | { ok: false; reason?: string };
+
+/**
  * 再チェックが触るところだけを取り出した形（P-23）。
  *
  * **誤字脱字の指摘と矛盾では、持っている項目が違う**（あちらは置き換え、
@@ -1254,6 +1264,103 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       }
     }
     if (changed) this.postItems();
+  }
+
+  /**
+   * 校正・メモパネルの［直す］——置き場の1件を、**［適用］と同じ関数**で本文へ当てる
+   * （設計書6.96.5。作者の裁定 2026-10-03「［直す］1手で本文が直る」）。
+   *
+   * 行は呼ぶ側（`primeFindings.applyFindingFromMemo`）が先にこの一覧へ置いてある。
+   * ここで写しの適用処理を書かず `applyIssue` を呼ぶので、検算・競合マーカーの
+   * 関門・校閲ロック・`writeTextFilePreservingFormat`・適用後の読み直し・
+   * 採否の記録（置き場の判断の行と `history/ai-verdicts.jsonl`）がそのまま揃う。
+   *
+   * **画面は前へ出さない**（1手で済ませる裁定）。行は［適用］を押したときと同じく
+   * 「適用済み・［戻す］」になり、残り件数から外れる。
+   */
+  async applyFinding(
+    work: WorkEntry,
+    category: string,
+    findingId: string
+  ): Promise<FindingFixOutcome> {
+    return this.runOnFindingRow(work, category, findingId, "applied", (row) =>
+      this.applyIssue(row.id)
+    );
+  }
+
+  /**
+   * 校正・メモパネルの［戻す］——当てた1件を、提案パネルの［戻す］と同じ関数で戻す
+   * （設計書6.96.5）。
+   *
+   * 既に提案パネルの側で戻してあれば、何もせずに「戻っている」と返す。
+   */
+  async undoFinding(
+    work: WorkEntry,
+    category: string,
+    findingId: string
+  ): Promise<FindingFixOutcome> {
+    return this.runOnFindingRow(work, category, findingId, "pending", (row) =>
+      this.undoIssue(row.id)
+    );
+  }
+
+  /**
+   * その作品・その分類の一覧で、置き場の番号に当たる行へ `run` を掛ける。
+   *
+   * **`applyIssue`・`undoIssue` は「いま出している作品と分類」を前提にしている**
+   * （記録の鍵を `this.category` から作る）。分類が違うまま呼ぶと判断の行が
+   * 別の番号へ足され、校正・メモパネルから消えない。そこで一度その分類を出し、
+   * 終わったら作者が見ていた作品と分類へ戻す。
+   *
+   * **行は番号ではなく置き場での番号（`identitiesOfRow`）で探す。** 同じ指摘が
+   * 検知の結果として既に並んでいれば、置いた行は畳まれて検知の行が残る
+   * （`foldSameFindings`）。
+   */
+  private async runOnFindingRow(
+    work: WorkEntry,
+    category: string,
+    findingId: string,
+    wanted: "applied" | "pending",
+    run: (row: ProposalViewItem) => Promise<void>
+  ): Promise<FindingFixOutcome> {
+    this.stashCurrent();
+    const previous = this.work
+      ? { work: this.work, category: this.category }
+      : undefined;
+    this.workBucketsOf(work);
+    this.work = work;
+    this.activate(category);
+    try {
+      const row = this.items.find((item) =>
+        identitiesOfRow(work.folderPath, category, item).includes(findingId)
+      );
+      if (!row) {
+        return {
+          ok: false,
+          reason: "この指摘が提案の一覧に見つかりませんでした。もう一度検知をやり直してください。",
+        };
+      }
+      await run(row);
+      if (row.status === wanted) {
+        return row.statusDetail
+          ? { ok: true, detail: row.statusDetail }
+          : { ok: true };
+      }
+      // 理由が無いのは、作者が確認の窓で止めたとき（校閲ロック）。言い直さない
+      return row.statusDetail
+        ? { ok: false, reason: row.statusDetail }
+        : { ok: false };
+    } finally {
+      this.stashCurrent();
+      if (
+        previous &&
+        (this.keyOf(previous.work) !== this.keyOf(work) ||
+          previous.category !== category)
+      ) {
+        this.work = previous.work;
+        this.activate(previous.category);
+      }
+    }
   }
 
   /** その分類を画面に出す（表示中の作品の中で） */

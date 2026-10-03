@@ -116,6 +116,25 @@ export function findingRestoreOf(
 }
 
 /**
+ * 校正・メモパネルの［直す］1手で本文へ当ててよい指摘か（設計書6.96.5。
+ * 作者の裁定 2026-10-03「［直す］1手で本文が直る」）。
+ *
+ * **本文の置き換えの形で、修正案があるものだけ。** 矛盾・逸脱は直し方を
+ * 作者が決めるので当てる道が無く、推敲には修正案の無い指摘がある
+ * （提案パネルでも［適用］を出さない——`proposalPanelHtml.ts` の `hasFix`）。
+ * 当てられないものは、これまでどおり提案パネルへ渡す。
+ */
+export function findingAppliesDirectly(finding: {
+  category: FindingCategory;
+  label?: string;
+  suggestion: string;
+}): boolean {
+  return (
+    findingRestoreOf(finding)?.shape === "item" && finding.suggestion !== ""
+  );
+}
+
+/**
  * 残す1件の中身（提案パネルの形から、残す形への中継ぎ）。
  *
  * **記録するときも、判断を足すときも、ここを通す。** 番号（`id`）は

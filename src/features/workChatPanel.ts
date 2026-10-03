@@ -6,6 +6,7 @@ import {
 } from "../core/plotDoc";
 import { fromUri } from "../core/paths";
 import { readPlotText } from "../core/plotFile";
+import { revealTextLocation, type RevealInManuscript } from "./revealLocation";
 import {
   composeSectionContents,
   describePlotDialogueEnd,
@@ -468,6 +469,13 @@ export interface ChatRunner {
     recordId: string,
     notes?: string
   ): Promise<void>;
+  /**
+   * 原稿エディターで本文の行を示す口（「そこを見せて」。0.97.8）。
+   *
+   * **飛び先の経路は `revealLocation.ts` の1本だけ**（6.37.4）。渡されなければ
+   * 素のエディターで開く（試験など）。
+   */
+  revealInManuscript?: RevealInManuscript;
 }
 
 /** 「画面で案内してもらう」の誘い（`tourOffer` の戻り値の中身） */
@@ -2791,31 +2799,33 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     const target = resolved.filePath;
 
     try {
+      // 本文は照合のために読むだけ。**開くのは下の `revealTextLocation`**
       const document = await vscode.workspace.openTextDocument(
         path.toUri(target)
       );
-      const editor = await vscode.window.showTextDocument(document, {
-        preview: false,
-        // 相談を続けられるよう、パネルからフォーカスを奪わない
-        preserveFocus: true,
-      });
+      const found = staged.locate.text
+        ? findTextRange(document.getText(), staged.locate.text)
+        : undefined;
 
       /*
-        **合本は、開いただけでは着いたことにならない。** 219話が1ファイルに
-        入っているので、先頭が映ったままでは作者は目的の話を探すことになる
-        （設計書6.25.5）。引き当てた話の本文の先頭へ寄せてから、引用文の
-        照合へ進む（引用が見つかればそちらが優先される）。
+        **開く道は本文へ飛ぶ1本（`revealLocation.ts`）に寄せる**（0.97.8）。
+        以前は列を決めずに `showTextDocument` で素のエディターを開いていたため、
+        原稿エディターで開いている話を指すと、原稿の列に素のタブが重なった
+        （0.97.7 の［適用］と同じ形）。原稿エディターが引き受ければその画面のまま
+        行頭にカーソルを置いて光らせ（0.97.2）、引き受けなければ素のエディターを
+        原稿の列に開く。
+
+        **合本は、開いただけでは着いたことにならない**（設計書6.25.5）。
+        引用が見つからなければ、引き当てた話の本文の先頭へ寄せる。
       */
-      if (resolved.line !== undefined) {
-        const at = new vscode.Range(
-          resolved.line - 1,
-          0,
-          resolved.line - 1,
-          0
-        );
-        editor.selection = new vscode.Selection(at.start, at.start);
-        editor.revealRange(at, vscode.TextEditorRevealType.InCenter);
-      }
+      const line = found ? found.line + 1 : (resolved.line ?? 1);
+      await revealTextLocation(
+        target,
+        line,
+        this.runner.revealInManuscript,
+        "相談の「そこを見せて」",
+        staged.work
+      );
 
       if (!staged.locate.text) {
         this.postAll({
@@ -2829,7 +2839,6 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         return;
       }
 
-      const found = findTextRange(document.getText(), staged.locate.text);
       if (!found) {
         this.postAll({
           type: "locateFailed",
@@ -2841,15 +2850,26 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
         return;
       }
 
-      const range = new vscode.Range(
-        found.line,
-        found.character,
-        found.endLine,
-        found.endCharacter
+      /*
+        素のエディターで開いたときは、引用の範囲に色を付ける。**選択はしない**
+        ——選んだまま打つと、その範囲が打った字に置き換わる（作者の裁定、
+        2026-10-03。設計書6.25.11）。原稿エディターは行を光らせている
+      */
+      const editor = vscode.window.visibleTextEditors.find(
+        (candidate) =>
+          candidate.document.uri.toString() === document.uri.toString()
       );
-      editor.selection = new vscode.Selection(range.start, range.end);
-      editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-      this.applyHighlight(editor, range);
+      if (editor) {
+        this.applyHighlight(
+          editor,
+          new vscode.Range(
+            found.line,
+            found.character,
+            found.endLine,
+            found.endCharacter
+          )
+        );
+      }
 
       this.postAll({
         type: "locateDone",

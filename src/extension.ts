@@ -110,8 +110,10 @@ import {
 } from "./features/applyPendingUpdates";
 // 数日残してある指摘を、開いたときに提案パネルへ戻す（設計書6.96.4）
 import {
+  applyFindingFromMemo,
   handOverFinding,
   primeSavedFindings,
+  undoFindingFromMemo,
 } from "./features/primeFindings";
 // 古い指摘を片づける（設計書6.96.4）。**findings.jsonl を書き直す唯一の道**
 import {
@@ -2277,12 +2279,9 @@ export async function activate(
     revealInManuscript: (filePath: string, line: number) =>
       manuscriptProvider.revealLine(filePath, line),
     /*
-      「直す」——AIの指摘を**種類ごとの道**（提案パネル）へ渡す（設計書6.96.5）。
-
-      **シーンメモの側は本文を書き換えない。** 当てるのは提案パネルの既存の
-      処理で、ここがするのは受け渡しだけである。組み立てはそちらと同じ
-      `features/primeFindings.ts` を通す——写しを作ると、戻し方が片方だけ
-      直る日が来る。
+      ［提案へ］——修正案の無いAIの指摘を**種類ごとの道**（提案パネル）へ渡す
+      （設計書6.96.5）。組み立ては `features/primeFindings.ts` を通す——写しを
+      作ると、戻し方が片方だけ直る日が来る。
 
       **渡したら提案パネルを前へ出す。** 静かに置くだけだと、押しても何も
       起きなかったようにしか見えない（提案パネルは右の列にあり、ほかのタブの
@@ -2293,6 +2292,15 @@ export async function activate(
       proposalPanel.reveal();
       return true;
     },
+    /*
+      ［直す］——修正案のある指摘を1手で本文へ当てる（作者の裁定 2026-10-03）。
+      当てるのも戻すのも提案パネルの［適用］［戻す］と同じ関数。
+      **提案パネルは前へ出さない**（1手で済ませる裁定）
+    */
+    applyFinding: (work, finding) =>
+      applyFindingFromMemo(work, proposalPanel, finding),
+    undoFindingFix: (work, finding) =>
+      undoFindingFromMemo(work, proposalPanel, finding),
     // シーンメモで見送ったものを、提案の一覧からも下げる（6.96.5）
     noteFindingDismissed: (work, findingId) =>
       proposalPanel.noteFindingDismissed(work, findingId),
@@ -2491,6 +2499,9 @@ export async function activate(
   // （相談パネルとメニューの取り込みで共有する。`backupPickFolder.ts`）
   initBackupPickFolder(verifiedState(context.globalState));
   const workChatPanel = new WorkChatPanel(registry, aiRegistry, {
+    // 「そこを見せて」も本文へ飛ぶ1本の道を通る（`revealLocation.ts`。0.97.8）
+    revealInManuscript: (filePath: string, line: number) =>
+      manuscriptProvider.revealLine(filePath, line),
     run: async (work, kind, filePath) => {
       // 既にコマンドとして登録されているものへ渡す。
       // **ここで処理を書き直さない。** 二重に持つと、片方だけ直したときに

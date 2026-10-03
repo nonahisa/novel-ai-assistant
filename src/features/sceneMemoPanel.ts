@@ -43,7 +43,8 @@ import {
   type PlacedFinding,
 } from "../core/sceneMemoRows";
 import { locateFindings } from "../core/findingLocation";
-import { findingFileKey } from "../core/findingSource";
+import { findingAppliesDirectly, findingFileKey } from "../core/findingSource";
+import type { FindingFixOutcome } from "./proposalPanel";
 import {
   FindingStore,
   findingsRetentionDays,
@@ -84,10 +85,12 @@ import {
  * `writeTextFilePreservingFormat`**（ハッシュ照合つき）。
  * `atomicWriteFile` を直に呼ぶ道は作らない（規則1・6.40.6）。
  *
- * **AIの指摘を本文へ当てる口は、この画面には無い**（6.96.5）。適用は
- * 種類ごとの道（提案パネル）を通す——6.11.1 の「3つの形を同じ配列へ
- * 混ぜない」は、本文の適用処理が設定資料の更新を掴んで壊れるのを防ぐため
- * にある。ここで本文へ書く道を作ると、その線を画面の側から破ることになる。
+ * **AIの指摘を本文へ当てる処理は、この画面には書かない**（6.96.5）。
+ * 修正案のある指摘の［直す］は1手で本文へ当たるが（作者の裁定、2026-10-03）、
+ * 当てるのは提案パネルの［適用］と同じ関数である（`deps.applyFinding`）。
+ * 6.11.1 の「3つの形を同じ配列へ混ぜない」は、本文の適用処理が設定資料の
+ * 更新を掴んで壊れるのを防ぐためにある。ここに写しの適用処理を作ると、
+ * その線を画面の側から破ることになる。
  */
 
 const openPanels = new Map<string, SceneMemoPanel>();
@@ -109,20 +112,39 @@ export interface SceneMemoDeps {
    */
   revealInManuscript?: RevealInManuscript;
   /**
-   * AIの指摘を、**種類ごとの道**（提案パネル）へ渡す口（設計書6.96.5）。
+   * 修正案の無いAIの指摘（矛盾・逸脱など）を、**種類ごとの道**（提案パネル）へ
+   * 渡す口（設計書6.96.5）。画面のボタンは［提案へ］。
    *
-   * **この画面は本文を書き換えない。** 「直す」は指摘を提案パネルへ
-   * 送るだけで、当てるのは向こうの既存の処理である——本文への適用を
-   * ここへ書き直すと、6.11.1 で分けたはずの3つの形が画面の側で
-   * また1つになる。
+   * 直し方は作者が決めるので、ここでは本文に触らない。
    *
-   * **渡されなければ「直す」を出さない。** 押しても何も起きない口を
+   * **渡されなければ［提案へ］を出さない。** 押しても何も起きない口を
    * 作らない（この作品の決まり）。
    */
   handOverFinding?: (
     work: WorkEntry,
     finding: PlacedFinding
   ) => Promise<boolean> | boolean;
+  /**
+   * 修正案のあるAIの指摘を、1手で本文へ当てる口（画面のボタンは［直す］。
+   * 作者の裁定 2026-10-03「［直す］1手で本文が直る」）。
+   *
+   * **当てるのは提案パネルの［適用］と同じ関数**（`primeFindings.applyFindingFromMemo`）。
+   * 本文への適用をここへ書き直すと、検算・校閲ロック・記録が片方だけ直る日が来る。
+   *
+   * 渡されなければ、修正案のある指摘も［提案へ］で渡す（これまでの形）。
+   */
+  applyFinding?: (
+    work: WorkEntry,
+    finding: PlacedFinding
+  ) => Promise<FindingFixOutcome>;
+  /**
+   * ［直す］で当てた1件を戻す口（提案パネルの［戻す］と同じ関数）。
+   * 渡されなければ、この画面に［戻す］を出さない（提案パネルの［戻す］は効く）。
+   */
+  undoFindingFix?: (
+    work: WorkEntry,
+    finding: PlacedFinding
+  ) => Promise<FindingFixOutcome>;
   /**
    * この画面で退けたことを、提案パネルへ伝える口（設計書6.96.5）。
    *
@@ -401,8 +423,12 @@ type PanelMessage =
   | { type: "prev" }
   | { type: "reveal"; filePath: string; line: number }
   | { type: "done"; filePath: string; line: number; raw: string }
-  /** AIの指摘を、種類ごとの道（提案パネル）へ渡す（設計書6.96.5） */
+  /** 修正案のあるAIの指摘を、提案パネルの［適用］と同じ道で本文へ当てる（6.96.5） */
   | { type: "fix"; findingId: string }
+  /** 修正案の無いAIの指摘を、種類ごとの道（提案パネル）へ渡す（設計書6.96.5） */
+  | { type: "handOver"; findingId: string }
+  /** ［直す］で当てた直近の1件を戻す */
+  | { type: "undoFix" }
   /** AIの指摘を退ける。**追記で残す**だけで、指摘の行は書き換えない */
   | { type: "dismissFinding"; findingId: string }
   | { type: "filter"; onlyCurrent: boolean; tag: string; query: string }
@@ -440,6 +466,15 @@ class SceneMemoPanel {
   private onlyCurrent = false;
   private tag = "";
   private query = "";
+
+  /**
+   * ［直す］で当てた直近の1件（上の帯に「直しました ［戻す］」を出す）。
+   *
+   * **一覧の行には置けない**——当てた指摘は判断が済み、一覧から消える。
+   * 直近1件だけを持つ。それより前のものは提案パネルの［戻す］で戻せる
+   * （行が「適用済み」で残っている）。
+   */
+  private lastFixed: PlacedFinding | null = null;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -521,6 +556,12 @@ class SceneMemoPanel {
       this.order = collected.order;
       this.notices = collected.notices;
       await this.loadLabels(collected.collectedTexts);
+      // **提案パネルの［戻す］で戻されたら、帯を下げる**（指摘がまた並んでいる）。
+      // 残すと、もう戻っているものに［戻す］が出たままになる
+      const fixed = this.lastFixed;
+      if (fixed && this.findings.some((finding) => finding.id === fixed.id)) {
+        this.lastFixed = null;
+      }
       // 消えた付箋を光らせたままにしない
       if (!this.memos.some((memo) => memoKey(memo) === this.activeKey)) {
         this.activeKey = "";
@@ -604,7 +645,13 @@ class SceneMemoPanel {
           await this.markDone(message.filePath, message.line, message.raw);
           return;
         case "fix":
+          await this.fix(message.findingId);
+          return;
+        case "handOver":
           await this.handOver(message.findingId);
+          return;
+        case "undoFix":
+          await this.undoFix();
           return;
         case "dismissFinding":
           await this.dismissFinding(message.findingId);
@@ -729,12 +776,65 @@ class SceneMemoPanel {
   }
 
   /**
-   * 「直す」——AIの指摘を、**種類ごとの道**へ渡す（設計書6.96.5）。
+   * ［直す］——修正案のある指摘を、1手で本文へ当てる（設計書6.96.5。
+   * 作者の裁定 2026-10-03「［直す］1手で本文が直る」）。
    *
-   * **ここでは本文へ1文字も書かない。** 当てるのは提案パネルの既存の
-   * 処理で、こちらがするのは「いまの位置に直した1件を手渡す」ことだけ
-   * である。位置は開くたびに探し直しているので、**保存してある
-   * `hintLine` ではなく、いまの行**を渡す（6.96.3）。
+   * **当てるのは提案パネルの［適用］と同じ関数**（`deps.applyFinding`）。
+   * ここに写しの適用処理を書かない。位置は**保存してある `hintLine` ではなく、
+   * いまの行**を渡す（6.96.3）。
+   *
+   * 当てたら置き場に「採った」が足され、一覧から消える（読み直しは向こうが
+   * 知らせてくるが、ここでも読み直す——知らせは開いているパネルにしか届かない）。
+   */
+  private async fix(findingId: string): Promise<void> {
+    const finding = this.findings.find((item) => item.id === findingId);
+    if (!finding) return;
+    const applyFinding = this.deps.applyFinding;
+    // 当てる口が無い・当てられない種類は、これまでどおり提案パネルへ渡す
+    if (!applyFinding || !findingAppliesDirectly(finding)) {
+      await this.handOver(findingId);
+      return;
+    }
+
+    const outcome = await applyFinding(this.work, finding);
+    if (outcome.ok) {
+      this.lastFixed = finding;
+      if (outcome.detail) void vscode.window.showInformationMessage(outcome.detail);
+    } else if (outcome.reason) {
+      void vscode.window.showWarningMessage(
+        `この指摘を本文へ当てられませんでした。${outcome.reason}`
+      );
+    }
+    await this.load();
+  }
+
+  /**
+   * 上の帯の［戻す］——［直す］で当てた直近の1件を戻す（設計書6.96.5）。
+   *
+   * **戻すのは提案パネルの［戻す］と同じ関数**（`deps.undoFindingFix`）。
+   * 戻すと置き場に「戻した」が足され、その指摘がまた一覧に並ぶ。
+   */
+  private async undoFix(): Promise<void> {
+    const fixed = this.lastFixed;
+    const undo = this.deps.undoFindingFix;
+    if (!fixed || !undo) return;
+    const outcome = await undo(this.work, fixed);
+    if (outcome.ok) {
+      this.lastFixed = null;
+    } else if (outcome.reason) {
+      void vscode.window.showWarningMessage(
+        `直したところを戻せませんでした。${outcome.reason}`
+      );
+    }
+    await this.load();
+  }
+
+  /**
+   * ［提案へ］——修正案の無い指摘を、**種類ごとの道**へ渡す（設計書6.96.5）。
+   *
+   * **ここでは本文へ1文字も書かない。** 直し方は作者が決める種類なので、
+   * 提案パネルへ「いまの位置に直した1件」を手渡すだけである。位置は
+   * **保存してある `hintLine` ではなく、いまの行**を渡す（6.96.3）。
    *
    * 「採った」の記録は、**本文へ当てた側が残す**。ここで先に書くと、
    * 作者が提案パネルで見送っても「採った」ことになる。
@@ -930,6 +1030,15 @@ class SceneMemoPanel {
         activeKey: this.activeKey,
         totalCount: this.memos.length,
         notice: this.notices.join(" "),
+        // ［直す］で当てた直近の1件。戻す口が無ければ帯も出さない
+        fixed:
+          this.lastFixed && this.deps.undoFindingFix
+            ? {
+                text: `${findingHeadline(this.lastFixed)}に直しました（${
+                  this.labelAt(this.lastFixed.filePath).label
+                }　${this.lastFixed.line}行目）`,
+              }
+            : null,
         emptyMessage:
           total === 0
             ? `この作品にメモはありません。${MEMO_HINT}（読者向けの出力とAIには渡りません）。`
@@ -1006,11 +1115,25 @@ class SceneMemoPanel {
       raw: "",
       chapterLabel: this.labelAt(finding.filePath).label,
       title: this.labelAt(finding.filePath).title,
-      // **渡す先が無ければ「直す」を出さない**（押しても何も起きない口を
-      // 作らない）。見送りはこの画面だけで完結するので、常に出る
-      canFix: this.deps.handOverFinding !== undefined,
+      // 修正案があれば［直す］（1手で当てる）、無ければ［提案へ］（6.96.5）。
+      // **口が無ければ出さない**（押しても何も起きない口を作らない）。
+      // 見送りはこの画面だけで完結するので、常に出る
+      fixAction: this.fixActionOf(finding),
       section,
     };
+  }
+
+  /**
+   * 指摘の行に出す押し口（設計書6.96.5）。
+   *
+   * - `"apply"`：［直す］。修正案があり、当てる口が渡されているとき
+   * - `"handOver"`：［提案へ］。修正案が無い（または当てる口が無い）とき
+   * - `""`：どちらの口も無い
+   */
+  private fixActionOf(finding: PlacedFinding): "apply" | "handOver" | "" {
+    if (this.deps.applyFinding && findingAppliesDirectly(finding)) return "apply";
+    if (this.deps.handOverFinding) return "handOver";
+    return "";
   }
 
   /**

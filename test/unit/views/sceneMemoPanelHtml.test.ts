@@ -103,17 +103,31 @@ describe("シーンメモのパネルのHTML", () => {
   });
 
   /**
-   * **本文を書き換える口を、この画面に持たせない**（6.96.5・6.96.6）。
-   * 「直す」は指摘を渡すだけで、当てるのは提案パネルの既存の処理である。
+   * **画面は本文を直に書かない**（6.96.5・6.96.6）。［直す］は拡張機能へ頼むだけで、
+   * 当てるのは提案パネルの［適用］と同じ関数である（作者の裁定 2026-10-03）。
    */
-  it("指摘を本文へ当てる口は無い", () => {
+  it("画面に本文を書く処理は無い", () => {
     expect(html).not.toContain("writeTextFile");
     expect(html).not.toContain('post("apply"');
   });
 
-  /** 渡す先が無ければ「直す」を出さない（押しても何も起きない口を作らない） */
-  it("直すは、渡す先があるときだけ出る", () => {
-    expect(html).toContain("row.canFix");
+  /**
+   * 修正案があれば［直す］、無ければ［提案へ］（作者の裁定 2026-10-03）。
+   * 口が無ければどちらも出さない（押しても何も起きない口を作らない）
+   */
+  it("直すと提案へは、拡張機能が決めた押し口で分かれる", () => {
+    expect(html).toContain('row.fixAction === "apply"');
+    expect(html).toContain('row.fixAction === "handOver"');
+    expect(html).toContain('post("handOver"');
+    expect(html).toContain("提案へ");
+  });
+
+  /** ［直す］で当てた指摘は一覧から消えるので、戻す口は一覧の外に置く */
+  it("直した直近の1件を戻す帯がある", () => {
+    expect(html).toContain('id="fixed"');
+    expect(html).toContain('id="undoFix"');
+    expect(html).toContain('post("undoFix")');
+    expect(html).toContain("data.fixed");
   });
 
   /** **同じ行に複数来たら、その行にまとめて出す**（6.96.5） */

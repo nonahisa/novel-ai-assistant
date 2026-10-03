@@ -7,10 +7,15 @@ import {
 } from "../models/finding";
 import { readTextFile } from "../core/textFile";
 import { locateFindings } from "../core/findingLocation";
-import { findingFilePath, findingRestoreOf } from "../core/findingSource";
+import {
+  findingAppliesDirectly,
+  findingFilePath,
+  findingRestoreOf,
+} from "../core/findingSource";
 import { FindingStore, findingsRetentionDays, visibleFindings } from "./findingStore";
 import type {
   ContradictionViewItem,
+  FindingFixOutcome,
   ProposalPanel,
   ProposalViewItem,
 } from "./proposalPanel";
@@ -96,8 +101,8 @@ export async function primeSavedFindings(
 /**
  * 1件だけを提案パネルへ渡す（設計書6.96.5）。
  *
- * シーンメモの「直す」の行き先である。**この画面は本文を書き換えない**ので、
- * 当てるのは提案パネルの既存の処理に任せ、ここでするのは
+ * 校正・メモパネルの［提案へ］（修正案の無い指摘）の行き先であり、［直す］
+ * （`applyFindingFromMemo`）が行を一覧へ置く道でもある。ここでするのは
  * 「いまの位置に直した1件を、元の分類へ置く」ことだけである。
  *
  * **中身は `primeSavedFindings` のループ本体と同じもの**を通す。写しを
@@ -132,6 +137,49 @@ export function handOverFinding(
     });
   }
   return true;
+}
+
+/**
+ * 校正・メモパネルの［直す］——修正案のある1件を、1手で本文へ当てる
+ * （設計書6.96.5。作者の裁定 2026-10-03「［直す］1手で本文が直る」）。
+ *
+ * **当てる道は提案パネルの［適用］と同じ関数**（`ProposalPanel.applyFinding` →
+ * `applyIssue`）。ここでするのは、`handOverFinding` と同じ組み立てで行を一覧へ
+ * 置くことだけである——写しの適用処理を作ると、検算や記録が片方だけ直る日が来る。
+ * 行が一覧に残るので、提案パネルの［戻す］でも戻せる。
+ *
+ * 修正案の無い指摘（矛盾・逸脱など）は当てない。呼ぶ側は `handOverFinding` へ回す。
+ */
+export async function applyFindingFromMemo(
+  work: WorkEntry,
+  panel: ProposalPanel,
+  finding: Finding & { line: number }
+): Promise<FindingFixOutcome> {
+  const restore = findingRestoreOf(finding);
+  if (!restore || !findingAppliesDirectly(finding)) {
+    return { ok: false, reason: "この指摘には修正案がありません。" };
+  }
+  if (!handOverFinding(work, panel, finding)) {
+    return { ok: false, reason: "この指摘を提案の一覧へ置けませんでした。" };
+  }
+  return panel.applyFinding(work, restore.panelCategory, finding.id);
+}
+
+/**
+ * 校正・メモパネルの［戻す］——［直す］で当てた1件を、提案パネルの［戻す］と
+ * 同じ関数で戻す（設計書6.96.5）。戻すと置き場に「戻した」の行が足され、
+ * 両方の画面にその指摘がまた並ぶ。
+ */
+export async function undoFindingFromMemo(
+  work: WorkEntry,
+  panel: ProposalPanel,
+  finding: Finding
+): Promise<FindingFixOutcome> {
+  const restore = findingRestoreOf(finding);
+  if (!restore) {
+    return { ok: false, reason: "この指摘の戻し方が決まっていません。" };
+  }
+  return panel.undoFinding(work, restore.panelCategory, finding.id);
 }
 
 /**
