@@ -30,7 +30,7 @@ import {
   saveModelTuning,
   type ModelTuning,
 } from "../core/modelTuning";
-import { TUNING_STORE_FILE } from "../core/modelTuningStore";
+import { tuningOfferMessage } from "../core/tuningOffer";
 import {
   DECLARED_LIMIT_CONFIRM_MARGIN,
   DECLARED_LIMIT_PROBE_OUTPUT_TOKENS,
@@ -973,11 +973,16 @@ async function offerStageProposals(
     return;
   }
 
+  // 要点（どのモデルへ、何を）を先頭に置く（実機確認リスト D-1、0.96.15。
+  // `core/tuningOffer.ts`）。経過と「押さなくても残した」断りは後ろへ回す
   const answer = await vscode.window.showInformationMessage(
-    `${prefix}${summary}${recordedNote}` +
-      `いま選んでいるモデル（${key}）のAIチューニングの記録として` +
-      `（VS Code の設定ではなく、拡張機能の保管庫の ${TUNING_STORE_FILE} に）、` +
-      `${parts.join("と、")}を反映できます。ほかのモデルには影響しません。`,
+    tuningOfferMessage({
+      cancelled: result.cancelled,
+      modelKey: key,
+      apply: parts,
+      summary: `${summary}${recordedNote}`,
+      notes: [],
+    }),
     "設定に反映",
     "そのままにする"
   );

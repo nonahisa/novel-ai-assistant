@@ -49,8 +49,16 @@ const BROWSER_EXTERNAL_BUILTINS = [
 // 束から落とすための印を埋めていた。道具ごと撤去したので不要になった
 // （作者の指示、2026-09-10。設計書6.26）
 
-async function main() {
-  const desktop = await esbuild.context({
+/**
+ * 3つの束の設定。
+ *
+ * **同梱表示（THIRD-PARTY-NOTICES.md）を作るスクリプトも、これを読む**
+ * （`scripts/bundledPackages.mjs`）。束に何が入るかは `external`・`alias` で
+ * 変わる（ブラウザ束は `undici` を外し、`path` を `path-browserify` へ
+ * 差し替える）ので、設定を写すと、束と表示の中身が食い違う日が来る。
+ */
+function bundleOptions() {
+  const desktop = {
     entryPoints: ["src/extension.ts"],
     bundle: true,
     format: "cjs",
@@ -61,9 +69,9 @@ async function main() {
     outfile: "dist/extension.js",
     external: ["vscode"],
     logLevel: "info",
-  });
+  };
 
-  const browser = await esbuild.context({
+  const browser = {
     entryPoints: ["src/extension.ts"],
     bundle: true,
     format: "cjs",
@@ -75,7 +83,7 @@ async function main() {
     external: ["vscode", ...BROWSER_EXTERNAL_BUILTINS],
     alias: { path: "path-browserify" },
     logLevel: "info",
-  });
+  };
 
   /**
    * 外から呼ぶ束（MCPサーバー。設計書6.87.8）。
@@ -90,7 +98,7 @@ async function main() {
    *
    * **配布物には入れない**（`.vscodeignore`）。拡張機能そのものは使わない。
    */
-  const mcp = await esbuild.context({
+  const mcp = {
     entryPoints: ["src/mcp/server.ts"],
     bundle: true,
     format: "esm",
@@ -101,7 +109,16 @@ async function main() {
     outfile: "dist/mcp-server.mjs",
     external: [],
     logLevel: "info",
-  });
+  };
+
+  return { desktop, browser, mcp };
+}
+
+async function main() {
+  const options = bundleOptions();
+  const desktop = await esbuild.context(options.desktop);
+  const browser = await esbuild.context(options.browser);
+  const mcp = await esbuild.context(options.mcp);
 
   if (watch) {
     await Promise.all([desktop.watch(), browser.watch(), mcp.watch()]);
@@ -111,7 +128,12 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+module.exports = { bundleOptions };
+
+// `require` で読まれたとき（同梱表示のスクリプト・テスト）は、ビルドしない
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

@@ -6,26 +6,27 @@
 // 本文をそのまま添えること」を配布の条件にしている。各パッケージの LICENSE を
 // そのまま貼る。手で書き写すと、版が上がったときに古い表示が残る。
 //
-// 対象は `dependencies` だけ。これらは esbuild が `dist/extension.js` へ
-// **束ねて**配布する。devDependencies（TypeScript・vitest など）は
-// 配布物に入らないので要らない。
+// 対象は、配布する3つの束（dist/extension.js・dist/browser-extension.js・
+// dist/mcp-server.mjs）に**実際に組み込まれる部品**（`scripts/bundledPackages.mjs`）。
+// 0.96.14 までは `dependencies` だけを見ていて、直接の依存の連れ
+// （`base64-js`・`ieee754`・`safer-buffer` など）と、MCP サーバーの束に入る
+// SDK の部品が抜けていた。束に入らない開発の道具（TypeScript・vitest・vsce）は
+// 配布物に入らないので載せない。
 //
 // **依存を足したら、これを走らせ直すこと。**
 // `test/unit/cross/thirdPartyNotices.test.ts` がずれを止める。
 import fs from "node:fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { collectBundledPackages } from "./bundledPackages.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const pkg = JSON.parse(
-  fs.readFileSync(path.join(root, "package.json"), "utf-8")
-);
-const names = Object.keys(pkg.dependencies ?? {}).sort();
+const packages = await collectBundledPackages();
 
 const parts = [
   "# 同梱しているソフトウェアについて",
   "",
-  "この拡張機能（`dist/extension.js`）には、次のライブラリが組み込まれています。",
+  "この拡張機能（`dist/extension.js`・`dist/browser-extension.js`・`dist/mcp-server.mjs`）には、次のライブラリが組み込まれています。",
   "著作権はそれぞれの権利者に属し、以下のライセンスの条件で配布しています。",
   "",
   "拡張機能そのもののライセンスは [LICENSE](LICENSE)（MIT）です。",
@@ -38,26 +39,24 @@ const parts = [
   "",
 ];
 
-for (const name of names) {
-  const dir = path.join(root, "node_modules", ...name.split("/"));
-  const meta = JSON.parse(
-    fs.readFileSync(path.join(dir, "package.json"), "utf-8")
-  );
+for (const entry of packages) {
+  const dir = path.join(root, entry.dir);
   const licenseFile = fs
     .readdirSync(dir)
-    .find((entry) => /^licen[cs]e/i.test(entry));
+    .find((name) => /^licen[cs]e/i.test(name));
   if (!licenseFile) {
     throw new Error(
-      `${name} に LICENSE ファイルがありません。手で確かめて追記してください。`
+      `${entry.name} ${entry.version}（${entry.dir}）に LICENSE ファイルがありません。` +
+        "手で確かめて追記してください。"
     );
   }
 
   const body = fs.readFileSync(path.join(dir, licenseFile), "utf-8").trim();
   parts.push(
-    `## ${meta.name} ${meta.version}`,
+    `## ${entry.name} ${entry.version}`,
     "",
-    `- ライセンス: ${meta.license ?? "（package.json に記載なし）"}`,
-    ...(meta.homepage ? [`- 配布元: ${meta.homepage}`] : []),
+    `- ライセンス: ${entry.license ?? "（package.json に記載なし）"}`,
+    ...(entry.homepage ? [`- 配布元: ${entry.homepage}`] : []),
     "",
     "```",
     body,
@@ -70,4 +69,9 @@ for (const name of names) {
 
 const out = parts.join("\n");
 fs.writeFileSync(path.join(root, "THIRD-PARTY-NOTICES.md"), out, "utf-8");
-console.log(`${names.length}件のライセンスを書き出しました（${out.length}文字）`);
+console.log(`${packages.length}件のライセンスを書き出しました（${out.length}文字）`);
+for (const entry of packages) {
+  console.log(
+    `  ${entry.name} ${entry.version}  ${entry.license ?? "?"}  ${entry.bundles.join("・")}`
+  );
+}

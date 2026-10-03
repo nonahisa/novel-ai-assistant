@@ -210,7 +210,8 @@ describe("測った結果が台帳へ入ったかどうか", () => {
     await measureContext(registry, "default", undefined, "input");
 
     const confirm = messagesWith("そのままにする").concat(
-      shown.filter((message) => message.includes("反映するのは"))
+      // 0.96.15 で要点を先頭に出す形にした（`core/tuningOffer.ts`）
+      shown.filter((message) => message.includes("に反映しますか"))
     );
     expect(confirm.length).toBeGreaterThan(0);
     // 申告値を持つ相手では、申告より長くは使わないことを断る

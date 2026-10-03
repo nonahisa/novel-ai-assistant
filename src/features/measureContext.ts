@@ -72,7 +72,7 @@ import {
   workRateOf,
   type ModelTuning,
 } from "../core/modelTuning";
-import { TUNING_STORE_FILE } from "../core/modelTuningStore";
+import { tuningOfferMessage } from "../core/tuningOffer";
 import { parseDeclaredContextLimit } from "../core/tuningStages";
 import { outputTokensPerSecond } from "../core/tuningStats";
 import {
@@ -2455,26 +2455,32 @@ async function offerToSave(input: {
     黙って「設定として覚えます」と言うと、測った 138,714字 がそのまま効くと
     読める。**記録する欄と、記録しても置き換えない値を、分けて言う。**
   */
+  /*
+    **要点（どのモデルへ、何を）を先頭に置く**（実機確認リスト D-1、0.96.15。
+    `core/tuningOffer.ts`）。経過と断り書きは削らずに後ろへ回す。
+  */
   const answer = await vscode.window.showInformationMessage(
-    `${prefix}${input.summary}` +
-      `この結果は、いま選んでいるモデル（${key}）のAIチューニングの記録として残します` +
-      `（VS Code の設定ではなく、拡張機能の保管庫の ${TUNING_STORE_FILE} です）。` +
-      "ほかのモデルには影響しません——モデルを切り替えれば、そのモデルの値に変わります。" +
-      "反映するのは、" +
-      (writesContext
-        ? `読める長さ 約${tokens.toLocaleString("ja-JP")}トークンと、`
-        : "") +
-      `待ち時間 ${timeoutSeconds}秒${timeoutBasis} です。` +
-      `測った長さ ${input.low.toLocaleString("ja-JP")}字 も記録に残り、` +
-      "チャンクの大きさを決めるのに使います。" +
-      (writesContext
-        ? DECLARING_TUNABLE_PROVIDERS.has(input.providerId)
-          ? // J3：実測は申告より短いときだけ効く。天井に届いたなら申告のまま
-            "読める長さは、このAIが申告する長さより短いときだけ、測った値を使います" +
-            "（申告より長くは使いません）。"
-          : ""
-        : "読める長さそのものは、このAIが申告する値を使い続けます" +
-          "（測った長さは記録に残すだけです）。"),
+    tuningOfferMessage({
+      cancelled: input.cancelled,
+      modelKey: key,
+      apply: [
+        ...(writesContext ? [`読める長さ 約${tokens.toLocaleString("ja-JP")}トークン`] : []),
+        `待ち時間 ${timeoutSeconds}秒${timeoutBasis}`,
+        `測った長さ ${input.low.toLocaleString("ja-JP")}字`,
+      ],
+      summary: input.summary,
+      notes: [
+        "測った長さは、チャンクの大きさを決めるのに使います。",
+        writesContext
+          ? DECLARING_TUNABLE_PROVIDERS.has(input.providerId)
+            ? // J3：実測は申告より短いときだけ効く。天井に届いたなら申告のまま
+              "読める長さは、このAIが申告する長さより短いときだけ、測った値を使います" +
+              "（申告より長くは使いません）。"
+            : ""
+          : "読める長さそのものは、このAIが申告する値を使い続けます" +
+            "（測った長さは記録に残すだけです）。",
+      ],
+    }),
     "設定に反映",
     "そのままにする"
   );
