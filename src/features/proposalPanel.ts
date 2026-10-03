@@ -984,7 +984,24 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       ]
         .map((item) => findingDraftOf(category, item))
         .filter((draft): draft is FindingDraft => draft !== undefined);
-      void recordFindings(work, drafts);
+      /*
+        **書き終えてから、開いている校正・メモパネルへ知らせる**（作者の報告、
+        2026-10-03。設計書6.96.7）。パネルは置き場を読んで指摘を並べるが、
+        知らせる口が判断のあとにしか無く、開いたまま検知しても並ばなかった
+        （閉じて開き直すと並んだ）。**書く前に知らせると、読み直しても空のまま**
+        なので、記録の約束が済んでから呼ぶ。`recordFindings` は失敗を内側で
+        受け止めて返るので、失敗しても読み直しは走る（並ぶものが無いだけ）
+      */
+      void recordFindings(work, drafts)
+        .then(() => refreshSceneMemoFindings(work.id))
+        .catch((error: unknown) =>
+          // 読み直せなくても検知は止めない。理由はログへ
+          logLine(
+            `校正・メモパネル：指摘を書いたあとの読み直しに失敗しました（${
+              error instanceof Error ? error.message : String(error)
+            }）。`
+          )
+        );
     }
 
     // **表示中の作品の作業を、先に控えへ戻す。** 届いたのがどちらの作品でも通す

@@ -62,6 +62,7 @@ import {
   type AppliedTracker,
 } from "../core/manuscriptSave";
 import { createBurstGate } from "../core/burstGate";
+import { KeyedLedger } from "../core/keyedLedger";
 import {
   currentCountMode,
   excludeRubyFromCount,
@@ -189,77 +190,92 @@ export function manuscriptLedgerKey(
  * **入口ごとの provider ではなく、ここ1つに集める。** 縦書きと横書きで
  * `ManuscriptEditorProvider` の実体は2つあり、片方だけが台帳を持つと
  * 「横書きで開いていた原稿へは飛べない」という取りこぼしが出る。
+ *
+ * **同じ原稿に面がいくつあっても、全部を載せておく**（作者の報告、2026-10-03。
+ * 設計書6.25.11）。縦と横の入口で1枚ずつ、または別の列にもう1枚開くと、
+ * VS Code は同じ文書の面をもう1つ作る（`supportsMultipleEditorsPerDocument:
+ * false` でも止まらない。1.138.0 で確かめた）。以前は `Map<鍵, 面>` で、
+ * **2枚目が1枚目を上書きし、2枚目を閉じると鍵ごと消えた**——1枚目はまだ
+ * 開いているのに台帳に無く、飛ぶ道がもう1枚開いていた。
+ * 引くときは、前面・見えている面・最後に使った面の順に選ぶ。
  */
-const openManuscripts = new Map<
-  string,
-  {
-    panel: vscode.WebviewPanel;
-    /**
-     * その行を示す。
-     *
-     * **画面が動き出す前に頼まれることがある**（開いた直後に飛んでくる）。
-     * まだ `ready` が来ていなければ覚えておき、来たときに出す。
-     * 送っても捨てられるだけなので、待つほかにやりようがない。
-     */
-    revealLine(line: number): void;
-    /**
-     * 下段の字数を測り直す（作者の指示、2026-08-29）。
-     *
-     * **保存のあと、執筆量を記録し終えてから呼ぶ**（`extension.ts`）。
-     * 保存の知らせを自分で拾うと、記録より先に読むことがあり、
-     * 「今日 +◯字」が1回分ずつ古くなる。
-     */
-    refreshCounts(): void;
-    /**
-     * 作品の種類を読み直し、下段の字数と目安を送り直す（2026-09-25）。
-     *
-     * 種類を変えても、開いている画面は開いたときの種類で目安を測り続け、
-     * エッセイに変えた直後に「読了 約N分」が出なかった。**組み方（縦横・
-     * 台本の組み分け）は変えない**——組み直すには画面を開き直す必要があり、
-     * 種類を変えたときの知らせもそう案内している。
-     */
-    refreshKind(): Promise<void>;
-    /**
-     * 読み上げの列を出す（設計書6.42）。
-     *
-     * **`revealLine` と同じで、`ready` を待ってから送る。** 開いた直後の
-     * 画面へ送っても、まだスクリプトが走っていないので捨てられる。
-     * 詳細メニューの「原稿を読み上げる」は開くのと同時に頼むので、
-     * ここを待たないと**開いたのに列が出ない**。
-     */
-    showReading(): void;
-    /**
-     * この画面が持っている文書（設計書6.40.4）。
-     *
-     * シーンメモの「済みにする」が、**打ちかけのまま開いている原稿**を
-     * 書き換えるために要る。ディスクを直に書くと、開いている面の
-     * （まだ保存していない）本文が勝った瞬間に消える。
-     */
-    document: vscode.TextDocument;
-    /**
-     * この画面がいま使っている見た目（設計書6.25.5）。
-     *
-     * 前後の話へ移るときに、そのまま次の画面へ持って行く。**画面が
-     * 知らせてくるまでは `undefined`**（開いた直後の一瞬だけ）。
-     */
-    appearance(): ManuscriptAppearance | undefined;
-    /**
-     * 前の話から持って来た見た目を、**この画面へ直に当てる**（設計書6.25.5）。
-     *
-     * 開くときの見た目は `pendingAppearance` に置き、画面側が立ち上がりに
-     * 1回だけ取り出す。**既に生きている画面は取りに来ない**——`openWith` は
-     * そのタブを前に出すだけだからである。タブが開いているかどうかで
-     * 引き継ぎが効いたり効かなかったりすると、作者には壊れて見える
-     * （2026-09-12、9巡目に実機で確認）。
-     */
-    applyAppearance(next: ManuscriptAppearance): void;
-    /**
-     * 未送信の状態（窓の札に載せる。作者の裁定、2026-10-01）。
-     * 画面からの知らせと、こちらで記録する時刻を持つ。**本文は持たない。**
-     */
-    status: ManuscriptEditorStatusState;
+const openManuscripts = new KeyedLedger<OpenManuscript>((entry) => {
+  try {
+    return entry.panel.active ? 2 : entry.panel.visible ? 1 : 0;
+  } catch {
+    // 閉じかけの面は読めないことがある。いちばん後ろに回す
+    return -1;
   }
->();
+});
+
+/** 台帳に載せる、開いている原稿エディター1枚ぶん */
+interface OpenManuscript {
+  panel: vscode.WebviewPanel;
+  /**
+   * その行を示す。
+   *
+   * **画面が動き出す前に頼まれることがある**（開いた直後に飛んでくる）。
+   * まだ `ready` が来ていなければ覚えておき、来たときに出す。
+   * 送っても捨てられるだけなので、待つほかにやりようがない。
+   */
+  revealLine(line: number): void;
+  /**
+   * 下段の字数を測り直す（作者の指示、2026-08-29）。
+   *
+   * **保存のあと、執筆量を記録し終えてから呼ぶ**（`extension.ts`）。
+   * 保存の知らせを自分で拾うと、記録より先に読むことがあり、
+   * 「今日 +◯字」が1回分ずつ古くなる。
+   */
+  refreshCounts(): void;
+  /**
+   * 作品の種類を読み直し、下段の字数と目安を送り直す（2026-09-25）。
+   *
+   * 種類を変えても、開いている画面は開いたときの種類で目安を測り続け、
+   * エッセイに変えた直後に「読了 約N分」が出なかった。**組み方（縦横・
+   * 台本の組み分け）は変えない**——組み直すには画面を開き直す必要があり、
+   * 種類を変えたときの知らせもそう案内している。
+   */
+  refreshKind(): Promise<void>;
+  /**
+   * 読み上げの列を出す（設計書6.42）。
+   *
+   * **`revealLine` と同じで、`ready` を待ってから送る。** 開いた直後の
+   * 画面へ送っても、まだスクリプトが走っていないので捨てられる。
+   * 詳細メニューの「原稿を読み上げる」は開くのと同時に頼むので、
+   * ここを待たないと**開いたのに列が出ない**。
+   */
+  showReading(): void;
+  /**
+   * この画面が持っている文書（設計書6.40.4）。
+   *
+   * シーンメモの「済みにする」が、**打ちかけのまま開いている原稿**を
+   * 書き換えるために要る。ディスクを直に書くと、開いている面の
+   * （まだ保存していない）本文が勝った瞬間に消える。
+   */
+  document: vscode.TextDocument;
+  /**
+   * この画面がいま使っている見た目（設計書6.25.5）。
+   *
+   * 前後の話へ移るときに、そのまま次の画面へ持って行く。**画面が
+   * 知らせてくるまでは `undefined`**（開いた直後の一瞬だけ）。
+   */
+  appearance(): ManuscriptAppearance | undefined;
+  /**
+   * 前の話から持って来た見た目を、**この画面へ直に当てる**（設計書6.25.5）。
+   *
+   * 開くときの見た目は `pendingAppearance` に置き、画面側が立ち上がりに
+   * 1回だけ取り出す。**既に生きている画面は取りに来ない**——`openWith` は
+   * そのタブを前に出すだけだからである。タブが開いているかどうかで
+   * 引き継ぎが効いたり効かなかったりすると、作者には壊れて見える
+   * （2026-09-12、9巡目に実機で確認）。
+   */
+  applyAppearance(next: ManuscriptAppearance): void;
+  /**
+   * 未送信の状態（窓の札に載せる。作者の裁定、2026-10-01）。
+   * 画面からの知らせと、こちらで記録する時刻を持つ。**本文は持たない。**
+   */
+  status: ManuscriptEditorStatusState;
+}
 
 /** 原稿エディター1つぶんの、窓の札に載せる状態（設計書6.25.9・6.87.17） */
 interface ManuscriptEditorStatusState {
@@ -441,6 +457,40 @@ async function warnDisconnected(names: readonly string[]): Promise<void> {
   }
 }
 
+/**
+ * その原稿の、原稿エディターのタブ（あれば入口と列）。
+ *
+ * 同じ原稿のタブが2つあれば、**その列で前に出ているもの**を選ぶ
+ * （作者がいま見ている面）。どれも背景なら、最初に見つかったもの。
+ * タブを読めない環境では undefined（これまでどおりの開き方へ）。
+ */
+function existingManuscriptTab(
+  key: string
+): { viewType: string; column: vscode.ViewColumn } | undefined {
+  try {
+    let fallback: { viewType: string; column: vscode.ViewColumn } | undefined;
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        const input: unknown = tab.input;
+        if (
+          !(input instanceof vscode.TabInputCustom) ||
+          (input.viewType !== MANUSCRIPT_EDITOR_VIEW_TYPE &&
+            input.viewType !== MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE) ||
+          manuscriptLedgerKey(input.uri) !== key
+        ) {
+          continue;
+        }
+        const found = { viewType: input.viewType, column: group.viewColumn };
+        if (tab.isActive) return found;
+        fallback ??= found;
+      }
+    }
+    return fallback;
+  } catch {
+    return undefined;
+  }
+}
+
 /** 原稿エディターのタブ（縦書き・横書きの入口のもの）。前に出ているかも添える */
 function manuscriptEditorTabs(): Array<{ uri: vscode.Uri; visible: boolean }> {
   try {
@@ -588,7 +638,10 @@ export function lastManuscriptCaret():
  * 開いていなければ何もしない。呼ぶのは保存を記録し終えたところ1か所だけ。
  */
 export function refreshManuscriptCounts(filePath: string): void {
-  openManuscripts.get(manuscriptLedgerKey(filePath))?.refreshCounts();
+  // 同じ原稿の面が2枚あれば、両方の下段を揃える（片方だけ古い字数にしない）
+  for (const open of openManuscripts.all(manuscriptLedgerKey(filePath))) {
+    open.refreshCounts();
+  }
 }
 
 /**
@@ -659,8 +712,10 @@ export function carryAppearanceToRenamed(from: string, to: string): void {
  * （変換の前に保存を通しているので、ここへ来るのは保存できなかった場合だけ）。
  */
 export function closeRenamedManuscript(from: string): void {
-  const open = openManuscripts.get(manuscriptLedgerKey(from));
-  if (!open) return;
+  // **同じ原稿の面が2枚あれば、両方閉じる**（6.25.11）。1枚でも残すと、
+  // そこから保存したときに消えたはずの .txt が復活する
+  const faces = openManuscripts.all(manuscriptLedgerKey(from));
+  if (faces.length === 0) return;
 
   const dirty = vscode.workspace.textDocuments.some(
     (document) =>
@@ -674,7 +729,7 @@ export function closeRenamedManuscript(from: string): void {
   }
 
   logLine(`原稿エディタ：名前が変わったため ${from} の面を閉じます。`);
-  open.panel.dispose();
+  for (const open of faces) open.panel.dispose();
 }
 
 /** 「← 前の話」「次の話 →」を押したときに、次に何をするか */
@@ -818,12 +873,15 @@ export async function openManuscriptForReading(work: WorkEntry): Promise<void> {
     return;
   }
 
+  // タブが既にあれば、その入口と列で前に出す（同じ原稿の2枚目を作らない。6.25.11）
+  const existing = existingManuscriptTab(key);
   await vscode.commands.executeCommand(
     "vscode.openWith",
     paths.toUri(filePath),
     // 向きの既定はタイプが決める（設計書6.70。脚本だけ縦書き）。
     // **ここで別の決め方をしない**——作品一覧から開いたときと同じ入口にする
-    manuscriptViewTypeFor(await kindOf(work))
+    existing?.viewType ?? manuscriptViewTypeFor(await kindOf(work)),
+    existing?.column
   );
   /*
     **台帳に載るまで待つ**（`revealLine` と同じ事情。開いた直後はまだ載らない）。
@@ -1799,12 +1857,27 @@ export class ManuscriptEditorProvider
       },
       status: {} as ManuscriptEditorStatusState,
     };
-    openManuscripts.set(key, entry);
+    /*
+      **同じ原稿の2枚目なら、記録に残す**（6.25.11）。2026-10-03 の実機では、
+      何が2枚目を開いたのかを示す行が1つも無く、台帳から落ちた理由を
+      追えなかった。2枚目そのものは止めない——縦と横を並べて見比べたい
+      作者もいる。こちらの道（飛ぶ・読み上げ）が2枚目を作らないようにしてある
+    */
+    const already = openManuscripts.all(key).length;
+    openManuscripts.add(key, entry);
+    if (already > 0) {
+      // 載せてから書く（ログの作品を引く await で、台帳に載るのを遅らせない）
+      void this.logForDocument(
+        document,
+        `原稿エディタ：同じ原稿の面がもう1枚開かれました（${already + 1}枚目。入口: ${this.viewType}／列: ${panel.viewColumn ?? "不明"}）`
+      );
+    }
     // 窓の札に「受け持っている原稿エディター」が増えた
     fireManuscriptStatusChanged();
     panel.onDidDispose(() => {
-      // 同じ文書が開き直されていたら、そちらの札を消さない
-      if (openManuscripts.get(key) === entry) openManuscripts.delete(key);
+      // **閉じた面だけを外す。** 鍵ごと消すと、同じ原稿のもう1枚が
+      // 開いたまま台帳から落ちる（2026-10-03 の不具合）
+      openManuscripts.remove(key, entry);
       fireManuscriptStatusChanged();
     });
 
@@ -1978,6 +2051,9 @@ export class ManuscriptEditorProvider
         // 前面に来た＝この話を書き始めた。右に単話プロットが見えていれば、
         // この話のものへ切り替えてもらう（設計書6.36。片方向）
         if (event.webviewPanel.active) {
+          // 前に出た面を「最後に使った面」にする（同じ原稿の面が2枚あるとき、
+          // 飛ぶ先として選ぶ。6.25.11）
+          openManuscripts.touch(key, entry);
           const filePath = fromUri(document.uri);
           this.deps.onManuscriptShown?.(
             filePath,
@@ -2416,6 +2492,10 @@ export class ManuscriptEditorProvider
       `原稿エディタ：${filePath} は台帳にありません（鍵: ${key}）。開き直します。`
     );
 
+    // タブが既にあれば、そのタブを前に出す（同じ原稿の2枚目を作らない。6.25.11）
+    const viaTab = await this.revealInExistingTab(filePath, line);
+    if (viaTab !== undefined) return viaTab;
+
     // **いま開いている向きが最優先**（縦書きで書いている人の画面を横にしない）。
     // 開いていなければ、その作品のタイプに合わせた入口で開く（設計書6.70）
     const episodeWork = await this.registeredEpisodeWork(filePath);
@@ -2466,6 +2546,47 @@ export class ManuscriptEditorProvider
       return false;
     }
     opened.revealLine(line);
+    return true;
+  }
+
+  /**
+   * 台帳に無い原稿でも、**タブが既にあるなら、そのタブを前に出して**行を示す
+   * （作者の報告、2026-10-03。設計書6.25.11）。
+   *
+   * 台帳に無くてもタブが残っていることがある——背景でまだ画面が作られて
+   * いないタブや、台帳から落ちた面である。ここで別の入口（縦と横）や別の列を
+   * 渡すと、VS Code は**同じ原稿の2枚目**を作る。同じ入口・同じ列の
+   * `openWith` は前に出すだけで済む（1.138.0 で確かめた）。
+   *
+   * @returns タブが無ければ undefined（呼んだ側が今までどおり開く）。
+   *   あれば、示せたかどうか
+   */
+  private async revealInExistingTab(
+    filePath: string,
+    line: number
+  ): Promise<boolean | undefined> {
+    const key = manuscriptLedgerKey(filePath);
+    const existing = existingManuscriptTab(key);
+    if (!existing) return undefined;
+    logLine(
+      `原稿エディタ：${filePath} のタブが${existing.column}列目にあるので、そのタブを前に出します（入口: ${existing.viewType}）。`
+    );
+    await vscode.commands.executeCommand(
+      "vscode.openWith",
+      paths.toUri(filePath),
+      existing.viewType,
+      existing.column
+    );
+    const shown = await waitFor(() => openManuscripts.get(key));
+    if (!shown) {
+      // 拡張機能ホストが起動し直したあとの面は、つながり直さない。
+      // 素のエディタへ譲る（切れた面の知らせは別の見張りが出す）
+      logLine(
+        `原稿エディタ：${filePath} のタブを前に出しましたが、画面とつながりませんでした（鍵: ${key}）。`
+      );
+      return false;
+    }
+    shown.revealLine(line);
     return true;
   }
 

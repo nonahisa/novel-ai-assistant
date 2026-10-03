@@ -36,14 +36,25 @@ const layout = vi.hoisted(() => {
   class TabInputWebview {
     constructor(readonly viewType: string) {}
   }
+  /** 原稿エディターのタブ（`uri` は `fromUri` が読める形だけ持たせる） */
+  class TabInputCustom {
+    readonly uri: { scheme: string; fsPath: string; toString(): string };
+    constructor(
+      filePath: string,
+      readonly viewType: string
+    ) {
+      this.uri = { scheme: "file", fsPath: filePath, toString: () => filePath };
+    }
+  }
   return {
     TabInputWebview,
+    TabInputCustom,
     groups: undefined as
       | Array<{
           viewColumn: number;
           isActive: boolean;
           activeTab?: { input: unknown };
-          tabs: Array<{ input: unknown }>;
+          tabs: Array<{ input: unknown; isActive?: boolean }>;
         }>
       | undefined,
   };
@@ -54,6 +65,7 @@ vi.mock("vscode", async (importOriginal) => {
   return {
     ...actual,
     TabInputWebview: layout.TabInputWebview,
+    TabInputCustom: layout.TabInputCustom,
     commands: {
       executeCommand: (command: string, ...args: unknown[]) => {
         executed.push({ command, args });
@@ -283,6 +295,95 @@ describe("開いていないときの受け皿", () => {
     await makeProvider().revealLine(episodePath, 40);
 
     expect(Date.now() - started).toBeGreaterThanOrEqual(1000);
+  });
+});
+
+/**
+ * 同じ話が2枚開き、元の画面が空白になる（作者の報告、2026-10-03。設計書6.25.11）。
+ *
+ * 校正・メモパネルの行を押すと、左で開いている episode_0001.md があるのに
+ * 「台帳にありません」の枝へ降り、もう1枚開いた。台帳から落ちていても、
+ * **タブが既にあるなら、そのタブの入口と列で開く**——VS Code は同じ入口・
+ * 同じ列の `openWith` を「前に出す」だけで済ませる（1.138.0 で確かめた）。
+ * 入口か列が違うと、同じ原稿の2枚目ができる。
+ */
+describe("タブが既にある原稿へは、もう1枚開かない", () => {
+  test("縦書きで開いている話へは、縦書きの入口・その列で開く", async () => {
+    const manuscript = {
+      input: new layout.TabInputCustom(episodePath, MANUSCRIPT_EDITOR_VIEW_TYPE),
+      isActive: true,
+    };
+    const panel = {
+      input: new layout.TabInputWebview("novelai.sceneMemos"),
+      isActive: true,
+    };
+    layout.groups = [
+      { viewColumn: 1, isActive: false, activeTab: manuscript, tabs: [manuscript] },
+      { viewColumn: 2, isActive: true, activeTab: panel, tabs: [panel] },
+    ];
+
+    await makeProvider().revealLine(episodePath, 158);
+
+    expect(executed).toHaveLength(1);
+    expect(executed[0].args[1]).toBe(MANUSCRIPT_EDITOR_VIEW_TYPE);
+    expect(executed[0].args[2]).toBe(1);
+  });
+
+  test("パネルを避けた先ではなく、原稿が居る列で開く", async () => {
+    const text = { input: {}, isActive: true };
+    const panel = {
+      input: new layout.TabInputWebview("novelai.sceneMemos"),
+      isActive: true,
+    };
+    const manuscript = {
+      input: new layout.TabInputCustom(
+        episodePath,
+        MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+      ),
+      isActive: true,
+    };
+    layout.groups = [
+      { viewColumn: 1, isActive: false, activeTab: text, tabs: [text] },
+      { viewColumn: 2, isActive: true, activeTab: panel, tabs: [panel] },
+      { viewColumn: 3, isActive: false, activeTab: manuscript, tabs: [manuscript] },
+    ];
+
+    await makeProvider().revealLine(episodePath, 158);
+
+    expect(executed).toHaveLength(1);
+    expect(executed[0].args[1]).toBe(MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE);
+    expect(executed[0].args[2]).toBe(3);
+  });
+
+  test("別の話のタブは見ない（これまでどおりの開き方）", async () => {
+    const other = {
+      input: new layout.TabInputCustom(
+        "C:/小説/いじめられっ子/本文/1.md",
+        MANUSCRIPT_EDITOR_VIEW_TYPE
+      ),
+      isActive: true,
+    };
+    layout.groups = [
+      { viewColumn: 1, isActive: false, activeTab: other, tabs: [other] },
+    ];
+
+    await makeProvider().revealLine(episodePath, 40);
+
+    expect(executed).toHaveLength(1);
+    expect(executed[0].args[1]).toBe(MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE);
+  });
+
+  /**
+   * 台帳そのものの直し（鍵1つに面をいくつも載せる）は `core/keyedLedger.test.ts`。
+   * ここでは、原稿エディターがその台帳を使い、閉じた面だけを外すことを見る。
+   * `resolveCustomTextEditor` を代役で組むには依存が多すぎるので、源の形で見張る
+   */
+  test("台帳は同じ原稿の面をいくつも持ち、閉じた面だけを外す", () => {
+    const source = readFileSync("src/features/manuscriptEditor.ts", "utf8");
+    expect(source).toContain("new KeyedLedger<");
+    expect(source).toContain("openManuscripts.remove(key, entry)");
+    // 鍵ごと消す書き方へ戻さない（2枚目を閉じると1枚目が台帳から落ちる）
+    expect(source).not.toContain("openManuscripts.delete(key)");
   });
 });
 

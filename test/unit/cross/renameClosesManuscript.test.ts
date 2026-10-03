@@ -41,8 +41,9 @@ describe("名前が変わったら、元の名前の面を閉じる", () => {
       editor.indexOf("export function closeRenamedManuscript("),
       editor.indexOf("/** 「← 前の話」「次の話 →」を押したときに、次に何をするか */")
     );
-    // 開いている面を台帳から引き、閉じるのはその面だけ
-    expect(body).toContain("openManuscripts.get(manuscriptLedgerKey(from))");
+    // 開いている面を台帳から引き、閉じるのはその原稿の面だけ。
+    // **同じ原稿の面が2枚あれば両方**（設計書6.25.11。1枚でも残ると .txt が復活する）
+    expect(body).toContain("openManuscripts.all(manuscriptLedgerKey(from))");
     expect(body).toContain("open.panel.dispose()");
     // **打ちかけを巻き添えにしない**（未保存なら残す）
     expect(body).toContain("document.isDirty");

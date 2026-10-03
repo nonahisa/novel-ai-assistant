@@ -92,9 +92,14 @@ vi.mock("../../../src/core/actorContext", () => ({
 
 /** シーンメモの横の一覧へ、判断が届いたか */
 const notified: string[] = [];
+/** 知らせが来た時点で、置き場（findings.jsonl）が書かれていたか */
+const writtenWhenNotified: boolean[] = [];
 vi.mock("../../../src/features/sceneMemoPanel", () => ({
   refreshSceneMemoFindings: vi.fn(async (workId: string) => {
     notified.push(workId);
+    writtenWhenNotified.push(
+      [...files.keys()].some((name) => name.endsWith("findings.jsonl"))
+    );
   }),
 }));
 
@@ -204,6 +209,50 @@ beforeEach(() => {
   text = original;
   files.clear();
   notified.length = 0;
+  writtenWhenNotified.length = 0;
+});
+
+/**
+ * 検知のあと、開いている校正・メモパネルに指摘が出ない（作者の報告、
+ * 2026-10-03。設計書6.96.7）。
+ *
+ * パネルを開いたまま誤字脱字を走らせても並ばず、閉じて開き直すと並んだ。
+ * 置き場（findings.jsonl）には書かれていた——**書いたことをパネルへ
+ * 知らせる口が無かった**（判断のあとには知らせていた）。
+ */
+describe("検知の結果が置き場へ書かれたら、校正・メモパネルが読み直す", () => {
+  /** 記録の書き込みが終わるまで待つ（読む・書くの往復が数回ある） */
+  async function settleWrites(): Promise<void> {
+    for (let round = 0; round < 20; round++) await settle();
+  }
+
+  test("書き終えたあとに、開いているパネルへ知らせる", async () => {
+    const panel = newPanel();
+    panel.showResults(work, [typo]);
+
+    await settleWrites();
+
+    expect(notified).toEqual([work.id]);
+  });
+
+  test("書き終わる前には知らせない（読み直しても空のまま）", async () => {
+    const panel = newPanel();
+    panel.showResults(work, [typo]);
+
+    // **待たない作り**なので、返った直後はまだ書いていない
+    expect(notified).toEqual([]);
+    await settleWrites();
+    expect(writtenWhenNotified).toEqual([true]);
+  });
+
+  test("置き場から戻しただけのとき（書かない）は知らせない", async () => {
+    const panel = newPanel();
+    panel.showRestoredFindings(work, "誤字脱字", { items: [restoredItem()] });
+
+    await settleWrites();
+
+    expect(notified).toEqual([]);
+  });
 });
 
 describe("戻した指摘と、もう一度検知した指摘が二重に並ばない", () => {
