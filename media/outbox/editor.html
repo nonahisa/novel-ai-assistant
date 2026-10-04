@@ -181,8 +181,38 @@ textarea[readonly] { background: var(--done-ground); }
   overflow-y: hidden;
   resize: none;
 }
+/*
+  縦書きの書く欄（textarea の代わり）。iPad の WebKit は縦書きの textarea でタップした位置に
+  カーソルを置けない（作者の実機、2026-10-05）ので、縦書きのときだけこの欄で書く
+*/
+.vwrite {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--sheet);
+  color: var(--ink);
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.vwrite:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.vwrite[contenteditable="false"] { background: var(--done-ground); }
+.vertical .vwrite {
+  writing-mode: vertical-rl;
+  -webkit-writing-mode: vertical-rl;
+  width: 100%;
+  height: 70vh;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
 /* 縦書きでは下線（変換中の印を含む）を字の右に引く。日本語の縦組みの慣わし（作者の要望、2026-10-05） */
-.vertical textarea, .vertical .view {
+.vertical textarea, .vertical .view, .vertical .vwrite {
   text-underline-position: right;
   -webkit-text-underline-position: right;
 }
@@ -335,6 +365,7 @@ textarea[readonly] { background: var(--done-ground); }
   </div>
   <div id="paper">
     <textarea id="text" aria-label="本文" spellcheck="false" hidden></textarea>
+    <div id="vtext" class="vwrite" contenteditable="plaintext-only" spellcheck="false" role="textbox" aria-multiline="true" aria-label="本文（縦書き）" hidden></div>
     <div class="view" id="view" hidden></div>
   </div>
 </div>
@@ -835,7 +866,7 @@ var EditorLogic = (function () {
   var repoEl = $("repo"), branchEl = $("branch"), loadEl = $("load");
   var workRowEl = $("workRow"), workEl = $("work"), episodeRowEl = $("episodeRow"), episodeEl = $("episode"), reopenEl = $("reopen");
   var bandEl = $("band"), bandStateEl = $("bandState"), bandNoteEl = $("bandNote"), bandFlashEl = $("bandFlash"), sendEl = $("send");
-  var toolsEl = $("tools"), countEl = $("count"), textEl = $("text"), viewEl = $("view"), paperEl = $("paper");
+  var toolsEl = $("tools"), countEl = $("count"), textEl = $("text"), viewEl = $("view"), paperEl = $("paper"), vtextEl = $("vtext");
   var modeWriteEl = $("modeWrite"), modeReadEl = $("modeRead"), dirVEl = $("dirV"), dirHEl = $("dirH");
   var draftPanelEl = $("draftPanel"), draftNoteEl = $("draftNote"), draftTextEl = $("draftText"), draftUseEl = $("draftUse"), draftDropEl = $("draftDrop");
   var diffPanelEl = $("diffPanel"), diffNoteEl = $("diffNote"), diffEl = $("diff"), sentTextEl = $("sentText"), diffCloseEl = $("diffClose");
@@ -928,6 +959,42 @@ var EditorLogic = (function () {
   }
 
   function isDirty() { return !!state.file && !state.readOnly && textEl.value !== state.loaded; }
+
+  /*
+    縦書きの書く欄（#vtext）。本文の持ち主はいつも textarea（#text）で、縦書きの欄は打つたびに
+    そこへ写す。iPad の WebKit は縦書きの textarea でタップした所にカーソルを置けないため
+    （作者の実機、2026-10-05「縦書きのとき」。横書きは置けた）
+  */
+  function domText(root) {
+    var out = "";
+    function walk(node) {
+      for (var c = node.firstChild; c; c = c.nextSibling) {
+        if (c.nodeType === 3) out += c.data;
+        else if (c.nodeName === "BR") {
+          // 最後の行を見せるためだけの BR（空の最後の行の置き物）は数えない
+          if (c === root.lastChild && out.slice(-1) === "\n") continue;
+          out += "\n";
+        } else {
+          if (/^(DIV|P)$/.test(c.nodeName) && out.length && out.slice(-1) !== "\n") out += "\n";
+          walk(c);
+        }
+      }
+    }
+    walk(root);
+    return out;
+  }
+  function pushToVertical() {
+    vtextEl.textContent = textEl.value;
+    var editable = state.readOnly ? "false" : "plaintext-only";
+    try { vtextEl.contentEditable = editable; } catch (error) { vtextEl.contentEditable = state.readOnly ? "false" : "true"; }
+  }
+  function showSurfaces() {
+    var open = !!state.file;
+    var writing = state.mode === "write";
+    textEl.hidden = !(open && writing && !state.vertical);
+    vtextEl.hidden = !(open && writing && state.vertical);
+    viewEl.hidden = !(open && state.mode === "read");
+  }
 
   /* ── 作品を読む ── */
   async function loadRepo() {
@@ -1044,7 +1111,9 @@ var EditorLogic = (function () {
     state.readOnly = "";
     state.latest = null;
     textEl.value = "";
+    vtextEl.textContent = "";
     textEl.hidden = true;
+    vtextEl.hidden = true;
     viewEl.hidden = true;
     toolsEl.hidden = true;
     draftPanelEl.hidden = true;
@@ -1092,11 +1161,11 @@ var EditorLogic = (function () {
     }
     textEl.value = state.loaded;
     textEl.readOnly = !!state.readOnly;
-    textEl.hidden = state.mode !== "write";
-    viewEl.hidden = state.mode !== "read";
     toolsEl.hidden = false;
     showDiffPanel();
     offerDraft();
+    pushToVertical();
+    showSurfaces();
     setStatus(state.readOnly, !!state.readOnly);
     paint();
   }
@@ -1240,10 +1309,7 @@ var EditorLogic = (function () {
     state.mode = mode;
     modeWriteEl.setAttribute("aria-pressed", String(mode === "write"));
     modeReadEl.setAttribute("aria-pressed", String(mode === "read"));
-    if (state.file) {
-      textEl.hidden = mode !== "write";
-      viewEl.hidden = mode !== "read";
-    }
+    showSurfaces();
     paint();
   }
 
@@ -1253,6 +1319,8 @@ var EditorLogic = (function () {
     paperEl.classList.toggle("vertical", vertical);
     dirVEl.setAttribute("aria-pressed", String(vertical));
     dirHEl.setAttribute("aria-pressed", String(!vertical));
+    if (state.file) pushToVertical();
+    showSurfaces();
   }
 
   /* ── 移る前に確かめる ── */
@@ -1359,12 +1427,35 @@ var EditorLogic = (function () {
   });
   sendEl.addEventListener("click", function () { sendToPc(); });
   textEl.addEventListener("input", function () { saveDraftSoon(); paint(); });
+  vtextEl.addEventListener("input", function () {
+    textEl.value = domText(vtextEl);
+    saveDraftSoon();
+    paint();
+  });
+  /*
+    タップした所へカーソルを置く。指を離した時点で選択が欄の外か、置いた所が指の位置と違う
+    ことがあるので、選んでいない（範囲でない）ときだけ、指の位置から場所を引き直す
+  */
+  vtextEl.addEventListener("pointerup", function (event) {
+    if (event.pointerType !== "touch" || vtextEl.contentEditable === "false") return;
+    var x = event.clientX, y = event.clientY;
+    setTimeout(function () {
+      var sel = window.getSelection();
+      if (sel && sel.rangeCount && !sel.isCollapsed) return;
+      var range = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null;
+      if (!range || !vtextEl.contains(range.startContainer)) return;
+      if (document.activeElement !== vtextEl) vtextEl.focus();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }, 0);
+  });
   modeWriteEl.addEventListener("click", function () { setMode("write"); });
   modeReadEl.addEventListener("click", function () { setMode("read"); });
   dirVEl.addEventListener("click", function () { setVertical(true); });
   dirHEl.addEventListener("click", function () { setVertical(false); });
   draftUseEl.addEventListener("click", function () {
     textEl.value = draftTextEl.value;
+    pushToVertical();
     draftPanelEl.hidden = true;
     paint();
   });
