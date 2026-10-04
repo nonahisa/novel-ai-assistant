@@ -883,8 +883,10 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     byFile.forEach(function (group) {
       var section = el("section", "episode");
       var heading = group.episodes.map(function (ep) {
-        var no = typeof ep.chapter === "number" ? "第" + ep.chapter + "話" : "";
-        return [no, str(ep.title)].filter(Boolean).join(" ");
+        // 題が「第1話　…」で始まる作品では、話数を前に足すと「第1話 第1話」と重なる
+        var title = str(ep.title);
+        var no = typeof ep.chapter === "number" && !/^第[0-9０-９一二三四五六七八九十百千]+話/.test(title) ? "第" + ep.chapter + "話" : "";
+        return [no, title].filter(Boolean).join(" ");
       }).filter(Boolean).join("／");
       section.appendChild(el("h2", "", heading || group.file));
       section.appendChild(el("div", "file", group.file));
