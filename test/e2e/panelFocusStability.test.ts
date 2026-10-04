@@ -169,6 +169,12 @@ test("簡単ステップメニューの段を開くと、中身の行が並ぶ",
     [{ name: EPISODE, text: TEXT }],
     async (session) => {
       const { page } = session;
+      /*
+        **先に原稿エディターで話を開く。** 作者の作品の写しでは、話を開いたあとにだけ
+        段の中身が出なかった（開かなければ出た。2026-10-04。ただしその走りは別の作業場の
+        E2E と重なっていて、焦点を外から奪われていた疑いがある）
+      */
+      await openEpisode(page, EPISODE, "零時を指していた");
       await showSidebar(page, E2E_WORK_TITLE);
       const heading = treeRow(page, "1. 作品登録");
       await waitUntil(async () => (await heading.count()) > 0, "簡単ステップメニューに「1. 作品登録」が出る");
@@ -189,7 +195,8 @@ test("簡単ステップメニューの段を開くと、中身の行が並ぶ",
           }
           return count;
         });
-      await waitUntil(async () => (await childCount()) > 0, "「1. 作品登録」の中身の行が並ぶ", 10_000);
+      // 遅いだけ（拡張機能ホストが忙しい）と、出ない、を分けるために長めに待つ
+      await waitUntil(async () => (await childCount()) > 0, "「1. 作品登録」の中身の行が並ぶ", 30_000);
     },
     LAUNCH
   );
