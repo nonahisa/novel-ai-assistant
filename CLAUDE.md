@@ -28,7 +28,7 @@
 
 **設計書・引継ぎ書を直すとき、版を上げるときは、スキル `docs-sync` を読むこと**（章番号の整合の手順、引継ぎ書の書き方、版を揃える6か所と見張っているテスト）。
 
-作業の手順は `.claude/skills/` にスキルとして置いてある（`implement`・`team`・`docs-sync`・`release`・`shell-safety`・`field-check`・`e2e`・`ai-bench`・`desk-editor`・`codebase-map`）。**必要なときだけ読まれるので、ここには写さない。**
+作業の手順は `.claude/skills/` にスキルとして置いてある（`implement`・`team`・`docs-sync`・`release`・`shell-safety`・`field-check`・`e2e`・`session-handoff`・`ai-bench`・`desk-editor`・`codebase-map`）。**必要なときだけ読まれるので、ここには写さない。**
 
 ---
 
@@ -72,6 +72,10 @@ npm run typecheck    # 型チェックのみ
 TypeScript strict、`any` を使わない。コメントは「なぜ」を書く。エラーは握りつぶさず、チャンク単位の失敗で全体を止めない。長時間処理は中止できるようにする。確認は処理量とコストを示してから。**全文はスキル `implement`。**
 
 ---
+
+## 要約（コンパクト）で必ず残すもの
+
+会話を要約するときは、次を落とさずに残す：動いている担当の印と作業場の枝・main に入れていない枝と入れる条件・ほかのセッションへの頼みごと・作者の判断待ちと手待ち・作者が今日決めたこと・版（手元／GitHub Release／Marketplace）・実機確認の進捗率・今週の使用量・ジャンクションの作業場。会話の使用量が8割を超えたら、先にスキル `session-handoff` で引継ぎ書へ書き出す。
 
 ## 役割分担
 
