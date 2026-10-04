@@ -323,6 +323,257 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
 </div>
 
 <script>
+/* github-common:start */
+/*
+  GitHub の作品のリポジトリを読む部品（統合小説執筆環境の設計書6.115「GitHub 経由」・6.116）。
+  出先の原稿箱（media/outbox/outbox.html）と出先の原稿エディター（media/outbox/editor.html）の
+  両方に、この区間を**一字違わず**置く。作品の選び方（最近更新のあった作品から開く）・GitHub に
+  届かないときの案内・受け取り箱の名前と結果の読み方を、2つのページでずらさないため
+  （test/unit/cross/editorPageLogic.test.ts が見張る）。画面（document）には触らない。
+*/
+var GitHubWorks = (function () {
+  function str(value) { return typeof value === "string" ? value : ""; }
+
+  function isNotFound(error) {
+    if (!error || error.code !== "tool_error") return false;
+    var text = str(error.message);
+    try { text += " " + JSON.stringify(error.result || ""); } catch (e) { /* 読めなくてもよい */ }
+    return /404|not\s*found/i.test(text);
+  }
+
+  /*
+    GitHub に届かないときの、理由と直し方。コードごとに直し方が違うので、1つにまとめない
+  */
+  function describeGithubError(error, what) {
+    var code = error && error.code;
+    if (code === "server_not_connected" || code === "selection_required" || code === "server_not_found") {
+      return "GitHub のコネクターが見つかりません。claude.ai の設定 → コネクターで、カスタムコネクター「GitHub」を足してください（上の「GitHub のつなぎ方」の1）。";
+    }
+    if (code === "needs_reauth") return "GitHub へのつながりが切れています。claude.ai の設定 → コネクターで、GitHub をつなぎ直してください。";
+    if (code === "not_in_manifest") return "このページで GitHub を使うことが許されていません。ページの権限（右上のメニュー）で GitHub を許してから、［読む］を押してください。";
+    if (code === "blocked_by_policy" || code === "approval_required") return "組織の決まりで、このページから GitHub を使えません。管理している人に確かめてください。";
+    if (code === "not_granted" || code === "capability_disabled" || code === "capability_removed") {
+      return "この画面では GitHub を使えません。claude.ai の Claude アプリかブラウザで開いてください。";
+    }
+    if (isNotFound(error)) {
+      return what === "repo"
+        ? "GitHub のアプリ（Claude Github MCP Connector）に、このリポジトリを許していないようです（名前か枝の打ち間違いでも同じ表示になります）。上の「GitHub のつなぎ方」の2と3で、このリポジトリを足してください。"
+        : "GitHub にファイルが見つかりませんでした（" + what + "）。";
+    }
+    if (code === "server_unavailable" || code === "upstream_error" || code === "rate_limited") {
+      return "GitHub に届きませんでした。少し待ってから［読む］を押してください。";
+    }
+    return "GitHub から読めませんでした（" + str(error && error.message).slice(0, 120) + "）。";
+  }
+
+  // 1つのファイルの中身。get_file_contents は「SHA の行」と中身を別の塊で返す（resource の text を先に見る）
+  function textOfResult(result) {
+    var blocks = (result && result.content) || [];
+    for (var i = 0; i < blocks.length; i++) {
+      var b = blocks[i];
+      if (b && b.type === "resource" && b.resource) {
+        if (typeof b.resource.text === "string") return b.resource.text;
+        if (typeof b.resource.blob === "string") {
+          var bin = atob(b.resource.blob);
+          var bytes = new Uint8Array(bin.length);
+          for (var j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);
+          return new TextDecoder().decode(bytes);
+        }
+      }
+    }
+    var texts = blocks.filter(function (b) { return b && b.type === "text" && typeof b.text === "string"; })
+      .map(function (b) { return b.text; })
+      .filter(function (t) { return !/^successfully downloaded/i.test(t); });
+    if (texts.length) return texts.join("");
+    return typeof (result && result.payload) === "string" ? result.payload : "";
+  }
+
+  function shaOfResult(result) {
+    var blocks = (result && result.content) || [];
+    for (var i = 0; i < blocks.length; i++) {
+      var m = blocks[i] && typeof blocks[i].text === "string" && /SHA:\s*([0-9a-f]{40})/i.exec(blocks[i].text);
+      if (m) return m[1].toLowerCase();
+    }
+    return "";
+  }
+
+  // 「持ち主/名前」（GitHub の URL を貼ってもよい）。形が違えば null
+  function parseRepoSpec(spec) {
+    var s = str(spec).trim().replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/i, "").replace(/\/+$/, "");
+    var parts = s.split("/");
+    if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+    return { spec: s, owner: parts[0], name: parts[1] };
+  }
+
+  // 同時に投げる数を絞って順に読む（GitHub の上限を叩かない）
+  async function eachLimited(items, limit, task) {
+    var results = new Array(items.length);
+    var next = 0;
+    async function worker() {
+      while (next < items.length) {
+        var index = next++;
+        results[index] = await task(items[index], index);
+      }
+    }
+    var workers = [];
+    for (var i = 0; i < Math.min(limit, items.length); i++) workers.push(worker());
+    await Promise.all(workers);
+    return results;
+  }
+
+  // 作品の中の道を、リポジトリの根からの道へ
+  function repoPath(work, relative) {
+    return work && work.path ? work.path + "/" + relative : relative;
+  }
+
+  // 読む口。repo は { owner, name, branch }。読むのは枝の先（refs/heads/<枝>）
+  function reader(gh, repo) {
+    var ref = "refs/heads/" + repo.branch;
+    async function readFile(path) {
+      var result = await gh("get_file_contents", { owner: repo.owner, repo: repo.name, path: path, ref: ref });
+      return { text: textOfResult(result), sha: shaOfResult(result) };
+    }
+    // 無いファイルは null（作品でないフォルダー・まだ指摘の無い作品）
+    async function readOptional(path) {
+      try { return await readFile(path); } catch (error) { if (isNotFound(error)) return null; throw error; }
+    }
+    async function listDir(path, optional) {
+      try {
+        var result = await gh("get_file_contents", {
+          owner: repo.owner, repo: repo.name, path: path || "/", ref: ref,
+          fields: ["type", "name", "path", "sha"]
+        });
+        return Array.isArray(result.payload) ? result.payload : [];
+      } catch (error) {
+        if (optional && isNotFound(error)) return [];
+        throw error;
+      }
+    }
+    return { readFile: readFile, readOptional: readOptional, listDir: listDir };
+  }
+
+  // 作品を最後のコミットの新しい順に（時刻の分からない作品は後ろ、同じなら道の順）
+  function sortWorksByRecent(works) {
+    return works.slice().sort(function (a, b) {
+      var x = Date.parse(a.lastCommitAt || "");
+      var y = Date.parse(b.lastCommitAt || "");
+      var xa = isNaN(x) ? -Infinity : x;
+      var ya = isNaN(y) ? -Infinity : y;
+      if (xa !== ya) return ya - xa;
+      return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+    });
+  }
+
+  /*
+    リポジトリの作品を探す。根に .aiwriter/ があれば根、ほかは根の直下のフォルダーのうち
+    .aiwriter/config.json のあるもの（2段より深い作品は探さない）。最近更新のあった順
+  */
+  async function findWorks(gh, repo) {
+    var r = reader(gh, repo);
+    var root = await r.listDir("", false);
+    var dirs = root.filter(function (e) { return e && e.type === "dir" && !/^\./.test(str(e.name)); });
+    var candidates = [];
+    if (root.some(function (e) { return e && e.type === "dir" && e.name === ".aiwriter"; })) candidates.push("");
+    dirs.forEach(function (d) { candidates.push(str(d.path || d.name)); });
+    // 作品の印（.aiwriter/config.json）のあるフォルダーだけ。無いフォルダーは黙って飛ばす
+    var found = await eachLimited(candidates, 4, async function (dir) {
+      var config = await r.readOptional(repoPath({ path: dir }, ".aiwriter/config.json"));
+      if (!config) return null;
+      var parsed = {};
+      try { parsed = JSON.parse(toLfText(config.text)) || {}; } catch (error) { parsed = {}; }
+      return { path: dir, title: str(parsed.workTitle) || dir || repo.name, manuscriptDir: str(parsed.manuscriptDir) || "本文", lastCommitAt: "" };
+    });
+    var works = found.filter(Boolean);
+    // 最後のコミットの時刻（作品のフォルダーで絞る）。最近更新のあった作品から開く
+    await eachLimited(works, 4, async function (work) {
+      try {
+        var result = await gh("list_commits", {
+          owner: repo.owner, repo: repo.name, sha: repo.branch,
+          path: work.path || undefined, perPage: 1, fields: ["commit"]
+        });
+        var list = Array.isArray(result.payload) ? result.payload : [];
+        var c = list[0] && list[0].commit;
+        work.lastCommitAt = str(c && ((c.committer && c.committer.date) || (c.author && c.author.date)));
+      } catch (error) {
+        work.lastCommitAt = "";
+      }
+    });
+    return sortWorksByRecent(works);
+  }
+
+  function isBodyName(name) { return /\.(txt|md)$/i.test(name); }
+
+  // 話のファイル（作品からの相対）と blob SHA。本文フォルダーが無い・空なら作品の直下（拡張機能と同じ決め方）
+  async function listBodies(gh, repo, work) {
+    var r = reader(gh, repo);
+    var manuscript = await r.listDir(repoPath(work, work.manuscriptDir), true);
+    var bodies = manuscript.filter(function (e) { return e && e.type === "file" && isBodyName(str(e.name)); });
+    var prefix = work.manuscriptDir + "/";
+    if (bodies.length === 0) {
+      bodies = (await r.listDir(work.path, true)).filter(function (e) { return e && e.type === "file" && isBodyName(str(e.name)); });
+      prefix = "";
+    }
+    return bodies.map(function (e) {
+      return { file: prefix + str(e.name), sha: str(e.sha).toLowerCase() };
+    }).sort(function (a, b) { return a.file.localeCompare(b.file, "ja"); });
+  }
+
+  // 受け取り箱のファイル名。Windows で取り出せない「:」を入れない（20261004T050102Z-tablet.json）
+  function inboxFileName(date, deviceSlug) {
+    var stamp = date.toISOString().replace(/\.\d+Z$/, "Z").replace(/[-:]/g, "");
+    return stamp + "-" + (/^[a-z0-9-]+$/.test(deviceSlug) ? deviceSlug : "device") + ".json";
+  }
+
+  // 本文を拡張機能の空間（LF・BOM なし）へそろえる。比べるのは文字だけで、送るハッシュは GitHub の blob SHA
+  function toLfText(text) {
+    return String(text || "").replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+  }
+
+  /*
+    取り込みの結果のファイル（拡張機能の core/outboxInbox.ts の buildInboxResult が置く
+    inbox/done/<箱の名前>.result.json）。断られた記録を、理由つきで決め直せるようにするため
+  */
+  var RESULT_FORMAT = "novelai-outbox-result";
+  function resultFileName(boxName) { return boxName + ".result.json"; }
+
+  // 結果のファイルを読む。形が違えば null（古い拡張機能・壊れたファイル）
+  function parseResultFile(text) {
+    var value;
+    try { value = JSON.parse(String(text || "").replace(/^﻿/, "")); } catch (error) { return null; }
+    if (!value || value.format !== RESULT_FORMAT || value.version !== 1 || !Array.isArray(value.results)) return null;
+    var out = {};
+    value.results.forEach(function (item) {
+      if (!item || typeof item.id !== "string") return;
+      if (item.status !== "imported" && item.status !== "already" && item.status !== "refused") return;
+      var entry = { status: item.status, reason: str(item.reason) };
+      if (typeof item.currentBlobSha === "string" && item.currentBlobSha) entry.currentBlobSha = item.currentBlobSha;
+      out[item.id] = entry;
+    });
+    return out;
+  }
+
+  return {
+    isNotFound: isNotFound,
+    describeGithubError: describeGithubError,
+    textOfResult: textOfResult,
+    shaOfResult: shaOfResult,
+    parseRepoSpec: parseRepoSpec,
+    eachLimited: eachLimited,
+    repoPath: repoPath,
+    reader: reader,
+    sortWorksByRecent: sortWorksByRecent,
+    findWorks: findWorks,
+    listBodies: listBodies,
+    inboxFileName: inboxFileName,
+    toLfText: toLfText,
+    resultFileName: resultFileName,
+    parseResultFile: parseResultFile
+  };
+})();
+/* github-common:end */
+</script>
+
+<script>
 /* outbox-logic:start */
 /*
   出先の原稿箱の判定の写し（統合小説執筆環境の設計書6.115「GitHub 経由」）。
@@ -647,28 +898,13 @@ var OutboxLogic = (function () {
     });
   }
 
-  // 作品を最後のコミットの新しい順に（時刻の分からない作品は後ろ、同じなら道の順）
-  function sortWorksByRecent(works) {
-    return works.slice().sort(function (a, b) {
-      var x = Date.parse(a.lastCommitAt || "");
-      var y = Date.parse(b.lastCommitAt || "");
-      var xa = isNaN(x) ? -Infinity : x;
-      var ya = isNaN(y) ? -Infinity : y;
-      if (xa !== ya) return ya - xa;
-      return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
-    });
-  }
-
-  // 受け取り箱のファイル名。Windows で取り出せない「:」を入れない（20261004T050102Z-tablet.json）
-  function inboxFileName(date, deviceSlug) {
-    var stamp = date.toISOString().replace(/\.\d+Z$/, "Z").replace(/[-:]/g, "");
-    return stamp + "-" + (/^[a-z0-9-]+$/.test(deviceSlug) ? deviceSlug : "device") + ".json";
-  }
-
-  // 本文を拡張機能の空間（LF・BOM なし）へそろえる。比べるのは文字だけで、送るハッシュは GitHub の blob SHA
-  function toLfText(text) {
-    return String(text || "").replace(/^﻿/, "").replace(/\r\n?/g, "\n");
-  }
+  /*
+    作品の並べ方・受け取り箱の名前・本文のそろえ方・結果のファイルの読み方は、原稿エディターの
+    ページと同じ部品（上の github-common の区間の GitHubWorks）を使う
+  */
+  var sortWorksByRecent = GitHubWorks.sortWorksByRecent;
+  var inboxFileName = GitHubWorks.inboxFileName;
+  var toLfText = GitHubWorks.toLfText;
 
   /*
     受け取り箱の中身（拡張機能の core/outboxInbox.ts の parseInboxFile が読む形）。
@@ -695,26 +931,9 @@ var OutboxLogic = (function () {
     };
   }
 
-  /*
-    取り込みの結果のファイル（拡張機能の core/outboxInbox.ts の buildInboxResult が置く
-    inbox/done/<箱の名前>.result.json）。断られた記録を、理由つきで決め直せるようにするため
-  */
-  var RESULT_FORMAT = "novelai-outbox-result";
-  function resultFileName(boxName) { return boxName + ".result.json"; }
-
-  // 結果のファイルを読む。形が違えば null（古い拡張機能・壊れたファイル）
-  function parseResultFile(text) {
-    var value;
-    try { value = JSON.parse(String(text || "").replace(/^﻿/, "")); } catch (error) { return null; }
-    if (!value || value.format !== RESULT_FORMAT || value.version !== 1 || !Array.isArray(value.results)) return null;
-    var out = {};
-    value.results.forEach(function (item) {
-      if (!item || typeof item.id !== "string") return;
-      if (item.status !== "imported" && item.status !== "already" && item.status !== "refused") return;
-      out[item.id] = { status: item.status, reason: str(item.reason) };
-    });
-    return out;
-  }
+  // 取り込みの結果のファイル（inbox/done/<箱の名前>.result.json）。読み方は GitHubWorks と同じ
+  var resultFileName = GitHubWorks.resultFileName;
+  var parseResultFile = GitHubWorks.parseResultFile;
 
   /*
     記録の行き先。results は 箱の名前 → parseResultFile の答え。
@@ -839,166 +1058,46 @@ var OutboxLogic = (function () {
 
   /* ── GitHub を読む・書く ─────────────────────────── */
 
-  function isNotFound(error) {
-    if (!error || error.code !== "tool_error") return false;
-    var text = str(error.message);
-    try { text += " " + JSON.stringify(error.result || ""); } catch (e) { /* 読めなくてもよい */ }
-    return /404|not\s*found/i.test(text);
-  }
-
   /*
-    GitHub に届かないときの、理由と直し方。コードごとに直し方が違うので、1つにまとめない
+    読み方・作品の探し方・届かないときの案内は、原稿エディターのページと同じ部品
+    （上の github-common の区間の GitHubWorks）を使う
   */
-  function describeGithubError(error, what) {
-    var code = error && error.code;
-    if (code === "server_not_connected" || code === "selection_required" || code === "server_not_found") {
-      return "GitHub のコネクターが見つかりません。claude.ai の設定 → コネクターで、カスタムコネクター「GitHub」を足してください（上の「GitHub のつなぎ方」の1）。";
-    }
-    if (code === "needs_reauth") return "GitHub へのつながりが切れています。claude.ai の設定 → コネクターで、GitHub をつなぎ直してください。";
-    if (code === "not_in_manifest") return "このページで GitHub を使うことが許されていません。ページの権限（右上のメニュー）で GitHub を許してから、［読む］を押してください。";
-    if (code === "blocked_by_policy" || code === "approval_required") return "組織の決まりで、このページから GitHub を使えません。管理している人に確かめてください。";
-    if (code === "not_granted" || code === "capability_disabled" || code === "capability_removed") {
-      return "この画面では GitHub を使えません。claude.ai の Claude アプリかブラウザで開いてください。";
-    }
-    if (isNotFound(error)) {
-      return what === "repo"
-        ? "GitHub のアプリ（Claude Github MCP Connector）に、このリポジトリを許していないようです（名前か枝の打ち間違いでも同じ表示になります）。上の「GitHub のつなぎ方」の2と3で、このリポジトリを足してください。"
-        : "GitHub にファイルが見つかりませんでした（" + what + "）。";
-    }
-    if (code === "server_unavailable" || code === "upstream_error" || code === "rate_limited") {
-      return "GitHub に届きませんでした。少し待ってから［読む］を押してください。";
-    }
-    return "GitHub から読めませんでした（" + str(error && error.message).slice(0, 120) + "）。";
-  }
+  var describeGithubError = GitHubWorks.describeGithubError;
+  var eachLimited = GitHubWorks.eachLimited;
+  var repoPath = GitHubWorks.repoPath;
 
   function gh(tool, input) {
     return state.mcp.callTool(GITHUB, tool, input);
   }
 
-  function refOf() { return "refs/heads/" + state.repo.branch; }
-
-  // 作品の中の道を、リポジトリの根からの道へ
-  function repoPath(work, relative) {
-    return work && work.path ? work.path + "/" + relative : relative;
-  }
-
-  // 1つのファイルの中身。get_file_contents は「SHA の行」と中身を別の塊で返す（resource の text を先に見る）
-  function textOfResult(result) {
-    var blocks = (result && result.content) || [];
-    for (var i = 0; i < blocks.length; i++) {
-      var b = blocks[i];
-      if (b && b.type === "resource" && b.resource) {
-        if (typeof b.resource.text === "string") return b.resource.text;
-        if (typeof b.resource.blob === "string") {
-          var bin = atob(b.resource.blob);
-          var bytes = new Uint8Array(bin.length);
-          for (var j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);
-          return new TextDecoder().decode(bytes);
-        }
-      }
-    }
-    var texts = blocks.filter(function (b) { return b && b.type === "text" && typeof b.text === "string"; })
-      .map(function (b) { return b.text; })
-      .filter(function (t) { return !/^successfully downloaded/i.test(t); });
-    if (texts.length) return texts.join("");
-    return typeof (result && result.payload) === "string" ? result.payload : "";
-  }
-
-  function shaOfResult(result) {
-    var blocks = (result && result.content) || [];
-    for (var i = 0; i < blocks.length; i++) {
-      var m = blocks[i] && typeof blocks[i].text === "string" && /SHA:\s*([0-9a-f]{40})/i.exec(blocks[i].text);
-      if (m) return m[1].toLowerCase();
-    }
-    return "";
-  }
-
-  async function readFile(path) {
-    var result = await gh("get_file_contents", { owner: state.repo.owner, repo: state.repo.name, path: path, ref: refOf() });
-    return { text: textOfResult(result), sha: shaOfResult(result) };
-  }
-
   // 無いファイルは null（作品でないフォルダー・まだ指摘の無い作品）
-  async function readOptional(path) {
-    try { return await readFile(path); } catch (error) { if (isNotFound(error)) return null; throw error; }
+  function readOptional(path) {
+    return GitHubWorks.reader(gh, state.repo).readOptional(path);
   }
 
-  async function listDir(path, optional) {
-    try {
-      var result = await gh("get_file_contents", {
-        owner: state.repo.owner, repo: state.repo.name, path: path || "/", ref: refOf(),
-        fields: ["type", "name", "path", "sha"]
-      });
-      return Array.isArray(result.payload) ? result.payload : [];
-    } catch (error) {
-      if (optional && isNotFound(error)) return [];
-      throw error;
-    }
-  }
-
-  // 同時に投げる数を絞って順に読む（GitHub の上限を叩かない）
-  async function eachLimited(items, limit, task) {
-    var results = new Array(items.length);
-    var next = 0;
-    async function worker() {
-      while (next < items.length) {
-        var index = next++;
-        results[index] = await task(items[index], index);
-      }
-    }
-    var workers = [];
-    for (var i = 0; i < Math.min(limit, items.length); i++) workers.push(worker());
-    await Promise.all(workers);
-    return results;
+  function listDir(path, optional) {
+    return GitHubWorks.reader(gh, state.repo).listDir(path, optional);
   }
 
   /* ── 作品を読む ─────────────────────────── */
 
   async function loadRepo() {
-    var spec = repoEl.value.trim().replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/i, "").replace(/\/+$/, "");
-    var parts = spec.split("/");
-    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    var spec = GitHubWorks.parseRepoSpec(repoEl.value);
+    if (!spec) {
       setStatus("リポジトリは「持ち主/名前」の形で入れてください（例：yourname/my-novels）。", true);
       return;
     }
     if (!state.mcp) { setStatus(describeGithubError({ code: "not_granted" }), true); return; }
     var branch = branchEl.value.trim() || "main";
-    state.repo = { owner: parts[0], name: parts[1], branch: branch };
-    remember(REPO_KEY, spec);
+    state.repo = { owner: spec.owner, name: spec.name, branch: branch };
+    remember(REPO_KEY, spec.spec);
     remember(BRANCH_KEY, branch);
     state.loading = true;
     loadEl.disabled = true;
     setStatus("作品を探しています…");
     try {
-      var root = await listDir("", false);
-      var dirs = root.filter(function (e) { return e && e.type === "dir" && !/^\./.test(str(e.name)); });
-      var candidates = [];
-      if (root.some(function (e) { return e && e.type === "dir" && e.name === ".aiwriter"; })) candidates.push("");
-      dirs.forEach(function (d) { candidates.push(str(d.path || d.name)); });
-      // 作品の印（.aiwriter/config.json）のあるフォルダーだけ。無いフォルダーは黙って飛ばす
-      var found = await eachLimited(candidates, 4, async function (dir) {
-        var config = await readOptional(repoPath({ path: dir }, ".aiwriter/config.json"));
-        if (!config) return null;
-        var parsed = {};
-        try { parsed = JSON.parse(OutboxLogic.toLfText(config.text)) || {}; } catch (error) { parsed = {}; }
-        return { path: dir, title: str(parsed.workTitle) || dir || state.repo.name, manuscriptDir: str(parsed.manuscriptDir) || "本文", lastCommitAt: "" };
-      });
-      var works = found.filter(Boolean);
-      // 最後のコミットの時刻（作品のフォルダーで絞る）。最近更新のあった作品から開く
-      await eachLimited(works, 4, async function (work) {
-        try {
-          var result = await gh("list_commits", {
-            owner: state.repo.owner, repo: state.repo.name, sha: state.repo.branch,
-            path: work.path || undefined, perPage: 1, fields: ["commit"]
-          });
-          var list = Array.isArray(result.payload) ? result.payload : [];
-          var c = list[0] && list[0].commit;
-          work.lastCommitAt = str(c && ((c.committer && c.committer.date) || (c.author && c.author.date)));
-        } catch (error) {
-          work.lastCommitAt = "";
-        }
-      });
-      state.works = OutboxLogic.sortWorksByRecent(works);
+      // 作品の印のあるフォルダーを、最後のコミットの新しい順に
+      state.works = await GitHubWorks.findWorks(gh, state.repo);
       workEl.textContent = "";
       state.works.forEach(function (work, index) {
         var option = el("option", "", work.title + (work.lastCommitAt ? "（" + formatTime(work.lastCommitAt) + "）" : ""));
@@ -1029,8 +1128,6 @@ var OutboxLogic = (function () {
     }
   }
 
-  function isBodyName(name) { return /\.(txt|md)$/i.test(name); }
-
   async function loadWork(work) {
     state.work = work;
     state.findings = [];
@@ -1040,18 +1137,8 @@ var OutboxLogic = (function () {
     render();
     try {
       // 本文の置き場。本文フォルダーが無い・空なら作品の直下（拡張機能と同じ決め方）
-      var manuscript = await listDir(repoPath(work, work.manuscriptDir), true);
-      var bodies = manuscript.filter(function (e) { return e && e.type === "file" && isBodyName(str(e.name)); });
-      var prefix = work.manuscriptDir + "/";
-      if (bodies.length === 0) {
-        bodies = (await listDir(work.path, true)).filter(function (e) { return e && e.type === "file" && isBodyName(str(e.name)); });
-        prefix = "";
-      }
-      state.episodes = bodies.map(function (e) {
-        var file = prefix + str(e.name);
-        state.shas[file] = str(e.sha).toLowerCase();
-        return { file: file, sha: str(e.sha).toLowerCase() };
-      }).sort(function (a, b) { return a.file.localeCompare(b.file, "ja"); });
+      state.episodes = await GitHubWorks.listBodies(gh, state.repo, work);
+      state.episodes.forEach(function (e) { state.shas[e.file] = e.sha; });
 
       var jsonl = await readOptional(repoPath(work, ".aiwriter/findings.jsonl"));
       var text = jsonl ? jsonl.text : "";

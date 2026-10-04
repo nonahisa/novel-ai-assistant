@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   OUTBOX_INBOX_FORMAT,
+  buildInboxResult,
   describeInboxImport,
+  parseInboxResult,
   doneNameFor,
   isPendingInboxPath,
   parseInboxFile,
@@ -63,9 +65,41 @@ describe("箱を読む", () => {
   it("壊れた箱・印の無い箱・読めない版は、直さずに理由を返す", () => {
     expect(parseInboxFile("{壊れ").ok).toBe(false);
     expect(parseInboxFile(JSON.stringify({ records: [] })).ok).toBe(false);
-    const future = parseInboxFile(box({ version: 2 }));
+    const future = parseInboxFile(box({ version: 3 }));
     expect(future.ok).toBe(false);
     expect(!future.ok && future.reason).toContain("拡張機能を新しく");
+  });
+
+  it("版2の箱（原稿エディターのページ）の本文の全体を読む。続きの印も読む", () => {
+    const parsed = parseInboxFile(
+      box({
+        version: 2,
+        writer: "editor",
+        records: [
+          {
+            id: "b2",
+            kind: "body",
+            at: "2026-10-05T01:00:00.000Z",
+            episode: "本文/001.txt",
+            baseBlobSha: "abc",
+            basedOn: "b1",
+            text: "全文\n",
+          },
+        ],
+      })
+    );
+    expect(parsed.ok && parsed.records).toEqual([
+      {
+        id: "b2",
+        writer: "editor",
+        kind: "body",
+        at: "2026-10-05T01:00:00.000Z",
+        episode: "本文/001.txt",
+        baseBlobSha: "abc",
+        basedOn: "b1",
+        text: "全文\n",
+      },
+    ]);
   });
 
   it("BOM 付きでも読める", () => {
@@ -101,6 +135,20 @@ describe("受け取り箱は同期から外れない", () => {
         expect(target.startsWith(plain), `${rule} が ${target} を外している`).toBe(false);
       }
     }
+  });
+});
+
+describe("結果のファイル", () => {
+  it("本文が変わって断った記録には、パソコンのいまの本文の印を添える（ページが違いを並べる）", () => {
+    const result = buildInboxResult(
+      "a.json",
+      [{ id: "b1", writer: "editor" }],
+      [{ id: "b1", writer: "editor", status: "refused", reason: "変わった", currentBlobSha: "def" }],
+      new Date("2026-10-05T00:00:00.000Z")
+    );
+    expect(result.results).toEqual([{ id: "b1", status: "refused", reason: "変わった", currentBlobSha: "def" }]);
+    const parsed = parseInboxResult(JSON.stringify(result));
+    expect(parsed.ok && parsed.results[0].currentBlobSha).toBe("def");
   });
 });
 

@@ -612,7 +612,7 @@ server.registerTool(
       "話ごとのファイル・題・本文のハッシュ、提案パネルに並んでいる校正の指摘（原文の一文・修正案と、" +
       "context に前後の数行・範囲の指摘の範囲の行。1指摘あたり2,000字まで）。" +
       "**読むだけで、AIは呼ばず、本文の全体は返しません。** 書き先は nextStep、" +
-      "ページの雛形の場所は templatePath にあります。",
+      "ページの雛形の場所は templatePath（出先の原稿エディターのページは editorTemplatePath）にあります。",
     inputSchema: OUTBOX_PACK_INPUT,
   },
   tool("outbox.pack", (args: { folder: string; retentionDays?: number }) => outboxPack(args))
@@ -632,6 +632,8 @@ server.registerTool(
       "持ち主の id（works/owner）を受け、1件ずつ入れて結果を返します。" +
       "メモは話の末尾（指摘に付けたメモはその行の上）へ // の行として入れ、送ったときと本文が違えば断ります。" +
       "採否（直す・済み・採らない）は持ち主の記録だけを、提案パネルと同じ判断として記録します。" +
+      "本文の全体（body。原稿エディターのページ）は持ち主の記録だけを、読んだときの本文（baseBlobSha）と" +
+      "いまの本文が同じときだけ、文字コードと改行を保って置き換えます。" +
       "入れた記録は覚えていて、2度目は already で返します。",
     inputSchema: OUTBOX_IMPORT_INPUT,
   },

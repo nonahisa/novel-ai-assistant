@@ -26,8 +26,15 @@ export const OUTBOX_INBOX_DONE = "done";
 /** 箱の印。ページはこの値を `format` に入れる */
 export const OUTBOX_INBOX_FORMAT = "novelai-outbox-inbox";
 
-/** 箱の形の版。形を変えたら上げ、読めない版は取り込まずに止める */
-export const OUTBOX_INBOX_VERSION = 1;
+/**
+ * 読める箱の形の版の上限。形を変えたら上げ、読めない版は取り込まずに止める。
+ *
+ * - 1：原稿箱のページ（メモ・採否・自分で直した文）
+ * - 2：原稿エディターのページ（本文の全体 `kind: "body"`。設計書6.116）。**版を分けたのは、
+ *   0.99.0 までの拡張機能が知らない種類の記録を黙って飛ばし、箱を `done/` へ移すため**——
+ *   本文の全体が消えたまま「取り込み済み」に見える。版2なら古い拡張機能は箱を残して止まる
+ */
+export const OUTBOX_INBOX_VERSION = 2;
 
 /**
  * 書き手の印が無い箱の書き手。取り込みの鍵（`書き手/記録のid`）の頭に入る
@@ -59,7 +66,7 @@ export type ParsedInbox =
     }
   | { ok: false; reason: string };
 
-const KINDS = new Set(["memo", "verdict", "edit"]);
+const KINDS = new Set(["memo", "verdict", "edit", "body"]);
 const VERDICTS = new Set(["fix", "done", "reject"]);
 
 /**
@@ -85,7 +92,12 @@ export function parseInboxFile(text: string): ParsedInbox {
   if (box.format !== OUTBOX_INBOX_FORMAT) {
     return { ok: false, reason: `箱の印（format: ${OUTBOX_INBOX_FORMAT}）がありません` };
   }
-  if (box.version !== OUTBOX_INBOX_VERSION) {
+  if (
+    typeof box.version !== "number" ||
+    !Number.isInteger(box.version) ||
+    box.version < 1 ||
+    box.version > OUTBOX_INBOX_VERSION
+  ) {
     return {
       ok: false,
       reason: `この拡張機能が読めない版の箱です（version: ${String(box.version)}）。拡張機能を新しくしてください`,
@@ -112,7 +124,7 @@ function toRecord(raw: unknown, writer: string): OutboxRecord | undefined {
   const kind = str(value.kind);
   if (!id || !KINDS.has(kind)) return undefined;
   const record: OutboxRecord = { id, writer, kind: kind as OutboxRecord["kind"] };
-  for (const key of ["at", "device", "episode", "findingId", "text", "original", "baseHash", "baseBlobSha"] as const) {
+  for (const key of ["at", "device", "episode", "findingId", "text", "original", "baseHash", "baseBlobSha", "basedOn"] as const) {
     const field = value[key];
     if (typeof field === "string") record[key] = field;
   }
@@ -180,8 +192,11 @@ export interface OutboxInboxResultFile {
   box: string;
   /** 取り込んだ時刻 */
   importedAt: string;
-  /** 箱の記録ごとの結果（箱の中の順） */
-  results: Array<{ id: string; status: OutboxImportItem["status"]; reason: string }>;
+  /**
+   * 箱の記録ごとの結果（箱の中の順）。`currentBlobSha` は本文の全体を「本文が変わった」で
+   * 断ったときだけ（パソコンのいまの本文。ページが違いを並べる手がかり）
+   */
+  results: Array<{ id: string; status: OutboxImportItem["status"]; reason: string; currentBlobSha?: string }>;
 }
 
 /** 結果のファイルの名前（箱の名前に `.result.json` を足す） */
@@ -207,7 +222,12 @@ export function buildInboxResult(
     importedAt: now.toISOString(),
     results: records.flatMap((record) => {
       const item = byKey.get(`${record.writer}/${record.id}`);
-      return item ? [{ id: item.id, status: item.status, reason: item.reason }] : [];
+      if (!item) return [];
+      return [
+        item.currentBlobSha
+          ? { id: item.id, status: item.status, reason: item.reason, currentBlobSha: item.currentBlobSha }
+          : { id: item.id, status: item.status, reason: item.reason },
+      ];
     }),
   };
 }
@@ -239,7 +259,12 @@ export function parseInboxResult(
       const item = raw as Record<string, unknown>;
       const status = item.status;
       if (!str(item.id) || (status !== "imported" && status !== "already" && status !== "refused")) return [];
-      return [{ id: str(item.id), status, reason: str(item.reason) }];
+      const current = str(item.currentBlobSha);
+      return [
+        current
+          ? { id: str(item.id), status, reason: str(item.reason), currentBlobSha: current }
+          : { id: str(item.id), status, reason: str(item.reason) },
+      ];
     }),
   };
 }

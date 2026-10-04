@@ -16,7 +16,7 @@ import {
   resolveLocks,
   type FileLock,
 } from "../models/fileLock";
-import { decodeBytes, type TextFileContent } from "./textDecode";
+import { decodeBytes, hasConflictMarkers, type TextFileContent } from "./textDecode";
 import { sha1Bytes } from "./hash";
 import {
   DEFAULT_FINDINGS_RETENTION_DAYS,
@@ -61,8 +61,11 @@ export interface OutboxRecord {
    * 受け取り箱では、箱のファイルの `writer`
    */
   writer: string;
-  /** memo＝メモ、verdict＝採否、edit＝作者が自分で直した文 */
-  kind: "memo" | "verdict" | "edit";
+  /**
+   * memo＝メモ、verdict＝採否、edit＝作者が自分で直した文、
+   * body＝原稿エディターのページで書いた話の本文の全体（設計書6.116）
+   */
+  kind: "memo" | "verdict" | "edit" | "body";
   /** 使わない（書き手は `writer` で決める） */
   by?: string;
   at?: string;
@@ -84,6 +87,13 @@ export interface OutboxRecord {
    * blob SHA なら GitHub が教えてくれる値そのもので、こちらはバイト列から同じ値を作れる
    */
   baseBlobSha?: string;
+  /**
+   * body のとき、この本文が続きとして書かれた前の body 記録の id（同じ書き手）。
+   * ページは送ったあと取り込まれる前の本文を重ねて見せ、その上に続きを書かせる——
+   * そのときの `baseBlobSha` は送る前の古い本文のままなので、前の記録を入れたあとの
+   * 本文と比べる手がかりが要る（設計書6.116）
+   */
+  basedOn?: string;
   imported?: boolean;
 }
 
@@ -144,6 +154,12 @@ export interface OutboxImportItem {
   status: OutboxImportStatus;
   /** 入れた・断った理由（作者に読める日本語） */
   reason: string;
+  /**
+   * body を「本文が変わった」で断ったときの、パソコンのいまの本文の blob SHA。
+   * ページは GitHub から読み直した本文がこの値と同じかを見て、送った本文との
+   * 違いを並べる（同期の前なら、まだ古い本文しか読めない）
+   */
+  currentBlobSha?: string;
 }
 
 export interface OutboxImportOutcome {
@@ -218,6 +234,25 @@ function blobShaCandidates(bytes: Uint8Array): Set<string> {
   return candidates;
 }
 
+/**
+ * 入れ済みの body 記録の、書いたあとの本文の blob SHA（鍵 → SHA）。
+ * 続きの印（`basedOn`）の先を入れたあとの本文が、いまも同じかを確かめるため
+ */
+export function parseImportedBodyShas(text: string | undefined): Map<string, string> {
+  const shas = new Map<string, string>();
+  if (!text) return shas;
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const value = JSON.parse(line) as { id?: unknown; blobSha?: unknown };
+      if (typeof value.id === "string" && typeof value.blobSha === "string") shas.set(value.id, value.blobSha);
+    } catch {
+      // 壊れた行は飛ばす
+    }
+  }
+  return shas;
+}
+
 /** 入れ済みの鍵の行を読む。壊れた行（同期の競合など）は飛ばす */
 export function parseImportedKeys(text: string | undefined): Set<string> {
   const ids = new Set<string>();
@@ -240,6 +275,14 @@ interface FileState {
   startHash: string;
   /** 取り込みを始めたときの blob SHA の候補（記録の `baseBlobSha` はこれと比べる） */
   startBlobShas: Set<string>;
+  /**
+   * いまの（この回で書いたあとの）blob SHA の候補。**body はこちらと比べる**——
+   * 本文の全体を置き換えるので、同じ回で先に書いた分を、古い本文から書いた
+   * 別の本文で黙って消さないため
+   */
+  currentBlobShas: Set<string>;
+  /** いまのバイト列そのままの blob SHA（断るときにページへ返す） */
+  currentBlobSha: string;
   content: TextFileContent;
 }
 
@@ -256,6 +299,8 @@ interface Context {
   retentionDays: number;
   now: Date;
   io: OutboxImportIo;
+  /** 入れた body 記録の鍵 → 書いたあとの blob SHA（前の回の分と、この回の分） */
+  bodyShas: Map<string, string>;
 }
 
 /**
@@ -272,7 +317,9 @@ export async function importOutboxRecords(
 ): Promise<OutboxImportOutcome> {
   const retentionDays = options.retentionDays ?? DEFAULT_FINDINGS_RETENTION_DAYS;
   const now = options.now ?? new Date();
-  const done = parseImportedKeys(await io.readText(IMPORTED_PATH));
+  const importedText = await io.readText(IMPORTED_PATH);
+  const done = parseImportedKeys(importedText);
+  const bodyShas = parseImportedBodyShas(importedText);
   const views = new Map(
     resolveFindings(parseFindingLines((await io.readText(FINDINGS_PATH)) ?? "")).map(
       (view) => [view.id, view]
@@ -306,6 +353,8 @@ export async function importOutboxRecords(
             relative: key,
             startHash: content.hash,
             startBlobShas: blobShaCandidates(bytes),
+            currentBlobShas: blobShaCandidates(bytes),
+            currentBlobSha: gitBlobSha(bytes),
             content,
           };
     } catch (error) {
@@ -319,7 +368,10 @@ export async function importOutboxRecords(
 
   /** 書いたあと、次の記録のために読み直す（ハッシュを持ち越す） */
   const reread: Reread = async (state) => {
-    state.content = decodeBytes(await io.readBytes(state.relative));
+    const bytes = await io.readBytes(state.relative);
+    state.content = decodeBytes(bytes);
+    state.currentBlobShas = blobShaCandidates(bytes);
+    state.currentBlobSha = gitBlobSha(bytes);
   };
 
   const context: Context = {
@@ -331,6 +383,7 @@ export async function importOutboxRecords(
     retentionDays,
     now,
     io,
+    bodyShas,
   };
 
   const results = new Map<string, OutboxImportItem>();
@@ -338,25 +391,43 @@ export async function importOutboxRecords(
   const verdicts: VerdictLine[] = [];
   /** ［自分で直す］で足す指摘の行（提案パネルの［戻す］と同じ形で戻せるように） */
   const authorFindings: Finding[] = [];
-  const importedIds: string[] = [];
+  const importedIds: Array<{ id: string; blobSha?: string }> = [];
   const decided = new Set<string>();
 
   /*
-    **メモを先に、採否をあとに入れる。** 同じ話で［直す］を先に当てると、
-    その指摘に付けたメモの行が引けなくなる（原文が直って探せない）。
+    **本文の全体を先に、メモをその次に、採否をあとに入れる。**
+    - 本文の全体（body）は送った時点の全文で置き換えるので、先にメモを入れると
+      そのメモの行を消してしまう。メモと［直す］は、いまの本文で位置を探し直す
+    - body どうしは時刻の順（続きの印 `basedOn` は前の記録を入れたあとの本文に続ける）
+    - 同じ話で［直す］を先に当てると、その指摘に付けたメモの行が引けなくなる
+      （原文が直って探せない）
     結果は渡された順で返す
   */
+  const bodies = options.records
+    .map((record, index) => ({ record, index }))
+    .filter(({ record }) => record.kind === "body")
+    .sort((a, b) => timeOf(a.record) - timeOf(b.record) || a.index - b.index)
+    .map(({ record }) => record);
   const ordered = [
+    ...bodies,
     ...options.records.filter((record) => record.kind === "memo"),
-    ...options.records.filter((record) => record.kind !== "memo"),
+    ...options.records.filter((record) => record.kind === "verdict" || record.kind === "edit"),
   ];
 
-  const finish = (record: OutboxRecord, status: OutboxImportStatus, reason: string) => {
+  const finish = (
+    record: OutboxRecord,
+    status: OutboxImportStatus,
+    reason: string,
+    extra: { blobSha?: string; currentBlobSha?: string } = {}
+  ) => {
     const key = outboxRecordKey(record);
-    results.set(key, { id: record.id, writer: record.writer, status, reason });
+    const item: OutboxImportItem = { id: record.id, writer: record.writer, status, reason };
+    if (extra.currentBlobSha) item.currentBlobSha = extra.currentBlobSha;
+    results.set(key, item);
     if (status === "imported") {
       done.add(key);
-      importedIds.push(key);
+      importedIds.push(extra.blobSha ? { id: key, blobSha: extra.blobSha } : { id: key });
+      if (extra.blobSha) bodyShas.set(key, extra.blobSha);
     }
   };
 
@@ -368,7 +439,8 @@ export async function importOutboxRecords(
   */
   const latestDecision = new Map<string, { record: OutboxRecord; time: number; index: number }>();
   options.records.forEach((record, index) => {
-    if (record.kind === "memo" || !options.isOwner(record.writer) || !record.findingId) return;
+    if (record.kind === "memo" || record.kind === "body") return;
+    if (!options.isOwner(record.writer) || !record.findingId) return;
     if (done.has(outboxRecordKey(record))) return;
     const time = Date.parse(record.at ?? "");
     const at = Number.isNaN(time) ? -Infinity : time;
@@ -383,6 +455,14 @@ export async function importOutboxRecords(
     if (results.has(outboxRecordKey(record))) continue; // 同じ記録が2度渡された
     if (done.has(outboxRecordKey(record))) {
       finish(record, "already", "入れ済みです（前に取り込みました）。");
+      continue;
+    }
+    if (record.kind === "body") {
+      const outcome = await importBody(record, context);
+      finish(record, outcome.ok ? "imported" : "refused", outcome.reason, {
+        blobSha: outcome.ok ? outcome.blobSha : undefined,
+        currentBlobSha: outcome.ok ? undefined : outcome.currentBlobSha,
+      });
       continue;
     }
     if (record.kind === "memo") {
@@ -436,7 +516,11 @@ export async function importOutboxRecords(
   await io.appendJsonLines(VERDICTS_PATH, verdicts);
   await io.appendJsonLines(
     IMPORTED_PATH,
-    importedIds.map((id) => ({ id, time: now.toISOString() }))
+    importedIds.map((item) =>
+      item.blobSha
+        ? { id: item.id, time: now.toISOString(), blobSha: item.blobSha }
+        : { id: item.id, time: now.toISOString() }
+    )
   );
 
   const list = options.records
@@ -474,6 +558,103 @@ function sameBaseAsSent(record: OutboxRecord, state: FileState): boolean {
   if (record.baseHash && record.baseHash === state.startHash) return true;
   if (record.baseBlobSha && state.startBlobShas.has(record.baseBlobSha.toLowerCase())) return true;
   return false;
+}
+
+type BodyOutcome =
+  | { ok: true; reason: string; blobSha: string }
+  | { ok: false; reason: string; currentBlobSha?: string };
+
+/**
+ * 原稿エディターのページ（設計書6.116）で書いた、話の本文の全体を入れる。
+ *
+ * - **持ち主の記録だけ**（採否と同じ）。書いてよいのは本文のファイルだけ（`stateOf`）
+ * - **いまの本文が、送ったときに読んだ本文と同じときだけ**入れる（blob SHA。続きの印
+ *   `basedOn` があれば、その記録を入れたあとの本文とも比べる）。比べる相手は
+ *   **いまの本文**——同じ回で先に入れた本文を、古い本文から別に書いた本文で消さない
+ * - 違えば入れずに、どこから違うかと、いまの本文の blob SHA を返す（ページが違いを並べる）
+ * - 書き戻しは呼び手の `writeBody`（製品は `writeTextFilePreservingFormat`）。全文の
+ *   置き換えでも、文字コード・改行を保ち、変わった所だけをバイト列へ当てる
+ * - 競合の印を含む本文（いまの本文・送った本文のどちらでも）には書かない
+ */
+async function importBody(record: OutboxRecord, context: Context): Promise<BodyOutcome> {
+  if (!context.isOwner(record.writer)) {
+    return { ok: false, reason: "持ち主でない人の本文は入れません。" };
+  }
+  if (!record.episode) return { ok: false, reason: "どの話の本文か分かりません（episode がありません）。" };
+  // ページの欄から CRLF・BOM 付きで届いても、本文の空間（LF）にそろえる。書き戻しで元の形へ戻す
+  const text = toLf((record.text ?? "").replace(/^﻿/, ""));
+  if (!text.trim()) return { ok: false, reason: "送られた本文が空です（話がまるごと消えるため、入れませんでした）。" };
+  if (hasConflictMarkers(text)) {
+    return { ok: false, reason: "送られた本文に Git の競合の印（<<<<<<< など）があるため、入れませんでした。" };
+  }
+
+  const state = await context.stateOf(record.episode);
+  if (state instanceof Error) return { ok: false, reason: state.message };
+  const lock = lockOf(context.locks, state.relative);
+  if (lock && lock.holderKind === "editor") {
+    return { ok: false, reason: `${describeLock(lock)} 校閲が終わってから送り直してください。` };
+  }
+
+  const base = record.baseBlobSha?.toLowerCase();
+  const chained = record.basedOn
+    ? context.bodyShas.get(outboxRecordKey({ writer: record.writer, id: record.basedOn }))
+    : undefined;
+  const same =
+    (base !== undefined && state.currentBlobShas.has(base)) ||
+    (record.baseHash !== undefined && record.baseHash === state.content.hash) ||
+    (chained !== undefined && state.currentBlobShas.has(chained));
+  if (!same) {
+    return {
+      ok: false,
+      reason: `${BODY_CHANGED_REASON}${describeBodyDifference(state.content.text, text)}`,
+      currentBlobSha: state.currentBlobSha,
+    };
+  }
+
+  if (text === state.content.text) {
+    return {
+      ok: true,
+      reason: `${toSlash(state.relative)} は、送られた本文と同じでした（書き換えはありません）。`,
+      blobSha: state.currentBlobSha,
+    };
+  }
+  const written = await context.io.writeBody(state.relative, text, state.content);
+  if (!written.ok) {
+    return {
+      ok: false,
+      reason: written.changed ? BODY_CHANGED_REASON : written.reason,
+      currentBlobSha: state.currentBlobSha,
+    };
+  }
+  await context.reread(state);
+  return {
+    ok: true,
+    reason: `${toSlash(state.relative)} を、出先で書いた本文にしました（${describeBodyChange(text)}）。`,
+    blobSha: state.currentBlobSha,
+  };
+}
+
+/**
+ * パソコンの本文と送られた本文の、最初に違う行（作者が違いを探す手がかり）。
+ * 送ったときの本文はパソコンに無いので、いまの本文と送られた本文を比べる
+ */
+export function describeBodyDifference(current: string, sent: string): string {
+  const a = current.split("\n");
+  const b = sent.split("\n");
+  let at = 0;
+  while (at < a.length && at < b.length && a[at] === b[at]) at += 1;
+  const lines = (list: string[]) => (list[list.length - 1] === "" ? list.length - 1 : list.length);
+  return `パソコンの本文と送られた本文は、${at + 1}行目から違います（パソコン ${lines(a)}行・送られた本文 ${lines(b)}行）。`;
+}
+
+function describeBodyChange(text: string): string {
+  const lines = text.split("\n");
+  return `${lines[lines.length - 1] === "" ? lines.length - 1 : lines.length}行`;
+}
+
+function timeOf(record: OutboxRecord): number {
+  const time = Date.parse(record.at ?? "");
+  return Number.isNaN(time) ? -Infinity : time;
 }
 
 async function importMemo(record: OutboxRecord, context: Context): Promise<Outcome> {
