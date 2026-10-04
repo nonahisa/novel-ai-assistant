@@ -747,17 +747,30 @@ describe("前の話・次の話", () => {
    * マウスの戻る・進むボタン（作者の依頼、2026-09-10）。
    *
    * WebView の中では VS Code 本体の割り当てが効かないので、この画面で
-   * 受ける。**`auxclick` には付けない**——同じ押下で両方来るため、
-   * 1回押すと2話ぶん動く。
+   * 受ける。**押した時点（mousedown）で動かし、mouseup・auxclick は止めるだけ**
+   * （2026-10-04。人物相関図と同じ形。VS Code 1.138 の本体も押した時点で動かす）。
+   * 同じ押下で3つとも来るので、動かすのを2か所にすると1回で2話ぶん動く。
    */
-  it("マウスの戻る・進むボタンを、前の話・次の話に結ぶ", () => {
-    const at = code.indexOf('document.addEventListener("mouseup"');
-    expect(at).toBeGreaterThan(0);
-    const handler = code.slice(at, at + 500);
-    expect(handler).toContain("event.button !== 3 && event.button !== 4");
-    expect(handler).toContain("event.preventDefault()");
-    expect(handler).toContain('event.button === 3 ? "prev" : "next"');
-    expect(code).not.toContain('addEventListener("auxclick"');
+  it("マウスの戻る・進むボタンを、押した時点で前の話・次の話に結び、離したときは止めるだけ", () => {
+    const handlerOf = (type: string) => {
+      const at = code.indexOf(`document.addEventListener("${type}", function (event) {\n    if (`);
+      expect(at, `${type} の受け口が無い`).toBeGreaterThan(0);
+      const end = code.indexOf("}, true);", at);
+      expect(end, `${type} を捕獲の段で受けていない`).toBeGreaterThan(at);
+      return code.slice(at, end);
+    };
+    expect(code).toContain("return event.button === 3 || event.button === 4;");
+    const down = handlerOf("mousedown");
+    expect(down).toContain("stopSideButton(event)");
+    expect(down).toContain('openNeighbor(event.button === 3 ? "prev" : "next")');
+    for (const type of ["mouseup", "auxclick"]) {
+      const handler = handlerOf(type);
+      expect(handler).toContain("if (isSideButton(event)) stopSideButton(event);");
+      expect(handler).not.toContain("openNeighbor");
+    }
+    const stop = code.slice(code.indexOf("function stopSideButton("), code.indexOf("function stopSideButton(") + 200);
+    expect(stop).toContain("event.preventDefault();");
+    expect(stop).toContain("event.stopPropagation();");
   });
 
   /** 「最新話を書く」は右端のまま（作者の依頼、2026-08-28） */

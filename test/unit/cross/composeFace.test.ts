@@ -1460,6 +1460,32 @@ describe("画面の約束", () => {
    * カーソルを span の外へ逃がす。**変換中（IME）は触らない**——変換の
    * 途中で選択を動かすと、日本語入力の側が持つ位置とずれて変換が壊れる。
    */
+  /*
+    Home／End は自前で動かす（作者の実機報告 2026-10-04。行にルビがあると Chromium の End が
+    ルビの直後で止まった）。動き方そのものは E2E の composeLineEnd.test.ts が見る。ここでは、
+    変換中と Ctrl つきには手を出さないことを見る
+  */
+  it("Home／End の受け口は、変換中と Ctrl つきには手を出さない", () => {
+    const block = code.slice(code.indexOf("/* lineBoundary:start */"), code.indexOf("/* lineBoundary:end */"));
+    expect(block).toContain("if (composing || event.isComposing) return;");
+    expect(block).toContain("if (event.ctrlKey || event.altKey || event.metaKey) return;");
+    // 動かせたときだけ既定の動きを止める（動かせなければブラウザに任せる）
+    expect(block).toMatch(/if \(composeMoveToLineBoundary\([^)]*\)\) \{\s*event\.preventDefault\(\);/);
+    // もう見えている行の端なら、段落の端へ（2回目。作者の裁定 2026-10-04）
+    expect(block).toContain("if (atRowEnd) target = items.length - 1;");
+    expect(block).toContain("if (atRowHead) target = 0;");
+  });
+
+  it("傍点の語の中の打鍵は、変換の字には手を出さず、打つ前に押した点への置き直しを当てる", () => {
+    const block = code.slice(code.indexOf("/* emphasisInside:start */"), code.indexOf("/* emphasisInside:end */"));
+    expect(block).toContain('if (composing || kind === "insertCompositionText") return false;');
+    const before = code.slice(code.indexOf('compose.addEventListener("beforeinput"'));
+    const applyAt = before.indexOf("composeApplyMouseFix()");
+    const typeAt = before.indexOf("composeTypeIntoChunk(event, kind)");
+    expect(applyAt).toBeGreaterThan(0);
+    expect(typeAt).toBeGreaterThan(applyAt);
+  });
+
   it("三点リーダ・ダッシュ・縦中横の中で打つ前に、カーソルを外へ出す", () => {
     expect(code).toContain("function composeEscapeEllipsis(");
     expect(code).toContain("function composeEllipsisAncestor(");
@@ -1491,7 +1517,8 @@ describe("画面の約束", () => {
     const before = code.slice(
       code.indexOf('compose.addEventListener("beforeinput"')
     );
-    expect(before.slice(0, 400)).toContain("composeEscapeEllipsis(kind)");
+    // 傍点の語の中の打鍵（composeTypeIntoChunk）を先に見るので、受け口の中ほどにある
+    expect(before.slice(0, 1200)).toContain("composeEscapeEllipsis(kind)");
   });
 
   /**
@@ -1588,8 +1615,12 @@ describe("画面の約束", () => {
     });
 
     it("既定の動きを止めず、動いたあとに直す", () => {
+      // 矢印を見張る受け口（keydown の受け口はほかにもある：Home／End・押した点の見張り）
       const keydown = code.slice(
-        code.indexOf('compose.addEventListener("keydown"')
+        code.lastIndexOf(
+          'compose.addEventListener("keydown"',
+          code.indexOf("COMPOSE_ARROW_KEYS[event.key] !== true")
+        )
       );
       const body = keydown.slice(0, 900);
       // **変換中は触らない**（選択を動かすと変換そのものが壊れる）
@@ -2622,6 +2653,34 @@ describe("見えている字は、記法の本文に必ず入る", () => {
     expect(expectNoLoss(fragment([line]), "site")).toBe(
       "｜漢字《かん》《《強調点》》"
     );
+  });
+
+  /*
+    傍点の語の中で打つために開いたかたまり（data-open。作者の裁定 2026-10-04、
+    設計書6.25.9）。開いている間に作者が中の字を消し切ったら、語は消えたのであって、
+    元の記法を出すと消した語が戻る
+  */
+  it("開いた傍点のかたまりの中の字を消し切ったら、語は本文から消える", () => {
+    const line = api.composeBuildLine("あ{{強調}}い", fakeDoc);
+    const emphasis = line.childNodes[1];
+    emphasis.setAttribute?.("data-open", "1");
+    emphasis.childNodes.splice(0, emphasis.childNodes.length);
+    expect(api.composeDomToNotation(fragment([line]))).toBe("あい");
+  });
+
+  it("開いていないかたまりが空なのは見えないだけなので、元の記法を出す（今までどおり）", () => {
+    const line = api.composeBuildLine("あ{{強調}}い", fakeDoc);
+    const emphasis = line.childNodes[1];
+    emphasis.childNodes.splice(0, emphasis.childNodes.length);
+    expect(api.composeDomToNotation(fragment([line]))).toBe("あ{{強調}}い");
+  });
+
+  it("開いた傍点のかたまりの中に打った字は、傍点の語の中に増える", () => {
+    const line = api.composeBuildLine("あ{{強調}}い", fakeDoc);
+    const emphasis = line.childNodes[1];
+    emphasis.setAttribute?.("data-open", "1");
+    emphasis.childNodes[0].nodeValue = "強あ調";
+    expect(api.composeDomToNotation(fragment([line]))).toBe("あ{{強あ調}}い");
   });
 
   it("かたまりの中が組んだときのままなら、記法をそのまま出す", () => {

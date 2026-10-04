@@ -23,7 +23,7 @@ import {
 } from "./support/manuscriptFrame";
 import { tabIsDirty } from "./support/workbenchDom";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
-import { waitUntil } from "./support/wait";
+import { holdsFor, waitUntil } from "./support/wait";
 
 const EPISODE = "001_はじまり.txt";
 
@@ -298,27 +298,24 @@ async function waitDirtyQuickly(session: E2ESession): Promise<void> {
  * 同じ時機に揃えることになる。待つのは選択だけで、画面の本文（傍点が残っている
  * ＝見たい場面）は待たない。画面の中で細かく見るので、本文の送り直し（120ミリ秒）より
  * ずっと早く戻る。
+ *
+ * **待つ目印は、本体の選び直しの知らせが画面に当たったこと**（traceInstall が立てる印。
+ * 2026-10-04 に改めた）。以前は「選択がかたまりの外へ出た」を待っていたが、傍点の語の中で
+ * 打てるようにした直し（設計書6.25.9）で、`selectText` の選択はその場でかたまり全体の選択に
+ * 直るようになり、待ちが即座に済んでしまった。遅い機械（ノートPC）では End や打鍵が選び直しより
+ * 先に着き、あとから着いた選び直しが作者の動かしたカーソルを語の選択へ戻して落ちた
  */
 async function waitSelectionOutsideChunk(frame: Frame): Promise<void> {
-  const moved = await frame.evaluate(async () => {
-    const insideChunk = () => {
-      const selection = window.getSelection();
-      if (!selection || selection.rangeCount === 0) return true;
-      const range = selection.getRangeAt(0);
-      const within = (node: Node) => {
-        const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
-        return !!element?.closest('[contenteditable="false"]');
-      };
-      return within(range.startContainer) || within(range.endContainer);
-    };
+  const reselected = await frame.evaluate(async () => {
+    const holder = window as unknown as { __e2eReselected?: boolean };
     const until = performance.now() + 5_000;
-    while (insideChunk()) {
+    while (holder.__e2eReselected !== true) {
       if (performance.now() > until) return false;
       await new Promise((resolve) => setTimeout(resolve, 2));
     }
     return true;
   });
-  if (!moved) throw new Error("Ctrl+Alt+K のあと、5秒待っても選択が傍点のかたまりの中から動きません（本体の選び直しが届いていません）");
+  if (!reselected) throw new Error("Ctrl+Alt+K のあと、5秒待っても本体の選び直し（select）が画面に届きません");
 }
 
 /** 落ちたときに読む操作ログの行（当て直し・ぶつかり・保存・外からの変更） */
@@ -371,6 +368,12 @@ async function traceInstall(frame: Frame): Promise<void> {
       "message",
       (event) => {
         const message = event.data as Record<string, unknown>;
+        // 本体の選び直しが画面に当たった印（画面の受け口のあとに立てる。waitHostReselect）
+        if (message.type === "select") {
+          setTimeout(() => {
+            (window as unknown as { __e2eReselected?: boolean }).__e2eReselected = true;
+          }, 0);
+        }
         record(
           `本体から ${String(message.type)}` +
             (typeof message.text === "string" ? ` ${JSON.stringify(message.text)}` : "") +
@@ -586,28 +589,27 @@ test("Ctrl+Alt+K で強調を外した直後、画面へ届く前に同じ語の
       const bar = await frame.evaluate(() => document.getElementById("rescueText")?.textContent ?? "");
       expect(bar).toContain("重な");
       try {
-        await traceMark(frame, "Ctrl+S（外した印のまま保存）");
-        await saveAndWaitFor(session, (text) => !text.includes("《《"), "外した印のままファイルに入る");
-        expect(await fileText(session)).toBe("前の字と強調と後ろの字。\n");
         /*
-          **［戻す］は、断られたあとの本体の本文が画面に届いてから押す**（2026-10-04、揺れの調べ）。
-          画面は「最後に届いた本体の本文」を戻す便の元にする。本体はその本文を、変更が続くあいだ
-          120ミリ秒ずつ延ばして送るので、帯が出てから100ミリ秒ほどで押すと、元はまだ傍点を外す前の
-          本文で、本体は戻す便をもう一度「重なった」と断り、帯を出し直した（同時に走らせて16回中3回。
-          字は帯に控えたままで、消えてはいない）。人は帯を読んでから押すので、そのあいだに必ず届く。
-          届いた目印は、画面の「あ」が本体の本文（外した字だけ）に置き換わること
+          **帯が出たら、待たずに［戻す］［それでも戻す］を押す**（作者の裁定、2026-10-04。設計書6.25.9）。
+          0.98.6 までは、本体は断ったあとの本文を120ミリ秒まとめて（続く変更で延ばして）送っていたので、
+          帯が出てすぐ押すと、画面は傍点を外す前の本文を元にして戻す便を送り、本体はもう一度
+          「重なった」と断って帯を出し直していた（同時に走らせて16回中3回。このテストは、本体の本文が
+          画面に届くのを待ってから押して避けていた）。いまは断った直後だけ待たずに送るので、
+          待ちを外しても一度で通る。保存（Ctrl+S）も挟まない——挟むと、その待ちで本文が届いてしまう
         */
-        await waitUntil(
-          async () => (await composeText(frame)).includes("前の字と強調と後ろの字。"),
-          "断られたあとの本体の本文が画面に届く"
-        );
-        // ［戻す］を押せば、打った字のほうへ戻せる（本体の変更は消えるので、確かめが1段入る）
         await traceMark(frame, "［戻す］を押す");
         await frame.locator("#rescueRestore").click();
         const confirm = await frame.evaluate(() => document.getElementById("rescueRestore")?.textContent ?? "");
         expect(confirm).toBe("それでも戻す");
         await traceMark(frame, "［それでも戻す］を押す");
         await frame.locator("#rescueRestore").click();
+        // 一度で通る：帯は閉じたまま、出し直されない
+        await holdsFor(
+          async () =>
+            !(await frame.evaluate(() => document.getElementById("rescue")?.classList.contains("open") === true)),
+          "［それでも戻す］のあと、帯が閉じたまま（二度目の「重なった」で出し直されない）",
+          1_500
+        );
         await waitUntil(async () => (await composeText(frame)).includes("前の字とあと後ろの字。"), "打った字が画面へ戻る");
         await traceMark(frame, "Ctrl+S（戻した字を保存）");
         await saveAndWaitFor(session, (text) => text.includes("あ"), "打った字がファイルに入る");
