@@ -44,6 +44,10 @@ const EPISODES = [
 const CONTROL_KEY = "ctrl+alt+shift+u";
 const CONTROL_PRESS = "Control+Alt+Shift+KeyU";
 
+/** 誤字脱字を when なしで呼ぶ対照のキー（検出器が「走った」を拾えるかを見る。AI は未設定なので呼ばれない） */
+const TYPO_CONTROL_KEY = "ctrl+alt+shift+i";
+const TYPO_CONTROL_PRESS = "Control+Alt+Shift+KeyI";
+
 /** 焦点の在り処（要素と、それが入っている本体の部品） */
 async function focusWhere(page: Page): Promise<{ element: string; part: string }> {
   return page.evaluate(() => {
@@ -113,11 +117,21 @@ test("作品一覧の作品の行・検索の欄に焦点があると Ctrl+Alt+T
         10_000
       );
       await expectTypoKeyIgnored(page, "検索の欄");
+
+      // 検出器の対照：when の無いキーで誤字脱字を呼べば「走った印」が拾えること。
+      // 拾えないまま（知らせの DOM の名前が版で変わるなど）だと、上の「走らない」は何も見ずに通る
+      await page.keyboard.press(TYPO_CONTROL_PRESS);
+      await waitUntil(async () => (await typoCheckStarted(page)) !== undefined, "when の無いキーで誤字脱字を呼ぶと、走った印が出る", 10_000);
     },
     {
       ...SIDEBAR_LAUNCH,
       settings: { ...SIDEBAR_LAUNCH.settings, "window.dialogStyle": "custom" },
-      keybindings: [...SIDEBAR_LAUNCH.keybindings, { key: CONTROL_KEY, command: "novelai.showVersion" }],
+      keybindings: [
+        ...SIDEBAR_LAUNCH.keybindings,
+        { key: CONTROL_KEY, command: "novelai.showVersion" },
+        // 引数は製品のキーと同じ印（前面の原稿の話で走らせる）。引数なしでは何も出さずに戻った
+        { key: TYPO_CONTROL_KEY, command: "novelai.checkTyposForFile", args: { source: "manuscriptEditor" } },
+      ],
     }
   );
 });
