@@ -18,9 +18,12 @@ import {
   memoTagClass,
   nearestMemo,
   parseMemos,
+  memoLineRemoval,
   removeMemoLine,
+  restoreMemoLine,
   sortMemos,
   type MemoPosition,
+  type RemovedMemoLine,
   type SceneMemo,
 } from "../core/sceneMemo";
 import {
@@ -56,6 +59,7 @@ import { revealTextLocation, type RevealInManuscript } from "./revealLocation";
 import {
   lastManuscriptCaret,
   removeMemoLineInOpenManuscript,
+  restoreMemoLineInOpenManuscript,
 } from "./manuscriptEditor";
 
 /**
@@ -427,12 +431,25 @@ type PanelMessage =
   | { type: "fix"; findingId: string }
   /** 修正案の無いAIの指摘を、種類ごとの道（提案パネル）へ渡す（設計書6.96.5） */
   | { type: "handOver"; findingId: string }
-  /** ［直す］で当てた直近の1件を戻す */
+  /** 帯に出ている直近の1手（［直す］か［済み］）を戻す */
   | { type: "undoFix" }
   /** AIの指摘を退ける。**追記で残す**だけで、指摘の行は書き換えない */
   | { type: "dismissFinding"; findingId: string }
   | { type: "filter"; onlyCurrent: boolean; tag: string; query: string }
   | { type: "export" };
+
+/** ［済み］で消したメモ（帯の［戻す］で元へ差し込む） */
+interface DoneStep {
+  kind: "done";
+  filePath: string;
+  /** 元の位置を確かめるための控え（上下の隣の行を含む） */
+  removed: RemovedMemoLine;
+  /** 帯に出す話の呼び名。消す前に引いておく（読み直すと引けなくなる） */
+  label: string;
+}
+
+/** 上の帯の［戻す］で戻せる、直近の1手 */
+type UndoableStep = { kind: "fix"; finding: PlacedFinding } | DoneStep;
 
 /**
  * シーンメモの画面の種類。**提案パネルが、シーンメモの列を探すのに使う**
@@ -468,13 +485,19 @@ class SceneMemoPanel {
   private query = "";
 
   /**
-   * ［直す］で当てた直近の1件（上の帯に「直しました ［戻す］」を出す）。
+   * 上の帯に出す、戻せる直近の1手（「直しました ［戻す］」「メモを済みに
+   * しました ［戻す］」）。
    *
-   * **一覧の行には置けない**——当てた指摘は判断が済み、一覧から消える。
-   * 直近1件だけを持つ。それより前のものは提案パネルの［戻す］で戻せる
-   * （行が「適用済み」で残っている）。
+   * **一覧の行には置けない**——当てた指摘は判断が済み、済ませたメモは
+   * 本文から消えて、どちらも一覧から外れる。
+   *
+   * **［直す］と［済み］で1つの枠を分け合う**（作者の裁定 2026-10-04
+   * 「［直す］と同じ形にする」）。次の手がこの枠を取るので、帯は次の操作で
+   * 入れ替わる。それより前の［直す］は提案パネルの［戻す］で戻せる
+   * （行が「適用済み」で残っている）。それより前の［済み］は Git の復元か、
+   * VS Code の「元に戻す」（開いている話のとき）で戻す。
    */
-  private lastFixed: PlacedFinding | null = null;
+  private lastUndoable: UndoableStep | null = null;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -557,10 +580,16 @@ class SceneMemoPanel {
       this.notices = collected.notices;
       await this.loadLabels(collected.collectedTexts);
       // **提案パネルの［戻す］で戻されたら、帯を下げる**（指摘がまた並んでいる）。
-      // 残すと、もう戻っているものに［戻す］が出たままになる
-      const fixed = this.lastFixed;
-      if (fixed && this.findings.some((finding) => finding.id === fixed.id)) {
-        this.lastFixed = null;
+      // 残すと、もう戻っているものに［戻す］が出たままになる。
+      // ［済み］の帯は、ここでは下げない——開いている話の［済み］は未保存で、
+      // ディスクから読み直した一覧にはそのメモがまだ居るので、同じ見方を
+      // すると出した瞬間に消える
+      const step = this.lastUndoable;
+      if (
+        step?.kind === "fix" &&
+        this.findings.some((finding) => finding.id === step.finding.id)
+      ) {
+        this.lastUndoable = null;
       }
       // 消えた付箋を光らせたままにしない
       if (!this.memos.some((memo) => memoKey(memo) === this.activeKey)) {
@@ -651,7 +680,9 @@ class SceneMemoPanel {
           await this.handOver(message.findingId);
           return;
         case "undoFix":
-          await this.undoFix();
+          // 名前は［直す］の帯のころのまま（画面の部品を同じにしたため）。
+          // 戻すのは、帯に出ている直近の1手である
+          await this.undoLast();
           return;
         case "dismissFinding":
           await this.dismissFinding(message.findingId);
@@ -720,17 +751,30 @@ class SceneMemoPanel {
    * 「済みにする」——メモの行を本文から消す（設計書6.40.4）。
    *
    * **1件ずつ確認しない。** メモは作者の付箋で、消えても原稿は無傷である
-   * （取り消しは原稿エディタの Ctrl+Z か Git の復元）。ただし
+   * （取り消しは上の帯の［戻す］。作者の裁定 2026-10-04）。ただし
    * **消す前に、その行が読み込んだときのものかは必ず確かめる。**
+   *
+   * 消せたら帯を出す。**原稿エディタの中の Ctrl+Z では戻らない**——あれは
+   * 画面の取り消しで、拡張機能の側から書き換えた［済み］の記録を持たない。
    */
   private async markDone(
     filePath: string,
     line: number,
     raw: string
   ): Promise<void> {
+    // 帯の見出しは**消す前に**引いておく。読み直したあとは、合本の
+    // メモ1件ずつの見出し（`memoLabels`）からこのメモが消えて引けない
+    const label = this.doneLabelOf(filePath, line);
+
     // 1. 原稿エディタで開いていれば、その文書を書き換える
     const inEditor = await removeMemoLineInOpenManuscript(filePath, line, raw);
     if (inEditor.kind === "removed") {
+      this.lastUndoable = {
+        kind: "done",
+        filePath,
+        removed: inEditor.removed,
+        label,
+      };
       await this.load();
       return;
     }
@@ -747,7 +791,8 @@ class SceneMemoPanel {
     //    **ハッシュ照合つきの経路だけを通る**（規則1）
     const content = await readTextFile(filePath);
     const next = removeMemoLine(content.text, line, raw);
-    if (next === null) {
+    const removed = memoLineRemoval(content.text, line, raw);
+    if (next === null || removed === null) {
       void vscode.window.showWarningMessage(
         "本文が変わっているため、このメモを消しませんでした。" +
           "一覧を作り直します。"
@@ -762,7 +807,9 @@ class SceneMemoPanel {
       content,
       content.hash
     );
-    if (!result.ok) {
+    if (result.ok) {
+      this.lastUndoable = { kind: "done", filePath, removed, label };
+    } else {
       // 作品のログファイルへ残す（49 の指摘、2026-09-08）
       useLogFile(this.work.folderPath);
       logLine(
@@ -798,7 +845,7 @@ class SceneMemoPanel {
 
     const outcome = await applyFinding(this.work, finding);
     if (outcome.ok) {
-      this.lastFixed = finding;
+      this.lastUndoable = { kind: "fix", finding };
       if (outcome.detail) void vscode.window.showInformationMessage(outcome.detail);
     } else if (outcome.reason) {
       void vscode.window.showWarningMessage(
@@ -809,24 +856,115 @@ class SceneMemoPanel {
   }
 
   /**
-   * 上の帯の［戻す］——［直す］で当てた直近の1件を戻す（設計書6.96.5）。
+   * 上の帯の［戻す］。帯に出ている直近の1手（［直す］か［済み］）を戻す。
+   */
+  private async undoLast(): Promise<void> {
+    const step = this.lastUndoable;
+    if (!step) return;
+    if (step.kind === "done") {
+      await this.undoDone(step);
+      return;
+    }
+    await this.undoFix(step.finding);
+  }
+
+  /**
+   * ［直す］で当てた1件を戻す（設計書6.96.5）。
    *
    * **戻すのは提案パネルの［戻す］と同じ関数**（`deps.undoFindingFix`）。
    * 戻すと置き場に「戻した」が足され、その指摘がまた一覧に並ぶ。
    */
-  private async undoFix(): Promise<void> {
-    const fixed = this.lastFixed;
+  private async undoFix(fixed: PlacedFinding): Promise<void> {
     const undo = this.deps.undoFindingFix;
-    if (!fixed || !undo) return;
+    if (!undo) return;
     const outcome = await undo(this.work, fixed);
     if (outcome.ok) {
-      this.lastFixed = null;
+      this.lastUndoable = null;
     } else if (outcome.reason) {
       void vscode.window.showWarningMessage(
         `直したところを戻せませんでした。${outcome.reason}`
       );
     }
     await this.load();
+  }
+
+  /**
+   * ［済み］で消したメモの行を、元の位置へ戻す（設計書6.40.4。作者の裁定
+   * 2026-10-04「［済み］の直後に戻す帯を出す。［直す］と同じ形にする」）。
+   *
+   * **書き戻しは［済み］と同じ2つの経路**——原稿エディタで開いていれば
+   * その文書へ `WorkspaceEdit`、開いていなければ
+   * `writeTextFilePreservingFormat`（ハッシュ照合つき）。
+   *
+   * **元の位置が分からなければ、理由を出して何もしない**（実装ルール1）。
+   * 位置は上下の隣の行で確かめる（`core/sceneMemo.ts` の
+   * `memoLineRestorePoint`。2つの経路で同じ判定を使う）。
+   */
+  private async undoDone(step: DoneStep): Promise<void> {
+    // 1. 原稿エディタで開いていれば、その文書へ差し込む
+    const inEditor = await restoreMemoLineInOpenManuscript(
+      step.filePath,
+      step.removed
+    );
+    if (inEditor.kind === "restored") {
+      this.lastUndoable = null;
+      await this.load();
+      return;
+    }
+    if (inEditor.kind === "changed") {
+      // 位置が分からないものは、何度押しても戻らない。帯は下げる
+      this.lastUndoable = null;
+      void vscode.window.showWarningMessage(
+        describeRestoreRefusal(step.removed.raw)
+      );
+      await this.load();
+      return;
+    }
+
+    // 2. 開いていなければ、ディスクを書き直す。**ハッシュ照合つきの経路だけ**
+    const content = await readTextFile(step.filePath);
+    const next = restoreMemoLine(content.text, step.removed);
+    if (next === null) {
+      this.lastUndoable = null;
+      void vscode.window.showWarningMessage(
+        describeRestoreRefusal(step.removed.raw)
+      );
+      await this.load();
+      return;
+    }
+    const result = await writeTextFilePreservingFormat(
+      step.filePath,
+      next,
+      content,
+      content.hash
+    );
+    if (result.ok) {
+      this.lastUndoable = null;
+    } else {
+      // 帯は残す——未保存の変更などは、作者が片づければもう一度押せる
+      useLogFile(this.work.folderPath);
+      logLine(
+        `校正・メモパネル：${step.filePath} の ${step.removed.line}行目のメモを戻せませんでした（${result.reason}）。`
+      );
+      void vscode.window.showWarningMessage(
+        describeWriteFailure(result.reason, "戻す")
+      );
+    }
+    await this.load();
+  }
+
+  /**
+   * ［済み］の帯に出す場所（「第3話　2行目」の「第3話」）。
+   * 押された行の付箋から引く（合本ではメモ1件ずつの見出し）。
+   */
+  private doneLabelOf(filePath: string, line: number): string {
+    const memo = this.memos.find(
+      (item) =>
+        item.line === line &&
+        paths.pathKeyForComparison(item.filePath) ===
+          paths.pathKeyForComparison(filePath)
+    );
+    return memo ? this.labelOf(memo).label : this.labelAt(filePath).label;
   }
 
   /**
@@ -1030,15 +1168,8 @@ class SceneMemoPanel {
         activeKey: this.activeKey,
         totalCount: this.memos.length,
         notice: this.notices.join(" "),
-        // ［直す］で当てた直近の1件。戻す口が無ければ帯も出さない
-        fixed:
-          this.lastFixed && this.deps.undoFindingFix
-            ? {
-                text: `${findingHeadline(this.lastFixed)}に直しました（${
-                  this.labelAt(this.lastFixed.filePath).label
-                }　${this.lastFixed.line}行目）`,
-              }
-            : null,
+        // 戻せる直近の1手（［直す］か［済み］）。戻す口が無ければ帯も出さない
+        fixed: this.undoBanner(),
         emptyMessage:
           total === 0
             ? `この作品にメモはありません。${MEMO_HINT}（読者向けの出力とAIには渡りません）。`
@@ -1046,6 +1177,28 @@ class SceneMemoPanel {
         colors: { ...colorsFor(), ...findingColorVars(isDarkTheme()) },
       },
     });
+  }
+
+  /**
+   * 上の帯（設計書6.40.4・6.96.5）。**［直す］と［済み］で同じ部品を使う**
+   * （作者の裁定 2026-10-04）。文言とボタンの説明だけが違う。
+   */
+  private undoBanner(): { text: string; undoTitle: string } | null {
+    const step = this.lastUndoable;
+    if (!step) return null;
+    if (step.kind === "done") {
+      return {
+        text: `メモを済みにしました（${step.label}　${step.removed.line}行目）`,
+        undoTitle: "済みにしたメモの行を、元の位置へ戻します",
+      };
+    }
+    if (!this.deps.undoFindingFix) return null;
+    return {
+      text: `${findingHeadline(step.finding)}に直しました（${
+        this.labelAt(step.finding.filePath).label
+      }　${step.finding.line}行目）`,
+      undoTitle: "直す前の本文へ戻します（指摘はまた一覧に並びます）",
+    };
   }
 
   /**
@@ -1163,27 +1316,49 @@ function memoKey(memo: SceneMemo): string {
   return `${memo.line}:${paths.pathKeyForComparison(memo.filePath)}`;
 }
 
-/** 書き込みに失敗した理由を、作者の言葉にする */
-function describeWriteFailure(reason: string): string {
+/**
+ * 書き込みに失敗した理由を、作者の言葉にする。
+ *
+ * @param action 「消す」（［済み］）か「戻す」（帯の［戻す］）。理由の言い方は同じ
+ */
+function describeWriteFailure(
+  reason: string,
+  action: "消す" | "戻す" = "消す"
+): string {
+  const didNot = action === "消す" ? "消しませんでした" : "戻しませんでした";
+  const could = action === "消す" ? "消せませんでした" : "戻せませんでした";
   if (reason === "unsaved_changes") {
     return (
-      "本文に保存していない変更があるため、メモを消しませんでした。" +
+      `本文に保存していない変更があるため、メモを${didNot}。` +
       "保存してからもう一度お試しください。"
     );
   }
   if (reason === "modified_externally") {
     return (
-      "本文が別のところで変わっているため、メモを消しませんでした。" +
+      `本文が別のところで変わっているため、メモを${didNot}。` +
       "一覧を作り直してからもう一度お試しください。"
     );
   }
   if (reason === "conflict_markers") {
     return (
-      "本文に未解決の競合が含まれているため、メモを消しませんでした。" +
+      `本文に未解決の競合が含まれているため、メモを${didNot}。` +
       "「競合解決」で直してからお試しください。"
     );
   }
-  return "メモを消せませんでした。ログに理由が残っています。";
+  return `メモを${could}。ログに理由が残っています。`;
+}
+
+/**
+ * 元の位置が確かめられず、済みにしたメモを戻さなかったときの案内。
+ *
+ * **メモの字を添える。** 戻せなかったメモは本文のどこにも残っていないので、
+ * 作者が手で書き直せるように、ここで見せる。
+ */
+function describeRestoreRefusal(raw: string): string {
+  return (
+    "済みにしたあとで本文が変わり、元の位置が分からないため、メモを戻しませんでした。" +
+    `戻すなら、手で書き直すか Git の復元をお使いください（消したメモ：${raw}）。`
+  );
 }
 
 /**

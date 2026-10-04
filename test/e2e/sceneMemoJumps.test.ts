@@ -5,8 +5,8 @@
  * 何を見張るか：
  * - 本文の右クリック「メモ追加」で、カーソルのある行の**上**に `// ` の行が入る
  * - 校正・メモパネルの［済み］で、**閉じている話**はファイルからその行が消え、
- *   **開いている話**は画面の本文から消えて（未保存）、Ctrl+Z で戻せる（戻すほうは
- *   2件目。2026-10-04 時点で落ちる）
+ *   **開いている話**は画面の本文から消えて（未保存）、どちらも上の帯の［戻す］で
+ *   戻せる（戻すほうは2件目。作者の裁定 2026-10-04）
  * - パネルの［次へ →］［← 戻る］が話をまたいで飛び（メモの無い話は飛ばす）、
  *   末尾の次は先頭へ、先頭の前は末尾へ回る
  * - 本文のカーソルを動かすと、パネルでいちばん近いメモの行が光る（`.memo.active`）
@@ -175,7 +175,7 @@ test("右クリック「メモ追加」で行の上に // が入り、［済み�
       // 第1話を前に戻してから（クイックオープンで、開いているタブへ移る）
       const ep1Frame = await openEpisode(page, EP1, "一の三行目");
       /* ── ［済み］：開いている話（画面から消え、ファイルは書き換えない）（F-45） ──
-         Ctrl+Z で戻るかは、下の別の件で見る（2026-10-04 時点で戻らない） */
+         帯の［戻す］で戻るかは、下の別の件で見る */
       await doneButtonOf("一のメモ").click();
       await waitUntil(async () => !(await composeText(ep1Frame)).includes("一のメモ"), "開いている第1話の画面から「一のメモ」が消える");
       await waitUntil(async () => await tabIsDirty(page, EP1), "開いている話は未保存のまま（ファイルは書き換えない）");
@@ -185,41 +185,79 @@ test("右クリック「メモ追加」で行の上に // が入り、［済み�
 });
 
 /*
-  **開いている話の［済み］を、原稿エディターの中の Ctrl+Z で戻す**（設計書6.40.4
-  「取り消しは原稿エディタの Ctrl+Z」。実機確認リスト F-45）。
+  **［済み］で消えたメモを、校正・メモパネルの上の帯の［戻す］で戻す**（設計書6.40.4。
+  作者の裁定 2026-10-04「［済み］の直後に戻す帯を出す。［直す］と同じ形にし、Ctrl+Z の
+  動きは変えない」。実機確認リスト F-45）。
 
-  2026-10-04 に移したとき**落ちた**（直さずに残す。直すのは別の担当）。下見で分かったこと：
+  いきさつ：2026-10-04 に「原稿エディターの中の Ctrl+Z で戻る」として移したとき落ちた。
   ［済み］は開いている文書を拡張機能の側から書き換えるので、取り消しの記録は VS Code の
-  文書の側に積まれる。原稿エディター（組んで書く面）の中で押した Ctrl+Z はブラウザの
-  取り消しに回り、その記録を持たないので何も戻らない。VS Code の「元に戻す」
-  （コマンド `undo`。メニューの 編集 → 元に戻す）なら戻った。
-*/
-test("開いている話の［済み］で消えたメモが、原稿エディターの中で押す Ctrl+Z で戻る", async () => {
-  await withVsCode("済みの取り消し", [{ name: EP1, text: "一の一行目。\n// 一のメモ\n一の三行目。\n" }], async (session) => {
-    const { page } = session;
-    const frame = await openEpisode(page, EP1, "一の三行目");
-    await placeCaretAfter(frame, "一の一行目");
-    await page.keyboard.press("Control+Alt+KeyM");
-    let found: Frame | undefined;
-    await waitUntil(async () => {
-      found = await memoPanelFrame(page);
-      return found !== undefined && (await found.locator("button[data-act=done]").count()) > 0;
-    }, "校正・メモパネルに［済み］が出る", 30_000);
-    if (!found) throw new Error("校正・メモパネルが見つかりません");
-    await found.locator("button[data-act=done]").first().click();
-    await waitUntil(async () => !(await composeText(frame)).includes("一のメモ"), "［済み］で画面から「一のメモ」が消える");
+  文書の側に積まれ、原稿エディター（組んで書く面）の中の Ctrl+Z（画面の取り消し）は
+  その記録を持たない。裁定で、戻す口を帯の［戻す］に置いた（［直す］の帯と同じ部品）。
 
-    // 作者と同じく、原稿の本文を押してから Ctrl+Z
-    await placeCaretAfter(frame, "一の一行目");
-    await page.keyboard.press("Control+KeyZ");
-    await waitUntil(async () => (await composeText(frame)).includes("// 一のメモ"), "Ctrl+Z で「一のメモ」が画面に戻る", 5_000).catch(
-      async (error: unknown) => {
-        throw new Error(
-          `${String(error)}（本文：${JSON.stringify(await composeText(frame))}／未保存の印：${await tabIsDirty(page, EP1)}）`
-        );
-      }
-    );
-  });
+  開いている話（文書へ差し込む道）と閉じている話（ファイルを書き直す道）の両方を見る。
+*/
+test("［済み］で消えたメモが、校正・メモパネルの帯の［戻す］で元の位置へ戻る（開いている話は画面へ・閉じている話はファイルへ）", async () => {
+  const ep1Text = "一の一行目。\n// 一のメモ\n一の三行目。\n";
+  const ep3Text = "三の一行目。\n// 三のメモ\n三の三行目。\n";
+  await withVsCode(
+    "済みの帯で戻す",
+    [
+      { name: EP1, text: ep1Text },
+      { name: EP3, text: ep3Text },
+    ],
+    async (session) => {
+      const { page } = session;
+      const frame = await openEpisode(page, EP1, "一の三行目");
+      await placeCaretAfter(frame, "一の一行目");
+      await page.keyboard.press("Control+Alt+KeyM");
+      let found: Frame | undefined;
+      await waitUntil(async () => {
+        found = await memoPanelFrame(page);
+        return found !== undefined && (await found.locator("button.go", { hasText: "三のメモ" }).count()) > 0;
+      }, "校正・メモパネルに2つの話のメモが出る", 30_000);
+      if (!found) throw new Error("校正・メモパネルが見つかりません");
+      const panel = found;
+      const doneButtonOf = (text: string) =>
+        panel.locator(".memo", { has: panel.locator("button.go", { hasText: text }) }).locator("button[data-act=done]");
+      const banner = panel.locator("#fixed");
+      const bannerText = async () => ((await banner.isVisible()) ? await panel.locator("#fixedText").innerText() : "");
+
+      /* ── 開いている話：画面から消え、帯の［戻す］で画面に戻る（ファイルは書き換えない） ── */
+      await doneButtonOf("一のメモ").click();
+      await waitUntil(async () => !(await composeText(frame)).includes("一のメモ"), "［済み］で画面から「一のメモ」が消える");
+      await waitUntil(
+        async () => (await bannerText()).includes("メモを済みにしました") && (await bannerText()).includes("2行目"),
+        "帯に「メモを済みにしました（… 2行目）」が出る"
+      );
+      await panel.locator("#undoFix").click();
+      await waitUntil(
+        async () => {
+          // 画面の字は段落の切れ目の数が面しだいなので、並び順で見る
+          const text = await composeText(frame);
+          const memoAt = text.indexOf("// 一のメモ");
+          return memoAt > text.indexOf("一の一行目。") && memoAt < text.indexOf("一の三行目。");
+        },
+        "帯の［戻す］で「一のメモ」が元の位置（1行目と3行目の間）へ戻る"
+      ).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}（本文：${JSON.stringify(await composeText(frame))}）`);
+      });
+      await waitUntil(async () => !(await banner.isVisible()), "戻したら帯が下がる");
+      expect(await fileText(session, EP1), "開いている話のファイルが直に書き換わりました").toBe(ep1Text);
+
+      /* ── 閉じている話：ファイルから消え、帯の［戻す］でファイルが元に戻る ── */
+      expect(await frameShowing(page, "三の一行目"), "第3話がまだ開いていないはずです").toBeUndefined();
+      await doneButtonOf("三のメモ").click();
+      await waitUntil(async () => !(await fileText(session, EP3)).includes("三のメモ"), "閉じている第3話のファイルから「三のメモ」が消える");
+      await waitUntil(async () => (await bannerText()).includes("メモを済みにしました"), "閉じている話でも帯が出る");
+      await panel.locator("#undoFix").click();
+      await waitUntil(async () => (await fileText(session, EP3)) === ep3Text, "帯の［戻す］で第3話のファイルが元のとおりに戻る");
+      await waitUntil(async () => !(await banner.isVisible()), "戻したら帯が下がる（閉じている話）");
+      await waitUntil(
+        async () => (await panel.locator("button.go", { hasText: "三のメモ" }).count()) === 1,
+        "戻したメモが一覧にまた並ぶ"
+      );
+    }
+  );
 });
 
 /*
