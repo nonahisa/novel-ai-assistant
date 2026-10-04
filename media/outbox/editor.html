@@ -1514,6 +1514,18 @@ var EditorLogic = (function () {
     vTouchPoint = null;
     var range = nearestCaret(point.x, point.y);
     if (!range) return;
+    /*
+      iPad が欄の中に置いたときは、その隣（前後1字）へ直すときだけ使う。キーボードが出て
+      ページがスクロールしていると、Claude のアプリの中では指の座標が実際とずれて届き、
+      座標から引いた場所がかえって遠くなった（作者の実機、2026-10-05。scrollY=944 のとき
+      触れた所より約270画素上の座標が届いた）。iPad 自身は正しい所の1字以内に置いている
+    */
+    if (sel.rangeCount && vtextEl.contains(sel.anchorNode)) {
+      var native = sel.getRangeAt(0);
+      var sameNode = native.startContainer === range.startContainer;
+      if (!sameNode || Math.abs(native.startOffset - range.startOffset) > 1) return;
+      if (native.startOffset === range.startOffset) return;
+    }
     if (document.activeElement !== vtextEl) vtextEl.focus();
     sel.removeAllRanges();
     sel.addRange(range);
