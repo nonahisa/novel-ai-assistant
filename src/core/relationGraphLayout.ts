@@ -1,5 +1,5 @@
 import {
-  shortPairLabel,
+  nodeCaption,
   type EgoGraph,
   type RelationGraph,
   type RelationNode,
@@ -22,6 +22,24 @@ export interface LayoutNode {
   y: number;
   /** 円の半径。登場話数で3段階 */
   r: number;
+  /**
+   * 名前の下に書く、中心の人から見た関係（個人中心図の1次の相手だけ。
+   * `layoutEgo` が言葉と置き場を決める。置き場が無ければ付けない）
+   */
+  caption?: LayoutCaption;
+}
+
+/**
+ * 名前の下の文字（設計書6.38.2、作者の裁定 2026-10-04「関係は人の名前の下に書く」）。
+ *
+ * 揃え（`anchor`）も配置が決めて渡す。下に置けないときは上・横・円の上下・
+ * 円の内側へずらすので、揃えは名前と同じとは限らない
+ */
+export interface LayoutCaption {
+  text: string;
+  x: number;
+  y: number;
+  anchor: "start" | "middle" | "end";
 }
 
 /** 所属ごとの弧。組織の色の帯と名前を、この範囲に描く */
@@ -33,21 +51,15 @@ export interface LayoutArc {
 }
 
 /**
- * 辺のラベルの置き場。全体図は弦の中点。個人中心図は相手の側へ寄せ、
- * 重なるときは線に沿ってずらした位置（`layoutEgo`）
+ * 線の中点。**線の上には文字を書かない**（全体図は線が混むため元から、
+ * 個人中心図は 2026-10-04 の作者の裁定で、関係を名前の下へ移した。設計書6.38.2）。
+ * 線を押すと関係が出る口は画面が線そのものに付ける
  */
 export interface LayoutEdgeLabel {
   a: string;
   b: string;
   x: number;
   y: number;
-  /**
-   * 線の上に書く短い言葉（`shortPairLabel`）。個人中心図だけが持つ。
-   *
-   * **全体図には置かない**——線が混むので、全体図は元から線に文字を書かない
-   * （設計書6.38.2）。重なりよけに文字の幅が要るので、配置と一緒にここで決める
-   */
-  text?: string;
 }
 
 export interface GraphLayout {
@@ -63,11 +75,11 @@ export interface GraphLayout {
   /** 薄く引く環の半径。個人中心図で1次・2次の環を示すために使う */
   rings: number[];
   /**
-   * 置き場が無くて線の上の文字を省いた線の数（個人中心図。全体図は元から
-   * 文字を置かないので0）。画面はこの数を右の一覧の説明に添える——黙って
+   * 置き場が無くて名前の下の文字を省いた人の数（個人中心図。全体図は元から
+   * 書かないので0）。画面はこの数を右の一覧の説明に添える——黙って
    * 消したことにしないため（全部は右の「つながっている人」で読める）
    */
-  omittedEdgeLabels: number;
+  omittedCaptions: number;
 }
 
 export interface LayoutOptions {
@@ -168,7 +180,9 @@ export function layoutCircle(
     arcs,
     edges: edgeLabels(graph.edges, positions),
     rings: [radius],
-    omittedEdgeLabels: 0,
+    // 全体図は名前の下に書かない。中心が無いので「誰から見た関係か」が決まらず、
+    // 相手の多い人の名前の下に1つの関係は書けない（設計書6.38.2）
+    omittedCaptions: 0,
   };
 }
 
@@ -218,7 +232,7 @@ export function layoutEgo(ego: EgoGraph, options: LayoutOptions): GraphLayout {
   place(first, inner);
   place(second, outer);
 
-  const labels = egoEdgeLabels(ego, positions);
+  const omittedCaptions = placeCaptions(ego, first, positions);
   return {
     width,
     height,
@@ -228,16 +242,27 @@ export function layoutEgo(ego: EgoGraph, options: LayoutOptions): GraphLayout {
       .map((node) => positions.get(node.id))
       .filter((node): node is LayoutNode => node !== undefined),
     arcs: [],
-    edges: labels.placed,
+    edges: edgeLabels(ego.edges, positions),
     rings: second.length > 0 ? [inner, outer] : [inner],
-    omittedEdgeLabels: labels.omitted,
+    omittedCaptions,
   };
 }
 
-/** 線の文字の大きさ（画面の `.g-edge-label` と同じ値にしておく） */
-export const EDGE_LABEL_FONT_SIZE = 11;
-/** 人物の名前の文字の大きさ（画面の `.g-node-label`） */
-const NODE_LABEL_FONT_SIZE = 12;
+/** 人物の名前の文字の大きさ（画面の `.g-node-label` と同じ値にしておく） */
+export const NODE_LABEL_FONT_SIZE = 12;
+/** 名前の下の文字の大きさ（画面の `.g-node-caption` と同じ値にしておく） */
+export const CAPTION_FONT_SIZE = 10;
+
+/**
+ * 重なりを見るときの字の箱の高さ（画素）は、文字の大きさの1.5倍に見積もる。
+ *
+ * 画面に描かれた字の矩形は書体の上下の余白を含み、文字の大きさより高い。
+ * 文字の大きさちょうどで見積もると、縦に並べた2つの文字が画面では重なる。
+ * 描かれた字の高さ（SVG の座標で）がこの値に収まることは、画面の自動テスト
+ * `e2e/relationGraph.test.ts` が見張る（設計書6.38.2）
+ */
+export const NODE_LABEL_BOX_HEIGHT = Math.ceil(NODE_LABEL_FONT_SIZE * 1.5);
+export const CAPTION_BOX_HEIGHT = Math.ceil(CAPTION_FONT_SIZE * 1.5);
 
 /**
  * 文字の幅の見積もり（画素）。
@@ -279,160 +304,126 @@ function overlapArea(a: Box, b: Box): number {
   return w > 0 && h > 0 ? w * h : 0;
 }
 
-/**
- * 中心から出る線の上で、文字を置いてみる位置（中心からの割合）。
- *
- * **中点（0.5）より中心の側は試さない。** 中心から出る線は中心へ向かって
- * 寄り集まるので、中心に近いほど置き場が無い（実機、教科書チートの「アブス」
- * 〔0.96.4〕と「イント」〔2026-10-04、相手30人前後〕）。相手の側へ寄せた位置から
- * 試し、重なれば相手の側の範囲で前後へずらす。
- */
-const CENTER_EDGE_STEPS = [0.64, 0.74, 0.56, 0.84];
-/** 中心に触れない線（2次の環との線）。こちらは中点から試す */
-const OTHER_EDGE_STEPS = [0.5, 0.38, 0.62, 0.28, 0.72];
+/** 箱を揃え（start は左端、end は右端、middle は真ん中）から作る */
+function anchoredBox(
+  anchor: LayoutCaption["anchor"],
+  x: number,
+  y: number,
+  width: number,
+  height: number
+): Box {
+  const left =
+    anchor === "start" ? x : anchor === "end" ? x - width : x - width / 2;
+  return { left, right: left + width, top: y - height / 2, bottom: y + height / 2 };
+}
 
 /**
- * 線の文字の箱の高さ（画素）。
+ * 名前の下の文字の言葉と置き場を決める（作者の裁定、2026-10-04「関係は人の名前の下に書く」。
+ * 設計書6.38.2）。戻り値は、置き場が無くて省いた人の数。
  *
- * 文字の大きさちょうど（11）では足りない。画面の字の矩形は書体の上下の
- * 余白を含み、文字の大きさより高い。見積もりが低いと、縦に並べた2つの
- * 文字が画面では重なる。描かれた字の高さ（SVG の座標で）がこの値に収まることは、
- * 画面の自動テスト `e2e/relationGraph.test.ts`「個人中心図（相手30人）…」が見張る
- * （設計書6.38.2）
+ * 相手が30人前後になると、線の上の文字は中心の近くへ寄り集まって読めなかった
+ * （教科書チート_確認用の「イント」）。名前は環に沿って散らばっているので、
+ * その下なら置き場が広い。
+ *
+ * 書くのは中心と線で結ばれた1次の相手だけ（2次の環の人は中心との関係が無い）。
+ * 置く順は環の並び（名前順）で決めてあるので、同じ材料からはいつも同じ図が出る。
+ * 候補は「名前の下 → 名前の上 → 名前の続き（外側の横）→ 円の下 → 円の上 →
+ * 円の内側」の順に試し、**人物の円・人物の名前・先に置いた名前の下の文字**の
+ * どれとも重ならない最初の位置に置く。どこでも重なるときは書かない（重ねて
+ * 置くと、0.98.6 までの線の文字と同じく1つも読めなくなる）。
  */
-export const EDGE_LABEL_BOX_HEIGHT = Math.ceil(EDGE_LABEL_FONT_SIZE * 1.5);
-
-/**
- * 個人中心図の線の文字の置き場と中身（作者の裁定、2026-10-03「線の文字を絞る」。
- * 2026-10-04 に「置き場が無ければ省く」へ改めた）。
- *
- * 文字は `shortPairLabel` の短い形。向きは画面の約束どおり、中心に触れる線は
- * 中心から、触れない線は辺の a から見る。中身の無い線（両向きとも何も無い）
- * には何も置かない。
- *
- * 置き方：文字が線の見えている長さ（両端の円の間）より長ければ置かない。
- * そうでなければ候補の位置を順に試し、**先に置いた文字・人物の円・人物の名前**の
- * どれとも重ならない最初の位置に置く。
- * 線に沿った候補で足りなければ、線と直角の向きへ1行ぶんずらした位置も試す。
- *
- * **どこでも重なるときは、その線には文字を置かない**（省いた数は `omitted`）。
- * 以前は重なりのいちばん小さい位置に無理に置いていたが、相手が30人前後になると
- * それが何十回も起き、中心のまわりで文字が積み重なって1つも読めなかった
- * （作者の実機確認、2026-10-04）。省いた線の言葉は、右の「つながっている人」で
- * 全部読める。置く順は中心から出る線が先なので、後から置く線（2次の環との線）
- * ほど省かれやすい。試す順は決めてあるので、同じ材料からはいつも同じ図が出る。
- */
-function egoEdgeLabels(
+function placeCaptions(
   ego: EgoGraph,
+  firstRing: RelationNode[],
   positions: Map<string, LayoutNode>
-): { placed: LayoutEdgeLabel[]; omitted: number } {
-  const obstacles: Box[] = [];
+): number {
   const centerPos = positions.get(ego.centerId);
+  if (!centerPos) return 0;
+
+  // 名前の置き場は画面（relationGraphPanelHtml.ts の renderGraph）と同じ決め方：
+  // 中心は円の下の真ん中、ほかは円の右（中心より右の人）か左
+  const obstacles: Box[] = [];
   for (const node of ego.nodes) {
     const at = positions.get(node.id);
     if (!at) continue;
     const pad = 3;
     obstacles.push(boxAt(at.x, at.y, (at.r + pad) * 2, (at.r + pad) * 2));
     const nameWidth = estimateTextWidth(node.name, NODE_LABEL_FONT_SIZE);
-    const nameHeight = NODE_LABEL_FONT_SIZE + 2;
     if (node.id === ego.centerId) {
-      // 中心の名前は円の下（画面の描き方と同じ）
-      obstacles.push(boxAt(at.x, at.y + at.r + 16, nameWidth, nameHeight));
-    } else if (centerPos && at.x >= centerPos.x) {
       obstacles.push(
-        boxAt(at.x + at.r + 6 + nameWidth / 2, at.y, nameWidth, nameHeight)
+        anchoredBox("middle", at.x, at.y + at.r + 16, nameWidth, NODE_LABEL_BOX_HEIGHT)
       );
     } else {
+      const right = at.x >= centerPos.x;
       obstacles.push(
-        boxAt(at.x - at.r - 6 - nameWidth / 2, at.y, nameWidth, nameHeight)
+        anchoredBox(
+          right ? "start" : "end",
+          at.x + (right ? at.r + 6 : -at.r - 6),
+          at.y,
+          nameWidth,
+          NODE_LABEL_BOX_HEIGHT
+        )
       );
     }
   }
 
-  // 中心から出る線を先に置く。いちばん混むのがそこで、2次の線は空いた所へ回す
-  const ordered = [
-    ...ego.edges.filter((edge) => touches(edge, ego.centerId)),
-    ...ego.edges.filter((edge) => !touches(edge, ego.centerId)),
-  ];
-  const placed = new Map<string, LayoutEdgeLabel>();
-  const height = EDGE_LABEL_BOX_HEIGHT;
-  let omitted = 0;
-
-  for (const edge of ordered) {
-    const fromId = touches(edge, ego.centerId) ? ego.centerId : edge.a;
-    const toId = edge.a === fromId ? edge.b : edge.a;
-    const from = positions.get(fromId);
-    const to = positions.get(toId);
-    if (!from || !to) continue;
-    const text = shortPairLabel(edge, fromId);
-    // 中身の無い線は、省いたのではなく書くことが無い（数に入れない）
-    if (!text) continue;
-    const width = estimateTextWidth(text, EDGE_LABEL_FONT_SIZE) + 4;
-    const steps = fromId === ego.centerId ? CENTER_EDGE_STEPS : OTHER_EDGE_STEPS;
-
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
-    const length = Math.hypot(dx, dy) || 1;
-    const ux = dx / length;
-    const uy = dy / length;
-    // 線と直角の向き（1行ぶんずらすときに使う）
-    const nx = -uy;
-    const ny = ux;
-    const shifts = [0, height, -height];
-    // 文字の箱を線の向きへ映した長さ。両端の円の間（線の見えている長さ）より
-    // 長い文字は、どこに置いても線からはみ出して誰の線か読めないので置かない。
-    // 置く位置そのものは、下の重なりの検査（円・名前・先に置いた文字）に任せる
-    // ——位置まで線の内側に縛ると、斜めの線で横長の文字の置き場が中点の
-    // まわりにしか残らず、相手6人の図でも省くことになった
-    const along = Math.abs(ux) * width + Math.abs(uy) * height;
-    const visible = length - from.r - to.r - 4;
-    if (along > visible) {
-      omitted++;
-      continue;
-    }
-
-    let spot: { x: number; y: number } | null = null;
-    search: for (const shift of shifts) {
-      for (const t of steps) {
-        const x = from.x + dx * t + nx * shift;
-        const y = from.y + dy * t + ny * shift;
-        const box = boxAt(x, y, width, height);
-        if (obstacles.every((other) => overlapArea(box, other) === 0)) {
-          spot = { x, y };
-          break search;
-        }
-      }
-    }
-    if (!spot) {
-      omitted++;
-      continue;
-    }
-    obstacles.push(boxAt(spot.x, spot.y, width, height));
-    placed.set(edgeKeyOf(edge.a, edge.b), {
-      a: edge.a,
-      b: edge.b,
-      x: spot.x,
-      y: spot.y,
-      text,
-    });
+  const edgeTo = new Map<string, EgoGraph["edges"][number]>();
+  for (const edge of ego.edges) {
+    if (edge.a === ego.centerId) edgeTo.set(edge.b, edge);
+    else if (edge.b === ego.centerId) edgeTo.set(edge.a, edge);
   }
 
-  // 並びは辺の順に戻す（画面は受け取った順に描く。決定的にしておく）
-  return {
-    placed: ego.edges
-      .map((edge) => placed.get(edgeKeyOf(edge.a, edge.b)))
-      .filter((label): label is LayoutEdgeLabel => label !== undefined),
-    omitted,
-  };
-}
+  // 名前の下と名前の行の、縦の中心どうしの間。2つの箱がちょうど接する
+  const rowGap = (NODE_LABEL_BOX_HEIGHT + CAPTION_BOX_HEIGHT) / 2;
+  let omitted = 0;
+  for (const node of firstRing) {
+    const at = positions.get(node.id);
+    const edge = edgeTo.get(node.id);
+    if (!at || !edge) continue;
+    const text = nodeCaption(edge, ego.centerId);
+    // 中身の無い人は、省いたのではなく書くことが無い（数に入れない）
+    if (!text) continue;
 
-function touches(edge: { a: string; b: string }, id: string): boolean {
-  return edge.a === id || edge.b === id;
-}
+    const width = estimateTextWidth(text, CAPTION_FONT_SIZE);
+    const nameWidth = estimateTextWidth(node.name, NODE_LABEL_FONT_SIZE);
+    const right = at.x >= centerPos.x;
+    const outward: LayoutCaption["anchor"] = right ? "start" : "end";
+    const inward: LayoutCaption["anchor"] = right ? "end" : "start";
+    const side = right ? 1 : -1;
+    const nameX = at.x + side * (at.r + 6);
+    const candidates: LayoutCaption[] = [
+      { text, anchor: outward, x: nameX, y: at.y + rowGap },
+      { text, anchor: outward, x: nameX, y: at.y - rowGap },
+      { text, anchor: outward, x: nameX + side * (nameWidth + 6), y: at.y },
+      { text, anchor: "middle", x: at.x, y: at.y + at.r + 3 + CAPTION_BOX_HEIGHT / 2 },
+      { text, anchor: "middle", x: at.x, y: at.y - at.r - 3 - CAPTION_BOX_HEIGHT / 2 },
+      { text, anchor: inward, x: at.x - side * (at.r + 6), y: at.y },
+    ];
 
-/** 辺の鍵。idに何の字が入っていても衝突しないよう JSON にする */
-function edgeKeyOf(a: string, b: string): string {
-  return JSON.stringify([a, b]);
+    let chosen: LayoutCaption | null = null;
+    let chosenBox: Box | null = null;
+    for (const candidate of candidates) {
+      const box = anchoredBox(
+        candidate.anchor,
+        candidate.x,
+        candidate.y,
+        width,
+        CAPTION_BOX_HEIGHT
+      );
+      if (obstacles.every((other) => overlapArea(box, other) === 0)) {
+        chosen = candidate;
+        chosenBox = box;
+        break;
+      }
+    }
+    if (!chosen || !chosenBox) {
+      omitted++;
+      continue;
+    }
+    obstacles.push(chosenBox);
+    at.caption = chosen;
+  }
+  return omitted;
 }
 
 /** 登場話数を3段階の大きさへ。話数の上限は作品ごとに違うので割合で見る */

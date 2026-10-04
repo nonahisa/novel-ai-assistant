@@ -229,7 +229,7 @@ svg.dragging { cursor: grabbing; }
 .g-edge.g-provisional { stroke-dasharray: 5 4; opacity: 0.55; }
 .g-edge.g-selected { stroke: var(--vscode-focusBorder); opacity: 1; }
 .g-edge-hit { stroke: transparent; stroke-width: 12; fill: none; cursor: pointer; }
-.g-edge-label { fill: var(--vscode-descriptionForeground); font-size: 11px; }
+.g-node-caption { fill: var(--vscode-descriptionForeground); font-size: 10px; }
 .g-arc { stroke: var(--novelai-organization); stroke-width: 6; fill: none; opacity: 0.75; }
 .g-arc-label { fill: var(--novelai-organization); font-size: 12px; }
 .g-ring { stroke: var(--vscode-panel-border); fill: none; stroke-dasharray: 2 4; }
@@ -716,25 +716,9 @@ function renderGraph() {
     svg.appendChild(hit);
   }
 
-  // 辺のラベル。全体図では線が混むので、個人中心図でだけ文字にする。
-  // 言葉は向きごとに1つだけの短い形で、置き場と一緒に拡張機能側
-  // （core/relationGraphLayout.ts の layoutEgo）が決めて渡す——重ならない
-  // 位置を選ぶには文字の幅が要るため。全部は右の「つながっている人」で読む。
-  // 置き場の無い線（相手の多い人）と中身の無い線は、配置が文字を渡さない
-  if (data.mode === "ego") {
-    for (const position of layout.edges) {
-      if (!position.text) continue;
-      const label = svgNode("text", {
-        class: "g-edge-label",
-        x: position.x,
-        y: position.y,
-        "text-anchor": "middle",
-        "dominant-baseline": "middle",
-      });
-      label.textContent = position.text;
-      svg.appendChild(label);
-    }
-  }
+  // 線の上には文字を書かない（全体図も個人中心図も）。個人中心図の関係は
+  // 周りの人の名前の下に書く（作者の裁定、2026-10-04「関係は人の名前の下に書く」）。
+  // 線を押せば、その線の関係と呼び合いが右に出る
 
   // ノード
   for (const position of layout.nodes) {
@@ -769,6 +753,21 @@ function renderGraph() {
     });
     label.textContent = node.name;
     group.appendChild(label);
+
+    // 名前の下の、中心の人から見た関係。言葉・置き場・揃えは拡張機能側
+    // （core/relationGraphLayout.ts の layoutEgo）が決めて渡す——ほかの名前と
+    // 重ならない位置を選ぶには、全員の名前の幅が要るため。置き場の無い人には渡らない
+    if (position.caption) {
+      const caption = svgNode("text", {
+        class: "g-node-caption",
+        x: position.caption.x,
+        y: position.caption.y,
+        "text-anchor": position.caption.anchor,
+        "dominant-baseline": "middle",
+      });
+      caption.textContent = position.caption.text;
+      group.appendChild(caption);
+    }
 
     // 円だけでは小さくて押せない。透明の輪を重ねる
     const hit = svgNode("circle", {
@@ -864,8 +863,8 @@ function addressPairRows(edge, fromId, fromName, toName, upTo) {
  * 「つながっている人」に置く、全部を並べたラベル。fromId から見て
  * →（fromId から相手へ）／←（相手から fromId へ）の対にする。
  * 関係はそのまま、呼び方は『』で囲む。
- * 図の線の上には使わない（長くて中心の近くで重なった。2026-10-03）——
- * 線の上は core の shortPairLabel が作る短い形
+ * 図には使わない（長くて中心の近くで重なった。2026-10-03）——
+ * 図では名前の下に core の nodeCaption が作る短い形を書く（2026-10-04）
  */
 function pairLabel(edge, fromId) {
   const toId = otherEnd(edge, fromId);
@@ -959,13 +958,14 @@ function renderSide() {
     const centerName = center ? center.name : data.centerName;
     el.side.appendChild(sideRow(
       "→は" + centerName + "から相手へ、←は相手から" + centerName + "へ。『』は呼び方です。" +
-        "図の線の上には向きごとに1つだけ書きます（多いときは「ほか2」のように数だけ）。全部はこの一覧で読めます。"
+        "図では、相手の名前の下に" + centerName + "から見た関係を書きます（無いときは←を付けて相手から見た関係。" +
+        "多いときは「ほか2」のように数だけ）。全部はこの一覧か、線を押して読めます。"
     ));
-    // 置き場が無くて線の文字を省いたとき（相手の多い人）。省いたことを黙らない
-    const omitted = Number(data.layout.omittedEdgeLabels) || 0;
+    // 置き場が無くて名前の下の文字を省いたとき（相手の多い人）。省いたことを黙らない
+    const omitted = Number(data.layout.omittedCaptions) || 0;
     if (omitted > 0) {
       el.side.appendChild(sideRow(
-        "図が混んでいるため、" + omitted + "本の線は文字を省いています（重ねると読めないため）。" +
+        "図が混んでいるため、" + omitted + "人は名前の下の関係を省いています（重ねると読めないため）。" +
           "拡大しても文字は増えません。この一覧か、線を押して読んでください。"
       ));
     }
@@ -1007,7 +1007,7 @@ function renderSide() {
   el.side.appendChild(
     sideRow(
       "第N話までに絞っているときは、その話までに使い始めた呼び方だけを出します。" +
-        "人物を押した図では、線の上に「→中心の人から相手へ／←相手から中心の人へ」の順で書きます。"
+        "人物を押した図では、周りの人の名前の下に、中心の人から見た関係を書きます（この図では線の上に文字を書きません）。"
     )
   );
 }

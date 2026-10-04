@@ -5,10 +5,13 @@ import {
 } from "../../../src/models/character";
 import { buildRelationGraph, egoGraph } from "../../../src/core/relationGraph";
 import {
-  EDGE_LABEL_FONT_SIZE,
+  CAPTION_BOX_HEIGHT,
+  CAPTION_FONT_SIZE,
   estimateTextWidth,
   layoutCircle,
   layoutEgo,
+  NODE_LABEL_BOX_HEIGHT,
+  NODE_LABEL_FONT_SIZE,
   NODE_RADII,
   type GraphLayout,
   type LayoutArc,
@@ -245,13 +248,13 @@ describe("個人中心図の配置", () => {
 });
 
 /**
- * 個人中心図の線の文字（作者の裁定、2026-10-03「線の文字を絞る」）。
+ * 個人中心図の名前の下の文字（作者の裁定、2026-10-04「関係は人の名前の下に書く」）。
  *
- * 実機（教科書チート、「アブス」の個人中心図）で、中心から出る線の文字が
- * 中心の近くに集まって重なった。中心から出る線は中点がみな同じ小さな円の上に
- * 並ぶので、文字は相手の側へ寄せ、それでも重なるなら線に沿ってずらす。
+ * 線の上に置いていた頃は、相手30人前後の図（教科書チートの「イント」）で文字が
+ * 中心の近くへ寄り集まって読めなかった。線には何も書かず、周りの人の名前の下に
+ * 中心から見た関係を書く。重なるなら上・横などへずらし、どこでも重なれば省く。
  */
-describe("個人中心図の線の文字", () => {
+describe("個人中心図の名前の下の文字", () => {
   /** 中心1人と、両向きの関係を持つ相手 n人 */
   function crowd(n: number): Character[] {
     const names = Array.from({ length: n }, (_, index) => `相手${index}`);
@@ -270,135 +273,169 @@ describe("個人中心図の線の文字", () => {
     ];
   }
 
-  test("線の文字は短い形で、中心から見た向きで置く", () => {
-    const layout = layoutEgo(
-      egoGraph(buildRelationGraph(crowd(3)), "char_000", 1),
-      SIZE
-    );
-    for (const label of layout.edges) {
-      expect(label.text).toBe("→同席 ほか1／←上司にあたる人");
-    }
-  });
-
-  test("中心から出る線の文字は、中点より相手の側に置く", () => {
-    const layout = layoutEgo(
-      egoGraph(buildRelationGraph(crowd(3)), "char_000", 1),
-      SIZE
-    );
-    const inner = Math.hypot(
-      layout.nodes.find((node) => node.id === "char_001")!.x - layout.center.x,
-      layout.nodes.find((node) => node.id === "char_001")!.y - layout.center.y
-    );
-    for (const label of layout.edges) {
-      const distance = Math.hypot(
-        label.x - layout.center.x,
-        label.y - layout.center.y
-      );
-      expect(distance).toBeGreaterThan(inner / 2 + 1);
-    }
-  });
-
-  test("相手が多くても、線の文字どうしが重ならない", () => {
-    const layout = layoutEgo(
-      egoGraph(buildRelationGraph(crowd(10)), "char_000", 1),
-      SIZE
-    );
-    expect(layout.edges).toHaveLength(10);
-    const boxes = layout.edges.map((label) => {
-      const width = estimateTextWidth(label.text ?? "", EDGE_LABEL_FONT_SIZE);
-      return {
-        left: label.x - width / 2,
-        right: label.x + width / 2,
-        top: label.y - EDGE_LABEL_FONT_SIZE / 2,
-        bottom: label.y + EDGE_LABEL_FONT_SIZE / 2,
-      };
-    });
-    for (let i = 0; i < boxes.length; i++) {
-      for (let j = i + 1; j < boxes.length; j++) {
-        const a = boxes[i];
-        const b = boxes[j];
-        const overlap =
-          a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
-        expect(overlap, `${i} と ${j} が重なる`).toBe(false);
-      }
-    }
-  });
-
-  /** 見積もった字幅での、置いた文字の箱（配置と同じ見積もり） */
-  function labelBoxes(layout: GraphLayout) {
-    return layout.edges
-      .filter((label) => label.text)
-      .map((label) => {
-        const width = estimateTextWidth(label.text ?? "", EDGE_LABEL_FONT_SIZE);
-        return {
-          left: label.x - width / 2,
-          right: label.x + width / 2,
-          top: label.y - EDGE_LABEL_FONT_SIZE / 2,
-          bottom: label.y + EDGE_LABEL_FONT_SIZE / 2,
-        };
-      });
+  interface Box {
+    who: string;
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
   }
+
+  function anchored(
+    who: string,
+    anchor: "start" | "middle" | "end",
+    x: number,
+    y: number,
+    width: number,
+    height: number
+  ): Box {
+    const left = anchor === "start" ? x : anchor === "end" ? x - width : x - width / 2;
+    return { who, left, right: left + width, top: y - height / 2, bottom: y + height / 2 };
+  }
+
+  function overlaps(a: Box, b: Box): boolean {
+    return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  }
+
+  /** 置いた名前の下の文字の箱（配置と同じ見積もり） */
+  function captionBoxes(layout: GraphLayout): Box[] {
+    return layout.nodes.flatMap((node) =>
+      node.caption
+        ? [
+            anchored(
+              `${node.id}の下の文字`,
+              node.caption.anchor,
+              node.caption.x,
+              node.caption.y,
+              estimateTextWidth(node.caption.text, CAPTION_FONT_SIZE),
+              CAPTION_BOX_HEIGHT
+            ),
+          ]
+        : []
+    );
+  }
+
+  /** 人物の円と名前の箱（画面の描き方と同じ：中心は円の下、ほかは円の右か左） */
+  function personBoxes(layout: GraphLayout, names: Map<string, string>, centerId: string): Box[] {
+    return layout.nodes.flatMap((node) => {
+      const name = names.get(node.id) ?? "";
+      const width = estimateTextWidth(name, NODE_LABEL_FONT_SIZE);
+      const right = node.x >= layout.center.x;
+      const nameBox =
+        node.id === centerId
+          ? anchored(`${node.id}の名前`, "middle", node.x, node.y + node.r + 16, width, NODE_LABEL_BOX_HEIGHT)
+          : anchored(
+              `${node.id}の名前`,
+              right ? "start" : "end",
+              node.x + (right ? node.r + 6 : -node.r - 6),
+              node.y,
+              width,
+              NODE_LABEL_BOX_HEIGHT
+            );
+      const circle = {
+        who: `${node.id}の円`,
+        left: node.x - node.r,
+        right: node.x + node.r,
+        top: node.y - node.r,
+        bottom: node.y + node.r,
+      };
+      return [circle, nameBox];
+    });
+  }
+
+  function egoOf(n: number, size = SIZE) {
+    const characters = crowd(n);
+    const layout = layoutEgo(egoGraph(buildRelationGraph(characters), "char_000", 1), size);
+    const names = new Map(characters.map((entry) => [entry.id, entry.name]));
+    return { layout, names };
+  }
+
+  test("線には文字を持たせない", () => {
+    const { layout } = egoOf(3);
+    expect(layout.edges).toHaveLength(3);
+    for (const label of layout.edges) {
+      expect(Object.keys(label).sort()).toEqual(["a", "b", "x", "y"]);
+    }
+  });
+
+  test("名前の下には、中心から見た関係を書く", () => {
+    const { layout } = egoOf(3);
+    const captions = layout.nodes.filter((node) => node.caption);
+    expect(captions).toHaveLength(3);
+    for (const node of captions) {
+      expect(node.caption?.text).toBe("同席・兼職男子");
+    }
+    // 中心には書かない
+    expect(layout.nodes.find((node) => node.id === "char_000")?.caption).toBeUndefined();
+  });
+
+  test("相手が少なければ、全員の名前の真下に置き、省いた数は0", () => {
+    const { layout } = egoOf(6);
+    const partners = layout.nodes.filter((node) => node.id !== "char_000");
+    expect(layout.omittedCaptions).toBe(0);
+    for (const node of partners) {
+      expect(node.caption, `${node.id} に名前の下の文字がありません`).toBeDefined();
+      // 真下：名前と同じ揃え・同じ横位置で、名前より下
+      const right = node.x >= layout.center.x;
+      expect(node.caption?.anchor).toBe(right ? "start" : "end");
+      expect(node.caption?.x).toBeCloseTo(node.x + (right ? node.r + 6 : -node.r - 6), 6);
+      expect(node.caption?.y ?? 0).toBeGreaterThan(node.y);
+    }
+  });
 
   /*
     相手30人（作者の実機確認、2026-10-04、教科書チートの「イント」）。
-    相手6人では重ならなかったが、30人前後では置き場が足りず、以前は
-    「重なりのいちばん小さい位置」へ無理に置いていたので何十個も重なった。
-    置き場の無い線には文字を出さない（全部は右の「つながっている人」で読む）。
     **何も置かなければ重ならないのは当たり前**なので、置いた数の下限も見る。
   */
-  test("相手30人では、置ける線にだけ文字を置き、置いた文字どうしは重ならない", () => {
-    const layout = layoutEgo(
-      egoGraph(buildRelationGraph(crowd(30)), "char_000", 1),
-      { width: 840, height: 840 }
-    );
-    const boxes = labelBoxes(layout);
-    expect(boxes.length).toBeGreaterThanOrEqual(8);
-    expect(boxes.length).toBeLessThan(30);
-    expect(layout.omittedEdgeLabels).toBe(30 - boxes.length);
-    for (let i = 0; i < boxes.length; i++) {
-      for (let j = i + 1; j < boxes.length; j++) {
-        const a = boxes[i];
-        const b = boxes[j];
-        const overlap =
-          a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
-        expect(overlap, `${i} と ${j} が重なる`).toBe(false);
+  test("相手30人でも、置いた文字は人物の円・名前・ほかの名前の下の文字と重ならない", () => {
+    const { layout, names } = egoOf(30, { width: 840, height: 840 });
+    const captions = captionBoxes(layout);
+    expect(captions.length).toBeGreaterThanOrEqual(20);
+    expect(layout.omittedCaptions).toBe(30 - captions.length);
+
+    const people = personBoxes(layout, names, "char_000");
+    const problems: string[] = [];
+    captions.forEach((box, index) => {
+      for (const other of captions.slice(index + 1)) {
+        if (overlaps(box, other)) problems.push(`${box.who} と ${other.who}`);
       }
-    }
-  });
-
-  test("置いた文字は人物の円に重ならない", () => {
-    const layout = layoutEgo(
-      egoGraph(buildRelationGraph(crowd(30)), "char_000", 1),
-      { width: 840, height: 840 }
-    );
-    for (const box of labelBoxes(layout)) {
-      for (const node of layout.nodes) {
-        const overlap =
-          box.left < node.x + node.r &&
-          node.x - node.r < box.right &&
-          box.top < node.y + node.r &&
-          node.y - node.r < box.bottom;
-        expect(overlap, `${node.id} の円に文字が重なる`).toBe(false);
+      for (const other of people) {
+        if (overlaps(box, other)) problems.push(`${box.who} と ${other.who}`);
       }
-    }
+    });
+    expect(problems).toEqual([]);
   });
 
-  test("相手が少なければ、全部の線に文字を置き、省いた数は0", () => {
-    const layout = layoutEgo(
-      egoGraph(buildRelationGraph(crowd(6)), "char_000", 1),
-      SIZE
+  test("真下に置けない人は、上や横へずらして置く（下だけで諦めない）", () => {
+    const { layout } = egoOf(30, { width: 840, height: 840 });
+    const moved = layout.nodes.filter(
+      (node) => node.caption && !(node.caption.y > node.y && node.caption.anchor !== "middle")
     );
-    expect(labelBoxes(layout)).toHaveLength(6);
-    expect(layout.omittedEdgeLabels).toBe(0);
+    expect(moved.length).toBeGreaterThan(0);
   });
 
-  test("全体図の線には文字を置かない", () => {
+  test("2次の環の人には書かない（中心との関係が無い）", () => {
+    const characters = [
+      character("char_001", "灯", { relations: [{ name: "月島", relation: "師匠" }] }),
+      character("char_002", "月島", { relations: [{ name: "遠い人", relation: "親" }] }),
+      character("char_003", "遠い人", {}),
+    ];
+    const layout = layoutEgo(egoGraph(buildRelationGraph(characters), "char_001", 2), SIZE);
+    expect(layout.nodes.find((node) => node.id === "char_002")?.caption?.text).toBe("師匠");
+    expect(layout.nodes.find((node) => node.id === "char_003")?.caption).toBeUndefined();
+  });
+
+  test("全体図には名前の下の文字も線の文字も置かない", () => {
     const layout = layoutCircle(buildRelationGraph(crowd(3)), {
       ...SIZE,
       groupBy: "affiliation",
     });
-    for (const label of layout.edges) {
-      expect(label.text).toBeUndefined();
+    for (const node of layout.nodes) {
+      expect(node.caption).toBeUndefined();
     }
+    for (const label of layout.edges) {
+      expect(Object.keys(label).sort()).toEqual(["a", "b", "x", "y"]);
+    }
+    expect(layout.omittedCaptions).toBe(0);
   });
 });
