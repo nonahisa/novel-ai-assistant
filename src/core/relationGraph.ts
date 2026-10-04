@@ -305,7 +305,12 @@ export const EDGE_WORD_MAX_CHARS = 8;
  *
  * `fromId` から見て「→（fromId から相手へ）／←（相手から fromId へ）」の対にし、
  * **向きごとに1語だけ**置く。残りは「ほかN」と数だけ出す。1語目は関係を
- * 先に採り、関係が無ければ呼び方を『』で囲んで置く。向きに何も無ければ「なし」。
+ * 先に採り、関係が無ければ呼び方を『』で囲んで置く。
+ *
+ * **何も無い向きは書かない**（2026-10-04 に改めた。以前は「なし」と書いていた）。
+ * 相手30人前後の図で「→なし／←…」が中心のまわりに何十個も並び、何も伝えない
+ * 文字が置き場を食っていた（作者の実機確認、教科書チートの「イント」）。片方だけ
+ * でも矢印で向きは読める。両向きとも何も無ければ空文字を返し、線の上には何も置かない。
  *
  * 全部を並べていた頃は、両向きの関係を「・」でつないだ長い文字が中心の近くで
  * 重なって読めなかった（実機、教科書チートの「アブス」）。**全部は画面右の
@@ -313,9 +318,15 @@ export const EDGE_WORD_MAX_CHARS = 8;
  */
 export function shortPairLabel(edge: RelationEdge, fromId: string): string {
   const toId = edge.a === fromId ? edge.b : edge.a;
-  return `→${shortHalf(edge, fromId)}／←${shortHalf(edge, toId)}`;
+  const forward = shortHalf(edge, fromId);
+  const backward = shortHalf(edge, toId);
+  const halves: string[] = [];
+  if (forward) halves.push(`→${forward}`);
+  if (backward) halves.push(`←${backward}`);
+  return halves.join("／");
 }
 
+/** 1つの向きの短い言葉。何も無ければ空文字 */
 function shortHalf(edge: RelationEdge, speakerId: string): string {
   const words: string[] = [];
   const seen = new Set<string>();
@@ -333,7 +344,7 @@ function shortHalf(edge: RelationEdge, speakerId: string): string {
       push(`『${label.text}』`);
     }
   }
-  if (words.length === 0) return "なし";
+  if (words.length === 0) return "";
   const head = clipWord(words[0]);
   return words.length > 1 ? `${head} ほか${words.length - 1}` : head;
 }

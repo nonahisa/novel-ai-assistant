@@ -62,6 +62,12 @@ export interface GraphLayout {
   edges: LayoutEdgeLabel[];
   /** 薄く引く環の半径。個人中心図で1次・2次の環を示すために使う */
   rings: number[];
+  /**
+   * 置き場が無くて線の上の文字を省いた線の数（個人中心図。全体図は元から
+   * 文字を置かないので0）。画面はこの数を右の一覧の説明に添える——黙って
+   * 消したことにしないため（全部は右の「つながっている人」で読める）
+   */
+  omittedEdgeLabels: number;
 }
 
 export interface LayoutOptions {
@@ -162,6 +168,7 @@ export function layoutCircle(
     arcs,
     edges: edgeLabels(graph.edges, positions),
     rings: [radius],
+    omittedEdgeLabels: 0,
   };
 }
 
@@ -211,6 +218,7 @@ export function layoutEgo(ego: EgoGraph, options: LayoutOptions): GraphLayout {
   place(first, inner);
   place(second, outer);
 
+  const labels = egoEdgeLabels(ego, positions);
   return {
     width,
     height,
@@ -220,8 +228,9 @@ export function layoutEgo(ego: EgoGraph, options: LayoutOptions): GraphLayout {
       .map((node) => positions.get(node.id))
       .filter((node): node is LayoutNode => node !== undefined),
     arcs: [],
-    edges: egoEdgeLabels(ego, positions),
+    edges: labels.placed,
     rings: second.length > 0 ? [inner, outer] : [inner],
+    omittedEdgeLabels: labels.omitted,
   };
 }
 
@@ -273,31 +282,49 @@ function overlapArea(a: Box, b: Box): number {
 /**
  * 中心から出る線の上で、文字を置いてみる位置（中心からの割合）。
  *
- * **中点（0.5）から始めない。** 中心から出る線の中点は、みな中心のまわりの
- * 小さな円に並ぶので、相手が多いと文字が中心の近くで重なる（実機、教科書
- * チートの「アブス」）。相手の側へ寄せた位置から試し、重なれば線に沿って
- * 前後へずらす。
+ * **中点（0.5）より中心の側は試さない。** 中心から出る線は中心へ向かって
+ * 寄り集まるので、中心に近いほど置き場が無い（実機、教科書チートの「アブス」
+ * 〔0.96.4〕と「イント」〔2026-10-04、相手30人前後〕）。相手の側へ寄せた位置から
+ * 試し、重なれば相手の側の範囲で前後へずらす。
  */
-const CENTER_EDGE_STEPS = [0.64, 0.74, 0.54, 0.82, 0.46, 0.9, 0.38];
+const CENTER_EDGE_STEPS = [0.64, 0.74, 0.56, 0.84];
 /** 中心に触れない線（2次の環との線）。こちらは中点から試す */
 const OTHER_EDGE_STEPS = [0.5, 0.38, 0.62, 0.28, 0.72];
 
 /**
- * 個人中心図の線の文字の置き場と中身（作者の裁定、2026-10-03「線の文字を絞る」）。
+ * 線の文字の箱の高さ（画素）。
+ *
+ * 文字の大きさちょうど（11）では足りない。画面の字の矩形は書体の上下の
+ * 余白を含み、和文の書体では文字の大きさの1.4〜1.5倍になる。見積もりが
+ * 低いと、縦に並べた2つの文字が画面では重なる（相手30人の画面の自動テストで
+ * 実際の矩形を測って決めた。設計書6.38.2）
+ */
+const EDGE_LABEL_BOX_HEIGHT = Math.ceil(EDGE_LABEL_FONT_SIZE * 1.5);
+
+/**
+ * 個人中心図の線の文字の置き場と中身（作者の裁定、2026-10-03「線の文字を絞る」。
+ * 2026-10-04 に「置き場が無ければ省く」へ改めた）。
  *
  * 文字は `shortPairLabel` の短い形。向きは画面の約束どおり、中心に触れる線は
- * 中心から、触れない線は辺の a から見る。
+ * 中心から、触れない線は辺の a から見る。中身の無い線（両向きとも何も無い）
+ * には何も置かない。
  *
- * 置き方：候補の位置を順に試し、**先に置いた文字・人物の円・人物の名前**の
- * どれとも重ならない最初の位置に置く。線に沿った候補で足りなければ、
- * 線と直角の向きへ1行ぶんずらした位置も試す。どこでも重なるときは、
- * 重なりのいちばん小さい位置に置く（黙って文字を消さない）。
- * 試す順は決めてあるので、同じ材料からはいつも同じ図が出る。
+ * 置き方：文字が線の見えている長さ（両端の円の間）より長ければ置かない。
+ * そうでなければ候補の位置を順に試し、**先に置いた文字・人物の円・人物の名前**の
+ * どれとも重ならない最初の位置に置く。
+ * 線に沿った候補で足りなければ、線と直角の向きへ1行ぶんずらした位置も試す。
+ *
+ * **どこでも重なるときは、その線には文字を置かない**（省いた数は `omitted`）。
+ * 以前は重なりのいちばん小さい位置に無理に置いていたが、相手が30人前後になると
+ * それが何十回も起き、中心のまわりで文字が積み重なって1つも読めなかった
+ * （作者の実機確認、2026-10-04）。省いた線の言葉は、右の「つながっている人」で
+ * 全部読める。置く順は中心から出る線が先なので、後から置く線（2次の環との線）
+ * ほど省かれやすい。試す順は決めてあるので、同じ材料からはいつも同じ図が出る。
  */
 function egoEdgeLabels(
   ego: EgoGraph,
   positions: Map<string, LayoutNode>
-): LayoutEdgeLabel[] {
+): { placed: LayoutEdgeLabel[]; omitted: number } {
   const obstacles: Box[] = [];
   const centerPos = positions.get(ego.centerId);
   for (const node of ego.nodes) {
@@ -327,7 +354,8 @@ function egoEdgeLabels(
     ...ego.edges.filter((edge) => !touches(edge, ego.centerId)),
   ];
   const placed = new Map<string, LayoutEdgeLabel>();
-  const height = EDGE_LABEL_FONT_SIZE + 3;
+  const height = EDGE_LABEL_BOX_HEIGHT;
+  let omitted = 0;
 
   for (const edge of ordered) {
     const fromId = touches(edge, ego.centerId) ? ego.centerId : edge.a;
@@ -336,44 +364,65 @@ function egoEdgeLabels(
     const to = positions.get(toId);
     if (!from || !to) continue;
     const text = shortPairLabel(edge, fromId);
+    // 中身の無い線は、省いたのではなく書くことが無い（数に入れない）
+    if (!text) continue;
     const width = estimateTextWidth(text, EDGE_LABEL_FONT_SIZE) + 4;
     const steps = fromId === ego.centerId ? CENTER_EDGE_STEPS : OTHER_EDGE_STEPS;
 
     const dx = to.x - from.x;
     const dy = to.y - from.y;
     const length = Math.hypot(dx, dy) || 1;
+    const ux = dx / length;
+    const uy = dy / length;
     // 線と直角の向き（1行ぶんずらすときに使う）
-    const nx = -dy / length;
-    const ny = dx / length;
+    const nx = -uy;
+    const ny = ux;
     const shifts = [0, height, -height];
+    // 文字の箱を線の向きへ映した長さ。両端の円の間（線の見えている長さ）より
+    // 長い文字は、どこに置いても線からはみ出して誰の線か読めないので置かない。
+    // 置く位置そのものは、下の重なりの検査（円・名前・先に置いた文字）に任せる
+    // ——位置まで線の内側に縛ると、斜めの線で横長の文字の置き場が中点の
+    // まわりにしか残らず、相手6人の図でも省くことになった
+    const along = Math.abs(ux) * width + Math.abs(uy) * height;
+    const visible = length - from.r - to.r - 4;
+    if (along > visible) {
+      omitted++;
+      continue;
+    }
 
-    let best: { x: number; y: number; cost: number } | null = null;
+    let spot: { x: number; y: number } | null = null;
     search: for (const shift of shifts) {
       for (const t of steps) {
         const x = from.x + dx * t + nx * shift;
         const y = from.y + dy * t + ny * shift;
         const box = boxAt(x, y, width, height);
-        let cost = 0;
-        for (const other of obstacles) cost += overlapArea(box, other);
-        if (best === null || cost < best.cost) best = { x, y, cost };
-        if (cost === 0) break search;
+        if (obstacles.every((other) => overlapArea(box, other) === 0)) {
+          spot = { x, y };
+          break search;
+        }
       }
     }
-    if (!best) continue;
-    obstacles.push(boxAt(best.x, best.y, width, height));
+    if (!spot) {
+      omitted++;
+      continue;
+    }
+    obstacles.push(boxAt(spot.x, spot.y, width, height));
     placed.set(edgeKeyOf(edge.a, edge.b), {
       a: edge.a,
       b: edge.b,
-      x: best.x,
-      y: best.y,
+      x: spot.x,
+      y: spot.y,
       text,
     });
   }
 
   // 並びは辺の順に戻す（画面は受け取った順に描く。決定的にしておく）
-  return ego.edges
-    .map((edge) => placed.get(edgeKeyOf(edge.a, edge.b)))
-    .filter((label): label is LayoutEdgeLabel => label !== undefined);
+  return {
+    placed: ego.edges
+      .map((edge) => placed.get(edgeKeyOf(edge.a, edge.b)))
+      .filter((label): label is LayoutEdgeLabel => label !== undefined),
+    omitted,
+  };
 }
 
 function touches(edge: { a: string; b: string }, id: string): boolean {

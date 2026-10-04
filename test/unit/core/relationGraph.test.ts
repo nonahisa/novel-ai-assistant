@@ -805,7 +805,33 @@ describe("線の上の短い言葉", () => {
       }),
       character("char_002", "イント", {}),
     ]);
-    expect(shortPairLabel(edge, "char_001")).toBe("→『イント君』／←なし");
+    expect(shortPairLabel(edge, "char_001")).toBe("→『イント君』");
+  });
+
+  /**
+   * 中身の無い向きは書かない（作者の実機確認、2026-10-04。相手30人の図で
+   * 「→なし／←…」が中心の近くに何十個も並んだ）。「なし」は何も伝えないうえ、
+   * 線の上の場所を取る。向きの片方だけを書いても、矢印で向きは読める
+   */
+  test("片方の向きに何も無ければ、その向きは書かない（「なし」と書かない）", () => {
+    const edge = edgeOf([
+      character("char_001", "イント", {}),
+      character("char_002", "相手", {
+        relations: [{ name: "イント", relation: "主人" }],
+      }),
+    ]);
+    expect(shortPairLabel(edge, "char_001")).toBe("←主人");
+    expect(shortPairLabel(edge, "char_002")).toBe("→主人");
+  });
+
+  test("両方の向きに何も無ければ空（線の上に何も書かない）", () => {
+    const edge: Parameters<typeof shortPairLabel>[0] = {
+      a: "char_001",
+      b: "char_002",
+      weight: 0,
+      labels: [],
+    };
+    expect(shortPairLabel(edge, "char_001")).toBe("");
   });
 
   test("長い言葉は途中で切る", () => {
@@ -816,7 +842,7 @@ describe("線の上の短い言葉", () => {
       character("char_002", "イント", {}),
     ]);
     const text = shortPairLabel(edge, "char_001");
-    expect(text).toBe("→電気について教え…／←なし");
+    expect(text).toBe("→電気について教え…");
   });
 
   test("全部を並べた長い形にはしない（線の上は短く）", () => {
