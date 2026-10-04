@@ -1471,6 +1471,9 @@ describe("画面の約束", () => {
     expect(block).toContain("if (event.ctrlKey || event.altKey || event.metaKey) return;");
     // 動かせたときだけ既定の動きを止める（動かせなければブラウザに任せる）
     expect(block).toMatch(/if \(composeMoveToLineBoundary\([^)]*\)\) \{\s*event\.preventDefault\(\);/);
+    // もう見えている行の端なら、段落の端へ（2回目。作者の裁定 2026-10-04）
+    expect(block).toContain("if (atRowEnd) target = items.length - 1;");
+    expect(block).toContain("if (atRowHead) target = 0;");
   });
 
   it("傍点の語の中の打鍵は、変換の字には手を出さず、打つ前に押した点への置き直しを当てる", () => {

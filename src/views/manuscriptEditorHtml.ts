@@ -6710,6 +6710,8 @@ ${RESUME_WRITING_LABEL ? `
     最後（Home なら最初）の要素の外側へ置く。同じ行かは、横書きなら字の高さの
     中ほど、縦書きなら字の幅の中ほどが、行の字と半分以上ずれていないかで見る。
     Shift つきは選択を伸ばす。Ctrl つき（文書の頭・尻）はブラウザに任せる。
+    もう見えている行の端にいるときは、段落（原稿の1行）の端へ動く（2回目の End／Home。
+    作者の裁定 2026-10-04、VS Code と同じ）。
   */
   /** 段落の中の字とかたまりを、本文の順に並べる（位置と見た目の箱つき） */
   function composeLineItems(line) {
@@ -6809,6 +6811,15 @@ ${RESUME_WRITING_LABEL ? `
     } else {
       while (target - 1 >= 0 && sameLine(items[target - 1].rect)) target--;
     }
+    /*
+      **もう見えている行の端にいれば、段落（原稿の1行）の端へ**（作者の裁定 2026-10-04。
+      VS Code と同じ）。1回目は見えている行（縦書きでは列）の端、2回目で段落の端。
+      折り返しの無い行なら、見えている行の端＝段落の端なので1回で着く
+    */
+    const atRowEnd = toEnd && next - 1 >= 0 && target === next - 1;
+    const atRowHead = !toEnd && next < items.length && target === next;
+    if (atRowEnd) target = items.length - 1;
+    if (atRowHead) target = 0;
     const point = toEnd ? items[target].end : items[target].start;
     try {
       if (extend) selection.extend(point.node, point.offset);
