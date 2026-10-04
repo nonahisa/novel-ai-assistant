@@ -967,6 +967,8 @@ var EditorLogic = (function () {
     そこへ写す。iPad の WebKit は縦書きの textarea でタップした所にカーソルを置けないため
     （作者の実機、2026-10-05「縦書きのとき」。横書きは置けた）
   */
+  /** 本文の最後に置く、幅ゼロの見えない字（本文には含めない） */
+  var ZWSP = "​";
   function domText(root) {
     var out = "";
     // 欄のいちばん最後の節点（末尾の「行の置き物」の BR はここに来る）
@@ -974,7 +976,7 @@ var EditorLogic = (function () {
     while (tail.lastChild) tail = tail.lastChild;
     function walk(node) {
       for (var c = node.firstChild; c; c = c.nextSibling) {
-        if (c.nodeType === 3) out += c.data;
+        if (c.nodeType === 3) out += c.data.split(ZWSP).join("");
         else if (c.nodeName === "BR") {
           // 末尾の置き物は本文ではない（pushToVertical が置く。ブラウザが置き直すこともある）
           if (c === tail) continue;
@@ -989,7 +991,6 @@ var EditorLogic = (function () {
     return out;
   }
   function pushToVertical() {
-    vtextEl.textContent = textEl.value;
     /*
       最後にいつも「行の置き物」（BR）を1つ置く。ブラウザの入力欄はこれを頼りに本文の
       最後のカーソルを描く。無いと iPad は最後の位置の箱を出せず（測ると x=0〜0 y=0）、
@@ -997,6 +998,13 @@ var EditorLogic = (function () {
       カーソル描画位置は変わってません」）。改行で終わるときは、この置き物が空の最後の行にもなる。
       domText は末尾の置き物を数えない
     */
+    /*
+      さらに本文の最後に幅ゼロの見えない字（U+200B）を置く。置き物（BR）だけでは iPad の印は
+      直らなかった（作者の実機、2026-10-05）。カーソルを「見えない字の手前」に置けば、字の手前の
+      位置なので iPad は正しく描ける（「Cが|18:」のときは合っていた）。打った字はその手前に入り、
+      domText はこの字を省く
+    */
+    vtextEl.textContent = textEl.value + ZWSP;
     vtextEl.appendChild(document.createElement("br"));
     var editable = state.readOnly ? "false" : "plaintext-only";
     try { vtextEl.contentEditable = editable; } catch (error) { vtextEl.contentEditable = state.readOnly ? "false" : "true"; }
@@ -1462,6 +1470,26 @@ var EditorLogic = (function () {
   var vTouchPoint = null;
   var vTouchWatchUntil = 0;
   var V_TOUCH_FIX_MS = 400;
+  /*
+    カーソルが見えない字のうしろ（本文の最後）に来たら、その手前へ寄せる。見えないので
+    場所は同じだが、iPad は「字の手前」の位置しか正しく描けない
+  */
+  function nudgeBeforeZwsp() {
+    if (vComposing || vtextEl.hidden) return;
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return;
+    var node = sel.anchorNode;
+    if (!node || node.nodeType !== 3 || !vtextEl.contains(node)) return;
+    var len = node.length;
+    if (sel.anchorOffset === len && len > 0 && node.data.charAt(len - 1) === ZWSP) {
+      var r = document.createRange();
+      r.setStart(node, len - 1);
+      r.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+  }
+  document.addEventListener("selectionchange", nudgeBeforeZwsp);
   vtextEl.addEventListener("compositionstart", function () { vComposing = true; });
   vtextEl.addEventListener("compositionend", function () { vComposing = false; });
   vtextEl.addEventListener("pointerdown", function (event) {
@@ -1490,7 +1518,7 @@ var EditorLogic = (function () {
       var after = o < len;
       probe.setStart(node, after ? o : o - 1);
       probe.setEnd(node, after ? o + 1 : o);
-      if (probe.toString() === "\n") continue;
+      if (probe.toString() === "\n" || probe.toString() === ZWSP) continue;
       var rects = probe.getClientRects();
       if (!rects.length) continue;
       var b = rects[0];
