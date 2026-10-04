@@ -289,7 +289,7 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
   <section class="picker" aria-label="作品の選び方">
     <div class="row">
       <label class="grow">リポジトリ（持ち主/名前）
-        <input type="text" id="repo" placeholder="nonahisa/novels" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <input type="text" id="repo" placeholder="持ち主/リポジトリ名" autocomplete="off" autocapitalize="off" spellcheck="false">
       </label>
       <label class="branch">枝
         <input type="text" id="branch" placeholder="main" autocomplete="off" autocapitalize="off" spellcheck="false">
@@ -958,7 +958,7 @@ var OutboxLogic = (function () {
     var spec = repoEl.value.trim().replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/i, "").replace(/\/+$/, "");
     var parts = spec.split("/");
     if (parts.length !== 2 || !parts[0] || !parts[1]) {
-      setStatus("リポジトリは「持ち主/名前」の形で入れてください（例：nonahisa/novels）。", true);
+      setStatus("リポジトリは「持ち主/名前」の形で入れてください（例：yourname/my-novels）。", true);
       return;
     }
     if (!state.mcp) { setStatus(describeGithubError({ code: "not_granted" }), true); return; }
