@@ -147,13 +147,31 @@ function copiesNeighbor(text: string, neighbors: readonly string[]): boolean {
   return neighbors.some((paragraph) => paragraph.includes(body));
 }
 
-/** 前後の鉤括弧・引用符・空白を落とす（中身は変えない） */
+/**
+ * 全体を囲んだ鉤括弧・引用符と前後の空白を落とす（中身は変えない）。
+ *
+ * **囲み全体のときだけ外す。** 頭だけを見て外すと、「「警戒している」の
+ * 繰り返しが…」の頭の括弧が落ちて、閉じ括弧だけが残る（手元の
+ * gemma4:e4b、2026-10-05）
+ */
+const WRAPS: ReadonlyArray<readonly [string, string]> = [
+  ["「", "」"],
+  ["『", "』"],
+  ['"', '"'],
+  ["“", "”"],
+];
+
 function unquote(text: string): string {
-  return text
-    .trim()
-    .replace(/^[「『"“]+/u, "")
-    .replace(/[」』"”]+$/u, "")
-    .trim();
+  let body = text.trim();
+  for (const [open, close] of WRAPS) {
+    if (body.length < 2 || !body.startsWith(open) || !body.endsWith(close)) continue;
+    const inner = body.slice(open.length, body.length - close.length);
+    // 中にもう一組あれば、囲みではなく「「A」と「B」」のような並び
+    if (inner.includes(open) || inner.includes(close)) continue;
+    body = inner.trim();
+    break;
+  }
+  return body;
 }
 
 /**

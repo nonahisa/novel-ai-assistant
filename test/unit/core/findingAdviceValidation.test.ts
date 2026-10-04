@@ -36,6 +36,20 @@ describe("読める答え", () => {
     expect(advice?.dropped).toBe(0);
   });
 
+  /**
+   * 手元の Ollama（gemma4:e4b、2026-10-05）で、頭の鉤括弧だけが落ちて
+   * 「警戒している」の繰り返しが…」になった。囲み全体のときだけ外す
+   */
+  test("鉤括弧で始まる引っかかりの、頭の括弧を落とさない", () => {
+    const advice = parse({
+      point: "「警戒している」の繰り返しが目立ちます。",
+      examples: [{ from: "「見ている彼女を」", to: "「窓辺の自分を」" }],
+    });
+    expect(advice?.point).toBe("「警戒している」の繰り返しが目立ちます。");
+    // 全体を囲んだものは外す
+    expect(advice?.examples).toEqual([{ from: "見ている彼女を", to: "窓辺の自分を" }]);
+  });
+
   test("コードフェンスや前置きが付いていても読む", () => {
     const text =
       "答えです。\n```json\n" +
