@@ -429,6 +429,44 @@ describe("［戻す］", () => {
   });
 });
 
+/**
+ * 種類ごとの色（作者の要望 2026-10-04「推敲や誤字脱字等で色分けしてください」
+ * 「表示ジャンルすべてです」）。色の表そのものは `test/unit/core/noteTones.test.ts`。
+ * ここでは、拡張機能が画面へ送る一覧に印が付くことを見る
+ */
+describe("種類ごとの色の印", () => {
+  test("誤字脱字・矛盾・推敲の行に、それぞれ違う色の印が付く", async () => {
+    const work = newWork();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, deps());
+
+    const tones = [typo, contradiction, proofreadNoFix].map(
+      (finding) => rowOf(finding.id)?.tagClass
+    );
+    expect(tones.every((tone) => typeof tone === "string" && tone !== "")).toBe(true);
+    expect(new Set(tones).size).toBe(3);
+  });
+
+  test("選び口に並ぶ種類すべてに印があり、その色が画面へ届く", async () => {
+    const work = newWork();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, deps());
+
+    const data = lastData();
+    const tags = data.tags as string[];
+    const tagTones = data.tagTones as Record<string, string>;
+    const colors = data.colors as Record<string, string>;
+    expect(tags.length).toBeGreaterThanOrEqual(3);
+    for (const tag of tags) {
+      const tone = tagTones[tag];
+      expect(tone, `${tag} に印が無い`).toBeTruthy();
+      expect(colors[tone], `${tone} の色が届いていない`).toBeTruthy();
+    }
+    // 行の印と選び口の印は同じもの
+    expect(tagTones["推敲"]).toBe(rowOf(proofreadNoFix.id)?.tagClass);
+  });
+});
+
 // 本文の見本（この試験の偽の本文と、指摘の原文が合っていることの念押し）
 test("見本の本文に、指摘の原文がある", () => {
   expect(TEXT).toContain(typo.original);
