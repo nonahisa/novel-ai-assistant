@@ -1,10 +1,10 @@
 /**
- * 人物相関図の個人中心図で、線の上の文字が重ならない（画面の自動テスト、設計書6.38.2・6.113）。
+ * 人物相関図の個人中心図で、関係が周りの人の名前の下に重ならずに書かれ、線の上には
+ * 文字が無い（画面の自動テスト、設計書6.38.2・6.113）。
  *
- * 実機確認リスト 0.96.8 の項目を機械へ移したもの（2026-10-03）。0.96.4 の実機で、
- * 相手の多い人物（教科書チート_確認用の「アブス」）を中心にすると、線の上の文字が
- * 中心の点の近くに寄って重なり、読めなかった。0.96.8 で文字を向きごとに1つへ縮め
- * （「→同席 ほか2／←上司」の形）、置き場を散らした。
+ * 0.96.4〜0.98.7 は線の上に関係を書いていたが、相手30人前後の人物（教科書チート_確認用の
+ * 「イント」）では文字が中心の近くに集まって読めなかった。作者の裁定（2026-10-04）
+ * 「関係は人の名前の下に書く」で、線の上の文字をやめ、名前の下へ移した。
  *
  * 単体テスト（`core/relationGraphLayout.test.ts`）は**見積もった字幅**で重なりを見ている。
  * ここでは**本物の画面に描かれた字の矩形**（`getBoundingClientRect`）で見る。
@@ -17,7 +17,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame } from "playwright-core";
 import { expect, test } from "vitest";
-import { EDGE_LABEL_BOX_HEIGHT } from "../../src/core/relationGraphLayout";
+import { CAPTION_BOX_HEIGHT, NODE_LABEL_BOX_HEIGHT } from "../../src/core/relationGraphLayout";
 import { emptyCharacter, type Character } from "../../src/models/character";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
@@ -72,7 +72,42 @@ interface Box {
   bottom: number;
 }
 
-test("個人中心図（相手の多い人）で、線の上の文字が向きごとに1つになり、描かれた字の矩形どうしが重ならず、右の一覧には全部が並ぶ", async () => {
+/** 描かれた要素の矩形（画面の座標）。文字は textContent、円は「円」と名乗る */
+async function rectsOf(frame: Frame, selector: string): Promise<Box[]> {
+  return frame.evaluate((query) =>
+    Array.from(document.querySelectorAll(query)).map((element) => {
+      const rect = element.getBoundingClientRect();
+      const text = element.tagName.toLowerCase() === "circle" ? "円" : element.textContent ?? "";
+      return { text, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+    })
+  , selector);
+}
+
+function intersects(a: Box, b: Box): boolean {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
+/**
+ * 名前の下の文字が、ほかの名前の下の文字・人物の名前・人物の円と重ならないかを並べる。
+ * 名前どうしの重なりは見ない（名前の置き場は今回の変更の外で、相手30人の環の上下では
+ * 隣の名前が元から近い）
+ */
+async function captionOverlaps(frame: Frame): Promise<string[]> {
+  const captions = await rectsOf(frame, ".g-node-caption");
+  const names = await rectsOf(frame, ".g-node-label");
+  const circles = await rectsOf(frame, ".g-node-circle");
+  const problems: string[] = [];
+  captions.forEach((caption, index) => {
+    for (const other of [...captions.slice(index + 1), ...names, ...circles]) {
+      if (intersects(caption, other)) {
+        problems.push(`「${caption.text}」と「${other.text}」（${JSON.stringify(caption)} ／ ${JSON.stringify(other)}）`);
+      }
+    }
+  });
+  return problems;
+}
+
+test("個人中心図（相手6人）で、関係が名前の下に中心から見た形で書かれ、線の上に文字が無く、名前の下の文字が重ならず、右の一覧には全部が並ぶ", async () => {
   await withVsCode(
     "相関図の線の文字",
     [{ name: "001_はじまり.txt", text: "アブスはイントと同席した。\n" }],
@@ -99,36 +134,22 @@ test("個人中心図（相手の多い人）で、線の上の文字が向き�
       await waitUntil(
         async () =>
           (await frame.locator(".g-node-circle.g-center").count()) === 1 &&
-          (await frame.locator(".g-edge-label").count()) === PARTNERS.length,
-        `「${HUB}」の個人中心図になり、線の文字が相手の数だけ並ぶ`,
+          (await frame.locator(".g-node-caption").count()) === PARTNERS.length,
+        `「${HUB}」の個人中心図になり、名前の下の文字が相手の数だけ並ぶ`,
         15_000
       );
 
-      const boxes: Box[] = await frame.evaluate(() =>
-        Array.from(document.querySelectorAll(".g-edge-label")).map((label) => {
-          const rect = label.getBoundingClientRect();
-          return { text: label.textContent ?? "", left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
-        })
-      );
+      // 線の上には文字が無い（線を押せば右に出る）
+      expect(await frame.locator(".g-edge-label").count(), "線の上に文字があります").toBe(0);
 
-      // 文字は向きごとに1つ（「→同席 ほか2／←上司にあたる人」の形）
+      // 中心から見た関係を矢印なしで、入るぶんだけ（「同席・兼職男子 ほか1」の形）
+      const boxes = await rectsOf(frame, ".g-node-caption");
       for (const box of boxes) {
-        expect(box.text, "線の上の文字の形").toMatch(/^→同席 ほか2／←上司にあたる人$/);
+        expect(box.text, "名前の下の文字の形").toBe("同席・兼職男子 ほか1");
         expect(box.right - box.left, `「${box.text}」が描かれていません`).toBeGreaterThan(0);
       }
 
-      // 描かれた字の矩形どうしが重ならない
-      const overlaps: string[] = [];
-      for (let i = 0; i < boxes.length; i++) {
-        for (let j = i + 1; j < boxes.length; j++) {
-          const a = boxes[i];
-          const b = boxes[j];
-          if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) {
-            overlaps.push(`${i}番と${j}番（${JSON.stringify(a)} ／ ${JSON.stringify(b)}）`);
-          }
-        }
-      }
-      expect(overlaps, "線の上の文字が重なっています").toEqual([]);
+      expect(await captionOverlaps(frame), "名前の下の文字が重なっています").toEqual([]);
 
       // 右の「つながっている人」には、従来どおり全部が並ぶ（線の上で省いた分もここで読める）
       const sideRows: string[] = await frame.evaluate(() =>
@@ -191,11 +212,11 @@ async function clickPerson(frame: Frame, name: string): Promise<void> {
 /*
   相手30人（作者の実機確認、2026-10-04、教科書チート_確認用の「イント」）。
   相手6人の作り物では重ならなかったが、相手が30人前後になると中心の近くで線の
-  文字が何十個も重なって読めなかった。置き場の無い線には文字を出さず、右の
-  「つながっている人」に任せる（設計書6.38.2）。
+  文字が何十個も重なって読めなかった。作者の裁定「関係は人の名前の下に書く」で、
+  線の上の文字をやめ、名前の下（置けなければ上・横など）へ移した。どこにも置けない
+  人は省き、右の「つながっている人」に数を添える（設計書6.38.2）。
 
-  **何も描かなくても「重ならない」は満点になる**ので、描かれた数の下限と、
-  省かれたものがあること（30本ぜんぶは置けない）も併せて見る。
+  **何も描かなくても「重ならない」は満点になる**ので、描かれた数の下限も見る。
 */
 const CROWD_HUB = "イント";
 const CROWD_SIZE = 30;
@@ -223,7 +244,7 @@ function crowdCast(): Character[] {
   return [hub, ...partners];
 }
 
-test("個人中心図（相手30人）で、描かれた線の文字の矩形が重ならず、置き場の無い線は文字を省き、「なし」は出ない", async () => {
+test("個人中心図（相手30人）で、線の上に文字が無く、名前の下の文字が円・名前・ほかの名前の下の文字と重ならず、省いた人の数が右に出て、「なし」は出ない", async () => {
   const characters = crowdCast();
   const partnerCount = characters.length - 1;
   await withVsCode(
@@ -242,16 +263,12 @@ test("個人中心図（相手30人）で、描かれた線の文字の矩形が
         15_000
       );
 
-      const boxes: Box[] = await frame.evaluate(() =>
-        Array.from(document.querySelectorAll(".g-edge-label")).map((label) => {
-          const rect = label.getBoundingClientRect();
-          return { text: label.textContent ?? "", left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
-        })
-      );
+      // 線の上には文字が無い
+      expect(await frame.locator(".g-edge-label").count(), "線の上に文字があります").toBe(0);
 
-      // 描かれた数：空振り（1つも描かない）を通さない下限と、全部は置けないこと
-      expect(boxes.length, "線の文字が少なすぎます（置ける所にも置いていない）").toBeGreaterThanOrEqual(8);
-      expect(boxes.length, "相手30人の線にぜんぶ文字を置いています（重なりを避けて省いていない）").toBeLessThan(partnerCount);
+      const boxes = await rectsOf(frame, ".g-node-caption");
+      // 描かれた数：空振り（1つも描かない）を通さない下限。配置の見積もりでは30人中27人に置ける
+      expect(boxes.length, "名前の下の文字が少なすぎます（置ける所にも置いていない）").toBeGreaterThanOrEqual(20);
 
       for (const box of boxes) {
         expect(box.text, "中身の無い「なし」を出しています").not.toMatch(/なし/);
@@ -259,27 +276,32 @@ test("個人中心図（相手30人）で、描かれた線の文字の矩形が
       }
 
       // 配置が見積もった字の箱の高さに、描かれた字の高さ（SVG の座標。拡大率に依らない）が収まる。
-      // 収まらないと、配置の上では重ならない2つの文字が、画面では縦に重なる
-      const heights: number[] = await frame.evaluate(() =>
-        Array.from(document.querySelectorAll(".g-edge-label")).map(
+      // 収まらないと、配置の上では重ならない名前と名前の下の文字が、画面では縦に重なる
+      const heights = await frame.evaluate(() => ({
+        captions: Array.from(document.querySelectorAll(".g-node-caption")).map(
           (label) => (label as SVGGraphicsElement).getBBox().height
-        )
-      );
-      for (const height of heights) {
-        expect(height, "描かれた字が、配置の見積もりより高い").toBeLessThanOrEqual(EDGE_LABEL_BOX_HEIGHT);
+        ),
+        names: Array.from(document.querySelectorAll(".g-node-label")).map(
+          (label) => (label as SVGGraphicsElement).getBBox().height
+        ),
+      }));
+      for (const height of heights.captions) {
+        expect(height, "名前の下の文字が、配置の見積もりより高い").toBeLessThanOrEqual(CAPTION_BOX_HEIGHT);
+      }
+      for (const height of heights.names) {
+        expect(height, "名前が、配置の見積もりより高い").toBeLessThanOrEqual(NODE_LABEL_BOX_HEIGHT);
       }
 
-      const overlaps: string[] = [];
-      for (let i = 0; i < boxes.length; i++) {
-        for (let j = i + 1; j < boxes.length; j++) {
-          const a = boxes[i];
-          const b = boxes[j];
-          if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) {
-            overlaps.push(`${i}番と${j}番（${JSON.stringify(a)} ／ ${JSON.stringify(b)}）`);
-          }
-        }
+      expect(await captionOverlaps(frame), "名前の下の文字が重なっています").toEqual([]);
+
+      // 省いた人がいれば、その数が右の一覧の説明に出る（黙って消さない）。いなければ出ない
+      const sideText: string = await frame.evaluate(() => (document.querySelector("#side") as HTMLElement | null)?.innerText ?? "");
+      const omitted = partnerCount - boxes.length;
+      if (omitted > 0) {
+        expect(sideText).toContain(`${omitted}人は名前の下の関係を省いています`);
+      } else {
+        expect(sideText).not.toContain("名前の下の関係を省いています");
       }
-      expect(overlaps, "線の上の文字が重なっています").toEqual([]);
     },
     { keybindings: [{ key: OPEN_GRAPH_KEY, command: "novelai.openRelationGraph" }] }
   );
