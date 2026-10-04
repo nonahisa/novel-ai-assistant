@@ -281,6 +281,12 @@ describe("ページの決まり", () => {
   it("呼ぶ GitHub の道具は3つだけ（スキルの capabilities と同じ）", () => {
     const called = new Set([...EDITOR.matchAll(/gh\("([a-z_]+)"/g)].map((m) => m[1]));
     expect([...called].sort()).toEqual(["create_or_update_file", "get_file_contents", "list_commits"]);
+    const skill = fs.readFileSync(nodePath.resolve("docs/skills/novel-assist.md"), "utf8");
+    const section = skill.slice(skill.indexOf("## 出先の原稿エディター"), skill.indexOf("## 道具の早見表"));
+    expect(section).toContain(
+      '{"mcp": {"servers": [{"server": "GitHub", "tools": ["get_file_contents", "list_commits", "create_or_update_file"]}]}}'
+    );
+    expect(section).toContain("editorTemplatePath");
   });
 
   it("画面に出す言葉に、内部の言葉（blob・inbox・records・SHA）を入れない", () => {
