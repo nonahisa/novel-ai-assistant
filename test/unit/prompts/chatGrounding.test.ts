@@ -244,7 +244,9 @@ describe("版", () => {
     // 問いに合わせて選ぶ（指示の中身は変えていない）
     // 3.24（2026-10-01）：読者の区分の一段で、決めていない作品でも「向いている読者」を
     // 「本文からの見立て」と断って挙げてよいことにした
-    expect(WORK_CHAT_VERSION).toBe("3.24");
+    // 3.25（2026-10-04）：校正・メモパネルの［AIに相談］から送る依頼文
+    // （buildFindingAdviceQuestion）を足した（システム指示は変えていない）
+    expect(WORK_CHAT_VERSION).toBe("3.25");
     expect(SETTINGS_CHAT_VERSION).toBe("3.0");
   });
 });

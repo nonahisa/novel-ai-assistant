@@ -23,7 +23,7 @@ export interface SampleFinding {
   producer?: { providerId: string; model: string };
   /**
    * 指摘の種類と分類名。**省けば誤字脱字**（`typo`／「誤字脱字」）。
-   * 修正案の無い指摘（［提案へ］の行）を作るときに、推敲・矛盾などを渡す
+   * 修正案の無い指摘（［本文へ］の行）を作るときに、推敲・矛盾などを渡す
    */
   category?: FindingCategory;
   label?: string;

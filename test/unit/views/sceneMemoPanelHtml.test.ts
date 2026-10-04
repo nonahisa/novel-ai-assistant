@@ -112,14 +112,31 @@ describe("シーンメモのパネルのHTML", () => {
   });
 
   /**
-   * 修正案があれば［直す］、無ければ［提案へ］（作者の裁定 2026-10-03）。
-   * 口が無ければどちらも出さない（押しても何も起きない口を作らない）
+   * 修正案があれば［直す］、無ければ［本文へ］（作者の裁定 2026-10-03・2026-10-04）。
+   * ［本文へ］は行の場所を押したときと同じ「reveal」を送る（飛ぶ道を1本にする）。
+   * ［提案へ］はやめた（「提案へ、というのもおかしい」）
    */
-  it("直すと提案へは、拡張機能が決めた押し口で分かれる", () => {
+  it("直すと本文へは、拡張機能が決めた押し口で分かれ、［提案へ］は無い", () => {
     expect(html).toContain('row.fixAction === "apply"');
-    expect(html).toContain('row.fixAction === "handOver"');
-    expect(html).toContain('post("handOver"');
-    expect(html).toContain("提案へ");
+    expect(html).toContain('data-act="reveal"');
+    expect(html).toContain(">本文へ</button>");
+    expect(html).toContain('post("reveal", { filePath: row.filePath, line: row.line })');
+    expect(html).not.toContain("提案へ");
+    expect(html).not.toContain("handOver");
+  });
+
+  /** 修正案の無い推敲には［AIに相談］（作者の要望 2026-10-04）。口が無ければ出さない */
+  it("［AIに相談］は拡張機能が許したときだけ出て、consult を送る", () => {
+    expect(html).toContain("if (row.canConsult)");
+    expect(html).toContain(">AIに相談</button>");
+    expect(html).toContain('post("consult", { findingId: row.findingId })');
+  });
+
+  /** 提案パネルへ移る口は、上の帯に1つだけ。開く口が無ければ隠す */
+  it("上に［提案パネル］が1つだけあり、開く口が無ければ隠れる", () => {
+    expect(html.match(/>提案パネル<\/button>/g)).toHaveLength(1);
+    expect(html).toContain('post("openProposals")');
+    expect(html).toContain("el.openProposals.hidden = data.canOpenProposals !== true");
   });
 
   /** ［直す］で当てた指摘は一覧から消えるので、戻す口は一覧の外に置く */

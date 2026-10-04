@@ -3,8 +3,10 @@
  *
  * 実機確認リスト 0.97.8 の2項目を機械へ移したもの（2026-10-03）：
  *
- * 1. **修正案の無い指摘**（矛盾・プロット逸脱）は［直す］でなく［提案へ］が出て、
- *    押すと提案パネルが前に出て、その指摘が並ぶ。本文は変わらない
+ * 1. **修正案の無い指摘**（矛盾・プロット逸脱）は［直す］でなく［本文へ］が出て、
+ *    押すと原稿のその行の頭へカーソルが来る（行の場所を押したときと同じ道。2枚目を
+ *    作らない）。本文は変わらず、提案パネルも開かない。提案パネルへは上の
+ *    ［提案パネル］から移れて、その指摘が並ぶ（作者の裁定 2026-10-04。以前は［提案へ］）
  * 2. **校閲ロックの掛かった話**で［直す］を押すと、提案パネルの［適用］と同じ
  *    「校閲中です」の確認が出る。止めれば本文は変わらず、指摘も残る。
  *    「それでも直す」を選べば当たる（確認の画面が道を塞いでいるだけで、壊れていない念押し）
@@ -16,7 +18,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
-import { memoPanelFrame, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
+import { caretPosition, manuscriptFrames, memoPanelFrame, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
 import {
   OPEN_PROPOSALS_LAUNCH,
   proposalPanelFrame,
@@ -74,7 +76,7 @@ async function decisions(session: E2ESession, sample: SampleFinding): Promise<st
   return lines.filter((line) => line.kind === "decision" && line.findingId === id).map((line) => String(line.status));
 }
 
-test("修正案の無い指摘（矛盾）の［提案へ］で、提案パネルが前に出てその指摘が並び、本文は変わらない", async () => {
+test("修正案の無い指摘（矛盾）の［本文へ］で、原稿のその行へ飛び、本文は変わらず、提案パネルは上の［提案パネル］から開ける", async () => {
   const sample: SampleFinding = {
     episode: EPISODE,
     text: TEXT,
@@ -86,7 +88,7 @@ test("修正案の無い指摘（矛盾）の［提案へ］で、提案パネ�
     label: "矛盾",
   };
   await withVsCode(
-    "校正・メモの提案へ",
+    "校正・メモの本文へ",
     [{ name: EPISODE, text: TEXT }],
     async (session) => {
       const { page } = session;
@@ -94,27 +96,56 @@ test("修正案の無い指摘（矛盾）の［提案へ］で、提案パネ�
       const frame = await openEpisode(page, EPISODE, "零時を指していた");
       await placeCaretAfter(frame, "終電を逃した");
 
-      const memo = await openMemoPanel(page, 'button[data-act="handOver"]');
+      const memo = await openMemoPanel(page, 'button[data-act="reveal"]');
       await clearNotifications(page);
-      // 修正案が無いので［直す］は出ない
+      // 修正案が無いので［直す］は出ない。［提案へ］はもう無い（作者の裁定 2026-10-04）
       expect(await countIn(memo, 'button[data-act="fix"]')).toBe(0);
-      expect(await proposalPanelFrame(page), "提案パネルが先に開いています").toBeUndefined();
+      expect(await countIn(memo, 'button[data-act="handOver"]')).toBe(0);
+      // 矛盾には［AIに相談］を出さない（出すのは修正案の無い推敲だけ）
+      expect(await countIn(memo, 'button[data-act="consult"]')).toBe(0);
 
-      await memo.locator('button[data-act="handOver"]').first().click();
+      await memo.locator('button[data-act="reveal"]').first().click();
 
-      // ── 提案パネルが開き、その指摘が並ぶ ──
-      let proposals: Frame | undefined;
+      // ── 原稿エディターのカーソルが、その行（3行目）の頭へ来る（行の場所を押したときと同じ道）──
       await waitUntil(
         async () => {
-          proposals = await proposalPanelFrame(page);
+          for (const candidate of await manuscriptFrames(page)) {
+            const caret = await caretPosition(candidate).catch(() => undefined);
+            if (caret?.lineText.includes("零時を指していた") && caret.column === 0) return true;
+          }
+          return false;
+        },
+        "［本文へ］で原稿のカーソルが指摘の行の頭へ動く",
+        15_000
+      );
+
+      // ── 2枚目を作らず、提案パネルも開かず、本文は変わらない ──
+      await holdsFor(
+        async () =>
+          (await fileText(session)) === TEXT &&
+          (await proposalPanelFrame(page)) === undefined &&
+          (await editorGroupTabs(page)).flat().filter((name) => name === EPISODE).length === 1 &&
+          (await manuscriptFrames(page)).length === 1,
+        "［本文へ］のあと、本文が変わらず・提案パネルが開かず・原稿が1枚のままであること",
+        3_000
+      );
+      // 置き場に「採った」も残らない（直し方は作者が決める）
+      expect(await decisions(session, sample)).toEqual([]);
+      expect(await dialogText(page), "思いがけず確認の窓が出ています").toBeUndefined();
+
+      // ── 上の［提案パネル］で提案パネルが開き、その指摘が並ぶ（提案パネルへ移る口は1つだけ）──
+      expect(await countIn(memo, "#openProposals")).toBe(1);
+      await memo.locator("#openProposals").click();
+      await waitUntil(
+        async () => {
+          const proposals = await proposalPanelFrame(page);
           if (!proposals) return false;
           const shown = await proposals.evaluate(() => document.body.innerText);
           return shown.includes("終電の時刻を二十三時");
         },
-        "提案パネルに矛盾の指摘が並ぶ",
+        "［提案パネル］で提案パネルが開き、矛盾の指摘が並ぶ",
         15_000
       );
-      // ── 前に出ている（どこかの列で、前のタブが提案パネル）──
       await waitUntil(
         // タブの題は件数つき（「提案（1）」）なので頭で見る
         async () => (await activeTabNames(page)).some((name) => name.startsWith("提案")),
@@ -123,13 +154,7 @@ test("修正案の無い指摘（矛盾）の［提案へ］で、提案パネ�
       ).catch(async (error: unknown) => {
         throw new Error(`${String(error)}（前のタブ：${JSON.stringify(await activeTabNames(page))}）`);
       });
-
-      // 本文は変わらず、置き場に「採った」も残らない（直し方は作者が決める）
-      await holdsFor(async () => (await fileText(session)) === TEXT, "［提案へ］のあとも本文が変わらない", 2_000);
-      expect(await decisions(session, sample)).toEqual([]);
-      expect(await dialogText(page), "思いがけず確認の窓が出ています").toBeUndefined();
-      // 原稿のタブは1枚のまま
-      expect((await editorGroupTabs(page)).flat().filter((name) => name === EPISODE).length).toBe(1);
+      expect(await fileText(session)).toBe(TEXT);
     },
     OPEN_PROPOSALS_LAUNCH
   );

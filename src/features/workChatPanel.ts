@@ -3622,6 +3622,50 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   }
 
   /**
+   * 外の画面から、作者の問いとして相談を送る（校正・メモパネルの［AIに相談］。
+   * 作者の要望 2026-10-04。設計書6.96.5）。
+   *
+   * **作者が入力欄から送ったときと同じ道を通す**（`ask`）。使うAIは相談の割当、
+   * 繋がるかの確認・有料の確認・材料の集め方・会話の履歴も同じ。迂回しない。
+   * 画面には作者の発言として積み、答えを待つ状態にする（もう片方の画面から
+   * 送られたときの `asked` と同じ出し方）。
+   *
+   * **断るとき**：相談パネルを開けない／答えを待っている途中／対話式プロット
+   * 作成の途中（問いが問答の答えとして読まれてしまう）。どれも理由を知らせて送らない。
+   *
+   * @returns 送ったか
+   */
+  async askFromOutside(question: string): Promise<boolean> {
+    if (!(await this.ensureChatVisible())) {
+      void vscode.window.showInformationMessage(
+        "相談パネルを開けませんでした。左の「AIに相談」を開いてから、もう一度押してください。"
+      );
+      return false;
+    }
+    if (this.tail.pending) {
+      void vscode.window.showInformationMessage(
+        "相談パネルがいま別の問いに答えています。答えが出てから、もう一度押してください。"
+      );
+      return false;
+    }
+    if (this.plotDialogue) {
+      void vscode.window.showInformationMessage(
+        "相談パネルは対話式プロット作成の途中です。「最初から」を押してから、もう一度押してください。"
+      );
+      return false;
+    }
+    this.postAll({ type: "asked", question });
+    const pending = { question };
+    this.tail = { pending };
+    try {
+      await this.ask(question);
+    } finally {
+      if (this.tail.pending === pending) this.tail.pending = undefined;
+    }
+    return true;
+  }
+
+  /**
    * AIの独り言を差し込む（設計書6.21）。
    *
    * **作者が聞いていない発言である。** 会話の履歴（`history`）には積まない。

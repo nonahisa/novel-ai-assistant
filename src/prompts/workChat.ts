@@ -109,7 +109,53 @@ import { closeTruncatedJson } from "../core/truncatedResponse";
 //       目次が付いていた。`guideSelect.ts`）。②長い各話あらすじは先頭2,000字で
 //       切らず、問いに出る話数・語に近い話を選んで同じ字数に収める（219話の作品で
 //       第16話までしか届いていなかった。`chatFileRequest.ts`）
-export const WORK_CHAT_VERSION = "3.24";
+// 3.25: 校正・メモパネルの［AIに相談］から送る依頼文（`buildFindingAdviceQuestion`）を
+//       足した（作者の要望 2026-10-04「AIからの助言も欲しいです」）。修正案の無い推敲の
+//       指摘について、その一文と指摘の中身を添えて助言を頼む。システム指示は変えて
+//       いないが、この口から送る本文はここで組むので版を上げる
+export const WORK_CHAT_VERSION = "3.25";
+
+/** ［AIに相談］の依頼文に入れる一文・指摘の長さの上限（長い合本の行で膨らませない） */
+export const FINDING_ADVICE_QUOTE_MAX_CHARS = 300;
+
+/**
+ * 校正・メモパネルの［AIに相談］から相談パネルへ送る依頼文（P-21。作者の要望
+ * 2026-10-04「AIからの助言も欲しいです」）。
+ *
+ * **作者が打った問いと同じ扱いで送る**（会話の履歴に積み、相談のシステム指示・
+ * 材料・課金の確認をそのまま通す）。だから依頼の決まりはこの文の中に書く。
+ *
+ * 頼み方は原稿箱の［Claude に聞く］（設計書6.115）にそろえる：
+ * - 作者の文体を尊重し、直すかどうかの判断材料を短く示す
+ * - 書き換えた本文の全体は作らない
+ * - 決めるのは作者
+ *
+ * **指示の言葉はそのまま返ってくる前提で書く**（CLAUDE.md の失敗3）——ここに
+ * 書くのは作者が読んでもそのまま通じる頼み方だけにし、型や記号の指定はしない。
+ */
+export function buildFindingAdviceQuestion(input: {
+  /** 「第3話　12行目」のような場所 */
+  place: string;
+  /** 指摘された本文の一文 */
+  quote: string;
+  /** 指摘の中身（「視点：…」など） */
+  finding: string;
+}): string {
+  const clip = (text: string): string => {
+    const flat = text.replace(/\s*\n\s*/g, " ").trim();
+    return flat.length > FINDING_ADVICE_QUOTE_MAX_CHARS
+      ? `${flat.slice(0, FINDING_ADVICE_QUOTE_MAX_CHARS)}…`
+      : flat;
+  };
+  return [
+    `${input.place}の一文に、推敲の指摘がありました。どう直すとよいか、助言をください。`,
+    `【本文の一文】${clip(input.quote)}`,
+    `【指摘】${clip(input.finding)}`,
+    "私の文体を尊重して、直すかどうかの判断材料を短く示してください（見出しや表は使わず、5行ほどで）。",
+    "書き換えた本文の全体は作らないでください。言い回しの例を挙げるなら、その箇所だけを短く。",
+    "直すかどうか、どう直すかは私が決めます。",
+  ].join("\n");
+}
 
 /**
  * 送るときの温度。相談は考えを広げる場なので、抽出よりは揺らす。

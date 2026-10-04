@@ -111,7 +111,6 @@ import {
 // 数日残してある指摘を、開いたときに提案パネルへ戻す（設計書6.96.4）
 import {
   applyFindingFromMemo,
-  handOverFinding,
   primeAppliedFindings,
   primeSavedFindings,
   undoFindingFromMemo,
@@ -265,6 +264,8 @@ import { generatePlot } from "./features/generatePlot";
 import { openPlotMode, refreshPlotMode } from "./features/plotModePanel";
 import { syncPlotCharacters } from "./features/plotCharacterSync";
 import { WORK_CHAT_VIEW_ID, WorkChatPanel } from "./features/workChatPanel";
+// 校正・メモパネルの［AIに相談］の依頼文（P-21。設計書6.96.5）
+import { buildFindingAdviceQuestion } from "./prompts/workChat";
 // 押すべき項目をサイドバーで光らせる（設計書6.104）
 import { createActionSpotlight } from "./features/actionSpotlight";
 import { ChatterService } from "./features/chatterService";
@@ -1703,18 +1704,8 @@ export async function activate(
       if (from) panel.setChapterContext(chapterOfPath(from.filePath));
       await panel.showRecord(kind, id);
     },
-    openChat: async (document, range) => {
-      // 相談パネルは普通のエディタから本文を受け取る。
-      // 同じ文書を横に開いてから渡す（開かないと、前に見ていた
-      // 別の作品について答えることになる）
-      const editor = await vscode.window.showTextDocument(document, {
-        viewColumn: vscode.ViewColumn.Beside,
-        preserveFocus: false,
-        selection: range,
-      });
-      workChatPanel.trackEditor(editor);
-      await vscode.commands.executeCommand(`${WORK_CHAT_VIEW_ID}.focus`);
-    },
+    // 「AI相談（選択範囲）」。校正・メモパネルの［AIに相談］も同じ関数を通る
+    openChat: (document, range) => openChatWithRange(document, range),
     // 下段の字数（作者の指示、2026-08-29）。**走査は一覧のキャッシュを借りる**
     workStats: (work) => treeProvider.getStats(work),
     // 改行コードの案内（設計書5.4.2）も、走査は一覧の結果を借りる
@@ -2276,22 +2267,62 @@ export async function activate(
    * 飛び先は1本の経路だけ（`revealLocation.ts`）。原稿エディタで書いて
    * いればその画面のまま示し、素のエディタなら素のまま開く。
    */
+  /**
+   * 本文を、その範囲を選んだ状態で横に開き、相談パネルへ渡す（「AI相談（選択範囲）」）。
+   *
+   * 相談パネルは普通のエディタから本文を受け取る。同じ文書を横に開いてから
+   * 渡す（開かないと、前に見ていた別の作品について答えることになる）。
+   * 原稿エディターの右クリックと、校正・メモパネルの［AIに相談］が通る
+   * （入口2つ・実体1つ）。**関数の宣言にしてある**——原稿エディターの繋ぎは
+   * これより上で組むので、`const` だと名前が先に要る
+   */
+  async function openChatWithRange(
+    document: vscode.TextDocument,
+    range: vscode.Range | undefined
+  ): Promise<void> {
+    const editor = await vscode.window.showTextDocument(document, {
+      viewColumn: vscode.ViewColumn.Beside,
+      preserveFocus: false,
+      selection: range,
+    });
+    workChatPanel.trackEditor(editor);
+    await vscode.commands.executeCommand(`${WORK_CHAT_VIEW_ID}.focus`);
+  }
+
   const sceneMemoDeps: SceneMemoDeps = {
     revealInManuscript: (filePath: string, line: number) =>
       manuscriptProvider.revealLine(filePath, line),
     /*
-      ［提案へ］——修正案の無いAIの指摘を**種類ごとの道**（提案パネル）へ渡す
-      （設計書6.96.5）。組み立ては `features/primeFindings.ts` を通す——写しを
-      作ると、戻し方が片方だけ直る日が来る。
-
-      **渡したら提案パネルを前へ出す。** 静かに置くだけだと、押しても何も
-      起きなかったようにしか見えない（提案パネルは右の列にあり、ほかのタブの
-      後ろに隠れていると見えない）。
+      上の帯の［提案パネル］（設計書6.96.5。作者の裁定 2026-10-04）。行ごとの
+      ［提案へ］はやめ、修正案の無い指摘の行は［本文へ］で原稿のその行へ飛ぶ。
+      提案パネルにしか無い操作（矛盾の再チェック・伏線として登録・まとめて適用）
+      へ移る口として、ここだけ残す。指摘は置き場から提案パネルにも並ぶので、
+      行を渡し直さない。作者が押したので、フォーカスごと移す
     */
-    handOverFinding: async (work, finding) => {
-      if (!handOverFinding(work, proposalPanel, finding)) return false;
-      proposalPanel.reveal();
-      return true;
+    openProposals: () => proposalPanel.reveal(),
+    /*
+      ［AIに相談］——修正案の無い推敲の指摘について、相談パネルで助言を頼む
+      （作者の要望 2026-10-04）。**「AI相談（選択範囲）」と同じ道**：その行を
+      選んだ状態で本文を横に開いて相談パネルへ渡し、作者の問いとして依頼文を送る。
+      使うAI・課金の確認は相談と同じ（`WorkChatPanel.askFromOutside` → `ask`）
+    */
+    consultFinding: async (_work, finding) => {
+      const document = await vscode.workspace.openTextDocument(
+        path.toUri(finding.filePath)
+      );
+      const lineIndex = Math.min(
+        Math.max(finding.line - 1, 0),
+        Math.max(document.lineCount - 1, 0)
+      );
+      await openChatWithRange(document, document.lineAt(lineIndex).range);
+      const place = `${path.basename(finding.filePath)}の${finding.line}行目`;
+      await workChatPanel.askFromOutside(
+        buildFindingAdviceQuestion({
+          place,
+          quote: finding.original,
+          finding: finding.message,
+        })
+      );
     },
     /*
       ［直す］——修正案のある指摘を1手で本文へ当てる（作者の裁定 2026-10-03）。

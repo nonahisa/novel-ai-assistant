@@ -89,6 +89,10 @@ import {
  * `writeTextFilePreservingFormat`**（ハッシュ照合つき）。
  * `atomicWriteFile` を直に呼ぶ道は作らない（規則1・6.40.6）。
  *
+ * 修正案の無い指摘の行は［本文へ］で原稿のその行へ飛ぶ（作者の裁定 2026-10-04。
+ * 以前の［提案へ］はやめ、提案パネルへ移る口は上の帯の［提案パネル］1つにした）。
+ * 修正案の無い推敲の指摘には［AIに相談］も出す（相談パネルで助言を頼む）。
+ *
  * **AIの指摘を本文へ当てる処理は、この画面には書かない**（6.96.5）。
  * 修正案のある指摘の［直す］は1手で本文へ当たるが（作者の裁定、2026-10-03）、
  * 当てるのは提案パネルの［適用］と同じ関数である（`deps.applyFinding`）。
@@ -116,18 +120,28 @@ export interface SceneMemoDeps {
    */
   revealInManuscript?: RevealInManuscript;
   /**
-   * 修正案の無いAIの指摘（矛盾・逸脱など）を、**種類ごとの道**（提案パネル）へ
-   * 渡す口（設計書6.96.5）。画面のボタンは［提案へ］。
+   * 提案パネルを開く口（上の帯の［提案パネル］。設計書6.96.5）。
    *
-   * 直し方は作者が決めるので、ここでは本文に触らない。
+   * 行ごとの［提案へ］はやめた（作者の裁定 2026-10-04「提案へ、というのも
+   * おかしい」）。修正案の無い指摘の行は［本文へ］で原稿のその行へ飛ぶ。
+   * 矛盾の再チェック・伏線として登録・まとめて適用など、提案パネルにしか無い
+   * 操作へ移る口を、パネルの上に1つだけ残す。指摘は置き場から提案パネルにも
+   * 並ぶので、渡し直さなくてよい。
    *
-   * **渡されなければ［提案へ］を出さない。** 押しても何も起きない口を
-   * 作らない（この作品の決まり）。
+   * **渡されなければ出さない**（押しても何も起きない口を作らない）。
    */
-  handOverFinding?: (
-    work: WorkEntry,
-    finding: PlacedFinding
-  ) => Promise<boolean> | boolean;
+  openProposals?: () => void | Promise<void>;
+  /**
+   * 修正案の無い推敲の指摘について、AIに助言を頼む口（画面のボタンは
+   * ［AIに相談］。作者の要望 2026-10-04「AIからの助言も欲しいです」）。
+   *
+   * **「AI相談（選択範囲）」と同じ道で相談パネルを開き**、その一文と指摘の
+   * 中身を添えて助言を頼む。使うAI・課金の確認・繋がるかの確認は相談と同じ
+   * （迂回しない）。答えは相談パネルに出るだけで、本文にも置き場にも入らない。
+   *
+   * **渡されなければ出さない。**
+   */
+  consultFinding?: (work: WorkEntry, finding: PlacedFinding) => Promise<void>;
   /**
    * 修正案のあるAIの指摘を、1手で本文へ当てる口（画面のボタンは［直す］。
    * 作者の裁定 2026-10-03「［直す］1手で本文が直る」）。
@@ -135,7 +149,7 @@ export interface SceneMemoDeps {
    * **当てるのは提案パネルの［適用］と同じ関数**（`primeFindings.applyFindingFromMemo`）。
    * 本文への適用をここへ書き直すと、検算・校閲ロック・記録が片方だけ直る日が来る。
    *
-   * 渡されなければ、修正案のある指摘も［提案へ］で渡す（これまでの形）。
+   * 渡されなければ、修正案のある指摘も［本文へ］（その行へ飛ぶだけ）になる。
    */
   applyFinding?: (
     work: WorkEntry,
@@ -443,8 +457,10 @@ type PanelMessage =
   | { type: "done"; filePath: string; line: number; raw: string }
   /** 修正案のあるAIの指摘を、提案パネルの［適用］と同じ道で本文へ当てる（6.96.5） */
   | { type: "fix"; findingId: string }
-  /** 修正案の無いAIの指摘を、種類ごとの道（提案パネル）へ渡す（設計書6.96.5） */
-  | { type: "handOver"; findingId: string }
+  /** 修正案の無い推敲の指摘について、相談パネルでAIに助言を頼む（設計書6.96.5） */
+  | { type: "consult"; findingId: string }
+  /** 上の帯の［提案パネル］ */
+  | { type: "openProposals" }
   /** 帯に出ている直近の1手（［直す］か［済み］）を戻す */
   | { type: "undoFix" }
   /** AIの指摘を退ける。**追記で残す**だけで、指摘の行は書き換えない */
@@ -727,8 +743,11 @@ class SceneMemoPanel {
         case "fix":
           await this.fix(message.findingId);
           return;
-        case "handOver":
-          await this.handOver(message.findingId);
+        case "consult":
+          await this.consult(message.findingId);
+          return;
+        case "openProposals":
+          await this.deps.openProposals?.();
           return;
         case "undoFix":
           // 名前は［直す］の帯のころのまま（画面の部品を同じにしたため）。
@@ -888,9 +907,10 @@ class SceneMemoPanel {
     const finding = this.findings.find((item) => item.id === findingId);
     if (!finding) return;
     const applyFinding = this.deps.applyFinding;
-    // 当てる口が無い・当てられない種類は、これまでどおり提案パネルへ渡す
+    // 当てる口が無い・当てられない種類は、本文のその行へ飛ぶだけにする
+    // （［本文へ］と同じ。直し方は作者が決める）
     if (!applyFinding || !findingAppliesDirectly(finding)) {
-      await this.handOver(findingId);
+      await this.reveal(finding.filePath, finding.line);
       return;
     }
 
@@ -1019,27 +1039,16 @@ class SceneMemoPanel {
   }
 
   /**
-   * ［提案へ］——修正案の無い指摘を、**種類ごとの道**へ渡す（設計書6.96.5）。
+   * ［AIに相談］——修正案の無い推敲の指摘について、相談パネルで助言を頼む
+   * （作者の要望 2026-10-04。設計書6.96.5）。
    *
-   * **ここでは本文へ1文字も書かない。** 直し方は作者が決める種類なので、
-   * 提案パネルへ「いまの位置に直した1件」を手渡すだけである。位置は
-   * **保存してある `hintLine` ではなく、いまの行**を渡す（6.96.3）。
-   *
-   * 「採った」の記録は、**本文へ当てた側が残す**。ここで先に書くと、
-   * 作者が提案パネルで見送っても「採った」ことになる。
+   * **本文にも置き場にも書かない。** 助言を読んで直すかどうかを決めるのは
+   * 作者である。位置は**いまの行**を渡す（6.96.3）。
    */
-  private async handOver(findingId: string): Promise<void> {
+  private async consult(findingId: string): Promise<void> {
     const finding = this.findings.find((item) => item.id === findingId);
-    if (!finding) return;
-    const handOverFinding = this.deps.handOverFinding;
-    if (!handOverFinding) return;
-
-    const accepted = await handOverFinding(this.work, finding);
-    if (accepted) return;
-    void vscode.window.showWarningMessage(
-      "この指摘を提案の一覧へ渡せませんでした。" +
-        "もう一度、検知をやり直してください。"
-    );
+    if (!finding || !this.deps.consultFinding) return;
+    await this.deps.consultFinding(this.work, finding);
   }
 
   /**
@@ -1212,6 +1221,8 @@ class SceneMemoPanel {
         hasCurrent: currentKey !== null,
         // 書き出すのは付箋だけなので、指摘しか出ていないときは押せない
         hasMemosToExport: rows.some((row) => row.kind === "memo"),
+        // 上の帯の［提案パネル］。開く口が渡されていなければ出さない
+        canOpenProposals: this.deps.openProposals !== undefined,
         onlyCurrent: this.onlyCurrent,
         tag: this.tag,
         tags: this.tagChoices(byTag),
@@ -1319,10 +1330,12 @@ class SceneMemoPanel {
       raw: "",
       chapterLabel: this.labelAt(finding.filePath).label,
       title: this.labelAt(finding.filePath).title,
-      // 修正案があれば［直す］（1手で当てる）、無ければ［提案へ］（6.96.5）。
-      // **口が無ければ出さない**（押しても何も起きない口を作らない）。
+      // 修正案があれば［直す］（1手で当てる）、無ければ［本文へ］（6.96.5）。
       // 見送りはこの画面だけで完結するので、常に出る
       fixAction: this.fixActionOf(finding),
+      // 修正案の無い推敲の指摘には［AIに相談］も出す（作者の要望 2026-10-04）。
+      // **口が無ければ出さない**（押しても何も起きない口を作らない）
+      canConsult: this.canConsult(finding),
       section,
     };
   }
@@ -1331,13 +1344,26 @@ class SceneMemoPanel {
    * 指摘の行に出す押し口（設計書6.96.5）。
    *
    * - `"apply"`：［直す］。修正案があり、当てる口が渡されているとき
-   * - `"handOver"`：［提案へ］。修正案が無い（または当てる口が無い）とき
-   * - `""`：どちらの口も無い
+   * - `"reveal"`：［本文へ］。修正案が無い（または当てる口が無い）とき。
+   *   行の場所を押したときと同じ道（`revealTextLocation`）で原稿のその行へ飛ぶ。
+   *   作者の裁定 2026-10-04——以前は［提案へ］（提案パネルへ渡す）だった
    */
-  private fixActionOf(finding: PlacedFinding): "apply" | "handOver" | "" {
+  private fixActionOf(finding: PlacedFinding): "apply" | "reveal" {
     if (this.deps.applyFinding && findingAppliesDirectly(finding)) return "apply";
-    if (this.deps.handOverFinding) return "handOver";
-    return "";
+    return "reveal";
+  }
+
+  /**
+   * ［AIに相談］を出すか。**修正案の無い推敲の指摘だけ**（作者の要望
+   * 2026-10-04）。修正案のある指摘は［直す］で済み、矛盾・逸脱は直し方の
+   * 前に「設定と本文のどちらが正しいか」を作者が決める種類なので出さない。
+   */
+  private canConsult(finding: PlacedFinding): boolean {
+    return (
+      this.deps.consultFinding !== undefined &&
+      finding.category === "proofread" &&
+      this.fixActionOf(finding) !== "apply"
+    );
   }
 
   /**
