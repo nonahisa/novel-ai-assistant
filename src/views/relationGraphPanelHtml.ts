@@ -408,17 +408,40 @@ el.forward.addEventListener("click", function () { post("forward"); });
   いるのは拡張機能側で、押せるかどうかも向こうが返す（canGoBack /
   canGoForward）。
 
-  **mouseup だけで扱う。** Chromium は同じ押下で auxclick も出すので、
-  両方に付けると1回押しただけで2つぶん動く。
+  **押した時点（mousedown）で動かし、離したとき（mouseup・auxclick）は既定を
+  止めるだけにする**（2026-10-04 に改めた。作者の実機確認「マウスの戻るボタンで
+  反応が欲しいです」——0.45.0 から mouseup で受けていたが、作者の画面では
+  反応しなかった）。VS Code 本体の横のボタン（エディターの行き来）が同じ形で、
+  押した時点で動かし、離したときは止めるだけにしている。動かすのを1か所に
+  絞るのは、同じ押下で mousedown・mouseup・auxclick が全部来るため——
+  2か所で動かすと1回押しただけで2つぶん動く。
+
+  既定を止めるのは、WebView のページが履歴で戻って図が白くならないようにするため。
+  止めたうえで外へ伝えない（stopPropagation）——VS Code の WebView の器が拾って
+  本体の「戻る」（エディターの行き来）まで動かすと、相関図のタブから離れてしまう。
+  受けるのはこの画面（相関図のパネルの中）だけなので、ほかの画面の戻るは邪魔しない。
 */
-document.addEventListener("mouseup", function (event) {
-  if (event.button !== 3 && event.button !== 4) return;
+function isSideButton(event) {
+  return event.button === 3 || event.button === 4;
+}
+function stopSideButton(event) {
   event.preventDefault();
+  event.stopPropagation();
+}
+document.addEventListener("mousedown", function (event) {
+  if (!isSideButton(event)) return;
+  stopSideButton(event);
   // 行き先が無いときは送らない（拡張機能側でも弾くが、往復を増やさない）
   const button = event.button === 3 ? el.back : el.forward;
   if (button.disabled) return;
   post(event.button === 3 ? "back" : "forward");
-});
+}, true);
+document.addEventListener("mouseup", function (event) {
+  if (isSideButton(event)) stopSideButton(event);
+}, true);
+document.addEventListener("auxclick", function (event) {
+  if (isSideButton(event)) stopSideButton(event);
+}, true);
 el.ring2.addEventListener("click", function () { post("toggleSecondRing"); });
 el.openRecord.addEventListener("click", function () { post("openRecord"); });
 el.exportSvg.addEventListener("click", function () { exportSvg(); });
@@ -696,7 +719,8 @@ function renderGraph() {
   // 辺のラベル。全体図では線が混むので、個人中心図でだけ文字にする。
   // 言葉は向きごとに1つだけの短い形で、置き場と一緒に拡張機能側
   // （core/relationGraphLayout.ts の layoutEgo）が決めて渡す——重ならない
-  // 位置を選ぶには文字の幅が要るため。全部は右の「つながっている人」で読む
+  // 位置を選ぶには文字の幅が要るため。全部は右の「つながっている人」で読む。
+  // 置き場の無い線（相手の多い人）と中身の無い線は、配置が文字を渡さない
   if (data.mode === "ego") {
     for (const position of layout.edges) {
       if (!position.text) continue;
@@ -937,6 +961,14 @@ function renderSide() {
       "→は" + centerName + "から相手へ、←は相手から" + centerName + "へ。『』は呼び方です。" +
         "図の線の上には向きごとに1つだけ書きます（多いときは「ほか2」のように数だけ）。全部はこの一覧で読めます。"
     ));
+    // 置き場が無くて線の文字を省いたとき（相手の多い人）。省いたことを黙らない
+    const omitted = Number(data.layout.omittedEdgeLabels) || 0;
+    if (omitted > 0) {
+      el.side.appendChild(sideRow(
+        "図が混んでいるため、" + omitted + "本の線は文字を省いています（重ねると読めないため）。" +
+          "拡大しても文字は増えません。この一覧か、線を押して読んでください。"
+      ));
+    }
     const neighbours = neighboursOf(data.centerId);
     if (neighbours.length === 0) {
       el.side.appendChild(sideRow("関係も呼称も見つかりません。"));
@@ -1223,7 +1255,7 @@ el.canvas.addEventListener(
   点や線を押す操作を壊さないよう、少し（DRAG_THRESHOLD）動くまでは何も
   しない。動いたら「引いた」とし、離したあとに来る click を握りつぶす
   ——動かしただけで中心の人物が替わると、寄せた所から別の図へ飛ばされる。
-  マウスの戻る・進むボタン（3・4）は既存の mouseup が受けるので、左ボタン
+  マウスの戻る・進むボタン（3・4）は上の mousedown が受けるので、左ボタン
   だけを見る。
 */
 let drag = null;

@@ -324,6 +324,74 @@ describe("個人中心図の線の文字", () => {
     }
   });
 
+  /** 見積もった字幅での、置いた文字の箱（配置と同じ見積もり） */
+  function labelBoxes(layout: GraphLayout) {
+    return layout.edges
+      .filter((label) => label.text)
+      .map((label) => {
+        const width = estimateTextWidth(label.text ?? "", EDGE_LABEL_FONT_SIZE);
+        return {
+          left: label.x - width / 2,
+          right: label.x + width / 2,
+          top: label.y - EDGE_LABEL_FONT_SIZE / 2,
+          bottom: label.y + EDGE_LABEL_FONT_SIZE / 2,
+        };
+      });
+  }
+
+  /*
+    相手30人（作者の実機確認、2026-10-04、教科書チートの「イント」）。
+    相手6人では重ならなかったが、30人前後では置き場が足りず、以前は
+    「重なりのいちばん小さい位置」へ無理に置いていたので何十個も重なった。
+    置き場の無い線には文字を出さない（全部は右の「つながっている人」で読む）。
+    **何も置かなければ重ならないのは当たり前**なので、置いた数の下限も見る。
+  */
+  test("相手30人では、置ける線にだけ文字を置き、置いた文字どうしは重ならない", () => {
+    const layout = layoutEgo(
+      egoGraph(buildRelationGraph(crowd(30)), "char_000", 1),
+      { width: 840, height: 840 }
+    );
+    const boxes = labelBoxes(layout);
+    expect(boxes.length).toBeGreaterThanOrEqual(8);
+    expect(boxes.length).toBeLessThan(30);
+    expect(layout.omittedEdgeLabels).toBe(30 - boxes.length);
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i];
+        const b = boxes[j];
+        const overlap =
+          a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+        expect(overlap, `${i} と ${j} が重なる`).toBe(false);
+      }
+    }
+  });
+
+  test("置いた文字は人物の円に重ならない", () => {
+    const layout = layoutEgo(
+      egoGraph(buildRelationGraph(crowd(30)), "char_000", 1),
+      { width: 840, height: 840 }
+    );
+    for (const box of labelBoxes(layout)) {
+      for (const node of layout.nodes) {
+        const overlap =
+          box.left < node.x + node.r &&
+          node.x - node.r < box.right &&
+          box.top < node.y + node.r &&
+          node.y - node.r < box.bottom;
+        expect(overlap, `${node.id} の円に文字が重なる`).toBe(false);
+      }
+    }
+  });
+
+  test("相手が少なければ、全部の線に文字を置き、省いた数は0", () => {
+    const layout = layoutEgo(
+      egoGraph(buildRelationGraph(crowd(6)), "char_000", 1),
+      SIZE
+    );
+    expect(labelBoxes(layout)).toHaveLength(6);
+    expect(layout.omittedEdgeLabels).toBe(0);
+  });
+
   test("全体図の線には文字を置かない", () => {
     const layout = layoutCircle(buildRelationGraph(crowd(3)), {
       ...SIZE,

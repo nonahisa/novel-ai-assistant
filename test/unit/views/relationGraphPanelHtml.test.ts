@@ -464,6 +464,16 @@ describe("呼び合いを対で見せる", () => {
     expect(side).toContain("全部はこの一覧で読めます");
   });
 
+  /**
+   * 置き場の無い線の文字は省く（2026-10-04、相手30人前後で重なって読めなかった）。
+   * 省いたことを黙らない——数を「つながっている人」の説明に添える
+   */
+  it("線の文字を省いたときは、その数を「つながっている人」に添える", () => {
+    const side = script.slice(script.indexOf("function renderSide"), script.indexOf("function sideRow"));
+    expect(side).toContain("data.layout.omittedEdgeLabels");
+    expect(side).toContain("文字を省いています");
+  });
+
   it("「この図について」に、呼び合いの見方がある", () => {
     const side = script.slice(script.indexOf("function renderSide"), script.indexOf("function sideRow"));
     expect(side).toContain("呼び合い");
@@ -489,17 +499,35 @@ describe("戻る・進む", () => {
     expect(script).toContain("el.forward.disabled = !data.canGoForward;");
   });
 
-  it("マウスの戻る・進むボタンを、履歴に結ぶ", () => {
-    const at = script.indexOf('document.addEventListener("mouseup"');
+  /**
+   * 押した時点（mousedown）で動かす（2026-10-04、作者の実機確認「マウスの戻るボタンで
+   * 反応が欲しいです」。0.45.0 の mouseup では作者の画面で反応しなかった）。
+   * VS Code 本体の横のボタンと同じ形。本物の押下で動くことは
+   * e2e/relationGraph.test.ts「相関図の上でマウスの戻るボタンを押すと…」が見る
+   */
+  it("マウスの戻る・進むボタンを、押した時点で履歴に結ぶ", () => {
+    const at = script.indexOf('document.addEventListener("mousedown"');
     expect(at).toBeGreaterThan(0);
     const handler = script.slice(at, at + 500);
-    expect(handler).toContain("event.button !== 3 && event.button !== 4");
-    expect(handler).toContain("event.preventDefault()");
+    expect(handler).toContain("isSideButton(event)");
+    expect(handler).toContain("stopSideButton(event)");
     expect(handler).toContain('post(event.button === 3 ? "back" : "forward")');
+    expect(script).toContain("return event.button === 3 || event.button === 4;");
+    expect(script).toContain("event.preventDefault();");
+    expect(script).toContain("event.stopPropagation();");
   });
 
-  /** 同じ押下で両方来るので、片方だけで扱う（1回押して2つ動かさない） */
-  it("auxclick には付けない", () => {
-    expect(script).not.toContain('addEventListener("auxclick"');
+  /** 同じ押下で mouseup・auxclick も来るので、そちらは既定を止めるだけ（1回押して2つ動かさない） */
+  it("離したとき（mouseup・auxclick）は既定を止めるだけで、用件を送らない", () => {
+    for (const type of ["mouseup", "auxclick"]) {
+      const at = script.indexOf(`document.addEventListener("${type}"`);
+      expect(at, type).toBeGreaterThan(0);
+      const end = script.indexOf("}, true);", at);
+      const handler = script.slice(at, end);
+      expect(handler, type).toContain("stopSideButton(event)");
+      expect(handler, type).not.toContain("post(");
+    }
+    // 用件を送るのは mousedown の1か所だけ
+    expect(script.split('post(event.button === 3 ? "back" : "forward")')).toHaveLength(2);
   });
 });
