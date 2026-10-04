@@ -112,6 +112,7 @@ import {
 import {
   applyFindingFromMemo,
   handOverFinding,
+  primeAppliedFindings,
   primeSavedFindings,
   undoFindingFromMemo,
 } from "./features/primeFindings";
@@ -2377,6 +2378,17 @@ export async function activate(
         } catch (error) {
           useLogFile(work.folderPath);
           logFailure("残っている指摘の読み込みに失敗", {
+            作品: work.title,
+            詳細: error instanceof Error ? error.message : String(error),
+          });
+        }
+        try {
+          // **当てたものも読む**（作者の裁定 2026-10-04）。出先で当てた分も、
+          // 起こし直す前に当てた分も、折り畳んだ欄から［戻す］で戻せるように
+          await primeAppliedFindings(work, panel);
+        } catch (error) {
+          useLogFile(work.folderPath);
+          logFailure("当てた指摘の読み込みに失敗", {
             作品: work.title,
             詳細: error instanceof Error ? error.message : String(error),
           });

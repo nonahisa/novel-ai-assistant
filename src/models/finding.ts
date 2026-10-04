@@ -200,6 +200,28 @@ export interface FindingDecision {
   note: string;
 }
 
+/**
+ * 原稿箱の取り込み（MCP `outbox.import`。設計書6.115）が判断の行に残す覚え書き。
+ *
+ * **ここに1つだけ置く。** 取り込む側（`mcp/tools/outbox.ts`）と、提案パネルの
+ * 「当てたもの」（`core/appliedFindings.ts`。誰がどこで当てたかを覚え書きから読む）が
+ * 同じ文字列を見る。写しを置くと、片方の言い回しを直した日に「当てたもの」から
+ * 黙って消える。`outbox.ts` は `fs` を静的に読むので、画面の側からは import できない
+ * （ブラウザ版の束が起動時に落ちる。実装ルール7）——それでモデルへ置いた。
+ */
+export const OUTBOX_DECISION_NOTES = {
+  /** ［直す］——AIの修正案を出先で当てた */
+  fix: "出先で直した",
+  /** ［済み］——本文には触れていない */
+  done: "出先で済みにした",
+  /** ［採らない］ */
+  reject: "出先で採らなかった",
+  /** ［自分で直す］の元のAIの指摘（本文に入ったのは作者の文で、AIの修正案ではない） */
+  editOriginal: "出先で自分で直した",
+  /** ［自分で直す］で足した、作者の文の置き換えの行 */
+  authorEdit: "出先で作者が自分の文に置き換えた",
+} as const;
+
 export type FindingLine =
   | ({ kind: "finding" } & Finding)
   | ({ kind: "decision" } & FindingDecision);
