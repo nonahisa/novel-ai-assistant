@@ -11,6 +11,8 @@ import {
   memoBadgeText,
   memoColorVars,
   memoLineRanges,
+  memoLineRemoval,
+  memoLineRestorePoint,
   memoTagClass,
   memoTagKind,
   nearestMemo,
@@ -18,6 +20,7 @@ import {
   parseMemos,
   prevMemo,
   removeMemoLine,
+  restoreMemoLine,
   sortMemos,
   stripMemoLines,
   type SceneMemo,
@@ -408,6 +411,75 @@ describe("済みにする（6.40.4）", () => {
     expect(removeMemoLine("あ\r\n// x\r\nい\r\n", 2, "// x")).toBe(
       "あ\r\nい\r\n"
     );
+  });
+});
+
+/**
+ * ［済み］の帯の［戻す］（6.40.4。作者の裁定 2026-10-04）。
+ * 消したあとの本文へ、消した行を元の位置に差し込み直す。
+ */
+describe("済みにしたメモを戻す（6.40.4）", () => {
+  /** 消してから戻すと、消す前と1文字も違わない */
+  function roundTrip(text: string, line: number, raw: string): string | null {
+    const removed = memoLineRemoval(text, line, raw);
+    const after = removeMemoLine(text, line, raw);
+    if (!removed || after === null) throw new Error("消せませんでした");
+    return restoreMemoLine(after, removed);
+  }
+
+  it("消した行が元の位置へ戻る", () => {
+    const text = "あ\n// TODO ここ\nい\n";
+    expect(roundTrip(text, 2, "// TODO ここ")).toBe(text);
+  });
+
+  it("CRLFの本文でも、改行ごと元のとおりに戻る", () => {
+    const text = "あ\r\n// x\r\nい\r\n";
+    expect(roundTrip(text, 2, "// x")).toBe(text);
+  });
+
+  it("先頭の行・改行の無い最終行・本文がメモ1行だけ、でも戻る", () => {
+    expect(roundTrip("// 先頭\nあ\n", 1, "// 先頭")).toBe("// 先頭\nあ\n");
+    expect(roundTrip("あ\n// 末尾", 2, "// 末尾")).toBe("あ\n// 末尾");
+    expect(roundTrip("あ\n// 末尾\n", 2, "// 末尾")).toBe("あ\n// 末尾\n");
+    expect(roundTrip("// だけ", 1, "// だけ")).toBe("// だけ");
+  });
+
+  /**
+   * **元の位置が確かめられなければ断る**（実装ルール1）。消したあとに
+   * 上へ1行足されていると、行番号の位置は別の段落の中になっている。
+   */
+  it("消したあとに上へ行が足されていれば、戻さない", () => {
+    const removed = memoLineRemoval("あ\n// x\nい\n", 2, "// x");
+    if (!removed) throw new Error("控えが作れませんでした");
+    expect(restoreMemoLine("足した\nあ\nい\n", removed)).toBeNull();
+  });
+
+  it("隣の行が書き換わっていれば、戻さない", () => {
+    const removed = memoLineRemoval("あ\n// x\nい\n", 2, "// x");
+    if (!removed) throw new Error("控えが作れませんでした");
+    expect(restoreMemoLine("あ\nいい\n", removed)).toBeNull();
+    expect(restoreMemoLine("ああ\nい\n", removed)).toBeNull();
+  });
+
+  it("もう戻っている（行がそこに居る）なら、二重に差し込まない", () => {
+    const text = "あ\n// x\nい\n";
+    const removed = memoLineRemoval(text, 2, "// x");
+    if (!removed) throw new Error("控えが作れませんでした");
+    expect(restoreMemoLine(text, removed)).toBeNull();
+  });
+
+  it("消せない行からは控えを作らない（removeMemoLine と同じ条件）", () => {
+    expect(memoLineRemoval("あ\n// 別\nい\n", 2, "// x")).toBeNull();
+    expect(memoLineRemoval("あ\nい\n", 2, "い")).toBeNull();
+  });
+
+  it("差し込む位置は、消したあとの本文の文字の位置で返す（開いている文書へ差し込む道）", () => {
+    const removed = memoLineRemoval("あい\n// x\nう\n", 2, "// x");
+    if (!removed) throw new Error("控えが作れませんでした");
+    expect(memoLineRestorePoint("あい\nう\n", removed)).toEqual({
+      offset: 3,
+      insert: "// x\n",
+    });
   });
 });
 

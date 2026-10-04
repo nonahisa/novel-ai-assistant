@@ -47,7 +47,9 @@ import {
 // **判断のあと、シーンメモの横の一覧にも効かせる**（設計書6.96.5）。
 // あちらは本文の保存でしか読み直さないので、知らせないと片方だけ残る
 import { refreshSceneMemoFindings, SCENE_MEMO_VIEW_TYPE } from "./sceneMemoPanel";
-import type { FindingProducer, FindingStatus } from "../models/finding";
+import type { Finding, FindingProducer, FindingStatus } from "../models/finding";
+// 「当てたもの」の行を、押した時点の本文で探し直す（作者の裁定 2026-10-04）
+import { locateAppliedFinding } from "../core/appliedFindings";
 // 作者が採った・退けたを、指摘を出したモデルごとに数える（設計書6.49.7）
 import {
   recordVerdictSubject,
@@ -479,6 +481,45 @@ export type FindingFixOutcome =
   | { ok: false; reason?: string };
 
 /**
+ * 「当てたもの」の1件（作者の裁定 2026-10-04。設計書6.96.5・6.115）。
+ *
+ * 置き場で「採った」になっている指摘のうち、いまの本文に当てた形で残っているもの。
+ * 組み立ては `features/primeFindings.ts` の `primeAppliedFindings`。
+ *
+ * **未処理の一覧（`items`）には混ぜない。** 混ぜると、タブの件数・「済」の印・
+ * ［一覧を空にする］の出し方が変わる。［戻す］を押したときだけ、その分類の一覧へ
+ * 「適用済み」の行として置き、既存の［戻す］（`undoIssue`）を通す。
+ */
+export interface AppliedFindingRow {
+  /** 置き場の1件（位置を押した時点で探し直すために持つ） */
+  finding: Finding;
+  /** 戻すときに通す分類（タブの名前） */
+  panelCategory: string;
+  /** 誰がどこで当てたか（「出先で当てた」など。覚え書きで分かる範囲） */
+  appliedBy: string;
+  /** 当てた時刻（判断の行の `time`） */
+  appliedTime: string;
+  /** 一覧へ置くときの行。`status` は "applied"、`line` は読み込んだときの位置 */
+  item: ProposalViewItem;
+  /** 戻せなかった理由。**押して断られたときだけ**入る */
+  note?: string;
+  /** 戻している最中か（二度押しを止め、押した手応えを返す） */
+  busy?: boolean;
+}
+
+/** 「当てたもの」の1件を、画面へ送る形 */
+interface AppliedViewRow {
+  findingId: string;
+  fileName: string;
+  line: number;
+  target: string;
+  suggestion: string;
+  appliedBy: string;
+  note?: string;
+  busy?: boolean;
+}
+
+/**
  * 再チェックが触るところだけを取り出した形（P-23）。
  *
  * **誤字脱字の指摘と矛盾では、持っている項目が違う**（あちらは置き換え、
@@ -655,6 +696,13 @@ type IssuesMessage = {
    * 下段の狭い画面を取るだけになる。
    */
   works: WorkSummary[];
+  /**
+   * 「当てたもの」（作者の裁定 2026-10-04）。未処理の一覧の下の折り畳んだ欄に出す。
+   * **どの分類のタブを見ていても同じもの**（その作品の分）を出す。空なら欄ごと隠す
+   */
+  applied: AppliedViewRow[];
+  /** 欄の見出し（「当てたもの（直近3日）」） */
+  appliedTitle: string;
 };
 
 /**
@@ -694,6 +742,8 @@ type IncomingMessage =
    */
   | { type: "apply"; id: string; dropKeys?: string[] }
   | { type: "undo"; id: string }
+  /** 「当てたもの」の［戻す］（作者の裁定 2026-10-04）。置き場での番号で指す */
+  | { type: "undoApplied"; findingId: string }
   | { type: "dismiss"; id: string }
   | { type: "keepWord"; id: string }
   | { type: "openSettings"; id: string }
@@ -849,6 +899,16 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * 指摘は控えに残り続ける（2026-08-27）。
    */
   private buckets = new Map<string, WorkBuckets>();
+  /**
+   * 「当てたもの」（作者の裁定 2026-10-04）。作品ごと。**`buckets` とは別に持つ**——
+   * 未処理の一覧の件数やタブを変えないため。開くたびに置き場から読み直す
+   * （`primeAppliedFindings`）。`days` は欄の見出しに出す日数（0 なら無期限）
+   */
+  private applied: Array<{
+    work: WorkEntry;
+    rows: AppliedFindingRow[];
+    days: number;
+  }> = [];
   /**
    * 有料AIの確認を取ったモデル（P-23）。
    *
@@ -1324,14 +1384,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     wanted: "applied" | "pending",
     run: (row: ProposalViewItem) => Promise<void>
   ): Promise<FindingFixOutcome> {
-    this.stashCurrent();
-    const previous = this.work
-      ? { work: this.work, category: this.category }
-      : undefined;
-    this.workBucketsOf(work);
-    this.work = work;
-    this.activate(category);
-    try {
+    return this.inCategory(work, category, async () => {
       const row = this.items.find((item) =>
         identitiesOfRow(work.folderPath, category, item).includes(findingId)
       );
@@ -1351,6 +1404,30 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       return row.statusDetail
         ? { ok: false, reason: row.statusDetail }
         : { ok: false };
+    });
+  }
+
+  /**
+   * その作品・その分類を一度出して `body` を走らせ、終わったら作者が見ていた
+   * 作品と分類へ戻す（`runOnFindingRow` と「当てたもの」の［戻す］が通る）。
+   *
+   * **`applyIssue`・`undoIssue` は「いま出している作品と分類」を前提にしている**
+   * （記録の鍵を `this.category` から作る）ので、分類を合わせてから呼ぶ。
+   */
+  private async inCategory<T>(
+    work: WorkEntry,
+    category: string,
+    body: () => Promise<T>
+  ): Promise<T> {
+    this.stashCurrent();
+    const previous = this.work
+      ? { work: this.work, category: this.category }
+      : undefined;
+    this.workBucketsOf(work);
+    this.work = work;
+    this.activate(category);
+    try {
+      return await body();
     } finally {
       this.stashCurrent();
       if (
@@ -1361,6 +1438,221 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         this.work = previous.work;
         this.activate(previous.category);
       }
+    }
+  }
+
+  /**
+   * 「当てたもの」を差し替える（作者の裁定 2026-10-04。`primeAppliedFindings` が呼ぶ）。
+   *
+   * **未処理の一覧には触らない。** 見出しの件数・タブ・印はそのまま
+   * （折り畳んだ欄の中身だけが変わる）。
+   *
+   * @param days 欄の見出しに出す日数（指摘の期限の設定と同じ。0 なら無期限）
+   */
+  setAppliedFindings(
+    work: WorkEntry,
+    rows: AppliedFindingRow[],
+    days: number
+  ): void {
+    const entry = this.appliedEntryOf(work);
+    if (entry) {
+      entry.work = work;
+      entry.rows = rows;
+      entry.days = days;
+    } else {
+      this.applied.push({ work, rows, days });
+    }
+    this.postItems();
+  }
+
+  /** その作品の「当てたもの」（同じ作品かは作品フォルダーで見る。`keyOf` と同じ理由） */
+  private appliedEntryOf(
+    work: WorkEntry
+  ): { work: WorkEntry; rows: AppliedFindingRow[]; days: number } | undefined {
+    return this.applied.find((entry) =>
+      path.isSameFolder(entry.work.folderPath, work.folderPath)
+    );
+  }
+
+  /**
+   * いま「当てたもの」の欄に出す作品。表示中の作品があればその作品、
+   * 何も出していなければ「当てたもの」を持つ最初の作品
+   * （未処理が1件も無くても、当てたものは戻せるようにする）。
+   */
+  private appliedShownEntry():
+    | { work: WorkEntry; rows: AppliedFindingRow[]; days: number }
+    | undefined {
+    if (this.work) return this.appliedEntryOf(this.work);
+    return this.applied.find((entry) => entry.rows.length > 0);
+  }
+
+  /**
+   * 欄に並べる行。**この起動のうちに一覧で当てた行（「適用済み・［戻す］」で
+   * 一覧に出ているもの）は外す**——同じものに［戻す］が2つ並ぶと、どちらを
+   * 押せばよいか迷う。一覧の行のほうが当てた位置（`appliedAt`）を持っていて確かである。
+   */
+  private appliedRowsToShow(entry: {
+    work: WorkEntry;
+    rows: AppliedFindingRow[];
+  }): AppliedFindingRow[] {
+    const shownAsApplied = new Set<string>();
+    const workBuckets = this.buckets.get(this.keyOf(entry.work));
+    const isCurrent =
+      this.work !== undefined && this.keyOf(this.work) === this.keyOf(entry.work);
+    const lists: Array<[string, ProposalViewItem[]]> = [];
+    for (const [category, bucket] of workBuckets?.categories ?? []) {
+      lists.push([category, bucket.items]);
+    }
+    // 表示中の分は手元の配列も見る（控えへ書き戻す前の瞬間がある。`countByCategory` と同じ）
+    if (isCurrent) lists.push([this.category, this.items]);
+    for (const [category, items] of lists) {
+      for (const item of items) {
+        if (item.status !== "applied") continue;
+        for (const id of identitiesOfRow(entry.work.folderPath, category, item)) {
+          shownAsApplied.add(id);
+        }
+      }
+    }
+    return entry.rows.filter((row) => !shownAsApplied.has(row.finding.id));
+  }
+
+  /**
+   * 「当てたもの」の［戻す］（作者の裁定 2026-10-04）。
+   *
+   * **既存の［戻す］（`undoIssue`）を通す。** その分類の一覧へ「適用済み」の行として
+   * 置いてから呼ぶので、校閲ロックの確認・`locateAppliedSuggestion` での位置決め・
+   * `writeTextFilePreservingFormat` での書き戻し・置き場への「戻した」の行・
+   * 採った数の取り消し・編集履歴が、一覧の［戻す］と同じに残る。
+   *
+   * - 押した時点の本文で行を探し直す（読み込んでから押すまでに書き足されていることがある）
+   * - **戻せたら**、行は一覧に「未処理」で残り（既存の［戻す］と同じく、もう一度当てられる）、
+   *   この欄からは外す
+   * - **戻せなかったら、何もしない**（実装ルール1）。一覧へ置いた行は引き上げ、理由を
+   *   この欄の行に出す
+   */
+  private async undoAppliedFinding(findingId: string): Promise<void> {
+    const entry = this.appliedShownEntry();
+    const row = entry?.rows.find((candidate) => candidate.finding.id === findingId);
+    if (!entry || !row || row.busy) return;
+    const work = entry.work;
+    row.busy = true;
+    row.note = undefined;
+    this.postItems();
+    try {
+      let text: string;
+      try {
+        text = (await readTextFile(row.item.filePath)).text;
+      } catch {
+        row.note = "本文を読み込めませんでした。";
+        return;
+      }
+      const line = locateAppliedFinding(row.finding, text);
+      if (line === undefined) {
+        row.note = describeUndoFailure("missing");
+        return;
+      }
+      const outcome = await this.undoStoredRow(work, row, line);
+      if (outcome.ok) {
+        entry.rows = entry.rows.filter((candidate) => candidate !== row);
+        return;
+      }
+      // 理由が無いのは、作者が校閲ロックの確認で止めたとき。言い直さない
+      row.note = outcome.reason;
+    } finally {
+      row.busy = false;
+      this.postItems();
+    }
+  }
+
+  /**
+   * 「当てたもの」の1件を、その分類の一覧へ「適用済み」で置いて `undoIssue` を通す。
+   *
+   * **同じ指摘の行が一覧に既にあれば、その行を使う**（二重に並べない）。
+   * 戻せなかったときは、置いた行を引き上げる（既にあった行は元の状態へ戻す）。
+   * 置くために作った分類・作品の段も、空なら片づける——押して断られただけで
+   * タブや作品の切り替え口が増えると、何かが届いたように見える。
+   */
+  private async undoStoredRow(
+    work: WorkEntry,
+    row: AppliedFindingRow,
+    line: number
+  ): Promise<FindingFixOutcome> {
+    const category = row.panelCategory;
+    const hadWork = this.buckets.has(this.keyOf(work));
+    const hadCategory =
+      this.buckets.get(this.keyOf(work))?.categories.has(category) ?? false;
+
+    const outcome = await this.inCategory(work, category, async () => {
+      const existing = this.items.find((item) =>
+        identitiesOfRow(work.folderPath, category, item).includes(row.finding.id)
+      );
+      let target: ProposalViewItem;
+      let takeBack: () => void;
+      if (existing) {
+        const before = {
+          status: existing.status,
+          line: existing.line,
+          statusDetail: existing.statusDetail,
+          appliedAt: existing.appliedAt,
+        };
+        existing.status = "applied";
+        existing.line = line;
+        existing.statusDetail = undefined;
+        target = existing;
+        takeBack = () => Object.assign(existing, before);
+      } else {
+        target = { ...row.item, line, status: "applied", appliedAt: undefined };
+        this.items.push(target);
+        takeBack = () => {
+          const at = this.items.indexOf(target);
+          if (at >= 0) this.items.splice(at, 1);
+        };
+      }
+      await this.undoIssue(target.id);
+      if (target.status === "pending") return { ok: true } as FindingFixOutcome;
+      const reason = target.statusDetail;
+      takeBack();
+      return (reason ? { ok: false, reason } : { ok: false }) as FindingFixOutcome;
+    });
+
+    if (!outcome.ok) this.dropEmptyBuckets(work, category, hadWork, hadCategory);
+    return outcome;
+  }
+
+  /** 置くために作った分類・作品の段が空なら片づける（`undoStoredRow` の後始末） */
+  private dropEmptyBuckets(
+    work: WorkEntry,
+    category: string,
+    hadWork: boolean,
+    hadCategory: boolean
+  ): void {
+    const key = this.keyOf(work);
+    const entry = this.buckets.get(key);
+    if (!entry) return;
+    const bucket = entry.categories.get(category);
+    const empty = (b: CategoryBucket) =>
+      b.items.length === 0 &&
+      b.contradictions.length === 0 &&
+      b.recordUpdates.length === 0;
+    if (!hadCategory && bucket && empty(bucket)) entry.categories.delete(category);
+    if (hadWork || entry.categories.size > 0) {
+      // いま出している分類を消したなら、残っている分類へ移る
+      if (this.work && this.keyOf(this.work) === key && !entry.categories.has(this.category)) {
+        const next = [...entry.categories.keys()][0];
+        if (next) this.activate(next);
+      }
+      return;
+    }
+    this.buckets.delete(key);
+    if (this.work && this.keyOf(this.work) === key) {
+      // 作者は何も出していなかった。開いたときの空の画面へ戻す
+      this.work = undefined;
+      this.items = [];
+      this.contradictions = [];
+      this.recordUpdates = [];
+      this.applyRecordUpdate = undefined;
+      this.dismissRecordUpdate = undefined;
+      this.registerForeshadow = undefined;
     }
   }
 
@@ -2129,8 +2421,29 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       categories: summaries.length > 1 ? summaries : [],
       // 作品の切り替え口も同じ（1作品なら、これまでと同じ見た目のまま）
       works: works.length > 1 ? works : [],
+      ...this.appliedForView(),
     };
     for (const webview of this.webviews()) void webview.postMessage(message);
+  }
+
+  /** 「当てたもの」の欄に送る中身（作者の裁定 2026-10-04） */
+  private appliedForView(): { applied: AppliedViewRow[]; appliedTitle: string } {
+    const entry = this.appliedShownEntry();
+    if (!entry) return { applied: [], appliedTitle: "" };
+    return {
+      applied: this.appliedRowsToShow(entry).map((row) => ({
+        findingId: row.finding.id,
+        fileName: row.item.fileName,
+        line: row.item.line,
+        target: row.item.target,
+        suggestion: row.item.suggestion,
+        appliedBy: row.appliedBy,
+        note: row.note,
+        busy: row.busy,
+      })),
+      appliedTitle:
+        entry.days > 0 ? `当てたもの（直近${entry.days}日）` : "当てたもの（期限なし）",
+    };
   }
 
   /**
@@ -2336,6 +2649,9 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         return;
       case "undo":
         await this.undoIssue(message.id);
+        return;
+      case "undoApplied":
+        await this.undoAppliedFinding(message.findingId);
         return;
       case "keepWord":
         await this.keepWord(message.id);

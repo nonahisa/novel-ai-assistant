@@ -504,3 +504,101 @@ export function removeMemoLine(
   }
   return out;
 }
+
+/**
+ * ［済み］で消したメモの行を、あとで戻すための控え（6.40.4。作者の裁定
+ * 2026-10-04「［済み］の直後に戻す帯を出す」）。
+ *
+ * **上下の隣の行を一緒に覚える。** 戻すときに「元の位置がいまも同じ所に
+ * あるか」を、行番号だけでなく隣の行の中身で確かめるため。行番号だけで
+ * 差し込むと、その間に作者が上へ1行足していたら、メモが別の段落へ入る。
+ */
+export interface RemovedMemoLine {
+  /** 消した行（1始まり） */
+  line: number;
+  /** 消した行の中身（改行を除く） */
+  raw: string;
+  /** 消した行の改行。最終行で改行が無かったなら空文字 */
+  eol: string;
+  /** 上の行の中身。先頭の行だったなら null */
+  before: string | null;
+  /** 下の行の中身。改行の無い最終行だったなら null */
+  after: string | null;
+}
+
+/**
+ * 消す前の本文から、戻すための控えを作る（消すのは `removeMemoLine`）。
+ *
+ * 消せない行（読み込んだときと違う・メモでない）なら `null`——
+ * `removeMemoLine` と同じ条件で断る。
+ *
+ * @param line 1始まり
+ */
+export function memoLineRemoval(
+  text: string,
+  line: number,
+  expectedRaw: string
+): RemovedMemoLine | null {
+  const lines = splitLines(text);
+  const index = line - 1;
+  const target = lines[index];
+  if (!target || target.body !== expectedRaw) return null;
+  if (!isMemoLine(target.body)) return null;
+  return {
+    line,
+    raw: target.body,
+    eol: target.eol,
+    before: index > 0 ? lines[index - 1].body : null,
+    // 改行の無い最終行は、下に行が無い（`splitLines` の最後の要素そのもの）
+    after: index + 1 < lines.length ? lines[index + 1].body : null,
+  };
+}
+
+/**
+ * 消したメモの行を、どこへ差し込めば元に戻るか（文字の位置と、差し込む字）。
+ *
+ * **元の位置が確かめられなければ `null`**（実装ルール1）。上下の隣の行が
+ * 消したときと同じ位置に居ることを確かめる。違えば、その間に本文が
+ * 書き換わっているので、当て推量で差し込まない。
+ *
+ * 開いている文書へ `WorkspaceEdit` で差し込むときも、ディスクの本文を
+ * 書き直すときも、ここで決めた位置を使う（2つの経路で判定を分けない）。
+ */
+export function memoLineRestorePoint(
+  text: string,
+  removed: RemovedMemoLine
+): { offset: number; insert: string } | null {
+  const lines = splitLines(text);
+  const index = removed.line - 1;
+  // 消したあとは、元の行の位置に「下の行」（または最後の空の行）が居る
+  if (index < 0 || index >= lines.length) return null;
+
+  if (removed.before === null) {
+    if (index !== 0) return null;
+  } else if (index === 0 || lines[index - 1].body !== removed.before) {
+    return null;
+  }
+
+  const here = lines[index];
+  if (removed.after === null) {
+    // 改行の無い最終行だった：消したあとは、空の最終行がそこに残る
+    if (index !== lines.length - 1 || here.body !== "") return null;
+  } else if (here.body !== removed.after) {
+    return null;
+  }
+
+  return { offset: here.start, insert: removed.raw + removed.eol };
+}
+
+/**
+ * 消したメモの行を本文へ戻す（ディスクの本文を書き直す経路で使う）。
+ * 元の位置が確かめられなければ `null`。
+ */
+export function restoreMemoLine(
+  text: string,
+  removed: RemovedMemoLine
+): string | null {
+  const point = memoLineRestorePoint(text, removed);
+  if (!point) return null;
+  return text.slice(0, point.offset) + point.insert + text.slice(point.offset);
+}

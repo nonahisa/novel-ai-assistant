@@ -92,8 +92,8 @@ input[type="search"] { flex: 1 1 120px; min-width: 90px; }
   border-bottom: 1px solid var(--vscode-panel-border);
 }
 #notice:empty { display: none; }
-/* ［直す］で当てた直近の1件と［戻す］（設計書6.96.5）。当てた指摘は一覧から
-   消えるので、戻す口は一覧の外のここに置く */
+/* ［直す］で当てた・［済み］で消した直近の1手と［戻す］（設計書6.96.5・6.40.4）。
+   当てた指摘も済ませたメモも一覧から消えるので、戻す口は一覧の外のここに置く */
 #fixed {
   display: flex;
   align-items: center;
@@ -408,9 +408,11 @@ function render() {
   el.title.textContent = data.title;
   el.counts.textContent = data.countsLabel;
   el.notice.textContent = data.notice;
-  // ［直す］で当てた直近の1件。無ければ帯ごと隠す
+  // 戻せる直近の1手（［直す］か［済み］）。無ければ帯ごと隠す。
+  // ボタンの説明は手の種類で変わるので、拡張機能から受け取る
   el.fixed.hidden = !data.fixed;
   el.fixedText.textContent = data.fixed ? data.fixed.text : "";
+  if (data.fixed && data.fixed.undoTitle) el.undoFix.title = data.fixed.undoTitle;
   el.onlyCurrent.classList.toggle("on", data.onlyCurrent === true);
   el.onlyCurrent.disabled = !data.hasCurrent;
   el.prev.disabled = data.totalCount === 0;

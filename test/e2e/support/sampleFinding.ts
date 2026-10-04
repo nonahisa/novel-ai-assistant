@@ -5,7 +5,7 @@
  * `models/finding.ts`）で置く。提案パネルの［適用］の見張り（`proposalApply.test.ts`）と
  * 校正・メモパネルの［直す］の見張り（`memoFixOneStep.test.ts`）が同じ見本を使う。
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { findingId, type FindingCategory } from "../../../src/models/finding";
@@ -65,6 +65,27 @@ export async function writeSampleFinding(workFolder: string, sample: SampleFindi
   const folder = path.join(workFolder, ".aiwriter");
   await mkdir(folder, { recursive: true });
   await writeFile(path.join(folder, "findings.jsonl"), line + "\n", "utf8");
+}
+
+/**
+ * 見本の指摘に、判断の行を1行足す（`writeSampleFinding` のあとに呼ぶ）。
+ *
+ * 原稿箱の取り込み（`mcp/tools/outbox.ts`、設計書6.115）は、本文を直したあとで
+ * この形の行を足す。覚え書き（`note`）は `OUTBOX_DECISION_NOTES` の値を渡す。
+ */
+export async function appendSampleDecision(
+  workFolder: string,
+  sample: SampleFinding,
+  decision: { status: "accepted" | "dismissed" | "pending"; note: string }
+): Promise<void> {
+  const line = JSON.stringify({
+    kind: "decision",
+    findingId: sampleFindingId(sample),
+    time: new Date().toISOString(),
+    status: decision.status,
+    note: decision.note,
+  });
+  await appendFile(path.join(workFolder, ".aiwriter", "findings.jsonl"), line + "\n", "utf8");
 }
 
 /** 置き場（`.aiwriter/` の下の1行1件のファイル）の行。無ければ空 */

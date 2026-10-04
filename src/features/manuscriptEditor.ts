@@ -104,7 +104,13 @@ import { convertForPosting } from "../core/postingConvert";
 import { showPostingCopyNotice } from "./postingCopyNotice";
 // 開く列の決め方は素のエディタと1本にする（`editorColumn.ts`）
 import { columnForLocation } from "./editorColumn";
-import { MEMO_LINE_PREFIX, memoColorVars } from "../core/sceneMemo";
+import {
+  MEMO_LINE_PREFIX,
+  memoColorVars,
+  memoLineRemoval,
+  memoLineRestorePoint,
+  type RemovedMemoLine,
+} from "../core/sceneMemo";
 import { READ_ALOUD_MEMO_TEXT, buildReadingPlan } from "../core/readAloud";
 import { pickPostingTarget } from "./ruby";
 import { registeredPostingSites } from "./postingCopyRegistered";
@@ -1112,8 +1118,8 @@ async function pickReadAloudTarget(
 
 /** 「済みにする」がどう終わったか（呼んだ側が理由を出せるようにする） */
 export type MemoLineRemoval =
-  /** 消した */
-  | { kind: "removed" }
+  /** 消した。`removed` は帯の［戻す］で元へ差し込むための控え（6.40.4） */
+  | { kind: "removed"; removed: RemovedMemoLine }
   /** この原稿は原稿エディタで開いていない（呼んだ側がディスクを書く） */
   | { kind: "not_open" }
   /** 行が読み込んだときのものと違う（本文が変わっている） */
@@ -1144,6 +1150,9 @@ export async function removeMemoLineInOpenManuscript(
   const index = line - 1;
   if (index < 0 || index >= document.lineCount) return { kind: "changed" };
   if (document.lineAt(index).text !== expectedRaw) return { kind: "changed" };
+  // 戻すための控えは、**消す前の文書の字**から作る（改行も文書のものになる）
+  const removed = memoLineRemoval(document.getText(), line, expectedRaw);
+  if (!removed) return { kind: "changed" };
 
   const change = new vscode.WorkspaceEdit();
   // **行まるごと（改行を含めて）消す。** 本文だけを消すと空行が残り、
@@ -1155,7 +1164,49 @@ export async function removeMemoLineInOpenManuscript(
     );
     return { kind: "changed" };
   }
-  return { kind: "removed" };
+  return { kind: "removed", removed };
+}
+
+/** 帯の［戻す］がどう終わったか（呼んだ側が理由を出せるようにする） */
+export type MemoLineRestore =
+  /** 戻した */
+  | { kind: "restored" }
+  /** この原稿は原稿エディタで開いていない（呼んだ側がディスクを書く） */
+  | { kind: "not_open" }
+  /** 消したあとに本文が変わり、元の位置が確かめられない */
+  | { kind: "changed" };
+
+/**
+ * ［済み］で消したメモの行を、原稿エディタで開いている文書へ戻す
+ * （設計書6.40.4。作者の裁定 2026-10-04「［済み］の直後に戻す帯を出す」）。
+ *
+ * **消すときと同じく、文書へ `WorkspaceEdit` で差し込む。** 原稿エディタの
+ * 中の Ctrl+Z は画面の取り消しで、拡張機能の側から書き換えた［済み］の
+ * 記録を持たないので、戻す口はこちらに置く。
+ *
+ * 元の位置は `core/sceneMemo.ts` の `memoLineRestorePoint` が決める
+ * （ディスクを書き直す経路と同じ判定。上下の隣の行が変わっていれば断る）。
+ */
+export async function restoreMemoLineInOpenManuscript(
+  filePath: string,
+  removed: RemovedMemoLine
+): Promise<MemoLineRestore> {
+  const open = openManuscripts.get(manuscriptLedgerKey(filePath));
+  if (!open) return { kind: "not_open" };
+
+  const document = open.document;
+  const point = memoLineRestorePoint(document.getText(), removed);
+  if (!point) return { kind: "changed" };
+
+  const change = new vscode.WorkspaceEdit();
+  change.insert(document.uri, document.positionAt(point.offset), point.insert);
+  if (!(await vscode.workspace.applyEdit(change))) {
+    logLine(
+      `原稿エディタ：済みにしたメモの行を戻せませんでした（${filePath} ${removed.line}行目）。`
+    );
+    return { kind: "changed" };
+  }
+  return { kind: "restored" };
 }
 
 /**

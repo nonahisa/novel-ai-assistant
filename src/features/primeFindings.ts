@@ -13,7 +13,13 @@ import {
   findingRestoreOf,
 } from "../core/findingSource";
 import { FindingStore, findingsRetentionDays, visibleFindings } from "./findingStore";
+import {
+  APPLIED_BY_LABELS,
+  locateAppliedFinding,
+  recentAppliedFindings,
+} from "../core/appliedFindings";
 import type {
+  AppliedFindingRow,
   ContradictionViewItem,
   FindingFixOutcome,
   ProposalPanel,
@@ -96,6 +102,63 @@ export async function primeSavedFindings(
     restored += list.length;
   }
   return restored;
+}
+
+/**
+ * 開いたときに、置き場から「当てたもの」を読んで提案パネルの折り畳んだ欄へ渡す
+ * （作者の裁定 2026-10-04。設計書6.96.5・6.115）。
+ *
+ * **未処理の一覧には混ぜない。** 混ぜると、タブの件数・「済」の印・［一覧を空にする］
+ * の出し方まで変わる。並べる候補と位置の決め方は `core/appliedFindings.ts`、
+ * 戻す処理は提案パネルの既存の［戻す］（`undoIssue`）。
+ *
+ * **位置の分からないものは渡さない**（`primeSavedFindings` が消えた指摘を落とすのと
+ * 同じ）。当てたあとで作者が書き換えた行は、戻す先がもう無い。
+ *
+ * 日数は指摘の期限の設定（`novelai.findings.retentionDays`）に揃える。同じ置き場の
+ * 同じ「数日見せる」話なので、設定を2つに分けると片方だけ変えて食い違う。
+ *
+ * @returns 渡した件数
+ */
+export async function primeAppliedFindings(
+  work: WorkEntry,
+  panel: ProposalPanel
+): Promise<number> {
+  const days = findingsRetentionDays();
+  const candidates = recentAppliedFindings(
+    await new FindingStore(work).load(),
+    days
+  );
+  const { texts } = await readTexts(
+    work,
+    candidates.map((candidate) => candidate.finding)
+  );
+  const rows: AppliedFindingRow[] = [];
+  for (const candidate of candidates) {
+    const text = texts.get(candidate.finding.file);
+    // 読めない本文（移した・まだ同期されていない）は位置を確かめられないので出さない
+    if (text === undefined) continue;
+    const line = locateAppliedFinding(candidate.finding, text);
+    if (line === undefined) continue;
+    const filePath = findingFilePath(work.folderPath, candidate.finding.file);
+    rows.push({
+      finding: candidate.finding,
+      panelCategory: candidate.panelCategory,
+      appliedBy: APPLIED_BY_LABELS[candidate.appliedBy],
+      appliedTime: candidate.appliedTime,
+      item: {
+        ...toItem(
+          { ...candidate.finding, line },
+          filePath,
+          candidate.panelCategory
+        ),
+        // 当てたあとの形で持つ。［戻す］（`undoIssue`）は「適用済み」の行しか戻さない
+        status: "applied",
+      },
+    });
+  }
+  panel.setAppliedFindings(work, rows, days);
+  return rows.length;
 }
 
 /**

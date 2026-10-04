@@ -342,6 +342,32 @@ body.show-low .issue.low { display: flex; }
   border-left: 2px dashed var(--vscode-textLink-foreground);
   padding-left: 8px;
 }
+/*
+  当てたもの（作者の裁定 2026-10-04）。**未処理の一覧の下に、畳んで置く。**
+  開いて見るのは「戻したい」ときだけなので、普段は見出し1行ぶんしか取らない
+*/
+#appliedBox {
+  border-top: 1px solid var(--vscode-panel-border);
+  padding: 6px 10px;
+}
+#appliedBox summary {
+  cursor: pointer;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+.applied-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+.applied-row:last-child { border-bottom: none; }
+.applied-row .applied-head {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+}
+.applied-row .applied-fix { font-family: var(--vscode-editor-font-family, monospace); }
 </style>
 </head>
 <body>
@@ -375,6 +401,15 @@ body.show-low .issue.low { display: flex; }
 -->
 <div id="empty">まだ検知結果がありません。この分類の検知を実行すると、ここに指摘が並びます。</div>
 <div id="list"></div>
+<!--
+  当てたもの（作者の裁定 2026-10-04）。出先で当てた分も、パソコンで当てた分も、
+  ここの［戻す］で戻せる。**未処理の一覧の件数・見え方には入れない**（別の欄）。
+  無ければ欄ごと隠す（script が決める。属性の style は CSP に止められる）
+-->
+<details id="appliedBox">
+  <summary id="appliedTitle">当てたもの</summary>
+  <div id="appliedList"></div>
+</details>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
 const listEl = document.getElementById('list');
@@ -389,6 +424,48 @@ const tabsEl = document.getElementById('tabs');
 const worksEl = document.getElementById('works');
 const clearEl = document.getElementById('clear');
 const runningEl = document.getElementById('running');
+const appliedBoxEl = document.getElementById('appliedBox');
+const appliedTitleEl = document.getElementById('appliedTitle');
+const appliedListEl = document.getElementById('appliedList');
+// 最初は隠す（中身が届いてから出す）
+appliedBoxEl.style.display = 'none';
+
+/**
+ * 当てたもの（作者の裁定 2026-10-04）。
+ *
+ * **畳んだ・開いたは作者のまま残す。** 欄（details）は描き直さず、中身だけを
+ * 入れ替える——描き直すたびに閉じると、［戻す］を押した直後に欄が閉じる。
+ *
+ * ボタンは \`data-action\` を使わない。一覧の［戻す］（\`data-action="undo"\`）と
+ * 別の押し口で、送るのは置き場での番号（findingId）である。
+ */
+function renderApplied(rows, title) {
+  if (!rows || rows.length === 0) {
+    appliedBoxEl.style.display = 'none';
+    appliedListEl.innerHTML = '';
+    return;
+  }
+  appliedBoxEl.style.display = '';
+  appliedTitleEl.textContent = (title || '当てたもの') + '　' + rows.length + '件';
+  appliedListEl.innerHTML = rows.map(function (row) {
+    const disabled = row.busy ? ' disabled' : '';
+    return '<div class="applied-row">' +
+      '<div class="applied-head">' + escapeHtml(row.fileName) + ' ' + row.line + '行目　' +
+        escapeHtml(row.appliedBy) + '</div>' +
+      '<div class="applied-fix">' + escapeHtml(row.target) + ' → ' + escapeHtml(row.suggestion) + '</div>' +
+      (row.note ? '<div class="status-detail">' + escapeHtml(row.note) + '</div>' : '') +
+      '<div class="actions">' +
+        '<button class="secondary" data-applied-undo="' + escapeHtml(row.findingId) + '"' + disabled +
+          ' title="本文をこの直しの前へ戻します">' + (row.busy ? '戻しています…' : '戻す') + '</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+  appliedListEl.querySelectorAll('[data-applied-undo]').forEach(function (el) {
+    el.addEventListener('click', function () {
+      vscode.postMessage({ type: 'undoApplied', findingId: el.dataset.appliedUndo });
+    });
+  });
+}
 
 /**
  * 検知の進み具合（作者の報告、2026-08-29）。
@@ -1146,6 +1223,7 @@ window.addEventListener('message', (event) => {
     renderWorks(message.works);
     renderTabs(message.categories);
     render(message.workTitle, message.items);
+    renderApplied(message.applied, message.appliedTitle);
     // 描き直しが終わってから戻す（先に戻すと、描き直しで打ち消される）
     window.scrollTo(0, keepScroll ? scrollY : 0);
   }
