@@ -47,7 +47,16 @@ export {
   describeSyncBadge,
   describeSyncTooltip,
 } from "../core/gitSyncStatusText";
-import { describeSyncStatusBar, divergenceLine } from "../core/gitSyncStatusText";
+import {
+  alignToRepository,
+  describeSyncStatusBar,
+  divergenceLine,
+  isStaleRead,
+  isWarning,
+  rootKey,
+} from "../core/gitSyncStatusText";
+// 判定は core へ移した（2026-10-05）。ここから読んでいる所のために出し直す
+export { isWarning } from "../core/gitSyncStatusText";
 import { cancelItem } from "../views/dialogs";
 import {
   canRecordChanges,
@@ -320,6 +329,18 @@ export class GitSyncMonitor implements vscode.Disposable {
   private readonly refreshing = new Set<string>();
 
   /**
+   * 数え直しの通し番号と、受け取った読みの番号（設計書6.15.1。2026-10-05）。
+   *
+   * **始めた順に返るとは限らない。** 記録の途中で始まった読みが、記録の
+   * あとの読みより遅れて返ると、古い数が画面を上書きする。作品ごとと
+   * 置き場ごとの両方で見る——兄弟の作品の新しい読みが、置き場ぜんぶの数を
+   * すでに揃えているためである（`alignToRepository`）。
+   */
+  private readSequence = 0;
+  private readonly acceptedByWork = new Map<string, number>();
+  private readonly acceptedByRoot = new Map<string, number>();
+
+  /**
    * すべて同期のあいだ、ファイル更新の知らせをためる場所。
    *
    * **置き場ごとに出すと、11作品ぶん同じ問いが並ぶ。** ためて最後に1回出す
@@ -469,7 +490,13 @@ export class GitSyncMonitor implements vscode.Disposable {
     // 取り込みや送信の最中なら重ねず、もう一度待ち直す。
     // **この見張りはネットへ出ないし、知らせも出さない**——
     // 印が変わるだけなので、作者の操作を邪魔しない
-    if (works.some((work) => this.refreshing.has(work.id))) {
+    // **git を書き換える操作（記録・取り込み・送信）の最中も待ち直す**
+    // （2026-10-05）。途中の状態を数えても、操作の終わりに置き場ぜんぶを
+    // 数え直す（`refreshRoot`）ので無駄になるうえ、古い数が残る元になる
+    if (
+      this.operating > 0 ||
+      works.some((work) => this.refreshing.has(work.id))
+    ) {
       this.scheduleFolderRefresh(first.id);
       return;
     }
@@ -549,16 +576,57 @@ export class GitSyncMonitor implements vscode.Disposable {
     // 取り込みの最中に入れ替わるファイルでも起きるので、重ならないよう
     // 見張り側がこの印を見て待ち直す
     this.refreshing.add(work.id);
+    // 番号は**読み始める前に**取る。返ってきた順ではなく始めた順で新旧を決める
+    const sequence = ++this.readSequence;
     try {
-      return await this.runRefresh(work, options);
+      return await this.runRefresh(work, options, sequence);
     } finally {
       this.refreshing.delete(work.id);
     }
   }
 
-  private async runRefresh(
+  /**
+   * その作品と、同じ置き場の作品をみな数え直す（設計書6.15.1。2026-10-05）。
+   *
+   * **git を書き換える操作（記録・取り込み・送信・合流）の終わりと、
+   * 「状態を確認」はこれを使う。** 1作品だけ数え直すと、兄弟の作品の
+   * 「その作品のぶん」（一覧の印）が古いまま残る。置き場ぜんぶの数は
+   * `refresh` が兄弟へ写すので、ステータスバーは1作品の読みでも揃う。
+   *
+   * 押した作品だけ `options` どおり（取りに行く・知らせる）に読み、
+   * 兄弟は手元だけで読む（同じ置き場を二度取りに行かない）。
+   */
+  async refreshRoot(
     work: WorkEntry,
     options: { fetch: boolean; notify: boolean }
+  ): Promise<GitSyncStatus> {
+    const status = await this.refresh(work, options);
+    const key = this.refreshGroupKey(work);
+    for (const sibling of this.worksInRefreshGroup(key, work.id)) {
+      if (sibling.id === work.id) continue;
+      await this.refresh(sibling, { fetch: false, notify: false });
+    }
+    return this.statuses.get(work.id) ?? status;
+  }
+
+  /**
+   * git を書き換える操作のあいだ、見張りの数え直しと自動の送り直しを
+   * 控えさせる（`isOperating`）。取り込み・送信は自前で数えており、
+   * 「変更を記録」（`gitOnboarding.ts` の `recordChanges`）はこれで囲む。
+   */
+  async whileOperating<T>(operation: () => Promise<T>): Promise<T> {
+    this.operating += 1;
+    try {
+      return await operation();
+    } finally {
+      this.operating -= 1;
+    }
+  }
+
+  private async runRefresh(
+    work: WorkEntry,
+    options: { fetch: boolean; notify: boolean },
+    sequence: number
   ): Promise<GitSyncStatus> {
     // **取りに行く前に、取りに行ける作品かを確かめる。**
     // Gitを使わずに書いている作品でもfetchを試みていたため、
@@ -594,13 +662,45 @@ export class GitSyncMonitor implements vscode.Disposable {
     // 「分かれています」だけでは、身構えるべきか作者に分からない
     status = await this.withConflicts(status);
 
+    // **後から始めた読みが先に受け取られていれば、この読みは捨てる**
+    // （2026-10-05、作者の報告「未記録９がふえました」）。記録の途中の数が
+    // 記録のあとの数を上書きしないようにする
+    const key = "root" in status ? rootKey(status.root) : undefined;
+    if (
+      isStaleRead(this.acceptedByWork.get(work.id), sequence) ||
+      (key !== undefined && isStaleRead(this.acceptedByRoot.get(key), sequence))
+    ) {
+      return this.statuses.get(work.id) ?? status;
+    }
+    this.acceptedByWork.set(work.id, sequence);
+    if (key !== undefined) this.acceptedByRoot.set(key, sequence);
+
     this.statuses.set(work.id, status);
+    this.alignSiblings(work, status);
     this.updateStatusBar();
     this.changed.fire();
 
     await this.detectGitFileChanges(work, status);
     if (options.notify) await this.notifyIfBehind(work, status);
     return status;
+  }
+
+  /**
+   * 同じ置き場の兄弟の控えへ、置き場ぜんぶの数を写す（2026-10-05）。
+   *
+   * ステータスバー（`uniqueByRoot`）・押したときの候補（`listSyncTargets`）・
+   * 「送らずに閉じた」印（`summarizeUnsent`）は、どれも置き場ごとに
+   * **1作品の控えだけ**を見る。1作品だけ数え直して兄弟を古いまま残すと、
+   * 古い兄弟が代表になり「git status は0件なのに未記録 9」が出た。
+   * 写すのはここ1か所にして、見る側を1つずつ直さない。
+   */
+  private alignSiblings(work: WorkEntry, fresh: GitSyncStatus): void {
+    if (!("root" in fresh)) return;
+    for (const [id, old] of this.statuses) {
+      if (id === work.id) continue;
+      const aligned = alignToRepository(old, fresh);
+      if (aligned !== old) this.statuses.set(id, aligned);
+    }
   }
 
   /**
@@ -964,7 +1064,8 @@ export class GitSyncMonitor implements vscode.Disposable {
 
     if (result.ok) {
       this.notified.delete(work.id);
-      await this.refresh(work, { fetch: false, notify: false });
+      // 置き場ぜんぶを数え直す（兄弟の作品に古い数を残さない。2026-10-05）
+      await this.refreshRoot(work, { fetch: false, notify: false });
       vscode.window.showInformationMessage(
         `「${work.title}」に別の環境の変更を取り込みました。`
       );
@@ -1234,7 +1335,7 @@ ${reason}` : ""}`,
     }
 
     this.notified.delete(work.id);
-    await this.refresh(work, { fetch: false, notify: false });
+    await this.refreshRoot(work, { fetch: false, notify: false });
     useLogFile(work.folderPath);
     logStep(
       `同期の中で分岐を合わせた（${label}／取り込み ${result.incoming}件` +
@@ -1286,7 +1387,7 @@ ${reason}` : ""}`,
       push(work.folderPath, this.options.run)
     );
     if (result.ok) {
-      await this.refresh(work, { fetch: false, notify: false });
+      await this.refreshRoot(work, { fetch: false, notify: false });
       vscode.window.showInformationMessage(
         `「${work.title}」の変更を送信しました。`
       );
@@ -1365,23 +1466,6 @@ ${reason}`
       .sort((a, b) => b.folderPath.length - a.folderPath.length)
       .find((work) => path.isPathInside(work.folderPath, filePath));
   }
-}
-
-/**
- * 警告として出すべき状態か。
- *
- * **記録していない変更も数える**（設計書6.15.1。作者の指示、2026-09-21）。
- * 記録も送信もしていない原稿は、別の機械からは存在しないのと同じなので、
- * 「送っていないもの」として同じ扱いにする。
- */
-export function isWarning(status: GitSyncStatus): boolean {
-  if (status.kind !== "tracked") return false;
-  return (
-    status.behind > 0 ||
-    status.ahead > 0 ||
-    status.dirty > 0 ||
-    status.unmerged > 0
-  );
 }
 
 /**
@@ -1606,9 +1690,13 @@ export async function showGitSyncActions(
       "root" in status && status.root ? status.root : work.folderPath,
       monitor.knownWorks()
     );
-    if (await recordChanges(target)) {
-      await monitor.refresh(work, { fetch: false, notify: false });
-    }
+    // **記録のあいだは見張りの数え直しを待たせ、終わったら置き場ぜんぶを
+    // 数え直す**（作者の報告、2026-10-05「未記録９がふえました」）。
+    // 押した作品だけ数え直すと、同じ置き場の兄弟に古い数が残っていた。
+    // 記録しなかった（取りやめ・何も無かった）ときも数え直す——画面の数が
+    // 古いことに作者が気づいて押した場合があるため
+    await monitor.whileOperating(() => recordChanges(target));
+    await monitor.refreshRoot(work, { fetch: false, notify: false });
     return;
   }
   if (picked.action === "setup") {
@@ -1625,8 +1713,8 @@ export async function showGitSyncActions(
         ? status
         : await readSyncStatus(target.folderPath);
     // 1手進むごとに状態が変わるので、続けて次の一手を出す
-    if (await runSetupStep(target, scoped)) {
-      await monitor.refresh(work, { fetch: false, notify: false });
+    if (await monitor.whileOperating(() => runSetupStep(target, scoped))) {
+      await monitor.refreshRoot(work, { fetch: false, notify: false });
       await showGitSyncActions(monitor, work);
     }
     return;
@@ -1634,7 +1722,10 @@ export async function showGitSyncActions(
   if (picked.action === "pull") await monitor.pull(work);
   else if (picked.action === "push") await monitor.push(work);
   else if (picked.action === "refresh") {
-    await monitor.refresh(work, { fetch: true, notify: false });
+    // 作者が「数を確かめたい」と押す所なので、置き場ぜんぶを読み直す。
+    // 1作品だけでは、知らせは「同期が取れています」なのにステータスバーは
+    // 「未記録 9」のまま、という食い違いが出た（2026-10-05）
+    await monitor.refreshRoot(work, { fetch: true, notify: false });
     vscode.window.showInformationMessage(
       `${work.title}: ${describeStatus(
         monitor.statusFor(work.id) ?? status

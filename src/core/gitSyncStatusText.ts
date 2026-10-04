@@ -1,5 +1,6 @@
 import type { DivergenceConflicts, GitSyncStatus } from "./git";
 import { authoredConflictCount } from "./divergenceScan";
+import { folderKeyForComparison } from "./pathText";
 
 /**
  * 同期状態を、ツリーの右側に出す短い印にする（設計書5.5.1）。
@@ -148,6 +149,93 @@ export function describeSyncStatusBar(
 
   if (parts.length === 0) return undefined;
   return `$(git-branch) ${parts.join(" / ")}`;
+}
+
+/**
+ * 警告として出すべき状態か（`features/gitSync.ts` から移した。2026-10-05）。
+ *
+ * **記録していない変更も数える**（設計書6.15.1。作者の指示、2026-09-21）。
+ * 記録も送信もしていない原稿は、別の機械からは存在しないのと同じなので、
+ * 「送っていないもの」として同じ扱いにする。
+ */
+export function isWarning(status: GitSyncStatus): boolean {
+  if (status.kind !== "tracked") return false;
+  return (
+    status.behind > 0 ||
+    status.ahead > 0 ||
+    status.dirty > 0 ||
+    status.unmerged > 0
+  );
+}
+
+/**
+ * 同じ置き場の兄弟の作品の控えを、新しく読んだ置き場ぜんぶの数へ揃える
+ * （設計書6.15.1。作者の報告、2026-10-05「未記録９がふえました」）。
+ *
+ * `dirty`・`ahead`・`behind`・`unmerged` は**置き場ぜんぶの数**なのに、
+ * 控えは作品ごとに持っている。1作品だけ数え直すと、兄弟の作品には古い数が
+ * 残る。ステータスバー・押したときの候補・「送らずに閉じた」印はどれも
+ * 置き場ごとに**1作品の控えだけ**を見るので、古い兄弟が代表になると
+ * 「git status は0件なのに未記録 9」が出る。
+ *
+ * **置き場ぜんぶの項目は新しい読みをそのまま使う**（どの作品から読んでも
+ * 同じ値になる）。**作品のぶん（`…Here`）は作品ごとなので写さない**——
+ * ただし置き場ぜんぶを超えることはありえないので、そこで頭を押さえる
+ * （置き場ぜんぶが0なら、どの作品も0）。正しい値は、続けて兄弟を
+ * 数え直したとき（`refreshRoot`）に入る。
+ *
+ * `sibling` が `fresh` と別の置き場なら、そのまま返す。
+ */
+export function alignToRepository(
+  sibling: GitSyncStatus,
+  fresh: GitSyncStatus
+): GitSyncStatus {
+  if (!("root" in sibling) || !("root" in fresh)) return sibling;
+  if (rootKey(sibling.root) !== rootKey(fresh.root)) return sibling;
+  // 兄弟の控えに作品のぶんが無い形（切り離されたHEADなど）なら0から始める。
+  // 正しい値は、続く兄弟の数え直しで入る
+  const dirtyHere = "dirtyHere" in sibling ? sibling.dirtyHere : 0;
+  const aheadHere = sibling.kind === "tracked" ? sibling.aheadHere : 0;
+  const behindHere = sibling.kind === "tracked" ? sibling.behindHere : 0;
+
+  switch (fresh.kind) {
+    case "tracked":
+      // 衝突の件数（`conflicts`）も置き場ぜんぶの性質なので、新しい読みのものを使う
+      return {
+        ...fresh,
+        dirtyHere: Math.min(dirtyHere, fresh.dirty),
+        aheadHere: Math.min(aheadHere, fresh.ahead),
+        behindHere: Math.min(behindHere, fresh.behind),
+      };
+    case "no_remote":
+    case "no_upstream":
+      return { ...fresh, dirtyHere: Math.min(dirtyHere, fresh.dirty) };
+    case "detached":
+      return { ...fresh };
+  }
+}
+
+/**
+ * その読みが、すでに受け取った読みより古いか（設計書6.15.1）。
+ *
+ * 数え直しは非同期で、**始めた順に返るとは限らない。** 記録の途中で始まった
+ * 読み（まだ未記録が残っている）が、記録のあとの読み（0件）より遅れて返ると、
+ * 古い数が画面を上書きする。数え直しを始めるときに通し番号を取り、
+ * 同じ置き場で**それより後に始めた読みが既に受け取られていれば**捨てる。
+ */
+export function isStaleRead(
+  lastAccepted: number | undefined,
+  sequence: number
+): boolean {
+  return lastAccepted !== undefined && lastAccepted > sequence;
+}
+
+/**
+ * 置き場の根を比べる鍵。区切りや末尾の違いで同じ置き場を割らない
+ * （比べ方は `pathText.ts` の1か所に任せる。写しを作らない）
+ */
+export function rootKey(root: string): string {
+  return folderKeyForComparison(root);
 }
 
 /** ステータスバーから押したときに出す、同期の候補（置き場1つ） */
