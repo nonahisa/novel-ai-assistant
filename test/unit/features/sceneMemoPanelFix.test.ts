@@ -108,6 +108,7 @@ vi.mock("../../../src/core/episodeLabel", () => ({
 vi.mock("../../../src/features/manuscriptEditor", () => ({
   lastManuscriptCaret: () => undefined,
   removeMemoLineInOpenManuscript: vi.fn(async () => ({ kind: "notOpen" })),
+  restoreMemoLineInOpenManuscript: vi.fn(async () => ({ kind: "not_open" })),
 }));
 
 vi.mock("../../../src/features/revealLocation", () => ({
