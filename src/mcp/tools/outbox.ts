@@ -4,6 +4,7 @@ import { z } from "zod";
 import { AIWRITER_DIR } from "../../models/types";
 import {
   FINDINGS_FILE_NAME,
+  OUTBOX_DECISION_NOTES,
   findingId,
   type Finding,
   type FindingStatus,
@@ -320,7 +321,7 @@ export const EDITORIAL_PREFIX = "編集部：";
  * 置き場の行は決まった欄しか読まれない（`models/finding.ts`）ので、新しい欄では
  * なく既存の欄で分かるようにした
  */
-export const AUTHOR_EDIT_NOTE = "出先で作者が自分の文に置き換えた";
+export const AUTHOR_EDIT_NOTE = OUTBOX_DECISION_NOTES.authorEdit;
 
 /** 断る理由。同じ指摘に持ち主の判断が2件以上あり、これより新しいものがある */
 export const OVERLAP_REASON =
@@ -650,7 +651,7 @@ function importVerdict(
     return {
       ok: true,
       reason: "採らない、として記録しました。",
-      decision: { findingId: view.id, status: "dismissed", note: "出先で採らなかった" },
+      decision: { findingId: view.id, status: "dismissed", note: OUTBOX_DECISION_NOTES.reject },
       verdict: verdictOf("dismissed"),
     };
   }
@@ -659,7 +660,7 @@ function importVerdict(
     return {
       ok: true,
       reason: "済み、として記録しました（本文には触れていません）。",
-      decision: { findingId: view.id, status: "accepted", note: "出先で済みにした" },
+      decision: { findingId: view.id, status: "accepted", note: OUTBOX_DECISION_NOTES.done },
       verdict: verdictOf("accepted"),
     };
   }
@@ -694,7 +695,7 @@ function importVerdict(
   return {
     ok: true,
     reason: `${toSlash(view.file)} の${line}行目「${view.target}」を「${view.suggestion}」に直しました。`,
-    decision: { findingId: view.id, status: "accepted", note: "出先で直した" },
+    decision: { findingId: view.id, status: "accepted", note: OUTBOX_DECISION_NOTES.fix },
     verdict: verdictOf("accepted"),
   };
 }
@@ -821,7 +822,7 @@ function importEdit(
     ok: true,
     reason: `${toSlash(view.file)} の${line}行目の一文を、出先で書いた文に置き換えました。`,
     // 元の指摘は［済み］と同じく「採った」（作者が問題を認めて自分で直した。6.49.7）
-    decision: { findingId: view.id, status: "accepted", note: "出先で自分で直した" },
+    decision: { findingId: view.id, status: "accepted", note: OUTBOX_DECISION_NOTES.editOriginal },
     verdict:
       view.producer && feature
         ? {

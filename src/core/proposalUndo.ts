@@ -54,8 +54,11 @@ export type UndoLocation =
  * 置き換えるのは**最初の `target` だけ**。適用側（`applyIssue`）が
  * `original.indexOf(target)` で位置を取っているので、そこと揃える。
  * 揃えないと、`target` が `original` に複数あるときに違う文字列を探す。
+ *
+ * **提案パネルの「当てたもの」（`core/appliedFindings.ts`）も、これで行を探す。**
+ * 当てたあとの本文に `original` はもう無いので、置き場の引用のままでは見つからない。
  */
-function appliedContextOf(item: AppliedSuggestion): string | undefined {
+export function appliedContextOf(item: AppliedSuggestion): string | undefined {
   const targetIndexInOriginal = item.original.indexOf(item.target);
   if (targetIndexInOriginal === -1) return undefined;
   return (
