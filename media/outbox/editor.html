@@ -47,6 +47,8 @@
   --done-ground: #26292e;
   color-scheme: dark;
 }
+/* iPad の文字の自動拡大を止める。字だけが大きく描かれ、カーソルとタップの位置の計算が元の大きさのまま残って、文章の後ろほどずれた（作者の実機、2026-10-05「カーソルの幅も文字よりだいぶ小さい」） */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body {
   background: var(--paper);
   color: var(--ink);
@@ -1487,7 +1489,10 @@ var EditorLogic = (function () {
       var d = Math.abs(cy - y) + (Math.abs(cx - x) > (b.right - b.left) ? 10000 : 0);
       if (d < bestD) { bestD = d; best = o; }
     }
-    if (best === null) return r;
+    // 触れた点がどの字の列にも入っていない（行の外の空白を押した）なら、置き直さない。
+    // iPad は本文の最後などの自然な所に置くので、それに任せる（作者の実機、2026-10-05
+    // 「これはカーソルが空白を指しています」：最後の行の左の空白を押したら、行の途中へ動かしていた）
+    if (best === null || bestD >= 10000) return null;
     var out = document.createRange();
     out.setStart(node, best);
     out.collapse(true);
