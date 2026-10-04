@@ -163,6 +163,57 @@ describe("置き場ごとの手順", () => {
   });
 });
 
+/**
+ * 記録の前の保存（設計書5.5.19。作者の裁定 2026-10-04）。
+ *
+ * 変更が未保存の文書にしか無い置き場は、ディスクの件数（trackable）が0で、
+ * 数えなければ「同期は取れています」で飛ばされ、保存の段までたどり着かない。
+ */
+describe("未保存の文書がある置き場", () => {
+  test("ディスクに変更が無くても、未保存があれば記録する", () => {
+    const plan = planSyncTarget(state({ trackable: 0, unsaved: 1 }));
+    expect(plan.commit).toBe(true);
+    expect(plan.push).toBe(true);
+    expect(plan.skip).toBeUndefined();
+  });
+
+  test("送り先が未設定でも、未保存があれば記録する", () => {
+    const plan = planSyncTarget(
+      state({
+        trackable: 0,
+        unsaved: 2,
+        status: { kind: "no_remote", root: "C:/書庫", dirty: 0, dirtyHere: 0 },
+      })
+    );
+    expect(plan.commit).toBe(true);
+  });
+
+  test("競合が残っていたら、未保存があっても触らない（5.5.3）", () => {
+    const plan = planSyncTarget(
+      state({ unsaved: 1, status: tracked({ unmerged: 1 }) })
+    );
+    expect(plan.commit).toBe(false);
+    expect(plan.skip).toBe("unmerged");
+  });
+
+  test("Gitで管理していない置き場は、未保存があっても飛ばす", () => {
+    const plan = planSyncTarget(
+      state({ unsaved: 1, status: { kind: "not_a_repo" } })
+    );
+    expect(plan.commit).toBe(false);
+    expect(plan.skip).toBe("not_a_repo");
+  });
+
+  test("押す前の一覧に、先に保存することが出る", () => {
+    expect(describePlan(planSyncTarget(state({ trackable: 0, unsaved: 1 })))).toContain(
+      "記録（未保存 1件を先に保存）"
+    );
+    expect(describePlan(planSyncTarget(state({ trackable: 2, unsaved: 1 })))).toContain(
+      "記録 2件（未保存 1件を先に保存）"
+    );
+  });
+});
+
 describe("何が起きるかを書く", () => {
   test("やることを並べる", () => {
     const text = describePlan(
