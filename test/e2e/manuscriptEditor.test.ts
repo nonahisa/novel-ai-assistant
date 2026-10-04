@@ -298,27 +298,24 @@ async function waitDirtyQuickly(session: E2ESession): Promise<void> {
  * 同じ時機に揃えることになる。待つのは選択だけで、画面の本文（傍点が残っている
  * ＝見たい場面）は待たない。画面の中で細かく見るので、本文の送り直し（120ミリ秒）より
  * ずっと早く戻る。
+ *
+ * **待つ目印は、本体の選び直しの知らせが画面に当たったこと**（traceInstall が立てる印。
+ * 2026-10-04 に改めた）。以前は「選択がかたまりの外へ出た」を待っていたが、傍点の語の中で
+ * 打てるようにした直し（設計書6.25.9）で、`selectText` の選択はその場でかたまり全体の選択に
+ * 直るようになり、待ちが即座に済んでしまった。遅い機械（ノートPC）では End や打鍵が選び直しより
+ * 先に着き、あとから着いた選び直しが作者の動かしたカーソルを語の選択へ戻して落ちた
  */
 async function waitSelectionOutsideChunk(frame: Frame): Promise<void> {
-  const moved = await frame.evaluate(async () => {
-    const insideChunk = () => {
-      const selection = window.getSelection();
-      if (!selection || selection.rangeCount === 0) return true;
-      const range = selection.getRangeAt(0);
-      const within = (node: Node) => {
-        const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
-        return !!element?.closest('[contenteditable="false"]');
-      };
-      return within(range.startContainer) || within(range.endContainer);
-    };
+  const reselected = await frame.evaluate(async () => {
+    const holder = window as unknown as { __e2eReselected?: boolean };
     const until = performance.now() + 5_000;
-    while (insideChunk()) {
+    while (holder.__e2eReselected !== true) {
       if (performance.now() > until) return false;
       await new Promise((resolve) => setTimeout(resolve, 2));
     }
     return true;
   });
-  if (!moved) throw new Error("Ctrl+Alt+K のあと、5秒待っても選択が傍点のかたまりの中から動きません（本体の選び直しが届いていません）");
+  if (!reselected) throw new Error("Ctrl+Alt+K のあと、5秒待っても本体の選び直し（select）が画面に届きません");
 }
 
 /** 落ちたときに読む操作ログの行（当て直し・ぶつかり・保存・外からの変更） */
@@ -371,6 +368,12 @@ async function traceInstall(frame: Frame): Promise<void> {
       "message",
       (event) => {
         const message = event.data as Record<string, unknown>;
+        // 本体の選び直しが画面に当たった印（画面の受け口のあとに立てる。waitHostReselect）
+        if (message.type === "select") {
+          setTimeout(() => {
+            (window as unknown as { __e2eReselected?: boolean }).__e2eReselected = true;
+          }, 0);
+        }
         record(
           `本体から ${String(message.type)}` +
             (typeof message.text === "string" ? ` ${JSON.stringify(message.text)}` : "") +
