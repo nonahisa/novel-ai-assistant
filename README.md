@@ -6,7 +6,7 @@
 
 > **※現在テスト中です。** 動作の確認（実機テスト）が済んでいない機能が含まれます。大切な原稿は、必ずバックアップ（GitHub同期など）を取ったうえでお使いください。
 
-このリポジトリの版：**0.98.8**（Marketplace に出ている版は **0.98.0**）。Marketplace に出ている版はこれより遅れることがあります。
+このリポジトリの版：**0.98.9**（Marketplace に出ている版は **0.98.0**）。Marketplace に出ている版はこれより遅れることがあります。
 
 - 原稿を書き換えるAIはいません。提案を適用するのは、いつもあなたです。
 - 手元AI（Ollama / LM Studio）なら無料で使えます。クラウドAIも、鍵を入れれば機能ごとに選べます。
@@ -466,6 +466,7 @@ npm run test:e2e     # 画面の自動テスト（本物のVS Codeを外から�
 VS Codeで `F5` を押すと拡張機能開発ホストが起動します。
 
 ```powershell
+.\build-vsix.bat         # 手元で試すVSIXを release/local/ に作る（ダブルクリックでも可。リリースゲートは通さない）
 npm run package:vsix     # release/ にVSIXを作る（リリースゲートを通ります）
 npm run verify:vsix      # 中身・隔離インストール・版を検証する
 npm run release:github   # タグを押して Release を作り、VSIXを添付する
