@@ -269,9 +269,9 @@ describe("簡単ステップメニューの構成", () => {
     }
   });
 
-  test("最上段は作品選択窓で、その下に段階が並ぶ", () => {
+  test("最上段は作品選択窓で、その下に段階が並ぶ", async () => {
     const provider = new StepMenuProvider(fakeRegistry([work("w1", "作品A")]));
-    const roots = provider.getChildren();
+    const roots = await provider.getChildren();
 
     expect(roots[0]).toEqual({ type: "selector" });
     expect(roots).toHaveLength(1 + STEP_MENU.length);
