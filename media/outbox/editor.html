@@ -969,12 +969,15 @@ var EditorLogic = (function () {
   */
   function domText(root) {
     var out = "";
+    // 欄のいちばん最後の節点（末尾の「行の置き物」の BR はここに来る）
+    var tail = root;
+    while (tail.lastChild) tail = tail.lastChild;
     function walk(node) {
       for (var c = node.firstChild; c; c = c.nextSibling) {
         if (c.nodeType === 3) out += c.data;
         else if (c.nodeName === "BR") {
-          // 最後の行を見せるためだけの BR（空の最後の行の置き物）は数えない
-          if (c === root.lastChild && out.slice(-1) === "\n") continue;
+          // 末尾の置き物は本文ではない（pushToVertical が置く。ブラウザが置き直すこともある）
+          if (c === tail) continue;
           out += "\n";
         } else {
           if (/^(DIV|P)$/.test(c.nodeName) && out.length && out.slice(-1) !== "\n") out += "\n";
@@ -988,11 +991,13 @@ var EditorLogic = (function () {
   function pushToVertical() {
     vtextEl.textContent = textEl.value;
     /*
-      本文が改行で終わるときは、空の最後の行の置き物（BR）を足す。無いと iPad は
-      「最後の改行のあと」のカーソルを、新しい列の頭ではなく前の列の下端に描く
-      （作者の実機、2026-10-05「カーソル位置見てください」）。domText はこの BR を数えない
+      最後にいつも「行の置き物」（BR）を1つ置く。ブラウザの入力欄はこれを頼りに本文の
+      最後のカーソルを描く。無いと iPad は最後の位置の箱を出せず（測ると x=0〜0 y=0）、
+      印を列の下のほうに描いた（作者の実機、2026-10-05「入力位置は正しいですが、
+      カーソル描画位置は変わってません」）。改行で終わるときは、この置き物が空の最後の行にもなる。
+      domText は末尾の置き物を数えない
     */
-    if (/\n$/.test(textEl.value)) vtextEl.appendChild(document.createElement("br"));
+    vtextEl.appendChild(document.createElement("br"));
     var editable = state.readOnly ? "false" : "plaintext-only";
     try { vtextEl.contentEditable = editable; } catch (error) { vtextEl.contentEditable = state.readOnly ? "false" : "true"; }
   }
