@@ -6678,6 +6678,138 @@ ${RESUME_WRITING_LABEL ? `
     ArrowRight: true,
   };
 
+  /* lineBoundary:start */
+  /*
+    ── Home／End は自前で動かす（作者の実機報告、2026-10-04。設計書6.25.9） ──
+    行にルビ（編集できないかたまり）があると、Chromium の End は行末へ行かず、
+    **そのルビの直後で止まった**（縦書きでも横書きでも。E2E で確かめた）。作者は
+    傍点を付けた直後に End を押して「い」を打ち、字が行末でなく前のほうのルビの
+    直後に入った。かたまりを開いてから動かしても、今度は読み仮名の中へ入った。
+
+    そこで、**見えている行（折り返した1行。縦書きでは1列）の端**を、字の位置から
+    自分で求めて置く。字とかたまりを順に並べ、カーソルのある行と同じ行に並ぶ
+    最後（Home なら最初）の要素の外側へ置く。同じ行かは、横書きなら字の高さの
+    中ほど、縦書きなら字の幅の中ほどが、行の字と半分以上ずれていないかで見る。
+    Shift つきは選択を伸ばす。Ctrl つき（文書の頭・尻）はブラウザに任せる。
+  */
+  /** 段落の中の字とかたまりを、本文の順に並べる（位置と見た目の箱つき） */
+  function composeLineItems(line) {
+    const items = [];
+    const walk = function (node) {
+      const kids = node.childNodes;
+      for (let i = 0; i < kids.length; i++) {
+        const kid = kids[i];
+        if (kid.nodeType === 3) {
+          const value = kid.nodeValue || "";
+          for (let k = 0; k < value.length; k++) {
+            const range = document.createRange();
+            range.setStart(kid, k);
+            range.setEnd(kid, k + 1);
+            items.push({
+              rect: range.getBoundingClientRect(),
+              start: { node: kid, offset: k },
+              end: { node: kid, offset: k + 1 },
+            });
+          }
+          continue;
+        }
+        if (kid.nodeType !== 1 || kid.nodeName === "BR") continue;
+        if (kid.getAttribute && kid.getAttribute("data-src")) {
+          // かたまりは1つの要素として並べる。箱は親文字の側（読み仮名を除く）
+          let rect = kid.getBoundingClientRect();
+          for (const part of kid.childNodes) {
+            if (part.nodeType === 3 && (part.nodeValue || "") !== "") {
+              const range = document.createRange();
+              range.selectNodeContents(part);
+              rect = range.getBoundingClientRect();
+              break;
+            }
+          }
+          items.push({
+            rect: rect,
+            start: { node: node, offset: i },
+            end: { node: node, offset: i + 1 },
+          });
+          continue;
+        }
+        walk(kid);
+      }
+    };
+    walk(line);
+    return items;
+  }
+
+  /**
+   * Home／End で、見えている行の端へ動かす。
+   * @returns 自分で動かしたか（false ならブラウザに任せる）
+   */
+  function composeMoveToLineBoundary(toEnd, extend) {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return false;
+    const focusNode = selection.focusNode;
+    if (!focusNode || !compose.contains(focusNode)) return false;
+    let line = focusNode;
+    while (line && line.parentNode !== compose) line = line.parentNode;
+    if (!line || line.nodeType !== 1) return false;
+    const items = composeLineItems(line);
+    if (items.length === 0) return false;
+    const caret = document.createRange();
+    try {
+      caret.setStart(focusNode, selection.focusOffset);
+    } catch (error) {
+      return false;
+    }
+    caret.collapse(true);
+    // カーソルの後ろの最初の要素
+    let next = items.length;
+    for (let i = 0; i < items.length; i++) {
+      if (caret.comparePoint(items[i].start.node, items[i].start.offset) >= 0) {
+        next = i;
+        break;
+      }
+    }
+    // どの行にいるか：End は手前の字の行、Home は後ろの字の行（押し直しても動かない）
+    let anchorIndex = toEnd ? next - 1 : next;
+    if (anchorIndex < 0) anchorIndex = 0;
+    if (anchorIndex >= items.length) anchorIndex = items.length - 1;
+    const vertical = document.body.classList.contains("vertical");
+    const center = function (rect) {
+      return vertical ? rect.left + rect.width / 2 : rect.top + rect.height / 2;
+    };
+    const span = function (rect) {
+      return vertical ? rect.width : rect.height;
+    };
+    const anchorRect = items[anchorIndex].rect;
+    const sameLine = function (rect) {
+      const tolerance = Math.max(span(anchorRect), span(rect)) / 2;
+      return Math.abs(center(rect) - center(anchorRect)) < tolerance;
+    };
+    let target = anchorIndex;
+    if (toEnd) {
+      while (target + 1 < items.length && sameLine(items[target + 1].rect)) target++;
+    } else {
+      while (target - 1 >= 0 && sameLine(items[target - 1].rect)) target--;
+    }
+    const point = toEnd ? items[target].end : items[target].start;
+    try {
+      if (extend) selection.extend(point.node, point.offset);
+      else selection.collapse(point.node, point.offset);
+    } catch (error) {
+      return false;
+    }
+    return true;
+  }
+
+  compose.addEventListener("keydown", function (event) {
+    if (composing || event.isComposing) return;
+    if (event.key !== "End" && event.key !== "Home") return;
+    if (event.ctrlKey || event.altKey || event.metaKey) return;
+    if (composeMoveToLineBoundary(event.key === "End", event.shiftKey === true)) {
+      event.preventDefault();
+    }
+  });
+  /* lineBoundary:end */
+
   compose.addEventListener("keydown", function (event) {
     if (composing) return;
     if (COMPOSE_ARROW_KEYS[event.key] !== true) return;
@@ -6719,26 +6851,37 @@ ${RESUME_WRITING_LABEL ? `
     置き換わる。
 
     ルビ（ruby）は開かない——読み仮名（rt）の中へ字が入ると、親文字か読みかが
-    決められないため。ルビの中で打った字の扱いは今までどおり。
+    決められないため。ルビの中に置かれた選択の端は、近いほうの外の境目へ出す
+    （親文字の前半なら手前、後半と読み仮名なら後ろ）。中で打った字が捨てられないように。
+
+    **マウスで押した所は、押した点から取り直す**（作者の実機報告、2026-10-04。縦書きで
+    Ctrl+Alt+K で付けた直後の傍点の語の真ん中を押すと、カーソルが出ず字が入らなかった）。
+    傍点を付けた直後は本体の選び直しで語ぜんたいが選ばれており、選ばれている所の中の
+    編集できないかたまりを押すと、Chromium は選択を行の頭へ畳んでいた（E2E で確かめた。
+    横書きでも同じ）。押した点（caretRangeFromPoint）を mousedown で控え、押し終えたあとの
+    選択が引いて選んだものでなく、控えた点と違えば、控えた点へ置き直す。
   */
   /** 開いている傍点のかたまり */
   let composeOpenChunks = [];
   /** マウスの釦を押しているあいだは選択を動かさない（引いて選ぶ手と取り合う） */
   let composeMouseDown = false;
+  /** かたまりの上で釦を押した点（押し終えたあと、そこへカーソルを置き直す） */
+  let composeMouseHit = null;
 
-  /** その節点を含む傍点のかたまり（無ければ null） */
-  function composeEmphasisChunkOf(node) {
+  /** かたまり（傍点・ルビ）の要素か */
+  function composeIsChunk(element, kind) {
+    if (!element || element.nodeType !== 1 || !element.getAttribute) return false;
+    if (!element.getAttribute("data-src")) return false;
+    if (kind === "ruby") return element.nodeName === "RUBY";
+    return !!(element.classList && element.classList.contains("emphasis"));
+  }
+
+  /** その節点を含むかたまり（傍点を先に、無ければルビ。どちらも無ければ null） */
+  function composeChunkOf(node) {
     let at = node;
     while (at && at !== compose) {
-      if (
-        at.nodeType === 1 &&
-        at.getAttribute &&
-        at.getAttribute("data-src") &&
-        at.classList &&
-        at.classList.contains("emphasis")
-      ) {
-        return at;
-      }
+      if (composeIsChunk(at, "emphasis")) return { span: at, ruby: false };
+      if (composeIsChunk(at, "ruby")) return { span: at, ruby: true };
       at = at.parentNode;
     }
     return null;
@@ -6746,11 +6889,12 @@ ${RESUME_WRITING_LABEL ? `
 
   /**
    * 選択の端がかたまりのどこにあるか。頭（head）・尻（tail）・中（inside）。
-   * かたまりの外なら null
+   * かたまりの外なら null。ルビは中（inside）を返さず、近いほうの端にする
    */
   function composeChunkEdge(node, offset) {
-    const span = composeEmphasisChunkOf(node);
-    if (!span) return null;
+    const found = composeChunkOf(node);
+    if (!found) return null;
+    const span = found.span;
     const head = document.createRange();
     head.setStart(span, 0);
     try {
@@ -6759,6 +6903,15 @@ ${RESUME_WRITING_LABEL ? `
       return null;
     }
     const before = head.toString().length;
+    if (found.ruby) {
+      // 親文字の字数（rt を除く）。読み仮名の中・後ろは尻
+      let base = 0;
+      for (const kid of span.childNodes) {
+        if (kid.nodeName === "RT" || kid.nodeName === "RP") continue;
+        base += (kid.textContent || "").length;
+      }
+      return { span: span, edge: before * 2 < base ? "head" : "tail" };
+    }
     const total = (span.textContent || "").length;
     if (before <= 0) return { span: span, edge: "head" };
     if (before >= total) return { span: span, edge: "tail" };
@@ -6853,13 +7006,73 @@ ${RESUME_WRITING_LABEL ? `
   document.addEventListener("selectionchange", function () {
     composeFitChunkSelection(false);
   });
-  compose.addEventListener("mousedown", function () {
+  compose.addEventListener("mousedown", function (event) {
     composeMouseDown = true;
+    composeMouseHit = null;
+    // 左の釦の1回押しだけ（Shift で伸ばす・2回押しで語を選ぶのはブラウザに任せる）
+    if (event.button !== 0 || event.shiftKey || event.detail > 1) return;
+    if (!document.caretRangeFromPoint) return;
+    const range = document.caretRangeFromPoint(event.clientX, event.clientY);
+    if (!range || !composeChunkOf(range.startContainer)) return;
+    composeMouseHit = { node: range.startContainer, offset: range.startOffset };
   });
+  /**
+   * 押し終えたあと、押した点へ置き直すのを待っているもの。
+   * **Chromium が選択を畳むのは click のあと、少し遅れてから**（E2E の記録で 2〜11 ミリ秒。
+   * click の時点ではまだ前の選択のまま）なので、決まった時間の後に1回見るのでは
+   * 間に合わないことがある。押し終えてから短いあいだ、選択の知らせを見張る
+   */
+  let composeMouseFix = null;
+  const COMPOSE_MOUSE_FIX_MS = 400;
+
+  /** 押した点と違う所へ畳まれていたら、押した点へ置き直す（置き直したら見張りを終える） */
+  function composeApplyMouseFix() {
+    const fix = composeMouseFix;
+    if (fix === null || composing) return;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return;
+    if (!compose.contains(fix.node)) {
+      composeMouseFix = null;
+      return;
+    }
+    if (selection.anchorNode === fix.node && selection.anchorOffset === fix.offset) return;
+    composeMouseFix = null;
+    try {
+      selection.collapse(fix.node, fix.offset);
+      vscode.postMessage({
+        type: "log",
+        text:
+          "組んで書く：ルビ・傍点の上を押したのに、カーソルが押した所に来なかったので、" +
+          "押した所へ置き直しました",
+      });
+    } catch (error) {
+      /* 置けなければ諦める（本文は壊れない） */
+    }
+  }
+
+  document.addEventListener("selectionchange", composeApplyMouseFix);
+  // 動かすキーが来たら見張りをやめる（作者が矢印で動かした先を押した点へ戻さない）
+  compose.addEventListener("keydown", function (event) {
+    if (/^(Arrow|Home$|End$|Page)/.test(event.key || "")) composeMouseFix = null;
+  }, true);
+
   document.addEventListener("mouseup", function () {
     if (!composeMouseDown) return;
     composeMouseDown = false;
-    composeFitChunkSelection(false);
+    const hit = composeMouseHit;
+    composeMouseHit = null;
+    if (hit === null) {
+      composeFitChunkSelection(false);
+      return;
+    }
+    composeMouseFix = { node: hit.node, offset: hit.offset };
+    setTimeout(function () {
+      composeApplyMouseFix();
+      composeFitChunkSelection(false);
+    }, 0);
+    setTimeout(function () {
+      composeMouseFix = null;
+    }, COMPOSE_MOUSE_FIX_MS);
   });
   // 変換を確定したあと（確定の字が入ったあと）に開け閉めを見直す
   compose.addEventListener("compositionend", function () {
@@ -6869,16 +7082,17 @@ ${RESUME_WRITING_LABEL ? `
   });
 
   /**
-   * 打つ瞬間の念押し（変換でない打鍵だけ）。選択の知らせより先に打鍵が来て、
-   * まだ閉じたかたまりの中に選択があるときは、ここで開いてから同じ打鍵を
-   * やり直す（既定の動きのままでは、開く前の判定で字が捨てられる）。
+   * 傍点のかたまりの中での打鍵（変換でないもの）。まだ閉じたかたまりの中に選択が
+   * あれば開き、**字を自分で差し込む・消す**。
+   *
+   * 既定の動きにも execCommand にも任せない——開いた直後に任せると、Chromium は
+   * 選択を編集できる最初の位置（**行の頭**）へ寄せ直して、そこへ字を入れた
+   * （E2E で確かめた。押してすぐ打つと起きる）。自前で差し込むので、傍点の語の中で
+   * 打った字は取り消し（Ctrl+Z）の履歴に載らない。
    * @returns 自分で打ち直したか
    */
   function composeTypeIntoChunk(event, kind) {
     if (composing || kind === "insertCompositionText") return false;
-    if (kind.indexOf("insert") !== 0 && kind.indexOf("delete") !== 0) return false;
-    if (!composeFitChunkSelection(true)) return false;
-    let command = null;
     let value = null;
     if (kind === "insertText" || kind === "insertReplacementText") {
       value = event.data;
@@ -6886,35 +7100,70 @@ ${RESUME_WRITING_LABEL ? `
         value = event.dataTransfer.getData("text/plain");
       }
       if (value === null || value === undefined || value === "") return false;
-      command = "insertText";
-    } else if (kind === "deleteContentBackward") {
-      command = "delete";
-    } else if (kind === "deleteContentForward") {
-      command = "forwardDelete";
-    } else {
-      // ほかの操作（改行・貼り付け等）は、開いたうえで既定の動きに任せる
+    } else if (kind !== "deleteContentBackward" && kind !== "deleteContentForward") {
       return false;
     }
+    composeFitChunkSelection(true);
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return false;
+    const range = selection.getRangeAt(0);
+    /*
+      開いたかたまりの中の打鍵は、**いつも自前で差し込む**。開いた直後（押してすぐ打つ）は、
+      選択の知らせで開いたあとでも Chromium が編集できると見なす前で、既定の動きに任せると
+      行の頭へ入った（E2E で確かめた）。選択が開いたかたまりの外なら（端を外へ出しただけ）、
+      既定の動きに任せる
+    */
+    const inOpen = function (node) {
+      const found = composeChunkOf(node);
+      return !!found && composeOpenChunks.indexOf(found.span) >= 0;
+    };
+    if (!inOpen(range.startContainer) && !inOpen(range.endContainer)) return false;
     event.preventDefault();
-    let done = false;
-    try {
-      done = document.execCommand(command, false, value);
-    } catch (error) {
-      done = false;
-    }
-    if (!done && command === "insertText") {
-      // execCommand が使えない環境：選んだ所へ字を差し込む（取り消しの履歴には載らない）
-      const selection = window.getSelection();
-      if (selection && selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0);
-        range.deleteContents();
-        const node = document.createTextNode(composeNormalizeText(value));
-        range.insertNode(node);
-        selection.collapse(node, node.nodeValue.length);
-        composeInvalidate();
-        composeSend();
+    if (!range.collapsed) {
+      /*
+        消したあとは、選び始めの位置へ戻す。選び始めがかたまりの中で、選び終わりが
+        かたまりの外のとき、Range は消したあとの位置を**かたまりの後ろ**へ寄せるので、
+        そのままでは打った字が傍点の外へ出る
+      */
+      const startNode = range.startContainer;
+      const startOffset = range.startOffset;
+      range.deleteContents();
+      if (startNode.nodeType === 3 && compose.contains(startNode)) {
+        selection.collapse(startNode, Math.min(startOffset, startNode.nodeValue.length));
+      }
+    } else if (value === null) {
+      // 1字消す（カーソルが字の節点の中にあるときだけ。端なら何もしない）
+      const node = range.startContainer;
+      if (node.nodeType === 3) {
+        const at = range.startOffset;
+        if (kind === "deleteContentBackward" && at > 0) {
+          node.deleteData(at - 1, 1);
+          selection.collapse(node, at - 1);
+        } else if (kind === "deleteContentForward" && at < node.nodeValue.length) {
+          node.deleteData(at, 1);
+          selection.collapse(node, at);
+        }
       }
     }
+    if (value !== null) {
+      const plain = composeNormalizeText(value);
+      const now = selection.getRangeAt(0);
+      const node = now.startContainer;
+      if (node.nodeType === 3) {
+        const at = now.startOffset;
+        node.insertData(at, plain);
+        selection.collapse(node, at + plain.length);
+      } else {
+        const text = document.createTextNode(plain);
+        now.insertNode(text);
+        selection.collapse(text, plain.length);
+      }
+    }
+    // input の受け口と同じ後始末（自前で差し込んだので input は起きない）
+    composeInvalidate();
+    composeSend();
+    composeScheduleHighlight();
+    composeRepaintMemos();
     return true;
   }
   /* emphasisInside:end */
@@ -6928,6 +7177,15 @@ ${RESUME_WRITING_LABEL ? `
     if (kind.indexOf("format") === 0) {
       event.preventDefault();
       return;
+    }
+    /*
+      押してすぐ打つと、選択の知らせより先に打鍵が来る（Chromium が押した選択を行の頭へ
+      畳んだまま、知らせはまだ届いていない）。押した点への置き直しを、ここでも先に当てる
+    */
+    if (kind.indexOf("insert") === 0) {
+      composeApplyMouseFix();
+      // 打ったら見張りは終わり（次の字のときに、打つ前の点へ戻さない）
+      composeMouseFix = null;
     }
     if (composeTypeIntoChunk(event, kind)) return;
     composeEscapeEllipsis(kind);
