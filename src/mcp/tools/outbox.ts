@@ -7,7 +7,12 @@ import { parseEpisodeMetadata } from "../../core/metadataParser";
 import { isWorkInfoFile } from "../../core/workInfoFile";
 import { decodeBytes, type TextFileContent } from "../../core/textDecode";
 import { findingAppliesDirectly, findingRestoreOf } from "../../core/findingSource";
-import { OUTBOX_TEMPLATE_COPY_NAME, OUTBOX_TEMPLATE_RELATIVE } from "../../core/outboxTemplate";
+import {
+  EDITOR_TEMPLATE_COPY_NAME,
+  EDITOR_TEMPLATE_RELATIVE,
+  OUTBOX_TEMPLATE_COPY_NAME,
+  OUTBOX_TEMPLATE_RELATIVE,
+} from "../../core/outboxTemplate";
 import {
   importOutboxRecords,
   jsonLinesAddition,
@@ -106,6 +111,11 @@ export interface OutboxPackResult {
    * 出先の原稿箱を作るときは、これを読んで publish する（スキルの手順）
    */
   templatePath: string | null;
+  /**
+   * 出先の原稿エディター（設計書6.116）のページの雛形の、実在する道。見つからなければ null。
+   * 原稿エディターのページを作るときは、これを読んで publish する（スキルの手順）
+   */
+  editorTemplatePath: string | null;
   nextStep: string;
   note: string;
 }
@@ -194,6 +204,7 @@ export function outboxPack(input: { folder: string; retentionDays?: number }): O
     findings,
     skipped,
     templatePath: findOutboxTemplate(),
+    editorTemplatePath: findEditorTemplate(),
     nextStep:
       "ArtifactData の batch で、出先の原稿箱の保管庫へ書いてください：works/main に { title, sentAt, episodes }、" +
       "findings/<id> に指摘を1件ずつ（前に送った findings/ の文書で、今回に無いものは消す）。",
@@ -213,12 +224,22 @@ export function outboxPack(input: { folder: string; retentionDays?: number }): O
  * @param bundleFile 走っている束の場所。省略すると `process.argv[1]`（試験が差し替える）
  */
 export function findOutboxTemplate(bundleFile: string | undefined = process.argv[1]): string | null {
+  return findPageTemplate(OUTBOX_TEMPLATE_COPY_NAME, OUTBOX_TEMPLATE_RELATIVE, bundleFile);
+}
+
+/** 出先の原稿エディター（設計書6.116）の雛形の、実在する道。探し方は原稿箱と同じ */
+export function findEditorTemplate(bundleFile: string | undefined = process.argv[1]): string | null {
+  return findPageTemplate(EDITOR_TEMPLATE_COPY_NAME, EDITOR_TEMPLATE_RELATIVE, bundleFile);
+}
+
+function findPageTemplate(
+  copyName: string,
+  relative: readonly string[],
+  bundleFile: string | undefined
+): string | null {
   if (!bundleFile) return null;
   const dir = nodePath.dirname(nodePath.resolve(bundleFile));
-  const candidates = [
-    nodePath.join(dir, OUTBOX_TEMPLATE_COPY_NAME),
-    nodePath.join(dir, "..", ...OUTBOX_TEMPLATE_RELATIVE),
-  ];
+  const candidates = [nodePath.join(dir, copyName), nodePath.join(dir, "..", ...relative)];
   for (const candidate of candidates) {
     try {
       if (fs.statSync(candidate).isFile()) return nodePath.resolve(candidate);
@@ -255,8 +276,11 @@ const RECORD_INPUT = z.object({
     .min(1)
     .describe("書き手の id。文書のパス records/<書き手のid>/items/... から読む（記録の欄からは読まない）"),
   kind: z
-    .enum(["memo", "verdict", "edit"])
-    .describe("memo＝メモ、verdict＝採否、edit＝作者が自分で直した文（原文の一文をこの文に置き換える）"),
+    .enum(["memo", "verdict", "edit", "body"])
+    .describe(
+      "memo＝メモ、verdict＝採否、edit＝作者が自分で直した文（原文の一文をこの文に置き換える）、" +
+        "body＝原稿エディターのページで書いた話の本文の全体（text が全文。baseBlobSha が読んだときの本文と合うときだけ入る）"
+    ),
   by: z.string().optional().describe("使わない（書き手はパスの writer で決める）"),
   at: z.string().optional(),
   device: z.string().optional(),
@@ -276,6 +300,10 @@ const RECORD_INPUT = z.object({
     .string()
     .optional()
     .describe("GitHub 経由のページが読んだときの本文の git の blob SHA（baseHash の代わり）"),
+  basedOn: z
+    .string()
+    .optional()
+    .describe("body のとき、この本文が続きとして書かれた前の body 記録の id（同じ書き手）"),
   imported: z.boolean().optional(),
 });
 

@@ -237,6 +237,56 @@ describe("受け取り箱を取り込む", () => {
     );
   });
 
+  it("原稿エディターのページの本文（版2の箱）：BOM・CRLF を保って書き、回復先に前の本文を残す。MCP の道と同じになる", async () => {
+    const withBom = `﻿${BODY}`;
+    const viaExtension = makeWork("body-ext");
+    const viaMcp = makeWork("body-mcp");
+    for (const work of [viaExtension, viaMcp]) fs.writeFileSync(nodePath.join(work.folderPath, FILE), withBom, "utf8");
+    // ページは GitHub の blob SHA を持つ（リポジトリは LF・BOM つき。core.autocrlf の機械）
+    const repoBytes = Buffer.from(withBom.replace(/\r\n/g, "\n"), "utf8");
+    const record = {
+      id: "b1",
+      kind: "body" as const,
+      at: "2026-10-05T01:00:00.000Z",
+      episode: FILE,
+      baseBlobSha: gitBlobSha(repoBytes),
+      text: "一行目\n彼はゆっくりと歩いた。\n三行目\n続きを書いた。\n",
+    };
+    putBox(viaExtension, "20261005T010000Z-phone-editor.json", [record], { version: 2, writer: "editor" });
+    const extension = await runInboxImport(viaExtension, { now: NOW });
+    const mcp = await outboxImport({ folder: viaMcp.folderPath, ownerId: "editor", records: [{ ...record, writer: "editor" }] });
+
+    expect(extension.outcome.results.map((item) => item.status)).toEqual(["imported"]);
+    expect(extension.outcome.results).toEqual(mcp.results);
+    const expected = "﻿一行目\r\n彼はゆっくりと歩いた。\r\n三行目\r\n続きを書いた。\r\n";
+    expect(read(viaExtension, FILE)).toBe(expected);
+    expect(read(viaMcp, FILE)).toBe(expected);
+    // 前の本文は回復先（.novelai-recovery）に残る（提案パネルの［戻す］には並ばない。全文の置き換えのため）
+    const recovery = nodePath.join(viaExtension.folderPath, "本文", ".novelai-recovery");
+    const kept = fs.existsSync(recovery) ? fs.readdirSync(recovery) : [];
+    expect(kept.length).toBeGreaterThan(0);
+  });
+
+  it("本文の全体は、パソコンの本文が変わっていれば断り、結果にいまの本文の印を返す", async () => {
+    const work = makeWork("body-changed");
+    putBox(
+      work,
+      "20261005T010000Z-phone-editor.json",
+      [{ id: "b1", kind: "body", episode: FILE, baseBlobSha: gitBlobSha(Buffer.from("前の本文\n")), text: "書いた\n" }],
+      { version: 2, writer: "editor" }
+    );
+    await runInboxImport(work, { now: NOW });
+    expect(read(work, FILE)).toBe(BODY);
+    const result = parseInboxResult(
+      fs.readFileSync(
+        nodePath.join(work.folderPath, ".aiwriter", "inbox", "done", "20261005T010000Z-phone-editor.json.result.json"),
+        "utf8"
+      )
+    );
+    expect(result.ok && result.results[0].status).toBe("refused");
+    expect(result.ok && result.results[0].currentBlobSha).toBe(gitBlobSha(Buffer.from(BODY, "utf8")));
+  });
+
   it("受け取り箱が無ければ何もしない", async () => {
     const work = makeWork("empty");
     expect(await countPendingInboxRecords(work)).toBe(0);
