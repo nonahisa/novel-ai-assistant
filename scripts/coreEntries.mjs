@@ -107,6 +107,13 @@ export const CORE_ENTRY_NAMES = [
   */
   "textEncodePreserving",
   "findingApply",
+  /*
+    原稿箱の取り込みの判断・受け取り箱の形・前後の文の組み方（2026-10-04、設計書6.115
+    「GitHub 経由」）。MCP の `outbox.import` と拡張機能の［原稿箱を取り込む］が同じものを通る
+  */
+  "outboxImport",
+  "outboxInbox",
+  "outboxContext",
 ];
 
 /**

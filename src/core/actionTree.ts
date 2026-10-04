@@ -1630,6 +1630,24 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "AIは呼ばない。",
           },
           /*
+            **出先の原稿箱の取り込み**（設計書6.115「GitHub 経由」。作者の裁定
+            2026-10-04「取り込みボタンが欲しいです」）。出先でさばくのは、この分類の
+            検知が挙げた指摘なので、同じ並びに置く（片づけは並びのいちばん後ろのまま。6.96.4）
+          */
+          {
+            kind: "action",
+            command: "novelai.importOutboxInbox",
+            label: "原稿箱を取り込む",
+            description: "AIを使わない",
+            icon: "inbox",
+            requiresWork: true,
+            detail:
+              "出先の原稿箱で押したもの（採否・メモ・直した文）を作品へ入れる\n\n" +
+              "・GitHub と同期して届いた受け取り箱（.aiwriter/inbox）を読む\n\n" +
+              "・本文が出先で見たときと違えば入れず、理由を出す\n\n" +
+              "・取り込んだ箱は inbox/done へ移し、次の同期で送る",
+          },
+          /*
             **検知の並びのすぐ後ろ、伏線の一覧の下に置く**（設計書6.96.4）。
 
             片づける相手は、この分類の検知が挙げた指摘そのものである。
