@@ -34,7 +34,8 @@ function notifyRunEnded(): void {
  * ## 札を取らないもの（あえて取らせない）
  *
  * 相談（`workChatPanel`）・相談からの反映（`chatSettingsSync`）・
- * 表記ゆれの1問（`notationAdvice`）・独り言（`chatterComment`）・
+ * 表記ゆれの1問（`notationAdvice`）・推敲の指摘の1問（`findingAdvice`）・
+ * 独り言（`chatterComment`）・
  * 再チェック（`recheckProposal`）・単発の生成（紹介文・キャッチコピー・
  * 章立て・名前・告知・プロット対話など、1〜数回で終わるもの）。
  *
