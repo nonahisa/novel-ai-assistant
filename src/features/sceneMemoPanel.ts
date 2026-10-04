@@ -34,12 +34,13 @@ import {
 import {
   arrangeRows,
   currentFirst,
-  findingColorVars,
   findingHeadline,
   findingLabelOf,
   findingNote,
-  FINDING_DOT_CLASS,
+  findingToneClass,
+  findingToneVars,
   mergeNoteRows,
+  tagTonesOf,
   nextNoteRow,
   prevNoteRow,
   type NoteRow,
@@ -1226,6 +1227,11 @@ class SceneMemoPanel {
         onlyCurrent: this.onlyCurrent,
         tag: this.tag,
         tags: this.tagChoices(byTag),
+        // 選び口の項目ごとの色の印（作者の要望 2026-10-04「表示ジャンルすべてです」）
+        tagTones: tagTonesOf(
+          byTag.map((entry) => entry.tag),
+          this.findings.map(findingLabelOf)
+        ),
         query: this.query,
         activeKey: this.activeKey,
         totalCount: this.memos.length,
@@ -1236,7 +1242,8 @@ class SceneMemoPanel {
           total === 0
             ? `この作品にメモはありません。${MEMO_HINT}（読者向けの出力とAIには渡りません）。`
             : "絞り込みに当てはまるものがありません。",
-        colors: { ...colorsFor(), ...findingColorVars(isDarkTheme()) },
+        // 付箋の色（明暗を選ぶ）と、指摘の種類の色（テーマの色そのもの）
+        colors: { ...colorsFor(), ...findingToneVars() },
       },
     });
   }
@@ -1324,7 +1331,8 @@ class SceneMemoPanel {
       line: finding.line,
       sameLine: row.sameLine,
       tag: findingLabelOf(finding),
-      tagClass: FINDING_DOT_CLASS,
+      // 種類ごとの色（0.98.9 までは指摘は1色だった）
+      tagClass: findingToneClass(findingLabelOf(finding)),
       text: findingHeadline(finding),
       note: findingNote(finding),
       raw: "",

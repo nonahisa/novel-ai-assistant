@@ -1,7 +1,14 @@
 // 場所を比べるための正規化だけを使う。`paths` ごと取り込むと `vscode` が
 // 付いてくるので、純粋な側を直に指す（`core/sceneMemo.ts` と同じ理由）
 import * as paths from "./pathText";
-import { fileRanker, type MemoColorPair, type SceneMemo } from "./sceneMemo";
+import {
+  fileRanker,
+  MEMO_TAG_COLORS,
+  memoTagClass,
+  type SceneMemo,
+} from "./sceneMemo";
+// 「矛盾（事実の照合）」の分類名。写さずに検知の側の定数を読む
+import { FACT_CONTRADICTION_CATEGORY } from "./factContradiction";
 import type { Finding, FindingCategory } from "../models/finding";
 
 /**
@@ -277,28 +284,112 @@ export function findingLabelOf(finding: {
 }
 
 /**
- * 指摘の印の色。**種類で分けず、1色にする。**
+ * 指摘の種類ごとの色。**指摘の色を書くのはここだけ**（設計書6.96.5）。
  *
- * 並びを種類で分けないと決めた以上、色まで種類ごとに割ると、目が
- * 「色の順に見る」ことを覚えてしまう。ここで区別したいのは
- * **誰が書いたか**（作者の付箋か、機械の指摘か）だけである。
+ * **種類ごとに分ける**（作者の要望 2026-10-04「推敲や誤字脱字等で色分けして
+ * ください」「表示ジャンルすべてです」）。0.98.9 までは「並びを種類で分けない
+ * なら色も分けない」として1色（紫）にしていたが、一覧を流し見して種類を
+ * 拾えないと作者が困った。並びは今までどおり話数 → 行のまま。
  *
- * 付箋の色（`core/sceneMemo.ts` の `MEMO_TAG_COLORS`）とは別の表に
- * してある。あちらは「あとで何をするか」の色で、こちらは出どころの印である。
+ * **VS Code のテーマの色（グラフの色）で受ける。** 明るい・暗い・ハイコントラストの
+ * どのテーマでも、テーマの側が背景に対して読める色を持っている。`#…` は
+ * テーマがその色を持たない環境のための既定（VS Code の既定の暗いテーマの値）。
+ *
+ * 付箋の色（`core/sceneMemo.ts` の `MEMO_TAG_COLORS`）と用語の色
+ * （`core/termColors.ts`）とは別の表である。付箋は「あとで何をするか」、
+ * 用語は「その語が何か」、こちらは「どの検知が挙げたか」の色。付箋の赤
+ * （TODO）と誤字脱字の赤のように色相が近いものはあるが、付箋と指摘は
+ * 帯の形（付箋は点線）と押せるボタンで見分けられる。**種類の名前の札は
+ * 必ず残す**（色だけで見分けさせない）。
  */
-export const FINDING_DOT_COLOR: MemoColorPair = {
-  light: "#6b4fbb",
-  dark: "#c0a9ff",
+export const FINDING_TONES = {
+  typo: "var(--vscode-charts-red, #f14c4c)",
+  notation: "var(--vscode-charts-orange, #d18616)",
+  proofread: "var(--vscode-charts-blue, #3794ff)",
+  contradiction: "var(--vscode-charts-purple, #b180d7)",
+  // 「矛盾」と並行して見比べる種類（設計書6.88.9）なので、矛盾と別の色にする。
+  // グラフの色は7色しか無いので、端末の色（テーマが必ず持つ）を借りる
+  factContradiction: "var(--vscode-terminal-ansiMagenta, #bc3fbc)",
+  deviation: "var(--vscode-charts-green, #89d185)",
+  // 知らない種類（外から置かれた指摘・これから足す検知）。勝手に強調しない
+  other: "var(--vscode-charts-foreground, #cccccc)",
+} as const;
+
+export type FindingToneKey = keyof typeof FINDING_TONES;
+
+/**
+ * 分類名 → 色。**選び口に並びうる分類名はすべてここに置く**——記録する分類
+ * （`core/findingSource.ts` の表）と古い記録の呼び名（`FINDING_CATEGORY_LABELS`）。
+ * 足し忘れると `test/unit/core/noteTones.test.ts` が落ちる。
+ */
+const FINDING_LABEL_TONES: Readonly<Record<string, FindingToneKey>> = {
+  誤字脱字: "typo",
+  // 分類名を残していなかったころの「typo」の呼び名
+  誤字: "typo",
+  表記ゆれ: "notation",
+  推敲: "proofread",
+  矛盾: "contradiction",
+  [FACT_CONTRADICTION_CATEGORY]: "factContradiction",
+  プロット逸脱: "deviation",
+  指摘: "other",
 };
 
-/** 画面で使うクラス名。付箋の `memo-todo` などと同じ並びに置く */
-export const FINDING_DOT_CLASS = "memo-ai";
+/** その分類名に色が決まっているか（見張り用。画面は知らない名前も `other` で塗る） */
+export function isKnownFindingLabel(label: string): boolean {
+  return Object.prototype.hasOwnProperty.call(FINDING_LABEL_TONES, label);
+}
 
-/** 画面へ渡す色（`--novelai-memo-ai`）。明暗の選び方は呼ぶ側が決める */
-export function findingColorVars(dark: boolean): Record<string, string> {
-  return {
-    [FINDING_DOT_CLASS]: dark ? FINDING_DOT_COLOR.dark : FINDING_DOT_COLOR.light,
-  };
+/** 画面で使う印の名前（`finding-typo` など）。付箋の `memo-todo` と同じ並びに置く */
+export function findingToneClass(label: string): string {
+  const key = isKnownFindingLabel(label) ? FINDING_LABEL_TONES[label] : "other";
+  return `finding-${key}`;
+}
+
+/**
+ * 画面へ渡す指摘の色（`--novelai-finding-typo` などになる）。
+ *
+ * 付箋の色（`memoColorVars`）と違って明暗を選ばない——テーマの色そのものを
+ * 渡すので、テーマが変われば画面の側で追う
+ */
+export function findingToneVars(): Record<string, string> {
+  const vars: Record<string, string> = {};
+  for (const [key, value] of Object.entries(FINDING_TONES)) {
+    vars[`finding-${key}`] = value;
+  }
+  return vars;
+}
+
+/**
+ * 画面が規則を持つべき印の名前すべて（付箋の種類と指摘の種類）。
+ *
+ * **画面の CSS はこれから組む**（`views/sceneMemoPanelHtml.ts`）。手で
+ * 並べると、種類を足したときに規則だけ抜けて、その種類が色無しで出る
+ */
+export function noteToneClasses(): string[] {
+  return [
+    ...Object.keys(MEMO_TAG_COLORS).map((kind) => `memo-${kind}`),
+    ...Object.keys(FINDING_TONES).map((key) => `finding-${key}`),
+  ];
+}
+
+/**
+ * 絞り込みの選び口の項目 → 印の名前。
+ *
+ * 付箋のタグは付箋の色、指摘の種類は指摘の色。同じ語が両方にあれば
+ * 選び口の項目は1つなので、付箋の色を使う（並びも付箋が先）
+ */
+export function tagTonesOf(
+  memoTags: readonly string[],
+  findingLabels: readonly string[]
+): Record<string, string> {
+  const tones: Record<string, string> = {};
+  for (const tag of memoTags) tones[tag] = memoTagClass(tag);
+  for (const label of findingLabels) {
+    if (!Object.prototype.hasOwnProperty.call(tones, label)) {
+      tones[label] = findingToneClass(label);
+    }
+  }
+  return tones;
 }
 
 /**

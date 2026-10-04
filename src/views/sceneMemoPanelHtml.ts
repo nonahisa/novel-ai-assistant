@@ -1,3 +1,5 @@
+import { noteToneClasses } from "../core/sceneMemoRows";
+
 /**
  * シーンメモのパネル（設計書6.40.4）。
  *
@@ -25,6 +27,18 @@
  * 助言を頼む）。提案パネルへ移る口は上の「提案パネル」1つだけ。**この画面は本文を直に書かない**
  * ——頼むだけで、当てるのも戻すのも拡張機能の側である。
  */
+/**
+ * 種類の印ごとの規則（`.tone-finding-typo { --note-color: … }` など）。
+ *
+ * 印の一覧は `core/sceneMemoRows.ts` の `noteToneClasses`（付箋と指摘の色の表）
+ * から取る。色の値はここに書かない——拡張機能が `--novelai-<印>` として届ける
+ */
+function toneRules(): string {
+  return noteToneClasses()
+    .map((name) => `.tone-${name} { --note-color: var(--novelai-${name}); }`)
+    .join("\n");
+}
+
 export function buildSceneMemoPanelHtml(
   nonce: string,
   cspSource: string
@@ -118,9 +132,18 @@ h2 {
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  padding: 5px 12px;
+  padding: 5px 12px 5px 9px;
   border-bottom: 1px solid var(--vscode-panel-border);
+  /* 種類の色の細い帯（作者の要望 2026-10-04）。流し見で種類を拾うため */
+  border-left: 3px solid var(--note-color, transparent);
 }
+/* 付箋は点線の帯。指摘と色相が近い種類（TODO の赤と誤字脱字の赤など）が
+   あっても、作者が書いたものか機械が挙げたものかを形で見分けられる */
+.memo.is-memo { border-left-style: dashed; }
+/* 種類ごとの色の印（設計書6.96.5）。**規則は色の表から組む**——色の値は
+   core（付箋は sceneMemo.ts、指摘は sceneMemoRows.ts）にだけ置き、拡張機能が
+   --novelai-<印> として届ける。手で並べると、種類を足したときに規則が抜ける */
+${toneRules()}
 /* いまカーソルのある場所にいちばん近い付箋（設計書6.40.4）。
    **光らせるだけで、本文は動かさない** */
 .memo.active { background: var(--vscode-list-activeSelectionBackground); }
@@ -131,15 +154,8 @@ h2 {
   height: 8px;
   margin-top: 6px;
   border-radius: 50%;
-  background: var(--novelai-memo-other, #6b6b6b);
+  background: var(--note-color, var(--vscode-descriptionForeground));
 }
-.dot.memo-todo { background: var(--novelai-memo-todo, #c01c28); }
-.dot.memo-check { background: var(--novelai-memo-check, #9a6700); }
-.dot.memo-foreshadow { background: var(--novelai-memo-foreshadow, #1a5fb4); }
-.dot.memo-idea { background: var(--novelai-memo-idea, #1c7c3c); }
-/* AIの指摘（設計書6.96.5）。**種類では分けず、1色**——分けるのは
-   「作者が書いたか、機械が挙げたか」だけである */
-.dot.memo-ai { background: var(--novelai-memo-ai, #6b4fbb); }
 /* 同じ行に続く2件目から。場所を繰り返さないので、**区切り線も引かない**
    ——線が入ると別の場所の指摘に見える（設計書6.96.5） */
 .memo.same-line { padding-top: 0; }
@@ -168,15 +184,20 @@ h2 {
   overflow-wrap: break-word;
 }
 .go:hover { text-decoration: underline; }
+/* 種類の札。**字はそのまま残す**（色だけで見分けさせない）。地は塗らず、
+   枠と字を種類の色にする——塗ると、明るいテーマの黄や緑の上で字が読めない */
 .tag {
   display: inline-block;
   margin-right: 5px;
-  padding: 0 5px;
+  padding: 0 4px;
   border-radius: 2px;
   font-size: 11px;
-  background: var(--vscode-badge-background);
-  color: var(--vscode-badge-foreground);
+  border: 1px solid var(--note-color, var(--vscode-badge-background));
+  color: var(--note-color, var(--vscode-badge-foreground));
 }
+/* 選び口で選んでいる種類の色。項目にも同じ印（● と字の色）を付ける */
+select#tag { border-left: 3px solid var(--note-color, transparent); }
+select#tag option { color: var(--note-color, var(--vscode-dropdown-foreground)); }
 .where {
   display: block;
   margin-top: 2px;
@@ -342,16 +363,21 @@ function renderTags() {
   if (el.tag.dataset.signature === signature) return;
   el.tag.dataset.signature = signature;
 
-  // 付箋のタグと、AIの指摘の種類が同じ一覧に並ぶ（設計書6.96.5）
+  // 付箋のタグと、AIの指摘の種類が同じ一覧に並ぶ（設計書6.96.5）。
+  // 項目ごとに、一覧の行と同じ色の印（● と字の色）を付ける（作者の要望 2026-10-04）
+  const tones = data.tagTones || {};
   const options = ['<option value="">すべて</option>'];
   for (const tag of data.tags) {
+    const tone = tones[tag] || "";
     options.push(
-      '<option value="' + escapeHtml(tag) + '"' +
+      '<option class="tone-' + escapeHtml(tone) + '" value="' + escapeHtml(tag) + '"' +
         (tag === data.tag ? " selected" : "") + ">" +
-        escapeHtml(tag) + "</option>"
+        (tone ? "● " : "") + escapeHtml(tag) + "</option>"
     );
   }
   el.tag.innerHTML = options.join("");
+  // 選び口の枠にも、選んでいる種類の色を出す（「すべて」なら出さない）
+  el.tag.className = data.tag && tones[data.tag] ? "tone-" + tones[data.tag] : "";
 }
 
 /**
@@ -402,8 +428,11 @@ function renderRow(row) {
   const same = row.sameLine ? " same-line" : "";
   const where = row.chapterLabel +
     (row.title ? " " + row.title : "") + "　" + row.line + "行目";
-  return '<div class="memo' + active + same + '">' +
-    '<span class="dot ' + escapeHtml(row.tagClass) + '"></span>' +
+  // 種類の色の印。帯・札・丸の3つが、この印の色（--note-color）で塗られる
+  const tone = " " + escapeHtml("tone-" + row.tagClass);
+  const isMemo = row.kind === "memo" ? " is-memo" : "";
+  return '<div class="memo' + tone + isMemo + active + same + '">' +
+    '<span class="dot"></span>' +
     '<span class="main">' +
       '<button class="go" data-act="go" data-key="' + escapeHtml(row.key) + '">' +
         '<span class="tag">' + escapeHtml(row.tag) + "</span>" +
