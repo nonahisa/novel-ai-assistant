@@ -19,3 +19,8 @@
 *.vsix binary
 *.png binary
 *.jpg binary
+
+# Windows のバッチファイルだけは CRLF にする。
+# cmd.exe は LF だけの bat で、ラベルや括弧のブロックを読み違えることがある
+# （build-vsix.bat。上の eol=lf のままだと作業ツリーで LF になる）
+*.bat text eol=crlf
