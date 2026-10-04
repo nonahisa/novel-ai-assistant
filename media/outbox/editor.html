@@ -181,6 +181,11 @@ textarea[readonly] { background: var(--done-ground); }
   overflow-y: hidden;
   resize: none;
 }
+/* 縦書きでは下線（変換中の印を含む）を字の右に引く。日本語の縦組みの慣わし（作者の要望、2026-10-05） */
+.vertical textarea, .vertical .view {
+  text-underline-position: right;
+  -webkit-text-underline-position: right;
+}
 /* 組んだ表示：ルビと傍点を組んで読むだけ（書けない） */
 .view {
   font-family: var(--font-display);
