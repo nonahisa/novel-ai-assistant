@@ -257,7 +257,8 @@ describe("相談の画面に繋がっている", () => {
   );
 
   test("パネルは、core の選び方を通す", () => {
-    expect(panel).toContain("workChatReaderBlocks(readerProfile, question)");
+    // 3つ目はターゲットシートの狙いと理由（設計書6.108.6 の⑤。0.98.8）
+    expect(panel).toContain("workChatReaderBlocks(readerProfile, question, readerAim)");
   });
 
   test("読者像が無いときは、決めていないことを渡す", () => {

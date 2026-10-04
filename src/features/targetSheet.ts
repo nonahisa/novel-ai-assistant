@@ -8,10 +8,16 @@ import {
   ReaderTargetStore,
   ReaderTargetStoreError,
 } from "../core/readerTargetStore";
-import { hasReaderProfile, type ReaderProfile } from "../models/readerProfile";
+import type { ReaderProfile } from "../models/readerProfile";
 import type { ReaderChatSource } from "../core/readerTarget";
-import type { ReaderScores } from "../models/readerProfile";
 import { targetSheetFor, type TargetSheet } from "../core/targetSheet";
+import {
+  buildTargetSheetAdviceMaterial,
+  parseTargetSheetAdviceRecord,
+  targetSheetBasis,
+  TARGET_SHEET_ADVICE_FILE,
+  type TargetSheetAdviceRecord,
+} from "../core/targetSheetAdvice";
 import {
   buildTargetSheetDoc,
   DEFAULT_AUTHOR_BLOCK,
@@ -124,8 +130,9 @@ export interface OpenTargetSheetOptions {
  *
  * **ここではAIを呼ばない。** 材料は読者像の台帳（`設定/読者像.json`）・
  * 作者の欄（狙いと理由）・作者自身の読者タイプ・タイトルの適合度の記録
- * （測ったときに残したもの）、そして書けたものの実績（原稿・執筆の記録・
- * 設定資料・投稿の台帳。読むだけ）である。助言（第3段）は次の版。
+ * （測ったときに残したもの）、助言の記録（「助言を作る」で残したもの）、
+ * そして書けたものの実績（原稿・執筆の記録・設定資料・投稿の台帳。
+ * 読むだけ）である。
  *
  * ## 書くのは2つだけ
  *
@@ -159,7 +166,7 @@ export async function openTargetSheet(
   const authorBlock = options.authorBlock ?? state.authorBlock;
   const aim = readAimTypes(authorBlock);
 
-  const basis = sheetBasis(profile);
+  const basis = targetSheetBasis(profile);
   if (!basis && aim.length === 0) {
     await warnWithLog(
       `${TARGET_SHEET_TITLE}：この作品の狙いも読者像もまだありません。` +
@@ -180,6 +187,10 @@ export async function openTargetSheet(
   const at = new Date();
   const history = await recordHistory(historyDir, sheet, basis?.source, at, notices);
   const titleFit = await readTitleFitRecord(settings, notices);
+  // 助言（P-46）は押したときに作った記録を並べるだけ。いまの材料の指紋と
+  // 比べて、作ったあとに材料が変わっていれば紙で断る
+  const adviceRecord = await readTargetSheetAdviceRecord(settings, notices);
+  const adviceMaterial = buildTargetSheetAdviceMaterial({ authorBlock, profile });
 
   /*
     書けたものの実績（2026-09-23 に単独の3つの輪の紙から移した）。
@@ -212,6 +223,12 @@ export async function openTargetSheet(
     }),
     written,
     titleFit,
+    advice: {
+      record: adviceRecord,
+      ...("material" in adviceMaterial
+        ? { currentMark: adviceMaterial.material.mark }
+        : {}),
+    },
     generatedAt: at,
   });
 
@@ -245,30 +262,6 @@ async function loadProfile(
     }
     throw error;
   }
-}
-
-/**
- * どの点数で測るか。
- *
- * **実像（書けているもの）を先に採る。** 相談へ渡す読者像
- * （`chatReaderBasis`）は宣言を先に採るが、あちらは「作者が向かおうと
- * している先へ助言を添える」ための選び方である。このシートの「実態」の
- * 欄が見たいのは**書けているもの**なので、逆の順になる。
- *
- * 実像がまだ無ければ宣言で出す（紙の側に出どころを書く）。どちらも
- * 無ければ `undefined`——**推測で埋めない**。
- */
-function sheetBasis(
-  profile: ReaderProfile
-): { scores: ReaderScores; source: ReaderChatSource } | undefined {
-  if (!hasReaderProfile(profile)) return undefined;
-  if (profile.actual) {
-    return { scores: profile.actual.scores, source: "actual" };
-  }
-  if (profile.declared) {
-    return { scores: profile.declared.scores, source: "declared" };
-  }
-  return undefined;
 }
 
 /**
@@ -393,6 +386,36 @@ export async function readTitleFitRecord(
     notices.push(
       `設定/${TARGET_SHEET_HISTORY_DIR}/${TITLE_FIT_FILE} を読めませんでした（こちらでは直しません）。` +
         "適合度の欄は空にしてあります。"
+    );
+  }
+  return record;
+}
+
+/** 助言の記録の置き場（`設定/ターゲットシート/助言.json`） */
+export function targetSheetAdvicePath(settings: string): string {
+  return path.join(settings, TARGET_SHEET_HISTORY_DIR, TARGET_SHEET_ADVICE_FILE);
+}
+
+/**
+ * 助言の記録を読む。**無ければ `undefined`**。読めないときも `undefined`
+ * だが断り書きを残す（適合度と同じ。記録1つのせいでシートを止めない）。
+ */
+export async function readTargetSheetAdviceRecord(
+  settings: string,
+  notices: string[]
+): Promise<TargetSheetAdviceRecord | undefined> {
+  const text = await readTextIfExists(targetSheetAdvicePath(settings));
+  if (text === undefined) return undefined;
+  let record: TargetSheetAdviceRecord | undefined;
+  try {
+    record = parseTargetSheetAdviceRecord(JSON.parse(text));
+  } catch {
+    record = undefined;
+  }
+  if (!record) {
+    notices.push(
+      `設定/${TARGET_SHEET_HISTORY_DIR}/${TARGET_SHEET_ADVICE_FILE} を読めませんでした（こちらでは直しません）。` +
+        "助言の欄は空にしてあります。"
     );
   }
   return record;

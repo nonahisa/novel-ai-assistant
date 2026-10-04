@@ -6,6 +6,7 @@ import { chatPrompt } from "../../../src/mcp/tools/chat";
 import { buildFeatureGuideForQuestion } from "../../../src/core/featureGuide";
 import { buildWorkChatSystemPrompt } from "../../../src/prompts/workChat";
 import {
+  buildReaderAimPrompt,
   buildReaderTypeGlossaryPrompt,
   buildReaderTypeUnknownPrompt,
 } from "../../../src/prompts/readerTarget";
@@ -143,6 +144,45 @@ describe("読者の材料", () => {
 
     expect(result.systemPrompt).toContain(buildReaderTypeUnknownPrompt());
     expect(result.systemPrompt).toContain(buildReaderTypeGlossaryPrompt());
+  });
+
+  /**
+   * ターゲットシートの狙いと理由（設計書6.108.6 の⑤。0.98.8）。製品の相談と
+   * 同じく、狙いがあれば毎回足し、読者像が無くても「まだ決めていません」は送らない。
+   */
+  test("シートに狙いと理由があれば、名前と理由を渡す（製品と同じ）", () => {
+    const folder = workWithoutReader();
+    fs.writeFileSync(
+      nodePath.join(folder, "設定", "ターゲットシート.md"),
+      [
+        "# ターゲットシート",
+        "<!-- 作者の欄 ここから -->",
+        "狙い：考察層",
+        "理由：伏線を拾ってくれる人に届けたい",
+        "<!-- ここまで -->",
+      ].join("\n")
+    );
+
+    const result = chatPrompt({ folder, question: "この場面はどうでしょう" });
+
+    expect(result.systemPrompt).toContain(
+      buildReaderAimPrompt(["lore_deep"], "伏線を拾ってくれる人に届けたい")
+    );
+    expect(result.systemPrompt).not.toContain(buildReaderTypeUnknownPrompt());
+    expect(result.diagnoses.readerAim).toBe(true);
+  });
+
+  test("印の無い同名のファイルからは、狙いを読まない（製品と同じ）", () => {
+    const folder = workWithoutReader();
+    fs.writeFileSync(
+      nodePath.join(folder, "設定", "ターゲットシート.md"),
+      "自分のメモ\n狙い：考察層\n"
+    );
+
+    const result = chatPrompt({ folder, question: "この場面はどうでしょう" });
+
+    expect(result.systemPrompt).not.toContain("【作者が狙う読者】");
+    expect(result.diagnoses.readerAim).toBe(false);
   });
 
   test("読者の反応の話なら、投稿状態の材料を足す（台帳が無ければ空の台帳として）", async () => {

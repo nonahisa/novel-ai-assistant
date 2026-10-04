@@ -246,7 +246,8 @@ describe("版", () => {
     // 「本文からの見立て」と断って挙げてよいことにした
     // 3.25（2026-10-04）：校正・メモパネルの［AIに相談］から送る依頼文
     // （buildFindingAdviceQuestion）を足した（システム指示は変えていない）
-    expect(WORK_CHAT_VERSION).toBe("3.25");
+    // 3.26（2026-10-04）：ターゲットシートの狙いと理由を【作者が狙う読者】として足した
+    expect(WORK_CHAT_VERSION).toBe("3.26");
     expect(SETTINGS_CHAT_VERSION).toBe("3.0");
   });
 });
