@@ -19,8 +19,10 @@
  * 場所は1度だけ出す**（`sameLine`）。どちらの行かは `kind` で分かれ、
  * 押せるものも分かれる——付箋は「済み」（本文から消す）、指摘は
  * 修正案があれば「直す」（拡張機能が提案パネルの［適用］と同じ関数で
- * 本文へ当てる。作者の裁定 2026-10-03）、無ければ「提案へ」（提案パネルへ
- * 渡す）と、「見送る」（記録を足す）である。**この画面は本文を直に書かない**
+ * 本文へ当てる。作者の裁定 2026-10-03）、無ければ「本文へ」（原稿のその行へ
+ * 飛ぶ。作者の裁定 2026-10-04——以前は「提案へ」だった）と、「見送る」（記録を
+ * 足す）である。修正案の無い推敲の指摘には「AIに相談」も出る（相談パネルで
+ * 助言を頼む）。提案パネルへ移る口は上の「提案パネル」1つだけ。**この画面は本文を直に書かない**
  * ——頼むだけで、当てるのも戻すのも拡張機能の側である。
  */
 export function buildSceneMemoPanelHtml(
@@ -207,6 +209,7 @@ h2 {
     <select id="tag" title="付箋のタグやAIの指摘の種類で絞り込みます"></select>
     <input type="search" id="query" placeholder="文字で探す">
     <button id="export" title="いま出ているメモをMarkdownで書き出します">書き出す</button>
+    <button id="openProposals" hidden title="提案パネルを開きます（矛盾の再チェック・伏線として登録・まとめて適用など、提案パネルにしか無い操作はこちら）">提案パネル</button>
   </div>
 </header>
 <div id="notice"></div>
@@ -233,6 +236,7 @@ const el = {
   tag: document.getElementById("tag"),
   query: document.getElementById("query"),
   exportMd: document.getElementById("export"),
+  openProposals: document.getElementById("openProposals"),
   notice: document.getElementById("notice"),
   fixed: document.getElementById("fixed"),
   fixedText: document.getElementById("fixedText"),
@@ -264,6 +268,7 @@ el.onlyCurrent.addEventListener("click", function () {
 });
 el.tag.addEventListener("change", sendFilter);
 el.exportMd.addEventListener("click", function () { post("export"); });
+el.openProposals.addEventListener("click", function () { post("openProposals"); });
 el.undoFix.addEventListener("click", function () { post("undoFix"); });
 
 /**
@@ -311,9 +316,10 @@ el.list.addEventListener("click", function (event) {
     post("fix", { findingId: row.findingId });
     return;
   }
-  if (act === "handOver") {
-    // 修正案の無い指摘。直し方は作者が決めるので、提案パネルへ渡す
-    post("handOver", { findingId: row.findingId });
+  if (act === "consult") {
+    // 修正案の無い推敲の指摘。相談パネルでAIに助言を頼む（拡張機能の側が
+    // 相談と同じ道で送る。この画面は頼むだけ）
+    post("consult", { findingId: row.findingId });
     return;
   }
   if (act === "dismiss") {
@@ -352,23 +358,32 @@ function renderTags() {
  * 押せるものを組む。**付箋と指摘で違う**（設計書6.96.5）。
  *
  * 付箋は本文から消せる。指摘は、修正案があれば［直す］（拡張機能が
- * 提案パネルと同じ道で当てる）、無ければ［提案へ］、それと［見送る］。
+ * 提案パネルと同じ道で当てる）、無ければ［本文へ］（行の場所を押したときと
+ * 同じ道で原稿のその行へ飛ぶ）、修正案の無い推敲には［AIに相談］、それと［見送る］。
  */
 function renderActions(row) {
   const key = escapeHtml(row.key);
   if (row.kind === "finding") {
     const buttons = [];
-    // 修正案があれば［直す］（1手で本文へ当てる）、無ければ［提案へ］。
-    // 口が無ければ出さない（押しても何も起きない口を作らない）
+    // 修正案があれば［直す］（1手で本文へ当てる）、無ければ［本文へ］。
+    // ［本文へ］の data-act="reveal" は、下の受け口で行の場所を押したときと
+    // 同じ「reveal」へ落ちる（飛ぶ道を1本にする。設計書6.25.11）
     if (row.fixAction === "apply") {
       buttons.push(
         '<button class="done" data-act="fix" data-key="' + key +
           '" title="修正案を本文へ当てます（上に出る［戻す］で元に戻せます）">直す</button>'
       );
-    } else if (row.fixAction === "handOver") {
+    } else {
       buttons.push(
-        '<button class="done" data-act="handOver" data-key="' + key +
-          '" title="この指摘を提案パネルへ渡します（直し方は作者が決めます。本文はまだ変わりません）">提案へ</button>'
+        '<button class="done" data-act="reveal" data-key="' + key +
+          '" title="原稿のこの行へ飛びます（直し方は作者が決めます。本文は変わりません）">本文へ</button>'
+      );
+    }
+    // 口が無ければ出さない（押しても何も起きない口を作らない）
+    if (row.canConsult) {
+      buttons.push(
+        '<button class="done" data-act="consult" data-key="' + key +
+          '" title="この一文と指摘を添えて、相談パネルでAIに直し方の助言を頼みます（相談に割り当てたAIを使います。本文は変わりません）">AIに相談</button>'
       );
     }
     buttons.push(
@@ -420,6 +435,7 @@ function render() {
   // **書き出すのは付箋だけ**（AIの指摘は作者が書いたものではない）。
   // 指摘しか出ていないときに押せると、空の1枚が開く
   el.exportMd.disabled = !data.hasMemosToExport;
+  el.openProposals.hidden = data.canOpenProposals !== true;
   if (el.query.value !== data.query) el.query.value = data.query;
 
   renderTags();
