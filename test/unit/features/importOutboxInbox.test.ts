@@ -6,8 +6,8 @@ import { execFileSync } from "node:child_process";
 import { FileSystemError, FileType, workspace } from "../support/vscodeStub";
 import { runInboxImport, countPendingInboxRecords } from "../../../src/features/importOutboxInbox";
 import { outboxImport } from "../../../src/mcp/tools/outbox";
-import { OUTBOX_INBOX_FORMAT } from "../../../src/core/outboxInbox";
-import { gitBlobSha, type OutboxRecord } from "../../../src/core/outboxImport";
+import { OUTBOX_INBOX_FORMAT, parseInboxResult } from "../../../src/core/outboxInbox";
+import { BODY_CHANGED_REASON, gitBlobSha, type OutboxRecord } from "../../../src/core/outboxImport";
 import { commitAll } from "../../../src/core/gitSetup";
 import { runGit } from "../../../src/core/git";
 import type { WorkEntry } from "../../../src/models/types";
@@ -180,8 +180,23 @@ describe("受け取り箱を取り込む", () => {
     // 読めた箱は done へ、壊れた箱は受け取り箱に残る
     const inbox = nodePath.join(work.folderPath, ".aiwriter", "inbox");
     expect(fs.readdirSync(inbox).sort()).toEqual(["20261004T050100Z-phone.json", "done"]);
-    expect(fs.readdirSync(nodePath.join(inbox, "done"))).toEqual(["20261004T050000Z-tablet.json"]);
+    expect(fs.readdirSync(nodePath.join(inbox, "done")).sort()).toEqual([
+      "20261004T050000Z-tablet.json",
+      "20261004T050000Z-tablet.json.result.json",
+    ]);
     expect(report.broken.map((item) => item.name)).toEqual(["20261004T050100Z-phone.json"]);
+    // 結果のファイル：ページが断られた記録を理由つきで出すため（記録ごと・箱の中の順）
+    const result = parseInboxResult(
+      fs.readFileSync(nodePath.join(inbox, "done", "20261004T050000Z-tablet.json.result.json"), "utf8")
+    );
+    expect(result.ok && result.box).toBe("20261004T050000Z-tablet.json");
+    expect(result.ok && result.results.map((item) => [item.id, item.status])).toEqual([
+      ["m1", "imported"],
+      ["m2", "refused"],
+      ["v1", "imported"],
+      ["m3", "refused"],
+    ]);
+    expect(result.ok && result.results[1].reason).toBe(BODY_CHANGED_REASON);
 
     // 同じ記録を別の箱で送り直しても、入れ済みで返す
     putBox(work, "20261004T060000Z-tablet.json", [recordsFor(bytes)[2]]);
@@ -190,7 +205,9 @@ describe("受け取り箱を取り込む", () => {
     // done に同じ名前が無いので、そのままの名前で移る
     expect(fs.readdirSync(nodePath.join(inbox, "done")).sort()).toEqual([
       "20261004T050000Z-tablet.json",
+      "20261004T050000Z-tablet.json.result.json",
       "20261004T060000Z-tablet.json",
+      "20261004T060000Z-tablet.json.result.json",
     ]);
   });
 

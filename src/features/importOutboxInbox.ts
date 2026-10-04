@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { scanWork } from "../core/scanner";
+import { atomicWriteFile } from "../core/atomicWrite";
 import {
   hasUnsavedChanges,
   writeTextFilePreservingFormat,
@@ -17,6 +18,9 @@ import {
 import {
   OUTBOX_INBOX_DIR,
   OUTBOX_INBOX_DONE,
+  buildInboxResult,
+  inboxResultName,
+  type OutboxInboxResultFile,
   describeInboxImport,
   doneNameFor,
   parseInboxFile,
@@ -170,6 +174,8 @@ export async function runInboxImport(
   const broken: InboxImportReport["broken"] = [];
   const readable: string[] = [];
   const records: OutboxRecord[] = [];
+  /** 箱ごとの記録（結果のファイルを箱ごとに組むため） */
+  const boxRecords = new Map<string, OutboxRecord[]>();
   for (const name of names) {
     let text: string;
     try {
@@ -187,6 +193,7 @@ export async function runInboxImport(
     }
     readable.push(name);
     records.push(...parsed.records);
+    boxRecords.set(name, parsed.records);
   }
 
   // 記録が1つも無ければ、本文の走査も置き場の読みもしない（空の箱は移すだけ）
@@ -201,21 +208,31 @@ export async function runInboxImport(
           now: options.now,
         });
 
-  const unmoved = await moveToDone(work, readable);
+  const unmoved = await moveToDone(
+    work,
+    readable.map((name) => ({
+      name,
+      result: buildInboxResult(name, boxRecords.get(name) ?? [], outcome.results, options.now ?? new Date()),
+    }))
+  );
   return { boxes: readable, broken, outcome, unmoved };
 }
 
 /**
- * 読めた箱を `inbox/done/` へ移す。**移し先に同じ名前があれば別の名前にする**
- * （既存のファイルを上書きしない）。移せなくても取り込みは済んでいる——
- * 次に押したときは「入れ済み」で返るだけなので、理由を知らせて残す
+ * 読めた箱を `inbox/done/` へ移し、隣に結果のファイル（`<箱の名前>.result.json`）を置く。
+ * **移し先に同じ名前があれば別の名前にする**（既存のファイルを上書きしない）。
+ * 移せなくても取り込みは済んでいる——次に押したときは「入れ済み」で返るだけなので、
+ * 理由を知らせて残す（結果のファイルは、移せた箱にだけ置く）
+ *
+ * 結果のファイルはページへ「断った理由」を返すためのもの（リーダーの裁定 2026-10-04）。
+ * 次の同期で GitHub へ届き、ページが読んで、入らなかった記録を決め直せるようにする
  */
 async function moveToDone(
   work: WorkEntry,
-  names: readonly string[]
+  boxes: ReadonlyArray<{ name: string; result: OutboxInboxResultFile }>
 ): Promise<Array<{ name: string; reason: string }>> {
   const unmoved: Array<{ name: string; reason: string }> = [];
-  if (names.length === 0) return unmoved;
+  if (boxes.length === 0) return unmoved;
   const doneDir = path.join(inboxDir(work), OUTBOX_INBOX_DONE);
   await vscode.workspace.fs.createDirectory(path.toUri(doneDir));
   const taken = new Set<string>();
@@ -224,7 +241,7 @@ async function moveToDone(
   } catch {
     // 空なら何も無い
   }
-  for (const name of names) {
+  for (const { name, result } of boxes) {
     const target = doneNameFor(name, taken);
     try {
       await vscode.workspace.fs.rename(
@@ -235,6 +252,24 @@ async function moveToDone(
       taken.add(target);
     } catch (error) {
       unmoved.push({ name, reason: error instanceof Error ? error.message : String(error) });
+      continue;
+    }
+    // ページは「送った箱の名前 + .result.json」を読む。同じ名前があれば上書きせず別の名前に
+    // （そのときページは結果を見つけられず、今までどおり「取り込み済み」と出すだけ）
+    const resultName = doneNameFor(inboxResultName(name), taken);
+    try {
+      await atomicWriteFile(
+        path.join(doneDir, resultName),
+        new TextEncoder().encode(`${JSON.stringify(result, null, 2)}\n`),
+        { mode: "create" }
+      );
+      taken.add(resultName);
+    } catch (error) {
+      logFailure("原稿箱の結果のファイルを置けなかった", {
+        作品: work.title,
+        箱: name,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
     }
   }
   return unmoved;

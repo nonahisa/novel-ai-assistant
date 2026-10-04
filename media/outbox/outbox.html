@@ -191,6 +191,9 @@ textarea {
 }
 .record.sent { border-style: solid; }
 .record.imported { background: var(--done-ground); color: var(--muted); border-style: solid; }
+/* 入らなかった記録：灰色の「取り込み済み」と分け、理由を地の色と線で目立たせる */
+.record.refused { border: 2px solid var(--reject); background: var(--sheet); }
+.refused-why { color: var(--reject); font-weight: 600; }
 .record .who { font-size: 0.75rem; color: var(--muted); }
 .empty { color: var(--muted); font-size: 0.9rem; }
 /* Claude に聞く：指摘の下で開く小さな欄。答えは原稿と同じ紙の色に置き、メモの欄と見分ける */
@@ -692,8 +695,49 @@ var OutboxLogic = (function () {
     };
   }
 
+  /*
+    取り込みの結果のファイル（拡張機能の core/outboxInbox.ts の buildInboxResult が置く
+    inbox/done/<箱の名前>.result.json）。断られた記録を、理由つきで決め直せるようにするため
+  */
+  var RESULT_FORMAT = "novelai-outbox-result";
+  function resultFileName(boxName) { return boxName + ".result.json"; }
+
+  // 結果のファイルを読む。形が違えば null（古い拡張機能・壊れたファイル）
+  function parseResultFile(text) {
+    var value;
+    try { value = JSON.parse(String(text || "").replace(/^﻿/, "")); } catch (error) { return null; }
+    if (!value || value.format !== RESULT_FORMAT || value.version !== 1 || !Array.isArray(value.results)) return null;
+    var out = {};
+    value.results.forEach(function (item) {
+      if (!item || typeof item.id !== "string") return;
+      if (item.status !== "imported" && item.status !== "already" && item.status !== "refused") return;
+      out[item.id] = { status: item.status, reason: str(item.reason) };
+    });
+    return out;
+  }
+
+  /*
+    記録の行き先。results は 箱の名前 → parseResultFile の答え。
+    - unsent：まだ送っていない
+    - sent：送った（パソコンの取り込み待ち。箱がまだ done に無い）
+    - imported：取り込み済み（結果のファイルが無い古い箱も、今までどおりここ）
+    - refused：送ったが、パソコンで入らなかった（結果のファイルに理由がある）
+  */
+  function recordStage(record, doneNames, results) {
+    if (record.imported === true) return { stage: "imported", reason: "" };
+    if (record.sent !== true) return { stage: "unsent", reason: "" };
+    var box = str(record.sentFile);
+    if (doneNames.indexOf(box) < 0) return { stage: "sent", reason: "" };
+    var found = results && results[box] && results[box][str(record.id)];
+    if (found && found.status === "refused") return { stage: "refused", reason: found.reason };
+    return { stage: "imported", reason: "" };
+  }
+
   return {
     DEFAULT_RETENTION_DAYS: DEFAULT_RETENTION_DAYS,
+    resultFileName: resultFileName,
+    parseResultFile: parseResultFile,
+    recordStage: recordStage,
     parseFindingLines: parseFindingLines,
     resolveFindings: resolveFindings,
     panelStateOf: panelStateOf,
@@ -744,7 +788,8 @@ var OutboxLogic = (function () {
   var state = {
     db: null, sample: null, mcp: null, myId: null,
     repo: null, works: [], work: null, episodes: [], shas: {}, findings: [],
-    inboxNames: [], doneNames: [], records: [], localAdded: {}, sending: {}, flashUntil: 0,
+    inboxNames: [], doneNames: [], results: {}, resultsLoading: {},
+    records: [], localAdded: {}, sending: {}, flashUntil: 0,
     loading: false, sendingBox: false, pendingSend: null
   };
 
@@ -1042,6 +1087,41 @@ var OutboxLogic = (function () {
       state.pendingSend = null;
       await markSent(pending.ids, pending.name);
     }
+    state.results = {};
+    state.resultsLoading = {};
+    ensureResults();
+  }
+
+  /*
+    取り込みの結果のファイル（done/<箱の名前>.result.json）を、自分が送った箱の分だけ読む。
+    断られた記録を理由つきで出し、決め直せるようにするため（リーダーの裁定 2026-10-04）。
+    結果のファイルが無い古い箱は読まない（今までどおり「取り込み済み」）
+  */
+  function ensureResults() {
+    if (!state.work || !state.mcp) return;
+    var work = state.work;
+    var boxes = [];
+    allRecords().forEach(function (r) {
+      var box = str(r.sentFile);
+      if (r.sent !== true || !box || boxes.indexOf(box) >= 0) return;
+      if (state.doneNames.indexOf(box) < 0) return;
+      if (state.doneNames.indexOf(OutboxLogic.resultFileName(box)) < 0) return;
+      if (state.results[box] || state.resultsLoading[box]) return;
+      boxes.push(box);
+    });
+    boxes.forEach(function (box) {
+      state.resultsLoading[box] = true;
+      readOptional(repoPath(work, ".aiwriter/inbox/done/" + OutboxLogic.resultFileName(box)))
+        .then(function (file) {
+          if (state.work !== work) return;
+          state.results[box] = (file && OutboxLogic.parseResultFile(file.text)) || {};
+          scheduleRender();
+        })
+        .catch(function () {
+          // 読めなければ「取り込み済み」のまま（次に［読む］を押せば読み直す）
+          delete state.resultsLoading[box];
+        });
+    });
   }
 
   /* ── 保存（自分の箱）と送る ─────────────────────────── */
@@ -1060,25 +1140,28 @@ var OutboxLogic = (function () {
     return state.records.concat(extra).filter(function (r) { return str(r.work) === key; });
   }
 
-  // 記録の行き先：まだ送っていない・送った（パソコンの取り込み待ち）・取り込み済み
+  // 記録の行き先：まだ送っていない・送った（パソコンの取り込み待ち）・取り込み済み・入らなかった
   function stageOf(r) {
-    if (r.imported === true) return "imported";
-    if (r.sent !== true) return "unsent";
-    return state.doneNames.indexOf(str(r.sentFile)) >= 0 ? "imported" : "sent";
+    return OutboxLogic.recordStage(r, state.doneNames, state.results).stage;
   }
-  var STAGE_LABELS = { unsent: "まだ送っていない", sent: "送った・パソコンの取り込み待ち", imported: "取り込み済み" };
+  function refusedReasonOf(r) {
+    return OutboxLogic.recordStage(r, state.doneNames, state.results).reason;
+  }
+  var STAGE_LABELS = { unsent: "まだ送っていない", sent: "送った・パソコンの取り込み待ち", imported: "取り込み済み", refused: "パソコンで入らなかった" };
 
   function updateTray() {
     var all = allRecords();
     var unsent = all.filter(function (r) { return stageOf(r) === "unsent"; }).length;
     var sent = all.filter(function (r) { return stageOf(r) === "sent"; }).length;
     var imported = all.filter(function (r) { return stageOf(r) === "imported"; }).length;
+    var refused = all.filter(function (r) { return stageOf(r) === "refused"; }).length;
     trayCountEl.textContent = !state.myId
       ? "読むだけで開いています"
       : unsent > 0 ? "まだ送っていない " + unsent + "件" : "まだ送っていないものはありません";
     var sentParts = [];
     if (sent > 0) sentParts.push("送った " + sent + "件（パソコンの取り込み待ち）");
     if (imported > 0) sentParts.push("取り込み済み " + imported + "件");
+    if (refused > 0) sentParts.push("入らなかった " + refused + "件（理由は各指摘の下。決め直せます）");
     traySentEl.textContent = sentParts.join("・");
     traySentEl.hidden = sentParts.length === 0;
     sendEl.disabled = !(state.mcp && state.db && state.myId && state.work && unsent > 0) || state.sendingBox;
@@ -1190,7 +1273,8 @@ var OutboxLogic = (function () {
   // その指摘への、自分のいちばん新しい判断（採否・自分で直した文）。取り込みも、いちばん新しい1件だけを当てる
   function decisionOf(findingId) {
     var list = recordsFor(function (r) {
-      return str(r.findingId) === findingId && (r.kind === "verdict" || r.kind === "edit");
+      // 入らなかった判断は「決めた状態」から外す（もう一度押し直せるように）
+      return str(r.findingId) === findingId && (r.kind === "verdict" || r.kind === "edit") && stageOf(r) !== "refused";
     });
     return list.length ? list[list.length - 1] : null;
   }
@@ -1201,7 +1285,9 @@ var OutboxLogic = (function () {
 
   // まだ送っていない自分の記録だけを消す（決め直したいとき）。送ったものは GitHub にあるので消さない
   async function cancelRecord(r, button) {
-    if (!state.db || !state.myId || stageOf(r) !== "unsent") return;
+    // まだ送っていないものと、入らなかったもの（片づける）だけ。送ったもの・入ったものは GitHub にあるので消さない
+    var removable = stageOf(r);
+    if (!state.db || !state.myId || (removable !== "unsent" && removable !== "refused")) return;
     if (button) button.disabled = true;
     try {
       await state.db.doc("records/" + state.myId + "/items/" + str(r.id)).delete();
@@ -1218,7 +1304,7 @@ var OutboxLogic = (function () {
     container.textContent = "";
     records.forEach(function (r) {
       var stage = stageOf(r);
-      var row = el("div", "record" + (stage === "imported" ? " imported" : stage === "sent" ? " sent" : ""));
+      var row = el("div", "record" + (stage === "imported" ? " imported" : stage === "sent" ? " sent" : stage === "refused" ? " refused" : ""));
       var what = r.kind === "verdict"
         ? "判断：" + (VERDICT_LABELS[str(r.verdict)] || "")
         : r.kind === "edit"
@@ -1228,10 +1314,14 @@ var OutboxLogic = (function () {
       var tail = [str(r.device), formatTime(r.at), STAGE_LABELS[stage]].filter(Boolean).join("・");
       var line = el("div", "record-row");
       line.appendChild(el("div", "who", tail));
-      if (stage === "unsent" && state.db) {
-        var cancel = el("button", "", "取り消す");
+      if (stage === "refused") {
+        // 灰色の「取り込み済み」とは分け、理由を目立たせる（作者が入らなかったことに気づけるように）
+        row.appendChild(el("div", "refused-why", "パソコンで入りませんでした：" + (refusedReasonOf(r) || "理由は記録されていません")));
+      }
+      if ((stage === "unsent" || stage === "refused") && state.db) {
+        var cancel = el("button", "", stage === "refused" ? "片づける" : "取り消す");
         cancel.type = "button";
-        cancel.setAttribute("aria-label", "この記録を取り消す");
+        cancel.setAttribute("aria-label", stage === "refused" ? "入らなかった記録を片づける" : "この記録を取り消す");
         cancel.addEventListener("click", function () { cancelRecord(r, cancel); });
         line.appendChild(cancel);
       }
@@ -1896,6 +1986,8 @@ var OutboxLogic = (function () {
       state.db.collection("records/" + state.myId + "/items").onSnapshot(function (snap) {
         state.records = snap.docs.map(function (d) { return Object.assign({}, d.data() || {}, { id: d.id }); });
         state.records.forEach(function (r) { delete state.localAdded[str(r.id)]; });
+        // 記録が後から届いたときも、送った箱の結果を読む（読み済みの箱は読まない）
+        ensureResults();
         scheduleRender();
       }, function () { setStatus("保存したものが読めなくなりました。開き直してください。", true); });
     }

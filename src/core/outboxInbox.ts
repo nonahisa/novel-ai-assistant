@@ -1,5 +1,5 @@
 import { AIWRITER_DIR } from "../models/types";
-import type { OutboxImportOutcome, OutboxRecord } from "./outboxImport";
+import type { OutboxImportItem, OutboxImportOutcome, OutboxRecord } from "./outboxImport";
 
 /**
  * 原稿箱の受け取り箱（設計書6.115「GitHub 経由」）。
@@ -156,6 +156,92 @@ export function doneNameFor(name: string, taken: ReadonlySet<string>): string {
     const candidate = `${stem}-${index}${ext}`;
     if (!taken.has(candidate)) return candidate;
   }
+}
+
+/* ── 取り込みの結果のファイル（ページへ返す） ─────────────── */
+
+/** 結果のファイルの印 */
+export const OUTBOX_RESULT_FORMAT = "novelai-outbox-result";
+
+/** 結果のファイルの形の版 */
+export const OUTBOX_RESULT_VERSION = 1;
+
+/**
+ * 結果のファイル（`inbox/done/<箱の名前>.result.json`）。
+ *
+ * **ページへ「断った理由」を返すため**（リーダーの裁定 2026-10-04）。ページは
+ * 箱が `done/` に移ったことしか見えず、断られたメモも「取り込み済み」と出ていた——
+ * 作者は入らなかったことに気づけず、送り直す道も無かった。次の同期で GitHub へ届く
+ */
+export interface OutboxInboxResultFile {
+  format: typeof OUTBOX_RESULT_FORMAT;
+  version: number;
+  /** 取り込んだ箱の名前（受け取り箱にあったときの名前） */
+  box: string;
+  /** 取り込んだ時刻 */
+  importedAt: string;
+  /** 箱の記録ごとの結果（箱の中の順） */
+  results: Array<{ id: string; status: OutboxImportItem["status"]; reason: string }>;
+}
+
+/** 結果のファイルの名前（箱の名前に `.result.json` を足す） */
+export function inboxResultName(boxName: string): string {
+  return `${boxName}.result.json`;
+}
+
+/**
+ * 箱1つぶんの結果のファイルを組む。取り込みの結果は**全部の箱をまとめた1回**のものなので、
+ * この箱の記録（書き手/id）の分だけを拾う
+ */
+export function buildInboxResult(
+  boxName: string,
+  records: readonly Pick<OutboxRecord, "id" | "writer">[],
+  results: readonly OutboxImportItem[],
+  now: Date
+): OutboxInboxResultFile {
+  const byKey = new Map(results.map((item) => [`${item.writer}/${item.id}`, item]));
+  return {
+    format: OUTBOX_RESULT_FORMAT,
+    version: OUTBOX_RESULT_VERSION,
+    box: boxName,
+    importedAt: now.toISOString(),
+    results: records.flatMap((record) => {
+      const item = byKey.get(`${record.writer}/${record.id}`);
+      return item ? [{ id: item.id, status: item.status, reason: item.reason }] : [];
+    }),
+  };
+}
+
+/**
+ * 結果のファイルを読む（試験と、形の約束の確かめに使う。ページは同じ形を自分で読む）
+ */
+export function parseInboxResult(
+  text: string
+): ({ ok: true } & Omit<OutboxInboxResultFile, "format" | "version">) | { ok: false; reason: string } {
+  let value: unknown;
+  try {
+    value = JSON.parse(text.replace(/^﻿/, ""));
+  } catch {
+    return { ok: false, reason: "JSON として読めません" };
+  }
+  if (typeof value !== "object" || value === null) return { ok: false, reason: "形が違います" };
+  const file = value as Record<string, unknown>;
+  if (file.format !== OUTBOX_RESULT_FORMAT || file.version !== OUTBOX_RESULT_VERSION) {
+    return { ok: false, reason: "結果のファイルの印・版が違います" };
+  }
+  const results = Array.isArray(file.results) ? file.results : [];
+  return {
+    ok: true,
+    box: str(file.box),
+    importedAt: str(file.importedAt),
+    results: results.flatMap((raw) => {
+      if (typeof raw !== "object" || raw === null) return [];
+      const item = raw as Record<string, unknown>;
+      const status = item.status;
+      if (!str(item.id) || (status !== "imported" && status !== "already" && status !== "refused")) return [];
+      return [{ id: str(item.id), status, reason: str(item.reason) }];
+    }),
+  };
 }
 
 /** 取り込みの結果を、知らせの一文にする */

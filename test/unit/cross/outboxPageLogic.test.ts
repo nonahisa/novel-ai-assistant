@@ -5,7 +5,8 @@ import nodePath from "node:path";
 import vm from "node:vm";
 import { findingPanelStateOf } from "../../../src/core/findingPanelState";
 import { outboxContextOf } from "../../../src/core/outboxContext";
-import { isPendingInboxPath, parseInboxFile } from "../../../src/core/outboxInbox";
+import { buildInboxResult, inboxResultName, isPendingInboxPath, parseInboxFile } from "../../../src/core/outboxInbox";
+import { BODY_CHANGED_REASON } from "../../../src/core/outboxImport";
 import { parseFindingLines, resolveFindings } from "../../../src/models/finding";
 import { outboxPack } from "../../../src/mcp/tools/outbox";
 
@@ -32,6 +33,9 @@ interface PageLogic {
   inboxFileName(date: Date, device: string): string;
   toLfText(text: string): string;
   buildInbox(records: unknown[], meta: { sentAt: string; device: string; writer: string }): unknown;
+  resultFileName(box: string): string;
+  parseResultFile(text: string): Record<string, { status: string; reason: string }> | null;
+  recordStage(record: unknown, doneNames: string[], results: Record<string, unknown>): { stage: string; reason: string };
 }
 
 function loadPageLogic(): PageLogic {
@@ -189,6 +193,61 @@ describe("並べる指摘（outbox.pack と同じ欄）", () => {
     });
     expect(listed.map(pick)).toEqual(packed.map((item) => pick(item as unknown as Record<string, unknown>)));
     expect(listed.length).toBeGreaterThan(3);
+  });
+});
+
+describe("取り込みの結果のファイル（断られた記録を決め直す）", () => {
+  const BOX = "20261004T050102Z-tablet.json";
+  const records = [
+    { id: "a", writer: "u_1" },
+    { id: "b", writer: "u_1" },
+    { id: "c", writer: "u_1" },
+  ];
+  const file = buildInboxResult(
+    BOX,
+    records,
+    [
+      { id: "a", writer: "u_1", status: "imported", reason: "入れた" },
+      { id: "b", writer: "u_1", status: "refused", reason: BODY_CHANGED_REASON },
+      { id: "c", writer: "u_1", status: "already", reason: "入れ済み" },
+      // 別の箱の記録（この箱の結果には入らない）
+      { id: "z", writer: "u_1", status: "refused", reason: "別の箱" },
+    ],
+    new Date("2026-10-04T06:00:00.000Z")
+  );
+
+  it("拡張機能が置く結果のファイルの名前と形を、ページが読める", () => {
+    expect(page.resultFileName(BOX)).toBe(`${BOX}.result.json`);
+    expect(inboxResultName(BOX)).toBe(page.resultFileName(BOX));
+    expect(file.results.map((item) => item.id)).toEqual(["a", "b", "c"]);
+    expect(page.parseResultFile(JSON.stringify(file))).toEqual({
+      a: { status: "imported", reason: "入れた" },
+      b: { status: "refused", reason: BODY_CHANGED_REASON },
+      c: { status: "already", reason: "入れ済み" },
+    });
+    expect(page.parseResultFile("{壊れ")).toBeNull();
+    expect(page.parseResultFile(JSON.stringify({ ...file, format: "別" }))).toBeNull();
+  });
+
+  it("記録の行き先：送っていない・取り込み待ち・取り込み済み・入らなかった（理由つき）", () => {
+    const results = { [BOX]: page.parseResultFile(JSON.stringify(file)) };
+    const done = [BOX, page.resultFileName(BOX)];
+    const stage = (record: Record<string, unknown>, doneNames = done) =>
+      page.recordStage(record, doneNames, results);
+    expect(stage({ id: "a", sent: false })).toEqual({ stage: "unsent", reason: "" });
+    expect(stage({ id: "a", sent: true, sentFile: BOX }, [])).toEqual({ stage: "sent", reason: "" });
+    expect(stage({ id: "a", sent: true, sentFile: BOX })).toEqual({ stage: "imported", reason: "" });
+    expect(stage({ id: "c", sent: true, sentFile: BOX })).toEqual({ stage: "imported", reason: "" });
+    expect(stage({ id: "b", sent: true, sentFile: BOX })).toEqual({ stage: "refused", reason: BODY_CHANGED_REASON });
+    // 保管庫の道（Claude Code の取り込み）で入れた印
+    expect(stage({ id: "b", imported: true })).toEqual({ stage: "imported", reason: "" });
+  });
+
+  it("結果のファイルが無い古い箱は、今までどおり取り込み済み", () => {
+    expect(page.recordStage({ id: "b", sent: true, sentFile: "old.json" }, ["old.json"], {})).toEqual({
+      stage: "imported",
+      reason: "",
+    });
   });
 });
 

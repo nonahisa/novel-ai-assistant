@@ -248,10 +248,18 @@ describe("ページの雛形——決めた状態・自分で直す・取り込�
     );
   });
 
-  it("押した直後にその指摘のボタンを止め、まだ送っていない自分の記録だけを［取り消す］で消せる", async () => {
+  it("押した直後にその指摘のボタンを止め、まだ送っていない記録と入らなかった記録だけを消せる", async () => {
     expect(page).toMatch(/if \(state\.sending\[fid\]\) return;\s*state\.sending\[fid\] = true;/);
-    // 送ったものは GitHub の受け取り箱にあるので、ページからは消さない
-    expect(page).toMatch(/stageOf\(r\) !== "unsent"\) return;[\s\S]*\.delete\(\)/);
+    // 送ったもの・入ったものは GitHub にあるので、ページからは消さない
+    expect(page).toMatch(
+      /\(removable !== "unsent" && removable !== "refused"\)\) return;[\s\S]*\.delete\(\)/
+    );
+  });
+
+  it("入らなかった記録は理由を目立たせ、その指摘を決めた状態から外す（決め直せる）", async () => {
+    expect(page).toContain('"パソコンで入りませんでした："');
+    expect(page).toContain('stageOf(r) !== "refused";');
+    expect(page).toMatch(/\.record\.refused \{[^}]*var\(--reject\)/);
   });
 
   it("［自分で直す］は空・改行入り・元と同じ文を送らず、原文を添えて edit を足す", async () => {
