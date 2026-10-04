@@ -2274,6 +2274,47 @@ ruby > rt {
     note.textContent = "打った字が原稿に入りました";
   }
 
+  /* quietSend:start */
+  /*
+    ── 打鍵の知らせ無しに送る字を記録する（作者の報告、2026-10-04 23時） ──
+    「// 」が2行続く所の1行が、作者の操作なしに原稿から消え、自動保存された
+    （確認用コピーの第1話。同期の28秒後）。操作ログには画面からの記録が
+    何も無く、どの道で送られたかを後から追えなかった。
+
+    打った字は input のたびにすぐ送るので、焦点が外れたとき・保存を頼んだときに
+    画面の字が原稿（current）と違っているのは、**変換中でなければ起きないはず**の
+    ことである。違っていたら、送る前に1行残す。**本文は書かない**——行数と、
+    最初に違う行の番号だけ（次に起きたとき、どの行がどう変わったかを差分で追える）。
+    送るかどうかは変えない（記録だけ。送らないと作者の打った字を失う恐れがある）。
+  */
+  /**
+   * 原稿と画面の字の違いを、行の数で短く言う。同じなら null。
+   * 純粋な関数にしてある（test/unit/views/manuscriptQuietSend.test.ts）。
+   */
+  function quietSendSummary(before, after) {
+    if (before === after) return null;
+    const a = before.split("\\n");
+    const b = after.split("\\n");
+    let first = 0;
+    while (first < a.length && first < b.length && a[first] === b[first]) first++;
+    return { beforeLines: a.length, afterLines: b.length, firstLine: first + 1 };
+  }
+  /* quietSend:end */
+
+  function noteQuietSend(reason) {
+    const shown = composeOn ? composeDomToNotation(compose) : write.value;
+    const summary = quietSendSummary(current, shown);
+    if (summary === null) return;
+    vscode.postMessage({
+      type: "log",
+      text:
+        "打鍵の知らせ無しに、画面の字が原稿と違っていました（" + reason +
+        "とき／" + (composeOn ? "組んで書く" : "打つ") + "面／行数 " +
+        summary.beforeLines + "→" + summary.afterLines + "／最初に違う行 " +
+        summary.firstLine + "行目）。画面の字を送ります",
+    });
+  }
+
   /**
    * **画面を離れる前に、未送信の字を送る**（設計書6.25.9）。
    *
@@ -2283,6 +2324,8 @@ ruby > rt {
    * 日本語入力の変換は終わっている。
    */
   function flushUnsent(reason) {
+    // 変換中の字が残っていたなら、画面と原稿が違うのは当たり前（記録しない）
+    if (!composing) noteQuietSend(reason);
     if (composing) {
       composing = false;
       pending = null;
@@ -2935,6 +2978,7 @@ ruby > rt {
       変換中は送らない——確定前の字が二重に入る。確定すれば、そのとき送られる
     */
     if (!composing) {
+      noteQuietSend("保存を頼んだ");
       const resend = unconfirmed !== null;
       if (composeOn) composeSend(resend);
       else send(resend);
@@ -3759,6 +3803,119 @@ ruby > rt {
     }
   }
 
+  /* revealScroll:start */
+  /*
+    ── 飛んだ段落を、まるごと見える所へ転がす（作者の実機確認、2026-10-04） ──
+    縦書きで［本文へ］から飛ぶと、段落が2列以上に折り返しているとき、
+    **2列目が左端で半分隠れた**。それまでは段落の頭（カーソルの位置）だけを
+    見える所へ入れていたので、頭の列が左端ぎりぎりに来ると、続きの列が
+    画面の外へ出る。横書きでも、頭の行が下端に来ると続きの行が下に切れる。
+
+    そこで段落の**全体の箱**と**頭の箱**を測り、
+    - 全体が入るなら、全体が入るところまで（はみ出しぶんだけ）動かす
+    - 入らないなら、**頭を流れの始まりの側**（縦書きは右端・横書きは上端）へ
+      寄せる。続きの列（行）は、入るだけ後ろへ並ぶ
+    流れと直交する向き（縦書きの上下・横書きの左右）は、頭の箱だけを見る。
+
+    中央へは寄せない（composeNudgeIntoView の但し書きと同じ。飛ぶたびに画面が
+    大きく動くと目が付いていけない）。**純粋な関数**にして、転がす量の決め方を
+    単体テストで見張る（test/unit/views/manuscriptRevealScroll.test.ts）。
+  */
+  /** 端からどれだけ内側へ入れるか（offRect と同じ量） */
+  const REVEAL_SLACK = 24;
+
+  /**
+   * 区間 [a, b] を [lo, hi] に入れるために足す量（スクロール値の増分）。
+   * スクロールを d 増やすと、中身は画面の上で -d 動く。
+   *
+   * @param headHigh 区間が入りきらないとき、頭をどちらの端へ寄せるか。
+   *   true＝高いほう（縦書きの右端）／false＝低いほう（横書きの上端）。
+   *   headA・headB は頭の箱の区間
+   */
+  function revealAxisDelta(a, b, lo, hi, headA, headB, headHigh) {
+    const slack = REVEAL_SLACK;
+    // 入るためにとれる増分の範囲（この間なら全体が見える）
+    const least = b - hi;
+    const most = a - lo;
+    if (least <= most) {
+      if (least <= 0 && 0 <= most) return 0;
+      // はみ出しぶん＋少しだけ内側へ。内側へ入れすぎて反対側が出ないように留める
+      if (least > 0) return Math.min(least + slack, most);
+      return Math.max(most - slack, least);
+    }
+    // 入りきらない：頭を流れの始まりの側へ寄せる
+    return headHigh ? headB - (hi - slack) : headA - (lo + slack);
+  }
+
+  /**
+   * 段落をまるごと見せるために、入れ物のスクロールへ足す量。
+   *
+   * @param box 入れ物（転がる要素）の箱
+   * @param whole 段落の全体の箱
+   * @param head 段落の頭（最初の列・行）の箱
+   * @param isVertical 縦書きか（列は右から左へ並ぶ）
+   * @returns { left, top } scrollLeft・scrollTop へ足す量
+   */
+  function revealScrollDelta(box, whole, head, isVertical) {
+    if (isVertical) {
+      return {
+        left: revealAxisDelta(
+          whole.left, whole.right, box.left, box.right, head.left, head.right, true
+        ),
+        top: revealAxisDelta(
+          head.top, head.bottom, box.top, box.bottom, head.top, head.bottom, false
+        ),
+      };
+    }
+    return {
+      left: revealAxisDelta(
+        head.left, head.right, box.left, box.right, head.left, head.right, false
+      ),
+      top: revealAxisDelta(
+        whole.top, whole.bottom, box.top, box.bottom, head.top, head.bottom, false
+      ),
+    };
+  }
+  /* revealScroll:end */
+
+  /**
+   * 段落の箱（全体と頭）を測って、入れ物をまるごと見える所へ転がす。
+   * 測れなければ false（呼んだ側が別の手で動かす）。
+   */
+  function revealScrollTo(container, whole, head) {
+    if (!whole || (whole.width === 0 && whole.height === 0)) return false;
+    const usableHead = head && !(head.width === 0 && head.height === 0) ? head : whole;
+    const delta = revealScrollDelta(
+      container.getBoundingClientRect(), whole, usableHead, vertical
+    );
+    if (delta.left !== 0) container.scrollLeft += delta.left;
+    if (delta.top !== 0) container.scrollTop += delta.top;
+    return true;
+  }
+
+  /**
+   * 組んで書く面で、start の行（段落）をまるごと見える所へ転がす。
+   * 段落の入れ物は compose の直下の子（1行＝1段落）。頭の箱は、段落の中身の
+   * 最初の断片（縦書きなら右端の列、横書きなら最初の行）で測る。
+   */
+  function composeRevealParagraph(start) {
+    try {
+      const atoms = composeCurrentAtoms();
+      const head = composeOffsetToPoint(atoms, start);
+      if (!head) return false;
+      let line = head.node;
+      while (line && line.parentNode !== compose) line = line.parentNode;
+      if (!line || !line.getBoundingClientRect) return false;
+      const range = document.createRange();
+      range.selectNodeContents(line);
+      const pieces = range.getClientRects();
+      const first = pieces && pieces.length > 0 ? pieces[0] : null;
+      return revealScrollTo(compose, line.getBoundingClientRect(), first);
+    } catch (error) {
+      return false;
+    }
+  }
+
   /** 打つ面で、start〜end を光らせて見えるところまで転がす */
   function revealFlashWrite(start, end) {
     const text = write.value;
@@ -3776,7 +3933,20 @@ ruby > rt {
     document.body.classList.add("revealmark");
     alignMarksBox();
     syncMarksScroll();
-    aloudNudgeWriteIntoView(span);
+    // 段落をまるごと見せる（revealScroll の但し書き）。空の行など測れなければ頭だけ
+    let moved = false;
+    try {
+      const pieces = span.getClientRects();
+      moved = revealScrollTo(
+        write,
+        span.getBoundingClientRect(),
+        pieces && pieces.length > 0 ? pieces[0] : null
+      );
+    } catch (error) {
+      moved = false;
+    }
+    if (moved) syncMarksScroll();
+    else aloudNudgeWriteIntoView(span);
   }
 
   /** 組んで書く面で、start〜end を光らせる */
@@ -3855,7 +4025,8 @@ ruby > rt {
         はみ出したぶんだけ動かす**（中央には寄せない。1行動くたびに画面が
         真ん中まで動くと、目が付いていけない）。
       */
-      if (!composeNudgeIntoView(start)) {
+      // 段落をまるごと見せる（revealScroll の但し書き）。測れなければ頭だけ
+      if (!composeRevealParagraph(start) && !composeNudgeIntoView(start)) {
         vscode.postMessage({
           type: "log",
           text: "組んで書く：" + line + "行目の位置を測れず、画面を動かせませんでした",
