@@ -1003,6 +1003,17 @@ export class GitSyncMonitor implements vscode.Disposable {
       await this.waitBeforeOperation();
       return await this.runPull(work, afterRecording);
     } finally {
+      // **成否にかかわらず、一番外の呼び出しの終わりに1回だけ置き場ぜんぶを
+      // 数え直す**（2026-10-05）。途中で「取り込む前の自動保存」を記録してから
+      // 取り込みが失敗で終わると、コミットは済んでいるのに古い「未記録」が
+      // 残っていた。git の中しか変わらないので、見張りの合図も来ない
+      if (!afterRecording) {
+        try {
+          await this.refreshRoot(work, { fetch: false, notify: false });
+        } catch {
+          // 数え直しの失敗で取り込みの結果を覆さない（次の契機で読み直す）
+        }
+      }
       this.operating -= 1;
     }
   }
@@ -1064,8 +1075,7 @@ export class GitSyncMonitor implements vscode.Disposable {
 
     if (result.ok) {
       this.notified.delete(work.id);
-      // 置き場ぜんぶを数え直す（兄弟の作品に古い数を残さない。2026-10-05）
-      await this.refreshRoot(work, { fetch: false, notify: false });
+      // 数え直しは `pull` の終わりで1回だけ行う（成否にかかわらず）
       vscode.window.showInformationMessage(
         `「${work.title}」に別の環境の変更を取り込みました。`
       );
@@ -1335,7 +1345,7 @@ ${reason}` : ""}`,
     }
 
     this.notified.delete(work.id);
-    await this.refreshRoot(work, { fetch: false, notify: false });
+    // 数え直しは `pull` の終わりで1回だけ行う（ここは `runPull` からしか呼ばれない）
     useLogFile(work.folderPath);
     logStep(
       `同期の中で分岐を合わせた（${label}／取り込み ${result.incoming}件` +

@@ -16,10 +16,21 @@ import type { WorkEntry } from "../../../src/models/types";
  */
 
 const readSyncStatus = vi.fn<(cwd: string) => Promise<GitSyncStatus>>();
+const pullFastForward = vi.fn<
+  () => Promise<
+    | { ok: true }
+    | { ok: false; failure: { kind: "failed"; detail: string } }
+  >
+>();
 
 vi.mock("../../../src/core/git", async (original) => ({
   ...(await original<typeof import("../../../src/core/git")>()),
   readSyncStatus: (cwd: string) => readSyncStatus(cwd),
+  pullFastForward: () => pullFastForward(),
+  // 改行の書き換えの知らせは出さない（設定が読めなければ黙って進む）
+  readAutoCrlf: async () => {
+    throw new Error("テストでは読まない");
+  },
   // HEADの入れ替わりの知らせはここでは見ない
   headCommit: async () => undefined,
 }));
@@ -216,6 +227,28 @@ describe("操作の終わりは置き場ぜんぶを数え直す", () => {
     expect(b?.kind === "tracked" && b.dirtyHere).toBe(0);
     const a = monitor.statusFor(A.id);
     expect(a?.kind === "tracked" && a.dirtyHere).toBe(3);
+    monitor.dispose();
+  });
+});
+
+describe("取り込みは、成否にかかわらず終わりに置き場ぜんぶを数え直す", () => {
+  test("取り込みが失敗で終わっても、終わりに数え直す（記録が済んでいれば未記録が消える）", async () => {
+    const monitor = newMonitor();
+    readSyncStatus.mockImplementation(async () => tracked(4, 2));
+    await monitor.refreshAll({ fetch: false });
+
+    // 取り込みの途中で記録が済んだ（git の上では0件）が、取り込み自体は
+    // 失敗で終わった、という状態を作る。pullFastForward は偽の git で落とす
+    pullFastForward.mockImplementationOnce(async () => {
+      readSyncStatus.mockImplementation(async () => tracked(0, 0));
+      return { ok: false, failure: { kind: "failed", detail: "回線" } };
+    });
+    await monitor.pull(A);
+
+    const b = monitor.statusFor(B.id);
+    expect(b?.kind === "tracked" && b.dirty).toBe(0);
+    expect(b?.kind === "tracked" && b.dirtyHere).toBe(0);
+    expect(statusBarOf(monitor).visible).toBe(false);
     monitor.dispose();
   });
 });
