@@ -2624,6 +2624,34 @@ describe("見えている字は、記法の本文に必ず入る", () => {
     );
   });
 
+  /*
+    傍点の語の中で打つために開いたかたまり（data-open。作者の裁定 2026-10-04、
+    設計書6.25.9）。開いている間に作者が中の字を消し切ったら、語は消えたのであって、
+    元の記法を出すと消した語が戻る
+  */
+  it("開いた傍点のかたまりの中の字を消し切ったら、語は本文から消える", () => {
+    const line = api.composeBuildLine("あ{{強調}}い", fakeDoc);
+    const emphasis = line.childNodes[1];
+    emphasis.setAttribute?.("data-open", "1");
+    emphasis.childNodes.splice(0, emphasis.childNodes.length);
+    expect(api.composeDomToNotation(fragment([line]))).toBe("あい");
+  });
+
+  it("開いていないかたまりが空なのは見えないだけなので、元の記法を出す（今までどおり）", () => {
+    const line = api.composeBuildLine("あ{{強調}}い", fakeDoc);
+    const emphasis = line.childNodes[1];
+    emphasis.childNodes.splice(0, emphasis.childNodes.length);
+    expect(api.composeDomToNotation(fragment([line]))).toBe("あ{{強調}}い");
+  });
+
+  it("開いた傍点のかたまりの中に打った字は、傍点の語の中に増える", () => {
+    const line = api.composeBuildLine("あ{{強調}}い", fakeDoc);
+    const emphasis = line.childNodes[1];
+    emphasis.setAttribute?.("data-open", "1");
+    emphasis.childNodes[0].nodeValue = "強あ調";
+    expect(api.composeDomToNotation(fragment([line]))).toBe("あ{{強あ調}}い");
+  });
+
   it("かたまりの中が組んだときのままなら、記法をそのまま出す", () => {
     const value = "あ{漢|かん}い{{強調}}う\n｜x";
     expect(round(value)).toBe(value);

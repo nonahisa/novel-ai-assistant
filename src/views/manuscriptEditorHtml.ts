@@ -1290,9 +1290,10 @@ ruby > rt {
       覚え直すたびに丸ごと書き換えるので、ここで拾わないと、見た目を
       変えただけで控えが消える
     */
-    const keptRescue = (vscode.getState() || {}).rescue;
+    // 控えの置き場は2つ（未送信の字＝rescue、帯の控え＝rescueBands）。どちらも拾う
+    const kept = vscode.getState() || {};
     vscode.setState({ vertical, size, compose: composeState,
-      noteStyle: noteStyle, rescue: keptRescue });
+      noteStyle: noteStyle, rescue: kept.rescue, rescueBands: kept.rescueBands });
     /*
       **拡張機能にも知らせる**（作者の依頼、2026-09-12。設計書6.25.5）。
       「← 前の話」「次の話 →」は新しい画面を開くので、覚えた state は
@@ -1992,7 +1993,11 @@ ruby > rt {
 
   function deliverUnsentStatus() {
     statusTimer = null;
-    const rescueKept = !!(vscode.getState() || {}).rescue;
+    // 控えの置き場は2つ。どちらかにあれば「控えがある」
+    const keptState = vscode.getState() || {};
+    const rescueKept =
+      !!keptState.rescue ||
+      (Array.isArray(keptState.rescueBands) && keptState.rescueBands.length > 0);
     const key = unsentStage + "|" + rescueKept;
     if (key === statusSentKey) return;
     statusSentKey = key;
@@ -2419,7 +2424,12 @@ ruby > rt {
     reopenAsked = true;
     keepRescue(screenText());
     const state = vscode.getState() || {};
-    vscode.postMessage({ type: "reopen", rescue: state.rescue || null });
+    // 帯の控えも一緒に預ける（タブを閉じると画面の状態は引き継がれない）
+    vscode.postMessage({
+      type: "reopen",
+      rescue: state.rescue || null,
+      bands: Array.isArray(state.rescueBands) ? state.rescueBands : [],
+    });
     unsentText.textContent = "開き直しを頼んでいます…";
     paintUnsent();
     if (reopenTimer !== null) clearTimeout(reopenTimer);
@@ -2468,6 +2478,15 @@ ruby > rt {
     baseLength と baseHash（**その本文の元になった文書**＝最後に拡張機能
     から届いた本文の字数とハッシュ）。戻すときに今の文書と比べ、控えた
     あとで原稿が外で変わっていないかを確かめるのに使う。
+
+    **置き場は2つ**（作者の裁定、2026-10-04。設計書6.25.9）。
+    - rescue … 未送信の字の控え（返事の来ない便があるときの画面の字）。keepRescue が書き、
+      全部届けば dropRescue が消す
+    - rescueBands … 帯の控え（重なって原稿に入らなかった字・開いたときの「前回の控え」）。
+      出している帯と、その後ろに待っている帯を順に並べる。戻す・捨てるで1つずつ減る
+    0.98.6 までは置き場が1つで、帯が開いている間は未送信の字を控えられなかった
+    （帯の控えを守るため）。分けたので、帯が開いていても届かなかった字を控え、
+    開き直したときに両方を順に見せる。
   */
   /** いま開いている文書の鍵（拡張機能が update に添える） */
   let docKey = null;
@@ -2482,6 +2501,8 @@ ruby > rt {
   let rescueChecked = false;
   /** 出している案内の控え */
   let rescueOffer = null;
+  /** 出している帯の後ろで待っている控え（片づいたら順に出す） */
+  let rescueWaiting = [];
   /** 「外で変わっています」の確かめを出しているか */
   let rescueConfirming = false;
 
@@ -2513,18 +2534,32 @@ ruby > rt {
     scheduleUnsentStatus();
   }
 
-  /** 返事の来ていない本文を控える */
+  /**
+   * 帯の控え（出している帯と、待っている帯）を画面の状態へ書く。
+   * 未送信の字の控え（rescue）とは別の欄なので、互いに上書きしない
+   */
+  function writeBands() {
+    const next = Object.assign({}, vscode.getState() || {});
+    const bands = [];
+    if (rescueOffer !== null) bands.push(rescueOffer);
+    for (const offer of rescueWaiting) bands.push(offer);
+    if (bands.length > 0) next.rescueBands = bands;
+    else delete next.rescueBands;
+    vscode.setState(next);
+    scheduleUnsentStatus();
+  }
+
+  /**
+   * 返事の来ていない本文を控える（未送信の字の欄。設計書6.25.9）。
+   *
+   * **帯が開いていても控える**（作者の裁定、2026-10-04）。帯の控えは別の欄
+   * （rescueBands）にあるので、ここで書いても消えない。0.98.6 までは欄が1つで、
+   * 帯を守るために帯が開いている間はここを止めており、その間に届かなかった字を
+   * 再読み込みで取り戻せなかった
+   */
   function keepRescue(text) {
     // どの文書のものか分からない控えは、取り戻すときに照合できない
     if (docKey === null) return;
-    /*
-      **帯を出している控えは上書きしない**（リーダーの指示、2026-10-04。設計書6.25.9）。
-      控えの欄は1つなので、帯が開いたまま Ctrl+S・未送信の知らせ・保存の返事が
-      無いときにここで画面の字を書くと、帯の控え（重なって入らなかった字・前回
-      入らなかった字）が状態から消え、再読み込みしたときに取り戻せなくなる。
-      帯を閉じれば（戻す・捨てる）、従来どおり控える
-    */
-    if (rescueOffer !== null) return;
     if (text === rescueSavedText) return;
     rescueSavedText = text;
     writeRescue({
@@ -2537,15 +2572,14 @@ ruby > rt {
   }
 
   /**
-   * 全部届いたので控えを消す。
+   * 全部届いたので、未送信の字の控えを消す。
    *
-   * **案内を出している間は消さない。** 作者がまだ「戻す／捨てる」を
-   * 選んでいない控えを、打ち始めた字が届いただけで消すと、もう一度
+   * 帯の控え（作者がまだ「戻す／捨てる」を選んでいないもの）は別の欄なので、
+   * ここでは消えない。打ち始めた字が届いただけで帯の控えを消すと、もう一度
    * 画面が作り直されたときに取り戻せない。
    */
   function dropRescue() {
     rescueSavedText = null;
-    if (rescueOffer !== null) return;
     const state = vscode.getState();
     if (!state || !state.rescue) return;
     writeRescue(null);
@@ -2584,57 +2618,77 @@ ruby > rt {
     if (typeof message.text === "string") lastDocText = message.text;
     if (rescueChecked || lastDocText === null) return;
     rescueChecked = true;
-    const saved = (vscode.getState() || {}).rescue;
-    // 拡張機能が持って来た控え（［開き直す］で新しい画面になったとき）
-    const carried = message.rescue;
-    const candidates = [saved, carried].filter(rescueUsable);
-    candidates.sort(function (a, b) {
-      return b.at - a.at;
-    });
-    const rescue = candidates.length > 0 ? candidates[0] : null;
-    if (rescue === null || rescue.text === lastDocText) {
+    const state = vscode.getState() || {};
+    const savedBands = Array.isArray(state.rescueBands) ? state.rescueBands : [];
+    const saved = state.rescue;
+    /*
+      拡張機能が持って来た控え（［開き直す］で新しい画面になったとき。タブを閉じると
+      画面の状態は引き継がれないので、拡張機能が預かって渡す）。rescues は帯の控えと
+      未送信の字の控えを並べたもの。rescue は 0.98.6 までの1つだけの形
+    */
+    const carried = Array.isArray(message.rescues)
+      ? message.rescues
+      : message.rescue
+        ? [message.rescue]
+        : [];
+    /*
+      **両方あれば両方を見せる**（作者の裁定、2026-10-04。設計書6.25.9）。順は
+      帯の控え（出していた順）→ 未送信の字の控え → 拡張機能が持って来たもの。
+      同じ本文は1つにまとめ、文書と同じもの（もう入っている）・別の文書・古いものは除く
+    */
+    const offers = [];
+    const seen = {};
+    for (const candidate of savedBands.concat([saved], carried)) {
+      if (!rescueUsable(candidate)) continue;
+      if (candidate.text === lastDocText) continue;
+      if (seen[candidate.text] === true) continue;
+      seen[candidate.text] = true;
+      offers.push(candidate);
+    }
+    if (offers.length === 0) {
       // 使えない控え（別の文書・古い・もう入っている）は片づける
-      if (saved) writeRescue(null);
+      if (saved || savedBands.length > 0) {
+        const next = Object.assign({}, state);
+        delete next.rescue;
+        delete next.rescueBands;
+        vscode.setState(next);
+        scheduleUnsentStatus();
+      }
       return;
     }
-    // 拡張機能から来た控えも、ここで画面の状態へ移す（もう一度作り直されても残す）
-    if (rescue !== saved) writeRescue(rescue);
-    rescueOffer = rescue;
+    rescueOffer = offers[0];
+    rescueWaiting = offers.slice(1);
     rescueConfirming = false;
+    /*
+      **見せる控えは全部、帯の欄へ移し、未送信の字の欄を空ける**。空けないと、
+      このあと届かなかった字を控えたときに、帯で訊いている控えが消える
+      （0.98.6 までの、欄が1つだった失敗と同じ）
+    */
+    const next = Object.assign({}, state);
+    delete next.rescue;
+    vscode.setState(next);
+    rescueSavedText = null;
+    writeBands();
     paintRescue();
-    // 開いたときに控えが見つかったことも、窓の札へ載せる
-    scheduleUnsentStatus();
     vscode.postMessage({
       type: "log",
       text:
-        "前回原稿に入らなかった字の控えが見つかりました（控えの本文" +
-        rescue.text.length + "字／文書" + lastDocText.length + "字）。戻すかを訊いています",
+        "前回原稿に入らなかった字の控えが見つかりました（" + offers.length + "件。" +
+        "最初の控えの本文" + rescueOffer.text.length + "字／文書" + lastDocText.length +
+        "字）。戻すかを順に訊いています",
     });
   }
-
-  /**
-   * 帯を出している控えがあるときに届いた「重なって入らなかった」本文。
-   * 控えの欄は1つなので、出ている控えを押しのけずに待たせ、片づいたら出す
-   */
-  let conflictWaiting = null;
 
   /**
    * 打った所が、まだ届いていない本体の変更と重なって原稿に入らなかった
    * （設計書6.25.9）。**黙って捨てない**——打った本文を控えて帯を出し、
    * ［戻す］（本体の変更は消える。確かめを1段挟む）・［捨てる］・［本文をコピー］を
    * 選ばせる。画面の字は、このあと届く本体の本文に置き換わる。
+   *
+   * 帯が出ているときは押しのけず、後ろへ並べて、片づいてから出す（帯の欄にも
+   * 並べて置くので、再読み込みしても順に出る）。
    */
   function offerConflict(text) {
-    if (rescueOffer !== null && !rescueOffer.conflict) {
-      conflictWaiting = text;
-      vscode.postMessage({
-        type: "log",
-        text:
-          "打った字（" + text.length + "字）が原稿に入らなかったので控えました。" +
-          "前回の控えの帯が出ているので、片づいてから出します",
-      });
-      return;
-    }
     const offer = {
       docKey: docKey,
       text: text,
@@ -2644,10 +2698,28 @@ ruby > rt {
       baseHash: "",
       conflict: true,
     };
+    const queued =
+      (rescueOffer !== null && rescueOffer.text === text) ||
+      rescueWaiting.some(function (waiting) {
+        return waiting.text === text;
+      });
+    if (rescueOffer !== null) {
+      // 同じ本文がもう並んでいれば、二重に並べない
+      if (!queued) rescueWaiting.push(offer);
+      if (docKey !== null) writeBands();
+      paintRescue();
+      vscode.postMessage({
+        type: "log",
+        text:
+          "打った字（" + text.length + "字）が原稿に入らなかったので控えました。" +
+          "控えの帯が出ているので、片づいてから出します",
+      });
+      return;
+    }
     rescueOffer = offer;
     rescueConfirming = false;
     // 画面が作り直されても取り戻せるように、画面の状態へも置く
-    if (docKey !== null) writeRescue(offer);
+    if (docKey !== null) writeBands();
     paintRescue();
     vscode.postMessage({
       type: "log",
@@ -2657,15 +2729,29 @@ ruby > rt {
     });
   }
 
-  /** 控えの帯が片づいたあと、待たせていた「重なって入らなかった」本文を出す */
-  function showWaitingConflict() {
-    if (conflictWaiting === null) return;
-    const text = conflictWaiting;
-    conflictWaiting = null;
-    offerConflict(text);
+  /** 帯が片づいたあと、後ろで待っていた控えを出す（無ければ帯を閉じたまま） */
+  function showNextBand() {
+    if (rescueWaiting.length > 0) {
+      rescueOffer = rescueWaiting.shift();
+      rescueConfirming = false;
+      vscode.postMessage({
+        type: "log",
+        text: "待っていた控えの帯を出しました（控えの本文" + rescueOffer.text.length + "字）",
+      });
+    }
+    writeBands();
+    paintRescue();
   }
 
   function paintRescue() {
+    paintRescueBody();
+    // 後ろに待っている帯があることも知らせる（片づけると次が出る）
+    if (rescueOffer !== null && rescueWaiting.length > 0) {
+      rescueText.textContent += "（控えはあと" + rescueWaiting.length + "件あります）";
+    }
+  }
+
+  function paintRescueBody() {
     if (rescueOffer === null) {
       rescueBar.classList.remove("open");
       return;
@@ -2717,7 +2803,7 @@ ruby > rt {
     const conflict = rescueOffer.conflict === true;
     rescueOffer = null;
     rescueConfirming = false;
-    writeRescue(null);
+    writeBands();
     paintRescue();
     /*
       **戻すのは作者が選んだ全文**なので、元は最後に届いた本体の本文にする
@@ -2736,7 +2822,7 @@ ruby > rt {
         "控えから戻しました（" + text.length + "字" +
         (unchanged ? "" : "。控えたあとで原稿が変わっていたのを確かめたうえで") + "）",
     });
-    showWaitingConflict();
+    showNextBand();
   }
   rescueRestoreButton.addEventListener("click", rescueRestore);
 
@@ -2745,13 +2831,13 @@ ruby > rt {
     const length = rescueOffer.text.length;
     rescueOffer = null;
     rescueConfirming = false;
-    writeRescue(null);
+    writeBands();
     paintRescue();
     vscode.postMessage({
       type: "log",
       text: "原稿に入らなかった字の控え（" + length + "字）を捨てました",
     });
-    showWaitingConflict();
+    showNextBand();
   });
 
   rescueCopyButton.addEventListener("click", function () {
@@ -5307,7 +5393,16 @@ ${RESUME_WRITING_LABEL ? `
       base += composePlainOf(kid);
     }
     const intact = { text: src, repaired: false, afterFrom: afterFrom };
-    if (base === "" && kana === "") return intact;
+    if (base === "" && kana === "") {
+      /*
+        **開いた傍点のかたまり（data-open）が空になったのは、作者が中の字を
+        消し切ったから**（設計書6.25.9）。元の記法を出すと、消した語が戻る
+      */
+      if (node.getAttribute && node.getAttribute("data-open") === "1") {
+        return { text: "", repaired: true, afterFrom: afterFrom };
+      }
+      return intact;
+    }
     const original = composeChunkOriginal(src, isRuby);
     if (original === null) return intact;
     const part = original.part;
@@ -6602,6 +6697,228 @@ ${RESUME_WRITING_LABEL ? `
     }, 0);
   });
 
+  /* emphasisInside:start */
+  /*
+    ── 傍点の語の中で打つ（作者の裁定、2026-10-04。設計書6.25.9） ──
+    傍点のかたまりは編集できない（contenteditable="false"）。矢印ではかたまりを
+    1単位で飛び越えるので中へ入らないが、**マウスで語の真ん中を押すと、カーソルが
+    かたまりの中の字に置かれる**。そこで打つと beforeinput だけが起きて字が入らず、
+    画面にも原稿にも残らなかった（E2E で確かめた。語の一部をマウスで引いて選んだ
+    ときも同じ）。
+
+    そこで、**選択の端がかたまりの中に来たら、そのかたまりだけ編集できるように
+    開く**。打った字はブラウザがかたまりの字の中へ入れ、直列化（composeChunkText）が
+    見えている字から《《強あ調》》のように記法を組み直す——傍点はそのまま、語に字が
+    増える。カーソルが離れたら閉じ直す（外にいるあいだは、今までどおり1単位で消える）。
+    打つ瞬間に開くのでなく**選択が来た時点で開く**のは、日本語入力（変換）の字は
+    beforeinput で止めて差し込み直せないため。変換中は開け閉めしない（DOM を触ると
+    変換が壊れる）。
+
+    端（語の頭・尻）に置かれた選択の端は、かたまりの外の境目へ出す。語をまるごと
+    選んだときはかたまり全体を選んだことになり（本体の選び直しと同じ形）、打てば語ごと
+    置き換わる。
+
+    ルビ（ruby）は開かない——読み仮名（rt）の中へ字が入ると、親文字か読みかが
+    決められないため。ルビの中で打った字の扱いは今までどおり。
+  */
+  /** 開いている傍点のかたまり */
+  let composeOpenChunks = [];
+  /** マウスの釦を押しているあいだは選択を動かさない（引いて選ぶ手と取り合う） */
+  let composeMouseDown = false;
+
+  /** その節点を含む傍点のかたまり（無ければ null） */
+  function composeEmphasisChunkOf(node) {
+    let at = node;
+    while (at && at !== compose) {
+      if (
+        at.nodeType === 1 &&
+        at.getAttribute &&
+        at.getAttribute("data-src") &&
+        at.classList &&
+        at.classList.contains("emphasis")
+      ) {
+        return at;
+      }
+      at = at.parentNode;
+    }
+    return null;
+  }
+
+  /**
+   * 選択の端がかたまりのどこにあるか。頭（head）・尻（tail）・中（inside）。
+   * かたまりの外なら null
+   */
+  function composeChunkEdge(node, offset) {
+    const span = composeEmphasisChunkOf(node);
+    if (!span) return null;
+    const head = document.createRange();
+    head.setStart(span, 0);
+    try {
+      head.setEnd(node, offset);
+    } catch (error) {
+      return null;
+    }
+    const before = head.toString().length;
+    const total = (span.textContent || "").length;
+    if (before <= 0) return { span: span, edge: "head" };
+    if (before >= total) return { span: span, edge: "tail" };
+    return { span: span, edge: "inside" };
+  }
+
+  /** かたまりの外の境目（頭なら手前、尻なら後ろ） */
+  function composeChunkOutside(found) {
+    const span = found.span;
+    const parent = span.parentNode;
+    let index = 0;
+    while (index < parent.childNodes.length && parent.childNodes[index] !== span) index++;
+    return found.edge === "head"
+      ? { node: parent, offset: index }
+      : { node: parent, offset: index + 1 };
+  }
+
+  function composeSetChunkOpen(span, open) {
+    if (open) {
+      span.setAttribute("contenteditable", "true");
+      span.setAttribute("data-open", "1");
+    } else {
+      span.setAttribute("contenteditable", "false");
+      span.removeAttribute("data-open");
+    }
+  }
+
+  /**
+   * 選択に合わせて、傍点のかたまりを開け閉めする（端は外へ出す）。
+   * @param force マウスの釦を押していても行う（打つ瞬間の念押し）
+   * @returns 選択を動かしたか、かたまりを新しく開いたか
+   */
+  function composeFitChunkSelection(force) {
+    if (composing) return false;
+    if (composeMouseDown && !force) return false;
+    const selection = window.getSelection();
+    let anchorNode = selection && selection.rangeCount > 0 ? selection.anchorNode : null;
+    let focusNode = selection && selection.rangeCount > 0 ? selection.focusNode : null;
+    const inCompose =
+      anchorNode && focusNode && compose.contains(anchorNode) && compose.contains(focusNode);
+    const keep = [];
+    let changed = false;
+    if (inCompose) {
+      let anchorOffset = selection.anchorOffset;
+      let focusOffset = selection.focusOffset;
+      const anchor = composeChunkEdge(anchorNode, anchorOffset);
+      const focus = composeChunkEdge(focusNode, focusOffset);
+      let moved = false;
+      if (anchor) {
+        if (anchor.edge === "inside") keep.push(anchor.span);
+        else {
+          const out = composeChunkOutside(anchor);
+          anchorNode = out.node;
+          anchorOffset = out.offset;
+          moved = true;
+        }
+      }
+      if (focus) {
+        if (focus.edge === "inside") keep.push(focus.span);
+        else {
+          const out = composeChunkOutside(focus);
+          focusNode = out.node;
+          focusOffset = out.offset;
+          moved = true;
+        }
+      }
+      if (moved) {
+        try {
+          selection.setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset);
+          changed = true;
+        } catch (error) {
+          /* 置けなければ諦める（本文は壊れない） */
+        }
+      }
+    }
+    // 開いているかたまりのうち、もう選択の端が無いものを閉じる
+    const still = [];
+    for (const span of composeOpenChunks) {
+      if (keep.indexOf(span) >= 0 && compose.contains(span)) still.push(span);
+      else if (compose.contains(span)) composeSetChunkOpen(span, false);
+    }
+    for (const span of keep) {
+      if (still.indexOf(span) >= 0) continue;
+      composeSetChunkOpen(span, true);
+      still.push(span);
+      changed = true;
+    }
+    composeOpenChunks = still;
+    return changed;
+  }
+
+  document.addEventListener("selectionchange", function () {
+    composeFitChunkSelection(false);
+  });
+  compose.addEventListener("mousedown", function () {
+    composeMouseDown = true;
+  });
+  document.addEventListener("mouseup", function () {
+    if (!composeMouseDown) return;
+    composeMouseDown = false;
+    composeFitChunkSelection(false);
+  });
+  // 変換を確定したあと（確定の字が入ったあと）に開け閉めを見直す
+  compose.addEventListener("compositionend", function () {
+    setTimeout(function () {
+      composeFitChunkSelection(false);
+    }, 0);
+  });
+
+  /**
+   * 打つ瞬間の念押し（変換でない打鍵だけ）。選択の知らせより先に打鍵が来て、
+   * まだ閉じたかたまりの中に選択があるときは、ここで開いてから同じ打鍵を
+   * やり直す（既定の動きのままでは、開く前の判定で字が捨てられる）。
+   * @returns 自分で打ち直したか
+   */
+  function composeTypeIntoChunk(event, kind) {
+    if (composing || kind === "insertCompositionText") return false;
+    if (kind.indexOf("insert") !== 0 && kind.indexOf("delete") !== 0) return false;
+    if (!composeFitChunkSelection(true)) return false;
+    let command = null;
+    let value = null;
+    if (kind === "insertText" || kind === "insertReplacementText") {
+      value = event.data;
+      if ((value === null || value === undefined) && event.dataTransfer) {
+        value = event.dataTransfer.getData("text/plain");
+      }
+      if (value === null || value === undefined || value === "") return false;
+      command = "insertText";
+    } else if (kind === "deleteContentBackward") {
+      command = "delete";
+    } else if (kind === "deleteContentForward") {
+      command = "forwardDelete";
+    } else {
+      // ほかの操作（改行・貼り付け等）は、開いたうえで既定の動きに任せる
+      return false;
+    }
+    event.preventDefault();
+    let done = false;
+    try {
+      done = document.execCommand(command, false, value);
+    } catch (error) {
+      done = false;
+    }
+    if (!done && command === "insertText") {
+      // execCommand が使えない環境：選んだ所へ字を差し込む（取り消しの履歴には載らない）
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+        const node = document.createTextNode(composeNormalizeText(value));
+        range.insertNode(node);
+        selection.collapse(node, node.nodeValue.length);
+        composeInvalidate();
+        composeSend();
+      }
+    }
+    return true;
+  }
+  /* emphasisInside:end */
+
   /**
    * **装飾のコマンドは通さない。** Ctrl+B などは記法に無いものを
    * DOMへ入れる（太字の要素）ので、直列化がそこで崩れる。
@@ -6612,6 +6929,7 @@ ${RESUME_WRITING_LABEL ? `
       event.preventDefault();
       return;
     }
+    if (composeTypeIntoChunk(event, kind)) return;
     composeEscapeEllipsis(kind);
   });
 

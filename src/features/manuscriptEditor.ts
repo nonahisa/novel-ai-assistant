@@ -562,6 +562,8 @@ export interface ManuscriptRescue {
   at: number;
   baseLength: number;
   baseHash: string;
+  /** 重なって原稿に入らなかった字の控え（帯の控え）か */
+  conflict?: true;
 }
 
 /**
@@ -589,7 +591,35 @@ export function parseManuscriptRescue(
     at: record.at,
     baseLength: record.baseLength,
     baseHash: record.baseHash,
+    // 重なって入らなかった字の控えか（画面は［戻す］で必ず確かめを挟む）
+    ...(record.conflict === true ? { conflict: true } : {}),
   };
+}
+
+/** 一度に預かる控えの数の上限（画面から届く値を信用しない） */
+const MAX_CARRIED_RESCUES = 20;
+
+/**
+ * ［開き直す］で画面から届いた控えをまとめて確かめる（設計書6.25.9）。
+ *
+ * 控えの置き場は2つ（帯の控え `bands`・未送信の字の控え `rescue`。作者の裁定
+ * 2026-10-04）。**両方を預かる**——片方だけ運ぶと、タブを閉じて開き直したときに
+ * もう片方が消える。並びは帯→未送信（画面が開いたときに見せる順と同じ）。
+ * 形の悪いもの・別の文書のものは捨てる。
+ */
+export function parseManuscriptRescues(
+  bands: unknown,
+  rescue: unknown,
+  docKey: string
+): ManuscriptRescue[] {
+  const raw = [...(Array.isArray(bands) ? bands : []), rescue];
+  const parsed: ManuscriptRescue[] = [];
+  for (const value of raw) {
+    const one = parseManuscriptRescue(value, docKey);
+    if (one) parsed.push(one);
+    if (parsed.length >= MAX_CARRIED_RESCUES) break;
+  }
+  return parsed;
 }
 
 /**
@@ -599,7 +629,7 @@ export function parseManuscriptRescue(
  * （`pendingAppearance` と同じ形）。拡張機能の中のメモリにしか置かない——
  * 拡張機能ホストが起き直す場合は、画面の状態（`setState`）のほうが残る。
  */
-const pendingRescue = new Map<string, ManuscriptRescue>();
+const pendingRescue = new Map<string, ManuscriptRescue[]>();
 
 /**
  * 原稿エディタで最後にカーソルがあった場所（設計書6.40.4）。
@@ -1473,9 +1503,10 @@ type Incoming =
    *
    * `rescue` は画面が控えた本文。**タブを閉じて開き直すと画面の状態は
    * 引き継がれない**ので、こちらで預かって新しい画面へ渡す。形は信用せず
-   * `parseManuscriptRescue` で確かめる
+   * `parseManuscriptRescue` で確かめる。`bands` は帯の控え（重なって入らなかった
+   * 字・前回の控え。2026-10-04 に未送信の字の控えと置き場を分けた）
    */
-  | { type: "reopen"; rescue?: unknown }
+  | { type: "reopen"; rescue?: unknown; bands?: unknown }
   /**
    * 未送信の状態が変わった（知らせの出し下げ・段・控えの有無。作者の裁定、
    * 2026-10-01）。窓の札（MCP の `windows.list`）に載せる。形は信用せず
@@ -1804,7 +1835,7 @@ export class ManuscriptEditorProvider
      * ［開き直す］で前の画面から預かった控え（設計書6.25.9）。
      * 最初の `update` に1回だけ添える。
      */
-    let carriedRescue: ManuscriptRescue | undefined;
+    let carriedRescue: ManuscriptRescue[] | undefined;
     /**
      * 画面の便の「元の本文」の控え帳（設計書6.25.9。作者の裁定「塞ぐ」、2026-10-04）。
      * 画面へ送った本文と、当て終えた画面の本文を覚える。本体の変更が画面へ
@@ -1895,7 +1926,7 @@ export class ManuscriptEditorProvider
           文書の控えだけを使う
         */
         docKey: key,
-        ...(carriedRescue ? { rescue: carriedRescue } : {}),
+        ...(carriedRescue && carriedRescue.length > 0 ? { rescues: carriedRescue } : {}),
       });
       // 添えるのは最初の1回だけ（送り直すたびに当て直させない）
       initialAppearance = undefined;
@@ -1955,11 +1986,7 @@ export class ManuscriptEditorProvider
           ときに、カーソルが元の位置（字数で数えた所）へ戻されていた
         */
         if (sendTimer) {
-          clearTimeout(sendTimer);
-          sendTimer = undefined;
-          void send()
-            .catch(() => undefined)
-            .then(() => revealLineNow(line, caret));
+          void sendNow().then(() => revealLineNow(line, caret));
           return;
         }
         revealLineNow(line, caret);
@@ -2053,6 +2080,17 @@ export class ManuscriptEditorProvider
         sendTimer = undefined;
         void send();
       }, 120);
+    };
+    /**
+     * 待っている便を取りやめ、いま送る（まとめて送る120ミリ秒を待てないとき）。
+     * 失敗は握って返す（呼び出し側は続きの処理を止めない）
+     */
+    const sendNow = (): Promise<void> => {
+      if (sendTimer) {
+        clearTimeout(sendTimer);
+        sendTimer = undefined;
+      }
+      return send().catch(() => undefined);
     };
 
     /**
@@ -2277,8 +2315,14 @@ export class ManuscriptEditorProvider
             ? `原稿エディタ：打った字が、画面へまだ届いていない変更と同じ所に重なったので、原稿へ入れずに画面の控えへ回しました（${item.text.length}字。画面の［戻す］で打った字のほうへ戻せます）`
             : `原稿エディタ：打った字の元になった本文が分からないので、原稿へ入れずに画面の控えへ回しました（${item.text.length}字。画面の［戻す］で打った字のほうへ戻せます）`
         );
-        // 画面へ今の本文を届ける（届かないと、画面は古い本文の上に打ち続ける）
-        scheduleSend();
+        /*
+          画面へ今の本文を届ける（届かないと、画面は古い本文の上に打ち続ける）。
+          **断った直後だけは待たずに送る**（作者の裁定、2026-10-04。設計書6.25.9）。
+          120ミリ秒まとめる送り（scheduleSend）は続く変更で延びるので、届く前に
+          作者が［それでも戻す］を押すと、画面は古い本文を元にした便を送り、
+          もう一度断られていた
+        */
+        sendNow();
         return "conflict";
       }
       const ok = await this.applyEdit(document, decision.text);
@@ -2540,7 +2584,7 @@ export class ManuscriptEditorProvider
           await this.reopenForRescue(
             document,
             panel,
-            parseManuscriptRescue(message.rescue, key)
+            parseManuscriptRescues(message.bands, message.rescue, key)
           );
           break;
 
@@ -3715,7 +3759,7 @@ export class ManuscriptEditorProvider
   private async reopenForRescue(
     document: vscode.TextDocument,
     panel: vscode.WebviewPanel,
-    rescue: ManuscriptRescue | undefined
+    rescues: ManuscriptRescue[]
   ): Promise<void> {
     await panel.webview.postMessage({ type: "reopenAccepted" });
     const key = manuscriptLedgerKey(document.uri);
@@ -3736,11 +3780,13 @@ export class ManuscriptEditorProvider
       await panel.webview.postMessage({ type: "reopenResult", ok: false });
       return;
     }
-    if (rescue) pendingRescue.set(key, rescue);
+    if (rescues.length > 0) pendingRescue.set(key, rescues);
     await this.logForDocument(
       document,
       `原稿エディタ：打った字が原稿に入らないため、開き直します（控え${
-        rescue ? `${rescue.text.length}字` : "なし"
+        rescues.length > 0
+          ? `${rescues.length}件：${rescues.map((one) => `${one.text.length}字`).join("・")}`
+          : "なし"
       }）`
     );
     const closed = await vscode.window.tabGroups.close(tab);

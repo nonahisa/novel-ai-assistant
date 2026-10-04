@@ -386,6 +386,15 @@ describe("便に元の本文の指紋を添える", () => {
     expect(edits[1].base).toBe(textFingerprint("あ"));
   });
 
+  /** 未送信の字の控え（rescue）の本文 */
+  const rescueTextIn = (store: { state?: unknown }) =>
+    (store.state as { rescue?: { text: string } } | undefined)?.rescue?.text;
+  /** 帯の控え（rescueBands）の本文の並び */
+  const bandTextsIn = (store: { state?: unknown }) =>
+    ((store.state as { rescueBands?: Array<{ text: string }> } | undefined)?.rescueBands ?? []).map(
+      (band) => band.text
+    );
+
   function conflicted(store: { state?: unknown } = {}) {
     const h = unsentHarness({ store });
     h.update({ type: "update", docKey: "doc", text: "前の字と強調。" });
@@ -400,11 +409,11 @@ describe("便に元の本文の指紋を添える", () => {
     const h = conflicted(store);
     expect(h.rescueOpen()).toBe(true);
     expect(h.rescueText()).toContain("重な");
-    // 画面が作り直されても取り戻せるように、画面の状態へも控える
-    expect((store.state as { rescue?: { text: string; conflict: boolean } }).rescue).toMatchObject({
-      text: "前の字と《《強調》》あ。",
-      conflict: true,
-    });
+    // 画面が作り直されても取り戻せるように、画面の状態の「帯の控え」の欄へも控える
+    expect(bandTextsIn(store)).toEqual(["前の字と《《強調》》あ。"]);
+    expect(
+      (store.state as { rescueBands: Array<{ conflict: boolean }> }).rescueBands[0].conflict
+    ).toBe(true);
     expect(h.logs().some((line) => line.includes("重なって原稿に入らなかった"))).toBe(true);
   });
 
@@ -429,39 +438,107 @@ describe("便に元の本文の指紋を添える", () => {
   });
 
   /*
-    **帯を出している控えは、画面の状態から上書きしない**（リーダーの指示、2026-10-04）。
-    控えの欄は1つなので、帯が開いたまま未送信の知らせなどで画面の字を控えると、
-    帯の控えが状態から消え、再読み込みしたときに取り戻せなくなっていた
+    **控えの置き場は2つ**（作者の裁定、2026-10-04。設計書6.25.9）。0.98.6 までは欄が1つで、
+    帯の控えを守るために、帯が開いている間は未送信の字を控えなかった（その間に届かな
+    かった字は再読み込みで取り戻せなかった）。いまは帯の控え（rescueBands）と未送信の字の
+    控え（rescue）を別々に持ち、どちらも上書きしない
   */
-  const rescueTextIn = (store: { state?: unknown }) =>
-    (store.state as { rescue?: { text: string } } | undefined)?.rescue?.text;
-
-  it("重なった控えの帯が開いている間は、未送信の知らせが出ても状態の控えを上書きしない／閉じたあとは従来どおり控える", () => {
+  it("重なった控えの帯が開いている間に届かなかった字は、未送信の欄へ控え、帯の控えも消えない", () => {
     const store: { state?: unknown } = {};
     const h = conflicted(store);
     h.postEdit("前の字と強調。い");
     h.advance(5_000);
     expect(h.bannerOpen(), "未送信の知らせが出る場面になっていない").toBe(true);
-    expect(rescueTextIn(store)).toBe("前の字と《《強調》》あ。");
+    expect(rescueTextIn(store)).toBe("打った字");
+    expect(bandTextsIn(store)).toEqual(["前の字と《《強調》》あ。"]);
+    // 帯を閉じても、未送信の欄は残る（帯の欄だけが空く）
     h.click("rescueDiscard");
-    h.postEdit("前の字と強調。いう");
-    expect(rescueTextIn(store)).toBe("前の字と強調。いう");
+    expect(bandTextsIn(store)).toEqual([]);
+    expect(rescueTextIn(store)).toBe("打った字");
   });
 
-  it("開いたときに出る「前回の控え」の帯も、開いている間は上書きしない／閉じたあとは従来どおり控える", () => {
+  it("**帯が開いている間に届かなかった字は、画面を作り直したあと、帯の控えに続けて順に出て、戻せる**", () => {
+    const store: { state?: unknown } = {};
+    const h = conflicted(store);
+    h.postEdit("前の字と強調。い");
+    h.advance(5_000);
+    // 拡張機能ホストが起き直した等で、画面が作り直される（画面の状態は持ち越される）
+    const reopened = unsentHarness({ store, text: "前の字と強調。", now: 60_000 });
+    reopened.update({ type: "update", docKey: "doc", text: "前の字と強調。" });
+    expect(reopened.rescueOpen()).toBe(true);
+    // 1枚目は帯の控え（重なって入らなかった字）。後ろに1件待っていることも出す
+    expect(reopened.rescueText()).toContain("重な");
+    expect(reopened.rescueText()).toContain("あと1件");
+    // 見せている控えは全部帯の欄へ移り、未送信の欄は空く（このあと届かなかった字を控えられる）
+    expect(bandTextsIn(store)).toEqual(["前の字と《《強調》》あ。", "打った字"]);
+    expect(rescueTextIn(store)).toBeUndefined();
+    reopened.click("rescueDiscard");
+    // 2枚目は、帯が開いている間に届かなかった字
+    expect(reopened.rescueOpen()).toBe(true);
+    expect(reopened.rescueText()).toContain("前回、原稿に入らなかった字があります");
+    reopened.click("rescueRestore");
+    // 元の文書が分かっていない控えなので、確かめを1段挟んでから戻す
+    reopened.click("rescueRestore");
+    expect(reopened.edits().map((edit) => edit.text)).toEqual(["打った字"]);
+    expect(reopened.rescueOpen()).toBe(false);
+    expect(bandTextsIn(store)).toEqual([]);
+  });
+
+  it("開いたときに出る「前回の控え」の帯は帯の欄へ移り、開いている間に届かなかった字は未送信の欄へ控える", () => {
     const store: { state?: unknown } = {
       state: { rescue: { docKey: "doc", text: "前回の控え", at: 0, baseLength: 1, baseHash: "x" } },
     };
     const h = unsentHarness({ store });
     h.update({ type: "update", docKey: "doc", text: "原稿" });
     expect(h.rescueOpen()).toBe(true);
+    expect(bandTextsIn(store)).toEqual(["前回の控え"]);
+    expect(rescueTextIn(store)).toBeUndefined();
     h.postEdit("原稿あ");
     h.advance(5_000);
     expect(h.bannerOpen(), "未送信の知らせが出る場面になっていない").toBe(true);
-    expect(rescueTextIn(store)).toBe("前回の控え");
-    h.click("rescueDiscard");
-    h.postEdit("原稿あい");
-    expect(rescueTextIn(store)).toBe("原稿あい");
+    expect(bandTextsIn(store)).toEqual(["前回の控え"]);
+    expect(rescueTextIn(store)).toBe("打った字");
+    // 届けば未送信の欄だけが消え、帯の控えは残る（作者がまだ選んでいない）
+    h.receive({ type: "editApplied", seq: h.edits().at(-1)!.seq, ok: true });
+    expect(rescueTextIn(store)).toBeUndefined();
+    expect(bandTextsIn(store)).toEqual(["前回の控え"]);
+  });
+
+  it("見た目を変えて状態を覚え直しても、2つの欄とも残る", () => {
+    const remember = functionSource("remember", "vscode.postMessage(");
+    expect(remember).toContain("rescue: kept.rescue");
+    expect(remember).toContain("rescueBands: kept.rescueBands");
+  });
+
+  /*
+    **断られた直後の本文と［それでも戻す］の順**（作者の裁定、2026-10-04）。本体は断った
+    直後に待たずに本文を送るが、画面へは「断った返事」と「本文」のどちらが先に着くかは
+    決まらない。どちらの順でも、戻す便の元は新しい本体の本文になる
+  */
+  it.each([
+    ["断った返事 → 本文", true],
+    ["本文 → 断った返事", false],
+  ])("［それでも戻す］の便の元は、断ったあとに届いた本体の本文（%s）", (_label, conflictFirst) => {
+    const h = unsentHarness();
+    h.update({ type: "update", docKey: "doc", text: "前の字と《《強調》》。" });
+    h.postEdit("前の字と《《強調》》あ。");
+    const seq = h.edits()[0].seq;
+    const reject = () =>
+      h.receive({ type: "editApplied", seq, ok: true, conflict: true, text: "前の字と《《強調》》あ。" });
+    const latest = () => h.update({ type: "update", docKey: "doc", text: "前の字と強調。" });
+    if (conflictFirst) {
+      reject();
+      latest();
+    } else {
+      latest();
+      reject();
+    }
+    expect(h.rescueOpen()).toBe(true);
+    h.click("rescueRestore");
+    h.click("rescueRestore");
+    const edits = h.posted().filter((message) => message.type === "edit");
+    expect(edits.at(-1)!.text).toBe("前の字と《《強調》》あ。");
+    expect(edits.at(-1)!.base).toBe(textFingerprint("前の字と強調。"));
   });
 
   it("前回の控えの帯が出ているときは押しのけず、片づいてから出す", () => {
@@ -988,6 +1065,23 @@ describe("開き直したときに、原稿に入らなかった字を取り戻�
       rescue: { docKey: "doc-1", text: TYPED, at: 50_000, baseLength: DOC.length, baseHash: "" },
     });
     expect(reopened.rescueOpen()).toBe(true);
+  });
+
+  it("**拡張機能が持って来た控えが2つ（帯の控えと未送信の字）なら、両方を順に出す**", () => {
+    const reopened = unsentHarness({ store: {}, text: DOC, now: 60_000 });
+    reopened.update({
+      type: "update",
+      docKey: "doc-1",
+      text: DOC,
+      rescues: [
+        { docKey: "doc-1", text: "重なった字", at: 50_000, baseLength: -1, baseHash: "", conflict: true },
+        { docKey: "doc-1", text: TYPED, at: 55_000, baseLength: DOC.length, baseHash: "" },
+      ],
+    });
+    expect(reopened.rescueText()).toContain("重な");
+    reopened.click("rescueDiscard");
+    expect(reopened.rescueOpen()).toBe(true);
+    expect(reopened.rescueText()).toContain("前回、原稿に入らなかった字があります");
   });
 
   it("案内は開いたときの1回だけ判断する（打つたびに届く本文で出し直さない）", () => {

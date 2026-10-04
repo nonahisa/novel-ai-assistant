@@ -23,7 +23,7 @@ import {
 } from "./support/manuscriptFrame";
 import { tabIsDirty } from "./support/workbenchDom";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
-import { waitUntil } from "./support/wait";
+import { holdsFor, waitUntil } from "./support/wait";
 
 const EPISODE = "001_はじまり.txt";
 
@@ -586,28 +586,27 @@ test("Ctrl+Alt+K で強調を外した直後、画面へ届く前に同じ語の
       const bar = await frame.evaluate(() => document.getElementById("rescueText")?.textContent ?? "");
       expect(bar).toContain("重な");
       try {
-        await traceMark(frame, "Ctrl+S（外した印のまま保存）");
-        await saveAndWaitFor(session, (text) => !text.includes("《《"), "外した印のままファイルに入る");
-        expect(await fileText(session)).toBe("前の字と強調と後ろの字。\n");
         /*
-          **［戻す］は、断られたあとの本体の本文が画面に届いてから押す**（2026-10-04、揺れの調べ）。
-          画面は「最後に届いた本体の本文」を戻す便の元にする。本体はその本文を、変更が続くあいだ
-          120ミリ秒ずつ延ばして送るので、帯が出てから100ミリ秒ほどで押すと、元はまだ傍点を外す前の
-          本文で、本体は戻す便をもう一度「重なった」と断り、帯を出し直した（同時に走らせて16回中3回。
-          字は帯に控えたままで、消えてはいない）。人は帯を読んでから押すので、そのあいだに必ず届く。
-          届いた目印は、画面の「あ」が本体の本文（外した字だけ）に置き換わること
+          **帯が出たら、待たずに［戻す］［それでも戻す］を押す**（作者の裁定、2026-10-04。設計書6.25.9）。
+          0.98.6 までは、本体は断ったあとの本文を120ミリ秒まとめて（続く変更で延ばして）送っていたので、
+          帯が出てすぐ押すと、画面は傍点を外す前の本文を元にして戻す便を送り、本体はもう一度
+          「重なった」と断って帯を出し直していた（同時に走らせて16回中3回。このテストは、本体の本文が
+          画面に届くのを待ってから押して避けていた）。いまは断った直後だけ待たずに送るので、
+          待ちを外しても一度で通る。保存（Ctrl+S）も挟まない——挟むと、その待ちで本文が届いてしまう
         */
-        await waitUntil(
-          async () => (await composeText(frame)).includes("前の字と強調と後ろの字。"),
-          "断られたあとの本体の本文が画面に届く"
-        );
-        // ［戻す］を押せば、打った字のほうへ戻せる（本体の変更は消えるので、確かめが1段入る）
         await traceMark(frame, "［戻す］を押す");
         await frame.locator("#rescueRestore").click();
         const confirm = await frame.evaluate(() => document.getElementById("rescueRestore")?.textContent ?? "");
         expect(confirm).toBe("それでも戻す");
         await traceMark(frame, "［それでも戻す］を押す");
         await frame.locator("#rescueRestore").click();
+        // 一度で通る：帯は閉じたまま、出し直されない
+        await holdsFor(
+          async () =>
+            !(await frame.evaluate(() => document.getElementById("rescue")?.classList.contains("open") === true)),
+          "［それでも戻す］のあと、帯が閉じたまま（二度目の「重なった」で出し直されない）",
+          1_500
+        );
         await waitUntil(async () => (await composeText(frame)).includes("前の字とあと後ろの字。"), "打った字が画面へ戻る");
         await traceMark(frame, "Ctrl+S（戻した字を保存）");
         await saveAndWaitFor(session, (text) => text.includes("あ"), "打った字がファイルに入る");
