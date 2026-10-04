@@ -338,7 +338,8 @@ var GitHubWorks = (function () {
     if (!error || error.code !== "tool_error") return false;
     var text = str(error.message);
     try { text += " " + JSON.stringify(error.result || ""); } catch (e) { /* 読めなくてもよい */ }
-    return /404|not\s*found/i.test(text);
+    // GitHub の MCP は「無い」を 404 と言わず「does not exist」「does not point to a file」と返すことがある（2026-10-05 実機）
+    return /404|not\s*found|does\s+not\s+exist|does\s+not\s+point\s+to/i.test(text);
   }
 
   /*

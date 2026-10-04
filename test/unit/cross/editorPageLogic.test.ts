@@ -70,6 +70,7 @@ interface GitHubWorksShape {
   inboxFileName(date: Date, slug: string): string;
   parseResultFile(text: string): Record<string, unknown> | null;
   parseRepoSpec(spec: string): { owner: string; name: string } | null;
+  isNotFound(error: unknown): boolean;
 }
 
 function load(): { logic: EditorLogicShape; works: GitHubWorksShape } {
@@ -96,6 +97,20 @@ describe("原稿箱のページと同じ部品", () => {
   it("リポジトリの名前は URL を貼っても読める", () => {
     expect(plain(works.parseRepoSpec("https://github.com/someone/novels.git"))).toMatchObject({ owner: "someone", name: "novels" });
     expect(works.parseRepoSpec("novels")).toBeNull();
+  });
+
+  // 作者の実機（2026-10-05）：作品の印の無いフォルダー（_参考_… など）を読んだとき、
+  // GitHub の MCP は 404 と言わずにこの文を返し、「無い」と分からずにページが止まった
+  it("GitHub の MCP の「無い」の文を、無いファイルとして扱う", () => {
+    const missing = {
+      code: "tool_error",
+      message:
+        "Failed to get file contents. The path does not point to a file or directory, or the file does not exist in the repository.",
+    };
+    expect(works.isNotFound(missing)).toBe(true);
+    expect(works.isNotFound({ code: "tool_error", message: "Not Found" })).toBe(true);
+    expect(works.isNotFound({ code: "tool_error", message: "rate limit exceeded" })).toBe(false);
+    expect(works.isNotFound({ code: "needs_reauth", message: "does not exist" })).toBe(false);
   });
 });
 
