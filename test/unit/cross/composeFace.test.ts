@@ -1939,6 +1939,34 @@ describe("シーンメモの付箋", () => {
     expect(round(text)).toBe(text);
   });
 
+  /**
+   * **中身の無いメモの行が続いても、1行も畳まない**（作者の報告、2026-10-04 23時。
+   * 「// 」が2行続く所の1行が、同期のあと保存で消えていた）。読み込み→直列化の
+   * 往復はここで、本物の Chromium（headless Edge）でも一致することを確かめた。
+   * 消えた経路はこの往復ではない（報告の「確かめたこと」）が、同じ型の取りこぼしが
+   * 入らないように、似た形の行をまとめて見張る。
+   */
+  it("中身の無いメモの行・空白だけの行が続いても、往復で1行も変わらない", () => {
+    const cases = [
+      "「こんにちは」\n\n// \n// \n　僕が挨拶をすると",
+      "あ\n// \n// \n// \nい",
+      "// \n// ",
+      "あ\n//\n//\nい",
+      "あ\n／／ \n／／ \nい",
+      "あ\n// 　\n// 　\nい",
+      "あ\n \n \nい",
+      "あ\n　\n　\nい",
+      "あ\n\n\n\nい",
+      "あ  \nい　\n// メモ  \n",
+      "\n\n// \n",
+    ];
+    for (const value of cases) {
+      expect(round(value)).toBe(value);
+      // 行の入れ物の数＝行の数（畳まれていれば減る）
+      expect(build(value).childNodes).toHaveLength(value.split("\n").length);
+    }
+  });
+
   it("メモの行の段落に、付箋のクラスとタグのクラスが付く", () => {
     const root = build("あ\n// TODO ここ\n／／ 伏線 そこ\n// 推敲 あれ");
     expect(root.childNodes[0].getAttribute?.("class")).toBe("line");

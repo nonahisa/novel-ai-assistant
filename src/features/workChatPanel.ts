@@ -759,13 +759,19 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   }
 
   /**
-   * 直前に開いていた本文エディター。
+   * 相談の相手（直前に開いていた本文と、その中で選んでいる所）。
    *
    * **相談パネルへフォーカスが移ると `activeTextEditor` は undefined になる。**
    * 質問を打っている最中はまさにその状態なので、覚えておかないと
    * 「何について聞かれているか」が毎回分からなくなる。
+   *
+   * **素のエディター（`TextEditor`）に縛らない**（作者の報告 2026-10-04）。
+   * 以前はエディターそのものを覚えていたので、原稿エディター（エディターを
+   * 持たない）から渡すには、素のエディターで本文を横に開くしかなかった
+   * ——［AIに相談］を押すと3列目に第1話が開いた。原稿は原稿エディターで
+   * しか開かない決まり（設計書6.25.10）なので、文書と範囲で受け取れるようにした。
    */
-  private lastEditor: vscode.TextEditor | undefined;
+  private lastSource: ChatSource | undefined;
 
   constructor(
     private readonly registry: WorkRegistry,
@@ -786,7 +792,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
      */
     private readonly writerProfiles?: WriterProfileStore
   ) {
-    this.lastEditor = vscode.window.activeTextEditor;
+    this.lastSource = sourceOfEditor(vscode.window.activeTextEditor);
     this.selectionListener = this.ai.onDidChangeSelection(
       () => void this.postContext()
     );
@@ -1430,8 +1436,27 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     // 作品の外の文書（無題・設定・出力）は受け取らない。パネルへ
     // フォーカスが移る途中で前に来ることがあり、受け取ると直前まで
     // 見ていた本文を手放してしまう
-    if (this.documentPath(editor) === undefined) return;
-    this.lastEditor = editor;
+    this.trackSource(sourceOfEditor(editor));
+  }
+
+  /**
+   * 原稿エディターから、相談の相手を受け取る（「AI相談（選択範囲）」）。
+   *
+   * **本文を素のエディターで開かずに渡す**（設計書6.25.10）。範囲が無ければ
+   * 文書の頭ではなく `caret`（原稿エディターのカーソルの行）を中心に抜粋する。
+   */
+  trackDocument(
+    document: vscode.TextDocument,
+    range: vscode.Range | undefined,
+    caret?: vscode.Position
+  ): void {
+    this.trackSource(sourceOfDocument(document, range, caret));
+  }
+
+  private trackSource(source: ChatSource | undefined): void {
+    if (!source) return;
+    if (this.documentPath(source) === undefined) return;
+    this.lastSource = source;
     void this.postContext();
   }
 
@@ -3326,7 +3351,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * 「どの作品か」を知りたいだけの呼び出しからは通せない。
    */
   currentWorkId(): string | undefined {
-    const filePath = this.documentPath(this.lastEditor);
+    const filePath = this.documentPath(this.lastSource);
     const opened = filePath ? this.findWork(filePath) : undefined;
     return opened?.id ?? this.selectedWork()?.id;
   }
@@ -3648,7 +3673,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     this.setSelectedWorkId(work.id);
     // 別の作品を開いたまま新規作成した場合、そちらが優先されてしまう。
     // 作りたてのほうを見るために、覚えているエディターを手放す
-    this.lastEditor = undefined;
+    this.lastSource = undefined;
     await this.postContext();
   }
 
@@ -3664,9 +3689,17 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    * **断るとき**：相談パネルを開けない／答えを待っている途中／対話式プロット
    * 作成の途中（問いが問答の答えとして読まれてしまう）。どれも理由を知らせて送らない。
    *
+   * **相談の相手（`target`）は引数で受け、パネルを開いたあとで覚える。** 先に
+   * 覚えさせると、パネルを開く途中のコマンド（`novelai.openChat`）が前面の
+   * 素のエディターで覚え直し、別の話について相談することになる。
+   * 素のエディターは開かない（作者の報告 2026-10-04。設計書6.25.10）
+   *
    * @returns 送ったか
    */
-  async askFromOutside(question: string): Promise<boolean> {
+  async askFromOutside(
+    question: string,
+    target?: { document: vscode.TextDocument; range: vscode.Range }
+  ): Promise<boolean> {
     if (!(await this.ensureChatVisible())) {
       void vscode.window.showInformationMessage(
         "相談パネルを開けませんでした。左の「AIに相談」を開いてから、もう一度押してください。"
@@ -3685,6 +3718,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       );
       return false;
     }
+    if (target) this.trackDocument(target.document, target.range);
     this.postAll({ type: "asked", question });
     const pending = { question };
     this.tail = { pending };
@@ -4582,8 +4616,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
   private async resolveContext(
     focus: readonly string[] = []
   ): Promise<ResolvedContext | undefined> {
-    const editor = this.lastEditor;
-    const filePath = this.documentPath(editor);
+    const source = this.lastSource;
+    const filePath = this.documentPath(source);
     const work = filePath ? this.findWork(filePath) : undefined;
 
     // **ファイルを開いていなくても相談できるようにする。**
@@ -4625,12 +4659,12 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     });
 
     // ここへ来る時点でファイルは決まっている（上で workOnly へ分けている）
-    const document = editor!.document;
-    const selection = document.getText(editor!.selection);
+    const document = source!.document;
+    const selection = document.getText(source!.selection());
     const excerpt = buildExcerpt({
       text: document.getText(),
       selection: selection || undefined,
-      caret: document.offsetAt(editor!.selection.active),
+      caret: document.offsetAt(source!.caret()),
       maxChars: EXCERPT_CHARS,
     });
 
@@ -4900,16 +4934,57 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
    *   手元の相対の道と見分けられず、中にあるかの判定に回すと
    *   いまの場所しだいで「中」と答えうる
    */
-  private documentPath(
-    editor: vscode.TextEditor | undefined
-  ): string | undefined {
-    if (!editor) return undefined;
-    const uri = editor.document.uri;
+  private documentPath(source: ChatSource | undefined): string | undefined {
+    if (!source) return undefined;
+    const uri = source.document.uri;
     const location = fromUri(uri);
     if (uri.scheme === "file") return location;
     if (!path.isUriString(location)) return undefined;
     return this.findWork(location) ? location : undefined;
   }
+}
+
+/**
+ * 相談の相手：本文と、その中で選んでいる所・カーソル。
+ *
+ * **選んでいる所は関数で読む。** 素のエディターから来たものは、作者が
+ * カーソルを動かせば変わる（覚えた時点の値で固めると、選び直してから
+ * 聞いたときに古い所について答える）。原稿エディターから来たものは、
+ * 渡された範囲のまま変わらない。
+ */
+interface ChatSource {
+  readonly document: vscode.TextDocument;
+  selection(): vscode.Range;
+  caret(): vscode.Position;
+}
+
+function sourceOfEditor(
+  editor: vscode.TextEditor | undefined
+): ChatSource | undefined {
+  if (!editor) return undefined;
+  return {
+    document: editor.document,
+    selection: () => editor.selection,
+    caret: () => editor.selection.active,
+  };
+}
+
+/**
+ * 原稿エディターから渡された文書と範囲。範囲が無ければカーソルの位置を
+ * 空の範囲として持つ（抜粋をその周りから取るため）。カーソルも無ければ文書の頭
+ */
+function sourceOfDocument(
+  document: vscode.TextDocument,
+  range: vscode.Range | undefined,
+  caret: vscode.Position | undefined
+): ChatSource {
+  const at = range?.end ?? caret ?? document.positionAt(0);
+  const selected = range ?? new vscode.Range(at, at);
+  return {
+    document,
+    selection: () => selected,
+    caret: () => at,
+  };
 }
 
 interface ResolvedContext {

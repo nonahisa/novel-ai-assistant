@@ -81,35 +81,36 @@ async function providerFor(
 }
 
 /** ツリーをたどって、いま画面に並ぶコマンドIDを集める */
-function shownCommands(provider: StepMenuProvider): string[] {
+async function shownCommands(provider: StepMenuProvider): Promise<string[]> {
   const commands: string[] = [];
-  for (const node of provider.getChildren()) {
+  for (const node of await provider.getChildren()) {
     if (node.type !== "step") continue;
-    for (const child of provider.getChildren(node)) {
-      collect(provider, child, commands);
+    for (const child of await provider.getChildren(node)) {
+      await collect(provider, child, commands);
     }
   }
   return commands;
 }
 
-function collect(
+async function collect(
   provider: StepMenuProvider,
   node: StepNode,
   into: string[]
-): void {
+): Promise<void> {
   if (node.type === "action") {
     into.push(node.item.command);
     return;
   }
   if (node.type === "section") {
-    for (const child of provider.getChildren(node)) collect(provider, child, into);
+    for (const child of await provider.getChildren(node)) {
+      await collect(provider, child, into);
+    }
   }
 }
 
 /** 段の名前だけを集める */
-function stepLabels(provider: StepMenuProvider): string[] {
-  return provider
-    .getChildren()
+async function stepLabels(provider: StepMenuProvider): Promise<string[]> {
+  return (await provider.getChildren())
     .filter((node) => node.type === "step")
     .map((node) => (node.type === "step" ? node.step.label : ""));
 }
@@ -118,14 +119,14 @@ describe("選んだ作品のタイプで絞る", () => {
   test("小説では、いままでと同じものが並ぶ", async () => {
     const provider = await providerFor("long");
 
-    expect(shownCommands(provider)).toEqual(commandsIn(STEP_MENU));
-    expect(stepLabels(provider)).toEqual(STEP_MENU.map((step) => step.label));
+    expect(await shownCommands(provider)).toEqual(commandsIn(STEP_MENU));
+    expect(await stepLabels(provider)).toEqual(STEP_MENU.map((step) => step.label));
   });
 
   test("タイプを決めていない作品でも、いままでと同じ", async () => {
     const provider = await providerFor(undefined);
 
-    expect(shownCommands(provider)).toEqual(commandsIn(STEP_MENU));
+    expect(await shownCommands(provider)).toEqual(commandsIn(STEP_MENU));
   });
 
   test("作品を選んでいなければ、すべて出す", async () => {
@@ -137,12 +138,12 @@ describe("選んだ作品のタイプで絞る", () => {
     ]);
 
     expect(provider.selectedWork()).toBeUndefined();
-    expect(shownCommands(provider)).toEqual(commandsIn(STEP_MENU));
+    expect(await shownCommands(provider)).toEqual(commandsIn(STEP_MENU));
   });
 
   test("創作メモ集では、物語向けの操作が消える", async () => {
     const provider = await providerFor("memo");
-    const shown = shownCommands(provider);
+    const shown = await shownCommands(provider);
 
     for (const command of [
       "novelai.createPlot",
@@ -161,7 +162,7 @@ describe("選んだ作品のタイプで絞る", () => {
 
   test("創作メモ集でも、書く・直す・同期する操作は残る", async () => {
     const provider = await providerFor("memo");
-    const shown = shownCommands(provider);
+    const shown = await shownCommands(provider);
 
     for (const command of [
       "novelai.checkTypos",
@@ -178,7 +179,7 @@ describe("選んだ作品のタイプで絞る", () => {
   test("脚本では、物語向けの操作がそのまま残る", async () => {
     const provider = await providerFor("script");
 
-    expect(shownCommands(provider)).toEqual(commandsIn(STEP_MENU));
+    expect(await shownCommands(provider)).toEqual(commandsIn(STEP_MENU));
   });
 
   test("中身が全部消えた小分類は、見出しごと畳む", async () => {
@@ -230,6 +231,107 @@ describe("選んだ作品のタイプで絞る", () => {
   });
 });
 
+/**
+ * 描画の途中で「並べ直して」と知らせない（2026-10-04、作者の実機と
+ * `test/e2e/panelFocusStability.test.ts`）。
+ *
+ * 形式を読み終えたことを木全体の作り直しで知らせていたころ、読み込みが速いと
+ * （原稿エディターで話を開いたあと）知らせが VS Code 本体の描画の 1ms 後に届き、
+ * 本体の木が止まって段を開いても中身が出なくなった。
+ */
+describe("形式の読み込みと描画の知らせ", () => {
+  test("最上段を描いて形式を読み終えても、作り直しの知らせを出さない", async () => {
+    const provider = new StepMenuProvider(
+      fakeRegistry([work("w1", "作品A")]),
+      memoryWorkStore(),
+      undefined,
+      undefined,
+      async () => "memo"
+    );
+    let fired = 0;
+    provider.onDidChangeTreeData(() => fired++);
+
+    await provider.getChildren();
+    // 背後の読み込みが終わるまで待つ（旧実装はここで知らせを出していた）
+    await provider.loadSelectedFormat();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fired).toBe(0);
+  });
+
+  test("最上段は、形式を読み終えてから絞った段を返す", async () => {
+    // 先に loadSelectedFormat を呼ばなくても、最初の描画から絞れている
+    const provider = new StepMenuProvider(
+      fakeRegistry([work("w1", "作品A")]),
+      memoryWorkStore(),
+      undefined,
+      undefined,
+      async () => "memo"
+    );
+
+    const shown = await shownCommands(provider);
+
+    expect(shown).not.toContain("novelai.checkForeshadows");
+    expect(shown).toContain("novelai.checkTypos");
+  });
+
+  test("続けて描いても、同じ作品の形式は1度だけ読む", async () => {
+    let reads = 0;
+    const provider = new StepMenuProvider(
+      fakeRegistry([work("w1", "作品A")]),
+      memoryWorkStore(),
+      undefined,
+      undefined,
+      async () => {
+        reads++;
+        return "long";
+      }
+    );
+
+    await Promise.all([
+      provider.getChildren(),
+      provider.getChildren(),
+      provider.loadSelectedFormat(),
+    ]);
+
+    expect(reads).toBe(1);
+  });
+
+  test("読み込みの途中でタイプを捨てたら、古い結果を置かない", async () => {
+    let format: WorkFormatKey = "memo";
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let first = true;
+    const provider = new StepMenuProvider(
+      fakeRegistry([work("w1", "作品A")]),
+      memoryWorkStore(),
+      undefined,
+      undefined,
+      async () => {
+        // 1回目だけ止めて、その間にタイプを変える
+        if (first) {
+          first = false;
+          const seen = format;
+          await gate;
+          return seen;
+        }
+        return format;
+      }
+    );
+
+    const stale = provider.loadSelectedFormat();
+    format = "long";
+    provider.invalidateFormats("w1");
+    release();
+    await stale;
+
+    // 古い「memo」が置かれていれば、伏線が消える
+    expect(await shownCommands(provider)).toContain("novelai.checkForeshadows");
+  });
+});
+
 /** 表を引くだけの、最小の操作項目 */
 function action(command: string): ActionItem {
   return {
@@ -264,7 +366,7 @@ describe("選んだ作品の種類で絞る", () => {
   }
 
   test("エッセイでは、矛盾・伏線・人物抽出・単話プロットが消える", async () => {
-    const shown = shownCommands(await providerForKind("long", "essay"));
+    const shown = await shownCommands(await providerForKind("long", "essay"));
 
     for (const command of [
       "novelai.checkContradictions",
@@ -279,7 +381,7 @@ describe("選んだ作品の種類で絞る", () => {
   });
 
   test("エッセイでも、プロット・校正・書き出しは残る", async () => {
-    const shown = shownCommands(await providerForKind("long", "essay"));
+    const shown = await shownCommands(await providerForKind("long", "essay"));
 
     for (const command of [
       "novelai.createPlot",
@@ -296,14 +398,14 @@ describe("選んだ作品の種類で絞る", () => {
 
   test("漫画の原作・台本は物語なので、小説と同じものが並ぶ", async () => {
     for (const kind of ["manga", "script", "novel"] as const) {
-      const shown = shownCommands(await providerForKind("long", kind));
+      const shown = await shownCommands(await providerForKind("long", kind));
       expect(shown, kind).toEqual(commandsIn(STEP_MENU));
     }
   });
 
   test("形式を決めていなくても、種類が歌詞なら絞る", async () => {
     // 形式の「決めていない」は絞らない理由だが、種類は作者が決めた値である
-    const shown = shownCommands(await providerForKind(undefined, "lyrics"));
+    const shown = await shownCommands(await providerForKind(undefined, "lyrics"));
     expect(shown).not.toContain("novelai.checkForeshadows");
     expect(shown).toContain("novelai.checkTypos");
   });

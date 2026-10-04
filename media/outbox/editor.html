@@ -1,0 +1,1495 @@
+<title>出先の原稿エディター</title>
+<style>
+/* 1列の原稿エディター：上に作品と話の選び方、いつも見える帯、書く欄と組んだ表示。スマホ幅で親指が届く押し口 */
+:root {
+  --paper: #f7f6f2;
+  --sheet: #ffffff;
+  --ink: #23262b;
+  --muted: #6b6f76;
+  --rule: #dcd9d0;
+  --accent: #2f5d8a;
+  --accent-ink: #ffffff;
+  --mark: #fbe7b5;
+  --fix: #2e6b45;
+  --reject: #8a3b32;
+  --done-ground: #eceae4;
+  --font-display: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", "Noto Serif JP", serif;
+  --font-body: system-ui, -apple-system, "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+  --font-data: ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #17191c;
+    --sheet: #202328;
+    --ink: #e6e4de;
+    --muted: #9a9ea6;
+    --rule: #353940;
+    --accent: #8fb6dc;
+    --accent-ink: #12161b;
+    --mark: #5a4a20;
+    --fix: #8fcca3;
+    --reject: #e3a198;
+    --done-ground: #26292e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #17191c;
+  --sheet: #202328;
+  --ink: #e6e4de;
+  --muted: #9a9ea6;
+  --rule: #353940;
+  --accent: #8fb6dc;
+  --accent-ink: #12161b;
+  --mark: #5a4a20;
+  --fix: #8fcca3;
+  --reject: #e3a198;
+  --done-ground: #26292e;
+  color-scheme: dark;
+}
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.7;
+  margin: 0;
+}
+.wrap {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding-inline: 16px;
+  padding-block: 20px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+[hidden] { display: none !important; }
+header { display: flex; flex-direction: column; gap: 4px; }
+h1 {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+.sub { color: var(--muted); font-size: 0.85rem; overflow-wrap: anywhere; }
+.notice {
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.notice.trouble { border-color: var(--reject); }
+.picker {
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.picker label { display: flex; flex-direction: column; gap: 2px; font-size: 0.8rem; color: var(--muted); min-width: 0; }
+.picker label.grow { flex: 1 1 12rem; }
+.picker label.branch { flex: 0 1 7rem; }
+input[type="text"], select {
+  font: inherit;
+  font-size: 0.95rem;
+  min-height: 44px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0 10px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+}
+button {
+  font: inherit;
+  font-size: 0.95rem;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 6px;
+  border: 1px solid var(--rule);
+  background: var(--sheet);
+  color: var(--ink);
+  cursor: pointer;
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button:disabled { opacity: 0.5; cursor: default; }
+button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.guide { font-size: 0.85rem; color: var(--muted); }
+.guide summary { cursor: pointer; font-size: 0.85rem; padding-block: 8px; color: var(--accent); }
+.guide ol { margin: 4px 0 0; padding-left: 1.4em; }
+/* 帯：いまの話の状態と［パソコンへ送る］を、スクロールしても見える所に */
+.band {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--sheet);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.band.refused { border: 2px solid var(--reject); }
+.band-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
+.band-state { font-weight: 600; overflow-wrap: anywhere; }
+.band.refused .band-state { color: var(--reject); }
+.band-note { color: var(--muted); font-size: 0.85rem; overflow-wrap: anywhere; white-space: pre-line; }
+.band-flash { color: var(--fix); font-weight: 600; }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.seg { display: inline-flex; gap: 0; }
+.seg button { border-radius: 0; }
+.seg button:first-child { border-radius: 6px 0 0 6px; }
+.seg button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
+.count { font-family: var(--font-data); font-size: 0.85rem; color: var(--muted); }
+/* 書く欄：原稿の記法のまま。縦書きでは右から左へ行が進む */
+textarea {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  line-height: 1.9;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 60vh;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--sheet);
+  color: var(--ink);
+  resize: vertical;
+}
+textarea[readonly] { background: var(--done-ground); }
+/* 縦書きでは箱の幅が中身に縮むので、幅をいっぱいに取る（行は右から始まる） */
+.vertical textarea, .vertical .view {
+  writing-mode: vertical-rl;
+  -webkit-writing-mode: vertical-rl;
+  width: 100%;
+  height: 70vh;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  resize: none;
+}
+/*
+  縦書きの書く欄（textarea の代わり）。iPad の WebKit は縦書きの textarea でタップした位置に
+  カーソルを置けない（作者の実機、2026-10-05）ので、縦書きのときだけこの欄で書く
+*/
+.vwrite {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--sheet);
+  color: var(--ink);
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.vwrite:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.vwrite[contenteditable="false"] { background: var(--done-ground); }
+.vertical .vwrite {
+  writing-mode: vertical-rl;
+  -webkit-writing-mode: vertical-rl;
+  width: 100%;
+  height: 70vh;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+/* 縦書きでは下線（変換中の印を含む）を字の右に引く。日本語の縦組みの慣わし（作者の要望、2026-10-05） */
+.vertical textarea, .vertical .view, .vertical .vwrite {
+  text-underline-position: right;
+  -webkit-text-underline-position: right;
+}
+/* 組んだ表示：ルビと傍点を組んで読むだけ（書けない） */
+.view {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  line-height: 2;
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 14px 16px;
+  min-height: 60vh;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+}
+/* 空行も1行分の場所を取る（縦書き・横書きのどちらでも効くよう、論理方向で） */
+.view p { margin: 0; white-space: pre-wrap; min-block-size: 1em; }
+.view p.memo-line { color: var(--muted); font-family: var(--font-body); font-size: 0.85rem; }
+.view ruby rt { font-size: 0.5em; }
+.dots { text-emphasis: filled sesame; -webkit-text-emphasis: filled sesame; text-emphasis-position: over right; -webkit-text-emphasis-position: over right; }
+/* 断られたとき：送った本文と、いまのパソコンの本文の違い */
+.diff-panel {
+  background: var(--sheet);
+  border: 2px solid var(--reject);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.diff-panel h2, .draft-panel h2 { font-size: 1rem; margin: 0; }
+.diff { font-family: var(--font-display); font-size: 0.9rem; display: flex; flex-direction: column; border-left: 2px solid var(--rule); padding-left: 10px; }
+.diff div { white-space: pre-wrap; overflow-wrap: anywhere; min-height: 1.4em; }
+.diff .add { background: var(--mark); }
+.diff .del { color: var(--reject); text-decoration: line-through; }
+.diff .gap { color: var(--muted); font-family: var(--font-body); font-size: 0.8rem; }
+.diff-legend { color: var(--muted); font-size: 0.8rem; }
+.sent-copy { min-height: 30vh; }
+.draft-panel {
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+/* 確かめの窓（ページの中に出す。枠の中ではブラウザの確認の窓が出ないことがある） */
+.dialog-back {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 10;
+}
+.dialog {
+  background: var(--sheet);
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 16px;
+  max-width: 26rem;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap" id="wrap" data-default-repo="" data-default-branch="">
+  <header>
+    <h1 id="title">出先の原稿エディター</h1>
+    <div class="sub" id="where">GitHub の作品の話を開いて、書き直したり続きを書いたりできます。</div>
+  </header>
+  <section class="picker" aria-label="作品と話の選び方">
+    <div class="row">
+      <label class="grow">リポジトリ（持ち主/名前）
+        <input type="text" id="repo" placeholder="持ち主/リポジトリ名" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </label>
+      <label class="branch">枝
+        <input type="text" id="branch" placeholder="main" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </label>
+      <button type="button" id="load" class="primary">読む</button>
+    </div>
+    <label id="workRow" hidden>作品（最近更新のあった順）
+      <select id="work"></select>
+    </label>
+    <div class="row" id="episodeRow" hidden>
+      <label class="grow">話
+        <select id="episode"></select>
+      </label>
+      <button type="button" id="reopen">読み直す</button>
+    </div>
+    <details class="guide">
+      <summary>GitHub のつなぎ方</summary>
+      <ol>
+        <li>claude.ai の設定 → コネクターで、カスタムコネクター「GitHub」（https://api.githubcopilot.com/mcp/）を足す</li>
+        <li>GitHub の Settings → Applications → Installed GitHub Apps で「Claude Github MCP Connector」の Configure を開く（まだなら、コネクターをつなぐときの案内からインストールする）</li>
+        <li>Repository access の Only select repositories に、作品のリポジトリを足して保存する（インストールのあとにエラーの画面が出ても、気にしなくて大丈夫です）</li>
+        <li>このページに戻り、リポジトリの名前を入れて［読む］を押す。最初の1回は、GitHub を使ってよいかを聞かれます</li>
+      </ol>
+    </details>
+  </section>
+  <div class="band" id="band" role="status" aria-live="polite">
+    <div class="band-row">
+      <div class="band-state" id="bandState">話を開くと、ここに状態が出ます</div>
+      <button type="button" id="send" class="primary" disabled>パソコンへ送る</button>
+    </div>
+    <div class="band-note" id="bandNote" hidden></div>
+    <div class="band-flash" id="bandFlash" hidden></div>
+  </div>
+  <div class="sub">書いたものは、［パソコンへ送る］を押すまで送られません（書きかけはこの端末に控えます）。送ったあと、パソコンで同期して［原稿箱を取り込む］を押すと、原稿に入ります。</div>
+  <div class="notice" id="status">読み込んでいます…</div>
+  <div class="draft-panel" id="draftPanel" hidden>
+    <h2>前に書きかけた分があります</h2>
+    <div class="band-note" id="draftNote"></div>
+    <textarea id="draftText" class="sent-copy" readonly aria-label="前に書きかけた分"></textarea>
+    <div class="buttons">
+      <button type="button" id="draftUse">この書きかけで続ける</button>
+      <button type="button" id="draftDrop">書きかけを捨てる</button>
+    </div>
+  </div>
+  <div class="diff-panel" id="diffPanel" hidden>
+    <h2>パソコンで入らなかった本文</h2>
+    <div class="band-note" id="diffNote"></div>
+    <div class="diff-legend">下地の行は送った本文にだけある行、取り消し線の行はいまのパソコンの本文にだけある行です。</div>
+    <div class="diff" id="diff"></div>
+    <label class="band-note">送った本文（選んで写せます）
+      <textarea id="sentText" class="sent-copy" readonly></textarea>
+    </label>
+    <div class="buttons"><button type="button" id="diffClose">閉じる</button></div>
+  </div>
+  <div class="tools" id="tools" hidden>
+    <div class="seg" role="group" aria-label="書く・組んで読む">
+      <button type="button" id="modeWrite" aria-pressed="true">書く</button>
+      <button type="button" id="modeRead" aria-pressed="false">組んで読む</button>
+    </div>
+    <div class="seg" role="group" aria-label="縦書き・横書き">
+      <button type="button" id="dirV" aria-pressed="false">縦書き</button>
+      <button type="button" id="dirH" aria-pressed="true">横書き</button>
+    </div>
+    <div class="count" id="count"></div>
+  </div>
+  <div id="paper">
+    <textarea id="text" aria-label="本文" spellcheck="false" hidden></textarea>
+    <div id="vtext" class="vwrite" contenteditable="plaintext-only" spellcheck="false" role="textbox" aria-multiline="true" aria-label="本文（縦書き）" hidden></div>
+    <div class="view" id="view" hidden></div>
+  </div>
+</div>
+
+<div class="dialog-back" id="dialog" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogText">
+    <div id="dialogText"></div>
+    <div class="buttons" id="dialogButtons"></div>
+  </div>
+</div>
+
+<script>
+/* github-common:start */
+/*
+  GitHub の作品のリポジトリを読む部品（統合小説執筆環境の設計書6.115「GitHub 経由」・6.116）。
+  出先の原稿箱（media/outbox/outbox.html）と出先の原稿エディター（media/outbox/editor.html）の
+  両方に、この区間を**一字違わず**置く。作品の選び方（最近更新のあった作品から開く）・GitHub に
+  届かないときの案内・受け取り箱の名前と結果の読み方を、2つのページでずらさないため
+  （test/unit/cross/editorPageLogic.test.ts が見張る）。画面（document）には触らない。
+*/
+var GitHubWorks = (function () {
+  function str(value) { return typeof value === "string" ? value : ""; }
+
+  function isNotFound(error) {
+    if (!error || error.code !== "tool_error") return false;
+    var text = str(error.message);
+    try { text += " " + JSON.stringify(error.result || ""); } catch (e) { /* 読めなくてもよい */ }
+    // GitHub の MCP は「無い」を 404 と言わず「does not exist」「does not point to a file」と返すことがある（2026-10-05 実機）
+    return /404|not\s*found|does\s+not\s+exist|does\s+not\s+point\s+to/i.test(text);
+  }
+
+  /*
+    GitHub に届かないときの、理由と直し方。コードごとに直し方が違うので、1つにまとめない
+  */
+  function describeGithubError(error, what) {
+    var code = error && error.code;
+    if (code === "server_not_connected" || code === "selection_required" || code === "server_not_found") {
+      return "GitHub のコネクターが見つかりません。claude.ai の設定 → コネクターで、カスタムコネクター「GitHub」を足してください（上の「GitHub のつなぎ方」の1）。";
+    }
+    if (code === "needs_reauth") return "GitHub へのつながりが切れています。claude.ai の設定 → コネクターで、GitHub をつなぎ直してください。";
+    if (code === "not_in_manifest") return "このページで GitHub を使うことが許されていません。ページの権限（右上のメニュー）で GitHub を許してから、［読む］を押してください。";
+    if (code === "blocked_by_policy" || code === "approval_required") return "組織の決まりで、このページから GitHub を使えません。管理している人に確かめてください。";
+    if (code === "not_granted" || code === "capability_disabled" || code === "capability_removed") {
+      return "この画面では GitHub を使えません。claude.ai の Claude アプリかブラウザで開いてください。";
+    }
+    if (isNotFound(error)) {
+      return what === "repo"
+        ? "GitHub のアプリ（Claude Github MCP Connector）に、このリポジトリを許していないようです（名前か枝の打ち間違いでも同じ表示になります）。上の「GitHub のつなぎ方」の2と3で、このリポジトリを足してください。"
+        : "GitHub にファイルが見つかりませんでした（" + what + "）。";
+    }
+    if (code === "server_unavailable" || code === "upstream_error" || code === "rate_limited") {
+      return "GitHub に届きませんでした。少し待ってから［読む］を押してください。";
+    }
+    return "GitHub から読めませんでした（" + str(error && error.message).slice(0, 120) + "）。";
+  }
+
+  // 1つのファイルの中身。get_file_contents は「SHA の行」と中身を別の塊で返す（resource の text を先に見る）
+  function textOfResult(result) {
+    var blocks = (result && result.content) || [];
+    for (var i = 0; i < blocks.length; i++) {
+      var b = blocks[i];
+      if (b && b.type === "resource" && b.resource) {
+        if (typeof b.resource.text === "string") return b.resource.text;
+        if (typeof b.resource.blob === "string") {
+          var bin = atob(b.resource.blob);
+          var bytes = new Uint8Array(bin.length);
+          for (var j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);
+          return new TextDecoder().decode(bytes);
+        }
+      }
+    }
+    var texts = blocks.filter(function (b) { return b && b.type === "text" && typeof b.text === "string"; })
+      .map(function (b) { return b.text; })
+      .filter(function (t) { return !/^successfully downloaded/i.test(t); });
+    if (texts.length) return texts.join("");
+    return typeof (result && result.payload) === "string" ? result.payload : "";
+  }
+
+  function shaOfResult(result) {
+    var blocks = (result && result.content) || [];
+    for (var i = 0; i < blocks.length; i++) {
+      var m = blocks[i] && typeof blocks[i].text === "string" && /SHA:\s*([0-9a-f]{40})/i.exec(blocks[i].text);
+      if (m) return m[1].toLowerCase();
+    }
+    return "";
+  }
+
+  // 「持ち主/名前」（GitHub の URL を貼ってもよい）。形が違えば null
+  function parseRepoSpec(spec) {
+    var s = str(spec).trim().replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/i, "").replace(/\/+$/, "");
+    var parts = s.split("/");
+    if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+    return { spec: s, owner: parts[0], name: parts[1] };
+  }
+
+  // 同時に投げる数を絞って順に読む（GitHub の上限を叩かない）
+  async function eachLimited(items, limit, task) {
+    var results = new Array(items.length);
+    var next = 0;
+    async function worker() {
+      while (next < items.length) {
+        var index = next++;
+        results[index] = await task(items[index], index);
+      }
+    }
+    var workers = [];
+    for (var i = 0; i < Math.min(limit, items.length); i++) workers.push(worker());
+    await Promise.all(workers);
+    return results;
+  }
+
+  // 作品の中の道を、リポジトリの根からの道へ
+  function repoPath(work, relative) {
+    return work && work.path ? work.path + "/" + relative : relative;
+  }
+
+  // 読む口。repo は { owner, name, branch }。読むのは枝の先（refs/heads/<枝>）
+  function reader(gh, repo) {
+    var ref = "refs/heads/" + repo.branch;
+    async function readFile(path) {
+      var result = await gh("get_file_contents", { owner: repo.owner, repo: repo.name, path: path, ref: ref });
+      return { text: textOfResult(result), sha: shaOfResult(result) };
+    }
+    // 無いファイルは null（作品でないフォルダー・まだ指摘の無い作品）
+    async function readOptional(path) {
+      try { return await readFile(path); } catch (error) { if (isNotFound(error)) return null; throw error; }
+    }
+    async function listDir(path, optional) {
+      try {
+        var result = await gh("get_file_contents", {
+          owner: repo.owner, repo: repo.name, path: path || "/", ref: ref,
+          fields: ["type", "name", "path", "sha"]
+        });
+        return Array.isArray(result.payload) ? result.payload : [];
+      } catch (error) {
+        if (optional && isNotFound(error)) return [];
+        throw error;
+      }
+    }
+    return { readFile: readFile, readOptional: readOptional, listDir: listDir };
+  }
+
+  // 作品を最後のコミットの新しい順に（時刻の分からない作品は後ろ、同じなら道の順）
+  function sortWorksByRecent(works) {
+    return works.slice().sort(function (a, b) {
+      var x = Date.parse(a.lastCommitAt || "");
+      var y = Date.parse(b.lastCommitAt || "");
+      var xa = isNaN(x) ? -Infinity : x;
+      var ya = isNaN(y) ? -Infinity : y;
+      if (xa !== ya) return ya - xa;
+      return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+    });
+  }
+
+  /*
+    リポジトリの作品を探す。根に .aiwriter/ があれば根、ほかは根の直下のフォルダーのうち
+    .aiwriter/config.json のあるもの（2段より深い作品は探さない）。最近更新のあった順
+  */
+  async function findWorks(gh, repo) {
+    var r = reader(gh, repo);
+    var root = await r.listDir("", false);
+    var dirs = root.filter(function (e) { return e && e.type === "dir" && !/^\./.test(str(e.name)); });
+    var candidates = [];
+    if (root.some(function (e) { return e && e.type === "dir" && e.name === ".aiwriter"; })) candidates.push("");
+    dirs.forEach(function (d) { candidates.push(str(d.path || d.name)); });
+    // 作品の印（.aiwriter/config.json）のあるフォルダーだけ。無いフォルダーは黙って飛ばす
+    var found = await eachLimited(candidates, 4, async function (dir) {
+      var config = await r.readOptional(repoPath({ path: dir }, ".aiwriter/config.json"));
+      if (!config) return null;
+      var parsed = {};
+      try { parsed = JSON.parse(toLfText(config.text)) || {}; } catch (error) { parsed = {}; }
+      return { path: dir, title: str(parsed.workTitle) || dir || repo.name, manuscriptDir: str(parsed.manuscriptDir) || "本文", lastCommitAt: "" };
+    });
+    var works = found.filter(Boolean);
+    // 最後のコミットの時刻（作品のフォルダーで絞る）。最近更新のあった作品から開く
+    await eachLimited(works, 4, async function (work) {
+      try {
+        var result = await gh("list_commits", {
+          owner: repo.owner, repo: repo.name, sha: repo.branch,
+          path: work.path || undefined, perPage: 1, fields: ["commit"]
+        });
+        var list = Array.isArray(result.payload) ? result.payload : [];
+        var c = list[0] && list[0].commit;
+        work.lastCommitAt = str(c && ((c.committer && c.committer.date) || (c.author && c.author.date)));
+      } catch (error) {
+        work.lastCommitAt = "";
+      }
+    });
+    return sortWorksByRecent(works);
+  }
+
+  function isBodyName(name) { return /\.(txt|md)$/i.test(name); }
+
+  // 話のファイル（作品からの相対）と blob SHA。本文フォルダーが無い・空なら作品の直下（拡張機能と同じ決め方）
+  async function listBodies(gh, repo, work) {
+    var r = reader(gh, repo);
+    var manuscript = await r.listDir(repoPath(work, work.manuscriptDir), true);
+    var bodies = manuscript.filter(function (e) { return e && e.type === "file" && isBodyName(str(e.name)); });
+    var prefix = work.manuscriptDir + "/";
+    if (bodies.length === 0) {
+      bodies = (await r.listDir(work.path, true)).filter(function (e) { return e && e.type === "file" && isBodyName(str(e.name)); });
+      prefix = "";
+    }
+    return bodies.map(function (e) {
+      return { file: prefix + str(e.name), sha: str(e.sha).toLowerCase() };
+    }).sort(function (a, b) { return a.file.localeCompare(b.file, "ja"); });
+  }
+
+  // 受け取り箱のファイル名。Windows で取り出せない「:」を入れない（20261004T050102Z-tablet.json）
+  function inboxFileName(date, deviceSlug) {
+    var stamp = date.toISOString().replace(/\.\d+Z$/, "Z").replace(/[-:]/g, "");
+    return stamp + "-" + (/^[a-z0-9-]+$/.test(deviceSlug) ? deviceSlug : "device") + ".json";
+  }
+
+  // 本文を拡張機能の空間（LF・BOM なし）へそろえる。比べるのは文字だけで、送るハッシュは GitHub の blob SHA
+  function toLfText(text) {
+    return String(text || "").replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+  }
+
+  /*
+    取り込みの結果のファイル（拡張機能の core/outboxInbox.ts の buildInboxResult が置く
+    inbox/done/<箱の名前>.result.json）。断られた記録を、理由つきで決め直せるようにするため
+  */
+  var RESULT_FORMAT = "novelai-outbox-result";
+  function resultFileName(boxName) { return boxName + ".result.json"; }
+
+  // 結果のファイルを読む。形が違えば null（古い拡張機能・壊れたファイル）
+  function parseResultFile(text) {
+    var value;
+    try { value = JSON.parse(String(text || "").replace(/^﻿/, "")); } catch (error) { return null; }
+    if (!value || value.format !== RESULT_FORMAT || value.version !== 1 || !Array.isArray(value.results)) return null;
+    var out = {};
+    value.results.forEach(function (item) {
+      if (!item || typeof item.id !== "string") return;
+      if (item.status !== "imported" && item.status !== "already" && item.status !== "refused") return;
+      var entry = { status: item.status, reason: str(item.reason) };
+      if (typeof item.currentBlobSha === "string" && item.currentBlobSha) entry.currentBlobSha = item.currentBlobSha;
+      out[item.id] = entry;
+    });
+    return out;
+  }
+
+  return {
+    isNotFound: isNotFound,
+    describeGithubError: describeGithubError,
+    textOfResult: textOfResult,
+    shaOfResult: shaOfResult,
+    parseRepoSpec: parseRepoSpec,
+    eachLimited: eachLimited,
+    repoPath: repoPath,
+    reader: reader,
+    sortWorksByRecent: sortWorksByRecent,
+    findWorks: findWorks,
+    listBodies: listBodies,
+    inboxFileName: inboxFileName,
+    toLfText: toLfText,
+    resultFileName: resultFileName,
+    parseResultFile: parseResultFile
+  };
+})();
+/* github-common:end */
+</script>
+
+<script>
+/* editor-logic:start */
+/*
+  出先の原稿エディターの判定（統合小説執筆環境の設計書6.116）。画面（document）に触らない。
+
+  **写した元**（どれも拡張機能の src/ にある。形を変えたら、ここも直す）
+  - NOTATION_RULES・notationModeFor・tokenizeLine … core/manuscriptRender.ts（記法の本体は core/ruby.ts）
+  - MEMO_LINE_PATTERN … core/sceneMemo.ts
+  - countChars の総・純（メモの行を落とす・.md だけルビの読みを外す） … core/charCount.ts・core/episodeCharCount.ts
+  - 受け取り箱の形（版2・kind: "body"） … core/outboxInbox.ts の parseInboxFile
+
+  **ずれても原稿は壊れない**：書き込みはパソコンの取り込み（core/outboxImport.ts）が、読んだときの
+  本文といまの本文が同じかを確かめてから行う。同じ見本で同じ結果になることは
+  test/unit/cross/editorPageLogic.test.ts が見張る。
+*/
+var EditorLogic = (function () {
+  function str(value) { return typeof value === "string" ? value : ""; }
+
+  /* ── core/manuscriptRender.ts（記法） ── */
+  var NOTATION_RULES = {
+    curly: {
+      pattern: "\\{\\{([^{}\\r\\n]+)\\}\\}|\\{([^{}|\\r\\n]+)\\|([^{}|\\r\\n]*)\\}",
+      emphasis: [1],
+      ruby: [[2, 3]]
+    },
+    site: {
+      pattern: "《《([^《》\\r\\n]+)》》|[|｜]([^|｜《》\\r\\n]+)《([^《》\\r\\n]*)》|([\\u4E00-\\u9FFF\\u3005々]+)《([^《》\\r\\n]*)》",
+      emphasis: [1],
+      ruby: [[2, 3], [4, 5]]
+    }
+  };
+
+  // .md だけが拡張機能の記法、ほかは投稿サイトの記法。**混ぜない**（パソコンの原稿エディターと同じ）
+  function notationModeFor(fileName) {
+    return str(fileName).toLowerCase().slice(-3) === ".md" ? "curly" : "site";
+  }
+
+  function tokenFor(match, rules) {
+    for (var i = 0; i < rules.emphasis.length; i++) {
+      var text = match[rules.emphasis[i]];
+      if (text !== undefined) return { kind: "emphasis", text: text };
+    }
+    for (var j = 0; j < rules.ruby.length; j++) {
+      var base = match[rules.ruby[j][0]];
+      if (base === undefined) continue;
+      var reading = match[rules.ruby[j][1]];
+      if (reading === undefined) reading = "";
+      // 読み仮名が空のものは、本文を消さずに平文へ戻す（書きかけかもしれない）
+      return reading.trim() ? { kind: "ruby", base: base, reading: reading } : { kind: "plain", text: base };
+    }
+    return { kind: "plain", text: match[0] };
+  }
+
+  function tokenizeLine(line, mode) {
+    var rules = NOTATION_RULES[mode === "site" ? "site" : "curly"];
+    var re = new RegExp(rules.pattern, "g");
+    var tokens = [];
+    var last = 0;
+    var m;
+    while ((m = re.exec(line)) !== null) {
+      if (m[0] === "") { re.lastIndex += 1; continue; }
+      if (m.index > last) tokens.push({ kind: "plain", text: line.slice(last, m.index) });
+      tokens.push(tokenFor(m, rules));
+      last = m.index + m[0].length;
+    }
+    if (last < line.length) tokens.push({ kind: "plain", text: line.slice(last) });
+    return tokens;
+  }
+
+  /* ── core/sceneMemo.ts（作者の付箋の行） ── */
+  var MEMO_LINE_PATTERN = "^[ \t　]*(?:\/\/|／／)";
+  var MEMO_LINE_RE = new RegExp(MEMO_LINE_PATTERN);
+  function isMemoLine(line) { return MEMO_LINE_RE.test(line); }
+
+  /* ── core/charCount.ts（字数。総＝改行を除く、純＝空白も除く） ── */
+  var RUBY_INTERNAL = /\{([^{}|\r\n]+)\|([^{}|\r\n]*)\}/g;
+  var EMPHASIS_INTERNAL = /\{\{([^{}\r\n]+)\}\}/g;
+  function countCodePoints(s) { return Array.from(s).length; }
+  // .md はルビの読みと傍点の印を外して数える（拡張機能の既定「ルビを文字数から外す」）。.txt は記法も数える
+  function countChars(text, fileName) {
+    var lines = String(text || "").replace(/\r\n?/g, "\n").split("\n").filter(function (line) { return !isMemoLine(line); });
+    var body = lines.join("\n");
+    if (notationModeFor(fileName) === "curly") body = body.replace(EMPHASIS_INTERNAL, "$1").replace(RUBY_INTERNAL, "$1");
+    var withoutNewline = body.replace(/\n/g, "");
+    return {
+      gross: countCodePoints(withoutNewline),
+      net: countCodePoints(withoutNewline.replace(/[\s　]/g, ""))
+    };
+  }
+
+  /* ── 受け取り箱（core/outboxInbox.ts の parseInboxFile が読む形） ── */
+  var INBOX_FORMAT = "novelai-outbox-inbox";
+  // 版2：本文の全体（kind: "body"）。古い拡張機能は版2の箱を読まずに残す（黙って飛ばさない）
+  var INBOX_VERSION = 2;
+  var EDITOR_SUFFIX = "-editor";
+
+  // このページが置く箱の名前か（原稿箱のページの箱と分ける）
+  function isEditorBoxName(name) {
+    return /-editor\.json$/i.test(str(name)) && !/\.result\.json$/i.test(str(name));
+  }
+
+  function buildBodyBox(record, meta) {
+    var out = { id: str(record.id), kind: "body", at: str(record.at), device: str(record.device), episode: str(record.episode), baseBlobSha: str(record.baseBlobSha), text: str(record.text) };
+    if (record.basedOn) out.basedOn = str(record.basedOn);
+    return {
+      format: INBOX_FORMAT,
+      version: INBOX_VERSION,
+      sentAt: meta.sentAt,
+      device: meta.device,
+      writer: meta.writer,
+      records: [out]
+    };
+  }
+
+  // 箱の中身を読む（自分で置いた形だけ）。読めなければ null
+  function parseBox(text) {
+    var value;
+    try { value = JSON.parse(String(text || "").replace(/^﻿/, "")); } catch (error) { return null; }
+    if (!value || value.format !== INBOX_FORMAT || !Array.isArray(value.records)) return null;
+    return value;
+  }
+
+  /*
+    その話の、いちばん新しい本文の記録と行き先。
+    pending：まだ取り込まれていない箱 [{ name, box }]、done：取り込まれた箱 [{ name, box, result }]
+    （result は parseResultFile の答え。結果のファイルが無ければ null）
+    - sent：送った（パソコンの取り込み待ち）。続きを書くときは、その本文の上に重ねる
+    - imported：取り込まれた。refused：パソコンで入らなかった（理由つき）。unknown：結果が分からない
+  */
+  function latestBodyOf(episode, pending, done) {
+    var best = null;
+    function consider(entry, stage) {
+      var records = (entry.box && Array.isArray(entry.box.records)) ? entry.box.records : [];
+      records.forEach(function (r) {
+        if (!r || r.kind !== "body" || str(r.episode) !== episode) return;
+        var t = Date.parse(str(r.at));
+        var at = isNaN(t) ? -Infinity : t;
+        var s = stage;
+        var reason = "";
+        var currentBlobSha = "";
+        if (stage === "done") {
+          var found = entry.result && entry.result[str(r.id)];
+          s = !found ? "unknown" : found.status === "refused" ? "refused" : "imported";
+          reason = found ? str(found.reason) : "";
+          currentBlobSha = found ? str(found.currentBlobSha) : "";
+        }
+        if (!best || at > best.time || (at === best.time && entry.name > best.box)) {
+          best = { record: r, stage: s, reason: reason, currentBlobSha: currentBlobSha, box: entry.name, time: at };
+        }
+      });
+    }
+    (pending || []).forEach(function (entry) { consider(entry, "sent"); });
+    (done || []).forEach(function (entry) { consider(entry, "done"); });
+    return best;
+  }
+
+  /*
+    行の違い（断られたとき、送った本文といまのパソコンの本文を並べる）。最長共通部分列で取る。
+    大きすぎるときは前後の同じ行だけを除いて、あいだを丸ごと違うとみなす（画面を固めない）
+  */
+  function lineDiff(before, after) {
+    var a = String(before || "").split("\n");
+    var b = String(after || "").split("\n");
+    var head = 0;
+    while (head < a.length && head < b.length && a[head] === b[head]) head++;
+    var tail = 0;
+    while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+    var midA = a.slice(head, a.length - tail);
+    var midB = b.slice(head, b.length - tail);
+    var ops = [];
+    a.slice(0, head).forEach(function (t) { ops.push({ type: "same", text: t }); });
+    if (midA.length * midB.length > 1000000) {
+      midA.forEach(function (t) { ops.push({ type: "del", text: t }); });
+      midB.forEach(function (t) { ops.push({ type: "add", text: t }); });
+    } else {
+      var n = midA.length, m = midB.length;
+      var dp = [];
+      for (var i = 0; i <= n; i++) { dp.push(new Array(m + 1).fill(0)); }
+      for (var x = n - 1; x >= 0; x--) {
+        for (var y = m - 1; y >= 0; y--) {
+          dp[x][y] = midA[x] === midB[y] ? dp[x + 1][y + 1] + 1 : Math.max(dp[x + 1][y], dp[x][y + 1]);
+        }
+      }
+      var p = 0, q = 0;
+      while (p < n && q < m) {
+        if (midA[p] === midB[q]) { ops.push({ type: "same", text: midA[p] }); p++; q++; }
+        else if (dp[p + 1][q] >= dp[p][q + 1]) { ops.push({ type: "del", text: midA[p] }); p++; }
+        else { ops.push({ type: "add", text: midB[q] }); q++; }
+      }
+      while (p < n) { ops.push({ type: "del", text: midA[p++] }); }
+      while (q < m) { ops.push({ type: "add", text: midB[q++] }); }
+    }
+    a.slice(a.length - tail).forEach(function (t) { ops.push({ type: "same", text: t }); });
+    return ops;
+  }
+
+  return {
+    NOTATION_RULES: NOTATION_RULES,
+    MEMO_LINE_PATTERN: MEMO_LINE_PATTERN,
+    INBOX_VERSION: INBOX_VERSION,
+    EDITOR_SUFFIX: EDITOR_SUFFIX,
+    notationModeFor: notationModeFor,
+    tokenizeLine: tokenizeLine,
+    isMemoLine: isMemoLine,
+    countChars: countChars,
+    isEditorBoxName: isEditorBoxName,
+    buildBodyBox: buildBodyBox,
+    parseBox: parseBox,
+    latestBodyOf: latestBodyOf,
+    lineDiff: lineDiff
+  };
+})();
+/* editor-logic:end */
+</script>
+
+<script>
+(function () {
+  /*
+    出先の原稿エディター（統合小説執筆環境の設計書6.116）。
+    このページは原稿に直接書かない。GitHub の作品から話を読み、書き直した本文の全体を
+    ［パソコンへ送る］で作品の受け取り箱へ新しいファイルとして置く（既存のファイルは書き換えない）。
+    原稿へ入れるのはパソコンの拡張機能の［原稿箱を取り込む］で、パソコンの本文が読んだときと
+    同じときだけ入る。AI は使わない。外から来た文字はすべて textContent で出す。
+  */
+  var GITHUB = "GitHub";
+  var REPO_KEY = "novelai.outbox.repo";
+  var BRANCH_KEY = "novelai.outbox.branch";
+  var DIR_KEY = "novelai.editor.vertical";
+  var LAST_KEY = "novelai.editor.last.";
+  var DRAFT_KEY = "novelai.editor.draft.";
+  var WRITER = "editor";
+
+  function $(id) { return document.getElementById(id); }
+  var titleEl = $("title"), whereEl = $("where"), statusEl = $("status");
+  var repoEl = $("repo"), branchEl = $("branch"), loadEl = $("load");
+  var workRowEl = $("workRow"), workEl = $("work"), episodeRowEl = $("episodeRow"), episodeEl = $("episode"), reopenEl = $("reopen");
+  var bandEl = $("band"), bandStateEl = $("bandState"), bandNoteEl = $("bandNote"), bandFlashEl = $("bandFlash"), sendEl = $("send");
+  var toolsEl = $("tools"), countEl = $("count"), textEl = $("text"), viewEl = $("view"), paperEl = $("paper"), vtextEl = $("vtext");
+  var modeWriteEl = $("modeWrite"), modeReadEl = $("modeRead"), dirVEl = $("dirV"), dirHEl = $("dirH");
+  var draftPanelEl = $("draftPanel"), draftNoteEl = $("draftNote"), draftTextEl = $("draftText"), draftUseEl = $("draftUse"), draftDropEl = $("draftDrop");
+  var diffPanelEl = $("diffPanel"), diffNoteEl = $("diffNote"), diffEl = $("diff"), sentTextEl = $("sentText"), diffCloseEl = $("diffClose");
+  var dialogEl = $("dialog"), dialogTextEl = $("dialogText"), dialogButtonsEl = $("dialogButtons");
+
+  /*
+    loaded：開いたときの本文（GitHub の本文か、送った本文を重ねたもの）。base：送るときに添える
+    「読んだときの本文」の印。basedOn：送った本文の上に続きを書いているときの、その記録の id
+  */
+  var state = {
+    mcp: null, repo: null, works: [], work: null, episodes: [], file: "",
+    githubText: "", githubSha: "", loaded: "", base: "", basedOn: "", latest: null,
+    readOnly: "", pending: [], done: [], boxCache: {}, resultCache: {},
+    loading: false, sending: false, pendingSend: null, mode: "write", vertical: false, flashUntil: 0, flashText: ""
+  };
+
+  function el(tag, cls, text) {
+    var node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    return node;
+  }
+  function str(value) { return typeof value === "string" ? value : ""; }
+
+  // 保存の読み書きは、使えない画面（非公開の窓など）でも落ちないように包む
+  function remember(key, value) { try { localStorage.setItem(key, value); } catch (error) { /* 覚えられなくても動く */ } }
+  function recall(key) { try { return localStorage.getItem(key) || ""; } catch (error) { return ""; } }
+  function forget(key) { try { localStorage.removeItem(key); } catch (error) { /* 消せなくても動く */ } }
+
+  function deviceLabel() {
+    var ua = navigator.userAgent || "";
+    if (/iPad|Tablet/i.test(ua) || (/Android/i.test(ua) && !/Mobile/i.test(ua))) return "タブレット";
+    if (/Mobi|iPhone|Android/i.test(ua)) return "スマホ";
+    return "パソコン";
+  }
+  function deviceSlug() {
+    return { "タブレット": "tablet", "スマホ": "phone", "パソコン": "pc" }[deviceLabel()] || "device";
+  }
+  function newId() {
+    try { if (crypto && typeof crypto.randomUUID === "function") return "b" + crypto.randomUUID().replace(/-/g, ""); } catch (error) { /* 下へ */ }
+    return "b" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  }
+
+  function setStatus(text, trouble) {
+    statusEl.textContent = "";
+    statusEl.classList.toggle("trouble", !!trouble);
+    if (!text) { statusEl.hidden = true; return; }
+    statusEl.hidden = false;
+    String(text).split("\n").forEach(function (line) { statusEl.appendChild(el("div", "", line)); });
+  }
+
+  /* ── 確かめの窓（ページの中に出す） ── */
+  function ask(text, choices) {
+    return new Promise(function (resolve) {
+      dialogTextEl.textContent = text;
+      dialogButtonsEl.textContent = "";
+      choices.forEach(function (c) {
+        var b = el("button", c.primary ? "primary" : "", c.label);
+        b.type = "button";
+        b.addEventListener("click", function () { dialogEl.hidden = true; resolve(c.value); });
+        dialogButtonsEl.appendChild(b);
+      });
+      dialogEl.hidden = false;
+      var first = dialogButtonsEl.querySelector("button");
+      if (first) first.focus();
+    });
+  }
+
+  /* ── GitHub ── */
+  function gh(tool, input) { return state.mcp.callTool(GITHUB, tool, input); }
+  function rd() { return GitHubWorks.reader(gh, state.repo); }
+  function repoPath(relative) { return GitHubWorks.repoPath(state.work, relative); }
+
+  /* ── 書きかけの控え（この端末だけ。送るまでの保険） ── */
+  function draftKey() {
+    return DRAFT_KEY + [state.repo.owner, state.repo.name, state.repo.branch, state.work.path, state.file].join("|");
+  }
+  var draftTimer = null;
+  function saveDraftSoon() {
+    if (draftTimer) clearTimeout(draftTimer);
+    draftTimer = setTimeout(function () {
+      draftTimer = null;
+      if (!state.file) return;
+      if (isDirty()) remember(draftKey(), JSON.stringify({ text: textEl.value, base: state.base, basedOn: state.basedOn, at: new Date().toISOString() }));
+      else forget(draftKey());
+    }, 400);
+  }
+  function readDraft() {
+    try { var d = JSON.parse(recall(draftKey()) || "null"); return d && typeof d.text === "string" ? d : null; } catch (error) { return null; }
+  }
+
+  function isDirty() { return !!state.file && !state.readOnly && textEl.value !== state.loaded; }
+
+  /*
+    縦書きの書く欄（#vtext）。本文の持ち主はいつも textarea（#text）で、縦書きの欄は打つたびに
+    そこへ写す。iPad の WebKit は縦書きの textarea でタップした所にカーソルを置けないため
+    （作者の実機、2026-10-05「縦書きのとき」。横書きは置けた）
+  */
+  function domText(root) {
+    var out = "";
+    function walk(node) {
+      for (var c = node.firstChild; c; c = c.nextSibling) {
+        if (c.nodeType === 3) out += c.data;
+        else if (c.nodeName === "BR") {
+          // 最後の行を見せるためだけの BR（空の最後の行の置き物）は数えない
+          if (c === root.lastChild && out.slice(-1) === "\n") continue;
+          out += "\n";
+        } else {
+          if (/^(DIV|P)$/.test(c.nodeName) && out.length && out.slice(-1) !== "\n") out += "\n";
+          walk(c);
+        }
+      }
+    }
+    walk(root);
+    return out;
+  }
+  function pushToVertical() {
+    vtextEl.textContent = textEl.value;
+    var editable = state.readOnly ? "false" : "plaintext-only";
+    try { vtextEl.contentEditable = editable; } catch (error) { vtextEl.contentEditable = state.readOnly ? "false" : "true"; }
+  }
+  function showSurfaces() {
+    var open = !!state.file;
+    var writing = state.mode === "write";
+    textEl.hidden = !(open && writing && !state.vertical);
+    vtextEl.hidden = !(open && writing && state.vertical);
+    viewEl.hidden = !(open && state.mode === "read");
+  }
+
+  /* ── 作品を読む ── */
+  async function loadRepo() {
+    if (!(await leaveIfClean())) return;
+    var spec = GitHubWorks.parseRepoSpec(repoEl.value);
+    if (!spec) { setStatus("リポジトリは「持ち主/名前」の形で入れてください（例：yourname/my-novels）。", true); return; }
+    if (!state.mcp) { setStatus(GitHubWorks.describeGithubError({ code: "not_granted" }), true); return; }
+    var branch = branchEl.value.trim() || "main";
+    state.repo = { owner: spec.owner, name: spec.name, branch: branch };
+    remember(REPO_KEY, spec.spec);
+    remember(BRANCH_KEY, branch);
+    state.loading = true;
+    loadEl.disabled = true;
+    setStatus("作品を探しています…");
+    try {
+      state.works = await GitHubWorks.findWorks(gh, state.repo);
+      workEl.textContent = "";
+      state.works.forEach(function (work, index) {
+        var option = el("option", "", work.title);
+        option.value = String(index);
+        workEl.appendChild(option);
+      });
+      workRowEl.hidden = state.works.length === 0;
+      if (state.works.length === 0) {
+        closeEpisode();
+        setStatus("このリポジトリに作品が見つかりませんでした（作品のフォルダーには .aiwriter/config.json があります）。", true);
+        return;
+      }
+      // 原稿箱と同じく、最近更新のあった作品から開く（選び直した作品は覚えない）
+      workEl.value = "0";
+      await loadWork(state.works[0]);
+    } catch (error) {
+      state.works = [];
+      workRowEl.hidden = true;
+      closeEpisode();
+      setStatus(GitHubWorks.describeGithubError(error, "repo"), true);
+    } finally {
+      state.loading = false;
+      loadEl.disabled = false;
+    }
+  }
+
+  async function loadWork(work) {
+    state.work = work;
+    closeEpisode();
+    titleEl.textContent = work.title || "出先の原稿エディター";
+    whereEl.textContent = state.repo.owner + "/" + state.repo.name + (work.path ? "／" + work.path : "");
+    setStatus("「" + work.title + "」の話を読んでいます…");
+    try {
+      state.episodes = await GitHubWorks.listBodies(gh, state.repo, work);
+      episodeEl.textContent = "";
+      state.episodes.forEach(function (e) {
+        var option = el("option", "", e.file);
+        option.value = e.file;
+        episodeEl.appendChild(option);
+      });
+      episodeRowEl.hidden = state.episodes.length === 0;
+      if (state.episodes.length === 0) { setStatus("この作品に話のファイル（.txt / .md）が見つかりませんでした。", true); return; }
+      await refreshBoxes();
+      // 前にこの端末で開いていた話。無ければ並びの最後（いちばん新しい話）
+      var last = recall(LAST_KEY + state.repo.owner + "/" + state.repo.name + ":" + work.path);
+      var file = state.episodes.some(function (e) { return e.file === last; }) ? last : state.episodes[state.episodes.length - 1].file;
+      await openEpisode(file);
+    } catch (error) {
+      setStatus(GitHubWorks.describeGithubError(error, work.title), true);
+    }
+  }
+
+  /*
+    受け取り箱の、このページが置いた箱を読む。未取り込みはすべて、取り込み済みは新しい8つだけ
+    （箱と結果のファイルは書き換わらないので、一度読んだら覚えておく）
+  */
+  async function refreshBoxes() {
+    var r = rd();
+    var inbox = await r.listDir(repoPath(".aiwriter/inbox"), true);
+    var done = await r.listDir(repoPath(".aiwriter/inbox/done"), true);
+    var inboxNames = inbox.filter(function (e) { return e && e.type === "file" && EditorLogic.isEditorBoxName(str(e.name)); }).map(function (e) { return str(e.name); });
+    var doneFiles = done.filter(function (e) { return e && e.type === "file"; }).map(function (e) { return str(e.name); });
+    var doneNames = doneFiles.filter(EditorLogic.isEditorBoxName).sort().slice(-8);
+    var key = state.repo.owner + "/" + state.repo.name + ":" + state.work.path + ":";
+    async function boxOf(dir, name) {
+      if (state.boxCache[key + name] !== undefined) return state.boxCache[key + name];
+      var file = await r.readOptional(repoPath(".aiwriter/inbox/" + dir + name));
+      var box = file ? EditorLogic.parseBox(file.text) : null;
+      state.boxCache[key + name] = box;
+      return box;
+    }
+    state.pending = (await GitHubWorks.eachLimited(inboxNames, 4, async function (name) {
+      return { name: name, box: await boxOf("", name) };
+    })).filter(function (e) { return e.box; });
+    state.done = (await GitHubWorks.eachLimited(doneNames, 4, async function (name) {
+      var box = await boxOf("done/", name);
+      var resultName = GitHubWorks.resultFileName(name);
+      var result = null;
+      if (doneFiles.indexOf(resultName) >= 0) {
+        if (state.resultCache[key + name] === undefined) {
+          var file = await r.readOptional(repoPath(".aiwriter/inbox/done/" + resultName));
+          state.resultCache[key + name] = file ? GitHubWorks.parseResultFile(file.text) : null;
+        }
+        result = state.resultCache[key + name];
+      }
+      return { name: name, box: box, result: result };
+    })).filter(function (e) { return e.box; });
+    // 届いたか分からなかった送りが、実は届いていたら、その本文の上に続ける
+    var pendingSend = state.pendingSend;
+    if (pendingSend && (inboxNames.indexOf(pendingSend.name) >= 0 || doneNames.indexOf(pendingSend.name) >= 0)) {
+      state.pendingSend = null;
+    }
+  }
+
+  function closeEpisode() {
+    state.file = "";
+    state.loaded = "";
+    state.readOnly = "";
+    state.latest = null;
+    textEl.value = "";
+    vtextEl.textContent = "";
+    textEl.hidden = true;
+    vtextEl.hidden = true;
+    viewEl.hidden = true;
+    toolsEl.hidden = true;
+    draftPanelEl.hidden = true;
+    diffPanelEl.hidden = true;
+    updateBand();
+  }
+
+  /*
+    話を開く。送ったあとまだ取り込まれていない本文があれば、それを重ねて見せる（続きを書ける）。
+    続きを送るときは、前の記録の id（basedOn）と、前の記録と同じ「読んだときの本文」の印を添える
+  */
+  async function openEpisode(file) {
+    setStatus("「" + file + "」を読んでいます…");
+    var read;
+    try {
+      read = await rd().readFile(repoPath(file));
+    } catch (error) {
+      setStatus(GitHubWorks.describeGithubError(error, file), true);
+      return;
+    }
+    var entry = state.episodes.filter(function (e) { return e.file === file; })[0];
+    state.file = file;
+    episodeEl.value = file;
+    remember(LAST_KEY + state.repo.owner + "/" + state.repo.name + ":" + state.work.path, file);
+    state.githubText = GitHubWorks.toLfText(read.text);
+    state.githubSha = read.sha || (entry ? entry.sha : "");
+    state.readOnly = "";
+    if (state.githubText.indexOf("\uFFFD") >= 0) {
+      state.readOnly = "この話は UTF-8 で保存されていないため、読めない字があります。出先では書かずに、パソコンで書いてください。";
+    } else if (/^(<{7}|={7}|>{7})( |$)/m.test(state.githubText)) {
+      state.readOnly = "この話には Git の競合の印（<<<<<<< など）が残っています。パソコンで直してから開いてください。";
+    } else if (!state.githubSha) {
+      state.readOnly = "この話の版の印を GitHub から読めませんでした。［読み直す］を押してください。";
+    }
+    state.latest = EditorLogic.latestBodyOf(file, state.pending, state.done);
+    var latest = state.latest;
+    if (latest && latest.stage === "sent") {
+      state.loaded = GitHubWorks.toLfText(str(latest.record.text));
+      state.base = str(latest.record.baseBlobSha);
+      state.basedOn = str(latest.record.id);
+    } else {
+      state.loaded = state.githubText;
+      state.base = state.githubSha;
+      state.basedOn = "";
+    }
+    textEl.value = state.loaded;
+    textEl.readOnly = !!state.readOnly;
+    toolsEl.hidden = false;
+    showDiffPanel();
+    offerDraft();
+    pushToVertical();
+    showSurfaces();
+    setStatus(state.readOnly, !!state.readOnly);
+    paint();
+  }
+
+  // 前に書きかけた分。同じ本文の上に書いていたら戻し、違えば見せて選ばせる
+  function offerDraft() {
+    draftPanelEl.hidden = true;
+    if (state.readOnly) return;
+    var d = readDraft();
+    if (!d || d.text === state.loaded) return;
+    if (str(d.base) === state.base && str(d.basedOn) === state.basedOn) {
+      textEl.value = d.text;
+      flash("送っていない書きかけを戻しました。");
+      return;
+    }
+    draftNoteEl.textContent = "この書きかけは、いま開いている本文とは別の版の上に書いたものです（" + formatTime(d.at) + "）。使うと、そのあとに変わった所は書きかけの内容に戻ります。";
+    draftTextEl.value = d.text;
+    draftPanelEl.hidden = false;
+  }
+
+  function formatTime(iso) {
+    var t = Date.parse(str(iso));
+    if (isNaN(t)) return "時刻不明";
+    var d = new Date(t);
+    return (d.getMonth() + 1) + "月" + d.getDate() + "日 " + d.getHours() + ":" + String(d.getMinutes()).padStart(2, "0");
+  }
+
+  // 断られた本文：送った本文と、いまの GitHub の本文の違いを並べる
+  function showDiffPanel() {
+    diffPanelEl.hidden = true;
+    var latest = state.latest;
+    if (!latest || latest.stage !== "refused") return;
+    var sent = GitHubWorks.toLfText(str(latest.record.text));
+    var note = "理由：" + (latest.reason || "（理由は書かれていません）");
+    if (latest.currentBlobSha && latest.currentBlobSha !== state.githubSha) {
+      note += "\nパソコンの最新の本文が、まだ GitHub に届いていないかもしれません。パソコンで同期してから［読み直す］を押すと、違いが正しく並びます。";
+    }
+    diffNoteEl.textContent = note;
+    diffEl.textContent = "";
+    var ops = EditorLogic.lineDiff(state.githubText, sent);
+    var run = [];
+    function flushSame(isEnd) {
+      // 同じ行が長く続くところは畳む（違いの前後2行だけ残す）
+      if (run.length > 5) {
+        var keepHead = isEnd === "start" ? 0 : 2;
+        var keepTail = isEnd === "end" ? 0 : 2;
+        run.slice(0, keepHead).forEach(function (t) { diffEl.appendChild(el("div", "", t)); });
+        diffEl.appendChild(el("div", "gap", "…（同じ行 " + (run.length - keepHead - keepTail) + "行）"));
+        run.slice(run.length - keepTail).forEach(function (t) { diffEl.appendChild(el("div", "", t)); });
+      } else {
+        run.forEach(function (t) { diffEl.appendChild(el("div", "", t)); });
+      }
+      run = [];
+    }
+    var started = false;
+    ops.forEach(function (o) {
+      if (o.type === "same") { run.push(o.text); return; }
+      flushSame(started ? "" : "start");
+      started = true;
+      diffEl.appendChild(el("div", o.type === "add" ? "add" : "del", o.text));
+    });
+    flushSame("end");
+    sentTextEl.value = sent;
+    diffPanelEl.hidden = false;
+  }
+
+  /* ── 画面を描く ── */
+  function paint() {
+    var dirty = isDirty();
+    var counts = EditorLogic.countChars(textEl.value, state.file);
+    countEl.textContent = state.file ? counts.net.toLocaleString("ja-JP") + "字（空白・改行を除く）" : "";
+    if (state.mode === "read") paintView();
+    updateBand();
+    sendEl.disabled = !(state.mcp && state.file && dirty && !state.readOnly && !state.sending);
+    sendEl.textContent = state.sending ? "送っています…" : "パソコンへ送る";
+  }
+
+  function updateBand() {
+    var latest = state.latest;
+    var dirty = isDirty();
+    var main = "話を開くと、ここに状態が出ます";
+    var note = "";
+    bandEl.classList.remove("refused");
+    if (state.file) {
+      if (state.readOnly) main = "読むだけで開いています";
+      else if (latest && latest.stage === "sent") {
+        main = "送った本文を表示しています（パソコンの取り込み待ち）";
+        note = "続けて書けます。もう一度送ると、前に送った本文の続きとして取り込まれます。";
+        if (state.githubSha && str(latest.record.baseBlobSha) !== state.githubSha) {
+          note += "ただし、送ったあとにパソコンの本文が変わっているため、このままでは取り込まれません。";
+        }
+      } else if (latest && latest.stage === "refused") {
+        main = "前に送った本文は、パソコンで入りませんでした";
+        note = "下に理由と違いを出しています。いまのパソコンの本文を開いています。";
+        bandEl.classList.add("refused");
+      } else if (latest && latest.stage === "imported") {
+        main = "前に送った本文は、パソコンに取り込まれました";
+      } else if (latest && latest.stage === "unknown") {
+        main = "前に送った本文は、パソコンで処理されました（結果は分かりません）";
+      } else {
+        main = "パソコンの本文を表示しています";
+      }
+      if (dirty) main = "まだ送っていない書き直しがあります";
+    }
+    bandStateEl.textContent = main;
+    bandNoteEl.textContent = note;
+    bandNoteEl.hidden = !note;
+    var flashing = Date.now() < state.flashUntil;
+    bandFlashEl.textContent = flashing ? state.flashText : "";
+    bandFlashEl.hidden = !flashing;
+  }
+
+  function flash(text) {
+    state.flashText = text;
+    state.flashUntil = Date.now() + 4000;
+    updateBand();
+    setTimeout(updateBand, 4100);
+  }
+
+  // 組んだ表示：記法を組んで見せる（ルビ・傍点）。作者の付箋（// の行）は薄く。読むだけ
+  function paintView() {
+    viewEl.textContent = "";
+    var mode = EditorLogic.notationModeFor(state.file);
+    textEl.value.split("\n").forEach(function (line) {
+      if (EditorLogic.isMemoLine(line)) { viewEl.appendChild(el("p", "memo-line", line)); return; }
+      var p = el("p", "");
+      EditorLogic.tokenizeLine(line, mode).forEach(function (t) {
+        if (t.kind === "emphasis") p.appendChild(el("span", "dots", t.text));
+        else if (t.kind === "ruby") {
+          var ruby = document.createElement("ruby");
+          ruby.appendChild(document.createTextNode(t.base));
+          ruby.appendChild(el("rt", "", t.reading));
+          p.appendChild(ruby);
+        } else p.appendChild(document.createTextNode(t.text));
+      });
+      viewEl.appendChild(p);
+    });
+  }
+
+  function setMode(mode) {
+    state.mode = mode;
+    modeWriteEl.setAttribute("aria-pressed", String(mode === "write"));
+    modeReadEl.setAttribute("aria-pressed", String(mode === "read"));
+    showSurfaces();
+    paint();
+  }
+
+  function setVertical(vertical) {
+    state.vertical = vertical;
+    remember(DIR_KEY, vertical ? "1" : "0");
+    paperEl.classList.toggle("vertical", vertical);
+    dirVEl.setAttribute("aria-pressed", String(vertical));
+    dirHEl.setAttribute("aria-pressed", String(!vertical));
+    if (state.file) pushToVertical();
+    showSurfaces();
+  }
+
+  /* ── 移る前に確かめる ── */
+  async function leaveIfClean() {
+    if (!isDirty()) return true;
+    var answer = await ask(
+      "「" + state.file + "」に、まだ送っていない書き直しがあります。書きかけはこの端末に控えてあり、次に開くと戻せます。",
+      [
+        { label: "送ってから移る", value: "send", primary: true },
+        { label: "送らずに移る", value: "leave" },
+        { label: "やめる", value: "stay" }
+      ]
+    );
+    if (answer === "stay") return false;
+    if (answer === "send") return await sendToPc();
+    // 控えを確かに残してから移る
+    if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; }
+    remember(draftKey(), JSON.stringify({ text: textEl.value, base: state.base, basedOn: state.basedOn, at: new Date().toISOString() }));
+    return true;
+  }
+
+  /* ── 送る ── */
+  /*
+    ［パソコンへ送る］：書き直した本文の全体を、作品の受け取り箱へ新しいファイルとして置く。
+    **書き込みは自分からやり直さない**——届かなかったと見えても、GitHub には書けていることがある。
+    同じ本文が2度届いても、取り込みは記録の id で「入れ済み」と返し、続きの印の無い2つ目は
+    断るので、原稿は上書きされない
+  */
+  async function sendToPc() {
+    if (state.sending || !state.file || state.readOnly || !state.mcp) return false;
+    var text = textEl.value;
+    if (!text.trim()) { setStatus("本文が空のままでは送れません（話がまるごと消えるため）。", true); return false; }
+    var now = new Date();
+    var record = {
+      id: newId(), kind: "body", at: now.toISOString(), device: deviceLabel(),
+      episode: state.file, baseBlobSha: state.base, text: text
+    };
+    if (state.basedOn) record.basedOn = state.basedOn;
+    var name = GitHubWorks.inboxFileName(now, deviceSlug() + EditorLogic.EDITOR_SUFFIX);
+    var box = EditorLogic.buildBodyBox(record, { sentAt: now.toISOString(), device: deviceLabel(), writer: WRITER });
+    state.sending = true;
+    paint();
+    try {
+      await gh("create_or_update_file", {
+        owner: state.repo.owner, repo: state.repo.name, branch: state.repo.branch,
+        path: repoPath(".aiwriter/inbox/" + name),
+        content: JSON.stringify(box, null, 2) + "\n",
+        message: "原稿エディターから送る（" + state.file + "・" + deviceLabel() + "）"
+      });
+      sentOk(name, box, record);
+      setStatus("");
+      flash("送りました。パソコンで同期して［原稿箱を取り込む］を押すと、原稿に入ります。");
+      return true;
+    } catch (error) {
+      var code = error && error.code;
+      if (code === "server_unavailable" || code === "upstream_error" || code === "cancelled") {
+        state.pendingSend = { name: name };
+        setStatus("送れたかどうか分かりませんでした。少し待って［読み直す］を押すと、届いていれば「取り込み待ち」に変わります。変わらなければ、もう一度送ってください。", true);
+      } else {
+        setStatus(GitHubWorks.describeGithubError(error, "repo"), true);
+      }
+      return false;
+    } finally {
+      state.sending = false;
+      paint();
+    }
+  }
+
+  // 送れたら、その本文を「送った本文」として重ね、続きを書けるようにする
+  function sentOk(name, box, record) {
+    var key = state.repo.owner + "/" + state.repo.name + ":" + state.work.path + ":";
+    state.boxCache[key + name] = box;
+    state.pending.push({ name: name, box: box });
+    state.latest = { record: record, stage: "sent", reason: "", currentBlobSha: "", box: name, time: Date.parse(record.at) };
+    state.loaded = record.text;
+    state.basedOn = record.id;
+    forget(draftKey());
+    diffPanelEl.hidden = true;
+    draftPanelEl.hidden = true;
+  }
+
+  /* ── 押し口 ── */
+  loadEl.addEventListener("click", function () { if (!state.loading) loadRepo(); });
+  repoEl.addEventListener("keydown", function (event) { if (event.key === "Enter" && !state.loading) loadRepo(); });
+  workEl.addEventListener("change", async function () {
+    var work = state.works[Number(workEl.value)];
+    var before = state.works.indexOf(state.work);
+    if (!work || work === state.work) return;
+    if (!(await leaveIfClean())) { workEl.value = String(before); return; }
+    loadWork(work);
+  });
+  episodeEl.addEventListener("change", async function () {
+    var file = episodeEl.value;
+    if (!file || file === state.file) return;
+    var previous = state.file;
+    if (!(await leaveIfClean())) { episodeEl.value = previous; return; }
+    openEpisode(file);
+  });
+  reopenEl.addEventListener("click", async function () {
+    if (!state.work || !state.file) return;
+    if (!(await leaveIfClean())) return;
+    try { await refreshBoxes(); } catch (error) { setStatus(GitHubWorks.describeGithubError(error, "repo"), true); return; }
+    openEpisode(state.file);
+  });
+  sendEl.addEventListener("click", function () { sendToPc(); });
+  textEl.addEventListener("input", function () { saveDraftSoon(); paint(); });
+  vtextEl.addEventListener("input", function () {
+    textEl.value = domText(vtextEl);
+    saveDraftSoon();
+    paint();
+  });
+  /*
+    タップしてもカーソルが欄に入らなかったときだけ、指の位置から場所を引き直す。
+    iPad が自分で置いたときに引き直すと、iPad の描くカーソルの印と字の入る所が1字ずれた
+    （作者の実機、2026-10-05「印と入る所がずれる」）。iPad の印は置き直しに追いつかないため
+  */
+  vtextEl.addEventListener("pointerup", function (event) {
+    if (event.pointerType !== "touch" || vtextEl.contentEditable === "false") return;
+    var x = event.clientX, y = event.clientY;
+    setTimeout(function () {
+      var sel = window.getSelection();
+      if (sel && sel.rangeCount && vtextEl.contains(sel.anchorNode)) return;
+      var range = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null;
+      if (!range || !vtextEl.contains(range.startContainer)) return;
+      if (document.activeElement !== vtextEl) vtextEl.focus();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }, 0);
+  });
+  modeWriteEl.addEventListener("click", function () { setMode("write"); });
+  modeReadEl.addEventListener("click", function () { setMode("read"); });
+  dirVEl.addEventListener("click", function () { setVertical(true); });
+  dirHEl.addEventListener("click", function () { setVertical(false); });
+  draftUseEl.addEventListener("click", function () {
+    textEl.value = draftTextEl.value;
+    pushToVertical();
+    draftPanelEl.hidden = true;
+    paint();
+  });
+  draftDropEl.addEventListener("click", function () {
+    forget(draftKey());
+    draftPanelEl.hidden = true;
+  });
+  diffCloseEl.addEventListener("click", function () { diffPanelEl.hidden = true; });
+  // 閉じるとき：送っていない書き直しがあれば止める（枠の中では出ないことがある。書きかけは控えてある）
+  window.addEventListener("beforeunload", function (event) {
+    if (!isDirty()) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
+
+  async function start() {
+    var pageDefaults = document.querySelector(".wrap");
+    // 作者のページに書き込んだ「最初に開くリポジトリ」（雛形では空。publish のとき Claude が埋める）。
+    // 端末に覚えた名前が先。端末の覚えは端末ごとで、別の端末では空から始まるため（作者の要望、2026-10-05）
+    repoEl.value = recall(REPO_KEY) || ((pageDefaults && pageDefaults.getAttribute("data-default-repo")) || "");
+    branchEl.value = recall(BRANCH_KEY) || ((pageDefaults && pageDefaults.getAttribute("data-default-branch")) || "") || "main";
+    setVertical(recall(DIR_KEY) === "1");
+    if (!window.claude || typeof window.claude.use !== "function") {
+      setStatus("この画面では GitHub を読めません。claude.ai の Claude アプリかブラウザで開いてください。", true);
+      return;
+    }
+    state.mcp = await window.claude.use("mcp");
+    if (!state.mcp) { setStatus(GitHubWorks.describeGithubError({ code: "not_granted" }), true); return; }
+    if (repoEl.value.trim()) await loadRepo();
+    else setStatus("作品のリポジトリ（持ち主/名前）を入れて［読む］を押してください。");
+  }
+
+  updateBand();
+  start();
+})();
+</script>

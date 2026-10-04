@@ -1,3 +1,5 @@
+import { noteToneClasses } from "../core/sceneMemoRows";
+
 /**
  * シーンメモのパネル（設計書6.40.4）。
  *
@@ -21,10 +23,22 @@
  * 修正案があれば「直す」（拡張機能が提案パネルの［適用］と同じ関数で
  * 本文へ当てる。作者の裁定 2026-10-03）、無ければ「本文へ」（原稿のその行へ
  * 飛ぶ。作者の裁定 2026-10-04——以前は「提案へ」だった）と、「見送る」（記録を
- * 足す）である。修正案の無い推敲の指摘には「AIに相談」も出る（相談パネルで
- * 助言を頼む）。提案パネルへ移る口は上の「提案パネル」1つだけ。**この画面は本文を直に書かない**
+ * 足す）である。修正案の無い推敲の指摘には「AIに相談」も出る（その行の
+ * すぐ下に短い助言が出る。P-47。相談パネルへは「相談パネルで続ける」を押したときだけ）。提案パネルへ移る口は上の「提案パネル」1つだけ。**この画面は本文を直に書かない**
  * ——頼むだけで、当てるのも戻すのも拡張機能の側である。
  */
+/**
+ * 種類の印ごとの規則（`.tone-finding-typo { --note-color: … }` など）。
+ *
+ * 印の一覧は `core/sceneMemoRows.ts` の `noteToneClasses`（付箋と指摘の色の表）
+ * から取る。色の値はここに書かない——拡張機能が `--novelai-<印>` として届ける
+ */
+function toneRules(): string {
+  return noteToneClasses()
+    .map((name) => `.tone-${name} { --note-color: var(--novelai-${name}); }`)
+    .join("\n");
+}
+
 export function buildSceneMemoPanelHtml(
   nonce: string,
   cspSource: string
@@ -118,9 +132,18 @@ h2 {
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  padding: 5px 12px;
+  padding: 5px 12px 5px 9px;
   border-bottom: 1px solid var(--vscode-panel-border);
+  /* 種類の色の細い帯（作者の要望 2026-10-04）。流し見で種類を拾うため */
+  border-left: 3px solid var(--note-color, transparent);
 }
+/* 付箋は点線の帯。指摘と色相が近い種類（TODO の赤と誤字脱字の赤など）が
+   あっても、作者が書いたものか機械が挙げたものかを形で見分けられる */
+.memo.is-memo { border-left-style: dashed; }
+/* 種類ごとの色の印（設計書6.96.5）。**規則は色の表から組む**——色の値は
+   core（付箋は sceneMemo.ts、指摘は sceneMemoRows.ts）にだけ置き、拡張機能が
+   --novelai-<印> として届ける。手で並べると、種類を足したときに規則が抜ける */
+${toneRules()}
 /* いまカーソルのある場所にいちばん近い付箋（設計書6.40.4）。
    **光らせるだけで、本文は動かさない** */
 .memo.active { background: var(--vscode-list-activeSelectionBackground); }
@@ -131,15 +154,8 @@ h2 {
   height: 8px;
   margin-top: 6px;
   border-radius: 50%;
-  background: var(--novelai-memo-other, #6b6b6b);
+  background: var(--note-color, var(--vscode-descriptionForeground));
 }
-.dot.memo-todo { background: var(--novelai-memo-todo, #c01c28); }
-.dot.memo-check { background: var(--novelai-memo-check, #9a6700); }
-.dot.memo-foreshadow { background: var(--novelai-memo-foreshadow, #1a5fb4); }
-.dot.memo-idea { background: var(--novelai-memo-idea, #1c7c3c); }
-/* AIの指摘（設計書6.96.5）。**種類では分けず、1色**——分けるのは
-   「作者が書いたか、機械が挙げたか」だけである */
-.dot.memo-ai { background: var(--novelai-memo-ai, #6b4fbb); }
 /* 同じ行に続く2件目から。場所を繰り返さないので、**区切り線も引かない**
    ——線が入ると別の場所の指摘に見える（設計書6.96.5） */
 .memo.same-line { padding-top: 0; }
@@ -168,15 +184,20 @@ h2 {
   overflow-wrap: break-word;
 }
 .go:hover { text-decoration: underline; }
+/* 種類の札。**字はそのまま残す**（色だけで見分けさせない）。地は塗らず、
+   枠と字を種類の色にする——塗ると、明るいテーマの黄や緑の上で字が読めない */
 .tag {
   display: inline-block;
   margin-right: 5px;
-  padding: 0 5px;
+  padding: 0 4px;
   border-radius: 2px;
   font-size: 11px;
-  background: var(--vscode-badge-background);
-  color: var(--vscode-badge-foreground);
+  border: 1px solid var(--note-color, var(--vscode-badge-background));
+  color: var(--note-color, var(--vscode-badge-foreground));
 }
+/* 選び口で選んでいる種類の色。項目にも同じ印（● と字の色）を付ける */
+select#tag { border-left: 3px solid var(--note-color, transparent); }
+select#tag option { color: var(--note-color, var(--vscode-dropdown-foreground)); }
 .where {
   display: block;
   margin-top: 2px;
@@ -196,6 +217,37 @@ h2 {
   flex-direction: column;
   gap: 3px;
 }
+/* ［AIに相談］の答え（P-47）。**押した指摘の行のすぐ下**に、小さく出す
+   （作者の報告 2026-10-04「表示される位置が離れすぎています」） */
+.advice {
+  margin-top: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  border-left: 2px solid var(--note-color, var(--vscode-panel-border));
+  background: var(--vscode-textBlockQuote-background, transparent);
+  overflow-wrap: break-word;
+}
+.advice .point { display: block; }
+.advice .examples { margin: 3px 0 0; padding-left: 1.2em; }
+.advice .examples li { margin: 1px 0; }
+.advice .from { color: var(--vscode-descriptionForeground); }
+.advice .advice-acts {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.advice .advice-acts button { padding: 1px 8px; font-size: 11px; }
+/* 「相談パネルで続ける」は控えめに（押したときだけ相談パネルへ渡す） */
+.advice .linkish {
+  background: none;
+  padding: 0;
+  color: var(--vscode-textLink-foreground);
+  text-decoration: underline;
+}
+.advice .linkish:hover:enabled { background: none; }
+.advice .muted { color: var(--vscode-descriptionForeground); }
 </style>
 </head>
 <body>
@@ -317,9 +369,13 @@ el.list.addEventListener("click", function (event) {
     return;
   }
   if (act === "consult") {
-    // 修正案の無い推敲の指摘。相談パネルでAIに助言を頼む（拡張機能の側が
-    // 相談と同じ道で送る。この画面は頼むだけ）
+    // 修正案の無い推敲の指摘。その行の下に短い助言を出す（拡張機能の側が
+    // AIへ頼み、答えを一覧に添えて返す。この画面は頼むだけ）
     post("consult", { findingId: row.findingId });
+    return;
+  }
+  if (act === "stopAdvice" || act === "closeAdvice" || act === "consultInChat") {
+    post(act, { findingId: row.findingId });
     return;
   }
   if (act === "dismiss") {
@@ -342,16 +398,21 @@ function renderTags() {
   if (el.tag.dataset.signature === signature) return;
   el.tag.dataset.signature = signature;
 
-  // 付箋のタグと、AIの指摘の種類が同じ一覧に並ぶ（設計書6.96.5）
+  // 付箋のタグと、AIの指摘の種類が同じ一覧に並ぶ（設計書6.96.5）。
+  // 項目ごとに、一覧の行と同じ色の印（● と字の色）を付ける（作者の要望 2026-10-04）
+  const tones = data.tagTones || {};
   const options = ['<option value="">すべて</option>'];
   for (const tag of data.tags) {
+    const tone = tones[tag] || "";
     options.push(
-      '<option value="' + escapeHtml(tag) + '"' +
+      '<option class="tone-' + escapeHtml(tone) + '" value="' + escapeHtml(tag) + '"' +
         (tag === data.tag ? " selected" : "") + ">" +
-        escapeHtml(tag) + "</option>"
+        (tone ? "● " : "") + escapeHtml(tag) + "</option>"
     );
   }
   el.tag.innerHTML = options.join("");
+  // 選び口の枠にも、選んでいる種類の色を出す（「すべて」なら出さない）
+  el.tag.className = data.tag && tones[data.tag] ? "tone-" + tones[data.tag] : "";
 }
 
 /**
@@ -383,7 +444,7 @@ function renderActions(row) {
     if (row.canConsult) {
       buttons.push(
         '<button class="done" data-act="consult" data-key="' + key +
-          '" title="この一文と指摘を添えて、相談パネルでAIに直し方の助言を頼みます（相談に割り当てたAIを使います。本文は変わりません）">AIに相談</button>'
+          '" title="何が引っかかっているかと、その箇所の言い換え例を、この行のすぐ下に短く出します（推敲に割り当てたAIを使います。本文は変わりません）">AIに相談</button>'
       );
     }
     buttons.push(
@@ -396,14 +457,59 @@ function renderActions(row) {
     '" title="この行を本文から消します">済み</button>';
 }
 
+/**
+ * 行のすぐ下に出す助言（P-47）。**中身は拡張機能が持ち、一覧に添えて届く**
+ * ——画面は一覧のたびに作り直すので、ここに置くと消える。
+ *
+ * 考えている間は「考えています…」と［止める］。答えが出たら、何が引っかかって
+ * いるか1文と言い換え例（「本文の部分 → 言い換え」）を小さく並べ、［閉じる］と
+ * 「相談パネルで続ける」を1つずつ置く。言い換えは読むだけ（当てる口は無い）。
+ */
+function renderAdvice(row) {
+  const advice = row.advice;
+  if (!advice) return "";
+  const key = escapeHtml(row.key);
+  const close = '<button data-act="closeAdvice" data-key="' + key + '">閉じる</button>';
+  if (advice.status === "thinking") {
+    return '<div class="advice"><span class="muted">考えています…</span>' +
+      '<div class="advice-acts"><button data-act="stopAdvice" data-key="' + key +
+      '" title="AIへの問い合わせを止めます">止める</button></div></div>';
+  }
+  if (advice.status === "failed") {
+    return '<div class="advice"><span class="muted">' + escapeHtml(advice.reason) +
+      '</span><div class="advice-acts">' + close + "</div></div>";
+  }
+  const parts = [];
+  if (advice.point) parts.push('<span class="point">' + escapeHtml(advice.point) + "</span>");
+  if (advice.examples && advice.examples.length > 0) {
+    const items = advice.examples.map(function (example) {
+      return '<li><span class="from">「' + escapeHtml(example.from) + "」</span> → 「" +
+        escapeHtml(example.to) + "」</li>";
+    });
+    parts.push('<ul class="examples">' + items.join("") + "</ul>");
+  }
+  const acts = [close];
+  if (row.canConsultInChat) {
+    acts.push(
+      '<button class="linkish" data-act="consultInChat" data-key="' + key +
+        '" title="この一文と指摘を、相談パネルへ渡して続けて相談します">相談パネルで続ける</button>'
+    );
+  }
+  return '<div class="advice">' + parts.join("") +
+    '<div class="advice-acts">' + acts.join("") + "</div></div>";
+}
+
 function renderRow(row) {
   const active = row.key === data.activeKey ? " active" : "";
   // **同じ行に続く2件目からは、場所を出さない**（設計書6.96.5）
   const same = row.sameLine ? " same-line" : "";
   const where = row.chapterLabel +
     (row.title ? " " + row.title : "") + "　" + row.line + "行目";
-  return '<div class="memo' + active + same + '">' +
-    '<span class="dot ' + escapeHtml(row.tagClass) + '"></span>' +
+  // 種類の色の印。帯・札・丸の3つが、この印の色（--note-color）で塗られる
+  const tone = " " + escapeHtml("tone-" + row.tagClass);
+  const isMemo = row.kind === "memo" ? " is-memo" : "";
+  return '<div class="memo' + tone + isMemo + active + same + '">' +
+    '<span class="dot"></span>' +
     '<span class="main">' +
       '<button class="go" data-act="go" data-key="' + escapeHtml(row.key) + '">' +
         '<span class="tag">' + escapeHtml(row.tag) + "</span>" +
@@ -413,6 +519,7 @@ function renderRow(row) {
           ? ""
           : '<span class="where">' + escapeHtml(where) + "</span>") +
       "</button>" +
+      renderAdvice(row) +
     "</span>" +
     renderActions(row) +
     "</div>";

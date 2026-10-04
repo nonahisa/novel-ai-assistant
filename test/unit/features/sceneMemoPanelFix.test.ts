@@ -8,8 +8,10 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
  *   提案パネルへは渡さない。当てたら上に［戻す］の帯が出る
  * - 修正案の無い指摘（矛盾・修正案の無い推敲）は［本文へ］——行の場所を押したときと
  *   同じ道で原稿のその行へ飛ぶ（作者の裁定 2026-10-04。以前の［提案へ］はやめた）
- * - 修正案の無い推敲には［AIに相談］も出る——相談の口（`consultFinding`）へ渡す
- *   （作者の要望 2026-10-04）。提案パネルへ移る口は上の［提案パネル］1つ
+ * - 修正案の無い推敲には［AIに相談］も出る——助言の口（`adviseFinding`）へ渡し、
+ *   答えをその行に添える（P-47。作者の報告 2026-10-05）。相談パネルへは
+ *   「相談パネルで続ける」（`consultFinding`）を押したときだけ。
+ *   提案パネルへ移る口は上の［提案パネル］1つ
  * - ［戻す］は戻す口（`undoFindingFix`）を呼び、帯を下げる
  *
  * 当てる中身（本文・記録）は `proposalPanelFixFromMemo.test.ts` が本物の
@@ -245,6 +247,16 @@ function deps() {
       await decide(finding.id, "pending");
       return { ok: true as const };
     }),
+    adviseFinding: vi.fn(async () => ({
+      kind: "answered" as const,
+      cached: false,
+      advice: {
+        point: "ここだけ視点が外へ出ています。",
+        examples: [{ from: "夜が明けた", to: "夜が明けていた" }],
+        noNeed: false,
+        dropped: 0,
+      },
+    })),
     consultFinding: vi.fn(async () => undefined),
     openProposals: vi.fn(),
   };
@@ -281,7 +293,7 @@ describe("修正案の有無で、押し口が分かれる", () => {
     expect(rowOf(typo.id)?.canConsult).toBe(false);
   });
 
-  test("相談の口が渡されていなければ、［AIに相談］を出さない", async () => {
+  test("助言の口が渡されていなければ、［AIに相談］を出さない", async () => {
     const work = newWork();
     const { applyFinding } = deps();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -311,7 +323,8 @@ describe("［本文へ］・［AIに相談］・［提案パネル］", () => {
     expect(given.consultFinding).not.toHaveBeenCalled();
   });
 
-  test("［AIに相談］は相談の口へ、その指摘（いまの行つき）を渡す。本文へは当てない", async () => {
+  /** P-47。作者の報告 2026-10-05「くどすぎます」「表示される位置が離れすぎています」 */
+  test("［AIに相談］は助言の口へその指摘（いまの行つき）を渡し、答えをその行に添える。相談パネルへは渡さない", async () => {
     const work = newWork();
     const given = deps();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -320,17 +333,118 @@ describe("［本文へ］・［AIに相談］・［提案パネル］", () => {
     receive?.({ type: "consult", findingId: proofreadNoFix.id });
     await settle();
 
-    expect(given.consultFinding).toHaveBeenCalledTimes(1);
-    expect(given.consultFinding).toHaveBeenCalledWith(
+    expect(given.adviseFinding).toHaveBeenCalledTimes(1);
+    expect(given.adviseFinding).toHaveBeenCalledWith(
       work,
       expect.objectContaining({
         id: proofreadNoFix.id,
         line: 2,
         original: "　夜が明けた。",
         message: "視点：ここだけ語り手が外から見ています",
-      })
+      }),
+      expect.any(AbortSignal)
     );
+    expect(rowOf(proofreadNoFix.id)?.advice).toEqual({
+      status: "answered",
+      point: "ここだけ視点が外へ出ています。",
+      examples: [{ from: "夜が明けた", to: "夜が明けていた" }],
+      noNeed: false,
+      cached: false,
+    });
+    // ほかの行には出ない
+    expect(rowOf(contradiction.id)?.advice).toBeNull();
+    expect(given.consultFinding).not.toHaveBeenCalled();
     expect(given.applyFinding).not.toHaveBeenCalled();
+  });
+
+  test("考えている間は行に「考えています」が出て、［止める］で中止の知らせが届き、行から消える", async () => {
+    const work = newWork();
+    let seen: AbortSignal | undefined;
+    const given = {
+      ...deps(),
+      adviseFinding: vi.fn(
+        (_work: WorkEntry, _finding: unknown, signal: AbortSignal) =>
+          new Promise<{ kind: "cancelled" }>((resolve) => {
+            seen = signal;
+            signal.addEventListener("abort", () => resolve({ kind: "cancelled" }));
+          })
+      ),
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, given);
+
+    receive?.({ type: "consult", findingId: proofreadNoFix.id });
+    await settle();
+    expect(rowOf(proofreadNoFix.id)?.advice).toEqual({ status: "thinking" });
+
+    // 考えている途中にもう一度押しても、重ねて呼ばない
+    receive?.({ type: "consult", findingId: proofreadNoFix.id });
+    await settle();
+    expect(given.adviseFinding).toHaveBeenCalledTimes(1);
+
+    receive?.({ type: "stopAdvice", findingId: proofreadNoFix.id });
+    await settle();
+    expect(seen?.aborted).toBe(true);
+    expect(rowOf(proofreadNoFix.id)?.advice).toBeNull();
+  });
+
+  test("［閉じる］で行の下の助言が消える", async () => {
+    const work = newWork();
+    const given = deps();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, given);
+    receive?.({ type: "consult", findingId: proofreadNoFix.id });
+    await settle();
+    expect(rowOf(proofreadNoFix.id)?.advice).not.toBeNull();
+
+    receive?.({ type: "closeAdvice", findingId: proofreadNoFix.id });
+    await settle();
+    expect(rowOf(proofreadNoFix.id)?.advice).toBeNull();
+  });
+
+  test("失敗は理由をその行に添える", async () => {
+    const work = newWork();
+    const given = {
+      ...deps(),
+      adviseFinding: vi.fn(async () => ({
+        kind: "failed" as const,
+        reason: "AIの答えを読み取れませんでした。",
+      })),
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, given);
+    receive?.({ type: "consult", findingId: proofreadNoFix.id });
+    await settle();
+    expect(rowOf(proofreadNoFix.id)?.advice).toEqual({
+      status: "failed",
+      reason: "AIの答えを読み取れませんでした。",
+    });
+  });
+
+  test("「相談パネルで続ける」は相談の口へ、その指摘を渡す", async () => {
+    const work = newWork();
+    const given = deps();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, given);
+    expect(rowOf(proofreadNoFix.id)?.canConsultInChat).toBe(true);
+
+    receive?.({ type: "consultInChat", findingId: proofreadNoFix.id });
+    await settle();
+
+    expect(given.consultFinding).toHaveBeenCalledTimes(1);
+    expect(given.consultFinding).toHaveBeenCalledWith(
+      work,
+      expect.objectContaining({ id: proofreadNoFix.id, line: 2 })
+    );
+  });
+
+  test("相談の口が渡されていなければ「相談パネルで続ける」を出さない", async () => {
+    const work = newWork();
+    const { adviseFinding } = deps();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, { adviseFinding });
+    expect(rowOf(proofreadNoFix.id)?.canConsult).toBe(true);
+    expect(rowOf(proofreadNoFix.id)?.canConsultInChat).toBe(false);
   });
 
   test("上の［提案パネル］で、提案パネルを開く口が呼ばれる", async () => {
@@ -426,6 +540,44 @@ describe("［戻す］", () => {
     await settle();
 
     expect(lastData().fixed).toBeNull();
+  });
+});
+
+/**
+ * 種類ごとの色（作者の要望 2026-10-04「推敲や誤字脱字等で色分けしてください」
+ * 「表示ジャンルすべてです」）。色の表そのものは `test/unit/core/noteTones.test.ts`。
+ * ここでは、拡張機能が画面へ送る一覧に印が付くことを見る
+ */
+describe("種類ごとの色の印", () => {
+  test("誤字脱字・矛盾・推敲の行に、それぞれ違う色の印が付く", async () => {
+    const work = newWork();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, deps());
+
+    const tones = [typo, contradiction, proofreadNoFix].map(
+      (finding) => rowOf(finding.id)?.tagClass
+    );
+    expect(tones.every((tone) => typeof tone === "string" && tone !== "")).toBe(true);
+    expect(new Set(tones).size).toBe(3);
+  });
+
+  test("選び口に並ぶ種類すべてに印があり、その色が画面へ届く", async () => {
+    const work = newWork();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await openSceneMemoPanel(context as any, work, deps());
+
+    const data = lastData();
+    const tags = data.tags as string[];
+    const tagTones = data.tagTones as Record<string, string>;
+    const colors = data.colors as Record<string, string>;
+    expect(tags.length).toBeGreaterThanOrEqual(3);
+    for (const tag of tags) {
+      const tone = tagTones[tag];
+      expect(tone, `${tag} に印が無い`).toBeTruthy();
+      expect(colors[tone], `${tone} の色が届いていない`).toBeTruthy();
+    }
+    // 行の印と選び口の印は同じもの
+    expect(tagTones["推敲"]).toBe(rowOf(proofreadNoFix.id)?.tagClass);
   });
 });
 

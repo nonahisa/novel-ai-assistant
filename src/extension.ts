@@ -265,8 +265,14 @@ import { generatePlot } from "./features/generatePlot";
 import { openPlotMode, refreshPlotMode } from "./features/plotModePanel";
 import { syncPlotCharacters } from "./features/plotCharacterSync";
 import { WORK_CHAT_VIEW_ID, WorkChatPanel } from "./features/workChatPanel";
-// 校正・メモパネルの［AIに相談］の依頼文（P-21。設計書6.96.5）
-import { buildFindingAdviceQuestion } from "./prompts/workChat";
+// 校正・メモパネルの［AIに相談］（設計書6.96.5）。素のエディターを開かずに材料を渡す
+import {
+  collectFindingMaterial,
+  consultFindingInChat,
+  type FindingMaterialDeps,
+} from "./features/findingConsult";
+import { askFindingAdvice } from "./features/findingAdvice";
+import { episodeLabel } from "./core/episodeLabel";
 // 押すべき項目をサイドバーで光らせる（設計書6.104）
 import { createActionSpotlight } from "./features/actionSpotlight";
 import { ChatterService } from "./features/chatterService";
@@ -458,6 +464,7 @@ import {
   askNotationInActiveManuscript,
   insertMemoLineAbove,
   isInsideWork,
+  lastManuscriptCaret,
   openManuscriptForReading,
   openManuscriptVertical,
   refreshAllManuscriptCounts,
@@ -469,6 +476,8 @@ import {
   watchDisconnectedManuscripts,
   type ManuscriptEditorDeps,
 } from "./features/manuscriptEditor";
+// 「すべて同期」の記録の前の保存（設計書5.5.19）。VS Code の文書の保存を呼ぶだけで、Node 専用の部品は引かない
+import { createSyncPresave } from "./features/presaveBeforeSync";
 // 「本文が見つからない」ときの文言は1か所に置く（`features/ruby.ts` と共用）
 import {
   activeForeignManuscriptTabUri,
@@ -1853,6 +1862,8 @@ export async function activate(
     storage: verifiedState(context.globalState),
     pauseSettingsWatch: () => settingsWatcher.pause(),
     batchFileNotices: gitSync.beginBatchedFileNotices?.bind(gitSync),
+    // 記録の前に、作品の中の未保存を保存する（設計書5.5.19）
+    presave: createSyncPresave(),
   });
 
   context.subscriptions.push(
@@ -1880,6 +1891,8 @@ export async function activate(
         monitor: gitSync,
         pauseSettingsWatch: () => settingsWatcher.pause(),
         batchFileNotices: batch,
+        // 記録の前に、作品の中の未保存を保存する（作者の裁定、2026-10-04。設計書5.5.19）
+        presave: createSyncPresave(),
       });
     }),
     // 別のPCとこちらの両方で書くと分岐する（設計書5.5.16）。
@@ -2269,26 +2282,48 @@ export async function activate(
    * いればその画面のまま示し、素のエディタなら素のまま開く。
    */
   /**
-   * 本文を、その範囲を選んだ状態で横に開き、相談パネルへ渡す（「AI相談（選択範囲）」）。
+   * 原稿エディターの本文と範囲を相談パネルへ渡して開く（右クリックの
+   * 「AI相談（選択範囲）」）。
    *
-   * 相談パネルは普通のエディタから本文を受け取る。同じ文書を横に開いてから
-   * 渡す（開かないと、前に見ていた別の作品について答えることになる）。
-   * 原稿エディターの右クリックと、校正・メモパネルの［AIに相談］が通る
-   * （入口2つ・実体1つ）。**関数の宣言にしてある**——原稿エディターの繋ぎは
-   * これより上で組むので、`const` だと名前が先に要る
+   * **本文を素のエディターで開かない**（作者の報告 2026-10-04。設計書6.25.10）。
+   * 以前は相談パネルが素のエディターからしか本文を受け取れなかったので、
+   * 同じ文書を `showTextDocument` で横の列に開いて渡しており、右クリックの
+   * たびに3列目に素のエディターが開いていた。いまは文書と範囲をそのまま渡す。
+   * 範囲が無ければ、原稿エディターのカーソルの行を中心に抜粋する。
+   * **関数の宣言にしてある**——原稿エディターの繋ぎはこれより上で組むので、
+   * `const` だと名前が先に要る
    */
   async function openChatWithRange(
     document: vscode.TextDocument,
     range: vscode.Range | undefined
   ): Promise<void> {
-    const editor = await vscode.window.showTextDocument(document, {
-      viewColumn: vscode.ViewColumn.Beside,
-      preserveFocus: false,
-      selection: range,
-    });
-    workChatPanel.trackEditor(editor);
+    const caret = lastManuscriptCaret();
+    const caretHere =
+      !range && caret && path.isSamePath(caret.filePath, fromUri(document.uri))
+        ? document.lineAt(
+            Math.min(Math.max(caret.line - 1, 0), Math.max(document.lineCount - 1, 0))
+          ).range.start
+        : undefined;
+    workChatPanel.trackDocument(document, range, caretHere);
     await vscode.commands.executeCommand(`${WORK_CHAT_VIEW_ID}.focus`);
   }
+
+  /**
+   * 指摘の材料（一文と前後・話の題）を集める口。［AIに相談］と
+   * 「相談パネルで続ける」が同じものを使う
+   */
+  const findingMaterialDeps: FindingMaterialDeps = {
+    // 読むだけでタブは作らない。原稿エディターで開いていればその文書が返る
+    openDocument: (filePath) =>
+      Promise.resolve(vscode.workspace.openTextDocument(path.toUri(filePath))),
+    episodeLabelOf: async (target, filePath) => {
+      const scan = await scanWork(target);
+      const episode = scan.episodes.find((item) =>
+        path.isSamePath(item.filePath, filePath)
+      );
+      return episode ? episodeLabel(episode) : undefined;
+    },
+  };
 
   const sceneMemoDeps: SceneMemoDeps = {
     revealInManuscript: (filePath: string, line: number) =>
@@ -2302,28 +2337,38 @@ export async function activate(
     */
     openProposals: () => proposalPanel.reveal(),
     /*
-      ［AIに相談］——修正案の無い推敲の指摘について、相談パネルで助言を頼む
-      （作者の要望 2026-10-04）。**「AI相談（選択範囲）」と同じ道**：その行を
-      選んだ状態で本文を横に開いて相談パネルへ渡し、作者の問いとして依頼文を送る。
+      ［AIに相談］——修正案の無い推敲の指摘について、短い助言を行のすぐ下に出す
+      （P-47。作者の報告 2026-10-05「くどすぎます」「表示される位置が離れすぎて
+      います」）。相談パネル（P-21）を通さない。割当は推敲、課金の確認と
+      キャッシュは `askFindingAdvice` が持つ
+    */
+    adviseFinding: async (work, finding, signal) => {
+      const material = await collectFindingMaterial(work, finding, findingMaterialDeps);
+      return await askFindingAdvice({
+        work,
+        registry: aiRegistry,
+        material: {
+          quote: material.quote,
+          finding: material.finding,
+          before: material.before,
+          after: material.after,
+        },
+        signal,
+      });
+    },
+    /*
+      助言の下の「相談パネルで続ける」——押したときだけ相談パネルへ渡す。
+      **素のエディターを開かない**（作者の報告 2026-10-04。以前は本文を横の列に
+      開いて渡し、3列目ができた）。材料（話の題・行番号・一文と前後・指摘）を
+      依頼文に入れ、相談の相手（文書とその行）を相談パネルへ直接渡す。
       使うAI・課金の確認は相談と同じ（`WorkChatPanel.askFromOutside` → `ask`）
     */
-    consultFinding: async (_work, finding) => {
-      const document = await vscode.workspace.openTextDocument(
-        path.toUri(finding.filePath)
-      );
-      const lineIndex = Math.min(
-        Math.max(finding.line - 1, 0),
-        Math.max(document.lineCount - 1, 0)
-      );
-      await openChatWithRange(document, document.lineAt(lineIndex).range);
-      const place = `${path.basename(finding.filePath)}の${finding.line}行目`;
-      await workChatPanel.askFromOutside(
-        buildFindingAdviceQuestion({
-          place,
-          quote: finding.original,
-          finding: finding.message,
-        })
-      );
+    consultFinding: async (work, finding) => {
+      await consultFindingInChat(work, finding, {
+        ...findingMaterialDeps,
+        askFromOutside: (question, target) =>
+          workChatPanel.askFromOutside(question, target),
+      });
     },
     /*
       ［直す］——修正案のある指摘を1手で本文へ当てる（作者の裁定 2026-10-03）。

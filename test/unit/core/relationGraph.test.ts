@@ -13,7 +13,7 @@ import {
   lastChapterOf,
   normalizeUpToChapter,
   restrictUnresolved,
-  shortPairLabel,
+  nodeCaption,
   UNRESOLVED_ID_PREFIX,
   type RelationGraph,
 } from "../../../src/core/relationGraph";
@@ -768,101 +768,132 @@ describe("注記の件数（設計書6.38.5）", () => {
 });
 
 /**
- * 線の上に置く短い言葉（作者の裁定、2026-10-03「線の文字を絞る」）。
+ * 名前の下に書く言葉（作者の裁定、2026-10-04「関係は人の名前の下に書く」。設計書6.38.2）。
  *
- * 実機（教科書チート、「アブス」の個人中心図）で、両向きの関係を全部並べた
- * 長い文字（「→同席・兼職男子・同席／←…」）が中心の近くで重なって読めなかった。
- * 線の上には向きごとに1つだけ置き、全部は右の「つながっている人」で読む。
+ * 線の上に置いていた頃は、相手30人前後の図（教科書チートの「イント」）で文字が
+ * 中心の近くへ寄り集まって読めなかった。名前の下には、中心の人から見た関係を
+ * 矢印なしで書き、無いときだけ「←」で相手から見た関係を書く。
  */
-describe("線の上の短い言葉", () => {
+describe("名前の下の言葉", () => {
   function edgeOf(characters: Character[]) {
     const graph = buildRelationGraph(characters);
     expect(graph.edges).toHaveLength(1);
     return graph.edges[0];
   }
 
-  test("向きごとに1つだけ置き、残りは「ほかN」にする", () => {
+  test("中心から見た関係を「・」でつなぎ、矢印は付けない", () => {
     const edge = edgeOf([
-      character("char_001", "アブス", {
+      character("char_001", "イント", {
         relations: [
-          { name: "イント", relation: "同席" },
-          { name: "イント", relation: "兼職男子" },
+          { name: "ロウ", relation: "師匠" },
+          { name: "ロウ", relation: "兄" },
         ],
-        addressTerms: [address("イント", ["イント君"])],
       }),
-      character("char_002", "イント", {
-        relations: [{ name: "アブス", relation: "上司" }],
+      character("char_002", "ロウ", {
+        relations: [{ name: "イント", relation: "弟子" }],
       }),
     ]);
-    expect(shortPairLabel(edge, "char_001")).toBe("→同席 ほか2／←上司");
-    expect(shortPairLabel(edge, "char_002")).toBe("→上司／←同席 ほか2");
+    expect(nodeCaption(edge, "char_001")).toBe("師匠・兄");
+    // 中心を替えれば、その人から見た関係になる
+    expect(nodeCaption(edge, "char_002")).toBe("弟子");
   });
 
-  test("関係が無ければ呼び方を『』で置く", () => {
-    const edge = edgeOf([
-      character("char_001", "マイナ", {
-        addressTerms: [address("イント", ["イント君"])],
-      }),
-      character("char_002", "イント", {}),
-    ]);
-    expect(shortPairLabel(edge, "char_001")).toBe("→『イント君』");
-  });
-
-  /**
-   * 中身の無い向きは書かない（作者の実機確認、2026-10-04。相手30人の図で
-   * 「→なし／←…」が中心の近くに何十個も並んだ）。「なし」は何も伝えないうえ、
-   * 線の上の場所を取る。向きの片方だけを書いても、矢印で向きは読める
-   */
-  test("片方の向きに何も無ければ、その向きは書かない（「なし」と書かない）", () => {
+  test("中心から見た関係が無ければ、相手から見た関係を「←」付きで書く", () => {
     const edge = edgeOf([
       character("char_001", "イント", {}),
       character("char_002", "相手", {
         relations: [{ name: "イント", relation: "主人" }],
       }),
     ]);
-    expect(shortPairLabel(edge, "char_001")).toBe("←主人");
-    expect(shortPairLabel(edge, "char_002")).toBe("→主人");
+    expect(nodeCaption(edge, "char_001")).toBe("←主人");
   });
 
-  test("両方の向きに何も無ければ空（線の上に何も書かない）", () => {
-    const edge: Parameters<typeof shortPairLabel>[0] = {
+  test("関係を呼び方より先にし、同じ向きの呼び方は『』で続ける", () => {
+    const edge = edgeOf([
+      character("char_001", "イント", {
+        relations: [{ name: "マイナ様", relation: "主" }],
+        addressTerms: [address("マイナ様", ["マイナ様"])],
+      }),
+      character("char_002", "マイナ様", {
+        addressTerms: [address("イント", ["イント君"])],
+      }),
+    ]);
+    expect(nodeCaption(edge, "char_001")).toBe("主・『マイナ様』");
+  });
+
+  test("関係がどちらにも無ければ呼び方を書く（中心からの呼び方が先、無ければ←で相手からの呼び方）", () => {
+    const fromCenter = edgeOf([
+      character("char_001", "イント", {
+        addressTerms: [address("リナ", ["リナ"])],
+      }),
+      character("char_002", "リナ", {
+        addressTerms: [address("イント", ["イント様"])],
+      }),
+    ]);
+    expect(nodeCaption(fromCenter, "char_001")).toBe("『リナ』");
+
+    const fromPartner = edgeOf([
+      character("char_001", "イント", {}),
+      character("char_002", "リナ", {
+        addressTerms: [address("イント", ["イント様"])],
+      }),
+    ]);
+    expect(nodeCaption(fromPartner, "char_001")).toBe("←『イント様』");
+  });
+
+  test("合計が長いときは入るぶんだけ並べ、残りは「ほかN」にする", () => {
+    const edge = edgeOf([
+      character("char_001", "イント", {
+        relations: ["同行者", "継子", "弟子", "護衛", "旅の仲間"].map((relation) => ({
+          name: "相手",
+          relation,
+        })),
+      }),
+      character("char_002", "相手", {}),
+    ]);
+    // 「同行者・継子・弟子」で8字、「・護衛」を足すと11字で上限（10字）を超える
+    expect(nodeCaption(edge, "char_001")).toBe("同行者・継子・弟子 ほか2");
+  });
+
+  test("長い1語は途中で切る（『』は閉じたまま）", () => {
+    const edge = edgeOf([
+      character("char_001", "アブス", {
+        relations: [{ name: "イント", relation: "電気について教えを受けている相手" }],
+        addressTerms: [address("イント", ["とても長い呼び方のあだ名"])],
+      }),
+      character("char_002", "イント", {}),
+    ]);
+    expect(nodeCaption(edge, "char_001")).toBe("電気について教え… ほか1");
+
+    const addressOnly = edgeOf([
+      character("char_001", "アブス", {
+        addressTerms: [address("イント", ["とても長い呼び方のあだ名"])],
+      }),
+      character("char_002", "イント", {}),
+    ]);
+    expect(nodeCaption(addressOnly, "char_001")).toBe("『とても長い呼…』");
+  });
+
+  test("同じ言葉は1度だけ数える", () => {
+    const edge = edgeOf([
+      character("char_001", "イント", {
+        relations: [
+          { name: "相手", relation: "師匠" },
+          { name: "相手", relation: "師匠" },
+        ],
+      }),
+      character("char_002", "相手", {}),
+    ]);
+    expect(nodeCaption(edge, "char_001")).toBe("師匠");
+  });
+
+  test("中心との言葉が何も無ければ空（「なし」と書かない）", () => {
+    const edge: Parameters<typeof nodeCaption>[0] = {
       a: "char_001",
       b: "char_002",
       weight: 0,
       labels: [],
     };
-    expect(shortPairLabel(edge, "char_001")).toBe("");
-  });
-
-  test("長い言葉は途中で切る", () => {
-    const edge = edgeOf([
-      character("char_001", "アブス", {
-        relations: [{ name: "イント", relation: "電気について教えを受けている相手" }],
-      }),
-      character("char_002", "イント", {}),
-    ]);
-    const text = shortPairLabel(edge, "char_001");
-    expect(text).toBe("→電気について教え…");
-  });
-
-  test("全部を並べた長い形にはしない（線の上は短く）", () => {
-    const edge = edgeOf([
-      character("char_001", "アブス", {
-        relations: [
-          { name: "イント", relation: "同席" },
-          { name: "イント", relation: "兼職男子" },
-          { name: "イント", relation: "部下" },
-        ],
-      }),
-      character("char_002", "イント", {
-        relations: [
-          { name: "アブス", relation: "上司" },
-          { name: "アブス", relation: "同席" },
-        ],
-      }),
-    ]);
-    const text = shortPairLabel(edge, "char_001");
-    expect(text).not.toContain("・");
-    expect([...text].length).toBeLessThanOrEqual(24);
+    expect(nodeCaption(edge, "char_001")).toBe("");
   });
 });

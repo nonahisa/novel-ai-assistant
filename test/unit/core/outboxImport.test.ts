@@ -189,3 +189,175 @@ describe("書いてよいのは本文だけ", () => {
     expect(result.results[0].reason).toContain("本文のファイルではありません");
   });
 });
+
+/* ── 原稿エディターのページから送った本文の全体（kind: "body"。設計書6.116） ── */
+
+const bodyRecord = (over: Partial<OutboxRecord> = {}): OutboxRecord => ({
+  id: "b1",
+  writer: "editor",
+  kind: "body",
+  at: "2026-10-05T01:00:00.000Z",
+  episode: FILE,
+  baseBlobSha: gitBlobSha(enc(BODY)),
+  text: "一行目\n彼はゆっくりと歩いた。\n続きを書いた。\n",
+  ...over,
+});
+
+const read = (io: ReturnType<typeof work>, file = FILE) => new TextDecoder().decode(io.files.get(file));
+
+describe("本文の全体（kind: body）", () => {
+  it("読んだときの本文と同じなら、送った本文に置き換える", async () => {
+    const io = work();
+    const result = await importOutboxRecords(io, { isOwner: () => true, records: [bodyRecord()], now: NOW });
+    expect(result.results[0]).toMatchObject({ status: "imported" });
+    expect(read(io)).toBe("一行目\n彼はゆっくりと歩いた。\n続きを書いた。\n");
+  });
+
+  it("出先から CRLF・BOM 付きで来ても、本文の空間（LF）にそろえて書く", async () => {
+    const io = work();
+    const text = "﻿一行目\r\n書き直した。\r\n";
+    await importOutboxRecords(io, { isOwner: () => true, records: [bodyRecord({ text })], now: NOW });
+    expect(read(io)).toBe("一行目\n書き直した。\n");
+  });
+
+  it("パソコンの本文が送ったあとに変わっていれば入れず、違いの場所と今の本文の印を返す", async () => {
+    const io = work("一行目\nパソコンで直した。\n");
+    const result = await importOutboxRecords(io, { isOwner: () => true, records: [bodyRecord()], now: NOW });
+    expect(result.results[0].status).toBe("refused");
+    expect(result.results[0].reason).toContain(BODY_CHANGED_REASON);
+    expect(result.results[0].reason).toContain("2行目から");
+    expect(result.results[0].currentBlobSha).toBe(gitBlobSha(enc("一行目\nパソコンで直した。\n")));
+    expect(read(io)).toBe("一行目\nパソコンで直した。\n");
+  });
+
+  it("持ち主でない人の本文は入れない", async () => {
+    const io = work();
+    const result = await importOutboxRecords(io, {
+      isOwner: (writer) => writer === "u_owner",
+      records: [bodyRecord()],
+      now: NOW,
+    });
+    expect(result.results[0].status).toBe("refused");
+    expect(read(io)).toBe(BODY);
+  });
+
+  it("本文のファイルでないもの（設定資料）には書かない", async () => {
+    const io = work();
+    io.files.set("設定/plot.md", enc("筋\n"));
+    const result = await importOutboxRecords(io, {
+      isOwner: () => true,
+      records: [bodyRecord({ episode: "設定/plot.md", baseBlobSha: gitBlobSha(enc("筋\n")) })],
+      now: NOW,
+    });
+    expect(result.results[0].reason).toContain("本文のファイルではありません");
+    expect(read(io, "設定/plot.md")).toBe("筋\n");
+  });
+
+  it("いまの本文にも、送った本文にも、競合の印があれば書かない", async () => {
+    const conflicted = "一行目\n<<<<<<< HEAD\nあ\n=======\nい\n>>>>>>> x\n";
+    const io = work(conflicted);
+    const first = await importOutboxRecords(io, {
+      isOwner: () => true,
+      records: [bodyRecord({ baseBlobSha: gitBlobSha(enc(conflicted)) })],
+      now: NOW,
+    });
+    expect(first.results[0].status).toBe("refused");
+    expect(read(io)).toBe(conflicted);
+
+    const io2 = work();
+    const second = await importOutboxRecords(io2, {
+      isOwner: () => true,
+      records: [bodyRecord({ text: conflicted })],
+      now: NOW,
+    });
+    expect(second.results[0].status).toBe("refused");
+    expect(read(io2)).toBe(BODY);
+  });
+
+  it("空の本文は入れない（話がまるごと消えるため）", async () => {
+    const io = work();
+    const result = await importOutboxRecords(io, { isOwner: () => true, records: [bodyRecord({ text: " \n" })], now: NOW });
+    expect(result.results[0].status).toBe("refused");
+    expect(read(io)).toBe(BODY);
+  });
+
+  it("校閲中（編集部がロック）の話には書かない", async () => {
+    const io = work();
+    io.files.set(
+      ".aiwriter/locks/locks.jsonl",
+      enc(JSON.stringify({ kind: "acquire", file: FILE, holder: "編集部の田中", holderKind: "editor", time: NOW.toISOString(), note: "" }) + "\n")
+    );
+    const result = await importOutboxRecords(io, { isOwner: () => true, records: [bodyRecord()], now: NOW });
+    expect(result.results[0].status).toBe("refused");
+    expect(read(io)).toBe(BODY);
+  });
+
+  it("2度目は already（同じ本文を二度書かない）", async () => {
+    const io = work();
+    await importOutboxRecords(io, { isOwner: () => true, records: [bodyRecord()], now: NOW });
+    const again = await importOutboxRecords(io, { isOwner: () => true, records: [bodyRecord()], now: NOW });
+    expect(again.results[0].status).toBe("already");
+  });
+
+  it("続きの印（basedOn）の付いた2件目は、1件目を入れたあとの本文に続けて入れる（同じ回でも、別の回でも）", async () => {
+    const v1 = bodyRecord();
+    const v2 = bodyRecord({
+      id: "b2",
+      at: "2026-10-05T02:00:00.000Z",
+      basedOn: "b1",
+      text: "一行目\n彼はゆっくりと歩いた。\n続きを書いた。\nさらに書いた。\n",
+    });
+    // 同じ回（渡す順が逆でも、時刻の順に入れる）
+    const io = work();
+    const together = await importOutboxRecords(io, { isOwner: () => true, records: [v2, v1], now: NOW });
+    expect(together.results.map((item) => item.status)).toEqual(["imported", "imported"]);
+    expect(read(io)).toBe(v2.text);
+
+    // 別の回（1件目を入れたあと、出先はまだ古い本文を読んでいた）
+    const io2 = work();
+    await importOutboxRecords(io2, { isOwner: () => true, records: [v1], now: NOW });
+    const later = await importOutboxRecords(io2, { isOwner: () => true, records: [v2], now: NOW });
+    expect(later.results[0].status).toBe("imported");
+    expect(read(io2)).toBe(v2.text);
+  });
+
+  it("続きの印の無い2件目（同じ元の本文から別に書いたもの）は、1件目を消さないよう断る", async () => {
+    const io = work();
+    const other = bodyRecord({ id: "b9", at: "2026-10-05T03:00:00.000Z", text: "一行目\n別の端末で書いた。\n" });
+    const result = await importOutboxRecords(io, { isOwner: () => true, records: [bodyRecord(), other], now: NOW });
+    expect(result.results.map((item) => item.status)).toEqual(["imported", "refused"]);
+    expect(read(io)).toBe(bodyRecord().text);
+  });
+
+  it("続きの印の先のあとでパソコンで書き換えていれば、続きも断る", async () => {
+    const io = work();
+    await importOutboxRecords(io, { isOwner: () => true, records: [bodyRecord()], now: NOW });
+    io.files.set(FILE, enc("一行目\nパソコンで書いた。\n"));
+    const result = await importOutboxRecords(io, {
+      isOwner: () => true,
+      records: [bodyRecord({ id: "b2", basedOn: "b1", text: "一行目\n上書き。\n" })],
+      now: NOW,
+    });
+    expect(result.results[0].status).toBe("refused");
+    expect(read(io)).toBe("一行目\nパソコンで書いた。\n");
+  });
+
+  it("同じ回のメモは、本文を入れたあとの本文へ入れる（本文がメモを消さない）", async () => {
+    const io = work();
+    const result = await importOutboxRecords(io, {
+      isOwner: () => true,
+      records: [memo({ baseBlobSha: gitBlobSha(enc(BODY)) }), bodyRecord()],
+      now: NOW,
+    });
+    expect(result.results.map((item) => item.status)).toEqual(["imported", "imported"]);
+    expect(read(io)).toContain("続きを書いた。");
+    expect(read(io)).toContain("// ここで間を置く");
+  });
+
+  it("送った本文が今と同じなら、書かずに入れたことにする", async () => {
+    const io = work();
+    const result = await importOutboxRecords(io, { isOwner: () => true, records: [bodyRecord({ text: BODY })], now: NOW });
+    expect(result.results[0].status).toBe("imported");
+    expect(result.results[0].reason).toContain("同じ");
+  });
+});

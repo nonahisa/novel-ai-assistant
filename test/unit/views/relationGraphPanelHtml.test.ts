@@ -449,29 +449,33 @@ describe("呼び合いを対で見せる", () => {
   });
 
   /**
-   * 線の上は短く（作者の裁定、2026-10-03「線の文字を絞る」）。短い言葉と
-   * 置き場は拡張機能側（core/relationGraphLayout.ts の layoutEgo）が決めて
-   * 渡すので、画面はそれを書くだけ。全部を並べる pairLabel を線に使わない
+   * 関係は名前の下に書き、線の上には書かない（作者の裁定、2026-10-04「関係は人の
+   * 名前の下に書く」）。言葉・置き場・揃えは拡張機能側（core/relationGraphLayout.ts の
+   * layoutEgo）が決めて渡すので、画面はそれを書くだけ。全部を並べる pairLabel を図に使わない
    */
-  it("線の上には、配置が決めた短い言葉をそのまま書く", () => {
-    expect(script).toContain("label.textContent = position.text;");
-    expect(script).not.toContain("label.textContent = pairLabel(edge");
+  it("名前の下には、配置が決めた言葉・位置・揃えをそのまま書き、線の上には書かない", () => {
+    const graph = script.slice(script.indexOf("function renderGraph"), script.indexOf("function isProvisional"));
+    expect(graph).toContain("caption.textContent = position.caption.text;");
+    expect(graph).toContain('"text-anchor": position.caption.anchor');
+    expect(graph).not.toContain("g-edge-label");
+    expect(graph).not.toContain("pairLabel(");
   });
 
-  it("「つながっている人」に、線の上は短くしてあることを書く", () => {
+  it("「つながっている人」に、名前の下に中心から見た関係を書くことを書く", () => {
     const side = script.slice(script.indexOf("function renderSide"), script.indexOf("function sideRow"));
-    expect(side).toContain("向きごとに1つだけ");
-    expect(side).toContain("全部はこの一覧で読めます");
+    expect(side).toContain("名前の下に");
+    expect(side).toContain("全部はこの一覧か、線を押して読めます");
   });
 
   /**
-   * 置き場の無い線の文字は省く（2026-10-04、相手30人前後で重なって読めなかった）。
+   * 置き場の無い人の名前の下は省く（相手30人前後で、どこにも置けない人が出る）。
    * 省いたことを黙らない——数を「つながっている人」の説明に添える
    */
-  it("線の文字を省いたときは、その数を「つながっている人」に添える", () => {
+  it("名前の下の文字を省いたときは、その数を「つながっている人」に添える", () => {
     const side = script.slice(script.indexOf("function renderSide"), script.indexOf("function sideRow"));
-    expect(side).toContain("data.layout.omittedEdgeLabels");
-    expect(side).toContain("文字を省いています");
+    expect(side).toContain("data.layout.omittedCaptions");
+    expect(side).toContain("人は名前の下の関係を省いています");
+    expect(side).not.toContain("omittedEdgeLabels");
   });
 
   it("「この図について」に、呼び合いの見方がある", () => {

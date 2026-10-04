@@ -45,9 +45,17 @@ function loadPageLogic(): PageLogic {
   expect(start, "ページに判定の区間の印がある").toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
   const code = html.slice(start, end);
+  // 判定は GitHub の共通の部品（github-common の区間。原稿エディターのページと同じもの）も使う
+  const commonStart = html.indexOf("/* github-common:start */");
+  const commonEnd = html.indexOf("/* github-common:end */");
+  expect(commonStart, "ページに GitHub の共通の区間がある").toBeGreaterThan(-1);
+  const common = html.slice(commonStart, commonEnd);
   // 区間は画面（document）に触らないこと。触ると試験の外でしか動かない写しになる
   expect(code).not.toMatch(/document\.|window\./);
-  return vm.runInNewContext(`${code}\nOutboxLogic`, { Date, Map, Array, JSON, Math, Object, Number, String, isNaN }) as PageLogic;
+  expect(common).not.toMatch(/document\.|window\./);
+  return vm.runInNewContext(`${common}\n${code}\nOutboxLogic`, {
+    Date, Map, Array, JSON, Math, Object, Number, String, isNaN, Promise, Uint8Array, TextDecoder, atob,
+  }) as PageLogic;
 }
 
 const page = loadPageLogic();

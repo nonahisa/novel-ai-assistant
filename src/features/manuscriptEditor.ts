@@ -292,7 +292,17 @@ interface OpenManuscript {
    * 画面からの知らせと、こちらで記録する時刻を持つ。**本文は持たない。**
    */
   status: ManuscriptEditorStatusState;
+  /**
+   * この画面から届いた便を、文書へ当て終わるまで待つ（設計書5.5.19）。
+   *
+   * 「すべて同期」が記録の前に保存するとき、**画面にだけある字を残したまま
+   * 保存しない**ために使う。［保存］と同じ見張り（`AppliedTracker`）で待つ。
+   */
+  settle(timeoutMs: number): Promise<ManuscriptSettle>;
 }
+
+/** 画面の便を待った結果（`settleOpenManuscripts`） */
+export type ManuscriptSettle = "applied" | "rejected" | "timeout" | "unsent";
 
 /** 原稿エディター1つぶんの、窓の札に載せる状態（設計書6.25.9・6.87.17） */
 interface ManuscriptEditorStatusState {
@@ -732,6 +742,36 @@ export function refreshManuscriptCounts(filePath: string): void {
  */
 export function refreshAllManuscriptCounts(): void {
   for (const open of openManuscripts.values()) open.refreshCounts();
+}
+
+/**
+ * 開いている原稿エディターのうち、`isTarget` が選んだ原稿の便を当て終わるまで
+ * 待ち、**当て終わらなかった面だけ**を返す（設計書5.5.19。作者の裁定 2026-10-04）。
+ *
+ * 「すべて同期」が記録の前に保存するときに使う。画面は打った字を待たずに
+ * 送る（変換中を除く）ので、ふだんは届いた便を当て終えるのを待てば、
+ * 画面の字は文書に入っている。**書き込みはここではしない**——保存は
+ * 呼び出し側が VS Code の文書の保存（`TextDocument.save()`）で行う。
+ *
+ * 変換中（確定前）の字は、画面がまだ送っていないので待ちようがない。
+ */
+export async function settleOpenManuscripts(
+  isTarget: (filePath: string) => boolean,
+  timeoutMs: number = SAVE_APPLY_WAIT_MS
+): Promise<Array<{ filePath: string; result: Exclude<ManuscriptSettle, "applied"> }>> {
+  const faces = openManuscripts
+    .values()
+    .filter((open) => isTarget(fromUri(open.document.uri)));
+  const results = await Promise.all(
+    faces.map(async (open) => ({
+      filePath: fromUri(open.document.uri),
+      result: await open.settle(timeoutMs),
+    }))
+  );
+  return results.filter(
+    (one): one is { filePath: string; result: Exclude<ManuscriptSettle, "applied"> } =>
+      one.result !== "applied"
+  );
 }
 
 /**
@@ -1994,6 +2034,8 @@ export class ManuscriptEditorProvider
      * `whenReady` と同じ事情）。
      */
     let webviewReady = false;
+    /** この画面から届いた便のうち、いちばん新しい番号（同期の前の待ち。設計書5.5.19） */
+    let lastReceivedSeq = 0;
     let pendingReveal: { line: number; caret: RevealCaret } | undefined;
     /** 読み上げの列を頼まれたが、画面がまだ動き出していない（設計書6.42） */
     let pendingReading = false;
@@ -2074,6 +2116,18 @@ export class ManuscriptEditorProvider
         applyAppearanceNow(next);
       },
       status: {} as ManuscriptEditorStatusState,
+      settle: async (timeoutMs: number): Promise<ManuscriptSettle> => {
+        // 画面が「届いていない」と知らせている（受け手を失った等）。待っても入らない
+        if (entry.status.report?.unsent) return "unsent";
+        if (lastReceivedSeq === 0) return "applied";
+        /*
+          「入れられなかった」（rejected）は、画面が見回りで送り直す。通れば
+          見張りは「入った」へ戻るので、ここで止めても行き止まりにはならない。
+          重なって画面の控え（［戻す］の帯）へ回した便は「入った」扱いで返る
+          ——どちらを採るかは作者が帯で選ぶもので、同期では待たない
+        */
+        return appliedTracker.waitFor(lastReceivedSeq, timeoutMs);
+      },
     };
     /*
       **同じ原稿の2枚目なら、記録に残す**（6.25.11）。2026-10-03 の実機では、
@@ -2488,6 +2542,10 @@ export class ManuscriptEditorProvider
           break;
 
         case "edit":
+          // 番号の付いた便は、同期の前の待ち（settle）がこの番号まで待つ
+          if (typeof message.seq === "number" && message.seq > lastReceivedSeq) {
+            lastReceivedSeq = message.seq;
+          }
           await queueEdit({
             text: message.text,
             ...(typeof message.seq === "number" ? { seq: message.seq } : {}),

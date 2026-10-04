@@ -101,6 +101,7 @@ export const REMEMBERABLE_CONFIRMS: readonly RememberableConfirm[] = [
   },
   { id: "ai.paid.measureContext", label: "AIチューニング：料金の確認" },
   { id: "ai.paid.notationAdvice", label: "表記ゆれの相談：料金の確認" },
+  { id: "ai.paid.findingAdvice", label: "推敲の指摘の相談：料金の確認" },
   { id: "ai.paid.chatSettingsSync", label: "相談を資料へ反映：料金の確認" },
   { id: "ai.paid.proposalPanel", label: "指摘の再チェック：料金の確認" },
   { id: "ai.paid.settingsPanel", label: "設定資料パネルのAI：料金の確認" },

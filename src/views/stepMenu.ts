@@ -401,11 +401,21 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
   /**
    * 作品ごとのタイプ（設計書6.70.1）。
    *
-   * **描画は同期なので、読めた結果をここへ置く。** まだ読んでいない
-   * あいだは絞らない（全部出す）ので、遅れて絞り込まれることはあっても、
-   * 出るはずの操作が最初から見えない状態にはならない。
+   * 読めた結果をここへ置く。最上段の `getChildren` は読み終えるまで待って
+   * から答えるが、`getParent`・`findActionNode` は同期で答えるので、
+   * そちらは読めていないあいだは絞らない（全部出す）。
    */
   private readonly formats = new Map<string, WorkFormatKey | undefined>();
+
+  /**
+   * 読み込み中の作品。**同じ作品の読み込みを1本にまとめる。**
+   *
+   * 最上段の描画・`getParent`・案内（設計書6.104）が続けて呼ぶと、
+   * まとめなければ同じプロットを何度も読む。`invalidateFormats` で
+   * 捨てたあとに古い読み込みが終わっても、ここから消えていれば
+   * 結果を置かない（タイプを変えた直後に前のタイプへ戻るのを防ぐ）。
+   */
+  private readonly loading = new Map<string, Promise<void>>();
 
   /**
    * 作品ごとの種類（設計書6.109.7）。形式と同じ時に読み、同じ時に捨てる。
@@ -436,15 +446,42 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
   }
 
   /**
-   * 選んでいる作品のタイプを読み込む。読めたら表示を作り直す。
+   * 選んでいる作品のタイプと種類を読み込む。**読み終えても知らせ（fire）は出さない。**
    *
-   * **描画の途中では待てない**（`getTreeItem` も `getChildren` も同期の
-   * 形で答える）ので、読み込みは背後で走らせ、結果が出てから並べ直す。
-   * 作品を選び直したときと、ツリーを描くときに呼ぶ。
+   * 2026-10-04 まではここで読み終えるたびに木全体の作り直しを知らせていた。
+   * 読み込みは最上段の描画（`getChildren`）の途中で始まるので、設定が
+   * 温まっていて読み込みが速いと（原稿エディターで話を開いたあと）、
+   * 知らせが VS Code 本体の描画の 1ms 後に届く。すると本体の木が止まり、
+   * 段を開いても中身を取りに来なくなった（矢印は開いた向きなのに行が出ない。
+   * 拡張機能側には子の要求も開閉の知らせも届いていなかった。
+   * `test/e2e/panelFocusStability.test.ts`）。
+   *
+   * いまは最上段の `getChildren` がこれを待ってから答えるので、
+   * 読み終えたことを別に知らせる必要が無い。作品を選び直したとき・
+   * タイプを変えたときは、呼ぶ側（`selectWork`・`invalidateFormats`）が
+   * 作り直しを知らせ、次の描画がここを通る。
    */
-  async loadSelectedFormat(): Promise<void> {
+  loadSelectedFormat(): Promise<void> {
     const work = this.selectedWork();
-    if (!work || this.formats.has(work.id)) return;
+    if (!work || this.formats.has(work.id)) return Promise.resolve();
+    const pending = this.loading.get(work.id);
+    if (pending) return pending;
+    const run = this.readTypeOf(work).then(({ format, kind }) => {
+      // 読み込み中に捨てられていたら、古い結果を置かない
+      if (this.loading.get(work.id) !== run) return;
+      this.loading.delete(work.id);
+      // **形式と種類を同じ時に置く。** 形式だけ先に置くと、その間の描画で
+      // 種類の絞り込みが抜けた並びが一瞬出る
+      this.kinds.set(work.id, kind);
+      this.formats.set(work.id, format);
+    });
+    this.loading.set(work.id, run);
+    return run;
+  }
+
+  private async readTypeOf(
+    work: WorkEntry
+  ): Promise<{ format?: WorkFormatKey; kind?: WorkKindKey }> {
     let format: WorkFormatKey | undefined;
     try {
       format = await this.loadFormat(work);
@@ -459,11 +496,7 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
       // 種類も、読めなければ絞らない
       kind = undefined;
     }
-    // **形式と種類を同じ時に置く。** 形式だけ先に置くと、その間の描画で
-    // 種類の絞り込みが抜けた並びが一瞬出る
-    this.kinds.set(work.id, kind);
-    this.formats.set(work.id, format);
-    this._onDidChangeTreeData.fire();
+    return { format, kind };
   }
 
   /**
@@ -471,15 +504,15 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
    *
    * 何に効くか決まっていないのに項目を消すと、初めて使う人には
    * 「入れたのに機能が足りない」に見える。
+   *
+   * **ここでは読み込みを始めない。** 同期で答える `getParent`・
+   * `findActionNode` から呼ばれるので、読めていなければ絞らずに答える
+   * （読み込みは最上段の描画が待って行う）。
    */
   visibleSteps(): readonly Step[] {
     const work = this.selectedWork();
     if (!work) return STEP_MENU;
-    if (!this.formats.has(work.id)) {
-      // まだ読んでいない。背後で読ませて、いまは全部出す
-      void this.loadSelectedFormat();
-      return STEP_MENU;
-    }
+    if (!this.formats.has(work.id)) return STEP_MENU;
     return filterSteps(
       STEP_MENU,
       workTypeColumn(this.formats.get(work.id)),
@@ -525,9 +558,11 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
     if (workId) {
       this.formats.delete(workId);
       this.kinds.delete(workId);
+      this.loading.delete(workId);
     } else {
       this.formats.clear();
       this.kinds.clear();
+      this.loading.clear();
     }
     this.refresh();
   }
@@ -598,8 +633,12 @@ export class StepMenuProvider implements vscode.TreeDataProvider<StepNode> {
     return undefined;
   }
 
-  getChildren(node?: StepNode): StepNode[] {
+  async getChildren(node?: StepNode): Promise<StepNode[]> {
     if (!node) {
+      // **作品のタイプを読み終えてから並べる。** 読み終えてから
+      // 「並べ直して」と知らせる形は、本体の描画と重なって木を止めた
+      // （`loadSelectedFormat` の説明）
+      await this.loadSelectedFormat();
       // **最上段は作品選択窓。** 下に並ぶものが何に効くのかを、
       // 押す前に見えるようにする
       return [

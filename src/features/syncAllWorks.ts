@@ -41,6 +41,8 @@ import {
 import { useSyncLog } from "./syncLog";
 import { withCancellableProgress } from "../views/progress";
 import type { GitSyncMonitorLike } from "./gitSyncStub";
+import type { SyncPresave } from "./presaveBeforeSync";
+import { describePresaveFailures } from "../core/syncPresave";
 
 /**
  * 作品をすべて同期する（設計書5.5.14）。
@@ -89,6 +91,15 @@ export interface SyncAllDeps {
    * 返ってきた関数を呼ぶと、まとめて出す
    */
   batchFileNotices?: () => () => Promise<void>;
+  /**
+   * 記録の前に、作品の中の未保存を保存する（設計書5.5.19。作者の裁定 2026-10-04）。
+   *
+   * 呼び出し側（`extension.ts`・`handoffSync.ts`）が `createSyncPresave()` を渡す。
+   * 渡さなければ保存しない（これまでどおり）——ここで VS Code の文書と原稿
+   * エディターを直に引くと、手順の試験（`syncAllWorksRun.test.ts`）が
+   * 原稿エディターの大きな部品まで読み込むことになるため
+   */
+  presave?: SyncPresave;
 }
 
 export async function syncAllWorks(deps: SyncAllDeps): Promise<void> {
@@ -223,6 +234,18 @@ async function collectStates(
       status.kind === "not_a_repo" || status.kind === "git_missing"
         ? 0
         : await countTrackableFiles(root, deps.run ?? runGit);
+    /*
+      **未保存の文書も数える**（設計書5.5.19）。変更が未保存の文書にしか
+      無い置き場は、ディスクの件数だけ見ると「同期は取れています」で
+      飛ばされ、記録の前の保存までたどり着かない。数えるのは、置き場の根
+      ではなく**登録された作品のフォルダーの中**だけ
+    */
+    const unsaved =
+      deps.presave &&
+      status.kind !== "not_a_repo" &&
+      status.kind !== "git_missing"
+        ? deps.presave.countUnsaved(target.works.map((work) => work.folderPath))
+        : 0;
 
     states.push({
       folderPath: root,
@@ -230,6 +253,7 @@ async function collectStates(
       works: target.works,
       status,
       trackable,
+      ...(unsaved > 0 ? { unsaved } : {}),
     });
   }
   return states;
@@ -289,6 +313,38 @@ async function runPlan(
   */
   await useSyncLog(cwd, plan.target.works);
 
+  /*
+    **記録の前に、作品の中の未保存を保存する**（設計書5.5.19。作者の裁定
+    2026-10-04「記録の前に自動で保存する」）。
+
+    **早送りの取り込みより前に置く。** 取り込みは書きかけを退避して戻す。
+    先に保存しておけば、新しい中身が退避に入って戻ってくる。取り込みの
+    あとに保存すると、取り込みで変わったファイルへ VS Code の古い下書きを
+    重ねることになり、保存が「ディスクの方が新しい」で通らないか、
+    取り込んだ中身を潰す。
+
+    **保存できなかった話があれば、この置き場は止める**（記録も取り込みも
+    送信もしない）。黙って古い中身を記録しない。他の置き場は続ける。
+  */
+  let trackable = plan.target.trackable;
+  if (plan.commit && deps.presave) {
+    const folders = plan.target.works.map((work) => work.folderPath);
+    const presaved = await deps.presave.saveInside(folders);
+    if (presaved.failures.length > 0) {
+      outcome.error = describePresaveFailures(presaved.failures);
+      logFailure("すべて同期：記録の前の保存ができなかった", {
+        置き場: name,
+        詳細: outcome.error,
+      });
+      return outcome;
+    }
+    if (presaved.saved > 0) {
+      logStep(`すべて同期：記録の前に保存した（${name}／${presaved.saved}件）`);
+      // 記録の説明に書く件数は、保存したあとのディスクで数え直す
+      trackable = await countTrackableFiles(cwd, run);
+    }
+  }
+
   // **記録より先に、早送りできるうちに取り込む**（設計書5.5.18）。
   // 遅れたまま記録すると、その1件で分岐が生まれる。単独の「同期」と
   // 同じ関数を呼ぶ（`gitSync.ts` の `pullBeforeRecording`。写しを作らない）
@@ -329,7 +385,7 @@ async function runPlan(
         "記録する人の名前が未設定です。「GitHubと同期」から一度設定してください。";
       return outcome;
     }
-    const message = syncCommitMessage(plan.target.trackable, new Date());
+    const message = syncCommitMessage(trackable, new Date());
     const next = afterCommit(await commitAll(cwd, message, run));
     if (next.stop) {
       outcome.error = next.error;
@@ -341,7 +397,7 @@ async function runPlan(
     outcome.committed = next.committed;
     logStep(
       next.committed
-        ? `すべて同期：記録（${name}／${plan.target.trackable}件）`
+        ? `すべて同期：記録（${name}／${trackable}件）`
         : `すべて同期：記録するものは無かった（${name}）`
     );
   }
@@ -386,7 +442,20 @@ async function runPlan(
     }
   }
 
-  if (plan.push) {
+  /*
+    **送るものが無いなら送らない**（設計書5.5.19）。未保存しか無かった置き場は
+    「記録するから送る」で送信が立つが、保存した中身がディスクと同じなら
+    記録は空になり、送るものも無い。そこで送ると「送信 1か所」と報告して
+    しまう。先へ進んでいた分（ahead）・合わせた分があれば今までどおり送る
+  */
+  const status = plan.target.status;
+  const nothingToSend =
+    status.kind === "tracked" &&
+    status.ahead === 0 &&
+    plan.commit &&
+    !outcome.committed &&
+    !outcome.folded;
+  if (plan.push && !nothingToSend) {
     const result = await push(cwd, deps.run);
     if (!result.ok) {
       outcome.error = `送信できませんでした: ${result.detail ?? "（詳細なし）"}`;

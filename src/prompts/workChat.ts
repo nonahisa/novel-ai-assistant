@@ -116,7 +116,10 @@ import { closeTruncatedJson } from "../core/truncatedResponse";
 // 3.26: ターゲットシートで狙いを選んでいれば、その層の名前と作者の理由を
 //       【作者が狙う読者】として毎回2〜3行足す（設計書6.108.6 の⑤。0.98.8）。
 //       読者像が無くても狙いがあれば「まだ決めていません」の1行は送らない
-export const WORK_CHAT_VERSION = "3.26";
+// 3.27: ［AIに相談］の依頼文に、一文の前後の段落（【前の段落】【後ろの段落】）と
+//       話の題を添えた（作者の報告 2026-10-04。素のエディターを開かずに材料を
+//       渡す形へ直したとき）。システム指示は変えていない
+export const WORK_CHAT_VERSION = "3.27";
 
 /** ［AIに相談］の依頼文に入れる一文・指摘の長さの上限（長い合本の行で膨らませない） */
 export const FINDING_ADVICE_QUOTE_MAX_CHARS = 300;
@@ -143,6 +146,15 @@ export function buildFindingAdviceQuestion(input: {
   quote: string;
   /** 指摘の中身（「視点：…」など） */
   finding: string;
+  /**
+   * 一文の前と後ろの段落（空の行とメモの行を飛ばした本文。無ければ省く）。
+   *
+   * 推敲の指摘（視点・係り受け・つながり）は、前後を見ないと直し方を
+   * 決められない。相談の抜粋にも本文は入るが、合本の長い話では指摘の行が
+   * 抜粋の外へ出ることがあるので、ここで1段落ずつ添える
+   */
+  before?: string;
+  after?: string;
 }): string {
   const clip = (text: string): string => {
     const flat = text.replace(/\s*\n\s*/g, " ").trim();
@@ -152,7 +164,9 @@ export function buildFindingAdviceQuestion(input: {
   };
   return [
     `${input.place}の一文に、推敲の指摘がありました。どう直すとよいか、助言をください。`,
+    ...(input.before?.trim() ? [`【前の段落】${clip(input.before)}`] : []),
     `【本文の一文】${clip(input.quote)}`,
+    ...(input.after?.trim() ? [`【後ろの段落】${clip(input.after)}`] : []),
     `【指摘】${clip(input.finding)}`,
     "私の文体を尊重して、直すかどうかの判断材料を短く示してください（見出しや表は使わず、5行ほどで）。",
     "書き換えた本文の全体は作らないでください。言い回しの例を挙げるなら、その箇所だけを短く。",

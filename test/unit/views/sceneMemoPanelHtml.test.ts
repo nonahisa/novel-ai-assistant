@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildSceneMemoPanelHtml } from "../../../src/views/sceneMemoPanelHtml";
+import { noteToneClasses } from "../../../src/core/sceneMemoRows";
 
 /**
  * シーンメモのパネルの骨組み（設計書6.40.4）。
@@ -154,10 +155,39 @@ describe("シーンメモのパネルのHTML", () => {
   });
 
   /**
-   * **指摘の印は1色**（種類で分けない。色の値は `core/sceneMemoRows.ts`）。
-   * 分けたいのは「作者が書いたか、機械が挙げたか」だけである。
+   * **種類ごとに色を分ける**（作者の要望 2026-10-04「推敲や誤字脱字等で色分けして
+   * ください」「表示ジャンルすべてです」。0.98.9 までは指摘は1色だった）。
+   * 色の値は `core/sceneMemoRows.ts`（指摘）と `core/sceneMemo.ts`（付箋）にだけ置き、
+   * 画面は印の名前ごとの規則を表から組んで、CSS変数で受ける
    */
-  it("AIの指摘の色もCSS変数で受ける", () => {
-    expect(html).toContain("var(--novelai-memo-ai");
+  it("付箋と指摘の種類すべてに、色の規則がある", () => {
+    for (const name of noteToneClasses()) {
+      expect(html, `${name} の規則が無い`).toContain(
+        `.tone-${name} { --note-color: var(--novelai-${name}); }`
+      );
+    }
+    // 1色だったころの印は残っていない
+    expect(html).not.toContain("memo-ai");
+  });
+
+  it("行の左端の帯・札・丸が、種類の色で塗られる", () => {
+    expect(html).toMatch(/\.memo \{[^}]*border-left: 3px solid var\(--note-color/);
+    expect(html).toMatch(/\.tag \{[^}]*var\(--note-color/);
+    expect(html).toMatch(/\.dot \{[^}]*var\(--note-color/);
+    // 行に印を付ける（色だけで見分けさせないので、札の字はそのまま出す）
+    const row = html.slice(html.indexOf("function renderRow("));
+    expect(row).toContain('"tone-" + ');
+    expect(row).toContain("escapeHtml(row.tag)");
+  });
+
+  it("絞り込みの選び口の項目にも、同じ色の印を付ける", () => {
+    const tags = html.slice(html.indexOf("function renderTags("));
+    expect(tags).toContain("data.tagTones");
+    expect(tags).toContain('class="tone-');
+  });
+
+  it("色は16進で画面に書かない（値は拡張機能から届く）", () => {
+    const style = html.slice(html.indexOf("<style"), html.indexOf("</style>"));
+    expect(style).not.toMatch(/--note-color[^;]*#[0-9a-fA-F]{3,6}/);
   });
 });

@@ -92,6 +92,17 @@ const LEGACY_RESTORED: ReadonlyMap<
   ["deviation", { shape: "contradiction", panelCategory: "プロット逸脱" }],
 ]);
 
+/**
+ * 残す分類名の一覧（校正・メモパネルの選び口に並びうる指摘の種類）。
+ *
+ * **色の表の取りこぼしの見張りに使う**（`test/unit/core/noteTones.test.ts`）。
+ * 検知を足して上の表へ1行足したのに、色の表（`core/sceneMemoRows.ts` の
+ * `FINDING_TONES`）へ足し忘れると、そこで落ちる
+ */
+export function recordedFindingLabels(): string[] {
+  return [...RECORDED.keys()];
+}
+
 /** その分類の指摘を残すか。**残さないなら `undefined`** */
 export function findingCategoryOf(
   panelCategory: string
