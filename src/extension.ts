@@ -122,6 +122,7 @@ import {
   pruneFindings,
   pruneFindingsAcrossWorks,
 } from "./features/pruneFindings";
+import { importOutboxInbox } from "./features/importOutboxInbox";
 import { renameWork } from "./features/renameWork";
 import { exportImeDictionary } from "./features/exportImeDictionary";
 import { exportPdf } from "./features/exportPdf";
@@ -4807,6 +4808,19 @@ export async function activate(
       if (target === "all") return pruneFindingsAcrossWorks(works);
       return pruneFindings(target);
     }),
+    /*
+      出先の原稿箱を取り込む（設計書6.115「GitHub 経由」）。同期のあとの知らせの
+      ［取り込む］は作品を渡して呼ぶ（どの作品かは知らせが名指ししている）
+    */
+    registerCommand(
+      "novelai.importOutboxInbox",
+      async (node?: WorkNode | { type: "work"; work: WorkEntry }) => {
+        const work =
+          node && node.type === "work" ? node.work : await resolveWork(undefined, registry);
+        if (!work) return;
+        await importOutboxInbox(work);
+      }
+    ),
     registerCommand("novelai.nextSceneMemo", async (node?: WorkNode) => {
       const work = await resolveWork(node, registry);
       if (!work) return;

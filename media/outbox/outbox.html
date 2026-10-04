@@ -63,6 +63,8 @@ body {
   flex-direction: column;
   gap: 20px;
 }
+/* hidden を付けた要素は、display を指定した組でも必ず隠す（空の知らせの枠が残っていた） */
+[hidden] { display: none !important; }
 .stack { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 header { display: flex; flex-direction: column; gap: 4px; }
 h1 {
@@ -79,6 +81,36 @@ h1 {
   border-radius: 8px;
   padding: 12px 14px;
   font-size: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.notice.trouble { border-color: var(--reject); }
+.notice ol { margin: 0; padding-left: 1.4em; }
+.picker {
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.picker .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.picker label { display: flex; flex-direction: column; gap: 2px; font-size: 0.8rem; color: var(--muted); min-width: 0; }
+.picker label.grow { flex: 1 1 12rem; }
+.picker label.branch { flex: 0 1 7rem; }
+input[type="text"], select {
+  font: inherit;
+  font-size: 0.95rem;
+  min-height: 44px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0 10px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
 }
 .episode {
   background: var(--sheet);
@@ -95,6 +127,7 @@ h1 {
   font-size: 1.15rem;
   font-weight: 600;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 .episode .file { font-family: var(--font-data); font-size: 0.75rem; color: var(--muted); overflow-wrap: anywhere; }
 .finding {
@@ -134,7 +167,7 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.fix { border-color: var(--fix); color: var(--fix); }
 button.reject { border-color: var(--reject); color: var(--reject); }
 button:disabled { opacity: 0.5; cursor: default; }
-button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .memo { display: flex; flex-direction: column; gap: 6px; }
 textarea {
   font: inherit;
@@ -156,6 +189,7 @@ textarea {
   border: 1px dashed var(--rule);
   overflow-wrap: anywhere;
 }
+.record.sent { border-style: solid; }
 .record.imported { background: var(--done-ground); color: var(--muted); border-style: solid; }
 .record .who { font-size: 0.75rem; color: var(--muted); }
 .empty { color: var(--muted); font-size: 0.9rem; }
@@ -183,7 +217,7 @@ textarea {
 }
 .answer.waiting { color: var(--muted); }
 .ask-note { color: var(--muted); font-size: 0.85rem; }
-/* 取り込み待ちの帯：押した時点で保存されていることを、いつも見える所で伝える */
+/* 送る帯：まだ送っていない数と［パソコンへ送る］を、いつも見える所に */
 .tray {
   position: sticky;
   top: 0;
@@ -194,15 +228,17 @@ textarea {
   padding: 10px 14px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
+.tray-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
 .tray-count { font-weight: 600; }
+.tray-sent { color: var(--muted); font-size: 0.85rem; }
 .tray-flash { color: var(--fix); font-weight: 600; }
 .tray-how { color: var(--muted); font-size: 0.85rem; }
 /* 字の差：原文で消える字に取り消し線、直したあとで足す字に下地 */
 del.gone { color: var(--reject); text-decoration: line-through; text-decoration-thickness: 2px; }
 ins.added { color: var(--fix); background: var(--mark); text-decoration: none; font-weight: 600; padding: 0 1px; }
-/* 持ち主が決めた指摘は灰色に。取り込み済みはさらに薄く */
+/* 決めた指摘は灰色に。取り込み済みはさらに薄く */
 .finding.decided {
   background: var(--done-ground);
   border-radius: 6px;
@@ -232,52 +268,484 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
   min-width: 0;
 }
 /* 開閉の三角を残す（display を変えると消える）。親指で押せる高さは上下の余白で取る */
-.context summary { cursor: pointer; font-family: var(--font-body); font-size: 0.85rem; padding-block: 8px; color: var(--accent); }
+.context summary, .guide summary { cursor: pointer; font-family: var(--font-body); font-size: 0.85rem; padding-block: 8px; color: var(--accent); }
 .ctx-lines { display: flex; flex-direction: column; padding-left: 10px; border-left: 2px solid var(--rule); }
 .ctx-line { white-space: pre-wrap; overflow-wrap: anywhere; min-height: 1.4em; }
 .ctx-line.in-range { color: var(--ink); border-left: 2px solid var(--accent); margin-left: -12px; padding-left: 10px; }
 .ctx-note { font-family: var(--font-body); font-size: 0.75rem; color: var(--muted); }
+.guide { font-size: 0.85rem; color: var(--muted); }
+.guide ol { margin: 4px 0 0; padding-left: 1.4em; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
 <div class="wrap">
   <header>
     <h1 id="title">出先の原稿箱</h1>
-    <div class="sub" id="sent">パソコンから送られた話と校正の指摘が、ここに並びます。</div>
+    <div class="sub" id="sent">GitHub の作品から、校正の指摘を読んで並べます。</div>
   </header>
+  <section class="picker" aria-label="作品の選び方">
+    <div class="row">
+      <label class="grow">リポジトリ（持ち主/名前）
+        <input type="text" id="repo" placeholder="nonahisa/novels" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </label>
+      <label class="branch">枝
+        <input type="text" id="branch" placeholder="main" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </label>
+      <button type="button" id="load" class="primary">読む</button>
+    </div>
+    <label id="workRow" hidden>作品（最近更新のあった順）
+      <select id="work"></select>
+    </label>
+    <details class="guide">
+      <summary>GitHub のつなぎ方</summary>
+      <ol>
+        <li>claude.ai の設定 → コネクターで、カスタムコネクター「GitHub」（https://api.githubcopilot.com/mcp/）を足す</li>
+        <li>GitHub の Settings → Applications → Installed GitHub Apps で「Claude Github MCP Connector」の Configure を開く（まだなら、コネクターをつなぐときの案内からインストールする）</li>
+        <li>Repository access の Only select repositories に、作品のリポジトリを足して保存する（インストールのあとにエラーの画面が出ても、気にしなくて大丈夫です）</li>
+        <li>このページに戻り、リポジトリの名前を入れて［読む］を押す。最初の1回は、GitHub を使ってよいかを聞かれます</li>
+      </ol>
+    </details>
+  </section>
   <div class="tray" id="tray" role="status" aria-live="polite">
-    <div class="tray-count" id="trayCount">取り込み待ちはありません</div>
+    <div class="tray-row">
+      <div class="tray-count" id="trayCount">まだ送っていないものはありません</div>
+      <button type="button" id="send" class="primary" disabled>パソコンへ送る</button>
+    </div>
+    <div class="tray-sent" id="traySent" hidden></div>
     <div class="tray-flash" id="trayFlash" hidden></div>
-    <div class="tray-how">押したもの・残したメモは、もう保存されています。原稿に入れるには、パソコンの Claude Code に「原稿箱の分を入れて」と頼んでください。</div>
+    <div class="tray-how">押したもの・残したメモは、まずこの画面に保存されます。［パソコンへ送る］で GitHub の作品へ送り、パソコンで同期してから［原稿箱を取り込む］を押すと、原稿に入ります。</div>
   </div>
   <div class="notice" id="status">読み込んでいます…</div>
   <main id="list" class="stack"></main>
 </div>
 
 <script>
+/* outbox-logic:start */
+/*
+  出先の原稿箱の判定の写し（統合小説執筆環境の設計書6.115「GitHub 経由」）。
+
+  **なぜ写すか**：このページは GitHub から作品の指摘の置き場（.aiwriter/findings.jsonl）と
+  本文を読み、提案パネルで「未処理」の指摘だけを並べる。パソコンが送ってくれるのを待たない
+  （パソコンの電源が切れていてもタブレットだけで使う）ため、判定をページの中で行う。
+
+  **写した元**（どれも拡張機能の src/ にある。形を変えたら、ここも直す）
+  - parseFindingLines・resolveFindings・isFindingExpired … models/finding.ts
+  - findingRestoreOf の表（RECORDED・LEGACY_RESTORED） … core/findingSource.ts
+  - relocateQuote・narrowByContext・matchesNeighbor … core/relocateQuote.ts（normalizeForComparison は core/groundedEvidence.ts）
+  - findingPanelStateOf … core/findingPanelState.ts
+  - outboxContextOf・outboxRangeOf … core/outboxContext.ts
+  - 未処理の並べ方と欄（label・canFix） … mcp/tools/outbox.ts の outboxPack
+
+  **ずれても原稿は壊れない**：取り込み（core/outboxImport.ts）が同じ判定をパソコンでやり直し、
+  合わないものは理由をつけて断る。同じ見本で同じ結果になることは
+  test/unit/cross/outboxPageLogic.test.ts が見張る。
+*/
+var OutboxLogic = (function () {
+  var CONTEXT_CHARS = 2000;
+  var CONTEXT_NEIGHBOR_LINES = 2;
+  var CONTEXT_MIN_CHARS = 4;
+  var DEFAULT_RETENTION_DAYS = 3;
+  var CATEGORIES = ["typo", "notation", "proofread", "contradiction", "deviation", "other"];
+  var RECORDED = {
+    "誤字脱字": "item",
+    "表記ゆれ": "item",
+    "推敲": "item",
+    "矛盾": "contradiction",
+    "矛盾（事実の照合）": "contradiction",
+    "プロット逸脱": "contradiction"
+  };
+  var LEGACY = {
+    typo: { shape: "item", panelCategory: "誤字脱字" },
+    notation: { shape: "item", panelCategory: "表記ゆれ" },
+    proofread: { shape: "item", panelCategory: "推敲" },
+    contradiction: { shape: "contradiction", panelCategory: "矛盾" },
+    deviation: { shape: "contradiction", panelCategory: "プロット逸脱" }
+  };
+
+  function str(value) { return typeof value === "string" ? value : ""; }
+  function chars(text) { return Array.from(text); }
+
+  /* ── models/finding.ts ── */
+  function toLine(value) {
+    if (typeof value !== "object" || value === null) return null;
+    if (value.kind === "finding") {
+      var id = str(value.id);
+      var file = str(value.file);
+      var original = str(value.original);
+      if (!id || !file || !original) return null;
+      var compared;
+      if (typeof value.compared === "object" && value.compared !== null) {
+        var left = str(value.compared.left);
+        var right = str(value.compared.right);
+        if (left || right) compared = { note: str(value.compared.note) };
+      }
+      return {
+        kind: "finding",
+        id: id,
+        time: str(value.time),
+        file: file,
+        hintLine: typeof value.hintLine === "number" ? value.hintLine : 0,
+        original: original,
+        target: str(value.target),
+        suggestion: str(value.suggestion),
+        before: str(value.before),
+        after: str(value.after),
+        message: str(value.message),
+        category: typeof value.category === "string" && CATEGORIES.indexOf(value.category) >= 0 ? value.category : "other",
+        label: str(value.label),
+        compared: compared
+      };
+    }
+    if (value.kind === "decision") {
+      var findingId = str(value.findingId);
+      var status = value.status;
+      if (!findingId || (status !== "accepted" && status !== "dismissed" && status !== "pending")) return null;
+      return { kind: "decision", findingId: findingId, time: str(value.time), status: status };
+    }
+    return null;
+  }
+
+  function parseFindingLines(text) {
+    var lines = [];
+    String(text || "").split(/\r?\n/).forEach(function (raw) {
+      var line = raw.trim();
+      if (!line) return;
+      if (/^(<<<<<<<|=======|>>>>>>>)/.test(line)) return;
+      try {
+        var parsed = toLine(JSON.parse(line));
+        if (parsed) lines.push(parsed);
+      } catch (error) {
+        // 壊れた行は捨てる（同期の競合で1行が壊れても、無事な指摘は見せる）
+      }
+    });
+    return lines;
+  }
+
+  function isNewer(candidate, current) {
+    var left = Date.parse(candidate);
+    var right = Date.parse(current);
+    if (isNaN(left)) return false;
+    if (isNaN(right)) return true;
+    return left > right;
+  }
+
+  function resolveFindings(lines) {
+    var findings = new Map();
+    var decisions = new Map();
+    lines.forEach(function (line) {
+      if (line.kind === "finding") { findings.set(line.id, line); return; }
+      var existing = decisions.get(line.findingId);
+      if (!existing || !isNewer(existing.time, line.time)) decisions.set(line.findingId, line);
+    });
+    var views = [];
+    findings.forEach(function (finding) {
+      var decision = decisions.get(finding.id);
+      views.push(Object.assign({}, finding, { status: decision ? decision.status : "pending" }));
+    });
+    return views;
+  }
+
+  function isFindingExpired(time, retentionDays, now) {
+    if (!(retentionDays > 0)) return false;
+    var created = Date.parse(time);
+    if (isNaN(created)) return false;
+    var elapsed = now.getTime() - created;
+    if (elapsed < 0) return false;
+    return elapsed > retentionDays * 24 * 60 * 60 * 1000;
+  }
+
+  /* ── core/findingSource.ts ── */
+  function restoreOf(finding) {
+    var label = finding.label || "";
+    if (label && Object.prototype.hasOwnProperty.call(RECORDED, label)) {
+      return { shape: RECORDED[label], panelCategory: label };
+    }
+    return Object.prototype.hasOwnProperty.call(LEGACY, finding.category) ? LEGACY[finding.category] : null;
+  }
+
+  /* ── core/relocateQuote.ts ── */
+  function normalize(text) {
+    return text.replace(/<0x[0-9A-Fa-f]{2}>/gu, "").replace(/[\s　]/gu, "");
+  }
+  function firstMeaningfulLine(quote) {
+    var parts = quote.split(/\r\n|\r|\n/u);
+    for (var i = 0; i < parts.length; i++) {
+      var n = normalize(parts[i]);
+      if (n.length > 0) return n;
+    }
+    return undefined;
+  }
+  function lastMeaningfulLine(quote) {
+    var parts = quote.split(/\r\n|\r|\n/u);
+    for (var i = parts.length - 1; i >= 0; i--) {
+      var n = normalize(parts[i]);
+      if (n.length > 0) return n;
+    }
+    return undefined;
+  }
+  function matchesNeighbor(lines, index, step, needle) {
+    for (var at = index + step; at >= 0 && at < lines.length; at += step) {
+      var n = normalize(lines[at]);
+      if (n.length === 0) continue;
+      if (n === needle) return true;
+      if (needle.length >= CONTEXT_MIN_CHARS && n.indexOf(needle) >= 0) return true;
+      return n.length >= CONTEXT_MIN_CHARS && needle.indexOf(n) >= 0;
+    }
+    return false;
+  }
+  function narrowByContext(lines, hits, before, after) {
+    var b = lastMeaningfulLine(before || "");
+    var a = firstMeaningfulLine(after || "");
+    if (!b && !a) return hits;
+    var bestScore = 0;
+    var best = [];
+    hits.forEach(function (line) {
+      var score = 0;
+      if (b && matchesNeighbor(lines, line - 1, -1, b)) score += 1;
+      if (a && matchesNeighbor(lines, line - 1, 1, a)) score += 1;
+      if (score > bestScore) { bestScore = score; best = [line]; }
+      else if (score === bestScore && score > 0) best.push(line);
+    });
+    return best.length > 0 ? best : hits;
+  }
+  function relocateQuote(text, quote, hintLine, before, after) {
+    var needle = firstMeaningfulLine(quote);
+    if (!needle) return undefined;
+    var lines = text.split(/\r\n|\r|\n/u);
+    var hits = [];
+    for (var i = 0; i < lines.length; i++) {
+      if (normalize(lines[i]).indexOf(needle) >= 0) hits.push(i + 1);
+    }
+    if (hits.length === 0) return undefined;
+    var narrowed = narrowByContext(lines, hits, before, after);
+    return narrowed.reduce(function (best, line) {
+      return Math.abs(line - hintLine) < Math.abs(best - hintLine) ? line : best;
+    });
+  }
+
+  /* ── core/findingPanelState.ts ── */
+  function panelStateOf(finding, text, retentionDays, now) {
+    var hint = finding.hintLine;
+    if (finding.status === "accepted" || finding.status === "dismissed") return { state: finding.status, line: hint };
+    if (!(finding.status === "pending" && !isFindingExpired(finding.time, retentionDays, now))) return { state: "expired", line: hint };
+    if (!restoreOf(finding)) return { state: "unrestorable", line: hint };
+    if (text === undefined) return { state: "unchecked", line: hint };
+    var found = relocateQuote(text, finding.original, finding.hintLine, finding.before, finding.after);
+    if (found === undefined) return { state: "stale", line: hint };
+    return { state: "pending", line: found };
+  }
+
+  /* ── core/outboxContext.ts ── */
+  function clip(text, max) {
+    var list = chars(text);
+    return list.length > max ? list.slice(0, max).join("") + "…" : text;
+  }
+  function rangeOf(finding) {
+    var sources = [finding.message || "", (finding.compared && finding.compared.note) || ""];
+    for (var i = 0; i < sources.length; i++) {
+      var matched = /(\d+)\s*[〜～~]\s*(\d+)\s*行目/u.exec(sources[i]);
+      if (!matched) continue;
+      var start = Number(matched[1]);
+      var end = Number(matched[2]);
+      if (start >= 1 && end >= start) return { start: start, end: end };
+    }
+    return undefined;
+  }
+  function neighborLines(lines, from, step) {
+    var found = [];
+    for (var at = from - 1 + step; at >= 0 && at < lines.length; at += step) {
+      if (lines[at].trim().length === 0) continue;
+      found.push(lines[at]);
+      if (found.length >= CONTEXT_NEIGHBOR_LINES) break;
+    }
+    return found;
+  }
+  function contextOf(text, line, finding) {
+    var all = text.split("\n");
+    var range = rangeOf(finding);
+    var start = line;
+    var end = line;
+    if (range) {
+      var shift = line - finding.hintLine;
+      start = Math.max(1, Math.min(range.start + shift, line));
+      end = Math.min(all.length, Math.max(range.end + shift, line));
+    }
+    var budget = CONTEXT_CHARS;
+    var clipped = false;
+    var rangeClipped = false;
+    var lines = [];
+    for (var at = start; at <= end; at++) {
+      var lineText = all[at - 1] === undefined ? "" : all[at - 1];
+      var size = chars(lineText).length;
+      if (size <= budget) { lines.push(lineText); budget -= size; continue; }
+      lines.push(clip(lineText, budget));
+      budget = 0;
+      clipped = true;
+      rangeClipped = true;
+      break;
+    }
+    var beforeCandidates = neighborLines(all, start, -1);
+    var afterCandidates = neighborLines(all, end, 1);
+    var before = [];
+    var after = [];
+    for (var index = 0; index < CONTEXT_NEIGHBOR_LINES && !clipped; index++) {
+      var pairs = [[beforeCandidates, before, true], [afterCandidates, after, false]];
+      for (var p = 0; p < pairs.length; p++) {
+        var candidate = pairs[p][0][index];
+        if (candidate === undefined || clipped) continue;
+        var csize = chars(candidate).length;
+        var taken = csize <= budget ? candidate : budget > 0 ? clip(candidate, budget) : undefined;
+        if (csize > budget) clipped = true;
+        if (taken === undefined) continue;
+        budget = Math.max(0, budget - csize);
+        if (pairs[p][2]) pairs[p][1].unshift(taken);
+        else pairs[p][1].push(taken);
+      }
+    }
+    return { before: before, lines: lines, startLine: start, after: after, range: range !== undefined, clipped: clipped, rangeClipped: rangeClipped };
+  }
+
+  /* ── ページだけのもの ── */
+
+  // 位置を確かめるために本文を読む必要があるファイル（判断済み・期限切れ・戻し方の無いものは読まない）
+  function candidateFiles(jsonl, retentionDays, now) {
+    var files = [];
+    resolveFindings(parseFindingLines(jsonl)).forEach(function (view) {
+      var st = panelStateOf(view, undefined, retentionDays, now).state;
+      if (st === "unchecked" && files.indexOf(view.file) < 0) files.push(view.file);
+    });
+    return files;
+  }
+
+  // 提案パネルに並ぶ（未処理の）指摘。texts は ファイル → 本文（LF にそろえたもの）
+  function pendingFindings(jsonl, texts, retentionDays, now) {
+    var items = [];
+    resolveFindings(parseFindingLines(jsonl)).forEach(function (view) {
+      var text = Object.prototype.hasOwnProperty.call(texts, view.file) ? texts[view.file] : undefined;
+      var st = panelStateOf(view, text, retentionDays, now);
+      if (st.state !== "pending") return;
+      var restore = restoreOf(view);
+      items.push({
+        id: view.id,
+        file: view.file,
+        line: st.line,
+        label: view.label || (restore ? restore.panelCategory : ""),
+        original: view.original,
+        target: view.target,
+        suggestion: view.suggestion,
+        message: view.message,
+        canFix: !!restore && restore.shape === "item" && view.suggestion !== "",
+        originalClipped: false,
+        context: contextOf(text, st.line, view)
+      });
+    });
+    return items.sort(function (a, b) {
+      return a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line;
+    });
+  }
+
+  // 作品を最後のコミットの新しい順に（時刻の分からない作品は後ろ、同じなら道の順）
+  function sortWorksByRecent(works) {
+    return works.slice().sort(function (a, b) {
+      var x = Date.parse(a.lastCommitAt || "");
+      var y = Date.parse(b.lastCommitAt || "");
+      var xa = isNaN(x) ? -Infinity : x;
+      var ya = isNaN(y) ? -Infinity : y;
+      if (xa !== ya) return ya - xa;
+      return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+    });
+  }
+
+  // 受け取り箱のファイル名。Windows で取り出せない「:」を入れない（20261004T050102Z-tablet.json）
+  function inboxFileName(date, deviceSlug) {
+    var stamp = date.toISOString().replace(/\.\d+Z$/, "Z").replace(/[-:]/g, "");
+    return stamp + "-" + (/^[a-z0-9-]+$/.test(deviceSlug) ? deviceSlug : "device") + ".json";
+  }
+
+  // 本文を拡張機能の空間（LF・BOM なし）へそろえる。比べるのは文字だけで、送るハッシュは GitHub の blob SHA
+  function toLfText(text) {
+    return String(text || "").replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+  }
+
+  /*
+    受け取り箱の中身（拡張機能の core/outboxInbox.ts の parseInboxFile が読む形）。
+    記録は決まった欄だけを写す（この画面だけの欄 work・sent などは送らない）
+  */
+  var INBOX_FORMAT = "novelai-outbox-inbox";
+  var INBOX_VERSION = 1;
+  var RECORD_TEXT_FIELDS = ["at", "device", "episode", "findingId", "verdict", "text", "original", "baseBlobSha"];
+  function buildInbox(records, meta) {
+    return {
+      format: INBOX_FORMAT,
+      version: INBOX_VERSION,
+      sentAt: meta.sentAt,
+      device: meta.device,
+      writer: meta.writer,
+      records: records.map(function (r) {
+        var out = { id: str(r.id), kind: r.kind };
+        RECORD_TEXT_FIELDS.forEach(function (k) {
+          if (typeof r[k] === "string" && r[k]) out[k] = r[k];
+        });
+        if (typeof r.line === "number") out.line = r.line;
+        return out;
+      })
+    };
+  }
+
+  return {
+    DEFAULT_RETENTION_DAYS: DEFAULT_RETENTION_DAYS,
+    parseFindingLines: parseFindingLines,
+    resolveFindings: resolveFindings,
+    panelStateOf: panelStateOf,
+    contextOf: contextOf,
+    candidateFiles: candidateFiles,
+    pendingFindings: pendingFindings,
+    sortWorksByRecent: sortWorksByRecent,
+    inboxFileName: inboxFileName,
+    toLfText: toLfText,
+    buildInbox: buildInbox
+  };
+})();
+/* outbox-logic:end */
+</script>
+
+<script>
 (function () {
   /*
-    出先の原稿箱（統合小説執筆環境の設計書6.115 の段1）。
-    このページは原稿にも資料にも書かない。押すと保管庫の records/ に1件足すだけで、
-    原稿へ入れるのはパソコンの Claude Code（outbox.import）が行う。
-    保管庫の中身は誰でも書ける場所から来るので、文字はすべて textContent で出す。
+    出先の原稿箱（統合小説執筆環境の設計書6.115「GitHub 経由」）。
+    このページは原稿にも資料にも書かない。GitHub の作品から指摘と本文を読んで並べ、
+    押したもの（採否・メモ・自分で直した文）はまずこの画面の保存先（records/<自分のid>/items）に置く。
+    ［パソコンへ送る］で、作品の受け取り箱 .aiwriter/inbox/ に新しいファイルとして送る
+    （既存のファイルは書き換えない）。原稿へ入れるのはパソコンの拡張機能の［原稿箱を取り込む］。
+    外から来た文字はすべて textContent で出す。
   */
+  var GITHUB = "GitHub";
+  var REPO_KEY = "novelai.outbox.repo";
+  var BRANCH_KEY = "novelai.outbox.branch";
+
   var listEl = document.getElementById("list");
   var statusEl = document.getElementById("status");
   var titleEl = document.getElementById("title");
   var sentEl = document.getElementById("sent");
-
+  var repoEl = document.getElementById("repo");
+  var branchEl = document.getElementById("branch");
+  var loadEl = document.getElementById("load");
+  var workRowEl = document.getElementById("workRow");
+  var workEl = document.getElementById("work");
+  var sendEl = document.getElementById("send");
   var trayCountEl = document.getElementById("trayCount");
+  var traySentEl = document.getElementById("traySent");
   var trayFlashEl = document.getElementById("trayFlash");
 
   /*
-    ownerId：作品の持ち主の id（持ち主の判断だけを「決めた状態」として見せる）。
     localAdded：自分が足して、まだ一覧に届いていない記録（押した直後に決めた状態を見せ、
-    二度押しを防ぐ）。sending：いま足している指摘の id
+    二度押しを防ぐ）。sending：いま足している指摘の id。shas：本文のファイル → GitHub の blob SHA
   */
   var state = {
-    db: null, sample: null, myId: null, isOwner: false, ownerId: null,
-    work: null, findings: [], records: [], localAdded: {}, sending: {}, flashUntil: 0
+    db: null, sample: null, mcp: null, myId: null,
+    repo: null, works: [], work: null, episodes: [], shas: {}, findings: [],
+    inboxNames: [], doneNames: [], records: [], localAdded: {}, sending: {}, flashUntil: 0,
+    loading: false, sendingBox: false, pendingSend: null
   };
 
   function el(tag, cls, text) {
@@ -289,11 +757,19 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
 
   function str(value) { return typeof value === "string" ? value : ""; }
 
+  // 保存の読み書きは、使えない画面（非公開の窓など）でも落ちないように包む
+  function remember(key, value) { try { localStorage.setItem(key, value); } catch (error) { /* 覚えられなくても動く */ } }
+  function recall(key) { try { return localStorage.getItem(key) || ""; } catch (error) { return ""; } }
+
   function deviceLabel() {
     var ua = navigator.userAgent || "";
     if (/iPad|Tablet/i.test(ua) || (/Android/i.test(ua) && !/Mobile/i.test(ua))) return "タブレット";
     if (/Mobi|iPhone|Android/i.test(ua)) return "スマホ";
     return "パソコン";
+  }
+  // ファイル名に入れる端末の名前（英字だけ。日本語の名前は git の表示で崩れることがある）
+  function deviceSlug() {
+    return { "タブレット": "tablet", "スマホ": "phone", "パソコン": "pc" }[deviceLabel()] || "device";
   }
 
   function formatTime(iso) {
@@ -305,62 +781,332 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
 
   var VERDICT_LABELS = { fix: "直す", done: "済み", reject: "採らない" };
 
-  function setStatus(text) {
-    statusEl.textContent = text;
-    statusEl.hidden = !text;
+  /*
+    知らせ。trouble は GitHub に届かないときの理由と直し方（作者が次に取れる操作を1つ出す）
+  */
+  function setStatus(text, trouble) {
+    statusEl.textContent = "";
+    statusEl.classList.toggle("trouble", !!trouble);
+    if (!text) { statusEl.hidden = true; return; }
+    statusEl.hidden = false;
+    String(text).split("\n").forEach(function (line) { statusEl.appendChild(el("div", "", line)); });
   }
 
-  // 届いた記録と、自分が足してまだ届いていない記録を合わせる
-  function allRecords() {
-    var seen = {};
-    state.records.forEach(function (r) { seen[str(r.writer) + "/" + str(r.id)] = true; });
-    var extra = Object.keys(state.localAdded).map(function (k) { return state.localAdded[k]; })
-      .filter(function (r) { return !seen[str(r.writer) + "/" + str(r.id)]; });
-    return state.records.concat(extra);
-  }
+  /* ── GitHub を読む・書く ─────────────────────────── */
 
-  function myWaitingCount() {
-    if (!state.myId) return 0;
-    return allRecords().filter(function (r) {
-      return str(r.writer) === state.myId && r.imported !== true;
-    }).length;
+  function isNotFound(error) {
+    if (!error || error.code !== "tool_error") return false;
+    var text = str(error.message);
+    try { text += " " + JSON.stringify(error.result || ""); } catch (e) { /* 読めなくてもよい */ }
+    return /404|not\s*found/i.test(text);
   }
 
   /*
-    取り込み待ちの帯。このページには「送る」ボタンが無く、押した時点で保存されている。
-    それが分かるように、自分の分の取り込み待ちの数をいつも出す（作者の報告 2026-10-04
-    「どうやって送信するかもわからなかったです」）
+    GitHub に届かないときの、理由と直し方。コードごとに直し方が違うので、1つにまとめない
   */
+  function describeGithubError(error, what) {
+    var code = error && error.code;
+    if (code === "server_not_connected" || code === "selection_required" || code === "server_not_found") {
+      return "GitHub のコネクターが見つかりません。claude.ai の設定 → コネクターで、カスタムコネクター「GitHub」を足してください（上の「GitHub のつなぎ方」の1）。";
+    }
+    if (code === "needs_reauth") return "GitHub へのつながりが切れています。claude.ai の設定 → コネクターで、GitHub をつなぎ直してください。";
+    if (code === "not_in_manifest") return "このページで GitHub を使うことが許されていません。ページの権限（右上のメニュー）で GitHub を許してから、［読む］を押してください。";
+    if (code === "blocked_by_policy" || code === "approval_required") return "組織の決まりで、このページから GitHub を使えません。管理している人に確かめてください。";
+    if (code === "not_granted" || code === "capability_disabled" || code === "capability_removed") {
+      return "この画面では GitHub を使えません。claude.ai の Claude アプリかブラウザで開いてください。";
+    }
+    if (isNotFound(error)) {
+      return what === "repo"
+        ? "GitHub のアプリ（Claude Github MCP Connector）に、このリポジトリを許していないようです（名前か枝の打ち間違いでも同じ表示になります）。上の「GitHub のつなぎ方」の2と3で、このリポジトリを足してください。"
+        : "GitHub にファイルが見つかりませんでした（" + what + "）。";
+    }
+    if (code === "server_unavailable" || code === "upstream_error" || code === "rate_limited") {
+      return "GitHub に届きませんでした。少し待ってから［読む］を押してください。";
+    }
+    return "GitHub から読めませんでした（" + str(error && error.message).slice(0, 120) + "）。";
+  }
+
+  function gh(tool, input) {
+    return state.mcp.callTool(GITHUB, tool, input);
+  }
+
+  function refOf() { return "refs/heads/" + state.repo.branch; }
+
+  // 作品の中の道を、リポジトリの根からの道へ
+  function repoPath(work, relative) {
+    return work && work.path ? work.path + "/" + relative : relative;
+  }
+
+  // 1つのファイルの中身。get_file_contents は「SHA の行」と中身を別の塊で返す（resource の text を先に見る）
+  function textOfResult(result) {
+    var blocks = (result && result.content) || [];
+    for (var i = 0; i < blocks.length; i++) {
+      var b = blocks[i];
+      if (b && b.type === "resource" && b.resource) {
+        if (typeof b.resource.text === "string") return b.resource.text;
+        if (typeof b.resource.blob === "string") {
+          var bin = atob(b.resource.blob);
+          var bytes = new Uint8Array(bin.length);
+          for (var j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);
+          return new TextDecoder().decode(bytes);
+        }
+      }
+    }
+    var texts = blocks.filter(function (b) { return b && b.type === "text" && typeof b.text === "string"; })
+      .map(function (b) { return b.text; })
+      .filter(function (t) { return !/^successfully downloaded/i.test(t); });
+    if (texts.length) return texts.join("");
+    return typeof (result && result.payload) === "string" ? result.payload : "";
+  }
+
+  function shaOfResult(result) {
+    var blocks = (result && result.content) || [];
+    for (var i = 0; i < blocks.length; i++) {
+      var m = blocks[i] && typeof blocks[i].text === "string" && /SHA:\s*([0-9a-f]{40})/i.exec(blocks[i].text);
+      if (m) return m[1].toLowerCase();
+    }
+    return "";
+  }
+
+  async function readFile(path) {
+    var result = await gh("get_file_contents", { owner: state.repo.owner, repo: state.repo.name, path: path, ref: refOf() });
+    return { text: textOfResult(result), sha: shaOfResult(result) };
+  }
+
+  // 無いファイルは null（作品でないフォルダー・まだ指摘の無い作品）
+  async function readOptional(path) {
+    try { return await readFile(path); } catch (error) { if (isNotFound(error)) return null; throw error; }
+  }
+
+  async function listDir(path, optional) {
+    try {
+      var result = await gh("get_file_contents", {
+        owner: state.repo.owner, repo: state.repo.name, path: path || "/", ref: refOf(),
+        fields: ["type", "name", "path", "sha"]
+      });
+      return Array.isArray(result.payload) ? result.payload : [];
+    } catch (error) {
+      if (optional && isNotFound(error)) return [];
+      throw error;
+    }
+  }
+
+  // 同時に投げる数を絞って順に読む（GitHub の上限を叩かない）
+  async function eachLimited(items, limit, task) {
+    var results = new Array(items.length);
+    var next = 0;
+    async function worker() {
+      while (next < items.length) {
+        var index = next++;
+        results[index] = await task(items[index], index);
+      }
+    }
+    var workers = [];
+    for (var i = 0; i < Math.min(limit, items.length); i++) workers.push(worker());
+    await Promise.all(workers);
+    return results;
+  }
+
+  /* ── 作品を読む ─────────────────────────── */
+
+  async function loadRepo() {
+    var spec = repoEl.value.trim().replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/i, "").replace(/\/+$/, "");
+    var parts = spec.split("/");
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      setStatus("リポジトリは「持ち主/名前」の形で入れてください（例：nonahisa/novels）。", true);
+      return;
+    }
+    if (!state.mcp) { setStatus(describeGithubError({ code: "not_granted" }), true); return; }
+    var branch = branchEl.value.trim() || "main";
+    state.repo = { owner: parts[0], name: parts[1], branch: branch };
+    remember(REPO_KEY, spec);
+    remember(BRANCH_KEY, branch);
+    state.loading = true;
+    loadEl.disabled = true;
+    setStatus("作品を探しています…");
+    try {
+      var root = await listDir("", false);
+      var dirs = root.filter(function (e) { return e && e.type === "dir" && !/^\./.test(str(e.name)); });
+      var candidates = [];
+      if (root.some(function (e) { return e && e.type === "dir" && e.name === ".aiwriter"; })) candidates.push("");
+      dirs.forEach(function (d) { candidates.push(str(d.path || d.name)); });
+      // 作品の印（.aiwriter/config.json）のあるフォルダーだけ。無いフォルダーは黙って飛ばす
+      var found = await eachLimited(candidates, 4, async function (dir) {
+        var config = await readOptional(repoPath({ path: dir }, ".aiwriter/config.json"));
+        if (!config) return null;
+        var parsed = {};
+        try { parsed = JSON.parse(OutboxLogic.toLfText(config.text)) || {}; } catch (error) { parsed = {}; }
+        return { path: dir, title: str(parsed.workTitle) || dir || state.repo.name, manuscriptDir: str(parsed.manuscriptDir) || "本文", lastCommitAt: "" };
+      });
+      var works = found.filter(Boolean);
+      // 最後のコミットの時刻（作品のフォルダーで絞る）。最近更新のあった作品から開く
+      await eachLimited(works, 4, async function (work) {
+        try {
+          var result = await gh("list_commits", {
+            owner: state.repo.owner, repo: state.repo.name, sha: state.repo.branch,
+            path: work.path || undefined, perPage: 1, fields: ["commit"]
+          });
+          var list = Array.isArray(result.payload) ? result.payload : [];
+          var c = list[0] && list[0].commit;
+          work.lastCommitAt = str(c && ((c.committer && c.committer.date) || (c.author && c.author.date)));
+        } catch (error) {
+          work.lastCommitAt = "";
+        }
+      });
+      state.works = OutboxLogic.sortWorksByRecent(works);
+      workEl.textContent = "";
+      state.works.forEach(function (work, index) {
+        var option = el("option", "", work.title + (work.lastCommitAt ? "（" + formatTime(work.lastCommitAt) + "）" : ""));
+        option.value = String(index);
+        workEl.appendChild(option);
+      });
+      workRowEl.hidden = state.works.length === 0;
+      if (state.works.length === 0) {
+        state.work = null;
+        setStatus("このリポジトリに作品が見つかりませんでした（作品のフォルダーには .aiwriter/config.json があります）。", true);
+        render();
+        return;
+      }
+      // 選び直した作品は覚えない（作者の裁定 2026-10-04：毎回、最近の作品から開く）
+      workEl.value = "0";
+      await loadWork(state.works[0]);
+    } catch (error) {
+      // 前のリポジトリの指摘を出したままにしない（どこを読んでいるのか分からなくなる）
+      state.works = [];
+      state.work = null;
+      state.findings = [];
+      workRowEl.hidden = true;
+      render();
+      setStatus(describeGithubError(error, "repo"), true);
+    } finally {
+      state.loading = false;
+      loadEl.disabled = false;
+    }
+  }
+
+  function isBodyName(name) { return /\.(txt|md)$/i.test(name); }
+
+  async function loadWork(work) {
+    state.work = work;
+    state.findings = [];
+    state.episodes = [];
+    state.shas = {};
+    setStatus("「" + work.title + "」の指摘を読んでいます…");
+    render();
+    try {
+      // 本文の置き場。本文フォルダーが無い・空なら作品の直下（拡張機能と同じ決め方）
+      var manuscript = await listDir(repoPath(work, work.manuscriptDir), true);
+      var bodies = manuscript.filter(function (e) { return e && e.type === "file" && isBodyName(str(e.name)); });
+      var prefix = work.manuscriptDir + "/";
+      if (bodies.length === 0) {
+        bodies = (await listDir(work.path, true)).filter(function (e) { return e && e.type === "file" && isBodyName(str(e.name)); });
+        prefix = "";
+      }
+      state.episodes = bodies.map(function (e) {
+        var file = prefix + str(e.name);
+        state.shas[file] = str(e.sha).toLowerCase();
+        return { file: file, sha: str(e.sha).toLowerCase() };
+      }).sort(function (a, b) { return a.file.localeCompare(b.file, "ja"); });
+
+      var jsonl = await readOptional(repoPath(work, ".aiwriter/findings.jsonl"));
+      var text = jsonl ? jsonl.text : "";
+      var now = new Date();
+      var days = OutboxLogic.DEFAULT_RETENTION_DAYS;
+      var texts = {};
+      await eachLimited(OutboxLogic.candidateFiles(text, days, now), 4, async function (file) {
+        var body = await readOptional(repoPath(work, file));
+        if (!body) return;
+        texts[file] = OutboxLogic.toLfText(body.text);
+        if (body.sha && !state.shas[file]) state.shas[file] = body.sha;
+      });
+      state.findings = OutboxLogic.pendingFindings(text, texts, days, now);
+      await refreshInbox();
+      setStatus(state.findings.length ? "" : "未処理の指摘はありません。話へのメモは下の欄から残せます。");
+    } catch (error) {
+      setStatus(describeGithubError(error, work.title), true);
+    }
+    render();
+  }
+
+  // 受け取り箱と done の名前（送った箱が取り込まれたかを見る）
+  async function refreshInbox() {
+    var work = state.work;
+    if (!work) return;
+    var inbox = await listDir(repoPath(work, ".aiwriter/inbox"), true);
+    var done = await listDir(repoPath(work, ".aiwriter/inbox/done"), true);
+    state.inboxNames = inbox.filter(function (e) { return e && e.type === "file"; }).map(function (e) { return str(e.name); });
+    state.doneNames = done.filter(function (e) { return e && e.type === "file"; }).map(function (e) { return str(e.name); });
+    // 届いたか分からなかった送りが、実は届いていたら印を付ける
+    var pending = state.pendingSend;
+    if (pending && (state.inboxNames.indexOf(pending.name) >= 0 || state.doneNames.indexOf(pending.name) >= 0)) {
+      state.pendingSend = null;
+      await markSent(pending.ids, pending.name);
+    }
+  }
+
+  /* ── 保存（自分の箱）と送る ─────────────────────────── */
+
+  function workKey() {
+    return state.repo && state.work ? state.repo.owner + "/" + state.repo.name + ":" + state.work.path : "";
+  }
+
+  // 届いた記録と、自分が足してまだ届いていない記録を合わせる（いまの作品の分だけ）
+  function allRecords() {
+    var seen = {};
+    state.records.forEach(function (r) { seen[str(r.id)] = true; });
+    var extra = Object.keys(state.localAdded).map(function (k) { return state.localAdded[k]; })
+      .filter(function (r) { return !seen[str(r.id)]; });
+    var key = workKey();
+    return state.records.concat(extra).filter(function (r) { return str(r.work) === key; });
+  }
+
+  // 記録の行き先：まだ送っていない・送った（パソコンの取り込み待ち）・取り込み済み
+  function stageOf(r) {
+    if (r.imported === true) return "imported";
+    if (r.sent !== true) return "unsent";
+    return state.doneNames.indexOf(str(r.sentFile)) >= 0 ? "imported" : "sent";
+  }
+  var STAGE_LABELS = { unsent: "まだ送っていない", sent: "送った・パソコンの取り込み待ち", imported: "取り込み済み" };
+
   function updateTray() {
-    var n = myWaitingCount();
+    var all = allRecords();
+    var unsent = all.filter(function (r) { return stageOf(r) === "unsent"; }).length;
+    var sent = all.filter(function (r) { return stageOf(r) === "sent"; }).length;
+    var imported = all.filter(function (r) { return stageOf(r) === "imported"; }).length;
     trayCountEl.textContent = !state.myId
       ? "読むだけで開いています"
-      : n > 0 ? "取り込み待ち " + n + "件（あなたの分）" : "取り込み待ちはありません";
+      : unsent > 0 ? "まだ送っていない " + unsent + "件" : "まだ送っていないものはありません";
+    var sentParts = [];
+    if (sent > 0) sentParts.push("送った " + sent + "件（パソコンの取り込み待ち）");
+    if (imported > 0) sentParts.push("取り込み済み " + imported + "件");
+    traySentEl.textContent = sentParts.join("・");
+    traySentEl.hidden = sentParts.length === 0;
+    sendEl.disabled = !(state.mcp && state.db && state.myId && state.work && unsent > 0) || state.sendingBox;
+    sendEl.textContent = state.sendingBox ? "送っています…" : unsent > 0 ? "パソコンへ送る（" + unsent + "件）" : "パソコンへ送る";
     var flashing = Date.now() < state.flashUntil;
-    trayFlashEl.textContent = flashing ? "保存しました（取り込み待ち " + n + "件）" : "";
+    trayFlashEl.textContent = flashing ? state.flashText : "";
     trayFlashEl.hidden = !flashing;
   }
 
-  function flashSaved() {
+  function flash(text) {
+    state.flashText = text;
     state.flashUntil = Date.now() + 4000;
     updateTray();
     setTimeout(updateTray, 4100);
   }
 
   async function addRecord(fields, button) {
-    if (!state.db || !state.myId) return false;
-    /*
-      書き手は記録の欄に書かない。**置き場のパス records/<自分のid>/items/ が書き手**で、
-      保管庫の規則（records/{self}）が本人の箱にしか書かせない。取り込みもパスから読む
-    */
+    if (!state.db || !state.myId || !state.work) return false;
     var body = {
       kind: fields.kind,
       at: new Date().toISOString(),
       device: deviceLabel(),
+      work: workKey(),
       episode: fields.episode,
-      baseHash: fields.baseHash,
-      imported: false
+      sent: false
     };
+    // 読んだときの本文の blob SHA。パソコンの本文がその後に変わっていれば、取り込みがメモを断る
+    if (fields.baseBlobSha) body.baseBlobSha = fields.baseBlobSha;
     if (typeof fields.line === "number") body.line = fields.line;
     if (fields.findingId) body.findingId = fields.findingId;
     if (fields.verdict) body.verdict = fields.verdict;
@@ -369,24 +1115,69 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     if (fields.original) body.original = fields.original;
     if (button) button.disabled = true;
     try {
-      // 書き手の箱の目印（一覧を読む側が、箱のある人を records/ から知るため）
-      if (!state.boxMarked) {
-        await state.db.doc("records/" + state.myId).set({ writer: state.myId });
-        state.boxMarked = true;
-      }
       var ref = await state.db.collection("records/" + state.myId + "/items").add(body);
-      if (ref && ref.id) state.localAdded[ref.id] = Object.assign({}, body, { id: ref.id, writer: state.myId });
+      if (ref && ref.id) state.localAdded[ref.id] = Object.assign({}, body, { id: ref.id });
       setStatus("");
-      flashSaved();
+      flash("保存しました（まだ送っていない " + allRecords().filter(function (r) { return stageOf(r) === "unsent"; }).length + "件）");
       return true;
     } catch (error) {
       var code = error && error.code;
       setStatus(code === "quota_exceeded"
-        ? "保存できる量がいっぱいです。パソコンで取り込んでから、取り込み済みの記録を消してください。"
-        : "保存できませんでした。この原稿箱を書ける立場で共有されているか、作者に確かめてください。");
+        ? "保存できる量がいっぱいです。取り込み済みの記録を［取り消す］で消してから、もう一度押してください。"
+        : "保存できませんでした。claude.ai にサインインしているか確かめてください。", true);
       return false;
     } finally {
       if (button) button.disabled = false;
+    }
+  }
+
+  async function markSent(ids, name) {
+    for (var i = 0; i < ids.length; i++) {
+      try {
+        await state.db.doc("records/" + state.myId + "/items/" + ids[i]).update({ sent: true, sentFile: name, sentAt: new Date().toISOString() });
+        if (state.localAdded[ids[i]]) Object.assign(state.localAdded[ids[i]], { sent: true, sentFile: name });
+      } catch (error) {
+        // 印を付け損ねても、次に送り直した分は取り込みが「入れ済み」で返す（記録の id で見分ける）
+      }
+    }
+  }
+
+  /*
+    ［パソコンへ送る］：まだ送っていない自分の記録を、作品の受け取り箱へ新しいファイルとして置く。
+    **書き込みは自分からはやり直さない**——届かなかったと見えても、GitHub には書けていることがある
+    （同じ記録を2度送っても、取り込みは記録の id で「入れ済み」と返すので壊れはしない）
+  */
+  async function sendToPc() {
+    if (state.sendingBox || !state.work || !state.mcp) return;
+    var records = allRecords().filter(function (r) { return stageOf(r) === "unsent"; });
+    if (records.length === 0) return;
+    var name = OutboxLogic.inboxFileName(new Date(), deviceSlug());
+    var box = OutboxLogic.buildInbox(records, { sentAt: new Date().toISOString(), device: deviceLabel(), writer: state.myId });
+    var path = repoPath(state.work, ".aiwriter/inbox/" + name);
+    state.sendingBox = true;
+    updateTray();
+    try {
+      await gh("create_or_update_file", {
+        owner: state.repo.owner, repo: state.repo.name, branch: state.repo.branch, path: path,
+        content: JSON.stringify(box, null, 2) + "\n",
+        message: "原稿箱から送る（" + records.length + "件・" + deviceLabel() + "）"
+      });
+      await markSent(records.map(function (r) { return str(r.id); }), name);
+      state.inboxNames.push(name);
+      setStatus("");
+      flash("送りました（" + records.length + "件）。パソコンで同期して［原稿箱を取り込む］を押すと、原稿に入ります。");
+    } catch (error) {
+      var code = error && error.code;
+      if (code === "server_unavailable" || code === "upstream_error" || code === "cancelled") {
+        // 届いたか分からない。次に読み直したとき、箱が在れば印を付ける
+        state.pendingSend = { name: name, ids: records.map(function (r) { return str(r.id); }) };
+        setStatus("送れたかどうか分かりませんでした。少し待って［読む］で読み直すと、届いていれば「送った」に変わります。変わらなければ、もう一度送ってください。", true);
+      } else {
+        setStatus(describeGithubError(error, "repo"), true);
+      }
+    } finally {
+      state.sendingBox = false;
+      render();
     }
   }
 
@@ -396,16 +1187,10 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     });
   }
 
-  /*
-    その指摘への、持ち主のいちばん新しい判断（採否・自分で直した文）。
-    取り込みも同じ指摘に判断が2件以上あれば、いちばん新しい1件だけを当てる
-  */
-  function ownerDecisionOf(findingId) {
-    if (!state.ownerId) return null;
+  // その指摘への、自分のいちばん新しい判断（採否・自分で直した文）。取り込みも、いちばん新しい1件だけを当てる
+  function decisionOf(findingId) {
     var list = recordsFor(function (r) {
-      return str(r.findingId) === findingId &&
-        str(r.writer) === state.ownerId &&
-        (r.kind === "verdict" || r.kind === "edit");
+      return str(r.findingId) === findingId && (r.kind === "verdict" || r.kind === "edit");
     });
     return list.length ? list[list.length - 1] : null;
   }
@@ -414,9 +1199,9 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     return r.kind === "edit" ? "自分で直した" : (VERDICT_LABELS[str(r.verdict)] || "判断");
   }
 
-  // まだ取り込まれていない自分の記録だけを消す（決め直したいとき）。取り込み済みは消さない
+  // まだ送っていない自分の記録だけを消す（決め直したいとき）。送ったものは GitHub にあるので消さない
   async function cancelRecord(r, button) {
-    if (!state.db || !state.myId || str(r.writer) !== state.myId || r.imported === true) return;
+    if (!state.db || !state.myId || stageOf(r) !== "unsent") return;
     if (button) button.disabled = true;
     try {
       await state.db.doc("records/" + state.myId + "/items/" + str(r.id)).delete();
@@ -424,34 +1209,26 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
       setStatus("");
       render();
     } catch (error) {
-      setStatus("取り消せませんでした。少し待ってからもう一度押してください。");
+      setStatus("取り消せませんでした。少し待ってからもう一度押してください。", true);
       if (button) button.disabled = false;
     }
   }
 
-  /*
-    書き手の名前は引かない（user.profiles を呼ばない）。指摘ごとに呼ぶと、組み直すたびに
-    数百回の問い合わせが重なり、スマホで「応答していません」が続いた（作者の報告 2026-10-04。
-    読み込み1回で308回）。編集部とは共有しない裁定（2026-10-03）なので「自分」か「ほかの人」で足りる
-  */
   function renderRecords(container, records) {
     container.textContent = "";
-    if (records.length === 0) return;
     records.forEach(function (r) {
-      var row = el("div", "record" + (r.imported === true ? " imported" : ""));
+      var stage = stageOf(r);
+      var row = el("div", "record" + (stage === "imported" ? " imported" : stage === "sent" ? " sent" : ""));
       var what = r.kind === "verdict"
         ? "判断：" + (VERDICT_LABELS[str(r.verdict)] || "")
         : r.kind === "edit"
           ? "自分で直した文：" + str(r.text)
           : str(r.text);
       row.appendChild(el("div", "", what));
-      var mine = str(r.writer) === state.myId;
-      var who = mine ? "自分" : "ほかの人";
-      var tail = [who, str(r.device), formatTime(r.at), r.imported === true ? "取り込み済み" : "取り込み待ち"]
-        .filter(Boolean).join("・");
+      var tail = [str(r.device), formatTime(r.at), STAGE_LABELS[stage]].filter(Boolean).join("・");
       var line = el("div", "record-row");
       line.appendChild(el("div", "who", tail));
-      if (mine && r.imported !== true && state.db) {
+      if (stage === "unsent" && state.db) {
         var cancel = el("button", "", "取り消す");
         cancel.type = "button";
         cancel.setAttribute("aria-label", "この記録を取り消す");
@@ -464,8 +1241,8 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
   }
 
   /*
-    保管庫が動くたびに一覧を組み直すので、打ちかけのメモを鍵ごとに控えて戻す
-    （ほかの人の記録が届いただけで、打っている途中の文が消えないように）
+    一覧を組み直すので、打ちかけのメモを鍵ごとに控えて戻す
+    （記録が届いただけで、打っている途中の文が消えないように）
   */
   var drafts = {};
 
@@ -499,8 +1276,7 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
   /*
     原文と直したあとの字の差（字ごとの最長共通部分列）。原文が一文まるごと指摘の対象だと、
     原文と「直すと：」が同じ文に見えて、どこが変わるのか読み取れなかった（作者の報告
-    2026-10-04。違いは「点々と」を消すことだけだった）。
-    返すのは [{type: "same"|"del"|"add", text}]。字は Array.from で数える（サロゲートを割らない）
+    2026-10-04）。返すのは [{type: "same"|"del"|"add", text}]。字は Array.from で数える
   */
   function charDiff(a, b) {
     var x = Array.from(a);
@@ -536,18 +1312,16 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
 
   /*
     原稿の記号（傍点 {{語}}・《《語》》、ルビ {漢字|かな}・｜漢字《かな》）を、画面では記号を外して見せる
-    （作者の指摘 2026-10-04「記号は外して見せてください」）。保存する記録・［自分で直す］の欄は原稿の字のまま
+    （作者の指摘 2026-10-04）。保存する記録・［自分で直す］の欄は原稿の字のまま
   */
   var MARKUP = /\{\{([^{}\n]+)\}\}|《《([^《》\n]+)》》|\{([^{}|\n]+)\|([^{}\n]+)\}|[|｜]([^|｜《》\n]+)《([^《》\n]+)》/g;
 
-  // 記号を外した字だけ（字の差を取るときに使う）
   function plainOf(text) {
     return str(text).replace(MARKUP, function (m, d1, d2, rb1, rt1, rb2) {
       return d1 || d2 || rb1 || rb2 || "";
     });
   }
 
-  // 記号を、点と振り仮名の要素に組み替えて node へ足す
   function appendMarked(node, text) {
     var t = str(text);
     var last = 0;
@@ -569,10 +1343,6 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     return node;
   }
 
-  /*
-    指摘の差を、印を付けて見せられるときだけ返す。修正案が無い・直す語が原文に無い・
-    変わる字が半分を超える（印だらけで読みにくい）ときは null（今までの出し方に戻す）
-  */
   function diffOf(f) {
     var original = plainOf(f.original);
     var target = plainOf(f.target);
@@ -589,7 +1359,6 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     return ops;
   }
 
-  // 原文の側：消える字に取り消し線（足す字は出さない）
   function diffQuoteNode(ops) {
     var node = el("div", "quote");
     ops.forEach(function (o) {
@@ -599,7 +1368,6 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     return node;
   }
 
-  // 直したあとの側：足す字に下地（消える字は出さない）
   function diffAfterNode(ops) {
     var to = el("div", "fixto", "直すと：");
     var span = el("span", "quote");
@@ -625,9 +1393,7 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
 
   /*
     指摘の前後の文（作者の報告 2026-10-04「『た』が4文続いている場合などは、前後がわからないと
-    修正できません」）。パソコンが送った context（前後の中身のある行・範囲の全行）を薄い字で出す。
-    範囲の行は地の色と左の線で分ける。長いときは畳んで［前後を見る］で開く（開いたかは指摘ごとに
-    控え、組み直しで閉じない）。記号は appendMarked で外す（保存する記録は原稿の字のまま）
+    修正できません」）。範囲の行は地の色と左の線で分ける。長いときは畳んで［前後を見る］で開く
   */
   var CONTEXT_FOLD_CHARS = 160;
   var CONTEXT_FOLD_LINES = 4;
@@ -636,10 +1402,9 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
   function contextOf(f) {
     var c = f && f.context;
     if (!c || typeof c !== "object") return null;
-    var lines = Array.isArray(c.lines) ? c.lines.map(str) : [];
     return {
       before: Array.isArray(c.before) ? c.before.map(str) : [],
-      lines: lines,
+      lines: Array.isArray(c.lines) ? c.lines.map(str) : [],
       after: Array.isArray(c.after) ? c.after.map(str) : [],
       startLine: typeof c.startLine === "number" ? c.startLine : null,
       range: c.range === true,
@@ -648,17 +1413,13 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     };
   }
 
-  // 範囲の行の見出し（「29〜35行目」）。範囲でなければ空
   function rangeLabelOf(f) {
     var c = contextOf(f);
     if (!c || !c.range || c.startLine === null || c.lines.length < 2) return "";
     return c.startLine + "〜" + (c.startLine + c.lines.length - 1) + "行目";
   }
 
-  /*
-    範囲を［自分で直す］に使える指摘なら、範囲の全行（改行つき）を返す。使えなければ null。
-    切った範囲（rangeClipped）は使わない——切れた範囲を直して送ると、取り込みが一字違わず探せない
-  */
+  // 範囲を［自分で直す］に使える指摘なら、範囲の全行（改行つき）。切った範囲は使わない
   function rangeTextOf(f) {
     var c = contextOf(f);
     if (!c || !c.range || c.lines.length < 2 || c.rangeClipped) return null;
@@ -678,7 +1439,6 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     c.lines.forEach(function (t) { add(t, true); });
     c.after.forEach(function (t) { add(t, false); });
     if (c.clipped) box.appendChild(el("div", "ctx-note", "長いので途中で切っています。"));
-
     var all = c.before.concat(c.lines, c.after);
     var size = Array.from(all.join("")).length;
     var long = size > CONTEXT_FOLD_CHARS || all.length > CONTEXT_FOLD_LINES;
@@ -697,10 +1457,9 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
   }
 
   /*
-    ［自分で直す］（作者の裁定 2026-10-04「取り込みでそのまま当てる」）。原文の一文を
-    初めから入れた欄で作者が書き直し、［この文で直す］で記録を1件足す。原稿へ入るのは
-    パソコンで取り込んだときで、原文がパソコンの本文に一字違わず1か所だけあるときだけ。
-    開いているか・注意書きは指摘ごとに控え、打ちかけの文は drafts に控える（組み直しで消さない）
+    ［自分で直す］（作者の裁定 2026-10-04「取り込みでそのまま当てる」）。原文（範囲の指摘は範囲の全行）を
+    初めから入れた欄で書き直し、［この文で直す］で記録を1件足す。原稿へ入るのはパソコンで取り込んだときで、
+    原文がパソコンの本文に一字違わず1か所だけあるときだけ
   */
   var edits = {};
 
@@ -713,11 +1472,6 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     var id = str(f.id);
     var s = editState(id);
     var key = "d:" + id;
-    /*
-      範囲の指摘（語尾単調の「29〜35行目」など）は、範囲の全行を改行つきで欄に入れ、その全行を
-      original として添える。行を足す・減らす直しもできる（範囲の外の行は送らない）。
-      取り込みは、範囲の全行がパソコンの本文に一字違わず1か所だけあるときだけ置き換える
-    */
     var multi = rangeTextOf(f) !== null;
     var original = multi ? rangeTextOf(f) : str(f.original);
     var wrap = el("div", "edit");
@@ -752,7 +1506,6 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     function say(text) { s.note = text; note.textContent = text; note.hidden = !text; }
     go.addEventListener("click", async function () {
       var text = area.value;
-      // 空の文・元と同じ文は送らない。1文の直しは改行を入れない（取り込みは1行の中の直しだけを入れる）
       if (!text.trim()) { say("直した文が空です。"); return; }
       if (!multi && /[\r\n]/.test(text)) { say("改行は入れられません。1行の中で直してください。"); return; }
       if (text === original) { say("元の文と同じです。直したい所を書き換えてください。"); return; }
@@ -782,30 +1535,22 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     return wrap;
   }
 
-  /*
-    組み直しは、続けて来る知らせを1回にまとめる。読み込みの直後は works/main・findings・
-    records・書き手の箱ごとの知らせが続けて何度も届き、そのたびに一覧をまるごと組み直していた
-    （試験台で読み込み1回に25回）。次の描画の前に1回だけ組む
-  */
+  // 続けて来る知らせを1回の組み直しにまとめる（スマホで「応答していません」が続いた。2026-10-04）
   var renderQueued = false;
   function scheduleRender() {
     if (renderQueued) return;
     renderQueued = true;
     var run = function () { renderQueued = false; render(); };
-    // 画面が隠れていると requestAnimationFrame は来ないので、短い待ちで代える
     if (typeof requestAnimationFrame === "function" && !document.hidden) requestAnimationFrame(run);
     else setTimeout(run, 50);
   }
 
   /*
     Claude に聞く（設計書6.115 の決まり6）。使った分は見ている人の Claude の枠から減る。
-    答えは保管庫にも原稿にも入れない——［メモに写す］でメモの欄へ写すだけで、
-    残すかどうかは作者が［メモを残す］で決める（作品づくりは材料を並べるまで。下書きは作らない）。
-    一覧は保管庫が動くたびに組み直すので、指摘ごとの聞きかけ・答えはここに控えて戻す
+    答えはどこにも保存しない——［メモに写す］でメモの欄へ写すだけ
   */
   var DEFAULT_QUESTION = "この指摘をどう直すのがよいか、理由と一緒に";
   var asks = {};
-  // 見ている人がこのページに Claude を使わせない・使えない、と分かった印。以後は道を出さない
   var HIDE_CODES = ["not_granted", "sampling_disabled", "not_declared", "capability_disabled", "capability_removed"];
 
   function askState(id) {
@@ -813,10 +1558,6 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     return asks[id];
   }
 
-  /*
-    送るのは、その指摘の原文・対象・修正案・理由と話の題だけ（ページは本文の全体を持っていない）。
-    資料は作品の文と道具の出力なので、指示として読ませない
-  */
   function buildPrompt(f, heading, question) {
     return [
       "あなたは小説の校正の相談相手です。作者が出先で、校正の道具が出した指摘を1件見て、直すかどうか迷っています。",
@@ -831,7 +1572,7 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
       "作者の問い：" + question,
       "",
       "資料",
-      "話の題：" + (heading || "（不明）"),
+      "話：" + (heading || "（不明）"),
       "原文：" + str(f.original),
       "指摘の対象：" + (str(f.target) || "（なし）"),
       "修正案：" + (str(f.suggestion) || "（なし）"),
@@ -839,7 +1580,6 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     ].join("\n");
   }
 
-  // 流れてくる答えのたびに一覧全体を組み直さず、開いている欄だけを今の状態にする
   function paintAsk(id) {
     var s = asks[id];
     var panel = document.querySelector('[data-ask="' + CSS.escape(id) + '"]');
@@ -867,7 +1607,6 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     var s = askState(id);
     if (s.busy || !state.sample) return;
     var question = s.question.trim() || DEFAULT_QUESTION;
-    // やめた呼び出しの印は残り続けるので、呼ぶたびに新しく作る
     var ctl = new AbortController();
     s.ctl = ctl;
     s.busy = true;
@@ -879,7 +1618,6 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
       var result = await state.sample(buildPrompt(f, heading, question), {
         signal: ctl.signal,
         onText: function (update) {
-          // text は答えの全体なので、足さずに入れ替える
           s.answer = update.text;
           paintAsk(id);
         }
@@ -888,14 +1626,12 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
       if (result.truncated) s.note = "答えが途中で切れています。問いを短くして聞き直してください。";
     } catch (error) {
       var code = error && error.code;
-      // 断られたときは途中までの答えも取り下げられる。ほかは届いた分を残してよい
       s.answer = code === "refused" ? "" : str(error && error.text);
       if (code === "cancelled") {
         s.note = s.answer ? "途中でやめました。" : "";
       } else if (HIDE_CODES.indexOf(code) >= 0) {
         hide = true;
       } else if (code === "rate_limited") {
-        // 自分からは聞き直さない。押し直すのは作者
         s.note = "いまは Claude に頼めません（頼みが続いたか、使える量の上限です）。少し待ってから［聞く］を押してください。";
       } else if (code === "session_expired") {
         s.note = "claude.ai へのサインインが切れました。サインインし直してから聞いてください。";
@@ -915,7 +1651,6 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     paintAsk(id);
   }
 
-  // 答えをメモの欄へ写すだけ。保管庫へ残すのは作者が［メモを残す］を押したとき
   function copyToMemo(id) {
     var s = asks[id];
     if (!s || !s.answer) return;
@@ -941,7 +1676,6 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     toggle.setAttribute("aria-expanded", s.open ? "true" : "false");
     toggle.addEventListener("click", function () {
       s.open = !s.open;
-      // 閉じたら、聞いている途中の分も止める（見えない所で枠を使い続けない）
       if (!s.open && s.ctl) s.ctl.abort();
       render();
     });
@@ -978,9 +1712,43 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     panel.appendChild(note);
     panel.appendChild(copy);
     wrap.appendChild(panel);
-    // 組み直した直後に、控えてある状態を写す（答えの途中でも消えない）
     paintPanel(panel, s);
     return wrap;
+  }
+
+  function episodeHeading(file) {
+    var name = file.split("/").pop() || file;
+    return name.replace(/\.(txt|md)$/i, "");
+  }
+
+  // ほかの話（指摘の無い話）へのメモ。話を選んで残す
+  var otherEpisode = "";
+  function otherMemoSection(shownFiles) {
+    var rest = state.episodes.filter(function (ep) { return shownFiles.indexOf(ep.file) < 0; });
+    if (rest.length === 0) return null;
+    var section = el("section", "episode");
+    section.appendChild(el("h2", "", "ほかの話へのメモ"));
+    var select = document.createElement("select");
+    select.setAttribute("aria-label", "メモを残す話");
+    rest.forEach(function (ep) {
+      var option = el("option", "", episodeHeading(ep.file));
+      option.value = ep.file;
+      select.appendChild(option);
+    });
+    if (!rest.some(function (ep) { return ep.file === otherEpisode; })) otherEpisode = rest[0].file;
+    select.value = otherEpisode;
+    select.addEventListener("change", function () { otherEpisode = select.value; render(); });
+    section.appendChild(select);
+    var wrap = el("div", "finding");
+    wrap.appendChild(el("div", "label", "この話へのメモ（末尾に入ります）"));
+    wrap.appendChild(memoBox("e:" + otherEpisode, "この話へのメモ", function (text, button) {
+      return addRecord({ kind: "memo", text: text, episode: otherEpisode, baseBlobSha: state.shas[otherEpisode] || "" }, button);
+    }));
+    var recs = el("div", "records");
+    renderRecords(recs, recordsFor(function (r) { return !r.findingId && str(r.episode) === otherEpisode; }));
+    wrap.appendChild(recs);
+    section.appendChild(wrap);
+    return section;
   }
 
   function render() {
@@ -991,57 +1759,32 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     listEl.textContent = "";
     if (!work) {
       titleEl.textContent = "出先の原稿箱";
-      sentEl.textContent = "まだ何も送られていません。パソコンの Claude Code に「最新を送って」と頼むと、話と指摘がここに並びます。";
+      sentEl.textContent = "作品のリポジトリを入れて［読む］を押すと、最近更新のあった作品の指摘が並びます。";
       return;
     }
-    titleEl.textContent = str(work.title) || "出先の原稿箱";
-    sentEl.textContent = work.sentAt ? formatTime(work.sentAt) + " に送られた分です。" : "";
+    titleEl.textContent = work.title || "出先の原稿箱";
+    sentEl.textContent = state.repo.owner + "/" + state.repo.name + (work.path ? "／" + work.path : "") +
+      (work.lastCommitAt ? "（最後の更新 " + formatTime(work.lastCommitAt) + "）" : "");
 
-    var episodes = Array.isArray(work.episodes) ? work.episodes : [];
-    // 合本は同じファイルに複数の話があるので、ファイルごとにまとめる
-    var byFile = [];
-    episodes.forEach(function (ep) {
-      var file = str(ep && ep.file);
-      if (!file) return;
-      var group = byFile.find(function (g) { return g.file === file; });
-      if (!group) { group = { file: file, hash: str(ep.hash), episodes: [] }; byFile.push(group); }
-      group.episodes.push(ep);
-    });
+    var files = [];
+    state.findings.forEach(function (f) { if (files.indexOf(f.file) < 0) files.push(f.file); });
 
-    if (byFile.length === 0) {
-      listEl.appendChild(el("div", "empty", "送られた話がありません。"));
-      return;
-    }
-
-    byFile.forEach(function (group) {
+    files.forEach(function (file) {
       var section = el("section", "episode");
-      var heading = group.episodes.map(function (ep) {
-        // 題が「第1話　…」で始まる作品では、話数を前に足すと「第1話 第1話」と重なる
-        var title = str(ep.title);
-        var no = typeof ep.chapter === "number" && !/^第[0-9０-９一二三四五六七八九十百千]+話/.test(title) ? "第" + ep.chapter + "話" : "";
-        return [no, title].filter(Boolean).join(" ");
-      }).filter(Boolean).join("／");
-      section.appendChild(el("h2", "", heading || group.file));
-      section.appendChild(el("div", "file", group.file));
-
-      var findings = state.findings
-        .filter(function (f) { return str(f.file) === group.file; })
-        .sort(function (a, b) { return (a.line || 0) - (b.line || 0); });
+      var heading = episodeHeading(file);
+      section.appendChild(el("h2", "", heading));
+      section.appendChild(el("div", "file", file));
+      var sha = state.shas[file] || "";
+      var findings = state.findings.filter(function (f) { return f.file === file; });
 
       findings.forEach(function (f) {
         var fid = str(f.id);
-        /*
-          持ち主の判断（採否・自分で直した文）がある指摘は、決めた状態として灰色で見せ、
-          判断のボタンを隠す（作者の報告 2026-10-04：［採らない］を押しても見た目が変わらず、
-          同じ指摘に4回押していた）。決め直すときは、記録の［取り消す］で消す
-        */
-        var decision = ownerDecisionOf(fid);
-        var item = el("div", "finding" + (decision ? " decided" + (decision.imported === true ? " imported" : "") : ""));
+        // 決めた指摘は灰色で見せ、判断のボタンを隠す（決め直すときは、記録の［取り消す］で消す）
+        var decision = decisionOf(fid);
+        var stage = decision ? stageOf(decision) : "";
+        var item = el("div", "finding" + (decision ? " decided" + (stage === "imported" ? " imported" : "") : ""));
         item.appendChild(el("div", "label", [str(f.label), rangeLabelOf(f) || (typeof f.line === "number" ? f.line + "行目" : "")].filter(Boolean).join("・")));
-        if (decision) {
-          item.appendChild(el("div", "decided-state",
-            decisionLabel(decision) + "（" + (decision.imported === true ? "取り込み済み" : "取り込み待ち") + "）"));
-        }
+        if (decision) item.appendChild(el("div", "decided-state", decisionLabel(decision) + "（" + STAGE_LABELS[stage] + "）"));
         var diff = diffOf(f);
         if (diff) {
           item.appendChild(diffQuoteNode(diff));
@@ -1058,9 +1801,8 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
         var ctx = contextNode(f);
         if (ctx) item.appendChild(ctx);
 
-        var base = { episode: group.file, baseHash: group.hash, findingId: fid, line: f.line };
-        // 採否は作品の持ち主だけ（編集部の意見はメモで残す。6.115）。決めた指摘には出さない
-        if (state.isOwner && state.myId && !decision) {
+        var base = { episode: file, baseBlobSha: sha, findingId: fid, line: f.line };
+        if (state.myId && !decision) {
           var buttons = el("div", "buttons");
           var choices = [];
           if (f.canFix === true) choices.push(["fix", "直す", "primary"]);
@@ -1083,36 +1825,36 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
             buttons.appendChild(b);
           });
           item.appendChild(buttons);
-          // 切って送った原文は直せない（取り込みが全文を置き換えて末尾が消えるため）。範囲の指摘は範囲で直す
-          if (rangeTextOf(f) !== null || str(f.original) && f.originalClipped !== true) item.appendChild(editBox(f, base));
+          if (rangeTextOf(f) !== null || (str(f.original) && f.originalClipped !== true)) item.appendChild(editBox(f, base));
         }
-        // Claude に頼めない見え方（未対応の画面・断った人）では、道そのものを出さない
         if (state.sample) item.appendChild(askBox(f, heading));
-        item.appendChild(memoBox("f:" + str(f.id), "この指摘へのメモ", function (text, button) {
+        item.appendChild(memoBox("f:" + fid, "この指摘へのメモ", function (text, button) {
           return addRecord(Object.assign({ kind: "memo", text: text }, base), button);
         }));
         var recs = el("div", "records");
-        renderRecords(recs, recordsFor(function (r) { return str(r.findingId) === str(f.id); }));
+        renderRecords(recs, recordsFor(function (r) { return str(r.findingId) === fid; }));
         item.appendChild(recs);
         section.appendChild(item);
       });
 
       var tail = el("div", "finding");
-      tail.appendChild(el("div", "label", findings.length ? "この話へのメモ（末尾に入ります）" : "指摘はありません。この話へのメモ（末尾に入ります）"));
-      tail.appendChild(memoBox("e:" + group.file, "この話へのメモ", function (text, button) {
-        return addRecord({ kind: "memo", text: text, episode: group.file, baseHash: group.hash }, button);
+      tail.appendChild(el("div", "label", "この話へのメモ（末尾に入ります）"));
+      tail.appendChild(memoBox("e:" + file, "この話へのメモ", function (text, button) {
+        return addRecord({ kind: "memo", text: text, episode: file, baseBlobSha: sha }, button);
       }));
       var tailRecs = el("div", "records");
-      renderRecords(tailRecs, recordsFor(function (r) { return !r.findingId && str(r.episode) === group.file; }));
+      renderRecords(tailRecs, recordsFor(function (r) { return !r.findingId && str(r.episode) === file; }));
       tail.appendChild(tailRecs);
       section.appendChild(tail);
-
       listEl.appendChild(section);
     });
 
-    // 打っていた欄へ、組み直したあとも入力の位置を戻す
+    var other = otherMemoSection(files);
+    if (other) listEl.appendChild(other);
+    if (files.length === 0 && !other) listEl.appendChild(el("div", "empty", "この作品に本文が見つかりませんでした。"));
+
     if (focusedKey) {
-      var again = document.querySelector('textarea[data-key="' + CSS.escape(focusedKey) + '"]');
+      var again = document.querySelector('[data-key="' + CSS.escape(focusedKey) + '"]');
       if (again) {
         var end = again.value.length;
         again.focus();
@@ -1121,99 +1863,52 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     }
   }
 
+  loadEl.addEventListener("click", function () { if (!state.loading) loadRepo(); });
+  repoEl.addEventListener("keydown", function (event) { if (event.key === "Enter" && !state.loading) loadRepo(); });
+  workEl.addEventListener("change", function () {
+    var work = state.works[Number(workEl.value)];
+    if (work) loadWork(work);
+  });
+  sendEl.addEventListener("click", function () { sendToPc(); });
+
   async function start() {
+    repoEl.value = recall(REPO_KEY);
+    branchEl.value = recall(BRANCH_KEY) || "main";
     if (!window.claude || typeof window.claude.use !== "function") {
-      setStatus("この画面では読み書きできません。claude.ai の Claude アプリかブラウザで開いてください。");
+      setStatus("この画面では読み書きできません。claude.ai の Claude アプリかブラウザで開いてください。", true);
       render();
       return;
     }
-    // 使えない能力は約10秒たって null になるので、3つを待ち合わせて遅れを重ねない
-    var caps = await Promise.all([window.claude.use("db"), window.claude.use("user"), window.claude.use("sample")]);
-    var db = caps[0];
+    // 使えない能力は約10秒たって null になるので、まとめて待ち合わせて遅れを重ねない
+    var caps = await Promise.all([
+      window.claude.use("db"), window.claude.use("user"), window.claude.use("sample"), window.claude.use("mcp")
+    ]);
+    state.db = caps[0];
     var user = caps[1];
-    state.db = db;
-    state.user = user;
     state.sample = typeof caps[2] === "function" ? caps[2] : null;
-    if (!db) {
-      setStatus("つながりません。claude.ai にサインインしてから開いてください。");
+    state.mcp = caps[3];
+    state.myId = user ? await user.id() : null;
+    if (!state.db || !state.myId) {
+      setStatus("押したものを保存できません。claude.ai にサインインしてから開いてください。", true);
+    } else {
+      setStatus("");
+      // 自分の箱だけを購読する（このページは誰とも共有しない。6.115）
+      state.db.collection("records/" + state.myId + "/items").onSnapshot(function (snap) {
+        state.records = snap.docs.map(function (d) { return Object.assign({}, d.data() || {}, { id: d.id }); });
+        state.records.forEach(function (r) { delete state.localAdded[str(r.id)]; });
+        scheduleRender();
+      }, function () { setStatus("保存したものが読めなくなりました。開き直してください。", true); });
+    }
+    if (!state.mcp) {
+      setStatus(describeGithubError({ code: "not_granted" }), true);
       render();
       return;
     }
-    state.myId = user ? await user.id() : null;
-    state.isOwner = user ? await user.isOwner() : false;
-    setStatus(state.myId ? "" : "読むだけで開いています（書くには claude.ai にサインインしてください）。");
-
-    /*
-      持ち主の id を works/owner に控える。パソコンの取り込みは、この id の記録だけを
-      採否として入れる。持ち主が開いたときだけ書く
-    */
-    var LOST = "読めなくなりました。開き直してください。";
-    if (state.isOwner && state.myId) {
-      state.ownerId = state.myId;
-      try {
-        var ownerDoc = await db.doc("works/owner").get();
-        var stored = ownerDoc.exists ? ownerDoc.data() : undefined;
-        if (!stored || stored.id !== state.myId) await db.doc("works/owner").set({ id: state.myId });
-      } catch (error) {
-        // 控えられなくても、読み書きはできる。取り込みのときに持ち主が分からないだけ
-      }
-    } else {
-      // 持ち主でない人も、持ち主が決めた指摘を灰色で見られるように id を読んでおく
-      try {
-        var owner = await db.doc("works/owner").get();
-        var data = owner.exists ? owner.data() : undefined;
-        state.ownerId = data && typeof data.id === "string" ? data.id : null;
-      } catch (error) {
-        state.ownerId = null;
-      }
+    if (repoEl.value.trim()) await loadRepo();
+    else {
+      setStatus("作品のリポジトリ（持ち主/名前）を入れて［読む］を押してください。");
+      render();
     }
-
-    // 知らせのたびには組まず、scheduleRender で1回にまとめる
-    db.doc("works/main").onSnapshot(function (snap) {
-      state.work = snap.exists ? snap.data() : null;
-      scheduleRender();
-    }, function () { setStatus(LOST); });
-    db.collection("findings").onSnapshot(function (snap) {
-      state.findings = snap.docs.map(function (d) {
-        var data = d.data() || {};
-        return Object.assign({}, data, { id: str(data.id) || d.id });
-      });
-      scheduleRender();
-    }, function () { setStatus(LOST); });
-    /*
-      記録は書き手ごとの箱（records/<書き手のid>/items/）にある。records/ の目印から
-      箱のある人を知り、箱ごとに1回だけ購読する。書き手はパスから読む（記録の欄は見ない）
-    */
-    var byWriter = {};
-    var watching = {};
-    function collectRecords() {
-      var all = [];
-      Object.keys(byWriter).forEach(function (writer) {
-        byWriter[writer].forEach(function (r) { all.push(r); });
-      });
-      state.records = all;
-      // 届いた記録は、自分が足した控えから外す（同じものを二重に数えない）
-      all.forEach(function (r) {
-        if (str(r.writer) === state.myId) delete state.localAdded[str(r.id)];
-      });
-      scheduleRender();
-    }
-    db.collection("records").onSnapshot(function (snap) {
-      snap.docs.forEach(function (d) {
-        var writer = d.id;
-        if (watching[writer]) return;
-        try {
-          watching[writer] = db.collection("records/" + writer + "/items").onSnapshot(function (items) {
-            byWriter[writer] = items.docs.map(function (item) {
-              return Object.assign({}, item.data() || {}, { id: item.id, writer: writer });
-            });
-            collectRecords();
-          }, function () { setStatus(LOST); });
-        } catch (error) {
-          // パスに使えない id の目印は飛ばす（誰かが置いた壊れた目印で、ページ全体を止めない）
-        }
-      });
-    }, function () { setStatus(LOST); });
   }
 
   render();

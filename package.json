@@ -1257,6 +1257,12 @@
         "icon": "$(trash)"
       },
       {
+        "command": "novelai.importOutboxInbox",
+        "title": "原稿箱を取り込む",
+        "category": "小説執筆",
+        "icon": "$(inbox)"
+      },
+      {
         "command": "novelai.nextSceneMemo",
         "title": "次のメモへ",
         "category": "小説執筆",

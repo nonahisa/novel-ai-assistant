@@ -115,7 +115,7 @@ function findingStatus(id: string): string | undefined {
 }
 
 describe("outbox.pack——送る中身", () => {
-  it("本文の全体は返さない（題・ハッシュ・未処理の指摘の一文と、その前後2行だけ）", () => {
+  it("本文の全体は返さない（題・ハッシュ・未処理の指摘の一文と、その前後2行だけ）", async () => {
     const secret = "この一文は外へ出てはいけない本文である。";
     // 前後に添えるのは中身のある2行まで。3行目より先は出ない
     writeBody(`一行目\n彼はわらった。\n後ろの一。\n\n後ろの二。\n${secret}\n`);
@@ -138,7 +138,7 @@ describe("outbox.pack——送る中身", () => {
     });
   });
 
-  it("判断の済んだ指摘は送らない（提案パネルと同じ状態の決め方）", () => {
+  it("判断の済んだ指摘は送らない（提案パネルと同じ状態の決め方）", async () => {
     writeBody("一行目\n彼はわらった。\n");
     placeFindings([finding()]);
     fs.appendFileSync(
@@ -148,7 +148,7 @@ describe("outbox.pack——送る中身", () => {
     expect(outboxPack({ folder: root }).findings).toHaveLength(0);
   });
 
-  it("雛形の道は実在するものだけを返す（束の隣 → リポジトリの media/outbox の順）", () => {
+  it("雛形の道は実在するものだけを返す（束の隣 → リポジトリの media/outbox の順）", async () => {
     // 束の隣に写してある（製品が保管庫へ写した形）
     const storage = fs.mkdtempSync(nodePath.join(os.tmpdir(), "outbox-storage-"));
     try {
@@ -169,7 +169,7 @@ describe("outbox.pack——送る中身", () => {
     );
   });
 
-  it("作品に触れない記録の重さ：pack は抜粋、import は出さない", () => {
+  it("作品に触れない記録の重さ：pack は抜粋、import は出さない", async () => {
     expect(exposureOf("outbox.pack", { folder: root })).toBe("excerpt");
     expect(exposureOf("outbox.import", { folder: root })).toBe("none");
   });
@@ -179,44 +179,57 @@ describe("ページの雛形——Claude に聞く（決まり6）", () => {
   const repo = nodePath.join(__dirname, "..", "..", "..");
   const page = fs.readFileSync(nodePath.join(repo, "media", "outbox", "outbox.html"), "utf8");
 
-  it("sample が無い見え方では道を出さない・答えは textContent で出す", () => {
+  it("sample が無い見え方では道を出さない・答えは textContent で出す", async () => {
     expect(page).toContain('window.claude.use("sample")');
     expect(page).toContain("if (state.sample) item.appendChild(askBox(");
     // 答えも保管庫の中身も HTML として差し込まない
     expect(page).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
   });
 
-  it("頼み方に、判断材料を示すだけで本文を書き換えないことを書く", () => {
+  it("頼み方に、判断材料を示すだけで本文を書き換えないことを書く", async () => {
     expect(page).toContain("作者の文体を尊重し、直すかどうかの判断材料を短く示す");
     expect(page).toContain("書き換えた本文を作らない");
   });
 
-  it("呼ぶたびに止め口を新しく作り、拒否されたら道を隠す", () => {
+  it("呼ぶたびに止め口を新しく作り、拒否されたら道を隠す", async () => {
     expect(page).toMatch(/var ctl = new AbortController\(\);[\s\S]*signal: ctl\.signal/);
     expect(page).toContain('"not_granted"');
   });
 
-  it("答えは保管庫へ自動では書かない（書くのは［メモを残す］の addRecord だけ）", () => {
-    const askPart = page.slice(page.indexOf("var DEFAULT_QUESTION"), page.indexOf("function render()"));
+  it("答えは保管庫へ自動では書かない（書くのは［メモを残す］の addRecord だけ）", async () => {
+    // Claude に聞く部品の区間（聞く欄を組む askBox まで。そのあとは話の見出しとメモの欄）
+    const askPart = page.slice(page.indexOf("var DEFAULT_QUESTION"), page.indexOf("function episodeHeading"));
     expect(askPart.length).toBeGreaterThan(0);
-    expect(askPart).not.toMatch(/addRecord|\.set\(|\.add\(|\.update\(/);
+    expect(askPart).toContain("function askBox(");
+    expect(askPart).not.toMatch(/addRecord|\.set\(|\.add\(|\.update\(|create_or_update_file/);
   });
 
-  it("書き手の名前を引かない（user.profiles を呼ぶと、スマホで「応答していません」が続いた）", () => {
+  it("書き手の名前を引かない（user.profiles を呼ぶと、スマホで「応答していません」が続いた）", async () => {
     expect(page).not.toMatch(/\.profiles\(/);
   });
 
-  it("保管庫の知らせのたびには組まず、まとめて1回組む（scheduleRender）", () => {
+  it("保管庫の知らせのたびには組まず、まとめて1回組む（scheduleRender）", async () => {
     const start = page.slice(page.indexOf("async function start()"));
     expect(start).toContain("scheduleRender();");
-    // 知らせの受け口の中で render() を直に呼ばない
-    expect(start).not.toMatch(/onSnapshot\([\s\S]*?\{[^}]*\brender\(\);/);
+    // 知らせの受け口（onSnapshot の1つ目の関数）の中で render() を直に呼ばない
+    const handlers = [...start.matchAll(/onSnapshot\(function \(snap\) \{([\s\S]*?)\}, function/g)].map((m) => m[1]);
+    expect(handlers.length).toBeGreaterThan(0);
+    for (const handler of handlers) {
+      expect(handler).toContain("scheduleRender();");
+      expect(handler).not.toMatch(/\brender\(\);/);
+    }
     expect(page).toMatch(/function scheduleRender\(\)[\s\S]*if \(renderQueued\) return;/);
   });
 
-  it("スキルの publish の capabilities に sample がある", () => {
+  it("スキルの publish の capabilities に sample と GitHub の3つの道具がある", async () => {
     const skill = fs.readFileSync(nodePath.join(repo, "docs", "skills", "novel-assist.md"), "utf8");
-    expect(skill).toContain('"user": {}, "sample": {}}');
+    expect(skill).toContain('"user": {}, "sample": {}');
+    expect(skill).toContain(
+      '"mcp": {"servers": [{"server": "GitHub", "tools": ["get_file_contents", "list_commits", "create_or_update_file"]}]}'
+    );
+    // ページが呼ぶ道具は、スキルに並べた3つだけ（manifest に無い道具は呼べない）
+    const called = new Set([...page.matchAll(/gh\("([a-z_]+)"/g)].map((m) => m[1]));
+    expect([...called].sort()).toEqual(["create_or_update_file", "get_file_contents", "list_commits"]);
   });
 });
 
@@ -224,39 +237,44 @@ describe("ページの雛形——決めた状態・自分で直す・取り込�
   const repo = nodePath.join(__dirname, "..", "..", "..");
   const page = fs.readFileSync(nodePath.join(repo, "media", "outbox", "outbox.html"), "utf8");
 
-  it("持ち主の判断がある指摘は灰色にして、判断のボタンと［自分で直す］を出さない", () => {
-    expect(page).toContain("var decision = ownerDecisionOf(fid);");
+  it("判断がある指摘は灰色にして、判断のボタンと［自分で直す］を出さない", async () => {
+    expect(page).toContain("var decision = decisionOf(fid);");
     expect(page).toContain('" decided"');
-    expect(page).toContain("if (state.isOwner && state.myId && !decision) {");
+    expect(page).toContain("if (state.myId && !decision) {");
     // ［自分で直す］も同じ枠の中（決めた指摘には出ない）。切って送った原文には出さない
-    const ownerBlock = page.slice(page.indexOf("if (state.isOwner && state.myId && !decision) {"));
+    const ownerBlock = page.slice(page.indexOf("if (state.myId && !decision) {"));
     expect(ownerBlock.slice(0, ownerBlock.indexOf("if (state.sample)"))).toContain(
-      "f.originalClipped !== true) item.appendChild(editBox(f, base));"
+      "f.originalClipped !== true)) item.appendChild(editBox(f, base));"
     );
   });
 
-  it("押した直後にその指摘のボタンを止め、取り込み前の自分の記録だけを［取り消す］で消せる", () => {
+  it("押した直後にその指摘のボタンを止め、まだ送っていない自分の記録だけを［取り消す］で消せる", async () => {
     expect(page).toMatch(/if \(state\.sending\[fid\]\) return;\s*state\.sending\[fid\] = true;/);
-    expect(page).toMatch(/str\(r\.writer\) !== state\.myId \|\| r\.imported === true\) return;[\s\S]*\.delete\(\)/);
+    // 送ったものは GitHub の受け取り箱にあるので、ページからは消さない
+    expect(page).toMatch(/stageOf\(r\) !== "unsent"\) return;[\s\S]*\.delete\(\)/);
   });
 
-  it("［自分で直す］は空・改行入り・元と同じ文を送らず、原文を添えて edit を足す", () => {
+  it("［自分で直す］は空・改行入り・元と同じ文を送らず、原文を添えて edit を足す", async () => {
     expect(page).toContain('if (!text.trim()) { say("直した文が空です。"); return; }');
     expect(page).toContain("/[\\r\\n]/.test(text))");
     expect(page).toContain("if (text === original)");
     expect(page).toContain('kind: "edit", original: original, text: text');
   });
 
-  it("取り込み待ちの帯がいつも見え、押した時点で保存されていることと頼み方を書く", () => {
+  it("送る帯がいつも見え、送っていない分と送った分を数え分け、原稿へ入る道を書く（GitHub 経由）", async () => {
     expect(page).toMatch(/<div class="tray" id="tray"/);
-    expect(page).toContain("押したもの・残したメモは、もう保存されています。");
-    expect(page).toContain("「原稿箱の分を入れて」と頼んでください");
-    expect(page).toContain('"取り込み待ち " + n + "件（あなたの分）"');
-    expect(page).toContain('"取り込み待ちはありません"');
-    expect(page).toContain('"保存しました（取り込み待ち " + n + "件）"');
+    expect(page).toContain("押したもの・残したメモは、まずこの画面に保存されます。");
+    expect(page).toContain("［原稿箱を取り込む］を押すと、原稿に入ります。");
+    expect(page).toContain('"まだ送っていない " + unsent + "件"');
+    expect(page).toContain('"送った " + sent + "件（パソコンの取り込み待ち）"');
+    expect(page).toContain('"取り込み済み " + imported + "件"');
+    // 送るのは新しいファイルとして（sha を渡さない＝既存のファイルを書き換えない）
+    const send = page.slice(page.indexOf("async function sendToPc()"), page.indexOf("function recordsFor("));
+    expect(send).toContain('gh("create_or_update_file"');
+    expect(send).not.toMatch(/\bsha\s*:/);
   });
 
-  it("画面に出す文に内部の言葉（保管庫・records）を書かない", () => {
+  it("画面に出す文に内部の言葉（保管庫・records）を書かない", async () => {
     // 地の HTML と、setStatus／textContent に渡す文字列だけを見る（コメントは対象外）
     const shown = [
       ...page.matchAll(/setStatus\("([^"]*)"\)/g),
@@ -271,17 +289,17 @@ describe("ページの雛形——決めた状態・自分で直す・取り込�
 });
 
 describe("outbox.import——メモ", () => {
-  it("話の末尾へ // の行として入れる", () => {
+  it("話の末尾へ // の行として入れる", async () => {
     writeBody("一行目\n二行目\n");
-    const result = outboxImport({ folder: root, ownerId: OWNER, records: [memo()] });
+    const result = await outboxImport({ folder: root, ownerId: OWNER, records: [memo()] });
     expect(result.results[0].status).toBe("imported");
     expect(readBytes().toString("utf8")).toBe("一行目\n二行目\n// ここに潮の匂いを足す\n");
   });
 
-  it("指摘に付けたメモは、その指摘の行の上へ入れる", () => {
+  it("指摘に付けたメモは、その指摘の行の上へ入れる", async () => {
     writeBody("一行目\n彼はわらった。\n三行目\n");
     placeFindings([finding()]);
-    const result = outboxImport({
+    const result = await outboxImport({
       folder: root,
       ownerId: OWNER,
       records: [memo({ findingId: "f_typo1", text: "ここは笑顔の描写を足す" })],
@@ -292,28 +310,28 @@ describe("outbox.import——メモ", () => {
     );
   });
 
-  it("持ち主でない人のメモには「編集部：」を付ける", () => {
+  it("持ち主でない人のメモには「編集部：」を付ける", async () => {
     writeBody("一行目\n");
-    outboxImport({ folder: root, ownerId: OWNER, records: [memo({ writer: EDITOR, text: "ここは早い" })] });
+    await outboxImport({ folder: root, ownerId: OWNER, records: [memo({ writer: EDITOR, text: "ここは早い" })] });
     expect(readBytes().toString("utf8")).toBe("一行目\n// 編集部：ここは早い\n");
   });
 
-  it("送ったあとに本文が変わっていれば入れずに断る（原稿は1バイトも変えない）", () => {
+  it("送ったあとに本文が変わっていれば入れずに断る（原稿は1バイトも変えない）", async () => {
     writeBody("一行目\n");
     const stale = memo();
     writeBody("一行目\n作者がパソコンで書き足した\n");
     const before = readBytes();
 
-    const result = outboxImport({ folder: root, ownerId: OWNER, records: [stale] });
+    const result = await outboxImport({ folder: root, ownerId: OWNER, records: [stale] });
 
     expect(result.results[0]).toMatchObject({ status: "refused", reason: BODY_CHANGED_REASON });
     expect(readBytes().equals(before)).toBe(true);
   });
 
-  it("同じ話へ2件入れても、2件目を「本文が変わった」で断らない", () => {
+  it("同じ話へ2件入れても、2件目を「本文が変わった」で断らない", async () => {
     writeBody("一行目\n");
     const base = hashOf();
-    const result = outboxImport({
+    const result = await outboxImport({
       folder: root,
       ownerId: OWNER,
       records: [
@@ -325,25 +343,25 @@ describe("outbox.import——メモ", () => {
     expect(readBytes().toString("utf8")).toBe("一行目\n// 一つ目\n// 二つ目\n");
   });
 
-  it("2度目は入れ済みとして返し、本文へ2度入れない", () => {
+  it("2度目は入れ済みとして返し、本文へ2度入れない", async () => {
     writeBody("一行目\n");
     const record = memo();
-    outboxImport({ folder: root, ownerId: OWNER, records: [record] });
+    await outboxImport({ folder: root, ownerId: OWNER, records: [record] });
     const after = readBytes();
 
-    const second = outboxImport({ folder: root, ownerId: OWNER, records: [record] });
+    const second = await outboxImport({ folder: root, ownerId: OWNER, records: [record] });
 
     expect(second.results[0].status).toBe("already");
     expect(second.alreadyCount).toBe(1);
     expect(readBytes().equals(after)).toBe(true);
   });
 
-  it("Shift_JIS・CRLF・末尾改行なしの本文で、文字コードと改行を保つ", () => {
+  it("Shift_JIS・CRLF・末尾改行なしの本文で、文字コードと改行を保つ", async () => {
     // 「～」は CP932 で別の符号を持つ字。書いていない行の元バイトが残るかを見る
     const original = iconv.encode("一行目～\r\n二行目", "shift_jis");
     writeBody(original);
 
-    const result = outboxImport({ folder: root, ownerId: OWNER, records: [memo({ text: "足す" })] });
+    const result = await outboxImport({ folder: root, ownerId: OWNER, records: [memo({ text: "足す" })] });
 
     expect(result.results[0].status).toBe("imported");
     const expected = Buffer.concat([
@@ -356,10 +374,10 @@ describe("outbox.import——メモ", () => {
     expect(recovery).toHaveLength(1);
   });
 
-  it("本文でないファイルは指させない", () => {
+  it("本文でないファイルは指させない", async () => {
     writeBody("一行目\n");
     fs.writeFileSync(nodePath.join(root, "メモ.json"), "{}");
-    const result = outboxImport({
+    const result = await outboxImport({
       folder: root,
       ownerId: OWNER,
       records: [memo({ episode: "メモ.json", baseHash: decodeBytes(Buffer.from("{}")).hash })],
@@ -370,11 +388,11 @@ describe("outbox.import——メモ", () => {
 });
 
 describe("outbox.import——採否", () => {
-  it("持ち主の［直す］は、提案パネルの［適用］と同じ計算で当てて判断を残す", () => {
+  it("持ち主の［直す］は、提案パネルの［適用］と同じ計算で当てて判断を残す", async () => {
     writeBody("一行目\r\n彼はわらった。\r\n");
     placeFindings([finding()]);
 
-    const result = outboxImport({ folder: root, ownerId: OWNER, records: [verdict()] });
+    const result = await outboxImport({ folder: root, ownerId: OWNER, records: [verdict()] });
 
     expect(result.results[0].status).toBe("imported");
     expect(readBytes().toString("utf8")).toBe("一行目\r\n彼は笑った。\r\n");
@@ -392,12 +410,12 @@ describe("outbox.import——採否", () => {
     });
   });
 
-  it("持ち主でない人の採否は断る（本文も判断も変えない）", () => {
+  it("持ち主でない人の採否は断る（本文も判断も変えない）", async () => {
     writeBody("一行目\n彼はわらった。\n");
     placeFindings([finding()]);
     const before = readBytes();
 
-    const result = outboxImport({
+    const result = await outboxImport({
       folder: root,
       ownerId: OWNER,
       records: [verdict({ writer: EDITOR })],
@@ -408,13 +426,13 @@ describe("outbox.import——採否", () => {
     expect(findingStatus("f_typo1")).toBe("pending");
   });
 
-  it("欄に持ち主の id が書いてあっても、パスが別の人のものなら採否は断る", () => {
+  it("欄に持ち主の id が書いてあっても、パスが別の人のものなら採否は断る", async () => {
     // 編集部が記録の欄 by に持ち主の id を書いて、持ち主の採否に見せかけた形
     writeBody("一行目\n彼はわらった。\n");
     placeFindings([finding()]);
     const before = readBytes();
 
-    const result = outboxImport({
+    const result = await outboxImport({
       folder: root,
       ownerId: OWNER,
       records: [verdict({ writer: EDITOR, by: OWNER })],
@@ -425,10 +443,10 @@ describe("outbox.import——採否", () => {
     expect(findingStatus("f_typo1")).toBe("pending");
   });
 
-  it("同じ文書の id でも、書き手が違えば別の記録として扱う", () => {
+  it("同じ文書の id でも、書き手が違えば別の記録として扱う", async () => {
     writeBody("一行目\n");
     const base = hashOf();
-    const result = outboxImport({
+    const result = await outboxImport({
       folder: root,
       ownerId: OWNER,
       records: [
@@ -443,7 +461,7 @@ describe("outbox.import——採否", () => {
     expect(readBytes().toString("utf8")).toBe("一行目\n// 作者\n// 編集部：編集\n");
   });
 
-  it("［採らない］は退けた、［済み］は採ったとして記録し、本文には触れない", () => {
+  it("［採らない］は退けた、［済み］は採ったとして記録し、本文には触れない", async () => {
     writeBody("一行目\n彼はわらった。\n彼女はないた。\n");
     placeFindings([
       finding(),
@@ -451,7 +469,7 @@ describe("outbox.import——採否", () => {
     ]);
     const before = readBytes();
 
-    const result = outboxImport({
+    const result = await outboxImport({
       folder: root,
       ownerId: OWNER,
       records: [
@@ -466,12 +484,12 @@ describe("outbox.import——採否", () => {
     expect(findingStatus("f_typo2")).toBe("accepted");
   });
 
-  it("メモと［直す］が同じ指摘に付いていても、両方入る（メモが先）", () => {
+  it("メモと［直す］が同じ指摘に付いていても、両方入る（メモが先）", async () => {
     writeBody("一行目\n彼はわらった。\n");
     placeFindings([finding()]);
     const base = hashOf();
 
-    const result = outboxImport({
+    const result = await outboxImport({
       folder: root,
       ownerId: OWNER,
       records: [
@@ -487,7 +505,7 @@ describe("outbox.import——採否", () => {
     expect(readBytes().toString("utf8")).toBe("一行目\n// 表情も\n彼は笑った。\n");
   });
 
-  it("校閲中のファイルへは［直す］を当てない", () => {
+  it("校閲中のファイルへは［直す］を当てない", async () => {
     writeBody("一行目\n彼はわらった。\n");
     placeFindings([finding()]);
     fs.mkdirSync(nodePath.join(root, ".aiwriter", "locks"), { recursive: true });
@@ -497,7 +515,7 @@ describe("outbox.import——採否", () => {
     );
     const before = readBytes();
 
-    const result = outboxImport({ folder: root, ownerId: OWNER, records: [verdict()] });
+    const result = await outboxImport({ folder: root, ownerId: OWNER, records: [verdict()] });
 
     expect(result.results[0].status).toBe("refused");
     expect(readBytes().equals(before)).toBe(true);
@@ -505,7 +523,7 @@ describe("outbox.import——採否", () => {
 });
 
 describe("outbox.pack——自分で直せるか", () => {
-  it("長い原文は切って送り、originalClipped で知らせる（切れた文は自分で直せない）", () => {
+  it("長い原文は切って送り、originalClipped で知らせる（切れた文は自分で直せない）", async () => {
     const long = "あ".repeat(130) + "。";
     writeBody(`一行目\n彼はわらった。\n${long}\n`);
     placeFindings([
@@ -548,11 +566,11 @@ function findingLines(): ReturnType<typeof parseFindingLines> {
 }
 
 describe("outbox.import——自分で直す（edit）", () => {
-  it("原文が1か所だけなら、作者の文に置き換えて元の指摘を「採った」にする", () => {
+  it("原文が1か所だけなら、作者の文に置き換えて元の指摘を「採った」にする", async () => {
     writeBody(`一行目\n部屋の隅。${PROOF.original}誰もいない。\n三行目\n`);
     placeFindings([PROOF]);
 
-    const result = outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
+    const result = await outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
 
     expect(result.results[0]).toMatchObject({ status: "imported" });
     expect(readBytes().toString("utf8")).toBe(`一行目\n部屋の隅。${MINE}誰もいない。\n三行目\n`);
@@ -574,11 +592,11 @@ describe("outbox.import——自分で直す（edit）", () => {
     expect(mine?.producer).toBeUndefined();
   });
 
-  it("足した行から、提案パネルの［戻す］と同じ計算で元の本文へ戻せる", () => {
+  it("足した行から、提案パネルの［戻す］と同じ計算で元の本文へ戻せる", async () => {
     const body = `一行目\n部屋の隅。${PROOF.original}誰もいない。\n三行目\n`;
     writeBody(body);
     placeFindings([PROOF]);
-    outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
+    await outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
 
     // 提案パネルの undoIssue と同じ手順：行の中で直したあとの文脈を探し、直す語へ戻す
     const mine = resolveFindings(findingLines()).find((view) => view.suggestion === MINE)!;
@@ -592,12 +610,12 @@ describe("outbox.import——自分で直す（edit）", () => {
     expect(lines.join("\n")).toBe(body);
   });
 
-  it("原文がパソコンの本文に無ければ断り、本文も判断も変えない", () => {
+  it("原文がパソコンの本文に無ければ断り、本文も判断も変えない", async () => {
     writeBody("一行目\nパソコンで書き直した一文。\n");
     placeFindings([PROOF]);
     const before = readBytes();
 
-    const result = outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
+    const result = await outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
 
     expect(result.results[0].status).toBe("refused");
     expect(result.results[0].reason).toContain("見つかりません");
@@ -605,24 +623,24 @@ describe("outbox.import——自分で直す（edit）", () => {
     expect(findingStatus("f_proof")).toBe("pending");
   });
 
-  it("原文が2か所以上あれば、どこか決められないので断る", () => {
+  it("原文が2か所以上あれば、どこか決められないので断る", async () => {
     writeBody(`一行目\n${PROOF.original}\n${PROOF.original}\n`);
     placeFindings([PROOF]);
     const before = readBytes();
 
-    const result = outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
+    const result = await outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
 
     expect(result.results[0].status).toBe("refused");
     expect(result.results[0].reason).toContain("2か所以上");
     expect(readBytes().equals(before)).toBe(true);
   });
 
-  it("持ち主でない人の直しは断る（欄に持ち主の id を書いても、パスで決まる）", () => {
+  it("持ち主でない人の直しは断る（欄に持ち主の id を書いても、パスで決まる）", async () => {
     writeBody(`一行目\n${PROOF.original}\n`);
     placeFindings([PROOF]);
     const before = readBytes();
 
-    const result = outboxImport({
+    const result = await outboxImport({
       folder: root,
       ownerId: OWNER,
       records: [edit({ writer: EDITOR, by: OWNER })],
@@ -633,31 +651,31 @@ describe("outbox.import——自分で直す（edit）", () => {
     expect(findingStatus("f_proof")).toBe("pending");
   });
 
-  it("2度目は入れ済みとして返し、本文へ2度当てない", () => {
+  it("2度目は入れ済みとして返し、本文へ2度当てない", async () => {
     writeBody(`一行目\n${PROOF.original}\n`);
     placeFindings([PROOF]);
-    outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
+    await outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
     const after = readBytes();
 
-    const second = outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
+    const second = await outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
 
     expect(second.results[0].status).toBe("already");
     expect(readBytes().equals(after)).toBe(true);
   });
 
-  it("Shift_JIS・CRLF・末尾改行なしの本文で、文字コードと改行を保つ", () => {
+  it("Shift_JIS・CRLF・末尾改行なしの本文で、文字コードと改行を保つ", async () => {
     const original = iconv.encode(`一行目～\r\n${PROOF.original}\r\n三行目`, "shift_jis");
     writeBody(original);
     placeFindings([PROOF]);
 
-    const result = outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
+    const result = await outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
 
     expect(result.results[0].status).toBe("imported");
     expect(readBytes().equals(iconv.encode(`一行目～\r\n${MINE}\r\n三行目`, "shift_jis"))).toBe(true);
     expect(fs.readdirSync(nodePath.join(root, "本文", ".novelai-recovery"))).toHaveLength(1);
   });
 
-  it("空の文・改行入り・元と同じ文・置き場と違う原文（切れた原文）は、それぞれの理由で断る", () => {
+  it("空の文・改行入り・元と同じ文・置き場と違う原文（切れた原文）は、それぞれの理由で断る", async () => {
     writeBody(`一行目\n${PROOF.original}\n`);
     placeFindings([PROOF]);
     const before = readBytes();
@@ -668,7 +686,7 @@ describe("outbox.import——自分で直す（edit）", () => {
       [edit({ id: "c", text: PROOF.original }), "同じ"],
       [edit({ id: "d", original: "それを隠すように点々と…" }), "原文と違います"],
     ] as const) {
-      const one = outboxImport({ folder: root, ownerId: OWNER, records: [record] });
+      const one = await outboxImport({ folder: root, ownerId: OWNER, records: [record] });
       expect(one.results[0].status).toBe("refused");
       expect(one.results[0].reason).toContain(words);
     }
@@ -676,7 +694,7 @@ describe("outbox.import——自分で直す（edit）", () => {
     expect(findingStatus("f_proof")).toBe("pending");
   });
 
-  it("校閲中のファイルへは当てない", () => {
+  it("校閲中のファイルへは当てない", async () => {
     writeBody(`一行目\n${PROOF.original}\n`);
     placeFindings([PROOF]);
     fs.mkdirSync(nodePath.join(root, ".aiwriter", "locks"), { recursive: true });
@@ -686,7 +704,7 @@ describe("outbox.import——自分で直す（edit）", () => {
     );
     const before = readBytes();
 
-    const result = outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
+    const result = await outboxImport({ folder: root, ownerId: OWNER, records: [edit()] });
 
     expect(result.results[0].status).toBe("refused");
     expect(readBytes().equals(before)).toBe(true);
@@ -694,12 +712,12 @@ describe("outbox.import——自分で直す（edit）", () => {
 });
 
 describe("outbox.import——同じ指摘に持ち主の判断が重なったとき", () => {
-  it("いちばん新しい1件だけを当て、残りは「重なり」として断る（渡した順ではなく時刻で）", () => {
+  it("いちばん新しい1件だけを当て、残りは「重なり」として断る（渡した順ではなく時刻で）", async () => {
     writeBody("一行目\n彼はわらった。\n");
     placeFindings([finding()]);
     const before = readBytes();
 
-    const result = outboxImport({
+    const result = await outboxImport({
       folder: root,
       ownerId: OWNER,
       records: [
@@ -720,11 +738,11 @@ describe("outbox.import——同じ指摘に持ち主の判断が重なったと
     expect(findingStatus("f_typo1")).toBe("dismissed");
   });
 
-  it("自分で直した文と採否が重なれば、新しいほうを当てる", () => {
+  it("自分で直した文と採否が重なれば、新しいほうを当てる", async () => {
     writeBody(`一行目\n${PROOF.original}\n`);
     placeFindings([PROOF]);
 
-    const result = outboxImport({
+    const result = await outboxImport({
       folder: root,
       ownerId: OWNER,
       records: [
@@ -740,22 +758,22 @@ describe("outbox.import——同じ指摘に持ち主の判断が重なったと
     expect(readBytes().toString("utf8")).toBe(`一行目\n${MINE}\n`);
   });
 
-  it("同じ記録が2度渡されても、重なりとは見なさず1件として入れる", () => {
+  it("同じ記録が2度渡されても、重なりとは見なさず1件として入れる", async () => {
     writeBody("一行目\n彼はわらった。\n");
     placeFindings([finding()]);
 
-    const result = outboxImport({ folder: root, ownerId: OWNER, records: [verdict(), verdict()] });
+    const result = await outboxImport({ folder: root, ownerId: OWNER, records: [verdict(), verdict()] });
 
     expect(result.results.map((item) => [item.id, item.status])).toEqual([["v1", "imported"]]);
     expect(result.refusedCount).toBe(0);
     expect(readBytes().toString("utf8")).toBe("一行目\n彼は笑った。\n");
   });
 
-  it("編集部の採否は重なりに数えない（持ち主の判断を押しのけない）", () => {
+  it("編集部の採否は重なりに数えない（持ち主の判断を押しのけない）", async () => {
     writeBody("一行目\n彼はわらった。\n");
     placeFindings([finding()]);
 
-    const result = outboxImport({
+    const result = await outboxImport({
       folder: root,
       ownerId: OWNER,
       records: [
@@ -806,7 +824,7 @@ const MONOTONY = finding({
 });
 
 describe("outbox.pack——指摘の前後の文と範囲", () => {
-  it("前後の中身のある行を2行ずつ（空行は飛ばす）と、範囲の全行を返す", () => {
+  it("前後の中身のある行を2行ずつ（空行は飛ばす）と、範囲の全行を返す", async () => {
     writeBody(RANGE_BODY);
     placeFindings([MONOTONY]);
 
@@ -823,7 +841,7 @@ describe("outbox.pack——指摘の前後の文と範囲", () => {
     });
   });
 
-  it("本文が上でずれていても、いまの位置から範囲を取る", () => {
+  it("本文が上でずれていても、いまの位置から範囲を取る", async () => {
     writeBody(`足した一行。\n${RANGE_BODY}`);
     placeFindings([MONOTONY]);
 
@@ -834,7 +852,7 @@ describe("outbox.pack——指摘の前後の文と範囲", () => {
     expect(context?.before).toEqual(["前の一。", "前の二。"]);
   });
 
-  it("範囲の無い指摘は、指摘の行とその前後", () => {
+  it("範囲の無い指摘は、指摘の行とその前後", async () => {
     writeBody("前の一。\n彼はわらった。\n後ろの一。\n");
     placeFindings([finding()]);
 
@@ -851,7 +869,7 @@ describe("outbox.pack——指摘の前後の文と範囲", () => {
     });
   });
 
-  it("1指摘あたりの上限を超えたら切って印を付ける（範囲まで切れたら rangeClipped）", () => {
+  it("1指摘あたりの上限を超えたら切って印を付ける（範囲まで切れたら rangeClipped）", async () => {
     const longBefore = "前".repeat(1990);
     writeBody([longBefore, "彼はわらった。", "後ろの一。", ""].join("\n"));
     placeFindings([finding({ hintLine: 2 })]);
@@ -883,11 +901,11 @@ describe("outbox.import——範囲を自分で直す（複数行の edit）", (
     });
   }
 
-  it("範囲の全行を、行数の違う作者の文に置き換える", () => {
+  it("範囲の全行を、行数の違う作者の文に置き換える", async () => {
     writeBody(RANGE_BODY);
     placeFindings([MONOTONY]);
 
-    const result = outboxImport({ folder: root, ownerId: OWNER, records: [rangeEdit()] });
+    const result = await outboxImport({ folder: root, ownerId: OWNER, records: [rangeEdit()] });
 
     expect(result.results[0]).toMatchObject({ status: "imported" });
     expect(readBytes().toString("utf8")).toBe(
@@ -906,23 +924,23 @@ describe("outbox.import——範囲を自分で直す（複数行の edit）", (
     expect(mine?.decision?.note).toBe(AUTHOR_EDIT_NOTE);
   });
 
-  it("行を増やす直しも入れられる", () => {
+  it("行を増やす直しも入れられる", async () => {
     writeBody(RANGE_BODY);
     placeFindings([MONOTONY]);
     const longer = "彼は歩いた。\n足を止める。\n空は青かった。\n\n風が吹く。鳥が鳴いた。";
 
-    const result = outboxImport({ folder: root, ownerId: OWNER, records: [rangeEdit({ text: longer })] });
+    const result = await outboxImport({ folder: root, ownerId: OWNER, records: [rangeEdit({ text: longer })] });
 
     expect(result.results[0].status).toBe("imported");
     expect(readBytes().toString("utf8")).toBe(RANGE_BODY.replace(RANGE_TEXT, longer));
   });
 
-  it("範囲がパソコンの本文に無ければ断り、本文も判断も変えない", () => {
+  it("範囲がパソコンの本文に無ければ断り、本文も判断も変えない", async () => {
     writeBody(RANGE_BODY.replace("空は青かった。", "空は灰色だった。"));
     placeFindings([MONOTONY]);
     const before = readBytes();
 
-    const result = outboxImport({ folder: root, ownerId: OWNER, records: [rangeEdit()] });
+    const result = await outboxImport({ folder: root, ownerId: OWNER, records: [rangeEdit()] });
 
     expect(result.results[0].status).toBe("refused");
     expect(result.results[0].reason).toContain("見つかりません");
@@ -930,24 +948,24 @@ describe("outbox.import——範囲を自分で直す（複数行の edit）", (
     expect(findingStatus("f_mono")).toBe("pending");
   });
 
-  it("範囲が2か所以上あれば断る", () => {
+  it("範囲が2か所以上あれば断る", async () => {
     writeBody(`${RANGE_BODY}${RANGE_TEXT}\n`);
     placeFindings([MONOTONY]);
     const before = readBytes();
 
-    const result = outboxImport({ folder: root, ownerId: OWNER, records: [rangeEdit()] });
+    const result = await outboxImport({ folder: root, ownerId: OWNER, records: [rangeEdit()] });
 
     expect(result.results[0].status).toBe("refused");
     expect(result.results[0].reason).toContain("2か所以上");
     expect(readBytes().equals(before)).toBe(true);
   });
 
-  it("指摘の原文を含まない範囲・行の途中から始まる範囲は断る", () => {
+  it("指摘の原文を含まない範囲・行の途中から始まる範囲は断る", async () => {
     writeBody(RANGE_BODY);
     placeFindings([MONOTONY]);
     const before = readBytes();
 
-    const notMine = outboxImport({
+    const notMine = await outboxImport({
       folder: root,
       ownerId: OWNER,
       records: [rangeEdit({ id: "x1", original: "後ろの一。\n\n後ろの二。" })],
@@ -955,7 +973,7 @@ describe("outbox.import——範囲を自分で直す（複数行の edit）", (
     expect(notMine.results[0].status).toBe("refused");
     expect(notMine.results[0].reason).toContain("指摘の原文");
 
-    const midLine = outboxImport({
+    const midLine = await outboxImport({
       folder: root,
       ownerId: OWNER,
       records: [
@@ -968,12 +986,12 @@ describe("outbox.import——範囲を自分で直す（複数行の edit）", (
     expect(findingStatus("f_mono")).toBe("pending");
   });
 
-  it("Shift_JIS・CRLF の本文で、文字コードと改行を保つ（ページから CRLF で来ても本文の形に揃える）", () => {
+  it("Shift_JIS・CRLF の本文で、文字コードと改行を保つ（ページから CRLF で来ても本文の形に揃える）", async () => {
     const crlf = RANGE_BODY.split("\n").join("\r\n");
     writeBody(iconv.encode(crlf, "shift_jis"));
     placeFindings([MONOTONY]);
 
-    const result = outboxImport({
+    const result = await outboxImport({
       folder: root,
       ownerId: OWNER,
       records: [
@@ -991,24 +1009,24 @@ describe("outbox.import——範囲を自分で直す（複数行の edit）", (
     expect(readBytes().equals(iconv.encode(expected, "shift_jis"))).toBe(true);
   });
 
-  it("1行の edit は今までどおり（改行入りは断る）", () => {
+  it("1行の edit は今までどおり（改行入りは断る）", async () => {
     writeBody(`一行目\n${PROOF.original}\n`);
     placeFindings([PROOF]);
-    const refused = outboxImport({
+    const refused = await outboxImport({
       folder: root,
       ownerId: OWNER,
       records: [edit({ id: "n1", text: "一行目。\n二行目。" })],
     });
     expect(refused.results[0].reason).toContain("改行");
-    const ok = outboxImport({ folder: root, ownerId: OWNER, records: [edit({ id: "n2" })] });
+    const ok = await outboxImport({ folder: root, ownerId: OWNER, records: [edit({ id: "n2" })] });
     expect(ok.results[0].status).toBe("imported");
     expect(readBytes().toString("utf8")).toBe(`一行目\n${MINE}\n`);
   });
 
-  it("「当てたもの」：1行へまとめた直しは［戻す］で戻せ、複数行の直しは並べない（落ちない）", () => {
+  it("「当てたもの」：1行へまとめた直しは［戻す］で戻せ、複数行の直しは並べない（落ちない）", async () => {
     writeBody(RANGE_BODY);
     placeFindings([MONOTONY]);
-    outboxImport({
+    await outboxImport({
       folder: root,
       ownerId: OWNER,
       records: [rangeEdit({ id: "one", text: "彼は歩き、空は青く、風が吹いて鳥が鳴いた。" })],
@@ -1040,14 +1058,14 @@ describe("ページの雛形——前後の文と範囲の直し", () => {
   const repo = nodePath.join(__dirname, "..", "..", "..");
   const page = fs.readFileSync(nodePath.join(repo, "media", "outbox", "outbox.html"), "utf8");
 
-  it("前後の文を薄い字で出し、長いときは畳んで［前後を見る］で開く。記号は appendMarked で外す", () => {
+  it("前後の文を薄い字で出し、長いときは畳んで［前後を見る］で開く。記号は appendMarked で外す", async () => {
     expect(page).toContain("function contextNode(f)");
     expect(page).toContain("前後を見る");
     expect(page).toMatch(/function contextNode\(f\)[\s\S]*appendMarked\(/);
     expect(page).toMatch(/var ctx = contextNode\(f\);\s*if \(ctx\) item\.appendChild\(ctx\);/);
   });
 
-  it("範囲の指摘は、範囲の全行を欄に入れて original に添える（切れた範囲では直させない）", () => {
+  it("範囲の指摘は、範囲の全行を欄に入れて original に添える（切れた範囲では直させない）", async () => {
     expect(page).toContain("function rangeTextOf(f)");
     expect(page).toContain("c.lines.length < 2 || c.rangeClipped) return null;");
     expect(page).toMatch(/var multi = rangeTextOf\(f\) !== null;/);

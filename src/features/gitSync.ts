@@ -6,6 +6,8 @@ import { normalizeForComparison } from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import type { WorkRegistry } from "../core/workRegistry";
 import { bodyChangePaths } from "../core/manuscriptChangePaths";
+import { isPendingInboxPath } from "../core/outboxInbox";
+import { countPendingInboxRecords } from "./importOutboxInbox";
 import {
   changedFilesBetween,
   fetchRemote,
@@ -695,6 +697,13 @@ export class GitSyncMonitor implements vscode.Disposable {
       この知らせは「抽出をやり直すと増えた内容を取り込める」と続くので、
       **本文が増えたときにだけ意味がある。**
     */
+    /*
+      **出先の原稿箱が届いたら知らせる**（設計書6.115「GitHub 経由」）。本文の数え方とは
+      別に見る——箱は本文ではないが、作者が待っているものである。自動では取り込まない
+      （本文を書き換えるので、押すのは作者）
+    */
+    if (changed.some(isPendingInboxPath)) this.notifyInbox(work);
+
     const files = bodyChangePaths(changed);
     if (files.length === 0) return;
 
@@ -745,6 +754,32 @@ export class GitSyncMonitor implements vscode.Disposable {
       },
       { label: "同期のあとの資料の案内", workFolder: work.folderPath }
     );
+  }
+
+  /**
+   * 「原稿箱に N件届いています［取り込む］」を出す。**待たない**（同期の札を持ったまま
+   * にしない。上の知らせと同じ）。数えるのはこの作品の受け取り箱だけ——書庫では、
+   * ほかの作品の箱が届いても、ここは0件になって黙る
+   */
+  private notifyInbox(work: WorkEntry): void {
+    void countPendingInboxRecords(work).then((count) => {
+      if (count === 0) return;
+      const IMPORT = "取り込む";
+      whenNoticePicked(
+        vscode.window.showInformationMessage(
+          `「${work.title}」の原稿箱に ${count}件届いています。`,
+          IMPORT
+        ),
+        async (action) => {
+          if (action !== IMPORT) return;
+          await vscode.commands.executeCommand("novelai.importOutboxInbox", {
+            type: "work",
+            work,
+          });
+        },
+        { label: "原稿箱が届いた知らせ", workFolder: work.folderPath }
+      );
+    });
   }
 
   /** 自動fetchしてよいか。設定と最小間隔で決める */
