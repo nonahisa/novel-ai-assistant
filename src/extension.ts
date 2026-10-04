@@ -469,6 +469,8 @@ import {
   watchDisconnectedManuscripts,
   type ManuscriptEditorDeps,
 } from "./features/manuscriptEditor";
+// 「すべて同期」の記録の前の保存（設計書5.5.19）。VS Code の文書の保存を呼ぶだけで、Node 専用の部品は引かない
+import { createSyncPresave } from "./features/presaveBeforeSync";
 // 「本文が見つからない」ときの文言は1か所に置く（`features/ruby.ts` と共用）
 import {
   activeForeignManuscriptTabUri,
@@ -1853,6 +1855,8 @@ export async function activate(
     storage: verifiedState(context.globalState),
     pauseSettingsWatch: () => settingsWatcher.pause(),
     batchFileNotices: gitSync.beginBatchedFileNotices?.bind(gitSync),
+    // 記録の前に、作品の中の未保存を保存する（設計書5.5.19）
+    presave: createSyncPresave(),
   });
 
   context.subscriptions.push(
@@ -1880,6 +1884,8 @@ export async function activate(
         monitor: gitSync,
         pauseSettingsWatch: () => settingsWatcher.pause(),
         batchFileNotices: batch,
+        // 記録の前に、作品の中の未保存を保存する（作者の裁定、2026-10-04。設計書5.5.19）
+        presave: createSyncPresave(),
       });
     }),
     // 別のPCとこちらの両方で書くと分岐する（設計書5.5.16）。

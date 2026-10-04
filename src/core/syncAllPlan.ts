@@ -42,6 +42,14 @@ export interface SyncTargetState {
    * 「何件記録されるか」はこちらで数えたものを使う
    */
   trackable: number;
+  /**
+   * 作品の中で、まだ保存していない文書の数（設計書5.5.19。作者の裁定 2026-10-04）。
+   *
+   * **ディスクの件数（`trackable`）とは別に持つ。** 変更が未保存の文書にしか
+   * 無い置き場は `trackable` が0で、数えなければ「同期は取れています」と
+   * 飛ばされ、記録の前の保存までたどり着かない。
+   */
+  unsaved?: number;
 }
 
 /** その置き場でやること */
@@ -98,6 +106,8 @@ export const SKIP_REASON_TEXT: Record<SkipReason, string> = {
 export function planSyncTarget(target: SyncTargetState): SyncTargetPlan {
   const base = { target, commit: false, pull: false, push: false };
   const status = target.status;
+  // 未保存の文書は、記録の前に保存してから入れる（設計書5.5.19）
+  const recordable = target.trackable > 0 || (target.unsaved ?? 0) > 0;
 
   switch (status.kind) {
     case "git_missing":
@@ -110,11 +120,11 @@ export function planSyncTarget(target: SyncTargetState): SyncTargetPlan {
       return { ...base, skip: "failed" };
     case "no_remote":
       // 送り先が無くても、履歴に残すことはできる
-      return target.trackable > 0
+      return recordable
         ? { ...base, commit: true }
         : { ...base, skip: "no_remote" };
     case "no_upstream":
-      return target.trackable > 0
+      return recordable
         ? { ...base, commit: true, skip: "no_upstream" }
         : { ...base, skip: "no_upstream" };
     case "tracked":
@@ -124,7 +134,7 @@ export function planSyncTarget(target: SyncTargetState): SyncTargetPlan {
   // **競合マーカーを履歴へ入れない**（5.5.3）
   if (status.unmerged > 0) return { ...base, skip: "unmerged" };
 
-  const commit = target.trackable > 0;
+  const commit = recordable;
   const pull = status.behind > 0;
   // 記録するぶんも送る。記録すれば ahead が増える
   const push = status.ahead > 0 || commit;
@@ -154,7 +164,17 @@ export function actionablePlans(
  */
 export function describePlan(plan: SyncTargetPlan): string {
   const parts: string[] = [];
-  if (plan.commit) parts.push(`記録 ${plan.target.trackable}件`);
+  if (plan.commit) {
+    const unsaved = plan.target.unsaved ?? 0;
+    // **保存してから記録することを、押す前に見せる**（設計書5.5.19）。
+    // ディスクの件数だけだと、未保存しか無い置き場が「記録 0件」に見える
+    parts.push(
+      unsaved > 0
+        ? `${plan.target.trackable > 0 ? `記録 ${plan.target.trackable}件` : "記録"}` +
+            `（未保存 ${unsaved}件を先に保存）`
+        : `記録 ${plan.target.trackable}件`
+    );
+  }
   if (plan.pull) {
     const status = plan.target.status;
     // **分かれているなら、そう書く**（設計書5.5.18）。押す前に、

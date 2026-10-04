@@ -31,6 +31,7 @@ import { buildSyncTarget } from "../core/syncTarget";
 import { logFailure, logStep, showLog } from "../core/logger";
 import { useSyncLog } from "./syncLog";
 import type { GitSyncMonitorLike } from "./gitSyncStub";
+import type { SyncPresave } from "./presaveBeforeSync";
 
 /**
  * 機械を行き来しても原稿が食い違わないようにする（設計書6.15.1）。
@@ -63,6 +64,8 @@ export interface HandoffDeps {
    * gitが書いたファイルも外部変更として拾うため
    */
   pauseSettingsWatch?: () => () => void;
+  /** 「すべて同期」の記録の前の保存（設計書5.5.19）。保存ボタンから同期へ渡す */
+  presave?: SyncPresave;
 }
 
 /** 置き場1つぶんの、点検の材料 */
@@ -479,6 +482,11 @@ export async function saveAndSyncAll(
     run: deps.run,
     pauseSettingsWatch: deps.pauseSettingsWatch,
     batchFileNotices: deps.batchFileNotices,
+    /*
+      上の saveAll は全部を保存するが、原稿エディターの画面から届いた便が
+      当たり終わるのは待たない。同期の側で、記録の前にもう一度確かめる
+    */
+    presave: deps.presave,
   });
 
   await refreshUnsentMark(deps);

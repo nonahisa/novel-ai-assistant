@@ -3,6 +3,7 @@ import { syncAllWorks } from "../../../src/features/syncAllWorks";
 import type { GitCommandRunner } from "../../../src/core/git";
 import type { WorkRegistry } from "../../../src/core/workRegistry";
 import type { GitSyncMonitorLike } from "../../../src/features/gitSyncStub";
+import type { SyncPresave } from "../../../src/features/presaveBeforeSync";
 import type { WorkEntry } from "../../../src/models/types";
 import { window } from "../support/vscodeStub";
 
@@ -386,5 +387,155 @@ describe("早送りで書きかけと食い違ったとき", () => {
     expect(text).toContain("こじれた作品");
     expect(text).toContain("書きかけと同じ箇所が食い違ったので止めました");
     expect(text).toContain("退避（stash）に残っています");
+  });
+});
+
+/**
+ * 記録の前の保存（設計書5.5.19。作者の裁定 2026-10-04「記録の前に自動で保存する」）。
+ *
+ * 作者の画面で「未記録1」が、同期しても1に戻る件が続いていた
+ * （`files.autoSave: afterDelay`）。同期の時点で保存されていない話は記録に
+ * 入らない。**記録の前に、その置き場の作品の中の未保存を保存する。**
+ */
+describe("記録の前の保存", () => {
+  /** 保存の段で渡されたフォルダーと、そのときまでに呼ばれた git の数 */
+  let presaveCalls: string[][] = [];
+  let presaveAt: number[] = [];
+
+  function fakePresave(options: { unsaved?: number; failIn?: string }): SyncPresave {
+    return {
+      countUnsaved: () => options.unsaved ?? 0,
+      saveInside: async (folders) => {
+        presaveCalls.push([...folders]);
+        presaveAt.push(calls.length);
+        const failIn = options.failIn;
+        if (failIn && folders.some((one) => one.includes(failIn))) {
+          return {
+            saved: 0,
+            failures: [{ filePath: `${folders[0]}/本文/003.txt`, reason: "saveFailed" }],
+          };
+        }
+        return { saved: options.unsaved ?? 0, failures: [] };
+      },
+    };
+  }
+
+  beforeEach(() => {
+    presaveCalls = [];
+    presaveAt = [];
+    Object.assign(window, {
+      showWarningMessage: async (message: string, ...rest: unknown[]) => {
+        const detail = rest.find(
+          (item): item is { detail?: string } =>
+            typeof item === "object" && item !== null && "detail" in item
+        )?.detail;
+        shown.push(detail ? `${message}\n${detail}` : message);
+        return undefined;
+      },
+    });
+  });
+
+  test("記録より先に、作品のフォルダーを渡して保存する", async () => {
+    await syncAllWorks({
+      registry,
+      monitor,
+      run: busyRepo,
+      presave: fakePresave({ unsaved: 1 }),
+    });
+
+    // 置き場の根（C:/書庫）ではなく、登録された作品のフォルダーを渡す
+    expect(presaveCalls).toEqual([[works[0].folderPath, works[1].folderPath]]);
+    // 保存は、記録（commit）・取り込み（pull）より前
+    const firstWrite = calls.findIndex(
+      (args) => args[0] === "commit" || args[0] === "pull" || args[0] === "add"
+    );
+    expect(firstWrite).toBeGreaterThanOrEqual(0);
+    expect(presaveAt[0]).toBeLessThanOrEqual(firstWrite);
+  });
+
+  test("押す前の確認に、先に保存することが出る", async () => {
+    await syncAllWorks({
+      registry,
+      monitor,
+      run: busyRepo,
+      presave: fakePresave({ unsaved: 2 }),
+    });
+
+    const confirms = shown.filter((text) => text.includes("か所を同期します"));
+    expect(confirms[0]).toContain("未保存 2件を先に保存");
+  });
+
+  test("中止したら、保存もしない", async () => {
+    answer = undefined;
+    await syncAllWorks({
+      registry,
+      monitor,
+      run: busyRepo,
+      presave: fakePresave({ unsaved: 1 }),
+    });
+    expect(presaveCalls).toEqual([]);
+  });
+
+  test("ディスクに変更が無くても、未保存があれば記録まで進む", async () => {
+    /** 作業ツリーはきれいで、遅れも先行も無い置き場 */
+    const cleanRepo: GitCommandRunner = async (args, cwd, timeout) => {
+      if (args.join(" ") === "status --porcelain --untracked-files=all") {
+        calls.push(args);
+        return { code: 0, stdout: "", stderr: "" };
+      }
+      if (args[0] === "rev-list") {
+        calls.push(args);
+        return { code: 0, stdout: "0\t0", stderr: "" };
+      }
+      return busyRepo(args, cwd, timeout);
+    };
+    await syncAllWorks({
+      registry,
+      monitor,
+      run: cleanRepo,
+      presave: fakePresave({ unsaved: 1 }),
+    });
+
+    expect(presaveCalls).toHaveLength(1);
+    expect(calls.some((args) => args[0] === "commit")).toBe(true);
+  });
+
+  test("保存できなかった話がある置き場は、記録も取り込みも送信もしない", async () => {
+    const libraries: WorkEntry[] = [
+      { id: "wa", title: "保存できない作品", folderPath: "C:/書庫A" },
+      { id: "wb", title: "無事な作品", folderPath: "C:/書庫B" },
+    ] as WorkEntry[];
+    const twoRegistry = { list: () => libraries } as unknown as WorkRegistry;
+    /** busyRepo と同じ答えで、どちらの置き場への呼び出しかを印にして残す */
+    const twoLibraries: GitCommandRunner = async (args, cwd, timeout) => {
+      const tag = cwd.includes("書庫A") ? "A" : "B";
+      if (args.join(" ") === "rev-parse --show-toplevel") {
+        calls.push([tag, ...args]);
+        return { code: 0, stdout: tag === "A" ? "C:/書庫A" : "C:/書庫B", stderr: "" };
+      }
+      const result = await busyRepo(args, cwd, timeout);
+      calls[calls.length - 1] = [tag, ...args];
+      return result;
+    };
+
+    await syncAllWorks({
+      registry: twoRegistry,
+      monitor,
+      run: twoLibraries,
+      presave: fakePresave({ unsaved: 1, failIn: "書庫A" }),
+    });
+
+    const inA = calls.filter((args) => args[0] === "A").map((args) => args[1]);
+    expect(inA).not.toContain("commit");
+    expect(inA).not.toContain("pull");
+    expect(inA).not.toContain("push");
+    // 他の置き場は続ける
+    const inB = calls.filter((args) => args[0] === "B").map((args) => args[1]);
+    expect(inB).toContain("commit");
+    expect(inB).toContain("push");
+    // どの話が保存できなかったかを知らせる
+    const text = shown.join("\n");
+    expect(text).toContain("保存できない作品");
+    expect(text).toContain("「003.txt」（保存できませんでした）");
   });
 });
