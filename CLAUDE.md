@@ -28,7 +28,7 @@
 
 **設計書・引継ぎ書を直すとき、版を上げるときは、スキル `docs-sync` を読むこと**（章番号の整合の手順、引継ぎ書の書き方、版を揃える6か所と見張っているテスト）。
 
-作業の手順は `.claude/skills/` にスキルとして置いてある（`implement`・`team`・`docs-sync`・`release`・`shell-safety`・`field-check`・`e2e`・`session-handoff`・`ai-bench`・`desk-editor`・`codebase-map`）。**必要なときだけ読まれるので、ここには写さない。**
+作業の手順は `.claude/skills/` にスキルとして置いてある（`implement`・`team`・`docs-sync`・`release`・`shell-safety`・`field-check`・`e2e`・`session-handoff`・`ai-bench`・`desk-editor`・`codebase-map`・`yomiyasu`。yomiyasu は外部の MIT のスキルで、README・説明文・Release ノートだけに当てる）。**必要なときだけ読まれるので、ここには写さない。**
 
 ---
 
