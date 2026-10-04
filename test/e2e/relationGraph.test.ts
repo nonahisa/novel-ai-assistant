@@ -17,6 +17,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame } from "playwright-core";
 import { expect, test } from "vitest";
+import { EDGE_LABEL_BOX_HEIGHT } from "../../src/core/relationGraphLayout";
 import { emptyCharacter, type Character } from "../../src/models/character";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
@@ -205,21 +206,19 @@ function crowdCast(): Character[] {
   const hub: Character = {
     ...emptyCharacter("char_001", CROWD_HUB),
     appearedChapters: [1, 2, 3],
-    // 偶数番だけ中心から関係を持つ。奇数番は相手からの片向きだけ（「→なし／←…」の形になる線）
+    // 偶数番だけ中心から関係を持つ（作者の画面の「→継子 ほか4」の長さに寄せる）。
+    // 奇数番は相手からの片向きだけ（以前は「→なし／←…」と書いていた線）
     relations: names.flatMap((name, index) =>
       index % 2 === 0
-        ? [
-            { name, relation: "同行者" },
-            { name, relation: "継子" },
-          ]
+        ? ["同行者", "継子", "弟子", "護衛", "旅の仲間"].map((relation) => ({ name, relation }))
         : []
     ),
   };
   const partners = names.map((name, index): Character => ({
     ...emptyCharacter(`char_${String(index + 2).padStart(3, "0")}`, name),
     appearedChapters: [1],
-    // 6の倍数番は中心への関係を持たない（「→同行者 ほか1」だけの線。偶数番なので中心からの関係はある）
-    relations: index % 6 === 0 ? [] : [{ name: CROWD_HUB, relation: "主人" }],
+    // 6の倍数番は中心への関係を持たない（「→同行者 ほか4」だけの線。偶数番なので中心からの関係はある）
+    relations: index % 6 === 0 ? [] : [{ name: CROWD_HUB, relation: "主人にあたる人" }],
   }));
   return [hub, ...partners];
 }
@@ -257,6 +256,17 @@ test("個人中心図（相手30人）で、描かれた線の文字の矩形が
       for (const box of boxes) {
         expect(box.text, "中身の無い「なし」を出しています").not.toMatch(/なし/);
         expect(box.right - box.left, `「${box.text}」が描かれていません`).toBeGreaterThan(0);
+      }
+
+      // 配置が見積もった字の箱の高さに、描かれた字の高さ（SVG の座標。拡大率に依らない）が収まる。
+      // 収まらないと、配置の上では重ならない2つの文字が、画面では縦に重なる
+      const heights: number[] = await frame.evaluate(() =>
+        Array.from(document.querySelectorAll(".g-edge-label")).map(
+          (label) => (label as SVGGraphicsElement).getBBox().height
+        )
+      );
+      for (const height of heights) {
+        expect(height, "描かれた字が、配置の見積もりより高い").toBeLessThanOrEqual(EDGE_LABEL_BOX_HEIGHT);
       }
 
       const overlaps: string[] = [];
