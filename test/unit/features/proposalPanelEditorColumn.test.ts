@@ -227,7 +227,10 @@ describe("右の列に開く（シーンメモと同じ置き方）", () => {
 describe("結果が届いたら、下段ではなく右の列を前へ出す", () => {
   test("下段のビューへフォーカスを移さない。右の列を、書く手を奪わずに出す", async () => {
     const panel = new ProposalPanel();
-    panel.showResults(work, [typo]);
+    // 誤字脱字など校正・メモパネルに並ぶ種類は、終わったら校正・メモパネルを
+    // 開く（作者の裁定 2026-10-04。`proposalPanelOpensMemoPanel.test.ts`）。
+    // 提案パネルが開くのは、並ばない種類（ここでは名前の付け替え）
+    panel.showResults(work, [typo], "名前の付け替え");
 
     expect(commands.map((entry) => entry.command)).not.toContain(
       "novelai.proposalsView.focus"

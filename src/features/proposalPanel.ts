@@ -47,6 +47,8 @@ import {
 // **判断のあと、シーンメモの横の一覧にも効かせる**（設計書6.96.5）。
 // あちらは本文の保存でしか読み直さないので、知らせないと片方だけ残る
 import { refreshSceneMemoFindings, SCENE_MEMO_VIEW_TYPE } from "./sceneMemoPanel";
+import { OPEN_SCENE_MEMOS_COMMAND } from "../core/sceneMemo";
+import { isCommandAllowed } from "../core/editorMode";
 import type { Finding, FindingProducer, FindingStatus } from "../models/finding";
 // 「当てたもの」の行を、押した時点の本文で探し直す（作者の裁定 2026-10-04）
 import { locateAppliedFinding } from "../core/appliedFindings";
@@ -133,6 +135,10 @@ export const PROPOSALS_PANEL_TYPE = "novelai.proposals";
  * **パネルの中からも、このコマンドを通して開く。** 画面を開く処理を直に
  * 呼ぶと、結果を出すだけの試験まで画面の代役を用意することになる。
  * 引数 `{ preserveFocus: true }` で、フォーカスを奪わずに出す。
+ *
+ * **検知が終わったときに開くのは、校正・メモパネルに並ばない種類だけ**
+ * （作者の裁定 2026-10-04。`showsInFindingsView`）。誤字脱字などは
+ * 校正・メモパネル（`OPEN_SCENE_MEMOS_COMMAND`）のほうを開く。
  */
 export const OPEN_PROPOSALS_COMMAND = "novelai.openProposals";
 
@@ -1043,6 +1049,13 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       表示を止める理由がない。失敗しても検知は止めない（記録側が
       受け止めて記録へ落とす）。
     */
+    /*
+      書き終えたあとに、校正・メモパネルを**開く**か、開いていれば**読み直すだけ**か。
+      決めるのはこの関数の下のほう（同じ作品か・静かに届いたか）なので、ここでは
+      箱だけ用意し、書き終えた時点（約束の `then`）で中を見る。`then` は必ずこの
+      関数を抜けたあとに走るので、下で決めた値が間に合う
+    */
+    const afterRecorded: { open: boolean } = { open: false };
     if (!options.restored) {
       this.stampProducer(category, [
         ...(contents.items ?? []),
@@ -1061,14 +1074,22 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         知らせる口が判断のあとにしか無く、開いたまま検知しても並ばなかった
         （閉じて開き直すと並んだ）。**書く前に知らせると、読み直しても空のまま**
         なので、記録の約束が済んでから呼ぶ。`recordFindings` は失敗を内側で
-        受け止めて返るので、失敗しても読み直しは走る（並ぶものが無いだけ）
+        受け止めて返るので、失敗しても読み直しは走る（並ぶものが無いだけ）。
+
+        **検知が終わって開くときも、書き終えてから開く**（作者の裁定 2026-10-04）。
+        先に開くと置き場がまだ空で、今回の指摘が並ばない。開けば読み直しも済む
+        （既に開いていれば `revealAndReload`）ので、読み直しは重ねない
       */
       void recordFindings(work, drafts)
-        .then(() => refreshSceneMemoFindings(work.id))
+        .then(() =>
+          afterRecorded.open
+            ? this.openFindingsView(work, true)
+            : refreshSceneMemoFindings(work.id)
+        )
         .catch((error: unknown) =>
           // 読み直せなくても検知は止めない。理由はログへ
           logLine(
-            `校正・メモパネル：指摘を書いたあとの読み直しに失敗しました（${
+            `校正・メモパネル：指摘を書いたあとの読み直し（または開く）に失敗しました（${
               error instanceof Error ? error.message : String(error)
             }）。`
           )
@@ -1173,13 +1194,26 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         this.postItems();
         return arrivedCount;
       }
+      // **中身は今までどおり追う**——［提案へ］や「提案パネルを開く」で開いたときに、
+      // この分類が出ているように
       this.activate(category);
-      // パネルが開いていなければ前面に出す。開いていれば余計なフォーカス移動はしない
       if (!options.quiet) {
-        // **書いている手からフォーカスを奪わない**（右の列に出すだけ）
-        void vscode.commands.executeCommand(OPEN_PROPOSALS_COMMAND, {
-          preserveFocus: true,
-        });
+        /*
+          **校正・メモパネルに並ぶ種類は、そちらを開く**（作者の裁定 2026-10-04。
+          報告「Ctrl+Alt+T が終わると提案パネルが開く」）。指摘は校正・メモパネルに
+          位置順で並び（6.96.5）、提案パネルは［提案へ］などから今までどおり開ける。
+          開くのは指摘を書き終えてから（上の `afterRecorded`）。
+          置き場へ書かない（`restored`）ときは、待つものが無いのでその場で開く
+        */
+        if (this.showsInFindingsView(category)) {
+          if (options.restored) void this.openFindingsView(work, true);
+          else afterRecorded.open = true;
+        } else {
+          // **書いている手からフォーカスを奪わない**（右の列に出すだけ）
+          void vscode.commands.executeCommand(OPEN_PROPOSALS_COMMAND, {
+            preserveFocus: true,
+          });
+        }
       }
       return arrivedCount;
     }
@@ -1226,8 +1260,54 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     this.stashCurrent();
     this.work = entry.work;
     this.activate(category);
-    // 作者が「表示する」を押したので、フォーカスごと移す
+    // 作者が「表示する」を押したので、フォーカスごと移す。校正・メモパネルに
+    // 並ぶ種類はそちらを開く（作者の裁定 2026-10-04。作品ごとに1枚なので、
+    // いま見ている作品の校正・メモパネルは奪わない）。指摘はふつう答えを待つ
+    // あいだに書き終えており、間に合わなくても、書き終えたときの読み直し
+    // （`refreshSceneMemoFindings`）で開いているパネルに並ぶ
+    if (this.showsInFindingsView(category)) {
+      void this.openFindingsView(entry.work, false);
+      return;
+    }
     void vscode.commands.executeCommand(OPEN_PROPOSALS_COMMAND);
+  }
+
+  /**
+   * 検知が終わったときに開くのが、校正・メモパネルか（作者の裁定 2026-10-04）。
+   *
+   * **校正・メモパネルに並ぶ種類＝置き場へ残す種類**（`findingCategoryOf`。
+   * `core/findingSource.ts` の表1つ）。並ばない種類（設定資料の更新・名前の
+   * 付け替え・単話プロット・編集部からの提案・バックアップとの違い）は、
+   * 開いても見るものが無いので今までどおり提案パネルを開く。ここに分類名の
+   * 一覧を写すと、検知を足したときに開く先だけが古くなる。
+   *
+   * **編集者モードでは開かない。** 校正・メモパネルの［済み］は本文のメモ行を
+   * 消すので、編集者モードでは使えない画面である（`core/editorMode.ts`）。
+   * そこへ開こうとすると「使えません」が出るだけなので、提案パネルのままにする。
+   */
+  private showsInFindingsView(category: string): boolean {
+    return (
+      findingCategoryOf(category) !== undefined &&
+      // モードは `isEditorMode` から読む（このファイルが前から使う口。単体テストの
+      // 多くがこの口だけを差し替えている）
+      isCommandAllowed(OPEN_SCENE_MEMOS_COMMAND, isEditorMode() ? "editor" : "author")
+    );
+  }
+
+  /**
+   * その作品の校正・メモパネルを開く（既に開いていれば前に出して読み直す）。
+   * **コマンドを通す**——画面を開く処理を直に呼ぶと、ここの試験まで画面の代役を
+   * 用意することになる（`OPEN_PROPOSALS_COMMAND` と同じ考え）。
+   */
+  private async openFindingsView(
+    work: WorkEntry,
+    preserveFocus: boolean
+  ): Promise<void> {
+    await vscode.commands.executeCommand(
+      OPEN_SCENE_MEMOS_COMMAND,
+      { type: "work", work },
+      { preserveFocus }
+    );
   }
 
   /** その作品の置き場（無ければ作る）。題名はいちばん新しいものへ揃える */

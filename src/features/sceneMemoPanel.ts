@@ -166,14 +166,28 @@ export async function openSceneMemoPanel(
   context: vscode.ExtensionContext,
   work: WorkEntry,
   deps: SceneMemoDeps,
-  options: { filePath?: string } = {}
+  options: {
+    filePath?: string;
+    /**
+     * フォーカスを奪わずに出す。検知が終わって自動で開くときは true
+     * （作者が Ctrl+Alt+M などで押したときは false＝これまでどおり）
+     */
+    preserveFocus?: boolean;
+  } = {}
 ): Promise<void> {
+  const preserveFocus = options.preserveFocus === true;
   const existing = openPanels.get(work.id);
   if (existing) {
-    await existing.revealAndReload(options.filePath);
+    await existing.revealAndReload(options.filePath, preserveFocus);
     return;
   }
-  const panel = new SceneMemoPanel(context, work, deps, options.filePath);
+  const panel = new SceneMemoPanel(
+    context,
+    work,
+    deps,
+    options.filePath,
+    preserveFocus
+  );
   openPanels.set(work.id, panel);
   await panel.initialize();
 }
@@ -503,7 +517,8 @@ class SceneMemoPanel {
     context: vscode.ExtensionContext,
     private readonly work: WorkEntry,
     private readonly deps: SceneMemoDeps,
-    filePath?: string
+    filePath?: string,
+    preserveFocus = false
   ) {
     this.currentFile = filePath ?? lastManuscriptCaret()?.filePath ?? null;
 
@@ -511,8 +526,9 @@ class SceneMemoPanel {
       SCENE_MEMO_VIEW_TYPE,
       `校正・メモパネル: ${work.title}`,
       // **原稿エディタの横へ開く**（作者の指示）。書きながら見るものなので、
-      // 本文の上に重なっては用をなさない
-      vscode.ViewColumn.Beside,
+      // 本文の上に重なっては用をなさない。検知が終わって自動で開くときは
+      // フォーカスを原稿に残す（打っている手を止めない）
+      { viewColumn: vscode.ViewColumn.Beside, preserveFocus },
       { enableScripts: true, retainContextWhenHidden: true }
     );
     context.subscriptions.push(this.panel);
@@ -535,11 +551,46 @@ class SceneMemoPanel {
     await this.load();
   }
 
-  async revealAndReload(filePath?: string): Promise<void> {
-    this.panel.reveal(vscode.ViewColumn.Beside);
+  async revealAndReload(filePath?: string, preserveFocus = false): Promise<void> {
+    this.panel.reveal(this.revealColumn(preserveFocus), preserveFocus);
     if (filePath) this.currentFile = filePath;
     // 開きっぱなしのパネルは、そのあと書かれた付箋を知らない
     await this.load();
+  }
+
+  /**
+   * 開いているパネルを前に出す列。
+   *
+   * **作者が押して開くとき**（Ctrl+Alt+M など。`preserveFocus` が偽）は
+   * これまでどおり `ViewColumn.Beside`（いま前面の列の横）。
+   *
+   * **検知が終わって自動で前に出すとき**（作者の裁定 2026-10-04）は、
+   * **パネルがいま居る列のまま**前に出す。`Beside` で前に出すと、同じ右の列に
+   * 提案パネルが重なっていたときに、パネルがさらに右の3列目へ移った
+   * （画面の自動テスト `test/e2e/checkOpensMemoPanel.test.ts` で見つかった）。
+   * ただし、その列の前面が原稿（原稿エディター・素のエディター）なら、原稿の上に
+   * 重ねないよう、これまでどおり横へ出す（6.25.11 の「原稿の列を空けない」）。
+   *
+   * 「前面の列」（`activeTabGroup`）では決めない。原稿エディターの中の
+   * キー（Ctrl+Alt+T など）は画面から拡張機能へ渡る道もあり、そのとき前面の
+   * 列が原稿の列とは限らない。見るのは、パネルが居る列に何が出ているかだけ
+   */
+  private revealColumn(preserveFocus: boolean): vscode.ViewColumn {
+    if (!preserveFocus) return vscode.ViewColumn.Beside;
+    const own = this.panel.viewColumn;
+    if (own === undefined) return vscode.ViewColumn.Beside;
+    try {
+      const group = vscode.window.tabGroups.all.find(
+        (candidate) => candidate.viewColumn === own
+      );
+      const input: unknown = group?.activeTab?.input;
+      const manuscriptInFront =
+        input instanceof vscode.TabInputCustom || input instanceof vscode.TabInputText;
+      return manuscriptInFront ? vscode.ViewColumn.Beside : own;
+    } catch {
+      // 列を読めない環境では、これまでどおり横へ出す
+      return vscode.ViewColumn.Beside;
+    }
   }
 
   /** その本文が、この作品の話か（保存の知らせを振り分ける） */

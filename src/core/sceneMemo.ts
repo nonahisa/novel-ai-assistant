@@ -87,6 +87,20 @@ export const MEMO_LINE_PREFIX = "// ";
 export const MEMO_HINT = "本文の行頭に // と書くとメモになります（字下げしていても構いません）";
 
 /**
+ * 校正・メモパネルを開くコマンド（Ctrl+Alt+M と同じもの）。
+ *
+ * **検知が終わったときも、提案パネルの側からこのコマンドを通して開く**
+ * （作者の裁定 2026-10-04「終わったら校正・メモパネルを開く」）。引数は
+ * `({ type: "work", work }, { preserveFocus: true })`——作品を名指しし、
+ * 書いている手からフォーカスを奪わない。画面を開く処理を直に呼ぶと、
+ * 提案パネルの試験まで画面の代役を用意することになる（`OPEN_PROPOSALS_COMMAND` と同じ考え）。
+ *
+ * `core` に置くのは、提案パネルの単体テストの多くが `features/sceneMemoPanel` を
+ * 丸ごと差し替えており、そちらに置くと定数まで消えるため
+ */
+export const OPEN_SCENE_MEMOS_COMMAND = "novelai.openSceneMemos";
+
+/**
  * タグとして読む最初の語の長さの上限。
  *
  * 日本語には語の切れ目に空白が無いので、`// 潮の匂いを足す` は1語である

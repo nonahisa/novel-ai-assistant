@@ -18,7 +18,22 @@ const files = new Map<string, Uint8Array>();
 vi.mock("vscode", () => {
   const noop = () => undefined;
   return {
-    commands: { executeCommand: vi.fn() },
+    commands: {
+      /*
+        検知が終わると、誤字脱字など校正・メモパネルに並ぶ種類は、読み直しの
+        知らせの代わりに校正・メモパネルを**開く**（開けば読み直しも済む。作者の
+        裁定 2026-10-04）。開く呼び出しも「知らせ」として数える
+      */
+      executeCommand: vi.fn(async (command: string, ...args: unknown[]) => {
+        if (command !== "novelai.openSceneMemos") return undefined;
+        const ref = args[0] as { work?: { id: string } } | undefined;
+        notified.push(ref?.work?.id ?? "");
+        writtenWhenNotified.push(
+          [...files.keys()].some((name) => name.endsWith("findings.jsonl"))
+        );
+        return undefined;
+      }),
+    },
     window: {
       showWarningMessage: vi.fn(() => Promise.resolve(undefined)),
       showInformationMessage: vi.fn(() => Promise.resolve(undefined)),

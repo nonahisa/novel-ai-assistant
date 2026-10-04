@@ -2309,14 +2309,13 @@ export async function activate(
 
   const showSceneMemos = async (
     work: WorkEntry,
-    filePath?: string
+    filePath?: string,
+    preserveFocus = false
   ): Promise<void> => {
-    await openSceneMemoPanel(
-      context,
-      work,
-      sceneMemoDeps,
-      filePath ? { filePath } : {}
-    );
+    await openSceneMemoPanel(context, work, sceneMemoDeps, {
+      ...(filePath ? { filePath } : {}),
+      preserveFocus,
+    });
   };
 
   /**
@@ -2405,10 +2404,12 @@ export async function activate(
   );
   context.subscriptions.push(
     /*
-      **提案パネルを右の列に開く**（作者の指示、2026-09-23）。結果が届いた
-      ときもパネルの中からこのコマンドを呼ぶ（`{ preserveFocus: true }`）。
-      作者が押したときは引数なし＝フォーカスごと移す。閉じたあとで開き直す
-      口でもある（下段と違い、閉じたら画面から消える）。
+      **提案パネルを右の列に開く**（作者の指示、2026-09-23）。校正・メモパネルに
+      並ばない種類（設定資料の更新・名前の付け替えなど）の結果が届いたときは、
+      パネルの中からこのコマンドを呼ぶ（`{ preserveFocus: true }`）。誤字脱字など
+      校正・メモパネルに並ぶ種類は、終わったら校正・メモパネルのほうを開く
+      （作者の裁定 2026-10-04）。作者が押したときは引数なし＝フォーカスごと移す。
+      閉じたあとで開き直す口でもある（下段と違い、閉じたら画面から消える）。
     */
     registerCommand("novelai.openProposals", (options?: { preserveFocus?: boolean }) => {
       proposalPanel.reveal({ preserveFocus: options?.preserveFocus === true });
@@ -4774,11 +4775,19 @@ export async function activate(
     （VS Code の設定）だけで使う道であり、そのために画面を開かせない。
   */
   context.subscriptions.push(
-    registerCommand("novelai.openSceneMemos", async (node?: WorkNode) => {
-      const work = await resolveWork(node, registry);
-      if (!work) return;
-      await showSceneMemos(work);
-    }),
+    /*
+      2つ目の引数 `{ preserveFocus: true }` は、検知が終わって提案パネルの側から
+      開くとき（作者の裁定 2026-10-04。`ProposalPanel.replaceContents`）。
+      書いている手からフォーカスを奪わない。キー・メニューから押したときは無い
+    */
+    registerCommand(
+      "novelai.openSceneMemos",
+      async (node?: WorkNode, options?: { preserveFocus?: boolean }) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await showSceneMemos(work, undefined, options?.preserveFocus === true);
+      }
+    ),
     /*
       古い指摘を片づける（設計書6.96.4）。
 
