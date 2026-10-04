@@ -1437,19 +1437,87 @@ var EditorLogic = (function () {
     iPad が自分で置いたときに引き直すと、iPad の描くカーソルの印と字の入る所が1字ずれた
     （作者の実機、2026-10-05「印と入る所がずれる」）。iPad の印は置き直しに追いつかないため
   */
-  vtextEl.addEventListener("pointerup", function (event) {
+  /*
+    パソコンの原稿エディター（拡張機能の manuscriptEditorHtml.ts の「押した所は、押した点から
+    取り直す」）と同じ形にそろえる：
+    - 押した点は、指を下ろした瞬間に控える（離した点ではない）
+    - ブラウザがカーソルを置くのは離したあと少し遅れてからなので、すぐには触らず、
+      短いあいだ（400ミリ秒）選択の知らせを見張り、欄の外に置かれたときだけ1回直す
+    - 変換中（日本語入力が動いているあいだ）は触らない
+  */
+  var vComposing = false;
+  var vTouchPoint = null;
+  var vTouchWatchUntil = 0;
+  var V_TOUCH_FIX_MS = 400;
+  vtextEl.addEventListener("compositionstart", function () { vComposing = true; });
+  vtextEl.addEventListener("compositionend", function () { vComposing = false; });
+  vtextEl.addEventListener("pointerdown", function (event) {
+    vTouchPoint = null;
     if (event.pointerType !== "touch" || vtextEl.contentEditable === "false") return;
-    var x = event.clientX, y = event.clientY;
-    setTimeout(function () {
-      var sel = window.getSelection();
-      if (sel && sel.rangeCount && vtextEl.contains(sel.anchorNode)) return;
-      var range = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null;
-      if (!range || !vtextEl.contains(range.startContainer)) return;
-      if (document.activeElement !== vtextEl) vtextEl.focus();
+    vTouchPoint = { x: event.clientX, y: event.clientY };
+  });
+  vtextEl.addEventListener("pointerup", function (event) {
+    if (event.pointerType !== "touch" || !vTouchPoint) return;
+    vTouchWatchUntil = Date.now() + V_TOUCH_FIX_MS;
+    setTimeout(applyTouchFix, V_TOUCH_FIX_MS);
+  });
+  /*
+    触れた点にいちばん近い字の境目。caretRangeFromPoint が返す境目の前後2字ずつを、
+    実際の字の箱（縦書きでは字の上の辺が「その字の前」）と比べて選ぶ。
+    caretRangeFromPoint だけでは縦書きで1字ずれた（作者の実機、2026-10-05）
+  */
+  function nearestCaret(x, y) {
+    var r = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null;
+    if (!r || !vtextEl.contains(r.startContainer)) return null;
+    var node = r.startContainer;
+    if (node.nodeType !== 3) return r;
+    var len = node.length, best = null, bestD = Infinity;
+    for (var o = Math.max(0, r.startOffset - 2); o <= Math.min(len, r.startOffset + 2); o++) {
+      var probe = document.createRange();
+      var after = o < len;
+      probe.setStart(node, after ? o : o - 1);
+      probe.setEnd(node, after ? o + 1 : o);
+      if (probe.toString() === "\n") continue;
+      var rects = probe.getClientRects();
+      if (!rects.length) continue;
+      var b = rects[0];
+      var cy = after ? b.top : b.bottom;
+      var cx = (b.left + b.right) / 2;
+      // 列（横の位置）が違う境目は大きく離れているとみなす
+      var d = Math.abs(cy - y) + (Math.abs(cx - x) > (b.right - b.left) ? 10000 : 0);
+      if (d < bestD) { bestD = d; best = o; }
+    }
+    if (best === null) return r;
+    var out = document.createRange();
+    out.setStart(node, best);
+    out.collapse(true);
+    return out;
+  }
+  /*
+    iPad は縦書きの欄で、触れた所から離れた所にカーソルを置くことがある（作者の実機、
+    2026-10-05「1行をタップしているのに、ああああたりにカーソルが行きます」）。
+    iPad が置き終わるのを待ってから、1回のタップにつき1回、触れた点の近くへ置き直す。
+    iPad の描く印が追いつかないことがあるので、次の描画でもう一度同じ所へ置く
+  */
+  function applyTouchFix() {
+    if (!vTouchPoint || vComposing) return;
+    var sel = window.getSelection();
+    if (!sel) return;
+    // 長押しで範囲を選んだときは、そのまま使う
+    if (sel.rangeCount && !sel.isCollapsed) { vTouchPoint = null; return; }
+    var point = vTouchPoint;
+    vTouchPoint = null;
+    var range = nearestCaret(point.x, point.y);
+    if (!range) return;
+    if (document.activeElement !== vtextEl) vtextEl.focus();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    requestAnimationFrame(function () {
+      if (vComposing) return;
       sel.removeAllRanges();
       sel.addRange(range);
-    }, 0);
-  });
+    });
+  }
   modeWriteEl.addEventListener("click", function () { setMode("write"); });
   modeReadEl.addEventListener("click", function () { setMode("read"); });
   dirVEl.addEventListener("click", function () { setVertical(true); });
