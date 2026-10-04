@@ -1437,18 +1437,46 @@ var EditorLogic = (function () {
     iPad が自分で置いたときに引き直すと、iPad の描くカーソルの印と字の入る所が1字ずれた
     （作者の実機、2026-10-05「印と入る所がずれる」）。iPad の印は置き直しに追いつかないため
   */
-  vtextEl.addEventListener("pointerup", function (event) {
+  /*
+    パソコンの原稿エディター（拡張機能の manuscriptEditorHtml.ts の「押した所は、押した点から
+    取り直す」）と同じ形にそろえる：
+    - 押した点は、指を下ろした瞬間に控える（離した点ではない）
+    - ブラウザがカーソルを置くのは離したあと少し遅れてからなので、すぐには触らず、
+      短いあいだ（400ミリ秒）選択の知らせを見張り、欄の外に置かれたときだけ1回直す
+    - 変換中（日本語入力が動いているあいだ）は触らない
+  */
+  var vComposing = false;
+  var vTouchPoint = null;
+  var vTouchWatchUntil = 0;
+  var V_TOUCH_FIX_MS = 400;
+  vtextEl.addEventListener("compositionstart", function () { vComposing = true; });
+  vtextEl.addEventListener("compositionend", function () { vComposing = false; });
+  vtextEl.addEventListener("pointerdown", function (event) {
+    vTouchPoint = null;
     if (event.pointerType !== "touch" || vtextEl.contentEditable === "false") return;
-    var x = event.clientX, y = event.clientY;
-    setTimeout(function () {
-      var sel = window.getSelection();
-      if (sel && sel.rangeCount && vtextEl.contains(sel.anchorNode)) return;
-      var range = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null;
-      if (!range || !vtextEl.contains(range.startContainer)) return;
-      if (document.activeElement !== vtextEl) vtextEl.focus();
-      sel.removeAllRanges();
-      sel.addRange(range);
-    }, 0);
+    vTouchPoint = { x: event.clientX, y: event.clientY };
+  });
+  vtextEl.addEventListener("pointerup", function (event) {
+    if (event.pointerType !== "touch" || !vTouchPoint) return;
+    vTouchWatchUntil = Date.now() + V_TOUCH_FIX_MS;
+    setTimeout(applyTouchFix, V_TOUCH_FIX_MS);
+  });
+  function applyTouchFix() {
+    if (!vTouchPoint || vComposing || Date.now() > vTouchWatchUntil + 50) return;
+    var sel = window.getSelection();
+    if (!sel) return;
+    // ブラウザが欄の中に置いた、または範囲を選んだ（長押し）なら、そのまま使う
+    if (sel.rangeCount && (vtextEl.contains(sel.anchorNode) || !sel.isCollapsed)) return;
+    var point = vTouchPoint;
+    vTouchPoint = null;
+    var range = document.caretRangeFromPoint ? document.caretRangeFromPoint(point.x, point.y) : null;
+    if (!range || !vtextEl.contains(range.startContainer)) return;
+    if (document.activeElement !== vtextEl) vtextEl.focus();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  document.addEventListener("selectionchange", function () {
+    if (vTouchPoint && Date.now() <= vTouchWatchUntil) applyTouchFix();
   });
   modeWriteEl.addEventListener("click", function () { setMode("write"); });
   modeReadEl.addEventListener("click", function () { setMode("read"); });
