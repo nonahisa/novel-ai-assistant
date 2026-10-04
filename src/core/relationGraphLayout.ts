@@ -264,6 +264,9 @@ export const CAPTION_FONT_SIZE = 10;
 export const NODE_LABEL_BOX_HEIGHT = Math.ceil(NODE_LABEL_FONT_SIZE * 1.5);
 export const CAPTION_BOX_HEIGHT = Math.ceil(CAPTION_FONT_SIZE * 1.5);
 
+/** 名前の下の文字を置くとき、左右に空ける余白（画素） */
+export const CAPTION_MARGIN = 2;
+
 /**
  * 文字の幅の見積もり（画素）。
  *
@@ -410,7 +413,16 @@ function placeCaptions(
         width,
         CAPTION_BOX_HEIGHT
       );
-      if (obstacles.every((other) => overlapArea(box, other) === 0)) {
+      // 周りに少し余白を取って調べる。ちょうど接する置き方を許すと、描いた字が
+      // 見積もりよりわずかに広いときに隣の文字と重なる（2026-10-05 の画面の
+      // 自動テストで、相手30人の図に 0.35 画素の重なりが出た）
+      const padded: Box = {
+        left: box.left - CAPTION_MARGIN,
+        right: box.right + CAPTION_MARGIN,
+        top: box.top,
+        bottom: box.bottom,
+      };
+      if (obstacles.every((other) => overlapArea(padded, other) === 0)) {
         chosen = candidate;
         chosenBox = box;
         break;
