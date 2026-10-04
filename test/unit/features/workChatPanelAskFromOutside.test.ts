@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
+import * as vscode from "vscode";
 import type { AIRegistry } from "../../../src/ai/registry";
 import type { WorkEntry } from "../../../src/models/types";
 
@@ -36,7 +37,7 @@ const WORK: WorkEntry = {
   registeredAt: "2026-10-04T00:00:00.000Z",
 };
 
-function openPanel(): {
+function openPanel(works: WorkEntry[] = [WORK]): {
   panel: InstanceType<typeof WorkChatPanel>;
   posted: Array<{ type?: string; question?: string }>;
   asked: string[];
@@ -56,7 +57,7 @@ function openPanel(): {
     }
   ) as unknown as AIRegistry;
   const panel = new WorkChatPanel(
-    { list: () => [WORK] } as unknown as ConstructorParameters<typeof WorkChatPanel>[0],
+    { list: () => works } as unknown as ConstructorParameters<typeof WorkChatPanel>[0],
     ai,
     { run: async () => undefined } as unknown as ConstructorParameters<
       typeof WorkChatPanel
@@ -124,6 +125,42 @@ describe("相談パネルへ送る口", () => {
 
     expect(posted).toContainEqual({ type: "asked", question: QUESTION });
     expect(asked).toEqual([QUESTION]);
+  });
+
+  test("相談の相手（文書と範囲）を渡すと、素のエディターが無くてもその話の作品で相談する", async () => {
+    // **2つ目の作品に置く。** 選んである作品（先頭）と区別できないと、渡した
+    // 相手が効いたのか、作品の既定に倒れただけなのかが分からない
+    const other: WorkEntry = {
+      id: "w_other",
+      title: "雪の町",
+      folderPath: "C:\\novels\\w_other",
+      registeredAt: "2026-10-04T00:00:00.000Z",
+    };
+    const { panel } = openPanel([WORK, other]);
+    // 上部の表示の組み直し（作品設定を読みに行く）は、ここでは見ない
+    vi.spyOn(
+      panel as unknown as { postContext: () => Promise<void> },
+      "postContext"
+    ).mockResolvedValue(undefined);
+    const seen: Array<string | undefined> = [];
+    vi.spyOn(panel as unknown as { ask: (q: string) => Promise<void> }, "ask").mockImplementation(
+      async () => {
+        seen.push(panel.currentWorkId());
+      }
+    );
+    const document = {
+      uri: vscode.Uri.file("C:\\novels\\w_other\\001.txt"),
+      getText: () => "　朝が来た。",
+      offsetAt: () => 0,
+    } as unknown as vscode.TextDocument;
+    const range = {
+      start: { line: 0, character: 0 },
+      end: { line: 0, character: 6 },
+      active: { line: 0, character: 6 },
+    } as unknown as vscode.Range;
+
+    expect(await panel.askFromOutside(QUESTION, { document, range })).toBe(true);
+    expect(seen).toEqual(["w_other"]);
   });
 
   test("答えを待っている途中なら、送らない", async () => {
