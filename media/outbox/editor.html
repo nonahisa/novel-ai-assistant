@@ -1433,15 +1433,16 @@ var EditorLogic = (function () {
     paint();
   });
   /*
-    タップした所へカーソルを置く。指を離した時点で選択が欄の外か、置いた所が指の位置と違う
-    ことがあるので、選んでいない（範囲でない）ときだけ、指の位置から場所を引き直す
+    タップしてもカーソルが欄に入らなかったときだけ、指の位置から場所を引き直す。
+    iPad が自分で置いたときに引き直すと、iPad の描くカーソルの印と字の入る所が1字ずれた
+    （作者の実機、2026-10-05「印と入る所がずれる」）。iPad の印は置き直しに追いつかないため
   */
   vtextEl.addEventListener("pointerup", function (event) {
     if (event.pointerType !== "touch" || vtextEl.contentEditable === "false") return;
     var x = event.clientX, y = event.clientY;
     setTimeout(function () {
       var sel = window.getSelection();
-      if (sel && sel.rangeCount && !sel.isCollapsed) return;
+      if (sel && sel.rangeCount && vtextEl.contains(sel.anchorNode)) return;
       var range = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null;
       if (!range || !vtextEl.contains(range.startContainer)) return;
       if (document.activeElement !== vtextEl) vtextEl.focus();
