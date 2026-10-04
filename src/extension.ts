@@ -266,7 +266,12 @@ import { openPlotMode, refreshPlotMode } from "./features/plotModePanel";
 import { syncPlotCharacters } from "./features/plotCharacterSync";
 import { WORK_CHAT_VIEW_ID, WorkChatPanel } from "./features/workChatPanel";
 // 校正・メモパネルの［AIに相談］（設計書6.96.5）。素のエディターを開かずに材料を渡す
-import { consultFindingInChat } from "./features/findingConsult";
+import {
+  collectFindingMaterial,
+  consultFindingInChat,
+  type FindingMaterialDeps,
+} from "./features/findingConsult";
+import { askFindingAdvice } from "./features/findingAdvice";
 import { episodeLabel } from "./core/episodeLabel";
 // 押すべき項目をサイドバーで光らせる（設計書6.104）
 import { createActionSpotlight } from "./features/actionSpotlight";
@@ -2297,6 +2302,23 @@ export async function activate(
     await vscode.commands.executeCommand(`${WORK_CHAT_VIEW_ID}.focus`);
   }
 
+  /**
+   * 指摘の材料（一文と前後・話の題）を集める口。［AIに相談］と
+   * 「相談パネルで続ける」が同じものを使う
+   */
+  const findingMaterialDeps: FindingMaterialDeps = {
+    // 読むだけでタブは作らない。原稿エディターで開いていればその文書が返る
+    openDocument: (filePath) =>
+      Promise.resolve(vscode.workspace.openTextDocument(path.toUri(filePath))),
+    episodeLabelOf: async (target, filePath) => {
+      const scan = await scanWork(target);
+      const episode = scan.episodes.find((item) =>
+        path.isSamePath(item.filePath, filePath)
+      );
+      return episode ? episodeLabel(episode) : undefined;
+    },
+  };
+
   const sceneMemoDeps: SceneMemoDeps = {
     revealInManuscript: (filePath: string, line: number) =>
       manuscriptProvider.revealLine(filePath, line),
@@ -2309,25 +2331,35 @@ export async function activate(
     */
     openProposals: () => proposalPanel.reveal(),
     /*
-      ［AIに相談］——修正案の無い推敲の指摘について、相談パネルで助言を頼む
-      （作者の要望 2026-10-04）。**素のエディターを開かない**（作者の報告
-      2026-10-04。以前は本文を横の列に開いて渡し、3列目ができた）。材料
-      （話の題・行番号・一文と前後・指摘）を依頼文に入れ、相談の相手（文書と
-      その行）を相談パネルへ直接渡す。使うAI・課金の確認は相談と同じ
-      （`WorkChatPanel.askFromOutside` → `ask`）
+      ［AIに相談］——修正案の無い推敲の指摘について、短い助言を行のすぐ下に出す
+      （P-47。作者の報告 2026-10-05「くどすぎます」「表示される位置が離れすぎて
+      います」）。相談パネル（P-21）を通さない。割当は推敲、課金の確認と
+      キャッシュは `askFindingAdvice` が持つ
+    */
+    adviseFinding: async (work, finding, signal) => {
+      const material = await collectFindingMaterial(work, finding, findingMaterialDeps);
+      return await askFindingAdvice({
+        work,
+        registry: aiRegistry,
+        material: {
+          quote: material.quote,
+          finding: material.finding,
+          before: material.before,
+          after: material.after,
+        },
+        signal,
+      });
+    },
+    /*
+      助言の下の「相談パネルで続ける」——押したときだけ相談パネルへ渡す。
+      **素のエディターを開かない**（作者の報告 2026-10-04。以前は本文を横の列に
+      開いて渡し、3列目ができた）。材料（話の題・行番号・一文と前後・指摘）を
+      依頼文に入れ、相談の相手（文書とその行）を相談パネルへ直接渡す。
+      使うAI・課金の確認は相談と同じ（`WorkChatPanel.askFromOutside` → `ask`）
     */
     consultFinding: async (work, finding) => {
       await consultFindingInChat(work, finding, {
-        // 読むだけでタブは作らない。原稿エディターで開いていればその文書が返る
-        openDocument: (filePath) =>
-          Promise.resolve(vscode.workspace.openTextDocument(path.toUri(filePath))),
-        episodeLabelOf: async (target, filePath) => {
-          const scan = await scanWork(target);
-          const episode = scan.episodes.find((item) =>
-            path.isSamePath(item.filePath, filePath)
-          );
-          return episode ? episodeLabel(episode) : undefined;
-        },
+        ...findingMaterialDeps,
         askFromOutside: (question, target) =>
           workChatPanel.askFromOutside(question, target),
       });

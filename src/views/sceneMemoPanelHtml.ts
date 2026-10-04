@@ -23,8 +23,8 @@ import { noteToneClasses } from "../core/sceneMemoRows";
  * 修正案があれば「直す」（拡張機能が提案パネルの［適用］と同じ関数で
  * 本文へ当てる。作者の裁定 2026-10-03）、無ければ「本文へ」（原稿のその行へ
  * 飛ぶ。作者の裁定 2026-10-04——以前は「提案へ」だった）と、「見送る」（記録を
- * 足す）である。修正案の無い推敲の指摘には「AIに相談」も出る（相談パネルで
- * 助言を頼む）。提案パネルへ移る口は上の「提案パネル」1つだけ。**この画面は本文を直に書かない**
+ * 足す）である。修正案の無い推敲の指摘には「AIに相談」も出る（その行の
+ * すぐ下に短い助言が出る。P-47。相談パネルへは「相談パネルで続ける」を押したときだけ）。提案パネルへ移る口は上の「提案パネル」1つだけ。**この画面は本文を直に書かない**
  * ——頼むだけで、当てるのも戻すのも拡張機能の側である。
  */
 /**
@@ -217,6 +217,37 @@ select#tag option { color: var(--note-color, var(--vscode-dropdown-foreground));
   flex-direction: column;
   gap: 3px;
 }
+/* ［AIに相談］の答え（P-47）。**押した指摘の行のすぐ下**に、小さく出す
+   （作者の報告 2026-10-04「表示される位置が離れすぎています」） */
+.advice {
+  margin-top: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  border-left: 2px solid var(--note-color, var(--vscode-panel-border));
+  background: var(--vscode-textBlockQuote-background, transparent);
+  overflow-wrap: break-word;
+}
+.advice .point { display: block; }
+.advice .examples { margin: 3px 0 0; padding-left: 1.2em; }
+.advice .examples li { margin: 1px 0; }
+.advice .from { color: var(--vscode-descriptionForeground); }
+.advice .advice-acts {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.advice .advice-acts button { padding: 1px 8px; font-size: 11px; }
+/* 「相談パネルで続ける」は控えめに（押したときだけ相談パネルへ渡す） */
+.advice .linkish {
+  background: none;
+  padding: 0;
+  color: var(--vscode-textLink-foreground);
+  text-decoration: underline;
+}
+.advice .linkish:hover:enabled { background: none; }
+.advice .muted { color: var(--vscode-descriptionForeground); }
 </style>
 </head>
 <body>
@@ -338,9 +369,13 @@ el.list.addEventListener("click", function (event) {
     return;
   }
   if (act === "consult") {
-    // 修正案の無い推敲の指摘。相談パネルでAIに助言を頼む（拡張機能の側が
-    // 相談と同じ道で送る。この画面は頼むだけ）
+    // 修正案の無い推敲の指摘。その行の下に短い助言を出す（拡張機能の側が
+    // AIへ頼み、答えを一覧に添えて返す。この画面は頼むだけ）
     post("consult", { findingId: row.findingId });
+    return;
+  }
+  if (act === "stopAdvice" || act === "closeAdvice" || act === "consultInChat") {
+    post(act, { findingId: row.findingId });
     return;
   }
   if (act === "dismiss") {
@@ -409,7 +444,7 @@ function renderActions(row) {
     if (row.canConsult) {
       buttons.push(
         '<button class="done" data-act="consult" data-key="' + key +
-          '" title="この一文と指摘を添えて、相談パネルでAIに直し方の助言を頼みます（相談に割り当てたAIを使います。本文は変わりません）">AIに相談</button>'
+          '" title="何が引っかかっているかと、その箇所の言い換え例を、この行のすぐ下に短く出します（推敲に割り当てたAIを使います。本文は変わりません）">AIに相談</button>'
       );
     }
     buttons.push(
@@ -420,6 +455,48 @@ function renderActions(row) {
   }
   return '<button class="done" data-act="done" data-key="' + key +
     '" title="この行を本文から消します">済み</button>';
+}
+
+/**
+ * 行のすぐ下に出す助言（P-47）。**中身は拡張機能が持ち、一覧に添えて届く**
+ * ——画面は一覧のたびに作り直すので、ここに置くと消える。
+ *
+ * 考えている間は「考えています…」と［止める］。答えが出たら、何が引っかかって
+ * いるか1文と言い換え例（「本文の部分 → 言い換え」）を小さく並べ、［閉じる］と
+ * 「相談パネルで続ける」を1つずつ置く。言い換えは読むだけ（当てる口は無い）。
+ */
+function renderAdvice(row) {
+  const advice = row.advice;
+  if (!advice) return "";
+  const key = escapeHtml(row.key);
+  const close = '<button data-act="closeAdvice" data-key="' + key + '">閉じる</button>';
+  if (advice.status === "thinking") {
+    return '<div class="advice"><span class="muted">考えています…</span>' +
+      '<div class="advice-acts"><button data-act="stopAdvice" data-key="' + key +
+      '" title="AIへの問い合わせを止めます">止める</button></div></div>';
+  }
+  if (advice.status === "failed") {
+    return '<div class="advice"><span class="muted">' + escapeHtml(advice.reason) +
+      '</span><div class="advice-acts">' + close + "</div></div>";
+  }
+  const parts = [];
+  if (advice.point) parts.push('<span class="point">' + escapeHtml(advice.point) + "</span>");
+  if (advice.examples && advice.examples.length > 0) {
+    const items = advice.examples.map(function (example) {
+      return '<li><span class="from">「' + escapeHtml(example.from) + "」</span> → 「" +
+        escapeHtml(example.to) + "」</li>";
+    });
+    parts.push('<ul class="examples">' + items.join("") + "</ul>");
+  }
+  const acts = [close];
+  if (row.canConsultInChat) {
+    acts.push(
+      '<button class="linkish" data-act="consultInChat" data-key="' + key +
+        '" title="この一文と指摘を、相談パネルへ渡して続けて相談します">相談パネルで続ける</button>'
+    );
+  }
+  return '<div class="advice">' + parts.join("") +
+    '<div class="advice-acts">' + acts.join("") + "</div></div>";
 }
 
 function renderRow(row) {
@@ -442,6 +519,7 @@ function renderRow(row) {
           ? ""
           : '<span class="where">' + escapeHtml(where) + "</span>") +
       "</button>" +
+      renderAdvice(row) +
     "</span>" +
     renderActions(row) +
     "</div>";

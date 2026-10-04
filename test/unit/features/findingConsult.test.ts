@@ -159,8 +159,11 @@ describe("相談パネルへ渡す配線（extension.ts）", () => {
     expect(opener).not.toContain("ViewColumn.Beside");
   });
 
-  test("［AIに相談］の口は、本文を開かない", () => {
-    const consult = body("consultFinding:", "applyFinding:");
+  test("［AIに相談］と「相談パネルで続ける」の口は、本文を開かない", () => {
+    // 材料を集める口から、助言の口・相談パネルで続ける口までを見る
+    const consult = body("const findingMaterialDeps", "applyFinding:");
+    expect(consult).toContain("adviseFinding:");
+    expect(consult).toContain("consultFinding:");
     expect(consult).not.toContain("showTextDocument");
     expect(consult).not.toContain("openChatWithRange");
   });

@@ -114,6 +114,7 @@ describe("プロンプト設計書の形", () => {
     ["P-44", "src/prompts/plotSummary.ts", "PLOT_SUMMARY_VERSION"],
     ["P-45", "src/prompts/plotNameSuggest.ts", "PLOT_NAME_SUGGEST_VERSION"],
     ["P-46", "src/prompts/targetSheetAdvice.ts", "TARGET_SHEET_ADVICE_VERSION"],
+    ["P-47", "src/prompts/findingAdvice.ts", "FINDING_ADVICE_VERSION"],
   ];
 
   test.each(IMPLEMENTED)(

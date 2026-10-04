@@ -49,6 +49,8 @@ import {
 import { locateFindings } from "../core/findingLocation";
 import { findingAppliesDirectly, findingFileKey } from "../core/findingSource";
 import type { FindingFixOutcome } from "./proposalPanel";
+import type { FindingAdviceOutcome } from "./findingAdvice";
+import type { FindingAdviceExample } from "../core/findingAdviceValidation";
 import {
   FindingStore,
   findingsRetentionDays,
@@ -92,7 +94,7 @@ import {
  *
  * 修正案の無い指摘の行は［本文へ］で原稿のその行へ飛ぶ（作者の裁定 2026-10-04。
  * 以前の［提案へ］はやめ、提案パネルへ移る口は上の帯の［提案パネル］1つにした）。
- * 修正案の無い推敲の指摘には［AIに相談］も出す（相談パネルで助言を頼む）。
+ * 修正案の無い推敲の指摘には［AIに相談］も出す（行のすぐ下に短い助言を出す。P-47）。
  *
  * **AIの指摘を本文へ当てる処理は、この画面には書かない**（6.96.5）。
  * 修正案のある指摘の［直す］は1手で本文へ当たるが（作者の裁定、2026-10-03）、
@@ -133,14 +135,24 @@ export interface SceneMemoDeps {
    */
   openProposals?: () => void | Promise<void>;
   /**
-   * 修正案の無い推敲の指摘について、AIに助言を頼む口（画面のボタンは
-   * ［AIに相談］。作者の要望 2026-10-04「AIからの助言も欲しいです」）。
+   * 修正案の無い推敲の指摘について、短い助言を作る口（画面のボタンは
+   * ［AIに相談］。P-47、`findingAdvice.ts`）。
    *
-   * **「AI相談（選択範囲）」と同じ道で相談パネルを開き**、その一文と指摘の
-   * 中身を添えて助言を頼む。使うAI・課金の確認・繋がるかの確認は相談と同じ
-   * （迂回しない）。答えは相談パネルに出るだけで、本文にも置き場にも入らない。
+   * 答えは**押した指摘の行のすぐ下**に出す（作者の報告 2026-10-04「表示される
+   * 位置が離れすぎています」）。本文にも置き場にも入らない。
+   * `signal` は［止める］で中止する。
    *
-   * **渡されなければ出さない。**
+   * **渡されなければ［AIに相談］を出さない。**
+   */
+  adviseFinding?: (
+    work: WorkEntry,
+    finding: PlacedFinding,
+    signal: AbortSignal
+  ) => Promise<FindingAdviceOutcome>;
+  /**
+   * 助言の下の「相談パネルで続ける」——その指摘を相談パネル（P-21）へ渡す口。
+   *
+   * 短い助言で足りないときだけ作者が押す。**渡されなければ出さない。**
    */
   consultFinding?: (work: WorkEntry, finding: PlacedFinding) => Promise<void>;
   /**
@@ -458,8 +470,14 @@ type PanelMessage =
   | { type: "done"; filePath: string; line: number; raw: string }
   /** 修正案のあるAIの指摘を、提案パネルの［適用］と同じ道で本文へ当てる（6.96.5） */
   | { type: "fix"; findingId: string }
-  /** 修正案の無い推敲の指摘について、相談パネルでAIに助言を頼む（設計書6.96.5） */
+  /** 修正案の無い推敲の指摘について、行の下に短い助言を出す（P-47。設計書6.96.5） */
   | { type: "consult"; findingId: string }
+  /** 考えている途中の助言を止める */
+  | { type: "stopAdvice"; findingId: string }
+  /** 行の下の助言を閉じる */
+  | { type: "closeAdvice"; findingId: string }
+  /** 助言の下の「相談パネルで続ける」 */
+  | { type: "consultInChat"; findingId: string }
   /** 上の帯の［提案パネル］ */
   | { type: "openProposals" }
   /** 帯に出ている直近の1手（［直す］か［済み］）を戻す */
@@ -478,6 +496,24 @@ interface DoneStep {
   /** 帯に出す話の呼び名。消す前に引いておく（読み直すと引けなくなる） */
   label: string;
 }
+
+/**
+ * 行の下に出している助言（P-47）。
+ *
+ * **拡張機能の側で持つ。** 画面は一覧を届くたびに作り直す（カーソルが
+ * 動いただけでも描き直す）ので、画面の中に置くと消える。鍵は指摘の id
+ * （行番号は読み直しで変わる）。
+ */
+type AdviceView =
+  | { status: "thinking" }
+  | {
+      status: "answered";
+      point: string;
+      examples: FindingAdviceExample[];
+      noNeed: boolean;
+      cached: boolean;
+    }
+  | { status: "failed"; reason: string };
 
 /** 上の帯の［戻す］で戻せる、直近の1手 */
 type UndoableStep = { kind: "fix"; finding: PlacedFinding } | DoneStep;
@@ -530,6 +566,11 @@ class SceneMemoPanel {
    */
   private lastUndoable: UndoableStep | null = null;
 
+  /** 行の下に出している助言（指摘の id → 中身） */
+  private readonly advice = new Map<string, AdviceView>();
+  /** 考えている途中の助言の止め口（［止める］） */
+  private readonly adviceAborts = new Map<string, AbortController>();
+
   constructor(
     context: vscode.ExtensionContext,
     private readonly work: WorkEntry,
@@ -549,7 +590,12 @@ class SceneMemoPanel {
       { enableScripts: true, retainContextWhenHidden: true }
     );
     context.subscriptions.push(this.panel);
-    this.panel.onDidDispose(() => openPanels.delete(work.id));
+    this.panel.onDidDispose(() => {
+      openPanels.delete(work.id);
+      // 閉じたら考えている途中の助言も止める（答えを出す先が無い）
+      for (const controller of this.adviceAborts.values()) controller.abort();
+      this.adviceAborts.clear();
+    });
 
     this.panel.webview.html = buildSceneMemoPanelHtml(
       createNonce(),
@@ -659,6 +705,14 @@ class SceneMemoPanel {
       ) {
         this.lastUndoable = null;
       }
+      // 一覧から消えた指摘（直した・見送った）の助言は捨てる
+      for (const id of [...this.advice.keys()]) {
+        if (!this.findings.some((finding) => finding.id === id)) {
+          this.adviceAborts.get(id)?.abort();
+          this.adviceAborts.delete(id);
+          this.advice.delete(id);
+        }
+      }
       // 消えた付箋を光らせたままにしない
       if (!this.memos.some((memo) => memoKey(memo) === this.activeKey)) {
         this.activeKey = "";
@@ -746,6 +800,18 @@ class SceneMemoPanel {
           return;
         case "consult":
           await this.consult(message.findingId);
+          return;
+        case "stopAdvice":
+          this.adviceAborts.get(message.findingId)?.abort();
+          return;
+        case "closeAdvice":
+          this.adviceAborts.get(message.findingId)?.abort();
+          this.adviceAborts.delete(message.findingId);
+          this.advice.delete(message.findingId);
+          this.post();
+          return;
+        case "consultInChat":
+          await this.consultInChat(message.findingId);
           return;
         case "openProposals":
           await this.deps.openProposals?.();
@@ -1040,13 +1106,64 @@ class SceneMemoPanel {
   }
 
   /**
-   * ［AIに相談］——修正案の無い推敲の指摘について、相談パネルで助言を頼む
-   * （作者の要望 2026-10-04。設計書6.96.5）。
+   * ［AIに相談］——修正案の無い推敲の指摘について、短い助言を行のすぐ下に出す
+   * （P-47。作者の報告 2026-10-04「くどすぎます」「表示される位置が離れすぎて
+   * います」。設計書6.96.5）。
    *
    * **本文にも置き場にも書かない。** 助言を読んで直すかどうかを決めるのは
    * 作者である。位置は**いまの行**を渡す（6.96.3）。
+   * 同じ指摘で考えている途中なら、もう一度押しても重ねて呼ばない。
    */
   private async consult(findingId: string): Promise<void> {
+    const finding = this.findings.find((item) => item.id === findingId);
+    const advise = this.deps.adviseFinding;
+    if (!finding || !advise) return;
+    if (this.adviceAborts.has(findingId)) return;
+
+    const controller = new AbortController();
+    this.adviceAborts.set(findingId, controller);
+    this.advice.set(findingId, { status: "thinking" });
+    this.post();
+    try {
+      const outcome = await advise(this.work, finding, controller.signal);
+      // 待つ間に閉じられた（止め口が外れた）なら、何もしない
+      if (this.adviceAborts.get(findingId) !== controller) return;
+      if (outcome.kind === "answered") {
+        this.advice.set(findingId, {
+          status: "answered",
+          point: outcome.advice.point,
+          examples: outcome.advice.examples,
+          noNeed: outcome.advice.noNeed,
+          cached: outcome.cached,
+        });
+      } else if (outcome.kind === "failed") {
+        this.advice.set(findingId, { status: "failed", reason: outcome.reason });
+      } else {
+        // 断った・止めた——伝わっているので、行の下には何も残さない
+        this.advice.delete(findingId);
+      }
+    } catch (error) {
+      if (this.adviceAborts.get(findingId) !== controller) return;
+      logFailure("校正・メモパネル：AIに相談", {
+        作品: this.work.title,
+        詳細: messageOf(error),
+      });
+      this.advice.set(findingId, {
+        status: "failed",
+        reason: "AIに相談できませんでした。ログに理由が残っています。",
+      });
+    } finally {
+      if (this.adviceAborts.get(findingId) === controller) {
+        this.adviceAborts.delete(findingId);
+      }
+    }
+    this.post();
+  }
+
+  /**
+   * 助言の下の「相談パネルで続ける」。押したときだけ、今までの相談パネルへ渡す。
+   */
+  private async consultInChat(findingId: string): Promise<void> {
     const finding = this.findings.find((item) => item.id === findingId);
     if (!finding || !this.deps.consultFinding) return;
     await this.deps.consultFinding(this.work, finding);
@@ -1344,6 +1461,10 @@ class SceneMemoPanel {
       // 修正案の無い推敲の指摘には［AIに相談］も出す（作者の要望 2026-10-04）。
       // **口が無ければ出さない**（押しても何も起きない口を作らない）
       canConsult: this.canConsult(finding),
+      // 行のすぐ下に出す助言（P-47）。無ければ出さない
+      advice: this.advice.get(finding.id) ?? null,
+      // 助言の下の「相談パネルで続ける」。口が無ければ出さない
+      canConsultInChat: this.deps.consultFinding !== undefined,
       section,
     };
   }
@@ -1368,7 +1489,7 @@ class SceneMemoPanel {
    */
   private canConsult(finding: PlacedFinding): boolean {
     return (
-      this.deps.consultFinding !== undefined &&
+      this.deps.adviseFinding !== undefined &&
       finding.category === "proofread" &&
       this.fixActionOf(finding) !== "apply"
     );
