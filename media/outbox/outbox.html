@@ -112,6 +112,9 @@ h1 {
 }
 .quote { font-family: var(--font-display); overflow-wrap: anywhere; }
 .quote mark { background: var(--mark); color: inherit; padding: 0 1px; }
+/* 傍点は点で、ルビは振り仮名で見せる（原稿の記号は画面に出さない） */
+.dots { text-emphasis: filled sesame; -webkit-text-emphasis: filled sesame; text-emphasis-position: over right; -webkit-text-emphasis-position: over right; }
+ruby rt { font-size: 0.55em; }
 .fixto { font-size: 0.95rem; }
 .fixto strong { color: var(--fix); }
 .why { color: var(--muted); font-size: 0.9rem; }
@@ -519,13 +522,48 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
   }
 
   /*
+    原稿の記号（傍点 {{語}}・《《語》》、ルビ {漢字|かな}・｜漢字《かな》）を、画面では記号を外して見せる
+    （作者の指摘 2026-10-04「記号は外して見せてください」）。保存する記録・［自分で直す］の欄は原稿の字のまま
+  */
+  var MARKUP = /\{\{([^{}\n]+)\}\}|《《([^《》\n]+)》》|\{([^{}|\n]+)\|([^{}\n]+)\}|[|｜]([^|｜《》\n]+)《([^《》\n]+)》/g;
+
+  // 記号を外した字だけ（字の差を取るときに使う）
+  function plainOf(text) {
+    return str(text).replace(MARKUP, function (m, d1, d2, rb1, rt1, rb2) {
+      return d1 || d2 || rb1 || rb2 || "";
+    });
+  }
+
+  // 記号を、点と振り仮名の要素に組み替えて node へ足す
+  function appendMarked(node, text) {
+    var t = str(text);
+    var last = 0;
+    MARKUP.lastIndex = 0;
+    var m;
+    while ((m = MARKUP.exec(t)) !== null) {
+      if (m.index > last) node.appendChild(document.createTextNode(t.slice(last, m.index)));
+      if (m[1] || m[2]) {
+        node.appendChild(el("span", "dots", m[1] || m[2]));
+      } else {
+        var ruby = document.createElement("ruby");
+        ruby.appendChild(document.createTextNode(m[3] || m[5]));
+        ruby.appendChild(el("rt", "", m[4] || m[6]));
+        node.appendChild(ruby);
+      }
+      last = MARKUP.lastIndex;
+    }
+    if (last < t.length) node.appendChild(document.createTextNode(t.slice(last)));
+    return node;
+  }
+
+  /*
     指摘の差を、印を付けて見せられるときだけ返す。修正案が無い・直す語が原文に無い・
     変わる字が半分を超える（印だらけで読みにくい）ときは null（今までの出し方に戻す）
   */
   function diffOf(f) {
-    var original = str(f.original);
-    var target = str(f.target);
-    var suggestion = str(f.suggestion);
+    var original = plainOf(f.original);
+    var target = plainOf(f.target);
+    var suggestion = plainOf(f.suggestion);
     if (!suggestion || !target) return null;
     var at = original.indexOf(target);
     if (at < 0) return null;
@@ -565,10 +603,10 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     var original = str(f.original);
     var target = str(f.target);
     var at = target ? original.indexOf(target) : -1;
-    if (at < 0) { node.textContent = original; return node; }
-    node.appendChild(document.createTextNode(original.slice(0, at)));
-    node.appendChild(el("mark", "", target));
-    node.appendChild(document.createTextNode(original.slice(at + target.length)));
+    if (at < 0) return appendMarked(node, original);
+    appendMarked(node, original.slice(0, at));
+    node.appendChild(appendMarked(el("mark", ""), target));
+    appendMarked(node, original.slice(at + target.length));
     return node;
   }
 
@@ -917,11 +955,11 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
           item.appendChild(quoteNode(f));
           if (str(f.suggestion)) {
             var to = el("div", "fixto", "直すと：");
-            to.appendChild(el("strong", "", str(f.suggestion)));
+            to.appendChild(appendMarked(el("strong", ""), f.suggestion));
             item.appendChild(to);
           }
         }
-        if (str(f.message)) item.appendChild(el("div", "why", str(f.message)));
+        if (str(f.message)) item.appendChild(appendMarked(el("div", "why"), f.message));
 
         var base = { episode: group.file, baseHash: group.hash, findingId: fid, line: f.line };
         // 採否は作品の持ち主だけ（編集部の意見はメモで残す。6.115）。決めた指摘には出さない
