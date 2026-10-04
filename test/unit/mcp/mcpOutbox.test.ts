@@ -8,6 +8,7 @@ import { parseFindingLines, resolveFindings, type Finding } from "../../../src/m
 import {
   AUTHOR_EDIT_NOTE,
   BODY_CHANGED_REASON,
+  OUTBOX_CONTEXT_CHARS,
   OVERLAP_REASON,
   findOutboxTemplate,
   outboxImport,
@@ -16,6 +17,7 @@ import {
 } from "../../../src/mcp/tools/outbox";
 import { exposureOf } from "../../../src/mcp/tools/accessLog";
 import { locateAppliedSuggestion } from "../../../src/core/proposalUndo";
+import { locateAppliedFinding, recentAppliedFindings } from "../../../src/core/appliedFindings";
 
 /**
  * 出先の原稿箱の段1（設計書6.115）——`outbox.pack` と `outbox.import`。
@@ -113,9 +115,10 @@ function findingStatus(id: string): string | undefined {
 }
 
 describe("outbox.pack——送る中身", () => {
-  it("本文そのものは返さない（題・ハッシュ・未処理の指摘の一文だけ）", () => {
+  it("本文の全体は返さない（題・ハッシュ・未処理の指摘の一文と、その前後2行だけ）", () => {
     const secret = "この一文は外へ出てはいけない本文である。";
-    writeBody(`一行目\n彼はわらった。\n${secret}\n`);
+    // 前後に添えるのは中身のある2行まで。3行目より先は出ない
+    writeBody(`一行目\n彼はわらった。\n後ろの一。\n\n後ろの二。\n${secret}\n`);
     placeFindings([finding()]);
 
     const result = outboxPack({ folder: root });
@@ -239,7 +242,7 @@ describe("ページの雛形——決めた状態・自分で直す・取り込�
 
   it("［自分で直す］は空・改行入り・元と同じ文を送らず、原文を添えて edit を足す", () => {
     expect(page).toContain('if (!text.trim()) { say("直した文が空です。"); return; }');
-    expect(page).toContain("if (/[\\r\\n]/.test(text))");
+    expect(page).toContain("/[\\r\\n]/.test(text))");
     expect(page).toContain("if (text === original)");
     expect(page).toContain('kind: "edit", original: original, text: text');
   });
@@ -766,5 +769,290 @@ describe("outbox.import——同じ指摘に持ち主の判断が重なったと
       ["theirs", "refused"],
     ]);
     expect(readBytes().toString("utf8")).toBe("一行目\n彼は笑った。\n");
+  });
+});
+
+/*
+  指摘の前後の文と、範囲の指摘（作者の報告 2026-10-04「『た』が4文続いている場合などは、
+  前後がわからないと修正できません」）。語尾単調の指摘は、続いている範囲の先頭の文を原文に持ち、
+  説明に「（N〜M行目）」を書く（core/proofreadValidation.ts の describeMonotonousRun）
+*/
+const RANGE_BODY = [
+  "前の一。",
+  "前の二。",
+  "",
+  "彼は歩いた。",
+  "空は青かった。",
+  "",
+  "風が吹いた。鳥が鳴いた。",
+  "後ろの一。",
+  "",
+  "後ろの二。",
+  "後ろの三。",
+  "",
+].join("\n");
+const RANGE_LINES = ["彼は歩いた。", "空は青かった。", "", "風が吹いた。鳥が鳴いた。"];
+const RANGE_TEXT = RANGE_LINES.join("\n");
+
+const MONOTONY = finding({
+  id: "f_mono",
+  hintLine: 4,
+  original: "彼は歩いた。",
+  target: "彼は歩いた。",
+  suggestion: "",
+  message: "「た。」で終わる地の文が4文続いています（4〜7行目）：彼は歩いた。 ／ 空は青かった。 ／ …",
+  category: "proofread",
+  label: "推敲",
+});
+
+describe("outbox.pack——指摘の前後の文と範囲", () => {
+  it("前後の中身のある行を2行ずつ（空行は飛ばす）と、範囲の全行を返す", () => {
+    writeBody(RANGE_BODY);
+    placeFindings([MONOTONY]);
+
+    const context = outboxPack({ folder: root }).findings[0].context;
+
+    expect(context).toEqual({
+      before: ["前の一。", "前の二。"],
+      lines: RANGE_LINES,
+      startLine: 4,
+      after: ["後ろの一。", "後ろの二。"],
+      range: true,
+      clipped: false,
+      rangeClipped: false,
+    });
+  });
+
+  it("本文が上でずれていても、いまの位置から範囲を取る", () => {
+    writeBody(`足した一行。\n${RANGE_BODY}`);
+    placeFindings([MONOTONY]);
+
+    const context = outboxPack({ folder: root }).findings[0].context;
+
+    expect(context?.startLine).toBe(5);
+    expect(context?.lines).toEqual(RANGE_LINES);
+    expect(context?.before).toEqual(["前の一。", "前の二。"]);
+  });
+
+  it("範囲の無い指摘は、指摘の行とその前後", () => {
+    writeBody("前の一。\n彼はわらった。\n後ろの一。\n");
+    placeFindings([finding()]);
+
+    const context = outboxPack({ folder: root }).findings[0].context;
+
+    expect(context).toMatchObject({
+      before: ["前の一。"],
+      lines: ["彼はわらった。"],
+      startLine: 2,
+      after: ["後ろの一。"],
+      range: false,
+      clipped: false,
+      rangeClipped: false,
+    });
+  });
+
+  it("1指摘あたりの上限を超えたら切って印を付ける（範囲まで切れたら rangeClipped）", () => {
+    const longBefore = "前".repeat(1990);
+    writeBody([longBefore, "彼はわらった。", "後ろの一。", ""].join("\n"));
+    placeFindings([finding({ hintLine: 2 })]);
+    const context = outboxPack({ folder: root }).findings[0].context!;
+    expect(context.lines).toEqual(["彼はわらった。"]);
+    expect(context.clipped).toBe(true);
+    expect(context.rangeClipped).toBe(false);
+    const sent = [...context.before, ...context.lines, ...context.after].join("");
+    expect([...sent].length).toBeLessThanOrEqual(OUTBOX_CONTEXT_CHARS + 2);
+
+    const longLine = "長".repeat(2500) + "た。";
+    writeBody(["前の一。", "", "彼は歩いた。", longLine, "空は青かった。", "風が吹いた。", ""].join("\n"));
+    placeFindings([{ ...MONOTONY, hintLine: 3, message: "「た。」で終わる地の文が4文続いています（3〜6行目）" }]);
+    const cut = outboxPack({ folder: root }).findings[0].context!;
+    expect(cut.rangeClipped).toBe(true);
+    expect(cut.clipped).toBe(true);
+    expect([...cut.lines.join("")].length).toBeLessThanOrEqual(OUTBOX_CONTEXT_CHARS + 1);
+  });
+});
+
+describe("outbox.import——範囲を自分で直す（複数行の edit）", () => {
+  function rangeEdit(overrides: Partial<OutboxRecord> = {}): OutboxRecord {
+    return edit({
+      id: "r_edit",
+      findingId: "f_mono",
+      original: RANGE_TEXT,
+      text: "彼は歩き、空は青かった。\n\n風が吹いて、鳥が鳴いた。",
+      ...overrides,
+    });
+  }
+
+  it("範囲の全行を、行数の違う作者の文に置き換える", () => {
+    writeBody(RANGE_BODY);
+    placeFindings([MONOTONY]);
+
+    const result = outboxImport({ folder: root, ownerId: OWNER, records: [rangeEdit()] });
+
+    expect(result.results[0]).toMatchObject({ status: "imported" });
+    expect(readBytes().toString("utf8")).toBe(
+      RANGE_BODY.replace(RANGE_TEXT, "彼は歩き、空は青かった。\n\n風が吹いて、鳥が鳴いた。")
+    );
+    expect(findingStatus("f_mono")).toBe("accepted");
+    const mine = resolveFindings(findingLines()).find((view) => view.suggestion.startsWith("彼は歩き"));
+    expect(mine).toMatchObject({
+      status: "accepted",
+      original: RANGE_TEXT,
+      target: RANGE_TEXT,
+      hintLine: 4,
+      before: "前の二。",
+      after: "後ろの一。",
+    });
+    expect(mine?.decision?.note).toBe(AUTHOR_EDIT_NOTE);
+  });
+
+  it("行を増やす直しも入れられる", () => {
+    writeBody(RANGE_BODY);
+    placeFindings([MONOTONY]);
+    const longer = "彼は歩いた。\n足を止める。\n空は青かった。\n\n風が吹く。鳥が鳴いた。";
+
+    const result = outboxImport({ folder: root, ownerId: OWNER, records: [rangeEdit({ text: longer })] });
+
+    expect(result.results[0].status).toBe("imported");
+    expect(readBytes().toString("utf8")).toBe(RANGE_BODY.replace(RANGE_TEXT, longer));
+  });
+
+  it("範囲がパソコンの本文に無ければ断り、本文も判断も変えない", () => {
+    writeBody(RANGE_BODY.replace("空は青かった。", "空は灰色だった。"));
+    placeFindings([MONOTONY]);
+    const before = readBytes();
+
+    const result = outboxImport({ folder: root, ownerId: OWNER, records: [rangeEdit()] });
+
+    expect(result.results[0].status).toBe("refused");
+    expect(result.results[0].reason).toContain("見つかりません");
+    expect(readBytes().equals(before)).toBe(true);
+    expect(findingStatus("f_mono")).toBe("pending");
+  });
+
+  it("範囲が2か所以上あれば断る", () => {
+    writeBody(`${RANGE_BODY}${RANGE_TEXT}\n`);
+    placeFindings([MONOTONY]);
+    const before = readBytes();
+
+    const result = outboxImport({ folder: root, ownerId: OWNER, records: [rangeEdit()] });
+
+    expect(result.results[0].status).toBe("refused");
+    expect(result.results[0].reason).toContain("2か所以上");
+    expect(readBytes().equals(before)).toBe(true);
+  });
+
+  it("指摘の原文を含まない範囲・行の途中から始まる範囲は断る", () => {
+    writeBody(RANGE_BODY);
+    placeFindings([MONOTONY]);
+    const before = readBytes();
+
+    const notMine = outboxImport({
+      folder: root,
+      ownerId: OWNER,
+      records: [rangeEdit({ id: "x1", original: "後ろの一。\n\n後ろの二。" })],
+    });
+    expect(notMine.results[0].status).toBe("refused");
+    expect(notMine.results[0].reason).toContain("指摘の原文");
+
+    const midLine = outboxImport({
+      folder: root,
+      ownerId: OWNER,
+      records: [
+        rangeEdit({ id: "x2", original: "前の二。\n\n彼は歩いた。\n空は青", text: "前の二。\n彼は歩き、空は青" }),
+      ],
+    });
+    expect(midLine.results[0].status).toBe("refused");
+    expect(midLine.results[0].reason).toContain("行の途中");
+    expect(readBytes().equals(before)).toBe(true);
+    expect(findingStatus("f_mono")).toBe("pending");
+  });
+
+  it("Shift_JIS・CRLF の本文で、文字コードと改行を保つ（ページから CRLF で来ても本文の形に揃える）", () => {
+    const crlf = RANGE_BODY.split("\n").join("\r\n");
+    writeBody(iconv.encode(crlf, "shift_jis"));
+    placeFindings([MONOTONY]);
+
+    const result = outboxImport({
+      folder: root,
+      ownerId: OWNER,
+      records: [
+        rangeEdit({
+          original: RANGE_LINES.join("\r\n"),
+          text: "彼は歩き、空は青かった。\r\n\r\n風が吹いて、鳥が鳴いた。",
+        }),
+      ],
+    });
+
+    expect(result.results[0].status).toBe("imported");
+    const expected = RANGE_BODY.replace(RANGE_TEXT, "彼は歩き、空は青かった。\n\n風が吹いて、鳥が鳴いた。")
+      .split("\n")
+      .join("\r\n");
+    expect(readBytes().equals(iconv.encode(expected, "shift_jis"))).toBe(true);
+  });
+
+  it("1行の edit は今までどおり（改行入りは断る）", () => {
+    writeBody(`一行目\n${PROOF.original}\n`);
+    placeFindings([PROOF]);
+    const refused = outboxImport({
+      folder: root,
+      ownerId: OWNER,
+      records: [edit({ id: "n1", text: "一行目。\n二行目。" })],
+    });
+    expect(refused.results[0].reason).toContain("改行");
+    const ok = outboxImport({ folder: root, ownerId: OWNER, records: [edit({ id: "n2" })] });
+    expect(ok.results[0].status).toBe("imported");
+    expect(readBytes().toString("utf8")).toBe(`一行目\n${MINE}\n`);
+  });
+
+  it("「当てたもの」：1行へまとめた直しは［戻す］で戻せ、複数行の直しは並べない（落ちない）", () => {
+    writeBody(RANGE_BODY);
+    placeFindings([MONOTONY]);
+    outboxImport({
+      folder: root,
+      ownerId: OWNER,
+      records: [rangeEdit({ id: "one", text: "彼は歩き、空は青く、風が吹いて鳥が鳴いた。" })],
+    });
+
+    const views = resolveFindings(findingLines());
+    const merged = views.find((view) => view.suggestion.startsWith("彼は歩き"))!;
+    const text = decodeBytes(readBytes()).text;
+    const line = locateAppliedFinding(merged, text);
+    expect(line).toBe(4);
+    // 提案パネルの undoIssue と同じ手順で戻す
+    const lines = text.split("\n");
+    const lineText = lines[line! - 1];
+    const located = locateAppliedSuggestion(lineText, merged);
+    expect(located.kind).toBe("found");
+    if (located.kind !== "found") return;
+    lines[line! - 1] =
+      lineText.slice(0, located.at) + merged.target + lineText.slice(located.at + merged.suggestion.length);
+    expect(lines.join("\n")).toBe(RANGE_BODY);
+
+    // 複数行の直し：戻す口には並ばない（行で探すため見つからない）。落ちもしない
+    const multi = { ...merged, suggestion: "彼は歩き、\n空は青かった。" };
+    expect(locateAppliedFinding(multi, RANGE_BODY.replace(RANGE_TEXT, multi.suggestion))).toBeUndefined();
+    expect(() => recentAppliedFindings([multi], 3)).not.toThrow();
+  });
+});
+
+describe("ページの雛形——前後の文と範囲の直し", () => {
+  const repo = nodePath.join(__dirname, "..", "..", "..");
+  const page = fs.readFileSync(nodePath.join(repo, "media", "outbox", "outbox.html"), "utf8");
+
+  it("前後の文を薄い字で出し、長いときは畳んで［前後を見る］で開く。記号は appendMarked で外す", () => {
+    expect(page).toContain("function contextNode(f)");
+    expect(page).toContain("前後を見る");
+    expect(page).toMatch(/function contextNode\(f\)[\s\S]*appendMarked\(/);
+    expect(page).toMatch(/var ctx = contextNode\(f\);\s*if \(ctx\) item\.appendChild\(ctx\);/);
+  });
+
+  it("範囲の指摘は、範囲の全行を欄に入れて original に添える（切れた範囲では直させない）", () => {
+    expect(page).toContain("function rangeTextOf(f)");
+    expect(page).toContain("c.lines.length < 2 || c.rangeClipped) return null;");
+    expect(page).toMatch(/var multi = rangeTextOf\(f\) !== null;/);
+    expect(page).toContain("var original = multi ? rangeTextOf(f) : str(f.original);");
+    // 範囲の直しは改行を許し、1文の直しは今までどおり改行を入れない
+    expect(page).toContain("if (!multi && /[\\r\\n]/.test(text))");
   });
 });

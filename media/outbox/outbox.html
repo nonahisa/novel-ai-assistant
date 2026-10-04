@@ -224,6 +224,19 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
 .edit-panel textarea { min-height: 7em; font-family: var(--font-display); }
 .edit-panel > button, .edit > button { align-self: flex-start; }
 .edit { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* 前後の文：指摘の下に薄い字で。範囲の行だけ地の色に戻し、左の線で範囲と分かるように */
+.context {
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  color: var(--muted);
+  min-width: 0;
+}
+/* 開閉の三角を残す（display を変えると消える）。親指で押せる高さは上下の余白で取る */
+.context summary { cursor: pointer; font-family: var(--font-body); font-size: 0.85rem; padding-block: 8px; color: var(--accent); }
+.ctx-lines { display: flex; flex-direction: column; padding-left: 10px; border-left: 2px solid var(--rule); }
+.ctx-line { white-space: pre-wrap; overflow-wrap: anywhere; min-height: 1.4em; }
+.ctx-line.in-range { color: var(--ink); border-left: 2px solid var(--accent); margin-left: -12px; padding-left: 10px; }
+.ctx-note { font-family: var(--font-body); font-size: 0.75rem; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
@@ -611,6 +624,79 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
   }
 
   /*
+    指摘の前後の文（作者の報告 2026-10-04「『た』が4文続いている場合などは、前後がわからないと
+    修正できません」）。パソコンが送った context（前後の中身のある行・範囲の全行）を薄い字で出す。
+    範囲の行は地の色と左の線で分ける。長いときは畳んで［前後を見る］で開く（開いたかは指摘ごとに
+    控え、組み直しで閉じない）。記号は appendMarked で外す（保存する記録は原稿の字のまま）
+  */
+  var CONTEXT_FOLD_CHARS = 160;
+  var CONTEXT_FOLD_LINES = 4;
+  var contextOpen = {};
+
+  function contextOf(f) {
+    var c = f && f.context;
+    if (!c || typeof c !== "object") return null;
+    var lines = Array.isArray(c.lines) ? c.lines.map(str) : [];
+    return {
+      before: Array.isArray(c.before) ? c.before.map(str) : [],
+      lines: lines,
+      after: Array.isArray(c.after) ? c.after.map(str) : [],
+      startLine: typeof c.startLine === "number" ? c.startLine : null,
+      range: c.range === true,
+      clipped: c.clipped === true,
+      rangeClipped: c.rangeClipped === true
+    };
+  }
+
+  // 範囲の行の見出し（「29〜35行目」）。範囲でなければ空
+  function rangeLabelOf(f) {
+    var c = contextOf(f);
+    if (!c || !c.range || c.startLine === null || c.lines.length < 2) return "";
+    return c.startLine + "〜" + (c.startLine + c.lines.length - 1) + "行目";
+  }
+
+  /*
+    範囲を［自分で直す］に使える指摘なら、範囲の全行（改行つき）を返す。使えなければ null。
+    切った範囲（rangeClipped）は使わない——切れた範囲を直して送ると、取り込みが一字違わず探せない
+  */
+  function rangeTextOf(f) {
+    var c = contextOf(f);
+    if (!c || !c.range || c.lines.length < 2 || c.rangeClipped) return null;
+    return c.lines.join("\n");
+  }
+
+  function contextNode(f) {
+    var c = contextOf(f);
+    if (!c) return null;
+    if (c.before.length === 0 && c.after.length === 0 && !c.range) return null;
+    var id = str(f.id);
+    var box = el("div", "ctx-lines");
+    function add(text, inRange) {
+      box.appendChild(appendMarked(el("div", "ctx-line" + (inRange ? " in-range" : "")), text));
+    }
+    c.before.forEach(function (t) { add(t, false); });
+    c.lines.forEach(function (t) { add(t, true); });
+    c.after.forEach(function (t) { add(t, false); });
+    if (c.clipped) box.appendChild(el("div", "ctx-note", "長いので途中で切っています。"));
+
+    var all = c.before.concat(c.lines, c.after);
+    var size = Array.from(all.join("")).length;
+    var long = size > CONTEXT_FOLD_CHARS || all.length > CONTEXT_FOLD_LINES;
+    if (!long) {
+      var plain = el("div", "context");
+      plain.appendChild(box);
+      return plain;
+    }
+    var details = document.createElement("details");
+    details.className = "context";
+    details.open = contextOpen[id] === true;
+    details.appendChild(el("summary", "", "前後を見る" + (c.range && rangeLabelOf(f) ? "（" + rangeLabelOf(f) + "を含む）" : "")));
+    details.addEventListener("toggle", function () { contextOpen[id] = details.open; });
+    details.appendChild(box);
+    return details;
+  }
+
+  /*
     ［自分で直す］（作者の裁定 2026-10-04「取り込みでそのまま当てる」）。原文の一文を
     初めから入れた欄で作者が書き直し、［この文で直す］で記録を1件足す。原稿へ入るのは
     パソコンで取り込んだときで、原文がパソコンの本文に一字違わず1か所だけあるときだけ。
@@ -627,7 +713,13 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     var id = str(f.id);
     var s = editState(id);
     var key = "d:" + id;
-    var original = str(f.original);
+    /*
+      範囲の指摘（語尾単調の「29〜35行目」など）は、範囲の全行を改行つきで欄に入れ、その全行を
+      original として添える。行を足す・減らす直しもできる（範囲の外の行は送らない）。
+      取り込みは、範囲の全行がパソコンの本文に一字違わず1か所だけあるときだけ置き換える
+    */
+    var multi = rangeTextOf(f) !== null;
+    var original = multi ? rangeTextOf(f) : str(f.original);
     var wrap = el("div", "edit");
     var toggle = el("button", "", s.open ? "自分で直すのをやめる" : "自分で直す");
     toggle.type = "button";
@@ -641,8 +733,11 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     if (!s.open) return wrap;
 
     var panel = el("div", "edit-panel");
-    panel.appendChild(el("div", "label", "原文を書き直してください（1行の中で）。原稿へは、パソコンで取り込んだときに入ります"));
+    panel.appendChild(el("div", "label", multi
+      ? rangeLabelOf(f) + "を書き直してください（改行して文を足したり減らしたりできます）。原稿へは、パソコンで取り込んだときに入ります"
+      : "原文を書き直してください（1行の中で）。原稿へは、パソコンで取り込んだときに入ります"));
     var area = document.createElement("textarea");
+    if (multi) area.rows = Math.min(16, original.split("\n").length + 2);
     area.setAttribute("data-key", key);
     area.setAttribute("aria-label", "自分で直した文");
     area.value = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : original;
@@ -657,9 +752,9 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
     function say(text) { s.note = text; note.textContent = text; note.hidden = !text; }
     go.addEventListener("click", async function () {
       var text = area.value;
-      // 空の文・元と同じ文は送らない。改行は入れない（取り込みは1行の中の直しだけを入れる）
+      // 空の文・元と同じ文は送らない。1文の直しは改行を入れない（取り込みは1行の中の直しだけを入れる）
       if (!text.trim()) { say("直した文が空です。"); return; }
-      if (/[\r\n]/.test(text)) { say("改行は入れられません。1行の中で直してください。"); return; }
+      if (!multi && /[\r\n]/.test(text)) { say("改行は入れられません。1行の中で直してください。"); return; }
       if (text === original) { say("元の文と同じです。直したい所を書き換えてください。"); return; }
       if (state.sending[id]) return;
       state.sending[id] = true;
@@ -942,7 +1037,7 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
         */
         var decision = ownerDecisionOf(fid);
         var item = el("div", "finding" + (decision ? " decided" + (decision.imported === true ? " imported" : "") : ""));
-        item.appendChild(el("div", "label", [str(f.label), typeof f.line === "number" ? f.line + "行目" : ""].filter(Boolean).join("・")));
+        item.appendChild(el("div", "label", [str(f.label), rangeLabelOf(f) || (typeof f.line === "number" ? f.line + "行目" : "")].filter(Boolean).join("・")));
         if (decision) {
           item.appendChild(el("div", "decided-state",
             decisionLabel(decision) + "（" + (decision.imported === true ? "取り込み済み" : "取り込み待ち") + "）"));
@@ -960,6 +1055,8 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
           }
         }
         if (str(f.message)) item.appendChild(appendMarked(el("div", "why"), f.message));
+        var ctx = contextNode(f);
+        if (ctx) item.appendChild(ctx);
 
         var base = { episode: group.file, baseHash: group.hash, findingId: fid, line: f.line };
         // 採否は作品の持ち主だけ（編集部の意見はメモで残す。6.115）。決めた指摘には出さない
@@ -986,8 +1083,8 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
             buttons.appendChild(b);
           });
           item.appendChild(buttons);
-          // 切って送った原文は直せない（取り込みが全文を置き換えて末尾が消えるため）
-          if (str(f.original) && f.originalClipped !== true) item.appendChild(editBox(f, base));
+          // 切って送った原文は直せない（取り込みが全文を置き換えて末尾が消えるため）。範囲の指摘は範囲で直す
+          if (rangeTextOf(f) !== null || str(f.original) && f.originalClipped !== true) item.appendChild(editBox(f, base));
         }
         // Claude に頼めない見え方（未対応の画面・断った人）では、道そのものを出さない
         if (state.sample) item.appendChild(askBox(f, heading));

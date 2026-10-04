@@ -45,7 +45,8 @@ import {
 /**
  * 出先の原稿箱（設計書6.115）の段1——メモと校正の採否。
  *
- * - `outbox.pack`：パソコン側から「送る」中身を組む。**読むだけ・AIを呼ばない・本文は返さない**
+ * - `outbox.pack`：パソコン側から「送る」中身を組む。**読むだけ・AIを呼ばない・本文の全体は返さない**
+ *   （指摘ごとに前後の数行と範囲の行を、1指摘あたり `OUTBOX_CONTEXT_CHARS` 字まで）
  * - `outbox.import`：出先の記録（claude.ai の保管庫の `records/`）を作品へ入れる
  *
  * **取り込みの判断はここ（コード）が持つ。** 呼び出し元の Claude は保管庫の中身を
@@ -65,7 +66,7 @@ export const OUTBOX_PACK_INPUT = {
     .describe("期限切れと見なす日数（VS Code の novelai.findings.retentionDays と同じ値。省略時3、0で無期限）"),
 };
 
-/** 指摘の原文を切る長さ。**原稿をまとめて渡さない**（段1で出るのは指摘の一文だけ） */
+/** 指摘の原文を切る長さ。**原稿をまとめて渡さない**（前後の文は `context` に別の上限で入れる） */
 const ORIGINAL_CHARS = 120;
 
 export interface OutboxEpisode {
@@ -99,6 +100,43 @@ export interface OutboxFinding {
    * ページはこれが true の指摘に［自分で直す］を出さない
    */
   originalClipped: boolean;
+  /**
+   * 指摘の前後の文と、範囲の指摘なら範囲の全行（作者の報告 2026-10-04「『た』が4文
+   * 続いている場合などは、前後がわからないと修正できません」）。本文が読めなければ null
+   */
+  context: OutboxContext | null;
+}
+
+/**
+ * 1指摘あたりに送る前後の文の上限（字）。**本文をまとめて claude.ai へ出さない**ため、
+ * 範囲の全行と前後の行を合わせてここまでに収める（設計書6.115 の決まり4）
+ */
+export const OUTBOX_CONTEXT_CHARS = 2000;
+
+/** 前後に添える、中身のある行の数（空行は数えずに飛ばす） */
+const CONTEXT_NEIGHBOR_LINES = 2;
+
+export interface OutboxContext {
+  /** 範囲（範囲の無い指摘は指摘の行）の前の、中身のある行。本文の順 */
+  before: string[];
+  /**
+   * 範囲の全行（範囲の無い指摘は指摘の行1行）。**範囲の中の空行も入れる**——
+   * ［自分で直す］で範囲を直すとき、取り込みは本文と一字違わず比べるため
+   */
+  lines: string[];
+  /** `lines` の最初の行（いまの本文の行番号） */
+  startLine: number;
+  /** 範囲の後ろの、中身のある行。本文の順 */
+  after: string[];
+  /** 範囲の指摘か（説明の「N〜M行目」・左右に並べる指摘の補足から読んだ） */
+  range: boolean;
+  /** 上限で何かを切ったか（ページは「…」で終わる行を出す） */
+  clipped: boolean;
+  /**
+   * 範囲の行（`lines`）まで切ったか。**切った範囲は［自分で直す］に使えない**——
+   * 切れた範囲を直して送ると、取り込みが一字違わず探せないか、末尾を消す
+   */
+  rangeClipped: boolean;
 }
 
 export interface OutboxPackResult {
@@ -125,6 +163,8 @@ export function outboxPack(input: { folder: string; retentionDays?: number }): O
 
   const episodes: OutboxEpisode[] = [];
   const skipped: Array<{ file: string; reason: string }> = [];
+  /** 前後の文を取るための本文（競合マーカーのあるファイルは入れない＝前後を送らない） */
+  const texts = new Map<string, string>();
   for (const relative of listBodyFiles(input.folder)) {
     const file = toSlash(relative);
     let content: TextFileContent;
@@ -138,6 +178,7 @@ export function outboxPack(input: { folder: string; retentionDays?: number }): O
       skipped.push({ file, reason: "Gitの競合マーカーが残っています（先に解消してください）" });
       continue;
     }
+    texts.set(file, content.text);
     const fileName = nodePath.basename(relative);
     // 合本は話ごとに並べる（ハッシュはファイルのもの。`novel.scan` と同じ分け方）
     const collected = parseCollectedFile(content.text);
@@ -175,6 +216,7 @@ export function outboxPack(input: { folder: string; retentionDays?: number }): O
     if (item.state !== "pending") continue;
     const view = views.get(item.id);
     if (!view) continue;
+    const text = texts.get(toSlash(item.file));
     findings.push({
       id: item.id,
       file: toSlash(item.file),
@@ -186,6 +228,7 @@ export function outboxPack(input: { folder: string; retentionDays?: number }): O
       message: item.message,
       canFix: findingAppliesDirectly(view),
       originalClipped: [...view.original].length > ORIGINAL_CHARS,
+      context: text === undefined ? null : contextOf(text, item.line, view),
     });
   }
 
@@ -200,9 +243,102 @@ export function outboxPack(input: { folder: string; retentionDays?: number }): O
       "ArtifactData の batch で、出先の原稿箱の保管庫へ書いてください：works/main に { title, sentAt, episodes }、" +
       "findings/<id> に指摘を1件ずつ（前に送った findings/ の文書で、今回に無いものは消す）。",
     note:
-      "読むだけです。AIは呼んでいません。本文そのものは返していません（指摘の原文の一文と、話の題・ハッシュだけ）。" +
+      "読むだけです。AIは呼んでいません。本文の全体は返していません（指摘の原文と、その前後の数行・範囲の指摘の範囲の行" +
+      `〈1指摘あたり${OUTBOX_CONTEXT_CHARS}字まで〉、話の題・ハッシュだけ）。` +
       "指摘は提案パネルに並ぶもの（未処理）だけです。",
   };
+}
+
+/**
+ * 指摘の前後の文と範囲（`OutboxContext`）を組む。
+ *
+ * **範囲は、いまの位置から取る。** 説明の「N〜M行目」は検知したときの行番号なので、
+ * 探し直した行（`line`）と検知したときの行（`hintLine`）の差だけずらす——数日たって
+ * 上に行が増えていても、同じ連続を指す。語尾単調は連続の先頭の文を原文に持つ
+ * （`core/proofreadValidation.ts`）ので、ずらした範囲の先頭がちょうど `line` になる
+ *
+ * **上限の配り方**：範囲の行を先に取り、残りを前後の近い行から交互に配る
+ * （直すのに要るのは範囲そのもので、前後は読むための手がかり）
+ */
+function contextOf(text: string, line: number, view: FindingView): OutboxContext {
+  const all = text.split("\n");
+  const range = rangeOf(view);
+  let start = line;
+  let end = line;
+  if (range) {
+    const shift = line - view.hintLine;
+    start = Math.max(1, Math.min(range.start + shift, line));
+    end = Math.min(all.length, Math.max(range.end + shift, line));
+  }
+
+  let budget = OUTBOX_CONTEXT_CHARS;
+  let clipped = false;
+  let rangeClipped = false;
+  const lines: string[] = [];
+  for (let at = start; at <= end; at += 1) {
+    const lineText = all[at - 1] ?? "";
+    const size = [...lineText].length;
+    if (size <= budget) {
+      lines.push(lineText);
+      budget -= size;
+      continue;
+    }
+    lines.push(clip(lineText, budget));
+    budget = 0;
+    clipped = true;
+    rangeClipped = true;
+    break;
+  }
+
+  const beforeCandidates = neighborLines(all, start, -1);
+  const afterCandidates = neighborLines(all, end, +1);
+  const before: string[] = [];
+  const after: string[] = [];
+  // 近い行から交互に（前の1行目・後ろの1行目・前の2行目…）。入りきらない行は切って止める
+  for (let index = 0; index < CONTEXT_NEIGHBOR_LINES && !clipped; index += 1) {
+    for (const [candidates, into, atFront] of [
+      [beforeCandidates, before, true],
+      [afterCandidates, after, false],
+    ] as const) {
+      const candidate = candidates[index];
+      if (candidate === undefined || clipped) continue;
+      const size = [...candidate].length;
+      const taken = size <= budget ? candidate : budget > 0 ? clip(candidate, budget) : undefined;
+      if (size > budget) clipped = true;
+      if (taken === undefined) continue;
+      budget = Math.max(0, budget - size);
+      if (atFront) into.unshift(taken);
+      else into.push(taken);
+    }
+  }
+
+  return { before, lines, startLine: start, after, range: range !== undefined, clipped, rangeClipped };
+}
+
+/**
+ * 指摘の持つ範囲（検知したときの行番号）。語尾単調の説明の「（N〜M行目）」と、
+ * 左右に並べる指摘（逸脱など）の補足の「N〜M行目」から読む。無ければ undefined
+ */
+function rangeOf(view: FindingView): { start: number; end: number } | undefined {
+  for (const source of [view.message, view.compared?.note ?? ""]) {
+    const matched = /(\d+)\s*[〜～~]\s*(\d+)\s*行目/u.exec(source);
+    if (!matched) continue;
+    const start = Number(matched[1]);
+    const end = Number(matched[2]);
+    if (start >= 1 && end >= start) return { start, end };
+  }
+  return undefined;
+}
+
+/** `from` 行の前（-1）か後ろ（+1）の、中身のある行を近い順に最大2つ（空行は飛ばす） */
+function neighborLines(lines: readonly string[], from: number, step: -1 | 1): string[] {
+  const found: string[] = [];
+  for (let at = from - 1 + step; at >= 0 && at < lines.length; at += step) {
+    if (lines[at].trim().length === 0) continue;
+    found.push(lines[at]);
+    if (found.length >= CONTEXT_NEIGHBOR_LINES) break;
+  }
+  return found;
 }
 
 /**
@@ -252,7 +388,9 @@ const RECORD_INPUT = z.object({
   original: z
     .string()
     .optional()
-    .describe("edit のとき、作者が直す前の原文の一文（ページに出ていたもの）"),
+    .describe(
+      "edit のとき、作者が直す前の原文（ページに出ていたもの）。範囲の指摘では範囲の全行を改行でつないだもの"
+    ),
   baseHash: z.string().optional(),
   imported: z.boolean().optional(),
 });
@@ -707,6 +845,9 @@ function importVerdict(
  * - **入れるのは、原文の一文がいまの本文に一字違わず1か所だけあるときだけ。**
  *   無ければ（パソコンで書き換えた）・2か所以上あれば（どれか決められない）断る。
  *   ［直す］と同じく `baseHash` では止めない——一字違わぬ照合がその代わりになる
+ * - **範囲の直し**（`original` が複数行。作者の報告 2026-10-04）：範囲の全行が一字違わず
+ *   1か所、行の頭から行の終わりまであり、指摘の原文を含むときだけ、範囲をまるごと作者の文
+ *   （改行を含んでよい）に置き換える
  * - 当てる計算は［直す］・提案パネルの［適用］と同じ `applyFindingToText`
  *   （原文の全体を「直す語」、作者の文を「直したあと」として渡す）
  * - 記録は2つ。元の指摘には「採った」（［済み］と同じく採った側に数える）、
@@ -737,46 +878,81 @@ function importEdit(
     return { ok: false, reason: "持ち主でない人の直しは入れません（編集部の意見はメモで書いてください）。" };
   }
   if (!record.findingId) return { ok: false, reason: "どの指摘への直しか分かりません（findingId がありません）。" };
-  const text = record.text ?? "";
+  /*
+    本文は LF の空間で持つ（`decodeBytes`）。ページの欄から CRLF で届いても、ここで LF に
+    揃えて比べ、書き戻しで本文の改行の形へ戻す（`writeBodyPreservingFormat`）
+  */
+  const text = toLf(record.text ?? "");
+  const original = toLf(record.original ?? "");
+  /*
+    **範囲の直し**（作者の報告 2026-10-04）：原文が複数行なら、ページが送った範囲の全行。
+    改行を含む直し（行を足す・減らす）を許す。1行の直しは今までどおり行の中だけ
+  */
+  const block = original.includes("\n");
   if (!text.trim()) return { ok: false, reason: "直した文が空です。" };
-  // 1行の中の置き換えだけを入れる（提案パネルの［戻す］も行の中で戻す）
-  if (/[\r\n]/.test(text)) {
+  // 1行の直しは行の中の置き換えだけを入れる（提案パネルの［戻す］も行の中で戻す）
+  if (!block && text.includes("\n")) {
     return { ok: false, reason: "直した文に改行が入っています。1行の中の直しだけを入れられます。" };
   }
   const view = views.get(record.findingId);
   if (!view) return { ok: false, reason: "その指摘が、パソコンの置き場に見つかりません。" };
-  /*
-    **作者が直した元の文と、置き場の原文が同じであること。** 送るときに長い原文は
-    切っているので、切れた文を直した記録で全文を置き換えると末尾が消える
-  */
-  if (record.original !== view.original) {
+  if (block) {
+    /*
+      **範囲は、その指摘の原文を含んでいること。** 指摘と関係のない範囲の置き換えを、
+      この道から入れさせない（ページは指摘の行を含む範囲だけを送る）
+    */
+    if (!original.includes(view.original)) {
+      return {
+        ok: false,
+        reason: "出先に出ていた範囲に、指摘の原文が入っていません（この指摘への直しとしては入れられません）。",
+      };
+    }
+  } else if (original !== view.original) {
+    /*
+      **作者が直した元の文と、置き場の原文が同じであること。** 送るときに長い原文は
+      切っているので、切れた文を直した記録で全文を置き換えると末尾が消える
+    */
     return {
       ok: false,
       reason: "出先に出ていた原文が、パソコンの置き場の原文と違います（長い原文は切って送るため、出先では直せません）。",
     };
   }
-  if (text === view.original) return { ok: false, reason: "直した文が元の文と同じです。" };
+  if (text === original) return { ok: false, reason: "直した文が元の文と同じです。" };
 
+  const what = block ? "範囲の文" : "原文の一文";
   const state = stateOf(view.file);
   if (state instanceof Error) return { ok: false, reason: state.message };
-  const found = occurrences(state.content.text, view.original);
+  const before = state.content.text;
+  const found = occurrences(before, original);
   if (found.length === 0) {
     return {
       ok: false,
-      reason: "原文の一文が、パソコンの本文に見つかりません（送ったあとに書き換えられたため、入れませんでした）。",
+      reason: `${what}が、パソコンの本文に見つかりません（送ったあとに書き換えられたため、入れませんでした）。`,
     };
   }
   if (found.length > 1) {
     return {
       ok: false,
-      reason: "原文の一文が、パソコンの本文に2か所以上あります（どこを直すか決められないため、入れませんでした）。",
+      reason: `${what}が、パソコンの本文に2か所以上あります（どこを直すか決められないため、入れませんでした）。`,
+    };
+  }
+  const at = found[0];
+  const end = at + original.length;
+  /*
+    **範囲は行の頭から行の終わりまで。** ページは行の単位で送るので、行の途中で
+    当たったなら、それは送った範囲ではない（別の行の一部にたまたま一致した）
+  */
+  if (block && ((at > 0 && before[at - 1] !== "\n") || (end < before.length && before[end] !== "\n"))) {
+    return {
+      ok: false,
+      reason: "範囲の文が、パソコンの本文では行の途中から始まるか、行の途中で終わっています（入れませんでした）。",
     };
   }
   const lock = lockOf(locks, view.file);
   if (lock && lock.holderKind === "editor") {
     return { ok: false, reason: `${describeLock(lock)} 校閲が終わってから直してください。` };
   }
-  const panelState = findingPanelStateOf(view, state.content.text, retentionDays, now).state;
+  const panelState = findingPanelStateOf(view, before, retentionDays, now).state;
   if (panelState !== "pending") {
     return {
       ok: false,
@@ -784,33 +960,46 @@ function importEdit(
     };
   }
 
-  const before = state.content.text;
-  const line = before.slice(0, found[0]).split("\n").length;
-  const applied = applyFindingToText(before, {
-    line,
-    original: view.original,
-    target: view.original,
-    suggestion: text,
-  });
-  if (applied.kind !== "applied") {
-    // 原文が行をまたぐ（改行を含む）ときはここへ来る。当て推量で置かない
-    return { ok: false, reason: "原文の一文が1行に収まっていないため、入れられませんでした。" };
+  const line = before.slice(0, at).split("\n").length;
+  let next: string;
+  if (block) {
+    // 範囲の全行を作者の文へ。行の数は変わってよい（文を足す・減らす）
+    next = before.slice(0, at) + text + before.slice(end);
+  } else {
+    const applied = applyFindingToText(before, {
+      line,
+      original: view.original,
+      target: view.original,
+      suggestion: text,
+    });
+    if (applied.kind !== "applied") {
+      // 原文が行をまたぐ（改行を含む）ときはここへ来る。当て推量で置かない
+      return { ok: false, reason: "原文の一文が1行に収まっていないため、入れられませんでした。" };
+    }
+    next = applied.text;
   }
-  const written = writeBodyPreservingFormat(state.absolute, applied.text, state.content, state.content.hash);
+  const written = writeBodyPreservingFormat(state.absolute, next, state.content, state.content.hash);
   if (!written.ok) return { ok: false, reason: describeBodyWriteFailure(written) };
   reread(state);
 
   const lines = before.split("\n");
+  const lastLine = line + original.split("\n").length - 1;
+  /*
+    足す指摘の行は、置き換えた文の全体（範囲なら範囲の全行）を原文・直す語に持つ。
+    提案パネルの［戻す］（`locateAppliedSuggestion`）は行の中で戻すので、**作者の文が
+    1行に収まれば**範囲の直しも戻せる。作者の文が複数行だと「当てたもの」に並ばない
+    （戻す位置を行で探せない）——そのときは回復先（`.novelai-recovery`）に直前の本文が残る
+  */
   const authorFinding: Finding = {
-    id: findingId(view.file, view.original, view.original, text, view.category, view.label),
+    id: findingId(view.file, original, original, text, view.category, view.label),
     time: now.toISOString(),
     file: view.file,
     hintLine: line,
-    original: view.original,
-    target: view.original,
+    original,
+    target: original,
     suggestion: text,
     before: neighborLine(lines, line, -1),
-    after: neighborLine(lines, line, +1),
+    after: neighborLine(lines, lastLine, +1),
     message: view.message ? `${AUTHOR_EDIT_NOTE}（元の指摘：${view.message}）` : AUTHOR_EDIT_NOTE,
     category: view.category,
     label: view.label,
@@ -820,7 +1009,9 @@ function importEdit(
   const feature = verdictFeatureOf(findingRestoreOf(view)?.panelCategory ?? "");
   return {
     ok: true,
-    reason: `${toSlash(view.file)} の${line}行目の一文を、出先で書いた文に置き換えました。`,
+    reason: block
+      ? `${toSlash(view.file)} の${line}〜${lastLine}行目を、出先で書いた文に置き換えました。`
+      : `${toSlash(view.file)} の${line}行目の一文を、出先で書いた文に置き換えました。`,
     // 元の指摘は［済み］と同じく「採った」（作者が問題を認めて自分で直した。6.49.7）
     decision: { findingId: view.id, status: "accepted", note: OUTBOX_DECISION_NOTES.editOriginal },
     verdict:
@@ -915,6 +1106,11 @@ function appendJsonLines(target: string, values: readonly object[]): void {
 /** メモは1行にする（改行を含むと2行目からが本文になる） */
 function singleLine(text: string): string {
   return text.replace(/\s*[\r\n]+\s*/g, " ").trim();
+}
+
+/** 改行を LF にそろえる（本文を持つ空間。`core/eolSpace.ts` と同じ考え方） */
+function toLf(text: string): string {
+  return text.replace(/\r\n?/g, "\n");
 }
 
 function toSlash(file: string): string {
