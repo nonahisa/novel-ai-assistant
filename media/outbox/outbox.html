@@ -281,7 +281,7 @@ ins.added { color: var(--fix); background: var(--mark); text-decoration: none; f
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
-<div class="wrap">
+<div class="wrap" data-default-repo="" data-default-branch="">
   <header>
     <h1 id="title">出先の原稿箱</h1>
     <div class="sub" id="sent">GitHub の作品から、校正の指摘を読んで並べます。</div>
@@ -2050,8 +2050,11 @@ var OutboxLogic = (function () {
   sendEl.addEventListener("click", function () { sendToPc(); });
 
   async function start() {
-    repoEl.value = recall(REPO_KEY);
-    branchEl.value = recall(BRANCH_KEY) || "main";
+    var pageDefaults = document.querySelector(".wrap");
+    // 作者のページに書き込んだ「最初に開くリポジトリ」（雛形では空。publish のとき Claude が埋める）。
+    // 端末に覚えた名前が先。端末の覚えは端末ごとで、別の端末では空から始まるため（作者の要望、2026-10-05）
+    repoEl.value = recall(REPO_KEY) || ((pageDefaults && pageDefaults.getAttribute("data-default-repo")) || "");
+    branchEl.value = recall(BRANCH_KEY) || ((pageDefaults && pageDefaults.getAttribute("data-default-branch")) || "") || "main";
     if (!window.claude || typeof window.claude.use !== "function") {
       setStatus("この画面では読み書きできません。claude.ai の Claude アプリかブラウザで開いてください。", true);
       render();
