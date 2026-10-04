@@ -12,7 +12,12 @@ import { decodeBytes } from "../../core/textDecode";
 import { parseEpisodeFileName } from "../../core/episodeParser";
 import { isWorkInfoFile } from "../../core/workInfoFile";
 import { parseReaderProfile } from "../../core/readerProfileParse";
-import { TARGET_SHEET_FILE } from "../../core/targetSheetDoc";
+import {
+  extractAuthorBlock,
+  readAim,
+  TARGET_SHEET_FILE,
+  type ReaderAim,
+} from "../../core/targetSheetDoc";
 import {
   publicityReaderFromSheet,
   type PublicityReader,
@@ -454,6 +459,15 @@ export function readPublicityReader(folder: string): PublicityReader | undefined
     readTargetSheetText(folder),
     readReaderProfile(folder)
   );
+}
+
+/**
+ * 作者の狙いと理由（相談へ渡す。設計書6.108.6 の⑤）。**製品と同じ約束**で
+ * 読む——作者の欄の印が無い紙からは読まない。読めなければ undefined（止めない）。
+ */
+export function readReaderAim(folder: string): ReaderAim | undefined {
+  const text = readTargetSheetText(folder);
+  return text === undefined ? undefined : readAim(extractAuthorBlock(text));
 }
 
 /** `設定/ターゲットシート.md` の中身。無ければ（読めなければ）undefined */

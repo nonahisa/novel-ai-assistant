@@ -40,6 +40,7 @@ import {
   TARGET_READER_TITLE,
 } from "./targetSheet";
 import { measureTitleFit } from "./titleFit";
+import { makeTargetSheetAdvice } from "./targetSheetAdvice";
 
 /**
  * 「ターゲット読者」——1つの入口に統合（設計書6.108.6）。
@@ -55,8 +56,8 @@ import { measureTitleFit } from "./titleFit";
  * | 3 本文の実像 | AIが冒頭とプロットを読む（P-38） | AI | `設定/読者像.json` の実像 |
  *
  * どの段も最後は**1枚のシート**（`設定/ターゲットシート.md`）へ落ちる。
- * タイトルとサブタイトルの適合度（P-41）は、料金が出るので段に入れず、
- * 押したときだけ測る。
+ * タイトルとサブタイトルの適合度（P-41）と助言（P-46）は、料金が出るので
+ * 段に入れず、押したときだけ作る。
  *
  * ## 途中でやめられる
  *
@@ -77,7 +78,7 @@ import { measureTitleFit } from "./titleFit";
  *   どちらが最新か作者に分からない
  */
 
-type Plan = "all" | "aim" | "declare" | "read" | "fit" | "sheet";
+type Plan = "all" | "aim" | "declare" | "read" | "fit" | "advice" | "sheet";
 type Stage = "aim" | "declare" | "read";
 
 const STAGES_OF: Record<Plan, readonly Stage[]> = {
@@ -86,6 +87,7 @@ const STAGES_OF: Record<Plan, readonly Stage[]> = {
   declare: ["declare"],
   read: ["read"],
   fit: [],
+  advice: [],
   sheet: [],
 };
 
@@ -134,6 +136,23 @@ export async function runTargetReader(
     const opened = await openTargetSheet(work, {
       authorReader: sources.authorReader,
       deviceId: sources.deviceId,
+    });
+    return opened ? CHECK_COMPLETED : CHECK_FAILED;
+  }
+
+  if (plan === "advice") {
+    // 助言（P-46）も料金が出るので、押したときだけ作る（適合度と同じ扱い）
+    const made = await makeTargetSheetAdvice(work, registry, {
+      settings: state.settings,
+      authorBlock: state.authorBlock,
+      profile,
+    });
+    if (made === "cancelled") return CHECK_CANCELLED;
+    if (made === "failed") return CHECK_FAILED;
+    const opened = await openTargetSheet(work, {
+      authorReader: sources.authorReader,
+      deviceId: sources.deviceId,
+      profile,
     });
     return opened ? CHECK_COMPLETED : CHECK_FAILED;
   }
@@ -278,6 +297,12 @@ async function choosePlan(
       detail:
         "狙いの層（無ければ実像の層）に引かれる言い方かを、AIが題ごとに見立てます。題は書き換えません。",
       plan: "fit" as Plan,
+    },
+    {
+      label: "助言を作る",
+      detail:
+        "狙いと理由・一致とずれ・向かう先を材料に、狙いへの寄せ方をAIが書きます。狙いと、2段目か3段目が済んでいると作れます。本文は書き換えません。",
+      plan: "advice" as Plan,
     },
     {
       label: "いまの材料でシートを作り直す",

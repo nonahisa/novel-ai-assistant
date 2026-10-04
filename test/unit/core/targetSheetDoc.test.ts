@@ -172,8 +172,11 @@ describe("紙の中身", () => {
     expect(doc).toContain("### 絞る（収束）");
   });
 
-  test("助言の欄は、次の版だと書いてある", () => {
-    expect(build(undefined, SCORES)).toContain("助言は次の版で入ります");
+  test("助言を作っていなければ、作り方を案内する（固定の「次の版」ではない）", () => {
+    const doc = build(undefined, SCORES);
+    expect(doc).toContain("## 助言");
+    expect(doc).toContain("「助言を作る」");
+    expect(doc).not.toContain("次の版で入ります");
   });
 });
 

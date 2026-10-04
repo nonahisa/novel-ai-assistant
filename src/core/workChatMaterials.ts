@@ -1,5 +1,6 @@
 import type { WorkChatTurn } from "../prompts/workChat";
 import {
+  buildReaderAimPrompt,
   buildReaderTypeGlossaryPrompt,
   buildReaderTypePrompt,
   buildReaderTypeReminder,
@@ -7,6 +8,9 @@ import {
   questionMentionsReader,
 } from "../prompts/readerTarget";
 import type { ReaderProfile } from "../models/readerProfile";
+import { READER_TYPES } from "./readerTarget";
+import type { ReaderAim } from "./targetSheetDoc";
+import { clipReason } from "./targetSheetAdvice";
 import { buildFeatureGuideForQuestion } from "./featureGuide";
 import { CHARACTER_NAMES_HEADING } from "./chatFileRequest";
 
@@ -87,11 +91,19 @@ export function workChatFeatureGuide(
  */
 export function workChatReaderBlocks(
   profile: ReaderProfile | undefined,
-  question: string
+  question: string,
+  /**
+   * 作者がシートで選んだ狙いと理由（設計書6.108.6 の⑤）。あれば毎回
+   * 2〜3行だけ足す。**読者像が無くても狙いがあれば「まだ決めていません」を
+   * 送らない**——狙いは決めてあるので、その1行は嘘になる
+   */
+  aim?: ReaderAim
 ): {
   blocks: string[];
   declared: boolean;
   glossary: boolean;
+  /** 狙いと理由を足したか */
+  aim: boolean;
   /**
    * 問いの直前（ユーザープロンプト側）へ置く読者の要点。**読者の話をしている
    * 回で、読者が決まっているときだけ**（`buildReaderTypeReminder`）。
@@ -101,7 +113,11 @@ export function workChatReaderBlocks(
 } {
   const blocks: string[] = [];
   const readerBlock = buildReaderTypePrompt(profile);
-  blocks.push(readerBlock ?? buildReaderTypeUnknownPrompt());
+  const hasAim = aim !== undefined && aim.types.length > 0;
+  if (readerBlock) blocks.push(readerBlock);
+  else if (!hasAim) blocks.push(buildReaderTypeUnknownPrompt());
+  // 狙いは読者像の段のすぐ後ろ（読者の話の材料をひとまとまりに置く）
+  if (hasAim) blocks.push(buildReaderAimPrompt(aim.types, clipReason(aim.reason)));
   const glossary = questionMentionsReader(question);
   if (glossary) blocks.push(buildReaderTypeGlossaryPrompt());
   const reminder = glossary ? buildReaderTypeReminder(profile) : undefined;
@@ -109,8 +125,20 @@ export function workChatReaderBlocks(
     blocks,
     declared: readerBlock !== undefined,
     glossary,
+    aim: hasAim,
     ...(reminder ? { reminder } : {}),
   };
+}
+
+/**
+ * 相談へ狙いを渡したことを、操作ログの1行にする（`readerTypeChatLogLines` と
+ * 同じ理由——効いているかを確かめる手掛かり。文言は試験から見られる core に置く）。
+ * **理由の中身は書かない**（作者の文。字数と有無だけ）。
+ */
+export function readerAimChatLogLine(aim: ReaderAim): string {
+  const labels = aim.types.map((type) => READER_TYPES[type].label).join("、");
+  const reason = aim.reason.trim();
+  return `相談: 作者の狙い（${labels}）を添えた／理由 ${reason ? `${[...reason].length}字` : "なし"}`;
 }
 
 /**

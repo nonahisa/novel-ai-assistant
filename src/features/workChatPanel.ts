@@ -149,7 +149,10 @@ import {
   workChatFeatureGuide,
   workChatOverviewFocus,
   workChatReaderBlocks,
+  readerAimChatLogLine,
 } from "../core/workChatMaterials";
+import { readAim, type ReaderAim } from "../core/targetSheetDoc";
+import { readTargetSheetState } from "./targetSheet";
 import {
   buildExcerpt,
   classifyChatContext,
@@ -1000,6 +1003,31 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     | undefined;
 
   /**
+   * ターゲットシートの作者の欄から読んだ狙いと理由（設計書6.108.6 の⑤）。
+   * 控えの寿命は読者像と同じ（作品が変わるか「最初から」で捨てる）。
+   */
+  private readerAimCache:
+    | { workId: string; aim: ReaderAim | undefined }
+    | undefined;
+
+  private async readerAimFor(work: WorkEntry): Promise<ReaderAim | undefined> {
+    if (this.readerAimCache?.workId === work.id) return this.readerAimCache.aim;
+    let aim: ReaderAim | undefined;
+    try {
+      const state = await readTargetSheetState(work);
+      // 作者が自分で置いた同名のファイルからは読まない（紹介文と同じ約束）
+      aim = state.authorOwned ? undefined : readAim(state.authorBlock);
+    } catch (error) {
+      logFailure("相談: ターゲットシートを読めませんでした", {
+        作品: work.title,
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    }
+    this.readerAimCache = { workId: work.id, aim };
+    return aim;
+  }
+
+  /**
    * 読者像を1回だけ読む。
    *
    * **読めなければ黙って諦める。** 台帳が無い・壊れている・まだ診断して
@@ -1124,13 +1152,15 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
     */
     if (work) {
       const readerProfile = await this.readerProfileFor(work);
+      const readerAim = await this.readerAimFor(work);
       // 選び方は core（MCP の相談も同じものを通る）。ここは記録だけを書く
-      const reader = workChatReaderBlocks(readerProfile, question);
+      const reader = workChatReaderBlocks(readerProfile, question, readerAim);
       if (reader.declared) {
         for (const line of readerTypeChatLogLines(readerProfile)) logStep(line);
-      } else {
+      } else if (!reader.aim) {
         logStep("相談: 読者タイプは未診断（決めていないことだけを渡した）");
       }
+      if (reader.aim && readerAim) logStep(readerAimChatLogLine(readerAim));
       // 読者の話をしている回だけ、隣の区分と比べられるように一覧を添える
       if (reader.glossary) {
         logStep("相談: 読者タイプの区分一覧を添えた（読者の話のため）");
@@ -1470,6 +1500,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       // 読者像の控えも捨てる。**診断し直した直後に、それが効く道を残す**
       // （開いたままのパネルで一度読んだきりだと、古い読者像で助言し続ける）
       this.readerProfileCache = undefined;
+      this.readerAimCache = undefined;
       // **案内も畳む**（設計書6.104）。会話を消すと案内の札も画面から
       // 消えるので、続けたままにすると「押しても進まない案内」が
       // 見えないところに残る

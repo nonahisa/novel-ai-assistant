@@ -30,6 +30,10 @@ import {
 } from "./targetSheetHistory";
 import { formatDayTime } from "./timestampedFileName";
 import type {
+  TargetSheetAdviceItem,
+  TargetSheetAdviceRecord,
+} from "./targetSheetAdvice";
+import type {
   TargetSheet,
   TargetSheetDirection,
   TargetSheetGap,
@@ -212,6 +216,25 @@ export function readAimReason(authorBlock: string): string {
   return line ? line.replace(REASON_LINE, "").trim() : "";
 }
 
+/** 作者の欄から読んだ狙いと理由（助言・相談へ渡す材料） */
+export interface ReaderAim {
+  /** 狙いの層（1〜2つ。書かれた順） */
+  readonly types: readonly ReaderTypeId[];
+  /** 理由（1行。書かれていなければ空文字） */
+  readonly reason: string;
+}
+
+/**
+ * 作者の欄から狙いと理由を読む。**狙いが読めなければ `undefined`**
+ * （理由だけでは宛先が決まらない。推測で層を当てない）。
+ */
+export function readAim(authorBlock: string | undefined): ReaderAim | undefined {
+  if (authorBlock === undefined) return undefined;
+  const types = readAimTypes(authorBlock);
+  if (types.length === 0) return undefined;
+  return { types, reason: readAimReason(authorBlock) };
+}
+
 /** 点数の出どころの言い方（作者向け） */
 const SOURCE_PHRASES: Record<ReaderChatSource, string> = {
   actual: "書けているもの",
@@ -250,7 +273,18 @@ export interface TargetSheetDocInput {
    * ——その場合は測り方を案内する（空の表を出さない）。
    */
   readonly titleFit?: TitleFitRecord;
+  /**
+   * 助言（P-46）の記録と、いまの材料の指紋。**作っていなければ記録は
+   * `undefined`**——その場合は作り方を案内する。
+   */
+  readonly advice?: TargetSheetDocAdvice;
   readonly generatedAt: Date;
+}
+
+export interface TargetSheetDocAdvice {
+  readonly record?: TargetSheetAdviceRecord;
+  /** いまの材料の指紋。材料が組めなければ `undefined`（＝作ったときと違う） */
+  readonly currentMark?: string;
 }
 
 export function buildTargetSheetDoc(input: TargetSheetDocInput): string {
@@ -275,7 +309,7 @@ export function buildTargetSheetDoc(input: TargetSheetDocInput): string {
     ...writtenSection(input.written),
     ...titleFitSection(input.titleFit),
     ...historySection(input.history ?? []),
-    ...adviceSection(),
+    ...adviceSection(input.advice),
     ...noticeSection(input.notices ?? []),
     `作り直した日時：${formatDayTime(input.generatedAt)}`,
     "",
@@ -809,15 +843,91 @@ function topThree(entry: TargetSheetHistoryEntry): string {
     .join("・");
 }
 
-/** 助言——**第3段（AI）は次の版**。空欄のまま置かず、そう書く */
-function adviceSection(): string[] {
-  return [
-    "## 助言",
+const ADVICE_DIRECTION_WORDS: Record<TargetSheetAdviceItem["direction"], string> = {
+  up: "上げる",
+  down: "下げる",
+};
+
+/**
+ * 助言（設計書6.108.4 の第3段、P-46）。
+ *
+ * **作るのは作者が「助言を作る」を押したときだけ**で、ここは残した記録を
+ * 並べるだけ（AI を呼ばない）。並びは**合っている所を先に**（プロンプト
+ * 設計書1.9の4）——寄せ方が0件なら「直す所は見当たりません」と明記する。
+ *
+ * 記録を作ったあとで狙い・理由・点数が変わっていれば、そう断る（黙って
+ * 古い助言を今の材料のものに見せない）。
+ */
+function adviceSection(advice: TargetSheetDocAdvice | undefined): string[] {
+  const lines = ["## 助言", ""];
+  const record = advice?.record;
+  if (!record) {
+    lines.push(
+      "**まだ作っていません。** 「ターゲット読者」の選択肢「助言を作る」で、" +
+        "上の欄（狙いと理由・一致とずれ・向かう先）を材料に、AIが狙いへの" +
+        "寄せ方を書きます。数字はこの紙のものだけを使い、本文は書き換えません。",
+      ""
+    );
+    return lines;
+  }
+
+  const aims = record.aims.map((type) => READER_TYPES[type].label).join("、");
+  const model = record.model ? `（${record.model}）` : "";
+  lines.push(
+    `${formatDayTime(new Date(record.generatedAt))}に作りました${model}。` +
+      `材料：狙い（${aims}）・理由（${record.reasonGiven ? "あり" : "書かれていません"}）・` +
+      `${SOURCE_PHRASES[record.source]}の点。`,
+    ""
+  );
+  if (advice?.currentMark !== record.materialMark) {
+    lines.push(
+      "**この助言を作ったあと、狙い・理由・点数のどれかが変わっています。** " +
+        "「助言を作る」で、いまの材料から作り直せます。",
+      ""
+    );
+  }
+  if (record.overall) lines.push(record.overall, "");
+
+  lines.push("### 狙いに合っている所", "");
+  if (record.keep.length === 0) {
+    lines.push("挙げられた所はありませんでした。");
+  }
+  for (const text of record.keep) lines.push(`- ${text}`);
+  lines.push("");
+
+  lines.push("### 寄せ方", "");
+  if (record.advice.length === 0) {
+    // 検算で落とした項目があるときは「見当たらない」と言い切らない
+    // ——AI は寄せ方を書いたが、材料と合わずに載せられなかっただけかもしれない
+    lines.push(
+      record.dropped > 0
+        ? "載せられる寄せ方がありませんでした（AIの答えの一部を下の理由で載せていません。作り直すと変わることがあります）。"
+        : "**直す所は見当たりません。** いまの向きのままで狙いに届いています。"
+    );
+  }
+  for (const item of record.advice) {
+    lines.push(
+      `- **${READER_AXIS_LABELS[item.axis]}を${ADVICE_DIRECTION_WORDS[item.direction]}**` +
+        `（「${adviceTowardOf(item)}」の側へ）　${item.text}`
+    );
+  }
+  lines.push(
     "",
-    "**助言は次の版で入ります。** ここには、上の欄を材料にしたAIの助言が" +
-      "入る予定です（数字はこの紙から写し、言い換えません）。",
-    "",
-  ];
+    "AIの見立てです。どれを動かすかは作者が決めます。どれも動かさない、という選び方もあります。",
+    ""
+  );
+  if (record.dropped > 0) {
+    lines.push(
+      `AIの答えのうち${record.dropped}件は、材料に無い数字や引用・逆の向きを含んでいたので載せていません。`,
+      ""
+    );
+  }
+  return lines;
+}
+
+function adviceTowardOf(item: TargetSheetAdviceItem): string {
+  const ends = READER_AXIS_ENDS[item.axis];
+  return item.direction === "up" ? ends.high : ends.low;
 }
 
 function noticeSection(notices: readonly string[]): string[] {

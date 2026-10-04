@@ -73,6 +73,7 @@ import {
   SETTINGS_SUBDIRS,
   listBodyFiles,
   readBody,
+  readReaderAim,
   readReaderProfile,
   readSettingsRecords,
   resolveInsideFolder,
@@ -203,6 +204,8 @@ export interface ChatDiagnosisReport {
   readerType: boolean;
   /** 読者の区分の一覧を添えたか（読者の話をしている回だけ。製品と同じ） */
   readerGlossary: boolean;
+  /** ターゲットシートの狙いと理由を添えたか（シートに狙いがあれば毎回。製品と同じ） */
+  readerAim: boolean;
   /** 読者の反応の材料を添えたか（PV・ブクマ等の話をしている回だけ。製品と同じ） */
   readerReaction: boolean;
   /** 送らなかった軸と、その理由 */
@@ -303,6 +306,7 @@ function buildDiagnosisBlocks(
     writerStyle: false,
     readerType: false,
     readerGlossary: false,
+    readerAim: false,
     readerReaction: false,
     omitted,
   };
@@ -369,13 +373,20 @@ function buildDiagnosisBlocks(
     区分の一覧を添える。以前は宣言が無ければ何も足さず、AIはこの拡張機能の
     区分を知らないまま一般論で答えていた（製品では 2026-09-21 に直した形）。
   */
-  const reader = workChatReaderBlocks(readReaderProfile(folder), input.question);
+  const reader = workChatReaderBlocks(
+    readReaderProfile(folder),
+    input.question,
+    readReaderAim(folder)
+  );
   blocks.push(...reader.blocks);
   report.readerType = reader.declared;
   report.readerGlossary = reader.glossary;
+  report.readerAim = reader.aim;
   if (!reader.declared) {
     omitted.push(
-      "ターゲット読者（設定/読者像.json に宣言が無いので、決めていないことだけを渡しました）"
+      reader.aim
+        ? "ターゲット読者（設定/読者像.json に宣言が無いので、シートの狙いと理由だけを渡しました）"
+        : "ターゲット読者（設定/読者像.json に宣言が無いので、決めていないことだけを渡しました）"
     );
   }
 

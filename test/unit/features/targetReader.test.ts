@@ -291,18 +291,20 @@ describe("入口の選択肢と、選ばずに OK", () => {
     };
   }
 
-  it("6つの道がこの順で並び、段の行にはいまの値が添う", async () => {
+  it("7つの道がこの順で並び、段の行にはいまの値が添う", async () => {
     const shown: PickItem[][] = [];
     answers = [captureFirst(shown)];
     await runTargetReader(WORK, REGISTRY, SOURCES);
 
     const labels = shown[0].map((item) => item.label);
-    expect(labels.slice(0, 6)).toEqual([
+    expect(labels.slice(0, 7)).toEqual([
       "3段とも通す",
       "1 狙いを選ぶ",
       "2 書き方の判断に答える",
       "3 本文の実像を読む",
       "タイトルとサブタイトルの適合度を測る",
+      // 助言（P-46。0.98.8）。料金が出るので段に入れず、押したときだけ作る
+      "助言を作る",
       "いまの材料でシートを作り直す",
     ]);
     // 出口も見える形で置く
@@ -363,6 +365,58 @@ describe("2段目（書き方の判断）", () => {
     };
     expect(profile.declared?.answers).toEqual(READER_QUESTIONS.map(() => 2));
     expect(fs.text(SHEET)).toContain("| 読者層 | 一致度 | どんな読者か |");
+  });
+});
+
+/**
+ * 助言（P-46。0.98.8）。AI を呼ぶ段はここでは通さない（登録が空）——
+ * 材料が無いときに AI へ行かずに止まることと、残した記録を紙が並べることを見る。
+ */
+describe("助言", () => {
+  it("狙いが無ければ、AIへ行かずに止め、紙も作らない", async () => {
+    answers = [plan("助言を作る")];
+
+    const outcome = await runTargetReader(WORK, REGISTRY, SOURCES);
+
+    expect(outcome).toBe(CHECK_FAILED);
+    expect(warnings.join("\n")).toContain("1 狙いを選ぶ");
+    expect(fs.placed()).toEqual([]);
+  });
+
+  it("残した助言の記録は、シートを作り直すと「助言」の欄に並ぶ", async () => {
+    answers = [plan("1 狙い"), types("考察層")];
+    inputs = ["伏線を拾う人に"];
+    await runTargetReader(WORK, REGISTRY, SOURCES);
+    fs.files.set(
+      paths.join(SETTINGS, "ターゲットシート", "助言.json"),
+      new TextEncoder().encode(
+        JSON.stringify({
+          schemaVersion: "1",
+          generatedAt: "2026-10-04T12:00:00.000Z",
+          providerId: "ollama",
+          model: "gemma4:e4b",
+          promptVersion: "1.0",
+          materialMark: "前の材料",
+          aims: ["lore_deep"],
+          reasonGiven: true,
+          source: "declared",
+          overall: "読み慣れの軸が離れています。",
+          keep: ["読む姿勢が合っています。"],
+          advice: [],
+          dropped: 0,
+        })
+      )
+    );
+
+    answers = [plan("いまの材料でシートを作り直す")];
+    await runTargetReader(WORK, REGISTRY, SOURCES);
+
+    const sheet = fs.text(SHEET) ?? "";
+    expect(sheet).toContain("### 狙いに合っている所");
+    expect(sheet).toContain("- 読む姿勢が合っています。");
+    expect(sheet).toContain("**直す所は見当たりません。**");
+    // いまは点数が無いので材料が組めない＝作ったときと同じとは言わない
+    expect(sheet).toContain("狙い・理由・点数のどれかが変わっています");
   });
 });
 

@@ -423,6 +423,33 @@ ${readerNote(basis.source, adviceDiagnosisDate(basis.updatedAt))}
 ${READER_TYPE_PROMPTS[resolveReaderType(basis.scores)]}`;
 }
 
+/** 狙いの一段の見出し（テストが探すのに使う） */
+export const READER_AIM_HEADING = "【作者が狙う読者】";
+
+/**
+ * 作者が「ターゲット読者」の1段目で選んだ狙いと、その理由（設計書6.108.6
+ * の⑤への答え）。**相談で毎回送るのは、この2〜3行だけ。**
+ *
+ * - **名前と理由だけ**を渡す。層の説明（効くこと・離れるところ）まで
+ *   毎回送ると、【この作品の読者】の段と2つの宛先の説明が並び、助言の
+ *   向きが揺れる（6.91.9 の「引きずられない」と同じ理由）
+ * - 理由は作者の文なので**そのまま**渡す（言い換えると作者の意図が動く）
+ * - 狙いと【この作品の読者】（書き方の判断か本文の実像）が違っていても、
+ *   **どちらかを間違いと言わせない**（6.91.7）
+ */
+export function buildReaderAimPrompt(
+  types: readonly ReaderTypeId[],
+  reason: string
+): string {
+  const labels = types.map((type) => READER_TYPES[type].label).join("、");
+  const trimmed = reason.trim();
+  return [
+    `${READER_AIM_HEADING}${labels}（作者が「この読者に読んでもらいたい」と選んだ層）`,
+    trimmed ? `作者が挙げた理由：${trimmed}` : "理由は書かれていません。",
+    "【この作品の読者】と違っていても、どちらかを間違いと言わないでください。この文章そのものを話題にしないでください（作者はこれを見ていません）。",
+  ].join("\n");
+}
+
 /** 問いの直前へ置く読者の要点の見出し（テストが位置を探すのに使う） */
 export const READER_TYPE_REMINDER_HEADING = "【この相談で向ける読者】";
 
