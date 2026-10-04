@@ -1439,18 +1439,37 @@ ruby > rt {
     WebView の中では VS Code 本体の割り当て（エディタの行き来）が効かない
     ので、この画面で受けて**前の話・次の話**に結ぶ。
 
-    **mouseup だけで扱う。** Chromium は同じ押下で auxclick も出すので、
-    両方に付けると1回押しただけで2話ぶん動く。mouseup を選んだのは、
-    auxclick が「非主ボタンのクリック」として来るのに対し、こちらは
-    どのボタンが押されたかを button で直に見られ、既定の動き
-    （履歴の行き来）もここで止められるためである。
+    **押した時点（mousedown）で動かし、離したとき（mouseup・auxclick）は既定を
+    止めるだけにする**（2026-10-04 に改めた。人物相関図と同じ形。設計書6.25.10）。
+    0.98.6 までは mouseup で受けていたが、作者の画面では mouseup が届かず効いて
+    いない疑いがあった。VS Code 1.138 の本体の横のボタン（エディターの行き来）も、
+    押した時点で動かし、離したときは止めるだけにしている。動かすのを1か所に
+    絞るのは、同じ押下で mousedown・mouseup・auxclick が全部来るため——
+    2か所で動かすと1回押しただけで2話ぶん動く。
+
+    既定を止めるのは、入れ子の枠へ「戻る」（履歴の行き来）が伝わらないように
+    するため。外へも伝えない（stopPropagation）——WebView の器が拾って本体の
+    「戻る」まで動かすと、原稿のタブから離れてしまう。どれも捕獲の段で受ける
+    （本文の中の受け口より先に受け、止める）。
   */
-  document.addEventListener("mouseup", function (event) {
-    if (event.button !== 3 && event.button !== 4) return;
-    // 入れ子の枠へ「戻る」が伝わらないよう、既定の動きは止める
+  function isSideButton(event) {
+    return event.button === 3 || event.button === 4;
+  }
+  function stopSideButton(event) {
     event.preventDefault();
+    event.stopPropagation();
+  }
+  document.addEventListener("mousedown", function (event) {
+    if (!isSideButton(event)) return;
+    stopSideButton(event);
     openNeighbor(event.button === 3 ? "prev" : "next");
-  });
+  }, true);
+  document.addEventListener("mouseup", function (event) {
+    if (isSideButton(event)) stopSideButton(event);
+  }, true);
+  document.addEventListener("auxclick", function (event) {
+    if (isSideButton(event)) stopSideButton(event);
+  }, true);
 
   /* ── 口述筆記（設計書6.83） ───────────────── */
   /*
