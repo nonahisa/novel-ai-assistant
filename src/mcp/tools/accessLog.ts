@@ -155,6 +155,8 @@ export function exposureOf(
     tool === "outbox.pack" ||
     // 作者のAIで走らせた結果（指摘の原文・あらすじ）が呼び出し元へ渡る（6.87.22）
     tool === "run.result" ||
+    // 質問に近い場面（6.87.23）。場面ごとの抜粋（200字まで）と話・行が渡る（全文は返さない）
+    tool === "novel.search" ||
     tool === "novel.scan" ||
     tool === "novel.validate" ||
     tool === "novel.detect" ||
@@ -325,6 +327,19 @@ function detailOf(
   if (tool === "run.request") {
     const feature = typeof args?.feature === "string" ? args.feature : "";
     return feature ? `作者のAIでの実行を頼んだ（${feature}）` : "作者のAIでの実行を頼んだ";
+  }
+  /*
+    質問に近い場面を探した回（6.87.23）。**どちらの道で探したかと件数だけ**を残す
+    （問いの文も抜粋も残さない——問いに作品の筋が書かれていることがある）
+  */
+  if (tool === "novel.search") {
+    const record =
+      typeof result === "object" && result !== null
+        ? (result as Record<string, unknown>)
+        : undefined;
+    const method = record?.method === "vector" ? "索引" : record?.method === "wordMatch" ? "語句の一致" : "";
+    const count = Array.isArray(record?.hits) ? `${record.hits.length}件` : "";
+    return method ? `質問に近い場面を探した（${method}で${count}）` : "質問に近い場面を探した";
   }
   if (tool === "run.result") {
     const id = typeof args?.requestId === "string" ? args.requestId.slice(0, 40) : "";

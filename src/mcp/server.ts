@@ -94,6 +94,7 @@ import {
   type NoticesRecentInput,
 } from "./tools/notices";
 import { worksList } from "./tools/works";
+import { NOVEL_SEARCH_INPUT, novelSearch, type NovelSearchInput } from "./tools/search";
 import { aiSettings } from "./tools/aiSettings";
 import {
   SETUP_REQUEST_INPUT,
@@ -735,6 +736,26 @@ server.registerTool(
     （`permissionKeyOf`）——頼めるのに読めない、という半端な許可を作らない。
   */
   tool("run.result", (args: RunResultInput) => runResult(args))
+);
+
+server.registerTool(
+  "novel.search",
+  {
+    title: "質問に近い場面を探す（検索用の索引か語句の一致で）",
+    description:
+      "作品の本文から、質問に近い場面を返します（ファイル・話・行・抜粋200字まで・近さ・索引の作成日時）。" +
+      "拡張機能が作った検索用の索引（ベクトル）があれば、索引を作ったのと同じ手元の Ollama・同じモデルで" +
+      "質問を埋め込んで引きます（method: vector）。索引が無い・モデルが今の設定と違う・本文に追いついていない" +
+      "ときは語句の一致で探し、理由を reason に入れます（method: wordMatch）。索引は run.request の " +
+      "feature: vectorIndex で作れます。**読むだけ**で、本文の全文は返しません。",
+    inputSchema: NOVEL_SEARCH_INPUT,
+  },
+  /*
+    **作品を指すので、転送層が許可を確かめる**（鍵は道具の名前。6.87.14）。
+    MCP の相談（feature=chat）が意味検索を使わない方針とはぶつからない——
+    こちらは作者が「索引を引く」と明示して呼ぶ道具で、どちらで探したかを必ず返す
+  */
+  tool("novel.search", (args: NovelSearchInput) => novelSearch(args))
 );
 
 server.registerTool(
