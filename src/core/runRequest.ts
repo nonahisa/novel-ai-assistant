@@ -88,7 +88,9 @@ export type RunFeature =
   | "contradiction"
   | "foreshadow"
   | "deviation"
-  | "synopsis";
+  | "synopsis"
+  /** 検索用の索引づくり（0.99.19）。AIの割当ではなく手元の Ollama の埋め込みで走る */
+  | "vectorIndex";
 
 export type RunAssignedFeature =
   | "typo"
@@ -120,6 +122,39 @@ export function findRunFeature(name: unknown): RunFeatureDef | undefined {
     : undefined;
 }
 
+/**
+ * 検索用の索引づくり（設計書6.19.11・6.87.23。0.99.19）。
+ *
+ * **`RUN_FEATURES` に入れない。** あちらは機能別AI割当（`assigned`）で選んだAIへ
+ * 本文を送る機能の白名簿で、送る量の上限（`RUN_MAX_BODY_CHARS`）も効く。
+ * 索引づくりは**埋め込みが手元の Ollama だけ**（6.19.5）で、送る先も料金も違う。
+ * 受け口は合言葉・1回限り・許可・回数の上限までを共通で通し、そこから分かれる。
+ *
+ * **原稿は書き換えない。** 書くのは作品の `.aiwriter/cache/vector/`（Git 除外の
+ * 作り直せる控え）だけで、作者が「検索索引作成／更新」を押したのと同じ。
+ */
+export const RUN_INDEX_FEATURE = "vectorIndex" as const;
+export const RUN_INDEX_LABEL = "検索用の索引づくり（意味検索）";
+
+export function isRunIndexFeature(name: unknown): name is typeof RUN_INDEX_FEATURE {
+  return name === RUN_INDEX_FEATURE;
+}
+
+/** 外から頼める機能の名前（白名簿＋索引づくり）。MCP の入力の形に使う */
+export const RUN_REQUESTABLE_FEATURES: readonly RunFeature[] = [
+  ...RUN_FEATURES.map((def) => def.feature),
+  RUN_INDEX_FEATURE,
+];
+
+/** 画面と返事に出す名前 */
+export function runFeatureLabel(name: unknown): string | undefined {
+  if (isRunIndexFeature(name)) return RUN_INDEX_LABEL;
+  return findRunFeature(name)?.label;
+}
+
+/** 索引づくりの範囲。`all` は登録済みの全作品（許可のある作品だけ回す） */
+export type RunScope = "all";
+
 // ── 札（MCP が書き、拡張機能が読む）────────────────────────
 
 /**
@@ -142,6 +177,12 @@ export interface RunTicket {
   folder: string;
   /** 対象の話（作品フォルダーからの相対パス。`novel.scan` の値）。無ければ作品全体 */
   file?: string;
+  /**
+   * 索引づくり（`vectorIndex`）だけ：`all` なら登録済みの全作品を順に回す。
+   * 無ければ `folder` の作品だけ。`folder` は**全作品のときも要る**——依頼の
+   * 持ち主（許可を確かめ、`run.result` で突き合わせる作品）になる
+   */
+  scope?: RunScope;
   /** 頼んだ接続元の名乗り（自己申告） */
   client: string;
   /** 依頼の時刻（ISO） */
@@ -227,6 +268,10 @@ export function parseRunTicket(text: string): RunTicket | undefined {
   if (typeof record.createdAt !== "string" || !Number.isFinite(Date.parse(record.createdAt))) {
     return undefined;
   }
+  // 範囲は `all` だけ。**索引づくり以外に付いた範囲は、見覚えのない札として読まない**
+  if (record.scope !== undefined) {
+    if (record.scope !== "all" || !isRunIndexFeature(record.feature)) return undefined;
+  }
   return {
     version: 1,
     id: record.id,
@@ -234,6 +279,7 @@ export function parseRunTicket(text: string): RunTicket | undefined {
     feature: (def?.feature ?? record.feature) as RunFeature,
     folder: record.folder,
     ...(record.file !== undefined ? { file: record.file as string } : {}),
+    ...(record.scope === "all" ? { scope: "all" as const } : {}),
     client: record.client,
     createdAt: record.createdAt,
   };
@@ -538,6 +584,15 @@ export function runStatusOf(
         message: "作者のAIで走っています。終わると結果が読めます。間を置いて確かめてください。",
       };
     case "done":
+      if (isRunIndexFeature(ticket.feature)) {
+        return {
+          status: "done",
+          message:
+            "検索用の索引づくりを終えました。作品ごとの件数・かかった時間・失敗や飛ばした理由は result.findings にあります" +
+            "（status が cancelled の作品は途中まで保存済み）。原稿・設定資料・提案パネルは変わっていません。" +
+            "索引は novel.search で引けます。",
+        };
+      }
       return {
         status: "done",
         message:
@@ -616,6 +671,88 @@ export function describeRunConfirm(input: RunConfirmInput): {
   ];
   return {
     message: `外部AI（${who}）からの依頼です。あなたのAIで「${input.featureLabel}」を走らせますか？`,
+    detail: lines.join("\n"),
+  };
+}
+
+// ── 索引づくり（vectorIndex）─────────────────────────────
+
+/**
+ * 索引づくりの1作品ぶんの結果（`result.findings` の1行）。**件数・時間・理由だけ**
+ * ——本文は1文字も入れない。
+ *
+ * - `done`：作り終えた（変わっていない場面は作り直さない）
+ * - `failed`：作れなかった（`reason`）。**ほかの作品は続けた**
+ * - `cancelled`：作者が止めた（そこまでは保存済み。次は続きから）
+ * - `skipped`：許可が無いなどで回さなかった（`reason`）
+ */
+export interface RunIndexRow {
+  workTitle: string;
+  folder: string;
+  status: "done" | "failed" | "cancelled" | "skipped";
+  /** 新しく埋め込んだ場面 */
+  built?: number;
+  /** そのまま使えた場面 */
+  reused?: number;
+  /** 本文から消えたので索引から外した場面 */
+  removed?: number;
+  /** いまの場面の数（本文・設定資料・あらすじ） */
+  total?: number;
+  /** 埋め込めずに飛ばした場面（次の作り直しで続きから） */
+  failedScenes?: number;
+  /** 索引の大きさ（バイト） */
+  bytes?: number;
+  seconds: number;
+  reason?: string;
+}
+
+export interface RunIndexConfirmInput {
+  ticket: RunTicket;
+  /** 回す作品（許可のあるもの） */
+  works: readonly { title: string }[];
+  /** 回さない作品と理由 */
+  skipped: readonly { title: string; reason: string }[];
+  model: string;
+}
+
+/**
+ * 索引づくりの確認のモーダル。**作品を全部並べる**（どこから・どの作品・使うAI・
+ * 料金・止め方）。1行目は作品（1作品なら題、全作品なら数）。
+ */
+export function describeIndexConfirm(input: RunIndexConfirmInput): {
+  message: string;
+  detail: string;
+} {
+  const who = clientKeyOf(input.ticket.client);
+  const deadline = new Date(Date.parse(input.ticket.createdAt) + RUN_CONFIRM_MS);
+  const all = input.ticket.scope === "all";
+  const titles = input.works.map((work) => work.title).join("・");
+  const lines = [
+    all
+      ? `作品：登録済みの全作品から ${input.works.length}作品（${titles}）`
+      : `作品：${titles}`,
+    `どこから：外部AI（名乗り：${who}。名乗りは自己申告です）`,
+    `機能：${RUN_INDEX_LABEL}`,
+    `使うAI：手元の Ollama（${input.model}）。料金：無料・手元で実行（本文はこの機械から出ません）`,
+    "変わっていない場面は作り直しません。1作品ずつ順に回し、1作品で失敗しても次へ進みます。",
+    "右下の「中止」で止められます（そこまでは保存します）。",
+    ...(input.skipped.length > 0
+      ? [
+          `回さない作品：${input.skipped
+            .map((entry) => `${entry.title}（${entry.reason}）`)
+            .join("・")}`,
+        ]
+      : []),
+    "",
+    "書くのは各作品の .aiwriter/cache/vector/（Git に載らない、作り直せる控え）だけです。" +
+      "原稿・設定資料・提案パネルは変わりません。",
+    `期限：${formatClock(deadline)} を過ぎて押しても走りません。`,
+    "覚えのない依頼なら「走らせる」を押さずに閉じてください。",
+  ];
+  return {
+    message: all
+      ? `外部AI（${who}）からの依頼です。${input.works.length}作品の検索用の索引を作りますか？`
+      : `外部AI（${who}）からの依頼です。「${titles}」の検索用の索引を作りますか？`,
     detail: lines.join("\n"),
   };
 }

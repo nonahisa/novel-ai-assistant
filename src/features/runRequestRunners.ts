@@ -60,10 +60,19 @@ import { confirmProviderReachable } from "./aiConnectivity";
 import { withAiTurnProgress } from "./aiTurn";
 import { globalStorageRoot } from "./globalStoragePath";
 import type {
+  RunIndexDeps,
   RunMeasure,
   RunOutcome,
   RunRequestHandlerDeps,
 } from "./runRequestHandler";
+import type { RunIndexRow } from "../core/runRequest";
+import { OllamaEmbeddingProvider } from "../ai/ollamaEmbedding";
+import {
+  buildVectorIndexForWorks,
+  embeddingModelName,
+  isVectorSearchEnabled,
+} from "./vectorSearch";
+import { withCancellableProgress } from "../views/progress";
 
 /**
  * 外部AIから頼まれた実行の、VS Code 側の手足（設計書6.87.22）。
@@ -95,8 +104,59 @@ import type {
 export interface RunRequestDepsInput {
   context: vscode.ExtensionContext;
   findWork(folder: string): WorkEntry | undefined;
+  /** 登録済みの全作品（索引づくりの `scope: "all"`） */
+  listWorks(): WorkEntry[];
   aiRegistry: AIRegistry;
   log(line: string): void;
+}
+
+/**
+ * 索引づくりの手足（設計書6.87.23）。**1作品のコマンドと同じ芯**
+ * （`buildVectorIndexForWorks` → `buildVectorIndexCore`）を通す——作り方も置き場も
+ * 作者が「検索索引作成／更新」を押したときと同じ。進捗と中止は右下に出る。
+ */
+function createIndexDeps(input: RunRequestDepsInput): RunIndexDeps<WorkEntry> {
+  return {
+    enabled: isVectorSearchEnabled,
+    model: embeddingModelName,
+    listWorks: input.listWorks,
+    check: async () => {
+      const check = await new OllamaEmbeddingProvider().check();
+      return check.ok
+        ? { ok: true }
+        : { ok: false, reason: check.error.message, nextAction: check.error.nextStep };
+    },
+    build: async (works) => {
+      const provider = new OllamaEmbeddingProvider();
+      const rows = await withCancellableProgress(
+        "検索用の索引を作っています（外部AIからの依頼）",
+        async (progress, token) =>
+          await buildVectorIndexForWorks(works, provider, {
+            isCancelled: () => token.isCancellationRequested,
+            report: (message) => progress.report({ message }),
+          })
+      );
+      return rows.map(
+        (row): RunIndexRow => ({
+          workTitle: row.work.title,
+          folder: row.work.folderPath,
+          status: row.status,
+          ...(row.result
+            ? {
+                built: row.result.built,
+                reused: row.result.reused,
+                removed: row.result.removed,
+                total: row.result.total,
+                failedScenes: row.result.failed,
+                bytes: row.result.bytes,
+              }
+            : {}),
+          seconds: Math.round(row.seconds * 10) / 10,
+          ...(row.reason ? { reason: row.reason } : {}),
+        })
+      );
+    },
+  };
 }
 
 export function createRunRequestDeps(
@@ -187,6 +247,7 @@ export function createRunRequestDeps(
     warn: (message) => void vscode.window.showWarningMessage(message),
     info: (message) => void vscode.window.showInformationMessage(message),
     log: input.log,
+    index: createIndexDeps(input),
   };
 }
 
@@ -408,6 +469,9 @@ async function runFeature(
     }
     case "synopsis":
       return runSynopses(work, registry, filePaths);
+    case "vectorIndex":
+      // 索引づくりは受け口が別の道（`handleIndexRequest`）へ分けるので、ここへは来ない
+      return { ok: false, reason: "索引づくりはこの口では走らせません。" };
   }
 }
 

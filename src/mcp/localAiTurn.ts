@@ -130,7 +130,8 @@ let turnInstance: CrossProcessTurn | null | undefined;
  * `mcpGlobalStorageRoot` は環境変数が無ければ「走っている束の親フォルダー」を
  * 返すが、単体テストでは走っているのが試験の道具なので、そこへ札を書くと
  * 試験の道具のフォルダーを汚す。束の名前（`mcp-server.mjs`）で見分ける。
- * `dist/` から撃つときは `dist/` に札ができる——拡張機能とは突き合わないので、
+ * `dist/` から撃つときは、0.99.19 から VS Code の既定の保管庫を探して札を立てる
+ * （拡張機能と突き合う）。見つからない機械では `dist/` に札ができるので、
  * 開発・測定では `NOVELAI_GLOBAL_STORAGE` で保管庫を渡す（メモの手順どおり）。
  */
 function leaseRoot(): string | undefined {

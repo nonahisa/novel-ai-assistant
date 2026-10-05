@@ -428,6 +428,7 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.openTargetSheet": "allTypes",
   "novelai.showThreeCircles": "allTypes",
   "novelai.buildVectorIndex": "allTypes",
+  "novelai.buildVectorIndexAll": "allTypes",
   "novelai.clearVectorIndex": "allTypes",
 
   // ── 画面の出し入れ・ヘルプ ──

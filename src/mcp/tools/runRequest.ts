@@ -4,11 +4,16 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import {
   RUN_FEATURES,
+  RUN_INDEX_FEATURE,
+  RUN_INDEX_LABEL,
   RUN_MAX_OPEN_REQUESTS,
+  RUN_REQUESTABLE_FEATURES,
   RUN_REQUEST_DIRECTORY,
   buildRunUri,
   checkRunFile,
-  findRunFeature,
+  isRunIndexFeature,
+  runFeatureLabel,
+  type RunFeature,
   formatRunTicket,
   isRunOpen,
   isRunRequestId,
@@ -50,20 +55,30 @@ import { openUri } from "./setupRequest";
  * 置かない。同期されて編集部の機械へ流れるため）。
  */
 
-const FEATURE_NAMES = RUN_FEATURES.map((def) => def.feature) as [string, ...string[]];
+const FEATURE_NAMES = [...RUN_REQUESTABLE_FEATURES] as [string, ...string[]];
 
 export const RUN_REQUEST_INPUT = {
-  folder: z.string().describe("作品フォルダーの絶対パス"),
+  folder: z
+    .string()
+    .describe("作品フォルダーの絶対パス（scope: all のときも、依頼の持ち主として1作品を渡す）"),
   feature: z
     .enum(FEATURE_NAMES)
     .describe(
       "走らせる機能（読み取りと生成だけ）。" +
-        RUN_FEATURES.map((def) => `${def.feature}＝${def.label}`).join("、")
+        RUN_FEATURES.map((def) => `${def.feature}＝${def.label}`).join("、") +
+        `、${RUN_INDEX_FEATURE}＝${RUN_INDEX_LABEL}（手元の Ollama で検索用の索引を作る・更新する。料金なし。novel.search で引く）`
     ),
   file: z
     .string()
     .optional()
-    .describe("対象の話（novel.scan の filePath）。省略すると作品全体"),
+    .describe("対象の話（novel.scan の filePath）。省略すると作品全体。vectorIndex では使えません"),
+  scope: z
+    .enum(["work", "all"])
+    .optional()
+    .describe(
+      "vectorIndex のときだけ。all で登録済みの全作品を順に回す（外部AIの許可がある作品だけ。無い作品は結果に理由つきで並ぶ）。" +
+        "省略か work で folder の作品だけ"
+    ),
 };
 
 export const RUN_RESULT_INPUT = {
@@ -75,6 +90,7 @@ export interface RunRequestInput {
   folder: string;
   feature: string;
   file?: string;
+  scope?: "work" | "all";
 }
 
 export interface RunResultInput {
@@ -114,13 +130,20 @@ export async function runRequest(
   args: RunRequestInput,
   deps: RunRequestDeps = defaultDeps
 ): Promise<RunRequestResult> {
-  const def = findRunFeature(args.feature);
-  if (!def) {
+  const label = runFeatureLabel(args.feature);
+  if (!label) {
     // **白名簿の外は開く前に断る。** 受け口でも断るが、確認の画面を出すまでもない
     throw new McpToolError(
       `この道で走らせられる機能ではありません（${String(args.feature).slice(0, 40)}）。` +
-        `読み取りと生成だけです：${RUN_FEATURES.map((entry) => entry.feature).join("・")}`
+        `読み取りと生成だけです：${RUN_REQUESTABLE_FEATURES.join("・")}`
     );
+  }
+  const index = isRunIndexFeature(args.feature);
+  if (args.scope === "all" && !index) {
+    throw new McpToolError(`scope: all は ${RUN_INDEX_FEATURE}（索引づくり）のときだけ使えます。`);
+  }
+  if (index && args.file !== undefined) {
+    throw new McpToolError("索引づくりは作品ごとに作ります。file は渡さないでください。");
   }
   if (args.file !== undefined) {
     const problem = checkRunFile(args.file);
@@ -158,9 +181,10 @@ export async function runRequest(
     version: 1,
     id,
     tokenHash: sha256Text(token),
-    feature: def.feature,
+    feature: args.feature as RunFeature,
     folder,
     ...(args.file !== undefined ? { file: args.file } : {}),
+    ...(index && args.scope === "all" ? { scope: "all" as const } : {}),
     client: deps.clientName(),
     createdAt: new Date(now).toISOString(),
   };
@@ -196,7 +220,12 @@ export async function runRequest(
     status: "waiting",
     opened: true,
     note:
-      `作者の VS Code に「${def.label}を走らせますか」という確認が出ます。押すのは作者です。` + after,
+      (index
+        ? `作者の VS Code に「検索用の索引を作りますか」という確認が出ます（${
+            args.scope === "all" ? "登録済みの全作品" : "この作品"
+          }。手元の Ollama で、料金はかかりません）。押すのは作者で、作者は途中で止められます。` +
+          "作品の数によっては数分かかります。"
+        : `作者の VS Code に「${label}を走らせますか」という確認が出ます。押すのは作者です。`) + after,
   };
 }
 

@@ -65,6 +65,20 @@ export interface AiAssignmentsSnapshot {
   defaultAi: AiChoice | null;
   /** 機能ごと（選択画面と同じ順） */
   features: AiAssignmentRow[];
+  /**
+   * 意味検索（ベクトル検索）の設定（0.99.19）。MCP の `novel.search` が、
+   * **索引のモデルが今の設定と同じか**を確かめ、検索語を埋め込む Ollama の
+   * 場所を知るために読む。**古い写しには無い**（そのときは照合を飛ばす）
+   */
+  vectorSearch?: VectorSearchSetting;
+}
+
+export interface VectorSearchSetting {
+  enabled: boolean;
+  /** 埋め込みのモデル（`novelai.vectorSearch.model`） */
+  model: string;
+  /** Ollama の場所（`novelai.ollama.endpoint`） */
+  endpoint: string;
 }
 
 export interface AiAssignmentsWriter {
@@ -84,6 +98,8 @@ export interface AiAssignmentsSource {
   assignments: unknown;
   /** 並べる機能と、その表示名（`ASSIGNABLE_FEATURES` と `ASSIGNABLE_FEATURE_LABELS`） */
   features: readonly { key: string; label: string }[];
+  /** 意味検索の設定。形が合わなければ写さない */
+  vectorSearch?: unknown;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -141,7 +157,22 @@ export function buildAiAssignmentsSnapshot(
     },
     defaultAi,
     features,
+    ...withVectorSearch(source.vectorSearch),
   };
+}
+
+/** 意味検索の設定を名指しで拾う。どれかが欠けていれば undefined（写さない） */
+function vectorSearchOf(value: unknown): VectorSearchSetting | undefined {
+  if (!isObject(value)) return undefined;
+  if (typeof value.enabled !== "boolean" || !nonEmpty(value.model) || !nonEmpty(value.endpoint)) {
+    return undefined;
+  }
+  return { enabled: value.enabled, model: value.model, endpoint: value.endpoint };
+}
+
+function withVectorSearch(value: unknown): { vectorSearch?: VectorSearchSetting } {
+  const setting = vectorSearchOf(value);
+  return setting ? { vectorSearch: setting } : {};
 }
 
 export function serializeAiAssignmentsSnapshot(snapshot: AiAssignmentsSnapshot): string {
@@ -205,5 +236,8 @@ export function parseAiAssignmentsSnapshot(text: string): AiAssignmentsSnapshot 
     },
     defaultAi,
     features,
+    // **任意の欄。** 形が合わないときは写しごと捨てず、この欄だけ無いものとして読む
+    // （古い版の拡張機能が書いた写しと同じ扱い）
+    ...withVectorSearch(raw.vectorSearch),
   };
 }

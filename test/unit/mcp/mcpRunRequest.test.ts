@@ -111,6 +111,30 @@ describe("run.request", () => {
     expect(ticket?.client).toBe("claude-code");
   });
 
+  test("索引づくり（vectorIndex）：全作品の範囲を札に書き、作品フォルダーには何も書かない", async () => {
+    const before = listRecursive(work);
+    const d = deps();
+    const result = await runRequest({ folder: work, feature: "vectorIndex", scope: "all" }, d);
+    expect(listRecursive(work)).toEqual(before);
+    const text = fs.readFileSync(
+      nodePath.join(storage, RUN_REQUEST_DIRECTORY, runTicketFileName(result.requestId)),
+      "utf8"
+    );
+    const ticket = parseRunTicket(text);
+    expect(ticket?.feature).toBe("vectorIndex");
+    expect(ticket?.scope).toBe("all");
+    expect(result.note).toContain("索引");
+  });
+
+  test("索引づくり以外の scope: all と、索引づくりの file は断る", async () => {
+    const d = deps();
+    await expect(runRequest({ folder: work, feature: "typo", scope: "all" }, d)).rejects.toThrow(/scope/u);
+    await expect(
+      runRequest({ folder: work, feature: "vectorIndex", file: "本文\\第1話.txt" }, d)
+    ).rejects.toThrow(/file/u);
+    expect(d.opened).toHaveLength(0);
+  });
+
   test("白名簿の外は、開く前に断る", async () => {
     const d = deps();
     await expect(runRequest({ folder: work, feature: "settings" }, d)).rejects.toBeInstanceOf(McpToolError);
@@ -260,6 +284,7 @@ describe("門番と記録", () => {
 
   test("合言葉は引数で受けない（呼び出し元に選ばせない）", () => {
     // 呼び出し元に合言葉を選ばせると、ウェブページも同じ値で URI を作れる
-    expect(Object.keys(RUN_REQUEST_INPUT).sort()).toEqual(["feature", "file", "folder"]);
+    // scope は索引づくりの範囲（0.99.19）。合言葉ではない
+    expect(Object.keys(RUN_REQUEST_INPUT).sort()).toEqual(["feature", "file", "folder", "scope"]);
   });
 });

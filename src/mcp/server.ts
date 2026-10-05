@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { SERVER_NAME, SERVER_VERSION } from "./version";
+import { mcpGlobalStorage, withStorageNote } from "./globalStorage";
 import {
   checkBundleStaleness,
   rememberBundleAtStartup,
@@ -93,6 +94,7 @@ import {
   type NoticesRecentInput,
 } from "./tools/notices";
 import { worksList } from "./tools/works";
+import { NOVEL_SEARCH_INPUT, novelSearch, type NovelSearchInput } from "./tools/search";
 import { aiSettings } from "./tools/aiSettings";
 import {
   SETUP_REQUEST_INPUT,
@@ -125,7 +127,7 @@ import {
  * そちらを直に呼ぶ（`test/unit/mcp/mcpTools.test.ts`）。混ぜると、
  * ツールの中身を確かめるのに stdio を立てなければならなくなる。
  *
- * **道具は25本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
+ * **道具は26本**（0.99.19 で `novel.search`、0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
  * 0.75.x で `windows.list`、0.82.1 で `setup.request`、0.83.x で `schedule.milestones`、
  * 0.85.0 で `notices.recent` と `works.list`、0.85.1 で `pending.list`、
  * 0.88 の次の版で `run.request` と `run.result`（設計書6.87.22）、
@@ -259,7 +261,16 @@ function tool<Args>(
       );
       // 返り値も渡す（件数を記録へ残す道具がある。中身は写さない）
       recordExternalAccess({ tool: name, args, ok: true, result: value });
-      return ok(withStaleNote(withLocalAiNotes(value, notes), checkBundleStaleness()));
+      /*
+        **保管庫を見つけられず束の親へ落ちたときは、どこを読んだかを添える**
+        （2026-10-05。別の機械で `dist/.aiwriter` を読んで登録簿が空だった）
+      */
+      return ok(
+        withStorageNote(
+          withStaleNote(withLocalAiNotes(value, notes), checkBundleStaleness()),
+          mcpGlobalStorage()
+        )
+      );
     } catch (error) {
       const result = fail(error, checkBundleStaleness());
       recordExternalAccess({
@@ -312,6 +323,12 @@ server.registerTool(
       リポジトリの `package.json` と束の更新時刻を突き合わせて初めて分かる。
     */
     bundle: checkBundleStaleness(),
+    /*
+      **どの保管庫を読んでいるか**（2026-10-05）。source は env（環境変数）・
+      bundle（束が保管庫にある）・default（VS Code の既定の保管庫）・
+      bundleFallback（見つからず束の親。登録簿や設定が空に見える）
+    */
+    storage: mcpGlobalStorage() ?? null,
     /*
       **名前が変わったことを、ここで伝える**（0.66.7、設計書6.87.15 の柱1）。
       旧名と新名を並べて持つ（二重管理）ことはしないので、**古い名前で
@@ -690,7 +707,9 @@ server.registerTool(
       "作者が VS Code で設定したAI（機能別AI割当のとおり。クラウドのAIも含む）で、" +
       "製品の機能を**検算まで通して**走らせるよう頼みます。鍵はこちらへ出ません。" +
       "**作者の画面に毎回確認が出て、押すのは作者です。** 待たずに requestId を返すので、" +
-      "結果は run.result で読んでください。読み取りと生成だけで、原稿・設定資料・提案パネルは変わりません。",
+      "結果は run.result で読んでください。読み取りと生成だけで、原稿・設定資料・提案パネルは変わりません。" +
+      "feature: vectorIndex は手元の Ollama で検索用の索引（novel.search が引く）を作る・更新します" +
+      "（scope: all で登録済みの全作品を順に。作者は途中で止められ、結果は作品ごとの件数・時間・失敗の理由）。",
     inputSchema: RUN_REQUEST_INPUT,
   },
   /*
@@ -717,6 +736,26 @@ server.registerTool(
     （`permissionKeyOf`）——頼めるのに読めない、という半端な許可を作らない。
   */
   tool("run.result", (args: RunResultInput) => runResult(args))
+);
+
+server.registerTool(
+  "novel.search",
+  {
+    title: "質問に近い場面を探す（検索用の索引か語句の一致で）",
+    description:
+      "作品の本文から、質問に近い場面を返します（ファイル・話・行・抜粋200字まで・近さ・索引の作成日時）。" +
+      "拡張機能が作った検索用の索引（ベクトル）があれば、索引を作ったのと同じ手元の Ollama・同じモデルで" +
+      "質問を埋め込んで引きます（method: vector）。索引が無い・モデルが今の設定と違う・本文に追いついていない" +
+      "ときは語句の一致で探し、理由を reason に入れます（method: wordMatch）。索引は run.request の " +
+      "feature: vectorIndex で作れます。**読むだけ**で、本文の全文は返しません。",
+    inputSchema: NOVEL_SEARCH_INPUT,
+  },
+  /*
+    **作品を指すので、転送層が許可を確かめる**（鍵は道具の名前。6.87.14）。
+    MCP の相談（feature=chat）が意味検索を使わない方針とはぶつからない——
+    こちらは作者が「索引を引く」と明示して呼ぶ道具で、どちらで探したかを必ず返す
+  */
+  tool("novel.search", (args: NovelSearchInput) => novelSearch(args))
 );
 
 server.registerTool(

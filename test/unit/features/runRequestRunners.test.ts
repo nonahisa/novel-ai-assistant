@@ -79,6 +79,8 @@ function makeDeps() {
   return createRunRequestDeps({
     context: { globalStorageUri: Uri.file(STORAGE) } as never,
     findWork: () => ({ id: "w", title: "星の町", folderPath: WORK_FOLDER } as WorkEntry),
+    // 全作品の索引づくり（0.99.19）が登録簿を読むために足した口。この試験は1作品だけ
+    listWorks: () => [{ id: "w", title: "星の町", folderPath: WORK_FOLDER } as WorkEntry],
     aiRegistry: {
       resolve: () => ({
         provider: { id: "sakura", displayName: "作り物のクラウドAI", isPaid: true, apiKey: "sk-秘密" },

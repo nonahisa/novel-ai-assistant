@@ -161,3 +161,30 @@ describe("割り当ての写しを読む", () => {
     expect(AI_ASSIGNMENTS_SNAPSHOT_PATH).toEqual([".aiwriter", "ai-assignments.json"]);
   });
 });
+
+describe("意味検索の設定（0.99.19。MCP の novel.search が索引と照らす）", () => {
+  const source = {
+    defaultProvider: "ollama",
+    defaultModel: "gemma4:e4b",
+    assignments: {},
+    features: FEATURES,
+  };
+
+  it("設定がそろっていれば写り、読み戻せる", () => {
+    const snapshot = buildAiAssignmentsSnapshot(
+      { ...source, vectorSearch: { enabled: true, model: "bge-m3", endpoint: "http://localhost:11434" } },
+      WRITER,
+      NOW
+    );
+    expect(snapshot.vectorSearch).toEqual({ enabled: true, model: "bge-m3", endpoint: "http://localhost:11434" });
+    expect(parseAiAssignmentsSnapshot(serializeAiAssignmentsSnapshot(snapshot))?.vectorSearch).toEqual(
+      snapshot.vectorSearch
+    );
+  });
+
+  it("形が崩れていれば写さず、古い写し（欄なし）も今までどおり読める", () => {
+    const snapshot = buildAiAssignmentsSnapshot({ ...source, vectorSearch: { enabled: "yes" } }, WRITER, NOW);
+    expect(snapshot.vectorSearch).toBeUndefined();
+    expect(parseAiAssignmentsSnapshot(serializeAiAssignmentsSnapshot(snapshot))).toEqual(snapshot);
+  });
+});

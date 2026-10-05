@@ -42,6 +42,11 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
       .get<string>("vectorSearch.model", DEFAULT_EMBEDDING_MODEL);
   }
 
+  /** 埋め込みに使う Ollama の場所（索引の記録に残す。0.99.19） */
+  get endpointUrl(): string {
+    return this.endpoint;
+  }
+
   private get endpoint(): string {
     return vscode.workspace
       .getConfiguration("novelai")

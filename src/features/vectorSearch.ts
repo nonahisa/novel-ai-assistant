@@ -452,6 +452,8 @@ export interface IndexBuildResult {
   seconds: number;
   bytes: number;
   cancelled: boolean;
+  /** 埋め込めずに飛ばした場面の数（ログに理由。次の作り直しで続きから） */
+  failed: number;
 }
 
 /**
@@ -473,16 +475,62 @@ export async function buildVectorIndex(
     return undefined;
   }
 
+  const outcome = await withCancellableProgress(
+    "検索用の索引を作っています",
+    async (progress, token) =>
+      await buildVectorIndexCore(work, provider, {
+        isCancelled: () => token.isCancellationRequested,
+        report: (done, total) =>
+          progress.report({
+            message: `${done}/${total}`,
+            increment: (EMBED_BATCH / Math.max(total, 1)) * 100,
+          }),
+      })
+  );
+  if (!outcome.ok) {
+    vscode.window.showWarningMessage(outcome.reason);
+    return undefined;
+  }
+  return outcome.result;
+}
+
+/** 索引づくりの芯に、外から渡す中止と進捗（1作品でも全作品でも同じ芯を通す） */
+export interface IndexBuildControl {
+  isCancelled(): boolean;
+  /** この作品の中で、埋め込み終えた件数／埋め込む件数 */
+  report(done: number, total: number): void;
+}
+
+export type IndexBuildOutcome =
+  | { ok: true; result: IndexBuildResult }
+  | { ok: false; reason: string };
+
+/**
+ * 索引を作る・更新する芯（**画面を出さない**）。
+ *
+ * 1作品のコマンド（`buildVectorIndex`）も、全作品を順に回すコマンド
+ * （`buildVectorIndexAll`。外部AIからの依頼もここ）も、この1か所を通す——
+ * 索引の作り方・置き場を2つにしない（0.99.19）。
+ *
+ * **途中で中止されても、それまでのぶんは保存する**（次は続きから）。
+ */
+export async function buildVectorIndexCore(
+  work: WorkEntry,
+  provider: OllamaEmbeddingProvider,
+  control: IndexBuildControl
+): Promise<IndexBuildOutcome> {
   const corpus = await buildRetrievalCorpus(work);
   if (corpus.items.length === 0) {
-    vscode.window.showWarningMessage(
-      "索引にする材料がありません。本文が読み込めているか確認してください。"
-    );
-    return undefined;
+    return {
+      ok: false,
+      reason: "索引にする材料がありません。本文が読み込めているか確認してください。",
+    };
   }
 
   const index = await VectorIndex.load(work, provider.model);
   index.setModel(provider.model);
+  // 索引に場所を残す（MCP の novel.search が同じ場所で検索語を埋め込む）
+  index.setEndpoint(provider.endpointUrl);
 
   const pending = corpus.items.filter((item) => !index.has(item.hash));
   const reused = corpus.items.length - pending.length;
@@ -493,52 +541,175 @@ export async function buildVectorIndex(
 
   const started = Date.now();
   let built = 0;
+  let failed = 0;
   let cancelled = false;
 
-  if (uniquePending.length > 0) {
-    await withCancellableProgress(
-      `検索用の索引を作っています（${uniquePending.length}件）`,
-      async (progress, token) => {
-        for (let i = 0; i < uniquePending.length; i += EMBED_BATCH) {
-          if (token.isCancellationRequested) {
-            cancelled = true;
-            return;
-          }
-          const batch = uniquePending.slice(i, i + EMBED_BATCH);
-          try {
-            // 詰まったら中で半分にして やり直す（非力な機械への備え）
-            built += await embedBatch(index, batch, provider);
-          } catch (error) {
-            // 1回の失敗で全部を捨てない。残りを続け、最後にまとめて報告する
-            useLogFile(work.folderPath);
-            logFailure("索引づくりの一部が失敗", {
-              位置: `${i + 1}件目から${batch.length}件`,
-              理由: error instanceof Error ? error.message : String(error),
-            });
-          }
-          progress.report({
-            message: `${Math.min(i + EMBED_BATCH, uniquePending.length)}/${
-              uniquePending.length
-            }`,
-            increment: (EMBED_BATCH / uniquePending.length) * 100,
-          });
-        }
-      }
-    );
+  for (let i = 0; i < uniquePending.length; i += EMBED_BATCH) {
+    if (control.isCancelled()) {
+      cancelled = true;
+      break;
+    }
+    const batch = uniquePending.slice(i, i + EMBED_BATCH);
+    try {
+      // 詰まったら中で半分にして やり直す（非力な機械への備え）
+      built += await embedBatch(index, batch, provider);
+    } catch (error) {
+      // 1回の失敗で全部を捨てない。残りを続け、最後にまとめて報告する
+      failed += batch.length;
+      useLogFile(work.folderPath);
+      logFailure("索引づくりの一部が失敗", {
+        位置: `${i + 1}件目から${batch.length}件`,
+        理由: error instanceof Error ? error.message : String(error),
+      });
+    }
+    control.report(Math.min(i + EMBED_BATCH, uniquePending.length), uniquePending.length);
   }
 
   const removed = index.retainOnly(corpus.items.map((item) => item.hash));
   await index.save(work);
 
   return {
-    built,
-    reused,
-    removed,
-    total: corpus.items.length,
-    seconds: (Date.now() - started) / 1000,
-    bytes: await VectorIndex.storedBytes(work),
-    cancelled,
+    ok: true,
+    result: {
+      built,
+      reused,
+      removed,
+      total: corpus.items.length,
+      seconds: (Date.now() - started) / 1000,
+      bytes: await VectorIndex.storedBytes(work),
+      cancelled,
+      failed,
+    },
   };
+}
+
+/** 全作品を順に回したときの、1作品ぶんの行 */
+export interface IndexBuildRow {
+  work: WorkEntry;
+  status: "done" | "failed" | "cancelled" | "skipped";
+  result?: IndexBuildResult;
+  /** 失敗・飛ばした理由 */
+  reason?: string;
+  seconds: number;
+}
+
+/**
+ * 渡した作品を**順に**索引づくりへ回す（0.99.19。外部AIからの依頼と、
+ * 「検索索引作成／更新（全作品）」が使う）。
+ *
+ * - **1作品の失敗で全体を止めない。** 作品ごとに受け止めて行に残す
+ * - **中止は作品の間でも、作品の中でも効く。** 中止のあとの作品は回さず
+ *   `cancelled` の行にする（それまでのぶんは保存済み）
+ * - Ollama の接続は**呼ぶ側が先に1回だけ**確かめる（作品ごとに確かめると、
+ *   落ちているときに同じ失敗が作品の数だけ並ぶ）
+ */
+export async function buildVectorIndexForWorks(
+  works: readonly WorkEntry[],
+  provider: OllamaEmbeddingProvider,
+  control: {
+    isCancelled(): boolean;
+    report(message: string): void;
+  }
+): Promise<IndexBuildRow[]> {
+  const rows: IndexBuildRow[] = [];
+  for (const [position, work] of works.entries()) {
+    if (control.isCancelled()) {
+      rows.push({ work, status: "cancelled", reason: "中止したため回していません", seconds: 0 });
+      continue;
+    }
+    const head = `${position + 1}/${works.length}作品目「${work.title}」`;
+    control.report(head);
+    const started = Date.now();
+    try {
+      const outcome = await buildVectorIndexCore(work, provider, {
+        isCancelled: control.isCancelled,
+        report: (done, total) => control.report(`${head} ${done}/${total}`),
+      });
+      const seconds = (Date.now() - started) / 1000;
+      if (!outcome.ok) {
+        rows.push({ work, status: "failed", reason: outcome.reason, seconds });
+      } else {
+        rows.push({
+          work,
+          status: outcome.result.cancelled ? "cancelled" : "done",
+          result: outcome.result,
+          ...(outcome.result.cancelled ? { reason: "途中で中止しました（そこまでは保存済み）" } : {}),
+          seconds,
+        });
+      }
+    } catch (error) {
+      useLogFile(work.folderPath);
+      const reason = error instanceof Error ? error.message : String(error);
+      logFailure("作品の索引づくりに失敗（次の作品へ進みます）", { 理由: reason });
+      rows.push({ work, status: "failed", reason, seconds: (Date.now() - started) / 1000 });
+    }
+  }
+  return rows;
+}
+
+/** 行の一覧を、知らせの1文へ（何作品できた・失敗・中止） */
+export function summarizeIndexRows(rows: readonly IndexBuildRow[]): string {
+  const count = (status: IndexBuildRow["status"]) =>
+    rows.filter((row) => row.status === status).length;
+  const seconds = rows.reduce((sum, row) => sum + row.seconds, 0);
+  const parts = [`できた ${count("done")}作品`];
+  if (count("failed")) parts.push(`失敗 ${count("failed")}作品`);
+  if (count("cancelled")) parts.push(`中止 ${count("cancelled")}作品`);
+  if (count("skipped")) parts.push(`飛ばした ${count("skipped")}作品`);
+  return `${parts.join("・")}（${seconds.toFixed(0)}秒）`;
+}
+
+/**
+ * 「検索索引作成／更新（全作品）」——登録済みの作品を順に回す（0.99.19）。
+ *
+ * 作者が押すコマンド。**確認は1回だけ**（作品の数と、手元の Ollama で無料で
+ * あること）。途中で中止でき、失敗した作品は名前と理由を記録へ残す。
+ */
+export async function buildVectorIndexAll(
+  works: readonly WorkEntry[]
+): Promise<IndexBuildRow[] | undefined> {
+  if (works.length === 0) {
+    vscode.window.showInformationMessage("登録されている作品がありません。");
+    return undefined;
+  }
+  const provider = new OllamaEmbeddingProvider();
+  const check = await provider.check();
+  if (!check.ok) {
+    await showEmbeddingError(check.error);
+    return undefined;
+  }
+  const yes = "作る";
+  const picked = await vscode.window.showInformationMessage(
+    `登録されている ${works.length}作品の検索用の索引を、順に作る・更新します。`,
+    {
+      modal: true,
+      detail:
+        `作品：${works.map((work) => work.title).join("・")}\n` +
+        `手元の Ollama（${provider.model}）で作ります。料金はかかりません。` +
+        "変わっていない場面は作り直しません。途中で止めても、そこまでは保存します。",
+    },
+    yes
+  );
+  if (picked !== yes) return undefined;
+
+  const rows = await withCancellableProgress(
+    "検索用の索引を作っています（全作品）",
+    async (progress, token) =>
+      await buildVectorIndexForWorks(works, provider, {
+        isCancelled: () => token.isCancellationRequested,
+        report: (message) => progress.report({ message }),
+      })
+  );
+  const failed = rows.filter((row) => row.status === "failed");
+  const message = `検索用の索引：${summarizeIndexRows(rows)}`;
+  if (failed.length > 0) {
+    vscode.window.showWarningMessage(
+      `${message}。失敗：${failed.map((row) => `${row.work.title}（${row.reason ?? "理由不明"}）`).join("・")}`
+    );
+  } else {
+    vscode.window.showInformationMessage(message);
+  }
+  return rows;
 }
 
 export async function removeVectorIndex(work: WorkEntry): Promise<void> {
