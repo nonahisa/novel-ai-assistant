@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { SERVER_NAME, SERVER_VERSION } from "./version";
+import { mcpGlobalStorage, withStorageNote } from "./globalStorage";
 import {
   checkBundleStaleness,
   rememberBundleAtStartup,
@@ -259,7 +260,16 @@ function tool<Args>(
       );
       // 返り値も渡す（件数を記録へ残す道具がある。中身は写さない）
       recordExternalAccess({ tool: name, args, ok: true, result: value });
-      return ok(withStaleNote(withLocalAiNotes(value, notes), checkBundleStaleness()));
+      /*
+        **保管庫を見つけられず束の親へ落ちたときは、どこを読んだかを添える**
+        （2026-10-05。別の機械で `dist/.aiwriter` を読んで登録簿が空だった）
+      */
+      return ok(
+        withStorageNote(
+          withStaleNote(withLocalAiNotes(value, notes), checkBundleStaleness()),
+          mcpGlobalStorage()
+        )
+      );
     } catch (error) {
       const result = fail(error, checkBundleStaleness());
       recordExternalAccess({
@@ -312,6 +322,12 @@ server.registerTool(
       リポジトリの `package.json` と束の更新時刻を突き合わせて初めて分かる。
     */
     bundle: checkBundleStaleness(),
+    /*
+      **どの保管庫を読んでいるか**（2026-10-05）。source は env（環境変数）・
+      bundle（束が保管庫にある）・default（VS Code の既定の保管庫）・
+      bundleFallback（見つからず束の親。登録簿や設定が空に見える）
+    */
+    storage: mcpGlobalStorage() ?? null,
     /*
       **名前が変わったことを、ここで伝える**（0.66.7、設計書6.87.15 の柱1）。
       旧名と新名を並べて持つ（二重管理）ことはしないので、**古い名前で
