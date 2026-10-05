@@ -1071,6 +1071,7 @@ async function checkRunRequestRoundTrip(): Promise<void> {
       context: fakeContext,
       findWork: (folder: string) =>
         path.resolve(folder) === path.resolve(workFolder) ? work : undefined,
+      listWorks: () => [work],
       aiRegistry,
       log: () => undefined,
     });

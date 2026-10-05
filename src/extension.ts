@@ -7107,6 +7107,7 @@ export async function activate(
             createRunRequestDeps({
               context,
               findWork: (folder) => registry.findByFolder(folder),
+              listWorks: () => registry.list(),
               aiRegistry,
               log: (line) => {
                 useLogFile(undefined);

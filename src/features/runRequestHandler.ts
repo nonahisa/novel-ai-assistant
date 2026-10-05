@@ -3,11 +3,16 @@ import {
   RUN_MAX_PER_HOUR,
   checkRunToken,
   countRecentRuns,
+  describeIndexConfirm,
   describeRunConfirm,
   findRunFeature,
   isConfirmTooLate,
+  isRunIndexFeature,
   parseRunQuery,
   runRequestForLog,
+  RUN_INDEX_FEATURE,
+  RUN_INDEX_LABEL,
+  type RunIndexRow,
   type RunDropped,
   type RunFailures,
   type RunFeatureDef,
@@ -17,6 +22,7 @@ import {
   type RunTicket,
 } from "../core/runRequest";
 import { paidUsageLines } from "../core/paidUsageNotice";
+import { VECTOR_INDEX_VERSION } from "../core/vectorIndexFormat";
 
 /**
  * 外部AIから頼まれた実行を受ける（設計書6.87.22）。
@@ -104,6 +110,22 @@ export interface RunRequestHandlerDeps<W extends RunWork = RunWork> {
   info(message: string): void;
   /** 記録へ1行（作品の場所・本文は入れない） */
   log(line: string): void;
+  /** 索引づくり（`vectorIndex`）の手足。無ければ索引づくりは断る */
+  index?: RunIndexDeps<W>;
+}
+
+/** 索引づくりの手足（設計書6.87.23。0.99.19） */
+export interface RunIndexDeps<W extends RunWork = RunWork> {
+  /** 意味検索（ベクトル検索）が「入」か */
+  enabled(): boolean;
+  /** 埋め込みのモデル（`novelai.vectorSearch.model`） */
+  model(): string;
+  /** 登録済みの全作品（`scope: "all"` のとき） */
+  listWorks(): W[];
+  /** 手元の Ollama で埋め込めるか（**回す前に1回だけ**） */
+  check(): Promise<{ ok: true } | { ok: false; reason: string; nextAction?: string }>;
+  /** 渡した作品を順に回す（進捗と中止は中で出す）。作品ごとの行を返す */
+  build(works: W[]): Promise<RunIndexRow[]>;
 }
 
 /** 断ったときに作者へ出す見出し（知らせの頭をそろえる） */
@@ -175,8 +197,9 @@ export async function handleRunRequest<W extends RunWork>(
   };
 
   // **白名簿の外は、確認も出さずに断る**（本文への適用・資料の保存などは入れない）
+  // 索引づくり（`vectorIndex`）は白名簿とは別に通し、回数の上限のあとで分かれる
   const def = findRunFeature(ticket.feature);
-  if (!def) {
+  if (!def && !isRunIndexFeature(ticket.feature)) {
     await refuse("この機能は外から頼めません（頼めるのは読み取りと生成だけです）。");
     return;
   }
@@ -213,6 +236,12 @@ export async function handleRunRequest<W extends RunWork>(
       `この1時間に ${recent} 回走らせています（上限は1時間に ${RUN_MAX_PER_HOUR} 回）。`,
       "時間を置いてから頼んでください"
     );
+    return;
+  }
+
+  if (!def) {
+    // ここへ来るのは索引づくりだけ（上の白名簿の確かめで、ほかは断ってある）
+    await handleIndexRequest(ticket, work, deps, refuse, forLog);
     return;
   }
 
@@ -336,6 +365,138 @@ export async function handleRunRequest<W extends RunWork>(
   deps.info(
     `外部AIから頼まれた「${def.label}」を終えました（${outcome.findings.length}件）。` +
       "結果は頼んだ側が読みます。原稿・設定資料・提案パネルは変わっていません。"
+  );
+}
+
+/**
+ * 索引づくりの依頼（設計書6.87.23）。合言葉・1回限り・登録・許可・回数の上限は
+ * 呼ぶ側で通してある。
+ *
+ * **全作品のときも、作品ごとに許可を確かめる。** 許可の無い作品は回さず、
+ * 結果に `skipped` と理由で並べる（`schedule.milestones` と同じ作法）。
+ * **確認の前に本文を読まない**——作品の題と数だけを見せる。
+ */
+async function handleIndexRequest<W extends RunWork>(
+  ticket: RunTicket,
+  work: W,
+  deps: RunRequestHandlerDeps<W>,
+  refuse: (reason: string, nextAction?: string) => Promise<void>,
+  forLog: string
+): Promise<void> {
+  const index = deps.index;
+  if (!index) {
+    await refuse("この拡張機能では、外から索引づくりを頼めません。");
+    return;
+  }
+  if (!index.enabled()) {
+    await refuse(
+      "意味検索（ベクトル検索）が「切」になっています。",
+      "設定管理の「ベクトル検索準備」で準備してから頼んでください"
+    );
+    return;
+  }
+
+  const candidates = ticket.scope === "all" ? index.listWorks() : [work];
+  const targets: W[] = [];
+  const skipped: RunIndexRow[] = [];
+  for (const candidate of candidates) {
+    if (await deps.isAllowed(candidate, ticket.client)) {
+      targets.push(candidate);
+    } else {
+      skipped.push({
+        workTitle: candidate.title,
+        folder: candidate.folderPath,
+        status: "skipped",
+        seconds: 0,
+        reason:
+          "この作品では外部AIからの実行の依頼（run.request）が許可されていません" +
+          "（作品管理 → 作品別設定 → 外部AI許可／取消）",
+      });
+    }
+  }
+  if (targets.length === 0) {
+    await refuse("索引を作ってよい作品がありません（どの作品にも外部AIの許可がありません）。");
+    return;
+  }
+
+  const check = await index.check();
+  if (!check.ok) {
+    await refuse(check.reason, check.nextAction);
+    return;
+  }
+
+  const model = index.model();
+  const confirm = describeIndexConfirm({
+    ticket,
+    works: targets.map((target) => ({ title: target.title })),
+    skipped: skipped.map((row) => ({ title: row.workTitle, reason: "許可が無い" })),
+    model,
+  });
+  if (!(await deps.confirm(confirm.message, confirm.detail))) {
+    await deps.writeState(stateOf(ticket, "declined", deps.now()));
+    deps.log(`作者が断りました：${forLog}`);
+    return;
+  }
+
+  const pressedAt = deps.now();
+  if (isConfirmTooLate(ticket, pressedAt)) {
+    const reason = "確認が出てから時間が経ちすぎたため、走らせませんでした。";
+    await deps.writeState(stateOf(ticket, "expired", pressedAt, { reason }));
+    deps.log(`外部AIからの実行の依頼が期限切れでした：${forLog}`);
+    deps.info(`${reason}必要なら、頼んだ側にもう一度頼んでもらってください。`);
+    return;
+  }
+
+  const startedAt = new Date(pressedAt).toISOString();
+  await deps.writeState(stateOf(ticket, "running", pressedAt, { startedAt }));
+
+  let rows: RunIndexRow[];
+  try {
+    rows = await index.build(targets);
+  } catch (error) {
+    // 作品ごとの失敗は build の中で受け止める。ここへ来るのは仕組みごと落ちたとき
+    const failure = deps.describeFailure(error);
+    await deps.writeState(stateOf(ticket, "failed", deps.now(), { startedAt, ...failure }));
+    deps.log(`外部AIから頼まれた索引づくりに失敗しました：${forLog}：${failure.reason}`);
+    deps.warn(`外部AIから頼まれた索引づくりに失敗しました：${failure.reason}`);
+    return;
+  }
+
+  const all = [...rows, ...skipped];
+  const failed = all.filter((row) => row.status === "failed");
+  const cancelled = all.filter((row) => row.status === "cancelled");
+  const result: RunResultBody = {
+    feature: RUN_INDEX_FEATURE,
+    featureLabel: RUN_INDEX_LABEL,
+    workTitle: ticket.scope === "all" ? `全作品（${candidates.length}作品）` : work.title,
+    target: null,
+    provider: { id: "ollama", name: "Ollama（手元・無料）", paid: false },
+    model,
+    promptVersion: `vector-index-v${VECTOR_INDEX_VERSION}`,
+    findings: all,
+    dropped: { count: 0, notes: [] },
+    failures: {
+      count: failed.length,
+      notes: [
+        ...failed.map((row) => `${row.workTitle}：${row.reason ?? "理由不明"}`),
+        ...(cancelled.length > 0 ? [`作者が途中で止めました（${cancelled.length}作品）`] : []),
+      ],
+    },
+    // 本文は外へ送っていない（手元の Ollama だけ）
+    bodyChars: 0,
+    startedAt,
+    finishedAt: new Date(deps.now()).toISOString(),
+  };
+  await deps.writeState(stateOf(ticket, "done", deps.now(), { startedAt, result }));
+  const done = all.filter((row) => row.status === "done").length;
+  deps.log(
+    `外部AIから頼まれた索引づくりを終えました：${forLog}（できた ${done}・失敗 ${failed.length}・中止 ${cancelled.length}・飛ばした ${skipped.length}）`
+  );
+  deps.info(
+    `外部AIから頼まれた索引づくりを終えました（できた ${done}作品` +
+      (failed.length ? `・失敗 ${failed.length}作品` : "") +
+      (cancelled.length ? `・中止 ${cancelled.length}作品` : "") +
+      "）。原稿・設定資料は変わっていません。"
   );
 }
 
