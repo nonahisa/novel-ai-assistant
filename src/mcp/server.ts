@@ -127,7 +127,7 @@ import {
  * そちらを直に呼ぶ（`test/unit/mcp/mcpTools.test.ts`）。混ぜると、
  * ツールの中身を確かめるのに stdio を立てなければならなくなる。
  *
- * **道具は25本**（0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
+ * **道具は26本**（0.99.19 で `novel.search`、0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
  * 0.75.x で `windows.list`、0.82.1 で `setup.request`、0.83.x で `schedule.milestones`、
  * 0.85.0 で `notices.recent` と `works.list`、0.85.1 で `pending.list`、
  * 0.88 の次の版で `run.request` と `run.result`（設計書6.87.22）、

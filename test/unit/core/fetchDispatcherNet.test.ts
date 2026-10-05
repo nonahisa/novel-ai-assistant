@@ -56,6 +56,8 @@ const LOCAL_FILES = new Set([
   "src/ai/ollamaEmbedding.ts",
   "src/ai/lmstudioProvider.ts",
   "src/mcp/tools/ollama.ts",
+  // MCP の novel.search が検索語を埋め込む（0.99.19）
+  "src/mcp/tools/search.ts",
 ]);
 
 /** クラウドのAIを呼ぶファイル。`localFetch` も `local: true` も使わない */
@@ -181,7 +183,12 @@ describe("AIを呼ぶ道は、手元なら localFetch、クラウドなら cloud
     // 拾えなくなったら、この網は何も見ていないことになる
     const files = (list: CallSite[]) => new Set(list.map((s) => s.file));
     expect(files(sites.localFetch)).toEqual(
-      new Set(["src/ai/ollamaProvider.ts", "src/ai/ollamaEmbedding.ts", "src/mcp/tools/ollama.ts"])
+      new Set([
+        "src/ai/ollamaProvider.ts",
+        "src/ai/ollamaEmbedding.ts",
+        "src/mcp/tools/ollama.ts",
+        "src/mcp/tools/search.ts",
+      ])
     );
     // `fetchJson` は `local` の印で2つの口を振り分ける（呼び出しではなく値として選ぶ）
     const client = fs.readFileSync(path.join(ROOT, JSON_CLIENT_FILE), "utf8");

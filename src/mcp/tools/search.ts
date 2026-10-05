@@ -22,6 +22,7 @@ import {
   parseAiAssignmentsSnapshot,
   type VectorSearchSetting,
 } from "../../core/aiAssignmentsSnapshot";
+import { localFetch } from "../../ai/fetchTimeouts";
 import { mcpGlobalStorageRoot } from "../globalStorage";
 import { enterLocalAi } from "../localAiTurn";
 import { pastSceneSourcesOf } from "./contradiction";
@@ -356,12 +357,17 @@ async function embedQuery(endpoint: string, model: string, text: string): Promis
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), EMBED_TIMEOUT_MS);
   try {
-    const response = await fetch(`${endpoint}/api/embed`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model, input: [text], truncate: false }),
-      signal: controller.signal,
-    });
+    // **手元の口（`localFetch`）で投げる**（製品の埋め込み・`ollama.ts` と同じ。`fetchTimeouts.ts`）
+    const response = await localFetch(
+      `${endpoint}/api/embed`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model, input: [text], truncate: false }),
+        signal: controller.signal,
+      },
+      EMBED_TIMEOUT_MS
+    );
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
       throw new Error(
