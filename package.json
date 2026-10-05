@@ -1066,6 +1066,12 @@
         "icon": "$(database)"
       },
       {
+        "command": "novelai.buildVectorIndexAll",
+        "title": "検索索引作成／更新（全作品）",
+        "category": "小説執筆",
+        "icon": "$(database)"
+      },
+      {
         "command": "novelai.clearVectorIndex",
         "title": "検索索引削除",
         "category": "小説執筆",

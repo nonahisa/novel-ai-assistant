@@ -179,6 +179,8 @@ import { TypingPause } from "./core/typingPause";
 import { chatLogPath, isChatLogEnabled } from "./core/chatLog";
 import {
   buildVectorIndex,
+  buildVectorIndexAll,
+  embeddingModelName,
   isVectorSearchEnabled,
   removeVectorIndex,
 } from "./features/vectorSearch";
@@ -2967,6 +2969,14 @@ export async function activate(
         key,
         label: ASSIGNABLE_FEATURE_LABELS[key],
       })),
+      // MCP の novel.search が索引のモデルと照らす（0.99.19）
+      vectorSearch: {
+        enabled: isVectorSearchEnabled(),
+        model: embeddingModelName(),
+        endpoint: vscode.workspace
+          .getConfiguration("novelai")
+          .get<string>("ollama.endpoint", "http://localhost:11434"),
+      },
     }),
     onDidChange: aiRegistry.onDidChangeSelection,
   });
@@ -3946,6 +3956,33 @@ export async function activate(
         );
       }
     )
+  );
+
+  context.subscriptions.push(
+    registerCommand("novelai.buildVectorIndexAll", async () => {
+      /*
+        **登録済みの全作品を順に回す**（0.99.19）。外部AIからの依頼
+        （run.request の vectorIndex）と同じ芯（`buildVectorIndexForWorks`）を通る。
+        切のときの案内は1作品のコマンドと同じ
+      */
+      if (!isVectorSearchEnabled()) {
+        const open = "準備を開く";
+        whenNoticePicked(
+          vscode.window.showInformationMessage(
+            "意味検索が「切」になっています。切のままでも相談は語句一致で場面を探すので、索引は要りません。",
+            open
+          ),
+          async (picked) => {
+            if (picked === open) {
+              await vscode.commands.executeCommand("novelai.setupVectorSearch");
+            }
+          },
+          { label: "検索用の索引" }
+        );
+        return;
+      }
+      await buildVectorIndexAll(registry.list());
+    })
   );
 
   context.subscriptions.push(

@@ -17,7 +17,8 @@ import {
   describeOrganization,
   describeWorldItem,
 } from "./settingsSummary";
-import { passageHash, splitPassages } from "./passages";
+import { passageHash } from "./passages";
+import { manuscriptItems } from "./manuscriptItems";
 
 /**
  * 切り方は葉の部品（`passages.ts`）へ移した。**ここからも今までどおり
@@ -144,27 +145,11 @@ export function describeRetrievedItems(
   });
 }
 
-/**
- * 1話の本文を、検索の場面へ分ける。
- *
- * 場面が2つ以上になったときだけ、何番目か（`part`）を持たせる。
- * 画面を開かずに確かめられるよう、ファイルを読む所から分けてある。
- */
-export function manuscriptItems(
-  label: string,
-  text: string,
-  origin?: { filePath?: string; chapter?: number | null }
-): RetrievalItem[] {
-  const passages = splitPassages(text);
-  return passages.map((passage, index) => ({
-    ...makeItem("本文", `${label}#${index}`, label, passage, false),
-    ...(passages.length > 1
-      ? { part: { index: index + 1, total: passages.length } }
-      : {}),
-    ...(origin?.filePath !== undefined ? { filePath: origin.filePath } : {}),
-    ...(origin && "chapter" in origin ? { chapter: origin.chapter ?? null } : {}),
-  }));
-}
+/*
+  1話の本文を検索の場面へ分ける `manuscriptItems` は `manuscriptItems.ts`
+  （VS Code に依存しない）にある。MCP の `novel.search` と同じ id・鍵で組むため
+*/
+export { manuscriptItems };
 
 export interface CorpusResult {
   items: RetrievalItem[];

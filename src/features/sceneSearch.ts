@@ -2,7 +2,7 @@
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { describeRetrievedItem, type RetrievalItem } from "../core/retrievalCorpus";
-import type { RetrievalCandidate } from "../core/retrieval";
+import { dropNeighbors, type RetrievalCandidate } from "../core/retrieval";
 import { lineOfPassage } from "../core/semanticRank";
 import { readTextFile } from "../core/textFile";
 import { logFailure, logStep, useLogFile } from "../core/logger";
@@ -178,24 +178,5 @@ export function snippet(text: string, limit = SNIPPET_CHARS): string {
   return flat.length > limit ? `${flat.slice(0, limit)}…` : flat;
 }
 
-/**
- * 隣り合う場面を1つにまとめる。
- *
- * 場面は100字ずつ重ねて切ってある（`passages.ts`）ので、1か所の記述が
- * 隣どうしの2件として並ぶことが多い。**先に並んだほうだけを残す。**
- */
-export function dropNeighbors(
-  candidates: readonly RetrievalCandidate[]
-): RetrievalCandidate[] {
-  const kept: RetrievalCandidate[] = [];
-  for (const candidate of candidates) {
-    const { item } = candidate;
-    const neighbor = kept.some(
-      (other) =>
-        other.item.label === item.label &&
-        Math.abs((other.item.part?.index ?? 1) - (item.part?.index ?? 1)) <= 1
-    );
-    if (!neighbor) kept.push(candidate);
-  }
-  return kept;
-}
+// 隣り合う場面を畳む部品は core/retrieval.ts にある（MCP の novel.search も使う。0.99.19）
+export { dropNeighbors };

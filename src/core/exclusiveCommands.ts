@@ -87,6 +87,8 @@ export const EXCLUSIVE_COMMANDS: readonly ExclusiveCommand[] = [
     重いのは索引づくりのほうで、そちらは下で塞いである。
   */
   { id: "novelai.buildVectorIndex", label: "検索索引作成／更新" },
+  // 全作品を順に回す版（0.99.19）。手元の Ollama を長く占めるので、これも塞ぐ
+  { id: "novelai.buildVectorIndexAll", label: "検索索引作成／更新（全作品）" },
 ];
 
 /** 引き当て用の索引。一覧は固定なので、読み込み時に一度だけ組む */

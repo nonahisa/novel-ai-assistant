@@ -4,6 +4,13 @@ import type { RetrievalItem, RetrievalSource } from "./retrievalCorpus";
 import type { VectorIndex } from "./vectorIndex";
 
 /**
+ * 意味検索で使う索引の口。**`VectorIndex` の `search` だけ**を要る形にした
+ * （0.99.19）——MCP の `novel.search` は VS Code を読めないので、索引のファイルを
+ * 自分で読み、同じ近さの計算（`vectorIndexFormat.ts`）でこの口を作って渡す。
+ */
+export type VectorSearcher = Pick<VectorIndex, "search">;
+
+/**
  * 質問に近い材料を選び、AIへ渡せる形にまとめる。
  *
  * ## いまのやり方の何が問題だったか
@@ -59,7 +66,7 @@ export interface SearchInput {
   query: string;
   /** 意味検索の材料。無ければ語句一致だけで動く */
   semantic?: {
-    index: VectorIndex;
+    index: VectorSearcher;
     queryVector: Float32Array;
   };
 }
@@ -203,4 +210,26 @@ export function describeRetrieval(
   }
   const parts = [...counts.entries()].map(([source, count]) => `${source}${count}件`);
   return `${parts.join("・")}を参照`;
+}
+
+/**
+ * 隣り合う場面を1つにまとめる。
+ *
+ * 場面は100字ずつ重ねて切ってある（`passages.ts`）ので、1か所の記述が
+ * 隣どうしの2件として並ぶことが多い。**先に並んだほうだけを残す。**
+ */
+export function dropNeighbors(
+  candidates: readonly RetrievalCandidate[]
+): RetrievalCandidate[] {
+  const kept: RetrievalCandidate[] = [];
+  for (const candidate of candidates) {
+    const { item } = candidate;
+    const neighbor = kept.some(
+      (other) =>
+        other.item.label === item.label &&
+        Math.abs((other.item.part?.index ?? 1) - (item.part?.index ?? 1)) <= 1
+    );
+    if (!neighbor) kept.push(candidate);
+  }
+  return kept;
 }

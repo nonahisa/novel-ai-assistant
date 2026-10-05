@@ -81,5 +81,16 @@ export function startAiAssignmentsSnapshot(
   };
 
   void write();
-  return options.onDidChange(() => void write());
+  return vscode.Disposable.from(
+    options.onDidChange(() => void write()),
+    // 意味検索の設定（MCP の novel.search が索引と照らす。0.99.19）が変わったときも書き直す
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (
+        event.affectsConfiguration("novelai.vectorSearch") ||
+        event.affectsConfiguration("novelai.ollama.endpoint")
+      ) {
+        void write();
+      }
+    })
+  );
 }

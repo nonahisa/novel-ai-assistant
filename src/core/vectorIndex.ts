@@ -3,6 +3,16 @@ import * as path from "./paths";
 import { WorkEntry } from "../models/types";
 import { workPaths } from "./workRegistry";
 import { atomicWriteFile } from "./atomicWrite";
+import {
+  VECTOR_INDEX_DIR,
+  VECTOR_INDEX_META_FILE,
+  VECTOR_INDEX_VECTORS_FILE,
+  VECTOR_INDEX_VERSION,
+  decodeVectors,
+  isStoredMeta,
+  nearestByCosine,
+  type StoredMeta,
+} from "./vectorIndexFormat";
 
 /**
  * 意味検索のための索引（ベクトルDB）。
@@ -27,16 +37,11 @@ import { atomicWriteFile } from "./atomicWrite";
  * 距離が意味を持たなくなるため、モデルを変えたら全部作り直す。
  */
 
-/** 保存形式の版。作りを変えたら上げる（古い索引は作り直す） */
-export const VECTOR_INDEX_VERSION = 2;
-
-interface StoredMeta {
-  version: number;
-  model: string;
-  dimensions: number;
-  /** ベクトルの並び順と対応する。i番目のハッシュがi番目のベクトル */
-  hashes: string[];
-}
+/*
+  形の解釈・ベクトルの並べ方・近さの計算は `vectorIndexFormat.ts`（VS Code に
+  依存しない葉）にある。MCP の `novel.search` も同じ索引を読むため（0.99.19）
+*/
+export { VECTOR_INDEX_VERSION } from "./vectorIndexFormat";
 
 export interface VectorEntry {
   hash: string;
@@ -47,6 +52,8 @@ export class VectorIndex {
   private readonly byHash = new Map<string, Float32Array>();
   private model = "";
   private dimensions = 0;
+  /** 埋め込みに使った Ollama の場所（記録に残す。MCP が同じ場所で検索語を埋め込む） */
+  private endpoint: string | undefined;
 
   private constructor() {}
 
@@ -77,6 +84,10 @@ export class VectorIndex {
 
   setModel(model: string): void {
     this.model = model;
+  }
+
+  setEndpoint(endpoint: string): void {
+    this.endpoint = endpoint;
   }
 
   /**
@@ -110,22 +121,7 @@ export class VectorIndex {
     candidates: readonly { id: string; hash: string }[],
     limit: number
   ): Array<{ id: string; score: number }> {
-    const queryNorm = norm(query);
-    if (queryNorm === 0 || limit <= 0) return [];
-
-    const scored: Array<{ id: string; score: number }> = [];
-    for (const candidate of candidates) {
-      const vector = this.byHash.get(candidate.hash);
-      if (!vector) continue;
-      const vectorNorm = norm(vector);
-      if (vectorNorm === 0) continue;
-      scored.push({
-        id: candidate.id,
-        score: dot(query, vector) / (queryNorm * vectorNorm),
-      });
-    }
-    scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, limit);
+    return nearestByCosine((hash) => this.byHash.get(hash), query, candidates, limit);
   }
 
   // ─── 保存と読み込み ───
@@ -148,26 +144,13 @@ export class VectorIndex {
       const binBytes = await vscode.workspace.fs.readFile(
         path.toUri(paths.vectors)
       );
-      const expected = meta.hashes.length * meta.dimensions * 4;
-      if (binBytes.byteLength !== expected) {
-        // 途中で切れた索引は使わない。作り直せば済む
-        return index;
-      }
-
-      const floats = new Float32Array(
-        binBytes.buffer.slice(
-          binBytes.byteOffset,
-          binBytes.byteOffset + binBytes.byteLength
-        )
-      );
-      meta.hashes.forEach((hash, i) => {
-        index.byHash.set(
-          hash,
-          floats.subarray(i * meta.dimensions, (i + 1) * meta.dimensions)
-        );
-      });
+      // 途中で切れた索引は使わない（undefined）。作り直せば済む
+      const vectors = decodeVectors(meta, binBytes);
+      if (!vectors) return index;
+      for (const [hash, vector] of vectors) index.byHash.set(hash, vector);
       index.model = meta.model;
       index.dimensions = meta.dimensions;
+      index.endpoint = meta.endpoint;
     } catch {
       // 索引は失われても作り直せる。読めなくても空で続行する
     }
@@ -193,6 +176,10 @@ export class VectorIndex {
       model: this.model,
       dimensions,
       hashes,
+      // **任意の欄**（版は上げない）。MCP の novel.search が作成日時と
+      // 検索語を埋め込む場所に使う
+      builtAt: new Date().toISOString(),
+      ...(this.endpoint ? { endpoint: this.endpoint } : {}),
     };
 
     // キャッシュなので上書きでよい（作者のデータではない）
@@ -235,35 +222,10 @@ export class VectorIndex {
 }
 
 function indexPaths(work: WorkEntry): { vectors: string; meta: string } {
-  const base = path.join(workPaths(work).aiwriter, "cache", "vector");
+  // `.aiwriter` は `workPaths` の決め方に従う（`VECTOR_INDEX_DIR` の頭と同じ）
+  const base = path.join(workPaths(work).aiwriter, ...VECTOR_INDEX_DIR.slice(1));
   return {
-    vectors: path.join(base, "vectors.bin"),
-    meta: path.join(base, "index.json"),
+    vectors: path.join(base, VECTOR_INDEX_VECTORS_FILE),
+    meta: path.join(base, VECTOR_INDEX_META_FILE),
   };
-}
-
-function isStoredMeta(value: unknown): value is StoredMeta {
-  if (typeof value !== "object" || value === null) return false;
-  const meta = value as Record<string, unknown>;
-  return (
-    typeof meta.version === "number" &&
-    typeof meta.model === "string" &&
-    typeof meta.dimensions === "number" &&
-    meta.dimensions > 0 &&
-    Array.isArray(meta.hashes) &&
-    meta.hashes.every((hash) => typeof hash === "string")
-  );
-}
-
-function dot(a: Float32Array, b: Float32Array): number {
-  let sum = 0;
-  const length = Math.min(a.length, b.length);
-  for (let i = 0; i < length; i++) sum += a[i] * b[i];
-  return sum;
-}
-
-function norm(a: Float32Array): number {
-  let sum = 0;
-  for (let i = 0; i < a.length; i++) sum += a[i] * a[i];
-  return Math.sqrt(sum);
 }
