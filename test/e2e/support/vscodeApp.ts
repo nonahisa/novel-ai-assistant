@@ -150,6 +150,12 @@ async function seedGlobalState(userData: string, values: Record<string, unknown>
   }
 }
 
+/** 開き直し（`restartVsCode`）のために控える、起こしたときの引数（一時フォルダーの根で引く） */
+const relaunchContexts = new Map<
+  string,
+  { executablePath: string; args: string[]; windowSize?: { width: number; height: number } }
+>();
+
 /**
  * 作品を一時フォルダーへ作り、VS Code を起こして作品を登録するところまで。
  * 呼び手は `withVsCode` を使う（片づけと失敗時の写真を引き受けるため）。
@@ -235,9 +241,7 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
     cachePath: path.join(repositoryRoot, ".vscode-test"),
   });
 
-  const app = await _electron.launch({
-    executablePath,
-    args: [
+  const args = [
       // **開く場所は先頭に置く。** VS Code の引数の読み方では、知らない名前の旗
       // （下の `--disable-renderer-backgrounding` など）のすぐ後ろの語は、
       // その旗の値として食われる（実際に書庫が開かれず、空の窓になった）
@@ -258,7 +262,13 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
       "--disable-features=CalculateNativeWinOcclusion",
       "--disable-renderer-backgrounding",
       "--disable-backgrounding-occluded-windows",
-    ],
+  ];
+  // 開き直し（`restartVsCode`）が同じ引数で起こせるよう控える
+  relaunchContexts.set(root, { executablePath, args, windowSize: options.windowSize ?? windowSizeFromEnv() });
+
+  const app = await _electron.launch({
+    executablePath,
+    args,
     env: cleanEnv(),
     timeout: 60_000,
     ...(options.recordVideo ? { recordVideo: options.recordVideo } : {}),
@@ -308,6 +318,39 @@ async function closeAndStop(app: ElectronApplication, entry: { root: string; pid
     new Promise((resolve) => setTimeout(resolve, 20_000)),
   ]);
   await stopLaunch(entry);
+}
+
+/**
+ * VS Code の窓を閉じて、**同じ一時フォルダー・同じ引数で起こし直す**（作者が VS Code を
+ * 閉じて開き直したのと同じ。拡張機能ホストも作り直される）。
+ *
+ * 作品・設定・globalState（`user-data`）は一時フォルダーに残るので、「開き直したあとも覚えているか」
+ * を見られる。**起こし直したあとは `session.app`・`session.page` が新しいものに替わる**
+ * （前の `page` や面は使えない）。登録は済んでいるので、やり直さない。
+ */
+export async function restartVsCode(session: E2ESession): Promise<void> {
+  const context = relaunchContexts.get(session.root);
+  if (!context) throw new Error("開き直しの控えがありません（withVsCode の外では使えません）");
+  const old = session.app;
+  // 閉じたあとは `process()` が読めないので、先に掴んでおく
+  const oldProcess = old.process();
+  await Promise.race([old.close().catch(() => undefined), new Promise((resolve) => setTimeout(resolve, 20_000))]);
+  // 閉じきれなかった分は止める（一時フォルダーは消さない）
+  if (oldProcess.exitCode === null) oldProcess.kill();
+  const app = await _electron.launch({ executablePath: context.executablePath, args: context.args, env: cleanEnv(), timeout: 60_000 });
+  const pid = app.process().pid;
+  if (pid !== undefined) await recordLaunch({ root: session.root, pid });
+  await keepOutOfTheWay(app);
+  const page = await app.firstWindow();
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+  await page.locator(".monaco-workbench").waitFor({ timeout: 60_000 });
+  await keepOutOfTheWay(app);
+  if (context.windowSize) await resizeWindows(app, context.windowSize);
+  session.app = app;
+  session.page = page;
+  // 起動のときの案内などが残っていれば閉じる
+  await clearNotifications(page);
 }
 
 /**
@@ -577,6 +620,15 @@ export async function withVsCode(
   } finally {
     // 閉じたあと、残ったプロセスを木ごと止めて一時フォルダーを消す（cleanup.ts）。
     // ここが届かない時間切れ・途中で止めたときは、走りの最後の片づけが拾う
-    await closeAndStop(session.app, { root: session.root, pid: session.app.process().pid });
+    relaunchContexts.delete(session.root);
+    // 開き直し（restartVsCode）の途中で落ちると、手元の app は閉じたあとのもの。PID は読めなくてよい
+    // （片づけは一時フォルダー名の引数でも拾う）。ここで投げると、本当の失敗が隠れる
+    let pid: number | undefined;
+    try {
+      pid = session.app.process().pid;
+    } catch {
+      pid = undefined;
+    }
+    await closeAndStop(session.app, { root: session.root, pid });
   }
 }
