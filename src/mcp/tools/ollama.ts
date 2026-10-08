@@ -332,7 +332,7 @@ async function postChatWithin(
     }, MCP_OLLAMA_WAIT_MS);
   } catch (error) {
     if (signal.aborted) {
-      throw new McpToolError(`Ollama の${deadlineMessage(timeoutMs)}。`);
+      throw new McpToolError(`Ollama：${deadlineMessage(timeoutMs)}。`);
     }
     throw new McpToolError(
       `Ollama へ繋がりませんでした（${endpoint}）: ${describeError(error)}`
@@ -450,7 +450,7 @@ async function readStream(
   // 検算へ渡すと「スキーマに沿っていません」になり、何が起きたのかが消える
   if (signal.aborted) {
     throw new McpToolError(
-      `Ollama の${deadlineMessage(timeoutMs)}（出力 ${result.content.length} 字まで受け取っていました）。`
+      `Ollama：${deadlineMessage(timeoutMs)}（出力 ${result.content.length} 字まで受け取っていました）。`
     );
   }
   // 最後の行に改行が付かないことがある
