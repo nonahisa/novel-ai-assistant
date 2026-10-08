@@ -1,7 +1,7 @@
 import type { SettingsExportData } from "../../../src/core/settingsExportProfiles";
 import { emptyAbility, emptyAbilitySystem } from "../../../src/models/ability";
 import { emptyCharacter, type Character } from "../../../src/models/character";
-import { emptyLocation } from "../../../src/models/location";
+import { emptyLocation, type LocationRelation } from "../../../src/models/location";
 import { emptyOrganization } from "../../../src/models/organization";
 import { emptyWorldItem } from "../../../src/models/world";
 
@@ -29,6 +29,12 @@ export const AUTHOR_NOTE_TEXT = "作者だけの覚え書き：結末で灯は�
 
 /** 作者だけの印を付けた人物の名前。**どの形式にも出てはいけない** */
 export const HIDDEN_NAME = "終幕の男";
+
+/**
+ * 作者だけの印を付けた場所の名前。**位置関係の相手に書かれていても、
+ * どの形式にも出てはいけない**（図書塔の関係に混ぜてある）
+ */
+export const HIDDEN_LOCATION_NAME = "封印の間";
 
 function main(): Character {
   return {
@@ -148,6 +154,19 @@ function main(): Character {
   };
 }
 
+function relation(
+  overrides: Partial<LocationRelation> & Pick<LocationRelation, "kind" | "target">
+): LocationRelation {
+  return {
+    targetId: null,
+    value: null,
+    chapters: [1],
+    evidence: null,
+    authorLocked: false,
+    ...overrides,
+  };
+}
+
 export function fixtureData(): SettingsExportData {
   return {
     characters: [
@@ -181,11 +200,27 @@ export function fixtureData(): SettingsExportData {
         description: "石造りの八角形。<屋根>に銅の風見鶏 & 鐘。",
         appearedChapters: [1, 2],
         exportNote: "外観の資料あり",
+        relations: [
+          relation({ kind: "within", target: "王都" }),
+          relation({ kind: "adjacent", target: "港", targetId: "loc_002", chapters: [2] }),
+          relation({ kind: "direction", target: "港", value: "東", chapters: [2] }),
+          // 伏せる場所が相手の関係。名前も方角も漏れてはいけない
+          relation({ kind: "direction", target: HIDDEN_LOCATION_NAME, value: "地下" }),
+          relation({ kind: "distance", target: HIDDEN_LOCATION_NAME, value: "徒歩3分" }),
+          // 第5話で分かる関係。第3話までの資料には出さない
+          relation({ kind: "distance", target: "港", value: "船で1日", chapters: [5] }),
+        ],
       },
       {
         ...emptyLocation("loc_002", "港"),
         description: "霧の多い港。",
         appearedChapters: [2],
+      },
+      {
+        ...emptyLocation("loc_003", HIDDEN_LOCATION_NAME),
+        description: "結末の舞台になる地下室。",
+        spoilerLevel: "author_only",
+        appearedChapters: [1],
       },
     ],
     abilities: [

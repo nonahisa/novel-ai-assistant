@@ -117,7 +117,7 @@ export const FINDING_PROPOSE_INPUT = {
     .string()
     .optional()
     .describe("kind: finding のときの機能"),
-  chunkId: z.string().optional().describe("kind: finding のとき。novel.prompt が返した chunkId"),
+  chunkId: z.string().optional().describe("kind: finding、または場所の relations のとき。novel.prompt が返した chunkId"),
   response: z
     .string()
     .optional()

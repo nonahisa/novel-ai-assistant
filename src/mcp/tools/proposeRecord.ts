@@ -3,7 +3,17 @@ import * as nodePath from "node:path";
 import { AIWRITER_DIR } from "../../models/types";
 import { parseAbility } from "../../models/ability";
 import { parseCharacter } from "../../models/character";
-import { parseLocation } from "../../models/location";
+import {
+  normalizeLocationName,
+  parseLocation,
+  type Location,
+  type LocationRelation,
+  type LocationRelationKind,
+} from "../../models/location";
+import {
+  normalizeExtractedLocation,
+  validateLocationRelations,
+} from "../../core/settingsExtractionValidation";
 import { parseOrganization } from "../../models/organization";
 import {
   parseWorldItem,
@@ -24,7 +34,7 @@ import {
   type PendingSettingsKind,
   type PendingSettingsRecord,
 } from "../../core/pendingSettingsMerge";
-import { McpToolError, SETTINGS_SUBDIRS, readSettingsRecords } from "./shared";
+import { McpToolError, SETTINGS_SUBDIRS, chunkFromId, readSettingsRecords } from "./shared";
 
 /**
  * 人物以外（能力・組織・場所・世界観）の更新案を、承認待ちへ置く
@@ -51,6 +61,15 @@ import { McpToolError, SETTINGS_SUBDIRS, readSettingsRecords } from "./shared";
  * 2026-09-24「３ＯＫ」）。人物の道が確定した人物にも置けるのと揃えた。
  * 反映は作者が差分を見て採ったときだけで、取り込みは出どころ
  * （`source: "external"`）を見て白名簿の欄だけを入れ、確定の印は変えない。
+ *
+ * ## 場所の位置関係（`relations`。2026-10-09の裁定）
+ *
+ * 場所だけ、関係の一覧を受ける。**製品の抽出と同じ検算**（
+ * `validateLocationRelations`）を通ったものだけを置く——引用が本文に一続き・
+ * 相手と値が引用の中・自分自身や4種以外は落とす。本文は `chunkId`
+ * （`novel.prompt` が返したもの）で引くので、関係を渡すときは `chunkId` が要る。
+ * 落とした関係は `skipped` で理由つきに返す（黙って落とさない）。
+ * マージは出口（`mergePendingSettingsRecord`）が製品の関数で行う。
  *
  * 退けた関係（`core/rejectedRelations.ts`）は人物の関係だけの話で、
  * 人物以外の記録は関係の欄を持たないので、ここでは扱わない。
@@ -93,6 +112,8 @@ export interface RecordProposeInput {
   name: string;
   changes: Record<string, unknown>;
   reason: string;
+  /** 場所の位置関係の引用を照らす本文（`novel.prompt` の chunkId）。関係を渡すときだけ要る */
+  chunkId?: string;
 }
 
 export interface RecordProposeResult {
@@ -181,6 +202,16 @@ export function recordPropose(input: RecordProposeInput): RecordProposeResult {
   const proposal = structuredClone(current) as PendingSettingsRecord &
     Record<string, unknown>;
   const changedFields = applyRecordChanges(kind, proposal, picked);
+  if (kind === "location") {
+    const relationResult = applyLocationRelations(
+      input,
+      current as Location,
+      proposal as Location,
+      picked.relations
+    );
+    skipped.push(...relationResult.skipped);
+    if (relationResult.added) changedFields.push("relations");
+  }
   if (changedFields.length === 0) {
     throw new McpToolError(
       `${name}（${kindLabel}）の提案は、いまの記録と同じです。置くものがありません。`
@@ -315,6 +346,8 @@ function applyRecordChanges(
   for (const field of RECORD_PROPOSE_FIELDS[kind]) {
     const value = changes[field];
     if (value === undefined) continue;
+    // 関係の一覧は文ではない。本文の検算が要るので `applyLocationRelations` が扱う
+    if (field === "relations") continue;
 
     if (ADD_ONLY_FIELDS.has(field)) {
       if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
@@ -354,6 +387,90 @@ function applyRecordChanges(
     changed.push(field);
   }
   return changed;
+}
+
+/**
+ * 場所の位置関係の提案を、製品の抽出と同じ検算に通して写しへ当てる。
+ *
+ * - 本文は `chunkId` で引く。無ければ断る（引用を照らせない関係は置かない）
+ * - 検算を通らない関係は落とし、場所そのものの提案は残す（抽出と同じ）
+ * - 写しに入れるのは**今回足す関係だけ**。いまの関係まで写すと、承認までの間に
+ *   作者が消した関係を、古い写しが復活させる
+ * - 同じ（種類, 相手, 値）が既にあるものは足さない
+ */
+function applyLocationRelations(
+  input: RecordProposeInput,
+  current: Location,
+  proposal: Location,
+  raw: unknown
+): { added: boolean; skipped: Array<{ field: string; reason: string }> } {
+  if (raw === undefined) return { added: false, skipped: [] };
+  if (!Array.isArray(raw)) {
+    throw new McpToolError(
+      "relations は { target, kind, value, evidence } の配列で渡してください。"
+    );
+  }
+  const chunkId = input.chunkId?.trim();
+  if (!chunkId) {
+    throw new McpToolError(
+      "relations には chunkId が要ります（novel.prompt が返したもの）。" +
+        "引用が本文にあるかを、こちらで照らし直すためです。"
+    );
+  }
+  const chunk = chunkFromId(input.folder, chunkId);
+  const extracted = normalizeExtractedLocation({
+    name: current.name,
+    aliases: current.aliases,
+    relations: raw,
+  });
+  const { kept, dropped } = validateLocationRelations(extracted, chunk);
+  const skipped = dropped.map((item) => ({
+    field: item.name ?? "relations",
+    reason:
+      "本文の引用で確かめられませんでした（種類は within・adjacent・direction・distance、" +
+      "引用は本文に一続きで、相手と方角・距離の値を含むこと）",
+  }));
+  // 形が合わず `normalizeExtractedLocation` が読み捨てた件も、黙らせない
+  const unreadable = raw.length - extracted.relations!.length;
+  if (unreadable > 0) {
+    skipped.push({
+      field: "relations",
+      reason: `target と kind が文字列でない関係を ${unreadable} 件読み捨てました`,
+    });
+  }
+
+  const known = new Set(
+    (current.relations ?? []).map((relation) => relationKey(relation))
+  );
+  const fresh: LocationRelation[] = kept
+    .map((relation) => ({
+      kind: relation.kind as LocationRelationKind,
+      target: relation.target,
+      targetId: null,
+      value: relation.value ?? null,
+      chapters: relation.chapters ?? [],
+      evidence: relation.evidence ?? null,
+      authorLocked: false,
+    }))
+    .filter((relation) => !known.has(relationKey(relation)));
+  if (fresh.length > 0) {
+    proposal.relations = fresh;
+  } else {
+    delete proposal.relations;
+  }
+  return { added: fresh.length > 0, skipped };
+}
+
+function relationKey(relation: {
+  kind: string;
+  target: string;
+  value?: string | null;
+}): string {
+  return [
+    relation.kind,
+    normalizeLocationName(relation.target),
+    normalizeLocationName(relation.value ?? ""),
+  ].join("\u0000");
 }
 
 /** 世界観の分類を、決まった7つのどれかへ。**似た言葉へ丸めない** */

@@ -12,6 +12,7 @@ import { snapshotOf } from "../../../src/core/settingsExportDiff";
 import {
   AUTHOR_NOTE_TEXT,
   FIXTURE_OPTIONS,
+  HIDDEN_LOCATION_NAME,
   HIDDEN_NAME,
   fixtureData,
 } from "../support/settingsExportFixture";
@@ -68,6 +69,55 @@ describe("伏せるものは、どの形式にも出ない", () => {
     for (const [format, text] of Object.entries(allFormats("editorial", null))) {
       expect(text, format).toContain("白鳥");
       expect(text, format).toContain("資料向けの補足");
+    }
+  });
+});
+
+/*
+  場所の位置関係（F1 の1段目。2026-10-09 の裁定）。書き出しにも出すが、
+  読み手別の絞り込みに従う。伏せた場所が相手の関係は、名前も方角も出ない。
+*/
+describe("場所の位置関係は、伏せた場所が相手のものを出さない", () => {
+  for (const audience of EXPORT_AUDIENCES) {
+    for (const chapter of [null, 3]) {
+      test(`${audience}・${chapter === null ? "全話" : `第${chapter}話まで`}：伏せた場所の名前と、その関係の値`, () => {
+        for (const [format, text] of Object.entries(allFormats(audience, chapter))) {
+          expect(text, `${format} に伏せた場所`).not.toContain(HIDDEN_LOCATION_NAME);
+          expect(text, `${format} に伏せた場所への方角`).not.toContain("地下");
+          expect(text, `${format} に伏せた場所への距離`).not.toContain("徒歩3分");
+        }
+      });
+    }
+  }
+
+  test("編集部向けの全話ぶんなら、出してよい関係は全形式に出る（材料が効いている証拠）", () => {
+    for (const [format, text] of Object.entries(allFormats("editorial", null))) {
+      expect(text, format).toContain("王都の中");
+      expect(text, format).toContain("港に隣接");
+      expect(text, format).toContain("港の東");
+      expect(text, format).toContain("港から船で1日");
+    }
+  });
+
+  test("CSV の場所の表には「位置関係」の列がある", () => {
+    const document = buildExportDocument("editorial", fixtureData(), {
+      ...FIXTURE_OPTIONS,
+      chapter: null,
+    });
+    const locations = buildExportCsvFiles(document).find((file) => file.kind === "locations");
+    expect(locations?.content.split("\r\n")[0]).toContain("位置関係");
+  });
+
+  test("第3話までなら、第5話で分かる関係は出さない", () => {
+    for (const [format, text] of Object.entries(allFormats("editorial", 3))) {
+      expect(text, format).toContain("港の東");
+      expect(text, format).not.toContain("船で1日");
+    }
+  });
+
+  test("外観だけのイラスト発注向けには出さない", () => {
+    for (const [format, text] of Object.entries(allFormats("illustration", null))) {
+      expect(text, format).not.toContain("港に隣接");
     }
   });
 });
