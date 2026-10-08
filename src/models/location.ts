@@ -5,6 +5,7 @@ import {
   optionalEnum,
   optionalNullableString,
   optionalNumberArray,
+  optionalObjectArray,
   optionalString,
   optionalStringArray,
   parseConflicts,
@@ -27,6 +28,85 @@ import {
  * 地域は region フィールドで表し、一覧生成時にまとめる。
  */
 
+/**
+ * 場所どうしの関係の種類（設計書6.93.2）。
+ *
+ * - within：この場所は相手の中にある（「港は港町の中」）。**片方向だけ持つ**——
+ *   「含む」は逆引きで出す。両方向に持つと、片方だけ直したときに食い違う
+ * - adjacent：相手に隣接している
+ * - direction：この場所は相手から見てどちらか（`value` に方角）
+ * - distance：相手からの距離・所要時間（`value` に本文の言い方）
+ */
+export const LOCATION_RELATION_KINDS = [
+  "within",
+  "adjacent",
+  "direction",
+  "distance",
+] as const;
+
+export type LocationRelationKind = (typeof LOCATION_RELATION_KINDS)[number];
+
+/** 8方位。方角の値はこれか、本文の短い言い方（「上流」「山側」） */
+export const COMPASS_DIRECTIONS = [
+  "北",
+  "北東",
+  "東",
+  "南東",
+  "南",
+  "南西",
+  "西",
+  "北西",
+] as const;
+
+/** 方角・距離の値の上限。これより長いものは関係ではなく描写である */
+export const LOCATION_RELATION_VALUE_MAX_CHARS = 20;
+
+export interface LocationRelation {
+  kind: LocationRelationKind;
+  /** 相手の場所（名前） */
+  target: string;
+  /** 相手のID。台帳で解決できたときだけ入る */
+  targetId: string | null;
+  /**
+   * direction：方角（8方位か短い自由文）。distance：本文の言い方のまま
+   * （「徒歩10分」を600秒に直すと作者が読めなくなる。正規化は照合の直前で行う）。
+   * within・adjacent：null
+   */
+  value: string | null;
+  /** どの話で分かったか */
+  chapters: number[];
+  /** 本文の根拠（逐語の連続した引用）。作者が書いた関係では null */
+  evidence: string | null;
+  /** 作者が固定した関係。AIの抽出で書き換えない */
+  authorLocked: boolean;
+}
+
+/** 値を持つ種類か（方角と距離だけ） */
+export function relationNeedsValue(kind: LocationRelationKind): boolean {
+  return kind === "direction" || kind === "distance";
+}
+
+/**
+ * 関係を1行の日本語にする（「港町の中」「港の北」「港から徒歩10分」「防波堤に隣接」）。
+ *
+ * **設定資料パネルの欄と設定資料集（Markdown）が同じ形を使う。** 書き方が
+ * 2通りあると、作者は画面ごとに別の書き方を覚えることになる。
+ * 読むほうは `core/settingsEdit.ts` の `editedLocationRelations`。
+ */
+export function describeLocationRelation(relation: LocationRelation): string {
+  const target = relation.target;
+  switch (relation.kind) {
+    case "within":
+      return `${target}の中`;
+    case "adjacent":
+      return `${target}に隣接`;
+    case "direction":
+      return `${target}の${relation.value ?? ""}`;
+    case "distance":
+      return `${target}から${relation.value ?? ""}`;
+  }
+}
+
 export interface Location {
   schemaVersion: string;
   id: string;
@@ -40,6 +120,12 @@ export interface Location {
   /** 上位の地域（「王都リヴェルス」等）。読み取れなければ null */
   region: string | null;
   description: string | null;
+  /**
+   * ほかの場所との位置関係（設計書6.93.2。0.100.x〜）。
+   * `region` は残す——既存の記録と画面を壊さないため。別の台帳（「地図」）は
+   * 作らず、組織の `parent` と同じく場所の記録に置く
+   */
+  relations: LocationRelation[];
   appearedChapters: number[];
   status: "登場済み" | "未登場";
   spoilerLevel: "public" | "staff_only" | "author_only";
@@ -74,6 +160,7 @@ export function emptyLocation(id: string, name: string): Location {
     summary: null,
     region: null,
     description: null,
+    relations: [],
     appearedChapters: [],
     status: "登場済み",
     spoilerLevel: "public",
@@ -115,6 +202,8 @@ export function normalizeLocation(raw: Partial<Location>): Location {
     ...base,
     ...raw,
     aliases: raw.aliases ?? [],
+    // 0.100.x より前のファイルには無い。無いのは「関係が分かっていない」だけ
+    relations: raw.relations ?? [],
     appearedChapters: raw.appearedChapters ?? [],
     conflicts: raw.conflicts ?? [],
     aiNotes: raw.aiNotes ?? [],
@@ -162,6 +251,7 @@ export function parseLocation(raw: unknown): Location {
   optionalString(value.updatedAt, "updatedAt");
 
   const conflicts = parseConflicts(value.conflicts);
+  const relations = parseLocationRelations(value.relations);
 
   // 追加項目の値は検証してから持たせる。`...value` のまま通すと、
   // 数値などの壊れた値が検証を素通りする
@@ -171,8 +261,44 @@ export function parseLocation(raw: unknown): Location {
       id: value.id as string,
       name: value.name as string,
       conflicts,
+      relations,
       aiNotes: parseAiNotes(value.aiNotes),
     } as Partial<Location>),
     parseOptionalCustomFieldValues(value.customFields)
+  );
+}
+
+/**
+ * 位置関係を検証する。**壊れていれば直さずに止める**（実装ルール2）。
+ *
+ * 欠けた欄（`targetId`・`value`・`chapters`・`evidence`・`authorLocked`）は
+ * 既定値で補う——作者が手で書くときに全部を書かせないため。
+ * 種類と相手だけは補えない（何の関係か分からなくなる）。
+ */
+export function parseLocationRelations(value: unknown): LocationRelation[] {
+  return (
+    optionalObjectArray(value, "relations", (entry, path) => {
+      optionalEnum(entry.kind, `${path}.kind`, LOCATION_RELATION_KINDS);
+      if (entry.kind === undefined) invalid(`${path}.kind`);
+      requireNonEmptyString(entry.target, `${path}.target`);
+      optionalNullableString(entry.targetId, `${path}.targetId`);
+      optionalNullableString(entry.value, `${path}.value`);
+      optionalNumberArray(entry.chapters, `${path}.chapters`);
+      optionalNullableString(entry.evidence, `${path}.evidence`);
+      optionalBoolean(entry.authorLocked, `${path}.authorLocked`);
+      const kind = entry.kind as LocationRelationKind;
+      const relationValue = (entry.value as string | null | undefined)?.trim() || null;
+      // 方角・距離なのに値が無いものは、何を言っているのか読めない
+      if (relationNeedsValue(kind) && !relationValue) invalid(`${path}.value`);
+      return {
+        kind,
+        target: (entry.target as string).trim(),
+        targetId: (entry.targetId as string | null | undefined) ?? null,
+        value: relationNeedsValue(kind) ? relationValue : null,
+        chapters: (entry.chapters as number[] | undefined) ?? [],
+        evidence: (entry.evidence as string | null | undefined)?.trim() || null,
+        authorLocked: (entry.authorLocked as boolean | undefined) ?? false,
+      };
+    }) ?? []
   );
 }
