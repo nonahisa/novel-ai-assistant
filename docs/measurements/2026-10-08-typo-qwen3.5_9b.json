@@ -1,0 +1,966 @@
+{
+  "measuredAt": "2026-10-08T12:49:51.655Z",
+  "feature": "typo",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "qwen3.5:9b",
+  "numCtx": 24576,
+  "numCtxDecision": {
+    "numCtx": 24576,
+    "source": "プロンプトの長さから（製品と同じ道）",
+    "promptChars": 9099,
+    "outputTokens": 8192,
+    "contextWindow": 262144,
+    "charsPerToken": null
+  },
+  "temperature": 0,
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": {
+    "contextLength": 262144,
+    "bundled": null,
+    "note": null
+  },
+  "warmup": {
+    "elapsedMs": 4486,
+    "ok": true,
+    "reason": null
+  },
+  "endpoint": null,
+  "options": {},
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.99.20",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.2",
+  "verifyPromptVersion": null,
+  "plans": [
+    {
+      "chunkId": "本文\\episode_0001_転生.txt#1-0@6020",
+      "chars": 3912,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0002_てこの原理と救助.txt#2-0@6020",
+      "chars": 3466,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0003_心肺蘇生と出会い.txt#3-0@6020",
+      "chars": 3589,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0004_筋肉と電気.txt#4-0@6020",
+      "chars": 5299,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0005_思春期の始まり.txt#5-0@6020",
+      "chars": 3617,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0006_コンストラクタ領の様子.txt#6-0@6020",
+      "chars": 3328,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0007_進学に向けて.txt#7-0@6020",
+      "chars": 2231,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0008_計算と計算違い.txt#8-0@6020",
+      "chars": 3314,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0009_体力と石鹸.txt#9-0@6020",
+      "chars": 3519,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0010_石鹸生成実験計画.txt#10-0@6020",
+      "chars": 4013,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-bench\\typo-gold-kyokasho10",
+    "targets": [
+      "本文\\episode_0001_転生.txt",
+      "本文\\episode_0002_てこの原理と救助.txt",
+      "本文\\episode_0003_心肺蘇生と出会い.txt",
+      "本文\\episode_0004_筋肉と電気.txt",
+      "本文\\episode_0005_思春期の始まり.txt",
+      "本文\\episode_0006_コンストラクタ領の様子.txt",
+      "本文\\episode_0007_進学に向けて.txt",
+      "本文\\episode_0008_計算と計算違い.txt",
+      "本文\\episode_0009_体力と石鹸.txt",
+      "本文\\episode_0010_石鹸生成実験計画.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-bench\\typo-gold-kyokasho10\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 1971995,
+      "temperature": 0,
+      "staleNote": null,
+      "metrics": {
+        "typoFound": 1,
+        "typoFoundTotal": 17,
+        "typoMissed": 16,
+        "typoWrongFix": 1,
+        "typoFalsePositives": 2,
+        "typoOtherFlags": 33,
+        "accepted": 37,
+        "rejected": 13,
+        "rejected.no_change": 10,
+        "rejected.target_not_in_original": 2,
+        "rejected.script_only": 1,
+        "failures": 3,
+        "elapsedMs": 1971995
+      },
+      "detail": {
+        "rejectedReasons": {
+          "no_change": 10,
+          "target_not_in_original": 2,
+          "script_only": 1
+        },
+        "failures": [
+          {
+            "chunkId": "本文\\episode_0004_筋肉と電気.txt#4-0@6020",
+            "reason": "応答を読み取れませんでした（誤字脱字のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
+          },
+          {
+            "chunkId": "本文\\episode_0005_思春期の始まり.txt#5-0@6020",
+            "reason": "応答を読み取れませんでした（誤字脱字のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
+          },
+          {
+            "chunkId": "本文\\episode_0010_石鹸生成実験計画.txt#10-0@6020",
+            "reason": "応答を読み取れませんでした（誤字脱字のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
+          }
+        ],
+        "typoFound": {
+          "脱字": {
+            "found": 0,
+            "total": 4
+          },
+          "衍字": {
+            "found": 1,
+            "total": 8
+          },
+          "変換ミス・入力ミス": {
+            "found": 0,
+            "total": 1
+          },
+          "変換ミス": {
+            "found": 0,
+            "total": 3
+          },
+          "助詞の誤り": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "typoMissed": [
+          {
+            "file": "本文/episode_0001_転生.txt",
+            "kind": "脱字",
+            "wrong": "きちんノート",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0002_てこの原理と救助.txt",
+            "kind": "脱字",
+            "wrong": "しているを",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0002_てこの原理と救助.txt",
+            "kind": "衍字",
+            "wrong": "のを原理を",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0002_てこの原理と救助.txt",
+            "kind": "変換ミス・入力ミス",
+            "wrong": "手を拾い",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0004_筋肉と電気.txt",
+            "kind": "衍字",
+            "wrong": "歳にである",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0004_筋肉と電気.txt",
+            "kind": "変換ミス",
+            "wrong": "暖かそう",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0004_筋肉と電気.txt",
+            "kind": "変換ミス",
+            "wrong": "荒い麻",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0005_思春期の始まり.txt",
+            "kind": "変換ミス",
+            "wrong": "来ている服",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0005_思春期の始まり.txt",
+            "kind": "脱字",
+            "wrong": "くだい",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0005_思春期の始まり.txt",
+            "kind": "衍字",
+            "wrong": "院長のが",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0006_コンストラクタ領の様子.txt",
+            "kind": "脱字",
+            "wrong": "良いわから",
+            "note": "場所は当てたが直らない"
+          },
+          {
+            "file": "本文/episode_0006_コンストラクタ領の様子.txt",
+            "kind": "助詞の誤り",
+            "wrong": "感の襲われ",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0008_計算と計算違い.txt",
+            "kind": "衍字",
+            "wrong": "いただいただける",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0009_体力と石鹸.txt",
+            "kind": "衍字",
+            "wrong": "かにじゃない",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0010_石鹸生成実験計画.txt",
+            "kind": "衍字",
+            "wrong": "とと思",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0010_石鹸生成実験計画.txt",
+            "kind": "衍字",
+            "wrong": "いていていて",
+            "note": "指摘が出なかった"
+          }
+        ],
+        "typoWrongFix": [
+          {
+            "file": "本文/episode_0006_コンストラクタ領の様子.txt",
+            "kind": "脱字",
+            "wrong": "良いわから",
+            "suggestion": "何を説明していいかわからない"
+          }
+        ],
+        "typoFalsePositives": [
+          {
+            "file": "本文/episode_0003_心肺蘇生と出会い.txt",
+            "kind": "作者の裁定（わざとの表記）",
+            "word": "行うっと",
+            "target": "行うっと",
+            "suggestion": "行うのだ"
+          },
+          {
+            "file": "本文/episode_0003_心肺蘇生と出会い.txt",
+            "kind": "台詞の崩し",
+            "word": "で、す、ね",
+            "target": "で、す、ね",
+            "suggestion": "ですね"
+          }
+        ],
+        "typoFalsePositivesByWord": {
+          "行うっと": 1,
+          "で、す、ね": 1
+        },
+        "typoFalsePositivesByKind": {
+          "作者の裁定（わざとの表記）": 1,
+          "台詞の崩し": 1
+        }
+      },
+      "raw": [
+        {
+          "target": "本文\\episode_0001_転生.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3.5:9b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0001_転生.txt#1-0@6020",
+                "chapterLabel": "第1話",
+                "accepted": [
+                  {
+                    "line": 102,
+                    "original": "「ターナ先生。魔物の数がちょっと多いようなので、我々で押し返してきます。ここをお任せできますか？村からはじきに援軍が来ると思いますので、馬車の救助が終われば村に向かってください」",
+                    "target": "村からはじきに",
+                    "suggestion": "村からすぐに",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 142,
+                    "original": "「ちょっと待て。僕は一人っ子だろ———っと」",
+                    "target": "だろ———っと",
+                    "suggestion": "だろ———と",
+                    "reason": "衍字",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 82,
+                    "target": "かった！",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0002_てこの原理と救助.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3.5:9b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0002_てこの原理と救助.txt#2-0@6020",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "line": 14,
+                    "original": "そう自分に言い聞かせて、身体をの緊張を無理やり解いていく。",
+                    "target": "身体をの緊張",
+                    "suggestion": "身体の緊張",
+                    "reason": "脱字",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 37,
+                    "original": "そこに近づくために障害物を脇へどけて前へ進みながら、自称天使をうかがう。",
+                    "target": "障害物を脇へどけて",
+                    "suggestion": "障害物を脇へどいて",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 53,
+                    "original": "前世、ときたか。不思議と納得してしまうのは、こちらがあまりに違う世界である事を痛感してきているからだろう。",
+                    "target": "前世、ときたか",
+                    "suggestion": "前世、ときたのか",
+                    "reason": "脱字",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 140,
+                    "original": "額に縦に２本並んだ角が、パチパチとスタンガンのような音を立てている。",
+                    "target": "角が、",
+                    "suggestion": "角は、",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 157,
+                    "original": "自称天使の言うことが正しいのであれば、今の僕は前世の記憶が戻って混乱しているらしい。後ろで後ずさりする少女も、妹であるということと、ストリナ（愛称リナ）という名前しか思い出せないが、それでなぜこんな風に命をはって護ろうと思うのだろうか。",
+                    "target": "ストリナ（愛称リナ）という名前しか",
+                    "suggestion": "ストリナ（愛称リナ）という名しか",
+                    "reason": "衍字",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 102,
+                    "target": "棍という名前",
+                    "reason": "target_not_in_original"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0003_心肺蘇生と出会い.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3.5:9b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0003_心肺蘇生と出会い.txt#3-0@6020",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 125,
+                    "original": "必要に応じて気道確保と人工呼吸を行うっと。",
+                    "target": "行うっと",
+                    "suggestion": "行うのだ",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 145,
+                    "original": "双丘が柔らかくて不謹慎な事を考えそうになるのを必死で抑えながら、",
+                    "target": "双丘が",
+                    "suggestion": "胸壁が",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 145,
+                    "original": "一分間に 100 から 120 回って事は、",
+                    "target": "100 から 120 回って事は",
+                    "suggestion": "100 から 120 回ということは",
+                    "reason": "脱字",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 147,
+                    "original": "「イ、イント殿？？　娘に何を？？」",
+                    "target": "？？",
+                    "suggestion": "？",
+                    "reason": "入力ミス",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 172,
+                    "original": "「良かった、で、す、ね？」",
+                    "target": "で、す、ね",
+                    "suggestion": "ですね",
+                    "reason": "脱字",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0004_筋肉と電気.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "1件も通せませんでした（1件すべて失敗）。理由は failures にあります。",
+            "model": "qwen3.5:9b",
+            "temperature": 0,
+            "results": [],
+            "failures": [
+              {
+                "chunkId": "本文\\episode_0004_筋肉と電気.txt#4-0@6020",
+                "reason": "応答を読み取れませんでした（誤字脱字のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
+              }
+            ]
+          }
+        },
+        {
+          "target": "本文\\episode_0005_思春期の始まり.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "1件も通せませんでした（1件すべて失敗）。理由は failures にあります。",
+            "model": "qwen3.5:9b",
+            "temperature": 0,
+            "results": [],
+            "failures": [
+              {
+                "chunkId": "本文\\episode_0005_思春期の始まり.txt#5-0@6020",
+                "reason": "応答を読み取れませんでした（誤字脱字のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
+              }
+            ]
+          }
+        },
+        {
+          "target": "本文\\episode_0006_コンストラクタ領の様子.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3.5:9b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0006_コンストラクタ領の様子.txt#6-0@6020",
+                "chapterLabel": "第6話",
+                "accepted": [
+                  {
+                    "line": 29,
+                    "original": "教科書と前世の記憶の事は何と説明して良いわからないので、",
+                    "target": "何と説明して良いわからない",
+                    "suggestion": "何を説明していいかわからない",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 43,
+                    "original": "この村で3階建てなのはここだけで、外から見るとちょっとした校舎ぐらいの規模がある。中庭を囲むロの字型の建物で、周囲には簡単な柵と空堀がある。一応砦としての機能もあるのだ。",
+                    "target": "中庭を囲むロの字型の建物",
+                    "suggestion": "中庭を囲むL字型の建物",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 44,
+                    "original": "まぁ正直、夏も冬も住み心地はそれほど良くなかったりはするのだが。",
+                    "target": "住み心地はそれほど良くなかったりはする",
+                    "suggestion": "住み心地はそれほど良くないし",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 57,
+                    "original": "おばあさんはあっけらかんと言い放つ。確かに何もないけど、辺鄙はひどかろう。",
+                    "target": "おばあさんはあっけらかんと言い放つ",
+                    "suggestion": "おばあさんはあっけらっかんと言い放つ",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 89,
+                    "original": "父上たちが狩った魔物を集めているはずなので、間違いなく遅くなるだろう。昨日はかなりの数の魔物が見えたので、死体を集めるのも時間がかかるはずだ。",
+                    "target": "父上たちが狩った魔物を集めている",
+                    "suggestion": "父上が狩った魔物を集めている",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 112,
+                    "original": "門は石畳敷きの中庭に繋がっていて、そこにいくつか粗末なテントが張られているが、人の気配はない。",
+                    "target": "石畳敷きの中庭に繋がっていて",
+                    "suggestion": "石畳の敷かれた中庭につながっていて",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 61,
+                    "target": "油ぎっている",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 82,
+                    "target": "父上の木剣が当たった時よりはマシだが",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 102,
+                    "target": "魔狼の攻撃で",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0007_進学に向けて.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3.5:9b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0007_進学に向けて.txt#7-0@6020",
+                "chapterLabel": "第7話",
+                "accepted": [
+                  {
+                    "line": 47,
+                    "original": "ただ、見慣れているだけで、僕はこちらの世界の文字がまだ読めないらしい。",
+                    "target": "見慣れている",
+                    "suggestion": "見慣れていない",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 51,
+                    "original": "単語を何度も書いて丸暗記しようとしているらしい。",
+                    "target": "丸暗記しよう",
+                    "suggestion": "丸暗記して",
+                    "reason": "脱字",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 69,
+                    "original": "転生してだいぶ若返ってしまったので、まだまだ先かもしれないが、将来大学に行こうと思ったら、そもそも文字ぐらいちゃんと読めないとマズイ。",
+                    "target": "転生して",
+                    "suggestion": "転生してから",
+                    "reason": "脱字",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0008_計算と計算違い.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3.5:9b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0008_計算と計算違い.txt#8-0@6020",
+                "chapterLabel": "第8話",
+                "accepted": [
+                  {
+                    "line": 42,
+                    "original": "義母さんはまったく汚れていない。",
+                    "target": "義母さんは",
+                    "suggestion": "義母様は",
+                    "reason": "同音の語の取り違え（「さん」を「さま」へ修正する文脈的な誤変換）",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 48,
+                    "original": "「あたしもじがよめるようになったよ！」",
+                    "target": "じが",
+                    "suggestion": "字が",
+                    "reason": "誤変換（「じ」を「字」へ修正）",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 56,
+                    "original": "ですが、我らの領地は貧乏領ですので、報酬の方は些少となってしまうのですが……",
+                    "target": "些少",
+                    "suggestion": "少量",
+                    "reason": "誤変換（「些少」は「少ししかない」という意味だが、文脈的に「少量」という言葉が適切）",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 64,
+                    "original": "「いえ、それ以前にマイナ殿には我が子らに助太刀いただいてます。お礼というならそのお礼もあるのですから、無報酬というわけには……」",
+                    "target": "我が子らに",
+                    "suggestion": "我が子たちに",
+                    "reason": "脱字（「ら」を「たち」へ修正）",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 67,
+                    "target": "心なしか",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 89,
+                    "target": "お前も",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 91,
+                    "target": "2人",
+                    "reason": "script_only"
+                  },
+                  {
+                    "line": 106,
+                    "target": "アンと",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0009_体力と石鹸.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "qwen3.5:9b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0009_体力と石鹸.txt#9-0@6020",
+                "chapterLabel": "第9話",
+                "accepted": [
+                  {
+                    "line": 42,
+                    "original": "「母は美容を専門にしてるの。美容には何が効くかわからないから、泉の水を手に入れてから調べるつもりみたい。温かい温泉って各地にあって、お肌がすべすべになったり、傷の治りが早くなったりするものもあるのよ」",
+                    "target": "母は美容を専門にしてるの",
+                    "suggestion": "母は美容を専門にしてますの",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 42,
+                    "original": "「母は美容を専門にしてるの。美容には何が効くかわからないから、泉の水を手に入れてから調べるつもりみたい。温かい温泉って各地にあって、お肌がすべすべになったり、傷の治りが早くなったりするものもあるのよ」",
+                    "target": "調べるつもりみたい",
+                    "suggestion": "調べたいつもりみたい",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 42,
+                    "original": "「母は美容を専門にしてるの。美容には何が効くかわからないから、泉の水を手に入れてから調べるつもりみたい。温かい温泉って各地にあって、お肌がすべすべになったり、傷の治りが早くなったりするものもあるのよ」",
+                    "target": "お肌がすべすべになったり",
+                    "suggestion": "お肌がツルツルになったり",
+                    "reason": "誤変換",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 42,
+                    "original": "「母は美容を専門にしてるの。美容には何が効くかわからないから、泉の水を手に入れてから調べるつもりみたい。温かい温泉って各地にあって、お肌がすべすべになったり、傷の治りが早くなったりするものもあるのよ」",
+                    "target": "傷の治りが早くなったり",
+                    "suggestion": "傷の回復が早くなったり",
+                    "reason": "誤変換",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 42,
+                    "original": "「母は美容を専門にしてるの。美容には何が効くかわからないから、泉の水を手に入れてから調べるつもりみたい。温かい温泉って各地にあって、お肌がすべすべになったり、傷の治りが早くなったりするものもあるのよ」",
+                    "target": "ものもあるのよ",
+                    "suggestion": "ものがあるのよ",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 53,
+                    "original": "「じゃあ美容を専門にしたら良いんじゃないですか？先生美人だし、美容ならお母さんに習えるんじゃないですか？」",
+                    "target": "じゃあ美容を専門にしたら良いんじゃないですか",
+                    "suggestion": "じゃあ美容を専門にしたらいいんじゃないですか",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 69,
+                    "original": "「身体を洗うのなら、石鹸があったら便利なんだけど、そういや見たことないなぁ」",
+                    "target": "そういや見たことないなぁ",
+                    "suggestion": "そういえば見たことないなぁ",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 79,
+                    "original": "「今度教えてくださいませ。イント様」",
+                    "target": "今度教えてくださいませ",
+                    "suggestion": "今度教えていただけますか",
+                    "reason": "誤変換",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 83,
+                    "original": "「隊長！止まってください！拠点予定地の樹上に飛猿の群れと、地上に骨喰牛が多数います！闇豹の足跡も確認していますので危険です！」",
+                    "target": "拠点予定地の樹上に飛猿の群れと",
+                    "suggestion": "拠点予定地の樹上で飛猿の群れと",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 83,
+                    "original": "「隊長！止まってください！拠点予定地の樹上に飛猿の群れと、地上に骨喰牛が多数います！闇豹の足跡も確認していますので危険です！」",
+                    "target": "地上に骨喰牛が多数います",
+                    "suggestion": "地上に骨喰牛が多数居ます",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 83,
+                    "original": "「隊長！止まってください！拠点予定地の樹上に飛猿の群れと、地上に骨喰牛が多数います！闇豹の足跡も確認していますので危険です！」",
+                    "target": "闇豹の足跡も確認していますので危険です",
+                    "suggestion": "闇豹の足跡も確認しておりますので危険です",
+                    "reason": "誤変換",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 109,
+                    "original": "「群れからはぐれた骨喰牛が一体、前方から来ます！迎撃お願いします！」",
+                    "target": "迎撃お願いします",
+                    "suggestion": "迎撃をお願いします",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 69,
+                    "target": "石鹸？聞いたことがありませんわね",
+                    "reason": "target_not_in_original"
+                  },
+                  {
+                    "line": 109,
+                    "target": "群れからはぐれた骨喰牛が一体",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 109,
+                    "target": "前方から来ます",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 125,
+                    "target": "今日はごちそうだね",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0010_石鹸生成実験計画.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "1件も通せませんでした（1件すべて失敗）。理由は failures にあります。",
+            "model": "qwen3.5:9b",
+            "temperature": 0,
+            "results": [],
+            "failures": [
+              {
+                "chunkId": "本文\\episode_0010_石鹸生成実験計画.txt#10-0@6020",
+                "reason": "応答を読み取れませんでした（誤字脱字のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "typoFound": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "typoFoundTotal": {
+      "values": [
+        17
+      ],
+      "min": 17,
+      "max": 17
+    },
+    "typoMissed": {
+      "values": [
+        16
+      ],
+      "min": 16,
+      "max": 16
+    },
+    "typoWrongFix": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "typoFalsePositives": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "typoOtherFlags": {
+      "values": [
+        33
+      ],
+      "min": 33,
+      "max": 33
+    },
+    "accepted": {
+      "values": [
+        37
+      ],
+      "min": 37,
+      "max": 37
+    },
+    "rejected": {
+      "values": [
+        13
+      ],
+      "min": 13,
+      "max": 13
+    },
+    "rejected.no_change": {
+      "values": [
+        10
+      ],
+      "min": 10,
+      "max": 10
+    },
+    "rejected.target_not_in_original": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "rejected.script_only": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "failures": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "elapsedMs": {
+      "values": [
+        1971995
+      ],
+      "min": 1971995,
+      "max": 1971995
+    }
+  },
+  "lines": [
+    "仕込んだ誤字を拾えた（当てると本文が直るもの）: 1/17",
+    "見逃し（拾えなかった仕込み）: 16",
+    "直し方が違う（場所は当てたが、当てても直らない）: 1",
+    "　※ 場所は当てたのに、当てても本文が直らない指摘があります（押しても直らない＝作者の手間だけが増える）。",
+    "誤検出（罠に付いた指摘。造語・方言・ルビ・正しい同音異義語）: 2",
+    "　※ 造語・方言・ルビ・正しい同音異義語を直そうとしています。種別ごとの内訳は記録の detail.typoFalsePositivesByKind にあります。",
+    "仕込み以外の箇所への指摘: 33",
+    "指摘（検算を通ったもの）: 37",
+    "落とした（検算で弾いたもの）: 13",
+    "　└ 落とした理由：no_change: 10",
+    "　└ 落とした理由：script_only: 1",
+    "　└ 落とした理由：target_not_in_original: 2",
+    "失敗（チャンクごと通らなかったもの）: 3",
+    "所要時間: 1972.0秒",
+    "num_ctx: 24576（プロンプトの長さから（製品と同じ道））",
+    "temperature: 0（製品と同じ（束が返した値））",
+    "温め（読み込みを含む。上の所要時間には入っていません）: 4.5秒"
+  ]
+}

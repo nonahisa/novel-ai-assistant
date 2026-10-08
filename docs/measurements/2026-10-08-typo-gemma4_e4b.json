@@ -1,0 +1,1572 @@
+{
+  "measuredAt": "2026-10-08T12:53:40.093Z",
+  "feature": "typo",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:e4b",
+  "numCtx": 24576,
+  "numCtxDecision": {
+    "numCtx": 24576,
+    "source": "プロンプトの長さから（製品と同じ道）",
+    "promptChars": 9099,
+    "outputTokens": 8192,
+    "contextWindow": 131072,
+    "charsPerToken": null
+  },
+  "temperature": 0,
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": {
+    "contextLength": 131072,
+    "bundled": {
+      "thinkingSeen": true,
+      "thinkingOffWorks": true,
+      "thinkingMeasuredAt": "2026-09-26",
+      "typoAccuracy": {
+        "hits": 3,
+        "total": 7,
+        "falsePositives": 0,
+        "wrongFixes": 0,
+        "trapHits": 0,
+        "trapTotal": 5,
+        "promptVersion": "1.1",
+        "smallPrompt": true,
+        "sampleVersion": "2",
+        "measuredAt": "2026-09-26T06:29:55+09:00"
+      },
+      "measuredAt": "2026-09-26"
+    },
+    "note": null
+  },
+  "warmup": {
+    "elapsedMs": 14991,
+    "ok": true,
+    "reason": null
+  },
+  "endpoint": null,
+  "options": {},
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.99.20",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.2",
+  "verifyPromptVersion": null,
+  "plans": [
+    {
+      "chunkId": "本文\\episode_0001_転生.txt#1-0@6020",
+      "chars": 3912,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0002_てこの原理と救助.txt#2-0@6020",
+      "chars": 3466,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0003_心肺蘇生と出会い.txt#3-0@6020",
+      "chars": 3589,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0004_筋肉と電気.txt#4-0@6020",
+      "chars": 5299,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0005_思春期の始まり.txt#5-0@6020",
+      "chars": 3617,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0006_コンストラクタ領の様子.txt#6-0@6020",
+      "chars": 3328,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0007_進学に向けて.txt#7-0@6020",
+      "chars": 2231,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0008_計算と計算違い.txt#8-0@6020",
+      "chars": 3314,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0009_体力と石鹸.txt#9-0@6020",
+      "chars": 3519,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0010_石鹸生成実験計画.txt#10-0@6020",
+      "chars": 4013,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-bench\\typo-gold-kyokasho10",
+    "targets": [
+      "本文\\episode_0001_転生.txt",
+      "本文\\episode_0002_てこの原理と救助.txt",
+      "本文\\episode_0003_心肺蘇生と出会い.txt",
+      "本文\\episode_0004_筋肉と電気.txt",
+      "本文\\episode_0005_思春期の始まり.txt",
+      "本文\\episode_0006_コンストラクタ領の様子.txt",
+      "本文\\episode_0007_進学に向けて.txt",
+      "本文\\episode_0008_計算と計算違い.txt",
+      "本文\\episode_0009_体力と石鹸.txt",
+      "本文\\episode_0010_石鹸生成実験計画.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-bench\\typo-gold-kyokasho10\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 207382,
+      "temperature": 0,
+      "staleNote": null,
+      "metrics": {
+        "typoFound": 3,
+        "typoFoundTotal": 17,
+        "typoMissed": 14,
+        "typoWrongFix": 3,
+        "typoFalsePositives": 3,
+        "typoOtherFlags": 28,
+        "accepted": 37,
+        "rejected": 123,
+        "rejected.no_change": 83,
+        "rejected.ungrounded": 2,
+        "rejected.same_as_original": 33,
+        "rejected.punctuation_only": 1,
+        "rejected.bracket_removed": 2,
+        "rejected.script_only": 2,
+        "failures": 0,
+        "elapsedMs": 207382
+      },
+      "detail": {
+        "rejectedReasons": {
+          "no_change": 83,
+          "ungrounded": 2,
+          "same_as_original": 33,
+          "punctuation_only": 1,
+          "bracket_removed": 2,
+          "script_only": 2
+        },
+        "failures": [],
+        "typoFound": {
+          "脱字": {
+            "found": 0,
+            "total": 4
+          },
+          "衍字": {
+            "found": 3,
+            "total": 8
+          },
+          "変換ミス・入力ミス": {
+            "found": 0,
+            "total": 1
+          },
+          "変換ミス": {
+            "found": 0,
+            "total": 3
+          },
+          "助詞の誤り": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "typoMissed": [
+          {
+            "file": "本文/episode_0001_転生.txt",
+            "kind": "脱字",
+            "wrong": "きちんノート",
+            "note": "場所は当てたが直らない"
+          },
+          {
+            "file": "本文/episode_0002_てこの原理と救助.txt",
+            "kind": "脱字",
+            "wrong": "しているを",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0002_てこの原理と救助.txt",
+            "kind": "衍字",
+            "wrong": "のを原理を",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0002_てこの原理と救助.txt",
+            "kind": "変換ミス・入力ミス",
+            "wrong": "手を拾い",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0004_筋肉と電気.txt",
+            "kind": "衍字",
+            "wrong": "歳にである",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0004_筋肉と電気.txt",
+            "kind": "変換ミス",
+            "wrong": "暖かそう",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0004_筋肉と電気.txt",
+            "kind": "変換ミス",
+            "wrong": "荒い麻",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0005_思春期の始まり.txt",
+            "kind": "変換ミス",
+            "wrong": "来ている服",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0005_思春期の始まり.txt",
+            "kind": "脱字",
+            "wrong": "くだい",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0005_思春期の始まり.txt",
+            "kind": "衍字",
+            "wrong": "院長のが",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0006_コンストラクタ領の様子.txt",
+            "kind": "脱字",
+            "wrong": "良いわから",
+            "note": "場所は当てたが直らない"
+          },
+          {
+            "file": "本文/episode_0006_コンストラクタ領の様子.txt",
+            "kind": "助詞の誤り",
+            "wrong": "感の襲われ",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0008_計算と計算違い.txt",
+            "kind": "衍字",
+            "wrong": "いただいただける",
+            "note": "場所は当てたが直らない"
+          },
+          {
+            "file": "本文/episode_0009_体力と石鹸.txt",
+            "kind": "衍字",
+            "wrong": "かにじゃない",
+            "note": "指摘が出なかった"
+          }
+        ],
+        "typoWrongFix": [
+          {
+            "file": "本文/episode_0001_転生.txt",
+            "kind": "脱字",
+            "wrong": "きちんノート",
+            "suggestion": "確認し、"
+          },
+          {
+            "file": "本文/episode_0006_コンストラクタ領の様子.txt",
+            "kind": "脱字",
+            "wrong": "良いわから",
+            "suggestion": "ことは何と"
+          },
+          {
+            "file": "本文/episode_0008_計算と計算違い.txt",
+            "kind": "衍字",
+            "wrong": "いただいただける",
+            "suggestion": "護衛を引き受けていただけてだけで十分ですわ」"
+          }
+        ],
+        "typoFalsePositives": [
+          {
+            "file": "本文/episode_0008_計算と計算違い.txt",
+            "kind": "口語（助詞の省略）",
+            "word": "四則演算習ってて",
+            "target": "今はマイナ先生に四則演算習ってて、それもだいたいできるようになったよ」",
+            "suggestion": "今はマイナ先生に四則演算を習ってて、それもだいたいできるようになったよ」"
+          },
+          {
+            "file": "本文/episode_0010_石鹸生成実験計画.txt",
+            "kind": "方言・崩し",
+            "word": "くだせぇ",
+            "target": "しててくだせぇ」",
+            "suggestion": "しててくださ い」"
+          },
+          {
+            "file": "本文/episode_0010_石鹸生成実験計画.txt",
+            "kind": "口語",
+            "word": "信じらんない",
+            "target": "し、信じらんない",
+            "suggestion": "し、信じられない"
+          }
+        ],
+        "typoFalsePositivesByWord": {
+          "四則演算習ってて": 1,
+          "くだせぇ": 1,
+          "信じらんない": 1
+        },
+        "typoFalsePositivesByKind": {
+          "口語（助詞の省略）": 1,
+          "方言・崩し": 1,
+          "口語": 1
+        }
+      },
+      "raw": [
+        {
+          "target": "本文\\episode_0001_転生.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0001_転生.txt#1-0@6020",
+                "chapterLabel": "第1話",
+                "accepted": [
+                  {
+                    "line": 17,
+                    "original": "次亜塩素酸ナトリウムになり、それがカビ取りや漂白に使われているなんて話、テストに出ないからだ。",
+                    "target": "テストに出ないからだ。",
+                    "suggestion": "テストには出ないからだ。",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 25,
+                    "original": "先生の話す豆知識は気になるとしても、それにつられて脱線すれば大学合格は遠くなる。",
+                    "target": "先生の話す豆知識は気になるとしても、",
+                    "suggestion": "先生が話す豆知識は気になるとしても、",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 28,
+                    "original": "社会人である両親は僕がわからない問題を教えられるはずだ。",
+                    "target": "社会人である両親は僕がわからない問題を教えられるはずだ。",
+                    "suggestion": "社会人である両親なら僕がわからない問題を教えられるはずだ。",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 30,
+                    "original": "過去戦争に負けて焼け野原になった過去がある。",
+                    "target": "過去戦争に負けて焼け野原になった過去がある。",
+                    "suggestion": "過去に戦争に負けて焼け野原になった過去がある。",
+                    "reason": "脱字",
+                    "confidence": "low"
+                  },
+                  {
+                    "line": 36,
+                    "original": "ということは、まだ授業は先に進む。",
+                    "target": "ということは、まだ授業は先に進む。",
+                    "suggestion": "ということは、まだ授業は進む。",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 38,
+                    "original": "黒板の板書をきちんノートに書き写せているか確認し———",
+                    "target": "確認し———",
+                    "suggestion": "確認し、",
+                    "reason": "入力ミス",
+                    "confidence": "low"
+                  },
+                  {
+                    "line": 52,
+                    "original": "あと心臓マッサージできるやつ！",
+                    "target": "心臓マッサージできるやつ！",
+                    "suggestion": "心臓マッサージができるやつ！",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 58,
+                    "original": "じゃあ僕はどうなるんだ？　ああ痛い———",
+                    "target": "どうなるんだ？　ああ痛い———",
+                    "suggestion": "どうなるんだ？　ああ、痛い———",
+                    "reason": "脱字",
+                    "confidence": "low"
+                  },
+                  {
+                    "line": 68,
+                    "original": "全身が痛い事がわかってくる。",
+                    "target": "全身が痛い事がわかってくる。",
+                    "suggestion": "全身が痛いことがわかってくる。",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 74,
+                    "original": "こちらに転がってくる音が聞こえて———",
+                    "target": "聞こえて———",
+                    "suggestion": "聞こえて、",
+                    "reason": "入力ミス",
+                    "confidence": "low"
+                  },
+                  {
+                    "line": 82,
+                    "original": "良かった！　無事だったかイント",
+                    "target": "無事だったかイント",
+                    "suggestion": "無事だったか、イント",
+                    "reason": "脱字",
+                    "confidence": "low"
+                  },
+                  {
+                    "line": 92,
+                    "original": "手にもっている剣を向けたまま、男が再度こちらに声をかけてくる。",
+                    "target": "手にもっている剣を向けたまま、",
+                    "suggestion": "手に持っている剣を向けたまま、",
+                    "reason": "誤変換",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 120,
+                    "original": "お父さんたちはちょっと行ってくるから、リナの事は任せたぞ！」",
+                    "target": "リナの事は任せたぞ！」",
+                    "suggestion": "リナのことは任せたぞ！」",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 124,
+                    "original": "僕しかリナという人を助けられる人間はいないらしいというのはわかった。",
+                    "target": "僕しかリナという人を助けられる人間はいないらしいというのはわかった。",
+                    "suggestion": "僕しかリナという人を助けられる人間はいないらしい、というのはわかった。",
+                    "reason": "脱字",
+                    "confidence": "low"
+                  },
+                  {
+                    "line": 132,
+                    "original": "横倒しになって砕けた車体の下を覗き込むが、ここからでは暗くて何も見えない。",
+                    "target": "覗き込むが、ここからでは暗くて何も見えない。",
+                    "suggestion": "覗き込むが、ここからは暗くて何も見えない。",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 42,
+                    "target": "異音が聞こえた気がして動きを止めた。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 86,
+                    "target": "それが２台ほど半壊して横転しているのが見て取れる。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 102,
+                    "target": "村からはじきに援軍が来ると思いますので、",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 112,
+                    "target": "近くだけだからね！",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0002_てこの原理と救助.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0002_てこの原理と救助.txt#2-0@6020",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "line": 14,
+                    "original": "身体をの緊張を無理やり解いていく。",
+                    "target": "身体をの緊張を",
+                    "suggestion": "身体の緊張を",
+                    "reason": "脱字",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 22,
+                    "original": "黒い執事服をビシッと着込んでいて、頭に黒い山羊の被り物をかぶった状態で、優雅にお辞儀をしている。",
+                    "target": "黒い執事服をビシッと着込んでいて、頭に黒い山羊の被り物をかぶった状態で、優雅にお辞儀をしている。",
+                    "suggestion": "黒い執事服をビシッと着込んでおり、頭に黒い山羊の被り物をかぶった状態で、優雅にお辞儀をしている。",
+                    "reason": "脱字",
+                    "confidence": "low"
+                  },
+                  {
+                    "line": 41,
+                    "original": "僕は単なる受験生なんだが。",
+                    "target": "僕は単なる受験生なんだが。",
+                    "suggestion": "僕は単なる受験生なんだ。",
+                    "reason": "入力ミス",
+                    "confidence": "low"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 36,
+                    "target": "積み荷が散らばっていた。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 51,
+                    "target": "吾輩が契約に基づき、前世の魂から一部を補填して助けたのである。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 102,
+                    "target": "確か父上のトレーニング用の武器の一つで『棍』という名前だったか。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 117,
+                    "target": "作用点と支点の距離と支点と力点の距離の比が、そのまま作用点での力の差になるので、子どもの力でも残骸を動かせるのだ。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 139,
+                    "target": "そちらを見ると、森と道との境目あたりに犬のような生き物がいる。",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0003_心肺蘇生と出会い.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0003_心肺蘇生と出会い.txt#3-0@6020",
+                "chapterLabel": "第3話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "line": 12,
+                    "target": "13:",
+                    "reason": "ungrounded"
+                  },
+                  {
+                    "line": 13,
+                    "target": "辿りつけただろうか。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 18,
+                    "target": "棒を目で追う。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 22,
+                    "target": "体育祭以来だ。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 30,
+                    "target": "呟いている。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 32,
+                    "target": "すれ違った。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 36,
+                    "target": "鳴った。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 40,
+                    "target": "起きたんだろうか？",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 44,
+                    "target": "あげた。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 46,
+                    "target": "痙攣していた。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 50,
+                    "target": "音だったか。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 52,
+                    "target": "おかしくないだろう。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 58,
+                    "target": "ばかりだ。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 64,
+                    "target": "忘れてしまっていた。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 74,
+                    "target": "存在していないはずだ。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 78,
+                    "target": "気になる事はあったけど、もう時間がない。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 82,
+                    "target": "笑顔だ。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 86,
+                    "target": "とりはじめる。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 92,
+                    "target": "できなかったんだろう。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 93,
+                    "target": "ことはない。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 95,
+                    "target": "叶えたのである",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 97,
+                    "target": "消えようとする。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 101,
+                    "target": "諦めたらしい。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 107,
+                    "target": "気がした。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 111,
+                    "target": "目を通す。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 124,
+                    "target": "押す。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 125,
+                    "target": "行うっと。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 127,
+                    "target": "しかないか。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 131,
+                    "target": "抜けた。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 137,
+                    "target": "事だとは……。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 141,
+                    "target": "開けた。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 145,
+                    "target": "早い。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 151,
+                    "target": "美少女だった。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 152,
+                    "target": "柔らかい。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 156,
+                    "target": "無視する。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 158,
+                    "target": "わかってしまう。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 160,
+                    "target": "戻る。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 162,
+                    "target": "あった。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 166,
+                    "target": "良かった。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 170,
+                    "target": "崩れた。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 174,
+                    "target": "しまう。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 176,
+                    "target": "のかもしれない。",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0004_筋肉と電気.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0004_筋肉と電気.txt#4-0@6020",
+                "chapterLabel": "第4話",
+                "accepted": [
+                  {
+                    "line": 19,
+                    "original": "変わっていないのではなかろうか。",
+                    "target": "のではなかろうか",
+                    "suggestion": "ではないのだろうか",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 21,
+                    "original": "どうしてだろうか？",
+                    "target": "どうしてだろうか？",
+                    "suggestion": "どうしてだろうか。",
+                    "reason": "入力ミス",
+                    "confidence": "low"
+                  },
+                  {
+                    "line": 37,
+                    "original": "ため息がでる。",
+                    "target": "ため息がでる",
+                    "suggestion": "ため息が出る",
+                    "reason": "脱字（修正案から前後の文を外しました）",
+                    "confidence": "medium",
+                    "contextTrimmed": true
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 11,
+                    "target": "臭いがした",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 25,
+                    "target": "扉が開かれる",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 33,
+                    "target": "お元気だそうですよ",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 42,
+                    "target": "許してもらいたい",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 46,
+                    "target": "心配してくれた",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 57,
+                    "target": "多分それくらいだろう",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 62,
+                    "target": "良く知らないが、とんでもない田舎だと思う",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 66,
+                    "target": "ということなのだろう",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 70,
+                    "target": "持ち歩いてこなかった",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 76,
+                    "target": "書いてある。昨日、自称天使に願って出してもらった教科書だ",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 80,
+                    "target": "食堂までが遠い",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 84,
+                    "target": "背中を叩いてやる",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 90,
+                    "target": "全身にカサブタがあったが、飛びついてこれるぐらいだから、もう大丈夫そうだ",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 92,
+                    "target": "驚く",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 103,
+                    "target": "わかった",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 107,
+                    "target": "食べてみる",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 111,
+                    "target": "あまりおいしくない",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 113,
+                    "target": "かもしれない",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 117,
+                    "target": "父上に向き直る",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 123,
+                    "target": "はずなんだが、イントは使えないはずだろう？",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 125,
+                    "target": "電気だろう",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 128,
+                    "target": "神術は使ってないよ",
+                    "reason": "punctuation_only"
+                  },
+                  {
+                    "line": 130,
+                    "target": "はずだ",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 131,
+                    "target": "のだろうか？",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 133,
+                    "target": "使いすぎよね？」",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 135,
+                    "target": "分かった",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 137,
+                    "target": "暗かったからだよ」",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 139,
+                    "target": "意趣返しだろう",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 141,
+                    "target": "はずなんだけど」",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 143,
+                    "target": "余裕もない",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 145,
+                    "target": "出してくれたんだよ」",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 151,
+                    "target": "助かる",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 153,
+                    "target": "できるか？」",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 155,
+                    "target": "有効なんだろうか？",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 163,
+                    "target": "返事が返ってくる",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 167,
+                    "target": "あるな』",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 171,
+                    "target": "けっこう明るい",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 175,
+                    "target": "わからなかったらしい",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 177,
+                    "target": "どういう事かしら」",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 181,
+                    "target": "言ってなかったか？」",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 185,
+                    "target": "みたい」",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 187,
+                    "target": "頷いている",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 191,
+                    "target": "痛い",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 193,
+                    "target": "ありがたい話ではあるな」",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 195,
+                    "target": "外見は胡散臭かったが",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 198,
+                    "target": "だもんなぁ…",
+                    "reason": "same_as_original"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0005_思春期の始まり.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0005_思春期の始まり.txt#5-0@6020",
+                "chapterLabel": "第5話",
+                "accepted": [
+                  {
+                    "line": 19,
+                    "original": "時間の空いた僕は助けてくれた美少女さんのところにお礼に行こうと思ったのだ。",
+                    "target": "時間の空いた",
+                    "suggestion": "時間のある",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 25,
+                    "original": "頷いた父上は院長宛の手紙を渡してきただけ。",
+                    "target": "渡してきただけ。",
+                    "suggestion": "渡してきただけだ。",
+                    "reason": "脱字",
+                    "confidence": "low"
+                  },
+                  {
+                    "line": 27,
+                    "original": "僕のやった事は初対面の若い女性の胸をまさぐって、唇を奪っただけだ。",
+                    "target": "僕のやった事は",
+                    "suggestion": "僕のやったことは",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 59,
+                    "original": "人口３００人の村にしては、患者が多すぎやしないだろうか？",
+                    "target": "多すぎやしないだろうか？",
+                    "suggestion": "多すぎやしないだろうか。",
+                    "reason": "脱字",
+                    "confidence": "low"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 36,
+                    "target": "駆け込んでいった。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 72,
+                    "target": "見たかもしれない。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 83,
+                    "target": "恥ずかしい限りだ。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 111,
+                    "target": "気がする。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 115,
+                    "target": "遅くなりました」",
+                    "reason": "bracket_removed"
+                  },
+                  {
+                    "line": 121,
+                    "target": "気がする。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 129,
+                    "target": "貼られてしまう！",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0006_コンストラクタ領の様子.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0006_コンストラクタ領の様子.txt#6-0@6020",
+                "chapterLabel": "第6話",
+                "accepted": [
+                  {
+                    "line": 29,
+                    "original": "教科書と前世の記憶の事は何と説明して良いわからないので、",
+                    "target": "事は何と",
+                    "suggestion": "ことは何と",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 102,
+                    "original": "魔狼の攻撃で―――」",
+                    "target": "魔狼の攻撃で―――",
+                    "suggestion": "魔狼の攻撃で――",
+                    "reason": "脱字",
+                    "confidence": "low"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 30,
+                    "target": "望み薄だろう。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 43,
+                    "target": "機能もあるのだ。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 61,
+                    "target": "艶と思えば",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0007_進学に向けて.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0007_進学に向けて.txt#7-0@6020",
+                "chapterLabel": "第7話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "line": 43,
+                    "target": "石板に熱心に何か文字を書いている",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0008_計算と計算違い.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0008_計算と計算違い.txt#8-0@6020",
+                "chapterLabel": "第8話",
+                "accepted": [
+                  {
+                    "line": 44,
+                    "original": "今はマイナ先生に四則演算習ってて、それもだいたいできるようになったよ」",
+                    "target": "今はマイナ先生に四則演算習ってて、それもだいたいできるようになったよ」",
+                    "suggestion": "今はマイナ先生に四則演算を習ってて、それもだいたいできるようになったよ」",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 62,
+                    "original": "父上の視線がちらりとこちらを向いて、一瞬目が合う。",
+                    "target": "父上の視線がちらりとこちらを向いて、一瞬目が合う。",
+                    "suggestion": "父上の視線がちらりとこちらを向いて、一瞬目が合った。",
+                    "reason": "送り仮名",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 81,
+                    "original": "護衛を引き受けていただいただけるだけで十分ですわ」",
+                    "target": "護衛を引き受けていただいただけるだけで十分ですわ」",
+                    "suggestion": "護衛を引き受けていただけてだけで十分ですわ」",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 14,
+                    "target": "親族たちは、話を聞いて軽いパニックを起こしていたほど",
+                    "reason": "same_as_original"
+                  },
+                  {
+                    "line": 32,
+                    "target": "マイナ先生は僕の手元を悔しそうにジッと見ている",
+                    "reason": "script_only"
+                  },
+                  {
+                    "line": 38,
+                    "target": "染みになっているんだろうけど、あれってキレイになったりするんだろうか？",
+                    "reason": "script_only"
+                  },
+                  {
+                    "line": 71,
+                    "target": "どうやら僕はさらなるミスをしてしまったらしい。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 73,
+                    "target": "今回の分を全部処理することはできない。塩なしでどこまでできるかわからないけど、ちゃんと処理されてないものは二束三文で買い叩かれるからね……\"",
+                    "reason": "ungrounded"
+                  },
+                  {
+                    "line": 91,
+                    "target": "父上はそれを把握して、機嫌が悪くなっているのかもしれない。",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0009_体力と石鹸.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0009_体力と石鹸.txt#9-0@6020",
+                "chapterLabel": "第9話",
+                "accepted": [
+                  {
+                    "line": 35,
+                    "original": "あれは神術と言っただろうか。",
+                    "target": "あれは神術と言っただろうか。",
+                    "suggestion": "あれは神術と言ったのだろうか。",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 13,
+                    "target": "短剣、背中には教科書が入ったカバンと短槍を背負っている。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 69,
+                    "target": "細かい手順は覚えていない。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 71,
+                    "target": "手順だったように思うが、油と強アルカリを手に入れる方法がまったくわからない。",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0010_石鹸生成実験計画.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0010_石鹸生成実験計画.txt#10-0@6020",
+                "chapterLabel": "第10話",
+                "accepted": [
+                  {
+                    "line": 17,
+                    "original": "飛び出したかとと思うと、木の上から",
+                    "target": "飛び出したかとと思うと、",
+                    "suggestion": "飛び出したかと思うと、",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 21,
+                    "original": "致命傷は眼を細剣で深く一突き。し、信じらんない手際ね。",
+                    "target": "し、信じらんない",
+                    "suggestion": "し、信じられない",
+                    "reason": "誤変換",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 23,
+                    "original": "巻き付いていていて、目からは今も血が流れだしていた。",
+                    "target": "巻き付いていていて、",
+                    "suggestion": "巻き付いていて、",
+                    "reason": "脱字",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 37,
+                    "original": "父上が軍隊にいた頃の部下がそのまま移住してきたそうだ",
+                    "target": "そうだ",
+                    "suggestion": "そうだ。",
+                    "reason": "脱字",
+                    "confidence": "low"
+                  },
+                  {
+                    "line": 62,
+                    "original": "と思う存分お勉強でもしててくだせぇ」",
+                    "target": "しててくだせぇ」",
+                    "suggestion": "しててくださ い」",
+                    "reason": "脱字",
+                    "confidence": "low"
+                  },
+                  {
+                    "line": 86,
+                    "original": "ページが割れ―――",
+                    "target": "割れ―――",
+                    "suggestion": "割れ――",
+                    "reason": "脱字",
+                    "confidence": "low"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 46,
+                    "target": "あげる。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 50,
+                    "target": "闇豹にお気をつけて。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 60,
+                    "target": "引っ掛けている。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 74,
+                    "target": "まるでない。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 104,
+                    "target": "だそうです」",
+                    "reason": "bracket_removed"
+                  },
+                  {
+                    "line": 126,
+                    "target": "塩析させる。",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "typoFound": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "typoFoundTotal": {
+      "values": [
+        17
+      ],
+      "min": 17,
+      "max": 17
+    },
+    "typoMissed": {
+      "values": [
+        14
+      ],
+      "min": 14,
+      "max": 14
+    },
+    "typoWrongFix": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "typoFalsePositives": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "typoOtherFlags": {
+      "values": [
+        28
+      ],
+      "min": 28,
+      "max": 28
+    },
+    "accepted": {
+      "values": [
+        37
+      ],
+      "min": 37,
+      "max": 37
+    },
+    "rejected": {
+      "values": [
+        123
+      ],
+      "min": 123,
+      "max": 123
+    },
+    "rejected.no_change": {
+      "values": [
+        83
+      ],
+      "min": 83,
+      "max": 83
+    },
+    "rejected.ungrounded": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "rejected.same_as_original": {
+      "values": [
+        33
+      ],
+      "min": 33,
+      "max": 33
+    },
+    "rejected.punctuation_only": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "rejected.bracket_removed": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "rejected.script_only": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        207382
+      ],
+      "min": 207382,
+      "max": 207382
+    }
+  },
+  "lines": [
+    "仕込んだ誤字を拾えた（当てると本文が直るもの）: 3/17",
+    "見逃し（拾えなかった仕込み）: 14",
+    "直し方が違う（場所は当てたが、当てても直らない）: 3",
+    "　※ 場所は当てたのに、当てても本文が直らない指摘があります（押しても直らない＝作者の手間だけが増える）。",
+    "誤検出（罠に付いた指摘。造語・方言・ルビ・正しい同音異義語）: 3",
+    "　※ 造語・方言・ルビ・正しい同音異義語を直そうとしています。種別ごとの内訳は記録の detail.typoFalsePositivesByKind にあります。",
+    "仕込み以外の箇所への指摘: 28",
+    "指摘（検算を通ったもの）: 37",
+    "落とした（検算で弾いたもの）: 123",
+    "　└ 落とした理由：bracket_removed: 2",
+    "　└ 落とした理由：no_change: 83",
+    "　└ 落とした理由：punctuation_only: 1",
+    "　└ 落とした理由：same_as_original: 33",
+    "　└ 落とした理由：script_only: 2",
+    "　└ 落とした理由：ungrounded（本文根拠なし）: 2",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 207.4秒",
+    "num_ctx: 24576（プロンプトの長さから（製品と同じ道））",
+    "temperature: 0（製品と同じ（束が返した値））",
+    "温め（読み込みを含む。上の所要時間には入っていません）: 15.0秒"
+  ]
+}
