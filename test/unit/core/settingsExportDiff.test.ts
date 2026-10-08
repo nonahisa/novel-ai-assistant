@@ -86,6 +86,53 @@ describe("差分の3種", () => {
     expect(diff[0].removed.map((record) => record.name)).toEqual(["灯守"]);
   });
 
+  test("同じ id で名前だけ変わった項目は、名前の変更として1件", () => {
+    const before = fixtureData();
+    const after = fixtureData();
+    const old = after.locations[0];
+    after.locations = [{ ...old, name: "新図書塔" }, ...after.locations.slice(1)];
+    const diff = diffSnapshots(snapshot(before), snapshot(after, null, LATER));
+    const locations = diff.find((section) => section.kind === "locations")!;
+    expect(locations.renamed).toEqual([{ from: old.name, to: "新図書塔" }]);
+    expect(locations.added).toEqual([]);
+    expect(locations.removed).toEqual([]);
+    const text = buildExportDiffMarkdown(
+      snapshot(before),
+      snapshot(after, null, LATER),
+      { workTitle: "灯の塔" }
+    );
+    expect(text).toContain(`名前の変更：${old.name} → 新図書塔`);
+  });
+
+  test("id の無い古い控えは、今までどおり名前で突き合わせる", () => {
+    const before = snapshot(fixtureData());
+    for (const section of before.sections) {
+      for (const record of section.records) delete record.id;
+    }
+    const after = fixtureData();
+    after.locations = [
+      { ...after.locations[0], name: "新図書塔" },
+      ...after.locations.slice(1),
+    ];
+    const diff = diffSnapshots(before, snapshot(after, null, LATER));
+    const locations = diff.find((section) => section.kind === "locations")!;
+    expect(locations.renamed).toEqual([]);
+    expect(locations.added.map((record) => record.name)).toEqual(["新図書塔"]);
+    expect(locations.removed).toHaveLength(1);
+  });
+
+  test("差分を出しても入力の控えは変わらない（同じ起点から同じ差分）", () => {
+    const before = snapshot(fixtureData());
+    const frozen = JSON.stringify(before);
+    const after = fixtureData();
+    after.world = after.world.filter((item) => item.name !== "灯守");
+    const next = snapshot(after, null, LATER);
+    const first = buildExportDiffMarkdown(before, next, { workTitle: "灯の塔" });
+    const second = buildExportDiffMarkdown(before, next, { workTitle: "灯の塔" });
+    expect(second).toBe(first);
+    expect(JSON.stringify(before)).toBe(frozen);
+  });
+
   test("変わりが無ければ、そう書く", () => {
     const text = buildExportDiffMarkdown(
       snapshot(fixtureData()),
