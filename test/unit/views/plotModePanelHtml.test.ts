@@ -295,6 +295,30 @@ describe("AIとの相談の欄", () => {
     expect(html).toContain('post("adviceStop")');
   });
 
+  /*
+    AIが設定されていない・料金の確認を取りやめた、のときは拡張機能が何も
+    知らせずに戻る。送った瞬間に欄を空にすると、打った相談の文が消える
+  */
+  it("送っただけでは欄を空にせず、受け取られた（考えている印が届いた）ときに空にする", () => {
+    const run = new Function(
+      "el",
+      "advice",
+      "post",
+      pick("sendAdvice", "el.adviceSend.addEventListener") +
+        "sendAdvice(); const afterSend = el.adviceInput.value;" +
+        "clearSentAdvice(); return [afterSend, el.adviceInput.value];"
+    ) as (el: unknown, advice: unknown, post: (type: string, payload: unknown) => void) => string[];
+    const posted: unknown[] = [];
+    const result = run(
+      { adviceInput: { value: "主人公の動機に迷っています" } },
+      { status: "idle", turns: [] },
+      (type, payload) => posted.push([type, payload])
+    );
+    expect(posted).toEqual([["adviceSend", { text: "主人公の動機に迷っています" }]]);
+    expect(result).toEqual(["主人公の動機に迷っています", ""]);
+    expect(html).toContain('if (advice && advice.status === "busy") clearSentAdvice();');
+  });
+
   it("日本語の変換を確定する Enter では送らない", () => {
     expect(html).toContain("event.isComposing || event.keyCode === 229");
   });

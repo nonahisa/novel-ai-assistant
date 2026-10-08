@@ -499,7 +499,22 @@ function sendAdvice() {
   const text = el.adviceInput.value.trim();
   if (!text) return;
   post("adviceSend", { text: text });
-  el.adviceInput.value = "";
+  /*
+    **ここでは欄を空にしない。** AIが設定されていない・接続を確かめられない・
+    料金の確認を取りやめた、のどれでも拡張機能は送らずに戻り、何も知らせて
+    こない。先に空にすると、長い相談の文がそのまま消える。受け取られた
+    （考えている印が届いた）ときに空にする
+  */
+  sentAdvice = text;
+}
+
+/** 送ったが、まだ受け取られたと分からない文。受け取られたら欄を空にする */
+let sentAdvice = null;
+
+function clearSentAdvice() {
+  if (sentAdvice === null) return;
+  if (el.adviceInput.value.trim() === sentAdvice) el.adviceInput.value = "";
+  sentAdvice = null;
 }
 
 el.adviceSend.addEventListener("click", sendAdvice);
@@ -844,6 +859,8 @@ window.addEventListener("message", function (event) {
   }
   if (message.type === "plotAdvice") {
     advice = message.data || null;
+    // 受け取られた（考えている印が届いた）ので、送った文を欄から消す
+    if (advice && advice.status === "busy") clearSentAdvice();
     renderAdvice();
     return;
   }
