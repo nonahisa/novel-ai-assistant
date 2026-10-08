@@ -21,6 +21,12 @@ import { openGeneratedMarkdown } from "../views/openDocument";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import { logStep } from "../core/logger";
 import {
+  buildTutorialStepItems,
+  type TutorialListItem,
+  type TutorialStepInput,
+  type TutorialStepMark,
+} from "../core/tutorialStepList";
+import {
   ADVICE_QUESTIONS,
   ADVICE_TYPES,
   appendAdviceHistory,
@@ -479,6 +485,9 @@ async function runTutorial(
   deps: WriterDiagnosisDeps,
   style: WriterStyle
 ): Promise<void> {
+  // 印は案内を開いている間だけ持つ（保存しない。設計書6.90.7）。
+  // 目的を選び直しても残す
+  const marks = new Map<string, TutorialStepMark>();
   for (;;) {
     const goal = await askGoal(style, deps.hasWork());
     if (!goal) return;
@@ -497,19 +506,31 @@ async function runTutorial(
       { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true }
     );
 
-    const step = await askStep(goal, advice.steps, [
+    const later = [
       ...advice.later,
       // **出さないと決めたものも、決めたと分かるように出す**（0.52.0）
       ...(advice.withheld ?? []).map(
         (line) => `いまは出していません：${line}`
       ),
-    ]);
-    if (step === "back") continue;
-    if (!step) return;
+    ];
 
-    logStep(`はじめの案内：${goal.label} → ${step.label}`);
-    await vscode.commands.executeCommand(step.command);
-    return;
+    // **1段ごとに一覧へ戻る**（設計書6.90.7）。操作のあとも、飛ばしたあとも
+    // 同じ一覧を出し直す。終わるのは「案内を終える」か Esc のときだけ
+    for (;;) {
+      const picked = await askStep(goal, advice.steps, later, marks);
+      if (picked === "back") break;
+      if (!picked) return;
+
+      if (picked.action === "skip") {
+        logStep(`はじめの案内：${goal.label} → ${picked.step.label}（飛ばした）`);
+        marks.set(picked.step.command, "skipped");
+        continue;
+      }
+      logStep(`はじめの案内：${goal.label} → ${picked.step.label}`);
+      await vscode.commands.executeCommand(picked.step.command);
+      // 「済んだ」とは書かない。QuickPick を閉じただけでも戻ってくるため
+      marks.set(picked.step.command, "opened");
+    }
   }
 }
 
@@ -542,44 +563,76 @@ async function askGoal(
   return "goal" in picked ? picked.goal : undefined;
 }
 
-async function askStep(
+type StepPick =
+  | { step: TutorialStepInput; action: "open" | "skip" }
+  | "back"
+  | undefined;
+
+/**
+ * 操作の一覧を出し、選ばれたものを返す。
+ *
+ * `showQuickPick` では行にボタンを付けられないので `createQuickPick` で組む。
+ * 行を選ぶと開く、行のチェックを押すと「飛ばした」（操作は起こさない）。
+ * 説明だけの行を選んだときは何も起きず、一覧は出たまま。
+ */
+function askStep(
   goal: TutorialGoalInfo,
-  steps: { command: string; label: string; why: string }[],
-  later: string[]
-): Promise<{ command: string; label: string } | "back" | undefined> {
-  const picked = await vscode.window.showQuickPick(
-    [
-      ...steps.map((step, index) => ({
-        label: `${index + 1}. ${step.label}`,
-        detail: step.why,
-        step,
-      })),
-      ...later.map((line) => ({
-        label: "$(info) " + line,
-        // **押せないものを押せる顔で出さない**（`processAvailability.ts` と
-        // 同じ考え方）。選んでも何も起きず、一覧へ戻る
-        detail: "いまはまだできません（説明だけ）",
-        step: undefined,
-      })),
-      {
-        label: "$(arrow-left) やりたいことを選び直す",
-        detail: "紙を読んで、別のほうが近いと思ったら",
-        step: undefined,
-        back: true,
-      },
-      cancelItem(),
-    ],
-    {
-      title: `はじめの案内：${goal.label}`,
-      placeHolder: "横に開いた紙に、それぞれの理由が書いてあります",
-      ignoreFocusOut: true,
-    }
-  );
-  if (!picked || isCancelItem(picked)) return undefined;
-  if ("back" in picked && picked.back) return "back";
-  if ("step" in picked && picked.step) return picked.step;
-  // 説明だけの行を選んだときは、もう一度同じ一覧を出す
-  return askStep(goal, steps, later);
+  steps: TutorialStepInput[],
+  later: string[],
+  marks: ReadonlyMap<string, TutorialStepMark>
+): Promise<StepPick> {
+  const list = buildTutorialStepItems({ steps, later, marks });
+  type Item = vscode.QuickPickItem & { source: TutorialListItem };
+  const skipButton: vscode.QuickInputButton = {
+    iconPath: new vscode.ThemeIcon("check"),
+    tooltip: "この段は済んでいる／飛ばす",
+  };
+
+  return new Promise<StepPick>((resolve) => {
+    const quickPick = vscode.window.createQuickPick<Item>();
+    let settled = false;
+    // 結果を1回だけ確定して一覧を閉じる。dispose は onDidHide も呼ぶので、
+    // 確定済みの印で二重に解決しないようにする
+    const finish = (result: StepPick): void => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+      quickPick.dispose();
+    };
+
+    quickPick.title = `はじめの案内：${goal.label}`;
+    quickPick.placeholder = list.allMarked
+      ? "全部の段に印が付きました。終えるときは「案内を終える」を選んでください"
+      : "横に開いた紙に、それぞれの理由が書いてあります";
+    quickPick.ignoreFocusOut = true;
+    quickPick.items = list.items.map((source) => ({
+      label: source.label,
+      description: source.description,
+      detail: source.detail,
+      buttons: source.kind === "step" ? [skipButton] : undefined,
+      source,
+    }));
+
+    quickPick.onDidAccept(() => {
+      const source = quickPick.selectedItems[0]?.source;
+      if (!source) return;
+      if (source.kind === "step" && source.step) {
+        finish({ step: source.step, action: "open" });
+      } else if (source.kind === "back") {
+        finish("back");
+      } else if (source.kind === "finish") {
+        finish(undefined);
+      }
+      // 説明だけの行は、何もせず一覧を出したままにする
+    });
+    quickPick.onDidTriggerItemButton((event) => {
+      const step = event.item.source.step;
+      if (step) finish({ step, action: "skip" });
+    });
+    // Esc や画面の外のクリックで閉じられたとき
+    quickPick.onDidHide(() => finish(undefined));
+    quickPick.show();
+  });
 }
 
 /**
