@@ -358,3 +358,141 @@ describe("助詞1文字ぶんの範囲ずれ", () => {
     });
   });
 });
+
+/*
+ * ルビ・傍点の記法を壊す案を通さない（2026-10-08）。
+ *
+ * qwen3.5:9b が「｜霧鈴《きりすず》」の縦線だけを target にして
+ * 「「',」へ置き換える案を返し、それが検算を通った
+ * （docs/measurements/2026-10-05-typo-qwen3.5_9b.json の runs[0].raw）。
+ * 作者が［当てる］を押すとルビが壊れる（実装ルール1）。
+ */
+describe("ルビ・傍点の記法を壊す案", () => {
+  const RUBY_LINE =
+    "　棚の上で、｜霧鈴《きりすず》が小さく鳴った。先代の観測員が作ったた道具である。";
+  const EMPHASIS_LINE =
+    "　書いてしまうと、《《ほんとう》》にあったことになる気がしたた。";
+
+  function check(
+    lineText: string,
+    original: string,
+    target: string,
+    suggestion: string
+  ) {
+    const chunk = makeChunk(`一行目\n\n${lineText}`);
+    return validateTypoIssues(
+      {
+        issues: [
+          {
+            line: 3,
+            original,
+            target,
+            suggestion,
+            reason: "誤変換",
+            confidence: "high",
+          },
+        ],
+      },
+      chunk,
+      []
+    );
+  }
+
+  test("縦線だけを別の字へ替える案を落とす（測定で通っていた形）", () => {
+    const result = check(
+      RUBY_LINE,
+      "棚の上で、｜霧鈴《きりすず》が小さく鳴った。",
+      "｜",
+      "「',"
+    );
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected.map((r) => r.reason)).toEqual(["notation_mark"]);
+  });
+
+  test("読み仮名の中身を直す案を落とす", () => {
+    const result = check(RUBY_LINE, "｜霧鈴《きりすず》が", "きりすず", "きりすづ");
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected.map((r) => r.reason)).toEqual(["notation_mark"]);
+  });
+
+  test("二重山括弧ごと替える案を落とす", () => {
+    const result = check(
+      RUBY_LINE,
+      "｜霧鈴《きりすず》が",
+      "《きりすず》",
+      "（きりすず）"
+    );
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected.map((r) => r.reason)).toEqual(["notation_mark"]);
+  });
+
+  test("ルビの親文字を直す案も落とす（記法の範囲に重なる）", () => {
+    const result = check(RUBY_LINE, "｜霧鈴《きりすず》が", "霧鈴", "霧鐘");
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected.map((r) => r.reason)).toEqual(["notation_mark"]);
+  });
+
+  test("傍点の中身を直す案を落とす", () => {
+    const result = check(
+      EMPHASIS_LINE,
+      "《《ほんとう》》にあった",
+      "ほんとう",
+      "本当"
+    );
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected.map((r) => r.reason)).toEqual(["notation_mark"]);
+  });
+
+  test("傍点の記号にまたがる案を落とす", () => {
+    const result = check(
+      EMPHASIS_LINE,
+      "《《ほんとう》》にあった",
+      "とう》》に",
+      "とうに"
+    );
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected.map((r) => r.reason)).toEqual(["notation_mark"]);
+  });
+
+  test("記法を消す案を落とす", () => {
+    const result = check(RUBY_LINE, "｜霧鈴《きりすず》が", "霧鈴《きりすず》", "霧鈴");
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected.map((r) => r.reason)).toEqual(["notation_mark"]);
+  });
+
+  test("記法の外の語に、ルビの記号を足す案を落とす", () => {
+    const result = check(
+      RUBY_LINE,
+      "先代の観測員が",
+      "観測員",
+      "｜観測員《かんそくいん》"
+    );
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected.map((r) => r.reason)).toEqual(["notation_mark"]);
+  });
+
+  test("記法の外の語に、傍点の記号を足す案を落とす", () => {
+    const result = check(RUBY_LINE, "先代の観測員が", "観測員", "《《観測員》》");
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected.map((r) => r.reason)).toEqual(["notation_mark"]);
+  });
+
+  test("同じ行の、記法の外の普通の誤字は通す", () => {
+    const result = check(RUBY_LINE, "作ったた道具", "作ったた", "作った");
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].suggestion).toBe("作った");
+
+    const emphasis = check(EMPHASIS_LINE, "気がしたた。", "したた", "した");
+    expect(emphasis.rejected).toEqual([]);
+    expect(emphasis.accepted).toHaveLength(1);
+  });
+
+  test("ルビの親文字と同じ語でも、引用が記法の外なら通す", () => {
+    // 同じ行に「霧鈴」が2つある。引用が指すのは記法の外のほう
+    const line = "　｜霧鈴《きりすず》が鳴った。霧鈴がなる朝は寒い。";
+    const result = check(line, "霧鈴がなる朝", "なる", "鳴る");
+    expect(result.rejected).toEqual([]);
+    expect(result.accepted).toHaveLength(1);
+  });
+});
