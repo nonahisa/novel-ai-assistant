@@ -485,7 +485,7 @@ const SNAPSHOT_DIR = "settings-exports";
  * 前回の控えを読む。無ければ `none`、読めなければ `broken`（**直さない**。
  * 今回の書き出しで新しい控えに置き換わる）。
  */
-async function readSnapshot(
+export async function readSnapshot(
   file: string
 ): Promise<{ snapshot: ExportSnapshot | null; reason: "none" | "broken" | null }> {
   let bytes: Uint8Array;
@@ -496,6 +496,21 @@ async function readSnapshot(
   }
   const snapshot = parseSnapshot(new TextDecoder().decode(bytes));
   return snapshot ? { snapshot, reason: null } : { snapshot: null, reason: "broken" };
+}
+
+/**
+ * 控えのファイルを書く。2回目以降は**同じ名前へ上書き**する（下の
+ * `saveSnapshot` の理由）。失敗は投げる。
+ */
+export async function writeSnapshotFile(
+  file: string,
+  snapshot: ExportSnapshot
+): Promise<void> {
+  await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(file)));
+  await atomicWriteFile(
+    file,
+    new TextEncoder().encode(JSON.stringify(snapshot, null, 2) + "\n")
+  );
 }
 
 /**
@@ -511,11 +526,7 @@ async function saveSnapshot(
   snapshot: ExportSnapshot
 ): Promise<void> {
   try {
-    await vscode.workspace.fs.createDirectory(path.toUri(path.dirname(file)));
-    await atomicWriteFile(
-      file,
-      new TextEncoder().encode(JSON.stringify(snapshot, null, 2) + "\n")
-    );
+    await writeSnapshotFile(file, snapshot);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     useLogFile(work.folderPath);

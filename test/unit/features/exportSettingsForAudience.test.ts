@@ -3,10 +3,18 @@ import {
   exportFileBaseName,
   exportFileNameCandidates,
   exportFormatChoices,
+  readSnapshot,
   snapshotPath,
   writeAudienceCsvExport,
   writeAudienceExport,
+  writeSnapshotFile,
 } from "../../../src/features/exportSettingsForAudience";
+import { buildExportDocument } from "../../../src/core/settingsExportProfiles";
+import { snapshotOf } from "../../../src/core/settingsExportDiff";
+import {
+  FIXTURE_OPTIONS,
+  fixtureData,
+} from "../support/settingsExportFixture";
 import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 
 /**
@@ -223,6 +231,44 @@ describe("書き出し", () => {
       AT
     );
     expect(folder.endsWith("設定資料（編集部用・全話）（CSV） 2026-09-05 1430")).toBe(true);
+  });
+
+  test("差分の控えは、2回目以降も同じ名前へ置き直せる（上書きの経路）", async () => {
+    /*
+      **2回目で失敗すると、差分を選ぶたびに「控えが無い」になる。**
+      既存ファイルへの書き込みが必ず失敗する経路（`replaceGuarded`）を
+      取り違えていないことを、実際に2度書いて読み戻して確かめる。
+    */
+    const file = snapshotPath(`${DIRECTORY}\\..\\.aiwriter`, "editorial");
+    expect(await readSnapshot(file)).toEqual({ snapshot: null, reason: "none" });
+
+    const first = snapshotOf(
+      buildExportDocument("editorial", fixtureData(), {
+        ...FIXTURE_OPTIONS,
+        chapter: 3,
+      }),
+      AT
+    );
+    await writeSnapshotFile(file, first);
+    expect((await readSnapshot(file)).snapshot).toEqual(first);
+
+    const second = snapshotOf(
+      buildExportDocument("editorial", fixtureData(), {
+        ...FIXTURE_OPTIONS,
+        chapter: null,
+      }),
+      AT
+    );
+    await writeSnapshotFile(file, second);
+    expect((await readSnapshot(file)).snapshot).toEqual(second);
+  });
+
+  test("壊れた控えは直さずに「読めない」と返す", async () => {
+    const file = snapshotPath(`${DIRECTORY}\\..\\.aiwriter`, "editorial");
+    files.set(key(file), new TextEncoder().encode("{ 壊れている"));
+    expect(await readSnapshot(file)).toEqual({ snapshot: null, reason: "broken" });
+    // 読んだだけで、中身は変えていない
+    expect(new TextDecoder().decode(files.get(key(file)))).toBe("{ 壊れている");
   });
 
   test("作者が置いた同名のファイルも潰さない", async () => {
