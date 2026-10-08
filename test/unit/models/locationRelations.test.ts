@@ -27,9 +27,31 @@ function relation(overrides: Partial<LocationRelation>): LocationRelation {
 }
 
 describe("位置関係の読み込み", () => {
-  test("関係の欄が無い古いファイルも読める（空の関係になる）", () => {
+  test("関係の欄が無い古いファイルも読める（欄は足さない）", () => {
     const location = parseLocation({ id: "loc_001", name: "港" });
-    expect(location.relations).toEqual([]);
+    expect(location).not.toHaveProperty("relations");
+  });
+
+  test("空の関係の欄は、読んだ時点で外す", () => {
+    const location = parseLocation({ id: "loc_001", name: "港", relations: [] });
+    expect(location).not.toHaveProperty("relations");
+  });
+
+  test("関係の無い場所を読み書きしても、JSON が1字も変わらない", () => {
+    // 関係の欄ができる前の版が書いたファイル。保存の形（2字下げ＋末尾の改行）も揃える
+    const saved: Record<string, unknown> = {
+      ...emptyLocation("loc_001", "港"),
+      aliases: ["港湾"],
+      summary: "町の南の港。",
+      appearedChapters: [1, 3],
+      evidence: "港に船が着いた",
+      updatedAt: "2026-10-01T00:00:00.000Z",
+    };
+    delete saved.relations;
+    const text = `${JSON.stringify(saved, null, 2)}\n`;
+
+    const reread = parseLocation(JSON.parse(text));
+    expect(`${JSON.stringify(reread, null, 2)}\n`).toBe(text);
   });
 
   test("欠けた欄は既定値で補う", () => {
@@ -83,8 +105,8 @@ describe("位置関係の読み込み", () => {
     ).toThrow("relations[0].value");
   });
 
-  test("新しい場所は関係を空で持つ", () => {
-    expect(emptyLocation("loc_001", "港").relations).toEqual([]);
+  test("新しい場所は関係の欄を持たない", () => {
+    expect(emptyLocation("loc_001", "港")).not.toHaveProperty("relations");
   });
 });
 

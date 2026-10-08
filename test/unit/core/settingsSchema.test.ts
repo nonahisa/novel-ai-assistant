@@ -84,7 +84,8 @@ const OPTIONAL_KEYS: Record<string, readonly string[]> = {
   登場人物: ["rejectedValues"],
   能力: ["customFields"],
   組織: ["customFields"],
-  場所: ["customFields"],
+  // 位置関係（設計書6.93.2）も、関係が1つも無い場所には欄ごと無い
+  場所: ["customFields", "relations"],
   世界観: ["customFields"],
 };
 
