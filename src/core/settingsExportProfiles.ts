@@ -3,7 +3,7 @@ import { relationFirstChapter, type Character } from "../models/character";
 import type { CustomFieldDefinition } from "../models/customField";
 import type { AiNote } from "../models/aiNote";
 import type { RecordConflict } from "../models/jsonValidation";
-import type { Location } from "../models/location";
+import { describeLocationRelation, type Location } from "../models/location";
 import { membersOf, type Organization } from "../models/organization";
 import {
   WORLD_CATEGORIES,
@@ -95,6 +95,7 @@ export type LocationExportField =
   | "summary"
   | "description"
   | "region"
+  | "relations"
   | "appearedChapters"
   | "status"
   | "exportNote"
@@ -180,6 +181,7 @@ const LOCATION_FIELD_LABELS: Record<LocationExportField, string> = {
   summary: "紹介文",
   description: "説明",
   region: "地域",
+  relations: "位置関係",
   appearedChapters: "登場話",
   status: "状態",
   exportNote: "補足",
@@ -1203,6 +1205,10 @@ function locationSection(
     .filter((location) => isExportable(location, profile, chapter))
     .map((location) => recordAsOf(location, LOCATION_AS_OF_FIELDS, chapter));
 
+  // 関係の相手を出してよいかの判断に使う（伏せた場所の名前を関係から漏らさない）
+  const locationsByName = nameIndexOf(data.locations);
+  const locationsById = new Map(data.locations.map((l) => [l.id, l]));
+
   const describe = (location: Location): ExportRecord => {
     const record = startRecord(
       location.id,
@@ -1215,6 +1221,18 @@ function locationSection(
     }
     if (has(fields, "description") && location.description) {
       record.fields.push({ label: "説明", value: location.description });
+    }
+    if (has(fields, "relations")) {
+      const relations = exportableLocationRelations(
+        location,
+        locationsByName,
+        locationsById,
+        profile,
+        chapter
+      );
+      if (relations) {
+        record.fields.push({ label: LOCATION_FIELD_LABELS.relations, value: relations });
+      }
     }
     addCommonTail(
       record,
@@ -1247,6 +1265,38 @@ function locationSection(
     ),
     mobs: [],
   };
+}
+
+/**
+ * 場所の位置関係を、書き出す1行にする（設計書6.93、2026-10-09の裁定）。
+ *
+ * 表し方は設定資料集と同じ `describeLocationRelation`（写さない）。
+ * **相手を出さないと決めた場所への関係は出さない**——人物の関係と同じ理由で、
+ * 場所そのものは伏せたのに「港の北」で名前だけ漏れるのを防ぐ。
+ * 相手は台帳のIDで引けるならIDで、引けなければ名前（別名も）で引く。
+ * 時点で絞ったときは、第N話より後に分かった関係を出さない。話数の無い関係は、
+ * 登場話と同じく「確実に言えないものは出さない」側へ倒す。
+ */
+function exportableLocationRelations(
+  location: Location,
+  byName: Map<string, Location[]>,
+  byId: Map<string, Location>,
+  profile: AudienceProfile,
+  chapter: number | null
+): string {
+  return (location.relations ?? [])
+    .filter((relation) => {
+      const byIdFound = relation.targetId ? byId.get(relation.targetId) : undefined;
+      const allowed = byIdFound
+        ? isExportable(byIdFound, profile, chapter)
+        : mentionAllowed(byName, relation.target, profile, chapter);
+      if (!allowed) return false;
+      if (chapter === null) return true;
+      const known = relation.chapters.filter((at) => Number.isFinite(at));
+      return known.length > 0 && Math.min(...known) <= chapter;
+    })
+    .map(describeLocationRelation)
+    .join("／");
 }
 
 /* ────────────────────────────  能力  ──────────────────────────── */

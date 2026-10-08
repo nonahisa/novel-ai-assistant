@@ -77,6 +77,40 @@ describe("差分の3種", () => {
     );
   });
 
+  test("場所の位置関係の足し引きは、変わった欄「位置関係」に出る（伏せた場所の関係は出ない）", () => {
+    const before = fixtureData();
+    const after = fixtureData();
+    const tower = after.locations[0];
+    // 港への隣接を外し、岬との関係を足す。伏せた場所への関係は両方に残したまま
+    after.locations = [
+      {
+        ...tower,
+        relations: [
+          ...(tower.relations ?? []).filter((entry) => entry.kind !== "adjacent"),
+          {
+            kind: "within",
+            target: "岬",
+            targetId: null,
+            value: null,
+            chapters: [1],
+            evidence: null,
+            authorLocked: false,
+          },
+        ],
+      },
+      ...after.locations.slice(1),
+    ];
+    const diff = diffSnapshots(snapshot(before), snapshot(after, null, LATER));
+    const changed = diff
+      .find((section) => section.kind === "locations")!
+      .changed.find((record) => record.name === "図書塔")!;
+    const field = changed.changes.find((change) => change.label === "位置関係")!;
+    expect(field.before).toContain("港に隣接");
+    expect(field.after).not.toContain("港に隣接");
+    expect(field.after).toContain("岬の中");
+    expect(`${field.before}${field.after}`).not.toContain("封印の間");
+  });
+
   test("消えた項目", () => {
     const before = fixtureData();
     const after = fixtureData();

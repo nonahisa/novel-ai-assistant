@@ -656,7 +656,7 @@ function applyLocation(
  * 項目名で最初の1件しか見ないので、1本にまとめると2件目の関係の
  * 食い違いが取り残される。
  */
-function mergeLocationRelations(
+export function mergeLocationRelations(
   target: Location,
   incoming: ExtractedLocationRelation[],
   fallbackChapters: number[],

@@ -95,12 +95,24 @@ const CHANGES_SCHEMA = z.looseObject({
     .describe("口調（一人称・語尾・口癖など、台詞に表れる話し方を短く）"),
   appearance: z.string().optional().describe("外見"),
   relations: z
-    .array(z.object({ name: z.string(), relation: z.string() }))
+    .array(
+      z.union([
+        z.object({ name: z.string(), relation: z.string() }),
+        z.object({
+          target: z.string(),
+          kind: z.string(),
+          value: z.string().nullish(),
+          evidence: z.string(),
+        }),
+      ])
+    )
     .optional()
     .describe(
       "関係（{name: 相手, relation: この人物から見た相手の続柄・立場}）。" +
         "書いた相手の関係は、いまの記録を置き換えます（ほかの相手の関係は残ります）。関係を消すだけの提案は受け付けません。" +
-        "作者が退けた関係（人物の rejectedRelations）は足しません"
+        "作者が退けた関係（人物の rejectedRelations）は足しません。" +
+        "場所は {target, kind: within|adjacent|direction|distance, value: 方角・距離, evidence: 本文の一続きの引用} で、" +
+        "chunkId が要り、本文で確かめられない関係は落とします"
     ),
   /*
     **人物以外の欄**（0.83.10）。どの種類で受けるかは `proposeRecord.ts` の
@@ -281,7 +293,7 @@ export function novelPropose(
       `recordKind は character・${PENDING_SETTINGS_KINDS.join("・")} のどれかです: ${String(kind)}`
     );
   }
-  return recordPropose({ ...settings, recordKind: kind });
+  return recordPropose({ ...settings, recordKind: kind, chunkId: input.chunkId });
 }
 
 /**

@@ -1,5 +1,10 @@
 import { parseAbility, type Ability } from "../models/ability";
-import { parseLocation, type Location } from "../models/location";
+import {
+  describeLocationRelation,
+  normalizeLocationName,
+  parseLocation,
+  type Location,
+} from "../models/location";
 import { parseOrganization, type Organization } from "../models/organization";
 import {
   parseWorldItem,
@@ -19,6 +24,7 @@ import {
   type PendingUpdateSource,
 } from "./pendingUpdateFormat";
 import { clampSummary } from "./summaryLimit";
+import { mergeLocationRelations } from "./settingsMerge";
 import type { SettingsKind } from "./settingsSummary";
 
 /**
@@ -169,7 +175,9 @@ export const EXTERNAL_PROPOSE_FIELDS: Record<PendingSettingsKind, readonly strin
     "userNames",
   ],
   organization: ["summary", "category", "parent", "description", "aliases"],
-  location: ["summary", "region", "description", "aliases"],
+  // relations は文ではなく関係の一覧。入口（proposeRecord.ts）が本文の引用で検算してから置き、
+  // 出口は下の `mergeProposedLocationRelations` で足すだけにする
+  location: ["summary", "region", "description", "aliases", "relations"],
   world: ["category", "description", "aliases"],
 };
 
@@ -252,6 +260,9 @@ export function mergePendingSettingsRecord(
   );
   if (!current.evidence && proposal.evidence) next.evidence = proposal.evidence;
   next.conflicts = unionConflicts(current.conflicts, proposal.conflicts);
+  if (kind === "location") {
+    mergeProposedLocationRelations(next as Location, proposal as Location, false);
+  }
 
   if (kind === "ability") {
     const ability = next as Ability;
@@ -303,7 +314,49 @@ function mergeIntoConfirmedRecord(
     if (typeof value !== "string" || !value.trim()) continue;
     next[field] = field === "summary" ? clampSummary(value) : value;
   }
+  if (kind === "location") {
+    mergeProposedLocationRelations(next as Location, proposal as Location, true);
+  }
   return next;
+}
+
+/**
+ * 外部AIの場所の位置関係を、記録へ足す（設計書6.93、2026-10-09の裁定）。
+ *
+ * **マージは抽出と同じ関数**（`settingsMerge.ts` の `mergeLocationRelations`）。
+ * 作者の関係・固定した関係（`authorLocked`）には触らず、足す・話数を足すだけで消さない。
+ * 入口（`proposeRecord.ts`）が本文の引用で検算してから置くので、ここでは検算しない。
+ *
+ * 作者が確定させた記録（`newOnly`）には、**同じ（種類, 相手）が無い関係だけ**を足す。
+ * 方角・距離の食い違いを `conflicts` に書くのは製品のマージの仕事で、確定した記録の
+ * 食い違いの欄は外から触らせない（白名簿の `conflicts` と同じ考え）。
+ */
+function mergeProposedLocationRelations(
+  next: Location,
+  proposal: Location,
+  newOnly: boolean
+): void {
+  const incoming = (proposal.relations ?? []).filter((relation) => {
+    if (!newOnly) return true;
+    return !(next.relations ?? []).some(
+      (entry) =>
+        entry.kind === relation.kind &&
+        normalizeLocationName(entry.target) === normalizeLocationName(relation.target)
+    );
+  });
+  if (incoming.length === 0) return;
+  mergeLocationRelations(
+    next,
+    incoming.map((relation) => ({
+      target: relation.target,
+      kind: relation.kind,
+      value: relation.value,
+      evidence: relation.evidence,
+      chapters: relation.chapters,
+    })),
+    [],
+    []
+  );
 }
 
 function unionNumbers(left: number[], right: number[]): number[] {
@@ -363,6 +416,11 @@ const DIFF_FIELDS: Record<
     { label: "読み", read: (r) => r.reading ?? "" },
     { label: "地域", read: (r) => (r as Location).region ?? "" },
     { label: "説明", read: (r) => r.description ?? "" },
+    {
+      label: "位置関係",
+      read: (r) =>
+        ((r as Location).relations ?? []).map(describeLocationRelation).join("／"),
+    },
   ],
   world: [
     { label: "別の言い方", read: (r) => r.aliases.join("、") },
