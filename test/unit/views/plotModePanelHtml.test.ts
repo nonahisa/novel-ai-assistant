@@ -251,3 +251,145 @@ describe("名前の候補の欄", () => {
     expect(html).not.toContain("<textarea");
   });
 });
+
+/**
+ * AIとの相談（P-01、設計書6.4.10）の欄。
+ *
+ * **画面は送った文と案の番号を返すだけ**で、プロットへは書かない。
+ * 書き込み案の中身は拡張機能が控えたものを使う。
+ */
+describe("AIとの相談の欄", () => {
+  function pick(name: string, until: string): string {
+    const start = html.indexOf(`function ${name}(`);
+    const end = html.indexOf(until, start);
+    return html.slice(start, end);
+  }
+
+  const renderAdvice = new Function(
+    "el",
+    "advice",
+    pick("escapeHtml", "/**") + pick("renderAdvice", "/**") + "renderAdvice();"
+  ) as (el: Record<string, Record<string, unknown>>, advice: unknown) => void;
+
+  function elements() {
+    const box = () => ({ innerHTML: "", textContent: "", hidden: true, disabled: false });
+    return {
+      advice: box(),
+      adviceLog: box(),
+      adviceStatus: box(),
+      adviceSend: box(),
+      adviceStop: box(),
+      adviceClear: box(),
+    };
+  }
+
+  it("入力は1行の欄で、複数行の欄（本文を書き換える欄と紛れる）を置かない", () => {
+    expect(html).toContain('id="adviceInput" type="text"');
+    expect(html).not.toContain("<textarea");
+  });
+
+  it("送るのは打った文、書くのは案の番号だけ", () => {
+    expect(html).toContain('post("adviceSend", { text: text })');
+    expect(html).toContain('post("adviceApply", { id: apply.dataset.adviceApply })');
+    expect(html).toContain('post("adviceDismiss", { id: dismiss.dataset.adviceDismiss })');
+    expect(html).toContain('post("adviceStop")');
+  });
+
+  /*
+    AIが設定されていない・料金の確認を取りやめた、のときは拡張機能が何も
+    知らせずに戻る。送った瞬間に欄を空にすると、打った相談の文が消える
+  */
+  it("送っただけでは欄を空にせず、受け取られた（考えている印が届いた）ときに空にする", () => {
+    const run = new Function(
+      "el",
+      "advice",
+      "post",
+      pick("sendAdvice", "el.adviceSend.addEventListener") +
+        "sendAdvice(); const afterSend = el.adviceInput.value;" +
+        "clearSentAdvice(); return [afterSend, el.adviceInput.value];"
+    ) as (el: unknown, advice: unknown, post: (type: string, payload: unknown) => void) => string[];
+    const posted: unknown[] = [];
+    const result = run(
+      { adviceInput: { value: "主人公の動機に迷っています" } },
+      { status: "idle", turns: [] },
+      (type, payload) => posted.push([type, payload])
+    );
+    expect(posted).toEqual([["adviceSend", { text: "主人公の動機に迷っています" }]]);
+    expect(result).toEqual(["主人公の動機に迷っています", ""]);
+    expect(html).toContain('if (advice && advice.status === "busy") clearSentAdvice();');
+  });
+
+  it("日本語の変換を確定する Enter では送らない", () => {
+    expect(html).toContain("event.isComposing || event.keyCode === 229");
+  });
+
+  it("AIを呼べない画面（null）では欄を出さない", () => {
+    const el = elements();
+    el.advice.hidden = false;
+    renderAdvice(el, null);
+    expect(el.advice.hidden).toBe(true);
+  });
+
+  it("会話と書き込み案を描き、文は escapeHtml を通す", () => {
+    const el = elements();
+    renderAdvice(el, {
+      status: "idle",
+      turns: [
+        { role: "author", text: "主人公<悩み>" },
+        {
+          role: "assistant",
+          text: "障害は何でしょうか？",
+          suggestion: {
+            id: "s1",
+            heading: "テーマ",
+            value: "裏方の<誇り>",
+            overwrites: true,
+            grounded: false,
+            state: "open",
+          },
+        },
+      ],
+    });
+    const out = String(el.adviceLog.innerHTML);
+    expect(el.advice.hidden).toBe(false);
+    expect(out).toContain("主人公&lt;悩み&gt;");
+    expect(out).toContain("書き込み案：テーマ");
+    expect(out).toContain("裏方の&lt;誇り&gt;");
+    expect(out).toContain('data-advice-apply="s1"');
+    expect(out).toContain('data-advice-dismiss="s1"');
+    expect(out).toContain("置き換える案です");
+    expect(out).toContain("あなたの発言に無い言葉が多い案です");
+  });
+
+  it("書いた案・採らなかった案にはボタンを出さない", () => {
+    const el = elements();
+    renderAdvice(el, {
+      status: "idle",
+      turns: [
+        {
+          role: "assistant",
+          text: "はい。",
+          suggestion: {
+            id: "s1",
+            heading: "テーマ",
+            value: "誇り",
+            overwrites: false,
+            grounded: true,
+            state: "written",
+          },
+        },
+      ],
+    });
+    const out = String(el.adviceLog.innerHTML);
+    expect(out).not.toContain("data-advice-apply");
+    expect(out).toContain("プロットに書きました。");
+  });
+
+  it("答えを待つあいだは送れず、止められる", () => {
+    const el = elements();
+    renderAdvice(el, { status: "busy", turns: [{ role: "author", text: "相談" }] });
+    expect(el.adviceSend.disabled).toBe(true);
+    expect(el.adviceStop.disabled).toBe(false);
+    expect(el.adviceStatus.textContent).toContain("考えています");
+  });
+});

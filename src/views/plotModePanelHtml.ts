@@ -17,6 +17,14 @@
  *
  * 押したことは拡張機能へ返すだけで、書き込みは向こうが既存の道
  * （`updatePlotMarkdown`・`createEpisodePlot`・既存コマンド）を通る。
+ *
+ * ## AIとの相談（P-01、設計書6.4.10）
+ *
+ * 作者が話しかける1行の入力欄を置く。**plot.md の中身を写す欄ではない**
+ * （6.4.3 の原則は崩さない）——打った文は相談として送るだけで、プロットへは
+ * 書かない。書き込み案の［この案をプロットに書く］は**案の番号だけ**を返し、
+ * 何を書くかは拡張機能が控えた案で決める（画面から届いた文を書く道を作らない）。
+ * 入力欄は複数行の欄にしない（`textarea` は「本文を書き換える欄」と紛れる）。
  */
 export function buildPlotModePanelHtml(
   nonce: string,
@@ -218,6 +226,53 @@ button:disabled { opacity: 0.45; cursor: default; }
   color: var(--vscode-button-foreground);
 }
 #nameButtons .apply:hover:enabled { background: var(--vscode-button-hoverBackground); }
+/* AIとの相談（P-01）。会話の並び・入力・書き込み案 */
+#advice[hidden] { display: none; }
+#adviceLog { padding: 4px 12px 0; }
+#adviceLog:empty { display: none; }
+.advice-turn { margin: 6px 0; }
+.advice-turn .who {
+  display: block;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.advice-turn .text { white-space: pre-wrap; overflow-wrap: break-word; }
+.advice-turn.author .text { color: var(--vscode-descriptionForeground); }
+.advice-turn.failed .text { color: var(--vscode-errorForeground, var(--vscode-descriptionForeground)); }
+.advice-suggestion {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 2px;
+  padding: 6px 8px;
+  margin-top: 4px;
+}
+.advice-suggestion .field { font-weight: bold; }
+.advice-suggestion .value { white-space: pre-wrap; overflow-wrap: break-word; margin: 4px 0; }
+.advice-suggestion .caution {
+  display: block;
+  font-size: 11px;
+  color: var(--vscode-editorWarning-foreground, var(--vscode-descriptionForeground));
+}
+.advice-suggestion .done { font-size: 11px; color: var(--vscode-descriptionForeground); }
+.advice-buttons { display: flex; gap: 6px; padding-top: 4px; }
+.advice-buttons .apply,
+#adviceSend {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+.advice-buttons .apply:hover:enabled,
+#adviceSend:hover:enabled { background: var(--vscode-button-hoverBackground); }
+#adviceForm { display: flex; gap: 4px; padding: 6px 12px 0; }
+#adviceInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 6px;
+  font: inherit;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+}
+#adviceStatus { padding: 2px 12px 0; font-size: 11px; color: var(--vscode-descriptionForeground); }
+#adviceStatus:empty { display: none; }
 #overdue button {
   background: none;
   border: 1px solid var(--vscode-editorWarning-foreground, var(--vscode-descriptionForeground));
@@ -240,6 +295,18 @@ button:disabled { opacity: 0.45; cursor: default; }
   <h2>AIに頼む</h2>
   <div id="aiActions"></div>
   <div id="syncActions"></div>
+  <div id="advice" hidden>
+    <h2>AIと相談しながら組み立てる</h2>
+    <div class="note">考えていることを書いて送ると、AIが編集者として問いを返します（AIを使う）。プロットへの書き込み案が出たときは、［この案をプロットに書く］を押したときだけ書きます。会話はこの画面を閉じると消えます。</div>
+    <div id="adviceLog"></div>
+    <div id="adviceStatus"></div>
+    <div id="adviceForm">
+      <input id="adviceInput" type="text" placeholder="例：主人公をどう動かすか迷っています" aria-label="AIに相談する文">
+      <button id="adviceSend" title="打った文をAIに送ります">送る</button>
+      <button id="adviceStop" title="答えを待つのをやめます" disabled>止める</button>
+      <button id="adviceClear" title="この画面の会話を消します（プロットは変わりません）">会話を消す</button>
+    </div>
+  </div>
   <h2 id="namesHeading">主要登場人物の名前</h2>
   <div id="nameActions"></div>
   <div class="note" id="namesNote"></div>
@@ -274,10 +341,23 @@ const el = {
   nameActions: document.getElementById("nameActions"),
   namesNote: document.getElementById("namesNote"),
   nameResults: document.getElementById("nameResults"),
+  advice: document.getElementById("advice"),
+  adviceLog: document.getElementById("adviceLog"),
+  adviceStatus: document.getElementById("adviceStatus"),
+  adviceInput: document.getElementById("adviceInput"),
+  adviceSend: document.getElementById("adviceSend"),
+  adviceStop: document.getElementById("adviceStop"),
+  adviceClear: document.getElementById("adviceClear"),
 };
 
 /** 名前の候補（P-45）。目録とは別に届く——目録の読み直しで選びかけを消さない */
 let names = { status: "idle", note: "", people: [] };
+
+/**
+ * AIとの相談（P-01）。これも目録とは別に届く——保存のたびの読み直しで、
+ * 会話の並びや打ちかけの文を消さない。null なら相談の欄を出さない
+ */
+let advice = null;
 
 function post(type, payload) {
   vscode.postMessage(Object.assign({ type: type }, payload || {}));
@@ -408,6 +488,61 @@ el.nameResults.addEventListener("click", function (event) {
     }
   }
   post("applyNames", { picks: picks });
+});
+
+/**
+ * AIとの相談（P-01）。打った文を送るだけで、プロットへは書かない。
+ * 書き込み案は**番号だけ**を返す（何を書くかは拡張機能が控えた案で決める）
+ */
+function sendAdvice() {
+  if (!advice || advice.status === "busy") return;
+  const text = el.adviceInput.value.trim();
+  if (!text) return;
+  post("adviceSend", { text: text });
+  /*
+    **ここでは欄を空にしない。** AIが設定されていない・接続を確かめられない・
+    料金の確認を取りやめた、のどれでも拡張機能は送らずに戻り、何も知らせて
+    こない。先に空にすると、長い相談の文がそのまま消える。受け取られた
+    （考えている印が届いた）ときに空にする
+  */
+  sentAdvice = text;
+}
+
+/** 送ったが、まだ受け取られたと分からない文。受け取られたら欄を空にする */
+let sentAdvice = null;
+
+function clearSentAdvice() {
+  if (sentAdvice === null) return;
+  if (el.adviceInput.value.trim() === sentAdvice) el.adviceInput.value = "";
+  sentAdvice = null;
+}
+
+el.adviceSend.addEventListener("click", sendAdvice);
+
+el.adviceInput.addEventListener("keydown", function (event) {
+  if (event.key !== "Enter") return;
+  // **日本語の変換を確定する Enter では送らない**（変換中の Enter は確定の操作）
+  if (event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
+  sendAdvice();
+});
+
+el.adviceStop.addEventListener("click", function () {
+  post("adviceStop");
+});
+
+el.adviceClear.addEventListener("click", function () {
+  post("adviceClear");
+});
+
+el.adviceLog.addEventListener("click", function (event) {
+  const apply = event.target.closest("[data-advice-apply]");
+  if (apply) {
+    post("adviceApply", { id: apply.dataset.adviceApply });
+    return;
+  }
+  const dismiss = event.target.closest("[data-advice-dismiss]");
+  if (dismiss) post("adviceDismiss", { id: dismiss.dataset.adviceDismiss });
 });
 
 function renderHeadings() {
@@ -568,6 +703,71 @@ function renderEpisodes() {
 }
 
 /**
+ * 相談の会話を描く（P-01）。入力欄はここでは作り直さない（打ちかけの文を消さない）。
+ * 書き込み案は、まだ決めていないものにだけボタンを出す
+ */
+function renderAdvice() {
+  if (!advice) {
+    el.advice.hidden = true;
+    return;
+  }
+  el.advice.hidden = false;
+  const busy = advice.status === "busy";
+  el.adviceSend.disabled = busy;
+  el.adviceStop.disabled = !busy;
+  el.adviceClear.disabled = busy || advice.turns.length === 0;
+  el.adviceStatus.textContent = busy ? "AIが答えを考えています…" : "";
+
+  const html = [];
+  for (const turn of advice.turns) {
+    const who = turn.role === "author" ? "あなた" : "AI";
+    let card = "";
+    const s = turn.suggestion;
+    if (s) {
+      const cautions = [];
+      if (s.overwrites) {
+        cautions.push("いま書いてある文を置き換える案です（書く前に確認します）。");
+      }
+      if (!s.grounded) {
+        cautions.push("あなたの発言に無い言葉が多い案です。確かめてから採ってください。");
+      }
+      let foot = "";
+      if (s.state === "open") {
+        foot =
+          '<div class="advice-buttons">' +
+            '<button class="apply" data-advice-apply="' + escapeHtml(s.id) +
+              '" title="この1項目だけをプロットに書きます">この案をプロットに書く</button>' +
+            '<button data-advice-dismiss="' + escapeHtml(s.id) +
+              '" title="何も書きません">採らない</button>' +
+          "</div>";
+      } else {
+        foot = '<span class="done">' +
+          (s.state === "written" ? "プロットに書きました。" : "採りませんでした。") +
+          "</span>";
+      }
+      card =
+        '<div class="advice-suggestion">' +
+          '<span class="field">書き込み案：' + escapeHtml(s.heading) + "</span>" +
+          '<div class="value">' + escapeHtml(s.value) + "</div>" +
+          cautions.map(function (text) {
+            return '<span class="caution">' + escapeHtml(text) + "</span>";
+          }).join("") +
+          foot +
+        "</div>";
+    }
+    html.push(
+      '<div class="advice-turn ' + (turn.role === "author" ? "author" : "assistant") +
+        (turn.failed ? " failed" : "") + '">' +
+        '<span class="who">' + who + "</span>" +
+        '<div class="text">' + escapeHtml(turn.text) + "</div>" +
+        card +
+      "</div>"
+    );
+  }
+  el.adviceLog.innerHTML = html.join("");
+}
+
+/**
  * 名前の候補（P-45）。人物ごとに「選ばない」を先頭に置き、既定はそれにする
  * ——選ばずに［入れる］を押しても、その人物には何も書かない
  */
@@ -655,6 +855,13 @@ window.addEventListener("message", function (event) {
   if (message.type === "plotNames") {
     names = message.data || { status: "idle", note: "", people: [] };
     renderNames();
+    return;
+  }
+  if (message.type === "plotAdvice") {
+    advice = message.data || null;
+    // 受け取られた（考えている印が届いた）ので、送った文を欄から消す
+    if (advice && advice.status === "busy") clearSentAdvice();
+    renderAdvice();
     return;
   }
   if (message.type !== "plotMode") return;

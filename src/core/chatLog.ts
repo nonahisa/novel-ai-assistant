@@ -56,8 +56,8 @@ export interface ChatLogMaterial {
 }
 
 export interface ChatLogEntry {
-  /** どの画面からの相談か */
-  panel: "相談パネル" | "設定資料パネル";
+  /** どの画面からの相談か（プロットモードのAI助言 P-01 も同じ記録に残す。設計書6.4.10） */
+  panel: "相談パネル" | "設定資料パネル" | "プロットモード";
   provider: string;
   model: string;
   paid: boolean;

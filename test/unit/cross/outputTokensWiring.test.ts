@@ -135,6 +135,8 @@ const PASSES_BOTH_TOKENS: Array<[file: string, marker: string]> = [
   ["plotNameSuggest.ts", '"plot_name_suggest"'],
   // 推敲の指摘への短い助言（P-47、設計書6.96.5）。機能名は定数で渡す
   ["findingAdvice.ts", "FINDING_ADVICE_FEATURE"],
+  // プロットモードの相談（P-01、設計書6.4.10）。機能名は定数で渡す
+  ["plotAdvice.ts", "PLOT_ADVICE_FEATURE"],
 ];
 
 describe("出力トークンの2つの欄の配り先", () => {
