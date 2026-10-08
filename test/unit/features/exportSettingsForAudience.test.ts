@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   exportFileBaseName,
   exportFileNameCandidates,
+  exportDirectoryFor,
   exportFormatChoices,
   readSnapshot,
   snapshotPath,
+  updatesSnapshot,
   writeAudienceCsvExport,
   writeAudienceExport,
   writeSnapshotFile,
@@ -288,5 +290,28 @@ describe("書き出し", () => {
     expect(new TextDecoder().decode(files.get(key(byAuthor)))).toBe(
       "作者が書いたもの"
     );
+  });
+});
+
+describe("置き場と控えの更新（2026-10-09 の裁定）", () => {
+  const SETTINGS = "C:\\works\\灯の塔\\設定";
+  const AIWRITER = "C:\\works\\灯の塔\\.aiwriter";
+
+  test("Markdown と差分は設定フォルダー、HTML・Word・CSV は git の外", () => {
+    const dir = (format: Parameters<typeof exportDirectoryFor>[0]) =>
+      exportDirectoryFor(format, SETTINGS, AIWRITER);
+    expect(dir("markdown")).toBe(SETTINGS);
+    expect(dir("diff")).toBe(SETTINGS);
+    for (const format of ["html", "docx", "csv"] as const) {
+      expect(dir(format)).toMatch(/\.aiwriter[\\/]exports[\\/]settings$/);
+    }
+    expect(dir("pdf")).toMatch(/\.aiwriter[\\/]exports$/);
+  });
+
+  test("控えを更新するのは資料そのものを書き出したときだけ（差分は更新しない）", () => {
+    expect(updatesSnapshot("diff")).toBe(false);
+    for (const format of ["markdown", "html", "csv", "pdf", "docx"] as const) {
+      expect(updatesSnapshot(format)).toBe(true);
+    }
   });
 });

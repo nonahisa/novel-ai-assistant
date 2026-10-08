@@ -258,6 +258,43 @@ export function exportFormatChoices(canRun: boolean): ExportFormatChoice[] {
   ];
 }
 
+/**
+ * 形式ごとの置き場（作者の裁定 2026-10-09）。
+ *
+ * **Markdown と差分だけが git 管理下の `設定/`**（読み手別の Markdown の決まりは
+ * そのまま）。HTML・Word・CSV は組み直せる配布用の写しなので、`.gitignore` 済みの
+ * `.aiwriter/exports/settings/` へ置く——履歴を膨らませず、渡した写しが
+ * 作品の設定と並んで同期に混ざることもない。PDF の下ごしらえは本文のPDF出力と
+ * 同じ `.aiwriter/exports/` 直下のまま。
+ */
+export function exportDirectoryFor(
+  format: ExportFormat,
+  settingsDir: string,
+  aiwriterDir: string
+): string {
+  switch (format) {
+    case "markdown":
+    case "diff":
+      return settingsDir;
+    case "pdf":
+      return path.join(aiwriterDir, "exports");
+    case "html":
+    case "docx":
+    case "csv":
+      return path.join(aiwriterDir, "exports", "settings");
+  }
+}
+
+/**
+ * 書き出したあとに控えを取り替える形式か。
+ *
+ * **資料そのものを書き出したときだけ**。差分は何度出しても同じ起点（前回
+ * 渡した資料）と比べるので、差分では控えを更新しない（作者の裁定 2026-10-09）。
+ */
+export function updatesSnapshot(format: ExportFormat): boolean {
+  return format !== "diff";
+}
+
 export async function exportSettingsForAudience(
   work: WorkEntry
 ): Promise<void> {
@@ -284,10 +321,11 @@ export async function exportSettingsForAudience(
   const config = await readWorkConfig(work);
   const paths = workPaths(work, config);
   const settingsDir = paths.settings;
+  const dirOf = (kind: ExportFormat) =>
+    exportDirectoryFor(kind, settingsDir, paths.aiwriter);
   const snapshotFile = snapshotPath(paths.aiwriter, audience);
   const label = AUDIENCE_PROFILES[audience].label;
 
-  // 差分は、控えを上書きする**前に**前回の控えを読んでおく
   const previous =
     format === "diff" ? await readSnapshot(snapshotFile) : undefined;
 
@@ -296,7 +334,7 @@ export async function exportSettingsForAudience(
     switch (format) {
       case "markdown":
         target = await writeAudienceExport(
-          settingsDir,
+          dirOf("markdown"),
           audience,
           chapter,
           renderExportMarkdown(document),
@@ -305,7 +343,7 @@ export async function exportSettingsForAudience(
         break;
       case "html":
         target = await writeAudienceExport(
-          settingsDir,
+          dirOf("html"),
           audience,
           chapter,
           buildExportHtml(document),
@@ -315,7 +353,7 @@ export async function exportSettingsForAudience(
         break;
       case "docx":
         target = await writeAudienceExport(
-          settingsDir,
+          dirOf("docx"),
           audience,
           chapter,
           buildExportDocx(document),
@@ -325,7 +363,7 @@ export async function exportSettingsForAudience(
         break;
       case "csv":
         target = await writeAudienceCsvExport(
-          settingsDir,
+          dirOf("csv"),
           audience,
           chapter,
           buildExportCsvFiles(document),
@@ -337,7 +375,7 @@ export async function exportSettingsForAudience(
         // 印刷用は組み直せるものなので、本文のPDF出力と同じく
         // `.gitignore` 済みの `.aiwriter/exports/` へ置く（履歴を膨らませない）
         target = await writeAudienceExport(
-          path.join(paths.aiwriter, "exports"),
+          dirOf("pdf"),
           audience,
           chapter,
           buildExportHtml(document),
@@ -347,18 +385,19 @@ export async function exportSettingsForAudience(
         break;
       case "diff":
         if (previous === undefined || previous.snapshot === null) {
-          // 前回の控えが無ければ比べられない。今回の控えだけ置いて、次回に備える
-          await saveSnapshot(work, snapshotFile, snapshotOf(document, at));
+          // 前回の控えが無ければ比べられない。**差分では控えを置かない**
+          // （控えは資料そのものを書き出したときだけ新しくなる）
           await vscode.window.showInformationMessage(
             (previous?.reason === "broken"
               ? "前回の控えを読めなかったため、"
               : `${label}へ書き出した控えがまだ無いため、`) +
-              "差分は作れませんでした。いまの資料を控えたので、次回からは差分を出せます。"
+              "差分は作れませんでした。先にこの提供先へ資料（Markdown・HTML・CSV・PDF・Wordのどれか）を書き出すと、" +
+              "その時点が次回からの差分の起点になります。"
           );
           return;
         }
         target = await writeAudienceExport(
-          settingsDir,
+          dirOf("diff"),
           audience,
           chapter,
           buildExportDiffMarkdown(previous.snapshot, snapshotOf(document, at), {
@@ -379,9 +418,12 @@ export async function exportSettingsForAudience(
     return;
   }
 
-  // **書き出すたびに控える**（差分の書き出しも含む。差分を渡したなら、
-  // 次の差分はそこからでよい）。控えに失敗しても、書き出しは済んでいる
-  await saveSnapshot(work, snapshotFile, snapshotOf(document, at));
+  // **資料そのものを書き出したときだけ控える。差分では控えを更新しない**
+  // （作者の裁定 2026-10-09）——差分を何度出しても、起点は前回渡した資料のまま。
+  // 控えに失敗しても、書き出しは済んでいる
+  if (updatesSnapshot(format)) {
+    await saveSnapshot(work, snapshotFile, snapshotOf(document, at));
+  }
 
   await announce(format, label, target);
 }

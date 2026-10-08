@@ -525,6 +525,11 @@ export interface ExportField {
 
 /** レコード1件（人物1人・場所1つ…） */
 export interface ExportRecord {
+  /**
+   * 元の記録の識別子。差分で「名前だけ変わった項目」を見分けるために持つ
+   * （設計書6.75.1）。描画（各形式）では使わない
+   */
+  id: string | null;
   name: string;
   /** 見出しに添える読み。その型が読みを出さないなら null */
   reading: string | null;
@@ -979,6 +984,7 @@ function describeCharacter(
   undatedText: boolean
 ): ExportRecord {
   const record = startRecord(
+    character.id,
     character.name,
     has(fields, "reading") ? character.reading : null,
     has(fields, "summary") ? character.summary : null
@@ -1153,11 +1159,13 @@ function describeCharacter(
  * （Markdown では `（読み）` と段落ごと省いていたのと同じ）。
  */
 function startRecord(
+  id: string | null,
   name: string,
   reading: string | null,
   lead: string | null
 ): ExportRecord {
   return {
+    id: id || null,
     name,
     reading: reading || null,
     lead: lead || null,
@@ -1197,6 +1205,7 @@ function locationSection(
 
   const describe = (location: Location): ExportRecord => {
     const record = startRecord(
+      location.id,
       location.name,
       has(fields, "reading") ? location.reading : null,
       has(fields, "summary") ? location.summary : null
@@ -1258,6 +1267,7 @@ function abilitySection(
 
   const describe = (ability: Ability): ExportRecord => {
     const record = startRecord(
+      ability.id,
       ability.name,
       has(fields, "reading") ? ability.reading : null,
       has(fields, "summary") ? ability.summary : null
@@ -1338,6 +1348,7 @@ function organizationSection(
 
   const describe = (organization: Organization): ExportRecord => {
     const record = startRecord(
+      organization.id,
       organization.name,
       has(fields, "reading") ? organization.reading : null,
       has(fields, "summary") ? organization.summary : null
@@ -1413,6 +1424,7 @@ function worldSection(
   const describe = (item: WorldItem): ExportRecord => {
     // 世界観は紹介文を持たず、説明を見出しの直後の段落にする
     const record = startRecord(
+      item.id,
       item.name,
       has(fields, "reading") ? item.reading : null,
       has(fields, "description") ? item.description : null

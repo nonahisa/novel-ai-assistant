@@ -70,6 +70,25 @@ describe("セルの逃がし", () => {
   });
 });
 
+describe("式の注入を防ぐ", () => {
+  test("= + - @ と先頭のタブ・CR で始まる値は、頭に ' を付ける", () => {
+    expect(csvCell("=SUM(A1)")).toBe("'=SUM(A1)");
+    expect(csvCell("-3")).toBe("'-3");
+    expect(csvCell("@me")).toBe("'@me");
+    expect(csvCell("+1")).toBe("'+1");
+    expect(csvCell("\t=1")).toBe("'\t=1");
+    // CR は引用符も要る
+    expect(csvCell("\r=1")).toBe('"\'\r=1"');
+  });
+
+  test("ふつうの値は変わらない", () => {
+    expect(csvCell("月島灯")).toBe("月島灯");
+    expect(csvCell("a=b")).toBe("a=b");
+    expect(csvCell("第3話-前編")).toBe("第3話-前編");
+    expect(csvCell("")).toBe("");
+  });
+});
+
 describe("Excel で文字化けしない形", () => {
   test("先頭に BOM、行の区切りは CRLF", () => {
     for (const file of files()) {
