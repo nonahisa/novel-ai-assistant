@@ -36,9 +36,10 @@ vi.mock("../../../src/core/retrievalCorpus", async (importOriginal) => {
   };
 });
 
-const { buildVectorIndexCore, buildVectorIndexForWorks } = await import(
+const { abortSignalOf, buildVectorIndexCore, buildVectorIndexForWorks } = await import(
   "../../../src/features/vectorSearch"
 );
+const { CancellationTokenSource } = await import("vscode");
 
 function workOf(title: string): WorkEntry {
   return {
@@ -69,6 +70,22 @@ async function finish(title: string): Promise<void> {
 afterEach(() => {
   corpusCalls.length = 0;
   gates.clear();
+});
+
+describe("画面の中止ボタンを順番待ちへ届ける", () => {
+  // 3か所（1作品・全作品・外部AIからの依頼）の「待っている間も中止できる」は、
+  // すべてこの写し替えに乗っている
+  test("あとから中止しても、始める前から中止されていても、印が立つ", () => {
+    const later = new CancellationTokenSource();
+    const signal = abortSignalOf(later.token);
+    expect(signal.aborted).toBe(false);
+    later.cancel();
+    expect(signal.aborted).toBe(true);
+
+    const already = new CancellationTokenSource();
+    already.cancel();
+    expect(abortSignalOf(already.token).aborted).toBe(true);
+  });
 });
 
 describe("索引づくりは同時に1つ（順番待ち）", () => {
