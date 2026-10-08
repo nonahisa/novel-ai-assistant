@@ -11,7 +11,7 @@
 
 ---
 
-## @modelcontextprotocol/sdk 1.30.0
+## @modelcontextprotocol/sdk 1.32.1
 
 - ライセンス: MIT
 - 配布元: https://modelcontextprotocol.io
