@@ -11,6 +11,7 @@ import {
   type ResolvedChunkSize,
 } from "../core/chunker";
 import { modelTuning, resolveTimeoutSeconds } from "../core/modelTuning";
+import { declaredContextSkipsProbe } from "../core/contextProbePolicy";
 import {
   fitChunkCharsToTimeout,
   CHUNK_TIME_FIT_RATIO,
@@ -246,8 +247,16 @@ export function readChunkSettings(
   // そのまま尊重する。outputTuning を渡さない呼び出し側は、対応させる
   // までの逃げ道としてこれまでどおり抑えない。**まるごと読むときも外す**
   // （上の `plan` の説明）
+  //
+  // **読める長さを API が申告し、その測定を飛ばすモデル（Gemini・Claude）にも
+  // 掛けない**（2026-10-08。設計書6.49.10）。測る道が無いので実測は入らず、
+  // 掛けると「測っていない」として6,000字に抑え続けることになる。この上限は
+  // 非力な手元の機械を守るためのもので、判定は測定の側と同じ関数を使う
   const untunedCapApplies =
-    mode === "auto" && outputTuning !== undefined && !plan.wholeRead;
+    mode === "auto" &&
+    outputTuning !== undefined &&
+    !plan.wholeRead &&
+    !declaredContextSkipsProbe(outputTuning.providerId, contextWindow);
   const cappedChars = untunedCapApplies
     ? capUntunedChunkChars(requested.chars, tuning?.measuredChars)
     : requested.chars;

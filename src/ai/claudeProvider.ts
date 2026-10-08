@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { AIError, ApiKeyHelp, ApiKeyProvider, ConnectionTestResult, GenerateParams, GenerateResult, ModelInfo, inferTier, validateApiKeyFormat } from "./types";
+import { AIError, AIRefusalError, ApiKeyHelp, ApiKeyProvider, ConnectionTestResult, GenerateParams, GenerateResult, ModelInfo, inferTier, validateApiKeyFormat } from "./types";
 import { fetchJson } from "./httpClient";
 import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
 import { buildAttemptPlan, type OptionAttempt } from "./optionFallback";
@@ -391,13 +391,15 @@ export class ClaudeProvider implements ApiKeyProvider {
     }
 
     // 安全側の判定を先に行う。refusal のとき content は空か途中までしかない
+    // 種別（bad_response）・文面・詳細はこれまでと同じ。型だけを分けて、
+    // 読める長さの測定が「長さとは関係の無い止まり方」と見分けられるようにする
+    // （`AIRefusalError` の説明。2026-10-08）
     if (res.stop_reason === "refusal") {
-      throw new AIError(
+      throw new AIRefusalError(
         "AIが安全上の理由でこの内容の処理を拒否しました。" +
           (res.stop_details?.explanation
             ? `（${res.stop_details.explanation}）`
             : ""),
-        "bad_response",
         JSON.stringify(res.stop_details ?? {})
       );
     }

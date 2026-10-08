@@ -8,11 +8,18 @@ import {
 import {
   AIError,
   isFatalProviderFailure,
+  isRefusalError,
   recoveryForAIError,
   type AIProvider,
+  type ModelInfo,
   type ProviderId,
 } from "../ai/types";
 import { CONTEXT_GUARD_EXEMPT_FEATURE } from "../ai/contextGuard";
+import {
+  CONTEXT_TUNABLE_PROVIDERS,
+  declaredContextSkipsProbe,
+  GUESSED_CONTEXT_PROVIDERS,
+} from "../core/contextProbePolicy";
 import { isLocalProvider } from "../ai/otherLocalAi";
 import { resolveMaxOutputTokens } from "../ai/outputLimit";
 import { contextSizeForPrompt } from "../core/chunker";
@@ -144,45 +151,10 @@ const FALLBACK_CONTEXT_WINDOW = 8192;
  */
 const MIN_CEILING_TOKENS = 256 * 1024;
 
-/**
- * 申告の文脈長が**当て推量**であるプロバイダ（設計書6.62.1）。
- *
- * ここは作者が設定（`novelai.sakura.contextWindow` など）に書いた値を
- * そのまま返してくるだけなので、**申告より長く読めるかもしれない**。
- * だから 256K までは試す。
- *
- * **ほかは信じる。** Ollama は `/api/show`、LM Studio は読み込み済み
- * モデル、Gemini・Claude は API から取れる**実測に基づく値**である。
- * 超えて送っても必ず弾かれるので、いちばん大きい1回を捨てるだけになる。
- */
-const GUESSED_CONTEXT_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>([
-  "sakura",
-  "openai",
-]);
-
-/**
- * 測った**上限**を台帳へ書いてよいプロバイダ。
- *
- * 申告値を取れないプロバイダ（さくら・LM Studio・ChatGPT）と、**Ollama**。
- *
- * **Ollama は申告するが、作者の実測を先に使う**（作者の裁定、2026-09-26 夕。
- * 残課題 J3。設計書 6.49.6）。申告は学習した長さで、作者の機械に載る長さ
- * ではない（`gemma4:26b` は 262,144 と申告して載らなかった。6.28.11）。
- * 読む側（`ollamaProvider` の `withMeasured`）は、実測が申告より短いときだけ
- * 使い、申告を超えては使わない。
- *
- * Gemini・Claude は入れない。クラウドの申告は機械に左右されないので、
- * 測定値で潰す理由が無い（参考表示にとどめる）。
- *
- * **待ち時間のほうは6つとも書く。** こちらはどのAIでも取りようがなく、
- * 実際に切れているのはローカルの小さいモデルとクラウドの両方である。
- */
-const CONTEXT_TUNABLE_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>([
-  "sakura",
-  "lmstudio",
-  "openai",
-  "ollama",
-]);
+// 当て推量の申告を持つプロバイダ（`GUESSED_CONTEXT_PROVIDERS`）と、測った上限を
+// 台帳へ書いてよいプロバイダ（`CONTEXT_TUNABLE_PROVIDERS`）は
+// `core/contextProbePolicy.ts` にある。チャンクの大きさの側も同じ線を使うため
+// （2026-10-08）
 
 /**
  * 読める長さを**自分で申告する**うえで、実測も台帳へ書くプロバイダ（J3）。
@@ -727,6 +699,37 @@ async function runMeasurement(
   }
 
   /*
+    **APIが読める長さを教えてくれるモデルには、詰め物を送らない**
+    （2026-10-08。設計書6.49.10）。
+
+    Gemini・Claude の申告は API から取れる実測に基づく値で、測った値で
+    上書きしない（`CONTEXT_TUNABLE_PROVIDERS` に入れていない）。測っても
+    読める長さは何も変わらないうえ、数十万字の詰め物は有料で、Claude では
+    安全装置に止められた（約70万字。category: "cyber"）。そこで止まると、
+    待ち時間を決める「仕事に近い形で測る」までたどり着かない。
+
+    待ち時間はこの測定でも決まっていたが、それは「仕事に近い形で測る」が
+    実際の機能に近い形で決める（設計書6.49.9）。だから送らずに記録して、
+    そちらへ進む。
+  */
+  if (declaredContextSkipsProbe(resolved.provider.id, declaredTokens)) {
+    const declaredText = declaredTokens.toLocaleString("ja-JP");
+    logStep(
+      `読める長さの測定：API の申告 ${declaredText} トークンを使います（測りません）。` +
+        "続けて仕事に近い形で測ります。"
+    );
+    // **止めない（押させない）。** 選んだものと違う測定へ進む理由を、
+    // 始まる前に言っておく。費用の確認は次の測定が出す
+    void vscode.window.showInformationMessage(
+      `${resolved.provider.displayName} は読める長さを API で申告しています` +
+        `（API の申告 ${declaredText} トークン）。読める長さはそれを使うので測りません。` +
+        "続けて、仕事に近い形で待ち時間を測ります。"
+    );
+    await runWorkTuning(resolved.provider, resolved.model, modelInfo);
+    return;
+  }
+
+  /*
     **天井は、このモデルの実測の換算で置く**（設計書6.77）。
 
     0.7という当て推量で字へ直していた頃、天井は窓の半分あたりに落ちて
@@ -783,39 +786,11 @@ async function runMeasurement(
   );
 
   /*
-    **測る前に、何が変わって何が変わらないかを言う**（作者の報告、
-    2026-09-19）。
-
-    Ollama は読める長さを自分で申告する（`/api/ps` が `context_length` を
-    返す）ので、測った長さで申告値を置き換えない
-    （`CONTEXT_TUNABLE_PROVIDERS`）。作者はそれを知らずに12分かけて測り、
-    申告より短い値が出て、**それが捨てられたように見えた。**
-
-    **選択肢は消さない。** この測定は無駄ではない——待ち時間の見立て、
-    字/トークンの実測、そしてチャンクの大きさの上限（測っていないモデルは
-    6,000字に抑えられる。`core/chunker.ts` の `capUntunedChunkChars`）が
-    ここで決まる。だから消さずに、**始まる前に断っておく。**
-
-    **止めない（押させない）。** 有料AIの確認とは別物で、ここで待たせる
-    ほどの話ではない。無料のローカルAIには確認そのものが出ないので、
-    伝える場所がここしか無い。
+    （2026-09-19 に足した「自分で申告します。この測定のあとも申告値を
+    使い続けます」の知らせは、2026-10-08 に外した。それが出る相手——
+    申告を測った値で置き換えないプロバイダ——は、いまは上の
+    `declaredContextSkipsProbe` で測定そのものに入らない。）
   */
-  if (
-    !CONTEXT_TUNABLE_PROVIDERS.has(resolved.provider.id) &&
-    declaredTokens !== undefined
-  ) {
-    /*
-      **「置き換えません」とは書かない。** その言い回しは、打ち切った測定が
-      前の記録より小さいときの断り（`offerToSave`）で使っている。同じ言葉が
-      違う意味で2度出ると、作者はどちらの話か分からなくなる。
-    */
-    void vscode.window.showInformationMessage(
-      `${resolved.provider.displayName} は読める長さを自分で申告します` +
-        `（${declaredTokens.toLocaleString("ja-JP")}トークン）。` +
-        "この測定のあとも、読める長さはその申告値を使い続けます。" +
-        "ここで決まるのは、待ち時間・チャンクの大きさ・字/トークンの換算です。"
-    );
-  }
 
   /**
    * `num_ctx` の上限。**上限であって、固定値ではない**（設計書6.53.2）。
@@ -913,6 +888,8 @@ async function runMeasurement(
    * 案内もそれ専用にする。
    */
   let loadFailure: AIError | undefined;
+  /** 安全装置に止められたときの失敗。入ったら何も記録せずに終える */
+  let refusal: AIError | undefined;
   let cancelled = false;
 
   /*
@@ -1112,6 +1089,27 @@ async function runMeasurement(
             // 作者が止めたときは、途中まででも分かったことを見せる
             if (error instanceof AIError && error.kind === "aborted") {
               cancelled = true;
+              return;
+            }
+
+            /*
+              **安全装置に止められたら、そこで終える。何も学ばない**
+              （2026-10-08。設計書6.49.10）。
+
+              止められたのは詰め物の中身であって、長さではない。「入らない」
+              と数えると、安全装置の判断が「読める長さの上限」という数字に
+              化ける（実装ルール5「覚えるのは通ったときだけ」）。それより
+              短い回で通っていても、その値も字/トークンも台帳へ書かない——
+              同じ詰め物を送り直しても同じく止められるので、探索を続ける
+              筋も無い。
+            */
+            if (isRefusalError(error)) {
+              refusal = error;
+              logStep(
+                `読める長さの測定：${size}字 → AI の安全装置に止められました` +
+                  `（${(error.detail ?? error.message).slice(0, ERROR_EXCERPT_CHARS)}）。` +
+                  "測定をここで終え、何も記録しません。"
+              );
               return;
             }
 
@@ -1433,6 +1431,17 @@ async function runMeasurement(
   // ほかのどの失敗より作者の手が届く（別のモデルを選べばよい）
   if (loadFailure) {
     reportModelLoadFailure(loadFailure, largestNumCtxUsed);
+    return;
+  }
+  // **字/トークンの保存（下の `saveMeasuredCharsPerToken`）より前で抜ける。**
+  // 通った回の読み取りも含めて、何も台帳へ書かない
+  if (refusal) {
+    await reportProbeRefusal(
+      resolved.provider,
+      resolved.model,
+      declaredTokens,
+      modelInfo
+    );
     return;
   }
   if (failure) {
@@ -2537,6 +2546,42 @@ async function offerToSave(input: {
       "ほかのモデルには影響しません。"
   );
   return true;
+}
+
+/**
+ * 読める長さの測定が、AI の安全装置に止められたときの知らせ
+ * （2026-10-08。設計書6.49.10）。
+ *
+ * **失敗（エラーの知らせ）にはしない。** 鍵も接続も生きていて、止められたのは
+ * 検査用の詰め物の中身である。作者が直すものは何も無いので、何を使い続けるか
+ * と、代わりに回せる測定を1つだけ示す。
+ *
+ * **何も記録していないと言い切る。** 呼ぶ側は台帳へ書く前に抜けている。
+ */
+async function reportProbeRefusal(
+  provider: AIProvider,
+  model: string,
+  declaredTokens: number | undefined,
+  modelInfo: Pick<ModelInfo, "parameterSize" | "tier"> | undefined
+): Promise<void> {
+  // 申告の出どころを取り違えない。さくら・ChatGPT の値は作者が設定に書いたもの
+  const source = GUESSED_CONTEXT_PROVIDERS.has(provider.id)
+    ? "設定の値"
+    : "API の申告";
+  const limit =
+    declaredTokens !== undefined
+      ? `読める長さは${source}（${declaredTokens.toLocaleString("ja-JP")} トークン）を使います。`
+      : "読める長さは、これまでの値を使います。";
+  const message =
+    "AI の安全装置に止められたので、読める長さを測れませんでした" +
+    `（何も記録していません）。${limit}`;
+  logStep(`読める長さの測定を終了: ${message}`);
+
+  const runWork = "仕事に近い形で測る";
+  const picked = await vscode.window.showWarningMessage(message, runWork);
+  if (picked === runWork) {
+    await runWorkTuning(provider, model, modelInfo);
+  }
 }
 
 function reportFailure(error: unknown): void {

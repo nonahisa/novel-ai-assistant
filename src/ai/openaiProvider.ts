@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import {
   AIError,
+  AIRefusalError,
   ApiKeyHelp,
   ApiKeyProvider,
   ConnectionTestResult,
@@ -323,10 +324,11 @@ export class OpenAIProvider implements ApiKeyProvider {
       );
     }
 
+    // 種別（bad_response）・文面はこれまでと同じ。型だけを分けて、読める長さの
+    // 測定が拒否を「入らない」と数えないようにする（`AIRefusalError`。2026-10-08）
     if (choice.message?.refusal) {
-      throw new AIError(
-        `AIが安全上の理由でこの内容の処理を拒否しました。（${choice.message.refusal}）`,
-        "bad_response"
+      throw new AIRefusalError(
+        `AIが安全上の理由でこの内容の処理を拒否しました。（${choice.message.refusal}）`
       );
     }
 
