@@ -40,9 +40,15 @@ describe("待っても直らない失敗の判定", () => {
       "context_overflow",
       "model_not_found",
       "unknown",
+      // 書き続けた末の時間切れ（2026-10-08）。次の話なら書き終えることがある
+      "output_deadline",
     ] as const) {
       expect(isFatalProviderFailure(kind)).toBe(false);
     }
+  });
+
+  test("書き続けた末の時間切れは、接続の失敗に数えない（3話続いても一括処理を止めない）", () => {
+    expect(isConnectivityFailure("output_deadline")).toBe(false);
   });
 });
 

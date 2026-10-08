@@ -179,6 +179,10 @@ function parseArgs(argv) {
       case "--timeout":
         // **秒で受けて、ミリ秒で持つ。** 作者が打つのは秒である
         options.timeoutMs = Number(needsValue()) * 1000;
+        // **打たれたかを覚える**（2026-10-08）。手元の Ollama の道
+        // （`novel.run`）へは打たれたときだけ渡す——既定（さくら用の180秒）を
+        // 黙って渡すと、これまで30分待っていた Ollama の測定が180秒で切れ始める
+        options.timeoutGiven = true;
         break;
       case "--repeat":
         options.repeat = Number(needsValue());
@@ -364,6 +368,15 @@ function planCalls(schema, context) {
     if ("model" in properties) base.model = context.model;
     if ("endpoint" in properties && context.endpoint) {
       base.endpoint = context.endpoint;
+    }
+    /*
+      **`--timeout` を手元の Ollama の道にも届ける**（2026-10-08）。それまでは
+      さくらの道（`askSakura`）にしか渡っておらず、`novel.run` は MCP の呼び出しの
+      30分しか見ていなかった（qwen3.5:9b が1話10分書き続けても切れなかった）。
+      束はこの秒数でチャンクごとに打ち切り、残りのチャンクを続ける
+    */
+    if ("timeoutSeconds" in properties && context.timeoutSeconds != null) {
+      base.timeoutSeconds = context.timeoutSeconds;
     }
   }
   // **空なら渡さない。** `options: {}` を渡すと、記録の上では
@@ -814,6 +827,10 @@ async function main() {
         options: options.options,
         // さくらのときは、束へ渡す行き先が無い（3段をこちらで回す）
         bundleRunner: sakura ? null : "ollama",
+        // **打たれたときだけ**（`--timeout` の注記）
+        timeoutSeconds: options.timeoutGiven
+          ? Math.round(options.timeoutMs / 1000)
+          : null,
       });
 
     /*

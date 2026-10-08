@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { OllamaProvider } from "../../../src/ai/ollamaProvider";
 import { setStreamingSettingReader } from "../../../src/ai/ollamaStream";
+import {
+  AIError,
+  isConnectivityFailure,
+  isFatalProviderFailure,
+  recoveryForAIError,
+} from "../../../src/ai/types";
 import { bundledFeatureOutput } from "../../../src/core/bundledTuning";
 import { workspace } from "../support/vscodeStub";
 import { useMemoryTuningStore } from "../support/tuningStore";
@@ -146,8 +152,84 @@ describe("出力の上限（num_predict）", () => {
   });
 });
 
+describe("書き続けた末の時間切れの札（output_deadline）", () => {
+  test("待ち時間を延ばせとは案内しない（延ばせば長く書くだけ）", () => {
+    const advice = recoveryForAIError(
+      new AIError("打ち切りました", "output_deadline")
+    );
+    expect(advice).not.toContain("タイムアウト");
+    expect(advice).toContain("モデル");
+  });
+});
+
+/** 誤字脱字の呼び出しの記録欄（締め切りは機能ごとの実測で決まる） */
+const TYPO_META = { feature: "typo_check" };
+
+/** この機械で誤字脱字を測った実測がある台帳（同梱ではなく作者の行） */
+async function useMeasuredTypoLedger(): Promise<void> {
+  await useMemoryTuningStore({
+    "出力見込み/ollama/test-model/typo_check": {
+      outputTokens: 3000,
+      outputTokenSamples: 1,
+    },
+  });
+}
+
+/** `pulls` 回、20ミリ秒おきに1字ずつ流してから正常に閉じる応答 */
+function slowStream(pulls: number): { stream: ReadableStream<Uint8Array>; pulled: () => number } {
+  const encoder = new TextEncoder();
+  let pulled = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      pulled += 1;
+      if (pulled > pulls) {
+        controller.enqueue(
+          encoder.encode(
+            JSON.stringify({ done: true, done_reason: "stop", eval_count: pulls }) + "\n"
+          )
+        );
+        controller.close();
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      controller.enqueue(
+        encoder.encode(JSON.stringify({ message: { content: "あ" }, done: false }) + "\n")
+      );
+    },
+  });
+  return { stream, pulled: () => pulled };
+}
+
+function stubStream(stream: ReadableStream<Uint8Array>): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith("/api/show")) {
+        return new Response(
+          JSON.stringify({ model_info: { "test.context_length": 131_072 } }),
+          { status: 200 }
+        );
+      }
+      return new Response(stream, { status: 200 });
+    })
+  );
+}
+
 describe("流す道の時間切れ", () => {
+  test("実測の無いモデル×機能は、待ち時間を越えて書き続けても切らない（F-52 の前例を守る）", async () => {
+    // 待ち時間0.3秒に対して約1秒書き続ける。台帳は空（同梱の typo_check はある）
+    useTimeoutSeconds(0.3);
+    const { stream } = slowStream(50);
+    stubStream(stream);
+
+    const result = await new OllamaProvider().generate({ ...params, meta: TYPO_META });
+
+    expect(result.text).toBe("あ".repeat(50));
+  });
+
   test("書き続けて終わらない応答は、選んだ秒数で打ち切る", async () => {
+    await useMeasuredTypoLedger();
     useTimeoutSeconds(0.3);
     const encoder = new TextEncoder();
     let pulled = 0;
@@ -188,12 +270,50 @@ describe("流す道の時間切れ", () => {
     );
 
     const failure = await new OllamaProvider()
-      .generate(params)
+      .generate({ ...params, meta: TYPO_META })
+      .then(() => undefined, (error: unknown) => error);
+
+    // **接続の失敗の札（timeout）にしない。** 断片は届いていたので繋がっている。
+    // timeout にすると、3話続いたときに誤字脱字などが一括処理ごと止まる
+    expect(failure).toMatchObject({ kind: "output_deadline" });
+    expect(String((failure as Error).message)).toContain("終わらなかった");
+    const kind = (failure as AIError).kind;
+    expect(isConnectivityFailure(kind)).toBe(false);
+    expect(isFatalProviderFailure(kind)).toBe(false);
+    // 待ち時間（0.3秒）のあたりでやめている。自分から閉じるまで待っていない
+    expect(pulled).toBeLessThan(100);
+  });
+
+  test("1つも断片が来ないまま時間が来たら、これまでどおり時間切れ（接続の失敗の側）", async () => {
+    // 締め切りが掛かる条件（実測あり）でも、何も届いていなければ無応答として扱う
+    await useMeasuredTypoLedger();
+    useTimeoutSeconds(0.3);
+    const stream = new ReadableStream<Uint8Array>({
+      // 何も流さずに約3秒待ってから閉じる（本物の無応答の代わり）
+      async pull(controller) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.endsWith("/api/show")) {
+          return new Response(
+            JSON.stringify({ model_info: { "test.context_length": 131_072 } }),
+            { status: 200 }
+          );
+        }
+        return new Response(stream, { status: 200 });
+      })
+    );
+
+    const failure = await new OllamaProvider()
+      .generate({ ...params, meta: TYPO_META })
       .then(() => undefined, (error: unknown) => error);
 
     expect(failure).toMatchObject({ kind: "timeout" });
-    expect(String((failure as Error).message)).toContain("終わらなかった");
-    // 待ち時間（0.3秒）のあたりでやめている。自分から閉じるまで待っていない
-    expect(pulled).toBeLessThan(100);
+    expect(isConnectivityFailure((failure as AIError).kind)).toBe(true);
   });
 });

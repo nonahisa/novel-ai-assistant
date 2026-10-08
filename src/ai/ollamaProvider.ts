@@ -24,6 +24,7 @@ import {
 // 持つと「関所は通ったのに num_ctx が足りない」という食い違いになる
 import { OUTPUT_RESERVE_TOKENS } from "./contextGuard";
 import { resolveFeatureOutputCap } from "./outputLimit";
+import { featureOutputTuningRaw } from "../core/featureOutputTokens";
 import { logLine } from "../core/logger";
 import { withAiWork } from "../core/aiActivity";
 import {
@@ -298,6 +299,30 @@ export class OllamaProvider implements AIProvider {
    */
   private requestTimeoutMs(model: string): number {
     return resolveTimeoutMs(this.id, model, 180);
+  }
+
+  /**
+   * 流す道に並べる、**呼び出し1回ぶんの締め切り**（ミリ秒）。undefined なら
+   * 掛けない（2026-10-08）。
+   *
+   * 流す道の時計は断片が届くたびに数え直すので、**書き続けて終わらない
+   * モデルを永遠に待つ**（qwen3.5:9b の誤字脱字で1話10分）。設定の説明は
+   * 「1回の呼び出しのタイムアウト」で、まとめて受け取る道（`fetchJson`）は
+   * もともとそう動いている。
+   *
+   * **掛けるのは、台帳にそのモデル×機能の実測があるときだけ**（作者の裁定、
+   * 2026-10-08）。実測が無いときはこれまでどおり切れない——12b で2万字の
+   * チャンクが687秒で完走した前例（F-52）があり、既定の300秒で一律に切ると、
+   * 遅い機械の健全な長い生成まで落とす。**同梱の値だけでは掛けない**
+   * （同梱は別の機械で測ったもので、この機械の速さを表さない）。長さは
+   * 作者が選んだ待ち時間（台帳・設定）で、新しい数字は作らない。
+   */
+  private outputDeadlineMs(params: GenerateParams): number | undefined {
+    const feature = params.meta?.feature;
+    if (feature === undefined || feature.length === 0) return undefined;
+    const measured = featureOutputTuningRaw(feature, this.id, params.model);
+    if (measured?.outputTokens === undefined) return undefined;
+    return this.requestTimeoutMs(params.model);
   }
 
   async isConfigured(): Promise<boolean> {
@@ -737,7 +762,8 @@ export class OllamaProvider implements AIProvider {
             body,
             this.requestTimeoutMs(params.model),
             params.signal,
-            params.onThinking
+            params.onThinking,
+            this.outputDeadlineMs(params)
           )
         : await this.fetchJson<ChatResponse>(
             "/api/chat",
@@ -859,7 +885,12 @@ export class OllamaProvider implements AIProvider {
     timeoutMs: number,
     externalSignal?: AbortSignal,
     /** 思考が届くたびに呼ぶ。相談パネルが画面へ流す（設計書6.63.2） */
-    onThinking?: (delta: string) => void
+    onThinking?: (delta: string) => void,
+    /**
+     * 呼び出し1回ぶんの締め切り（ミリ秒）。**undefined なら掛けない**
+     * （断片ごとに数え直す時計だけになる）。決めるのは `outputDeadlineMs`
+     */
+    deadlineMs?: number
   ): Promise<ChatResponse> {
     const controller = new AbortController();
     let abortSource: "caller" | "timeout" | "deadline" | undefined;
@@ -871,25 +902,22 @@ export class OllamaProvider implements AIProvider {
     // **断片が届くたびに数え直す。** 止まったモデル（何も流れてこない）を
     // 早めに見限るための時計
     let timer = setTimeout(() => abort("timeout"), timeoutMs);
+    /** 断片が1つでも届いたか。締め切りで切ったときの札を分けるのに使う */
+    let receivedAny = false;
     const bump = () => {
+      receivedAny = true;
       clearTimeout(timer);
       timer = setTimeout(() => abort("timeout"), timeoutMs);
     };
     /*
-      **呼び出し1回ぶんの締め切りも並べる**（2026-10-08）。
-
-      上の時計だけでは、**書き続けて終わらないモデルを永遠に待つ。**
-      qwen3.5:9b の誤字脱字が出力1.5万トークンを超えて書き続け、1話に
-      10分かかった（設定の待ち時間は既定300秒）。設定の説明は「1回の
-      呼び出しのタイムアウト」で、まとめて受け取る道（`fetchJson`）は
-      もともとそう動いている。流す道だけが黙って「止まっている時間」に
-      読み替えていたのを、説明どおりに戻す。
-
-      **長さは同じ値（作者が選んだ秒数・台帳の値）を使う。** 新しい数字は
-      作らない。長い生成が健全に進んでいても、この秒数を超えれば切れる
-      ——足りない作者は、時間切れの案内どおり待ち時間を延ばす。
+      **呼び出し1回ぶんの締め切りも並べる**（2026-10-08）。上の時計だけでは
+      **書き続けて終わらないモデルを永遠に待つ**（理由と長さの決め方は
+      `outputDeadlineMs`）
     */
-    const deadline = setTimeout(() => abort("deadline"), timeoutMs);
+    const deadline =
+      deadlineMs === undefined
+        ? undefined
+        : setTimeout(() => abort("deadline"), deadlineMs);
     const onExternalAbort = () => abort("caller");
     if (externalSignal?.aborted) onExternalAbort();
     else externalSignal?.addEventListener("abort", onExternalAbort);
@@ -1023,15 +1051,21 @@ export class OllamaProvider implements AIProvider {
         if (abortSource === "caller") {
           throw new AIError("処理が中止されました。", "aborted");
         }
-        if (abortSource === "deadline") {
-          // **「止まった」と「終わらなかった」を分けて言う。** 書き続けていた
-          // のか、何も返ってこなかったのかで、作者の次の手が違う
-          // （モデルを替える／待ち時間を延ばす）
+        if (abortSource === "deadline" && receivedAny) {
+          /*
+            **「止まった」と「書き続けて終わらなかった」を、札から分ける。**
+            断片は届いていたので、繋がっていないのではない。`timeout` の札に
+            すると接続の失敗に数えられ（`isConnectivityFailure`）、3話続くと
+            一括処理ごと止まる。`output_deadline` はそのチャンクだけの失敗で、
+            ほかの話は続く。直し方も違う（延ばしても長く書くだけ。モデルを替える）
+          */
           throw new AIError(
-            `Ollamaの応答が${Math.round(timeoutMs / 1000)}秒で終わらなかったので打ち切りました。`,
-            "timeout"
+            `Ollamaの応答が${Math.round((deadlineMs ?? timeoutMs) / 1000)}秒で終わらなかったので打ち切りました（書き続けていました）。`,
+            "output_deadline"
           );
         }
+        // 締め切りまでに1つも断片が来なかったのは、本物の無応答。これまでどおり
+        // 時間切れ（接続の失敗の側）として扱う
         throw new AIError(
           `Ollamaの応答がタイムアウトしました（${Math.round(timeoutMs / 1000)}秒）。`,
           "timeout"
@@ -1044,7 +1078,7 @@ export class OllamaProvider implements AIProvider {
       );
     } finally {
       clearTimeout(timer);
-      clearTimeout(deadline);
+      if (deadline !== undefined) clearTimeout(deadline);
       externalSignal?.removeEventListener("abort", onExternalAbort);
     }
   }

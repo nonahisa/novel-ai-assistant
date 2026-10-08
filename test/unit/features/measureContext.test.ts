@@ -81,11 +81,14 @@ describe("エラーを「入らなかった」と数えてよいか", () => {
     context_overflow: false,
     rate_limited: false,
     aborted: false,
+    // 書き続けた末の時間切れ（2026-10-08）。長すぎて断られたのではない
+    // （測定は流す道を通らないので、そもそもここへは来ない）
+    output_deadline: false,
   };
 
-  test("数えてよいのは bad_response と unknown だけ（12種別を表で見る）", () => {
+  test("数えてよいのは bad_response と unknown だけ（13種別を表で見る）", () => {
     // 数が変わったら、表の側も見直したというしるしになる
-    expect(Object.keys(BY_KIND)).toHaveLength(12);
+    expect(Object.keys(BY_KIND)).toHaveLength(13);
 
     for (const [kind, expected] of Object.entries(BY_KIND)) {
       expect(
