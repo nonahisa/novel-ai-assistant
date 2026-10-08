@@ -15,6 +15,7 @@ import { EmbeddingError, type EmbeddingProvider } from "../ai/embeddingProvider"
 import { rankByNearest, type VectorLookup } from "../core/semanticRank";
 import { withCancellableProgress } from "../views/progress";
 import { logFailure, useLogFile } from "../core/logger";
+import { TurnQueue, TurnWaitAbortedError } from "../core/runningCommands";
 
 /**
  * 検索の入口。相談パネル・設定資料パネル・（今後の）矛盾検知から呼ぶ。
@@ -454,6 +455,46 @@ export interface IndexBuildResult {
   cancelled: boolean;
   /** 埋め込めずに飛ばした場面の数（ログに理由。次の作り直しで続きから） */
   failed: number;
+  /**
+   * **順番待ちのあいだに中止した**（何も作っていない・索引に触れていない）。
+   * 「途中まで保存しました」と言うと事実と違うので、知らせの言い方を分ける
+   */
+  cancelledWhileWaiting?: boolean;
+}
+
+/**
+ * 索引づくりの順番待ちの列（作者の裁定 2026-10-05。設計書6.87.23）。
+ *
+ * 作者が「検索索引作成／更新」を押している最中に外部AI（MCP の run.request）
+ * からの索引づくりが走ると、同じ作品の `vectors.bin` と `index.json` を2本が
+ * 別々に書き、組が食い違って意味検索が黙って語句一致へ落ちる。
+ * **断らずに、先の索引づくりが終わるまで待たせる。**
+ *
+ * - **機械（この拡張機能ホスト）で同時に1つ。作品が違っても順に。**
+ *   作品ごとに列を分けると鍵の管理が増えるうえ、手元の Ollama を2本で
+ *   取り合うだけなので、分ける得が無い
+ * - 外部AIからの依頼も、拡張機能ホストの中（`runRequestRunners.ts`）で
+ *   この芯を呼ぶので、同じ列に乗る
+ * - 6.76 の実行の札（`acquireRun`）とは**別の列**。乗せると索引づくりが
+ *   誤字脱字の10分を待ち、誤字脱字も索引づくりを待つことになる
+ */
+const indexBuildQueue = new TurnQueue();
+
+/** 待たされた側の進捗に出す1文（作者の裁定の言い回し） */
+export const INDEX_WAIT_MESSAGE = "順番待ち：ほかの索引づくりが終わるまで待っています";
+
+/**
+ * 画面の中止（VS Code の CancellationToken）を、順番待ちの列が受け取れる形
+ * （AbortSignal）へ写す。待っている間に中止ボタンを押したら、列から抜けるため。
+ */
+export function abortSignalOf(token: vscode.CancellationToken): AbortSignal {
+  const controller = new AbortController();
+  if (token.isCancellationRequested) {
+    controller.abort();
+  } else {
+    token.onCancellationRequested(() => controller.abort());
+  }
+  return controller.signal;
 }
 
 /**
@@ -485,10 +526,18 @@ export async function buildVectorIndex(
             message: `${done}/${total}`,
             increment: (EMBED_BATCH / Math.max(total, 1)) * 100,
           }),
+        signal: abortSignalOf(token),
+        onWaiting: (message) => progress.report({ message }),
       })
   );
   if (!outcome.ok) {
     vscode.window.showWarningMessage(outcome.reason);
+    return undefined;
+  }
+  if (outcome.result.cancelledWhileWaiting) {
+    vscode.window.showInformationMessage(
+      "索引づくりを中止しました（順番待ちのあいだに止めたので、何も作っていません）。"
+    );
     return undefined;
   }
   return outcome.result;
@@ -499,6 +548,13 @@ export interface IndexBuildControl {
   isCancelled(): boolean;
   /** この作品の中で、埋め込み終えた件数／埋め込む件数 */
   report(done: number, total: number): void;
+  /**
+   * 順番待ちのあいだも中止を効かせるための印。`isCancelled()` は見に行く形なので、
+   * 待っている最中には見る機会が無い。渡さなければ、待っている間は中止できない
+   */
+  signal?: AbortSignal;
+  /** ほかの索引づくりを待つことになったときに1回だけ呼ぶ（進捗へ出す） */
+  onWaiting?(message: string): void;
 }
 
 export type IndexBuildOutcome =
@@ -513,8 +569,51 @@ export type IndexBuildOutcome =
  * 索引の作り方・置き場を2つにしない（0.99.19）。
  *
  * **途中で中止されても、それまでのぶんは保存する**（次は続きから）。
+ *
+ * **ほかの索引づくりが走っていれば、終わるまで待ってから始める**（`indexBuildQueue`）。
+ * 材料集めも待ったあとに行う——待っている間に作者が本文を直すことがあり、
+ * 古い材料で索引を作ると、すぐに「追いついていない」になるため。
  */
 export async function buildVectorIndexCore(
+  work: WorkEntry,
+  provider: OllamaEmbeddingProvider,
+  control: IndexBuildControl
+): Promise<IndexBuildOutcome> {
+  // 取る前に見る。取ったあとでは「自分が持っている」と区別がつかない
+  if (indexBuildQueue.currentLabel() !== undefined) {
+    control.onWaiting?.(INDEX_WAIT_MESSAGE);
+  }
+  let release: () => void;
+  try {
+    release = await indexBuildQueue.acquire(work.title, control.signal);
+  } catch (error) {
+    if (!(error instanceof TurnWaitAbortedError)) throw error;
+    // 失敗ではなく中止として返す。全作品の行で「失敗」と数えないため
+    // （6.76 の決めごと4と同じ——中止を失敗と報告しない）
+    return {
+      ok: true,
+      result: {
+        built: 0,
+        reused: 0,
+        removed: 0,
+        total: 0,
+        seconds: 0,
+        bytes: 0,
+        cancelled: true,
+        failed: 0,
+        cancelledWhileWaiting: true,
+      },
+    };
+  }
+  try {
+    return await buildIndexHoldingTurn(work, provider, control);
+  } finally {
+    release();
+  }
+}
+
+/** 順番を取ったあとの本体（`buildVectorIndexCore` からだけ呼ぶ） */
+async function buildIndexHoldingTurn(
   work: WorkEntry,
   provider: OllamaEmbeddingProvider,
   control: IndexBuildControl
@@ -609,6 +708,8 @@ export async function buildVectorIndexForWorks(
   control: {
     isCancelled(): boolean;
     report(message: string): void;
+    /** 順番待ちのあいだも中止を効かせる印（`IndexBuildControl.signal`） */
+    signal?: AbortSignal;
   }
 ): Promise<IndexBuildRow[]> {
   const rows: IndexBuildRow[] = [];
@@ -624,10 +725,20 @@ export async function buildVectorIndexForWorks(
       const outcome = await buildVectorIndexCore(work, provider, {
         isCancelled: control.isCancelled,
         report: (done, total) => control.report(`${head} ${done}/${total}`),
+        ...(control.signal ? { signal: control.signal } : {}),
+        onWaiting: (message) => control.report(`${head} ${message}`),
       });
       const seconds = (Date.now() - started) / 1000;
       if (!outcome.ok) {
         rows.push({ work, status: "failed", reason: outcome.reason, seconds });
+      } else if (outcome.result.cancelledWhileWaiting) {
+        // 索引に触れていないので、結果の数（0件）は載せない
+        rows.push({
+          work,
+          status: "cancelled",
+          reason: "順番待ちのあいだに中止したため回していません",
+          seconds,
+        });
       } else {
         rows.push({
           work,
@@ -698,6 +809,7 @@ export async function buildVectorIndexAll(
       await buildVectorIndexForWorks(works, provider, {
         isCancelled: () => token.isCancellationRequested,
         report: (message) => progress.report({ message }),
+        signal: abortSignalOf(token),
       })
   );
   const failed = rows.filter((row) => row.status === "failed");

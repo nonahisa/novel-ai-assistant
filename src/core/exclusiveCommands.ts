@@ -88,6 +88,8 @@ export const EXCLUSIVE_COMMANDS: readonly ExclusiveCommand[] = [
   */
   { id: "novelai.buildVectorIndex", label: "検索索引作成／更新" },
   // 全作品を順に回す版（0.99.19）。手元の Ollama を長く占めるので、これも塞ぐ
+  // ここが断るのは「同じコマンドの2回押し」だけ。1作品と全作品・外部AIからの依頼の
+  // あいだは断らず、索引づくりの芯の順番待ちで順に回す（`vectorSearch.ts`。2026-10-08）
   { id: "novelai.buildVectorIndexAll", label: "検索索引作成／更新（全作品）" },
 ];
 
