@@ -68,6 +68,7 @@ import type {
 import type { RunIndexRow } from "../core/runRequest";
 import { OllamaEmbeddingProvider } from "../ai/ollamaEmbedding";
 import {
+  abortSignalOf,
   buildVectorIndexForWorks,
   embeddingModelName,
   isVectorSearchEnabled,
@@ -114,6 +115,9 @@ export interface RunRequestDepsInput {
  * 索引づくりの手足（設計書6.87.23）。**1作品のコマンドと同じ芯**
  * （`buildVectorIndexForWorks` → `buildVectorIndexCore`）を通す——作り方も置き場も
  * 作者が「検索索引作成／更新」を押したときと同じ。進捗と中止は右下に出る。
+ *
+ * **作者が画面から索引づくりを回している最中なら、終わるまで待ってから始める**
+ * （作者の裁定 2026-10-05。断らない）。列は芯が持つので、ここでは中止の印を渡すだけ。
  */
 function createIndexDeps(input: RunRequestDepsInput): RunIndexDeps<WorkEntry> {
   return {
@@ -134,6 +138,9 @@ function createIndexDeps(input: RunRequestDepsInput): RunIndexDeps<WorkEntry> {
           await buildVectorIndexForWorks(works, provider, {
             isCancelled: () => token.isCancellationRequested,
             report: (message) => progress.report({ message }),
+            // 作者が画面から索引づくりを回していれば、終わるまで待つ（芯の順番待ち）。
+            // 待っている間も右下の中止で抜けられるように、中止の印を渡す
+            signal: abortSignalOf(token),
           })
       );
       return rows.map(
