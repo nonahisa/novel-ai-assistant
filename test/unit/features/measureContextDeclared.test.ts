@@ -219,6 +219,24 @@ describe("測定の途中で安全装置に止められたとき", () => {
     expect(notices.error).not.toHaveBeenCalled();
   });
 
+  /**
+   * ChatGPT は申告が作者の設定なので測る側にいる。拒否を「入らない」と
+   * 数えると、読める長さとして学んでしまう
+   */
+  test("ChatGPT が途中で拒否しても「入らない」と学ばず、設定の値を使うと知らせる", async () => {
+    state.assigned = { providerId: "openai", model: "gpt-5", isPaid: true };
+    state.refuseAt = 2;
+    const notices = captureNotices();
+
+    await measureContext(registryDeclaring(128_000), "default", undefined, "input");
+
+    expect(state.generateCalls).toBe(2);
+    expect(tuningStoreContents()).toEqual({});
+    const text = allNoticeText(notices);
+    expect(text).toContain("安全装置");
+    expect(text).toContain("設定の値");
+  });
+
   test("知らせのボタンを押すと、仕事に近い形の測定だけを回す", async () => {
     state.assigned = { providerId: "ollama", model: "gemma4:26b", isPaid: false };
     state.refuseAt = 1;
