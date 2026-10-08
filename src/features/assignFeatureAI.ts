@@ -9,6 +9,7 @@ import {
 } from "../ai/registry";
 import {
   EXTRACT_MODEL_ADVICE,
+  CHAT_MODEL_ADVICE,
   FORESHADOW_MODEL_ADVICE,
   TYPO_MODEL_ADVICE,
 } from "../core/requirements";
@@ -95,6 +96,8 @@ const MODEL_SIZE_ADVICE: Partial<Record<AssignableFeature, string>> = {
   extract: EXTRACT_MODEL_ADVICE,
   // 伏線の回収の確認は、既定の 4B 級では1件も通らなかった（2026-09-26 の測定）
   foreshadow: FORESHADOW_MODEL_ADVICE,
+  // 相談は盲検の比べで、短い助言は 26b・相談パネルは e4b が選ばれた（2026-10-05 測定）
+  chat: CHAT_MODEL_ADVICE,
 };
 
 /**

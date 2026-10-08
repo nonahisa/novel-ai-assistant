@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import {
+  CHAT_MODEL_ADVICE,
   EXTRACT_MODEL_ADVICE,
   FORESHADOW_MODEL_ADVICE,
   TYPO_MODEL_ADVICE,
@@ -107,5 +108,23 @@ describe("伏線に向くモデルの案内", () => {
   test("機能別AI割当の「伏線」の説明が、この定数を読む", () => {
     const source = read("features/assignFeatureAI.ts");
     expect(source).toContain("foreshadow: FORESHADOW_MODEL_ADVICE");
+  });
+});
+
+/**
+ * 相談は、短い助言と相談パネルで向くモデルが違う（2026-10-05 測定、10-09 作者が盲検で選んだ）。
+ * 既定（e4b）は変えず、選ぶところで一言添えるだけ。
+ */
+describe("相談に向くモデルの案内", () => {
+  test("26b と e4b と件数と日付で理由を言う", () => {
+    expect(CHAT_MODEL_ADVICE).toContain("26b");
+    expect(CHAT_MODEL_ADVICE).toContain("e4b");
+    expect(CHAT_MODEL_ADVICE).toContain("10件中8件");
+    expect(CHAT_MODEL_ADVICE).toContain("2026-10-05");
+  });
+
+  test("機能別AI割当の「相談」の説明が、この定数を読む", () => {
+    const source = read("features/assignFeatureAI.ts");
+    expect(source).toContain("chat: CHAT_MODEL_ADVICE");
   });
 });
