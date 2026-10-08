@@ -363,6 +363,8 @@ export interface FeatureCallInput {
   model?: string;
   allowRemote?: boolean;
   temperature?: number;
+  /** runner ollama の1回の呼び出しを待つ秒数（2026-10-08。`OLLAMA_INPUT`） */
+  timeoutSeconds?: number;
   /** `novel.validate`（settings・synopsis・blurb）で、検算が通った答えを貯める（2026-10-02） */
   stash?: boolean;
   options?: Record<string, unknown>;
@@ -507,6 +509,7 @@ function runnerArgs(input: FeatureCallInput): {
   allowRemote?: boolean;
   numCtx?: number;
   temperature?: number;
+  timeoutSeconds?: number;
 } {
   return {
     runner: needRunner(input),
@@ -514,6 +517,8 @@ function runnerArgs(input: FeatureCallInput): {
     model: input.model,
     allowRemote: input.allowRemote,
     numCtx: input.numCtx,
+    // 渡されなければ undefined のまま（道具の既定＝30分）。ここで埋めない
+    timeoutSeconds: input.timeoutSeconds,
     /*
       **省略したら製品と同じ温度になる**（設計書6.87.16）。ここで既定を
       埋めない——埋めた瞬間に、**製品の値と食い違う写しが1つできる。**

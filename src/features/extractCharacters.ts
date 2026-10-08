@@ -1480,6 +1480,7 @@ function toExtractionFailure(
     context_overflow: "送る量がモデルの上限を超えています。",
     rate_limited: "AIのレート上限に達しました。",
     aborted: "AI処理が中断されました。",
+    output_deadline: "AIが書くのを止めずに続けたため、打ち切りました。",
     unknown: "AI処理で予期しないエラーが発生しました。",
   };
   return {

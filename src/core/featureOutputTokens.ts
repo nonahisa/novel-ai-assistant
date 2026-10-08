@@ -4,6 +4,7 @@ import { logLine } from "./logger";
 // 鍵の頭は `vscode` に依存しない所へ置いた（MCP の `ai.settings` も借りる）。
 // ここでも使うので import を併記する（再輸出だけではこのファイルの中で使えない）
 import { FEATURE_OUTPUT_KEY_PREFIX } from "./tuningStoreNames";
+import { MIN_FEATURE_OUTPUT_SAMPLES, ceilingOfFeatureOutput } from "./outputCeiling";
 export { FEATURE_OUTPUT_KEY_PREFIX };
 
 /**
@@ -133,27 +134,25 @@ export function featureOutputKey(
  * - どの機能も実測が1〜6回しか無い。まだ見ていない上振れはあるが、
  *   足りなければ**切り詰められたことが記録に残り、その機能は設定値へ戻る**
  *   （`recordFeatureOutputTokens` の `truncated`）。取り返しはつく
- */
-export const FEATURE_OUTPUT_MARGIN = 1.25;
-
-/**
- * 見込みを丸める刻み。
  *
- * 端数の付いた上限（15,029 など）には意味が無い。`MINIMUM_OUTPUT_TOKENS`
- * と同じ 1,024 で切り上げると、読める値になり、**上乗せもそのぶん増える**
- * （実際の余裕は25〜50%になる）。切り上げなので、丸めで下がることは無い。
- */
-export const FEATURE_OUTPUT_STEP = 1024;
-
-/**
- * これだけ実測が貯まるまで、見込みに使わない。
+ * **見込みを丸める刻み**（`FEATURE_OUTPUT_STEP`）は 1,024。端数の付いた上限
+ * （15,029 など）には意味が無い。`MINIMUM_OUTPUT_TOKENS` と同じ刻みで切り上げると
+ * 読める値になり、**上乗せもそのぶん増える**（実際の余裕は25〜50%になる）。
  *
- * **1回では「たまたま短かった回」と区別が付かない。** 短い回を根拠に
- * 上限を下げると、次の長い回が切れて丸ごと捨てられる。字/トークンの
- * `MIN_CHARS_PER_TOKEN_SAMPLES`（`core/sizeBudget.ts`）と同じ考え方で、
- * **届くまでは従来どおり（設定値）で動く**——悪くならない。
+ * **件数のしきい値**（`MIN_FEATURE_OUTPUT_SAMPLES`）は3回。1回では「たまたま
+ * 短かった回」と区別が付かない。短い回を根拠に上限を下げると、次の長い回が
+ * 切れて丸ごと捨てられる。字/トークンの `MIN_CHARS_PER_TOKEN_SAMPLES`
+ * （`core/sizeBudget.ts`）と同じ考え方で、**届くまでは従来どおり（設定値）で動く。**
+ *
+ * **値の実体は `core/outputCeiling.ts`**（2026-10-08）。MCP の `novel.run` も
+ * 同じ計算で Ollama へ上限を送るので、`vscode` に届かない所へ移した
+ * （このファイルは台帳を通じて `vscode` に届く）。ここでは再輸出だけする。
  */
-export const MIN_FEATURE_OUTPUT_SAMPLES = 3;
+export {
+  FEATURE_OUTPUT_MARGIN,
+  FEATURE_OUTPUT_STEP,
+  MIN_FEATURE_OUTPUT_SAMPLES,
+} from "./outputCeiling";
 
 /** 1機能ぶんの記録。**どれも省略できる**（採れたものだけ入る） */
 export interface FeatureOutputTuning {
@@ -312,17 +311,12 @@ export function featureOutputCeiling(
   providerId: string,
   model: string
 ): number | undefined {
-  const tuning = featureOutputTuning(feature, providerId, model);
-  if (!tuning) return undefined;
-  // 上限に当たった実績がある機能は、要る量を知らない（上の `outputTruncated`）
-  if (tuning.outputTruncated === true) return undefined;
-  const max = tuning.outputTokens;
-  if (max === undefined) return undefined;
-  if ((tuning.outputTokenSamples ?? 0) < MIN_FEATURE_OUTPUT_SAMPLES) {
-    return undefined;
-  }
-  return Math.ceil((max * FEATURE_OUTPUT_MARGIN) / FEATURE_OUTPUT_STEP) *
-    FEATURE_OUTPUT_STEP;
+  /*
+    上限に当たった実績がある機能は要る量を知らない（上の `outputTruncated`）。
+    件数のしきい値・余裕・刻みの決まりも含めて、**計算は MCP と同じ関数**
+    （`core/outputCeiling.ts`）を通す。違うのは材料（こちらは台帳を混ぜる）だけ
+  */
+  return ceilingOfFeatureOutput(featureOutputTuning(feature, providerId, model));
 }
 
 /**

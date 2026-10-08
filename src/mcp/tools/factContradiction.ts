@@ -72,6 +72,7 @@ import {
   temperatureFor,
   validateWith,
   type RunnerKind,
+  timeoutMsOf,
 } from "./run";
 
 /**
@@ -367,6 +368,8 @@ export interface FactContradictionRunInput extends FactContradictionInput {
   model?: string;
   allowRemote?: boolean;
   temperature?: number;
+  /** 1回の呼び出しを待つ秒数（`run.ts` の `RunnerContext.timeoutSeconds`） */
+  timeoutSeconds?: number;
 }
 
 export type FactContradictionRunOutcome =
@@ -664,6 +667,7 @@ function askerOf(
       schema: params.schema,
       numCtx: input.numCtx,
       allowRemote: input.allowRemote,
+      timeoutMs: timeoutMsOf(input.timeoutSeconds),
       // **段ごとの値を、呼ぶ側から受け取る**（製品の `prompts/*.ts` の値）
       temperature: params.temperature,
     });

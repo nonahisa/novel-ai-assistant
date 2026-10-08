@@ -327,6 +327,50 @@ export function resolveOutputLimitForSend(
   return { tokens, source: tokens < configured ? from : "設定" };
 }
 
+/**
+ * **出力に上限を掛けないプロバイダ（Ollama）が、暴走を止めるために送る上限。**
+ * 機能の見込みが無ければ undefined（＝これまでどおり送らない）。
+ *
+ * ## なぜ要るか（2026-10-08 の測定）
+ *
+ * Ollama へは `num_predict` を送らない方針だった（設計書6.58.2、作者の判断
+ * 「出力上限は制限不要」2026-09-01）。上限で切れた JSON は解析できず、
+ * そのチャンクが丸ごと捨てられるからである。ところが qwen3.5:9b の誤字脱字は、
+ * 1話あたり約5,000トークンの入力に対して**出力が15,000トークンを超えても
+ * 止まらず**、1話に10分かかって、結局「スキーマに沿っていません」で落ちた。
+ * 上限を掛けなくても、そのチャンクは捨てられていた。
+ *
+ * ## 何を送るか
+ *
+ * **測って要る量が分かっている機能だけ**、その見込み（実測の最大×1.25、
+ * 1,024刻みで切り上げ。`core/outputCeiling.ts`）を送る。設定の
+ * 「1回の応答の上限」（16,384）は送らない——それは作者の判断が退けたもの。
+ * 見込みの無い機能は、これまでどおり上限なしで動く。
+ *
+ * **切れたら、次の回から送らなくなる。** 上限に当たると関所
+ * （`meteredProvider.ts`）が「切り詰められた」と台帳へ残し、見込みが
+ * 消える（`featureOutputCeiling` が undefined を返す）。本当に長く要る回と
+ * 暴走とは `done_reason` からは見分けられないので、**疑わしきは作者の
+ * 判断（上限なし）へ戻す。** そこから先の守りは時間切れ
+ * （`ollamaProvider.ts` の `streamChat`）になる。
+ *
+ * **計算は `resolveOutputLimitForSend` の「機能の実測」と同じもの**
+ * （思考のぶんを足すところまで）。MCP の `novel.run` は同じ計算を同梱の値へ
+ * 当てる（`bundledFeatureOutputCeiling`）。
+ */
+export function resolveFeatureOutputCap(
+  providerId: string,
+  model: string,
+  feature: string | undefined
+): number | undefined {
+  return withThinkingOverhead(
+    featureOutputCeiling(feature, providerId, model),
+    feature,
+    providerId,
+    model
+  );
+}
+
 /** 送る上限の値だけが要るとき（大半の呼び出し側） */
 export function resolveOutputTokensForSend(
   providerId: string,

@@ -571,6 +571,17 @@ export class AIError extends Error {
       | "context_overflow"
       | "rate_limited"
       | "aborted"
+      /**
+       * **書き続けたまま、呼び出し1回ぶんの締め切りを越えた**（2026-10-08）。
+       *
+       * 断片は届いていたので、繋がっていないのではない——モデルが止まらずに
+       * 書き続けた（qwen3.5:9b の誤字脱字で1話10分）。`timeout`（何も返って
+       * こない）と分けるのは、**直し方も扱いも違うから**：待ち時間を延ばしても
+       * 直らず（延ばせばそのぶん長く書くだけ）、**接続の失敗に数えると、3話
+       * 続いたときに一括処理ごと止まる**（`isConnectivityFailure`）。
+       * そのチャンクだけの失敗として扱い、ほかの話は続ける。
+       */
+      | "output_deadline"
       | "unknown",
     readonly detail?: string,
     /**
@@ -707,6 +718,14 @@ export function recoveryForAIError(error: AIError): string {
       return "しばらく待ってから、必要な場合に手動で再実行してください。";
     case "aborted":
       return "必要なら抽出をもう一度実行してください。";
+    // **待ち時間を延ばせ、とは言わない。** 書き続けたモデルは、延ばせば
+    // そのぶん長く書くだけである。効くのはモデルを替えることと、送る量を
+    // 減らすこと（どちらも作者が操作できる）
+    case "output_deadline":
+      return (
+        "AIが書くのを止めずに続けたため、この部分は打ち切りました。" +
+        "ほかのモデルを選ぶか、「1チャンクの文字数」を小さくしてお試しください。"
+      );
     case "unknown":
       return "AI設定と拡張機能のログを確認してください。";
   }

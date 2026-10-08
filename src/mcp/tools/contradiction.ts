@@ -93,6 +93,7 @@ import {
   type RunOutcome,
   type RunnerKind,
   validateWith,
+  timeoutMsOf,
 } from "./run";
 
 /**
@@ -920,6 +921,8 @@ export interface ContradictionRunInput extends ContradictionPromptInput {
   model?: string;
   allowRemote?: boolean;
   temperature?: number;
+  /** 1回の呼び出しを待つ秒数（`run.ts` の `RunnerContext.timeoutSeconds`） */
+  timeoutSeconds?: number;
 }
 
 export async function contradictionRun(input: ContradictionRunInput): Promise<
@@ -1122,6 +1125,7 @@ function verifyAskerOf(
       schema: params.schema,
       numCtx: input.numCtx,
       allowRemote: input.allowRemote,
+      timeoutMs: timeoutMsOf(input.timeoutSeconds),
       temperature: params.temperature,
     });
 }

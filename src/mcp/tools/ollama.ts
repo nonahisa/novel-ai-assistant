@@ -119,6 +119,24 @@ export interface OllamaGenerateInput {
    * （`mcp/tools/contradiction.ts`）が製品と同じ受け答えを渡す。
    */
   toolReply?: (call: AIToolCall) => string | undefined;
+  /**
+   * 出力の上限（`num_predict`）。**渡したときだけ送る**（2026-10-08）。
+   *
+   * 製品は「測って要る量が分かっている機能だけ」上限を送る
+   * （`ai/outputLimit.ts` の `resolveFeatureOutputCap`）。`novel.run` は同じ
+   * 計算を同梱の値へ当てて渡す（`core/outputCeiling.ts`）。**MCP の入力の形
+   * には出さない**——値は機能が決めるもので、外から差し替えるものではない。
+   */
+  numPredict?: number;
+  /**
+   * 1回の呼び出しを待つ上限（ミリ秒）。省略すると `MCP_OLLAMA_WAIT_MS`。
+   * **それより長くはしない**（道具全体の30分の上限はそのまま）。
+   *
+   * 書き続けて終わらないモデルを止めるための時計で、断片が届いても
+   * 数え直さない（2026-10-08。通信部品の待ち時間は断片ごとに数え直すので、
+   * 書き続けている限り鳴らなかった）。
+   */
+  timeoutMs?: number;
 }
 
 /**
@@ -149,6 +167,14 @@ export interface OllamaGenerateResult {
   endpoint: string;
   /** 何ミリ秒かかったか。遅いモデルを見分けるため */
   elapsedMs: number;
+  /**
+   * 出力の上限で切られたか（`done_reason: "length"`）。
+   *
+   * **ここでは失敗にしない。** 切れたJSONから閉じられる所までを救う検算が
+   * ある（逸脱検知）ので、読めるかどうかは検算に任せる。読めなかったときに
+   * 「上限で切られた」と言い添えるのは呼ぶ側（`run.ts` の `runByRunner`）
+   */
+  truncated: boolean;
 }
 
 export async function ollamaGenerate(
@@ -198,7 +224,19 @@ export async function ollamaGenerate(
     model: input.model,
     endpoint,
     elapsedMs: Date.now() - startedAt,
+    truncated: streamed.truncated,
   };
+}
+
+/**
+ * 1回の呼び出しを待つ上限（ミリ秒）。渡されなければ、渡されても長すぎれば
+ * `MCP_OLLAMA_WAIT_MS`（30分）。
+ */
+export function callTimeoutMs(requested: number | undefined): number {
+  if (requested === undefined || !Number.isFinite(requested) || requested <= 0) {
+    return MCP_OLLAMA_WAIT_MS;
+  }
+  return Math.min(requested, MCP_OLLAMA_WAIT_MS);
 }
 
 /** `/api/chat` へ1回投げて、流れてきた応答を組み立てる */
@@ -206,6 +244,34 @@ async function postChat(
   endpoint: string,
   input: OllamaGenerateInput,
   messages: readonly unknown[]
+): Promise<StreamedChat> {
+  /*
+    **呼び出し1回ぶんの締め切り**（2026-10-08）。下の `localFetch` へ渡す
+    待ち時間は「頭を待つ上限」と「断片の間があいたときの上限」で、**書き続けて
+    いる限り一度も鳴らない**——qwen3.5:9b が1話に10分書き続けたとき、何も
+    止めなかった。断片が届いても数え直さない時計を、ここで別に持つ。
+  */
+  const timeoutMs = callTimeoutMs(input.timeoutMs);
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await postChatWithin(endpoint, input, messages, controller.signal, timeoutMs);
+  } finally {
+    clearTimeout(deadline);
+  }
+}
+
+/** 「N 秒で応答が終わらなかった」の断り。秒は丸めて言う */
+function deadlineMessage(timeoutMs: number): string {
+  return `${Math.round(timeoutMs / 1000)} 秒で応答が終わらなかったので打ち切りました`;
+}
+
+async function postChatWithin(
+  endpoint: string,
+  input: OllamaGenerateInput,
+  messages: readonly unknown[],
+  signal: AbortSignal,
+  timeoutMs: number
 ): Promise<StreamedChat> {
   let response: Response;
   try {
@@ -254,11 +320,20 @@ async function postChat(
           // **既定を持たない**（上の `temperature` の注記）。製品の値は
           // `prompts/*.ts` にあり、呼ぶ側がそこから渡す
           temperature: input.temperature,
+          // **渡されたときだけ**（`numPredict` の注記）。渡さない道具は
+          // これまでどおり上限なし
+          ...(input.numPredict === undefined
+            ? {}
+            : { num_predict: input.numPredict }),
         },
         messages,
       }),
+      signal,
     }, MCP_OLLAMA_WAIT_MS);
   } catch (error) {
+    if (signal.aborted) {
+      throw new McpToolError(`Ollama：${deadlineMessage(timeoutMs)}。`);
+    }
     throw new McpToolError(
       `Ollama へ繋がりませんでした（${endpoint}）: ${describeError(error)}`
     );
@@ -272,7 +347,7 @@ async function postChat(
     );
   }
 
-  const streamed = await readStream(response);
+  const streamed = await readStream(response, signal, timeoutMs);
   // **Ollama が返したエラー文を捨てない**（CLAUDE.md 規則5）。
   // 流す形では HTTP 200 のまま本文の中で失敗を知らせてくることがある
   if (streamed.error) {
@@ -330,17 +405,31 @@ async function answerToolCalls(
  * 日本語が半分に割れた行で JSON の解析に失敗する（`ai/ollamaStream.ts`）。
  */
 async function readStream(
-  response: Response
+  response: Response,
+  signal: AbortSignal,
+  timeoutMs: number
 ): Promise<ReturnType<typeof emptyStreamedChat>> {
   const result = emptyStreamedChat();
   const reader = response.body?.getReader();
   if (!reader) throw new McpToolError("Ollama の応答を読み取れません。");
+
+  /*
+    **締め切りが来たら、読みかけの待ちもやめる**（製品の `streamChat` と同じ）。
+    通信部品は合図で流れを止めるが、それに頼り切らない。接続を切れば
+    Ollama 側も生成をやめる
+  */
+  const stopReading = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  if (signal.aborted) stopReading();
+  else signal.addEventListener("abort", stopReading);
 
   const decoder = new TextDecoder();
   let buffer = "";
   try {
     for (;;) {
       const { done, value } = await reader.read();
+      if (signal.aborted) break;
       if (done) break;
       // **多バイト文字の途中で切れた断片を持ち越す**（`{ stream: true }`）
       buffer += decoder.decode(value, { stream: true });
@@ -349,8 +438,19 @@ async function readStream(
       for (const line of taken.lines) applyStreamLine(result, line);
     }
   } catch (error) {
+    if (!signal.aborted) {
+      throw new McpToolError(
+        `Ollama の応答が途中で切れました: ${describeError(error)}`
+      );
+    }
+  } finally {
+    signal.removeEventListener("abort", stopReading);
+  }
+  // **締め切りで切った回は、そこまでの断片を返さない。** 途中までの JSON を
+  // 検算へ渡すと「スキーマに沿っていません」になり、何が起きたのかが消える
+  if (signal.aborted) {
     throw new McpToolError(
-      `Ollama の応答が途中で切れました: ${describeError(error)}`
+      `Ollama：${deadlineMessage(timeoutMs)}（出力 ${result.content.length} 字まで受け取っていました）。`
     );
   }
   // 最後の行に改行が付かないことがある

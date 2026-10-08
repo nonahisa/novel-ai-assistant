@@ -38,6 +38,7 @@ import {
   temperatureFor,
   type RunnerKind,
   validateWith,
+  timeoutMsOf,
 } from "./run";
 import type { RunOutcome } from "./run";
 import { readExtractStash, stashExtractAnswer } from "./extractStash";
@@ -537,6 +538,8 @@ export interface SettingsRunInput extends SettingsPromptInput {
   model?: string;
   allowRemote?: boolean;
   temperature?: number;
+  /** 1回の呼び出しを待つ秒数（`run.ts` の `RunnerContext.timeoutSeconds`） */
+  timeoutSeconds?: number;
 }
 
 export async function settingsRun(
@@ -615,6 +618,7 @@ export async function settingsRun(
       numCtx: input.numCtx,
       temperature,
       allowRemote: input.allowRemote,
+      timeoutMs: timeoutMsOf(input.timeoutSeconds),
     });
     return { text: response.text, model: model as string };
   };

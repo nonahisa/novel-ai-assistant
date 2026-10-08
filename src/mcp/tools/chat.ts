@@ -87,6 +87,7 @@ import {
   temperatureFor,
   type RunnerKind,
   validateWith,
+  timeoutMsOf,
 } from "./run";
 
 /**
@@ -840,6 +841,8 @@ export interface ChatRunInput extends ChatPromptInput {
   allowRemote?: boolean;
   temperature?: number;
   numCtx?: number;
+  /** 1回の呼び出しを待つ秒数（`run.ts` の `RunnerContext.timeoutSeconds`） */
+  timeoutSeconds?: number;
 }
 
 /**
@@ -1025,6 +1028,7 @@ export async function chatRun(input: ChatRunInput): Promise<ChatRunResult> {
       numCtx: input.numCtx ?? 16384,
       temperature,
       allowRemote: input.allowRemote,
+      timeoutMs: timeoutMsOf(input.timeoutSeconds),
     });
     return { text: response.text, model };
   });

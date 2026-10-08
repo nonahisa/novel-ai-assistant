@@ -23,6 +23,19 @@ import {
 // 出力の見込みは**関所と同じ値**を使う（設計書6.27.10）。ここだけ別の値を
 // 持つと「関所は通ったのに num_ctx が足りない」という食い違いになる
 import { OUTPUT_RESERVE_TOKENS } from "./contextGuard";
+import { resolveFeatureOutputCap } from "./outputLimit";
+import { featureOutputTuningRaw } from "../core/featureOutputTokens";
+import { withOutputMargin } from "../core/outputCeiling";
+
+/**
+ * 流す道の締め切り（`OllamaProvider.outputDeadline`）。
+ *
+ * `ms` を過ぎ、**かつ**流れた出力が `allowanceTokens` を越えたときだけ切る。
+ */
+interface OutputDeadline {
+  readonly ms: number;
+  readonly allowanceTokens: number;
+}
 import { logLine } from "../core/logger";
 import { withAiWork } from "../core/aiActivity";
 import {
@@ -297,6 +310,40 @@ export class OllamaProvider implements AIProvider {
    */
   private requestTimeoutMs(model: string): number {
     return resolveTimeoutMs(this.id, model, 180);
+  }
+
+  /**
+   * 流す道に並べる、**呼び出し1回ぶんの締め切り**（ミリ秒）。undefined なら
+   * 掛けない（2026-10-08）。
+   *
+   * 流す道の時計は断片が届くたびに数え直すので、**書き続けて終わらない
+   * モデルを永遠に待つ**（qwen3.5:9b の誤字脱字で1話10分）。設定の説明は
+   * 「1回の呼び出しのタイムアウト」で、まとめて受け取る道（`fetchJson`）は
+   * もともとそう動いている。
+   *
+   * **掛けるのは、台帳にそのモデル×機能の実測があるときだけ**（作者の裁定、
+   * 2026-10-08）。実測が無いときはこれまでどおり切れない——12b で2万字の
+   * チャンクが687秒で完走した前例（F-52）があり、既定の300秒で一律に切ると、
+   * 遅い機械の健全な長い生成まで落とす。**同梱の値だけでは掛けない**
+   * （同梱は別の機械で測ったもので、この機械の速さを表さない）。長さは
+   * 作者が選んだ待ち時間（台帳・設定）で、新しい数字は作らない。
+   *
+   * **時刻を越えても、書いた量が見込みの内なら切らない**（リーダーの直し、
+   * 2026-10-08）。F-52 の 687秒の完走は台帳に実測が残っているので、時刻だけで
+   * 切ると次回から300秒で落ちる。**遅いだけ**の生成と、**書くべき量を越えて
+   * 書き続けている**生成（暴走）を、流れた量で見分ける。見込みは
+   * `num_predict` と同じ式（`withOutputMargin`。実測の最大×1.25を刻みで
+   * 切り上げ）で、写しを作らない。
+   */
+  private outputDeadline(params: GenerateParams): OutputDeadline | undefined {
+    const feature = params.meta?.feature;
+    if (feature === undefined || feature.length === 0) return undefined;
+    const measured = featureOutputTuningRaw(feature, this.id, params.model);
+    if (measured?.outputTokens === undefined) return undefined;
+    return {
+      ms: this.requestTimeoutMs(params.model),
+      allowanceTokens: withOutputMargin(measured.outputTokens),
+    };
   }
 
   async isConfigured(): Promise<boolean> {
@@ -589,6 +636,11 @@ export class OllamaProvider implements AIProvider {
         設定値を超えて書けても測定の役には立たないうえ、繰り返しに崩れた
         モデルを待ち続ける害のほうが大きい。呼び出し側が
         `capOutputTokens: true` を立てたときだけ、下で `num_predict` を足す。
+
+        **もう1つの例外：暴走の歯止め**（2026-10-08）。測って要る量が
+        分かっている機能だけ、その見込みを送る（`resolveFeatureOutputCap`
+        に理由。設定値の16,384は送らない）。見込みの無い機能・一度切れた
+        機能は、これまでどおり上限なしで動く。
       */
       // これを指定しないとOllamaは既定の短いコンテキストで動き、
       // 入力が黙って切り捨てられる。長文処理では必須。
@@ -596,7 +648,16 @@ export class OllamaProvider implements AIProvider {
     };
     if (params.capOutputTokens && params.maxOutputTokens !== undefined) {
       options.num_predict = params.maxOutputTokens;
+    } else {
+      const cap = resolveFeatureOutputCap(
+        this.id,
+        params.model,
+        params.meta?.feature
+      );
+      if (cap !== undefined) options.num_predict = cap;
     }
+    const numPredict =
+      typeof options.num_predict === "number" ? options.num_predict : undefined;
 
     const body: Record<string, unknown> = {
       model: params.model,
@@ -634,6 +695,27 @@ export class OllamaProvider implements AIProvider {
     // 道具だけが返ったときの受け（1往復まで）。受け口が無ければ undefined
     const second = await this.answerToolCalls(first, body, params, streaming);
     const res = second ?? first;
+
+    /*
+      **上限で打ち切ったことを、記録に残す**（2026-10-08）。機能の側は
+      「切り詰められた」としか数えない（`checkTypos.ts` は件数だけ）ので、
+      上限が暴走の歯止め（`num_predict`）だったのか、空白の連続だったのかを
+      ここで言っておかないと、作者が操作ログから追えない
+    */
+    // 空白の連続でこちらから受け取りをやめた回も `length` になるが、そちらは
+    // 終わりの行（`eval_count` の入った行）を受け取る前にやめているので分けられる
+    if (
+      res.done_reason === "length" &&
+      numPredict !== undefined &&
+      res.eval_count !== undefined
+    ) {
+      logLine(
+        `Ollama：出力が上限（${numPredict} トークン）に達したので打ち切りました` +
+          `（${params.model}${
+            params.meta?.feature ? ` / ${params.meta.feature}` : ""
+          }）。次の回からこの機能には上限を送りません。`
+      );
+    }
 
     // 珍しい漢字が `<0xE5><0x9B><0xAE>` のようなバイト表記のまま
     // 返ることがある（実データで「囮」がそうなっていた）。
@@ -701,7 +783,8 @@ export class OllamaProvider implements AIProvider {
             body,
             this.requestTimeoutMs(params.model),
             params.signal,
-            params.onThinking
+            params.onThinking,
+            this.outputDeadline(params)
           )
         : await this.fetchJson<ChatResponse>(
             "/api/chat",
@@ -823,22 +906,54 @@ export class OllamaProvider implements AIProvider {
     timeoutMs: number,
     externalSignal?: AbortSignal,
     /** 思考が届くたびに呼ぶ。相談パネルが画面へ流す（設計書6.63.2） */
-    onThinking?: (delta: string) => void
+    onThinking?: (delta: string) => void,
+    /**
+     * 呼び出し1回ぶんの締め切り。**undefined なら掛けない**
+     * （断片ごとに数え直す時計だけになる）。決めるのは `outputDeadline`
+     */
+    deadlineSpec?: OutputDeadline
   ): Promise<ChatResponse> {
+    const deadlineMs = deadlineSpec?.ms;
     const controller = new AbortController();
-    let abortSource: "caller" | "timeout" | undefined;
-    const abort = (source: "caller" | "timeout") => {
+    let abortSource: "caller" | "timeout" | "deadline" | undefined;
+    const abort = (source: "caller" | "timeout" | "deadline") => {
       if (abortSource !== undefined) return;
       abortSource = source;
       controller.abort();
     };
-    // **断片が届くたびに数え直す。** 全体の上限にすると、長い生成が
-    // まっとうに進んでいても途中で切ってしまう
+    // **断片が届くたびに数え直す。** 止まったモデル（何も流れてこない）を
+    // 早めに見限るための時計
     let timer = setTimeout(() => abort("timeout"), timeoutMs);
+    /** 断片が1つでも届いたか。締め切りで切ったときの札を分けるのに使う */
+    let receivedAny = false;
     const bump = () => {
+      receivedAny = true;
       clearTimeout(timer);
       timer = setTimeout(() => abort("timeout"), timeoutMs);
     };
+    /*
+      **呼び出し1回ぶんの締め切りも並べる**（2026-10-08）。上の時計だけでは
+      **書き続けて終わらないモデルを永遠に待つ**（理由と長さの決め方は
+      `outputDeadlineMs`）
+    */
+    /** 締め切りの時刻を過ぎたか。過ぎても、書いた量が見込みの内なら待つ */
+    let deadlinePassed = false;
+    /**
+     * ここまでに流れた出力（本文と思考）の断片の数。Ollama は1トークンずつ
+     * 1行で流すので、これをトークン数の目安にする（終わりの行の
+     * `eval_count` は、終わるまで来ない）
+     */
+    let streamedTokens = 0;
+    const overAllowance = () =>
+      deadlineSpec !== undefined && streamedTokens > deadlineSpec.allowanceTokens;
+    const deadline =
+      deadlineMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            deadlinePassed = true;
+            // 時刻の時点で既に書きすぎていれば、すぐ切る。内なら、越えた瞬間に切る
+            if (overAllowance()) abort("deadline");
+          }, deadlineMs);
     const onExternalAbort = () => abort("caller");
     if (externalSignal?.aborted) onExternalAbort();
     else externalSignal?.addEventListener("abort", onExternalAbort);
@@ -875,6 +990,15 @@ export class OllamaProvider implements AIProvider {
       }
 
       const reader = response.body.getReader();
+      /*
+        **時計が鳴ったら、読みかけの断片の待ちもやめる。** 通信部品は合図で
+        本文の流れも止めるが、それに頼り切らない（手元の口が差し替えられて
+        いる試験や、合図を見ない実装でも、待ちが残らないように）。
+        やめたあとに読めた断片は捨てて、時間切れとして扱う
+      */
+      controller.signal.addEventListener("abort", () => {
+        void reader.cancel().catch(() => undefined);
+      });
       const decoder = new TextDecoder();
       const state = emptyStreamedChat();
       let buffer = "";
@@ -882,6 +1006,9 @@ export class OllamaProvider implements AIProvider {
       let whitespaceStopped = false;
       for (;;) {
         const { done, value } = await reader.read();
+        if (controller.signal.aborted) {
+          throw Object.assign(new Error("aborted"), { name: "AbortError" });
+        }
         if (done) break;
         bump();
         buffer += decoder.decode(value, { stream: true });
@@ -889,6 +1016,7 @@ export class OllamaProvider implements AIProvider {
         buffer = rest;
         for (const line of lines) {
           const before = state.thinking ?? "";
+          const contentBefore = state.content.length;
           applyStreamLine(state, line);
           // **増えた分だけを渡す。** 全文を毎回渡すと、受け取る側が
           // 差分を計算する羽目になり、同じ理屈が2か所に散る
@@ -896,7 +1024,15 @@ export class OllamaProvider implements AIProvider {
           if (onThinking && after.length > before.length) {
             onThinking(after.slice(before.length));
           }
+          if (
+            state.content.length > contentBefore ||
+            after.length > before.length
+          ) {
+            streamedTokens += 1;
+          }
         }
+        // 締め切りを過ぎたあとで見込みを越えたら、そこで切る（暴走の形）
+        if (deadlinePassed && overAllowance()) abort("deadline");
         /*
           **空白だけの行が続いたら、それ以上待たない**（残課題8）。
 
@@ -960,6 +1096,21 @@ export class OllamaProvider implements AIProvider {
         if (abortSource === "caller") {
           throw new AIError("処理が中止されました。", "aborted");
         }
+        if (abortSource === "deadline" && receivedAny) {
+          /*
+            **「止まった」と「書き続けて終わらなかった」を、札から分ける。**
+            断片は届いていたので、繋がっていないのではない。`timeout` の札に
+            すると接続の失敗に数えられ（`isConnectivityFailure`）、3話続くと
+            一括処理ごと止まる。`output_deadline` はそのチャンクだけの失敗で、
+            ほかの話は続く。直し方も違う（延ばしても長く書くだけ。モデルを替える）
+          */
+          throw new AIError(
+            `Ollamaの応答が${Math.round((deadlineMs ?? timeoutMs) / 1000)}秒で終わらなかったので打ち切りました（書き続けていました）。`,
+            "output_deadline"
+          );
+        }
+        // 締め切りまでに1つも断片が来なかったのは、本物の無応答。これまでどおり
+        // 時間切れ（接続の失敗の側）として扱う
         throw new AIError(
           `Ollamaの応答がタイムアウトしました（${Math.round(timeoutMs / 1000)}秒）。`,
           "timeout"
@@ -972,6 +1123,7 @@ export class OllamaProvider implements AIProvider {
       );
     } finally {
       clearTimeout(timer);
+      if (deadline !== undefined) clearTimeout(deadline);
       externalSignal?.removeEventListener("abort", onExternalAbort);
     }
   }

@@ -37,6 +37,7 @@ import {
   temperatureFor,
   type RunnerKind,
   validateWith,
+  timeoutMsOf,
 } from "./run";
 
 /**
@@ -227,6 +228,8 @@ export interface NotationRunInput extends NotationPromptInput {
   allowRemote?: boolean;
   temperature?: number;
   numCtx?: number;
+  /** 1回の呼び出しを待つ秒数（`run.ts` の `RunnerContext.timeoutSeconds`） */
+  timeoutSeconds?: number;
 }
 
 export async function notationRun(input: NotationRunInput) {
@@ -280,6 +283,7 @@ export async function notationRun(input: NotationRunInput) {
     numCtx: input.numCtx ?? 8192,
     temperature,
     allowRemote: input.allowRemote,
+    timeoutMs: timeoutMsOf(input.timeoutSeconds),
   });
   return {
     runner: "ollama" as const,
