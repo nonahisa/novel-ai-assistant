@@ -57,7 +57,12 @@ import {
 //      とおり（「〜たち」・属性として使う呼び名は true、無名でも同じ一人を指す
 //      人物は false）。**例には固有の呼び名を置かない**——例の語が本文に無い
 //      まま返ってくる（失敗3）のを避けるため、形（「〜たち」）だけを書く
-export const CHARACTER_EXTRACT_VERSION = "5.8";
+// 5.9: 場所に位置関係（relations：within／adjacent／direction／distance）を
+//      足した（設計書6.93.3。作者の裁定 2026-10-08「1段目だけ着手」）。
+//      **例に方角や距離の語を置かない**——例の語が本文に無いまま返ってくる
+//      （失敗3）。返ってきても、値が引用の中に無ければ検算が落とす
+//      （`validateLocationRelations`）
+export const CHARACTER_EXTRACT_VERSION = "5.9";
 
 /**
  * 送るときの温度。本文から拾うだけだが、書きぶりの揺れを少しだけ許す。
@@ -319,6 +324,17 @@ ${knownWorld}
    （例：「王都リヴェルスの図書塔」→ name: "図書塔", region: "王都リヴェルス"）。
    読み取れない場合は null とすること。
 4. 説明は本文から読み取れる範囲だけを書くこと。
+5. relations には、**本文に書かれた**ほかの場所との位置関係だけを入れること。
+   ・kind は次の4つのどれか。
+     within（この場所が相手の中にある）／adjacent（相手に隣接している）／
+     direction（この場所が相手から見てどの方角か）／distance（相手からの距離・所要時間）
+   ・target には相手の場所の名前を、本文の表記のまま入れること。
+   ・value は direction なら方角の語、distance なら距離・所要時間の言い方を、
+     **本文の言い方のまま**入れること。within と adjacent は null にすること。
+   ・evidence には、その関係が書かれた本文の一続きの部分を**そのまま**写すこと。
+     離れた文をつなげないこと。
+   ・**地図の常識や推測で関係を補わないこと。** 方角は本文に方角の語があるときだけ書く。
+   ・関係が書かれていなければ、空の配列を返すこと。
 
 【世界観の抽出ルール】（P-03）
 世界観とは「**その世界がどうなっているか**」です。
@@ -395,6 +411,8 @@ const MAX_USER_NAMES = 20;
 const MAX_RULES = 20;
 /** 1チャンクから取れる、種別ごとのレコードの数 */
 const MAX_ENTRIES = 40;
+/** 1つの場所の位置関係。1チャンクで1か所が10を超える関係を持つことはまず無い */
+const MAX_LOCATION_RELATIONS = 10;
 
 /**
  * Ollamaの構造化出力に渡すJSONスキーマ。
@@ -562,9 +580,29 @@ export const CHARACTER_EXTRACT_SCHEMA = {
           summary: { type: ["string", "null"], maxLength: SUMMARY_MAX_CHARS },
           region: { type: ["string", "null"] },
           description: { type: ["string", "null"] },
+          // 位置関係（5.9。設計書6.93.3）。検算は `validateLocationRelations`
+          relations: {
+            type: "array",
+            maxItems: MAX_LOCATION_RELATIONS,
+            items: {
+              type: "object",
+              properties: {
+                target: { type: "string" },
+                kind: {
+                  type: "string",
+                  enum: ["within", "adjacent", "direction", "distance"],
+                },
+                value: { type: ["string", "null"] },
+                evidence: { type: "string", minLength: 1 },
+              },
+              required: ["target", "kind", "evidence"],
+            },
+          },
           evidence: { type: "string", minLength: 1 },
         },
-        required: ["name", "summary", "description", "evidence"],
+        // relations を必須にするのは、人物の relations と同じ理由
+        // （省略可能にすると小さいモデルが黙って落とす。空配列は許す）
+        required: ["name", "summary", "description", "relations", "evidence"],
       },
     },
     worldview: {
@@ -690,7 +728,19 @@ export interface ExtractedLocation {
   /** 上位の地域（「王都リヴェルス」等） */
   region?: string | null;
   description?: string | null;
+  /** ほかの場所との位置関係（5.9）。検算を通ったものだけが残る */
+  relations?: ExtractedLocationRelation[];
   evidence?: string | null;
+}
+
+/** AIから返る位置関係。kind は文字列のまま受け、検算で4種に絞る */
+export interface ExtractedLocationRelation {
+  target: string;
+  kind: string;
+  value?: string | null;
+  evidence?: string | null;
+  /** 検算が本文の位置から決める話数（AIには言わせない） */
+  chapters?: number[];
 }
 
 /**

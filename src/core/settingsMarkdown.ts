@@ -1,5 +1,5 @@
 import type { Ability, AbilitySystem } from "../models/ability";
-import type { Location } from "../models/location";
+import { describeLocationRelation, type Location } from "../models/location";
 import type { Character, PersonalityFacet } from "../models/character";
 import {
   PERSONALITY_SEPARATOR,
@@ -381,6 +381,13 @@ export function buildLocationMarkdown(
       }
       if (location.description) {
         lines.push(`- **説明**: ${location.description}`);
+      }
+      // 位置関係（設計書6.93.7）。パネルの欄と同じ書き方で並べる
+      // （`describeLocationRelation`）。地図の絵は描かない
+      if ((location.relations ?? []).length > 0) {
+        lines.push(
+          `- **位置関係**: ${location.relations.map(describeLocationRelation).join("／")}`
+        );
       }
       lines.push(
         ...customFieldLines(
