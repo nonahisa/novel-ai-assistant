@@ -1725,6 +1725,8 @@ const REJECT_REASON_JA = {
   not_an_ability: "能力ではない",
   not_a_place: "場所ではない",
   not_worldview: "世界観ではない",
+  // 誤字脱字の検算（`typoCheckValidation.ts` の REJECT_REASON_LABELS と同じ語）
+  notation_mark: "ルビ・傍点の記法に触れる",
 };
 
 export function labelOf(key) {

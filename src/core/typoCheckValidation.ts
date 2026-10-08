@@ -4,6 +4,13 @@ import type { ExtractedTypoIssue, TypoCheckResult } from "../prompts/typoCheck";
 import { normalizeForComparison } from "./groundedEvidence";
 import { isPlaceholderText } from "./placeholderText";
 import { isKeptWord, type KeepWord } from "../models/keepWord";
+import {
+  INTERNAL_EMPHASIS_SOURCE,
+  INTERNAL_RUBY_SOURCE,
+  SITE_EMPHASIS_SOURCE,
+  SITE_RUBY_BARE_SOURCE,
+  SITE_RUBY_BAR_SOURCE,
+} from "./ruby";
 
 /**
  * P-09 誤字脱字検知のAI出力を検証する。
@@ -47,7 +54,12 @@ export type TypoRejectionReason =
    */
   | "whitespace_only"
   /** 当てると括弧が消える（閉じ括弧を句点に替えるなど） */
-  | "bracket_removed";
+  | "bracket_removed"
+  /**
+   * ルビ・傍点の記法に重なる、または記法の記号（｜《》）を足す・消す
+   * （当てるとルビや傍点が壊れる。2026-10-08）
+   */
+  | "notation_mark";
 
 export interface RejectedTypoIssue {
   line: number | null;
@@ -110,6 +122,7 @@ const REJECT_REASON_LABELS: Record<TypoRejectionReason, string> = {
   rewrites_span: "文の書き換え",
   whitespace_only: "空白だけの直し",
   bracket_removed: "括弧が消える",
+  notation_mark: "ルビ・傍点の記法に触れる",
 };
 
 /**
@@ -334,6 +347,20 @@ export function validateTypoIssues(
       rangeExtended = true;
     }
 
+    // **ルビ・傍点の記法に重なる直しは通さない**（2026-10-08）。
+    // 「｜霧鈴《きりすず》」の縦線だけを「「',」へ替える案が検算を通った
+    // （qwen3.5:9b、正解つきの台）。当てるとルビが壊れる。読み仮名や
+    // 親文字の直しも、記法ごと作者が書いたものなので誤字脱字としては触らない。
+    // 置き換える範囲で見るので、修正案の中身を問わず先に落とす
+    if (touchesNotation(lineText, original, target)) {
+      rejected.push({
+        line: issue.line,
+        target: issue.target,
+        reason: "notation_mark",
+      });
+      continue;
+    }
+
     // **同じ語を「修正案」として返してくる。**
     // 作者の10作品で測ったところ、通った62件のうち**25件がこれだった**
     // （「保険」→「保険」、「跨いだ」→「跨いだ」）。押しても何も起きないのに、
@@ -469,6 +496,21 @@ export function validateTypoIssues(
         line: issue.line,
         target: issue.target,
         reason: "no_change",
+      });
+      continue;
+    }
+
+    // **記法の外でも、記法の記号を足す・消す直しは通さない。**
+    // 「観測員」→「｜観測員《かんそくいん》」のように、ルビを振るのは作者の
+    // 書き方の判断で、誤字脱字の直しではない。前後の句を外した後の修正案で
+    // 見る——抱えた句に記法があっても、外せば正しい直しのことがあるため。
+    // 括弧の検査より先に見る（《》は括弧の一覧にも入っているが、記法の
+    // 記号として落としたほうが、内訳を読んだとき原因が分かる）
+    if (changesNotationMarks(target, suggestion)) {
+      rejected.push({
+        line: issue.line,
+        target: issue.target,
+        reason: "notation_mark",
       });
       continue;
     }
@@ -1332,6 +1374,92 @@ export function addsWhatIsAlreadyThere(
 
 /** 数を減らしてはいけない括弧（台詞・引用・補足の区切り） */
 const BRACKETS = ["「", "」", "『", "』", "（", "）", "(", ")", "【", "】", "〈", "〉", "《", "》"];
+
+/**
+ * ルビ・傍点の記法（`core/ruby.ts` の正規表現をそのまま使う）。
+ *
+ * **写しを書かない。** 同じ規則を2か所に書くと、記法を足したとき片方だけが
+ * 直る。投稿サイトの記法（`｜漢字《かんじ》`・`漢字《かんじ》`・`《《強調》》`）と、
+ * 拡張機能の中の記法（`{漢字|かんじ}`・`{{強調}}`）の両方を見る——
+ * `.md` の原稿は後者で書かれている（`rubyNotationFor`）。
+ */
+const NOTATION_SOURCES = [
+  SITE_RUBY_BAR_SOURCE,
+  SITE_RUBY_BARE_SOURCE,
+  SITE_EMPHASIS_SOURCE,
+  INTERNAL_RUBY_SOURCE,
+  INTERNAL_EMPHASIS_SOURCE,
+];
+
+/** 行の中の記法の範囲（開始, 終わりの次）。重なっていても構わない */
+function notationSpans(text: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  for (const source of NOTATION_SOURCES) {
+    for (const match of text.matchAll(new RegExp(source, "g"))) {
+      const start = match.index ?? 0;
+      spans.push([start, start + match[0].length]);
+    }
+  }
+  return spans;
+}
+
+/** `needle` が `haystack` に現れる位置をすべて返す（重なりも数える） */
+function positionsOf(haystack: string, needle: string): number[] {
+  const positions: number[] = [];
+  if (!needle) return positions;
+  for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) {
+    positions.push(at);
+  }
+  return positions;
+}
+
+/**
+ * 置き換える範囲（`original` の中の `target`）が、ルビ・傍点の記法に重なるか。
+ *
+ * **記号を含むかどうかだけでは足りない。** 読み仮名の中身（「きりすず」）や
+ * 傍点の中身（「ほんとう」）だけを target にした案は、記号を1つも含まないのに
+ * 当てれば記法の中を書き換える。そこで、本文のその行で `original` の位置を
+ * 探し、`target` が当たる範囲を記法の範囲と突き合わせる。
+ *
+ * **当てる側と同じく、`original` の中の最初の `target` を見る。** `original` が
+ * 行に何度か現れるときは、どれか1つでも重なれば落とす（どれに当たるか、
+ * ここでは決められないため。落とす側に倒す）。行で `original` が見つからない
+ * ときは、`original` だけで見る（検査そのものを飛ばさないため）。
+ */
+export function touchesNotation(
+  lineText: string,
+  original: string,
+  target: string
+): boolean {
+  const offsetInOriginal = original.indexOf(target);
+  if (offsetInOriginal < 0 || !target) return false;
+  const overlaps = (text: string, starts: number[]) => {
+    const spans = notationSpans(text);
+    return starts.some((start) => {
+      const end = start + target.length;
+      return spans.some(([from, to]) => start < to && from < end);
+    });
+  };
+  const inLine = positionsOf(lineText, original).map(
+    (at) => at + offsetInOriginal
+  );
+  if (inLine.length > 0) return overlaps(lineText, inLine);
+  return overlaps(original, [offsetInOriginal]);
+}
+
+/** 記法の記号。縦線は半角も全角も記法として読まれる（`SITE_BAR`） */
+const NOTATION_MARKS = ["｜", "|", "《", "》"];
+
+/**
+ * 修正案で、記法の記号の数が変わるか（足すのも消すのも落とす）。
+ *
+ * 括弧（`removesBracket`）と違い、**足すほうも通さない。** 閉じ忘れの直しに
+ * あたるものが記法には無く、足せば本文にルビや傍点が新しく生まれる。
+ */
+export function changesNotationMarks(target: string, suggestion: string): boolean {
+  const count = (text: string, mark: string) => text.split(mark).length - 1;
+  return NOTATION_MARKS.some((mark) => count(suggestion, mark) !== count(target, mark));
+}
 
 /** 修正案で、どれかの括弧が減るか（足すのは閉じ忘れの直しなので構わない） */
 export function removesBracket(target: string, suggestion: string): boolean {
