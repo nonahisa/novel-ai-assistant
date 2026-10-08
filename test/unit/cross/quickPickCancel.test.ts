@@ -175,7 +175,13 @@ describe("選択画面には閉じる道を出す", () => {
     // **だけ**である（0.48.0。「以降はこの選択で進む」を右上のボタンで
     // 出すために要る）。ここが増えたら、その画面にも閉じる道があるか
     // 一度考えること
-    expect(created.map((site) => site.file)).toEqual(["src/views/notify.ts"]);
+    // もう1つ、はじめの案内の一覧（`writerDiagnosis.ts`）がある。行に
+    // 「飛ばす」ボタンを付けるために要る（設計書6.90.7）。閉じる道は
+    // 「案内を終える」の行（`core/tutorialStepList.ts`）が出している
+    expect(created.map((site) => site.file)).toEqual([
+      "src/features/writerDiagnosis.ts",
+      "src/views/notify.ts",
+    ]);
     expect(memoryPicks.length).toBeGreaterThan(0);
   });
 
