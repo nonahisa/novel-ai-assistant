@@ -75,6 +75,7 @@ describe("プロンプト設計書の形", () => {
    * キャッシュから返り続ける（鍵は promptVersion|providerId|model|chunkHash）。
    */
   const IMPLEMENTED: Array<[string, string, string]> = [
+    ["P-01", "src/prompts/plotAdvice.ts", "PLOT_ADVICE_VERSION"],
     ["P-02", "src/prompts/plotReverse.ts", "PLOT_REVERSE_VERSION"],
     ["P-04a", "src/prompts/characterExtract.ts", "CHARACTER_EXTRACT_VERSION"],
     ["P-06", "src/prompts/blurb.ts", "BLURB_VERSION"],

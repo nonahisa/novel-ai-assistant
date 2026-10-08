@@ -78,6 +78,7 @@ import {
   type PlotNameSession,
   type PlotNamesView,
 } from "./plotNameSuggest";
+import { PlotAdviceSession, type PlotAdviceView } from "./plotAdvice";
 
 /**
  * プロットモードの画面（設計書6.4.8）。
@@ -103,6 +104,8 @@ import {
  * - 名前の候補（P-45）：plot.md の行へは本文と同じ書き戻しの口
  *   （`writeTextFilePreservingFormat`）、資料へは承認待ちへ積むだけ
  *   （`plotNameSuggest.ts`）
+ * - AIとの相談（P-01、6.4.10）：作者が［この案をプロットに書く］を押した
+ *   ときだけ、同じ書き戻しの口で1項目を書く（`plotAdvice.ts`）
  *
  * 新しい書き込み経路は作らない。
  */
@@ -216,7 +219,17 @@ type PanelMessage =
   /** 選んだ名前を入れる。**名前は控えと照らし合わせてから使う** */
   | { type: "applyNames"; picks: PlotNameChoice[] }
   /** 候補を閉じる（何も書かない） */
-  | { type: "clearNames" };
+  | { type: "clearNames" }
+  /** AIに相談する（P-01）。作者が打った文 */
+  | { type: "adviceSend"; text: string }
+  /** 答えを待つのをやめる */
+  | { type: "adviceStop" }
+  /** 書き込み案を書く。**届くのは案の番号だけ**（中身は拡張機能の控えを使う） */
+  | { type: "adviceApply"; id: string }
+  /** 書き込み案を採らない（何も書かない） */
+  | { type: "adviceDismiss"; id: string }
+  /** 会話を消す */
+  | { type: "adviceClear" };
 
 class PlotModePanel {
   private readonly panel: vscode.WebviewPanel;
@@ -241,6 +254,13 @@ class PlotModePanel {
    */
   private nameSession: PlotNameSession | undefined;
   private namesView: PlotNamesView = IDLE_PLOT_NAMES;
+  /**
+   * AIとの相談（P-01、設計書6.4.10）。AIを呼べないとき（`registry` が無い）は
+   * 持たない。**会話はこの画面が開いているあいだだけ**（閉じたら消える）
+   */
+  private readonly advice: PlotAdviceSession | undefined;
+  /** 閉じたあとに答えが届いても、画面へは送らない */
+  private disposed = false;
   /**
    * 単話プロットの置き場の見張り（2026-09-23）。**外から**書き換えた単話
    * プロット（別のエディタ・同期・Git の復元）でも一覧を作り直す。
@@ -277,9 +297,23 @@ class PlotModePanel {
       { enableScripts: true, retainContextWhenHidden: true }
     );
     context.subscriptions.push(this.panel);
+    this.advice = registry
+      ? new PlotAdviceSession({
+          work,
+          registry,
+          plotFile,
+          // **開いていれば、その文書の中身**（保存前に打った行も見て助言する）
+          readPlot: async () =>
+            this.openPlotDocument()?.getText() ?? (await readPlotText(work)),
+          post: (view) => this.postAdvice(view),
+        })
+      : undefined;
     this.panel.onDidDispose(() => {
+      this.disposed = true;
       openPanels.delete(work.id);
       this.plotWatcher.dispose();
+      // 答えを待っていたら止める（閉じた画面のためにAIを走らせ続けない）
+      this.advice?.dispose();
     });
 
     this.panel.webview.html = buildPlotModePanelHtml(
@@ -354,6 +388,7 @@ class PlotModePanel {
           await this.load();
           // 画面を作り直したとき（開き直し）も、出ている候補を並べ直す
           this.postNames(this.namesView);
+          this.postAdvice(this.advice?.current());
           return;
         case "reveal":
           await showPlotDocument(this.plotFile, message.line);
@@ -413,6 +448,28 @@ class PlotModePanel {
         case "clearNames":
           this.nameSession = undefined;
           this.postNames(IDLE_PLOT_NAMES);
+          return;
+        case "adviceSend":
+          if (!this.advice) {
+            void vscode.window.showWarningMessage(
+              "この画面からはAIを呼べません。プロットモードを開き直してください。"
+            );
+            return;
+          }
+          await this.advice.send(message.text);
+          return;
+        case "adviceStop":
+          this.advice?.stop();
+          return;
+        case "adviceApply":
+          // 書くのは作者が押したこのときだけ。書けたら目次を読み直す
+          if (await this.advice?.apply(message.id)) await this.load();
+          return;
+        case "adviceDismiss":
+          this.advice?.dismiss(message.id);
+          return;
+        case "adviceClear":
+          this.advice?.clear();
           return;
       }
     } catch (error) {
@@ -546,6 +603,17 @@ class PlotModePanel {
   private postNames(view: PlotNamesView): void {
     this.namesView = view;
     void this.panel.webview.postMessage({ type: "plotNames", data: view });
+  }
+
+  /**
+   * 相談の会話を画面へ送る（P-01）。**目録（`plotMode`）とは別の知らせ**にする
+   * ——plot.md を保存するたびに目録を作り直すので、同じ知らせに載せると
+   * 打ちかけの文や会話の並びが消える（名前の候補と同じ理由）。
+   * AIを呼べない画面では `null` を送り、相談の欄を出さない。
+   */
+  private postAdvice(view: PlotAdviceView | undefined): void {
+    if (this.disposed) return;
+    void this.panel.webview.postMessage({ type: "plotAdvice", data: view ?? null });
   }
 
   /**
