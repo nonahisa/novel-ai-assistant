@@ -166,10 +166,10 @@ describe("書き続けた末の時間切れの札（output_deadline）", () => {
 const TYPO_META = { feature: "typo_check" };
 
 /** この機械で誤字脱字を測った実測がある台帳（同梱ではなく作者の行） */
-async function useMeasuredTypoLedger(): Promise<void> {
+async function useMeasuredTypoLedger(outputTokens = 3000): Promise<void> {
   await useMemoryTuningStore({
     "出力見込み/ollama/test-model/typo_check": {
-      outputTokens: 3000,
+      outputTokens,
       outputTokenSamples: 1,
     },
   });
@@ -228,10 +228,24 @@ describe("流す道の時間切れ", () => {
     expect(result.text).toBe("あ".repeat(50));
   });
 
-  test("書き続けて終わらない応答は、選んだ秒数で打ち切る", async () => {
-    await useMeasuredTypoLedger();
+  test("実測があっても、時刻を越えて書いた量が見込みの内なら切らない（遅いだけ）", async () => {
+    // 見込み 3,000×1.25 → 4,096。待ち時間0.3秒に対して約1秒・50トークン書く
+    await useMeasuredTypoLedger(3000);
+    useTimeoutSeconds(0.3);
+    const { stream } = slowStream(50);
+    stubStream(stream);
+
+    const result = await new OllamaProvider().generate({ ...params, meta: TYPO_META });
+
+    expect(result.text).toBe("あ".repeat(50));
+  });
+
+  test("時刻を越え、見込み×1.25 を越えて書き続ける応答は打ち切る（暴走）", async () => {
+    // 見込み 10×1.25 → 刻みで 1,024。20ミリ秒ごとに30トークンずつ流す
+    await useMeasuredTypoLedger(10);
     useTimeoutSeconds(0.3);
     const encoder = new TextEncoder();
+    const line = JSON.stringify({ message: { content: "あ" }, done: false }) + "\n";
     let pulled = 0;
     const stream = new ReadableStream<Uint8Array>({
       async pull(controller) {
@@ -241,18 +255,14 @@ describe("流す道の時間切れ", () => {
         if (pulled > 150) {
           controller.enqueue(
             encoder.encode(
-              JSON.stringify({ done: true, done_reason: "stop", eval_count: 150 }) + "\n"
+              JSON.stringify({ done: true, done_reason: "stop", eval_count: 4500 }) + "\n"
             )
           );
           controller.close();
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, 20));
-        controller.enqueue(
-          encoder.encode(
-            JSON.stringify({ message: { content: "あ" }, done: false }) + "\n"
-          )
-        );
+        controller.enqueue(encoder.encode(line.repeat(30)));
       },
     });
     vi.stubGlobal(
@@ -280,7 +290,9 @@ describe("流す道の時間切れ", () => {
     const kind = (failure as AIError).kind;
     expect(isConnectivityFailure(kind)).toBe(false);
     expect(isFatalProviderFailure(kind)).toBe(false);
-    // 待ち時間（0.3秒）のあたりでやめている。自分から閉じるまで待っていない
+    // 時刻（0.3秒＝約450トークン）では切らず、見込み（1,024）を越えたところで
+    // やめている。自分から閉じるまで待っていない
+    expect(pulled).toBeGreaterThan(30);
     expect(pulled).toBeLessThan(100);
   });
 

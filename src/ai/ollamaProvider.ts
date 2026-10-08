@@ -25,6 +25,17 @@ import {
 import { OUTPUT_RESERVE_TOKENS } from "./contextGuard";
 import { resolveFeatureOutputCap } from "./outputLimit";
 import { featureOutputTuningRaw } from "../core/featureOutputTokens";
+import { withOutputMargin } from "../core/outputCeiling";
+
+/**
+ * 流す道の締め切り（`OllamaProvider.outputDeadline`）。
+ *
+ * `ms` を過ぎ、**かつ**流れた出力が `allowanceTokens` を越えたときだけ切る。
+ */
+interface OutputDeadline {
+  readonly ms: number;
+  readonly allowanceTokens: number;
+}
 import { logLine } from "../core/logger";
 import { withAiWork } from "../core/aiActivity";
 import {
@@ -316,13 +327,23 @@ export class OllamaProvider implements AIProvider {
    * 遅い機械の健全な長い生成まで落とす。**同梱の値だけでは掛けない**
    * （同梱は別の機械で測ったもので、この機械の速さを表さない）。長さは
    * 作者が選んだ待ち時間（台帳・設定）で、新しい数字は作らない。
+   *
+   * **時刻を越えても、書いた量が見込みの内なら切らない**（リーダーの直し、
+   * 2026-10-08）。F-52 の 687秒の完走は台帳に実測が残っているので、時刻だけで
+   * 切ると次回から300秒で落ちる。**遅いだけ**の生成と、**書くべき量を越えて
+   * 書き続けている**生成（暴走）を、流れた量で見分ける。見込みは
+   * `num_predict` と同じ式（`withOutputMargin`。実測の最大×1.25を刻みで
+   * 切り上げ）で、写しを作らない。
    */
-  private outputDeadlineMs(params: GenerateParams): number | undefined {
+  private outputDeadline(params: GenerateParams): OutputDeadline | undefined {
     const feature = params.meta?.feature;
     if (feature === undefined || feature.length === 0) return undefined;
     const measured = featureOutputTuningRaw(feature, this.id, params.model);
     if (measured?.outputTokens === undefined) return undefined;
-    return this.requestTimeoutMs(params.model);
+    return {
+      ms: this.requestTimeoutMs(params.model),
+      allowanceTokens: withOutputMargin(measured.outputTokens),
+    };
   }
 
   async isConfigured(): Promise<boolean> {
@@ -763,7 +784,7 @@ export class OllamaProvider implements AIProvider {
             this.requestTimeoutMs(params.model),
             params.signal,
             params.onThinking,
-            this.outputDeadlineMs(params)
+            this.outputDeadline(params)
           )
         : await this.fetchJson<ChatResponse>(
             "/api/chat",
@@ -887,11 +908,12 @@ export class OllamaProvider implements AIProvider {
     /** 思考が届くたびに呼ぶ。相談パネルが画面へ流す（設計書6.63.2） */
     onThinking?: (delta: string) => void,
     /**
-     * 呼び出し1回ぶんの締め切り（ミリ秒）。**undefined なら掛けない**
-     * （断片ごとに数え直す時計だけになる）。決めるのは `outputDeadlineMs`
+     * 呼び出し1回ぶんの締め切り。**undefined なら掛けない**
+     * （断片ごとに数え直す時計だけになる）。決めるのは `outputDeadline`
      */
-    deadlineMs?: number
+    deadlineSpec?: OutputDeadline
   ): Promise<ChatResponse> {
+    const deadlineMs = deadlineSpec?.ms;
     const controller = new AbortController();
     let abortSource: "caller" | "timeout" | "deadline" | undefined;
     const abort = (source: "caller" | "timeout" | "deadline") => {
@@ -914,10 +936,24 @@ export class OllamaProvider implements AIProvider {
       **書き続けて終わらないモデルを永遠に待つ**（理由と長さの決め方は
       `outputDeadlineMs`）
     */
+    /** 締め切りの時刻を過ぎたか。過ぎても、書いた量が見込みの内なら待つ */
+    let deadlinePassed = false;
+    /**
+     * ここまでに流れた出力（本文と思考）の断片の数。Ollama は1トークンずつ
+     * 1行で流すので、これをトークン数の目安にする（終わりの行の
+     * `eval_count` は、終わるまで来ない）
+     */
+    let streamedTokens = 0;
+    const overAllowance = () =>
+      deadlineSpec !== undefined && streamedTokens > deadlineSpec.allowanceTokens;
     const deadline =
       deadlineMs === undefined
         ? undefined
-        : setTimeout(() => abort("deadline"), deadlineMs);
+        : setTimeout(() => {
+            deadlinePassed = true;
+            // 時刻の時点で既に書きすぎていれば、すぐ切る。内なら、越えた瞬間に切る
+            if (overAllowance()) abort("deadline");
+          }, deadlineMs);
     const onExternalAbort = () => abort("caller");
     if (externalSignal?.aborted) onExternalAbort();
     else externalSignal?.addEventListener("abort", onExternalAbort);
@@ -980,6 +1016,7 @@ export class OllamaProvider implements AIProvider {
         buffer = rest;
         for (const line of lines) {
           const before = state.thinking ?? "";
+          const contentBefore = state.content.length;
           applyStreamLine(state, line);
           // **増えた分だけを渡す。** 全文を毎回渡すと、受け取る側が
           // 差分を計算する羽目になり、同じ理屈が2か所に散る
@@ -987,7 +1024,15 @@ export class OllamaProvider implements AIProvider {
           if (onThinking && after.length > before.length) {
             onThinking(after.slice(before.length));
           }
+          if (
+            state.content.length > contentBefore ||
+            after.length > before.length
+          ) {
+            streamedTokens += 1;
+          }
         }
+        // 締め切りを過ぎたあとで見込みを越えたら、そこで切る（暴走の形）
+        if (deadlinePassed && overAllowance()) abort("deadline");
         /*
           **空白だけの行が続いたら、それ以上待たない**（残課題8）。
 

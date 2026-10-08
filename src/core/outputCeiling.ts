@@ -52,8 +52,19 @@ export function ceilingOfFeatureOutput(
   if ((record.outputTokenSamples ?? 0) < MIN_FEATURE_OUTPUT_SAMPLES) {
     return undefined;
   }
+  return withOutputMargin(max);
+}
+
+/**
+ * 実測の最大に余裕を乗せ、刻みで切り上げる（見込みの式そのもの）。
+ *
+ * **件数のしきい値は見ない。** 呼ぶのは `ceilingOfFeatureOutput` と、流す道の
+ * 締め切りの「遅いだけか、書きすぎか」の見分け（`ai/ollamaProvider.ts`。
+ * 実測1件から効かせる裁定、2026-10-08）。式を2か所に写さないために分けた
+ */
+export function withOutputMargin(maxTokens: number): number {
   return (
-    Math.ceil((max * FEATURE_OUTPUT_MARGIN) / FEATURE_OUTPUT_STEP) *
+    Math.ceil((maxTokens * FEATURE_OUTPUT_MARGIN) / FEATURE_OUTPUT_STEP) *
     FEATURE_OUTPUT_STEP
   );
 }
