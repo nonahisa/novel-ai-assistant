@@ -5,6 +5,7 @@ import {
   optionalEnum,
   optionalNullableString,
   optionalNumberArray,
+  optionalObjectArray,
   optionalString,
   optionalStringArray,
   parseConflicts,
@@ -27,6 +28,77 @@ import {
  * 地域は region フィールドで表し、一覧生成時にまとめる。
  */
 
+/**
+ * 場所どうしの関係の種類（設計書6.93.2）。
+ *
+ * - within：この場所は相手の中にある（「港は港町の中」）。**片方向だけ持つ**——
+ *   「含む」は逆引きで出す。両方向に持つと、片方だけ直したときに食い違う
+ * - adjacent：相手に隣接している
+ * - direction：この場所は相手から見てどちらか（`value` に方角）
+ * - distance：相手からの距離・所要時間（`value` に本文の言い方）
+ */
+export const LOCATION_RELATION_KINDS = [
+  "within",
+  "adjacent",
+  "direction",
+  "distance",
+] as const;
+
+export type LocationRelationKind = (typeof LOCATION_RELATION_KINDS)[number];
+
+/**
+ * 方角・距離の値の上限。これより長いものは関係ではなく描写である。
+ * 方角は8方位でも本文の短い言い方（「上流」「山側」）でもよいので、表では絞らない
+ * （8方位の表は、方角の非対称を比べる機械照合〈6.93.4、順2〉で要る）
+ */
+export const LOCATION_RELATION_VALUE_MAX_CHARS = 20;
+
+export interface LocationRelation {
+  kind: LocationRelationKind;
+  /** 相手の場所（名前） */
+  target: string;
+  /** 相手のID。台帳で解決できたときだけ入る */
+  targetId: string | null;
+  /**
+   * direction：方角（8方位か短い自由文）。distance：本文の言い方のまま
+   * （「徒歩10分」を600秒に直すと作者が読めなくなる。正規化は照合の直前で行う）。
+   * within・adjacent：null
+   */
+  value: string | null;
+  /** どの話で分かったか */
+  chapters: number[];
+  /** 本文の根拠（逐語の連続した引用）。作者が書いた関係では null */
+  evidence: string | null;
+  /** 作者が固定した関係。AIの抽出で書き換えない */
+  authorLocked: boolean;
+}
+
+/** 値を持つ種類か（方角と距離だけ） */
+export function relationNeedsValue(kind: LocationRelationKind): boolean {
+  return kind === "direction" || kind === "distance";
+}
+
+/**
+ * 関係を1行の日本語にする（「港町の中」「港の北」「港から徒歩10分」「防波堤に隣接」）。
+ *
+ * **設定資料パネルの欄と設定資料集（Markdown）が同じ形を使う。** 書き方が
+ * 2通りあると、作者は画面ごとに別の書き方を覚えることになる。
+ * 読むほうは `core/settingsEdit.ts` の `editedLocationRelations`。
+ */
+export function describeLocationRelation(relation: LocationRelation): string {
+  const target = relation.target;
+  switch (relation.kind) {
+    case "within":
+      return `${target}の中`;
+    case "adjacent":
+      return `${target}に隣接`;
+    case "direction":
+      return `${target}の${relation.value ?? ""}`;
+    case "distance":
+      return `${target}から${relation.value ?? ""}`;
+  }
+}
+
 export interface Location {
   schemaVersion: string;
   id: string;
@@ -40,6 +112,14 @@ export interface Location {
   /** 上位の地域（「王都リヴェルス」等）。読み取れなければ null */
   region: string | null;
   description: string | null;
+  /**
+   * ほかの場所との位置関係（設計書6.93.2。0.100.x〜）。
+   * `region` は残す——既存の記録と画面を壊さないため。別の台帳（「地図」）は
+   * 作らず、組織の `parent` と同じく場所の記録に置く。
+   * **1つも無ければキーごと持たない**——関係の無い場所のファイルを、
+   * 保存のたびに書き換えないため（`withOptionalRelations`）。読むときは無ければ空
+   */
+  relations?: LocationRelation[];
   appearedChapters: number[];
   status: "登場済み" | "未登場";
   spoilerLevel: "public" | "staff_only" | "author_only";
@@ -111,16 +191,40 @@ export function nextLocationId(existing: Location[]): string {
 /** 旧バージョンや手書きJSONでも落ちないよう欠損を補う */
 export function normalizeLocation(raw: Partial<Location>): Location {
   const base = emptyLocation(raw.id ?? "loc_unknown", raw.name ?? "名称不明");
-  return {
-    ...base,
-    ...raw,
-    aliases: raw.aliases ?? [],
-    appearedChapters: raw.appearedChapters ?? [],
-    conflicts: raw.conflicts ?? [],
-    aiNotes: raw.aiNotes ?? [],
-    authorNotes: raw.authorNotes ?? "",
-    exportNote: raw.exportNote ?? "",
-  } as Location;
+  // 位置関係は空なら欄ごと持たない（`withOptionalRelations`）
+  return withOptionalRelations(
+    {
+      ...base,
+      ...raw,
+      aliases: raw.aliases ?? [],
+      appearedChapters: raw.appearedChapters ?? [],
+      conflicts: raw.conflicts ?? [],
+      aiNotes: raw.aiNotes ?? [],
+      authorNotes: raw.authorNotes ?? "",
+      exportNote: raw.exportNote ?? "",
+    } as Location,
+    raw.relations
+  );
+}
+
+/**
+ * 位置関係を入れる。**空なら欄ごと外す**（`withOptionalCustomFields` と同じ形）。
+ *
+ * 関係の無い場所が、保存のたびに `"relations": []` で書き換わらないようにする。
+ * 作者の書庫は同期しているので、中身の変わらない差分が全部の場所のファイルに
+ * 出ると、本当に変わったものが埋もれる。
+ */
+export function withOptionalRelations<T extends { relations?: LocationRelation[] }>(
+  record: T,
+  relations: readonly LocationRelation[] | undefined
+): T {
+  const copy = { ...record };
+  if (relations && relations.length > 0) {
+    copy.relations = [...relations];
+  } else {
+    delete copy.relations;
+  }
+  return copy;
 }
 
 /** 表記ゆれを吸収して同一場所を判定する */
@@ -162,6 +266,7 @@ export function parseLocation(raw: unknown): Location {
   optionalString(value.updatedAt, "updatedAt");
 
   const conflicts = parseConflicts(value.conflicts);
+  const relations = parseLocationRelations(value.relations);
 
   // 追加項目の値は検証してから持たせる。`...value` のまま通すと、
   // 数値などの壊れた値が検証を素通りする
@@ -171,8 +276,44 @@ export function parseLocation(raw: unknown): Location {
       id: value.id as string,
       name: value.name as string,
       conflicts,
+      relations,
       aiNotes: parseAiNotes(value.aiNotes),
     } as Partial<Location>),
     parseOptionalCustomFieldValues(value.customFields)
+  );
+}
+
+/**
+ * 位置関係を検証する。**壊れていれば直さずに止める**（実装ルール2）。
+ *
+ * 欠けた欄（`targetId`・`value`・`chapters`・`evidence`・`authorLocked`）は
+ * 既定値で補う——作者が手で書くときに全部を書かせないため。
+ * 種類と相手だけは補えない（何の関係か分からなくなる）。
+ */
+export function parseLocationRelations(value: unknown): LocationRelation[] {
+  return (
+    optionalObjectArray(value, "relations", (entry, path) => {
+      optionalEnum(entry.kind, `${path}.kind`, LOCATION_RELATION_KINDS);
+      if (entry.kind === undefined) invalid(`${path}.kind`);
+      requireNonEmptyString(entry.target, `${path}.target`);
+      optionalNullableString(entry.targetId, `${path}.targetId`);
+      optionalNullableString(entry.value, `${path}.value`);
+      optionalNumberArray(entry.chapters, `${path}.chapters`);
+      optionalNullableString(entry.evidence, `${path}.evidence`);
+      optionalBoolean(entry.authorLocked, `${path}.authorLocked`);
+      const kind = entry.kind as LocationRelationKind;
+      const relationValue = (entry.value as string | null | undefined)?.trim() || null;
+      // 方角・距離なのに値が無いものは、何を言っているのか読めない
+      if (relationNeedsValue(kind) && !relationValue) invalid(`${path}.value`);
+      return {
+        kind,
+        target: (entry.target as string).trim(),
+        targetId: (entry.targetId as string | null | undefined) ?? null,
+        value: relationNeedsValue(kind) ? relationValue : null,
+        chapters: (entry.chapters as number[] | undefined) ?? [],
+        evidence: (entry.evidence as string | null | undefined)?.trim() || null,
+        authorLocked: (entry.authorLocked as boolean | undefined) ?? false,
+      };
+    }) ?? []
   );
 }

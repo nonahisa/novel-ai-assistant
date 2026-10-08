@@ -3,9 +3,17 @@ import type {
   ExtractedAbility,
   ExtractedAbilitySystem,
   ExtractedLocation,
+  ExtractedLocationRelation,
   ExtractedOrganization,
   ExtractedWorldItem,
 } from "../prompts/characterExtract";
+import {
+  LOCATION_RELATION_KINDS,
+  LOCATION_RELATION_VALUE_MAX_CHARS,
+  normalizeLocationName,
+  relationNeedsValue,
+  type LocationRelationKind,
+} from "../models/location";
 // 送った指示文そのものが答えとして返ってくるので、**送った文面と突き合わせる**
 // （下の `isInstructionEcho`）。プロンプトは変えない——読むだけである
 import {
@@ -38,7 +46,9 @@ export type SettingRejectionReason =
   | "not_worldview"
   | "ungrounded"
   /** 送ったプロンプトの指示文が、そのまま答えとして返ってきた */
-  | "instruction_echo";
+  | "instruction_echo"
+  /** 場所の位置関係が本文と照らせなかった（場所そのものは残す。設計書6.93.3） */
+  | "ungrounded_relation";
 
 export interface RejectedSettingCandidate {
   name: string | null;
@@ -273,8 +283,11 @@ export function validateExtractedLocations(
       rejected.push({ name: location.name, reason: "ungrounded" });
       continue;
     }
+    // 位置関係は1件ずつ本文と照らす。落ちても場所そのものは残す
+    const relations = validateLocationRelations(location, chunk);
+    rejected.push(...relations.dropped);
     accepted.push({
-      data: location,
+      data: { ...location, relations: relations.kept },
       chapters: chaptersForCandidate(
         chunk,
         [location.name, ...(location.aliases ?? [])],
@@ -818,8 +831,143 @@ export function normalizeExtractedLocation(
     summary: nullableString(raw.summary),
     region: nullableString(raw.region),
     description: nullableString(raw.description),
+    relations: normalizeExtractedLocationRelations(raw.relations),
     evidence: nullableString(raw.evidence),
   };
+}
+
+/** 形だけ整える（文字列でない相手・種類は捨てる）。中身の検算は `validateLocationRelations` */
+function normalizeExtractedLocationRelations(
+  value: unknown
+): ExtractedLocationRelation[] {
+  if (!Array.isArray(value)) return [];
+  const relations: ExtractedLocationRelation[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+    if (typeof entry.target !== "string" || typeof entry.kind !== "string") {
+      continue;
+    }
+    relations.push({
+      target: entry.target.trim(),
+      kind: entry.kind.trim(),
+      value: nullableString(entry.value),
+      evidence: nullableString(entry.evidence),
+    });
+  }
+  return relations;
+}
+
+export interface LocationRelationValidation {
+  kept: ExtractedLocationRelation[];
+  /** 落とした関係。抽出の完了報告で「除外」に数える（黙って捨てない） */
+  dropped: RejectedSettingCandidate[];
+}
+
+/**
+ * 位置関係を本文と照合する（設計書6.93.3。実装ルール3「AIの出力を信用しない」）。
+ *
+ * **関係は根拠が無いと作者が確かめようがない**ので、場所そのものより厳しく見る。
+ *
+ * - 種類は4つのどれか（指示に並べた英字の列がそのまま返っても通さない）
+ * - 相手は自分自身でなく、指示語でなく、**引用の中に名前がある**こと。
+ *   引用が相手を名指ししていないなら、その引用は関係の根拠になっていない
+ * - **引用は本文の一続きの部分であること。** 場所や人物の根拠は「。」で割った
+ *   断片の1つが本文にあれば通すが（`isGroundedInChunk`）、関係でそれをすると、
+ *   離れた2文をつないだ引用（「港があった。…北に学校がある」）が通り、
+ *   本文に無い関係ができる
+ * - 方角・距離の値は引用の中にあること。指示の例の語（「方角の語」など）が
+ *   そのまま返ってきても、ここで落ちる（失敗3）
+ *
+ * **落とすのは関係だけで、場所そのものは残す。**
+ */
+export function validateLocationRelations(
+  location: ExtractedLocation,
+  chunk: Chunk
+): LocationRelationValidation {
+  const kept: ExtractedLocationRelation[] = [];
+  const dropped: RejectedSettingCandidate[] = [];
+  const ownNames = new Set(
+    [location.name, ...(location.aliases ?? [])]
+      .map(normalizeLocationName)
+      .filter(Boolean)
+  );
+  const normalizedChunk = normalizeForComparison(chunk.text);
+  const drop = (relation: ExtractedLocationRelation): void => {
+    dropped.push({
+      name: `${location.name}の位置関係（${relation.target || "相手なし"}）`,
+      reason: "ungrounded_relation",
+    });
+  };
+
+  for (const relation of location.relations ?? []) {
+    const kind = (LOCATION_RELATION_KINDS as readonly string[]).includes(
+      relation.kind
+    )
+      ? (relation.kind as LocationRelationKind)
+      : null;
+    const target = relation.target.trim();
+    if (
+      !kind ||
+      !isValidSettingName(target) ||
+      DEMONSTRATIVE_PATTERN.test(target) ||
+      ownNames.has(normalizeLocationName(target))
+    ) {
+      drop(relation);
+      continue;
+    }
+
+    const quote = contiguousQuote(relation.evidence);
+    if (!quote || !normalizedChunk.includes(quote)) {
+      drop(relation);
+      continue;
+    }
+    const normalizedTarget = normalizeForComparison(target);
+    // 既知の名前でも、引用が相手を名指ししていなければ根拠にならない
+    if (!quote.includes(normalizedTarget)) {
+      drop(relation);
+      continue;
+    }
+
+    let value: string | null = null;
+    if (relationNeedsValue(kind)) {
+      value = relation.value?.trim() || null;
+      if (
+        !value ||
+        [...value].length > LOCATION_RELATION_VALUE_MAX_CHARS ||
+        !quote.includes(normalizeForComparison(value))
+      ) {
+        drop(relation);
+        continue;
+      }
+    }
+
+    kept.push({
+      target,
+      kind,
+      value,
+      evidence: relation.evidence ?? null,
+      // 場所の話数を流用しない——関係の引用は、場所の引用と別の話にあることがある
+      chapters: chaptersForCandidate(chunk, [target], relation.evidence),
+    });
+  }
+  return { kept, dropped };
+}
+
+/**
+ * 引用を、本文と1つの文字列として照らせる形にする。
+ *
+ * 前後の括弧・引用符と末尾の句点は落とす（写すときに付け外しされやすい）。
+ * **途中の句点では割らない**——割ると、離れた文をつないだ引用が通る。
+ * 短すぎる引用（4文字未満）は、本文のどこかに偶然あるので根拠にならない。
+ */
+function contiguousQuote(evidence: string | null | undefined): string | null {
+  if (!evidence) return null;
+  const trimmed = evidence
+    .replace(/<0x[0-9A-Fa-f]{2}>/gu, "")
+    .replace(/^[「『"'“”‘’（(\s…]+/u, "")
+    .replace(/[」』"'“”‘’）)\s…。．.！？!?]+$/u, "");
+  const normalized = normalizeForComparison(trimmed);
+  return normalized.length >= 4 ? normalized : null;
 }
 
 /**

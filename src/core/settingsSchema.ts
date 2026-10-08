@@ -405,6 +405,38 @@ export function locationSchema(): Record<string, unknown> {
   return schemaOf("場所", "^loc_\\d+$", {
     region: { type: ["string", "null"], description: "上位の地域" },
     description: { type: ["string", "null"] },
+    // 位置関係（設計書6.93.2）。手で書くときに全部の欄を書かせない
+    // （読み込みが既定値で補う。種類と相手だけは補えない）
+    relations: {
+      type: "array",
+      description: "ほかの場所との位置関係",
+      items: {
+        type: "object",
+        required: ["kind", "target"],
+        properties: {
+          kind: {
+            enum: ["within", "adjacent", "direction", "distance"],
+            description:
+              "within＝相手の中／adjacent＝相手に隣接／direction＝相手から見た方角／distance＝相手からの距離",
+          },
+          target: { type: "string", minLength: 1, description: "相手の場所の名前" },
+          targetId: {
+            type: ["string", "null"],
+            description: "相手の場所のID。名前から引けるので手で書かなくてよい",
+          },
+          value: {
+            type: ["string", "null"],
+            description: "方角（direction）か距離（distance）。本文の言い方のまま",
+          },
+          chapters: { type: "array", items: { type: "integer", minimum: 0 } },
+          evidence: { type: ["string", "null"] },
+          authorLocked: {
+            type: "boolean",
+            description: "true ならAIの抽出で書き換えない",
+          },
+        },
+      },
+    },
   });
 }
 

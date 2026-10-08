@@ -1,0 +1,213 @@
+import { describe, expect, test } from "vitest";
+import {
+  applyLocationEdits,
+  editedLocationRelations,
+  formatLocationRelationsForEdit,
+  SettingsEditError,
+} from "../../../src/core/settingsEdit";
+import { buildLocationMarkdown } from "../../../src/core/settingsMarkdown";
+import {
+  emptyLocation,
+  type Location,
+  type LocationRelation,
+} from "../../../src/models/location";
+
+/**
+ * 設定資料パネルの位置関係欄と、設定資料集（Markdown）の位置関係（設計書6.93.7）。
+ *
+ * 欄は「港町の中」「港の北」「港から徒歩10分」「防波堤に隣接」を1行に1つ。
+ * 書いたまま保存しても何も変わらないこと、触らない行の話数と根拠が
+ * 消えないこと、読めない行で止まることを見る。
+ */
+
+const extracted: LocationRelation[] = [
+  {
+    kind: "within",
+    target: "港町",
+    targetId: "loc_003",
+    value: null,
+    chapters: [1],
+    evidence: "港町の外れに港がある",
+    authorLocked: false,
+  },
+  {
+    kind: "direction",
+    target: "港",
+    targetId: "loc_001",
+    value: "北",
+    chapters: [2, 4],
+    evidence: "学校は港の北に建っている",
+    authorLocked: false,
+  },
+  {
+    kind: "distance",
+    target: "港",
+    targetId: "loc_001",
+    value: "徒歩10分",
+    chapters: [3],
+    evidence: "港から学校までは徒歩10分ほどだ",
+    authorLocked: false,
+  },
+  {
+    kind: "adjacent",
+    target: "防波堤",
+    targetId: null,
+    value: null,
+    chapters: [5],
+    evidence: "学校は防波堤に隣接している",
+    authorLocked: false,
+  },
+];
+
+const school: Location = { ...emptyLocation("loc_002", "学校"), relations: extracted };
+const ledger: Location[] = [
+  emptyLocation("loc_001", "港"),
+  school,
+  emptyLocation("loc_003", "港町"),
+  { ...emptyLocation("loc_004", "灯台"), aliases: ["白灯台"] },
+];
+
+describe("位置関係欄の書き方", () => {
+  test("1行に1つ、決まった形で出す", () => {
+    expect(formatLocationRelationsForEdit(extracted)).toBe(
+      ["港町の中", "港の北", "港から徒歩10分", "防波堤に隣接"].join("\n")
+    );
+  });
+
+  test("出したまま保存しても、関係は1つも変わらない（話数・根拠・IDも残る）", () => {
+    const text = formatLocationRelationsForEdit(extracted);
+    const result = editedLocationRelations(extracted, text, school, ledger);
+    expect(result).toEqual(extracted);
+    expect(formatLocationRelationsForEdit(result)).toBe(text);
+  });
+
+  test("名前に「の」や「から」を含む場所でも、触らなければ形が崩れない", () => {
+    const tricky: LocationRelation[] = [
+      { ...extracted[1], target: "からくり館の離れ", value: "北" },
+    ];
+    const text = formatLocationRelationsForEdit(tricky);
+    expect(editedLocationRelations(tricky, text, school)).toEqual(tricky);
+  });
+
+  test("1行だけ直すと、ほかの行の話数と根拠は残り、直した行は作者の関係になる", () => {
+    const text = ["港町の中", "港の北東", "港から徒歩10分", "防波堤に隣接"].join("\n");
+    const result = editedLocationRelations(extracted, text, school, ledger);
+    expect(result[0]).toEqual(extracted[0]);
+    expect(result[2]).toEqual(extracted[2]);
+    expect(result[3]).toEqual(extracted[3]);
+    expect(result[1]).toEqual({
+      kind: "direction",
+      target: "港",
+      targetId: "loc_001",
+      value: "北東",
+      chapters: [],
+      evidence: null,
+      authorLocked: true,
+    });
+  });
+
+  test("新しい行の相手は、別名からでも台帳のIDを引く", () => {
+    const result = editedLocationRelations([], "白灯台に隣接", school, ledger);
+    expect(result).toEqual([
+      {
+        kind: "adjacent",
+        target: "白灯台",
+        targetId: "loc_004",
+        value: null,
+        chapters: [],
+        evidence: null,
+        authorLocked: true,
+      },
+    ]);
+  });
+
+  test.each([
+    ["港町の中", "within", "港町", null],
+    ["防波堤に隣接", "adjacent", "防波堤", null],
+    ["港から馬で半日", "distance", "港", "馬で半日"],
+    ["港の南西", "direction", "港", "南西"],
+    ["川の上流", "direction", "川", "上流"],
+    ["からくり館の北", "direction", "からくり館", "北"],
+  ])("「%s」を読む", (line, kind, target, value) => {
+    const [result] = editedLocationRelations([], line, school);
+    expect(result).toMatchObject({ kind, target, value });
+  });
+
+  test("行を消せば関係も消える", () => {
+    const result = editedLocationRelations(extracted, "港町の中", school);
+    expect(result).toEqual([extracted[0]]);
+  });
+
+  test("同じ行は1つにまとめる", () => {
+    expect(editedLocationRelations([], "港の北\n港の北", school)).toHaveLength(1);
+  });
+
+  test("渡されなければ触らない", () => {
+    expect(editedLocationRelations(extracted, undefined, school)).toEqual(extracted);
+  });
+
+  test("読めない行は、行番号を挙げて止める（黙って捨てない）", () => {
+    expect(() => editedLocationRelations([], "港町の中\n港", school)).toThrow(
+      SettingsEditError
+    );
+    expect(() => editedLocationRelations([], "港町の中\n港", school)).toThrow("2行目");
+  });
+
+  test("値が長すぎる行は止める（関係ではなく描写）", () => {
+    expect(() =>
+      editedLocationRelations(
+        [],
+        "港から朝早くに出ても夕方まで歩き続けてようやく着くほど",
+        school
+      )
+    ).toThrow(SettingsEditError);
+  });
+
+  test("自分自身を相手にした行は止める", () => {
+    expect(() => editedLocationRelations([], "学校の北", school)).toThrow("自身");
+  });
+
+  test("パネルで保存すると、場所は確定した記録になる（抽出で関係が戻らない）", () => {
+    const saved = applyLocationEdits(
+      school,
+      { relations: "港町の中" },
+      { locations: ledger }
+    );
+    expect(saved.relations).toEqual([extracted[0]]);
+    expect(saved.autoGenerated).toBe(false);
+  });
+
+  test("欄を空にして保存すると、関係の欄ごと外す", () => {
+    const saved = applyLocationEdits(school, { relations: "" });
+    expect(saved).not.toHaveProperty("relations");
+  });
+
+  test("関係の無い場所をパネルで保存しても、空の欄を書き足さない", () => {
+    const saved = applyLocationEdits(emptyLocation("loc_001", "港"), {
+      relations: "",
+      description: "町の南の港",
+    });
+    expect(saved).not.toHaveProperty("relations");
+  });
+
+  test("位置関係欄を送らない保存では関係を触らない", () => {
+    const saved = applyLocationEdits(school, { description: "坂の上の学校" });
+    expect(saved.relations).toEqual(extracted);
+  });
+});
+
+describe("設定資料集（Markdown）の位置関係", () => {
+  test("パネルの欄と同じ書き方で並べる", () => {
+    const markdown = buildLocationMarkdown([school], { workTitle: "灯台守の休日" });
+    expect(markdown).toContain(
+      "- **位置関係**: 港町の中／港の北／港から徒歩10分／防波堤に隣接"
+    );
+  });
+
+  test("関係が無ければ行を出さない", () => {
+    const markdown = buildLocationMarkdown([emptyLocation("loc_001", "港")], {
+      workTitle: "灯台守の休日",
+    });
+    expect(markdown).not.toContain("位置関係");
+  });
+});

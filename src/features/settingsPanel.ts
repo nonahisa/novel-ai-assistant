@@ -37,7 +37,9 @@ import {
   applyOrganizationEdits,
   applyWorldItemEdits,
   appendAiNote,
+  describeLocationRelationEditHint,
   describeRelationEditHint,
+  formatLocationRelationsForEdit,
   formatRelationsForEdit,
   removeAiNote,
   toRecordEdits,
@@ -1150,6 +1152,17 @@ export class SettingsPanel {
         field("reading", "読み", location.reading),
         field("aliases", "別名（読点区切り）", location.aliases.join("、")),
         field("region", "地域", location.region),
+        // 位置関係（設計書6.93.7）。地図の絵は描かない——方角と距離だけでは
+        // 位置が決まらず、決めたふりの図は誤解を生む
+        {
+          ...field(
+            "relations",
+            "位置関係（1行に1つ）",
+            formatLocationRelationsForEdit(location.relations ?? []),
+            true
+          ),
+          hint: describeLocationRelationEditHint(),
+        },
         field("description", "説明", location.description, true),
         // 作者が足した項目（2026-09-23〜）。人物と同じく、既定の項目のあと・メモの前
         ...customFieldControls(
@@ -1828,7 +1841,11 @@ export class SettingsPanel {
     if (kind === "world") {
       return applyWorldItemEdits(record as WorldItem, edits, options);
     }
-    return applyLocationEdits(record as Location, edits, options);
+    // 場所の一覧を渡すのは、位置関係欄に書いた相手を台帳のIDへ引き当てるため
+    return applyLocationEdits(record as Location, edits, {
+      ...options,
+      locations: this.locations,
+    });
   }
 
   private async persist(
