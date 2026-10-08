@@ -2,8 +2,19 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   exportFileBaseName,
   exportFileNameCandidates,
+  exportFormatChoices,
+  readSnapshot,
+  snapshotPath,
+  writeAudienceCsvExport,
   writeAudienceExport,
+  writeSnapshotFile,
 } from "../../../src/features/exportSettingsForAudience";
+import { buildExportDocument } from "../../../src/core/settingsExportProfiles";
+import { snapshotOf } from "../../../src/core/settingsExportDiff";
+import {
+  FIXTURE_OPTIONS,
+  fixtureData,
+} from "../support/settingsExportFixture";
 import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
 
 /**
@@ -38,6 +49,39 @@ describe("書き出すファイルの名前", () => {
       "設定資料（イラスト発注用・第12話まで） 2026-09-05 1430.md",
       "設定資料（イラスト発注用・第12話まで） 2026-09-05 143005.md",
     ]);
+  });
+});
+
+describe("形式の選択肢（F6）", () => {
+  test("Markdown が先頭で、6つの形式が並ぶ", () => {
+    expect(exportFormatChoices(true).map((choice) => choice.id)).toEqual([
+      "markdown",
+      "html",
+      "csv",
+      "pdf",
+      "docx",
+      "diff",
+    ]);
+  });
+
+  test("手元の VS Code では、どれも使える", () => {
+    for (const choice of exportFormatChoices(true)) {
+      expect(choice.blockedReason, choice.id).toBeNull();
+    }
+  });
+
+  test("ブラウザ版では PDF だけを、消さずに理由つきで押せなくする", () => {
+    const choices = exportFormatChoices(false);
+    expect(choices).toHaveLength(6);
+    const blocked = choices.filter((choice) => choice.blockedReason !== null);
+    expect(blocked.map((choice) => choice.id)).toEqual(["pdf"]);
+    expect(blocked[0].blockedReason).toContain("ブラウザ版");
+  });
+
+  test("差分の控えは .aiwriter の下に、提供先ごとに1つ", () => {
+    expect(snapshotPath("C:\\works\\灯の塔\\.aiwriter", "illustration")).toBe(
+      "C:\\works\\灯の塔\\.aiwriter\\settings-exports\\illustration.json"
+    );
   });
 });
 
@@ -125,6 +169,106 @@ describe("書き出し", () => {
         files.get(key(`${DIRECTORY}\\設定資料（イラスト発注用・第12話まで）.md`))
       )
     ).toBe("1回目");
+  });
+
+  test("HTML・Word は拡張子だけ変えて、同じ名前の決まりで置く", async () => {
+    const html = await writeAudienceExport(DIRECTORY, "illustration", 12, "<p>", AT, {
+      extension: ".html",
+    });
+    const word = await writeAudienceExport(
+      DIRECTORY,
+      "illustration",
+      12,
+      new Uint8Array([0x50, 0x4b]),
+      AT,
+      { extension: ".docx" }
+    );
+    expect(html.endsWith("設定資料（イラスト発注用・第12話まで）.html")).toBe(true);
+    expect(word.endsWith("設定資料（イラスト発注用・第12話まで）.docx")).toBe(true);
+    // バイト列はそのまま書く（文字列に直さない）
+    expect([...files.get(key(word))!]).toEqual([0x50, 0x4b]);
+  });
+
+  test("差分は添え書きの付いた名前で、資料本体の名前とぶつからない", async () => {
+    await writeAudienceExport(DIRECTORY, "editorial", null, "本体", AT);
+    await writeAudienceExport(DIRECTORY, "editorial", null, "差分", AT, {
+      suffix: "・前回との差分",
+    });
+    expect(names()).toEqual([
+      "設定資料（編集部用・全話）.md",
+      "設定資料（編集部用・全話）・前回との差分.md",
+    ]);
+  });
+
+  test("CSV は新しいフォルダーに、種別ごとのファイルと頭書きを置く", async () => {
+    const folder = await writeAudienceCsvExport(
+      DIRECTORY,
+      "editorial",
+      null,
+      [
+        { kind: "characters", label: "登場人物", content: "名前\r\n" },
+        { kind: "locations", label: "場所", content: "名前\r\n" },
+      ],
+      "# 頭書き",
+      AT
+    );
+    expect(folder.endsWith("設定資料（編集部用・全話）（CSV）")).toBe(true);
+    expect(names()).toEqual(["この資料について.md", "場所.csv", "登場人物.csv"]);
+  });
+
+  test("CSV のフォルダーが既にあれば、別名のフォルダーにする（中へ書き足さない）", async () => {
+    // 前回の書き出しで作ったフォルダーが残っている
+    files.set(
+      key(`${DIRECTORY}\\設定資料（編集部用・全話）（CSV）`),
+      new Uint8Array()
+    );
+    const folder = await writeAudienceCsvExport(
+      DIRECTORY,
+      "editorial",
+      null,
+      [{ kind: "characters", label: "登場人物", content: "名前\r\n" }],
+      "# 頭書き",
+      AT
+    );
+    expect(folder.endsWith("設定資料（編集部用・全話）（CSV） 2026-09-05 1430")).toBe(true);
+  });
+
+  test("差分の控えは、2回目以降も同じ名前へ置き直せる（上書きの経路）", async () => {
+    /*
+      **2回目で失敗すると、差分を選ぶたびに「控えが無い」になる。**
+      既存ファイルへの書き込みが必ず失敗する経路（`replaceGuarded`）を
+      取り違えていないことを、実際に2度書いて読み戻して確かめる。
+    */
+    const file = snapshotPath(`${DIRECTORY}\\..\\.aiwriter`, "editorial");
+    expect(await readSnapshot(file)).toEqual({ snapshot: null, reason: "none" });
+
+    const first = snapshotOf(
+      buildExportDocument("editorial", fixtureData(), {
+        ...FIXTURE_OPTIONS,
+        chapter: 3,
+      }),
+      AT
+    );
+    await writeSnapshotFile(file, first);
+    expect((await readSnapshot(file)).snapshot).toEqual(first);
+
+    const second = snapshotOf(
+      buildExportDocument("editorial", fixtureData(), {
+        ...FIXTURE_OPTIONS,
+        chapter: null,
+      }),
+      AT
+    );
+    await writeSnapshotFile(file, second);
+    expect((await readSnapshot(file)).snapshot).toEqual(second);
+  });
+
+  test("壊れた控えは直さずに「読めない」と返す", async () => {
+    const file = snapshotPath(`${DIRECTORY}\\..\\.aiwriter`, "editorial");
+    files.set(key(file), new TextEncoder().encode("{ 壊れている"));
+    expect(await readSnapshot(file)).toEqual({ snapshot: null, reason: "broken" });
+    // 読んだだけで、中身は変えていない
+    expect(new TextDecoder().decode(files.get(key(file)))).toBe("{ 壊れている");
   });
 
   test("作者が置いた同名のファイルも潰さない", async () => {

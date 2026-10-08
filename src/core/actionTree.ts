@@ -2016,9 +2016,10 @@ export const ACTION_TREE: readonly ActionGroup[] = [
             icon: "mail",
             requiresWork: true,
             detail:
-              "渡す相手に合わせて項目を絞った設定資料を1ファイルに\n\n" +
+              "渡す相手に合わせて項目を絞った設定資料を書き出す\n\n" +
               "・編集部向け／イラスト・デザイン発注向け／紹介向け\n\n" +
               "・「第N話までの情報だけ」も選べる\n\n" +
+              "・形式は Markdown／HTML／CSV／PDF／Word と、前回との差分\n\n" +
               "・含めた項目と含めなかった項目はファイルの冒頭に\n\n" +
               "AIは呼ばない。",
           },
