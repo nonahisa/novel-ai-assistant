@@ -605,6 +605,34 @@ export class AIError extends Error {
 }
 
 /**
+ * AI の安全装置に止められた（応答の止まった理由が「拒否」だった）。
+ *
+ * **種別は `bad_response` のまま変えない。** これまでの扱い（通知の文・
+ * 失敗の数え方）はすべて `AIError` として同じに動く。分けたのは、
+ * 読める長さの測定（`features/measureContext.ts`）が「長さとは関係の無い
+ * 止まり方」と見分けるためだけである。
+ *
+ * **文面から見分けない**（実装ルール5「エラー文から原因を当てない」）。
+ * 通知の文は作者に見せるもので、言い回しを直した瞬間に判定が外れる。
+ * プロバイダが応答の止まった理由（`stop_reason: "refusal"`）を見て、
+ * この型で投げる。
+ *
+ * 2026-10-08、Claude で約70万字の詰め物を送ったところ、安全装置に
+ * 止められた（category: "cyber"）。
+ */
+export class AIRefusalError extends AIError {
+  constructor(message: string, detail?: string) {
+    super(message, "bad_response", detail);
+    this.name = "AIRefusalError";
+  }
+}
+
+/** 安全装置に止められた失敗か */
+export function isRefusalError(error: unknown): error is AIRefusalError {
+  return error instanceof AIRefusalError;
+}
+
+/**
  * 待っても直らない失敗か。**残りのチャンクを試すだけ無駄になる**もの。
  *
  * チャンク単位の失敗で全体を止めないのが原則だが（CLAUDE.md 実装スタイル）、

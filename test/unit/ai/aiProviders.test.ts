@@ -10,7 +10,7 @@ import {
 import { OpenAIProvider } from "../../../src/ai/openaiProvider";
 import { GeminiProvider } from "../../../src/ai/geminiProvider";
 import { LmStudioProvider } from "../../../src/ai/lmstudioProvider";
-import { AIError } from "../../../src/ai/types";
+import { AIError, isRefusalError } from "../../../src/ai/types";
 import { setStreamingSettingReader } from "../../../src/ai/ollamaStream";
 import { workspace } from "../support/vscodeStub";
 
@@ -773,6 +773,24 @@ describe("AIプロバイダ境界", () => {
     await expect(new ClaudeProvider(claudeContext()).generate(ollamaParams)).rejects.toMatchObject({
       kind: "bad_response",
     });
+  });
+
+  // 読める長さの測定が「安全装置に止められた」と見分けるため（設計書6.49.10）。
+  // 文面からではなく型で見分ける
+  test("Claudeのrefusalは、種別を変えずに安全装置の拒否と見分けられる", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes("/v1/models/")) {
+        return jsonResponse(claudeModel);
+      }
+      return jsonResponse(claudeMessage("", "refusal"));
+    }));
+
+    const error = await new ClaudeProvider(claudeContext())
+      .generate(ollamaParams)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(AIError);
+    expect(isRefusalError(error)).toBe(true);
   });
 
   test("Claudeは空白だけの応答をbad_responseとして返す", async () => {
