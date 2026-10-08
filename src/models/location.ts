@@ -46,19 +46,11 @@ export const LOCATION_RELATION_KINDS = [
 
 export type LocationRelationKind = (typeof LOCATION_RELATION_KINDS)[number];
 
-/** 8方位。方角の値はこれか、本文の短い言い方（「上流」「山側」） */
-export const COMPASS_DIRECTIONS = [
-  "北",
-  "北東",
-  "東",
-  "南東",
-  "南",
-  "南西",
-  "西",
-  "北西",
-] as const;
-
-/** 方角・距離の値の上限。これより長いものは関係ではなく描写である */
+/**
+ * 方角・距離の値の上限。これより長いものは関係ではなく描写である。
+ * 方角は8方位でも本文の短い言い方（「上流」「山側」）でもよいので、表では絞らない
+ * （8方位の表は、方角の非対称を比べる機械照合〈6.93.4、順2〉で要る）
+ */
 export const LOCATION_RELATION_VALUE_MAX_CHARS = 20;
 
 export interface LocationRelation {
