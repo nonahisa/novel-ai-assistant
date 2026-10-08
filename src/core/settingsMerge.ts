@@ -663,8 +663,9 @@ function mergeLocationRelations(
   conflicts: LocationMergeResult["conflicts"]
 ): boolean {
   let changed = false;
-  // 読み込みを通らずに来た古い形の記録（関係の欄が無い）にも備える
-  target.relations ??= [];
+  // 関係の無い場所は欄ごと持たない（`withOptionalRelations`）。手元の配列で
+  // 組み立て、1つでもあるときだけ記録へ戻す——空の欄を書き足さないため
+  const relations = target.relations ?? [];
   const ownKeys = new Set(
     [target.name, ...target.aliases].map(normalizeLocationName)
   );
@@ -678,13 +679,13 @@ function mergeLocationRelations(
     const chapters = relation.chapters ?? fallbackChapters;
     const evidence = relation.evidence?.trim() || null;
 
-    const existing = target.relations.find(
+    const existing = relations.find(
       (entry) =>
         entry.kind === kind &&
         normalizeLocationName(entry.target) === normalizeLocationName(name)
     );
     if (!existing) {
-      target.relations.push({
+      relations.push({
         kind,
         target: name,
         targetId: null,
@@ -720,6 +721,7 @@ function mergeLocationRelations(
       recordRelationConflict(target, existing, value ?? "", chapters, evidence, conflicts) ||
       changed;
   }
+  if (relations.length > 0) target.relations = relations;
   return changed;
 }
 
@@ -779,13 +781,20 @@ function recordRelationConflict(
  * （別名で書かれていた）は、関係として意味を持たないので外す。
  */
 function resolveRelationTargets(location: Location, all: Location[]): void {
-  location.relations = location.relations.filter((relation) => {
+  if (!location.relations) return;
+  const kept = location.relations.filter((relation) => {
     if (relation.authorLocked) return true;
     const found = findByAppellation(all, [relation.target], normalizeLocationName);
     if (found?.id === location.id) return false;
     if (found && relation.targetId === null) relation.targetId = found.id;
     return true;
   });
+  // 全部外れたら欄ごと外す（空の欄を残さない）
+  if (kept.length > 0) {
+    location.relations = kept;
+  } else {
+    delete location.relations;
+  }
 }
 
 /** 別名は和集合。照合に使われた別表記も残す */

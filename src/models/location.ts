@@ -115,9 +115,11 @@ export interface Location {
   /**
    * ほかの場所との位置関係（設計書6.93.2。0.100.x〜）。
    * `region` は残す——既存の記録と画面を壊さないため。別の台帳（「地図」）は
-   * 作らず、組織の `parent` と同じく場所の記録に置く
+   * 作らず、組織の `parent` と同じく場所の記録に置く。
+   * **1つも無ければキーごと持たない**——関係の無い場所のファイルを、
+   * 保存のたびに書き換えないため（`withOptionalRelations`）。読むときは無ければ空
    */
-  relations: LocationRelation[];
+  relations?: LocationRelation[];
   appearedChapters: number[];
   status: "登場済み" | "未登場";
   spoilerLevel: "public" | "staff_only" | "author_only";
@@ -152,7 +154,6 @@ export function emptyLocation(id: string, name: string): Location {
     summary: null,
     region: null,
     description: null,
-    relations: [],
     appearedChapters: [],
     status: "登場済み",
     spoilerLevel: "public",
@@ -190,18 +191,40 @@ export function nextLocationId(existing: Location[]): string {
 /** 旧バージョンや手書きJSONでも落ちないよう欠損を補う */
 export function normalizeLocation(raw: Partial<Location>): Location {
   const base = emptyLocation(raw.id ?? "loc_unknown", raw.name ?? "名称不明");
-  return {
-    ...base,
-    ...raw,
-    aliases: raw.aliases ?? [],
-    // 0.100.x より前のファイルには無い。無いのは「関係が分かっていない」だけ
-    relations: raw.relations ?? [],
-    appearedChapters: raw.appearedChapters ?? [],
-    conflicts: raw.conflicts ?? [],
-    aiNotes: raw.aiNotes ?? [],
-    authorNotes: raw.authorNotes ?? "",
-    exportNote: raw.exportNote ?? "",
-  } as Location;
+  // 位置関係は空なら欄ごと持たない（`withOptionalRelations`）
+  return withOptionalRelations(
+    {
+      ...base,
+      ...raw,
+      aliases: raw.aliases ?? [],
+      appearedChapters: raw.appearedChapters ?? [],
+      conflicts: raw.conflicts ?? [],
+      aiNotes: raw.aiNotes ?? [],
+      authorNotes: raw.authorNotes ?? "",
+      exportNote: raw.exportNote ?? "",
+    } as Location,
+    raw.relations
+  );
+}
+
+/**
+ * 位置関係を入れる。**空なら欄ごと外す**（`withOptionalCustomFields` と同じ形）。
+ *
+ * 関係の無い場所が、保存のたびに `"relations": []` で書き換わらないようにする。
+ * 作者の書庫は同期しているので、中身の変わらない差分が全部の場所のファイルに
+ * 出ると、本当に変わったものが埋もれる。
+ */
+export function withOptionalRelations<T extends { relations?: LocationRelation[] }>(
+  record: T,
+  relations: readonly LocationRelation[] | undefined
+): T {
+  const copy = { ...record };
+  if (relations && relations.length > 0) {
+    copy.relations = [...relations];
+  } else {
+    delete copy.relations;
+  }
+  return copy;
 }
 
 /** 表記ゆれを吸収して同一場所を判定する */
