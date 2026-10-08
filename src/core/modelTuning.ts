@@ -16,6 +16,7 @@ import {
 // 住んでいるので、モデルの表を読むときに読み飛ばす必要がある
 import { FEATURE_OUTPUT_KEY_PREFIX } from "./featureOutputTokens";
 import { MIN_CHARS_PER_TOKEN_SAMPLES } from "./sizeBudget";
+import { thinkingOverheadOf } from "./outputCeiling";
 import { WORK_REFERENCE_CHARS, WORK_TIME_MARGIN } from "./tuningStages";
 import { predictWorkSeconds, type WorkRate } from "./etaEstimate";
 // 同梱の精度の目安を混ぜるとき、**いまの頼み方と文の版か**を確かめる。
@@ -1155,8 +1156,9 @@ export function workRateOf(tuning: ModelTuning | undefined): WorkRate | undefine
  * （`ai/outputLimit.ts`・`ai/runTimeEstimate.ts`）がそこを分ける。
  */
 export function unsuppressedThinkingTokens(tuning: ModelTuning | undefined): number {
-  if (tuning?.thinkingOffWorks !== false) return 0;
-  return tuning.thinkingOverheadTokens ?? 0;
+  // 計算は MCP の `novel.run` と同じ関数（`core/outputCeiling.ts`）。あちらは
+  // `vscode` を読めないので、写しを作らずにこちらから借りる
+  return thinkingOverheadOf(tuning);
 }
 
 /**

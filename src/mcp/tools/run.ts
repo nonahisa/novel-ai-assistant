@@ -4,6 +4,7 @@ import { askSampling } from "./sampling";
 import { ollamaGenerate } from "./ollama";
 import { openChunkCache } from "./chunkCacheFile";
 import type { CacheKeyBase } from "../../core/chunkCacheStore";
+import { bundledFeatureOutputCeiling } from "../../core/outputCeiling";
 
 /**
  * `run` ツールの返し方（設計書6.87.8 の5・6）。
@@ -172,6 +173,14 @@ export interface RunnerContext {
    * 条件ではない**——記録にもその旨が残るようにしてある。
    */
   temperature?: number;
+  /**
+   * 1チャンク（1回の呼び出し）を待つ秒数（2026-10-08）。省略すると30分
+   * （`MCP_OLLAMA_WAIT_MS`）。それより長くはできない。
+   *
+   * **製品の待ち時間（設定・台帳）はこの束から読めない**（`vscode` に届く）。
+   * 製品と同じ条件で測りたいときは、呼ぶ側が作者の秒数を渡す。
+   */
+  timeoutSeconds?: number;
 }
 
 /**
@@ -253,7 +262,11 @@ export async function runByRunner<
     numCtx: number;
     temperature: number;
     allowRemote?: boolean;
-  }) => Promise<{ text: string }>,
+    /** 出力の上限。機能の見込みが無ければ undefined（送らない） */
+    numPredict?: number;
+    /** 1回の呼び出しを待つ上限（ミリ秒）。undefined なら道具の既定 */
+    timeoutMs?: number;
+  }) => Promise<{ text: string; truncated?: boolean }>,
   /**
    * 結果を貯める先。**省略できる**（製品の鍵を組み立てられない機能がある）。
    * 詳しくは `RunChunkCache` の断り書き。
@@ -324,6 +337,19 @@ export async function runByRunner<
     };
   if (store) await store.load();
 
+  /*
+    **出力の上限は、製品と同じ計算で決める**（2026-10-08。`core/outputCeiling.ts`）。
+    この束は作者の台帳を読めないので、同梱の見込みに当てる。機能が分かるのは
+    キャッシュを渡してきた道具だけ（製品と同じ機能名を持っている）なので、
+    渡さない道具はこれまでどおり上限なしで投げる。
+  */
+  const numPredict = bundledFeatureOutputCeiling(
+    cache?.feature,
+    OLLAMA_PROVIDER_ID,
+    model
+  );
+  const timeoutMs = timeoutMsOf(context.timeoutSeconds);
+
   const outcome = await runChunks(
     model,
     temperature,
@@ -349,10 +375,16 @@ export async function runByRunner<
         numCtx: context.numCtx,
         temperature,
         allowRemote: context.allowRemote,
+        ...(numPredict !== undefined ? { numPredict } : {}),
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       });
       // **検算が通ってから貯める。** 読み取れない応答を貯めると、
       // 次からその壊れた答えが返り続ける
-      const result = validate(item.chunkId, response.text);
+      const result = validateNoting(
+        () => validate(item.chunkId, response.text),
+        response.truncated === true,
+        numPredict
+      );
       if (store && cache && keyBase && chunkHash !== undefined) {
         const parsed = cache.parse(response.text);
         if (parsed !== undefined && parsed !== null) {
@@ -378,6 +410,42 @@ export async function runByRunner<
     }
   }
   return outcome;
+}
+
+/** 秒の指定をミリ秒にする。指定が無い・読めないときは undefined（道具の既定） */
+export function timeoutMsOf(seconds: number | undefined): number | undefined {
+  if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) {
+    return undefined;
+  }
+  return seconds * 1000;
+}
+
+/**
+ * 検算を通す。**上限で切られた応答が読めなかったら、そうと言い添える**
+ * （2026-10-08）。
+ *
+ * 10-08 の測定では、暴走したチャンクの失敗が「スキーマに沿っていません」とだけ
+ * 残り、出力が止まらなかったことは記録から読めなかった。**何が起きたかを先に
+ * 言う。** 読めたときはそのまま通す——切れたJSONから閉じられる所まで救う
+ * 検算がある（逸脱検知）ので、切れたこと自体を失敗にはしない。
+ */
+function validateNoting<R>(
+  run: () => R,
+  truncated: boolean,
+  numPredict: number | undefined
+): R {
+  try {
+    return run();
+  } catch (error) {
+    if (!truncated) throw error;
+    const limit =
+      numPredict !== undefined
+        ? `出力が上限（${numPredict} トークン）に達したので打ち切りました`
+        : "出力が読める長さ（num_ctx）の終わりに達して打ち切られました";
+    throw new McpToolError(
+      `${limit}。そこまでの応答は検算を通りませんでした: ${describeError(error)}`
+    );
+  }
 }
 
 /**
@@ -414,6 +482,8 @@ export interface RunnerInput {
   numCtx?: number;
   /** 温度を明示して測りたいとき。**省略すれば製品と同じ値**（6.87.16） */
   temperature?: number;
+  /** 1回の呼び出しを待つ秒数（`RunnerContext.timeoutSeconds` と同じ） */
+  timeoutSeconds?: number;
 }
 
 export type OnceOutcome<T> =
@@ -497,12 +567,18 @@ export async function runOnce<T>(
     numCtx: input.numCtx ?? ONCE_DEFAULT_NUM_CTX,
     temperature,
     allowRemote: input.allowRemote,
+    // 出力の上限は送らない（この道は機能名を受け取っていない）。時計だけ渡す
+    timeoutMs: timeoutMsOf(input.timeoutSeconds),
   });
   return {
     runner: "ollama",
     model,
     temperature,
-    result: validate(response.text),
+    result: validateNoting(
+      () => validate(response.text),
+      response.truncated,
+      undefined
+    ),
   };
 }
 
