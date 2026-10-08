@@ -496,8 +496,107 @@ function mentionAllowed<
   return found.every((record) => isExportable(record, profile, chapter));
 }
 
+/* ──────────────────────  組み上がった資料の形（F6）  ────────────────────── */
+
+/*
+  **出す・出さないの判断と、書式を分けてある**（F6、0.100.x）。
+
+  以前は判断と Markdown の行づくりが同じ関数に混ざっていた。HTML・CSV・
+  Word・差分を足すにあたって、形式ごとに判断を書き直すと「Markdown では
+  伏せた名前が CSV から漏れる」穴が形式の数だけ開く（0.32.6・0.32.8 で
+  3度塞いだのと同じ種類の穴）。そこで判断は下の `buildExportDocument` が
+  1回だけ行い、各形式はその結果（`ExportDocument`）を描くだけにした。
+  **どの形式も、ここに無いものは出しようがない。**
+*/
+
+/** 項目1つ。`- **label**: value` の1行に当たる */
+export interface ExportField {
+  label: string;
+  value: string;
+  /**
+   * 表（CSV）にしたときの列の名前。省けば `label`。
+   *
+   * 「白鳥への呼称」「変化（外見）」のように**相手や欄の名前が入る項目**は、
+   * そのまま列にすると相手の数だけ列が増える。列は1つにまとめ、
+   * セルの中で「白鳥への呼称：白鳥さん」と書き分ける。
+   */
+  column?: string;
+}
+
+/** レコード1件（人物1人・場所1つ…） */
+export interface ExportRecord {
+  name: string;
+  /** 見出しに添える読み。その型が読みを出さないなら null */
+  reading: string | null;
+  /** 見出しの直後の段落（紹介文。世界観だけは説明） */
+  lead: string | null;
+  fields: ExportField[];
+  /** 作者が承認したAIの掘り下げ。出さない型・時点では空 */
+  aiNotes: readonly AiNote[];
+}
+
+/** 見出しでまとめた塊。まとめない型では1つだけで、`title` が null */
+export interface ExportGroup {
+  /** 見出しの文字（「所属の記載なし」のような受け皿の名前も含む） */
+  title: string | null;
+  /**
+   * まとめた値そのもの。受け皿（値の無いものを寄せた塊）なら null。
+   * 表にしたとき、受け皿の名前を値として書かないために分けてある
+   */
+  value: string | null;
+  records: ExportRecord[];
+}
+
+/** モブ・集団（名前だけの記録） */
+export interface ExportMob {
+  name: string;
+  /** 「第1、2話」。出さない型・記録が無いときは null */
+  chapters: string | null;
+}
+
+export type ExportSectionKind =
+  | "characters"
+  | "locations"
+  | "abilities"
+  | "organizations"
+  | "world";
+
+/** 種別1つ分（「## 登場人物」の章） */
+export interface ExportSection {
+  kind: ExportSectionKind;
+  title: string;
+  /** 1件も無いときの1文 */
+  emptyText: string;
+  /** `lead` の項目名。表の列名と差分の欄名に使う */
+  leadLabel: string;
+  /** まとめる値の項目名（所属・地域・分類・上位組織） */
+  groupLabel: string;
+  groups: ExportGroup[];
+  mobs: ExportMob[];
+}
+
+/** 冒頭の頭書き */
+export interface ExportHeader {
+  title: string;
+  /** 作品名・作者・作成日・型・範囲 */
+  meta: ExportField[];
+  /** 種別ごとの「含めた項目」。空なら何も含めていない */
+  included: ExportField[];
+  /** 種別ごとの「含めなかった項目」。空なら落とした項目は無い */
+  excluded: ExportField[];
+  /** 断り書きの段落（作者だけの印・時点で絞ったこと） */
+  notes: string[];
+}
+
+export interface ExportDocument {
+  audience: ExportAudience;
+  chapter: number | null;
+  header: ExportHeader;
+  sections: ExportSection[];
+}
+
 /**
- * 提供先の型に合わせた設定資料を組み立てる。
+ * 提供先の型に合わせた設定資料を組み立てる（Markdown）。
  *
  * @param audience 提供先の型
  * @param data 書き出す元の資料（読むだけ。値は書き換えない）
@@ -507,6 +606,20 @@ export function buildExportMarkdown(
   data: SettingsExportData,
   options: SettingsExportOptions
 ): string {
+  return renderExportMarkdown(buildExportDocument(audience, data, options));
+}
+
+/**
+ * 出してよいものだけを選んで、資料の形に組む。**判断はここだけが持つ。**
+ *
+ * @param audience 提供先の型
+ * @param data 書き出す元の資料（読むだけ。値は書き換えない）
+ */
+export function buildExportDocument(
+  audience: ExportAudience,
+  data: SettingsExportData,
+  options: SettingsExportOptions
+): ExportDocument {
   const profile = AUDIENCE_PROFILES[audience];
   const chapter = options.chapter;
   /**
@@ -518,28 +631,25 @@ export function buildExportMarkdown(
    */
   const undatedText = chapter === null;
 
-  const lines: string[] = [
-    ...headerLines(profile, data, options, undatedText),
-  ];
-
+  const sections: ExportSection[] = [];
   if (profile.characters) {
-    lines.push(
-      ...characterSection(profile, profile.characters, data, chapter, undatedText)
+    sections.push(
+      characterSection(profile, profile.characters, data, chapter, undatedText)
     );
   }
   if (profile.locations) {
-    lines.push(
-      ...locationSection(profile, profile.locations, data, chapter, undatedText)
+    sections.push(
+      locationSection(profile, profile.locations, data, chapter, undatedText)
     );
   }
   if (profile.abilities) {
-    lines.push(
-      ...abilitySection(profile, profile.abilities, data, chapter, undatedText)
+    sections.push(
+      abilitySection(profile, profile.abilities, data, chapter, undatedText)
     );
   }
   if (profile.organizations) {
-    lines.push(
-      ...organizationSection(
+    sections.push(
+      organizationSection(
         profile,
         profile.organizations,
         data,
@@ -549,12 +659,84 @@ export function buildExportMarkdown(
     );
   }
   if (profile.world) {
-    lines.push(
-      ...worldSection(profile, profile.world, data, chapter, undatedText)
+    sections.push(
+      worldSection(profile, profile.world, data, chapter, undatedText)
     );
   }
 
+  return {
+    audience,
+    chapter,
+    header: buildHeader(profile, data, options, undatedText),
+    sections,
+  };
+}
+
+/** 組んだ資料を Markdown にする（0.32.5 からの書式を1字も変えない） */
+export function renderExportMarkdown(document: ExportDocument): string {
+  const lines = headerMarkdownLines(document.header);
+  for (const section of document.sections) {
+    lines.push(...sectionMarkdownLines(section));
+  }
   return lines.join("\n");
+}
+
+/**
+ * 頭書きだけの Markdown。
+ *
+ * CSV は表の外に断り書きを置けないので、この1枚を添える
+ * （何を含めなかったかを、渡された側が読めるようにするため。設計書6.75）。
+ */
+export function renderExportHeaderMarkdown(header: ExportHeader): string {
+  return headerMarkdownLines(header).join("\n");
+}
+
+function headerMarkdownLines(header: ExportHeader): string[] {
+  const bullet = (field: ExportField) => `- **${field.label}**: ${field.value}`;
+  const lines: string[] = [`# ${header.title}`, "", ...header.meta.map(bullet)];
+  lines.push("", "## この資料に含めた項目", "");
+  if (header.included.length === 0) lines.push("- （何も含めていません）");
+  else lines.push(...header.included.map(bullet));
+  lines.push("", "## この資料に含めなかった項目", "");
+  if (header.excluded.length === 0) lines.push("- （落とした項目はありません）");
+  else lines.push(...header.excluded.map(bullet));
+  for (const note of header.notes) lines.push("", note);
+  lines.push("");
+  return lines;
+}
+
+function sectionMarkdownLines(section: ExportSection): string[] {
+  const lines = [`## ${section.title}`, ""];
+  const empty =
+    section.groups.every((group) => group.records.length === 0) &&
+    section.mobs.length === 0;
+  if (empty) {
+    lines.push(section.emptyText, "");
+    return lines;
+  }
+
+  for (const group of section.groups) {
+    if (group.title !== null) lines.push(`### ${group.title}`, "");
+    const depth = group.title !== null ? 4 : 3;
+    for (const record of group.records) {
+      lines.push(heading(depth, record.name, record.reading), "");
+      if (record.lead) lines.push(record.lead, "");
+      for (const field of record.fields) {
+        lines.push(`- **${field.label}**: ${field.value}`);
+      }
+      lines.push(...aiNoteLines([...record.aiNotes]));
+      lines.push("");
+    }
+  }
+
+  if (section.mobs.length > 0) {
+    lines.push("### モブ・集団", "");
+    for (const mob of section.mobs) {
+      lines.push(`- ${mob.name}${mob.chapters ? `（${mob.chapters}）` : ""}`);
+    }
+    lines.push("");
+  }
+  return lines;
 }
 
 /**
@@ -563,50 +745,36 @@ export function buildExportMarkdown(
  * **何を含めなかったかまで書く。** 渡された側が「これで全部だ」と思い込むと、
  * 足りない情報を訊いてもらえない（設計書6.75）。
  */
-function headerLines(
+function buildHeader(
   profile: AudienceProfile,
   data: SettingsExportData,
   options: SettingsExportOptions,
   undatedText: boolean
-): string[] {
+): ExportHeader {
   const scope =
     options.chapter === null
       ? "全話ぶん"
       : `第${options.chapter}話までに書かれたことだけ`;
 
-  const lines: string[] = [
-    `# ${options.workTitle} 設定資料（${profile.label}）`,
-    "",
-    `- **作品名**: ${options.workTitle}`,
-  ];
+  const meta: ExportField[] = [{ label: "作品名", value: options.workTitle }];
   if (options.authorName?.trim()) {
-    lines.push(`- **作者**: ${options.authorName.trim()}`);
+    meta.push({ label: "作者", value: options.authorName.trim() });
   }
-  lines.push(
-    `- **作成日**: ${formatDayStamp(options.at)}`,
-    `- **提供先の型**: ${profile.label}`,
-    `- **範囲**: ${scope}`,
-    "",
-    "## この資料に含めた項目",
-    ""
+  meta.push(
+    { label: "作成日", value: formatDayStamp(options.at) },
+    { label: "提供先の型", value: profile.label },
+    { label: "範囲", value: scope }
   );
 
-  for (const line of includedLines(profile, data)) lines.push(line);
-
-  lines.push("", "## この資料に含めなかった項目", "");
-  for (const line of excludedLines(profile, data)) lines.push(line);
-
-  lines.push(
-    "",
+  const notes: string[] = [
     `作者が「作者だけ」と印を付けた項目は含めていません。${
       profile.spoilerLevel === "public"
         ? "公開してよい印の付いた項目だけを載せています。"
         : ""
-    }`
-  );
+    }`,
+  ];
   if (!undatedText) {
-    lines.push(
-      "",
+    notes.push(
       `第${options.chapter}話までに絞ったため、いつ書かれたか分からない自由記述` +
         "（補足・AIの掘り下げ・判断待ちの食い違い）は、先の話の内容が混ざって" +
         "いないと言い切れないので含めていません。"
@@ -623,8 +791,7 @@ function headerLines(
     );
     if (undated.length > 0) {
       const names = undated.map((field) => CHARACTER_FIELD_LABELS[field]);
-      lines.push(
-        "",
+      notes.push(
         `ただし ${names.join("・")} は時点の記録を持たないため、` +
           "この資料でも最新の値で載っています（作中で変わっていれば、" +
           "第" +
@@ -632,30 +799,35 @@ function headerLines(
       );
     }
   }
-  lines.push("");
-  return lines;
+
+  return {
+    title: `${options.workTitle} 設定資料（${profile.label}）`,
+    meta,
+    included: includedFields(profile, data),
+    excluded: excludedFields(profile, data),
+    notes,
+  };
 }
 
 /** 種別ごとに「名前＋出す項目」を並べる */
-function includedLines(
+function includedFields(
   profile: AudienceProfile,
   data: SettingsExportData
-): string[] {
-  const lines: string[] = [];
+): ExportField[] {
+  const fields: ExportField[] = [];
   for (const kind of kindsOf(profile, data)) {
     if (!kind.fields) continue;
     const names = ["名前", ...kind.fields.map((field) => kind.labels[field])];
-    lines.push(`- **${kind.label}**: ${names.join("／")}`);
+    fields.push({ label: kind.label, value: names.join("／") });
   }
-  if (lines.length === 0) lines.push("- （何も含めていません）");
-  return lines;
+  return fields;
 }
 
-function excludedLines(
+function excludedFields(
   profile: AudienceProfile,
   data: SettingsExportData
-): string[] {
-  const lines: string[] = [];
+): ExportField[] {
+  const fields: ExportField[] = [];
   const wholeKinds: string[] = [];
 
   for (const kind of kindsOf(profile, data)) {
@@ -667,15 +839,14 @@ function excludedLines(
       .filter((field) => !kind.fields!.includes(field))
       .map((field) => kind.labels[field]);
     if (dropped.length > 0) {
-      lines.push(`- **${kind.label}**: ${dropped.join("／")}`);
+      fields.push({ label: kind.label, value: dropped.join("／") });
     }
   }
 
   if (wholeKinds.length > 0) {
-    lines.push(`- **${wholeKinds.join("・")}**: 種別ごと含めていません`);
+    fields.push({ label: wholeKinds.join("・"), value: "種別ごと含めていません" });
   }
-  if (lines.length === 0) lines.push("- （落とした項目はありません）");
-  return lines;
+  return fields;
 }
 
 /**
@@ -728,7 +899,7 @@ function characterSection(
   data: SettingsExportData,
   chapter: number | null,
   undatedText: boolean
-): string[] {
+): ExportSection {
   const visible = data.characters
     .filter((character) => isExportable(character, profile, chapter))
     .map((character) =>
@@ -738,11 +909,16 @@ function characterSection(
   const named = visible.filter((character) => !character.isMob);
   const mobs = profile.mobs ? visible.filter((c) => c.isMob) : [];
 
-  const lines = ["## 登場人物", ""];
-  if (named.length === 0 && mobs.length === 0) {
-    lines.push("該当する登場人物はありません。", "");
-    return lines;
-  }
+  const section: ExportSection = {
+    kind: "characters",
+    title: "登場人物",
+    emptyText: "該当する登場人物はありません。",
+    leadLabel: CHARACTER_FIELD_LABELS.summary,
+    groupLabel: CHARACTER_FIELD_LABELS.affiliation,
+    groups: [],
+    mobs: [],
+  };
+  if (named.length === 0 && mobs.length === 0) return section;
 
   /*
     **名指しされた相手も、同じ関門を通す**（0.32.6のレビュー）。
@@ -755,59 +931,33 @@ function characterSection(
     abilities: nameIndexOf(data.abilities),
   };
 
-  const depth = profile.grouped && fields.includes("affiliation") ? 4 : 3;
-  if (depth === 4) {
-    for (const [affiliation, members] of groupBy(
-      named,
-      (character) => character.affiliation,
-      "所属の記載なし"
-    )) {
-      lines.push(`### ${affiliation}`, "");
-      for (const character of members) {
-        lines.push(
-          ...describeCharacter(
-            character,
-            fields,
-            data,
-            profile,
-            mentions,
-            chapter,
-            undatedText,
-            depth
-          )
-        );
-      }
-    }
-  } else {
-    for (const character of named) {
-      lines.push(
-        ...describeCharacter(
-          character,
-          fields,
-          data,
-          profile,
-          mentions,
-          chapter,
-          undatedText,
-          depth
-        )
-      );
-    }
-  }
+  const describe = (character: Character) =>
+    describeCharacter(
+      character,
+      fields,
+      data,
+      profile,
+      mentions,
+      chapter,
+      undatedText
+    );
+  const grouped = profile.grouped && fields.includes("affiliation");
+  section.groups = grouped
+    ? groupBy(named, (character) => character.affiliation, "所属の記載なし")
+        .map((group) => ({ ...group, records: group.records.map(describe) }))
+    : [{ title: null, value: null, records: named.map(describe) }];
 
-  if (mobs.length > 0) {
-    lines.push("### モブ・集団", "");
-    for (const character of mobs) {
-      const chapters = chaptersUpTo(character.appearedChapters, chapter);
-      const suffix =
+  section.mobs = mobs.map((character) => {
+    const chapters = chaptersUpTo(character.appearedChapters, chapter);
+    return {
+      name: character.name,
+      chapters:
         fields.includes("appearedChapters") && chapters.length > 0
-          ? `（${formatChapters(chapters)}）`
-          : "";
-      lines.push(`- ${character.name}${suffix}`);
-    }
-    lines.push("");
-  }
-  return lines;
+          ? formatChapters(chapters)
+          : null,
+    };
+  });
+  return section;
 }
 
 /**
@@ -826,18 +976,16 @@ function describeCharacter(
   profile: AudienceProfile,
   mentions: MentionIndexes,
   chapter: number | null,
-  undatedText: boolean,
-  depth: number
-): string[] {
-  const lines: string[] = [];
-  lines.push(heading(depth, character.name, has(fields, "reading") ? character.reading : null), "");
+  undatedText: boolean
+): ExportRecord {
+  const record = startRecord(
+    character.name,
+    has(fields, "reading") ? character.reading : null,
+    has(fields, "summary") ? character.summary : null
+  );
 
-  if (has(fields, "summary") && character.summary) {
-    lines.push(character.summary, "");
-  }
-
-  const bullet = (label: string, value: string) =>
-    lines.push(`- **${label}**: ${value}`);
+  const bullet = (label: string, value: string, column?: string) =>
+    record.fields.push(column ? { label, value, column } : { label, value });
 
   if (has(fields, "aliases") && character.aliases.length > 0) {
     bullet("別名", character.aliases.join("、"));
@@ -908,7 +1056,13 @@ function describeCharacter(
           return `${form.term}${period}${context}${ended ? "（現在は使われない）" : ""}`;
         })
         .join("、");
-      if (forms) bullet(`${term.targetName}への呼称`, forms);
+      if (forms) {
+        bullet(
+          `${term.targetName}への呼称`,
+          forms,
+          CHARACTER_FIELD_LABELS.addressTerms
+        );
+      }
     }
   }
   if (has(fields, "abilities")) {
@@ -974,7 +1128,8 @@ function describeCharacter(
     for (const field of changedFields(changes)) {
       bullet(
         `変化（${field}）`,
-        describeChangeValues(changesOfField(changes, field))
+        describeChangeValues(changesOfField(changes, field)),
+        CHARACTER_FIELD_LABELS.changes
       );
     }
   }
@@ -982,15 +1137,33 @@ function describeCharacter(
     for (const conflict of character.conflicts) {
       bullet(
         `変化かもしれない（${conflict.field}）`,
-        describeConflictValues(conflict)
+        describeConflictValues(conflict),
+        CHARACTER_FIELD_LABELS.conflicts
       );
     }
   }
   if (has(fields, "aiNotes") && undatedText) {
-    lines.push(...aiNoteLines(character.aiNotes));
+    record.aiNotes = character.aiNotes;
   }
-  lines.push("");
-  return lines;
+  return record;
+}
+
+/**
+ * レコードの書き始め。見出しの読みと紹介文は、空なら出さない
+ * （Markdown では `（読み）` と段落ごと省いていたのと同じ）。
+ */
+function startRecord(
+  name: string,
+  reading: string | null,
+  lead: string | null
+): ExportRecord {
+  return {
+    name,
+    reading: reading || null,
+    lead: lead || null,
+    fields: [],
+    aiNotes: [],
+  };
 }
 
 /** 見た目の細目。1つの欄にまとめて、箇条書きが縦に伸びるのを防ぐ */
@@ -1017,57 +1190,54 @@ function locationSection(
   data: SettingsExportData,
   chapter: number | null,
   undatedText: boolean
-): string[] {
+): ExportSection {
   const visible = data.locations
     .filter((location) => isExportable(location, profile, chapter))
     .map((location) => recordAsOf(location, LOCATION_AS_OF_FIELDS, chapter));
 
-  const lines = ["## 場所", ""];
-  if (visible.length === 0) {
-    lines.push("該当する場所はありません。", "");
-    return lines;
-  }
+  const describe = (location: Location): ExportRecord => {
+    const record = startRecord(
+      location.name,
+      has(fields, "reading") ? location.reading : null,
+      has(fields, "summary") ? location.summary : null
+    );
+    if (has(fields, "aliases") && location.aliases.length > 0) {
+      record.fields.push({ label: "別名", value: location.aliases.join("、") });
+    }
+    if (has(fields, "description") && location.description) {
+      record.fields.push({ label: "説明", value: location.description });
+    }
+    addCommonTail(
+      record,
+      {
+        appearedChapters: location.appearedChapters,
+        status: location.status,
+        exportNote: location.exportNote,
+        conflicts: location.conflicts,
+        aiNotes: location.aiNotes,
+      },
+      fields,
+      chapter,
+      undatedText
+    );
+    return record;
+  };
 
   const grouped = profile.grouped && fields.includes("region");
-  const depth = grouped ? 4 : 3;
-  const groups = grouped
-    ? groupBy(visible, (location) => location.region, "地域未設定")
-    : new Map([["", visible]]);
-
-  for (const [region, items] of groups) {
-    if (grouped) lines.push(`### ${region}`, "");
-    for (const location of items) {
-      lines.push(
-        heading(depth, location.name, has(fields, "reading") ? location.reading : null),
-        ""
-      );
-      if (has(fields, "summary") && location.summary) {
-        lines.push(location.summary, "");
-      }
-      if (has(fields, "aliases") && location.aliases.length > 0) {
-        lines.push(`- **別名**: ${location.aliases.join("、")}`);
-      }
-      if (has(fields, "description") && location.description) {
-        lines.push(`- **説明**: ${location.description}`);
-      }
-      lines.push(
-        ...commonTailLines(
-          {
-            appearedChapters: location.appearedChapters,
-            status: location.status,
-            exportNote: location.exportNote,
-            conflicts: location.conflicts,
-            aiNotes: location.aiNotes,
-          },
-          fields,
-          chapter,
-          undatedText
-        )
-      );
-      lines.push("");
-    }
-  }
-  return lines;
+  return {
+    kind: "locations",
+    title: "場所",
+    emptyText: "該当する場所はありません。",
+    leadLabel: LOCATION_FIELD_LABELS.summary,
+    groupLabel: LOCATION_FIELD_LABELS.region,
+    groups: describeGroups(
+      visible,
+      grouped ? (location) => location.region : null,
+      "地域未設定",
+      describe
+    ),
+    mobs: [],
+  };
 }
 
 /* ────────────────────────────  能力  ──────────────────────────── */
@@ -1078,7 +1248,7 @@ function abilitySection(
   data: SettingsExportData,
   chapter: number | null,
   undatedText: boolean
-): string[] {
+): ExportSection {
   const term = abilityTermOf(data);
   const visible = data.abilities.filter((ability) =>
     isExportable(ability, profile, chapter)
@@ -1086,64 +1256,61 @@ function abilitySection(
   // 「使い手」は人物の名前なので、人物と同じ関門を通す（設計書6.75）
   const charactersByName = nameIndexOf(data.characters);
 
-  const lines = [`## ${term}`, ""];
-  if (visible.length === 0) {
-    lines.push(`該当する${term}はありません。`, "");
-    return lines;
-  }
+  const describe = (ability: Ability): ExportRecord => {
+    const record = startRecord(
+      ability.name,
+      has(fields, "reading") ? ability.reading : null,
+      has(fields, "summary") ? ability.summary : null
+    );
+    const push = (label: string, value: string) =>
+      record.fields.push({ label, value });
+    if (has(fields, "aliases") && ability.aliases.length > 0) {
+      push("別名", ability.aliases.join("、"));
+    }
+    if (has(fields, "description") && ability.description) {
+      push("効果", ability.description);
+    }
+    if (has(fields, "cost") && ability.cost) push("代償", ability.cost);
+    if (has(fields, "limitation") && ability.limitation) {
+      push("制約", ability.limitation);
+    }
+    if (has(fields, "userNames")) {
+      const users = ability.userNames.filter((name) =>
+        mentionAllowed(charactersByName, name, profile, chapter)
+      );
+      if (users.length > 0) push("使い手", users.join("、"));
+    }
+    addCommonTail(
+      record,
+      {
+        appearedChapters: ability.appearedChapters,
+        status: ability.status,
+        exportNote: ability.exportNote,
+        conflicts: ability.conflicts,
+        aiNotes: ability.aiNotes,
+      },
+      fields,
+      chapter,
+      undatedText
+    );
+    return record;
+  };
 
   const grouped = profile.grouped && fields.includes("category");
-  const depth = grouped ? 4 : 3;
-  const groups = grouped
-    ? groupBy(visible, (ability) => ability.category, "分類なし")
-    : new Map([["", visible]]);
-
-  for (const [category, items] of groups) {
-    if (grouped) lines.push(`### ${category}`, "");
-    for (const ability of items) {
-      lines.push(
-        heading(depth, ability.name, has(fields, "reading") ? ability.reading : null),
-        ""
-      );
-      if (has(fields, "summary") && ability.summary) {
-        lines.push(ability.summary, "");
-      }
-      if (has(fields, "aliases") && ability.aliases.length > 0) {
-        lines.push(`- **別名**: ${ability.aliases.join("、")}`);
-      }
-      if (has(fields, "description") && ability.description) {
-        lines.push(`- **効果**: ${ability.description}`);
-      }
-      if (has(fields, "cost") && ability.cost) {
-        lines.push(`- **代償**: ${ability.cost}`);
-      }
-      if (has(fields, "limitation") && ability.limitation) {
-        lines.push(`- **制約**: ${ability.limitation}`);
-      }
-      if (has(fields, "userNames")) {
-        const users = ability.userNames.filter((name) =>
-          mentionAllowed(charactersByName, name, profile, chapter)
-        );
-        if (users.length > 0) lines.push(`- **使い手**: ${users.join("、")}`);
-      }
-      lines.push(
-        ...commonTailLines(
-          {
-            appearedChapters: ability.appearedChapters,
-            status: ability.status,
-            exportNote: ability.exportNote,
-            conflicts: ability.conflicts,
-            aiNotes: ability.aiNotes,
-          },
-          fields,
-          chapter,
-          undatedText
-        )
-      );
-      lines.push("");
-    }
-  }
-  return lines;
+  return {
+    kind: "abilities",
+    title: term,
+    emptyText: `該当する${term}はありません。`,
+    leadLabel: ABILITY_FIELD_LABELS.summary,
+    groupLabel: ABILITY_FIELD_LABELS.category,
+    groups: describeGroups(
+      visible,
+      grouped ? (ability) => ability.category : null,
+      "分類なし",
+      describe
+    ),
+    mobs: [],
+  };
 }
 
 /* ────────────────────────────  組織  ──────────────────────────── */
@@ -1154,16 +1321,10 @@ function organizationSection(
   data: SettingsExportData,
   chapter: number | null,
   undatedText: boolean
-): string[] {
+): ExportSection {
   const visible = data.organizations.filter((organization) =>
     isExportable(organization, profile, chapter)
   );
-
-  const lines = ["## 組織", ""];
-  if (visible.length === 0) {
-    lines.push("該当する組織はありません。", "");
-    return lines;
-  }
 
   // **所属する人物は、その提供先に出してよい人だけを引く**（0.32.6の
   // レビュー）。公開範囲を見ていなかったので、作者だけの印を付けた人物の
@@ -1175,59 +1336,58 @@ function organizationSection(
       affiliation: character.affiliation,
     }));
 
-  const grouped = profile.grouped && fields.includes("parent");
-  const depth = grouped ? 4 : 3;
-  const groups = grouped
-    ? groupBy(visible, (organization) => organization.parent, "上位組織の記載なし")
-    : new Map([["", visible]]);
-
-  for (const [parent, items] of groups) {
-    if (grouped) lines.push(`### ${parent}`, "");
-    for (const organization of items) {
-      lines.push(
-        heading(
-          depth,
-          organization.name,
-          has(fields, "reading") ? organization.reading : null
-        ),
-        ""
-      );
-      if (has(fields, "summary") && organization.summary) {
-        lines.push(organization.summary, "");
-      }
-      if (has(fields, "aliases") && organization.aliases.length > 0) {
-        lines.push(`- **別名**: ${organization.aliases.join("、")}`);
-      }
-      if (has(fields, "category") && organization.category) {
-        lines.push(`- **種別**: ${organization.category}`);
-      }
-      if (has(fields, "description") && organization.description) {
-        lines.push(`- **説明**: ${organization.description}`);
-      }
-      if (has(fields, "members")) {
-        const belongs = membersOf(organization, members);
-        if (belongs.length > 0) {
-          lines.push(`- **所属する人物**: ${belongs.join("、")}`);
-        }
-      }
-      lines.push(
-        ...commonTailLines(
-          {
-            appearedChapters: organization.appearedChapters,
-            status: organization.status,
-            exportNote: organization.exportNote,
-            conflicts: organization.conflicts,
-            aiNotes: organization.aiNotes,
-          },
-          fields,
-          chapter,
-          undatedText
-        )
-      );
-      lines.push("");
+  const describe = (organization: Organization): ExportRecord => {
+    const record = startRecord(
+      organization.name,
+      has(fields, "reading") ? organization.reading : null,
+      has(fields, "summary") ? organization.summary : null
+    );
+    const push = (label: string, value: string) =>
+      record.fields.push({ label, value });
+    if (has(fields, "aliases") && organization.aliases.length > 0) {
+      push("別名", organization.aliases.join("、"));
     }
-  }
-  return lines;
+    if (has(fields, "category") && organization.category) {
+      push("種別", organization.category);
+    }
+    if (has(fields, "description") && organization.description) {
+      push("説明", organization.description);
+    }
+    if (has(fields, "members")) {
+      const belongs = membersOf(organization, members);
+      if (belongs.length > 0) push("所属する人物", belongs.join("、"));
+    }
+    addCommonTail(
+      record,
+      {
+        appearedChapters: organization.appearedChapters,
+        status: organization.status,
+        exportNote: organization.exportNote,
+        conflicts: organization.conflicts,
+        aiNotes: organization.aiNotes,
+      },
+      fields,
+      chapter,
+      undatedText
+    );
+    return record;
+  };
+
+  const grouped = profile.grouped && fields.includes("parent");
+  return {
+    kind: "organizations",
+    title: "組織",
+    emptyText: "該当する組織はありません。",
+    leadLabel: ORGANIZATION_FIELD_LABELS.summary,
+    groupLabel: ORGANIZATION_FIELD_LABELS.parent,
+    groups: describeGroups(
+      visible,
+      grouped ? (organization) => organization.parent : null,
+      "上位組織の記載なし",
+      describe
+    ),
+    mobs: [],
+  };
 }
 
 /* ────────────────────────────  世界観  ──────────────────────────── */
@@ -1245,50 +1405,59 @@ function worldSection(
   data: SettingsExportData,
   chapter: number | null,
   undatedText: boolean
-): string[] {
+): ExportSection {
   const visible = data.world.filter((item) =>
     isExportable(item, profile, chapter)
   );
 
-  const lines = ["## 世界観", ""];
-  if (visible.length === 0) {
-    lines.push("該当する世界観の項目はありません。", "");
-    return lines;
-  }
+  const describe = (item: WorldItem): ExportRecord => {
+    // 世界観は紹介文を持たず、説明を見出しの直後の段落にする
+    const record = startRecord(
+      item.name,
+      has(fields, "reading") ? item.reading : null,
+      has(fields, "description") ? item.description : null
+    );
+    if (has(fields, "aliases") && item.aliases.length > 0) {
+      record.fields.push({
+        label: "別の言い方",
+        value: item.aliases.join("、"),
+      });
+    }
+    addCommonTail(
+      record,
+      {
+        appearedChapters: item.appearedChapters,
+        exportNote: item.exportNote,
+        conflicts: item.conflicts,
+        aiNotes: item.aiNotes,
+      },
+      fields,
+      chapter,
+      undatedText
+    );
+    return record;
+  };
 
+  const groups: ExportGroup[] = [];
   for (const category of WORLD_CATEGORIES) {
     const group = visible.filter((item) => item.category === category);
     if (group.length === 0) continue;
-
-    lines.push(`### ${WORLD_CATEGORY_LABELS[category]}`, "");
-    for (const item of group) {
-      lines.push(
-        heading(4, item.name, has(fields, "reading") ? item.reading : null),
-        ""
-      );
-      if (has(fields, "description") && item.description) {
-        lines.push(item.description, "");
-      }
-      if (has(fields, "aliases") && item.aliases.length > 0) {
-        lines.push(`- **別の言い方**: ${item.aliases.join("、")}`);
-      }
-      lines.push(
-        ...commonTailLines(
-          {
-            appearedChapters: item.appearedChapters,
-            exportNote: item.exportNote,
-            conflicts: item.conflicts,
-            aiNotes: item.aiNotes,
-          },
-          fields,
-          chapter,
-          undatedText
-        )
-      );
-      lines.push("");
-    }
+    groups.push({
+      title: WORLD_CATEGORY_LABELS[category],
+      value: WORLD_CATEGORY_LABELS[category],
+      records: group.map(describe),
+    });
   }
-  return lines;
+
+  return {
+    kind: "world",
+    title: "世界観",
+    emptyText: "該当する世界観の項目はありません。",
+    leadLabel: WORLD_FIELD_LABELS.description,
+    groupLabel: "分類",
+    groups,
+    mobs: [],
+  };
 }
 
 /**
@@ -1304,7 +1473,8 @@ type CommonTailField =
   | "conflicts"
   | "aiNotes";
 
-function commonTailLines(
+function addCommonTail(
+  target: ExportRecord,
   record: {
     appearedChapters: number[];
     /** 世界観だけは「未登場」の印を持たない */
@@ -1316,33 +1486,35 @@ function commonTailLines(
   fields: readonly string[],
   chapter: number | null,
   undatedText: boolean
-): string[] {
+): void {
   const shows = (field: CommonTailField): boolean => fields.includes(field);
 
-  const lines: string[] = [];
   if (shows("appearedChapters")) {
     const chapters = chaptersUpTo(record.appearedChapters, chapter);
     if (chapters.length > 0) {
-      lines.push(`- **登場話**: ${formatChapters(chapters)}`);
+      target.fields.push({ label: "登場話", value: formatChapters(chapters) });
     }
   }
   if (shows("status") && record.status === "未登場") {
-    lines.push("- **状態**: 未登場（設定のみ）");
+    target.fields.push({ label: "状態", value: "未登場（設定のみ）" });
   }
+  // **作者のメモ（authorNotes）は、どの型・どの形式にも出さない。** 外へ
+  // 出してよい補足は作者が別の欄（exportNote）に書く決まりである（6.75）
   if (shows("exportNote") && undatedText && record.exportNote.trim()) {
-    lines.push(`- **補足**: ${record.exportNote.trim()}`);
+    target.fields.push({ label: "補足", value: record.exportNote.trim() });
   }
   if (shows("conflicts") && undatedText) {
     for (const conflict of record.conflicts) {
-      lines.push(
-        `- **変化かもしれない（${conflict.field}）**: ${describeConflictValues(conflict)}`
-      );
+      target.fields.push({
+        label: `変化かもしれない（${conflict.field}）`,
+        value: describeConflictValues(conflict),
+        column: "判断待ちの食い違い",
+      });
     }
   }
   if (shows("aiNotes") && undatedText) {
-    lines.push(...aiNoteLines(record.aiNotes));
+    target.aiNotes = record.aiNotes;
   }
-  return lines;
 }
 
 /* ────────────────────────────  共通  ──────────────────────────── */
@@ -1383,7 +1555,7 @@ function groupBy<T>(
   records: readonly T[],
   keyOf: (record: T) => string | null,
   fallback: string
-): Map<string, T[]> {
+): Array<{ title: string; value: string | null; records: T[] }> {
   const groups = new Map<string, T[]>();
   const others: T[] = [];
 
@@ -1398,6 +1570,34 @@ function groupBy<T>(
     groups.set(key, list);
   }
 
-  if (others.length > 0) groups.set(fallback, others);
-  return groups;
+  const result = [...groups].map(([key, list]) => ({
+    title: key,
+    value: key as string | null,
+    records: list,
+  }));
+  if (others.length > 0) {
+    result.push({ title: fallback, value: null, records: others });
+  }
+  return result;
+}
+
+/**
+ * まとめる型ならまとめ、まとめない型なら見出しの無い塊1つにして、
+ * 中のレコードを描く。
+ */
+function describeGroups<T>(
+  records: readonly T[],
+  keyOf: ((record: T) => string | null) | null,
+  fallback: string,
+  describe: (record: T) => ExportRecord
+): ExportGroup[] {
+  if (records.length === 0) return [];
+  if (!keyOf) {
+    return [{ title: null, value: null, records: records.map(describe) }];
+  }
+  return groupBy(records, keyOf, fallback).map((group) => ({
+    title: group.title,
+    value: group.value,
+    records: group.records.map(describe),
+  }));
 }
