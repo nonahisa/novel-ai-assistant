@@ -26,6 +26,8 @@ const MARKDOWN_ALLOWED = new Set([
   "src/core/settingsMarkdown.ts",
   // 提供先別の設定資料を .md として組む（設計書6.75）
   "src/core/settingsExportProfiles.ts",
+  // 前回との差分を .md として組む（設計書6.75.1、F6）
+  "src/core/settingsExportDiff.ts",
   "src/core/chatLog.ts",
   "src/core/usageLog.ts",
   "src/core/plotTemplate.ts",
