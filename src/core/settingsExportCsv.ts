@@ -20,8 +20,12 @@ import {
  * - 行の区切りは CRLF。セルの中の改行は LF のまま、引用符で囲む
  * - `"` `,` 改行を含むセルは `"` で囲み、中の `"` は `""` に重ねる（RFC 4180）
  *
- * **値の先頭の `=` などは書き換えない。** 表計算ソフトが式と読む恐れはあるが、
- * 書き換えれば作者の値ではなくなる（実装ルール2）。
+ * ## 式の注入を防ぐ（作者の裁定 2026-10-09）
+ *
+ * 値が `=` `+` `-` `@`（と先頭のタブ・CR）で始まるセルは、頭に `'` を付ける。
+ * 受け取った相手が Excel で開いたとき、式として実行されないように。
+ * 設定資料は第三者へ渡すもので、値にはAIが読み取った文字も混じる。
+ * 書き出した CSV の値であって、作者の保存データは変えない。
  *
  * VS Code API に依存しない（単体テストできる）。
  */
@@ -30,7 +34,8 @@ import {
 export const CSV_BOM = "﻿";
 
 /** 1つのセルを CSV の形にする */
-export function csvCell(value: string): string {
+export function csvCell(raw: string): string {
+  const value = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
   if (/[",\r\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
   return value;
 }

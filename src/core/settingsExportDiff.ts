@@ -35,6 +35,11 @@ export const SNAPSHOT_VERSION = 1;
 
 /** 控えのレコード。欄の名前と値の組を、資料に出た順に持つ */
 export interface SnapshotRecord {
+  /**
+   * 元の記録の識別子。**名前を変えた項目を見分ける鍵**（作者の裁定 2026-10-09）。
+   * 古い控えには無い（その場合は名前で突き合わせる）
+   */
+  id?: string | null;
   /** 突き合わせの鍵。同じ種別に同じ名前が2つあれば「名前#2」 */
   key: string;
   name: string;
@@ -92,7 +97,12 @@ export function snapshotOf(document: ExportDocument, at: Date): ExportSnapshot {
               record.aiNotes.map((note) => note.text).join("\n\n")
             );
           }
-          records.push({ key: keyOf(record.name), name: record.name, values });
+          records.push({
+            key: keyOf(record.name),
+            id: record.id,
+            name: record.name,
+            values,
+          });
         }
       }
       for (const mob of section.mobs) {
@@ -132,6 +142,14 @@ export function parseSnapshot(text: string): ExportSnapshot | null {
       if (typeof record.key !== "string" || typeof record.name !== "string") {
         return null;
       }
+      // id は後から足した欄。無い・null は古い控えとして許し、型違いだけ弾く
+      if (
+        record.id !== undefined &&
+        record.id !== null &&
+        typeof record.id !== "string"
+      ) {
+        return null;
+      }
       if (!Array.isArray(record.values)) return null;
       for (const pair of record.values) {
         if (
@@ -166,6 +184,8 @@ export interface SectionDiff {
   added: SnapshotRecord[];
   removed: SnapshotRecord[];
   changed: Array<{ name: string; changes: FieldChange[] }>;
+  /** 名前が変わった項目。消えた＋足された、にはしない */
+  renamed: Array<{ from: string; to: string }>;
 }
 
 /** 種別ごとの差分。変わりの無い種別は入れない */
@@ -184,27 +204,82 @@ export function diffSnapshots(
     const after = current.sections.find((section) => section.kind === kind);
     const beforeRecords = before?.records ?? [];
     const afterRecords = after?.records ?? [];
-    const beforeByKey = new Map(beforeRecords.map((record) => [record.key, record]));
-    const afterKeys = new Set(afterRecords.map((record) => record.key));
+    const pairs = matchRecords(beforeRecords, afterRecords);
+    const matchedBefore = new Set(pairs.map(([old]) => old));
+    const matchedAfter = new Set(pairs.map(([, record]) => record));
 
     const diff: SectionDiff = {
       kind,
       title: after?.title ?? before?.title ?? kind,
-      added: afterRecords.filter((record) => !beforeByKey.has(record.key)),
-      removed: beforeRecords.filter((record) => !afterKeys.has(record.key)),
+      added: afterRecords.filter((record) => !matchedAfter.has(record)),
+      removed: beforeRecords.filter((record) => !matchedBefore.has(record)),
       changed: [],
+      renamed: [],
     };
-    for (const record of afterRecords) {
-      const old = beforeByKey.get(record.key);
-      if (!old) continue;
+    for (const [old, record] of pairs) {
+      if (old.name !== record.name) {
+        diff.renamed.push({ from: old.name, to: record.name });
+      }
       const changes = diffValues(old.values, record.values);
       if (changes.length > 0) diff.changed.push({ name: record.name, changes });
     }
-    if (diff.added.length + diff.removed.length + diff.changed.length > 0) {
+    if (diff.added.length +
+        diff.removed.length +
+        diff.changed.length +
+        diff.renamed.length >
+      0) {
       result.push(diff);
     }
   }
   return result;
+}
+
+/**
+ * 前回と今回の項目を対応づける。
+ *
+ * 1. **識別子が両方にあるものは識別子で**——名前が変わっても同じ項目と分かる
+ * 2. 残りは名前（key）で。ただし両方に識別子があって違うものは別の項目
+ *    （同じ名前の別人を同じ人と取り違えない）。識別子の無い古い控えはここで
+ *    今までどおり名前で対応づく
+ */
+function matchRecords(
+  before: readonly SnapshotRecord[],
+  after: readonly SnapshotRecord[]
+): Array<[SnapshotRecord, SnapshotRecord]> {
+  const pairs: Array<[SnapshotRecord, SnapshotRecord]> = [];
+  const usedBefore = new Set<SnapshotRecord>();
+  const usedAfter = new Set<SnapshotRecord>();
+
+  const beforeById = new Map<string, SnapshotRecord>();
+  for (const record of before) {
+    if (record.id && !beforeById.has(record.id)) beforeById.set(record.id, record);
+  }
+  for (const record of after) {
+    const old = record.id ? beforeById.get(record.id) : undefined;
+    if (!old || usedBefore.has(old)) continue;
+    pairs.push([old, record]);
+    usedBefore.add(old);
+    usedAfter.add(record);
+  }
+
+  const beforeByKey = new Map<string, SnapshotRecord>();
+  for (const record of before) {
+    if (!usedBefore.has(record) && !beforeByKey.has(record.key)) {
+      beforeByKey.set(record.key, record);
+    }
+  }
+  for (const record of after) {
+    if (usedAfter.has(record)) continue;
+    const old = beforeByKey.get(record.key);
+    if (!old || usedBefore.has(old)) continue;
+    if (old.id && record.id && old.id !== record.id) continue;
+    pairs.push([old, record]);
+    usedBefore.add(old);
+    usedAfter.add(record);
+  }
+  // 今回の並びに揃える
+  pairs.sort((a, b) => after.indexOf(a[1]) - after.indexOf(b[1]));
+  return pairs;
 }
 
 function diffValues(
@@ -244,7 +319,7 @@ export function buildExportDiffMarkdown(
     "",
     "前回この提供先へ書き出した資料と、いま書き出す資料を比べています。" +
       "「消えた項目」は今回の資料に載らなくなったもので、設定から消したほかに、" +
-      "名前を変えた・公開の印を変えた・範囲を狭めた場合も含みます。",
+      "公開の印を変えた・範囲を狭めた場合も含みます。識別子で見分けられた名前の変更は「名前の変更」に分けて載せます。",
     "",
   ];
 
@@ -259,6 +334,13 @@ export function buildExportDiffMarkdown(
     if (section.added.length > 0) {
       lines.push("### 足された項目", "");
       for (const record of section.added) lines.push(`- ${record.name}`);
+      lines.push("");
+    }
+    if (section.renamed.length > 0) {
+      lines.push("### 名前の変更", "");
+      for (const record of section.renamed) {
+        lines.push(`- 名前の変更：${record.from} → ${record.to}`);
+      }
       lines.push("");
     }
     if (section.changed.length > 0) {
