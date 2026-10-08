@@ -48,12 +48,19 @@ describe("差分の3種", () => {
 
   test("変わった欄（値が変わった・欄が増えた・欄が消えた）", () => {
     const before = fixtureData();
-    const after = fixtureData();
-    after.characters[0] = {
-      ...after.characters[0],
-      personality: "人見知りを克服しつつある",
-      speechStyle: "丁寧語",
-      gender: "",
+    const base = fixtureData();
+    // characters は読み取り専用の配列なので、差し替えた配列で作り直す
+    const after = {
+      ...base,
+      characters: [
+        {
+          ...base.characters[0],
+          personality: "人見知りを克服しつつある",
+          speechStyle: "丁寧語",
+          gender: "",
+        },
+        ...base.characters.slice(1),
+      ],
     };
     const diff = diffSnapshots(snapshot(before), snapshot(after, null, LATER));
     const changed = diff[0].changed.find((record) => record.name === "月島灯")!;
