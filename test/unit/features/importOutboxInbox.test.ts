@@ -218,11 +218,14 @@ describe("受け取り箱を取り込む", () => {
     const records = recordsFor(bytes);
 
     putBox(viaExtension, "box.json", records);
-    const extension = await runInboxImport(viaExtension, { now: NOW });
+    // MCP の道具は試験用の「今」を受け取らず本物の時計で期限を数えるので、
+    // 両方とも無期限にして比べる（2026-10-08 に、10-04 の指摘が既定の3日を過ぎて落ちた）
+    const extension = await runInboxImport(viaExtension, { now: NOW, retentionDays: 0 });
     const mcp = await outboxImport({
       folder: viaMcp.folderPath,
       ownerId: "u_1",
       records: records.map((record) => ({ ...record, writer: "u_1" })),
+      retentionDays: 0,
     });
 
     expect(extension.outcome.results).toEqual(mcp.results);
