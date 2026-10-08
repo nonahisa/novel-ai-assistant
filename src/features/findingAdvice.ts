@@ -43,10 +43,13 @@ import {
  * 閉じてもう一度押したときに、課金の確認もAIの呼び出しも起きない。
  * **検証を通った答えだけ**を入れる。
  *
- * ## 割当は「推敲」に従う
+ * ## 割当は「相談」に従う（2026-10-08 作者の裁定）
  *
- * 助言の相手は推敲の指摘で、推敲を無料AIに割り当てた作者がここだけ相談の
- * 割当（有料AIのことがある）で動くと驚く。
+ * ボタンの名前が［AIに相談］で、「相談パネルで続ける」も相談の割当なので、
+ * 名前と動きを揃える。相談パネル（`workChatPanel.ts`）と同じ鍵 `"chat"` で引く。
+ * （旧：推敲を無料AIに割り当てた作者が、ここだけ相談の割当で動くと驚くとして
+ * 推敲の割当に従っていた。有料なら `ai.paid.findingAdvice` の確認が出るので
+ * 黙って課金されることはない）
  *
  * ## 本文は書き換えない
  *
@@ -81,7 +84,7 @@ export const FINDING_ADVICE_FEATURE = "finding_advice";
 export async function askFindingAdvice(
   request: FindingAdviceRequest
 ): Promise<FindingAdviceOutcome> {
-  const resolved = request.registry?.resolve("proofread");
+  const resolved = request.registry?.resolve("chat");
   if (!resolved) {
     void vscode.window.showWarningMessage(
       "AIが設定されていません。詳細メニューの「AIの設定」から設定してください。"

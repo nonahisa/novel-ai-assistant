@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 /**
  * 推敲の指摘への短い助言（P-47）の呼び出し（`features/findingAdvice.ts`）。
  *
- * - 割当は「推敲」に従う
+ * - 割当は「相談」に従う（2026-10-08 作者の裁定。旧は推敲）
  * - 同じ指摘・同じ本文・同じプロバイダとモデル・同じ版なら作り直さない（規則4）。
  *   当たったときは繋がるかの確認も課金の確認もしない
  * - 検証を通らなかった答え・失敗はキャッシュに入れない
@@ -97,13 +97,13 @@ beforeEach(() => {
 });
 
 describe("呼び出し", () => {
-  test("推敲の割当で、スキーマ・思考なしで呼び、検証を通った答えを返す", async () => {
+  test("相談の割当で、スキーマ・思考なしで呼び、検証を通った答えを返す", async () => {
     const generate = vi.fn(async () => ({ text: GOOD }));
     const { registry, resolve } = registryWith("gemma4:e4b", generate);
 
     const outcome = await askFindingAdvice({ work: WORK, registry, material });
 
-    expect(resolve).toHaveBeenCalledWith("proofread");
+    expect(resolve).toHaveBeenCalledWith("chat");
     expect(generate).toHaveBeenCalledTimes(1);
     const params = (generate.mock.calls[0] as unknown[] | undefined)?.[0] as Record<
       string,
@@ -121,6 +121,39 @@ describe("呼び出し", () => {
         noNeed: false,
         dropped: 0,
       },
+    });
+  });
+
+  test("推敲と相談に別のAIを割り当てたら、相談のAIで呼ぶ（2026-10-08 作者の裁定）", async () => {
+    const proofreadGenerate = vi.fn(async () => ({ text: GOOD }));
+    const chatGenerate = vi.fn(async () => ({ text: GOOD }));
+    const byFeature: Record<string, { id: string; generate: typeof proofreadGenerate; model: string }> = {
+      proofread: { id: "ollama", generate: proofreadGenerate, model: "gemma4:e4b" },
+      chat: { id: "gemini", generate: chatGenerate, model: "gemini-flash" },
+    };
+    const registry = {
+      resolve: vi.fn((feature: string) => {
+        const entry = byFeature[feature];
+        if (!entry) return undefined;
+        return {
+          provider: { id: entry.id, displayName: entry.id, isPaid: false, generate: entry.generate },
+          model: entry.model,
+        };
+      }),
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const outcome = await askFindingAdvice({ work: WORK, registry: registry as any, material });
+
+    expect(outcome.kind).toBe("answered");
+    expect(chatGenerate).toHaveBeenCalledTimes(1);
+    expect(proofreadGenerate).not.toHaveBeenCalled();
+    // 有料の確認は相談のAI・モデルで出る（`ai.paid.findingAdvice` の鍵は変えない）
+    const paidCall = connectivity.paid.mock.calls[0] as unknown[] | undefined;
+    expect((paidCall?.[0] as { id: string }).id).toBe("gemini");
+    expect(paidCall?.[1]).toMatchObject({
+      remember: { id: "ai.paid.findingAdvice" },
+      model: "gemini-flash",
     });
   });
 
