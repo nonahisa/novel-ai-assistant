@@ -2,6 +2,7 @@ import type { Chunk } from "./chunker";
 import { summarizeReasons } from "./checkRunCounts";
 import type { ExtractedTypoIssue, TypoCheckResult } from "../prompts/typoCheck";
 import { normalizeForComparison } from "./groundedEvidence";
+import { lineHoldingQuote } from "./relocateQuote";
 import { isPlaceholderText } from "./placeholderText";
 import { isKeptWord, type KeepWord } from "../models/keepWord";
 import {
@@ -246,30 +247,40 @@ export function validateTypoIssues(
   const normalizedChunk = normalizeForComparison(chunk.text);
 
   for (const candidate of raw.issues as unknown[]) {
-    const issue = parseIssue(candidate);
-    if (!issue) {
+    const parsed = parseIssue(candidate);
+    if (!parsed) {
       rejected.push({ line: null, target: null, reason: "invalid_shape" });
       continue;
     }
 
-    if (issue.line < firstLine || issue.line > lastLine) {
+    if (parsed.line < firstLine || parsed.line > lastLine) {
       rejected.push({
-        line: issue.line,
-        target: issue.target,
+        line: parsed.line,
+        target: parsed.target,
         reason: "out_of_range",
       });
       continue;
     }
 
     // AIの幻覚を防ぐ：original が本文中に逐語で実在しない指摘は破棄する
-    if (!normalizedChunk.includes(normalizeForComparison(issue.original))) {
+    if (!normalizedChunk.includes(normalizeForComparison(parsed.original))) {
       rejected.push({
-        line: issue.line,
-        target: issue.target,
+        line: parsed.line,
+        target: parsed.target,
         reason: "ungrounded",
       });
       continue;
     }
+
+    // **申告の行を、original が実際にある行へ直す**（設計書6.8.20、2026-10-10）。
+    // 上の照合はチャンク全体で見るので、AIが行番号を言い間違えても通る。
+    // ここから先の検査（助詞の範囲・二重になるか・行末の句点）は「その行の文」
+    // で行うため、直さないと**別の行の文で検査して**、ずれた行番号のまま
+    // 画面へ出る。矛盾検知（0.101.2）と同じ部品で直す
+    const issue = {
+      ...parsed,
+      line: lineHoldingQuote(chunk.text, parsed.original, parsed.line, firstLine),
+    };
 
     // target が original の中に含まれていないと、適用時に置換位置を特定できない
     if (!issue.original.includes(issue.target)) {

@@ -1,4 +1,5 @@
 import { normalizeForComparison } from "./groundedEvidence";
+import { lineHoldingQuote } from "./relocateQuote";
 import { isPlaceholderText } from "./placeholderText";
 import {
   closeTruncatedJson,
@@ -436,14 +437,21 @@ export function validateDeviations(
       continue;
     }
 
-    // 終わりの行が読めない・逆さまなら、始まりの行だけを指す
+    // **申告の行を、引用が実際にある行へ直す**（設計書6.10.2、2026-10-10）。
+    // 上の照合は話全体で見るので、AIが行番号を言い間違えても通り、ずれた
+    // 行を指したまま画面へ出ていた。矛盾検知（0.101.2）と同じ部品で直す。
+    // 番号は話の1行目から（`checkDeviations.ts` の `withLineNumbers` と同じ）
+    const movedStart = lineHoldingQuote(episode.text, excerpt, lineStart);
+    // 終わりの行が読めない・逆さまなら、始まりの行だけを指す。
+    // 読めるなら**範囲の幅を保ったまま**一緒にずらす——AIが言い間違えたのは
+    // 位置であって、指した範囲の長さまで間違えたとは限らない
     const lineEnd =
       Number.isFinite(lineEndRaw) && lineEndRaw >= lineStart
-        ? Math.min(lineEndRaw, lastLine)
-        : lineStart;
+        ? Math.min(lineEndRaw + (movedStart - lineStart), lastLine)
+        : movedStart;
 
     passed.push({
-      lineStart,
+      lineStart: movedStart,
       lineEnd,
       excerpt,
       type,

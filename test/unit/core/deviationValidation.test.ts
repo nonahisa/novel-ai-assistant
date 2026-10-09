@@ -521,3 +521,54 @@ describe("空白で埋まった応答を救う", () => {
     expect(salvageDeviationResult("{" + blank)).toBeNull();
   });
 });
+
+/**
+ * AIが申告した行番号を、引用が実際にある行へ直す（設計書6.10.2、2026-10-10）。
+ *
+ * 矛盾検知（0.101.2）と同じ決まり。引用は本文全体にあるかしか見ていなかったので、
+ * 行番号を言い間違えた指摘は、ずれた行を指したまま画面へ出ていた。
+ */
+describe("申告の行を引用のある行へ直す", () => {
+  const SHIFT_TEXT = [
+    "太志は体育倉庫で目を覚ました。",
+    "空から急にドラゴンが降りてきた。",
+    "おばあさんが手を伸ばしてくる。",
+    "太志は物置に隠れた。",
+    "ドラゴンは炎を吐いた。",
+    "空から急にドラゴンが降りてきた。",
+    "遺書はまだ見つからない。",
+  ].join("\n");
+  const shiftEpisode = { text: SHIFT_TEXT, plot: PLOT };
+  const run = (overrides: Record<string, unknown>) =>
+    validateDeviations({ deviations: [item(overrides)] }, shiftEpisode).accepted;
+
+  test("申告の行に引用が無ければ、引用のある行へ直し、終わりの行も同じだけずらす", () => {
+    const accepted = run({ lineStart: 1, lineEnd: 2, excerpt: "太志は物置に隠れた。" });
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]).toMatchObject({ lineStart: 4, lineEnd: 5 });
+  });
+
+  test("申告が正しければそのまま", () => {
+    const accepted = run({ lineStart: 4, lineEnd: 5, excerpt: "太志は物置に隠れた。" });
+    expect(accepted[0]).toMatchObject({ lineStart: 4, lineEnd: 5 });
+  });
+
+  test("同じ引用が2か所にあれば、申告に近いほうへ直す", () => {
+    expect(run({ lineStart: 5, lineEnd: 5 })[0]).toMatchObject({ lineStart: 6, lineEnd: 6 });
+    expect(run({ lineStart: 1, lineEnd: 1 })[0]).toMatchObject({ lineStart: 2, lineEnd: 2 });
+  });
+
+  test("ずらした終わりの行が本文の外へ出れば、最後の行で止める", () => {
+    const accepted = run({ lineStart: 1, lineEnd: 4, excerpt: "ドラゴンは炎を吐いた。" });
+    expect(accepted[0]).toMatchObject({ lineStart: 5, lineEnd: 7 });
+  });
+
+  test("行をまたぐ引用は申告のまま", () => {
+    const accepted = run({
+      lineStart: 1,
+      lineEnd: 1,
+      excerpt: "太志は物置に隠れた。\nドラゴンは炎を吐いた。",
+    });
+    expect(accepted[0]).toMatchObject({ lineStart: 1, lineEnd: 1 });
+  });
+});

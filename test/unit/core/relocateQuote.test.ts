@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { relocateQuote } from "../../../src/core/relocateQuote";
+import { lineHoldingQuote, relocateQuote } from "../../../src/core/relocateQuote";
 
 /**
  * 引用が「いま何行目に在るか」を探し直す（作者の報告、2026-09-12）。
@@ -154,5 +154,37 @@ describe("relocateQuote（前後の文脈つき）", () => {
   /** 「。」のような短い断片はどこにでも含まれる。絞ったつもりで絞れない */
   test("短すぎる文脈では絞らない", () => {
     expect(relocateQuote(twice, quote, 5, { before: "。" })).toBe(5);
+  });
+});
+
+/**
+ * 検算の段で、AIが申告した行を引用のある行へ直す（2026-10-10）。
+ * 矛盾検知・誤字脱字・逸脱検知の3つが同じこの部品を使う。
+ */
+describe("lineHoldingQuote", () => {
+  const text = ["一行目。", "猫が鳴いた。", "三行目。", "四行目。", "猫が鳴いた。"].join("\n");
+
+  test("申告の行が引用を含めばそのまま", () => {
+    expect(lineHoldingQuote(text, "猫が鳴いた。", 2)).toBe(2);
+  });
+
+  test("含まなければ、申告に最も近い行へ直す", () => {
+    expect(lineHoldingQuote(text, "猫が鳴いた。", 4)).toBe(5);
+    expect(lineHoldingQuote(text, "猫が鳴いた。", 1)).toBe(2);
+  });
+
+  test("同じ距離なら前の行", () => {
+    const tie = ["一行目。", "猫が鳴いた。", "三行目。", "猫が鳴いた。"].join("\n");
+    expect(lineHoldingQuote(tie, "猫が鳴いた。", 3)).toBe(2);
+  });
+
+  test("1行目の番号をずらせる（チャンクの通し番号）", () => {
+    expect(lineHoldingQuote(text, "三行目。", 20, 11)).toBe(13);
+  });
+
+  test("行をまたぐ引用・本文に無い引用・空の引用は申告のまま", () => {
+    expect(lineHoldingQuote(text, "三行目。\n四行目。", 1)).toBe(1);
+    expect(lineHoldingQuote(text, "犬が吠えた。", 4)).toBe(4);
+    expect(lineHoldingQuote(text, "　", 4)).toBe(4);
   });
 });
