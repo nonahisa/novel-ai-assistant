@@ -149,8 +149,15 @@ h2 {
 ${toneRules()}
 /* いまカーソルのある場所にいちばん近い付箋（設計書6.40.4）。
    **光らせるだけで、本文は動かさない** */
-.memo.active { background: var(--vscode-list-activeSelectionBackground); }
-.memo.active .go { color: var(--vscode-list-activeSelectionForeground); }
+/* 色の決め方は原稿エディターの飛んだ行の光り（.mark-reveal）と同じ focusBorder。
+   リストの選択色だと暗いテーマで灰色の帯になり、左の青い枠と結びつかなかった
+   （作者の裁定 2026-10-10）。枠は内側に引く（行どうしが隣り合うため） */
+.memo.active {
+  background: rgba(0, 120, 215, 0.25);
+  background: color-mix(in srgb, var(--vscode-focusBorder, #0078d4) 25%, transparent);
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -2px;
+}
 .dot {
   flex: 0 0 auto;
   width: 8px;
@@ -187,6 +194,9 @@ ${toneRules()}
   overflow-wrap: break-word;
 }
 .go:hover { text-decoration: underline; }
+/* 上の button:hover:enabled が行の本文に灰色の四角を重ねていた。押した行の青い光りの
+   中に灰色が混ざらないよう、行の本文は下線だけで示す（2026-10-10） */
+.memo .go:hover:enabled { background: none; }
 /* 種類の札。**字はそのまま残す**（色だけで見分けさせない）。地は塗らず、
    枠と字を種類の色にする——塗ると、明るいテーマの黄や緑の上で字が読めない */
 .tag {

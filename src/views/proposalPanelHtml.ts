@@ -876,8 +876,9 @@ function renderRecordUpdate(item) {
   return (
     '<div class="' + classes.join(' ') + '">' +
     '<div class="meta"><span class="reason">' + escapeHtml(item.name) + '</span>' +
-    (item.source ? '<span class="conf">' + escapeHtml(item.source) + '</span>' : '') +
-    (item.status === "applied" ? '<span class="reason">' + escapeHtml(doneLabel(item)) + '</span>' : '') +
+    // 名前と出どころの間に全角空白（作者の裁定 2026-10-10。くっついて読めなかった）
+    (item.source ? '　<span class="conf">' + escapeHtml(item.source) + '</span>' : '') +
+    (item.status === "applied" ? '<span class="reason">' + escapeHtml(doneLabel(item))+ '</span>' : '') +
     (item.status === "failed" ? '<span class="reason">' + escapeHtml(item.statusDetail || "失敗") + '</span>' : '') +
     '</div>' +
     '<div class="quote">' + renderRecordChanges(item) + '</div>' +

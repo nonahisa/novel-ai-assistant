@@ -125,6 +125,7 @@ describe.skipIf(!lookEnabled)("見た目の写真：プロットモードの名�
         updates = await openUpdates(session);
         await lookNote(`[545・566] 更新分反映（別の行を保存したあと）：${await panelText(updates)}`);
         await shootPage(page, "545-566-更新分反映-別の行を保存したあと");
+        await shootPage(page, "見出し-直したあと");
 
         // 546：「主人公（相馬 誠）」の行の説明を書き換えて保存
         const afterOther = (await readFile(path.join(session.workFolder, "設定", "plot.md"), "utf8")).replace(/\r\n/g, "\n");
