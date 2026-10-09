@@ -81,6 +81,12 @@ import {
   listBodyFiles,
   loadResolveManuscriptDir,
 } from "./measureBodyFiles.mjs";
+import {
+  decideProductOptions,
+  describeModelSize,
+  isSizeDependentFeature,
+  loadCapability,
+} from "./measureModelSize.mjs";
 
 /**
  * 測れる行き先。
@@ -558,18 +564,23 @@ async function askModelInfo(client, { model, endpoint }) {
     if (!found) {
       return {
         contextLength: null,
+        parameterSize: null,
         bundled: null,
         note: `${model} は手元の一覧にありません`,
       };
     }
     return {
       contextLength: found.contextLength ?? null,
+      // **頼み方を製品と同じ判断で決めるのに使う**（`measureModelSize.mjs`）。
+      // モデル名から大きさを当てにいかない
+      parameterSize: found.parameterSize ?? null,
       bundled: found.bundled ?? null,
       note: null,
     };
   } catch (error) {
     return {
       contextLength: null,
+      parameterSize: null,
       bundled: null,
       note: error instanceof Error ? error.message : String(error),
     };
@@ -814,6 +825,50 @@ async function main() {
         );
       }
     }
+    /*
+      **頼み方を、製品と同じ判断で決める**（2026-10-10。`measureModelSize.mjs`）。
+
+      製品はモデルの大きさで頼み方を変える（誤字脱字の 1.1／1.2、矛盾検知の
+      抑制と観点、逸脱の種別）が、MCP は指定が無ければ大きいモデル向けで組む。
+      台本が何も渡していなかったので、`gemma4:e4b` を製品が送らない頼み方で
+      測っていた。**組む前に決める**——`novel.prompt`（版の控え）と
+      `novel.run`（本番）の両方へ同じ値が渡るように。
+
+      大きさは `ollama.models` の申告から取る（モデル名から当てない）。
+      `--num-ctx` を打った回でも訊く（以前は打たなかった回にしか訊いておらず、
+      今回の測り直しのように `--num-ctx` を固定すると大きさが分からなかった）。
+    */
+    let modelInfo = null;
+    if (!sakura) {
+      modelInfo = await askModelInfo(client, {
+        model: options.model,
+        endpoint: options.endpoint,
+      });
+      if (modelInfo.note) console.warn(`※ ${modelInfo.note}`);
+    }
+    let capability = null;
+    if (!sakura && isSizeDependentFeature(options.feature)) {
+      capability = await loadCapability();
+      if (capability.stale) {
+        console.warn(
+          "※ dist/core-bundle.mjs が src/ai/capability.ts より古いようです（npm run bundle:core で束ね直してください）。"
+        );
+      }
+    }
+    const productOptions = decideProductOptions({
+      feature: options.feature,
+      runner: options.runner,
+      parameterSize: modelInfo?.parameterSize ?? null,
+      given: options.options,
+      capability,
+    });
+    const runOptions = productOptions.options;
+    const modelSizeDecision = productOptions.decision;
+    if (modelSizeDecision.sizeDependent && !modelSizeDecision.decided) {
+      // **黙って大きいモデル向けで回さない**
+      console.warn(`※ 頼み方をモデルの大きさで決めていません: ${modelSizeDecision.reason}`);
+    }
+
     const buildCalls = (numCtx) =>
       planCalls(schema, {
         work,
@@ -824,7 +879,8 @@ async function main() {
         endpoint: options.endpoint,
         // **打たれたときだけ渡る**（打たなければ束が製品の値を使う）
         temperature: options.temperature,
-        options: options.options,
+        // **製品と同じ頼み方を足した後の値**（打たれた `--option` が勝つ）
+        options: runOptions,
         // さくらのときは、束へ渡す行き先が無い（3段をこちらで回す）
         bundleRunner: sakura ? null : "ollama",
         // **打たれたときだけ**（`--timeout` の注記）
@@ -874,7 +930,6 @@ async function main() {
         ? "本文の切り方（クラウドへ num_ctx は送りません）"
         : "既定",
     };
-    let modelInfo = null;
     if (!sakura) {
       /*
         **明示されているなら、束にもモデルにも訊かない。** ここで
@@ -894,11 +949,7 @@ async function main() {
             "※ dist/core-bundle.mjs が src/core/chunker.ts より古いようです（npm run bundle:core で束ね直してください）。"
           );
         }
-        modelInfo = await askModelInfo(client, {
-          model: options.model,
-          endpoint: options.endpoint,
-        });
-        if (modelInfo.note) console.warn(`※ ${modelInfo.note}`);
+        // モデル情報は上（頼み方を決めるところ）で訊いたものを使う
         // **製品の定数は源から読む**（写しを持たない。`measureNumCtx.mjs`）
         outputTokens = outputReserveTokens();
         measured = measuredOf(modelInfo.bundled, bundledCharsPerTokenSamples());
@@ -990,6 +1041,8 @@ async function main() {
     console.log(
       `  temperature ${describeTemperature(temperature)}（${temperatureSource}）`
     );
+    const modelSizeLine = describeModelSize(modelSizeDecision, promptVersion);
+    if (modelSizeLine) console.log(`  ${modelSizeLine}`);
     if (sakura) {
       // **鍵は出さない。** 宛先と待ち時間だけを断る（課金の目安になる）
       console.log(
@@ -1078,6 +1131,8 @@ async function main() {
     lines.push(
       `temperature: ${describeTemperature(usedTemperature ?? temperature)}（${temperatureSource}）`
     );
+    // **頼み方も結果の行に出す**（温度と同じ理由。1.1 と 1.2 では数字が変わる）
+    if (modelSizeLine) lines.push(modelSizeLine);
     if (warmup) {
       lines.push(
         warmup.ok
@@ -1119,7 +1174,21 @@ async function main() {
       endpoint,
       // **何を指定して測ったかを残す。** 同じ日に `categories` を変えて
       // 2度回すと、記録は `-2.json` になるだけで中身の違いが読めない
-      options: options.options,
+      //
+      // **束へ実際に渡した値を書く**（2026-10-10）。製品と同じ頼み方を
+      // 台本が足すようになったので、打った `--option` だけでは何で測ったか
+      // 分からない。打った値は `givenOptions` に分けて残す
+      options: runOptions,
+      givenOptions: options.options,
+      /*
+        **モデルの大きさに合わせた頼み方**（2026-10-10。`measureModelSize.mjs`）。
+        `modelSize` は束へ渡した small／large（誤字脱字・逸脱。それ以外は null）、
+        `modelSizeDecision` は何を根拠に決めたか（申告の大きさ・ティア・
+        製品の判断・打った値で上書きした名前）。2026-10-08 までの記録には無く、
+        e4b を大きいモデル向けの 1.2 で測っていたことが読めなかった
+      */
+      modelSize: runOptions.modelSize ?? null,
+      modelSizeDecision,
       repeat: options.repeat,
       bundle,
       promptVersion,
