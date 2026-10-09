@@ -290,6 +290,34 @@ export function parseContradictionResult(
 const OUTER_QUOTES = /^[「『"“]+|[」』"”]+$/gu;
 
 /**
+ * 申告の行番号を、引用が実際にある行へ直す（設計書6.10.5、2026-10-10）。
+ *
+ * **AIは引用を正しく取っても、行番号を言い間違える。** 実測（gemma4:26b、
+ * いじめられっ子の写しの第2話）で、36行目の台詞を正しく指摘しながら 28 と
+ * 申告した。検証の段（P-12b）は申告の行の前後6行しか見せないので、引用の
+ * 無い範囲を見た検証AIが「引用が本文と違う」で本物の指摘を取り下げていた。
+ * 画面で指摘から本文へ飛ぶ位置もずれる。
+ *
+ * 申告の行が引用を含むならそのまま。含まなければ、引用を含む行のうち申告に
+ * 最も近い行へ直す（同じ距離なら前の行）。**どの1行にも収まらない引用
+ * （行をまたぐ）は申告のまま残す**——どこへ動かすのが正しいか決められない。
+ * 番号の振り方は `withLineNumbers` と同じ（まとめたチャンクでも通し番号）。
+ */
+function lineHoldingExcerpt(excerpt: string, chunk: Chunk, line: number): number {
+  const target = normalizeForComparison(excerpt);
+  if (!target) return line;
+  let best: number | undefined;
+  chunk.text.split("\n").forEach((text, index) => {
+    if (!normalizeForComparison(text).includes(target)) return;
+    const candidate = chunk.startLine + index + 1;
+    if (best === undefined || Math.abs(candidate - line) < Math.abs(best - line)) {
+      best = candidate;
+    }
+  });
+  return best ?? line;
+}
+
+/**
  * 引用が本文にあれば、本文に実在する形の引用を返す。無ければ undefined。
  *
  * まず書かれたまま照らし、無ければ**外側の括弧を外して**照らす
@@ -402,7 +430,7 @@ export function validateContradictions(
     }
 
     accepted.push({
-      line,
+      line: lineHoldingExcerpt(found, chunk, line),
       excerpt: found,
       category: category as ContradictionCategory,
       settingSays,
