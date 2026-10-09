@@ -269,6 +269,45 @@ describe("矛盾にも再チェックを出す", () => {
     expect(latest().items[0]).toMatchObject({ canRecheck: true });
   });
 
+  test("場所の位置関係（機械照合。設計書6.93.4）は同じ一覧に並び、再チェックも伏線登録も出さない", () => {
+    const panel = panelWithView();
+    panel.showContradictions(
+      work,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      [contradiction as any],
+      async () => ({ ok: true }),
+      [
+        {
+          kind: "direction",
+          filePath: "C:/小説/いじめられっ子/本文/007.txt",
+          line: 3,
+          excerpt: "港は学校の北に見えた",
+          category: "場所",
+          settingSays: "第3話：学校は港の北（「学校は港の北の高台にある」）",
+          textSays: "第7話：港は学校の北（「港は学校の北に見えた」）",
+          note: "学校と港の方角が食い違っています。AIを使わず、設定資料の位置関係を照らしました。",
+          confidence: "high",
+        },
+      ]
+    );
+    const items = latest().items as Array<Record<string, unknown>>;
+    // **AIの指摘を消さない**（同じ分類へ、同じ1回の差し替えで並べる）
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ canRecheck: true, canRegisterForeshadow: true });
+    expect(items[1]).toMatchObject({
+      category: "場所",
+      line: 3,
+      fileName: "007.txt",
+      canRecheck: false,
+      canRegisterForeshadow: false,
+      confidence: "high",
+      leftLabel: "もう一方の記述では",
+      rightLabel: "この箇所では",
+    });
+    // 修正案（本文の書き換え）は持たない
+    expect(items[1]).not.toHaveProperty("suggestion");
+  });
+
   test("プロット逸脱の指摘にも出す", () => {
     const panel = panelWithView();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -317,6 +317,7 @@ import {
   pickContradictionReadMode,
   pickContradictionRoute,
 } from "./features/checkContradictions";
+import { collectLocationContradictions } from "./features/checkLocationConsistency";
 // 矛盾検知のもう1つの道（設計書6.88）。入口は「矛盾検知」1つで、
 // 押したときに選ぶ（2026-09-23）。コマンドはパレットと関門の代わりの道に残す
 import { checkFactContradictions } from "./features/checkFactContradictions";
@@ -6297,11 +6298,19 @@ export async function activate(
     if (missing) return checkSkipped(missingReason, missing);
     if (!result || result.cancelled) return CHECK_CANCELLED;
 
+    /*
+      **場所の位置関係を機械で照らす**（設計書6.93.4）。AIは使わず、
+      設定資料の場所の関係どうしの食い違い（含む関係の輪・方角・距離）を
+      挙げる。同じ「矛盾」の分類へ、AIの指摘と同じ1回の差し替えで並べる
+    */
+    const locationRun = await collectLocationContradictions(work, scope.filePaths);
+
     // 矛盾が実は伏線だったときの逃げ道を添える（設計書6.35.4）
     const shown = proposalPanel.showContradictions(
       work,
       result.issues,
-      (source) => registerForeshadowFromContradiction(work, source)
+      (source) => registerForeshadowFromContradiction(work, source),
+      locationRun.issues
     );
 
     // **誤字脱字と同じ数え方にする**（設計書6.8）。捨てたぶんは、
@@ -6318,6 +6327,22 @@ export async function activate(
     // **検証で消したことを黙らない**（設計書6.10.5）。内訳が見えないと、
     // 指摘が少ないのが「本当に無い」のか「消しすぎ」なのか分からない
     if (result.verifyNote) parts.push(result.verifyNote);
+    // **機械で照らした分を分けて言う**（設計書6.93.4）。AIの指摘と同じ一覧に
+    // 並ぶので、どれがAIを通っていないかを数で示す
+    if (locationRun.issues.length > 0) {
+      parts.push(`うち場所の位置関係（機械で照合） ${locationRun.issues.length}件`);
+    }
+    // 本文に置けなかった食い違い（作者が書いた関係どうし）は黙らない
+    if (locationRun.unplacedCount > 0) {
+      parts.push(
+        `本文の行に置けなかった位置関係の食い違い ${locationRun.unplacedCount}件（ログ参照）`
+      );
+    }
+    if (locationRun.unreadableLocations > 0) {
+      parts.push(
+        `読めなかった場所のファイル ${locationRun.unreadableLocations}件（位置関係の照合の外）`
+      );
+    }
     if (result.failedChunks > 0) {
       parts.push(`読み取れなかった ${result.failedChunks}件`);
     }
@@ -6342,7 +6367,7 @@ export async function activate(
         // **口調を照らさなかったことも黙らない**（P-12 1.9）。小さいモデルでは
         // 口調の指示を送らないので、「口調は合っていた」と読まれないようにする
         result.speechNote,
-        result.issues.length > 0
+        result.issues.length + locationRun.issues.length > 0
           ? "本文は書き換えていません。 設定と本文のどちらを直すかは作者が決めてください。"
           : "",
       ]

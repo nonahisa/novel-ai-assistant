@@ -12,6 +12,7 @@ import { dismissKey, TypoDismissedHistory } from "../core/typoIssueHistory";
 import { parseEpisodeFileName } from "../core/episodeParser";
 import type { TypoCheckIssue } from "./checkTypos";
 import type { AcceptedContradiction as ContradictionIssue } from "../core/contradictionValidation";
+import type { LocationContradictionIssue } from "../core/locationConsistency";
 import type { DeviationIssue } from "./checkDeviations";
 // 分類名（タブ）の定義は core が持つ。写しを作らない（設計書6.88）
 import { FACT_CONTRADICTION_CATEGORY } from "../core/factContradiction";
@@ -199,6 +200,44 @@ function contradictionForView(
 ): ContradictionViewItem {
   // **出さないと決めた指摘だけを外す**（単話プロットの判定。設計書6.36.3）
   return { ...item, canRecheck: item.allowRecheck !== false };
+}
+
+/**
+ * 場所の位置関係の機械照合（設計書6.93.4）の1件を、矛盾の行にする。
+ *
+ * - **再チェックを出さない。** 再チェックは本文だけを読み直して AI に問うので、
+ *   照らした物差し（設定資料の位置関係）が渡らない——確かめたことにならない
+ * - **「伏線として登録」を出さない。** 2つの記述の食い違いで、後の展開への
+ *   示唆ではない（事実の照合と同じ）
+ * - **修正案を持たない。** どちらの記述が正しいかは作者にしか決められない
+ * - 見出しは「もう一方の記述では」「この箇所では」。両方とも本文から抜いた関係なので、
+ *   「設定では」と書くと作者は資料のほうを疑いに行ってしまう。「先の」とも書かない
+ *   ——範囲で絞ったときは、飛ぶ先が先の話の記述になることがある
+ */
+export function locationContradictionView(
+  issue: LocationContradictionIssue,
+  index: number
+): ContradictionViewItem {
+  return {
+    id: `l:${issue.kind}:${path.basename(issue.filePath)}:${issue.line}:${index}`,
+    filePath: issue.filePath,
+    fileName: path.basename(issue.filePath),
+    // 本文のチャンクから出た指摘ではないので、指紋は持たない
+    chunkHash: "",
+    line: issue.line,
+    excerpt: issue.excerpt,
+    category: issue.category,
+    settingSays: issue.settingSays,
+    textSays: issue.textSays,
+    note: issue.note,
+    confidence: issue.confidence,
+    status: "pending",
+    canRegisterForeshadow: false,
+    leftLabel: "もう一方の記述では",
+    rightLabel: "この箇所では",
+    openTarget: "settings",
+    allowRecheck: false,
+  };
 }
 
 export interface ProposalViewItem {
@@ -2031,8 +2070,17 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
      * **渡されなければボタンを出さない。** 押しても何も起きない口を
      * 作らないため（「見送る」が黙って素通りしていた失敗と同じ形）。
      */
-    registerForeshadow?: RegisterForeshadow
+    registerForeshadow?: RegisterForeshadow,
+    /**
+     * 場所の位置関係の機械照合（設計書6.93.4）。**同じ「矛盾」の分類へ、
+     * 同じ1回の差し替えで並べる**——分類の中身は呼ぶたびに差し替わるので、
+     * 別に呼ぶと先に並べた AI の指摘が消える
+     */
+    locationIssues: readonly LocationContradictionIssue[] = []
   ): IncomingCount {
+    const locationItems: ContradictionViewItem[] = locationIssues.map(
+      (issue, index) => locationContradictionView(issue, index)
+    );
     const contradictions: ContradictionViewItem[] = issues.map((issue, index) => ({
       id: `c:${issue.chunkHash}:${issue.line}:${index}`,
       filePath: issue.filePath,
@@ -2054,7 +2102,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       openTarget: "settings",
     }));
     return this.replaceContents(work, "矛盾", {
-      contradictions,
+      // 機械の指摘は AI の指摘のあとへ。AI の指摘の番号（並び）を動かさない
+      contradictions: [...contradictions, ...locationItems],
       registerForeshadow,
     });
   }

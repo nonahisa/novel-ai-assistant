@@ -105,7 +105,13 @@ export const CHUNKED_FEATURES: readonly FeatureName[] = [
 ];
 
 /** AIを使わずに探す機能（`novel.detect`） */
-export const DETECT_FEATURES = ["notation", "name", "proofread"] as const;
+export const DETECT_FEATURES = [
+  "notation",
+  "name",
+  "proofread",
+  // 場所の位置関係の食い違い（設計書6.93.4。設計書での名前は contradiction.detectLocations）
+  "contradiction",
+] as const;
 
 /** AIへ渡す材料だけを組む機能（`novel.material`） */
 export const MATERIAL_FEATURES = ["contradiction"] as const;

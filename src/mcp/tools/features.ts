@@ -42,6 +42,7 @@ import {
   notationValidate,
 } from "./notation";
 import {
+  contradictionDetectLocations,
   contradictionMaterial,
   contradictionPrompt,
   contradictionRun,
@@ -636,6 +637,8 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
       }),
   },
   contradiction: {
+    // 場所の位置関係の食い違い（設計書6.93.4）。AIを使わず、設定資料だけで決まる
+    detect: (input) => contradictionDetectLocations({ folder: input.folder }),
     material: (input) =>
       contradictionMaterial({
         ...chunkArgs(input),
