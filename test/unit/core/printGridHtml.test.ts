@@ -272,6 +272,26 @@ describe("余白", () => {
     // ぶら下げないなら、下の帯へは何もはみ出さない
     expect(gridMarginClear("a4-landscape", { ...v30, hanging: false }, 10)).toBe(true);
   });
+
+  /** 設計書 6.33.5 に書いた「狭くが出ない組み合わせ」を固定する（係数を変えたら文書も直す） */
+  test.each([
+    ["a4-landscape", { columns: 40, rows: 30, hanging: true, vertical: true }],
+    ["a4-landscape", { columns: 20, rows: 20, hanging: true, vertical: true }],
+    ["a4-portrait", { columns: 20, rows: 20, hanging: true, vertical: false }],
+    ["a4-portrait", { columns: 20, rows: 20, hanging: false, vertical: false }],
+  ] as const)("狭くが出ない：%s %o", (paper, options) => {
+    expect(gridMarginClear(paper, options, 10)).toBe(false);
+  });
+
+  test.each([
+    ["a4-landscape", { columns: 40, rows: 30, hanging: false, vertical: true }],
+    ["a4-landscape", { columns: 20, rows: 20, hanging: false, vertical: true }],
+    ["a4-portrait", { columns: 40, rows: 30, hanging: true, vertical: true }],
+    ["a4-portrait", { columns: 20, rows: 20, hanging: true, vertical: true }],
+    ["a4-portrait", { columns: 40, rows: 30, hanging: true, vertical: false }],
+  ] as const)("狭くが出る：%s %o", (paper, options) => {
+    expect(gridMarginClear(paper, options, 10)).toBe(true);
+  });
 });
 
 /**
