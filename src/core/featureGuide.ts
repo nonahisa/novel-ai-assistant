@@ -172,7 +172,7 @@ export const EXTRA_GUIDE = `
 - 既にいる人物への変更は、その場では書き換えず「設定資料更新分反映」で承認してから入る
 - 作者が書き直した内容（作者メモなど）はAIが上書きしない
 - 同じ本文を二度AIに読ませない。処理済みは記憶され、本文を変えた分だけ作り直す
-- AIを呼ぶ操作には「AI」の印が付く。クラウドのAI（Claude・ChatGPT・Gemini）は実行のたびに課金され、Ollamaは無料
+- AIを呼ぶ操作には「AI」の印が付く。クラウドのAI（Claude・ChatGPT・Gemini）は実行のたびに課金され（ClaudeはMax・Teamプランなら毎月のAPIクレジットの範囲で使える）、Ollamaは無料
 `.trim();
 
 /**

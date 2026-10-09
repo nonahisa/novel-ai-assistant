@@ -73,6 +73,7 @@ function manualHeader(): string {
     "",
     "AIを呼ぶ操作には「AIを使う」と書いてあります。",
     "クラウドのAI（Claude・ChatGPT・Gemini・さくらのAI）は実行のたびに課金され、",
+    "ClaudeはMax・Teamプランなら、claude.aiの設定で受け取る毎月のAPIクレジットの範囲で使えます。",
     "手元で動くAI（Ollama・LM Studio）は無料です。",
   ].join("\n");
 }
