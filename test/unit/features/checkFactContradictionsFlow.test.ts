@@ -4,6 +4,7 @@ import { answerConfirms, type ConfirmPicker } from "../support/confirmPicker";
 
 let confirmPicker: ConfirmPicker | undefined;
 let confirmAnswer: string | undefined = "実行";
+import { AIError } from "../../../src/ai/types";
 import type { AIRegistry } from "../../../src/ai/registry";
 import type { WorkEntry } from "../../../src/models/types";
 
@@ -68,6 +69,8 @@ const state = vi.hoisted(() => ({
    */
   realCache: false,
   memory: new Map<string, unknown>(),
+  /** 次の抽出の呼び出しを、この回数だけレート上限（429・待ち10ms）で弾く */
+  rateLimitedCalls: 0,
 }));
 
 vi.mock("../../../src/ai/registry", () => ({
@@ -93,6 +96,10 @@ vi.mock("../../../src/ai/registry", () => ({
           meta?: { feature?: string };
         }) {
           const name = request.meta?.feature ?? "";
+          if (name === "story_fact_extract" && state.rateLimitedCalls > 0) {
+            state.rateLimitedCalls--;
+            throw new AIError("上限", "rate_limited", "", 10);
+          }
           state.sent.push({ feature: name, userPrompt: request.userPrompt });
           let text = state.extractResponse;
           if (name === "fact_contradiction_verify") {
@@ -306,6 +313,7 @@ beforeEach(() => {
   state.unreachable = [];
   state.realCache = false;
   state.memory = new Map();
+  state.rateLimitedCalls = 0;
   state.extractResponse = TWO_FACTS;
   state.verifyResponse = JSON.stringify({
     verdict: "採用",
@@ -364,6 +372,17 @@ describe("端から端まで", () => {
     expect(issue.textSays).toContain("黒髪");
     // 判定で分かったことは、作者の判断材料として残す
     expect(issue.note).toContain("両立しない");
+  });
+
+  test("抽出がレート上限（429・待ち時間つき）で弾かれても、待ってやり直して最後まで通す", async () => {
+    // さくらは毎分の上限が低く、1本ずつでも当たる（2026-10-10）。
+    // 致命として残りを止めると、事実が1件も取れず「見つからなかった」に見える
+    state.rateLimitedCalls = 1;
+
+    const result = await checkFactContradictions(work, registry());
+
+    expect(result?.acceptedFacts).toBe(2);
+    expect(result?.issues).toHaveLength(1);
   });
 
   test("抽出と判定で、別々の割当を引く", async () => {

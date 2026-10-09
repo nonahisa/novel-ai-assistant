@@ -30,6 +30,13 @@ import {
 } from "./chunkSettings";
 import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
 import {
+  callWithRateLimitWait,
+  newRateLimitRetryState,
+  rateLimitGiveUpNote,
+  rateLimitWaitHooks,
+  sleepUnlessAborted,
+} from "./rateLimitRetry";
+import {
   resolveOutputTokensForPlanning,
   resolveOutputTokensForSend,
 } from "../ai/outputLimit";
@@ -311,6 +318,8 @@ export async function checkProofread(
   let cancelled = false;
   // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
   let fatalFailure = "";
+  // レート上限で待った回数と時間（チャンクをまたいで数える。`rateLimitRetry.ts`）
+  const rateLimit = newRateLimitRetryState();
   /**
    * 何チャンクまでAIへ送ったか。**最後に「推敲を終了」の1行を残すのに要る**
    * （誤字脱字・矛盾と同じ形。`test/unit/cross/checkEndLog.test.ts`）。
@@ -452,7 +461,11 @@ export async function checkProofread(
             maxIssues: issueBudget(chunk.text.length),
           });
 
-          const response = await provider.generate({
+          // **レート上限は、示された時間だけ待って同じチャンクをやり直す**
+          // （`rateLimitRetry.ts`。さくらは毎分の上限が低く、1本ずつでも当たる）
+          const response = await callWithRateLimitWait(
+            () =>
+              provider.generate({
             systemPrompt: PROOFREAD_SYSTEM_PROMPT,
             userPrompt,
             model,
@@ -471,7 +484,15 @@ export async function checkProofread(
                 作法: styleNote.length,
               }),
             },
-          });
+              }),
+            rateLimit,
+              rateLimitWaitHooks({
+                sleep: (ms) => sleepUnlessAborted(ms, controller.signal),
+                report: (message) => progress.report({ message }),
+                log: logStep,
+                position: () => `${chunksDone + 1}/${chunksTotal}`,
+              })
+            );
 
           const parsed = parseProofreadResult(response.text);
           if (!parsed) {
@@ -501,7 +522,7 @@ export async function checkProofread(
           // **同じ失敗を積まない。** 環境側の失敗はどのチャンクでも同じに
           // なるので、1回目で止めて理由を1つだけ残す（作者のログで9件並んだ）
           if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
-            fatalFailure = `${error.message} ${recoveryForAIError(error)}`.trim();
+            fatalFailure = `${rateLimitGiveUpNote(rateLimit)}${error.message} ${recoveryForAIError(error)}`.trim();
             logStep(`残りのチャンクは試しません: ${fatalFailure}`);
           }
           failedChunks++;

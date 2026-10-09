@@ -5,6 +5,8 @@ import { AIError } from "../../../src/ai/types";
 import {
   callWithRateLimitWait,
   newRateLimitRetryState,
+  rateLimitGiveUpNote,
+  rateLimitWaitHooks,
 } from "../../../src/features/rateLimitRetry";
 
 /*
@@ -165,5 +167,78 @@ describe("伏線はレート上限で待つ", () => {
   test("検知と回収確認の2か所とも、待ちを通して呼ぶ", () => {
     const wrapped = source.match(/callWithRateLimitWait\(/g) ?? [];
     expect(wrapped.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+/*
+  **同じ決まりを機能ごとに写さない。** 推敲・矛盾検知・事実の矛盾・人物抽出・誤字脱字は、
+  どれも AI をチャンクごとに呼ぶ。1か所でも素の `provider.generate` や、
+  待ちを自前で書いた形に戻ると、5チャンクごとに止まる（または通算で諦める）形へ戻る。
+*/
+function featureSource(name: string): string {
+  return readFileSync(
+    resolve(__dirname, `../../../src/features/${name}.ts`),
+    "utf8"
+  );
+}
+
+describe("チャンクごとにAIを呼ぶ機能は、レート上限の待ちを共通の部品で通す", () => {
+  test.each(["checkProofread", "checkContradictions", "checkFactContradictions"])(
+    "%s は、チャンクの呼び出しを待ちに通し、諦めた前置きも付ける",
+    (name) => {
+      const source = featureSource(name);
+      expect(source).toContain("callWithRateLimitWait(");
+      expect(source).toContain("newRateLimitRetryState()");
+      expect(source).toContain("rateLimitGiveUpNote(");
+    }
+  );
+
+  test.each(["extractCharacters", "checkTypos"])(
+    "%s は、待ちを自前で書かず、共通の部品で「最後に通ってから」数える",
+    (name) => {
+      const source = featureSource(name);
+      expect(source).toContain("callWithRateLimitWait(");
+      // 通算で数える旧い書き方（呼び出しの外で totalWaitedMs を足す）が残っていない
+      expect(source).not.toMatch(/rateLimit\.totalWaitedMs\s*\+=/);
+      expect(source).not.toMatch(/rateLimitWaitMs\(error/);
+    }
+  );
+});
+
+describe("待ちの表示と諦めた前置き", () => {
+  test("待つ文言は、進み具合・秒数・回数・合計を含む", async () => {
+    const reports: string[] = [];
+    const logs: string[] = [];
+    const state = newRateLimitRetryState();
+    const hooks = rateLimitWaitHooks({
+      sleep: async () => true,
+      report: (m) => reports.push(m),
+      log: (m) => logs.push(m),
+      position: () => "3/17",
+    });
+    let first = true;
+    await callWithRateLimitWait(
+      async () => {
+        if (first) {
+          first = false;
+          throw new AIError("上限", "rate_limited", "", 60_000);
+        }
+        return "ok";
+      },
+      state,
+      hooks
+    );
+    expect(reports[0]).toBe(
+      "3/17  レート上限のため 61 秒待っています（1回目 / 合計 61 秒）"
+    );
+    expect(logs[0]).toContain("61 秒待っています");
+  });
+
+  test("諦めていなければ前置きは空、諦めたら待った秒数を書く", () => {
+    const state = newRateLimitRetryState();
+    expect(rateLimitGiveUpNote(state)).toBe("");
+    state.gaveUp = true;
+    state.waitedSinceSuccessMs = 122_000;
+    expect(rateLimitGiveUpNote(state)).toContain("合計 122 秒待ちましたが");
   });
 });

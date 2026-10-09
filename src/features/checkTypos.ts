@@ -80,10 +80,11 @@ import {
   resolveOutputTokensForSend,
 } from "../ai/outputLimit";
 import {
-  rateLimitWaitMs,
+  callWithRateLimitWait,
   describeRateLimitGiveUp,
-  type RateLimitWaitState,
-} from "./extractCharacters";
+  newRateLimitRetryState,
+  rateLimitWaitHooks,
+} from "./rateLimitRetry";
 import { KeepWordStore } from "../core/keepWordStore";
 import {
   buildStyleNote,
@@ -544,8 +545,7 @@ export async function checkTypos(
   let cancelled = false;
   let connectivityLost = false;
   let consecutiveConnectivityFailures = 0;
-  const rateLimit: RateLimitWaitState = { waits: 0, totalWaitedMs: 0 };
-  let rateLimitGaveUp = false;
+  const rateLimit = newRateLimitRetryState();
 
   // **ほかの一括処理と重ならないよう、実行の札を取る**（設計書6.76）。
   // 関所（送信を1件ずつ）だけだと、誤字脱字と矛盾検知が交互に流れて
@@ -667,38 +667,16 @@ export async function checkTypos(
           });
 
         try {
-          let res: Awaited<ReturnType<typeof callAI>> | undefined;
-          for (;;) {
-            try {
-              res = await callAI();
-              break;
-            } catch (error) {
-              const waitMs = rateLimitWaitMs(error, rateLimit);
-              if (waitMs === undefined) {
-                if (
-                  error instanceof AIError &&
-                  error.kind === "rate_limited" &&
-                  rateLimit.waits > 0
-                ) {
-                  rateLimitGaveUp = true;
-                }
-                throw error;
-              }
-              rateLimit.waits++;
-              rateLimit.totalWaitedMs += waitMs;
-              progress.report({
-                message:
-                  `${done + 1}/${total}  ` +
-                  `レート上限のため ${Math.ceil(waitMs / 1000)} 秒待っています` +
-                  `（${rateLimit.waits}回目 / 合計 ${Math.round(
-                    rateLimit.totalWaitedMs / 1000
-                  )} 秒）`,
-              });
-              if (!(await delay(waitMs, token))) {
-                throw new AIError("処理が中止されました。", "aborted");
-              }
-            }
-          }
+          const res = await callWithRateLimitWait(
+            callAI,
+            rateLimit,
+            rateLimitWaitHooks({
+              sleep: (ms) => delay(ms, token),
+              report: (message) => progress.report({ message }),
+              log: logStep,
+              position: () => `${done + 1}/${total}`,
+            })
+          );
 
           consecutiveConnectivityFailures = 0;
           // **分母は `total` を使う。** 送る側（上）と同じ値でなければ、
@@ -842,7 +820,7 @@ export async function checkTypos(
         "AIが起動しているか、ネットワーク接続を確認してください。" +
         "完了済みの処理は次回再利用されます。"
     );
-  } else if (rateLimitGaveUp) {
+  } else if (rateLimit.gaveUp) {
     vscode.window.showWarningMessage(describeRateLimitGiveUp(rateLimit));
   }
 

@@ -33,9 +33,10 @@ import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
 import {
   callWithRateLimitWait,
   newRateLimitRetryState,
+  rateLimitGiveUpNote,
+  rateLimitWaitHooks,
   sleepUnlessAborted,
   type RateLimitRetryHooks,
-  type RateLimitRetryState,
 } from "./rateLimitRetry";
 import { formatChapterLabel } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
@@ -1355,28 +1356,12 @@ function rateLimitHooks(
   signal: AbortSignal,
   position: () => string
 ): RateLimitRetryHooks {
-  return {
+  return rateLimitWaitHooks({
     sleep: (ms) => sleepUnlessAborted(ms, signal),
-    onWait: (waitMs, state) => {
-      const note =
-        `レート上限のため ${Math.ceil(waitMs / 1000)} 秒待っています` +
-        `（${state.waits}回目 / 合計 ${Math.round(state.totalWaitedMs / 1000)} 秒）`;
-      progress.report({ message: `${position()}  ${note}` });
-      logStep(note);
-    },
-  };
-}
-
-/**
- * 待っても通らずに諦めたときの前置き。**待ったことを書かないと、
- * 「しばらく待って」という案内が、待ったあとの作者には的外れに読める**
- */
-function rateLimitGiveUpNote(state: RateLimitRetryState): string {
-  if (!state.gaveUp) return "";
-  return (
-    `レート上限のため合計 ${Math.round(state.waitedSinceSuccessMs / 1000)} 秒待ちましたが、` +
-    "解消しませんでした（月や日の上限を使い切っていると、待っても回復しません）。"
-  );
+    report: (message) => progress.report({ message }),
+    log: logStep,
+    position,
+  });
 }
 
 function describeError(error: unknown): string {

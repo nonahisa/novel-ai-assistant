@@ -23,6 +23,13 @@ import { measureParts } from "../core/usageLog";
 import { resolveModelInfoOrWarn } from "./chunkSettings";
 import { collectManuscriptChunks } from "./manuscriptChunks";
 import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
+import {
+  callWithRateLimitWait,
+  newRateLimitRetryState,
+  rateLimitGiveUpNote,
+  rateLimitWaitHooks,
+  sleepUnlessAborted,
+} from "./rateLimitRetry";
 import { CharacterStore } from "../core/characterStore";
 import { readTextFile } from "../core/textFile";
 import { factsFromCharacters } from "../core/factsFromRecords";
@@ -378,6 +385,8 @@ export async function checkFactContradictions(
   let cancelled = false;
   /** 待っても直らない失敗を掴んだら、残りのチャンクは試さない */
   let fatalFailure = "";
+  // レート上限で待った回数と時間（チャンクをまたいで数える。`rateLimitRetry.ts`）
+  const rateLimit = newRateLimitRetryState();
   /**
    * 進み（何チャンク見たか／分母）。**数えるのは、実際にAIへ送ったものだけ**
    * である。キャッシュ命中まで分母に入れると、1件しか動かない実行が
@@ -521,7 +530,11 @@ export async function checkFactContradictions(
                 knownTopics: knownTopics.slice(-TOPIC_CARRY_LIMIT),
               });
 
-              const response = await provider.generate({
+              // **レート上限は、示された時間だけ待って同じチャンクをやり直す**
+              // （`rateLimitRetry.ts`）
+              const response = await callWithRateLimitWait(
+                () =>
+                  provider.generate({
                 systemPrompt: STORY_FACT_EXTRACT_SYSTEM_PROMPT,
                 userPrompt,
                 model,
@@ -541,7 +554,15 @@ export async function checkFactContradictions(
                     topic: knownTopics.length,
                   }),
                 },
-              });
+                  }),
+                rateLimit,
+                  rateLimitWaitHooks({
+                    sleep: (ms) => sleepUnlessAborted(ms, controller.signal),
+                    report: (message) => progress.report({ message }),
+                    log: logStep,
+                    position: () => `${chunksDone + 1}/${chunksTotal}`,
+                  })
+                );
 
               if (response.truncated || !response.text.trim()) {
                 // まとめたせいで入り切らなかったのなら、元の大きさなら通る
@@ -573,7 +594,7 @@ export async function checkFactContradictions(
               if (isContextOverflow(error)) return error;
               // **同じ失敗を積まない。** 環境側の失敗はどのチャンクでも同じ
               if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
-                fatalFailure = `${error.message} ${recoveryForAIError(error)}`.trim();
+                fatalFailure = `${rateLimitGiveUpNote(rateLimit)}${error.message} ${recoveryForAIError(error)}`.trim();
                 logStep(`残りのチャンクは試しません: ${fatalFailure}`);
               }
               failedChunks++;
