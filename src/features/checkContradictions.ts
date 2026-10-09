@@ -36,6 +36,13 @@ import {
 import { resolveModelInfoOrWarn } from "./chunkSettings";
 import { collectManuscriptChunks } from "./manuscriptChunks";
 import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
+import {
+  callWithRateLimitWait,
+  newRateLimitRetryState,
+  rateLimitGiveUpNote,
+  rateLimitWaitHooks,
+  sleepUnlessAborted,
+} from "./rateLimitRetry";
 import { factsRevealedAfter } from "../core/settingsAsOf";
 import {
   buildContradictionTermIndex,
@@ -982,6 +989,8 @@ export async function checkContradictions(
   let cancelled = false;
   // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
   let fatalFailure = "";
+  // レート上限で待った回数と時間（チャンクをまたいで数える。`rateLimitRetry.ts`）
+  const rateLimit = newRateLimitRetryState();
   /**
    * 検出の段の進み（何チャンク見たか／分母）。**中の関数ではなく、ここに置く。**
    *
@@ -1151,7 +1160,11 @@ export async function checkContradictions(
             // 失敗して答えが返らなくても、本文は外へ出ている
             sentChars += sendCharsOf(built);
             sentCalls++;
-            const response = await provider.generate({
+            // **レート上限は、示された時間だけ待って同じチャンクをやり直す**
+            // （`rateLimitRetry.ts`）
+            const response = await callWithRateLimitWait(
+              () =>
+                provider.generate({
               systemPrompt,
               userPrompt,
               model,
@@ -1195,7 +1208,15 @@ export async function checkContradictions(
                   過去場面: pastScenes.length,
                 }),
               },
-            });
+                }),
+              rateLimit,
+                rateLimitWaitHooks({
+                  sleep: (ms) => sleepUnlessAborted(ms, controller.signal),
+                  report: (message) => progress.report({ message }),
+                  log: logStep,
+                  position: () => `${chunksDone + 1}/${chunksTotal}`,
+                })
+              );
 
             if (response.truncated || !response.text.trim()) {
               // まとめたせいで入り切らなかったのなら、元の大きさなら通る見込みが
@@ -1234,7 +1255,7 @@ export async function checkContradictions(
             // **同じ失敗を積まない。** 環境側の失敗はどのチャンクでも同じに
             // なるので、1回目で止めて理由を1つだけ残す（作者のログで9件並んだ）
             if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
-              fatalFailure = `${error.message} ${recoveryForAIError(error)}`.trim();
+              fatalFailure = `${rateLimitGiveUpNote(rateLimit)}${error.message} ${recoveryForAIError(error)}`.trim();
               logStep(`残りのチャンクは試しません: ${fatalFailure}`);
             }
             failedChunks++;

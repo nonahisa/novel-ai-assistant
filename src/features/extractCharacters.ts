@@ -108,6 +108,18 @@ import {
 } from "../views/notify";
 import { estimateCallsTimeFor } from "../ai/runTimeEstimate";
 import { describeCallTimeEstimate } from "../core/etaEstimate";
+import {
+  callWithRateLimitWait,
+  describeRateLimitGiveUp,
+  newRateLimitRetryState,
+  rateLimitWaitHooks,
+} from "./rateLimitRetry";
+// 既存の呼び出し側と試験が、ここから読んでいる
+export {
+  describeRateLimitGiveUp,
+  rateLimitWaitMs,
+  type RateLimitWaitState,
+} from "./rateLimitRetry";
 
 /**
  * 速さを測っていないときの、1チャンクあたりの決め打ちの秒数（設計書6.8.19）。
@@ -648,9 +660,7 @@ export async function extractCharacters(
   let connectivityLost = false;
   let consecutiveConnectivityFailures = 0;
   /** レート上限で待った回数と合計時間。待ち続けないための歯止め */
-  const rateLimit: RateLimitWaitState = { waits: 0, totalWaitedMs: 0 };
-  /** 待っても解消せず諦めたか。作者への説明を変える */
-  let rateLimitGaveUp = false;
+  const rateLimit = newRateLimitRetryState();
 
   // 同じAI応答から能力・場所も取り出す。種別ごとにAIを呼ばないための仕組み。
   // 既存の総称が決まっていれば、チャンクごとに揺れないよう引き継ぐ。
@@ -798,40 +808,18 @@ export async function extractCharacters(
           // サーバーが待ち時間を指定してきたら守って同じチャンクをやり直す。
           // 上限で弾かれた呼び出しは課金対象にならないので、
           // 失敗として捨てるより待って続けるほうが作者の損が少ない。
-          let res: Awaited<ReturnType<typeof callAI>> | undefined;
-          for (;;) {
-            try {
-              res = await callAI();
-              break;
-            } catch (error) {
-              const waitMs = rateLimitWaitMs(error, rateLimit);
-              if (waitMs === undefined) {
-                // 待ちきれなかった場合は、そのことを理由として残す。
-                // 「利用できませんでした」だけでは待った意味が伝わらない
-                if (
-                  error instanceof AIError &&
-                  error.kind === "rate_limited" &&
-                  rateLimit.waits > 0
-                ) {
-                  rateLimitGaveUp = true;
-                }
-                throw error;
-              }
-              rateLimit.waits++;
-              rateLimit.totalWaitedMs += waitMs;
-              progress.report({
-                message:
-                  `${done + 1}/${queue.length}  ` +
-                  `レート上限のため ${Math.ceil(waitMs / 1000)} 秒待っています` +
-                  `（${rateLimit.waits}回目 / 合計 ${Math.round(
-                    rateLimit.totalWaitedMs / 1000
-                  )} 秒）`,
-              });
-              if (!(await delay(waitMs, token))) {
-                throw new AIError("処理が中止されました。", "aborted");
-              }
-            }
-          }
+          // 待ちの決まり（1回90秒まで・合計は「最後に通ってから」180秒）は
+          // `rateLimitRetry.ts` に1つだけ置く。
+          const res = await callWithRateLimitWait(
+            callAI,
+            rateLimit,
+            rateLimitWaitHooks({
+              sleep: (ms) => delay(ms, token),
+              report: (message) => progress.report({ message }),
+              log: logStep,
+              position: () => `${done + 1}/${queue.length}`,
+            })
+          );
 
           // 応答が返った時点で接続は生きている。連続失敗の数え直し
           consecutiveConnectivityFailures = 0;
@@ -1251,7 +1239,7 @@ export async function extractCharacters(
     ? "AIへ接続できなくなったため、残りのチャンクを中断しました。" +
       "AIが起動しているか、ネットワーク接続を確認してください。" +
       "完了済みの処理は次回再利用されます。\n"
-    : rateLimitGaveUp
+    : rateLimit.gaveUp
       ? `${describeRateLimitGiveUp(rateLimit)}\n`
       : "";
   const message =
@@ -1283,7 +1271,7 @@ export async function extractCharacters(
     failures.length > 0 ||
     cacheWarnings > 0 ||
     connectivityLost ||
-    rateLimitGaveUp ||
+    rateLimit.gaveUp ||
     !merged
       ? vscode.window.showWarningMessage(message, ...actions)
       : vscode.window.showInformationMessage(message, ...actions);
@@ -1314,7 +1302,7 @@ export async function extractCharacters(
     failures.length === 0 &&
     conflicted.length === 0 &&
     !connectivityLost &&
-    !rateLimitGaveUp &&
+    !rateLimit.gaveUp &&
     settingsNoticePrefix === ""
   ) {
     const updatedIds = new Set(updatedCharacters.map((record) => record.id));
@@ -1984,59 +1972,6 @@ async function showRecoveryPaths(recoveryPaths: string[]): Promise<void> {
     language: "text",
   });
   await vscode.window.showTextDocument(doc);
-}
-
-/** 1回あたりの待機時間の上限。これを超える指定なら待たずに失敗として扱う */
-const MAX_RATE_LIMIT_WAIT_MS = 90_000;
-
-/**
- * 1回の抽出で待ってよい合計時間。
- *
- * 無料枠には毎分の制限とは別に1日あたりの上限があり、
- * そちらを使い切ると待っても回復しない。それでも待ち続けると
- * 何十分も終わらない処理になる。
- * 回数ではなく**合計時間**で区切るのは、1回の待ち時間が
- * サーバーの都合で変わるため、回数では長さを見積もれないから。
- */
-const MAX_TOTAL_RATE_LIMIT_WAIT_MS = 180_000;
-
-export interface RateLimitWaitState {
-  waits: number;
-  totalWaitedMs: number;
-}
-
-/**
- * レート上限で待つべきなら待機時間を返す。待つべきでなければ undefined。
- *
- * サーバーが待ち時間を示してこない場合は待たない。
- * 当てずっぽうで待つと、いつ終わるか分からない処理になる。
- */
-export function rateLimitWaitMs(
-  error: unknown,
-  state: RateLimitWaitState
-): number | undefined {
-  if (!(error instanceof AIError)) return undefined;
-  if (error.kind !== "rate_limited") return undefined;
-  if (error.retryAfterMs === undefined) return undefined;
-
-  // サーバーの指定ちょうどだと際どいので少し余裕を持たせる
-  const waitMs = error.retryAfterMs + 1000;
-  if (waitMs > MAX_RATE_LIMIT_WAIT_MS) return undefined;
-  if (state.totalWaitedMs + waitMs > MAX_TOTAL_RATE_LIMIT_WAIT_MS) {
-    return undefined;
-  }
-  return waitMs;
-}
-
-/** 待ちきれずに諦めたときの説明。次に何をすればよいかまで書く */
-export function describeRateLimitGiveUp(state: RateLimitWaitState): string {
-  return (
-    `レート上限のため合計 ${Math.round(state.totalWaitedMs / 1000)} 秒待ちましたが、` +
-    "解消しませんでした。無料枠には1日あたりの上限もあり、" +
-    "使い切っている場合は待っても回復しません。\n" +
-    "時間をおいて再実行するか、呼び出し回数の多い抽出はOllamaで行ってください。" +
-    "完了済みのチャンクは次回再利用されます。"
-  );
 }
 
 /** 中止できる待機。中止されたら false */
