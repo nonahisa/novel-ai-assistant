@@ -119,6 +119,9 @@ input[type="search"] { flex: 1 1 120px; min-width: 90px; }
 }
 #fixed[hidden] { display: none; }
 #fixedText { flex: 1 1 auto; min-width: 0; overflow-wrap: break-word; }
+/* ボタンは縮めない。縮められると、長い修正案のとき［戻す］が「戻／す」と縦に
+   折れていた（実機確認リスト 95 の写真、2026-10-09）。狭いときは文のほうが折り返す */
+#undoFix { flex: 0 0 auto; white-space: nowrap; }
 #body { flex: 1; min-height: 0; overflow: auto; padding: 4px 0 32px; }
 #empty { padding: 20px 12px; color: var(--vscode-descriptionForeground); }
 h2 {

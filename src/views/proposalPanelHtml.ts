@@ -452,8 +452,13 @@ appliedBoxEl.style.display = 'none';
 */
 ${OBSERVE_VISIBLE_WIDTH_SOURCE}
 observeVisibleWidth(function (clippedWidth) {
-  // 切れているときだけ本文の幅を見える幅へ詰める。広いときは空のまま（見た目を変えない）
-  const next = clippedWidth > 0 ? clippedWidth + 'px' : '';
+  // 切れているときだけ本文の幅を見える幅へ詰める。広いときは空のまま（見た目を変えない）。
+  // **本文の左端の位置を引く**（原稿エディターと同じ形）。VS Code は WebView の body に
+  // 左右20pxの余白を入れ、原稿エディターではそのぶん右端が窓の外へ出ていた。この画面は
+  // body の余白を0にしているので今は0を引くだけだが、余白を戻したときに同じずれを起こさない
+  // （画面の自動テスト proposalPanelNarrow が本文の右端を見張る。2026-10-10）
+  const left = Math.max(0, document.body.getBoundingClientRect().left);
+  const next = clippedWidth > 0 ? Math.max(0, Math.floor(clippedWidth - left)) + 'px' : '';
   if (document.body.style.maxWidth !== next) document.body.style.maxWidth = next;
 });
 

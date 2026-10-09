@@ -74,6 +74,22 @@ export const TUNING_SCOPE_CHOICES: readonly TuningScopeChoice[] = [
   },
 ];
 
+/**
+ * 「何を測りますか」の画面の題。**測るモデルが分かれば題に出す**
+ * （実機確認リスト 419、2026-10-09）。
+ *
+ * 知らせの［AIチューニングで測る］から来た作者が確かめたいのは「いま割り当てた
+ * モデルを測るのか」である。以前は選んで測り終えたあとの知らせで初めてモデル名が
+ * 出ていた。分からないとき（AIが未設定）は、これまでの題のまま。
+ *
+ * @param subject 測るモデル（「Ollama / gemma4:e4b」の形）
+ */
+export function tuningScopeTitle(subject: string | undefined): string {
+  return subject
+    ? `AIチューニング：${subject} の何を測りますか`
+    : "AIチューニング：何を測りますか";
+}
+
 /** その回に、読める長さ（と待ち時間）を測るか */
 export function measuresInput(scope: TuningScope): boolean {
   return scope === "input" || scope === "both";

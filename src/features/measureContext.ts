@@ -88,6 +88,7 @@ import { outputTokensPerSecond } from "../core/tuningStats";
 import {
   measuresOutput,
   TUNING_SCOPE_CHOICES,
+  tuningScopeTitle,
   type TuningScope,
 } from "../core/tuningScope";
 import { cancelItem } from "../views/dialogs";
@@ -464,9 +465,16 @@ const ERROR_EXCERPT_CHARS = 200;
  * 渡された範囲を測るだけにして、呼び出し（時間切れの通知から来る経路や
  * 検査）が勝手に画面を出さないようにする。
  *
+ * **測るモデルを題に出す**（実機確認リスト 419、2026-10-09）。知らせの
+ * ［AIチューニングで測る］から来た作者は、いま割り当てたモデルを測るのかを
+ * 選ぶ前に確かめたい。どのモデルかは呼び手が副作用の無い道で引いて渡す。
+ *
+ * @param subject 測るモデル（「Ollama / gemma4:e4b」の形）。分からなければ省く
  * @returns 選ばれた範囲。取りやめたら undefined
  */
-export async function askTuningScope(): Promise<TuningScope | undefined> {
+export async function askTuningScope(
+  subject?: string
+): Promise<TuningScope | undefined> {
   const picked = await vscode.window.showQuickPick(
     [
       ...TUNING_SCOPE_CHOICES.map((choice) => ({
@@ -477,7 +485,7 @@ export async function askTuningScope(): Promise<TuningScope | undefined> {
       cancelItem("取りやめる"),
     ],
     {
-      title: "AIチューニング：何を測りますか",
+      title: tuningScopeTitle(subject),
       placeHolder: "測るものを選んでください",
       ignoreFocusOut: true,
     }

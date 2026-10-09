@@ -261,9 +261,13 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 .advice-buttons .apply:hover:enabled,
 #adviceSend:hover:enabled { background: var(--vscode-button-hoverBackground); }
-#adviceForm { display: flex; gap: 4px; padding: 6px 12px 0; }
+/* 狭い列（plot.md・この画面・提案パネルの3列）では、入力欄を1段目に、ボタンを2段目に
+   折り返す。折り返さないと［止める］［会話を消す］が1字ずつ縦に折れ、入力欄も潰れていた
+   （実機確認リスト 545〜566 の写真、2026-10-09）。ボタンは縮めず、字を1行に保つ */
+#adviceForm { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 12px 0; }
+#adviceForm button { flex: 0 0 auto; white-space: nowrap; }
 #adviceInput {
-  flex: 1 1 auto;
+  flex: 1 1 180px;
   min-width: 0;
   padding: 3px 6px;
   font: inherit;

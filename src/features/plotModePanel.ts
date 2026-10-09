@@ -931,7 +931,29 @@ class PlotModePanel {
     );
   }
 
-  private async load(): Promise<void> {
+  /**
+   * 読み込みの列。**読み込みは1本ずつ**（前のものが終わってから次を始める）。
+   *
+   * 開いた直後は、パネルを作った側の `initialize()` と、画面が整ったときの
+   * `ready` の知らせが、ほぼ同時に読み込みを始める。重ねて走らせると、
+   * どちらも先頭で知らせの器を空にしてから、置き場を読んだあとで同じ器へ
+   * 断りを足すので、**同じ断りが帯に2回続けて出ていた**（実機確認リスト 369、
+   * 2026-10-09）。本文の並び・単話プロットの話数（`episodes`・`plotChapters`）も
+   * 同じ器なので、重なると途中の値を読む恐れがある。並べて1本ずつにする。
+   */
+  private loading: Promise<void> = Promise.resolve();
+
+  private load(): Promise<void> {
+    // 前の読み込みが失敗しても、次は走らせる（失敗はその呼び手が受け取る）
+    const next = this.loading.then(
+      () => this.loadOnce(),
+      () => this.loadOnce()
+    );
+    this.loading = next.catch(() => undefined);
+    return next;
+  }
+
+  private async loadOnce(): Promise<void> {
     this.notices = [];
     const document = this.openPlotDocument();
     const text = document ? document.getText() : await readPlotText(this.work);

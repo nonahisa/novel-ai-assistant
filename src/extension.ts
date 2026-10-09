@@ -4539,7 +4539,21 @@ export async function activate(
       // **何を測るかを先に訊く**（作者の依頼、2026-09-13）。読める長さは
       // 数分だが、書ける長さは遅いモデルで1時間以上かかる。押した瞬間に
       // 両方始まる形だと、数分で済ませたい作者が1時間付き合わされる
-      const scope = await askTuningScope();
+      const measuredFeature = isAssignableFeature(feature) ? feature : "default";
+      const named = isMeasureTarget(target) ? target : undefined;
+      /*
+        **選ぶ画面に、測るモデルを出す**（実機確認リスト 419、2026-10-09）。
+        引くのは副作用の無い `resolve`（設定ウィザードも LM Studio の読み込みも
+        起こさない）。`ensureConfigured` はこれまでどおり選んだあと（測る中）で通す
+        ——先に出すと、何を測るかを選ぶ前に設定の画面が出てしまう。
+      */
+      const resolvedForTitle = named ? undefined : aiRegistry.resolve(measuredFeature);
+      const subject = named
+        ? `${aiRegistry.getProvider(named.providerId)?.displayName ?? named.providerId} / ${named.model}`
+        : resolvedForTitle
+          ? `${resolvedForTitle.provider.displayName} / ${resolvedForTitle.model}`
+          : undefined;
+      const scope = await askTuningScope(subject);
       if (!scope) return;
       // **測定に作品は要らないが、ログの置き場所には要る**（設計書6.53）。
       // 出力パネルはVS Codeを閉じると消えるので、点滅や時間切れの原因を
@@ -4564,12 +4578,12 @@ export async function activate(
       try {
         await measureContext(
           aiRegistry,
-          isAssignableFeature(feature) ? feature : "default",
+          measuredFeature,
           logFolder,
           scope,
           // 確認画面の「この大きいモデルの速さを測る」から来たときだけ名指しがある
           // （A3④）。割当を変える前に測るため
-          isMeasureTarget(target) ? target : undefined
+          named
         );
       } finally {
         useLogFile(logFolder);
