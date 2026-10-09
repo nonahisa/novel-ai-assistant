@@ -6498,13 +6498,8 @@ export async function activate(
         run.issues,
         run.recordIssues
       );
-      // 本文に置けない行は校正・メモパネルに並ばない（本文の位置を持たない）。
-      // 提案パネルのほうも開いて、行が見えるようにする
-      if (run.recordIssues.length > 0) {
-        void vscode.commands.executeCommand("novelai.openProposals", {
-          preserveFocus: true,
-        });
-      }
+      // 本文に置けない行があれば、提案パネルも開く（`showLocationContradictions` の中。
+      // 矛盾検知の終わりと同じ決まり）
       const parts = describeCheckRunCounts({
         shown: shown.remaining,
         alreadyHandled: shown.handled,
