@@ -74,7 +74,7 @@ code --install-extension ".\novel-ai-assistant-$($v.TrimStart('v')).vsix" --forc
 
 クラウドAIだけを使うならOllamaとモデルは要らず、1台だけで書くならGitとGitHub CLIも要りません。
 
-`gemma4:e4b` は小さいモデルで、誤字脱字・矛盾・伏線などの検知では見落としや誤った指摘が多く出ます。検知に使うなら、`gemma4:26b`（8GBのGPUでも動きます）かクラウドAIを勧めます。機能別AI割当で、機能ごとに選べます。
+誤字脱字・矛盾・伏線などの検知に使うなら、`gemma4:26b`（8GBのGPUでも動きます）かクラウドAIを勧めます。機能別AI割当で、機能ごとに選べます。
 
 ---
 
