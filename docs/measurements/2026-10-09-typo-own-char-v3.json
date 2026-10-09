@@ -1,0 +1,1003 @@
+{
+  "measuredAt": "2026-10-10T00:09:29+09:00",
+  "feature": "typo",
+  "runner": "python（製品の外。novel-ai-bench\\typo-model\\measure.py。数え方は %TEMP%\\td\\run.py の写し）",
+  "base": "tohoku-nlp/bert-base-japanese-char-v3（Apache-2.0）に1字ずつの印付けの頭（9ラベル）を足して学習",
+  "weights": "novel-ai-bench\\typo-model\\models\\（配らない。この機械の中だけ）",
+  "comparedWith": "recruit-jp/japanese-typo-detector-roberta-base（素の版）",
+  "countingCheck": "recruit-jp を run.py と measure.py の両方で当て、小さい台（線0.5）10/12・罠0・外12、大きい台（線0.5）14/17・罠9・外254 で一致を確かめてから測った",
+  "benches": {
+    "small": "test/fixtures/seeded/typo（12件）",
+    "large": "novel-ai-bench/typo-gold-kyokasho10（確実17・罠38）"
+  },
+  "versions": {
+    "recruit-jp": {
+      "note": "素の版",
+      "results": {
+        "small": {
+          "0.5": {
+            "found": "10/12",
+            "missed": [
+              "助詞の抜け「風強く」",
+              "打ちかけの字「ｓっと」"
+            ],
+            "trapFlagged": 0,
+            "trapWords": [],
+            "outsideMarks": 12
+          },
+          "0.3": {
+            "found": "10/12",
+            "missed": [
+              "助詞の抜け「風強く」",
+              "打ちかけの字「ｓっと」"
+            ],
+            "trapFlagged": 2,
+            "trapWords": [
+              "ほうかい",
+              "ほうかい"
+            ],
+            "outsideMarks": 15
+          },
+          "0.1": {
+            "found": "10/12",
+            "missed": [
+              "助詞の抜け「風強く」",
+              "打ちかけの字「ｓっと」"
+            ],
+            "trapFlagged": 4,
+            "trapWords": [
+              "｜霧鈴",
+              "霧見坂",
+              "ほうかい",
+              "ほうかい"
+            ],
+            "outsideMarks": 23
+          }
+        },
+        "large": {
+          "0.5": {
+            "found": "14/17",
+            "missed": [
+              "衍字「のを原理を」",
+              "変換ミス・入力ミス「手を拾い」",
+              "脱字「良いわから」"
+            ],
+            "trapFlagged": 9,
+            "trapWords": [
+              "行うっと",
+              "炎槍",
+              "見れる",
+              "き、き、き昨日",
+              "別嬪さんやねぇ",
+              "出れない",
+              "後継ぎ",
+              "骨喰牛",
+              "先生がた"
+            ],
+            "outsideMarks": 254
+          },
+          "0.3": {
+            "found": "14/17",
+            "missed": [
+              "衍字「のを原理を」",
+              "変換ミス・入力ミス「手を拾い」",
+              "脱字「良いわから」"
+            ],
+            "trapFlagged": 11,
+            "trapWords": [
+              "火針",
+              "行うっと",
+              "炎槍",
+              "見れる",
+              "き、き、き昨日",
+              "別嬪さんやねぇ",
+              "出れない",
+              "後継ぎ",
+              "骨喰牛",
+              "信じらんない",
+              "先生がた"
+            ],
+            "outsideMarks": 306
+          },
+          "0.1": {
+            "found": "15/17",
+            "missed": [
+              "変換ミス・入力ミス「手を拾い」",
+              "脱字「良いわから」"
+            ],
+            "trapFlagged": 13,
+            "trapWords": [
+              "火針",
+              "行うっと",
+              "炎槍",
+              "見れる",
+              "灯りあれ",
+              "き、き、き昨日",
+              "別嬪さんやねぇ",
+              "出れない",
+              "後継ぎ",
+              "骨喰牛",
+              "闇豹",
+              "信じらんない",
+              "先生がた"
+            ],
+            "outsideMarks": 395
+          }
+        },
+        "seconds": {
+          "small": 2.5,
+          "large": 23.7,
+          "device": "cpu"
+        }
+      }
+    },
+    "v1-aozora": {
+      "note": "①青空文庫だけ（1段目、250万段落・1エポック）",
+      "results": {
+        "small": {
+          "0.5": {
+            "found": "8/12",
+            "missed": [
+              "送り仮名「新らしい」",
+              "助詞の抜け「風強く」",
+              "変換ミス「暑い」",
+              "送り仮名「短かい」"
+            ],
+            "trapFlagged": 0,
+            "trapWords": [],
+            "outsideMarks": 2
+          },
+          "0.3": {
+            "found": "9/12",
+            "missed": [
+              "送り仮名「新らしい」",
+              "変換ミス「暑い」",
+              "送り仮名「短かい」"
+            ],
+            "trapFlagged": 0,
+            "trapWords": [],
+            "outsideMarks": 3
+          },
+          "0.1": {
+            "found": "10/12",
+            "missed": [
+              "送り仮名「新らしい」",
+              "送り仮名「短かい」"
+            ],
+            "trapFlagged": 3,
+            "trapWords": [
+              "夜霧番",
+              "ほうかい",
+              "ほうかい"
+            ],
+            "outsideMarks": 9
+          }
+        },
+        "large": {
+          "0.5": {
+            "found": "12/17",
+            "missed": [
+              "脱字「きちんノート」",
+              "変換ミス・入力ミス「手を拾い」",
+              "変換ミス「暖かそう」",
+              "変換ミス「荒い麻」",
+              "変換ミス「来ている服」"
+            ],
+            "trapFlagged": 3,
+            "trapWords": [
+              "んでつ",
+              "き、き、き昨日",
+              "あっれぇ"
+            ],
+            "outsideMarks": 41
+          },
+          "0.3": {
+            "found": "13/17",
+            "missed": [
+              "変換ミス・入力ミス「手を拾い」",
+              "変換ミス「暖かそう」",
+              "変換ミス「荒い麻」",
+              "変換ミス「来ている服」"
+            ],
+            "trapFlagged": 5,
+            "trapWords": [
+              "で、す、ね",
+              "んでつ",
+              "き、き、き昨日",
+              "あっれぇ",
+              "四則演算習ってて"
+            ],
+            "outsideMarks": 83
+          },
+          "0.1": {
+            "found": "13/17",
+            "missed": [
+              "変換ミス・入力ミス「手を拾い」",
+              "変換ミス「暖かそう」",
+              "変換ミス「荒い麻」",
+              "変換ミス「来ている服」"
+            ],
+            "trapFlagged": 10,
+            "trapWords": [
+              "聖紋神術",
+              "行うっと",
+              "炎槍",
+              "見れる",
+              "で、す、ね",
+              "灯りあれ",
+              "んでつ",
+              "き、き、き昨日",
+              "あっれぇ",
+              "四則演算習ってて"
+            ],
+            "outsideMarks": 188
+          }
+        },
+        "seconds": {
+          "small": 0.6,
+          "large": 5.8,
+          "device": "cuda（RTX 4060 Ti）"
+        }
+      },
+      "training": {
+        "data": "main",
+        "init": null,
+        "epochs": 1.0,
+        "bs": 32,
+        "lr": 3e-05,
+        "steps": 76161,
+        "seconds": 7436,
+        "val": [
+          {
+            "precision": 0.887,
+            "recall": 0.76,
+            "cleanParasFlaggedShare": 0.059,
+            "step": 76161,
+            "seconds": 7436
+          }
+        ]
+      },
+      "material": {
+        "paragraphsSampled": 2500000,
+        "worksSampled": 9728,
+        "trainParagraphs": 2437134,
+        "valParagraphs": 62866,
+        "trend": null,
+        "seededByKind": {
+          "そのまま": 744046,
+          "打ちかけ": 111375,
+          "入力ミス": 111959,
+          "OK崩し": 968550,
+          "余分": 196866,
+          "抜け": 243470,
+          "助詞": 97679,
+          "送り仮名": 57202,
+          "重なり": 320316,
+          "変換": 240089
+        }
+      }
+    },
+    "v1b-aozora-stage2": {
+      "note": "①の対照：①から青空文庫だけで2段目を同じ歩数だけ続けたもの（②④の差が「続けて学んだこと」でないかを見るため）",
+      "results": {
+        "small": {
+          "0.5": {
+            "found": "8/12",
+            "missed": [
+              "送り仮名「新らしい」",
+              "助詞の抜け「風強く」",
+              "変換ミス「暑い」",
+              "送り仮名「短かい」"
+            ],
+            "trapFlagged": 0,
+            "trapWords": [],
+            "outsideMarks": 2
+          },
+          "0.3": {
+            "found": "9/12",
+            "missed": [
+              "送り仮名「新らしい」",
+              "変換ミス「暑い」",
+              "送り仮名「短かい」"
+            ],
+            "trapFlagged": 0,
+            "trapWords": [],
+            "outsideMarks": 3
+          },
+          "0.1": {
+            "found": "9/12",
+            "missed": [
+              "送り仮名「新らしい」",
+              "変換ミス「暑い」",
+              "送り仮名「短かい」"
+            ],
+            "trapFlagged": 2,
+            "trapWords": [
+              "夜霧番",
+              "夜霧番"
+            ],
+            "outsideMarks": 12
+          }
+        },
+        "large": {
+          "0.5": {
+            "found": "12/17",
+            "missed": [
+              "脱字「きちんノート」",
+              "変換ミス・入力ミス「手を拾い」",
+              "変換ミス「暖かそう」",
+              "変換ミス「荒い麻」",
+              "変換ミス「来ている服」"
+            ],
+            "trapFlagged": 3,
+            "trapWords": [
+              "んでつ",
+              "あっれぇ",
+              "四則演算習ってて"
+            ],
+            "outsideMarks": 52
+          },
+          "0.3": {
+            "found": "12/17",
+            "missed": [
+              "脱字「きちんノート」",
+              "変換ミス・入力ミス「手を拾い」",
+              "変換ミス「暖かそう」",
+              "変換ミス「荒い麻」",
+              "変換ミス「来ている服」"
+            ],
+            "trapFlagged": 5,
+            "trapWords": [
+              "で、す、ね",
+              "んでつ",
+              "き、き、き昨日",
+              "あっれぇ",
+              "四則演算習ってて"
+            ],
+            "outsideMarks": 83
+          },
+          "0.1": {
+            "found": "13/17",
+            "missed": [
+              "変換ミス・入力ミス「手を拾い」",
+              "変換ミス「暖かそう」",
+              "変換ミス「荒い麻」",
+              "変換ミス「来ている服」"
+            ],
+            "trapFlagged": 11,
+            "trapWords": [
+              "火針",
+              "聖紋神術",
+              "すまなんだ",
+              "行うっと",
+              "で、す、ね",
+              "だいじょぶ",
+              "灯りあれ",
+              "んでつ",
+              "き、き、き昨日",
+              "あっれぇ",
+              "四則演算習ってて"
+            ],
+            "outsideMarks": 197
+          }
+        },
+        "seconds": {
+          "small": 0.4,
+          "large": 2.9,
+          "device": "cuda"
+        }
+      },
+      "training": {
+        "data": "aoz2",
+        "init": "models\\main",
+        "epochs": 1.0,
+        "bs": 32,
+        "lr": 2e-05,
+        "steps": 9138,
+        "seconds": 2024,
+        "val": [
+          {
+            "precision": 0.881,
+            "recall": 0.763,
+            "cleanParasFlaggedShare": 0.063,
+            "step": 9138,
+            "seconds": 2024
+          }
+        ]
+      },
+      "material": {
+        "paragraphsSampled": 300000,
+        "worksSampled": 8898,
+        "trainParagraphs": 292392,
+        "valParagraphs": 7608,
+        "trend": null,
+        "seededByKind": {
+          "そのまま": 90047,
+          "重なり": 38493,
+          "OK崩し": 115748,
+          "入力ミス": 13535,
+          "抜け": 28967,
+          "打ちかけ": 13458,
+          "変換": 28989,
+          "余分": 23560,
+          "助詞": 11543,
+          "送り仮名": 6685
+        }
+      }
+    },
+    "v2-aozora-author": {
+      "note": "②①から、青空文庫（新しく仕込んだ30万段落）＋作者の作品の正解（約10万字）で2段目",
+      "results": {
+        "small": {
+          "0.5": {
+            "found": "9/12",
+            "missed": [
+              "送り仮名「新らしい」",
+              "変換ミス「暑い」",
+              "送り仮名「短かい」"
+            ],
+            "trapFlagged": 0,
+            "trapWords": [],
+            "outsideMarks": 2
+          },
+          "0.3": {
+            "found": "10/12",
+            "missed": [
+              "送り仮名「新らしい」",
+              "送り仮名「短かい」"
+            ],
+            "trapFlagged": 0,
+            "trapWords": [],
+            "outsideMarks": 2
+          },
+          "0.1": {
+            "found": "10/12",
+            "missed": [
+              "送り仮名「新らしい」",
+              "送り仮名「短かい」"
+            ],
+            "trapFlagged": 2,
+            "trapWords": [
+              "夜霧番",
+              "夜霧番"
+            ],
+            "outsideMarks": 11
+          }
+        },
+        "large": {
+          "0.5": {
+            "found": "12/17",
+            "missed": [
+              "脱字「きちんノート」",
+              "変換ミス・入力ミス「手を拾い」",
+              "変換ミス「暖かそう」",
+              "変換ミス「荒い麻」",
+              "変換ミス「来ている服」"
+            ],
+            "trapFlagged": 3,
+            "trapWords": [
+              "で、す、ね",
+              "んでつ",
+              "あっれぇ"
+            ],
+            "outsideMarks": 46
+          },
+          "0.3": {
+            "found": "13/17",
+            "missed": [
+              "変換ミス・入力ミス「手を拾い」",
+              "変換ミス「暖かそう」",
+              "変換ミス「荒い麻」",
+              "変換ミス「来ている服」"
+            ],
+            "trapFlagged": 6,
+            "trapWords": [
+              "行うっと",
+              "で、す、ね",
+              "んでつ",
+              "き、き、き昨日",
+              "あっれぇ",
+              "四則演算習ってて"
+            ],
+            "outsideMarks": 85
+          },
+          "0.1": {
+            "found": "14/17",
+            "missed": [
+              "変換ミス・入力ミス「手を拾い」",
+              "変換ミス「暖かそう」",
+              "変換ミス「荒い麻」"
+            ],
+            "trapFlagged": 8,
+            "trapWords": [
+              "行うっと",
+              "炎槍",
+              "見れる",
+              "で、す、ね",
+              "んでつ",
+              "き、き、き昨日",
+              "あっれぇ",
+              "四則演算習ってて"
+            ],
+            "outsideMarks": 198
+          }
+        },
+        "seconds": {
+          "small": 0.4,
+          "large": 3.4,
+          "device": "cuda"
+        }
+      },
+      "training": {
+        "data": "aoz2,author",
+        "init": "models\\main",
+        "epochs": 1.0,
+        "bs": 32,
+        "lr": 2e-05,
+        "steps": 9796,
+        "seconds": 947,
+        "val": [
+          {
+            "precision": 0.879,
+            "recall": 0.764,
+            "cleanParasFlaggedShare": 0.067,
+            "step": 9796,
+            "seconds": 947
+          }
+        ]
+      },
+      "material": {
+        "aozora": {
+          "paragraphsSampled": 300000,
+          "worksSampled": 8898,
+          "trainParagraphs": 292392,
+          "valParagraphs": 7608,
+          "trend": null,
+          "seededByKind": {
+            "そのまま": 90047,
+            "重なり": 38493,
+            "OK崩し": 115748,
+            "入力ミス": 13535,
+            "抜け": 28967,
+            "打ちかけ": 13458,
+            "変換": 28989,
+            "余分": 23560,
+            "助詞": 11543,
+            "送り仮名": 6685
+          }
+        },
+        "author": {
+          "works": 13,
+          "chars": 94730,
+          "paragraphs": 2216,
+          "usedParagraphs": 2145,
+          "lines": 2359,
+          "examples": 21056,
+          "excluded": {
+            "たぶん": 36,
+            "台と同じ文": 34,
+            "改行・空白の誤り": 1
+          },
+          "sureErrors": 55,
+          "sureByKind": {
+            "衍字": 15,
+            "助詞の抜け": 4,
+            "助詞の重なり": 3,
+            "助詞の誤り": 3,
+            "変換ミス": 14,
+            "脱字": 8,
+            "入力ミス": 6,
+            "その他": 2
+          },
+          "seededExamplesByKind": {
+            "重なり": 4262,
+            "助詞": 1287,
+            "打ちかけ": 1516,
+            "変換": 3306,
+            "抜け": 3288,
+            "余分": 2678,
+            "入力ミス": 1501,
+            "送り仮名": 655
+          },
+          "realErrorExamples": 204
+        }
+      }
+    },
+    "v4-aozora-author-jwtdtrend": {
+      "note": "④②と同じ材料を、京大データ（JWTD v2 train）の傾向の集計（jwtd-stats.json、文を含まない）で仕込んだもの",
+      "results": {
+        "small": {
+          "0.5": {
+            "found": "8/12",
+            "missed": [
+              "送り仮名「新らしい」",
+              "変換ミス「対称」",
+              "変換ミス「暑い」",
+              "送り仮名「短かい」"
+            ],
+            "trapFlagged": 0,
+            "trapWords": [],
+            "outsideMarks": 2
+          },
+          "0.3": {
+            "found": "9/12",
+            "missed": [
+              "送り仮名「新らしい」",
+              "変換ミス「暑い」",
+              "送り仮名「短かい」"
+            ],
+            "trapFlagged": 2,
+            "trapWords": [
+              "夜霧番",
+              "夜霧番"
+            ],
+            "outsideMarks": 6
+          },
+          "0.1": {
+            "found": "9/12",
+            "missed": [
+              "送り仮名「新らしい」",
+              "変換ミス「暑い」",
+              "送り仮名「短かい」"
+            ],
+            "trapFlagged": 3,
+            "trapWords": [
+              "夜霧番",
+              "夜霧番",
+              "夜霧番"
+            ],
+            "outsideMarks": 17
+          }
+        },
+        "large": {
+          "0.5": {
+            "found": "13/17",
+            "missed": [
+              "変換ミス・入力ミス「手を拾い」",
+              "変換ミス「暖かそう」",
+              "変換ミス「荒い麻」",
+              "変換ミス「来ている服」"
+            ],
+            "trapFlagged": 4,
+            "trapWords": [
+              "んでつ",
+              "き、き、き昨日",
+              "あっれぇ",
+              "四則演算習ってて"
+            ],
+            "outsideMarks": 59
+          },
+          "0.3": {
+            "found": "13/17",
+            "missed": [
+              "変換ミス・入力ミス「手を拾い」",
+              "変換ミス「暖かそう」",
+              "変換ミス「荒い麻」",
+              "変換ミス「来ている服」"
+            ],
+            "trapFlagged": 6,
+            "trapWords": [
+              "行うっと",
+              "灯りあれ",
+              "んでつ",
+              "き、き、き昨日",
+              "あっれぇ",
+              "四則演算習ってて"
+            ],
+            "outsideMarks": 98
+          },
+          "0.1": {
+            "found": "13/17",
+            "missed": [
+              "変換ミス・入力ミス「手を拾い」",
+              "変換ミス「暖かそう」",
+              "変換ミス「荒い麻」",
+              "変換ミス「来ている服」"
+            ],
+            "trapFlagged": 10,
+            "trapWords": [
+              "すまなんだ",
+              "行うっと",
+              "炎槍",
+              "で、す、ね",
+              "灯りあれ",
+              "んでつ",
+              "き、き、き昨日",
+              "あっれぇ",
+              "四則演算習ってて",
+              "骨喰牛"
+            ],
+            "outsideMarks": 243
+          }
+        },
+        "seconds": {
+          "small": 0.4,
+          "large": 4.5,
+          "device": "cuda"
+        }
+      },
+      "training": {
+        "data": "aoz2t,author_trend",
+        "init": "models\\main",
+        "epochs": 1.0,
+        "bs": 32,
+        "lr": 2e-05,
+        "steps": 9799,
+        "seconds": 960,
+        "val": [
+          {
+            "precision": 0.846,
+            "recall": 0.688,
+            "cleanParasFlaggedShare": 0.083,
+            "step": 9799,
+            "seconds": 960
+          }
+        ]
+      },
+      "material": {
+        "aozora": {
+          "paragraphsSampled": 300000,
+          "worksSampled": 8898,
+          "trainParagraphs": 292392,
+          "valParagraphs": 7608,
+          "trend": "jwtd-stats.json",
+          "seededByKind": {
+            "そのまま": 89609,
+            "助詞": 10748,
+            "OK崩し": 115748,
+            "打ちかけ": 12449,
+            "抜け": 28313,
+            "変換": 55913,
+            "入力ミス": 21492,
+            "余分": 24054,
+            "重なり": 4753,
+            "送り仮名": 6460,
+            "入力ミス（転字）": 1880
+          }
+        },
+        "author": {
+          "works": 13,
+          "chars": 94730,
+          "paragraphs": 2216,
+          "usedParagraphs": 2145,
+          "lines": 2359,
+          "examples": 21147,
+          "excluded": {
+            "たぶん": 36,
+            "台と同じ文": 34,
+            "改行・空白の誤り": 1
+          },
+          "sureErrors": 55,
+          "sureByKind": {
+            "衍字": 15,
+            "助詞の抜け": 4,
+            "助詞の重なり": 3,
+            "助詞の誤り": 3,
+            "変換ミス": 14,
+            "脱字": 8,
+            "入力ミス": 6,
+            "その他": 2
+          },
+          "seededExamplesByKind": {
+            "抜け": 3209,
+            "変換": 6151,
+            "余分": 2814,
+            "重なり": 522,
+            "入力ミス（転字）": 226,
+            "入力ミス": 2426,
+            "助詞": 1194,
+            "送り仮名": 658,
+            "打ちかけ": 1384
+          },
+          "realErrorExamples": 204
+        }
+      }
+    },
+    "v3-aozora-author-jwtd": {
+      "note": "③②の材料＋京大データ（JWTD v2 train）の文の組15万（誤りあり・直したあとの両方）。重みに CC BY-SA 3.0 が及ぶ",
+      "results": {
+        "small": {
+          "0.5": {
+            "found": "10/12",
+            "missed": [
+              "送り仮名「新らしい」",
+              "送り仮名「短かい」"
+            ],
+            "trapFlagged": 0,
+            "trapWords": [],
+            "outsideMarks": 2
+          },
+          "0.3": {
+            "found": "10/12",
+            "missed": [
+              "送り仮名「新らしい」",
+              "送り仮名「短かい」"
+            ],
+            "trapFlagged": 1,
+            "trapWords": [
+              "夜霧番"
+            ],
+            "outsideMarks": 4
+          },
+          "0.1": {
+            "found": "11/12",
+            "missed": [
+              "送り仮名「新らしい」"
+            ],
+            "trapFlagged": 2,
+            "trapWords": [
+              "夜霧番",
+              "夜霧番"
+            ],
+            "outsideMarks": 12
+          }
+        },
+        "large": {
+          "0.5": {
+            "found": "12/17",
+            "missed": [
+              "脱字「きちんノート」",
+              "変換ミス・入力ミス「手を拾い」",
+              "変換ミス「暖かそう」",
+              "変換ミス「荒い麻」",
+              "変換ミス「来ている服」"
+            ],
+            "trapFlagged": 4,
+            "trapWords": [
+              "行うっと",
+              "見れる",
+              "んでつ",
+              "あっれぇ"
+            ],
+            "outsideMarks": 42
+          },
+          "0.3": {
+            "found": "13/17",
+            "missed": [
+              "脱字「きちんノート」",
+              "変換ミス・入力ミス「手を拾い」",
+              "変換ミス「暖かそう」",
+              "変換ミス「荒い麻」"
+            ],
+            "trapFlagged": 7,
+            "trapWords": [
+              "行うっと",
+              "見れる",
+              "で、す、ね",
+              "んでつ",
+              "き、き、き昨日",
+              "あっれぇ",
+              "四則演算習ってて"
+            ],
+            "outsideMarks": 99
+          },
+          "0.1": {
+            "found": "14/17",
+            "missed": [
+              "変換ミス・入力ミス「手を拾い」",
+              "変換ミス「暖かそう」",
+              "変換ミス「荒い麻」"
+            ],
+            "trapFlagged": 10,
+            "trapWords": [
+              "すまなんだ",
+              "行うっと",
+              "炎槍",
+              "見れる",
+              "で、す、ね",
+              "んでつ",
+              "き、き、き昨日",
+              "出れない",
+              "あっれぇ",
+              "四則演算習ってて"
+            ],
+            "outsideMarks": 221
+          }
+        },
+        "seconds": {
+          "small": 0.6,
+          "large": 2.9,
+          "device": "cuda"
+        }
+      },
+      "training": {
+        "data": "aoz2,author,jwtd",
+        "init": "models\\main",
+        "epochs": 1.0,
+        "bs": 32,
+        "lr": 2e-05,
+        "steps": 19171,
+        "seconds": 1733,
+        "val": [
+          {
+            "precision": 0.879,
+            "recall": 0.759,
+            "cleanParasFlaggedShare": 0.067,
+            "step": 19171,
+            "seconds": 1733
+          }
+        ]
+      },
+      "material": {
+        "aozora": {
+          "paragraphsSampled": 300000,
+          "worksSampled": 8898,
+          "trainParagraphs": 292392,
+          "valParagraphs": 7608,
+          "trend": null,
+          "seededByKind": {
+            "そのまま": 90047,
+            "重なり": 38493,
+            "OK崩し": 115748,
+            "入力ミス": 13535,
+            "抜け": 28967,
+            "打ちかけ": 13458,
+            "変換": 28989,
+            "余分": 23560,
+            "助詞": 11543,
+            "送り仮名": 6685
+          }
+        },
+        "author": {
+          "works": 13,
+          "chars": 94730,
+          "paragraphs": 2216,
+          "usedParagraphs": 2145,
+          "lines": 2359,
+          "examples": 21056,
+          "excluded": {
+            "たぶん": 36,
+            "台と同じ文": 34,
+            "改行・空白の誤り": 1
+          },
+          "sureErrors": 55,
+          "sureByKind": {
+            "衍字": 15,
+            "助詞の抜け": 4,
+            "助詞の重なり": 3,
+            "助詞の誤り": 3,
+            "変換ミス": 14,
+            "脱字": 8,
+            "入力ミス": 6,
+            "その他": 2
+          },
+          "seededExamplesByKind": {
+            "重なり": 4262,
+            "助詞": 1287,
+            "打ちかけ": 1516,
+            "変換": 3306,
+            "抜け": 3288,
+            "余分": 2678,
+            "入力ミス": 1501,
+            "送り仮名": 655
+          },
+          "realErrorExamples": 204
+        },
+        "jwtd": {
+          "name": "jwtd",
+          "source": "JWTD v2.0 train（CC BY-SA 3.0）",
+          "examples": 300000,
+          "stats": {
+            "組": 696189,
+            "外した:others・not-typo": 32539,
+            "外した:台と重なる": 5,
+            "使った組": 150000
+          }
+        }
+      }
+    }
+  },
+  "cpuSecondsLargeV1": 21.1,
+  "corpus": {
+    "source": "青空文庫（globis-university/aozorabunko-clean、CC BY 4.0）。新字新仮名かつ作品著作権フラグ・人物著作権フラグがともに「なし」。詩歌（分類911）を除く",
+    "works": 9761,
+    "paragraphs": 2365083,
+    "chars": 168239585
+  },
+  "jwtd": {
+    "source": "京都大学 黒橋研究室「日本語Wikipedia入力誤りデータセット」v2.0（JWTD v2）",
+    "license": "CC BY-SA 3.0",
+    "used": "train の部分だけ（test・gold は使わない）。③は文の組そのもの、④は文を含まない集計（jwtd-stats.json）だけ"
+  },
+  "authorWorks": "作者の作品の正解（Claude が本物の誤りと直しを付けたもの）。作品名・場所はここに書かない"
+}
