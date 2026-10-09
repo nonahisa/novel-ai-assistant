@@ -68,6 +68,11 @@ import { worldviewMaxChars } from "../../core/worldviewSelect";
 import { withLineNumbers, type Chunk } from "../../core/chunker";
 import { parseCharacter, type Character } from "../../models/character";
 import { parseLocation, type Location } from "../../models/location";
+import {
+  findLocationInconsistencies,
+  placeLocationInconsistencies,
+  type EpisodeText,
+} from "../../core/locationConsistency";
 import { parseWorldItem, type WorldItem } from "../../models/world";
 import { parseSynopsisSet } from "../../models/synopsis";
 import {
@@ -1128,4 +1133,77 @@ function verifyAskerOf(
       timeoutMs: timeoutMsOf(input.timeoutSeconds),
       temperature: params.temperature,
     });
+}
+
+/**
+ * 場所の位置関係の食い違いを、AIを使わずに挙げる（設計書6.93.4。
+ * 設計書での名前は `contradiction.detectLocations`、口は `novel.detect` の
+ * feature: contradiction）。
+ *
+ * **AIが要らない判断は、AIに訊かない。** 含む関係の輪・方角の非対称・
+ * 距離の食い違いは、設定資料の場所の関係だけで決まる。判定は製品と同じ
+ * `core/locationConsistency.ts` を通す（写しを作らない）。何も書き換えない。
+ */
+export function contradictionDetectLocations(input: { folder: string }) {
+  const read = readSettingsRecords(
+    input.folder,
+    SETTINGS_SUBDIRS.locations,
+    parseLocation
+  );
+  const found = findLocationInconsistencies(read.records);
+
+  /*
+    **本文の行は、ファイルの全文で数える。** 合本を話ごとに割った本文
+    （`orderedEpisodeBodies`）で数えると、2話目以降の行番号がファイルの
+    行とずれ、飛ぶ先が違う所になる
+  */
+  const episodes: EpisodeText[] = [];
+  if (found.length > 0) {
+    for (const filePath of listBodyFiles(input.folder)) {
+      let text: string;
+      try {
+        text = readBody(input.folder, filePath);
+      } catch {
+        // 読めないファイル（競合マーカーのあるものも）は探さない。製品と同じ
+        continue;
+      }
+      const fileName = nodePath.basename(filePath);
+      if (isWorkInfoFile(fileName, text)) continue;
+      const parsed = parseEpisodeFileName(fileName);
+      episodes.push({
+        filePath,
+        text,
+        chapterStart: parsed.chapterStart,
+        chapterEnd: parsed.chapterEnd,
+      });
+    }
+  }
+  const placed = placeLocationInconsistencies(found, episodes);
+
+  return {
+    inconsistencies: found.map((inconsistency) => ({
+      kind: inconsistency.kind,
+      summary: inconsistency.summary,
+      statements: inconsistency.statements.map((statement) => ({
+        location: statement.locationName,
+        relation: statement.text,
+        chapters: statement.relation.chapters,
+        evidence: statement.relation.evidence,
+        /** 地域の欄を「中」として読み替えたもの（直す先は地域の欄） */
+        fromRegion: statement.fromRegion,
+      })),
+    })),
+    /**
+     * 提案パネルへ置くときと同じ形（飛ぶ先の行・並べる2つの記述）。
+     * **本文のどこにも置けなかったものは `unplaced` の件数に入る**
+     */
+    issues: placed.issues,
+    unplaced: placed.unplaced.length,
+    /** 読めなかった場所のファイル。**照合の外に置いたことを隠さない** */
+    unreadable: read.unreadableFiles,
+    note:
+      "判定はAIを使わず、設定資料の場所の位置関係（含む・方角・距離）だけで行っています。" +
+      "隣接と距離は突き合わせず、読めない方角・距離（「上流」「数日」など）は比べていません。" +
+      "何も書き換えていません。",
+  };
 }

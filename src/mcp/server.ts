@@ -484,7 +484,8 @@ server.registerTool(
     description:
       "コードだけで探します（AIは使いません）。notation＝2通り以上で出ている語を探す" +
       "（返した組の1件を options.group に渡すと、揃え先をAIに問えます）。" +
-      "name＝名前を読みと表記の規則で突き合わせ、紛らわしい組を返します。",
+      "name＝名前を読みと表記の規則で突き合わせ、紛らわしい組を返します。" +
+      "contradiction＝設定資料の場所の位置関係（含む・方角・距離）の食い違いを、本文の行つきで返します。",
     inputSchema: NOVEL_DETECT_INPUT,
   },
   tool("novel.detect", (args: FeatureCallInput) => novelDetect(args))
