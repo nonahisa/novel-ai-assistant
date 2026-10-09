@@ -20,6 +20,20 @@ import type { Page } from "playwright-core";
 import type { LaunchOptions } from "./vscodeApp";
 import { dialogText, pressDialogButton } from "./workbenchDom";
 
+/** 見本の埋め込みが数える語（話の筋を分ける語）。この語の出方だけでベクトルができる */
+const EMBEDDING_WORDS = ["駅", "切符", "駅員", "雨", "改札", "港", "船", "海", "灯台", "漁師", "城", "騎士", "王", "魔法", "市場", "老人", "地図"] as const;
+
+/**
+ * 見本の埋め込み。語ごとに1つの次元を持ち、出た回数を数えて長さを1に揃える。
+ * 語が1つも出ない文は、全部を同じ向きの小さなベクトルにする（0 のベクトルを避ける）
+ */
+export function fakeEmbedding(text: string): number[] {
+  const counts = EMBEDDING_WORDS.map((word) => text.split(word).length - 1);
+  const vector = [...counts, 0.05];
+  const length = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+  return vector.map((value) => value / length);
+}
+
 /** 偽のモデル名（作者のモデルと取り違えない名前にする） */
 export const FAKE_OLLAMA_MODEL = "e2e-fake:1b";
 
@@ -50,7 +64,11 @@ async function readBody(request: IncomingMessage): Promise<string> {
  * 偽の Ollama を立てる。`respond` が `/api/chat` の答え（本文）を返す。
  * 構造化出力を求められた呼び出し（`structured`）には JSON の文字列を返すこと
  */
-export async function startFakeOllama(respond: (request: FakeOllamaRequest) => string): Promise<FakeOllama> {
+export async function startFakeOllama(
+  respond: (request: FakeOllamaRequest) => string,
+  /** 一覧に足す別のモデル名（モデルを選び替える場面を見るとき）。答え方は同じ */
+  options: { extraModels?: readonly string[] } = {}
+): Promise<FakeOllama> {
   const requests: FakeOllamaRequest[] = [];
   const server: Server = createServer((request, response) => {
     void (async () => {
@@ -61,15 +79,21 @@ export async function startFakeOllama(respond: (request: FakeOllamaRequest) => s
       };
       if (url.startsWith("/api/tags")) {
         sendJson({
-          models: [
-            {
-              name: FAKE_OLLAMA_MODEL,
-              size: 1_000_000,
-              details: { parameter_size: "1B", quantization_level: "Q4_0" },
-              capabilities: ["completion"],
-            },
-          ],
+          models: [FAKE_OLLAMA_MODEL, ...(options.extraModels ?? [])].map((name) => ({
+            name,
+            size: 1_000_000,
+            details: { parameter_size: "1B", quantization_level: "Q4_0" },
+            capabilities: ["completion"],
+          })),
         });
+        return;
+      }
+      if (url.startsWith("/api/embed")) {
+        // 埋め込み（検索索引・似た場面の検出が使う）。**決まった語の出方で作る見本のベクトル**で、
+        // 同じ語の出る文どうしは近く、出ない文とは遠い。本物の埋め込みの出来は見えない
+        const body = JSON.parse(await readBody(request)) as { input?: string[] | string };
+        const inputs = Array.isArray(body.input) ? body.input : [String(body.input ?? "")];
+        sendJson({ model: FAKE_OLLAMA_MODEL, embeddings: inputs.map((text) => fakeEmbedding(text)) });
         return;
       }
       if (url.startsWith("/api/show")) {
