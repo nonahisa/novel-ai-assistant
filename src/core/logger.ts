@@ -183,6 +183,34 @@ export function responseExcerptForLog(text: string): string {
   return text.slice(0, MAX_LOGGED_RESPONSE_CHARS);
 }
 
+/**
+ * 読み取れなかった応答の「形」を1行で表す（全文の代わり）。
+ *
+ * **400字の抜粋だけでは、形が違うのか途中で切れたのかが分からないことがある。**
+ * 2026-10-10 の冒頭診断では、抜粋が長い1項目の途中で終わり、答えの最上位に
+ * `elements` が無い（`five_w1h` という別の形で返った）ことは、抜粋の先頭を
+ * 読み解いて初めて分かった。総字数と最上位の鍵を並べれば一目で分かる。
+ * 全文は残さない（`MAX_LOGGED_RESPONSE_CHARS` の理由と同じ）。
+ */
+export function responseShapeForLog(text: string): string {
+  const length = `${text.length.toLocaleString("ja-JP")}字`;
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end <= start) {
+    return `${length}／JSONの括弧が見当たらない`;
+  }
+  try {
+    const parsed: unknown = JSON.parse(text.slice(start, end + 1));
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return `${length}／JSONだが object ではない`;
+    }
+    return `${length}／最上位の鍵: ${Object.keys(parsed).join(", ") || "（なし）"}`;
+  } catch {
+    // 閉じ括弧まで揃わない＝途中で切れた可能性が高い
+    return `${length}／JSONとして読めない（途中で切れた可能性）`;
+  }
+}
+
 /** 失敗の詳細を、作者が読める形で残す */
 export function logFailure(
   context: string,

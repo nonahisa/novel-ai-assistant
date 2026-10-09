@@ -51,6 +51,7 @@ import {
   logFailure,
   logStep,
   responseExcerptForLog,
+  responseShapeForLog,
   useLogFile,
 } from "../core/logger";
 import { warnWithLog } from "../views/notify";
@@ -223,6 +224,8 @@ export async function checkOpening(
     // **応答の中身は捨てない。** 通知には出さなくても、ログには残す
     logFailure("冒頭診断", {
       理由: "応答を読み取れません",
+      // 形のずれか切れかを、抜粋を読み解かずに見分けられるようにする
+      形: responseShapeForLog(responseText),
       応答: responseExcerptForLog(responseText),
     });
     await warnWithLog("冒頭診断の応答を読み取れませんでした。");

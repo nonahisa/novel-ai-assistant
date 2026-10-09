@@ -138,7 +138,7 @@ const KEYS: KeyRow[] = [
   { key: "novelai.ai.model", literalIn: "ai/registry.ts", writtenIn: "ai/registry.ts", write: /\.update\(KEY_MODEL\b/g, guarded: true },
   { key: "novelai.ai.featureAssignments", literalIn: "ai/registry.ts", writtenIn: "ai/registry.ts", write: /\.patch<FeatureAssignments>\(\s*KEY_FEATURE_ASSIGNMENTS\b/g, guarded: true },
   { key: "novelai.gemini.support.v3.", literalIn: "ai/geminiProvider.ts", writtenIn: "ai/geminiProvider.ts", write: /\.update\(supportKey\(model\)/g, guarded: true },
-  { key: "novelai.claude.support.v5.", literalIn: "ai/claudeProvider.ts", writtenIn: "ai/claudeProvider.ts", write: /\.update\(supportKey\(model\)/g, guarded: true },
+  { key: "novelai.claude.support.v6.", literalIn: "ai/claudeProvider.ts", writtenIn: "ai/claudeProvider.ts", write: /\.update\(supportKey\(model\)/g, guarded: true },
   { key: "novelai.deviceId", literalIn: "core/device.ts", writtenIn: "core/device.ts", write: /\.patch<string \| undefined>\(\s*DEVICE_ID_KEY\b/g, guarded: true },
   { key: "novelai.unsentAtClose", literalIn: "core/unsentMark.ts", writtenIn: "core/unsentMark.ts", write: /\.update\(UNSENT_MARK_KEY\b/g, guarded: true },
   { key: "novelai.advicePolicy.", literalIn: "core/advicePolicyStore.ts", writtenIn: "core/advicePolicyStore.ts", write: /verifiedState\(this\.state\)\.update\(key, profile\)/g, guarded: true },
