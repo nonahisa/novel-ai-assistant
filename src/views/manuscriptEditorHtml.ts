@@ -1081,13 +1081,28 @@ body.clipped #counts, body.clipped #cheer { white-space: normal; }
      打つ面・本文の幅には触らない（打鍵・変換・縦書きの切り替えへ影響させない）。
      切れていないとき（広いとき）は何もしない ── */
 ${OBSERVE_VISIBLE_WIDTH_SOURCE}
+  /**
+   * 見えている幅（面の左端0から数えた幅）のうち、その要素に使ってよい幅。
+   * **要素の左端の位置を引く。** VS Code は WebView の body に左右20pxの余白を
+   * 入れるので、要素は20pxから始まる。見えている幅をそのまま最大幅にすると、
+   * 右端が20pxぶん窓の外へ出る（本文の面の画面の自動テストで測って分かった）
+   */
+  function clippedWidthFor(el, clippedWidth) {
+    if (clippedWidth <= 0) return "";
+    const left = Math.max(0, el.getBoundingClientRect().left);
+    return Math.max(0, Math.floor(clippedWidth - left)) + "px";
+  }
   observeVisibleWidth(function (clippedWidth) {
-    const next = clippedWidth > 0 ? clippedWidth + "px" : "";
     ["bottom", "foot"].forEach(function (id) {
       const el = document.getElementById(id);
-      if (el && el.style.maxWidth !== next) el.style.maxWidth = next;
+      if (!el) return;
+      const next = clippedWidthFor(el, clippedWidth);
+      if (el.style.maxWidth !== next) el.style.maxWidth = next;
     });
     document.body.classList.toggle("clipped", clippedWidth > 0);
+    // 本文の面も同じ幅へ詰める（下の fitSurfaceToVisible。見ていた場所を保つ手順があるので分けた）
+    const surface = document.getElementById("surface");
+    if (surface) fitSurfaceToVisible(clippedWidthFor(surface, clippedWidth));
   });
 
   /** いま画面が持っている本文。拡張機能から来たものと比べるために持つ */
@@ -3500,6 +3515,194 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     return viewHold();
   }
   /* view-anchor:end */
+
+  /*
+    ── 本文の面を、窓の中で見えている幅へ詰める（作者の裁定、2026-10-09。設計書6.11.7） ──
+
+    窓が狭いと、VS Code の編集の列（最小幅220px）の右端が窓の外へ出る。面の中からは
+    自分の幅が220pxに見えるので、本文はその幅で組まれ、**見えている幅より右の字が
+    窓の外へ隠れていた。** 縦書き（vertical-rl）は右端から書き始めるので、1行目の頭
+    そのものが窓の外に出る。
+
+    詰めるのは #surface の最大幅だけにする。打つ面・重ねる2枚の層・組んで書く面・
+    貼り付け後の面は、どれも #surface いっぱいに張った絶対配置なので、5枚が同じ幅で
+    組み直される（1枚でも折り返し幅が違うと、重ねた色が本文と無関係な所へ浮く）。
+    横書きは見えている幅で折り返し、縦書きは見えている右端から書き始める。
+
+    **本文にも DOM にも触らない**（幅を変えるだけ）。だから選択・焦点・変換中の字は
+    そのまま残る。動かすのはスクロールだけで、viewRestore は使わない——あれは焦点と
+    選択を置き直すので、変換中に当たると日本語入力が壊れる。幅を変える前に見ていた
+    場所を字で控え（viewHold）、組み直したあとにその字が見える所へ動かす。
+    変換中は控えも動かしもしない（打つ面の採寸は写しの面を一時的に足すので、変換の
+    最中に DOM を動かさない。幅だけは詰めるので、字が窓の外へ隠れることはない）。
+
+    切れていないとき（広いとき）は最大幅を空にする＝何も変えない。
+  */
+  function fitSurfaceToVisible(next) {
+    const surface = document.getElementById("surface");
+    if (!surface || surface.style.maxWidth === next) return;
+    // 窓の大きさが変わった直後なら、変わる前に控えた場所を使う（下の viewSettled）
+    const anchor = composing ? null : viewResizeAnchor();
+    surface.style.maxWidth = next;
+    // この切り落としは WebView の窓の大きさが変わらないまま起きることがある
+    // （サイドバーの出し入れなど）。resize の知らせを待たずに、重ねる層の枠を合わせ直す
+    scheduleAlignMarks();
+    viewKeepThroughResize(anchor);
+  }
+
+  /*
+    ── 窓の大きさが変わっても、見ていた場所を保つ ──
+
+    窓の大きさが変わると、面の幅が変わって組み直される。横書きは行の折り返しが
+    変わり、縦書きは右端を起点に左側が削られる（または増える）。どちらも、
+    スクロールの値はそのままなので、**カーソルのあった行が画面の外へ出る**ことがある
+    （狭い窓⇔広い窓を行き来する画面の自動テストで、縦書きで踏んだ）。
+
+    ところが resize の知らせは**変わったあと**に来る。そこで、スクロール・カーソルの
+    移動・打鍵のたびに（組んで書く面は次の描画で、打つ面は止まって少し後に）見ていた
+    場所を字で控えておき（viewSettled）、大きさが変わったらその字が見える所へ動かす。
+    控えるのは位置を測るだけで、本文・選択・焦点には触らない。変換中は控えない。
+    大きさが変わっている間（続けて知らせが来る間）は控え直さない——動かした結果を
+    「見ていた場所」として覚え直すと、少しずつずれていく。
+  */
+  /** 落ち着いていたときに控えた、見ていた場所（viewHold の形） */
+  let viewSettled = null;
+  /**
+   * 控えたときの本文。**違えば控えを使わない。** 外から本文が届いた（ほかの話へ
+   * 移った・外で書き換えられた）あとは、控えた字の位置が別の字を指す
+   */
+  let viewSettledText = null;
+  let viewSettleTimer = null;
+  let viewSettleFrame = null;
+  /** 窓の大きさが変わっている最中か（このあいだは控え直さない） */
+  let viewResizing = false;
+  /** 大きさの知らせの通し番号（最後の知らせだけが「変わり終えた」を決める） */
+  let viewResizeGeneration = 0;
+  /**
+   * 打つ面（textarea）で控えるまでの間。打つ面の採寸は本文全体の写しを組むので、
+   * 打鍵のたびには測らず、止まってから測る
+   */
+  const VIEW_SETTLE_WRITE_MS = 250;
+
+  function viewSettleNow() {
+    if (composing) return;
+    // 大きさが変わっている最中は控えない（いま測ると、組み直しの途中を覚える）。
+    // 変わり終えたときに控え直す（viewKeepThroughResize）
+    if (viewResizing) return;
+    viewSettled = viewHoldForResize();
+    viewSettledText = current;
+  }
+
+  /**
+   * 控え直しの予約。**組んで書く面は次の描画で控える**——間を空けると、カーソルを
+   * 動かしてすぐ窓の大きさを変えたとき（その間に控えが無い）に、変わったあとの
+   * 組みで測ることになり、カーソルが画面の外へ出る（画面の自動テストで踏んだ）。
+   * 組んで書く面の採寸は、本文の DOM の位置を引くだけなので、描画ごとでも軽い
+   */
+  function viewScheduleSettle() {
+    if (composeOn) {
+      if (viewSettleFrame !== null) return;
+      viewSettleFrame = requestAnimationFrame(function () {
+        viewSettleFrame = null;
+        viewSettleNow();
+      });
+      return;
+    }
+    if (viewSettleTimer !== null) clearTimeout(viewSettleTimer);
+    viewSettleTimer = setTimeout(function () {
+      viewSettleTimer = null;
+      viewSettleNow();
+    }, VIEW_SETTLE_WRITE_MS);
+  }
+
+  /**
+   * 大きさが変わるときの控え。viewHold と同じだが、**カーソルそのものが見えていれば
+   * カーソルを控える。** viewHold は「カーソルの次の字」の箱で見えているかを測るので、
+   * 行の終わりにカーソルがあると次の字は次の行にあり、狭い面ではそれが画面の外に
+   * 出ている（縦書きの狭い窓で、カーソルが見えているのに画面の先頭を控えて、
+   * 戻したらカーソルが画面の外へ出た）。打つ面（textarea）はカーソルの箱を
+   * 直接は測れないので、viewHold のまま
+   */
+  function viewHoldForResize() {
+    const anchor = viewHold();
+    if (!anchor || anchor.kind === "caret" || !anchor.selection || !composeOn) return anchor;
+    try {
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) return anchor;
+      const rect = selection.getRangeAt(0).getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) return anchor;
+      const off = offRect(compose, rect);
+      if (off.left !== 0 || off.top !== 0) return anchor;
+      return {
+        face: anchor.face,
+        offset: anchor.selection.start,
+        kind: "caret",
+        selection: anchor.selection,
+        focus: anchor.focus,
+      };
+    } catch (error) {
+      return anchor;
+    }
+  }
+
+  /** 大きさが変わったときに使う控え。使えなければ、いまの場所を控える */
+  function viewResizeAnchor() {
+    if (
+      viewSettled &&
+      viewSettledText === current &&
+      viewSettled.face === (composeOn ? "compose" : "write")
+    ) {
+      return viewSettled;
+    }
+    return viewHoldForResize();
+  }
+
+  /**
+   * 控えた字が見える所へ動かし、2枚あとの描画で控え直しに戻る。
+   *
+   * **終わりをタイマーで決めない。** 画面の外に置いた窓（画面の自動テスト）では
+   * タイマーが大きく遅れ、「変わっている最中」のまま控え直しが止まって、次に大きさが
+   * 変わったときに古い場所へ戻した。描画の区切りなら遅れない
+   */
+  function viewKeepThroughResize(anchor) {
+    viewResizing = true;
+    const generation = ++viewResizeGeneration;
+    if (anchor) {
+      // 戻した場所が、作者が次に触るまでの「見ていた場所」。続けて大きさが変わったとき
+      // （広げてすぐ狭めた等）も、控え直しを待たずにこれを使う
+      viewSettled = anchor;
+      viewSettledText = current;
+      // 選択と焦点は置き直さない（変換中の字を壊さない）。動かすのはスクロールだけ
+      viewScrollTo(anchor);
+    }
+    requestAnimationFrame(function () {
+      // 採寸の予約（scheduleAlignMarks）や書体の読み込みで、組みがもう一度動くことがある
+      if (anchor) viewScrollTo(anchor);
+      requestAnimationFrame(function () {
+        // あとから別の知らせが来ていれば、そちらが終わりを決める
+        if (generation !== viewResizeGeneration) return;
+        viewResizing = false;
+        viewScheduleSettle();
+      });
+    });
+  }
+
+  compose.addEventListener("scroll", viewScheduleSettle);
+  write.addEventListener("scroll", viewScheduleSettle);
+  document.addEventListener("selectionchange", function () {
+    // カーソルが動いたら、前の控えはもう「見ていた場所」ではない。控え直すまでの間に
+    // 大きさが変わったら、その場で控える（古い控えへ戻すと、カーソルが画面の外へ出る。
+    // 起動直後の控えが残っていて、画面の自動テストで横書きが3回に1回落ちた）。
+    // 大きさの変化ではスクロールしか動かさないので、この知らせは作者の操作か、
+    // ほかの機能がカーソルを置いたときに来る（どちらも前の控えは古い）
+    viewSettled = null;
+    viewScheduleSettle();
+  });
+  window.addEventListener("resize", function () {
+    if (composing) return;
+    // 続けて知らせが来る間は、最初に使った控えのまま動かす
+    viewKeepThroughResize(viewResizeAnchor());
+  });
 
   /* view-measure:start */
   /*
