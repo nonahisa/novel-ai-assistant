@@ -9,8 +9,11 @@ import {
 } from "../ai/registry";
 import {
   EXTRACT_MODEL_ADVICE,
+  EXTRACT_MODEL_ADVICE_SHORT,
   FORESHADOW_MODEL_ADVICE,
+  FORESHADOW_MODEL_ADVICE_SHORT,
   TYPO_MODEL_ADVICE,
+  TYPO_MODEL_ADVICE_SHORT,
 } from "../core/requirements";
 import {
   asVerdictFeature,
@@ -72,6 +75,10 @@ export async function assignFeatureAI(
     );
   }
 
+  // 選ぶ画面の1行に入らなかった理由と測定日は、ここで出す（作者の裁定 2026-10-10）
+  const reason = MODEL_SIZE_REASON[feature];
+  if (reason) notes.push(reason);
+
   // **注意文を添えるときは通知に残す**（設計書6.81の規則3）。
   // 「実行のたびに課金されます」「精度が下がる場合があります」は、この
   // あと作者が何に気をつけるかの案内であって、その場限りの完了ではない。
@@ -90,10 +97,20 @@ export async function assignFeatureAI(
  * 肝心の行が埋もれる。ここに無い機能は説明なしで並ぶ。
  */
 const MODEL_SIZE_ADVICE: Partial<Record<AssignableFeature, string>> = {
-  typo: TYPO_MODEL_ADVICE,
+  typo: TYPO_MODEL_ADVICE_SHORT,
   // 抽出は、モデルを替えるだけで人物の分裂が止まった（実機確認A-18）
-  extract: EXTRACT_MODEL_ADVICE,
+  extract: EXTRACT_MODEL_ADVICE_SHORT,
   // 伏線の回収の確認は、既定の 4B 級では1件も通らなかった（2026-09-26 の測定）
+  foreshadow: FORESHADOW_MODEL_ADVICE_SHORT,
+};
+
+/**
+ * 選ぶ画面の1行には入らない理由と測定日。割り当てたあとの知らせに添える
+ * （選ぶ画面は1行で切れるため。作者の裁定 2026-10-10）。
+ */
+const MODEL_SIZE_REASON: Partial<Record<AssignableFeature, string>> = {
+  typo: TYPO_MODEL_ADVICE,
+  extract: EXTRACT_MODEL_ADVICE,
   foreshadow: FORESHADOW_MODEL_ADVICE,
 };
 

@@ -3,8 +3,11 @@ import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import {
   EXTRACT_MODEL_ADVICE,
+  EXTRACT_MODEL_ADVICE_SHORT,
   FORESHADOW_MODEL_ADVICE,
+  FORESHADOW_MODEL_ADVICE_SHORT,
   TYPO_MODEL_ADVICE,
+  TYPO_MODEL_ADVICE_SHORT,
 } from "../../../src/core/requirements";
 
 /**
@@ -71,7 +74,7 @@ describe("誤字脱字に向くモデルの案内", () => {
  */
 describe("設定資料の抽出に向くモデルの案内", () => {
   test("手元の大きいモデルと、外部AIの両方を挙げる", () => {
-    expect(EXTRACT_MODEL_ADVICE).toMatch(/26B|26b/);
+    expect(EXTRACT_MODEL_ADVICE).toContain("gemma4:26b");
     expect(EXTRACT_MODEL_ADVICE).toContain("Gemini");
     // 何が起きるのかを言う（言わないと、勧めの理由が伝わらない）
     expect(EXTRACT_MODEL_ADVICE).toContain("別名");
@@ -107,5 +110,45 @@ describe("伏線に向くモデルの案内", () => {
   test("機能別AI割当の「伏線」の説明が、この定数を読む", () => {
     const source = read("features/assignFeatureAI.ts");
     expect(source).toContain("foreshadow: FORESHADOW_MODEL_ADVICE");
+  });
+});
+
+/**
+ * 機能別AI割当の選ぶ画面は説明を1行しか出さない。長いと「…」で切れる
+ * （写真 2026-10-09b の389。作者の裁定 2026-10-10「短くして全部見せる」）。
+ * 表示幅（全角2・半角1）で60以内に収める。理由と測定日は長い文のほうに残し、
+ * 割り当てたあとの知らせで出す。
+ */
+function displayWidth(text: string): number {
+  let width = 0;
+  for (const ch of text) width += ch.charCodeAt(0) < 0x100 ? 1 : 2;
+  return width;
+}
+
+describe("選ぶ画面の1行の案内", () => {
+  const shorts = [
+    ["誤字脱字", TYPO_MODEL_ADVICE_SHORT],
+    ["設定資料の抽出", EXTRACT_MODEL_ADVICE_SHORT],
+    ["伏線", FORESHADOW_MODEL_ADVICE_SHORT],
+  ] as const;
+
+  test.each(shorts)("%s：表示幅60以内で、モデル名は Ollama の書き方", (_name, text) => {
+    expect(displayWidth(text)).toBeLessThanOrEqual(60);
+    expect(text).toContain("gemma4:26b");
+    expect(text).not.toMatch(/26B/);
+  });
+
+  test("選ぶ画面の行は短い形を読み、理由は割り当てたあとの知らせへ回す", () => {
+    const source = read("features/assignFeatureAI.ts");
+    expect(source).toContain("typo: TYPO_MODEL_ADVICE_SHORT");
+    expect(source).toContain("extract: EXTRACT_MODEL_ADVICE_SHORT");
+    expect(source).toContain("foreshadow: FORESHADOW_MODEL_ADVICE_SHORT");
+    expect(source).toContain("notes.push(reason)");
+  });
+
+  test("長い文のモデル名も gemma4:26b に揃っている", () => {
+    for (const text of [TYPO_MODEL_ADVICE, EXTRACT_MODEL_ADVICE, FORESHADOW_MODEL_ADVICE]) {
+      expect(text).not.toMatch(/26B/);
+    }
   });
 });

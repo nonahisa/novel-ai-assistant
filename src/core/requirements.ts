@@ -101,7 +101,7 @@ export const RECOMMENDED_EMBEDDING_MODEL = "bge-m3";
  * **文言はここだけが持つ。** 機能別AI割当（設計書6.28.9）が読む。
  */
 export const EXTRACT_MODEL_ADVICE =
-  "別名・呼び名の拾い出しには大きいモデルが向きます（手元なら 26B 以上、" +
+  "別名・呼び名の拾い出しには大きいモデルが向きます（手元なら gemma4:26b 以上、" +
   "または Gemini・さくらのAI などの外部AI）。" +
   "小さいモデルは別名を返さず、同じ人物が別の記録に分かれます（測定 2026-09-08）。" +
   "機能別AI割当で、抽出だけ大きいモデルにできます。";
@@ -138,6 +138,21 @@ export const FORESHADOW_MODEL_ADVICE =
   1作品・15件だけの比べなので画面では勧めず、相談で訊かれたときだけ答える
   （`core/chatModelNotes.ts`。作者の裁定 2026-10-09）。
 */
+
+/*
+  **機能別AI割当の選ぶ画面（QuickPick）に出す1行の案内。**
+  選ぶ画面は説明を1行しか出さず、長いと「…」で切れて読めなかった
+  （2026-10-09 の写真。作者の裁定 2026-10-10「短くして全部見せる」）。
+  理由と測定日は上の長い文に残し、選んだあとの知らせ（assignFeatureAI.ts）で出す。
+  Ollama の導入画面は折り返す画面なので、長い文のまま読む。
+  モデル名は Ollama の書き方（gemma4:26b）に揃える。
+*/
+export const TYPO_MODEL_ADVICE_SHORT =
+  "向くモデル：gemma4:26b 以上／さくら Kimi-K2.6";
+export const EXTRACT_MODEL_ADVICE_SHORT =
+  "向くモデル：gemma4:26b 以上／Gemini・さくら";
+export const FORESHADOW_MODEL_ADVICE_SHORT =
+  "向くモデル：gemma4:26b 以上／さくら Kimi-K2.6";
 
 export const REQUIREMENTS: Requirement[] = [
   {
