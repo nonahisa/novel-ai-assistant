@@ -1,0 +1,891 @@
+{
+  "measuredAt": "2026-10-09T16:29:49.962Z",
+  "feature": "typo",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:e4b",
+  "numCtx": 24576,
+  "numCtxDecision": {
+    "numCtx": 24576,
+    "source": "--num-ctx で指定"
+  },
+  "temperature": 0,
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": {
+    "contextLength": 131072,
+    "parameterSize": "8.0B",
+    "bundled": {
+      "thinkingSeen": true,
+      "thinkingOffWorks": true,
+      "thinkingMeasuredAt": "2026-09-26",
+      "typoAccuracy": {
+        "hits": 3,
+        "total": 7,
+        "falsePositives": 0,
+        "wrongFixes": 0,
+        "trapHits": 0,
+        "trapTotal": 5,
+        "promptVersion": "1.1",
+        "smallPrompt": true,
+        "sampleVersion": "2",
+        "measuredAt": "2026-09-26T06:29:55+09:00"
+      },
+      "measuredAt": "2026-09-26"
+    },
+    "note": null
+  },
+  "warmup": {
+    "elapsedMs": 4665,
+    "ok": true,
+    "reason": null
+  },
+  "endpoint": null,
+  "options": {
+    "modelSize": "small"
+  },
+  "givenOptions": {},
+  "modelSize": "small",
+  "modelSizeDecision": {
+    "sizeDependent": true,
+    "decided": true,
+    "providerId": "ollama",
+    "parameterSize": "8.0B",
+    "tier": "standard",
+    "product": {
+      "modelSize": "small"
+    },
+    "kept": [],
+    "source": "製品と同じ判断（ai/capability.ts を束から借りた）"
+  },
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.100.6",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.1",
+  "verifyPromptVersion": null,
+  "plans": [
+    {
+      "chunkId": "本文\\episode_0001_転生.txt#1-0@6020",
+      "chars": 3912,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0002_てこの原理と救助.txt#2-0@6020",
+      "chars": 3466,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0003_心肺蘇生と出会い.txt#3-0@6020",
+      "chars": 3589,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0004_筋肉と電気.txt#4-0@6020",
+      "chars": 5299,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0005_思春期の始まり.txt#5-0@6020",
+      "chars": 3617,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0006_コンストラクタ領の様子.txt#6-0@6020",
+      "chars": 3328,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0007_進学に向けて.txt#7-0@6020",
+      "chars": 2231,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0008_計算と計算違い.txt#8-0@6020",
+      "chars": 3314,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0009_体力と石鹸.txt#9-0@6020",
+      "chars": 3519,
+      "maxIssues": null
+    },
+    {
+      "chunkId": "本文\\episode_0010_石鹸生成実験計画.txt#10-0@6020",
+      "chars": 4013,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\Documents\\novel-ai-bench\\typo-gold-kyokasho10",
+    "targets": [
+      "本文\\episode_0001_転生.txt",
+      "本文\\episode_0002_てこの原理と救助.txt",
+      "本文\\episode_0003_心肺蘇生と出会い.txt",
+      "本文\\episode_0004_筋肉と電気.txt",
+      "本文\\episode_0005_思春期の始まり.txt",
+      "本文\\episode_0006_コンストラクタ領の様子.txt",
+      "本文\\episode_0007_進学に向けて.txt",
+      "本文\\episode_0008_計算と計算違い.txt",
+      "本文\\episode_0009_体力と石鹸.txt",
+      "本文\\episode_0010_石鹸生成実験計画.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\Documents\\novel-ai-bench\\typo-gold-kyokasho10\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 78658,
+      "temperature": 0,
+      "staleNote": null,
+      "metrics": {
+        "typoFound": 3,
+        "typoFoundTotal": 17,
+        "typoMissed": 14,
+        "typoWrongFix": 1,
+        "typoFalsePositives": 1,
+        "typoOtherFlags": 15,
+        "accepted": 20,
+        "rejected": 26,
+        "rejected.no_change": 25,
+        "rejected.punctuation_only": 1,
+        "failures": 0,
+        "elapsedMs": 78658
+      },
+      "detail": {
+        "rejectedReasons": {
+          "no_change": 25,
+          "punctuation_only": 1
+        },
+        "failures": [],
+        "typoFound": {
+          "脱字": {
+            "found": 0,
+            "total": 4
+          },
+          "衍字": {
+            "found": 3,
+            "total": 8
+          },
+          "変換ミス・入力ミス": {
+            "found": 0,
+            "total": 1
+          },
+          "変換ミス": {
+            "found": 0,
+            "total": 3
+          },
+          "助詞の誤り": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "typoMissed": [
+          {
+            "file": "本文/episode_0001_転生.txt",
+            "kind": "脱字",
+            "wrong": "きちんノート",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0002_てこの原理と救助.txt",
+            "kind": "脱字",
+            "wrong": "しているを",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0002_てこの原理と救助.txt",
+            "kind": "衍字",
+            "wrong": "のを原理を",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0002_てこの原理と救助.txt",
+            "kind": "変換ミス・入力ミス",
+            "wrong": "手を拾い",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0004_筋肉と電気.txt",
+            "kind": "衍字",
+            "wrong": "歳にである",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0004_筋肉と電気.txt",
+            "kind": "変換ミス",
+            "wrong": "暖かそう",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0004_筋肉と電気.txt",
+            "kind": "変換ミス",
+            "wrong": "荒い麻",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0005_思春期の始まり.txt",
+            "kind": "変換ミス",
+            "wrong": "来ている服",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0005_思春期の始まり.txt",
+            "kind": "脱字",
+            "wrong": "くだい",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0005_思春期の始まり.txt",
+            "kind": "衍字",
+            "wrong": "院長のが",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0006_コンストラクタ領の様子.txt",
+            "kind": "脱字",
+            "wrong": "良いわから",
+            "note": "場所は当てたが直らない"
+          },
+          {
+            "file": "本文/episode_0006_コンストラクタ領の様子.txt",
+            "kind": "助詞の誤り",
+            "wrong": "感の襲われ",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0008_計算と計算違い.txt",
+            "kind": "衍字",
+            "wrong": "いただいただける",
+            "note": "指摘が出なかった"
+          },
+          {
+            "file": "本文/episode_0009_体力と石鹸.txt",
+            "kind": "衍字",
+            "wrong": "かにじゃない",
+            "note": "指摘が出なかった"
+          }
+        ],
+        "typoWrongFix": [
+          {
+            "file": "本文/episode_0006_コンストラクタ領の様子.txt",
+            "kind": "脱字",
+            "wrong": "良いわから",
+            "suggestion": "こと"
+          }
+        ],
+        "typoFalsePositives": [
+          {
+            "file": "本文/episode_0010_石鹸生成実験計画.txt",
+            "kind": "口語",
+            "word": "信じらんない",
+            "target": "信じらんない",
+            "suggestion": "信じられない"
+          }
+        ],
+        "typoFalsePositivesByWord": {
+          "信じらんない": 1
+        },
+        "typoFalsePositivesByKind": {
+          "口語": 1
+        }
+      },
+      "raw": [
+        {
+          "target": "本文\\episode_0001_転生.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0001_転生.txt#1-0@6020",
+                "chapterLabel": "第1話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "line": 17,
+                    "target": "次亜塩素酸ナトリウムになり、それが",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0002_てこの原理と救助.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0002_てこの原理と救助.txt#2-0@6020",
+                "chapterLabel": "第2話",
+                "accepted": [
+                  {
+                    "line": 14,
+                    "original": "身体をの緊張を無理やり解いていく。",
+                    "target": "身体をの",
+                    "suggestion": "身体の",
+                    "reason": "脱字",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 22,
+                    "original": "黒い執事服をビシッと着込んでいて、頭に黒い山羊の被り物をかぶった状態で、優雅にお辞儀をしている。",
+                    "target": "黒い執事服をビシッと着込んでいて",
+                    "suggestion": "黒い執事服をビシッと着こんでいて",
+                    "reason": "送り仮名",
+                    "confidence": "medium"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 34,
+                    "target": "山羊の頭の",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 102,
+                    "target": "父上の",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0003_心肺蘇生と出会い.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0003_心肺蘇生と出会い.txt#3-0@6020",
+                "chapterLabel": "第3話",
+                "accepted": [
+                  {
+                    "line": 13,
+                    "original": "そろそろリナはみんなのところまで辿りつけただろうか。",
+                    "target": "辿りつけただろうか",
+                    "suggestion": "辿り着いたのだろうか",
+                    "reason": "送り仮名",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 18,
+                    "original": "狼は棒を警戒して大きく飛び退いて、棒を目で追う。",
+                    "target": "棒を目で追う",
+                    "suggestion": "棒を目で追った",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 58,
+                    "original": "なんせ僕は、それが原因でさっき死んだばかりだ。",
+                    "target": "なんせ",
+                    "suggestion": "何せ",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 30,
+                    "target": "呟いている",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 40,
+                    "target": "火だるまになってもがいている",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 64,
+                    "target": "頼りない",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 131,
+                    "target": "抜けた",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0004_筋肉と電気.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0004_筋肉と電気.txt#4-0@6020",
+                "chapterLabel": "第4話",
+                "accepted": [
+                  {
+                    "line": 11,
+                    "original": "明り取りの窓の板は全開になっていて",
+                    "target": "明り取りの窓の板は",
+                    "suggestion": "明かり取りの窓の板は",
+                    "reason": "送り仮名",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 19,
+                    "target": "変わっていないのではなかろうか。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 21,
+                    "target": "どうしてだろうか？",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 33,
+                    "target": "イント様と、リナ様が軽傷で、イント様が助けたマイナ様は",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 37,
+                    "target": "ため息がでる。だからホッとすると言うのかもしれない。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 42,
+                    "target": "可能なら子どものしたことだと笑って許してもらいたい。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 66,
+                    "target": "「馴染む」ということなのだろう。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 76,
+                    "target": "表紙には日本語で『保健』と書いてある。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 107,
+                    "target": "何か言いたそうな父上を放置してスプーンを手に取って食べてみる。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 123,
+                    "target": "神術を使う必要があるはずなんだが、イントは使えないはずだろう？」",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 125,
+                    "target": "電気だろう。",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 130,
+                    "target": "物理でごり押しする心肺蘇生法は全然違うもののはずだ。",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0005_思春期の始まり.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0005_思春期の始まり.txt#5-0@6020",
+                "chapterLabel": "第5話",
+                "accepted": [
+                  {
+                    "line": 19,
+                    "original": "時間の空いた僕は助けてくれた美少女さんのところにお礼に行こうと思ったのだ。",
+                    "target": "時間の空いた",
+                    "suggestion": "時間が空いた",
+                    "reason": "脱字",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 27,
+                    "original": "僕のやった事は初対面の若い女性の胸をまさぐって、唇を奪っただけだ。",
+                    "target": "僕のやった事",
+                    "suggestion": "僕がやったこと",
+                    "reason": "誤変換",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 36,
+                    "original": "軽く頭を下げるだけで嵐のような勢いで治療院に駆け込んでいった。",
+                    "target": "軽く頭を下げるだけで",
+                    "suggestion": "軽く頭を下げただけで",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 52,
+                    "original": "マイナさんが入院している部屋を教えてもらうことができた。",
+                    "target": "マイナさんが",
+                    "suggestion": "マイナが",
+                    "reason": "誤変換",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 83,
+                    "original": "心臓が跳ねあがって、声が上ずっていく。",
+                    "target": "心臓が跳ねあがって",
+                    "suggestion": "心臓が跳ね上がり",
+                    "reason": "送り仮名",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 111,
+                    "original": "話が噛みあっていない気がする。",
+                    "target": "話が噛みあっていない",
+                    "suggestion": "話が噛み合っていない",
+                    "reason": "送り仮名",
+                    "confidence": "medium"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 25,
+                    "target": "院長宛",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 58,
+                    "target": "2～30人",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 71,
+                    "target": "確かターナさんと言ったか",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 83,
+                    "target": "8歳にもなるのに",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0006_コンストラクタ領の様子.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0006_コンストラクタ領の様子.txt#6-0@6020",
+                "chapterLabel": "第6話",
+                "accepted": [
+                  {
+                    "line": 29,
+                    "original": "教科書と前世の記憶の事は何と説明して良いわからないので",
+                    "target": "事",
+                    "suggestion": "こと",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0007_進学に向けて.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0007_進学に向けて.txt#7-0@6020",
+                "chapterLabel": "第7話",
+                "accepted": [],
+                "rejected": [
+                  {
+                    "line": 47,
+                    "target": "僕はこちらの世界の文字が",
+                    "reason": "no_change"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0008_計算と計算違い.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0008_計算と計算違い.txt#8-0@6020",
+                "chapterLabel": "第8話",
+                "accepted": [
+                  {
+                    "line": 14,
+                    "original": "生徒やその親族は、二人に何度もお礼を言って、中庭や屋上に散っていった。",
+                    "target": "散っていった",
+                    "suggestion": "去っていった",
+                    "reason": "誤変換",
+                    "confidence": "medium"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0009_体力と石鹸.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0009_体力と石鹸.txt#9-0@6020",
+                "chapterLabel": "第9話",
+                "accepted": [
+                  {
+                    "line": 13,
+                    "original": "オイルの塗りこまれた真新しい革鎧を着こんで",
+                    "target": "オイルの塗りこまれた",
+                    "suggestion": "オイルを塗りこまれた",
+                    "reason": "脱字",
+                    "confidence": "high"
+                  }
+                ],
+                "rejected": []
+              }
+            ],
+            "failures": []
+          }
+        },
+        {
+          "target": "本文\\episode_0010_石鹸生成実験計画.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:e4b",
+            "temperature": 0,
+            "results": [
+              {
+                "chunkId": "本文\\episode_0010_石鹸生成実験計画.txt#10-0@6020",
+                "chapterLabel": "第10話",
+                "accepted": [
+                  {
+                    "line": 17,
+                    "original": "飛び出したかとと思うと、木の上から執事姿のパッケがひらり飛び降りた。",
+                    "target": "飛び出したかとと思うと",
+                    "suggestion": "飛び出したかと思うと",
+                    "reason": "脱字",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 21,
+                    "original": "致命傷は眼を細剣で深く一突き。し、信じらんない手際ね。",
+                    "target": "信じらんない",
+                    "suggestion": "信じられない",
+                    "reason": "誤変換",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 23,
+                    "original": "重りのついたワイヤーが巻き付いていていて、目からは今も血が流れだしていた。",
+                    "target": "巻き付いていていて",
+                    "suggestion": "巻き付いていて",
+                    "reason": "脱字",
+                    "confidence": "high"
+                  },
+                  {
+                    "line": 37,
+                    "original": "話したことはないけど、父上が軍隊にいた頃の部下がそのまま移住してきたそうだ",
+                    "target": "話したことはないけど",
+                    "suggestion": "話したことはないが",
+                    "reason": "誤変換",
+                    "confidence": "medium"
+                  },
+                  {
+                    "line": 70,
+                    "original": "今も娘のマイナ先生とは姉妹にしか見えない若さを維持していて、それでも新しいものに興味を失わないのは、さすが美容の研究家といったところか。",
+                    "target": "娘のマイナ先生とは",
+                    "suggestion": "マイナ先生とは",
+                    "reason": "脱字",
+                    "confidence": "medium"
+                  }
+                ],
+                "rejected": [
+                  {
+                    "line": 46,
+                    "target": "意表を突かれたのか",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 62,
+                    "target": "そいじゃ",
+                    "reason": "no_change"
+                  },
+                  {
+                    "line": 104,
+                    "target": "作る、だそうです",
+                    "reason": "punctuation_only"
+                  }
+                ]
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "typoFound": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "typoFoundTotal": {
+      "values": [
+        17
+      ],
+      "min": 17,
+      "max": 17
+    },
+    "typoMissed": {
+      "values": [
+        14
+      ],
+      "min": 14,
+      "max": 14
+    },
+    "typoWrongFix": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "typoFalsePositives": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "typoOtherFlags": {
+      "values": [
+        15
+      ],
+      "min": 15,
+      "max": 15
+    },
+    "accepted": {
+      "values": [
+        20
+      ],
+      "min": 20,
+      "max": 20
+    },
+    "rejected": {
+      "values": [
+        26
+      ],
+      "min": 26,
+      "max": 26
+    },
+    "rejected.no_change": {
+      "values": [
+        25
+      ],
+      "min": 25,
+      "max": 25
+    },
+    "rejected.punctuation_only": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        78658
+      ],
+      "min": 78658,
+      "max": 78658
+    }
+  },
+  "lines": [
+    "仕込んだ誤字を拾えた（当てると本文が直るもの）: 3/17",
+    "見逃し（拾えなかった仕込み）: 14",
+    "直し方が違う（場所は当てたが、当てても直らない）: 1",
+    "　※ 場所は当てたのに、当てても本文が直らない指摘があります（押しても直らない＝作者の手間だけが増える）。",
+    "誤検出（罠に付いた指摘。造語・方言・ルビ・正しい同音異義語）: 1",
+    "　※ 造語・方言・ルビ・正しい同音異義語を直そうとしています。種別ごとの内訳は記録の detail.typoFalsePositivesByKind にあります。",
+    "仕込み以外の箇所への指摘: 15",
+    "指摘（検算を通ったもの）: 20",
+    "落とした（検算で弾いたもの）: 26",
+    "　└ 落とした理由：no_change: 25",
+    "　└ 落とした理由：punctuation_only: 1",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 78.7秒",
+    "num_ctx: 24576（--num-ctx で指定）",
+    "temperature: 0（製品と同じ（束が返した値））",
+    "頼み方: modelSize=small（申告の大きさ 8.0B・ティア standard、版 1.1／製品と同じ判断（ai/capability.ts を束から借りた））",
+    "温め（読み込みを含む。上の所要時間には入っていません）: 4.7秒"
+  ]
+}

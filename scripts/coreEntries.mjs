@@ -117,6 +117,20 @@ export const CORE_ENTRY_NAMES = [
 ];
 
 /**
+ * `ai` 側の起点——**モデルの地力で機能の重さを決める判断**だけ。
+ *
+ * 測定台（`scripts/measureModelSize.mjs`）がここから借りる（2026-10-10）。
+ * 台本が大きさを渡していなかったため、`gemma4:e4b` の誤字脱字を製品と違う
+ * 頼み方（大きいモデル向けの 1.2）で測っていた。**台本の中に「20B 未満は
+ * small」の写しを置かず、製品の関数（`useSmallModelTypoPrompt`・
+ * `capabilityProfile`・`inferTier`）をそのまま呼ぶ**ために束へ入れる。
+ *
+ * `ai/` のほかのファイル（プロバイダ）は `vscode` を引くので足さない。
+ * この2つが `vscode` へ届かないことは `mcpReach.test.ts` が同じ起点で歩いて見る。
+ */
+export const AI_ENTRY_NAMES = ["capability", "types"];
+
+/**
  * MCP サーバーの入口（設計書6.87.8 の1）。
  *
  * **束ねる側（`bundleCore.mjs`）はここを見ない。** あちらは入口を
@@ -143,13 +157,21 @@ export function coreEntryFiles(src) {
   return CORE_ENTRY_NAMES.map((name) => path.join(src, "core", `${name}.ts`));
 }
 
+export function aiEntryFiles(src) {
+  return AI_ENTRY_NAMES.map((name) => path.join(src, "ai", `${name}.ts`));
+}
+
 export function mcpEntryFiles(src) {
   return MCP_ENTRY_NAMES.map((name) => path.join(src, "mcp", `${name}.ts`));
 }
 
-/** 束ねる起点の全部（プロンプト＋検算・材料） */
+/** 束ねる起点の全部（プロンプト＋検算・材料＋モデルの地力の判断） */
 export function allEntryFiles(src) {
-  return [...promptEntryFiles(src), ...coreEntryFiles(src)];
+  return [
+    ...promptEntryFiles(src),
+    ...coreEntryFiles(src),
+    ...aiEntryFiles(src),
+  ];
 }
 
 /** たどる起点の全部。**MCP サーバーの入口も含める**（6.87.8 の1） */
