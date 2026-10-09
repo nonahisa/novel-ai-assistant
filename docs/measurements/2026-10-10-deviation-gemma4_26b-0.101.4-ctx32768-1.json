@@ -1,0 +1,349 @@
+{
+  "measuredAt": "2026-10-09T18:58:22.029Z",
+  "feature": "deviation",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:26b",
+  "numCtx": 32768,
+  "numCtxDecision": {
+    "numCtx": 32768,
+    "source": "--num-ctx で指定"
+  },
+  "temperature": 0.2,
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": {
+    "contextLength": 262144,
+    "parameterSize": "25.2B",
+    "bundled": {
+      "thinkingSeen": true,
+      "thinkingOffWorks": true,
+      "thinkingMeasuredAt": "2026-09-26",
+      "typoAccuracy": {
+        "hits": 5,
+        "total": 7,
+        "falsePositives": 0,
+        "wrongFixes": 0,
+        "trapHits": 0,
+        "trapTotal": 5,
+        "promptVersion": "1.2",
+        "smallPrompt": false,
+        "sampleVersion": "2",
+        "measuredAt": "2026-09-26T06:31:27+09:00"
+      },
+      "measuredAt": "2026-09-26"
+    },
+    "note": null
+  },
+  "warmup": {
+    "elapsedMs": 19171,
+    "ok": true,
+    "reason": null
+  },
+  "endpoint": "http://127.0.0.1:11501",
+  "options": {
+    "modelSize": "large"
+  },
+  "givenOptions": {},
+  "modelSize": "large",
+  "modelSizeDecision": {
+    "sizeDependent": true,
+    "decided": true,
+    "providerId": "ollama",
+    "parameterSize": "25.2B",
+    "tier": "high",
+    "product": {
+      "modelSize": "large"
+    },
+    "kept": [],
+    "source": "製品と同じ判断（ai/capability.ts を束から借りた）"
+  },
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.101.4",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.2",
+  "verifyPromptVersion": null,
+  "plans": [],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\aa802787-65db-4c41-8484-fcc6029eac4e\\scratchpad\\work-v12c32k-1",
+    "targets": [
+      "本文\\001_灯が消えた朝.txt",
+      "本文\\002_灯台へ.txt",
+      "本文\\003_灯台守の話.txt",
+      "本文\\004_もう一度、灯をともす.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\aa802787-65db-4c41-8484-fcc6029eac4e\\scratchpad\\work-v12c32k-1\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 23878,
+      "temperature": 0.2,
+      "staleNote": null,
+      "metrics": {
+        "seeded": 1,
+        "seededTotal": 3,
+        "missed": 2,
+        "falseFlags": 0,
+        "kindMismatch": 1,
+        "otherFlags": 0,
+        "accepted": 1,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 23878
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "seeded": {
+          "逸脱": {
+            "found": 1,
+            "total": 2
+          },
+          "間延び": {
+            "found": 0,
+            "total": 1
+          }
+        },
+        "missed": [
+          {
+            "file": "本文/002_灯台へ.txt",
+            "kind": "逸脱",
+            "where": "文化祭、出ないか。あと三人いる"
+          },
+          {
+            "file": "本文/004_もう一度、灯をともす.txt",
+            "kind": "間延び",
+            "where": "本当に点くのかな"
+          }
+        ],
+        "falseFlags": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_灯が消えた朝.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "temperature": 0.2,
+            "result": {
+              "accepted": [],
+              "rejected": [],
+              "fillers": 0
+            },
+            "modelSizeDecision": {
+              "source": "unknownModel",
+              "parameterSize": null,
+              "product": {
+                "typoModelSize": "large",
+                "deviationModelSize": "large",
+                "categories": "all",
+                "suppression": "loose"
+              },
+              "given": [
+                "modelSize"
+              ],
+              "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\002_灯台へ.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "temperature": 0.2,
+            "result": {
+              "accepted": [],
+              "rejected": [],
+              "fillers": 0
+            },
+            "modelSizeDecision": {
+              "source": "unknownModel",
+              "parameterSize": null,
+              "product": {
+                "typoModelSize": "large",
+                "deviationModelSize": "large",
+                "categories": "all",
+                "suppression": "loose"
+              },
+              "given": [
+                "modelSize"
+              ],
+              "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\003_灯台守の話.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "temperature": 0.2,
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 37,
+                  "lineEnd": 43,
+                  "excerpt": "広場の隅で、茶色の子猫が段ボールの陰から出てきた。",
+                  "type": "間延び",
+                  "reason": "子猫の保護と世話の描写が、灯台守に会うという目的や父の行方を探す主筋に寄与しているか検討の余地があります。",
+                  "plotReference": "海斗と陽菜は町はずれの家を訪ね、灯台守の老人に会う。",
+                  "severity": "low",
+                  "confidence": "medium"
+                }
+              ],
+              "rejected": [],
+              "fillers": 0
+            },
+            "modelSizeDecision": {
+              "source": "unknownModel",
+              "parameterSize": null,
+              "product": {
+                "typoModelSize": "large",
+                "deviationModelSize": "large",
+                "categories": "all",
+                "suppression": "loose"
+              },
+              "given": [
+                "modelSize"
+              ],
+              "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\004_もう一度、灯をともす.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:26b",
+            "temperature": 0.2,
+            "result": {
+              "accepted": [],
+              "rejected": [],
+              "fillers": 0
+            },
+            "modelSizeDecision": {
+              "source": "unknownModel",
+              "parameterSize": null,
+              "product": {
+                "typoModelSize": "large",
+                "deviationModelSize": "large",
+                "categories": "all",
+                "suppression": "loose"
+              },
+              "given": [
+                "modelSize"
+              ],
+              "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seeded": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "seededTotal": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "missed": {
+      "values": [
+        2
+      ],
+      "min": 2,
+      "max": 2
+    },
+    "falseFlags": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "kindMismatch": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "otherFlags": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "rejected": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        23878
+      ],
+      "min": 23878,
+      "max": 23878
+    }
+  },
+  "lines": [
+    "仕込んだ逸脱を拾えた: 1/3",
+    "見逃し（拾えなかった仕込み）: 2",
+    "誤検出（プロットどおりの話に付いた指摘）: 0",
+    "種別ちがい（場所は当てたが 逸脱／間延び を取り違えた）: 1",
+    "仕込み以外の箇所への指摘: 0",
+    "指摘（検算を通ったもの）: 1",
+    "落とした（検算で弾いたもの）: 0",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 23.9秒",
+    "num_ctx: 32768（--num-ctx で指定）",
+    "temperature: 0.2（製品と同じ（束が返した値））",
+    "頼み方: modelSize=large（申告の大きさ 25.2B・ティア high、版 1.2／製品と同じ判断（ai/capability.ts を束から借りた））",
+    "温め（読み込みを含む。上の所要時間には入っていません）: 19.2秒"
+  ]
+}
