@@ -4,8 +4,10 @@ import {
   isHangable,
   isNoLineEnd,
   isNoLineStart,
+  isNoLineStartStrict,
   NO_LINE_END,
   NO_LINE_START,
+  NO_LINE_START_STRICT,
 } from "../../../src/core/kinsoku";
 
 /**
@@ -79,5 +81,35 @@ describe("ぶら下げ", () => {
 
   test("開き括弧と閉じ括弧が混ざっていない", () => {
     for (const ch of NO_LINE_END) expect(NO_LINE_START).not.toContain(ch);
+  });
+});
+
+/**
+ * 読む紙の厳しい禁則（作者の裁定、2026-10-09）。
+ *
+ * 文庫などの読む紙（`printPaginate.ts`）では、小さい仮名と長音も行頭に置かない
+ * （実機の写真で、2ページ目の頭が「った。」から始まっていた）。
+ * 公募の納品用の升目（`manuscriptGrid.ts`）は上のゆるい側のまま。
+ */
+describe("読む紙の行頭禁則（厳しい側）", () => {
+  test.each(["ぁ", "っ", "ゃ", "ゎ", "ゕ", "ゖ", "ァ", "ッ", "ャ", "ヮ", "ヵ", "ヶ", "ㇰ", "ㇿ", "ー"])(
+    "%s は行頭に来ない",
+    (ch) => {
+      expect(isNoLineStartStrict(ch)).toBe(true);
+    }
+  );
+
+  test("ゆるい側の字は、厳しい側でも行頭に来ない", () => {
+    for (const ch of NO_LINE_START) expect(NO_LINE_START_STRICT).toContain(ch);
+  });
+
+  test("ふつうの字・開き括弧は、厳しい側でも行頭に来てよい", () => {
+    for (const ch of ["あ", "つ", "や", "ア", "漢", "「", "…"]) {
+      expect(isNoLineStartStrict(ch)).toBe(false);
+    }
+  });
+
+  test("升目のゆるい側は変えない（小さい仮名と長音は入らない）", () => {
+    for (const ch of ["っ", "ャ", "ー"]) expect(NO_LINE_START).not.toContain(ch);
   });
 });

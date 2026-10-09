@@ -288,3 +288,55 @@ describe("寸法", () => {
     expect(geometry.cell).toBeCloseTo(170 / 20, 1);
   });
 });
+
+/**
+ * 台本の字下げ（作者の裁定、2026-10-09。写真 6463）：柱 0字・ト書き 3字下げ・台詞 0字。
+ * ト書きが折り返したときも3字下げを続ける。見分け方は `scriptLines.ts`
+ * （原稿エディター・読む紙と同じ）。漫画の原作など、ほかの種類はいまのまま。
+ */
+describe("台本の字下げ", () => {
+  const SCRIPT = [
+    "○駅前・夜",
+    "　太郎、ドアを開けて、雨の降る駅前の広場へ一歩ずつ出ていく。",
+    "太郎「行こう、もう終電は出てしまったけれど、歩けば朝には着くはずだ」",
+  ].join("\n");
+  const options: GridOptions = { columns: 20, rows: 40, hanging: true, vertical: true };
+
+  function scriptLines(kind?: "script" | "manga" | "novel"): GridLine[] {
+    return layoutGrid([{ heading: "", body: SCRIPT, notation: "curly" }], options, kind)[0].lines;
+  }
+
+  test("柱は0字・ト書きは3字下げ（折り返しても）・台詞は0字", () => {
+    const result = scriptLines("script");
+
+    // 柱
+    expect(result[0].indent ?? 0).toBe(0);
+    expect(show(result[0])).toBe("○駅前・夜");
+    // ト書き：本文の頭の全角空白は字下げに含める（3字ちょうど）
+    const togaki = result.filter((line) => line.indent === 3);
+    expect(togaki.length).toBeGreaterThanOrEqual(2);
+    expect(show(togaki[0]).startsWith("太郎、")).toBe(true);
+    // 台詞（2行以上に折り返す）は0字のまま
+    const serifu = result.slice(1 + togaki.length);
+    expect(serifu.length).toBeGreaterThanOrEqual(2);
+    expect(show(serifu[0]).startsWith("太郎「")).toBe(true);
+    for (const line of serifu) expect(line.indent ?? 0).toBe(0);
+  });
+
+  test("字下げを足しても、1行の字数は指定を超えない", () => {
+    for (const line of scriptLines("script")) {
+      expect((line.indent ?? 0) + lineWidth(line)).toBeLessThanOrEqual(options.columns);
+    }
+  });
+
+  test("ト書きの本文は1字も落ちない（頭の全角空白だけが字下げに替わる）", () => {
+    const togaki = scriptLines("script").filter((line) => line.indent === 3);
+    expect(allText(togaki)).toBe("太郎、ドアを開けて、雨の降る駅前の広場へ一歩ずつ出ていく。");
+  });
+
+  test.each([undefined, "novel", "manga"] as const)("台本でなければ（%s）いまのまま", (kind) => {
+    const result = scriptLines(kind);
+    for (const line of result) expect(line.indent ?? 0).toBe(0);
+    expect(show(result[1]).startsWith("　太郎、")).toBe(true);
+  });
+});

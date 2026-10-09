@@ -7,6 +7,7 @@ import { stripMemoLines } from "./sceneMemo";
 import { kindLineClass, kindLineCss } from "./kindLines";
 import type { WorkKindKey } from "./workKind";
 import { PRINT_PAGINATE_SCRIPT } from "./printPaginate";
+import { tcyRuns } from "./tateChuYoko";
 
 /**
  * 印刷用に組版したHTMLを作る（PDF出力のもと）。
@@ -219,8 +220,14 @@ export function buildPrintHtml(input: PrintHtmlInput): string {
     // 紙でもある（そのときは以前と同じ刷り上がりになる）
     '<div class="sheet" id="print-source">',
     // 1ページ目は題だけの扉。ここで改ページして本文へ移る
-    `<section class="cover"><h1 class="cover-title">${title}</h1></section>`,
-    ...input.episodes.map((episode) => renderEpisode(episode, input.kind)),
+    // 題の数字も縦中横にする（`<title>` と data-title は文字のまま）
+    `<section class="cover"><h1 class="cover-title">${renderPlain(
+      input.workTitle.trim() || "無題",
+      preset.vertical
+    )}</h1></section>`,
+    ...input.episodes.map((episode) =>
+      renderEpisode(episode, input.kind, preset.vertical)
+    ),
     "</div>",
     // 本文のあとに置く。先に置くと、割る相手がまだ読み込まれていない
     "<script>",
@@ -286,13 +293,16 @@ export const PRINT_FONT_FAMILY =
 /** 1話ぶん。**話ごとに改ページする**（本の体裁に合わせる） */
 function renderEpisode(
   episode: PrintEpisode,
-  kind: WorkKindKey | undefined
+  kind: WorkKindKey | undefined,
+  vertical: boolean
 ): string {
-  const heading = escapeHtml(episode.heading.trim());
+  // 見出しの「第1話」の数字も、縦書きなら立てる（公募の升目と揃える）。
+  // 面の頭と足に刷る話の見出しは、スクリプトが textContent で拾うので札は混ざらない
+  const heading = renderPlain(episode.heading.trim(), vertical);
   return [
     '<section class="episode">',
     ...(heading ? [`<h2 class="episode-heading">${heading}</h2>`] : []),
-    ...renderBody(episode.body, episode.notation, kind),
+    ...renderBody(episode.body, episode.notation, kind, vertical),
     "</section>",
   ].join("\n");
 }
@@ -314,7 +324,8 @@ function renderEpisode(
 function renderBody(
   body: string,
   notation: NotationMode,
-  kind?: WorkKindKey
+  kind: WorkKindKey | undefined,
+  vertical: boolean
 ): string[] {
   const paragraphs: string[] = [];
   let afterBlank = false;
@@ -333,7 +344,7 @@ function renderBody(
     const lineClass = kindLineClass(kind, line);
     if (lineClass) names.push(lineClass);
     const attr = names.length > 0 ? ` class="${names.join(" ")}"` : "";
-    paragraphs.push(`<p${attr}>${renderInline(line, notation)}</p>`);
+    paragraphs.push(`<p${attr}>${renderInline(line, notation, vertical)}</p>`);
     afterBlank = false;
   }
   return paragraphs;
@@ -345,20 +356,74 @@ function renderBody(
  * **どの経路も `escapeHtml` を通る。** ここを1つでも抜かすと、本文に
  * 書いた記号がタグとして読まれる。
  */
-function renderInline(line: string, notation: NotationMode): string {
+function renderInline(
+  line: string,
+  notation: NotationMode,
+  vertical: boolean
+): string {
   return tokenizeLine(line, notation)
     .map((token) => {
+      // **ルビには縦中横を当てない**（親文字も読みも）。読みを割ると
+      // `<rt>` の中に札が混ざり、ルビの組み方が崩れる
       if (token.kind === "ruby") {
         return `<ruby>${escapeHtml(token.base)}<rt>${escapeHtml(
           token.reading
         )}</rt></ruby>`;
       }
       if (token.kind === "emphasis") {
-        return `<span class="emphasis">${escapeHtml(token.text)}</span>`;
+        // 縦中横の区間だけ札を分ける（`emphasis tcy`）。1本の span の中に
+        // 入れ子にすると、面に割るスクリプトが傍点を1字ずつにほどくときに
+        // 縦中横が消える
+        return segmentsForTcy(token.text, vertical)
+          .map((segment) =>
+            segment.tcy
+              ? `<span class="emphasis tcy">${escapeHtml(segment.text)}</span>`
+              : `<span class="emphasis">${escapeHtml(segment.text)}</span>`
+          )
+          .join("");
       }
-      return escapeHtml(token.text);
+      return renderPlain(token.text, vertical);
     })
     .join("");
+}
+
+/**
+ * 記法を含まない文字列を、縦中横つきで逃がす（見出し・扉の題にも使う）。
+ * 横書きの紙では、ただ逃がすだけ。
+ */
+function renderPlain(text: string, vertical: boolean): string {
+  return segmentsForTcy(text, vertical)
+    .map((segment) =>
+      segment.tcy
+        ? `<span class="tcy">${escapeHtml(segment.text)}</span>`
+        : escapeHtml(segment.text)
+    )
+    .join("");
+}
+
+/**
+ * 縦中横の区間で切る（作者の裁定、2026-10-09。規則は `tateChuYoko.ts` の
+ * `tcyRuns`——原稿エディター・公募の升目・EPUB と同じ）。
+ *
+ * **逃がす前の生の字で切ってから、区間ごとに逃がす。** EPUB は逃がしたあとの
+ * 文字列に正規表現を当てるので、`&#8230;` のような実体参照の中の数字を
+ * 除けている。こちらは順番を逆にしたので、実体参照の中を割ることがそもそも
+ * 起きない（`&` は半角なので、隣の数字は規則どおり寝たまま）。
+ */
+function segmentsForTcy(
+  text: string,
+  vertical: boolean
+): Array<{ text: string; tcy: boolean }> {
+  if (!vertical) return text ? [{ text, tcy: false }] : [];
+  const segments: Array<{ text: string; tcy: boolean }> = [];
+  let at = 0;
+  for (const run of tcyRuns(text)) {
+    if (run.start > at) segments.push({ text: text.slice(at, run.start), tcy: false });
+    segments.push({ text: text.slice(run.start, run.end), tcy: true });
+    at = run.end;
+  }
+  if (at < text.length) segments.push({ text: text.slice(at), tcy: false });
+  return segments;
 }
 
 /**
@@ -383,6 +448,8 @@ function buildStyle(
         "#print-source { writing-mode: vertical-rl; }",
         ".page-body { writing-mode: vertical-rl; }",
         ".page-head, .page-foot { writing-mode: horizontal-tb; }",
+        // 半角数字1〜2字の縦中横（作者の裁定、2026-10-09）。公募の升目と同じ指定
+        ".tcy { text-combine-upright: all; -webkit-text-combine: horizontal; }",
       ]
     : [];
   const [width, height] = paperSize(preset);
@@ -406,6 +473,10 @@ function buildStyle(
     `  font-size: ${preset.fontSize};`,
     // ルビが親文字にぶつからない程度に空ける
     "  line-height: 1.8;",
+    // 面の中の折り返しはブラウザ任せなので、厳しい禁則（小さい仮名・長音を
+    // 行頭に置かない）を指定する。面の切れ目は `printPaginate.ts` が
+    // `kinsoku.ts` の厳しい側で割る（作者の裁定、2026-10-09）
+    "  line-break: strict;",
     "  color: #000;",
     "  background: #fff;",
     "}",

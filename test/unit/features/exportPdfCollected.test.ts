@@ -232,8 +232,9 @@ describe("合本は話ごとに章へ割る（設計書6.65.15）", () => {
   test("章の見出しは、その話の話数と題になる", async () => {
     await exportPdf(work);
     const headings = [
-      ...exportedHtml().matchAll(/<h2 class="episode-heading">([^<]*)<\/h2>/g),
-    ].map((matched) => matched[1]);
+      ...exportedHtml().matchAll(/<h2 class="episode-heading">(.*?)<\/h2>/g),
+      // 縦書きの紙では数字が縦中横の札に包まれる（2026-10-09）。字だけを見る
+    ].map((matched) => matched[1].replace(/<[^>]*>/g, ""));
 
     expect(headings).toEqual(["第1話　転生", "第2話　再会", "第3話　別離"]);
   });
@@ -264,8 +265,9 @@ describe("合本は話ごとに章へ割る（設計書6.65.15）", () => {
 
     await exportPdf(work);
     const headings = [
-      ...exportedHtml().matchAll(/<h2 class="episode-heading">([^<]*)<\/h2>/g),
-    ].map((matched) => matched[1]);
+      ...exportedHtml().matchAll(/<h2 class="episode-heading">(.*?)<\/h2>/g),
+      // 縦書きの紙では数字が縦中横の札に包まれる（2026-10-09）。字だけを見る
+    ].map((matched) => matched[1].replace(/<[^>]*>/g, ""));
 
     expect(headings).toEqual(["プロローグ", "第1話　転生"]);
   });
@@ -410,10 +412,14 @@ describe("公募の納品用で書き出す", () => {
   const shownTitles: string[] = [];
   const inputs: Array<{ validateInput?: (value: string) => unknown }> = [];
 
-  /** 紙の選択で公募を選び、あとは `answers` の順に項目の形で答える */
+  /**
+   * 紙の選択で公募を選び、あとは `answers` の順に項目の形で答える。
+   * 余白を尋ねられたら `marginMm` を選ぶ（尋ねられない組み合わせもある）
+   */
   function chooseManuscript(
     answers: Array<(item: Record<string, unknown>) => boolean>,
-    typed: string[] = []
+    typed: string[] = [],
+    marginMm = 20
   ): void {
     const queue = [...answers];
     (window as unknown as Record<string, unknown>).showQuickPick = async (
@@ -427,6 +433,9 @@ describe("公募の納品用で書き出す", () => {
       if (manuscript) return manuscript;
       const keep = items.find((item) => item.margins === "default");
       if (keep) return keep;
+      if (items.some((item) => typeof item.mm === "number")) {
+        return items.find((item) => item.mm === marginMm);
+      }
       const answer = queue.shift();
       return answer ? items.find(answer) : undefined;
     };
@@ -458,6 +467,55 @@ describe("公募の納品用で書き出す", () => {
     expect(html).toContain("公募の納品用・縦書き・40字×40行・句読点のぶら下げあり");
     // 公募の上下の既定：上はなし、下はページ番号（名前を出さない公募があるため）
     expect(html).toContain('data-head="none" data-foot="page"');
+  });
+
+  /** 余白（作者の裁定、2026-10-09）：普通（20mm）／狭く（10mm）。既定は普通 */
+  test("余白を尋ね、選んだ余白で組む。字の大きさを添える", async () => {
+    chooseManuscript(
+      [
+        (item) => item.columns === 40 && item.rows === 40,
+        (item) => item.paper === "a4-portrait" && item.vertical === true,
+        (item) => item.hanging === true,
+      ],
+      [],
+      10
+    );
+    await exportPdf(work);
+
+    expect(shownTitles).toContain("紙の余白を選んでください");
+    const html = exportedHtml();
+    expect(html).toContain("・余白10mm）");
+    expect(html).toContain("top: 10mm;");
+  });
+
+  test("余白を選ぶ画面に、字の大きさ（A4縦置き40×40で約8pt→約9pt）と端に刷れないことを出す", async () => {
+    let marginItems: Array<Record<string, unknown>> = [];
+    chooseManuscript([
+      (item) => item.columns === 40 && item.rows === 40,
+      (item) => item.paper === "a4-portrait" && item.vertical === true,
+      (item) => item.hanging === true,
+    ]);
+    const answer = (window as unknown as Record<string, unknown>).showQuickPick as (
+      items: Array<Record<string, unknown>>,
+      options?: { title?: string }
+    ) => Promise<unknown>;
+    (window as unknown as Record<string, unknown>).showQuickPick = async (
+      items: Array<Record<string, unknown>>,
+      options?: { title?: string }
+    ) => {
+      if (items.some((item) => typeof item.mm === "number")) marginItems = items;
+      return answer(items, options);
+    };
+    await exportPdf(work);
+
+    const normal = marginItems.find((item) => item.mm === 20);
+    const narrow = marginItems.find((item) => item.mm === 10);
+    expect(normal?.label).toBe("普通（20mm）");
+    expect(narrow?.label).toBe("狭く（10mm）");
+    expect(String(normal?.detail)).toContain("約8.0pt");
+    expect(String(narrow?.detail)).toContain("約8.0ptから約9.0pt");
+    expect(String(narrow?.detail)).toContain("端の数mm");
+    expect(exportedHtml()).toContain("・余白20mm）");
   });
 
   test("書き出したあとの知らせに、字数×行数と本文の枚数を出す", async () => {
@@ -662,6 +720,9 @@ describe(".mdと.txtが混ざっても両方組まれる（実機確認リスト
  *   （設計書6.33.5 の2）。body に選んだ中身と材料が付き、案内帯に何が刷られるかが出る
  * - 0.84.2（2026-09-24）：埋め込むスクリプトに、公募の納品用（面を組んで渡す）の
  *   ときは割り直さない分かれ道が加わった（設計書6.33.5 の3）。組み方そのものは変わらない
+ * - 2026-10-09（作者の裁定）：読む紙に厳しい禁則（`line-break: strict` と、面の切れ目の
+ *   小さい仮名・長音）と縦書きの縦中横（見出しの「第1話」の 1 も立つ）が加わった。
+ *   話の割り方は変わらない
  */
 const GOLDEN =
-  "22fb34f3f6c832681f90c3c5682e116f283145b696a41a63958c6d52a631beb8";
+  "9656495dad555a4ab2027bac5bb6f70c66082b4dfed9a66ac08e9b75a336dee5";

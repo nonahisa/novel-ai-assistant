@@ -4,6 +4,9 @@ import {
   describeGrid,
   GRID_HEADER_FOOTER,
   GRID_MARGIN_MM,
+  GRID_MARGINS,
+  gridFontSizePt,
+  gridMarginClear,
   gridPaper,
   type GridPaper,
 } from "../../../src/core/printGridHtml";
@@ -183,10 +186,10 @@ describe("上下の余白と案内", () => {
     expect(out).toContain('<div class="print-guide">');
     expect(out).toContain(describeGrid("a4-landscape", V40));
     expect(describeGrid("a4-landscape", V40)).toBe(
-      "公募の納品用・縦書き・40字×40行・句読点のぶら下げあり（A4横置き 297mm × 210mm）"
+      "公募の納品用・縦書き・40字×40行・句読点のぶら下げあり（A4横置き 297mm × 210mm・余白20mm）"
     );
-    expect(describeGrid("a4-portrait", { ...V40, hanging: false, vertical: false })).toBe(
-      "公募の納品用・横書き・40字×40行・句読点のぶら下げなし（A4縦置き 210mm × 297mm）"
+    expect(describeGrid("a4-portrait", { ...V40, hanging: false, vertical: false }, 10)).toBe(
+      "公募の納品用・横書き・40字×40行・句読点のぶら下げなし（A4縦置き 210mm × 297mm・余白10mm）"
     );
   });
 
@@ -204,5 +207,88 @@ describe("紙", () => {
   test("A4の横置きと縦置き", () => {
     expect(gridPaper("a4-landscape")).toMatchObject({ width: 297, height: 210 });
     expect(gridPaper("a4-portrait")).toMatchObject({ width: 210, height: 297 });
+  });
+});
+
+/**
+ * 余白を選ぶ（作者の裁定、2026-10-09）。A4縦置きの40×40は字が約8ptになるので、
+ * 「普通（20mm）／狭く（10mm）」を選べるようにする。既定は普通。
+ */
+describe("余白", () => {
+  test("普通（20mm）と狭く（10mm）があり、既定は普通", () => {
+    expect(GRID_MARGINS.map((margin) => margin.mm)).toEqual([20, 10]);
+    expect(GRID_MARGINS[0].mm).toBe(GRID_MARGIN_MM);
+    expect(GRID_MARGIN_MM).toBe(20);
+  });
+
+  test("選ばなければ普通の余白で組む", () => {
+    const out = grid();
+    expect(out).toContain(".page-body { position: absolute; top: 20mm; right: 20mm; bottom: 20mm; left: 20mm;");
+  });
+
+  test("狭くすると、面の余白も上下の帯も10mmになり、字の大きさは寸法の計算どおり", () => {
+    const out = buildGridPrintHtml({
+      workTitle: "銀の航路",
+      episodes: [{ heading: "第1話", body: BODY, notation: "curly" }],
+      paper: "a4-portrait",
+      grid: V40,
+      marginMm: 10,
+    });
+    const geometry = gridGeometry(210, 297, 10, V40);
+
+    expect(out).toContain(".page-body { position: absolute; top: 10mm; right: 10mm; bottom: 10mm; left: 10mm;");
+    expect(out).toContain(".page-head, .page-foot { position: absolute; left: 10mm; right: 10mm; height: 10mm;");
+    expect(out).toContain(`font-size: ${geometry.cell}mm;`);
+    expect(out).toContain(`block-size: ${geometry.pitch}mm;`);
+    // 案内帯にも余白が出る
+    expect(out).toContain(describeGrid("a4-portrait", V40, 10));
+  });
+
+  test("A4縦置き・縦書き40×40：普通で約8pt、狭くで約9pt", () => {
+    expect(gridFontSizePt("a4-portrait", V40, 20)).toBeCloseTo(8.0, 1);
+    expect(gridFontSizePt("a4-portrait", V40, 10)).toBeCloseTo(9.0, 1);
+  });
+
+  /*
+    上下の帯の字（題名・作者名・ページ番号）と、本文の範囲からはみ出すもの
+    （縦書きのぶら下げ・横書きの上の行のルビと傍点）が重ならないこと。
+    40×40 は向き・紙・余白のどれでも重ならない（作者が使う形）
+  */
+  test.each([
+    ["a4-landscape", true],
+    ["a4-portrait", true],
+    ["a4-portrait", false],
+  ] as const)("40字×40行（%s・縦書き=%s）は、普通でも狭くでも上下の字と重ならない", (paper, vertical) => {
+    for (const margin of GRID_MARGINS) {
+      expect(gridMarginClear(paper, { ...V40, vertical }, margin.mm)).toBe(true);
+    }
+  });
+
+  test("ぶら下げが下の帯へ届く組み合わせは、重なると判定する（狭くを出さない）", () => {
+    // 縦書き・A4横置き・40字×30行：狭くするとマスが4.75mmで、ぶら下げた「。」が下の帯の字に届く
+    const v30 = { columns: 40, rows: 30, hanging: true, vertical: true };
+    expect(gridMarginClear("a4-landscape", v30, 20)).toBe(true);
+    expect(gridMarginClear("a4-landscape", v30, 10)).toBe(false);
+    // ぶら下げないなら、下の帯へは何もはみ出さない
+    expect(gridMarginClear("a4-landscape", { ...v30, hanging: false }, 10)).toBe(true);
+  });
+});
+
+/**
+ * 台本の升目の字下げ（作者の裁定、2026-10-09）：柱 0字・ト書き 3字下げ・台詞 0字。
+ * 字下げは空のマスとして並べる（1行の字数は指定どおりのまま）。
+ */
+describe("台本の字下げ", () => {
+  test("ト書きの行頭に、空のマスが3つ並ぶ", () => {
+    const out = buildGridPrintHtml({
+      workTitle: "夜の駅",
+      episodes: [{ heading: "", body: "○駅前・夜\n　太郎、ドアを開ける。\n太郎「行こう」", notation: "curly" }],
+      paper: "a4-landscape",
+      grid: V40,
+      kind: "script",
+    });
+    expect(out).toContain('<div class="gl"><i>○</i><i>駅</i>');
+    expect(out).toContain('<div class="gl"><i></i><i></i><i></i><i>太</i><i>郎</i><i>、</i>');
+    expect(out).toContain('<div class="gl"><i>太</i><i>郎</i><i>「</i>');
   });
 });

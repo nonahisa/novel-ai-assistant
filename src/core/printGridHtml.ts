@@ -15,6 +15,7 @@ import {
   type GridPage,
   type GridUnit,
 } from "./manuscriptGrid";
+import type { WorkKindKey } from "./workKind";
 
 /**
  * 公募の納品用の組版を、印刷用HTMLにする（設計書6.33.5 の3）。
@@ -54,12 +55,66 @@ export function gridPaper(id: GridPaper): GridPaperInfo {
 }
 
 /**
- * 紙の端から本文までの余白（mm）。
+ * 紙の端から本文までの余白（mm）の既定（「普通」）。
  *
  * ふつうの紙（15mm）より広くとる。公募の原稿は綴じたり書き込んだりされる
  * ことがあり、上下の余白にはページ番号も入る。
  */
 export const GRID_MARGIN_MM = 20;
+
+/**
+ * 選べる余白（作者の裁定、2026-10-09）。**既定は先頭の「普通」。**
+ *
+ * A4縦置きの縦書き40×40は、行送りで字の大きさが決まり約8ptになる。
+ * 余白を狭くすると本文の範囲が広がって約9ptになる。10mm より狭くしないのは、
+ * 家庭用のプリンターが紙の端の数mmに刷れないため。
+ */
+export const GRID_MARGINS: readonly { id: "normal" | "narrow"; label: string; mm: number }[] = [
+  { id: "normal", label: "普通", mm: GRID_MARGIN_MM },
+  { id: "narrow", label: "狭く", mm: 10 },
+];
+
+/**
+ * 上下の帯の字の大きさ（マスに対する比）。`printHtml.ts` の `pageSheetCss` の
+ * `.page-head, .page-foot { font-size: 0.8em }` と同じ値（升目では1em＝1マス）。
+ */
+const HEAD_FOOT_EM = 0.8;
+
+/**
+ * 横書きの行の上へ出るルビ・傍点の高さ（マスに対する比）。下の CSS の
+ * `.rt`（0.5em の字で -1.05em）・傍点（0.5em の字で -1.1em）のうち大きいほう。
+ */
+const MARK_REACH_EM = 0.55;
+
+/** 本文の字の大きさ（pt）。選ぶ画面に出す */
+export function gridFontSizePt(paper: GridPaper, grid: GridOptions, marginMm: number): number {
+  const info = gridPaper(paper);
+  return (gridGeometry(info.width, info.height, marginMm, grid).cell * 72) / 25.4;
+}
+
+/**
+ * 上下の帯の字（題名・作者名・ページ番号）と、本文の範囲から余白へはみ出すものが
+ * 重ならないか（作者の裁定、2026-10-09「重ならないことを確かめる」）。
+ *
+ * - 帯の字は、高さ＝余白の帯の真ん中に、0.8マスの高さで置かれる
+ * - 縦書き：ぶら下げた句読点が、行の長さのあまりを越えて**下の余白へ1マス**出る
+ * - 横書き：いちばん上の行のルビ・傍点が、行間のあまりを越えて**上の余白へ**出る
+ *   （ぶら下げは右の余白へ出るので、帯には届かない）
+ *
+ * 字の形（「。」は縦書きではマスの右上に寄る）までは見ず、マスいっぱいとして
+ * 厳しめに測る。
+ */
+export function gridMarginClear(paper: GridPaper, grid: GridOptions, marginMm: number): boolean {
+  const info = gridPaper(paper);
+  const geometry = gridGeometry(info.width, info.height, marginMm, grid);
+  const reach = grid.vertical
+    ? grid.hanging
+      ? geometry.cell - geometry.inlineOffset
+      : 0
+    : MARK_REACH_EM * geometry.cell - (geometry.pitch - geometry.cell) / 2;
+  const room = marginMm / 2 - (HEAD_FOOT_EM / 2) * geometry.cell;
+  return reach < room;
+}
 
 /**
  * 公募の上下の余白の既定：上は何も刷らず、下にページ番号。
@@ -77,15 +132,26 @@ export interface GridPrintHtmlInput {
   /** 省略なら `GRID_HEADER_FOOTER` */
   headerFooter?: HeaderFooter;
   author?: string;
+  /** 紙の端から本文までの余白（mm）。省略なら普通（`GRID_MARGIN_MM`） */
+  marginMm?: number;
+  /**
+   * 作品の種類。**台本だけ、ト書きを3字下げる**（作者の裁定、2026-10-09）。
+   * ほかの種類はいまのまま（本文をそのまま升目に置く）
+   */
+  kind?: WorkKindKey;
 }
 
 /** 案内帯と選ぶ画面に出す、組み方の説明 */
-export function describeGrid(paper: GridPaper, grid: GridOptions): string {
+export function describeGrid(
+  paper: GridPaper,
+  grid: GridOptions,
+  marginMm: number = GRID_MARGIN_MM
+): string {
   const info = gridPaper(paper);
   return (
     `公募の納品用・${grid.vertical ? "縦書き" : "横書き"}・${grid.columns}字×${grid.rows}行・` +
     `句読点のぶら下げ${grid.hanging ? "あり" : "なし"}` +
-    `（${info.label} ${info.width}mm × ${info.height}mm）`
+    `（${info.label} ${info.width}mm × ${info.height}mm・余白${marginMm}mm）`
   );
 }
 
@@ -94,7 +160,8 @@ export function buildGridPrintHtml(input: GridPrintHtmlInput): string {
   const title = escapeHtml(input.workTitle.trim() || "無題");
   const margins = input.headerFooter ?? GRID_HEADER_FOOTER;
   const author = escapeHtml((input.author ?? "").trim());
-  const pages = layoutGrid(input.episodes, input.grid);
+  const marginMm = input.marginMm ?? GRID_MARGIN_MM;
+  const pages = layoutGrid(input.episodes, input.grid, input.kind);
 
   return [
     "<!DOCTYPE html>",
@@ -103,11 +170,11 @@ export function buildGridPrintHtml(input: GridPrintHtmlInput): string {
     '<meta charset="utf-8">',
     `<title>${title}</title>`,
     "<style>",
-    buildGridStyle(paper, input.grid),
+    buildGridStyle(paper, input.grid, marginMm),
     "</style>",
     "</head>",
     `<body data-grid="1" data-vertical="${input.grid.vertical ? "1" : "0"}" data-head="${margins.top}" data-foot="${margins.bottom}" data-title="${title}" data-author="${author}">`,
-    buildPrintGuide(escapeHtml(describeGrid(input.paper, input.grid)), margins),
+    buildPrintGuide(escapeHtml(describeGrid(input.paper, input.grid, marginMm)), margins),
     '<div id="print-pages">',
     // 扉（題だけ）。上下の余白には何も刷らない（スクリプトが飛ばす）
     `<div class="page page-cover"><div class="page-head"></div><div class="page-body"><h1 class="cover-title">${title}</h1></div><div class="page-foot"></div></div>`,
@@ -132,10 +199,13 @@ function renderPage(page: GridPage): string {
 }
 
 function renderLine(line: GridLine): string {
+  // 字下げ（台本のト書き）は空のマスとして並べる。マスの寸法は字と同じなので、
+  // 下げた行の字も升目の列に揃う
+  const indent = "<i></i>".repeat(line.indent ?? 0);
   const cells = line.units.map(renderUnit).join("");
   // ぶら下げは最後のマスのあとに置く。行の枠からはみ出して、余白に出る
   const hang = line.hang ? renderUnit(line.hang) : "";
-  return `<div class="gl">${cells}${hang}</div>`;
+  return `<div class="gl">${indent}${cells}${hang}</div>`;
 }
 
 /**
@@ -157,11 +227,13 @@ function renderUnit(unit: GridUnit): string {
   return `<i${attr}>${escapeHtml(unit.text)}</i>`;
 }
 
-function buildGridStyle(paper: GridPaperInfo, grid: GridOptions): string {
-  const geometry = gridGeometry(paper.width, paper.height, GRID_MARGIN_MM, grid);
+function buildGridStyle(paper: GridPaperInfo, grid: GridOptions, marginMm: number): string {
+  // 字の大きさを決める寸法と、面の余白・上下の帯は**同じ値**から作る
+  // （片方だけ変わると、升目が帯に食い込むか、余白が余る）
+  const geometry = gridGeometry(paper.width, paper.height, marginMm, grid);
   const width = `${paper.width}mm`;
   const height = `${paper.height}mm`;
-  const margin = `${GRID_MARGIN_MM}mm`;
+  const margin = `${marginMm}mm`;
   const vertical = grid.vertical
     ? [
         ".page-body { writing-mode: vertical-rl; }",
