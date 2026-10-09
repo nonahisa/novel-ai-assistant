@@ -430,6 +430,56 @@ const appliedListEl = document.getElementById('appliedList');
 // 最初は隠す（中身が届いてから出す）
 appliedBoxEl.style.display = 'none';
 
+/*
+  **窓の外へはみ出した分を、見える幅に詰める**（実機確認リスト 4544、作者の裁定 2026-10-09）。
+
+  窓を狭くすると、分類のタブの3つ目と「確信度が低いものも表示」などの文が右端で
+  切れていた。パネルの組み方のせいではない。VS Code の編集の列には最小の幅
+  （220px）があり、左の列・サイドバーと足して窓に収まらないと、**右の列の端が
+  窓の外へ出て切り落とされる**（640px の窓で 18px）。パネルの中からは自分の幅が
+  220px に見えるので、折り返しが起きない。
+
+  そこで、パネルの中から「実際に見えている幅」を測る。最上位の窓に対する交差を
+  返す IntersectionObserver（root を渡さない）は、窓の端と途中の切り落としを
+  含めた幅を返す。見える幅が自分の幅より狭いときだけ、本文の幅をそこへ詰める
+  ——タブは2段に、文は見える幅で折り返す。**広いとき（切れていないとき）は何も
+  しない**ので、見た目は変わらない。
+
+  見える幅が0のとき（タブを切り替えてパネルが隠れたとき）は詰めない。詰めると
+  戻ってきたときに幅0の面が一瞬見える。
+*/
+(function fitToVisibleWidth() {
+  if (typeof IntersectionObserver !== 'function') return;
+  const probe = document.createElement('div');
+  probe.setAttribute('aria-hidden', 'true');
+  probe.style.position = 'fixed';
+  probe.style.left = '0';
+  probe.style.right = '0';
+  probe.style.top = '0';
+  probe.style.height = '1px';
+  probe.style.opacity = '0';
+  probe.style.pointerEvents = 'none';
+  document.body.appendChild(probe);
+  const steps = [];
+  for (let i = 0; i <= 100; i++) steps.push(i / 100);
+  function apply(entry) {
+    const visible = Math.floor(entry.intersectionRect.width);
+    const whole = entry.boundingClientRect.width;
+    const clipped = visible > 0 && visible < whole - 1;
+    const next = clipped ? visible + 'px' : '';
+    if (document.body.style.maxWidth !== next) document.body.style.maxWidth = next;
+  }
+  const observer = new IntersectionObserver((entries) => {
+    apply(entries[entries.length - 1]);
+  }, { threshold: steps });
+  observer.observe(probe);
+  // 窓の幅だけが変わって見える割合の段を跨がないと知らせが来ないので、測り直す
+  window.addEventListener('resize', () => {
+    observer.unobserve(probe);
+    observer.observe(probe);
+  });
+})();
+
 /**
  * 当てたもの（作者の裁定 2026-10-04）。
  *
