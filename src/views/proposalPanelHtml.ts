@@ -1,3 +1,5 @@
+import { OBSERVE_VISIBLE_WIDTH_SOURCE } from "./visibleWidthScript";
+
 /**
  * 提案パネル（誤字脱字など）の中身。既定はエディターの右の列に開き、
  * 設定で下段にも出せる（`features/proposalPanel.ts` の `reveal`）。
@@ -448,37 +450,12 @@ appliedBoxEl.style.display = 'none';
   見える幅が0のとき（タブを切り替えてパネルが隠れたとき）は詰めない。詰めると
   戻ってきたときに幅0の面が一瞬見える。
 */
-(function fitToVisibleWidth() {
-  if (typeof IntersectionObserver !== 'function') return;
-  const probe = document.createElement('div');
-  probe.setAttribute('aria-hidden', 'true');
-  probe.style.position = 'fixed';
-  probe.style.left = '0';
-  probe.style.right = '0';
-  probe.style.top = '0';
-  probe.style.height = '1px';
-  probe.style.opacity = '0';
-  probe.style.pointerEvents = 'none';
-  document.body.appendChild(probe);
-  const steps = [];
-  for (let i = 0; i <= 100; i++) steps.push(i / 100);
-  function apply(entry) {
-    const visible = Math.floor(entry.intersectionRect.width);
-    const whole = entry.boundingClientRect.width;
-    const clipped = visible > 0 && visible < whole - 1;
-    const next = clipped ? visible + 'px' : '';
-    if (document.body.style.maxWidth !== next) document.body.style.maxWidth = next;
-  }
-  const observer = new IntersectionObserver((entries) => {
-    apply(entries[entries.length - 1]);
-  }, { threshold: steps });
-  observer.observe(probe);
-  // 窓の幅だけが変わって見える割合の段を跨がないと知らせが来ないので、測り直す
-  window.addEventListener('resize', () => {
-    observer.unobserve(probe);
-    observer.observe(probe);
-  });
-})();
+${OBSERVE_VISIBLE_WIDTH_SOURCE}
+observeVisibleWidth(function (clippedWidth) {
+  // 切れているときだけ本文の幅を見える幅へ詰める。広いときは空のまま（見た目を変えない）
+  const next = clippedWidth > 0 ? clippedWidth + 'px' : '';
+  if (document.body.style.maxWidth !== next) document.body.style.maxWidth = next;
+});
 
 /**
  * 当てたもの（作者の裁定 2026-10-04）。

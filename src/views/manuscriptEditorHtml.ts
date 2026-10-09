@@ -45,6 +45,7 @@ import { TCY_RUN_PATTERN } from "../core/tateChuYoko";
 import { kindLineCss, kindLineRules } from "../core/kindLines";
 import type { WorkKindKey } from "../core/workKind";
 import { findAction } from "./actionList";
+import { OBSERVE_VISIBLE_WIDTH_SOURCE } from "./visibleWidthScript";
 
 /**
  * 測る書体の名前。
@@ -262,7 +263,12 @@ body.revealmark:not(.compose):not(.notepv) #aloudmarks { display: block; }
   padding: 6px 10px;
   border-top: 1px solid var(--vscode-panel-border, transparent);
   background: var(--vscode-editor-background);
+  /* 狭いとき、ボタンが右へ切れずに次の段へ落ちる（実機確認リスト 4544）。広いときは
+     1段に収まるので見た目は変わらない */
+  flex-wrap: wrap;
 }
+/* ボタンの字の途中では折り返さない（折り返すのはボタンの単位） */
+#bottom button { white-space: nowrap; }
 /* **画面の右下へ置く**（作者の依頼、2026-08-28）。
    margin-left: auto にしておくと、この段へ左寄せの要素を足しても
    このボタンだけが右端に残る（並び順で決め打たない） */
@@ -855,6 +861,9 @@ ruby > rt {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+/* 列の右端が窓の外へ出て切られているとき（下の観測が body に clipped を付ける）だけ、
+   字数の文も折り返して全部読めるようにする。広いときは1行のまま（実機確認リスト 4544） */
+body.clipped #counts, body.clipped #cheer { white-space: normal; }
 #note {
   color: var(--vscode-notificationsInfoIcon-foreground, inherit);
 }
@@ -1064,6 +1073,22 @@ ruby > rt {
   const notePvButton = document.getElementById("notePv");
   /** 「noteに貼ったときの見た目」の面 */
   const notepv = document.getElementById("notepv");
+
+  /* ── 窓の外へはみ出した分を、下の段だけ見える幅へ詰める（実機確認リスト 4544、
+     作者の裁定 2026-10-09）。VS Code の編集の列には最小の幅（220px）があり、
+     窓が狭いと右の列の端が窓の外へ出て、下の段の文が右で切れていた。
+     見える幅の測り方は提案パネルと共通（views/visibleWidthScript.ts）。
+     打つ面・本文の幅には触らない（打鍵・変換・縦書きの切り替えへ影響させない）。
+     切れていないとき（広いとき）は何もしない ── */
+${OBSERVE_VISIBLE_WIDTH_SOURCE}
+  observeVisibleWidth(function (clippedWidth) {
+    const next = clippedWidth > 0 ? clippedWidth + "px" : "";
+    ["bottom", "foot"].forEach(function (id) {
+      const el = document.getElementById(id);
+      if (el && el.style.maxWidth !== next) el.style.maxWidth = next;
+    });
+    document.body.classList.toggle("clipped", clippedWidth > 0);
+  });
 
   /** いま画面が持っている本文。拡張機能から来たものと比べるために持つ */
   let current = "";
