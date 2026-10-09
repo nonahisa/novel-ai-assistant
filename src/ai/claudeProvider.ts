@@ -7,6 +7,7 @@ import { forgetSecret, logLine, registerSecret } from "../core/logger";
 import { verifiedState } from "../core/verifiedMemento";
 import { resolveTimeoutMs } from "../core/modelTuning";
 import { isWebRuntime } from "../core/runtime";
+import { hashText } from "../core/hash";
 
 /**
  * Claude（Anthropic API）アダプタ。
@@ -277,11 +278,6 @@ export class ClaudeProvider implements ApiKeyProvider {
     );
     throwIfAborted(params.signal);
 
-    // モデルの申告する対応状況だけでは足りない。実際に400で拒否される項目が
-    // あるため、拒否されたら外して試し、通った組み合わせを覚える。
-    // Gemini側と同じ方針（エラー文から原因を当てにいかない）。
-    const stored = this.supportFor(params.model);
-
     // 思考モードの扱いはモデル世代で逆になっている。
     //  - adaptive対応の新しいモデル：既定でONなので、切るには明示的にdisabledを送る
     //  - enabledのみの古いモデル：既定でOFFなので、何も送らなければよい
@@ -290,6 +286,18 @@ export class ClaudeProvider implements ApiKeyProvider {
     const sendsSchema =
       params.jsonSchema !== undefined &&
       raw?.structured_outputs?.supported !== false;
+    // 送るスキーマは1回だけ変換し、その指紋で「このスキーマが通るか」を覚える
+    const claudeSchema = sendsSchema
+      ? (toClaudeJsonSchema(params.jsonSchema) as Record<string, unknown>)
+      : undefined;
+    const schemaFingerprint = claudeSchema
+      ? fingerprintOfConverted(claudeSchema)
+      : undefined;
+
+    // モデルの申告する対応状況だけでは足りない。実際に400で拒否される項目が
+    // あるため、拒否されたら外して試し、通った組み合わせを覚える。
+    // Gemini側と同じ方針（エラー文から原因を当てにいかない）。
+    const stored = this.supportFor(params.model, schemaFingerprint);
     const sendsThinking = params.disableThinking === true && thinkingIsOnByDefault;
     const sendsEffort =
       raw?.effort?.supported === true && raw.effort.low?.supported === true;
@@ -309,16 +317,10 @@ export class ClaudeProvider implements ApiKeyProvider {
         messages: [{ role: "user", content: params.userPrompt }],
       };
       let outputConfig: Record<string, unknown> | undefined;
-      if (sendsSchema && support.jsonSchema) {
+      if (claudeSchema && support.jsonSchema) {
         // Claudeの構造化出力はスキーマに追加の制約がある（後述の変換を参照）
         outputConfig = {
-          format: {
-            type: "json_schema",
-            schema: toClaudeJsonSchema(params.jsonSchema) as Record<
-              string,
-              unknown
-            >,
-          },
+          format: { type: "json_schema", schema: claudeSchema },
         };
       }
       if (sendsThinking && support.thinking) {
@@ -353,7 +355,10 @@ export class ClaudeProvider implements ApiKeyProvider {
         if (attempt.dropped.length > 0) {
           logLine(
             `Claudeは「${describeDroppedOptions(attempt.dropped)}」を外すと通りました` +
-              `（モデル: ${params.model}）。以後この組み合わせで呼び出します。`
+              `（モデル: ${params.model}）。以後この組み合わせで呼び出します。` +
+              (attempt.dropped.includes("jsonSchema")
+                ? `JSONスキーマを外すのは、このスキーマ（${params.meta?.feature ?? "機能名なし"}／指紋 ${schemaFingerprint ?? "なし"}）だけです。`
+                : "")
           );
         }
         break;
@@ -384,7 +389,7 @@ export class ClaudeProvider implements ApiKeyProvider {
         new AIError("Claudeが要求を受け付けませんでした。", "bad_response")
       );
     }
-    this.rememberSupport(params.model, accepted);
+    this.rememberSupport(params.model, accepted, schemaFingerprint);
 
     if (!isClaudeMessage(res)) {
       throw new AIError("Claudeから形式が不正な応答が返りました。", "bad_response");
@@ -488,28 +493,39 @@ export class ClaudeProvider implements ApiKeyProvider {
     return (await this.rawModel(id, signal))?.capabilities ?? undefined;
   }
 
-  private readonly supportCache = new Map<string, ClaudeSupport>();
+  private readonly supportCache = new Map<string, ClaudeStoredSupport>();
+
+  private storedSupport(model: string): ClaudeStoredSupport {
+    const cached = this.supportCache.get(model);
+    if (cached) return cached;
+    const stored = this.context.globalState.get<ClaudeStoredSupport>(
+      supportKey(model)
+    );
+    const support = normalizeStoredSupport(stored);
+    this.supportCache.set(model, support);
+    return support;
+  }
 
   /**
    * モデルごとに送ってよい指定。分からないうちは全部送れる前提で始める。
    *
    * **VS Codeを閉じても覚えておく。** 覚えないと再起動のたびに
    * 400で弾かれる呼び出しが発生し、そのぶん課金される。
+   *
+   * **JSONスキーマだけは、スキーマごとに見る**（`schemaFingerprint`）。
+   * effort・思考の無効化はモデルの性質だが、スキーマが通るかはスキーマの形の
+   * 性質である。2026-10-10、相談のスキーマが断られて「JSONスキーマ非対応」を
+   * モデル単位で覚え、形の違う冒頭診断までスキーマ無しで呼んで答えを読めなくした。
    */
-  private supportFor(model: string): ClaudeSupport {
-    const cached = this.supportCache.get(model);
-    if (cached) return cached;
-
-    const stored = this.context.globalState.get<ClaudeSupport>(
-      supportKey(model)
-    );
-    const support: ClaudeSupport = {
-      effort: stored?.effort ?? true,
-      thinking: stored?.thinking ?? true,
-      jsonSchema: stored?.jsonSchema ?? true,
+  private supportFor(model: string, schemaFingerprint?: string): ClaudeSupport {
+    const stored = this.storedSupport(model);
+    return {
+      effort: stored.effort,
+      thinking: stored.thinking,
+      jsonSchema:
+        schemaFingerprint === undefined ||
+        !stored.rejectedSchemas.includes(schemaFingerprint),
     };
-    this.supportCache.set(model, support);
-    return support;
   }
 
   /**
@@ -518,13 +534,25 @@ export class ClaudeProvider implements ApiKeyProvider {
    * **記憶と手元の控えの両方を書き換える。** 以前は保存先だけを更新しており、
    * 手元の控えが古いままだったため、同じ実行の次のチャンクでまた同じ指定を送り、
    * 毎回400を4回もらってから通るという動きになっていた（実データのログで確認）。
+   *
+   * スキーマは、送ったときだけ、そのスキーマの指紋について覚える
+   * （外して通ったら「このスキーマは通らない」、付けたまま通ったら取り消す）。
    */
-  private rememberSupport(model: string, support: ClaudeSupport): void {
-    this.supportCache.set(model, { ...support });
+  private rememberSupport(
+    model: string,
+    support: ClaudeSupport,
+    schemaFingerprint: string | undefined
+  ): void {
+    const next = rememberedSupport(
+      this.storedSupport(model),
+      support,
+      schemaFingerprint
+    );
+    this.supportCache.set(model, next);
     // **確かめて書く**（設計書5.7.8）。消えると次の起動で、通らない指定を
     // もう一度送ってから通ることになる。待たないので、失敗はログへ
     verifiedState(this.context.globalState)
-      .update(supportKey(model), { ...support })
+      .update(supportKey(model), { ...next, rejectedSchemas: [...next.rejectedSchemas] })
       .catch((error: unknown) =>
         logLine(
           `Claude: 通った指定を覚えられませんでした（${model}）：` +
@@ -562,11 +590,84 @@ function toModelInfo(m: ClaudeModel): ModelInfo {
  * 「必須でない項目が多すぎる」で弾かれていたのを直したので、
  * 「JSONスキーマ非対応」という記録は誤りになった。
  *
+ * v6 は、null 許容の配列・object を anyOf の枝へ正しく分けるように直し
+ * （2026-10-10）、あわせてスキーマの記憶をモデル単位からスキーマ単位
+ * （`rejectedSchemas`）へ改めたため。v5 には、相談のスキーマが断られた
+ * 結果の「JSONスキーマ非対応」がモデル単位で残っている。
+ *
  * **`toClaudeJsonSchema` を直したら、ここの版も上げること。**
  * 上げないと、直す前の判定が残って新しいスキーマを試さない。
+ * （スキーマ単位になったので、変換で形が変われば指紋も変わり、古い記録は
+ * 当たらなくなる。それでも effort・思考の記録との整合のため版は上げる）
  */
 function supportKey(model: string): string {
-  return `novelai.claude.support.v5.${model}`;
+  return `novelai.claude.support.v6.${model}`;
+}
+
+/** 覚えておく形。JSONスキーマはモデル単位でなく、断られたスキーマの指紋で持つ */
+export interface ClaudeStoredSupport {
+  effort: boolean;
+  thinking: boolean;
+  /** スキーマを外さないと通らなかったスキーマの指紋 */
+  rejectedSchemas: string[];
+}
+
+/** 覚えておく指紋の数の上限。機能の数（40ほど）より多く取る */
+const MAX_REJECTED_SCHEMAS = 64;
+
+export function normalizeStoredSupport(stored: unknown): ClaudeStoredSupport {
+  const record =
+    typeof stored === "object" && stored !== null
+      ? (stored as Record<string, unknown>)
+      : {};
+  return {
+    effort: typeof record.effort === "boolean" ? record.effort : true,
+    thinking: typeof record.thinking === "boolean" ? record.thinking : true,
+    rejectedSchemas: Array.isArray(record.rejectedSchemas)
+      ? record.rejectedSchemas.filter(
+          (entry): entry is string => typeof entry === "string"
+        )
+      : [],
+  };
+}
+
+/**
+ * 通った組み合わせから、次に覚えておく形を作る。
+ *
+ * - effort・思考の無効化は、従来どおりモデル単位で通った値を覚える
+ * - スキーマは、**送ったときだけ**その指紋について覚える。送っていない回
+ *   （スキーマの無い機能）の結果で、ほかのスキーマの記録を動かさない
+ */
+export function rememberedSupport(
+  previous: ClaudeStoredSupport,
+  accepted: ClaudeSupport,
+  schemaFingerprint: string | undefined
+): ClaudeStoredSupport {
+  let rejected = previous.rejectedSchemas.filter(
+    (entry) => entry !== schemaFingerprint
+  );
+  if (schemaFingerprint !== undefined && !accepted.jsonSchema) {
+    rejected = [...rejected, schemaFingerprint].slice(-MAX_REJECTED_SCHEMAS);
+  }
+  return {
+    effort: accepted.effort,
+    thinking: accepted.thinking,
+    rejectedSchemas: rejected,
+  };
+}
+
+/**
+ * Claude へ送る形に変換したスキーマの指紋。
+ *
+ * **変換後の形で取る。** 変換を直せば指紋も変わり、直す前に断られた記録が
+ * 直したあとのスキーマに当たらない。
+ */
+export function claudeSchemaFingerprint(schema: unknown): string {
+  return fingerprintOfConverted(toClaudeJsonSchema(schema));
+}
+
+function fingerprintOfConverted(converted: unknown): string {
+  return hashText(JSON.stringify(converted)).slice(0, 16);
 }
 
 /**
@@ -673,8 +774,13 @@ function describeCapabilities(caps: ClaudeModelCapabilities | null): string[] {
  *
  * Claudeの構造化出力は
  *   - すべてのobjectに additionalProperties: false が必要
- *   - type: ["string", "null"] のような配列形式は anyOf で書く
+ *   - type: ["string", "null"] のような配列形式は anyOf で書く。**型の語
+ *     （items・properties など）は anyOf の横に置けない**ので、枝の中へ入れる
+ *     （`typeUnionToAnyOf`）
  *   - **minLength / maxLength は受け付けない**（件数の maxItems も送らない）
+ *
+ * 全機能のスキーマを変換して制限に触れないことは
+ * `test/unit/ai/claudeSchemaLimits.test.ts` が見張る。
  * という制約がある。Ollama側のスキーマ定義は変更したくないので
  * （プロンプトversionが変わるとキャッシュが全部無効になる）、
  * 送信直前にここで変換する。
@@ -694,13 +800,13 @@ export function toClaudeJsonSchema(schema: unknown): unknown {
   }
 
   const src = schema as Record<string, unknown>;
+  if (Array.isArray(src.type)) {
+    return typeUnionToAnyOf(src, src.type as unknown[]);
+  }
+
   const out: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(src)) {
-    if (key === "type" && Array.isArray(value)) {
-      // ["string", "null"] → anyOf: [{type:"string"}, {type:"null"}]
-      continue;
-    }
     // 件数の制約（maxItems）も送らない。文字数と同じく非対応とみられ、
     // 試すとその400が他の指定への濡れ衣になる。maxItems は手元のモデルが
     // 同じ語を書き続けるのを止めるためのもの（設計書6.5.9）で、
@@ -714,10 +820,6 @@ export function toClaudeJsonSchema(schema: unknown): unknown {
       continue;
     }
     out[key] = toClaudeJsonSchema(value);
-  }
-
-  if (Array.isArray(src.type)) {
-    out.anyOf = (src.type as unknown[]).map((t) => ({ type: t }));
   }
 
   if (out.type === "object" || out.properties !== undefined) {
@@ -745,6 +847,78 @@ export function toClaudeJsonSchema(schema: unknown): unknown {
     }
   }
 
+  return out;
+}
+
+/**
+ * anyOf の横に置いてよい語（注釈だけ）。
+ *
+ * **型に結びつく語（items・properties・enum など）を anyOf の横に残すと、
+ * Claude は要求ごと断る**（「For 'anyOf', 'items' is not supported」、
+ * 2026-10-10 に相談のスキーマで実際に断られた）。
+ */
+const ANYOF_ANNOTATION_KEYS = new Set(["description", "title", "default"]);
+
+/**
+ * 型ごとに意味を持つ語。ここに無い語（enum・const など）は、null 以外の
+ * すべての枝へ入れる。
+ *
+ * `["string","number"]` のような組でも、`items` を文字列の枝へ入れて
+ * 意味の無い形を作らないよう、持ち主の型を決めておく。
+ */
+const TYPE_OWNED_KEYS: Record<string, string> = {
+  items: "array",
+  minItems: "array",
+  maxItems: "array",
+  properties: "object",
+  required: "object",
+  additionalProperties: "object",
+  minLength: "string",
+  maxLength: "string",
+  pattern: "string",
+  format: "string",
+};
+
+/**
+ * `type: ["array","null"]` のような型の組を、anyOf の枝に分けて書き直す。
+ *
+ * 以前は `type` だけを anyOf に移し、`items`・`properties` などを親に
+ * 残していた。`["string","null"]` だけなら横に何も残らず通っていたが、
+ * null 許容の配列・object（相談・プロット逆算・あらすじ）では、型の語が
+ * anyOf の横に取り残され、スキーマごと断られていた。
+ *
+ * **型の語は、その型の枝の中へ入れる。** 枝の中身は通常どおり変換するので、
+ * object の枝にも additionalProperties: false と「すべて必須」が付く。
+ *
+ * 公式の文書では `type` の配列も受け付けると書かれているが、ここは
+ * これまで実データで通ってきた anyOf の形を保つ（文字列の null 許容は
+ * 変換の結果が以前と同じになる）。
+ */
+function typeUnionToAnyOf(
+  src: Record<string, unknown>,
+  types: unknown[]
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(src)) {
+    if (ANYOF_ANNOTATION_KEYS.has(key)) out[key] = src[key];
+  }
+  out.anyOf = types.map((type) => {
+    if (type === "null") return { type: "null" };
+    const branch: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(src)) {
+      if (key === "type" || ANYOF_ANNOTATION_KEYS.has(key)) continue;
+      const owner = TYPE_OWNED_KEYS[key];
+      if (owner !== undefined && owner !== type) continue;
+      // null は null の枝が受け持つ。文字列の枝の enum に null を残すと、
+      // 型と食い違う選択肢になる
+      branch[key] =
+        key === "enum" && Array.isArray(value)
+          ? value.filter((entry) => entry !== null)
+          : value;
+    }
+    branch.type = type;
+    return toClaudeJsonSchema(branch);
+  });
   return out;
 }
 

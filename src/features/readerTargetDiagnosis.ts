@@ -53,6 +53,7 @@ import {
   logFailure,
   logStep,
   responseExcerptForLog,
+  responseShapeForLog,
   useLogFile,
 } from "../core/logger";
 import { warnWithLog } from "../views/notify";
@@ -422,6 +423,13 @@ export async function readFromWork(
   for (const note of reading.notes) logStep(`読者像の検算：${note}`);
 
   if (!isReadingUsable(reading)) {
+    // **読めたのに軸が無いときも、答えの形を残す。** 2026-10-10、スキーマ無しで
+    // 呼ばれた回に鍵の違う形で返り、ログには「軸が1つも返りませんでした」しか
+    // 残らず、形のずれだと分からなかった
+    logFailure("読者像の応答から軸を拾えませんでした", {
+      形: responseShapeForLog(responseText),
+      応答: responseExcerptForLog(responseText),
+    });
     await warnWithLog(
       "読者像を読み取れませんでした。3つの軸のどれも読み取れませんでした。" +
         "話数が増えてからお試しください。"
