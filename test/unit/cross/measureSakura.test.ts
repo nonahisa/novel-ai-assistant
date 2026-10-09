@@ -285,6 +285,86 @@ describe("さくらへ投げる形", () => {
   });
 });
 
+/*
+  **レート上限（429）は、示された時間だけ待って出し直す**（製品の
+  `src/features/rateLimitRetry.ts` と同じ決まり）。2026-10-10 の〔AIの測定〕で、
+  伏線が17チャンク中 8〜11 件を 429 で落とした。さくらは間隔なしの5本目まで通し、
+  6本目から `Retry-After: 60` を返す（同じ日に探って確かめた）。台本が待たずに
+  失敗として数えると、製品なら待って通る話を「失敗」として測ってしまう。
+*/
+describe("レート上限で待つ", () => {
+  function rateLimitedResponse(retryAfter?: string): Response {
+    return {
+      ok: false,
+      status: 429,
+      headers: new Headers(retryAfter === undefined ? {} : { "retry-after": retryAfter }),
+      json: async () => ({}),
+      text: async () => '{"error":{"message":"rate limit exceeded"}}',
+    } as unknown as Response;
+  }
+  const base = {
+    token: FAKE_TOKEN,
+    model: "preview/Kimi-K2.6",
+    systemPrompt: "s",
+    userPrompt: "u",
+    temperature: 0,
+  };
+
+  it("Retry-After があれば、1秒足して待ってから出し直す", async () => {
+    let calls = 0;
+    const fetchImpl = async () => {
+      calls += 1;
+      return calls === 1 ? rateLimitedResponse("60") : chatResponse("[]");
+    };
+    const waits: number[] = [];
+    const result = await askSakura({
+      ...base,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleepImpl: async (ms: number) => {
+        waits.push(ms);
+      },
+    });
+    expect(result.text).toBe("[]");
+    expect(calls).toBe(2);
+    expect(waits).toEqual([61_000]);
+  });
+
+  it("待ち時間が示されなければ待たずに失敗にする（当て推量で待たない）", async () => {
+    let calls = 0;
+    const fetchImpl = async () => {
+      calls += 1;
+      return rateLimitedResponse();
+    };
+    const waits: number[] = [];
+    await expect(
+      askSakura({
+        ...base,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        sleepImpl: async (ms: number) => {
+          waits.push(ms);
+        },
+      })
+    ).rejects.toThrow("429");
+    expect(calls).toBe(1);
+    expect(waits).toEqual([]);
+  });
+
+  it("待っても通らないまま合計180秒を越えたら諦める", async () => {
+    const fetchImpl = async () => rateLimitedResponse("60");
+    const waits: number[] = [];
+    await expect(
+      askSakura({
+        ...base,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        sleepImpl: async (ms: number) => {
+          waits.push(ms);
+        },
+      })
+    ).rejects.toThrow("429");
+    expect(waits).toEqual([61_000, 61_000]);
+  });
+});
+
 describe("novel.validate へ渡す形", () => {
   it("検算に要る項目だけを渡す（numCtx・chunkIndex・model は渡さない）", () => {
     const args = validateArgsOf(

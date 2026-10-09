@@ -96,6 +96,23 @@ export function toOpenAIJsonSchema(schema) {
 /* ── さくらへ投げる ───────────────────────────────────── */
 
 /** 応答の本文を、記録に載せてよい長さへ詰める（鍵は元から入らない） */
+/**
+ * レート上限の待ちの決まり（製品の `rateLimitWaitMs` と `rateLimitRetry.ts` と同じ値）。
+ * 示された時間より1秒長く待つ・1回90秒まで・通らないまま合計180秒で諦める。
+ * **ここで値を変えない**——製品と違う待ち方で測ると、製品に無い失敗を数える。
+ */
+const RATE_LIMIT_MARGIN_MS = 1000;
+const MAX_RATE_LIMIT_WAIT_MS = 90_000;
+const MAX_TOTAL_RATE_LIMIT_WAIT_MS = 180_000;
+
+function retryAfterMsOf(header) {
+  if (!header) return undefined;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const at = Date.parse(header);
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : undefined;
+}
+
 function compact(text) {
   return String(text ?? "").replace(/\s+/g, " ").slice(0, 500);
 }
@@ -149,6 +166,12 @@ async function postOnce({ body, token, endpoint, fetchImpl, timeoutMs }) {
     return {
       ok: false,
       detail: `さくらのAI HTTP ${response.status}${text ? `: ${compact(text)}` : ""}`,
+      // レート上限のときだけ、待つ秒数を数で持ち帰る（応答のヘッダの値だけ。
+      // 製品の `parseRetryAfterMs` と同じく、秒数でなければ日時として読む）
+      retryAfterMs:
+        response.status === 429
+          ? retryAfterMsOf(response.headers?.get?.("retry-after") ?? null)
+          : undefined,
     };
   }
 
@@ -193,6 +216,7 @@ async function postOnce({ body, token, endpoint, fetchImpl, timeoutMs }) {
  *   timeoutMs?: number,
  *   maxOutputTokens?: number,
  *   log?: (line: string) => void,
+ *   sleepImpl?: (ms: number) => Promise<unknown>,
  * }} options
  * @returns {Promise<{ text: string, usage: unknown, droppedResponseFormat: boolean }>}
  */
@@ -208,6 +232,8 @@ export async function askSakura({
   timeoutMs = DEFAULT_SAKURA_TIMEOUT_MS,
   maxOutputTokens = DEFAULT_MAX_OUTPUT_TOKENS,
   log,
+  // 試験では偽物を渡す（本当に60秒待たないため）
+  sleepImpl = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) {
   if (typeof token !== "string" || token.trim() === "") {
     throw new Error(`${SAKURA_TOKEN_ENV} が空です。`);
@@ -256,8 +282,28 @@ export async function askSakura({
   }
 
   let droppedResponseFormat = false;
+  let rateLimitWaitedMs = 0;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const outcome = await postOnce({ body, token, endpoint, fetchImpl, timeoutMs });
+    /*
+      **レート上限は、示された時間だけ待って同じ形で出し直す**（製品の
+      `src/features/rateLimitRetry.ts`。2026-10-10 に伏線で 17 件中 8〜11 件が
+      429 で落ちた）。指定を外す出し直し（下）の回数には数えない——別の理由で
+      やり直しているので、待つたびに数えると3回で打ち切ってしまう。
+    */
+    if (!outcome.ok && outcome.retryAfterMs !== undefined) {
+      const waitMs = outcome.retryAfterMs + RATE_LIMIT_MARGIN_MS;
+      if (
+        waitMs <= MAX_RATE_LIMIT_WAIT_MS &&
+        rateLimitWaitedMs + waitMs <= MAX_TOTAL_RATE_LIMIT_WAIT_MS
+      ) {
+        rateLimitWaitedMs += waitMs;
+        log?.(`さくらのAI: レート上限のため ${Math.ceil(waitMs / 1000)} 秒待って出し直します。`);
+        await sleepImpl(waitMs);
+        attempt -= 1;
+        continue;
+      }
+    }
     if (outcome.ok) {
       return {
         text: outcome.text,

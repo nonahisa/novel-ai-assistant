@@ -30,6 +30,13 @@ import {
   resolveModelInfoOrWarn,
 } from "./chunkSettings";
 import { isContextOverflow, retryOnOverflow } from "./chunkRetry";
+import {
+  callWithRateLimitWait,
+  newRateLimitRetryState,
+  sleepUnlessAborted,
+  type RateLimitRetryHooks,
+  type RateLimitRetryState,
+} from "./rateLimitRetry";
 import { formatChapterLabel } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
 import {
@@ -322,6 +329,8 @@ export async function checkForeshadows(
   let cancelled = false;
   // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
   let fatalFailure = "";
+  // レート上限で待った回数と時間（チャンクをまたいで数える）
+  const rateLimit = newRateLimitRetryState();
   // **終了ログでも使うので、進捗の輪の外に置く**（設計書6.77）。
   // 中に閉じ込めると「何件中何件で終えたか」を書けない
   let done = 0;
@@ -443,7 +452,9 @@ export async function checkForeshadows(
             knownLabels: knownLabels.slice(-60),
           });
 
-          const response = await provider.generate({
+          // **レート上限は、示された時間だけ待って同じチャンクをやり直す**
+          // （`rateLimitRetry.ts`。さくらは毎分の上限が低く、1本ずつでも当たる）
+          const response = await callWithRateLimitWait(() => provider.generate({
             systemPrompt: FORESHADOW_DETECT_SYSTEM_PROMPT,
             userPrompt,
             model,
@@ -462,7 +473,7 @@ export async function checkForeshadows(
                 既存の伏線: knownLabels.join("").length,
               }),
             },
-          });
+          }), rateLimit, rateLimitHooks(progress, controller.signal, () => `${done + 1}/${total}`));
 
           if (response.truncated || !response.text.trim()) {
             logFailure("伏線の検知", {
@@ -494,7 +505,7 @@ export async function checkForeshadows(
           // **同じ失敗を積まない。** 環境側の失敗はどのチャンクでも同じに
           // なるので、1回目で止めて理由を1つだけ残す（作者のログで9件並んだ）
           if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
-            fatalFailure = `${error.message} ${recoveryForAIError(error)}`.trim();
+            fatalFailure = `${rateLimitGiveUpNote(rateLimit)}${error.message} ${recoveryForAIError(error)}`.trim();
             logStep(`残りのチャンクは試しません: ${fatalFailure}`);
           }
           failedChunks++;
@@ -808,6 +819,8 @@ export async function checkForeshadowResolution(
   let cancelled = false;
   // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
   let fatalFailure = "";
+  // レート上限で待った回数と時間（検知側と同じ）
+  const rateLimit = newRateLimitRetryState();
   // 終了ログで使うので、進捗の輪の外に置く（検知側と同じ理由）
   let done = 0;
   let total = 0;
@@ -912,7 +925,8 @@ export async function checkForeshadowResolution(
             foreshadows: targets.map(toBrief),
           });
 
-          const response = await provider.generate({
+          // レート上限は待ってやり直す（検知側と同じ）
+          const response = await callWithRateLimitWait(() => provider.generate({
             systemPrompt: FORESHADOW_RESOLVE_SYSTEM_PROMPT,
             userPrompt,
             model,
@@ -932,7 +946,7 @@ export async function checkForeshadowResolution(
                   .join("").length,
               }),
             },
-          });
+          }), rateLimit, rateLimitHooks(progress, controller.signal, () => `${done + 1}/${total}`));
 
           if (response.truncated || !response.text.trim()) {
             failedChunks++;
@@ -965,7 +979,7 @@ export async function checkForeshadowResolution(
           // **同じ失敗を積まない。** 環境側の失敗はどのチャンクでも同じに
           // なるので、1回目で止めて理由を1つだけ残す（作者のログで9件並んだ）
           if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
-            fatalFailure = `${error.message} ${recoveryForAIError(error)}`.trim();
+            fatalFailure = `${rateLimitGiveUpNote(rateLimit)}${error.message} ${recoveryForAIError(error)}`.trim();
             logStep(`残りのチャンクは試しません: ${fatalFailure}`);
           }
           failedChunks++;
@@ -1329,6 +1343,40 @@ async function collectChunks(
 function chapterText(chapter: number | null): string {
   // 話数を推測で埋めない。分からないことは分からないと書く
   return chapter === null ? "話数不明" : `第${chapter}話`;
+}
+
+/**
+ * レート上限で待つときの、進み具合の表示とログ。
+ *
+ * 待ちは最大90秒続くので、黙っていると止まって見える（誤字脱字・人物抽出と同じ表示）。
+ */
+function rateLimitHooks(
+  progress: vscode.Progress<{ message?: string; increment?: number }>,
+  signal: AbortSignal,
+  position: () => string
+): RateLimitRetryHooks {
+  return {
+    sleep: (ms) => sleepUnlessAborted(ms, signal),
+    onWait: (waitMs, state) => {
+      const note =
+        `レート上限のため ${Math.ceil(waitMs / 1000)} 秒待っています` +
+        `（${state.waits}回目 / 合計 ${Math.round(state.totalWaitedMs / 1000)} 秒）`;
+      progress.report({ message: `${position()}  ${note}` });
+      logStep(note);
+    },
+  };
+}
+
+/**
+ * 待っても通らずに諦めたときの前置き。**待ったことを書かないと、
+ * 「しばらく待って」という案内が、待ったあとの作者には的外れに読める**
+ */
+function rateLimitGiveUpNote(state: RateLimitRetryState): string {
+  if (!state.gaveUp) return "";
+  return (
+    `レート上限のため合計 ${Math.round(state.waitedSinceSuccessMs / 1000)} 秒待ちましたが、` +
+    "解消しませんでした（月や日の上限を使い切っていると、待っても回復しません）。"
+  );
 }
 
 function describeError(error: unknown): string {
