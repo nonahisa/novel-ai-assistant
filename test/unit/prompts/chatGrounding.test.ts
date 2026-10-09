@@ -248,7 +248,8 @@ describe("版", () => {
     // （buildFindingAdviceQuestion）を足した（システム指示は変えていない）
     // 3.26（2026-10-04）：ターゲットシートの狙いと理由を【作者が狙う読者】として足した
     // 3.27（2026-10-04）：［AIに相談］の依頼文に前後の段落と話の題を添えた
-    expect(WORK_CHAT_VERSION).toBe("3.27");
+    // 3.28（2026-10-09）：説明の束に「相談に使うモデルの目安」を足した（訊かれたときだけ当たる）
+    expect(WORK_CHAT_VERSION).toBe("3.28");
     expect(SETTINGS_CHAT_VERSION).toBe("3.0");
   });
 });

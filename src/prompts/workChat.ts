@@ -119,7 +119,11 @@ import { closeTruncatedJson } from "../core/truncatedResponse";
 // 3.27: ［AIに相談］の依頼文に、一文の前後の段落（【前の段落】【後ろの段落】）と
 //       話の題を添えた（作者の報告 2026-10-04。素のエディターを開かずに材料を
 //       渡す形へ直したとき）。システム指示は変えていない
-export const WORK_CHAT_VERSION = "3.27";
+// 3.28: 使い方の説明の束に「相談に使うモデルの目安」（会話の比べ 2026-10-05。
+//       `core/chatModelNotes.ts`）を足した。作者が「向くモデルは？」と訊いた
+//       回にだけ当たる。機能別AI割当の画面からは外した（1作品の比べなので画面では
+//       勧めない。作者の裁定 2026-10-09）。システム指示は変えていない
+export const WORK_CHAT_VERSION = "3.28";
 
 /** ［AIに相談］の依頼文に入れる一文・指摘の長さの上限（長い合本の行で膨らませない） */
 export const FINDING_ADVICE_QUOTE_MAX_CHARS = 300;
