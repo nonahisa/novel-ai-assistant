@@ -1,5 +1,6 @@
 import { locateChunkLine, segmentsOf, type Chunk } from "./chunker";
 import { normalizeForComparison } from "./groundedEvidence";
+import { lineHoldingQuote } from "./relocateQuote";
 import { isPlaceholderText } from "./placeholderText";
 import { nonJouyouKanjiIn } from "./jouyouKanji";
 import { opensOnyomiCompound } from "./onyomiReading";
@@ -1196,21 +1197,26 @@ function viewpointRejection(
 }
 
 /**
- * 原文がどの行のどこにあるか。AIの行番号の行を先に見て、無ければチャンクの中を探す
- * （AIは行番号を1つ2つずらす）。改行をまたぐ原文は見つからない（`undefined`）
+ * 原文がどの行のどこにあるか。改行をまたぐ原文は見つからない（`undefined`）。
+ *
+ * **行は `lineHoldingQuote` で選ぶ**（2026-10-10）。以前は「申告の行 → 最初に
+ * 見つかった行」の順で探していたので、同じ原文が2か所あると、申告から遠い
+ * ほう（別の場面・台詞の中）で視点や台詞の検査をすることがあった。
+ * 受け入れの行と同じ決め方（申告に最も近い行、同じ距離なら前）に揃える。
+ * 呼び出し側はすでに直した行を渡すので、ふつうはその行がそのまま返る。
+ *
+ * 行の中の位置は生の `indexOf` で取る（括弧の内側か・どの文か を見るため）。
+ * 空白の違いだけで一致した行では位置が取れないので `undefined`——今までも
+ * 生の一致が無ければ見つからない扱いだった
  */
 function lineHolding(
   chunkLines: readonly string[],
   lineIndex: number,
   original: string
 ): { index: number; at: number } | undefined {
-  const own = chunkLines[lineIndex]?.indexOf(original) ?? -1;
-  if (own >= 0) return { index: lineIndex, at: own };
-  for (let index = 0; index < chunkLines.length; index++) {
-    const at = chunkLines[index].indexOf(original);
-    if (at >= 0) return { index, at };
-  }
-  return undefined;
+  const index = lineHoldingQuote(chunkLines.join("\n"), original, lineIndex, 0);
+  const at = chunkLines[index]?.indexOf(original) ?? -1;
+  return at >= 0 ? { index, at } : undefined;
 }
 
 /**
@@ -1505,16 +1511,28 @@ export function validateProofreadIssues(
       normalizeReason(asString(item.reason)),
       asString(item.explanation)
     );
-    const line = typeof item.line === "number" ? Math.round(item.line) : NaN;
+    const declaredLine =
+      typeof item.line === "number" ? Math.round(item.line) : NaN;
 
     // **修正案が無くてもよい。** 長すぎる文をどう割るか、繰り返しをどう
     // 変えるかは文体の書き換えになる。**それは作者が決めること**なので、
     // 「ここが読みにくい」と指す指摘にも意味がある（実データで、
     // 「一閃っ一閃っ一閃っ！」のように直しようのない指摘が返ってきた）
-    if (!original || !Number.isFinite(line)) {
+    if (!original || !Number.isFinite(declaredLine)) {
       rejected.push({ raw: item, reason: "shape" });
       continue;
     }
+    // **申告の行を、原文が実際にある行へ直す**（設計書6.9.1、2026-10-10）。
+    // 原文の照合（下の original_not_found）はチャンク全体で見るので、AIが
+    // 行番号を言い間違えても通り、ずれた行のまま一覧へ出ていた。しかも
+    // 長文・同語反復・台詞・視点・行の中の重複の検査は「その行」で見るので、
+    // **直さないと別の行の文で検査する。** 矛盾検知（0.101.2）・誤字脱字と
+    // 逸脱検知（0.101.3）と同じ部品で、検査より前に直す。
+    // 番号は `withLineNumbers` と同じ通し番号（`chunk.startLine + index + 1`）
+    // のままで、ファイルの行へ直すのは今までどおり `locateChunkLine` だけ。
+    // 語尾単調も、どの連続に寄せるかをこの行で選ぶ（AIの行より原文の行の
+    // ほうが確か。原文が見つからなければ申告のまま）
+    const line = lineHoldingQuote(chunk.text, original, declaredLine, firstLine);
     if (!reason) {
       // 決めた7種類以外は、文体への干渉が紛れ込む口になる
       rejected.push({ raw: item, reason: "unknown_reason" });
@@ -1650,7 +1668,9 @@ export function validateProofreadIssues(
     // 連続の指摘がAIの言い間違いだけで消える。** 本文にあるかどうかは、
     // 連続そのものを本文から数えている時点で確かめ終えている
     const anchorFromAi = reason !== "語尾単調";
-    if (anchorFromAi && (line < firstLine || line > lastLine)) {
+    // 範囲は**申告の行**で見る（誤字脱字の out_of_range と同じ）。チャンクの
+    // 外を申告した答えを、原文が中にあるからと拾い直すことはしない
+    if (anchorFromAi && (declaredLine < firstLine || declaredLine > lastLine)) {
       rejected.push({ raw: item, reason: "line_out_of_range" });
       continue;
     }
