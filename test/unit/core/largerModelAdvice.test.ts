@@ -183,10 +183,27 @@ describe("当たりの記録（同梱）", () => {
     expect(text).toMatch(/同梱の測定（2026-09-20/);
   });
 
-  test("いまのモデルに記録が無ければ、比べずに数字だけを添える", () => {
+  test("誤字脱字も、e4b の記録（2026-10-10、製品と同じ 1.1 で 2/12）と比べて言う", () => {
     const advice = advise({
       feature: "typo",
       promptVersion: "1.1",
+    });
+    const text = describeLargerModelAdvice(advice!, {
+      count: 3,
+      unit: "チャンク",
+      featureLabel: "誤字脱字",
+    });
+    expect(text).toContain("8/12");
+    expect(text).toContain("2/12");
+    expect(text).toContain("当たりが多い");
+  });
+
+  test("いまのモデルに記録が無ければ、比べずに数字だけを添える", () => {
+    // 12b は誤字脱字の答え付きの台で測っていない
+    const advice = advise({
+      feature: "typo",
+      promptVersion: "1.1",
+      current: B12,
     });
     const text = describeLargerModelAdvice(advice!, {
       count: 3,

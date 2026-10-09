@@ -234,15 +234,18 @@ const TEMPERATURE_INPUT = {
  */
 const OPTIONS_TABLE =
   "feature ごとの追加の指定（※は要るもの）。" +
-  "typo: modelSize（large〈既定〉＝大きいモデル向けの版／" +
+  // 決め方の1行（作者の裁定 2026-10-10「製品と同じ判定にする」。mcp/tools/modelSize.ts）
+  "modelSize・categories・suppression を省くと、ollama ではモデルの申告の大きさから製品と同じ判定で決め" +
+  "（結果の modelSizeDecision）、ほかの道では製品が大きいモデルへ送る形（large・all・loose）にします。" +
+  "typo: modelSize（large＝大きいモデル向けの版／" +
   "small＝小さいモデル向けの版〈1.1 の文〉。製品は 20B 未満のモデルに small を送る）。" +
-  "deviation: modelSize（large〈既定〉＝逸脱と間延び／small＝逸脱だけ。製品は 20B 未満のモデルに small）。" +
+  "deviation: modelSize（large＝逸脱と間延び／small＝逸脱だけ。製品は 20B 未満のモデルに small）。" +
   "foreshadow: mode（detect＝配置を拾う〈既定〉／resolve＝回収を見る）。" +
-  "contradiction: categories（light〈既定〉／all／区分名そのもの。" +
+  "contradiction: categories（light／all／区分名そのもの。" +
   "「状態」「人物,時系列」のように1つでも並びでも指せる）・" +
   "carryOver（前の話を何話ぶん引き継いで人物を探すか。0〜5。既定は2＝" +
   "製品と同じ。0で引き継がない）・" +
-  "suppression（loose〈既定〉＝疑わしい箇所も挙げさせる／" +
+  "suppression（loose＝疑わしい箇所も挙げさせる／" +
   "strict＝確信の持てないものは挙げさせない）。" +
   "notation: group※（novel.detect が返した組の1件）・limit（detect の上限）。" +
   "synopsis: needsSubtitle。" +

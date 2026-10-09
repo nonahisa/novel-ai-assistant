@@ -515,6 +515,7 @@ import {
 } from "./features/adviceProfileMirror";
 import { startWindowCard } from "./features/windowCard";
 import { startLocalAiGate } from "./features/localAiGate";
+import { installSmallModelNoticeState } from "./features/smallModelNotice";
 import { startNoticeRecorder } from "./features/noticeRecorder";
 import { startWorksSnapshot } from "./features/worksSnapshot";
 import { startAiAssignmentsSnapshot } from "./features/aiAssignmentsSnapshot";
@@ -1475,6 +1476,8 @@ export async function activate(
   // 同期状態が変わっても本文は変わらないので、再走査はせず描き直すだけにする
   gitSync.onDidChange(() => treeProvider.redraw());
   const aiRegistry = new AIRegistry(context);
+  // 小さいモデルの知らせの「今後出さない」は手元の保管庫にだけ覚える（設計書6.28.9）
+  installSmallModelNoticeState(verifiedState(context.globalState));
   // 測っていないモデルに切り替えたら、AIチューニングを一言勧める（設計書6.49.8）。
   // 選ぶ道（AI設定・機能別割当・大きいモデルの案内）はどれも選択の変更の
   // 合図を鳴らすので、見張るのはその1か所

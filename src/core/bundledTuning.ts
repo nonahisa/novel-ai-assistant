@@ -386,6 +386,12 @@ const BUNDLED: Readonly<Record<string, BundledTuning>> = {
     thinkingSeen: true,
     thinkingOffWorks: true,
     thinkingMeasuredAt: "2026-09-26",
+    /*
+      **この目安は同梱の短い文（誤り7・罠5、文の版2）の成績である。** 2026-10-10 に
+      製品と同じ頼み方（1.1）で測り直したのは別の台（答え付きの台 12件で 2/12、作品10話
+      の確実17件で 3/17）で、欄の意味（7件中いくつ）が違うので入れ替えない。答え付きの
+      台の成績は `bundledFeatureAccuracy.ts` に載せた。同梱の文で測り直したら入れ替える
+    */
     typoAccuracy: {
       hits: 3,
       total: 7,

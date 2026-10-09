@@ -59,7 +59,14 @@ export interface Requirement {
   };
 }
 
-/** 最初に薦める会話モデル。作者の環境（8B・131072文脈）で実績がある */
+/**
+ * セットアップが取ってくる会話モデル（作者の環境で動いた実績がある。8B・131072文脈）。
+ *
+ * **勧めるモデルではない**（作者の裁定 2026-10-10）。誤字脱字は製品と同じ頼み方でも
+ * 確実17件中3件・12件中2件だった（`docs/measurements/2026-10-10-typo-gemma4_e4b*.json`）。
+ * 画面と README では「入るのはこれ、検知には gemma4:26b かクラウド」と言う
+ * （`CHAT_MODEL_IS_SMALL_NOTE`）。値を変えるかは作者の判断待ち。
+ */
 export const RECOMMENDED_CHAT_MODEL = "gemma4:e4b";
 /** 埋め込みモデル。日本語を含む多言語向け */
 export const RECOMMENDED_EMBEDDING_MODEL = "bge-m3";
@@ -154,6 +161,30 @@ export const EXTRACT_MODEL_ADVICE_SHORT =
 export const FORESHADOW_MODEL_ADVICE_SHORT =
   "向くモデル：gemma4:26b 以上／さくら Kimi-K2.6";
 
+/*
+  **小さいモデルで検知の機能を動かす前の知らせ**（作者の裁定 2026-10-10「モデルは
+  多く出てくると思うので、4B以下にはまとめてメッセージを出す等の工夫が必要」）。
+  機能ごとに別々の断りを並べず、1つの文でまとめて言う。出す条件は
+  `core/smallModelNotice.ts`、出すのは `features/smallModelNotice.ts`。
+  勧めるのは測定で誤字脱字・矛盾検知・伏線が通った gemma4:26b（作者の 8GB の GPU で、
+  一部を CPU に分けて動いた）とクラウドのAI。
+*/
+export const SMALL_MODEL_NOTICE =
+  "このAIは小さいため、見落としや誤った指摘が多くなります。" +
+  "大きいモデル（例：gemma4:26b）かクラウドのAIを勧めます。";
+
+/** 機能別AI割当の選ぶ画面で、小さいモデルの行に添える1行（全角30字以内） */
+export const SMALL_MODEL_PICK_NOTE = "小さいモデル：見落としや誤った指摘が増えます";
+
+/**
+ * Ollama の導入画面で、セットアップが取ってくるモデル（`RECOMMENDED_CHAT_MODEL`）に
+ * 添える一言。**勧めない**（作者の裁定 2026-10-10「これすらできないのなら、
+ * ドキュメント上の推奨モデルにすべきではありません」）。既定の値そのものを
+ * 変えるかは作者の判断待ちなので、ここでは言い方だけを変えた。
+ */
+export const CHAT_MODEL_IS_SMALL_NOTE =
+  "検知（誤字脱字・矛盾・伏線など）に使うなら、gemma4:26b（8GBのGPUでも動きます）かクラウドのAIを勧めます。";
+
 export const REQUIREMENTS: Requirement[] = [
   {
     id: "ollama",
@@ -178,7 +209,8 @@ export const REQUIREMENTS: Requirement[] = [
     id: "chatModel",
     label: `会話モデル（${RECOMMENDED_CHAT_MODEL}）`,
     purpose:
-      "設定資料の抽出、あらすじ・紹介文の生成、誤字脱字の検知、AIへの相談に使います。",
+      "設定資料の抽出、あらすじ・紹介文の生成、誤字脱字の検知、AIへの相談に使います。" +
+      CHAT_MODEL_IS_SMALL_NOTE,
     withoutIt: "Ollamaは動いてもAIの機能が何も使えません。",
     level: "必須",
     size: "約9.6GB",

@@ -461,6 +461,7 @@ export async function contrastEpisodePlot(
     provider: resolved.provider,
     model: resolved.model,
     actionLabel: "単話プロットと本文の照合",
+    workFolder: work.folderPath,
   });
   if (!info) return undefined;
 

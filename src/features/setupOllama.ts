@@ -8,6 +8,7 @@ import {
 import { AIRegistry, runSetupWizard } from "../ai/registry";
 import { pullOllamaModel, shortenProgress } from "../core/packageInstall";
 import {
+  CHAT_MODEL_IS_SMALL_NOTE,
   RECOMMENDED_CHAT_MODEL,
   TYPO_MODEL_ADVICE,
 } from "../core/requirements";
@@ -29,7 +30,8 @@ import { notifyDone } from "../views/notify";
  */
 
 /**
- * 最初に薦めるモデル。**名前は `core/requirements.ts` が持つ**（規則6）。
+ * モデルが1つも無いときに取ってくるモデル（勧めるモデルではない。2026-10-10）。
+ * **名前は `core/requirements.ts` が持つ**（規則6）。
  *
  * かつてここに同じ値を書いていた（`RECOMMENDED_MODEL = "gemma4:e4b"`。
  * コメントまで一字一句同じ写しだった）。**薦めるモデルを変えるときに
@@ -90,7 +92,10 @@ export async function setupOllama(registry: AIRegistry): Promise<void> {
     const get = "取得する";
     const action = await vscode.window.showInformationMessage(
       "Ollamaは動いていますが、モデルが1つもありません。" +
-        `まずは ${RECOMMENDED_MODEL} をお勧めします（日本語が扱え、長い本文も読めます。約9.6GB）。` +
+        // **e4b を勧めない**（作者の裁定 2026-10-10）。取ってくるのはこれだと言い、
+        // 検知に向くモデルを並べる。既定の値を変えるかは作者の判断待ち
+        `「取得する」で入るのは ${RECOMMENDED_MODEL} です（日本語が扱え、長い本文も読めます。約9.6GB）。` +
+        CHAT_MODEL_IS_SMALL_NOTE +
         // **これから選ぶ人に、先に言っておく**（作者の裁定 2026-09-06）。
         // 入れたあとで「誤字脱字が効かない」と気づくと、取り直しになる
         `\n${TYPO_MODEL_ADVICE}`,

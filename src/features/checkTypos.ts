@@ -211,6 +211,7 @@ export async function checkTypos(
     provider: resolved.provider,
     model: resolved.model,
     actionLabel: "誤字脱字の検知",
+    workFolder: work.folderPath,
   });
   if (!modelInfo) return undefined;
 

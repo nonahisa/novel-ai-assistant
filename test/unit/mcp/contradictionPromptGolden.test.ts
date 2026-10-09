@@ -22,6 +22,11 @@ import { contradictionPrompt } from "../../../src/mcp/tools/contradiction";
  * 「指定しない」を写しの鍵にしていると、既定を変えた日に**写しの意味まで
  * 黙って変わる**。既定そのものは下の「既定は2話ぶん引き継ぐ」で見張る。
  *
+ * **観点と抑制も明示する**（2026-10-10）。写しは観点を3つ（light）・ゆるめた版
+ * （loose）で作った。MCP の既定は製品と同じ判定になり（設計書6.87.12）、
+ * 大きさの分からない道では7つの観点になったので、指定しないと別の材料になる。
+ * 既定そのものは `mcpModelSizeDefault.test.ts` が見張る。
+ *
  * **2026-09-26 に写しを作り直した（版は据え置き）。** MCP が製品と同じく
  * 過去の場面の抜粋（設計書6.74）を送るようになり、2〜5話の写しに
  * 【過去の場面の抜粋】の欄が入った。**欄の外は1文字も変わっていない**ことを
@@ -65,6 +70,8 @@ describe("送る材料の写し（設計書6.10.6）", () => {
         filePath: `本文/${fileName}`,
         numCtx: 16384,
         carryOver,
+        categories: "light",
+        suppression: "loose",
       });
 
       expect(built.promptVersion).toBe(expected.promptVersion);
@@ -87,14 +94,17 @@ describe("送る材料の写し（設計書6.10.6）", () => {
     既定を0から2へ変えたので、**何も指定せずに呼んだときに何が送られるか**
     を写しへ結びつけておかないと、既定だけが黙って戻っても誰も気づかない。
   */
-  test("指定しないときは、carryOver=2 の写しと同じものを送る", () => {
+  test("引き継ぎを指定しないときは、carryOver=2 の写しと同じものを送る", () => {
     for (const fileName of Object.keys(GOLDEN)
       .filter((key) => key.endsWith("|carryOver=2"))
       .map((key) => key.split("|")[0])) {
+      // 見張るのは引き継ぎの既定だけ。観点と抑制は写しを作った形に揃える
       const built = contradictionPrompt({
         folder,
         filePath: `本文/${fileName}`,
         numCtx: 16384,
+        categories: "light",
+        suppression: "loose",
       });
       const expected = GOLDEN[`${fileName}|carryOver=2`];
 

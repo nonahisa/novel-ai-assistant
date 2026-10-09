@@ -31,6 +31,12 @@ import {
 import { collectStyle, type WorkStyle } from "./proofread";
 import { ollamaGenerate } from "./ollama";
 import {
+  decideModelSize,
+  givenOptionNames,
+  UNKNOWN_MODEL_SIZE_CHOICE,
+  type ModelSizeDecision,
+} from "./modelSize";
+import {
   runByRunner,
   type RunOutcome,
   type RunnerKind,
@@ -150,7 +156,9 @@ export interface TypoPromptInput {
   chunkIndex?: number;
   /**
    * どちらのモデル向けの版を返すか（P-09 1.2、設計書6.8.20）。
-   * `large`（既定。1.2）・`small`（1.1 の文そのまま）。
+   * `large`（1.2）・`small`（1.1 の文そのまま）。指定が無ければ、
+   * `novel.run` の ollama はモデルの申告の大きさから製品と同じ判定で、
+   * ほかの道は製品が大きいモデルへ送る形（large）で決める（`modelSize.ts`）。
    */
   modelSize?: string;
 }
@@ -158,17 +166,16 @@ export interface TypoPromptInput {
 /**
  * 版を決める。
  *
- * **MCP の既定は大きいモデル向けである。** 製品はモデルの大きさから自動で
- * 決める（`ai/capability.ts` の `useSmallModelTypoPrompt`。20B 未満は small）が、
- * MCP は外部AIが自分でモデルを選ぶので、大きさを当てにいかない（矛盾検知の
- * `suppression` と同じ考え）。小さいモデルを製品と同じ条件で測るなら `small` を渡す。
+ * **指定が無いときは、製品と同じ判定で決めたものが渡ってくる**（作者の裁定
+ * 2026-10-10。`modelSize.ts`）。ここへ指定なしのまま来るのは大きさの
+ * 分からない道（`novel.prompt` など）で、製品が大きいモデルへ送る形にする。
  *
  * **知らない値は黙って丸めない**（打ち間違いに気づかないまま記録が残る）。
  */
 function forSmallModelOf(choice: string | undefined): boolean {
-  if (choice === undefined) return false;
-  const name = String(choice).trim();
-  if (name === "" || name === "large") return false;
+  const name = choice === undefined ? "" : String(choice).trim();
+  if (name === "") return UNKNOWN_MODEL_SIZE_CHOICE.typoModelSize === "small";
+  if (name === "large") return false;
   if (name === "small") return true;
   throw new McpToolError(
     `知らないモデルの大きさです: ${name}` +
@@ -301,8 +308,28 @@ export interface TypoRunInput extends TypoPromptInput {
 
 export async function typoRun(
   input: TypoRunInput
-): Promise<RunOutcome<TypoChunkPrompt, TypoValidateResult>> {
-  const prompts = typoPrompt(input);
+): Promise<
+  RunOutcome<TypoChunkPrompt, TypoValidateResult> & {
+    /** 頼み方をどう決めたか（製品と同じ判定か、指定に従ったか） */
+    modelSizeDecision: ModelSizeDecision;
+  }
+> {
+  /*
+    **指定が無ければ、製品と同じ判定で頼み方を決める**（作者の裁定 2026-10-10）。
+    手元の Ollama ならモデルの申告の大きさを製品の関数へ渡す。キャッシュの鍵の
+    版も送った文に揃うので、e4b なら製品が貯めた 1.1 の処理済みと当たる
+  */
+  const sized = await decideModelSize(
+    input,
+    givenOptionNames({ modelSize: input.modelSize }),
+    ["modelSize"]
+  );
+  const prompts = typoPrompt({
+    ...input,
+    modelSize: sized.decision.given.includes("modelSize")
+      ? input.modelSize
+      : sized.choice.typoModelSize,
+  });
   // **材料は1回だけ集める。** チャンクごとに集め直すと、辞書と作法を
   // チャンクの数だけ読むことになる
   const context = collectContext(input.folder);
@@ -312,7 +339,7 @@ export async function typoRun(
     同じ分岐が8つの道具に写されていたので、1か所へ寄せた。
     ここが渡すのは「この道具の検算」だけである。
   */
-  return runByRunner(
+  const outcome = await runByRunner(
     input,
     prompts,
     VALIDATE_WITH,
@@ -336,4 +363,5 @@ export async function typoRun(
       parse: (responseText) => parseTypoCheckResult(responseText),
     }
   );
+  return { ...outcome, modelSizeDecision: sized.decision };
 }

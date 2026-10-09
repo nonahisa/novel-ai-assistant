@@ -67,7 +67,14 @@ async function readBody(request: IncomingMessage): Promise<string> {
 export async function startFakeOllama(
   respond: (request: FakeOllamaRequest) => string,
   /** 一覧に足す別のモデル名（モデルを選び替える場面を見るとき）。答え方は同じ */
-  options: { extraModels?: readonly string[] } = {}
+  options: {
+    extraModels?: readonly string[];
+    /**
+     * 申告する大きさ（`parameter_size`）。既定は "1B"。小さいモデルの知らせ（設計書6.28.9）が
+     * 出ない大きいモデルの場面を見るときに "25.2B" などを渡す
+     */
+    parameterSize?: string;
+  } = {}
 ): Promise<FakeOllama> {
   const requests: FakeOllamaRequest[] = [];
   const server: Server = createServer((request, response) => {
@@ -82,7 +89,7 @@ export async function startFakeOllama(
           models: [FAKE_OLLAMA_MODEL, ...(options.extraModels ?? [])].map((name) => ({
             name,
             size: 1_000_000,
-            details: { parameter_size: "1B", quantization_level: "Q4_0" },
+            details: { parameter_size: options.parameterSize ?? "1B", quantization_level: "Q4_0" },
             capabilities: ["completion"],
           })),
         });
@@ -99,7 +106,7 @@ export async function startFakeOllama(
       if (url.startsWith("/api/show")) {
         sendJson({
           capabilities: ["completion"],
-          details: { parameter_size: "1B" },
+          details: { parameter_size: options.parameterSize ?? "1B" },
           model_info: { "fake.context_length": 32768 },
         });
         return;
