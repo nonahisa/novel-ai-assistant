@@ -198,30 +198,36 @@ describe.skipIf(!lookEnabled)("見た目の写真：校正・メモパネル", (
     );
   });
 
-  test("校正・メモパネルの行を押したときの、パネルと本文の光り", async () => {
-    await withVsCode(
-      "見た目の写真：パネルの行を押す",
-      [{ name: EPISODE, text: TEXT }],
-      async (session) => {
-        const { page } = session;
-        await writeSampleFindings(session.workFolder, [TYPO]);
-        const frame = await openEpisode(page, EPISODE, "零時を指していた");
-        await placeCaretAfter(frame, "終電を逃した");
-        const memo = await openMemoPanel(page, 3);
-        await clearNotifications(page);
-        // メモの行（2つ目のメモ）を押す
-        await memo.locator("#list button.go", { hasText: "雨の描写" }).first().click();
-        await page.waitForTimeout(250);
-        await shootNow(page, "123-パネルの行を押した直後");
-        await page.waitForTimeout(700);
-        await shootNow(page, "123-パネルの行を押して1秒後");
-        // 指摘の行も押す
-        await memo.locator("#list button.go", { hasText: "以外" }).first().click();
-        await page.waitForTimeout(250);
-        await shootNow(page, "123-パネルの指摘の行を押した直後");
-      },
-      { windowSize: { width: 1280, height: 800 } }
-    );
+  test("校正・メモパネルの行を押したときの、パネルと本文の光り（暗い・明るい。2026-10-10 パネル側も青にそろえた）", async () => {
+    for (const [label, settings] of [
+      ["暗い", {}],
+      ["明るい", { "workbench.colorTheme": "Default Light Modern" }],
+    ] as const) {
+      await withVsCode(
+        `見た目の写真：パネルの行を押す（${label}）`,
+        [{ name: EPISODE, text: TEXT }],
+        async (session) => {
+          const { page } = session;
+          await writeSampleFindings(session.workFolder, [TYPO]);
+          const frame = await openEpisode(page, EPISODE, "零時を指していた");
+          await placeCaretAfter(frame, "終電を逃した");
+          const memo = await openMemoPanel(page, 3);
+          await clearNotifications(page);
+          // メモの行（2つ目のメモ）を押す
+          await memo.locator("#list button.go", { hasText: "雨の描写" }).first().click();
+          await page.waitForTimeout(250);
+          await shootNow(page, `123-直したあと-${label}`);
+          const lit = await memo.evaluate(() => {
+            const row = document.querySelector(".memo.active") as HTMLElement | null;
+            if (!row) return null;
+            const css = getComputedStyle(row);
+            return { background: css.backgroundColor, outline: css.outlineColor, width: css.outlineWidth };
+          });
+          await lookNote(`[123] ${label}テーマの押した行の光り：${JSON.stringify(lit)}`);
+        },
+        { windowSize: { width: 1280, height: 800 }, settings }
+      );
+    }
   });
 
   test("広報動画と同じ見た目（明るい・窓 1280×720）で、［直す］のあとの一覧", async () => {
