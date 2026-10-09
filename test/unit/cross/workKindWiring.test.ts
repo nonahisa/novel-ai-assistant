@@ -77,6 +77,10 @@ describe("出力", () => {
     const pdf = read("src/features/exportPdf.ts");
     expect(pdf).toContain("readWorkKind(work)");
     expect(body(pdf, "buildPrintHtml({", 600)).toContain("kind,");
+    // 公募の升目も（台本のト書きの字下げ。作者の裁定、2026-10-09）。
+    // 枚数の知らせの組み直しにも同じ種類を渡す（紙と枚数がずれない）
+    expect(body(pdf, "buildGridPrintHtml({", 600)).toContain("kind,");
+    expect(pdf).toContain("layoutGrid(chapters, paper.grid, kind)");
   });
 
   test("EPUBは書き出しも画面も種類を渡す", () => {

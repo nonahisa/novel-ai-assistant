@@ -2,6 +2,8 @@ import { tokenizeLine, type NotationMode } from "./manuscriptRender";
 import { stripMemoLines } from "./sceneMemo";
 import { tcyRuns } from "./tateChuYoko";
 import { isHangable, isNoLineEnd, isNoLineStart } from "./kinsoku";
+import { classifyScriptLine } from "./scriptLines";
+import type { WorkKindKey } from "./workKind";
 
 /**
  * 公募の納品用の組版——1字1マスで、字数×行数を指定どおりに組む
@@ -62,6 +64,12 @@ export interface GridLine {
   units: GridUnit[];
   /** 行末の外へぶら下げた句読点 */
   hang?: GridUnit;
+  /**
+   * 行頭の空きマスの数（台本のト書きの字下げ。作者の裁定、2026-10-09）。
+   * `units` には数えない——字下げのぶんだけ、この行に入る字は少なくなる
+   * （`indent + lineWidth ≤ 字数`）。省略は0
+   */
+  indent?: number;
 }
 
 export interface GridPage {
@@ -286,7 +294,8 @@ function chooseCut(line: readonly GridUnit[], next: GridUnit): number {
  */
 export function layoutGrid(
   episodes: readonly GridEpisode[],
-  options: GridOptions
+  options: GridOptions,
+  kind?: WorkKindKey
 ): GridPage[] {
   const rows = Math.max(1, Math.floor(options.rows));
   const pages: GridPage[] = [];
@@ -309,7 +318,7 @@ export function layoutGrid(
         lines.push({ units: [] });
         continue;
       }
-      lines.push(...breakIntoLines(unitsOfLine(text, episode.notation, options.vertical), options));
+      lines.push(...linesOfParagraph(text, episode.notation, options, kind));
     }
 
     for (let start = 0; start < lines.length; start += rows) {
@@ -317,6 +326,40 @@ export function layoutGrid(
     }
   }
   return pages;
+}
+
+/**
+ * 台本のト書きの字下げ（マスの数）。作者の裁定（2026-10-09）：
+ * **柱 0字・ト書き 3字下げ・台詞 0字。** 折り返した行も3字下げを続ける。
+ */
+export const SCRIPT_TOGAKI_INDENT = 3;
+
+/**
+ * 1段落を行へ割る。**台本のト書きだけ字下げする。**
+ *
+ * - 見分け方は `scriptLines.ts` の `classifyScriptLine`（原稿エディター・読む紙と
+ *   同じ規則）。**`kindLineClass` は通さない**——漫画の原作も同じ「ト書き」の
+ *   印を借りているので、そちらを通すと漫画まで下がる（今回は台本だけ）
+ * - ト書きは行頭の全角空白で見分けるので、**頭の全角空白は字下げに置き換える**。
+ *   残すと「空白1字＋字下げ3字」で4字下がる。紙だけの話で、原稿は変えない
+ * - 字下げのぶん、1行に入る字を減らして割る（1行の字数は指定どおりのまま）
+ */
+function linesOfParagraph(
+  text: string,
+  notation: NotationMode,
+  options: GridOptions,
+  kind: WorkKindKey | undefined
+): GridLine[] {
+  if (kind === "script" && classifyScriptLine(text) === "togaki") {
+    const columns = Math.max(1, Math.floor(options.columns));
+    const indent = Math.min(SCRIPT_TOGAKI_INDENT, columns - 1);
+    const body = text.replace(/^　+/, "");
+    const narrowed = { ...options, columns: columns - indent };
+    return breakIntoLines(unitsOfLine(body, notation, options.vertical), narrowed).map(
+      (line) => ({ ...line, indent })
+    );
+  }
+  return breakIntoLines(unitsOfLine(text, notation, options.vertical), options);
 }
 
 /** マスと行の寸法（mm） */

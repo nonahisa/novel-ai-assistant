@@ -1,4 +1,4 @@
-import { NO_LINE_END, NO_LINE_START } from "./kinsoku";
+import { NO_LINE_END, NO_LINE_START_STRICT } from "./kinsoku";
 
 /**
  * 印刷用HTMLを、紙1枚ずつの面に割るスクリプト（設計書6.33.5 の1）。
@@ -45,7 +45,8 @@ import { NO_LINE_END, NO_LINE_START } from "./kinsoku";
  *   禁則を破るほうがましである（元の数をそのまま返す）
  */
 export const PAGINATE_HELPERS = [
-  "var NO_START = " + JSON.stringify(NO_LINE_START) + ";",
+  // 読む紙は厳しい側（小さい仮名・長音も行頭に置かない。作者の裁定、2026-10-09）
+  "var NO_START = " + JSON.stringify(NO_LINE_START_STRICT) + ";",
   "var NO_END = " + JSON.stringify(NO_LINE_END) + ";",
   "var MAX_PULL = 4;",
   "function firstOf(text) { return text ? Array.from(text)[0] : ''; }",
@@ -68,6 +69,25 @@ export const PAGINATE_HELPERS = [
   "  if (slot === 'episode') return info.heading;",
   "  if (slot === 'page') return info.number > 0 ? String(info.number) : '';",
   "  return '';",
+  "}",
+  // 段落を部品へ。平文と傍点は1字ずつ、ルビなどの札はかたまりごと。
+  // **縦中横（tcy）は傍点の中でも札として1つ**——先に見ないと、傍点として
+  // 1字ずつにほどかれ、面に分けたあとで縦中横が消える（作者の裁定、2026-10-09）
+  "function atomsOf(block) {",
+  "  var atoms = [];",
+  "  for (var i = 0; i < block.childNodes.length; i++) {",
+  "    var node = block.childNodes[i];",
+  "    if (node.nodeType === 3) {",
+  "      Array.from(node.nodeValue || '').forEach(function (ch) { atoms.push({ t: 'text', s: ch }); });",
+  "    } else if (node.nodeType === 1 && node.classList.contains('tcy')) {",
+  "      atoms.push({ t: 'node', s: '', n: node });",
+  "    } else if (node.nodeType === 1 && node.classList.contains('emphasis')) {",
+  "      Array.from(node.textContent || '').forEach(function (ch) { atoms.push({ t: 'em', s: ch }); });",
+  "    } else if (node.nodeType === 1) {",
+  "      atoms.push({ t: 'node', s: '', n: node });",
+  "    }",
+  "  }",
+  "  return atoms;",
   "}",
 ].join("\n");
 
@@ -119,22 +139,6 @@ export const PRINT_PAGINATE_SCRIPT = [
   "  page.appendChild(foot);",
   "  root.appendChild(page);",
   "  return inner;",
-  "}",
-  "",
-  // 段落を部品へ。平文と傍点は1字ずつ、ルビなどの札はかたまりごと
-  "function atomsOf(block) {",
-  "  var atoms = [];",
-  "  for (var i = 0; i < block.childNodes.length; i++) {",
-  "    var node = block.childNodes[i];",
-  "    if (node.nodeType === 3) {",
-  "      Array.from(node.nodeValue || '').forEach(function (ch) { atoms.push({ t: 'text', s: ch }); });",
-  "    } else if (node.nodeType === 1 && node.classList.contains('emphasis')) {",
-  "      Array.from(node.textContent || '').forEach(function (ch) { atoms.push({ t: 'em', s: ch }); });",
-  "    } else if (node.nodeType === 1) {",
-  "      atoms.push({ t: 'node', s: '', n: node });",
-  "    }",
-  "  }",
-  "  return atoms;",
   "}",
   "",
   "function fill(shell, atoms, from, to) {",

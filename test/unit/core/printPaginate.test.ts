@@ -3,7 +3,7 @@ import {
   PAGINATE_HELPERS,
   PRINT_PAGINATE_SCRIPT,
 } from "../../../src/core/printPaginate";
-import { NO_LINE_END, NO_LINE_START } from "../../../src/core/kinsoku";
+import { NO_LINE_END, NO_LINE_START_STRICT } from "../../../src/core/kinsoku";
 
 /**
  * 印刷用HTMLを紙1枚ずつの面に割るスクリプト（設計書6.33.5 の1）。
@@ -68,6 +68,59 @@ describe("面の切れ目の禁則", () => {
     expect(cut(atoms("あい"), 0)).toBe(0);
     expect(cut(atoms("あい"), 2)).toBe(2);
   });
+
+  /*
+    読む紙は厳しい禁則（作者の裁定、2026-10-09）。実機の写真で、文庫の
+    2ページ目の頭が「った。」から始まっていた
+  */
+  test("次の面の頭が小さい仮名なら、前の字ごと送る", () => {
+    // 「あいう」で切ると次の面が「って」から始まる
+    expect(cut(atoms("あいうって"), 3)).toBe(2);
+  });
+
+  test("次の面の頭が長音なら、前の字ごと送る", () => {
+    expect(cut(atoms("あいコーヒー"), 3)).toBe(2);
+  });
+
+  test("厳しい側の字が入る（升目のゆるい側ではない）", () => {
+    expect(PAGINATE_HELPERS).toContain(JSON.stringify(NO_LINE_START_STRICT));
+  });
+});
+
+/**
+ * 段落を部品へ割る（面の切れ目の単位）。縦中横（作者の裁定、2026-10-09）の
+ * かたまりは、傍点の中でも**1つの部品**のまま扱う——1字ずつにほどくと、
+ * 面に分けたあとで縦中横が消える。
+ */
+describe("段落の部品", () => {
+  type Atom = { t: string; s: string };
+  type FakeNode = {
+    nodeType: number;
+    nodeValue?: string;
+    textContent?: string;
+    classList?: { contains: (name: string) => boolean };
+  };
+  const atomsOf = new Function(`${PAGINATE_HELPERS}\nreturn atomsOf;`)() as (block: {
+    childNodes: FakeNode[];
+  }) => Atom[];
+  const text = (value: string): FakeNode => ({ nodeType: 3, nodeValue: value });
+  const element = (classes: string[], value: string): FakeNode => ({
+    nodeType: 1,
+    textContent: value,
+    classList: { contains: (name: string) => classes.includes(name) },
+  });
+
+  test("平文は1字ずつ、縦中横はかたまり1つ", () => {
+    const atoms = atomsOf({ childNodes: [text("第"), element(["tcy"], "12"), text("時")] });
+    expect(atoms.map((atom) => atom.t)).toEqual(["text", "node", "text"]);
+  });
+
+  test("傍点の中の縦中横も、かたまり1つ（傍点として1字ずつにほどかない）", () => {
+    const atoms = atomsOf({
+      childNodes: [element(["emphasis"], "あい"), element(["emphasis", "tcy"], "12")],
+    });
+    expect(atoms.map((atom) => atom.t)).toEqual(["em", "em", "node"]);
+  });
 });
 
 /** ヘッダー・フッターの中身（設計書6.33.5 の2） */
@@ -127,7 +180,7 @@ describe("スクリプトの形", () => {
   });
 
   test("禁則の字は kinsoku.ts のものが入る（写しを置かない）", () => {
-    expect(PAGINATE_HELPERS).toContain(JSON.stringify(NO_LINE_START));
+    expect(PAGINATE_HELPERS).toContain(JSON.stringify(NO_LINE_START_STRICT));
     expect(PAGINATE_HELPERS).toContain(JSON.stringify(NO_LINE_END));
   });
 

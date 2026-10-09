@@ -27,6 +27,10 @@ import { BookStore } from "../core/bookStore";
 import {
   buildGridPrintHtml,
   GRID_HEADER_FOOTER,
+  GRID_MARGIN_MM,
+  GRID_MARGINS,
+  gridFontSizePt,
+  gridMarginClear,
   type GridPaper,
 } from "../core/printGridHtml";
 import { layoutGrid, type GridOptions } from "../core/manuscriptGrid";
@@ -148,9 +152,9 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
     return;
   }
 
-  // 公募の納品用（設計書6.33.5 の3）は1字1マスで組む。**種類ごとの組み方
-  // （台本の柱・ト書きの字下げなど）は当てない**——字下げや寄せを入れると
-  // 1行の字数が指定からずれる。公募の原稿は本文をそのまま升目に置く
+  // 公募の納品用（設計書6.33.5 の3）は1字1マスで組む。**台本だけ、ト書きを
+  // 3字下げる**（作者の裁定、2026-10-09。柱・台詞は0字）。字下げは空のマスで
+  // 取るので、1行の字数は指定どおりのまま。ほかの種類は本文をそのまま升目に置く
   const html =
     paper.kind === "grid"
       ? buildGridPrintHtml({
@@ -160,6 +164,8 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
           grid: paper.grid,
           headerFooter,
           author,
+          marginMm: paper.marginMm,
+          kind,
         })
       : buildPrintHtml({
           workTitle: work.title,
@@ -176,7 +182,8 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
   const gridNote =
     paper.kind === "grid"
       ? `\n${paper.grid.columns}字×${paper.grid.rows}行で本文${
-          layoutGrid(chapters, paper.grid).length
+          // 紙と同じ種類を渡す（台本の字下げで行が増える。枚数の知らせと紙がずれない）
+          layoutGrid(chapters, paper.grid, kind).length
         }枚（扉を除く）です。`
       : "";
 
@@ -287,7 +294,7 @@ async function pickEpisodes(
 /** 紙の選び方。ふつうの紙（流し込み）か、公募の納品用（1字1マス） */
 type PaperChoice =
   | { kind: "preset"; preset: PrintPreset }
-  | { kind: "grid"; paper: GridPaper; grid: GridOptions };
+  | { kind: "grid"; paper: GridPaper; grid: GridOptions; marginMm: number };
 
 async function pickPaper(): Promise<PaperChoice | undefined> {
   const picked = await vscode.window.showQuickPick(
@@ -401,11 +408,47 @@ async function pickGrid(): Promise<PaperChoice | undefined> {
   );
   if (!hang || isCancelItem(hang) || !("hanging" in hang)) return undefined;
 
-  return {
-    kind: "grid",
-    paper: layout.paper,
-    grid: { columns, rows, hanging: hang.hanging, vertical: layout.vertical },
-  };
+  const grid: GridOptions = { columns, rows, hanging: hang.hanging, vertical: layout.vertical };
+  const marginMm = await pickGridMargin(layout.paper, grid);
+  if (marginMm === undefined) return undefined;
+
+  return { kind: "grid", paper: layout.paper, grid, marginMm };
+}
+
+/**
+ * 余白を決める：普通（20mm）／狭く（10mm）。既定は普通（作者の裁定、2026-10-09）。
+ *
+ * **字の大きさを、選んだ紙と字数×行数で計算して出す。** A4縦置きの縦書き
+ * 40×40 なら約8pt→約9pt。固定の文にすると、ほかの組み合わせで嘘になる。
+ *
+ * **狭くすると上下の帯の字（ページ番号など）とぶら下げ・ルビが重なる組み合わせ
+ * では、尋ねずに普通で組む**（`gridMarginClear`）。重なる紙を選ばせない。
+ */
+async function pickGridMargin(
+  paper: GridPaper,
+  grid: GridOptions
+): Promise<number | undefined> {
+  const narrow = GRID_MARGINS.find((margin) => margin.id === "narrow");
+  if (!narrow || !gridMarginClear(paper, grid, narrow.mm)) return GRID_MARGIN_MM;
+
+  const points = (mm: number) => `約${gridFontSizePt(paper, grid, mm).toFixed(1)}pt`;
+  const picked = await vscode.window.showQuickPick(
+    [
+      ...GRID_MARGINS.map((margin) => ({
+        label: `${margin.label}（${margin.mm}mm）`,
+        detail:
+          margin.id === "normal"
+            ? `字の大きさは${points(margin.mm)}。綴じしろや書き込みの余裕があります`
+            : `字が${points(GRID_MARGIN_MM)}から${points(margin.mm)}に大きくなります。` +
+              "家庭用のプリンターは紙の端の数mmに刷れないことがあります",
+        mm: margin.mm,
+      })),
+      cancelItem(),
+    ],
+    { title: "紙の余白を選んでください", ignoreFocusOut: true }
+  );
+  if (!picked || isCancelItem(picked) || !("mm" in picked)) return undefined;
+  return picked.mm;
 }
 
 /** 自分で決める字数・行数の幅。小さすぎても大きすぎても、紙として読めない */

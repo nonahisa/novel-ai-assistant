@@ -164,8 +164,9 @@ describe("紙の形", () => {
 
     expect(out).toContain("break-before: page");
     expect([...out.matchAll(/<section class="episode">/g)]).toHaveLength(2);
-    expect(out).toContain('<h2 class="episode-heading">第1話</h2>');
-    expect(out).toContain('<h2 class="episode-heading">第2話</h2>');
+    // 縦書きの紙なので、見出しの数字は縦中横で立つ（作者の裁定、2026-10-09）
+    expect(out).toContain('<h2 class="episode-heading">第<span class="tcy">1</span>話</h2>');
+    expect(out).toContain('<h2 class="episode-heading">第<span class="tcy">2</span>話</h2>');
   });
 
   test("行が段落になり、空行は段落の空きになる", () => {
@@ -481,5 +482,86 @@ describe("脚本の組版", () => {
     expect(asLong).toBe(plain);
     expect(plain).not.toContain("script-");
     expect(plain).not.toContain(SCRIPT_LINE_CSS);
+  });
+});
+
+/**
+ * 読む紙の禁則（作者の裁定、2026-10-09）。面の中の折り返しはブラウザに
+ * 任せているので、小さい仮名・長音を行頭に置かない厳しい決まりを指定する
+ * （面の切れ目は `printPaginate.ts` が同じ決まりで割る）。
+ */
+describe("読む紙の禁則", () => {
+  test("どの版でも、ブラウザの折り返しを厳しい禁則にする", () => {
+    for (const preset of PRINT_PRESETS) {
+      expect(html("本文", preset.id)).toContain("line-break: strict;");
+    }
+  });
+});
+
+/**
+ * 読む紙の縦中横（作者の裁定、2026-10-09）。規則は原稿エディター・公募の升目と
+ * 同じ `tateChuYoko.ts` の `tcyRuns`。縦書きの紙だけで、横書きでは何もしない。
+ */
+describe("読む紙の縦中横", () => {
+  /** 本文の側だけ（題の属性や head の指定を除く） */
+  function sourceOf(out: string): string {
+    return out.slice(out.indexOf('<div class="sheet" id="print-source">'));
+  }
+
+  test("縦書きでは、半角数字1〜2字を立てる", () => {
+    const out = sourceOf(html("3月5日の12時"));
+    expect(out).toContain(
+      '<span class="tcy">3</span>月<span class="tcy">5</span>日の<span class="tcy">12</span>時'
+    );
+  });
+
+  test("3字以上は寝たまま", () => {
+    expect(sourceOf(html("2026年"))).toContain("<p>2026年</p>");
+  });
+
+  test("横書きの紙では何もしない（見出しも）", () => {
+    const out = html("3月5日", "a4-horizontal");
+    expect(out).toContain("<p>3月5日</p>");
+    expect(out).toContain('<h2 class="episode-heading">第1話　夜の駅</h2>');
+    expect(out).not.toContain('class="tcy"');
+    expect(out).not.toContain('class="emphasis tcy"');
+  });
+
+  test("縦書きの紙だけ、縦中横の指定が入る", () => {
+    expect(html("本文", "bunko-vertical")).toContain("text-combine-upright: all");
+    expect(html("本文", "a4-horizontal")).not.toContain("text-combine-upright");
+  });
+
+  test("逃がした記号（&amp; &lt;）の中を割らない", () => {
+    const out = sourceOf(html("A&B と <12> と &12"));
+    expect(out).toContain("&amp;");
+    expect(out).toContain("&lt;");
+    expect(out).not.toMatch(/&(?:amp|lt|gt);?<span/);
+    // 半角の記号に挟まれた数字は、規則どおり寝たまま
+    expect(out).not.toContain('<span class="tcy">12</span>');
+  });
+
+  test("ルビの中は割らない", () => {
+    const out = sourceOf(html("{12|じゅうに}時"));
+    expect(out).toContain("<ruby>12<rt>じゅうに</rt></ruby>時");
+  });
+
+  test("傍点の中の数字も立てる（傍点は付いたまま）", () => {
+    const out = sourceOf(html("{{第3}}話"));
+    expect(out).toContain(
+      '<span class="emphasis">第</span><span class="emphasis tcy">3</span>話'
+    );
+  });
+
+  test("話の見出しの数字も立てる（題名の属性には入れない）", () => {
+    const out = buildPrintHtml({
+      workTitle: "第2部",
+      episodes: [{ heading: "第1話　夜の駅", body: "本文", notation: "curly" }],
+      preset: "bunko-vertical",
+    });
+    expect(out).toContain('<h2 class="episode-heading">第<span class="tcy">1</span>話　夜の駅</h2>');
+    expect(out).toContain('<h1 class="cover-title">第<span class="tcy">2</span>部</h1>');
+    expect(out).toContain('data-title="第2部"');
+    expect(out).toContain("<title>第2部</title>");
   });
 });
