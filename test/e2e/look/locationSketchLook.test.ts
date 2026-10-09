@@ -83,18 +83,18 @@ describe.skipIf(!lookEnabled)("見た目の写真：場所の略図", () => {
           30_000
         );
         await page.waitForTimeout(800);
-        await shootPage(page, "01-略図の全体");
+        await shootPage(page, "04-略図の全体（字を縮めない）");
 
         // 点を選ぶ（右に置き方と操作が出る）
         await frame!.locator('.s-point[data-id="loc_007"] .s-dot').click({ force: true });
         await page.waitForTimeout(500);
-        await shootPage(page, "02-点を選んだところ");
+        await shootPage(page, "05-点を選んだところ");
 
         // 赤い線を押す（提案パネルの「矛盾」の同じ行へ）
         await frame!.locator(".s-conflict-label").first().click({ force: true });
         await page.waitForTimeout(4000);
-        await shootPage(page, "03-赤い線から提案パネルへ");
-        await lookNote("場所の略図：01 全体／02 点を選ぶ／03 赤い線から提案パネル");
+        await shootPage(page, "06-赤い線から提案パネルへ（本文で隠さない）");
+        await lookNote("場所の略図（作者の裁定 2026-10-10 のあと）：04 全体／05 点を選ぶ／06 赤い線から提案パネル");
       },
       {
         keybindings: [{ key: OPEN_KEY, command: "novelai.openLocationSketch" }],

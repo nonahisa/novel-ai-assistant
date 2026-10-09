@@ -2166,11 +2166,29 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       rightLabel: "本文では",
       openTarget: "settings",
     }));
-    return this.replaceContents(work, "矛盾", {
+    const counts = this.replaceContents(work, "矛盾", {
       // 機械の指摘は AI の指摘のあとへ。AI の指摘の番号（並び）を動かさない
       contradictions: [...contradictions, ...locationItems],
       registerForeshadow,
     });
+    this.openForRecordRows(work, locationRecordIssues.length);
+    return counts;
+  }
+
+  /**
+   * 「場所の資料を開く」行が1件でもあれば、提案パネルも開く（作者の裁定 2026-10-10）。
+   *
+   * 「矛盾」は校正・メモパネルのほうが開くが、この行は本文の位置を持たないので
+   * そちらに並ばない（`findingDraftOf`）。開かないと作者が見つけられない。
+   * 書いている手から焦点は奪わない。校正・メモパネルを使わない設定のときは、
+   * `replaceContents` が既に提案パネルを開いているので重ねない。
+   * 別の作品を見ているときも開かない（その作品の結果は通知で知らせてある）
+   */
+  private openForRecordRows(work: WorkEntry, recordRows: number): void {
+    if (recordRows === 0) return;
+    if (!this.work || this.keyOf(this.work) !== this.keyOf(work)) return;
+    if (!this.showsInFindingsView("矛盾")) return;
+    void vscode.commands.executeCommand(OPEN_PROPOSALS_COMMAND, { preserveFocus: true });
   }
 
   /**
@@ -2207,7 +2225,7 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       );
       bucket.contradictions.splice(0, bucket.contradictions.length, ...kept);
     }
-    return this.replaceContents(
+    const counts = this.replaceContents(
       work,
       "矛盾",
       {
@@ -2218,6 +2236,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       },
       { quiet: options.quiet }
     );
+    if (!options.quiet) this.openForRecordRows(work, recordIssues.length);
+    return counts;
   }
 
   /**
@@ -2241,13 +2261,18 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       this.stashCurrent();
     }
     this.activate("矛盾");
+    /*
+      **本文を先に開き、そのあとで提案パネルを前に出す**（作者の裁定 2026-10-10）。
+      逆の順だと、本文が提案パネルと同じ列に開いてパネルを後ろへ隠す。
+      本文は開いてその行を示してあるので、タブを押せばすぐ見られる
+    */
+    await this.jumpTo(id);
     // 面が今から開くなら、読み込み終わり（"ready"）でもう一度送る
     this.focusRowId = id;
     this.reveal({ preserveFocus: true });
     for (const webview of this.webviews()) {
       void webview.postMessage({ type: "focusRow", id });
     }
-    await this.jumpTo(id);
     return true;
   }
 

@@ -116,9 +116,18 @@ h3 {
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px; }
 table.legend { border-collapse: collapse; }
 table.legend td { padding: 1px 8px 1px 0; vertical-align: middle; }
-/* 狭い窓では右の欄を細くして、図の場所を残す */
+/* 狭い窓では右の欄を図の下へ回し、図の幅を残す（字は縮めないので、図の欄が
+   細いと名前どうしが重なる） */
 @media (max-width: 760px) {
-  #side { width: 200px; min-width: 160px; }
+  #layout { flex-direction: column; }
+  #canvas { min-height: 0; }
+  #side {
+    width: auto;
+    min-width: 0;
+    max-height: 38%;
+    border-left: none;
+    border-top: 1px solid var(--vscode-panel-border);
+  }
 }
 footer {
   padding: 6px 16px;
@@ -138,17 +147,19 @@ svg#sketch {
 }
 svg#sketch.panning { cursor: grabbing; }
 /* 図の中の見た目。class の頭を s- で揃える */
+/* 線と枠と点の縁は、図を縮めても同じ太さで描く（字と同じく、細って消えないように） */
+.s-frame, .s-line, .s-conflict-hit, .s-dot { vector-effect: non-scaling-stroke; }
 .s-frame { fill: none; stroke: var(--novelai-location); stroke-opacity: 0.45; stroke-width: 1.2; }
-.s-frame-label { fill: var(--novelai-location); font-size: 13px; opacity: 0.9; }
+.s-frame-label { fill: var(--novelai-location); font-size: calc(13px * var(--u, 1)); opacity: 0.9; }
 .s-line { stroke: var(--vscode-foreground); stroke-opacity: 0.55; stroke-width: 1.4; fill: none; }
 .s-line.s-dashed { stroke-dasharray: 6 4; }
 .s-line.s-adjacent { stroke-dasharray: 2 3; stroke-opacity: 0.7; }
 .s-line.s-conflict { stroke: var(--vscode-errorForeground, #d33); stroke-opacity: 0.95; stroke-width: 2; }
-.s-line-label { fill: var(--vscode-descriptionForeground); font-size: 12px; }
-.s-conflict-label { fill: var(--vscode-errorForeground, #d33); font-size: 12px; cursor: pointer; text-decoration: underline; }
+.s-line-label { fill: var(--vscode-descriptionForeground); font-size: calc(12px * var(--u, 1)); }
+.s-conflict-label { fill: var(--vscode-errorForeground, #d33); font-size: calc(12px * var(--u, 1)); cursor: pointer; text-decoration: underline; }
 .s-conflict-hit { stroke: transparent; stroke-width: 12; fill: none; cursor: pointer; }
 .s-mismatch { fill: var(--vscode-editorWarning-foreground, #c90); }
-.s-mismatch-text { fill: var(--vscode-editor-background); font-size: 10px; font-weight: 700; }
+.s-mismatch-text { fill: var(--vscode-editor-background); font-size: calc(10px * var(--u, 1)); font-weight: 700; }
 .s-point { cursor: move; }
 .s-dot { fill: var(--novelai-location); }
 .s-dot.s-unsettled {
@@ -159,10 +170,10 @@ svg#sketch.panning { cursor: grabbing; }
 }
 .s-dot.s-shelf { fill: var(--vscode-editor-background); stroke: var(--vscode-descriptionForeground); stroke-width: 1.2; }
 .s-author-mark { fill: var(--vscode-foreground); }
-.s-name { fill: var(--vscode-foreground); font-size: 15px; }
+.s-name { fill: var(--vscode-foreground); font-size: calc(15px * var(--u, 1)); }
 .s-name.s-unsettled { fill: var(--vscode-descriptionForeground); }
 .s-point.s-selected .s-dot { stroke: var(--vscode-focusBorder); stroke-width: 2.5; stroke-dasharray: none; }
-.s-shelf-label { fill: var(--vscode-descriptionForeground); font-size: 13px; }
+.s-shelf-label { fill: var(--vscode-descriptionForeground); font-size: calc(13px * var(--u, 1)); }
 .s-shelf-line { stroke: var(--vscode-panel-border); stroke-dasharray: 2 4; }
 </style>
 </head>
@@ -262,13 +273,103 @@ function fullBox() {
     minX = Math.min(minX, pos.x); maxX = Math.max(maxX, pos.x);
     minY = Math.min(minY, pos.y - 30); maxY = Math.max(maxY, pos.y);
   });
-  const pad = 70;
+  // 前に描いたときの字の範囲も入れる（字は画素で大きさが決まるので、点だけで
+  // 合わせると端の名前が欄の外へ切れる）
+  let pad = 70;
+  if (textBounds) {
+    minX = Math.min(minX, textBounds.minX); minY = Math.min(minY, textBounds.minY);
+    maxX = Math.max(maxX, textBounds.maxX); maxY = Math.max(maxY, textBounds.maxY);
+    pad = 20;
+  }
   return { x: minX - pad, y: minY - pad, w: Math.max(maxX - minX + pad * 2, 200), h: Math.max(maxY - minY + pad * 2, 160) };
 }
+
+/** 前に描いたときの、字と点の箱の範囲（全体を合わせるときに入れる） */
+let textBounds = null;
+
+/**
+ * 全体を合わせて描く。字の範囲は描いてみないと分からず、範囲が変わると字の
+ * 大きさ（図の単位）も変わるので、2回描いて落ち着かせる
+ */
+function drawFitted() {
+  textBounds = null;
+  draw();
+  if (!viewBox) draw();
+}
+
+/**
+ * 図の1単位が、画面の何画素ぶんか（の逆数）。**字は縮めない**（作者の裁定 2026-10-10）——
+ * 図を窓に合わせて縮めても、名前と線の字は同じ画素で描く。縮むのは点の間と線だけ。
+ * 字の大きさ・字の置き場の隙間は、この値を掛けて図の単位へ直す
+ */
+let unit = 1;
 
 function applyViewBox() {
   const box = viewBox || fullBox();
   el.svg.setAttribute("viewBox", box.x + " " + box.y + " " + box.w + " " + box.h);
+  const rect = el.svg.getBoundingClientRect();
+  // preserveAspectRatio="meet" なので、縦横のうち余計に縮むほうで決まる
+  unit = rect.width > 0 && rect.height > 0 ? Math.max(box.w / rect.width, box.h / rect.height) : 1;
+  el.svg.style.setProperty("--u", String(unit));
+}
+
+/** 画面の画素を図の単位へ */
+function px(value) {
+  return value * unit;
+}
+
+/** 字の幅の見積もり（全角を1字＝字の大きさ、半角を半分） */
+function textWidth(text, size) {
+  let width = 0;
+  for (const char of text) width += char.charCodeAt(0) < 0x2e80 ? size * 0.55 : size;
+  return width;
+}
+
+/**
+ * 字の置き場を、すでに置いたものと重ならない所から選ぶ（最小限の避け方）。
+ * 候補を順に試し、どれも重なるなら最初の候補に置く（字を消しはしない）
+ */
+function placeText(occupied, candidates, width, size) {
+  // 候補は字の並びの基準線（左端）。字の箱は基準線の上に字の大きさ、下に少し
+  const boxOf = function (candidate) {
+    return { x: candidate.x, y: candidate.y - size, w: width, h: size * 1.3 };
+  };
+  const fits = function (box) {
+    return !occupied.some(function (other) {
+      return box.x < other.x + other.w && other.x < box.x + box.w && box.y < other.y + other.h && other.y < box.y + box.h;
+    });
+  };
+  let chosen = candidates[0];
+  for (const candidate of candidates) {
+    if (fits(boxOf(candidate))) { chosen = candidate; break; }
+  }
+  occupied.push(boxOf(chosen));
+  return chosen;
+}
+
+/** 点のまわりの、名前を置く候補（右下 → 右上 → 左下 → 左上 → 真下 → 真上） */
+function nameCandidates(pos, width, size) {
+  const gap = px(10);
+  return [
+    { x: pos.x + gap, y: pos.y + size + px(2) },
+    { x: pos.x + gap, y: pos.y - px(6) },
+    { x: pos.x - gap - width, y: pos.y + size + px(2) },
+    { x: pos.x - gap - width, y: pos.y - px(6) },
+    { x: pos.x - width / 2, y: pos.y + size + px(10) },
+    { x: pos.x - width / 2, y: pos.y - px(12) },
+  ];
+}
+
+/** 線の中ほどの、線の字を置く候補 */
+function lineCandidates(mx, my, width, size) {
+  return [
+    { x: mx + px(4), y: my - px(4) },
+    { x: mx + px(4), y: my + size + px(2) },
+    { x: mx - px(4) - width, y: my - px(4) },
+    { x: mx - px(4) - width, y: my + size + px(2) },
+    { x: mx - width / 2, y: my - size - px(6) },
+    { x: mx - width / 2, y: my + size * 2 + px(4) },
+  ];
 }
 
 function nameOf(id) {
@@ -293,12 +394,47 @@ function draw() {
   el.svg.appendChild(layerLines);
   el.svg.appendChild(layerPoints);
 
+  // 字の大きさ（図の単位）。画面の上では、窓に合わせて縮めても同じ画素になる
+  const NAME_SIZE = px(15);
+  const LINE_SIZE = px(12);
+  const FRAME_SIZE = px(13);
+  /** 置いた字と点の箱（重ならない置き場を選ぶため） */
+  const occupied = [];
+  const dotRadius = Math.max(7, px(5));
+
   for (const frame of sketch.frames) {
     layerFrames.appendChild(svgEl("rect", {
       class: "s-frame", x: frame.x, y: frame.y, width: frame.width, height: frame.height, rx: 8,
       "data-id": frame.id,
     }));
-    layerFrames.appendChild(svgEl("text", { class: "s-frame-label", x: frame.x + 6, y: frame.y + 15 }, frame.name));
+  }
+
+  // 点（棚も）の位置を先に決め、点そのものの箱を塞いでおく
+  const shelf = shelfPositions();
+  const pointsToDraw = [];
+  for (const point of sketch.points) {
+    pointsToDraw.push({ id: point.id, name: point.name, pos: positionOf(point.id), point: point, onShelf: false });
+  }
+  for (const entry of sketch.shelf) {
+    pointsToDraw.push({ id: entry.id, name: entry.name, pos: positionOf(entry.id), point: null, onShelf: true });
+  }
+  for (const item of pointsToDraw) {
+    occupied.push({ x: item.pos.x - dotRadius, y: item.pos.y - dotRadius, w: dotRadius * 2, h: dotRadius * 2 });
+  }
+  // 枠の名前（枠の内側の左上 → 枠の上 → 枠の内側の右上）。点に重ねない
+  for (const frame of sketch.frames) {
+    const width = textWidth(frame.name, FRAME_SIZE);
+    const at = placeText(occupied, [
+      { x: frame.x + px(6), y: frame.y + FRAME_SIZE + px(2) },
+      { x: frame.x + px(6), y: frame.y - px(4) },
+      { x: frame.x + frame.width - px(6) - width, y: frame.y + FRAME_SIZE + px(2) },
+    ], width, FRAME_SIZE);
+    layerFrames.appendChild(svgEl("text", { class: "s-frame-label", x: at.x, y: at.y }, frame.name));
+  }
+  // 名前を先に置く（線の字より名前を読めることを優先する）
+  for (const item of pointsToDraw) {
+    const width = textWidth(item.name, NAME_SIZE);
+    item.label = placeText(occupied, nameCandidates(item.pos, width, NAME_SIZE), width, NAME_SIZE);
   }
 
   for (const line of sketch.lines) {
@@ -317,58 +453,71 @@ function draw() {
     const mx = (a.x + b.x) / 2;
     const my = (a.y + b.y) / 2;
     if (line.label) {
-      group.appendChild(svgEl("text", { class: "s-line-label", x: mx + 4, y: my - 4 }, line.label));
+      const width = textWidth(line.label, LINE_SIZE);
+      const at = placeText(occupied, lineCandidates(mx, my, width, LINE_SIZE), width, LINE_SIZE);
+      group.appendChild(svgEl("text", { class: "s-line-label", x: at.x, y: at.y }, line.label));
     }
     if (line.conflict) {
       const index = line.conflict.index;
       const hit = svgEl("line", { class: "s-conflict-hit", x1: a.x, y1: a.y, x2: b.x, y2: b.y, "data-conflict": index });
       hit.appendChild(svgEl("title", {}, "押すと提案パネルの「矛盾」の同じ行と、本文の同じ所を開きます"));
       group.appendChild(hit);
-      const label = svgEl("text", { class: "s-conflict-label", x: mx + 4, y: my + 10, "data-conflict": index }, line.conflict.label);
-      group.appendChild(label);
+      const width = textWidth(line.conflict.label, LINE_SIZE);
+      const at = placeText(occupied, lineCandidates(mx, my + LINE_SIZE * 1.4, width, LINE_SIZE), width, LINE_SIZE);
+      group.appendChild(svgEl("text", { class: "s-conflict-label", x: at.x, y: at.y, "data-conflict": index }, line.conflict.label));
     }
     if (line.authorMismatch) {
       const mark = svgEl("g", { class: "s-mismatch-mark" });
-      mark.appendChild(svgEl("circle", { class: "s-mismatch", cx: mx - 10, cy: my, r: 6 }));
-      mark.appendChild(svgEl("text", { class: "s-mismatch-text", x: mx - 12, y: my + 3.5 }, "!"));
+      mark.appendChild(svgEl("circle", { class: "s-mismatch", cx: mx - px(10), cy: my, r: px(6) }));
+      mark.appendChild(svgEl("text", { class: "s-mismatch-text", x: mx - px(12), y: my + px(3.5) }, "!"));
       mark.appendChild(svgEl("title", {}, "作者が置いた位置が、資料の方角と食い違っています（位置はそのまま残します）"));
       group.appendChild(mark);
     }
     layerLines.appendChild(group);
   }
 
-  const shelf = shelfPositions();
   if (sketch.shelf.length > 0) {
     const first = shelf.get(sketch.shelf[0].id);
-    layerLines.appendChild(svgEl("text", { class: "s-shelf-label", x: first.x - 10, y: first.y - 22 },
-      "位置未定の棚（手がかりの無い場所。引っ張って図へ置けます）"));
+    const shelfText = "位置未定の棚（手がかりの無い場所。引っ張って図へ置けます）";
+    const at = { x: first.x - px(10), y: first.y - px(22) };
+    occupied.push({ x: at.x, y: at.y - px(13), w: textWidth(shelfText, px(13)), h: px(13) * 1.3 });
+    layerLines.appendChild(svgEl("text", { class: "s-shelf-label", x: at.x, y: at.y }, shelfText));
   }
 
-  const drawPoint = function (id, name, pos, classes, extra) {
-    const group = svgEl("g", { class: "s-point" + (selectedId === id ? " s-selected" : ""), "data-id": id, "data-kind": extra.kind });
-    group.appendChild(svgEl("circle", { class: "s-dot " + classes, cx: pos.x, cy: pos.y, r: 7 }));
-    if (extra.author) {
-      group.appendChild(svgEl("rect", { class: "s-author-mark", x: pos.x + 6, y: pos.y - 11, width: 5, height: 5 }));
+  for (const item of pointsToDraw) {
+    const point = item.point;
+    const authorPlaced = point ? point.authorPlaced : false;
+    const settled = point ? point.settled || point.authorPlaced : false;
+    const classes = item.onShelf ? "s-shelf" : !point.settled && !point.authorPlaced ? "s-unsettled" : "";
+    const tip = item.onShelf
+      ? item.name + "（位置の手がかりがありません）"
+      : point.authorPlaced
+        ? item.name + "（作者が置いた位置）"
+        : point.settled
+          ? item.name + "（方角と距離で決まった位置）"
+          : item.name + "（仮に置いた位置）";
+    const group = svgEl("g", {
+      class: "s-point" + (selectedId === item.id ? " s-selected" : ""),
+      "data-id": item.id,
+      "data-kind": item.onShelf ? "shelf" : "point",
+    });
+    group.appendChild(svgEl("circle", { class: "s-dot " + classes, cx: item.pos.x, cy: item.pos.y, r: dotRadius }));
+    if (authorPlaced) {
+      group.appendChild(svgEl("rect", {
+        class: "s-author-mark", x: item.pos.x + dotRadius - px(1), y: item.pos.y - dotRadius - px(4), width: px(5), height: px(5),
+      }));
     }
-    group.appendChild(svgEl("text", { class: "s-name" + (extra.settled ? "" : " s-unsettled"), x: pos.x + 10, y: pos.y + 16 }, name));
-    group.appendChild(svgEl("title", {}, extra.tip));
+    group.appendChild(svgEl("text", { class: "s-name" + (settled ? "" : " s-unsettled"), x: item.label.x, y: item.label.y }, item.name));
+    group.appendChild(svgEl("title", {}, tip));
     layerPoints.appendChild(group);
+  }
+
+  textBounds = occupied.length === 0 ? null : {
+    minX: Math.min.apply(null, occupied.map(function (box) { return box.x; })),
+    minY: Math.min.apply(null, occupied.map(function (box) { return box.y; })),
+    maxX: Math.max.apply(null, occupied.map(function (box) { return box.x + box.w; })),
+    maxY: Math.max.apply(null, occupied.map(function (box) { return box.y + box.h; })),
   };
-  for (const point of sketch.points) {
-    const pos = positionOf(point.id);
-    const unsettled = !point.settled && !point.authorPlaced;
-    drawPoint(point.id, point.name, pos, unsettled ? "s-unsettled" : "", {
-      kind: "point",
-      author: point.authorPlaced,
-      settled: point.settled || point.authorPlaced,
-      tip: point.authorPlaced ? point.name + "（作者が置いた位置）" : point.settled ? point.name + "（方角と距離で決まった位置）" : point.name + "（仮に置いた位置）",
-    });
-  }
-  for (const entry of sketch.shelf) {
-    drawPoint(entry.id, entry.name, positionOf(entry.id), "s-shelf", {
-      kind: "shelf", author: false, settled: false, tip: entry.name + "（位置の手がかりがありません）",
-    });
-  }
 }
 
 function drawSide() {
@@ -570,12 +719,17 @@ el.svg.addEventListener("wheel", function (event) {
     w: viewBox.w * factor,
     h: viewBox.h * factor,
   };
-  applyViewBox();
+  draw();
 }, { passive: false });
 
 el.fit.addEventListener("click", function () {
   viewBox = null;
-  applyViewBox();
+  drawFitted();
+});
+
+// 窓の大きさが変わると、図の1単位の画素も変わる。字の大きさを保つために描き直す
+window.addEventListener("resize", function () {
+  if (view) drawFitted();
 });
 
 el.origin.addEventListener("change", function () {
@@ -591,7 +745,7 @@ window.addEventListener("message", function (event) {
   if (selectedId && !view.locations.some(function (l) { return l.id === selectedId; })) selectedId = null;
   el.title.textContent = view.title;
   drawOrigin();
-  draw();
+  drawFitted();
   drawSide();
 });
 

@@ -229,3 +229,60 @@ describe("場所の位置関係を単独で照合したときの並べ方", () =
     ]);
   });
 });
+
+/**
+ * 「場所の資料を開く」行は校正・メモパネルに並ばないので、1件でもあれば提案パネルを
+ * 開く（作者の裁定 2026-10-10）。矛盾検知の終わり（`showContradictions`）でも、
+ * 単独の照合でも同じ。書いている手から焦点は奪わない。
+ */
+describe("「場所の資料を開く」行があれば提案パネルを開く", () => {
+  const opened = () =>
+    executed.filter((entry) => entry.command === "novelai.openProposals");
+
+  test("矛盾検知の終わりに1件以上あれば開く（焦点は奪わない）", () => {
+    const panel = panelWithView();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    panel.showContradictions(work, [aiIssue as any], undefined, [], [recordIssue]);
+    expect(opened()).toEqual([
+      { command: "novelai.openProposals", args: [{ preserveFocus: true }] },
+    ]);
+  });
+
+  test("単独の照合でも開く", () => {
+    const panel = panelWithView();
+    panel.showLocationContradictions(work, [], [recordIssue]);
+    expect(opened()).toHaveLength(1);
+  });
+
+  test("無ければ開かない（本文に置ける行は校正・メモパネルに並ぶ）", () => {
+    const panel = panelWithView();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    panel.showContradictions(work, [aiIssue as any], undefined, [locationIssue(3)], []);
+    panel.showLocationContradictions(work, [locationIssue(3)], []);
+    expect(opened()).toEqual([]);
+  });
+
+  test("略図の赤い線から行を示すときは、本文を開いてから提案パネルを前に出す（本文で隠さない）", async () => {
+    const panel = panelWithView();
+    panel.showLocationContradictions(work, [locationIssue(3)], [], { quiet: true });
+    const order: string[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const spied = panel as any;
+    spied.jumpTo = vi.fn(async () => {
+      order.push("本文");
+    });
+    spied.reveal = vi.fn(() => {
+      order.push("提案パネル");
+    });
+    const [row] = contradictionsOf(panel);
+    expect(await panel.focusContradiction(work, row.id as string)).toBe(true);
+    expect(order).toEqual(["本文", "提案パネル"]);
+    expect(spied.reveal).toHaveBeenCalledWith({ preserveFocus: true });
+  });
+
+  test("略図から静かに並べるとき（quiet）は、ここでは開かない（続けて行を示す側が開く）", () => {
+    const panel = panelWithView();
+    panel.showLocationContradictions(work, [], [recordIssue], { quiet: true });
+    expect(opened()).toEqual([]);
+  });
+});
