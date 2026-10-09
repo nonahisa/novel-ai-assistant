@@ -97,6 +97,21 @@ export const BUNDLED_FEATURE_ACCURACY: readonly FeatureAccuracyRecord[] = [
     bench: "答え付きの台（仕込み12）",
   },
   /*
+    20B 以上へ送る頼み方（1.2）での記録。2026-10-10、
+    `docs/measurements/2026-10-10-typo-gemma4_26b-v1.2.json`（2回とも 8/12・誤検出0・
+    num_ctx 16384）。版が一致する記録が無いと大きいモデルの案内が出ないため足した
+  */
+  {
+    feature: "typo",
+    providerId: "ollama",
+    model: "gemma4:26b",
+    hits: 8,
+    total: 12,
+    promptVersion: "1.2",
+    measuredAt: "2026-10-10",
+    bench: "答え付きの台（仕込み12）",
+  },
+  /*
     e4b は製品と同じ頼み方（20B 未満なので小さいモデル向けの 1.1）で測った
     （2026-10-10、`docs/measurements/2026-10-10-typo-gemma4_e4b-2.json`・`-3.json`。
     num_ctx 24576 でも 16384 でも 2/12・誤検出0）。作品10話の大きい台（確実17）では

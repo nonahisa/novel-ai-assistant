@@ -198,6 +198,27 @@ describe("当たりの記録（同梱）", () => {
     expect(text).toContain("当たりが多い");
   });
 
+  test("誤字脱字の 1.2 版（20B 以上へ送る頼み方）でも 26b の記録が引け、案内が出る", () => {
+    // checkTypos.ts は TYPO_CHECK_VERSION（1.2）で案内を探す。1.1 の記録しか無いと
+    // 版が違うので使われず、案内が一度も出なかった（2026-10-10）
+    expect(
+      accuracyRecordFor({
+        feature: "typo",
+        providerId: "ollama",
+        model: "gemma4:26b",
+        promptVersion: "1.2",
+      })
+    ).toMatchObject({ hits: 8, total: 12 });
+    const advice = advise({ feature: "typo", promptVersion: "1.2" });
+    expect(advice?.fits?.id).toBe("gemma4:26b");
+    const text = describeLargerModelAdvice(advice!, {
+      count: 3,
+      unit: "チャンク",
+      featureLabel: "誤字脱字",
+    });
+    expect(text).toContain("8/12");
+  });
+
   test("いまのモデルに記録が無ければ、比べずに数字だけを添える", () => {
     // 12b は誤字脱字の答え付きの台で測っていない
     const advice = advise({
