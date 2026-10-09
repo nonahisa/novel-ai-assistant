@@ -928,7 +928,8 @@ function renderContradiction(item) {
     '<div class="' + classes.join(' ') + '">' +
     '<div class="issue-head">' +
     '<span class="location" data-action="jump" data-id="' + item.id + '">' +
-    escapeHtml(item.fileName) + ' ' + item.line + '行目</span>' +
+    // 本文の行を持たない行（場所の資料を開く行。設計書6.93.9）は行番号を出さない
+    (item.headLabel ? escapeHtml(item.headLabel) : escapeHtml(item.fileName) + ' ' + item.line + '行目') + '</span>' +
     '<span class="badge cat">' + escapeHtml(item.category) + '</span>' +
     '<span class="badge ' + item.confidence + '">' + CONFIDENCE_LABEL[item.confidence] + '</span>' +
     renderOriginBadge(item) +

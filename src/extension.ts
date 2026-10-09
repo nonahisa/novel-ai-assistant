@@ -317,7 +317,11 @@ import {
   pickContradictionReadMode,
   pickContradictionRoute,
 } from "./features/checkContradictions";
-import { collectLocationContradictions } from "./features/checkLocationConsistency";
+import {
+  collectLocationContradictions,
+  describeLocationRun,
+} from "./features/checkLocationConsistency";
+import type { SettingsKind } from "./core/settingsSummary";
 // 矛盾検知のもう1つの道（設計書6.88）。入口は「矛盾検知」1つで、
 // 押したときに選ぶ（2026-09-23）。コマンドはパレットと関門の代わりの道に残す
 import { checkFactContradictions } from "./features/checkFactContradictions";
@@ -4826,12 +4830,17 @@ export async function activate(
   context.subscriptions.push(
     registerCommand(
       "novelai.openSettingsPanel",
-      async (node?: WorkNode) => {
+      /*
+        2つ目の引数 `record` は、開いたあとに示す資料（設計書6.93.9 の順6。
+        提案パネルの「場所の資料を開く」行と、場所の略図の点から）
+      */
+      async (node?: WorkNode, record?: { kind: SettingsKind; id: string }) => {
         const work = await resolveWork(node, registry);
         if (!work) return CHECK_CANCELLED;
         // **戻り値（画面そのもの）は結果ではない。** 開けたかどうかしか
         // 分からないので、済んだこととして返す
-        await openSettingsPanel(context, work, aiRegistry);
+        const panel = await openSettingsPanel(context, work, aiRegistry);
+        if (record?.kind && record.id) await panel.showRecord(record.kind, record.id);
         return CHECK_COMPLETED;
       }
     )
@@ -6310,7 +6319,8 @@ export async function activate(
       work,
       result.issues,
       (source) => registerForeshadowFromContradiction(work, source),
-      locationRun.issues
+      locationRun.issues,
+      locationRun.recordIssues
     );
 
     // **誤字脱字と同じ数え方にする**（設計書6.8）。捨てたぶんは、
@@ -6329,20 +6339,7 @@ export async function activate(
     if (result.verifyNote) parts.push(result.verifyNote);
     // **機械で照らした分を分けて言う**（設計書6.93.4）。AIの指摘と同じ一覧に
     // 並ぶので、どれがAIを通っていないかを数で示す
-    if (locationRun.issues.length > 0) {
-      parts.push(`うち場所の位置関係（機械で照合） ${locationRun.issues.length}件`);
-    }
-    // 本文に置けなかった食い違い（作者が書いた関係どうし）は黙らない
-    if (locationRun.unplacedCount > 0) {
-      parts.push(
-        `本文の行に置けなかった位置関係の食い違い ${locationRun.unplacedCount}件（ログ参照）`
-      );
-    }
-    if (locationRun.unreadableLocations > 0) {
-      parts.push(
-        `読めなかった場所のファイル ${locationRun.unreadableLocations}件（位置関係の照合の外）`
-      );
-    }
+    parts.push(...describeLocationRun(locationRun, "うち"));
     if (result.failedChunks > 0) {
       parts.push(`読み取れなかった ${result.failedChunks}件`);
     }
@@ -6367,7 +6364,7 @@ export async function activate(
         // **口調を照らさなかったことも黙らない**（P-12 1.9）。小さいモデルでは
         // 口調の指示を送らないので、「口調は合っていた」と読まれないようにする
         result.speechNote,
-        result.issues.length + locationRun.issues.length > 0
+        result.issues.length + locationRun.issues.length + locationRun.recordIssues.length > 0
           ? "本文は書き換えていません。 設定と本文のどちらを直すかは作者が決めてください。"
           : "",
       ]
@@ -6376,6 +6373,74 @@ export async function activate(
     });
     return CHECK_COMPLETED;
   }
+
+  /*
+    場所の位置関係の照合を単独で（設計書6.93.9 の順6。作者の裁定 2026-10-09 夜）。
+
+    **AIを使わない・無料。** これまでは矛盾検知（P-12）の終わりにしか走らず、
+    資料の位置関係を直したあとに確かめるだけでも AI の検知を待つ必要があった。
+    略図（6.93.10）の前の検算としても押す。
+
+    - 結果は矛盾検知と同じ「矛盾」の分類へ並べる。**AI の指摘は消さない**
+      （`showLocationContradictions`）
+    - **「前回から書いた分」の記録（`recordCheck`）は付けない。** AI の矛盾検知が
+      走ったことにすると、次の矛盾検知で範囲が狭まり、まだ AI に見せていない話が
+      抜ける
+    - 作品全体を照らす（範囲は選ばせない）。台帳全体の照合で、読むのは本文の
+      置き場を探すときだけなので軽い
+  */
+  context.subscriptions.push(
+    registerCommand("novelai.checkLocationConsistency", async (node?: WorkNode) => {
+      const work = await resolveWork(node, registry, { preferLast: true });
+      if (!work) return CHECK_CANCELLED;
+      // 未保存のまま読むと、画面と違う本文に行を置いてしまう
+      const unsaved = await saveBeforeCheck(work, "場所の位置関係の照合");
+      if (unsaved) return unsaved;
+
+      const run = await collectLocationContradictions(work);
+      if (run.loadError) {
+        void vscode.window.showErrorMessage(
+          `場所の資料を読めなかったので、位置関係を照合できませんでした。${run.loadError}`
+        );
+        return CHECK_COMPLETED;
+      }
+      if (run.locationsWithRelations === 0) {
+        // 照らす材料が無いのに「食い違い0件」と言うと、照らして無かったと読める
+        void vscode.window.showInformationMessage(
+          "位置関係を書いた場所がまだありません。設定資料パネルの場所の「位置関係」に書くか、資料を抽出してから押してください。"
+        );
+        return CHECK_COMPLETED;
+      }
+      const shown = proposalPanel.showLocationContradictions(
+        work,
+        run.issues,
+        run.recordIssues
+      );
+      // 本文に置けない行は校正・メモパネルに並ばない（本文の位置を持たない）。
+      // 提案パネルのほうも開いて、行が見えるようにする
+      if (run.recordIssues.length > 0) {
+        void vscode.commands.executeCommand("novelai.openProposals", {
+          preserveFocus: true,
+        });
+      }
+      const parts = describeCheckRunCounts({
+        shown: shown.remaining,
+        alreadyHandled: shown.handled,
+        rejected: 0,
+      });
+      parts.push(...describeLocationRun(run, ""));
+      notifyRunCompletion({
+        headline: "場所の位置関係の照合",
+        parts,
+        failedCount: 0,
+        tail:
+          run.issues.length + run.recordIssues.length > 0
+            ? "AIは使っていません。本文も資料も書き換えていません。どちらの記述を直すかは作者が決めてください。"
+            : "AIは使っていません。",
+      });
+      return CHECK_COMPLETED;
+    })
+  );
 
   /*
     矛盾検知（事実の照合。設計書6.88の第4段）。

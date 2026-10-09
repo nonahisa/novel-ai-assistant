@@ -217,13 +217,18 @@ export interface LocationInconsistency {
   statements: LocationStatement[];
 }
 
-/** 台帳で相手を引く。引けなければ null（推測で補わない） */
-interface Resolver {
+/**
+ * 台帳で相手を引く。引けなければ null（推測で補わない）。
+ *
+ * **略図（`locationSketch.ts`）も同じ1本を使う。** 照合と略図で相手の引き方が
+ * 違うと、照合では比べなかった関係を略図だけが線で結ぶことになる。
+ */
+export interface LocationResolver {
   resolve(name: string, targetId: string | null): string | null;
   nameOf(key: string): string;
 }
 
-function buildResolver(locations: readonly Location[]): Resolver {
+export function buildLocationResolver(locations: readonly Location[]): LocationResolver {
   const byId = new Map(locations.map((location) => [location.id, location]));
   const byName = new Map<string, Set<string>>();
   for (const location of locations) {
@@ -264,9 +269,9 @@ function statementOf(location: Location, relation: LocationRelation): LocationSt
  * （設計書6.93.2）。無ければ読まない——地域の欄は自由文で、場所の名前とは
  * 限らない。
  */
-function regionStatement(
+export function regionStatement(
   location: Location,
-  resolver: Resolver
+  resolver: LocationResolver
 ): { statement: LocationStatement; targetKey: string } | null {
   const region = location.region?.trim();
   if (!region) return null;
@@ -302,7 +307,7 @@ function regionStatement(
 export function findLocationInconsistencies(
   locations: readonly Location[]
 ): LocationInconsistency[] {
-  const resolver = buildResolver(locations);
+  const resolver = buildLocationResolver(locations);
   return [
     ...findCycles(locations, resolver),
     ...findPairConflicts(locations, resolver),
@@ -312,7 +317,7 @@ export function findLocationInconsistencies(
 /** 含む関係の輪。強く繋がった塊（2か所以上）を1件にまとめる */
 function findCycles(
   locations: readonly Location[],
-  resolver: Resolver
+  resolver: LocationResolver
 ): LocationInconsistency[] {
   /** 辺（from→to）ごとに、最初に見つけた記述。関係の欄を地域の欄より先に採る */
   const edges = new Map<string, Map<string, LocationStatement>>();
@@ -413,7 +418,7 @@ function stronglyConnected(
  */
 function findPairConflicts(
   locations: readonly Location[],
-  resolver: Resolver
+  resolver: LocationResolver
 ): LocationInconsistency[] {
   interface Entry {
     statement: LocationStatement;
@@ -683,4 +688,51 @@ export function describeStatement(statement: LocationStatement): string {
       ? ""
       : "（作者が書いた関係）";
   return `${head}${statement.text}${quote}`;
+}
+
+/* ── 本文に置けない食い違い ───────────────────────── */
+
+/**
+ * 根拠も話数も無い食い違い（作者が書いた関係どうし）を、提案パネルの
+ * 「場所の資料を開く」行にするための1件（設計書6.93.9 の順6）。
+ *
+ * **本文の行を持たない。** 飛ぶ先の本文が無いので、押すとその場所の資料が開く。
+ * 以前は件数を通知に出して中身をログへ残すだけで、作者は資料のどこを見れば
+ * よいのか探す必要があった。
+ */
+export interface LocationRecordIssue {
+  kind: LocationInconsistencyKind;
+  /** 開く資料（食い違いを作っている記述のうち、先頭の記述を持つ場所） */
+  locationId: string;
+  locationName: string;
+  /** その場所の資料のファイル。呼ぶ側（台帳の置き場を知っている側）が入れる */
+  filePath: string;
+  summary: string;
+  /** もう一方の記述（循環は残り全部を「／」で） */
+  settingSays: string;
+  /** 開く資料の記述 */
+  textSays: string;
+}
+
+/**
+ * 置けなかった食い違いを、資料を開く1件にする。
+ *
+ * 開くのは**先頭の記述を持つ場所**（並びは台帳の順なので、毎回同じ場所になる）。
+ * 地域の欄から読んだ記述しか無いとき（循環が地域の欄だけで閉じている）も、
+ * 直す先はその場所の資料なので同じ扱いでよい。
+ */
+export function recordIssueOf(
+  inconsistency: LocationInconsistency,
+  filePathOf: (locationId: string) => string
+): LocationRecordIssue {
+  const [anchor, ...others] = inconsistency.statements;
+  return {
+    kind: inconsistency.kind,
+    locationId: anchor.locationId,
+    locationName: anchor.locationName,
+    filePath: filePathOf(anchor.locationId),
+    summary: inconsistency.summary,
+    settingSays: others.map(describeStatement).join("／"),
+    textSays: describeStatement(anchor),
+  };
 }

@@ -772,6 +772,12 @@
         "icon": "$(warning)"
       },
       {
+        "command": "novelai.checkLocationConsistency",
+        "title": "位置関係の照合（場所・AIなし）",
+        "category": "小説執筆",
+        "icon": "$(location)"
+      },
+      {
         "command": "novelai.checkDeviations",
         "title": "プロット逸脱検知",
         "category": "小説執筆",

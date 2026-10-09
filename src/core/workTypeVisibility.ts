@@ -336,6 +336,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.checkContradictions": "story",
   // 事実の照合による矛盾検知（設計書6.88）。P-12 としばらく並行させる
   "novelai.checkFactContradictions": "story",
+  // 場所の位置関係の照合（設計書6.93.9 の順6）。場所の資料が元
+  "novelai.checkLocationConsistency": "story",
   "novelai.checkForeshadows": "story",
   "novelai.checkForeshadowResolution": "story",
   "novelai.openForeshadows": "story",
@@ -541,6 +543,7 @@ export const COMMAND_KIND_FEATURES: Readonly<Record<string, KindFeature>> = {
   "novelai.checkDeviations": "narrative",
   "novelai.checkContradictions": "narrative",
   "novelai.checkFactContradictions": "narrative",
+  "novelai.checkLocationConsistency": "narrative",
   "novelai.checkForeshadows": "narrative",
   "novelai.checkForeshadowResolution": "narrative",
   "novelai.openForeshadows": "narrative",
