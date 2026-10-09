@@ -8,6 +8,7 @@ import {
   type ActionSection,
 } from "./actionTree";
 import { canRunProcesses } from "./runtime";
+import { CHAT_MODEL_NOTES } from "./chatModelNotes";
 import { entranceOf } from "./actionEntrance";
 import {
   selectGuideBundles,
@@ -424,6 +425,14 @@ export function buildGuideBundles(): GuideBundle[] {
     key: "files",
     label: "ファイルの置き場所",
     text: extraGuideSection("ファイルの置き場所"),
+  });
+  // 相談に向くモデルの比べ。**作者が訊いたときだけ**当たる束で、画面では勧めない
+  // （作者の裁定 2026-10-09）。EXTRA_GUIDE には入れない——あちらは作者が読む
+  // マニュアルにも載るので、ここへ書くと画面で勧めたことになる
+  bundles.push({
+    key: "modelChoice",
+    label: "相談に使うモデルの目安",
+    text: CHAT_MODEL_NOTES,
   });
 
   return bundles;
