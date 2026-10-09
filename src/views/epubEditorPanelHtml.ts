@@ -2298,7 +2298,13 @@ function renderPages() {
     if (page.vertical && !page.compose) sheet.scrollLeft = sheet.scrollWidth;
   });
 
-  SIDES.forEach(drawCover);
+  // **面の名前だけを渡す。** forEach へ drawCover をそのまま渡すと、2つ目の値（並びの
+  // 番号）が描く先（target）に入る。front は番号0で偽なので画面の canvas に描かれるが、
+  // back は番号1が描く先になり、画面の見本が空白の箱のままだった（実機確認リスト 316、
+  // 2026-10-09）
+  SIDES.forEach(function (side) {
+    drawCover(side);
+  });
 }
 
 /** 面の並びとプレビューを受け取る。選びは拡張機能が言うときだけ動かす */

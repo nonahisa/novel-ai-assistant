@@ -171,7 +171,8 @@ describe("プロットモードのパネルへの配線", () => {
 
   it("置き場を読んだら見張りを張る", () => {
     expect(source).toContain("new EpisodePlotFolderWatcher(");
-    const load = source.indexOf("private async load(");
+    // 読み込みの中身は loadOnce（load は前の読み込みに続けて走らせる口。実機確認リスト 369）
+    const load = source.indexOf("private async loadOnce(");
     expect(load).toBeGreaterThan(-1);
     expect(source.slice(load, load + 1500)).toContain(
       "this.plotWatcher.watch(this.episodePlotsDir)"

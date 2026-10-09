@@ -109,6 +109,11 @@ interface Measure {
   tabCount: number;
   /** パネルが本文の幅を詰めたか（空なら詰めていない） */
   bodyMaxWidth: string;
+  /** 本文（body）の左端・右端。VS Code は WebView の body に左右の余白を入れることがある */
+  bodyLeft: number;
+  bodyRight: number;
+  /** 本文の中で、いちばん右へ出た要素の右端 */
+  widestRight: number;
 }
 
 /**
@@ -152,6 +157,18 @@ async function measure(page: Page, frame: Frame): Promise<Measure> {
       tabRows: rows.size,
       tabCount: tabs.length,
       bodyMaxWidth: document.body.style.maxWidth,
+      bodyLeft: Math.round(document.body.getBoundingClientRect().left),
+      bodyRight: Math.round(document.body.getBoundingClientRect().right),
+      // 本文の中の、いちばん右へ出た要素の右端（上の名指しの要素に限らない）
+      widestRight: Math.round(
+        Array.from(document.body.querySelectorAll("*")).reduce((most, element) => {
+          const box = element.getBoundingClientRect();
+          if (box.width === 0 && box.height === 0) return most;
+          // 見えている幅を測る目印（visibleWidthScript.ts。窓いっぱいの見えない帯）は数えない
+          if (getComputedStyle(element).position === "fixed") return most;
+          return Math.max(most, box.right);
+        }, 0)
+      ),
     };
   }, width);
   return { width, ...inside };
@@ -195,7 +212,9 @@ test("狭い窓で、提案パネルのタブと文は右で切れずに折り�
         10_000
       ).catch(() => undefined);
       const result = last as Measure;
-      const detail = `見える幅 ${result.width}px／パネルの幅 ${result.frameWidth}px`;
+      const detail =
+        `見える幅 ${result.width}px／パネルの幅 ${result.frameWidth}px／` +
+        `本文の左端 ${result.bodyLeft}px・右端 ${result.bodyRight}px／いちばん右の要素 ${result.widestRight}px`;
 
       // 写真と同じ形：パネルの右端が窓の外へ出て、見える幅が WebView の幅より狭い
       expect(result.width, `写真と同じ形になっていません（${detail}）`).toBeLessThan(result.frameWidth);
@@ -204,6 +223,14 @@ test("狭い窓で、提案パネルのタブと文は右で切れずに折り�
         result.frameWidth + 1
       );
       expect(result.tabRows, `狭いのにタブが1段のままです（${detail}）`).toBeGreaterThanOrEqual(2);
+      // 本文の右端も、中のどの要素も、見える幅の中に収まる。本文の左に余白があるとき、
+      // 見える幅をそのまま最大幅にすると、余白のぶん右へ出る（原稿エディターで起きた）
+      expect(result.bodyRight, `本文の右端が見える幅の外へ出ています（${detail}）`).toBeLessThanOrEqual(
+        result.width + 1
+      );
+      expect(result.widestRight, `見える幅の外へ出た要素があります（${detail}）`).toBeLessThanOrEqual(
+        result.width + 1
+      );
     },
     { ...OPEN_PROPOSALS_LAUNCH, windowSize: { width: 640, height: 800 } }
   );

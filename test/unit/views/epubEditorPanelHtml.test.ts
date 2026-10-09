@@ -722,4 +722,13 @@ describe("画面から拡張機能へ返すもの", () => {
     // 拡張機能からバイト列（dataURL）を貰って描き直す
     expect(script).toContain("post('imageData'");
   });
+
+  /**
+   * 実機確認リスト 316（2026-10-09）：`SIDES.forEach(drawCover)` と書くと、forEach の
+   * 2つ目の値（並びの番号）が描く先（target）に入り、裏表紙（番号1）の見本が画面に
+   * 描かれず空白の箱になっていた。画面での確かめは `test/e2e/epubBackCoverPreview.test.ts`。
+   */
+  it("見本を描く関数を、forEach へそのまま渡さない（並びの番号が描く先に入る）", () => {
+    expect(script).not.toMatch(/forEach\(\s*drawCover\s*\)/);
+  });
 });
