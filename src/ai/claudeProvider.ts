@@ -101,7 +101,7 @@ export class ClaudeProvider implements ApiKeyProvider {
   readonly apiKeyHelp: ApiKeyHelp = {
     title: "ClaudeのAPIキーを入力してください",
     prompt:
-      "console.anthropic.com の API Keys で発行できます。入力内容は資格情報ストアに保存され、settings.jsonには書き込まれません。",
+      "console.anthropic.com の API Keys で発行できます。Max・Teamプランの毎月のAPIクレジットは、claude.aiの設定でConsoleの組織を結びつけると使えます。入力内容は資格情報ストアに保存され、settings.jsonには書き込まれません。",
     placeHolder: "APIキーを貼り付けてください",
     validate: validateApiKeyFormat,
   };
@@ -593,7 +593,7 @@ export function billingProblem(error: unknown): AIError | undefined {
   }
   return new AIError(
     "Anthropicのクレジット残高が不足しています。" +
-      "console.anthropic.com の Plans & Billing で購入してください。",
+      "console.anthropic.com の Plans & Billing で購入してください（Max・Teamプランの毎月のクレジットを使い切ったときも同じです）。",
     "insufficient_credit",
     message
   );

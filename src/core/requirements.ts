@@ -161,7 +161,7 @@ export const REQUIREMENTS: Requirement[] = [
     purpose:
       "自分のパソコンの中でAIを動かします。無料で、原稿を外部へ送りません。",
     withoutIt:
-      "AIを使う機能は、Claude・ChatGPT・GeminiのAPIキーを登録しないと使えません（こちらは従量課金です）。",
+      "AIを使う機能は、Claude・ChatGPT・GeminiのAPIキーを登録しないと使えません（こちらは従量課金です。ClaudeはMax・Teamプランなら毎月のAPIクレジットの範囲で使えます）。",
     level: "必須",
     size: "約1GB",
     wingetId: "Ollama.Ollama",

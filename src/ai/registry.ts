@@ -452,7 +452,7 @@ export async function pickProviderAndModel(
     gemini: "無料枠あり。超えると課金される",
     openai: "実行するたびに課金される",
     sakura: "国内のサービス。無料枠あり。超えると課金される",
-    claude: "高精度だが実行するたびに課金される",
+    claude: "高精度。実行ごとの課金（Max・Teamは毎月のクレジット内）",
     /*
       **鍵はこの製品が持たない**（設計書6.87.11）。VS Code へ繋いである
       AI（Copilot にサインイン、または VS Code 側へ入れた各社の鍵）を借りる。

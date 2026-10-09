@@ -254,7 +254,7 @@ VS Codeの「ヘルプ → はじめに」にある「統合小説執筆環境�
 | Gemini | 無料枠あり。超えると課金 | aistudio.google.com |
 | さくらのAI Engine | 無料枠あり。超えると課金 | さくらのクラウド コントロールパネル |
 | ChatGPT | 実行するたびに課金 | platform.openai.com |
-| Claude | 実行するたびに課金 | console.anthropic.com |
+| Claude | 実行するたびに課金。Max・Team プランなら毎月のAPIクレジットの範囲で使えます（[受け取り方](https://platform.claude.com/docs/en/about-claude/api-credits-for-subscribers)） | console.anthropic.com |
 | VS Code 経由 | VS Code 側の契約による | 不要（VS Code が持っています） |
 
 **APIキーはOSの資格情報ストアへ保存し、`settings.json` や作品フォルダーには書き込みません。** ログでは伏せ字にします。クラウドAIでは、呼び出しの多い処理の前にトークン量の目安を表示します。
