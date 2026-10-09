@@ -168,8 +168,9 @@ describe("抑制を残した版（6.10.8）", () => {
 /*
   MCP から抑制を選ぶ（設計書6.10.8）。
 
-  **既定はゆるめた版である。** 製品はモデルの大きさから自動で決めるが、
-  MCP は外部AIが自分でモデルを選ぶので、こちらから大きさを当てにいかない。
+  **`novel.prompt` の既定はゆるめた版である。** 相手のモデルの大きさが分からない
+  ので、製品が大きいモデルへ送る形にする。手元の Ollama で回す `novel.run` は
+  製品と同じ判定で決める（2026-10-10。`mcpModelSizeDefault.test.ts`）。
 */
 describe("MCP の options.suppression", () => {
   const folder = "test/fixtures/seeded/contradiction";
@@ -652,7 +653,12 @@ describe("画面", () => {
   作者の案（2026-09-19）：「クラウドの高位AIは節約、手元で動くローカルLLMでは
   **手数を意識して組む**と良さそうですね」。手元では呼び出しが電気代だけなので、
   **7区分を減らすのではなく、1区分ずつ分けて問う**道があり得る。
-  その測り比べをするための口である。**既定（light）は変えていない。**
+  その測り比べをするための口である。
+
+  **既定は 2026-10-10 に all へ変わった**（作者の裁定「製品と同じ判定にする」）。
+  `novel.prompt` は相手のモデルの大きさが分からないので、製品が大きいモデルへ
+  送る形にする。手元の Ollama で回す `novel.run` は、製品と同じ判定で決めた値が
+  指定として渡る（`mcpModelSizeDefault.test.ts`）。
 */
 describe("矛盾の区分を、名前で指す", () => {
   const folder = "test/fixtures/seeded/contradiction";
@@ -663,8 +669,8 @@ describe("矛盾の区分を、名前で指す", () => {
       .categories;
   }
 
-  test("指定しなければ、これまでどおり light の3つ", () => {
-    expect(categoriesFor()).toEqual(["人物", "状態", "時系列"]);
+  test("指定しなければ、製品が大きいモデルへ送る形（7つ）", () => {
+    expect(categoriesFor()).toHaveLength(7);
   });
 
   test("light と all は、これまでどおり", () => {
@@ -700,8 +706,8 @@ describe("矛盾の区分を、名前で指す", () => {
   });
 
   test("空を渡されたら、黙って既定へ倒す", () => {
-    expect(categoriesFor("")).toEqual(["人物", "状態", "時系列"]);
-    expect(categoriesFor("  ,  ")).toEqual(["人物", "状態", "時系列"]);
+    expect(categoriesFor("")).toEqual(categoriesFor());
+    expect(categoriesFor("  ,  ")).toEqual(categoriesFor());
   });
 
   /*

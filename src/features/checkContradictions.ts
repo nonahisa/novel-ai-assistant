@@ -427,6 +427,7 @@ export async function checkContradictions(
     provider: resolved.provider,
     model: resolved.model,
     actionLabel: "矛盾検知",
+    workFolder: work.folderPath,
   });
   if (!info) return undefined;
   const tier = info.tier;

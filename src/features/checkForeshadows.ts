@@ -187,6 +187,7 @@ export async function checkForeshadows(
     provider: resolved.provider,
     model: resolved.model,
     actionLabel: "伏線の検知",
+    workFolder: work.folderPath,
   });
   if (!info) return undefined;
 
@@ -650,6 +651,7 @@ export async function checkForeshadowResolution(
     provider: resolved.provider,
     model: resolved.model,
     actionLabel: "伏線の回収の確認",
+    workFolder: work.folderPath,
   });
   if (!info) return undefined;
 

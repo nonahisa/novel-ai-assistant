@@ -38,6 +38,11 @@ vi.mock("../../../src/mcp/tools/ollama", () => ({
     asked.push(params.userPrompt);
     return { text: reply };
   }),
+  /*
+    頼み方は申告の大きさから製品と同じ判定で決まる（2026-10-10。設計書6.87.12）。
+    ここでは大きいモデル（1.2 の文＝`TYPO_CHECK_VERSION`）として鍵を確かめる
+  */
+  ollamaParameterSize: vi.fn(async () => "25.2B"),
 }));
 
 import { typoRun, typoPrompt } from "../../../src/mcp/tools/typo";

@@ -71,6 +71,11 @@ import {
   validateWith,
 } from "./run";
 import {
+  decideModelSize,
+  givenOptionNames,
+  UNKNOWN_MODEL_SIZE_CHOICE,
+} from "./modelSize";
+import {
   needsSubtitleOf,
   resolveEpisodeForSynopsis,
   stashEpisodeSynopsis,
@@ -290,8 +295,10 @@ const DEVIATION_VALIDATE_WITH = validateWith("deviation");
 
 export interface DeviationPromptInput extends EpisodePromptInput {
   /**
-   * どちらのモデル向けに尋ねるか。`large`（既定）＝「逸脱」と「間延び」の2つ、
-   * `small` ＝「逸脱」だけ（製品が20B未満のモデルへ送る形）。
+   * どちらのモデル向けに尋ねるか。`large`＝「逸脱」と「間延び」の2つ、
+   * `small` ＝「逸脱」だけ（製品が20B未満のモデルへ送る形）。指定が無ければ、
+   * `novel.run` の ollama はモデルの申告の大きさから製品と同じ判定で、
+   * ほかの道は製品が大きいモデルへ送る形（large）で決める（`modelSize.ts`）。
    */
   modelSize?: string;
 }
@@ -299,11 +306,9 @@ export interface DeviationPromptInput extends EpisodePromptInput {
 /**
  * 小さいモデル向けに尋ねるか。
  *
- * **MCP の既定は大きいモデル向けである。** 製品はモデルの大きさから自動で
- * 決める（`ai/capability.ts` の `narrowDeviationTypes`。20B 未満は「逸脱」だけ）が、
- * MCP は外部AIが自分でモデルを選ぶので、大きさを当てにいかない（誤字脱字の
- * `modelSize`・矛盾検知の `suppression` と同じ考え）。小さいモデルを製品と同じ
- * 条件で測るなら `small` を渡す。
+ * **指定が無いときは、製品と同じ判定で決めたものが渡ってくる**（作者の裁定
+ * 2026-10-10。`modelSize.ts`）。ここへ指定なしのまま来るのは大きさの
+ * 分からない道（`novel.prompt` など）で、製品が大きいモデルへ送る形にする。
  *
  * 2026-09-26 まではこの選択が無く、いつも2つとも尋ねていた。e4b・12b を
  * 製品と違う頼み方で測ることになっていた。
@@ -311,9 +316,9 @@ export interface DeviationPromptInput extends EpisodePromptInput {
  * **知らない値は黙って丸めない**（打ち間違いに気づかないまま記録が残る）。
  */
 function deviationForSmallModelOf(choice: string | undefined): boolean {
-  if (choice === undefined) return false;
-  const name = String(choice).trim();
-  if (name === "" || name === "large") return false;
+  const name = choice === undefined ? "" : String(choice).trim();
+  if (name === "") return UNKNOWN_MODEL_SIZE_CHOICE.deviationModelSize === "small";
+  if (name === "large") return false;
   if (name === "small") return true;
   throw new McpToolError(
     `知らないモデルの大きさです: ${name}` +
@@ -537,10 +542,22 @@ export async function synopsisRun(input: EpisodePromptInput & RunnerInput) {
 }
 
 export async function deviationRun(input: DeviationPromptInput & RunnerInput) {
-  const prompt = deviationPrompt(input);
-  const outcome = await runOnce(input, prompt, (response) =>
+  // **指定が無ければ、製品と同じ判定で尋ね方を決める**（作者の裁定 2026-10-10）
+  const sized = await decideModelSize(
+    input,
+    givenOptionNames({ modelSize: input.modelSize }),
+    ["modelSize"]
+  );
+  const prompt = deviationPrompt({
+    ...input,
+    modelSize: sized.decision.given.includes("modelSize")
+      ? input.modelSize
+      : sized.choice.deviationModelSize,
+  });
+  const ran = await runOnce(input, prompt, (response) =>
     deviationValidate({ ...input, response })
   );
+  const outcome = { ...ran, modelSizeDecision: sized.decision };
   /*
     **切ったことは `run` でも知らせる**（0.66.4）。`prompt` だけが知っていると、
     `run` で回した人には「プロットを全部見たうえでの0件」に見える。

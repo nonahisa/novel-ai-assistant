@@ -22,6 +22,7 @@ import {
   type VerdictCount,
 } from "../core/verdictTally";
 import { modelTuning } from "../core/modelTuning";
+import { SMALL_MODEL_NOTICE_FEATURES } from "../core/smallModelNotice";
 import { describeTypoAccuracyHint } from "../core/tuningAccuracy";
 import { cancelItem } from "../views/dialogs";
 import { notifyDone } from "../views/notify";
@@ -232,5 +233,11 @@ async function pickTarget(
   if (!choice || !("action" in choice)) return undefined;
   if (choice.action === "default") return "default";
 
-  return await pickProviderAndModel(registry);
+  // 出来がモデルの大きさに左右される機能だけ、小さいモデルの行に注意を添える（設計書6.28.9）
+  return await pickProviderAndModel(registry, {
+    smallModelNote: Object.prototype.hasOwnProperty.call(
+      SMALL_MODEL_NOTICE_FEATURES,
+      feature
+    ),
+  });
 }

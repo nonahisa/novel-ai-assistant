@@ -22,6 +22,7 @@ import { canRunProcesses } from "../core/runtime";
 import { isLocalProviderId } from "../core/localProviders";
 import { allModelTuning, modelTuningKey } from "../core/modelTuning";
 import { modelPickDetail } from "../core/tuningStats";
+import { smallModelPickDetail } from "../core/smallModelNotice";
 import { EXPERTS_BADGE } from "../core/modelExperts";
 import { notifyDone } from "../views/notify";
 import { manualModelEntryPrompt } from "./hiddenModels";
@@ -442,7 +443,16 @@ export interface ProviderAndModelPick {
  * 割り当てるのか）は呼び出し側が決める。
  */
 export async function pickProviderAndModel(
-  registry: AIRegistry
+  registry: AIRegistry,
+  options: {
+    /**
+     * 小さいモデルの行に短い注意を添えるか（設計書6.28.9）。機能別AI割当で、
+     * 出来がモデルの大きさに左右される機能を割り当てるときだけ true。
+     * AI設定（既定のモデル）では添えない——生成や相談にも使うモデルで、
+     * そこでは大きさで決まると言える測定が無い
+     */
+    smallModelNote?: boolean;
+  } = {}
 ): Promise<ProviderAndModelPick | undefined> {
   const providers = registry.listProviders();
 
@@ -616,10 +626,14 @@ export async function pickProviderAndModel(
         ]
           .filter(Boolean)
           .join(" / "),
-        detail: modelPickDetail(
-          m.capabilities,
-          tuningTable.get(modelTuningKey(providerPick.providerId, m.id)),
-          m.experts
+        detail: smallModelPickDetail(
+          options.smallModelNote === true,
+          m.parameterSize,
+          modelPickDetail(
+            m.capabilities,
+            tuningTable.get(modelTuningKey(providerPick.providerId, m.id)),
+            m.experts
+          )
         ),
         model: m,
       })),

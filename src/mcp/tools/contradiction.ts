@@ -100,6 +100,12 @@ import {
   validateWith,
   timeoutMsOf,
 } from "./run";
+import {
+  decideModelSize,
+  givenOptionNames,
+  UNKNOWN_MODEL_SIZE_CHOICE,
+  type ModelSizeDecision,
+} from "./modelSize";
 
 /**
  * 矛盾検知（P-12）を外から呼ぶ（設計書6.87.8 の4）。
@@ -118,9 +124,10 @@ const VALIDATE_WITH = validateWith("contradiction");
 /**
  * 観点の絞り方。
  *
- * 製品はモデルの地力（`capabilityProfile`）から自動で決めるが、**MCP は
- * 相手のモデルの素性を知らない**ので、呼ぶ側に選ばせる。既定は `light`
- * （小さいモデルで観点を広げると、1回の負荷が上がって検出漏れが増える）。
+ * 呼ぶ側が選べる。指定が無ければ製品と同じ判定で決める（作者の裁定
+ * 2026-10-10。`modelSize.ts`）——`novel.run` の ollama はモデルの申告の
+ * 大きさから、大きさの分からない道は製品が大きいモデルへ送る形（all）。
+ * 2026-10-09 までの既定 `light`＋`loose` は、製品のどの大きさとも一致しなかった。
  */
 interface Settings {
   people: Character[];
@@ -330,16 +337,24 @@ function pastSceneLookupOf(
  * 作者の案（2026-09-19）：「クラウドの高位AIは節約、手元で動くローカルLLMでは
  * **手数を意識して組む**と良さそうですね」。手元では呼び出しが電気代だけなので、
  * **7区分を減らすのではなく、1区分ずつ分けて問う**道があり得る。
- * それを**測れるようにする**ための口である（既定は `light` のまま変えない）。
+ * それを**測れるようにする**ための口である。
  *
  * 受ける形は3つ——1つの名前（`"状態"`）、並び（`["人物","状態"]`）、
  * 区切り文字でつないだもの（`"人物,状態"`）。**測定の台本から
  * `--option categories=状態` と打てる**ことを優先した。
+ *
+ * 指定が無いときの既定は、大きさの分からない道の既定（製品が大きいモデルへ
+ * 送る形＝all。`UNKNOWN_MODEL_SIZE_CHOICE`）。`novel.run` の ollama では、
+ * 製品と同じ判定で決めた値が指定として渡ってくる。
  */
 function categoriesOf(
   choice: string | readonly string[] | undefined
 ): readonly ContradictionCategory[] {
-  if (choice === undefined) return LIGHT_CATEGORIES;
+  const fallback =
+    UNKNOWN_MODEL_SIZE_CHOICE.categories === "light"
+      ? LIGHT_CATEGORIES
+      : CONTRADICTION_CATEGORIES;
+  if (choice === undefined) return fallback;
   if (choice === "all") return CONTRADICTION_CATEGORIES;
   if (choice === "light") return LIGHT_CATEGORIES;
 
@@ -347,7 +362,7 @@ function categoriesOf(
     .map((name) => name.trim())
     .filter((name) => name !== "");
   // 空文字だけを渡されたときは、黙って既定へ倒す（打ち間違いで止めない）
-  if (names.length === 0) return LIGHT_CATEGORIES;
+  if (names.length === 0) return fallback;
 
   const unknown = names.filter(
     (name) => !CONTRADICTION_CATEGORIES.includes(name as ContradictionCategory)
@@ -411,18 +426,17 @@ type Suppression = "loose" | "strict";
 /**
  * 抑制の強さを決める。
  *
- * **MCP の既定はゆるめた版である。** 製品はモデルの大きさから自動で決める
- * （`ai/capability.ts`）が、**MCP は外部AIが自分でモデルを選ぶ**ので、
- * こちらから大きさを当てにいかない。呼ぶ側に選ばせる。
+ * 呼ぶ側が選べる。指定が無ければ製品と同じ判定で決める（`categoriesOf` と
+ * 同じ。`modelSize.ts`）。ここへ指定なしのまま来るのは大きさの分からない道で、
+ * 製品が大きいモデルへ送る形（ゆるめた版）にする。
  *
  * **知らない値は黙って丸めない**（`categoriesOf`・`carryOverOf` と同じ）。
  * 丸めると、打ち間違いに気づかないまま「その抑制で測った」記録が残る。
  */
 function suppressionOf(choice: string | undefined): Suppression {
-  if (choice === undefined) return "loose";
-  const name = String(choice).trim();
+  const name = choice === undefined ? "" : String(choice).trim();
   // 空文字だけを渡されたときは、黙って既定へ倒す（打ち間違いで止めない）
-  if (name === "") return "loose";
+  if (name === "") return UNKNOWN_MODEL_SIZE_CHOICE.suppression;
   if (name === "loose" || name === "strict") return name;
   throw new McpToolError(
     `知らない抑制の強さです: ${name}` +
@@ -946,9 +960,27 @@ export async function contradictionRun(input: ContradictionRunInput): Promise<
      * `claude` では検証を通していないことを断る
      */
     verifyNote: string;
+    /** 観点と抑制をどう決めたか（製品と同じ判定か、指定に従ったか） */
+    modelSizeDecision: ModelSizeDecision;
   }
 > {
-  const prompts = contradictionPrompt(input);
+  /*
+    **指定が無ければ、製品と同じ判定で観点と抑制を決める**（作者の裁定 2026-10-10）。
+    指定はそれぞれ別に効く——観点だけを振って比べる測定の道を残す
+  */
+  const sized = await decideModelSize(
+    input,
+    givenOptionNames({ categories: input.categories, suppression: input.suppression }),
+    ["categories", "suppression"]
+  );
+  const given = sized.decision.given;
+  const prompts = contradictionPrompt({
+    ...input,
+    categories: given.includes("categories") ? input.categories : sized.choice.categories,
+    suppression: given.includes("suppression")
+      ? input.suppression
+      : sized.choice.suppression,
+  });
 
   /*
     **落としたことを言う**（設計書6.10.6）。
@@ -1004,6 +1036,7 @@ export async function contradictionRun(input: ContradictionRunInput): Promise<
     missed,
     speechCheck: prompts.speechCheck,
     speechNote: prompts.speechNote,
+    modelSizeDecision: sized.decision,
   };
   if (outcome.runner === "claude") {
     // **2段のうち1段しか渡せないことを黙らない**（`factContradiction` と同じ）

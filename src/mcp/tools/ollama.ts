@@ -239,6 +239,48 @@ export function callTimeoutMs(requested: number | undefined): number {
   return Math.min(requested, MCP_OLLAMA_WAIT_MS);
 }
 
+/** 大きさを問い合わせるときの待ち時間。モデルを載せない問い合わせなので短くてよい */
+const PARAMETER_SIZE_TIMEOUT_MS = 10_000;
+
+/**
+ * そのモデルが申告する大きさ（`/api/show` の `details.parameter_size`。"8.0B" など）。
+ *
+ * **製品（`ai/ollamaProvider.ts`）と同じ欄を読む。** 頼み方を製品と同じ判定で
+ * 決める（`mcp/tools/modelSize.ts`）ための材料で、別の欄を読むと同じモデルの
+ * 大きさが製品と MCP で食い違う。
+ *
+ * **取れなければ null**（投げない）。製品も大きさが取れないモデルを
+ * 「大きさ不明」として判定へ渡すので、ここも同じ形で返す。
+ *
+ * **`allowRemote` は見ない**（`ollama.models` と同じ）。モデルの素性を読むだけで、
+ * 作者の原稿は1文字も送らない。本文を送る段（`ollamaGenerate`）が別に断る。
+ */
+export async function ollamaParameterSize(input: {
+  endpoint?: string;
+  model: string;
+}): Promise<string | null> {
+  const endpoint = (input.endpoint ?? DEFAULT_ENDPOINT).replace(/\/+$/, "");
+  try {
+    const response = await localFetch(
+      `${endpoint}/api/show`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: input.model }),
+      },
+      PARAMETER_SIZE_TIMEOUT_MS
+    );
+    if (!response.ok) return null;
+    const payload = (await response.json()) as {
+      details?: { parameter_size?: unknown };
+    };
+    return stringOrNull(payload.details?.parameter_size);
+  } catch {
+    // 繋がらなければ、本文を送る段が理由つきで断る。ここで二重に断らない
+    return null;
+  }
+}
+
 /** `/api/chat` へ1回投げて、流れてきた応答を組み立てる */
 async function postChat(
   endpoint: string,
