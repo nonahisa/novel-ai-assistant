@@ -29,7 +29,7 @@ import {
 } from "./support/manuscriptFrame";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { activeTabNames, tabIsDirty } from "./support/workbenchDom";
+import { activeTabNames, quickOpen, tabIsDirty } from "./support/workbenchDom";
 
 const EP1 = "001_いち.txt";
 const EP2 = "002_に.txt";
@@ -307,6 +307,66 @@ test("校正・メモパネルの［次へ］を続けて押すと、2つの話�
           throw new Error(`${String(error)}（前に出ているタブ：${JSON.stringify(await activeTabNames(page))}）`);
         });
       }
+    }
+  );
+});
+
+/*
+  **打つ面でも、右クリック「メモ追加」でカーソル行の上に // が入る**（設計書6.40.3。
+  実機確認リスト F-45「右クリック『メモ追加』…（両方の面）」のうち、組んで書く面は1本目が
+  見ている。ここは打つ面）。
+
+  打つ面（textarea の `#write`）へは、いまは作者が自分で入る道が無い（切り替えのボタンは
+  0.24.14 で外した）。入るのは安全弁が働くときだけ——本文に組み直せない字（U+00A0）が
+  あると、組んで書く面は「元の本文と一致しない」と断って、打つ面のまま開く
+  （`composeBuildChecked`）。見本の本文へその字を1つ入れて、その道で打つ面を出す。
+*/
+test("打つ面でも、右クリック「メモ追加」でカーソル行の上に // が入る", async () => {
+  const NBSP = " ";
+  await withVsCode(
+    "メモ追加（打つ面）",
+    [{ name: EP1, text: `一の一行目。${NBSP}\n一の二行目。\n一の三行目。\n` }],
+    async (session) => {
+      const { page } = session;
+      await quickOpen(page, EP1);
+      const writeValue = (candidate: Frame): Promise<string> =>
+        candidate.evaluate(() => (document.getElementById("write") as HTMLTextAreaElement | null)?.value ?? "").catch(() => "");
+      let found: Frame | undefined;
+      await waitUntil(
+        async () => {
+          for (const candidate of await manuscriptFrames(page)) {
+            if ((await writeValue(candidate)).includes("一の三行目")) {
+              found = candidate;
+              return true;
+            }
+          }
+          return false;
+        },
+        "原稿エディターの打つ面（#write）に本文が入る",
+        30_000
+      );
+      if (!found) throw new Error("原稿エディターの面が見つかりません");
+      const surface = found;
+      // 打つ面にいること（組んで書く面に入っていないこと）を確かめる
+      expect(await surface.evaluate(() => document.body.classList.contains("compose")), "組んで書く面に入っています").toBe(false);
+      expect(await surface.locator("#write").isVisible(), "打つ面（#write）が見えません").toBe(true);
+
+      // 打つ面の上で右クリックする（右クリックした点にカーソルが動く。どの行に動いたかは、
+      // 品書きが開いたあとに読み直して、製品が使う値と同じものを見る）
+      await surface.locator("#write").click({ button: "right", position: { x: 60, y: 70 } });
+      const addItem = surface.locator("#menu .item", { hasText: "メモ追加" }).first();
+      await waitUntil(async () => (await addItem.count()) > 0 && (await addItem.isVisible()), "右クリックの品書きに「メモ追加」が出る");
+      const caretLine = await surface.evaluate(() => {
+        const write = document.getElementById("write") as HTMLTextAreaElement;
+        return write.value.slice(0, write.selectionStart).split("\n").length;
+      });
+      await addItem.click();
+      await waitUntil(async () => (await writeValue(surface)).split("\n").length === 5, "「メモ追加」で打つ面に1行増える");
+      const lines = (await writeValue(surface)).split("\n");
+      expect(lines[caretLine - 1].trim(), `カーソル行（${caretLine}行目）の上に // が入っていません。本文：${JSON.stringify(lines)}`).toBe("//");
+      await page.keyboard.press("Control+KeyS");
+      await waitUntil(async () => (await fileText(session, EP1)).split("\n").some((line) => line.trim() === "//"), "足したメモの行がファイルに入る");
+      expect((await fileText(session, EP1)).split("\n").length, "ファイルの行数").toBe(5);
     }
   );
 });
