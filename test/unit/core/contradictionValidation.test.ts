@@ -10,6 +10,7 @@ import { buildKnownAtIndex, lookupKnownAt, lookupKnownAtValue,
   type AcceptedContradiction,
 } from "../../../src/core/contradictionValidation";
 import type { Chunk } from "../../../src/core/chunker";
+import { contradictionVerifyContext } from "../../../src/core/contradictionAssembly";
 
 /**
  * 矛盾検知の応答の検証（設計書6.10.1）。
@@ -666,5 +667,78 @@ describe("値だけで索引を引く", () => {
     ]);
 
     expect(lookupKnownAtValue(index, "部長")).toEqual([]);
+  });
+});
+
+/**
+ * AIが申告した行番号を、引用が実際にある行へ直す（設計書6.10.5、2026-10-10）。
+ *
+ * 実データ（gemma4:26b、いじめられっ子の写しの第2話）で、36行目の台詞を正しく
+ * 指摘しながら line を 28 と申告した。検証の段は申告の行の前後6行しか見せないので、
+ * 引用の無い範囲を見た検証AIが「引用が本文と違う」で本物の指摘を取り下げていた。
+ */
+describe("申告の行を、引用のある行へ直す", () => {
+  // startLine は0始まり。19 なら1行目が20行目で、36行目まで17行ある
+  const lines = Array.from({ length: 17 }, (_, index) => `地の文${20 + index}行目。`);
+  lines[36 - 20] = "「僕は誰かを助けたかったのであって、責めたかったわけじゃない」";
+  const longChunk = {
+    ...chunk,
+    text: lines.join("\n"),
+    startLine: 19,
+  } as unknown as Chunk;
+  const speech = item({
+    line: 28,
+    excerpt: "僕は誰かを助けたかったのであって、",
+    settingSays: "一人称は「俺」",
+    textSays: "「僕」と言っている",
+  });
+
+  test("申告28・引用は36行目なら、36へ直す", () => {
+    const result = validateContradictions({ contradictions: [speech] }, longChunk);
+
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].line).toBe(36);
+  });
+
+  test("直した行の前後を検証へ渡すので、引用が見える", () => {
+    const result = validateContradictions({ contradictions: [speech] }, longChunk);
+    const context = contradictionVerifyContext(longChunk, result.accepted[0].line);
+
+    expect(context).toContain("僕は誰かを助けたかったのであって");
+  });
+
+  test("申告が正しければ動かさない", () => {
+    const result = validateContradictions(
+      { contradictions: [{ ...speech, line: 36 }] },
+      longChunk
+    );
+
+    expect(result.accepted[0].line).toBe(36);
+  });
+
+  test("同じ引用が2か所にあれば、申告に近いほうへ直す", () => {
+    const twice = [...lines];
+    twice[22 - 20] = "「僕は誰かを助けたかったのであって、責めたかったわけじゃない」";
+    const result = validateContradictions(
+      { contradictions: [speech] },
+      { ...longChunk, text: twice.join("\n") } as unknown as Chunk
+    );
+
+    // 28 から見て 22 は6行、36 は8行離れている
+    expect(result.accepted[0].line).toBe(22);
+  });
+
+  test("行をまたぐ引用は、申告のまま残す", () => {
+    const result = validateContradictions(
+      {
+        contradictions: [
+          { ...speech, line: 30, excerpt: "地の文25行目。地の文26行目。" },
+        ],
+      },
+      longChunk
+    );
+
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].line).toBe(30);
   });
 });
