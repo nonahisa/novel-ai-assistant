@@ -12,7 +12,10 @@ import { dismissKey, TypoDismissedHistory } from "../core/typoIssueHistory";
 import { parseEpisodeFileName } from "../core/episodeParser";
 import type { TypoCheckIssue } from "./checkTypos";
 import type { AcceptedContradiction as ContradictionIssue } from "../core/contradictionValidation";
-import type { LocationContradictionIssue } from "../core/locationConsistency";
+import type {
+  LocationContradictionIssue,
+  LocationRecordIssue,
+} from "../core/locationConsistency";
 import type { DeviationIssue } from "./checkDeviations";
 // 分類名（タブ）の定義は core が持つ。写しを作らない（設計書6.88）
 import { FACT_CONTRADICTION_CATEGORY } from "../core/factContradiction";
@@ -237,6 +240,52 @@ export function locationContradictionView(
     rightLabel: "この箇所では",
     openTarget: "settings",
     allowRecheck: false,
+  };
+}
+
+/** 位置関係の照合が出した行か（AIの指摘と分けて入れ替えるときに使う） */
+export function isLocationCheckRow(item: { id: string }): boolean {
+  return item.id.startsWith("l:") || item.id.startsWith("lr:");
+}
+
+/**
+ * 本文に置けない位置関係の食い違いを、「場所の資料を開く」行にする
+ * （設計書6.93.9 の順6）。
+ *
+ * - **押すと、その場所の資料を設定資料パネルで開く**（`recordLink`）。行番号は
+ *   持たないので、見出しも「N行目」にしない
+ * - 照らす相手のボタンは出さない（開く先が同じ資料になり、同じボタンが2つ並ぶ）
+ * - 再チェック・伏線として登録は、本文に置ける行と同じ理由で出さない
+ * - 見出しは「一方の記録では」「もう一方の記録では」。どちらも作者が書いた関係で、
+ *   本文の行ではない
+ */
+export function locationRecordView(
+  issue: LocationRecordIssue,
+  index: number
+): ContradictionViewItem {
+  return {
+    id: `lr:${issue.kind}:${issue.locationId}:${index}`,
+    filePath: issue.filePath,
+    fileName: path.basename(issue.filePath),
+    chunkHash: "",
+    line: 1,
+    excerpt: issue.summary,
+    category: "場所",
+    settingSays: issue.settingSays,
+    textSays: issue.textSays,
+    note:
+      `${issue.summary}。どちらの記述にも本文の根拠が無いので、本文の行には置けません。` +
+      "AIを使わず、設定資料の位置関係を照らしました。",
+    confidence: "high",
+    status: "pending",
+    canRegisterForeshadow: false,
+    leftLabel: "もう一方の記録では",
+    rightLabel: "この資料では",
+    openTarget: "none",
+    allowRecheck: false,
+    jumpLabel: "場所の資料を開く",
+    headLabel: `${issue.locationName}（場所の資料）`,
+    recordLink: { kind: "location", id: issue.locationId },
   };
 }
 
@@ -466,6 +515,17 @@ export interface ContradictionViewItem {
   openTarget: "settings" | "plot" | "file" | "none";
   /** `openTarget` が `"file"` のときに開くファイル */
   openPath?: string;
+  /**
+   * 本文の代わりに開く資料（設計書6.93.9 の順6）。**持っていれば「本文を見る」の
+   * 代わりにこの資料を設定資料パネルで開く。** 根拠も話数も無い位置関係の
+   * 食い違い（作者が書いた関係どうし）は、飛ぶ先の本文が無い
+   */
+  recordLink?: { kind: "location"; id: string };
+  /**
+   * 見出しの「〈ファイル名〉 N行目」の代わりに出す言葉。本文の行を持たない行
+   * （`recordLink`）で、行番号を出さないために使う
+   */
+  headLabel?: string;
   /** 相手側を開くボタンの言葉。無ければ `openTarget` から決める */
   openLabel?: string;
   /**
@@ -963,6 +1023,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * モデルを覚えるのは、**切り替えたら確認を取り直す**ため。
    */
   private paidConfirmedFor: string | undefined;
+  /** 面が読み込み終わったら示す行（`focusContradiction`） */
+  private focusRowId: string | undefined;
 
   /**
    * @param ai 再チェック（P-23）で使う。**渡されなければ
@@ -2076,11 +2138,14 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
      * 同じ1回の差し替えで並べる**——分類の中身は呼ぶたびに差し替わるので、
      * 別に呼ぶと先に並べた AI の指摘が消える
      */
-    locationIssues: readonly LocationContradictionIssue[] = []
+    locationIssues: readonly LocationContradictionIssue[] = [],
+    /** 本文に置けない位置関係の食い違い（「場所の資料を開く」行。設計書6.93.9 の順6） */
+    locationRecordIssues: readonly LocationRecordIssue[] = []
   ): IncomingCount {
-    const locationItems: ContradictionViewItem[] = locationIssues.map(
-      (issue, index) => locationContradictionView(issue, index)
-    );
+    const locationItems: ContradictionViewItem[] = [
+      ...locationIssues.map((issue, index) => locationContradictionView(issue, index)),
+      ...locationRecordIssues.map((issue, index) => locationRecordView(issue, index)),
+    ];
     const contradictions: ContradictionViewItem[] = issues.map((issue, index) => ({
       id: `c:${issue.chunkHash}:${issue.line}:${index}`,
       filePath: issue.filePath,
@@ -2106,6 +2171,84 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       contradictions: [...contradictions, ...locationItems],
       registerForeshadow,
     });
+  }
+
+  /**
+   * 場所の位置関係の照合だけを、単独で並べる（設計書6.93.9 の順6。AIを使わない）。
+   *
+   * **AI の指摘は消さない。** 同じ「矛盾」の分類に入れるが、`replaceContents` は
+   * 手を付けていない行を残して足す作りなので、AI の指摘はそのまま残る。
+   *
+   * **前回の照合の行のうち、まだ手を付けていないものは先に外す。** 照合は作品
+   * 全体の台帳を毎回読み直すので、今回出なかった食い違いは資料を直して消えた
+   * ものである。残すと、直したのに行が残り続ける。作者が「無視」した行は
+   * 作者の判断なので残す（同じ食い違いがまた届いても、無視のまま）。
+   *
+   * @param recordIssues 本文に置けない食い違い（「場所の資料を開く」行）
+   */
+  showLocationContradictions(
+    work: WorkEntry,
+    issues: readonly LocationContradictionIssue[],
+    recordIssues: readonly LocationRecordIssue[],
+    /**
+     * `quiet` なら、届いたことを知らせず画面も開かない（略図の赤い線から
+     * 呼ぶとき。続けて `focusContradiction` がこのパネルを開いて行を示す）
+     */
+    options: { quiet?: boolean } = {}
+  ): IncomingCount {
+    // 画面に出している分を置き場へ戻してから外す。**配列は同じものを
+    // 共有しているので、詰め直しは同じ配列の中で行う**（入れ替えると、
+    // 画面側が古い配列を握ったまま次の書き戻しで元へ戻してしまう）
+    this.stashCurrent();
+    const bucket = this.workBucketsOf(work).categories.get("矛盾");
+    if (bucket) {
+      const kept = bucket.contradictions.filter(
+        (item) => !(isLocationCheckRow(item) && item.status === "pending")
+      );
+      bucket.contradictions.splice(0, bucket.contradictions.length, ...kept);
+    }
+    return this.replaceContents(
+      work,
+      "矛盾",
+      {
+        contradictions: [
+          ...issues.map((issue, index) => locationContradictionView(issue, index)),
+          ...recordIssues.map((issue, index) => locationRecordView(issue, index)),
+        ],
+      },
+      { quiet: options.quiet }
+    );
+  }
+
+  /**
+   * 「矛盾」の1行を示す（場所の略図の赤い線から。設計書6.93.10）。
+   *
+   * このパネルを開いて「矛盾」へ切り替え、行を画面の真ん中へ寄せて一瞬
+   * 囲み、本文の同じ所（本文の行を持たない行なら場所の資料）を開く——
+   * 行の「本文を見る」を押したのと同じ道を通す。
+   *
+   * @returns 行が見つかったか
+   */
+  async focusContradiction(work: WorkEntry, id: string): Promise<boolean> {
+    const entry = this.buckets.get(this.keyOf(work));
+    if (!entry?.categories.get("矛盾")?.contradictions.some((item) => item.id === id)) {
+      return false;
+    }
+    if (!this.work || this.keyOf(this.work) !== this.keyOf(work)) {
+      this.stashCurrent();
+      this.work = entry.work;
+    } else {
+      this.stashCurrent();
+    }
+    this.activate("矛盾");
+    // 面が今から開くなら、読み込み終わり（"ready"）でもう一度送る
+    this.focusRowId = id;
+    this.reveal({ preserveFocus: true });
+    for (const webview of this.webviews()) {
+      void webview.postMessage({ type: "focusRow", id });
+    }
+    await this.jumpTo(id);
+    return true;
   }
 
   /**
@@ -2818,6 +2961,14 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       case "ready":
         // 組み直された面へ、いまの中身を送り直す（設計書6.11.9）
         this.postItems();
+        // 開いた直後に示すはずだった行も送り直す（開く前に送ったものは捨てられる）
+        if (this.focusRowId) {
+          const id = this.focusRowId;
+          this.focusRowId = undefined;
+          for (const webview of this.webviews()) {
+            void webview.postMessage({ type: "focusRow", id });
+          }
+        }
         return;
     }
   }
@@ -2895,6 +3046,17 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       // 作品のログファイルへ残す（49 の指摘、2026-09-08）
       if (this.work) useLogFile(this.work.folderPath);
       logLine(`提案パネル：飛び先の指摘が見つかりませんでした（id: ${id}）。`);
+      return;
+    }
+
+    // **本文の行を持たない行は、資料を開く**（設計書6.93.9 の順6）。設定資料
+    // パネルを開く口はコマンドを通す——パネルを直に読み込むと、互いに読み合う
+    if (contradiction?.recordLink && this.work) {
+      await vscode.commands.executeCommand(
+        "novelai.openSettingsPanel",
+        { type: "work", work: this.work },
+        contradiction.recordLink
+      );
       return;
     }
 
@@ -4325,6 +4487,13 @@ function findingDraftOf(
     };
   }
 
+  /*
+    **本文の行を持たない行は残さない**（設計書6.93.9 の順6）。置き場は本文の位置で
+    並べる校正・メモパネルが読むので、場所の資料（JSON）を指す行が混ざると、
+    本文に無い所を指す指摘になる。照合は台帳から毎回作り直せるので、残さなくても
+    失うものが無い
+  */
+  if (item.recordLink) return undefined;
   return {
     filePath: item.filePath,
     line: item.line,

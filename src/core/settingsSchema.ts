@@ -405,6 +405,19 @@ export function locationSchema(): Record<string, unknown> {
   return schemaOf("場所", "^loc_\\d+$", {
     region: { type: ["string", "null"], description: "上位の地域" },
     description: { type: ["string", "null"] },
+    // 場所の略図で作者が置いた位置（設計書6.93.10）。**書かないと、略図で
+    // 点を動かした場所のファイルが、知らない項目として検証で落ちる**
+    sketchPosition: {
+      type: "object",
+      description:
+        "場所の略図で作者が置いた位置（画面の座標）。AIの抽出では書き換えない",
+      required: ["x", "y"],
+      additionalProperties: false,
+      properties: {
+        x: { type: "number" },
+        y: { type: "number" },
+      },
+    },
     // 位置関係（設計書6.93.2）。手で書くときに全部の欄を書かせない
     // （読み込みが既定値で補う。種類と相手だけは補えない）
     relations: {

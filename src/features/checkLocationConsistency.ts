@@ -1,14 +1,21 @@
 import type { WorkEntry } from "../models/types";
+import { locationFileName } from "../models/location";
+import * as path from "../core/paths";
+import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { createLocationStore } from "../core/abilityStore";
 import { scanWork } from "../core/scanner";
 import { readTextFile } from "../core/textFile";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { isSameLocation } from "../core/locationCompare";
 import {
+  buildLocationResolver,
+  regionStatement,
   findLocationInconsistencies,
   placeLocationInconsistencies,
+  recordIssueOf,
   type EpisodeText,
   type LocationContradictionIssue,
+  type LocationRecordIssue,
 } from "../core/locationConsistency";
 
 /**
@@ -20,10 +27,28 @@ import {
  */
 export interface LocationContradictionRun {
   issues: LocationContradictionIssue[];
-  /** 本文のどこにも置けなかった食い違いの数（中身は操作ログ） */
+  /**
+   * 本文のどこにも置けなかった食い違い（設計書6.93.9 の順6）。提案パネルに
+   * 「場所の資料を開く」行として並べる（中身は操作ログにも残す）
+   */
+  recordIssues: LocationRecordIssue[];
+  /**
+   * `issues`・`recordIssues` の各行が、照合（`findLocationInconsistencies`）の
+   * 何番目の食い違いか。場所の略図の赤い線から、提案パネルの同じ行を引く
+   */
+  issueSources: number[];
+  recordSources: number[];
+  /** 本文のどこにも置けなかった食い違いの数 */
   unplacedCount: number;
   /** 読めなかった場所のファイルの数（照合の外に置いたことを黙らない） */
   unreadableLocations: number;
+  /**
+   * 位置関係（関係の欄か、台帳の場所を指す地域の欄）を持つ場所の数。
+   * 0 なら照らす材料が無い——「食い違い0件」と言うと、照らして無かったと読まれる
+   */
+  locationsWithRelations: number;
+  /** 場所の置き場そのものを読めなかったときの理由（照合は走っていない） */
+  loadError?: string;
 }
 
 export async function collectLocationContradictions(
@@ -35,22 +60,30 @@ export async function collectLocationContradictions(
   useLogFile(work.folderPath);
   const empty: LocationContradictionRun = {
     issues: [],
+    recordIssues: [],
+    issueSources: [],
+    recordSources: [],
     unplacedCount: 0,
     unreadableLocations: 0,
+    locationsWithRelations: 0,
   };
   let loaded: Awaited<ReturnType<ReturnType<typeof createLocationStore>["loadAll"]>>;
   try {
     loaded = await createLocationStore(work).loadAll();
   } catch (error) {
     // 照合は付け足しの段なので、読めなくても矛盾検知そのものは止めない
-    logFailure("矛盾検知：場所の位置関係の照合（場所の読み込み）", {
-      詳細: error instanceof Error ? error.message : String(error),
-    });
-    return empty;
+    const detail = error instanceof Error ? error.message : String(error);
+    logFailure("矛盾検知：場所の位置関係の照合（場所の読み込み）", { 詳細: detail });
+    return { ...empty, loadError: detail };
   }
+  const resolver = buildLocationResolver(loaded.records);
+  const locationsWithRelations = loaded.records.filter(
+    (location) =>
+      (location.relations?.length ?? 0) > 0 || regionStatement(location, resolver) !== null
+  ).length;
   const found = findLocationInconsistencies(loaded.records);
   if (found.length === 0) {
-    return { ...empty, unreadableLocations: loaded.errors.length };
+    return { ...empty, unreadableLocations: loaded.errors.length, locationsWithRelations };
   }
 
   // 置き場所を探すのは、食い違いが見つかったときだけ（全話を読むので）
@@ -98,9 +131,51 @@ export async function collectLocationContradictions(
         `（${inconsistency.statements.map((statement) => statement.text).join("／")}）`
     );
   }
+  // 開く資料のファイルは、保存と同じ決まり（`locationFileName`）で置き場から組む
+  const directory = path.join(
+    workPaths(work, await readWorkConfig(work)).settings,
+    "locations"
+  );
+  const byId = new Map(loaded.records.map((location) => [location.id, location]));
+  const recordIssues = placed.unplaced.map((inconsistency) =>
+    recordIssueOf(inconsistency, (locationId) => {
+      const location = byId.get(locationId);
+      return path.join(directory, location ? locationFileName(location) : `${locationId}.json`);
+    })
+  );
   return {
     issues: placed.issues,
+    recordIssues,
+    issueSources: placed.issueSources,
+    recordSources: placed.unplaced.map((inconsistency) => found.indexOf(inconsistency)),
     unplacedCount: placed.unplaced.length,
     unreadableLocations: loaded.errors.length,
+    locationsWithRelations,
   };
+}
+
+/**
+ * 完了の通知に並べる、位置関係の照合の内訳。
+ *
+ * **矛盾検知の終わりと単独の照合で同じ言い方にする**（2か所に書くと片方だけ
+ * 直る）。`lead` は矛盾検知の側だけ「うち」——AI の指摘と同じ一覧の中の数だから。
+ */
+export function describeLocationRun(
+  run: LocationContradictionRun,
+  lead: "うち" | ""
+): string[] {
+  const parts: string[] = [];
+  if (run.issues.length > 0) {
+    parts.push(`${lead}場所の位置関係（機械で照合） ${run.issues.length}件`);
+  }
+  // 本文に置けなかった食い違い（作者が書いた関係どうし）は黙らない
+  if (run.recordIssues.length > 0) {
+    parts.push(`本文の根拠が無い位置関係の食い違い ${run.recordIssues.length}件（場所の資料を開く行）`);
+  }
+  if (run.unreadableLocations > 0) {
+    parts.push(
+      `読めなかった場所のファイル ${run.unreadableLocations}件（位置関係の照合の外）`
+    );
+  }
+  return parts;
 }

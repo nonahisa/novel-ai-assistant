@@ -688,6 +688,12 @@
         "icon": "$(type-hierarchy)"
       },
       {
+        "command": "novelai.openLocationSketch",
+        "title": "場所の略図",
+        "category": "小説執筆",
+        "icon": "$(map)"
+      },
+      {
         "command": "novelai.extractSettings",
         "title": "一括抽出",
         "category": "小説執筆",
@@ -770,6 +776,12 @@
         "title": "矛盾検知（事実の照合）",
         "category": "小説執筆",
         "icon": "$(warning)"
+      },
+      {
+        "command": "novelai.checkLocationConsistency",
+        "title": "位置関係の照合（場所・AIなし）",
+        "category": "小説執筆",
+        "icon": "$(location)"
       },
       {
         "command": "novelai.checkDeviations",

@@ -1164,6 +1164,25 @@ button.danger:hover {
     }
 
     /*
+      場所には略図への入口を置く（設計書6.93.10）。位置関係を書いた場所の
+      資料を開いているときに、置かれ方を確かめたくなる。押すと、その場所を
+      選んだ状態で略図が開く
+    */
+    if (detail.kind === "location") {
+      const sketchRow = document.createElement("div");
+      sketchRow.className = "row";
+      const sketchButton = document.createElement("button");
+      sketchButton.type = "button";
+      sketchButton.textContent = "略図";
+      sketchButton.title = detail.name + " を選んだ状態で場所の略図を開きます";
+      sketchButton.addEventListener("click", function () {
+        post("locationSketch", { kind: detail.kind, id: detail.id });
+      });
+      sketchRow.appendChild(sketchButton);
+      el.detail.appendChild(sketchRow);
+    }
+
+    /*
       ── 呼び合い（設計書6.92、作者の依頼 2026-09-13）
 
       **編集欄より上に置く。** これは「参考」ではなく、会話を書きながら

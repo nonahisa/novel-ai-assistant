@@ -1263,6 +1263,14 @@ export class SettingsPanel {
         case "relationGraph":
           await this.handleRelationGraph(message.id);
           return;
+        case "locationSketch":
+          // 略図はコマンドで開く（パネルどうしが直に読み合うと輪になる）
+          await vscode.commands.executeCommand(
+            "novelai.openLocationSketch",
+            { type: "work", work: this.work },
+            message.id
+          );
+          return;
         case "addressScope":
           this.handleAddressScope(message);
           return;
@@ -3591,6 +3599,7 @@ type PanelMessage =
   | { type: "openPendingUpdates" }
   /** その人物を中心にした人物相関図を開く（設計書6.38.3） */
   | { type: "relationGraph"; kind: SettingsKind; id: string }
+  | { type: "locationSketch"; kind: SettingsKind; id: string }
   | {
       type: "promoteConflict";
       kind: SettingsKind;

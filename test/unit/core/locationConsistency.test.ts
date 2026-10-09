@@ -11,6 +11,7 @@ import {
   normalizeDirection,
   normalizeTravel,
   placeLocationInconsistencies,
+  recordIssueOf,
   type EpisodeText,
 } from "../../../src/core/locationConsistency";
 
@@ -372,5 +373,28 @@ describe("本文の行へ置く", () => {
     expect(placed.issues).toHaveLength(1);
     expect(placed.issues[0].filePath).toBe("/w/本文/003_三.txt");
     expect(placed.issues[0].line).toBe(1);
+  });
+});
+
+describe("本文に置けない食い違いを、場所の資料を開く1件にする（設計書6.93.9 の順6）", () => {
+  it("作者が書いた関係どうしの距離の食い違いは、先頭の記述を持つ場所の資料を指す", () => {
+    const locations = [
+      place("loc_001", "港", [rel("distance", "学校", "徒歩2時間")]),
+      place("loc_002", "学校", [rel("distance", "港", "徒歩10分")]),
+    ];
+    const placed = placeLocationInconsistencies(findLocationInconsistencies(locations), []);
+    expect(placed.issues).toEqual([]);
+    expect(placed.unplaced).toHaveLength(1);
+
+    const issue = recordIssueOf(placed.unplaced[0], (id) => `設定/locations/${id}.json`);
+    expect(issue).toMatchObject({
+      kind: "distance",
+      locationId: "loc_001",
+      locationName: "港",
+      filePath: "設定/locations/loc_001.json",
+      textSays: "港は学校から徒歩2時間（作者が書いた関係）",
+      settingSays: "学校は港から徒歩10分（作者が書いた関係）",
+    });
+    expect(issue.summary).toContain("距離が食い違っています");
   });
 });
