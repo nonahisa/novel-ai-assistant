@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   SAKURA_TOKEN_ENV,
   askSakura,
@@ -208,6 +210,57 @@ describe("さくらへ投げる形", () => {
     expect(bodies[0]).toContain("response_format");
     expect(bodies[1]).not.toContain("response_format");
     expect(answered.droppedResponseFormat).toBe(true);
+  });
+
+  it("製品と同じく思考を止める指定を送り、製品の定数と同じ鍵を使う", async () => {
+    const bodies: string[] = [];
+    const fetchImpl = async (_url: string, init: RequestInit) => {
+      bodies.push(String(init.body));
+      return chatResponse('{"issues":[]}');
+    };
+    await askSakura({
+      token: FAKE_TOKEN,
+      model: "preview/Kimi-K2.6",
+      systemPrompt: "s",
+      userPrompt: "u",
+      schema: PROOFREAD_SCHEMA,
+      temperature: 0.2,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const sent = JSON.parse(bodies[0]) as { chat_template_kwargs?: Record<string, boolean> };
+    expect(sent.chat_template_kwargs).toEqual({ enable_thinking: false, thinking: false });
+
+    // 製品側の定数が変わったら、測定の台本も揃え直す（製品と違う条件で測らない）
+    const provider = readFileSync(
+      path.join(__dirname, "../../../src/ai/sakuraProvider.ts"),
+      "utf8"
+    );
+    expect(provider).toMatch(/enable_thinking: false,\s*\n\s*thinking: false,/);
+  });
+
+  it("思考を止める指定を断られたら、外して出し直す", async () => {
+    const bodies: string[] = [];
+    let call = 0;
+    const fetchImpl = async (_url: string, init: RequestInit) => {
+      bodies.push(String(init.body));
+      call += 1;
+      if (call === 1) {
+        return errorResponse(400, "chat_template_kwargs is not supported");
+      }
+      return chatResponse('{"issues":[]}');
+    };
+    await askSakura({
+      token: FAKE_TOKEN,
+      model: "preview/llm-jp-3.1-8x13b-instruct4",
+      systemPrompt: "s",
+      userPrompt: "u",
+      schema: PROOFREAD_SCHEMA,
+      temperature: 0.2,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toContain("chat_template_kwargs");
+    expect(bodies[1]).not.toContain("chat_template_kwargs");
   });
 
   it("原因の分からない失敗では出し直さない（当てにいかない）", async () => {

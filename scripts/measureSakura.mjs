@@ -237,6 +237,12 @@ export async function askSakura({
     temperature,
     max_tokens: maxOutputTokens,
     stream: false,
+    // **製品と同じく思考を止める**（`src/ai/sakuraProvider.ts` の
+    // THINKING_OFF_TEMPLATE_KWARGS。製品の機能はほぼすべて disableThinking: true）。
+    // 付けずに撃つと Kimi-K2.6 が考える分で max_tokens を使い切り、
+    // finish_reason=length の空の応答になる（2026-10-09 の〔AIの測定〕で
+    // 設定資料の抽出が17チャンク中9件落ちた。製品に無い失敗を測っていた）
+    chat_template_kwargs: { enable_thinking: false, thinking: false },
   };
   if (schema !== undefined && schema !== null) {
     body.response_format = {
@@ -250,7 +256,7 @@ export async function askSakura({
   }
 
   let droppedResponseFormat = false;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     const outcome = await postOnce({ body, token, endpoint, fetchImpl, timeoutMs });
     if (outcome.ok) {
       return {
@@ -267,6 +273,17 @@ export async function askSakura({
       droppedResponseFormat = true;
       log?.(
         "さくらのAI: JSON形式の強制が受け付けられなかったため、外して出し直します。"
+      );
+      continue;
+    }
+    // 製品と同じく、思考を止める指定を断られたら外して出し直す
+    if (
+      body.chat_template_kwargs !== undefined &&
+      mentionsUnsupported(outcome.detail, "chat_template_kwargs")
+    ) {
+      delete body.chat_template_kwargs;
+      log?.(
+        "さくらのAI: 思考を止める指定（chat_template_kwargs）が受け付けられなかったため、外して出し直します。"
       );
       continue;
     }
