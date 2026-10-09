@@ -301,7 +301,7 @@ describe("矛盾にも再チェックを出す", () => {
       canRecheck: false,
       canRegisterForeshadow: false,
       confidence: "high",
-      leftLabel: "先の記述では",
+      leftLabel: "もう一方の記述では",
       rightLabel: "この箇所では",
     });
     // 修正案（本文の書き換え）は持たない

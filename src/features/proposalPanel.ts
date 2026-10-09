@@ -210,8 +210,9 @@ function contradictionForView(
  * - **「伏線として登録」を出さない。** 2つの記述の食い違いで、後の展開への
  *   示唆ではない（事実の照合と同じ）
  * - **修正案を持たない。** どちらの記述が正しいかは作者にしか決められない
- * - 見出しは「先の記述では」「この箇所では」。両方とも本文から抜いた関係なので、
- *   「設定では」と書くと作者は資料のほうを疑いに行ってしまう
+ * - 見出しは「もう一方の記述では」「この箇所では」。両方とも本文から抜いた関係なので、
+ *   「設定では」と書くと作者は資料のほうを疑いに行ってしまう。「先の」とも書かない
+ *   ——範囲で絞ったときは、飛ぶ先が先の話の記述になることがある
  */
 export function locationContradictionView(
   issue: LocationContradictionIssue,
@@ -232,7 +233,7 @@ export function locationContradictionView(
     confidence: issue.confidence,
     status: "pending",
     canRegisterForeshadow: false,
-    leftLabel: "先の記述では",
+    leftLabel: "もう一方の記述では",
     rightLabel: "この箇所では",
     openTarget: "settings",
     allowRecheck: false,
