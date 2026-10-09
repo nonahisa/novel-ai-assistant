@@ -1023,6 +1023,8 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
    * モデルを覚えるのは、**切り替えたら確認を取り直す**ため。
    */
   private paidConfirmedFor: string | undefined;
+  /** 面が読み込み終わったら示す行（`focusContradiction`） */
+  private focusRowId: string | undefined;
 
   /**
    * @param ai 再チェック（P-23）で使う。**渡されなければ
@@ -2187,7 +2189,12 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
   showLocationContradictions(
     work: WorkEntry,
     issues: readonly LocationContradictionIssue[],
-    recordIssues: readonly LocationRecordIssue[]
+    recordIssues: readonly LocationRecordIssue[],
+    /**
+     * `quiet` なら、届いたことを知らせず画面も開かない（略図の赤い線から
+     * 呼ぶとき。続けて `focusContradiction` がこのパネルを開いて行を示す）
+     */
+    options: { quiet?: boolean } = {}
   ): IncomingCount {
     // 画面に出している分を置き場へ戻してから外す。**配列は同じものを
     // 共有しているので、詰め直しは同じ配列の中で行う**（入れ替えると、
@@ -2200,12 +2207,48 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       );
       bucket.contradictions.splice(0, bucket.contradictions.length, ...kept);
     }
-    return this.replaceContents(work, "矛盾", {
-      contradictions: [
-        ...issues.map((issue, index) => locationContradictionView(issue, index)),
-        ...recordIssues.map((issue, index) => locationRecordView(issue, index)),
-      ],
-    });
+    return this.replaceContents(
+      work,
+      "矛盾",
+      {
+        contradictions: [
+          ...issues.map((issue, index) => locationContradictionView(issue, index)),
+          ...recordIssues.map((issue, index) => locationRecordView(issue, index)),
+        ],
+      },
+      { quiet: options.quiet }
+    );
+  }
+
+  /**
+   * 「矛盾」の1行を示す（場所の略図の赤い線から。設計書6.93.10）。
+   *
+   * このパネルを開いて「矛盾」へ切り替え、行を画面の真ん中へ寄せて一瞬
+   * 囲み、本文の同じ所（本文の行を持たない行なら場所の資料）を開く——
+   * 行の「本文を見る」を押したのと同じ道を通す。
+   *
+   * @returns 行が見つかったか
+   */
+  async focusContradiction(work: WorkEntry, id: string): Promise<boolean> {
+    const entry = this.buckets.get(this.keyOf(work));
+    if (!entry?.categories.get("矛盾")?.contradictions.some((item) => item.id === id)) {
+      return false;
+    }
+    if (!this.work || this.keyOf(this.work) !== this.keyOf(work)) {
+      this.stashCurrent();
+      this.work = entry.work;
+    } else {
+      this.stashCurrent();
+    }
+    this.activate("矛盾");
+    // 面が今から開くなら、読み込み終わり（"ready"）でもう一度送る
+    this.focusRowId = id;
+    this.reveal({ preserveFocus: true });
+    for (const webview of this.webviews()) {
+      void webview.postMessage({ type: "focusRow", id });
+    }
+    await this.jumpTo(id);
+    return true;
   }
 
   /**
@@ -2918,6 +2961,14 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
       case "ready":
         // 組み直された面へ、いまの中身を送り直す（設計書6.11.9）
         this.postItems();
+        // 開いた直後に示すはずだった行も送り直す（開く前に送ったものは捨てられる）
+        if (this.focusRowId) {
+          const id = this.focusRowId;
+          this.focusRowId = undefined;
+          for (const webview of this.webviews()) {
+            void webview.postMessage({ type: "focusRow", id });
+          }
+        }
         return;
     }
   }

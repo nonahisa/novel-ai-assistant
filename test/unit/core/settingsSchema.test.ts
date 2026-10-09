@@ -85,7 +85,8 @@ const OPTIONAL_KEYS: Record<string, readonly string[]> = {
   能力: ["customFields"],
   組織: ["customFields"],
   // 位置関係（設計書6.93.2）も、関係が1つも無い場所には欄ごと無い
-  場所: ["customFields", "relations"],
+  // 略図の位置（設計書6.93.10）も、作者が点を動かしていない場所には欄ごと無い
+  場所: ["customFields", "relations", "sketchPosition"],
   世界観: ["customFields"],
 };
 

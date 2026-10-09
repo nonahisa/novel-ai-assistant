@@ -144,6 +144,8 @@ button:disabled { opacity: 0.5; cursor: default; }
   padding: 8px 10px;
   border-bottom: 1px solid var(--vscode-panel-border);
 }
+/* ほかの画面から示された行（場所の略図の赤い線から） */
+.issue.focused { outline: 2px solid var(--vscode-focusBorder); outline-offset: -2px; }
 .issue.low { display: none; }
 body.show-low .issue.low { display: flex; }
 /* 済んだ指摘は薄く出す。ただし薄くするのは中身だけで、押せる操作は
@@ -1230,6 +1232,19 @@ window.addEventListener('message', (event) => {
   if (message.type === 'runningDone') {
     runningState = null;
     paintRunning();
+    return;
+  }
+  if (message.type === 'focusRow') {
+    // **ほかの画面から、この行を示す**（場所の略図の赤い線から。設計書6.93.10）。
+    // 番号に記号が入るので、属性の選び方ではなく1つずつ比べて探す
+    const head = Array.from(document.querySelectorAll('.location[data-id]'))
+      .find((node) => node.getAttribute('data-id') === message.id);
+    const row = head ? head.closest('.issue') : null;
+    if (row) {
+      row.scrollIntoView({ block: 'center' });
+      row.classList.add('focused');
+      setTimeout(() => row.classList.remove('focused'), 2000);
+    }
     return;
   }
   if (message.type === 'issues') {

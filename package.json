@@ -688,6 +688,12 @@
         "icon": "$(type-hierarchy)"
       },
       {
+        "command": "novelai.openLocationSketch",
+        "title": "場所の略図",
+        "category": "小説執筆",
+        "icon": "$(map)"
+      },
+      {
         "command": "novelai.extractSettings",
         "title": "一括抽出",
         "category": "小説執筆",

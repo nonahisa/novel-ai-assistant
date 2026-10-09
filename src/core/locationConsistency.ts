@@ -536,6 +536,11 @@ export interface PlacedLocationInconsistencies {
    * **黙って捨てない。** 呼び出し側が件数を知らせ、中身をログへ残す
    */
   unplaced: LocationInconsistency[];
+  /**
+   * `issues` の各行が、渡した `found` の何番目から来たか（同じ長さ）。
+   * 場所の略図の赤い線（番号は `found` の並び）から、提案パネルの同じ行を引く
+   */
+  issueSources: number[];
 }
 
 interface StatementPlace {
@@ -567,9 +572,10 @@ export function placeLocationInconsistencies(
 ): PlacedLocationInconsistencies {
   const issues: LocationContradictionIssue[] = [];
   const unplaced: LocationInconsistency[] = [];
+  const issueSources: number[] = [];
   const scope = options.scopeFiles;
 
-  for (const inconsistency of found) {
+  for (const [sourceIndex, inconsistency] of found.entries()) {
     const placed = inconsistency.statements.map((statement) => ({
       statement,
       place: placeStatement(statement, episodes, scope),
@@ -592,6 +598,7 @@ export function placeLocationInconsistencies(
       return (b.chapter ?? -1) > (a.chapter ?? -1) ? entry : best;
     });
     const others = placed.filter((entry) => entry !== anchor);
+    issueSources.push(sourceIndex);
     issues.push({
       kind: inconsistency.kind,
       filePath: anchor.place!.filePath,
@@ -607,7 +614,7 @@ export function placeLocationInconsistencies(
       confidence: "high",
     });
   }
-  return { issues, unplaced };
+  return { issues, issueSources, unplaced };
 }
 
 function placeStatement(

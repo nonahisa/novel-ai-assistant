@@ -32,6 +32,12 @@ export interface LocationContradictionRun {
    * 「場所の資料を開く」行として並べる（中身は操作ログにも残す）
    */
   recordIssues: LocationRecordIssue[];
+  /**
+   * `issues`・`recordIssues` の各行が、照合（`findLocationInconsistencies`）の
+   * 何番目の食い違いか。場所の略図の赤い線から、提案パネルの同じ行を引く
+   */
+  issueSources: number[];
+  recordSources: number[];
   /** 本文のどこにも置けなかった食い違いの数 */
   unplacedCount: number;
   /** 読めなかった場所のファイルの数（照合の外に置いたことを黙らない） */
@@ -55,6 +61,8 @@ export async function collectLocationContradictions(
   const empty: LocationContradictionRun = {
     issues: [],
     recordIssues: [],
+    issueSources: [],
+    recordSources: [],
     unplacedCount: 0,
     unreadableLocations: 0,
     locationsWithRelations: 0,
@@ -138,6 +146,8 @@ export async function collectLocationContradictions(
   return {
     issues: placed.issues,
     recordIssues,
+    issueSources: placed.issueSources,
+    recordSources: placed.unplaced.map((inconsistency) => found.indexOf(inconsistency)),
     unplacedCount: placed.unplaced.length,
     unreadableLocations: loaded.errors.length,
     locationsWithRelations,

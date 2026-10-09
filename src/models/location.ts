@@ -99,6 +99,12 @@ export function describeLocationRelation(relation: LocationRelation): string {
   }
 }
 
+/** 略図の上の位置（画面の座標。北が上、y は下へ増える） */
+export interface SketchPosition {
+  x: number;
+  y: number;
+}
+
 export interface Location {
   schemaVersion: string;
   id: string;
@@ -120,6 +126,14 @@ export interface Location {
    * 保存のたびに書き換えないため（`withOptionalRelations`）。読むときは無ければ空
    */
   relations?: LocationRelation[];
+  /**
+   * 場所の略図（設計書6.93.10）で、作者が点を引っ張って置いた位置。
+   *
+   * **作者の値。抽出・マージ・照合で書き換えない**（実装ルール2）。動かしても
+   * 関係（`relations`）は変えない。別の台帳は作らず場所の記録に置く（6.93.2）。
+   * **置いていなければキーごと持たない**（`relations` と同じ形）
+   */
+  sketchPosition?: SketchPosition;
   appearedChapters: number[];
   status: "登場済み" | "未登場";
   spoilerLevel: "public" | "staff_only" | "author_only";
@@ -267,20 +281,63 @@ export function parseLocation(raw: unknown): Location {
 
   const conflicts = parseConflicts(value.conflicts);
   const relations = parseLocationRelations(value.relations);
+  const sketchPosition = parseSketchPosition(value.sketchPosition);
 
   // 追加項目の値は検証してから持たせる。`...value` のまま通すと、
   // 数値などの壊れた値が検証を素通りする
   return withOptionalCustomFields(
-    normalizeLocation({
-      ...value,
-      id: value.id as string,
-      name: value.name as string,
-      conflicts,
-      relations,
-      aiNotes: parseAiNotes(value.aiNotes),
-    } as Partial<Location>),
+    withOptionalSketchPosition(
+      normalizeLocation({
+        ...value,
+        id: value.id as string,
+        name: value.name as string,
+        conflicts,
+        relations,
+        aiNotes: parseAiNotes(value.aiNotes),
+      } as Partial<Location>),
+      sketchPosition
+    ),
     parseOptionalCustomFieldValues(value.customFields)
   );
+}
+
+/**
+ * 略図の位置を検証する。**壊れていれば直さずに止める**（実装ルール2）。
+ *
+ * 無ければ undefined（欄ごと持たない）。数でない・有限でない値は、作者が
+ * 置いた位置として読めないので、勝手に0へ寄せず読み込みを止める。
+ */
+export function parseSketchPosition(value: unknown): SketchPosition | undefined {
+  if (value === undefined) return undefined;
+  const position = objectValue(value, "sketchPosition");
+  // 知らない欄があれば止める。黙って落とすと、次の保存で作者の書いたものが消える
+  if (Object.keys(position).some((key) => key !== "x" && key !== "y")) {
+    invalid("sketchPosition");
+  }
+  for (const key of ["x", "y"] as const) {
+    const coordinate = position[key];
+    if (typeof coordinate !== "number" || !Number.isFinite(coordinate)) {
+      invalid(`sketchPosition.${key}`);
+    }
+  }
+  return { x: position.x as number, y: position.y as number };
+}
+
+/**
+ * 略図の位置を入れる。**無ければ欄ごと外す**（`withOptionalRelations` と同じ形）。
+ * 動かしていない場所のファイルに、空の欄を書き足さないため。
+ */
+export function withOptionalSketchPosition<T extends { sketchPosition?: SketchPosition }>(
+  record: T,
+  position: SketchPosition | undefined
+): T {
+  const copy = { ...record };
+  if (position) {
+    copy.sketchPosition = { x: position.x, y: position.y };
+  } else {
+    delete copy.sketchPosition;
+  }
+  return copy;
 }
 
 /**

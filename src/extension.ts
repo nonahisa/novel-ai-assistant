@@ -362,7 +362,13 @@ import { pruneAllLogs } from "./features/pruneLogs";
 import { parseSynopsisMarkdown, SYNOPSIS_FILE } from "./core/synopsisDoc";
 import { SynopsisStore } from "./core/synopsisStore";
 import { hasUnsavedChanges } from "./core/textFile";
-import { PROPOSALS_VIEW_ID, ProposalPanel } from "./features/proposalPanel";
+import {
+  PROPOSALS_VIEW_ID,
+  ProposalPanel,
+  locationContradictionView,
+  locationRecordView,
+} from "./features/proposalPanel";
+import { openLocationSketch } from "./features/locationSketchPanel";
 import {
   WritingProgressTracker,
   boundaryHour,
@@ -2258,6 +2264,52 @@ export async function activate(
   setRelationGraphOpener((work, characterId) =>
     showRelationGraph(work, characterId)
   );
+
+  /**
+   * 場所の略図の入口（設計書6.93.10）。相関図と同じく、設定資料パネルと
+   * 提案パネルへの繋ぎはここだけに置く（略図の側から読み込むと輪になる）。
+   */
+  const showLocationSketch = async (
+    work: WorkEntry,
+    locationId?: string
+  ): Promise<void> => {
+    await openLocationSketch(
+      context,
+      work,
+      {
+        openSettingsRecord: async (target, id) => {
+          const panel = await openSettingsPanel(context, target, aiRegistry);
+          await panel.showRecord("location", id);
+        },
+        /*
+          赤い線を押したとき：照合を走らせ直して「矛盾」へ並べ（AI の指摘は
+          消さない）、同じ食い違いの行を示して本文の同じ所を開く。照合は
+          略図と同じ台帳から同じ並びで挙がるので、番号で同じ食い違いを引ける
+        */
+        openConflict: async (target, index) => {
+          const run = await collectLocationContradictions(target);
+          proposalPanel.showLocationContradictions(target, run.issues, run.recordIssues, {
+            quiet: true,
+          });
+          const placedAt = run.issueSources.indexOf(index);
+          const recordAt = run.recordSources.indexOf(index);
+          const id =
+            placedAt >= 0
+              ? locationContradictionView(run.issues[placedAt], placedAt).id
+              : recordAt >= 0
+                ? locationRecordView(run.recordIssues[recordAt], recordAt).id
+                : null;
+          // 範囲の外へ外れた・資料が直された直後などで見つからなければ、そう言う
+          if (!id || !(await proposalPanel.focusContradiction(target, id))) {
+            void vscode.window.showInformationMessage(
+              "この食い違いは、いまの資料ではもう挙がりませんでした。略図を開き直してください。"
+            );
+          }
+        },
+      },
+      locationId ? { focusId: locationId } : {}
+    );
+  };
   context.subscriptions.push({
     dispose: () => setRelationGraphOpener(undefined),
   });
@@ -4855,6 +4907,22 @@ export async function activate(
         const work = await resolveWork(node, registry);
         if (!work) return;
         await showRelationGraph(work, characterId);
+      }
+    )
+  );
+
+  // 場所の略図（設計書6.93.10）。引数に場所を取れる——設定資料パネルの
+  // 場所の「略図」は、この道を通ってその場所を選んだ状態で開く。AIは使わない
+  context.subscriptions.push(
+    registerCommand(
+      "novelai.openLocationSketch",
+      async (node?: WorkNode, locationId?: string) => {
+        const work = await resolveWork(node, registry);
+        if (!work) return;
+        await showLocationSketch(
+          work,
+          typeof locationId === "string" ? locationId : undefined
+        );
       }
     )
   );
