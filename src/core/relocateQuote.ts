@@ -71,17 +71,65 @@ export function relocateQuote(
   */
   const narrowed = narrowByContext(lines, hits, context);
 
-  /*
-    **同じ引用が2か所にあるときは、`hintLine` にいちばん近いほうを選ぶ。**
-    1件当てたくらいで行が大きく動くことはないので、近さが最も確かな
-    手がかりになる。
+  return nearestLine(narrowed, hintLine);
+}
 
-    上下に同じだけ離れていたときは**前（行番号の小さいほう）**を返す。
-    どちらが正しいかは決められないが、決め方を固定しないと押すたびに
-    飛び先が変わりかねない。前を選ぶのは、行を頭から走査して最初に
-    当たったものを採る形で、`proposalUndo.ts` の「最初の一致」と揃う。
-  */
-  return narrowed.reduce((best, line) =>
+/**
+ * 検知の段で、AIが申告した行番号を引用が実際にある行へ直す
+ * （設計書6.10.5・6.8.20・6.10.2、2026-10-10）。
+ *
+ * **AIは引用を正しく取っても、行番号を言い間違える。** 実測（gemma4:26b）で、
+ * 36行目の台詞を正しく指摘しながら 28 と申告した。矛盾検知・誤字脱字・
+ * 逸脱検知は、どれも引用が本文に在るかを本文全体で照らすので、行がずれても
+ * 検算を通り、ずれた行番号のまま先へ渡っていた。
+ *
+ * 決まり：申告の行が引用を含むならそのまま。含まなければ、引用を含む行の
+ * うち申告に最も近い行（同じ距離なら前）。**どの1行にも丸ごと収まらない
+ * 引用（行をまたぐ）は申告のまま**——どこへ動かすのが正しいか決められない。
+ *
+ * ## `relocateQuote` と分けている理由
+ *
+ * あちらは**飛ぶ直前**に、引用の最初の行だけで探し、見つからなければ
+ * `undefined` を返す（飛び先を決められないことを呼び出し側へ知らせる）。
+ * こちらは**検算の段**で使い、行をまたぐ引用は動かさず、見つからなくても
+ * 申告の行を返す（行番号の無い指摘を作らない）。扱いの違う2点以外は
+ * 同じにするため、候補から1つ選ぶ決め方（`nearestLine`）は共有している。
+ *
+ * @param text 行で割る本文。番号の振り方と揃えるため `\n` だけで割る
+ *   （`withLineNumbers` と同じ。CR は `normalizeForComparison` が消す）
+ * @param firstLine `text` の1行目の行番号（チャンクなら `chunk.startLine + 1`）
+ */
+export function lineHoldingQuote(
+  text: string,
+  quote: string,
+  hintLine: number,
+  firstLine = 1
+): number {
+  const target = normalizeForComparison(quote);
+  if (!target) return hintLine;
+  const hits: number[] = [];
+  text.split("\n").forEach((line, index) => {
+    if (normalizeForComparison(line).includes(target)) {
+      hits.push(firstLine + index);
+    }
+  });
+  return hits.length > 0 ? nearestLine(hits, hintLine) : hintLine;
+}
+
+/**
+ * 候補（昇順）のうち `hintLine` にいちばん近い行。
+ *
+ * **同じ引用が2か所にあるときは、`hintLine` にいちばん近いほうを選ぶ。**
+ * 1件当てたくらいで行が大きく動くことはないし、AIの言い間違いも数行の
+ * ずれが多いので、近さが最も確かな手がかりになる。
+ *
+ * 上下に同じだけ離れていたときは**前（行番号の小さいほう）**を返す。
+ * どちらが正しいかは決められないが、決め方を固定しないと押すたびに
+ * 飛び先が変わりかねない。前を選ぶのは、行を頭から走査して最初に
+ * 当たったものを採る形で、`proposalUndo.ts` の「最初の一致」と揃う。
+ */
+function nearestLine(candidates: readonly number[], hintLine: number): number {
+  return candidates.reduce((best, line) =>
     Math.abs(line - hintLine) < Math.abs(best - hintLine) ? line : best
   );
 }

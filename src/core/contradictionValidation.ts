@@ -1,6 +1,7 @@
 import type { Chunk } from "./chunker";
 import { normalizeForComparison } from "./groundedEvidence";
 import { decodeByteFallback } from "./byteFallback";
+import { lineHoldingQuote } from "./relocateQuote";
 import {
   CONTRADICTION_CATEGORIES,
   SPEECH_INSTRUCTION_TEXTS,
@@ -302,19 +303,12 @@ const OUTER_QUOTES = /^[「『"“]+|[」』"”]+$/gu;
  * 最も近い行へ直す（同じ距離なら前の行）。**どの1行にも収まらない引用
  * （行をまたぐ）は申告のまま残す**——どこへ動かすのが正しいか決められない。
  * 番号の振り方は `withLineNumbers` と同じ（まとめたチャンクでも通し番号）。
+ *
+ * 探し方は誤字脱字・逸脱検知と同じ部品（`lineHoldingQuote`）に寄せてある
+ * （0.101.3）。片方だけ直されて食い違うのを避けるため。
  */
 function lineHoldingExcerpt(excerpt: string, chunk: Chunk, line: number): number {
-  const target = normalizeForComparison(excerpt);
-  if (!target) return line;
-  let best: number | undefined;
-  chunk.text.split("\n").forEach((text, index) => {
-    if (!normalizeForComparison(text).includes(target)) return;
-    const candidate = chunk.startLine + index + 1;
-    if (best === undefined || Math.abs(candidate - line) < Math.abs(best - line)) {
-      best = candidate;
-    }
-  });
-  return best ?? line;
+  return lineHoldingQuote(chunk.text, excerpt, line, chunk.startLine + 1);
 }
 
 /**

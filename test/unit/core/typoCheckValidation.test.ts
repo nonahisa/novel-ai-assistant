@@ -496,3 +496,74 @@ describe("ルビ・傍点の記法を壊す案", () => {
     expect(result.accepted).toHaveLength(1);
   });
 });
+
+/**
+ * AIが申告した行番号を、original が実際にある行へ直す（設計書6.8.20、2026-10-10）。
+ *
+ * 矛盾検知（0.101.2）と同じ不具合が誤字脱字にもあった。original はチャンク全体で
+ * 照らすので行がずれても通るが、助詞の範囲などの検査は**申告の行の文**で行うため、
+ * 別の行の文で検査したうえ、ずれた行番号のまま画面へ出ていた。
+ */
+describe("申告の行を original のある行へ直す", () => {
+  const issueAt = (line: number) => ({
+    issues: [
+      {
+        line,
+        original: "意外な行動",
+        target: "意外",
+        suggestion: "以外",
+        reason: "誤変換",
+        confidence: "high",
+      },
+    ],
+  });
+
+  test("申告の行に original が無ければ、original のある行へ直す", () => {
+    // 11〜13行目。original は13行目にしか無い
+    const chunk = makeChunk("雨が降っていた。\n風が強い。\n彼は意外な行動に出た。", 10);
+    const result = validateTypoIssues(issueAt(11), chunk, []);
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].line).toBe(13);
+  });
+
+  test("申告が正しければそのまま", () => {
+    const chunk = makeChunk("雨が降っていた。\n風が強い。\n彼は意外な行動に出た。", 10);
+    const result = validateTypoIssues(issueAt(13), chunk, []);
+    expect(result.accepted[0].line).toBe(13);
+  });
+
+  test("同じ original が2か所にあれば、申告に近いほうへ直す", () => {
+    // 11行目と15行目に同じ original がある
+    const chunk = makeChunk(
+      "彼は意外な行動に出た。\n雨。\n雨。\n雨。\n彼女は意外な行動に出た。",
+      10
+    );
+    expect(validateTypoIssues(issueAt(14), chunk, []).accepted[0].line).toBe(15);
+    expect(validateTypoIssues(issueAt(12), chunk, []).accepted[0].line).toBe(11);
+  });
+
+  test("ずれた行の文で助詞の範囲を検査しない（直したあとの行で検査する）", () => {
+    // 本物の誤りは13行目「すでの僕」。AIは11行目と申告した。
+    // 申告の行で検査すると original が見つからず範囲を伸ばせないまま通り、
+    // 当てると「すでにの僕」になる。正しい行で検査すれば「すでの」へ伸びる
+    const chunk = makeChunk(
+      "彼はすでに僕を見ていた。\n雨が降っていた。\n彼はすでの僕を見ていた。",
+      10
+    );
+    const raw = {
+      issues: [
+        {
+          line: 11,
+          original: "すでの僕",
+          target: "すで",
+          suggestion: "すでに",
+          reason: "脱字",
+          confidence: "high",
+        },
+      ],
+    };
+    const result = validateTypoIssues(raw, chunk, []);
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0]).toMatchObject({ line: 13, target: "すでの" });
+  });
+});
