@@ -3,7 +3,7 @@ import { segmentsOf, type Chunk } from "./chunker";
 import { evidenceSegments, normalizeForComparison } from "./groundedEvidence";
 import { detectNarrator, firstPersonOwners, type NarratorHint } from "./narrator";
 import { sceneRanges } from "./sceneBreaks";
-import { narrationFirstPersonOf } from "./workStyleFacts";
+import { countNarrationFirstPersons, narrationFirstPersonOf } from "./workStyleFacts";
 
 /**
  * 場面ごとに一人称の語り手が入れ替わる作品で、**主人公でない語り手の場面**を
@@ -92,6 +92,7 @@ export function foreignNarrationScenes(
     const body = lines.slice(range.start, range.end).join("\n");
     const found = narrationFirstPersonOf(body, FOREIGN_SCENE_MIN_FIRST_PERSON);
     if (!found || found.word === narratorFirstPerson) continue;
+    if (!isForeignNarration(body, found.word, narratorFirstPerson)) continue;
     const start = lineStarts[range.start];
     scenes.push({ start, end: start + body.length, firstPerson: found.word });
   }
@@ -108,6 +109,24 @@ export function foreignNarrationScenesInChunk(
     narratorFirstPerson,
     segmentsOf(chunk).map((segment) => segment.start)
   );
+}
+
+/**
+ * いちばん多い一人称が主人公と違っても、主人公でない語り手の場面とは
+ * 言えない形を除く（実データ、2026-10-10 の測定）。
+ *
+ * - **主人公の一人称が地の文に1回でも出る場面**：主人公の語りである。
+ *   ハイエルフ未亡人の第6話は「自分2・俺1」で、「自分」が多いだけの「俺」の話
+ * - **「自分」**：一人称の語りにも、再帰の「自分で」「自分の」にも使う。
+ *   「俺」の語りの「自分で焼いた」を別の語り手と取り違える
+ */
+function isForeignNarration(
+  body: string,
+  firstPerson: string,
+  narratorFirstPerson: string
+): boolean {
+  if (firstPerson === "自分") return false;
+  return (countNarrationFirstPersons(body).get(narratorFirstPerson) ?? 0) === 0;
 }
 
 function lineIndexAt(lineStarts: readonly number[], offset: number): number {
@@ -327,7 +346,10 @@ export function suspectForeignFirstPersonVariants(
       const scenes = foreignNarrationScenes(source.text, context.narrator.firstPerson);
       const same = scenes.filter((scene) => scene.firstPerson === form);
       if (same.length === 0) continue;
-      if (variant.evidence && evidenceInNarratorPart(source.text, scenes, variant.evidence)) {
+      if (
+        variant.evidence &&
+        evidenceInNarratorScene(source.text, context.narrator.firstPerson, variant.evidence)
+      ) {
         groundedInNarratorScene = true;
       }
       if (!chapters.includes(source.chapter)) chapters.push(source.chapter);
@@ -360,17 +382,27 @@ export function describeSuspectVariant(suspect: SuspectFirstPersonVariant): {
   };
 }
 
-/** 引用の断片が、主人公でない場面の外（主人公の側）に見つかるか */
-function evidenceInNarratorPart(
+/**
+ * 引用の断片が、**主人公の一人称で語られている場面**に見つかるか。
+ *
+ * 「主人公でない場面の外」では足りない（実データ、2026-10-10）。第12話の
+ * 根拠「皇子殿下は、どの教科も優秀でございます」は、皇子の章の後半——
+ * 一人称の無い、皇帝と側近の場面——の台詞で、そこを主人公の側と数えると
+ * 取り違えの言い分けを疑えなかった
+ */
+function evidenceInNarratorScene(
   text: string,
-  scenes: readonly ForeignNarrationScene[],
+  narratorFirstPerson: string,
   evidence: string
 ): boolean {
   const fragments = evidenceSegments(evidence);
   if (fragments.length === 0) return false;
-  const found = fragments.some((fragment) =>
-    normalizeForComparison(text).includes(fragment)
-  );
-  if (!found) return false;
-  return foreignSceneOfEvidence(text, scenes, evidence) === null;
+  const lines = text.split("\n");
+  return sceneRanges(lines).some((range) => {
+    const body = lines.slice(range.start, range.end).join("\n");
+    const found = narrationFirstPersonOf(body, FOREIGN_SCENE_MIN_FIRST_PERSON);
+    if (found?.word !== narratorFirstPerson) return false;
+    const normalized = normalizeForComparison(body);
+    return fragments.some((fragment) => normalized.includes(fragment));
+  });
 }

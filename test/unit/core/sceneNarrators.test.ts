@@ -121,6 +121,13 @@ describe("主人公でない語り手の場面を見分ける", () => {
     }
   });
 
+  test("「自分」が多いだけの主人公の場面・「自分で」しか無い場面は返さない（実データの第6話）", () => {
+    const sixth = "　自分で焼いた串を、自分の皿に載せる。\n　俺はそれを頬張った。\n";
+    const reflexive = "　自分で焼いた串を、自分の皿に載せる。\n　旨い。\n";
+    expect(foreignNarrationScenes(sixth, "俺")).toEqual([]);
+    expect(foreignNarrationScenes(reflexive, "俺")).toEqual([]);
+  });
+
   test("まとめたチャンクでは話の境でも場面を割る", () => {
     const first = PRINCE_SCENE;
     const second = HERO_SCENE.repeat(2);
@@ -360,6 +367,14 @@ describe("既に混ざった一人称の言い分け（裁定4）", () => {
     expect(describeSuspectVariant(suspects[0]).before).toBe(
       "余（第12話） 根拠「皇子殿下は、どの教科も優秀でございます」"
     );
+  });
+
+  test("根拠が同じ話の一人称の無い場面（皇帝と側近の場面）にあっても疑う（実データの第12話）", () => {
+    const twelfth = `${PRINCE_SCENE}\n◇◆◇◆\n\n　執務室で若い皇帝に声をかけたのは、宰相の側近だった。\n「はい、皇子殿下は、どの教科も優秀でございます」\n`;
+    const suspects = suspectForeignFirstPersonVariants(polluted, contextOf([polluted, EMPEROR]), [
+      { label: "第12話", text: twelfth, chapter: 12 },
+    ]);
+    expect(suspects.map((suspect) => suspect.variant.form)).toEqual(["余"]);
   });
 
   test("根拠が主人公の場面にあれば疑わない（主人公が本当に言い分けた所かもしれない）", () => {
