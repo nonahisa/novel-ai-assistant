@@ -822,7 +822,7 @@
       },
       {
         "command": "novelai.resumeWriting",
-        "title": "執筆再開用資料生成",
+        "title": "再開用資料",
         "category": "小説執筆",
         "icon": "$(debug-continue)"
       },
@@ -1385,7 +1385,7 @@
       },
       {
         "command": "novelai.chaptersFromHeadings",
-        "title": "章見出しから章立て",
+        "title": "章見出し反映",
         "icon": "$(list-tree)",
         "category": "小説執筆"
       },

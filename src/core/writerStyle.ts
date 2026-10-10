@@ -910,7 +910,7 @@ function keepWritingAdvice(style: WriterStyle): TutorialAdvice {
   }
   return {
     advice:
-      "まず「執筆再開用資料生成」から見てください。" +
+      "まず「再開用資料」から見てください。" +
       "前の話がどこで終わったか、次に書くことの候補、" +
       "張ったままの伏線が1枚にまとまって出ます。" +
       "書き始める前に思い出す手間が、ここで済みます。",

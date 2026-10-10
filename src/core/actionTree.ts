@@ -192,6 +192,11 @@ export interface ActionGroup {
  *
  * 狭いサイドバー（約240px）では、9字の名前の右に残る幅が全角3字ぶんほどしか無く、
  * 薄字は右から省略される（実機確認リスト 608、2026-10-09）。
+ *
+ * **薄字の付く操作の名前は短くしておく。** 作業メニューは VS Code 本体が描く木で、
+ * 拡張機能から折り返しを指定できない。9字の「執筆再開用資料生成」「章見出しから
+ * 章立て」は 240px で薄字が枠をはみ出したので、「再開用資料」「章見出し反映」へ
+ * 縮めた（作者の裁定、2026-10-11。E2E `actionListNoAiNarrow` が見張る）。
  */
 export const NO_AI_DESCRIPTION = "AI不要";
 
@@ -1168,7 +1173,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.resumeWriting",
-            label: "執筆再開用資料生成",
+            label: "再開用資料",
             description: NO_AI_DESCRIPTION,
             icon: "debug-continue",
             requiresWork: true,
@@ -1199,7 +1204,7 @@ export const ACTION_TREE: readonly ActionGroup[] = [
           {
             kind: "action",
             command: "novelai.chaptersFromHeadings",
-            label: "章見出しから章立て",
+            label: "章見出し反映",
             description: NO_AI_DESCRIPTION,
             icon: "list-tree",
             requiresWork: true,
