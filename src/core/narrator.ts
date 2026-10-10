@@ -39,11 +39,27 @@ export function detectNarrator(options: {
   const firstPerson = detectFirstPerson(options.narrationText);
   if (!firstPerson) return null;
 
+  const names = firstPersonOwners(options.people, firstPerson);
+  // 0人（設定に一人称が登録されていない）も、2人以上（絞れない）も黙る
+  if (names.length !== 1) return null;
+  return { firstPerson, name: names[0] };
+}
+
+/**
+ * その一人称を使う人物の名前（既定と言い分けのどちらかに持つ人）。
+ *
+ * 場面ごとの語り手の断り書き（`sceneNarrators.ts`）も**同じ数え方**で名指しを
+ * 決めるので切り出した（2026-10-10）。2か所に書くと片方だけ直して食い違う。
+ */
+export function firstPersonOwners(
+  people: readonly Character[],
+  firstPerson: string
+): string[] {
   // **名前で畳む。** 同じ人物の資料が2件ある作品があり（`missedCharacters`
   // と同じ事情）、そこで黙ると、重複があるというだけの理由で語り手を
   // 言えなくなる。**別人が2人いれば、名前が違うのでここで2件になる**
   const names: string[] = [];
-  for (const person of options.people) {
+  for (const person of people) {
     const forms = [
       person.firstPerson.default,
       ...person.firstPerson.variants.map((variant) => variant.form),
@@ -54,8 +70,5 @@ export function detectNarrator(options: {
     if (names.includes(person.name)) continue;
     names.push(person.name);
   }
-
-  // 0人（設定に一人称が登録されていない）も、2人以上（絞れない）も黙る
-  if (names.length !== 1) return null;
-  return { firstPerson, name: names[0] };
+  return names;
 }

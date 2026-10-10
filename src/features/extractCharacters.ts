@@ -39,6 +39,7 @@ import {
   type DroppedAliasRecord,
   type DroppedRelationRecord,
   type DroppedReadingRecord,
+  type DroppedFirstPersonRecord,
   type DroppedSpeechStyleRecord,
   type RejectedCharacterCandidate,
   type RelationRejectionReason,
@@ -49,6 +50,12 @@ import {
   selectNewNarratorNames,
 } from "../core/rejectedNarratorNotice";
 import { describeUnnamedNarratorOutcome } from "../core/unnamedNarrator";
+import {
+  foreignNarrationScenesInChunk,
+  foreignNarratorNoteOf,
+  workNarratorContextOf,
+} from "../core/sceneNarrators";
+import { blankMemoLines } from "../core/sceneMemo";
 import {
   readNotifiedNarrators,
   rememberNotifiedNarrators,
@@ -160,6 +167,8 @@ interface ValidationFixCounts {
   droppedSpeechStyles: DroppedSpeechStyleRecord[];
   /** 名前と合わない読みを外したもの（作者の裁定、2026-10-01） */
   droppedReadings: DroppedReadingRecord[];
+  /** 主人公でない語り手の場面の一人称として外したもの（2026-10-10） */
+  droppedFirstPersons: DroppedFirstPersonRecord[];
 }
 
 function collectValidationFixes(
@@ -177,6 +186,7 @@ function collectValidationFixes(
   target.movedAddressRelations.push(...validated.movedAddressRelations);
   target.droppedSpeechStyles.push(...validated.droppedSpeechStyles);
   target.droppedReadings.push(...validated.droppedReadings);
+  target.droppedFirstPersons.push(...(validated.droppedFirstPersons ?? []));
 }
 
 interface ExtractionSummaryCounts {
@@ -663,6 +673,7 @@ export async function extractCharacters(
     movedAddressRelations: [],
     droppedSpeechStyles: [],
     droppedReadings: [],
+    droppedFirstPersons: [],
   };
   const failures: ExtractionFailure[] = [];
   let cacheWarnings = 0;
@@ -696,6 +707,16 @@ export async function extractCharacters(
     チャンクごとに作り直すと、その回の抽出で増えた名前まで裏付けに混ざり、
     同じ資料でも実行のたびに結果が変わる
   */
+  /*
+    **作品の語り手は、全話を繋いだ本文で1回だけ決める**（2026-10-10。設計書6.5.12）。
+    場面ごとに一人称の語り手が入れ替わる作品で、主人公でない語り手の場面の
+    答えを主人公の記録にしないための断り書きと検算に使う。決め方は矛盾検知・
+    推敲と同じ（`detectNarrator`）。決まらない作品では今までと何も変わらない
+  */
+  const workNarrator = workNarratorContextOf(
+    chunks.map((chunk) => blankMemoLines(chunk.text)).join("\n"),
+    loaded.characters
+  );
   const replay = new ExtractionReplay(
     {
       characters: loaded.characters,
@@ -704,7 +725,8 @@ export async function extractCharacters(
       organizations: existingOrganizations,
       world: existingWorld,
     },
-    settings
+    settings,
+    workNarrator
   );
   const extractedAll = replay.extracted;
   const rejectedCandidates = replay.rejected;
@@ -787,6 +809,13 @@ export async function extractCharacters(
           knownOrganizationNames: known.organizations,
           knownWorldNames: known.worlds,
           abilityTerm: settings.currentAbilityTerm() ?? undefined,
+          // 主人公でない語り手の場面があるチャンクだけ、断り書きを添える
+          foreignNarrator: workNarrator
+            ? foreignNarratorNoteOf(
+                foreignNarrationScenesInChunk(chunk, workNarrator.narrator.firstPerson),
+                workNarrator
+              )
+            : null,
         });
 
         const callAI = () =>
@@ -1822,6 +1851,20 @@ function describeValidationFixes(fixes: ValidationFixCounts): string {
       `名前と合わない読みを ${fixes.droppedReadings.length}件 外しました（${shown}${rest}）`
     );
   }
+  // 主人公でない語り手の場面の一人称（2026-10-10）。一人称の欄だけ外し、人物は残す
+  if (fixes.droppedFirstPersons.length > 0) {
+    const shown = fixes.droppedFirstPersons
+      .slice(0, 3)
+      .map((entry) => `${entry.characterName} の「${entry.firstPerson}」`)
+      .join("、");
+    const rest =
+      fixes.droppedFirstPersons.length > 3
+        ? ` ほか${fixes.droppedFirstPersons.length - 3}件`
+        : "";
+    lines.push(
+      `ほかの語り手の場面の一人称を ${fixes.droppedFirstPersons.length}件 外しました（${shown}${rest}）`
+    );
+  }
 
   return lines.length > 0 ? `\n${lines.join("\n")}` : "";
 }
@@ -2164,6 +2207,7 @@ function describeRejectedCandidates(
     non_person: "人物以外",
     collective: "集団",
     ungrounded: "本文根拠なし",
+    foreign_narrator_scene: "ほかの語り手の場面",
   };
   const counts = new Map<CharacterRejectionReason, number>();
   for (const candidate of rejected) {

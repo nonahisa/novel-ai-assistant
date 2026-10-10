@@ -49,6 +49,7 @@ const FIRST_PERSON_CANDIDATES = [
   "ぼく",
   "おれ",
   "儂",
+  "余",
   "私",
   "僕",
   "俺",
@@ -197,6 +198,20 @@ export function countNarrationFirstPersons(
  */
 const KANA_PRONOUN_NEXT = "はがもをとへや、。，．！？!?…」』）)\\s　";
 function kanaPronounPattern(word: string): RegExp | undefined {
+  /*
+    **「余」も語の中の字として数えない**（2026-10-10、語り手の入れ替わる作品）。
+    皇子の章を「余は先生の話をただ聞いていた」と語る作品で、「余」が候補に
+    無かったため、その場面を一人称の場面と見られなかった。字で数えると
+    「紆余曲折」「余韻」「余計」「余裕」をすべて一人称と数える（同じ作品の
+    第1・2・4・5話）ので、仮名と同じく**後ろに助詞か句読点が続く形**だけを数え、
+    前に漢字が付く形（「十余の」）も数えない
+  */
+  if (word === "余") {
+    return new RegExp(
+      `(?<!\\p{Script=Han})余(?=[${KANA_PRONOUN_NEXT}のにで]|$)`,
+      "gu"
+    );
+  }
   if (!/^\p{Script=Hiragana}+$/u.test(word)) return undefined;
   if (word === "うち") {
     return new RegExp(

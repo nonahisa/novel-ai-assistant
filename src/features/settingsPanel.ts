@@ -44,6 +44,7 @@ import {
   removeAiNote,
   toRecordEdits,
   CUSTOM_FIELD_PREFIX,
+  firstPersonVariantRemoveKey,
   SettingsEditError,
   type EditOptions,
   type RecordEdits,
@@ -111,6 +112,15 @@ import {
   truncatedOutputAdvice,
 } from "../ai/outputLimit";
 import { loadExcerptSources } from "../core/manuscriptSources";
+import {
+  describeSuspectVariant,
+  enrichForeignNarratorOf,
+  suspectForeignFirstPersonVariants,
+  workNarratorContextOf,
+  type SuspectFirstPersonVariant,
+  type WorkNarratorContext,
+} from "../core/sceneNarrators";
+import { blankMemoLines } from "../core/sceneMemo";
 import {
   AIRegistry,
   ensureConfigured,
@@ -1933,6 +1943,13 @@ export class SettingsPanel {
     if (!resolved) return;
 
     const excerpts = await this.excerptsFor(kind, record);
+    /*
+      **対象が作品の語り手（主人公）なら、主人公でない語り手の場面を断る**
+      （2026-10-10。設計書6.5.12）。語り手の決め方は抽出と同じ（全話を繋いだ本文）。
+      人物以外・語り手が決まらない作品では、頼み方も提案も今までどおり
+    */
+    const narration =
+      kind === "character" ? await this.narrationOf() : null;
     const prompt = buildEnrichPrompt({
       workTitle: this.work.title,
       kind,
@@ -1944,6 +1961,14 @@ export class SettingsPanel {
       excerpts,
       customFields: this.customFields,
       notes,
+      foreignNarrator: narration
+        ? enrichForeignNarratorOf(
+            record as Character,
+            excerpts,
+            narration.sources,
+            narration.context
+          )
+        : null,
     });
 
     const text = await this.generate(
@@ -1989,6 +2014,17 @@ export class SettingsPanel {
         selected: fillsBlank,
       })
     );
+    // **語り手の取り違えで入った疑いのある一人称の言い分けを、外す案として並べる**
+    // （裁定4）。自動では消さない（作者のデータ。実装ルール2）——既定では選ばず、
+    // 作者が選んだときだけ外す
+    const suspects = narration
+      ? suspectForeignFirstPersonVariants(
+          record as Character,
+          narration.context,
+          narration.sources
+        )
+      : [];
+    proposals.push(...suspects.map(suspectVariantProposal));
 
     const misattributed = this.buildMisattributed(
       kind,
@@ -2021,7 +2057,11 @@ export class SettingsPanel {
       speechEchoes > 0
         ? "（口調の提案は、指示の言葉をそのまま写したものだったので除きました）"
         : "";
-    const notice = `${misattributed.droppedNotice}${citationNotice}${speechEchoNotice}`;
+    const suspectNotice =
+      suspects.length > 0
+        ? "（一人称の言い分けのうち、ほかの語り手の場面から取り違えて入った疑いのあるものを、外す案として並べました。既定では選んでいません）"
+        : "";
+    const notice = `${misattributed.droppedNotice}${citationNotice}${speechEchoNotice}${suspectNotice}`;
 
     if (proposals.length === 0 && misattributed.items.length === 0) {
       this.post({
@@ -2051,6 +2091,50 @@ export class SettingsPanel {
       placeable: kind === "character",
       notice,
     });
+  }
+
+  /**
+   * 作品の語り手と、話ごとの本文（2026-10-10。設計書6.5.12）。語り手が
+   * 決まらない作品・本文が読めないときは null（再読込は今までどおり進む）
+   */
+  private async narrationOf(): Promise<{
+    context: WorkNarratorContext;
+    sources: ExcerptSource[];
+  } | null> {
+    try {
+      const sources = await this.loadedExcerptSources();
+      const context = workNarratorContextOf(
+        sources.map((source) => blankMemoLines(source.text)).join("\n"),
+        this.characters
+      );
+      return context ? { context, sources } : null;
+    } catch (error) {
+      useLogFile(this.work.folderPath);
+      logFailure("再読込：語り手を決めるための本文を読めなかった（断り書きなしで続行）", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  /** 抜粋の出典（本文）。1度読んだら持ち回す（`evenlySampledExcerpts` と共用） */
+  private async loadedExcerptSources(): Promise<ExcerptSource[]> {
+    if (!this.excerptSources) {
+      const loaded = await withCancellableProgress(
+        "本文を読み込んでいます",
+        async () => loadExcerptSources(this.work)
+      );
+      this.excerptSources = loaded.sources;
+      if (loaded.conflicted.length > 0) {
+        this.post({
+          type: "error",
+          message: `未解決の競合があるファイルは参照していません（${loaded.conflicted.join(
+            "、"
+          )}）。`,
+        });
+      }
+    }
+    return this.excerptSources;
   }
 
   /**
@@ -2746,26 +2830,12 @@ export class SettingsPanel {
     kind: SettingsKind,
     record: SettingsRecord
   ): Promise<MentionExcerpt[]> {
-    if (!this.excerptSources) {
-      const loaded = await withCancellableProgress(
-        "本文を読み込んでいます",
-        async () => loadExcerptSources(this.work)
-      );
-      this.excerptSources = loaded.sources;
-      if (loaded.conflicted.length > 0) {
-        this.post({
-          type: "error",
-          message: `未解決の競合があるファイルは参照していません（${loaded.conflicted.join(
-            "、"
-          )}）。`,
-        });
-      }
-    }
+    const sources = await this.loadedExcerptSources();
     // フルネームで登録されていても、本文には片方しか出てこないことが多い。
     // 広げないと、その人物の場面がほとんど集まらない。
     // ほかの記録の名前の中の一致（「ルド王国」の「ルド」）は除く（2026-10-02）
     return collectMentionExcerpts(
-      this.excerptSources,
+      sources,
       searchTermsFor(kind, record, this.characters),
       {
         otherNames: otherRecordNamesFor(record, [
@@ -3500,6 +3570,23 @@ function describeError(
   if (error instanceof SettingsEditError) return error.message;
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+/**
+ * 語り手の取り違えで入った疑いのある一人称の言い分けを、外す案の1行にする
+ * （2026-10-10。設計書6.5.12）。**既定では選ばない**——外すかは作者が決める。
+ * 入力欄の文は説明で、反映では読まない（鍵が指す言い分けを外すだけ）
+ */
+function suspectVariantProposal(suspect: SuspectFirstPersonVariant): FieldProposal {
+  const text = describeSuspectVariant(suspect);
+  return {
+    key: firstPersonVariantRemoveKey(suspect.variant),
+    label: text.label,
+    before: text.before,
+    after: text.after,
+    multiline: true,
+    selected: false,
+  };
 }
 
 function createNonce(): string {
