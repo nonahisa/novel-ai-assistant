@@ -138,6 +138,10 @@ function harness(
           focus: () => { env.focused = id; },
           select: () => {},
           blur: () => { if (env.focused === id) env.focused = ""; },
+          // 下の欄の字数は塊（span）に分けて入れる。本物と同じく、中身の文字をつないだものを textContent にする
+          replaceChildren: (...nodes) => {
+            el.textContent = nodes.map((node) => node.textContent ?? node.text ?? "").join("");
+          },
         };
         env.elements[id] = el;
       }

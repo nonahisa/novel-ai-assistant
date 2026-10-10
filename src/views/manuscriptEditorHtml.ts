@@ -858,12 +858,25 @@ ruby > rt {
 /* **字数は控えめに出す。** 書いている最中にいつも視界へ入るものなので、
    読みにいったときだけ読める濃さにしておく（数えるのが目的ではない） */
 #counts {
-  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+/* **狭い列では「／」の区切りで折り返す**（作者の実機、2026-10-10）。
+   以前は字数の文を nowrap にして、列が窓の外へ出て切られたとき（body.clipped）だけ
+   折り返しを許していた。左の列を約190pxまで狭めただけ（窓の外へは出ていない）では
+   clipped が付かず、「作品 17,841字 ／ このファイル 5,563字 ／ この話…」と右で切れた。
+   そこで区切りの1つ分（「作品 17,841字 ／」）を1つの塊にして、塊と塊の間で折り返す。
+   広い列では全部が1行に収まるので、見た目は変わらない。
+   inline-block にしてあるのは、塊1つが列より広いときだけ塊の中（「作品」と数字の間の
+   空白）で折り返させるため。keep-all は和字の間で切らせない（「5,563」と「字」を離さない）。
+   anywhere は、それでも収まらないときの最後の逃げ道（右で切れるよりは読める） */
+#counts > span {
+  display: inline-block;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
 /* 列の右端が窓の外へ出て切られているとき（下の観測が body に clipped を付ける）だけ、
-   字数の文も折り返して全部読めるようにする。広いときは1行のまま（実機確認リスト 4544） */
-body.clipped #counts, body.clipped #cheer { white-space: normal; }
+   目標の一言も折り返して全部読めるようにする。広いときは1行のまま（実機確認リスト 4544） */
+body.clipped #cheer { white-space: normal; }
 #note {
   color: var(--vscode-notificationsInfoIcon-foreground, inherit);
 }
@@ -3966,7 +3979,20 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
       分からなかった）
     */
     parts.push("表示倍率 " + Math.round((size / ${MANUSCRIPT_SIZE_DEFAULT}) * 100) + "%");
-    countsLabel.textContent = parts.join(" ／ ");
+    /*
+      区切りの1つ分ずつ span の塊にする（狭い列で「／」のところから折り返すため。
+      CSS の #counts > span）。**「／」は前の塊の終わりに付ける**——行の頭に「／」が
+      来ない。塊の間は普通の空白を置き、全体の文字は今までの「 ／ 」でつないだ形と
+      同じにする（字数の文を読むテストや画面の自動テストがそのまま読める）
+    */
+    const pieces = [];
+    parts.forEach(function (part, index) {
+      if (index > 0) pieces.push(document.createTextNode(" "));
+      const piece = document.createElement("span");
+      piece.textContent = index < parts.length - 1 ? part + " ／" : part;
+      pieces.push(piece);
+    });
+    countsLabel.replaceChildren(...pieces);
   }
   /* counts:end */
 

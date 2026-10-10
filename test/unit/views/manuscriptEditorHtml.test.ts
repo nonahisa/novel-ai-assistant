@@ -702,6 +702,39 @@ describe("下段の字数", () => {
     expect(code).toContain('message.type === "counts"');
   });
 
+  /**
+   * **狭い列では「／」の区切りで折り返す**（作者の実機、2026-10-10。0.101.11）。
+   * 左の列を約190pxまで狭めると「作品 17,841字 ／ このファイル 5,563字 ／ この話…」と
+   * 右で切れていた。0.100.6 の直しは「列が窓の外へ出て切られたとき」（body.clipped）だけ
+   * 折り返しを許していたので、列そのものが狭いだけのときは1行のまま（nowrap）はみ出した。
+   * ボタンの段と同じく、いつでも折り返せるようにしておく（広ければ1行に収まる）。
+   */
+  it("字数の行そのものは折り返しを止めない（狭い列でも右で切れない）", () => {
+    const style = styleWithoutComments();
+    const rule = style.match(/#counts \{[^}]*\}/);
+    expect(rule, "#counts の指定が無い").toBeTruthy();
+    expect(rule![0]).not.toContain("nowrap");
+  });
+
+  it("区切りの1つ分は、字数の数字の途中では切らない", () => {
+    const style = styleWithoutComments();
+    const rule = style.match(/#counts > span \{[^}]*\}/);
+    expect(rule, "#counts > span の指定が無い").toBeTruthy();
+    // 1つ分を1つの塊にして、塊と塊の間（「／」のあと）で折り返す
+    expect(rule![0]).toContain("display: inline-block");
+    // 塊の中でも和字の間では切らない（「17,841字」の「字」の前で切らない）
+    expect(rule![0]).toContain("word-break: keep-all");
+  });
+
+  it("字数は区切りの1つ分ずつ塊にして並べる（「／」は前の塊に付ける）", () => {
+    const paint = code.slice(code.indexOf("function paintCounts()"), code.indexOf("/* counts:end */"));
+    expect(paint).toContain('document.createElement("span")');
+    expect(paint).toContain('" ／"');
+    expect(paint).toContain("countsLabel.replaceChildren(");
+    // 1行の文字列を丸ごと入れると、塊に分けられない
+    expect(paint).not.toContain('countsLabel.textContent = parts.join(" ／ ")');
+  });
+
   /** 記録を止めている作者に「今日 0字」と書かない */
   it("今日の量が届かなければ、出さない", () => {
     const handler = code.slice(code.indexOf('message.type === "counts"'));
