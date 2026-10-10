@@ -30,6 +30,8 @@ export const FEATURE_NAMES = [
   "foreshadow",
   "deviation",
   "episodePlot",
+  // 単話プロットと本文の照合（P-28。2026-10-10）。緩み（P-27）の隣——同じ単話プロットを本文と照らす
+  "episodePlotContrast",
   "settings",
   // AIで再読込（2026-10-01、作者の裁定）。抽出の隣——同じ設定資料を、1記録ずつ読み直す
   "settingsEnrich",
@@ -62,6 +64,7 @@ export const FEATURE_LABELS: Record<FeatureName, string> = {
   foreshadow: "伏線",
   deviation: "プロット逸脱",
   episodePlot: "単話プロットの緩み",
+  episodePlotContrast: "単話プロットと本文の照合",
   settings: "設定資料の抽出",
   settingsEnrich: "AIで再読込（設定資料）",
   synopsis: "各話あらすじ",
@@ -135,6 +138,7 @@ export const FEATURE_HINTS: Record<FeatureName, string> = {
   foreshadow: "配置と回収",
   deviation: "プロットと本文のずれ・間延び",
   episodePlot: "1話の展開の停滞・重複",
+  episodePlotContrast: "本文の欠落・順序・改変",
   settings: "人物・場所・世界観の案",
   settingsEnrich: "1記録の項目案（口調・性格など）",
   synopsis: "サブタイトル案つき",

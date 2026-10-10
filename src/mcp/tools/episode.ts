@@ -41,9 +41,21 @@ import {
   buildEpisodePlotCheckPrompt,
 } from "../../prompts/episodePlotCheck";
 import {
+  EPISODE_PLOT_CONTRAST_SCHEMA,
+  EPISODE_PLOT_CONTRAST_SYSTEM_PROMPT,
+  EPISODE_PLOT_CONTRAST_TEMPERATURE,
+  EPISODE_PLOT_CONTRAST_VERSION,
+  buildEpisodePlotContrastPrompt,
+  episodePlotContrastBudget,
+} from "../../prompts/episodePlotContrast";
+import {
   parseEpisodePlotFindings,
   validateEpisodePlotCheck,
+  validateEpisodePlotContrast,
 } from "../../core/episodePlotValidation";
+import { blankMemoLines } from "../../core/sceneMemo";
+import { hashText } from "../../core/hash";
+import type { FeatureName } from "../../core/mcpFeatures";
 import {
   episodePlotUnwrittenReason,
   parseEpisodePlot,
@@ -82,8 +94,9 @@ import {
 } from "./synopsisStash";
 
 /**
- * 話ごとに見る3つ——**各話あらすじ（P-06）・プロット逸脱（P-11）・
- * 単話プロットの緩み（P-27）**——を外から呼ぶ（設計書6.87.8 の4）。
+ * 話ごとに見る4つ——**各話あらすじ（P-06）・プロット逸脱（P-11）・
+ * 単話プロットの緩み（P-27）・単話プロットと本文の照合（P-28）**——を
+ * 外から呼ぶ（設計書6.87.8 の4）。
  *
  * **1つのファイルにまとめたのは、材料の集め方が同じだから。** どれも
  * チャンクに切らず、**話を丸ごと**渡す。切ると、話の筋を見る判断
@@ -464,7 +477,19 @@ export interface EpisodePlotPromptInput {
   chapterLabel?: string;
 }
 
-function readEpisodePlotDoc(input: EpisodePlotPromptInput) {
+function readEpisodePlotDoc(
+  input: EpisodePlotPromptInput,
+  /** 断りの次の一手に出す機能。照合（P-28）から呼ばれたら照合の名で断る */
+  feature: FeatureName = "episodePlot"
+) {
+  return readEpisodePlotFile(input, feature).doc;
+}
+
+/** 単話プロットを読み、**中身そのもの**も返す（照合はキャッシュの鍵に使う） */
+function readEpisodePlotFile(
+  input: EpisodePlotPromptInput,
+  feature: FeatureName
+) {
   // **作品フォルダーの外は読まない**（`shared.ts` の守り）
   const absolute = resolveInsideFolder(input.folder, input.plotPath);
   let text: string;
@@ -490,12 +515,12 @@ function readEpisodePlotDoc(input: EpisodePlotPromptInput) {
   const unwritten = episodePlotUnwrittenReason(doc);
   if (unwritten) {
     // 次の一手を添える（関門の断りと同じもの。不具合17）
-    const refusal = inlinePrerequisiteRefusal("episodePlot", "episodePlot");
+    const refusal = inlinePrerequisiteRefusal(feature, "episodePlot");
     throw new McpToolError(`この単話プロットは${unwritten}\n${refusal.line}`, {
       ...refusal.detail,
     });
   }
-  return doc;
+  return { doc, text };
 }
 
 export function episodePlotPrompt(input: EpisodePlotPromptInput) {
@@ -532,7 +557,105 @@ export function episodePlotValidate(
   });
 }
 
-/* ── runner（3つとも同じ形）────────────────────────── */
+/* ── 単話プロットと本文の照合（P-28）─────────────────── */
+
+/*
+  2026-10-10 に足した（実機確認の「本文と照合」——主筋の改変・出来事の欠落——を
+  外から測る道が無かった。P-27 の道は箇条書きだけを見るので、本文を逆に
+  書き換えても「強み」しか返らない）。
+
+  **製品は `features/checkEpisodePlot.ts` の `contrastEpisodePlot`。** プロンプト・
+  件数の上限・検算はそこと同じ部品を呼ぶ。写しを作らない。
+*/
+
+const EPISODE_PLOT_CONTRAST_VALIDATE_WITH = validateWith("episodePlotContrast");
+
+export interface EpisodePlotContrastPromptInput extends EpisodePlotPromptInput {
+  /** 照らす本文の話（相対パス） */
+  filePath: string;
+}
+
+/**
+ * 照らす本文。**プロンプトと検算で同じものを使う**（`deviationEpisodeOf` と同じ考え）。
+ *
+ * 製品と同じく、**ファイルの中身まるごと**からシーンメモを空行にしたもの
+ * （製品は `scanWork` の話のファイルを `readTextFile` で丸ごと読み、
+ * `blankMemoLines` を通す）。合本から1話を切り出すことはしない——製品も切らない。
+ *
+ * **モデルに合わせた切り落としはしない。** 製品は送り先のモデルの読める長さ
+ * （作者の設定・台帳の実測・未計測の安全既定）で後ろを落とすが、それは
+ * 作者の VS Code の中にしか無い値である。ここで当て推量の長さで切ると、
+ * 検算のときに同じ長さを組み直せない（`novel.validate` は numCtx を受けない）。
+ * 字数は返り値の `bodyChars` で知らせる。
+ */
+function contrastBodyOf(folder: string, filePath: string): string {
+  return blankMemoLines(readBody(folder, filePath));
+}
+
+/** 見出し。指定が無ければ、ファイル名の話数から「第N話」（製品の既定と同じ形） */
+function contrastLabelOf(input: EpisodePlotContrastPromptInput): string {
+  if (input.chapterLabel) return input.chapterLabel;
+  const parsed = parseEpisodeFileName(nodePath.basename(input.filePath));
+  return parsed.chapterStart === null || parsed.chapterStart === undefined
+    ? nodePath.basename(input.filePath)
+    : `第${parsed.chapterStart}話`;
+}
+
+export function episodePlotContrastPrompt(input: EpisodePlotContrastPromptInput) {
+  const { doc, text: plotText } = readEpisodePlotFile(input, "episodePlotContrast");
+  const body = contrastBodyOf(input.folder, input.filePath);
+  const label = contrastLabelOf(input);
+  // 件数の上限は製品と同じ決め方（箇条書きの数から）
+  const maxFindings = episodePlotContrastBudget(doc.items.length);
+
+  return {
+    /*
+      **版は製品のキャッシュの鍵と同じ組み立て**（版＋単話プロットの指紋）。
+      箇条書きを書き換えれば、同じ本文でも答えが変わるため
+    */
+    promptVersion: `${EPISODE_PLOT_CONTRAST_VERSION}:${hashText(plotText).slice(0, 16)}`,
+    systemPrompt: EPISODE_PLOT_CONTRAST_SYSTEM_PROMPT,
+    schema: EPISODE_PLOT_CONTRAST_SCHEMA,
+    temperature: EPISODE_PLOT_CONTRAST_TEMPERATURE,
+    validateWith: EPISODE_PLOT_CONTRAST_VALIDATE_WITH,
+    chapterLabel: label,
+    itemCount: doc.items.length,
+    maxFindings,
+    bodyChars: body.length,
+    userPrompt: buildEpisodePlotContrastPrompt({
+      chapterLabel: label,
+      goal: doc.goal,
+      items: doc.items.map((item) => item.text),
+      chapterText: body,
+      maxFindings,
+    }),
+  };
+}
+
+export function episodePlotContrastValidate(
+  input: EpisodePlotContrastPromptInput & { response: string }
+) {
+  const doc = readEpisodePlotDoc(input, "episodePlotContrast");
+  /*
+    **先にパースし、読めなければ断る。** `validateEpisodePlotContrast` は
+    形の合わない入力を黙って0件にする作りなので、読めない応答をそのまま
+    渡すと「食い違い0件」に見える（逸脱の検算で 0.64.3 に直したのと同じ罠）
+  */
+  const parsed = parseEpisodePlotFindings(input.response);
+  if (!parsed) {
+    throw new McpToolError(
+      "応答を読み取れませんでした（単話プロットと本文の照合のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
+    );
+  }
+  return validateEpisodePlotContrast(parsed, {
+    items: doc.items,
+    // **送ったのと同じ本文で照らす**（`contrastBodyOf`）
+    text: contrastBodyOf(input.folder, input.filePath),
+    maxFindings: episodePlotContrastBudget(doc.items.length),
+  });
+}
+
+/* ── runner（どれも同じ形）────────────────────────── */
 
 
 export async function synopsisRun(input: EpisodePromptInput & RunnerInput) {
@@ -585,4 +708,16 @@ export async function episodePlotRun(
   return runOnce(input, episodePlotPrompt(input), (response) =>
     episodePlotValidate({ ...input, response })
   );
+}
+
+export async function episodePlotContrastRun(
+  input: EpisodePlotContrastPromptInput & RunnerInput
+) {
+  const prompt = episodePlotContrastPrompt(input);
+  const ran = await runOnce(input, prompt, (response) =>
+    episodePlotContrastValidate({ ...input, response })
+  );
+  // 照らした本文の字数を `run` でも返す（製品はモデルに合わせて後ろを落とすが、
+  // ここは落とさない。比べるときに、どれだけ送ったかが分かるように）
+  return { ...ran, bodyChars: prompt.bodyChars };
 }

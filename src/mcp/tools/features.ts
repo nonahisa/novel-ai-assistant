@@ -63,6 +63,9 @@ import {
   deviationPrompt,
   deviationRun,
   deviationValidate,
+  episodePlotContrastPrompt,
+  episodePlotContrastRun,
+  episodePlotContrastValidate,
   episodePlotPrompt,
   episodePlotRun,
   episodePlotValidate,
@@ -250,6 +253,7 @@ const OPTIONS_TABLE =
   "notation: group※（novel.detect が返した組の1件）・limit（detect の上限）。" +
   "synopsis: needsSubtitle。" +
   "episodePlot: plotPath※（単話プロットの相対パス）・chapterLabel。" +
+  "episodePlotContrast: filePath※（照らす本文）・plotPath※・chapterLabel。" +
   "chat: question※・history・adviceAnswers・writerStyle・featureIndex・" +
   "overview（省くと作品の全体像＝話の一覧と各話の場所・紹介文・プロットを添える。false で外す。製品と同じ材料）。" +
   /*
@@ -725,6 +729,20 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
     run: (input) =>
       episodePlotRun({ ...episodePlotArgs(input), ...runnerArgs(input) }),
   },
+  episodePlotContrast: {
+    prompt: (input) => episodePlotContrastPrompt(episodePlotContrastArgs(input)),
+    // 検算にも本文と単話プロットの両方が要る（送ったのと同じ本文・箇条書きで照らす）
+    validate: (input) =>
+      episodePlotContrastValidate({
+        ...episodePlotContrastArgs(input),
+        response: needResponse(input),
+      }),
+    run: (input) =>
+      episodePlotContrastRun({
+        ...episodePlotContrastArgs(input),
+        ...runnerArgs(input),
+      }),
+  },
   settings: {
     prompt: (input) => settingsPrompt(chunkArgs(input)),
     validate: (input) =>
@@ -830,6 +848,15 @@ function episodePlotArgs(input: FeatureCallInput): {
     plotPath: needOption(input, "plotPath", z.string().min(1)),
     chapterLabel: option(input, "chapterLabel", z.string()),
   };
+}
+
+function episodePlotContrastArgs(input: FeatureCallInput): {
+  folder: string;
+  filePath: string;
+  plotPath: string;
+  chapterLabel?: string;
+} {
+  return { ...episodePlotArgs(input), filePath: needFilePath(input) };
 }
 
 /**

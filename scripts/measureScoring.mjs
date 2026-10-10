@@ -69,6 +69,9 @@ export const FEATURES = [
   "deviation",
   "synopsis",
   "episodePlot",
+  // 単話プロットと本文の照合（2026-10-10）。filePath と options.plotPath を1話ずつ渡す
+  // （作品ぜんたいの話を回す FILE_TARGET_FEATURES には入れない。plotPath が話ごとに違う）
+  "episodePlotContrast",
   "settings",
   "settingsEnrich",
   "opening",
