@@ -17,7 +17,7 @@
 import type { Frame } from "playwright-core";
 import { test } from "vitest";
 import { composeText, manuscriptFrames, openEpisode } from "./support/manuscriptFrame";
-import { activeTabNames, editorGroupTabs } from "./support/workbenchDom";
+import { activeTabNames, editorGroupTabs, tabNamesInclude } from "./support/workbenchDom";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 
@@ -55,7 +55,7 @@ async function sendMouseSide(
 
 /** 前に出ているタブ（どの列でも）が `name` か */
 async function frontIs(session: E2ESession, name: string): Promise<boolean> {
-  return (await activeTabNames(session.page)).includes(name);
+  return tabNamesInclude(await activeTabNames(session.page), name);
 }
 
 /** 本文に `marker` を描いた原稿エディターの面 */

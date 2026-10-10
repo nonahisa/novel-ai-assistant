@@ -5,7 +5,7 @@ description: 画面の自動テスト（E2E。Playwright で本物の VS Code �
 
 # 画面の自動テスト（E2E）
 
-**作者の画面を触らずに「押して起きること」を確かめる道。** 本物の VS Code（既定 1.141.0。2026-10-10 に 1.138.0 から上げた。**1.141.0 では全件をまだ走らせていない**——落ちたらまず `workbenchDom.ts`。前の版で回すなら `NOVELAI_E2E_VSCODE=1.138.0`）を Playwright の Electron モードで画面の外に起こし、キー・クリック・右クリック・打ち込みを送る。設計書 6.113（土台）・6.114（広報の動画）が正。
+**作者の画面を触らずに「押して起きること」を確かめる道。** 本物の VS Code（既定 1.141.0。2026-10-10 に 1.138.0 から上げた。2026-10-10 にノートPCで1回全件を回し、通過78・失敗38。新しく落ちた分の主な原因は**タブの名前から拡張子が外れた**こと（1.141.0 はタブの列が新しい見た目のとき、拡張子を `.label-suffix` へ分ける。配布物の `redrawTabLabel`）。`workbenchDom.ts` の `readTabState` を名前＋拡張子で組み立てる形に直したが、**直したあとの 1.141.0 ではまだ走らせていない**——落ちたらまず `workbenchDom.ts`。前の版で回すなら `NOVELAI_E2E_VSCODE=1.138.0`）を Playwright の Electron モードで画面の外に起こし、キー・クリック・右クリック・打ち込みを送る。設計書 6.113（土台）・6.114（広報の動画）が正。
 
 **2026-10-03 から、画面の確認はまずここで行う**（作者「良いです」——computer-use で作者の画面を押そうとして「desktop shell is frontmost」で止まり、空の VS Code の窓を作者の画面に出してしまったため）。computer-use と違い、**打つ・キー・右クリック・修飾キーもできる。**
 
@@ -38,7 +38,7 @@ npm run typecheck:tests                            # 型（test/e2e/tsconfig.jso
 |---|---|
 | `vscodeApp.ts` | `withVsCode(名前, 話の配列, 本体, 起こし方?)`——一時フォルダーに作品を作り、VS Code を画面の外で起こし、作品を登録して、終われば必ず止めて消す。失敗したら写真を `%TEMP%\novelai-e2e-screenshots\` に残す。`LaunchOptions` で settings・keybindings を足せる |
 | `manuscriptFrame.ts` | 原稿エディター（WebView）の中：`openEpisode`・`placeCaretAfter`・`caretPosition`・`composeText`・`footText`・`selectionCollapsed`・`revealFlashLit`・`memoPanelFrame`。再読み込みのあと面を探し直す `waitForManuscriptFrame`、届かなかった字を作る `dropEditsToHost`（打った字の便だけを WebView の外側の枠で落とす）と `classOpen`・`rescueBarText` |
-| `workbenchDom.ts` | **VS Code 本体の DOM に頼るのはここ1か所**：`editorGroupTabs`（列ごとのタブ）・`activateTab`（タブを押して前に出す）・`quickOpen`・`clearNotifications`・`dialogText`・`closeDialog`。版で壊れたらここだけ直す |
+| `workbenchDom.ts` | **VS Code 本体の DOM に頼るのはここ1か所**：`readTabState`（列ごとのタブの名前・前に出ているか・未保存の印を読む唯一の口）・`editorGroupTabs`（列ごとのタブ）・`activateTab`（タブを押して前に出す）・`tabLocator`。**タブの名前を期待値と比べるときは `tabNameMatches`／`tabNamesInclude`／`countTabsNamed`**（拡張子のあり／なしのどちらでも当たる。`=== name` や `.includes(name)` で比べない）・`quickOpen`・`clearNotifications`・`dialogText`・`closeDialog`。版で壊れたらここだけ直す |
 | `workbenchDom.ts` の続き | 選ぶ画面（QuickPick）：`waitForQuickPick`・`quickPickTitle`・`quickPickRows`・`pickQuickPickRow`・`toggleQuickPickRow`・`acceptQuickPick`（1.138 はチェック欄が `.monaco-checkbox`。決めるのは［OK］——チェックのあと Enter で戻る）。WebView を開いたあとの本体向けのキーは `pressWorkbenchKey`（焦点が iframe にあると本体のキー割り当てに届かない。ノートPCで落ちた） |
 | `settingsFixture.ts` | 設定資料の見本（人物を製品と同じファイル名で置く）・設定資料パネルの面と一覧の読み取り |
 | `LaunchOptions` の追加 | `globalState`（起こす前に `state.vscdb` へ書く。`node:sqlite`）・`prepareWork`（起こす前に作品フォルダーへ置く） |
@@ -75,7 +75,7 @@ npm run typecheck:tests                            # 型（test/e2e/tsconfig.jso
 - ほかのアプリとのキーの取り合い（Notion の Ctrl+Shift+K など）
 - **見た目の良し悪し**（並びや重なりは機械で測れるが、「読みやすいか」は作者）
 - F5 の開発ホストそのもの
-- 拡張機能ホストの再起動をまたぐことは、**1.141.0 なら見張れる見込み**（作者の 1.141.0 では再起動してもタブが残った。2026-10-10）。`e2e/hostRestartDisconnect.test.ts`（つながりの切れたモーダル→再読み込み→打った字が入る／再起動の前に届かなかった字を［戻す］）。**書いたが未実行。** 1.138.0 では再起動の確かめが出てタブが閉じ、見張れなかった——1.141.0 でも確かめが出たら、このテストはその文を添えて落ちるので、ここを「見張れない」に戻す。再起動のキーは `ctrl+alt+shift+r`（使い捨ての keybindings.json）
+- 拡張機能ホストの再起動をまたぐことは、**1.141.0 なら見張れる見込み**（作者の 1.141.0 では再起動してもタブが残った。2026-10-10）。`e2e/hostRestartDisconnect.test.ts`（つながりの切れたモーダル→再読み込み→打った字が入る／再起動の前に届かなかった字を［戻す］）。**ノートPCの 1.141.0 の1回目（2026-10-10）は、確かめの窓は出ずタブも残ったが、タブの名前の照合（拡張子）で落ちた。照合を直したあとは未実行。** 1.138.0 では再起動の確かめが出てタブが閉じ、見張れなかった——1.141.0 でも確かめが出たら、このテストはその文を添えて落ちるので、ここを「見張れない」に戻す。再起動のキーは `ctrl+alt+shift+r`（使い捨ての keybindings.json）
 - AI を本当に呼ぶもの（MCP か `ai-bench` で測る）
 
 ## 実機確認リストへの反映

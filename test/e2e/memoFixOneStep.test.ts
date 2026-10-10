@@ -32,7 +32,7 @@ import {
 } from "./support/sampleFinding";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { clearNotifications, dialogText, editorGroupTabs, pressWorkbenchKey } from "./support/workbenchDom";
+import { clearNotifications, countTabsNamed, dialogText, editorGroupTabs, pressWorkbenchKey } from "./support/workbenchDom";
 
 const EPISODE = "001_駅.txt";
 const TEXT = ["　終電を逃した駅のホームに、雨の音だけが残っていた。", "　近づいてみると、男は以外にも若かった。", "　ホームの時計が、零時を指していた。", ""].join("\n");
@@ -145,7 +145,7 @@ async function verdicts(session: E2ESession): Promise<string[]> {
 }
 
 async function episodeTabCount(page: Page): Promise<number> {
-  return (await editorGroupTabs(page)).flat().filter((name) => name === EPISODE).length;
+  return countTabsNamed((await editorGroupTabs(page)).flat(), EPISODE);
 }
 
 test("提案パネルを開いたまま［直す］を押すと、1手で本文が直り、提案パネルからも消え、［戻す］で両方に戻る", async () => {

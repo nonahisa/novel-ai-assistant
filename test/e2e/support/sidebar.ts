@@ -9,7 +9,9 @@
  *   OS のメニューになり、Playwright から読めないうえ、作者の画面の前面に出る
  *
  * VS Code 本体の DOM に頼るのは `quickInput.ts` と同じく、ここに閉じ込める。
- * 確かめた版：1.138.0（2026-10-04）。
+ * 確かめた版：1.138.0（2026-10-04）。1.141.0 は**未実行**——頼っているクラス名
+ * （`.context-view`・`.monaco-menu`・`.action-label`・`.monaco-list-row`）が 1.141.0 の配布物の
+ * `workbench.desktop.main.js` にも残っていることだけを確かめた（2026-10-10）。
  */
 import type { Locator, Page } from "playwright-core";
 import { waitUntil } from "./wait";

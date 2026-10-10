@@ -35,6 +35,7 @@ import {
   closeDialog,
   dialogText,
   editorGroupTabs,
+  countTabsNamed,
   pressDialogButton,
 } from "./support/workbenchDom";
 
@@ -124,7 +125,7 @@ test("修正案の無い指摘（矛盾）の［本文へ］で、原稿のそ�
         async () =>
           (await fileText(session)) === TEXT &&
           (await proposalPanelFrame(page)) === undefined &&
-          (await editorGroupTabs(page)).flat().filter((name) => name === EPISODE).length === 1 &&
+          countTabsNamed((await editorGroupTabs(page)).flat(), EPISODE) === 1 &&
           (await manuscriptFrames(page)).length === 1,
         "［本文へ］のあと、本文が変わらず・提案パネルが開かず・原稿が1枚のままであること",
         3_000

@@ -5,9 +5,13 @@
  * 版が上がると変わることがある。壊れたらここだけ直せばよいように、
  * テストの本体からはクラス名を書かない。
  *
- * 確かめた版：1.138.0（2026-10-03）。
+ * 確かめた版：1.138.0（2026-10-03）。1.141.0 に合わせたが**未実行**（2026-10-10。配布物の
+ * `workbench.desktop.main.js` の `redrawTabLabel`・`doRedrawTabDirty`・`doRedrawTabActive` を読み、
+ * タブの名前が拡張子を `.label-suffix` へ分けるようになったのに合わせた——`readTabState`）。
+ * ほかのクラス名（`.quick-input-*`・`.monaco-checkbox`・`.notification-toast`・`.monaco-dialog-box`・
+ * `.keybindings-header`・`.marker-widget` など）は、1.141.0 の配布物にも残っていることだけを確かめた。
  */
-import type { Page } from "playwright-core";
+import type { Locator, Page } from "playwright-core";
 import { waitUntil } from "./wait";
 
 /**
@@ -38,42 +42,116 @@ export async function dismissWorkbenchHover(page: Page): Promise<void> {
   );
 }
 
+/** タブ1枚の様子（`readTabState` が返す） */
+export interface TabState {
+  /** タブの名前。ファイルのタブなら拡張子まで含めた名前（「001_はじまり.txt」） */
+  name: string;
+  /** その列で前に出ているか */
+  active: boolean;
+  /** 未保存の印（●）が付いているか */
+  dirty: boolean;
+}
+
+/** 列（グループ）1つの様子 */
+export interface EditorGroupState {
+  /** 焦点のある列か */
+  active: boolean;
+  tabs: TabState[];
+}
+
+/**
+ * 列ごとのタブの様子を**ここ1か所で**読む。タブの名前・前に出ているか・未保存の印を
+ * 読む関数（`editorGroupTabs`・`activeTabNames`・`tabIsDirty`・`activeGroupIndex`）は、
+ * 全部これを Node の側で加工するだけにする（`page.evaluate` の中へは外の関数を
+ * 持ち込めないので、DOM の読み方を何か所にも写さないため）。
+ *
+ * **名前は `.label-name` の字に `.label-suffix` の字を足して組み立てる。**
+ * 1.141.0 の配布物（`workbench.desktop.main.js` の `redrawTabLabel`）は、タブの列が
+ * 新しい見た目（`.modern-ui-connected-editor-tabs`）の中にあり、名前がファイル名と同じなら、
+ * 拡張子を `suffix` に分けて `.label-name` から削る（`.label-name` は「001_はじまり」、
+ * `.monaco-icon-suffix-container > .label-suffix` に「.txt」）。1.138.0 の `redrawTabLabel` には
+ * この分け方が無く、タブに `.label-suffix` は出ない（足しても空）。どちらの版でも
+ * 拡張子つきの名前に戻る。新しい見た目を設定で切って逃げることはしない——作者の画面は
+ * この見た目で動いている。
+ *
+ * 未保存は `.tab.dirty`、前に出ているのは `.tab.active`（1.141.0 の `doRedrawTabDirty`・
+ * `doRedrawTabActive` も 1.138.0 と同じクラスを付ける。ノートPCで「未保存の印が見つからない」と
+ * 落ちたのは、印ではなく名前の照合が外れていたため）。
+ */
+export async function readTabState(page: Page): Promise<EditorGroupState[]> {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll(".editor-group-container")).map((group) => ({
+      active: group.classList.contains("active"),
+      tabs: Array.from(group.querySelectorAll(".tabs-container .tab")).map((tab) => {
+        const base = tab.querySelector(".label-name")?.textContent ?? "";
+        const suffix = tab.querySelector(".label-suffix")?.textContent ?? "";
+        // 名前の部分が無い版では、読み上げ用の名前の頭を使う
+        const name = base ? `${base}${suffix}`.trim() : (tab.getAttribute("aria-label") ?? "").split(",")[0].trim();
+        return { name, active: tab.classList.contains("active"), dirty: tab.classList.contains("dirty") };
+      }),
+    }))
+  );
+}
+
+/**
+ * タブの名前 `actual` が `wanted` に当たるか。**拡張子のあり／なしのどちらでも一致させる**
+ * （「001_はじまり.txt」と「001_はじまり」は同じタブ。ただし「001_はじまり.txt」と
+ * 「001_はじまり.md」は別のタブ）。
+ *
+ * `readTabState` で拡張子つきに組み立て直しているので、ふだんは完全一致で当たる。
+ * これは、VS Code の版がまた名前の見せ方を変えたときに、テストの期待値を
+ * 書き換えずに済ませるための受け皿
+ */
+export function tabNameMatches(actual: string, wanted: string): boolean {
+  if (actual === wanted) return true;
+  const stem = (name: string) => name.replace(/\.[^./\\]+$/, "");
+  // 片方が拡張子なしのときだけ、語幹どうしで比べる
+  return stem(actual) === stem(wanted) && (actual === stem(actual) || wanted === stem(wanted));
+}
+
+/** タブの名前の並び `names` に、`wanted` に当たるものがあるか（拡張子のあり／なしを問わない） */
+export function tabNamesInclude(names: readonly string[], wanted: string): boolean {
+  return names.some((name) => tabNameMatches(name, wanted));
+}
+
+/** タブの名前の並び `names` のうち、`wanted` に当たるものの数（拡張子のあり／なしを問わない） */
+export function countTabsNamed(names: readonly string[], wanted: string): number {
+  return names.filter((name) => tabNameMatches(name, wanted)).length;
+}
+
 /** エディターの列（グループ）ごとの、タブの名前。左の列から順に */
 export async function editorGroupTabs(page: Page): Promise<string[][]> {
-  return page.evaluate(() =>
-    Array.from(document.querySelectorAll(".editor-group-container")).map((group) =>
-      Array.from(group.querySelectorAll(".tabs-container .tab")).map((tab) => {
-        // 名前の部分（`label-name`）を取る。無い版では読み上げ用の名前の頭を使う
-        const name = tab.querySelector(".label-name")?.textContent;
-        if (name) return name.trim();
-        return (tab.getAttribute("aria-label") ?? "").split(",")[0].trim();
-      })
-    )
-  );
+  return (await readTabState(page)).map((group) => group.tabs.map((tab) => tab.name));
 }
 
 /** 列ごとに、前に出ているタブの名前（その列にタブが無ければ空文字）。左の列から順に */
 export async function activeTabNames(page: Page): Promise<string[]> {
-  return page.evaluate(() =>
-    Array.from(document.querySelectorAll(".editor-group-container")).map((group) => {
-      const tab = group.querySelector(".tabs-container .tab.active");
-      if (!tab) return "";
-      const name = tab.querySelector(".label-name")?.textContent;
-      if (name) return name.trim();
-      return (tab.getAttribute("aria-label") ?? "").split(",")[0].trim();
-    })
+  return (await readTabState(page)).map((group) => group.tabs.find((tab) => tab.active)?.name ?? "");
+}
+
+/** その名前のタブが「未保存」の印（●）を付けているか（拡張子のあり／なしを問わない） */
+export async function tabIsDirty(page: Page, name: string): Promise<boolean> {
+  return (await readTabState(page)).some((group) =>
+    group.tabs.some((tab) => tab.dirty && tabNameMatches(tab.name, name))
   );
 }
 
-/** その名前のタブが「未保存」の印（●）を付けているか */
-export async function tabIsDirty(page: Page, name: string): Promise<boolean> {
-  return page.evaluate(
-    (wanted) =>
-      Array.from(document.querySelectorAll(".tabs-container .tab.dirty")).some(
-        (tab) => (tab.querySelector(".label-name")?.textContent ?? "").trim() === wanted
-      ),
-    name
-  );
+/**
+ * 名前が `name` に当たるタブ（拡張子のあり／なしを問わない）を指す locator。
+ * いま無ければ、どのタブにも当たらない locator を返す（`waitFor` で時間切れになる）。
+ *
+ * `.label-name` を `hasText` で絞る形は使わない——1.141.0 では `.label-name` が拡張子を
+ * 持たないので、「001_はじまり.txt」で探すと部分一致もしない
+ */
+export async function tabLocator(page: Page, name: string): Promise<Locator> {
+  const index = (await readTabState(page))
+    .flatMap((group) => group.tabs)
+    .findIndex((tab) => tabNameMatches(tab.name, name));
+  // 列の順・列の中のタブの順は、文書の中の `.editor-group-container .tabs-container .tab` の順と同じ。
+  // `readTabState` と同じ範囲で数える（列の外に別の `.tabs-container .tab` が描かれても隣を押さない）
+  return index >= 0
+    ? page.locator(".editor-group-container .tabs-container .tab").nth(index)
+    : page.locator(".editor-group-container .tabs-container .tab.novelai-e2e-no-such-tab");
 }
 
 /**
@@ -83,22 +161,20 @@ export async function tabIsDirty(page: Page, name: string): Promise<boolean> {
  * 処理を通るので、「タブを前に出しただけ」の場面にならない
  */
 export async function activateTab(page: Page, name: string): Promise<void> {
-  const tab = page
-    .locator(".tabs-container .tab")
-    .filter({ has: page.locator(".label-name", { hasText: name }) })
-    .first();
+  await waitUntil(
+    async () => tabNamesInclude((await editorGroupTabs(page)).flat(), name),
+    `タブ「${name}」が出る`,
+    10_000
+  );
+  const tab = await tabLocator(page, name);
   await tab.waitFor({ state: "visible", timeout: 10_000 });
   await tab.click();
-  await waitUntil(async () => (await activeTabNames(page)).includes(name), `タブ「${name}」が前に出る`, 10_000);
+  await waitUntil(async () => tabNamesInclude(await activeTabNames(page), name), `タブ「${name}」が前に出る`, 10_000);
 }
 
 /** 焦点のある列（グループ）の番号。左の列から 0, 1, … 。分からなければ -1 */
 export async function activeGroupIndex(page: Page): Promise<number> {
-  return page.evaluate(() =>
-    Array.from(document.querySelectorAll(".editor-group-container")).findIndex((group) =>
-      group.classList.contains("active")
-    )
-  );
+  return (await readTabState(page)).findIndex((group) => group.active);
 }
 
 /**

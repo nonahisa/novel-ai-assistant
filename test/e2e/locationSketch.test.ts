@@ -21,7 +21,7 @@ import { expect, test } from "vitest";
 import { emptyLocation, type Location, type LocationRelation } from "../../src/models/location";
 import { DEFAULT_SETTINGS_DIR } from "../../src/models/types";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
-import { activeTabNames, editorGroupTabs, pressWorkbenchKey } from "./support/workbenchDom";
+import { activeTabNames, editorGroupTabs, pressWorkbenchKey, tabNamesInclude } from "./support/workbenchDom";
 import { holdsFor, waitUntil } from "./support/wait";
 
 const OPEN_SKETCH_KEY = "ctrl+alt+shift+g";
@@ -277,7 +277,7 @@ test("食い違いの赤い線を押すと、提案パネルの「矛盾」に�
       await waitUntil(
         async () =>
           (await proposalsInFront()) &&
-          (await editorGroupTabs(session.page)).flat().includes("002_つづき.txt"),
+          tabNamesInclude((await editorGroupTabs(session.page)).flat(), "002_つづき.txt"),
         "本文が開き、提案パネルが前に出ている",
         30_000
       );

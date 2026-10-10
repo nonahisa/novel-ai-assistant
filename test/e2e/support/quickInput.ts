@@ -9,7 +9,10 @@
  * `toggleQuickPickRow`・`acceptQuickPick`）にある。ここに置くのは、それで足りない
  * 「入力欄」と「題の一部で待つ」「パレットから走らせる」だけ。
  * VS Code 本体の DOM のクラス名に頼るので、`workbenchDom.ts` と同じく版で壊れたらここを直す。
- * 確かめた版：1.138.0（2026-10-04）。
+ * 確かめた版：1.138.0（2026-10-04）。1.141.0 は**未実行**——頼っているクラス名
+ * （`.quick-input-widget`・`.quick-input-list`・`.quick-input-message`・`.monaco-list-row`）が
+ * 1.141.0 の配布物の `workbench.desktop.main.js` にも残っていることだけを確かめた（2026-10-10）。
+ * 名前の拡張子を `.label-suffix` へ分ける 1.141.0 の変更はタブだけで、選ぶ画面の行には効かない。
  */
 import type { Page } from "playwright-core";
 import { waitUntil } from "./wait";
