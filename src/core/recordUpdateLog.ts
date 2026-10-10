@@ -185,3 +185,24 @@ export function describeNarratorMoveLog(entry: {
     `${entry.value}${arrow}${notes}（${entry.via}）`
   );
 }
+
+/**
+ * 移す案の反映で古くなった人物の更新案を片づけたときの1行（0.102.4。設計書6.5.12）。
+ *
+ * 更新案はレコード丸ごとの写しなので、移したあとに承認すると、呼称・一人称の
+ * 言い分け・登場話が写しから戻る。**片づけたことを黙らない**——作者が
+ * 「承認待ちが消えた」と気づいたときに、ログで理由が追えるようにする。
+ * 頭は「設定資料の更新を」でそろえる（反映・見送りの行と一緒に拾える）。
+ */
+export function describeUpdatesDiscardedByMoveLog(entry: {
+  /** 更新案を片づけた人物の名前（主人公・移し先） */
+  names: readonly string[];
+  /** 設定資料パネルの「AIで再読込」から移したときは「設定資料パネル」 */
+  via: RecordUpdateVia | "設定資料パネル";
+}): string {
+  const names = entry.names.map((name) => `「${name}」`).join("");
+  return (
+    `設定資料の更新を片づけ：人物${names}の承認待ちの更新案` +
+    `（移す案の反映で古くなったため。もう一度抽出すると作り直されます）（${entry.via}）`
+  );
+}

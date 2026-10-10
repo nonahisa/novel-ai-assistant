@@ -88,6 +88,7 @@ import {
   batchVerbFromLabel,
   describeRecordUpdateBatchLog,
 } from "../core/recordUpdateLog";
+import { MOVE_DESTINATION_KEY_PREFIX } from "../core/pendingNarratorMoves";
 import {
   askNotationAdvice,
   describeNotationAdvice,
@@ -3280,12 +3281,25 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     /** 画面で ✕ を付けた葉（レコードごと。設計書6.32） */
     drops?: readonly RecordDropKeys[]
   ): Promise<void> {
-    const targets = this.recordUpdates.filter(
+    const actionable = this.recordUpdates.filter(
       (entry) => entry.status === "pending" || entry.status === "failed"
+    );
+    // **移し先を選んでいない移す案は、反映へ回さない**（0.102.4。設計書6.5.12）。
+    // 回すと「移し先を選んでください」で失敗の印が付き、知らせの件数とも
+    // 押した数とも合わない。行は承認待ちのまま残し、知らせで数を分けて言う
+    const keysOf = (id: string) => drops?.find((entry) => entry.id === id)?.dropKeys;
+    const unchosenMoves = actionable.filter((entry) =>
+      isMoveDestinationUnchosen(entry, keysOf(entry.id))
+    ).length;
+    const targets = actionable.filter(
+      (entry) => !isMoveDestinationUnchosen(entry, keysOf(entry.id))
     );
     if (targets.length === 0) {
       void vscode.window.showInformationMessage(
-        "反映できる更新がありません。"
+        "反映できる更新がありません。" +
+          (unchosenMoves > 0
+            ? `移し先を選んでいない移す案 ${unchosenMoves}件は、移し先を選んでから反映してください。`
+            : "")
       );
       return;
     }
@@ -3311,12 +3325,16 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     // 保存の直前に実際に落ちた数を積む（レコード側に見つからない鍵もある）
     let dropped = 0;
     for (const target of targets) {
-      const keys = drops?.find((entry) => entry.id === target.id)?.dropKeys;
-      const outcome = await this.applyRecordUpdateById(target.id, keys);
+      const outcome = await this.applyRecordUpdateById(target.id, keysOf(target.id));
       dropped += outcome.dropped;
     }
     const applied = this.recordUpdates.filter(
       (entry) => entry.status === "applied"
+    ).length;
+    // 今回押したうちで入らなかった数（前に1件ずつ失敗した行は数えない）
+    const failed = targets.filter(
+      (target) =>
+        this.recordUpdates.find((entry) => entry.id === target.id)?.status === "failed"
     ).length;
     // **件数の1行を作品のログへ**（0.101.13）。1件ずつの行は反映の口
     // （`applyPendingUpdates.ts` の `showInPanel` など）が書く。まとめの輪は
@@ -3327,7 +3345,14 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     void vscode.window.showInformationMessage(
       `${applied}件を${conjugate(label, "しました")}` +
         (dropped > 0 ? `（${dropped} 件を落としました）` : "") +
-        "。"
+        "。" +
+        // 失敗と、選んでいないので回さなかった案は、別の数として言う（0.102.4）
+        (failed > 0
+          ? `${label.endsWith("する") ? label.slice(0, -2) : label}できなかった ${failed}件は、一覧に理由が出ています。`
+          : "") +
+        (unchosenMoves > 0
+          ? `移し先を選んでいない移す案 ${unchosenMoves}件は残しました。`
+          : "")
     );
   }
 
@@ -4438,6 +4463,22 @@ function id2(item: ProposalViewItem): string {
  */
 export function conjugate(label: string, tail: "します" | "しました"): string {
   return label.endsWith("する") ? label.slice(0, -2) + tail : label + tail;
+}
+
+/**
+ * 移し先を選んでいない移す案か（0.102.4。設計書6.5.12）。
+ *
+ * 画面の選び（`moveTo:` の鍵）も既定の移し先（名指しできた案）も無ければ、
+ * 反映しても `destinationFromKeys` が「移し先を選んでください」で断る。
+ * ［まとめて適用］はこれを反映へ回さず、失敗と分けて数える。
+ * 「外すだけ」（`moveTo:-`）は選んだものとして扱う。
+ */
+export function isMoveDestinationUnchosen(
+  item: Pick<RecordUpdateViewItem, "moveChoice">,
+  dropKeys: readonly string[] | undefined
+): boolean {
+  if (!item.moveChoice || item.moveChoice.selected) return false;
+  return !(dropKeys ?? []).some((key) => key.startsWith(MOVE_DESTINATION_KEY_PREFIX));
 }
 
 /**

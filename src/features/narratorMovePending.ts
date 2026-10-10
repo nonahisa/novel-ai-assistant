@@ -1,6 +1,7 @@
 import type { WorkEntry } from "../models/types";
 import type { Character } from "../models/character";
 import { CharacterStore } from "../core/characterStore";
+import { PendingUpdateStore } from "../core/pendingUpdates";
 import { loadExcerptSources } from "../core/manuscriptSources";
 import { applyNarratorMoves, findNarratorMoves } from "../core/narratorMoves";
 import {
@@ -145,6 +146,11 @@ export interface NarratorMoveApplied {
   destinationName: string | null;
   /** 移し先の値を上書きしなかったことの説明 */
   notes: string[];
+  /**
+   * 承認待ちの更新案を片づけた人物の名前（0.102.4）。
+   * 移す前の写しなので、残すと承認したときに移した値が戻る
+   */
+  discardedUpdates: string[];
 }
 
 /**
@@ -207,11 +213,73 @@ export async function applyPendingNarratorMove(
     );
   }
   await store.discard(item.move.filePath);
+  const discardedUpdates = await discardStaleCharacterUpdates(work, [
+    source,
+    ...(destination ? [destination] : []),
+  ]);
   return {
     sourceName: source.name,
     destinationName: destination ? destination.name : null,
     notes: outcome.notes,
+    discardedUpdates,
   };
+}
+
+/**
+ * 移したあとの人物の、承認待ちの更新案を片づける（0.102.4。設計書6.5.12）。
+ *
+ * 更新案（`.aiwriter/pending-characters/`）は**レコード丸ごとの写し**である。
+ * `settlePendingRejectedValues`・`settlePendingRelations` が覆うのは変化の記録・
+ * 面・関係だけで、呼称・一人称の言い分け・登場話は写しのまま戻る。
+ * 移し先も同じで、足したばかりの値が写しで消える。
+ *
+ * **写しから移した値だけを抜く道は取らない。** 写しの中の値は抽出のたびに
+ * 形が変わり（話数の並び・証拠の文）、抜き損ねると黙って戻る。前例は
+ * 設定資料パネルの「別の人物に分ける」（`discardPendingFor`）——提案は
+ * 再抽出で作り直せる（前と同じAI・モデルならキャッシュが効き、AIは呼ばれない）。
+ *
+ * 新しく作る案（`kind: "creation"`）は仮IDなので照らさない。片づけに失敗しても、
+ * 移したこと自体は成立しているので止めない（同じパネルで押されても、
+ * `characterTargets` が書く前にファイルの有無を確かめる）。
+ *
+ * 設定資料パネルの「AIで再読込」から移す道（`settingsPanel.ts` の
+ * `handleApplyProposal`）も、これを呼ぶ（理由は同じ）。
+ *
+ * @returns 更新案を片づけた人物の名前
+ */
+export async function discardStaleCharacterUpdates(
+  work: WorkEntry,
+  people: readonly Character[]
+): Promise<string[]> {
+  const names: string[] = [];
+  try {
+    const store = new PendingUpdateStore(work);
+    const { updates } = await store.loadAll();
+    for (const person of people) {
+      const stale = updates.filter(
+        (update) => update.kind !== "creation" && update.character.id === person.id
+      );
+      if (stale.length === 0) continue;
+      for (const update of stale) await store.discard(update.filePath);
+      names.push(person.name);
+    }
+  } catch {
+    // 承認待ちの置き場が読めないだけ。移した結果はもう台帳にある
+  }
+  return names;
+}
+
+/**
+ * 片づけたことの知らせ（反映の知らせに1行。黙って消したことにしない）。
+ * 片づけが無ければ null。
+ */
+export function describeDiscardedUpdatesNotice(names: readonly string[]): string | null {
+  if (names.length === 0) return null;
+  return (
+    `${names.map((name) => `「${name}」`).join("")}の承認待ちの更新案を片づけました` +
+    "（移す前の写しなので、承認すると移した値が戻るため）。" +
+    "もう一度「設定資料を抽出」すると作り直されます。"
+  );
 }
 
 /**

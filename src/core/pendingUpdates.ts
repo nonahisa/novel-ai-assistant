@@ -187,6 +187,23 @@ export class PendingUpdateStore {
     }
   }
 
+  /**
+   * その更新案がまだ承認待ちにあるか（0.102.4）。
+   *
+   * 提案パネルは開いたときの写しをメモリに持つので、ほかの承認（移す案の
+   * 反映など）でファイルが片づいたあとも行が残る。**押されたら書く前に
+   * ここで確かめる**——無いのに写しを書くと、片づけた理由（値が巻き戻る）が
+   * そのまま起きる。読めない理由が「無い」以外でも false にする（書かない側へ倒す）。
+   */
+  async exists(filePath: string): Promise<boolean> {
+    try {
+      await vscode.workspace.fs.stat(path.toUri(filePath));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async count(): Promise<number> {
     return (await this.loadAll()).updates.length;
   }
