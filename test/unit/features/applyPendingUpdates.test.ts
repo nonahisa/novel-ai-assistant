@@ -73,10 +73,14 @@ vi.mock("../../../src/views/openDocument", () => ({
   openGeneratedMarkdown: vi.fn(async () => undefined),
 }));
 
-// 記録の書き先を向ける口も代役に要る（0.45.0 で features 全体へ広げた）
+// 記録の書き先を向ける口も代役に要る（0.45.0 で features 全体へ広げた）。
+// **書いた行と、行の直前に向けた書き先を順に積む**（0.101.13。反映しても
+// 作品のログに1行も残らなかった）
+const logged = vi.hoisted(() => ({ events: [] as string[] }));
 vi.mock("../../../src/core/logger", () => ({
   logFailure: vi.fn(),
-  useLogFile: vi.fn(),
+  logLine: vi.fn((message: string) => logged.events.push(`line:${message}`)),
+  useLogFile: vi.fn((folder: string) => logged.events.push(`use:${folder}`)),
 }));
 
 const { applyPendingCharacterUpdates } = await import(
@@ -421,4 +425,130 @@ describe("プロット・相談から来た既存人物の更新案", () => {
       expect(state.discard).toHaveBeenCalledWith(`pending/char_001_${source}.json`);
     }
   );
+});
+
+/**
+ * **反映・見送りを作品のログへ1件1行で残す**（0.101.13）。
+ *
+ * 2026-10-10、作者の作品で抽出の直後に人物6件が提案パネルから書き換わった
+ * のに、`.aiwriter/logs/actions.log` に1行も無かった。失敗だけは
+ * `logFailure` で残っていたが、成功と見送りは黙っていた。
+ */
+describe("反映・見送りの記録", () => {
+  beforeEach(() => {
+    state.pending = [];
+    state.pendingErrors = [];
+    state.characters = [];
+    state.loadErrors = [];
+    state.saveOrUpdate.mockClear();
+    state.save.mockClear();
+    state.discard.mockClear();
+    logged.events = [];
+  });
+
+  /** 行だけを取り出す */
+  function lines(): string[] {
+    return logged.events
+      .filter((event) => event.startsWith("line:"))
+      .map((event) => event.slice("line:".length));
+  }
+
+  /** 1件の行の直前に、作品のログへ書き先を向けたか */
+  function pointedToWorkBefore(line: string): boolean {
+    const index = logged.events.indexOf(`line:${line}`);
+    return index > 0 && logged.events[index - 1] === `use:${work.folderPath}`;
+  }
+
+  function aliasUpdate(): void {
+    state.characters = [{ ...character("char_001", "灯", "主人公"), personality: "無口" }];
+    state.pending = [
+      {
+        character: {
+          ...character("char_001", "灯", "主人公"),
+          aliases: ["灯ちゃん", "あかりん"],
+          personality: "無口。幽霊が見える",
+        },
+        filePath: "pending/char_001.json",
+      },
+    ];
+  }
+
+  test("提案パネルで反映すると、作品のログへ1行残る", async () => {
+    aliasUpdate();
+    const { panel, captured } = fakePanel();
+    await applyPendingCharacterUpdates(work, panel as never);
+    logged.events = [];
+
+    await captured.apply!("pending/char_001.json");
+
+    const expected = "設定資料の更新を適用：人物「灯」 別名＋2・性格（追記）（提案パネル）";
+    expect(lines()).toEqual([expected]);
+    expect(pointedToWorkBefore(expected)).toBe(true);
+  });
+
+  test("✕ で落とした葉は数えず、落とした数を添える", async () => {
+    aliasUpdate();
+    const { panel, captured } = fakePanel();
+    await applyPendingCharacterUpdates(work, panel as never);
+    logged.events = [];
+
+    await (captured.apply as unknown as (id: string, keys: string[]) => Promise<unknown>)(
+      "pending/char_001.json",
+      ["alias:あかりん"]
+    );
+
+    expect(lines()).toEqual([
+      "設定資料の更新を適用：人物「灯」 別名＋1・性格（追記）（✕で1件を落とした）（提案パネル）",
+    ]);
+  });
+
+  test("提案パネルで見送ると、作品のログへ1行残る", async () => {
+    aliasUpdate();
+    const { panel, captured } = fakePanel();
+    await applyPendingCharacterUpdates(work, panel as never);
+    logged.events = [];
+
+    await captured.dismiss!("pending/char_001.json");
+
+    const expected = "設定資料の更新を見送り：人物「灯」 別名＋2・性格（追記）（提案パネル）";
+    expect(lines()).toEqual([expected]);
+    expect(pointedToWorkBefore(expected)).toBe(true);
+  });
+
+  test("反映に失敗したら、適用の行は書かない（失敗は logFailure が残す）", async () => {
+    aliasUpdate();
+    state.saveOrUpdate.mockRejectedValueOnce(new Error("書けませんでした"));
+    const { panel, captured } = fakePanel();
+    await applyPendingCharacterUpdates(work, panel as never);
+    logged.events = [];
+
+    const result = await captured.apply!("pending/char_001.json");
+
+    expect(result.ok).toBe(false);
+    expect(lines()).toEqual([]);
+  });
+
+  test("確認ダイアログの「すべて反映」も、1件ずつと件数の行を残す", async () => {
+    state.characters = [
+      character("char_001", "灯", "主人公"),
+      character("char_002", "澪", "親友"),
+    ];
+    state.pending = [
+      { character: character("char_001", "灯", "主人公。幽霊が見える"), filePath: "pending/char_001.json" },
+      { character: character("char_002", "澪", "灯の親友"), filePath: "pending/char_002.json" },
+    ];
+    window.showInformationMessage = (async (_message: string, ...rest: unknown[]) =>
+      rest.includes("すべて反映") ? "すべて反映" : undefined) as typeof window.showInformationMessage;
+
+    await applyPendingCharacterUpdates(work);
+
+    expect(state.saveOrUpdate).toHaveBeenCalledTimes(2);
+    expect(lines()).toEqual([
+      "設定資料の更新を適用：人物「灯」 紹介（追記）（確認ダイアログ）",
+      "設定資料の更新を適用：人物「澪」 紹介（変更）（確認ダイアログ）",
+      "設定資料の更新をまとめて適用：2/2件（確認ダイアログ）",
+    ]);
+    // 1件目の行より前に、作品のログへ向けてある
+    expect(logged.events[0]).toBe(`use:${work.folderPath}`);
+  });
 });

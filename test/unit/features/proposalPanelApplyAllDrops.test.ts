@@ -22,6 +22,8 @@ vi.mock("vscode", () => {
       showWarningMessage: vi.fn(() => Promise.resolve("反映する")),
       showInformationMessage: vi.fn(() => Promise.resolve(undefined)),
       showErrorMessage: vi.fn(),
+      // まとめて適用の件数の行を作品のログへ書く（0.101.13）。出力パネルの代役
+      createOutputChannel: () => ({ appendLine: noop }),
     },
     workspace: {
       getConfiguration: () => ({ get: (_k: string, d?: unknown) => d }),
