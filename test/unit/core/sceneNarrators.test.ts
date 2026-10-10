@@ -162,9 +162,24 @@ describe("主人公でない語り手の場面を見分ける", () => {
 describe("断り書きの名指し", () => {
   const scenes = [{ firstPerson: "余" }];
 
-  test("持ち主が主人公以外の1人なら名指しする", () => {
-    const note = foreignNarratorNoteOf(scenes, contextOf([HERO, EMPEROR, PRINCE]));
+  test("持ち主が主人公以外の1人で、その場面の本文に出ていれば名指しする", () => {
+    const note = foreignNarratorNoteOf(
+      [{ firstPerson: "余", text: "　余は皇帝として玉座に座った。余は退屈だった。\n" }],
+      contextOf([HERO, EMPEROR, PRINCE])
+    );
     expect(note?.forms).toEqual([{ firstPerson: "余", speaker: "皇帝" }]);
+  });
+
+  test("持ち主が1人でも、その場面の本文に出ていなければ名指ししない（0.102.2）", () => {
+    // 本文の渡らない形（0.102.1 まではこれで名指ししていた）
+    expect(foreignNarratorNoteOf(scenes, contextOf([HERO, EMPEROR, PRINCE]))?.forms).toEqual([
+      { firstPerson: "余", speaker: null },
+    ]);
+    const note = foreignNarratorNoteOf(
+      [{ firstPerson: "余", text: PRINCE_SCENE }],
+      contextOf([HERO, EMPEROR, PRINCE])
+    );
+    expect(note?.forms).toEqual([{ firstPerson: "余", speaker: null }]);
   });
 
   test("持ち主が2人なら名指ししない（取り違えの言い分けを持つ主人公も数える）", () => {

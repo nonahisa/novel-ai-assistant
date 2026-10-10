@@ -1681,7 +1681,7 @@ button.danger:hover {
       label.textContent = item.label;
       label.htmlFor = check.id;
       head.appendChild(label);
-      if (item.before) {
+      if (item.before && !item.destinations) {
         // 既にある内容を置き換える提案は、目立たせて既定で選ばない
         const warn = document.createElement("span");
         warn.className = "overwrite";
@@ -1701,14 +1701,38 @@ button.danger:hover {
         row.appendChild(before);
       }
 
-      const editor = document.createElement(item.multiline ? "textarea" : "input");
-      editor.value = item.after;
-      // 提案は長いことが多い。隠れていると、何を反映するのか読めない
-      if (item.multiline) growWithContent(editor);
-      // 選択と手直しを提案側へ書き戻す。再描画で元へ戻さないため
-      editor.addEventListener("input", function () {
-        item.after = editor.value;
-      });
+      // なぜその案なのか（移す案の「ほかの語り手の場面だけの話」）
+      if (item.note) {
+        const note = document.createElement("div");
+        note.className = "readonly";
+        note.textContent = item.note;
+        row.appendChild(note);
+      }
+
+      // 移す案は、入力欄の代わりに移し先を選ばせる（値は人物の id。空は外すだけ）
+      let editor;
+      if (item.destinations) {
+        editor = document.createElement("select");
+        for (const destination of item.destinations) {
+          const option = document.createElement("option");
+          option.value = destination.id;
+          option.textContent = destination.name;
+          editor.appendChild(option);
+        }
+        editor.value = item.after;
+        editor.addEventListener("change", function () {
+          item.after = editor.value;
+        });
+      } else {
+        editor = document.createElement(item.multiline ? "textarea" : "input");
+        editor.value = item.after;
+        // 提案は長いことが多い。隠れていると、何を反映するのか読めない
+        if (item.multiline) growWithContent(editor);
+        // 選択と手直しを提案側へ書き戻す。再描画で元へ戻さないため
+        editor.addEventListener("input", function () {
+          item.after = editor.value;
+        });
+      }
       check.addEventListener("change", function () {
         item.selected = check.checked;
       });

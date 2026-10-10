@@ -44,7 +44,6 @@ import {
   removeAiNote,
   toRecordEdits,
   CUSTOM_FIELD_PREFIX,
-  firstPersonVariantRemoveKey,
   SettingsEditError,
   type EditOptions,
   type RecordEdits,
@@ -113,13 +112,17 @@ import {
 } from "../ai/outputLimit";
 import { loadExcerptSources } from "../core/manuscriptSources";
 import {
-  describeSuspectVariant,
   enrichForeignNarratorOf,
-  suspectForeignFirstPersonVariants,
   workNarratorContextOf,
-  type SuspectFirstPersonVariant,
   type WorkNarratorContext,
 } from "../core/sceneNarrators";
+import {
+  applyNarratorMoves,
+  describeNarratorMove,
+  findNarratorMoves,
+  type NarratorMoveChoice,
+  type NarratorMoveItem,
+} from "../core/narratorMoves";
 import { blankMemoLines } from "../core/sceneMemo";
 import {
   AIRegistry,
@@ -531,6 +534,13 @@ export class SettingsPanel {
    * 場所の「地域」や能力の「代償」は人物レコードに置き場所が無い）。
    */
   private misattributedKind: SettingsKind | undefined;
+  /**
+   * 直近の再読込で出した、語り手の取り違えの移す案（2026-10-10、0.102.2。
+   * 設計書6.5.12）。画面には見出しと移し先の候補だけを送り、何を動かすかは
+   * こちらの控えで引く（画面から返った文字列で資料を動かさない）。
+   * `recordId` はその案を出した人物
+   */
+  private narratorMoves: { recordId: string; items: NarratorMoveItem[] } | undefined;
   /** 画面が「ready」を返したか。開いた直後に送っても届かないため見張る */
   private ready = false;
   private readyWaiters: Array<() => void> = [];
@@ -2014,17 +2024,15 @@ export class SettingsPanel {
         selected: fillsBlank,
       })
     );
-    // **語り手の取り違えで入った疑いのある一人称の言い分けを、外す案として並べる**
-    // （裁定4）。自動では消さない（作者のデータ。実装ルール2）——既定では選ばず、
-    // 作者が選んだときだけ外す
-    const suspects = narration
-      ? suspectForeignFirstPersonVariants(
-          record as Character,
-          narration.context,
-          narration.sources
-        )
+    // **語り手の取り違えで入った疑いのある値を、別の人物へ移す案として並べる**
+    // （作者の裁定 2026-10-10「殿下の資料へ移す案」。0.102.1 の一人称の言い分けの
+    // 外す案もここへ含む）。自動では動かさない（作者のデータ。実装ルール2）——
+    // 既定では選ばず、作者が選んだときだけ移す（移し先を選ばなければ外すだけ）
+    const moves = narration
+      ? findNarratorMoves(record as Character, narration.context, narration.sources)
       : [];
-    proposals.push(...suspects.map(suspectVariantProposal));
+    this.narratorMoves = moves.length > 0 ? { recordId: record.id, items: moves } : undefined;
+    proposals.push(...moves.map(narratorMoveProposal));
 
     const misattributed = this.buildMisattributed(
       kind,
@@ -2058,8 +2066,8 @@ export class SettingsPanel {
         ? "（口調の提案は、指示の言葉をそのまま写したものだったので除きました）"
         : "";
     const suspectNotice =
-      suspects.length > 0
-        ? "（一人称の言い分けのうち、ほかの語り手の場面から取り違えて入った疑いのあるものを、外す案として並べました。既定では選んでいません）"
+      moves.length > 0
+        ? `（ほかの語り手の場面だけの話から取り違えて入った疑いのある値 ${moves.length} 件を、別の人物へ移す案として並べました。既定では選んでいません）`
         : "";
     const notice = `${misattributed.droppedNotice}${citationNotice}${speechEchoNotice}${suspectNotice}`;
 
@@ -2351,19 +2359,50 @@ export class SettingsPanel {
       return;
     }
 
-    const edits = toRecordEdits(message.values);
+    const fieldValues = withoutNarratorMoves(message.values);
+    const edits = toRecordEdits(fieldValues);
+
+    /*
+      **移す案（2026-10-10、0.102.2）**。控えはその案を出した人物のものだけ使う
+      （別の人物を開き直したあとに古い画面から届いた鍵で、違う資料を動かさない）。
+      移し先を先に、主人公をあとに保存する——主人公から外す分だけが先に
+      着地して値が消える形にしない（失敗しても、二重に残るほうへ倒れる）
+    */
+    let source = record;
+    let moveNotice = "";
+    const moveItems =
+      message.kind === "character" && this.narratorMoves?.recordId === record.id
+        ? this.narratorMoves.items
+        : [];
+    const choices = narratorMoveChoicesOf(message.values, moveItems);
+    if (choices.length > 0) {
+      const outcome = applyNarratorMoves(
+        record as Character,
+        this.characters,
+        choices,
+        new Date().toISOString()
+      );
+      for (const destination of outcome.destinations) {
+        await this.characterStore.saveOrUpdate(destination);
+      }
+      source = outcome.source;
+      moveNotice = describeMoveOutcome(outcome, this.characters);
+    }
 
     // AIの提案を採用しただけなので、作者が確定させた記述としては扱わない。
     // 作者確定にすると、その人物は以後の抽出から締め出されてしまう
-    const updated = this.applyEdits(message.kind, record, edits, {
+    const updated = this.applyEdits(message.kind, source, edits, {
       authorConfirmed: false,
     });
     await this.persist(message.kind, updated);
+    if (choices.length > 0) this.narratorMoves = undefined;
+    const fieldCount = Object.keys(fieldValues).length;
     await this.reloadAfterSave(
       message.kind,
       message.id,
-      `${Object.keys(message.values).length} 項目を反映しました。` +
-        "この内容は以後の抽出で更新されることがあります。"
+      (fieldCount > 0 ? `${fieldCount} 項目を反映しました。` : "") +
+        moveNotice +
+        (fieldCount > 0 ? "この内容は以後の抽出で更新されることがあります。" : "")
     );
   }
 
@@ -3573,20 +3612,102 @@ function describeError(
 }
 
 /**
- * 語り手の取り違えで入った疑いのある一人称の言い分けを、外す案の1行にする
- * （2026-10-10。設計書6.5.12）。**既定では選ばない**——外すかは作者が決める。
- * 入力欄の文は説明で、反映では読まない（鍵が指す言い分けを外すだけ）
+ * 移す案の鍵の印（2026-10-10、0.102.2。設計書6.5.12）。鍵は「印＋控えの位置」
+ * ——`narratorMove:3`。値は移し先の人物の id（空なら外すだけ）。
+ * 画面は鍵の中身を見ずにそのまま送り返してくる
  */
-function suspectVariantProposal(suspect: SuspectFirstPersonVariant): FieldProposal {
-  const text = describeSuspectVariant(suspect);
+export const NARRATOR_MOVE_PREFIX = "narratorMove:";
+
+/**
+ * 語り手の取り違えで入った疑いのある値を、移す案の1行にする。
+ * **既定では選ばない**——移すかは作者が決める。移し先は選び直せる
+ * （名指しできた人が既定、名指しできなければ「外すだけ」が既定）
+ */
+export function narratorMoveProposal(item: NarratorMoveItem, index: number): FieldProposal {
+  const text = describeNarratorMove(item);
   return {
-    key: firstPersonVariantRemoveKey(suspect.variant),
+    key: `${NARRATOR_MOVE_PREFIX}${index}`,
     label: text.label,
     before: text.before,
-    after: text.after,
-    multiline: true,
+    after: item.destination.kind === "named" ? item.destination.id : "",
+    multiline: false,
     selected: false,
+    note: text.reason,
+    destinations: [
+      ...item.destination.candidates.map((candidate) => ({
+        id: candidate.id,
+        name: `「${candidate.name}」へ移す`,
+      })),
+      { id: "", name: "外すだけ（どこにも移さない）" },
+    ],
   };
+}
+
+/**
+ * 画面から返った移す案の選び（鍵と移し先の id）を、控えの案に引き当てる。
+ * **移し先はその案の候補にあるものだけを通す**（画面から返った id で、候補に
+ * 無い人物の資料を書き換えない）。候補に無い id・控えに無い位置は落とす
+ */
+export function narratorMoveChoicesOf(
+  values: Record<string, string>,
+  items: readonly NarratorMoveItem[]
+): NarratorMoveChoice[] {
+  const choices: NarratorMoveChoice[] = [];
+  for (const [key, value] of Object.entries(values)) {
+    if (!key.startsWith(NARRATOR_MOVE_PREFIX)) continue;
+    const index = Number(key.slice(NARRATOR_MOVE_PREFIX.length));
+    const item = Number.isSafeInteger(index) ? items[index] : undefined;
+    if (!item) continue;
+    const wanted = value.trim();
+    if (wanted && !item.destination.candidates.some((candidate) => candidate.id === wanted)) {
+      continue;
+    }
+    choices.push({ item, destinationId: wanted || null });
+  }
+  return choices;
+}
+
+/**
+ * 移す案を反映した結果の知らせ。**黙って据え置いたことにしない**——移した数・
+ * 外すだけにした数・見つからなかった数と、移し先の値を上書きしなかったことを書く
+ */
+export function describeMoveOutcome(
+  outcome: Pick<
+    ReturnType<typeof applyNarratorMoves>,
+    "destinations" | "moved" | "removedOnly" | "missing" | "notes"
+  >,
+  people: readonly Character[]
+): string {
+  const parts: string[] = [];
+  if (outcome.moved > 0) {
+    const names = outcome.destinations
+      .map((destination) => people.find((person) => person.id === destination.id)?.name ?? destination.name)
+      .map((name) => `「${name}」`)
+      .join("・");
+    parts.push(`${outcome.moved} 件を${names}の資料へ移しました。`);
+  }
+  if (outcome.removedOnly > 0) {
+    parts.push(`${outcome.removedOnly} 件は移し先を選ばなかったので、外すだけにしました。`);
+  }
+  if (outcome.missing > 0) {
+    parts.push(
+      `${outcome.missing} 件はいまの資料に見つからなかったので、何もしていません（別の窓で直されたのかもしれません）。`
+    );
+  }
+  if (outcome.moved + outcome.removedOnly > 0) {
+    parts.push(
+      "外した項目の値と関係は、退けた記録に残しました（次の抽出が同じ値を積み戻さないため）。"
+    );
+  }
+  parts.push(...outcome.notes);
+  return parts.join("");
+}
+
+/** 移す案の鍵を除いた、ふつうの項目の値 */
+function withoutNarratorMoves(values: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(values).filter(([key]) => !key.startsWith(NARRATOR_MOVE_PREFIX))
+  );
 }
 
 function createNonce(): string {
@@ -3607,6 +3728,13 @@ export interface FieldProposal {
   multiline: boolean;
   /** 既定で選ばれているか。空欄を埋める提案だけを既定にする */
   selected: boolean;
+  /** 行に添える説明（移す案の、なぜ疑ったか） */
+  note?: string;
+  /**
+   * 移し先の選択肢（移す案だけ）。あれば入力欄の代わりに選択を出し、
+   * 選んだ id（空なら外すだけ）が値として返る
+   */
+  destinations?: Array<{ id: string; name: string }>;
 }
 
 /** 画面に出す、はじいた記述1件（設計書6.31.2） */

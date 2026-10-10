@@ -49,6 +49,7 @@ import {
   type SuspectFirstPersonVariant,
   type WorkNarratorContext,
 } from "../../core/sceneNarrators";
+import { describeNarratorMove, findNarratorMoves } from "../../core/narratorMoves";
 import { blankMemoLines } from "../../core/sceneMemo";
 import {
   droppedTotal,
@@ -612,6 +613,21 @@ export function settingsEnrichValidate(
       foreignChapters: suspect.chapters,
       ...describeSuspectVariant(suspect),
     })),
+    /**
+     * 語り手の取り違えで入った疑いのある値を、別の人物へ移す案（2026-10-10、
+     * 0.102.2。画面と同じ関数）。**ここからは動かせない**（承認待ちは1人物ずつで、
+     * 移す案は2人物を書く）。移すかと移し先は、作者が設定資料パネルの
+     * 「AIで再読込」で選ぶ（画面には同じ行が並ぶ）
+     */
+    narratorMoves: narratorMovesOf(target).map((item) => ({
+      kind: item.kind,
+      value: item.value,
+      chapters: item.chapters,
+      evidence: item.evidence,
+      firstPersons: item.firstPersons,
+      destination: item.destination,
+      ...describeNarratorMove(item),
+    })),
     nextStep: proposeArgs
       ? "作者に見せてよければ、proposeArgs を novel.propose へ渡すと承認待ちへ置けます（作者が「設定資料更新分反映」で採否を決めます）。"
       : "承認待ちへ置ける提案はありません。",
@@ -624,6 +640,16 @@ export function settingsEnrichValidate(
 function suspectsOf(target: EnrichTarget): SuspectFirstPersonVariant[] {
   if (!target.narration || target.kind !== "character") return [];
   return suspectForeignFirstPersonVariants(
+    target.record as Character,
+    target.narration.context,
+    target.narration.sources
+  );
+}
+
+/** 語り手の取り違えで入った疑いのある値の移す案（画面と同じ関数） */
+function narratorMovesOf(target: EnrichTarget) {
+  if (!target.narration || target.kind !== "character") return [];
+  return findNarratorMoves(
     target.record as Character,
     target.narration.context,
     target.narration.sources

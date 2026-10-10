@@ -180,8 +180,8 @@ export interface ForeignNarratorForm {
   /** 地の文の一人称（「余」） */
   firstPerson: string;
   /**
-   * その一人称を持つ人物が資料に**ちょうど1人**で、それが主人公でないとき
-   * だけ、その人の名前。決められなければ null（名指ししない）
+   * その場面の語り手を名指しできるときだけ、その人の名前。決められなければ
+   * null（名指ししない）。決め方は `sceneSpeakerOf`
    */
   speaker: string | null;
 }
@@ -195,28 +195,140 @@ export interface ForeignNarratorNote {
   forms: ForeignNarratorForm[];
 }
 
+/** 名前の照合に使う最短の長さ。1字の名前は本文のどこにでも出てしまう */
+const SCENE_NAME_MIN_LENGTH = 2;
+
+/**
+ * その人物が、場面の本文に出ているか（2026-10-10、0.102.2。設計書6.5.12）。
+ *
+ * 名前か別名（2字以上）が場面の本文にあるか、その一人称の言い分けの根拠が
+ * 場面の本文にあれば出ているとみる。**話ではなく場面で見る**——皇帝は第12話に
+ * 登場するが、出てくるのは後半の皇帝と側近の場面で、地の文が「余」の前半
+ * （皇子の場面）には名前も根拠も無い。
+ */
+export function appearsInScenes(
+  person: Character,
+  firstPerson: string | null,
+  sceneTexts: readonly string[]
+): boolean {
+  const joined = normalizeForComparison(sceneTexts.join("\n"));
+  if (!joined) return false;
+  const names = [person.name, ...person.aliases]
+    .map((name) => normalizeForComparison(name ?? ""))
+    .filter((name) => name.length >= SCENE_NAME_MIN_LENGTH);
+  if (names.some((name) => joined.includes(name))) return true;
+  if (!firstPerson) return false;
+  return person.firstPerson.variants.some(
+    (variant) =>
+      variant.form.trim() === firstPerson &&
+      evidenceSegments(variant.evidence).some((fragment) => joined.includes(fragment))
+  );
+}
+
+/** その一人称を地の文に持つ人物（既定か言い分け。完全一致）。主人公は除く */
+function firstPersonHolders(
+  firstPerson: string,
+  context: WorkNarratorContext
+): Character[] {
+  const owners = new Set(firstPersonOwners(context.people, firstPerson));
+  const holders: Character[] = [];
+  for (const person of context.people) {
+    if (!owners.has(person.name)) continue;
+    if (isNarratorRecord([person.name, ...person.aliases], context)) continue;
+    if (holders.some((holder) => holder.name === person.name)) continue;
+    holders.push(person);
+  }
+  return holders;
+}
+
+/**
+ * 主人公でない語り手の場面の、語り手を名指しできるならその人物（0.102.2）。
+ *
+ * その一人称を持つ人物（主人公を除く）のうち、**その場面の本文に出ている
+ * 人物がちょうど1人**のときだけ（`appearsInScenes`）。0.102.1 は「持ち主が
+ * 資料にちょうど1人」だけで決めていたので、主人公の資料から取り違えの「余」を
+ * 外すと持ち主が皇帝1人になり、皇子の場面を「語り手は皇帝」と誤って
+ * 名指しするところだった（0.102.1 の懸念2）。場面の本文が渡らなければ
+ * 名指ししない（迷ったら名指ししない側へ倒す）。
+ */
+export function sceneSpeakerOf(
+  firstPerson: string,
+  sceneTexts: readonly string[],
+  context: WorkNarratorContext
+): Character | null {
+  if (sceneTexts.length === 0) return null;
+  const present = firstPersonHolders(firstPerson, context).filter((person) =>
+    appearsInScenes(person, firstPerson, sceneTexts)
+  );
+  return present.length === 1 ? present[0] : null;
+}
+
+/**
+ * 場面の本文に名前（別名）が出ている人物（主人公を除く）。語り手を名指し
+ * できないとき、移し先を作者に選ばせる候補にする
+ */
+export function sceneCandidatesOf(
+  sceneTexts: readonly string[],
+  context: WorkNarratorContext
+): Character[] {
+  const found: Character[] = [];
+  for (const person of context.people) {
+    if (isNarratorRecord([person.name, ...person.aliases], context)) continue;
+    if (found.some((entry) => entry.id === person.id)) continue;
+    if (appearsInScenes(person, null, sceneTexts)) found.push(person);
+  }
+  return found;
+}
+
+/** 頼み方の断りに渡す場面1つ分。`text` は場面の本文（名指しに使う） */
+export interface ForeignSceneOfNote {
+  firstPerson: string;
+  text?: string;
+}
+
+/** 場面の一覧に、場面の本文を添える（`foreignNarratorNoteOf` へ渡す形） */
+export function withSceneText(
+  text: string,
+  scenes: readonly ForeignNarrationScene[]
+): ForeignSceneOfNote[] {
+  return scenes.map((scene) => ({
+    firstPerson: scene.firstPerson,
+    text: text.slice(scene.start, scene.end),
+  }));
+}
+
 /**
  * 場面の一覧から、頼み方に書き添える断りを組む。主人公でない場面が無ければ null。
  *
- * **名指しは、その一人称を持つ人物が資料にちょうど1人のときだけ**（作者の裁定）。
- * 数え方は `detectNarrator` と同じ（`firstPersonOwners`。既定と言い分けの
- * 完全一致・名前で畳む）。**持ち主が主人公自身なら名指ししない**——主人公の
- * 資料に取り違えで入った言い分け（アジャーノの「余」）を根拠に「語り手は
- * アジャーノ」と書けば、断り書きが取り違えを裏書きしてしまう。
+ * **名指しは `sceneSpeakerOf` が決める**——その一人称を持つ人物（主人公を除く）
+ * のうち、場面の本文に出ている人物がちょうど1人のときだけ（0.102.2）。数え方は
+ * `detectNarrator` と同じ（`firstPersonOwners`。既定と言い分けの完全一致・
+ * 名前で畳む）。**主人公自身は名指ししない**——主人公の資料に取り違えで入った
+ * 言い分け（アジャーノの「余」）を根拠に「語り手はアジャーノ」と書けば、
+ * 断り書きが取り違えを裏書きしてしまう。
  */
 export function foreignNarratorNoteOf(
-  scenes: ReadonlyArray<Pick<ForeignNarrationScene, "firstPerson">>,
+  scenes: readonly ForeignSceneOfNote[],
   context: WorkNarratorContext
 ): ForeignNarratorNote | null {
-  const forms: ForeignNarratorForm[] = [];
+  const order: string[] = [];
+  const textsByForm = new Map<string, string[]>();
   for (const scene of scenes) {
-    if (forms.some((entry) => entry.firstPerson === scene.firstPerson)) continue;
-    const owners = firstPersonOwners(context.people, scene.firstPerson);
-    const speaker =
-      owners.length === 1 && owners[0] !== context.narrator.name ? owners[0] : null;
-    forms.push({ firstPerson: scene.firstPerson, speaker });
+    let texts = textsByForm.get(scene.firstPerson);
+    if (!texts) {
+      texts = [];
+      order.push(scene.firstPerson);
+      textsByForm.set(scene.firstPerson, texts);
+    }
+    if (scene.text) texts.push(scene.text);
   }
-  if (forms.length === 0) return null;
+  if (order.length === 0) return null;
+  const forms: ForeignNarratorForm[] = order.map((firstPerson) => ({
+    firstPerson,
+    speaker:
+      sceneSpeakerOf(firstPerson, textsByForm.get(firstPerson) ?? [], context)?.name ??
+      null,
+  }));
   return {
     narratorName: context.narrator.name,
     narratorFirstPerson: context.narrator.firstPerson,
@@ -249,14 +361,28 @@ export interface NarrationSource {
 
 /**
  * 本文の抜粋ごとに、その抜粋に入っている主人公でない場面の一人称を返す
- * （再読込の頼み方の印に使う）。抜粋は出典の本文の一部をそのまま切ったもの
- * なので、出典の中で位置を探して場面と重ねる。見つからない抜粋は空。
+ * （再読込の頼み方の印に使う）。見つからない抜粋は空。
  */
 export function foreignFormsOfExcerpts(
   excerpts: ReadonlyArray<{ label: string; text: string }>,
   sources: readonly NarrationSource[],
   narratorFirstPerson: string
 ): string[][] {
+  return foreignScenesOfExcerpts(excerpts, sources, narratorFirstPerson).map(
+    (scenes) => [...new Set(scenes.map((scene) => scene.firstPerson))]
+  );
+}
+
+/**
+ * 本文の抜粋ごとに、その抜粋に重なる主人公でない場面（場面の本文つき）を返す。
+ * 抜粋は出典の本文の一部をそのまま切ったものなので、出典の中で位置を探して
+ * 場面と重ねる。見つからない抜粋は空。
+ */
+function foreignScenesOfExcerpts(
+  excerpts: ReadonlyArray<{ label: string; text: string }>,
+  sources: readonly NarrationSource[],
+  narratorFirstPerson: string
+): ForeignSceneOfNote[][] {
   const scenesByLabel = new Map<string, ForeignNarrationScene[]>();
   const textByLabel = new Map<string, string>();
   for (const source of sources) {
@@ -273,12 +399,10 @@ export function foreignFormsOfExcerpts(
       scenes = foreignNarrationScenes(text, narratorFirstPerson);
       scenesByLabel.set(excerpt.label, scenes);
     }
-    const forms: string[] = [];
-    for (const scene of scenes) {
-      if (scene.end <= start || scene.start >= end) continue;
-      if (!forms.includes(scene.firstPerson)) forms.push(scene.firstPerson);
-    }
-    return forms;
+    return withSceneText(
+      text,
+      scenes.filter((scene) => !(scene.end <= start || scene.start >= end))
+    );
   });
 }
 
@@ -296,16 +420,15 @@ export function enrichForeignNarratorOf(
   if (!context || !isNarratorRecord([target.name, ...target.aliases], context)) {
     return null;
   }
-  const excerptForms = foreignFormsOfExcerpts(
+  const excerptScenes = foreignScenesOfExcerpts(
     excerpts,
     sources,
     context.narrator.firstPerson
   );
-  const forms = [...new Set(excerptForms.flat())];
-  const note = foreignNarratorNoteOf(
-    forms.map((firstPerson) => ({ firstPerson })),
-    context
-  );
+  const excerptForms = excerptScenes.map((scenes) => [
+    ...new Set(scenes.map((scene) => scene.firstPerson)),
+  ]);
+  const note = foreignNarratorNoteOf(excerptScenes.flat(), context);
   return note ? { note, excerptForms } : null;
 }
 
