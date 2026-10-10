@@ -121,6 +121,62 @@ test("狭い窓で、原稿エディターの下の段は右で切れずに折�
   );
 });
 
+/**
+ * 列が窓の外へ出ていなくても、列そのものが狭ければ字数の行を「／」で折り返す
+ * （作者の実機、2026-10-10。0.101.11）。
+ *
+ * 左の列を約190pxまで狭めると、ボタンの段は折り返したのに、字数の行だけ
+ * 「作品 17,841字 ／ このファイル 5,563字 ／ この話…」と右で切れていた。0.100.6 の直しは
+ * 列が窓の外へ出たとき（body.clipped）だけ折り返しを許していたため。
+ *
+ * 列の幅を190pxへ縮める操作（境目のドラッグ）は VS Code の版で動きが変わるので、
+ * ここでは**下の欄の幅だけを190pxに絞って**、本物の Chromium の組版で字数の行が
+ * 欄に収まるか・区切りの塊の中で切れていないかを測る（窓の外へは出ないので clipped は付かない）。
+ */
+test("列そのものが狭いときも、字数の行は「／」の区切りで折り返して欄に収まる", async () => {
+  await withVsCode(
+    "下の段・列が狭い",
+    [{ name: EPISODE, text: TEXT }],
+    async (session) => {
+      const { page } = session;
+      const frame = await openEpisode(page, EPISODE, "零時を指していた");
+      await waitUntil(async () => (await footText(frame, "counts")).includes("このファイル"), "下段に字数が出る", 15_000);
+
+      const wide = await frame.evaluate(() => {
+        const pieces = Array.from(document.querySelectorAll("#counts > span"));
+        return { tops: [...new Set(pieces.map((piece) => Math.round(piece.getBoundingClientRect().top)))].length, count: pieces.length };
+      });
+      // 広いときは今までどおり1行（塊がすべて同じ高さに並ぶ）
+      expect(wide.count, "字数が区切りの塊に分かれていません").toBeGreaterThanOrEqual(3);
+      expect(wide.tops, "広い列なのに字数の行が折り返しています").toBe(1);
+
+      const narrow = await frame.evaluate(() => {
+        const foot = document.getElementById("foot") as HTMLElement;
+        foot.style.width = "190px";
+        foot.style.maxWidth = "190px";
+        const right = foot.getBoundingClientRect().right;
+        const pieces = Array.from(document.querySelectorAll("#counts > span")) as HTMLElement[];
+        return {
+          clipped: document.body.classList.contains("clipped"),
+          rows: [...new Set(pieces.map((piece) => Math.round(piece.getBoundingClientRect().top)))].length,
+          overflowing: pieces
+            .filter((piece) => piece.getBoundingClientRect().right > right + 1)
+            .map((piece) => `${piece.textContent ?? ""}（右端${Math.round(piece.getBoundingClientRect().right)}／欄${Math.round(right)}）`),
+          // 塊の中で行が分かれた（＝数字の途中などで切れた）もの
+          split: pieces.filter((piece) => piece.getClientRects().length > 1 || piece.getBoundingClientRect().height > 30).map((piece) => piece.textContent ?? ""),
+        };
+      });
+      expect(narrow.clipped, "列は窓の外へ出ていないはず（clipped が付いています）").toBe(false);
+      expect(narrow.overflowing, "字数の行が欄の右へはみ出しています").toEqual([]);
+      expect(narrow.rows, "狭い欄なのに字数の行が折り返していません").toBeGreaterThan(1);
+      expect(narrow.split, "区切りの塊の中で行が分かれています").toEqual([]);
+      // 文字そのものは今までと同じ（「 ／ 」でつないだ形）
+      expect(await footText(frame, "counts")).toMatch(/このファイル [\d,]+字 ／ /);
+    },
+    { windowSize: { width: 1600, height: 900 } }
+  );
+});
+
 test("広い窓では、原稿エディターの下の段に手を付けない", async () => {
   await withVsCode(
     "下の段・広い",
