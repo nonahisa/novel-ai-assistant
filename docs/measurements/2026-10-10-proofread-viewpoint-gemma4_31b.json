@@ -1,0 +1,83 @@
+{
+ "measuredAt": "2026-10-10T03:22:53.434Z",
+ "purpose": "推敲（P-10）の視点の札が、なぜ検算で落ちるかの測定（2026-10-10）。製品と同じ道（measure.mjs → novel.run、検算まで通す）",
+ "model": "gemma4:31b",
+ "runner": "ollama",
+ "note": "本文は載せない（作者の作品の写しのため）。視点らしい指摘の原文は短い引用だけ。全文のログはスクラッチパッド",
+ "dai": {
+  "seed": {
+   "説明": "seeded/contradiction 第1話の写し（A・B・C を仕込み。9月24日と同じ文）",
+   "bundle": "0.101.8",
+   "promptVersion": "1.12",
+   "numCtx": 20480,
+   "temperature": 0.2,
+   "rounds": [
+    {
+     "round": 1,
+     "elapsedMs": 102671,
+     "accepted計": 2,
+     "rejected計": 0,
+     "視点通過": [
+      {
+       "line": 45,
+       "original": "蓬田さんは内心、この無口な配達員を気に入っていた。",
+       "explanation": "「俺」の語りなのに、蓬田さんの「内心」が言い切られています（わざとなら、このままで構いません）"
+      },
+      {
+       "line": 57,
+       "original": "千夏は伝票を揃えながら、相沢くんはきっと来月も水筒を忘れるだろうと思い、少しだけ胸が温かくなった。",
+       "explanation": "「俺」の語りなのに、千夏が「思い」「胸が温かくなった」ことが言い切られています（わざとなら、このままで構いません）"
+      }
+     ],
+     "視点らしい落ち": [],
+     "視点らしい落ちの内訳": {},
+     "全rejectedの内訳": {}
+    }
+   ]
+  },
+  "miboujin": {
+   "説明": "ハイエルフ未亡人 12・13話の写し（確認用コピー。地の文に一人称の語が無い）",
+   "bundle": "0.101.8",
+   "promptVersion": "1.12",
+   "numCtx": 20480,
+   "temperature": 0.2,
+   "rounds": [
+    {
+     "round": 1,
+     "elapsedMs": 230694,
+     "accepted計": 1,
+     "rejected計": 4,
+     "視点通過": [],
+     "視点らしい落ち": [],
+     "視点らしい落ちの内訳": {},
+     "全rejectedの内訳": {
+      "no_change": 2,
+      "not_repeated": 1,
+      "not_long": 1
+     }
+    }
+   ]
+  },
+  "hatsukoi": {
+   "説明": "初恋相手の王女 第3話の写し（Documents/novel から読み取りで写した。地の文は 俺5・僕2）",
+   "bundle": "0.101.8",
+   "promptVersion": "1.12",
+   "numCtx": 20480,
+   "temperature": 0.2,
+   "rounds": [
+    {
+     "round": 1,
+     "elapsedMs": 127630,
+     "accepted計": 2,
+     "rejected計": 1,
+     "視点通過": [],
+     "視点らしい落ち": [],
+     "視点らしい落ちの内訳": {},
+     "全rejectedの内訳": {
+      "not_long": 1
+     }
+    }
+   ]
+  }
+ }
+}
