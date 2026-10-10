@@ -60,7 +60,6 @@ import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
 import { revealTextLocation, type RevealInManuscript } from "./revealLocation";
 import { relocateQuote } from "../core/relocateQuote";
 import {
-  logFailure,
   logStep,
   responseExcerptForLog,
   useLogFile,
@@ -579,12 +578,14 @@ export async function rememberOrigin(
   label: string
 ): Promise<void> {
   if (!origin) return;
+  // AIの候補を待ったあとに呼ばれるので、共有の書き先でなく作品へ束ねて書く（`workLog`）
+  const log = workLog(work.folderPath);
   const result = await rememberNameOrigin(work, origin);
   if (result.ok) {
-    logStep(`${label}：この作品の系統を「${origin}」と覚えました（次からはこの系統で揃えます）`);
+    log.step(`${label}：この作品の系統を「${origin}」と覚えました（次からはこの系統で揃えます）`);
     return;
   }
-  logFailure(`${label}：系統を覚えられませんでした`, {
+  log.failure(`${label}：系統を覚えられませんでした`, {
     作品: work.title,
     系統: origin,
     理由:

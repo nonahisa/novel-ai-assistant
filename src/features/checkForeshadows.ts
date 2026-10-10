@@ -1142,13 +1142,15 @@ async function narrowResolutionByMeaning(
   });
   // 使わない設定では、全話を読み直すこともしない
   if (!isVectorUseInChecksEnabled()) return unchanged({ kind: "off" });
+  // 埋め込みを待つので、共有の書き先でなく作品へ束ねて書く（`workLog`）
+  const log = workLog(work.folderPath);
 
   let items: ReturnType<typeof manuscriptItems> = [];
   try {
     const sources = (await loadExcerptSources(work)).sources;
     items = sources.flatMap((source) => manuscriptItems(source.label, source.text));
   } catch (error) {
-    logFailure("伏線の回収の確認：本文の読み込み（意味の近さで絞るため）", {
+    log.failure("伏線の回収の確認：本文の読み込み（意味の近さで絞るため）", {
       詳細: describeError(error),
     });
     return unchanged({ kind: "unavailable", reason: "noIndex" });
