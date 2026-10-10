@@ -28,14 +28,12 @@
  */
 
 /**
- * 代名詞。**これだけの名前は、誰を指しているのか決められない。**
+ * 一人称の代名詞。`PRONOUN_WORDS` の一人称の部分を、ここだけで持つ。
  *
- * 抽出は「僕」という人物レコードを作ってくる（qwen3:8b でも
- * gemma4:26b でも起きた。実機確認A-18）。プロンプトで禁じても返るので、
- * コード側で弾く。
+ * 二人称・三人称（「あんた」「彼」）と分けて持つのは、名前の出ない語り手を
+ * 見分けるため（`unnamedNarrator.ts`）。語り手になれるのは一人称だけである。
  */
-export const PRONOUN_WORDS: readonly string[] = [
-  // 一人称
+export const FIRST_PERSON_PRONOUN_WORDS: readonly string[] = [
   "私",
   "わたし",
   "わたくし",
@@ -56,6 +54,18 @@ export const PRONOUN_WORDS: readonly string[] = [
   "拙者",
   "小生",
   "おいら",
+];
+
+/**
+ * 代名詞。**これだけの名前は、誰を指しているのか決められない。**
+ *
+ * 抽出は「僕」という人物レコードを作ってくる（qwen3:8b でも
+ * gemma4:26b でも起きた。実機確認A-18）。プロンプトで禁じても返るので、
+ * コード側で弾く。
+ */
+export const PRONOUN_WORDS: readonly string[] = [
+  // 一人称（名前の出ない語り手の判定は一人称だけを見る。`unnamedNarrator.ts`）
+  ...FIRST_PERSON_PRONOUN_WORDS,
   // 二人称
   "あなた",
   "貴方",

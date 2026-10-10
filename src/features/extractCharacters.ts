@@ -48,6 +48,7 @@ import {
   describeRejectedNarratorsForLog,
   selectNewNarratorNames,
 } from "../core/rejectedNarratorNotice";
+import { describeUnnamedNarratorOutcome } from "../core/unnamedNarrator";
 import {
   readNotifiedNarrators,
   rememberNotifiedNarrators,
@@ -216,6 +217,13 @@ interface ExtractionSummaryCounts {
    * **黙って捨てない**——出さないと、作者は抽出が関係を読み落としたと思う
    */
   skippedRejectedRelations: MergeResult["skippedRejectedRelations"];
+  /**
+   * 名前の出てこない語り手として新しく作った記録の名前（2026-10-10）。
+   * 作者が見ていない人物が増えるので、**黙って増やしたことにしない**
+   */
+  createdNarrators: string[];
+  /** 同じ一人称の人物が2人以上いて、語り手を置けなかったもの */
+  unplacedNarrators: MergeResult["unplacedNarrators"];
   failedChunks: number;
   saved: number;
   ambiguous: number;
@@ -1031,6 +1039,10 @@ export async function extractCharacters(
     rejectedDistinct: merged?.rejectedDistinct ?? [],
     honorificMerges: merged?.honorificMerges ?? [],
     skippedRejectedRelations: merged?.skippedRejectedRelations ?? [],
+    createdNarrators: (characterPlan?.created ?? [])
+      .filter((character) => character.unnamedNarrator !== undefined)
+      .map((character) => character.name),
+    unplacedNarrators: merged?.unplacedNarrators ?? [],
     failedChunks: failures.length,
     saved: 0,
     ambiguous: 0,
@@ -1227,6 +1239,12 @@ export async function extractCharacters(
   */
   const narratorLog = describeRejectedNarratorsForLog(baseCounts.rejected);
   if (narratorLog) log.step(narratorLog);
+  // 語り手を「語り手（僕）」として作った・置けなかったことも、操作ログに残す
+  const unnamedNarratorLog = describeUnnamedNarratorOutcome(
+    baseCounts.createdNarrators,
+    baseCounts.unplacedNarrators
+  ).trim();
+  if (unnamedNarratorLog) log.step(unnamedNarratorLog);
 
   const summary = buildExtractionSummary(baseCounts) + settingsNotice;
   // いま画面へ出す断りに入った呼び名を覚える（次回から出さない）。
@@ -1545,6 +1563,8 @@ function buildExtractionSummary(counts: ExtractionSummaryCounts): string {
     ].join(" / ") +
     rejectedDetail +
     narratorDetail +
+    // 名前の出てこない語り手を「語り手（僕）」として作った・置けなかった（2026-10-10）
+    describeUnnamedNarratorOutcome(counts.createdNarrators, counts.unplacedNarrators) +
     candidateDetail +
     distinctDetail +
     honorificDetail +

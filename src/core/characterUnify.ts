@@ -120,6 +120,10 @@ export function unifyCharacters(
       // 吸収される側で作者が落とした値が、まとめたあとの次の抽出で戻る。
       // どちらも持っていなければ欄ごと置かない（空の配列を増やさない）
       ...unifyRejectedValues(keep, absorb),
+      // 名前の出てこない語り手の印（2026-10-10）は、どちらかにあれば引き継ぐ。
+      // 「語り手（僕）」を名前のある人物へまとめたときに落とすと、次の抽出で
+      // 仮の名前の記録がまた作られる。どちらにも無ければ欄ごと置かない
+      ...unifyUnnamedNarrator(keep, absorb),
       abilities: dedupeBy(
         [...keep.abilities, ...absorb.abilities],
         (ability) => ability.name
@@ -238,6 +242,15 @@ function unifyRejectedRelations(
     result.push(entry);
   }
   return result;
+}
+
+/** 名前の出てこない語り手の印を引き継ぐ（残す側を優先）。どちらにも無ければ空 */
+function unifyUnnamedNarrator(
+  keep: Character,
+  absorb: Character
+): Pick<Character, "unnamedNarrator"> {
+  const mark = keep.unnamedNarrator ?? absorb.unnamedNarrator;
+  return mark ? { unnamedNarrator: { ...mark } } : {};
 }
 
 /** 誤りとして落とした値を2人ぶん合わせる。文字どおり同じ項目・同じ値だけ畳む */

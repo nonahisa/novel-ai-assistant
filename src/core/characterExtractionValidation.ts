@@ -21,6 +21,11 @@ import type {
   CharacterExtractResult,
   ExtractedCharacter,
 } from "../prompts/characterExtract";
+import type { UnnamedNarratorMark } from "../models/character";
+import {
+  unnamedNarratorFirstPerson,
+  unnamedNarratorName,
+} from "./unnamedNarrator";
 
 export type CharacterRejectionReason =
   | "invalid_shape"
@@ -75,6 +80,12 @@ export interface RejectedCharacterCandidate {
 export interface AcceptedCharacterCandidate {
   data: ExtractedCharacter;
   chapters: number[];
+  /**
+   * 名前の出てこない語り手として受け入れた候補の印（2026-10-10。
+   * `unnamedNarrator.ts`）。マージはこれを見て、名前ではなく一人称と印で
+   * 既存の記録を引き当てる。**AIの答えの型には足さない**——印はコードが立てる
+   */
+  unnamedNarrator?: UnnamedNarratorMark;
 }
 
 /** 別名を落としたことの記録。**黙って消さない**ので、報告に出すために持つ */
@@ -396,6 +407,8 @@ export function validateCharacterExtractResult(
   // 本文に実在する人物が「根拠なし」で消える。
   const survived: ExtractedCharacter[] = [];
   const groundingNames = new Map<ExtractedCharacter, string[]>();
+  /** 名前の出てこない語り手として受け入れた候補（2026-10-10） */
+  const narratorMarks = new Map<ExtractedCharacter, UnnamedNarratorMark>();
   for (const raw of rawCharacters) {
     if (!isRecord(raw) || typeof raw.name !== "string") {
       rejected.push({ name: candidateName(raw), reason: "invalid_shape" });
@@ -411,6 +424,23 @@ export function validateCharacterExtractResult(
     }
 
     const character = normalizeExtractedCharacter(raw);
+    // **名前の出てこない語り手は、捨てずに「語り手（僕）」にする**（作者の裁定、
+    // 2026-10-10。`unnamedNarrator.ts`）。代名詞・説明的な名前の判定より前に
+    // 置く——仮の名前は括弧で終わるので、名前の形の検算（`isValidName`）でも
+    // 落ちる。語り手と決められないもの（地の文の一人称と違う、二人称など）は
+    // ここを素通りし、これまでどおり下で捨てられる
+    const narratorFirstPerson = unnamedNarratorFirstPerson(character, chunk.text);
+    if (narratorFirstPerson !== null) {
+      asUnnamedNarrator(character, narratorFirstPerson);
+      survived.push(character);
+      narratorMarks.set(character, { firstPerson: narratorFirstPerson });
+      // 根拠の照合は、本文に実際に出てくる一人称で行う（仮の名前は本文に無い）
+      groundingNames.set(character, [
+        narratorFirstPerson,
+        ...(character.aliases ?? []),
+      ]);
+      continue;
+    }
     if (!isValidName(character.name)) {
       rejected.push({ name: character.name, reason: "invalid_name" });
       continue;
@@ -531,13 +561,18 @@ export function validateCharacterExtractResult(
     // 話数は、引用が本文のどの位置にあるかで決める。
     // 複数の話をまとめて送っているとき、チャンク全体の話数を付けると
     // 「第3話にしか出ない人物が第1〜4話に登場」になってしまう
+    const narratorMark = narratorMarks.get(character);
     accepted.push({
       data: character,
       chapters: chaptersForCandidate(
         chunk,
-        [character.name, ...(character.aliases ?? [])],
+        // 語り手の仮の名前は本文に無いので、話数も一人称で探す
+        narratorMark
+          ? [narratorMark.firstPerson, ...(character.aliases ?? [])]
+          : [character.name, ...(character.aliases ?? [])],
         character.evidence
       ),
+      ...(narratorMark ? { unnamedNarrator: narratorMark } : {}),
     });
   }
 
@@ -1494,6 +1529,35 @@ function isDescriptiveName(name: string): boolean {
   const bare = normalizeSpacingOnly(name);
   if (!bare) return false;
   return DESCRIPTIVE_ROLES.has(bare) || DESCRIPTIVE_ROLES.has(stripHonorific(bare));
+}
+
+/**
+ * 名前の出てこない語り手の候補を、仮の名前の記録の形へ直す（渡したものを書き換える）。
+ *
+ * - 名前は「語り手（僕）」、一人称の欄は地の文の一人称
+ * - **別名から代名詞・説明的な名前・仮の名前を外す。** 「僕」が別名に残ると、
+ *   語り手の名前のよじれ（設計書6.9.2）が「僕は」を名前の出現として拾い、
+ *   マージでも誰の台詞の「僕」とも引き当たる
+ * - 紹介・外見などの中身は抽出の案のまま（本文への実在は呼んだ側が検算する）
+ */
+function asUnnamedNarrator(
+  character: ExtractedCharacter,
+  firstPerson: string
+): void {
+  const placeholder = unnamedNarratorName(firstPerson);
+  character.name = placeholder;
+  character.firstPerson = firstPerson;
+  character.entityType = "person";
+  character.isMob = false;
+  character.aliases = (character.aliases ?? []).filter((alias) => {
+    const bare = normalizeSpacingOnly(alias);
+    return (
+      bare.length > 0 &&
+      bare !== placeholder &&
+      !isPronounName(bare) &&
+      !isDescriptiveName(bare)
+    );
+  });
 }
 
 /**
