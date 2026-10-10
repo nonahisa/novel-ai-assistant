@@ -38,8 +38,18 @@ import {
 } from "../../core/settingsEnrichCheck";
 import {
   collectMentionExcerpts,
+  type ExcerptSource,
   type MentionExcerpt,
 } from "../../core/mentionExcerpts";
+import {
+  describeSuspectVariant,
+  enrichForeignNarratorOf,
+  suspectForeignFirstPersonVariants,
+  workNarratorContextOf,
+  type SuspectFirstPersonVariant,
+  type WorkNarratorContext,
+} from "../../core/sceneNarrators";
+import { blankMemoLines } from "../../core/sceneMemo";
 import {
   droppedTotal,
   parseMisattributedValues,
@@ -236,6 +246,25 @@ interface EnrichTarget {
   customFields: CustomFieldDefinition[];
   characters: Character[];
   excerpts: MentionExcerpt[];
+  /**
+   * 作品の語り手と話ごとの本文（人物のときだけ。2026-10-10、設計書6.5.12）。
+   * 語り手が決まらなければ null
+   */
+  narration: { context: WorkNarratorContext; sources: ExcerptSource[] } | null;
+}
+
+/** 製品の `settingsPanel.ts` の `narrationOf` と同じ材料 */
+function narrationOf(
+  kind: SettingsKind,
+  characters: readonly Character[],
+  sources: ExcerptSource[]
+): EnrichTarget["narration"] {
+  if (kind !== "character") return null;
+  const context = workNarratorContextOf(
+    sources.map((source) => blankMemoLines(source.text)).join("\n"),
+    characters
+  );
+  return context ? { context, sources } : null;
 }
 
 /**
@@ -270,12 +299,20 @@ function loadTarget(input: SettingsEnrichInput): EnrichTarget {
       : (readRecords(input.folder, "character") as Character[]);
   const customFields = readCustomFields(input.folder);
   // 本文の割り方は製品の `loadExcerptSources` と同じ（`excerptSourcesOfEpisode`）
+  const sources = pastSceneSourcesOf(input.folder);
   const excerpts = collectMentionExcerpts(
-    pastSceneSourcesOf(input.folder),
+    sources,
     searchTermsFor(kind, record, characters),
     { otherNames: otherNamesOf(input.folder, record, characters) }
   );
-  return { kind, record, customFields, characters, excerpts };
+  return {
+    kind,
+    record,
+    customFields,
+    characters,
+    excerpts,
+    narration: narrationOf(kind, characters, sources),
+  };
 }
 
 /**
@@ -331,12 +368,20 @@ function loadStagedTarget(input: SettingsEnrichInput): EnrichTarget {
     ...plan.result.characters.created,
   ];
   const customFields = readCustomFields(input.folder);
+  const sources = pastSceneSourcesOf(input.folder);
   const excerpts = collectMentionExcerpts(
-    pastSceneSourcesOf(input.folder),
+    sources,
     searchTermsFor(kind, record, characters),
     { otherNames: otherNamesOf(input.folder, record, characters) }
   );
-  return { kind, record, customFields, characters, excerpts };
+  return {
+    kind,
+    record,
+    customFields,
+    characters,
+    excerpts,
+    narration: narrationOf(kind, characters, sources),
+  };
 }
 
 /**
@@ -384,6 +429,15 @@ export function settingsEnrichPrompt(input: SettingsEnrichInput) {
     excerpts,
     customFields,
     notes: input.notes,
+    // 製品と同じ断り書き（対象が主人公で、抜粋にほかの語り手の場面があるときだけ）
+    foreignNarrator: target.narration
+      ? enrichForeignNarratorOf(
+          record,
+          excerpts,
+          target.narration.sources,
+          target.narration.context
+        )
+      : null,
   });
   return {
     promptVersion: `P-20 ${SETTINGS_ENRICH_VERSION}`,
@@ -546,12 +600,34 @@ export function settingsEnrichValidate(
       speechEchoes: checked.speechEchoes,
       misattributed: droppedTotal(misattributed.dropped),
     },
+    /**
+     * 語り手の取り違えで入った疑いのある一人称の言い分け（2026-10-10、裁定4）。
+     * **承認待ちへは置けない**（`novel.propose` の欄に一人称が無い）。外すかは
+     * 作者が設定資料パネルの「AIで再読込」で選ぶ（画面には外す案として並ぶ）
+     */
+    suspectedFirstPersonVariants: suspectsOf(target).map((suspect) => ({
+      form: suspect.variant.form,
+      chapters: suspect.variant.chapters,
+      evidence: suspect.variant.evidence,
+      foreignChapters: suspect.chapters,
+      ...describeSuspectVariant(suspect),
+    })),
     nextStep: proposeArgs
       ? "作者に見せてよければ、proposeArgs を novel.propose へ渡すと承認待ちへ置けます（作者が「設定資料更新分反映」で採否を決めます）。"
       : "承認待ちへ置ける提案はありません。",
     note:
       "台帳（設定/）にも承認待ちにも書いていません。はじいた記述の行き先（挿入・新規）は、設定資料パネルの「AIで再読込」でだけ選べます。",
   };
+}
+
+/** 語り手の取り違えで入った疑いのある一人称の言い分け（画面と同じ関数） */
+function suspectsOf(target: EnrichTarget): SuspectFirstPersonVariant[] {
+  if (!target.narration || target.kind !== "character") return [];
+  return suspectForeignFirstPersonVariants(
+    target.record as Character,
+    target.narration.context,
+    target.narration.sources
+  );
 }
 
 /** まとめに入れない提案の理由（`fromExtract`） */

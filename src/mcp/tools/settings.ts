@@ -44,6 +44,12 @@ import type { RunOutcome } from "./run";
 import { readExtractStash, stashExtractAnswer } from "./extractStash";
 import { replayChunksOf } from "./extractCommit";
 import { ExtractionReplay } from "../../core/externalExtractMerge";
+import {
+  foreignNarrationScenesInChunk,
+  foreignNarratorNoteOf,
+  type WorkNarratorContext,
+} from "../../core/sceneNarrators";
+import { workNarratorContextFor } from "./proofread";
 
 /**
  * 設定資料の抽出（P-04a）を外から呼ぶ（設計書6.87.8 の4）。
@@ -95,6 +101,11 @@ interface StoredSettings {
   organizationNames: string[];
   worldNames: string[];
   abilityTerm: string | null;
+  /**
+   * 作品の語り手（2026-10-10。設計書6.5.12）。主人公でない語り手の場面の
+   * 断り書きと検算に使う。製品の抽出と同じ決め方（全話を繋いだ本文）
+   */
+  workNarrator: WorkNarratorContext | null;
 }
 
 function readStored(folder: string): StoredSettings {
@@ -154,6 +165,7 @@ function readStored(folder: string): StoredSettings {
       .slice(0, KNOWN_WORLD_LIMIT),
     // 作者が確定させた総称があれば、それを使う（揺らさない）
     abilityTerm: null,
+    workNarrator: workNarratorContextFor(folder, people),
   };
 }
 
@@ -253,6 +265,13 @@ function promptForChunk(
       knownOrganizationNames: organizations,
       knownWorldNames: world,
       abilityTerm: stored.abilityTerm ?? undefined,
+      // 製品と同じ断り書き（主人公でない語り手の場面があるチャンクだけ）
+      foreignNarrator: stored.workNarrator
+        ? foreignNarratorNoteOf(
+            foreignNarrationScenesInChunk(chunk, stored.workNarrator.narrator.firstPerson),
+            stored.workNarrator
+          )
+        : null,
     }),
   };
 }
@@ -295,10 +314,14 @@ function stashedKnown(folder: string): {
   }
   if (stashed.length === 0) return { people: [], extra: NO_EXTRA };
   const { chunks } = replayChunksOf(folder, stashed);
+  const people = readSettingsRecords(
+    folder,
+    SETTINGS_SUBDIRS.characters,
+    parseCharacter
+  ).records;
   const replay = new ExtractionReplay(
     {
-      characters: readSettingsRecords(folder, SETTINGS_SUBDIRS.characters, parseCharacter)
-        .records,
+      characters: people,
       abilities: readSettingsRecords(folder, SETTINGS_SUBDIRS.abilities, parseAbility)
         .records,
       locations: readSettingsRecords(folder, SETTINGS_SUBDIRS.locations, parseLocation)
@@ -310,7 +333,9 @@ function stashedKnown(folder: string): {
       ).records,
       world: readSettingsRecords(folder, SETTINGS_SUBDIRS.world, parseWorldItem).records,
     },
-    new SettingsExtractionCollector()
+    new SettingsExtractionCollector(),
+    // 保存（`novel.extract.commit`）と同じ検算で既知を育てる
+    workNarratorContextFor(folder, people)
   );
   for (const item of chunks) replay.accept(item.parsed, item.chunk);
   const gathered = replay.settings.candidates();
@@ -388,6 +413,8 @@ export interface SettingsValidateResult {
     droppedReadings: unknown[];
     /** 口調の欄だけ外したもの（根拠の台詞が無い・指示の写し。2026-09-25） */
     droppedSpeechStyles: unknown[];
+    /** 主人公でない語り手の場面の一人称として、一人称の欄だけ外したもの（2026-10-10） */
+    droppedFirstPersons: unknown[];
   };
   /** 能力・場所・組織・世界観。**製品の集約が数えたそのまま** */
   settings: {
@@ -443,6 +470,7 @@ function validateAgainst(
         ...(person.data.aliases ?? []),
       ]),
     ],
+    workNarrator: stored.workNarrator,
   });
 
   // **製品の集約をそのまま通す。** 総称を先に読む・人物側の所属を拾う、
@@ -469,6 +497,7 @@ function validateAgainst(
       movedAddressRelations: people.movedAddressRelations,
       droppedSpeechStyles: people.droppedSpeechStyles,
       droppedReadings: people.droppedReadings,
+      droppedFirstPersons: people.droppedFirstPersons ?? [],
     },
     settings: {
       abilities: [...gathered.abilities],

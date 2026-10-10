@@ -29,6 +29,7 @@ import {
 } from "./settingsMerge";
 import type { RejectedSettingCandidate } from "./settingsExtractionValidation";
 import { buildKnownCharacterNames } from "./knownCharacterNames";
+import type { WorkNarratorContext } from "./sceneNarrators";
 
 /**
  * 設定資料の抽出の「取り出したあと」を、**製品と同じ順で**行う（2026-10-02）。
@@ -99,7 +100,13 @@ export class ExtractionReplay<
      * 能力・場所・組織・世界観を集める側。製品は保存まで持つ子クラス
      * （`SettingsExtractionAccumulator`）を渡し、MCP は集めるだけのものを渡す
      */
-    readonly settings: C
+    readonly settings: C,
+    /**
+     * 作品の語り手（`workNarratorContextOf`。2026-10-10）。主人公でない語り手の
+     * 場面の答えを主人公の記録にしない検算に使う。決まらない作品・渡さない
+     * 呼び出しでは今までどおり
+     */
+    private readonly workNarrator: WorkNarratorContext | null = null
   ) {
     this.existingCharacterNames = buildKnownCharacterNames(
       baseline.characters,
@@ -131,6 +138,7 @@ export class ExtractionReplay<
         this.baseline.characters,
         this.extracted
       ),
+      workNarrator: this.workNarrator,
     });
     this.extracted.push(...validated.accepted);
     this.rejected.push(...validated.rejected);
@@ -314,10 +322,13 @@ export function replayExtraction(input: {
   chunks: readonly ReplayChunk[];
   baseline: ExtractionBaseline;
   initialAbilityTerm: string | null;
+  /** 作品の語り手（製品の抽出と同じ検算にするため。2026-10-10） */
+  workNarrator?: WorkNarratorContext | null;
 }): ExtractionReplayResult {
   const replay = new ExtractionReplay(
     input.baseline,
-    new SettingsExtractionCollector(input.initialAbilityTerm)
+    new SettingsExtractionCollector(input.initialAbilityTerm),
+    input.workNarrator ?? null
   );
   for (const item of input.chunks) replay.accept(item.parsed, item.chunk);
 

@@ -57,6 +57,7 @@ import {
   type PendingSettingsRecord,
 } from "../../core/pendingSettingsMerge";
 import { CHARACTER_EXTRACT_VERSION } from "../../prompts/characterExtract";
+import { workNarratorContextFor } from "./proofread";
 import {
   FOLDER_INPUT,
   McpToolError,
@@ -419,6 +420,8 @@ export function planExtractCommit(folder: string): ExtractCommitPlan {
     chunks,
     baseline: ledgers.baseline,
     initialAbilityTerm: initialAbilityTermOf(abilitySystem),
+    // 製品の抽出と同じく、主人公でない語り手の場面の答えを主人公に付けない
+    workNarrator: workNarratorContextFor(folder, ledgers.baseline.characters),
   });
 
   return {

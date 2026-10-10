@@ -146,8 +146,9 @@ describe("登場人物抽出の品質ゲート", () => {
     // その呼び名で出すと書いた（2026-09-25 精査 F7）。
     // 5.8で isMob（端役の印）の意味を書いた（2026-09-26 精査 R5）。
     // 5.9で場所の位置関係（relations）を足した（設計書6.93.3）。
+    // 5.10で地の文の語り手についての注意を足した（設計書6.5.12）。
     // 版が変わるとキャッシュが無効になり、次回の抽出でAIを呼び直す
-    expect(CHARACTER_EXTRACT_VERSION).toBe("5.9");
+    expect(CHARACTER_EXTRACT_VERSION).toBe("5.10");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.properties)
       .toHaveProperty("entityType");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.required)
@@ -187,8 +188,9 @@ describe("登場人物抽出の品質ゲート", () => {
     // 版を上げるとキャッシュが全部無効になり、作品全体を再処理させる。
     // スキーマの上限はプロンプトの文言を変えていないので、上げる理由が無い。
     // （5.6 へ上げたのは口調と世界観の規則、5.7 は家族関係語の規則で
-    // プロンプトの文言が変わったため。5.8 は端役の印の説明、5.9 は場所の位置関係）
-    expect(CHARACTER_EXTRACT_VERSION).toBe("5.9");
+    // プロンプトの文言が変わったため。5.8 は端役の印の説明、5.9 は場所の位置関係、
+    // 5.10 は地の文の語り手についての注意）
+    expect(CHARACTER_EXTRACT_VERSION).toBe("5.10");
   });
 
   test("関係を必須にして、名前や外見から分からない結びつきを残せるようにする", () => {

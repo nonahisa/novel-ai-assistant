@@ -26,6 +26,14 @@ import {
   unnamedNarratorFirstPerson,
   unnamedNarratorName,
 } from "./unnamedNarrator";
+import {
+  foreignNarrationScenesInChunk,
+  evidenceInNarratorScene,
+  foreignSceneOfEvidence,
+  isNarratorRecord,
+  type ForeignNarrationScene,
+  type WorkNarratorContext,
+} from "./sceneNarrators";
 
 export type CharacterRejectionReason =
   | "invalid_shape"
@@ -39,7 +47,13 @@ export type CharacterRejectionReason =
   | "descriptive_name"
   | "non_person"
   | "collective"
-  | "ungrounded";
+  | "ungrounded"
+  /**
+   * 主人公の記録として返ったが、根拠の引用が**主人公でない語り手の場面**に
+   * だけあった（2026-10-10。`sceneNarrators.ts`）。皇子の「余」の場面を読んで
+   * 主人公の記録へ入れた形で、その中身は主人公のものではない
+   */
+  | "foreign_narrator_scene";
 
 /**
  * 捨てたレコードの中身。**名前を決められなかった2つの理由のときだけ**持つ
@@ -152,6 +166,20 @@ export interface DroppedReadingRecord {
   reading: string;
 }
 
+/**
+ * 主人公の記録から一人称だけを外した記録（2026-10-10。`sceneNarrators.ts`）。
+ * **人物は残し、一人称の欄だけを外す。** 主人公の場面と主人公でない語り手の
+ * 場面が1つのチャンクに入っていると、AIは両方を1人にまとめ、主人公でない
+ * 場面の一人称（「余」）を主人公の一人称として返す。マージはそれを
+ * 一人称の言い分けとして積む
+ */
+export interface DroppedFirstPersonRecord {
+  characterName: string;
+  /** AIが書いてきた一人称（落とした値そのまま） */
+  firstPerson: string;
+  reason: "foreign_narrator_first_person";
+}
+
 /** 向きが逆だった関係を直した記録（設計書6.18） */
 export interface CorrectedRelationRecord {
   characterName: string;
@@ -223,6 +251,11 @@ export interface CharacterValidationResult {
   droppedSpeechStyles: DroppedSpeechStyleRecord[];
   /** 名前と合わない読みを外したもの（作者の裁定、2026-10-01）。人物は受け入れている */
   droppedReadings: DroppedReadingRecord[];
+  /**
+   * 主人公でない語り手の場面の一人称として外したもの（2026-10-10）。
+   * 人物は受け入れている。古い呼び出し側との互換のため省略可能
+   */
+  droppedFirstPersons?: DroppedFirstPersonRecord[];
 }
 
 export interface CharacterValidationOptions {
@@ -255,6 +288,13 @@ export interface CharacterValidationOptions {
    * AIに見せたものと揃える必要があるため。
    */
   knownRecordNames?: readonly string[];
+  /**
+   * 作品の語り手（`workNarratorContextOf`。2026-10-10）。渡すと、主人公の記録と
+   * して返った答えの根拠が主人公でない語り手の場面にだけあれば落とし
+   * （`foreign_narrator_scene`）、その場面の一人称が主人公の一人称として返って
+   * いれば一人称の欄だけ外す。渡さなければ今までどおり
+   */
+  workNarrator?: WorkNarratorContext | null;
 }
 
 const MAX_NAME_LENGTH = 30;
@@ -321,6 +361,18 @@ const ABSENCE_NEGATION_PATTERN =
   /^[（(]?[^)）。]{0,50}(?:本文|記述|描写|言及|記載|情報)[^)）。]{0,20}(?:読み取れない|確認できない|見当たらない|判断できない|特定できない|わからない|分からない|ありません|存在しない)[。.]?[）)]?$/u;
 
 /**
+ * 語り手の断り書き（`foreignNarratorSentences`、2026-10-10）の写し。
+ *
+ * 指示の言葉は答えの中身として返ってくる（CLAUDE.md の失敗3）。紹介や役割に
+ * 「地の文の語り手はアジャーノではありません」が入れば、そのまま資料に載る。
+ * 断り書きにしか出ない言い回しだけを見る（「語り手」単独では落とさない——
+ * 物語の語り手役の人物の役割や、世界観の「地の文の語り手が場面ごとに替わる」
+ * のような正しい値に出る）
+ */
+const FOREIGN_NARRATOR_NOTE_ECHO =
+  /(資料に付けないで|地の文の語り手は.{0,30}ではありません|地の文の語り手が.{0,30}でない場面|で語られている場面の語り手は)/u;
+
+/**
  * 中身のある値か。空欄と同じ扱いにするものを弾く。
  *
  * 名前ではなく説明系の項目（性格・外見・説明など）に使う。
@@ -330,6 +382,7 @@ export function isMeaningfulValue(value: string | null | undefined): boolean {
   const text = value.trim();
   if (!text) return false;
   if (EMPTY_VALUE_PATTERN.test(text)) return false;
+  if (FOREIGN_NARRATOR_NOTE_ECHO.test(text)) return false;
   if (ABSENCE_SENTENCE_PATTERN.test(text)) return false;
   return !ABSENCE_NEGATION_PATTERN.test(text);
 }
@@ -379,6 +432,19 @@ export function validateCharacterExtractResult(
   const movedAddressRelations: MovedAddressRelationRecord[] = [];
   const droppedSpeechStyles: DroppedSpeechStyleRecord[] = [];
   const droppedReadings: DroppedReadingRecord[] = [];
+  const droppedFirstPersons: DroppedFirstPersonRecord[] = [];
+  const workNarrator = options.workNarrator ?? null;
+  // 主人公でない語り手の場面は、要るときに1回だけ数える（主人公の答えが無い
+  // チャンクでは数えない）
+  let scenesCache: ForeignNarrationScene[] | undefined;
+  const foreignScenes = (): ForeignNarrationScene[] => {
+    if (!workNarrator) return [];
+    scenesCache ??= foreignNarrationScenesInChunk(
+      chunk,
+      workNarrator.narrator.firstPerson
+    );
+    return scenesCache;
+  };
   const rawCharacters: unknown = result.characters;
 
   if (!Array.isArray(rawCharacters)) {
@@ -545,6 +611,23 @@ export function validateCharacterExtractResult(
       character.evidence = speechQuote;
     }
 
+    // **主人公でない語り手の場面を、主人公の記録にしない**（2026-10-10。
+    // 設計書6.5.12）。名前の無い語り手として受け入れた候補は対象外——
+    // あちらは地の文の一人称そのもので人物を決めている
+    if (workNarrator && !narratorMarks.has(character)) {
+      const verdict = checkForeignNarration(
+        character,
+        chunk.text,
+        workNarrator,
+        foreignScenes()
+      );
+      if (verdict === "reject") {
+        rejected.push({ name: character.name, reason: "foreign_narrator_scene" });
+        continue;
+      }
+      if (verdict) droppedFirstPersons.push(verdict);
+    }
+
     // 読みが名前と食い違うもの（別名の読みが入った）は、読みの欄だけ外す。
     // 作者が書いた読みへは触れない：ここで外すのはAIの候補の値だけで、
     // 既存レコードの値はマージ側で守られる（CLAUDE.md 規則2）
@@ -590,7 +673,55 @@ export function validateCharacterExtractResult(
     movedAddressRelations,
     droppedSpeechStyles,
     droppedReadings,
+    droppedFirstPersons,
   };
+}
+
+/**
+ * 主人公の記録として返った答えを、主人公でない語り手の場面と突き合わせる
+ * （2026-10-10。設計書6.5.12）。**渡した候補を書き換える**（一人称を外すとき）。
+ *
+ * - 主人公の記録でない・主人公でない場面がチャンクに無い → `undefined`（何もしない）
+ * - 根拠の引用がその場面に**だけ**ある → `"reject"`（記録ごと主人公に付けない）
+ * - 一人称が主人公の一人称と違い、その場面の一人称と同じ：
+ *   - 根拠が**主人公の一人称で語られている場面**にある → 一人称の欄だけ外す。
+ *     AIは2つの場面の人物を1人にまとめて返すため
+ *   - そうでない → `"reject"`。主人公に別の語り手の一人称を付けたこと自体が
+ *     取り違えの印で、根拠が同じ話の一人称の無い場面（第12話の皇帝と側近の
+ *     場面の台詞）にあると、上の判定では主人公の側と数えてすり抜けた
+ */
+function checkForeignNarration(
+  character: ExtractedCharacter,
+  chunkText: string,
+  context: WorkNarratorContext,
+  scenes: readonly ForeignNarrationScene[]
+): "reject" | DroppedFirstPersonRecord | undefined {
+  if (scenes.length === 0) return undefined;
+  if (!isNarratorRecord([character.name, ...(character.aliases ?? [])], context)) {
+    return undefined;
+  }
+  if (foreignSceneOfEvidence(chunkText, scenes, character.evidence)) return "reject";
+
+  const firstPerson = character.firstPerson?.trim();
+  if (
+    firstPerson &&
+    firstPerson !== context.narrator.firstPerson &&
+    scenes.some((scene) => scene.firstPerson === firstPerson)
+  ) {
+    if (
+      !character.evidence ||
+      !evidenceInNarratorScene(chunkText, context.narrator.firstPerson, character.evidence)
+    ) {
+      return "reject";
+    }
+    delete character.firstPerson;
+    return {
+      characterName: character.name,
+      firstPerson,
+      reason: "foreign_narrator_first_person",
+    };
+  }
+  return undefined;
 }
 
 /**

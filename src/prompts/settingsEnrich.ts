@@ -7,6 +7,8 @@ import {
   SPEECH_STYLE_ASPECTS,
   SPEECH_STYLE_MAX_CHARS,
 } from "../core/speechStyle";
+import type { ForeignNarratorNote } from "../core/sceneNarrators";
+import { foreignNarratorSentences } from "./characterExtract";
 
 /**
  * P-20 設定項目の充実
@@ -26,13 +28,16 @@ import {
  *
  * ## 変更履歴
  *
+ * - 2.2 対象が作品の語り手（主人公）のとき、主人公でない語り手の場面が入る
+ *   抜粋の頭に断り（抽出 5.10 と同じ文）を置く（作者の裁定 2026-10-10。
+ *   設計書6.5.12）。そういう抜粋が無ければ 2.1 と同じ文
  * - 2.1 人物の提案する項目に口調（speechStyle）を足した（設計書6.5.11）
  * - 2.0 「AIで再読込」へ（設計書6.31）。作者の**留意点**を受け取り、
  *   混入と判断した記述を `misattributed` として分けて返させる。
  *   留意点が空なら、従来（1.1）と同じ「項目の充実」として動く
  * - 1.1 変化の関与度を紹介へどこまで書くかを指示
  */
-export const SETTINGS_ENRICH_VERSION = "2.1";
+export const SETTINGS_ENRICH_VERSION = "2.2";
 
 /**
  * 製品がこのプロンプトを送るときの温度。項目の提案は設定として書くので、
@@ -274,6 +279,16 @@ export interface EnrichInput {
    * 言い換えると内容が変わるので、**要約も整形もしない。**
    */
   notes?: string;
+  /**
+   * 主人公でない語り手の場面の断り（2.2。設計書6.5.12）。再読込の対象が
+   * 作品の語り手（主人公）で、抜粋のどれかにそういう場面が入るときだけ渡す。
+   * `excerptForms` は `excerpts` と同じ順で、その抜粋に入っている主人公でない
+   * 場面の一人称（無ければ空）
+   */
+  foreignNarrator?: {
+    note: ForeignNarratorNote;
+    excerptForms: readonly (readonly string[])[];
+  } | null;
 }
 
 export function buildEnrichPrompt(input: EnrichInput): string {
@@ -289,7 +304,7 @@ ${notes ? formatNotes(notes, input.target.kindLabel) : ""}
 ${input.target.currentSettings}
 
 【本文の抜粋】（この${input.target.kindLabel}が登場する場面）
-${formatExcerpts(input.excerpts)}
+${formatExcerpts(input.excerpts, input.foreignNarrator ?? null)}
 
 【提案する項目】
 ${fields
@@ -349,11 +364,40 @@ ${notes}
 `;
 }
 
-function formatExcerpts(excerpts: MentionExcerpt[]): string {
+function formatExcerpts(
+  excerpts: MentionExcerpt[],
+  foreign: EnrichInput["foreignNarrator"]
+): string {
   if (excerpts.length === 0) {
     return "（本文中に該当する場面が見つかりませんでした）";
   }
   return excerpts
-    .map((excerpt) => `--- ${excerpt.label} ---\n${excerpt.text}`)
+    .map((excerpt, index) => {
+      const notice = foreignExcerptNotice(foreign ?? null, index);
+      return `--- ${excerpt.label} ---\n${notice}${excerpt.text}`;
+    })
     .join("\n\n");
+}
+
+/**
+ * 主人公でない語り手の場面が入る抜粋の頭に置く断り（2.2）。
+ * **本文の中には印を挿さない**——はじいた記述の根拠（evidence）は抜粋と
+ * 逐語で照合するので、本文に混ぜると照合が狂う。見出しの直後に1行で置き、
+ * 文は抽出と同じもの（`foreignNarratorSentences`）を使う
+ */
+function foreignExcerptNotice(
+  foreign: NonNullable<EnrichInput["foreignNarrator"]> | null,
+  index: number
+): string {
+  if (!foreign) return "";
+  const forms = foreign.excerptForms[index] ?? [];
+  if (forms.length === 0) return "";
+  const note: ForeignNarratorNote = {
+    ...foreign.note,
+    forms: foreign.note.forms.filter((form) => forms.includes(form.firstPerson)),
+  };
+  if (note.forms.length === 0) return "";
+  return `［注意：この抜粋には、地の文の語り手が${note.narratorName}でない場面があります。${foreignNarratorSentences(
+    note
+  ).join("")}］\n`;
 }

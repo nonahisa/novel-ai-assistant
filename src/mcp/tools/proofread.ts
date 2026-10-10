@@ -27,7 +27,11 @@ import {
   resolveWorkNarrator,
   viewpointNarratorOf,
 } from "../../core/narratorNameSlip";
-import { parseCharacter } from "../../models/character";
+import { parseCharacter, type Character } from "../../models/character";
+import {
+  workNarratorContextOf,
+  type WorkNarratorContext,
+} from "../../core/sceneNarrators";
 import { parseEpisodeFileName } from "../../core/episodeParser";
 import { parsePlotMarkdown } from "../../core/plotDoc";
 import { buildStyleNote, collectWorkStyle } from "../../core/workStyleFacts";
@@ -149,6 +153,24 @@ function readWorkSources(folder: string): EpisodeBodySource[] {
     );
   }
   return sources;
+}
+
+/**
+ * 作品の語り手（場面ごとの語り手の断り書きと検算に使う。2026-10-10、設計書6.5.12）。
+ *
+ * **製品と同じ決め方**——全話を繋ぎ、シーンメモの行を空にした本文で
+ * `detectNarrator` を通す（推敲の `viewpointNarratorFor` と同じ材料）。
+ */
+export function workNarratorContextFor(
+  folder: string,
+  people: readonly Character[]
+): WorkNarratorContext | null {
+  return workNarratorContextOf(
+    readWorkSources(folder)
+      .map((source) => blankMemoLines(source.body))
+      .join("\n"),
+    people
+  );
 }
 
 /** 語り手の名前が地の文に出る所（設計書6.9.2）。1件ぶん */

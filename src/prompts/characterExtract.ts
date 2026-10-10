@@ -10,6 +10,7 @@ import {
   SPEECH_STYLE_EXAMPLE,
   SPEECH_STYLE_MAX_CHARS,
 } from "../core/speechStyle";
+import type { ForeignNarratorNote } from "../core/sceneNarrators";
 
 /**
  * P-04a 設定抽出（チャンク単位）
@@ -62,7 +63,12 @@ import {
 //      **例に方角や距離の語を置かない**——例の語が本文に無いまま返ってくる
 //      （失敗3）。返ってきても、値が引用の中に無ければ検算が落とす
 //      （`validateLocationRelations`）
-export const CHARACTER_EXTRACT_VERSION = "5.9";
+// 5.10: 場面ごとに一人称の語り手が入れ替わる作品で、地の文が主人公と違う
+//      一人称の場面が本文にあるとき、【地の文の語り手についての注意】を書き添える
+//      （作者の裁定 2026-10-10「控えめな直しから」。設計書6.5.12）。皇子の「余」の
+//      場面を主人公（「俺」）の場面と読み、「余」を主人公の一人称の揺れに入れていた。
+//      その場面が無いチャンクでは 5.9 と同じ文
+export const CHARACTER_EXTRACT_VERSION = "5.10";
 
 /**
  * 送るときの温度。本文から拾うだけだが、書きぶりの揺れを少しだけ許す。
@@ -90,10 +96,35 @@ export const BASE_SYSTEM_PROMPT = `あなたは日本語の小説執筆を支援
 5. 作品世界の設定（造語、固有名詞、独自の言い回し）を誤りとして扱わないこと。
    判断に迷う場合は指摘せず、confidence を low にすること。`;
 
+/**
+ * 主人公でない語り手の場面について、頼み方に書き添える文（5.10。設計書6.5.12）。
+ * 1つの一人称につき1文。抽出（P-04a）と再読込（P-20）が同じ文を使う。
+ *
+ * **名指しは `speaker` があるときだけ**（その一人称の持ち主が資料に1人だけの
+ * とき。決め方は `sceneNarrators.ts` の `foreignNarratorNoteOf`）。
+ * 指示の言葉が値として返ってくる前提で、写しは `isMeaningfulValue` が落とす
+ * （「資料に付けない」「地の文の語り手は」）。
+ */
+export function foreignNarratorSentences(note: ForeignNarratorNote): string[] {
+  return note.forms.map(
+    (form) =>
+      `地の文が一人称「${form.firstPerson}」で語られている場面の語り手は、` +
+      `${note.narratorName}（地の文の一人称「${note.narratorFirstPerson}」）ではありません。` +
+      `その場面の地の文の「${form.firstPerson}」の行動・考え・一人称を、` +
+      `${note.narratorName}の資料に付けないでください。` +
+      (form.speaker ? `その場面の語り手は${form.speaker}です。` : "")
+  );
+}
+
 export interface CharacterExtractInput {
   chunkText: string;
   chapterLabel: string;
   knownCharacterNames: string[];
+  /**
+   * 主人公でない語り手の場面の断り（5.10）。その場面が本文に無ければ省く
+   * ——省けば頼み方は 5.9 と1文字も変わらない
+   */
+  foreignNarrator?: ForeignNarratorNote | null;
   /** 既知の能力名。同一能力の判定に使う */
   knownAbilityNames?: string[];
   /** 既知の場所名。同一場所の判定に使う */
@@ -140,11 +171,19 @@ export function buildCharacterExtractPrompt(
    良い例：本文に「神術」「仙術」とあれば "神術"。「魔法」なら "魔法"。「スキル」なら "スキル"。
    本文にそのような総称が見当たらない場合は null にしてください。無理に埋めないでください。`;
 
+  const foreignNarratorBlock = input.foreignNarrator
+    ? `\n【地の文の語り手についての注意】\n${foreignNarratorSentences(
+        input.foreignNarrator
+      )
+        .map((sentence) => `- ${sentence}`)
+        .join("\n")}\n`
+    : "";
+
   return `以下の小説本文から、登場人物・能力・組織・場所の情報を抽出してください。
 
 【本文】（${input.chapterLabel}）
 ${input.chunkText}
-
+${foreignNarratorBlock}
 【既知の登場人物】（同一人物の判定に使用）
 ${known}
 
