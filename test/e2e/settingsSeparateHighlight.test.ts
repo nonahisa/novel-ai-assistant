@@ -124,7 +124,18 @@ test("別名を別の人物に分けると、開いたままの本文の「お�
       await pressDialogButton(page, "分ける");
 
       // ファイル：元の人物から別名が外れ、新しい人物ができる
-      await waitUntil(async () => (await charactersOnDisk(session)).some((entry) => entry.name === "お嬢様"), "新しい人物「お嬢様」のファイルができる", 15_000);
+      // 製品は**新しい人物を先に**書き、元の人物をあとで書く（settingsPanel.ts。途中で落ちても別名が消えない順）。
+      // 新しいファイルができた直後は元の人物がまだ古いままか、書き換えの途中で読めないことがあるので、
+      // 両方が揃うまで待つ（2026-10-10 ノートPCで ['お嬢様']／undefined の形で落ちた）
+      await waitUntil(
+        async () => {
+          const people = await charactersOnDisk(session);
+          const original = people.find((entry) => entry.name === "密倉文佳");
+          return people.some((entry) => entry.name === "お嬢様") && original !== undefined && original.aliases.length === 0;
+        },
+        "新しい人物「お嬢様」のファイルができ、「密倉文佳」の別名から外れる",
+        15_000
+      );
       const people = await charactersOnDisk(session);
       expect(people.find((entry) => entry.name === "密倉文佳")?.aliases).toEqual([]);
 
