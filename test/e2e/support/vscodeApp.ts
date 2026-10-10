@@ -269,6 +269,13 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
       "--disable-features=CalculateNativeWinOcclusion",
       "--disable-renderer-backgrounding",
       "--disable-backgrounding-occluded-windows",
+      /*
+        環境変数 `NOVELAI_E2E_SCALE`（例 `1.25`）で、画面の拡大率を替えて起こす。ノートPCは
+        拡大率が 125%・150% のことが多く、CSS の1px が実際の画素の端数になる。この形でだけ
+        「広い窓なのに切れていると判定する」落ち方があった（2026-10-10、
+        manuscriptFootNarrow・manuscriptSurfaceNarrow）。手元の 100% の機械で写すために使う
+      */
+      ...(/^\d+(\.\d+)?$/.test(process.env.NOVELAI_E2E_SCALE ?? "") ? [`--force-device-scale-factor=${process.env.NOVELAI_E2E_SCALE}`] : []),
   ];
   // 開き直し（`restartVsCode`）が同じ引数で起こせるよう控える
   relaunchContexts.set(root, { executablePath, args, windowSize: options.windowSize ?? windowSizeFromEnv() });

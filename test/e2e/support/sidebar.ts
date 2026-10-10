@@ -56,6 +56,41 @@ export async function treeRowLabels(page: Page): Promise<string[]> {
   );
 }
 
+/**
+ * 名前が `head` で始まる行が DOM に現れるまで、`anchorHead` の行の上でホイールを回して
+ * 下へ送る（見つからなければ時間切れで落とす）。
+ *
+ * **VS Code の木は見えている行しか DOM に描かない**（仮想化）。窓が狭いと、開いた段の
+ * 下のほうの行は描かれず、`treeRow` では見つからない（2026-10-10、ノートPCの 1.141.0 で
+ * 「4. 自己校正」の中が「プロット逸脱検知」までしか出ず、「伏線手動追加」が見えなかった。
+ * こちらの機械でも `NOVELAI_E2E_WINDOW=1024x640` で同じ形に落ちた）。
+ * キーの↓は選んだ行を動かすだけだが、押す行を取り違えないよう、選びを動かさないホイールで送る
+ */
+export async function scrollTreeUntilRow(page: Page, anchorHead: string, head: string, timeoutMs = 30_000): Promise<Locator> {
+  const target = treeRow(page, head);
+  /*
+    回すのは `anchorHead` の行がある区画（簡単ステップメニューなど）の真ん中。行そのものの上で
+    回すと、送ったあとに上へ貼り付く見出し（sticky scroll。同じ名前の行が2つになる）の上で
+    回すことになり、1.141.0 ではそこから先へ送れなかった（2026-10-10）
+  */
+  const pane = page.locator(".pane-body").filter({ has: treeRow(page, anchorHead) }).first();
+  const deadline = Date.now() + timeoutMs;
+  while ((await target.count()) === 0) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `「${head}」の行が出るまで左の列を下へ送りましたが、出ません（いまの行：${(await treeRowLabels(page)).join(" / ")}）`
+      );
+    }
+    const box = await pane.boundingBox();
+    if (box) {
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.75);
+      await page.mouse.wheel(0, 120);
+    }
+    await page.waitForTimeout(200);
+  }
+  return target;
+}
+
 /** 作品の行を開く（畳まれていれば押して開く） */
 export async function expandTreeRow(page: Page, head: string): Promise<void> {
   const row = treeRow(page, head);

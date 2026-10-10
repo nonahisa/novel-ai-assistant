@@ -75,6 +75,19 @@ async function decisions(session: E2ESession): Promise<string[]> {
 }
 
 /**
+ * ［戻す］のあと、置き場に「戻した（pending）」の行が足されるのを待って確かめる。
+ *
+ * **ファイルが戻ったのを見た直後に1回だけ読まない。** 製品はファイルを書き戻してから
+ * 置き場へ判断の行を足すので、その間は `['accepted']` のまま見える。遅い機械（ノートPC）と
+ * 全件の負荷のときだけ、この隙間を読んで落ちていた（2026-10-04〜10-10。単独では毎回通る）。
+ * 足されないまま終わる不具合は、待った末の比較で落ちる
+ */
+async function expectUndoRecorded(session: E2ESession): Promise<void> {
+  await waitUntil(async () => (await decisions(session)).length >= 2, "置き場に［戻す］の判断の行が足される", 10_000).catch(() => undefined);
+  expect(await decisions(session)).toEqual(["accepted", "pending"]);
+}
+
+/**
  * 提案パネルを開き、`ready` が満たされるまで待つ。
  *
  * **押し直さない。** 閉じたあとの1回で開かなければ、それは「開き直す口」の不具合である
@@ -149,7 +162,7 @@ test("原稿箱の取り込みで当てた直しが、開き直した提案パ�
       await proposals.locator("#appliedTitle").click();
       await proposals.locator("[data-applied-undo]").first().click();
       await waitUntil(async () => (await fileText(session)) === TEXT, "［戻す］でファイルが元へ戻る");
-      expect(await decisions(session)).toEqual(["accepted", "pending"]);
+      await expectUndoRecorded(session);
 
       // 欄から外れ、既存の［戻す］と同じく未処理の一覧に［適用］で並ぶ
       await waitUntil(
@@ -203,7 +216,7 @@ test("校正・メモパネルの［直す］のあと、提案パネルを閉�
 
       await proposals.locator('button[data-action="undo"]').first().click();
       await waitUntil(async () => (await fileText(session)) === TEXT, "［戻す］でファイルが元へ戻る");
-      expect(await decisions(session)).toEqual(["accepted", "pending"]);
+      await expectUndoRecorded(session);
     },
     OPEN_PROPOSALS_LAUNCH
   );

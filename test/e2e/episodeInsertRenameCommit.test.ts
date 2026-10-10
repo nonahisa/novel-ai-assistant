@@ -49,7 +49,16 @@ test("話を挿入して「コミットする」を押すと、失敗の知ら�
 
       // 第2話の前に挿入する
       await treeContextMenu(page, "第2話", "この話の前に挿入");
-      await waitForQuickInput(page, "この話の前に挿入");
+      /*
+        ノートPC（1.141.0、2026-10-10）でだけ、ここで15秒待って落ちた（こちらの機械では通常の窓でも
+        1024x640 でも通る。1.138.0 のノートPCでは通った回もある）。製品が断りの知らせを出して
+        止まったのか、品書きの押下が届かなかったのかを次の回で分けられるよう、落ちたときに
+        出ている知らせと確認の窓を添える
+      */
+      await waitForQuickInput(page, "この話の前に挿入", 30_000).catch(async (error: unknown) => {
+        const toasts = await page.locator(".notification-toast").allInnerTexts().catch(() => [] as string[]);
+        throw new Error(`${String(error)}（出ている知らせ：${JSON.stringify(toasts)}／確認の窓：${(await dialogText(page)) ?? "なし"}）`);
+      });
       await answerInput(page, "割り込み");
 
       // 付け替えの確認 → 付け替える

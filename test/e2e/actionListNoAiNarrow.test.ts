@@ -102,7 +102,8 @@ test("狭いサイドバーでも、AIを呼ばない操作の右の薄字は切
         await setRow(page, place.group, false);
       }
       expect(seen, "薄字の付いた行が1つも開けていません").toBeGreaterThan(0);
-      expect([...new Set(clipped)], `左の列 ${width}px で薄字が切れています`).toEqual([]);
+      const unique = [...new Set(clipped)];
+      expect(unique, `左の列 ${width}px で薄字が切れています：${unique.join(" / ")}`).toEqual([]);
     },
     { ...SIDEBAR_LAUNCH, windowSize: { width: 1280, height: 800 } }
   );

@@ -13,11 +13,16 @@
  * 再起動すると「拡張機能の出したエディターが閉じる」確かめが出て、押すとタブが閉じ、
  * 画面の状態ごと消えた。作者の 1.141.0 ではタブが残ったので、E2E の VS Code を
  * 1.141.0 へ上げて（`support/vscodeApp.ts` の `E2E_VSCODE_VERSION`）この件を書いた。
- * **再起動の直後に確かめの窓が出たら、その文を添えて落とす**（1.141 でも 1.138 と同じなら、
- * この件は「見張れない」に戻す判断が要るため。skip にはしない）。
  *
- * **2026-10-10 に書いた時点では一度も走らせていない**（作者がこの機械で作業中のため。
- * 1.141.0 も `.vscode-test/` に無く、初回に取り寄せる）。
+ * **1.141.0 でも確かめの窓は出る**（2026-10-10、この機械で初めて走らせて確かめた。文は
+ * 「Please confirm restart of extensions. An extension provided text editor for '001_はじまり.txt'
+ * is still open that would close otherwise.」）。ただし 1.141.0 では［Restart Anyway］を押しても
+ * **原稿のタブは閉じずに残り**、そのあとの流れ（モーダル→再読み込み→打った字が入る）が通る。
+ * そこで作者と同じく［Restart Anyway］を押して進み、**押したあとタブが残っていること**を確かめる
+ * （1.138.0 ではここで閉じるので、この件はその文で落ちる）。
+ *
+ * 原稿を後ろへ回すのは無題のファイル（1.141.0 ではキーボード ショートカットの画面がタブでなく
+ * 重なる窓として開き、原稿が前に出たままだった）。
  *
  * 再起動のキーは使い捨ての keybindings.json に足す（製品にテスト専用の口を足さない）。
  */
@@ -41,8 +46,7 @@ import {
   activeTabNames,
   dialogText,
   editorGroupTabs,
-  OPEN_KEYBINDINGS_BINDING,
-  OPEN_KEYBINDINGS_PRESS,
+  pressDialogButton,
   pressWorkbenchKey,
   tabNamesInclude,
 } from "./support/workbenchDom";
@@ -54,6 +58,18 @@ const FIRST_LINE = "一行目の文。";
 const RESTART_HOST_KEY = "ctrl+alt+shift+r";
 const RESTART_HOST_PRESS = "Control+Alt+Shift+KeyR";
 
+/**
+ * 原稿を後ろへ回すために、新しい無題のファイルを同じ列へ開くキー（製品にもほかの件にも無い組）。
+ *
+ * **キーボード ショートカットの画面は使わない。** 1.141.0 ではタブではなく、編集の列の上に
+ * 重なる窓（モーダルのエディター）として開き、原稿のタブは前に出たままになる
+ * （2026-10-10、この機械の 1.141.0 で写真を撮って確かめた。1.138.0 までは同じ列のタブだった）。
+ * 無題のファイルは空のままなら未保存の扱いにならず、再読み込みで保存を訊かれない
+ */
+const NEW_UNTITLED_KEY = "ctrl+alt+shift+n";
+const NEW_UNTITLED_PRESS = "Control+Alt+Shift+KeyN";
+const UNTITLED_PREFIX = "Untitled";
+
 /** 製品のモーダル（`features/manuscriptEditor.ts` の `warnDisconnected`）の見出しとボタン */
 const DISCONNECTED_MESSAGE = "開いていた原稿エディターとのつながりが切れました";
 const RELOAD_BUTTON = "ウィンドウを再読み込み";
@@ -63,7 +79,7 @@ const LAUNCH = {
     { key: RESTART_HOST_KEY, command: "workbench.action.restartExtensionHost" },
     // 「別のタブ」は原稿エディター以外にする。原稿をもう1枚開くと、前に出ている方が
     // 先に「切れた」と判定され、見たい原稿の前に別のモーダルが出る
-    OPEN_KEYBINDINGS_BINDING,
+    { key: NEW_UNTITLED_KEY, command: "workbench.action.files.newUntitledFile" },
   ],
 };
 
@@ -71,10 +87,16 @@ async function fileText(session: E2ESession): Promise<string> {
   return (await readFile(path.join(session.manuscriptFolder, EPISODE), "utf8")).replace(/\r\n/g, "\n");
 }
 
-/** 原稿エディターを後ろのタブにする（キーボード ショートカットの画面を同じ列で前に出す） */
+/** 原稿エディターを後ろのタブにする（無題のファイルを同じ列で前に出す） */
 async function putManuscriptBehind(page: Page): Promise<void> {
-  await pressWorkbenchKey(page, OPEN_KEYBINDINGS_PRESS);
-  await page.locator(".keybindings-editor").first().waitFor({ state: "visible", timeout: 15_000 });
+  await pressWorkbenchKey(page, NEW_UNTITLED_PRESS);
+  await waitUntil(
+    async () => (await activeTabNames(page)).some((name) => name.startsWith(UNTITLED_PREFIX)),
+    "無題のファイルのタブが前に出る",
+    15_000
+  ).catch(async (error: unknown) => {
+    throw new Error(`${String(error)}（前に出ているタブ：${JSON.stringify(await activeTabNames(page))}）`);
+  });
   await waitUntil(
     async () => !tabNamesInclude(await activeTabNames(page), EPISODE),
     "原稿のタブが後ろに回る",
@@ -82,24 +104,27 @@ async function putManuscriptBehind(page: Page): Promise<void> {
   );
 }
 
+/** 再起動の確かめの窓（VS Code 本体）の、それでも再起動するボタン */
+const RESTART_ANYWAY_BUTTON = "Restart Anyway";
+
 /**
- * 拡張機能ホストを再起動する。**再起動の確かめの窓が出たら、その文を添えて落とす**
- * （1.138.0 では「拡張機能の出したエディターが閉じる」と出て、押すとタブが閉じた）。
- * 製品のモーダルは原稿のタブを前に出すまで出ないので、ここで出る窓は VS Code 本体のもの
+ * 拡張機能ホストを再起動する。**再起動の確かめの窓が出たら［Restart Anyway］を押して進む**
+ * （冒頭の説明。1.141.0 では押してもタブが残る。1.138.0 では閉じた）。
+ * 製品のモーダルは原稿のタブを前に出すまで出ないので、ここで出る窓は VS Code 本体のもの。
+ * 確かめの窓でない窓が出たら、その文を添えて落とす
  */
 async function restartExtensionHost(page: Page): Promise<void> {
   await pressWorkbenchKey(page, RESTART_HOST_PRESS);
   let seen: string | undefined;
-  await holdsFor(
-    async () => (seen = await dialogText(page)) === undefined,
-    "拡張機能ホストの再起動で確かめの窓が出ない",
-    8_000
-  ).catch(() => {
-    throw new Error(
-      `拡張機能ホストの再起動で、VS Code の確かめの窓が出ました（1.138.0 と同じ形。` +
-        `押すと原稿のタブが閉じるので、この件は先へ進めません）：${JSON.stringify(seen)}`
-    );
-  });
+  await waitUntil(async () => (seen = await dialogText(page)) !== undefined, "再起動の確かめの窓が出る", 8_000).catch(() => undefined);
+  if (seen !== undefined) {
+    if (!seen.includes(RESTART_ANYWAY_BUTTON)) {
+      throw new Error(`拡張機能ホストの再起動で、思っていない窓が出ました：${JSON.stringify(seen)}`);
+    }
+    await pressDialogButton(page, RESTART_ANYWAY_BUTTON);
+  }
+  // 再起動が始まって、古い拡張機能ホストが止まるのを少し待つ（タブが閉じるならこの間に閉じる）
+  await page.waitForTimeout(3_000);
   // タブが閉じていないこと（1.138.0 では閉じた）
   const tabs = (await editorGroupTabs(page)).flat();
   expect(tabNamesInclude(tabs, EPISODE), `拡張機能ホストの再起動で、原稿のタブが閉じました（タブ：${JSON.stringify(tabs)}）`).toBe(true);

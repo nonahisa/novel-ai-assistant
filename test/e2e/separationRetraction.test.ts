@@ -49,7 +49,7 @@ import {
 } from "./support/settingsFixture";
 import { withVsCode, type E2ESession, type LaunchOptions } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
-import { clearNotifications, closeDialog, dialogText, pressDialogButton } from "./support/workbenchDom";
+import { clearNotifications, closeDialog, dialogText, pressDialogButton, pressWorkbenchKey } from "./support/workbenchDom";
 
 const OPEN_SETTINGS_KEY = "ctrl+alt+shift+f1";
 const OPEN_SETTINGS_PRESS = "Control+Alt+Shift+F1";
@@ -152,7 +152,7 @@ async function prepare(session: E2ESession): Promise<{ panel: Frame; created: Ch
   // 起こす前に置いた場所が、登録で決まった置き場と同じであること
   expect(await charactersFolder(session)).toBe(defaultCharactersFolder(session.workFolder));
 
-  await session.page.keyboard.press(OPEN_SETTINGS_PRESS);
+  await pressWorkbenchKey(session.page, OPEN_SETTINGS_PRESS);
   let panel: Frame | undefined;
   await waitUntil(async () => (panel = await settingsPanelFrame(session)) !== undefined, "設定資料パネルが開く", 30_000);
   if (!panel) throw new Error("設定資料パネルの面が見つかりません");
@@ -201,7 +201,13 @@ async function extractionStarts(session: E2ESession): Promise<number> {
  * **届かなければ押し直す。** 起きてから人物を書いていた頃、「外で変更されました」の知らせが
  * 出た回に、押したのにログに何も書かれないことがあった（2026-10-03、焦点は設定資料パネル
  * 〈WebView〉の中）。いまは起こす前に置くので知らせは出ないが、念のため残す。抽出は覚えだけで
- * 1秒足らずで終わるので、5秒待って書かれなければ届かなかったとみなす
+ * 1秒足らずで終わるので、5秒待って書かれなければ届かなかったとみなす。
+ *
+ * **キーは `pressWorkbenchKey` で、本体へ焦点を戻してから押す。** 押す直前に開いた設定資料
+ * パネル（WebView）に焦点があると、素の `keyboard.press` は本体のキー割り当てへ届かず、
+ * 3回押しても「抽出を開始」が書かれない。ノートPC（1.138.0・1.141.0）で毎回この形に落ちた
+ * （2026-10-10）。0.101.15 でログの書き先を `workLog` にしたが、書くファイルは同じ
+ * `.aiwriter/logs/actions.log`（`core/logger.ts` の `resolveLogFilePath`）で、待つ先は変わっていない
  */
 async function runExtraction(session: E2ESession): Promise<void> {
   const { page } = session;
@@ -209,7 +215,7 @@ async function runExtraction(session: E2ESession): Promise<void> {
   const before = await extractionStarts(session);
   await withDiagnostics(session, async () => {
     for (let attempt = 1; ; attempt++) {
-      await page.keyboard.press(EXTRACT_PRESS);
+      await pressWorkbenchKey(page, EXTRACT_PRESS);
       try {
         await waitUntil(async () => (await extractionStarts(session)) > before, "操作ログに「抽出を開始」が書かれる", 5_000);
         break;
