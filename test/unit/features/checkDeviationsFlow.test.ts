@@ -38,6 +38,12 @@ const state = vi.hoisted(() => ({
   truncated: false,
   /** キャッシュへ書いた回数（救った応答を覚えないことを見る） */
   cacheSets: 0,
+  /** 控え（鍵 → 中身と印）。2回目に控えから返るかを見る */
+  cacheEntries: new Map<string, { value: unknown; note?: unknown }>(),
+  /** 応答に付ける途中止めの印（`GenerateResult.stoppedEarly`） */
+  stoppedEarly: undefined as
+    | { reason: "repetition"; stoppedAt: number; kept: number }
+    | undefined,
   /** AIを呼んだ回数 */
   calls: 0,
   logged: [] as string[],
@@ -71,6 +77,7 @@ vi.mock("../../../src/ai/registry", () => ({
             text: state.response,
             truncated: state.truncated,
             elapsedMs: 1,
+            ...(state.stoppedEarly ? { stoppedEarly: state.stoppedEarly } : {}),
           };
         },
       },
@@ -115,11 +122,21 @@ vi.mock("../../../src/core/synopsisStore", () => ({
 vi.mock("../../../src/core/chunkCache", () => ({
   ChunkCache: class {
     async load() {}
-    get() {
-      return undefined;
+    get(hash: string, base: { promptVersion: string; model: string }) {
+      return state.cacheEntries.get(`${base.promptVersion}|${base.model}|${hash}`)
+        ?.value;
     }
-    async set() {
+    async set(
+      hash: string,
+      base: { promptVersion: string; model: string },
+      value: unknown,
+      note?: unknown
+    ) {
       state.cacheSets += 1;
+      state.cacheEntries.set(`${base.promptVersion}|${base.model}|${hash}`, {
+        value,
+        note,
+      });
     }
     async save() {}
   },
@@ -234,6 +251,8 @@ beforeEach(() => {
   state.response = JSON.stringify({ deviations: [] });
   state.truncated = false;
   state.cacheSets = 0;
+  state.cacheEntries = new Map();
+  state.stoppedEarly = undefined;
 
   // 実行の確認は画面上部の選択窓で出る（A4、2026-09-23）。「実行」を選ぶ
   confirmPicker?.restore();
@@ -400,5 +419,43 @@ describe("空白で埋まった応答", () => {
     expect(result?.issues).toHaveLength(0);
     expect(result?.rejectedCount).toBe(0);
     expect(result?.failedChunks).toBe(0);
+  });
+});
+
+describe("繰り返しで途中止めした答えの控え（作者の裁定、2026-10-10。設計書6.77 の 15）", () => {
+  test("途中止めの答えも控え、印を残す。2回目はAIを呼ばずに控えから同じ指摘を出す", async () => {
+    state.response = deviationFor("少年は山へ登った。", "第2話　到着。少年は港へ着く");
+    state.stoppedEarly = { reason: "repetition", stoppedAt: 6, kept: 1 };
+
+    const first = await checkDeviations(work, registry());
+    expect(state.calls).toBe(EPISODES.length);
+    expect(first?.issues.length).toBeGreaterThan(0);
+
+    // 控えた話のどれにも、途中止めの印が付いている
+    const notes = [...state.cacheEntries.values()].map((entry) => entry.note);
+    expect(notes).toHaveLength(EPISODES.length);
+    for (const note of notes) {
+      expect(note).toEqual({ stoppedEarly: state.stoppedEarly });
+    }
+
+    const second = await checkDeviations(work, registry());
+    // **聞き直さない**
+    expect(state.calls).toBe(EPISODES.length);
+    expect(second?.issues.map((issue) => issue.excerpt)).toEqual(
+      first?.issues.map((issue) => issue.excerpt)
+    );
+  });
+
+  test("書き切った答えの控えには、途中止めの印を付けない", async () => {
+    state.response = deviationFor("少年は山へ登った。", "第2話　到着。少年は港へ着く");
+
+    await checkDeviations(work, registry());
+
+    expect(state.cacheEntries.size).toBe(EPISODES.length);
+    for (const entry of state.cacheEntries.values()) {
+      expect(
+        (entry.note as { stoppedEarly?: unknown } | undefined)?.stoppedEarly
+      ).toBeUndefined();
+    }
   });
 });

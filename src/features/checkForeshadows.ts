@@ -498,7 +498,10 @@ export async function checkForeshadows(
             });
             return undefined;
           }
-          await cache.set(chunk.hash, cacheKeyBase, parsed);
+          // 繰り返しで途中止めした答えも控え、印を残す（設計書6.77 の 15）
+          await cache.set(chunk.hash, cacheKeyBase, parsed, {
+            stoppedEarly: response.stoppedEarly,
+          });
           return parsed;
         } catch (error) {
           if (error instanceof AIError && error.kind === "aborted") {
@@ -975,7 +978,9 @@ export async function checkForeshadowResolution(
             });
             return undefined;
           }
-          await cache.set(chunk.hash, cacheKey, parsed);
+          await cache.set(chunk.hash, cacheKey, parsed, {
+            stoppedEarly: response.stoppedEarly,
+          });
           return parsed;
         } catch (error) {
           if (error instanceof AIError && error.kind === "aborted") {

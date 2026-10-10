@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import type { AIRegistry } from "../ai/registry";
-import { AIError } from "../ai/types";
+import { AIError, type GenerateResult } from "../ai/types";
 import {
   resolveOutputTokensForPlanning,
   resolveOutputTokensForSend,
@@ -146,6 +146,8 @@ export async function askFindingAdvice(
   );
 
   let text: string;
+  // 繰り返しで途中止めした答えなら、控えに印を残す（設計書6.77 の 15）
+  let stoppedEarly: GenerateResult["stoppedEarly"];
   try {
     const response = await resolved.provider.generate({
       systemPrompt: FINDING_ADVICE_SYSTEM_PROMPT,
@@ -177,6 +179,7 @@ export async function askFindingAdvice(
       return { kind: "failed", reason: "AIの答えが途中で切れました。" };
     }
     text = response.text;
+    stoppedEarly = response.stoppedEarly;
   } catch (error) {
     // 中止は失敗ではない（作者が［止める］を押した）
     if (error instanceof AIError && error.kind === "aborted") {
@@ -206,7 +209,7 @@ export async function askFindingAdvice(
   }
 
   try {
-    await cache.set(contentHash, cacheBase, advice);
+    await cache.set(contentHash, cacheBase, advice, { stoppedEarly });
     await cache.save();
   } catch (error) {
     // 覚えられなくても答えは出す（次に押したときにもう一度訊くだけ）

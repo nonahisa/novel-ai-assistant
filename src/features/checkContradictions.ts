@@ -1246,7 +1246,9 @@ export async function checkContradictions(
               mode === "future"
                 ? futureKeyBase
                 : keyWithPastScenes(cacheKeyBase, chunk),
-              parsed
+              parsed,
+              // 繰り返しで途中止めした答えも控え、印を残す（設計書6.77 の 15）
+              { stoppedEarly: response.stoppedEarly }
             );
             return parsed;
           } catch (error) {
@@ -1780,7 +1782,9 @@ export async function checkContradictions(
       if (response.truncated || !response.text.trim()) {
         return undecidedOutcome("応答が切り詰められました");
       }
-      await cache.set(key, verifyKeyBase, response.text);
+      await cache.set(key, verifyKeyBase, response.text, {
+        stoppedEarly: response.stoppedEarly,
+      });
       return parseVerifyOutcome(response.text);
     } catch (error) {
       if (error instanceof AIError && error.kind === "aborted") {

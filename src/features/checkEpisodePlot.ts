@@ -2,7 +2,12 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
-import { AIError, recoveryForAIError, type AIProvider } from "../ai/types";
+import {
+  AIError,
+  recoveryForAIError,
+  type AIProvider,
+  type GenerateResult,
+} from "../ai/types";
 import {
   resolveOutputTokensForPlanning,
   resolveOutputTokensForSend,
@@ -372,9 +377,9 @@ export async function checkEpisodePlotDesign(
         controller.abort();
       });
 
-      const raw =
-        cached ??
-        (await ask({
+      const asked = cached
+        ? undefined
+        : await ask({
           provider: resolved.provider,
           model: resolved.model,
           systemPrompt: EPISODE_PLOT_CHECK_SYSTEM_PROMPT,
@@ -400,7 +405,8 @@ export async function checkEpisodePlotDesign(
             "episode_plot_check"
           ),
           signal: controller.signal,
-        }));
+        });
+      const raw = cached ?? asked?.value;
       progress.report({ message: "1/1", increment: 100 });
       options.onProgress?.(1, 1);
 
@@ -408,7 +414,12 @@ export async function checkEpisodePlotDesign(
         base.failed = !base.cancelled;
         return;
       }
-      if (!cached) await cache.set(hash, cacheKeyBase, raw);
+      // 繰り返しで途中止めした答えも控え、印を残す（設計書6.77 の 15）
+      if (!cached) {
+        await cache.set(hash, cacheKeyBase, raw, {
+          stoppedEarly: asked?.stoppedEarly,
+        });
+      }
 
       const validated = validateEpisodePlotCheck(raw, {
         items: doc.items,
@@ -595,9 +606,9 @@ export async function contrastEpisodePlot(
         controller.abort();
       });
 
-      const raw =
-        cached ??
-        (await ask({
+      const asked = cached
+        ? undefined
+        : await ask({
           provider: resolved.provider,
           model: resolved.model,
           systemPrompt: EPISODE_PLOT_CONTRAST_SYSTEM_PROMPT,
@@ -612,7 +623,8 @@ export async function contrastEpisodePlot(
           maxOutputTokens: sendOutputTokens,
           plannedOutputTokens,
           signal: controller.signal,
-        }));
+        });
+      const raw = cached ?? asked?.value;
       progress.report({ message: "1/1", increment: 100 });
       options.onProgress?.(1, 1);
 
@@ -620,7 +632,12 @@ export async function contrastEpisodePlot(
         base.failed = !base.cancelled;
         return;
       }
-      if (!cached) await cache.set(hash, cacheKeyBase, raw);
+      // 繰り返しで途中止めした答えも控え、印を残す（設計書6.77 の 15）
+      if (!cached) {
+        await cache.set(hash, cacheKeyBase, raw, {
+          stoppedEarly: asked?.stoppedEarly,
+        });
+      }
 
       const validated = validateEpisodePlotContrast(raw, {
         items: doc.items,
@@ -853,7 +870,14 @@ async function ask(options: {
   /** 場所の確保に見込む量。**上限としては送らない**（同上） */
   plannedOutputTokens?: number;
   signal: AbortSignal;
-}): Promise<unknown | undefined> {
+}): Promise<
+  | {
+      value: unknown;
+      /** 繰り返しで途中止めした答えなら、その印（控えに残す。設計書6.77 の 15） */
+      stoppedEarly: GenerateResult["stoppedEarly"];
+    }
+  | undefined
+> {
   // 応答を待ったあとに書くので、共有の書き先でなく作品へ束ねて書く
   // （待つあいだに別の作品の画面が開かれると紛れる。`workLog`）
   const log = workLog(options.workFolder);
@@ -892,7 +916,7 @@ async function ask(options: {
       });
       return undefined;
     }
-    return parsed;
+    return { value: parsed, stoppedEarly: response.stoppedEarly };
   } catch (error) {
     if (error instanceof AIError && error.kind === "aborted") return undefined;
     log.failure(options.label, {

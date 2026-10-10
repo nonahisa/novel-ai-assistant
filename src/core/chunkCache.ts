@@ -8,6 +8,8 @@ import {
   ChunkCacheStore,
   type CacheKeyBase,
   type ChunkCacheIo,
+  type ChunkCacheSetNote,
+  type ChunkCacheStoppedEarly,
 } from "./chunkCacheStore";
 
 /**
@@ -72,8 +74,25 @@ export class ChunkCache {
     return this.store.get(chunkHash, base);
   }
 
-  set(chunkHash: string, base: CacheKeyBase, value: unknown): Promise<void> {
-    return this.store.set(chunkHash, base, value);
+  /**
+   * 控えへ書く。AIの答えから作った控えは、**応答の `stoppedEarly` を `note` へ
+   * 渡す**（途中で受け取りをやめた答えだと後から分かるように。設計書6.77 の 15）。
+   */
+  set(
+    chunkHash: string,
+    base: CacheKeyBase,
+    value: unknown,
+    note?: ChunkCacheSetNote
+  ): Promise<void> {
+    return this.store.set(chunkHash, base, value, note);
+  }
+
+  /** 控えに付いた途中止めの印（無ければ undefined）。当たったことにはしない */
+  stoppedEarlyOf(
+    chunkHash: string,
+    base: CacheKeyBase
+  ): ChunkCacheStoppedEarly | undefined {
+    return this.store.stoppedEarlyOf(chunkHash, base);
   }
 
   get size(): number {

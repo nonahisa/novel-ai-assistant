@@ -275,7 +275,12 @@ export async function runByRunner<
   }) => Promise<{
     text: string;
     truncated?: boolean;
-    stoppedEarly?: { stoppedAt: number; kept: number };
+    // 理由まで受け取る（控えの印に残すため。`ollama.generate` の返す形と同じ）
+    stoppedEarly?: {
+      readonly reason: "repetition";
+      readonly stoppedAt: number;
+      readonly kept: number;
+    };
   }>,
   /**
    * 結果を貯める先。**省略できる**（製品の鍵を組み立てられない機能がある）。
@@ -391,7 +396,9 @@ export async function runByRunner<
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       });
       if (response.stoppedEarly) {
-        stoppedEarly.push({ chunkId: item.chunkId, ...response.stoppedEarly });
+        // 結果へ添える形はこれまでどおり（理由は1種しか無いので載せない）
+        const { stoppedAt, kept } = response.stoppedEarly;
+        stoppedEarly.push({ chunkId: item.chunkId, stoppedAt, kept });
       }
       // **検算が通ってから貯める。** 読み取れない応答を貯めると、
       // 次からその壊れた答えが返り続ける
@@ -403,7 +410,14 @@ export async function runByRunner<
       if (store && cache && keyBase && chunkHash !== undefined) {
         const parsed = cache.parse(response.text);
         if (parsed !== undefined && parsed !== null) {
-          await store.set(chunkHash, keyBase, parsed);
+          /*
+            **途中止めの答えも控える**（作者の裁定、2026-10-10。設計書6.77 の 15）。
+            打ち切るまでに言い切った要素は本物なので、次は聞き直さない。
+            途中止めだったことは印で残す（拡張機能も同じファイルを読む）
+          */
+          await store.set(chunkHash, keyBase, parsed, {
+            stoppedEarly: response.stoppedEarly,
+          });
         }
       }
       return result;

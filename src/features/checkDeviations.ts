@@ -458,7 +458,10 @@ export async function checkDeviations(
 
           const parsed = parseDeviationResult(response.text);
           if (parsed) {
-            await cache.set(episode.hash, cacheKeyBase, parsed);
+            // 繰り返しで途中止めした答えも控え、印を残す（設計書6.77 の 15）
+            await cache.set(episode.hash, cacheKeyBase, parsed, {
+              stoppedEarly: response.stoppedEarly,
+            });
             return parsed;
           }
 

@@ -39,6 +39,37 @@ export interface CacheEntry {
    */
   lastUsedAt?: string;
   value: unknown;
+  /**
+   * **AIが書き切る前にこちらから受け取りをやめた答え**から作った控えにだけ付く印
+   * （作者の裁定、2026-10-10。設計書6.77 の 15）。
+   *
+   * 同じ要素の繰り返しを5回で打ち切った答え（`GenerateResult.stoppedEarly`）も、
+   * 打ち切るまでに言い切った要素は本物なので控えに残し、次は聞き直さない。
+   * ただ「AIが最後まで答えた控え」とは中身の確かさが違うので、後から見分けが
+   * 付くように印を残す。**鍵には入れない**（鍵を変えると、印の有無で同じ本文を
+   * 2回送ることになる）。古い形式のファイルには無いので省略できる。
+   */
+  stoppedEarly?: ChunkCacheStoppedEarly;
+}
+
+/**
+ * 控えに残す「途中で止めた」印の中身。
+ *
+ * 形は `GenerateResult.stoppedEarly`（`ai/types.ts`）と同じ。**`ai` を
+ * 読み込まずに同じ形を書いている**のは、この倉庫を `core` に置いたまま
+ * MCPサーバー（別プロセス）とも共有するため（依存の向きを `core` → `ai` にしない）。
+ */
+export interface ChunkCacheStoppedEarly {
+  readonly reason: "repetition";
+  /** 止めた要素が何件目か（1始まり） */
+  readonly stoppedAt: number;
+  /** 閉じて残した要素の数（検算の前） */
+  readonly kept: number;
+}
+
+/** 控えへ書くときに添えるもの。いまは途中止めの印だけ */
+export interface ChunkCacheSetNote {
+  stoppedEarly?: ChunkCacheStoppedEarly;
 }
 
 /**
@@ -138,15 +169,33 @@ export class ChunkCacheStore {
   async set(
     chunkHash: string,
     base: CacheKeyBase,
-    value: unknown
+    value: unknown,
+    note: ChunkCacheSetNote = {}
   ): Promise<void> {
     const key = makeKey(chunkHash, base);
     this.entries.set(key, {
       key,
       createdAt: this.now().toISOString(),
       value,
+      // 印の無い控えには欄そのものを書かない（ファイルの差分を増やさない）
+      ...(note.stoppedEarly ? { stoppedEarly: { ...note.stoppedEarly } } : {}),
     });
     this.dirty = true;
+  }
+
+  /**
+   * その控えが、途中で受け取りをやめた答えから作られたものなら印を返す。
+   *
+   * **当たったことにしない**（`get` と違って最後に使った日を進めない）。
+   * 印を覗くだけの呼び出しで、掃除の判定や同期の差分を動かさないため。
+   * 印の形が読めない（手で書き換えられた等）ときは、印が無いものとして扱う。
+   */
+  stoppedEarlyOf(
+    chunkHash: string,
+    base: CacheKeyBase
+  ): ChunkCacheStoppedEarly | undefined {
+    const mark = this.entries.get(makeKey(chunkHash, base))?.stoppedEarly;
+    return isStoppedEarlyMark(mark) ? mark : undefined;
   }
 
   get size(): number {
@@ -288,6 +337,16 @@ function isCacheEntry(value: unknown): value is CacheEntry {
       (typeof entry.lastUsedAt === "string" &&
         isValidIsoDate(entry.lastUsedAt))) &&
     "value" in entry
+  );
+}
+
+function isStoppedEarlyMark(value: unknown): value is ChunkCacheStoppedEarly {
+  if (typeof value !== "object" || value === null) return false;
+  const mark = value as Record<string, unknown>;
+  return (
+    mark.reason === "repetition" &&
+    typeof mark.stoppedAt === "number" &&
+    typeof mark.kept === "number"
   );
 }
 
