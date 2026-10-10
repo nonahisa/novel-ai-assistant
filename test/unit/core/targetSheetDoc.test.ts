@@ -153,12 +153,26 @@ describe("紙の中身", () => {
   test("11層ぶんの一致度が、いちばん高い層を太字にして並ぶ", () => {
     const doc = build("狙い：考察層", SCORES);
     expect(doc).toContain("**考察層**");
-    expect(doc).toContain("| 読者層 | 一致度 | どんな読者か |");
-    // 11行ある（見出しと区切りを除く）
+    expect(doc).toContain("| 読者層 | 一致度ランク | どんな読者か |");
+    // 11行ある（見出しと区切りを除く）。値は S〜F のランク
     const rows = doc
       .split("\n")
-      .filter((line) => /^\| .+ \| \d+ \| /.test(line));
+      .filter((line) => /^\| .+ \| [SABCDEF] \| /.test(line));
     expect(rows.length).toBe(11);
+    expect(doc).toContain("| **考察層** | S |");
+  });
+
+  test("一致度は数字で出さず、表の下にランクの意味を添える（作者の裁定 2026-10-10）", () => {
+    const doc = build("狙い：回遊層", SCORES);
+    // 数字の列が残っていない
+    expect(doc.split("\n").filter((line) => /^\| .+ \| \d+ \| /.test(line))).toEqual(
+      []
+    );
+    expect(doc).toContain("S＝3軸とも中心と同じ段階");
+    expect(doc).toContain("F＝3軸とも正反対の端");
+    // 文中の数字もランクにする
+    expect(doc).toMatch(/### 狙い：回遊層（一致度 [SABCDEF]）/);
+    expect(doc).not.toMatch(/一致度 \d+/);
   });
 
   test("狙いが書かれていなければ、そう言う（黙って空欄にしない）", () => {

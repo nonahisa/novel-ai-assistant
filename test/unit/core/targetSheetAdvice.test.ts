@@ -99,6 +99,12 @@ describe("材料の組み立て", () => {
     expect(prompt).not.toContain("すきま層");
   });
 
+  test("一致度は数字でなくランクで渡す（シートと同じ見せ方。作者の裁定 2026-10-10）", () => {
+    const prompt = buildTargetSheetAdvicePrompt(materialOf(WITH_REASON));
+    expect(prompt).toMatch(/考察層（一致度 [SABCDEF]。/);
+    expect(prompt).not.toMatch(/一致度 \d+/);
+  });
+
   test("寄せてよい向きは、狙いの中心へ向かう向き（機械が決める）", () => {
     // 考察層の中心は 読み慣れ6・読む姿勢3・求めるもの0。いまは 2・5・1
     const material = materialOf(WITH_REASON);

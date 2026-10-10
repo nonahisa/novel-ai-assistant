@@ -12,7 +12,7 @@ import {
   type AdviceDirection,
   type TargetSheetAdviceMaterial,
 } from "../core/targetSheetAdvice";
-import type { TargetSheetDirection } from "../core/targetSheet";
+import { affinityRank, type TargetSheetDirection } from "../core/targetSheet";
 
 /**
  * P-46 ターゲットシートの助言（設計書6.108.4 の第3段）
@@ -50,8 +50,10 @@ import type { TargetSheetDirection } from "../core/targetSheet";
  * - 1.1: 向きの英語の値（up・down）を材料の文から外し、文に書かないよう指示。
  *   本文から読み取れなかった軸を材料で断り、寄せる先から外した（0.98.8。
  *   e4b が「「down」に寄せる」と書き、仮の点の軸へ寄せ方を書いたため）
+ * - 1.2: 狙いの層の一致度を数字（67 など）でなくランク（S〜F）で渡す
+ *   （0.101.7。シートの表をランクにした作者の裁定 2026-10-10 に合わせた）
  */
-export const TARGET_SHEET_ADVICE_VERSION = "1.1";
+export const TARGET_SHEET_ADVICE_VERSION = "1.2";
 
 /**
  * 揺らしすぎると、同じ材料で作り直すたびに寄せる向きの言い方が大きく
@@ -110,7 +112,9 @@ function aimBlock(material: TargetSheetAdviceMaterial): string {
     .map((aim) => {
       const info = READER_TYPES[aim.type];
       return [
-        `${info.label}（一致度 ${aim.affinity}）`,
+        // シートと同じランクで渡す。数字で渡すと、助言の文に紙に無い
+        // 数字（67 など）が写り、作者が見ている表と食い違う
+        `${info.label}（一致度 ${affinityRank(aim.affinity)}。S〜F の段で、S がいちばん近い）`,
         info.summary,
         `- この層に効くこと：${info.works}`,
         `- この層が離れるところ：${info.loses}`,

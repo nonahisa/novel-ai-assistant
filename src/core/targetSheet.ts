@@ -132,6 +132,46 @@ export function readerTypeAffinityOf(
   return Math.round((100 * (MAX_DISTANCE - distance)) / MAX_DISTANCE);
 }
 
+/**
+ * 一致度のランク（S〜F）。
+ *
+ * 作者の裁定（2026-10-10）：「数字で出すと同じ数字が並んでいるように
+ * 見えます」「S,A,B,Cみたいなランク付けに」「D以下も作ってください」。
+ * 一致度は段階のずれの合計（0〜6）から出るので7通りしか取らず、
+ * 83・67 のような数字が表に何行も並ぶと、細かく測った数字が偶然そろった
+ * ように読める。**7通りに1つずつ文字を当て、粗い段であることを見た目で
+ * 伝える。** 計算は変えない（点数の控えも数字のまま残す）。
+ *
+ * `min` は「この値以上ならこの段」。計算が途中の値を返す日が来ても、
+ * 近い下の段に寄せる（60 なら C）。上から順に並べること。
+ */
+export const AFFINITY_RANKS = [
+  { rank: "S", min: 100, meaning: "3軸とも中心と同じ段階" },
+  { rank: "A", min: 83, meaning: "ずれが1段（1軸だけ隣の段階）" },
+  { rank: "B", min: 67, meaning: "ずれが合わせて2段" },
+  { rank: "C", min: 50, meaning: "ずれが合わせて3段" },
+  { rank: "D", min: 33, meaning: "ずれが合わせて4段" },
+  { rank: "E", min: 17, meaning: "ずれが合わせて5段" },
+  { rank: "F", min: 0, meaning: "3軸とも正反対の端" },
+] as const;
+
+export type AffinityRank = (typeof AFFINITY_RANKS)[number]["rank"];
+
+/** 一致度（0〜100）をランクにする。0未満のような壊れた値は F に落とす */
+export function affinityRank(affinity: number): AffinityRank {
+  for (const entry of AFFINITY_RANKS) {
+    if (affinity >= entry.min) return entry.rank;
+  }
+  return "F";
+}
+
+/** 表の下に添える、ランクの意味の1行（「S＝…、A＝…」） */
+export function affinityRankLegend(): string {
+  return AFFINITY_RANKS.map((entry) => `${entry.rank}＝${entry.meaning}`).join(
+    "、"
+  );
+}
+
 /** 11型すべての一致度 */
 export function readerTypeAffinity(
   scores: ReaderScores

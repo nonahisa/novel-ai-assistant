@@ -8,6 +8,8 @@ import {
 } from "../../../src/core/readerTarget";
 import { READER_TYPE_IDS } from "../../../src/core/readerTypeNeighbors";
 import {
+  affinityRank,
+  affinityRankLegend,
   rankReaderTypes,
   readerTypeAffinity,
   readerTypeAffinityOf,
@@ -131,6 +133,46 @@ describe("一致度", () => {
     // 高い順に並んでいる
     const values = rankReaderTypes(scores).map((entry) => entry.affinity);
     expect([...values].sort((left, right) => right - left)).toEqual(values);
+  });
+});
+
+describe("一致度のランク（作者の裁定 2026-10-10）", () => {
+  test("いまの計算で出る7つの値に、S〜F が1つずつ当たる", () => {
+    expect([100, 83, 67, 50, 33, 17, 0].map(affinityRank)).toEqual([
+      "S",
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "F",
+    ]);
+  });
+
+  test("343通り×11型で出る値は7通りで、どれも別のランクになる", () => {
+    // 2つの値が同じランクに落ちると、表で区別が消える
+    const values = new Set<number>();
+    for (const scores of allScores()) {
+      for (const type of READER_TYPE_IDS) {
+        values.add(readerTypeAffinityOf(scores, type));
+      }
+    }
+    const ranks = new Set([...values].map(affinityRank));
+    expect(ranks.size).toBe(values.size);
+  });
+
+  test("途中の値は、近い下の段に寄せる", () => {
+    expect(affinityRank(99)).toBe("A");
+    expect(affinityRank(60)).toBe("C");
+    expect(affinityRank(16)).toBe("F");
+    expect(affinityRank(-5)).toBe("F");
+  });
+
+  test("説明の1行は S から F まで全部を言う", () => {
+    const legend = affinityRankLegend();
+    for (const rank of ["S", "A", "B", "C", "D", "E", "F"]) {
+      expect(legend).toContain(`${rank}＝`);
+    }
   });
 });
 
