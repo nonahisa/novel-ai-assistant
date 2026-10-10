@@ -57,6 +57,7 @@ import {
 } from "../core/pendingNarratorMoves";
 import {
   applyPendingNarratorMove,
+  describeDiscardedUpdatesNotice,
   dismissPendingNarratorMove,
   narratorMoveViewItems,
   reviewPendingNarratorMoves,
@@ -67,6 +68,7 @@ import {
   describeNarratorMoveLog,
   describeRecordUpdateBatchLog,
   describeRecordUpdateLog,
+  describeUpdatesDiscardedByMoveLog,
   type RecordUpdateVerdict,
   type RecordUpdateVia,
 } from "../core/recordUpdateLog";
@@ -436,6 +438,15 @@ interface ApplyTarget {
    * `describeRecordUpdateLog` を通せない。`describeNarratorMoveLog`）
    */
   logLineOf?: (verdict: RecordUpdateVerdict, via: RecordUpdateVia) => string;
+  /**
+   * 反映の行のあとに続けて残す行（移す案で、古くなった更新案を片づけたとき。0.102.4）
+   */
+  followUpLogLines?: (via: RecordUpdateVia) => string[];
+  /**
+   * 移し先を作者が選ばないと反映できない移す案か（名指しできなかった案）。
+   * 確認ダイアログの道は選ぶ画面を持たないので、反映へ回さず数を分けて言う（0.102.4）
+   */
+  needsChoice?: boolean;
   /** 差分を持たない案の説明（「内容を確認」の文書に出す） */
   detail?: string[];
 }
@@ -460,12 +471,16 @@ function moveTargets(work: WorkEntry, review: PendingNarratorMoveReview): ApplyT
       detail: view.changes,
       kindLabel: PENDING_KIND_SHORT_LABELS.character,
       creation: false,
+      needsChoice: item.defaultId === null,
       apply: async (dropKeys) => {
         applied = await applyPendingNarratorMove(work, item, dropKeys, review.store);
         // 移し先の値を上書きしなかったことは黙らない（`applyNarratorMoves` の notes）
         if (applied.notes.length > 0) {
           void vscode.window.showInformationMessage(applied.notes.join(""));
         }
+        // 古くなった更新案を片づけたことも黙らない（0.102.4）
+        const discarded = describeDiscardedUpdatesNotice(applied.discardedUpdates);
+        if (discarded) void vscode.window.showInformationMessage(discarded);
         return 0;
       },
       discard: () => dismissPendingNarratorMove(work, item, review.store),
@@ -478,6 +493,10 @@ function moveTargets(work: WorkEntry, review: PendingNarratorMoveReview): ApplyT
           via,
           keptNotes: applied?.notes.length ?? 0,
         }),
+      followUpLogLines: (via) =>
+        applied && applied.discardedUpdates.length > 0
+          ? [describeUpdatesDiscardedByMoveLog({ names: applied.discardedUpdates, via })]
+          : [],
     };
   });
 }
@@ -517,6 +536,15 @@ function characterTargets(review: PendingUpdateReview): ApplyTarget[] {
             }),
           }
         : character;
+      // **書く前に、承認待ちのファイルがまだあるかを確かめる**（0.102.4）。
+      // パネルは開いたときの写しを持つので、同じパネルで先に移す案を反映して
+      // 片づいた更新案も、行は残る。写しを書くと、移した値が戻る
+      if (!(await review.pendingStore.exists(item.update.filePath))) {
+        throw new Error(
+          "この更新案は、別の操作（移す案の反映など）で古くなったため片づけました。" +
+            "提案パネルを開き直してください。もう一度「設定資料を抽出」すると作り直されます。"
+        );
+      }
       // 既存ファイルは上書きできないので saveOrUpdate を通す
       // （新規案はここでIDを採る。`applyItem` を参照）
       await applyItem(item, review.characterStore, review.known, settled);
@@ -575,6 +603,9 @@ function logVerdict(
         ? target.logLineOf(verdict, via)
         : `設定資料の更新を${verdict === "applied" ? "適用" : "見送り"}：${target.kindLabel}「${target.name}」 ${target.change}（${via}）`
     );
+    if (verdict === "applied") {
+      for (const line of target.followUpLogLines?.(via) ?? []) logLine(line);
+    }
     return;
   }
   logLine(
@@ -868,12 +899,25 @@ export async function applyPendingCharacterUpdates(
 }
 
 async function applyAll(
-  targets: ApplyTarget[],
+  chosen: ApplyTarget[],
   unit: "人" | "件",
   /** 記録の書き先（作品フォルダー） */
   work: WorkEntry
 ): Promise<void> {
   const workFolder = work.folderPath;
+  // **移し先を選ばないと反映できない移す案は、回さない**（0.102.4）。
+  // 回すと「移し先を選んでください」の失敗に数えられ、「反映できなかった」と
+  // 区別がつかない。承認待ちは残る（提案パネルで選べる）
+  const unchosenMoves = chosen.filter((target) => target.needsChoice).length;
+  const targets = chosen.filter((target) => !target.needsChoice);
+  const unchosenNote =
+    unchosenMoves > 0
+      ? `移し先を選んでいない移す案 ${unchosenMoves}件は残しました（提案パネルで移し先を選べます）。`
+      : "";
+  if (targets.length === 0) {
+    vscode.window.showInformationMessage(`反映できる更新がありません。${unchosenNote}`);
+    return;
+  }
   const applied: string[] = [];
   const failed: Array<{ name: string; message: string }> = [];
 
@@ -919,6 +963,7 @@ async function applyAll(
   if (failed.length === 0) {
     vscode.window.showInformationMessage(
       `${applied.length} ${unit}の設定を更新しました。` +
+        unchosenNote +
         "「設定資料集出力」を実行すると一覧にも反映されます。"
     );
     return;
@@ -930,7 +975,8 @@ async function applyAll(
   whenNoticePicked(
     vscode.window.showWarningMessage(
       `${applied.length} ${unit}を更新し、${failed.length} ${unit}は反映できませんでした。` +
-        "反映できなかった更新案は残してあります。",
+        "反映できなかった更新案は残してあります。" +
+        unchosenNote,
       "詳細を表示"
     ),
     async (action) => {

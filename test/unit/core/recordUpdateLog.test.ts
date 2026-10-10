@@ -3,6 +3,7 @@ import {
   batchVerbFromLabel,
   describeRecordUpdateBatchLog,
   describeRecordUpdateLog,
+  describeUpdatesDiscardedByMoveLog,
   summarizeRecordUpdateForLog,
 } from "../../../src/core/recordUpdateLog";
 import { diffCharacter } from "../../../src/core/characterDiff";
@@ -132,5 +133,16 @@ describe("まとめて押したときの件数の行", () => {
 
   test("押しボタンの語を持つ分類（伏線の候補など）は、その語を使う", () => {
     expect(batchVerbFromLabel("登録する")).toBe("登録");
+  });
+});
+
+describe("移す案の反映で古くなった更新案を片づけた行（0.102.4）", () => {
+  test("人物の名前と、どこから押したかを書く", () => {
+    expect(
+      describeUpdatesDiscardedByMoveLog({ names: ["アジャーノ", "殿下"], via: "提案パネル" })
+    ).toBe(
+      "設定資料の更新を片づけ：人物「アジャーノ」「殿下」の承認待ちの更新案" +
+        "（移す案の反映で古くなったため。もう一度抽出すると作り直されます）（提案パネル）"
+    );
   });
 });

@@ -47,6 +47,12 @@ vi.mock("../../../src/core/pendingUpdates", async (importOriginal) => ({
       return { updates: state.pending, errors: state.pendingErrors };
     }
     discard = state.discard;
+    // 書く前に承認待ちのファイルがまだあるかを見る（0.102.4）。積んだ案はある
+    async exists(filePath: string) {
+      return state.pending.some(
+        (update) => (update as { filePath?: string }).filePath === filePath
+      );
+    }
   },
 }));
 
