@@ -1,0 +1,347 @@
+{
+  "measuredAt": "2026-10-10T01:18:30.531Z",
+  "feature": "deviation",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:31b",
+  "numCtx": 16384,
+  "numCtxDecision": {
+    "numCtx": 16384,
+    "source": "プロンプトの長さから（製品と同じ道）",
+    "promptChars": 3642,
+    "outputTokens": 8192,
+    "contextWindow": 262144,
+    "charsPerToken": null
+  },
+  "temperature": 0.2,
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": {
+    "contextLength": 262144,
+    "parameterSize": "31.3B",
+    "bundled": null,
+    "note": null
+  },
+  "warmup": {
+    "elapsedMs": 17847,
+    "ok": true,
+    "reason": null
+  },
+  "endpoint": "http://127.0.0.1:11500",
+  "options": {
+    "modelSize": "large"
+  },
+  "givenOptions": {},
+  "modelSize": "large",
+  "modelSizeDecision": {
+    "sizeDependent": true,
+    "decided": true,
+    "providerId": "ollama",
+    "parameterSize": "31.3B",
+    "tier": "high",
+    "product": {
+      "modelSize": "large"
+    },
+    "kept": [],
+    "source": "製品と同じ判断（ai/capability.ts を束から借りた）"
+  },
+  "repeat": 1,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.101.5",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "1.3",
+  "verifyPromptVersion": null,
+  "plans": [],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\aa802787-65db-4c41-8484-fcc6029eac4e\\scratchpad\\work-v13-1",
+    "targets": [
+      "本文\\001_灯が消えた朝.txt",
+      "本文\\002_灯台へ.txt",
+      "本文\\003_灯台守の話.txt",
+      "本文\\004_もう一度、灯をともす.txt"
+    ]
+  },
+  "answers": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\aa802787-65db-4c41-8484-fcc6029eac4e\\scratchpad\\work-v13-1\\answers.json",
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 234961,
+      "temperature": 0.2,
+      "staleNote": null,
+      "metrics": {
+        "seeded": 3,
+        "seededTotal": 3,
+        "missed": 0,
+        "falseFlags": 0,
+        "kindMismatch": 1,
+        "otherFlags": 0,
+        "accepted": 3,
+        "rejected": 0,
+        "failures": 0,
+        "elapsedMs": 234961
+      },
+      "detail": {
+        "rejectedReasons": {},
+        "failures": [],
+        "seeded": {
+          "逸脱": {
+            "found": 2,
+            "total": 2
+          },
+          "間延び": {
+            "found": 1,
+            "total": 1
+          }
+        },
+        "missed": [],
+        "falseFlags": {}
+      },
+      "raw": [
+        {
+          "target": "本文\\001_灯が消えた朝.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:31b",
+            "temperature": 0.2,
+            "result": {
+              "accepted": [],
+              "rejected": [],
+              "fillers": 0
+            },
+            "modelSizeDecision": {
+              "source": "unknownModel",
+              "parameterSize": null,
+              "product": {
+                "typoModelSize": "large",
+                "deviationModelSize": "large",
+                "categories": "all",
+                "suppression": "loose"
+              },
+              "given": [
+                "modelSize"
+              ],
+              "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\002_灯台へ.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:31b",
+            "temperature": 0.2,
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 1,
+                  "lineEnd": 45,
+                  "excerpt": "朝の会で、転校生が紹介された。",
+                  "type": "逸脱",
+                  "reason": "転校生とのバンド結成に多くの紙幅が割かれていますが、灯台の灯をともすという主筋との関連性が現時点では見当たりません。",
+                  "plotReference": "放課後、海斗は陽菜と防波堤を歩いて灯台の下まで行く。",
+                  "severity": "high",
+                  "confidence": "high"
+                }
+              ],
+              "rejected": [],
+              "fillers": 0
+            },
+            "modelSizeDecision": {
+              "source": "unknownModel",
+              "parameterSize": null,
+              "product": {
+                "typoModelSize": "large",
+                "deviationModelSize": "large",
+                "categories": "all",
+                "suppression": "loose"
+              },
+              "given": [
+                "modelSize"
+              ],
+              "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\003_灯台守の話.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:31b",
+            "temperature": 0.2,
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 3,
+                  "lineEnd": 44,
+                  "excerpt": "港の広場を横切ろうとしたとき、見慣れない白いテントが目に入った。",
+                  "type": "間延び",
+                  "reason": "占い師との対話や子猫の保護に多くの紙幅が割かれており、灯台守への訪問という目的への進行が著しく遅くなっている可能性があります。",
+                  "plotReference": "海斗と陽菜は町はずれの家を訪ね、灯台守の老人に会う。",
+                  "severity": "medium",
+                  "confidence": "medium"
+                }
+              ],
+              "rejected": [],
+              "fillers": 0
+            },
+            "modelSizeDecision": {
+              "source": "unknownModel",
+              "parameterSize": null,
+              "product": {
+                "typoModelSize": "large",
+                "deviationModelSize": "large",
+                "categories": "all",
+                "suppression": "loose"
+              },
+              "given": [
+                "modelSize"
+              ],
+              "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        },
+        {
+          "target": "本文\\004_もう一度、灯をともす.txt",
+          "response": {
+            "runner": "ollama",
+            "model": "gemma4:31b",
+            "temperature": 0.2,
+            "result": {
+              "accepted": [
+                {
+                  "lineStart": 11,
+                  "lineEnd": 43,
+                  "excerpt": "防波堤は長かった。右も左も海で、風は正面から吹いてくる。",
+                  "type": "間延び",
+                  "reason": "陽菜の問いかけと海斗の思考が三度繰り返されており、灯台へ向かう道中の描写が冗長に感じられる可能性があります。",
+                  "plotReference": "海斗は老人から鍵を預かり、防波堤の先へ向かう。",
+                  "severity": "low",
+                  "confidence": "medium"
+                }
+              ],
+              "rejected": [],
+              "fillers": 0
+            },
+            "modelSizeDecision": {
+              "source": "unknownModel",
+              "parameterSize": null,
+              "product": {
+                "typoModelSize": "large",
+                "deviationModelSize": "large",
+                "categories": "all",
+                "suppression": "loose"
+              },
+              "given": [
+                "modelSize"
+              ],
+              "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+            },
+            "plotChars": 601,
+            "usedPlotChars": 601,
+            "plotTrimmed": false
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "seeded": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "seededTotal": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "missed": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "falseFlags": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "kindMismatch": {
+      "values": [
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "otherFlags": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "accepted": {
+      "values": [
+        3
+      ],
+      "min": 3,
+      "max": 3
+    },
+    "rejected": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "failures": {
+      "values": [
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        234961
+      ],
+      "min": 234961,
+      "max": 234961
+    }
+  },
+  "lines": [
+    "仕込んだ逸脱を拾えた: 3/3",
+    "見逃し（拾えなかった仕込み）: 0",
+    "誤検出（プロットどおりの話に付いた指摘）: 0",
+    "種別ちがい（場所は当てたが 逸脱／間延び を取り違えた）: 1",
+    "仕込み以外の箇所への指摘: 0",
+    "指摘（検算を通ったもの）: 3",
+    "落とした（検算で弾いたもの）: 0",
+    "失敗（チャンクごと通らなかったもの）: 0",
+    "所要時間: 235.0秒",
+    "num_ctx: 16384（プロンプトの長さから（製品と同じ道））",
+    "temperature: 0.2（製品と同じ（束が返した値））",
+    "頼み方: modelSize=large（申告の大きさ 31.3B・ティア high、版 1.3／製品と同じ判断（ai/capability.ts を束から借りた））",
+    "温め（読み込みを含む。上の所要時間には入っていません）: 17.8秒"
+  ]
+}

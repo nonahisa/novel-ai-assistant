@@ -1,0 +1,301 @@
+{
+  "note": "Ollama の手前に挟んだ中継で控えた、AI の生の答え（検算の前）。プロンプト版 1.3（0.101.5）。話の順は 001〜004。",
+  "conditions": [
+    {
+      "model": "gemma4:26b",
+      "promptVersion": "1.3",
+      "numCtx": 16384,
+      "rounds": [
+        [
+          {
+            "promptChars": 3598,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": []
+            }
+          },
+          {
+            "promptChars": 3567,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": [
+                {
+                  "lineStart": 1,
+                  "lineEnd": 43,
+                  "excerpt": "朝の会で、転校生が紹介された。",
+                  "type": "逸脱",
+                  "reason": "プロットの「第2話 放課後、海斗は陽菜と防波堤を歩いて灯台の下まで行く」に対し、バンド活動の描写が大きく割かれており、主筋との関連性が不明瞭に見える可能性があります。",
+                  "plotReference": "放課後、海斗は陽菜と防波堤を歩いて灯台の下まで行く。",
+                  "severity": "medium",
+                  "confidence": "medium"
+                }
+              ]
+            }
+          },
+          {
+            "promptChars": 3536,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": [
+                {
+                  "lineStart": 37,
+                  "lineEnd": 43,
+                  "excerpt": "広場の隅で、茶色の子猫が段ボールの陰から出てきた。",
+                  "type": "間延び",
+                  "reason": "子猫の保護と世話の描写が、灯台守に会うという目的や父の行方を探す主筋に寄与しているか検討の余地があります。",
+                  "plotReference": "海斗と陽菜は町はずれの家を訪ね、灯台守の老人に会う。",
+                  "severity": "low",
+                  "confidence": "medium"
+                }
+              ]
+            }
+          },
+          {
+            "promptChars": 3643,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": []
+            }
+          }
+        ],
+        [
+          {
+            "promptChars": 3598,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": []
+            }
+          },
+          {
+            "promptChars": 3567,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": [
+                {
+                  "lineStart": 1,
+                  "lineEnd": 43,
+                  "excerpt": "朝の会で、転校生が紹介された。",
+                  "type": "逸脱",
+                  "reason": "プロットの第2話は「放課後、海斗は陽菜と防波堤を歩いて灯台の下まで行く」という展開ですが、前半のバンド活動の描写が主筋にどう関わるか不明瞭に見える可能性があります。",
+                  "plotReference": "放課後、海斗は陽菜と防波堤を歩いて灯台の下まで行く。",
+                  "severity": "low",
+                  "confidence": "medium"
+                }
+              ]
+            }
+          },
+          {
+            "promptChars": 3536,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": [
+                {
+                  "lineStart": 37,
+                  "lineEnd": 43,
+                  "excerpt": "広場の隅で、茶色の子猫が段ボールの陰から出てきた。",
+                  "type": "間延び",
+                  "reason": "子猫の保護と世話の描写が、父の行方や灯台の謎という主筋に寄与しているか検討の余地があります。",
+                  "plotReference": "海斗は、父の船が帰る道しるべになるはずの灯台がなぜ消えたのかを確かめ、もう一度灯をともすことを目指す。",
+                  "severity": "low",
+                  "confidence": "medium"
+                }
+              ]
+            }
+          },
+          {
+            "promptChars": 3643,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": []
+            }
+          }
+        ],
+        [
+          {
+            "promptChars": 3598,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": []
+            }
+          },
+          {
+            "promptChars": 3567,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": [
+                {
+                  "lineStart": 1,
+                  "lineEnd": 43,
+                  "excerpt": "朝の会で、転校生が紹介された。",
+                  "type": "逸脱",
+                  "reason": "プロットの第2話は「放課後、海斗は陽菜と防波堤を歩いて灯台の下まで行く」という展開ですが、前半のバンド活動の描写が主筋にどう関わるか不明瞭に見える可能性があります。",
+                  "plotReference": "放課後、海斗は陽菜と防波堤を歩いて灯台の下まで行く。",
+                  "severity": "low",
+                  "confidence": "medium"
+                }
+              ]
+            }
+          },
+          {
+            "promptChars": 3536,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": [
+                {
+                  "lineStart": 37,
+                  "lineEnd": 43,
+                  "excerpt": "広場の隅で、茶色の子猫が段ボールの陰から出てきた。",
+                  "type": "間延び",
+                  "reason": "子猫の保護と世話の描写が、父の行方や灯台の謎という主筋に寄与しているか検討の余地があります。",
+                  "plotReference": "海斗は、父の船が帰る道しるべになるはずの灯台がなぜ消えたのかを確かめ、もう一度灯をともすことを目指す。",
+                  "severity": "low",
+                  "confidence": "medium"
+                }
+              ]
+            }
+          },
+          {
+            "promptChars": 3643,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": []
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "model": "gemma4:31b",
+      "promptVersion": "1.3",
+      "numCtx": 16384,
+      "rounds": [
+        [
+          {
+            "promptChars": 3598,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": []
+            }
+          },
+          {
+            "promptChars": 3567,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": [
+                {
+                  "lineStart": 1,
+                  "lineEnd": 45,
+                  "excerpt": "朝の会で、転校生が紹介された。",
+                  "type": "逸脱",
+                  "reason": "転校生とのバンド結成に多くの紙幅が割かれていますが、灯台の灯をともすという主筋との関連性が現時点では見当たりません。",
+                  "plotReference": "放課後、海斗は陽菜と防波堤を歩いて灯台の下まで行く。",
+                  "severity": "high",
+                  "confidence": "high"
+                }
+              ]
+            }
+          },
+          {
+            "promptChars": 3536,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": [
+                {
+                  "lineStart": 3,
+                  "lineEnd": 44,
+                  "excerpt": "港の広場を横切ろうとしたとき、見慣れない白いテントが目に入った。",
+                  "type": "間延び",
+                  "reason": "占い師との対話や子猫の保護に多くの紙幅が割かれており、灯台守への訪問という目的への進行が著しく遅くなっている可能性があります。",
+                  "plotReference": "海斗と陽菜は町はずれの家を訪ね、灯台守の老人に会う。",
+                  "severity": "medium",
+                  "confidence": "medium"
+                }
+              ]
+            }
+          },
+          {
+            "promptChars": 3643,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": [
+                {
+                  "lineStart": 11,
+                  "lineEnd": 43,
+                  "excerpt": "防波堤は長かった。右も左も海で、風は正面から吹いてくる。",
+                  "type": "間延び",
+                  "reason": "陽菜の問いかけと海斗の思考が三度繰り返されており、灯台へ向かう道中の描写が冗長に感じられる可能性があります。",
+                  "plotReference": "海斗は老人から鍵を預かり、防波堤の先へ向かう。",
+                  "severity": "low",
+                  "confidence": "medium"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          {
+            "promptChars": 3598,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": []
+            }
+          },
+          {
+            "promptChars": 3567,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": [
+                {
+                  "lineStart": 1,
+                  "lineEnd": 45,
+                  "excerpt": "朝の会で、転校生が紹介された。",
+                  "type": "逸脱",
+                  "reason": "転校生とのバンド結成に多くの紙幅が割かれていますが、灯台の件や父を待つ目的との関連性が現時点で見当たりません。",
+                  "plotReference": "放課後、海斗は陽菜と防波堤を歩いて灯台の下まで行く。",
+                  "severity": "high",
+                  "confidence": "high"
+                }
+              ]
+            }
+          },
+          {
+            "promptChars": 3536,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": [
+                {
+                  "lineStart": 3,
+                  "lineEnd": 44,
+                  "excerpt": "港の広場を横切ろうとしたとき、見慣れない白いテントが目に入った。",
+                  "type": "間延び",
+                  "reason": "占い師との対話や子猫の保護に多くの紙幅が割かれており、灯台守に会うという目的への進行が遅くなっている可能性があります。",
+                  "plotReference": "海斗と陽菜は町はずれの家を訪ね、灯台守の老人に会う。",
+                  "severity": "medium",
+                  "confidence": "medium"
+                }
+              ]
+            }
+          },
+          {
+            "promptChars": 3643,
+            "numCtx": 16384,
+            "answer": {
+              "deviations": [
+                {
+                  "lineStart": 11,
+                  "lineEnd": 43,
+                  "excerpt": "防波堤は長かった。右も左も海で、風は正面から吹いてくる。",
+                  "type": "間延び",
+                  "reason": "陽菜の問いかけと海斗の思考が三度繰り返されており、灯台へ向かう道中の描写が冗長に感じられる可能性があります。",
+                  "plotReference": "海斗は老人から鍵を預かり、防波堤の先へ向かう。",
+                  "severity": "low",
+                  "confidence": "medium"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    }
+  ]
+}
