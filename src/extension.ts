@@ -5300,6 +5300,15 @@ export async function activate(
       profiles: writerProfiles,
       hasWork: () => registry.list().length > 0,
       /*
+        はじめの案内で使う作品（設計書6.90.7）。ほかの操作と同じ決め方
+        （1作なら黙って・作品一覧で選んでいればそれ・直前の作品を先頭に）を
+        そのまま使う。案内の側で一度だけ呼ぶ
+      */
+      pickWork: () =>
+        resolveWork(undefined, registry, {
+          title: "はじめの案内で使う作品を選択",
+        }),
+      /*
         **9問の答えは、作者ごとの既定へ置く**（設計書6.90.2）。
         使用開始時にはまだ作品が1つも無いので、作品ごとの置き場には書けない。
         作品ができたら相談がここから始まる（`getEffective`）。
