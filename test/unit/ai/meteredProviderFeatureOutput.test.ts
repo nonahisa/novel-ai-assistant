@@ -124,6 +124,22 @@ describe("普段の呼び出しから、機能ごとの出力トークン数を�
     expect(entryOf("deviation_check").outputTokens).toBeUndefined();
   });
 
+  test("同じ要素の繰り返しで止めた回も、量も印も残さない（2026-10-10）", async () => {
+    // 印を付けると以後その機能には上限が送られなくなり、暴走の歯止めが外れる。
+    // 量として残せば、繰り返しの量を「要った量」と覚える
+    const metered = new MeteredProvider(
+      fakeProvider(() => ({
+        ...reply(11_264),
+        stoppedEarly: { reason: "repetition", stoppedAt: 6, kept: 2 },
+      }))
+    );
+
+    await metered.generate(params("typo_check"));
+
+    expect(entryOf("typo_check").outputTruncated).toBeUndefined();
+    expect(entryOf("typo_check").outputTokens).toBeUndefined();
+  });
+
   test("読める長さの測定からは採らない（わざと上限を試す呼び出し）", async () => {
     const metered = new MeteredProvider(fakeProvider(() => reply(9_100)));
 

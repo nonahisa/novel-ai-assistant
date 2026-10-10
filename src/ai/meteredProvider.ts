@@ -280,7 +280,9 @@ export class MeteredProvider implements AIProvider {
       this.record(params, {
         usage: result.usage,
         elapsedMs: result.elapsedMs,
-        truncated: result.truncated,
+        // **使用量の記録では「切り詰め」と並べる**（空白でこちらから止めた回と
+        // 同じ扱い）。書き切った回と同じ行に見えると、量を読み違える
+        truncated: result.truncated || result.stoppedEarly !== undefined,
       });
       // **うまくいった回からだけ速さを採る**（下のコメントに理由）。
       // 台帳への書き込みは抑えてあるので、たいていは何もせずに戻る
@@ -732,6 +734,13 @@ export class MeteredProvider implements AIProvider {
       覚える。どちらも測ったことにならない。
     */
     if (endsInWhitespaceRunaway(result.text)) return;
+    /*
+      **同じ要素の繰り返しで止めた回も、量も印も残さない**（2026-10-10。
+      理由は空白と同じ）。印を付けると以後その機能は上限なしで送られ、
+      暴走の歯止めそのものが外れる。量として残せば、繰り返しの量を
+      「要った量」と覚える
+    */
+    if (result.stoppedEarly) return;
 
     const tokens = result.usage?.outputTokens;
     if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens <= 0) {
@@ -814,7 +823,8 @@ function outputSpeedSample(
   result: GenerateResult
 ): { tokensPerSecond: number; source: SpeedSource } | undefined {
   // 途中で切られた応答は「その速さで書き切れた」ことにならない
-  if (result.truncated) return undefined;
+  // （繰り返しでこちらから止めた回も同じ。終わりの行の統計が届いていない）
+  if (result.truncated || result.stoppedEarly) return undefined;
 
   const measured = result.usage?.outputTokens;
   const useMeasured =

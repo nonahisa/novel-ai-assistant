@@ -567,3 +567,60 @@ describe("申告の行を original のある行へ直す", () => {
     expect(result.accepted[0]).toMatchObject({ line: 13, target: "すでの" });
   });
 });
+
+describe("同じ指摘を繰り返した答えの2件（gemma4:26b・温度0、2026-10-10）", () => {
+  /*
+    `docs/measurements/2026-10-10-typo-runaway.md`。繰り返しで止めて閉じた
+    答えは2件で、1件目は直し先が元と同じ（「癇癪」→「癇癪」）、2件目は
+    本文に無い語への直し（「癇癪」→「癇嘶」）だった。
+
+    - 1件目は「直しにならない」で落ちる（字の並びも同じことを先に確かめる。
+      互換漢字や異体字なら見た目が同じでも `===` をすり抜ける）
+    - 2件目は落とさない。**直し先が本文に無いのは、誤字の直しとしては
+      ふつう**（正しい語は本文に無いから誤字なのである）。この語が誤りか
+      どうかは作者が画面で決める
+  */
+  const chunk = makeChunk(
+    "なんとか自力で押して見ると、癇癪が公園に虚しく響き、近所の人の視線が飛んでくる。",
+    217
+  );
+  const raw = {
+    issues: [
+      {
+        line: 218,
+        original: "癇癪が公園に虚しく響き",
+        target: "癇癪",
+        suggestion: "癇癪",
+        reason: "誤変換",
+        confidence: "high",
+      },
+      {
+        line: 218,
+        original: "癇癪が公園に虚しく響き",
+        target: "癇癪",
+        suggestion: "癇嘶",
+        reason: "誤変換",
+        confidence: "medium",
+      },
+    ],
+  };
+
+  test("直し先が元と同じ指摘は「直しにならない」で落とす", () => {
+    const [first] = raw.issues;
+    expect([...first.suggestion].map((c) => c.codePointAt(0))).toEqual(
+      [...first.target].map((c) => c.codePointAt(0))
+    );
+
+    const result = validateTypoIssues(raw, chunk, []);
+
+    expect(result.rejected).toEqual([
+      expect.objectContaining({ line: 218, target: "癇癪", reason: "no_change" }),
+    ]);
+  });
+
+  test("本文に無い語への直しは、それだけでは落とさない", () => {
+    const result = validateTypoIssues(raw, chunk, []);
+
+    expect(result.accepted.map((issue) => issue.suggestion)).toEqual(["癇嘶"]);
+  });
+});

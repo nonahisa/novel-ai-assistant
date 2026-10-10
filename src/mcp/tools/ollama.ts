@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { bundledTuningByKey, type BundledTuning } from "../../core/bundledTuning";
 import { decodeByteFallback } from "../../core/byteFallback";
+import { findRepetition, salvageRepetition } from "../../core/repeatedElements";
 import {
   applyStreamLine,
   emptyStreamedChat,
@@ -175,6 +176,15 @@ export interface OllamaGenerateResult {
    * 「上限で切られた」と言い添えるのは呼ぶ側（`run.ts` の `runByRunner`）
    */
   truncated: boolean;
+  /**
+   * 同じ要素の繰り返しで受け取りをやめ、それまでの答えを閉じて渡した回だけ
+   * 入る（製品の `GenerateResult.stoppedEarly` と同じ形）
+   */
+  stoppedEarly?: {
+    readonly reason: "repetition";
+    readonly stoppedAt: number;
+    readonly kept: number;
+  };
 }
 
 export async function ollamaGenerate(
@@ -212,6 +222,31 @@ export async function ollamaGenerate(
     throw new McpToolError("Ollama の応答に本文がありません。");
   }
 
+  /*
+    **同じ要素の繰り返しで止めた（または上限で切れた）答えを、切り戻して
+    閉じる**（製品の `ai/ollamaProvider.ts` と同じ部品。2026-10-10）。
+    救えたら「切れた」とは言わずに検算へ渡す——言うと、救った答えを
+    検算の失敗の理由で上書きしてしまう
+  */
+  const stop =
+    streamed.repetitionStop ??
+    (streamed.truncated ? findRepetition(streamed.content) : undefined);
+  const salvaged = stop ? salvageRepetition(streamed.content, stop) : undefined;
+  if (stop && salvaged !== undefined) {
+    return {
+      text: decodeByteFallback(salvaged),
+      model: input.model,
+      endpoint,
+      elapsedMs: Date.now() - startedAt,
+      truncated: false,
+      stoppedEarly: {
+        reason: "repetition",
+        stoppedAt: stop.stoppedAt,
+        kept: stop.kept,
+      },
+    };
+  }
+
   return {
     /*
       **バイトの札を字へ戻してから返す**（製品の `ai/ollamaProvider.ts` と
@@ -224,7 +259,8 @@ export async function ollamaGenerate(
     model: input.model,
     endpoint,
     elapsedMs: Date.now() - startedAt,
-    truncated: streamed.truncated,
+    // 繰り返しで止めたのに閉じられなかった回も、途中で切れた答えとして言う
+    truncated: streamed.truncated || stop !== undefined,
   };
 }
 
@@ -478,6 +514,14 @@ async function readStream(
       const taken = takeCompleteLines(buffer);
       buffer = taken.rest;
       for (const line of taken.lines) applyStreamLine(result, line);
+      /*
+        **同じ要素が続いたら、それ以上待たない**（製品の `streamChat` と同じ。
+        2026-10-10）。切り戻して閉じるのは `ollamaGenerate` の側
+      */
+      if (result.repetitionStop) {
+        stopReading();
+        break;
+      }
     }
   } catch (error) {
     if (!signal.aborted) {
@@ -495,6 +539,8 @@ async function readStream(
       `Ollama：${deadlineMessage(timeoutMs)}（出力 ${result.content.length} 字まで受け取っていました）。`
     );
   }
+  // 繰り返しで止めた回は、読みかけの断片を足さない（止めた位置は決まっている）
+  if (result.repetitionStop) return result;
   // 最後の行に改行が付かないことがある
   buffer += decoder.decode();
   applyStreamLine(result, buffer);
