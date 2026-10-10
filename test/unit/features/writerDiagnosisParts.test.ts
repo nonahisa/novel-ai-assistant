@@ -81,6 +81,7 @@ function deps() {
     deps: {
       profiles: writer,
       hasWork: () => false,
+      pickWork: async () => undefined,
       adviceDefault: {
         get: () => advice.getDefault(),
         set: (profile: Parameters<AdvicePolicyStore["setDefault"]>[0]) =>

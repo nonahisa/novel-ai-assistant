@@ -21,6 +21,11 @@ import { openGeneratedMarkdown } from "../views/openDocument";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import { logStep } from "../core/logger";
 import {
+  runTutorialFlow,
+  type TutorialStepChoice,
+} from "../core/tutorialFlow";
+import type { WorkEntry } from "../models/types";
+import {
   buildTutorialStepItems,
   type TutorialListItem,
   type TutorialStepInput,
@@ -76,6 +81,14 @@ export interface WriterDiagnosisDeps {
   profiles: WriterProfileStore;
   /** 作品をもう登録しているか。押せない案内を並べないために要る */
   hasWork(): boolean;
+  /**
+   * はじめの案内で使う作品を決める（設計書6.90.7）。1つなら黙って返し、
+   * 複数なら直前の作品を先頭にして選ばせる。取りやめたら undefined。
+   *
+   * **案内1回につき一度だけ呼ぶ。** 段ごとに訊いていた頃は、作品を選ぶ→
+   * 一覧に戻る、の繰り返しに見えた（2026-10-10 の永久ループ）
+   */
+  pickWork(): Promise<WorkEntry | undefined>;
   /**
    * 6.86 の助言方針を、**作者ごとの既定**として読み書きする。
    *
@@ -480,32 +493,24 @@ async function askStyle(
  *
  * **目的を選び直せるようにする。** 紙を読んで「思っていたのと違う」と
  * 気づくことがあるので、操作の一覧から戻れる道を残す。
+ *
+ * 段を押したあとは一覧を出し直さず、右下の知らせで戻るかを訊く
+ * （`core/tutorialFlow.ts`。2026-10-10 の永久ループの直し）。
  */
 async function runTutorial(
   deps: WriterDiagnosisDeps,
   style: WriterStyle
 ): Promise<void> {
-  // 印は案内を開いている間だけ持つ（保存しない。設計書6.90.7）。
-  // 目的を選び直しても残す
-  const marks = new Map<string, TutorialStepMark>();
-  for (;;) {
-    const goal = await askGoal(style, deps.hasWork());
-    if (!goal) return;
+  type Goal = TutorialGoalInfo & {
+    steps: TutorialStepInput[];
+    advice: ReturnType<typeof tutorialAdvice>;
+    later: string[];
+  };
+  const askGoal = async (): Promise<Goal | undefined> => {
+    const goal = await askGoalPick(style, deps.hasWork());
+    if (!goal) return undefined;
 
     const advice = tutorialAdvice(style, goal.goal);
-
-    // **紙を先に開く。** 操作の一覧より前に、なぜそれを勧めるのかを読ませる
-    await openGeneratedMarkdown(
-      WRITER_GUIDE_TITLE,
-      buildWriterGuide({
-        style,
-        goal,
-        advice,
-        advicePolicy: describeAdviceDefault(deps),
-      }),
-      { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true }
-    );
-
     const later = [
       ...advice.later,
       // **出さないと決めたものも、決めたと分かるように出す**（0.52.0）
@@ -513,28 +518,53 @@ async function runTutorial(
         (line) => `いまは出していません：${line}`
       ),
     ];
+    return { ...goal, steps: advice.steps, advice, later };
+  };
 
-    // **1段ごとに一覧へ戻る**（設計書6.90.7）。操作のあとも、飛ばしたあとも
-    // 同じ一覧を出し直す。終わるのは「案内を終える」か Esc のときだけ
-    for (;;) {
-      const picked = await askStep(goal, advice.steps, later, marks);
-      if (picked === "back") break;
-      if (!picked) return;
-
-      if (picked.action === "skip") {
-        logStep(`はじめの案内：${goal.label} → ${picked.step.label}（飛ばした）`);
-        marks.set(picked.step.command, "skipped");
-        continue;
-      }
-      logStep(`はじめの案内：${goal.label} → ${picked.step.label}`);
-      await vscode.commands.executeCommand(picked.step.command);
-      // 「済んだ」とは書かない。QuickPick を閉じただけでも戻ってくるため
-      marks.set(picked.step.command, "opened");
-    }
-  }
+  // 流れ（作品を一度だけ決める・段のあとは知らせ）は core が持つ（設計書6.90.7）
+  await runTutorialFlow<Goal, WorkEntry>({
+    askGoal,
+    openGuide: async (goal) => {
+      await openGeneratedMarkdown(
+        WRITER_GUIDE_TITLE,
+        buildWriterGuide({
+          style,
+          goal,
+          advice: goal.advice,
+          advicePolicy: describeAdviceDefault(deps),
+        }),
+        { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true }
+      );
+    },
+    hasWork: () => deps.hasWork(),
+    pickWork: () => deps.pickWork(),
+    askStep: (goal, marks) => askStep(goal, goal.steps, goal.later, marks),
+    // 作品は WorkNode の形で渡す（受けるコマンドは `resolveWork` がそのまま使う）
+    runStep: async (step, work) =>
+      work
+        ? await vscode.commands.executeCommand(step.command, {
+            type: "work",
+            work,
+          })
+        : await vscode.commands.executeCommand(step.command),
+    notifyOpened: async (step) => {
+      const BACK = "はじめの案内に戻る";
+      const FINISH = "終える";
+      // 知らせは焦点を奪わない。段が開いた紙や画面に焦点を残したまま、
+      // 戻りたくなったときだけ押してもらう
+      const picked = await vscode.window.showInformationMessage(
+        `「${step.label}」を開きました。`,
+        BACK,
+        FINISH
+      );
+      if (picked === BACK) return "back";
+      return picked === FINISH ? "finish" : undefined;
+    },
+    log: logStep,
+  });
 }
 
-async function askGoal(
+async function askGoalPick(
   style: WriterStyle,
   hasWork: boolean
 ): Promise<TutorialGoalInfo | undefined> {
@@ -563,10 +593,7 @@ async function askGoal(
   return "goal" in picked ? picked.goal : undefined;
 }
 
-type StepPick =
-  | { step: TutorialStepInput; action: "open" | "skip" }
-  | "back"
-  | undefined;
+type StepPick = TutorialStepChoice;
 
 /**
  * 操作の一覧を出し、選ばれたものを返す。
