@@ -28,6 +28,7 @@ import {
 } from "./unnamedNarrator";
 import {
   foreignNarrationScenesInChunk,
+  evidenceInNarratorScene,
   foreignSceneOfEvidence,
   isNarratorRecord,
   type ForeignNarrationScene,
@@ -365,10 +366,11 @@ const ABSENCE_NEGATION_PATTERN =
  * 指示の言葉は答えの中身として返ってくる（CLAUDE.md の失敗3）。紹介や役割に
  * 「地の文の語り手はアジャーノではありません」が入れば、そのまま資料に載る。
  * 断り書きにしか出ない言い回しだけを見る（「語り手」単独では落とさない——
- * 物語の語り手役の人物の役割に書かれることがある）
+ * 物語の語り手役の人物の役割や、世界観の「地の文の語り手が場面ごとに替わる」
+ * のような正しい値に出る）
  */
 const FOREIGN_NARRATOR_NOTE_ECHO =
-  /(資料に付けない|地の文の語り手[はが]|で語られている場面の語り手)/u;
+  /(資料に付けないで|地の文の語り手は.{0,30}ではありません|地の文の語り手が.{0,30}でない場面|で語られている場面の語り手は)/u;
 
 /**
  * 中身のある値か。空欄と同じ扱いにするものを弾く。
@@ -681,8 +683,12 @@ export function validateCharacterExtractResult(
  *
  * - 主人公の記録でない・主人公でない場面がチャンクに無い → `undefined`（何もしない）
  * - 根拠の引用がその場面に**だけ**ある → `"reject"`（記録ごと主人公に付けない）
- * - 一人称が主人公の一人称と違い、その場面の一人称と同じ → 一人称の欄だけ外す。
- *   根拠が主人公の場面にあっても、AIは2つの場面の人物を1人にまとめて返すため
+ * - 一人称が主人公の一人称と違い、その場面の一人称と同じ：
+ *   - 根拠が**主人公の一人称で語られている場面**にある → 一人称の欄だけ外す。
+ *     AIは2つの場面の人物を1人にまとめて返すため
+ *   - そうでない → `"reject"`。主人公に別の語り手の一人称を付けたこと自体が
+ *     取り違えの印で、根拠が同じ話の一人称の無い場面（第12話の皇帝と側近の
+ *     場面の台詞）にあると、上の判定では主人公の側と数えてすり抜けた
  */
 function checkForeignNarration(
   character: ExtractedCharacter,
@@ -702,6 +708,12 @@ function checkForeignNarration(
     firstPerson !== context.narrator.firstPerson &&
     scenes.some((scene) => scene.firstPerson === firstPerson)
   ) {
+    if (
+      !character.evidence ||
+      !evidenceInNarratorScene(chunkText, context.narrator.firstPerson, character.evidence)
+    ) {
+      return "reject";
+    }
     delete character.firstPerson;
     return {
       characterName: character.name,

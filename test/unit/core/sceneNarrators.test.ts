@@ -220,6 +220,9 @@ describe("抽出の頼み方（P-04a 5.10）", () => {
     expect(isMeaningfulValue("地の文の語り手はアジャーノではありません")).toBe(false);
     expect(isMeaningfulValue("皇子。アジャーノの資料に付けないでください")).toBe(false);
     expect(isMeaningfulValue("物語の語り手役を務める吟遊詩人")).toBe(true);
+    // 世界観・作品の説明として正しい値は落とさない
+    expect(isMeaningfulValue("一人称の語り。地の文の語り手が場面ごとに替わる")).toBe(true);
+    expect(isMeaningfulValue("地の文の語り手は宮廷の書記官で、物語を後から書き留めている")).toBe(true);
   });
 });
 
@@ -265,6 +268,17 @@ describe("抽出の検算（主人公でない語り手の場面）", () => {
     expect(result.droppedFirstPersons).toEqual([
       { characterName: "アジャーノ", firstPerson: "余", reason: "foreign_narrator_first_person" },
     ]);
+  });
+
+  test("根拠が同じ話の一人称の無い場面にあり、一人称がその場面の形なら記録ごと落とす（実データの第12話の形）", () => {
+    const twelfth = `${PRINCE_SCENE}\n◇◆◇◆\n\n　執務室で若い皇帝に声をかけたのは、宰相の側近だった。\n「はい、皇子殿下は、どの教科も優秀でございます」\n`;
+    const result = validateCharacterExtractResult(
+      answerOf({ evidence: "はい、皇子殿下は、どの教科も優秀でございます", firstPerson: "余" }),
+      chunkOf(twelfth),
+      options
+    );
+    expect(result.accepted).toHaveLength(0);
+    expect(result.rejected).toEqual([{ name: "アジャーノ", reason: "foreign_narrator_scene" }]);
   });
 
   test("主人公でない人物の答えは今までどおり", () => {

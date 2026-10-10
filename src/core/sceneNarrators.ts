@@ -390,7 +390,7 @@ export function describeSuspectVariant(suspect: SuspectFirstPersonVariant): {
  * 一人称の無い、皇帝と側近の場面——の台詞で、そこを主人公の側と数えると
  * 取り違えの言い分けを疑えなかった
  */
-function evidenceInNarratorScene(
+export function evidenceInNarratorScene(
   text: string,
   narratorFirstPerson: string,
   evidence: string
