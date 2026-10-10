@@ -2994,7 +2994,10 @@ export async function activate(
   }
   // つながりの切れた原稿エディター（拡張機能ホストの起動し直し）を見つけて、
   // ウィンドウの再読み込みを勧める（作者の裁定 2026-10-02。設計書6.25.9）。
-  // 札と違ってブラウザ版でも起きうるので、札の有無に関わらず見張る
+  // 札と違ってブラウザ版でも起きうるので、札の有無に関わらず見張る。
+  // 起動し直したホストでここまで来ないと働かないので、`package.json` の
+  // `activationEvents` に `onStartupFinished` を持つ（後ろの原稿エディターを前に
+  // 出しても `onCustomEditor` は開かない。2026-10-10。`activationEvents.test.ts`）
   context.subscriptions.push(
     watchDisconnectedManuscripts((filePath) => workOfPath(registry, filePath))
   );

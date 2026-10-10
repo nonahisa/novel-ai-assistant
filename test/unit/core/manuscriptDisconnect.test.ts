@@ -107,6 +107,42 @@ describe("confirmDisconnectedTabs（猶予のあとにもう一度見る）", ()
   });
 });
 
+/**
+ * 2026-10-10 13:28 の形：原稿エディターを後ろに置いたまま拡張機能ホストが起動し直し、
+ * あとで作者が前に出す。前に出した回のタブの知らせで同じ判定にかける。
+ */
+describe("後ろのタブで起動し直し、あとで前に出す", () => {
+  it("起動した直後（後ろ）は数えず、前に出した回で拾い、猶予のあともつながらなければ切れたと見る", () => {
+    const resolved = new Set<string>();
+    expect(unresolvedActiveTabs([tab("a", false)], resolved)).toEqual([]);
+    const earlier = unresolvedActiveTabs([tab("a", true)], resolved);
+    expect(earlier).toEqual(["a"]);
+    expect(
+      confirmDisconnectedTabs({
+        earlier,
+        tabs: [tab("a", true)],
+        resolved,
+        warned: new Set(),
+      })
+    ).toEqual(["a"]);
+  });
+
+  it("前に出したとき VS Code が新しい画面でつなぎ直したら、生きている画面なので出さない", () => {
+    // ふつうに開いたウィンドウで背景のタブを前に出したときも、この形になる
+    const resolved = new Set<string>();
+    const earlier = unresolvedActiveTabs([tab("a", true)], resolved);
+    resolved.add("a");
+    expect(
+      confirmDisconnectedTabs({
+        earlier,
+        tabs: [tab("a", true)],
+        resolved,
+        warned: new Set(),
+      })
+    ).toEqual([]);
+  });
+});
+
 describe("猶予の長さ", () => {
   it("開いた直後のつながりの遅れを覆えるだけの長さがある（5秒以上）", () => {
     expect(MANUSCRIPT_RESOLVE_GRACE_MS).toBeGreaterThanOrEqual(5000);
