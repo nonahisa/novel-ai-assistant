@@ -478,6 +478,16 @@ test("Ctrl+Alt+K で強調を外した直後、画面へ届く前に行末へ字
       */
       const emphasisAtInput = await emphasisAtFirstInput(frame);
       if (emphasisAtInput === 1) {
+        /*
+          **ログの1行は、保存より遅れて書かれることがある。** 本体は当て直しの行を
+          `void this.logForDocument(...)` で書き、その中で作品の索引（`highlighter.indexFor`）を
+          待ってから書く。文書が変わった直後は索引の作り直しと重なるので、遅い機械（ノートPC、
+          2026-10-10）では「保存しました」を見た時点でまだ書かれていないことがある。
+          5秒まで待ってから確かめる（通っていなければ、待った末に下で落ちる）
+        */
+        await waitUntil(async () => (await rebaseLogLines(session)).includes("当て直しました"), "操作ログに当て直しの行が書かれる", 5_000).catch(
+          () => undefined
+        );
         expect(
           await rebaseLogLines(session),
           `当て直しの道を通っていません（打った瞬間の傍点：${emphasisAtInput}）${await traceReport(session, frame)}`

@@ -24,7 +24,7 @@ import {
 } from "./support/sampleFinding";
 import { withVsCode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { clearNotifications } from "./support/workbenchDom";
+import { clearNotifications, pressWorkbenchKey } from "./support/workbenchDom";
 
 const EPISODE = "001_駅.txt";
 const SECOND = "002_つづき.txt";
@@ -96,7 +96,9 @@ test("狭い窓で、原稿エディターの下の段は右で切れずに折�
       });
       await openEpisode(page, EPISODE, "零時を指していた");
       await clearNotifications(page);
-      await page.keyboard.press(OPEN_PROPOSALS_PRESS);
+      // 原稿エディター（WebView）を開いた直後は焦点が iframe の中にあり、素のキーは本体へ届かない
+      // ことがある（ノートPC、2026-10-10 にこの件が時間切れで落ちた。ほかの件と同じ押し方にそろえる）
+      await pressWorkbenchKey(page, OPEN_PROPOSALS_PRESS);
       await waitUntil(async () => (await proposalPanelFrame(page)) !== undefined, "提案パネルが開く", 15_000);
       const frame = await openEpisode(page, SECOND, "二話目の本文");
       await waitUntil(async () => (await footText(frame, "counts")).includes("このファイル"), "下段に字数が出る", 15_000);

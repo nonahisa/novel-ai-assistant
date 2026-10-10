@@ -16,7 +16,7 @@
  */
 import type { Page } from "playwright-core";
 import { waitUntil } from "./wait";
-import { quickPickRows, quickPickTitle } from "./workbenchDom";
+import { pressWorkbenchKey, quickPickRows, quickPickTitle } from "./workbenchDom";
 
 const WIDGET = ".quick-input-widget";
 
@@ -73,9 +73,23 @@ export async function waitQuickInputClosed(page: Page, label: string): Promise<v
  * 目当ての行が出るまで待つ。
  */
 export async function runCommand(page: Page, title: string): Promise<void> {
-  await page.keyboard.press("Control+Shift+KeyP");
+  /*
+    **パレットのキーは本体へ焦点を戻してから押し、出なければ押し直す。**
+    パネル（WebView）を開いた直後は焦点が iframe の中にあり、素の `keyboard.press` は
+    本体のキー割り当てに届かない。ノートPC（1.138.0・1.141.0 とも）では、設定資料・
+    執筆統計の件でパレットの入力欄が出ないまま30秒待って落ちた（2026-10-10）。
+    パネルが開き終わるまでの間に焦点が iframe へ移ることもあるので、1回で決めつけず3回まで
+  */
   const input = page.locator(`${WIDGET} input`).first();
-  await input.waitFor({ state: "visible" });
+  for (let attempt = 1; ; attempt++) {
+    await pressWorkbenchKey(page, "Control+Shift+KeyP");
+    const shown = await input
+      .waitFor({ state: "visible", timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (shown) break;
+    if (attempt === 3) throw new Error(`コマンドパレットの入力欄が出ません（「${title}」を走らせようとして、3回押しました）`);
+  }
   await page.keyboard.insertText(title);
   let index = -1;
   const labels = async () => (await quickPickRows(page)).map((row) => row.label);

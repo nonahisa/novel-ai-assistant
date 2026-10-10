@@ -34,10 +34,15 @@ function observeVisibleWidth(onChange) {
   const steps = [];
   for (let i = 0; i <= 100; i++) steps.push(i / 100);
   function apply(entry) {
-    const visible = Math.floor(entry.intersectionRect.width);
+    const seen = entry.intersectionRect.width;
     const whole = entry.boundingClientRect.width;
-    const clipped = visible > 0 && visible < whole - 1;
-    onChange(clipped ? visible : 0);
+    // 2px までのずれは切れていないとみなす。拡大率が端数（125%・150%）の機械では、
+    // 窓の中に収まっている列でも、見えている幅が要素の幅より1px足らず狭く測られる
+    // （150% で 1242.67 と 1243.33。2026-10-10、ノートPCの VS Code 1.141.0）。
+    // 切り捨ててから比べていた頃は、広い窓でも下の段・本文の面へ幅を書き込んでいた。
+    // 本当に切れるときは列の最小幅のせいで十数px以上外へ出るので、2px で取りこぼさない
+    const clipped = seen >= 1 && seen < whole - 2;
+    onChange(clipped ? Math.floor(seen) : 0);
   }
   const observer = new IntersectionObserver(function (entries) {
     apply(entries[entries.length - 1]);

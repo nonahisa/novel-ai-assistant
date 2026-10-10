@@ -17,7 +17,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "vitest";
 import { answerInput, runCommand, waitForQuickInput, waitQuickInputClosed } from "./support/quickInput";
-import { SIDEBAR_LAUNCH, showSidebar, treeRow, treeRowLabels } from "./support/sidebar";
+import { SIDEBAR_LAUNCH, scrollTreeUntilRow, showSidebar, treeRow } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 import { clearNotifications, pressWorkbenchKey } from "./support/workbenchDom";
@@ -45,13 +45,8 @@ test("ステップメニュー「4. 自己校正」の「伏線手動追加」�
       await step.scrollIntoViewIfNeeded();
       if ((await step.getAttribute("aria-expanded")) !== "true") await step.click();
       await waitUntil(async () => (await step.getAttribute("aria-expanded")) === "true", "「4. 自己校正」が開く");
-      const row = treeRow(page, ROW_NAME);
-      await waitUntil(async () => (await row.count()) > 0, `「4. 自己校正」の中に「${ROW_NAME}」の行が出る`, 30_000).catch(
-        async (error: unknown) => {
-          throw new Error(`${String(error)}（いまの行：${(await treeRowLabels(page)).join(" / ")}）`);
-        }
-      );
-      await row.scrollIntoViewIfNeeded();
+      // 狭い窓では「4. 自己校正」の下のほうの行が描かれない（仮想化）ので、下へ送って出す
+      const row = await scrollTreeUntilRow(page, "4. 自己校正", ROW_NAME);
       await row.click();
       await waitForQuickInput(page, "伏線を手で追加（1/3）", 20_000);
       await page.keyboard.press("Escape");
