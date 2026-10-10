@@ -53,6 +53,10 @@ export const FEATURE_COMMANDS: Readonly<Partial<Record<FeatureName, string>>> =
     factContradiction: "novelai.checkFactContradictions",
     deviation: "novelai.checkDeviations",
     episodePlot: "novelai.checkEpisodePlot",
+    // 照合（P-28）も画面では同じコマンドの中の1つ（要るのは同じ単話プロット）。
+    // `featureOfCommand` は先に並ぶ episodePlot を返すが、このコマンドを
+    // 代わりの道（insteadOf）に指す前提は無いので食い違わない
+    episodePlotContrast: "novelai.checkEpisodePlot",
     // 「本文からプロットを逆算」＝プロット逆算（P-02）
     plotReverse: "novelai.generatePlot",
   };

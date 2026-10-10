@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.101.17 - 2026-10-10
+
+### 追加
+
+- 外部AI（MCP）の `novel.prompt`・`novel.validate`・`novel.run` に「単話プロットと本文の照合」（feature: `episodePlotContrast`）を足した。話の本文（`filePath`）と単話プロット（`options.plotPath`）を、画面の「本文と照合」と同じプロンプトと検算で照らし、出来事の欠落・順序の食い違い・主筋の改変などを返す。原稿も単話プロットも書き換えない
+
 ## 0.101.15 - 2026-10-10
 
 ### 修正
