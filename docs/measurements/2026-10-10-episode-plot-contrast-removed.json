@@ -1,0 +1,54 @@
+{
+  "model": "gemma4:26b",
+  "numCtx": 16384,
+  "variant": "removed",
+  "runs": [
+    {
+      "run": 1,
+      "seconds": 28,
+      "accepted": [
+        {
+          "kind": "出来事の欠落",
+          "plotItem": "マーフが、孤児院を出なければならないのに仕事が減っていると暮らしの苦しさを語る",
+          "plotLine": 10,
+          "excerpt": null,
+          "line": null,
+          "reason": "マーフが暮らしの苦しさや仕事について語る場面が本文にないため。"
+        }
+      ],
+      "rejected": []
+    },
+    {
+      "run": 2,
+      "seconds": 3,
+      "accepted": [
+        {
+          "kind": "出来事の欠落",
+          "plotItem": "マーフが、孤児院を出なければならないのに仕事が減っていると暮らしの苦しさを語る",
+          "plotLine": 10,
+          "excerpt": null,
+          "line": null,
+          "reason": "マーフが暮らしの苦しさについて語る場面が本文にないため。"
+        }
+      ],
+      "rejected": []
+    },
+    {
+      "run": 3,
+      "seconds": 3,
+      "accepted": [
+        {
+          "kind": "出来事の欠落",
+          "plotItem": "マーフが、孤児院を出なければならないのに仕事が減っていると暮らしの苦しさを語る",
+          "plotLine": 10,
+          "excerpt": null,
+          "line": null,
+          "reason": "マーフが暮らしの苦しさや仕事の減少について語る場面がないため。"
+        }
+      ],
+      "rejected": []
+    }
+  ],
+  "mcpVersion": "0.101.17",
+  "bundleStale": false
+}
