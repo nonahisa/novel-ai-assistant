@@ -254,6 +254,15 @@ interface OpenManuscript {
    */
   refreshKind(): Promise<void>;
   /**
+   * 用語の位置と持ち主（色・吹き出し・右クリックの当たり）を送り直す
+   * （設計書6.5.8。2026-10-11）。
+   *
+   * 設定資料パネルで別名を別の人物に分けても、開いたままの画面は前に送った
+   * 持ち主を持ち続け、「設定資料を見る」が古い人物の資料を出していた。
+   * 本文を送る便（`send`）が用語も一緒に組むので、その便をもう一度出す。
+   */
+  resendTerms(): void;
+  /**
    * 読み上げの列を出す（設計書6.42）。
    *
    * **`revealLine` と同じで、`ready` を待ってから送る。** 開いた直後の
@@ -742,6 +751,21 @@ export function refreshManuscriptCounts(filePath: string): void {
  */
 export function refreshAllManuscriptCounts(): void {
   for (const open of openManuscripts.values()) open.refreshCounts();
+}
+
+/**
+ * 開いている原稿**すべて**へ、用語の位置と持ち主を送り直す（設計書6.5.8。
+ * 2026-10-11）。
+ *
+ * 設定資料パネルの保存のあとに呼ぶ（`extension.ts` の見張り）。**色分けの控え
+ * （`highlighter.invalidate()`）を捨ててから呼ぶこと**——送る便は控えから
+ * 用語を引くので、先に呼ぶと古い持ち主をもう一度送ってしまう。
+ *
+ * どの作品の原稿かは見分けない。資料を変えていない作品の原稿は、同じ用語を
+ * 送り直すだけで見た目は変わらない。
+ */
+export function refreshAllManuscriptTerms(): void {
+  for (const open of openManuscripts.values()) open.resendTerms();
 }
 
 /**
@@ -2104,6 +2128,16 @@ export class ManuscriptEditorProvider
           document,
           measureKind
         );
+      },
+      resendTerms: (): void => {
+        /*
+          画面が動き出す前なら送らない（`ready` で最初の便を送るとき、
+          捨てたあとの控えから用語を引く）。`sendNow` ではなく `send` を
+          直に呼ぶ——`sendNow` はこの台帳の札より後ろで定義していて、
+          札を台帳へ載せた直後に呼ばれると、まだ使えない
+        */
+        if (!webviewReady) return;
+        void send().catch(() => undefined);
       },
       document,
       appearance: (): ManuscriptAppearance | undefined => appearanceNow,

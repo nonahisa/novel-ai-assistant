@@ -484,6 +484,7 @@ import {
   openManuscriptForReading,
   openManuscriptVertical,
   refreshAllManuscriptCounts,
+  refreshAllManuscriptTerms,
   refreshManuscriptCounts,
   refreshManuscriptKinds,
   collectManuscriptEditorsCard,
@@ -2232,6 +2233,11 @@ export async function activate(
   // 分けても、本文の用語ハイライトは古い人物を指したままだった
   setSettingsChangeObserver((work) => {
     highlighter.invalidate();
+    // 開いている原稿エディターへも用語の位置と持ち主を送り直す（設計書6.5.8）。
+    // invalidate() が引き直すのは素のテキストエディターの色だけで、原稿エディターは
+    // 前に送った持ち主を持ち続け、別名を分けても「設定資料を見る」が古い人物を出した。
+    // **控えを捨てたあとに呼ぶ**（先に呼ぶと古い控えから送ってしまう）
+    refreshAllManuscriptTerms();
     treeProvider.refresh(work.id);
     refreshActionBadges();
     // 開いている相関図も読み直す（関係欄を直したら線の言葉が変わる。作者の依頼「B3」）。
