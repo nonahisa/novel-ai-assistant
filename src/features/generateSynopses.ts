@@ -44,6 +44,7 @@ import {
   logStep,
   responseExcerptForLog,
   useLogFile,
+  workLog,
 } from "../core/logger";
 import { renameEpisodeFile } from "../core/episodeRename";
 import { confirmFormatFit } from "./formatFitPrompt";
@@ -83,6 +84,9 @@ export async function generateSynopses(
   registry: AIRegistry
 ): Promise<FeatureRunResult> {
   useLogFile(work.folderPath);
+  // 以後の行はこの作品のログへ書き続ける（AIを待つあいだに別の作品の画面が
+  // 開かれても紛れない。`workLog` の説明、2026-10-10 の実機）
+  const log = workLog(work.folderPath);
 
   // 短編では1件しか作れず、感情曲線も線にならない（設計書6.4.5）
   if (!(await confirmFormatFit(work, "episodeSynopses"))) return "cancelled";
@@ -129,7 +133,7 @@ export async function generateSynopses(
   try {
     readerProfile = await new ReaderTargetStore(work).load();
   } catch (error) {
-    logFailure("あらすじ生成: 読者像の台帳を読めませんでした", {
+    log.failure("あらすじ生成: 読者像の台帳を読めませんでした", {
       作品: work.title,
       詳細: error instanceof Error ? error.message : String(error),
     });
@@ -309,7 +313,7 @@ export async function generateSynopses(
                 ? "応答が出力上限で切り詰められました。"
                 : "応答を読み取れませんでした。",
             });
-            logFailure(`あらすじ生成（${episodeBodyLabel(episode)}）`, {
+            log.failure(`あらすじ生成（${episodeBodyLabel(episode)}）`, {
               理由: "応答を読み取れません",
               応答: responseExcerptForLog(response.text),
             });
@@ -343,7 +347,7 @@ export async function generateSynopses(
           set = result.set;
 
           for (const dropped of validated.rejectedSubtitles) {
-            logStep(
+            log.step(
               `サブタイトル案を却下（${episodeBodyLabel(episode)}）: ` +
                 `「${dropped.text}」${describeSubtitleRejection(dropped.reason)}`
             );
@@ -362,7 +366,7 @@ export async function generateSynopses(
                 ? error.message
                 : String(error);
           failures.push({ label: episodeBodyLabel(episode), message });
-          logFailure(`あらすじ生成（${episodeBodyLabel(episode)}）`, {
+          log.failure(`あらすじ生成（${episodeBodyLabel(episode)}）`, {
             種別: error instanceof AIError ? error.kind : "unknown",
             内容: message,
           });

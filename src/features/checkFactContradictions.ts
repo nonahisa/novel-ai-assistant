@@ -99,9 +99,9 @@ import { confirmProviderReachable } from "./aiConnectivity";
 import { confirmRun } from "../views/notify";
 import {
   logFailure,
-  logStep,
   responseExcerptForLog,
   useLogFile,
+  workLog,
 } from "../core/logger";
 
 /**
@@ -187,6 +187,9 @@ export async function checkFactContradictions(
   options: CheckFactContradictionsOptions = {}
 ): Promise<FactContradictionRunResult | undefined> {
   useLogFile(work.folderPath);
+  // 以後の行はこの作品のログへ書き続ける（AIを待つあいだに別の作品の画面が
+  // 開かれても紛れない。`workLog` の説明、2026-10-10 の実機）
+  const log = workLog(work.folderPath);
 
   // **抽出は `factExtract` の割当で動かす**（6.88.9）。定型のJSON化なので
   // ローカルの小さいモデルで足り、判定（`contradiction`）とは分けて選べる
@@ -345,7 +348,7 @@ export async function checkFactContradictions(
     if (options.suiteConfirmed) {
       // まとめ実行が先に1回だけ確認している（設計書6.80）。
       // **飛ばした中身はログへ残す**
-      logStep(`矛盾検知（事実の照合）：まとめ実行のため確認を省略\n${detail}`);
+      log.step(`矛盾検知（事実の照合）：まとめ実行のため確認を省略\n${detail}`);
     } else {
       const confirmed = await confirmRun(
         `${work.title} の事実を取り出して照合します。`,
@@ -357,7 +360,7 @@ export async function checkFactContradictions(
     confirmedToSend = true;
   }
 
-  logStep(
+  log.step(
     `矛盾検知（事実の照合）を開始: ${work.title} / ${provider.displayName} / ` +
       `${model} / ${chunks.length}チャンク / ${chunkNote} / ` +
       `v${STORY_FACT_EXTRACT_VERSION}`
@@ -459,7 +462,7 @@ export async function checkFactContradictions(
               if (parts.length > 1) {
                 queue.splice(cursor + 1, 0, ...parts);
                 chunksTotal += parts.length;
-                logStep(
+                log.step(
                   `切り詰められたため ${parts.length} 話に分けて試し直します: ${chunk.hash}`
                 );
               } else {
@@ -473,10 +476,10 @@ export async function checkFactContradictions(
               if (retry.kind === "split") {
                 queue.splice(cursor + 1, 0, ...retry.parts);
                 chunksTotal += retry.parts.length;
-                logStep(`${chunk.hash}: ${retry.note}`);
+                log.step(`${chunk.hash}: ${retry.note}`);
               } else {
                 failedChunks++;
-                logFailure("矛盾検知（事実の照合）", {
+                log.failure("矛盾検知（事実の照合）", {
                   チャンク: chunk.hash,
                   理由: retry.note,
                 });
@@ -506,7 +509,7 @@ export async function checkFactContradictions(
             for (const line of got.unlocatableLines) {
               // **黙って落とさない**（設計書6.8）
               unlocatable++;
-              logStep(
+              log.step(
                 `矛盾検知（事実の照合）：行番号 ${line} を元のファイルへ戻せず除外`
               );
             }
@@ -559,7 +562,7 @@ export async function checkFactContradictions(
                   rateLimitWaitHooks({
                     sleep: (ms) => sleepUnlessAborted(ms, controller.signal),
                     report: (message) => progress.report({ message }),
-                    log: logStep,
+                    log: log.step,
                     position: () => `${chunksDone + 1}/${chunksTotal}`,
                   })
                 );
@@ -567,7 +570,7 @@ export async function checkFactContradictions(
               if (response.truncated || !response.text.trim()) {
                 // まとめたせいで入り切らなかったのなら、元の大きさなら通る
                 // 見込みがある。**捨てるより試すほうがよい**
-                logFailure("矛盾検知（事実の照合）", {
+                log.failure("矛盾検知（事実の照合）", {
                   チャンク: chunk.hash,
                   理由: "応答が上限で切り詰められました",
                 });
@@ -577,7 +580,7 @@ export async function checkFactContradictions(
               const parsed = parseFactJsonObject(response.text);
               if (!parsed) {
                 failedChunks++;
-                logFailure("矛盾検知（事実の照合）", {
+                log.failure("矛盾検知（事実の照合）", {
                   チャンク: chunk.hash,
                   理由: "応答を読み取れません",
                   応答: responseExcerptForLog(response.text),
@@ -595,10 +598,10 @@ export async function checkFactContradictions(
               // **同じ失敗を積まない。** 環境側の失敗はどのチャンクでも同じ
               if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
                 fatalFailure = `${rateLimitGiveUpNote(rateLimit)}${error.message} ${recoveryForAIError(error)}`.trim();
-                logStep(`残りのチャンクは試しません: ${fatalFailure}`);
+                log.step(`残りのチャンクは試しません: ${fatalFailure}`);
               }
               failedChunks++;
-              logFailure("矛盾検知（事実の照合）", {
+              log.failure("矛盾検知（事実の照合）", {
                 チャンク: chunk.hash,
                 詳細:
                   error instanceof AIError
@@ -643,7 +646,7 @@ export async function checkFactContradictions(
       if (!verifier) {
         // **候補を消さない。** 判定できなかっただけなので、そのまま出して
         // 「確かめていない」と断る（検証できないことを、指摘を消す理由にしない）
-        logStep("矛盾検知（事実の照合）：判定のAIが選べないため、候補をそのまま出します");
+        log.step("矛盾検知（事実の照合）：判定のAIが選べないため、候補をそのまま出します");
         for (const candidate of candidates) {
           const sides = await resolveSides(candidate, factById);
           if (sides) issues.push(toIssue(candidate, sides, undefined));
@@ -762,7 +765,7 @@ export async function checkFactContradictions(
             if (outcome.undecided) verifyUndecided++;
             if (!outcome.keep) {
               verifyRejected.push({ reason: outcome.reason });
-              logStep(
+              log.step(
                 `判定で取り下げ: ${issue.excerpt.slice(0, 20)} ` +
                   `（${outcome.reason}／${outcome.explanation}）`
               );
@@ -783,7 +786,7 @@ export async function checkFactContradictions(
   const candidateNote = describeCandidateTypes(candidates);
 
   if (unlocatable > 0) {
-    logStep(
+    log.step(
       `矛盾検知（事実の照合）：元のファイルへ戻せない事実 ${unlocatable}件を除外`
     );
   }
@@ -791,7 +794,7 @@ export async function checkFactContradictions(
     **開始したら、必ず終了の1行を残す。** どの工程で減ったのかが分からないと、
     次に直す場所が決まらない——この道は工程が4つある（設計書6.88.1）。
   */
-  logStep(
+  log.step(
     describeFactRun({
       chunksDone,
       chunksTotal,
@@ -851,7 +854,7 @@ export async function checkFactContradictions(
     if (!sides) {
       // 両側とも資料由来なら**本文の飛び先が無い**ので、いまは出せない
       // （資料どうしの食い違いは `conflicts` が既に作者へ回している）
-      logStep(
+      log.step(
         `矛盾検知（事実の照合）：本文の場所が無い候補を除外（${candidate.fingerprint}）`
       );
       return undefined;
@@ -950,7 +953,7 @@ export async function checkFactContradictions(
         return undecidedOutcome("取りやめました");
       }
       // **判定できなかったら通す。** 通信の失敗で本物の候補を消さない
-      logFailure("矛盾の判定（事実の照合）", {
+      log.failure("矛盾の判定（事実の照合）", {
         引用: input.issue.excerpt.slice(0, 40),
         詳細: error instanceof Error ? error.message : String(error),
       });

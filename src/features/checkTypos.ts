@@ -73,7 +73,7 @@ import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import type { ScopeChoice } from "../core/typoCheckScope";
 import { resolveCheckScope } from "./typoCheckScope";
 import { withAiTurnProgress } from "./aiTurn";
-import { logFailure, logStep, useLogFile } from "../core/logger";
+import { logStep, useLogFile, workLog, type WorkLog } from "../core/logger";
 import {
   resolveMaxOutputTokens,
   resolveOutputTokensForPlanning,
@@ -418,6 +418,9 @@ export async function checkTypos(
   // あとに書く——下の確認でキャンセルした回に、作品のログへ「開始」が
   // 残らないように（ノートPCの実機、2026-09-23。抽出で起きた）
   useLogFile(work.folderPath);
+  // 以後の行はこの作品のログへ書き続ける（AIを待つあいだに別の作品の画面が
+  // 開かれても紛れない。`workLog` の説明、2026-10-10 の実機）
+  const log = workLog(work.folderPath);
 
   const cache = new ChunkCache(work);
   await cache.load();
@@ -478,7 +481,7 @@ export async function checkTypos(
       // まとめ実行が先に1回だけ確認している（設計書6.80）。
       // **飛ばした中身は捨てずにログへ残す**——あとから件数と見積もりを
       // 突き合わせられないと、料金の問い合わせに答えられない
-      logStep(`誤字脱字検知：まとめ実行のため確認を省略\n${notice}`);
+      log.step(`誤字脱字検知：まとめ実行のため確認を省略\n${notice}`);
     } else {
       /*
         **この機械で上限内に終わる、もっと大きいモデルがあれば案内する**
@@ -524,12 +527,12 @@ export async function checkTypos(
   // 「開始」は確認で「実行」が押されたあと（上の書き先の説明を参照）。
   // 確認の間に別の操作が書き先を向け直していても困らないよう、もう一度向ける
   useLogFile(work.folderPath);
-  logStep(
+  log.step(
     `誤字脱字検知を開始: ${work.title} / ${resolved.provider.displayName} / ` +
       `${resolved.model} / ${chunks.length}チャンク / ` +
       `${describeChunkSettings(chunkSettings)} / v${promptVersion}`
   );
-  if (pendingOfferLog) logStep(pendingOfferLog);
+  if (pendingOfferLog) log.step(pendingOfferLog);
 
   let rejectedCount = 0;
   /**
@@ -608,7 +611,8 @@ export async function checkTypos(
             dismissed,
             appliedFixKeys,
             issues,
-            validationOptions
+            validationOptions,
+            log
           );
           rejectedCount += tally.rejected;
           alreadyAppliedCount += tally.alreadyApplied;
@@ -627,7 +631,7 @@ export async function checkTypos(
         });
         // 提案パネルにも同じ進みを出す（作者は結果が出る場所で待っている）
         options.onProgress?.(done + 1, total, skipped, eta.remaining);
-        logStep(`AIへ送信: ${done + 1}/${total} ${label}`);
+        log.step(`AIへ送信: ${done + 1}/${total} ${label}`);
         const startedAt = Date.now();
 
         const bodyWithLines = withLineNumbers(chunk);
@@ -673,7 +677,7 @@ export async function checkTypos(
             rateLimitWaitHooks({
               sleep: (ms) => delay(ms, token),
               report: (message) => progress.report({ message }),
-              log: logStep,
+              log: log.step,
               position: () => `${done + 1}/${total}`,
             })
           );
@@ -684,7 +688,7 @@ export async function checkTypos(
           // 分割して送り直すたびに増えるので、`pending.length` は途中で古くなる
           // （実際のログに「AIへ送信: 4/9」と「応答を受信: 4/7」が並んでいた。
           // 作者のログ、2026-08-30）。0.28.13
-          logStep(
+          log.step(
             `応答を受信: ${done + 1}/${total} ${label} ` +
               `（${Math.round((Date.now() - startedAt) / 1000)}秒）`
           );
@@ -696,7 +700,7 @@ export async function checkTypos(
             if (parts.length > 1) {
               queue.splice(cursor + 1, 0, ...parts);
               total += parts.length;
-              logStep(
+              log.step(
                 `切り詰められたため ${parts.length} 話に分けて試し直します: ${label}`
               );
             } else {
@@ -718,7 +722,8 @@ export async function checkTypos(
               dismissed,
               appliedFixKeys,
               issues,
-              validationOptions
+              validationOptions,
+              log
             );
             rejectedCount += tally.rejected;
             alreadyAppliedCount += tally.alreadyApplied;
@@ -739,11 +744,11 @@ export async function checkTypos(
             if (retry.kind === "split") {
               queue.splice(cursor + 1, 0, ...retry.parts);
               total += retry.parts.length;
-              logStep(`${label}: ${retry.note}`);
+              log.step(`${label}: ${retry.note}`);
             } else {
               // 下限まで割っても入らない。**黙って飛ばさず、理由を残す**
               failedChunks++;
-              logFailure("誤字脱字検知", {
+              log.failure("誤字脱字検知", {
                 チャンク: label,
                 理由: retry.note,
               });
@@ -751,7 +756,7 @@ export async function checkTypos(
             done++;
             continue;
           }
-          logTypoFailure(chunk, e, {
+          logTypoFailure(log, chunk, e, {
             provider: resolved.provider.displayName,
             model: resolved.model,
           });
@@ -779,7 +784,7 @@ export async function checkTypos(
       // 分割の前の数**なので、分割が起きた回は分母のほうが大きくなる。
       // 飛ばした件数も残す——ログだけを見て「1件しか見ていない」と
       // 読まれないようにするため
-      logStep(
+      log.step(
         `誤字脱字検知を終了: ${done}/${total}（失敗 ${failedChunks}件${
           skipped > 0 ? ` / 処理済み ${skipped}件はスキップ` : ""
         }${
@@ -873,7 +878,12 @@ export function collectIssues(
   appliedFixKeys: ReadonlySet<string>,
   out: TypoCheckIssue[],
   /** 作品について分かっていること（文語体か。R17）。渡さなければ現代文として扱う */
-  validationOptions: TypoValidationOptions = {}
+  validationOptions: TypoValidationOptions = {},
+  /**
+   * 書き先を作品へ束ねた記録係（`workLog`）。AIを待ったあとに呼ばれるので、
+   * 共有の書き先だと別の作品のログへ紛れることがある。渡さなければ共有の書き先
+   */
+  log: Pick<WorkLog, "step"> = { step: logStep }
 ): TypoCollectTally {
   const validated = validateTypoIssues(
     result,
@@ -887,7 +897,7 @@ export function collectIssues(
   let alreadyApplied = 0;
 
   if (validated.rejected.length > 0) {
-    logStep(
+    log.step(
       `${label}: 本文と合わないため除外 ${validated.rejected.length}件` +
         `（${summarizeRejectReasons(validated.rejected)}）`
     );
@@ -901,7 +911,7 @@ export function collectIssues(
     if (!at) {
       // 戻せない行は捨てる。どこを直すのか決められない。
       // **どの行だったかを残す。** まとめ方を疑うときの唯一の手掛かりになる
-      logStep(`${label}: 行番号 ${issue.line} を元のファイルへ戻せず除外`);
+      log.step(`${label}: 行番号 ${issue.line} を元のファイルへ戻せず除外`);
       rejectedCount++;
       continue;
     }
@@ -923,7 +933,7 @@ export function collectIssues(
   }
 
   if (alreadyApplied > 0) {
-    logStep(`${label}: 前回適用済みの直しと同じため除外 ${alreadyApplied}件`);
+    log.step(`${label}: 前回適用済みの直しと同じため除外 ${alreadyApplied}件`);
   }
 
   return { rejected: rejectedCount, alreadyApplied };
@@ -940,11 +950,13 @@ function describeChunkFile(filePath: string, chunk: Chunk): string {
 }
 
 function logTypoFailure(
+  /** 処理の始めに作品へ束ねた記録係（途中で別の作品へ紛れないように） */
+  log: WorkLog,
   chunk: Chunk,
   error: unknown,
   used: { provider: string; model: string }
 ): void {
-  logFailure("誤字脱字検知の失敗", {
+  log.failure("誤字脱字検知の失敗", {
     ファイル: describeChunkFile(chunk.filePath, chunk),
     使用中のAI: `${used.provider} / ${used.model}`,
     // **送った量を残す。** タイムアウトの記録が「180秒で切れた」だけだと、

@@ -155,9 +155,9 @@ import { withAiTurn } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
 import {
   logFailure,
-  logStep,
   responseExcerptForLog,
   useLogFile,
+  workLog,
 } from "../core/logger";
 // 落とした理由の内訳は、通知ではなく操作ログへ残す（設計書6.8）
 import { summarizeReasons } from "../core/checkRunCounts";
@@ -409,6 +409,9 @@ export async function checkContradictions(
   options: CheckContradictionsOptions = {}
 ): Promise<ContradictionRunResult | undefined> {
   useLogFile(work.folderPath);
+  // 以後の行はこの作品のログへ書き続ける（AIを待つあいだに別の作品の画面が
+  // 開かれても紛れない。`workLog` の説明、2026-10-10 の実機）
+  const log = workLog(work.folderPath);
 
   const resolved = await ensureConfigured(registry, "contradiction");
   if (!resolved) return undefined;
@@ -869,7 +872,7 @@ export async function checkContradictions(
       // まとめ実行が先に1回だけ確認している（設計書6.80）。
       // **飛ばした中身はログへ残す**——観点を絞ったことや、過去の場面を
       // 足したことは、この確認の中にしか書かれていない
-      logStep(`矛盾検知：まとめ実行のため確認を省略\n${detail}`);
+      log.step(`矛盾検知：まとめ実行のため確認を省略\n${detail}`);
     } else {
       /*
         **この機械で上限内に終わる、もっと大きいモデルがあれば案内する**
@@ -915,11 +918,11 @@ export async function checkContradictions(
           ? checkContradictions(work, registry, options)
           : undefined;
       }
-      if (offer) logStep(offer.logText);
+      if (offer) log.step(offer.logText);
     }
   }
 
-  logStep(
+  log.step(
     `矛盾検知を開始: ${work.title} / ${resolved.provider.displayName} / ` +
       `${resolved.model}（${describeCapability(capabilityInput, capability, "contradiction")}） / ` +
       `${chunks.length}チャンク / ${chunkNote} / ` +
@@ -928,12 +931,12 @@ export async function checkContradictions(
   // **ベクトル検索を使ったかを残す**（設計書6.19.10）。使わない設定（既定）では
   // 何も書かない——これまでの記録の形を変えない
   if (checkVectors.kind === "on") {
-    logStep(
+    log.step(
       `矛盾検知：前の話の場面を、名前と意味の近さ（ベクトル検索）で選びます` +
         `（索引に載っている場面 ${checkVectors.covered}/${checkVectors.total}）`
     );
   } else if (checkVectors.kind === "unavailable") {
-    logStep(
+    log.step(
       `矛盾検知：ベクトル検索は使えないため、前の話の場面は名前だけで選びます（${describeVectorUnavailable(checkVectors.reason)}）`
     );
   }
@@ -955,7 +958,7 @@ export async function checkContradictions(
   */
   const missedByEpisode = missedCharactersByEpisode();
   for (const entry of missedByEpisode) {
-    logStep(
+    log.step(
       // **手がかりの名前（登場話数・直前の話）を作者向けの文へ出さない。**
       // どちらで拾ったかは内部の都合で、作者に要るのは「見ていない」事実
       `矛盾検知：${entry.label}は「${entry.names.join("」「")}」の設定を` +
@@ -1076,7 +1079,7 @@ export async function checkContradictions(
             if (parts.length > 1) {
               queue.splice(cursor + 1, 0, ...parts);
               chunksTotal += parts.length;
-              logStep(
+              log.step(
                 wholeRead
                   ? `切り詰められたため ${parts.length} つの区切りに分けて試し直します: ${chunk.hash}`
                   : `切り詰められたため ${parts.length} 話に分けて試し直します: ${chunk.hash}`
@@ -1093,10 +1096,10 @@ export async function checkContradictions(
             if (retry.kind === "split") {
               queue.splice(cursor + 1, 0, ...retry.parts);
               chunksTotal += retry.parts.length;
-              logStep(`${chunk.hash}: ${retry.note}`);
+              log.step(`${chunk.hash}: ${retry.note}`);
             } else {
               failedChunks++;
-              logFailure("矛盾検知", { チャンク: chunk.hash, 理由: retry.note });
+              log.failure("矛盾検知", { チャンク: chunk.hash, 理由: retry.note });
             }
             continue;
           }
@@ -1213,7 +1216,7 @@ export async function checkContradictions(
                 rateLimitWaitHooks({
                   sleep: (ms) => sleepUnlessAborted(ms, controller.signal),
                   report: (message) => progress.report({ message }),
-                  log: logStep,
+                  log: log.step,
                   position: () => `${chunksDone + 1}/${chunksTotal}`,
                 })
               );
@@ -1221,7 +1224,7 @@ export async function checkContradictions(
             if (response.truncated || !response.text.trim()) {
               // まとめたせいで入り切らなかったのなら、元の大きさなら通る見込みが
               // ある。**捨てるより試すほうがよい**（部分的なJSONは解析できない）
-              logFailure("矛盾検知", {
+              log.failure("矛盾検知", {
                 チャンク: chunk.hash,
                 理由: "応答が上限で切り詰められました",
               });
@@ -1231,7 +1234,7 @@ export async function checkContradictions(
             const parsed = parseContradictionResult(response.text);
             if (!parsed) {
               failedChunks++;
-              logFailure("矛盾検知", {
+              log.failure("矛盾検知", {
                 チャンク: chunk.hash,
                 理由: "応答を読み取れません",
                 応答: responseExcerptForLog(response.text),
@@ -1256,10 +1259,10 @@ export async function checkContradictions(
             // なるので、1回目で止めて理由を1つだけ残す（作者のログで9件並んだ）
             if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
               fatalFailure = `${rateLimitGiveUpNote(rateLimit)}${error.message} ${recoveryForAIError(error)}`.trim();
-              logStep(`残りのチャンクは試しません: ${fatalFailure}`);
+              log.step(`残りのチャンクは試しません: ${fatalFailure}`);
             }
             failedChunks++;
-            logFailure("矛盾検知", {
+            log.failure("矛盾検知", {
               チャンク: chunk.hash,
               詳細:
                 error instanceof AIError
@@ -1302,7 +1305,7 @@ export async function checkContradictions(
               if (outcome.undecided) verifyUndecided++;
               if (!outcome.keep) {
                 verifyRejected.push({ reason: outcome.reason });
-                logStep(
+                log.step(
                   `検証で取り下げ: ${entry.issue.excerpt.slice(0, 20)} ` +
                     `（${outcome.reason}／${outcome.explanation}）`
                 );
@@ -1317,7 +1320,7 @@ export async function checkContradictions(
                 // 戻せない行は捨てる。どこの話か決められない。
                 // **どの行だったかを残す**（設計書6.8）。まとめ方を疑うときの
                 // 唯一の手掛かりになる
-                logStep(
+                log.step(
                   `矛盾検知：行番号 ${entry.issue.line} を元のファイルへ戻せず除外`
                 );
                 rejectedCount++;
@@ -1342,7 +1345,7 @@ export async function checkContradictions(
   // **同意した量と送った量を並べて残す**（ノートPCの実機、0.76.1）。
   // 確認で示した量は上限寄りなので下回るのは普通。超えたらそう書く
   if (plannedTotal) {
-    logStep(
+    log.step(
       `矛盾検知：${describeSentAgainstPlanned({
         planned: plannedTotal,
         sentChars,
@@ -1352,11 +1355,11 @@ export async function checkContradictions(
   }
 
   const verifyNote = describeVerifyResults(verifyRejected, verifyUndecided);
-  if (verifyNote) logStep(`矛盾検知の検証: ${verifyNote}`);
+  if (verifyNote) log.step(`矛盾検知の検証: ${verifyNote}`);
   // 意味で足した場面の数。**指摘の根拠になったか、誤検知の種になったかを
   // 後から測る手がかり**（見逃しと誤検出の両方を測る。CLAUDE.md の失敗2）
   if (checkVectors.kind === "on") {
-    logStep(
+    log.step(
       `矛盾検知：前の話の場面は、名前で${pastSceneTally.byName}件・` +
         `意味の近さで${pastSceneTally.byMeaning}件` +
         `（意味で足したチャンク ${pastSceneTally.chunksWithMeaning}件）`
@@ -1380,12 +1383,12 @@ export async function checkContradictions(
   if (rejectedReasons.length > 0) {
     // 種別の名前をそのまま出す（`core/contradictionValidation.ts` の
     // `RejectedContradiction` に、それぞれの意味が書いてある）
-    logStep(
+    log.step(
       `矛盾検知：検証で除外 ${rejectedReasons.length}件` +
         `（${summarizeReasons(rejectedReasons)}）`
     );
   }
-  logStep(
+  log.step(
     `矛盾検知を終了: ${chunksDone}/${chunksTotal}` +
       `（失敗 ${failedChunks}件 / 指摘 ${accepted.length}件` +
       ` / 検証で取り下げ ${verifyRejected.length}件` +
@@ -1784,7 +1787,7 @@ export async function checkContradictions(
         return undecidedOutcome("取りやめました");
       }
       // **検証できなかったら通す。** 通信の失敗で本物の指摘を消さない
-      logFailure("矛盾の検証", {
+      log.failure("矛盾の検証", {
         引用: issue.excerpt.slice(0, 40),
         詳細: error instanceof Error ? error.message : String(error),
       });

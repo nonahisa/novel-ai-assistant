@@ -64,6 +64,8 @@ import {
   logStep,
   responseExcerptForLog,
   useLogFile,
+  workLog,
+  type WorkLog,
 } from "../core/logger";
 import { warnWithLog } from "../views/notify";
 
@@ -334,6 +336,9 @@ export async function suggestNames(
   characterId: string
 ): Promise<void> {
   useLogFile(work.folderPath);
+  // 以後の行はこの作品のログへ書き続ける（AIを待つあいだに別の作品の画面が
+  // 開かれても紛れない。`workLog` の説明、2026-10-10 の実機）
+  const log = workLog(work.folderPath);
 
   const store = new CharacterStore(work);
   const loaded = await store.loadAll();
@@ -399,7 +404,7 @@ export async function suggestNames(
       const controller = new AbortController();
       token.onCancellationRequested(() => controller.abort());
       try {
-        logStep(
+        log.step(
           `名前の候補を開始: ${work.title} / ${character.name} / ` +
             `${resolved.provider.displayName} / ${resolved.model} / ` +
             `v${NAME_SUGGEST_VERSION} / 系統 ${plan.choices.join("・")}（${plan.basis}）`
@@ -452,7 +457,7 @@ export async function suggestNames(
     const cancelled = failure instanceof AIError && failure.kind === "aborted";
     // **終わり方をログに残す。** 候補が出ないまま画面が静かになるので、
     // 中止したのか落ちたのかがログだけで分かるようにする
-    logNameSuggestEnd({ failed: !cancelled, cancelled, kept: 0, dropped: 0 });
+    logNameSuggestEnd(log, { failed: !cancelled, cancelled, kept: 0, dropped: 0 });
     // 中止は失敗ではない。作者が自分で止めたことを警告で知らせ直さない
     if (!cancelled) {
       reportAIError("名前の候補づくり", failure);
@@ -468,7 +473,7 @@ export async function suggestNames(
   const parsed = answer.candidates;
   if (parsed.length === 0) {
     // **応答の中身は捨てない。** 通知に出さなくても、ログには残す
-    logFailure("名前の候補", {
+    log.failure("名前の候補", {
       理由: "応答を読み取れません",
       応答: responseExcerptForLog(responseText),
     });
@@ -509,13 +514,13 @@ export async function suggestNames(
   });
 
   if (fitted.converted.length > 0) {
-    logStep(
+    log.step(
       `名前の候補：英字の名前を読みからカタカナに直しました（${fitted.converted
         .map((item) => `${item.from}→${item.to}`)
         .join("・")}）`
     );
   }
-  logNameSuggestEnd({
+  logNameSuggestEnd(log, {
     failed: false,
     cancelled: false,
     kept: screened.kept.length,
@@ -596,16 +601,20 @@ export async function rememberOrigin(
  * AIへの問い合わせは1回だけなので分母は常に1だが、ほかの検知と同じ
  * 「n/N（失敗 m件 …）」の形に揃える——ログを読む側が形を覚え直さずに済む。
  */
-function logNameSuggestEnd(counts: {
+function logNameSuggestEnd(
+  /** 処理の始めに作品へ束ねた記録係（途中で別の作品へ紛れないように） */
+  log: WorkLog,
+  counts: {
   failed: boolean;
   cancelled: boolean;
   kept: number;
   dropped: number;
   /** 落としたうち、系統・表記が揃わなかったもの */
   offOrigin?: number;
-}): void {
+  }
+): void {
   const offOrigin = counts.offOrigin ?? 0;
-  logStep(
+  log.step(
     `名前の候補を終了: ${counts.cancelled ? 0 : 1}/1（失敗 ${
       counts.failed ? 1 : 0
     }件 / 候補 ${counts.kept}件 / 系統・表記が揃わず落とした ${offOrigin}件` +

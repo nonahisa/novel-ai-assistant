@@ -70,9 +70,10 @@ import { confirmRun } from "../views/notify";
 import { withCancellableProgress, type CheckProgress } from "../views/progress";
 import {
   logFailure,
-  logStep,
   responseExcerptForLog,
   useLogFile,
+  workLog,
+  type WorkLog,
 } from "../core/logger";
 
 /**
@@ -281,6 +282,9 @@ export async function checkEpisodePlotDesign(
   options: CheckEpisodePlotOptions = {}
 ): Promise<EpisodePlotDesignResult | undefined> {
   useLogFile(work.folderPath);
+  // 以後の行はこの作品のログへ書き続ける（AIを待つあいだに別の作品の画面が
+  // 開かれても紛れない。`workLog` の説明、2026-10-10 の実機）
+  const log = workLog(work.folderPath);
 
   const loaded = await loadEpisodePlot(work, chapter);
   if (!loaded) return undefined;
@@ -340,7 +344,7 @@ export async function checkEpisodePlotDesign(
     if (!confirmed) return undefined;
   }
 
-  logStep(
+  log.step(
     `単話プロットの検査を開始: ${work.title} / ${chapterLabel} / ` +
       `${resolved.provider.displayName} / ${resolved.model} / ` +
       `箇条書き${doc.items.length}件 / v${EPISODE_PLOT_CHECK_VERSION}`
@@ -422,9 +426,9 @@ export async function checkEpisodePlotDesign(
 
   await cache.save();
 
-  logEpisodePlotEnd("単話プロットの検査", base, findings.length, Boolean(cached));
+  logEpisodePlotEnd("単話プロットの検査", base, findings.length, Boolean(cached), log);
   if (strengths.length > 0 || strengthsDropped > 0) {
-    logStep(
+    log.step(
       `単話プロットの検査：良いところ ${strengths.length}件` +
         (strengthsDropped > 0 ? `（箇条書きに無い行で外した ${strengthsDropped}件）` : "")
     );
@@ -442,6 +446,9 @@ export async function contrastEpisodePlot(
   options: CheckEpisodePlotOptions = {}
 ): Promise<EpisodePlotContrastResult | undefined> {
   useLogFile(work.folderPath);
+  // 以後の行はこの作品のログへ書き続ける（AIを待つあいだに別の作品の画面が
+  // 開かれても紛れない。`workLog` の説明、2026-10-10 の実機）
+  const log = workLog(work.folderPath);
 
   const loaded = await loadEpisodePlot(work, chapter);
   if (!loaded) return undefined;
@@ -561,7 +568,7 @@ export async function contrastEpisodePlot(
     if (!confirmed) return undefined;
   }
 
-  logStep(
+  log.step(
     `単話プロットと本文の照合を開始: ${work.title} / ${chapterLabel} / ` +
       `${resolved.provider.displayName} / ${resolved.model} / ` +
       `本文${body.length}字（落とした${droppedChars}字） / ` +
@@ -632,7 +639,8 @@ export async function contrastEpisodePlot(
     "単話プロットと本文の照合",
     base,
     findings.length,
-    Boolean(cached)
+    Boolean(cached),
+    log
   );
 
   return {
@@ -655,9 +663,11 @@ function logEpisodePlotEnd(
   label: string,
   base: EpisodePlotRunBase,
   findings: number,
-  fromCache: boolean
+  fromCache: boolean,
+  /** 処理の始めに作品へ束ねた記録係（途中で別の作品へ紛れないように） */
+  log: WorkLog
 ): void {
-  logStep(
+  log.step(
     `${label}を終了: ${base.cancelled ? 0 : 1}/1（失敗 ${
       base.failed ? 1 : 0
     }件 / 指摘 ${findings}件 / 本文と合わず落とした ${base.rejectedCount}件` +
@@ -844,6 +854,9 @@ async function ask(options: {
   plannedOutputTokens?: number;
   signal: AbortSignal;
 }): Promise<unknown | undefined> {
+  // 応答を待ったあとに書くので、共有の書き先でなく作品へ束ねて書く
+  // （待つあいだに別の作品の画面が開かれると紛れる。`workLog`）
+  const log = workLog(options.workFolder);
   try {
     const response = await options.provider.generate({
       systemPrompt: options.systemPrompt,
@@ -870,7 +883,7 @@ async function ask(options: {
 
     const parsed = parseEpisodePlotFindings(response.text);
     if (!parsed) {
-      logFailure(options.label, {
+      log.failure(options.label, {
         話: options.chapterLabel,
         理由: response.truncated
           ? "応答が上限で切り詰められました"
@@ -882,7 +895,7 @@ async function ask(options: {
     return parsed;
   } catch (error) {
     if (error instanceof AIError && error.kind === "aborted") return undefined;
-    logFailure(options.label, {
+    log.failure(options.label, {
       話: options.chapterLabel,
       詳細:
         error instanceof AIError

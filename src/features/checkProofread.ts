@@ -68,10 +68,10 @@ import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
 import {
-  logFailure,
   logStep,
   responseExcerptForLog,
   useLogFile,
+  workLog,
 } from "../core/logger";
 // 落とした理由の内訳は、通知ではなく操作ログへ残す（設計書6.8）
 import { summarizeReasons } from "../core/checkRunCounts";
@@ -156,6 +156,9 @@ export async function checkProofread(
   options: CheckProofreadOptions = {}
 ): Promise<ProofreadRunResult | undefined> {
   useLogFile(work.folderPath);
+  // 以後の行はこの作品のログへ書き続ける（AIを待つあいだに別の作品の画面が
+  // 開かれても紛れない。`workLog` の説明、2026-10-10 の実機）
+  const log = workLog(work.folderPath);
 
   const resolved = await ensureConfigured(registry, "proofread");
   if (!resolved) return undefined;
@@ -263,7 +266,7 @@ export async function checkProofread(
       // まとめ実行が先に1回だけ確認している（設計書6.80）。
       // **飛ばした中身はログへ残す**——絞り込みの上限や課金の断りは、
       // この確認の中にしか書かれていない
-      logStep(`推敲：まとめ実行のため確認を省略\n${detail}`);
+      log.step(`推敲：まとめ実行のため確認を省略\n${detail}`);
     } else {
       /*
         **この機械で上限内に終わる、もっと大きいモデルがあれば案内する**
@@ -300,11 +303,11 @@ export async function checkProofread(
           ? checkProofread(work, registry, options)
           : undefined;
       }
-      if (offer) logStep(offer.logText);
+      if (offer) log.step(offer.logText);
     }
   }
 
-  logStep(
+  log.step(
     `推敲を開始: ${work.title} / ${resolved.provider.displayName} / ` +
       `${resolved.model} / ${chunks.length}チャンク / v${PROOFREAD_VERSION}`
   );
@@ -387,11 +390,11 @@ export async function checkProofread(
             if (retry.kind === "split") {
               queue.splice(cursor + 1, 0, ...retry.parts);
               chunksTotal += retry.parts.length;
-              logStep(`${chunk.hash}: ${retry.note}`);
+              log.step(`${chunk.hash}: ${retry.note}`);
             } else {
               // **黙って飛ばさない。** 理由を残して次のチャンクへ進む
               failedChunks++;
-              logFailure("推敲", { チャンク: chunk.hash, 理由: retry.note });
+              log.failure("推敲", { チャンク: chunk.hash, 理由: retry.note });
             }
           } else if (asked.truncated) {
             const parts = splitMergedChunk(chunk);
@@ -448,7 +451,7 @@ export async function checkProofread(
           if (!located) {
             // **どの行だったかを残す**（設計書6.8）。まとめ方を疑うときの
             // 唯一の手掛かりになる
-            logStep(`推敲：行番号 ${issue.line} を元のファイルへ戻せず除外`);
+            log.step(`推敲：行番号 ${issue.line} を元のファイルへ戻せず除外`);
             rejectedCount++;
             continue;
           }
@@ -502,7 +505,7 @@ export async function checkProofread(
               rateLimitWaitHooks({
                 sleep: (ms) => sleepUnlessAborted(ms, controller.signal),
                 report: (message) => progress.report({ message }),
-                log: logStep,
+                log: log.step,
                 position: () => `${chunksDone + 1}/${chunksTotal}`,
               })
             );
@@ -512,7 +515,7 @@ export async function checkProofread(
             // **切り詰められたのなら、まとめたせいかもしれない。**
             // 話ごとに戻せば通る見込みがある（捨てるより試すほうがよい）
             if (!response.truncated) failedChunks++;
-            logFailure("推敲", {
+            log.failure("推敲", {
               チャンク: chunk.hash,
               理由: response.truncated
                 ? "応答が上限で切り詰められました"
@@ -536,10 +539,10 @@ export async function checkProofread(
           // なるので、1回目で止めて理由を1つだけ残す（作者のログで9件並んだ）
           if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
             fatalFailure = `${rateLimitGiveUpNote(rateLimit)}${error.message} ${recoveryForAIError(error)}`.trim();
-            logStep(`残りのチャンクは試しません: ${fatalFailure}`);
+            log.step(`残りのチャンクは試しません: ${fatalFailure}`);
           }
           failedChunks++;
-          logFailure("推敲", {
+          log.failure("推敲", {
             チャンク: chunk.hash,
             詳細:
               error instanceof AIError
@@ -559,7 +562,7 @@ export async function checkProofread(
   if (rejectedReasons.length > 0) {
     // 種別の名前をそのまま出す（`core/proofreadValidation.ts` の
     // `RejectedProofreadIssue` に、それぞれの意味が書いてある）
-    logStep(
+    log.step(
       `推敲：検証で除外 ${rejectedReasons.length}件` +
         `（${summarizeReasons(rejectedReasons)}）`
     );
@@ -567,12 +570,12 @@ export async function checkProofread(
   if (monotonyDroppedCount > 0) {
     // **どれだけ数え違えていたかを残す。** この観点は実モデルでの当たり具合を
     // まだ測れていないので、記録が測る手掛かりになる
-    logStep(
+    log.step(
       `語尾単調：数え直して4連続未満だったため${monotonyDroppedCount}件除外`
     );
   }
   if (monotonyMergedCount > 0) {
-    logStep(`語尾単調：同じ連続の重複${monotonyMergedCount}件をまとめた`);
+    log.step(`語尾単調：同じ連続の重複${monotonyMergedCount}件をまとめた`);
   }
 
   /*
@@ -610,7 +613,7 @@ export async function checkProofread(
     本体を走らせずに戻り、ループの `break` も関数の外へは抜けないため、
     どの経路でも「そこまで何チャンク見たか」が残る。
   */
-  logStep(
+  log.step(
     `推敲を終了: ${chunksDone}/${chunksTotal}` +
       `（失敗 ${failedChunks}件 / 指摘 ${accepted.length}件` +
       ` / 検証で除外 ${rejectedCount}件` +

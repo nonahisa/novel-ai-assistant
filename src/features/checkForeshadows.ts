@@ -81,9 +81,10 @@ import { confirmProviderReachable } from "./aiConnectivity";
 import { confirmRun } from "../views/notify";
 import {
   logFailure,
-  logStep,
   responseExcerptForLog,
   useLogFile,
+  workLog,
+  type WorkLog,
 } from "../core/logger";
 import type { ProposalPanel, RecordUpdateViewItem } from "./proposalPanel";
 import { sha1Text } from "../core/hash";
@@ -171,6 +172,9 @@ export async function checkForeshadows(
   options: CheckForeshadowsOptions = {}
 ): Promise<ForeshadowDetectRunResult | undefined> {
   useLogFile(work.folderPath);
+  // 以後の行はこの作品のログへ書き続ける（AIを待つあいだに別の作品の画面が
+  // 開かれても紛れない。`workLog` の説明、2026-10-10 の実機）
+  const log = workLog(work.folderPath);
 
   const resolved = await ensureConfigured(registry, "foreshadow");
   if (!resolved) return undefined;
@@ -282,7 +286,7 @@ export async function checkForeshadows(
     if (options.suiteConfirmed) {
       // まとめ実行が先に1回だけ確認している（設計書6.80）。
       // **飛ばした中身はログへ残す**（既に登録済みの件数と課金の断り）
-      logStep(`伏線の検知：まとめ実行のため確認を省略\n${detail}`);
+      log.step(`伏線の検知：まとめ実行のため確認を省略\n${detail}`);
     } else {
       const confirmed = await confirmRun(
         `${work.title} の伏線を検知します。`,
@@ -293,7 +297,7 @@ export async function checkForeshadows(
     }
   }
 
-  logStep(
+  log.step(
     `伏線の検知を開始: ${work.title} / ${resolved.provider.displayName} / ` +
       `${resolved.model} / ${chunks.length}チャンク / ` +
       `${describeChunkSettings(chunkSettings)} / v${FORESHADOW_DETECT_VERSION}`
@@ -390,7 +394,7 @@ export async function checkForeshadows(
           if (parts.length > 1) {
             queue.splice(cursor + 1, 0, ...parts);
             total += parts.length;
-            logStep(
+            log.step(
               `切り詰められたため ${parts.length} 話に分けて試し直します: ${chunk.hash}`
             );
           } else {
@@ -404,11 +408,11 @@ export async function checkForeshadows(
           if (retry.kind === "split") {
             queue.splice(cursor + 1, 0, ...retry.parts);
             total += retry.parts.length;
-            logStep(`${chunk.hash}: ${retry.note}`);
+            log.step(`${chunk.hash}: ${retry.note}`);
           } else {
             // **黙って飛ばさない。** 理由を残して次のチャンクへ進む
             failedChunks++;
-            logFailure("伏線の検知", {
+            log.failure("伏線の検知", {
               チャンク: chunk.hash,
               理由: retry.note,
             });
@@ -474,10 +478,10 @@ export async function checkForeshadows(
                 既存の伏線: knownLabels.join("").length,
               }),
             },
-          }), rateLimit, rateLimitHooks(progress, controller.signal, () => `${done + 1}/${total}`));
+          }), rateLimit, rateLimitHooks(progress, controller.signal, () => `${done + 1}/${total}`, log));
 
           if (response.truncated || !response.text.trim()) {
-            logFailure("伏線の検知", {
+            log.failure("伏線の検知", {
               チャンク: chunk.hash,
               理由: "応答が上限で切り詰められました",
             });
@@ -487,7 +491,7 @@ export async function checkForeshadows(
           const parsed = parseForeshadowDetectResult(response.text);
           if (!parsed) {
             failedChunks++;
-            logFailure("伏線の検知", {
+            log.failure("伏線の検知", {
               チャンク: chunk.hash,
               理由: "応答を読み取れません",
               応答: responseExcerptForLog(response.text),
@@ -507,10 +511,10 @@ export async function checkForeshadows(
           // なるので、1回目で止めて理由を1つだけ残す（作者のログで9件並んだ）
           if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
             fatalFailure = `${rateLimitGiveUpNote(rateLimit)}${error.message} ${recoveryForAIError(error)}`.trim();
-            logStep(`残りのチャンクは試しません: ${fatalFailure}`);
+            log.step(`残りのチャンクは試しません: ${fatalFailure}`);
           }
           failedChunks++;
-          logFailure("伏線の検知", {
+          log.failure("伏線の検知", {
             チャンク: chunk.hash,
             詳細: describeError(error),
           });
@@ -522,7 +526,7 @@ export async function checkForeshadows(
 
   await saveCache(cache);
 
-  logStep(
+  log.step(
     // **「n/N（失敗 m件）」から書き出す**（ほかの検知と同じ形）。
     // 件数だけでは、何チャンク見終えたのかが読み取れなかった
     `伏線の検知を終了: ${done}/${total}（失敗 ${failedChunks}件 / ` +
@@ -625,6 +629,9 @@ export async function checkForeshadowResolution(
   options: CheckForeshadowsOptions = {}
 ): Promise<ForeshadowResolveRunResult | undefined> {
   useLogFile(work.folderPath);
+  // 以後の行はこの作品のログへ書き続ける（AIを待つあいだに別の作品の画面が
+  // 開かれても紛れない。`workLog` の説明、2026-10-10 の実機）
+  const log = workLog(work.folderPath);
 
   const ledger = await loadLedger(work);
   if (!ledger) return undefined;
@@ -776,7 +783,7 @@ export async function checkForeshadowResolution(
     if (!confirmed) return undefined;
   }
 
-  logStep(
+  log.step(
     `伏線の回収の確認を開始: ${work.title} / ${resolved.provider.displayName} / ` +
       `${resolved.model} / 未回収 ${open.length}件 / ${targeted.length}か所 / ` +
       `v${FORESHADOW_RESOLVE_VERSION}`
@@ -784,14 +791,14 @@ export async function checkForeshadowResolution(
   // **絞ったなら、どれだけ絞ったかを残す**（見逃しを後から測る手がかり）。
   // 使わない設定（既定）では何も書かない
   if (meaning.vectors.kind === "on") {
-    logStep(
+    log.step(
       meaning.embedFailed
         ? "伏線の回収の確認：伏線を埋め込めなかったため、絞らずに全部の箇所を照らします"
         : `伏線の回収の確認：意味の近さで絞りました（伏線1つにつき上位${FORESHADOW_KEEP_PER_RECORD}か所。` +
             `組 ${meaning.pairsBefore}→${meaning.pairsAfter}、箇所 ${byChapter.length}→${targeted.length}）`
     );
   } else if (meaning.vectors.kind === "unavailable") {
-    logStep(
+    log.step(
       `伏線の回収の確認：ベクトル検索は使えないため、絞らずに照らします（${describeVectorUnavailable(meaning.vectors.reason)}）`
     );
   }
@@ -880,11 +887,11 @@ export async function checkForeshadowResolution(
               .filter((part) => part.targets.length > 0);
             queue.splice(cursor + 1, 0, ...parts);
             total += parts.length;
-            logStep(`${entry.chunk.hash}: ${retry.note}`);
+            log.step(`${entry.chunk.hash}: ${retry.note}`);
           } else {
             // **黙って飛ばさない。** 理由を残して次のチャンクへ進む
             failedChunks++;
-            logFailure("伏線の回収の確認", {
+            log.failure("伏線の回収の確認", {
               チャンク: entry.chunk.hash,
               理由: retry.note,
             });
@@ -947,11 +954,11 @@ export async function checkForeshadowResolution(
                   .join("").length,
               }),
             },
-          }), rateLimit, rateLimitHooks(progress, controller.signal, () => `${done + 1}/${total}`));
+          }), rateLimit, rateLimitHooks(progress, controller.signal, () => `${done + 1}/${total}`, log));
 
           if (response.truncated || !response.text.trim()) {
             failedChunks++;
-            logFailure("伏線の回収の確認", {
+            log.failure("伏線の回収の確認", {
               チャンク: chunk.hash,
               理由: "応答が上限で切り詰められました",
             });
@@ -961,7 +968,7 @@ export async function checkForeshadowResolution(
           const parsed = parseForeshadowResolveResult(response.text);
           if (!parsed) {
             failedChunks++;
-            logFailure("伏線の回収の確認", {
+            log.failure("伏線の回収の確認", {
               チャンク: chunk.hash,
               理由: "応答を読み取れません",
               応答: responseExcerptForLog(response.text),
@@ -981,10 +988,10 @@ export async function checkForeshadowResolution(
           // なるので、1回目で止めて理由を1つだけ残す（作者のログで9件並んだ）
           if (error instanceof AIError && isFatalProviderFailure(error.kind)) {
             fatalFailure = `${rateLimitGiveUpNote(rateLimit)}${error.message} ${recoveryForAIError(error)}`.trim();
-            logStep(`残りのチャンクは試しません: ${fatalFailure}`);
+            log.step(`残りのチャンクは試しません: ${fatalFailure}`);
           }
           failedChunks++;
-          logFailure("伏線の回収の確認", {
+          log.failure("伏線の回収の確認", {
             チャンク: chunk.hash,
             詳細: describeError(error),
           });
@@ -996,7 +1003,7 @@ export async function checkForeshadowResolution(
 
   await saveCache(cache);
 
-  logStep(
+  log.step(
     // 検知側と同じ形（n/N（失敗 m件）から書き出す）
     `伏線の回収の確認を終了: ${done}/${total}（失敗 ${failedChunks}件 / ` +
       `候補 ${proposals.length}件 / 本文と合わない ${rejectedCount}件 / ` +
@@ -1354,12 +1361,14 @@ function chapterText(chapter: number | null): string {
 function rateLimitHooks(
   progress: vscode.Progress<{ message?: string; increment?: number }>,
   signal: AbortSignal,
-  position: () => string
+  position: () => string,
+  /** 処理の始めに作品へ束ねた記録係（途中で別の作品へ紛れないように） */
+  log: WorkLog
 ): RateLimitRetryHooks {
   return rateLimitWaitHooks({
     sleep: (ms) => sleepUnlessAborted(ms, signal),
     report: (message) => progress.report({ message }),
-    log: logStep,
+    log: log.step,
     position,
   });
 }
