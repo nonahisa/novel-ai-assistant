@@ -197,7 +197,8 @@ export function describeNarratorMoveLog(entry: {
 export function describeUpdatesDiscardedByMoveLog(entry: {
   /** 更新案を片づけた人物の名前（主人公・移し先） */
   names: readonly string[];
-  via: RecordUpdateVia;
+  /** 設定資料パネルの「AIで再読込」から移したときは「設定資料パネル」 */
+  via: RecordUpdateVia | "設定資料パネル";
 }): string {
   const names = entry.names.map((name) => `「${name}」`).join("");
   return (

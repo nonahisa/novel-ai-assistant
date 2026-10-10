@@ -195,7 +195,12 @@ import { buildSettingsPanelHtml } from "../views/settingsPanelHtml";
 import { renderMarkdownLite } from "../core/markdownLite";
 import { withCancellableProgress } from "../views/progress";
 import { askText, cancelItem } from "../views/dialogs";
-import { logFailure, logStep, useLogFile } from "../core/logger";
+import { logFailure, logLine, logStep, useLogFile } from "../core/logger";
+import { describeUpdatesDiscardedByMoveLog } from "../core/recordUpdateLog";
+import {
+  describeDiscardedUpdatesNotice,
+  discardStaleCharacterUpdates,
+} from "./narratorMovePending";
 import { knownChaptersOf } from "../core/chapterCitations";
 import { scanWork } from "../core/scanner";
 import { appendChatLog, summarizeMaterials } from "../core/chatLog";
@@ -2371,6 +2376,7 @@ export class SettingsPanel {
     */
     let source = record;
     let moveNotice = "";
+    let movedDestinations: Character[] = [];
     const moveItems =
       message.kind === "character" && this.narratorMoves?.recordId === record.id
         ? this.narratorMoves.items
@@ -2387,6 +2393,7 @@ export class SettingsPanel {
         await this.characterStore.saveOrUpdate(destination);
       }
       source = outcome.source;
+      movedDestinations = outcome.destinations;
       moveNotice = describeMoveOutcome(outcome, this.characters);
     }
 
@@ -2396,7 +2403,25 @@ export class SettingsPanel {
       authorConfirmed: false,
     });
     await this.persist(message.kind, updated);
-    if (choices.length > 0) this.narratorMoves = undefined;
+    if (choices.length > 0) {
+      this.narratorMoves = undefined;
+      // **主人公と移し先の承認待ちの更新案を片づける**（0.102.4。設計書6.5.12）。
+      // 更新案はレコード丸ごとの写しで、承認すると呼称・一人称の言い分け・
+      // 登場話が移す前の値へ戻る（提案パネルの移す案と同じ理由・同じ関数）。
+      // 主人公まで書けたあとに呼ぶ——途中で止まったら値は両方に残り、更新案も残る
+      const discarded = await discardStaleCharacterUpdates(this.work, [
+        updated as Character,
+        ...movedDestinations,
+      ]);
+      if (discarded.length > 0) {
+        // **記録の直前に書き先を向ける**（ほかの機能が別の作品へ向け直していることがある）
+        useLogFile(this.work.folderPath);
+        logLine(
+          describeUpdatesDiscardedByMoveLog({ names: discarded, via: "設定資料パネル" })
+        );
+        moveNotice += describeDiscardedUpdatesNotice(discarded) ?? "";
+      }
+    }
     const fieldCount = Object.keys(fieldValues).length;
     await this.reloadAfterSave(
       message.kind,

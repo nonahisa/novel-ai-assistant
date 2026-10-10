@@ -242,9 +242,12 @@ export async function applyPendingNarratorMove(
  * 移したこと自体は成立しているので止めない（同じパネルで押されても、
  * `characterTargets` が書く前にファイルの有無を確かめる）。
  *
+ * 設定資料パネルの「AIで再読込」から移す道（`settingsPanel.ts` の
+ * `handleApplyProposal`）も、これを呼ぶ（理由は同じ）。
+ *
  * @returns 更新案を片づけた人物の名前
  */
-async function discardStaleCharacterUpdates(
+export async function discardStaleCharacterUpdates(
   work: WorkEntry,
   people: readonly Character[]
 ): Promise<string[]> {
