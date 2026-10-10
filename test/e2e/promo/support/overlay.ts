@@ -303,10 +303,53 @@ export async function burstStarsAt(page: Page, x: number, y: number): Promise<vo
  * ボタンでなく行の文字（「思いのほか…」）を押す絵になった（作者の指摘、2026-10-03）。
  *
  * @param label 押す物の名前（外れたときの知らせに出す）
+ * @param options.position 要素の左上からの押す点。**原稿の本文（`#compose`）の中の1語**のように、
+ *   要素全体の字の真ん中では当たらない物を押すときに渡す（場面3「書く」の右クリック）。省けば字の真ん中
+ * @param options.button 右クリックなら `"right"`。右クリックでも星は散らす（押したことが見えるように）
  */
-export async function clickWithCursor(page: Page, target: Locator, label: string): Promise<void> {
+export async function clickWithCursor(
+  page: Page,
+  target: Locator,
+  label: string,
+  options: { position?: { x: number; y: number }; button?: "left" | "right" } = {}
+): Promise<void> {
+  const { point, offset } = await aimAt(target, label, options.position);
+  await moveCursorTo(page, point.x, point.y);
+  await assertCursorOn(page, target, label);
+  await burstStarsAt(page, point.x, point.y);
+  await target.click({ position: offset, button: options.button ?? "left" });
+}
+
+/**
+ * 描いたカーソルを滑らせて、**本物のマウスも同じ点に載せる**（押さない）。
+ *
+ * 原稿エディターの用語のチップ（設計書6.34.3）は、本物のマウスが用語の上に来たときの
+ * `mousemove` でしか出ない。描いた矢印だけ動かしても何も出ないので、着いたら同じ点へ
+ * `hover` する。星は出さない（押していないので）
+ */
+export async function hoverWithCursor(
+  page: Page,
+  target: Locator,
+  label: string,
+  options: { position?: { x: number; y: number } } = {}
+): Promise<void> {
+  const { point, offset } = await aimAt(target, label, options.position);
+  await moveCursorTo(page, point.x, point.y);
+  await assertCursorOn(page, target, label);
+  await target.hover({ position: offset });
+}
+
+/** 押す（載せる）点を決める。`position` が無ければ、要素の中の字の並びの真ん中 */
+async function aimAt(
+  target: Locator,
+  label: string,
+  position: { x: number; y: number } | undefined
+): Promise<{ point: { x: number; y: number }; offset: { x: number; y: number } }> {
   const box = await target.boundingBox();
   if (!box) throw new Error(`「${label}」が画面に見えていません（boundingBox が取れない）`);
+  if (position) {
+    return { point: { x: box.x + position.x, y: box.y + position.y }, offset: position };
+  }
   // **字の真ん中を狙う。** 場所の表示（`span.where`）は行の幅いっぱいの箱なので、箱の真ん中は
   // 字の右の空白になる（1回目の撮影で、矢印が「4行目」の右の何も無い所に写った）。
   // 箱の中の字の並び（Range）の真ん中を取る。ボタンなら字の真ん中＝ボタンの真ん中
@@ -319,13 +362,8 @@ export async function clickWithCursor(page: Page, target: Locator, label: string
     // 要素の左上からの位置で返す（iframe の外の座標へは、下で box を足して直す）
     return { x: rect.left - own.left + rect.width / 2, y: rect.top - own.top + rect.height / 2 };
   });
-  const offsetX = text?.x ?? box.width / 2;
-  const offsetY = text?.y ?? box.height / 2;
-  const point = { x: box.x + offsetX, y: box.y + offsetY };
-  await moveCursorTo(page, point.x, point.y);
-  await assertCursorOn(page, target, label);
-  await burstStarsAt(page, point.x, point.y);
-  await target.click({ position: { x: offsetX, y: offsetY } });
+  const offset = { x: text?.x ?? box.width / 2, y: text?.y ?? box.height / 2 };
+  return { point: { x: box.x + offset.x, y: box.y + offset.y }, offset };
 }
 
 /**
