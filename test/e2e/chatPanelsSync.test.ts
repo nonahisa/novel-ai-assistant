@@ -22,7 +22,7 @@ import { afterAll, beforeAll, expect, test } from "vitest";
 import { fakeOllamaLaunch, passLocalAiGate, startFakeOllama, type FakeOllama } from "./support/fakeOllama";
 import { E2E_WORK_TITLE, withVsCode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { activeTabNames, clearNotifications, editorGroupTabs, pressWorkbenchKey } from "./support/workbenchDom";
+import { activeTabNames, clearNotifications, editorGroupTabs, pressWorkbenchKey, tabNamesInclude } from "./support/workbenchDom";
 
 const EPISODE = "001_はじまり.txt";
 const OPEN_SIDE_KEY = "ctrl+alt+shift+c";
@@ -131,7 +131,7 @@ test("横のパネルと大きい画面を同時に開いて質問すると両�
       expect(firstText).toContain(QUESTION);
       expect(firstText).toContain(ANSWER);
       await waitUntil(
-        async () => (await editorGroupTabs(page)).flat().includes(first),
+        async () => tabNamesInclude((await editorGroupTabs(page)).flat(), first),
         "保存した相談メモがタブとして開く",
         20_000
       ).catch(async (error: unknown) => {

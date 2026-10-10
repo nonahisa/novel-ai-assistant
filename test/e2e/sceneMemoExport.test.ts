@@ -15,7 +15,7 @@ import { expect, test } from "vitest";
 import { memoPanelFrame, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
 import { E2E_WORK_TITLE, withVsCode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { activeTabNames } from "./support/workbenchDom";
+import { activeTabNames, tabNamesInclude } from "./support/workbenchDom";
 
 const EPISODE = "001_はじまり.txt";
 const TEXT = "一行目の文。\n// 見張りのメモ\n三行目の文。\n";
@@ -74,7 +74,7 @@ test("校正・メモパネルの［書き出す］で「校正・メモ」の�
     // ── 開く（どこかの列で前に出ている）──
     const fileName = written;
     await waitUntil(
-      async () => (await activeTabNames(page)).some((name) => name === fileName),
+      async () => tabNamesInclude(await activeTabNames(page), fileName),
       "書き出した紙のタブが前に出る",
       10_000
     ).catch(async (error: unknown) => {

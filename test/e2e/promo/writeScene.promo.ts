@@ -45,7 +45,7 @@ import { caretPosition, composeText, manuscriptFrames, openEpisode, placeCaretAf
 import { defaultCharactersFolder, settingsPanelFrame, writeCharactersTo } from "../support/settingsFixture";
 import { resizeWindows, withVsCode, type E2ESession, type FixtureEpisode } from "../support/vscodeApp";
 import { waitUntil } from "../support/wait";
-import { clearNotifications, editorGroupTabs, pressWorkbenchKey } from "../support/workbenchDom";
+import { clearNotifications, editorGroupTabs, pressWorkbenchKey, tabLocator } from "../support/workbenchDom";
 import { durationSeconds, findFfmpeg, toGif, toMp4 } from "./support/encode";
 import {
   clickWithCursor,
@@ -438,10 +438,16 @@ async function toggleMaximize(page: Page): Promise<void> {
 
 /** 本体のタブ（列の見出し）を描いたカーソルで押す。押した列が焦点を持つ */
 async function clickTab(session: E2ESession, name: string): Promise<void> {
-  const tab = session.page
-    .locator(".tabs-container .tab")
-    .filter({ has: session.page.locator(".label-name", { hasText: name }) })
-    .first();
+  // 名前が当たるタブ（拡張子のあり／なしを問わない。1.141.0 は `.label-name` から拡張子を外す）。
+  // 当たらなければ、パネルの題の一部で探す前の形へ戻る
+  const exact = await tabLocator(session.page, name);
+  const tab =
+    (await exact.count()) > 0
+      ? exact
+      : session.page
+          .locator(".tabs-container .tab")
+          .filter({ has: session.page.locator(".label-name", { hasText: name }) })
+          .first();
   await tab.waitFor({ state: "visible", timeout: 10_000 });
   await clickWithCursor(session.page, tab.locator(".label-name").first(), `タブ「${name}」`);
   // 本物のマウスをタブの上に残すと、VS Code の吹き出し（タブの場所の表示）が出て録画に写る。

@@ -16,7 +16,7 @@ import { expect, test } from "vitest";
 import { composeText, manuscriptFrames, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
 import { withVsCode } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
-import { activeGroupIndex, activeTabNames, editorGroupTabs, quickOpen } from "./support/workbenchDom";
+import { activeGroupIndex, activeTabNames, countTabsNamed, editorGroupTabs, quickOpen, tabNameMatches, tabNamesInclude } from "./support/workbenchDom";
 
 const FIRST = "001_はじまり.txt";
 const LATEST = "002_つづき.txt";
@@ -30,7 +30,7 @@ const OPEN_VERTICAL_KEY = "ctrl+alt+shift+f5";
 const OPEN_VERTICAL_PRESS = "Control+Alt+Shift+F5";
 
 async function tabCount(page: Page, name: string): Promise<number> {
-  return (await editorGroupTabs(page)).flat().filter((tab) => tab === name).length;
+  return countTabsNamed((await editorGroupTabs(page)).flat(), name);
 }
 
 /** その話のタブが1枚のまま、原稿の面が2枚のまま、をしばらく見続ける */
@@ -98,7 +98,12 @@ test("移る先の話が別の列・別の向きで開いているとき、［�
       await waitUntil(
         async () => {
           const groups = await editorGroupTabs(page);
-          return groups.length === 2 && groups[0].includes(FIRST) && groups[1].includes(LATEST) && !groups[0].includes(LATEST);
+          return (
+            groups.length === 2 &&
+            tabNamesInclude(groups[0], FIRST) &&
+            tabNamesInclude(groups[1], LATEST) &&
+            !tabNamesInclude(groups[0], LATEST)
+          );
         },
         "最新話が右の列へ移る",
         10_000
@@ -159,7 +164,7 @@ test("移る先の話が別の列・別の向きで開いているとき、［�
       const groupsWithStats = await editorGroupTabs(page);
       await stats.locator("tr.clickable[data-path]", { hasText: "つづき" }).first().click();
       await waitUntil(
-        async () => (await activeTabNames(page))[await activeGroupIndex(page)] === LATEST,
+        async () => tabNameMatches((await activeTabNames(page))[await activeGroupIndex(page)] ?? "", LATEST),
         "執筆統計の行を押すと、最新話のタブが前に出る",
         10_000
       ).catch(async (error: unknown) => {
@@ -177,7 +182,7 @@ test("移る先の話が別の列・別の向きで開いているとき、［�
       if (!latestFrame) throw new Error("最新話の原稿エディターの面が見つかりません");
       await latestFrame.locator("#prev").click();
       await waitUntil(
-        async () => (await activeGroupIndex(page)) === 0 && (await activeTabNames(page))[0] === FIRST,
+        async () => (await activeGroupIndex(page)) === 0 && tabNameMatches((await activeTabNames(page))[0] ?? "", FIRST),
         "［← 前の話］で左の列の第1話が前に出る",
         10_000
       ).catch(async (error: unknown) => {

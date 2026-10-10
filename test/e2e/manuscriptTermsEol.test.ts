@@ -26,7 +26,7 @@ import { answerInput, runCommand, waitForQuickInput } from "./support/quickInput
 import { charactersFolder, settingsPanelFrame, writeCharactersTo } from "./support/settingsFixture";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { dismissWorkbenchHover, pickQuickPickRow, quickPickTitle, tabIsDirty } from "./support/workbenchDom";
+import { dismissWorkbenchHover, pickQuickPickRow, quickPickTitle, readTabState, tabIsDirty } from "./support/workbenchDom";
 
 const CRLF_EPISODE = "001_改行CRLF.md";
 const LF_EPISODE = "002_改行LF.md";
@@ -110,15 +110,12 @@ async function panelState(frame: Frame): Promise<{ collapsed: boolean; detail: s
  */
 async function layoutState(session: E2ESession, frames: Record<string, Frame | undefined>): Promise<string> {
   const { page } = session;
-  const groups = await page
-    .evaluate(() =>
-      Array.from(document.querySelectorAll(".editor-group-container")).map((group) => ({
-        active: group.classList.contains("active"),
-        tabs: Array.from(group.querySelectorAll(".tabs-container .tab")).map(
-          (tab) =>
-            ((tab.querySelector(".label-name")?.textContent ?? tab.getAttribute("aria-label") ?? "").trim()) +
-            (tab.classList.contains("active") ? "［前］" : "")
-        ),
+  // タブの読み方は workbenchDom.ts の1か所に任せる（1.141.0 で名前の形が変わった）
+  const groups = await readTabState(page)
+    .then((state) =>
+      state.map((group) => ({
+        active: group.active,
+        tabs: group.tabs.map((tab) => tab.name + (tab.active ? "［前］" : "")),
       }))
     )
     .catch(() => "（読めません）");

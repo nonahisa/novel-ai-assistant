@@ -44,6 +44,7 @@ import {
   OPEN_KEYBINDINGS_BINDING,
   OPEN_KEYBINDINGS_PRESS,
   pressWorkbenchKey,
+  tabNamesInclude,
 } from "./support/workbenchDom";
 
 const EPISODE = "001_はじまり.txt";
@@ -75,7 +76,7 @@ async function putManuscriptBehind(page: Page): Promise<void> {
   await pressWorkbenchKey(page, OPEN_KEYBINDINGS_PRESS);
   await page.locator(".keybindings-editor").first().waitFor({ state: "visible", timeout: 15_000 });
   await waitUntil(
-    async () => !(await activeTabNames(page)).includes(EPISODE),
+    async () => !tabNamesInclude(await activeTabNames(page), EPISODE),
     "原稿のタブが後ろに回る",
     10_000
   );
@@ -101,7 +102,7 @@ async function restartExtensionHost(page: Page): Promise<void> {
   });
   // タブが閉じていないこと（1.138.0 では閉じた）
   const tabs = (await editorGroupTabs(page)).flat();
-  expect(tabs, "拡張機能ホストの再起動で、原稿のタブが閉じました").toContain(EPISODE);
+  expect(tabNamesInclude(tabs, EPISODE), `拡張機能ホストの再起動で、原稿のタブが閉じました（タブ：${JSON.stringify(tabs)}）`).toBe(true);
 }
 
 /** 製品のモーダルが出るのを待ち、文とボタンを確かめる（猶予10秒＋新しい拡張機能の起動） */

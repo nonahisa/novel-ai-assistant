@@ -16,7 +16,7 @@ import { runCommand, waitForQuickInput } from "./support/quickInput";
 import { composeText, footText, manuscriptFrames, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
 import { withVsCode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { pickQuickPickRow } from "./support/workbenchDom";
+import { activateTab, pickQuickPickRow } from "./support/workbenchDom";
 
 /** 「作品の種類」で種類を替える（コマンドパレット→選ぶ画面。作者の道順） */
 async function setWorkKind(page: Page, label: string): Promise<void> {
@@ -85,7 +85,7 @@ test("下段は「この話で今日 +N字」になり、第1話で1日の目標
       expect(await footText(secondFrame, "counts")).toContain("この話で今日 0字");
 
       // 第1話へ戻って、1日の目標（20字）を超えて打ち、保存する
-      await page.locator(".tabs-container .tab", { hasText: "001_はじまり" }).first().click();
+      await activateTab(page, "001_はじまり.txt");
       await waitUntil(async () => (await composeText(firstFrame)).includes("一行目の文"), "第1話の面が前に出る", 15_000);
       await placeCaretAfter(firstFrame, "一行目の文。");
       // **最初の保存は、その日の起点（基準線）を置くだけで、書いた量には数えない**（統計の作り）。
@@ -109,7 +109,7 @@ test("下段は「この話で今日 +N字」になり、第1話で1日の目標
       );
 
       // 先に開いてあった第2話のタブへ切り替えても、同じ一言が出ている
-      await page.locator(".tabs-container .tab", { hasText: "002_つづき" }).first().click();
+      await activateTab(page, "002_つづき.txt");
       const front = await frontManuscript(page, "二話目の本文");
       await waitUntil(
         async () => (await cheerText(front)).includes("今日の目標に届きました"),

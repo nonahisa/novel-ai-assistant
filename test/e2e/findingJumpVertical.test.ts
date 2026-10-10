@@ -25,7 +25,14 @@ import { caretPosition, composeText, manuscriptFrames, openEpisode, selectionCol
 import { OPEN_PROPOSALS_LAUNCH, OPEN_PROPOSALS_PRESS, proposalPanelFrame, writeSampleFinding } from "./support/sampleFinding";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
-import { activeTabNames, clearNotifications, editorGroupTabs, pressWorkbenchKey } from "./support/workbenchDom";
+import {
+  activeTabNames,
+  clearNotifications,
+  countTabsNamed,
+  editorGroupTabs,
+  pressWorkbenchKey,
+  tabNamesInclude,
+} from "./support/workbenchDom";
 
 const OPENED = "001_朝.txt";
 const UNOPENED = "002_夜.txt";
@@ -97,7 +104,7 @@ async function caretInView(frame: Frame): Promise<boolean> {
 }
 
 async function tabCount(page: Page, name: string): Promise<number> {
-  return (await editorGroupTabs(page)).flat().filter((tab) => tab === name).length;
+  return countTabsNamed((await editorGroupTabs(page)).flat(), name);
 }
 
 /** 指摘を2件（第1話・第2話）置く。見本の口は1件ずつ書き直すので、行を足し合わせる */
@@ -166,7 +173,7 @@ test("開いていない話の指摘の場所を押すとその話が1枚だけ�
 
       // 裏に回った第1話
       await jumpTo(OPENED);
-      await waitUntil(async () => (await activeTabNames(page)).includes(OPENED), "裏の第1話のタブが前に出る");
+      await waitUntil(async () => tabNamesInclude(await activeTabNames(page), OPENED), "裏の第1話のタブが前に出る");
       const morning = await waitCaretOn(page, "朝の終わり", OPENED_TARGET, "第1話のカーソルが指摘の行に来る");
       expect(await selectionCollapsed(morning), "第1話で行が選ばれています").toBe(true);
       await waitUntil(async () => await caretInView(morning), "第1話が指摘の行まで転がる", 5_000);

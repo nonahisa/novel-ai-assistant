@@ -29,7 +29,7 @@ import {
 } from "./support/manuscriptFrame";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { activeTabNames, quickOpen, tabIsDirty } from "./support/workbenchDom";
+import { activeTabNames, quickOpen, tabIsDirty, tabNamesInclude } from "./support/workbenchDom";
 
 const EP1 = "001_いち.txt";
 const EP2 = "002_に.txt";
@@ -156,20 +156,20 @@ test("右クリック「メモ追加」で行の上に // が入り、［済み�
       await settleCaret(page);
       await panel.locator("#next").click();
       // 第1話の最後のメモより後ろにはもう無いので、第2話を飛ばして第3話へ
-      await waitUntil(async () => (await activeTabNames(page)).includes(EP3), "［次へ］で第2話を飛ばして第3話が前に出る");
+      await waitUntil(async () => tabNamesInclude(await activeTabNames(page), EP3), "［次へ］で第2話を飛ばして第3話が前に出る");
       await waitUntil(async () => (await caretLineAnywhere(page)).includes("三のメモA"), "［次へ］で第3話のメモの行へ飛ぶ");
-      expect((await activeTabNames(page)).includes(EP2), "メモの無い第2話が開きました").toBe(false);
+      expect(tabNamesInclude(await activeTabNames(page), EP2), "メモの無い第2話が開きました").toBe(false);
 
       // 末尾の次は先頭（第1話の最初のメモ）へ回る
       await settleCaret(page);
       await panel.locator("#next").click();
-      await waitUntil(async () => (await activeTabNames(page)).includes(EP1), "末尾の［次へ］で第1話へ戻る");
+      await waitUntil(async () => tabNamesInclude(await activeTabNames(page), EP1), "末尾の［次へ］で第1話へ戻る");
       await waitUntil(async () => (await caretLineAnywhere(page)).includes("一のメモ"), "末尾の［次へ］で先頭のメモ（一のメモ）へ回る");
 
       // 先頭の前は末尾（第3話のメモ）へ回る
       await settleCaret(page);
       await panel.locator("#prev").click();
-      await waitUntil(async () => (await activeTabNames(page)).includes(EP3), "先頭の［戻る］で第3話へ回る");
+      await waitUntil(async () => tabNamesInclude(await activeTabNames(page), EP3), "先頭の［戻る］で第3話へ回る");
       await waitUntil(async () => (await caretLineAnywhere(page)).includes("三のメモA"), "先頭の［戻る］で末尾のメモへ回る");
 
       // 第1話を前に戻してから（クイックオープンで、開いているタブへ移る）
@@ -300,7 +300,7 @@ test("校正・メモパネルの［次へ］を続けて押すと、2つの話�
         await settleCaret(page);
         await panel.locator("#next").click();
         await waitUntil(
-          async () => (await activeTabNames(page)).includes(episode),
+          async () => tabNamesInclude(await activeTabNames(page), episode),
           `${index + 1}回目の［次へ］で ${episode} が前に出る`,
           8_000
         ).catch(async (error: unknown) => {

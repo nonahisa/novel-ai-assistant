@@ -22,7 +22,7 @@ import { openEpisode } from "./support/manuscriptFrame";
 import { defaultCharactersFolder, settingsPanelFrame, writeCharactersTo } from "./support/settingsFixture";
 import { withVsCode, type E2ESession, type LaunchOptions } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { dialogText, editorGroupTabs, pressDialogButton } from "./support/workbenchDom";
+import { activateTab, dialogText, editorGroupTabs, pressDialogButton, tabNamesInclude } from "./support/workbenchDom";
 
 const EPISODE = "001_お屋敷.md";
 const TEXT = "密倉文佳は窓の外を見た。\nお嬢様は静かに笑った。\n";
@@ -130,8 +130,8 @@ test("別名を別の人物に分けると、開いたままの本文の「お�
 
       // 原稿エディターを開き直さずに、同じ語を右クリック：今度は新しい人物の資料
       const tabs = (await editorGroupTabs(page)).flat();
-      expect(tabs.some((tab) => tab.includes(EPISODE)), "原稿のタブは開いたまま").toBe(true);
-      await page.locator(".tabs-container .tab", { hasText: EPISODE }).first().click();
+      expect(tabNamesInclude(tabs, EPISODE), `原稿のタブは開いたまま（タブ：${JSON.stringify(tabs)}）`).toBe(true);
+      await activateTab(page, EPISODE);
       expect(await coloredCharacterTerms(frame), "分けたあとも「お嬢様」に色が付く").toContain("お嬢様");
       await showSettingsOf(frame, "お嬢様");
       await waitUntil(
