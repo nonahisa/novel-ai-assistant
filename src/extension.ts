@@ -144,6 +144,7 @@ import {
 import { ActionDecorationProvider } from "./views/actionDecorations";
 import { PendingUpdateStore } from "./core/pendingUpdates";
 import { PendingSettingsUpdateStore } from "./core/pendingSettingsUpdates";
+import { PendingNarratorMoveStore } from "./core/pendingNarratorMoveStore";
 // 作品を選ぶ場面で「未処理の提案が何件あるか」を出すために使う。
 // 提案パネル（features/proposalPanel）が既に読んでいるので、束は増えない
 import { ProposalStore } from "./core/proposalStore";
@@ -2033,6 +2034,8 @@ export async function activate(
           // 人物以外の承認待ち（2026-09-23〜）も同じ「更新分を反映」で扱う。
           // 設定資料パネルの件数と同じ置き場を数える（食い違わせない）
           total += await new PendingSettingsUpdateStore(work).count();
+          // 語り手の取り違えの移す案（設計書6.5.12、0.102.3）も同じ提案パネルに並ぶ
+          total += await new PendingNarratorMoveStore(work).count();
         } else if (counter === "staleImeDictionary") {
           // 書き出し済みの辞書より設定資料が新しい作品を数える。
           // 一度も書き出していない作品は数えない（催促にならないため）
@@ -4817,7 +4820,8 @@ export async function activate(
             try {
               count =
                 (await new PendingUpdateStore(candidate).count()) +
-                (await new PendingSettingsUpdateStore(candidate).count());
+                (await new PendingSettingsUpdateStore(candidate).count()) +
+                (await new PendingNarratorMoveStore(candidate).count());
             } catch {
               // 読めない作品は0件として扱う。補足が出ないだけ
             }

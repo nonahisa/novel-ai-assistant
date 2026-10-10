@@ -142,6 +142,10 @@ describe("自動で書かれるファイルの見分け", () => {
     expect(
       isAutoWrittenPath("短編/.aiwriter/pending-settings/loc_001.json")
     ).toBe(true);
+    // 語り手の取り違えの移す案（0.102.3）も同じ
+    expect(
+      isAutoWrittenPath("短編/.aiwriter/pending-moves/char_007_0123456789abcdef01234567.json")
+    ).toBe(true);
   });
 
   test("原稿と設定資料は畳めない", () => {

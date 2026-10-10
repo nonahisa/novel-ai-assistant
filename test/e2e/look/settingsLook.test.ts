@@ -9,6 +9,12 @@ import path from "node:path";
 import type { Frame } from "playwright-core";
 import { describe, test } from "vitest";
 import { emptyCharacter, type Character } from "../../../src/models/character";
+import type { NarratorMoveItem } from "../../../src/core/narratorMoves";
+import {
+  PENDING_MOVES_DIR,
+  buildPendingNarratorMovePayload,
+  pendingNarratorMoveFileName,
+} from "../../../src/core/pendingNarratorMoves";
 import { runCommand } from "../support/quickInput";
 import { proposalPanelFrame } from "../support/sampleFinding";
 import { defaultCharactersFolder, settingsPanelFrame, writeCharactersTo } from "../support/settingsFixture";
@@ -164,6 +170,79 @@ describe.skipIf(!lookEnabled)("見た目の写真：提案パネル（承認待�
           await writeFile(
             path.join(pending, "char_001.json"),
             JSON.stringify({ source: "external", reason: "第1話の描写に合わせる", character: proposed }, null, 2),
+            "utf8"
+          );
+        },
+      }
+    );
+  });
+
+  /*
+    語り手の取り違えの移す案（設計書6.5.12、0.102.3）。名指しできない案の行に、
+    移し先の選び口（「（選んでください）」・候補・外すだけ）が出て、選ぶまで
+    「反映する」が押せないことを写す。承認待ちは製品と同じ関数で組む
+  */
+  test("移す案の行と移し先の選び口", async () => {
+    const hero: Character = {
+      ...emptyCharacter("char_007", "アジャーノ"),
+      role: "冒険者",
+      firstPerson: { default: "俺", variants: [] },
+      changes: [
+        { field: "role", value: "冒険者", chapters: [10], timepointId: null, note: null, evidence: null, source: "extracted" },
+        { field: "role", value: "皇子", chapters: [12], timepointId: null, note: null, evidence: null, source: "extracted" },
+      ],
+      appearedChapters: [10],
+    };
+    const prince = emptyCharacter("char_016", "殿下");
+    const item: NarratorMoveItem = {
+      kind: "change",
+      label: "役割",
+      value: "皇子",
+      chapters: [12],
+      evidence: null,
+      firstPersons: ["余"],
+      destination: { kind: "choose", candidates: [{ id: prince.id, name: prince.name }] },
+      change: hero.changes[1],
+    };
+    const payload = buildPendingNarratorMovePayload(hero, item, "2026-10-10T00:00:00.000Z");
+    await withVsCode(
+      "見た目の写真：移す案の行",
+      EPISODES,
+      async (session) => {
+        const { page } = session;
+        await clearNotifications(page);
+        await runCommand(page, "設定資料更新分反映");
+        let panel: Frame | undefined;
+        await waitUntil(
+          async () => {
+            panel = await proposalPanelFrame(page);
+            return panel !== undefined;
+          },
+          "提案パネルが開く",
+          30_000
+        );
+        await page.waitForTimeout(2500);
+        await clearNotifications(page);
+        const state = await (panel as Frame).evaluate(() => ({
+          text: (document.body?.innerText ?? "").replace(/\s+/g, " ").slice(0, 600),
+          select: document.querySelector("select[data-move-for]") !== null,
+          applyDisabled:
+            (document.querySelector('button[data-action="apply"]') as HTMLButtonElement | null)?.disabled ?? null,
+        }));
+        await lookNote(
+          `[353] 移す案の行：選び口=${state.select} 反映を押せない=${state.applyDisabled} 字：${state.text}`
+        );
+        await shootPage(page, "353-提案パネル-移す案の行");
+      },
+      {
+        windowSize: { width: 1280, height: 800 },
+        prepareWork: async ({ workFolder }) => {
+          await writeCharactersTo(defaultCharactersFolder(workFolder), [hero, prince]);
+          const pending = path.join(workFolder, ".aiwriter", PENDING_MOVES_DIR);
+          await mkdir(pending, { recursive: true });
+          await writeFile(
+            path.join(pending, pendingNarratorMoveFileName(payload.sourceId, payload.key)),
+            JSON.stringify(payload, null, 2),
             "utf8"
           );
         },

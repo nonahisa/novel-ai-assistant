@@ -56,6 +56,8 @@ const OVERWRITE_ALLOWED: Record<string, string> = {
   "pendingUpdates.ts": "承認待ち。まだ資料になっていない（5.5.18）",
   "pendingSettingsUpdates.ts":
     "人物以外の承認待ち（0.78.4）。まだ資料になっていない（5.5.18）",
+  "pendingNarratorMoveStore.ts":
+    "語り手の取り違えの移す案の承認待ちと、見送った案の鍵（0.102.3）。まだ資料になっていない",
   "modelTuningStore.ts":
     "AIチューニングの台帳（6.49）。書いたあとに読み直して、" +
     "入れた欄と読んだときの鍵が残っているかを確かめ、消えていればやり直す",

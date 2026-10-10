@@ -52,6 +52,19 @@ import type { WorldItem } from "../models/world";
 import type { PendingUpdateSource } from "../core/pendingUpdates";
 import { logFailure, logLine, useLogFile } from "../core/logger";
 import {
+  describeNarratorMoveReviewItem,
+  narratorMoveValueForLog,
+} from "../core/pendingNarratorMoves";
+import {
+  applyPendingNarratorMove,
+  dismissPendingNarratorMove,
+  narratorMoveViewItems,
+  reviewPendingNarratorMoves,
+  type NarratorMoveApplied,
+  type PendingNarratorMoveReview,
+} from "./narratorMovePending";
+import {
+  describeNarratorMoveLog,
   describeRecordUpdateBatchLog,
   describeRecordUpdateLog,
   type RecordUpdateVerdict,
@@ -405,7 +418,8 @@ export function settingsUpdateViewItems(
 interface ApplyTarget {
   id: string;
   name: string;
-  diff: CharacterDiff;
+  /** 何がどう変わるか。**移す案は持たない**（書き換え後の姿を反映のときに組むため） */
+  diff?: CharacterDiff;
   change: string;
   source?: PendingUpdateSource;
   reason?: string;
@@ -417,6 +431,55 @@ interface ApplyTarget {
   apply: (dropKeys: string[]) => Promise<number>;
   /** 見送る（承認待ちから片付ける。レコードには触らない） */
   discard: () => Promise<void>;
+  /**
+   * ログの1行を自分で組む（移す案だけ。差分を持たないので
+   * `describeRecordUpdateLog` を通せない。`describeNarratorMoveLog`）
+   */
+  logLineOf?: (verdict: RecordUpdateVerdict, via: RecordUpdateVia) => string;
+  /** 差分を持たない案の説明（「内容を確認」の文書に出す） */
+  detail?: string[];
+}
+
+/**
+ * 移す案（語り手の取り違えで主人公に入った値。設計書6.5.12、0.102.3）の反映の口。
+ *
+ * **移し先を選ぶのは提案パネルの行**（`moveChoice`）。選びは ✕ の印と同じ
+ * 鍵の並びで届く（`destinationFromKeys`）。確認ダイアログの道（「すべて反映」）は
+ * 選ぶ画面を持たないので、名指しできた案は既定の移し先へ、選ぶ案は
+ * 「移し先を選んでください」で失敗として残る（承認待ちは消えない）。
+ */
+function moveTargets(work: WorkEntry, review: PendingNarratorMoveReview): ApplyTarget[] {
+  return review.items.map((item) => {
+    const view = describeNarratorMoveReviewItem(item);
+    const value = narratorMoveValueForLog(item.move.item);
+    let applied: NarratorMoveApplied | undefined;
+    return {
+      id: item.move.filePath,
+      name: item.source.name,
+      change: view.source,
+      detail: view.changes,
+      kindLabel: PENDING_KIND_SHORT_LABELS.character,
+      creation: false,
+      apply: async (dropKeys) => {
+        applied = await applyPendingNarratorMove(work, item, dropKeys, review.store);
+        // 移し先の値を上書きしなかったことは黙らない（`applyNarratorMoves` の notes）
+        if (applied.notes.length > 0) {
+          void vscode.window.showInformationMessage(applied.notes.join(""));
+        }
+        return 0;
+      },
+      discard: () => dismissPendingNarratorMove(work, item, review.store),
+      logLineOf: (verdict, via) =>
+        describeNarratorMoveLog({
+          verdict,
+          sourceName: applied?.sourceName ?? item.source.name,
+          value,
+          destinationName: applied?.destinationName ?? null,
+          via,
+          keptNotes: applied?.notes.length ?? 0,
+        }),
+    };
+  });
 }
 
 function characterTargets(review: PendingUpdateReview): ApplyTarget[] {
@@ -506,6 +569,14 @@ function logVerdict(
   drop: { dropKeys?: readonly string[]; dropped?: number } = {}
 ): void {
   useLogFile(work.folderPath);
+  if (target.logLineOf || !target.diff) {
+    logLine(
+      target.logLineOf
+        ? target.logLineOf(verdict, via)
+        : `設定資料の更新を${verdict === "applied" ? "適用" : "見送り"}：${target.kindLabel}「${target.name}」 ${target.change}（${via}）`
+    );
+    return;
+  }
   logLine(
     describeRecordUpdateLog({
       verdict,
@@ -529,17 +600,27 @@ function logVerdict(
 function showInPanel(
   review: PendingUpdateReview,
   settingsReview: PendingSettingsReview,
+  moveReview: PendingNarratorMoveReview,
   work: WorkEntry,
   panel: ProposalPanel,
   options: { quiet?: boolean } = {}
 ): void {
-  const targets = [...characterTargets(review), ...settingsTargets(settingsReview)];
+  const targets = [
+    ...characterTargets(review),
+    ...settingsTargets(settingsReview),
+    ...moveTargets(work, moveReview),
+  ];
   const find = (id: string): ApplyTarget | undefined =>
     targets.find((target) => target.id === id);
 
   panel.showRecordUpdates(
     work,
-    [...recordUpdateViewItems(review), ...settingsUpdateViewItems(settingsReview)],
+    [
+      ...recordUpdateViewItems(review),
+      ...settingsUpdateViewItems(settingsReview),
+      // 移す案は人物の更新案のあとに並べる（同じ主人公の更新案と見比べられるように）
+      ...narratorMoveViewItems(moveReview),
+    ],
     async (id, dropKeys) => {
       const target = find(id);
       if (!target) return { ok: false, reason: "対象が見つかりません。" };
@@ -622,9 +703,11 @@ export async function primePendingRecordUpdates(
 ): Promise<number> {
   const review = await reviewPendingCharacterUpdates(work);
   const settingsReview = await reviewPendingSettingsUpdates(work);
-  const count = review.items.length + settingsReview.items.length;
+  const moveReview = await reviewPendingNarratorMoves(work);
+  const count =
+    review.items.length + settingsReview.items.length + moveReview.items.length;
   if (count === 0) return 0;
-  showInPanel(review, settingsReview, work, panel, { quiet: true });
+  showInPanel(review, settingsReview, moveReview, work, panel, { quiet: true });
   return count;
 }
 
@@ -647,9 +730,15 @@ export async function applyPendingCharacterUpdates(
   useLogFile(work.folderPath);
   const review = await reviewPendingCharacterUpdates(work);
   const settingsReview = await reviewPendingSettingsUpdates(work);
+  // 移す案（設計書6.5.12、0.102.3）。人物の更新案と同じ「設定資料の更新」に並ぶ
+  const moveReview = await reviewPendingNarratorMoves(work);
   const { pendingStore } = review;
 
-  const pendingErrors = [...review.pendingErrors, ...settingsReview.pendingErrors];
+  const pendingErrors = [
+    ...review.pendingErrors,
+    ...settingsReview.pendingErrors,
+    ...moveReview.pendingErrors,
+  ];
   if (pendingErrors.length > 0) {
     await vscode.window.showWarningMessage(
       `読み込めない更新案が ${pendingErrors.length} 件あります（${pendingErrors
@@ -657,14 +746,19 @@ export async function applyPendingCharacterUpdates(
         .join("、")}）。残りだけを扱います。`
     );
   }
-  if (review.totalPending + settingsReview.totalPending === 0) {
+  if (
+    review.totalPending + settingsReview.totalPending + moveReview.totalPending ===
+    0
+  ) {
     vscode.window.showInformationMessage("反映待ちの更新はありません。");
     return;
   }
 
   // 人物設定が読めないときは、人物の案は組み立てていない（差分の相手が欠ける）。
   // **人物以外の案が無ければ、これまでどおりここで止める**
-  const characterBlocked = review.characterErrors.length > 0;
+  // （移す案も人物を書き換えるので、人物の案と同じく組み立てていない）
+  const characterBlocked =
+    review.characterErrors.length > 0 || moveReview.characterErrors.length > 0;
   if (characterBlocked) {
     const files = review.characterErrors.map((error) => error.file).join("、");
     if (settingsReview.totalPending === 0) {
@@ -698,8 +792,17 @@ export async function applyPendingCharacterUpdates(
   for (const stale of settingsReview.stale) {
     await settingsReview.pendingStore.discard(stale.filePath);
   }
+  // 主人公が居ない・値がもう無い移す案。**見送りとしては覚えない**
+  // （作者が判断したのではない。値がまた入れば、また積まれてよい）
+  for (const stale of moveReview.stale) {
+    await moveReview.store.discard(stale.filePath);
+  }
 
-  const targets = [...characterTargets(review), ...settingsTargets(settingsReview)];
+  const targets = [
+    ...characterTargets(review),
+    ...settingsTargets(settingsReview),
+    ...moveTargets(work, moveReview),
+  ];
   if (targets.length === 0) {
     vscode.window.showInformationMessage(
       "反映が必要な更新はありませんでした。古い更新案は片付けました。"
@@ -711,12 +814,14 @@ export async function applyPendingCharacterUpdates(
   // 設定資料の更新は別のダイアログ、では作者が片方を見落とす。
   // **組み立ては開いたときと同じものを通す**（0.45.0。写しを作らない）
   if (panel) {
-    showInPanel(review, settingsReview, work, panel);
+    showInPanel(review, settingsReview, moveReview, work, panel);
     return;
   }
 
   // 人物だけなら「人」、場所などが混じれば「件」で数える
-  const unit = settingsReview.items.length > 0 ? "件" : "人";
+  // （移す案は1人に何件も並ぶので「件」）
+  const unit =
+    settingsReview.items.length > 0 || moveReview.items.length > 0 ? "件" : "人";
   const choice = await vscode.window.showInformationMessage(
     describePendingUpdatesConfirm(
       targets.map((target) => ({ name: target.name, change: target.change })),
@@ -860,6 +965,10 @@ async function showDiffDocument(
       // 理由（設計書6.87.16）は**切らずに全部出す**。確認のダイアログは
       // 1行しか出せないので、判断の材料はこちらで読ませる
       const reason = target.reason?.trim();
+      // 差分を持たない案（移す案）は、説明の行をそのまま出す
+      if (!target.diff) {
+        return [`## ${target.name}`, "", target.change, ...(target.detail ?? []), ""].join("\n");
+      }
       const body = formatDiff(target.diff);
       if (!label && !reason) return body;
       const [heading, ...rest] = body.split("\n");
