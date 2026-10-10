@@ -22,6 +22,7 @@ import {
   MemoFileNode,
   type TreeNode,
 } from "./views/workTree";
+import { requireTreeNode } from "./views/treeCommandNode";
 import { formatCount } from "./core/charCount";
 import {
   nextChapterNumber,
@@ -1477,7 +1478,9 @@ export async function activate(
     }
   );
   // 同期状態が変わっても本文は変わらないので、再走査はせず描き直すだけにする
-  gitSync.onDidChange(() => treeProvider.redraw());
+  // **印が変わったときだけ**描き直す（0.102.8）。見た目の同じ描き直しでも、
+  // そのあいだ右クリックの命令に行が渡らなくなる（`redrawIfChanged` の説明）
+  gitSync.onDidChange(() => treeProvider.redrawIfChanged());
   const aiRegistry = new AIRegistry(context);
   // 測っていないモデルに切り替えたら、AIチューニングを一言勧める（設計書6.49.8）。
   // 選ぶ道（AI設定・機能別割当・大きいモデルの案内）はどれも選択の変更の
@@ -6631,7 +6634,9 @@ export async function activate(
   context.subscriptions.push(
     registerCommand(
       "novelai.checkTyposForFile",
-      async (node?: EpisodeNode) => {
+      async (picked?: EpisodeNode) => {
+        // 行が渡らなければ黙らずに理由を出す（views/treeCommandNode.ts。以下の右クリックも同じ）
+        const node = requireTreeNode(picked, "この話の誤字脱字を検知");
         if (!node) return;
         const work = node.work;
 
@@ -6669,7 +6674,8 @@ export async function activate(
   context.subscriptions.push(
     registerCommand(
       "novelai.deleteEpisodeFile",
-      async (node?: EpisodeNode) => {
+      async (picked?: EpisodeNode) => {
+        const node = requireTreeNode(picked, "ファイルを削除");
         if (!node) return;
 
         // 削除は取り消せない操作の入口なので、ごみ箱経由にしたうえで
@@ -7133,7 +7139,8 @@ export async function activate(
   context.subscriptions.push(
     registerCommand(
       "novelai.splitCollectedFile",
-      async (node?: EpisodeNode) => {
+      async (picked?: EpisodeNode) => {
+        const node = requireTreeNode(picked, "話ごとのファイルに分ける");
         if (!node) return;
         // 未保存のまま読むと、画面と違う本文を分けてしまう
         if (
@@ -7150,13 +7157,15 @@ export async function activate(
   context.subscriptions.push(
     registerCommand(
       "novelai.copySubtitle",
-      async (node?: EpisodeNode) => {
+      async (picked?: EpisodeNode) => {
+        const node = requireTreeNode(picked, "サブタイトルをコピー");
         if (node) await copySubtitle(node.episode);
       }
     ),
     registerCommand(
       "novelai.copyBodyForPosting",
-      async (node?: EpisodeNode) => {
+      async (picked?: EpisodeNode) => {
+        const node = requireTreeNode(picked, "コピー（投稿サイト用）");
         if (!node) return;
         // 未保存のままコピーすると、画面と違う本文を渡してしまう
         if (
@@ -7169,7 +7178,8 @@ export async function activate(
     ),
     registerCommand(
       "novelai.renameWithSubtitle",
-      async (node?: EpisodeNode) => {
+      async (picked?: EpisodeNode) => {
+        const node = requireTreeNode(picked, "ファイル名にサブタイトルを付ける");
         if (!node) return;
         await renameWithSubtitle(node.work, node.episode);
         treeProvider.refresh(node.work.id);
@@ -7202,7 +7212,8 @@ export async function activate(
       */
       return result.changed ? CHECK_COMPLETED : CHECK_CANCELLED;
     }),
-    registerCommand("novelai.postThisEpisode", async (node?: EpisodeNode) => {
+    registerCommand("novelai.postThisEpisode", async (picked?: EpisodeNode) => {
+      const node = requireTreeNode(picked, "この話を投稿する");
       if (!node) return;
       if (!(await saveDirtyDocumentsBeforeExtraction(node.work, "投稿の準備"))) {
         return;
@@ -7401,7 +7412,8 @@ export async function activate(
         if (await addWorkMemo(work)) treeProvider.refresh(work.id);
       }
     ),
-    registerCommand("novelai.removeWorkMemo", async (node?: MemoFileNode) => {
+    registerCommand("novelai.removeWorkMemo", async (picked?: MemoFileNode) => {
+      const node = requireTreeNode(picked, "メモを削除（ごみ箱へ）");
       if (!node) return;
       if (await removeWorkMemo(node.work, node.memo)) {
         treeProvider.refresh(node.work.id);
@@ -7409,7 +7421,8 @@ export async function activate(
     }),
     registerCommand(
       "novelai.transferMemoToWork",
-      async (node?: EpisodeNode) => {
+      async (picked?: EpisodeNode) => {
+        const node = requireTreeNode(picked, "このメモを作品へ移管");
         if (!node) return;
         const moved = await transferMemo(node.work, node.episode, registry);
         if (!moved) return;
@@ -7425,19 +7438,22 @@ export async function activate(
     台帳が変わったときだけ作品一覧を作り直す。
   */
   context.subscriptions.push(
-    registerCommand("novelai.startChapter", async (node?: EpisodeNode) => {
+    registerCommand("novelai.startChapter", async (picked?: EpisodeNode) => {
+      const node = requireTreeNode(picked, "ここから章を始める");
       if (!node) return;
       if (await startChapterAt(node.work, node.episode)) {
         treeProvider.refresh(node.work.id);
       }
     }),
-    registerCommand("novelai.renameChapter", async (node?: ChapterNode) => {
+    registerCommand("novelai.renameChapter", async (picked?: ChapterNode) => {
+      const node = requireTreeNode(picked, "章の名前を変える");
       if (!node) return;
       if (await renameChapter(node.work, node.chapter)) {
         treeProvider.refresh(node.work.id);
       }
     }),
-    registerCommand("novelai.removeChapter", async (node?: ChapterNode) => {
+    registerCommand("novelai.removeChapter", async (picked?: ChapterNode) => {
+      const node = requireTreeNode(picked, "章を外す");
       if (!node) return;
       if (await removeChapter(node.work, node.chapter)) {
         treeProvider.refresh(node.work.id);
@@ -7484,7 +7500,8 @@ export async function activate(
     ),
     registerCommand(
       "novelai.suggestChapterName",
-      async (node?: ChapterNode) => {
+      async (picked?: ChapterNode) => {
+        const node = requireTreeNode(picked, "この章の名前の案を出す");
         if (!node) return;
         if (await suggestChapterName(node.work, node.chapter, aiRegistry)) {
           treeProvider.refresh(node.work.id);
@@ -7502,7 +7519,8 @@ export async function activate(
     （`novelai.gitSync` などと同じ約束、設計書5.8.5）。
   */
   context.subscriptions.push(
-    registerCommand("novelai.insertEpisodeBefore", async (node?: EpisodeNode) => {
+    registerCommand("novelai.insertEpisodeBefore", async (picked?: EpisodeNode) => {
+      const node = requireTreeNode(picked, "この話の前に挿入");
       if (!node) return;
       const episodes = await treeProvider.getEpisodes(node.work);
       const { insertEpisodeBefore } = await import("./features/insertEpisode.js");
@@ -7523,7 +7541,8 @@ export async function activate(
     }),
     registerCommand(
       "novelai.removeEpisodeAndRenumber",
-      async (node?: EpisodeNode) => {
+      async (picked?: EpisodeNode) => {
+        const node = requireTreeNode(picked, "この話を削除（話数を詰める）");
         if (!node) return;
         const episodes = await treeProvider.getEpisodes(node.work);
         const { removeEpisodeAndRenumber } = await import(

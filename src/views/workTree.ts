@@ -366,6 +366,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     // 裏の走査の行は、もう正しくないかもしれない（設計書6.107）
     this.rootGeneration += 1;
     this.warmedRoot = undefined;
+    // 読み直した一覧は今の印で描かれる。次の同期の知らせは必ず描き直す側に倒す
+    this.lastSyncMarks = undefined;
     if (workId) {
       this.inflight.delete(workId);
       this.cache.delete(workId);
@@ -391,6 +393,39 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
    * `refresh()` を呼ぶと、作品ごとの全ファイル再走査が走ってしまう。
    */
   redraw(): void {
+    this._onDidChangeTreeData.fire();
+  }
+
+  /**
+   * 前回の `redrawIfChanged` で描いた同期の印（作品ごとの印と内訳をつないだもの）。
+   * `refresh()` で捨てる（読み直した一覧は、その時点の印で描かれているため）。
+   */
+  private lastSyncMarks: string | undefined;
+
+  /**
+   * 同期の印が前回と変わったときだけ描き直す（0.102.8）。
+   *
+   * **描き直しは、見た目が同じでも VS Code 側の行の対応表を消す。**
+   * `onDidChangeTreeData` を引数なしで撃つと、拡張機能ホストはその場で
+   * 「行の控え → 行の中身」の表を空にし、画面が `getChildren` を呼び直すまで
+   * 埋まらない。その隙間に右クリックの品書きを押すと、命令に行が渡らない
+   * （`undefined` になる）。同期の見張りはファイルが1つ書かれるたびに
+   * 状態を読み直して知らせてくるので、印が同じままの描き直しが続き、
+   * 作者には見えない形で隙間を作り続けていた。
+   */
+  redrawIfChanged(): void {
+    const marks = this.registry
+      .list()
+      .map((work) =>
+        [
+          work.id,
+          this.syncBadge?.(work.id) ?? "",
+          ...(this.syncTooltip?.(work.id) ?? []),
+        ].join("\u0000")
+      )
+      .join("\u0001");
+    if (marks === this.lastSyncMarks) return;
+    this.lastSyncMarks = marks;
     this._onDidChangeTreeData.fire();
   }
 
@@ -577,6 +612,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         vscode.TreeItemCollapsibleState.None
       );
       item.contextValue = workTypeContextValue("memoFile", node.format);
+      // 話の行と同じ理由で、作品とファイルから決まる id を付ける（0.102.8）
+      item.id = `memoFile:${node.work.id}:${node.memo.filePath}`;
       item.resourceUri = toUri(node.memo.filePath);
       item.iconPath = new vscode.ThemeIcon("note");
       /*
@@ -604,6 +641,15 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       vscode.TreeItemCollapsibleState.None
     );
     item.contextValue = workTypeContextValue("episode", node.format, node.kind);
+    /*
+      **行の id を作品と話のファイルで固定する**（0.102.8）。id の無い行を VS Code は
+      「親の行・何番目か・名前」で覚えるので、話を挿入・削除して並びがずれたり、
+      題の付け直しで名前が変わったりすると、同じ話が別の行として扱われる。
+      ただし**これだけでは描き直しの隙間は閉じない**——隙間のあいだは id があっても
+      行が渡らない（`redrawIfChanged` と `views/treeCommandNode.ts` の説明）。
+      頭の `episode:` は、作品（`work:`）・章・メモの枝の id と重ならないため
+    */
+    item.id = `episode:${node.work.id}:${ep.filePath}`;
     item.resourceUri = toUri(ep.filePath);
     /*
       **本文は原稿エディタ（横書き）で開く**（作者の指示、2026-08-29）。
