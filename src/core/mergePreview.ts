@@ -89,6 +89,8 @@ export function isAutoWrittenPath(filePath: string): boolean {
     // 人物以外の承認待ち（2026-09-23〜）。置き場を分けただけで、
     // まだ資料になっていない提案であることは人物と同じ
     /(^|\/)\.aiwriter\/pending-settings\//.test(normalized) ||
+    // 語り手の取り違えの移す案（0.102.3）。次の抽出で積み直せる提案である
+    /(^|\/)\.aiwriter\/pending-moves\//.test(normalized) ||
     /(^|\/)\.aiwriter\/config\.json$/.test(normalized) ||
     // 設定資料の生成物（0.45.1）。設定フォルダーの名前は変えられるので
     // フォルダー名では縛らず、生成物の側の名前で見る

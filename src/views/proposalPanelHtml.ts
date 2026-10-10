@@ -267,6 +267,9 @@ body.show-low .issue.low { display: flex; }
 .entry button.drop:hover { color: var(--vscode-foreground); }
 .reason { color: var(--vscode-descriptionForeground); font-size: 12px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+/* 移す案の移し先（設計書6.5.12）。選び口は本文の下、ボタンの上に置く */
+.move-choice { margin: 4px 0; }
+.move-choice select { max-width: 100%; }
 /*
   「今後直さない」だけ隣から離す（作者の指摘、2026-09-06）。
 
@@ -716,6 +719,13 @@ function render(workTitle, items) {
       vscode.postMessage({ type: el.dataset.action, id: el.dataset.id });
     });
   });
+  // 移す案の移し先。選んだら描き直す（「反映する」を押せるようになる）
+  listEl.querySelectorAll('select[data-move-for]').forEach((el) => {
+    el.addEventListener('change', () => {
+      setMoveChoice(el.dataset.moveFor, el.value);
+      render(lastWorkTitle, lastItems);
+    });
+  });
 }
 
 /**
@@ -837,6 +847,9 @@ function renderEntries(item, part) {
  * **その更新案の変更が葉だけで、その葉が全部 ✕ になったとき**に限る。
  */
 function canApplyRecordUpdate(item) {
+  // 移す案は、移し先（「外すだけ」を含む）を選ぶまで押せない（作者の裁定 2026-10-10。
+  // 既定では選ばない）
+  if (item.moveChoice) return moveChoiceOf(item.id) !== null;
   const parts = item.changeParts || [];
   // 葉に分かれない変更が1つでも残っていれば、入るものがある
   const hasPlainChange = parts.length === 0 || parts.some(function (part) {
@@ -882,6 +895,7 @@ function renderRecordUpdate(item) {
     (item.status === "failed" ? '<span class="reason">' + escapeHtml(item.statusDetail || "失敗") + '</span>' : '') +
     '</div>' +
     '<div class="quote">' + renderRecordChanges(item) + '</div>' +
+    (canAct && item.moveChoice ? renderMoveChoice(item) : '') +
     (canAct
       ? '<div class="actions">' +
         // **押した結果が何になるかで呼び名が変わる**（設計書6.35.2）。
@@ -897,6 +911,53 @@ function renderRecordUpdate(item) {
       : '') +
     '</div>'
   );
+}
+
+/**
+ * 移す案の移し先（語り手の取り違え。設計書6.5.12、0.102.3）。
+ *
+ * **選びは ✕ の印と同じ集合に「moveTo:」の頭で入れる。** 1件ずつの「反映する」も
+ * 「まとめて適用」も、その集合をそのまま送るので、どちらの道でも選んだ移し先が届く。
+ * 描き直し（✕ を押したとき）でも集合から選びを戻すので、選んだものが消えない。
+ * 名指しできた案は、その人を最初から選んでおく（作者が選び直せる）。
+ */
+const MOVE_PREFIX = 'moveTo:';
+const MOVE_REMOVE_ONLY = '-';
+
+/** その行で選んである移し先（「外すだけ」は '-'）。選んでいなければ null */
+function moveChoiceOf(id) {
+  let found = null;
+  dropSetOf(id).forEach(function (key) {
+    if (key.indexOf(MOVE_PREFIX) === 0) found = key.slice(MOVE_PREFIX.length);
+  });
+  return found;
+}
+
+function setMoveChoice(id, value) {
+  const set = dropSetOf(id);
+  Array.from(set).forEach(function (key) {
+    if (key.indexOf(MOVE_PREFIX) === 0) set.delete(key);
+  });
+  if (value) set.add(MOVE_PREFIX + value);
+}
+
+function renderMoveChoice(item) {
+  if (moveChoiceOf(item.id) === null && item.moveChoice.selected) {
+    setMoveChoice(item.id, item.moveChoice.selected);
+  }
+  const chosen = moveChoiceOf(item.id);
+  const option = function (value, label) {
+    return '<option value="' + escapeHtml(value) + '"' +
+      (chosen === value ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+  };
+  return '<div class="move-choice"><label>移し先 <select data-move-for="' +
+    escapeHtml(item.id) + '">' +
+    (chosen === null ? '<option value="" selected disabled>（選んでください）</option>' : '') +
+    item.moveChoice.options.map(function (entry) {
+      return option(entry.id, entry.name);
+    }).join('') +
+    option(MOVE_REMOVE_ONLY, '外すだけ（どこへも移さない）') +
+    '</select></label></div>';
 }
 
 // 外から置かれた指摘の札（2026-10-01）。中のAIの指摘には何も出さない

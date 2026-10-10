@@ -11,6 +11,7 @@ import type { RecordChange } from "../models/jsonValidation";
 import { CHARACTER_FIELD_LABELS } from "./characterFieldLabels";
 import { createNameResolver } from "./characterNameResolve";
 import { normalizeForComparison } from "./groundedEvidence";
+import { sha1Text } from "./hash";
 import {
   addFacetTo,
   composePersonality,
@@ -540,6 +541,51 @@ export function applyNarratorMoves(
     missing,
     notes,
   };
+}
+
+/**
+ * 移す案1件の鍵（提案パネルの承認待ち・見送りの記録。0.102.3）。
+ *
+ * **`removeFrom` が照合に使うのと同じ材料で組む**——同じ値・同じ話数の案は
+ * 同じ鍵になり、承認待ちへ二重に積まない・見送った案を積み直さない。
+ * 移し先・根拠・項目名は入れない（移し先の候補は資料が増えると変わる。
+ * 根拠の引用は抽出のたびに揺れる）。主人公の id を含めるのは、別の人物の
+ * 同じ値と取り違えないため。
+ */
+export function narratorMoveKey(sourceId: string, item: NarratorMoveItem): string {
+  return sha1Text([sourceId, item.kind, ...narratorMoveIdentity(item)].join("\u0000")).slice(0, 24);
+}
+
+/** 鍵の材料（`removeFrom` の照合と同じ項目） */
+function narratorMoveIdentity(item: NarratorMoveItem): string[] {
+  switch (item.kind) {
+    case "change":
+      return item.change ? [changeEntryKey(item.change)] : [item.value];
+    case "personalityFacet":
+    case "speechStyleFacet":
+      return item.facet
+        ? [item.facet.value, item.facet.chapters.join(",")]
+        : [item.value, item.chapters.join(",")];
+    case "relation":
+      return item.relation
+        ? [item.relation.name, item.relation.relation, String(item.relation.firstChapter ?? "")]
+        : [item.value];
+    case "address":
+      return item.address
+        ? [
+            item.address.targetName,
+            item.address.form.term,
+            String(item.address.form.firstChapter ?? ""),
+            String(item.address.form.lastChapter ?? ""),
+          ]
+        : [item.value];
+    case "firstPersonVariant":
+      return item.variant
+        ? [item.variant.form, item.variant.chapters.join(",")]
+        : [item.value, item.chapters.join(",")];
+    case "appearedChapters":
+      return [item.chapters.join(",")];
+  }
 }
 
 /** 主人公から1件外す。いまの資料に見つからなければ false */

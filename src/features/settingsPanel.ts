@@ -22,6 +22,7 @@ import {
 } from "../core/characterSeparate";
 import { normalizeName } from "../core/characterMerge";
 import { PendingUpdateStore } from "../core/pendingUpdates";
+import { PendingNarratorMoveStore } from "../core/pendingNarratorMoveStore";
 import {
   AbilitySystemStore,
   createAbilityStore,
@@ -3075,7 +3076,10 @@ export class SettingsPanel {
   private async countPendingUpdates(): Promise<string> {
     const counts: Partial<Record<SettingsKind, number>> = {};
     try {
-      counts.character = await new PendingUpdateStore(this.work).count();
+      counts.character =
+        (await new PendingUpdateStore(this.work).count()) +
+        // 移す案（設計書6.5.12、0.102.3）も人物の承認待ちとして数える（印と同じ）
+        (await new PendingNarratorMoveStore(this.work).count());
     } catch {
       // 読めない作品は0件として扱う（印と同じ）
     }

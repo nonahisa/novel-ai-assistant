@@ -70,6 +70,7 @@ import {
 } from "../prompts/characterExtract";
 import { withAiTurnProgress } from "./aiTurn";
 import {
+  logFailure,
   showLog,
   useLogFile,
   workLog,
@@ -89,6 +90,7 @@ import {
 import { PendingUpdateStore } from "../core/pendingUpdates";
 import { describeHeldChanges } from "../core/recordChanges";
 import { applyPendingCharacterUpdates } from "./applyPendingUpdates";
+import { stageNarratorMovesAfterExtraction } from "./narratorMovePending";
 import type { ProposalPanel } from "./proposalPanel";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
@@ -1217,6 +1219,33 @@ export async function extractCharacters(
   }
 
   /*
+    **主人公の資料に、語り手の取り違えで入った疑いのある値があれば、別の人物へ
+    移す案を承認待ちに積む**（作者の裁定 2026-10-10「提案パネルにも出す」。
+    設計書6.5.12）。自動では動かさない——提案パネルで作者が承認したときだけ。
+    同じ案・見送った案は積まない（`planNarratorMoveStaging`）。
+
+    人物を保存しない指定の回は見ない。ここで失敗しても抽出は成功させる
+    （記録に残すだけ）——移す案は抽出の結果ではなく、その後の見直しである。
+  */
+  let narratorMoveCount = 0;
+  if (saveKinds.has("characters")) {
+    try {
+      narratorMoveCount = await stageNarratorMovesAfterExtraction(work);
+      if (narratorMoveCount > 0) {
+        log.step(`語り手の取り違えの疑いで、別の人物へ移す案を ${narratorMoveCount}件 承認待ちにしました`);
+        settingsNotice +=
+          `\n主人公の資料に、ほかの語り手の場面から入った疑いのある値があります。` +
+          `別の人物へ移す案 ${narratorMoveCount}件を承認待ちにしました（「提案を見る」から確認できます）`;
+      }
+    } catch (error) {
+      useLogFile(work.folderPath);
+      logFailure("移す案（語り手の取り違え）を積めなかった（抽出は続行）", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /*
     **終わったことと、件数の内訳を記録に残す**（作者の裁定、2026-09-19）。
 
     知らせ（通知）は消えるので、「新規0名・更新0名」で終わった回に、
@@ -1307,7 +1336,7 @@ export async function extractCharacters(
     // **承認待ちがあるなら、いちばん上に置く**（作者の指摘、2026-09-01）。
     // 抽出のあとに作者が決めるのは「全部反映するか、1件ずつ選ぶか」で、
     // それを引き受けるのは提案パネルである（設計書5.6・6.57.1）
-    ...(pendingUpdateCount > 0 ? ["提案を見る"] : []),
+    ...(pendingUpdateCount > 0 || narratorMoveCount > 0 ? ["提案を見る"] : []),
     ...(failures.length > 0 ? ["詳細を表示", "ログを表示"] : []),
     ...(hasSettingsFailure ? ["設定を開く"] : []),
     ...(merged ? ["設定資料を見る"] : []),

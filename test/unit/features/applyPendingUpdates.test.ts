@@ -61,6 +61,22 @@ vi.mock("../../../src/core/pendingSettingsUpdates", () => ({
   },
 }));
 
+// 語り手の取り違えの移す案（0.102.3）。ここでは空の置き場（本物は narratorMovePending.test.ts）
+vi.mock("../../../src/core/pendingNarratorMoveStore", () => ({
+  PendingNarratorMoveStore: class {
+    async loadAll() {
+      return { moves: [], errors: [] };
+    }
+    async discard() {}
+  },
+  NarratorMoveDismissedHistory: class {
+    async load() {
+      return new Set<string>();
+    }
+    async add() {}
+  },
+}));
+
 vi.mock("../../../src/core/customFieldStore", () => ({
   CustomFieldStore: class {
     async loadFields() {

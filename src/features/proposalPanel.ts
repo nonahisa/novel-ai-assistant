@@ -717,6 +717,18 @@ export interface RecordUpdateViewItem {
    * `source`（どの話から来たか）・`origin`（外部AIか）とは別の話である。
    */
   producedBy?: FindingProducer;
+  /**
+   * 移し先を選ぶ欄（語り手の取り違えの移す案だけが持つ。設計書6.5.12、0.102.3）。
+   *
+   * 画面は候補と「外すだけ」を並べた選び口を出し、選んだものを ✕ の印と同じ
+   * 鍵の並びに `moveTo:` の頭で載せて送る（`MOVE_DESTINATION_KEY_PREFIX`）。
+   * `selected` は既定の移し先——名指しできた案だけ入り、**選ぶ案は null**
+   * （既定では選ばない。選ぶまで「反映する」は押せない）。
+   */
+  moveChoice?: {
+    options: Array<{ id: string; name: string }>;
+    selected: string | null;
+  };
 }
 
 type OutgoingMessage = IssuesMessage | RunningMessage;

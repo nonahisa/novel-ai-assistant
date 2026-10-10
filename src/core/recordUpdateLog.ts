@@ -148,3 +148,40 @@ export function batchVerbFromLabel(applyLabel: string | undefined): string {
   if (!applyLabel) return VERDICT_WORD.applied;
   return applyLabel.replace(/する$/, "");
 }
+
+/**
+ * 移す案（語り手の取り違えで主人公に入った値。設計書6.5.12）の1行（0.102.3）。
+ *
+ * 例：`設定資料の更新を適用：移す 人物「アジャーノ」役割「皇子」（第12話）→「殿下」（提案パネル）`
+ *
+ * **ふつうの更新案と同じ頭で書く**——「設定資料の更新を」で拾えば、移す案も
+ * 一緒に出る。差分（`CharacterDiff`）を持たないので、値は項目と話数で言う。
+ * 外すだけは `→（外すだけ）`、見送りは移し先を書かない。
+ */
+export function describeNarratorMoveLog(entry: {
+  verdict: RecordUpdateVerdict;
+  /** 主人公の名前 */
+  sourceName: string;
+  /** 項目と値と話数（`narratorMoveValueForLog`） */
+  value: string;
+  /** 移し先の名前。null は外すだけ（反映のときだけ見る） */
+  destinationName?: string | null;
+  via: RecordUpdateVia;
+  /** 移し先の値を上書きしなかった件数（`applyNarratorMoves` の notes） */
+  keptNotes?: number;
+}): string {
+  const arrow =
+    entry.verdict === "applied"
+      ? entry.destinationName
+        ? `→「${entry.destinationName}」`
+        : "→（外すだけ）"
+      : "";
+  const notes =
+    entry.verdict === "applied" && (entry.keptNotes ?? 0) > 0
+      ? `（移し先の値は変えず記録へ残した ${entry.keptNotes}件）`
+      : "";
+  return (
+    `設定資料の更新を${VERDICT_WORD[entry.verdict]}：移す 人物「${entry.sourceName}」` +
+    `${entry.value}${arrow}${notes}（${entry.via}）`
+  );
+}
