@@ -216,6 +216,12 @@ export interface PersonalityFacet {
  */
 export type SpeechStyleFacet = PersonalityFacet;
 
+/** 名前の出てこない語り手の印（`Character.unnamedNarrator`） */
+export interface UnnamedNarratorMark {
+  /** 地の文の一人称（「僕」） */
+  firstPerson: string;
+}
+
 export interface FirstPersonVariant {
   form: string;
   context: string | null;
@@ -336,6 +342,17 @@ export interface Character {
    * 増やさない（作者が開いて読むファイルである）。
    */
   rejectedValues?: RejectedValue[];
+  /**
+   * 名前の出てこない語り手として、**コードが作った記録の印**
+   * （作者の裁定、2026-10-10。`core/unnamedNarrator.ts`）。
+   *
+   * 名前は「語り手（僕）」の仮のもので、一人称の欄に `firstPerson` が入る。
+   * **作者が名前を付け直しても消さない**——次の抽出も「僕」で返ってくるので、
+   * 印で同じ語り手として引き当てないと、仮の名前の記録がまた作られる。
+   *
+   * 印の無い人物には欄ごと置かない（`rejectedValues` と同じ作法）。
+   */
+  unnamedNarrator?: UnnamedNarratorMark;
   /**
    * 作中での変化。作者が食い違いを「これは変化だ」と確定させたものが入る。
    * 話数と、分かれば作中の時期（`設定/timeline.json`）を持つ（設計書6.18）。
@@ -591,6 +608,15 @@ export function parseCharacter(raw: unknown): Character {
       };
     }
   );
+  // 名前の出てこない語り手の印（2026-10-10）。**壊れた形は読み込みエラーにする。**
+  // 黙って捨てると、次の抽出で同じ語り手の仮の記録がもう1件作られる。
+  // 持っていない資料は undefined のまま（欄を足さない）
+  let unnamedNarrator: UnnamedNarratorMark | undefined;
+  if (value.unnamedNarrator !== undefined) {
+    const mark = objectValue(value.unnamedNarrator, "unnamedNarrator");
+    requireNonEmptyString(mark.firstPerson, "unnamedNarrator.firstPerson");
+    unnamedNarrator = { firstPerson: mark.firstPerson as string };
+  }
   // 別人だと決めた相手（6.5.8）。**壊れた形は読み込みエラーにする。**
   // 黙って空にすると、作者の判断が消えたまま次の抽出でまとめ直される
   const distinctFrom = optionalObjectArray(value.distinctFrom, "distinctFrom", (entry, path) => {
@@ -656,6 +682,7 @@ export function parseCharacter(raw: unknown): Character {
     relations,
     rejectedRelations,
     ...(rejectedValues !== undefined ? { rejectedValues } : {}),
+    ...(unnamedNarrator !== undefined ? { unnamedNarrator } : {}),
     distinctFrom,
     personalityFacets,
     speechStyleFacets,

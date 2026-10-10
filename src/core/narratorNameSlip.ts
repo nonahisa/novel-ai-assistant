@@ -9,6 +9,7 @@ import { maskQuoted } from "./quotedSpans";
 import { sceneRanges, type SceneRange } from "./sceneBreaks";
 import { blankMemoLines } from "./sceneMemo";
 import { countNarrationFirstPersons } from "./workStyleFacts";
+import { hasUnnamedNarratorName } from "./unnamedNarrator";
 
 /**
  * 一人称の作品で、**語り手の名前が地の文に三人称で出ている所**を探す
@@ -136,6 +137,10 @@ export function narratorNameForms(
 function formsOf(person: Character, onlyNameParts: boolean): string[] {
   const full = person.name.trim();
   if (!full) return [];
+  // **名前の出てこない語り手（「語り手（僕）」）からは形を作らない**（2026-10-10）。
+  // 仮の名前は本文に出ず、別名に「僕」が混ざっていると「僕は」を名前の出現と
+  // 誤って拾う。作者が名前を付けたら、その名前で探す（印ではなく名前で見る）
+  if (hasUnnamedNarratorName(person)) return [];
   const compact = full.replace(/[\s　・･]+/gu, "");
   const parts = full.split(/[\s　・･]+/u).filter(Boolean);
   const forms = [full, compact, ...parts];

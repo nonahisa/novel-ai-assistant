@@ -7,9 +7,11 @@ import {
   nextCharacterId,
   relationFirstChapter,
   type CharacterTextField,
+  type UnnamedNarratorMark,
 } from "../models/character";
 import type { ExtractedCharacter } from "../prompts/characterExtract";
 import { clampSummary } from "./summaryLimit";
+import { placeUnnamedNarrator } from "./unnamedNarrator";
 import { createRejectedRelationMatcher } from "./rejectedRelations";
 import { fillReading, toDictionaryReading } from "./reading";
 import { normalizeGender } from "./gender";
@@ -140,6 +142,18 @@ export interface MergeResult {
     name: string;
     relation: string;
   }>;
+  /**
+   * 名前の出てこない語り手の候補を、同じ一人称の人物が2人以上いて
+   * どこへも置けなかったもの（2026-10-10。`unnamedNarrator.ts`）。
+   *
+   * **黙って捨てない。** 語り手が登録されなかった理由を完了報告に出す。
+   * 一人称ごとに1件（何話ぶん当たっても1件）。
+   */
+  unplacedNarrators: Array<{
+    firstPerson: string;
+    /** 同じ一人称を使う人物の名前 */
+    candidates: string[];
+  }>;
   /** 同一人物かもしれない組。自動では統合せず、作者の判断に委ねる */
   mergeCandidates: MergeCandidate[];
 }
@@ -259,7 +273,12 @@ export function describeMergeCandidate(candidate: MergeCandidate): string {
 
 export function mergeExtractedCharacters(
   existing: Character[],
-  extracted: Array<{ data: ExtractedCharacter; chapters: number[] }>
+  extracted: Array<{
+    data: ExtractedCharacter;
+    chapters: number[];
+    /** 名前の出てこない語り手の候補（`AcceptedCharacterCandidate.unnamedNarrator`） */
+    unnamedNarrator?: UnnamedNarratorMark;
+  }>
 ): MergeResult {
   // 作者が管理している元レコードを、入れ子の配列・オブジェクトを含めて保護する。
   const result: Character[] = existing.map((character) => structuredClone(character));
@@ -270,6 +289,7 @@ export function mergeExtractedCharacters(
   const rejectedDistinct: MergeResult["rejectedDistinct"] = [];
   const honorificMerges: MergeResult["honorificMerges"] = [];
   const skippedRejectedRelations: MergeResult["skippedRejectedRelations"] = [];
+  const unplacedNarrators: MergeResult["unplacedNarrators"] = [];
   /** 性格を面の形へ移した人物の id（報告は名前で、最後に並べ直す） */
   const personalityMigrated = new Set<string>();
   /** 報告済みの退けた記録（人物id と記録の位置）。何話ぶん当たっても1件に数える */
@@ -281,10 +301,37 @@ export function mergeExtractedCharacters(
   }> = [];
 
   for (const item of extracted) {
-    const ex = item.data;
+    let ex = item.data;
     if (!ex.name || !ex.name.trim()) continue;
 
-    const lookup = findCharacter(result, ex.name, ex.aliases ?? []);
+    // **名前の出てこない語り手は、名前ではなく一人称と印で引き当てる**
+    // （2026-10-10。`unnamedNarrator.ts`）。仮の名前で引き当てると、作者が
+    // 名前を付けた後の抽出で「語り手（僕）」がまた作られる
+    let lookup: CharacterLookup;
+    if (item.unnamedNarrator) {
+      const firstPerson = item.unnamedNarrator.firstPerson;
+      const placement = placeUnnamedNarrator(result, firstPerson);
+      if (placement.kind === "ambiguous") {
+        // どれが語り手か決められない。作らず、何もしなかったことを報告に出す
+        if (!unplacedNarrators.some((entry) => entry.firstPerson === firstPerson)) {
+          unplacedNarrators.push({
+            firstPerson,
+            candidates: placement.candidates.map((person) => person.name),
+          });
+        }
+        continue;
+      }
+      if (placement.kind === "existing") {
+        lookup = { match: placement.match, ambiguous: [] };
+        // 寄せ先の名前に揃える。仮の名前のままだと、作者が付けた名前の
+        // 記録へ「語り手（僕）」が別名として足される
+        ex = { ...ex, name: placement.match.name };
+      } else {
+        lookup = { ambiguous: [] };
+      }
+    } else {
+      lookup = findCharacter(result, ex.name, ex.aliases ?? []);
+    }
     const match = lookup.match;
 
     if (!match) {
@@ -297,6 +344,9 @@ export function mergeExtractedCharacters(
         otherRecordNames(result, c),
         result
       );
+      // 名前の出てこない語り手の印。名前を付け直したあとも、次の抽出で
+      // 同じ語り手として引き当てるのに使う（`placeUnnamedNarrator`）
+      if (item.unnamedNarrator) c.unnamedNarrator = { ...item.unnamedNarrator };
       result.push(c);
       added.push(c.name);
       changedIds.add(c.id);
@@ -467,6 +517,7 @@ export function mergeExtractedCharacters(
     rejectedDistinct,
     honorificMerges,
     skippedRejectedRelations,
+    unplacedNarrators,
     mergeCandidates: [
       ...ambiguousPairs.map((pair) => ({
         ...pair,

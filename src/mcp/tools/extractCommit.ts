@@ -199,6 +199,11 @@ export interface ExtractCommitResult {
   discardedChunks: Array<{ chunkId: string; reason: string }>;
   /** 検算で落とした件数・作者に判断を預けた食い違い */
   rejected: { characters: number; settings: number };
+  /**
+   * 名前の出てこない語り手を、同じ一人称の人物が2人以上いて置けなかったもの
+   * （2026-10-10。製品の完了報告と同じ中身）。無ければ欄ごと出さない
+   */
+  unplacedNarrators?: Array<{ firstPerson: string; candidates: string[] }>;
   conflicts: number;
   /** 読み取れた能力の総称と決まり。**保存していない** */
   abilitySystem: { abilityTerm: string | null; rules: string[] };
@@ -315,6 +320,9 @@ export function extractCommit(input: ExtractCommitInput): ExtractCommitResult {
       characters: result.rejectedCharacters.length,
       settings: result.rejectedSettings.length,
     },
+    ...((result.characterMerge?.unplacedNarrators.length ?? 0) > 0
+      ? { unplacedNarrators: result.characterMerge?.unplacedNarrators }
+      : {}),
     conflicts:
       (result.characterMerge?.conflicts.length ?? 0) +
       result.settingsMerge.abilityMerge.conflicts.length +

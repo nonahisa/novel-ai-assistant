@@ -361,6 +361,24 @@ export function characterSchema(): Record<string, unknown> {
         "集団名詞・汎用役職名か。true にすると一覧の末尾へ回り、" +
         "ハイライトとIME辞書から外れる",
     },
+    // 名前の出てこない語り手の印（2026-10-10）。外部のAIにも見せる——
+    // 消されると、次の抽出で「語り手（僕）」がもう1件作られる
+    unnamedNarrator: {
+      type: "object",
+      description:
+        "名前の出てこない一人称の語り手として、コードが作った記録の印。" +
+        "名前（「語り手（僕）」）は書き換えてよいが、**この印は消さないこと**" +
+        "（名前を付けたあとも、次の抽出で同じ語り手として引き当てるのに使う）",
+      required: ["firstPerson"],
+      additionalProperties: false,
+      properties: {
+        firstPerson: {
+          type: "string",
+          minLength: 1,
+          description: "地の文の一人称（「僕」）",
+        },
+      },
+    },
     romaji: { type: ["string", "null"] },
     icon: { type: ["string", "null"] },
     iconSource: { type: "string", enum: ["external", "generated", "none"] },
