@@ -3,7 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
 import { novelDetect } from "../../../src/mcp/tools/features";
-import { scanNarratorSlips } from "../../../src/mcp/tools/proofread";
+import {
+  proofreadPrompt,
+  proofreadValidate,
+  scanNarratorSlips,
+  viewpointNarratorFor,
+} from "../../../src/mcp/tools/proofread";
 
 /**
  * 語り手の名前が地の文に出る所を、外から数える（設計書6.9.2、2026-09-25）。
@@ -109,5 +114,52 @@ describe("語り手の名前が地の文に出る所（MCP）", () => {
       slips: unknown[];
     };
     expect(result.slips).toHaveLength(1);
+  });
+});
+
+/**
+ * 推敲の検算へ渡す語り手（2026-10-10）。地の文に一人称の語が0回の話でも、
+ * 作品全体で語り手が決まっていれば視点の札（B・C）を通す。**MCP の測定が
+ * 製品と同じ検算を通る**ことを、検算の入口（`proofreadValidate`）から見る。
+ */
+describe("推敲の検算へ渡す語り手（MCP）", () => {
+  it("一人称の台では語り手と名前の形を、三人称の台では null を返す", () => {
+    const narrator = viewpointNarratorFor(SEEDED);
+    expect(narrator?.firstPerson).toBe("俺");
+    expect(narrator?.nameForms).toContain("相沢");
+    expect(viewpointNarratorFor(THIRD_PERSON)).toBeNull();
+  });
+
+  it("代名詞の無い話の視点の指摘を、検算が通す", () => {
+    const folder = fs.mkdtempSync(nodePath.join(os.tmpdir(), "narrator-vp-"));
+    made.push(folder);
+    fs.cpSync(SEEDED, folder, { recursive: true });
+    const added = "本文/006_代名詞の無い朝.txt";
+    fs.writeFileSync(
+      nodePath.join(folder, added),
+      [
+        "　朝の坂を上る。",
+        "　郵便局の窓口には、もう灯りが点いている。",
+        "　蓬田さんは内心、この無口な配達員を気に入っていた。",
+        "　鞄を下ろして、伝票の束を数える。",
+      ].join("\n")
+    );
+    const prompts = proofreadPrompt({ folder, filePath: added, numCtx: 8192 });
+    const chunk = prompts.chunks[0];
+    const response = JSON.stringify({
+      issues: [
+        {
+          line: 3,
+          original: "蓬田さんは内心、この無口な配達員を気に入っていた。",
+          suggestion: "",
+          reason: "視点",
+          explanation: "「俺」の語りの中に、蓬田さんの「内心」が言い切られています",
+          confidence: "medium",
+        },
+      ],
+    });
+    const result = proofreadValidate({ folder, chunkId: chunk.chunkId, response });
+    expect(result.rejected.map((entry) => entry.reason)).toEqual([]);
+    expect(result.accepted.map((issue) => issue.reason)).toEqual(["視点"]);
   });
 });

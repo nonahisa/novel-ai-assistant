@@ -8,7 +8,11 @@ import { suggestsOpeningKanji } from "./notationVariants";
 import { isKeptWord, type KeepWord } from "../models/keepWord";
 import { maskQuoted, quotedSpans, removeQuoted } from "./quotedSpans";
 import { sceneRanges } from "./sceneBreaks";
-import { narrationFirstPersonOf } from "./workStyleFacts";
+import { narratorNameSubjectPattern } from "./narratorNamePattern";
+import {
+  countNarrationFirstPersons,
+  narrationFirstPersonOf,
+} from "./workStyleFacts";
 import {
   issueBudget,
   PROOFREAD_REASONS,
@@ -180,9 +184,17 @@ export interface RejectedProofreadIssue {
     /**
      * 説明が、ほかの人物の心（気持ち・感覚）にも、視点の移りにも触れていない。
      * 「年齢への言及」「確信が言い切られています」のような、誰の心の話でも
-     * ない指摘。説明が空なら、誰の心かを確かめられないので同じく落とす
+     * ない指摘。説明が空なら、誰の心かを確かめられないので同じく落とす。
+     * 代名詞の無い場面（作品の語り手から見なした場面）では、原文の段落の
+     * 地の文に心の語が無ければ、説明にあっても落とす（2026-10-10）
      */
     | "no_other_mind"
+    /**
+     * 代名詞の無い一人称の場面（作品の語り手から見なした場面）で、説明が
+     * 名指しした人物が、原文の段落の地の文で主語に一度も立っていない
+     * （2026-10-10。主語の無い文は語り手のこと。`namedOtherIsSubject`）
+     */
+    | "no_named_other"
     /**
      * 「漢字ひらき」の札だが、**原文に漢字が無いか、説明が挙げた漢字が原文に無い**
      * （しかも修正案が空）。ひらく字の無い所に貼った札で、どこを直すのか分からない
@@ -1094,6 +1106,33 @@ export const VIEWPOINT_INTENT_NOTE = "（わざとなら、このままで構い
 const VIEWPOINT_SCENE_MIN_FIRST_PERSON = 2;
 
 /**
+ * 作品全体で決まった語り手（`detectNarrator`。設計書6.10.6／6.9.2 の A と同じ判定）。
+ *
+ * **代名詞の無い一人称の場面を拾うために渡す**（2026-10-10）。上の関門だけだと、
+ * 地の文に「俺」が1回も出ない話（未亡人13話）では、仕込んだ本物のよじれ（B・C）を
+ * 26b が2回とも挙げたのに、4件とも `not_first_person_scene` で落ちた。
+ * 作品全体で「俺」の語り手が決まっているなら、一人称の語が0回の場面も
+ * その語り手の場面と見なす（`isPronounlessNarratorScene`）。
+ * 作り方は `narratorNameSlip.ts` の `viewpointNarratorOf`。
+ */
+export interface ViewpointNarrator {
+  /** 語り手の一人称（「俺」） */
+  firstPerson: string;
+  /** 地の文で探す語り手の名前の形（`narratorNameForms`。長いものから） */
+  nameForms: readonly string[];
+}
+
+/**
+ * 一人称の語が0回の場面で、語り手の名前が地の文の主語（名前＋は／が／も）に
+ * これだけ立っていたら、**三人称の語り**と見て視点の札を出さない。
+ *
+ * 1回は許す——それは人称のよじれ（A。「俺は」を「相沢は」と書いた所）の
+ * 候補で、場面そのものは一人称である。2回以上なら、語り手を外から名前で
+ * 書いている場面（6.9.2 の A の2番と同じ考え方）。
+ */
+const PRONOUNLESS_SCENE_MAX_NAME_SUBJECTS = 1;
+
+/**
  * 語り手の推し量り。**言い切っていない**ので、知り得ない心を書いたことにならない。
  *
  * 「〜だろうと思い」の「だろう」は、**人物の考えの中身**である（仕込み C の
@@ -1133,6 +1172,10 @@ const FIRST_PERSON_WORDS =
 const NARRATOR_OWN_MIND = new RegExp(
   `(「(?:${FIRST_PERSON_WORDS})」|(?<!\\p{Script=Han})(?:${FIRST_PERSON_WORDS}))(自身)?の(心の声|思考|独白|内面|考え|心情|心理|感情|気持ち|思い|本音|推測|判断|感想|内心)` +
     "|(語り手|自分)(自身)?の(心|思考|独白|内面|考え|感情|心理|気持ち|思い)" +
+    // 「語り手の評価です」「語り手の主観的な感想」——説明そのものが語り手の考えだと
+    // 言っている（2026-10-10、代名詞の無い場面の測定で 26b）。「自分の評価」は
+    // 他人が自分の評価を気にする話にも使うので、語り手だけに限る
+    "|語り手(自身)?の(評価|主観|感想|判断|見立て|認識)" +
     // 「兵士の視点の中に、兵士自身の…」——視点人物が自分の心を書いている
     "|(?<who>[^\\s、。「」『』]{1,10})の(視点|語り)[^、。]{0,6}、\\k<who>自身の" +
     "|独白|一般的な|一般論|客観的|知識|解説|説明的|状況を説明|状況の説明" +
@@ -1161,12 +1204,17 @@ function viewpointRejection(
   chunkLines: readonly string[],
   lineIndex: number,
   original: string,
-  explanation: string
+  explanation: string,
+  narrator: ViewpointNarrator | null
 ): RejectedProofreadIssue["reason"] | undefined {
   const found = lineHolding(chunkLines, lineIndex, original);
-  if (!isFirstPersonScene(chunk, chunkLines, found?.index ?? lineIndex)) {
-    return "not_first_person_scene";
-  }
+  const scene = firstPersonSceneKind(
+    chunk,
+    chunkLines,
+    found?.index ?? lineIndex,
+    narrator
+  );
+  if (!scene) return "not_first_person_scene";
   const line = found ? chunkLines[found.index] : original;
   const at = found ? found.at : 0;
   if (
@@ -1193,7 +1241,60 @@ function viewpointRejection(
   ) {
     return "no_other_mind";
   }
+  if (scene === "pronounless" && narrator) {
+    // **代名詞の無い場面では、心の語を本文の側に求める**（2026-10-10）。
+    // 一人称の語で「これは語り手の場面だ」と確かめられないぶん、AIの言い換えだけを
+    // 頼りにしない。26b が「少年が腰を抜かしてへたり込む」（見える動作）を
+    // 「殺気を感じて腰を抜かす」と言い換えて挙げ、説明の「感じ」で上を抜けた。
+    // 見るのは**原文を含む文**（段落ではない）。段落で見ると、同じ段落の別の文の
+    // 「オークが怒りの声をあげ」（見える声）の「怒」で通ってしまった（2026-10-10 の測定）
+    if (!OTHER_MIND.test(sentence)) return "no_other_mind";
+    if (!namedOtherIsSubject(line, explanation, narrator)) return "no_named_other";
+  }
   return undefined;
+}
+
+/**
+ * 段落（行）の地の文で主語に立つ名前（名前＋敬称？＋は／が／も）。
+ * 片仮名2字以上か、漢字1〜6字の並びを名前の候補と見る（平仮名の名前は拾わない
+ * ——拾えないときは落とす側へ倒れる）。
+ */
+const LINE_SUBJECT =
+  /(?:(?<![\p{Script=Katakana}ー])([\p{Script=Katakana}ー]{2,})|(?<!\p{Script=Han})(\p{Script=Han}{1,6}))(?:さん|くん|さま|ちゃん)?(?:は|が|も)/gu;
+/** 漢字の敬称。漢字の並びに続けて書かれるので、名前の候補から外して比べる */
+const KANJI_HONORIFIC = /(君|様|殿)$/u;
+
+/**
+ * 代名詞の無い場面で、説明が名指しした人物が、原文の段落（行）の地の文で
+ * 主語に立っているか（2026-10-10）。
+ *
+ * 一人称の語が0回の場面は、主語の無い文がすべて語り手のことである。
+ * 関門を緩めたあと 26b が「特大のファイアボールが…飛ぶ。弱めと指示した
+ * つもりだったんだけど、ある意味予想通りだ。」（語り手自身の考え）を
+ * 「エルシーの…評価が混ざっています」として挙げ、「つもり」が心の語に当たって
+ * `no_other_mind` を抜けた。**名指しされた人物が段落の主語に一度も立って
+ * いなければ、その人物の心を書いた文ではない**として落とす。
+ *
+ * 見るのは**段落**（文ではない）——C は「段落の途中で」視点が移る形で、
+ * 「エルシーさんは杖を握り直した。きっと…と思い、胸が弾んだ。」の2文目には主語が無い。
+ * 一人称の語が数えられる場面（`scene === "pronoun"`）では見ない（今までどおり）。
+ */
+function namedOtherIsSubject(
+  line: string,
+  explanation: string,
+  narrator: ViewpointNarrator
+): boolean {
+  // **説明の「」の中は見ない。** 説明が原文を「」で引くと、段落の主語の候補
+  // （「火力も」の「火力」）がそこにだけ現れて、名指ししたことになってしまう
+  // （26b、「「最悪エルシーさんの火力もある」は、…語り手の評価です」）
+  const named = removeQuoted(explanation);
+  for (const matched of maskQuoted(line, " ").matchAll(LINE_SUBJECT)) {
+    const name = matched[1] ?? matched[2] ?? "";
+    const bare = name.replace(KANJI_HONORIFIC, "");
+    if (!bare || narrator.nameForms.includes(bare)) continue;
+    if (named.includes(bare)) return true;
+  }
+  return false;
 }
 
 /**
@@ -1240,12 +1341,20 @@ function liesInDialogue(
   );
 }
 
-/** その行を含む場面（区切りと話の境で割る）の地の文が、一人称で語られているか */
-function isFirstPersonScene(
+/**
+ * その行を含む場面（区切りと話の境で割る）の地の文が、一人称で語られているか。
+ * 一人称の語で数えられた場面は "pronoun"、語り手の場面と見なした代名詞の無い
+ * 場面は "pronounless"（後ろで名指しの人物を確かめる）、どちらでもなければ null。
+ *
+ * 作品の語り手が決まっていれば、一人称の語が0回の場面も語り手の場面と
+ * 見なす（`isPronounlessNarratorScene`、2026-10-10）
+ */
+function firstPersonSceneKind(
   chunk: Chunk,
   chunkLines: readonly string[],
-  lineIndex: number
-): boolean {
+  lineIndex: number,
+  narrator: ViewpointNarrator | null
+): "pronoun" | "pronounless" | null {
   // まとめたチャンクでは、話の境でも場面を割る（別の話の一人称を数えない）
   const segmentStarts = segmentsOf(chunk).map((segment) =>
     countNewlines(chunk.text, segment.start)
@@ -1253,9 +1362,48 @@ function isFirstPersonScene(
   const scene = sceneRanges(chunkLines, segmentStarts).find(
     (range) => lineIndex >= range.start && lineIndex < range.end
   );
-  if (!scene) return false;
+  if (!scene) return null;
   const text = chunkLines.slice(scene.start, scene.end).join("\n");
-  return narrationFirstPersonOf(text, VIEWPOINT_SCENE_MIN_FIRST_PERSON) !== null;
+  if (narrationFirstPersonOf(text, VIEWPOINT_SCENE_MIN_FIRST_PERSON) !== null) {
+    return "pronoun";
+  }
+  return narrator !== null && isPronounlessNarratorScene(text, narrator)
+    ? "pronounless"
+    : null;
+}
+
+/**
+ * 地の文に一人称の語が1つも無い場面を、作品の語り手の一人称の場面と見なせるか
+ * （2026-10-10。`ViewpointNarrator` の説明）。
+ *
+ * 見なさないのは、**別の人称がはっきり出ている場面**だけ（6.9.2 の A の2番に合わせる）。
+ *
+ * - **一人称の語が1つでもあれば、ここでは見ない**（上の関門の判定に任せる）。
+ *   別の人物の一人称（多視点の作品の、千夏の「私」の章）が出る場面を拾わないため。
+ *   語り手の一人称が1回だけの場面も今までどおり——1回では決めない
+ *   （三人称の場面の地の文にも、心の声の「俺」が1つ混じることはある）
+ * - **語り手の名前が地の文の主語に2回以上立つ場面**は、語り手を外から名前で
+ *   書いている三人称の語りなので見ない（`PRONOUNLESS_SCENE_MAX_NAME_SUBJECTS`）
+ *
+ * 語り手自身の心の声を「視点」で挙げた誤検出（1.11 でこの関門を入れた理由。
+ * 26b で7件）は、ここでは止めない。後ろの守り（`observable`・`narrator_own_mind`・
+ * `no_other_mind` など）が受け持つ。
+ */
+function isPronounlessNarratorScene(
+  text: string,
+  narrator: ViewpointNarrator
+): boolean {
+  if (countNarrationFirstPersons(text).size > 0) return false;
+  if (narrator.nameForms.length === 0) return true;
+  const pattern = narratorNameSubjectPattern(narrator.nameForms);
+  let subjects = 0;
+  // 台詞（「」『』）の中の名前は、ほかの人物が呼んでいるだけなので数えない
+  for (const line of maskQuoted(text, "　").split("\n")) {
+    // 見出しは地の文ではない
+    if (/^\s*#/u.test(line)) continue;
+    for (const _ of line.matchAll(pattern)) subjects += 1;
+  }
+  return subjects <= PRONOUNLESS_SCENE_MAX_NAME_SUBJECTS;
 }
 
 /** 行の `at` の位置が丸括弧の中か */
@@ -1472,7 +1620,13 @@ export function validateProofreadIssues(
    * **推敲は原文まるごとを置き換える**ので、守る語が原文に含まれていたら
    * その指摘ごと出さない。言い換えれば必ず巻き込むためである。
    */
-  keepWords: KeepWord[] = []
+  keepWords: KeepWord[] = [],
+  /**
+   * 作品全体で決まった語り手（`viewpointNarratorOf`）。決まらない作品・
+   * 人物の資料が読めない作品では渡さない（今までどおり、一人称の語が
+   * 数えられる場面でしか視点の札を出さない）
+   */
+  narrator: ViewpointNarrator | null = null
 ): {
   accepted: AcceptedProofreadIssue[];
   rejected: RejectedProofreadIssue[];
@@ -1691,7 +1845,8 @@ export function validateProofreadIssues(
         chunkLines,
         line - firstLine,
         original,
-        asString(item.explanation)
+        asString(item.explanation),
+        narrator
       );
       if (dropped) {
         rejected.push({ raw: item, reason: dropped });
