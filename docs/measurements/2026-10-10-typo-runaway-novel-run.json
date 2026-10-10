@@ -1,0 +1,61 @@
+{
+ "runner": "ollama",
+ "note": "手元の Ollama で1件を検算まで通しました（原稿はこの機械から出ていません）。1件は失敗しています（理由は failures）。検算（validate）を通していない結果は、製品の結果ではありません。",
+ "model": "gemma4:26b",
+ "temperature": 0,
+ "results": [
+  {
+   "chunkId": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\aa802787-65db-4c41-8484-fcc6029eac4e\\scratchpad\\tayu\\episode_0001.md#1-0@4013",
+   "chapterLabel": "第1話",
+   "accepted": [
+    {
+     "line": 30,
+     "original": "いますい",
+     "target": "いますい",
+     "suggestion": "います",
+     "reason": "脱字",
+     "confidence": "medium"
+    },
+    {
+     "line": 33,
+     "original": "出来ていた。い",
+     "target": "出来ていた。い",
+     "suggestion": "出来ていた。",
+     "reason": "衍字",
+     "confidence": "high"
+    }
+   ],
+   "rejected": [
+    {
+     "line": 24,
+     "target": "今あ日",
+     "reason": "notation_mark"
+    },
+    {
+     "line": 28,
+     "target": "挨拶を雨雨雨雨すると",
+     "reason": "ungrounded"
+    }
+   ]
+  }
+ ],
+ "failures": [
+  {
+   "chunkId": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\aa802787-65db-4c41-8484-fcc6029eac4e\\scratchpad\\tayu\\episode_0001.md#1-1@4013",
+   "reason": "出力が上限（11264 トークン）に達したので打ち切りました。そこまでの応答は検算を通りませんでした: 応答を読み取れませんでした（誤字脱字のスキーマに沿っていません。JSONの形か、項目が合っていません）。"
+  }
+ ],
+ "modelSizeDecision": {
+  "source": "product",
+  "parameterSize": "25.2B",
+  "tier": "high",
+  "product": {
+   "typoModelSize": "large",
+   "deviationModelSize": "large",
+   "categories": "all",
+   "suppression": "loose"
+  },
+  "given": [],
+  "note": "申告の大きさ 25.2B から、製品と同じ判定で決めました"
+ }
+}
