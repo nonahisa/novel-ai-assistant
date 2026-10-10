@@ -16,12 +16,14 @@ import {
   isSettingsJsonPath,
 } from "../core/settingsConflictRule";
 import {
+  describeChoicePlaceholder,
   describeConflict,
   parseConflicts,
   resolveConflicts as buildResolvedText,
   sideFileName,
   type ConflictParseResult,
 } from "../core/conflictFile";
+import { readMachineName } from "./windowCard";
 import { countChars, formatCount } from "../core/charCount";
 import { logFailure, logStep, showLog, useLogFile } from "../core/logger";
 import { lastAuthorOf } from "../core/git";
@@ -114,6 +116,11 @@ export interface WalkConflictsOptions {
    * `manuscriptsOnly` で設定資料が出てきたときだけは、入口の窓で訊く
    */
   start?: ConflictWalkStart;
+  /**
+   * このパソコンの名前（差分の見出しと選択肢に出す）。`null` は名前が無い
+   * （ブラウザ版など）。省けばここで読む——呼び出し側が既に読んでいれば渡す
+   */
+  machineName?: string | null;
 }
 
 /**
@@ -138,6 +145,12 @@ export type ReviewOutcome =
   | "resolved"
   /** 作者が選ばずに閉じた */
   | "cancelled"
+  /**
+   * 選んだが、確定できなかった（書き戻しや別ファイルの作成に失敗した）。
+   * **「選ばずに閉じた」とは分ける**——閉じたときの訊き直し（「選ばずに
+   * 閉じました」）を、失敗のあとに出すと事実と違う
+   */
+  | "failed"
   /** 「自分で直す」を選んだ。ファイルを開いてある */
   | "manual"
   /** マーカーを読み取れず、こちらからは確定できなかった */
@@ -162,6 +175,21 @@ interface ReviewOptions extends ResolveConflictsOptions {
   sides?: { ours: string; theirs: string };
   /** 確定したことを個別に知らせない（まとめて知らせる側が使う） */
   quiet?: boolean;
+  /** このパソコンの名前。`null`・省略なら「このパソコン」とだけ出す */
+  machineName?: string | null;
+  /**
+   * 「両方とも残す」で作った別ファイル（置き場からの道、`/` 区切り）を足す先。
+   *
+   * **ここでは git に足さない**（索引へ入れない）。合流の途中で足すと、
+   * やめたときの `merge --abort` が索引ごと戻し、別ファイルが消えるおそれがある。
+   * 記録の直前に、合流する側（`foldDivergence`）がまとめて足す
+   */
+  sideFiles?: string[];
+  /**
+   * 一覧を選ばずに閉じたとき、もう一度出すか（作者の裁定、2026-10-11「閉じない＋訊き直す」）。
+   * true を返したら同じ一覧をもう一度出す。省けば、閉じたら「選ばずに閉じた」で終わる
+   */
+  onClosed?: () => Promise<boolean>;
 }
 
 /** 競合しているファイルを集める */
@@ -229,7 +257,10 @@ export async function resolveWorkConflicts(
   );
   if (!picked || !("file" in picked)) return;
 
-  await reviewConflict(work, picked.file, options);
+  await reviewConflict(work, picked.file, {
+    ...options,
+    machineName: await readMachineName(),
+  });
 }
 
 /** 1ファイルぶんの見比べと解決 */
@@ -254,8 +285,13 @@ async function reviewConflict(
   const theirs = options.sides
     ? options.sides.theirs
     : buildResolvedText(original.text, "theirs");
-  const theirsLabel = file.parsed.hunks[0]?.theirsLabel || "別環境";
-  const oursLabel = file.parsed.hunks[0]?.oursLabel || "この環境";
+  const fileName = path.basename(file.relativePath);
+  // **左右は「このパソコン」と「もう1台」で呼ぶ**（作者の裁定、2026-10-11）。
+  // それまでは git の印（`origin/main:本文/第9話.txt`）がそのまま見出しに出ており、
+  // 作者には何のことか読めなかった
+  const here = options.machineName
+    ? `このパソコン（${options.machineName}）`
+    : "このパソコン";
 
   // **誰の版かを出す**（設計書5.5.4）。
   // 「別環境の版」とだけ出すと、編集部の直しが自分の書き忘れに見える。
@@ -272,61 +308,59 @@ async function reviewConflict(
     file.relativePath,
     "HEAD"
   ).catch(() => undefined);
-  const oursWho = oursAuthor ? `／${oursAuthor}` : "";
-  const theirsWho = theirsAuthor ? `／${theirsAuthor}` : "";
-
-  // 両方を並べて見せる。左がこの環境、右が別環境
+  // 両方を並べて見せる。左がこのパソコン、右がもう1台
   const key = `${work.id}-${Date.now()}`;
-  const leftUri = options.provider.register(
-    key,
-    `この環境（${oursLabel}${oursWho}）`,
-    ours
-  );
-  const rightUri = options.provider.register(
-    key,
-    `別環境（${theirsLabel}${theirsWho}）`,
-    theirs
-  );
+  const leftUri = options.provider.register(key, here, ours);
+  const rightUri = options.provider.register(key, "もう1台", theirs);
   await vscode.commands.executeCommand(
     "vscode.diff",
     leftUri,
     rightUri,
-    `${path.basename(file.relativePath)}: この環境 ↔ 別環境`,
+    `${fileName}：このパソコン ↔ もう1台`,
     { preview: true }
   );
 
   const oursCount = countChars(ours).net;
   const theirsCount = countChars(theirs).net;
+  // **別ファイルの名前はここで1回だけ決める。** 一覧に見せた名前と、
+  // 実際に作る名前が（分をまたいで）ずれないようにするため
+  const sideName = sideFileName(
+    fileName,
+    new Date(),
+    await namesInFolder(path.dirname(file.absolutePath))
+  );
 
   // **選択肢の意味は変えない**（設計書5.5.4）。出す・出さないだけを場面で選ぶ
   const omitted = new Set(options.omit ?? []);
   const items: Array<vscode.QuickPickItem & { action: ConflictAction }> = [
     {
-      label: "$(arrow-left) こちらを採用",
+      label: "$(arrow-left) 左の文を残す（このパソコン）",
       description:
-        `この環境の版（${formatCount(oursCount)}字）` +
+        `${formatCount(oursCount)}字` +
         (oursAuthor ? `／最後に触ったのは ${oursAuthor}` : ""),
-      detail: "別環境の変更は捨てられます。",
+      detail: "原稿はこのパソコンの文になります。もう1台の文は原稿に残りません。",
       action: "ours",
     },
     {
-      label: "$(arrow-right) 別環境のものを採用",
+      label: "$(arrow-right) 右の文を残す（もう1台）",
       description:
-        `別環境の版（${formatCount(theirsCount)}字）` +
+        `${formatCount(theirsCount)}字` +
         (theirsAuthor ? `／最後に触ったのは ${theirsAuthor}` : ""),
-      detail: theirsAuthor
-        ? `この環境の変更は捨てられます。${theirsAuthor} の直しを採ります。`
-        : "この環境の変更は捨てられます。",
+      // 編集部と書くときは、右が編集部の直しのことがある。誰の直しかを添える
+      detail:
+        "原稿はもう1台の文になります。このパソコンの文は原稿に残りません。" +
+        (theirsAuthor ? `${theirsAuthor} の直しを採ります。` : ""),
       action: "theirs",
     },
   ];
   if (!omitted.has("both")) {
     items.push({
-      label: "$(files) 両方を残す",
-      description: "別環境の版を別ファイルへ書き出す",
+      label: "$(files) 両方とも残す",
+      description: "原稿は左の文、右の文は別のファイルへ",
       detail:
-        `${sideFileName(path.basename(file.relativePath), theirsLabel)} を作り、` +
-        "本文はこの環境の版にします。迷ったらこれが安全です。",
+        "原稿はこのパソコンの文のままにして、もう1台の文を同じフォルダーの" +
+        `「${sideName}」へ保存します。あとで読み比べて手で直せます。` +
+        "迷ったらこれを選んでください。",
       action: "both",
     });
   }
@@ -339,11 +373,23 @@ async function reviewConflict(
     });
   }
 
-  const choice = await vscode.window.showQuickPick([...items, cancelItem()], {
-    title: `${path.basename(file.relativePath)} をどう解決しますか`,
-    placeHolder: describeConflict(file.parsed),
-  });
-  if (!choice || !("action" in choice)) return "cancelled";
+  // **差分を読みに行っても閉じない**（ignoreFocusOut）。作者は差分の画面を
+  // 触って読み比べるので、そのたびに一覧が消えると「選ばずに閉じた」になる
+  // （2026-10-11、作者の実機確認で、選ぶ前に一覧が消えて最初へ戻った）
+  const pickAction = async (): Promise<(typeof items)[number] | undefined> => {
+    for (;;) {
+      const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
+        title: `${fileName}：どちらの文を残しますか`,
+        placeHolder: describeChoicePlaceholder(file.parsed),
+        ignoreFocusOut: true,
+      });
+      if (picked && "action" in picked) return picked;
+      // 選ばずに閉じた。訊き直す口があれば訊き、［もう一度選ぶ］なら同じ一覧を出す
+      if (!(await options.onClosed?.())) return undefined;
+    }
+  };
+  const choice = await pickAction();
+  if (!choice) return "cancelled";
 
   if (choice.action === "manual") {
     await openFile(file.absolutePath);
@@ -353,11 +399,12 @@ async function reviewConflict(
   const applied = await applyChoice(work, file, choice.action, {
     ours,
     theirs,
-    theirsLabel,
+    sideName,
+    here,
     original,
     options,
   });
-  return applied ? "resolved" : "cancelled";
+  return applied ? "resolved" : "failed";
 }
 
 type ConflictAction = "ours" | "theirs" | "both" | "manual";
@@ -365,9 +412,29 @@ type ConflictAction = "ours" | "theirs" | "both" | "manual";
 interface ApplyContext {
   ours: string;
   theirs: string;
-  theirsLabel: string;
+  /** 「両方とも残す」で作る別ファイルの名前（一覧に見せたもの） */
+  sideName: string;
+  /** 「このパソコン（名前）」 */
+  here: string;
   original: Awaited<ReturnType<typeof readTextFile>>;
   options: ReviewOptions;
+}
+
+/**
+ * フォルダーに今あるファイルの名前。別ファイルの名前が重ならないようにする。
+ *
+ * 読めなくても止めない——空として扱い、作るときの「新規作成だけ」
+ * （`atomicWriteFile` の create）が、既にあるファイルを潰さないことを守る。
+ */
+async function namesInFolder(directory: string): Promise<Set<string>> {
+  try {
+    const entries = await vscode.workspace.fs.readDirectory(
+      path.toUri(directory)
+    );
+    return new Set(entries.map(([name]) => name));
+  } catch {
+    return new Set();
+  }
 }
 
 /** 選んだ版で確定する。**確定できたときだけ true** */
@@ -424,7 +491,7 @@ async function applyChoice(
   if (!context.options.quiet) {
     vscode.window.showInformationMessage(
       `${path.basename(file.relativePath)} を` +
-        `${side === "ours" ? "この環境" : "別環境"}の版で確定しました。`
+        `${side === "ours" ? context.here : "もう1台"}の文で確定しました。`
     );
   }
   return true;
@@ -442,10 +509,7 @@ async function writeSideFile(
   context: ApplyContext
 ): Promise<boolean> {
   const directory = path.dirname(file.absolutePath);
-  const name = sideFileName(
-    path.basename(file.relativePath),
-    context.theirsLabel
-  );
+  const name = context.sideName;
   const target = path.join(directory, name);
 
   const bytes = encodeForNewFile(context.theirs, context.original);
@@ -469,7 +533,12 @@ async function writeSideFile(
     return false;
   }
 
-  vscode.window.showInformationMessage(`別環境の版を ${name} へ残しました。`);
+  // 合流の側が、記録の直前に git へ足す（ここで足すと、やめたときに消えうる）
+  const slash = file.relativePath.lastIndexOf("/");
+  context.options.sideFiles?.push(
+    `${slash >= 0 ? file.relativePath.slice(0, slash + 1) : ""}${name}`
+  );
+  vscode.window.showInformationMessage(`もう1台の文を「${name}」へ残しました。`);
   return true;
 }
 
@@ -490,8 +559,39 @@ export interface WalkConflictsResult {
   resolved: string[];
   /** 「全部、新しいほうを採る」で確定したファイル */
   bulkResolved: string[];
+  /**
+   * 「両方とも残す」で作った別ファイル（置き場からの道、`/` 区切り）。
+   *
+   * **まだ git に足していない。** 合流する側が、検査を通ったあと・記録の
+   * 直前に足す（作者の裁定、2026-10-11「一緒に送る」）。途中でやめたときは
+   * 足さない——別ファイルは作業ツリーに残り、原稿の写しが消えることはない。
+   * `walkConflicts` は必ず入れる（省けるのは、差し替えの見比べのため）
+   */
+  sideFiles?: string[];
   /** 途中でやめたか。**やめたら呼び出し側が `merge --abort` で全部戻す** */
   aborted: boolean;
+}
+
+/** 「選ばずに閉じました」の窓のボタン */
+const PICK_AGAIN = "もう一度選ぶ";
+const STOP_FOLDING = "そろえるのをやめる";
+
+/**
+ * 選ぶ一覧を選ばずに閉じたとき、すぐ戻さずに1回訊く
+ * （作者の裁定、2026-10-11「閉じない＋訊き直す」）。
+ *
+ * それまでは、差分を読みに行った拍子に一覧が消えただけで「選ばずに閉じた」
+ * となり、そこまで選んだ分もふくめて最初からになっていた。
+ * ［もう一度選ぶ］なら true（同じ一覧をもう一度出す）。
+ */
+async function askAfterClosed(): Promise<boolean> {
+  const answer = await vscode.window.showWarningMessage(
+    "選ばずに閉じました。原稿はまだ何も変えていません。",
+    { modal: true },
+    PICK_AGAIN,
+    STOP_FOLDING
+  );
+  return answer === PICK_AGAIN;
 }
 
 /** 入口のボタン。**押された文字で分けるので、定数を1か所に置く** */
@@ -525,23 +625,34 @@ export async function walkConflicts(
 ): Promise<WalkConflictsResult> {
   const resolved: string[] = [];
   const bulkResolved: string[] = [];
-  if (files.length === 0) return { resolved, bulkResolved, aborted: false };
+  const sideFiles: string[] = [];
+  const finish = (aborted: boolean): WalkConflictsResult => ({
+    resolved,
+    bulkResolved,
+    sideFiles,
+    aborted,
+  });
+  if (files.length === 0) return finish(false);
 
   const provider = options.provider ?? registeredProvider;
   if (!provider) {
     // 見比べる場所が無い。**確定させずに手を引く**——選ばせずに片側へ
-    // 寄せるくらいなら、合わせるのをやめたほうがよい
+    // 寄せるくらいなら、そろえるのをやめたほうがよい
     await vscode.window.showWarningMessage(
-      "見比べの画面を用意できませんでした。合わせるのを取りやめます。"
+      "見比べの画面を用意できませんでした。そろえるのを取りやめます。"
     );
-    return { resolved, bulkResolved, aborted: true };
+    return finish(true);
   }
 
   const settingsFiles = files.filter((file) => isSettingsJsonPath(file));
   const start = await chooseStart(files, settingsFiles, options.start);
   if (start !== KEEP_ALL_NEWEST && start !== ONE_BY_ONE) {
-    return { resolved, bulkResolved, aborted: true };
+    return finish(true);
   }
+  const machineName =
+    options.machineName === undefined
+      ? await readMachineName()
+      : options.machineName;
 
   let toReview: readonly string[] = files;
   if (start === KEEP_ALL_NEWEST) {
@@ -558,7 +669,7 @@ export async function walkConflicts(
       ...undecided,
       ...files.filter((file) => !isSettingsJsonPath(file)),
     ];
-    if (toReview.length === 0) return { resolved, bulkResolved, aborted: false };
+    if (toReview.length === 0) return finish(false);
   }
 
   for (const [index, relative] of toReview.entries()) {
@@ -572,8 +683,11 @@ export async function walkConflicts(
         : ["manual"],
       sides: file.sides,
       quiet: true,
+      machineName,
+      sideFiles,
+      onClosed: askAfterClosed,
     });
-    if (outcome !== "resolved") return { resolved, bulkResolved, aborted: true };
+    if (outcome !== "resolved") return finish(true);
     resolved.push(relative);
 
     const remaining = toReview.length - index - 1;
@@ -589,10 +703,10 @@ export async function walkConflicts(
       },
       "次へ"
     );
-    if (next !== "次へ") return { resolved, bulkResolved, aborted: true };
+    if (next !== "次へ") return finish(true);
   }
 
-  return { resolved, bulkResolved, aborted: false };
+  return finish(false);
 }
 
 /**
@@ -691,8 +805,8 @@ export function describeWalkStartDetail(files: readonly string[]): string {
     lines.join("\n"),
     "",
     guidance,
-    "途中でやめると、合わせるのをやめて元の状態へ戻します。",
-    "気に入らなければ、合わせる前の退避の枝から丸ごと戻せます。",
+    "途中でやめれば、原稿は元のままです。",
+    "そろえたあとでも、控えから「そろえる前」へ丸ごと戻せます。",
   ].join("\n");
 }
 

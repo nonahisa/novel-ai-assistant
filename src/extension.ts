@@ -1920,7 +1920,10 @@ export async function activate(
         // 合わせる相手は置き場（リポジトリ）だが、選んでもらうのは作品にする。
         // 作者が見ているのは作品であり、どの作品がどの置き場かは意識しなくてよい
         const work = await resolveWork(node, registry, {
-          title: "分かれた分を合わせる作品",
+          title: "どの作品の原稿をそろえますか",
+          // 作品の補足を読みに他の画面へ目を移しても閉じない（2026-10-11、
+          // 作者の実機確認で、選ぶ画面が途中で消えた）
+          ignoreFocusOut: true,
           // **この操作は分かれた作品しか対象にならない**のに、選択肢では
           // それを見分けられなかった。ブラウザ版では代役が全作品に同じ状態を
           // 返すので、補足を出さない（同じ文字が並ぶだけで手掛かりにならない）
@@ -8168,6 +8171,14 @@ interface ResolveWorkOptions {
    * 作品に手を加える操作（作品名の変更・改行の統一・投稿）だけ false を渡し、押し間違いで別の作品に手を入れないようにする。
    */
   preferLast?: boolean;
+  /**
+   * 一覧の外を押しても閉じない（VS Code の `ignoreFocusOut`）。
+   *
+   * **既定では付けない。** 付けると Esc か［取りやめる］でしか閉じられず、
+   * 気軽に開いて閉じる操作では邪魔になる。2台の原稿をそろえる操作のように、
+   * 補足を読みながら選ぶ一覧だけが付ける（2026-10-11）
+   */
+  ignoreFocusOut?: boolean;
 }
 
 /**
@@ -8398,9 +8409,14 @@ async function showStatusBarSyncMenu(
     work: "",
     log: "$(output) ",
   };
+  // 「そろえたあと送るか」を事実に合わせる（2026-10-11、「GitHubへは送りません」と
+  // 書いてあったのに、自動の送り直しが1分後に送っていた）
+  const { readAutoResendSettings } = await import("./features/autoResend.js");
+  const autoResend = readAutoResendSettings().enabled !== false;
   const details: Record<StatusBarSyncChoice<WorkEntry>["kind"], string> = {
-    divergence:
-      "別のPCとこちらで分かれた変更を合わせます。合わせる前に退避の枝を作ります（GitHubへは送りません）。",
+    divergence: autoResend
+      ? "このパソコンともう1台で別々に書いた分を、1つの原稿にそろえます。そろえたあと、自動でGitHubへ送ります。"
+      : "このパソコンともう1台で別々に書いた分を、1つの原稿にそろえます。GitHubへは「保存・同期」で送ります。",
     syncAll:
       "開いている原稿を保存し、すべての作品を記録してGitHubへ送ります。送る前に1回だけ確認します。",
     work: "この作品の操作（記録・取り込み・送信・状態の確認）を選びます。",
@@ -8527,7 +8543,7 @@ async function resolveWorkUnrouted(
         // Escでも閉じられるが、それを知らない人には出口が無いように見える
         cancelItem(),
       ],
-      { title }
+      { title, ignoreFocusOut: options.ignoreFocusOut }
     );
     return picked && "work" in picked ? picked.work : undefined;
   }
@@ -8551,7 +8567,7 @@ async function resolveWorkUnrouted(
 
   const picked = await vscode.window.showQuickPick(
     [...items, cancelItem()],
-    { title }
+    { title, ignoreFocusOut: options.ignoreFocusOut }
   );
   return picked && "work" in picked ? picked.work : undefined;
 }

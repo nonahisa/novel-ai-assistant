@@ -30,6 +30,7 @@ import {
 import { buildSyncTarget } from "../core/syncTarget";
 import { logFailure, logStep, showLog } from "../core/logger";
 import { useSyncLog } from "./syncLog";
+import { readMachineName } from "./windowCard";
 import type { GitSyncMonitorLike } from "./gitSyncStub";
 import type { SyncPresave } from "./presaveBeforeSync";
 
@@ -377,8 +378,11 @@ async function reportStartup(
 
   const done = outcomes.filter((one) => one.done && one.action.kind !== "nothing");
   const stopped = outcomes.filter((one) => !one.done);
+  const needsFold = outcomes.some((one) => one.action.kind === "ask");
+  // 「このパソコン（名前）」と名指すため。止めたときだけ読む（ブラウザ版は null）
+  const machineName = needsFold ? await readMachineName() : null;
   if (done.length > 0) lines.push(describeDone(done));
-  for (const one of stopped) lines.push(describeStopped(one));
+  for (const one of stopped) lines.push(describeStopped(one, machineName));
 
   if (lines.length === 0) return;
   if (deferred > 0) {
@@ -387,15 +391,17 @@ async function reportStartup(
     );
   }
 
-  const needsFold = outcomes.some((one) => one.action.kind === "ask");
+  // **ボタンは文の言葉と同じにする**（作者の裁定、2026-10-11）。それまでの
+  // ［分岐合流］は、文の「どちらを残すかお選びください」と結びつかなかった。
+  // ログはここで開いても作者の判断の助けにならないので、［あとで］に替えた
   const buttons = needsFold
-    ? ["分岐合流", "ログを表示"]
+    ? [CHOOSE_WHICH_TO_KEEP, "あとで"]
     : ["同期する", "ログを表示"];
   const answer = await vscode.window.showWarningMessage(
     lines.join("\n"),
     ...buttons
   );
-  if (answer === "分岐合流") {
+  if (answer === CHOOSE_WHICH_TO_KEEP) {
     await vscode.commands.executeCommand("novelai.resolveDivergence");
   } else if (answer === "同期する") {
     await vscode.commands.executeCommand("novelai.saveAndSync");
@@ -416,14 +422,62 @@ function describeDone(outcomes: readonly HandoffOutcome[]): string {
   return `開いたときの点検で、${parts.join("・")}を済ませました。`;
 }
 
+/** 止めたときの知らせのボタン。押された文字で分けるので1か所に置く */
+export const CHOOSE_WHICH_TO_KEEP = "どちらを残すか選ぶ";
+
+/**
+ * 2台で同じ原稿を書き換えていて止めたときの文（作者の裁定、2026-10-11）。
+ *
+ * それまでは「分かれていて、同じファイルが両方で変わっています」だった。
+ * 作者の実機確認では、**何が起きていて、どのファイルで、選ぶまで何が
+ * 止まるのか**が読み取れなかった。
+ *
+ * 「選ぶまで GitHub へ送りません」は事実と合っている——自動の送り直しは、
+ * 相手が先に進んでいる間は送らない（`core/autoResendPlan.ts` の
+ * `resendDecision`。`handoffStartup.test.ts` が並べて見張る）。
+ */
+export function describeAskStop(
+  label: string,
+  machineName: string | null,
+  overlap: readonly string[]
+): string {
+  const here = machineName ? `このパソコン（${machineName}）` : "このパソコン";
+  return (
+    `「${label}」を、${here}ともう1台の両方で書き進めていました。` +
+    `同じ原稿の同じところが、両方で書き換えられています${describeOverlapNames(overlap)}。` +
+    "どちらの文を残すか選ぶまで、この作品はGitHubへ送りません。"
+  );
+}
+
+/**
+ * 重なったファイルの名前を「（1件：A、B ほか N件）」の形にする。
+ *
+ * **拡張子と置き場の道を落とす。** 作者が見分けるのは話の名前であって、
+ * `短編/本文/episode_9999_同期の確認.md` の全体ではない。名前は5件まで。
+ * 調べられなかった印（「（調べられませんでした）」）は名前として並べない。
+ */
+function describeOverlapNames(overlap: readonly string[]): string {
+  const names = overlap
+    .filter((file) => !file.startsWith("（"))
+    .map((file) => {
+      const base = file.slice(file.lastIndexOf("/") + 1);
+      const dot = base.lastIndexOf(".");
+      return dot > 0 ? base.slice(0, dot) : base;
+    });
+  if (names.length === 0) return "";
+  const shown = names.slice(0, 5).join("、");
+  const more = names.length > 5 ? ` ほか ${names.length - 5}件` : "";
+  return `（${names.length}件：${shown}${more}）`;
+}
+
 /** 止めたこと・できなかったことを1行で。**何をすればよいかまで書く** */
-function describeStopped(outcome: HandoffOutcome): string {
+function describeStopped(
+  outcome: HandoffOutcome,
+  machineName: string | null
+): string {
   const action = outcome.action;
   if (action.kind === "ask") {
-    return (
-      `「${outcome.label}」は分かれていて、同じファイルが両方で変わっています` +
-      `（${action.overlap.length}件）。どちらを残すかお選びください。`
-    );
+    return describeAskStop(outcome.label, machineName, action.overlap);
   }
   if (action.kind === "blocked") {
     switch (action.reason) {
@@ -437,7 +491,7 @@ function describeStopped(outcome: HandoffOutcome): string {
       case "dirty":
         return (
           `「${outcome.label}」に記録していない変更が ${action.dirty}件あります` +
-          (action.behind > 0 ? `（別の環境の変更 ${action.behind}件も未取得です）` : "") +
+          (action.behind > 0 ? `（もう1台で書いた分 ${action.behind}件も未反映です）` : "") +
           "。「保存・同期」で記録して送れます。"
         );
     }

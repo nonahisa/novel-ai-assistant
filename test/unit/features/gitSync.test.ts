@@ -536,7 +536,7 @@ describe("「分岐合流」（旧「分かれた分を合わせる」）の入�
  */
 describe("未記録の変更があるときの取り込み", () => {
   test("止めた理由と、押せるボタンの名前が文に入る", () => {
-    const text = describeDirtyPull("ある作品");
+    const text = describeDirtyPull("ある作品", true);
 
     expect(text).toContain("「ある作品」");
     // なぜ止めたか。**理由が無いと、作者には故障に見える**
@@ -545,9 +545,17 @@ describe("未記録の変更があるときの取り込み", () => {
     expect(text).toContain(RECORD_THEN_PULL);
   });
 
-  test("記録は手元に残るだけで、外へは出ないと伝える", () => {
+  test("自動の送り直しが切ってあれば、記録は手元に残るだけで外へは出ないと伝える", () => {
     // **「記録」を「送信」と読み違えると、書きかけが公開されると思って押せない**
-    expect(describeDirtyPull("ある作品")).toContain("GitHubへは送りません");
+    expect(describeDirtyPull("ある作品", false)).toContain("GitHubへは送りません");
+  });
+
+  test("自動の送り直しが入っていれば、「送りません」と言わず、送ることを伝える", () => {
+    // 2026-10-11、「GitHubへは送りません」と書いた窓のあとで送り直しが送っていた。
+    // 記録した分は「送っていない記録」になり、取り込んだあとは送り直しが拾う
+    const text = describeDirtyPull("ある作品", true);
+    expect(text).not.toContain("送りません");
+    expect(text).toContain("数分のうちに自動でGitHubへ送ります");
   });
 
   test("ボタンの名前は「記録してから取り込む」", () => {

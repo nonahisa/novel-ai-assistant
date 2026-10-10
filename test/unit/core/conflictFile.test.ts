@@ -1,9 +1,10 @@
 import { describe, expect, test } from "vitest";
 import {
+  describeChoicePlaceholder,
   describeConflict,
+  isConflictSideFile,
   parseConflicts,
   resolveConflicts,
-  sanitizeLabel,
   sideFileName,
 } from "../../../src/core/conflictFile";
 
@@ -159,22 +160,59 @@ describe("選んだ側で本文を組み立てる", () => {
   });
 });
 
-describe("両方を残すときのファイル名", () => {
-  test("拡張子の手前に印を入れる", () => {
-    expect(sideFileName("008.txt", "origin/main")).toBe(
-      "008.conflict-origin-main.txt"
+/**
+ * 「両方とも残す」の別ファイルの名前（作者の裁定、2026-10-11「日時の名前」）。
+ *
+ * それまでは git の印を32字で切って名前に入れていたので、
+ * `episode_9999_同期の確認.conflict-origin-main-本文-episode_9999_同期の.md`
+ * のように途中で切れていた。
+ */
+describe("両方とも残すときのファイル名", () => {
+  // 月は0始まり。2026-10-11 0:45
+  const when = new Date(2026, 9, 11, 0, 45);
+
+  test("元の名前.conflict-年-月-日-時分.拡張子 になる", () => {
+    expect(sideFileName("episode_9999_同期の確認.md", when)).toBe(
+      "episode_9999_同期の確認.conflict-2026-10-11-0045.md"
     );
   });
 
-  test("サブタイトル付きの名前でも壊さない", () => {
-    expect(sideFileName("007_湖畔の誓い.txt", "laptop")).toBe(
-      "007_湖畔の誓い.conflict-laptop.txt"
+  test("拡張子は元のまま（.txt なら .txt）", () => {
+    expect(sideFileName("007_湖畔の誓い.txt", when)).toBe(
+      "007_湖畔の誓い.conflict-2026-10-11-0045.txt"
     );
   });
 
-  test("パス区切りをファイル名に持ち込まない", () => {
-    expect(sanitizeLabel("origin/main")).toBe("origin-main");
-    expect(sanitizeLabel("  ")).toBe("other");
+  test("原稿の走査から外す目印が付く", () => {
+    expect(isConflictSideFile(sideFileName("008.txt", when))).toBe(true);
+  });
+
+  test("同じ名前があれば -2, -3 を付ける（前の写しを潰さない）", () => {
+    const first = sideFileName("008.txt", when);
+    expect(sideFileName("008.txt", when, new Set([first]))).toBe(
+      "008.conflict-2026-10-11-0045-2.txt"
+    );
+    expect(
+      sideFileName(
+        "008.txt",
+        when,
+        new Set([first, "008.conflict-2026-10-11-0045-2.txt"])
+      )
+    ).toBe("008.conflict-2026-10-11-0045-3.txt");
+  });
+});
+
+describe("どちらの文を残すかの案内", () => {
+  test("左右がどちらの文かと、違う箇所の数を言う", () => {
+    const text = describeChoicePlaceholder(parseConflicts(CONFLICTED));
+    expect(text).toContain("左がこのパソコン、右がもう1台の文です");
+    expect(text).toContain("1か所");
+  });
+
+  test("印を読めないときは数を出さない", () => {
+    expect(describeChoicePlaceholder(parseConflicts("本文だけ。"))).toBe(
+      "左がこのパソコン、右がもう1台の文です"
+    );
   });
 });
 

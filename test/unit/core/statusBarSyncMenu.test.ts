@@ -90,6 +90,14 @@ describe("ステータスバーから押したときの一覧", () => {
     ]);
   });
 
+  test("そろえる行の名前は作者の言葉で「2台の原稿をそろえる」（2026-10-11）", () => {
+    const menu = buildStatusBarSyncMenu([
+      { work: w("分岐"), status: tracked({ ahead: 1, behind: 1 }) },
+    ]);
+    if (menu.kind !== "menu") throw new Error("一覧になっていません");
+    expect(menu.choices[0].label).toBe("2台の原稿をそろえる");
+  });
+
   test("分岐した置き場が1つだけでも、作品選びを飛ばさずに分岐合流を先に見せる", () => {
     const menu = buildStatusBarSyncMenu([
       { work: w("分岐"), status: tracked({ ahead: 1, behind: 1 }) },

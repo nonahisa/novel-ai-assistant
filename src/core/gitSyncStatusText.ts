@@ -370,7 +370,8 @@ export function buildStatusBarSyncMenu<W extends { title: string }>(
     choices.push({
       kind: "divergence",
       work: target.work,
-      label: "分岐合流",
+      // 何をする行かを、作者の言葉で（作者の裁定、2026-10-11。旧「分岐合流」）
+      label: "2台の原稿をそろえる",
       description: `${target.label}：取り込み ${target.status.behind}件・送信 ${target.status.ahead}件`,
     });
   }

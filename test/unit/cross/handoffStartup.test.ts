@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import {
+  describeAskStop,
   noticeBeforeClose,
   refreshUnsentMark,
   runStartupHandoff,
 } from "../../../src/features/handoffSync";
+import { resendDecision } from "../../../src/core/autoResendPlan";
 import type { GitCommandRunner, GitSyncStatus } from "../../../src/core/git";
 import type { WorkRegistry } from "../../../src/core/workRegistry";
 import type { GitSyncMonitorLike } from "../../../src/features/gitSyncStub";
@@ -173,7 +175,10 @@ describe("開いたときの点検（作者の裁定の表）", () => {
     expect(called("pull")).toBe(false);
     expect(called("push")).toBe(false);
     expect(called("merge")).toBe(false);
-    expect(notice).toContain("同じファイルが両方で変わっています");
+    expect(notice).toContain("同じ原稿の同じところが、両方で書き換えられています");
+    // 名前は拡張子と置き場の道を落とす（2026-10-11）
+    expect(notice).toContain("（1件：008）");
+    expect(notice).toContain("この作品はGitHubへ送りません");
   });
 
   test("両側の変更を調べられなかったら、混ぜずに止める", async () => {
@@ -390,8 +395,9 @@ describe("点検のあとの知らせ", () => {
       }),
     });
 
-    // ボタンの名前はメニューと同じ「分岐合流」（2026-09-23。旧「分かれた分を合わせる」）
-    expect(buttons).toContain("分岐合流");
+    // ボタンは文の言葉と同じ［どちらを残すか選ぶ］［あとで］（作者の裁定、2026-10-11。
+    // 旧［分岐合流］［ログを表示］）
+    expect(buttons).toEqual(["どちらを残すか選ぶ", "あとで"]);
   });
 
   test("止まっていないときの口は「同期する」", async () => {
@@ -405,7 +411,7 @@ describe("点検のあとの知らせ", () => {
     });
 
     expect(buttons).toContain("同期する");
-    expect(buttons).not.toContain("分岐合流");
+    expect(buttons).not.toContain("どちらを残すか選ぶ");
   });
 
   test("何も起きなければ、何も出さない", async () => {
@@ -418,5 +424,54 @@ describe("点検のあとの知らせ", () => {
     });
 
     expect(notice).toBeUndefined();
+  });
+});
+
+/**
+ * 止めたときの文（作者の裁定、2026-10-11）。
+ *
+ * 作者の実機確認で、知らせに「GitHubへは送信しません」と書いてあったのに、
+ * 合わせた1分後に自動の送り直しが送っていた。**新しい文の「選ぶまで送りません」
+ * は、送り直しの判断と結びつけて見張る**——送り直しの決まりが変わったら、
+ * この文もうそになる。
+ */
+describe("2台で同じ原稿を書き換えていたときの知らせ", () => {
+  test("このパソコンの名前と、拡張子を落としたファイル名を出す", () => {
+    const text = describeAskStop("確認用コピー", "書斎のPC", [
+      "確認用コピー/本文/episode_9999_同期の確認.md",
+    ]);
+    expect(text).toBe(
+      "「確認用コピー」を、このパソコン（書斎のPC）ともう1台の両方で書き進めていました。" +
+        "同じ原稿の同じところが、両方で書き換えられています（1件：episode_9999_同期の確認）。" +
+        "どちらの文を残すか選ぶまで、この作品はGitHubへ送りません。"
+    );
+  });
+
+  test("名前が取れない（ブラウザ版など）なら「このパソコン」だけ", () => {
+    expect(describeAskStop("短編", null, ["本文/1.txt"])).toContain(
+      "「短編」を、このパソコンともう1台の両方で"
+    );
+  });
+
+  test("名前は5件まで、残りは件数で", () => {
+    const files = ["a", "b", "c", "d", "e", "f", "g"].map((name) => `本文/${name}.txt`);
+    expect(describeAskStop("短編", null, files)).toContain(
+      "（7件：a、b、c、d、e ほか 2件）"
+    );
+  });
+
+  test("調べられなかった印は、ファイル名として並べない", () => {
+    expect(describeAskStop("短編", null, ["（調べられませんでした）"])).not.toContain(
+      "調べられませんでした"
+    );
+  });
+
+  test("「選ぶまで送りません」は、自動の送り直しの判断と合っている", () => {
+    // 止めて訊く（ask）のは、両方が先へ進んでいるとき。そのとき送り直しは送らない
+    expect(describeAskStop("短編", null, ["本文/1.txt"])).toContain("GitHubへ送りません");
+    expect(resendDecision(tracked({ ahead: 2, behind: 3 }))).toEqual({
+      send: false,
+      reason: "behind",
+    });
   });
 });
