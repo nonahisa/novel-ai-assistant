@@ -1,0 +1,848 @@
+{
+  "measuredAt": "2026-10-10T07:41:47.885Z",
+  "feature": "settings",
+  "runner": "ollama",
+  "tool": "novel.run",
+  "model": "gemma4:26b",
+  "numCtx": 28672,
+  "numCtxDecision": {
+    "numCtx": 28672,
+    "source": "プロンプトの長さから（製品と同じ道）",
+    "promptChars": 12338,
+    "outputTokens": 8192,
+    "contextWindow": 262144,
+    "charsPerToken": null
+  },
+  "temperature": 0.2,
+  "temperatureSource": "製品と同じ（束が返した値）",
+  "modelInfo": {
+    "contextLength": 262144,
+    "parameterSize": "25.2B",
+    "bundled": {
+      "thinkingSeen": true,
+      "thinkingOffWorks": true,
+      "thinkingMeasuredAt": "2026-09-26",
+      "typoAccuracy": {
+        "hits": 5,
+        "total": 7,
+        "falsePositives": 0,
+        "wrongFixes": 0,
+        "trapHits": 0,
+        "trapTotal": 5,
+        "promptVersion": "1.2",
+        "smallPrompt": false,
+        "sampleVersion": "2",
+        "measuredAt": "2026-09-26T06:31:27+09:00"
+      },
+      "measuredAt": "2026-09-26"
+    },
+    "note": null
+  },
+  "warmup": {
+    "elapsedMs": 19971,
+    "ok": true,
+    "reason": null
+  },
+  "endpoint": null,
+  "options": {},
+  "givenOptions": {},
+  "modelSize": null,
+  "modelSizeDecision": {
+    "sizeDependent": false,
+    "decided": false,
+    "reason": "この機能は製品がモデルの大きさで頼み方を変えません"
+  },
+  "repeat": 3,
+  "bundle": {
+    "name": "novel-ai-assistant",
+    "version": "0.101.13",
+    "stale": false,
+    "reason": null,
+    "staleDuringRun": null
+  },
+  "promptVersion": "5.9",
+  "verifyPromptVersion": null,
+  "plans": [
+    {
+      "chunkId": "episode_0006_コンストラクタ領の様子.txt#6-0@7024",
+      "chars": 3328,
+      "maxIssues": null
+    }
+  ],
+  "maxIssuesPer1000Chars": null,
+  "work": {
+    "source": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\aa802787-65db-4c41-8484-fcc6029eac4e\\scratchpad\\loc6",
+    "targets": [
+      "episode_0006_コンストラクタ領の様子.txt"
+    ]
+  },
+  "answers": null,
+  "runs": [
+    {
+      "round": 1,
+      "elapsedMs": 54596,
+      "temperature": 0.2,
+      "staleNote": null,
+      "metrics": {
+        "accepted": 8,
+        "rejected": 1,
+        "rejected.not_an_ability": 1,
+        "failures": 0,
+        "elapsedMs": 54596
+      },
+      "detail": {
+        "rejectedReasons": {
+          "not_an_ability": 1
+        },
+        "failures": []
+      },
+      "raw": [
+        {
+          "target": "episode_0006_コンストラクタ領の様子.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0.2,
+            "results": [
+              {
+                "chunkId": "episode_0006_コンストラクタ領の様子.txt#6-0@7024",
+                "chapterLabel": "第6話",
+                "characters": {
+                  "accepted": [
+                    {
+                      "data": {
+                        "name": "イント",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "村の領主の後継ぎ。前世の記憶を持ち、聖霊との契約をしている。",
+                        "affiliation": null,
+                        "gender": "男性",
+                        "role": "領主の後継ぎ",
+                        "personality": "責任感が強く、申し訳なさがりな性格（病み上がりの客人を歩かせることに申し訳なさを感じたり、妹の失言に慌てたりする様子）",
+                        "appearance": null,
+                        "speechStyle": "丁寧で落ち着いた話し方。",
+                        "speechEvidence": "「そう言ってもらえると救われます」",
+                        "evidence": "「イント様は恩人なのですから、そんな申し訳なさそうになさらなくても良いのですよ？」",
+                        "relations": [
+                          {
+                            "name": "ストリナ",
+                            "relation": "兄"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "ターナ",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "美容の研究家を自称する女性。神術を使い、フィールドワークに慣れている。",
+                        "affiliation": null,
+                        "gender": "女性",
+                        "role": "美容の研究家",
+                        "personality": "落ち着いており、物怖じしない（歩くことへの不満を言わず、おばあさんに対しても堂々と説明している）",
+                        "appearance": "肌が綺麗で、髪は若干油ぎっている感じはあるが、艶がある。",
+                        "speechStyle": "丁寧な言葉遣い。",
+                        "speechEvidence": "「この村へ来たのは、死の谷の奥にあるという温泉の調査のためですの。」",
+                        "evidence": "「この村へ来たのは、死の谷の奥にあるという温泉の調査のためですの。」",
+                        "relations": []
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "マイナ",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "ターナの同行者。清楚で大人しげな外見だが、怒ると般若のような顔をする。",
+                        "affiliation": null,
+                        "gender": "女性",
+                        "role": null,
+                        "personality": "清楚で大人しそうに見えるが、怒ると激しい（普段は清楚で大人しげだが、イントの失言に対して般若のような顔で怒る）",
+                        "appearance": "清楚で大人しげな外見。肌が綺麗。",
+                        "evidence": "「マイナさんがまったく話をしてくれないのだ。」",
+                        "relations": []
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "ストリナ",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "イントの妹。活発で、村の子供たちに剣の手ほどきをしている。",
+                        "affiliation": null,
+                        "gender": "女性",
+                        "role": null,
+                        "personality": "無邪気で活発（イントを見つけて飛びつき、試合を無邪気に誘う様子）",
+                        "appearance": null,
+                        "speechStyle": "子供らしい無邪気な話し方。",
+                        "speechEvidence": "「おにいちゃぁぁぁん！」",
+                        "evidence": "「おにいちゃぁぁぁん！」",
+                        "relations": [
+                          {
+                            "name": "イント",
+                            "relation": "妹"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "おばあちゃん",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "道端で草を刈っている、イントの顔見知り。",
+                        "affiliation": null,
+                        "gender": "女性",
+                        "role": "顔見知り",
+                        "personality": "あっけらかんとしている（辺鄙な村に来た理由を遠慮なく尋ねる様子）",
+                        "appearance": null,
+                        "speechStyle": "親しみやすい、年配の女性らしい話し方。",
+                        "speechEvidence": "「なるほど。２人とも別嬪さんやねぇ。よろしくねぇ。」",
+                        "evidence": "「道端で草を刈っていた顔見知りのおばあちゃんが、手を止めて声をかけてきた。」",
+                        "relations": []
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    }
+                  ],
+                  "rejected": [],
+                  "droppedSharedBodyAliases": [],
+                  "droppedTruncatedAliases": [],
+                  "droppedSharedFamilyNameAliases": [],
+                  "droppedRelativeAliases": [],
+                  "droppedRelations": [],
+                  "correctedRelations": [],
+                  "movedAddressRelations": [],
+                  "droppedSpeechStyles": [
+                    {
+                      "characterName": "イント",
+                      "speechStyle": "丁寧で落ち着いた話し方。一人称は「僕」。",
+                      "speechEvidence": "「そう言ってもらえると救われます」",
+                      "reason": "first_person_unquoted",
+                      "kept": "丁寧で落ち着いた話し方。"
+                    },
+                    {
+                      "characterName": "ターナ",
+                      "speechStyle": "丁寧な言葉遣い。一人称は「私」。",
+                      "speechEvidence": "「この村へ来たのは、死の谷の奥にあるという温泉の調査のためですの。」",
+                      "reason": "first_person_unquoted",
+                      "kept": "丁寧な言葉遣い。"
+                    }
+                  ],
+                  "droppedReadings": []
+                },
+                "settings": {
+                  "abilities": [],
+                  "locations": [
+                    {
+                      "data": {
+                        "name": "死の谷",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "温泉が存在するとされる、危険な場所。",
+                        "region": null,
+                        "description": "温泉があるが、危ないところとされる場所。",
+                        "relations": [
+                          {
+                            "target": "温泉",
+                            "kind": "within",
+                            "value": null,
+                            "evidence": "「死の谷の奥にあるという温泉の調査のためですの。」",
+                            "chapters": [
+                              6
+                            ]
+                          }
+                        ],
+                        "evidence": "「死の谷は危ないところだから、入るんなら気をつけてなぁ。」"
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    }
+                  ],
+                  "organizations": [],
+                  "worldItems": [
+                    {
+                      "data": {
+                        "name": "奇病の流行",
+                        "category": "society",
+                        "description": "村で流行している、家族が同時に下痢をする病や、炎天下での作業中に吐き気や頭痛、倦怠感を伴い死に至ることもある病。",
+                        "evidence": "「同じ家に住む家族が同時に下痢をするようになるっていう奇病と、炎天下で農作業や狩りをしていた者が急に吐き気や頭痛、倦怠感の襲われて、場合によっては死んでしまう奇病でしたっけ……」"
+                      },
+                      "category": "society",
+                      "chapters": [
+                        6
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "魔物",
+                        "category": "term",
+                        "description": "村の周辺に多く存在し、その素材（皮や肉）は高値で売れる重要な特産品となる生物。",
+                        "evidence": "「魔物の皮や肉は高値で売れる重要な特産品なので、はずせないのはわかるが」"
+                      },
+                      "category": "term",
+                      "chapters": [
+                        6
+                      ]
+                    }
+                  ],
+                  "affiliations": [],
+                  "rejected": [
+                    {
+                      "name": "神術",
+                      "reason": "not_an_ability"
+                    }
+                  ],
+                  "abilityTerm": "神術",
+                  "rules": []
+                },
+                "note": "マージ（既存の資料との突き合わせ）と保存は行っていません。これは取り出して検算したところまでの結果です。"
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "elapsedMs": 41629,
+      "temperature": 0.2,
+      "staleNote": null,
+      "metrics": {
+        "accepted": 8,
+        "rejected": 1,
+        "rejected.not_an_ability": 1,
+        "failures": 0,
+        "elapsedMs": 41629
+      },
+      "detail": {
+        "rejectedReasons": {
+          "not_an_ability": 1
+        },
+        "failures": []
+      },
+      "raw": [
+        {
+          "target": "episode_0006_コンストラクタ領の様子.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0.2,
+            "results": [
+              {
+                "chunkId": "episode_0006_コンストラクタ領の様子.txt#6-0@7024",
+                "chapterLabel": "第6話",
+                "characters": {
+                  "accepted": [
+                    {
+                      "data": {
+                        "name": "イント",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "村の領主の後継ぎ。前世の記憶を持ち、教科書や神術の知識を扱おうとしている。",
+                        "affiliation": null,
+                        "gender": "男性",
+                        "role": "領主の後継ぎ",
+                        "personality": "責任感が強く、申し訳なさがりな性格（病み上がりの客人を歩かせることに申し訳なさを感じる）",
+                        "appearance": null,
+                        "speechStyle": "丁寧な口調。",
+                        "speechEvidence": "「そう言ってもらえると救われます」",
+                        "evidence": "「イント様は恩人なのですから、そんな申し訳なさそうになさらなくても良いのですよ？」",
+                        "relations": [
+                          {
+                            "name": "ストリナ",
+                            "relation": "兄"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "ターナ",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "美容の研究家を自称する女性。神術を使い、フィールドワークに慣れている。",
+                        "affiliation": null,
+                        "gender": "女性",
+                        "role": "美容の研究家",
+                        "personality": "落ち着いており、物怖じしない（おばあさんの問いかけに淀みなく説明している）",
+                        "appearance": "肌が綺麗で、髪は若干油ぎっている感じはあるが、艶がある。",
+                        "speechStyle": "丁寧な女性語。一人称は「私」。",
+                        "speechEvidence": "「私は美容について研究していて、温泉は美容に良いこともありますのよ。」",
+                        "evidence": "「私は美容について研究していて、温泉は美容に良いこともありますのよ。」",
+                        "relations": [
+                          {
+                            "name": "マイナ",
+                            "relation": "同行者"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "マイナ",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "ターナの同行者。清楚で大人しげな外見だが、怒ると般若のような顔を見せる。",
+                        "affiliation": null,
+                        "gender": "女性",
+                        "role": null,
+                        "personality": "清楚で大人しげに見えるが、怒ると激しい（普段は清楚だが、怒ると般若もかくやという顔をしている）",
+                        "appearance": "清楚で大人しげ。肌が綺麗。",
+                        "evidence": "「すっかり体調が良くなっていたマイナさんの退院が認められたので」",
+                        "relations": [
+                          {
+                            "name": "ターナ",
+                            "relation": "同行者"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "ストリナ",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "イントの妹。剣の手ほどきを受けており、村の子どもたちに教える立場にある。",
+                        "affiliation": null,
+                        "gender": "女性",
+                        "role": null,
+                        "personality": "無邪気（「おにいちゃぁぁぁん！」と飛びついてくる）",
+                        "appearance": null,
+                        "speechStyle": "幼い子供らしい話し方。",
+                        "speechEvidence": "「おにいちゃぁぁぁん！」",
+                        "evidence": "「おにいちゃぁぁぁん！」",
+                        "relations": [
+                          {
+                            "name": "イント",
+                            "relation": "妹"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "おばあちゃん",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "村の道端で草を刈っている顔見知りの老人。",
+                        "affiliation": null,
+                        "gender": "女性",
+                        "role": "村の老人",
+                        "personality": "気さくで飾らない（「何しにこんな辺鄙な村に来たんだい？」とあっけらかんと言い放つ）",
+                        "appearance": null,
+                        "speechStyle": "年配の女性らしい、のんびりとした話し方。",
+                        "speechEvidence": "「なるほど。２人とも別嬪さんやねぇ。よろしくねぇ。」",
+                        "evidence": "「道端で草を刈っていた顔見知りのおばあちゃんが、手を止めて声をかけてきた。」",
+                        "relations": []
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    }
+                  ],
+                  "rejected": [],
+                  "droppedSharedBodyAliases": [],
+                  "droppedTruncatedAliases": [],
+                  "droppedSharedFamilyNameAliases": [],
+                  "droppedRelativeAliases": [],
+                  "droppedRelations": [],
+                  "correctedRelations": [],
+                  "movedAddressRelations": [],
+                  "droppedSpeechStyles": [
+                    {
+                      "characterName": "イント",
+                      "speechStyle": "丁寧な口調。一人称は「僕」。",
+                      "speechEvidence": "「そう言ってもらえると救われます」",
+                      "reason": "first_person_unquoted",
+                      "kept": "丁寧な口調。"
+                    }
+                  ],
+                  "droppedReadings": []
+                },
+                "settings": {
+                  "abilities": [],
+                  "locations": [
+                    {
+                      "data": {
+                        "name": "死の谷",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "温泉が存在するとされる、危険な場所。",
+                        "region": null,
+                        "description": "奥に温泉があるが、危ないところとされる場所。",
+                        "relations": [],
+                        "evidence": "「死の谷の奥にあるという温泉の調査のためですの。」"
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    }
+                  ],
+                  "organizations": [],
+                  "worldItems": [
+                    {
+                      "data": {
+                        "name": "奇病の流行",
+                        "category": "society",
+                        "description": "家族が同時に下痢をする病気や、炎天下での作業中に吐き気や頭痛、倦怠感を起こし、死に至ることもある病気が流行している。",
+                        "evidence": "「同じ家に住む家族が同時に下痢をするようになるっていう奇病と、炎天下で農作業や狩りをしていた者が急に吐き気や頭痛、倦怠感の襲われて、場合によっては死んでしまう奇病でしたっけ……」"
+                      },
+                      "category": "society",
+                      "chapters": [
+                        6
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "魔物",
+                        "category": "term",
+                        "description": "村に大量発生したり、騎士団に被害を出したりする存在。その皮や肉は高値で売れる特産品となる。",
+                        "evidence": "「魔物の皮や肉は高値で売れる重要な特産品なので」"
+                      },
+                      "category": "term",
+                      "chapters": [
+                        6
+                      ]
+                    }
+                  ],
+                  "affiliations": [],
+                  "rejected": [
+                    {
+                      "name": "神術",
+                      "reason": "not_an_ability"
+                    }
+                  ],
+                  "abilityTerm": "神術",
+                  "rules": []
+                },
+                "note": "マージ（既存の資料との突き合わせ）と保存は行っていません。これは取り出して検算したところまでの結果です。"
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    },
+    {
+      "round": 3,
+      "elapsedMs": 42647,
+      "temperature": 0.2,
+      "staleNote": null,
+      "metrics": {
+        "accepted": 8,
+        "rejected": 1,
+        "rejected.not_an_ability": 1,
+        "failures": 0,
+        "elapsedMs": 42647
+      },
+      "detail": {
+        "rejectedReasons": {
+          "not_an_ability": 1
+        },
+        "failures": []
+      },
+      "raw": [
+        {
+          "target": "episode_0006_コンストラクタ領の様子.txt",
+          "response": {
+            "runner": "ollama",
+            "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+            "model": "gemma4:26b",
+            "temperature": 0.2,
+            "results": [
+              {
+                "chunkId": "episode_0006_コンストラクタ領の様子.txt#6-0@7024",
+                "chapterLabel": "第6話",
+                "characters": {
+                  "accepted": [
+                    {
+                      "data": {
+                        "name": "イント",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "村の領主の後継ぎ。前世の記憶を持ち、教科書や神術の知識を扱おうとしている。",
+                        "affiliation": null,
+                        "gender": "男性",
+                        "role": "領主の後継ぎ",
+                        "personality": "責任感が強く、申し訳なさがりな性格（病み上がりの客人を歩かせることに心を痛める）",
+                        "appearance": null,
+                        "speechStyle": "丁寧な口調。",
+                        "speechEvidence": "「そう言ってもらえると救われます」",
+                        "evidence": "「イント様は恩人なのですから、そんな申し訳なさそうになさらなくても良いのですよ？」",
+                        "relations": [
+                          {
+                            "name": "ストリナ",
+                            "relation": "兄"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "ターナ",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "美容の研究家を自称する女性。神術を使い、フィールドワークに慣れている。",
+                        "affiliation": null,
+                        "gender": "女性",
+                        "role": "美容の研究家",
+                        "personality": "落ち着いており、物怖じしない（おばあさんの問いかけに淀みなく説明する）",
+                        "appearance": "肌が綺麗で、髪は若干油ぎっている感じはあるが、艶がある。",
+                        "speechStyle": "丁寧な言葉遣い。一人称は「私」。",
+                        "speechEvidence": "「私は美容について研究していて、温泉は美容に良いこともありますのよ。」",
+                        "evidence": "「私は美容について研究していて、温泉は美容に良いこともありますのよ。」",
+                        "relations": [
+                          {
+                            "name": "マイナ",
+                            "relation": "同行者"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "マイナ",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "シーゲン子爵の紹介で村に来た女性。清楚で大人しげな外見だが、怒ると般若のようになる。",
+                        "affiliation": null,
+                        "gender": "女性",
+                        "role": null,
+                        "personality": "普段は清楚で大人しそうだが、怒ると激しい（般若もかくやという顔をしている）",
+                        "appearance": "肌が綺麗。清楚で大人しげな外見。",
+                        "evidence": "「マイナさんがまったく話をしてくれないのだ。」",
+                        "relations": [
+                          {
+                            "name": "ターナ",
+                            "relation": "同行者"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "ストリナ",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "イントの妹。剣の手ほどきを受けており、村の同年代の中で非常に高い実力を持つ。",
+                        "affiliation": null,
+                        "gender": "女性",
+                        "role": null,
+                        "personality": "無邪気（「おにいちゃぁぁぁん！」と飛びついてくる）",
+                        "appearance": null,
+                        "speechStyle": "幼い子供らしい話し方。",
+                        "speechEvidence": "「おにいちゃぁぁぁん！」",
+                        "evidence": "「おにいちゃぁぁぁん！」",
+                        "relations": [
+                          {
+                            "name": "イント",
+                            "relation": "妹"
+                          }
+                        ]
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "おばあちゃん",
+                        "aliases": [],
+                        "entityType": "person",
+                        "summary": "村の道端で草を刈っている顔見知りの老人。",
+                        "affiliation": null,
+                        "gender": "女性",
+                        "role": "村人",
+                        "personality": "気さくで飾らない（「何しにこんな辺鄙な村に来たんだい？」とあっけらかんと言い放つ）",
+                        "appearance": null,
+                        "speechStyle": "年配の女性らしい、親しみのある話し方。",
+                        "speechEvidence": "「なるほど。２人とも別嬪さんやねぇ。よろしくねぇ。」",
+                        "evidence": "「道端で草を刈っていた顔見知りのおばあちゃんが、手を止めて声をかけてきた。」",
+                        "relations": []
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    }
+                  ],
+                  "rejected": [],
+                  "droppedSharedBodyAliases": [],
+                  "droppedTruncatedAliases": [],
+                  "droppedSharedFamilyNameAliases": [],
+                  "droppedRelativeAliases": [],
+                  "droppedRelations": [],
+                  "correctedRelations": [],
+                  "movedAddressRelations": [],
+                  "droppedSpeechStyles": [
+                    {
+                      "characterName": "イント",
+                      "speechStyle": "丁寧な口調。一人称は「僕」。",
+                      "speechEvidence": "「そう言ってもらえると救われます」",
+                      "reason": "first_person_unquoted",
+                      "kept": "丁寧な口調。"
+                    }
+                  ],
+                  "droppedReadings": []
+                },
+                "settings": {
+                  "abilities": [],
+                  "locations": [
+                    {
+                      "data": {
+                        "name": "死の谷",
+                        "aliases": [],
+                        "reading": null,
+                        "summary": "温泉が存在するとされる、危険な場所。",
+                        "region": null,
+                        "description": "奥に温泉があるが、危ないところとされる場所。",
+                        "relations": [],
+                        "evidence": "「死の谷の奥にあるという温泉の調査のためですの。」"
+                      },
+                      "chapters": [
+                        6
+                      ]
+                    }
+                  ],
+                  "organizations": [],
+                  "worldItems": [
+                    {
+                      "data": {
+                        "name": "奇病の流行",
+                        "category": "society",
+                        "description": "家族が同時に下痢をする病や、炎天下での作業中に吐き気や頭痛、倦怠感を伴い死に至ることもある病が流行している。",
+                        "evidence": "「同じ家に住む家族が同時に下痢をするようになるっていう奇病と、炎天下で農作業や狩りをしていた者が急に吐き気や頭痛、倦怠感の襲われて、場合によっては死んでしまう奇病でしたっけ……」"
+                      },
+                      "category": "society",
+                      "chapters": [
+                        6
+                      ]
+                    },
+                    {
+                      "data": {
+                        "name": "魔物の存在",
+                        "category": "term",
+                        "description": "村の周辺に多く発生しており、その素材（皮や肉）は高値で売れる重要な特産品である。",
+                        "evidence": "「魔物の皮や肉は高値で売れる重要な特産品なので、はずせないのはわかるが」"
+                      },
+                      "category": "term",
+                      "chapters": [
+                        6
+                      ]
+                    }
+                  ],
+                  "affiliations": [],
+                  "rejected": [
+                    {
+                      "name": "神術",
+                      "reason": "not_an_ability"
+                    }
+                  ],
+                  "abilityTerm": "神術",
+                  "rules": []
+                },
+                "note": "マージ（既存の資料との突き合わせ）と保存は行っていません。これは取り出して検算したところまでの結果です。"
+              }
+            ],
+            "failures": []
+          }
+        }
+      ]
+    }
+  ],
+  "spread": {
+    "accepted": {
+      "values": [
+        8,
+        8,
+        8
+      ],
+      "min": 8,
+      "max": 8
+    },
+    "rejected": {
+      "values": [
+        1,
+        1,
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "rejected.not_an_ability": {
+      "values": [
+        1,
+        1,
+        1
+      ],
+      "min": 1,
+      "max": 1
+    },
+    "failures": {
+      "values": [
+        0,
+        0,
+        0
+      ],
+      "min": 0,
+      "max": 0
+    },
+    "elapsedMs": {
+      "values": [
+        54596,
+        41629,
+        42647
+      ],
+      "min": 41629,
+      "max": 54596
+    }
+  },
+  "lines": [
+    "指摘（検算を通ったもの）: 8（各回：8、8、8）",
+    "落とした（検算で弾いたもの）: 1（各回：1、1、1）",
+    "　└ 落とした理由：not_an_ability（能力ではない）: 1（各回：1、1、1）",
+    "失敗（チャンクごと通らなかったもの）: 0（各回：0、0、0）",
+    "所要時間: 41.6秒〜54.6秒（各回：54.6秒、41.6秒、42.6秒）",
+    "num_ctx: 28672（プロンプトの長さから（製品と同じ道））",
+    "temperature: 0.2（製品と同じ（束が返した値））",
+    "温め（読み込みを含む。上の所要時間には入っていません）: 20.0秒"
+  ]
+}
