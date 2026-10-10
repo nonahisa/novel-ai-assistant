@@ -1,5 +1,11 @@
 import { environmentVariable } from "../core/runtime";
 import { endsInWhitespaceRunaway } from "../core/truncatedResponse";
+import {
+  newRepetitionWatch,
+  watchRepetition,
+  type RepetitionStop,
+  type RepetitionWatch,
+} from "../core/repeatedElements";
 
 /**
  * Ollamaの応答を**流しながら**受け取る（設計書6.63.1）。
@@ -96,6 +102,16 @@ export interface StreamedChat {
    * 「いまの末尾」を見るので、空白のあとに中身が続けば下りる。
    */
   whitespaceRunaway?: boolean;
+  /**
+   * **同じ要素が続いたので止めるべき位置**（2026-10-10。`core/repeatedElements.ts`）。
+   *
+   * 立ったら、受け取る側はそれ以上待たずに打ち切り、ここで切り戻して
+   * 閉じた JSON を機能へ渡す。空白の印と違って下りない（一度繰り返しに
+   * 入ったら、その先は捨てる）。
+   */
+  repetitionStop?: RepetitionStop;
+  /** 繰り返しの見張りの途中の状態（断片ごとに続きから読むため） */
+  repetitionWatch?: RepetitionWatch;
   /** Ollamaが返したエラー文（あれば） */
   error?: string;
   /**
@@ -142,6 +158,9 @@ export function applyStreamLine(
     // 数えるのは末尾から最大でしきい値ぶんだけ（`trailingWhitespaceLength`）
     // なので、断片ごとに見ても重くならない
     into.whitespaceRunaway = endsInWhitespaceRunaway(into.content);
+    // 続きから読むので、断片ごとに呼んでも全体を読み直さない
+    into.repetitionWatch ??= newRepetitionWatch();
+    into.repetitionStop ??= watchRepetition(into.repetitionWatch, into.content);
   }
   /*
     **思考は本文と混ぜない**（設計書6.63.1）。

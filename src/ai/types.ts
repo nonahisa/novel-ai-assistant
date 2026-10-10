@@ -327,6 +327,22 @@ export interface GenerateResult {
    * 「上限を上げても変わらない」と言い分ける。
    */
   outputCappedByWindow?: OutputWindowCap;
+  /**
+   * **書き切る前にこちらから受け取りをやめ、それまでの答えを閉じて渡した**
+   * 回だけ入る（2026-10-10。いまは同じ要素の繰り返しだけ。
+   * `core/repeatedElements.ts`）。
+   *
+   * `truncated` とは分ける。機能の側は `truncated` を見ると解析せずに失敗へ
+   * 数えるので、救った答えまで捨ててしまう。使用量の記録の側
+   * （`ai/meteredProvider.ts`）は、これも「書き切っていない回」として扱う。
+   */
+  stoppedEarly?: {
+    readonly reason: "repetition";
+    /** 止めた要素が何件目か（1始まり） */
+    readonly stoppedAt: number;
+    /** 閉じて渡した要素の数（検算の前） */
+    readonly kept: number;
+  };
 }
 
 /**

@@ -117,6 +117,12 @@ export interface OllamaRunResult<R> {
   results: R[];
   /** 失敗したチャンク。**黙って飛ばさない**（件数だけでは何も分からない） */
   failures: Array<{ chunkId: string; reason: string }>;
+  /**
+   * AIが同じ要素を繰り返したので、途中で受け取りをやめたチャンク
+   * （2026-10-10）。`stoppedAt` 件目で止め、`kept` 件を閉じて検算へ回した。
+   * 起きた回だけ付く
+   */
+  stoppedEarly?: Array<{ chunkId: string; stoppedAt: number; kept: number }>;
 }
 
 /**
@@ -266,7 +272,11 @@ export async function runByRunner<
     numPredict?: number;
     /** 1回の呼び出しを待つ上限（ミリ秒）。undefined なら道具の既定 */
     timeoutMs?: number;
-  }) => Promise<{ text: string; truncated?: boolean }>,
+  }) => Promise<{
+    text: string;
+    truncated?: boolean;
+    stoppedEarly?: { stoppedAt: number; kept: number };
+  }>,
   /**
    * 結果を貯める先。**省略できる**（製品の鍵を組み立てられない機能がある）。
    * 詳しくは `RunChunkCache` の断り書き。
@@ -349,6 +359,8 @@ export async function runByRunner<
     model
   );
   const timeoutMs = timeoutMsOf(context.timeoutSeconds);
+  /** 同じ要素の繰り返しで受け取りをやめたチャンク（結果へ添える） */
+  const stoppedEarly: NonNullable<OllamaRunResult<R>["stoppedEarly"]> = [];
 
   const outcome = await runChunks(
     model,
@@ -378,6 +390,9 @@ export async function runByRunner<
         ...(numPredict !== undefined ? { numPredict } : {}),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       });
+      if (response.stoppedEarly) {
+        stoppedEarly.push({ chunkId: item.chunkId, ...response.stoppedEarly });
+      }
       // **検算が通ってから貯める。** 読み取れない応答を貯めると、
       // 次からその壊れた答えが返り続ける
       const result = validateNoting(
@@ -409,7 +424,7 @@ export async function runByRunner<
       );
     }
   }
-  return outcome;
+  return stoppedEarly.length > 0 ? { ...outcome, stoppedEarly } : outcome;
 }
 
 /** 秒の指定をミリ秒にする。指定が無い・読めないときは undefined（道具の既定） */

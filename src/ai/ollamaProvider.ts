@@ -36,7 +36,13 @@ interface OutputDeadline {
   readonly ms: number;
   readonly allowanceTokens: number;
 }
-import { logLine } from "../core/logger";
+import { logLine, workLog } from "../core/logger";
+import {
+  findRepetition,
+  repetitionStopMessage,
+  salvageRepetition,
+  type RepetitionStop,
+} from "../core/repeatedElements";
 import { withAiWork } from "../core/aiActivity";
 import {
   modelTuning,
@@ -231,6 +237,31 @@ interface ChatResponse {
   prompt_eval_duration?: unknown;
   eval_duration?: unknown;
   error?: string;
+  /**
+   * 同じ要素が続いたので、こちらから受け取りをやめた位置（流す道だけが
+   * 入れる。Ollama の応答には無い欄。`core/repeatedElements.ts`）
+   */
+  repetitionStop?: RepetitionStop;
+}
+
+/**
+ * 同じ要素の繰り返しで止めた（または上限で切れた）答えを、切り戻して閉じる。
+ *
+ * - 流す道が止めた位置を持っていれば、それを使う
+ * - 持っていなくても上限で切れていれば、全体から探す（流さない道の後始末）
+ * - どちらでもなければ何もしない（書き切った答えには触らない）
+ *
+ * @returns 止めた位置と、閉じた答え（閉じられなければ `salvaged` は無い）
+ */
+function salvageRepeatedElements(
+  res: ChatResponse,
+  content: string
+): { stop?: RepetitionStop; salvaged?: string } {
+  const stop =
+    res.repetitionStop ??
+    (res.done_reason === "length" ? findRepetition(content) : undefined);
+  if (!stop) return {};
+  return { stop, salvaged: salvageRepetition(content, stop) };
 }
 
 /**
@@ -697,6 +728,24 @@ export class OllamaProvider implements AIProvider {
     const res = second ?? first;
 
     /*
+      **同じ要素の繰り返しを、切り戻して閉じる**（2026-10-10）。流す道は
+      途中で止めた位置を持ってくる。流さない道（設定で切った作者）は上限まで
+      待つしかないが、上限で切れた答えから同じ形で救う
+    */
+    const received = res.message?.content ?? "";
+    const repetition = salvageRepeatedElements(res, received);
+    if (repetition.stop) {
+      const message = repetition.salvaged
+        ? repetitionStopMessage(repetition.stop)
+        : `AIが同じ指摘を繰り返したため、${repetition.stop.stoppedAt}件目で受け取りを止めましたが、` +
+          "それまでの答えを閉じられませんでした。";
+      // **作品のログへ書く**（0.101.15 と同じ理由。待っているあいだに作者が
+      // 別の作品を開いても、始めた作品の記録に残す）
+      if (params.meta?.workFolder) workLog(params.meta.workFolder).line(message);
+      else logLine(message);
+    }
+
+    /*
       **上限で打ち切ったことを、記録に残す**（2026-10-08）。機能の側は
       「切り詰められた」としか数えない（`checkTypos.ts` は件数だけ）ので、
       上限が暴走の歯止め（`num_predict`）だったのか、空白の連続だったのかを
@@ -704,10 +753,13 @@ export class OllamaProvider implements AIProvider {
     */
     // 空白の連続でこちらから受け取りをやめた回も `length` になるが、そちらは
     // 終わりの行（`eval_count` の入った行）を受け取る前にやめているので分けられる
+    // 繰り返しから救えた回は言わない（上限が足りなかったのではなく、
+    // 上限を外しても同じ要素が増えるだけ。台帳にも切り詰めの印を付けない）
     if (
       res.done_reason === "length" &&
       numPredict !== undefined &&
-      res.eval_count !== undefined
+      res.eval_count !== undefined &&
+      !repetition.salvaged
     ) {
       logLine(
         `Ollama：出力が上限（${numPredict} トークン）に達したので打ち切りました` +
@@ -720,7 +772,7 @@ export class OllamaProvider implements AIProvider {
     // 珍しい漢字が `<0xE5><0x9B><0xAE>` のようなバイト表記のまま
     // 返ることがある（実データで「囮」がそうなっていた）。
     // ここで戻さないと、そのまま資料ファイルへ保存されてしまう
-    const raw = res.message?.content ?? "";
+    const raw = repetition.salvaged ?? received;
     const text = decodeByteFallback(raw);
     const repaired = countByteFallback(raw);
     if (repaired > 0) {
@@ -749,7 +801,23 @@ export class OllamaProvider implements AIProvider {
         // 読み込みと書き出しの内訳。押す前の目安に使う（設計書6.8.19）
         ...durationUsage(res),
       },
-      truncated: res.done_reason === "length",
+      /*
+        **救えた回は「切り詰め」にしない。** 機能の側は切り詰めの印を見ると
+        解析せずに失敗へ数える（`checkTypos.ts` など10を超える機能）。
+        救えなかった回は、これまでどおり途中で切れた応答として渡す
+      */
+      truncated: repetition.salvaged
+        ? false
+        : res.done_reason === "length" || repetition.stop !== undefined,
+      ...(repetition.stop && repetition.salvaged
+        ? {
+            stoppedEarly: {
+              reason: "repetition" as const,
+              stoppedAt: repetition.stop.stoppedAt,
+              kept: repetition.stop.kept,
+            },
+          }
+        : {}),
       elapsedMs: Date.now() - started,
     };
   }
@@ -1051,6 +1119,18 @@ export class OllamaProvider implements AIProvider {
           await reader.cancel().catch(() => undefined);
           break;
         }
+        /*
+          **同じ要素が続いたら、それ以上待たない**（2026-10-10）。
+          gemma4:26b・温度0 の誤字脱字で、同じ指摘を157回書いて上限まで
+          約290秒かかり、閉じていない JSON はチャンクごと捨てられた。
+          ここで止め、切り戻して閉じるのは `chat` の側（流さない道と同じ
+          後始末を通すため）。**切り詰めの印は立てない**——立てると機能の
+          側が「途中で切れた」として、救った答えまで捨てる
+        */
+        if (state.repetitionStop) {
+          await reader.cancel().catch(() => undefined);
+          break;
+        }
       }
       /*
         **最後に取り込み器を空にする**（設計書6.63.1）。
@@ -1063,15 +1143,21 @@ export class OllamaProvider implements AIProvider {
 
         引数なしの `decode()` が、その持ち越しを吐き出す。
       */
-      buffer += decoder.decode();
-      // 最後の断片（改行で終わっていない場合）も取り込む
-      applyStreamLine(state, buffer);
+      // 繰り返しで止めた回は、読みかけの断片を足さない（止めた位置は決まっている）
+      if (!state.repetitionStop) {
+        buffer += decoder.decode();
+        // 最後の断片（改行で終わっていない場合）も取り込む
+        applyStreamLine(state, buffer);
+      }
 
       logLine(
         `Ollama：流して受信（${Math.round((Date.now() - started) / 1000)}秒 / ` +
           `${state.content.length}字 / 出力 ${state.evalCount ?? "不明"}トークン）` +
           (whitespaceStopped
             ? "。空白だけの行が続いたので、そこで受け取りをやめました"
+            : "") +
+          (state.repetitionStop
+            ? "。同じ要素が続いたので、そこで受け取りをやめました"
             : "")
       );
 
@@ -1088,6 +1174,7 @@ export class OllamaProvider implements AIProvider {
         prompt_eval_count: state.promptEvalCount,
         eval_duration: state.evalDuration,
         prompt_eval_duration: state.promptEvalDuration,
+        ...(state.repetitionStop ? { repetitionStop: state.repetitionStop } : {}),
       } as ChatResponse;
     } catch (error) {
       if (error instanceof AIError) throw error;
