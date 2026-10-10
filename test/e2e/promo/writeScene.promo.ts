@@ -80,7 +80,7 @@ const TITLE = { title: "統合小説執筆環境", subtitle: "書く — 原稿�
 const CLOSING = { title: "統合小説執筆環境", subtitle: "VS Code の拡張機能" };
 /** 段ごとの字幕 */
 const CAPTIONS = {
-  direction: "縦書きと横書き、ボタン1つで",
+  direction: "縦書きも、ボタン1つで",
   terms: "登場人物や場所は、色で見分けられます",
   rightClick: "右クリックで、その人物の設定資料へ",
   follow: "書きながら、資料を切り替え",
@@ -519,18 +519,15 @@ test("場面3「書く」を撮る", async () => {
       if (shown < 2_500) await hold(page, 2_500 - shown);
       await hideTitleCard(page);
 
-      /* ── 1. 縦書きと横書き ── */
+      /* ── 1. 縦書きにする（以後、縦書きのまま） ── */
       await showCaption(page, CAPTIONS.direction, CAPTION_SOLO);
       await hold(page, 1_000);
       await clickWithCursor(page, dir, "［縦書きにする］");
       mark("［縦書きにする］を押した");
       await waitUntil(async () => await isVertical(frame), "1段目：縦書きになる", 10_000);
-      await hold(page, 2_200);
+      // **ここから最後まで縦書きのまま進める**（作者の指示、2026-10-10「横書に切り替えず、縦書のままで」）
       if ((await dir.innerText()).trim() !== "横書きにする") throw new Error("縦書きにしたのに、ボタンが［横書きにする］になっていません");
-      await clickWithCursor(page, dir, "［横書きにする］");
-      mark("［横書きにする］を押した");
-      await waitUntil(async () => !(await isVertical(frame)), "1段目：横書きに戻る", 10_000);
-      await hold(page, 1_400);
+      await hold(page, 2_400);
 
       /* ── 2. 用語の色とチップ ── */
       await showCaption(page, CAPTIONS.terms, CAPTION_SOLO);
@@ -637,11 +634,9 @@ test("場面3「書く」を撮る", async () => {
       await waitUntil(async () => await fillsWindow(page, frame), "6段目：原稿エディターが窓いっぱいに広がる", 10_000);
       mark("原稿の列を最大化");
       await hold(page, 900);
-      const dirNow = frame.locator("#dir");
-      if ((await dirNow.innerText()).trim() !== "縦書きにする") throw new Error("6段目：原稿が横書きのままではありません");
-      await clickWithCursor(page, dirNow, "［縦書きにする］");
-      await waitUntil(async () => await isVertical(frame), "6段目：縦書きになる", 10_000);
-      mark("縦書きにした");
+      // 1段目で縦書きにしたまま。最大化で組み直されても縦書きであることを確かめる
+      await waitUntil(async () => await isVertical(frame), "6段目：縦書きのまま", 10_000);
+      mark("縦書きのまま最大化した");
       const parkVertical = await viewportPoint(page, PARK_VERTICAL);
       await parkCursor(page, parkVertical.x, parkVertical.y);
       await hold(page, 900);
