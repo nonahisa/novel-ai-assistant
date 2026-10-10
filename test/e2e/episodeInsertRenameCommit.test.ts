@@ -19,10 +19,10 @@
 import { expect, test } from "vitest";
 import { git, initRepoWithFirstCommit } from "./support/gitFixture";
 import { answerInput, waitForQuickInput } from "./support/quickInput";
-import { SIDEBAR_LAUNCH, treeContextMenu, treeRowLabels } from "./support/sidebar";
+import { SIDEBAR_LAUNCH, treeContextMenu, treeRowLabels, waitTreeSettled } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
-import { dialogText, pressDialogButton, pressWorkbenchKey } from "./support/workbenchDom";
+import { dialogText, pressDialogButton, pressWorkbenchKey, quickPickTitle } from "./support/workbenchDom";
 
 const EPISODES = [
   { name: "第1話_はじまり.txt", text: "一話の本文。\n" },
@@ -48,6 +48,8 @@ test("話を挿入して「コミットする」を押すと、失敗の知ら�
       expect(before).toBe("1");
 
       // 第2話の前に挿入する
+      // 一覧が裏の走査・記録待ちの数で描き直している最中に押さない（`waitTreeSettled` の説明）
+      await waitTreeSettled(page);
       await treeContextMenu(page, "第2話", "この話の前に挿入");
       /*
         ノートPC（1.141.0、2026-10-10）でだけ、ここで15秒待って落ちた（こちらの機械では通常の窓でも
@@ -57,7 +59,14 @@ test("話を挿入して「コミットする」を押すと、失敗の知ら�
       */
       await waitForQuickInput(page, "この話の前に挿入", 30_000).catch(async (error: unknown) => {
         const toasts = await page.locator(".notification-toast").allInnerTexts().catch(() => [] as string[]);
-        throw new Error(`${String(error)}（出ている知らせ：${JSON.stringify(toasts)}／確認の窓：${(await dialogText(page)) ?? "なし"}）`);
+        // 別の選ぶ画面（「作品を選択」など）が出ていないか・品書きが残っていないか・一覧の行も添える
+        // （2026-10-11 ノートPCで単独だと必ずここで落ちた。次の回で、押した先が届いたかを分けるため）
+        const menuOpen = (await page.locator(".context-view .monaco-menu").count()) > 0;
+        throw new Error(
+          `${String(error)}（出ている知らせ：${JSON.stringify(toasts)}／確認の窓：${(await dialogText(page)) ?? "なし"}` +
+            `／選ぶ画面の題：${(await quickPickTitle(page)) ?? "なし"}／品書き：${menuOpen ? "開いたまま" : "閉じた"}` +
+            `／一覧の行：${(await treeRowLabels(page)).join(" / ")}）`
+        );
       });
       await answerInput(page, "割り込み");
 

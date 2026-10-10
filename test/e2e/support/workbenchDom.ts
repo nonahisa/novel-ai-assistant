@@ -184,16 +184,35 @@ export async function activeGroupIndex(page: Page): Promise<number> {
  * 空の候補で閉じて何も開かない）。
  */
 export async function quickOpen(page: Page, fileName: string): Promise<void> {
-  await page.keyboard.press("Control+KeyP");
-  const input = page.locator(".quick-input-widget input");
-  await input.waitFor({ state: "visible" });
+  /*
+    **Ctrl+P は本体へ焦点を戻してから押す**（`pressWorkbenchKey`）。提案パネルなどの WebView を
+    開いた直後は焦点が iframe の中にあり、素の `keyboard.press` は本体のキー割り当てに届かない。
+    ノートPC（1.141.0、2026-10-11）の `manuscriptFootNarrow` で、提案パネルを開いたあとの
+    2話目を開こうとして、入力欄が出ないまま30秒待って落ちた。パレット（`runCommand`）と同じく、
+    パネルが開き終わる途中で焦点が移ることもあるので、出なければ3回まで押し直す
+  */
+  const input = page.locator(".quick-input-widget input").first();
+  for (let attempt = 1; ; attempt++) {
+    await pressWorkbenchKey(page, "Control+KeyP");
+    const shown = await input
+      .waitFor({ state: "visible", timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (shown) break;
+    if (attempt === 3) throw new Error(`Ctrl+P のファイル検索の入力欄が出ません（「${fileName}」を開こうとして、3回押しました）`);
+  }
   await page.keyboard.insertText(fileName);
   await page
     .locator(".quick-input-widget .monaco-list-row", { hasText: fileName })
     .first()
-    .waitFor({ state: "visible" });
+    .waitFor({ state: "visible" })
+    .catch((error: unknown) => {
+      throw new Error(`Ctrl+P の候補に「${fileName}」が出ません（${String(error)}）`);
+    });
   await page.keyboard.press("Enter");
-  await input.waitFor({ state: "hidden" });
+  await input.waitFor({ state: "hidden" }).catch((error: unknown) => {
+    throw new Error(`Ctrl+P で「${fileName}」を選んだあと、入力欄が閉じません（${String(error)}）`);
+  });
 }
 
 /**
