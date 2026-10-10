@@ -47,6 +47,7 @@ import { ExtractionReplay } from "../../core/externalExtractMerge";
 import {
   foreignNarrationScenesInChunk,
   foreignNarratorNoteOf,
+  withSceneText,
   type WorkNarratorContext,
 } from "../../core/sceneNarrators";
 import { workNarratorContextFor } from "./proofread";
@@ -268,7 +269,10 @@ function promptForChunk(
       // 製品と同じ断り書き（主人公でない語り手の場面があるチャンクだけ）
       foreignNarrator: stored.workNarrator
         ? foreignNarratorNoteOf(
-            foreignNarrationScenesInChunk(chunk, stored.workNarrator.narrator.firstPerson),
+            withSceneText(
+              chunk.text,
+              foreignNarrationScenesInChunk(chunk, stored.workNarrator.narrator.firstPerson)
+            ),
             stored.workNarrator
           )
         : null,

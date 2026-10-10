@@ -53,6 +53,7 @@ import { describeUnnamedNarratorOutcome } from "../core/unnamedNarrator";
 import {
   foreignNarrationScenesInChunk,
   foreignNarratorNoteOf,
+  withSceneText,
   workNarratorContextOf,
 } from "../core/sceneNarrators";
 import { blankMemoLines } from "../core/sceneMemo";
@@ -812,7 +813,11 @@ export async function extractCharacters(
           // 主人公でない語り手の場面があるチャンクだけ、断り書きを添える
           foreignNarrator: workNarrator
             ? foreignNarratorNoteOf(
-                foreignNarrationScenesInChunk(chunk, workNarrator.narrator.firstPerson),
+                // 場面の本文を添える（名指しは、その場面に出ている人物で決める）
+                withSceneText(
+                  chunk.text,
+                  foreignNarrationScenesInChunk(chunk, workNarrator.narrator.firstPerson)
+                ),
                 workNarrator
               )
             : null,
