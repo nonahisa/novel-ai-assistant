@@ -48,8 +48,8 @@ async function coloredCharacterTerms(frame: Frame): Promise<string[]> {
   });
 }
 
-/** 組んで書く面の `word` を右クリックし、品書きの「設定資料を見る」を押す */
-async function showSettingsOf(frame: Frame, word: string): Promise<void> {
+/** 組んで書く面での `word` の2字目の真ん中（`#compose` の左上からの位置） */
+async function wordPosition(frame: Frame, word: string): Promise<{ x: number; y: number }> {
   const position = await frame.evaluate((text) => {
     const compose = document.getElementById("compose");
     if (!compose) return undefined;
@@ -68,6 +68,34 @@ async function showSettingsOf(frame: Frame, word: string): Promise<void> {
     return undefined;
   }, word);
   if (!position) throw new Error(`組んで書く面に「${word}」が見つかりません`);
+  return position;
+}
+
+/**
+ * 組んで書く面の `word` の上に矢印を載せたときに出る吹き出しの名前（`#tip .tip-name`）。
+ *
+ * 吹き出しの名前は、画面が持っている用語の位置（`termSpans`）の持ち主の名前である。右クリックの
+ * 「設定資料を見る」が開く人物も同じ `termSpans` から決まるので、**右クリックの前に、画面が新しい
+ * 持ち主を知っているか**をここで見分けられる。同じ座標に載せ直しても mousemove が出ないことがあるので、
+ * 呼ぶたびに1px ずらす
+ */
+let tipNudge = 0;
+async function tipNameOver(frame: Frame, word: string): Promise<string> {
+  const position = await wordPosition(frame, word);
+  tipNudge = tipNudge === 0 ? 1 : 0;
+  await frame.locator("#compose").hover({ position: { x: position.x + tipNudge, y: position.y } });
+  // 吹き出しは次の描画の機会（requestAnimationFrame）に出る
+  await frame.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  return frame.evaluate(() => {
+    const tip = document.getElementById("tip");
+    if (!tip || !tip.classList.contains("open")) return "";
+    return (tip.querySelector(".tip-name")?.textContent ?? "").trim();
+  });
+}
+
+/** 組んで書く面の `word` を右クリックし、品書きの「設定資料を見る」を押す */
+async function showSettingsOf(frame: Frame, word: string): Promise<void> {
+  const position = await wordPosition(frame, word);
   await frame.locator("#compose").click({ button: "right", position });
   const entry = frame.locator("#menu .item", { hasText: "設定資料を見る" }).first();
   await waitUntil(async () => (await entry.count()) > 0 && (await entry.isVisible()), "右クリックの品書きに「設定資料を見る」が出る");
@@ -104,6 +132,14 @@ test("別名を別の人物に分けると、開いたままの本文の「お�
 
       // 色は別名にも付いている（分ける前）
       await waitUntil(async () => (await coloredCharacterTerms(frame)).includes("お嬢様"), "分ける前：「お嬢様」に人物の色が付く", 20_000);
+
+      // 分ける前：吹き出しの名前も、持ち主の「密倉文佳」（下の「分けたあと」の見分けに使う道が効くことを先に確かめる）
+      let tipName = "";
+      await waitUntil(async () => (tipName = await tipNameOver(frame, "お嬢様")) === "密倉文佳", "分ける前：「お嬢様」の吹き出しは「密倉文佳」", 10_000).catch(
+        (error: unknown) => {
+          throw new Error(`${String(error)}（いまの吹き出し：「${tipName}」）`);
+        }
+      );
 
       // 分ける前：「お嬢様」は密倉文佳の資料を出す
       await showSettingsOf(frame, "お嬢様");
@@ -144,6 +180,20 @@ test("別名を別の人物に分けると、開いたままの本文の「お�
       expect(tabNamesInclude(tabs, EPISODE), `原稿のタブは開いたまま（タブ：${JSON.stringify(tabs)}）`).toBe(true);
       await activateTab(page, EPISODE);
       expect(await coloredCharacterTerms(frame), "分けたあとも「お嬢様」に色が付く").toContain("お嬢様");
+      /*
+        **右クリックの前に、画面が新しい持ち主を知っているかを見分ける**（2026-10-11 ノートPCで3回に1回、
+        右クリックで古い「密倉文佳」が開いて落ちた）。ここで落ちたら**製品の側**：分けたあと、開いている
+        原稿エディターへ新しい用語の位置が送り直されていない。製品は設定資料の変更で色分けの控えを捨てる
+        （`setSettingsChangeObserver` → `highlighter.invalidate()`）が、原稿エディターへ送り直すのは
+        本文の変更・配色や設定の変更・タブの見え方の変化（`onDidChangeViewState`）のときだけで、
+        上の `activateTab` の送り直しが控えを捨てるより先に走ると、古い持ち主のまま残る。
+        待っても直らないことを確かめるため、時間は長めに取る
+      */
+      await waitUntil(async () => (tipName = await tipNameOver(frame, "お嬢様")) === "お嬢様", "分けたあと：「お嬢様」の吹き出しが新しい人物になる（原稿エディターへ新しい用語が届く）", 15_000).catch(
+        (error: unknown) => {
+          throw new Error(`${String(error)}（いまの吹き出し：「${tipName}」。開いている原稿エディターへ、分けたあとの用語が送り直されていません）`);
+        }
+      );
       await showSettingsOf(frame, "お嬢様");
       await waitUntil(
         async () => {

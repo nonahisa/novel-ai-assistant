@@ -15,7 +15,7 @@
  */
 import type { Locator, Page } from "playwright-core";
 import { waitUntil } from "./wait";
-import { pressWorkbenchKey } from "./workbenchDom";
+import { dismissWorkbenchHover, pressWorkbenchKey } from "./workbenchDom";
 
 /**
  * 左の列を出すキー（使い捨ての keybindings.json に書く）。F1〜F12 は埋まったので、
@@ -26,7 +26,15 @@ const SHOW_SIDEBAR_PRESS = "Control+Alt+Shift+KeyJ";
 
 /** 左の列を使う件が `withVsCode` の起こし方へ渡すもの */
 export const SIDEBAR_LAUNCH = {
-  settings: { "window.menuStyle": "custom" } as Record<string, unknown>,
+  settings: {
+    "window.menuStyle": "custom",
+    /*
+      **行の吹き出し（作品・話の紹介）を出さない。** 右クリックで品書きが出るのを待つあいだ、矢印は
+      行の上に止まったままになり、既定の 500ms で吹き出しが出る。吹き出しも品書きも矢印の下へ開くので、
+      品書きの行の上に重なりうる（`treeContextMenu`）。左の列の件で吹き出しの中身を見るものは無い
+    */
+    "workbench.hover.delay": 600_000,
+  } as Record<string, unknown>,
   keybindings: [{ key: SHOW_SIDEBAR_KEY, command: "workbench.view.extension.novelai" }] as Record<string, unknown>[],
 };
 
@@ -91,6 +99,35 @@ export async function scrollTreeUntilRow(page: Page, anchorHead: string, head: s
   return target;
 }
 
+/**
+ * 左の列の行が落ち着くまで待つ（行の名前の並びが `quietMs` のあいだ変わらず、
+ * 「読み込み中」「前回の値」の行が無い）。
+ *
+ * 作品一覧は、控えを先に出してから裏で走査し直し、git の記録待ちの数が分かると描き直す
+ * （設計書6.107・5.5.17）。描き直しの最中に右クリックの品書きを押すと、品書きが指していた
+ * 行がもう無く、命令に行が渡らずに黙って終わることがある。押す前にここで待つ
+ */
+export async function waitTreeSettled(page: Page, quietMs = 2_000, timeoutMs = 30_000): Promise<void> {
+  let last = "";
+  let since = Date.now();
+  await waitUntil(
+    async () => {
+      const labels = await treeRowLabels(page);
+      const now = labels.join("\n");
+      if (now !== last || labels.some((label) => label.includes("読み込み中") || label.includes("前回の値"))) {
+        last = now;
+        since = Date.now();
+        return false;
+      }
+      return Date.now() - since >= quietMs;
+    },
+    "左の列の行が落ち着く",
+    timeoutMs
+  ).catch(async (error: unknown) => {
+    throw new Error(`${String(error)}（いまの行：${(await treeRowLabels(page)).join(" / ")}）`);
+  });
+}
+
 /** 作品の行を開く（畳まれていれば押して開く） */
 export async function expandTreeRow(page: Page, head: string): Promise<void> {
   const row = treeRow(page, head);
@@ -110,13 +147,31 @@ export async function contextMenuLabels(page: Page): Promise<string[]> {
 
 /** 行を右クリックし、品書きの `item` を押す */
 export async function treeContextMenu(page: Page, head: string, item: string): Promise<void> {
+  // 前に出ていた吹き出しが品書きの上に残らないよう、先に払う（矢印は右クリックで行の上へ戻る）
+  await dismissWorkbenchHover(page);
   await treeRow(page, head).click({ button: "right" });
   await waitUntil(async () => (await contextMenuLabels(page)).includes(item), `右クリックの品書きに「${item}」が出る`).catch(
     async (error: unknown) => {
       throw new Error(`${String(error)}（品書き：${(await contextMenuLabels(page)).join(" / ")}）`);
     }
   );
-  await page.locator(".context-view .action-label", { hasText: item }).first().click();
+  const entry = page.locator(".context-view .action-label", { hasText: item }).first();
+  /*
+    **押す前に、品書きの行がいちばん上に出ているかを確かめる。** 吹き出しなどが重なっていると、
+    押したつもりが重なったほうに当たり、品書きだけが閉じて何も起きない形になりうる（2026-10-11
+    ノートPCの `episodeInsertRenameCommit` が、品書きは閉じたのに入力欄が出ない形で落ちた）。
+    重なっていたら黙って押さずに、上に何があるかを名乗って落とす
+  */
+  const covering = await entry.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    if (!top || element.contains(top) || top.contains(element)) return undefined;
+    const row = element.closest(".action-item");
+    if (row && row.contains(top)) return undefined;
+    return `${top.tagName.toLowerCase()}.${String(top.className)}「${(top.textContent ?? "").trim().slice(0, 30)}」`;
+  });
+  if (covering) throw new Error(`右クリックの品書きの「${item}」の上に別のものが重なっています：${covering}`);
+  await entry.click();
   /*
     **押しても品書きが閉じないことがある**（2026-10-04、作品の行の右クリックで踏んだ。
     行は選ばれた色になるが、押したことにならない）。押した行には焦点が載っているので、
@@ -124,6 +179,13 @@ export async function treeContextMenu(page: Page, head: string, item: string): P
   */
   const closed = async () => (await page.locator(".context-view .monaco-menu").count()) === 0;
   await waitUntil(closed, "右クリックの品書きが閉じる", 2_000).catch(async () => {
+    // 焦点の載った行が目当てと違えば、Enter で別の命令を走らせてしまう。名乗って止める
+    const focused = await page.evaluate(() =>
+      (document.querySelector(".context-view .action-item.focused .action-label")?.textContent ?? "").trim()
+    );
+    if (focused !== "" && !focused.includes(item)) {
+      throw new Error(`右クリックの品書きで「${item}」を押しましたが閉じず、焦点は「${focused}」に載っています`);
+    }
     await page.keyboard.press("Enter");
     await waitUntil(closed, `右クリックの品書きで「${item}」を選んで閉じる`, 5_000);
   });

@@ -82,7 +82,19 @@ test("下段は「この話で今日 +N字」になり、第1話で1日の目標
       // 第1話、第2話の順に開く（2枚のタブ）
       const firstFrame = await openEpisode(page, first.name, "一行目の文");
       const secondFrame = await openEpisode(page, second.name, "二話目の本文");
-      expect(await footText(secondFrame, "counts")).toContain("この話で今日 0字");
+      /*
+        **「この話で今日」は、本文が描かれたあとに別の便で届く**（`sendFootCounts`。作品の合計を
+        出すのに全話を走査するので、「このファイル N字」の便より遅れる）。描かれた直後に1回だけ
+        読むと「このファイル 7字 ／ 表示倍率 100%」の形（作品も今日もまだ無い）で落ちた
+        （ノートPC・1.141.0、2026-10-11）。届くまで待つ
+      */
+      await waitUntil(
+        async () => (await footText(secondFrame, "counts")).includes("この話で今日 0字"),
+        "第2話の下段に「この話で今日 0字」が届く",
+        20_000
+      ).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}（いまの下段：「${await footText(secondFrame, "counts")}」）`);
+      });
 
       // 第1話へ戻って、1日の目標（20字）を超えて打ち、保存する
       await activateTab(page, "001_はじまり.txt");
@@ -117,7 +129,14 @@ test("下段は「この話で今日 +N字」になり、第1話で1日の目標
         20_000
       );
       // 第2話そのものは書いていないので、この話の今日は0字のまま
-      expect(await footText(front, "counts")).toContain("この話で今日 0字");
+      // （タブを戻したときにも下段は測り直しの便で届き直すので、待って読む）
+      await waitUntil(
+        async () => (await footText(front, "counts")).includes("この話で今日 0字"),
+        "第2話の下段は「この話で今日 0字」のまま",
+        20_000
+      ).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}（いまの下段：「${await footText(front, "counts")}」）`);
+      });
     },
     { settings: { "novelai.stats.dailyGoal": 20 } }
   );
