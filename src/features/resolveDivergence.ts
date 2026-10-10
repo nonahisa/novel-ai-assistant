@@ -47,6 +47,7 @@ import {
 } from "../core/logger";
 import { withCancellableProgress } from "../views/progress";
 import type { WalkConflictsResult } from "./resolveConflicts";
+import { readAutoResendSettings } from "./autoResend";
 
 /**
  * 分岐したときに、畳めるものは畳む（設計書5.5.16／5.5.18）。
@@ -219,9 +220,9 @@ export async function resolveDivergence(
   useRootLog(deps, root);
 
   const outcome = await withCancellableProgress(
-    "分かれた分を調べています…",
+    "2台の原稿を調べています…",
     async (progress, token) => {
-      progress.report({ message: "GitHubの分を取りに行っています…" });
+      progress.report({ message: "もう1台で書いた分を、GitHubから取りに行っています…" });
       await fetchRemote(root, run);
       if (token.isCancellationRequested) return undefined;
 
@@ -231,7 +232,7 @@ export async function resolveDivergence(
         return { kind: "not_diverged" as const };
       }
 
-      progress.report({ message: "合わせられるかを調べています…" });
+      progress.report({ message: "そろえられるかを調べています…" });
       const preview = parseMergeTree(
         await run(mergeTreeArgs("HEAD", status.upstream), root, 60_000)
       );
@@ -253,13 +254,14 @@ export async function resolveDivergence(
 
   if (outcome.kind === "not_tracked") {
     void vscode.window.showInformationMessage(
-      `${label} は、GitHubとつながっていません。`
+      `「${label}」は、GitHubとつながっていません。`
     );
     return;
   }
   if (outcome.kind === "not_diverged") {
     void vscode.window.showInformationMessage(
-      `${label} は分かれていません。「同期」でそのまま取り込めます。`
+      `「${label}」は、2台の原稿がそろっています（作業は要りません）。` +
+        "送るのと取り込むのは「保存・同期」でできます。"
     );
     return;
   }
@@ -274,17 +276,22 @@ export async function resolveDivergence(
   // **作者のものが衝突していても、もう行き止まりにしない**（設計書5.5.18）。
   // 何が起きるかを先に見せ、押されたら1件ずつ選んでもらう。
   // **選び方もこの窓で訊く**（案2、2026-10-01）——見比べの入口の窓を続けて出さない
+  // 窓の文（送るか送らないか）を事実に合わせるため、送り直しの設定を読む
+  // （既定は入っている。読めない値は既定どおり「送る」側に数える——
+  // 送らないと言って送るほうが、作者にとって悪い食い違いなので）
+  const autoResend = readAutoResendSettings().enabled !== false;
   const start = await confirm(
     label,
     status.behind,
     status.ahead,
     preview,
-    undecidedSettings
+    undecidedSettings,
+    autoResend
   );
   if (!start) return;
 
   const result = await withCancellableProgress(
-    "分かれた分を合わせています…",
+    "2台の原稿をそろえています…",
     async (progress) =>
       foldDivergence(
         deps,
@@ -294,7 +301,7 @@ export async function resolveDivergence(
   );
   if (!result) return;
 
-  await reportFold(deps, label, result, { sending: false });
+  await reportFold(deps, label, result, { sending: false, autoResend });
 }
 
 /** どの置き場を畳むか。作品が指定されなければ、登録の先頭から根をたどる */
@@ -338,59 +345,82 @@ export function describeDivergenceConfirm(input: {
   settingsToChoose?: number;
   /** 作者が1件ずつ選ぶことになる本文の件数 */
   manuscripts?: number;
+  /**
+   * 自動の送り直し（`novelai.git.autoResend`）が入っているか。
+   *
+   * **そろえたあと、送り直しが数分のうちに GitHub へ送る**（そろえた記録は
+   * 「送っていない記録」になり、相手より遅れてもいないため）。
+   * 2026-10-11、窓に「GitHubへは送信しません」と書いてあったのに、
+   * 1分後に送られていた（作者の実機確認）。**窓の文は事実に合わせる**
+   */
+  autoResend: boolean;
 }): { message: string; detail: string; buttons: string[] } {
-  const lines = [
-    `・GitHubの側にある${input.behind}件を取り込みます`,
-    `・こちらの${input.ahead}件はそのまま残ります`,
-  ];
-  if (input.autoWritten > 0) {
-    lines.push(
-      `・食い違う${input.autoWritten}件（自動で書かれるもの）は、この端末の側を残します`
-    );
-  }
-  if (input.appendOnly && input.appendOnly > 0) {
-    lines.push(
-      `・追記型${input.appendOnly}件（履歴・提案・ロック）は、両方の行を残します`
-    );
-  }
+  const label = `「${input.label}」`;
   const toChoose = input.settingsToChoose ?? 0;
-  if (input.settings && input.settings > 0) {
+  const manuscripts = input.manuscripts ?? 0;
+  // **窓に出すのは、作者が判断に使うことだけ**（作者の裁定、2026-10-11）。
+  // 自動で書かれるもの・履歴・設定資料の内訳は作品のログへ回す
+  // （`describeDivergenceBreakdown`）。ここに並べると、読む所が分からない
+  const lines = ["もう1台で書いた分を入れ、このパソコンで書いた分も残します。"];
+  if (manuscripts > 0) {
     lines.push(
-      `・食い違う設定資料${input.settings}件は、` +
-        "作者が書いた部分が重ならなければ、両方の変更を合わせて新しいほうへ揃えます"
+      `同じところを両方で書き換えた原稿が ${manuscripts}件あります。` +
+        "このあと両方の文を並べるので、残すほうを選んでください。"
     );
   }
   if (toChoose > 0) {
+    // ボタンが3つに増える理由が分かるように、これだけは窓に残す
     lines.push(
-      `・そのうち作者が書いた部分が両方で違う設定資料${toChoose}件は、` +
-        "押したボタンで決めます（新しいほうへまとめて／1件ずつ）"
+      `作者が書いたところが両方で違う設定資料が ${toChoose}件あります。` +
+        "下のボタンで決め方を選んでください。"
     );
   }
-  if (input.manuscripts && input.manuscripts > 0) {
-    lines.push(
-      `・同じ箇所を両方で書き換えた本文${input.manuscripts}件は、1件ずつお選びいただきます`
-    );
-  }
-  if (toChoose > 0 || (input.manuscripts ?? 0) > 0) {
-    // 見比べの入口の窓が言っていたこと（案2で窓を1つにまとめたので、ここへ移す）
-    lines.push("・途中でやめると、合わせるのをやめて元の状態へ戻します");
-  }
-  lines.push("・合わせる前に、未記録の変更を記録します");
-  lines.push("・戻せるように、退避の枝を作ります");
+  lines.push(
+    input.autoResend
+      ? "そろえ終わったら、数分のうちに自動でGitHubへ送ります。"
+      : "GitHubへは送りません。送るときは「保存・同期」を押してください。"
+  );
 
   return {
-    message: `${input.label} の分かれた分を合わせます。`,
+    message: input.autoResend
+      ? `${label}：2台の原稿をそろえて、GitHubへ送ります。`
+      : `${label}：2台の原稿をそろえます。`,
     detail:
       `${lines.join("\n")}\n\n` +
-      "GitHubへは送信しません。送信は「同期」から改めて行ってください。",
+      "途中でやめれば、原稿は元のままです。そろえたあとでも「そろえる前」へ戻せます。",
     buttons: toChoose > 0 ? [MERGE_NEWEST, MERGE_ONE_BY_ONE] : [MERGE],
   };
 }
 
+/**
+ * 確認の窓から外した内訳を、作品のログへ1行で残す文（作者の裁定、2026-10-11）。
+ *
+ * **黙って片方へ寄せたことにしない**（5.5.18）ために、窓から外しても
+ * どこかには残す。開発側が「何がどう片づく見込みだったか」を追えるように。
+ */
+export function describeDivergenceBreakdown(input: {
+  label: string;
+  behind: number;
+  ahead: number;
+  autoWritten: number;
+  appendOnly?: number;
+  settings?: number;
+  settingsToChoose?: number;
+  manuscripts?: number;
+}): string {
+  return (
+    `そろえる前の見込み（${input.label}／もう1台の記録 ${input.behind}件・` +
+    `このパソコンの記録 ${input.ahead}件／自動で書かれるもの ${input.autoWritten}件は` +
+    `このパソコンの側／追記型 ${input.appendOnly ?? 0}件は両方の行／` +
+    `設定資料 ${input.settings ?? 0}件（作者が選ぶ ${input.settingsToChoose ?? 0}件）／` +
+    `作者が選ぶ原稿 ${input.manuscripts ?? 0}件）`
+  );
+}
+
 /** 確認の窓のボタン。**押された文字で分けるので、定数を1か所に置く** */
-const MERGE = "合わせる";
-const MERGE_NEWEST = "合わせる（設定資料は新しいほうへ）";
-const MERGE_ONE_BY_ONE = "合わせる（1件ずつ選ぶ）";
+const MERGE = "そろえる";
+const MERGE_NEWEST = "そろえる（設定資料は新しいほうへ）";
+const MERGE_ONE_BY_ONE = "そろえる（1件ずつ選ぶ）";
 
 /** 押されたボタンを見比べの始め方へ。押さずに閉じたら undefined（合わせない） */
 function mergeChoiceOf(answer: string | undefined): ConflictWalkStart | undefined {
@@ -409,10 +439,11 @@ async function confirm(
   behind: number,
   ahead: number,
   preview: MergePreview,
-  undecidedSettings: readonly string[] | undefined
+  undecidedSettings: readonly string[] | undefined,
+  autoResend: boolean
 ): Promise<ConflictWalkStart | undefined> {
   const classified = classifyConflicts(preview.conflicts);
-  const text = describeDivergenceConfirm({
+  const counts = {
     label,
     behind,
     ahead,
@@ -422,7 +453,9 @@ async function confirm(
     // 調べられなかったら全部を選ぶ側に数える（安全な側）
     settingsToChoose: (undecidedSettings ?? classified.settings).length,
     manuscripts: classified.manuscripts.length,
-  });
+  };
+  logStep(describeDivergenceBreakdown(counts));
+  const text = describeDivergenceConfirm({ ...counts, autoResend });
   const answer = await vscode.window.showInformationMessage(
     text.message,
     { modal: true, detail: text.detail },
@@ -463,13 +496,13 @@ export async function foldDivergence(
     }
   }
 
-  report("退避の枝を作っています…");
+  report("そろえる前の控えを作っています…");
   const backup = backupBranchName();
   const branched = await run(["branch", backup], root, 15_000);
   if (branched.code !== 0) {
     return {
       ok: false,
-      reason: `退避の枝を作れませんでした: ${branched.stderr.trim()}`,
+      reason: `そろえる前の控えを作れませんでした: ${branched.stderr.trim()}`,
     };
   }
 
@@ -500,7 +533,7 @@ export async function foldDivergence(
   report("原稿の指紋を控えています…");
   const before = await fingerprints(root, run);
 
-  report("合わせています…");
+  report("そろえています…");
   // **確定させずに畳む。** 検査に落ちたときに戻せるようにするため
   const merged = await run(
     ["merge", "--no-commit", "--no-ff", upstream],
@@ -515,6 +548,8 @@ export async function foldDivergence(
   const settingsAutoResolved: SettingsResolution[] = [];
   let manuscriptConflicts: string[] = [];
   let settingsBulkResolved = 0;
+  // 「両方とも残す」で作った別ファイル。**記録の直前まで git へ足さない**（下）
+  let sideFiles: string[] = [];
 
   const unresolved = await unmergedFiles(root, run);
   if (unresolved.length === 0 && merged.code !== 0) {
@@ -632,6 +667,7 @@ export async function foldDivergence(
       resolved.push(...walked.resolved, ...walked.bulkResolved);
       manuscriptConflicts = [...walked.resolved];
       settingsBulkResolved = walked.bulkResolved.length;
+      sideFiles = [...(walked.sideFiles ?? [])];
     }
 
     // 選び終わっても未解決が残っているなら、こちらの読み違いである。
@@ -676,6 +712,26 @@ export async function foldDivergence(
         "合わせた中身が検査に通らなかったため、元に戻しました。\n" +
         describeGuardFailure(guard),
     };
+  }
+
+  // 「両方とも残す」の別ファイルを、そろえた記録へ一緒に入れる
+  // （作者の裁定、2026-10-11「一緒に送る」。もう1台でも写しが読めるように）。
+  // **検査のあと・記録の直前に足す。** 選んだ直後に索引へ入れると、途中で
+  // やめたときの `merge --abort` が索引ごと戻し、写しが作業ツリーから消えうる
+  // （`resolveDivergence.test.ts` の裏づけの試験）。新しいファイルなので
+  // 検査の指紋（追跡しているファイルだけ）には入っておらず、検査を乱さない
+  if (sideFiles.length > 0) {
+    const added = await run(["add", "--", ...sideFiles], root, 15_000);
+    if (added.code !== 0) {
+      return await abort(
+        root,
+        run,
+        `両方とも残した別ファイルを記録に入れられませんでした: ${(
+          added.stderr || added.stdout
+        ).trim()}`
+      );
+    }
+    logStep(`両方とも残した別ファイル ${sideFiles.length}件を記録に入れます：${sideFiles.join("、")}`);
   }
 
   report("記録しています…");
@@ -925,11 +981,13 @@ async function abort(
 export function describeAuthoredStop(files: readonly string[]): string {
   const listed = files.slice(0, 5).map((file) => baseNameOf(file));
   const more = files.length > 5 ? `、ほか${files.length - 5}件` : "";
+  // **「続きから選べます」とは言わない**（2026-10-11）。やめると `merge --abort`
+  // で全部戻るので、次は最初から選び直しになる。事実と違う約束をしていた
   return (
-    `本文と設定資料の ${files.length} 件が、同じ箇所で衝突しています` +
+    `同じところを両方で書き換えた原稿・設定資料が ${files.length}件あります` +
     `（${listed.join("、")}${more}）。` +
-    "選ばれなかったので、元の状態へ戻しました。" +
-    "もう一度同期すると、続きから選べます。"
+    "そろえるのをやめて、元のままにしました。" +
+    "もう一度そろえる操作をすると、最初から選び直せます。"
   );
 }
 
@@ -946,35 +1004,44 @@ export function describeAuthoredStop(files: readonly string[]): string {
 export function describeFoldSuccess(
   label: string,
   result: Extract<FoldOutcome, { ok: true }>,
-  options: { sending: boolean } = { sending: false }
+  options: {
+    /** この知らせのすぐあとに、呼び出し側が送る（同期の流れの中） */
+    sending: boolean;
+    /**
+     * 自動の送り直しが入っているか。**そろえた記録は数分のうちに送られる**
+     * （2026-10-11、「送りません」と書いた1分後に送られていた）
+     */
+    autoResend?: boolean;
+  } = { sending: false }
 ): string {
-  const parts = [`取り込み ${result.incoming}件`];
+  const parts = [`もう1台から入れたファイル ${result.incoming}件`];
   if (result.settingsAutoResolved.length > 0) {
-    const theirs = result.settingsAutoResolved.filter(
-      (one) => one.side === "theirs"
-    ).length;
-    // 両方の変更を項目ごとに合わせた分（案3）。**片方へ寄せたとは言わない**
+    // 両方の変更を項目ごとに合わせた分（案3）。**片方へ寄せたとは言わない**。
+    // どちらの側を採ったかの内訳は、1件ずつ作品のログに残してある
     const merged = result.settingsAutoResolved.filter(
       (one) => one.side === "merged"
     ).length;
-    const ours = result.settingsAutoResolved.length - theirs - merged;
     parts.push(
-      `設定資料 ${result.settingsAutoResolved.length}件は新しいほうに揃えました` +
-        `（別環境 ${theirs}件・こちら ${ours}件` +
-        (merged > 0 ? `・両方を合わせた ${merged}件` : "") +
-        "）"
+      `設定資料 ${result.settingsAutoResolved.length}件は新しいほうにそろえました` +
+        (merged > 0 ? `（うち両方の変更を合わせた ${merged}件）` : "")
     );
   }
   if (result.settingsBulkResolved > 0) {
     parts.push(`設定資料 ${result.settingsBulkResolved}件は、まとめて新しいほうを採りました`);
   }
+  // **作者が1件ずつ選んだ分だけを数える**（一括で寄せた分を混ぜない。2026-09-11）
   if (result.manuscriptConflicts.length > 0) {
-    parts.push(`本文など ${result.manuscriptConflicts.length}件はお選びいただきました`);
+    parts.push(`選んでいただいた原稿 ${result.manuscriptConflicts.length}件`);
   }
+  const sendNote = options.sending
+    ? "続けてGitHubへ送ります。"
+    : options.autoResend
+      ? "数分のうちに自動でGitHubへ送ります。"
+      : "GitHubへは「保存・同期」で送ります。";
   return (
-    `${label} で別の環境の変更を合わせました（${parts.join("／")}）。` +
-    `戻したいときは枝「${result.backup}」から戻せます。` +
-    (options.sending ? "続けて送信します。" : "GitHubへ出すには「同期」で送信してください。")
+    `「${label}」の2台の原稿をそろえました（${parts.join("／")}）。` +
+    sendNote +
+    `そろえる前へ戻したいときは、控え「${result.backup}」から戻せます。`
   );
 }
 
@@ -983,12 +1050,12 @@ async function reportFold(
   deps: ResolveDivergenceDeps,
   label: string,
   result: FoldOutcome,
-  options: { sending: boolean }
+  options: { sending: boolean; autoResend: boolean }
 ): Promise<void> {
   if (!result.ok) {
     logFailure("分岐を合わせられなかった", { 置き場: label, 詳細: result.reason });
     const action = await vscode.window.showErrorMessage(
-      `${label} の分かれた分を合わせられませんでした。`,
+      `「${label}」の2台の原稿をそろえられませんでした。`,
       { modal: true, detail: `${result.reason}\n\n原稿は元のままです。` },
       "ログを表示"
     );

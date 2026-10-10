@@ -20,11 +20,35 @@ const answers: string[] = [];
 const shown: string[] = [];
 /** QuickPick で選ぶ項目の見出し（含まれていれば、それを選ぶ） */
 const picks: string[] = [];
+/**
+ * 呼ばれた順に使う QuickPick の答え。`undefined` は「選ばずに閉じた」。
+ * 空になったら `picks` へ戻る（「1回目は閉じる・2回目は選ぶ」を書くため）
+ */
+const pickScript: Array<string | undefined> = [];
+/** QuickPick に渡された項目と設定（見出し・ignoreFocusOut を確かめる） */
+const quickPicks: Array<{
+  items: Array<{ label?: string; description?: string; detail?: string }>;
+  options?: { title?: string; placeHolder?: string; ignoreFocusOut?: boolean };
+}> = [];
 
 vi.mock("vscode", () => {
-  const readFile = async (uri: { fsPath: string }) =>
-    new Uint8Array(fs.readFileSync(uri.fsPath));
+  /** 本物の vscode と同じく、無いファイルは FileNotFound で知らせる */
+  class FileSystemError extends Error {
+    constructor(
+      message: string,
+      public code: string
+    ) {
+      super(message);
+    }
+  }
+  const readFile = async (uri: { fsPath: string }) => {
+    if (!fs.existsSync(uri.fsPath)) {
+      throw new FileSystemError(uri.fsPath, "FileNotFound");
+    }
+    return new Uint8Array(fs.readFileSync(uri.fsPath));
+  };
   return {
+    FileSystemError,
     window: {
       showInformationMessage: (message: string, ...rest: unknown[]) => {
         record(message, rest);
@@ -38,8 +62,21 @@ vi.mock("vscode", () => {
         record(message, rest);
         return Promise.resolve(pickAnswer(rest));
       },
-      showQuickPick: (items: unknown, options?: { title?: string }) => {
+      showQuickPick: (
+        items: unknown,
+        options?: { title?: string; placeHolder?: string; ignoreFocusOut?: boolean }
+      ) => {
         shown.push(options?.title ?? "（見出しなし）");
+        quickPicks.push({
+          items: Array.isArray(items) ? items : [],
+          options,
+        });
+        if (pickScript.length > 0) {
+          const wanted = pickScript.shift();
+          return Promise.resolve(
+            wanted === undefined ? undefined : pickItem(items, [wanted])
+          );
+        }
         return Promise.resolve(pickItem(items));
       },
       showTextDocument: () => Promise.resolve(undefined),
@@ -50,7 +87,29 @@ vi.mock("vscode", () => {
       }),
     },
     workspace: {
-      fs: { readFile },
+      fs: {
+        readFile,
+        // 「両方とも残す」の別ファイルを本当に作るため（`atomicWriteFile` の create）
+        writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
+          fs.mkdirSync(nodePath.dirname(uri.fsPath), { recursive: true });
+          fs.writeFileSync(uri.fsPath, bytes);
+        },
+        rename: async (
+          from: { fsPath: string },
+          to: { fsPath: string },
+          options?: { overwrite?: boolean }
+        ) => {
+          if (!options?.overwrite && fs.existsSync(to.fsPath)) {
+            throw new FileSystemError(to.fsPath, "FileExists");
+          }
+          fs.renameSync(from.fsPath, to.fsPath);
+        },
+        delete: async (uri: { fsPath: string }) => {
+          fs.rmSync(uri.fsPath, { force: true });
+        },
+        readDirectory: async (uri: { fsPath: string }) =>
+          fs.readdirSync(uri.fsPath).map((name) => [name, 1] as const),
+      },
       getConfiguration: () => ({ get: () => undefined }),
       openTextDocument: () => Promise.resolve({}),
       textDocuments: [],
@@ -100,9 +159,9 @@ function pickAnswer(rest: unknown[]): string | undefined {
 }
 
 /** 用意した見出しに当たる項目を返す。当たらなければ「取りやめる」扱い */
-function pickItem(items: unknown): unknown {
+function pickItem(items: unknown, wantedList: readonly string[] = picks): unknown {
   if (!Array.isArray(items)) return undefined;
-  for (const wanted of picks) {
+  for (const wanted of wantedList) {
     const found = items.find(
       (item) =>
         typeof item === "object" &&
@@ -202,6 +261,8 @@ beforeEach(() => {
   answers.length = 0;
   shown.length = 0;
   picks.length = 0;
+  pickScript.length = 0;
+  quickPicks.length = 0;
 });
 
 afterEach(() => {
@@ -224,7 +285,7 @@ describe("全部、新しいほうを採る", { timeout: 30_000 }, () => {
   test("設定資料は一度に片づき、原稿だけ見比べに回る", async () => {
     answers.push("全部、新しいほうを採る");
     // 原稿は1件ずつ。ここでは「こちら」を選ぶ
-    picks.push("こちらを採用");
+    picks.push("左の文を残す");
 
     const result = await walkConflicts(scope(), [人物ファイル, 原稿ファイル], {
       provider: new ConflictContentProvider(),
@@ -241,7 +302,7 @@ describe("全部、新しいほうを採る", { timeout: 30_000 }, () => {
     // **原稿は一括で寄せない。** 作者が選んだ側になる
     expect(read(原稿ファイル)).toBe("こちらの一行。\n");
     // 見比べの画面は原稿の1件だけ
-    expect(shown.filter((text) => text.includes("をどう解決しますか"))).toHaveLength(
+    expect(shown.filter((text) => text.includes("どちらの文を残しますか"))).toHaveLength(
       1
     );
   });
@@ -256,7 +317,7 @@ describe("全部、新しいほうを採る", { timeout: 30_000 }, () => {
    */
   test("一括で寄せたものは resolved に入らない", async () => {
     answers.push("全部、新しいほうを採る");
-    picks.push("こちらを採用");
+    picks.push("左の文を残す");
 
     const result = await walkConflicts(scope(), [人物ファイル, 原稿ファイル], {
       provider: new ConflictContentProvider(),
@@ -281,7 +342,7 @@ describe("全部、新しいほうを採る", { timeout: 30_000 }, () => {
     // 作者は1件も選んでいない。**`resolved` は空のままにする**
     expect(result.resolved).toEqual([]);
     expect(result.bulkResolved).toEqual([人物ファイル]);
-    expect(shown.filter((text) => text.includes("をどう解決しますか"))).toEqual(
+    expect(shown.filter((text) => text.includes("どちらの文を残しますか"))).toEqual(
       []
     );
   });
@@ -291,7 +352,7 @@ describe("全部、新しいほうを採る", { timeout: 30_000 }, () => {
     answers.push("1件ずつ選ぶ");
     // 1件確定するごとに「次へ」を押す（ボタンであって QuickPick ではない）
     answers.push("次へ");
-    picks.push("こちらを採用");
+    picks.push("左の文を残す");
 
     const result = await walkConflicts(scope(), [人物ファイル, 原稿ファイル], {
       provider: new ConflictContentProvider(),
@@ -329,7 +390,7 @@ describe("確認の窓で選んだあとは、入口の窓を出さない", { ti
   const 入口 = (text: string) => text.includes("同じ箇所を両方で書き換えたものが");
 
   test("「新しいほうへ」を選んであれば、設定資料はそのまま一括で片づける", async () => {
-    picks.push("こちらを採用");
+    picks.push("左の文を残す");
 
     const result = await walkConflicts(scope(), [人物ファイル, 原稿ファイル], {
       provider: new ConflictContentProvider(),
@@ -345,7 +406,7 @@ describe("確認の窓で選んだあとは、入口の窓を出さない", { ti
 
   test("「1件ずつ」を選んであれば、設定資料も見比べに回す", async () => {
     answers.push("次へ");
-    picks.push("こちらを採用");
+    picks.push("左の文を残す");
 
     const result = await walkConflicts(scope(), [人物ファイル, 原稿ファイル], {
       provider: new ConflictContentProvider(),
@@ -357,7 +418,7 @@ describe("確認の窓で選んだあとは、入口の窓を出さない", { ti
   });
 
   test("選ぶ設定資料が無い見込みで、原稿だけなら入口を出さない", async () => {
-    picks.push("こちらを採用");
+    picks.push("左の文を残す");
 
     const result = await walkConflicts(scope(), [原稿ファイル], {
       provider: new ConflictContentProvider(),
@@ -372,7 +433,7 @@ describe("確認の窓で選んだあとは、入口の窓を出さない", { ti
     // 確認の窓では「選ぶ設定資料は無い」と言っていた。**訊いていないことを決めない**
     answers.push("1件ずつ選ぶ");
     answers.push("次へ");
-    picks.push("こちらを採用");
+    picks.push("左の文を残す");
 
     await walkConflicts(scope(), [人物ファイル, 原稿ファイル], {
       provider: new ConflictContentProvider(),
@@ -380,6 +441,117 @@ describe("確認の窓で選んだあとは、入口の窓を出さない", { ti
     });
 
     expect(shown.filter(入口)).toHaveLength(1);
+  });
+});
+
+/**
+ * どちらの文を残すかの一覧（作者の実機確認、2026-10-11）。
+ *
+ * 作者は分岐合流を実機で確かめ、**差分を読みに行った拍子に一覧が消え、
+ * 「選ばずに閉じた」扱いで最初へ戻った。** 見出しには git の印
+ * （`origin/main:本文/…`）がそのまま出ていて、どちらがどちらか読めなかった。
+ * 裁定は「閉じない＋訊き直す」「このパソコン／もう1台で呼ぶ」。
+ */
+describe("どちらの文を残すかの一覧", { timeout: 30_000 }, () => {
+  beforeEach(() => {
+    setUpConflict();
+  }, 30_000);
+
+  test("左右を「このパソコン」「もう1台」で呼び、差分を読みに行っても閉じない", async () => {
+    picks.push("左の文を残す");
+
+    await walkConflicts(scope(), [原稿ファイル], {
+      provider: new ConflictContentProvider(),
+      start: "manuscriptsOnly",
+      machineName: "書斎のPC",
+    });
+
+    const pick = quickPicks[0];
+    expect(pick.options?.title).toBe("第1話.txt：どちらの文を残しますか");
+    expect(pick.options?.placeHolder).toContain(
+      "左がこのパソコン、右がもう1台の文です"
+    );
+    expect(pick.options?.ignoreFocusOut).toBe(true);
+    const labels = pick.items.map((item) => item.label ?? "");
+    expect(labels).toContain("$(arrow-left) 左の文を残す（このパソコン）");
+    expect(labels).toContain("$(arrow-right) 右の文を残す（もう1台）");
+    expect(labels).toContain("$(files) 両方とも残す");
+    // git の印は出さない
+    expect(JSON.stringify(pick.items)).not.toContain("origin");
+    expect(JSON.stringify(pick.items)).not.toContain("環境");
+  });
+
+  test("選ばずに閉じたら、すぐ戻さずに訊く。［もう一度選ぶ］で同じ一覧が出る", async () => {
+    // 1回目は閉じる、2回目は左を選ぶ
+    pickScript.push(undefined, "左の文を残す");
+    answers.push("もう一度選ぶ");
+
+    const result = await walkConflicts(scope(), [原稿ファイル], {
+      provider: new ConflictContentProvider(),
+      start: "manuscriptsOnly",
+      machineName: null,
+    });
+
+    expect(
+      shown.filter((text) => text.includes("選ばずに閉じました"))
+    ).toHaveLength(1);
+    expect(shown.join("\n")).toContain("原稿はまだ何も変えていません");
+    expect(quickPicks).toHaveLength(2);
+    expect(result.aborted).toBe(false);
+    expect(result.resolved).toEqual([原稿ファイル]);
+    expect(read(原稿ファイル)).toBe("こちらの一行。\n");
+  });
+
+  test("［そろえるのをやめる］なら、今までどおりやめる", async () => {
+    pickScript.push(undefined);
+    answers.push("そろえるのをやめる");
+
+    const result = await walkConflicts(scope(), [原稿ファイル], {
+      provider: new ConflictContentProvider(),
+      start: "manuscriptsOnly",
+      machineName: null,
+    });
+
+    expect(result.aborted).toBe(true);
+    expect(quickPicks).toHaveLength(1);
+  });
+
+  test("訊いた窓も閉じたら、やめる", async () => {
+    pickScript.push(undefined);
+
+    const result = await walkConflicts(scope(), [原稿ファイル], {
+      provider: new ConflictContentProvider(),
+      start: "manuscriptsOnly",
+      machineName: null,
+    });
+
+    expect(result.aborted).toBe(true);
+  });
+
+  test("両方とも残すと、日時の名前の別ファイルを作り、git へはまだ足さない", async () => {
+    picks.push("両方とも残す");
+
+    const result = await walkConflicts(scope(), [原稿ファイル], {
+      provider: new ConflictContentProvider(),
+      start: "manuscriptsOnly",
+      machineName: null,
+    });
+
+    expect(result.aborted).toBe(false);
+    const sideFiles = result.sideFiles ?? [];
+    expect(sideFiles).toHaveLength(1);
+    const side = sideFiles[0];
+    expect(side).toMatch(
+      /^いじめられっ子\/本文\/第1話\.conflict-\d{4}-\d{2}-\d{2}-\d{4}\.txt$/
+    );
+    // 一覧に見せた名前と、作った名前が同じ
+    expect(JSON.stringify(quickPicks[0].items)).toContain(
+      side.slice(side.lastIndexOf("/") + 1)
+    );
+    expect(read(side)).toBe("むこうの一行。\n");
+    expect(read(原稿ファイル)).toBe("こちらの一行。\n");
+    // **索引へはまだ入れない**（やめたときの merge --abort で消えないように）
+    expect(git(root, "status", "--porcelain", "--", side).trim()).toMatch(/^\?\?/);
   });
 });
 
@@ -430,10 +602,12 @@ describe("見比べを始める前に出す中身", () => {
     expect(detail).toContain("1件ずつ両方を並べます");
   });
 
-  test("退避の枝から丸ごと戻せることを、必ず添える", () => {
+  test("そろえる前へ丸ごと戻せることを、必ず添える", () => {
     // **選んだあとで後悔しても戻れる**と分かれば、押す手がとまらない
-    expect(describeWalkStartDetail([いじめ原稿])).toContain(
-      "合わせる前の退避の枝から丸ごと戻せます"
-    );
+    const detail = describeWalkStartDetail([いじめ原稿]);
+    expect(detail).toContain("「そろえる前」へ丸ごと戻せます");
+    // 作者の目に触れる文に、開発の言葉（枝・環境）を出さない（2026-10-11）
+    expect(detail).not.toContain("枝");
+    expect(detail).not.toContain("環境");
   });
 });

@@ -77,19 +77,20 @@ describe("GitHubへ送る", () => {
 
 describe("分かれた分を合わせる", () => {
   test("分かれている作品には、送信待ちと受け取りの数を出す（実機確認リスト F-15 の代わり）", () => {
+    // 2台のどちらで書いた分かで言う（作者の裁定、2026-10-11）
     expect(divergenceNote({ ahead: 3, behind: 2 })).toEqual({
-      note: "分かれています（送信待ち 3件・受け取り 2件）",
+      note: "もう1台で書いた分が未反映（2回）・このパソコンで書いた分が未送信（3回）",
       order: 1,
     });
   });
 
   test("分かれていなければ、そう言って下へ回す（実機確認リスト F-15 の代わり）", () => {
     expect(divergenceNote({ ahead: 3, behind: 0 })).toEqual({
-      note: "分かれていません",
+      note: "そろっています（作業は要りません）",
       order: 0,
     });
     expect(divergenceNote({ ahead: 0, behind: 4 })).toEqual({
-      note: "分かれていません",
+      note: "そろっています（作業は要りません）",
       order: 0,
     });
   });

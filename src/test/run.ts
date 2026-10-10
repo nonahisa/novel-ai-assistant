@@ -696,7 +696,7 @@ export async function run(): Promise<void> {
         // 本文はこの環境の版で確定する
         const original = await readTextFile(path.join(a, "008.txt"));
         const theirs = buildResolvedText(original.text, "theirs");
-        const sideName = sideFileName("008.txt", "origin/main");
+        const sideName = sideFileName("008.txt", new Date());
         const encoded = encodeForNewFile(theirs, original);
         assert.ok(encoded, "別環境の版を書き出せません");
         await atomicWriteFile(path.join(a, sideName), encoded, {

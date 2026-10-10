@@ -36,8 +36,8 @@ describe.skipIf(!lookEnabled)("見た目の写真：分岐合流", () => {
             await shootPage(page, `758-手順${step}-確認の窓`);
             const buttons = await page.locator(".monaco-dialog-box .monaco-button").allInnerTexts();
             await lookNote(`[758-手順${step}] ボタン：${buttons.join(" / ")}`);
-            // 「合わせる」「続ける」などの進むボタンを押す（無ければ先頭）
-            const go = buttons.find((text) => /合わせる|続ける|進む|はい|OK/.test(text)) ?? buttons[0];
+            // 「そろえる」「続ける」などの進むボタンを押す（無ければ先頭。0.102.7 で「合わせる」から改めた）
+            const go = buttons.find((text) => /そろえる|合わせる|続ける|進む|はい|OK/.test(text)) ?? buttons[0];
             if (go) await pressDialogButton(page, go).catch(() => undefined);
             continue;
           }

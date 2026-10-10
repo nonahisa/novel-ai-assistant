@@ -150,13 +150,12 @@ function endLineOf(lines: string[], startLine: number): number {
 }
 
 /**
- * 「両方を残す」ときに使う、別環境の版のファイル名。
+ * 退避ファイルの目印。原稿と見分けるために名前へ必ず入る。
  *
  * 判断に迷う場合、片方を消すより両方残す方が安全である。
  * 原稿は失われた時の損害が大きく、あとから統合する手間の方が
  * はるかに軽い（設計書5.5.4）。
  */
-/** 退避ファイルの目印。原稿と見分けるために名前へ必ず入る */
 const SIDE_FILE_MARKER = ".conflict-";
 
 /**
@@ -171,26 +170,43 @@ export function isConflictSideFile(fileName: string): boolean {
   return fileName.includes(SIDE_FILE_MARKER);
 }
 
-export function sideFileName(fileName: string, label: string): string {
+/**
+ * 「両方とも残す」で作る別ファイルの名前（設計書5.5.4）。
+ *
+ * **形は「元の名前.conflict-年-月-日-時分.拡張子」**（作者の裁定、2026-10-11）。
+ * それまでは git の印（`origin/main:本文/第9話.txt` のような長い文字列）を
+ * 32字で切って使っていたため、名前が途中で切れ、何の写しか読めなかった。
+ * 日時なら、いつそろえたときの写しかが名前だけで分かる。
+ *
+ * `.conflict-` の目印は必ず残す。`isConflictSideFile` が、原稿の走査から
+ * 外すのに使っている（写しを話数として二重に数えないため）。
+ *
+ * 同じ名前が既にあれば、末尾に -2, -3 … を付ける（`existing` に今ある名前を渡す）。
+ * **既にあるファイルは決して潰さない**——前回の写しにしか無い原稿が消える。
+ */
+export function sideFileName(
+  fileName: string,
+  when: Date,
+  existing: ReadonlySet<string> = new Set()
+): string {
   const dot = fileName.lastIndexOf(".");
   const stem = dot > 0 ? fileName.slice(0, dot) : fileName;
   const extension = dot > 0 ? fileName.slice(dot) : "";
-  return `${stem}${SIDE_FILE_MARKER}${sanitizeLabel(label)}${extension}`;
+  const base = `${stem}${SIDE_FILE_MARKER}${sideFileStamp(when)}`;
+  let candidate = `${base}${extension}`;
+  for (let attempt = 2; existing.has(candidate); attempt++) {
+    candidate = `${base}-${attempt}${extension}`;
+  }
+  return candidate;
 }
 
-/**
- * ラベルをファイル名に使える形へ均す。
- *
- * `>>>>>>> origin/main` の「origin/main」はそのままでは
- * パス区切りを含む。何も残らなければ "other" とする。
- */
-export function sanitizeLabel(label: string): string {
-  const normalized = label
-    .trim()
-    .replace(/[/\\:*?"<>|\s]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 32);
-  return normalized || "other";
+/** 別ファイルの名前に入れる日時（YYYY-MM-DD-HHmm。手元の時刻） */
+export function sideFileStamp(when: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return (
+    `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}` +
+    `-${pad(when.getHours())}${pad(when.getMinutes())}`
+  );
 }
 
 /** 競合の規模を1文で伝える */
@@ -208,4 +224,22 @@ export function describeConflict(parsed: ConflictParseResult): string {
     ? "（閉じていないマーカーもあります）"
     : "";
   return `${parsed.hunks.length}か所・最大${lines}行が食い違っています${note}`;
+}
+
+/**
+ * どちらの文を残すかを選ぶ一覧の、入力欄の案内（作者の裁定、2026-10-11）。
+ *
+ * **左右がどちらの機械の文かを、ここで必ず言う。** 差分の見出しは小さく、
+ * 作者は一覧の文だけを読んで選ぶことがある。違う箇所の数を添えるのは、
+ * 1か所だけの違いか、話の大半が違うのかで、選び方の慎重さが変わるため。
+ * 印を読めなかったとき（索引の版を並べたとき）は数を出さない。
+ */
+export function describeChoicePlaceholder(parsed: ConflictParseResult): string {
+  const head = "左がこのパソコン、右がもう1台の文です";
+  if (parsed.hunks.length === 0) return head;
+  const lines = parsed.hunks.reduce(
+    (total, hunk) => total + Math.max(hunk.ours.length, hunk.theirs.length),
+    0
+  );
+  return `${head}（${parsed.hunks.length}か所・最大${lines}行が違います）`;
 }

@@ -87,15 +87,18 @@ export function divergenceNote(status: {
   ahead: number;
   behind: number;
 }): WorkPickNote {
+  // **2台のどちらで書いた分かで言う**（作者の裁定、2026-10-11）。それまでの
+  // 「分かれています（送信待ち・受け取り）」は git の言葉で、何がどこにあるのか
+  // 作者には読めなかった。数は記録の回数なので「回」で数える
   if (status.ahead > 0 && status.behind > 0) {
     return {
       note:
-        `分かれています（送信待ち ${status.ahead}件・` +
-        `受け取り ${status.behind}件）`,
+        `もう1台で書いた分が未反映（${status.behind}回）・` +
+        `このパソコンで書いた分が未送信（${status.ahead}回）`,
       order: 1,
     };
   }
-  return { note: "分かれていません", order: 0 };
+  return { note: "そろっています（作業は要りません）", order: 0 };
 }
 
 /**

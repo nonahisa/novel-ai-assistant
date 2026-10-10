@@ -205,8 +205,8 @@ describe("開いたときの点検：名前の上では重ならないが、合�
     expect(remoteHead()).toBe(sentBefore);
     // 「重なる」ときと同じ知らせと、進める口
     const last = notices[notices.length - 1];
-    expect(last?.message).toContain("同じファイルが両方で変わっています");
-    expect(last?.buttons).toContain("分岐合流");
+    expect(last?.message).toContain("同じ原稿の同じところが、両方で書き換えられています");
+    expect(last?.buttons).toContain("どちらを残すか選ぶ");
     // 押されていないので、合流の画面へは進んでいない
     expect(commands).not.toContain("novelai.resolveDivergence");
   });
@@ -389,8 +389,8 @@ describe("開いたときの点検：自動で片づくものだけが重なる"
     expect(git(root, "rev-parse", "HEAD").trim()).toBe(before);
     expect(fs.existsSync(nodePath.join(root, ".git", "MERGE_HEAD"))).toBe(false);
     const last = notices[notices.length - 1];
-    expect(last?.message).toContain("同じファイルが両方で変わっています");
-    expect(last?.buttons).toContain("分岐合流");
+    expect(last?.message).toContain("同じ原稿の同じところが、両方で書き換えられています");
+    expect(last?.buttons).toContain("どちらを残すか選ぶ");
   });
 
   test("本文が両方で変わったら、これまでどおり止めて訊く", async () => {
@@ -402,7 +402,7 @@ describe("開いたときの点検：自動で片づくものだけが重なる"
 
     expect(git(root, "rev-parse", "HEAD").trim()).toBe(before);
     expect(walkCalls).toEqual([]);
-    expect(notices[notices.length - 1]?.buttons).toContain("分岐合流");
+    expect(notices[notices.length - 1]?.buttons).toContain("どちらを残すか選ぶ");
   });
 });
 

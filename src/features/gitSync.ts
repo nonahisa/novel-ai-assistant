@@ -67,6 +67,7 @@ import {
 } from "./gitOnboarding";
 import { confirmRun, notifyDone, whenNoticePicked } from "../views/notify";
 import { FolderWatchHub } from "./folderWatchHub";
+import { readAutoResendSettings } from "./autoResend";
 import { isUnderFolder } from "../core/folderWatchMatch";
 
 /**
@@ -98,12 +99,18 @@ export const RECORD_THEN_PULL = "記録してから取り込む";
  * 文だけを純粋関数にしてあるのは、画面を出さずに言い回しを試験できるように
  * するためである（`gitSync.test.ts`）。
  */
-export function describeDirtyPull(title: string): string {
+export function describeDirtyPull(title: string, autoResend: boolean): string {
   return (
     `「${title}」に未記録の変更があるため取り込みませんでした。` +
     "書きかけの原稿を巻き込まないためです。" +
     `「${RECORD_THEN_PULL}」を押すと、いまの状態を手元の履歴へ残してから` +
-    "取り込みます（記録はこの端末に残るだけで、GitHubへは送りません）。"
+    "取り込みます" +
+    // **送り直しが入っていれば、記録した分は数分のうちに送られる**（2026-10-11）。
+    // 記録は「送っていない記録」になり、取り込んだあとは相手より遅れてもいない
+    // ので、`autoResend` が拾う。「送りません」と書くと事実と違う
+    (autoResend
+      ? "（記録した分は、取り込んだあと数分のうちに自動でGitHubへ送ります）。"
+      : "（記録はこのパソコンに残るだけで、GitHubへは送りません）。")
   );
 }
 
@@ -1094,7 +1101,7 @@ export class GitSyncMonitor implements vscode.Disposable {
         return false;
       }
       const answer = await vscode.window.showWarningMessage(
-        describeDirtyPull(work.title),
+        describeDirtyPull(work.title, readAutoResendSettings().enabled !== false),
         RECORD_THEN_PULL,
         "閉じる"
       );
@@ -1318,7 +1325,7 @@ ${reason}` : ""}`,
     let result: Awaited<ReturnType<typeof foldDivergence>>;
     try {
       result = await withProgress(
-        "別の環境の変更を合わせています…",
+        "2台の原稿をそろえています…",
         (progress) =>
           foldDivergence(
             { registry: this.registry, run: this.options.run },
@@ -1337,7 +1344,7 @@ ${reason}` : ""}`,
         詳細: result.reason,
       });
       const action = await vscode.window.showWarningMessage(
-        `「${work.title}」の分かれた分を合わせられませんでした。`,
+        `「${work.title}」の2台の原稿をそろえられませんでした。`,
         { modal: true, detail: `${result.reason}\n\n原稿は元のままです。` },
         "ログを表示"
       );
@@ -1356,7 +1363,11 @@ ${reason}` : ""}`,
     );
     // **件数を必ず出す**（作者の指摘：「件数が出ない」）
     vscode.window.showInformationMessage(
-      describeFoldSuccess(`「${work.title}」`, result, { sending: false })
+      // 題の「」は文を組む側が付ける
+      describeFoldSuccess(work.title, result, {
+        sending: false,
+        autoResend: readAutoResendSettings().enabled !== false,
+      })
     );
     return true;
   }
