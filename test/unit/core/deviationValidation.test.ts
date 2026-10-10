@@ -477,6 +477,31 @@ describe("該当なしを表す埋め草の要素", () => {
       validateDeviations({ deviations: [item()] }, episode).fillers
     ).toBe(0);
   });
+
+  // **P-11 1.3 で書いた「食い違いも間延びも本当に1つも無いときだけ」が、
+  // そのまま引用として返ってくる前提で押さえる**（CLAUDE.md 失敗3）。
+  // 行番号が付いていても、引用が本文に無い「無い」の言葉は埋め草
+  test.each([
+    "食い違いなし",
+    "食い違いはありません",
+    "プロットとの食い違いはありません",
+    "逸脱なし",
+    "間延びなし",
+    "食い違いも間延びも本当に1つも無い",
+    "（プロットとの食い違いが本当に1つも無い）",
+    "1つも無い",
+    "指摘はありません",
+  ])("1.3 の言葉の反響「%s」は埋め草（行番号が0でも1以上でも）", (excerpt) => {
+    for (const lineStart of [0, 3]) {
+      const result = validateDeviations(
+        { deviations: [item({ excerpt, lineStart, lineEnd: lineStart })] },
+        episode
+      );
+      expect(result.accepted, `${excerpt} / ${lineStart}`).toHaveLength(0);
+      expect(result.rejected, `${excerpt} / ${lineStart}`).toHaveLength(0);
+      expect(result.fillers, `${excerpt} / ${lineStart}`).toBe(1);
+    }
+  });
 });
 
 /**

@@ -64,7 +64,6 @@ import type { SuiteAwareOptions } from "../core/proofreadingSuite";
 import { withAiTurnProgress } from "./aiTurn";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { confirmRun } from "../views/notify";
-import { noticeSmallModelOnce } from "./smallModelNotice";
 import { confirmFormatFit } from "./formatFitPrompt";
 import {
   logFailure,
@@ -194,16 +193,6 @@ export async function checkDeviations(
   // **この機能は話単位で送るので、コンテキスト長は要らない。**
   // モデル情報が取れなくても止めず、これまでと同じ判定へ落とす
   const modelInfo = await registry.resolveModelInfo("deviation");
-  // 小さいモデルの知らせ（設計書6.28.9）。この機能は `resolveModelInfoOrWarn` を
-  // 通らないので、ここで同じ関数を呼ぶ（作品・モデルごとに1回なので、ほかの機能で
-  // 出ていれば出ない）
-  noticeSmallModelOnce({
-    workFolder: work.folderPath,
-    feature: "deviation",
-    providerId: resolved.provider.id,
-    model: resolved.model,
-    parameterSize: modelInfo?.parameterSize,
-  });
   // **パラメータ数も渡す**（0.70.12）。この機能に抑制の仕組みは無いが、
   // 渡さないと `suppressUncertainContradictions` が「取れなかった」扱いで
   // 決まり、嘘の値が `CapabilityProfile` に載ったまま持ち回られる。

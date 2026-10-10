@@ -70,8 +70,8 @@ export async function startFakeOllama(
   options: {
     extraModels?: readonly string[];
     /**
-     * 申告する大きさ（`parameter_size`）。既定は "1B"。小さいモデルの知らせ（設計書6.28.9）が
-     * 出ない大きいモデルの場面を見るときに "25.2B" などを渡す
+     * 申告する大きさ（`parameter_size`）。既定は "1B"。製品が頼み方を大きいモデル向けに
+     * 切り替える場面（20B 以上）を見るときに "25.2B" などを渡す
      */
     parameterSize?: string;
   } = {}

@@ -352,7 +352,6 @@ export async function extractCharacters(
     provider: resolved.provider,
     model: resolved.model,
     actionLabel: "設定資料の抽出",
-    workFolder: work.folderPath,
   });
   if (!modelInfo) return "failed";
 

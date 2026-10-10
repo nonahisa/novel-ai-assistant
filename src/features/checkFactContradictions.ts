@@ -201,7 +201,6 @@ export async function checkFactContradictions(
     provider: resolved.provider,
     model: resolved.model,
     actionLabel: "矛盾検知（事実の照合）",
-    workFolder: work.folderPath,
   });
   if (!info) return undefined;
 

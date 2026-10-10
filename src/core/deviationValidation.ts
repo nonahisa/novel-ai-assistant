@@ -327,6 +327,26 @@ function firstDeviationList(
 }
 
 /**
+ * 「食い違いは無い」と言うための言葉か（P-11 1.3）。
+ *
+ * 1.3 で「プロットとの食い違いも間延びも本当に1つも無いときだけ空の配列」と
+ * 書いたので、その言葉が引用として返ってくる前提で押さえる（CLAUDE.md 失敗3）。
+ * **逸脱だけの言葉なので、全機能共通の `placeholderText.ts` には入れない**
+ * （「逸脱なし」が誤字脱字の直しに効く必要は無い）。本文にそのまま在る引用は
+ * 呼ぶ側で埋め草にしない。
+ */
+const NO_DEVIATION_ECHO =
+  /^(?:(?:プロットとの)?(?:食い違い|逸脱|間延び|指摘)(?:も|や|・|、|と)?)*(?:は|が)?(?:本当に)?(?:なし|無し|ない|無い|ありません|見当たりません|(?:1|１|一|ひと)つも(?:無い|ない|ありません))$/u;
+
+function isNoDeviationEcho(excerpt: string): boolean {
+  const body = excerpt
+    .trim()
+    // 前後の括弧・引用符・句点を落とす（「（食い違いなし）」の形で返ることがある）
+    .replace(/^[「『"'“”‘’（(\[【\s]+|[」』"'“”‘’）)\]】。、\s]+$/gu, "");
+  return body.length > 0 && NO_DEVIATION_ECHO.test(body);
+}
+
+/**
  * 「該当なし」を表すために置かれた要素か（残課題8）。
  *
  * AIは「指摘が0件」を、空の配列ではなく**中身の無い要素1件**で表すことが
@@ -350,6 +370,13 @@ function isFillerDeviation(
 ): boolean {
   const excerpt = asString(item.excerpt);
   if (excerpt && isPlaceholderText(excerpt, true)) return true;
+  if (
+    excerpt &&
+    isNoDeviationEcho(excerpt) &&
+    !normalizedText.includes(normalizeForComparison(excerpt))
+  ) {
+    return true;
+  }
   const lineStart = item.lineStart;
   if (typeof lineStart !== "number" || lineStart > 0) return false;
   if (!excerpt) return true;
