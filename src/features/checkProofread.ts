@@ -57,6 +57,7 @@ import {
   sortProofreadIssues,
   validateProofreadIssues,
   type AcceptedProofreadIssue,
+  type ViewpointNarrator,
 } from "../core/proofreadValidation";
 import {
   startRunEta,
@@ -89,6 +90,7 @@ import {
   describeNarratorNameSlip,
   findNarratorNameSlips,
   resolveWorkNarrator,
+  viewpointNarratorOf,
 } from "../core/narratorNameSlip";
 
 /**
@@ -189,8 +191,14 @@ export async function checkProofread(
 
   const prepared = await collectChunks(work, info, options, outputTuning);
   if (!prepared) return undefined;
-  const { chunks, narrativeStyle, keepWords, styleNote, narratorSlips } =
-    prepared;
+  const {
+    chunks,
+    narrativeStyle,
+    keepWords,
+    styleNote,
+    narratorSlips,
+    viewpointNarrator,
+  } = prepared;
   if (chunks.length === 0) {
     vscode.window.showWarningMessage("推敲できる本文がありませんでした。");
     return undefined;
@@ -412,7 +420,12 @@ export async function checkProofread(
         }
         if (raw === undefined) continue;
 
-        const validated = validateProofreadIssues(raw, chunk, keepWords);
+        const validated = validateProofreadIssues(
+          raw,
+          chunk,
+          keepWords,
+          viewpointNarrator
+        );
         rejectedCount += validated.rejected.length;
         // **落とした理由を残す**（設計書6.8）。総数だけでは、指摘が少ないのが
         // 「本当に無い」のか「検証で消しすぎ」なのか切り分けられない
@@ -648,6 +661,11 @@ async function collectChunks(
       styleNote: string;
       /** コードで見つけた、語り手の名前が地の文に出る所（設計書6.9.2） */
       narratorSlips: ProofreadIssue[];
+      /**
+       * 作品全体で決まった語り手（検算の視点の札へ渡す）。決まらなければ null。
+       * 代名詞の無い一人称の場面を語り手の場面と見なすのに使う（設計書6.9.2）
+       */
+      viewpointNarrator: ViewpointNarrator | null;
     }
   | undefined
 > {
@@ -686,11 +704,8 @@ async function collectChunks(
     if (isTarget(episode.filePath)) sources.push(...parts);
   }
 
-  const narratorSlips = await findNarratorSlipsInSources(
-    work,
-    sources,
-    narrationBodies.join("\n")
-  );
+  const { issues: narratorSlips, viewpointNarrator } =
+    await findNarratorSlipsInSources(work, sources, narrationBodies.join("\n"));
 
   const narrativeStyle = await readNarrativePerson(work);
   // 作者が「直さない」と決めた語。推敲は原文まるごとを置き換えるので、
@@ -758,6 +773,7 @@ async function collectChunks(
     keepWords,
     styleNote,
     narratorSlips,
+    viewpointNarrator,
   };
 }
 
@@ -770,13 +786,18 @@ async function collectChunks(
  *
  * **人物の資料に読めないファイルがあれば探さない。** 読めなかった人物と
  * 苗字が重なっていても分からず、その苗字を語り手のものとして拾ってしまう。
+ *
+ * **決まった語り手も一緒に返す**（2026-10-10）。AIの視点の札の検算が、
+ * 代名詞の無い一人称の場面を語り手の場面と見なすのに使う。決め方を
+ * ここと検算とで分けない（片方だけ決まる日を作らない）ので、黙る条件も同じ。
  */
 async function findNarratorSlipsInSources(
   work: WorkEntry,
   sources: readonly EpisodeBodySource[],
   workBodyText: string
-): Promise<ProofreadIssue[]> {
-  if (sources.length === 0) return [];
+): Promise<{ issues: ProofreadIssue[]; viewpointNarrator: ViewpointNarrator | null }> {
+  const none = { issues: [], viewpointNarrator: null };
+  if (sources.length === 0) return none;
   let people: Character[];
   try {
     const loaded = await new CharacterStore(work).loadAll();
@@ -785,7 +806,7 @@ async function findNarratorSlipsInSources(
         `推敲：人物の資料に読めないファイルが${loaded.errors.length}件あるため、` +
           "語り手の名前の確認は行いません"
       );
-      return [];
+      return none;
     }
     people = loaded.characters;
   } catch (error) {
@@ -794,11 +815,11 @@ async function findNarratorSlipsInSources(
         error instanceof Error ? error.message : String(error)
       }）`
     );
-    return [];
+    return none;
   }
 
   const narrator = resolveWorkNarrator(workBodyText, people);
-  if (!narrator) return [];
+  if (!narrator) return none;
 
   const issues: ProofreadIssue[] = [];
   const skipped: string[] = [];
@@ -826,5 +847,5 @@ async function findNarratorSlipsInSources(
       `地の文に出る所 ${issues.length}件` +
       (skipped.length > 0 ? `（見なかった話 ${summarizeReasons(skipped)}）` : "")
   );
-  return issues;
+  return { issues, viewpointNarrator: viewpointNarratorOf(narrator, people) };
 }

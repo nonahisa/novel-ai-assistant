@@ -1,6 +1,10 @@
 import type { Character } from "../models/character";
 import { detectNarrator, type NarratorHint } from "./narrator";
-import { VIEWPOINT_INTENT_NOTE } from "./proofreadValidation";
+import { narratorNameSubjectPattern } from "./narratorNamePattern";
+import {
+  VIEWPOINT_INTENT_NOTE,
+  type ViewpointNarrator,
+} from "./proofreadValidation";
 import { maskQuoted } from "./quotedSpans";
 import { sceneRanges, type SceneRange } from "./sceneBreaks";
 import { blankMemoLines } from "./sceneMemo";
@@ -164,7 +168,7 @@ export function findNarratorNameSlips(options: {
   const rawLines = body.split("\n");
 
   const forms = narratorNameForms(narrator, options.people);
-  const pattern = forms.length > 0 ? slipPattern(forms) : null;
+  const pattern = forms.length > 0 ? narratorNameSubjectPattern(forms) : null;
   // 台詞は**入れ子を数えて**伏せる（`quotedSpans.ts`）。「…『死の谷』…」の』で
   // 台詞が閉じたと見ると、残りの台詞を地の文として拾う（教科書チート18話）
   const maskedLines = maskQuoted(body, "　").split("\n");
@@ -272,32 +276,27 @@ function narratorShareHolds(own: number, total: number, candidates: number): boo
   return recounted / recountedTotal >= MIN_EPISODE_FIRST_PERSON_SHARE;
 }
 
-/**
- * 「名前＋は／が／も」の形。
- *
- * - **前に漢字・片仮名・英数字が付いていれば別の語**（「小相沢は」「千春人が」）
- * - ルビ（「|相沢《あいざわ》は」）はまたいで見る
- * - 「が」の後ろに丘・岡・谷などが続くのは地名（「相沢が丘」）
- * - 「、と」が続くのは、括弧を付けずに言葉を引いた形（「相沢は、と言いかけた」）
- */
-function slipPattern(forms: readonly string[]): RegExp {
-  const names = forms.map(escapeRegExp).join("|");
-  return new RegExp(
-    "(?<![\\p{Script=Han}\\p{Script=Katakana}ーA-Za-zＡ-Ｚａ-ｚ0-9０-９])" +
-      `[|｜]?(${names})(《[^》\\n]*》)?` +
-      "(は|が(?![丘岡谷崎浜原森関島池])|も)" +
-      "(?![、，]と)",
-    "gu"
-  );
-}
-
 function occursTwice(line: string, original: string): boolean {
   const first = line.indexOf(original);
   return first >= 0 && line.indexOf(original, first + 1) >= 0;
 }
 
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/**
+ * 推敲の検算（視点の札）へ渡す語り手（`ViewpointNarrator`）を作る。
+ *
+ * 一人称の語が0回の場面を語り手の場面と見なすかどうかに使う（2026-10-10）。
+ * **名前の形は、よじれを探すときと同じもの**（`narratorNameForms`）——
+ * 名前が主語に何度も立つ場面は三人称の語りとして外すので、ここで別の
+ * 決め方をすると、よじれとして拾う名前と食い違う。
+ */
+export function viewpointNarratorOf(
+  narrator: NarratorHint,
+  people: readonly Character[]
+): ViewpointNarrator {
+  return {
+    firstPerson: narrator.firstPerson,
+    nameForms: narratorNameForms(narrator, people),
+  };
 }
 
 /**

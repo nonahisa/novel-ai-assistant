@@ -13,6 +13,7 @@ import {
   validateProofreadIssues,
   type AcceptedProofreadIssue,
   type RejectedProofreadIssue,
+  type ViewpointNarrator,
 } from "../../core/proofreadValidation";
 import { withLineNumbers, type Chunk } from "../../core/chunker";
 import { blankMemoLines } from "../../core/sceneMemo";
@@ -24,6 +25,7 @@ import {
   describeNarratorNameSlip,
   findNarratorNameSlips,
   resolveWorkNarrator,
+  viewpointNarratorOf,
 } from "../../core/narratorNameSlip";
 import { parseCharacter } from "../../models/character";
 import { parseEpisodeFileName } from "../../core/episodeParser";
@@ -175,6 +177,29 @@ export interface NarratorSlipScan {
    * （3巡目のコールドスリープで `N5078JI.txt` が3回並んだ）
    */
   skipped: Array<{ filePath: string; reason: string; episodes: number }>;
+}
+
+/**
+ * 検算の視点の札へ渡す語り手（設計書6.9.2、2026-10-10）。
+ *
+ * **製品と同じ決め方**（`features/checkProofread.ts` の `findNarratorSlipsInSources`）。
+ * 全話を繋いで決め、人物の資料に読めないファイルがあれば渡さない（null）。
+ * ここで別の決め方をすると、MCP の測定が製品と違う検算を通ることになる。
+ */
+export function viewpointNarratorFor(folder: string): ViewpointNarrator | null {
+  const people = readSettingsRecords(
+    folder,
+    SETTINGS_SUBDIRS.characters,
+    parseCharacter
+  );
+  if (people.unreadable > 0) return null;
+  const narrator = resolveWorkNarrator(
+    readWorkSources(folder)
+      .map((source) => blankMemoLines(source.body))
+      .join("\n"),
+    people.records
+  );
+  return narrator ? viewpointNarratorOf(narrator, people.records) : null;
 }
 
 /**
@@ -354,7 +379,13 @@ export function proofreadValidate(input: {
 }): ProofreadValidateResult {
   const chunk = chunkFromId(input.folder, input.chunkId);
   const style = collectStyle(input.folder);
-  return validateAgainst(input.chunkId, chunk, input.response, style);
+  return validateAgainst(
+    input.chunkId,
+    chunk,
+    input.response,
+    style,
+    viewpointNarratorFor(input.folder)
+  );
 }
 
 /**
@@ -368,7 +399,9 @@ function validateAgainst(
   chunkId: string,
   chunk: Chunk,
   response: string,
-  style: WorkStyle
+  style: WorkStyle,
+  /** 作品全体で決まった語り手（`viewpointNarratorFor`）。製品と同じものを渡す */
+  narrator: ViewpointNarrator | null
 ): ProofreadValidateResult {
   const parsed = parseProofreadResult(response);
   if (!parsed) {
@@ -378,7 +411,12 @@ function validateAgainst(
   }
   // **作者が「直さない」と決めた語を渡す。** 推敲は原文まるごとを
   // 置き換えるので、守る語が原文に含まれていたらその指摘ごと出さない
-  const result = validateProofreadIssues(parsed, chunk, style.keepWords);
+  const result = validateProofreadIssues(
+    parsed,
+    chunk,
+    style.keepWords,
+    narrator
+  );
   return {
     chunkId,
     chapterLabel: chapterLabelOf(chunk),
@@ -408,6 +446,7 @@ export async function proofreadRun(input: ProofreadRunInput): Promise<
   // **作法は1回だけ集める**（チャンクごとに読み直さない）
   const style = collectStyle(input.folder);
   const narratorSlips = scanNarratorSlips(input.folder, input.filePath);
+  const viewpointNarrator = viewpointNarratorFor(input.folder);
 
   // 行き先ごとの分岐は `runByRunner` が持つ（設計書6.87.12）
   const outcome = await runByRunner(
@@ -419,7 +458,8 @@ export async function proofreadRun(input: ProofreadRunInput): Promise<
         chunkId,
         chunkFromId(input.folder, chunkId),
         responseText,
-        style
+        style,
+        viewpointNarrator
       ),
     ollamaGenerate,
     {
