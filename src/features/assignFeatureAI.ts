@@ -8,14 +8,6 @@ import {
   type ProviderAndModelPick,
 } from "../ai/registry";
 import {
-  EXTRACT_MODEL_ADVICE,
-  EXTRACT_MODEL_ADVICE_SHORT,
-  FORESHADOW_MODEL_ADVICE,
-  FORESHADOW_MODEL_ADVICE_SHORT,
-  TYPO_MODEL_ADVICE,
-  TYPO_MODEL_ADVICE_SHORT,
-} from "../core/requirements";
-import {
   asVerdictFeature,
   describeVerdictCount,
   findVerdictCount,
@@ -75,9 +67,8 @@ export async function assignFeatureAI(
     );
   }
 
-  // 選ぶ画面の1行に入らなかった理由と測定日は、ここで出す（作者の裁定 2026-10-10）
-  const reason = MODEL_SIZE_REASON[feature];
-  if (reason) notes.push(reason);
+  // 機能に向くモデルの大きさは、ここでも自分からは言わない（作者の裁定 2026-10-10
+  // 「割当画面の案内も外してください」）。訊かれたら相談が答える（`core/chatModelNotes.ts`）
 
   // **注意文を添えるときは通知に残す**（設計書6.81の規則3）。
   // 「実行のたびに課金されます」「精度が下がる場合があります」は、この
@@ -91,34 +82,10 @@ export async function assignFeatureAI(
 }
 
 /**
- * モデルの大きさで結果が変わる機能と、その一言。
- *
- * **全部の行に説明を付けない**（作者の裁定 2026-09-06）。付けると、
- * 肝心の行が埋もれる。ここに無い機能は説明なしで並ぶ。
- */
-const MODEL_SIZE_ADVICE: Partial<Record<AssignableFeature, string>> = {
-  typo: TYPO_MODEL_ADVICE_SHORT,
-  // 抽出は、モデルを替えるだけで人物の分裂が止まった（実機確認A-18）
-  extract: EXTRACT_MODEL_ADVICE_SHORT,
-  // 伏線の回収の確認は、既定の 4B 級では1件も通らなかった（2026-09-26 の測定）
-  foreshadow: FORESHADOW_MODEL_ADVICE_SHORT,
-};
-
-/**
- * 選ぶ画面の1行には入らない理由と測定日。割り当てたあとの知らせに添える
- * （選ぶ画面は1行で切れるため。作者の裁定 2026-10-10）。
- */
-const MODEL_SIZE_REASON: Partial<Record<AssignableFeature, string>> = {
-  typo: TYPO_MODEL_ADVICE,
-  extract: EXTRACT_MODEL_ADVICE,
-  foreshadow: FORESHADOW_MODEL_ADVICE,
-};
-
-/**
  * その行のモデルの指摘を、作者がどれだけ採ったか（設計書6.49.7）。
  *
  * **判断が1件も無ければ何も言わない**（全部の行に「まだ0件」が並ぶと、
- * 肝心の行が埋もれる。`MODEL_SIZE_ADVICE` と同じ考え方）。
+ * 肝心の行が埋もれる）。
  * 数える機能でなければ（抽出・生成・相談など）何も言わない。
  */
 function verdictNoteFor(
@@ -164,16 +131,10 @@ async function pickFeature(
         const provider = assigned
           ? registry.getProvider(assigned.provider)
           : undefined;
-        // **モデルの大きさで結果が変わる機能だけ、その場で言う**
-        // （作者の裁定 2026-09-06）。全部の行に説明を付けると、
-        // 肝心の1行が埋もれる。作者が採った率（6.49.7）は、
-        // 判断の記録がある行にだけ並べる
-        const detail = [
-          MODEL_SIZE_ADVICE[feature],
-          verdictNoteFor(registry, feature, verdicts),
-        ]
-          .filter((text): text is string => Boolean(text))
-          .join("　");
+        // 作者が採った率（6.49.7）は、判断の記録がある行にだけ並べる。
+        // 機能に向くモデルの大きさの案内は出さない（作者の裁定 2026-10-10
+        // 「割当画面の案内も外してください」。訊かれたら相談が答える）
+        const detail = verdictNoteFor(registry, feature, verdicts);
         return {
           label: ASSIGNABLE_FEATURE_LABELS[feature],
           description: assigned

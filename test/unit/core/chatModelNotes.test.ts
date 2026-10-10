@@ -26,9 +26,10 @@ describe("機能別AI割当の画面に、相談の比べの案内を出さな�
     expect(read("core/requirements.ts")).not.toContain("CHAT_MODEL_ADVICE");
   });
 
-  test("誤字脱字の案内は残る", () => {
+  test("誤字脱字の案内も割当の画面には出さず、Ollama の導入画面にだけ残る（作者の裁定 2026-10-10）", () => {
     expect(TYPO_MODEL_ADVICE).toContain("gemma4:26b");
-    expect(read("features/assignFeatureAI.ts")).toContain("typo: TYPO_MODEL_ADVICE");
+    expect(read("features/assignFeatureAI.ts")).not.toContain("TYPO_MODEL_ADVICE");
+    expect(read("features/setupOllama.ts")).toContain("TYPO_MODEL_ADVICE");
   });
 });
 
@@ -97,6 +98,20 @@ describe("検知に向くモデルの記録（相談で訊かれたときだけ�
       "2026-09-26",
       "目安",
       "機能別AI割当",
+    ]) {
+      expect(DETECTION_MODEL_NOTES, word).toContain(word);
+    }
+  });
+
+  // 機能別AI割当の案内（2026-10-10 に外した）が挙げていた数字は、ここで答えられる
+  test("割当の画面から外した案内の数字がそろっている", () => {
+    for (const word of [
+      // 誤字脱字（作品10話・確実19件）
+      "19件では 26b が12件、さくらの Kimi-K2.6 が13件、12b が5件、e4b が3件",
+      // 伏線の回収の確認（21件）
+      "21件で e4b は0件、12b は5件、26b は12件、Kimi-K2.6 は15件",
+      // 設定資料の抽出（別名）
+      "26b は3件拾った（2026-09-08）",
     ]) {
       expect(DETECTION_MODEL_NOTES, word).toContain(word);
     }
