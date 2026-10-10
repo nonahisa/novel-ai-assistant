@@ -30,15 +30,22 @@ import { CLEAR_NOTIFICATIONS_KEY, clearNotifications, closeDialog, dialogText } 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 /**
- * どの版の VS Code で回すか。**既定は 1.138.0。**
+ * どの版の VS Code で回すか。**既定は 1.141.0**（作者の VS Code と同じ版。2026-10-10）。
  *
  * 統合テストの既定（対応の下限の 1.90.0）と違えたのは、ここで見張るのが
  * **作者がいま使っている VS Code の画面の動き**（タブの列・WebView の作り直し）
  * だからである。1.90 で通っても、作者の画面で2枚目ができては意味が無い。
  * 環境変数 `NOVELAI_E2E_VSCODE` で替えられる（`VSCODE_` で始めない——
- * 起動の前に `VSCODE_*` を全部落とすため）。
+ * 起動の前に `VSCODE_*` を全部落とすため）。前の既定 1.138.0 で回すなら
+ * `NOVELAI_E2E_VSCODE=1.138.0`。
+ *
+ * 1.138.0 から上げたのは、拡張機能ホストの再起動をまたぐ件（`hostRestartDisconnect.test.ts`）の
+ * ため。1.138 では再起動すると「拡張機能の出したエディターが閉じる」確かめが出て、押すと
+ * 原稿のタブが閉じたが、作者の 1.141.0 ではタブが残った（2026-10-10）。**上げた時点では
+ * 1.141.0 で全件を走らせていない**——部品の冒頭の「確かめた版」は 1.138.0 のまま残す
+ * （走らせて通ったら書き換える）。`.vscode-test/` に無ければ初回に取り寄せる
  */
-export const E2E_VSCODE_VERSION = process.env.NOVELAI_E2E_VSCODE || "1.138.0";
+export const E2E_VSCODE_VERSION = process.env.NOVELAI_E2E_VSCODE || "1.141.0";
 
 /**
  * 作品を登録するためのキー。**製品のキーと重ならない組み合わせ**にする。

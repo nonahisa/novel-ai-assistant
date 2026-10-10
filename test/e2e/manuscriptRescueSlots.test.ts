@@ -11,12 +11,21 @@
  * ほかの作り方は使えなかった——拡張機能ホストの起動し直しは、1.138 が「拡張機能の出した
  * エディターが閉じる」と確かめを出し、押せばタブが閉じて画面の状態ごと消える。この窓の
  * あいだだけの読み取り専用は、拡張機能の WorkspaceEdit には効かず、字が入った。
+ * （1.141 で再起動をまたいで控えを戻す件は `hostRestartDisconnect.test.ts`。2026-10-10、未実行）
  */
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import type { Frame, Page } from "playwright-core";
+import type { Frame } from "playwright-core";
 import { expect, test } from "vitest";
-import { composeText, manuscriptFrames, openEpisode, placeCaretAfter } from "./support/manuscriptFrame";
+import {
+  classOpen,
+  composeText,
+  dropEditsToHost,
+  openEpisode,
+  placeCaretAfter,
+  rescueBarText,
+  waitForManuscriptFrame,
+} from "./support/manuscriptFrame";
 import { pressWorkbenchKey } from "./support/workbenchDom";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
@@ -29,61 +38,6 @@ const RELOAD_WINDOW_PRESS = "Control+Alt+Shift+KeyY";
 
 async function fileText(session: E2ESession): Promise<string> {
   return (await readFile(path.join(session.manuscriptFolder, EPISODE), "utf8")).replace(/\r\n/g, "\n");
-}
-
-async function classOpen(frame: Frame, id: string): Promise<boolean> {
-  return frame
-    .evaluate((elementId) => document.getElementById(elementId)?.classList.contains("open") === true, id)
-    .catch(() => false);
-}
-
-async function rescueBarText(frame: Frame): Promise<string> {
-  return frame.evaluate(() => document.getElementById("rescueText")?.textContent ?? "").catch(() => "");
-}
-
-/** 原稿エディターの面（再読み込みのあとは新しい面になるので、探し直す） */
-async function manuscriptFrame(page: Page, expected: string): Promise<Frame> {
-  let found: Frame | undefined;
-  await waitUntil(
-    async () => {
-      for (const frame of await manuscriptFrames(page)) {
-        if ((await composeText(frame).catch(() => "")).includes(expected)) {
-          found = frame;
-          return true;
-        }
-      }
-      return false;
-    },
-    "再読み込みのあと、原稿エディターの面が本文を描く",
-    60_000
-  );
-  if (!found) throw new Error("原稿エディターの面が見つかりません");
-  return found;
-}
-
-/**
- * 画面から拡張機能へ向かう「打った字の便」（edit）だけを、WebView の外側の枠で落とす。
- *
- * 拡張機能ホストが起動し直して受け手を失った画面（6.25.9）と同じく、便は送られるのに
- * 返事が来ない形を作る。**製品には何も足さない**——VS Code の WebView の外側の枠
- * （`pre/index.html`）は、内側の枠の `postMessage` を MessagePort で本体へ渡すので、
- * テストの側からその枠の MessagePort をくるむ。画面の状態の書き込み（do-update-state）は
- * 通すので、控えは本物どおり状態に残る。枠は再読み込みで作り直されるので、くるみも消える
- */
-async function dropEditsToHost(frame: Frame): Promise<void> {
-  const outer = frame.parentFrame();
-  if (!outer) throw new Error("WebView の外側の枠が見つかりません");
-  await outer.evaluate(() => {
-    const proto = MessagePort.prototype as MessagePort & { __e2eDrop?: boolean };
-    if (proto.__e2eDrop) return;
-    proto.__e2eDrop = true;
-    const original = proto.postMessage;
-    proto.postMessage = function (this: MessagePort, ...args: unknown[]) {
-      const message = args[0] as { channel?: string; data?: { message?: { type?: string } } } | undefined;
-      if (message?.channel === "onmessage" && message.data?.message?.type === "edit") return;
-      return (original as (...rest: unknown[]) => void).apply(this, args);
-    } as typeof proto.postMessage;
-  });
 }
 
 /** 打った字が拡張機能へ届かないようにしてから打ち、届かない知らせ（4秒）が出るのを待つ */
@@ -99,7 +53,7 @@ async function reloadWindow(session: E2ESession, oldFrame: Frame): Promise<Frame
   await pressWorkbenchKey(session.page, RELOAD_WINDOW_PRESS);
   // 再読み込みが始まる前の古い面を拾わないよう、古い面が外れるのを待つ
   await waitUntil(() => oldFrame.isDetached(), "再読み込みで古い面が外れる", 30_000);
-  return manuscriptFrame(session.page, "一行目の文");
+  return waitForManuscriptFrame(session.page, "一行目の文", "再読み込みのあと、原稿エディターの面が本文を描く");
 }
 
 test("帯の控えが開いている間に原稿へ届かなかった字も、ウィンドウを再読み込みしたあと、帯に続けて順に出て戻せる", async () => {
