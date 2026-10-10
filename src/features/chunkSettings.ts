@@ -26,7 +26,6 @@ import { lookupCallSpeeds } from "../ai/runTimeEstimate";
 import { confirmProviderReachable } from "./aiConnectivity";
 import type { AIProvider, ModelInfo } from "../ai/types";
 import type { AssignableFeature } from "../ai/registry";
-import { noticeSmallModelOnce } from "./smallModelNotice";
 
 /**
  * チャンクの大きさに関する設定を、1か所で読む（設計書6.23）。
@@ -142,16 +141,8 @@ export async function resolveModelInfoOrWarn(options: {
    * （Geminiを使っているのに「Claudeの…」と出た不具合と同じ形）
    */
   actionLabel: string;
-  /**
-   * 作品フォルダー。小さいモデルの知らせ（設計書6.28.9）を作品ごとに覚えるのに使う。
-   * 渡されなければモデルごとだけで覚える
-   */
-  workFolder?: string;
 }): Promise<ModelInfo | undefined> {
-  const info = withSmallModelNotice(
-    options,
-    await options.registry.resolveModelInfo(options.feature)
-  );
+  const info = await options.registry.resolveModelInfo(options.feature);
   if (info) return info;
 
   // **モデル名を渡す。** LM Studioをこの場から起こしたとき、起こした直後に
@@ -168,10 +159,7 @@ export async function resolveModelInfoOrWarn(options: {
     return undefined;
   }
 
-  const retried = withSmallModelNotice(
-    options,
-    await options.registry.resolveModelInfo(options.feature)
-  );
+  const retried = await options.registry.resolveModelInfo(options.feature);
   if (retried) return retried;
 
   const action = await vscode.window.showWarningMessage(
@@ -186,35 +174,6 @@ export async function resolveModelInfoOrWarn(options: {
     await vscode.commands.executeCommand("novelai.setupAI");
   }
   return undefined;
-}
-
-/**
- * モデルの詳細が取れたところで、小さいモデルの知らせを出す（設計書6.28.9）。
- *
- * **ここに置くのは、検知の機能がみなこの関数を通るから**（誤字脱字・推敲・矛盾検知・
- * 事実の照合・伏線・抽出・単話プロット）。機能ごとに足すと、足し忘れた機能だけ
- * 黙る。出すかどうかは機能のキーとモデルの大きさで決まり、生成などは素通りする。
- * **待たない**——通知は実行を止めない。
- */
-function withSmallModelNotice(
-  options: {
-    feature: AssignableFeature;
-    provider: Pick<AIProvider, "id">;
-    model: string;
-    workFolder?: string;
-  },
-  info: ModelInfo | undefined
-): ModelInfo | undefined {
-  if (info) {
-    noticeSmallModelOnce({
-      workFolder: options.workFolder,
-      feature: options.feature,
-      providerId: options.provider.id,
-      model: options.model,
-      parameterSize: info.parameterSize,
-    });
-  }
-  return info;
 }
 
 export function readChunkSettings(

@@ -30,6 +30,14 @@ export interface GuideBundle {
   label: string;
   /** AIへ渡す説明の本文。見出し行から始まる */
   text: string;
+  /**
+   * 機能の名前（`FEATURE_NAME_TERMS`）が当たったときだけ選ぶ。2文字組みでは当てない。
+   *
+   * 検知に向くモデルの記録（`core/chatModelNotes.ts`）のように、本文に機能の名前が
+   * 並ぶが**訊かれたときだけ**渡したい束に付ける。2文字組みで当てると「誤字脱字は
+   * どこ？」のような使い方の問いにも付いてしまう
+   */
+  byNameOnly?: boolean;
 }
 
 export interface GuideSelection {
@@ -100,7 +108,7 @@ export function selectGuideBundles(input: {
     .map((bundle) => ({
       bundle,
       score:
-        countGramHits(bundle.text, grams) +
+        (bundle.byNameOnly ? 0 : countGramHits(bundle.text, grams)) +
         // 機能の名前は1語で話題を名指しているので、それだけで当たりに届かせる
         // （`FEATURE_NAME_TERMS` の説明）
         terms.filter((term) => bundle.text.includes(term)).length *
@@ -114,7 +122,16 @@ export function selectGuideBundles(input: {
   if (scored.length > 0) {
     // 点の高い順。同点は元の並び（メニュー順）のまま——`sort` は安定なので、
     // 作者が画面で見ている順序が保たれる
-    scored.sort((a, b) => b.score - a.score);
+    //
+    // **名前の語でだけ当たる束（`byNameOnly`）は先頭へ。** 当たったのは作者がその話を
+    // 名指しで訊いたときだけなので、問いの主題そのものである。点で並べると、
+    // 「誤字脱字に向くモデルは？」で誤字脱字の操作の束（2文字組みで点が高い）が
+    // 予算を埋め、訊かれた記録が落ちた
+    scored.sort(
+      (a, b) =>
+        Number(b.bundle.byNameOnly === true) - Number(a.bundle.byNameOnly === true) ||
+        b.score - a.score
+    );
     const selected = fit(
       scored.map((entry) => entry.bundle),
       budget

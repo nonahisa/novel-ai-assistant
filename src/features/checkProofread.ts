@@ -168,7 +168,6 @@ export async function checkProofread(
     provider: resolved.provider,
     model: resolved.model,
     actionLabel: "推敲",
-    workFolder: work.folderPath,
   });
   if (!info) return undefined;
 

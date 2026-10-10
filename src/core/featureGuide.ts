@@ -8,7 +8,7 @@ import {
   type ActionSection,
 } from "./actionTree";
 import { canRunProcesses } from "./runtime";
-import { CHAT_MODEL_NOTES } from "./chatModelNotes";
+import { CHAT_MODEL_NOTES, DETECTION_MODEL_NOTES } from "./chatModelNotes";
 import { entranceOf } from "./actionEntrance";
 import {
   selectGuideBundles,
@@ -433,6 +433,15 @@ export function buildGuideBundles(): GuideBundle[] {
     key: "modelChoice",
     label: "相談に使うモデルの目安",
     text: CHAT_MODEL_NOTES,
+  });
+  // 検知に向くモデルの記録も同じ扱い（作者の裁定 2026-10-10 朝、A11）。
+  // **名前の語でだけ当てる**——本文に「誤字脱字」「検知」が並ぶので、
+  // 2文字組みで当てると使い方の問いにもモデルの話が付く
+  bundles.push({
+    key: "detectionModelChoice",
+    label: "検知の機能に使うモデルの目安",
+    text: DETECTION_MODEL_NOTES,
+    byNameOnly: true,
   });
 
   return bundles;

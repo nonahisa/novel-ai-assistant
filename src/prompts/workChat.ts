@@ -123,7 +123,12 @@ import { closeTruncatedJson } from "../core/truncatedResponse";
 //       `core/chatModelNotes.ts`）を足した。作者が「向くモデルは？」と訊いた
 //       回にだけ当たる。機能別AI割当の画面からは外した（1作品の比べなので画面では
 //       勧めない。作者の裁定 2026-10-09）。システム指示は変えていない
-export const WORK_CHAT_VERSION = "3.28";
+// 3.29: 使い方の説明の束に「検知の機能に使うモデルの目安」（`core/chatModelNotes.ts` の
+//       `DETECTION_MODEL_NOTES`）を足した。作者が「検知にはどのモデルが向く？」と
+//       訊いた回にだけ当たる（名前の語でだけ当て、使い方の問いには付けない）。
+//       小さいモデルへの右下の知らせと選ぶ画面の注意は外した（作者の裁定
+//       2026-10-10 朝、A11）。システム指示は変えていない
+export const WORK_CHAT_VERSION = "3.29";
 
 /** ［AIに相談］の依頼文に入れる一文・指摘の長さの上限（長い合本の行で膨らませない） */
 export const FINDING_ADVICE_QUOTE_MAX_CHARS = 300;
