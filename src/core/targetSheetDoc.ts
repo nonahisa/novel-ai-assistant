@@ -33,10 +33,12 @@ import type {
   TargetSheetAdviceItem,
   TargetSheetAdviceRecord,
 } from "./targetSheetAdvice";
-import type {
-  TargetSheet,
-  TargetSheetDirection,
-  TargetSheetGap,
+import {
+  affinityRank,
+  affinityRankLegend,
+  type TargetSheet,
+  type TargetSheetDirection,
+  type TargetSheetGap,
 } from "./targetSheet";
 
 /**
@@ -374,18 +376,21 @@ function actualSection(
   }
   lines.push("");
 
-  lines.push("| 読者層 | 一致度 | どんな読者か |", "|---|---|---|");
+  lines.push("| 読者層 | 一致度ランク | どんな読者か |", "|---|---|---|");
   for (const entry of actual.ranking) {
     const info = READER_TYPES[entry.type];
     // いちばん高い型（診断が決めた型）だけを太字にする。同率の型は
-    // 同じ数字のまま並べる——**数字を動かして順位を作らない**
+    // 同じランクのまま並べる——**ランクを動かして順位を作らない**
     const name = entry.type === actual.top ? `**${info.label}**` : info.label;
-    lines.push(`| ${name} | ${entry.affinity} | ${info.summary} |`);
+    lines.push(
+      `| ${name} | ${affinityRank(entry.affinity)} | ${info.summary} |`
+    );
   }
   lines.push(
     "",
-    "一致度は、3つの軸の**段階**（低・中・高）がその層の中心とどれだけ" +
-      "そろっているかで出しています。AIは使っていません。",
+    "一致度ランクは、3つの軸の**段階**（低・中・高）がその層の中心と" +
+      "どれだけずれているかを、3軸ぶん足して出しています。AIは使っていません。" +
+      `${affinityRankLegend()}。`,
     ""
   );
   if (unmeasured.length > 0) {
@@ -494,7 +499,10 @@ function matchSection(sheet: TargetSheet): string[] {
 
   for (const aim of sheet.aims) {
     const info = READER_TYPES[aim.type];
-    lines.push(`### 狙い：${info.label}（一致度 ${aim.affinity}）`, "");
+    lines.push(
+      `### 狙い：${info.label}（一致度 ${affinityRank(aim.affinity)}）`,
+      ""
+    );
     if (aim.isTop) {
       lines.push(
         "**狙いと、いちばん高い層が同じです。** 向けたい先へ、書けているものが向いています。",
@@ -814,14 +822,21 @@ function historyWhen(entry: TargetSheetHistoryEntry): string {
   return Number.isNaN(at.getTime()) ? entry.recordedAt : formatDayTime(at);
 }
 
-/** 狙いの型と、そのときの一致度。**狙いを変えた日が分かるように出す** */
+/**
+ * 狙いの型と、そのときの一致度。**狙いを変えた日が分かるように出す**
+ *
+ * 控えは数字のまま持ち（出し方を将来変えても読み直せるように）、
+ * 紙ではほかの欄と同じランクで見せる。
+ */
 function aimColumn(entry: TargetSheetHistoryEntry): string {
   if (entry.aim.length === 0) return "（狙い未記入）";
   return entry.aim
     .map((type) => {
       const affinity = entry.affinities?.[type];
       const label = READER_TYPES[type].label;
-      return typeof affinity === "number" ? `${label} ${affinity}` : label;
+      return typeof affinity === "number"
+        ? `${label} ${affinityRank(affinity)}`
+        : label;
     })
     .join("／");
 }
@@ -839,7 +854,10 @@ function topThree(entry: TargetSheetHistoryEntry): string {
   if (ranked.length === 0) return "—";
   return ranked
     .slice(0, 3)
-    .map((type) => `${READER_TYPES[type].label} ${affinities[type]}`)
+    .map(
+      (type) =>
+        `${READER_TYPES[type].label} ${affinityRank(affinities[type])}`
+    )
     .join("・");
 }
 

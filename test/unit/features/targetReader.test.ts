@@ -364,7 +364,7 @@ describe("2段目（書き方の判断）", () => {
       declared?: { answers: number[] };
     };
     expect(profile.declared?.answers).toEqual(READER_QUESTIONS.map(() => 2));
-    expect(fs.text(SHEET)).toContain("| 読者層 | 一致度 | どんな読者か |");
+    expect(fs.text(SHEET)).toContain("| 読者層 | 一致度ランク | どんな読者か |");
   });
 });
 

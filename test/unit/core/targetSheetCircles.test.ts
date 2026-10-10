@@ -95,7 +95,7 @@ describe("3つの輪がそろっているとき", () => {
     ).toHaveLength(2);
   });
 
-  test("狙いと実像の辺は、一致度の数字を添える（数字は機械が出したもの）", () => {
+  test("狙いと実像の辺は、一致度のランクを添える（機械が出したもの。作者の裁定 2026-10-10）", () => {
     const circles = targetSheetCircles({
       aim: ["light"],
       actual: actualOf(LORE_DEEP),
@@ -103,7 +103,17 @@ describe("3つの輪がそろっているとき", () => {
 
     const edge = circles.edges.find((entry) => entry.key === "aim-actual");
     expect(edge?.apart).toBe(true);
-    expect(edge?.lines.join("\n")).toMatch(/一致度 \d+/);
+    expect(edge?.lines.join("\n")).toMatch(/一致度 [SABCDEF]。/);
+    expect(edge?.lines.join("\n")).not.toMatch(/一致度 \d+/);
+  });
+
+  test("狙いと実像が同じ層なら、ランクは S", () => {
+    const circles = targetSheetCircles({
+      aim: ["lore_deep"],
+      actual: actualOf(LORE_DEEP),
+    });
+    const edge = circles.edges.find((entry) => entry.key === "aim-actual");
+    expect(edge?.lines.join("\n")).toContain("（一致度 S）");
   });
 });
 

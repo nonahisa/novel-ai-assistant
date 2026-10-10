@@ -6,7 +6,11 @@ import {
 } from "./readerTarget";
 import { compareAuthorReader } from "./authorReaderGap";
 import { neighborToward, readerTypeNeighbors } from "./readerTypeNeighbors";
-import { readerTypeAffinityOf, readerTypeGaps } from "./targetSheet";
+import {
+  affinityRank,
+  readerTypeAffinityOf,
+  readerTypeGaps,
+} from "./targetSheet";
 import {
   READER_PROFILE_SCHEMA_VERSION,
   type ReaderActual,
@@ -305,7 +309,8 @@ function aimActualEdge(
 ): TargetSheetCircleEdge {
   const aimInfo = READER_TYPES[aim];
   const actualType = resolveReaderType(actual);
-  const affinity = readerTypeAffinityOf(actual, aim);
+  // シートの表と同じランクで言う（数字にすると表と見え方がずれる）
+  const affinity = affinityRank(readerTypeAffinityOf(actual, aim));
   const heading = `読んでもらいたい読者（${aimInfo.label}） ↔ 書けているもの`;
 
   if (actualType === aim) {
