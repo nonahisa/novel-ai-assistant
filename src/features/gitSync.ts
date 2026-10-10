@@ -49,6 +49,7 @@ export {
 } from "../core/gitSyncStatusText";
 import {
   alignToRepository,
+  canSaveAndSync,
   describeSyncStatusBar,
   divergenceLine,
   isStaleRead,
@@ -1635,6 +1636,27 @@ export async function showGitSyncActions(
     items.push({ ...setup, action: "setup" });
   }
 
+  // **送れるなら、同期を先頭に置く**（作者の報告、2026-10-10。設計書6.15.1）。
+  // 「記録する」「送信する」を別々に押させると、記録待ちしか無いときに
+  // 送る道が見えなかった。**置き場1つだけを記録して送る道は持たない**——
+  // 記録→取り込み→送信の手順を2つ持つと、片方だけ直して食い違うので、
+  // 既存の「保存・同期」（すべての作品。確認の窓は向こうが1回出す）へ渡す
+  if (canSaveAndSync(status) && status.kind === "tracked") {
+    items.push({
+      label: "$(cloud-upload) 保存・同期（記録して送る）",
+      description: [
+        status.dirty > 0 ? `未記録 ${status.dirty}` : undefined,
+        status.ahead > 0 ? `未送信 ${status.ahead}` : undefined,
+      ]
+        .filter((part): part is string => part !== undefined)
+        .join("・"),
+      detail:
+        "開いている原稿を保存し、記録してGitHubへ送ります。" +
+        "ほかの作品の置き場もまとめて同期します（送る前に1回だけ確認します）。",
+      action: "saveAndSync",
+    });
+  }
+
   // 記録する手段が無いと、初回コミットのあと何も残せない。
   // GitHubを使わない作者にとっては、これが唯一の使い道になる
   if (canRecordChanges(status)) {
@@ -1693,6 +1715,10 @@ export async function showGitSyncActions(
   });
   if (!picked || !("action" in picked)) return;
 
+  if (picked.action === "saveAndSync") {
+    await vscode.commands.executeCommand("novelai.saveAndSync");
+    return;
+  }
   if (picked.action === "commit") {
     // **記録は置き場まるごとに効く**（`git add -A` はリポジトリ全体を見る）。
     // 作品名だけを出すと、その作品だけが記録されると読めてしまう

@@ -247,6 +247,8 @@ export interface SyncTarget<W extends { title: string }> {
   label: string;
   /** 件数。例「未記録 2・送信待ち 1」 */
   description: string;
+  /** 置き場ぜんぶの状態（代表の作品の控え）。分岐・同期できるかの判定に使う */
+  status: Extract<GitSyncStatus, { kind: "tracked" }>;
 }
 
 /**
@@ -288,7 +290,13 @@ export function listSyncTargets<W extends { title: string }>(
         : `${basenameOf(root)}（${first.title} ほか${works.length - 1}作品）`;
     return {
       heavy: status.unmerged > 0 || diverged,
-      target: { work: first, works, label, description: parts.join("・") },
+      target: {
+        work: first,
+        works,
+        label,
+        description: parts.join("・"),
+        status,
+      },
     };
   });
 
@@ -296,6 +304,104 @@ export function listSyncTargets<W extends { title: string }>(
   return targets
     .sort((a, b) => Number(b.heavy) - Number(a.heavy))
     .map((one) => one.target);
+}
+
+/**
+ * その置き場を「保存・同期」で前へ進められるか（設計書6.15.1。2026-10-10）。
+ *
+ * 送り先があり（`tracked`）、記録待ちか未送信がある置き場。
+ * **競合の残る置き場は外す**——すべて同期（`planSyncTarget`）は競合マーカーを
+ * 履歴へ入れないために飛ばすので、出しても押して何も起きない項目になる。
+ * 取り込み待ちだけの置き場も外す（記録も送信も無い。取り込みは作品ごとの一覧から）。
+ */
+export function canSaveAndSync(status: GitSyncStatus): boolean {
+  if (status.kind !== "tracked") return false;
+  if (status.unmerged > 0) return false;
+  return status.dirty > 0 || status.ahead > 0;
+}
+
+/** ステータスバーから押したときの一覧の1行（画面の部品に依らない形） */
+export type StatusBarSyncChoice<W extends { title: string }> =
+  | { kind: "divergence"; work: W; label: string; description: string }
+  | { kind: "syncAll"; label: string; description: string }
+  | { kind: "work"; work: W; label: string; description: string }
+  | { kind: "log"; label: string; description: string };
+
+export type StatusBarSyncMenu<W extends { title: string }> =
+  /** 手当ての要る置き場が無い */
+  | { kind: "nothing" }
+  /** 置き場が1つだけ（分岐なし）。作品ごとの一覧へ直接進む */
+  | { kind: "direct"; work: W }
+  | { kind: "menu"; choices: Array<StatusBarSyncChoice<W>> };
+
+/**
+ * ステータスバーの「未送信／未記録」を押したときの一覧（設計書6.15.1）。
+ *
+ * 作者の報告（2026-10-10）：「一番上を選択しても同期されません。同期可能で
+ * あれば、優先順位は同期が上です。また２回も選択肢が表示され冗長です」。
+ * それまでは作品を選ばせてから、**その作品の置き場の状態だけ**で操作を並べて
+ * いた。ステータスバーの数は置き場ぜんぶの合計なので、選んだ作品に未送信が
+ * 無ければ「記録する」「状態を確認」「ログ」だけになり、送る道が無かった。
+ *
+ * 並び（1つの一覧にまとめ、2段にしない）：
+ * 1. **分岐合流**（分かれた置き場ごと）——同期より先に合わせる必要がある
+ * 2. **保存・同期（すべての作品）**——同期できる置き場が1つでもあれば
+ * 3. 作品ごとの行（`listSyncTargets` の並び。押すと今までの作品ごとの一覧）
+ * 4. ログを表示
+ *
+ * 置き場が1つだけで分かれていなければ、今までどおり作品選びを飛ばす
+ * （作品ごとの一覧の先頭にも「保存・同期」が出るので、1押しで同期へ行ける）。
+ */
+export function buildStatusBarSyncMenu<W extends { title: string }>(
+  entries: readonly { work: W; status: GitSyncStatus }[]
+): StatusBarSyncMenu<W> {
+  const targets = listSyncTargets(entries);
+  if (targets.length === 0) return { kind: "nothing" };
+
+  const diverged = targets.filter(
+    (target) => target.status.ahead > 0 && target.status.behind > 0
+  );
+  if (targets.length === 1 && diverged.length === 0) {
+    return { kind: "direct", work: targets[0].work };
+  }
+
+  const choices: Array<StatusBarSyncChoice<W>> = [];
+  for (const target of diverged) {
+    choices.push({
+      kind: "divergence",
+      work: target.work,
+      label: "分岐合流",
+      description: `${target.label}：取り込み ${target.status.behind}件・送信 ${target.status.ahead}件`,
+    });
+  }
+
+  // 数は置き場ごとに1回だけ足す（`listSyncTargets` が置き場で畳んである）
+  const syncable = targets.filter((target) => canSaveAndSync(target.status));
+  if (syncable.length > 0) {
+    const dirty = syncable.reduce((sum, one) => sum + one.status.dirty, 0);
+    const ahead = syncable.reduce((sum, one) => sum + one.status.ahead, 0);
+    choices.push({
+      kind: "syncAll",
+      label: "保存・同期（すべての作品）",
+      description: [
+        dirty > 0 ? `未記録 ${dirty}` : undefined,
+        ahead > 0 ? `未送信 ${ahead}` : undefined,
+      ]
+        .filter(isText)
+        .join("・"),
+    });
+  }
+
+  for (const target of targets) {
+    choices.push({
+      kind: "work",
+      work: target.work,
+      label: target.label,
+      description: target.description,
+    });
+  }
+  choices.push({ kind: "log", label: "ログを表示", description: "" });
+  return { kind: "menu", choices };
 }
 
 function needsAttention(
