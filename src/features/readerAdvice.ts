@@ -249,7 +249,10 @@ export async function requestReaderAdvice(
           return;
         }
         // 覚えるのは**読めた答えだけ**（読めなかった答えを次も出さない）
-        await cache.set(hash, cacheBase, response.text);
+        // 繰り返しで途中止めした答えなら、そうと分かる印を残す（設計書6.77 の 15）
+        await cache.set(hash, cacheBase, response.text, {
+          stoppedEarly: response.stoppedEarly,
+        });
         await cache.save();
         outcome = {
           kind: "answer",

@@ -2,7 +2,7 @@
   "name": "novel-ai-assistant",
   "displayName": "統合小説執筆環境",
   "description": "書くこと以外、引き受けます。プロットづくり・設定資料の抽出・校正・投稿の準備・EPUB／PDFでの出版までを扱うVS Code拡張機能です。AIは提案するだけで、原稿は書き換えません。無料の手元AIだけでも使えます。※現在テスト中です。",
-  "version": "0.102.4",
+  "version": "0.102.5",
   "publisher": "nonahisa",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -822,7 +822,7 @@
       },
       {
         "command": "novelai.resumeWriting",
-        "title": "執筆再開用資料生成",
+        "title": "再開用資料",
         "category": "小説執筆",
         "icon": "$(debug-continue)"
       },
@@ -1385,7 +1385,7 @@
       },
       {
         "command": "novelai.chaptersFromHeadings",
-        "title": "章見出しから章立て",
+        "title": "章見出し反映",
         "icon": "$(list-tree)",
         "category": "小説執筆"
       },

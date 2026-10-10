@@ -587,7 +587,10 @@ export async function checkFactContradictions(
                 });
                 return undefined;
               }
-              await cache.set(chunk.hash, extractKeyBase, parsed);
+              // 繰り返しで途中止めした答えも控え、印を残す（設計書6.77 の 15）
+              await cache.set(chunk.hash, extractKeyBase, parsed, {
+                stoppedEarly: response.stoppedEarly,
+              });
               return parsed;
             } catch (error) {
               if (error instanceof AIError && error.kind === "aborted") {
@@ -946,7 +949,9 @@ export async function checkFactContradictions(
       if (response.truncated || !response.text.trim()) {
         return undecidedOutcome("応答が切り詰められました");
       }
-      await cache.set(input.fingerprint, input.cacheKey, response.text);
+      await cache.set(input.fingerprint, input.cacheKey, response.text, {
+        stoppedEarly: response.stoppedEarly,
+      });
       return parseVerifyOutcome(response.text);
     } catch (error) {
       if (error instanceof AIError && error.kind === "aborted") {

@@ -1,6 +1,6 @@
 /**
  * 実機確認リストの 〔作者の手：見た目〕 のうち、ベクトル検索を使う2つの画面の写真——
- * 「類似場面検出」（別の話どうしの似た場面）と、「執筆再開用資料生成」の「この話に関係しそうな前の場面」
+ * 「類似場面検出」（別の話どうしの似た場面）と、「再開用資料」の「この話に関係しそうな前の場面」
  * （2026-10-09 の二段目。作者が見た目の良し悪しを判断するための写真。判断そのものはしない）。
  *
  * **本物の AI も本物の埋め込みも使わない。** 偽の Ollama が、決まった語の出方だけで作った見本のベクトルを返す。
@@ -137,7 +137,7 @@ function launch(withPlot: boolean) {
 }
 
 describe.skipIf(!lookEnabled)("見た目の写真：ベクトル検索を使う画面", () => {
-  test("索引が無いとき・作ったあと：類似場面検出と執筆再開用資料生成", async () => {
+  test("索引が無いとき・作ったあと：類似場面検出と再開用資料", async () => {
     await withVsCode(
       "見た目の写真：類似場面検出と執筆再開",
       EPISODES,
@@ -155,7 +155,7 @@ describe.skipIf(!lookEnabled)("見た目の写真：ベクトル検索を使う�
         if (dialog0) await pressDialogButton(page, "閉じる").catch(() => page.keyboard.press("Escape"));
         await clearNotifications(page);
 
-        await runCommand(page, "執筆再開用資料生成");
+        await runCommand(page, "再開用資料");
         await drive(page, async () => (await editorGroupTabs(page)).flat().some((name) => name.startsWith("執筆再開")), ["最新話", "実行", "続ける"]);
         await page.waitForTimeout(1500);
         const sheet0 = await newestGenerated(session, "執筆再開");
@@ -199,9 +199,9 @@ describe.skipIf(!lookEnabled)("見た目の写真：ベクトル検索を使う�
           await shootPage(page, "678-類似場面検出-選んだあと2つが並ぶ");
         }
 
-        // ── 執筆再開用資料生成（索引あり） ──
+        // ── 再開用資料（索引あり） ──
         await clearNotifications(page);
-        await runCommand(page, "執筆再開用資料生成");
+        await runCommand(page, "再開用資料");
         await drive(page, async () => (await newestGenerated(session, "執筆再開")) !== sheet0 && (await newestGenerated(session, "執筆再開")) !== "", ["最新話", "実行", "続ける"]);
         await page.waitForTimeout(2000);
         const sheet1 = await newestGenerated(session, "執筆再開");
@@ -222,7 +222,7 @@ describe.skipIf(!lookEnabled)("見た目の写真：ベクトル検索を使う�
         const { page } = session;
         await clearNotifications(page);
         // 単話プロットが無い
-        await runCommand(page, "執筆再開用資料生成");
+        await runCommand(page, "再開用資料");
         await drive(page, async () => (await editorGroupTabs(page)).flat().some((name) => name.startsWith("執筆再開")), ["最新話", "実行", "続ける"]);
         await page.waitForTimeout(1500);
         const none = await newestGenerated(session, "執筆再開");
@@ -235,7 +235,7 @@ describe.skipIf(!lookEnabled)("見た目の写真：ベクトル検索を使う�
         await drive(page, async () => (await editorGroupTabs(page)).flat().some((name) => /^第\d+話\.md$/.test(name)), ["最新話", "第4話", "第"]);
         await page.waitForTimeout(1500);
         await clearNotifications(page);
-        await runCommand(page, "執筆再開用資料生成");
+        await runCommand(page, "再開用資料");
         await page.waitForTimeout(500);
         await drive(page, async () => (await newestGenerated(session, "執筆再開")).length > 0 && (await editorGroupTabs(page)).flat().filter((name) => name.startsWith("執筆再開")).length >= 1, ["最新話", "実行", "続ける"]);
         await page.waitForTimeout(2000);

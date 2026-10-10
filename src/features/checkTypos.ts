@@ -727,7 +727,11 @@ export async function checkTypos(
             );
             rejectedCount += tally.rejected;
             alreadyAppliedCount += tally.alreadyApplied;
-            await cache.set(chunk.hash, cacheKeyBase, parsed);
+            // 繰り返しで途中止めした答えも控え、印を残す（作者の裁定、
+            // 2026-10-10。設計書6.77 の 15）。言い切った指摘は本物なので聞き直さない
+            await cache.set(chunk.hash, cacheKeyBase, parsed, {
+              stoppedEarly: res.stoppedEarly,
+            });
           }
         } catch (e) {
           if (

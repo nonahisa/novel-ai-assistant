@@ -967,7 +967,10 @@ export async function extractCharacters(
             // しない（`ExtractionReplay.accept`）
             const validated = replay.accept(parsed, chunk);
             collectValidationFixes(validationFixes, validated);
-            await cache.set(chunk.hash, cacheKeyBase, parsed);
+            // 繰り返しで途中止めした答えも控え、印を残す（設計書6.77 の 15）
+            await cache.set(chunk.hash, cacheKeyBase, parsed, {
+              stoppedEarly: res.stoppedEarly,
+            });
           }
         } catch (e) {
           if (
