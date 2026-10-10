@@ -147,10 +147,11 @@ export async function tabLocator(page: Page, name: string): Promise<Locator> {
   const index = (await readTabState(page))
     .flatMap((group) => group.tabs)
     .findIndex((tab) => tabNameMatches(tab.name, name));
-  // 列の順・列の中のタブの順は、文書の中の `.tabs-container .tab` の順と同じ
+  // 列の順・列の中のタブの順は、文書の中の `.editor-group-container .tabs-container .tab` の順と同じ。
+  // `readTabState` と同じ範囲で数える（列の外に別の `.tabs-container .tab` が描かれても隣を押さない）
   return index >= 0
-    ? page.locator(".tabs-container .tab").nth(index)
-    : page.locator(".tabs-container .tab.novelai-e2e-no-such-tab");
+    ? page.locator(".editor-group-container .tabs-container .tab").nth(index)
+    : page.locator(".editor-group-container .tabs-container .tab.novelai-e2e-no-such-tab");
 }
 
 /**
