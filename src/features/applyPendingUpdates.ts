@@ -50,7 +50,13 @@ import type { Location } from "../models/location";
 import type { Organization } from "../models/organization";
 import type { WorldItem } from "../models/world";
 import type { PendingUpdateSource } from "../core/pendingUpdates";
-import { logFailure, useLogFile } from "../core/logger";
+import { logFailure, logLine, useLogFile } from "../core/logger";
+import {
+  describeRecordUpdateBatchLog,
+  describeRecordUpdateLog,
+  type RecordUpdateVerdict,
+  type RecordUpdateVia,
+} from "../core/recordUpdateLog";
 import { openGeneratedMarkdown } from "../views/openDocument";
 import { whenNoticePicked } from "../views/notify";
 import type { ProposalPanel, RecordUpdateViewItem } from "./proposalPanel";
@@ -403,6 +409,10 @@ interface ApplyTarget {
   change: string;
   source?: PendingUpdateSource;
   reason?: string;
+  /** 種類の短い呼び名（人物・能力・組織・場所・世界観）。動作の記録に使う */
+  kindLabel: string;
+  /** 新しく作る案か（動作の記録で「新規作成」と言う） */
+  creation: boolean;
   /** 反映する。落とした葉の数を返す（人物だけ。ほかは常に0） */
   apply: (dropKeys: string[]) => Promise<number>;
   /** 見送る（承認待ちから片付ける。レコードには触らない） */
@@ -417,6 +427,8 @@ function characterTargets(review: PendingUpdateReview): ApplyTarget[] {
     change: describeChange(item),
     source: item.update.source,
     reason: item.update.reason,
+    kindLabel: PENDING_KIND_SHORT_LABELS.character,
+    creation: isCreation(item),
     apply: async (dropKeys) => {
       // **作者が ✕ を付けた葉は、保存の直前に落とす**（設計書6.32）。
       // 承認待ちのファイルは書き換えない——印はその1回の反映にだけ効く
@@ -460,6 +472,8 @@ function settingsTargets(review: PendingSettingsReview): ApplyTarget[] {
     change: describeSettingsChange(item),
     source: item.update.source,
     reason: item.update.reason,
+    kindLabel: PENDING_KIND_SHORT_LABELS[item.update.recordKind],
+    creation: false,
     apply: async () => {
       const ledger = review.ledgers[item.update.recordKind];
       if (!ledger) throw new Error("台帳を開けませんでした。読み込み直してください。");
@@ -471,6 +485,39 @@ function settingsTargets(review: PendingSettingsReview): ApplyTarget[] {
     },
     discard: () => review.pendingStore.discard(item.update.filePath),
   }));
+}
+
+/**
+ * 反映・見送りを作品のログへ1行残す（0.101.13）。
+ *
+ * **成功も見送りも残す。** 2026-10-10、抽出の直後に人物6件が提案パネルから
+ * 書き換わったのに、`.aiwriter/logs/actions.log` に1行も無く、いつ・どの画面
+ * から押したのかが追えなかった。失敗だけは `logFailure` で残っていた。
+ *
+ * **記録の直前に書き先を向ける**（0.43.3 と同じ）。パネルの「反映する」は
+ * 押されるまで間があり、そのあいだにほかの機能が別の作品へ向け直している
+ * ことがある。
+ */
+function logVerdict(
+  work: WorkEntry,
+  target: ApplyTarget,
+  verdict: RecordUpdateVerdict,
+  via: RecordUpdateVia,
+  drop: { dropKeys?: readonly string[]; dropped?: number } = {}
+): void {
+  useLogFile(work.folderPath);
+  logLine(
+    describeRecordUpdateLog({
+      verdict,
+      kindLabel: target.kindLabel,
+      name: target.name,
+      diff: target.diff,
+      via,
+      creation: target.creation,
+      sourceLabel: pendingSourceLabel(target.source),
+      ...drop,
+    })
+  );
 }
 
 /**
@@ -498,6 +545,9 @@ function showInPanel(
       if (!target) return { ok: false, reason: "対象が見つかりません。" };
       try {
         const dropped = await target.apply(dropKeys ?? []);
+        // 1件ずつでも、まとめて適用・外部AIのまとめての承認でもここを通る。
+        // 件数の行はまとめの輪を持つパネル側が書く
+        logVerdict(work, target, "applied", "提案パネル", { dropKeys, dropped });
         // **黙って落としたことにしない**（CLAUDE.md 規則2）。
         // 何件が入らなかったのかを、その場で伝える
         if (dropped > 0) {
@@ -527,6 +577,7 @@ function showInPanel(
       if (!target) return { ok: false, reason: "対象が見つかりません。" };
       try {
         await target.discard();
+        logVerdict(work, target, "dismissed", "提案パネル");
         return { ok: true };
       } catch (error) {
         const message = errorText(error);
@@ -708,15 +759,16 @@ export async function applyPendingCharacterUpdates(
     return;
   }
 
-  await applyAll(chosen, unit, work.folderPath);
+  await applyAll(chosen, unit, work);
 }
 
 async function applyAll(
   targets: ApplyTarget[],
   unit: "人" | "件",
-  /** 失敗の記録の書き先（作品フォルダー） */
-  workFolder: string
+  /** 記録の書き先（作品フォルダー） */
+  work: WorkEntry
 ): Promise<void> {
+  const workFolder = work.folderPath;
   const applied: string[] = [];
   const failed: Array<{ name: string; message: string }> = [];
 
@@ -730,9 +782,12 @@ async function applyAll(
         try {
           await target.apply([]);
           applied.push(target.name);
+          // 提案パネルの道と同じ言い方で残す（`core/recordUpdateLog.ts`）
+          logVerdict(work, target, "applied", "確認ダイアログ");
         } catch (error) {
           // 1件の失敗で全体を止めない。何が反映できなかったかを最後にまとめて出す
           const message = errorText(error);
+          useLogFile(workFolder);
           logFailure("更新の反映に失敗", {
             対象: target.name,
             詳細: message,
@@ -741,6 +796,19 @@ async function applyAll(
         }
       }
     }
+  );
+
+  // 1件ずつの行のあとに件数の1行（提案パネルの「まとめて適用」と同じ形）
+  useLogFile(workFolder);
+  logLine(
+    describeRecordUpdateBatchLog({
+      category: "設定資料の更新",
+      verb: "適用",
+      applied: applied.length,
+      total: targets.length,
+      failed: failed.length,
+      via: "確認ダイアログ",
+    })
   );
 
   if (failed.length === 0) {

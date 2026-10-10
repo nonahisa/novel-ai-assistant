@@ -85,6 +85,10 @@ import {
 } from "./recheckProposal";
 import { logFailure, logLine, logStep, useLogFile } from "../core/logger";
 import {
+  batchVerbFromLabel,
+  describeRecordUpdateBatchLog,
+} from "../core/recordUpdateLog";
+import {
   askNotationAdvice,
   describeNotationAdvice,
 } from "./notationAdvice";
@@ -3302,6 +3306,10 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
     const applied = this.recordUpdates.filter(
       (entry) => entry.status === "applied"
     ).length;
+    // **件数の1行を作品のログへ**（0.101.13）。1件ずつの行は反映の口
+    // （`applyPendingUpdates.ts` の `showInPanel` など）が書く。まとめの輪は
+    // ここにしか無いので、何件のうち何件入ったかはここで書く
+    this.logBatch(targets, batchVerbFromLabel(targets[0].applyLabel), dropped);
     // **黙って落としたことにしない**（CLAUDE.md 規則2）。
     // 1件ずつのときと同じ「◯ 件を落と…」の形で添える
     void vscode.window.showInformationMessage(
@@ -3357,11 +3365,44 @@ export class ProposalPanel implements vscode.WebviewViewProvider {
         this.recordUpdates.find((entry) => entry.id === target.id)?.status ===
         "applied"
     ).length;
+    this.logBatch(targets, "承認", dropped, `${this.category}（外部AIから）`);
     // **黙って落としたことにしない**（CLAUDE.md 規則2）。入らなかった分も言う
     void vscode.window.showInformationMessage(
       `外部AIからの提案を ${applied}/${targets.length} 件承認しました` +
         (dropped > 0 ? `（${dropped} 件を落としました）` : "") +
         (applied < targets.length ? "。残りは一覧に理由が出ています。" : "。")
+    );
+  }
+
+  /**
+   * まとめて押したときの件数の1行を、作品のログへ残す（0.101.13）。
+   *
+   * **数えるのは今回押した分だけ。** 前に1件ずつ反映した行まで数えると、
+   * 「6/4件」のような読めない行になる。
+   */
+  private logBatch(
+    targets: readonly RecordUpdateViewItem[],
+    verb: string,
+    dropped: number,
+    category: string = this.category
+  ): void {
+    if (!this.work) return;
+    const statusOf = (id: string) =>
+      this.recordUpdates.find((entry) => entry.id === id)?.status;
+    const applied = targets.filter((target) => statusOf(target.id) === "applied").length;
+    const failed = targets.filter((target) => statusOf(target.id) === "failed").length;
+    // **記録の直前に書き先を向ける**（ほかの機能が別の作品へ向け直していることがある）
+    useLogFile(this.work.folderPath);
+    logLine(
+      describeRecordUpdateBatchLog({
+        category,
+        verb,
+        applied,
+        total: targets.length,
+        failed,
+        dropped,
+        via: "提案パネル",
+      })
     );
   }
 
