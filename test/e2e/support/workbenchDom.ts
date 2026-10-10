@@ -76,6 +76,22 @@ export async function tabIsDirty(page: Page, name: string): Promise<boolean> {
   );
 }
 
+/**
+ * 名前が `name` のタブを押して前に出す（作者がタブを押すのと同じ道）。
+ *
+ * クイックオープンで開き直す道は取らない——開き直すと、拡張機能の側の「開く」の
+ * 処理を通るので、「タブを前に出しただけ」の場面にならない
+ */
+export async function activateTab(page: Page, name: string): Promise<void> {
+  const tab = page
+    .locator(".tabs-container .tab")
+    .filter({ has: page.locator(".label-name", { hasText: name }) })
+    .first();
+  await tab.waitFor({ state: "visible", timeout: 10_000 });
+  await tab.click();
+  await waitUntil(async () => (await activeTabNames(page)).includes(name), `タブ「${name}」が前に出る`, 10_000);
+}
+
 /** 焦点のある列（グループ）の番号。左の列から 0, 1, … 。分からなければ -1 */
 export async function activeGroupIndex(page: Page): Promise<number> {
   return page.evaluate(() =>
@@ -398,7 +414,7 @@ export async function closeDialog(page: Page): Promise<void> {
 
 /** キーボード ショートカットの画面を開くキー。使う件は `LaunchOptions.keybindings` へ足す */
 export const OPEN_KEYBINDINGS_KEY = "ctrl+alt+shift+f4";
-const OPEN_KEYBINDINGS_PRESS = "Control+Alt+Shift+F4";
+export const OPEN_KEYBINDINGS_PRESS = "Control+Alt+Shift+F4";
 export const OPEN_KEYBINDINGS_BINDING = { key: OPEN_KEYBINDINGS_KEY, command: "workbench.action.openGlobalKeybindings" };
 
 /** 知らせを閉じるキー（VS Code での書き方）。keybindings.json へ書く */

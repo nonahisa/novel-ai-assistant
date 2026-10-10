@@ -184,3 +184,71 @@ export async function caretPosition(
     return { lineText: line.textContent ?? "", column: before.toString().length };
   });
 }
+
+/**
+ * 原稿エディターの面のうち、本文に `expected` を描いたものを待って返す。
+ *
+ * ウィンドウを再読み込みしたあとは面が新しく作り直されるので、前の面は使えない。
+ * そのとき探し直すのに使う（`openEpisode` と違い、開く操作はしない）
+ */
+export async function waitForManuscriptFrame(
+  page: Page,
+  expected: string,
+  label: string,
+  timeoutMs = 60_000
+): Promise<Frame> {
+  let found: Frame | undefined;
+  await waitUntil(
+    async () => {
+      for (const frame of await manuscriptFrames(page)) {
+        if ((await composeText(frame).catch(() => "")).includes(expected)) {
+          found = frame;
+          return true;
+        }
+      }
+      return false;
+    },
+    label,
+    timeoutMs
+  );
+  if (!found) throw new Error("原稿エディターの面が見つかりません");
+  return found;
+}
+
+/** 面の中の要素 `id` が `open` の印を持っているか（届かない知らせ `unsent`・控えの帯 `rescue`） */
+export async function classOpen(frame: Frame, id: string): Promise<boolean> {
+  return frame
+    .evaluate((elementId) => document.getElementById(elementId)?.classList.contains("open") === true, id)
+    .catch(() => false);
+}
+
+/** 控えの帯（「前回、原稿に入らなかった字があります」）の文 */
+export async function rescueBarText(frame: Frame): Promise<string> {
+  return frame.evaluate(() => document.getElementById("rescueText")?.textContent ?? "").catch(() => "");
+}
+
+/**
+ * 画面から拡張機能へ向かう「打った字の便」（edit）だけを、WebView の外側の枠で落とす。
+ *
+ * 拡張機能ホストが起動し直して受け手を失った画面（6.25.9）と同じく、便は送られるのに
+ * 返事が来ない形を作る。**製品には何も足さない**——VS Code の WebView の外側の枠
+ * （`pre/index.html`）は、内側の枠の `postMessage` を MessagePort で本体へ渡すので、
+ * テストの側からその枠の MessagePort をくるむ。画面の状態の書き込み（do-update-state）は
+ * 通すので、控えは本物どおり状態に残る。枠はウィンドウの再読み込みで作り直されるので、
+ * くるみも消える（拡張機能ホストの再起動では枠は作り直されないので、くるみは残る）
+ */
+export async function dropEditsToHost(frame: Frame): Promise<void> {
+  const outer = frame.parentFrame();
+  if (!outer) throw new Error("WebView の外側の枠が見つかりません");
+  await outer.evaluate(() => {
+    const proto = MessagePort.prototype as MessagePort & { __e2eDrop?: boolean };
+    if (proto.__e2eDrop) return;
+    proto.__e2eDrop = true;
+    const original = proto.postMessage;
+    proto.postMessage = function (this: MessagePort, ...args: unknown[]) {
+      const message = args[0] as { channel?: string; data?: { message?: { type?: string } } } | undefined;
+      if (message?.channel === "onmessage" && message.data?.message?.type === "edit") return;
+      return (original as (...rest: unknown[]) => void).apply(this, args);
+    } as typeof proto.postMessage;
+  });
+}
