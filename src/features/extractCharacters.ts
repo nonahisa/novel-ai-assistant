@@ -61,11 +61,10 @@ import {
 } from "../prompts/characterExtract";
 import { withAiTurnProgress } from "./aiTurn";
 import {
-  logFailure,
-  logLine,
-  logStep,
   showLog,
   useLogFile,
+  workLog,
+  type WorkLog,
 } from "../core/logger";
 import {
   describeExtractionCancelled,
@@ -630,7 +629,11 @@ export async function extractCharacters(
     困らないよう、書く直前にもう一度向ける）。
   */
   useLogFile(work.folderPath);
-  logStep(
+  // **ここから先の行は、この作品のログへ書き続ける**（`workLog`）。AIを待つ
+  // あいだに別の作品の画面が開かれると共有の書き先が向け直され、終わりの行が
+  // 別の作品のログへ紛れた（2026-10-10 の実機、窓2つ）
+  const log = workLog(work.folderPath);
+  log.step(
     `抽出を開始: ${work.title} / ${resolved.provider.displayName} / ` +
       `${resolved.model} / ${chunks.length}チャンク / ` +
       // **なぜこの大きさか**も残す。待ち時間に収めるために縮めた回
@@ -744,7 +747,7 @@ export async function extractCharacters(
 
         // 応答が返らないまま止まった場合、記録はこの行で終わる。
         // どのチャンクで止まったかが分かるようにしておく
-        logStep(`AIへ送信: ${done + 1}/${queue.length} ${label}`);
+        log.step(`AIへ送信: ${done + 1}/${queue.length} ${label}`);
         const startedAt = Date.now();
 
         // 既知の人物名を渡して同一人物判定を助ける。
@@ -816,14 +819,14 @@ export async function extractCharacters(
             rateLimitWaitHooks({
               sleep: (ms) => delay(ms, token),
               report: (message) => progress.report({ message }),
-              log: logStep,
+              log: log.step,
               position: () => `${done + 1}/${queue.length}`,
             })
           );
 
           // 応答が返った時点で接続は生きている。連続失敗の数え直し
           consecutiveConnectivityFailures = 0;
-          logStep(
+          log.step(
             `応答を受信: ${done + 1}/${queue.length} ${label} ` +
               `（${Math.round((Date.now() - startedAt) / 1000)}秒）`
           );
@@ -876,7 +879,7 @@ export async function extractCharacters(
                 queue.splice(rest, 1, ...smaller);
                 presplit++;
               }
-              logStep(
+              log.step(
                 `出力上限のため ${describeChunk(chunk)} を ${split.length}件へ分け直します` +
                   (presplit > 0
                     ? `（同じ大きさの残り ${presplit}件も先に分けます）`
@@ -940,7 +943,7 @@ export async function extractCharacters(
               // 切り詰められたときと同じく、**いま処理中の位置の直後へ挿す**
               // （末尾へ回すと、その話だけ渡される既知名が変わる）
               queue.splice(position + 1, 0, ...retry.parts);
-              logStep(`${describeChunk(chunk)}: ${retry.note}`);
+              log.step(`${describeChunk(chunk)}: ${retry.note}`);
               done++;
               continue;
             }
@@ -951,7 +954,7 @@ export async function extractCharacters(
           }
 
           failures.push(
-            toExtractionFailure(chunk, e, {
+            toExtractionFailure(log, chunk, e, {
               provider: resolved.provider.displayName,
               model: resolved.model,
             })
@@ -978,7 +981,7 @@ export async function extractCharacters(
         done++;
       }
 
-      logStep(
+      log.step(
         `チャンクの処理を終了: ${done}/${queue.length} ` +
           `（失敗 ${failures.length}件${cancelled ? " / 中止された" : ""}）`
       );
@@ -996,7 +999,7 @@ export async function extractCharacters(
     // **中止も記録に残す**（作者の裁定、2026-09-19）。知らせは消えるので、
     // 「押したのに資料が増えていない」の理由が後から追えなくなる
     useLogFile(work.folderPath);
-    logStep(describeExtractionCancelled());
+    log.step(describeExtractionCancelled());
     notifyDone(
       "設定資料の抽出を中止しました。完了済みの処理は次回再利用されます。"
     );
@@ -1085,7 +1088,7 @@ export async function extractCharacters(
         );
         await offerSeriesCharacterMatches(work, newCharacters);
       } catch (error) {
-        logStep(
+        log.step(
           "シリーズの人物候補を出せませんでした: " +
             (error instanceof Error ? error.message : String(error))
         );
@@ -1148,7 +1151,7 @@ export async function extractCharacters(
   // 能力・場所を保存する。人物の保存が終わってから行うのは、
   // 人物側で保存を中止した場合に設定だけ書き込まれるのを避けるため。
   let settingsNotice = settingsNoticePrefix;
-  /** 指示文として落とした決まり。**中身は操作ログにだけ残す**（下の logStep） */
+  /** 指示文として落とした決まり。**中身は操作ログにだけ残す**（下の log.step） */
   let echoedRules: string[] = [];
   /** 以前の抽出で保存されていた指示文。**今回落とした分とは分けて記録する** */
   let staleRules: string[] = [];
@@ -1177,7 +1180,7 @@ export async function extractCharacters(
     ある（行で追えることが、ログでは効く）。
   */
   useLogFile(work.folderPath);
-  logStep(
+  log.step(
     describeExtractionLog({
       added: baseCounts.added,
       updated: baseCounts.updated,
@@ -1199,7 +1202,7 @@ export async function extractCharacters(
     すぐ分かる。
   */
   if (echoedRules.length > 0) {
-    logStep(
+    log.step(
       `能力の決まりから、AIへの指示文がそのまま返ってきた ${echoedRules.length}件を外しました:\n` +
         echoedRules.map((rule) => `  ${rule}`).join("\n")
     );
@@ -1211,7 +1214,7 @@ export async function extractCharacters(
     件数が出ている」ようにしか見えず、掃除が済んだのかどうかが分からない。
   */
   if (staleRules.length > 0) {
-    logStep(
+    log.step(
       `能力の決まりに前から入っていた指示文 ${staleRules.length}件を、保存のときに外しました:\n` +
         staleRules.map((rule) => `  ${rule}`).join("\n")
     );
@@ -1223,7 +1226,7 @@ export async function extractCharacters(
     あとから「誰を落としたのか」を確かめる手立ては、ここにしかない。
   */
   const narratorLog = describeRejectedNarratorsForLog(baseCounts.rejected);
-  if (narratorLog) logStep(narratorLog);
+  if (narratorLog) log.step(narratorLog);
 
   const summary = buildExtractionSummary(baseCounts) + settingsNotice;
   // いま画面へ出す断りに入った呼び名を覚える（次回から出さない）。
@@ -1311,7 +1314,7 @@ export async function extractCharacters(
         offerSeparationRetraction(work, loaded.characters, updatedIds)
       )
       .catch((error: unknown) =>
-        logStep(
+        log.step(
           "分けた記録の取り下げを訊けませんでした: " +
             (error instanceof Error ? error.message : String(error))
         )
@@ -1330,7 +1333,7 @@ export async function extractCharacters(
     try {
       await writeExtractedIndex(work, await readEpisodeContents(work));
     } catch (error) {
-      logLine(
+      log.line(
         `取り込んだ話の記録を書けませんでした: ${
           error instanceof Error ? error.message : String(error)
         }`
@@ -1420,6 +1423,8 @@ function hasSpecificMessage(kind: AIError["kind"]): boolean {
 }
 
 function toExtractionFailure(
+  /** 処理の始めに作品へ束ねた記録係（途中で別の作品へ紛れないように） */
+  log: WorkLog,
   chunk: Chunk,
   error: unknown,
   /**
@@ -1434,7 +1439,7 @@ function toExtractionFailure(
 ): ExtractionFailure {
   // 通知には出さない技術的な内容をログへ残す。
   // これが無いと、作者は「利用できませんでした」だけを見て手詰まりになる
-  logFailure("AI呼び出しの失敗", {
+  log.failure("AI呼び出しの失敗", {
     ファイル: describeChunk(chunk),
     使用中のAI: used ? `${used.provider} / ${used.model}` : "不明",
     種別: error instanceof AIError ? error.kind : "不明",

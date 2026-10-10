@@ -67,9 +67,9 @@ import { confirmRun } from "../views/notify";
 import { confirmFormatFit } from "./formatFitPrompt";
 import {
   logFailure,
-  logStep,
   responseExcerptForLog,
   useLogFile,
+  workLog,
 } from "../core/logger";
 
 /**
@@ -168,6 +168,9 @@ export async function checkDeviations(
   options: CheckDeviationsOptions = {}
 ): Promise<DeviationRunResult | undefined> {
   useLogFile(work.folderPath);
+  // 以後の行はこの作品のログへ書き続ける（AIを待つあいだに別の作品の画面が
+  // 開かれても紛れない。`workLog` の説明、2026-10-10 の実機）
+  const log = workLog(work.folderPath);
 
   // 短編集・SNS記事では、話が続かないので「プロットからの逸脱」が成り立たない
   if (!(await confirmFormatFit(work, "plotReverse"))) return undefined;
@@ -214,7 +217,7 @@ export async function checkDeviations(
   const plotTrimmedNote = plotTrim.trimmed
     ? describePlotTrim(plotText.length, plot.length)
     : undefined;
-  if (plotTrimmedNote) logStep(`プロット逸脱検知：${plotTrimmedNote}`);
+  if (plotTrimmedNote) log.step(`プロット逸脱検知：${plotTrimmedNote}`);
 
   const cache = new ChunkCache(work);
   await cache.load();
@@ -291,7 +294,7 @@ export async function checkDeviations(
       // まとめ実行が先に1回だけ確認している（設計書6.80）。
       // **飛ばした中身はログへ残す**——「小さめのモデルではほとんど働きません」
       // という実測に基づく断りは、この確認の中にしか書かれていない
-      logStep(`プロット逸脱検知：まとめ実行のため確認を省略\n${detail}`);
+      log.step(`プロット逸脱検知：まとめ実行のため確認を省略\n${detail}`);
     } else {
       const confirmed = await confirmRun(
         `${work.title} のプロット逸脱を検知します。`,
@@ -302,7 +305,7 @@ export async function checkDeviations(
     }
   }
 
-  logStep(
+  log.step(
     `プロット逸脱検知を開始: ${work.title} / ${resolved.provider.displayName} / ` +
       `${resolved.model}（${describeCapability(capabilityInput, capability, "deviation")}） / ` +
       `${episodes.length}話 / v${DEVIATION_CHECK_VERSION}`
@@ -476,14 +479,14 @@ export async function checkDeviations(
           const reason =
             truncationReasonForLog(response) ?? "応答を読み取れません";
           if (salvaged) {
-            logStep(
+            log.step(
               `プロット逸脱検知（${episode.label}）：${reason}。` +
                 "閉じられるところまでで読みました（この話の結果は覚えず、次の実行で送り直します）。"
             );
             return salvaged;
           }
           failedChunks++;
-          logFailure("プロット逸脱検知", {
+          log.failure("プロット逸脱検知", {
             話: episode.label,
             理由: reason,
             // 末尾の空白は落として残す。空白で埋まった回は、そのままだと
@@ -496,7 +499,7 @@ export async function checkDeviations(
             return undefined;
           }
           failedChunks++;
-          logFailure("プロット逸脱検知", {
+          log.failure("プロット逸脱検知", {
             話: episode.label,
             詳細:
               error instanceof AIError
@@ -526,7 +529,7 @@ export async function checkDeviations(
     走らせずに戻り、ループの `break` も関数の外へは抜けないため、
     どの経路でも「そこまで何話見たか」が残る。
   */
-  logStep(
+  log.step(
     `プロット逸脱検知を終了: ${episodesDone}/${pending.length}` +
       `（失敗 ${failedChunks}件 / 指摘 ${accepted.length}件` +
       ` / 検証で除外 ${rejectedCount}件` +

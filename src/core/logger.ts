@@ -53,10 +53,47 @@ export function setFallbackLogRoot(rootPath: string): void {
  * **作品が分かるなら作品の下、分からないなら拡張機能の保管庫**である。
  */
 export function useLogFile(workFolderPath: string | undefined): void {
+  logFilePath = resolveLogFilePath(workFolderPath);
+}
+
+function resolveLogFilePath(
+  workFolderPath: string | undefined
+): string | undefined {
   const root = workFolderPath ?? fallbackLogRoot;
-  logFilePath = root
-    ? path.join(root, ".aiwriter", "logs", "actions.log")
-    : undefined;
+  return root ? path.join(root, ".aiwriter", "logs", "actions.log") : undefined;
+}
+
+/** 書き先を束ねた記録係（`workLog`） */
+export interface WorkLog {
+  line(message: string): void;
+  step(message: string): void;
+  failure(context: string, detail: Record<string, unknown>): void;
+}
+
+/**
+ * **書き先を、呼んだ時点の作品に固定した記録係**を返す。
+ *
+ * `useLogFile` の書き先は拡張機能の中で1つの共有の値で、どの操作でも
+ * 向け直せる。短い操作はそれで足りるが、**AIを何十秒も待つ長い処理**では、
+ * 待っているあいだに作者が別の作品の画面を開くと共有の値が向け直され、
+ * 処理の残りの行が**別の作品のログへ紛れる**（2026-10-10 の実機：
+ * 「ハイエルフ未亡人」の抽出を中止した「チャンクの処理を終了: 0/4」の行が、
+ * 直前に触っていた「肉片とラジオと心霊現象」のログに入り、本来の作品の
+ * ログには残らなかった）。
+ *
+ * 長い処理は始めにこれで作品を決め、以後の行はこの記録係から書く。
+ * **共有の値には触らない**——触ると、同時に動いているほかの操作の行が
+ * 今度はこちらの作品へ紛れる。作品が決まらないとき（`undefined`）の
+ * 保管庫も、**束ねた時点で**決める。
+ */
+export function workLog(workFolderPath: string | undefined): WorkLog {
+  const target = resolveLogFilePath(workFolderPath);
+  const line = (message: string): void => writeLine(message, target);
+  return {
+    line,
+    step: line,
+    failure: (context, detail) => line(formatFailure(context, detail)),
+  };
 }
 
 /**
@@ -70,8 +107,7 @@ export function useLogFile(workFolderPath: string | undefined): void {
  */
 const MAX_ACTION_LOG_BYTES = 1_000_000;
 
-function appendToFile(text: string): void {
-  const target = logFilePath;
+function appendToFile(text: string, target: string | undefined): void {
   if (!target) return;
 
   // 失敗しても本来の処理は止めない。ログが書けないことより、
@@ -142,9 +178,14 @@ export function formatLogTime(now: Date = new Date()): string {
 }
 
 export function logLine(message: string): void {
+  // 書き先は**呼ばれた瞬間の**共有の値で決まる（長い処理は `workLog` を使う）
+  writeLine(message, logFilePath);
+}
+
+function writeLine(message: string, target: string | undefined): void {
   const line = `[${formatLogTime()}] ${redactSecrets(message)}`;
   outputChannel().appendLine(line);
-  appendToFile(line);
+  appendToFile(line, target);
 }
 
 /**
@@ -216,12 +257,19 @@ export function logFailure(
   context: string,
   detail: Record<string, unknown>
 ): void {
+  logLine(formatFailure(context, detail));
+}
+
+function formatFailure(
+  context: string,
+  detail: Record<string, unknown>
+): string {
   const lines = [`--- ${context} ---`];
   for (const [key, value] of Object.entries(detail)) {
     if (value === undefined || value === null || value === "") continue;
     lines.push(`  ${key}: ${String(value)}`);
   }
-  logLine(lines.join("\n"));
+  return lines.join("\n");
 }
 
 /**

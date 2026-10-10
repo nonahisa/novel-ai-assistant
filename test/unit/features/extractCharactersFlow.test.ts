@@ -99,7 +99,14 @@ vi.mock("../../../src/ai/registry", () => ({
  * 更新0名」で終わった回に、除外や失敗のせいなのか、本当に増えるものが
  * 無かったのかを、あとから区別できなかった。
  */
-const loggedSteps = vi.hoisted(() => ({ lines: [] as string[] }));
+const loggedSteps = vi.hoisted(() => ({
+  lines: [] as string[],
+  /**
+   * 作品へ束ねた記録係（`workLog`）から書かれた行と、その書き先の作品。
+   * 共有の書き先（`logStep`）から書かれた行はここに入らない
+   */
+  bound: [] as { folder: string | undefined; message: string }[],
+}));
 
 vi.mock("../../../src/core/logger", () => ({
   logStep: vi.fn((message: string) => loggedSteps.lines.push(message)),
@@ -107,6 +114,13 @@ vi.mock("../../../src/core/logger", () => ({
   logFailure: vi.fn(),
   showLog: vi.fn(),
   useLogFile: vi.fn(),
+  workLog: vi.fn((folder: string | undefined) => {
+    const write = (message: string): void => {
+      loggedSteps.lines.push(message);
+      loggedSteps.bound.push({ folder, message });
+    };
+    return { line: write, step: write, failure: vi.fn() };
+  }),
 }));
 
 vi.mock("../../../src/core/scanner", () => ({
@@ -933,6 +947,41 @@ describe("人物抽出フロー", () => {
     state.generate.mockResolvedValue(successfulResult("灯"));
 
     await expect(extractCharacters(work, testRegistry())).resolves.toBe("done");
+  });
+
+  /*
+    2026-10-10 の実機（窓2つ）：「ハイエルフ未亡人_確認用」の抽出を中止した
+    「チャンクの処理を終了: 0/4（中止された）」が、直前に触っていた別の作品
+    「肉片とラジオと心霊現象」のログへ入り、本来の作品のログには残らなかった。
+    ログの共有の書き先は、AIを待つあいだに別の作品の画面が開かれると
+    向け直される。開始から終了までの行は、始めに決めた作品へ束ねて書く
+  */
+  test("AIを待つあいだに書き先が別の作品へ向いても、開始から終了までの行は抽出した作品のログへ書く", async () => {
+    Object.assign(window, {
+      showInformationMessage: vi.fn(async () => "実行"),
+      showWarningMessage: vi.fn(async () => undefined),
+      showErrorMessage: vi.fn(async () => undefined),
+      withProgress: vi.fn(async (_options, task) =>
+        task(
+          { report: vi.fn() },
+          { isCancellationRequested: false, onCancellationRequested: vi.fn() }
+        )
+      ),
+    });
+    loggedSteps.lines = [];
+    loggedSteps.bound = [];
+    state.generate.mockResolvedValue(successfulResult("灯"));
+
+    await extractCharacters(work, testRegistry());
+
+    const boundTo = (needle: string) =>
+      loggedSteps.bound.filter((entry) => entry.message.includes(needle));
+    for (const needle of ["抽出を開始", "AIへ送信", "応答を受信", "チャンクの処理を終了"]) {
+      const folders = boundTo(needle).map((entry) => entry.folder);
+      // 書かない実装で満点にしない
+      expect(folders.length, needle).toBeGreaterThan(0);
+      expect(new Set(folders), needle).toEqual(new Set([work.folderPath]));
+    }
   });
 
   // 以前は真偽で false を返し、取りやめも「失敗しました」と内訳に出ていた
