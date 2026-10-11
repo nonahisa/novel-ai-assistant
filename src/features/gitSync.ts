@@ -999,28 +999,52 @@ export class GitSyncMonitor implements vscode.Disposable {
   /**
    * 取り込む（作者の操作が起点）。
    *
-   * @param afterRecording 未記録の変更を記録したあとの呼び直しか。
-   *   **記録 → 取り込みの往復は1回まで**にする。記録しても `dirty` が
-   *   消えないとき（`.gitignore` で追えないもの、権限で書けないもの）に、
-   *   同じ問いを延々と出さないためである。
+   * 未記録の変更が残っていて取り込めないときは、［記録してから取り込む］を
+   * 訊いて**答えを待たずに `false` で戻る**（2026-10-11、0.103.5）。押されたら
+   * `recordThenPull` が改めて旗を立てて続ける。
    */
-  async pull(work: WorkEntry, afterRecording = false): Promise<boolean> {
+  async pull(work: WorkEntry): Promise<boolean> {
+    return await this.countedPull(work, () => this.runPull(work, false));
+  }
+
+  /**
+   * 未記録の変更を記録してから、もう一度だけ取り込む（問いの答えから呼ぶ）。
+   *
+   * **記録 → 取り込みの往復は1回まで**にする（`runPull` に `afterRecording` を
+   * 渡す）。記録しても `dirty` が消えないとき（`.gitignore` で追えないもの、
+   * 権限で書けないもの）に、同じ問いを延々と出さないためである。
+   */
+  private async recordThenPull(work: WorkEntry): Promise<boolean> {
+    return await this.countedPull(work, async () => {
+      if (!(await this.recordBeforePull(work))) return false;
+      return await this.runPull(work, true);
+    });
+  }
+
+  /**
+   * 取り込みの旗を立てて `operation` を走らせ、終わりに置き場ぜんぶを数え直す。
+   *
+   * **記録も旗の中で行う。** 記録は git commit を書くので、送り直しと重ねない。
+   * 送り直しが走っていれば、それが終わるのを待ってから始める。
+   */
+  private async countedPull(
+    work: WorkEntry,
+    operation: () => Promise<boolean>
+  ): Promise<boolean> {
     // 走っている間は自動の送り直しを控えさせる（`isOperating`）
     this.operating += 1;
     try {
       await this.waitBeforeOperation();
-      return await this.runPull(work, afterRecording);
+      return await operation();
     } finally {
-      // **成否にかかわらず、一番外の呼び出しの終わりに1回だけ置き場ぜんぶを
-      // 数え直す**（2026-10-05）。途中で「取り込む前の自動保存」を記録してから
+      // **成否にかかわらず、終わりに1回だけ置き場ぜんぶを数え直す**
+      // （2026-10-05）。途中で「取り込む前の自動保存」を記録してから
       // 取り込みが失敗で終わると、コミットは済んでいるのに古い「未記録」が
       // 残っていた。git の中しか変わらないので、見張りの合図も来ない
-      if (!afterRecording) {
-        try {
-          await this.refreshRoot(work, { fetch: false, notify: false });
-        } catch {
-          // 数え直しの失敗で取り込みの結果を覆さない（次の契機で読み直す）
-        }
+      try {
+        await this.refreshRoot(work, { fetch: false, notify: false });
+      } catch {
+        // 数え直しの失敗で取り込みの結果を覆さない（次の契機で読み直す）
       }
       this.operating -= 1;
     }
@@ -1100,15 +1124,23 @@ export class GitSyncMonitor implements vscode.Disposable {
         );
         return false;
       }
-      const answer = await vscode.window.showWarningMessage(
-        describeDirtyPull(work.title, readAutoResendSettings().enabled !== false),
-        RECORD_THEN_PULL,
-        "閉じる"
+      // **答えを待たずに戻る**（2026-10-11、0.103.5）。待つと、作者が押さずに
+      // ベルへ畳んだ間じゅう取り込みの旗（`isOperating`）と、取り込みの
+      // コマンドの札（「同期の操作が走っている」）が立ったままになり、
+      // 自動の送り直しが見送り続ける（0.103.2 の開いたときの点検と同じ形）。
+      // 押されたら、改めて旗を立てて記録 → 取り込みへ進む
+      whenNoticePicked(
+        vscode.window.showWarningMessage(
+          describeDirtyPull(work.title, readAutoResendSettings().enabled !== false),
+          RECORD_THEN_PULL,
+          "閉じる"
+        ),
+        async (answer) => {
+          if (answer === RECORD_THEN_PULL) await this.recordThenPull(work);
+        },
+        { label: "取り込む前の記録の問い", workFolder: work.folderPath }
       );
-      if (answer !== RECORD_THEN_PULL) return false;
-      if (!(await this.recordBeforePull(work))) return false;
-      // 記録できた。**もう一度だけ**取り込みへ行く
-      return await this.pull(work, true);
+      return false;
     }
 
     if (result.failure.kind === "diverged") {
@@ -1186,12 +1218,19 @@ ${reason}` : ""}`,
         作品: work.title,
         詳細: committed.detail ?? "",
       });
-      const action = await vscode.window.showErrorMessage(
-        `「${work.title}」の変更を記録できませんでした。`,
-        "ログを表示",
-        "閉じる"
+      // **ボタンを待たない**（2026-10-11、0.103.5）。ここは取り込みの旗
+      // （`isOperating`）の中なので、待つと作者が閉じるまで送り直しが控え続ける
+      whenNoticePicked(
+        vscode.window.showErrorMessage(
+          `「${work.title}」の変更を記録できませんでした。`,
+          "ログを表示",
+          "閉じる"
+        ),
+        (action) => {
+          if (action === "ログを表示") showLog();
+        },
+        { label: "取り込む前の記録の失敗の案内", workFolder: work.folderPath }
       );
-      if (action === "ログを表示") showLog();
       return false;
     }
     return true;
