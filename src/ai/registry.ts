@@ -26,6 +26,23 @@ import { EXPERTS_BADGE } from "../core/modelExperts";
 import { notifyDone } from "../views/notify";
 import { manualModelEntryPrompt } from "./hiddenModels";
 import { verifiedState } from "../core/verifiedMemento";
+import { imageSupportFor, type ImageSupport } from "./imageInput";
+
+/**
+ * モデルの行の説明へ、写真を読めるかを添える（設計書6.117.4）。
+ * 写真を求めない選び方（`support` が undefined）では元の説明のまま。
+ */
+export function imageNoteFor(
+  support: ImageSupport | undefined,
+  detail: string | undefined
+): string | undefined {
+  if (!support || support.kind === "yes") return detail;
+  const note =
+    support.kind === "no"
+      ? `$(circle-slash) 写真を送れません：${support.reason}`
+      : `$(question) ${support.note}`;
+  return detail ? `${note}　${detail}` : note;
+}
 
 const KEY_PROVIDER = "novelai.ai.provider";
 const KEY_MODEL = "novelai.ai.model";
@@ -63,7 +80,13 @@ export type AssignableFeature =
   | "deviation" // プロットからの逸脱
   | "foreshadow" // 伏線の検知（配置と回収。どちらも同じ台帳を見る）
   | "generate" // あらすじ・紹介文・キャッチコピー・更新告知・プロット逆算・冒頭診断・感情曲線・読者像の読み取り・適合度・ターゲットシートの助言
-  | "chat"; // 相談（相談パネル・設定の相談・検索語の生成・独り言・推敲の指摘の［AIに相談］）
+  | "chat" // 相談（相談パネル・設定の相談・検索語の生成・独り言・推敲の指摘の［AIに相談］）
+  /*
+    写真の書き起こし（P-48。設計書6.117）。**写真を読めるAIでないと動かない**
+    ので、ほかの機能と相乗りさせない（相乗りすると、相談のために選んだ文字だけの
+    AIへ写真を回すことになる）。
+  */
+  | "transcribe";
 
 /**
  * 機能の表示名。**画面に出す名前はここだけが持つ。**
@@ -79,6 +102,7 @@ export const ASSIGNABLE_FEATURE_LABELS: Record<AssignableFeature, string> = {
   foreshadow: "伏線の検知",
   generate: "あらすじ・紹介文・キャッチコピーなど",
   chat: "AIに相談",
+  transcribe: "写真の書き起こし",
 };
 
 /** 選択画面に並べる順。重い（＝手元AIの効きが大きい）ものから */
@@ -92,6 +116,7 @@ export const ASSIGNABLE_FEATURES: AssignableFeature[] = [
   "foreshadow",
   "generate",
   "chat",
+  "transcribe",
 ];
 
 export interface FeatureAssignment {
@@ -442,9 +467,19 @@ export interface ProviderAndModelPick {
  * 割り当てるのか）は呼び出し側が決める。
  */
 export async function pickProviderAndModel(
-  registry: AIRegistry
+  registry: AIRegistry,
+  options: {
+    /**
+     * `"image"` なら、写真を読めないプロバイダ・モデルの行に理由を添え、
+     * 選んだら理由を出して戻る（写真の書き起こし。設計書6.117.4）。
+     * **選ぶ手順を2つ書かないために、ここへ引数で足す**（二重実装すると
+     * 鍵・接続・生成の確かめの片方だけが直る）
+     */
+    requires?: "image";
+  } = {}
 ): Promise<ProviderAndModelPick | undefined> {
   const providers = registry.listProviders();
+  const needsImage = options.requires === "image";
 
   const providerDescriptions: Partial<Record<ProviderId, string>> = {
     ollama: "無料・オフライン可。ローカル実行",
@@ -463,11 +498,17 @@ export async function pickProviderAndModel(
 
   const providerPick = await vscode.window.showQuickPick(
     [
-      ...providers.map((p) => ({
-        label: p.displayName,
-        description: providerDescriptions[p.id],
-        providerId: p.id,
-      })),
+      ...providers.map((p) => {
+        const support = needsImage ? imageSupportFor(p.id) : undefined;
+        return {
+          label: p.displayName,
+          description: providerDescriptions[p.id],
+          // 写真を読めないものも消さずに並べ、理由を添える（設計書5.8の「消さずに理由を出す」）
+          detail:
+            support?.kind === "no" ? `$(circle-slash) 写真を送れません：${support.reason}` : undefined,
+          providerId: p.id,
+        };
+      }),
       // **取りやめる道を画面に出す。** Escでも閉じられるが、
       // それを知らない人には出口が無いように見える（作者の指摘、2026-08-21）
       cancelItem(),
@@ -480,6 +521,16 @@ export async function pickProviderAndModel(
   if (!providerPick || !("providerId" in providerPick)) return undefined;
 
   const provider = registry.getProvider(providerPick.providerId)!;
+
+  if (needsImage) {
+    const support = imageSupportFor(provider.id);
+    if (support.kind === "no") {
+      void vscode.window.showWarningMessage(
+        `${provider.displayName} は写真の書き起こしに使えません。${support.reason}`
+      );
+      return undefined;
+    }
+  }
 
   // APIキーが要るプロバイダは、接続テストの前に入力してもらう
   if (isApiKeyProvider(provider)) {
@@ -618,10 +669,13 @@ export async function pickProviderAndModel(
           .join(" / "),
         // 小さいモデルの行に注意は添えない（作者の裁定 2026-10-10 朝、A11）。
         // 検知に向くモデルは、相談パネルで訊かれたときだけ答える（`core/chatModelNotes.ts`）
-        detail: modelPickDetail(
-          m.capabilities,
-          tuningTable.get(modelTuningKey(providerPick.providerId, m.id)),
-          m.experts
+        detail: imageNoteFor(
+          needsImage ? imageSupportFor(providerPick.providerId, m) : undefined,
+          modelPickDetail(
+            m.capabilities,
+            tuningTable.get(modelTuningKey(providerPick.providerId, m.id)),
+            m.experts
+          )
         ),
         model: m,
       })),
@@ -670,6 +724,16 @@ export async function pickProviderAndModel(
     chosenModel = named;
   } else {
     return undefined;
+  }
+
+  if (needsImage) {
+    const support = imageSupportFor(providerPick.providerId, chosenModel);
+    if (support.kind === "no") {
+      void vscode.window.showWarningMessage(
+        `${chosenModel.displayName} は写真の書き起こしに使えません。${support.reason}`
+      );
+      return undefined;
+    }
   }
 
   // **生成を試す前に、LM Studioへモデルを読み込ませる。**

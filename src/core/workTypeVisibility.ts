@@ -264,6 +264,8 @@ export const COMMAND_FEATURES: Readonly<Record<string, WorkFeature>> = {
   "novelai.addEmphasis": "allTypes",
   // 口述の整文（設計書6.83）。声で書くことに、作品のタイプは関わらない
   "novelai.dictationClean": "allTypes",
+  // 写真から原稿を起こす（設計書6.117）。手で書くことに、作品のタイプは関わらない
+  "novelai.transcribePhotos": "allTypes",
   "novelai.openSceneMemos": "allTypes",
   "novelai.addSceneMemo": "allTypes",
   "novelai.nextSceneMemo": "allTypes",

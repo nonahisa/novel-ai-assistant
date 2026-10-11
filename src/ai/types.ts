@@ -76,11 +76,40 @@ export interface ModelInfo {
    * **undefined は「分からない」であって「部品を分けていない」ではない。**
    */
   experts?: ModelExperts;
+  /**
+   * 写真（画像）を読めるとAIが申告しているか（設計書6.117.4）。
+   * **undefined は「申告が無い・取れなかった」であって「読めない」ではない。**
+   *
+   * 入れるのは申告を返すものだけ：Ollama（`capabilities` の `vision`）、
+   * LM Studio（`/api/v0/models` の `type` が `vlm`）、Claude
+   * （`capabilities.image_input.supported`）。判定は `ai/imageInput.ts` が1か所で持つ。
+   */
+  imageInput?: boolean;
+}
+
+/**
+ * AIへ渡す画像1枚（設計書6.117）。
+ *
+ * **base64 は `data:` の頭を付けない素のもの**（Ollama はこの形しか受けない。
+ * 頭が要る口〈OpenAI互換〉は送る直前に付ける）。
+ */
+export interface ImageInput {
+  /** `image/jpeg`・`image/png`・`image/webp` */
+  readonly mimeType: string;
+  readonly base64: string;
 }
 
 export interface GenerateParams {
   systemPrompt: string;
   userPrompt: string;
+  /**
+   * 依頼文と一緒に渡す画像（写真の書き起こし。設計書6.117）。**渡さなければ従来どおり。**
+   *
+   * 送り方はプロバイダごとに違うので、組み立ては `ai/imageInput.ts` の関数が持つ。
+   * **画像を送る口を持たないプロバイダは、黙って捨てずに失敗にする**
+   * （`rejectImagesIfAny`）——捨てると写真を見ないまま作文が返る。
+   */
+  images?: readonly ImageInput[];
   model: string;
   temperature: number;
   /** 実際に使うコンテキスト長。Ollamaでは num_ctx として渡す */

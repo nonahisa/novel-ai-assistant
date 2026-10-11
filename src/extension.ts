@@ -4592,6 +4592,29 @@ export async function activate(
     )
   );
 
+  context.subscriptions.push(
+    /*
+      写真から原稿を起こす（設計書6.117）。画面は作品ごとに1枚。
+      新しい話を足したときの後始末（一覧・執筆量の基準・原稿エディターで開く）は
+      「新しい話を作る」と同じものを渡す
+    */
+    registerCommand("novelai.transcribePhotos", async (node?: WorkNode | EpisodeNode) => {
+      const work =
+        node instanceof EpisodeNode
+          ? node.work
+          : await resolveWork(node as WorkNode | undefined, registry);
+      if (!work) return;
+      const { openPhotoTranscribe } = await import("./features/photoTranscribe.js");
+      await openPhotoTranscribe(context, work, aiRegistry, {
+        refreshTree: (target) => treeProvider.refresh(target.id),
+        rebaseline: (target) => progress.rebaseline(target),
+        openEpisode: async (target, filePath) => {
+          await openManuscriptFile(filePath, manuscriptViewTypeFor(await readWorkKind(target)));
+        },
+      });
+    })
+  );
+
   // ─── AI関連コマンド ───
 
   context.subscriptions.push(

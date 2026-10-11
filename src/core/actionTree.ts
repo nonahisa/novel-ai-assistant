@@ -1359,6 +1359,25 @@ export const ACTION_TREE: readonly ActionGroup[] = [
               "・Windows：Win+H／macOS：fnキー2回\n\n" +
               "言葉は足さない・削らない・言い換えない。",
           },
+          // **手で書いた分を、写真から下書きにする**（設計書6.117）。口述の隣に
+          // 置く——どちらも、原稿エディターの外で書いたものを本文へ入れる道具
+          {
+            kind: "action",
+            command: "novelai.transcribePhotos",
+            // 狭いサイドバーで切れないよう9字に収める（`menuLabelWidth.test.ts`）。
+            // コマンドパレットの名前は「写真から書き起こし（手書き）」
+            label: "写真から書き起こし",
+            note: "手書き",
+            icon: "device-camera",
+            requiresWork: true,
+            usesAI: true,
+            detail:
+              "手書きのノートを撮った写真を、AIに一字一句書き起こさせる\n\n" +
+              "・写真ごとに向きを直し、見開きは左右に切ってから送る\n\n" +
+              "・外のAIへ送るときは、送る前に毎回確かめる\n\n" +
+              "・読めない字は〓。写真と並べて直してから、新しい話として保存するか、開いている話へ差し込む\n\n" +
+              "挿入の印や取り消し線の扱いはAIに決めさせない。",
+          },
           {
             kind: "action",
             command: "novelai.addRuby",

@@ -39,16 +39,30 @@ export async function assignFeatureAI(
 ): Promise<void> {
   const feature = await pickFeature(registry, verdicts);
   if (!feature) return;
+  await assignOneFeatureAI(registry, feature);
+}
 
+/**
+ * 1つの機能の割当だけを変える（機能を選ぶ段を飛ばす）。
+ *
+ * 写真の書き起こしの画面の［AIを選ぶ］が使う（設計書6.117.2）。
+ * 機能別AI割当と同じ手順・同じ知らせにする（2つ目の実装を書かない）。
+ *
+ * @returns 割当を変えたか（既定へ戻したときも true）
+ */
+export async function assignOneFeatureAI(
+  registry: AIRegistry,
+  feature: AssignableFeature
+): Promise<boolean> {
   const target = await pickTarget(registry, feature);
-  if (!target) return;
+  if (!target) return false;
 
   if (target === "default") {
     await registry.unassign(feature);
     notifyDone(
       `${ASSIGNABLE_FEATURE_LABELS[feature]} は、AI設定で選んだ既定のAIで実行するようにしました。`
     );
-    return;
+    return true;
   }
 
   await registry.assign(feature, target.providerId, target.model.id);
@@ -79,6 +93,7 @@ export async function assignFeatureAI(
       `${target.provider.displayName}（${target.model.displayName}）で実行するようにしました。` +
       (notes.length > 0 ? "\n" + notes.join("\n") : "")
   );
+  return true;
 }
 
 /**
@@ -193,5 +208,9 @@ async function pickTarget(
   if (!choice || !("action" in choice)) return undefined;
   if (choice.action === "default") return "default";
 
-  return await pickProviderAndModel(registry);
+  // 写真の書き起こしは、写真を読めるAIだけを選ばせる（設計書6.117.4）
+  return await pickProviderAndModel(
+    registry,
+    feature === "transcribe" ? { requires: "image" } : {}
+  );
 }

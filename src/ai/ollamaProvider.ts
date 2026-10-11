@@ -26,6 +26,7 @@ import { OUTPUT_RESERVE_TOKENS } from "./contextGuard";
 import { resolveFeatureOutputCap } from "./outputLimit";
 import { featureOutputTuningRaw } from "../core/featureOutputTokens";
 import { withOutputMargin } from "../core/outputCeiling";
+import { ollamaUserMessage } from "./imageInput";
 
 /**
  * 流す道の締め切り（`OllamaProvider.outputDeadline`）。
@@ -511,6 +512,10 @@ export class OllamaProvider implements AIProvider {
       ),
       parameterSize,
       capabilities: res.capabilities ?? [],
+      // 写真を読めるか（設計書6.117.4）。申告が無ければ「分からない」のまま
+      ...(res.capabilities && res.capabilities.length > 0
+        ? { imageInput: res.capabilities.includes("vision") }
+        : {}),
       tier: inferTier(parameterSize, "ollama"),
       // 取れた行にだけ置く。`undefined` を常に置くと、写しを作る側
       // （LM Studioの `describe`）が「持っている」と読み違える
@@ -696,7 +701,8 @@ export class OllamaProvider implements AIProvider {
       stream: false,
       messages: [
         { role: "system", content: params.systemPrompt },
-        { role: "user", content: params.userPrompt },
+        // 写真があれば `images` に載せる（設計書6.117。無ければ従来どおり）
+        ollamaUserMessage(params.userPrompt, params.images),
       ],
       options,
     };

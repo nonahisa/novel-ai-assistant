@@ -8,6 +8,7 @@ import { verifiedState } from "../core/verifiedMemento";
 import { resolveTimeoutMs } from "../core/modelTuning";
 import { isWebRuntime } from "../core/runtime";
 import { hashText } from "../core/hash";
+import { claudeUserContent } from "./imageInput";
 
 /**
  * Claude（Anthropic API）アダプタ。
@@ -314,7 +315,10 @@ export class ClaudeProvider implements ApiKeyProvider {
         model: params.model,
         max_tokens: maxTokens,
         system: params.systemPrompt,
-        messages: [{ role: "user", content: params.userPrompt }],
+        // 写真があれば文より前に並べる（設計書6.117。無ければ従来どおり文字列）
+        messages: [
+          { role: "user", content: claudeUserContent(params.userPrompt, params.images) },
+        ],
       };
       let outputConfig: Record<string, unknown> | undefined;
       if (claudeSchema && support.jsonSchema) {
@@ -571,6 +575,10 @@ function toModelInfo(m: ClaudeModel): ModelInfo {
     // クラウドモデルはパラメータ数を公開していない
     parameterSize: null,
     capabilities: describeCapabilities(m.capabilities),
+    // 写真を読めるか（設計書6.117.4）。申告の欄が無ければ「分からない」のまま
+    ...(m.capabilities?.image_input?.supported !== undefined
+      ? { imageInput: m.capabilities.image_input.supported }
+      : {}),
     tier: inferTier(null, "claude"),
   };
 }
