@@ -271,6 +271,12 @@ export async function quickOpen(page: Page, fileName: string): Promise<void> {
     2話目を開こうとして、入力欄が出ないまま30秒待って落ちた。パレット（`runCommand`）と同じく、
     パネルが開き終わる途中で焦点が移ることもあるので、出なければ3回まで押し直す
   */
+  /*
+    **打った字が入力欄に入ったことを確かめ、閉じていたら押し直す。** WebView のタブを押した直後に
+    押すと、入力欄は一度開くが、遅れて届いた WebView への焦点の移動で字を打つ前に閉じる。母艦
+    （0.104.2、1.141.0）の `manuscriptFootNarrow` で単独3回とも、入力欄が閉じ・値が空のまま
+    候補を30秒待って落ちた（2026-10-12）
+  */
   const input = page.locator(".quick-input-widget input").first();
   for (let attempt = 1; ; attempt++) {
     await pressWorkbenchKey(page, "Control+KeyP");
@@ -278,16 +284,33 @@ export async function quickOpen(page: Page, fileName: string): Promise<void> {
       .waitFor({ state: "visible", timeout: 5_000 })
       .then(() => true)
       .catch(() => false);
-    if (shown) break;
-    if (attempt === 3) throw new Error(`Ctrl+P のファイル検索の入力欄が出ません（「${fileName}」を開こうとして、3回押しました）`);
+    if (shown) {
+      await page.keyboard.insertText(fileName);
+      const typed = await waitUntil(
+        async () => (await input.isVisible()) && (await input.inputValue()) === fileName,
+        "Ctrl+P の入力欄に打った名前が入る",
+        2_000
+      )
+        .then(() => true)
+        .catch(() => false);
+      if (typed) break;
+      // 開いたままの入力欄で Ctrl+P を押すと候補送りになるので、閉じてから押し直す
+      if (await input.isVisible().catch(() => false)) await page.keyboard.press("Escape");
+    }
+    if (attempt === 3) {
+      const value = await input.inputValue().catch(() => "?");
+      throw new Error(
+        `Ctrl+P のファイル検索の入力欄が出ないか、字を打つ前に閉じます（「${fileName}」を開こうとして3回押しました。最後の入力欄の値 ${JSON.stringify(value)}）`
+      );
+    }
   }
-  await page.keyboard.insertText(fileName);
   await page
     .locator(".quick-input-widget .monaco-list-row", { hasText: fileName })
     .first()
     .waitFor({ state: "visible" })
-    .catch((error: unknown) => {
-      throw new Error(`Ctrl+P の候補に「${fileName}」が出ません（${String(error)}）`);
+    .catch(async (error: unknown) => {
+      const rows = await page.locator(".quick-input-widget .monaco-list-row").allInnerTexts().catch(() => []);
+      throw new Error(`Ctrl+P の候補に「${fileName}」が出ません（出ている候補 ${JSON.stringify(rows)}）（${String(error)}）`);
     });
   await page.keyboard.press("Enter");
   await input.waitFor({ state: "hidden" }).catch((error: unknown) => {
