@@ -11,7 +11,7 @@
  */
 import type { Frame, Page } from "playwright-core";
 import { waitUntil } from "./wait";
-import { quickOpen } from "./workbenchDom";
+import { quickOpen, webviewLayer, webviewLayers, type WebviewLayer } from "./workbenchDom";
 
 /** 原稿エディターの面（`#surface` を持つ）を全部。2枚目ができていないかを数えるのにも使う */
 export async function manuscriptFrames(page: Page): Promise<Frame[]> {
@@ -212,6 +212,47 @@ export async function waitForManuscriptFrame(
     timeoutMs
   );
   if (!found) throw new Error("原稿エディターの面が見つかりません");
+  return found;
+}
+
+/**
+ * WebView の面（内側の枠）が、本体の画面でどう見えているか（`webviewLayer`）。
+ * 前に出ているか・重なっている列・その列の見えている幅が分かる
+ */
+export async function frameLayer(page: Page, frame: Frame): Promise<WebviewLayer> {
+  const outer = frame.parentFrame();
+  if (!outer) return { inFront: false, groupIndex: -1, visibleWidth: 0, detail: "WebView の外側の枠が無い" };
+  return webviewLayer(page, outer.name());
+}
+
+/**
+ * 原稿エディターの面のうち、本文に `marker` を描いていて、**しかも前に出ている**ものを待って返す。
+ *
+ * `waitForManuscriptFrame` は「面がある」ことしか見ない。原稿エディターは裏に回っても面が残る
+ * （`retainContextWhenHidden`）ので、話を移るキーやタブの切り替えのあとに使うと、移る前から
+ * あった裏の面を即座に返す。その面を押すと、前にある面の iframe が押下を受け止めて
+ * 30秒押し直す（ノートPC・1.141.0、2026-10-11 の `neighborKeys`）。
+ * 時間切れのときは、面と iframe の重なりを文に添える
+ */
+export async function frontFrameShowing(page: Page, marker: string, label: string, timeoutMs = 20_000): Promise<Frame> {
+  let found: Frame | undefined;
+  await waitUntil(
+    async () => {
+      for (const frame of await manuscriptFrames(page)) {
+        if (!(await composeText(frame).catch(() => "")).includes(marker)) continue;
+        if ((await frameLayer(page, frame).catch(() => undefined))?.inFront) {
+          found = frame;
+          return true;
+        }
+      }
+      return false;
+    },
+    label,
+    timeoutMs
+  ).catch(async (error: unknown) => {
+    throw new Error(`${String(error)}（WebView の重なり：${JSON.stringify(await webviewLayers(page))}）`);
+  });
+  if (!found) throw new Error(`${label}：面が見つかりません`);
   return found;
 }
 

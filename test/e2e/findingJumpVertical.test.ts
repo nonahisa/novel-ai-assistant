@@ -21,7 +21,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
-import { caretPosition, composeText, manuscriptFrames, openEpisode, selectionCollapsed } from "./support/manuscriptFrame";
+import { caretPosition, composeText, frameLayer, manuscriptFrames, openEpisode, selectionCollapsed } from "./support/manuscriptFrame";
 import { OPEN_PROPOSALS_LAUNCH, OPEN_PROPOSALS_PRESS, proposalPanelFrame, writeSampleFinding } from "./support/sampleFinding";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
@@ -32,6 +32,7 @@ import {
   editorGroupTabs,
   pressWorkbenchKey,
   tabNamesInclude,
+  webviewLayers,
 } from "./support/workbenchDom";
 
 const OPENED = "001_朝.txt";
@@ -129,8 +130,33 @@ async function openProposals(page: Page): Promise<(fileName: string) => Promise<
   if (!found) throw new Error("提案パネルが見つかりません");
   const proposals = found;
   return async (fileName: string) => {
-    await proposals.locator('.location[data-action="jump"]', { hasText: fileName }).first().click();
+    /*
+      **押す前に、提案パネルが前に出ていることを確かめる。** パネルは裏に回っても中身が残る
+      （retainContextWhenHidden）ので、Playwright は裏のパネルの行も見つけ、押すと前にある
+      別の WebView の iframe が押下を受け止めて30秒押し直す（ノートPC・1.141.0、2026-10-11。
+      2回目の「001_朝.txt 61行目」で落ちた）。**パネルのタブを押して前へ戻すことはしない**——
+      作者は話へ飛んだあと、そのままパネルの次の行を押す。話がパネルの列へ開いてパネルを
+      隠したのなら、それは製品の不具合（6.25.11・`columnForLocation`）なので、ここで落として
+      列とタブ・WebView の重なりを文に出す
+    */
+    await waitUntil(async () => (await frameLayer(page, proposals).catch(() => undefined))?.inFront === true, `「${fileName}」の場所を押す前に、提案パネルが前に出ている`, 15_000).catch(
+      async (error: unknown) => {
+        throw new Error(`${String(error)}${await layoutDetail(page)}`);
+      }
+    );
+    await proposals
+      .locator('.location[data-action="jump"]', { hasText: fileName })
+      .first()
+      .click({ timeout: 15_000 })
+      .catch(async (error: unknown) => {
+        throw new Error(`「${fileName}」の場所を押せません：${String(error).split("\n")[0]}${await layoutDetail(page)}`);
+      });
   };
+}
+
+/** 失敗の文へ添える、列とタブ・WebView の重なり */
+async function layoutDetail(page: Page): Promise<string> {
+  return `（列とタブ：${JSON.stringify(await editorGroupTabs(page).catch(() => []))}／WebView の重なり：${JSON.stringify(await webviewLayers(page))}）`;
 }
 
 /** `marker` の話の面で、カーソルが `target` の行に来るまで待って面を返す */

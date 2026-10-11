@@ -15,7 +15,7 @@
  */
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
-import { footText, openEpisode } from "./support/manuscriptFrame";
+import { footText, frameLayer, openEpisode } from "./support/manuscriptFrame";
 import {
   OPEN_PROPOSALS_LAUNCH,
   OPEN_PROPOSALS_PRESS,
@@ -24,7 +24,14 @@ import {
 } from "./support/sampleFinding";
 import { withVsCode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
-import { clearNotifications, pressWorkbenchKey } from "./support/workbenchDom";
+import {
+  activateTab,
+  clearNotifications,
+  editorGroupTabs,
+  pressWorkbenchKey,
+  tabNamesInclude,
+  webviewLayers,
+} from "./support/workbenchDom";
 
 const EPISODE = "001_駅.txt";
 const SECOND = "002_つづき.txt";
@@ -42,18 +49,17 @@ interface Measure {
   bottomMaxWidth: string;
 }
 
-/** いま前に出ている列（原稿エディターを開いた列）が、窓の中で見えている幅 */
-async function visibleWidth(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const active = document.querySelector(".editor-group-container.active") ?? document.querySelector(".editor-group-container");
-    if (!active) return 0;
-    const box = active.getBoundingClientRect();
-    return Math.min(box.width, window.innerWidth - box.left);
-  });
-}
-
+/**
+ * 原稿エディターの面が窓の中で見えている幅を、**その面が重なっている列**で測る。
+ *
+ * 以前は焦点のある列（`.editor-group-container.active`）を測っていた。ノートPC（1.141.0、
+ * 2026-10-11）で「見える幅 220px／面の幅 220px」と落ちた——220px は列の最小幅で、どこかの列が
+ * 窓の外へ押し出されていたのに、測った列は窓に収まっていた。焦点が左の列へ移った瞬間に
+ * 測ると、第2話の列でない列を測る（1.141.0 では焦点の列が揺れる。`checkOpensMemoPanel` と同じ）。
+ * WebView の iframe は列の DOM の中に無いので、iframe の場所から列を引き当てる（`webviewLayer`）
+ */
 async function measure(page: Page, frame: Frame): Promise<Measure> {
-  const width = await visibleWidth(page);
+  const width = (await frameLayer(page, frame)).visibleWidth;
   const inside = await frame.evaluate((visible) => {
     const overflowing: string[] = [];
     document.querySelectorAll("#bottom > *, #foot > *").forEach((element) => {
@@ -100,7 +106,21 @@ test("狭い窓で、原稿エディターの下の段は右で切れずに折�
       // ことがある（ノートPC、2026-10-10 にこの件が時間切れで落ちた。ほかの件と同じ押し方にそろえる）
       await pressWorkbenchKey(page, OPEN_PROPOSALS_PRESS);
       await waitUntil(async () => (await proposalPanelFrame(page)) !== undefined, "提案パネルが開く", 15_000);
+      /*
+        2話目は**提案パネルの列**（右の列）に開きたい。クイックオープンは焦点のある列へ開くので、
+        開く前にパネルのタブを押してその列へ焦点を置く（パネルは焦点を取って開くが、1.141.0 では
+        焦点の列が揺れ、左の列へ開くと写真と違う並び〔右の列が切れない形〕になる）
+      */
+      await activateTab(page, "提案");
       const frame = await openEpisode(page, SECOND, "二話目の本文");
+      // 前提の崩れを黙って測らない：2話目が提案パネルと同じ、いちばん右の列にあること
+      const groups = await editorGroupTabs(page);
+      const secondColumn = groups.findIndex((tabs) => tabNamesInclude(tabs, SECOND));
+      const panelColumn = groups.findIndex((tabs) => tabNamesInclude(tabs, "提案"));
+      expect(
+        secondColumn === panelColumn && secondColumn === groups.length - 1,
+        `2話目が提案パネルのある右の列に開いていません（列とタブ：${JSON.stringify(groups)}）`
+      ).toBe(true);
       await waitUntil(async () => (await footText(frame, "counts")).includes("このファイル"), "下段に字数が出る", 15_000);
 
       let last: Measure | undefined;
@@ -113,7 +133,7 @@ test("狭い窓で、原稿エディターの下の段は右で切れずに折�
         10_000
       ).catch(() => undefined);
       const result = last as Measure;
-      const detail = `見える幅 ${result.width}px／面の幅 ${result.frameWidth}px`;
+      const detail = `見える幅 ${result.width}px／面の幅 ${result.frameWidth}px／列とタブ：${JSON.stringify(await editorGroupTabs(page))}／WebView の重なり：${JSON.stringify(await webviewLayers(page))}`;
 
       // 写真と同じ形：列の右端が窓の外へ出て、見える幅が面の幅より狭い
       expect(result.width, `写真と同じ形になっていません（${detail}）`).toBeLessThan(result.frameWidth);
@@ -142,7 +162,18 @@ test("列そのものが狭いときも、字数の行は「／」の区切り�
     async (session) => {
       const { page } = session;
       const frame = await openEpisode(page, EPISODE, "零時を指していた");
-      await waitUntil(async () => (await footText(frame, "counts")).includes("このファイル"), "下段に字数が出る", 15_000);
+      /*
+        **作品の合計が届くまで待つ。** 下段の字数は2便に分かれて届く——「このファイル」は開いて
+        すぐの count、「作品」「この話で今日」は全話を数え終えてからの counts
+        （`manuscriptEditor.ts` の `sendFootCounts`）。「このファイル」が出た瞬間に塊を数えると、
+        遅い機械では「このファイル」「表示倍率」の2つしか無い（ノートPC・1.141.0、2026-10-11 の
+        「expected 2 to be greater than or equal to 3」。10-10 の manuscriptFootKind も同じ形）
+      */
+      await waitUntil(async () => (await footText(frame, "counts")).includes("作品 "), "下段に作品の合計の字数が出る", 30_000).catch(
+        async (error: unknown) => {
+          throw new Error(`${String(error)}（いまの下段：「${await footText(frame, "counts")}」）`);
+        }
+      );
 
       const wide = await frame.evaluate(() => {
         const pieces = Array.from(document.querySelectorAll("#counts > span"));
