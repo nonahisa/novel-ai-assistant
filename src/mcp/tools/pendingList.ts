@@ -48,6 +48,7 @@ import {
 import { PARSERS as RECORD_PARSERS, SUBDIRS as RECORD_SUBDIRS } from "./proposeRecord";
 import { DEFAULT_FINDINGS_RETENTION_DAYS } from "../../core/findingPanelState";
 import { findingList, type FindingListResult } from "./findingList";
+import { listNarratorMovesFs, type NarratorMoveListResult } from "./narratorMoveFiles";
 
 /**
  * 承認待ちの更新案を読む（`pending.list`。0.85.1、作者の承認 2026-09-24）。
@@ -198,6 +199,14 @@ export interface PendingListResult {
   unreadable: Array<{ file: string; message: string }>;
   /** 台帳が読めず、その種類の案の組み立てを見合わせているもの */
   blocked: Array<{ recordKind: SettingsKind; ledgerFiles: string[] }>;
+  /**
+   * 語り手の取り違えの移す案（`.aiwriter/pending-moves/`。設計書6.5.12、0.102.12）。
+   * 提案パネルでは人物の案・人物以外の案のあとに並ぶ。**形が人物の案と違う**
+   * （「どの値を主人公からどの人物へ」だけを持ち、書き換え後の姿を持たない）ので、
+   * `items` には混ぜず別に返す。件数は `total`・`counts` に入れない。
+   * 人物以外の種類（`kind`）や出どころ（`source`）で絞ったときは空
+   */
+  narratorMoves: NarratorMoveListResult;
   nextStep: string;
   note: string;
 }
@@ -241,6 +250,13 @@ export function pendingList(input: PendingListInput): PendingListResult {
       (!input.source || item.source === input.source)
   );
 
+  // 移す案は人物の案の一種。出どころの欄を持たない（積むのは抽出の終わり）ので、
+  // 出どころで絞ったときは返さない
+  const narratorMoves: NarratorMoveListResult =
+    (!input.kind || input.kind === "character") && !input.source
+      ? listNarratorMovesFs(input.folder)
+      : { total: 0, items: [], unreadable: [], blockedBy: [] };
+
   return {
     total: ordered.length + unreadable.length,
     counts,
@@ -250,11 +266,13 @@ export function pendingList(input: PendingListInput): PendingListResult {
     items: matching.slice(0, limit),
     unreadable,
     blocked,
+    narratorMoves,
     nextStep:
       "採否は作者が VS Code の詳細メニュー「設定資料更新分反映」（または提案パネル）で決めます。",
     note:
       "読むだけです。承認・見送り・古い案の片付けはしていません。" +
-      "組み立ては提案パネルと同じ関数を通しています（差分は、いまの台帳と取り込んだあとの比較）。",
+      "組み立ては提案パネルと同じ関数を通しています（差分は、いまの台帳と取り込んだあとの比較）。" +
+      "移す案（narratorMoves）は、移し先を選ぶ口が提案パネルにしか無いため、ここからは反映も見送りもできません。",
   };
 }
 

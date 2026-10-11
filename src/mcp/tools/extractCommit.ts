@@ -76,6 +76,7 @@ import {
   readExtractEnrichStash,
   staleReasonOf,
 } from "./extractEnrichStash";
+import { stageNarratorMovesFs, type NarratorMoveStagingResult } from "./narratorMoveFiles";
 
 /**
  * 外部AIが行った設定資料の抽出を、**拡張機能の［設定資料を抽出］と同じ形で**
@@ -87,6 +88,8 @@ import {
  *
  *   新しい資料 → その場で保存（承認は要らない）
  *   既存の人物への変更 → 承認待ち（`.aiwriter/pending-characters/`）
+ *   主人公の資料に入った語り手の取り違え → 移す案の承認待ち（`.aiwriter/pending-moves/`。
+ *     0.102.12 から。`narratorMoveFiles.ts`）
  *
  * と分けている。ここも同じ線を引く。**既存のファイルは1バイトも変えない**
  * ——新しいファイルは `wx`（新規作成だけ）で作り、同じ名前が既にあれば
@@ -206,6 +209,12 @@ export interface ExtractCommitResult {
    */
   unplacedNarrators?: Array<{ firstPerson: string; candidates: string[] }>;
   conflicts: number;
+  /**
+   * 語り手の取り違えの移す案（設計書6.5.12。0.102.12）。保存のあとに台帳の
+   * 主人公を見て、疑う値があれば `.aiwriter/pending-moves/` へ積んだ（dryRun は
+   * 積む予定の）もの。移し先を選んで反映するのは作者（提案パネル）
+   */
+  narratorMoves: NarratorMoveStagingResult;
   /** 読み取れた能力の総称と決まり。**保存していない** */
   abilitySystem: { abilityTerm: string | null; rules: string[] };
   /** 貯め場所（抽出の答えと、まとめ）を消したか */
@@ -305,8 +314,19 @@ export function extractCommit(input: ExtractCommitInput): ExtractCommitResult {
     clearExtractEnrichStash(input.folder);
   }
 
+  /*
+    **移す案は、書き終えたあとの台帳から積む**（製品の［設定資料を抽出］の終わりと
+    同じ。`stageNarratorMovesAfterExtraction`）。今回作った人物も移し先の候補に
+    入るよう、書いたあとで台帳を読み直す。`planExtractCommit` には入れない——
+    まとめ直しのプロンプト（`settingsEnrich` の fromExtract）もそこを通るので、
+    プロンプトを組むたびに積んでしまう。
+    **積み損ねても貯め場所は残さない**（移す案は台帳から作り直せる。抽出の答えとは独立）
+  */
+  const narratorMoves = stageNarratorMovesFs(input.folder, { dryRun });
+
   const createdCount = countOf(created);
   const pendingCount = countOf(pending);
+  const movesStaged = narratorMoves.staged.length;
   return {
     dryRun,
     replayedChunks: chunks.length,
@@ -330,6 +350,7 @@ export function extractCommit(input: ExtractCommitInput): ExtractCommitResult {
       result.settingsMerge.locationMerge.conflicts.length +
       result.settingsMerge.organizationMerge.conflicts.length +
       result.settingsMerge.worldMerge.conflicts.length,
+    narratorMoves,
     abilitySystem: {
       abilityTerm: result.abilityTerm,
       rules: result.abilityRules,
@@ -345,8 +366,10 @@ export function extractCommit(input: ExtractCommitInput): ExtractCommitResult {
     },
     ...(materials ? { materials } : {}),
     nextStep:
-      pendingCount > 0 && !dryRun
-        ? "既存の記録への変更は承認待ちです。VS Code の詳細メニュー「設定資料更新分反映」で採否を決めます。"
+      (pendingCount > 0 || movesStaged > 0) && !dryRun
+        ? "既存の記録への変更" +
+          (movesStaged > 0 ? "と、語り手の取り違えの移す案" : "") +
+          "は承認待ちです。VS Code の詳細メニュー「設定資料更新分反映」（提案パネル）で採否を決めます。"
         : dryRun
           ? "dryRun です。何も書いていません。dryRun を外すと、この内訳で保存します。"
           : "新しい資料を保存しました。VS Code の設定資料パネルで確かめられます。",
@@ -356,7 +379,8 @@ export function extractCommit(input: ExtractCommitInput): ExtractCommitResult {
       "既存の能力・場所・組織・世界観への変更も承認待ちです（拡張機能はそのまま保存します）。" +
       "能力体系（総称・決まり）は保存していません（abilitySystem に読み取れたものを載せています）。" +
       "まとめ（settingsEnrich の fromExtract で貯めたもの）は新しい人物の本体の欄にだけ入れ、" +
-      "性格・口調の面と話ごとの値（changes）はそのまま残します。",
+      "性格・口調の面と話ごとの値（changes）はそのまま残します。" +
+      "主人公の資料に、ほかの語り手の場面から入った疑いのある値があれば、移す案を承認待ち（.aiwriter/pending-moves/）へ積みます（narratorMoves。移し先は作者が提案パネルで選びます）。",
   };
 }
 
