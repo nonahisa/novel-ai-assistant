@@ -36,10 +36,27 @@ vi.mock("../../../src/core/retrievalCorpus", async (importOriginal) => {
   };
 });
 
-const { abortSignalOf, buildVectorIndexCore, buildVectorIndexForWorks } = await import(
-  "../../../src/features/vectorSearch"
-);
-const { CancellationTokenSource } = await import("vscode");
+/*
+  画面から押す1作品の索引づくり（`buildVectorIndex`）は、最初に Ollama の埋め込みが
+  使えるかを確かめる。その確かめだけを「使える」と答える作り物にする（本物の Ollama は
+  叩かない）。ほかの件は作り物の口を直に渡すので、この差し替えの影響を受けない
+*/
+vi.mock("../../../src/ai/ollamaEmbedding", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../../src/ai/ollamaEmbedding")>();
+  return {
+    ...original,
+    OllamaEmbeddingProvider: class {
+      async check() {
+        return { ok: true };
+      }
+    },
+  };
+});
+
+const { abortSignalOf, buildVectorIndex, buildVectorIndexCore, buildVectorIndexForWorks } =
+  await import("../../../src/features/vectorSearch");
+const { CancellationTokenSource, window } = await import("vscode");
+const { cancelRunningTask } = await import("../../../src/views/progress");
 
 function workOf(title: string): WorkEntry {
   return {
@@ -182,6 +199,64 @@ describe("索引づくりは同時に1つ（順番待ち）", () => {
     const rows = await outside;
     expect(corpusCalls).toEqual(["星の町", "海の駅", "森の家"]);
     expect(rows.map((row) => row.status)).toEqual(["failed", "failed"]);
+  });
+
+  /**
+   * 画面の「検索索引作成／更新」（1作品）を、外部AIの索引づくりの最中に押した形
+   * （実機確認リスト 0.99.20「後から来たほうが右下に『順番待ち：…』と出て、…待っている間に
+   * 中止を押すと『中止』で返り、…1作品なら『何も作っていません』と出る」。
+   * 2026-10-11 作者の指示「機械でできる実機確認」）。
+   *
+   * 進捗と中止ボタンは本物（`withCancellableProgress` と、［中止］が呼ぶ `cancelRunningTask`）。
+   */
+  test("画面の1作品の索引づくりは、待っている間は右下に順番待ちと出て、［中止］で何も作らずに終わる", async () => {
+    const progressed: string[] = [];
+    const informed: string[] = [];
+    const originalProgress = window.withProgress;
+    const originalInfo = window.showInformationMessage;
+    window.withProgress = (async (
+      _options: unknown,
+      task: (progress: { report(value: { message?: string }): void }, token: unknown) => unknown
+    ) =>
+      task(
+        {
+          report: (value) => {
+            if (value.message) progressed.push(value.message);
+          },
+        },
+        { isCancellationRequested: false }
+      )) as typeof window.withProgress;
+    window.showInformationMessage = (async (message: string) => {
+      informed.push(message);
+      return undefined;
+    }) as typeof window.showInformationMessage;
+    try {
+      // 先に外部AIからの索引づくりが走っている
+      const outside = buildVectorIndexCore(workOf("星の町"), provider, {
+        isCancelled: () => false,
+        report: () => undefined,
+      });
+      await settle();
+
+      const screen = buildVectorIndex(workOf("海の駅"));
+      for (let i = 0; i < 20 && progressed.length === 0; i++) await settle();
+      expect(progressed).toContain("順番待ち：ほかの索引づくりが終わるまで待っています");
+      expect(corpusCalls).toEqual(["星の町"]);
+
+      // 待っている最中に、右下の［中止］を押す
+      await cancelRunningTask();
+      expect(await screen).toBeUndefined();
+      expect(informed).toEqual([
+        "索引づくりを中止しました（順番待ちのあいだに止めたので、何も作っていません）。",
+      ]);
+      // 待っていた作品は材料集めにも入っていない。先の索引づくりは続く
+      expect(corpusCalls).toEqual(["星の町"]);
+      await finish("星の町");
+      await outside;
+    } finally {
+      window.withProgress = originalProgress;
+      window.showInformationMessage = originalInfo;
+    }
   });
 
   test("全作品の索引づくりを待っている間に中止すると、残りは「中止」の行になる（失敗と数えない）", async () => {

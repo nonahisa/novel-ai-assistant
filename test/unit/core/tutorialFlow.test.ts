@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   runTutorialFlow,
   stepNeedsWork,
@@ -10,7 +11,11 @@ import {
   type TutorialStepChoice,
 } from "../../../src/core/tutorialFlow";
 import { CHECK_CANCELLED } from "../../../src/core/proofreadingSuite";
-import type { TutorialStepInput } from "../../../src/core/tutorialStepList";
+import {
+  buildTutorialStepItems,
+  type TutorialStepInput,
+  type TutorialStepMark,
+} from "../../../src/core/tutorialStepList";
 
 /**
  * はじめの案内の流れ（設計書6.90.7）。
@@ -427,6 +432,103 @@ describe("飛ばす", () => {
 
     expect(calls.filter((c) => c === "askStep")).toHaveLength(2);
     expect(calls.some((c) => c.startsWith("run:"))).toBe(false);
+  });
+});
+
+/**
+ * 段の印（実機確認リスト 0.99.20「段の行を選ぶと操作が開き、戻ると同じ一覧に『開いた』の印」
+ * 「チェックのボタンで『飛ばした』の印」「全部の段に印が付くと説明文が変わる・もう一度開くと
+ * 印は消えている」。2026-10-11 作者の指示「機械でできる実機確認」）。
+ *
+ * 一覧の行の組み立て（印の文・`allMarked`）は `tutorialStepList.test.ts` が見ている。
+ * ここでは**流れが一覧へ渡す印**——開いた段・飛ばした段が、戻った一覧に付いているか、
+ * 案内を開き直すと消えているか——を見る。
+ */
+describe("段の印は、戻った一覧に付き、開き直すと消える", () => {
+  /** 一覧を出すたびに、そのとき渡された印を写し取る偽の画面 */
+  function markRecorder(script: { steps: TutorialStepChoice[]; after?: TutorialAfterStep[] }) {
+    const seen: Array<Map<string, TutorialStepMark>> = [];
+    const ran: string[] = [];
+    const steps = [...script.steps];
+    const after = [...(script.after ?? [])];
+    let goalAsked = false;
+    const ports: TutorialFlowPorts<TutorialFlowGoal, Work> = {
+      askGoal: async () => {
+        // 目的は1回だけ選ぶ。一覧から「選び直す」で戻ったら、そこで終える
+        if (goalAsked) return undefined;
+        goalAsked = true;
+        return goal([resume, plot]);
+      },
+      openGuide: async () => undefined,
+      hasWork: () => true,
+      pickWork: async () => ({ id: "w" }),
+      askStep: async (_goal, marks) => {
+        seen.push(new Map(marks));
+        return steps.shift();
+      },
+      runStep: async (step) => {
+        ran.push(step.command);
+        return undefined;
+      },
+      notifyOpened: async () => after.shift(),
+      log: () => undefined,
+    };
+    return { ports, seen, ran };
+  }
+
+  test("開いた段は、［はじめの案内に戻る］で戻った一覧に「開いた」の印が付いて、次の段を選べる", async () => {
+    const { ports, seen, ran } = markRecorder({
+      steps: [{ step: resume, action: "open" }, { step: plot, action: "open" }],
+      after: ["back", "finish"],
+    });
+
+    await runTutorialFlow(ports);
+
+    expect(ran).toEqual(["novelai.resumeWriting", "novelai.generatePlot"]);
+    expect(seen[0].size).toBe(0);
+    expect(seen[1].get("novelai.resumeWriting")).toBe("opened");
+    // 戻った一覧で次の段（プロット逆算）を選べて、それも動いた
+    expect(seen[1].has("novelai.generatePlot")).toBe(false);
+  });
+
+  test("飛ばした段は、操作を起こさずに「飛ばした」の印が付いて一覧に戻る", async () => {
+    const { ports, seen, ran } = markRecorder({
+      steps: [{ step: resume, action: "skip" }, undefined],
+    });
+
+    await runTutorialFlow(ports);
+
+    expect(ran).toEqual([]);
+    expect(seen).toHaveLength(2);
+    expect(seen[1].get("novelai.resumeWriting")).toBe("skipped");
+  });
+
+  test("全部の段に印が付くと一覧は「全部」と言い、Esc（選ばずに閉じる）で終わり、開き直すと印は消えている", async () => {
+    const first = markRecorder({
+      steps: [
+        { step: resume, action: "open" },
+        { step: plot, action: "skip" },
+        // 全部に印が付いた一覧を Esc で閉じる
+        undefined,
+      ],
+      after: ["back"],
+    });
+    await runTutorialFlow(first.ports);
+
+    const last = first.seen[first.seen.length - 1];
+    expect(
+      buildTutorialStepItems({ steps: [resume, plot], later: [], marks: last }).allMarked
+    ).toBe(true);
+    // 一覧の説明文は、全部に印が付いたときだけ「全部の段に印が付きました」に変わる
+    const panel = readFileSync("src/features/writerDiagnosis.ts", "utf8");
+    expect(panel).toMatch(
+      /list\.allMarked\s*\?\s*"全部の段に印が付きました。終えるときは「案内を終える」を選んでください"/
+    );
+
+    // もう一度案内を開くと、最初の一覧に印は無い（印は案内を開いている間だけ持つ）
+    const again = markRecorder({ steps: [undefined] });
+    await runTutorialFlow(again.ports);
+    expect(again.seen[0].size).toBe(0);
   });
 });
 

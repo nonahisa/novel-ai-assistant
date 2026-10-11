@@ -909,6 +909,53 @@ describe("AIプロバイダ境界", () => {
     expect(messageCalls).toBe(2);
   });
 
+  /**
+   * 上の件は呼んだ回数だけを見ている。**2回目で本当に思考の無効化を外したか**と、
+   * 通った組み合わせを覚えて次から最初から外すかを、送った中身で見る
+   * （実機確認リスト G 節「思考の無効化（disableThinking）で400が返ったとき、1回だけ外して
+   * 再試行できるか」。2026-10-11 作者の指示「機械でできる実機確認」）。
+   */
+  test("Claudeは思考の無効化を400で断られたら、それだけを外して1回だけ送り直し、次からは外して送る", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes("/v1/models/")) {
+        return jsonResponse(claudeModel);
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      sent.push(body);
+      if ("thinking" in body) {
+        return jsonResponse(
+          {
+            type: "error",
+            error: { type: "invalid_request_error", message: "thinking is unsupported" },
+          },
+          400
+        );
+      }
+      return jsonResponse(claudeMessage("ok"));
+    }));
+
+    const provider = new ClaudeProvider(claudeContext());
+    await expect(
+      provider.generate({ ...ollamaParams, disableThinking: true })
+    ).resolves.toMatchObject({ text: "ok" });
+
+    expect(sent).toHaveLength(2);
+    expect(sent[0].thinking).toEqual({ type: "disabled" });
+    expect(sent[1]).not.toHaveProperty("thinking");
+    // 外したのは思考の無効化だけ（ほかの中身は同じ）
+    expect(sent[1].messages).toEqual(sent[0].messages);
+    expect(sent[1].model).toBe(sent[0].model);
+
+    // 通った組み合わせを覚えたので、次の呼び出しは1回目から外して送り、断られない
+    await expect(
+      provider.generate({ ...ollamaParams, disableThinking: true })
+    ).resolves.toMatchObject({ text: "ok" });
+    expect(sent).toHaveLength(3);
+    expect(sent[2]).not.toHaveProperty("thinking");
+  });
+
   test("Claudeはthinking以外の失敗を再試行しない", async () => {
     let messageCalls = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: Parameters<typeof fetch>[0]) => {
