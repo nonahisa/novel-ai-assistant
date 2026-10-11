@@ -2641,5 +2641,56 @@ describe("人物抽出フロー", () => {
 
       expect(shown.join("\n")).not.toContain("別人と決めた呼び名");
     });
+
+    /*
+      主人公と同じ一人称の脇役（作者の裁定 2026-10-11「案B：知らせるだけ」。
+      設計書6.5.12）。判定そのものは core のテスト（`sharedFirstPersonNarrator`）が
+      見ているので、ここは完了報告へ届くことだけを見る
+    */
+    test("主人公と同じ一人称の人物がいて、値が入った話があれば完了報告で知らせる", async () => {
+      const boku = (id: string, name: string) => ({
+        ...emptyCharacter(id, name),
+        firstPerson: { default: "僕", variants: [] },
+      });
+      state.mergeResult = {
+        ...(mergedWith([]) as object),
+        characters: [boku("char_001", "春人"), boku("char_002", "健太")],
+        landed: [{ characterId: "char_001", characterName: "春人", chapters: [1] }],
+      };
+      const textFile = await import("../../../src/core/textFile");
+      const readText = vi.mocked(textFile.readTextFile);
+      const original = readText.getMockImplementation();
+      const bokuText = Array.from(
+        { length: 14 },
+        (_, index) => `　僕は${index + 1}枚目の答案を見直した。僕は鉛筆を置き、窓の外の雨を眺めていた。`
+      ).join("\n");
+      readText.mockImplementation(
+        async () => ({ text: bokuText, hasConflictMarkers: false }) as Awaited<
+          ReturnType<typeof textFile.readTextFile>
+        >
+      );
+      try {
+        const { shown } = installWindow();
+        state.generate.mockResolvedValue(successfulResult("灯"));
+
+        await extractCharacters(work, testRegistry());
+
+        expect(shown.join("\n")).toContain(
+          "第1話は、主人公へ入った値に語り手の取り違えの可能性があります（主人公と同じ一人称「僕」を使う人物がいるため）"
+        );
+      } finally {
+        if (original) readText.mockImplementation(original);
+      }
+    });
+
+    test("値が入った話が無ければ、語り手の取り違えの知らせは出さない", async () => {
+      state.mergeResult = mergedWith([]);
+      const { shown } = installWindow();
+      state.generate.mockResolvedValue(successfulResult("灯"));
+
+      await extractCharacters(work, testRegistry());
+
+      expect(shown.join("\n")).not.toContain("語り手の取り違えの可能性");
+    });
   });
 });
