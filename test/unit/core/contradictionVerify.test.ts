@@ -204,3 +204,58 @@ describe("あとで判明する事実", () => {
     expect(factsRevealedAfter({ role: "商店街" }, fields, 1)).toEqual([]);
   });
 });
+
+/**
+ * 口調の但し書き（P-12b 1.1）の言葉が、答えの中身として返ってきたとき
+ * （CLAUDE.md「繰り返し起きた失敗」3番）。
+ */
+describe("口調の但し書きの言葉が答えに写ったとき（2026-10-11）", () => {
+  it("但し書きの言葉を理由の欄に書いた却下は、却下として受け取らない", () => {
+    const result = outcome({
+      verdict: "却下",
+      reason: "設定の語尾の変わり型",
+      explanation: "『〜ですわ』は『〜でしょ』『〜ね』『〜よ』の語尾の変わり型に含まれる",
+      confidence: "medium",
+    });
+    expect(result.keep).toBe(true);
+    expect(result.undecided).toBe(true);
+  });
+
+  it("「残せ」の文を説明に写したまま却下してきたら、判断できなかったものとして通す", () => {
+    const result = outcome({
+      verdict: "却下",
+      reason: "そもそも食い違っていない",
+      explanation: "本文にきっかけが描かれていなければ、食い違いとして残してください。",
+      confidence: "low",
+    });
+    expect(result.keep).toBe(true);
+    expect(result.undecided).toBe(true);
+  });
+
+  /**
+   * 罠1（蓬田「なんだ、そんな顔をするな」）の正しい却下。但し書きの1文目
+   * （同じ話し方のまま語尾だけ違うなら食い違いではない）を写すのは正しい根拠。
+   */
+  it("「同じ話し方なら食い違いではない」を写した却下は、そのまま却下", () => {
+    const result = outcome({
+      verdict: "却下",
+      reason: "そもそも食い違っていない",
+      explanation:
+        "設定に挙がった語尾は例なので、同じ話し方（くだけた・ぶっきらぼう など）のまま語尾だけが違うなら食い違いではありません。",
+      confidence: "high",
+    });
+    expect(result.keep).toBe(false);
+    expect(result.reason).toBe("そもそも食い違っていない");
+  });
+
+  it("10-10 の 26b の却下（変わり型と言うだけ）は、読み取りでは消さない判断をしない（頼み方で直す）", () => {
+    // 説明の意味をコードで判定しない（「変形」「変わり型」は罠の正しい却下にも出る）
+    const result = outcome({
+      verdict: "却下",
+      reason: "そもそも食い違っていない",
+      explanation: "『〜ですわ』は『〜でしょ』『〜ね』『〜よ』の語尾の変わり型に含まれる",
+      confidence: "medium",
+    });
+    expect(result.keep).toBe(false);
+  });
+});

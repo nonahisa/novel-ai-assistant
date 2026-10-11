@@ -1,7 +1,9 @@
 import {
   VERIFY_REJECT_REASONS,
+  VERIFY_SPEECH_KEEP_SENTENCES,
   type VerifyRejectReason,
 } from "../prompts/contradictionVerify";
+import { normalizeForComparison } from "./groundedEvidence";
 
 /**
  * 矛盾の検証結果を読む（設計書6.10.5）。
@@ -57,7 +59,28 @@ export function parseVerifyOutcome(text: string): VerifyOutcome {
     // 作者は「なぜ出ないのか」を追えない
     return undecidedOutcome(explanation || "却下の理由がありません");
   }
+  if (echoesSpeechKeep(explanation)) {
+    // **「残せ」と頼んだ文を写したまま却下してきた**（P-12b 1.1）。指示の言葉が
+    // 答えの中身として返る型で、自分の説明と判定が逆を向いている。消す根拠に
+    // ならないので、判断できなかったものとして通す
+    return undecidedOutcome(explanation);
+  }
   return { keep: false, reason, explanation, confidence, undecided: false };
+}
+
+/**
+ * 説明が、口調の但し書き（P-12b 1.1）の「残せ」の文を丸ごと写しているか。
+ *
+ * 文の一部の一致は見ない。「変わり型」「語尾」のような語は、罠（語尾は違うが
+ * 話し方は同じ）の正しい却下の説明にも出るので、語で見ると正しい却下まで
+ * 通してしまう。
+ */
+function echoesSpeechKeep(explanation: string): boolean {
+  const field = normalizeForComparison(explanation);
+  if (!field) return false;
+  return VERIFY_SPEECH_KEEP_SENTENCES.some((sentence) =>
+    field.includes(normalizeForComparison(sentence))
+  );
 }
 
 function normalizeReason(value: string): VerifyRejectReason | undefined {
