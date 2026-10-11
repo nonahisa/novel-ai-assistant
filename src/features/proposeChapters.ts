@@ -65,7 +65,12 @@ import {
   logStep,
   responseExcerptForLog,
   useLogFile,
+  workLog,
 } from "../core/logger";
+import {
+  describeProposalVerdictLog,
+  type RecordUpdateVerdict,
+} from "../core/recordUpdateLog";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 // **型だけを取る。** パネルの実体は呼び出し側（`extension.ts`）が作ったものを
 // 受け取るので、ここで束に取り込む必要がない（`checkForeshadows` と同じ）
@@ -99,6 +104,8 @@ const MOVE_CHAPTER_LABEL = "動かす";
 
 /** 提案パネルに出すときの分類名 */
 export const CHAPTER_PROPOSAL_CATEGORY = "章立て";
+/** 提案パネルの押しボタンの語（画面とログで同じ語を使う） */
+const CHAPTER_APPLY_LABEL = "章にする";
 
 /**
  * 合本の途中を章の始まりに指されたときの断り（設計書6.66.4）。
@@ -625,8 +632,10 @@ export async function suggestChapterName(
  *
  * **設定資料の更新と同じ形に載せる**（伏線の候補と同じ理由、設計書6.35.2）。
  * どちらも「1件ずつ承認して保存する」提案であり、描画も適用の道も既にある。
+ *
+ * 公開しているのは試験のため（反映・見送りの行を `proposalVerdictLog.test.ts` が見る）
  */
-function showChapterProposals(
+export function showChapterProposals(
   panel: ProposalPanel,
   work: WorkEntry,
   material: ChapterMaterial,
@@ -705,9 +714,33 @@ function showChapterProposals(
       }),
       source: episode.fileName,
       status: "pending" as const,
-      applyLabel: "章にする",
+      applyLabel: CHAPTER_APPLY_LABEL,
     };
   });
+
+  // **1件ずつ、作品のログへ残す**（0.102.10。設計書6.66.4）。1件ずつでも
+  // まとめて章にするでもこの口を通る。範囲の終わりは次の章の始まりで決まり、
+  // 提案の時点では確定しないので、始まりの話だけを言う
+  const logVerdict = (
+    entry: { name: string; label: string; movedFrom?: { label: string } },
+    verdict: RecordUpdateVerdict
+  ): void =>
+    workLog(work.folderPath).line(
+      describeProposalVerdictLog({
+        category: CHAPTER_PROPOSAL_CATEGORY,
+        verdict,
+        applyLabel: CHAPTER_APPLY_LABEL,
+        kindLabel: "章",
+        name: entry.name,
+        detail:
+          `${entry.label}から` +
+          // 作者が決めた区切りを動かしたことは、元の始まりと一緒に残す
+          (verdict === "applied" && entry.movedFrom
+            ? `（${entry.movedFrom.label}から動かした）`
+            : ""),
+        via: "提案パネル",
+      })
+    );
 
   panel.showRecordUpdates(
     work,
@@ -744,17 +777,31 @@ function showChapterProposals(
         ...(entry.movedFrom ? { movedFromPath: entry.movedFrom.path } : {}),
       });
       // 一覧の折りたたみは台帳から作られるので、入ったらすぐ作り直す
-      if (result.ok) options.onChaptersChanged?.();
+      if (result.ok) {
+        logVerdict(entry, "applied");
+        options.onChaptersChanged?.();
+      }
+      // 入らなかったときは書かない。保存の失敗は `ChapterProposalApplier` が
+      // `logFailure` で残し、確認で取りやめたのは反映でも見送りでもない
       return result;
     },
-    // 見送りは何も書かない。**提案は台帳に無い**ので、片付ける先が無い
-    async () => ({ ok: true }),
+    // 見送りは台帳に何も書かない。**提案は台帳に無い**ので、片付ける先が無い。
+    // 押したことだけはログへ残す
+    async (id) => {
+      const entry = byId.get(id);
+      if (entry) logVerdict(entry, "dismissed");
+      return { ok: true };
+    },
     CHAPTER_PROPOSAL_CATEGORY
   );
 }
 
-/** AIへ渡す材料と、提案を読み解くための手掛かり */
-interface ChapterMaterial {
+/**
+ * AIへ渡す材料と、提案を読み解くための手掛かり。
+ *
+ * 公開しているのは試験のため（`proposalVerdictLog.test.ts` が代役を作る）
+ */
+export interface ChapterMaterial {
   episodes: ChapterProposeEpisode[];
   /**
    * いまの章立て。`startEpisodePath` は区切りを動かす提案を承認するときに、
