@@ -159,6 +159,13 @@ export interface ReaderStatsEnvelope {
   readAt: string;
   /** `readAt` が何の日時か。無ければ押した時刻（これまでの封筒） */
   readAtBasis?: ReaderStatsReadAtBasis;
+  /**
+   * サイトでの作品名（2026-10-11 に足した省いてよい欄。版数は上げない）。
+   * **作品IDの登録の一覧で「おすすめ」を出すことにだけ使う**——作品名は
+   * 作品の照合に使わない（作者の裁定「タイトルが同じとは限らない」）。
+   * 空文字は入れない。長さは `READER_STATS_TITLE_MAX_LENGTH` まで
+   */
+  title?: string;
   /** 1回の読み取りで拾えた行。**1件も無い封筒は受け取らない** */
   entries: ReaderStatsEnvelopeEntry[];
 }
@@ -231,9 +238,11 @@ export function buildReaderStatsEnvelope(input: {
   workId?: string | null;
   readAt: string;
   readAtBasis?: ReaderStatsReadAtBasis;
+  title?: string | null;
   entries: readonly ReaderStatsEnvelopeEntry[];
 }): string {
   const workId = (input.workId ?? "").trim();
+  const title = (input.title ?? "").trim();
   return JSON.stringify({
     [MARKER]: READER_STATS_ENVELOPE_VERSION,
     site: input.site,
@@ -241,9 +250,16 @@ export function buildReaderStatsEnvelope(input: {
     ...(workId ? { workId } : {}),
     readAt: input.readAt,
     ...(input.readAtBasis ? { readAtBasis: input.readAtBasis } : {}),
+    ...(title ? { title } : {}),
     entries: input.entries,
   });
 }
+
+/**
+ * 封筒の作品名の長さの上限。投稿サイトの作品名は長くても100字ほどなので、
+ * 余裕を見て200字。これを超えるものは作品名でない何かが入っていると見て使わない
+ */
+export const READER_STATS_TITLE_MAX_LENGTH = 200;
 
 /** 封筒が入っていなかったときの断り（1件の封筒と束で同じ文言を使う） */
 const NOT_ENVELOPE_REASON =
@@ -351,6 +367,24 @@ function readEnvelopeValue(value: Record<string, unknown>): ReaderStatsEnvelopeR
         "食い違っているかもしれません）。どちらかを更新してからお試しください。"
     );
   }
+  /*
+    サイトでの作品名（2026-10-11）。**null と空文字は「欄なし」**。
+    文字列でなければ、ほかの欄と同じく版の食い違いとして断る。
+    **長すぎるものは断らずに欄なしにする**——おすすめにしか使わない欄のために、
+    数の正しい封筒を丸ごと落とさない
+  */
+  const rawTitle = absent(value.title) ? undefined : value.title;
+  if (rawTitle !== undefined && typeof rawTitle !== "string") {
+    return reject(
+      "コピーしたデータの作品名を読めませんでした（ヘルパーと拡張機能の版が" +
+        "食い違っているかもしれません）。どちらかを更新してからお試しください。"
+    );
+  }
+  const trimmedTitle = (rawTitle ?? "").trim();
+  const title =
+    trimmedTitle && trimmedTitle.length <= READER_STATS_TITLE_MAX_LENGTH
+      ? trimmedTitle
+      : undefined;
   if (!Array.isArray(entries) || entries.length === 0) {
     return reject("コピーしたデータに読者の反応が1件も入っていませんでした。");
   }
@@ -391,6 +425,7 @@ function readEnvelopeValue(value: Record<string, unknown>): ReaderStatsEnvelopeR
       ...(trimmedWorkId ? { workId: trimmedWorkId } : {}),
       readAt: readAt.trim(),
       ...(readAtBasis !== undefined ? { readAtBasis } : {}),
+      ...(title !== undefined ? { title } : {}),
       entries: parsedEntries,
     },
   };

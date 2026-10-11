@@ -1,4 +1,5 @@
 import { UNREADABLE_MARK } from "../prompts/photoTranscribe";
+import { INLINE_REPEAT_STOP_NOTE } from "../core/photoTranscribeValidation";
 
 /**
  * 写真から原稿を起こす画面（設計書6.117）。
@@ -7,8 +8,11 @@ import { UNREADABLE_MARK } from "../prompts/photoTranscribe";
  * 拡張機能の側は写真のバイト列を読んで渡すだけにして、Node の画像の部品を
  * 使わない（ブラウザ版でも同じ道で動く。規則7）。
  *
- * 写真の向きの印（EXIF）は `<img>` が描くときに当たるので、回すのは
- * 作者が画面で見た向きを基準に90度ずつ。
+ * 写真の向きの印（EXIF）は `<img>` が描くときに当たる（Chromium は `<img>`・
+ * `drawImage` とも印に合わせて回す。2026-10-11 に確かめた。`core/exifOrientation.ts`）。
+ * ここで重ねて回すと二重になるので、拡張機能が読んだ印の値（`orientation`）は
+ * 「自動で回した」と写真の札に出すのにだけ使う。作者が直す90度ずつの回転は、
+ * 画面で見た向きを基準にする。
  */
 
 /** 送る前に縮める長辺（px）。Claude の1枚5MBの上限に余裕を持って入る。字が潰れないよう、これより小さくしない */
@@ -106,6 +110,7 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
 (function () {
   var vscode = acquireVsCodeApi();
   var MARK = ${JSON.stringify(UNREADABLE_MARK)};
+  var REPEAT_NOTE = ${JSON.stringify(INLINE_REPEAT_STOP_NOTE)};
   var MAX_EDGE = ${PHOTO_MAX_EDGE};
   var SPREAD = ${SPREAD_ASPECT};
   /** 写真の並び。{ id, name, img, rotation(0/90/180/270), split, order("lr"|"rl") } */
@@ -179,6 +184,8 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
       }
       card.appendChild(canvas);
       card.appendChild(el("div", { "class": "name" }, (index + 1) + "枚目：" + photo.name));
+      var autoNote = autoRotationNote(photo.orientation);
+      if (autoNote) card.appendChild(el("div", { "class": "name", "data-testid": "photo-auto-rotated" }, autoNote));
       var bar = el("div", { "class": "bar" });
       var left = el("button", { "class": "secondary", "title": "左へ90度回す", "data-testid": "photo-rotate-left" }, "⟲ 左へ回す");
       left.onclick = function () { setRotation(photo, photo.rotation + 270); };
@@ -208,6 +215,15 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
       box.appendChild(card);
     });
     updateButtons();
+  }
+
+  /**
+   * 写真の向きの印で自動で回したことを伝える1行。印が無い・そのままの向き（1）なら出さない。
+   * 角度の決め方は core/exifOrientation.ts の rotationForOrientation と同じ表
+   */
+  function autoRotationNote(orientation) {
+    var turn = { 2: "左右を反転", 3: "180度回転", 4: "上下を反転", 5: "右へ90度回して反転", 6: "右へ90度回転", 7: "左へ90度回して反転", 8: "左へ90度回転" }[orientation];
+    return turn ? "写真の向きの印に合わせて自動で直しました（" + turn + "）。違っていれば下のボタンで回してください。" : "";
   }
 
   function setRotation(photo, degrees) {
@@ -323,7 +339,7 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
       message.items.forEach(function (item) {
         var img = new Image();
         img.onload = function () {
-          var photo = { id: item.id, name: item.name, img: img, rotation: 0, split: false, order: "lr" };
+          var photo = { id: item.id, name: item.name, img: img, rotation: 0, split: false, order: "lr", orientation: item.orientation };
           // 横長の写真は見開きとして左右に切るのを既定にする（向きは推さない。設計書6.117.3）
           photo.split = img.naturalWidth >= img.naturalHeight * SPREAD;
           photos.push(photo);
@@ -354,6 +370,7 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
         page.textarea.disabled = false;
         var notes = [];
         if (message.stoppedEarly) notes.push("同じ行が繰り返されたので、途中で止めました。写真の向きをお確かめください。");
+        if (message.repeatStopped) notes.push(REPEAT_NOTE);
         if (message.truncated) notes.push("答えが途中で切れています。");
         if (message.latin > 0) notes.push("英字が混じった所が " + message.latin + "か所あります（黄色）。");
         if (message.descriptive > 0) notes.push("写真の説明らしい行が " + message.descriptive + "行あります。");

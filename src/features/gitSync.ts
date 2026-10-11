@@ -689,7 +689,7 @@ export class GitSyncMonitor implements vscode.Disposable {
     this.changed.fire();
 
     await this.detectGitFileChanges(work, status);
-    if (options.notify) await this.notifyIfBehind(work, status);
+    if (options.notify) this.notifyIfBehind(work, status);
     return status;
   }
 
@@ -932,11 +932,12 @@ export class GitSyncMonitor implements vscode.Disposable {
    * 同じ作品について繰り返し出さない。エディタを切り替えるたびに
    * 同じ通知が出ると、読まずに閉じる癖がついて意味を失う。
    * 取り込めば印を消すので、次に遅れたときはまた出る。
+   *
+   * **ボタンの答えを待たない**（2026-10-11、0.103.9）。数え直しは走るあいだ
+   * `refreshing` の印を立て、フォルダーの見張りはその印を見て待ち直す。
+   * 作者が知らせを押さずに置くと、その作品の数え直しが止まったままになる。
    */
-  private async notifyIfBehind(
-    work: WorkEntry,
-    status: GitSyncStatus
-  ): Promise<void> {
+  private notifyIfBehind(work: WorkEntry, status: GitSyncStatus): void {
     if (status.kind !== "tracked" || status.behind === 0) {
       this.notified.delete(work.id);
       return;
@@ -944,13 +945,18 @@ export class GitSyncMonitor implements vscode.Disposable {
     if (this.notified.has(work.id)) return;
     this.notified.add(work.id);
 
-    const action = await vscode.window.showWarningMessage(
-      `「${work.title}」に別の環境での変更が未取得です（${status.behind}件）。` +
-        "取り込んでから執筆することをおすすめします。",
-      "取り込む",
-      "このまま開く"
+    whenNoticePicked(
+      vscode.window.showWarningMessage(
+        `「${work.title}」に別の環境での変更が未取得です（${status.behind}件）。` +
+          "取り込んでから執筆することをおすすめします。",
+        "取り込む",
+        "このまま開く"
+      ),
+      async (action) => {
+        if (action === "取り込む") await this.pull(work);
+      },
+      { label: "未取得の知らせ", workFolder: work.folderPath }
     );
-    if (action === "取り込む") await this.pull(work);
   }
 
   /**

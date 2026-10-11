@@ -44,6 +44,20 @@ describe("写真から原稿を起こす画面", () => {
     }
   });
 
+  test("1行の中の繰り返しで止めたページに、向きの確認を出す（A17）", () => {
+    expect(script()).toContain("message.repeatStopped");
+    expect(script()).toContain("同じ字が続いたので止めました。写真の向きをお確かめください。");
+  });
+
+  test("写真の向きの印で自動で直したことを、写真の札に出す（6.117.3）", () => {
+    expect(script()).toContain("item.orientation");
+    expect(html).toContain('data-testid": "photo-auto-rotated"');
+    expect(script()).toContain("写真の向きの印に合わせて自動で直しました");
+    // 作者が直す90度ずつの回転は残す
+    expect(html).toContain("photo-rotate-left");
+    expect(html).toContain("photo-rotate-right");
+  });
+
   test("挿入の印や取り消し線をAIに決めさせないことを、画面でも断る", () => {
     expect(html).toContain("AIには決めさせません");
     expect(html).toContain("〓");
