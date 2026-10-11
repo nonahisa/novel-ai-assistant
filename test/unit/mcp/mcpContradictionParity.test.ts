@@ -114,7 +114,9 @@ describe("過去の場面の抜粋（設計書6.74）", () => {
       index,
       chunks[0],
       ["少年"],
-      pastSceneMaxChars(NUM_CTX)
+      // 予算は送る長さ（NUM_CTX）ではなく読める長さで決める（0.102.13）。
+      // 長さを渡さない novel.prompt は、製品が長さを知らないときと同じ頭打ち
+      pastSceneMaxChars(undefined)
     ).text;
 
     expect(expected).not.toBe("");

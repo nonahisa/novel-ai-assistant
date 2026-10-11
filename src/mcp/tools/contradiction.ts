@@ -65,7 +65,11 @@ import {
   type StoryDate,
 } from "../../core/storyCalendar";
 import { worldviewMaxChars } from "../../core/worldviewSelect";
-import { withLineNumbers, type Chunk } from "../../core/chunker";
+import { contextSizeForPrompt, withLineNumbers, type Chunk } from "../../core/chunker";
+import { MIN_CHARS_PER_TOKEN_SAMPLES, resolveTokensPerChar } from "../../core/sizeBudget";
+import { bundledTuningByKey } from "../../core/bundledTuning";
+// 製品と同じ出力の見込み（`vscode` へは届かない。送る直前の関所と同じ値）
+import { OUTPUT_RESERVE_TOKENS } from "../../ai/contextGuard";
 import { parseCharacter, type Character } from "../../models/character";
 import { parseLocation, type Location } from "../../models/location";
 import {
@@ -91,7 +95,7 @@ import {
   readSettingsRecords,
   selectChunks,
 } from "./shared";
-import { ollamaGenerate } from "./ollama";
+import { ollamaContextLength, ollamaGenerate } from "./ollama";
 import {
   runByRunner,
   temperatureFor,
@@ -156,8 +160,17 @@ interface Settings {
  *
  * 世界観の上限は**モデルの上限に対する割合**で決める（設計書6.27.10）。
  * 固定字数のままだと、32kのモデルでは本文を1文字も足さないうちに溢れる。
+ *
+ * **割合を掛けるのはモデルの読める長さ（`contextWindow`）で、送る長さ（`numCtx`）
+ * ではない**（作者の裁定 2026-10-11「製品と同じ量にそろえる」）。製品は
+ * `worldviewMaxChars(info.contextWindow)` で決める。送る長さで掛けると、
+ * 測定の台本がプロンプトに合わせて num_ctx を詰めるほど材料が細り、
+ * 製品より少ない材料で測ることになる。分からなければ undefined（頭打ち）。
  */
-function loadSettings(folder: string, numCtx: number): Settings {
+function loadSettings(
+  folder: string,
+  contextWindow: number | undefined
+): Settings {
   const people = readSettingsRecords(
     folder,
     SETTINGS_SUBDIRS.characters,
@@ -183,7 +196,7 @@ function loadSettings(folder: string, numCtx: number): Settings {
     places: places.records,
     worldItems: worldItems.records,
     index,
-    worldviewMax: worldviewMaxChars(numCtx),
+    worldviewMax: worldviewMaxChars(contextWindow),
   });
 
   let synopses: Array<{ chapter: number | null; synopsis: string }> = [];
@@ -293,10 +306,77 @@ export function pastSceneSourcesOf(folder: string): ExcerptSource[] {
 }
 
 /**
+ * 材料（過去の場面・世界観）の予算と、それを決めた読める長さ
+ * （作者の裁定 2026-10-11「製品と同じ量にそろえる」）。
+ *
+ * **送る長さ（`numCtx`）とは別物である。** 製品は材料の予算をモデルの読める
+ * 長さ（`ModelInfo.contextWindow`＝申告と設定 `novelai.ollama.numCtx` の小さいほう）
+ * で決め、送る `num_ctx` はでき上がったプロンプトの長さから決める
+ * （`contextSizeForPrompt`）。MCP の `numCtx` は本文の切り方と送る長さを兼ねて
+ * いるので、材料までそこへ連動させると、送る長さを詰めるほど材料が細る。
+ *
+ * 結果に載せる——**どの長さで材料を組んだのか**が記録に無いと、製品と同じ
+ * 条件で測ったのかを後から確かめられない。
+ */
+export interface MaterialBudget {
+  /** 材料の予算を決めた読める長さ（トークン）。分からなければ null（頭打ちを使う） */
+  contextWindow: number | null;
+  /**
+   * - `given`……呼ぶ側が `contextWindow` で渡した
+   * - `ollama`……手元の Ollama にモデルの申告を訊いた（`novel.run` の ollama）
+   * - `unknown`……分からない。製品が長さを知らないときと同じ頭打ち
+   */
+  contextWindowSource: "given" | "ollama" | "unknown";
+  /** 1チャンクに渡す過去の場面の上限（字。`pastSceneMaxChars`） */
+  pastSceneChars: number;
+  /** 世界観の上限（字。`worldviewMaxChars`） */
+  worldviewChars: number;
+}
+
+function materialBudgetOf(
+  contextWindow: number | undefined,
+  source: MaterialBudget["contextWindowSource"]
+): MaterialBudget {
+  return {
+    contextWindow: contextWindow ?? null,
+    contextWindowSource: contextWindow === undefined ? "unknown" : source,
+    pastSceneChars: pastSceneMaxChars(contextWindow),
+    worldviewChars: worldviewMaxChars(contextWindow),
+  };
+}
+
+/**
+ * 呼ぶ側が渡した読める長さを読む。
+ *
+ * **文字列でも受ける**（`carryOverOf` と同じ理由。測定の台本は
+ * `--option contextWindow=262144` の値を文字列のまま渡す）。
+ * **知らない値は黙って丸めない**——丸めると、打ち間違いに気づかないまま
+ * 「その長さで測った」記録が残る。
+ */
+function contextWindowOf(choice: number | string | undefined): number | undefined {
+  if (choice === undefined) return undefined;
+  if (typeof choice === "string" && choice.trim() === "") return undefined;
+  const value = typeof choice === "number" ? choice : Number(String(choice).trim());
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 1) {
+    throw new McpToolError(
+      `contextWindow は1以上の整数（トークン）です: ${String(choice)}` +
+        "（モデルの読める長さ。ollama.models の contextLength、" +
+        "設定 novelai.ollama.numCtx で絞っているならその値）"
+    );
+  }
+  return value;
+}
+
+/**
  * 過去の場面の索引と、1チャンクに渡せる字数（設計書6.74）。
  *
- * **字数はモデルの上限に対する割合**（製品は `pastSceneMaxChars(contextWindow)`）。
- * MCP の口ではモデルの上限が分からないので、読み込む長さ（`numCtx`）で測る。
+ * **字数はモデルの読める長さに対する割合**（製品と同じ `pastSceneMaxChars(contextWindow)`。
+ * 長さの決め方は `materialBudgetOf`）。
+ *
+ * 0.102.12 までは送る長さ（`numCtx`）で掛けていた。測定の台本はプロンプトの
+ * 長さから num_ctx を詰める（24,576 など）ので、抜粋が1,720〜2,293字に細り、
+ * 製品（既定で6,000字）より少ない材料で測っていた（2026-10-11 の測定で、
+ * 抜粋の量で答えが変わることを確かめた）。
  *
  * **意味の近さでは引かない。** 製品は作者が「検知にもベクトル検索を使う」を
  * 入れたときだけ意味でも引く（既定は切）。MCP は既定の側に揃える。
@@ -311,9 +391,9 @@ interface PastSceneLookup {
 function pastSceneLookupOf(
   folder: string,
   chunks: readonly Chunk[],
-  numCtx: number
+  budget: MaterialBudget
 ): PastSceneLookup {
-  const maxChars = pastSceneMaxChars(numCtx);
+  const maxChars = budget.pastSceneChars;
   try {
     return {
       index: buildContradictionPastSceneIndex(
@@ -617,15 +697,29 @@ export interface ContradictionMaterialInput {
    * 文字列でも受ける（`carryOverOf`）
    */
   carryOver?: number | string;
+  /**
+   * モデルの読める長さ（トークン）。**材料（過去の場面・世界観）の予算を決める**
+   * （製品の `ModelInfo.contextWindow` と同じ意味。`MaterialBudget`）。
+   *
+   * 省くと、`novel.run` の ollama ではモデルの申告を訊き、ほかの道では
+   * 頭打ち（製品が長さを知らないときと同じ）にする。設定
+   * `novelai.ollama.numCtx` で絞っている作者の条件を写すときは、その値を渡す。
+   * 文字列でも受ける（`contextWindowOf`）
+   */
+  contextWindow?: number | string;
 }
 
 export function contradictionMaterial(input: ContradictionMaterialInput): {
   settingsCount: { people: number; places: number; world: number };
   unreadableSettings: number;
   referenceBudgetChars: number;
+  /** 材料の予算と、それを決めた読める長さ */
+  budget: MaterialBudget;
   chunks: ContradictionChunkMaterial[];
 } {
-  const settings = loadSettings(input.folder, input.numCtx);
+  const contextWindow = contextWindowOf(input.contextWindow);
+  const budget = materialBudgetOf(contextWindow, "given");
+  const settings = loadSettings(input.folder, contextWindow);
   const { chunks, maxChars } = chunksOfWorkFile(
     input.folder,
     input.filePath,
@@ -635,9 +729,10 @@ export function contradictionMaterial(input: ContradictionMaterialInput): {
   // **チャンクごとに読み直さない**（作品ぜんぶで1回。設計書6.10.9）
   const storyDates = storyDatesOf(settings, carryOver);
   // 過去の場面の索引も作品ぜんぶで1回だけ組む（製品と同じ）
-  const pastScenes = pastSceneLookupOf(input.folder, chunks, input.numCtx);
+  const pastScenes = pastSceneLookupOf(input.folder, chunks, budget);
 
   return {
+    budget,
     settingsCount: {
       people: settings.people.length,
       places: settings.places.length,
@@ -766,8 +861,12 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
   speechCheck: boolean;
   /** 口調を照らさなかったことの断り。照らした回は空文字 */
   speechNote: string;
+  /** 材料の予算と、それを決めた読める長さ（`MaterialBudget`） */
+  materialBudget: MaterialBudget;
 } {
-  const settings = loadSettings(input.folder, input.numCtx);
+  const contextWindow = contextWindowOf(input.contextWindow);
+  const budget = materialBudgetOf(contextWindow, "given");
+  const settings = loadSettings(input.folder, contextWindow);
   const { chunks, maxChars } = chunksOfWorkFile(
     input.folder,
     input.filePath,
@@ -785,7 +884,7 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
   // **チャンクごとに読み直さない**（作品ぜんぶで1回。設計書6.10.9）
   const storyDates = storyDatesOf(settings, carryOver);
   // 過去の場面の索引も作品ぜんぶで1回だけ組む（製品と同じ）
-  const pastScenes = pastSceneLookupOf(input.folder, chunks, input.numCtx);
+  const pastScenes = pastSceneLookupOf(input.folder, chunks, budget);
 
   const prompts: ContradictionChunkPrompt[] = [];
   const skipped: Array<{ chunkId: string; reason: string }> = [];
@@ -855,6 +954,7 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
     skipped,
     speechCheck,
     speechNote: speechNoteFor(speechCheck),
+    materialBudget: budget,
   };
 }
 
@@ -962,6 +1062,8 @@ export async function contradictionRun(input: ContradictionRunInput): Promise<
     verifyNote: string;
     /** 観点と抑制をどう決めたか（製品と同じ判定か、指定に従ったか） */
     modelSizeDecision: ModelSizeDecision;
+    /** 材料（過去の場面・世界観）の予算と、それを決めた読める長さ */
+    materialBudget: MaterialBudget;
   }
 > {
   /*
@@ -974,13 +1076,30 @@ export async function contradictionRun(input: ContradictionRunInput): Promise<
     ["categories", "suppression"]
   );
   const given = sized.decision.given;
+  /*
+    **材料の予算は、製品と同じくモデルの読める長さで決める**（作者の裁定
+    2026-10-11「製品と同じ量にそろえる」。`MaterialBudget`）。渡されていなければ、
+    手元の Ollama ではモデルの申告を訊く（製品の `showModel` と同じ欄）。
+  */
+  const window = await resolveContextWindow(input);
+  const materialBudget = materialBudgetOf(window.contextWindow, window.source);
   const prompts = contradictionPrompt({
     ...input,
+    contextWindow: window.contextWindow,
     categories: given.includes("categories") ? input.categories : sized.choice.categories,
     suppression: given.includes("suppression")
       ? input.suppression
       : sized.choice.suppression,
   });
+  /*
+    **材料を増やしたぶん、送る num_ctx に入らなくなっていないかを、送る前に見る**
+    （CLAUDE.md 規則6）。製品は送る num_ctx をでき上がったプロンプトの長さから
+    決めるが、MCP の `numCtx` は呼ぶ側が決めた値をそのまま送る。入らないまま
+    送ると、Ollama は**黙って入力を切り捨てる**。
+  */
+  if (input.runner === "ollama") {
+    assertPromptsFitNumCtx(prompts, input.numCtx, input.model, window.contextWindow);
+  }
 
   /*
     **落としたことを言う**（設計書6.10.6）。
@@ -1037,6 +1156,7 @@ export async function contradictionRun(input: ContradictionRunInput): Promise<
     speechCheck: prompts.speechCheck,
     speechNote: prompts.speechNote,
     modelSizeDecision: sized.decision,
+    materialBudget,
   };
   if (outcome.runner === "claude") {
     // **2段のうち1段しか渡せないことを黙らない**（`factContradiction` と同じ）
@@ -1064,6 +1184,85 @@ export async function contradictionRun(input: ContradictionRunInput): Promise<
   };
 }
 
+/**
+ * 材料の予算を決める読める長さ（`MaterialBudget`）。
+ *
+ * 1. 呼ぶ側が `contextWindow` を渡した → それ（設定で絞っている作者の条件も写せる）
+ * 2. `runner: ollama` でモデル名がある → `/api/show` の申告（製品と同じ欄）
+ * 3. どちらも無い → 分からない（頭打ち。製品が長さを知らないときと同じ）
+ *
+ * **訊けなくても止めない**（`decideModelSize` の大きさの問い合わせと同じ構え）。
+ * 繋がらなければ、本文を送る段が理由つきで断る。
+ */
+async function resolveContextWindow(input: ContradictionRunInput): Promise<{
+  contextWindow: number | undefined;
+  source: MaterialBudget["contextWindowSource"];
+}> {
+  const given = contextWindowOf(input.contextWindow);
+  if (given !== undefined) return { contextWindow: given, source: "given" };
+  if (input.runner !== "ollama" || !input.model) {
+    return { contextWindow: undefined, source: "unknown" };
+  }
+  let declared: number | null = null;
+  try {
+    declared = await ollamaContextLength({ endpoint: input.endpoint, model: input.model });
+  } catch {
+    // 単体テストが `./ollama` を差し替えてこの関数を持たせていないときもここで受ける
+    declared = null;
+  }
+  return declared === null || declared <= 0
+    ? { contextWindow: undefined, source: "unknown" }
+    : { contextWindow: declared, source: "ollama" };
+}
+
+/**
+ * いちばん長いプロンプトが、送る `num_ctx` に入るか（CLAUDE.md 規則6）。
+ *
+ * **見積りは製品と同じ係数で行う**——同梱の字/トークンがあればそれを
+ * （`resolveTokensPerChar`。製品も台帳が空なら同梱の値を、しきい値を満たす
+ * 件数を添えて読む）、無ければ当て推量の0.7字/トークン。
+ *
+ * **断るのは入力だけで溢れるとき**（出力の分までは断らない）。`numCtx` は
+ * VRAM に載る上限を探るために作者が意図して固定する道でもあり、出力の余白
+ * まで求めると、その測り方ができなくなる。出力が足りなかったときは、途中で
+ * 切れた答えとして検算が知らせる（`validateNoting`）。
+ */
+function assertPromptsFitNumCtx(
+  prompts: { systemPrompt: string; chunks: readonly ContradictionChunkPrompt[] },
+  numCtx: number,
+  model: string | undefined,
+  contextWindow: number | undefined
+): void {
+  const longest = prompts.chunks.reduce(
+    (max, chunk) => Math.max(max, prompts.systemPrompt.length + chunk.userPrompt.length),
+    0
+  );
+  if (longest === 0) return;
+  const bundled = model ? bundledTuningByKey(`ollama/${model}`) : undefined;
+  const measured =
+    bundled?.charsPerToken !== undefined
+      ? {
+          charsPerToken: bundled.charsPerToken,
+          charsPerTokenSamples: MIN_CHARS_PER_TOKEN_SAMPLES,
+        }
+      : undefined;
+  const inputTokens = Math.ceil(longest * resolveTokensPerChar(measured));
+  if (inputTokens <= numCtx) return;
+  // 製品なら送る長さ（出力の見込みと1割の余裕込み）。これを案内する
+  const suggested = contextSizeForPrompt({
+    promptChars: longest,
+    outputTokens: OUTPUT_RESERVE_TOKENS,
+    contextWindow: contextWindow ?? Number.MAX_SAFE_INTEGER,
+    measured,
+  });
+  throw new McpToolError(
+    `いちばん長いプロンプト（${longest}字、見込み ${inputTokens} トークン）が ` +
+      `numCtx ${numCtx} に入りません。このまま送ると、Ollama は num_ctx を超えた入力を黙って切り捨てます。` +
+      `numCtx を ${suggested} 以上にしてください（製品はプロンプトの長さからこの値を決めます）。` +
+      "過去の場面と世界観の量は、送る長さではなくモデルの読める長さ（contextWindow）で決めています。"
+  );
+}
+
 /** `claude` の道では検証の段を通せないことの断り */
 const VERIFY_SKIPPED_NOTE =
   "この道では、見つけた指摘を1件ずつ問い直す検証の段（P-12b）を通していません" +
@@ -1082,7 +1281,9 @@ async function verifyContradictionResults(
 ): Promise<{ results: ContradictionValidateResult[]; note: string }> {
   const ask = verifyAskerOf(input);
   const temperature = temperatureFor(input, CONTRADICTION_VERIFY_TEMPERATURE);
-  const settings = loadSettings(input.folder, input.numCtx);
+  // 検証で使うのは `knownAt` だけだが、長さは本文を読む段と同じものを渡す
+  // （値を2系統にしない）
+  const settings = loadSettings(input.folder, prompts.materialBudget.contextWindow ?? undefined);
   const labelOf = new Map(
     prompts.chunks.map((chunk) => [chunk.chunkId, chunk.chapterLabel])
   );

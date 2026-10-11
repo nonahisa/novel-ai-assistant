@@ -862,7 +862,22 @@ async function main() {
       given: options.options,
       capability,
     });
-    const runOptions = productOptions.options;
+    /*
+      **矛盾検知の材料（過去の場面・世界観）の量を、製品と同じ長さで決める**
+      （作者の裁定 2026-10-11「製品と同じ量にそろえる」）。
+
+      製品はモデルの読める長さ（申告。設定 `novelai.ollama.numCtx` が既定の0なら
+      そのまま）から材料の予算を決める。束はそれを `contextWindow` で受ける。
+      **`novel.prompt`（長さを測る組み立て）と `novel.run`（本番）の両方へ同じ値を
+      渡す**——片方だけだと、num_ctx を決めた根拠のプロンプトと実際に送る
+      プロンプトで材料の量が食い違う。打った `--option contextWindow=…` が勝つ。
+    */
+    const runOptions =
+      options.feature === "contradiction" &&
+      modelInfo?.contextLength &&
+      productOptions.options.contextWindow === undefined
+        ? { ...productOptions.options, contextWindow: modelInfo.contextLength }
+        : productOptions.options;
     const modelSizeDecision = productOptions.decision;
     if (modelSizeDecision.sizeDependent && !modelSizeDecision.decided) {
       // **黙って大きいモデル向けで回さない**
