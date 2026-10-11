@@ -1121,6 +1121,18 @@ describe("そろえた結果の知らせ", () => {
     );
   });
 
+  test("両方とも残した別ファイルの名前を出す（選ぶ一覧には出さないため）", () => {
+    const text = describeFoldSuccess("短編", {
+      ...結果({ picked: ["短編/本文/第1話.txt"] }),
+      sideFiles: ["短編/本文/第1話.conflict-2026-10-11-0045.txt"],
+    });
+
+    expect(text).toContain(
+      "もう1台の文は「第1話.conflict-2026-10-11-0045.txt」に残しました。"
+    );
+    expect(describeFoldSuccess("短編", 結果({}))).not.toContain("に残しました");
+  });
+
   test("一括だけなら、選んだとは言わない", () => {
     const text = describeFoldSuccess("短編", 結果({ bulk: 13 }));
 

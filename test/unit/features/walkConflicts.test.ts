@@ -481,6 +481,44 @@ describe("どちらの文を残すかの一覧", { timeout: 30_000 }, () => {
     expect(JSON.stringify(pick.items)).not.toContain("環境");
   });
 
+  /**
+   * 選択肢の detail は画面の幅で切れる（2026-10-11、ノートPCで「別の機械 の
+   * 直しを採り…」「「第1話_はじまり.conflic…」と切れていた）。
+   * **全角でおよそ40字**（半角は半分で数える）に収まっていることを見張る。
+   * 誰の直しかは detail ではなく説明（description）の側に出す
+   */
+  test("選択肢の detail は全角40字ほどに収まり、誰の直しかは説明の側に出る", async () => {
+    picks.push("左の文を残す");
+
+    await walkConflicts(scope(), [原稿ファイル], {
+      provider: new ConflictContentProvider(),
+      start: "manuscriptsOnly",
+      machineName: "書斎のPC",
+    });
+
+    const width = (text: string): number =>
+      [...text].reduce(
+        (sum, char) => sum + (/[ -~｡-ﾟ]/.test(char) ? 1 : 2),
+        0
+      );
+    const choices = quickPicks[0].items.filter(
+      (item) => "action" in item && (item as { action?: string }).action !== "manual"
+    );
+    expect(choices).toHaveLength(3);
+    for (const item of choices) {
+      expect(width(item.detail ?? ""), item.label).toBeLessThanOrEqual(80);
+      // 説明も、見出しと同じ行に収まる短さに
+      expect(width(item.description ?? ""), item.label).toBeLessThanOrEqual(60);
+    }
+    const theirs = choices.find((item) => item.label?.includes("右の文を残す"));
+    // テストの作業場では、どちらの記録も「作者」が書いている
+    expect(theirs?.description).toContain("作者 の直しを採ります");
+    expect(theirs?.detail).not.toContain("作者");
+    const both = choices.find((item) => item.label?.includes("両方とも残す"));
+    expect(both?.detail).toContain("別のファイルへ残します");
+    expect(both?.description).toContain("迷ったらこれ");
+  });
+
   test("選ばずに閉じたら、すぐ戻さずに訊く。［もう一度選ぶ］で同じ一覧が出る", async () => {
     // 1回目は閉じる、2回目は左を選ぶ
     pickScript.push(undefined, "左の文を残す");
@@ -544,10 +582,10 @@ describe("どちらの文を残すかの一覧", { timeout: 30_000 }, () => {
     expect(side).toMatch(
       /^いじめられっ子\/本文\/第1話\.conflict-\d{4}-\d{2}-\d{2}-\d{4}\.txt$/
     );
-    // 一覧に見せた名前と、作った名前が同じ
-    expect(JSON.stringify(quickPicks[0].items)).toContain(
-      side.slice(side.lastIndexOf("/") + 1)
-    );
+    // 名前は一覧には出さず（幅で切れるため）、書いたあとの知らせで出す
+    const sideName = side.slice(side.lastIndexOf("/") + 1);
+    expect(JSON.stringify(quickPicks[0].items)).not.toContain(sideName);
+    expect(shown.join("\n")).toContain(`もう1台の文を「${sideName}」へ残しました。`);
     expect(read(side)).toBe("むこうの一行。\n");
     expect(read(原稿ファイル)).toBe("こちらの一行。\n");
     // **索引へはまだ入れない**（やめたときの merge --abort で消えないように）

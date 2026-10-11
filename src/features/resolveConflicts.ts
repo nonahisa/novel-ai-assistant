@@ -322,8 +322,8 @@ async function reviewConflict(
 
   const oursCount = countChars(ours).net;
   const theirsCount = countChars(theirs).net;
-  // **別ファイルの名前はここで1回だけ決める。** 一覧に見せた名前と、
-  // 実際に作る名前が（分をまたいで）ずれないようにするため
+  // 別ファイルの名前は一覧には出さない（幅に収まらず文が切れた。作者の裁定
+  // 2026-10-11）。書いたあとの知らせと、そろえたあとの知らせで出す
   const sideName = sideFileName(
     fileName,
     new Date(),
@@ -338,29 +338,31 @@ async function reviewConflict(
       description:
         `${formatCount(oursCount)}字` +
         (oursAuthor ? `／最後に触ったのは ${oursAuthor}` : ""),
+      // detail は全角40字ほどに収める。画面の幅を超えると途中で切れる
+      // （2026-10-11、ノートPCで「別の機械 の直しを採り…」と切れていた）
       detail: "原稿はこのパソコンの文になります。もう1台の文は原稿に残りません。",
       action: "ours",
     },
     {
       label: "$(arrow-right) 右の文を残す（もう1台）",
+      // 編集部と書くときは、右が編集部の直しのことがある。誰の直しかを添える。
+      // detail に置くと幅を超えて切れたので、短い形で説明の側へ寄せる
+      // （「最後に触ったのは X」と「X の直しを採ります」は同じ人を指すので1つにする）
       description:
         `${formatCount(theirsCount)}字` +
-        (theirsAuthor ? `／最後に触ったのは ${theirsAuthor}` : ""),
-      // 編集部と書くときは、右が編集部の直しのことがある。誰の直しかを添える
-      detail:
-        "原稿はもう1台の文になります。このパソコンの文は原稿に残りません。" +
-        (theirsAuthor ? `${theirsAuthor} の直しを採ります。` : ""),
+        (theirsAuthor ? `／${theirsAuthor} の直しを採ります` : ""),
+      detail: "原稿はもう1台の文になります。このパソコンの文は原稿に残りません。",
       action: "theirs",
     },
   ];
   if (!omitted.has("both")) {
     items.push({
       label: "$(files) 両方とも残す",
-      description: "原稿は左の文、右の文は別のファイルへ",
+      // 別ファイルの名前は出さない（長く、detail が切れる）。名前は書いたあとの知らせで出す
+      description: "原稿は左の文、右の文は別のファイルへ（迷ったらこれ）",
       detail:
-        "原稿はこのパソコンの文のままにして、もう1台の文を同じフォルダーの" +
-        `「${sideName}」へ保存します。あとで読み比べて手で直せます。` +
-        "迷ったらこれを選んでください。",
+        "もう1台の文は同じフォルダーの別のファイルへ残します。" +
+        "あとで読み比べて直せます。",
       action: "both",
     });
   }
@@ -412,7 +414,7 @@ type ConflictAction = "ours" | "theirs" | "both" | "manual";
 interface ApplyContext {
   ours: string;
   theirs: string;
-  /** 「両方とも残す」で作る別ファイルの名前（一覧に見せたもの） */
+  /** 「両方とも残す」で作る別ファイルの名前（一覧を出す前に1回だけ決めたもの） */
   sideName: string;
   /** 「このパソコン（名前）」 */
   here: string;
