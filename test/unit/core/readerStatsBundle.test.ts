@@ -12,9 +12,12 @@ import {
 import {
   BUNDLE_FAILURES_SHOWN,
   readerStatsBundleItemLabel,
+  planReaderStatsSiteId,
   readerStatsBundleNotice,
   readerStatsBundlePending,
+  readerStatsWorkPageUrl,
   routeReaderStatsBundleItem,
+  suggestWorksByTitle,
 } from "../../../src/core/readerStatsHelperLink";
 import {
   emptyPostingLedger,
@@ -385,5 +388,86 @@ describe("知らせ（1つにまとめる）", () => {
     for (const word of ["母艦", "封筒", "台帳", "束"]) {
       expect(notice.message).not.toContain(word);
     }
+  });
+});
+
+describe("登録の無い作品IDをその場で登録する（作者の裁定 2026-10-11）", () => {
+  const a = { id: "a", ledger: kakuyomuWork(KAKUYOMU_POST_A, "1111") };
+
+  test("どの作品も登録していない作品IDだけ「登録で直る」印が立つ", () => {
+    expect(
+      routeReaderStatsBundleItem(
+        envelopeOf(kakuyomuItem("9999", "2026-10-11T10:00:00.000+09:00")),
+        [a]
+      )
+    ).toMatchObject({ kind: "none", registrable: true });
+
+    const noId = routeReaderStatsBundleItem(
+      envelopeOf(kakuyomuItem(undefined, "2026-10-11T10:00:00.000+09:00")),
+      [a]
+    );
+    expect(noId.kind).toBe("none");
+    expect(noId.kind === "none" && noId.registrable).toBeFalsy();
+  });
+
+  test("作品名が近い作品だけをおすすめにする（作品名が無ければ出さない）", () => {
+    const works = [
+      { id: "a", title: "教科書チート" },
+      { id: "b", title: "教科書チート　〜異世界で先生になりました〜" },
+      { id: "c", title: "別の話" },
+    ];
+    expect(suggestWorksByTitle(works, "教科書チート")).toEqual(["a", "b"]);
+    expect(suggestWorksByTitle(works, "教科書 チート")).toEqual(["a", "b"]);
+    expect(suggestWorksByTitle(works, undefined)).toEqual([]);
+    expect(suggestWorksByTitle(works, "話")).toEqual([]);
+  });
+
+  test("別の作品IDが入っていれば「置き換え」で、上書きの前に確かめる印になる", () => {
+    expect(planReaderStatsSiteId(emptyPostingLedger(), "kakuyomu", "9999")).toEqual({
+      kind: "add",
+    });
+    expect(planReaderStatsSiteId(kakuyomuWork(KAKUYOMU_POST_A, "9999"), "kakuyomu", "9999")).toEqual({
+      kind: "same",
+    });
+    expect(planReaderStatsSiteId(a.ledger, "kakuyomu", "9999")).toEqual({
+      kind: "replace",
+      existing: "1111",
+    });
+  });
+
+  test("選ぶ画面に出す作品ページのURLは、形の分かるサイトだけ組む", () => {
+    expect(readerStatsWorkPageUrl("kakuyomu", "1177354054934574437")).toBe(
+      "https://kakuyomu.jp/works/1177354054934574437"
+    );
+    expect(readerStatsWorkPageUrl("kakuyomu", "作品名")).toBeUndefined();
+    expect(readerStatsWorkPageUrl("narou", "N1234AB")).toBe("https://ncode.syosetu.com/n1234ab/");
+    expect(readerStatsWorkPageUrl("alphapolis", "123")).toBeUndefined();
+  });
+
+  test("登録しないと決めた作品IDの分だけなら、取り込まなかったことと取り消し方を1つの知らせで言う", () => {
+    const notice = readerStatsBundleNotice({
+      works: [],
+      failures: [],
+      declined: ["カクヨム 作品ID 9999"],
+    });
+    expect(notice.level).toBe("info");
+    expect(notice.message).toContain(
+      "登録しないことにした作品ID（カクヨム 作品ID 9999）の分だけでした"
+    );
+    expect(notice.message).toContain("「読者の反応を貼り付けて取り込む」");
+  });
+
+  test("［作品に登録する］を付けるときは、直し方の文でボタンを指す", () => {
+    const notice = readerStatsBundleNotice({
+      works: [],
+      failures: [
+        { label: "カクヨム 作品ID 9999", reason: "見つかりませんでした。", fixByWorkId: true },
+      ],
+      registerOffered: true,
+    });
+    expect(notice.level).toBe("warning");
+    expect(notice.message).toContain(
+      "［作品に登録する］で作品を選ぶと、その場で登録して取り込みます"
+    );
   });
 });

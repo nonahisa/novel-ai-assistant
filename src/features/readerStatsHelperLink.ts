@@ -8,6 +8,8 @@ import {
   type ReaderStatsEnvelope,
 } from "../core/readerStatsEnvelope";
 import {
+  DECLINED_UNDO_HINT,
+  planReaderStatsSiteId,
   pickReaderStatsWork,
   readerStatsAlreadyImported,
   readerStatsBundlePending,
@@ -21,6 +23,12 @@ import { isWebRuntime } from "../core/runtime";
 import { logLine, useLogFile } from "../core/logger";
 import { cancelItem, isCancelItem } from "../views/dialogs";
 import { importReaderStats, importReaderStatsBundle } from "./readerStats";
+import {
+  groupPendingRegistrations,
+  isDeclinedReaderStatsId,
+  showNoticeWithRegister,
+  type ReaderStatsRegisterOptions,
+} from "./readerStatsRegister";
 
 /**
  * ヘルパーから読者の反応を受け取る2つの入口（設計書6.79.7「ヘルパーからの受け口」）。
@@ -233,7 +241,7 @@ export class ReaderStatsHelperLink {
 
     if (pick.kind === "none") {
       if (trigger === "uri") {
-        await explainNoWork(text, envelope, works, candidates);
+        await this.explainOrOfferRegister(text, envelope, works, candidates);
       }
       return;
     }
@@ -320,10 +328,64 @@ export class ReaderStatsHelperLink {
       if (answer !== "取り込む") return;
     }
 
-    const result = await importReaderStatsBundle(bundle, works);
+    const result = await importReaderStatsBundle(bundle, works, {
+      // 登録の無い作品IDは、その場で作品に登録できるようにする（作者の裁定 2026-10-11）
+      register: this.registerOptions(),
+    });
     for (const work of result.changedWorks ?? []) {
       await this.deps.afterImport(work);
     }
+  }
+
+  /** その場で作品IDを登録する道の置き場と後始末（取り込んだら執筆量パネルを作り直す） */
+  private registerOptions(): ReaderStatsRegisterOptions {
+    return {
+      memory: this.deps.memory,
+      afterImport: (work) => this.deps.afterImport(work),
+    };
+  }
+
+  /**
+   * 1件の封筒が、どの作品とも照合できなかったとき（URI のときだけ呼ぶ）。
+   *
+   * **どの作品も登録していない作品IDなら、断るだけにせず［作品に登録する］を付ける**
+   * （作者の裁定 2026-10-11）。「登録しない」と決めたIDならボタンを出さずに1文で言う。
+   * 作品IDが無い封筒は登録しようがないので、これまでどおり理由を言う
+   */
+  private async explainOrOfferRegister(
+    text: string,
+    envelope: ReaderStatsEnvelope,
+    works: readonly WorkEntry[],
+    candidates: readonly ReaderStatsWorkCandidate[]
+  ): Promise<void> {
+    const workId = envelope.workId;
+    const registered =
+      workId !== undefined &&
+      candidates.some(
+        (candidate) =>
+          planReaderStatsSiteId(candidate.ledger, envelope.site, workId).kind === "same"
+      );
+    if (!workId || registered) {
+      await explainNoWork(text, envelope, works, candidates);
+      return;
+    }
+    const siteLabel = postingSiteInfo(envelope.site).label;
+    if (isDeclinedReaderStatsId(this.deps.memory, envelope.site, workId)) {
+      void vscode.window.showInformationMessage(
+        `${siteLabel}の作品ID ${workId} は、登録しないことにした作品IDなので取り込みませんでした。` +
+          DECLINED_UNDO_HINT
+      );
+      return;
+    }
+    showNoticeWithRegister(
+      "warning",
+      `${siteLabel}の作品ID ${workId} を登録した作品が見つからないため、読者の反応を取り込めませんでした。` +
+        "［作品に登録する］で作品を選ぶと、その場で登録して取り込みます。",
+      groupPendingRegistrations([envelope]),
+      works,
+      this.registerOptions(),
+      importReaderStatsBundle
+    );
   }
 
   private seen(fingerprint: string): boolean {

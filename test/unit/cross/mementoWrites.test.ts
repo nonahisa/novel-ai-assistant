@@ -171,6 +171,7 @@ const KEYS: KeyRow[] = [
   { key: "novelai.lastBackupPickFolder", literalIn: "features/backupPickFolder.ts", writtenIn: "features/backupPickFolder.ts", write: /\.update\(\s*BACKUP_PICK_FOLDER_KEY\b/g, guarded: true },
   { key: "novelai.contests.inbox", literalIn: "features/contestImport.ts", writtenIn: "features/contestImport.ts", write: /\.update\(CONTEST_INBOX_KEY\b/g, guarded: true },
   { key: "novelai.readerStats.seenClipboard", literalIn: "features/readerStatsHelperLink.ts", writtenIn: "features/readerStatsHelperLink.ts", write: /\.update\(\s*SEEN_FINGERPRINTS_KEY\b/g, guarded: true },
+  { key: "novelai.readerStats.declinedWorkIds", literalIn: "features/readerStatsRegister.ts", writtenIn: "features/readerStatsRegister.ts", write: /\.update\(DECLINED_READER_STATS_IDS_KEY\b/g, guarded: true },
   { key: "novelai.proofreadingSuite.selection", literalIn: "core/proofreadingSuite.ts", writtenIn: "features/proofreadingSuite.ts", write: /\.update\(\s*PROOFREADING_SUITE_SELECTION_KEY\b/g, guarded: true },
   { key: "novelai.imeDictionary.excluded.", literalIn: "core/imeDictionary.ts", writtenIn: "features/exportImeDictionary.ts", write: /\.update\(imeExcludedKey\(work\.id\)/g, guarded: true },
   { key: "novelai.pendingRename.", literalIn: "features/nameRename.ts", writtenIn: "features/nameRename.ts", write: /\.update\(pendingRenameKey\(workId\)/g, guarded: true },
