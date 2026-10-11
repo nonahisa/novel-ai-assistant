@@ -462,6 +462,8 @@ describe("段の印は、戻った一覧に付き、開き直すと消える", (
       openGuide: async () => undefined,
       hasWork: () => true,
       pickWork: async () => ({ id: "w" }),
+      // 作品は常にあるので呼ばれない（0.102.11 で足した受け口）
+      notifyNeedsWork: async () => undefined,
       askStep: async (_goal, marks) => {
         seen.push(new Map(marks));
         return steps.shift();
