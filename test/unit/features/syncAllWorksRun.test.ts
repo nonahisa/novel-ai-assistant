@@ -6,6 +6,7 @@ import type { GitSyncMonitorLike } from "../../../src/features/gitSyncStub";
 import type { SyncPresave } from "../../../src/features/presaveBeforeSync";
 import type { WorkEntry } from "../../../src/models/types";
 import { window } from "../support/vscodeStub";
+import { cancelRunningTask } from "../../../src/views/progress";
 
 /**
  * 「作品をすべて同期」を、作り物の git で一通り走らせる（設計書5.5.14）。
@@ -537,5 +538,51 @@ describe("記録の前の保存", () => {
     const text = shown.join("\n");
     expect(text).toContain("保存できない作品");
     expect(text).toContain("「003.txt」（保存できませんでした）");
+  });
+});
+
+/**
+ * 同期の途中で［中止］を押す（実機確認リスト A-15「実行中に中止を押すと、途中で止まるか
+ * （それまでの記録・送信は残る）」。2026-10-11 作者の指示「機械でできる実機確認」）。
+ *
+ * 上の「中止すると…」は**始める前の確認で断った**形で、走っている最中ではない。
+ * ここでは本物の進捗（`withCancellableProgress`）とステータスバーの［中止］が呼ぶ
+ * `cancelRunningTask` を通し、**1か所目の送信が済んだところで押す**。
+ */
+describe("同期の途中で中止する", () => {
+  test("1か所目を送ったところで中止すると、2か所目には手を付けず、1か所目の記録と送信は残る", async () => {
+    const libraries: WorkEntry[] = [
+      { id: "wa", title: "先に回る作品", folderPath: "C:/書庫A" },
+      { id: "wb", title: "後に回る作品", folderPath: "C:/書庫B" },
+    ] as WorkEntry[];
+    const twoRegistry = { list: () => libraries } as unknown as WorkRegistry;
+    const twoLibraries: GitCommandRunner = async (args, cwd, timeout) => {
+      const tag = cwd.includes("書庫A") ? "A" : "B";
+      if (args.join(" ") === "rev-parse --show-toplevel") {
+        calls.push([tag, ...args]);
+        return { code: 0, stdout: tag === "A" ? "C:/書庫A" : "C:/書庫B", stderr: "" };
+      }
+      const result = await busyRepo(args, cwd, timeout);
+      calls[calls.length - 1] = [tag, ...args];
+      // 1か所目の送信が終わった瞬間に、作者が［中止］を押す
+      if (tag === "A" && args[0] === "push") await cancelRunningTask();
+      return result;
+    };
+
+    await syncAllWorks({ registry: twoRegistry, monitor, run: twoLibraries });
+
+    const inA = calls.filter((args) => args[0] === "A").map((args) => args[1]);
+    expect(inA).toContain("commit");
+    expect(inA).toContain("push");
+    // 2か所目は、状態を読んだだけで書き込みには進まない
+    const wroteB = calls.filter(
+      (args) =>
+        args[0] === "B" &&
+        (args[1] === "add" || args[1] === "commit" || args[1] === "pull" || args[1] === "push")
+    );
+    expect(wroteB).toEqual([]);
+    // 済んだ分は報告し、同期の印も作り直す（何も起きなかった扱いにしない）
+    expect(refreshedAll).toBe(1);
+    expect(shown.join("\n")).toContain("先に回る作品");
   });
 });

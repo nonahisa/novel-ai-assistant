@@ -130,6 +130,33 @@ describe("届いている反応の選び方", () => {
     expect(reactions[0].readAt).toBe("2026-09-10");
   });
 
+  /**
+   * **サイトごとに最新1件ずつ**（実機確認リスト「読者が読みたいものに、サイトごとの反応が
+   * 最新1件ずつ出る」。その節は3つの輪の紙のもので、2026-09-23 の統合でターゲットシートの
+   * 「届いている反応」へ移った。2026-10-11 作者の指示「機械でできる実機確認」）。
+   *
+   * 上の件はサイトが1つだけなので、別のサイトの記録が混ざったり、1つのサイトから
+   * 2行出たりしても気づけない。
+   */
+  test("2つのサイトに古い記録と新しい記録があれば、サイトごとに最新の1行ずつ並ぶ", () => {
+    const reactions = collectReactions(
+      ledgerWith([
+        stats({ site: "kakuyomu", readAt: "2026-09-01T00:00:00.000Z", metrics: { pv: 100 } }),
+        stats({ site: "narou", readAt: "2026-09-12T00:00:00.000Z", metrics: { pv: 900 } }),
+        stats({ site: "kakuyomu", readAt: "2026-09-15T00:00:00.000Z", metrics: { pv: 600 } }),
+        stats({ site: "narou", readAt: "2026-09-02T00:00:00.000Z", metrics: { pv: 50 } }),
+      ])
+    );
+
+    expect(reactions.map((reaction) => reaction.site)).toEqual(["小説家になろう", "カクヨム"]);
+    const narou = reactions[0];
+    const kakuyomu = reactions[1];
+    expect(narou.metrics).toContain("900");
+    expect(narou.readAt).toBe("2026-09-12");
+    expect(kakuyomu.metrics).toContain("600");
+    expect(kakuyomu.readAt).toBe("2026-09-15");
+  });
+
   test("そのサイトの記録が無ければ、その行は出さない", () => {
     expect(collectReactions(ledgerWith([]))).toEqual([]);
     // 話ごとの記録しか無いサイトも、作品全体の数字が無いので出さない

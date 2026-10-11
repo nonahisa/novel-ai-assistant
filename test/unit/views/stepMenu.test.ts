@@ -415,6 +415,33 @@ describe("作品が1つだけのとき", () => {
     // `resolveWork` が受ける形。これが渡らないと、押すたびに作品を訊かれる
     expect(command?.arguments?.[0]).toEqual({ type: "work", work: only });
   });
+
+  /**
+   * 「5. 投稿脱稿」の「コピー（投稿サイト用）」に指を載せたときの説明
+   * （実機確認リスト 0.96.15「マウスを載せたとき、説明が『貼り付け先（…）を1度だけ訊く』
+   * になっているか」。2026-10-11 作者の指示「機械でできる実機確認」）。
+   *
+   * 説明の文そのものは `core/postingCopyDetail.test.ts` が見ている。ここでは
+   * **簡単ステップメニューのその段に並ぶ行の吹き出し**に、その文が載ることを見る。
+   */
+  test("「5. 投稿脱稿」のコピー（投稿サイト用）の吹き出しに、貼り付け先を1度だけ訊くと出る", () => {
+    const step = STEP_MENU.find((entry) => entry.label === "5. 投稿脱稿");
+    const item = step?.entries.find(
+      (entry): entry is ActionItem =>
+        entry.kind === "action" && entry.command === "novelai.copyForPosting"
+    );
+    expect(item, "「5. 投稿脱稿」にコピー（投稿サイト用）がありません").toBeDefined();
+
+    const treeItem = provider().getTreeItem({ type: "action", item: item as ActionItem });
+    expect(treeItem.label).toBe("コピー（投稿サイト用）");
+    const tooltip = treeItem.tooltip;
+    const text = typeof tooltip === "string" ? tooltip : (tooltip?.value ?? "");
+    expect(text).toContain(
+      "貼り付け先（なろう・カクヨム・アルファポリス・note）を1度だけ訊く"
+    );
+    // 押せない理由の前置きが付いていない（作品を要さない操作なので押せる）
+    expect(text).not.toContain("使えます");
+  });
 });
 
 /**
