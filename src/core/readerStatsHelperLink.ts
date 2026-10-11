@@ -3,7 +3,9 @@ import {
   repeatsReaderStats,
   siteProfile,
   type PostingLedger,
+  type PostingSiteId,
 } from "../models/posting";
+import { narouNcode } from "./postingSiteRecords";
 import { hashText } from "./hash";
 import { SETUP_URI_PATH } from "./setupRequest";
 import { RUN_URI_PATH } from "./runRequest";
@@ -183,7 +185,15 @@ function workIdMatches(
  */
 export type ReaderStatsBundleRoute =
   | { readonly kind: "work"; readonly id: string }
-  | { readonly kind: "none"; readonly reason: string };
+  | {
+      readonly kind: "none";
+      readonly reason: string;
+      /**
+       * **作品IDを作品に登録すれば直る**か（作者の裁定 2026-10-11）。作品IDが届いていて、
+       * それを登録した作品が1つも無いときだけ立つ。立っていれば、その場で登録する道を出す
+       */
+      readonly registrable?: true;
+    };
 
 /**
  * 束の1件の行き先を決める（作者の依頼 2026-09-23。ヘルパー 0.9.0 の「まとめて渡す」）。
@@ -224,7 +234,11 @@ export function routeReaderStatsBundleItem(
       reason: "作品IDが入っていないため、どの作品のものか決められませんでした。",
     };
   }
-  return { kind: "none", reason: "この作品IDを登録した作品が見つかりませんでした。" };
+  return {
+    kind: "none",
+    reason: "この作品IDを登録した作品が見つかりませんでした。",
+    registrable: true,
+  };
 }
 
 /**
@@ -291,6 +305,15 @@ export interface ReaderStatsBundleFailure {
 export interface ReaderStatsBundleOutcome {
   readonly works: readonly ReaderStatsBundleWorkOutcome[];
   readonly failures: readonly ReaderStatsBundleFailure[];
+  /**
+   * 作者が「登録しない」と決めた作品IDの画面（`readerStatsBundleItemLabel`）。
+   * 取り込めなかったものには数えず、ボタンも出さない（作者の裁定 2026-10-11）
+   */
+  readonly declined?: readonly string[];
+  /** 知らせに［作品に登録する］を付けるか（直し方の文を変える） */
+  readonly registerOffered?: boolean;
+  /** 知らせの頭に置く1文（その場で登録したあとの取り込みで「登録しました」を添える） */
+  readonly lead?: string;
 }
 
 /** 知らせに並べる「取り込めなかったもの」の数。**残りは件数で言い、全部は記録に残す** */
@@ -313,7 +336,21 @@ export function readerStatsBundleNotice(outcome: ReaderStatsBundleOutcome): {
     .map((work) => `「${work.title}」${work.screens}画面`)
     .join("・");
 
-  const parts: string[] = [];
+  const declined = outcome.declined ?? [];
+  const parts: string[] = outcome.lead ? [outcome.lead] : [];
+  if (outcome.works.length === 0 && outcome.failures.length === 0 && declined.length > 0) {
+    /*
+      **登録しないと決めた作品IDの分だけだった。** 押したのに何も起きない、に
+      しないよう1文で言う（ボタンは出さない）。取り消し方もここで言う——
+      ほかに覚えを外す画面を持たない
+    */
+    parts.push(
+      "読者の反応を取り込みませんでした。届いたのは、登録しないことにした作品ID" +
+        `（${declined.slice(0, BUNDLE_FAILURES_SHOWN).join(" ／ ")}）の分だけでした。` +
+        DECLINED_UNDO_HINT
+    );
+    return { level: "info", message: parts.join("") };
+  }
   if (outcome.works.length === 0) {
     parts.push("読者の反応を取り込めませんでした。");
   } else if (added === 0) {
@@ -338,12 +375,20 @@ export function readerStatsBundleNotice(outcome: ReaderStatsBundleOutcome): {
       `取り込めなかったもの（${outcome.failures.length}画面）：${shown.join(" ／ ")}` +
         (rest > 0 ? ` ／ ほか${rest}画面（出力パネルに記録しました）` : "")
     );
-    if (outcome.failures.some((failure) => failure.fixByWorkId)) {
+    if (outcome.registerOffered) {
+      parts.push(
+        "［作品に登録する］で作品を選ぶと、その場で登録して取り込みます" +
+          "（「投稿サイト設定」で作品IDを登録してから、ヘルパーの「もう一度渡す」で渡し直しても取り込めます）。"
+      );
+    } else if (outcome.failures.some((failure) => failure.fixByWorkId)) {
       parts.push(
         "取り込みたい作品の「投稿サイト設定」で作品IDを登録してから、" +
           "ヘルパーの「もう一度渡す」で渡し直すと取り込めます（取り込み済みの数は二重に積みません）。"
       );
     }
+  }
+  if (declined.length > 0) {
+    parts.push(`登録しないことにした作品IDの分（${declined.length}画面）は取り込んでいません。`);
   }
   if (added > 0) {
     parts.push("執筆量パネルの「サイトの記録」で履歴を見られます。");
@@ -368,4 +413,96 @@ export function readerStatsAlreadyImported(
   return readerStatsRecordsFromEnvelope(envelope).every((record) =>
     repeatsReaderStats(ledger, record)
   );
+}
+
+/**
+ * 「登録しない」の覚えを取り消す道（作者の裁定 2026-10-11「取り消す道も1つ用意する」）。
+ * 知らせと選ぶ画面の両方で同じ言い方をする
+ */
+export const DECLINED_UNDO_HINT =
+  "登録したくなったら、「読者の反応を貼り付けて取り込む」で同じデータを取り込むと、また選べます。";
+
+/**
+ * 「登録しない」と決めた作品IDを覚えるときの鍵（サイトごとにIDの形が違うので、サイトを前に付ける）。
+ * Nコードは大文字・小文字を問わないので小文字にそろえる
+ */
+export function readerStatsDeclineKey(site: PostingSiteId, workId: string): string {
+  const id = workId.trim();
+  return `${site}:${site === "narou" ? id.toLowerCase() : id}`;
+}
+
+/**
+ * 届いた作品IDの、読者が見る作品ページのURL。選ぶ画面で「どの作品か」を確かめる手がかり。
+ * 形を確かめられるサイト（カクヨム・なろう）だけ組み、ほかは undefined（IDだけを出す）
+ */
+export function readerStatsWorkPageUrl(
+  site: PostingSiteId,
+  workId: string
+): string | undefined {
+  const id = workId.trim();
+  if (site === "kakuyomu") {
+    return /^\d+$/u.test(id) ? `https://kakuyomu.jp/works/${id}` : undefined;
+  }
+  if (site === "narou") {
+    const ncode = narouNcode(id);
+    return ncode ? `https://ncode.syosetu.com/${ncode}/` : undefined;
+  }
+  return undefined;
+}
+
+/** 作品名を比べるときの形（全角・半角、大小、空白・かっこ・記号の違いを無視する） */
+function titleKey(title: string): string {
+  return title
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\s\p{P}\p{S}]/gu, "");
+}
+
+/**
+ * 届いた作品名に近い作品（作者の裁定 2026-10-11「タイトルが同じとは限らないので、入力も必要」）。
+ *
+ * **おすすめにするだけで、選んだことにはしない。** サイトの作品名と書庫の作品名は
+ * 違うことがあり（副題・略称）、近いからといって同じ作品とは限らない。
+ * 一致するか、どちらかがもう一方を含む（2文字以上）ものだけを近いと見る。
+ *
+ * @returns 近い作品の id（並びは渡した順）。作品名が無ければ空
+ */
+export function suggestWorksByTitle(
+  works: readonly { id: string; title: string }[],
+  title: string | undefined
+): string[] {
+  const wanted = titleKey(title ?? "");
+  if (wanted.length < 2) return [];
+  return works
+    .filter((work) => {
+      const key = titleKey(work.title);
+      if (key.length < 2) return false;
+      return key === wanted || key.includes(wanted) || wanted.includes(key);
+    })
+    .map((work) => work.id);
+}
+
+/**
+ * 選んだ作品へ作品IDを登録するとき、何が起きるか。
+ *
+ * - `add`：そのサイトの作品IDがまだ無い（そのまま登録する）
+ * - `same`：もう同じIDが入っている（書かない）
+ * - `replace`：**別のIDが入っている。確かめずに上書きしない**（作者の書いた値）
+ */
+export type ReaderStatsSiteIdPlan =
+  | { readonly kind: "add" }
+  | { readonly kind: "same" }
+  | { readonly kind: "replace"; readonly existing: string };
+
+export function planReaderStatsSiteId(
+  ledger: PostingLedger,
+  site: PostingSiteId,
+  workId: string
+): ReaderStatsSiteIdPlan {
+  const existing = siteProfile(ledger, site)?.workId?.trim();
+  if (!existing) return { kind: "add" };
+  if (readerStatsDeclineKey(site, existing) === readerStatsDeclineKey(site, workId)) {
+    return { kind: "same" };
+  }
+  return { kind: "replace", existing };
 }

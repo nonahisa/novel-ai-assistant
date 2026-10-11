@@ -7285,7 +7285,18 @@ export async function activate(
       const work = await resolveWork(node, registry);
       if (!work) return;
       // まとめて渡された分（ヘルパー 0.9.0）は、登録した作品ぜんぶへ振り分ける
-      const result = await importReaderStats(work, { works: registry.list() });
+      const result = await importReaderStats(work, {
+        works: registry.list(),
+        /*
+          登録の無い作品IDは、その場で作品に登録できるようにする（作者の裁定 2026-10-11）。
+          **手で貼り付けたときは「登録しない」にしたIDでもボタンを出す**——覚えを取り消す道
+        */
+        register: {
+          memory: verifiedState(context.globalState),
+          manual: true,
+          afterImport: (changed) => refreshWritingStatsPanel(changed, deviceId),
+        },
+      });
       if (!result.changed) return;
       for (const changed of result.changedWorks ?? [work]) {
         await refreshWritingStatsPanel(changed, deviceId);

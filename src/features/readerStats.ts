@@ -43,6 +43,12 @@ import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { whenNoticePicked } from "../views/notify";
 import { configurePostingSites } from "./postingKit";
+import {
+  groupPendingRegistrations,
+  isDeclinedReaderStatsId,
+  showNoticeWithRegister,
+  type ReaderStatsRegisterOptions,
+} from "./readerStatsRegister";
 
 /**
  * 読者の反応を台帳へ入れる2つの入口（設計書6.79.7）。
@@ -102,6 +108,20 @@ export interface ImportReaderStatsOptions {
    * 貼り付けたとき、作品ごとに振り分ける先になる。渡さなければ選んだ作品だけ。
    */
   works?: readonly WorkEntry[];
+  /**
+   * まとめて渡された分に、どの作品も登録していない作品IDがあったとき、
+   * その場で作品に登録する道（［作品に登録する］）を出すための置き場と後始末
+   * （作者の裁定 2026-10-11）。渡さなければ、これまでどおり断るだけ
+   */
+  register?: ReaderStatsRegisterOptions;
+}
+
+/** 束の取り込みの呼び方の違い */
+export interface ImportReaderStatsBundleOptions {
+  /** 登録の無い作品IDを、その場で登録する道を出す（`ImportReaderStatsOptions.register`） */
+  register?: ReaderStatsRegisterOptions;
+  /** 知らせの頭に置く1文（その場で登録したあとの取り込みで「登録しました」を添える） */
+  lead?: string;
 }
 
 /**
@@ -204,7 +224,8 @@ export async function importReaderStats(
     const works = options.works ?? [work];
     return importReaderStatsBundle(
       parsed.bundle,
-      works.some((entry) => entry.id === work.id) ? works : [work, ...works]
+      works.some((entry) => entry.id === work.id) ? works : [work, ...works],
+      { register: options.register }
     );
   }
 
@@ -292,8 +313,10 @@ export async function importReaderStats(
  */
 export async function importReaderStatsBundle(
   bundle: ReaderStatsBundle,
-  works: readonly WorkEntry[]
+  works: readonly WorkEntry[],
+  options: ImportReaderStatsBundleOptions = {}
 ): Promise<ReaderStatsResult> {
+  const register = options.register;
   // 各作品の投稿状態を読む。**読めない作品は振り分けの先から外す**（直さずに止める）
   const loaded: { work: WorkEntry; store: PostingStore; ledger: PostingLedger }[] = [];
   const unreadable: WorkEntry[] = [];
@@ -309,6 +332,14 @@ export async function importReaderStatsBundle(
   const candidates = loaded.map((entry) => ({ id: entry.work.id, ledger: entry.ledger }));
 
   const failures: ReaderStatsBundleFailure[] = [];
+  /*
+    どの作品も登録していない作品IDの画面（作者の裁定 2026-10-11）。登録の道を
+    出せるときは、知らせに［作品に登録する］を付けて、押されたらその場で取り込む。
+    「登録しない」と決めたIDの画面は取り込めなかったものに数えず、ボタンも出さない
+    （作者が自分で貼り付けたときだけは出す。覚えを取り消す道）
+  */
+  const unregistered: ReaderStatsEnvelope[] = [];
+  const declined: string[] = [];
   // 作品ごとの画面。**束に最初に出てきた順**（Map は入れた順を保つ）で、中は溜めた順
   const groups = new Map<string, ReaderStatsEnvelope[]>();
   for (const item of bundle.items) {
@@ -323,6 +354,16 @@ export async function importReaderStatsBundle(
     const envelope = item.result.envelope;
     const route = routeReaderStatsBundleItem(envelope, candidates);
     if (route.kind === "none") {
+      if (register && route.registrable && envelope.workId) {
+        if (
+          !register.manual &&
+          isDeclinedReaderStatsId(register.memory, envelope.site, envelope.workId)
+        ) {
+          declined.push(readerStatsBundleItemLabel(envelope));
+          continue;
+        }
+        unregistered.push(envelope);
+      }
       failures.push({
         label: readerStatsBundleItemLabel(envelope),
         reason: route.reason,
@@ -399,13 +440,34 @@ export async function importReaderStatsBundle(
       内訳: failures.map((failure) => `${failure.label}：${failure.reason}`).join("\n"),
     });
   }
+  if (declined.length > 0) {
+    useLogFile(undefined);
+    logStep(`登録しないことにした作品IDの分は取り込みませんでした：${declined.join(" ／ ")}`);
+  }
 
-  const notice = readerStatsBundleNotice({ works: outcomes, failures });
+  const pending = groupPendingRegistrations(unregistered);
+  const notice = readerStatsBundleNotice({
+    works: outcomes,
+    failures,
+    declined,
+    registerOffered: pending.length > 0,
+    lead: options.lead,
+  });
   // 知らせが画面から外れても読み返せるよう、同じ文を操作ログにも残す
   // （`announceResult` と同じ理由。束は作品をまたぐので、書き先は保管庫）
   useLogFile(undefined);
   logStep(notice.message);
-  if (notice.level === "warning") {
+  if (register && pending.length > 0) {
+    // ボタンの答えは待たない（押されたら後から登録して取り込む）
+    showNoticeWithRegister(
+      notice.level,
+      notice.message,
+      pending,
+      works,
+      register,
+      importReaderStatsBundle
+    );
+  } else if (notice.level === "warning") {
     void vscode.window.showWarningMessage(notice.message);
   } else {
     void vscode.window.showInformationMessage(notice.message);
