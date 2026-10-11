@@ -528,10 +528,62 @@ export async function quickInputWaitContext(page: Page): Promise<string> {
   const dialog = await dialogText(page).catch(() => undefined);
   const title = await quickPickTitle(page).catch(() => undefined);
   const menu = await contextMenuOpen(page);
+  const watched = await readQuickInputWatch(page);
   return (
     `（出ている知らせ：${JSON.stringify(toasts)}／確認の窓：${dialog ?? "なし"}` +
-    `／選ぶ画面の題：${title ?? "なし"}／品書き：${menu ? "開いたまま" : "閉じた"}）`
+    `／選ぶ画面の題：${title ?? "なし"}／品書き：${menu ? "開いたまま" : "閉じた"}` +
+    (watched === undefined ? "" : `／押してからの移り変わり：${watched}`) +
+    `）`
   );
+}
+
+/**
+ * 押してから、選ぶ画面・入力欄が開いたか・閉じたか・焦点がどこへ移ったかを、ページの中で
+ * 50ミリ秒ごとに見て、変わったときだけ控える（最大40件）。
+ *
+ * **画面が「出ない」と「一度出てすぐ閉じた」を分けるため。** 母艦の `manuscriptFootNarrow` は
+ * 後者だった（Ctrl+P の入力欄が、遅れて届いた WebView への焦点の移動で閉じた。2026-10-12）。
+ * ノートPCで品書きのあとの画面が出ずに落ちる3件（episodeInsertRenameCommit・workTreeChapterPlot・
+ * manuscriptSurfaceNarrow）は写真からどちらか分からないので、落ちたときの文へ添える
+ */
+export async function startQuickInputWatch(page: Page): Promise<void> {
+  await page
+    .evaluate(() => {
+      type Watch = { timer: number; log: string[]; last: string; start: number };
+      const host = window as unknown as { __novelaiQuickInputWatch?: Watch };
+      if (host.__novelaiQuickInputWatch) window.clearInterval(host.__novelaiQuickInputWatch.timer);
+      const watch: Watch = { timer: 0, log: [], last: "", start: Date.now() };
+      const snapshot = (): string => {
+        const widget = document.querySelector(".quick-input-widget") as HTMLElement | null;
+        const open = !!widget && widget.style.display !== "none" && widget.offsetParent !== null;
+        const title = open ? (widget?.querySelector(".quick-input-title")?.textContent ?? "").trim() : "";
+        const active = document.activeElement as HTMLElement | null;
+        const focus = active
+          ? `${active.tagName.toLowerCase()}${active.className ? "." + String(active.className).split(" ").slice(0, 2).join(".") : ""}`
+          : "なし";
+        return `入力欄=${open ? `開「${title}」` : "閉"} 焦点=${focus}`;
+      };
+      const tick = (): void => {
+        const now = snapshot();
+        if (now === watch.last || watch.log.length >= 40) return;
+        watch.last = now;
+        watch.log.push(`+${Date.now() - watch.start}ms ${now}`);
+      };
+      tick();
+      watch.timer = window.setInterval(tick, 50);
+      host.__novelaiQuickInputWatch = watch;
+    })
+    .catch(() => undefined);
+}
+
+/** `startQuickInputWatch` の控え。始めていなければ undefined */
+async function readQuickInputWatch(page: Page): Promise<string | undefined> {
+  return page
+    .evaluate(() => {
+      const host = window as unknown as { __novelaiQuickInputWatch?: { log: string[] } };
+      return host.__novelaiQuickInputWatch ? host.__novelaiQuickInputWatch.log.join(" → ") : undefined;
+    })
+    .catch(() => undefined);
 }
 
 /** いま出ている選ぶ画面の題。出ていなければ undefined */

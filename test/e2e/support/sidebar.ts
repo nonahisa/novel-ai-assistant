@@ -15,7 +15,7 @@
  */
 import type { Locator, Page } from "playwright-core";
 import { waitUntil } from "./wait";
-import { dismissWorkbenchHover, pressWorkbenchKey } from "./workbenchDom";
+import { dismissWorkbenchHover, pressWorkbenchKey, startQuickInputWatch } from "./workbenchDom";
 
 /**
  * 左の列を出すキー（使い捨ての keybindings.json に書く）。F1〜F12 は埋まったので、
@@ -171,6 +171,8 @@ export async function treeContextMenu(page: Page, head: string, item: string): P
     return `${top.tagName.toLowerCase()}.${String(top.className)}「${(top.textContent ?? "").trim().slice(0, 30)}」`;
   });
   if (covering) throw new Error(`右クリックの品書きの「${item}」の上に別のものが重なっています：${covering}`);
+  // 押したあとの画面が出ないとき、「出ない」か「一度出て閉じた」かを落ちた文で分けるため
+  await startQuickInputWatch(page);
   await entry.click();
   /*
     **押しても品書きが閉じないことがある**（2026-10-04、作品の行の右クリックで踏んだ。
