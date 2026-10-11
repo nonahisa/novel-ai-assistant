@@ -27,6 +27,7 @@ import {
   type PostingLedger,
 } from "../../../src/models/posting";
 import type { WorkEntry } from "../../../src/models/types";
+import { importChaptersFromHelper } from "../../../src/features/importChaptersFromBackup";
 import { env, FileSystemError, Uri, window, workspace } from "../support/vscodeStub";
 
 /**
@@ -563,5 +564,125 @@ describe("作品の絞り込み（画面を出さない部分）", () => {
     expect(list).toEqual(["f2", "f3", "f4"]);
     // 同じものは1つにまとめて末尾へ
     expect(rememberFingerprint(["a", "b"], "a", 3)).toEqual(["b", "a"]);
+  });
+});
+
+/*
+  章立ての封筒（2026-10-11 実機。カクヨムの作品管理の画面で「章立てを統合小説執筆環境へ渡す」を
+  押したら、章の確認が出ずに「読者の反応を取り込めませんでした」が出た）。
+
+  操作ログを読むと、その知らせは**読者の反応のまとめ渡し**（`/import-reader-stats` と束）で
+  出たもので、章立ての封筒からは出ていなかった。ここでは「章立ての封筒が読者の反応の取り込みに
+  読まれない」ことを、窓に戻ったとき・URI が届いたときの両方の順番で固める。
+  あわせて、章立ての呼び出しが届いたことを記録に残す（届いたかどうかを後から確かめられるように）。
+*/
+describe("章立ての封筒は、読者の反応の取り込みに読ませない", () => {
+  function chaptersEnvelopeText(): string {
+    return JSON.stringify({
+      "novelai-chapters": 1,
+      site: "kakuyomu",
+      workId: "1177354054000000001",
+      pageUrl: "https://kakuyomu.jp/my/works/1177354054000000001",
+      readAt: "2026-10-11T19:56:00.000+09:00",
+      episodes: [
+        { heading: "１話　潮の匂い", part: "第一章『岬』" },
+        { heading: "２話　古い地図", part: "第一章『岬』" },
+        { heading: "３話　嵐の夜", part: "第二章『灯』" },
+      ],
+    });
+  }
+
+  function chaptersLink(calls: string[]): ReaderStatsHelperLink {
+    return new ReaderStatsHelperLink({
+      listWorks: () => works,
+      memory,
+      afterImport: async () => undefined,
+      importChapters: async () => {
+        calls.push("chapters");
+      },
+    });
+  }
+
+  test("窓が先に前に出ても、章立ての封筒では何も出さず指紋も残さない", async () => {
+    works = [work("w1", "星を継ぐ者たち")];
+    writeLedger(works[0], onKakuyomu());
+    env.clipboard.text = chaptersEnvelopeText();
+    const calls: string[] = [];
+    const helper = chaptersLink(calls);
+
+    // 窓に戻ったときの確認が先に走り、そのあと章立ての URI が届く順番
+    await helper.checkOnFocus();
+    await helper.handleUri({ path: "/import-chapters" });
+
+    expect(calls).toEqual(["chapters"]);
+    expect(informed).toEqual([]);
+    expect(warned).toEqual([]);
+    expect(memory.values.size).toBe(0);
+    expect(readLedger(works[0])?.readerStats ?? []).toHaveLength(0);
+  });
+
+  test("URI が先に届いても、そのあと窓に戻ったときに読者の反応として訊かない", async () => {
+    works = [work("w1", "星を継ぐ者たち")];
+    writeLedger(works[0], onKakuyomu());
+    env.clipboard.text = chaptersEnvelopeText();
+    const calls: string[] = [];
+    const helper = chaptersLink(calls);
+
+    await helper.handleUri({ path: "/import-chapters" });
+    await helper.checkOnFocus();
+
+    expect(calls).toEqual(["chapters"]);
+    expect(informed).toEqual([]);
+    expect(warned).toEqual([]);
+    expect(memory.values.size).toBe(0);
+  });
+
+  test("読者の反応の URI で章立ての封筒を読んでも、束の「取り込めなかったもの」は出さない", async () => {
+    works = [work("w1", "星を継ぐ者たち")];
+    writeLedger(works[0], onKakuyomu());
+    env.clipboard.text = chaptersEnvelopeText();
+
+    await link().handleUri({ path: "/import-reader-stats" });
+
+    expect(warned).toEqual([]);
+    expect(informed).toHaveLength(1);
+    expect(informed[0]).toContain("読者の反応のデータがありませんでした");
+    expect(informed[0]).not.toContain("取り込めなかったもの");
+    expect(memory.values.size).toBe(0);
+  });
+
+  test("章立ての呼び出しは届いたことを記録に残し、作品が決まらなければ選ぶ画面を出す", async () => {
+    // カクヨムの作品IDを登録した作品が無い（2026-10-11 の作者の書庫と同じ）
+    works = [work("w1", "星を継ぐ者たち"), work("w2", "星を継ぐ者たち_確認用")];
+    writeLedger(works[0], emptyPostingLedger());
+    writeLedger(works[1], emptyPostingLedger());
+    env.clipboard.text = chaptersEnvelopeText();
+
+    await importChaptersFromHelper({
+      listWorks: () => works,
+      afterChange: () => undefined,
+    });
+
+    expect(logged.some((line) => line.includes("章立ての呼び出しを受けました"))).toBe(true);
+    // 作品IDで決まらないので、どの作品へ入れるかを訊く（推し量って決めない）
+    expect(picks).toHaveLength(1);
+    expect(warned).toEqual([]);
+    expect(logged.some((line) => line.includes("作品IDで決まらなかった"))).toBe(true);
+  });
+
+  test("章立ての呼び出しでクリップボードに章立てが無ければ、そのことも記録に残す（中身は残さない）", async () => {
+    works = [work("w1", "星を継ぐ者たち")];
+    writeLedger(works[0], emptyPostingLedger());
+    env.clipboard.text = "今日の買い物：卵、牛乳";
+
+    await importChaptersFromHelper({
+      listWorks: () => works,
+      afterChange: () => undefined,
+    });
+
+    expect(informed).toHaveLength(1);
+    expect(informed[0]).toContain("クリップボードに章立てがありませんでした");
+    expect(logged.some((line) => line.includes("章立てが入っていませんでした"))).toBe(true);
+    expect(logged.join("\n")).not.toContain("卵");
   });
 });

@@ -112,6 +112,13 @@ export async function importChaptersFromBackup(work: WorkEntry): Promise<boolean
  * ちょうど1つならそこへ、そうでなければ作者に選んでもらう（推し量って決めない）。
  */
 export async function importChaptersFromHelper(deps: ChapterImportDeps): Promise<void> {
+  /*
+    **届いたことを最初に記録する**（2026-10-11 実機）。読者の反応の受け口は「呼び出しで受けました」と
+    残すのに、章立ては黙っていた。作者が「章の確認が出なかった」と言ったとき、呼び出しが
+    VS Code まで届かなかったのか、届いてから止まったのかを記録から分けられなかった。
+  */
+  useLogFile(undefined);
+  logLine("ヘルパーから章立ての呼び出しを受けました。");
   const read = await readChaptersClipboard("uri");
   if (!read) return;
 
@@ -122,9 +129,15 @@ export async function importChaptersFromHelper(deps: ChapterImportDeps): Promise
     );
     return;
   }
-  const work =
-    (read.workId ? await workByKakuyomuId(works, read.workId) : undefined) ??
-    (await askWork(works));
+  const byId = read.workId ? await workByKakuyomuId(works, read.workId) : undefined;
+  useLogFile(undefined);
+  logLine(
+    `章立て（${read.outline.length}話、カクヨムの作品ID ${read.workId ?? "なし"}）を` +
+      (byId
+        ? `「${byId.title}」へ当てます。`
+        : "読みました。作品IDで決まらなかったので、取り込む作品を選んでもらいます。")
+  );
+  const work = byId ?? (await askWork(works));
   if (!work) return;
 
   if (await applyChapterOutline(work, read.outline, "カクヨムの作品管理の画面")) {
@@ -292,6 +305,13 @@ async function readChaptersClipboard(
   }
   const parsed = parseChaptersClipboard(text);
   if (!parsed.ok) {
+    // 理由だけを記録する。**クリップボードの中身は残さない**（作者の私物。読者の反応の受け口と同じ線）
+    useLogFile(undefined);
+    logLine(
+      parsed.kind === "invalid"
+        ? `クリップボードの章立てを読めませんでした：${parsed.reason}`
+        : "クリップボードに章立てが入っていませんでした。"
+    );
     if (parsed.kind === "invalid") {
       void vscode.window.showWarningMessage(parsed.reason);
       return undefined;
