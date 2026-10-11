@@ -413,3 +413,111 @@ describe("貯める口", () => {
     expect(exposureOf("novel.extract.commit", { folder: "x" })).toBe("none");
   });
 });
+
+/**
+ * 主人公と同じ一人称の脇役（作者の裁定 2026-10-11「案B：知らせるだけ」。設計書6.5.12）。
+ * 製品の完了報告と同じ文を、`novel.extract.commit` の結果にも出す。
+ */
+describe("novel.extract.commit——主人公と同じ一人称の脇役の知らせ", () => {
+  const BOKU_EPISODE_1 = "001_答案.txt";
+  const BOKU_EPISODE_2 = "002_封筒.txt";
+  const BOKU_TEXT_1 = Array.from(
+    { length: 14 },
+    (_, index) =>
+      `　僕は${index + 1}枚目の答案を見直した。数字が合わない。僕は鉛筆を置き、窓の外の雨をしばらく眺めていた。`
+  ).join("\n");
+  /** 健太が「僕」で語る話。地の文に主人公（春人）の名前が三人称で出る */
+  const BOKU_TEXT_2 =
+    "　僕は体育館の裏で待っていた。春人は約束の時間に遅れてきた。\n" +
+    "　春人が謝る前に、僕は封筒を差し出した。春人は黙って受け取った。\n";
+
+  function makeBokuWork(withKenta: boolean): string {
+    const folder = fs.mkdtempSync(nodePath.join(os.tmpdir(), "novelai-extract-boku-"));
+    temporary.push(folder);
+    fs.mkdirSync(nodePath.join(folder, "本文"), { recursive: true });
+    fs.writeFileSync(nodePath.join(folder, "本文", BOKU_EPISODE_1), BOKU_TEXT_1, "utf8");
+    fs.writeFileSync(nodePath.join(folder, "本文", BOKU_EPISODE_2), BOKU_TEXT_2, "utf8");
+    const dir = nodePath.join(folder, "設定", "characters");
+    fs.mkdirSync(dir, { recursive: true });
+    const haruto = {
+      ...emptyCharacter(nextCharacterId([]), "春人"),
+      firstPerson: { default: "僕", variants: [] },
+    };
+    const people = [haruto];
+    if (withKenta) {
+      people.push({
+        ...emptyCharacter(nextCharacterId([haruto]), "健太"),
+        firstPerson: { default: "僕", variants: [] },
+      });
+    }
+    for (const person of people) {
+      fs.writeFileSync(
+        nodePath.join(dir, `${person.id}_${person.name}.json`),
+        `${JSON.stringify({ ...person, updatedAt: "2026-09-01T00:00:00.000Z" }, null, 2)}\n`,
+        "utf8"
+      );
+    }
+    settingsValidate({
+      folder,
+      chunkId: chunkIdOf(folder, BOKU_EPISODE_2),
+      response: JSON.stringify({
+        characters: [
+          {
+            name: "春人",
+            aliases: [],
+            entityType: "person",
+            summary: "体育館の裏で封筒を渡す",
+            evidence: "僕は封筒を差し出した",
+          },
+        ],
+      }),
+      stash: true,
+    });
+    return folder;
+  }
+
+  const NOTICE_2 =
+    "第2話は、主人公へ入った値に語り手の取り違えの可能性があります（主人公と同じ一人称「僕」を使う人物がいるため）";
+
+  it("同じ一人称の人物が台帳にいれば、値が入った話を知らせる（値は承認待ちのまま）", () => {
+    const folder = makeBokuWork(true);
+    const result = extractCommit({ folder });
+    expect(result.pending.character).toEqual(["春人"]);
+    expect(result.sharedFirstPersonNotices).toEqual([NOTICE_2]);
+  });
+
+  it("dryRun でも同じ知らせを出す", () => {
+    const folder = makeBokuWork(true);
+    expect(extractCommit({ folder, dryRun: true }).sharedFirstPersonNotices).toEqual([NOTICE_2]);
+  });
+
+  it("脇役が台帳に無くても、地の文の主語に主人公の名前が出る話なら知らせる", () => {
+    const folder = makeBokuWork(false);
+    expect(extractCommit({ folder }).sharedFirstPersonNotices).toEqual([NOTICE_2]);
+  });
+
+  it("主人公の話だけから値が入ったなら、知らせの欄は出ない", () => {
+    const folder = makeBokuWork(false);
+    // 第2話の貯めを、第1話（主人公の場面）の答えに置き換える
+    fs.rmSync(extractStashFileOf(folder), { force: true });
+    settingsValidate({
+      folder,
+      chunkId: chunkIdOf(folder, BOKU_EPISODE_1),
+      response: JSON.stringify({
+        characters: [
+          {
+            name: "春人",
+            aliases: [],
+            entityType: "person",
+            summary: "答案を見直す",
+            evidence: "僕は1枚目の答案を見直した",
+          },
+        ],
+      }),
+      stash: true,
+    });
+    const result = extractCommit({ folder });
+    expect(result.pending.character).toEqual(["春人"]);
+    expect(result.sharedFirstPersonNotices).toBeUndefined();
+  });
+});

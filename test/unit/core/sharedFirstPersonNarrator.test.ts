@@ -11,27 +11,33 @@ import type { CharacterExtractResult, ExtractedCharacter } from "../../../src/pr
 import { emptyCharacter, type Character } from "../../../src/models/character";
 import type { RecordChange } from "../../../src/models/jsonValidation";
 import type { Chunk } from "../../../src/core/chunker";
+import {
+  describeSharedFirstPersonNotices,
+  findSharedFirstPersonNotices,
+} from "../../../src/core/sharedFirstPersonNotice";
 
 /**
- * **主人公と同じ一人称の脇役が語る場面**の、いまの動き（0.102.12 で調べた。
- * 作者の指示 2026-10-11「語り手の残り」。設計書6.5.12 の「残っていること」）。
+ * **主人公と同じ一人称の脇役が語る場面**の動き（0.102.12 で調べ、0.102.14 で
+ * 知らせを足した。作者の裁定 2026-10-11「案B：知らせるだけ」。設計書6.5.12）。
  *
  * 6.5.12 は場面の語り手を**地の文の一人称**で見分ける。主人公（春人、地の文
  * 「僕」）と同じ「僕」で脇役（健太）が語る場面は、一人称では見分けがつかない。
  *
- * ここは**直したあとの動きではなく、いまの動きを書き留めたもの**である。
- * 直し方には設計の判断が要る（報告で案を2つ出し、作者の裁定を待つ）。
- * 直したらここが落ちるので、裁定に合わせて書き換えること。
+ * **値の扱いは 0.102.12 のまま変えない**（自動では寄せも外しもしない）。
+ * 変えたのは、抽出の完了報告と `novel.extract.commit` の結果に
+ * 「第N話は、主人公へ入った値に語り手の取り違えの可能性があります」と
+ * 知らせることだけ（`core/sharedFirstPersonNotice.ts`）。
  *
- * 調べて分かったこと（2つの場合に分かれる）：
+ * 動きは2つの場合に分かれる：
  *
  * - **脇役の「僕」が台帳に入っている**：`detectNarrator` は「僕」の持ち主が2人で
- *   語り手を決めない（null）。6.5.12 の歯止めは作品全体で働かない（ほかの一人称の
- *   場面も含めて）。名無しの「僕」の答えはどこにも寄せず、完了報告で名指しする
- *   （安全側）。名前で返った答えは AI の読みのまま入る
+ *   語り手を決めない（null）。6.5.12 の歯止めは作品全体で働かない。名無しの「僕」の
+ *   答えはどこにも寄せず、完了報告で名指しする（安全側）。名前で返った答えは
+ *   AI の読みのまま入る——**入った話を知らせる**（条件1）
  * - **脇役の「僕」が台帳に無い**：主人公が語り手に決まり、脇役の場面は主人公の
  *   場面として扱われる。名無しの「僕」の答えは**コードが主人公へ寄せる**
- *   （`placeUnnamedNarrator`。「僕」の持ち主が1人だけなので）。移す案にも出ない
+ *   （`placeUnnamedNarrator`）。移す案にも出ない——**その話の「僕」の場面の地の文に
+ *   主人公の名前が主語として出ていれば、知らせる**（条件2）
  */
 
 function person(id: string, name: string, firstPerson: string | null): Character {
@@ -86,6 +92,43 @@ function answerOf(character: Partial<ExtractedCharacter>): CharacterExtractResul
 
 const WORK_TEXT = `${HARUTO_SCENE}\n${KENTA_SCENE}`;
 
+/** 作品の話（第1話は主人公の場面、第3話は脇役の場面） */
+const EPISODES = [
+  { chapter: 1, text: HARUTO_SCENE },
+  { chapter: 3, text: KENTA_SCENE },
+];
+
+/** 検算 → マージを通し、知らせまで出す（製品と MCP が通る順） */
+function extractAndNotice(
+  people: Character[],
+  answer: CharacterExtractResult,
+  chunk: Chunk,
+  context: WorkNarratorContext | null
+) {
+  const validated = validateCharacterExtractResult(answer, chunk, {
+    knownRecordNames: ["春人", "健太"],
+    workNarrator: context,
+  });
+  const merged = mergeExtractedCharacters(
+    people,
+    validated.accepted.map((entry) => ({
+      data: entry.data,
+      chapters: entry.chapters,
+      unnamedNarrator: entry.unnamedNarrator,
+    }))
+  );
+  const notices = findSharedFirstPersonNotices({
+    workBodyText: WORK_TEXT,
+    people: merged.characters,
+    landed: merged.landed,
+    episodes: EPISODES,
+  });
+  return { validated, merged, notices };
+}
+
+const NOTICE_3 =
+  "第3話は、主人公へ入った値に語り手の取り違えの可能性があります（主人公と同じ一人称「僕」を使う人物がいるため）";
+
 describe("脇役の「僕」が台帳に入っているとき", () => {
   test("語り手が決まらず、6.5.12 の歯止めは作品全体で働かない", () => {
     expect(workNarratorContextOf(WORK_TEXT, [HARUTO, KENTA_WITH_BOKU])).toBeNull();
@@ -111,9 +154,50 @@ describe("脇役の「僕」が台帳に入っているとき", () => {
     expect(merged.updated).toEqual([]);
     expect(merged.unplacedNarrators).toEqual([{ firstPerson: "僕", candidates: ["春人", "健太"] }]);
   });
+
+  test("名前で返った答えは AI の読みのまま入り、入った話を知らせる（条件1）", () => {
+    const { merged, notices } = extractAndNotice(
+      [HARUTO, KENTA_WITH_BOKU],
+      answerOf({ evidence: "僕は封筒を差し出した" }),
+      chunkOf(KENTA_SCENE, 3),
+      null
+    );
+    // 値の扱いは 0.102.12 のまま（寄せも外しもしない）
+    expect(merged.updated).toEqual(["春人"]);
+    expect(notices.map((notice) => notice.chapter)).toEqual([3]);
+    expect(notices[0].reason).toBe("shared_owner");
+    expect(describeSharedFirstPersonNotices(notices)).toEqual([NOTICE_3]);
+  });
+
+  test("どこにも入らなかった名無しの「僕」では知らせない（入った値が無い）", () => {
+    const { notices } = extractAndNotice(
+      [HARUTO, KENTA_WITH_BOKU],
+      answerOf({ name: "僕", firstPerson: "僕", evidence: "僕は封筒を差し出した" }),
+      chunkOf(KENTA_SCENE, 3),
+      null
+    );
+    expect(notices).toEqual([]);
+  });
+
+  test("同じ答えをもう一度通しても、新しく入る値が無ければ知らせない", () => {
+    const first = extractAndNotice(
+      [HARUTO, KENTA_WITH_BOKU],
+      answerOf({ evidence: "僕は封筒を差し出した" }),
+      chunkOf(KENTA_SCENE, 3),
+      null
+    );
+    const second = extractAndNotice(
+      first.merged.characters,
+      answerOf({ evidence: "僕は封筒を差し出した" }),
+      chunkOf(KENTA_SCENE, 3),
+      null
+    );
+    expect(second.merged.landed).toEqual([]);
+    expect(second.notices).toEqual([]);
+  });
 });
 
-describe("脇役の「僕」が台帳に無いとき（いまの動き：主人公へ入る）", () => {
+describe("脇役の「僕」が台帳に無いとき（値は主人公へ入り、知らせる）", () => {
   const context = workNarratorContextOf(WORK_TEXT, [HARUTO, KENTA_WITHOUT]) as WorkNarratorContext;
 
   test("主人公が語り手に決まり、脇役の場面は主人公の場面と区別されない", () => {
@@ -147,6 +231,34 @@ describe("脇役の「僕」が台帳に無いとき（いまの動き：主人�
     );
     expect(merged.updated).toEqual(["春人"]);
     expect(merged.unplacedNarrators).toEqual([]);
+  });
+
+  test("脇役の場面から主人公へ値が入った話を知らせる（条件2：地の文の主語に主人公の名前）", () => {
+    const { merged, notices } = extractAndNotice(
+      [HARUTO, KENTA_WITHOUT],
+      answerOf({ name: "僕", firstPerson: "僕", evidence: "僕は封筒を差し出した" }),
+      chunkOf(KENTA_SCENE, 3),
+      context
+    );
+    // 値の扱いは 0.102.12 のまま（主人公へ寄せる）
+    expect(merged.updated).toEqual(["春人"]);
+    expect(notices.map((notice) => [notice.chapter, notice.reason])).toEqual([[3, "name_subject"]]);
+    expect(describeSharedFirstPersonNotices(notices)).toEqual([NOTICE_3]);
+  });
+
+  test("主人公の場面（地の文に主人公の名前が出ない話）から入った値では知らせない", () => {
+    const { merged, notices } = extractAndNotice(
+      [HARUTO, KENTA_WITHOUT],
+      answerOf({
+        summary: "答案を見直す",
+        firstPerson: "僕",
+        evidence: "僕は1枚目の答案を見直した",
+      }),
+      chunkOf(HARUTO_SCENE, 1),
+      context
+    );
+    expect(merged.updated).toEqual(["春人"]);
+    expect(notices).toEqual([]);
   });
 
   test("入った値は移す案にも出ない（ほかの語り手の場面だけの話と数えない）", () => {

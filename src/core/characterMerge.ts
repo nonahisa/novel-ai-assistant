@@ -154,6 +154,17 @@ export interface MergeResult {
     /** 同じ一人称を使う人物の名前 */
     candidates: string[];
   }>;
+  /**
+   * 今回のマージで**値が新しく入った**人物と、その値の話数（人物ごとに1件。
+   * 作者の裁定 2026-10-11「案B：知らせるだけ」。設計書6.5.12）。
+   *
+   * 主人公と同じ一人称の脇役がいる作品で「第N話は、主人公へ入った値に語り手の
+   * 取り違えの可能性があります」と知らせるのに使う（`sharedFirstPersonNotice.ts`）。
+   * **答えの話数ではなく、実際に値が入ったかで数える**——キャッシュの答えは
+   * 抽出のたびにマージを通り直すので、答えで数えると同じ知らせが毎回出る。
+   * 作者が確定させた人物（登場話数の追記だけ）は入れない（値は入らない）。
+   */
+  landed: Array<{ characterId: string; characterName: string; chapters: number[] }>;
   /** 同一人物かもしれない組。自動では統合せず、作者の判断に委ねる */
   mergeCandidates: MergeCandidate[];
 }
@@ -292,6 +303,11 @@ export function mergeExtractedCharacters(
   const unplacedNarrators: MergeResult["unplacedNarrators"] = [];
   /** 性格を面の形へ移した人物の id（報告は名前で、最後に並べ直す） */
   const personalityMigrated = new Set<string>();
+  /** 値が新しく入った人物の id と話数（報告は名前で、最後に並べ直す） */
+  const landedChapters = new Map<string, number[]>();
+  const noteLanded = (id: string, chapters: readonly number[]): void => {
+    landedChapters.set(id, mergeChapters(landedChapters.get(id) ?? [], [...chapters]));
+  };
   /** 報告済みの退けた記録（人物id と記録の位置）。何話ぶん当たっても1件に数える */
   const reportedRejections = new Set<string>();
   /** 統合先を決められず新規にした組。作者の判断へ回す */
@@ -350,6 +366,7 @@ export function mergeExtractedCharacters(
       result.push(c);
       added.push(c.name);
       changedIds.add(c.id);
+      noteLanded(c.id, item.chapters);
       // 統合先が複数あって決められなかった場合、データは残しつつ
       // 「どれかと同じかもしれない」ことを作者へ伝える。
       // 黙って新規にすると重複が増えるだけで気づけない。
@@ -461,6 +478,8 @@ export function mergeExtractedCharacters(
       if (!updated.includes(match.name)) updated.push(match.name);
       changedIds.add(match.id);
     }
+    // 性格の形を移しただけ（migrated）は、この答えの値が入ったことにしない
+    if (applied) noteLanded(match.id, item.chapters);
   }
 
   // 話数の違う値は、作者に聞かずに作中の変化として畳む。
@@ -518,6 +537,14 @@ export function mergeExtractedCharacters(
     honorificMerges,
     skippedRejectedRelations,
     unplacedNarrators,
+    // 名前は畳んだあとの記録から引く（台帳の並びで返す）
+    landed: result
+      .filter((character) => (landedChapters.get(character.id)?.length ?? 0) > 0)
+      .map((character) => ({
+        characterId: character.id,
+        characterName: character.name,
+        chapters: landedChapters.get(character.id) ?? [],
+      })),
     mergeCandidates: [
       ...ambiguousPairs.map((pair) => ({
         ...pair,

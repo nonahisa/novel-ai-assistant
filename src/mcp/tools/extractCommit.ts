@@ -77,6 +77,12 @@ import {
   staleReasonOf,
 } from "./extractEnrichStash";
 import { stageNarratorMovesFs, type NarratorMoveStagingResult } from "./narratorMoveFiles";
+import { pastSceneSourcesOf } from "./contradiction";
+import { blankMemoLines } from "../../core/sceneMemo";
+import {
+  describeSharedFirstPersonNotices,
+  findSharedFirstPersonNotices,
+} from "../../core/sharedFirstPersonNotice";
 
 /**
  * 外部AIが行った設定資料の抽出を、**拡張機能の［設定資料を抽出］と同じ形で**
@@ -215,6 +221,12 @@ export interface ExtractCommitResult {
    * 積む予定の）もの。移し先を選んで反映するのは作者（提案パネル）
    */
   narratorMoves: NarratorMoveStagingResult;
+  /**
+   * 主人公と同じ一人称の脇役が語る話から、主人公へ値が入ったかもしれない話の
+   * 知らせ（作者の裁定 2026-10-11「案B：知らせるだけ」。設計書6.5.12。製品の
+   * 完了報告と同じ文）。**値は寄せも外しもしていない。** 無ければ欄ごと出さない
+   */
+  sharedFirstPersonNotices?: string[];
   /** 読み取れた能力の総称と決まり。**保存していない** */
   abilitySystem: { abilityTerm: string | null; rules: string[] };
   /** 貯め場所（抽出の答えと、まとめ）を消したか */
@@ -323,6 +335,7 @@ export function extractCommit(input: ExtractCommitInput): ExtractCommitResult {
     **積み損ねても貯め場所は残さない**（移す案は台帳から作り直せる。抽出の答えとは独立）
   */
   const narratorMoves = stageNarratorMovesFs(input.folder, { dryRun });
+  const sharedFirstPersonNotices = sharedFirstPersonNoticesOf(input.folder, result);
 
   const createdCount = countOf(created);
   const pendingCount = countOf(pending);
@@ -351,6 +364,7 @@ export function extractCommit(input: ExtractCommitInput): ExtractCommitResult {
       result.settingsMerge.organizationMerge.conflicts.length +
       result.settingsMerge.worldMerge.conflicts.length,
     narratorMoves,
+    ...(sharedFirstPersonNotices.length > 0 ? { sharedFirstPersonNotices } : {}),
     abilitySystem: {
       abilityTerm: result.abilityTerm,
       rules: result.abilityRules,
@@ -380,8 +394,38 @@ export function extractCommit(input: ExtractCommitInput): ExtractCommitResult {
       "能力体系（総称・決まり）は保存していません（abilitySystem に読み取れたものを載せています）。" +
       "まとめ（settingsEnrich の fromExtract で貯めたもの）は新しい人物の本体の欄にだけ入れ、" +
       "性格・口調の面と話ごとの値（changes）はそのまま残します。" +
-      "主人公の資料に、ほかの語り手の場面から入った疑いのある値があれば、移す案を承認待ち（.aiwriter/pending-moves/）へ積みます（narratorMoves。移し先は作者が提案パネルで選びます）。",
+      "主人公の資料に、ほかの語り手の場面から入った疑いのある値があれば、移す案を承認待ち（.aiwriter/pending-moves/）へ積みます（narratorMoves。移し先は作者が提案パネルで選びます）。" +
+      "主人公と同じ一人称の脇役が語る話から主人公へ値が入ったかもしれなければ、その話を sharedFirstPersonNotices で知らせます（値は動かしていません）。",
   };
+}
+
+/**
+ * 主人公と同じ一人称の脇役の知らせ（設計書6.5.12。製品の完了報告と同じ決め方）。
+ *
+ * 本文は移す案と同じ `pastSceneSourcesOf`。見るのは今回のマージで値が入った話
+ * だけ（`characterMerge.landed`）。**dryRun でも同じ知らせを出す**——保存すれば
+ * そのとおりに入る値なので、保存する前に作者へ見せられるほうがよい。
+ * 本文が読めなくても保存は止めない（知らせは保存の結果ではない）。
+ */
+function sharedFirstPersonNoticesOf(
+  folder: string,
+  result: ExtractionReplayResult
+): string[] {
+  const merge = result.characterMerge;
+  if (!merge || merge.landed.length === 0) return [];
+  try {
+    const sources = pastSceneSourcesOf(folder);
+    return describeSharedFirstPersonNotices(
+      findSharedFirstPersonNotices({
+        workBodyText: sources.map((source) => blankMemoLines(source.text)).join("\n"),
+        people: merge.characters,
+        landed: merge.landed,
+        episodes: sources,
+      })
+    );
+  } catch {
+    return [];
+  }
 }
 
 /** 抽出を検算し直した結果と、書く場所（`novel.extract.commit` と、まとめ直しのプロンプトが使う） */

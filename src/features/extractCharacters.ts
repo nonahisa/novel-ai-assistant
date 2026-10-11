@@ -91,6 +91,11 @@ import { PendingUpdateStore } from "../core/pendingUpdates";
 import { describeHeldChanges } from "../core/recordChanges";
 import { applyPendingCharacterUpdates } from "./applyPendingUpdates";
 import { stageNarratorMovesAfterExtraction } from "./narratorMovePending";
+import { loadExcerptSources } from "../core/manuscriptSources";
+import {
+  describeSharedFirstPersonNotices,
+  findSharedFirstPersonNotices,
+} from "../core/sharedFirstPersonNotice";
 import type { ProposalPanel } from "./proposalPanel";
 import { ChunkCache } from "../core/chunkCache";
 import { measureParts } from "../core/usageLog";
@@ -1243,6 +1248,37 @@ export async function extractCharacters(
     } catch (error) {
       useLogFile(work.folderPath);
       logFailure("移す案（語り手の取り違え）を積めなかった（抽出は続行）", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /*
+    **主人公と同じ一人称の脇役が語る話から、主人公へ値が入ったかもしれないことを
+    知らせる**（作者の裁定 2026-10-11「案B：知らせるだけ」。設計書6.5.12）。
+    値は寄せも外しもしない——知らせるだけ。今回のマージで値が入った話だけを見る
+    （`merged.landed`）ので、キャッシュの答えを通し直しただけの回は黙る。
+    本文の読み方は移す案と同じ（`loadExcerptSources`）。失敗しても抽出は成功させる
+  */
+  const landed = merged?.landed ?? [];
+  if (merged && landed.length > 0) {
+    try {
+      const { sources } = await loadExcerptSources(work);
+      const sentences = describeSharedFirstPersonNotices(
+        findSharedFirstPersonNotices({
+          workBodyText: sources.map((source) => blankMemoLines(source.text)).join("\n"),
+          people: merged.characters,
+          landed,
+          episodes: sources,
+        })
+      );
+      for (const sentence of sentences) {
+        log.step(sentence);
+        settingsNotice += `\n${sentence}`;
+      }
+    } catch (error) {
+      useLogFile(work.folderPath);
+      logFailure("語り手の取り違えの知らせを組めなかった（抽出は続行）", {
         error: error instanceof Error ? error.message : String(error),
       });
     }
