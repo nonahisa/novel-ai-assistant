@@ -16,7 +16,7 @@
  */
 import type { Page } from "playwright-core";
 import { waitUntil } from "./wait";
-import { pressWorkbenchKey, quickPickRows, quickPickTitle } from "./workbenchDom";
+import { pressWorkbenchKey, quickInputWaitContext, quickPickRows, quickPickTitle } from "./workbenchDom";
 
 const WIDGET = ".quick-input-widget";
 
@@ -35,7 +35,9 @@ export async function quickInputMessage(page: Page): Promise<string> {
 export async function waitForQuickInput(page: Page, title: string, timeoutMs = 15_000): Promise<void> {
   await waitUntil(async () => ((await quickPickTitle(page)) ?? "").includes(title), `「${title}」の画面が出る`, timeoutMs).catch(
     async (error: unknown) => {
-      throw new Error(`${String(error)}（いまの題：「${(await quickPickTitle(page)) ?? ""}」）`);
+      // 題が空としか分からないと、製品が断りの知らせを出したのか押下が届かなかったのかを
+      // 分けられない。知らせ・確認の窓・品書きの様子を添える（`quickInputWaitContext`）
+      throw new Error(`${String(error)}（いまの題：「${(await quickPickTitle(page)) ?? ""}」）${await quickInputWaitContext(page)}`);
     }
   );
 }
