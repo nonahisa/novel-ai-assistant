@@ -59,7 +59,15 @@ describe("小さいモデルへの知らせを自分からは出さない（A11�
 
   test("選ぶ画面は、どの機能でもモデルの行の説明を同じに組む", () => {
     const assign = fs.readFileSync(path.join(SRC, "features", "assignFeatureAI.ts"), "utf8");
-    expect(assign).toContain("pickProviderAndModel(registry)");
+    /*
+      機能ごとに変えてよいのは、**写真の書き起こしで写真を読めるかを添える**ことだけ
+      （設計書6.117.4。モデルの大きさの案内ではなく、送れるかどうかの事実）。
+      それ以外の引数を足したら落ちる
+    */
+    expect(assign).toMatch(
+      /pickProviderAndModel\(\s*registry,\s*feature === "transcribe" \? \{ requires: "image" \} : \{\}\s*\)/
+    );
+    expect(assign.match(/pickProviderAndModel\(/g)?.length).toBe(1);
   });
 });
 

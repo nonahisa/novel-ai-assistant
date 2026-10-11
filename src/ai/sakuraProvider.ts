@@ -13,6 +13,7 @@ import { fetchJson } from "./httpClient";
 import { toOpenAIJsonSchema } from "./jsonSchema";
 import { resolveMaxOutputTokens } from "./outputLimit";
 import { describeWindowCappedOutput } from "./contextGuard";
+import { rejectImagesIfAny } from "./imageInput";
 import { aiCallLog, forgetSecret, logLine, registerSecret } from "../core/logger";
 import {
   resolveContextWindow,
@@ -328,6 +329,8 @@ export class SakuraProvider implements ApiKeyProvider {
       無視して従来どおり答えさせるほうがよい——**道具は答えの質を上げる
       添え物**で、本体はプロンプトの段のほうにある（無くても成り立つ）。
     */
+    // 写真を送れることを確かめていない（設計書6.117.4）。黙って捨てずに止める
+    rejectImagesIfAny(params.images, "さくらのAI");
     const started = Date.now();
     const headers = await this.headers();
 

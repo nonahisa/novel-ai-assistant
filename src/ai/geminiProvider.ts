@@ -12,6 +12,7 @@ import {
 } from "./types";
 import { fetchJson } from "./httpClient";
 import { toGeminiSchema } from "./jsonSchema";
+import { geminiUserParts } from "./imageInput";
 import { aiCallLog, forgetSecret, logLine, registerSecret } from "../core/logger";
 import { verifiedState } from "../core/verifiedMemento";
 import { resolveTimeoutMs } from "../core/modelTuning";
@@ -345,7 +346,10 @@ export class GeminiProvider implements ApiKeyProvider {
       }
       return {
         systemInstruction: { parts: [{ text: params.systemPrompt }] },
-        contents: [{ role: "user", parts: [{ text: params.userPrompt }] }],
+        // 写真があれば文より前に並べる（設計書6.117。無ければ従来どおり文1つ）
+        contents: [
+          { role: "user", parts: geminiUserParts(params.userPrompt, params.images) },
+        ],
         generationConfig,
       };
     };

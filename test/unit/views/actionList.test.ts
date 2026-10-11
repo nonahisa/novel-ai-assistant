@@ -380,6 +380,8 @@ describe("AIの印", () => {
         // 4つには誤字脱字・推敲・矛盾が入っており、料金が出るためである
         "novelai.runProofreadingSuite",
         "novelai.runReaderTargetDiagnosis",
+        // 写真から原稿を起こす（設計書6.117）。写真をAIに書き起こさせる
+        "novelai.transcribePhotos",
         // 「ターゲット読者」（設計書6.108.6）。3段目（本文の実像）と
         // タイトルの適合度でAIを呼ぶ
         "novelai.openTargetReader",
@@ -1188,6 +1190,8 @@ describe("原稿整備と投稿・出力", () => {
       "novelai.importChaptersFromBackup",
       "novelai.convertToMarkdown",
       "novelai.unifyEol",
+      // 手書きの写真から下書きを起こす（設計書6.117）
+      "novelai.transcribePhotos",
     ]);
     // 原稿エディターにもある操作は画面から外したが、木には残す
     // （作者の裁定、2026-09-23 問5 A。コマンドパレットと簡単ステップメニューが引く）

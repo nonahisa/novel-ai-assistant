@@ -10,6 +10,7 @@ import {
 } from "./types";
 import { withAiWork } from "../core/aiActivity";
 import { logLine } from "../core/logger";
+import { rejectImagesIfAny } from "./imageInput";
 
 /**
  * VS Code のエディタが持っているAI（設計書6.87.11）。
@@ -370,6 +371,8 @@ export class VsCodeLmProvider implements AIProvider {
       無視して従来どおり答えさせるほうがよい——**道具は答えの質を上げる
       添え物**で、本体はプロンプトの段のほうにある（無くても成り立つ）。
     */
+    // この口は文字だけを送る作り（設計書6.117.4）。黙って捨てずに止める
+    rejectImagesIfAny(params.images, "VS Code 経由の接続");
     const started = Date.now();
     const models = await this.chatModels();
     const model =

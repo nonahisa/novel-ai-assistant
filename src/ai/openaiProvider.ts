@@ -14,6 +14,7 @@ import {
 import { fetchJson } from "./httpClient";
 import { toOpenAIJsonSchema } from "./jsonSchema";
 import { resolveMaxOutputTokens } from "./outputLimit";
+import { openAiUserContent } from "./imageInput";
 import { forgetSecret, registerSecret } from "../core/logger";
 import {
   resolveContextWindow,
@@ -257,7 +258,8 @@ export class OpenAIProvider implements ApiKeyProvider {
       model: params.model,
       messages: [
         { role: "system", content: params.systemPrompt },
-        { role: "user", content: params.userPrompt },
+        // 写真があれば `image_url` の部品を並べる（設計書6.117。無ければ文字列のまま）
+        { role: "user", content: openAiUserContent(params.userPrompt, params.images) },
       ],
       temperature: params.temperature,
       // 新しいモデルは max_tokens を受け付けず、こちらの名前を要求する。

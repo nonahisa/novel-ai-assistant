@@ -11,6 +11,7 @@ import {
 import { fetchJson } from "./httpClient";
 import { toOpenAIJsonSchema } from "./jsonSchema";
 import { resolveMaxOutputTokens } from "./outputLimit";
+import { openAiUserContent } from "./imageInput";
 import { withAiWork } from "../core/aiActivity";
 import { aiCallLog, logLine } from "../core/logger";
 import {
@@ -416,6 +417,8 @@ export class LmStudioProvider implements AIProvider {
       contextWindow: loadedContextLength(native) ?? this.contextWindowFor(id),
       parameterSize,
       capabilities: ["JSON強制"],
+      // 写真を読めるか（設計書6.117.4）。種別が取れなければ「分からない」のまま
+      ...(native?.type !== undefined ? { imageInput: native.type === "vlm" } : {}),
       // 公開重みのモデルなので、Ollamaと同じ物差しで測る
       tier: inferTier(parameterSize, "ollama"),
       // **表示のためだけに持つ。** 未読込のモデルに「文脈 8k」と出ると
@@ -463,7 +466,8 @@ export class LmStudioProvider implements AIProvider {
       model: params.model,
       messages: [
         { role: "system", content: params.systemPrompt },
-        { role: "user", content: params.userPrompt },
+        // 写真があれば `image_url` の部品を並べる（設計書6.117。無ければ文字列のまま）
+        { role: "user", content: openAiUserContent(params.userPrompt, params.images) },
       ],
       temperature: params.temperature,
       // **呼び出し側の見込みを尊重する**（設計書6.77の第2段）。
