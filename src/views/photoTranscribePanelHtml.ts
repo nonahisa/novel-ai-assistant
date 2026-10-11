@@ -1,5 +1,7 @@
 import { UNREADABLE_MARK } from "../prompts/photoTranscribe";
 import { INLINE_REPEAT_STOP_NOTE } from "../core/photoTranscribeValidation";
+import { SPREAD_ASPECT } from "../core/photoOrientValidation";
+import { ORIENT_PROBE_TURNS, PHOTO_ORIENT_EDGE } from "../prompts/photoOrient";
 
 /**
  * 写真から原稿を起こす画面（設計書6.117）。
@@ -13,12 +15,16 @@ import { INLINE_REPEAT_STOP_NOTE } from "../core/photoTranscribeValidation";
  * ここで重ねて回すと二重になるので、拡張機能が読んだ印の値（`orientation`）は
  * 「自動で回した」と写真の札に出すのにだけ使う。作者が直す90度ずつの回転は、
  * 画面で見た向きを基準にする。
+ *
+ * 写真を読み込んだら、手元のAIに向きを尋ねる（設計書6.117.11。拡張機能が
+ * 「尋ねてよい」と知らせたときだけ）。見えている向きから回した写し（長辺1,024px）を
+ * 渡し、推しが返ったら、その向き・切り方で置き直して札に出す。**作者が先に
+ * 回した・切り方を変えた・外した写真には当てない**（作者の操作が勝つ）。
+ * 書き起こしは勝手に始めない。
  */
 
 /** 送る前に縮める長辺（px）。Claude の1枚5MBの上限に余裕を持って入る。字が潰れないよう、これより小さくしない */
 export const PHOTO_MAX_EDGE = 2000;
-/** 横長と見なす縦横比（幅÷高さ）。これ以上なら見開きとして「左右に切る」を既定で入れる */
-export const SPREAD_ASPECT = 1.2;
 
 export function buildPhotoTranscribeHtml(nonce: string, cspSource: string): string {
   return `<!DOCTYPE html>
@@ -113,12 +119,19 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
   var REPEAT_NOTE = ${JSON.stringify(INLINE_REPEAT_STOP_NOTE)};
   var MAX_EDGE = ${PHOTO_MAX_EDGE};
   var SPREAD = ${SPREAD_ASPECT};
-  /** 写真の並び。{ id, name, img, rotation(0/90/180/270), split, order("lr"|"rl") } */
+  var ORIENT_EDGE = ${PHOTO_ORIENT_EDGE};
+  var ORIENT_TURNS = ${JSON.stringify(ORIENT_PROBE_TURNS)};
+  /**
+   * 写真の並び。{ id, name, img, rotation(0/90/180/270), split, order("lr"|"rl"),
+   *   orienting（手元のAIに向きを尋ねている間）, orientNote（推しの札）, touched（作者が回した・切り方を変えた） }
+   */
   var photos = [];
   /** ページの並び（書き起こしの結果）。{ id, label, dataUrl, textarea } */
   var pages = [];
   var running = false;
   var aiOk = false;
+  /** 手元のAIに向きを尋ねてよいか（拡張機能が知らせる） */
+  var canOrient = false;
 
   function el(tag, attrs, text) {
     var node = document.createElement(tag);
@@ -186,19 +199,21 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
       card.appendChild(el("div", { "class": "name" }, (index + 1) + "枚目：" + photo.name));
       var autoNote = autoRotationNote(photo.orientation);
       if (autoNote) card.appendChild(el("div", { "class": "name", "data-testid": "photo-auto-rotated" }, autoNote));
+      if (photo.orienting) card.appendChild(el("div", { "class": "name", "data-testid": "photo-orienting" }, "向きを手元のAIに尋ねています…（このまま回してもかまいません）"));
+      if (photo.orientNote) card.appendChild(el("div", { "class": "name", "data-testid": "photo-orient-guess" }, photo.orientNote));
       var bar = el("div", { "class": "bar" });
       var left = el("button", { "class": "secondary", "title": "左へ90度回す", "data-testid": "photo-rotate-left" }, "⟲ 左へ回す");
-      left.onclick = function () { setRotation(photo, photo.rotation + 270); };
+      left.onclick = function () { touch(photo); setRotation(photo, photo.rotation + 270); };
       var right = el("button", { "class": "secondary", "title": "右へ90度回す", "data-testid": "photo-rotate-right" }, "⟳ 右へ回す");
-      right.onclick = function () { setRotation(photo, photo.rotation + 90); };
+      right.onclick = function () { touch(photo); setRotation(photo, photo.rotation + 90); };
       var remove = el("button", { "class": "secondary", "title": "この写真を外す" }, "外す");
-      remove.onclick = function () { photos.splice(photos.indexOf(photo), 1); renderPhotos(); };
+      remove.onclick = function () { touch(photo); photos.splice(photos.indexOf(photo), 1); renderPhotos(); };
       bar.appendChild(left); bar.appendChild(right); bar.appendChild(remove);
       card.appendChild(bar);
       var splitLabel = el("label");
       var split = el("input", { type: "checkbox", "data-testid": "photo-split" });
       split.checked = photo.split;
-      split.onchange = function () { photo.split = split.checked; renderPhotos(); };
+      split.onchange = function () { touch(photo); photo.split = split.checked; renderPhotos(); };
       splitLabel.appendChild(split);
       splitLabel.appendChild(document.createTextNode(" 見開き：左右に切る"));
       card.appendChild(splitLabel);
@@ -224,6 +239,31 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
   function autoRotationNote(orientation) {
     var turn = { 2: "左右を反転", 3: "180度回転", 4: "上下を反転", 5: "右へ90度回して反転", 6: "右へ90度回転", 7: "左へ90度回して反転", 8: "左へ90度回転" }[orientation];
     return turn ? "写真の向きの印に合わせて自動で直しました（" + turn + "）。違っていれば下のボタンで回してください。" : "";
+  }
+
+  /**
+   * 作者がこの写真を回した・切り方を変えた・外した。推しはもう当てない。
+   * 尋ねている途中なら、拡張機能に止めてもらう（手元のAIを無駄に回さない）
+   */
+  function touch(photo) {
+    photo.touched = true;
+    photo.orientNote = "";
+    if (photo.orienting) {
+      photo.orienting = false;
+      vscode.postMessage({ type: "orientCancel", id: photo.id });
+    }
+  }
+
+  /** 見えている向きから回した写し（長辺 ORIENT_EDGE）を作って、手元のAIに向きを尋ねる */
+  function askOrient(photo) {
+    if (!canOrient || running) return;
+    var images = ORIENT_TURNS.map(function (turn) {
+      var canvas = drawRotated({ img: photo.img, rotation: (photo.rotation + turn) % 360 }, ORIENT_EDGE);
+      var dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      return { turn: turn, base64: dataUrl.slice(dataUrl.indexOf(",") + 1) };
+    });
+    photo.orienting = true;
+    vscode.postMessage({ type: "orientProbe", id: photo.id, width: rotatedSize(photo).w, height: rotatedSize(photo).h, images: images });
   }
 
   function setRotation(photo, degrees) {
@@ -316,6 +356,9 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
   document.getElementById("cancel").onclick = function () { vscode.postMessage({ type: "cancel" }); };
   document.getElementById("run").onclick = function () {
     if (running) return;
+    // 書き起こしを始めたら、向きを尋ねるのはやめる（拡張機能の側でも止める）。いまの向きで送る
+    photos.forEach(function (photo) { photo.orienting = false; });
+    renderPhotos();
     var out = [];
     photos.forEach(function (photo, index) { out = out.concat(pagesOf(photo, index)); });
     if (out.length === 0) return;
@@ -339,10 +382,11 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
       message.items.forEach(function (item) {
         var img = new Image();
         img.onload = function () {
-          var photo = { id: item.id, name: item.name, img: img, rotation: 0, split: false, order: "lr", orientation: item.orientation };
-          // 横長の写真は見開きとして左右に切るのを既定にする（向きは推さない。設計書6.117.3）
+          var photo = { id: item.id, name: item.name, img: img, rotation: 0, split: false, order: "lr", orientation: item.orientation, orienting: false, orientNote: "", touched: false };
+          // 横長の写真は見開きとして左右に切るのを既定にする（手元のAIの推しが返れば置き直す。設計書6.117.3）
           photo.split = img.naturalWidth >= img.naturalHeight * SPREAD;
           photos.push(photo);
+          askOrient(photo);
           renderPhotos();
         };
         img.onerror = function () {
@@ -353,11 +397,23 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
     } else if (message.type === "ai") {
       var box = document.getElementById("ai");
       aiOk = message.canSend === true;
+      canOrient = message.canOrient === true;
       box.className = aiOk ? "ai" : "ai ng";
       box.textContent = "";
       box.appendChild(el("div", {}, message.label));
       if (message.note) box.appendChild(el("div", { "class": "note" }, message.note));
       updateButtons();
+    } else if (message.type === "orientResult") {
+      var target = photos.filter(function (p) { return p.id === message.id; })[0];
+      if (!target) return;
+      target.orienting = false;
+      // 作者が先に触った写真には当てない。推せなかったときは何も変えない（今までどおりの既定のまま）
+      if (!target.touched && typeof message.rotation === "number" && typeof message.split === "boolean") {
+        target.rotation = message.rotation;
+        target.split = message.split;
+        target.orientNote = String(message.label || "");
+      }
+      renderPhotos();
     } else if (message.type === "running") {
       running = message.on === true;
       document.getElementById("status").textContent = message.text || "";

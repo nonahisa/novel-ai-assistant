@@ -117,6 +117,7 @@ describe("プロンプト設計書の形", () => {
     ["P-46", "src/prompts/targetSheetAdvice.ts", "TARGET_SHEET_ADVICE_VERSION"],
     ["P-47", "src/prompts/findingAdvice.ts", "FINDING_ADVICE_VERSION"],
     ["P-48", "src/prompts/photoTranscribe.ts", "PHOTO_TRANSCRIBE_VERSION"],
+    ["P-49", "src/prompts/photoOrient.ts", "PHOTO_ORIENT_VERSION"],
   ];
 
   test.each(IMPLEMENTED)(
