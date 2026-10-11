@@ -111,13 +111,27 @@ export function isDeclinedReaderStatsId(
 export function groupPendingRegistrations(
   envelopes: readonly ReaderStatsEnvelope[]
 ): PendingReaderStatsRegistration[] {
-  const groups = new Map<string, { site: PostingSiteId; workId: string; envelopes: ReaderStatsEnvelope[] }>();
+  const groups = new Map<
+    string,
+    { site: PostingSiteId; workId: string; envelopes: ReaderStatsEnvelope[]; title?: string }
+  >();
   for (const envelope of envelopes) {
     if (!envelope.workId) continue;
     const key = readerStatsDeclineKey(envelope.site, envelope.workId);
     const found = groups.get(key);
-    if (found) found.envelopes.push(envelope);
-    else groups.set(key, { site: envelope.site, workId: envelope.workId, envelopes: [envelope] });
+    if (found) {
+      found.envelopes.push(envelope);
+      // 作品名は**いちばん新しい画面の分**を使う（届いた順なので後のもの）。
+      // 途中で作品名を変えていれば、いまの名前のほうが作者の書庫の名に近い
+      if (envelope.title) found.title = envelope.title;
+    } else {
+      groups.set(key, {
+        site: envelope.site,
+        workId: envelope.workId,
+        envelopes: [envelope],
+        ...(envelope.title ? { title: envelope.title } : {}),
+      });
+    }
   }
   return [...groups.values()];
 }

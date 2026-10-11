@@ -33,11 +33,11 @@ const SYNC_FILES = [
 /**
  * 旗の外で待っていると分かっている所。**足すときは理由を書く。**
  *
- * - `notifyIfBehind`：エディターを切り替えたときの見張り（`refresh` の
- *   `notify: true`）からだけ呼ばれ、送り直しの旗にも同期のコマンドの札にも
- *   入らない
+ * いまは無い。0.103.9 まで許していた「未取得です」の知らせ（`notifyIfBehind`）は、
+ * 送り直しの旗には入らないが数え直しの印（`refreshing`）の中で待っており、
+ * 押さずに置くとその作品の数え直しが止まったので、`whenNoticePicked` へ直した。
  */
-const ALLOWED = new Set(["src/features/gitSync.ts:「${work.title}」に別の環境での変更が未取得です"]);
+const ALLOWED = new Set<string>();
 
 /** `await vscode.window.showXxxMessage(` から閉じ括弧までを切り出す */
 function awaitedNotices(source: string): string[] {
@@ -102,8 +102,13 @@ describe("同期の旗の中で、ボタン付きの知らせの答えを待た�
     const source = fs.readFileSync(path.join(ROOT, "src/features/gitSync.ts"), "utf8");
     const calls = awaitedNotices(source);
     expect(calls.length).toBeGreaterThan(0);
-    // 許した1件は、ボタンが2つある知らせとして数えられている
-    const behind = calls.find((call) => call.includes("未取得です"));
-    expect(behind && topLevelArgs(behind)).toBe(3);
+    // モーダルの知らせ（改行の注意）は、ボタン2つの呼び出しとして数えられている
+    const modal = calls.find((call) => call.includes("改行コードが変わる"));
+    expect(modal && topLevelArgs(modal)).toBe(4);
+    // ボタン付きの await を見つけられることを、作った呼び出しで確かめる
+    const sample = awaitedNotices(
+      'await vscode.window.showWarningMessage("未取得です", "取り込む", "このまま開く");'
+    );
+    expect(sample.map(topLevelArgs)).toEqual([3]);
   });
 });

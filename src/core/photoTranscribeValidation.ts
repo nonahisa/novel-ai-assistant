@@ -1,4 +1,6 @@
 import { PHOTO_TRANSCRIBE_HINTS, UNREADABLE_MARK } from "../prompts/photoTranscribe";
+import { cutAtInlineRepetition } from "./inlineRepetition";
+import { closeTruncatedJson } from "./truncatedResponse";
 
 /**
  * 写真の書き起こし（P-48、設計書6.117.7）の答えの検算。VS Code に依存しない。
@@ -120,6 +122,35 @@ export function parsePhotoTranscription(raw: string): PhotoTranscribeParse {
       descriptiveLines,
       droppedEchoes,
     },
+  };
+}
+
+/** 1行の中の繰り返しで止めたときに、そのページへ出す言葉（A17） */
+export const INLINE_REPEAT_STOP_NOTE =
+  "同じ字が続いたので止めました。写真の向きをお確かめください。";
+
+/**
+ * 答えを読む。**1行の中で同じ並びが続いていたら、1つ目の並びで切ってから読む**
+ * （残課題 A17、2026-10-11。`core/inlineRepetition.ts`）。
+ *
+ * 流して受け取る道では途中で止まり、流さないAIでは上限まで書いた答えが届く。
+ * どちらも閉じていない JSON なので、切ったあと `closeTruncatedJson` で閉じる。
+ * 読めなければ、止めたことだけを理由にして返す（作者の次の一手は向きの確認）。
+ */
+export function parsePhotoTranscriptionStoppingRepeats(raw: string): {
+  readonly parse: PhotoTranscribeParse;
+  /** 1行の中の繰り返しで切ったか */
+  readonly repeatStopped: boolean;
+} {
+  const head = cutAtInlineRepetition(raw);
+  if (head === undefined) return { parse: parsePhotoTranscription(raw), repeatStopped: false };
+  for (const candidate of closeTruncatedJson(head)) {
+    const parse = parsePhotoTranscription(candidate);
+    if (parse.ok) return { parse, repeatStopped: true };
+  }
+  return {
+    parse: { ok: false, reason: INLINE_REPEAT_STOP_NOTE },
+    repeatStopped: true,
   };
 }
 

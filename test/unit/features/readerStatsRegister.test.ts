@@ -289,6 +289,36 @@ describe("まとめて渡された分（URI）", () => {
     expect(rows(cheat)).toHaveLength(0);
   });
 
+  test("封筒に作品名があれば、近い作品をおすすめにする（先頭は「この中に無い」のまま）", async () => {
+    // ヘルパーが足した省いてよい欄 `title`（2026-10-11）
+    const titled = JSON.parse(
+      buildReaderStatsEnvelope({
+        site: "kakuyomu",
+        workId: KAKUYOMU_ID,
+        readAt: "2026-10-11T10:00:00.000+09:00",
+        title: "教科書チート",
+        entries: [{ scope: "work", metrics: { pv: 100 } }],
+      })
+    );
+    env.clipboard.text = bundleText([titled]);
+    pickItem = () => undefined;
+
+    await link().handleUri({ path: "/import-reader-stats" });
+    await vi.waitFor(() => expect(picks).toHaveLength(1));
+
+    const { items, options } = picks[0];
+    // 既定で選んだことにはしない
+    expect(items[0].workId).toBeUndefined();
+    expect(items[0].label).toContain("この中に無い");
+    const recommended = items.filter((item) =>
+      (item.description ?? "").includes("おすすめ")
+    );
+    expect(recommended.map((item) => item.workId)).toEqual(["cheat"]);
+    expect(options.placeHolder ?? "").toContain("サイトでの作品名：教科書チート");
+    // 閉じたら何も書かない
+    expect(siteProfile(ledgerOf(cheat), "kakuyomu")).toBeUndefined();
+  });
+
   test("選んだ作品にカクヨムの別のIDがあれば、確かめて、断れば上書きしない", async () => {
     writeLedger(
       cheat,

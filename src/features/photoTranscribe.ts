@@ -5,7 +5,9 @@ import { ASSIGNABLE_FEATURE_LABELS, ensureConfigured } from "../ai/registry";
 import { AIError, type AIProvider, type ModelInfo } from "../ai/types";
 import { canSendImages, imageSupportFor, type ImageSupport } from "../ai/imageInput";
 import { describePhotoSend } from "../core/photoTranscribeConfirm";
-import { parsePhotoTranscription } from "../core/photoTranscribeValidation";
+import { parsePhotoTranscriptionStoppingRepeats } from "../core/photoTranscribeValidation";
+import { endsWithInlineRepetition } from "../core/inlineRepetition";
+import { readExifOrientation } from "../core/exifOrientation";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { fromLfText } from "../core/eolSpace";
 import { scanWork } from "../core/scanner";
@@ -162,7 +164,7 @@ async function addPhotos(panel: vscode.WebviewPanel): Promise<void> {
     filters: { 写真: ["jpg", "jpeg", "png", "webp"] },
   });
   if (!uris || uris.length === 0) return;
-  const items: { id: string; name: string; dataUrl: string }[] = [];
+  const items: { id: string; name: string; dataUrl: string; orientation?: number }[] = [];
   for (const uri of uris) {
     const name = path.basename(path.fromUri(uri));
     const mime = IMAGE_TYPES[path.extname(name).toLowerCase()];
@@ -172,10 +174,14 @@ async function addPhotos(panel: vscode.WebviewPanel): Promise<void> {
     }
     try {
       const bytes = await vscode.workspace.fs.readFile(uri);
+      // 向きの印（EXIF）を読んで画面へ添える。回すのは画面の描き方に任せ、
+      // 画面は「自動で回した」ことを出すのに使う（設計書6.117.3）
+      const orientation = readExifOrientation(bytes);
       items.push({
         id: `p${Date.now().toString(36)}${items.length}`,
         name,
         dataUrl: `data:${mime};base64,${bytesToBase64(bytes)}`,
+        ...(orientation !== undefined ? { orientation } : {}),
       });
     } catch (error) {
       void vscode.window.showWarningMessage(
@@ -332,9 +338,20 @@ async function transcribePages(
           numCtx,
         }),
         signal: signal,
+        /*
+          **1行の中で同じ並びが続いたら、流しの途中で受け取りをやめる**（残課題 A17）。
+          gemma4:26b の実測（2026-10-11）：逆向きの写真で、1行の中に同じ9字を
+          903回書き続けて上限まで待った。流さないAIでは、届いたあとで切り詰める
+        */
+        stopWhen: (content) => endsWithInlineRepetition(content) !== undefined,
         meta: { feature: PHOTO_TRANSCRIBE_FEATURE, workFolder: work.folderPath },
       });
-      const parsed = parsePhotoTranscription(result.text);
+      const { parse: parsed, repeatStopped } = parsePhotoTranscriptionStoppingRepeats(
+        result.text
+      );
+      if (repeatStopped) {
+        logStep(`写真の書き起こし：${page.label}で同じ字が続いたので、1つ目の並びで切りました。`);
+      }
       if (!parsed.ok) {
         logFailure("写真の書き起こし", { ページ: page.label, 詳細: parsed.reason });
         void panel.webview.postMessage({
@@ -342,14 +359,13 @@ async function transcribePages(
           id: page.id,
           ok: false,
           /*
-            途中で切れた答えは、向きの違う写真で起きやすい（gemma4:26b の実測 2026-10-11：
-            逆向きの写真で、1行の中に同じ9字を903回書き続けて上限で切れた）。
-            同じ行の繰り返しは止められるが、1行の中の繰り返しは止められないので、
-            次の一手として向きを確かめることを添える
+            途中で切れた答えは、向きの違う写真で起きやすい。繰り返しで止めた回は
+            理由にその旨が入っているので、重ねて添えない
           */
-          error: result.truncated
-            ? `${parsed.reason}答えが途中で切れました。写真の向きをお確かめください。`
-            : parsed.reason,
+          error:
+            result.truncated && !repeatStopped
+              ? `${parsed.reason}答えが途中で切れました。写真の向きをお確かめください。`
+              : parsed.reason,
         });
       } else {
         void panel.webview.postMessage({
@@ -361,7 +377,9 @@ async function transcribePages(
           descriptive: parsed.value.descriptiveLines.length,
           droppedEchoes: parsed.value.droppedEchoes,
           stoppedEarly: result.stoppedEarly !== undefined,
-          truncated: result.truncated,
+          repeatStopped,
+          // 繰り返しで止めた回は、切れたのはこちらが止めたからなので「途中で切れた」と言わない
+          truncated: result.truncated && !repeatStopped,
         });
       }
     } catch (error) {

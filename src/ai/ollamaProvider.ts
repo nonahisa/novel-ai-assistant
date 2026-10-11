@@ -861,7 +861,8 @@ export class OllamaProvider implements AIProvider {
             params.signal,
             params.onThinking,
             this.outputDeadline(params),
-            aiCallLog(params.meta)
+            aiCallLog(params.meta),
+            params.stopWhen
           )
         : await this.fetchJson<ChatResponse>(
             "/api/chat",
@@ -992,7 +993,9 @@ export class OllamaProvider implements AIProvider {
      */
     deadlineSpec?: OutputDeadline,
     /** 受信の記録を書く先（呼び出した作品。`aiCallLog`） */
-    log: WorkLog = aiCallLog(undefined)
+    log: WorkLog = aiCallLog(undefined),
+    /** 機能が決める、受け取りをやめる条件（`GenerateParams.stopWhen`） */
+    stopWhen?: (content: string) => boolean
   ): Promise<ChatResponse> {
     const deadlineMs = deadlineSpec?.ms;
     const controller = new AbortController();
@@ -1085,6 +1088,8 @@ export class OllamaProvider implements AIProvider {
       let buffer = "";
       /** 空白が続いたので、こちらから受け取りをやめたか */
       let whitespaceStopped = false;
+      /** 機能の条件（`stopWhen`）で受け取りをやめたか */
+      let callerStopped = false;
       for (;;) {
         const { done, value } = await reader.read();
         if (controller.signal.aborted) {
@@ -1144,6 +1149,18 @@ export class OllamaProvider implements AIProvider {
           await reader.cancel().catch(() => undefined);
           break;
         }
+        /*
+          **機能が決めた条件で、それ以上待たない**（2026-10-11、残課題 A17）。
+          写真の書き起こしで、1行の中に同じ9字を903回書いて上限まで待った。
+          **切り詰めの印を立てる**——書き切った応答ではないので、速さの台帳に
+          採らせない。切り戻して閉じるのは機能の側
+        */
+        if (stopWhen?.(state.content)) {
+          callerStopped = true;
+          state.truncated = true;
+          await reader.cancel().catch(() => undefined);
+          break;
+        }
       }
       /*
         **最後に取り込み器を空にする**（設計書6.63.1）。
@@ -1157,7 +1174,7 @@ export class OllamaProvider implements AIProvider {
         引数なしの `decode()` が、その持ち越しを吐き出す。
       */
       // 繰り返しで止めた回は、読みかけの断片を足さない（止めた位置は決まっている）
-      if (!state.repetitionStop) {
+      if (!state.repetitionStop && !callerStopped) {
         buffer += decoder.decode();
         // 最後の断片（改行で終わっていない場合）も取り込む
         applyStreamLine(state, buffer);
@@ -1171,6 +1188,9 @@ export class OllamaProvider implements AIProvider {
             : "") +
           (state.repetitionStop
             ? "。同じ要素が続いたので、そこで受け取りをやめました"
+            : "") +
+          (callerStopped
+            ? "。機能の条件（同じ字の繰り返しなど）に当たったので、そこで受け取りをやめました"
             : "")
       );
 
