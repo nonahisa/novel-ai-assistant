@@ -573,6 +573,7 @@ server.registerTool(
       "novel.validate（feature: settings、stash: true）や novel.run（settings、runner: sampling）で貯めた答えを、" +
       "製品と同じ検算とマージに通し、**新しい記録（人物・能力・場所・組織・世界観）は 設定/ へ保存、" +
       "既存の記録への変更は承認待ち**（.aiwriter/pending-characters/・pending-settings/）へ置きます。" +
+      "主人公の資料に語り手の取り違えの疑いがあれば、移す案も承認待ち（pending-moves/）へ積みます（narratorMoves）。" +
       "既存のファイルは書き換えず、同じ名前が既にあれば断って refused で返します。" +
       "読めない設定ファイルがあれば何も書かずに止めます。dryRun: true で、書かずに内訳と、" +
       "新しい人物のまとめ直しの材料（materials。names・offset・limit で絞れる）を返します。" +
@@ -615,7 +616,8 @@ server.registerTool(
       "変わる欄の前と後・古い案か・読めない案か）。" +
       "status が pending のものがパネルに並び、stale は「設定資料更新分反映」で片付けられる古い案です。" +
       "**読むだけで、承認も見送りも片付けもしません。** kind・source で絞り、limit で件数を決めます。" +
-      "kind: finding で提案パネルの指摘（作者が採ったか・退けたか）を読みます（許可は別の鍵 pending.list.finding）。",
+      "kind: finding で提案パネルの指摘（作者が採ったか・退けたか）を読みます（許可は別の鍵 pending.list.finding）。" +
+      "語り手の取り違えの移す案は narratorMoves で返します（移し先は作者が提案パネルで選びます）。",
     inputSchema: PENDING_LIST_INPUT,
   },
   tool("pending.list", (args: PendingListInput) => pendingListTool(args))
