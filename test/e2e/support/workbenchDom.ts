@@ -384,7 +384,9 @@ export async function waitForQuickPick(page: Page, title: string, timeoutMs = 15
     async () => (await quickPickTitle(page)) === title,
     `選ぶ画面「${title}」が出る`,
     timeoutMs
-  );
+  ).catch(async (error: unknown) => {
+    throw new Error(`${String(error)}${await quickInputWaitContext(page)}`);
+  });
   let rows: QuickPickRow[] = [];
   let stable = 0;
   await waitUntil(
@@ -398,6 +400,35 @@ export async function waitForQuickPick(page: Page, title: string, timeoutMs = 15
     10_000
   );
   return rows;
+}
+
+/** 右下に出ている知らせの文（出ていなければ空の配列） */
+export async function notificationTexts(page: Page): Promise<string[]> {
+  return page.locator(".notification-toast").allInnerTexts().catch(() => [] as string[]);
+}
+
+/** 右クリックの品書きが開いたままか */
+export async function contextMenuOpen(page: Page): Promise<boolean> {
+  return (await page.locator(".context-view .monaco-menu").count().catch(() => 0)) > 0;
+}
+
+/**
+ * 選ぶ画面・入力欄を待って時間切れになったときに、失敗の文へ添える画面の様子。
+ *
+ * 待っていた画面が出なかったとき、製品が断りの知らせ（「〜を始められませんでした」など）を
+ * 出して止まったのか、品書きの押下が届かなかったのかを、写真を見る前に文だけで分けたい
+ * （2026-10-11 ノートPC・1.141.0 で「ここから章を始める」が3回に1回出ず、いまの題が空としか
+ * 分からなかった）。形は episodeInsertRenameCommit の失敗の文に揃える
+ */
+export async function quickInputWaitContext(page: Page): Promise<string> {
+  const toasts = await notificationTexts(page);
+  const dialog = await dialogText(page).catch(() => undefined);
+  const title = await quickPickTitle(page).catch(() => undefined);
+  const menu = await contextMenuOpen(page);
+  return (
+    `（出ている知らせ：${JSON.stringify(toasts)}／確認の窓：${dialog ?? "なし"}` +
+    `／選ぶ画面の題：${title ?? "なし"}／品書き：${menu ? "開いたまま" : "閉じた"}）`
+  );
 }
 
 /** いま出ている選ぶ画面の題。出ていなければ undefined */

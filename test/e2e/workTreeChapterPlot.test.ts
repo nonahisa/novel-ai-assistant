@@ -24,6 +24,7 @@ import {
   SIDEBAR_LAUNCH,
   treeContextMenu,
   treeRowLabels,
+  waitTreeSettled,
 } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
@@ -60,6 +61,9 @@ test("話の右クリック「ここから章を始める」で名前を入れ�
       await waitUntil(async () => (await treeRowLabels(page)).some((label) => label.startsWith("第4話")), "作品の下に話が並ぶ");
 
       /* ── 章を始める（F-60） ── */
+      // 一覧が裏の走査・記録待ちの数で描き直している最中に押さない（`waitTreeSettled` の説明）。
+      // ノートPC（1.141.0、2026-10-11）で3回に1回、ここで入力欄が出ずに落ちた
+      await waitTreeSettled(page);
       await treeContextMenu(page, "第3話", "ここから章を始める");
       await waitForQuickInput(page, "ここから章を始める");
       await answerInput(page, CHAPTER_NAME);
@@ -85,6 +89,8 @@ test("話の右クリック「ここから章を始める」で名前を入れ�
       expect(ledger.chapters).toEqual([{ name: CHAPTER_NAME, startEpisodePath: "本文/第3話_山場.txt" }]);
 
       /* ── プロットモード（F-71） ── */
+      // 章を足した直後は一覧が描き直されるので、落ち着いてから押す
+      await waitTreeSettled(page);
       await treeContextMenu(page, E2E_WORK_TITLE, "プロットモード");
       let panel: Frame | undefined;
       await waitUntil(async () => (panel = await plotPanelFrame(page)) !== undefined, "プロットモードのパネルが開く", 30_000);
