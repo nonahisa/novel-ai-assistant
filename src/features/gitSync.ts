@@ -1125,13 +1125,20 @@ export class GitSyncMonitor implements vscode.Disposable {
     });
     // つながらないだけなのか、設定が違うのかで、次にやることが変わる
     const reason = describeNetworkFailure(result.failure.detail);
-    const action = await vscode.window.showErrorMessage(
-      `「${work.title}」の取り込みに失敗しました。${reason ? `
+    // **ボタンを待たない**（2026-10-11）。待つと、作者が閉じるまで
+    // 「取り込み中」と数えたままになり、自動の送り直しが控え続ける
+    whenNoticePicked(
+      vscode.window.showErrorMessage(
+        `「${work.title}」の取り込みに失敗しました。${reason ? `
 ${reason}` : ""}`,
-      "ログを表示",
-      "閉じる"
+        "ログを表示",
+        "閉じる"
+      ),
+      (action) => {
+        if (action === "ログを表示") showLog();
+      },
+      { label: "取り込みの失敗の案内", workFolder: work.folderPath }
     );
-    if (action === "ログを表示") showLog();
     return false;
   }
 
@@ -1422,16 +1429,23 @@ ${reason}` : ""}`,
       詳細: result.detail ?? "（詳細なし）",
     });
     const reason = describeNetworkFailure(result.detail);
-    const action = await vscode.window.showErrorMessage(
-      `「${work.title}」の送信に失敗しました。` +
-        (reason
-          ? `
+    // **ボタンを待たない**（2026-10-11）。待つと、作者が閉じるまで
+    // 「送信中」と数えたままになり、回線が戻っても自動の送り直しが控え続ける
+    whenNoticePicked(
+      vscode.window.showErrorMessage(
+        `「${work.title}」の送信に失敗しました。` +
+          (reason
+            ? `
 ${reason}`
-          : "別の環境の変更が先に送られている場合は、先に取り込んでください。"),
-      "ログを表示",
-      "閉じる"
+            : "別の環境の変更が先に送られている場合は、先に取り込んでください。"),
+        "ログを表示",
+        "閉じる"
+      ),
+      (action) => {
+        if (action === "ログを表示") showLog();
+      },
+      { label: "送信の失敗の案内", workFolder: work.folderPath }
     );
-    if (action === "ログを表示") showLog();
     return false;
   }
 

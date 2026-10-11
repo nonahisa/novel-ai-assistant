@@ -9,6 +9,7 @@ import {
   looksLikeWake,
   normalizeResendIntervalMinutes,
   pickResendTargets,
+  planResend,
   resendDecision,
 } from "../../../src/core/autoResendPlan";
 import {
@@ -206,5 +207,37 @@ describe("途中の操作（readOperationInProgress）", () => {
     expect(
       await readOperationInProgress("C:/書庫", runner([], ["MERGE_HEAD"]))
     ).toContain("読めませんでした");
+  });
+});
+
+/**
+ * 送れていない分があるのに送らない置き場を、見送りとして拾う（2026-10-11）。
+ * 自動の送り直しは、これを理由つきでログに1回だけ残す（黙って見送らない）
+ */
+describe("planResend：見送る置き場", () => {
+  test("分かれていて送らない置き場は、理由つきで見送りに入る", () => {
+    const plan = planResend([
+      { work: "a", status: tracked({ behind: 2, ahead: 1 }) },
+      { work: "b", status: tracked({ behind: 2, ahead: 1 }) },
+    ]);
+    expect(plan.targets).toEqual([]);
+    expect(plan.holds).toEqual([
+      { root: "C:/書庫", works: ["a", "b"], reason: "behind" },
+    ]);
+  });
+
+  test("送るものが無い置き場は、見送りに入らない", () => {
+    const plan = planResend([
+      { work: "a", status: tracked({ ahead: 0 }) },
+      { work: "b", status: tracked({ behind: 3, ahead: 0 }) },
+    ]);
+    expect(plan.targets).toEqual([]);
+    expect(plan.holds).toEqual([]);
+  });
+
+  test("送れる置き場は送る側へ入り、見送りには入らない", () => {
+    const plan = planResend([{ work: "a", status: tracked({ ahead: 2, dirty: 5 }) }]);
+    expect(plan.targets).toEqual([{ root: "C:/書庫", works: ["a"], ahead: 2 }]);
+    expect(plan.holds).toEqual([]);
   });
 });

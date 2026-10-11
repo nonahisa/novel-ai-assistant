@@ -103,17 +103,48 @@ export interface ResendTarget<W> {
 export function pickResendTargets<W>(
   entries: ReadonlyArray<{ work: W; status: GitSyncStatus | undefined }>
 ): ResendTarget<W>[] {
+  return planResend(entries).targets;
+}
+
+/** 送れていない分があるのに、送らないと決めた置き場1つぶん */
+export interface ResendHold<W> {
+  root: string;
+  works: W[];
+  /** 送らない理由（同じ置き場の作品が最初に挙げたもの） */
+  reason: Exclude<ResendSkipReason, "nothing_to_send">;
+}
+
+/**
+ * 送る置き場と、**送れていない分があるのに送らない置き場**の両方を返す。
+ *
+ * 後者は自動の送り直しが「なぜ送らないか」をログへ残すのに使う
+ * （2026-10-11。黙って見送ると、作者もこちらも原因へたどり着けない）。
+ * 送るものが無い置き場はどちらにも入らない——それは見送りではない。
+ */
+export function planResend<W>(
+  entries: ReadonlyArray<{ work: W; status: GitSyncStatus | undefined }>
+): { targets: ResendTarget<W>[]; holds: ResendHold<W>[] } {
   const byRoot = new Map<string, ResendTarget<W>>();
   // 同じ置き場の作品のうち1つでも「送らない」と読めたら、その置き場は送らない
   // （控えの古さが作品ごとに違うことがある。慎重なほうへ倒す）
-  const refused = new Set<string>();
+  const refused = new Map<string, ResendHold<W>["reason"]>();
+  // 送れていない分（ahead）がある置き場。分かれている（behind も ahead もある）
+  // ときは `resendDecision` が送らない側へ倒すので、ここで別に数える
+  const pending = new Map<string, ResendTarget<W>>();
   for (const { work, status } of entries) {
     if (!status || !("root" in status)) continue;
     const key = normalizeForComparison(status.root);
+    if (status.kind === "tracked" && status.ahead > 0) {
+      const found = pending.get(key);
+      if (found) found.works.push(work);
+      else pending.set(key, { root: status.root, works: [work], ahead: status.ahead });
+    }
     const decision = resendDecision(status);
     if (!decision.send) {
       // 送るものが無いだけの作品は、同じ置き場の他の作品を止めない
-      if (decision.reason !== "nothing_to_send") refused.add(key);
+      if (decision.reason !== "nothing_to_send" && !refused.has(key)) {
+        refused.set(key, decision.reason);
+      }
       continue;
     }
     const found = byRoot.get(key);
@@ -124,9 +155,27 @@ export function pickResendTargets<W>(
       byRoot.set(key, { root: status.root, works: [work], ahead: decision.ahead });
     }
   }
-  return [...byRoot.entries()]
+  const targets = [...byRoot.entries()]
     .filter(([key]) => !refused.has(key))
     .map(([, target]) => target);
+  const holds: ResendHold<W>[] = [];
+  for (const [key, reason] of refused) {
+    const waiting = pending.get(key);
+    if (waiting) holds.push({ root: waiting.root, works: waiting.works, reason });
+  }
+  return { targets, holds };
+}
+
+/** 見送った理由を、ログに載せる言葉へ */
+export function describeHoldReason(reason: ResendHold<unknown>["reason"]): string {
+  switch (reason) {
+    case "behind":
+      return "別の環境のほうが進んでいる（取り込みか分岐合流が要る）";
+    case "unmerged":
+      return "競合が解けていない";
+    case "not_tracked":
+      return "GitHub の送り先が決まっていない";
+  }
 }
 
 /**
