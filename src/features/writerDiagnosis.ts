@@ -22,6 +22,7 @@ import { cancelItem, isCancelItem } from "../views/dialogs";
 import { logStep } from "../core/logger";
 import {
   runTutorialFlow,
+  TutorialNoticeGate,
   type TutorialStepChoice,
 } from "../core/tutorialFlow";
 import type { WorkEntry } from "../models/types";
@@ -56,6 +57,12 @@ import {
   askAuthorReaderQuestions,
   showAuthorReaderResult,
 } from "./authorReaderTypeDiagnosis";
+
+/**
+ * はじめの案内の門。**窓（拡張機能ホスト）に1つ**——ヘルプから案内を
+ * 始め直したとき、前の案内の待ちを解くため（`TutorialNoticeGate`）
+ */
+const tutorialNotices = new TutorialNoticeGate();
 
 /**
  * 作家タイプ診断と、はじめの案内（設計書6.90）。
@@ -521,6 +528,13 @@ async function runTutorial(
     return { ...goal, steps: advice.steps, advice, later };
   };
 
+  /*
+    **案内は1つだけ動かす**（2026-10-11）。前の案内の知らせがベルに残って
+    待ったままでも、ここで待ちを解いて終わらせる。古い知らせを押しても
+    古い一覧へは戻らない（`TutorialNoticeGate`）
+  */
+  const session = tutorialNotices.begin();
+
   // 流れ（作品を一度だけ決める・段のあとは知らせ）は core が持つ（設計書6.90.7）
   await runTutorialFlow<Goal, WorkEntry>({
     askGoal,
@@ -552,13 +566,48 @@ async function runTutorial(
       const FINISH = "終える";
       // 知らせは焦点を奪わない。段が開いた紙や画面に焦点を残したまま、
       // 戻りたくなったときだけ押してもらう
-      const picked = await vscode.window.showInformationMessage(
-        `「${step.label}」を開きました。`,
-        BACK,
-        FINISH
+      const picked = await session.wait(
+        vscode.window.showInformationMessage(
+          `「${step.label}」を開きました。`,
+          BACK,
+          FINISH
+        )
       );
       if (picked === BACK) return "back";
       return picked === FINISH ? "finish" : undefined;
+    },
+    notifyNeedsWork: async (step) => {
+      /*
+        作品が1つも無いのに、作品を受ける段が押された（2026-10-11）。
+        段を動かすと「作品が登録されていません。」とだけ出て行き詰まるので、
+        **登録の操作をその場で押せるようにする**。作品一覧が0件のときに出す
+        案内（`viewsWelcome`）と同じ2つを、よく使う順に並べる
+      */
+      const ADD = "フォルダー登録";
+      const CREATE = "新規作品を作成";
+      const BACK = "はじめの案内に戻る";
+      const picked = await session.wait(
+        vscode.window.showInformationMessage(
+          `「${step.label}」は、作品を登録してから使えます。` +
+            "原稿のフォルダーがあれば［フォルダー登録］、これから書くなら［新規作品を作成］を押してください" +
+            "（左の作品一覧からも、バックアップ取込・GitHubからの追加ができます）。",
+          ADD,
+          CREATE,
+          BACK
+        )
+      );
+      if (picked === ADD || picked === CREATE) {
+        await vscode.commands.executeCommand(
+          picked === ADD ? "novelai.addWork" : "novelai.createWork"
+        );
+        /*
+          登録のあとは同じ一覧へ戻す。次に段を押したとき作品を一度だけ決める。
+          登録を取りやめたときも戻す（黙って案内ごと終えると、作者には
+          何が起きたか分からない）
+        */
+        return "back";
+      }
+      return picked === BACK ? "back" : undefined;
     },
     log: logStep,
   });

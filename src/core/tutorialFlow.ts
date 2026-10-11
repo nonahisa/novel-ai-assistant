@@ -78,6 +78,11 @@ export interface TutorialFlowPorts<G extends TutorialFlowGoal, W> {
   /** 段のコマンドを走らせる。`work` は作品を受けるコマンドのときだけ入る */
   runStep(step: TutorialStepInput, work: W | undefined): Promise<unknown>;
   notifyOpened(step: TutorialStepInput): Promise<TutorialAfterStep>;
+  /**
+   * 作品が1つも無いのに、作品を受ける段が押されたときの知らせ。
+   * 作品の登録へ案内する。［はじめの案内に戻る］なら "back"、閉じたら終える
+   */
+  notifyNeedsWork(step: TutorialStepInput): Promise<TutorialAfterStep>;
   log(line: string): void;
 }
 
@@ -118,10 +123,35 @@ export async function runTutorialFlow<G extends TutorialFlowGoal, W>(
         continue;
       }
 
+      const needsWork = stepNeedsWork(picked.step.command);
+      if (needsWork && work === undefined) {
+        if (!ports.hasWork()) {
+          /*
+            **作品が無いまま段を動かさない**（2026-10-11 作者の指示）。
+            動かすと機能の側が「作品が登録されていません。」とだけ出し、
+            何も開いていないのに案内は「開きました」と知らせていた。
+            作者はそこで何をすればよいか分からなくなるので、登録へ案内する。
+            印は付けない（開いていない）
+          */
+          ports.log(
+            `はじめの案内：${goal.label} → ${picked.step.label}（作品が無いので登録へ案内）`
+          );
+          const next = await ports.notifyNeedsWork(picked.step);
+          if (next !== "back") return;
+          continue;
+        }
+        /*
+          案内の途中で作品が登録された（作品の追加の段を開いた等）。目的を
+          選んだ時点では作品が無かったので、ここで一度だけ決める
+        */
+        work = await ports.pickWork();
+        if (work === undefined) return;
+      }
+
       ports.log(`はじめの案内：${goal.label} → ${picked.step.label}`);
       const result = await ports.runStep(
         picked.step,
-        stepNeedsWork(picked.step.command) ? work : undefined
+        needsWork ? work : undefined
       );
       /*
         段の中で取りやめた（確認で断った等）なら、開いたとは言わない。
@@ -138,5 +168,70 @@ export async function runTutorialFlow<G extends TutorialFlowGoal, W>(
       const after = await ports.notifyOpened(picked.step);
       if (after !== "back") return;
     }
+  }
+}
+
+/** 案内1回ぶんの印。新しい案内が始まると `superseded` になる */
+export interface TutorialNoticeSession {
+  readonly superseded: boolean;
+  /**
+   * 知らせの答えを待つ。**新しい案内が始まったら、答えを待たずに
+   * undefined（閉じた）を返す。** 始まったあとで古い知らせが押されても、
+   * 押されたものは捨てる（古い一覧へ戻さない）
+   */
+  wait<T>(pending: PromiseLike<T>): Promise<T | undefined>;
+}
+
+/**
+ * はじめの案内を、拡張機能の中で1つだけ動かすための門。
+ *
+ * ## 2026-10-11 の「古い知らせが残る」
+ *
+ * 段のあとの知らせ（［はじめの案内に戻る］［終える］）は、しばらくすると
+ * 右下から消えて通知センター（ベル）へ移る。**押されるまで案内は待ったまま**
+ * なので、作者が終わったと思ってヘルプから案内をもう一度始めると、古い知らせが
+ * 新しい案内と並んで残り、押すと古い一覧まで戻ってきた。
+ *
+ * VS Code には出した知らせを外から閉じる手段が無い。できるのは、**新しい案内を
+ * 始めた時点で古い案内の待ちを解いて終わらせ、古い知らせが押されても何も
+ * 起こさない**ことである。知らせの箱そのものはベルに残る。
+ */
+export class TutorialNoticeGate {
+  private current: { supersede(): void } | undefined;
+
+  begin(): TutorialNoticeSession {
+    this.current?.supersede();
+    let superseded = false;
+    const waiters = new Set<() => void>();
+    this.current = {
+      supersede: () => {
+        superseded = true;
+        for (const wake of waiters) wake();
+        waiters.clear();
+      },
+    };
+    return {
+      get superseded() {
+        return superseded;
+      },
+      wait: <T>(pending: PromiseLike<T>): Promise<T | undefined> => {
+        if (superseded) return Promise.resolve(undefined);
+        return new Promise<T | undefined>((resolve, reject) => {
+          const wake = (): void => resolve(undefined);
+          waiters.add(wake);
+          pending.then(
+            (value) => {
+              waiters.delete(wake);
+              // 待ちが解けたあとで押された古い知らせは、捨てる
+              resolve(superseded ? undefined : value);
+            },
+            (error: unknown) => {
+              waiters.delete(wake);
+              reject(error);
+            }
+          );
+        });
+      },
+    };
   }
 }

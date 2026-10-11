@@ -12,7 +12,7 @@ import {
 } from "./types";
 import { fetchJson } from "./httpClient";
 import { toGeminiSchema } from "./jsonSchema";
-import { forgetSecret, logLine, registerSecret } from "../core/logger";
+import { aiCallLog, forgetSecret, logLine, registerSecret } from "../core/logger";
 import { verifiedState } from "../core/verifiedMemento";
 import { resolveTimeoutMs } from "../core/modelTuning";
 import { customEndpointNotice } from "../core/endpointNotice";
@@ -363,7 +363,8 @@ export class GeminiProvider implements ApiKeyProvider {
         // 通った組み合わせだけを覚える
         this.rememberSupport(params.model, attempt.support);
         if (attempt.dropped.length > 0) {
-          logLine(
+          // 呼び出した作品のログへ（`aiCallLog`。待つあいだに別の作品が開かれても紛れない）
+          aiCallLog(params.meta).line(
             `Geminiは「${describeDroppedGeminiOptions(attempt.dropped)}」を外すと通りました` +
               `（モデル: ${params.model}）。以後この組み合わせで呼び出します。`
           );
@@ -376,7 +377,7 @@ export class GeminiProvider implements ApiKeyProvider {
         // **何を外したときに何と言われたのかを残す。**
         // Geminiの本文は「invalid argument」だけのことが多いが、
         // 別の理由（スキーマの作りなど）を書いてくることもある
-        logLine(
+        aiCallLog(params.meta).line(
           `Geminiが要求を受け付けませんでした（モデル: ${params.model} / ` +
             `外した指定: ${describeDroppedGeminiOptions(attempt.dropped)}）。` +
             `応答: ${
