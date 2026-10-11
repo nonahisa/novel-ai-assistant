@@ -57,6 +57,8 @@ let repo: {
   ahead: number;
   online: boolean;
   merging: boolean;
+  /** `git status --porcelain` の答え（記録していない変更） */
+  porcelain?: string;
 };
 /** 呼ばれた git（副コマンドの並び） */
 let calls: string[][];
@@ -72,7 +74,7 @@ const fakeGit: GitCommandRunner = async (args) => {
   if (joined === "rev-parse --show-toplevel") {
     return { code: 0, stdout: library, stderr: "" };
   }
-  if (args[0] === "status") return { code: 0, stdout: "", stderr: "" };
+  if (args[0] === "status") return { code: 0, stdout: repo.porcelain ?? "", stderr: "" };
   if (joined === "remote") return { code: 0, stdout: "origin", stderr: "" };
   if (args[0] === "symbolic-ref") return { code: 0, stdout: "main", stderr: "" };
   if (joined.startsWith("rev-parse --abbrev-ref")) {
@@ -120,7 +122,8 @@ const monitor = {
 } as unknown as GitSyncMonitorLike;
 
 let windowsShown: string[];
-let busy: boolean;
+/** 文字列なら「走っている」とその理由（`extension.ts` が渡す形） */
+let busy: boolean | string;
 let settings: AutoResendSettings;
 let clock: number;
 let afterSent: number;
@@ -476,5 +479,92 @@ describe("送り直しの最中に同期が押されたら（逆向きの排他�
     await first;
     await command;
     expect(pushes()).toHaveLength(1);
+  });
+});
+
+/**
+ * 2026-10-11、作者のノートPC（0.103.0）。Wi-Fi を切って「すべて同期」→ 送信だけ
+ * 失敗 → Wi-Fi を入れて20分たっても送られず、**送り直しの行がログに1行も
+ * 無かった**。書庫には自動で書かれる執筆量の記録（stats）の未記録の変更が
+ * 残っていた。
+ *
+ * 原因は「点検が走っている」旗の立ちっぱなし（`handoffStartupNoWait.test.ts`）。
+ * ここでは、**控えているあいだも黙らない**ことと、未記録の変更が送り直しを
+ * 止めないことを確かめる。
+ */
+describe("見送るときは黙らない（2026-10-11 の再現）", () => {
+  const holdLines = (): string[] =>
+    vi
+      .mocked(logStep)
+      .mock.calls.map((call) => String(call[0]))
+      .filter((line) => line.includes("自動の送り直しを見送った"));
+
+  test("同期中の旗が立ったままなら、見送った理由を1回だけログに残す", async () => {
+    busy = "開いたときの点検が終わっていない";
+    const resender = makeResender();
+    await resender.heartbeat();
+    clock += 5 * 60_000;
+    await resender.heartbeat();
+    clock += 5 * 60_000;
+    await resender.onFocus();
+    expect(calls).toEqual([]);
+    expect(holdLines()).toHaveLength(1);
+    expect(holdLines()[0]).toContain("開いたときの点検が終わっていない");
+    expect(windowsShown).toEqual([]);
+
+    // 旗が降りれば、次の鼓動で試す（回線が無ければ失敗を1行）
+    busy = false;
+    clock += 60_000;
+    await resender.heartbeat();
+    expect(pushes()).toHaveLength(1);
+    expect(logFailure).toHaveBeenCalledTimes(1);
+
+    // 回線が戻れば送る
+    repo.online = true;
+    clock += 5 * 60_000;
+    const sent = await resender.heartbeat();
+    expect(sent?.sent).toEqual([{ label: "書庫", ahead: 2 }]);
+  });
+
+  test("見張りの取り込み・送信が終わらないときも、理由を1回だけ残す", async () => {
+    operating = true;
+    const resender = makeResender();
+    await resender.attempt("interval");
+    await resender.attempt("focus");
+    expect(calls).toEqual([]);
+    expect(holdLines()).toHaveLength(1);
+    expect(holdLines()[0]).toContain("取り込み・送信");
+  });
+
+  test("送るものが無ければ、走っていても何も残さない（毎分の鼓動でログを埋めない）", async () => {
+    cached = new Map(works.map((work) => [work.id, tracked(0, 0)]));
+    busy = "同期の操作が走っている";
+    await makeResender().heartbeat();
+    expect(holdLines()).toEqual([]);
+  });
+
+  test("分かれていて送れないときも、理由を1回だけ残す", async () => {
+    cached = new Map(works.map((work) => [work.id, tracked(3, 2)]));
+    const resender = makeResender();
+    await resender.attempt("interval");
+    clock += 5 * 60_000;
+    await resender.attempt("interval");
+    expect(calls).toEqual([]);
+    expect(holdLines()).toHaveLength(1);
+    expect(holdLines()[0]).toContain("書庫");
+  });
+
+  test("執筆量の記録（stats）が未記録でも、記録済みの分は送る", async () => {
+    repo.online = true;
+    repo.ahead = 1;
+    repo.porcelain =
+      " M たゆたう鉛_確認用/.aiwriter/stats/hisa-22a8.json\n" +
+      "?? 事実の照合台_確認用/.aiwriter/stats/\n";
+    cached = new Map(
+      works.map((work) => [work.id, { ...tracked(0, 1), dirty: 2, dirtyHere: 1 }])
+    );
+    const result = await makeResender().heartbeat();
+    expect(pushes()).toEqual([["push"]]);
+    expect(result?.sent).toEqual([{ label: "書庫", ahead: 1 }]);
   });
 });

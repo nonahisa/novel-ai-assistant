@@ -11,10 +11,11 @@ import {
   DEFAULT_RESEND_INTERVAL_MINUTES,
   FOCUS_MIN_GAP_MS,
   RESEND_HEARTBEAT_MS,
+  describeHoldReason,
   describeResent,
   looksLikeWake,
   normalizeResendIntervalMinutes,
-  pickResendTargets,
+  planResend,
   resendDecision,
   type ResendTarget,
 } from "../core/autoResendPlan";
@@ -61,9 +62,12 @@ export interface AutoResendDeps {
   run?: GitCommandRunner;
   /**
    * 同期そのもの（すべて同期・取り込む・送る・分岐合流・開いたときの点検）が
-   * 走っているか。**走っている間は試さない**——同じ置き場へ git を2本走らせない
+   * 走っているか。**走っている間は試さない**——同じ置き場へ git を2本走らせない。
+   *
+   * 文字列を返せば「走っている」とみなし、それを見送った理由としてログへ
+   * 残す（2026-10-11。旗が立ちっぱなしのとき、何が立てているのかを読めるように）
    */
-  isSyncBusy: () => boolean;
+  isSyncBusy: () => boolean | string;
   /** 設定。省くと VS Code の設定を読む */
   settings?: () => AutoResendSettings;
   /** 時計（試験で差し替える） */
@@ -111,6 +115,15 @@ export class AutoResender implements vscode.Disposable {
    * 変わったとき・送れたときに、あらためて1行残す。
    */
   private readonly failures = new Map<string, { count: number; detail: string }>();
+  /**
+   * いま見送っている理由（ログへ書いたもの）。
+   *
+   * **見送るときは黙らない、ただし1回だけ**（2026-10-11、作者のノートPC）。
+   * 「点検が走っている」旗が立ちっぱなしで、20分のあいだ1度も試さず、
+   * ログにも何も残らなかった。毎分の鼓動のたびに書くとログが埋まるので、
+   * 理由が変わったときだけ書き、試せたとき・送るものが無くなったときに忘れる。
+   */
+  private readonly holdNoted = new Map<string, string>();
   private timer: ReturnType<typeof setInterval> | undefined;
   private readonly disposables: vscode.Disposable[] = [];
 
@@ -171,15 +184,30 @@ export class AutoResender implements vscode.Disposable {
   async attempt(trigger: ResendTrigger): Promise<ResendAttempt | undefined> {
     if (this.current) return undefined;
     if (!this.settings().enabled) return undefined;
-    if (this.busy()) return undefined;
 
+    // **送るものがあるかを先に見る**（控えを読むだけで git は呼ばない）。
+    // 送るものが無いのに「走っているので見送った」と書くと、同期のたびに
+    // ログが埋まる
     const works = this.deps.registry.list();
-    const targets = pickResendTargets(
+    const { targets, holds } = planResend(
       works.map((work) => ({ work, status: this.deps.monitor.statusFor(work.id) }))
     );
     // 送るものが無ければ git は呼ばない。**ここで時刻を進めない**——
     // 次に送るものができたら、次の鼓動ですぐ試せるようにする
-    if (targets.length === 0) return undefined;
+    if (targets.length === 0) {
+      if (holds.length === 0) this.holdNoted.clear();
+      for (const hold of holds) {
+        await this.noteHold(hold, describeHoldReason(hold.reason), works);
+      }
+      return undefined;
+    }
+
+    const busy = this.busyReason();
+    if (busy) {
+      for (const target of targets) await this.noteHold(target, busy, works);
+      return undefined;
+    }
+    this.holdNoted.clear();
 
     this.lastAttemptAt = this.now();
     // **走っている試行を掴んでおく。** 作者が同期を押したら、同期の側が
@@ -357,7 +385,43 @@ export class AutoResender implements vscode.Disposable {
   }
 
   private busy(): boolean {
-    return this.deps.isSyncBusy() || (this.deps.monitor.isOperating?.() ?? false);
+    return this.busyReason() !== undefined;
+  }
+
+  /** 控える理由。走っていなければ undefined */
+  private busyReason(): string | undefined {
+    const sync = this.deps.isSyncBusy();
+    if (typeof sync === "string") return sync;
+    if (sync) return "同期の操作が走っている";
+    if (this.deps.monitor.isOperating?.()) return "取り込み・送信が走っている";
+    return undefined;
+  }
+
+  /**
+   * 見送ったことを、その置き場のログへ**理由が変わったときだけ**1行残す。
+   *
+   * **例外を外へ出さない**（鼓動から呼ばれる）。書けなくても見送り自体は続ける。
+   */
+  private async noteHold(
+    place: { root: string; works: WorkEntry[] },
+    reason: string,
+    works: readonly WorkEntry[]
+  ): Promise<void> {
+    const key = normalizeForComparison(place.root);
+    if (this.holdNoted.get(key) === reason) return;
+    this.holdNoted.set(key, reason);
+    try {
+      // 書庫なら書庫のログへ（送り直しの他の記録と同じ置き場）
+      await useSyncLog(place.root, place.works);
+      logStep(
+        `自動の送り直しを見送った（${buildSyncTarget(place.root, works).label}` +
+          `／${reason}。送れていない分は手元に残っています）`
+      );
+    } catch (error) {
+      logFailure("自動の送り直しの見送りを記録できなかった", {
+        詳細: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private settings(): AutoResendSettings {

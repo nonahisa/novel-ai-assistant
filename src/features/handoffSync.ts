@@ -31,6 +31,7 @@ import { buildSyncTarget } from "../core/syncTarget";
 import { logFailure, logStep, showLog } from "../core/logger";
 import { useSyncLog } from "./syncLog";
 import { readMachineName } from "./windowCard";
+import { whenNoticePicked } from "../views/notify";
 import type { GitSyncMonitorLike } from "./gitSyncStub";
 import type { SyncPresave } from "./presaveBeforeSync";
 
@@ -397,17 +398,24 @@ async function reportStartup(
   const buttons = needsFold
     ? [CHOOSE_WHICH_TO_KEEP, "あとで"]
     : ["同期する", "ログを表示"];
-  const answer = await vscode.window.showWarningMessage(
-    lines.join("\n"),
-    ...buttons
+  // **ボタンが押されるのを待たない**（2026-10-11、作者のノートPC）。
+  // 待つと、作者が押さずにベルへ畳んだ間じゅう点検が終わらず、
+  // 「点検が走っている」旗が立ったままになる。自動の送り直しはこの旗を
+  // 見て控えるので、回線が戻っても20分のあいだ1度も試さなかった
+  whenNoticePicked(
+    vscode.window.showWarningMessage(lines.join("\n"), ...buttons),
+    async (answer) => {
+      if (answer === CHOOSE_WHICH_TO_KEEP) {
+        await vscode.commands.executeCommand("novelai.resolveDivergence");
+      } else if (answer === "同期する") {
+        await vscode.commands.executeCommand("novelai.saveAndSync");
+      } else if (answer === "ログを表示") {
+        showLog();
+      }
+    },
+    // 複数の置き場にまたがる知らせなので、失敗の記録は保管庫へ
+    { label: "開いたときの点検の案内" }
   );
-  if (answer === CHOOSE_WHICH_TO_KEEP) {
-    await vscode.commands.executeCommand("novelai.resolveDivergence");
-  } else if (answer === "同期する") {
-    await vscode.commands.executeCommand("novelai.saveAndSync");
-  } else if (answer === "ログを表示") {
-    showLog();
-  }
 }
 
 /** 済んだことを1行で */

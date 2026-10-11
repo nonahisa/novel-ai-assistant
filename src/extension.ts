@@ -7604,7 +7604,14 @@ export async function activate(
       const resender = new AutoResender({
         registry,
         monitor: gitSync,
-        isSyncBusy: () => syncCommandsRunning > 0 || startupHandoffRunning,
+        // 理由を返すと、見送ったときにその理由がログに1行残る（2026-10-11。
+        // 旗が立ちっぱなしで黙って見送り続けた不具合の、次の手がかりにする）
+        isSyncBusy: () =>
+          syncCommandsRunning > 0
+            ? "同期の操作が走っている"
+            : startupHandoffRunning
+              ? "開いたときの点検が終わっていない"
+              : false,
         afterSent: () => handoff.refreshUnsentMark(deps),
       });
       context.subscriptions.push(resender);
