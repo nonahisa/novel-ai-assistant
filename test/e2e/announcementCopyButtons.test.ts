@@ -16,6 +16,8 @@
  * （Electron 本体の `clipboard`）ので、**走らせたあと、前の中身へ戻す**。
  * 「X の投稿欄に貼って字数が収まるか」は別アプリなので見ない（作者の手）。
  */
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { Page } from "playwright-core";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { fakeOllamaLaunch, passLocalAiGate, startFakeOllama, type FakeOllama } from "./support/fakeOllama";
@@ -65,6 +67,60 @@ async function readClipboard(session: E2ESession): Promise<string> {
 }
 async function writeClipboard(session: E2ESession, text: string): Promise<void> {
   await session.app.evaluate(({ clipboard }, value) => clipboard.writeText(value), text);
+}
+
+const run = promisify(execFile);
+
+/**
+ * クリップボードが期待と違ったときの手がかり（2026-10-12、ノートPCの 0.103.8 で単独 0/3）。
+ *
+ * 製品は `await vscode.env.clipboard.writeText` が終わってから次の通知を出すので
+ * （`offerAnnouncementActions`）、「押したあとの通知は出たのに読むと空」は、
+ * **書いたあと読むまでの間に OS のクリップボードが別の誰かに空にされた／押さえられていた**か、
+ * **読み口（Electron 本体）だけが空を返した**かのどちらかになる。1回の失敗で分けられるよう、
+ * - Electron 本体の `readText()` と、入っている形式の一覧（`availableFormats`）
+ * - 別のプロセス（PowerShell の Get-Clipboard）から読んだ字
+ * - そのあと約2秒、0.25秒ごとに Electron 本体から読んだ字の移り変わり
+ * を失敗の文へ添える。**期待値は緩めない**（遅れて入るなら、それも移り変わりで見える）。
+ */
+async function clipboardDiagnosis(session: E2ESession): Promise<string> {
+  const short = (text: string): string => JSON.stringify(text.length > 40 ? `${text.slice(0, 40)}…` : text);
+  const electron = await session.app
+    .evaluate(({ clipboard }) => ({ text: clipboard.readText(), formats: clipboard.availableFormats() }))
+    .catch((error: unknown) => ({ text: `（読めない：${String(error)}）`, formats: [] as string[] }));
+  let fromShell: string;
+  try {
+    // 日本語が化けないよう、出力の符号を UTF-8 に揃えてから読む（PowerShell 5.1 の既定は ANSI）
+    const { stdout } = await run(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", "[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-Clipboard -Raw"],
+      { timeout: 10_000, windowsHide: true, encoding: "utf8" }
+    );
+    fromShell = short(stdout.replace(/\r?\n$/, ""));
+  } catch (error) {
+    fromShell = `（読めない：${String(error)}）`;
+  }
+  const timeline: string[] = [];
+  const started = Date.now();
+  for (let i = 0; i < 8; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const text = await readClipboard(session).catch((error: unknown) => `（読めない：${String(error)}）`);
+    timeline.push(`+${Date.now() - started}ms ${short(text)}`);
+  }
+  return [
+    `Electron 本体：${short(electron.text)}（形式：${JSON.stringify(electron.formats)}）`,
+    `PowerShell の Get-Clipboard：${fromShell}`,
+    `その後の移り変わり：${timeline.join(" → ")}`,
+  ].join("／");
+}
+
+/** クリップボードの字を確かめる。違えば手がかりを添えて落とす（期待そのものは変えない） */
+async function expectClipboard(session: E2ESession, check: (text: string) => boolean, what: string): Promise<string> {
+  const text = await readClipboard(session);
+  if (!check(text)) {
+    throw new Error(`${what}（読んだ字：${JSON.stringify(text)}）／${await clipboardDiagnosis(session)}`);
+  }
+  return text;
 }
 
 test("告知の通知で「X用をコピー」を押すとクリップボードに入り、残りのボタンで通知がもう一度出て、3つ押すとコピーのボタンが無くなる", async () => {
@@ -120,9 +176,12 @@ test("告知の通知で「X用をコピー」を押すとクリップボード�
           "押したあと、「X用 をコピーしました。続けてコピーできます」の通知が出る",
           15_000
         );
-        const copiedX = await readClipboard(session);
         // 製品は文ごとに改行を入れて整える（頭に話の見出し、末尾にタグと URL）。字の並びで見る
-        expect(copiedX.replace(/\s+/g, ""), "クリップボードに X 用の文（AI の文）が入っていません").toContain(X_POST);
+        const copiedX = await expectClipboard(
+          session,
+          (text) => text.replace(/\s+/g, "").includes(X_POST),
+          "クリップボードに X 用の文（AI の文）が入っていません"
+        );
         expect(copiedX, "ハッシュタグが付いていません").toContain("#創作");
         expect(copiedX, "作品ページの URL が付いていません").toContain("https://example.com/e2e-work");
         await waitUntil(
@@ -139,7 +198,7 @@ test("告知の通知で「X用をコピー」を押すとクリップボード�
           "「X用・活動報告用 をコピーしました」の通知が出る",
           15_000
         );
-        expect(await readClipboard(session)).toBe(ACTIVITY);
+        await expectClipboard(session, (text) => text === ACTIVITY, "クリップボードに活動報告用の文が入っていません");
         await waitUntil(async () => (await noticeButtons(page)).join("|") === "後書き用をコピー|Xへ貼り付ける（投稿画面を開く）", "残りは後書き用と貼り付けだけ");
 
         await page.locator(".notification-toast .monaco-button", { hasText: "後書き用をコピー" }).first().click();
@@ -148,7 +207,7 @@ test("告知の通知で「X用をコピー」を押すとクリップボード�
           "「X用・活動報告用・後書き用 をコピーしました」の通知が出る",
           15_000
         );
-        expect(await readClipboard(session)).toBe(AFTERWORD);
+        await expectClipboard(session, (text) => text === AFTERWORD, "クリップボードに後書き用の文が入っていません");
 
         /* ── 3つ押したあと：コピーのボタンは無く、残るのは「Xへ貼り付ける」だけ ── */
         await waitUntil(
