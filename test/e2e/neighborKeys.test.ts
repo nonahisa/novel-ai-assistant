@@ -71,7 +71,8 @@ test("途中の話の Alt+↓ は隣を開いて打った字を残し、最終�
 
       // ── 最終話（第2話）で Alt+↓ ──
       // キーは焦点のある面が受ける。作者と同じく、いま前にある第1話の本文に焦点を入れてから押す
-      await placeCaretAfter(firstAgain, "朝が来た。甲");
+      // 針は打つ前からある字にする（打った「甲」が同じ字の並びの節点に続くとは限らない）
+      await placeCaretAfter(firstAgain, "朝が来た。");
       await clearNotifications(page);
       await page.keyboard.press("Alt+ArrowDown");
       await waitFrontTab(page, LAST, "もう一度 Alt+↓ で第2話のタブが前に出る");
