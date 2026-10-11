@@ -1,0 +1,788 @@
+{
+  "_説明": "矛盾検知（P-12・版1.9）の口調の食い違い（実機確認リスト L436・L497、field-ai の撃ち C2）を、さくらのAI preview/gemma-4-31B-it で測った記録。台は novel-ai-bench/field-ai/台/台C_照合台_口調（measure.mjs が一時フォルダーへ写して撃つ）。手元の gemma4:31b（docs/measurements/2026-10-11-contradiction-speech-gemma4_31b.json）と並べるため。",
+  "speechSummary": {
+    "seeds": [
+      "第4話43行 蓬田「それはよかったですね。私のは一生ものですけれど」（ぶっきらぼう・敬語なしの設定に反する）",
+      "第5話41行 千夏「そうか、ではありませんわ。わたくし、驚きましたのよ」（一人称私・くだけた話し方の設定に反する）"
+    ],
+    "traps": [
+      "第3話30行 蓬田「なんだ、そんな顔をするな」",
+      "第4話65行 千夏「じゃあ、私は窓口ね」"
+    ],
+    "path": "scripts/measure.mjs contradiction --runner sakura --repeat 2（novel.prompt → さくらのAI → novel.validate）",
+    "verifyStage": "確かめの段（P-12b）は通していない。novel.run の行き先は ollama・claude・sampling だけで、さくらへは向けられない。さくらの道は第1段と検算（validate）までなので、落ちた場所は「第1段で挙げなかった」「検算で落ちた」の2つしか数えられない。手元の 26b・31b（novel.run、確かめの段まで）とはこの点で条件が違う",
+    "promptShape": "頼み方（categories・suppression）は台本が決めず、束の既定（大きさの分からない道＝大きいモデル向けの all・loose）で送った。31B・Kimi はどちらも製品では大きいモデルとして扱われるので、製品と同じ形のはず（sakuraProvider の判定そのものは通していない）",
+    "preview/gemma-4-31B-it（さくら）": {
+      "bundle": "0.102.8",
+      "promptVersion": "1.9",
+      "seedsFound": "1/2・1/2（回ごと）",
+      "traps": 0,
+      "whereLost": "2回とも、千夏（第5話41行）は第1段で挙げて検算を通った。蓬田（第4話43行）は2回とも第1段で挙げていない。代わりに直前の第4話39行「戻ったか」を口調で挙げ、自分の説明の中で「蓬田自身の口調に矛盾はない…この項目は削除する」と取り下げ、検算が self_denied で落とした（2回とも同じ）",
+      "otherSeeds": "元の照合台の仕込み4件は 4/4・4/4（区分ちがい0）",
+      "falsePositives": "1件・1件。第3話19行 千夏の台詞「あの坂、三つ目がいちばんきつい」を、第1話の地の文「二つ目でいちばん脚を使う」と食い違う「既出情報」とした。人の感じ方の違いで、食い違いではない（たぶん誤検出）。第1話（指摘が出てはいけない話）への指摘は0",
+      "failuresAndEmpty": "0・0（空の応答・形の崩れなし）",
+      "requests": "10回（5話×2回。再試行・待たされた回なし）",
+      "elapsedSec": [
+        48,
+        45
+      ],
+      "completionTokens": [
+        [
+          387,
+          435,
+          598,
+          754,
+          885
+        ],
+        [
+          387,
+          439,
+          610,
+          763,
+          884
+        ]
+      ],
+      "runs": [
+        {
+          "round": 1,
+          "elapsedSec": 48,
+          "failures": [],
+          "items": [
+            {
+              "id": "仕込み1 第4話43行 蓬田",
+              "seed": true,
+              "where": "なし（AIが第1段で挙げていない）",
+              "rejected": []
+            },
+            {
+              "id": "仕込み2 第5話41行 千夏",
+              "seed": true,
+              "where": "accepted（検算を通った）",
+              "rejected": []
+            },
+            {
+              "id": "罠1 第3話30行 蓬田",
+              "seed": false,
+              "where": "なし（AIが第1段で挙げていない）",
+              "rejected": []
+            },
+            {
+              "id": "罠2 第4話65行 千夏",
+              "seed": false,
+              "where": "なし（AIが第1段で挙げていない）",
+              "rejected": []
+            }
+          ]
+        },
+        {
+          "round": 2,
+          "elapsedSec": 45,
+          "failures": [],
+          "items": [
+            {
+              "id": "仕込み1 第4話43行 蓬田",
+              "seed": true,
+              "where": "なし（AIが第1段で挙げていない）",
+              "rejected": []
+            },
+            {
+              "id": "仕込み2 第5話41行 千夏",
+              "seed": true,
+              "where": "accepted（検算を通った）",
+              "rejected": []
+            },
+            {
+              "id": "罠1 第3話30行 蓬田",
+              "seed": false,
+              "where": "なし（AIが第1段で挙げていない）",
+              "rejected": []
+            },
+            {
+              "id": "罠2 第4話65行 千夏",
+              "seed": false,
+              "where": "なし（AIが第1段で挙げていない）",
+              "rejected": []
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "record": {
+    "measuredAt": "2026-10-11T02:51:55.172Z",
+    "feature": "contradiction",
+    "runner": "sakura",
+    "tool": "novel.prompt → novel.validate",
+    "model": "preview/gemma-4-31B-it",
+    "numCtx": 32768,
+    "numCtxDecision": {
+      "numCtx": 32768,
+      "source": "本文の切り方（クラウドへ num_ctx は送りません）"
+    },
+    "temperature": 0,
+    "temperatureSource": "製品と同じ（束が返した値）",
+    "modelInfo": null,
+    "warmup": null,
+    "endpoint": "https://api.ai.sakura.ad.jp/v1/chat/completions",
+    "options": {},
+    "givenOptions": {},
+    "modelSize": null,
+    "modelSizeDecision": {
+      "sizeDependent": true,
+      "decided": false,
+      "reason": "さくらのモデルの大きさは製品が sakuraProvider（vscode を引く）で読むため、台本では決めていません。製品と同じ条件にするなら --option で指定してください"
+    },
+    "repeat": 2,
+    "bundle": {
+      "name": "novel-ai-assistant",
+      "version": "0.102.8",
+      "stale": false,
+      "reason": null,
+      "staleDuringRun": null
+    },
+    "promptVersion": "1.9",
+    "verifyPromptVersion": null,
+    "plans": [
+      {
+        "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+        "chars": 1235,
+        "maxIssues": null
+      },
+      {
+        "chunkId": "本文\\002_十月三日の坂.txt#2-0@8027",
+        "chars": 1218,
+        "maxIssues": null
+      },
+      {
+        "chunkId": "本文\\003_窓口の椅子.txt#3-0@8027",
+        "chars": 1211,
+        "maxIssues": null
+      },
+      {
+        "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+        "chars": 1252,
+        "maxIssues": null
+      },
+      {
+        "chunkId": "本文\\005_初雪の窓口.txt#5-0@8027",
+        "chars": 1230,
+        "maxIssues": null
+      }
+    ],
+    "maxIssuesPer1000Chars": null,
+    "work": {
+      "source": "C:\\Users\\nonah\\Documents\\novel-ai-bench\\field-ai\\台\\台C_照合台_口調",
+      "targets": [
+        "本文\\001_九月の終わりの坂.txt",
+        "本文\\002_十月三日の坂.txt",
+        "本文\\003_窓口の椅子.txt",
+        "本文\\004_ギプスが外れた日.txt",
+        "本文\\005_初雪の窓口.txt"
+      ]
+    },
+    "answers": "C:\\Users\\nonah\\Documents\\novel-ai-bench\\field-ai\\台\\台C_照合台_口調\\answers.json",
+    "runs": [
+      {
+        "round": 1,
+        "elapsedMs": 48103,
+        "temperature": 0,
+        "staleNote": null,
+        "metrics": {
+          "seededContradictions": 5,
+          "seededContradictionsTotal": 6,
+          "missedContradictions": 1,
+          "falseFlagsContradiction": 0,
+          "categoryMismatch": 0,
+          "otherFlagsContradiction": 1,
+          "accepted": 6,
+          "rejected": 1,
+          "rejected.self_denied": 1,
+          "failures": 0,
+          "elapsedMs": 48103
+        },
+        "detail": {
+          "rejectedReasons": {
+            "self_denied": 1
+          },
+          "failures": [],
+          "seededContradictions": {
+            "人物": {
+              "found": 3,
+              "total": 4
+            },
+            "状態": {
+              "found": 1,
+              "total": 1
+            },
+            "時系列": {
+              "found": 1,
+              "total": 1
+            }
+          },
+          "missedContradictions": [
+            {
+              "file": "本文/004_ギプスが外れた日.txt",
+              "kind": "人物",
+              "where": "私のは一生ものですけれど"
+            }
+          ],
+          "falseFlagsContradiction": {}
+        },
+        "raw": [
+          {
+            "target": "本文\\001_九月の終わりの坂.txt",
+            "chunks": [
+              {
+                "target": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+                "aiText": "{\n  \"contradictions\": []\n  ,\n  \"joint_attention\": [\n    {\n      \"attendingTo\": \"鳶ヶ丘へ向かう坂\",\n      \"readerKnows\": \"立花郵便局から自転車で四十分の上り坂で、曲がりが三つある。\"\n    },\n    {\n      \"attendingTo\": \"相沢春人の外見\",\n      \"readerKnows\": \"背が高く、右目の下に小さなほくろがある。\"\n    },\n    {\n      \"attendingTo\": \"蓬田さんの状態\",\n      \"readerKnows\": \"膝が悪く、めったに町へ下りない。白髪で紺の半纏を着ている。\"\n    }\n  ],\n  \"perspective_taking\": [\n    {\n      \"asThem\": \"俺は立花郵便局の配達員だ。人付き合いは苦手で、窓口に立つのは無理だと思う。右目の下に泣きぼくろがある。今は九月の終わりで、毎日一人で鳶ヶ丘の坂を上っている。\",\n      \"who\": \"相沢 春人\"\n    },\n    {\n      \"asThem\": \"私は窓口係よ。相沢くんとは同期ね。彼はいつも忘れ物が多いから、私が教えてあげてるの。来月からは雨が増えるから、彼には気をつけてほしいわ。\",\n      \"who\": \"黒瀬 千夏\"\n    },\n    {\n      \"asThem\": \"膝が痛くてな。もう何年も町へは下りられん。郵便が来るから、まだ町と繋がっとる。そういうことにしとるんだ。\",\n      \"who\": \"蓬田 吾一\"\n    }\n  ]\n}",
+                "droppedResponseFormat": false,
+                "usage": {
+                  "prompt_tokens": 3745,
+                  "total_tokens": 4132,
+                  "completion_tokens": 387,
+                  "prompt_tokens_details": null
+                },
+                "validated": {
+                  "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+                  "chapterLabel": "第1話",
+                  "accepted": [],
+                  "rejected": []
+                }
+              }
+            ]
+          },
+          {
+            "target": "本文\\002_十月三日の坂.txt",
+            "chunks": [
+              {
+                "target": "本文\\002_十月三日の坂.txt#2-0@8027",
+                "aiText": "{\n  \"contradictions\": []\n  ,\n  \"joint_attention\": [\n    {\n      \"attendingTo\": \"十月三日の雨の中での転倒と負傷\",\n      \"readerKnows\": \"相沢春人が鳶ヶ丘の配達員であること、そこが上り坂であること\"\n    },\n    {\n      \"attendingTo\": \"千夏が代わりに配達を行うこと\",\n      \"readerKnows\": \"配達員が出られないときは窓口係が代わりに回るというきまりがあること\"\n    },\n    {\n      \"attendingTo\": \"蓬田さんの反応\",\n      \"readerKnows\": \"蓬田さんが鳶ヶ丘の頂上に住む膝の悪い老人であること\"\n    }\n  ],\n  \"perspective_taking\": [\n    {\n      \"asThem\": \"俺は配達員だ。十月三日に鳶ヶ丘の二つ目の曲がりで転んで、左足首を折った。全治一か月だって。今は局の椅子に座って、千夏が代わりに坂を上るのを眺めてる。人前で話すのは相変わらず苦手だ。\",\n      \"who\": \"相沢 春人\"\n    },\n    {\n      \"asThem\": \"私は窓口係よ。相沢くんが足を折っちゃったから、代わりに鳶ヶ丘を回ることになったわ。四十分くらいかかるけど、上るわよ。相沢くんは相変わらず口数が少ないんだから。\",\n      \"who\": \"黒瀬 千夏\"\n    },\n    {\n      \"asThem\": \"わしは鳶ヶ丘の上のほうに住んどる。膝が悪くて下りられん。郵便が来るから町と繋がっとると思っとる。雨の日に転んだ相沢くんの話を聞いて、雨が悪いと言ったぞ。\",\n      \"who\": \"蓬田 吾一\"\n    }\n  ]\n}",
+                "droppedResponseFormat": false,
+                "usage": {
+                  "prompt_tokens": 5039,
+                  "total_tokens": 5474,
+                  "completion_tokens": 435,
+                  "prompt_tokens_details": null
+                },
+                "validated": {
+                  "chunkId": "本文\\002_十月三日の坂.txt#2-0@8027",
+                  "chapterLabel": "第2話",
+                  "accepted": [],
+                  "rejected": []
+                }
+              }
+            ]
+          },
+          {
+            "target": "本文\\003_窓口の椅子.txt",
+            "chunks": [
+              {
+                "target": "本文\\003_窓口の椅子.txt#3-0@8027",
+                "aiText": "{\n  \"contradictions\": [\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"僕は判子を押す手を止めた。\",\n      \"line\": 39,\n      \"note\": \"地の文の一人称が「俺」から「僕」に変わっている。\",\n      \"settingSays\": \"一人称は「俺」\",\n      \"severity\": \"medium\",\n      \"textSays\": \"一人称が「僕」になっている\"\n    },\n    {\n      \"category\": \"既出情報\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"「あの坂、三つ目がいちばんきつい」\",\n      \"line\": 19,\n      \"note\": \"第1話の地の文での記述と食い違っている。\",\n      \"settingSays\": \"第1話「二つ目でいちばん脚を使う」\",\n      \"severity\": \"medium\",\n      \"textSays\": \"千夏が「三つ目がいちばんきつい」と言っている\"\n    }\n  ],\n  \"joint_attention\": [\n    {\n      \"attendingTo\": \"相沢春人の足の状態\",\n      \"readerKnows\": \"十月三日に左足首を骨折し、ギプスを三週間ほどつけると言われている。\"\n    },\n    {\n      \"attendingTo\": \"千夏の配達状況\",\n      \"readerKnows\": \"相沢の代わりに鳶ヶ丘の配達を担当している。\"\n    },\n    {\n      \"attendingTo\": \"蓬田さんの状態\",\n      \"readerKnows\": \"膝が悪く、めったに町へ下りない。\"\n    }\n  ],\n  \"perspective_taking\": [\n    {\n      \"asThem\": \"俺は今、局の窓口に座ってる。左足はまだギプスに入ったままだし、松葉杖が手放せない。人に見られないように伝票ばかり見てるけど、本当は落ち着かないんだ。\",\n      \"who\": \"相沢 春人\"\n    },\n    {\n      \"asThem\": \"私は毎朝八時に鳶ヶ丘の袋を持って出てるわ。相沢くんの代わりに坂を上るのは大変だけど、もう二週間やってるし、慣れてきたかな。\",\n      \"who\": \"黒瀬 千夏\"\n    },\n    {\n      \"asThem\": \"今日は膝の調子がええ。こういう日は年に何度もないからな。切手も買うし、栗も届けてやろうと思って町まで下りてきたんだ。\",\n      \"who\": \"蓬田 吾一\"\n    }\n  ]\n}",
+                "droppedResponseFormat": false,
+                "usage": {
+                  "prompt_tokens": 5486,
+                  "total_tokens": 6084,
+                  "completion_tokens": 598,
+                  "prompt_tokens_details": null
+                },
+                "validated": {
+                  "chunkId": "本文\\003_窓口の椅子.txt#3-0@8027",
+                  "chapterLabel": "第3話",
+                  "accepted": [
+                    {
+                      "line": 39,
+                      "excerpt": "僕は判子を押す手を止めた。",
+                      "category": "人物",
+                      "settingSays": "一人称は「俺」",
+                      "textSays": "一人称が「僕」になっている",
+                      "note": "地の文の一人称が「俺」から「僕」に変わっている。",
+                      "severity": "medium",
+                      "confidence": "high",
+                      "filePath": "本文\\003_窓口の椅子.txt",
+                      "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                    },
+                    {
+                      "line": 19,
+                      "excerpt": "「あの坂、三つ目がいちばんきつい」",
+                      "category": "既出情報",
+                      "settingSays": "第1話「二つ目でいちばん脚を使う」",
+                      "textSays": "千夏が「三つ目がいちばんきつい」と言っている",
+                      "note": "第1話の地の文での記述と食い違っている。",
+                      "severity": "medium",
+                      "confidence": "high",
+                      "filePath": "本文\\003_窓口の椅子.txt",
+                      "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                    }
+                  ],
+                  "rejected": []
+                }
+              }
+            ]
+          },
+          {
+            "target": "本文\\004_ギプスが外れた日.txt",
+            "chunks": [
+              {
+                "target": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+                "aiText": "{\n  \"contradictions\": [\n    {\n      \"category\": \"状態\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"右足のギプスが外れたのは\",\n      \"line\": 1,\n      \"note\": \"\",\n      \"settingSays\": \"相沢春人は「左の足首を折った」と設定および第2話（「左の足首を折る」）にある。\",\n      \"severity\": \"high\",\n      \"textSays\": \"「右足のギプス」が外れたと記述されている。\"\n    },\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"「戻ったか」\",\n      \"line\": 39,\n      \"note\": \"\",\n      \"settingSays\": \"蓬田吾一の口調は「敬語は使わない」と設定にある。\",\n      \"severity\": \"medium\",\n      \"textSays\": \"「戻ったか」という問いかけ自体はぶっきらぼうだが、その後の相沢の返答「戻りました」に対し、特に否定せず会話が続いている。ただし、設定の「敬語は使わない」という点と、相沢が敬語で返している関係性は一致しているが、蓬田自身の口調に矛盾はない。再検討し、ここは矛盾から除外するが、念のため確認。……いや、蓬田の口調は設定通りであるため、この項目は削除し、他の矛盾を探す。結果、本項目は削除する（出力から除外）。\"\n    }\n  ],\n  \"joint_attention\": [\n    {\n      \"attendingTo\": \"右足のギプスが外れたこと\",\n      \"readerKnows\": \"相沢春人は10月3日に左の足首を折ったこと。\"\n    },\n    {\n      \"attendingTo\": \"自転車で鳶ヶ丘を回ること\",\n      \"readerKnows\": \"鳶ヶ丘は12軒の家があり、自転車で40分かかる上り坂であること。\"\n    },\n    {\n      \"attendingTo\": \"蓬田さんとの会話\",\n      \"readerKnows\": \"蓬田さんは膝が悪く、杖を突いて歩く老人であること。\"\n    }\n  ],\n  \"perspective_taking\": [\n    {\n      \"asThem\": \"俺は相沢春人。左足首を折って一か月、やっとギプスが外れた。今日は久しぶりに自分の自転車で鳶ヶ丘の配達に戻る。まだ足に不安はあるけど、一人で上りたい。\",\n      \"who\": \"相沢 春人\"\n    },\n    {\n      \"asThem\": \"私は黒瀬千夏。相沢くんが怪我してる間、代わりに鳶ヶ丘を回ってたわ。あの上り坂、本当に大変なのね。相沢くんが戻ってきたのは嬉しいけど、無理しすぎないでほしいわ。\",\n      \"who\": \"黒瀬 千夏\"\n    },\n    {\n      \"asThem\": \"わしは蓬田だ。膝が悪くて町へは滅多に下りんが、杖があればなんとか動ける。相沢くんが戻ってきたか。あいつは不器用だが、真面目な奴だ。\",\n      \"who\": \"蓬田 吾一\"\n    }\n  ]\n}",
+                "droppedResponseFormat": false,
+                "usage": {
+                  "prompt_tokens": 5846,
+                  "total_tokens": 6600,
+                  "completion_tokens": 754,
+                  "prompt_tokens_details": null
+                },
+                "validated": {
+                  "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+                  "chapterLabel": "第4話",
+                  "accepted": [
+                    {
+                      "line": 1,
+                      "excerpt": "右足のギプスが外れたのは",
+                      "category": "状態",
+                      "settingSays": "相沢春人は「左の足首を折った」と設定および第2話（「左の足首を折る」）にある。",
+                      "textSays": "「右足のギプス」が外れたと記述されている。",
+                      "note": "",
+                      "severity": "high",
+                      "confidence": "high",
+                      "filePath": "本文\\004_ギプスが外れた日.txt",
+                      "chunkHash": "801a48d664eb506a67413fe11aa96f08ae8daaf9ba4f0bb2ba781f2d9c8ae1ea"
+                    }
+                  ],
+                  "rejected": [
+                    {
+                      "raw": {
+                        "category": "人物",
+                        "confidence": "high",
+                        "excerpt": "「戻ったか」",
+                        "line": 39,
+                        "note": "",
+                        "settingSays": "蓬田吾一の口調は「敬語は使わない」と設定にある。",
+                        "severity": "medium",
+                        "textSays": "「戻ったか」という問いかけ自体はぶっきらぼうだが、その後の相沢の返答「戻りました」に対し、特に否定せず会話が続いている。ただし、設定の「敬語は使わない」という点と、相沢が敬語で返している関係性は一致しているが、蓬田自身の口調に矛盾はない。再検討し、ここは矛盾から除外するが、念のため確認。……いや、蓬田の口調は設定通りであるため、この項目は削除し、他の矛盾を探す。結果、本項目は削除する（出力から除外）。"
+                      },
+                      "reason": "self_denied"
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "target": "本文\\005_初雪の窓口.txt",
+            "chunks": [
+              {
+                "target": "本文\\005_初雪の窓口.txt#5-0@8027",
+                "aiText": "{\n  \"contradictions\": [\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"左目の下のほくろが\",\n      \"line\": 7,\n      \"note\": \"\",\n      \"settingSays\": \"設定および第1話抜粋では「右目の下」にほくろがある（「右目の下を手の甲でこすった。小さいころからそこに小さなほくろがある」）。\",\n      \"severity\": \"medium\",\n      \"textSays\": \"「左目の下のほくろ」と記述されている。\"\n    },\n    {\n      \"category\": \"時系列\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"足を折ってから、ちょうど二週間が過ぎた。\",\n      \"line\": 11,\n      \"note\": \"\",\n      \"settingSays\": \"第2話の十月三日に足を折っており、第5話の十二月八日時点では約66日が経過している。\",\n      \"severity\": \"high\",\n      \"textSays\": \"「ちょうど二週間が過ぎた」と記述されている。\"\n    },\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"medium\",\n      \"excerpt\": \"「そうか、ではありませんわ。わたくし、驚きましたのよ」\",\n      \"line\": 41,\n      \"note\": \"お嬢様のような口調への変化が意図的な演出である可能性があるが、設定上の口調とは大きく異なる。\",\n      \"settingSays\": \"口調は「くだけた話し方で、語尾は『〜でしょ』『〜ね』『〜よ』」。一人称は「私」。\",\n      \"severity\": \"medium\",\n      \"textSays\": \"一人称が「わたくし」となり、語尾が「〜ですわ」「〜ますのよ」という非常に丁寧で格式高い口調になっている。\"\n    }\n  ],\n  \"joint_attention\": [\n    {\n      \"attendingTo\": \"左目の下のほくろ\",\n      \"readerKnows\": \"相沢春人の右目の下に小さなほくろがあること。\"\n    },\n    {\n      \"attendingTo\": \"足を折ってから、ちょうど二週間が過ぎた\",\n      \"readerKnows\": \"十月三日に足を折り、現在は十二月八日であること。\"\n    },\n    {\n      \"attendingTo\": \"千夏の口調\",\n      \"readerKnows\": \"一人称は「私」で、くだけた話し方をすること。\"\n    }\n  ],\n  \"perspective_taking\": [\n    {\n      \"asThem\": \"俺は相沢春人。二十二歳。十月に左足首を折ったけど、今はもうギプスも外れて、また自分の区域である鳶ヶ丘の配達に戻った。人見知りで客の顔を見るのは苦手だけど、少しずつ変わっていきたいと思ってる。今は十二月、雪が降り始めたから歩いて上らなきゃならないな。\",\n      \"who\": \"相沢 春人\"\n    },\n    {\n      \"asThem\": \"私は黒瀬千夏。相沢くんと同い年の同僚よ。彼が怪我をしてた間は私が代わりに鳶ヶ丘を回ってたけど、今はまた彼が戻ってきたわね。相沢くん、最近なんだか雰囲気が変わった気がするし、お客さんの顔をちゃんと見ててびっくりしちゃった。\",\n      \"who\": \"黒瀬 千夏\"\n    },\n    {\n      \"asThem\": \"わしは蓬田だ。鳶ヶ丘の一番上に一人で住んどる。膝が悪くて町へは滅多に下りんが、たまに調子がいい日もある。相沢くんがまた戻ってきてくれたのは嬉しい。紺の半纏を着て、あいつが上ってくるのを待っとるよ。\",\n      \"who\": \"蓬田 吾一\"\n    }\n  ]\n}",
+                "droppedResponseFormat": false,
+                "usage": {
+                  "prompt_tokens": 6083,
+                  "total_tokens": 6968,
+                  "completion_tokens": 885,
+                  "prompt_tokens_details": null
+                },
+                "validated": {
+                  "chunkId": "本文\\005_初雪の窓口.txt#5-0@8027",
+                  "chapterLabel": "第5話",
+                  "accepted": [
+                    {
+                      "line": 7,
+                      "excerpt": "左目の下のほくろが",
+                      "category": "人物",
+                      "settingSays": "設定および第1話抜粋では「右目の下」にほくろがある（「右目の下を手の甲でこすった。小さいころからそこに小さなほくろがある」）。",
+                      "textSays": "「左目の下のほくろ」と記述されている。",
+                      "note": "",
+                      "severity": "medium",
+                      "confidence": "high",
+                      "filePath": "本文\\005_初雪の窓口.txt",
+                      "chunkHash": "2530220d379942b327f4197e45dd319277f6b31943d0528c83b539b7f66d1660"
+                    },
+                    {
+                      "line": 11,
+                      "excerpt": "足を折ってから、ちょうど二週間が過ぎた。",
+                      "category": "時系列",
+                      "settingSays": "第2話の十月三日に足を折っており、第5話の十二月八日時点では約66日が経過している。",
+                      "textSays": "「ちょうど二週間が過ぎた」と記述されている。",
+                      "note": "",
+                      "severity": "high",
+                      "confidence": "high",
+                      "filePath": "本文\\005_初雪の窓口.txt",
+                      "chunkHash": "2530220d379942b327f4197e45dd319277f6b31943d0528c83b539b7f66d1660"
+                    },
+                    {
+                      "line": 41,
+                      "excerpt": "「そうか、ではありませんわ。わたくし、驚きましたのよ」",
+                      "category": "人物",
+                      "settingSays": "口調は「くだけた話し方で、語尾は『〜でしょ』『〜ね』『〜よ』」。一人称は「私」。",
+                      "textSays": "一人称が「わたくし」となり、語尾が「〜ですわ」「〜ますのよ」という非常に丁寧で格式高い口調になっている。",
+                      "note": "お嬢様のような口調への変化が意図的な演出である可能性があるが、設定上の口調とは大きく異なる。",
+                      "severity": "medium",
+                      "confidence": "medium",
+                      "filePath": "本文\\005_初雪の窓口.txt",
+                      "chunkHash": "2530220d379942b327f4197e45dd319277f6b31943d0528c83b539b7f66d1660"
+                    }
+                  ],
+                  "rejected": []
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "round": 2,
+        "elapsedMs": 44849,
+        "temperature": 0,
+        "staleNote": null,
+        "metrics": {
+          "seededContradictions": 5,
+          "seededContradictionsTotal": 6,
+          "missedContradictions": 1,
+          "falseFlagsContradiction": 0,
+          "categoryMismatch": 0,
+          "otherFlagsContradiction": 1,
+          "accepted": 6,
+          "rejected": 1,
+          "rejected.self_denied": 1,
+          "failures": 0,
+          "elapsedMs": 44849
+        },
+        "detail": {
+          "rejectedReasons": {
+            "self_denied": 1
+          },
+          "failures": [],
+          "seededContradictions": {
+            "人物": {
+              "found": 3,
+              "total": 4
+            },
+            "状態": {
+              "found": 1,
+              "total": 1
+            },
+            "時系列": {
+              "found": 1,
+              "total": 1
+            }
+          },
+          "missedContradictions": [
+            {
+              "file": "本文/004_ギプスが外れた日.txt",
+              "kind": "人物",
+              "where": "私のは一生ものですけれど"
+            }
+          ],
+          "falseFlagsContradiction": {}
+        },
+        "raw": [
+          {
+            "target": "本文\\001_九月の終わりの坂.txt",
+            "chunks": [
+              {
+                "target": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+                "aiText": "{\n  \"contradictions\": []\n  ,\n  \"joint_attention\": [\n    {\n      \"attendingTo\": \"鳶ヶ丘へ向かう坂\",\n      \"readerKnows\": \"立花郵便局から自転車で四十分の上り坂。曲がりが三つある。\"\n    },\n    {\n      \"attendingTo\": \"相沢春人の外見\",\n      \"readerKnows\": \"背が高く、右目の下に小さなほくろがある。\"\n    },\n    {\n      \"attendingTo\": \"蓬田さんの状態\",\n      \"readerKnows\": \"膝が悪く、めったに町へ下りない。白髪で紺の半纏を着ている。\"\n    }\n  ],\n  \"perspective_taking\": [\n    {\n      \"asThem\": \"俺は立花郵便局の配達員だ。人付き合いは苦手で、窓口に立つのは無理だと思う。右目の下に泣きぼくろがある。今は九月の終わりで、毎日一人で鳶ヶ丘の坂を上っている。\",\n      \"who\": \"相沢 春人\"\n    },\n    {\n      \"asThem\": \"私は窓口係よ。相沢くんとは同期ね。彼はいつも忘れ物が多いから、私が教えてあげてるの。来月からは雨が増えるから、彼には気をつけてほしいわ。\",\n      \"who\": \"黒瀬 千夏\"\n    },\n    {\n      \"asThem\": \"膝が痛くてな。もう何年も町へは下りられん。郵便が来るから、まだ町と繋がっとる。そういうことにしとるんじゃ。\",\n      \"who\": \"蓬田 吾一\"\n    }\n  ]\n}",
+                "droppedResponseFormat": false,
+                "usage": {
+                  "prompt_tokens": 3745,
+                  "total_tokens": 4132,
+                  "completion_tokens": 387,
+                  "prompt_tokens_details": null
+                },
+                "validated": {
+                  "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@8027",
+                  "chapterLabel": "第1話",
+                  "accepted": [],
+                  "rejected": []
+                }
+              }
+            ]
+          },
+          {
+            "target": "本文\\002_十月三日の坂.txt",
+            "chunks": [
+              {
+                "target": "本文\\002_十月三日の坂.txt#2-0@8027",
+                "aiText": "{\n  \"contradictions\": []\n  ,\n  \"joint_attention\": [\n    {\n      \"attendingTo\": \"十月三日の雨の中での転倒と負傷\",\n      \"readerKnows\": \"相沢春人が鳶ヶ丘の配達員であること、そこが上り坂であること\"\n    },\n    {\n      \"attendingTo\": \"千夏が代わりに配達を行うこと\",\n      \"readerKnows\": \"配達員が出られないときは窓口係が代わりに回るというきまりがあること\"\n    },\n    {\n      \"attendingTo\": \"蓬田さんの反応\",\n      \"readerKnows\": \"蓬田さんが鳶ヶ丘の頂上に住む、膝の悪い老人であること\"\n    }\n  ],\n  \"perspective_taking\": [\n    {\n      \"asThem\": \"俺は配達員だ。十月三日に鳶ヶ丘の二つ目の曲がりで転んで、左足首を折った。全治一か月だって。今は局の椅子に座って、千夏が代わりに坂を上るのを眺めてる。人前で話すのは相変わらず苦手だ。\",\n      \"who\": \"相沢 春人\"\n    },\n    {\n      \"asThem\": \"私は窓口係よ。相沢くんが足を折っちゃったから、きまり通り私が代わりに鳶ヶ丘を回ることになったわ。四十分くらいかかるけど、上るわよ。蓬田さんも相沢くんのこと気にしてたみたいね。\",\n      \"who\": \"黒瀬 千夏\"\n    },\n    {\n      \"asThem\": \"わしは鳶ヶ丘の上のほうに住んどる。膝が悪くて下りられん。郵便が来るから町と繋がっとると思っとるんじゃ。相沢のやつ、雨のせいで足を折ったそうじゃな。\",\n      \"who\": \"蓬田 吾一\"\n    }\n  ]\n}",
+                "droppedResponseFormat": false,
+                "usage": {
+                  "prompt_tokens": 5039,
+                  "total_tokens": 5478,
+                  "completion_tokens": 439,
+                  "prompt_tokens_details": null
+                },
+                "validated": {
+                  "chunkId": "本文\\002_十月三日の坂.txt#2-0@8027",
+                  "chapterLabel": "第2話",
+                  "accepted": [],
+                  "rejected": []
+                }
+              }
+            ]
+          },
+          {
+            "target": "本文\\003_窓口の椅子.txt",
+            "chunks": [
+              {
+                "target": "本文\\003_窓口の椅子.txt#3-0@8027",
+                "aiText": "{\n  \"contradictions\": [\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"僕は判子を押す手を止めた。\",\n      \"line\": 39,\n      \"note\": \"地の文の一人称が「俺」から「僕」に変わっている。\",\n      \"settingSays\": \"一人称は「俺」\",\n      \"severity\": \"medium\",\n      \"textSays\": \"一人称が「僕」になっている\"\n    },\n    {\n      \"category\": \"既出情報\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"「あの坂、三つ目がいちばんきつい」\",\n      \"line\": 19,\n      \"note\": \"第1話の地の文での記述と食い違っている。\",\n      \"settingSays\": \"第1話「二つ目でいちばん脚を使う」\",\n      \"severity\": \"medium\",\n      \"textSays\": \"千夏が「三つ目がいちばんきつい」と言っている\"\n    }\n  ],\n  \"joint_attention\": [\n    {\n      \"attendingTo\": \"相沢春人の足の状態\",\n      \"readerKnows\": \"十月三日に左足首を骨折し、ギプスを三週間ほどつけると言われている。\"\n    },\n    {\n      \"attendingTo\": \"千夏の配達状況\",\n      \"readerKnows\": \"相沢の代わりに鳶ヶ丘の配達を担当している。\"\n    },\n    {\n      \"attendingTo\": \"蓬田さんの状態\",\n      \"readerKnows\": \"膝が悪く、めったに町へ下りない。\"\n    }\n  ],\n  \"perspective_taking\": [\n    {\n      \"asThem\": \"俺は今、局の窓口に座ってる。左足はまだギプスに入ったままだし、松葉杖が手放せない。人に見られないように伝票ばかり見てるけど、本当は落ち着かないんだ。\",\n      \"who\": \"相沢 春人\"\n    },\n    {\n      \"asThem\": \"私は毎朝八時に鳶ヶ丘の袋を持って出てるわ。相沢くんの代わりに坂を上るけど、あの子、窓口だと全然声が出ないんだから。もう二週間もやってるし、慣れたわよ。\",\n      \"who\": \"黒瀬 千夏\"\n    },\n    {\n      \"asThem\": \"今日は膝の調子がええ。こういう日は年に何度もないからな。切手を買いに町まで下りてきたが、ついでに栗も持ってきたぞ。\",\n      \"who\": \"蓬田 吾一\"\n    }\n  ]\n}",
+                "droppedResponseFormat": false,
+                "usage": {
+                  "prompt_tokens": 5486,
+                  "total_tokens": 6096,
+                  "completion_tokens": 610,
+                  "prompt_tokens_details": null
+                },
+                "validated": {
+                  "chunkId": "本文\\003_窓口の椅子.txt#3-0@8027",
+                  "chapterLabel": "第3話",
+                  "accepted": [
+                    {
+                      "line": 39,
+                      "excerpt": "僕は判子を押す手を止めた。",
+                      "category": "人物",
+                      "settingSays": "一人称は「俺」",
+                      "textSays": "一人称が「僕」になっている",
+                      "note": "地の文の一人称が「俺」から「僕」に変わっている。",
+                      "severity": "medium",
+                      "confidence": "high",
+                      "filePath": "本文\\003_窓口の椅子.txt",
+                      "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                    },
+                    {
+                      "line": 19,
+                      "excerpt": "「あの坂、三つ目がいちばんきつい」",
+                      "category": "既出情報",
+                      "settingSays": "第1話「二つ目でいちばん脚を使う」",
+                      "textSays": "千夏が「三つ目がいちばんきつい」と言っている",
+                      "note": "第1話の地の文での記述と食い違っている。",
+                      "severity": "medium",
+                      "confidence": "high",
+                      "filePath": "本文\\003_窓口の椅子.txt",
+                      "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                    }
+                  ],
+                  "rejected": []
+                }
+              }
+            ]
+          },
+          {
+            "target": "本文\\004_ギプスが外れた日.txt",
+            "chunks": [
+              {
+                "target": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+                "aiText": "{\n  \"contradictions\": [\n    {\n      \"category\": \"状態\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"右足のギプスが外れたのは\",\n      \"line\": 1,\n      \"note\": \"\",\n      \"settingSays\": \"相沢春人は「左の足首を折った」と設定および第2話（「左の足首を折る」）にある。\",\n      \"severity\": \"high\",\n      \"textSays\": \"「右足のギプスが外れた」と記述されている。\"\n    },\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"「戻ったか」\",\n      \"line\": 39,\n      \"note\": \"\",\n      \"settingSays\": \"蓬田吾一の口調は「敬語は使わない」と設定にある。\",\n      \"severity\": \"medium\",\n      \"textSays\": \"「戻ったか」という問いかけ自体はぶっきらぼうだが、その後の相沢の返答「戻りました」に対し、特に否定せず会話が続いている。ただし、設定の「敬語は使わない」という点と、相沢が敬語で返している関係性は一致しているが、蓬田自身の口調に矛盾はない。再検討し、ここは矛盾から除外する。失礼した。改めて確認し、他の箇所を精査するが、現状では「右足」の件が明確な矛盾であるため、他はなしとする。\"\n    }\n  ],\n  \"joint_attention\": [\n    {\n      \"attendingTo\": \"右足のギプスが外れたこと\",\n      \"readerKnows\": \"相沢春人は10月3日に左の足首を折ったこと\"\n    },\n    {\n      \"attendingTo\": \"自転車で鳶ヶ丘を回ること\",\n      \"readerKnows\": \"鳶ヶ丘は12軒の家があり、自転車で40分かかる上り坂であること\"\n    },\n    {\n      \"attendingTo\": \"蓬田さんとの会話\",\n      \"readerKnows\": \"蓬田さんは膝が悪く、杖を突いて歩く老人であること\"\n    }\n  ],\n  \"perspective_taking\": [\n    {\n      \"asThem\": \"俺は相沢春人。左足首を折って一か月、やっとギプスが外れた。まだ無理はしちゃいけないけど、また自分の自転車で鳶ヶ丘の坂を上れる。千夏さんが代わりに回ってくれていたけど、やっぱり自分の区域は自分でやりたい。\",\n      \"who\": \"相沢 春人\"\n    },\n    {\n      \"asThem\": \"私は黒瀬千夏。相沢くんが怪我してる間、代わりに鳶ヶ丘を回ってたわ。あの坂、本当に長いのね。相沢くんが戻ってきたのは嬉しいけど、無理してまた転ばないか心配だわ。\",\n      \"who\": \"黒瀬 千夏\"\n    },\n    {\n      \"asThem\": \"わしは蓬田だ。膝が悪くて町へは滅多に下りんが、杖があればなんとか動ける。相沢くんが戻ってきたか。あいつは不器用だが、真面目に届けてくれるからな。\",\n      \"who\": \"蓬田 吾一\"\n    }\n  ]\n}",
+                "droppedResponseFormat": false,
+                "usage": {
+                  "prompt_tokens": 5846,
+                  "total_tokens": 6609,
+                  "completion_tokens": 763,
+                  "prompt_tokens_details": null
+                },
+                "validated": {
+                  "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@8027",
+                  "chapterLabel": "第4話",
+                  "accepted": [
+                    {
+                      "line": 1,
+                      "excerpt": "右足のギプスが外れたのは",
+                      "category": "状態",
+                      "settingSays": "相沢春人は「左の足首を折った」と設定および第2話（「左の足首を折る」）にある。",
+                      "textSays": "「右足のギプスが外れた」と記述されている。",
+                      "note": "",
+                      "severity": "high",
+                      "confidence": "high",
+                      "filePath": "本文\\004_ギプスが外れた日.txt",
+                      "chunkHash": "801a48d664eb506a67413fe11aa96f08ae8daaf9ba4f0bb2ba781f2d9c8ae1ea"
+                    }
+                  ],
+                  "rejected": [
+                    {
+                      "raw": {
+                        "category": "人物",
+                        "confidence": "high",
+                        "excerpt": "「戻ったか」",
+                        "line": 39,
+                        "note": "",
+                        "settingSays": "蓬田吾一の口調は「敬語は使わない」と設定にある。",
+                        "severity": "medium",
+                        "textSays": "「戻ったか」という問いかけ自体はぶっきらぼうだが、その後の相沢の返答「戻りました」に対し、特に否定せず会話が続いている。ただし、設定の「敬語は使わない」という点と、相沢が敬語で返している関係性は一致しているが、蓬田自身の口調に矛盾はない。再検討し、ここは矛盾から除外する。失礼した。改めて確認し、他の箇所を精査するが、現状では「右足」の件が明確な矛盾であるため、他はなしとする。"
+                      },
+                      "reason": "self_denied"
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "target": "本文\\005_初雪の窓口.txt",
+            "chunks": [
+              {
+                "target": "本文\\005_初雪の窓口.txt#5-0@8027",
+                "aiText": "{\n  \"contradictions\": [\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"左目の下のほくろが\",\n      \"line\": 7,\n      \"note\": \"\",\n      \"settingSays\": \"設定および第1話抜粋では「右目の下」にほくろがある（「右目の下を手の甲でこすった。小さいころからそこに小さなほくろがある」）。\",\n      \"severity\": \"medium\",\n      \"textSays\": \"「左目の下のほくろ」と記述されている。\"\n    },\n    {\n      \"category\": \"時系列\",\n      \"confidence\": \"high\",\n      \"excerpt\": \"足を折ってから、ちょうど二週間が過ぎた。\",\n      \"line\": 11,\n      \"note\": \"\",\n      \"settingSays\": \"第2話の十月三日に足を折っており、第5話の十二月八日時点では約66日が経過している。\",\n      \"severity\": \"high\",\n      \"textSays\": \"「ちょうど二週間が過ぎた」と記述されている。\"\n    },\n    {\n      \"category\": \"人物\",\n      \"confidence\": \"medium\",\n      \"excerpt\": \"「そうか、ではありませんわ。わたくし、驚きましたのよ」\",\n      \"line\": 41,\n      \"note\": \"お嬢様のような口調への変化が意図的な演出である可能性があるが、設定上の口調とは大きく異なる。\",\n      \"settingSays\": \"口調は「くだけた話し方で、語尾は『〜でしょ』『〜ね』『〜よ』」。一人称は「私」。\",\n      \"severity\": \"medium\",\n      \"textSays\": \"一人称が「わたくし」となり、語尾が「〜ですわ」「〜ますのよ」という非常に丁寧で格式高い口調になっている。\"\n    }\n  ],\n  \"joint_attention\": [\n    {\n      \"attendingTo\": \"左目の下のほくろ\",\n      \"readerKnows\": \"相沢春人の右目の下に小さなほくろがあること。\"\n    },\n    {\n      \"attendingTo\": \"足を折ってから、ちょうど二週間が過ぎた\",\n      \"readerKnows\": \"十月三日に足を折り、現在は十二月八日であること。\"\n    },\n    {\n      \"attendingTo\": \"千夏の口調\",\n      \"readerKnows\": \"一人称は「私」で、くだけた話し方をすること。\"\n    }\n  ],\n  \"perspective_taking\": [\n    {\n      \"asThem\": \"俺は相沢春人。二十二歳。十月に左足首を折ったけど、今はもうギプスも外れて、また自分の区域である鳶ヶ丘の配達に戻った。人見知りで客の顔を見るのは苦手だけど、少しずつ変わっていきたいと思ってる。今は十二月、雪が降り始めたから自転車は使えない。歩いて上るしかないな。\",\n      \"who\": \"相沢 春人\"\n    },\n    {\n      \"asThem\": \"私は黒瀬千夏。相沢くんと同い年の同僚よ。彼が怪我をしてた間は私が代わりに鳶ヶ丘を回ってたけど、彼が戻ってきてくれてよかった。相沢くん、さっきはお客さんの顔をちゃんと見てたし、少し成長したんじゃないかしら。\",\n      \"who\": \"黒瀬 千夏\"\n    },\n    {\n      \"asThem\": \"わしは蓬田だ。鳶ヶ丘の一番上に一人で住んどる。膝が悪くて町へは滅多に下りんが、たまに調子がいい日もある。相沢くんがまた配達に来てくれるようになったのはいいことだ。紺の半纏を着て、彼が来るのを待っとるよ。\",\n      \"who\": \"蓬田 吾一\"\n    }\n  ]\n}",
+                "droppedResponseFormat": false,
+                "usage": {
+                  "prompt_tokens": 6083,
+                  "total_tokens": 6967,
+                  "completion_tokens": 884,
+                  "prompt_tokens_details": null
+                },
+                "validated": {
+                  "chunkId": "本文\\005_初雪の窓口.txt#5-0@8027",
+                  "chapterLabel": "第5話",
+                  "accepted": [
+                    {
+                      "line": 7,
+                      "excerpt": "左目の下のほくろが",
+                      "category": "人物",
+                      "settingSays": "設定および第1話抜粋では「右目の下」にほくろがある（「右目の下を手の甲でこすった。小さいころからそこに小さなほくろがある」）。",
+                      "textSays": "「左目の下のほくろ」と記述されている。",
+                      "note": "",
+                      "severity": "medium",
+                      "confidence": "high",
+                      "filePath": "本文\\005_初雪の窓口.txt",
+                      "chunkHash": "2530220d379942b327f4197e45dd319277f6b31943d0528c83b539b7f66d1660"
+                    },
+                    {
+                      "line": 11,
+                      "excerpt": "足を折ってから、ちょうど二週間が過ぎた。",
+                      "category": "時系列",
+                      "settingSays": "第2話の十月三日に足を折っており、第5話の十二月八日時点では約66日が経過している。",
+                      "textSays": "「ちょうど二週間が過ぎた」と記述されている。",
+                      "note": "",
+                      "severity": "high",
+                      "confidence": "high",
+                      "filePath": "本文\\005_初雪の窓口.txt",
+                      "chunkHash": "2530220d379942b327f4197e45dd319277f6b31943d0528c83b539b7f66d1660"
+                    },
+                    {
+                      "line": 41,
+                      "excerpt": "「そうか、ではありませんわ。わたくし、驚きましたのよ」",
+                      "category": "人物",
+                      "settingSays": "口調は「くだけた話し方で、語尾は『〜でしょ』『〜ね』『〜よ』」。一人称は「私」。",
+                      "textSays": "一人称が「わたくし」となり、語尾が「〜ですわ」「〜ますのよ」という非常に丁寧で格式高い口調になっている。",
+                      "note": "お嬢様のような口調への変化が意図的な演出である可能性があるが、設定上の口調とは大きく異なる。",
+                      "severity": "medium",
+                      "confidence": "medium",
+                      "filePath": "本文\\005_初雪の窓口.txt",
+                      "chunkHash": "2530220d379942b327f4197e45dd319277f6b31943d0528c83b539b7f66d1660"
+                    }
+                  ],
+                  "rejected": []
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "spread": {
+      "seededContradictions": {
+        "values": [
+          5,
+          5
+        ],
+        "min": 5,
+        "max": 5
+      },
+      "seededContradictionsTotal": {
+        "values": [
+          6,
+          6
+        ],
+        "min": 6,
+        "max": 6
+      },
+      "missedContradictions": {
+        "values": [
+          1,
+          1
+        ],
+        "min": 1,
+        "max": 1
+      },
+      "falseFlagsContradiction": {
+        "values": [
+          0,
+          0
+        ],
+        "min": 0,
+        "max": 0
+      },
+      "categoryMismatch": {
+        "values": [
+          0,
+          0
+        ],
+        "min": 0,
+        "max": 0
+      },
+      "otherFlagsContradiction": {
+        "values": [
+          1,
+          1
+        ],
+        "min": 1,
+        "max": 1
+      },
+      "accepted": {
+        "values": [
+          6,
+          6
+        ],
+        "min": 6,
+        "max": 6
+      },
+      "rejected": {
+        "values": [
+          1,
+          1
+        ],
+        "min": 1,
+        "max": 1
+      },
+      "rejected.self_denied": {
+        "values": [
+          1,
+          1
+        ],
+        "min": 1,
+        "max": 1
+      },
+      "failures": {
+        "values": [
+          0,
+          0
+        ],
+        "min": 0,
+        "max": 0
+      },
+      "elapsedMs": {
+        "values": [
+          48103,
+          44849
+        ],
+        "min": 44849,
+        "max": 48103
+      }
+    },
+    "lines": [
+      "仕込んだ矛盾を拾えた: 5/6（各回：5/6、5/6）",
+      "見逃し（拾えなかった仕込み）: 1（各回：1、1）",
+      "誤検出（罠と、矛盾の無い話に付いた指摘）: 0（各回：0、0）",
+      "区分ちがい（場所は当てたが 人物／状態／時系列 を取り違えた）: 0（各回：0、0）",
+      "仕込み以外の箇所への指摘: 1（各回：1、1）",
+      "指摘（検算を通ったもの）: 6（各回：6、6）",
+      "落とした（検算で弾いたもの）: 1（各回：1、1）",
+      "　└ 落とした理由：self_denied: 1（各回：1、1）",
+      "失敗（チャンクごと通らなかったもの）: 0（各回：0、0）",
+      "所要時間: 44.8秒〜48.1秒（各回：48.1秒、44.8秒）",
+      "本文の切り方: 32768（本文の切り方（クラウドへ num_ctx は送りません））",
+      "temperature: 0（製品と同じ（束が返した値））",
+      "頼み方: 大きさで決めていません（さくらのモデルの大きさは製品が sakuraProvider（vscode を引く）で読むため、台本では決めていません。製品と同じ条件にするなら --option で指定してください、版 1.9）"
+    ]
+  }
+}
