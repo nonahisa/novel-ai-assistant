@@ -8,6 +8,22 @@ import { describePhotoSend } from "../core/photoTranscribeConfirm";
 import { parsePhotoTranscriptionStoppingRepeats } from "../core/photoTranscribeValidation";
 import { endsWithInlineRepetition } from "../core/inlineRepetition";
 import { readExifOrientation } from "../core/exifOrientation";
+import { isLocalProviderId } from "../core/localProviders";
+import {
+  combinePhotoOrient,
+  describePhotoOrientGuess,
+  parsePhotoOrient,
+  photoOrientSettled,
+  placePhotoByGuess,
+  shouldAskPhotoOrient,
+  type PhotoOrientProbe,
+} from "../core/photoOrientValidation";
+import {
+  ORIENT_PROBE_TURNS,
+  PHOTO_ORIENT_NUM_CTX,
+  PHOTO_ORIENT_VERSION,
+  buildPhotoOrientRequest,
+} from "../prompts/photoOrient";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { fromLfText } from "../core/eolSpace";
 import { scanWork } from "../core/scanner";
@@ -36,6 +52,8 @@ import { isInsideWork, lastManuscriptCaret, openManuscriptTabUris } from "./manu
 
 /** 送信量の記録とログに使う機能の名前 */
 export const PHOTO_TRANSCRIBE_FEATURE = "photo_transcribe";
+/** 向きを尋ねる（P-49）の記録の名前 */
+export const PHOTO_ORIENT_FEATURE = "photo_orient";
 
 /** 選べる写真の種類（拡張子 → 種類） */
 const IMAGE_TYPES: Readonly<Record<string, string>> = {
@@ -98,9 +116,9 @@ export async function openPhotoTranscribe(
   });
   panel.webview.html = buildPhotoTranscribeHtml(createNonce(), panel.webview.cspSource);
 
-  const postAi = async (): Promise<void> => {
-    void panel.webview.postMessage({ type: "ai", ...(await describeAssignedAi(registry)) });
-  };
+  const postAi = (): Promise<void> => postAiState(panel, registry);
+  const orientQueue = new PhotoOrientQueue(panel, registry, work);
+  panel.onDidDispose(() => orientQueue.stopAll());
   // 割当を別の画面で変えても、こちらの表示を追わせる
   const selection = registry.onDidChangeSelection(() => void postAi());
   panel.onDidDispose(() => selection.dispose());
@@ -129,11 +147,21 @@ export async function openPhotoTranscribe(
       case "cancel":
         abort?.abort();
         break;
+      case "orientProbe": {
+        const probe = readOrientProbe(message);
+        if (probe) orientQueue.add(probe);
+        break;
+      }
+      case "orientCancel":
+        if (typeof message.id === "string") orientQueue.cancel(message.id);
+        break;
       case "transcribe": {
         if (abort) return; // 走っている間は受けない（画面の［書き起こす］も押せない）
         const pages = readPages(message.pages);
         const photos = typeof message.photos === "number" ? message.photos : pages.length;
         if (pages.length === 0) return;
+        // 書き起こしを始めたら、向きを尋ねるのはやめる（同じ手元のAIを取り合わない）
+        orientQueue.stopAll();
         abort = new AbortController();
         try {
           await transcribePages(panel, work, registry, pages, photos, abort.signal);
@@ -232,6 +260,202 @@ async function modelInfoOf(provider: AIProvider, model: string): Promise<ModelIn
   }
 }
 
+/** 割当のAIの帯と、向きを尋ねられるかを画面へ送る */
+async function postAiState(panel: vscode.WebviewPanel, registry: AIRegistry): Promise<void> {
+  const [ai, orient] = await Promise.all([describeAssignedAi(registry), resolveOrientAi(registry)]);
+  void panel.webview.postMessage({ type: "ai", ...ai, canOrient: orient !== undefined });
+}
+
+/**
+ * 向きを尋ねる相手（設計書6.117.11）。**写真の書き起こしの割当（既定へ落ちた先を含む）
+ * が、写真を読めると申告した手元のAIのときだけ**。
+ *
+ * 割当がクラウドなら尋ねない（作者が送るのを確かめる前に写真を外へ出さない）。
+ * 手元の別のモデルを探して勝手に使うこともしない——作者が選んでいない大きな
+ * モデルを読み込ませ、メモリを取り合うことになるため。
+ */
+async function resolveOrientAi(
+  registry: AIRegistry
+): Promise<{ provider: AIProvider; model: string; info: ModelInfo | undefined } | undefined> {
+  const resolved = registry.resolve("transcribe");
+  if (!resolved || !isLocalProviderId(resolved.provider.id)) return undefined;
+  const info = await modelInfoOf(resolved.provider, resolved.model);
+  if (!shouldAskPhotoOrient(resolved.provider.id, imageSupportFor(resolved.provider.id, info))) {
+    return undefined;
+  }
+  return { ...resolved, info };
+}
+
+/** 画面から届く、向きを尋ねる写し（見えている向きから回した角度ごと） */
+interface OrientProbeInput {
+  id: string;
+  /** 見えている写真の幅と高さ（見開きを推せなかったとき、回したあとの縦横比で切り方を決める） */
+  width: number;
+  height: number;
+  images: { turn: number; base64: string }[];
+}
+
+function readOrientProbe(message: Record<string, unknown>): OrientProbeInput | undefined {
+  if (typeof message.id !== "string" || !Array.isArray(message.images)) return undefined;
+  const { width, height } = message;
+  if (typeof width !== "number" || typeof height !== "number" || !(width > 0) || !(height > 0)) {
+    return undefined;
+  }
+  const images: { turn: number; base64: string }[] = [];
+  for (const item of message.images) {
+    if (typeof item !== "object" || item === null) continue;
+    const one = item as Record<string, unknown>;
+    if (
+      typeof one.turn === "number" &&
+      (ORIENT_PROBE_TURNS as readonly number[]).includes(one.turn) &&
+      typeof one.base64 === "string" &&
+      one.base64.length > 0
+    ) {
+      images.push({ turn: one.turn, base64: one.base64 });
+    }
+  }
+  return images.length > 0 ? { id: message.id, width, height, images } : undefined;
+}
+
+/**
+ * 1枚の写真に掛けてよい時間（ミリ秒）。手元の gemma4:26b は読み込みに約30秒、
+ * 1回約10秒で、1枚に2〜3回尋ねる（2026-10-12）。これを過ぎたら黙って諦める
+ */
+const ORIENT_TIMEOUT_MS = 90_000;
+
+/**
+ * 写真の向きを、手元のAIへ1枚ずつ順に尋ねる（設計書6.117.11）。
+ *
+ * **1枚ずつ**にするのは、同じ手元のAIへ同時に投げると、どれも遅くなるうえ
+ * メモリを取り合うため。**失敗は黙って元のまま**（画面は縦横比の既定のまま）で、
+ * 理由はログに1行だけ残す。作者が回した・外した写真、書き起こしを始めたときは
+ * 尋ねるのをやめる。
+ */
+class PhotoOrientQueue {
+  private readonly waiting: OrientProbeInput[] = [];
+  private current: { id: string; abort: AbortController } | undefined;
+  private running = false;
+
+  constructor(
+    private readonly panel: vscode.WebviewPanel,
+    private readonly registry: AIRegistry,
+    private readonly work: WorkEntry
+  ) {}
+
+  add(probe: OrientProbeInput): void {
+    this.cancel(probe.id);
+    this.waiting.push(probe);
+    void this.drain();
+  }
+
+  cancel(id: string): void {
+    const index = this.waiting.findIndex((one) => one.id === id);
+    if (index >= 0) this.waiting.splice(index, 1);
+    if (this.current?.id === id) this.current.abort.abort();
+  }
+
+  stopAll(): void {
+    this.waiting.length = 0;
+    this.current?.abort.abort();
+  }
+
+  /** 画面を閉じたあとに届いた答えは捨てる（閉じた画面へ送ると例外になる） */
+  private post(message: Record<string, unknown>): void {
+    try {
+      void this.panel.webview.postMessage(message);
+    } catch {
+      // 閉じた画面。知らせる先が無い
+    }
+  }
+
+  private async drain(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+    try {
+      for (let probe = this.waiting.shift(); probe; probe = this.waiting.shift()) {
+        const abort = new AbortController();
+        this.current = { id: probe.id, abort };
+        let timedOut = false;
+        const timer = setTimeout(() => {
+          timedOut = true;
+          abort.abort();
+        }, ORIENT_TIMEOUT_MS);
+        try {
+          await this.askOne(probe, abort.signal, () => timedOut);
+        } finally {
+          clearTimeout(timer);
+          this.current = undefined;
+        }
+      }
+    } finally {
+      this.running = false;
+    }
+  }
+
+  private async askOne(
+    probe: OrientProbeInput,
+    signal: AbortSignal,
+    timedOut: () => boolean
+  ): Promise<void> {
+    const ai = await resolveOrientAi(this.registry);
+    if (!ai) {
+      this.post({ type: "orientResult", id: probe.id });
+      return;
+    }
+    const numCtx = Math.min(PHOTO_ORIENT_NUM_CTX, ai.info?.contextWindow ?? PHOTO_ORIENT_NUM_CTX);
+    const probes: PhotoOrientProbe[] = [];
+    let failure: string | undefined;
+    // 製品の順（ORIENT_PROBE_TURNS）に尋ね、2つ一致したら残りは尋ねない
+    for (const turn of ORIENT_PROBE_TURNS) {
+      const image = probe.images.find((one) => one.turn === turn);
+      if (!image) continue;
+      if (signal.aborted) break;
+      try {
+        const result = await ai.provider.generate({
+          ...buildPhotoOrientRequest({
+            image: { mimeType: "image/jpeg", base64: image.base64 },
+            model: ai.model,
+            numCtx,
+          }),
+          signal: signal,
+          meta: { feature: PHOTO_ORIENT_FEATURE, workFolder: this.work.folderPath },
+        });
+        probes.push({ turn, answer: parsePhotoOrient(result.text) });
+      } catch (error) {
+        if (signal.aborted || (error instanceof AIError && error.kind === "aborted")) break;
+        failure = describeAIError(error);
+        break;
+      }
+      if (photoOrientSettled(probes)) break;
+    }
+    if (signal.aborted) {
+      // 作者が回した・外した・書き起こしを始めた、か時間切れ。作者の操作で止めたときはログに残さない
+      if (timedOut()) {
+        logStep(
+          `写真の向き：手元のAI（${ai.model}）が${ORIENT_TIMEOUT_MS / 1000}秒のうちに答えなかったので、推しませんでした（P-49 ${PHOTO_ORIENT_VERSION}）。`
+        );
+      }
+      this.post({ type: "orientResult", id: probe.id });
+      return;
+    }
+    const guess = combinePhotoOrient(probes);
+    if (failure) {
+      logStep(`写真の向き：手元のAIに尋ねられなかったので、推しませんでした（${failure}）。`);
+    } else if (!guess) {
+      logStep(
+        `写真の向き：手元のAI（${ai.model}）の${probes.length}回の答えが揃わなかったので、推しませんでした（P-49 ${PHOTO_ORIENT_VERSION}）。`
+      );
+    }
+    this.post({
+      type: "orientResult",
+      id: probe.id,
+      ...(guess
+        ? { ...placePhotoByGuess(guess, probe.width, probe.height), label: describePhotoOrientGuess(guess) }
+        : {}),
+    });
+  }
+}
+
 function readPages(raw: unknown): PageInput[] {
   if (!Array.isArray(raw)) return [];
   const pages: PageInput[] = [];
@@ -283,7 +507,7 @@ async function transcribePages(
     if (answer === PICK) {
       const { assignOneFeatureAI } = await import("./assignFeatureAI.js");
       await assignOneFeatureAI(registry, "transcribe");
-      void panel.webview.postMessage({ type: "ai", ...(await describeAssignedAi(registry)) });
+      await postAiState(panel, registry);
     }
     return failAll(panel, pages, "写真を読めるAIを選んでから、もう一度［書き起こす］を押してください。");
   }

@@ -58,6 +58,33 @@ describe("写真から原稿を起こす画面", () => {
     expect(html).toContain("photo-rotate-right");
   });
 
+  test("向きは、拡張機能が「尋ねてよい」と知らせたときだけ手元のAIに尋ねる（6.117.11）", () => {
+    const body = script();
+    expect(body).toContain("canOrient = message.canOrient === true");
+    expect(body).toContain("if (!canOrient || running) return;");
+    expect(body).toContain('type: "orientProbe"');
+    // 見えている向き・右へ90度・左へ90度の写し。逆さは送らない
+    expect(body).toContain("var ORIENT_TURNS = [0,90,270];");
+    expect(body).toContain("var ORIENT_EDGE = 1024;");
+  });
+
+  test("推しは、作者が先に触った写真には当てず、推せなかったら何も変えない", () => {
+    const body = script();
+    expect(body).toContain("if (!target.touched && typeof message.rotation === \"number\" && typeof message.split === \"boolean\")");
+    // 回す・切り方を変える・外すは、どれも「触った」にして、尋ねている途中なら止める
+    expect(body.match(/touch\(photo\);/g)?.length).toBe(4);
+    expect(body).toContain('type: "orientCancel"');
+    expect(html).toContain('data-testid": "photo-orient-guess"');
+    expect(html).toContain('data-testid": "photo-orienting"');
+  });
+
+  test("書き起こしは勝手に始めない（推しの答えで transcribe を送らない）", () => {
+    const body = script();
+    const handler = body.slice(body.indexOf('message.type === "orientResult"'), body.indexOf('message.type === "running"'));
+    expect(handler).not.toContain("transcribe");
+    expect(handler).not.toContain("postMessage");
+  });
+
   test("挿入の印や取り消し線をAIに決めさせないことを、画面でも断る", () => {
     expect(html).toContain("AIには決めさせません");
     expect(html).toContain("〓");
