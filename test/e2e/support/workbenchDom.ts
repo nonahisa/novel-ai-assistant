@@ -101,9 +101,18 @@ export async function readTabState(page: Page): Promise<EditorGroupState[]> {
  * `readTabState` で拡張子つきに組み立て直しているので、ふだんは完全一致で当たる。
  * これは、VS Code の版がまた名前の見せ方を変えたときに、テストの期待値を
  * 書き換えずに済ませるための受け皿
+ *
+ * **件数つきの題も当てる**（2026-10-11、`manuscriptFootNarrow` が単独で3回とも
+ * 「タブ「提案」が出る」の時間切れで落ちた。写真の右の列には「提案（1）」があった）。
+ * 提案パネルは残りの件数を題に出す（設計書6.11）ので、「提案」で探したら
+ * 「提案（1）」「提案(12)」にも当てる。件数で探したとき（「提案（2）」）は完全一致だけ。
+ * 拡張子のある名前（話のタブ）には当てない——「第1話（2）.txt」を「第1話」で拾わないため
  */
 export function tabNameMatches(actual: string, wanted: string): boolean {
   if (actual === wanted) return true;
+  const counted = /^(.*?)\s*[（(]\d+[）)]$/.exec(actual);
+  // 末尾が括弧で終わる名前だけを見るので、拡張子つきの話のタブは外れる
+  if (counted && counted[1] === wanted) return true;
   const stem = (name: string) => name.replace(/\.[^./\\]+$/, "");
   // 片方が拡張子なしのときだけ、語幹どうしで比べる
   return stem(actual) === stem(wanted) && (actual === stem(actual) || wanted === stem(wanted));

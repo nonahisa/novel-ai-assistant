@@ -48,10 +48,20 @@ export interface ColumnChoice {
  * 1. **既にそのファイルが開いている列があれば、そこ**（作者が置いた場所を
  *    動かさない。2列目に原稿を置いている人がいるので `ViewColumn.One` の
  *    決め打ちはしない）
- * 2. 開いていなくて、**前面がパネル（WebView のタブ）なら、その列を避ける**
+ * 2. 開いていなければ、**パネルの列を避けて、避けない列を名指しする**。
+ *    避けるのは「前に出ているタブがパネル（WebView）の列」と「提案・シーンメモの
+ *    パネルがいて、編集の面を1つも持たない列」。どの列が前面かでは決めない（下記）
  * 3. 避ける先が無ければ、パネルの横へ新しく開く（パネルの上に重ねない）
- * 4. 前面が本文・原稿のタブなら **決めない**——下段の提案パネルから飛ぶ道は
+ * 4. 避ける列が1つも無ければ **決めない**——下段の提案パネルから飛ぶ道は
  *    これまでどおり「前面の列」で正しい
+ *
+ * **前面の列（`isActive`）を根拠にしない**（ノートPC・1.141.0 の E2E、2026-10-11）。
+ * 以前は「前面の列がパネルなら避ける」だったが、拡張機能から見た前面の列が
+ * 原稿の列のままのことがあり、そのとき「決めない」を返して、VS Code は実際に
+ * 前面にある提案パネルの列へ話を開いた（パネルが裏へ回り、続けて指摘を押せない）。
+ * 焦点の動きのタイミングで揺れるので、単独では通り全件でだけ落ちた。
+ * 列ごとの前に出ているタブは焦点に左右されないので、そちらで決める。
+ * 前面の列は、避けない列が複数あるときの好みの順にだけ使う。
  */
 export function columnForLocation(location: string): ColumnChoice {
   let groups: readonly vscode.TabGroup[];
@@ -80,22 +90,27 @@ export function columnForLocation(location: string): ColumnChoice {
     }
   }
 
-  const active = groups.find((group) => group.isActive);
-  if (!active || !isPanelGroup(active)) {
-    return { reason: "列は指定なし（前面が編集の面）" };
+  const avoided = groups.filter(isPanelColumn);
+  if (avoided.length === 0) {
+    return { reason: "列は指定なし（パネルの列が無い）" };
   }
+  const avoidedText = avoided.map((group) => group.viewColumn).join("・");
 
   /*
-    **原稿の面がある列を先に選ぶ。** 「前面でない列」というだけで選ぶと、
+    **原稿の面がある列を先に選ぶ。** 「パネルでない列」というだけで選ぶと、
     設定資料や出力タブしか無い列へ本文を押し込むことがある。
+    候補が複数なら前面の列を好み、無ければ左の列（作者が本文を置く側）。
   */
+  const open = groups.filter((group) => !avoided.includes(group));
+  const pick = (candidates: readonly vscode.TabGroup[]) =>
+    candidates.find((group) => group.isActive) ??
+    [...candidates].sort((a, b) => a.viewColumn - b.viewColumn)[0];
   const elsewhere =
-    groups.find((group) => group !== active && group.tabs.some(isEditorTab)) ??
-    groups.find((group) => group !== active);
+    pick(open.filter((group) => group.tabs.some(isEditorTab))) ?? pick(open);
   if (elsewhere) {
     return {
       column: elsewhere.viewColumn,
-      reason: `パネルの列（${active.viewColumn}）を避けて${elsewhere.viewColumn}列目へ`,
+      reason: `パネルの列（${avoidedText}）を避けて${elsewhere.viewColumn}列目へ`,
     };
   }
 
@@ -158,6 +173,42 @@ function tabUri(tab: vscode.Tab): vscode.Uri | undefined {
 /** そのタブが、本文を編集している面か（原稿エディタは `TabInputCustom`） */
 function isEditorTab(tab: vscode.Tab): boolean {
   return tabUri(tab) !== undefined;
+}
+
+/**
+ * 右の列に住むパネル（提案・シーンメモ）の viewType。
+ *
+ * **`proposalPanel.ts`・`sceneMemoPanel.ts` から import しない。** 2つとも
+ * このファイルを import しているので、輪になる。名前を変えたら
+ * `editorColumnForLocation.test.ts` と一緒にここも直す。
+ */
+const SIDE_PANEL_TYPES = ["novelai.proposals", "novelai.sceneMemos"];
+
+/**
+ * 本文を開くときに避ける列か。
+ *
+ * - 前に出ているタブがパネル（WebView）の列——開くとパネルが裏へ回る
+ * - 提案・シーンメモのパネルがいて、編集の面を1つも持たない列——パネルが裏に
+ *   回っていても、その列は本文の置き場ではない。**編集の面がある列は避けない**
+ *   （原稿の列の裏にパネルを置いている人の本文を、主の列から追い出さない）
+ */
+function isPanelColumn(group: vscode.TabGroup): boolean {
+  if (isPanelGroup(group)) return true;
+  return !group.tabs.some(isEditorTab) && group.tabs.some(isSidePanelTab);
+}
+
+function isSidePanelTab(tab: vscode.Tab): boolean {
+  try {
+    const input: unknown = tab.input;
+    return (
+      input instanceof vscode.TabInputWebview &&
+      SIDE_PANEL_TYPES.some(
+        (type) => input.viewType === type || input.viewType.endsWith(`-${type}`)
+      )
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
