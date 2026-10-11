@@ -177,6 +177,77 @@ export async function activeGroupIndex(page: Page): Promise<number> {
   return (await readTabState(page)).findIndex((group) => group.active);
 }
 
+/** WebView 1枚の、本体の側から見た様子（`webviewLayer` が返す） */
+export interface WebviewLayer {
+  /** 前に出ていて、真ん中を押せばその WebView に届くか */
+  inFront: boolean;
+  /** 重なっている列の番号（左から 0, 1, …。見つからなければ -1） */
+  groupIndex: number;
+  /** その列が窓の中で見えている幅（列の右端が窓の外へ出ていれば、その分だけ狭い） */
+  visibleWidth: number;
+  /** 失敗の文へ添える一言（場所・大きさ・visibility・真ん中でいちばん上の iframe） */
+  detail: string;
+}
+
+/**
+ * 外側の iframe の名前が `outerName` の WebView が、本体の画面でどう見えているか。
+ *
+ * **WebView の中から「前に出ているか」は分からない。** `retainContextWhenHidden` の面
+ * （原稿エディター・提案パネル）は裏に回っても DOM が残り、Playwright は裏の面の
+ * 要素も見つける。そのまま押すと、前にある別の WebView の iframe が押下を受け止め
+ * （「intercepts pointer events」）、30秒押し直して落ちる（ノートPC・1.141.0、2026-10-11 の
+ * `neighborKeys`・`findingJumpVertical`）。
+ *
+ * **WebView の iframe は列の DOM の中に無い**（VS Code は別の層に重ねて、列の場所へ動かす）。
+ * そこで iframe の左端が入っている列を、場所で引き当てる。前に出ているかは、
+ * visibility と大きさに加え、**見えている部分の真ん中で、いちばん上の iframe がそれか**で見る
+ * （別の WebView が上に重なっていれば、押下はそちらへ行く）
+ */
+export async function webviewLayer(page: Page, outerName: string): Promise<WebviewLayer> {
+  return page.evaluate((name) => {
+    const iframe = Array.from(document.querySelectorAll("iframe")).find((element) => element.name === name);
+    if (!iframe) return { inFront: false, groupIndex: -1, visibleWidth: 0, detail: `iframe「${name.slice(0, 8)}」が無い` };
+    const box = iframe.getBoundingClientRect();
+    const style = getComputedStyle(iframe);
+    const groups = Array.from(document.querySelectorAll(".editor-group-container")).map((group) => group.getBoundingClientRect());
+    const groupIndex = groups.findIndex((group) => box.left + 1 >= group.left && box.left + 1 <= group.right);
+    const group = groups[groupIndex];
+    const visibleWidth = group ? Math.min(group.width, window.innerWidth - group.left) : 0;
+    const left = Math.max(box.left, 0);
+    const right = Math.min(box.right, window.innerWidth);
+    const top = Math.max(box.top, 0);
+    const bottom = Math.min(box.bottom, window.innerHeight);
+    const sized = right - left > 1 && bottom - top > 1;
+    // 真ん中の点で、いちばん上にある iframe。知らせ・吹き出しなど本体の小さな重なりは数えない
+    // （別の WebView に隠れているかだけを見る。小さな重なりで「前に無い」とすると、押す場所が
+    // 隠れていないのに待ち続ける）
+    const hit = sized
+      ? (document.elementsFromPoint((left + right) / 2, (top + bottom) / 2).find((element) => element.tagName === "IFRAME") ?? null)
+      : null;
+    const inFront = style.visibility !== "hidden" && sized && hit === iframe;
+    const hitName =
+      hit === null ? "なし" : hit instanceof HTMLIFrameElement ? `iframe「${hit.name.slice(0, 8)}」` : hit.tagName.toLowerCase();
+    return {
+      inFront,
+      groupIndex,
+      visibleWidth,
+      detail:
+        `iframe「${name.slice(0, 8)}」@${Math.round(box.left)},${Math.round(box.top)} ` +
+        `${Math.round(box.width)}x${Math.round(box.height)} visibility=${style.visibility} 列=${groupIndex} 真ん中=${hitName}`,
+    };
+  }, outerName);
+}
+
+/** 本体の画面にある WebView の iframe を全部、`webviewLayer` の一言の形で（失敗の文へ添える） */
+export async function webviewLayers(page: Page): Promise<string[]> {
+  const names = await page
+    .evaluate(() => Array.from(document.querySelectorAll("iframe.webview")).map((element) => (element as HTMLIFrameElement).name))
+    .catch(() => [] as string[]);
+  const details: string[] = [];
+  for (const name of names) details.push((await webviewLayer(page, name).catch(() => undefined))?.detail ?? `「${name.slice(0, 8)}」読めない`);
+  return details;
+}
+
 /**
  * クイックオープン（Ctrl+P）でファイルを開く。
  *
