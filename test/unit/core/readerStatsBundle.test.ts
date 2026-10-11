@@ -410,6 +410,12 @@ describe("登録の無い作品IDをその場で登録する（作者の裁定 2
     expect(noId.kind === "none" && noId.registrable).toBeFalsy();
   });
 
+  test("Narou.fun など他人の作品も開ける画面から届いたものには、登録の印を立てない（作者の裁定 2026-10-11）", () => {
+    const fromNarouFun = routeReaderStatsBundleItem(envelopeOf(narouFunItem("n9999zz")), [a]);
+    expect(fromNarouFun.kind).toBe("none");
+    expect(fromNarouFun.kind === "none" && fromNarouFun.registrable).toBeFalsy();
+  });
+
   test("作品名が近い作品だけをおすすめにする（作品名が無ければ出さない）", () => {
     const works = [
       { id: "a", title: "教科書チート" },

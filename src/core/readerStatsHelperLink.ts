@@ -234,11 +234,16 @@ export function routeReaderStatsBundleItem(
       reason: "作品IDが入っていないため、どの作品のものか決められませんでした。",
     };
   }
-  return {
-    kind: "none",
-    reason: "この作品IDを登録した作品が見つかりませんでした。",
-    registrable: true,
-  };
+  // その場で登録できるのは、自分の作品しか開けない管理画面から届いたもの（source が無い封筒）だけ。
+  // Narou.fun などは他人の作品のページも開けるので、よその作品の番号を登録する道を開かない
+  // （作者の裁定 2026-10-11「管理画面からのものだけ」）
+  return envelope.source === undefined
+    ? {
+        kind: "none",
+        reason: "この作品IDを登録した作品が見つかりませんでした。",
+        registrable: true,
+      }
+    : { kind: "none", reason: "この作品IDを登録した作品が見つかりませんでした。" };
 }
 
 /**
