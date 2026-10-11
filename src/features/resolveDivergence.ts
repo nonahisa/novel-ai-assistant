@@ -156,6 +156,11 @@ export type FoldOutcome =
       settingsBulkResolved: number;
       /** 作者が1件ずつ選んだファイル */
       manuscriptConflicts: string[];
+      /**
+       * 「両方とも残す」で作った別ファイル（置き場からの道）。
+       * 選ぶ一覧には名前を出さないので、済んだあとの知らせで名前を出す
+       */
+      sideFiles?: string[];
     }
   | { ok: false; reason: string; authored?: string[] };
 
@@ -753,6 +758,7 @@ export async function foldDivergence(
     settingsAutoResolved,
     settingsBulkResolved,
     manuscriptConflicts,
+    sideFiles,
   };
 }
 
@@ -1038,8 +1044,18 @@ export function describeFoldSuccess(
     : options.autoResend
       ? "数分のうちに自動でGitHubへ送ります。"
       : "GitHubへは「保存・同期」で送ります。";
+  // 「両方とも残す」の別ファイルの名前は、選ぶ一覧には出していない（幅に
+  // 収まらず文が切れた。2026-10-11）。どこを読めばよいかをここで示す
+  const sideNames = (result.sideFiles ?? []).map((one) =>
+    one.slice(one.lastIndexOf("/") + 1)
+  );
+  const sideNote =
+    sideNames.length > 0
+      ? `もう1台の文は「${sideNames.join("」「")}」に残しました。`
+      : "";
   return (
     `「${label}」の2台の原稿をそろえました（${parts.join("／")}）。` +
+    sideNote +
     sendNote +
     `そろえる前へ戻したいときは、控え「${result.backup}」から戻せます。`
   );
