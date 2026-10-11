@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   batchVerbFromLabel,
+  describeProposalVerdictLog,
   describeRecordUpdateBatchLog,
   describeRecordUpdateLog,
   describeUpdatesDiscardedByMoveLog,
@@ -144,5 +145,53 @@ describe("移す案の反映で古くなった更新案を片づけた行（0.10
       "設定資料の更新を片づけ：人物「アジャーノ」「殿下」の承認待ちの更新案" +
         "（移す案の反映で古くなったため。もう一度抽出すると作り直されます）（提案パネル）"
     );
+  });
+});
+
+describe("設定資料の更新以外の提案の1件の行（0.102.10）", () => {
+  // 2026-10-11、作者の指示「提案パネルのログ」。伏線の候補・伏線の回収・章立ては
+  // 反映しても見送っても、作品のログに1件ずつの行が無かった（まとめの件数だけ）
+  test("伏線の候補の登録：分類・動詞・名前・話数・押した画面", () => {
+    expect(
+      describeProposalVerdictLog({
+        category: "伏線の候補",
+        verdict: "applied",
+        applyLabel: "登録",
+        kindLabel: "伏線",
+        name: "銀の懐中時計",
+        detail: "第3話で張られています",
+        via: "提案パネル",
+      })
+    ).toBe("伏線の候補を登録：伏線「銀の懐中時計」 第3話で張られています（提案パネル）");
+  });
+
+  test("見送りは押しボタンの語にかかわらず「見送り」と言う", () => {
+    expect(
+      describeProposalVerdictLog({
+        category: "章立て",
+        verdict: "dismissed",
+        applyLabel: "章にする",
+        kindLabel: "章",
+        name: "出立の章",
+        detail: "第1話から",
+        via: "提案パネル",
+      })
+    ).toBe("章立てを見送り：章「出立の章」 第1話から（提案パネル）");
+  });
+
+  test("反映の動詞は、まとめの行と同じ語にそろえる（回収済みにする→回収済みに）", () => {
+    const line = describeProposalVerdictLog({
+      category: "伏線の回収",
+      verdict: "applied",
+      applyLabel: "回収済みにする",
+      kindLabel: "伏線",
+      name: "銀の懐中時計",
+      detail: "第3話で張った→第7話で回収",
+      via: "提案パネル",
+    });
+    expect(line).toBe(
+      "伏線の回収を回収済みに：伏線「銀の懐中時計」 第3話で張った→第7話で回収（提案パネル）"
+    );
+    expect(line.startsWith(`伏線の回収を${batchVerbFromLabel("回収済みにする")}`)).toBe(true);
   });
 });

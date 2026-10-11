@@ -150,6 +150,42 @@ export function batchVerbFromLabel(applyLabel: string | undefined): string {
 }
 
 /**
+ * 設定資料の更新以外の提案（伏線の候補・伏線の回収・章立て）の1件の行（0.102.10）。
+ *
+ * 例：`伏線の候補を登録：伏線「銀の懐中時計」 第3話で張られています（提案パネル）`
+ *
+ * **頭は分類の見出しにする**——まとめの行（`describeRecordUpdateBatchLog`）も
+ * 同じ見出しで始まるので、分類名で拾えば1件ずつの行と件数の行が一緒に出る。
+ * 反映の動詞もまとめの行と同じ `batchVerbFromLabel` から作る（同じ操作を
+ * 2つの言い方で書かない）。見送りは押しボタンの語にかかわらず「見送り」。
+ *
+ * 引用（本文）はログへ写さない。どれのことかは名前と話数で足りる。
+ */
+export function describeProposalVerdictLog(entry: {
+  /** 分類の見出し（伏線の候補・伏線の回収・章立て） */
+  category: string;
+  verdict: RecordUpdateVerdict;
+  /** 画面の押しボタンの語（登録・回収済みにする・章にする） */
+  applyLabel: string | undefined;
+  /** 何の名前か（伏線・章） */
+  kindLabel: string;
+  name: string;
+  /** どこのことか（話数・範囲・動かした元など） */
+  detail: string;
+  via: RecordUpdateVia;
+}): string {
+  const verb =
+    entry.verdict === "applied"
+      ? batchVerbFromLabel(entry.applyLabel)
+      : VERDICT_WORD.dismissed;
+  return (
+    `${entry.category}を${verb}：${entry.kindLabel}「${entry.name}」` +
+    (entry.detail ? ` ${entry.detail}` : "") +
+    `（${entry.via}）`
+  );
+}
+
+/**
  * 移す案（語り手の取り違えで主人公に入った値。設計書6.5.12）の1行（0.102.3）。
  *
  * 例：`設定資料の更新を適用：移す 人物「アジャーノ」役割「皇子」（第12話）→「殿下」（提案パネル）`
