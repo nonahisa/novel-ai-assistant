@@ -13,7 +13,7 @@ import { fetchJson } from "./httpClient";
 import { toOpenAIJsonSchema } from "./jsonSchema";
 import { resolveMaxOutputTokens } from "./outputLimit";
 import { describeWindowCappedOutput } from "./contextGuard";
-import { forgetSecret, logLine, registerSecret } from "../core/logger";
+import { aiCallLog, forgetSecret, logLine, registerSecret } from "../core/logger";
 import {
   resolveContextWindow,
   resolveTimeoutMs,
@@ -375,7 +375,8 @@ export class SakuraProvider implements ApiKeyProvider {
         // のに外した状態で通ったなら、このモデルは受け付けないと分かった
         if (sendsThinkingOff && body.chat_template_kwargs === undefined) {
           this.thinkingOffRejected.add(params.model);
-          logLine(
+          // 呼び出した作品のログへ（`aiCallLog`。待つあいだに別の作品が開かれても紛れない）
+          aiCallLog(params.meta).line(
             `さくらのAI Engine：思考を止める指定（chat_template_kwargs）を外すと通りました` +
               `（モデル: ${params.model}）。この起動のあいだは付けずに送ります。`
           );
@@ -397,7 +398,7 @@ export class SakuraProvider implements ApiKeyProvider {
           // **形式の強制が効かないだけで、応答は使える。**
           // 各機能のパーサはコードフェンス付きの応答も読めるようにしてある
           delete body.response_format;
-          logLine(
+          aiCallLog(params.meta).line(
             "さくらのAI Engine：JSON形式の強制が受け付けられなかったため、外して再試行します。"
           );
           continue;
@@ -424,7 +425,7 @@ export class SakuraProvider implements ApiKeyProvider {
           error.status === 400
         ) {
           delete body.chat_template_kwargs;
-          logLine(
+          aiCallLog(params.meta).line(
             `さくらのAI Engine：思考を止める指定を付けた要求が受け付けられなかったため、` +
               `外して再試行します（モデル: ${params.model}）。応答: ${error.detail ?? "（本文なし）"}`
           );

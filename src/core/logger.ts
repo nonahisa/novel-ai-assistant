@@ -97,6 +97,34 @@ export function workLog(workFolderPath: string | undefined): WorkLog {
 }
 
 /**
+ * **AIの層（プロバイダー・関所）が1回の呼び出しの中で書く記録係**
+ * （2026-10-11。0.101.15 の残り）。
+ *
+ * 長い処理は `workLog` で作品へ束ねたが、その中で呼ばれるAIの層は共有の
+ * 書き先へ書いていた。待っているあいだに別の作品の画面が開かれると、
+ * 「指定を外して再試行します」のような行が開いた作品のログへ紛れる。
+ * 呼び出しは `GenerateMeta.workFolder` で作品を持っているので、それへ書く。
+ *
+ * **`workLog(undefined)` とは振る舞いが違う。** あちらは作品が決まらない
+ * 処理を保管庫へ固定する。こちらは作品の分からない呼び出し（接続確認・
+ * モデル一覧など）を、**今までどおり呼んだ時点の共有の書き先**へ書く——
+ * 作品の画面から接続確認をした行は、その作品のログに残っていてよい。
+ *
+ * 引数は `GenerateMeta` の形だけを受ける（`core` から `ai` の型を引かない）。
+ */
+export function aiCallLog(
+  meta: { workFolder?: string } | undefined
+): WorkLog {
+  const workFolder = meta?.workFolder;
+  if (workFolder) return workLog(workFolder);
+  return {
+    line: logLine,
+    step: logLine,
+    failure: logFailure,
+  };
+}
+
+/**
  * 動作の記録（`.aiwriter/logs/actions.log`）1ファイルの上限。
  *
  * **ログのバイト上限は3つある。値も違う**（設計書6.77の第2段で名前だけ揃えた）。

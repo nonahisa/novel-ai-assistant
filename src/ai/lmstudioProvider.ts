@@ -12,7 +12,7 @@ import { fetchJson } from "./httpClient";
 import { toOpenAIJsonSchema } from "./jsonSchema";
 import { resolveMaxOutputTokens } from "./outputLimit";
 import { withAiWork } from "../core/aiActivity";
-import { logLine } from "../core/logger";
+import { aiCallLog, logLine } from "../core/logger";
 import {
   resolveContextWindow,
   resolveTimeoutMs,
@@ -509,7 +509,8 @@ export class LmStudioProvider implements AIProvider {
         ) {
           // 形式の強制が効かないだけで、応答は使える
           delete body.response_format;
-          logLine(
+          // 呼び出した作品のログへ（`aiCallLog`。待つあいだに別の作品が開かれても紛れない）
+          aiCallLog(params.meta).line(
             "LM Studio：JSON形式の強制が受け付けられなかったため、外して再試行します。"
           );
           continue;

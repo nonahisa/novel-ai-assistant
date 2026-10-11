@@ -22,7 +22,7 @@ import {
 import { recordFeatureOutputTokens } from "../core/featureOutputTokens";
 import { TUNING_WORK_FEATURE } from "../core/tuningStages";
 import { endsInWhitespaceRunaway } from "../core/truncatedResponse";
-import { logStep } from "../core/logger";
+import { aiCallLog, logStep } from "../core/logger";
 import { AiQueueAbortError, acquireCall } from "../core/aiSequence";
 import { localAiGate } from "../core/localAiGate";
 import { isLocalProviderId } from "../core/localProviders";
@@ -222,7 +222,7 @@ export class MeteredProvider implements AIProvider {
         systemChars: requested.systemPrompt.length,
         userChars: requested.userPrompt.length,
         outputTokens: this.outputTokensFor(requested),
-        contextWindow: await this.contextWindowOf(requested.model),
+        contextWindow: await this.contextWindowOf(requested.model, requested.meta),
         // **チャンクを決めたのと同じ台帳を見る**（設計書6.77）。
         // 実測が無ければ `resolveTokensPerChar` が従来の 0.7 を返す
         measured: modelTuning(this.inner.id, requested.model),
@@ -333,7 +333,8 @@ export class MeteredProvider implements AIProvider {
       if (error instanceof AiQueueAbortError) {
         throw new AIError(error.message || "処理が中止されました。", "aborted");
       }
-      logStep(
+      // 呼び出した作品のログへ（`aiCallLog`。待つあいだに別の作品が開かれても紛れない）
+      aiCallLog(params.meta).step(
         `手元のAIの順番待ち（ほかの窓との札）を確かめられなかったので、そのまま送ります：${describeError(error)}`
       );
       return undefined;
@@ -426,7 +427,8 @@ export class MeteredProvider implements AIProvider {
     const note = `${params.model}:${fit.outputTokens}`;
     if (!this.loggedOutputFit.has(note)) {
       this.loggedOutputFit.add(note);
-      logStep(
+      // 一度きりの行も、きっかけになった呼び出しの作品へ書く
+      aiCallLog(params.meta).step(
         `モデル「${params.model}」は読める長さが` +
           `${(fit.contextWindow ?? 0).toLocaleString("ja-JP")}トークンで、` +
           `出力の見込み（${fit.outputTokens.toLocaleString("ja-JP")}トークン）だけで埋まるため、` +
@@ -468,7 +470,10 @@ export class MeteredProvider implements AIProvider {
    * **通ったときは何も書かない。** チャンクの数だけ行が出るとログが
    * 埋まって他が読めなくなる。送った量は `usage.md` に既に残っている。
    */
-  private async contextWindowOf(model: string): Promise<number | undefined> {
+  private async contextWindowOf(
+    model: string,
+    meta: GenerateParams["meta"]
+  ): Promise<number | undefined> {
     if (!this.getModel) return undefined;
     let limit: number | undefined;
     try {
@@ -478,7 +483,7 @@ export class MeteredProvider implements AIProvider {
     }
     if (limit === undefined && !this.loggedUnknownLimit.has(model)) {
       this.loggedUnknownLimit.add(model);
-      logStep(
+      aiCallLog(meta).step(
         `モデル「${model}」のコンテキスト上限が取れないため、` +
           "入るかどうかの確認を省いて送ります"
       );
@@ -684,7 +689,7 @@ export class MeteredProvider implements AIProvider {
       // 捨てない（CLAUDE.md 規則5）。速度のときと同じ扱い
       if (this.loggedRatioFailure.has(params.model)) return;
       this.loggedRatioFailure.add(params.model);
-      logStep(
+      aiCallLog(params.meta).step(
         `モデル「${params.model}」の字/トークンを台帳へ保存できませんでした` +
           `（${error instanceof Error ? error.message : String(error)}）。`
       );
@@ -762,7 +767,7 @@ export class MeteredProvider implements AIProvider {
       // ただしエラーの本文は捨てない（CLAUDE.md 規則5）
       if (this.loggedFeatureOutputFailure.has(feature)) return;
       this.loggedFeatureOutputFailure.add(feature);
-      logStep(
+      aiCallLog(params.meta).step(
         `機能「${feature}」の出力トークン数を台帳へ保存できませんでした` +
           `（${error instanceof Error ? error.message : String(error)}）。`
       );

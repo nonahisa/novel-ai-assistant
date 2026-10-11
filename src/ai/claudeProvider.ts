@@ -3,7 +3,7 @@ import { AIError, AIRefusalError, ApiKeyHelp, ApiKeyProvider, ConnectionTestResu
 import { fetchJson } from "./httpClient";
 import { clampToModelLimit, resolveMaxOutputTokens } from "./outputLimit";
 import { buildAttemptPlan, type OptionAttempt } from "./optionFallback";
-import { forgetSecret, logLine, registerSecret } from "../core/logger";
+import { aiCallLog, forgetSecret, logLine, registerSecret } from "../core/logger";
 import { verifiedState } from "../core/verifiedMemento";
 import { resolveTimeoutMs } from "../core/modelTuning";
 import { isWebRuntime } from "../core/runtime";
@@ -353,7 +353,8 @@ export class ClaudeProvider implements ApiKeyProvider {
         // 通った組み合わせだけを覚える。失敗から学ぶと誤った結論が残る
         accepted = attempt.support;
         if (attempt.dropped.length > 0) {
-          logLine(
+          // 呼び出した作品のログへ（`aiCallLog`。待つあいだに別の作品が開かれても紛れない）
+          aiCallLog(params.meta).line(
             `Claudeは「${describeDroppedOptions(attempt.dropped)}」を外すと通りました` +
               `（モデル: ${params.model}）。以後この組み合わせで呼び出します。` +
               (attempt.dropped.includes("jsonSchema")
@@ -375,7 +376,7 @@ export class ClaudeProvider implements ApiKeyProvider {
         // **何を外したときに何と言われたのかを必ず残す。**
         // 以前はこれを捨てていたため、どの指定が悪いのか誰にも分からず、
         // 当てずっぽうで機能を外し続けることになった
-        logLine(
+        aiCallLog(params.meta).line(
           `Claudeが要求を受け付けませんでした（モデル: ${params.model} / ` +
             `外した指定: ${describeDroppedOptions(attempt.dropped)}）。` +
             `応答: ${error.detail ?? "（本文なし）"}`

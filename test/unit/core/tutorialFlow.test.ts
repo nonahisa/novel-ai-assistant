@@ -3,6 +3,7 @@ import {
   runTutorialFlow,
   stepNeedsWork,
   TUTORIAL_WORK_COMMANDS,
+  TutorialNoticeGate,
   type TutorialAfterStep,
   type TutorialFlowGoal,
   type TutorialFlowPorts,
@@ -46,7 +47,10 @@ interface Script {
   steps?: TutorialStepChoice[];
   works?: Array<Work | undefined>;
   after?: TutorialAfterStep[];
-  hasWork?: boolean;
+  /** 作品が無いのに作品を受ける段を押したときの知らせで、押されたもの */
+  needsWork?: TutorialAfterStep[];
+  /** 案内の途中で作品が登録される場面は、関数で答えを変える */
+  hasWork?: boolean | (() => boolean);
   runResult?: unknown;
 }
 
@@ -58,6 +62,7 @@ function fakePorts(script: Script) {
   const steps = [...(script.steps ?? [])];
   const works = [...(script.works ?? [])];
   const after = [...(script.after ?? [])];
+  const needsWork = [...(script.needsWork ?? [])];
   const ports: TutorialFlowPorts<TutorialFlowGoal, Work> = {
     askGoal: async () => {
       calls.push("askGoal");
@@ -66,7 +71,10 @@ function fakePorts(script: Script) {
     openGuide: async () => {
       calls.push("openGuide");
     },
-    hasWork: () => script.hasWork ?? true,
+    hasWork: () =>
+      typeof script.hasWork === "function"
+        ? script.hasWork()
+        : (script.hasWork ?? true),
     pickWork: async () => {
       calls.push("pickWork");
       return works.shift();
@@ -83,6 +91,10 @@ function fakePorts(script: Script) {
     notifyOpened: async (step) => {
       calls.push(`notify:${step.command}`);
       return after.shift();
+    },
+    notifyNeedsWork: async (step) => {
+      calls.push(`needsWork:${step.command}`);
+      return needsWork.shift();
     },
     log: () => undefined,
   };
@@ -165,6 +177,162 @@ describe("作品は案内の中で一度だけ決める", () => {
     await runTutorialFlow(ports);
 
     expect(calls).not.toContain("pickWork");
+  });
+});
+
+/**
+ * 作品が1つも無いときに、作品を受ける段を押した（2026-10-11 作者の指示）。
+ *
+ * 以前は段を引数なしで動かし、機能の側が「作品が登録されていません。」
+ * （ボタン無し）を出して何も開かないのに、案内は「「〇〇」を開きました。」と
+ * 知らせていた。作者は何をすればよいか分からず、そこで行き詰まる。
+ */
+const review: TutorialStepInput = {
+  command: "novelai.reviewProposals",
+  label: "提案を確認",
+  why: "編集部の提案を見ます",
+};
+
+describe("作品が無いときは、段を動かさず作品の登録へ案内する", () => {
+  test("作品を受ける段を押しても動かさず、「開きました」とも言わない", async () => {
+    const { ports, calls } = fakePorts({
+      hasWork: false,
+      goals: [goal([review])],
+      steps: [{ step: review, action: "open" }, undefined],
+      needsWork: ["back"],
+    });
+
+    await runTutorialFlow(ports);
+
+    expect(calls.some((c) => c.startsWith("run:"))).toBe(false);
+    expect(calls.some((c) => c.startsWith("notify:"))).toBe(false);
+    expect(calls).toContain("needsWork:novelai.reviewProposals");
+    // ［はじめの案内に戻る］で同じ一覧へ戻る
+    expect(calls.filter((c) => c === "askStep")).toHaveLength(2);
+  });
+
+  test("知らせを閉じたら案内を終える（一覧を勝手に出し直さない）", async () => {
+    const { ports, calls } = fakePorts({
+      hasWork: false,
+      goals: [goal([review])],
+      steps: [{ step: review, action: "open" }],
+      needsWork: [undefined],
+    });
+
+    await runTutorialFlow(ports);
+
+    expect(calls.at(-1)).toBe("needsWork:novelai.reviewProposals");
+    expect(calls.filter((c) => c === "askStep")).toHaveLength(1);
+  });
+
+  test("作品を受けない段（作品の追加など）は、作品が無くてもそのまま動かす", async () => {
+    const add: TutorialStepInput = {
+      command: "novelai.addWork",
+      label: "フォルダーから作品を追加",
+      why: "原稿のフォルダーを登録します",
+    };
+    const { ports, ran, calls } = fakePorts({
+      hasWork: false,
+      goals: [goal([add])],
+      steps: [{ step: add, action: "open" }],
+      after: [undefined],
+    });
+
+    await runTutorialFlow(ports);
+
+    expect(ran).toEqual([{ command: "novelai.addWork", work: undefined }]);
+    expect(calls.some((c) => c.startsWith("needsWork:"))).toBe(false);
+  });
+
+  test("案内の途中で作品を登録したら、次に作品を受ける段を押したときに一度だけ決める", async () => {
+    let registered = false;
+    const work = { id: "new" };
+    const add: TutorialStepInput = {
+      command: "novelai.addWork",
+      label: "フォルダーから作品を追加",
+      why: "原稿のフォルダーを登録します",
+    };
+    const { ports, ran, calls } = fakePorts({
+      hasWork: () => registered,
+      goals: [goal([add, review])],
+      steps: [
+        { step: add, action: "open" },
+        { step: review, action: "open" },
+      ],
+      works: [work],
+      after: ["back", undefined],
+    });
+    const runStep = ports.runStep;
+    ports.runStep = async (step, picked) => {
+      if (step.command === "novelai.addWork") registered = true;
+      return runStep(step, picked);
+    };
+
+    await runTutorialFlow(ports);
+
+    expect(calls.filter((c) => c === "pickWork")).toHaveLength(1);
+    expect(ran.at(-1)).toEqual({ command: "novelai.reviewProposals", work });
+    expect(calls.some((c) => c.startsWith("needsWork:"))).toBe(false);
+  });
+});
+
+/**
+ * 古い知らせが残る（2026-10-11 作者の指示）。
+ *
+ * 段のあとの知らせ（［はじめの案内に戻る］［終える］）は、しばらくすると右下から
+ * 消えて通知センター（ベル）へ移る。待っている案内は終わっていないので、作者が
+ * ヘルプから案内をもう一度始めると、古い知らせが新しい案内と並んで残り、押すと
+ * 古い一覧まで戻ってきた。新しい案内を始めたら、古い案内の待ちは解いて終える。
+ */
+describe("案内は1つだけ動かす（TutorialNoticeGate）", () => {
+  test("新しい案内を始めると、古い案内の知らせの待ちは「閉じた」として解ける", async () => {
+    const gate = new TutorialNoticeGate();
+    const first = gate.begin();
+    // 作者が押さないまま残っている知らせ
+    const never = new Promise<string | undefined>(() => undefined);
+    const waiting = first.wait(never);
+
+    const second = gate.begin();
+
+    await expect(waiting).resolves.toBeUndefined();
+    expect(first.superseded).toBe(true);
+    expect(second.superseded).toBe(false);
+  });
+
+  test("新しい案内が始まったあとで古い知らせを押しても、古い一覧へは戻らない", async () => {
+    const gate = new TutorialNoticeGate();
+    const first = gate.begin();
+    gate.begin();
+    // 古い知らせの［はじめの案内に戻る］が、あとから押された
+    await expect(first.wait(Promise.resolve("back"))).resolves.toBeUndefined();
+  });
+
+  test("いまの案内の知らせは、押されたものをそのまま返す", async () => {
+    const gate = new TutorialNoticeGate();
+    const session = gate.begin();
+    await expect(session.wait(Promise.resolve("back"))).resolves.toBe("back");
+  });
+
+  test("知らせの待ちが解けた古い案内は、一覧を出さずに終わる", async () => {
+    const gate = new TutorialNoticeGate();
+    const first = gate.begin();
+    const { ports, calls } = fakePorts({
+      goals: [goal([resume])],
+      works: [{ id: "w" }],
+      steps: [{ step: resume, action: "open" }],
+    });
+    ports.notifyOpened = async (step) => {
+      calls.push(`notify:${step.command}`);
+      const pending = first.wait(new Promise<TutorialAfterStep>(() => undefined));
+      // 知らせが出ているあいだに、ヘルプから案内がもう一度始まった
+      gate.begin();
+      return pending;
+    };
+
+    await runTutorialFlow(ports);
+
+    expect(calls.at(-1)).toBe("notify:novelai.resumeWriting");
+    expect(calls.filter((c) => c === "askStep")).toHaveLength(1);
   });
 });
 

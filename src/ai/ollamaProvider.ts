@@ -36,7 +36,7 @@ interface OutputDeadline {
   readonly ms: number;
   readonly allowanceTokens: number;
 }
-import { logLine, workLog } from "../core/logger";
+import { aiCallLog, logLine, type WorkLog } from "../core/logger";
 import {
   findRepetition,
   repetitionStopMessage,
@@ -638,7 +638,8 @@ export class OllamaProvider implements AIProvider {
     // 「抽出中にコンソールが一瞬ずつ何度も出る」という報告（2026-08-30）の
     // 原因——`num_ctx` がチャンクごとに変わってモデルが読み込み直されていた
     // ——を、ログからは追えなかった（設計書6.53）
-    logLine(
+    // 呼び出した作品のログへ（`aiCallLog`。待つあいだに別の作品が開かれても紛れない）
+    aiCallLog(params.meta).line(
       `Ollama：num_ctx ${numCtx}（${params.model} / 送信 ${
         params.systemPrompt.length + params.userPrompt.length
       }字）`
@@ -741,8 +742,7 @@ export class OllamaProvider implements AIProvider {
           "それまでの答えを閉じられませんでした。";
       // **作品のログへ書く**（0.101.15 と同じ理由。待っているあいだに作者が
       // 別の作品を開いても、始めた作品の記録に残す）
-      if (params.meta?.workFolder) workLog(params.meta.workFolder).line(message);
-      else logLine(message);
+      aiCallLog(params.meta).line(message);
     }
 
     /*
@@ -761,7 +761,7 @@ export class OllamaProvider implements AIProvider {
       res.eval_count !== undefined &&
       !repetition.salvaged
     ) {
-      logLine(
+      aiCallLog(params.meta).line(
         `Ollama：出力が上限（${numPredict} トークン）に達したので打ち切りました` +
           `（${params.model}${
             params.meta?.feature ? ` / ${params.meta.feature}` : ""
@@ -776,7 +776,9 @@ export class OllamaProvider implements AIProvider {
     const text = decodeByteFallback(raw);
     const repaired = countByteFallback(raw);
     if (repaired > 0) {
-      logLine(`バイト表記のまま返った文字を ${repaired} 箇所戻しました。`);
+      aiCallLog(params.meta).line(
+        `バイト表記のまま返った文字を ${repaired} 箇所戻しました。`
+      );
     }
     if (!text.trim()) {
       throw new AIError(
@@ -852,7 +854,8 @@ export class OllamaProvider implements AIProvider {
             this.requestTimeoutMs(params.model),
             params.signal,
             params.onThinking,
-            this.outputDeadline(params)
+            this.outputDeadline(params),
+            aiCallLog(params.meta)
           )
         : await this.fetchJson<ChatResponse>(
             "/api/chat",
@@ -911,7 +914,7 @@ export class OllamaProvider implements AIProvider {
     const calls = normalizeToolCalls(rawToolCalls);
     if (calls.length === 0) return undefined;
 
-    logLine(
+    aiCallLog(params.meta).line(
       `Ollama：道具が呼ばれました（${calls
         .map((call) => call.name)
         .join("、")}）。返事をして、道具を外して書かせ直します`
@@ -948,7 +951,9 @@ export class OllamaProvider implements AIProvider {
     if (!(second.message?.content ?? "").trim()) {
       // **黙って空を返さない**（CLAUDE.md 規則5）。道具を外してなお本文が
       // 無いのは道具とは別の不調なので、そうと分かる言い方で残す
-      logLine("Ollama：道具を外して投げ直しても、本文が返りませんでした");
+      aiCallLog(params.meta).line(
+        "Ollama：道具を外して投げ直しても、本文が返りませんでした"
+      );
       throw new AIError(
         "道具に返事をして投げ直しましたが、本文が返りませんでした。",
         "bad_response",
@@ -979,7 +984,9 @@ export class OllamaProvider implements AIProvider {
      * 呼び出し1回ぶんの締め切り。**undefined なら掛けない**
      * （断片ごとに数え直す時計だけになる）。決めるのは `outputDeadline`
      */
-    deadlineSpec?: OutputDeadline
+    deadlineSpec?: OutputDeadline,
+    /** 受信の記録を書く先（呼び出した作品。`aiCallLog`） */
+    log: WorkLog = aiCallLog(undefined)
   ): Promise<ChatResponse> {
     const deadlineMs = deadlineSpec?.ms;
     const controller = new AbortController();
@@ -1150,7 +1157,7 @@ export class OllamaProvider implements AIProvider {
         applyStreamLine(state, buffer);
       }
 
-      logLine(
+      log.line(
         `Ollama：流して受信（${Math.round((Date.now() - started) / 1000)}秒 / ` +
           `${state.content.length}字 / 出力 ${state.evalCount ?? "不明"}トークン）` +
           (whitespaceStopped
