@@ -1,0 +1,1067 @@
+{
+  "_説明": "矛盾検知の口調の食い違い（C2）を、0.102.9 の直し（検算の self_denied に「整合する。」「計算上は正しい。」などを足した／確かめの段 P-12b を 1.1 にした）のあとに gemma4:26b で2回測った記録。台は novel-ai-bench/field-ai/台/台C_照合台_口調 を scratchpad へ写したもの（.aiwriter/cache なし）。道は scripts/measure.mjs contradiction → novel.run（検算・確かめの段まで。束 0.102.9）。正解は台の answers.json（measure.mjs がそこから数える）。口調の仕込み・罠の行き先は accepted・rejected・verifyRejected を台詞で引いて数えた。abVerify は補助の比べで、製品の道ではない：確かめの段の頼み方 1.0 と 1.1 を、仕込み2件・罠2件に同じ形の指摘（設定の口調の欄と、第1段がよく書く形を写した）で直接当てた。第1段が挙げるかどうかに左右されずに、確かめの段だけの効き目を見るため。",
+  "speechSummary": {
+    "seeds": [
+      "第4話43行 蓬田「それはよかったですね。私のは一生ものですけれど」（ぶっきらぼう・敬語なしの設定に反する）",
+      "第5話41行 千夏「そうか、ではありませんわ。わたくし、驚きましたのよ」（一人称私・くだけた話し方の設定に反する）"
+    ],
+    "traps": [
+      "第3話30行 蓬田「なんだ、そんな顔をするな」",
+      "第4話65行 千夏「じゃあ、私は窓口ね」"
+    ],
+    "gemma4:26b（2026-10-11、0.102.9）": {
+      "bundle": "0.102.9",
+      "promptVersion": "1.9",
+      "verifyPromptVersion": "1.1",
+      "numCtx": 24576,
+      "seedsFound": "1/2・0/2（回ごと）",
+      "whereLost": "1回目：千夏（第5話41行）を第1段が挙げ、確かめの段（1.1）を通って残った。蓬田（第4話43行）は第1段で挙げていない。2回目：2件とも第1段で挙げていない",
+      "traps": "0件・0件（2件とも第1段で挙げていない）",
+      "otherSeeds": "元の照合台の仕込み4件は 3/4・3/4（第5話「二週間」を2回とも挙げず。区分ちがい2＝右足・ほくろを「既出情報」としたもの）",
+      "falsePositives": "0件・0件（仕込み以外への指摘も 0・0）",
+      "checkRejected": "1件・0件（1回目の第4話17行「医者が、乗っていいと言った」を self_denied。補足が「〜と解釈すれば矛盾ではないが」の形。罠の場所＝mustNotFlag の「今日から乗る」の近くで、落として正しい）",
+      "verifyRejected": "0件・1件（2回目の第4話「足首の外側が熱を持っていた」を「作中の変化」で却下。10-10 の2回目と同じもの）",
+      "elapsedSec": [
+        173,
+        122
+      ],
+      "ps": "gemma4:26b のみ・context_length 24576。札の外の利用なし"
+    },
+    "比べ（直す前）": {
+      "gemma4:26b 2026-10-10（束 0.101.13、確かめの段 1.0）": "口調 0/2・0/2。1回目は千夏を第1段が挙げ、確かめの段が「そもそも食い違っていない」で却下（説明「〜ですわは〜でしょ〜ね〜よの語尾のバリエーションに含まれ…」）。罠0。元の仕込み 3/4（区分ちがい2）",
+      "gemma4:31b 2026-10-11 未明（束 0.102.8）": "口調 0/2・0/2（第1段で挙げず）。罠0。元の仕込み 4/4・4/4。誤検出 1・1"
+    },
+    "abVerifySummary": "確かめの段だけの比べ（26b、温度0、各2回）：1.0 は仕込み2件を2回とも却下（理由はどちらも「まだ明かされていない」）、罠2件も却下。1.1 は仕込み2件を2回とも採用（「お嬢様言葉」「丁寧語…きっかけも描かれていない」）、罠2件は2回とも却下（罠1は「設定の語尾は例示であり、〜なもぶっきらぼうな口調の範疇」）"
+  },
+  "record": {
+    "measuredAt": "2026-10-11T04:07:12.814Z",
+    "feature": "contradiction",
+    "runner": "ollama",
+    "tool": "novel.run",
+    "model": "gemma4:26b",
+    "numCtx": 24576,
+    "numCtxDecision": {
+      "numCtx": 24576,
+      "source": "プロンプトの長さから（製品と同じ道）",
+      "promptChars": 9433,
+      "outputTokens": 8192,
+      "contextWindow": 262144,
+      "charsPerToken": null
+    },
+    "temperature": 0,
+    "temperatureSource": "製品と同じ（束が返した値）",
+    "modelInfo": {
+      "contextLength": 262144,
+      "parameterSize": "25.2B",
+      "bundled": {
+        "thinkingSeen": true,
+        "thinkingOffWorks": true,
+        "thinkingMeasuredAt": "2026-09-26",
+        "typoAccuracy": {
+          "hits": 5,
+          "total": 7,
+          "falsePositives": 0,
+          "wrongFixes": 0,
+          "trapHits": 0,
+          "trapTotal": 5,
+          "promptVersion": "1.2",
+          "smallPrompt": false,
+          "sampleVersion": "2",
+          "measuredAt": "2026-09-26T06:31:27+09:00"
+        },
+        "measuredAt": "2026-09-26"
+      },
+      "note": null
+    },
+    "warmup": {
+      "elapsedMs": 22103,
+      "ok": true,
+      "reason": null
+    },
+    "endpoint": null,
+    "options": {
+      "categories": "all",
+      "suppression": "loose"
+    },
+    "givenOptions": {},
+    "modelSize": null,
+    "modelSizeDecision": {
+      "sizeDependent": true,
+      "decided": true,
+      "providerId": "ollama",
+      "parameterSize": "25.2B",
+      "tier": "high",
+      "product": {
+        "categories": "all",
+        "suppression": "loose"
+      },
+      "kept": [],
+      "source": "製品と同じ判断（ai/capability.ts を束から借りた）"
+    },
+    "repeat": 2,
+    "bundle": {
+      "name": "novel-ai-assistant",
+      "version": "0.102.9",
+      "stale": false,
+      "reason": null,
+      "staleDuringRun": null
+    },
+    "promptVersion": "1.9",
+    "verifyPromptVersion": null,
+    "plans": [
+      {
+        "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@6020",
+        "chars": 1235,
+        "maxIssues": null
+      },
+      {
+        "chunkId": "本文\\002_十月三日の坂.txt#2-0@6020",
+        "chars": 1218,
+        "maxIssues": null
+      },
+      {
+        "chunkId": "本文\\003_窓口の椅子.txt#3-0@6020",
+        "chars": 1211,
+        "maxIssues": null
+      },
+      {
+        "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@6020",
+        "chars": 1252,
+        "maxIssues": null
+      },
+      {
+        "chunkId": "本文\\005_初雪の窓口.txt#5-0@6020",
+        "chars": 1230,
+        "maxIssues": null
+      }
+    ],
+    "maxIssuesPer1000Chars": null,
+    "work": {
+      "source": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\aa802787-65db-4c41-8484-fcc6029eac4e\\scratchpad\\sd\\台C_照合台_口調",
+      "targets": [
+        "本文\\001_九月の終わりの坂.txt",
+        "本文\\002_十月三日の坂.txt",
+        "本文\\003_窓口の椅子.txt",
+        "本文\\004_ギプスが外れた日.txt",
+        "本文\\005_初雪の窓口.txt"
+      ]
+    },
+    "answers": "C:\\Users\\nonah\\AppData\\Local\\Temp\\claude\\C--Users-nonah-Documents-novel-ai-assistant\\aa802787-65db-4c41-8484-fcc6029eac4e\\scratchpad\\sd\\台C_照合台_口調\\answers.json",
+    "runs": [
+      {
+        "round": 1,
+        "elapsedMs": 173229,
+        "temperature": 0,
+        "staleNote": null,
+        "metrics": {
+          "seededContradictions": 4,
+          "seededContradictionsTotal": 6,
+          "missedContradictions": 2,
+          "falseFlagsContradiction": 0,
+          "categoryMismatch": 2,
+          "otherFlagsContradiction": 0,
+          "accepted": 4,
+          "rejected": 1,
+          "rejected.self_denied": 1,
+          "failures": 0,
+          "elapsedMs": 173229
+        },
+        "detail": {
+          "rejectedReasons": {
+            "self_denied": 1
+          },
+          "failures": [],
+          "seededContradictions": {
+            "人物": {
+              "found": 3,
+              "total": 4
+            },
+            "状態": {
+              "found": 1,
+              "total": 1
+            },
+            "時系列": {
+              "found": 0,
+              "total": 1
+            }
+          },
+          "missedContradictions": [
+            {
+              "file": "本文/004_ギプスが外れた日.txt",
+              "kind": "人物",
+              "where": "私のは一生ものですけれど"
+            },
+            {
+              "file": "本文/005_初雪の窓口.txt",
+              "kind": "時系列",
+              "where": "足を折ってから、ちょうど二週間が過ぎた"
+            }
+          ],
+          "falseFlagsContradiction": {}
+        },
+        "raw": [
+          {
+            "target": "本文\\001_九月の終わりの坂.txt",
+            "response": {
+              "runner": "ollama",
+              "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+              "model": "gemma4:26b",
+              "temperature": 0,
+              "results": [
+                {
+                  "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@6020",
+                  "chapterLabel": "第1話",
+                  "accepted": [],
+                  "rejected": [],
+                  "verifyRejected": []
+                }
+              ],
+              "failures": [],
+              "missed": [],
+              "speechCheck": true,
+              "speechNote": "",
+              "modelSizeDecision": {
+                "source": "unknownModel",
+                "parameterSize": null,
+                "product": {
+                  "typoModelSize": "large",
+                  "deviationModelSize": "large",
+                  "categories": "all",
+                  "suppression": "loose"
+                },
+                "given": [
+                  "categories",
+                  "suppression"
+                ],
+                "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+              },
+              "verifyNote": ""
+            }
+          },
+          {
+            "target": "本文\\002_十月三日の坂.txt",
+            "response": {
+              "runner": "ollama",
+              "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+              "model": "gemma4:26b",
+              "temperature": 0,
+              "results": [
+                {
+                  "chunkId": "本文\\002_十月三日の坂.txt#2-0@6020",
+                  "chapterLabel": "第2話",
+                  "accepted": [],
+                  "rejected": [],
+                  "verifyRejected": []
+                }
+              ],
+              "failures": [],
+              "missed": [],
+              "speechCheck": true,
+              "speechNote": "",
+              "modelSizeDecision": {
+                "source": "unknownModel",
+                "parameterSize": null,
+                "product": {
+                  "typoModelSize": "large",
+                  "deviationModelSize": "large",
+                  "categories": "all",
+                  "suppression": "loose"
+                },
+                "given": [
+                  "categories",
+                  "suppression"
+                ],
+                "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+              },
+              "verifyNote": ""
+            }
+          },
+          {
+            "target": "本文\\003_窓口の椅子.txt",
+            "response": {
+              "runner": "ollama",
+              "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+              "model": "gemma4:26b",
+              "temperature": 0,
+              "results": [
+                {
+                  "chunkId": "本文\\003_窓口の椅子.txt#3-0@6020",
+                  "chapterLabel": "第3話",
+                  "accepted": [
+                    {
+                      "line": 39,
+                      "excerpt": "僕は判子を押す手を止めた。",
+                      "category": "人物",
+                      "settingSays": "一人称は「俺」",
+                      "textSays": "僕は判子を押す手を止めた。",
+                      "note": "地の文の語り手（相沢春人）の一人称が、突如「僕」に変わっている。視点人物の交代や意図的な変化の描写はない。（検証: 地の文において、一人称が「俺」と「僕」で混在しており、語り手の記述として矛盾している。）",
+                      "severity": "medium",
+                      "confidence": "high",
+                      "filePath": "本文\\003_窓口の椅子.txt",
+                      "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                    }
+                  ],
+                  "rejected": [],
+                  "verifyRejected": []
+                }
+              ],
+              "failures": [],
+              "missed": [],
+              "speechCheck": true,
+              "speechNote": "",
+              "modelSizeDecision": {
+                "source": "unknownModel",
+                "parameterSize": null,
+                "product": {
+                  "typoModelSize": "large",
+                  "deviationModelSize": "large",
+                  "categories": "all",
+                  "suppression": "loose"
+                },
+                "given": [
+                  "categories",
+                  "suppression"
+                ],
+                "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+              },
+              "verifyNote": ""
+            }
+          },
+          {
+            "target": "本文\\004_ギプスが外れた日.txt",
+            "response": {
+              "runner": "ollama",
+              "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+              "model": "gemma4:26b",
+              "temperature": 0,
+              "results": [
+                {
+                  "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@6020",
+                  "chapterLabel": "第4話",
+                  "accepted": [
+                    {
+                      "line": 1,
+                      "excerpt": "右足のギプスが外れたのは、十一月の最初の月曜だった。",
+                      "category": "既出情報",
+                      "settingSays": "第2話にて「左の足首を折った」と記述されている。",
+                      "textSays": "右足のギプスが外れた",
+                      "note": "負傷部位が「左」から「右」に変わっている。単なる書き間違いか、あるいは設定の更新か。（検証: 第2話で「左の足首」と設定されているのに対し、第4話の地の文で「右足のギプス」となっており、左右が食い違っている。）",
+                      "severity": "medium",
+                      "confidence": "high",
+                      "filePath": "本文\\004_ギプスが外れた日.txt",
+                      "chunkHash": "801a48d664eb506a67413fe11aa96f08ae8daaf9ba4f0bb2ba781f2d9c8ae1ea"
+                    }
+                  ],
+                  "rejected": [
+                    {
+                      "raw": {
+                        "line": 17,
+                        "excerpt": "「医者が、乗っていいと言った」",
+                        "category": "既出情報",
+                        "settingSays": "第2話にて、医者からは「二週間は自転車に乗るなと言われている」と記述されている。",
+                        "textSays": "医者が、乗っていいと言った",
+                        "note": "経過した一か月間で、医者の指示が「乗るな」から「乗っていい」に変化したと解釈すれば矛盾ではないが、直前の「まだ無理はするな」という指示との整合性に注意が必要。",
+                        "severity": "low",
+                        "confidence": "medium"
+                      },
+                      "reason": "self_denied"
+                    }
+                  ],
+                  "verifyRejected": []
+                }
+              ],
+              "failures": [],
+              "missed": [],
+              "speechCheck": true,
+              "speechNote": "",
+              "modelSizeDecision": {
+                "source": "unknownModel",
+                "parameterSize": null,
+                "product": {
+                  "typoModelSize": "large",
+                  "deviationModelSize": "large",
+                  "categories": "all",
+                  "suppression": "loose"
+                },
+                "given": [
+                  "categories",
+                  "suppression"
+                ],
+                "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+              },
+              "verifyNote": ""
+            }
+          },
+          {
+            "target": "本文\\005_初雪の窓口.txt",
+            "response": {
+              "runner": "ollama",
+              "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+              "model": "gemma4:26b",
+              "temperature": 0,
+              "results": [
+                {
+                  "chunkId": "本文\\005_初雪の窓口.txt#5-0@6020",
+                  "chapterLabel": "第5話",
+                  "accepted": [
+                    {
+                      "line": 7,
+                      "excerpt": "左目の下のほくろが、鏡の中で滲んだ。",
+                      "category": "既出情報",
+                      "settingSays": "第1話にて「右目の下を手の甲でこすった。小さいころからそこに小さなほくろがある」と記述されている。",
+                      "textSays": "左目の下のほくろが、鏡の中で滲んだ。",
+                      "note": "設定では右目、本文では左目となっている。単なる左右の書き間違いか、設定の誤記か。（検証: 第1話の設定（右目）と第5話の記述（左目）で、左右が食い違っており、作中の変化の記述もないため。）",
+                      "severity": "medium",
+                      "confidence": "high",
+                      "filePath": "本文\\005_初雪の窓口.txt",
+                      "chunkHash": "2530220d379942b327f4197e45dd319277f6b31943d0528c83b539b7f66d1660"
+                    },
+                    {
+                      "line": 41,
+                      "excerpt": "「そうか、ではありませんわ。わたくし、驚きましたのよ」",
+                      "category": "人物",
+                      "settingSays": "一人称は「私」。くだけた話し方で、語尾は「〜でしょ」「〜ね」「〜よ」。",
+                      "textSays": "「そうか、ではありませんわ。わたくし、驚きましたのよ」",
+                      "note": "一人称が「わたくし」になり、語尾も「〜ですわ」といったお嬢様口調になっている。千夏の性格の変化や、相沢を驚かせようとする意図的な演出の可能性もあるが、設定とは異なる。（検証: 設定の「くだけた話し方」に対し、本文は「〜ですわ」「わたくし」とお嬢様言葉（丁寧な敬語）になっており、乖離がある。）",
+                      "severity": "low",
+                      "confidence": "medium",
+                      "filePath": "本文\\005_初雪の窓口.txt",
+                      "chunkHash": "2530220d379942b327f4197e45dd319277f6b31943d0528c83b539b7f66d1660"
+                    }
+                  ],
+                  "rejected": [],
+                  "verifyRejected": []
+                }
+              ],
+              "failures": [],
+              "missed": [],
+              "speechCheck": true,
+              "speechNote": "",
+              "modelSizeDecision": {
+                "source": "unknownModel",
+                "parameterSize": null,
+                "product": {
+                  "typoModelSize": "large",
+                  "deviationModelSize": "large",
+                  "categories": "all",
+                  "suppression": "loose"
+                },
+                "given": [
+                  "categories",
+                  "suppression"
+                ],
+                "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+              },
+              "verifyNote": ""
+            }
+          }
+        ]
+      },
+      {
+        "round": 2,
+        "elapsedMs": 122063,
+        "temperature": 0,
+        "staleNote": null,
+        "metrics": {
+          "seededContradictions": 3,
+          "seededContradictionsTotal": 6,
+          "missedContradictions": 3,
+          "falseFlagsContradiction": 0,
+          "categoryMismatch": 2,
+          "otherFlagsContradiction": 0,
+          "accepted": 3,
+          "rejected": 0,
+          "failures": 0,
+          "elapsedMs": 122063
+        },
+        "detail": {
+          "rejectedReasons": {},
+          "failures": [],
+          "seededContradictions": {
+            "人物": {
+              "found": 2,
+              "total": 4
+            },
+            "状態": {
+              "found": 1,
+              "total": 1
+            },
+            "時系列": {
+              "found": 0,
+              "total": 1
+            }
+          },
+          "missedContradictions": [
+            {
+              "file": "本文/004_ギプスが外れた日.txt",
+              "kind": "人物",
+              "where": "私のは一生ものですけれど"
+            },
+            {
+              "file": "本文/005_初雪の窓口.txt",
+              "kind": "時系列",
+              "where": "足を折ってから、ちょうど二週間が過ぎた"
+            },
+            {
+              "file": "本文/005_初雪の窓口.txt",
+              "kind": "人物",
+              "where": "ではありませんわ"
+            }
+          ],
+          "falseFlagsContradiction": {}
+        },
+        "raw": [
+          {
+            "target": "本文\\001_九月の終わりの坂.txt",
+            "response": {
+              "runner": "ollama",
+              "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+              "model": "gemma4:26b",
+              "temperature": 0,
+              "results": [
+                {
+                  "chunkId": "本文\\001_九月の終わりの坂.txt#1-0@6020",
+                  "chapterLabel": "第1話",
+                  "accepted": [],
+                  "rejected": [],
+                  "verifyRejected": []
+                }
+              ],
+              "failures": [],
+              "missed": [],
+              "speechCheck": true,
+              "speechNote": "",
+              "modelSizeDecision": {
+                "source": "unknownModel",
+                "parameterSize": null,
+                "product": {
+                  "typoModelSize": "large",
+                  "deviationModelSize": "large",
+                  "categories": "all",
+                  "suppression": "loose"
+                },
+                "given": [
+                  "categories",
+                  "suppression"
+                ],
+                "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+              },
+              "verifyNote": ""
+            }
+          },
+          {
+            "target": "本文\\002_十月三日の坂.txt",
+            "response": {
+              "runner": "ollama",
+              "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+              "model": "gemma4:26b",
+              "temperature": 0,
+              "results": [
+                {
+                  "chunkId": "本文\\002_十月三日の坂.txt#2-0@6020",
+                  "chapterLabel": "第2話",
+                  "accepted": [],
+                  "rejected": [],
+                  "verifyRejected": []
+                }
+              ],
+              "failures": [],
+              "missed": [],
+              "speechCheck": true,
+              "speechNote": "",
+              "modelSizeDecision": {
+                "source": "unknownModel",
+                "parameterSize": null,
+                "product": {
+                  "typoModelSize": "large",
+                  "deviationModelSize": "large",
+                  "categories": "all",
+                  "suppression": "loose"
+                },
+                "given": [
+                  "categories",
+                  "suppression"
+                ],
+                "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+              },
+              "verifyNote": ""
+            }
+          },
+          {
+            "target": "本文\\003_窓口の椅子.txt",
+            "response": {
+              "runner": "ollama",
+              "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+              "model": "gemma4:26b",
+              "temperature": 0,
+              "results": [
+                {
+                  "chunkId": "本文\\003_窓口の椅子.txt#3-0@6020",
+                  "chapterLabel": "第3話",
+                  "accepted": [
+                    {
+                      "line": 39,
+                      "excerpt": "僕は判子を押す手を止めた。",
+                      "category": "人物",
+                      "settingSays": "相沢春人の一人称は「俺」である。",
+                      "textSays": "「僕は判子を押す手を止めた。」と、一人称が「僕」になっている。",
+                      "note": "地の文の語り手（相沢春人）の一人称が、突如として「僕」に変化している。書き間違いの可能性がある。（検証: 地の文において、同一人物の視点と思われる一人称が「俺」と「僕」で混在しており、矛盾している。）",
+                      "severity": "medium",
+                      "confidence": "high",
+                      "filePath": "本文\\003_窓口の椅子.txt",
+                      "chunkHash": "20a2423871cb8d66d1e0b1c7149c2c1e096508efc80abc7bc6051b1699b2c34a"
+                    }
+                  ],
+                  "rejected": [],
+                  "verifyRejected": []
+                }
+              ],
+              "failures": [],
+              "missed": [],
+              "speechCheck": true,
+              "speechNote": "",
+              "modelSizeDecision": {
+                "source": "unknownModel",
+                "parameterSize": null,
+                "product": {
+                  "typoModelSize": "large",
+                  "deviationModelSize": "large",
+                  "categories": "all",
+                  "suppression": "loose"
+                },
+                "given": [
+                  "categories",
+                  "suppression"
+                ],
+                "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+              },
+              "verifyNote": ""
+            }
+          },
+          {
+            "target": "本文\\004_ギプスが外れた日.txt",
+            "response": {
+              "runner": "ollama",
+              "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+              "model": "gemma4:26b",
+              "temperature": 0,
+              "results": [
+                {
+                  "chunkId": "本文\\004_ギプスが外れた日.txt#4-0@6020",
+                  "chapterLabel": "第4話",
+                  "accepted": [
+                    {
+                      "line": 1,
+                      "excerpt": "右足のギプスが外れたのは、十一月の最初の月曜だった。",
+                      "category": "既出情報",
+                      "settingSays": "第2話：十月三日、雨。春人は……左の足首を折った。",
+                      "textSays": "右足のギプスが外れたのは、十一月の最初の月曜だった。",
+                      "note": "第2話では「左の足首」を折ったと記述されていますが、第4話では「右足」のギプスが外れたことになっています。単なる左右の書き間違いか、あるいは設定の更新か、確認が必要です。（検証: 設定では「左足」を折ったことになっているが、本文では「右足」のギプスが外れたと記述されており、左右が矛盾している。）",
+                      "severity": "medium",
+                      "confidence": "high",
+                      "filePath": "本文\\004_ギプスが外れた日.txt",
+                      "chunkHash": "801a48d664eb506a67413fe11aa96f08ae8daaf9ba4f0bb2ba781f2d9c8ae1ea"
+                    }
+                  ],
+                  "rejected": [],
+                  "verifyRejected": [
+                    {
+                      "excerpt": "足首の外側が熱を持っていた。",
+                      "reason": "作中の変化",
+                      "explanation": "骨折（左足首）から一ヶ月経過しており、負傷部位や状態の変化は時間の経過として矛盾しないため。"
+                    }
+                  ]
+                }
+              ],
+              "failures": [],
+              "missed": [],
+              "speechCheck": true,
+              "speechNote": "",
+              "modelSizeDecision": {
+                "source": "unknownModel",
+                "parameterSize": null,
+                "product": {
+                  "typoModelSize": "large",
+                  "deviationModelSize": "large",
+                  "categories": "all",
+                  "suppression": "loose"
+                },
+                "given": [
+                  "categories",
+                  "suppression"
+                ],
+                "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+              },
+              "verifyNote": "検証で 1件を取り下げ（作中の変化 1件）"
+            }
+          },
+          {
+            "target": "本文\\005_初雪の窓口.txt",
+            "response": {
+              "runner": "ollama",
+              "note": "手元の Ollama で検算まで通しました（原稿はこの機械から出ていません）。検算（validate）を通していない結果は、製品の結果ではありません。",
+              "model": "gemma4:26b",
+              "temperature": 0,
+              "results": [
+                {
+                  "chunkId": "本文\\005_初雪の窓口.txt#5-0@6020",
+                  "chapterLabel": "第5話",
+                  "accepted": [
+                    {
+                      "line": 7,
+                      "excerpt": "左目の下のほくろが、鏡の中で滲んだ。",
+                      "category": "既出情報",
+                      "settingSays": "第1話の抜粋にて「右目の下を手の甲でこすった。小さいころからそこに小さなほくろがある」と記述されている。",
+                      "textSays": "左目の下のほくろが、鏡の中で滲んだ。",
+                      "note": "設定では「右目」だが、本文では「左目」となっている。単なる書き間違いか、あるいは左右の記述ミスか。（検証: 第1話で「右目の下」と明記されているのに対し、第5話では「左目の下」となっており、地の文の記述が矛盾している。）",
+                      "severity": "medium",
+                      "confidence": "high",
+                      "filePath": "本文\\005_初雪の窓口.txt",
+                      "chunkHash": "2530220d379942b327f4197e45dd319277f6b31943d0528c83b539b7f66d1660"
+                    }
+                  ],
+                  "rejected": [],
+                  "verifyRejected": []
+                }
+              ],
+              "failures": [],
+              "missed": [],
+              "speechCheck": true,
+              "speechNote": "",
+              "modelSizeDecision": {
+                "source": "unknownModel",
+                "parameterSize": null,
+                "product": {
+                  "typoModelSize": "large",
+                  "deviationModelSize": "large",
+                  "categories": "all",
+                  "suppression": "loose"
+                },
+                "given": [
+                  "categories",
+                  "suppression"
+                ],
+                "note": "指定に従いました（モデルの大きさは問い合わせていません）"
+              },
+              "verifyNote": ""
+            }
+          }
+        ]
+      }
+    ],
+    "spread": {
+      "seededContradictions": {
+        "values": [
+          4,
+          3
+        ],
+        "min": 3,
+        "max": 4
+      },
+      "seededContradictionsTotal": {
+        "values": [
+          6,
+          6
+        ],
+        "min": 6,
+        "max": 6
+      },
+      "missedContradictions": {
+        "values": [
+          2,
+          3
+        ],
+        "min": 2,
+        "max": 3
+      },
+      "falseFlagsContradiction": {
+        "values": [
+          0,
+          0
+        ],
+        "min": 0,
+        "max": 0
+      },
+      "categoryMismatch": {
+        "values": [
+          2,
+          2
+        ],
+        "min": 2,
+        "max": 2
+      },
+      "otherFlagsContradiction": {
+        "values": [
+          0,
+          0
+        ],
+        "min": 0,
+        "max": 0
+      },
+      "accepted": {
+        "values": [
+          4,
+          3
+        ],
+        "min": 3,
+        "max": 4
+      },
+      "rejected": {
+        "values": [
+          1,
+          0
+        ],
+        "min": 0,
+        "max": 1
+      },
+      "rejected.self_denied": {
+        "values": [
+          1,
+          0
+        ],
+        "min": 0,
+        "max": 1
+      },
+      "failures": {
+        "values": [
+          0,
+          0
+        ],
+        "min": 0,
+        "max": 0
+      },
+      "elapsedMs": {
+        "values": [
+          173229,
+          122063
+        ],
+        "min": 122063,
+        "max": 173229
+      }
+    },
+    "lines": [
+      "仕込んだ矛盾を拾えた: 3/6〜4/6（各回：4/6、3/6）",
+      "見逃し（拾えなかった仕込み）: 2〜3（各回：2、3）",
+      "誤検出（罠と、矛盾の無い話に付いた指摘）: 0（各回：0、0）",
+      "区分ちがい（場所は当てたが 人物／状態／時系列 を取り違えた）: 2（各回：2、2）",
+      "仕込み以外の箇所への指摘: 0（各回：0、0）",
+      "指摘（検算を通ったもの）: 3〜4（各回：4、3）",
+      "落とした（検算で弾いたもの）: 0〜1（各回：1、0）",
+      "　└ 落とした理由：self_denied: 0〜1（各回：1、0）",
+      "失敗（チャンクごと通らなかったもの）: 0（各回：0、0）",
+      "所要時間: 122.1秒〜173.2秒（各回：173.2秒、122.1秒）",
+      "num_ctx: 24576（プロンプトの長さから（製品と同じ道））",
+      "temperature: 0（製品と同じ（束が返した値））",
+      "頼み方: categories=all・suppression=loose（申告の大きさ 25.2B・ティア high、版 1.9／製品と同じ判断（ai/capability.ts を束から借りた））",
+      "温め（読み込みを含む。上の所要時間には入っていません）: 22.1秒"
+    ]
+  },
+  "abVerify": {
+    "model": "gemma4:26b",
+    "numCtx": 24576,
+    "items": [
+      {
+        "id": "仕込み2 第5話41行 千夏",
+        "seed": true,
+        "file": "005_初雪の窓口.txt",
+        "chapter": "第5話",
+        "line": 41,
+        "excerpt": "「そうか、ではありませんわ。わたくし、驚きましたのよ」",
+        "settingSays": "黒瀬千夏の口調：一人称は「私」。くだけた話し方で、語尾は「〜でしょ」「〜ね」「〜よ」。相沢を「相沢くん」と呼ぶ。",
+        "textSays": "一人称が「わたくし」、語尾が「〜ですわ」「〜ましたのよ」という改まった口調になっている"
+      },
+      {
+        "id": "仕込み1 第4話43行 蓬田",
+        "seed": true,
+        "file": "004_ギプスが外れた日.txt",
+        "chapter": "第4話",
+        "line": 43,
+        "excerpt": "「それはよかったですね。私のは一生ものですけれど」",
+        "settingSays": "蓬田吾一の口調：年寄りらしいぶっきらぼうな話し方。語尾は「〜だ」「〜とる」「〜ん」で、敬語は使わない。",
+        "textSays": "「ですね」「ですけれど」という丁寧語を使っている"
+      },
+      {
+        "id": "罠1 第3話30行 蓬田",
+        "seed": false,
+        "file": "003_窓口の椅子.txt",
+        "chapter": "第3話",
+        "line": 30,
+        "excerpt": "「なんだ、そんな顔をするな」",
+        "settingSays": "蓬田吾一の口調：年寄りらしいぶっきらぼうな話し方。語尾は「〜だ」「〜とる」「〜ん」で、敬語は使わない。",
+        "textSays": "語尾が「〜な」で、設定の語尾「〜だ」「〜とる」「〜ん」に無い"
+      },
+      {
+        "id": "罠2 第4話65行 千夏",
+        "seed": false,
+        "file": "004_ギプスが外れた日.txt",
+        "chapter": "第4話",
+        "line": 65,
+        "excerpt": "「じゃあ、私は窓口ね」",
+        "settingSays": "黒瀬千夏の口調：一人称は「私」。くだけた話し方で、語尾は「〜でしょ」「〜ね」「〜よ」。相沢を「相沢くん」と呼ぶ。",
+        "textSays": "「じゃあ、私は窓口ね」と言っている"
+      }
+    ],
+    "results": [
+      {
+        "version": "1.0",
+        "id": "仕込み2 第5話41行 千夏",
+        "seed": true,
+        "round": 1,
+        "ms": 24692,
+        "verdict": "却下",
+        "reason": "まだ明かされていない",
+        "explanation": "設定上の口調と異なるが、キャラの二面性や変化の可能性があり、現時点で矛盾とは断定できないため。"
+      },
+      {
+        "version": "1.0",
+        "id": "仕込み2 第5話41行 千夏",
+        "seed": true,
+        "round": 2,
+        "ms": 1871,
+        "verdict": "却下",
+        "reason": "まだ明かされていない",
+        "explanation": "設定上の口調と異なるが、キャラの二面性や変化の可能性があり、現時点で矛盾とは断定できないため。"
+      },
+      {
+        "version": "1.0",
+        "id": "仕込み1 第4話43行 蓬田",
+        "seed": true,
+        "round": 1,
+        "ms": 3732,
+        "verdict": "却下",
+        "reason": "まだ明かされていない",
+        "explanation": "設定上の口調は物語の進行に伴い変化するか、後述される可能性があるため、現時点での丁寧語使用は矛盾とは言えない。"
+      },
+      {
+        "version": "1.0",
+        "id": "仕込み1 第4話43行 蓬田",
+        "seed": true,
+        "round": 2,
+        "ms": 2241,
+        "verdict": "却下",
+        "reason": "まだ明かされていない",
+        "explanation": "設定上の口調は物語の進行に伴い変化するか、後から明かされる性質のものであり、現時点での丁寧語使用は矛盾ではない。"
+      },
+      {
+        "version": "1.0",
+        "id": "罠1 第3話30行 蓬田",
+        "seed": false,
+        "round": 1,
+        "ms": 3686,
+        "verdict": "却下",
+        "reason": "そもそも食い違っていない",
+        "explanation": "「〜な」は命令や促しの終助詞であり、指定された語尾のルール（文末の形式）を逸脱するものではないため。"
+      },
+      {
+        "version": "1.0",
+        "id": "罠1 第3話30行 蓬田",
+        "seed": false,
+        "round": 2,
+        "ms": 1962,
+        "verdict": "却下",
+        "reason": "そもそも食い違っていない",
+        "explanation": "「〜な」は禁止された語尾ではなく、提示された語尾の例に含まれないからといって矛盾には当たらない。"
+      },
+      {
+        "version": "1.0",
+        "id": "罠2 第4話65行 千夏",
+        "seed": false,
+        "round": 1,
+        "ms": 3174,
+        "verdict": "却下",
+        "reason": "そもそも食い違っていない",
+        "explanation": "設定の「一人称は私」「語尾は〜ね」と本文の発言内容が一致しており、矛盾はありません。"
+      },
+      {
+        "version": "1.0",
+        "id": "罠2 第4話65行 千夏",
+        "seed": false,
+        "round": 2,
+        "ms": 1620,
+        "verdict": "却下",
+        "reason": "そもそも食い違っていない",
+        "explanation": "設定の「一人称は私」「語尾は〜ね」と本文の発言内容が一致しており、矛盾はありません。"
+      },
+      {
+        "version": "1.1",
+        "id": "仕込み2 第5話41行 千夏",
+        "seed": true,
+        "round": 1,
+        "ms": 3204,
+        "verdict": "採用",
+        "reason": "",
+        "explanation": "設定の「くだけた話し方」に対し、本文は「わたくし」「〜ですわ」とお嬢様言葉（丁寧な敬語）であり、乖離している。"
+      },
+      {
+        "version": "1.1",
+        "id": "仕込み2 第5話41行 千夏",
+        "seed": true,
+        "round": 2,
+        "ms": 1723,
+        "verdict": "採用",
+        "reason": "",
+        "explanation": "設定の「くだけた話し方」に対し、本文は「わたくし」「〜ですわ」とお嬢様言葉の丁寧な口調であり、乖離している。"
+      },
+      {
+        "version": "1.1",
+        "id": "仕込み1 第4話43行 蓬田",
+        "seed": true,
+        "round": 1,
+        "ms": 3232,
+        "verdict": "採用",
+        "reason": "",
+        "explanation": "敬語を使わない設定に対し、本文で丁寧語（ですね、ですけれど）を使用しており、その変化のきっかけも描かれていないため。"
+      },
+      {
+        "version": "1.1",
+        "id": "仕込み1 第4話43行 蓬田",
+        "seed": true,
+        "round": 2,
+        "ms": 1813,
+        "verdict": "採用",
+        "reason": "",
+        "explanation": "敬語を使わない設定に対し、本文で丁寧語（ですね、ですけれど）を使用しており、その変化のきっかけも描かれていないため。"
+      },
+      {
+        "version": "1.1",
+        "id": "罠1 第3話30行 蓬田",
+        "seed": false,
+        "round": 1,
+        "ms": 3371,
+        "verdict": "却下",
+        "reason": "そもそも食い違っていない",
+        "explanation": "設定の語尾は例示であり、「〜な」もぶっきらぼうな口調の範疇に含まれるため矛盾とは言えない。"
+      },
+      {
+        "version": "1.1",
+        "id": "罠1 第3話30行 蓬田",
+        "seed": false,
+        "round": 2,
+        "ms": 1917,
+        "verdict": "却下",
+        "reason": "そもそも食い違っていない",
+        "explanation": "設定の語尾は例示であり、「〜な」もぶっきらぼうな口調の範疇に含まれるため矛盾とは言えない。"
+      },
+      {
+        "version": "1.1",
+        "id": "罠2 第4話65行 千夏",
+        "seed": false,
+        "round": 1,
+        "ms": 3321,
+        "verdict": "却下",
+        "reason": "そもそも食い違っていない",
+        "explanation": "設定にある語尾「〜ね」が本文でも使われており、一人称も一致しているため矛盾はない。"
+      },
+      {
+        "version": "1.1",
+        "id": "罠2 第4話65行 千夏",
+        "seed": false,
+        "round": 2,
+        "ms": 1517,
+        "verdict": "却下",
+        "reason": "そもそも食い違っていない",
+        "explanation": "設定にある語尾「〜ね」と本文の台詞が一致しており、矛盾はありません。"
+      }
+    ]
+  }
+}
