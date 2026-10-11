@@ -29,6 +29,7 @@ import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 import {
   acceptQuickPick,
+  activateTab,
   activeGroupIndex,
   activeTabNames,
   clearNotifications,
@@ -73,12 +74,23 @@ async function memoTabCount(page: Page): Promise<number> {
  * 本文はまだ書き換わらない（指摘を作るだけ）
  *
  * @returns 押す前に焦点のあった列（終わったあと同じ列のままか＝フォーカスを奪わないかを見る）。
- *   画面の外で起こした VS Code では、WebView の中を押しても焦点の列が原稿の列へ
- *   移らないことがある（窓が OS の前面に無いため）ので、0 と決め打ちしない
+ *   いつも原稿の列（0）になるよう、**押す前に原稿のタブを押して、列の焦点が付くまで待つ**。
+ *
+ * **WebView の中を押すだけでは、焦点の列が原稿の列へ移らないことがある**（画面の外で起こした
+ * VS Code では窓が OS の前面に無いため）。提案パネルを右の列に開いたあと（2つ目の試験）は
+ * 焦点の列が右（1）に残ったまま測り、検知の終わりに VS Code の焦点の印が原稿の列（0）へ
+ * 遅れて追いつくと「焦点の列が変わった」で落ちた（ノートPC・1.141.0・0.103.2、単独で3回とも。
+ * 2026-10-11）。製品は原稿の列へ戻しただけで、パネルの列へ奪ってはいない。
+ * タブの帯は本体の DOM なので、押せば列の焦点が確実に付く——測る土台を作者の状態
+ * （原稿で書いていて、そこでキーを押す）にそろえ、終わりの比べを「パネルの列へ奪わない」の見張りにする
  */
 async function runNotationCheck(page: Page, frame: Frame): Promise<number> {
+  await activateTab(page, EPISODE);
+  // activateTab はタブが前に出たかしか見ない（原稿は最初から列の前面にいる）ので、列の焦点は別に待つ
+  await waitUntil(async () => (await activeGroupIndex(page)) === 0, "原稿の列（0）に焦点が付く", 10_000);
   await placeCaretAfter(frame, "空には");
   const focusedGroup = await activeGroupIndex(page);
+  expect(focusedGroup, "押す前は原稿の列（0）に焦点がある").toBe(0);
   await page.keyboard.press("Control+Alt+KeyH");
   await waitUntil(
     async () => (await quickPickTitle(page))?.startsWith("表記ゆれが 1 組見つかりました") === true,
