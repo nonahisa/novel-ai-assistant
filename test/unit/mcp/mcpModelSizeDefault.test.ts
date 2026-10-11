@@ -42,6 +42,9 @@ vi.mock("../../../src/mcp/tools/ollama", async (importOriginal) => {
       sizeQueries.push(input.model);
       return declaredSize;
     }),
+    // 矛盾検知は材料の予算のために読める長さも訊く（0.102.13）。
+    // **手元の Ollama へ問い合わせない**——取れなかったもの（頭打ち）として返す
+    ollamaContextLength: vi.fn(async () => null),
   };
 });
 

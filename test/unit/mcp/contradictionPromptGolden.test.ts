@@ -33,7 +33,14 @@ import { contradictionPrompt } from "../../../src/mcp/tools/contradiction";
  * 確かめてから書き出した。版を上げなかったのは、製品は前からこの欄を送って
  * おり、その鍵には抜粋の印（`promptVersionWithPastScenes`）が付いているため
  * ——製品の送る材料もキャッシュの鍵も変わっていない。
+ *
+ * **読める長さ（`contextWindow`）を 16,384 と明示する**（0.102.13）。MCP の材料の
+ * 予算は、送る長さ（`numCtx`）ではなくモデルの読める長さで決めるようになった
+ * （作者の裁定 2026-10-11「製品と同じ量にそろえる」）。写しは送る長さ 16,384 で
+ * 予算を決めていた日に作ったので、同じ長さを読める長さとして渡すと1文字も
+ * 変わらない。**材料の組み立てそのものは変えていない**ので、版も写しも据え置く。
  */
+const GOLDEN_CONTEXT_WINDOW = 16384;
 
 interface GoldenChunk {
   chapterLabel: string;
@@ -69,6 +76,8 @@ describe("送る材料の写し（設計書6.10.6）", () => {
         folder,
         filePath: `本文/${fileName}`,
         numCtx: 16384,
+        // 写しを作った日の材料の予算（送る長さと同じ 16,384 で決めていた）
+        contextWindow: GOLDEN_CONTEXT_WINDOW,
         carryOver,
         categories: "light",
         suppression: "loose",
@@ -103,6 +112,7 @@ describe("送る材料の写し（設計書6.10.6）", () => {
         folder,
         filePath: `本文/${fileName}`,
         numCtx: 16384,
+        contextWindow: GOLDEN_CONTEXT_WINDOW,
         categories: "light",
         suppression: "loose",
       });

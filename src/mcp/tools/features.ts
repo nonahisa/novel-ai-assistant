@@ -249,7 +249,9 @@ const OPTIONS_TABLE =
   "carryOver（前の話を何話ぶん引き継いで人物を探すか。0〜5。既定は2＝" +
   "製品と同じ。0で引き継がない）・" +
   "suppression（loose＝疑わしい箇所も挙げさせる／" +
-  "strict＝確信の持てないものは挙げさせない）。" +
+  "strict＝確信の持てないものは挙げさせない）・" +
+  "contextWindow（モデルの読める長さ〈トークン〉。過去の場面と世界観の量を製品と同じくここから決める。" +
+  "省くと ollama ではモデルの申告を訊き、ほかの道では頭打ち。numCtx〈送る長さ〉とは別）。" +
   "notation: group※（novel.detect が返した組の1件）・limit（detect の上限）。" +
   "synopsis: needsSubtitle。" +
   "episodePlot: plotPath※（単話プロットの相対パス）・chapterLabel。" +
@@ -570,6 +572,13 @@ const CATEGORIES_SCHEMA = z.union([
 const CARRY_OVER_SCHEMA = z.union([z.number(), z.string()]);
 
 /**
+ * モデルの読める長さ（矛盾検知の材料の予算。作者の裁定 2026-10-11）。
+ * **ここも形だけを見る**（`carryOver` と同じく文字列も通す）。値の中身は
+ * `contextWindowOf`（`tools/contradiction.ts`）が見る。
+ */
+const CONTEXT_WINDOW_SCHEMA = z.union([z.number(), z.string()]);
+
+/**
  * 抑制の強さ（設計書6.10.8）。**ここも形だけを見る。**
  *
  * 選べる名前（loose・strict）の表は `suppressionOf`
@@ -650,6 +659,7 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
       contradictionMaterial({
         ...chunkArgs(input),
         carryOver: option(input, "carryOver", CARRY_OVER_SCHEMA),
+        contextWindow: option(input, "contextWindow", CONTEXT_WINDOW_SCHEMA),
       }),
     prompt: (input) =>
       contradictionPrompt({
@@ -657,6 +667,7 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
         categories: option(input, "categories", CATEGORIES_SCHEMA),
         carryOver: option(input, "carryOver", CARRY_OVER_SCHEMA),
         suppression: option(input, "suppression", SUPPRESSION_SCHEMA),
+        contextWindow: option(input, "contextWindow", CONTEXT_WINDOW_SCHEMA),
       }),
     validate: (input) =>
       contradictionValidate({
@@ -670,6 +681,7 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
         categories: option(input, "categories", CATEGORIES_SCHEMA),
         carryOver: option(input, "carryOver", CARRY_OVER_SCHEMA),
         suppression: option(input, "suppression", SUPPRESSION_SCHEMA),
+        contextWindow: option(input, "contextWindow", CONTEXT_WINDOW_SCHEMA),
         ...runnerArgs(input),
       }),
   },

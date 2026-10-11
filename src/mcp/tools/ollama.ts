@@ -317,6 +317,44 @@ export async function ollamaParameterSize(input: {
   }
 }
 
+/**
+ * そのモデルが申告する読める長さ（トークン。`/api/show` の `<アーキ>.context_length`）。
+ *
+ * **製品が材料の予算を決める長さ（`ModelInfo.contextWindow`）の元になる値。**
+ * 矛盾検知の過去の場面・世界観の予算を、製品と同じ長さで決めるのに使う
+ * （作者の裁定 2026-10-11「製品と同じ量にそろえる」）。読み方は `ollama.models` と
+ * 同じ `contextLengthOf` を通す（写しを作らない）。
+ *
+ * **取れなければ null**（投げない。`ollamaParameterSize` と同じ構え）。
+ * 作者の設定 `novelai.ollama.numCtx` と実測の台帳はここからは読めない——
+ * 絞っているなら、呼ぶ側が `contextWindow` で渡す。
+ */
+export async function ollamaContextLength(input: {
+  endpoint?: string;
+  model: string;
+}): Promise<number | null> {
+  const endpoint = (input.endpoint ?? DEFAULT_ENDPOINT).replace(/\/+$/, "");
+  try {
+    const response = await localFetch(
+      `${endpoint}/api/show`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: input.model }),
+      },
+      PARAMETER_SIZE_TIMEOUT_MS
+    );
+    if (!response.ok) return null;
+    const payload = (await response.json()) as {
+      model_info?: Record<string, unknown>;
+    };
+    return contextLengthOf(payload.model_info ?? {});
+  } catch {
+    // 繋がらなければ、本文を送る段が理由つきで断る。ここで二重に断らない
+    return null;
+  }
+}
+
 /** `/api/chat` へ1回投げて、流れてきた応答を組み立てる */
 async function postChat(
   endpoint: string,
@@ -605,6 +643,29 @@ function stringOrNull(value: unknown): string | null {
 }
 
 /**
+ * `/api/show` の `model_info` から読める長さ（トークン）を拾う。無ければ null。
+ *
+ * 読める長さの鍵は `<アーキテクチャ>.context_length`（`gemma4.context_length`）
+ * である。**アーキ名はモデルごとに違う**ので、まず `general.architecture` を
+ * 読んで組み立てる。取れなければ末尾一致で拾う——古い版の Ollama は
+ * `general.architecture` を返さないことがあり、そこで諦めると
+ * 「読める長さが分からない」に倒れる（製品の `showModel` も末尾一致で拾う）。
+ */
+function contextLengthOf(info: Record<string, unknown>): number | null {
+  const architecture = info["general.architecture"];
+  if (typeof architecture === "string") {
+    const value = info[`${architecture}.context_length`];
+    if (typeof value === "number") return value;
+  }
+  for (const [key, value] of Object.entries(info)) {
+    if (key.endsWith(".context_length") && typeof value === "number") {
+      return value;
+    }
+  }
+  return null;
+}
+
+/**
  * `/api/show` から読める長さと対応機能を取る。
  *
  * **`ollamaProvider.ts` の同じ読み取りは借りられない**——あちらは `vscode` を
@@ -634,29 +695,7 @@ async function showModel(endpoint: string, model: string): Promise<ShowDetail> {
     capabilities?: unknown;
     model_info?: Record<string, unknown>;
   };
-  const info = payload.model_info ?? {};
-
-  /*
-    読める長さの鍵は `<アーキテクチャ>.context_length`（`gemma4.context_length`）
-    である。**アーキ名はモデルごとに違う**ので、まず `general.architecture` を
-    読んで組み立てる。取れなければ末尾一致で拾う——古い版の Ollama は
-    `general.architecture` を返さないことがあり、そこで諦めると
-    「読める長さが分からない」に倒れる（製品の `showModel` も末尾一致で拾う）。
-  */
-  let contextLength: number | null = null;
-  const architecture = info["general.architecture"];
-  if (typeof architecture === "string") {
-    const value = info[`${architecture}.context_length`];
-    if (typeof value === "number") contextLength = value;
-  }
-  if (contextLength === null) {
-    for (const [key, value] of Object.entries(info)) {
-      if (key.endsWith(".context_length") && typeof value === "number") {
-        contextLength = value;
-        break;
-      }
-    }
-  }
+  const contextLength = contextLengthOf(payload.model_info ?? {});
 
   const capabilities = Array.isArray(payload.capabilities)
     ? payload.capabilities.filter(
