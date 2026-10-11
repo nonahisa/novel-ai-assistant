@@ -14,6 +14,7 @@ import {
 import { logFailure, useLogFile } from "../core/logger";
 import { withProgress } from "../views/progress";
 import { cancelItem } from "../views/dialogs";
+import { whenNoticePicked } from "../views/notify";
 
 /**
  * 過去の版に戻す（設計書5.5.10）。
@@ -100,15 +101,22 @@ export async function restoreFromHistory(work: WorkEntry): Promise<void> {
         作品: work.title,
         詳細: saved.detail ?? "",
       });
-      const action = await vscode.window.showErrorMessage(
-        "いまの原稿を履歴へ残せなかったため、復元を中止しました。" +
-          "原稿には手を触れていません。",
-        "ログを表示",
-        "閉じる"
+      // **ボタンを待たない**（0.103.5）。復元は同期のコマンドの札の中で
+      // 走るので、待つと作者が閉じるまで自動の送り直しが控え続ける
+      whenNoticePicked(
+        vscode.window.showErrorMessage(
+          "いまの原稿を履歴へ残せなかったため、復元を中止しました。" +
+            "原稿には手を触れていません。",
+          "ログを表示",
+          "閉じる"
+        ),
+        async (action) => {
+          if (action === "ログを表示") {
+            await vscode.commands.executeCommand("novelai.showLog");
+          }
+        },
+        { label: "復元の中止の案内", workFolder: work.folderPath }
       );
-      if (action === "ログを表示") {
-        await vscode.commands.executeCommand("novelai.showLog");
-      }
       return;
     }
   }
@@ -145,19 +153,26 @@ export async function restoreFromHistory(work: WorkEntry): Promise<void> {
     });
   }
 
-  const action = await vscode.window.showInformationMessage(
-    `${picked.date} の版に戻しました。` +
-      "元に戻したい場合は、もう一度「復元」で1つ前の版を選んでください。",
-    "GitHubへ送信",
-    "閉じる"
+  // **ボタンを待たない**（0.103.5）。待つと、作者が閉じるまで復元のコマンドの
+  // 札（同期の操作が走っている）が立ったままになり、自動の送り直しが控え続ける
+  whenNoticePicked(
+    vscode.window.showInformationMessage(
+      `${picked.date} の版に戻しました。` +
+        "元に戻したい場合は、もう一度「復元」で1つ前の版を選んでください。",
+      "GitHubへ送信",
+      "閉じる"
+    ),
+    async (action) => {
+      if (action === "GitHubへ送信") {
+        // いま復元した作品を送る。引数無しだと作品選択からやり直させる
+        await vscode.commands.executeCommand("novelai.gitPush", {
+          type: "work",
+          work,
+        });
+      }
+    },
+    { label: "復元の完了の案内", workFolder: work.folderPath }
   );
-  if (action === "GitHubへ送信") {
-    // いま復元した作品を送る。引数無しだと作品選択からやり直させる
-    await vscode.commands.executeCommand("novelai.gitPush", {
-      type: "work",
-      work,
-    });
-  }
 }
 
 async function pickCommit(

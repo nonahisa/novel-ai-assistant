@@ -30,6 +30,7 @@ import { lastAuthorOf } from "../core/git";
 import type { ConflictWalkStart } from "../core/divergenceScan";
 import { cancelItem } from "../views/dialogs";
 import { openInDefaultEditor } from "../views/openDocument";
+import { whenNoticePicked } from "../views/notify";
 
 /**
  * 競合の解決（設計書5.5.4）。
@@ -479,12 +480,19 @@ async function applyChoice(
       ファイル: file.relativePath,
       詳細: result.detail ?? "（詳細なし）",
     });
-    const answer = await vscode.window.showErrorMessage(
-      `${path.basename(file.relativePath)} の解決に失敗しました。`,
-      "ログを表示",
-      "閉じる"
+    // **ボタンを待たない**（0.103.5）。競合の解決は同期の旗の中で走るので、
+    // 待つと作者が閉じるまで自動の送り直しが控え続ける
+    whenNoticePicked(
+      vscode.window.showErrorMessage(
+        `${path.basename(file.relativePath)} の解決に失敗しました。`,
+        "ログを表示",
+        "閉じる"
+      ),
+      (answer) => {
+        if (answer === "ログを表示") showLog();
+      },
+      { label: "競合の解決の失敗の案内", workFolder: work.folderPath }
     );
-    if (answer === "ログを表示") showLog();
     return false;
   }
 
