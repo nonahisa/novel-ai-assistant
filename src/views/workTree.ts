@@ -391,8 +391,9 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private pendingRows = new Set<Promise<void>>();
 
   /**
-   * 走査したときの作品の場所（作品ID -> 場所）。登録簿が変わったとき、
-   * **場所が変わった作品だけ**読み直すために控える（`refreshRoot`）。
+   * いちばん新しい走査を始めたときの作品の場所（作品ID -> 場所）。登録簿が
+   * 変わったとき、**場所が変わった作品だけ**読み直すために控える（`refreshRoot`）。
+   * 1作品ぶんの控えを捨てても消さない（走っている最中の走査の場所も比べるため）。
    */
   private scannedFolders = new Map<string, string>();
 
@@ -441,6 +442,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       this.posting.clear();
       this.memos.clear();
       this.scannedFolders.clear();
+      this.dropAllEpoch += 1;
     }
     this.redrawWholeList();
   }
@@ -462,7 +464,10 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       this.registry.list().map((work) => [work.id, work.folderPath])
     );
     for (const [id, folder] of this.scannedFolders) {
-      if (folders.get(id) !== folder) this.dropWork(id);
+      if (folders.get(id) === folder) continue;
+      this.dropWork(id);
+      // 外れた作品は覚えておく理由が無い（場所が変わった作品は次の走査で書き直す）
+      if (!folders.has(id)) this.scannedFolders.delete(id);
     }
     this.redrawWholeList();
   }
@@ -494,7 +499,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     this.chapters.delete(workId);
     this.posting.delete(workId);
     this.memos.delete(workId);
-    this.scannedFolders.delete(workId);
+    // 走っている走査は止められないので、印を進めて書き戻させない（`scanAndCache`）
+    this.dropEpochs.set(workId, (this.dropEpochs.get(workId) ?? 0) + 1);
   }
 
   /**
@@ -1540,6 +1546,10 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   }
 
   private async scanAndCache(work: WorkEntry): Promise<LoadedWork> {
+    const epoch = this.dropEpochOf(work.id);
+    // 走査を**始めた時点で**場所を控える。走っている最中に場所が変わっても、
+    // `refreshRoot` が食い違いに気づいて捨てられるように
+    this.scannedFolders.set(work.id, work.folderPath);
     const result = await scanWork(work);
     // **初回の描画までに走ったものだけ控える**（設計書6.107）。
     // キャッシュに載せないのは、計測が走査1回ごとの値だからである
@@ -1549,10 +1559,24 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       stats: result.stats,
       configuredKind: result.configuredKind,
     };
-    this.cache.set(work.id, value);
-    this.scannedFolders.set(work.id, work.folderPath);
+    /*
+      **走っているあいだに捨てられた走査は、控えに書き戻さない**（0.105.2）。
+      捨てる（`dropWork`・丸ごとの `refresh()`）のは、その作品の中身や場所が
+      変わったからである。走っている走査そのものは止められないので、書き戻すと
+      古い場所・古い中身の数字が控えに残り、次の描き直しがそれを出す。
+      待っていた呼び手には結果を返す（その呼び手の描画は、どのみち描き直される）
+    */
+    if (this.dropEpochOf(work.id) === epoch) this.cache.set(work.id, value);
     this._onDidLoadWork.fire(work.id);
     return value;
+  }
+
+  /** 作品ごとに、控えを捨てた回数（丸ごと捨てた回数と合わせて1つの印にする） */
+  private dropEpochs = new Map<string, number>();
+  private dropAllEpoch = 0;
+
+  private dropEpochOf(workId: string): string {
+    return `${this.dropAllEpoch}:${this.dropEpochs.get(workId) ?? 0}`;
   }
 
   /**

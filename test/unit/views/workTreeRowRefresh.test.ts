@@ -257,6 +257,34 @@ describe("作品の登録・解除", () => {
   });
 });
 
+describe("捨てたあとに終わった走査", () => {
+  test("作品の場所が変わる前に始まった走査は、終わっても控えに残らない（古い場所の数字を出さない）", async () => {
+    const { provider, setWorks } = setup([a, b]);
+    await provider.getChildren();
+    let release: () => void = () => undefined;
+    scanWork.mockImplementationOnce(
+      (work: WorkEntry) =>
+        new Promise((resolve) => {
+          release = () => resolve(scanned(work));
+        })
+    );
+    // 古い場所の走査を始めたところで、作品の場所が変わる
+    provider.refresh(a.id);
+    await Promise.resolve();
+    setWorks([{ ...a, folderPath: "D:/移した先/氷の街" }, b]);
+
+    release();
+    await provider.settled();
+    await provider.getChildren();
+
+    // 古い走査（2回目）の結果は捨て、新しい場所でもう一度読む（3回目）
+    expect(scanCount(a)).toBe(3);
+    expect(
+      (scanWork.mock.calls.at(-1)?.[0] as WorkEntry).folderPath
+    ).toBe("D:/移した先/氷の街");
+  });
+});
+
 describe("ファイルの保存", () => {
   test("作品の外のファイルを保存しても、何も撃たない", async () => {
     const { provider } = setup([a, b]);
