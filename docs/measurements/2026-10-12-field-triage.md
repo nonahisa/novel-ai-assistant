@@ -49,7 +49,7 @@ T で走らせたテスト（12ファイル・131件、すべて通過）：`cor
 | E6 | 提案パネルの［適用］の変わり種 | 3 | 118・466・599 | sampleFinding・withVsCode（ワークスペースの外に作品を置く起こし方を足す） | 札「視点」の指摘の見本 | 易。済み（2026-10-12、ノートPCで通過） |
 | E7 | 縦書きでの行へ飛ぶ・挿入 | 2 | 201・230 | 既存の sceneMemoPanel・proposalApply の件・manuscriptFrame | 台本の作品（種類＝台本） | 易。済み（2026-10-12、ノートPCで通過） |
 | E8 | 原稿エディターのキー | 4 | 267・272・276・301 | manuscriptFrame（placeCaretAfter・composeText）・LaunchOptions.keybindings | 1話 | 中。267・276・301 は済み（2026-10-12 夜、ノートPCで通過）。272 はこの回の対象外 |
-| E9 | つながりの切れ・再起動をまたぐ | 5 | 156・200・288・289・6132 | hostRestartDisconnect の部品（ctrl+alt+shift+r）・dropEditsToHost・rescueBarText | 1〜2話（1.141.0 でだけ見張れる）。**289 は既存の hostRestartDisconnect が覆うので走らせるだけ**（新しく書くのは4件） | 難。289・6132 は済み（2026-10-12 夜、ノートPCで通過）。156・200・288 は落ちたので test.fixme で止めて切り分け待ち |
+| E9 | つながりの切れ・再起動をまたぐ | 5 | 156・200・288・289・6132 | hostRestartDisconnect の部品（ctrl+alt+shift+r）・dropEditsToHost・rescueBarText | 1〜2話（1.141.0 でだけ見張れる）。**289 は既存の hostRestartDisconnect が覆うので走らせるだけ**（新しく書くのは4件） | 難。289・6132 は済み（2026-10-12 夜、ノートPCで通過）。156・200・288 は落ちたので test.skip で止めて切り分け待ち |
 | E10 | メニューと吹き出しの文・初回の案内 | 3 | 181・235・4623 | workbenchDom（サイドバーの木・右クリックの品書き）・使い捨ての user-data-dir | 1話 | 易。済み（2026-10-12、ノートPCで通過） |
 | E11 | 承認待ちとプロットの知らせ | 2 | 545・561 | プロットモードの面・notices の読み取り・prepareWork で plot.md と承認待ちを置く | plot.md と役名の人物 | 中。済み（2026-10-12 夜、ノートPCで通過。561 は残り） |
 | E12 | 編集部モード（1台の中で） | 4 | 4714・4719・4720・4721 | settings で novelai.mode・prepareWork でロックの台帳を置く・dialogText | 1話とロックの台帳 | 中。済み（2026-10-12 夜、ノートPCで通過） |
