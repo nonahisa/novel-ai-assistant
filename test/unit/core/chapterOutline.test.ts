@@ -200,6 +200,35 @@ describe("既にある作品へ、章立てだけを取り込む計画", () => {
     expect(plan.kind).toBe("same");
   });
 
+  /*
+    2026-10-12 作者の実機：カクヨムの作品管理の画面から取り込んだのに「すでにバックアップと同じです」と
+    出た。読んだ元の名前で言う（省けば今までどおり「バックアップ」）
+  */
+  it("同じ・違うの文は、読んだ元の名前で言う", () => {
+    const same = planChapterImport({
+      outline: outline(),
+      locals: splitLocals(),
+      existing: [
+        { name: "第二章『灯』", startEpisodePath: "本文/0003_嵐の夜.txt" },
+        { name: "第一章『岬』", startEpisodePath: "本文/0001_潮の匂い.txt" },
+      ],
+    });
+    const fromKakuyomu = describeChapterImportPlan(same, "カクヨムの作品管理の画面").join("\n");
+    expect(fromKakuyomu).toContain("カクヨムの作品管理の画面と同じです");
+    expect(fromKakuyomu).not.toContain("バックアップ");
+    expect(describeChapterImportPlan(same).join("\n")).toContain("バックアップと同じです");
+
+    const differs = planChapterImport({
+      outline: outline(),
+      locals: splitLocals(),
+      existing: [{ name: "序章（作者が付けた名前）", startEpisodePath: "本文/0001_潮の匂い.txt" }],
+    });
+    expect(differs.kind).toBe("differs");
+    const differsText = describeChapterImportPlan(differs, "カクヨムの作品管理の画面").join("\n");
+    expect(differsText).toContain("カクヨムの作品管理の画面との違い");
+    expect(differsText).not.toContain("バックアップ");
+  });
+
   it("手元に無い話があれば、一覧にして止める（推測で割り当てない）", () => {
     const locals = splitLocals().filter((local) => local.number !== 2);
     const plan = planChapterImport({ outline: outline(), locals, existing: [] });

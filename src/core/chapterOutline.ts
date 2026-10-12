@@ -532,7 +532,11 @@ const LISTED = 30;
  * **どの章がどの話から始まるかを全部並べる**（多すぎるときだけ「ほか」）。
  * 章立てが既にあるときは、**作者の章が消えないこと**と違いの中身を先に言う。
  */
-export function describeChapterImportPlan(plan: ChapterImportPlan): string[] {
+/**
+ * @param sourceName 読んだ元の名前（「カクヨムの作品管理の画面」・バックアップのファイル名）。同じ・違うの文で使う。
+ *   省けば「バックアップ」（2026-10-12、カクヨムから取り込んだのに「バックアップと同じ」と出た）
+ */
+export function describeChapterImportPlan(plan: ChapterImportPlan, sourceName = "バックアップ"): string[] {
   switch (plan.kind) {
     case "none":
       return ["章の見出しが見つかりませんでした。"];
@@ -542,16 +546,16 @@ export function describeChapterImportPlan(plan: ChapterImportPlan): string[] {
       ];
     case "mismatch":
       return [
-        "バックアップの話と、この作品の話を照らし合わせられないものがありました。",
+        `${sourceName}の話と、この作品の話を照らし合わせられないものがありました。`,
         "推測では割り当てないため、章立ては取り込みません。",
         "",
-        ...listed(plan.problems.map(describeProblem), "話"),
+        ...listed(plan.problems.map((problem) => describeProblem(problem, sourceName)), "話"),
       ];
     case "titleByNumber":
       return [
         `次の${plan.problems.length}話は、話数は合いますが題が違います。`,
         "",
-        ...listed(plan.problems.map(describeProblem), "話"),
+        ...listed(plan.problems.map((problem) => describeProblem(problem, sourceName)), "話"),
         "",
         "改題した話なら、話数で当てて取り込めます（題が違う話を、推測では当てません）。",
         "原稿は書き換えません。書くのは章立ての記録（設定/章立て.json）だけです。",
@@ -574,20 +578,20 @@ export function describeChapterImportPlan(plan: ChapterImportPlan): string[] {
         "章立ての記録（設定/章立て.json）に書くだけで、原稿は書き換えません。",
       ];
     case "same":
-      return [`章立ては、すでにバックアップと同じです（${plan.count}個）。`];
+      return [`章立ては、すでに${sourceName}と同じです（${plan.count}個）。`];
     case "differs":
       return [
         `この作品には既に章立てがあります（${plan.existing.length}個）。上書きはしません。`,
-        "バックアップとの違いは次のとおりです。",
+        `${sourceName}との違いは次のとおりです。`,
         "",
-        ...listed(plan.diff.map(describeDiffLine), "行"),
+        ...listed(plan.diff.map((line) => describeDiffLine(line, sourceName)), "行"),
         "",
         "原稿は書き換えません。書くのは章立ての記録（設定/章立て.json）だけです。",
       ];
   }
 }
 
-function describeProblem(problem: OutlineProblem): string {
+function describeProblem(problem: OutlineProblem, sourceName: string): string {
   switch (problem.reason) {
     case "missing":
       return `・${problem.label}：この作品に見当たりません`;
@@ -596,16 +600,16 @@ function describeProblem(problem: OutlineProblem): string {
     case "title":
       return `・${problem.label}：話数は合いますが、題が違います（この作品では「${problem.localTitle}」）`;
     case "order":
-      return `・${problem.label}：この作品での並びが、バックアップと違います`;
+      return `・${problem.label}：この作品での並びが、${sourceName}と違います`;
   }
 }
 
-function describeDiffLine(line: ChapterDiffLine): string {
+function describeDiffLine(line: ChapterDiffLine, sourceName: string): string {
   switch (line.kind) {
     case "rename":
-      return `・${line.label}からの章：いまは「${line.from}」、バックアップでは「${line.to}」`;
+      return `・${line.label}からの章：いまは「${line.from}」、${sourceName}では「${line.to}」`;
     case "add":
-      return `・バックアップにだけある章：「${line.name}」（${line.label}から）`;
+      return `・${sourceName}にだけある章：「${line.name}」（${line.label}から）`;
     case "extra":
       return `・この作品にだけある章：「${line.name}」（${line.label}から。足すときもそのまま残ります）`;
   }
