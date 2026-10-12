@@ -135,6 +135,8 @@ describe("「バックアップから章立て」", () => {
   let confirmButtons: readonly string[] = [];
   let answer: string | undefined;
   let warnings: string[] = [];
+  let warningButtons: string[] = [];
+  let warningAnswer: string | undefined;
 
   beforeEach(() => {
     disk.clear();
@@ -143,6 +145,8 @@ describe("「バックアップから章立て」", () => {
     confirmButtons = [];
     answer = undefined;
     warnings = [];
+    warningButtons = [];
+    warningAnswer = undefined;
     workspace.textDocuments = [];
     workspace.fs = {
       createDirectory: async () => undefined,
@@ -189,7 +193,8 @@ describe("「バックアップから章立て」", () => {
     window.showWarningMessage = (async (message: string, ...rest: unknown[]) => {
       const options = rest[0] as { detail?: string } | undefined;
       warnings.push(`${message}${options?.detail ?? ""}`);
-      return undefined;
+      warningButtons = rest.slice(1) as string[];
+      return warningAnswer;
     }) as typeof window.showWarningMessage;
     window.showErrorMessage = (async () => undefined) as typeof window.showErrorMessage;
   });
@@ -249,6 +254,42 @@ describe("「バックアップから章立て」", () => {
     expect(ledger()).toBeNull();
     expect(warnings.join("")).toContain("2話　古い地図");
   });
+
+  /*
+    2026-10-12 実機：改題した話のために、219話の作品で章立て全体が止まった。
+    題だけが違う話は、作者が「話数で当てて取り込む」を押したときだけ話数で当てる
+  */
+  test("題だけが違う話は、作者に確かめ、「話数で当てて取り込む」なら章を立てる", async () => {
+    putSplitWork();
+    const renamed = outline().map((episode) =>
+      episode.number === 3 ? { ...episode, label: "3話　嵐の晩", title: "嵐の晩" } : episode
+    );
+    warningAnswer = "話数で当てて取り込む";
+    answer = "章を立てる";
+
+    expect(await applyChapterOutline(work, renamed, "カクヨムの作品管理の画面")).toBe(true);
+
+    // 確かめる窓に、サイトの題と手元の題が並ぶ
+    expect(warnings.join("")).toContain("3話　嵐の晩");
+    expect(warnings.join("")).toContain("嵐の夜");
+    expect(warningButtons).toEqual(["話数で当てて取り込む", "取り込まない"]);
+    expect(ledger()?.chapters).toEqual([
+      { name: "第一章『岬』", startEpisodePath: "episode_0001.txt" },
+      { name: "第二章『灯』", startEpisodePath: "episode_0003.txt" },
+    ]);
+  });
+
+  test("題だけが違う話で「取り込まない」なら、台帳を作らない", async () => {
+    putSplitWork();
+    const renamed = outline().map((episode) =>
+      episode.number === 3 ? { ...episode, label: "3話　嵐の晩", title: "嵐の晩" } : episode
+    );
+    warningAnswer = "取り込まない";
+    answer = "章を立てる";
+
+    expect(await applyChapterOutline(work, renamed, "カクヨムの作品管理の画面")).toBe(false);
+    expect(ledger()).toBeNull();
+  });
 });
 
 describe("新しく取り込んだ作品の章立て（placeImportedChapters）", () => {
@@ -285,6 +326,18 @@ describe("新しく取り込んだ作品の章立て（placeImportedChapters）"
 
     expect(result?.created).toBe(0);
     expect(result?.note).toContain("話ごとのファイルに分ける");
+    expect(ledger()).toBeNull();
+  });
+
+  test("題だけが違う話があれば、訊かずには立てない（話数で当てるのは作者が選んだときだけ）", async () => {
+    putSplitWork();
+    const renamed = outline().map((episode) =>
+      episode.number === 3 ? { ...episode, label: "3話　嵐の晩", title: "嵐の晩" } : episode
+    );
+
+    const result = await placeImportedChapters(work, renamed);
+
+    expect(result?.created).toBe(0);
     expect(ledger()).toBeNull();
   });
 
