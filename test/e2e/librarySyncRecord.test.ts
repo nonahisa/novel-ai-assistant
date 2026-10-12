@@ -355,7 +355,15 @@ test("原稿エディターで打って保存しないうちに全作品同期�
         }
       );
       expect(confirm).toContain("1か所を同期します。");
-      expect(confirm, "保存してから記録することが、押す前に見える").toContain(`・${E2E_WORK_TITLE}：記録（未保存 1件を先に保存）`);
+      /*
+        保存してから記録することが、押す前に見える。ディスクの件数が0なら「記録（未保存 1件を先に保存）」、
+        執筆量の記録（`.aiwriter/stats/`）が開いただけで書き換わっていれば「記録 1件（未保存 1件を先に保存）」
+        になる（`core/syncAllPlan.ts` の `describePlan`。記録できる件数〔`countTrackableFiles`〕は執筆量の
+        記録も数える）。見たいのは「未保存 1件を先に保存」が見えることで、件数ではない
+      */
+      expect(confirm ?? "", "保存してから記録することが、押す前に見える").toMatch(
+        new RegExp(`・${E2E_WORK_TITLE}：記録( \\d+件)?（未保存 1件を先に保存）`)
+      );
       // git の無い作品は同期の相手に入らず、「次は同期しません」の側に理由つきで並ぶ
       expect(confirm).toContain(`・${OTHER_TITLE}：Gitで管理していません`);
       await pressDialogButton(page, "同期する");
