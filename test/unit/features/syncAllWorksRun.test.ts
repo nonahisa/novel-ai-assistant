@@ -63,7 +63,20 @@ const busyRepo: GitCommandRunner = async (args) => {
   if (joined === "status --porcelain --untracked-files=all") {
     return { code: 0, stdout: " M 本文/001.txt\n M 本文/002.txt\n", stderr: "" };
   }
+  // この回に関わる作品を決める材料（作者の指摘、2026-10-12 夜）。
+  // 書きかけは「いじめられっ子」の中だけ。ハイエルフ未亡人には何も無い
+  if (joined === "status --porcelain -z --untracked-files=all") {
+    return {
+      code: 0,
+      stdout: " M いじめられっ子/本文/001.txt\u0000 M いじめられっ子/本文/002.txt\u0000",
+      stderr: "",
+    };
+  }
   if (args[0] === "status") return { code: 0, stdout: "", stderr: "" };
+  // 送信待ち・取り込み待ちの道。書庫の直下だけ（どの作品にも当たらない）
+  if (joined.startsWith("diff --name-only -z")) {
+    return { code: 0, stdout: "README.md\u0000", stderr: "" };
+  }
   if (joined === "remote") return { code: 0, stdout: "origin", stderr: "" };
   if (args[0] === "symbolic-ref") return { code: 0, stdout: "main", stderr: "" };
   if (joined.startsWith("rev-parse --abbrev-ref")) {
@@ -131,9 +144,10 @@ describe("作品をすべて同期", () => {
     const confirms = shown.filter((text) => text.includes("か所を同期します"));
     expect(confirms).toHaveLength(1);
     expect(confirms[0]).toContain("1か所を同期します");
-    // 一覧には、置き場と中の作品の両方が出る
-    expect(confirms[0]).toContain("いじめられっ子");
-    expect(confirms[0]).toContain("ハイエルフ未亡人");
+    // 一覧には、置き場と**この回に関わる作品だけ**が出る（作者の指摘、2026-10-12 夜：
+    // 「書庫の全部作品名がでるのはわかりにくいです」）
+    expect(confirms[0]).toContain("・いじめられっ子（書庫 書庫）：");
+    expect(confirms[0]).not.toContain("ハイエルフ未亡人");
     expect(confirms[0]).toContain("記録 2件");
   });
 
@@ -149,8 +163,7 @@ describe("作品をすべて同期", () => {
   test("進捗に置き場の名前が出る（実機確認リスト A-15 の代わり）", async () => {
     await syncAllWorks({ registry, monitor, run: busyRepo });
 
-    expect(progressed.some((text) => text.includes("書庫"))).toBe(true);
-    expect(progressed.some((text) => text.includes("（1/1）"))).toBe(true);
+    expect(progressed).toContain("いじめられっ子（書庫 書庫）（1/1）");
   });
 
   test("中止すると、記録も取り込みも送信もしない（実機確認リスト A-15 の代わり）", async () => {

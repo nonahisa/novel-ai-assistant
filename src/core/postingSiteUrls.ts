@@ -1,5 +1,6 @@
 import {
   postingSiteInfo,
+  type PostingSiteEntry,
   type PostingSiteId,
   type PostingSiteProfile,
 } from "../models/posting";
@@ -186,6 +187,79 @@ export function newEpisodeUrlFromWorkId(
   return /^\d+$/.test(trimmed)
     ? `https://kakuyomu.jp/my/works/${trimmed}/episodes/new`
     : undefined;
+}
+
+/**
+ * 「投稿サイト設定」で投稿ページのURLを訊くときの初期値（作者に約束済み、2026-10-12）。
+ *
+ * **URL が空のときだけ**、台帳の作品IDから組み立てた URL を下書きとして入れる
+ * （作品IDは読者の反応から登録されていることがあり、同じ番号を2度打たせない）。
+ * 入っていればそのまま——作者が自分の画面から貼った値がいちばん確かである。
+ * 組み立てるのは `newEpisodeUrlFromWorkId` が組み立てるサイト（いまはカクヨム）だけ。
+ *
+ * **下書きは欄の初期値に置くだけ**で、作者が Enter を押すまで台帳には入らない。
+ */
+export function newEpisodeUrlDraft(
+  site: PostingSiteId,
+  currentUrl: string | null | undefined,
+  workId: string | null | undefined
+): string | undefined {
+  if ((currentUrl ?? "").trim()) return currentUrl ?? undefined;
+  return newEpisodeUrlFromWorkId(site, workId);
+}
+
+/** 作品IDを書き換えたとき、投稿ページのURLを合わせるかを訊く文（作者の裁定、2026-10-12） */
+export const NEW_EPISODE_URL_FOLLOW_QUESTION =
+  "投稿ページの URL を新しい作品IDに合わせますか";
+
+export type NewEpisodeUrlFollowPlan =
+  | { readonly kind: "none" }
+  | { readonly kind: "ask"; readonly rebuilt: string };
+
+/**
+ * 投稿ページのURLが入っている作品で作品IDを書き換えたとき、URL を合わせるか
+ * 訊くべきか（作者の裁定、2026-10-12 22時台）。
+ *
+ * **黙って組み直さない。** 投稿ページのURLは作者が自分の画面から貼った値で、
+ * 作品IDの欄の打ち間違いのほうが起きやすい。かといって黙って残すと、
+ * 投稿キットが古い作品の投稿欄を開き、**別の作品へ貼る**恐れがある。だから一言訊く。
+ *
+ * 訊かないとき：
+ * - 新しい作品IDが空・組み立てられない形（数字でない、組み立てないサイト）
+ * - 作品IDが変わっていない
+ * - 今の URL がもう新しい作品IDを指している（URL から作品IDを読んで比べる。
+ *   文字列で比べると、末尾の `/` の違いだけで訊いてしまう）
+ */
+export function planNewEpisodeUrlOnWorkIdChange(
+  site: PostingSiteId,
+  currentUrl: string | null | undefined,
+  previousWorkId: string | null | undefined,
+  nextWorkId: string | null | undefined
+): NewEpisodeUrlFollowPlan {
+  const next = (nextWorkId ?? "").trim();
+  if (!next || next === (previousWorkId ?? "").trim()) return { kind: "none" };
+  const url = (currentUrl ?? "").trim();
+  if (!url) return { kind: "none" };
+  const rebuilt = newEpisodeUrlFromWorkId(site, next);
+  if (!rebuilt) return { kind: "none" };
+  if (deriveSiteProfile(site, url).workId === next) return { kind: "none" };
+  return { kind: "ask", rebuilt };
+}
+
+/**
+ * 作者の答えを投稿先の一覧へ反映する。**いいえなら一覧をそのまま返す**
+ * （元の配列も書き換えない）。
+ */
+export function followNewEpisodeUrl(
+  sites: readonly PostingSiteEntry[],
+  site: PostingSiteId,
+  rebuilt: string,
+  accepted: boolean
+): readonly PostingSiteEntry[] {
+  if (!accepted) return sites;
+  return sites.map((entry) =>
+    entry.site === site ? { ...entry, newEpisodeUrl: rebuilt } : entry
+  );
 }
 
 /**

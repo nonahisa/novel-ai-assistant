@@ -1,6 +1,7 @@
 import type { GitSyncStatus } from "./git";
 import type { WorkEntry } from "../models/types";
 import { divergenceLine } from "./gitSyncStatusText";
+import { isPathInside, isSameFolder, join } from "./pathText";
 import { settingsToChooseCount, type ConflictWalkStart } from "./divergenceScan";
 
 /**
@@ -50,6 +51,17 @@ export interface SyncTargetState {
    * 飛ばされ、記録の前の保存までたどり着かない。
    */
   unsaved?: number;
+  /**
+   * **この回に関わる作品**（作者の指摘、2026-10-12 夜）。
+   *
+   * 記録待ち・送信待ち・取り込み待ちの変更がある作品と、未保存の文書が
+   * ある作品。置き場の git が出す変わった道を作品フォルダーへ当てて決める
+   * （`worksTouchedByPaths`）。画面とログに出す作品名を、書庫の全作品では
+   * なくこれに絞るために使う。**手順（記録・送信）は置き場ぜんぶのまま。**
+   *
+   * 調べられなかったときは undefined（名前は書庫の名前だけにする）。
+   */
+  involved?: WorkEntry[];
 }
 
 /** その置き場でやること */
@@ -227,13 +239,77 @@ export function afterCommit(result: {
   return { stop: false, committed: !result.nothingToCommit };
 }
 
-/** 置き場の名前と、中の作品名 */
+/**
+ * 書庫で関わる作品がこの数以上なら、先頭だけ名前を出して残りは「ほか N作品」にする。
+ *
+ * 確認の窓・進み具合・ログの1行に入るので、長くすると読めなくなる。
+ */
+const INVOLVED_SHORTEN_FROM = 4;
+/** 縮めるときに名前を出す数 */
+const INVOLVED_SHOWN_WHEN_SHORT = 2;
+
+/**
+ * 置き場の名前と、**その回に関わる作品**の名前（作者の指摘、2026-10-12 夜）。
+ *
+ * 「書庫単位で同期する際、書庫の全部作品名がでるのはわかりにくいです。
+ * 作品名を特定してください」。それまでは書庫の名前のあとに中の作品を
+ * 全部並べていたため、1作品しか直していないのに5作品の名前が出て、
+ * どれが送られたのか読み取れなかった。
+ *
+ * - 作品が1つだけの置き場：その作品名（これまでどおり）
+ * - 書庫で関わる作品が1つ：「いじめられっ子（書庫 novel-works）」
+ * - 2〜3作品：「novel-works の いじめられっ子・たゆたう鉛」
+ * - 4作品以上：「novel-works の いじめられっ子・たゆたう鉛 ほか2作品」
+ * - 作品に当てられない変更しか無い・調べられなかった：書庫の名前だけ。
+ *   **全作品を並べる形には戻さない**——関わらない作品の名前を出すと、
+ *   作者はそれも送られたと読む
+ *
+ * 自動の送り直し（`autoResend.ts`）も同じ書き方にするので、置き場の
+ * 状態（`SyncTargetState`）に縛らない形で受け取る。
+ */
+export function describePlaceWorks(
+  label: string,
+  works: readonly WorkEntry[],
+  involved: readonly WorkEntry[] | undefined
+): string {
+  if (works.length === 0) return label;
+  if (works.length === 1) return works[0].title;
+  const names = (involved ?? []).map((work) => work.title);
+  if (names.length === 0) return label;
+  if (names.length === 1) return `${names[0]}（書庫 ${label}）`;
+  if (names.length < INVOLVED_SHORTEN_FROM) {
+    return `${label} の ${names.join("・")}`;
+  }
+  const shown = names.slice(0, INVOLVED_SHOWN_WHEN_SHORT);
+  return `${label} の ${shown.join("・")} ほか${names.length - shown.length}作品`;
+}
+
+/** 置き場の名前と、その回に関わる作品名（`describePlaceWorks`） */
 export function describeTargetWorks(target: SyncTargetState): string {
-  if (target.works.length === 0) return target.label;
-  if (target.works.length === 1) return target.works[0].title;
-  return `${target.label}（${target.works
-    .map((work) => work.title)
-    .join("、")}）`;
+  return describePlaceWorks(target.label, target.works, target.involved);
+}
+
+/**
+ * 置き場の根からの道（git が出す `/` 区切りの相対の道）を、作品フォルダーへ当てる。
+ *
+ * **作品の並びは登録の順のまま返す**（文の「・」の順が実行のたびに
+ * 入れ替わらないように）。書庫の直下のファイル（README など）は
+ * どの作品にも当たらない。
+ *
+ * 作品フォルダーが置き場の根そのもののときは、どの道もその作品に当てる。
+ */
+export function worksTouchedByPaths(
+  root: string,
+  works: readonly WorkEntry[],
+  relativePaths: readonly string[]
+): WorkEntry[] {
+  if (relativePaths.length === 0) return [];
+  const absolute = relativePaths.map((one) => join(root, one));
+  return works.filter(
+    (work) =>
+      isSameFolder(work.folderPath, root) ||
+      absolute.some((file) => isPathInside(work.folderPath, file))
+  );
 }
 
 /**

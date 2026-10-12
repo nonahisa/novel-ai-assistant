@@ -37,7 +37,13 @@ import {
   supportsPasteHelper,
 } from "../core/postingEnvelope";
 // 同じ数字を2度打たせない——投稿ページのURLから作品IDと作品ページを導く
-import { deriveSiteProfile } from "../core/postingSiteUrls";
+import {
+  deriveSiteProfile,
+  followNewEpisodeUrl,
+  NEW_EPISODE_URL_FOLLOW_QUESTION,
+  newEpisodeUrlDraft,
+  planNewEpisodeUrlOnWorkIdChange,
+} from "../core/postingSiteUrls";
 import { hasEmphasis } from "../core/ruby";
 // 合本の中の話の呼び方は1か所に置く（作品ごとの数え方を通す）
 import {
@@ -404,7 +410,7 @@ async function setUpPosting(
   episodes: readonly EpisodeFile[],
   format: WorkFormatKey | undefined
 ): Promise<{ ledger: PostingLedger; changed: boolean } | undefined> {
-  const entries = await askSites(work, ledger.sites);
+  const entries = await askSites(work, ledger);
   if (!entries || entries.length === 0) return undefined;
 
   const withNewSites = withSites(ledger, entries);
@@ -438,7 +444,7 @@ export async function configurePostingSites(
   const ledger = await load(store, work);
   if (!ledger) return { changed: false };
 
-  const chosen = await askSites(work, ledger.sites);
+  const chosen = await askSites(work, ledger);
   if (!chosen) return { changed: false };
 
   /*
@@ -542,13 +548,15 @@ export async function configurePostingSites(
  * URLの検証は**そのサイトのドメインかどうかだけ**（6.68.1）。
  * 中身は見ない——見るにはページを読みにいくことになる。
  *
- * @param current 既に登録してあるもの。選択済みにして、URLは初期値に入れる
+ * @param ledger 今の台帳。登録済みのサイトは選択済みにして、URLは初期値に入れる。
+ *   URL が無くて作品IDがあれば、作品IDから組み立てた URL を初期値にする
  * @returns 取りやめたら undefined。空配列は「1つも出さない」という答え
  */
 async function askSites(
   work: WorkEntry,
-  current: readonly PostingSiteEntry[]
+  ledger: PostingLedger
 ): Promise<PostingSiteEntry[] | undefined> {
+  const current = ledger.sites;
   const picked = await vscode.window.showQuickPick(
     POSTING_SITES.map((site) => ({
       label: site.label,
@@ -582,7 +590,17 @@ async function askSites(
       prompt:
         `${info.label}で「新しい話を書く」画面を開き、そのURLを貼り付けてください。` +
         "この作品のページを毎回ここから開きます",
-      value: existing?.newEpisodeUrl,
+      /*
+        **作品IDが分かっていれば、URL を下書きで入れる**（作者に約束済み、
+        2026-10-12）。読者の反応から作品IDだけ登録されたカクヨムの作品で、
+        同じ番号の入った URL をもう一度探して貼らせない。入っている URL は
+        そのまま（`newEpisodeUrlDraft`）。Enter を押すまで台帳には入らない
+      */
+      value: newEpisodeUrlDraft(
+        item.site,
+        existing?.newEpisodeUrl,
+        siteProfile(ledger, item.site)?.workId
+      ),
       placeHolder: info.urlExample,
       ignoreFocusOut: true,
       validateInput: (value) =>
@@ -675,12 +693,51 @@ async function askSiteProfiles(
     // まだ訊いていないサイトの作品情報にも触らない
     if (workId === undefined) return next;
 
+    /*
+      **作品IDを書き換えたら、投稿ページのURLを合わせるか一言訊く**
+      （作者の裁定、2026-10-12 22時台）。黙って組み直すと作者が手で貼った
+      URL が消え、黙って残すと投稿キットが古い作品の投稿欄を開く。
+      いいえ・閉じたなら URL はそのまま
+    */
+    const postUrl = next.sites.find((one) => one.site === entry.site)?.newEpisodeUrl;
+    const follow = planNewEpisodeUrlOnWorkIdChange(
+      entry.site,
+      postUrl,
+      current?.workId,
+      workId
+    );
+    let followedUrl: string | undefined;
+    if (follow.kind === "ask") {
+      const answer = await vscode.window.showInformationMessage(
+        NEW_EPISODE_URL_FOLLOW_QUESTION,
+        {
+          modal: true,
+          detail:
+            `今の URL：${postUrl ?? ""}\n` +
+            `合わせると：${follow.rebuilt}\n\n` +
+            "合わせなければ、今の URL のままにします。",
+        },
+        "合わせる"
+      );
+      const accepted = answer === "合わせる";
+      next = withSites(
+        next,
+        followNewEpisodeUrl(next.sites, entry.site, follow.rebuilt, accepted)
+      );
+      if (accepted) followedUrl = follow.rebuilt;
+    }
+
     const workUrl = await askText({
       title: `${info.label} の作品ページのURL`,
       prompt:
         "読者が見る作品ページのURLを貼ってください（空のままで構いません）。" +
         "執筆量パネルからここを開けるようになります",
-      value: current?.workUrl || derived.pageUrl,
+      // URL を新しい作品IDへ合わせたなら、作品ページの下書きもそちらから導く
+      value:
+        current?.workUrl ||
+        (followedUrl
+          ? deriveSiteProfile(entry.site, followedUrl).pageUrl
+          : derived.pageUrl),
       placeHolder: `https://${info.domain}/`,
       ignoreFocusOut: true,
       // **確かめるのはドメインだけ**（6.68.1）。ページは読みにいかない

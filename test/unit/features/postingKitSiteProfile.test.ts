@@ -460,3 +460,129 @@ describe("投稿ページのURLから初期値を埋める", () => {
     );
   });
 });
+
+/**
+ * 「投稿サイト設定」でカクヨムを選んだとき、作品IDから投稿ページのURLを下書きする
+ * （作者に約束済み、2026-10-12）。URL が入っている作品で作品IDを書き換えたら
+ * **確認で一言訊く**（作者の裁定、2026-10-12 22時台）。
+ *
+ * 組み立て方と訊く条件は `postingSiteUrls.test.ts`。ここで見るのは画面の流れと台帳。
+ */
+describe("カクヨムの投稿ページのURLを作品IDに合わせる", () => {
+  const urlOf = (id: string) => `https://kakuyomu.jp/my/works/${id}/episodes/new`;
+  /** 投稿ページのURLの欄に出た初期値 */
+  let urlInitial: string | undefined;
+  /** 出た確認の文 */
+  let confirms: string[];
+
+  function seed(ledger: Record<string, unknown>): void {
+    disk.clear();
+    disk.set(
+      ledgerPath,
+      utf8(
+        JSON.stringify({
+          schemaVersion: "1",
+          sites: [],
+          siteProfiles: [],
+          posts: [],
+          rankings: [],
+          ...ledger,
+        })
+      )
+    );
+  }
+
+  function stub(newWorkId: string | undefined, confirmAnswer: string | undefined): void {
+    urlInitial = undefined;
+    confirms = [];
+    let round = 0;
+    Object.assign(window, {
+      showInformationMessage: async (message: string, ...rest: unknown[]) => {
+        if (rest.some((item) => typeof item === "string")) {
+          confirms.push(message);
+          return confirmAnswer;
+        }
+        return undefined;
+      },
+      showWarningMessage: async () => undefined,
+      showErrorMessage: async () => undefined,
+      showQuickPick: async (items: Array<Record<string, unknown>>) => {
+        round += 1;
+        if (round === 1) {
+          return items.filter((item) => String(item.label ?? "").includes("カクヨム"));
+        }
+        if (round === 2) return items.find((item) => "detailed" in item);
+        return undefined;
+      },
+      showInputBox: async (options: { title?: string; value?: string }) => {
+        const title = options.title ?? "";
+        if (title.includes("新規エピソード投稿ページ")) {
+          urlInitial = options.value;
+          return options.value ?? "";
+        }
+        if (title === "カクヨム での作品ID" && newWorkId !== undefined) return newWorkId;
+        return options.value ?? "";
+      },
+    });
+  }
+
+  function saved(): { sites: Array<{ site: string; newEpisodeUrl: string }> } {
+    return JSON.parse(new TextDecoder().decode(disk.get(ledgerPath) as Uint8Array));
+  }
+
+  test("URL が空で作品IDがあれば、組み立てた URL が下書きに入る", async () => {
+    seed({ siteProfiles: [{ site: "kakuyomu", workId: "111" }] });
+    stub(undefined, undefined);
+
+    await configurePostingSites(work);
+
+    expect(urlInitial).toBe(urlOf("111"));
+    expect(confirms).toEqual([]);
+    expect(saved().sites).toEqual([{ site: "kakuyomu", newEpisodeUrl: urlOf("111") }]);
+  });
+
+  test("作品IDが無ければ、下書きは入らない", async () => {
+    seed({});
+    stub("", undefined);
+    // URL は必須なので、空のままでは進めない——下書きが無いことだけを見る
+    Object.assign(window, {
+      showInputBox: async (options: { title?: string; value?: string }) => {
+        if ((options.title ?? "").includes("新規エピソード投稿ページ")) {
+          urlInitial = options.value;
+          return undefined;
+        }
+        return "";
+      },
+    });
+
+    await configurePostingSites(work);
+
+    expect(urlInitial).toBeUndefined();
+  });
+
+  test("URL が入っていて作品IDを変えたら訊き、はいなら組み直す", async () => {
+    seed({
+      sites: [{ site: "kakuyomu", newEpisodeUrl: urlOf("111") }],
+      siteProfiles: [{ site: "kakuyomu", workId: "111" }],
+    });
+    stub("222", "合わせる");
+
+    await configurePostingSites(work);
+
+    expect(confirms).toEqual(["投稿ページの URL を新しい作品IDに合わせますか"]);
+    expect(saved().sites).toEqual([{ site: "kakuyomu", newEpisodeUrl: urlOf("222") }]);
+  });
+
+  test("いいえ（閉じた）なら、URL は変わらない", async () => {
+    seed({
+      sites: [{ site: "kakuyomu", newEpisodeUrl: urlOf("111") }],
+      siteProfiles: [{ site: "kakuyomu", workId: "111" }],
+    });
+    stub("222", undefined);
+
+    await configurePostingSites(work);
+
+    expect(confirms).toHaveLength(1);
+    expect(saved().sites).toEqual([{ site: "kakuyomu", newEpisodeUrl: urlOf("111") }]);
+  });
+});

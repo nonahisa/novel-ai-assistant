@@ -731,6 +731,63 @@ export async function changedFilesEachSide(
   };
 }
 
+/**
+ * 同期でこの回に関わる道（置き場の根からの相対の道）を集める（作者の指摘、2026-10-12 夜）。
+ *
+ * 記録待ち（作業ツリーの変更・未追跡）と、上流があれば送信待ち・取り込み待ちの
+ * 両側。「すべて同期」が書庫の中の**どの作品の名前を出すか**を決める材料で、
+ * 手順そのもの（何を記録・送信するか）には使わない。
+ *
+ * **自動で書き換わるもの（執筆量の記録）は除く。** 件数の数え方
+ * （`parseStatusPorcelain`）と同じ考えで、作者が何もしていない作品の名前を出さない。
+ *
+ * 読めなかったら undefined——呼び出し側は作品名を出さず、置き場の名前だけにする。
+ */
+export async function readPendingPaths(
+  root: string,
+  status: GitSyncStatus,
+  run: GitCommandRunner = runGit
+): Promise<string[] | undefined> {
+  const working = await run(
+    ["status", "--porcelain", "-z", "--untracked-files=all"],
+    root,
+    LOCAL_TIMEOUT_MS
+  );
+  if (working.code !== 0) return undefined;
+  const found = parseStatusPorcelainPaths(working.stdout);
+
+  if (status.kind === "tracked" && (status.ahead > 0 || status.behind > 0)) {
+    const sides = await changedFilesEachSide(root, status.upstream, run);
+    if (!sides.ok) return undefined;
+    found.push(...sides.local, ...sides.remote);
+  }
+  return [...new Set(found)].filter(
+    (one) => !AUTO_WRITTEN_PATHS.some((target) => one.includes(target))
+  );
+}
+
+/**
+ * `git status --porcelain -z` の出力から道だけを取り出す。
+ *
+ * `-z` では1件が「XY 道」で、**改名・複写（X か Y が R/C）だけは、続く1件に
+ * 元の道が前置きなしで来る。** 両方を返す（元の場所の作品も変わっている）。
+ */
+export function parseStatusPorcelainPaths(stdout: string): string[] {
+  const fields = splitNulPaths(stdout);
+  const paths: string[] = [];
+  for (let index = 0; index < fields.length; index++) {
+    const field = fields[index];
+    if (field.length < 4) continue;
+    const code = field.slice(0, 2);
+    paths.push(field.slice(3));
+    if (/[RC]/.test(code) && index + 1 < fields.length) {
+      index++;
+      paths.push(fields[index]);
+    }
+  }
+  return paths;
+}
+
 /** NUL区切りのパス一覧をほどく。**区切りはエスケープで書く**（生の制御文字を置かない） */
 function splitNulPaths(stdout: string): string[] {
   return stdout.split("\0").filter((name) => name !== "");
