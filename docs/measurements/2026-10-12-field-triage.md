@@ -41,19 +41,19 @@ T で走らせたテスト（12ファイル・131件、すべて通過）：`cor
 
 | 束 | 名前 | 件数 | 項目（行） | 使う部品 | 見本の作り方 | 難しさ |
 |---|---|---|---|---|---|---|
-| E1 | 場所の矛盾（機械の照合） | 1 | 18 | 偽のOllama（e2e/episodePlotContrast の形）・settingsFixture（場所の記録に位置関係を持たせる）・workbenchDom の提案パネル | 場所2つの記録と第3話・第7話の本文を台本に書く | 中 |
+| E1 | 場所の矛盾（機械の照合） | 1 | 18 | 偽のOllama（e2e/episodePlotContrast の形）・settingsFixture（場所の記録に位置関係を持たせる）・workbenchDom の提案パネル | 場所2つの記録と第3話・第7話の本文を台本に書く | 中。済み（2026-10-12 夜、ノートPCで通過） |
 | E2 | 設定資料パネルの書き込みと吹き出し | 2 | 25・418 | settingsFixture（パネルの面と一覧の読み取り） | 場所1つ・人物1人の記録（長い値の変化つき） | 易。済み（2026-10-12、ノートPCで通過）：418 は済み、25 は書き足しの保存まで〔次の抽出で変わらないかは未確認〕 |
 | E3 | 索引づくり（偽の埋め込み） | 3 | 62・64・65 | 偽のOllama に /api/embed を足す・run.request の札を保管庫へ置く道・notices | 作品2〜3つ、意味検索を入にした設定 | 難 |
 | E4 | 記録と同期（手元の git） | 3 | 80・88・4989 | prepareWork で git init と裸の送り先を作る・原稿エディターの打ち込み | 作品をコミット済みにしておく | 難 |
-| E5 | 偽のOllamaで相談・プロットの入口 | 4 | 112・578・5525・5673 | 偽のOllama（答えを台本で決める）・相談パネルの面・workbenchDom | 相談の答え（そこを見せて付き）・名前の候補 | 中 |
+| E5 | 偽のOllamaで相談・プロットの入口 | 4 | 112・578・5525・5673 | 偽のOllama（答えを台本で決める）・相談パネルの面・workbenchDom | 相談の答え（そこを見せて付き）・名前の候補 | 中。済み（2026-10-12 夜、ノートPCで通過。5673 は残り） |
 | E6 | 提案パネルの［適用］の変わり種 | 3 | 118・466・599 | sampleFinding・withVsCode（ワークスペースの外に作品を置く起こし方を足す） | 札「視点」の指摘の見本 | 易。済み（2026-10-12、ノートPCで通過） |
 | E7 | 縦書きでの行へ飛ぶ・挿入 | 2 | 201・230 | 既存の sceneMemoPanel・proposalApply の件・manuscriptFrame | 台本の作品（種類＝台本） | 易。済み（2026-10-12、ノートPCで通過） |
-| E8 | 原稿エディターのキー | 4 | 267・272・276・301 | manuscriptFrame（placeCaretAfter・composeText）・LaunchOptions.keybindings | 1話 | 中 |
+| E8 | 原稿エディターのキー | 4 | 267・272・276・301 | manuscriptFrame（placeCaretAfter・composeText）・LaunchOptions.keybindings | 1話 | 中。267・276・301 は済み（2026-10-12 夜、ノートPCで通過）。272 はこの回の対象外 |
 | E9 | つながりの切れ・再起動をまたぐ | 5 | 156・200・288・289・6132 | hostRestartDisconnect の部品（ctrl+alt+shift+r）・dropEditsToHost・rescueBarText | 1〜2話（1.141.0 でだけ見張れる）。**289 は既存の hostRestartDisconnect が覆うので走らせるだけ**（新しく書くのは4件） | 難 |
 | E10 | メニューと吹き出しの文・初回の案内 | 3 | 181・235・4623 | workbenchDom（サイドバーの木・右クリックの品書き）・使い捨ての user-data-dir | 1話 | 易。済み（2026-10-12、ノートPCで通過） |
-| E11 | 承認待ちとプロットの知らせ | 2 | 545・561 | プロットモードの面・notices の読み取り・prepareWork で plot.md と承認待ちを置く | plot.md と役名の人物 | 中 |
-| E12 | 編集部モード（1台の中で） | 4 | 4714・4719・4720・4721 | settings で novelai.mode・prepareWork でロックの台帳を置く・dialogText | 1話とロックの台帳 | 中 |
-| E13 | ファイル選択の窓 | 2 | 722・974 | settings で files.simpleDialog.enable・QuickPick の部品で道を打つ | バックアップのファイルの見本 | 中 |
+| E11 | 承認待ちとプロットの知らせ | 2 | 545・561 | プロットモードの面・notices の読み取り・prepareWork で plot.md と承認待ちを置く | plot.md と役名の人物 | 中。済み（2026-10-12 夜、ノートPCで通過。561 は残り） |
+| E12 | 編集部モード（1台の中で） | 4 | 4714・4719・4720・4721 | settings で novelai.mode・prepareWork でロックの台帳を置く・dialogText | 1話とロックの台帳 | 中。済み（2026-10-12 夜、ノートPCで通過） |
+| E13 | ファイル選択の窓 | 2 | 722・974 | settings で files.simpleDialog.enable・QuickPick の部品で道を打つ | バックアップのファイルの見本 | 中。済み（2026-10-12 夜、ノートPCで通過） |
 
 ## 全件の表
 
