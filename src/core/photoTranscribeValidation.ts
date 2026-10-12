@@ -1,4 +1,4 @@
-import { PHOTO_TRANSCRIBE_HINTS, UNREADABLE_MARK } from "../prompts/photoTranscribe";
+import { PHOTO_EXAMPLE_CHARS, PHOTO_TRANSCRIBE_HINTS, UNREADABLE_MARK } from "../prompts/photoTranscribe";
 import { cutAtInlineRepetition } from "./inlineRepetition";
 import { closeTruncatedJson } from "./truncatedResponse";
 
@@ -25,6 +25,20 @@ export interface PhotoTranscription {
   readonly descriptiveLines: readonly number[];
   /** 指示の言葉がそのまま返って捨てた行の数 */
   readonly droppedEchoes: number;
+  /**
+   * 原則2に例として挙げた字（國・學・體・ゝ・ゞ。`PHOTO_EXAMPLE_CHARS`）の数。
+   * **捨てない**——写真に本当にある字かもしれず、正しい字は写真の中にしかない。
+   * 指示の例が写真に無いのに混じっていないか、作者に見比べてもらう（失敗3）
+   */
+  readonly exampleChars: number;
+}
+
+export interface PhotoTranscribeParseOptions {
+  /**
+   * 作者からの頼みの各行（`photoRequestEchoes`）。行の全体がこれと同じものは、
+   * 指示の言葉の返りとして捨てる
+   */
+  readonly requestEchoes?: readonly string[];
 }
 
 export type PhotoTranscribeParse =
@@ -45,13 +59,13 @@ const DESCRIPTIVE_PATTERNS: readonly RegExp[] = [
 ];
 
 /** 行の全体が指示の言葉と同じか（前後の約物と空白を落として比べる） */
-function isEcho(line: string): boolean {
+function isEcho(line: string, extra: readonly string[]): boolean {
   // 括弧ごとの言葉（「（読めない）」）もあるので、外側の空白と句点だけを落とした形と、
   // 括弧まで落とした形の両方で比べる
   let form = line.replace(/^[\s　]+|[\s　。、:：]+$/gu, "");
   for (;;) {
     if (form === "") return false;
-    if (PHOTO_TRANSCRIBE_HINTS.includes(form)) return true;
+    if (PHOTO_TRANSCRIBE_HINTS.includes(form) || extra.includes(form)) return true;
     // 外側の括弧を1組ずつ外して比べ直す
     const inner = form.replace(/^[「『（(【](.*)[」』）)】]$/u, "$1");
     if (inner === form) return false;
@@ -59,7 +73,14 @@ function isEcho(line: string): boolean {
   }
 }
 
-export function parsePhotoTranscription(raw: string): PhotoTranscribeParse {
+export function parsePhotoTranscription(
+  raw: string,
+  options: PhotoTranscribeParseOptions = {}
+): PhotoTranscribeParse {
+  // 頼みの行も、比べる形（外側の空白と句点を落とした形）に揃えておく
+  const extra = (options.requestEchoes ?? [])
+    .map((one) => one.replace(/^[\s　]+|[\s　。、:：]+$/gu, ""))
+    .filter((one) => one !== "");
   const parsed = parseObject(raw);
   if (!parsed) return { ok: false, reason: "AIの答えを読み取れませんでした（JSONの形ではありません）。" };
   if (!Array.isArray(parsed.lines)) {
@@ -81,7 +102,7 @@ export function parsePhotoTranscription(raw: string): PhotoTranscribeParse {
       // 行頭の全角空白（字下げ）は残す。行末の空白だけ落とす
       const line = piece.replace(/[\s　]+$/u, "");
       if (line.trim() === "") continue;
-      if (isEcho(line)) {
+      if (isEcho(line, extra)) {
         droppedEchoes += 1;
         continue;
       }
@@ -102,8 +123,10 @@ export function parsePhotoTranscription(raw: string): PhotoTranscribeParse {
   const latinRuns: { line: number; text: string }[] = [];
   const descriptiveLines: number[] = [];
   let unreadable = 0;
+  let exampleChars = 0;
   kept.forEach((line, index) => {
     unreadable += countMark(line);
+    for (const char of line) if (PHOTO_EXAMPLE_CHARS.includes(char)) exampleChars += 1;
     for (const match of line.matchAll(LATIN_RUN)) {
       latinRuns.push({ line: index + 1, text: match[0] });
     }
@@ -121,6 +144,7 @@ export function parsePhotoTranscription(raw: string): PhotoTranscribeParse {
       latinRuns,
       descriptiveLines,
       droppedEchoes,
+      exampleChars,
     },
   };
 }
@@ -137,15 +161,20 @@ export const INLINE_REPEAT_STOP_NOTE =
  * どちらも閉じていない JSON なので、切ったあと `closeTruncatedJson` で閉じる。
  * 読めなければ、止めたことだけを理由にして返す（作者の次の一手は向きの確認）。
  */
-export function parsePhotoTranscriptionStoppingRepeats(raw: string): {
+export function parsePhotoTranscriptionStoppingRepeats(
+  raw: string,
+  options: PhotoTranscribeParseOptions = {}
+): {
   readonly parse: PhotoTranscribeParse;
   /** 1行の中の繰り返しで切ったか */
   readonly repeatStopped: boolean;
 } {
   const head = cutAtInlineRepetition(raw);
-  if (head === undefined) return { parse: parsePhotoTranscription(raw), repeatStopped: false };
+  if (head === undefined) {
+    return { parse: parsePhotoTranscription(raw, options), repeatStopped: false };
+  }
   for (const candidate of closeTruncatedJson(head)) {
-    const parse = parsePhotoTranscription(candidate);
+    const parse = parsePhotoTranscription(candidate, options);
     if (parse.ok) return { parse, repeatStopped: true };
   }
   return {

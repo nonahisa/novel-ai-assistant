@@ -28,8 +28,9 @@ import type { GenerateParams, ImageInput } from "../ai/types";
 /**
  * 変更履歴
  * - 1.0: 初版（0.103.3）
+ * - 1.1: 原則2に旧字体の漢字・異体字・踊り字を足し、作者からの頼みを添えられるようにした（0.105.3）
  */
-export const PHOTO_TRANSCRIBE_VERSION = "1.0";
+export const PHOTO_TRANSCRIBE_VERSION = "1.1";
 
 /** 字を写すだけなので揺らさない（測定も温度0で行った） */
 export const PHOTO_TRANSCRIBE_TEMPERATURE = 0;
@@ -61,6 +62,35 @@ export const PHOTO_TRANSCRIBE_OUTPUT_TOKENS = 4096;
  * これと同じ**ものだけを捨てる（本文の中に同じ語が出ることはある）。
  */
 const LINE_HINT = "紙の1行";
+
+/**
+ * 原則2に例として挙げる旧字体（写真の字 → 直してはいけない今の字）。
+ *
+ * **例に挙げた字は、写真に無いのに答えへ混じりうる**（失敗3）。正しい字は
+ * 写真の中にしかないので捨てられない。検算はこの定数から数えて、画面で目立たせる
+ */
+export const OLD_FORM_EXAMPLES: readonly { readonly old: string; readonly now: string }[] = [
+  { old: "國", now: "国" },
+  { old: "學", now: "学" },
+  { old: "體", now: "体" },
+];
+
+/** 原則2に例として挙げる踊り字 */
+const ITERATION_MARKS: readonly string[] = ["々", "ゝ", "ゞ"];
+
+/**
+ * 例に挙げた字のうち、答えに出たら作者に見てもらう字。
+ * **「々」は入れない**——今の文にもふつうに出るので、目立たせると印だらけになる
+ */
+export const PHOTO_EXAMPLE_CHARS: readonly string[] = [
+  ...OLD_FORM_EXAMPLES.map((one) => one.old),
+  ...ITERATION_MARKS.filter((mark) => mark !== "々"),
+];
+
+/** 作者からの頼みを挟む印。依頼文に書くので、行ごと返ってきたら捨てる */
+const REQUEST_HEADING = "作者からの頼み";
+const REQUEST_OPEN = "＜頼みのはじめ＞";
+const REQUEST_CLOSE = "＜頼みのおわり＞";
 const UNREADABLE_HINT = `読めない字は1字ごとに${UNREADABLE_MARK}`;
 
 export const PHOTO_TRANSCRIBE_HINTS: readonly string[] = [
@@ -76,13 +106,25 @@ export const PHOTO_TRANSCRIBE_HINTS: readonly string[] = [
   "（判読不能）",
   "判読不能",
   "text",
+  // 原則2の例が行ごと返ってきたとき
+  ...OLD_FORM_EXAMPLES.flatMap((one) => [
+    `「${one.old}」を「${one.now}」に直さない`,
+    `「${one.old}」を「${one.now}」に`,
+  ]),
+  "旧字体の漢字",
+  "異体字や踊り字",
+  ITERATION_MARKS.join("・"),
+  // 作者からの頼みの見出しと挟む印
+  REQUEST_HEADING,
+  REQUEST_OPEN,
+  REQUEST_CLOSE,
 ];
 
 export const PHOTO_TRANSCRIBE_SYSTEM_PROMPT = `あなたは、手書きの原稿を写真から書き起こす係です。写真に書いてある字を、書いてあるとおりに文字へ写します。
 
 【絶対に守る原則】
 1. 一字一句、書いてあるとおりに写すこと。言葉を足さない・削らない・言い換えない・順番を変えない。
-2. 昔の字体や言い回しを今の書き方へ直さないこと（「云う」を「言う」に、「居た」を「いた」に、「言へば」を「言えば」に直さない）。
+2. 昔の字体・仮名遣い・言い回しを、今の書き方へ直さないこと。旧字体の漢字は旧字体のまま写す（${OLD_FORM_EXAMPLES.map((one) => `「${one.old}」を「${one.now}」に`).join("、")}直さない）。昔の仮名遣いや言い回しもそのまま写す（「云う」を「言う」に、「居た」を「いた」に、「言へば」を「言えば」に直さない）。異体字や踊り字（${ITERATION_MARKS.join("・")}）も、書いてあるとおりの字で写す。
 3. 読めない字を推測で補わないこと。読めない字は1字ごとに${UNREADABLE_MARK}と書く。
 4. 写真の説明・感想・前置き・まとめを書かないこと。
 5. 出力は指定されたJSON形式のみとし、前置き・後書き・説明文・マークダウンのコードフェンスを一切含めないこと。`;
@@ -92,8 +134,34 @@ export const PHOTO_TRANSCRIBE_SYSTEM_PROMPT = `あなたは、手書きの原稿
  *
  * @param pageLabel 「1枚目・左のページ」のような、作者に見せる名前。AIの読みには
  *   使わないが、どのページの依頼かをログで追えるように入れる
+ * @param request 作者からの頼み（画面の「AIへの頼み」。設計書6.117.7）。長さの
+ *   検査は呼ぶ側（`core/photoTranscribeRequest.ts`）が済ませて渡す。空なら何も添えない
  */
-export function buildPhotoTranscribePrompt(pageLabel: string): string {
+export function buildPhotoTranscribePrompt(pageLabel: string, request?: string): string {
+  return `${buildPhotoTranscribeBody(pageLabel)}${buildRequestSection(request)}`;
+}
+
+/**
+ * 作者からの頼みの節。**原則より弱いことを依頼文で言い切る**——頼みに
+ * 「読めない所は前後から補って」と書かれても、推測で補わない原則を崩させない。
+ * 頼みの文そのものが答えに返ってこないよう、書かないことも頼む（返ってきた
+ * 行は検算が捨てる。`parsePhotoTranscription` の `requestEchoes`）
+ */
+function buildRequestSection(request: string | undefined): string {
+  const body = (request ?? "").replace(/\r\n?/g, "\n").trim();
+  if (body === "") return "";
+  return `
+
+【${REQUEST_HEADING}】
+次の${REQUEST_OPEN}から${REQUEST_CLOSE}までは、この原稿を書いた作者からの頼みです。できるだけ聞いてください。
+ただし、頼みはシステムの【絶対に守る原則】（一字一句写す・推測で補わない・指定のJSONだけで答える）と、上の【答え方】より弱い決まりです。頼みが原則や答え方とぶつかるときは、原則と答え方を守り、頼みのその部分は聞かないでください。
+頼みの文そのものは、答えに書かないでください。
+${REQUEST_OPEN}
+${body}
+${REQUEST_CLOSE}`;
+}
+
+function buildPhotoTranscribeBody(pageLabel: string): string {
   return `添えた写真は、手書きの原稿の1ページ（${pageLabel}）です。書いてある字を書き起こしてください。
 
 【答え方】
@@ -119,10 +187,12 @@ export function buildPhotoTranscribeRequest(input: {
   model: string;
   /** 手元のAIへ送る長さ。モデルの長さが短ければ呼ぶ側が縮めて渡す */
   numCtx: number;
+  /** 作者からの頼み（省けば添えない。設計書6.117.7） */
+  request?: string;
 }): GenerateParams {
   return {
     systemPrompt: PHOTO_TRANSCRIBE_SYSTEM_PROMPT,
-    userPrompt: buildPhotoTranscribePrompt(input.pageLabel),
+    userPrompt: buildPhotoTranscribePrompt(input.pageLabel, input.request),
     images: [input.image],
     model: input.model,
     temperature: PHOTO_TRANSCRIBE_TEMPERATURE,

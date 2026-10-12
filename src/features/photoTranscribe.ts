@@ -5,6 +5,13 @@ import { ASSIGNABLE_FEATURE_LABELS, ensureConfigured } from "../ai/registry";
 import { AIError, type AIProvider, type ModelInfo } from "../ai/types";
 import { canSendImages, imageSupportFor, type ImageSupport } from "../ai/imageInput";
 import { describePhotoSend } from "../core/photoTranscribeConfirm";
+import {
+  PHOTO_REQUEST_MAX_CHARS,
+  checkPhotoRequest,
+  countPhotoRequestChars,
+  photoRequestEchoes,
+} from "../core/photoTranscribeRequest";
+import { readPhotoRequest, savePhotoRequest } from "../core/photoTranscribeRequestStore";
 import { parsePhotoTranscriptionStoppingRepeats } from "../core/photoTranscribeValidation";
 import { endsWithInlineRepetition } from "../core/inlineRepetition";
 import { readExifOrientation } from "../core/exifOrientation";
@@ -116,6 +123,53 @@ export async function openPhotoTranscribe(
   });
   panel.webview.html = buildPhotoTranscribeHtml(createNonce(), panel.webview.cspSource);
 
+  /*
+    作者からの頼みは作品フォルダーに置く（設計書6.117.7。`core/photoTranscribeRequestStore.ts`）。
+    `knownRequest` はこの画面が最後に読んだ（書いた）頼み。**読めなかったら undefined
+    にして、画面を開き直すまで書かない**——壊れたファイル・競合の印が入ったファイルを
+    上書きすると、そこに残っている作者の文が消える。読めなくても書き起こしは止めない
+    （いま欄にある頼みは作者の手元にあり、送るのはそちらだから）
+  */
+  let knownRequest: string | undefined;
+  const postRequestNote = (note: string): void => {
+    void panel.webview.postMessage({ type: "requestNote", text: note });
+  };
+  const loadRequest = async (): Promise<void> => {
+    const read = await readPhotoRequest(work);
+    knownRequest = read.ok ? read.text : undefined;
+    if (!read.ok) {
+      logFailure("写真の書き起こし：AIへの頼みを読む", { 内容: read.reason });
+    }
+    void panel.webview.postMessage({
+      type: "request",
+      text: read.ok ? read.text : "",
+      max: PHOTO_REQUEST_MAX_CHARS,
+      note: read.ok ? "" : read.reason,
+    });
+  };
+  const saveRequest = async (raw: unknown): Promise<void> => {
+    if (knownRequest === undefined) return;
+    try {
+      const saved = await savePhotoRequest(work, knownRequest, typeof raw === "string" ? raw : "");
+      if (saved.ok) {
+        knownRequest = saved.text;
+        postRequestNote("");
+        return;
+      }
+      // 上限を超えた頼みは覚えない（画面が超えたことを出している）
+      if (saved.kind === "over") return;
+      logFailure("写真の書き起こし：AIへの頼みを覚える", { 内容: saved.reason });
+      postRequestNote(saved.reason);
+    } catch (error) {
+      // 覚えられなくても、いま画面にある頼みで書き起こしは続けられる。理由はログと画面へ
+      const detail = error instanceof Error ? error.message : String(error);
+      logFailure("写真の書き起こし：AIへの頼みを覚える", { 内容: detail });
+      postRequestNote(
+        `AIへの頼みを作品フォルダーに覚えられませんでした（${detail}）。いまの欄の頼みで書き起こしはできます。`
+      );
+    }
+  };
+
   const postAi = (): Promise<void> => postAiState(panel, registry);
   const orientQueue = new PhotoOrientQueue(panel, registry, work);
   panel.onDidDispose(() => orientQueue.stopAll());
@@ -127,8 +181,12 @@ export async function openPhotoTranscribe(
     const message = raw as { type?: string } & Record<string, unknown>;
     switch (message.type) {
       case "ready":
+        await loadRequest();
         await postAi();
         await addPhotos(panel);
+        break;
+      case "saveRequest":
+        await saveRequest(message.text);
         break;
       case "addPhotos":
         await addPhotos(panel);
@@ -160,11 +218,22 @@ export async function openPhotoTranscribe(
         const pages = readPages(message.pages);
         const photos = typeof message.photos === "number" ? message.photos : pages.length;
         if (pages.length === 0) return;
+        /*
+          頼みは画面にある文をそのまま送る（覚えた文と画面の文が食い違わないよう、
+          押されたときの文を覚え直してから使う）。**上限を超えていたら黙って切らずに止める**
+        */
+        const request = checkPhotoRequest(message.request);
+        if (!request.ok) {
+          failAll(panel, pages, request.reason);
+          return;
+        }
         // 書き起こしを始めたら、向きを尋ねるのはやめる（同じ手元のAIを取り合わない）
         orientQueue.stopAll();
+        // 覚えるのを待つ間に2度目の［書き起こす］が届いても受けないよう、先に旗を立てる
         abort = new AbortController();
         try {
-          await transcribePages(panel, work, registry, pages, photos, abort.signal);
+          await saveRequest(request.text);
+          await transcribePages(panel, work, registry, pages, photos, request.text, abort.signal);
         } finally {
           abort = undefined;
           void panel.webview.postMessage({ type: "running", on: false, text: "" });
@@ -485,6 +554,8 @@ async function transcribePages(
   registry: AIRegistry,
   pages: readonly PageInput[],
   photos: number,
+  /** 作者からの頼み（検査済み。空なら添えない） */
+  request: string,
   signal: AbortSignal
 ): Promise<void> {
   const resolved = await ensureConfigured(registry, "transcribe");
@@ -525,6 +596,7 @@ async function transcribePages(
     pages: pages.length,
     photos,
     isPaid: resolved.provider.isPaid,
+    request,
   });
   const answer = await vscode.window.showWarningMessage(
     confirm.message,
@@ -537,8 +609,11 @@ async function transcribePages(
 
   logStep(
     `写真の書き起こし：${pages.length}ページ → ${resolved.provider.displayName}（${resolved.model}）` +
-      `（P-48 ${PHOTO_TRANSCRIBE_VERSION}）`
+      `（P-48 ${PHOTO_TRANSCRIBE_VERSION}）` +
+      // 頼みの文は記録に書かない（長さだけ。どの頼みで読んだかは画面に残っている）
+      (request === "" ? "" : `・頼みあり（${countPhotoRequestChars(request)}字）`)
   );
+  const requestEchoes = photoRequestEchoes(request);
   // 手元のAIへは num_ctx を明示する（写真の分は文字数の見積もりに入らない。規則6）
   const numCtx = Math.min(PHOTO_TRANSCRIBE_NUM_CTX, info?.contextWindow ?? PHOTO_TRANSCRIBE_NUM_CTX);
 
@@ -560,6 +635,7 @@ async function transcribePages(
           image: { mimeType: page.mimeType, base64: page.base64 },
           model: resolved.model,
           numCtx,
+          request,
         }),
         signal: signal,
         /*
@@ -571,7 +647,8 @@ async function transcribePages(
         meta: { feature: PHOTO_TRANSCRIBE_FEATURE, workFolder: work.folderPath },
       });
       const { parse: parsed, repeatStopped } = parsePhotoTranscriptionStoppingRepeats(
-        result.text
+        result.text,
+        { requestEchoes }
       );
       if (repeatStopped) {
         logStep(`写真の書き起こし：${page.label}で同じ字が続いたので、1つ目の並びで切りました。`);
@@ -600,6 +677,7 @@ async function transcribePages(
           latin: parsed.value.latinRuns.length,
           descriptive: parsed.value.descriptiveLines.length,
           droppedEchoes: parsed.value.droppedEchoes,
+          exampleChars: parsed.value.exampleChars,
           stoppedEarly: result.stoppedEarly !== undefined,
           repeatStopped,
           // 繰り返しで止めた回は、切れたのはこちらが止めたからなので「途中で切れた」と言わない

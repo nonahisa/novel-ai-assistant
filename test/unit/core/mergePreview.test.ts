@@ -129,6 +129,11 @@ describe("自動で書かれるファイルの見分け", () => {
     expect(isAutoWrittenPath("短編/.aiwriter/extracted.json")).toBe(false);
   });
 
+  test("写真の書き起こしの「AIへの頼み」は作者の文なので畳めない（設計書6.117.7）", () => {
+    // 2台で違う頼みを書いたとき、片方を黙って残すともう片方の頼みが消える
+    expect(isAutoWrittenPath("短編/.aiwriter/photo-transcribe-request.json")).toBe(false);
+  });
+
   test("承認待ちの提案は畳める（0.45.0）", () => {
     // **AIの提案で、まだ資料になっていない**（設計書5.5.18）。
     // 作者の手は入っていないので、再抽出で同じものが出てくる。

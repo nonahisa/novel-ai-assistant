@@ -85,6 +85,47 @@ describe("写真から原稿を起こす画面", () => {
     expect(handler).not.toContain("postMessage");
   });
 
+  test("AIへの頼みの欄がある（上限は拡張機能と同じ300字・同じ数え方）", () => {
+    expect(html).toContain('data-testid="photo-request"');
+    expect(html).toContain('data-testid="photo-request-count"');
+    // 置き場は作品フォルダー（同期で共有される）。作者がそれと分かる言い方にする
+    expect(html).toContain("この作品のフォルダーに保存し、同期でほかのパソコンとも共有します");
+    const body = script();
+    expect(body).toContain("var REQUEST_MAX = 300;");
+    expect(body).toContain("Array.from(");
+    // maxlength は UTF-16 で数えるので使わない
+    expect(html).not.toContain("maxlength");
+  });
+
+  test("頼みは［書き起こす］で一緒に送り、欄を離れたら覚えてもらう。超えている間は押せない", () => {
+    const body = script();
+    const run = body.slice(body.indexOf('getElementById("run").onclick'), body.indexOf('getElementById("saveNew").onclick'));
+    expect(run).toContain('request: document.getElementById("request").value');
+    expect(run).toContain("requestOver()");
+    expect(body).toContain('type: "saveRequest"');
+    expect(body).toContain("|| requestOver();");
+    // 開いたとき、前の頼みを入れる
+    expect(body).toContain('message.type === "request"');
+  });
+
+  test("頼みを覚えられなかった理由（ファイルが壊れている・同期で書き換わった）を欄の下に出す", () => {
+    expect(html).toContain('data-testid="photo-request-note"');
+    const body = script();
+    expect(body).toContain('message.type === "requestNote"');
+    // 開いたときに読めなかった理由も、同じ所へ出す
+    const onRequest = body.slice(body.indexOf('message.type === "request"'), body.indexOf('message.type === "requestNote"'));
+    expect(onRequest).toContain("showRequestNote(message.note)");
+    // 理由は文字として入れる（HTML として解釈させない）
+    expect(body).toContain('getElementById("requestNote").textContent');
+  });
+
+  test("指示の例の字が答えに出たら目立たせて知らせる", () => {
+    const body = script();
+    expect(body).toContain('var EXAMPLE_CHARS = ["國","學","體","ゝ","ゞ"];');
+    expect(body).toContain('<mark class="example">');
+    expect(body).toContain("message.exampleChars > 0");
+  });
+
   test("挿入の印や取り消し線をAIに決めさせないことを、画面でも断る", () => {
     expect(html).toContain("AIには決めさせません");
     expect(html).toContain("〓");

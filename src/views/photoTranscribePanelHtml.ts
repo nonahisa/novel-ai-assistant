@@ -1,4 +1,5 @@
-import { UNREADABLE_MARK } from "../prompts/photoTranscribe";
+import { PHOTO_EXAMPLE_CHARS, UNREADABLE_MARK } from "../prompts/photoTranscribe";
+import { PHOTO_REQUEST_MAX_CHARS } from "../core/photoTranscribeRequest";
 import { INLINE_REPEAT_STOP_NOTE } from "../core/photoTranscribeValidation";
 import { SPREAD_ASPECT } from "../core/photoOrientValidation";
 import { ORIENT_PROBE_TURNS, PHOTO_ORIENT_EDGE } from "../prompts/photoOrient";
@@ -80,6 +81,16 @@ button:disabled { opacity: 0.5; cursor: default; }
 }
 mark.unread { background: var(--vscode-editorError-foreground, #e51400); color: #fff; padding: 0 1px; }
 mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color: #000; }
+mark.example { background: var(--vscode-editorInfo-foreground, #3794ff); color: #fff; padding: 0 1px; }
+.request { margin: 8px 0; }
+.request label { display: block; margin-bottom: 2px; }
+.request textarea {
+  width: 100%; max-width: 640px; box-sizing: border-box; min-height: 3.6em;
+  font-family: var(--vscode-font-family); font-size: 13px;
+  color: var(--vscode-input-foreground); background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, transparent);
+}
+.request .note { color: var(--vscode-descriptionForeground); font-size: 12px; }
 .warn { color: var(--vscode-editorWarning-foreground); font-size: 12px; }
 .err { color: var(--vscode-errorForeground); }
 .count { font-size: 12px; margin: 4px 0; }
@@ -97,6 +108,14 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
 </div>
 
 <div class="photos" id="photos" data-testid="photo-list"></div>
+
+<div class="request">
+  <label for="request">AIへの頼み（なくてもかまいません。この作品のフォルダーに保存し、同期でほかのパソコンとも共有します）</label>
+  <textarea id="request" data-testid="photo-request" placeholder="例：旧字体はそのまま。ルビの小さい字は（）に入れる。"></textarea>
+  <div class="note">書いてあるとおりに写す・読めない字を補わない、という決まりとぶつかる頼みは聞きません。</div>
+  <div id="requestCount" class="count" data-testid="photo-request-count"></div>
+  <div id="requestNote" class="count err" data-testid="photo-request-note"></div>
+</div>
 
 <div class="bar">
   <button id="run" data-testid="photo-run" disabled>書き起こす</button>
@@ -121,6 +140,10 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
   var SPREAD = ${SPREAD_ASPECT};
   var ORIENT_EDGE = ${PHOTO_ORIENT_EDGE};
   var ORIENT_TURNS = ${JSON.stringify(ORIENT_PROBE_TURNS)};
+  /** 指示に例として挙げた字（答えに出たら写真と見比べてもらう） */
+  var EXAMPLE_CHARS = ${JSON.stringify(PHOTO_EXAMPLE_CHARS)};
+  /** 頼みの上限（字）。拡張機能の側も同じ数え方で確かめる */
+  var REQUEST_MAX = ${PHOTO_REQUEST_MAX_CHARS};
   /**
    * 写真の並び。{ id, name, img, rotation(0/90/180/270), split, order("lr"|"rl"),
    *   orienting（手元のAIに向きを尋ねている間）, orientNote（推しの札）, touched（作者が回した・切り方を変えた） }
@@ -284,7 +307,32 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
   function markUp(text) {
     return escapeHtml(text)
       .replace(/[A-Za-zＡ-Ｚａ-ｚ]{3,}/g, function (m) { return '<mark class="latin">' + m + "</mark>"; })
-      .split(MARK).join('<mark class="unread">' + MARK + "</mark>");
+      .split(MARK).join('<mark class="unread">' + MARK + "</mark>")
+      .replace(new RegExp("[" + EXAMPLE_CHARS.join("") + "]", "g"), function (m) { return '<mark class="example">' + m + "</mark>"; });
+  }
+
+  /** 頼みの字数。拡張機能と同じく、前後の空白を落として1字ずつ数える（絵文字も1字） */
+  function requestChars() {
+    return Array.from(document.getElementById("request").value.replace(/\\r\\n?/g, "\\n").trim()).length;
+  }
+
+  function requestOver() { return requestChars() > REQUEST_MAX; }
+
+  function showRequestNote(text) {
+    document.getElementById("requestNote").textContent = String(text || "");
+  }
+
+  function refreshRequest() {
+    var n = requestChars();
+    var box = document.getElementById("requestCount");
+    if (n > REQUEST_MAX) {
+      box.textContent = n + "／" + REQUEST_MAX + "字　" + REQUEST_MAX + "字を超えています。縮めてください（超えている間は書き起こせません）。";
+      box.className = "count err";
+    } else {
+      box.textContent = n > 0 ? n + "／" + REQUEST_MAX + "字" : "";
+      box.className = "count";
+    }
+    updateButtons();
   }
 
   function countMark(text) { return text.split(MARK).length - 1; }
@@ -313,7 +361,8 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
   }
 
   function updateButtons() {
-    document.getElementById("run").disabled = running || !aiOk || photos.length === 0;
+    document.getElementById("run").disabled = running || !aiOk || photos.length === 0 || requestOver();
+    document.getElementById("request").disabled = running;
     document.getElementById("cancel").disabled = !running;
     document.getElementById("addPhotos").disabled = running;
     document.getElementById("pickAi").disabled = running;
@@ -354,8 +403,13 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
   document.getElementById("addPhotos").onclick = function () { vscode.postMessage({ type: "addPhotos" }); };
   document.getElementById("pickAi").onclick = function () { vscode.postMessage({ type: "pickAi" }); };
   document.getElementById("cancel").onclick = function () { vscode.postMessage({ type: "cancel" }); };
+  document.getElementById("request").addEventListener("input", refreshRequest);
+  // 欄を離れたら覚えてもらう（上限を超えていれば拡張機能の側が覚えない）
+  document.getElementById("request").addEventListener("change", function () {
+    vscode.postMessage({ type: "saveRequest", text: document.getElementById("request").value });
+  });
   document.getElementById("run").onclick = function () {
-    if (running) return;
+    if (running || requestOver()) return;
     // 書き起こしを始めたら、向きを尋ねるのはやめる（拡張機能の側でも止める）。いまの向きで送る
     photos.forEach(function (photo) { photo.orienting = false; });
     renderPhotos();
@@ -369,6 +423,7 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
     vscode.postMessage({
       type: "transcribe",
       photos: photos.length,
+      request: document.getElementById("request").value,
       pages: out.map(function (page) { return { id: page.id, label: page.label, mimeType: "image/jpeg", base64: page.base64 }; })
     });
   };
@@ -394,6 +449,14 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
         };
         img.src = item.dataUrl;
       });
+    } else if (message.type === "request") {
+      // 開いたときに、この作品で前に書いた頼みを入れる
+      document.getElementById("request").value = String(message.text || "");
+      showRequestNote(message.note);
+      refreshRequest();
+    } else if (message.type === "requestNote") {
+      // 覚えられなかった理由（ファイルが壊れている・同期で書き換わった）。空なら消す
+      showRequestNote(message.text);
     } else if (message.type === "ai") {
       var box = document.getElementById("ai");
       aiOk = message.canSend === true;
@@ -430,6 +493,7 @@ mark.latin { background: var(--vscode-editorWarning-foreground, #bf8803); color:
         if (message.truncated) notes.push("答えが途中で切れています。");
         if (message.latin > 0) notes.push("英字が混じった所が " + message.latin + "か所あります（黄色）。");
         if (message.descriptive > 0) notes.push("写真の説明らしい行が " + message.descriptive + "行あります。");
+        if (message.exampleChars > 0) notes.push("指示に例として挙げた字（" + EXAMPLE_CHARS.join("・") + "）が " + message.exampleChars + "か所あります（青）。写真にあるかお確かめください。");
         if (message.droppedEchoes > 0) notes.push("指示の言葉がそのまま返った " + message.droppedEchoes + "行を外しました。");
         page.status.textContent = notes.length > 0 ? notes.join(" ") : "書き起こしました。写真と見比べて直してください。";
         page.status.className = notes.length > 0 ? "warn" : "count";
