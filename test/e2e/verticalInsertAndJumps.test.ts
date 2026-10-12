@@ -151,7 +151,10 @@ async function insertBeforeSecond(page: Page, manuscriptFolder: string): Promise
     throw new Error(`${String(error)}（原稿の面：${(await manuscriptFrames(page)).length}枚）${await layoutDetail(page)}`);
   });
   if (!face) throw new Error("差し込んだ話の原稿の面が見つかりません");
-  expect(countTabsNamed((await editorGroupTabs(page)).flat(), inserted), await layoutDetail(page)).toBe(1);
+  expect(
+    countTabsNamed((await editorGroupTabs(page)).flat(), inserted),
+    `差し込んだ話のタブが1枚（探した名前：${JSON.stringify(inserted)}／本文フォルダー：${JSON.stringify(await readdir(manuscriptFolder))}）${await layoutDetail(page)}`
+  ).toBe(1);
   return face;
 }
 

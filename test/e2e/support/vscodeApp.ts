@@ -334,7 +334,7 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
     const windowSize = options.windowSize ?? windowSizeFromEnv();
     if (windowSize) await resizeWindows(app, windowSize);
     if (options.beforeRegister) await options.beforeRegister(page);
-    await registerWork(session(), workTitle);
+    await registerWork(session(), workTitle, options.outsideWorkspace === true);
   } catch (error) {
     // 呼び手（withVsCode）の片づけはまだ始まっていないので、ここで写真を残して閉じる
     const shot = page ? await saveScreenshot(page, "起動と作品の登録") : undefined;
@@ -575,7 +575,7 @@ async function pressUntilToast(
  * （`novelai.showVersion`）の確認の画面は、登録簿から引いた作品名を「（作品: …）」と
  * 添える。確認の画面と知らせは本文を塞ぐので、読んだら閉じる。
  */
-async function registerWork(session: E2ESession, workTitle: string): Promise<void> {
+async function registerWork(session: E2ESession, workTitle: string, outsideWorkspace = false): Promise<void> {
   const { page } = session;
   const config = path.join(session.workFolder, ".aiwriter", "config.json");
   // 拡張機能がまだ起きていなければ、知らせが出るまで押し直す（登録はすでにあれば
@@ -587,6 +587,13 @@ async function registerWork(session: E2ESession, workTitle: string): Promise<voi
   // 登録のあと、遅れて消える形の見張り（製品側は2秒まで見張る）を待ってから読み返す
   await page.waitForTimeout(2_500);
   await clearNotifications(page);
+  /*
+    **ワークスペースの外の作品は、版の画面では確かめない**（2026-10-12）。版の画面の「（作品: …）」は
+    この窓で開いているフォルダーの中の作品だけを数える（showVersion.ts の windowLines）ので、外の作品は
+    登録できていても出ない。ノートPCで「登録簿に入っていません」と落ちたのはこのため。外の作品のテストは
+    続けて作品一覧から開くので、登録できていなければそこで名乗って落ちる
+  */
+  if (outsideWorkspace) return;
   const version = await readVersionDialog(page, "登録簿の読み返し");
   /*
     作品フォルダーの名前も同じなので、登録簿から引いた形「（作品: …）」で見る。
