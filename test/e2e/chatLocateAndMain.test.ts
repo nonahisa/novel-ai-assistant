@@ -15,7 +15,7 @@
 import type { Frame, Page } from "playwright-core";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { SEARCH_TERMS_SYSTEM_PROMPT } from "../../src/prompts/searchTerms";
-import { describeFakeRequests, fakeOllamaLaunch, passLocalAiGate, startFakeOllama, type FakeOllama } from "./support/fakeOllama";
+import { describeFakeRequests, fakeOllamaLaunch, passLocalAiGate, startFakeOllama, type FakeOllama, type FakeOllamaRequest } from "./support/fakeOllama";
 import { caretPosition, manuscriptFrames, openEpisode, placeCaretAfter, revealFlashLit } from "./support/manuscriptFrame";
 import { E2E_WORK_TITLE, withVsCode } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
@@ -46,6 +46,11 @@ function chatAnswer(reply: string, locate: { path: string; text: string; label: 
     profileSignals: null,
     writerStyleSignals: null,
   });
+}
+
+/** 場面探しの検索語づくり（P-22）の頼みか。system の1行目か、頼みの書き出しで見分ける */
+function isSearchTermsRequest(request: FakeOllamaRequest): boolean {
+  return request.system.includes(SEARCH_TERMS_SYSTEM_PROMPT.split("\n")[0]) || request.user.startsWith("次の質問に合う場面を");
 }
 
 let fake: FakeOllama;
@@ -221,7 +226,8 @@ test("横の相談パネルで1往復したあと［メインに表示］を押�
       const sent = describeFakeRequests(fake.requests, sentBefore);
       const second = fake.requests
         .slice(sentBefore)
-        .find((request) => request.user.includes(QUESTION_2) && request.system !== SEARCH_TERMS_SYSTEM_PROMPT);
+        // system を等号で比べない（送る途中で前後に足されても外れないよう、頭の一文と頼みの書き出しで見分ける）
+        .find((request) => request.user.includes(QUESTION_2) && !isSearchTermsRequest(request));
       expect(second, `2問目（相談の本体）が偽のAIへ届いていません（${sent}）`).toBeDefined();
       expect(second?.user, `2問目に前のやり取りが添えられていません（会話が続いていない）（${sent}）`).toContain("【これまでのやり取り】");
       expect(second?.user, `2問目の前のやり取りに1問目がありません（${sent}）`).toContain(QUESTION_1);
