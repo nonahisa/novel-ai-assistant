@@ -129,6 +129,25 @@ export interface LaunchOptions {
    * 見張りが張られる前なので知らせは出ない
    */
   prepareWork?: (folders: { workFolder: string; manuscriptFolder: string }) => Promise<void>;
+  /**
+   * **作品をワークスペースの外に置く**（開くのは一時フォルダーの中の空のフォルダー）。
+   *
+   * 既定では書庫そのものを開くので、作品はいつもワークスペースの中にある。作者は
+   * 書庫を開かずに、作品一覧から話を開くこともある（実機確認リスト「ワークスペースの外にある
+   * 作品」）。登録は絶対パスの引数で渡すので、開くフォルダーを替えても同じように通る。
+   * **クイックオープン（`openEpisode`）はワークスペースの外のファイルを出さない**ので、
+   * 話は作品一覧（`sidebar.ts`）から開くこと
+   */
+  outsideWorkspace?: boolean;
+  /**
+   * ワークベンチが組み上がったあと、**作品を登録する前**に呼ぶ。
+   *
+   * 起動の直後にだけ出る知らせ（はじめての案内など）は、登録の途中の
+   * 「知らせを閉じる」（`registerWork`）で消され、`withVsCode` の本体からは見えない。
+   * 一度出たら二度と出ない知らせを見るには、ここで待って読む。
+   * ここで投げると、写真を残して VS Code を閉じ、その例外で落ちる
+   */
+  beforeRegister?: (page: Page) => Promise<void>;
 }
 
 /** package.json の `publisher.name`。globalState はこの名前の行に1つの JSON で入る */
@@ -183,6 +202,9 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
     await writeFile(path.join(manuscriptFolder, episode.name), episode.text, "utf8");
   }
   if (options.prepareWork) await options.prepareWork({ workFolder, manuscriptFolder });
+  // 開くフォルダー。作品をワークスペースの外に置くときは、書庫と関係の無い空のフォルダーを開く
+  const openFolder = options.outsideWorkspace ? path.join(root, "別の作業フォルダー") : library;
+  if (options.outsideWorkspace) await mkdir(openFolder, { recursive: true });
 
   const userData = path.join(root, "user-data");
   await mkdir(path.join(userData, "User"), { recursive: true });
@@ -252,7 +274,7 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
       // **開く場所は先頭に置く。** VS Code の引数の読み方では、知らない名前の旗
       // （下の `--disable-renderer-backgrounding` など）のすぐ後ろの語は、
       // その旗の値として食われる（実際に書庫が開かれず、空の窓になった）
-      library,
+      openFolder,
       `--extensionDevelopmentPath=${repositoryRoot}`,
       `--user-data-dir=${userData}`,
       `--extensions-dir=${path.join(root, "extensions")}`,
@@ -311,6 +333,7 @@ async function launch(episodes: readonly FixtureEpisode[], options: LaunchOption
     await keepOutOfTheWay(app);
     const windowSize = options.windowSize ?? windowSizeFromEnv();
     if (windowSize) await resizeWindows(app, windowSize);
+    if (options.beforeRegister) await options.beforeRegister(page);
     await registerWork(session(), workTitle);
   } catch (error) {
     // 呼び手（withVsCode）の片づけはまだ始まっていないので、ここで写真を残して閉じる
