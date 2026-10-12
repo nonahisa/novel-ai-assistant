@@ -27,6 +27,7 @@ import {
   quickInputWaitContext,
   quickOpen,
   quickPickTitle,
+  readTabState,
 } from "./workbenchDom";
 
 /** 見本の plot.md（現代の港町。主要登場人物は役名だけの3人） */
@@ -170,13 +171,22 @@ export async function startNameSuggest(
 }
 
 /** 人物ごとの候補が並び、［名前の候補を出す］が押せる形に戻るまで待つ */
-export async function waitNameResults(plot: Frame): Promise<void> {
+export async function waitNameResults(plot: Frame, page?: Page): Promise<void> {
   await waitUntil(
     async () => (await plot.locator(".name-person").count()) > 0 && (await plot.locator("[data-suggest-names]").isEnabled()),
     "人物ごとの名前の候補が並ぶ",
     60_000
   ).catch(async (error: unknown) => {
-    throw new Error(`${String(error)}（名前の欄：${JSON.stringify((await plot.locator("#nameResults").innerText().catch(() => "")).replace(/\s+/g, " ").slice(0, 400))}／一文：${JSON.stringify(await plot.locator("#namesNote").innerText().catch(() => ""))}）`);
+    // 選ぶ画面が開いたまま（人物・系統を選ぶ途中で止まった）か、断りの知らせで止まったかを文で分ける
+    const button = await plot
+      .locator("[data-suggest-names]")
+      .isEnabled()
+      .then((enabled) => (enabled ? "押せる" : "押せない"))
+      .catch(() => "見つからない");
+    throw new Error(
+      `${String(error)}（名前の欄：${JSON.stringify((await plot.locator("#nameResults").innerText().catch(() => "")).replace(/\s+/g, " ").slice(0, 400))}／一文：${JSON.stringify(await plot.locator("#namesNote").innerText().catch(() => ""))}` +
+        `／［名前の候補を出す］：${button}）${page ? await quickInputWaitContext(page) : ""}`
+    );
   });
 }
 
@@ -196,7 +206,34 @@ export async function rewritePlotAndSave(session: E2ESession, text: string): Pro
   const { page } = session;
   await quickOpen(page, "plot.md");
   const lines = page.locator(".editor-group-container.active .monaco-editor .view-lines", { hasText: "主要登場人物" }).first();
-  await waitUntil(async () => (await lines.count()) > 0, "plot.md が素のエディターで開く", 15_000);
+  await waitUntil(async () => (await lines.count()) > 0, "plot.md が素のエディターで開く", 15_000).catch(async (error: unknown) => {
+    /*
+      2026-10-12 ノートPC（1.141.0）の plotRenamePending 1件目で、Ctrl+P で開いたのにここで15秒待って落ちた。
+      見当がつかなかったので、次に落ちたときに分けられるよう、列ごとのタブ（どれが前か）・各列に見えている
+      素のエディターの字の頭・列の幅・窓と選ぶ画面と知らせを添える。plot.md が「前の列でない列」に開いた／
+      提案パネルなどの面が plot.md の上へ戻ってきた／素のエディターでない画面で開いた、のどれかを分けたい
+    */
+    const groups = await readTabState(page).catch(() => []);
+    const shown = await page
+      .evaluate(() =>
+        Array.from(document.querySelectorAll(".editor-group-container")).map((group, index) => {
+          const box = (group as HTMLElement).getBoundingClientRect();
+          const text = Array.from(group.querySelectorAll(".monaco-editor .view-lines"))
+            .map((node) => (node as HTMLElement).innerText)
+            .join("⏎")
+            .replace(/\s+/g, " ")
+            .slice(0, 60);
+          return `列${index + 1}${group.classList.contains("active") ? "（前）" : ""} 幅${Math.round(box.width)}：「${text}」`;
+        })
+      )
+      .catch(() => [] as string[]);
+    const tabs = groups.map(
+      (group, index) => `列${index + 1}${group.active ? "（前）" : ""}：${group.tabs.map((tab) => `${tab.name}${tab.active ? "＊" : ""}`).join("・")}`
+    );
+    throw new Error(
+      `${String(error)}（タブ（＊が前）：${JSON.stringify(tabs)}／素のエディターの字：${JSON.stringify(shown)}）${await quickInputWaitContext(page)}`
+    );
+  });
   await lines.click();
   await page.keyboard.press("Control+KeyA");
   await page.keyboard.insertText(text);

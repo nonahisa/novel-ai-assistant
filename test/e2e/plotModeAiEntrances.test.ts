@@ -20,7 +20,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { afterAll, beforeAll, expect, test } from "vitest";
-import { fakeOllamaLaunch, passLocalAiGate, startFakeOllama, type FakeOllama } from "./support/fakeOllama";
+import { describeFakeRequests, fakeOllamaLaunch, passLocalAiGate, startFakeOllama, type FakeOllama } from "./support/fakeOllama";
 import {
   EXISTING_PERSON,
   FIRST_CANDIDATES,
@@ -81,7 +81,9 @@ test("「名前の候補を出す」で考えている間はボタンが押せ�
     [{ name: "第1話_はじまり.txt", text: "一話の本文。\n" }],
     async (session) => {
       const plot = await openPlotMode(session);
-      await startNameSuggest(session, plot, () => fake.requests.some(isPlotNamesRequest));
+      // 偽の AI はファイルの中の件で共有なので、この件で増えた分だけを見る
+      const sentBefore = fake.requests.length;
+      await startNameSuggest(session, plot, () => fake.requests.slice(sentBefore).some(isPlotNamesRequest));
 
       /* ── 偽の AI が答えを止めている間 ── */
       const button = plot.locator("[data-suggest-names]");
@@ -94,7 +96,7 @@ test("「名前の候補を出す」で考えている間はボタンが押せ�
 
       /* ── 答えを解く ── */
       releaseNames?.();
-      await waitNameResults(plot);
+      await waitNameResults(plot, session.page);
       expect(await button.isEnabled(), "答えが返ったのに、ボタンが押せないままです").toBe(true);
 
       /* ── 主人公の欄：「選ばない」が先頭で選ばれており、候補が名前・読み・一言で並ぶ ── */
@@ -148,6 +150,14 @@ test("プロットモードの「プロット逆算」「対話式プロット�
     [{ name: "第1話_はじまり.txt", text: "　朝の港で、少年は船を見上げた。\n" }],
     async (session) => {
       const { page } = session;
+      /*
+        **偽の AI はこのファイルの件で共有している**（`beforeAll` で1つ立てる）。前の件（名前の候補）の頼みが
+        `fake.requests` に残っているので、この件で増えた分だけを数える。2026-10-12 ノートPC で
+        「確認の前に AI が呼ばれました」が 1 で落ちたのは、前の件の名前の候補の1件を数えていた形
+        （ファイルを通して走らせると前の件は必ず1件送る。単独の件だけで走らせれば 0 になる）
+      */
+      const sentBefore = fake.requests.length;
+      const sentHere = () => fake.requests.length - sentBefore;
       await page.keyboard.press(REGISTER_OTHER_PRESS);
       await waitUntil(async () => (await page.locator(".notification-toast", { hasText: "登録" }).count()) > 0, "作品Bを登録した知らせが出る", 30_000);
       await clearNotifications(page);
@@ -176,7 +186,7 @@ test("プロットモードの「プロット逆算」「対話式プロット�
       expect(titles.length, `確認の前に別の選ぶ画面が出ました（作品を訊かれた形）：${JSON.stringify(titles)}`).toBe(1);
       expect(confirm, `確認がプロットモードの作品のものではありません：${confirm}`).toContain(E2E_WORK_TITLE);
       expect(confirm, `確認が作品Bのものになっています：${confirm}`).not.toContain(OTHER_TITLE);
-      expect(fake.requests.length, "確認の前に AI が呼ばれました").toBe(0);
+      expect(sentHere(), `確認の前に AI が呼ばれました（${describeFakeRequests(fake.requests, sentBefore)}）`).toBe(0);
       // 取りやめる（AI は呼ばない）
       await page.keyboard.press("Escape");
       await waitUntil(async () => (await quickPickTitle(page)) === undefined, "確認を Esc で閉じる", 10_000);
@@ -190,7 +200,7 @@ test("プロットモードの「プロット逆算」「対話式プロット�
       });
       await holdsFor(async () => (await quickPickTitle(page)) === undefined, "対話式プロット作成で、作品を選ぶ画面が出ない", 2_000);
       expect(await sideChatLog(page), "問答が作品Bで始まっています").not.toContain(`「${OTHER_TITLE}」のプロット`);
-      expect(fake.requests.length, "問答の始めに AI が呼ばれました（型を選ぶまではコードが答える）").toBe(0);
+      expect(sentHere(), `問答の始めに AI が呼ばれました（型を選ぶまではコードが答える）（${describeFakeRequests(fake.requests, sentBefore)}）`).toBe(0);
     },
     plotLaunch({
       keybindings: [registerOther],

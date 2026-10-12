@@ -187,3 +187,19 @@ export function fakeOllamaLaunch(fake: FakeOllama, extra: LaunchOptions = {}): L
     },
   };
 }
+
+/**
+ * 受けた頼みの並び（落ちた文に添える用）。順番・構造化出力か・system と user の頭（各80字、改行は ⏎）。
+ *
+ * 「AI が呼ばれた／呼ばれない」「何が送られた」で落ちたとき、件数だけでは、同じファイルの前の件の頼みが
+ * 残っていたのか、製品が本当に呼んだのか、場面探しの検索語づくり（P-22）が先に走ったのかを分けられない
+ * （2026-10-12 ノートPC の plotModeAiEntrances・chatLocateAndMain）。`from` より前は「前の件の分」として数えない
+ */
+export function describeFakeRequests(requests: readonly FakeOllamaRequest[], from = 0): string {
+  const head = (text: string): string => text.replace(/\r?\n/g, "⏎").slice(0, 80);
+  const lines = requests.map(
+    (request, index) =>
+      `#${index + 1}${index < from ? "（前の件）" : ""}${request.structured ? "（構造化）" : ""} system「${head(request.system)}」 user「${head(request.user)}」`
+  );
+  return `偽のAIへの頼み：この件で${requests.length - from}件・全体で${requests.length}件：${lines.length > 0 ? lines.join(" ／ ") : "なし"}`;
+}

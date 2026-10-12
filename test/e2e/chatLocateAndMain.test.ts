@@ -14,7 +14,8 @@
  */
 import type { Frame, Page } from "playwright-core";
 import { afterAll, beforeAll, expect, test } from "vitest";
-import { fakeOllamaLaunch, passLocalAiGate, startFakeOllama, type FakeOllama } from "./support/fakeOllama";
+import { SEARCH_TERMS_SYSTEM_PROMPT } from "../../src/prompts/searchTerms";
+import { describeFakeRequests, fakeOllamaLaunch, passLocalAiGate, startFakeOllama, type FakeOllama } from "./support/fakeOllama";
 import { caretPosition, manuscriptFrames, openEpisode, placeCaretAfter, revealFlashLit } from "./support/manuscriptFrame";
 import { E2E_WORK_TITLE, withVsCode } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
@@ -109,7 +110,7 @@ async function ask(page: Page, frame: Frame, question: string, answer: string, w
     `${where}に答えが出る`,
     60_000
   ).catch(async (error: unknown) => {
-    throw new Error(`${String(error)}（${where}の会話：${JSON.stringify((await logText(frame)).slice(-400))}／偽のAIへの呼び出し：${fake.requests.length}回）`);
+    throw new Error(`${String(error)}（${where}の会話：${JSON.stringify((await logText(frame)).slice(-400))}／${describeFakeRequests(fake.requests)}）`);
   });
 }
 
@@ -210,10 +211,20 @@ test("横の相談パネルで1往復したあと［メインに表示］を押�
       /* ── 大きい画面で続けて聞く → 前のやり取りを添えて送られる ── */
       const sentBefore = fake.requests.length;
       await ask(page, large, QUESTION_2, ANSWER_2, "大きい相談画面");
-      const second = fake.requests.slice(sentBefore).find((request) => request.user.includes(QUESTION_2));
-      expect(second, "2問目が偽のAIへ届いていません").toBeDefined();
-      expect(second?.user, "2問目に前のやり取りが添えられていません（会話が続いていない）").toContain("【これまでのやり取り】");
-      expect(second?.user).toContain(QUESTION_1);
+      /*
+        **場面探しの検索語づくり（P-22、`prompts/searchTerms.ts`）の頼みは除く。** 相談は本体の前に、
+        質問を検索語へ直す頼みを1回送る（`workChatPanel.ts` の `expandSearchTerms`）。その頼みにも質問の文が
+        入るので、「質問を含む最初の1件」を取ると検索語づくりのほうを拾う。2026-10-12 ノートPC で
+        「【これまでのやり取り】が無い」と落ちたとき、拾っていたのは「次の質問に合う場面を、小説の本文から
+        探します。」で始まる検索語づくりの頼みだった（相談の本体は、そのあとに送られている）
+      */
+      const sent = describeFakeRequests(fake.requests, sentBefore);
+      const second = fake.requests
+        .slice(sentBefore)
+        .find((request) => request.user.includes(QUESTION_2) && request.system !== SEARCH_TERMS_SYSTEM_PROMPT);
+      expect(second, `2問目（相談の本体）が偽のAIへ届いていません（${sent}）`).toBeDefined();
+      expect(second?.user, `2問目に前のやり取りが添えられていません（会話が続いていない）（${sent}）`).toContain("【これまでのやり取り】");
+      expect(second?.user, `2問目の前のやり取りに1問目がありません（${sent}）`).toContain(QUESTION_1);
       const after = await logText(large);
       expect(after.indexOf(QUESTION_1), `大きい画面で、前の問いが新しい答えより上にありません：${after.slice(-400)}`).toBeLessThan(after.indexOf(ANSWER_2));
     },

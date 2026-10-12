@@ -510,6 +510,22 @@ export async function notificationTexts(page: Page): Promise<string[]> {
   return page.locator(".notification-toast").allInnerTexts().catch(() => [] as string[]);
 }
 
+/**
+ * 下の帯（ステータスバー）に出ている字。項目ごとに並べる。
+ *
+ * **その場限りの完了（`views/notify.ts` の `notifyDone`）は右下の知らせでなく、ここへ数秒だけ出る**
+ * （作者の裁定 2026-09-06「完了はステータスバー」）。知らせの記録ファイル（`noticeRecord.ts`）にも
+ * 残らないので、完了の文を待つ件はここを読む。2026-10-12 ノートPC の editorModeReviewLock で、
+ * 「…のロックを外しました」を右下の知らせで15秒待って落ちた（製品は帯へ出していた）
+ */
+export async function statusBarTexts(page: Page): Promise<string[]> {
+  return page
+    .locator(".part.statusbar .statusbar-item")
+    .allInnerTexts()
+    .then((texts) => texts.map((text) => text.replace(/\s+/g, " ").trim()).filter((text) => text !== ""))
+    .catch(() => [] as string[]);
+}
+
 /** 右クリックの品書きが開いたままか */
 export async function contextMenuOpen(page: Page): Promise<boolean> {
   return (await page.locator(".context-view .monaco-menu").count().catch(() => 0)) > 0;

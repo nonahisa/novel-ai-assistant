@@ -121,11 +121,14 @@ async function insertBeforeSecond(page: Page, manuscriptFolder: string): Promise
   );
   await pressDialogButton(page, "付け替える");
 
-  // 差し込んだ話のファイルができる（名前は「第2話_割り込み」の形。ほかの話は第3話・第4話へずれる）
+  // 差し込んだ話のファイルができる（名前は「第2話_割り込み」の形。ほかの話は第3話・第4話へずれる）。
+  // **書き込み途中の一時ファイルは拾わない**——製品は一時ファイル（`第2話_割り込み.txt.novelai-<pid>-…tmp`）へ
+  // 書いてから正規の名前へ置くので、その一瞬に見ると一時ファイルの名前を差し込んだ話と取り違える
+  // （2026-10-12 ノートPC で「探した名前：第2話_割り込み.txt.novelai-32148-…tmp」）。本文の拡張子で終わるものだけ
   let inserted = "";
   await waitUntil(
     async () => {
-      inserted = (await readdir(manuscriptFolder)).find((name) => name.includes("割り込み")) ?? "";
+      inserted = (await readdir(manuscriptFolder)).find((name) => name.includes("割り込み") && /\.(txt|md)$/i.test(name)) ?? "";
       return inserted !== "";
     },
     "差し込んだ話のファイルができる",

@@ -53,6 +53,7 @@ import {
   pressWorkbenchKey,
   quickInputWaitContext,
   quickOpen,
+  statusBarTexts,
   textEditorVisibleText,
 } from "./support/workbenchDom";
 
@@ -211,7 +212,21 @@ test("編集部が押さえているファイルを作者が［適用］で直�
       const events = await lockEvents(workFolder);
       expect(events[1].kind).toBe("release");
       expect(events[1].holderKind, "作者が外したのに、作者の名で記録されていません").toBe("author");
-      await waitUntil(async () => (await notificationTexts(page)).some((text) => text.includes("のロックを外しました")), "「…のロックを外しました」の知らせが出る", 15_000);
+      /*
+        **外した知らせは下の帯（ステータスバー）に出る**（`features/reviewProposals.ts` の `toggleReviewLock` は
+        `notifyDone`＝その場限りの完了。押さえたときの「…を押さえました」は件の説明を伴うので右下の知らせ）。
+        2026-10-12 ノートPC では右下だけを15秒待って落ちた。帯の字は6秒で消えるので、台帳を待ったあとすぐ見る。
+        念のため右下の知らせも見る（行き先が変わっても、この件の見たいこと＝外したと伝わることは同じ）
+      */
+      await waitUntil(
+        async () => [...(await statusBarTexts(page)), ...(await notificationTexts(page))].some((text) => text.includes("のロックを外しました")),
+        "「…のロックを外しました」が下の帯（または右下の知らせ）に出る",
+        15_000
+      ).catch(async (error: unknown) => {
+        throw new Error(
+          `${String(error)}（下の帯：${JSON.stringify(await statusBarTexts(page))}／右下の知らせ：${JSON.stringify(await notificationTexts(page))}／いまの窓：${JSON.stringify(await dialogText(page))}／台帳：${JSON.stringify(await lockEvents(workFolder))}）`
+        );
+      });
 
       /* ── 外したあとの［適用］は、窓を出さずに通る ── */
       await pressWorkbenchKey(page, OPEN_PROPOSALS_PRESS);

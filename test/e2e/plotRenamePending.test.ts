@@ -75,8 +75,15 @@ async function describePending(session: E2ESession): Promise<string> {
 /** プロットモードで主人公に「相馬 誠」を選んで［入れる］まで。直す案が承認待ちに置かれたところで戻る */
 async function renameProtagonist(session: E2ESession): Promise<void> {
   const plot = await openPlotMode(session);
-  await startNameSuggest(session, plot, () => fake.requests.some(isPlotNamesRequest));
-  await waitNameResults(plot);
+  /*
+    **この件で増えた頼みだけを見る。** 偽の AI はファイルの中の件で共有なので（`beforeAll`）、前の件の名前の
+    候補の頼みが `fake.requests` に残っている。素の `fake.requests.some(...)` では2件目は押した直後に
+    「届いた」と見なして戻り、人物を選ぶ画面を通さないまま候補を60秒待って落ちた（2026-10-12 ノートPC、
+    名前の欄も一文も空）
+  */
+  const sentBefore = fake.requests.length;
+  await startNameSuggest(session, plot, () => fake.requests.slice(sentBefore).some(isPlotNamesRequest));
+  await waitNameResults(plot, session.page);
   // 主人公（name-1）の候補の1つ目＝相馬 誠（0番目は「選ばない」）
   const pick = plot.locator('input[name="name-1"]').nth(1);
   expect(await pick.evaluate((input) => (input.parentElement?.textContent ?? "").trim()), "主人公の候補の1つ目が相馬 誠ではありません").toContain(RENAMED);
