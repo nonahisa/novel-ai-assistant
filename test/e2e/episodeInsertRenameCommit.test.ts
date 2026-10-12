@@ -19,7 +19,7 @@
 import { expect, test } from "vitest";
 import { git, initRepoWithFirstCommit } from "./support/gitFixture";
 import { answerInput, waitForQuickInput } from "./support/quickInput";
-import { SIDEBAR_LAUNCH, treeContextMenuExpecting, treeRowLabels, waitTreeSettled } from "./support/sidebar";
+import { SIDEBAR_LAUNCH, treeContextMenu, treeRowLabels, waitTreeSettled } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 import { dialogText, pressDialogButton, pressWorkbenchKey, quickPickTitle } from "./support/workbenchDom";
@@ -50,8 +50,7 @@ test("話を挿入して「コミットする」を押すと、失敗の知ら�
       // 第2話の前に挿入する
       // 一覧が裏の走査・記録待ちの数で描き直している最中に押さない（`waitTreeSettled` の説明）
       await waitTreeSettled(page);
-      // 押したのにコマンドが走らなかった回だけ押し直す（`treeContextMenuExpecting` の説明）
-      await treeContextMenuExpecting(page, "第2話", "この話の前に挿入", "この話の前に挿入");
+      await treeContextMenu(page, "第2話", "この話の前に挿入");
       /*
         ノートPC（1.141.0、2026-10-10）でだけ、ここで15秒待って落ちた（こちらの機械では通常の窓でも
         1024x640 でも通る。1.138.0 のノートPCでは通った回もある）。製品が断りの知らせを出して

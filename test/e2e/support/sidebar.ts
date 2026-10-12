@@ -15,15 +15,7 @@
  */
 import type { Locator, Page } from "playwright-core";
 import { waitUntil } from "./wait";
-import {
-  dialogText,
-  dismissWorkbenchHover,
-  notificationTexts,
-  pressWorkbenchKey,
-  quickPickTitle,
-  readQuickInputWatch,
-  startQuickInputWatch,
-} from "./workbenchDom";
+import { dismissWorkbenchHover, pressWorkbenchKey, startQuickInputWatch } from "./workbenchDom";
 
 /**
  * 左の列を出すキー（使い捨ての keybindings.json に書く）。F1〜F12 は埋まったので、
@@ -151,41 +143,6 @@ export async function contextMenuLabels(page: Page): Promise<string[]> {
       .map((item) => (item.textContent ?? "").trim())
       .filter((text) => text !== "")
   );
-}
-
-/**
- * 行を右クリックして品書きの `item` を押し、題に `title` を含む画面が出始めるのを5秒だけ見る。
- * 出るまで待つのは呼ぶ側（`waitForQuickInput`）。
- *
- * **押したのにコマンドが走らなかった回だけ、1回押し直す。** ノートPC（1.141.0、2026-10-12）の
- * `workTreeChapterPlot` で5回中4回、品書きは閉じたのに入力欄が一度も開かず、焦点は一覧へ戻り、
- * 製品の入口の守り（行を受け取れなかったときの知らせ、`requireTreeNode`）も出なかった——
- * コマンドが呼ばれていない。押し直すのは、知らせも確認の窓も選ぶ画面も出ていないときだけ
- * （製品が何か言ったなら、それを落ちた文で見せる）。押し直したことは控えに残す
- */
-export async function treeContextMenuExpecting(
-  page: Page,
-  head: string,
-  item: string,
-  title: string
-): Promise<void> {
-  await treeContextMenu(page, head, item);
-  const opened = async () => ((await quickPickTitle(page)) ?? "").includes(title);
-  const shown = await waitUntil(opened, `「${title}」の画面が出る`, 5_000)
-    .then(() => true)
-    .catch(() => false);
-  if (shown) return;
-  const silent =
-    (await notificationTexts(page)).length === 0 &&
-    (await dialogText(page).catch(() => undefined)) === undefined &&
-    (await quickPickTitle(page)) === undefined;
-  if (silent) {
-    console.warn(
-      `[E2E] 品書きの「${item}」を押しても画面が出ず、知らせも無いので押し直します（押してからの移り変わり：${(await readQuickInputWatch(page)) ?? "なし"}）`
-    );
-    await waitTreeSettled(page);
-    await treeContextMenu(page, head, item);
-  }
 }
 
 /** 行を右クリックし、品書きの `item` を押す */
