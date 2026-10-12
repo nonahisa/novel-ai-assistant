@@ -27,6 +27,12 @@ export interface SampleFinding {
    */
   category?: FindingCategory;
   label?: string;
+  /**
+   * 原文が本文に何度も出るとき、**何回目の出現を指すか**（0 始まり。省けば最初）。
+   * 製品は行番号と前後の字（`hintLine`・`before`・`after`）でどれを指すかを決めるので、
+   * 台詞の中にも同じ字がある本文で、地の文の側を指す見本を作るのに使う
+   */
+  occurrence?: number;
 }
 
 /** 見本の指摘の番号（置き場の判断の行が指す番号） */
@@ -43,8 +49,11 @@ export function sampleFindingId(sample: SampleFinding): string {
 
 /** 見本の指摘を、製品が読む形で置く */
 export async function writeSampleFinding(workFolder: string, sample: SampleFinding): Promise<void> {
-  const at = sample.text.indexOf(sample.original);
-  if (at < 0) throw new Error("見本の指摘の原文が本文にありません");
+  let at = sample.text.indexOf(sample.original);
+  for (let skip = sample.occurrence ?? 0; skip > 0 && at >= 0; skip--) {
+    at = sample.text.indexOf(sample.original, at + sample.original.length);
+  }
+  if (at < 0) throw new Error("見本の指摘の原文が本文にありません（指定の回数だけ出てきません）");
   const line = JSON.stringify({
     kind: "finding",
     id: sampleFindingId(sample),
