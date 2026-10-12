@@ -51,6 +51,12 @@ export interface FakeOllama {
   endpoint: string;
   /** 受けた `/api/chat` の中身（古い順）。何が送られたかを確かめるのに使う */
   requests: FakeOllamaRequest[];
+  /**
+   * 受けた `/api/embed` の入力（1回の呼び出しごとに、送られた文の並び。古い順）。
+   * `/api/chat` の `requests` とは別に数える——索引づくりの件は埋め込みだけを呼ぶので、
+   * 同じ並びに混ぜると「AI が呼ばれた」の数え方が件ごとに崩れる
+   */
+  embedRequests: string[][];
   close(): Promise<void>;
 }
 
@@ -78,9 +84,17 @@ export async function startFakeOllama(
      * 切り替える場面（20B 以上）を見るときに "25.2B" などを渡す
      */
     parameterSize?: string;
+    /**
+     * 埋め込み（`/api/embed`）に答える**前に**呼ぶ門。約束を返せば、解けるまで答えを止める。
+     *
+     * 索引づくりの「途中で中止」（実機確認リスト 64）を作るのに使う：止めている間に
+     * ステータスバーの［中止］を押し、押したあとで門を開ける。一瞬で返すと、中止を押す隙が無い
+     */
+    beforeEmbed?: (inputs: readonly string[]) => void | Promise<void>;
   } = {}
 ): Promise<FakeOllama> {
   const requests: FakeOllamaRequest[] = [];
+  const embedRequests: string[][] = [];
   const server: Server = createServer((request, response) => {
     void (async () => {
       const url = request.url ?? "/";
@@ -104,6 +118,8 @@ export async function startFakeOllama(
         // 同じ語の出る文どうしは近く、出ない文とは遠い。本物の埋め込みの出来は見えない
         const body = JSON.parse(await readBody(request)) as { input?: string[] | string };
         const inputs = Array.isArray(body.input) ? body.input : [String(body.input ?? "")];
+        embedRequests.push(inputs);
+        await options.beforeEmbed?.(inputs);
         sendJson({ model: FAKE_OLLAMA_MODEL, embeddings: inputs.map((text) => fakeEmbedding(text)) });
         return;
       }
@@ -150,6 +166,7 @@ export async function startFakeOllama(
   return {
     endpoint: `http://127.0.0.1:${port}`,
     requests,
+    embedRequests,
     close: () =>
       new Promise<void>((resolve) => {
         server.closeAllConnections();
