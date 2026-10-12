@@ -175,6 +175,7 @@ const KEYS: KeyRow[] = [
   { key: "novelai.siteLink.browserGuideShown", literalIn: "features/openSiteLink.ts", writtenIn: "features/openSiteLink.ts", write: /\.update\(SITE_LINK_GUIDE_SHOWN_KEY\b/g, guarded: true },
   { key: "novelai.proofreadingSuite.selection", literalIn: "core/proofreadingSuite.ts", writtenIn: "features/proofreadingSuite.ts", write: /\.update\(\s*PROOFREADING_SUITE_SELECTION_KEY\b/g, guarded: true },
   { key: "novelai.imeDictionary.excluded.", literalIn: "core/imeDictionary.ts", writtenIn: "features/exportImeDictionary.ts", write: /\.update\(imeExcludedKey\(work\.id\)/g, guarded: true },
+  { key: "novelai.photoTranscribeRequest.", literalIn: "core/photoTranscribeRequest.ts", writtenIn: "core/photoTranscribeRequest.ts", write: /verifiedState\(this\.state\)\.update\(\s*photoRequestKey\(workId\)/g, guarded: true },
   { key: "novelai.pendingRename.", literalIn: "features/nameRename.ts", writtenIn: "features/nameRename.ts", write: /\.update\(pendingRenameKey\(workId\)/g, guarded: true },
   {
     key: "novelai.workList.snapshot",
@@ -214,6 +215,7 @@ describe("鍵ごとに書く口は1か所", () => {
       advicePolicyKey: [],
       imeExcludedKey: ["features/exportImeDictionary.ts"],
       pendingRenameKey: ["features/nameRename.ts"],
+      photoRequestKey: ["core/photoTranscribeRequest.ts"],
       supportKey: ["ai/geminiProvider.ts", "ai/claudeProvider.ts"],
     };
     for (const [builder, owners] of Object.entries(builders)) {

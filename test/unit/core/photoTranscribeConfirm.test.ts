@@ -59,3 +59,30 @@ describe("写真を送る前の確かめ", () => {
     expect(confirm.message).toContain("この写真 5枚（写真 3枚を切り分けた 5ページ）");
   });
 });
+
+describe("作者からの頼みも、送る前に見せる（6.117.12）", () => {
+  const base = {
+    providerName: "Claude（クラウド・有料）",
+    model: "claude-opus-5-5",
+    pages: 1,
+    photos: 1,
+    isPaid: true,
+  };
+
+  test("クラウドへ送るとき、頼みの文を本文の末尾に出す（改行もそのまま）", () => {
+    const confirm = describePhotoSend({ ...base, providerId: "claude", request: "旧字体はそのまま\nルビは（）に" });
+    expect(confirm.detail).toBe(
+      "写真は外のサービスに渡ります。\n呼び出すたびに課金されます。\n\nAIへの頼み（一緒に送ります）：\n旧字体はそのまま\nルビは（）に"
+    );
+  });
+
+  test("手元のAIでも頼みを出す", () => {
+    const confirm = describePhotoSend({ ...base, providerId: "ollama", isPaid: false, request: "旧字体はそのまま" });
+    expect(confirm.detail).toBe("写真はこのパソコンの外へは出ません。\n\nAIへの頼み（一緒に送ります）：\n旧字体はそのまま");
+  });
+
+  test("頼みが空なら何も足さない", () => {
+    const confirm = describePhotoSend({ ...base, providerId: "ollama", isPaid: false, request: "  " });
+    expect(confirm.detail).toBe("写真はこのパソコンの外へは出ません。");
+  });
+});
