@@ -62,10 +62,14 @@ async function readBody(request: IncomingMessage): Promise<string> {
 
 /**
  * 偽の Ollama を立てる。`respond` が `/api/chat` の答え（本文）を返す。
- * 構造化出力を求められた呼び出し（`structured`）には JSON の文字列を返すこと
+ * 構造化出力を求められた呼び出し（`structured`）には JSON の文字列を返すこと。
+ *
+ * **答えを約束（Promise）で返してもよい。** 答えが返るまでの画面（考えている間に
+ * ボタンが押せなくなるか、など）を見る件は、テストが解くまで答えを止めておける
+ * （一瞬で返すと、その間の画面を見る隙が無い）
  */
 export async function startFakeOllama(
-  respond: (request: FakeOllamaRequest) => string,
+  respond: (request: FakeOllamaRequest) => string | Promise<string>,
   /** 一覧に足す別のモデル名（モデルを選び替える場面を見るとき）。答え方は同じ */
   options: {
     extraModels?: readonly string[];
@@ -122,7 +126,7 @@ export async function startFakeOllama(
         const user = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
         const parsed: FakeOllamaRequest = { system, user, structured: body.format !== undefined };
         requests.push(parsed);
-        const text = respond(parsed);
+        const text = await respond(parsed);
         const tail = { model: FAKE_OLLAMA_MODEL, done: true, done_reason: "stop", prompt_eval_count: 10, eval_count: 10 };
         if (body.stream === true) {
           response.writeHead(200, { "content-type": "application/x-ndjson" });
