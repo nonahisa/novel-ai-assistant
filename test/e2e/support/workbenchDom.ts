@@ -549,10 +549,28 @@ export async function quickInputWaitContext(page: Page): Promise<string> {
 export async function startQuickInputWatch(page: Page): Promise<void> {
   await page
     .evaluate(() => {
-      type Watch = { timer: number; log: string[]; last: string; start: number };
+      type Watch = { timer: number; log: string[]; last: string; start: number; redraws: number; observer?: MutationObserver };
       const host = window as unknown as { __novelaiQuickInputWatch?: Watch };
-      if (host.__novelaiQuickInputWatch) window.clearInterval(host.__novelaiQuickInputWatch.timer);
-      const watch: Watch = { timer: 0, log: [], last: "", start: Date.now() };
+      if (host.__novelaiQuickInputWatch) {
+        window.clearInterval(host.__novelaiQuickInputWatch.timer);
+        host.__novelaiQuickInputWatch.observer?.disconnect();
+      }
+      const watch: Watch = { timer: 0, log: [], last: "", start: Date.now(), redraws: 0 };
+      /*
+        左の列の一覧（作品一覧など）の行の入れ替えを数える。品書きが開いている間に一覧が
+        描き直されると、押した項目が空振りする疑いがある（ノートPCの workTreeChapterPlot で、
+        押したのに入力欄が一度も開かず、焦点が一覧へ戻った。2026-10-12）
+      */
+      watch.observer = new MutationObserver((records) => {
+        for (const record of records) {
+          const target = record.target as Element;
+          if (target.closest?.(".sidebar .monaco-list-rows")) {
+            watch.redraws += 1;
+            return;
+          }
+        }
+      });
+      watch.observer.observe(document.body, { childList: true, subtree: true });
       const snapshot = (): string => {
         const widget = document.querySelector(".quick-input-widget") as HTMLElement | null;
         const open = !!widget && widget.style.display !== "none" && widget.offsetParent !== null;
@@ -561,7 +579,7 @@ export async function startQuickInputWatch(page: Page): Promise<void> {
         const focus = active
           ? `${active.tagName.toLowerCase()}${active.className ? "." + String(active.className).split(" ").slice(0, 2).join(".") : ""}`
           : "なし";
-        return `入力欄=${open ? `開「${title}」` : "閉"} 焦点=${focus}`;
+        return `入力欄=${open ? `開「${title}」` : "閉"} 焦点=${focus} 一覧の描き直し=${watch.redraws}`;
       };
       const tick = (): void => {
         const now = snapshot();
@@ -577,7 +595,7 @@ export async function startQuickInputWatch(page: Page): Promise<void> {
 }
 
 /** `startQuickInputWatch` の控え。始めていなければ undefined */
-async function readQuickInputWatch(page: Page): Promise<string | undefined> {
+export async function readQuickInputWatch(page: Page): Promise<string | undefined> {
   return page
     .evaluate(() => {
       const host = window as unknown as { __novelaiQuickInputWatch?: { log: string[] } };
