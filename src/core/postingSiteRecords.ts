@@ -261,7 +261,7 @@ export function buildPostingSiteRecords(
       site: info.id,
       label: postingSiteInfo(info.id).label,
       workId: profile?.workId ?? null,
-      workUrl: profile?.workUrl ?? null,
+      workUrl: profile?.workUrl ?? workPageUrlFromWorkId(info.id, profile?.workId) ?? null,
       genre: profile?.genre ?? null,
       note: profile?.note ?? null,
       registered,
@@ -658,6 +658,29 @@ export function narouAnalysisUrl(
  * @param workId 台帳の作品ID（6.68.5）。**第一候補**
  * @param workUrl 作品ページのURL。作品IDが無い・形が違うときに拾う
  */
+/**
+ * 台帳に作品ページのURLが無いとき、作品IDから組み立てる（2026-10-12）。
+ *
+ * 読者の反応の知らせから作品IDだけを登録した作品で、「作品ページを開く」が出なかったため。
+ * **形を確かめたサイトだけ**：なろう（`ncode.syosetu.com/{Nコード}/`）とカクヨム
+ * （`kakuyomu.jp/works/{数字}`。`postingSiteUrls.ts` の `deriveSiteProfile` と同じ形）。
+ * アルファポリスは作者IDも要るので作らない。推測のURLを開かせない
+ */
+export function workPageUrlFromWorkId(
+  site: PostingSiteId,
+  workId?: string | null
+): string | undefined {
+  const id = (workId ?? "").trim();
+  if (site === "narou") {
+    const ncode = narouNcode(id);
+    return ncode ? `https://ncode.syosetu.com/${ncode}/` : undefined;
+  }
+  if (site === "kakuyomu") {
+    return /^\d+$/.test(id) ? `https://kakuyomu.jp/works/${id}` : undefined;
+  }
+  return undefined;
+}
+
 export function narouNcode(
   workId?: string | null,
   workUrl?: string | null
