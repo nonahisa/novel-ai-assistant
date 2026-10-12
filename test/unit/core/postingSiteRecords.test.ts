@@ -807,3 +807,37 @@ describe("執筆量パネルの側", () => {
     expect(html).toContain("読者の反応");
   });
 });
+
+/*
+  2026-10-12 作者の実機：読者の反応から作品IDだけを登録したカクヨムの行に「作品ページを開く」が
+  出なかった（台帳に作品ページのURLが無いため）。形を確かめたサイトだけ、作品IDから組み立てる
+*/
+describe("作品ページのURLが無いときは、作品IDから組み立てる", () => {
+  test("カクヨムは作品IDから作品ページのURLを作る", () => {
+    const ledger = withSiteProfile(emptyPostingLedger(), "kakuyomu", { workId: "1177354054934574437" });
+    const record = buildPostingSiteRecords(ledger).find((r) => r.site === "kakuyomu");
+    expect(record?.workUrl).toBe("https://kakuyomu.jp/works/1177354054934574437");
+  });
+
+  test("なろうは Nコードから作品ページのURLを作る", () => {
+    const ledger = withSiteProfile(emptyPostingLedger(), "narou", { workId: "n2600go" });
+    const record = buildPostingSiteRecords(ledger).find((r) => r.site === "narou");
+    expect(record?.workUrl).toBe("https://ncode.syosetu.com/n2600go/");
+  });
+
+  test("台帳に作品ページのURLがあれば、それを使う", () => {
+    const ledger = withSiteProfile(emptyPostingLedger(), "kakuyomu", {
+      workId: "1177354054934574437",
+      workUrl: "https://kakuyomu.jp/works/1177354054934574437?x=1",
+    });
+    const record = buildPostingSiteRecords(ledger).find((r) => r.site === "kakuyomu");
+    expect(record?.workUrl).toBe("https://kakuyomu.jp/works/1177354054934574437?x=1");
+  });
+
+  test("形を確かめていないサイトや、数字でない作品IDからは作らない", () => {
+    const ap = withSiteProfile(emptyPostingLedger(), "alphapolis", { workId: "637622366" });
+    expect(buildPostingSiteRecords(ap).find((r) => r.site === "alphapolis")?.workUrl ?? null).toBeNull();
+    const bad = withSiteProfile(emptyPostingLedger(), "kakuyomu", { workId: "abc" });
+    expect(buildPostingSiteRecords(bad).find((r) => r.site === "kakuyomu")?.workUrl ?? null).toBeNull();
+  });
+});
