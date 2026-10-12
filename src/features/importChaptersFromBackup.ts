@@ -384,7 +384,7 @@ async function chooseChapters(
   plan: ChapterImportPlan,
   sourceName: string
 ): Promise<readonly Chapter[] | undefined> {
-  const detail = [`読んだ元：${sourceName}`, "", ...describeChapterImportPlan(plan)].join("\n");
+  const detail = [`読んだ元：${sourceName}`, "", ...describeChapterImportPlan(plan, sourceName)].join("\n");
   switch (plan.kind) {
     case "none":
       void vscode.window.showInformationMessage(
@@ -393,7 +393,7 @@ async function chooseChapters(
       return undefined;
     case "same":
     case "unreadable":
-      void vscode.window.showInformationMessage(describeChapterImportPlan(plan).join(""));
+      void vscode.window.showInformationMessage(describeChapterImportPlan(plan, sourceName).join(""));
       return undefined;
     case "mismatch":
     case "insideCollected":
