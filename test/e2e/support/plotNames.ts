@@ -16,7 +16,7 @@ import { passLocalAiGate, type FakeOllamaRequest } from "./fakeOllama";
 import { runCommand } from "./quickInput";
 import { proposalPanelFrame } from "./sampleFinding";
 import { defaultCharactersFolder, writeCharactersTo } from "./settingsFixture";
-import { expandTreeRow, showSidebar, treeContextMenu } from "./sidebar";
+import { expandTreeRow, showSidebar, treeContextMenu, treeRowLabels, waitTreeSettled } from "./sidebar";
 import { E2E_WORK_TITLE, type E2ESession } from "./vscodeApp";
 import { waitUntil } from "./wait";
 import {
@@ -26,6 +26,7 @@ import {
   pickQuickPickRow,
   quickInputWaitContext,
   quickOpen,
+  quickPickRows,
   quickPickTitle,
   readTabState,
 } from "./workbenchDom";
@@ -118,9 +119,24 @@ export async function openPlotMode(session: E2ESession, workTitle = E2E_WORK_TIT
   const { page } = session;
   await showSidebar(page, workTitle);
   await expandTreeRow(page, workTitle);
+  /*
+    **一覧が描き直している最中に右クリックしない**（`waitTreeSettled` の説明）。作品を2つ登録する件
+    （plotModeAiEntrances の2件目）は、登録した直後に裏の走査で一覧が描き直され、ノートPCで2回に1回
+    「プロットモードのパネルが開く」を30秒待って落ちた（2026-10-12）。品書きが指していた行が消えると、
+    命令に作品が渡らず黙って終わるか、作品を選ぶ画面が出る形になる
+  */
+  await waitTreeSettled(page);
   await treeContextMenu(page, workTitle, "プロットモード");
   let panel: Frame | undefined;
-  await waitUntil(async () => (panel = await plotPanelFrame(page)) !== undefined, "プロットモードのパネルが開く", 30_000);
+  await waitUntil(async () => (panel = await plotPanelFrame(page)) !== undefined, "プロットモードのパネルが開く", 30_000).catch(async (error: unknown) => {
+    // 作品を選ぶ画面が出たのか・黙って終わったのか・別の列に何か開いたのかを、離れた機械でも読めるように添える
+    const rows = await quickPickRows(page).catch(() => []);
+    throw new Error(
+      `${String(error)}（選ぶ画面の行：${JSON.stringify(rows.map((row) => `${row.label}${row.description ? ` ― ${row.description}` : ""}`))}` +
+        `／タブ（＊が前）：${JSON.stringify(await describeTabs(page))}／左の列の行：${JSON.stringify(await treeRowLabels(page).catch(() => []))}）` +
+        `${await quickInputWaitContext(page)}`
+    );
+  });
   if (!panel) throw new Error("プロットモードのパネルが見つかりません");
   const found = panel;
   await waitUntil(async () => (await found.locator("[data-suggest-names]").count()) > 0, "プロットモードに［名前の候補を出す］が出る", 30_000);
@@ -205,7 +221,13 @@ export async function readPlot(session: E2ESession): Promise<string> {
 export async function rewritePlotAndSave(session: E2ESession, text: string): Promise<void> {
   const { page } = session;
   await quickOpen(page, "plot.md");
-  const lines = page.locator(".editor-group-container.active .monaco-editor .view-lines", { hasText: "主要登場人物" }).first();
+  /*
+    **前の列に限らず探す。** プロットモードは plot.md を列1、パネルを列2に置く（`features/plotModePanel.ts`）。
+    パネルを押したあとは列2が前の列で、Ctrl+P で plot.md を選ぶと、既に開いている列1の plot.md が前に出るだけで
+    焦点は列2の WebView に残ることがある（2026-10-12 ノートPC 1.141.0。列1に plot.md の字が見えているのに、
+    前の列だけを見ていたこの待ちが15秒で落ちた）。見つけたら押して、その列へ焦点を移す
+  */
+  const lines = page.locator(".editor-group-container .monaco-editor .view-lines", { hasText: "主要登場人物" }).filter({ visible: true }).first();
   await waitUntil(async () => (await lines.count()) > 0, "plot.md が素のエディターで開く", 15_000).catch(async (error: unknown) => {
     /*
       2026-10-12 ノートPC（1.141.0）の plotRenamePending 1件目で、Ctrl+P で開いたのにここで15秒待って落ちた。
@@ -227,20 +249,48 @@ export async function rewritePlotAndSave(session: E2ESession, text: string): Pro
         })
       )
       .catch(() => [] as string[]);
-    const tabs = groups.map(
-      (group, index) => `列${index + 1}${group.active ? "（前）" : ""}：${group.tabs.map((tab) => `${tab.name}${tab.active ? "＊" : ""}`).join("・")}`
-    );
+    const tabs = describeGroups(groups);
     throw new Error(
       `${String(error)}（タブ（＊が前）：${JSON.stringify(tabs)}／素のエディターの字：${JSON.stringify(shown)}）${await quickInputWaitContext(page)}`
     );
   });
   await lines.click();
+  /*
+    押したあと、焦点が plot.md の素のエディターに載るまで待つ。WebView に焦点を取り返されたまま Ctrl+A と
+    打ち込みを送ると、字が WebView へ流れ、次の「保存される」の待ちで原因の読めない形で落ちるため
+  */
+  await waitUntil(
+    async () =>
+      page.evaluate(() => {
+        const editor = document.activeElement?.closest(".monaco-editor");
+        return (editor?.querySelector(".view-lines") as HTMLElement | null | undefined)?.innerText.includes("主要登場人物") === true;
+      }),
+    "押したあと、焦点が plot.md の素のエディターに載る",
+    5_000
+  ).catch(async (error: unknown) => {
+    const focus = await page.evaluate(() => {
+      const active = document.activeElement as HTMLElement | null;
+      return active ? `${active.tagName.toLowerCase()}${active.className ? "." + String(active.className).split(" ").slice(0, 2).join(".") : ""}` : "なし";
+    });
+    throw new Error(`${String(error)}（焦点：${focus}／タブ（＊が前）：${JSON.stringify(await describeTabs(page))}）${await quickInputWaitContext(page)}`);
+  });
   await page.keyboard.press("Control+KeyA");
   await page.keyboard.insertText(text);
   await page.keyboard.press("Control+KeyS");
   await waitUntil(async () => (await readPlot(session)) === text, "書き換えた plot.md が保存される", 15_000).catch(async (error: unknown) => {
     throw new Error(`${String(error)}（ファイル：${JSON.stringify(await readPlot(session).catch(() => "読めない"))}）`);
   });
+}
+
+/** 列ごとのタブを「列1（前）：名前＊・名前」の形にする（＊はその列で前に出ているタブ）。落ちた文に添える */
+function describeGroups(groups: Awaited<ReturnType<typeof readTabState>>): string[] {
+  return groups.map(
+    (group, index) => `列${index + 1}${group.active ? "（前）" : ""}：${group.tabs.map((tab) => `${tab.name}${tab.active ? "＊" : ""}`).join("・")}`
+  );
+}
+
+async function describeTabs(page: Page): Promise<string[]> {
+  return describeGroups(await readTabState(page).catch(() => []));
 }
 
 /** 承認待ち（`.aiwriter/pending-characters/*.json`）の中身。ファイル名 → 字 */
