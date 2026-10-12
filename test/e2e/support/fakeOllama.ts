@@ -62,10 +62,14 @@ async function readBody(request: IncomingMessage): Promise<string> {
 
 /**
  * 偽の Ollama を立てる。`respond` が `/api/chat` の答え（本文）を返す。
- * 構造化出力を求められた呼び出し（`structured`）には JSON の文字列を返すこと
+ * 構造化出力を求められた呼び出し（`structured`）には JSON の文字列を返すこと。
+ *
+ * **答えを約束（Promise）で返してもよい。** 答えが返るまでの画面（考えている間に
+ * ボタンが押せなくなるか、など）を見る件は、テストが解くまで答えを止めておける
+ * （一瞬で返すと、その間の画面を見る隙が無い）
  */
 export async function startFakeOllama(
-  respond: (request: FakeOllamaRequest) => string,
+  respond: (request: FakeOllamaRequest) => string | Promise<string>,
   /** 一覧に足す別のモデル名（モデルを選び替える場面を見るとき）。答え方は同じ */
   options: {
     extraModels?: readonly string[];
@@ -122,7 +126,7 @@ export async function startFakeOllama(
         const user = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
         const parsed: FakeOllamaRequest = { system, user, structured: body.format !== undefined };
         requests.push(parsed);
-        const text = respond(parsed);
+        const text = await respond(parsed);
         const tail = { model: FAKE_OLLAMA_MODEL, done: true, done_reason: "stop", prompt_eval_count: 10, eval_count: 10 };
         if (body.stream === true) {
           response.writeHead(200, { "content-type": "application/x-ndjson" });
@@ -182,4 +186,20 @@ export function fakeOllamaLaunch(fake: FakeOllama, extra: LaunchOptions = {}): L
       ...extra.settings,
     },
   };
+}
+
+/**
+ * 受けた頼みの並び（落ちた文に添える用）。順番・構造化出力か・system と user の頭（各80字、改行は ⏎）。
+ *
+ * 「AI が呼ばれた／呼ばれない」「何が送られた」で落ちたとき、件数だけでは、同じファイルの前の件の頼みが
+ * 残っていたのか、製品が本当に呼んだのか、場面探しの検索語づくり（P-22）が先に走ったのかを分けられない
+ * （2026-10-12 ノートPC の plotModeAiEntrances・chatLocateAndMain）。`from` より前は「前の件の分」として数えない
+ */
+export function describeFakeRequests(requests: readonly FakeOllamaRequest[], from = 0): string {
+  const head = (text: string): string => text.replace(/\r?\n/g, "⏎").slice(0, 80);
+  const lines = requests.map(
+    (request, index) =>
+      `#${index + 1}${index < from ? "（前の件）" : ""}${request.structured ? "（構造化）" : ""} system「${head(request.system)}」 user「${head(request.user)}」`
+  );
+  return `偽のAIへの頼み：この件で${requests.length - from}件・全体で${requests.length}件：${lines.length > 0 ? lines.join(" ／ ") : "なし"}`;
 }
