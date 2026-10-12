@@ -110,10 +110,11 @@ mark.example { background: var(--vscode-editorInfo-foreground, #3794ff); color: 
 <div class="photos" id="photos" data-testid="photo-list"></div>
 
 <div class="request">
-  <label for="request">AIへの頼み（なくてもかまいません。この作品で覚えておきます）</label>
+  <label for="request">AIへの頼み（なくてもかまいません。この作品のフォルダーに保存し、同期でほかのパソコンとも共有します）</label>
   <textarea id="request" data-testid="photo-request" placeholder="例：旧字体はそのまま。ルビの小さい字は（）に入れる。"></textarea>
   <div class="note">書いてあるとおりに写す・読めない字を補わない、という決まりとぶつかる頼みは聞きません。</div>
   <div id="requestCount" class="count" data-testid="photo-request-count"></div>
+  <div id="requestNote" class="count err" data-testid="photo-request-note"></div>
 </div>
 
 <div class="bar">
@@ -317,6 +318,10 @@ mark.example { background: var(--vscode-editorInfo-foreground, #3794ff); color: 
 
   function requestOver() { return requestChars() > REQUEST_MAX; }
 
+  function showRequestNote(text) {
+    document.getElementById("requestNote").textContent = String(text || "");
+  }
+
   function refreshRequest() {
     var n = requestChars();
     var box = document.getElementById("requestCount");
@@ -447,7 +452,11 @@ mark.example { background: var(--vscode-editorInfo-foreground, #3794ff); color: 
     } else if (message.type === "request") {
       // 開いたときに、この作品で前に書いた頼みを入れる
       document.getElementById("request").value = String(message.text || "");
+      showRequestNote(message.note);
       refreshRequest();
+    } else if (message.type === "requestNote") {
+      // 覚えられなかった理由（ファイルが壊れている・同期で書き換わった）。空なら消す
+      showRequestNote(message.text);
     } else if (message.type === "ai") {
       var box = document.getElementById("ai");
       aiOk = message.canSend === true;

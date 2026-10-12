@@ -134,7 +134,7 @@ export const PHOTO_TRANSCRIBE_SYSTEM_PROMPT = `あなたは、手書きの原稿
  *
  * @param pageLabel 「1枚目・左のページ」のような、作者に見せる名前。AIの読みには
  *   使わないが、どのページの依頼かをログで追えるように入れる
- * @param request 作者からの頼み（画面の「AIへの頼み」。設計書6.117.12）。長さの
+ * @param request 作者からの頼み（画面の「AIへの頼み」。設計書6.117.7）。長さの
  *   検査は呼ぶ側（`core/photoTranscribeRequest.ts`）が済ませて渡す。空なら何も添えない
  */
 export function buildPhotoTranscribePrompt(pageLabel: string, request?: string): string {
@@ -187,7 +187,7 @@ export function buildPhotoTranscribeRequest(input: {
   model: string;
   /** 手元のAIへ送る長さ。モデルの長さが短ければ呼ぶ側が縮めて渡す */
   numCtx: number;
-  /** 作者からの頼み（省けば添えない。設計書6.117.12） */
+  /** 作者からの頼み（省けば添えない。設計書6.117.7） */
   request?: string;
 }): GenerateParams {
   return {

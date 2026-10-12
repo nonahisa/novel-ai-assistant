@@ -19,7 +19,7 @@ export interface PhotoSendConfirmInput {
   /** 呼ぶたびに課金されるか */
   readonly isPaid: boolean;
   /**
-   * 作者からの頼み（設計書6.117.12）。**写真と一緒に送る文なので、確かめの窓で
+   * 作者からの頼み（設計書6.117.7）。**写真と一緒に送る文なので、確かめの窓で
    * 見せる**。空なら出さない
    */
   readonly request?: string;

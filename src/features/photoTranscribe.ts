@@ -7,12 +7,11 @@ import { canSendImages, imageSupportFor, type ImageSupport } from "../ai/imageIn
 import { describePhotoSend } from "../core/photoTranscribeConfirm";
 import {
   PHOTO_REQUEST_MAX_CHARS,
-  PhotoTranscribeRequestStore,
   checkPhotoRequest,
   countPhotoRequestChars,
   photoRequestEchoes,
 } from "../core/photoTranscribeRequest";
-import { verifiedState } from "../core/verifiedMemento";
+import { readPhotoRequest, savePhotoRequest } from "../core/photoTranscribeRequestStore";
 import { parsePhotoTranscriptionStoppingRepeats } from "../core/photoTranscribeValidation";
 import { endsWithInlineRepetition } from "../core/inlineRepetition";
 import { readExifOrientation } from "../core/exifOrientation";
@@ -124,19 +123,50 @@ export async function openPhotoTranscribe(
   });
   panel.webview.html = buildPhotoTranscribeHtml(createNonce(), panel.webview.cspSource);
 
-  // 作者からの頼みは作品ごとに覚える（設計書6.117.12）
-  const requests = new PhotoTranscribeRequestStore(verifiedState(context.globalState));
+  /*
+    作者からの頼みは作品フォルダーに置く（設計書6.117.7。`core/photoTranscribeRequestStore.ts`）。
+    `knownRequest` はこの画面が最後に読んだ（書いた）頼み。**読めなかったら undefined
+    にして、画面を開き直すまで書かない**——壊れたファイル・競合の印が入ったファイルを
+    上書きすると、そこに残っている作者の文が消える。読めなくても書き起こしは止めない
+    （いま欄にある頼みは作者の手元にあり、送るのはそちらだから）
+  */
+  let knownRequest: string | undefined;
+  const postRequestNote = (note: string): void => {
+    void panel.webview.postMessage({ type: "requestNote", text: note });
+  };
+  const loadRequest = async (): Promise<void> => {
+    const read = await readPhotoRequest(work);
+    knownRequest = read.ok ? read.text : undefined;
+    if (!read.ok) {
+      logFailure("写真の書き起こし：AIへの頼みを読む", { 内容: read.reason });
+    }
+    void panel.webview.postMessage({
+      type: "request",
+      text: read.ok ? read.text : "",
+      max: PHOTO_REQUEST_MAX_CHARS,
+      note: read.ok ? "" : read.reason,
+    });
+  };
   const saveRequest = async (raw: unknown): Promise<void> => {
-    const check = checkPhotoRequest(raw);
-    // 上限を超えた頼みは覚えない（画面が超えたことを出している）
-    if (!check.ok) return;
+    if (knownRequest === undefined) return;
     try {
-      await requests.set(work.id, check.text);
+      const saved = await savePhotoRequest(work, knownRequest, typeof raw === "string" ? raw : "");
+      if (saved.ok) {
+        knownRequest = saved.text;
+        postRequestNote("");
+        return;
+      }
+      // 上限を超えた頼みは覚えない（画面が超えたことを出している）
+      if (saved.kind === "over") return;
+      logFailure("写真の書き起こし：AIへの頼みを覚える", { 内容: saved.reason });
+      postRequestNote(saved.reason);
     } catch (error) {
-      // 覚えられなくても、いま画面にある頼みで書き起こしは続けられる。理由はログへ
-      logFailure("写真の書き起こし：AIへの頼みを覚える", {
-        内容: error instanceof Error ? error.message : String(error),
-      });
+      // 覚えられなくても、いま画面にある頼みで書き起こしは続けられる。理由はログと画面へ
+      const detail = error instanceof Error ? error.message : String(error);
+      logFailure("写真の書き起こし：AIへの頼みを覚える", { 内容: detail });
+      postRequestNote(
+        `AIへの頼みを作品フォルダーに覚えられませんでした（${detail}）。いまの欄の頼みで書き起こしはできます。`
+      );
     }
   };
 
@@ -151,11 +181,7 @@ export async function openPhotoTranscribe(
     const message = raw as { type?: string } & Record<string, unknown>;
     switch (message.type) {
       case "ready":
-        void panel.webview.postMessage({
-          type: "request",
-          text: requests.get(work.id),
-          max: PHOTO_REQUEST_MAX_CHARS,
-        });
+        await loadRequest();
         await postAi();
         await addPhotos(panel);
         break;

@@ -60,7 +60,7 @@ describe("写真を送る前の確かめ", () => {
   });
 });
 
-describe("作者からの頼みも、送る前に見せる（6.117.12）", () => {
+describe("作者からの頼みも、送る前に見せる（6.117.7）", () => {
   const base = {
     providerName: "Claude（クラウド・有料）",
     model: "claude-opus-5-5",

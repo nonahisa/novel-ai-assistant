@@ -1,86 +1,23 @@
 import { describe, expect, test } from "vitest";
-import type * as vscode from "vscode";
 import {
-  PHOTO_REQUEST_KEY_PREFIX,
+  PHOTO_REQUEST_FILE_NAME,
   PHOTO_REQUEST_MAX_CHARS,
-  PhotoTranscribeRequestStore,
   checkPhotoRequest,
   countPhotoRequestChars,
+  formatPhotoRequestFile,
+  parsePhotoRequestFile,
   photoRequestEchoes,
-  photoRequestKey,
 } from "../../../src/core/photoTranscribeRequest";
-import { verifiedState } from "../../../src/core/verifiedMemento";
 
 /**
- * 写真の書き起こしの「AIへの頼み」（設計書6.117.12。作者の裁定、2026-10-12）。
+ * 写真の書き起こしの「AIへの頼み」の純粋な部分（設計書6.117.7。作者の裁定、2026-10-12）。
  *
- * 守るのは3つ。
- * 1. 作品ごとに覚え、次に開いたとき前の頼みが入っている（ほかの作品へ漏れない）
- * 2. 上限（300字）を超えたら、黙って切らずに断る
- * 3. 改行はそのまま
+ * 守るのは4つ。
+ * 1. 上限（300字）を超えたら、黙って切らずに断る
+ * 2. 改行はそのまま
+ * 3. 置き場のファイルが壊れていたら、直さずに理由を返す
+ * 4. 同期で2つの版が混ざった印（競合マーカー）は、壊れとは別の理由で言う
  */
-
-/** その場かぎりの保管庫 */
-function memento(): vscode.Memento {
-  const box = new Map<string, unknown>();
-  return {
-    keys: () => [...box.keys()],
-    get: <T>(key: string, fallback?: T) => (box.has(key) ? box.get(key) : fallback) as T,
-    update: async (key: string, value: unknown) => {
-      if (value === undefined) box.delete(key);
-      else box.set(key, value);
-    },
-  } as vscode.Memento;
-}
-
-/** 書いたあと読み返しを見張る仕組みを止めて包む（試験の中で時計を待たない） */
-function store(state = memento()): { store: PhotoTranscribeRequestStore; state: vscode.Memento } {
-  verifiedState(state, { lateCheckDelays: [] });
-  return { store: new PhotoTranscribeRequestStore(state), state };
-}
-
-describe("頼みを作品ごとに覚える", () => {
-  test("覚えた頼みは、同じ作品でだけ読める（改行もそのまま）", async () => {
-    const { store: requests } = store();
-    await requests.set("work-a", "旧字体はそのまま。\nルビの小さい字は（）に入れる。");
-    expect(requests.get("work-a")).toBe("旧字体はそのまま。\nルビの小さい字は（）に入れる。");
-    expect(requests.get("work-b")).toBe("");
-  });
-
-  test("次に開いたとき（同じ保管庫を新しく包み直しても）前の頼みが入っている", async () => {
-    const shared = memento();
-    await store(shared).store.set("work-a", "旧字体はそのまま");
-    expect(new PhotoTranscribeRequestStore(shared).get("work-a")).toBe("旧字体はそのまま");
-  });
-
-  test("鍵は作品IDごと", async () => {
-    const { store: requests, state } = store();
-    await requests.set("work-a", "頼み");
-    expect(photoRequestKey("work-a")).toBe(`${PHOTO_REQUEST_KEY_PREFIX}work-a`);
-    expect(state.get(photoRequestKey("work-a"))).toBe("頼み");
-  });
-
-  test("空にしたら消す（空の頼みを残さない）", async () => {
-    const { store: requests, state } = store();
-    await requests.set("work-a", "頼み");
-    await requests.set("work-a", "  \n ");
-    expect(requests.get("work-a")).toBe("");
-    expect(state.get(photoRequestKey("work-a"))).toBeUndefined();
-  });
-
-  test("CRLF は LF にそろえ、前後の空白は落とす", async () => {
-    const { store: requests } = store();
-    await requests.set("work-a", "\r\n 一行目\r\n二行目 \r\n");
-    expect(requests.get("work-a")).toBe("一行目\n二行目");
-  });
-
-  test("上限を超えた頼みは覚えない（前の頼みが残る）", async () => {
-    const { store: requests } = store();
-    await requests.set("work-a", "前の頼み");
-    expect(await requests.set("work-a", "あ".repeat(PHOTO_REQUEST_MAX_CHARS + 1))).toBe(false);
-    expect(requests.get("work-a")).toBe("前の頼み");
-  });
-});
 
 describe("頼みの上限", () => {
   test("上限は300字", () => {
@@ -108,6 +45,10 @@ describe("頼みの上限", () => {
     expect(checkPhotoRequest(undefined)).toEqual({ ok: true, text: "" });
     expect(checkPhotoRequest(42)).toEqual({ ok: true, text: "" });
   });
+
+  test("CRLF は LF にそろえ、前後の空白は落とす（中の改行はそのまま）", () => {
+    expect(checkPhotoRequest("\r\n 一行目\r\n二行目 \r\n")).toEqual({ ok: true, text: "一行目\n二行目" });
+  });
 });
 
 describe("頼みの返りを捨てるための行", () => {
@@ -117,5 +58,62 @@ describe("頼みの返りを捨てるための行", () => {
       "ルビは（）に",
     ]);
     expect(photoRequestEchoes("")).toEqual([]);
+  });
+});
+
+describe("置き場のファイルの形", () => {
+  test("ファイル名は .aiwriter の直下の photo-transcribe-request.json", () => {
+    expect(PHOTO_REQUEST_FILE_NAME).toBe("photo-transcribe-request.json");
+  });
+
+  test("書いた形をそのまま読み戻せる（改行もそのまま）", () => {
+    const text = "旧字体はそのまま。\nルビの小さい字は（）に入れる。";
+    const file = formatPhotoRequestFile(text);
+    expect(file.endsWith("\n")).toBe(true);
+    expect(parsePhotoRequestFile(file)).toEqual({ ok: true, text });
+  });
+
+  test("先頭の BOM は中身ではないので落として読む", () => {
+    expect(parsePhotoRequestFile(`﻿${formatPhotoRequestFile("頼み")}`)).toEqual({ ok: true, text: "頼み" });
+  });
+
+  test("request が無ければ空の頼み", () => {
+    expect(parsePhotoRequestFile('{ "version": 1 }')).toEqual({ ok: true, text: "" });
+  });
+
+  test("上限を超えた文も切らずに返す（画面と［書き起こす］の確かめが縮めてと言う）", () => {
+    const long = "あ".repeat(PHOTO_REQUEST_MAX_CHARS + 5);
+    expect(parsePhotoRequestFile(formatPhotoRequestFile(long))).toEqual({ ok: true, text: long });
+  });
+
+  test("壊れた JSON は直さずに理由を返す", () => {
+    const read = parsePhotoRequestFile('{ "request": "頼み"');
+    expect(read.ok).toBe(false);
+    if (read.ok) return;
+    expect(read.kind).toBe("broken");
+    expect(read.reason).toContain(PHOTO_REQUEST_FILE_NAME);
+    expect(read.reason).toContain("直さずに");
+  });
+
+  test("形の違うもの（配列・request が文字列でない）も壊れとして止める", () => {
+    expect(parsePhotoRequestFile("[]").ok).toBe(false);
+    expect(parsePhotoRequestFile("null").ok).toBe(false);
+    expect(parsePhotoRequestFile('{ "request": 3 }').ok).toBe(false);
+  });
+
+  test("競合マーカーは JSON として読む前に見つけ、同期で混ざったと言う", () => {
+    const conflicted = [
+      "<<<<<<< HEAD",
+      '{ "version": 1, "request": "旧字体はそのまま" }',
+      "=======",
+      '{ "version": 1, "request": "ルビは（）に" }',
+      ">>>>>>> origin/main",
+      "",
+    ].join("\n");
+    const read = parsePhotoRequestFile(conflicted);
+    expect(read.ok).toBe(false);
+    if (read.ok) return;
+    expect(read.kind).toBe("conflict");
+    expect(read.reason).toContain("同期で2つの版が混ざった");
   });
 });
