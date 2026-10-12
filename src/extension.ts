@@ -23,6 +23,7 @@ import {
   type TreeNode,
 } from "./views/workTree";
 import { requireTreeNode } from "./views/treeCommandNode";
+import { describeTreeMenuCall, treeMenuCommandsFrom } from "./core/treeMenuLog";
 import { formatCount } from "./core/charCount";
 import {
   nextChapterNumber,
@@ -1034,12 +1035,28 @@ export async function activate(
     return [ref, ...rest];
   };
 
+  /*
+    **作品一覧の右クリックの品書きに並ぶ命令**（0.105.2、`core/treeMenuLog.ts`）。
+    入口で「行あり（種類）／行なし」を操作ログへ1行残す。品書きを押したのに
+    何も起きないとき、届いたのか・行が渡らなかったのか・届かなかったのかを
+    ログで分けるため。コマンドパレットから引数なしで呼ばれた回も「行なし」で
+    残る（どちらから来たかは VS Code が教えてくれない）。
+  */
+  const treeMenuCommands = treeMenuCommandsFrom(
+    context.extension.packageJSON,
+    "novelai.works"
+  );
+
   const registerCommand: typeof vscode.commands.registerCommand = (
     command,
     callback,
     thisArg
   ) =>
     vscode.commands.registerCommand(command, async (...args: unknown[]) => {
+      // 関門より先に残す（関門で止まった回も「届いた」ことは分かるように）
+      if (treeMenuCommands.has(command)) {
+        logStep(describeTreeMenuCall(command, args[0]));
+      }
       // **原稿エディターのキーから来た印は、関門より先に節点へ直す**
       // （設計書6.25.10）。印のままだと、関門が作品を見つけられずに
       // 「作品を選択」を出す
@@ -3130,7 +3147,10 @@ export async function activate(
         // 反映は作者が「更新分を反映」で承認したときに起きる
         void syncPlotCharactersOnSave(fromUri(document.uri));
       }
-      treeProvider.refresh();
+      // **保存したファイルの作品だけを読み直す**（0.105.2）。これまでは何を保存しても
+      // 全作品を読み直し、そのあいだ作品一覧の右クリックに行が渡らなかった
+      // （`WorkTreeProvider.refresh` の説明）。作品の外のファイルなら何もしない
+      treeProvider.refreshForFile(fromUri(document.uri));
       // 「直前にどの環境で書いていたか」を残す（設計書5.5.2）。
       // 開いただけでは書かない。何も書いていないのに作業ツリーが汚れ、
       // 未コミットの変更を理由に取り込みが止まるようになるため
@@ -3279,7 +3299,7 @@ export async function activate(
     );
     if (collection.handled) {
       if (collection.added.length > 0) {
-        treeProvider.refresh();
+        treeProvider.refreshRoot();
         highlighter.invalidate();
       }
       return undefined;
@@ -3331,7 +3351,7 @@ export async function activate(
         `「${entry.title}」を登録しました（文字数の集計は後で行います）。`
       );
     }
-    treeProvider.refresh();
+    treeProvider.refresh(entry.id);
     highlighter.invalidate();
 
     /*
@@ -3437,7 +3457,7 @@ export async function activate(
         "./features/collectUnregisteredWorks.js"
       );
       await collectUnregisteredWorks(registry, () => {
-        treeProvider.refresh();
+        treeProvider.refreshRoot();
         highlighter.invalidate();
       });
     })
@@ -3591,7 +3611,7 @@ export async function activate(
       }
     }
 
-    treeProvider.refresh();
+    treeProvider.refresh(entry.id);
     if (startMode === "plot") {
       await openPlotFile(entry);
       await startPlotAdvice(entry);
@@ -3785,7 +3805,7 @@ export async function activate(
       );
       const entries = await addWorkFromGithub(registry);
       if (entries.length === 0) return;
-      treeProvider.refresh();
+      treeProvider.refreshRoot();
       // 取り寄せた作品の設定が用語ハイライトの材料になる
       highlighter.invalidate();
     })
@@ -4165,7 +4185,7 @@ export async function activate(
 
   context.subscriptions.push(
     registerCommand("novelai.refresh", () => {
-      treeProvider.refresh();
+      treeProvider.refreshRoot();
     })
   );
 

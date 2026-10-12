@@ -38,7 +38,7 @@ import {
 import { episodePathFor } from "../core/bookStore";
 import { SynopsisStore } from "../core/synopsisStore";
 import { synopsisKey } from "../models/synopsis";
-import { WorkRegistry } from "../core/workRegistry";
+import { WorkRegistry, findWorkForFile } from "../core/workRegistry";
 import {
   WORK_LIST_SNAPSHOT_KEY,
   buildWorkListSnapshot,
@@ -97,18 +97,28 @@ export type TreeNode =
   | MemoFileNode
   | MessageNode;
 
+/**
+ * 作品の行。
+ *
+ * **字数・失敗の理由・タイプ・種類は、同じ行のまま書き換える**（0.105.2）。
+ * 1作品だけ読み直したとき、VS Code へは「この行を描き直して」と、**画面に
+ * 出ているのと同じオブジェクト**を渡す必要がある（拡張機能ホストは行を
+ * オブジェクトで引き、知らないオブジェクトは黙って捨てる）。行を作り直すと
+ * 一覧を丸ごと描き直すしかなく、そのあいだ右クリックの命令に行が渡らない
+ * （`WorkTreeProvider.refresh` の説明）。
+ */
 export class WorkNode {
   readonly type = "work" as const;
   constructor(
     public readonly work: WorkEntry,
-    public readonly stats: WorkStats,
+    public stats: WorkStats,
     /**
      * 走査に失敗した理由。成功なら `undefined`。
      *
      * **登録されている以上、読めなくても一覧には出す。** 隠すと
      * 「登録したのに出てこない」という、原因の分からない終わり方になる。
      */
-    public readonly loadError?: string,
+    public loadError?: string,
     /**
      * 作品のタイプ（設計書6.70）。右クリックを絞る印
      * （`contextValue`）に織り込む。
@@ -116,9 +126,9 @@ export class WorkNode {
      * **描画（`getTreeItem`）は同期なので、ここで持たせておく**
      * （話・章のノードと同じ理由）。
      */
-    public readonly format?: WorkFormatKey,
+    public format?: WorkFormatKey,
     /** 作品の種類（設計書6.109）。吹き出しの目安（台本の分数など）に使う */
-    public readonly kind?: WorkKindKey,
+    public kind?: WorkKindKey,
     /**
      * 走査の前に控えから出した行か（設計書6.107）。走査の結果なら `undefined`。
      *
@@ -207,7 +217,7 @@ export class MessageNode {
 
 export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
-    TreeNode | undefined | void
+    TreeNode | TreeNode[] | undefined | void
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
@@ -298,7 +308,8 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     ) => void,
     private readonly snapshotOptions: WorkTreeSnapshotOptions = {}
   ) {
-    registry.onDidChange(() => this.refresh());
+    // 登録・解除では残っている作品を読み直さない（`refreshRoot` の説明）
+    registry.onDidChange(() => this.refreshRoot());
   }
 
   /**
@@ -362,19 +373,66 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
    */
   private scanTimings: ScanTiming[] = [];
 
+  /**
+   * いま画面に出ている作品の行（作品ID -> 行）と、その並び（0.105.2）。
+   *
+   * 1作品だけ描き直すときに撃つ相手。**画面に出ているのと同じオブジェクト**
+   * でないと、拡張機能ホストは黙って捨てる（`WorkNode` の説明）。一覧を
+   * 丸ごと描き直したら空にする——取り直した行が返るまで、古い行を撃っても
+   * 届かないので、そのあいだの読み直しは丸ごとの描き直しに倒す。
+   */
+  private rootRows = new Map<string, WorkNode>();
+  private rootOrder: TreeNode[] = [];
+
+  /** 作品ごとの、いちばん新しい読み直しの番号（古い読み直しの結果で上書きしない） */
+  private rowTokens = new Map<string, number>();
+
+  /** 走っている最中の1作品の読み直し（試験が終わりを待つため） */
+  private pendingRows = new Set<Promise<void>>();
+
+  /**
+   * 走査したときの作品の場所（作品ID -> 場所）。登録簿が変わったとき、
+   * **場所が変わった作品だけ**読み直すために控える（`refreshRoot`）。
+   */
+  private scannedFolders = new Map<string, string>();
+
+  /**
+   * 作品一覧を読み直す。
+   *
+   * ## 1作品だけ（`workId` あり）：先に読んでから、その行だけを撃つ（0.105.2）
+   *
+   * **描き直しの合図の撃ち方で、右クリックの品書きが空振りする長さが決まる。**
+   * VS Code 1.141.0 の拡張機能ホスト（`ExtHostTreeView`）を読んで確かめた：
+   * - 引数なしで撃つと、「行の控え → 行の中身」の表を**全部**消す。画面が
+   *   行を取り直すまで、どの行の右クリックにも行が渡らない（`undefined`）
+   * - 行を渡して撃つと、消えるのは**その行の子だけ**。行そのものは残る
+   * - 消えているのは「撃ってから `getChildren` が返るまで」。これまでは
+   *   捨てて撃ってから走査していたので、**走査の時間だけ全部の行が引けなかった**
+   *   （遅い機械で、作品を登録した直後・保存した直後の右クリックが空振りした）
+   *
+   * そこで、先に走査を済ませ（子の行に要る章・あらすじ・投稿・メモも読む）、
+   * 画面に出ているその作品の行へ新しい値を入れてから、**その行だけ**を撃つ。
+   * VS Code が子を取り直すときには、読み終えた値ですぐ返せる。
+   *
+   * 画面にまだ行が無い（一覧を描いていない・丸ごと描き直しの最中・控えの行を
+   * 出している）ときは、これまでどおり丸ごと描き直す。
+   *
+   * ## 全部（引数なし）：丸ごと描き直す
+   *
+   * 作者が「最新の情報に更新」を押したとき、数え方の設定を変えたとき、
+   * 書庫へまとめたとき（作品の場所が変わる）に使う。**全作品の数字が
+   * 変わりうる**ので、行ごとに撃つ意味がない。いずれも作者の操作の直後に
+   * 1回だけ起きる。
+   */
   refresh(workId?: string): void {
-    // 裏の走査の行は、もう正しくないかもしれない（設計書6.107）
-    this.rootGeneration += 1;
-    this.warmedRoot = undefined;
-    // 読み直した一覧は今の印で描かれる。次の同期の知らせは必ず描き直す側に倒す
-    this.lastSyncMarks = undefined;
     if (workId) {
-      this.inflight.delete(workId);
-      this.cache.delete(workId);
-      this.synopses.delete(workId);
-      this.chapters.delete(workId);
-      this.posting.delete(workId);
-      this.memos.delete(workId);
+      this.dropWork(workId);
+      const row = this.rootRows.get(workId);
+      // 控えの行（6.107）は裏の走査が差し替える最中なので、行ごとに撃たない
+      if (row && row.snapshot === undefined) {
+        this.track(this.refreshRow(row));
+        return;
+      }
     } else {
       this.inflight.clear();
       this.cache.clear();
@@ -382,8 +440,142 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       this.chapters.clear();
       this.posting.clear();
       this.memos.clear();
+      this.scannedFolders.clear();
     }
+    this.redrawWholeList();
+  }
+
+  /**
+   * 作品の登録・解除・作品名の変更のあとに、一覧を描き直す（0.105.2）。
+   *
+   * **行の顔ぶれが変わるので、丸ごと描き直すしかない**（増えた行を撃つ相手が
+   * まだ無い）。ただし、残っている作品の走査結果は捨てない——これまでは
+   * 全作品を読み直していたので、描き直しが返るまで（＝全作品の走査が
+   * 終わるまで）どの行の右クリックも空振りした。残っている作品は控えから
+   * すぐ返し、新しい作品だけを読む。
+   *
+   * **場所が変わった作品と、外れた作品は捨てる**（別のフォルダーの数字を
+   * 出さない。同じIDで登録し直したときに古い数字を出さない）。
+   */
+  refreshRoot(): void {
+    const folders = new Map(
+      this.registry.list().map((work) => [work.id, work.folderPath])
+    );
+    for (const [id, folder] of this.scannedFolders) {
+      if (folders.get(id) !== folder) this.dropWork(id);
+    }
+    this.redrawWholeList();
+  }
+
+  /**
+   * 保存したファイルの作品だけを読み直す（0.105.2）。
+   *
+   * これまでは**どのファイルを保存しても全作品を読み直していた**
+   * （`onDidSaveTextDocument` → `refresh()`）。作品の外のファイル（VS Code の
+   * 設定など）なら一覧の数字は変わらないので、何もしない。
+   */
+  refreshForFile(filePath: string): void {
+    const work = findWorkForFile(this.registry.list(), filePath);
+    if (work) this.refresh(work.id);
+  }
+
+  /** 走っている1作品の読み直しが、すべて終わるのを待つ（試験のため） */
+  async settled(): Promise<void> {
+    while (this.pendingRows.size > 0) {
+      await Promise.all([...this.pendingRows]);
+    }
+  }
+
+  /** 1作品ぶんの控えを捨てる。次に読むときは走査し直す */
+  private dropWork(workId: string): void {
+    this.inflight.delete(workId);
+    this.cache.delete(workId);
+    this.synopses.delete(workId);
+    this.chapters.delete(workId);
+    this.posting.delete(workId);
+    this.memos.delete(workId);
+    this.scannedFolders.delete(workId);
+  }
+
+  /**
+   * 一覧を丸ごと描き直す（行の対応表が全部消える。`refresh` の説明）。
+   * 呼ぶ所は、行ごとに撃てない理由を持っている所だけにする。
+   */
+  private redrawWholeList(): void {
+    // 裏の走査の行は、もう正しくないかもしれない（設計書6.107）
+    this.rootGeneration += 1;
+    this.warmedRoot = undefined;
+    // 読み直した一覧は今の印で描かれる。次の同期の知らせは必ず描き直す側に倒す
+    this.lastSyncMarks = undefined;
+    // 取り直した行が返るまで、古い行を撃っても届かない（`rootRows` の説明）
+    this.rootRows.clear();
+    this.rootOrder = [];
     this._onDidChangeTreeData.fire();
+  }
+
+  /** 画面に出した作品の行を控える（1作品だけ撃つ相手。`rootRows` の説明） */
+  private rememberRoot(nodes: TreeNode[]): TreeNode[] {
+    this.rootOrder = nodes;
+    this.rootRows = new Map(
+      nodes
+        .filter((node): node is WorkNode => node.type === "work")
+        .map((node) => [node.work.id, node])
+    );
+    return nodes;
+  }
+
+  private track(work: Promise<void>): void {
+    this.pendingRows.add(work);
+    const done = (): void => {
+      this.pendingRows.delete(work);
+    };
+    work.then(done, done);
+  }
+
+  /**
+   * 1作品を読み直し、画面に出ているその行へ値を入れてから、その行だけを撃つ。
+   */
+  private async refreshRow(row: WorkNode): Promise<void> {
+    const id = row.work.id;
+    const token = (this.rowTokens.get(id) ?? 0) + 1;
+    this.rowTokens.set(id, token);
+
+    let stats: WorkStats;
+    let loadError: string | undefined;
+    let format: WorkFormatKey | undefined;
+    let kind: WorkKindKey | undefined;
+    try {
+      const result = await this.load(row.work);
+      format = await this.formatOf(row.work);
+      kind = resolveWorkKind(result.configuredKind, format);
+      stats = result.stats;
+      /*
+        **子の行に要るものも、撃つ前に読んでおく。** 撃つと VS Code はこの行の
+        子（話・章・メモ）を表から消して取り直す。ここで読んでおけば、取り直しは
+        控えからすぐ返り、話の行が引けない隙間が短くなる。
+        読めなくても一覧は出す（`getChildren` が同じ扱いで理由を出す）
+      */
+      await this.loadSynopses(row.work);
+      await this.loadPosting(row.work);
+      await this.loadChapters(row.work).catch(() => undefined);
+      await this.memoNodes(row.work, format);
+    } catch (error) {
+      // 全部の走査（`scanAll`）と同じく、失敗は行の理由に変える
+      stats = { fileCount: 0, totals: emptyCounts(), conflictedCount: 0 };
+      loadError = error instanceof Error ? error.message : String(error);
+    }
+    /*
+      後から始まった読み直しがあれば、そちらに任せる（古い数字で上書きしない）。
+      そのあいだに一覧が丸ごと描き直されて行が替わっていたら、撃っても
+      届かない——取り直した行は、この読み直しの結果で描かれている
+    */
+    if (this.rowTokens.get(id) !== token || this.rootRows.get(id) !== row) return;
+    row.stats = stats;
+    row.loadError = loadError;
+    row.format = format;
+    row.kind = kind;
+    this.saveSnapshot(this.rootOrder);
+    this._onDidChangeTreeData.fire(row);
   }
 
   /**
@@ -391,16 +583,19 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
    *
    * 同期状態の表示のようにファイルの中身と無関係な変化で
    * `refresh()` を呼ぶと、作品ごとの全ファイル再走査が走ってしまう。
+   *
+   * **丸ごと描き直す**（0.105.2 で残した）。呼ぶのは数え方（純／総）の設定を
+   * 変えたときで、全部の行の数字が変わる。作者の操作の直後に1回だけ起きる。
    */
   redraw(): void {
     this._onDidChangeTreeData.fire();
   }
 
   /**
-   * 前回の `redrawIfChanged` で描いた同期の印（作品ごとの印と内訳をつないだもの）。
-   * `refresh()` で捨てる（読み直した一覧は、その時点の印で描かれているため）。
+   * 前回の `redrawIfChanged` で描いた同期の印（作品ID -> 印と内訳をつないだもの）。
+   * 丸ごと描き直したら捨てる（読み直した一覧は、その時点の印で描かれているため）。
    */
-  private lastSyncMarks: string | undefined;
+  private lastSyncMarks: Map<string, string> | undefined;
 
   /**
    * 同期の印が前回と変わったときだけ描き直す（0.102.8）。
@@ -412,21 +607,39 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
    * （`undefined` になる）。同期の見張りはファイルが1つ書かれるたびに
    * 状態を読み直して知らせてくるので、印が同じままの描き直しが続き、
    * 作者には見えない形で隙間を作り続けていた。
+   *
+   * **変わったときも、印の変わった作品の行だけを撃つ**（0.105.2）。印は作品の
+   * 行にしか出ないので、ほかの作品の行まで表から消す理由が無い（`refresh` の
+   * 説明）。一覧をまだ描いていない・撃つ相手の行が無いときは丸ごと描き直す。
    */
   redrawIfChanged(): void {
-    const marks = this.registry
-      .list()
-      .map((work) =>
-        [
+    const marks = new Map(
+      this.registry
+        .list()
+        .map((work) => [
           work.id,
-          this.syncBadge?.(work.id) ?? "",
-          ...(this.syncTooltip?.(work.id) ?? []),
-        ].join("\u0000")
-      )
-      .join("\u0001");
-    if (marks === this.lastSyncMarks) return;
+          [
+            this.syncBadge?.(work.id) ?? "",
+            ...(this.syncTooltip?.(work.id) ?? []),
+          ].join("\u0000"),
+        ])
+    );
+    const previous = this.lastSyncMarks;
     this.lastSyncMarks = marks;
-    this._onDidChangeTreeData.fire();
+    if (!previous) {
+      this._onDidChangeTreeData.fire();
+      return;
+    }
+    const changed = new Set<string>();
+    for (const [id, mark] of marks) if (previous.get(id) !== mark) changed.add(id);
+    for (const id of previous.keys()) if (!marks.has(id)) changed.add(id);
+    if (changed.size === 0) return;
+    const rows = [...changed].map((id) => this.rootRows.get(id));
+    if (rows.some((row) => row === undefined)) {
+      this._onDidChangeTreeData.fire();
+      return;
+    }
+    this._onDidChangeTreeData.fire(rows as WorkNode[]);
   }
 
   getTreeItem(node: TreeNode): vscode.TreeItem {
@@ -812,7 +1025,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       const warmed = this.warmedRoot;
       if (warmed) {
         this.warmedRoot = undefined;
-        return warmed;
+        return this.rememberRoot(warmed);
       }
       /*
         **控えがあれば、走査を待たずに出す**（設計書6.107）。ノートPCでは
@@ -820,7 +1033,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         終わったら描き直しを求めて差し替える。
       */
       const quick = this.renderFromSnapshot(works);
-      if (quick) return quick;
+      if (quick) return this.rememberRoot(quick);
       /*
         **走査のあいだ、案内を「読み込んでいます」に差し替える**（設計書6.1.2）。
 
@@ -837,7 +1050,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       try {
         const nodes = await this.scanAll(works);
         this.finishScan(nodes);
-        return nodes;
+        return this.rememberRoot(nodes);
       } finally {
         // **途中で失敗しても印を落とす。** 落とし忘れると、
         // 作品が0件になったあとも「読み込んでいます」が出たままになる
@@ -1052,6 +1265,12 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       if (generation === this.rootGeneration) this.warmedRoot = nodes;
     } finally {
       this.noteLoading(false, works.length);
+      /*
+        **ここは丸ごと描き直す**（0.105.2 で残した）。控えの行と走査の行は
+        別のオブジェクトで、差し替えそのものが目的だから（行ごとに撃つと、
+        控えの「前回の値」の行が残る）。起動で1回だけ起き、行の名前から
+        「前回の値」が消えるので、画面の自動テストの `waitTreeSettled` でも待てる
+      */
       this._onDidChangeTreeData.fire();
     }
   }
@@ -1331,6 +1550,7 @@ export class WorkTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       configuredKind: result.configuredKind,
     };
     this.cache.set(work.id, value);
+    this.scannedFolders.set(work.id, work.folderPath);
     this._onDidLoadWork.fire(work.id);
     return value;
   }
