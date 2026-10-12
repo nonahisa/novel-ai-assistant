@@ -144,3 +144,45 @@ describe("頼み方（P-48）", () => {
     expect(parsed.ok && parsed.value.text).toBe("最初の行\n同じ行");
   });
 });
+
+describe("指示の例の字と、作者からの頼みの返り（P-48 1.1）", () => {
+  test("例に挙げた字（國・學・體・ゝ・ゞ）は捨てずに数える（写真と見比べてもらう）", () => {
+    const parsed = parsePhotoTranscription(answer(["國の學校", "こゝろ", "人々の体"]));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // 「々」と今の字（体）は数えない
+    expect(parsed.value.exampleChars).toBe(3);
+    expect(parsed.value.text).toBe("國の學校\nこゝろ\n人々の体");
+  });
+
+  test("例の字が無ければ0（誤検出しない）", () => {
+    const parsed = parsePhotoTranscription(answer(["国の学校", "人々の体"]));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.exampleChars).toBe(0);
+  });
+
+  test("原則2の例が行ごと返ってきたら捨てる", () => {
+    const parsed = parsePhotoTranscription(answer(["「國」を「国」に直さない。", "本文の行"]));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.text).toBe("本文の行");
+    expect(parsed.value.droppedEchoes).toBe(1);
+  });
+
+  test("頼みの文が行ごと返ってきたら捨てる。本文の中に同じ語がある行は捨てない", () => {
+    const parsed = parsePhotoTranscription(
+      answer(["【作者からの頼み】", "旧字体はそのまま。", "旧字体はそのままだと彼は云う", "本文の行"]),
+      { requestEchoes: ["旧字体はそのまま。"] }
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.text).toBe("旧字体はそのままだと彼は云う\n本文の行");
+    expect(parsed.value.droppedEchoes).toBe(2);
+  });
+
+  test("頼みを渡さなければ、頼みと同じ行も捨てない（頼みの無い回に本文を失わない）", () => {
+    const parsed = parsePhotoTranscription(answer(["旧字体はそのまま。"]));
+    expect(parsed.ok).toBe(true);
+  });
+});

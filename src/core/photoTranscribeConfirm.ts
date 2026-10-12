@@ -18,6 +18,17 @@ export interface PhotoSendConfirmInput {
   readonly photos: number;
   /** 呼ぶたびに課金されるか */
   readonly isPaid: boolean;
+  /**
+   * 作者からの頼み（設計書6.117.12）。**写真と一緒に送る文なので、確かめの窓で
+   * 見せる**。空なら出さない
+   */
+  readonly request?: string;
+}
+
+/** 確かめの窓の本文の末尾に添える、頼みの文 */
+function requestNote(request: string | undefined): string {
+  const text = (request ?? "").replace(/\r\n?/g, "\n").trim();
+  return text === "" ? "" : `\n\nAIへの頼み（一緒に送ります）：\n${text}`;
 }
 
 export interface PhotoSendConfirm {
@@ -43,7 +54,7 @@ export function describePhotoSend(input: PhotoSendConfirmInput): PhotoSendConfir
   if (isLocalProviderId(input.providerId)) {
     return {
       message: `${count}を${ai}で読みます。`,
-      detail: "写真はこのパソコンの外へは出ません。",
+      detail: "写真はこのパソコンの外へは出ません。" + requestNote(input.request),
       proceed: "書き起こす",
     };
   }
@@ -51,7 +62,8 @@ export function describePhotoSend(input: PhotoSendConfirmInput): PhotoSendConfir
     message: `${count}を${ai}へ送ります。`,
     detail:
       "写真は外のサービスに渡ります。" +
-      (input.isPaid ? "\n呼び出すたびに課金されます。" : ""),
+      (input.isPaid ? "\n呼び出すたびに課金されます。" : "") +
+      requestNote(input.request),
     proceed: "送って書き起こす",
   };
 }
