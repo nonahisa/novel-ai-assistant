@@ -207,7 +207,7 @@ describe("回線が戻ったら送り直す（2026-10-01 の再現）", () => {
     repo.online = true;
     const third = await resender.attempt("interval");
     expect(pushes()).toHaveLength(3);
-    expect(third?.sent).toEqual([{ label: "書庫", ahead: 2 }]);
+    expect(third?.sent).toEqual([{ label: "書庫 の いじめられっ子・ハイエルフ未亡人", ahead: 2 }]);
     expect(windowsShown).toEqual([]);
     expect(statusBarMessages.map((one) => one.text).join("\n")).toContain(
       "送れていなかった 2件を GitHub へ送りました"
@@ -223,6 +223,27 @@ describe("回線が戻ったら送り直す（2026-10-01 の再現）", () => {
     const before = calls.length;
     await resender.attempt("interval");
     expect(calls.length).toBe(before);
+  });
+
+  /**
+   * 書庫の作品名は、送れていなかった分がある作品だけを出す（作者の指摘、
+   * 2026-10-12 夜：「書庫の全部作品名がでるのはわかりにくいです」）。
+   * 作品ごとの送信待ち（`aheadHere`）は見張りの控えにあるので、git は増やさない
+   */
+  test("知らせとログに出す名前は、送れていなかった分がある作品だけ", async () => {
+    repo.online = true;
+    cached.set("w2", {
+      ...(tracked(0, 2) as Extract<GitSyncStatus, { kind: "tracked" }>),
+      aheadHere: 0,
+    });
+    const result = await makeResender().attempt("interval");
+    expect(result?.sent).toEqual([{ label: "いじめられっ子（書庫 書庫）", ahead: 2 }]);
+    expect(statusBarMessages.map((one) => one.text).join("\n")).toContain(
+      "送れていなかった 2件を GitHub へ送りました（いじめられっ子（書庫 書庫））"
+    );
+    const logged = vi.mocked(logStep).mock.calls.flat().join("\n");
+    expect(logged).toContain("自動の送り直し：送った（いじめられっ子（書庫 書庫）／2件");
+    expect(logged).not.toContain("ハイエルフ未亡人");
   });
 
   /**
@@ -523,7 +544,7 @@ describe("見送るときは黙らない（2026-10-11 の再現）", () => {
     repo.online = true;
     clock += 5 * 60_000;
     const sent = await resender.heartbeat();
-    expect(sent?.sent).toEqual([{ label: "書庫", ahead: 2 }]);
+    expect(sent?.sent).toEqual([{ label: "書庫 の いじめられっ子・ハイエルフ未亡人", ahead: 2 }]);
   });
 
   test("見張りの取り込み・送信が終わらないときも、理由を1回だけ残す", async () => {
@@ -565,6 +586,6 @@ describe("見送るときは黙らない（2026-10-11 の再現）", () => {
     );
     const result = await makeResender().heartbeat();
     expect(pushes()).toEqual([["push"]]);
-    expect(result?.sent).toEqual([{ label: "書庫", ahead: 1 }]);
+    expect(result?.sent).toEqual([{ label: "書庫 の いじめられっ子・ハイエルフ未亡人", ahead: 1 }]);
   });
 });

@@ -5,6 +5,7 @@ import {
   fetchRemote,
   pullFastForward,
   push,
+  readPendingPaths,
   readSyncStatus,
   runGit,
   type GitCommandRunner,
@@ -28,6 +29,7 @@ import {
   planSyncAll,
   syncChoiceOf,
   syncCommitMessage,
+  worksTouchedByPaths,
   type FoldSummary,
   type SyncTargetOutcome,
   type SyncTargetPlan,
@@ -254,9 +256,43 @@ async function collectStates(
       status,
       trackable,
       ...(unsaved > 0 ? { unsaved } : {}),
+      ...(await involvedWorks(deps, root, target.works, status)),
     });
   }
   return states;
+}
+
+/**
+ * 書庫の中で、この回に関わる作品を決める（作者の指摘、2026-10-12 夜）。
+ *
+ * 「書庫の全部作品名がでるのはわかりにくいです。作品名を特定してください」。
+ * 確認の窓・進み具合・報告・ログに出す名前を、変わった道が当たる作品と
+ * 未保存の文書がある作品に絞る。**git は置き場ごとに数回だけ**呼ぶ
+ * （作品ごとには呼ばない。書庫では作品の数だけプロセスが起きる）。
+ *
+ * 作品が1つの置き場は調べない（名前はその作品に決まっている）。
+ * 調べられなければ何も足さない——名前は書庫の名前だけになる。
+ */
+async function involvedWorks(
+  deps: SyncAllDeps,
+  root: string,
+  works: readonly WorkEntry[],
+  status: SyncTargetState["status"]
+): Promise<{ involved?: WorkEntry[] }> {
+  if (works.length <= 1) return {};
+  if (status.kind === "not_a_repo" || status.kind === "git_missing") return {};
+  const pending = await readPendingPaths(root, status, deps.run ?? runGit);
+  if (!pending) return {};
+  const touched = new Set(worksTouchedByPaths(root, works, pending));
+  // 未保存の文書は git の道に現れないので、作品ごとに数える（git は呼ばない）
+  const presave = deps.presave;
+  return {
+    involved: works.filter(
+      (work) =>
+        touched.has(work) ||
+        (presave !== undefined && presave.countUnsaved([work.folderPath]) > 0)
+    ),
+  };
 }
 
 /**
@@ -548,7 +584,9 @@ async function report(
   );
   if (action === "ログを表示") showLog();
   if (action === "分岐合流") {
-    const work = diverged[0]?.plan.target.works[0];
+    // 関わる作品が分かっていれば、それを入口にする（書庫の先頭の作品より近い）
+    const target = diverged[0]?.plan.target;
+    const work = target?.involved?.[0] ?? target?.works[0];
     await vscode.commands.executeCommand(
       "novelai.resolveDivergence",
       work ? { type: "work", work } : undefined

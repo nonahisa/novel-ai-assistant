@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
 import {
   deriveSiteProfile,
+  followNewEpisodeUrl,
+  NEW_EPISODE_URL_FOLLOW_QUESTION,
+  newEpisodeUrlDraft,
+  planNewEpisodeUrlOnWorkIdChange,
   postingPageUrl,
   readerStatsPageUrl,
 } from "../../../src/core/postingSiteUrls";
@@ -221,5 +225,84 @@ describe("コピーのあとに開く投稿ページ", () => {
         workId: 実機.workId,
       })
     ).toBe(実機.newEpisodeUrl);
+  });
+});
+
+/**
+ * 「投稿サイト設定」の投稿ページのURLを、作品IDから下書きする（作者に約束済み、
+ * 2026-10-12）。URL が入っている作品で作品IDを書き換えたときは**確認で一言訊く**
+ * （作者の裁定、2026-10-12 22時台）。手で入れた URL を黙って消さない。
+ */
+describe("投稿ページのURLの下書きと、作品IDを変えたときの問い", () => {
+  const kakuyomuUrl = (id: string) => `https://kakuyomu.jp/my/works/${id}/episodes/new`;
+
+  test("URL が空で作品IDがあれば、作品IDから組み立てた URL を下書きに入れる", () => {
+    expect(newEpisodeUrlDraft("kakuyomu", undefined, 実機.workId)).toBe(
+      実機.newEpisodeUrl
+    );
+    expect(newEpisodeUrlDraft("kakuyomu", "  ", 実機.workId)).toBe(実機.newEpisodeUrl);
+  });
+
+  test("URL が入っていれば、そのまま（組み立てた値で上書きしない）", () => {
+    expect(newEpisodeUrlDraft("kakuyomu", kakuyomuUrl("1"), "2")).toBe(kakuyomuUrl("1"));
+  });
+
+  test("作品IDが無い・組み立てられないサイトなら、下書きは無い", () => {
+    expect(newEpisodeUrlDraft("kakuyomu", undefined, undefined)).toBeUndefined();
+    expect(newEpisodeUrlDraft("kakuyomu", undefined, "作品名")).toBeUndefined();
+    expect(newEpisodeUrlDraft("narou", undefined, "n1234ab")).toBeUndefined();
+  });
+
+  test("URL が入っていて作品IDを変えたら、合わせるかを訊く", () => {
+    expect(
+      planNewEpisodeUrlOnWorkIdChange("kakuyomu", kakuyomuUrl("111"), "111", "222")
+    ).toEqual({ kind: "ask", rebuilt: kakuyomuUrl("222") });
+    expect(NEW_EPISODE_URL_FOLLOW_QUESTION).toBe(
+      "投稿ページの URL を新しい作品IDに合わせますか"
+    );
+  });
+
+  test("作品IDを変えていない・消した・URL がもう新しい作品IDを指すなら訊かない", () => {
+    const url = kakuyomuUrl("111");
+    expect(planNewEpisodeUrlOnWorkIdChange("kakuyomu", url, "111", " 111 ")).toEqual({
+      kind: "none",
+    });
+    expect(planNewEpisodeUrlOnWorkIdChange("kakuyomu", url, "111", "")).toEqual({
+      kind: "none",
+    });
+    // 作品IDを初めて入れたが、URL がもうその作品を指している
+    expect(planNewEpisodeUrlOnWorkIdChange("kakuyomu", url, undefined, "111")).toEqual({
+      kind: "none",
+    });
+    // 作品IDが数字でない（組み立てられない）なら訊かない
+    expect(planNewEpisodeUrlOnWorkIdChange("kakuyomu", url, "111", "作品名")).toEqual({
+      kind: "none",
+    });
+    // 組み立てられないサイトでは訊かない（推測のURLを入れない）
+    expect(
+      planNewEpisodeUrlOnWorkIdChange(
+        "narou",
+        "https://syosetu.com/usernovelmanage/top/ncode/n1/",
+        "n1",
+        "n2"
+      )
+    ).toEqual({ kind: "none" });
+  });
+
+  test("はいなら組み直し、いいえなら URL は変わらない", () => {
+    const sites = [
+      { site: "kakuyomu" as const, newEpisodeUrl: kakuyomuUrl("111") },
+      {
+        site: "narou" as const,
+        newEpisodeUrl: "https://syosetu.com/usernovelmanage/top/ncode/n1/",
+      },
+    ];
+    expect(followNewEpisodeUrl(sites, "kakuyomu", kakuyomuUrl("222"), false)).toEqual(
+      sites
+    );
+    expect(followNewEpisodeUrl(sites, "kakuyomu", kakuyomuUrl("222"), true)).toEqual([
+      { site: "kakuyomu", newEpisodeUrl: kakuyomuUrl("222") },
+      sites[1],
+    ]);
   });
 });

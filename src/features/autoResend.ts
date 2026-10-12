@@ -20,6 +20,7 @@ import {
   type ResendTarget,
 } from "../core/autoResendPlan";
 import { buildSyncTarget } from "../core/syncTarget";
+import { describePlaceWorks } from "../core/syncAllPlan";
 import { normalizeForComparison } from "../core/paths";
 import { logFailure, logStep } from "../core/logger";
 import { useSyncLog } from "./syncLog";
@@ -306,7 +307,7 @@ export class AutoResender implements vscode.Disposable {
     trigger: ResendTrigger,
     outcome: ResendAttempt
   ): Promise<void> {
-    const label = buildSyncTarget(target.root, works).label;
+    const label = this.placeLabel(target.root, works);
 
     // **控えは古いことがある**（端末で送った・別の道で取り込んだ）。
     // 送る前に手元の git に聞き直す。ネットワークには出ない
@@ -378,6 +379,23 @@ export class AutoResender implements vscode.Disposable {
     });
   }
 
+  /**
+   * 知らせとログに出す置き場の名前（作者の指摘、2026-10-12 夜）。
+   *
+   * 「すべて同期」と同じ書き方（`describePlaceWorks`）で、書庫なら
+   * **送れていなかった分がある作品だけ**を名前で出す。作品ごとの送信待ちは
+   * 見張りの控え（`aheadHere`）から読むので、git は増やさない。控えが古ければ
+   * 名前の選び方がずれうるが、ずれるのは表示だけで、送るものは置き場ぜんぶのまま。
+   */
+  private placeLabel(root: string, works: readonly WorkEntry[]): string {
+    const place = buildSyncTarget(root, works);
+    const involved = place.works.filter((work) => {
+      const status = this.deps.monitor.statusFor(work.id);
+      return status?.kind === "tracked" && status.aheadHere > 0;
+    });
+    return describePlaceWorks(place.label, place.works, involved);
+  }
+
   private async refreshWorks(works: readonly WorkEntry[]): Promise<void> {
     for (const work of works) {
       await this.deps.monitor.refresh(work, { fetch: false, notify: false });
@@ -414,7 +432,7 @@ export class AutoResender implements vscode.Disposable {
       // 書庫なら書庫のログへ（送り直しの他の記録と同じ置き場）
       await useSyncLog(place.root, place.works);
       logStep(
-        `自動の送り直しを見送った（${buildSyncTarget(place.root, works).label}` +
+        `自動の送り直しを見送った（${this.placeLabel(place.root, works)}` +
           `／${reason}。送れていない分は手元に残っています）`
       );
     } catch (error) {

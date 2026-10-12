@@ -9,6 +9,7 @@ import {
   describeTargetWorks,
   planSyncAll,
   planSyncTarget,
+  worksTouchedByPaths,
   syncChoiceOf,
   syncCommitMessage,
   type SyncTargetState,
@@ -240,18 +241,63 @@ describe("何が起きるかを書く", () => {
     expect(describeTargetWorks(state())).toBe("作品A");
   });
 
-  test("複数なら、置き場と中の作品を出す", () => {
+});
+
+/**
+ * 書庫の同期で、その回に関わる作品だけを名前で出す（作者の指摘、2026-10-12 夜）。
+ *
+ * 「書庫単位で同期する際、書庫の全部作品名がでるのはわかりにくいです。
+ * 作品名を特定してください」。実際に直したのは1作品だけなのに、書庫の
+ * 5作品が全部並んでいた。
+ */
+describe("書庫の同期で出す作品名", () => {
+  const five = [
+    work("w1", "いじめられっ子", "C:/書庫/いじめられっ子"),
+    work("w2", "たゆたう鉛", "C:/書庫/たゆたう鉛"),
+    work("w3", "ハイエルフ未亡人", "C:/書庫/ハイエルフ未亡人"),
+    work("w4", "教科書チート", "C:/書庫/教科書チート"),
+    work("w5", "事実の照合台", "C:/書庫/事実の照合台"),
+  ];
+
+  test("1作品だけ変えたなら、その作品名と書庫の名前だけを出す", () => {
     const text = describeTargetWorks(
-      state({
-        works: [
-          work("w1", "作品A", "C:/書庫/作品A"),
-          work("w2", "作品B", "C:/書庫/作品B"),
-        ],
-      })
+      state({ works: five, involved: [five[0]] })
     );
-    expect(text).toContain("書庫");
-    expect(text).toContain("作品A");
-    expect(text).toContain("作品B");
+    expect(text).toBe("いじめられっ子（書庫 書庫）");
+    expect(text).not.toContain("たゆたう鉛");
+  });
+
+  test("2作品なら、書庫の名前のあとに2つを並べる", () => {
+    expect(
+      describeTargetWorks(state({ works: five, involved: [five[0], five[2]] }))
+    ).toBe("書庫 の いじめられっ子・ハイエルフ未亡人");
+  });
+
+  test("多いときは、先頭の作品と「ほか N作品」に縮める", () => {
+    expect(
+      describeTargetWorks(state({ works: five, involved: five.slice(0, 4) }))
+    ).toBe("書庫 の いじめられっ子・たゆたう鉛 ほか2作品");
+  });
+
+  test("作品に当てられない変更しか無ければ、書庫の名前だけ（全作品を並べない）", () => {
+    expect(describeTargetWorks(state({ works: five, involved: [] }))).toBe("書庫");
+    // 材料が無い（調べられなかった）ときも同じ
+    expect(describeTargetWorks(state({ works: five }))).toBe("書庫");
+  });
+
+  test("変わった道を、作品フォルダーへ当てる（書庫の直下は当てない）", () => {
+    const touched = worksTouchedByPaths("C:/書庫", five, [
+      "いじめられっ子/本文/001.txt",
+      "教科書チート/設定/characters.json",
+      "README.md",
+      // 書庫の名前が前方一致するだけの別フォルダーは、中ではない
+      "いじめられっ子2/本文/001.txt",
+    ]);
+    expect(touched.map((one) => one.title)).toEqual([
+      "いじめられっ子",
+      "教科書チート",
+    ]);
+    expect(worksTouchedByPaths("C:/書庫", five, ["README.md"])).toEqual([]);
   });
 });
 
