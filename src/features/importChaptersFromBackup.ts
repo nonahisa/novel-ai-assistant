@@ -194,6 +194,8 @@ export async function placeImportedChapters(
           "作品一覧でそのファイルを右クリックして「話ごとのファイルに分ける」を選ぶと、分けるときに章も立ちます。",
       };
     }
+    // 題だけが違う話（titleByNumber）も、ここでは訊けないので立てない。
+    // 話数で当てるのは作者が選んだときだけ（メニューの取り込みでは確かめる窓が出る）
     return {
       created: 0,
       note:
@@ -355,9 +357,7 @@ export async function applyChapterOutline(
     locals,
     existing: set ? set.chapters : null,
   });
-  const detail = [`読んだ元：${sourceName}`, "", ...describeChapterImportPlan(plan)].join("\n");
-
-  const chapters = await chooseChapters(work, plan, detail);
+  const chapters = await chooseChapters(work, plan, sourceName);
   if (!chapters || !set) return false;
 
   try {
@@ -382,8 +382,9 @@ export async function applyChapterOutline(
 async function chooseChapters(
   work: WorkEntry,
   plan: ChapterImportPlan,
-  detail: string
+  sourceName: string
 ): Promise<readonly Chapter[] | undefined> {
+  const detail = [`読んだ元：${sourceName}`, "", ...describeChapterImportPlan(plan)].join("\n");
   switch (plan.kind) {
     case "none":
       void vscode.window.showInformationMessage(
@@ -401,6 +402,31 @@ async function chooseChapters(
         detail,
       });
       return undefined;
+    case "titleByNumber": {
+      /*
+        **題だけが違う話は、作者が選んだときだけ話数で当てる**（2026-10-12 作者の裁定）。
+        改題した話か、別の話かは作者にしか分からない。当てたあとは、ふだんの取り込みと
+        同じ確認（章を立てる／既にある章立てとの違い）へ進む
+      */
+      const acceptLabel = "話数で当てて取り込む";
+      const answer = await vscode.window.showWarningMessage(
+        "話数は合いますが、題が違う話があります。話数で当てて取り込みますか？",
+        { modal: true, detail },
+        acceptLabel,
+        "取り込まない"
+      );
+      useLogFile(work.folderPath);
+      if (answer !== acceptLabel) {
+        logLine(`章立ての取り込み：題の違う話が${plan.problems.length}話あり、取り込みませんでした。`);
+        return undefined;
+      }
+      logLine(
+        `章立ての取り込み：題の違う${plan.problems.length}話を、作者の選択で話数で当てました（` +
+          plan.problems.map((problem) => problem.label).join("、") +
+          "）。"
+      );
+      return chooseChapters(work, plan.accepted, sourceName);
+    }
     case "create":
       return (await confirmRun(
         `バックアップの章立てから、章を${plan.chapters.length}個立てます。`,

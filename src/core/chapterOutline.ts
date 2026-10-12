@@ -36,7 +36,9 @@ import { parseEpisodeMetadata } from "./metadataParser";
  *   （足りない章だけ足す／置き換える／やめる）
  * - **話を推測で割り当てない。** 題と話数で照らし、合わない話が1つでもあれば
  *   一覧にして止める。並びが入れ替わっているときも止める（章の切れ目は
- *   作品一覧の並びで決まるので、並びが違うと別の話が章に入る）
+ *   作品一覧の並びで決まるので、並びが違うと別の話が章に入る）。
+ *   合わないのが「話数は合うが題が違う」話だけなら、作者が確かめたときに限り
+ *   話数で当てる（`titleByNumber`。2026-10-12 作者の裁定）
  *
  * VS Code API には依存しない。
  */
@@ -190,6 +192,19 @@ export type ChapterImportPlan =
       readonly problems: readonly OutlineProblem[];
     }
   /**
+   * 合わないのは「話数は合うが題が違う」話だけで、話数で当てれば並びも崩れない。
+   * **作者が確かめたときだけ** `accepted` を使う（推し量って当てない。2026-10-12 作者の裁定）。
+   * 訊けない道（取り込んだ作品へ訊かずに立てる）では、`mismatch` と同じく止める
+   */
+  | {
+      readonly kind: "titleByNumber";
+      readonly count: number;
+      /** 題の違う話（すべて `reason: "title"`） */
+      readonly problems: readonly OutlineProblem[];
+      /** 話数で当てたときの計画 */
+      readonly accepted: MatchedChapterImportPlan;
+    }
+  /**
    * 手元の合本の途中から始まる章がある。**1つも立てない**
    * （`chaptersFromHeadings.ts` と同じ判断。頭の章だけ立てると、あとで分けても残りが立たない）
    */
@@ -214,6 +229,12 @@ export type ChapterImportPlan =
       readonly diff: readonly ChapterDiffLine[];
     };
 
+/** 話を全部照らし合わせられたあとの計画（`planChapterImport` の後段） */
+export type MatchedChapterImportPlan = Extract<
+  ChapterImportPlan,
+  { kind: "insideCollected" | "create" | "same" | "differs" }
+>;
+
 /**
  * 章立てを取り込む計画を立てる。**まだ何も書かない。**
  *
@@ -232,20 +253,51 @@ export function planChapterImport(input: {
     return { kind: "unreadable", count: sections.length };
   }
 
-  const matched = matchOutline(input.outline, input.locals);
+  const matched = matchOutline(input.outline, input.locals, false);
   if (matched.problems.length > 0) {
+    /*
+      **題の違いだけなら、話数で当てる道を作者に示す**（2026-10-12 実機、219話の作品で
+      改題した5話のために章立て全体が止まった）。missing・ambiguous・order が1つでも
+      あれば今までどおり止める——そちらは話数でも決められない
+    */
+    if (matched.problems.every((problem) => problem.reason === "title")) {
+      const byNumber = matchOutline(input.outline, input.locals, true);
+      if (byNumber.problems.length === 0) {
+        return {
+          kind: "titleByNumber",
+          count: sections.length,
+          problems: matched.problems,
+          accepted: planMatched(sections, byNumber.locals, input.locals, input.existing),
+        };
+      }
+      // 話数で当てると並びが崩れる：題の違いと並びの違いを両方見せて止める
+      return {
+        kind: "mismatch",
+        count: sections.length,
+        problems: [...matched.problems, ...byNumber.problems],
+      };
+    }
     return {
       kind: "mismatch",
       count: sections.length,
       problems: matched.problems,
     };
   }
+  return planMatched(sections, matched.locals, input.locals, input.existing);
+}
 
+/** 全部の話を当てられたあと、章を立てる形を決める */
+function planMatched(
+  sections: readonly CollectedSectionStart[],
+  matchedLocals: readonly (LocalOutlineEpisode | undefined)[],
+  locals: readonly LocalOutlineEpisode[],
+  existing: readonly Chapter[]
+): MatchedChapterImportPlan {
   const chapters: Chapter[] = [];
   const labels: string[] = [];
   let inside = 0;
   for (const section of sections) {
-    const local = matched.locals[section.startIndex];
+    const local = matchedLocals[section.startIndex];
     // 照らし合わせは全部通っているので、ここで欠けることは無い
     if (!local) continue;
     // **章立てはファイルしか指せない**（6.66.4）。合本の途中には置けない
@@ -266,13 +318,13 @@ export function planChapterImport(input: {
     };
   }
 
-  if (input.existing.length === 0) {
+  if (existing.length === 0) {
     return { kind: "create", chapters, labels };
   }
 
-  const diff = diffChapters(input.existing, chapters, input.locals);
+  const diff = diffChapters(existing, chapters, locals);
   if (diff.length === 0) return { kind: "same", count: chapters.length };
-  return { kind: "differs", proposed: chapters, existing: input.existing, diff };
+  return { kind: "differs", proposed: chapters, existing, diff };
 }
 
 /**
@@ -307,13 +359,17 @@ interface Matching {
  * - 話数が読めなければ、**題がちょうど1つだけ合う**話に当てる
  *   （なろうの「１　自殺の後始末」のように、話数を題から読めない作品がある）
  * - 当てた話の並びが、バックアップと同じ順でなければ止める
+ * - `byNumber` のときは、話数がちょうど1つ合えば題が違っても当てる
+ *   （**作者が確かめたあとだけ**。並びの確かめはそのまま通す）
  *
  * 題は、空白と全角半角の違いだけを揃えて比べる（サイトと手元で空白の入れ方が違う
- * ことがある）。それ以外の違いは違いとして扱う。
+ * ことがある）。サイトの題が末尾「…」で切れていれば頭だけで比べる（`sameTitle`）。
+ * それ以外の違いは違いとして扱う。
  */
 function matchOutline(
   outline: readonly OutlineEpisode[],
-  locals: readonly LocalOutlineEpisode[]
+  locals: readonly LocalOutlineEpisode[],
+  byNumber: boolean
 ): Matching {
   const problems: OutlineProblem[] = [];
   const matchedLocals: (LocalOutlineEpisode | undefined)[] = [];
@@ -331,10 +387,12 @@ function matchOutline(
       if (candidates.length === 0 && wanted !== null) {
         candidates = indexesOf(
           locals,
-          (local) => local.number === null && titleKey(local.title) === wanted
+          (local) => local.number === null && sameTitle(wanted, titleKey(local.title))
         );
       }
-      if (candidates.length === 0 && sameNumber.length === 1) {
+      if (candidates.length === 0 && sameNumber.length === 1 && byNumber) {
+        candidates = sameNumber;
+      } else if (candidates.length === 0 && sameNumber.length === 1) {
         problems.push({
           label: episode.label,
           reason: "title",
@@ -344,7 +402,7 @@ function matchOutline(
         continue;
       }
     } else if (wanted !== null) {
-      candidates = indexesOf(locals, (local) => titleKey(local.title) === wanted);
+      candidates = indexesOf(locals, (local) => sameTitle(wanted, titleKey(local.title)));
     } else {
       candidates = [];
     }
@@ -390,8 +448,30 @@ function titleKey(title: string | null): string | null {
 }
 
 /** どちらかの題が分からなければ、題では弾かない（話数で決める） */
-function titlesAgree(a: string | null, b: string | null): boolean {
-  return a === null || b === null || a === b;
+function titlesAgree(site: string | null, local: string | null): boolean {
+  return site === null || local === null || sameTitle(site, local);
+}
+
+/** 切れた題の頭が、これより短ければ当てない（「塩化…」の2字では別の話とも合いうる） */
+const MIN_TRUNCATED_HEAD = 3;
+
+/**
+ * サイトの題（`site`）と手元の題（`local`）が同じ話を指すか。どちらも `titleKey` の形で渡す。
+ *
+ * **カクヨムの作品管理の画面は、長い題を末尾「…」で切って表示する**（2026-10-12 実機、
+ * 219話の作品で6話。ヘルパーは画面の字をそのまま渡す）。サイトの題が「…」で終わるときは、
+ * その手前までが手元の題の頭と合えば同じ話とみなす。`titleKey` の NFKC で「…」（U+2026）は
+ * 「...」になるので、半角の点3つで終わる題も同じ扱いになる。
+ *
+ * 手元の題の側が「…」で終わるときは切れたとみなさない（手元は作者の原稿で、切れていない）。
+ */
+function sameTitle(site: string | null, local: string | null): boolean {
+  if (site === null || local === null) return false;
+  if (site === local) return true;
+  if (!site.endsWith("...")) return false;
+  const head = site.replace(/\.+$/u, "");
+  if (Array.from(head).length < MIN_TRUNCATED_HEAD) return false;
+  return local.startsWith(head);
 }
 
 /* ── いまの章立てとの違い ─────────────────────────────── */
@@ -466,6 +546,15 @@ export function describeChapterImportPlan(plan: ChapterImportPlan): string[] {
         "推測では割り当てないため、章立ては取り込みません。",
         "",
         ...listed(plan.problems.map(describeProblem), "話"),
+      ];
+    case "titleByNumber":
+      return [
+        `次の${plan.problems.length}話は、話数は合いますが題が違います。`,
+        "",
+        ...listed(plan.problems.map(describeProblem), "話"),
+        "",
+        "改題した話なら、話数で当てて取り込めます（題が違う話を、推測では当てません）。",
+        "原稿は書き換えません。書くのは章立ての記録（設定/章立て.json）だけです。",
       ];
     case "insideCollected":
       return [

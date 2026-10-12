@@ -327,3 +327,142 @@ describe("手元の原稿を照らし合わせる形にする（localOutlineOf�
     ).toBe("insideCollected");
   });
 });
+
+/*
+  2026-10-12 実機（219話・章7個の作品）で、カクヨムからの章立ての取り込みが
+  「推測では割り当てないため」で全体止まった。題が合わないと言われた11件は2種類あった。
+  A：カクヨムの作品管理の画面が長い題を末尾「…」で切って表示し、ヘルパーがそのまま渡した（6件）
+  B：本当に題が違う（5件）。作者の裁定は「Aを直しBは確かめて当てる」
+*/
+describe("カクヨムの画面で切れた題（末尾の「…」）", () => {
+  function kakuyomu(title: string): OutlineEpisode[] {
+    return [
+      { label: "1話　潮の匂い", number: 1, title: "潮の匂い", part: "第一章『岬』" },
+      { label: `2話　${title}`, number: 2, title, part: "第一章『岬』" },
+      { label: "3話　嵐の夜", number: 3, title: "嵐の夜", part: "第二章『灯』" },
+    ];
+  }
+  function locals(second: string): LocalOutlineEpisode[] {
+    return [
+      { relPath: "本文/1.txt", indexInFile: 0, number: 1, title: "潮の匂い", label: "第1話" },
+      { relPath: "本文/2.txt", indexInFile: 0, number: 2, title: second, label: "第2話" },
+      { relPath: "本文/3.txt", indexInFile: 0, number: 3, title: "嵐の夜", label: "第3話" },
+    ];
+  }
+
+  it("サイトの題が「…」で切れていれば、手前までが手元の題の頭と合えば同じ話とみなす", () => {
+    const plan = planChapterImport({
+      outline: kakuyomu("塩化ナトリウム水溶液が飽和する…"),
+      locals: locals("塩化ナトリウム水溶液が飽和するまで"),
+      existing: [],
+    });
+    expect(plan.kind).toBe("create");
+  });
+
+  it("括弧の途中で切れた題（工場制手工業(マニュファクチ…）も当たる", () => {
+    const plan = planChapterImport({
+      outline: kakuyomu("工場制手工業(マニュファクチ…"),
+      locals: locals("工場制手工業(マニュファクチュア)"),
+      existing: [],
+    });
+    expect(plan.kind).toBe("create");
+  });
+
+  it("念のため、末尾の「...」（半角の点3つ）でも同じに扱う", () => {
+    const plan = planChapterImport({
+      outline: kakuyomu("塩化ナトリウム水溶液が..."),
+      locals: locals("塩化ナトリウム水溶液が飽和するまで"),
+      existing: [],
+    });
+    expect(plan.kind).toBe("create");
+  });
+
+  it("切れた頭が3字に満たなければ当てない（題の違いとして扱う）", () => {
+    const plan = planChapterImport({
+      outline: kakuyomu("塩化…"),
+      locals: locals("塩化ナトリウム水溶液が飽和するまで"),
+      existing: [],
+    });
+    expect(plan.kind).not.toBe("create");
+  });
+
+  it("頭が合わなければ当てない", () => {
+    const plan = planChapterImport({
+      outline: kakuyomu("塩化カリウム水溶液が…"),
+      locals: locals("塩化ナトリウム水溶液が飽和するまで"),
+      existing: [],
+    });
+    expect(plan.kind).not.toBe("create");
+  });
+
+  it("手元の題が「…」で終わり、サイトが切れていないときは今までどおり（題の違い）", () => {
+    const plan = planChapterImport({
+      outline: kakuyomu("塩化ナトリウム水溶液が飽和するまで"),
+      locals: locals("塩化ナトリウム水溶液が飽和する…"),
+      existing: [],
+    });
+    expect(plan.kind).not.toBe("create");
+  });
+});
+
+describe("話数は合うが題だけが違う話（作者に確かめて話数で当てる）", () => {
+  it("題の違いだけなら、全体を止めずに「確かめれば当てられる」形で返す", () => {
+    const locals = splitLocals().map((local) =>
+      local.number === 2 ? { ...local, title: "古い地図1" } : local
+    );
+    const plan = planChapterImport({ outline: outline(), locals, existing: [] });
+    expect(plan.kind).toBe("titleByNumber");
+    if (plan.kind !== "titleByNumber") return;
+    expect(plan.problems).toEqual([
+      { label: "2話　古い地図", reason: "title", localTitle: "古い地図1" },
+    ]);
+    // 話数で当てたあとの計画は、ふだんの「立てる」と同じ
+    expect(plan.accepted.kind).toBe("create");
+    if (plan.accepted.kind !== "create") return;
+    expect(plan.accepted.chapters).toEqual([
+      { name: "第一章『岬』", startEpisodePath: "本文/0001_潮の匂い.txt" },
+      { name: "第二章『灯』", startEpisodePath: "本文/0003_嵐の夜.txt" },
+    ]);
+    // 確かめる文に、話数・サイトの題・手元の題が出る
+    const text = describeChapterImportPlan(plan).join("\n");
+    expect(text).toContain("2話　古い地図");
+    expect(text).toContain("古い地図1");
+  });
+
+  it("章の始まりの話の題が違っても、話数で当てれば章はその話から始まる", () => {
+    const locals = splitLocals().map((local) =>
+      local.number === 3 ? { ...local, title: "嵐の夜（改題）" } : local
+    );
+    const plan = planChapterImport({ outline: outline(), locals, existing: [] });
+    expect(plan.kind).toBe("titleByNumber");
+    if (plan.kind !== "titleByNumber" || plan.accepted.kind !== "create") return;
+    expect(plan.accepted.chapters[1]).toEqual({
+      name: "第二章『灯』",
+      startEpisodePath: "本文/0003_嵐の夜.txt",
+    });
+  });
+
+  it("題の違いのほかに見当たらない話が混ざれば、今までどおり止める", () => {
+    const locals = splitLocals()
+      .filter((local) => local.number !== 4)
+      .map((local) => (local.number === 2 ? { ...local, title: "古い地図1" } : local));
+    const plan = planChapterImport({ outline: outline(), locals, existing: [] });
+    expect(plan.kind).toBe("mismatch");
+    if (plan.kind !== "mismatch") return;
+    expect(plan.problems.map((problem) => problem.reason).sort()).toEqual(["missing", "title"]);
+  });
+
+  it("話数で当てると並びが崩れるなら、確かめずに止める", () => {
+    // 手元では2話と3話の位置が入れ替わっていて、題も違う
+    const base = splitLocals();
+    const locals = [
+      base[0],
+      { ...base[2], number: 3, title: "別の題B" },
+      { ...base[1], number: 2, title: "別の題A" },
+      base[3],
+      base[4],
+    ];
+    const plan = planChapterImport({ outline: outline(), locals, existing: [] });
+    expect(plan.kind).toBe("mismatch");
+  });
+});
