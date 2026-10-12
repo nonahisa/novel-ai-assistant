@@ -81,6 +81,28 @@ export function activeManuscriptTabUri(): vscode.Uri | undefined {
 }
 
 /**
+ * 前に出ているタブが開いているファイルの場所。本文かどうかは問わない。
+ *
+ * **素のエディタ（`TabInputText`）でも原稿エディタ（`TabInputCustom`）でも
+ * 同じ答えを返す。** 「校閲開始／終了」のように、ファイルを押さえるだけで
+ * 中身を書き換えない操作は、どの画面で開いていても場所さえ分かれば足りる。
+ * `activeTextEditor` だけを見ていると、原稿エディタ（既定の開き方）で開いた
+ * 話では空になり、「開いてから実行してください」で止まっていた（2026-10-12）。
+ *
+ * パネル（WebView）など、ファイルを指さないタブなら undefined。
+ */
+export function activeTabFileUri(): vscode.Uri | undefined {
+  try {
+    const input: unknown = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    if (input instanceof vscode.TabInputText) return input.uri;
+    if (input instanceof vscode.TabInputCustom) return input.uri;
+  } catch {
+    // 読めない環境（古いVS Code・試験の代役）では「開いていない」と同じ扱い
+  }
+  return undefined;
+}
+
+/**
  * いまアクティブなタブが、この拡張機能以外のカスタムエディタで本文を開いているなら、
  * その場所（hybrid Markdown editor がこれに当たる）。
  *

@@ -16,6 +16,7 @@ import { cancelItem, isCancelItem } from "../views/dialogs";
 import type { ProposalPanel, ProposalViewItem } from "./proposalPanel";
 import { notifyDone } from "../views/notify";
 import { useLogFile } from "../core/logger";
+import { activeTabFileUri } from "./manuscriptTab";
 
 /**
  * 編集部からの提案を、作者が見て決める（設計書5.6）。
@@ -93,15 +94,19 @@ function toViewItem(proposal: ProposalView): ProposalViewItem & {
  * 見ている間、作者は第20話も書けない。
  */
 export async function toggleReviewLock(work: WorkEntry): Promise<void> {
-  const editor = vscode.window.activeTextEditor;
-  if (!editor) {
+  // **前に出ているタブから取る。** 原稿エディタ（既定の開き方）は
+  // `TextEditor` を持たないので、`activeTextEditor` だけでは話を開いていても
+  // 空になる（2026-10-12）。タブが読めない環境のために素のエディタへも落とす
+  const uri =
+    activeTabFileUri() ?? vscode.window.activeTextEditor?.document.uri;
+  if (!uri) {
     void vscode.window.showWarningMessage(
       "校閲するファイルを開いてから実行してください。"
     );
     return;
   }
 
-  const filePath = fromUri(editor.document.uri);
+  const filePath = fromUri(uri);
   // 「中にあるか」は共通の判定に任せる（2026-09-23）。`startsWith("..")` の
   // 写しは、`..下書き` のようなフォルダーを外と誤り、別のドライブのファイル
   // （`relative` が絶対の場所を返す）を中と誤っていた

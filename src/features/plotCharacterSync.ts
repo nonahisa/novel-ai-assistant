@@ -143,7 +143,7 @@ export async function syncPlotCharacters(
     skipped: plan.skipped,
     unchanged: false,
   };
-  announce(result, options.force ?? false);
+  announce(work, result, options.force ?? false);
   return result;
 }
 
@@ -153,8 +153,13 @@ export async function syncPlotCharacters(
  * **新しい情報が無ければ何も言わない**（設計書6.4.9）。保存のたびに
  * 「何もありませんでした」と出ると、書いている手が止まる。
  * 自分で押したときだけは、無反応にしないために必ず返事をする。
+ * 例外は見送った名前の案があるとき（`announceDeclinedRenames`）。
  */
-function announce(result: PlotCharacterSyncResult, force: boolean): void {
+function announce(
+  work: WorkEntry,
+  result: PlotCharacterSyncResult,
+  force: boolean
+): void {
   const parts: string[] = [];
   const created = result.creations.length;
   const total = result.staged + created;
@@ -193,7 +198,10 @@ function announce(result: PlotCharacterSyncResult, force: boolean): void {
   notes.push(...describeSkipped(result.skipped));
 
   if (parts.length === 0) {
-    if (!force) return;
+    if (!force) {
+      announceDeclinedRenames(work, result.skipped);
+      return;
+    }
     void vscode.window.showInformationMessage(
       ["プロットから資料へ反映するものはありませんでした。", ...notes].join("")
     );
@@ -201,6 +209,40 @@ function announce(result: PlotCharacterSyncResult, force: boolean): void {
   }
 
   void vscode.window.showInformationMessage([...parts, ...notes].join(""));
+}
+
+/**
+ * 作品ごとの、もう出した「置き直していません」の文。VS Code を開いている
+ * 間だけ覚える（ディスクには残さない）。
+ */
+const declinedNoticesShown = new Map<string, Set<string>>();
+
+/**
+ * 名前を直す案を見送った作品では、反映するものが無い保存でも一言出す
+ * （作者の裁定、2026-10-12）。
+ *
+ * 黙ると、plot.md に名前を書いたのに資料へ出てこない理由が分からない。
+ * ほかの見送り（読めない行など）はこれまでどおり添えるだけにする——
+ * それだけで保存のたびに口を開くと、書く手が止まる。
+ *
+ * **同じ文は、作品ごとに1回の起動で1回だけ。** 見送った案は直さない限り
+ * 残り続けるので、欄を直して保存するたびに同じ文が出るとうるさい。
+ * 名前を書き換えれば文が変わるので、そのときはもう一度出る。
+ */
+function announceDeclinedRenames(
+  work: WorkEntry,
+  skipped: readonly PlotCharacterSkip[]
+): void {
+  const lines = describeSkipped(
+    skipped.filter((entry) => entry.reason === "renameOffered")
+  );
+  if (lines.length === 0) return;
+  const message = ["プロットから資料へ反映するものはありませんでした。", ...lines].join("");
+  const shown = declinedNoticesShown.get(work.folderPath) ?? new Set<string>();
+  if (shown.has(message)) return;
+  shown.add(message);
+  declinedNoticesShown.set(work.folderPath, shown);
+  void vscode.window.showInformationMessage(message);
 }
 
 /**

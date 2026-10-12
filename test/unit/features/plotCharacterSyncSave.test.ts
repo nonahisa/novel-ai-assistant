@@ -480,6 +480,86 @@ describe("plot.md の保存で人物の更新案を積む", () => {
     expect(disk.has(statePath)).toBe(false);
   });
 
+  /**
+   * 名前を直す案を見送った作品では、反映するものが無い保存でも一言出す
+   * （作者の裁定、2026-10-12）。黙ると、plot.md に名前を書いたのに資料へ
+   * 出てこない理由が分からない。ただし同じ文は、VS Code を開いている間に
+   * 作品ごとに1回だけ（保存のたびに出るとうるさい）。
+   *
+   * 作品ごとに覚えるので、ほかの試験と覚えが混ざらないよう別の作品で試す。
+   */
+  function otherWork(id: string): { entry: WorkEntry; digestPath: string } {
+    const entry: WorkEntry = {
+      ...work,
+      id,
+      folderPath: nodePath.join("C:", "novels", id),
+    };
+    const digestPath = Uri.file(
+      nodePath.join(entry.folderPath, ".aiwriter", "plot-sync.json")
+    ).fsPath;
+    return { entry, digestPath };
+  }
+
+  async function offerThenDecline(entry: WorkEntry): Promise<void> {
+    state.characters = [
+      character("char_001", "灯", "主人公"),
+      character("char_002", "主人公", "冒険者試験に落ちた"),
+    ];
+    state.plotText = plot(
+      ["- 灯：主人公", "- 主人公（相馬 誠）：冒険者試験に落ちた"].join("\n")
+    );
+    await syncPlotCharacters(entry);
+    expect(state.stage).toHaveBeenCalled();
+    // 作者が承認の画面で見送った（承認待ちは空、資料は「主人公」のまま）
+    state.stage.mockClear();
+    state.pending = [];
+    announced = [];
+  }
+
+  test("見送った名前の案があれば、反映するものが無い保存でも置き直さないことを言う", async () => {
+    const { entry, digestPath } = otherWork("work_declined");
+    await offerThenDecline(entry);
+
+    // 欄が変わったものとして読み直させる（覚え書きを消す）。積むものは無い
+    disk.delete(digestPath);
+    const result = await syncPlotCharacters(entry);
+
+    expect(result.staged).toBe(0);
+    expect(result.creations).toEqual([]);
+    expect(state.stage).not.toHaveBeenCalled();
+    expect(announced).toHaveLength(1);
+    expect(announced[0]).toContain("反映するものはありませんでした");
+    expect(announced[0]).toContain("相馬 誠");
+    expect(announced[0]).toContain("置き直していません");
+  });
+
+  test("同じ一言は、同じ作品で二度出さない", async () => {
+    const { entry, digestPath } = otherWork("work_declined_twice");
+    await offerThenDecline(entry);
+
+    disk.delete(digestPath);
+    await syncPlotCharacters(entry);
+    expect(announced).toHaveLength(1);
+
+    announced = [];
+    disk.delete(digestPath);
+    await syncPlotCharacters(entry);
+    expect(announced).toEqual([]);
+  });
+
+  test("見送った案が無い作品では、反映するものが無い保存は今までどおり黙る", async () => {
+    const { entry, digestPath } = otherWork("work_quiet");
+    state.characters = [character("char_001", "灯", "主人公")];
+    state.plotText = plot("- 灯：主人公");
+    await syncPlotCharacters(entry);
+    expect(state.stage).not.toHaveBeenCalled();
+
+    disk.delete(digestPath);
+    await syncPlotCharacters(entry);
+
+    expect(announced).toEqual([]);
+  });
+
   test("主要登場人物の節が無ければ、何もしない", async () => {
     state.plotText = ["# 氷の街", "", "## あらすじ", "- 灯が歩く。"].join("\n");
 
