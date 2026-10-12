@@ -2,10 +2,13 @@ import {
   postingSiteInfo,
   repeatsReaderStats,
   siteProfile,
+  validateNewEpisodeUrl,
   type PostingLedger,
+  type PostingSiteEntry,
   type PostingSiteId,
 } from "../models/posting";
 import { narouNcode } from "./postingSiteRecords";
+import { newEpisodeUrlFromWorkId } from "./postingSiteUrls";
 import { hashText } from "./hash";
 import { SETUP_URI_PATH } from "./setupRequest";
 import { RUN_URI_PATH } from "./runRequest";
@@ -510,4 +513,43 @@ export function planReaderStatsSiteId(
     return { kind: "same" };
   }
   return { kind: "replace", existing };
+}
+
+/** 新話投稿の先にするための案内（組み立てられないサイトの登録の知らせに添える） */
+export const POSTING_SITE_URL_HINT =
+  "新話投稿の先にするには『投稿サイト設定』で投稿ページのURLを入れてください。";
+
+/**
+ * 作品IDを登録したとき、投稿先（`sites[]`）をどうするか（作者の依頼 2026-10-12
+ * 「投稿先へは自動登録してください」）。
+ *
+ * - `add`：投稿先に無いので足す（投稿ページのURLは作品IDから組み立てた）
+ * - `unbuildable`：投稿先に無いが、投稿ページのURLを作品IDから組み立てられない
+ *   サイト（なろう・アルファポリス・note）。足さずに `POSTING_SITE_URL_HINT` を添える
+ * - `none`：何もしない
+ *
+ * ## 足さないとき
+ *
+ * - **作品IDが前から同じ（`same`）なら足さない。** 作者が投稿先から外したサイトを、
+ *   読者の反応を取り込むたびに戻さないため（作者の判断を上書きしない。実装ルール2）
+ * - **既に投稿先にあれば触らない。** 投稿ページのURLは作者が自分の画面から貼った値で、
+ *   組み立てた値より確か
+ */
+export type ReaderStatsPostingSitePlan =
+  | { readonly kind: "add"; readonly entry: PostingSiteEntry }
+  | { readonly kind: "unbuildable" }
+  | { readonly kind: "none" };
+
+export function planReaderStatsPostingSite(
+  ledger: PostingLedger,
+  site: PostingSiteId,
+  workId: string,
+  idPlan: ReaderStatsSiteIdPlan
+): ReaderStatsPostingSitePlan {
+  if (idPlan.kind === "same") return { kind: "none" };
+  if (ledger.sites.some((entry) => entry.site === site)) return { kind: "none" };
+  const url = newEpisodeUrlFromWorkId(site, workId);
+  // 組み立てた値も、作者が貼るときと同じ検査を通す（ドメイン違い・空を台帳へ入れない）
+  if (!url || validateNewEpisodeUrl(site, url) !== null) return { kind: "unbuildable" };
+  return { kind: "add", entry: { site, newEpisodeUrl: url } };
 }

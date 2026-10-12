@@ -263,6 +263,44 @@ describe("まとめて渡された分（URI）", () => {
     expect(informed.at(-1)).toContain("読者の反応を取り込みました：「教科書チート」1画面");
   });
 
+  test("登録したサイトを投稿先にも足し、足したことを知らせる（2026-10-12）", async () => {
+    env.clipboard.text = bundleText([kakuyomuItem(KAKUYOMU_ID)]);
+    pickItem = byWork("cheat");
+
+    await link().handleUri({ path: "/import-reader-stats" });
+
+    await vi.waitFor(() => expect(rows(cheat)).toHaveLength(1));
+    const url = `https://kakuyomu.jp/my/works/${KAKUYOMU_ID}/episodes/new`;
+    expect(ledgerOf(cheat).sites).toEqual([{ site: "kakuyomu", newEpisodeUrl: url }]);
+    expect(informed.at(-1)).toContain("投稿先にもカクヨムを足しました");
+    expect(informed.at(-1)).toContain(url);
+  });
+
+  test("前から同じ作品IDが入っていれば、投稿先から外したサイトを戻さない", async () => {
+    // 作者が投稿先から外した（sites に無い）が、作品IDは残っている
+    writeLedger(cheat, withSiteProfile(emptyPostingLedger(), "kakuyomu", { workId: KAKUYOMU_ID }));
+    env.clipboard.text = bundleText([kakuyomuItem(KAKUYOMU_ID)]);
+
+    await link().handleUri({ path: "/import-reader-stats" });
+
+    await vi.waitFor(() => expect(rows(cheat)).toHaveLength(1));
+    expect(ledgerOf(cheat).sites).toEqual([]);
+  });
+
+  test("既に投稿先にあれば、投稿ページのURLに触らない", async () => {
+    const mine = "https://kakuyomu.jp/my/works/2222/episodes/new";
+    writeLedger(cheat, withSites(emptyPostingLedger(), [{ site: "kakuyomu", newEpisodeUrl: mine }]));
+    env.clipboard.text = bundleText([kakuyomuItem(KAKUYOMU_ID)]);
+    pickItem = byWork("cheat");
+
+    await link().handleUri({ path: "/import-reader-stats" });
+
+    await vi.waitFor(() => expect(rows(cheat)).toHaveLength(1));
+    expect(siteProfile(ledgerOf(cheat), "kakuyomu")?.workId).toBe(KAKUYOMU_ID);
+    expect(ledgerOf(cheat).sites).toEqual([{ site: "kakuyomu", newEpisodeUrl: mine }]);
+    expect(informed.at(-1)).not.toContain("投稿先にも");
+  });
+
   test("選ぶ画面は作品名で決めない（先頭は作品でない）・IDとURLを出す・登録しないも選べる", async () => {
     env.clipboard.text = bundleText([kakuyomuItem(KAKUYOMU_ID)]);
     pickItem = () => undefined;

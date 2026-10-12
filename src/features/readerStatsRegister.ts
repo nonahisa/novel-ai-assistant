@@ -4,6 +4,7 @@ import {
   postingSiteInfo,
   siteProfile,
   withSiteProfile,
+  withSites,
   type PostingLedger,
   type PostingSiteId,
 } from "../models/posting";
@@ -11,6 +12,8 @@ import { PostingStore, PostingStoreError } from "../core/postingStore";
 import type { ReaderStatsBundle, ReaderStatsEnvelope } from "../core/readerStatsEnvelope";
 import {
   DECLINED_UNDO_HINT,
+  POSTING_SITE_URL_HINT,
+  planReaderStatsPostingSite,
   planReaderStatsSiteId,
   readerStatsDeclineKey,
   readerStatsWorkPageUrl,
@@ -40,6 +43,12 @@ import { cancelItem } from "../views/dialogs";
  * 読んだときのハッシュで照合する）。選んだ作品に**別の作品IDがあれば、確かめるまで
  * 書かない。** 置き換えるときも替えるのは作品IDだけで、作品ページ・ジャンル・
  * 作者のメモは残す。
+ *
+ * ## 投稿先にも入れる（作者の依頼 2026-10-12）
+ *
+ * 作品IDを新しく入れた・置き換えたときは、そのサイトを投稿先（`sites[]`）にも足す
+ * （判断は `planReaderStatsPostingSite`）。作品IDが前から同じなら足さない——作者が
+ * 投稿先から外したサイトを、取り込みのたびに戻さないため。
  *
  * ## 知らせの答えは待たない
  *
@@ -261,10 +270,15 @@ async function registerOne(
   if (plan.kind !== "same") {
     // **替えるのは作品IDだけ。** `withSiteProfile` はそのサイトの作品情報を丸ごと
     // 差し替えるので、いまの欄を広げてから作品IDを入れる（作品ページ・ジャンル・メモを消さない）
-    const next = withSiteProfile(ledger, entry.site, {
+    const withId = withSiteProfile(ledger, entry.site, {
       ...(siteProfile(ledger, entry.site) ?? {}),
       workId: entry.workId,
     });
+    // 投稿先にも入れる（作者の依頼 2026-10-12）。作品IDと**同じ1回の保存**で書く
+    // ——2回に分けると、間に失敗したとき「IDだけ入って投稿先に無い」が残る
+    const sitePlan = planReaderStatsPostingSite(ledger, entry.site, entry.workId, plan);
+    const next =
+      sitePlan.kind === "add" ? withSites(withId, [...withId.sites, sitePlan.entry]) : withId;
     try {
       await store.save(next);
     } catch (error) {
@@ -272,6 +286,11 @@ async function registerOne(
       return true;
     }
     lead = `「${work.title}」に${siteLabel}の作品ID ${entry.workId} を登録しました。`;
+    if (sitePlan.kind === "add") {
+      lead += `投稿先にも${siteLabel}を足しました（新話投稿の先：${sitePlan.entry.newEpisodeUrl}）。`;
+    } else if (sitePlan.kind === "unbuildable") {
+      lead += POSTING_SITE_URL_HINT;
+    }
     logRegister(work, lead);
   }
   // 登録したIDは「登録しない」の覚えから外す（手で貼り付けて登録し直したとき）

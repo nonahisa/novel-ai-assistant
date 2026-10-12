@@ -163,11 +163,28 @@ export function postingPageUrl(
   const stored = siteUrl(site, newEpisodeUrl);
   if (stored) return (newEpisodeUrl ?? "").trim();
 
+  return newEpisodeUrlFromWorkId(site, profile?.workId);
+}
+
+/**
+ * 作品IDから、そのサイトの新しい話を投稿するページのURLを組み立てる。
+ *
+ * **組み立てるのは形が実機で確かめられたサイトだけ**（いまはカクヨムだけ。
+ * 組み立てないサイトの理由は `postingPageUrl` の説明）。開く口（`postingPageUrl`）と、
+ * 読者の反応から作品IDを登録したときに投稿先へ足す口（`planReaderStatsPostingSite`）が
+ * 同じ形を使うよう、ここ1か所で組み立てる。
+ *
+ * @returns 組み立てられなければ undefined
+ */
+export function newEpisodeUrlFromWorkId(
+  site: PostingSiteId,
+  workId: string | null | undefined
+): string | undefined {
   if (site !== "kakuyomu") return undefined;
-  const workId = (profile?.workId ?? "").trim();
+  const trimmed = (workId ?? "").trim();
   // 作品IDの欄は自由入力なので、数字だけのときに限る（`readerStatsPageUrl` と同じ用心）
-  return /^\d+$/.test(workId)
-    ? `https://kakuyomu.jp/my/works/${workId}/episodes/new`
+  return /^\d+$/.test(trimmed)
+    ? `https://kakuyomu.jp/my/works/${trimmed}/episodes/new`
     : undefined;
 }
 
