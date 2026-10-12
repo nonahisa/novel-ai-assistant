@@ -557,6 +557,7 @@ import {
   ReaderStatsHelperLink,
   registerReaderStatsHelperLink,
 } from "./features/readerStatsHelperLink";
+import { initSiteLinkGuide } from "./features/openSiteLink";
 import {
   proposeChapters,
   suggestChapterName,
@@ -7309,6 +7310,9 @@ export async function activate(
       if (result.changed) await refreshWritingStatsPanel(work, deviceId);
     })
   );
+
+  // 投稿サイトのリンクを開く口（`openSiteLink`）。Chrome でないとき初回だけ出す案内の覚え
+  initSiteLinkGuide(verifiedState(context.globalState));
 
   /*
     ヘルパーからの受け口（設計書6.79.7「ヘルパーからの受け口」）。ヘルパーが読者の反応を

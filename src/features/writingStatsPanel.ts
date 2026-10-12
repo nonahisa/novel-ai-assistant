@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { wideViewColumn } from "./editorColumn";
+import { openSiteLink } from "./openSiteLink";
 // ブラウザ版でも同じ場所を指すため、`node:path` ではなくこちらを使う
 import type { WorkEntry } from "../models/types";
 import { toManuscriptPages } from "../core/charCount";
@@ -162,7 +163,9 @@ export async function openWritingStatsPanel(
         あることを確かめる（`javascript:` を踏ませない）。
       */
       if (!isOpenableWorkUrl(parsed.url)) return;
-      await vscode.env.openExternal(vscode.Uri.parse(parsed.url));
+      // 投稿サイト・Narou.fun なら、Chrome でないとき初回だけ案内してから開く。
+      // 公募の要項など、ヘルパーと関わりの無いリンクは案内を出さずに開く（`openSiteLink`）
+      await openSiteLink(parsed.url);
       return;
     }
     if (parsed.type === COMMON_GOALS_MESSAGE) {

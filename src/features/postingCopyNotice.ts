@@ -8,6 +8,7 @@ import type { WorkEntry } from "../models/types";
 import { revealFolder } from "../views/openDocument";
 import { notifyDone } from "../views/notify";
 import { postingPageUrlFor } from "./postingCopyRegistered";
+import { openSiteLink } from "./openSiteLink";
 
 /**
  * 「投稿サイト用に変換してコピー」のあとの知らせ（設計書6.84）。
@@ -153,7 +154,8 @@ function whenPicked(
  * **開くだけ。** ページの中身は読まないし、貼り付けも投稿も作者がする（6.68.1）。
  */
 async function openPostingPage(url: string): Promise<void> {
-  await vscode.env.openExternal(vscode.Uri.parse(url));
+  // Chrome でなければ初回だけ案内してから開く（`openSiteLink`）
+  await openSiteLink(url);
 }
 
 /** Windowsの絶対パス（`C:\…`）。**URLの仕組み（scheme）と見分ける** */

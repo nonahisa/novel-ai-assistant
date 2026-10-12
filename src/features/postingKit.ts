@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import type { EpisodeFile, WorkEntry } from "../models/types";
+import { openSiteLink } from "./openSiteLink";
 import {
   firstUnpostedEpisodePath,
   latestRanking,
@@ -278,7 +279,8 @@ async function walkSite(input: {
   await vscode.env.clipboard.writeText(body);
 
   // **開くだけ。** ページの中身は読まないし、操作もしない（6.68.1）
-  await vscode.env.openExternal(vscode.Uri.parse(entry.newEpisodeUrl));
+  // Chrome でなければ初回だけ案内してから開く（`openSiteLink`）
+  await openSiteLink(entry.newEpisodeUrl);
 
   let hint = `本文（${body.length.toLocaleString(
     "ja-JP"

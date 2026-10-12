@@ -43,6 +43,7 @@ import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { whenNoticePicked } from "../views/notify";
 import { configurePostingSites } from "./postingKit";
+import { openSiteLink } from "./openSiteLink";
 import {
   groupPendingRegistrations,
   isDeclinedReaderStatsId,
@@ -541,6 +542,9 @@ function adminPage(ledger: PostingLedger): AdminPage | undefined {
  * **「Chrome」と書かない。** 開くのは `openExternal`＝**作者の既定の
  * ブラウザ**であって、こちらがブラウザを選ぶわけではない（決め打ちで
  * サービス名を書かない、という線は実装ルール5と同じ）。
+ * 例外は、開くブラウザが Chrome でないと分かったときの初回の案内だけ
+ * （`openSiteLink`。作者の依頼 2026-10-12）——ヘルパーが Chrome の拡張機能なので、
+ * そこでは名前を出さないと何をすればよいか伝わらない。
  */
 function openAdminLabel(page: AdminPage): string {
   return `${page.label}の管理画面をブラウザで開く`;
@@ -601,7 +605,8 @@ async function askAdminPage(
 async function openAdminPage(page: AdminPage): Promise<void> {
   // `Uri.parse` を使う——`paths.toUri()` は手元のファイル用で、
   // ここで開くのは http(s) のURLである（実装ルール7の対象外）
-  await vscode.env.openExternal(vscode.Uri.parse(page.url));
+  // Chrome でなければ初回だけ案内してから開く（`openSiteLink`）
+  await openSiteLink(page.url);
 }
 
 /**
