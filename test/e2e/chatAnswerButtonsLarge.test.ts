@@ -410,18 +410,34 @@ test("大きい画面で「アジャーノに殿下の情報が混ざってい�
       expect(enrich?.user, `殿下の記録を読み直しています（${enrichSent}）`).not.toContain(`「${DENKA.name}」について`);
       expect(enrich?.structured, "再読込の頼みが構造化出力（JSON スキーマ）になっていません").toBe(true);
 
-      /* ── 項目の提案が並ぶ（保存はされない） ── */
+      /*
+        ── 項目の提案が並ぶ（保存はされない） ──
+        提案の値は**入力欄の value** に入る（`settingsPanelHtml.ts` の `renderProposal`。作者が手直しできるよう
+        `input`／`textarea` に置く）。textContent には出ないので、行（`.field-row`）ごとにチェック欄の id
+        （`prop-<項目>`）と入力欄の value を読む。2026-10-13 母艦で、知らせは「2 項目の提案ができました」なのに
+        textContent を読んで落ちた
+      */
+      const proposalRows = async (): Promise<Array<{ key: string; value: string }>> =>
+        (panel as Frame)
+          .evaluate(() =>
+            Array.from(document.querySelectorAll(".note.proposal .field-row")).map((row) => {
+              const check = row.querySelector('input[type="checkbox"]');
+              const editor = row.querySelector("textarea, input:not([type]), input[type='text'], select") as HTMLInputElement | null;
+              return { key: (check?.id ?? "").replace(/^prop-/, ""), value: editor?.value ?? "" };
+            })
+          )
+          .catch(() => []);
       await waitUntil(
         async () => {
           await passLocalAiGate(page);
-          const text = await (panel as Frame).evaluate(() => document.querySelector(".note.proposal")?.textContent ?? "").catch(() => "");
-          return text.includes(ENRICH_ROLE) && text.includes(ENRICH_SUMMARY);
+          const rows = await proposalRows();
+          return rows.some((row) => row.key === "role" && row.value === ENRICH_ROLE) && rows.some((row) => row.key === "summary" && row.value === ENRICH_SUMMARY);
         },
         "設定資料パネルに再読込の提案（紹介・役割）が並ぶ",
         30_000
       ).catch(async (error: unknown) => {
         const status = await (panel as Frame).evaluate(() => document.getElementById("status")?.textContent ?? "").catch(() => "");
-        throw new Error(`${String(error)}（パネルの知らせ：${JSON.stringify(status)}）${await describeState(page, large, sentBeforeReload)}`);
+        throw new Error(`${String(error)}（パネルの知らせ：${JSON.stringify(status)}／提案の行：${JSON.stringify(await proposalRows())}）${await describeState(page, large, sentBeforeReload)}`);
       });
 
       /* ── 相談の会話に「設定資料の画面で開きました」が出る ── */
