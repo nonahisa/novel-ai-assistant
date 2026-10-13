@@ -29,6 +29,8 @@ import {
   quickPickRows,
   quickPickTitle,
   readTabState,
+  waitForQuickPick,
+  type QuickPickRow,
 } from "./workbenchDom";
 
 /** 見本の plot.md（現代の港町。主要登場人物は役名だけの3人） */
@@ -157,10 +159,21 @@ export async function startNameSuggest(
     「和風」の行を名前で押すと、行の探し方（行の字のどこかに含む）が、説明に「和風」を含む
     「指定なし」の行に当たりうる
   */
-  originRow = "指定なし"
+  originRow = "指定なし",
+  /*
+    選ぶ画面の行を読む・付け外しする件（束 E16、実機確認リスト 579）のための呼び戻し。
+    どちらも**行が出揃ってから1回だけ**呼ぶ（題が替わった直後は行が描き終わっていない）。
+    `onTargets` は人物の画面で［OK］を押す前に呼ぶので、中でチェックを外せば外したまま決まる
+  */
+  hooks: {
+    onTargets?: (rows: QuickPickRow[]) => Promise<void>;
+    onOrigin?: (title: string, rows: QuickPickRow[]) => Promise<void>;
+  } = {}
 ): Promise<{ titles: string[] }> {
   const { page } = session;
   const titles: string[] = [];
+  let targetsSeen = false;
+  let originSeen = false;
   await plot.locator("[data-suggest-names]").click();
   await waitUntil(
     async () => {
@@ -168,8 +181,16 @@ export async function startNameSuggest(
       const title = (await quickPickTitle(page)) ?? "";
       if (title !== "" && titles[titles.length - 1] !== title) titles.push(title);
       if (title.includes("名前の候補を出す人物")) {
+        if (hooks.onTargets && !targetsSeen) {
+          targetsSeen = true;
+          await hooks.onTargets(await waitForQuickPick(page, title));
+        }
         await acceptQuickPick(page);
       } else if (title.includes("名前の系統")) {
+        if (hooks.onOrigin && !originSeen) {
+          originSeen = true;
+          await hooks.onOrigin(title, await waitForQuickPick(page, title));
+        }
         await pickQuickPickRow(page, originRow);
       } else if (title === "") {
         // 料金などの確認が窓で出たら、進める（手元のAIでは出ないはず。出たら文を落ちた文に残すため名乗る）
