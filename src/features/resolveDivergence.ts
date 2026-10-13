@@ -37,6 +37,7 @@ import {
   unexpectedChanges,
 } from "../core/mergeGuard";
 import { sha256Bytes } from "../core/hash";
+import { describeKeepBoth, keepBothExample } from "../core/conflictFile";
 import { fromLfText, toLf } from "../core/eolSpace";
 import { detectJsonFileFormat } from "../core/jsonFileFormat";
 import {
@@ -162,7 +163,17 @@ export type FoldOutcome =
        */
       sideFiles?: string[];
     }
-  | { ok: false; reason: string; authored?: string[] };
+  | {
+      ok: false;
+      reason: string;
+      authored?: string[];
+      /**
+       * 作者が選ぶ画面を閉じて（取りやめて）やめた（2026-10-13 夜）。
+       * 失敗の窓ではなく「途中でやめました。続けるには…」の知らせにする
+       * （`describeFoldFailureNotice`）
+       */
+      stoppedByAuthor?: boolean;
+    };
 
 /**
  * 作者が1件ずつ選ぶところ。
@@ -359,6 +370,12 @@ export function describeDivergenceConfirm(input: {
    * 1分後に送られていた（作者の実機確認）。**窓の文は事実に合わせる**
    */
   autoResend: boolean;
+  /**
+   * 「両方とも残す」で作られる別ファイルの名前の例（`keepBothExample`）。
+   * 選ぶ原稿があるときだけ、何が起きるかを例つきで添える（作者、2026-10-13 夜
+   * 「どうやって統合するかわからない」）
+   */
+  sideExample?: string;
 }): { message: string; detail: string; buttons: string[] } {
   const label = `「${input.label}」`;
   const toChoose = input.settingsToChoose ?? 0;
@@ -372,6 +389,7 @@ export function describeDivergenceConfirm(input: {
       `同じところを両方で書き換えた原稿が ${manuscripts}件あります。` +
         "このあと両方の文を並べるので、残すほうを選んでください。"
     );
+    lines.push(describeKeepBoth(input.sideExample));
   }
   if (toChoose > 0) {
     // ボタンが3つに増える理由が分かるように、これだけは窓に残す
@@ -460,7 +478,11 @@ async function confirm(
     manuscripts: classified.manuscripts.length,
   };
   logStep(describeDivergenceBreakdown(counts));
-  const text = describeDivergenceConfirm({ ...counts, autoResend });
+  const text = describeDivergenceConfirm({
+    ...counts,
+    autoResend,
+    sideExample: keepBothExample(classified.manuscripts, new Date()),
+  });
   const answer = await vscode.window.showInformationMessage(
     text.message,
     { modal: true, detail: text.detail },
@@ -660,11 +682,21 @@ export async function foldDivergence(
         );
       }
       if (walked.aborted) {
+        // **途中でやめたら全部戻す作りは変えない**（原稿が半分だけ入れ替わった
+        // 状態を作らない）。作者がやめたときは、続け方を知らせで示す
         await run(["merge", "--abort"], root, 15_000);
+        if (walked.unavailable) {
+          return {
+            ok: false,
+            reason: describeAuthoredStop(forAuthor),
+            authored: forAuthor,
+          };
+        }
         return {
           ok: false,
-          reason: describeAuthoredStop(forAuthor),
+          reason: describeFoldStopped(forAuthor),
           authored: forAuthor,
+          stoppedByAuthor: true,
         };
       }
       // 検査の白紙は「触ってよい側」なので、**一括で寄せた分もここへ足す**。
@@ -998,6 +1030,53 @@ export function describeAuthoredStop(files: readonly string[]): string {
 }
 
 /**
+ * 続けるときに押す所（作者、2026-10-13 夜「窓が消えてから再度窓を開けない」）。
+ *
+ * **次の一手は1つだけ示す。** 「GitHubと同期」の一覧の「両方の書き換えを合わせる」
+ * （`core/gitSyncMenuText.ts`）は、2台で分かれている間はいつも出ている。
+ * やめると全部戻るので、押せば最初から選び直しになる
+ */
+export const RESUME_FOLD_STEP =
+  "続けるには、作品一覧で作品を右クリックし、「GitHubと同期」→「両方の書き換えを合わせる」をもう一度押してください。" +
+  "最初から選び直しになります。";
+
+/** 作者が選ぶ画面を閉じて（取りやめて）やめたときの理由（知らせの詳しい文） */
+export function describeFoldStopped(files: readonly string[]): string {
+  const listed = files.slice(0, 5).map((file) => baseNameOf(file));
+  const more = files.length > 5 ? `、ほか${files.length - 5}件` : "";
+  return (
+    `同じところを両方で書き換えた原稿・設定資料が ${files.length}件あります` +
+    `（${listed.join("、")}${more}）。\n\n` +
+    RESUME_FOLD_STEP
+  );
+}
+
+/**
+ * そろえられなかったときに出す窓の中身。
+ *
+ * **作者がやめただけなら、失敗の窓にしない**（2026-10-13 夜）。「そろえられません
+ * でした」と赤い窓で出すと、何か壊れたように読める。原稿が元のままであることと、
+ * 続け方を1つ示す。
+ */
+export function describeFoldFailureNotice(
+  label: string,
+  result: Extract<FoldOutcome, { ok: false }>
+): { kind: "stopped" | "failed"; message: string; detail: string } {
+  if (result.stoppedByAuthor) {
+    return {
+      kind: "stopped",
+      message: "そろえるのを途中でやめました。原稿は元のままです。",
+      detail: result.reason,
+    };
+  }
+  return {
+    kind: "failed",
+    message: `「${label}」の2台の原稿をそろえられませんでした。`,
+    detail: `${result.reason}\n\n原稿は元のままです。`,
+  };
+}
+
+/**
  * 合わせた結果の知らせ（設計書5.5.18）。
  *
  * 作者の指摘（2026-09-10）：「競合解決があるかないかわからない。件数が出ない」。
@@ -1039,11 +1118,6 @@ export function describeFoldSuccess(
   if (result.manuscriptConflicts.length > 0) {
     parts.push(`選んでいただいた原稿 ${result.manuscriptConflicts.length}件`);
   }
-  const sendNote = options.sending
-    ? "続けてGitHubへ送ります。"
-    : options.autoResend
-      ? "数分のうちに自動でGitHubへ送ります。"
-      : "GitHubへは「保存・同期」で送ります。";
   // 「両方とも残す」の別ファイルの名前は、選ぶ一覧には出していない（幅に
   // 収まらず文が切れた。2026-10-11）。どこを読めばよいかをここで示す
   const sideNames = (result.sideFiles ?? []).map((one) =>
@@ -1051,8 +1125,18 @@ export function describeFoldSuccess(
   );
   const sideNote =
     sideNames.length > 0
-      ? `もう1台の文は「${sideNames.join("」「")}」に残しました。`
+      ? `もう1台の文は、同じフォルダーの「${sideNames.join("」「")}」に残しました` +
+        "（原稿はこのパソコンの文です。あとで読み比べて直せます）。"
       : "";
+  // **別のファイルも GitHub へ行くと書く**（作者、2026-10-13 夜）。別のファイルは
+  // そろえた記録に入れてある（`foldDivergence` が記録の直前に足す）ので、
+  // 原稿と同じ送り方で一緒に送られる
+  const withSide = sideNames.length > 0 ? "（別のファイルも一緒に送ります）" : "";
+  const sendNote = options.sending
+    ? `続けてGitHubへ送ります${withSide}。`
+    : options.autoResend
+      ? `数分のうちに自動でGitHubへ送ります${withSide}。`
+      : `GitHubへは「保存・同期」で送ります${withSide}。`;
   return (
     `「${label}」の2台の原稿をそろえました（${parts.join("／")}）。` +
     sideNote +
@@ -1069,10 +1153,20 @@ async function reportFold(
   options: { sending: boolean; autoResend: boolean }
 ): Promise<void> {
   if (!result.ok) {
+    const notice = describeFoldFailureNotice(label, result);
+    if (notice.kind === "stopped") {
+      // 作者がやめただけ。失敗としては残さず、やめたことだけ記録に1行
+      logStep(`分岐を合わせるのを、作者が途中でやめた（${label}。全部元へ戻した）`);
+      await vscode.window.showInformationMessage(notice.message, {
+        modal: true,
+        detail: notice.detail,
+      });
+      return;
+    }
     logFailure("分岐を合わせられなかった", { 置き場: label, 詳細: result.reason });
     const action = await vscode.window.showErrorMessage(
-      `「${label}」の2台の原稿をそろえられませんでした。`,
-      { modal: true, detail: `${result.reason}\n\n原稿は元のままです。` },
+      notice.message,
+      { modal: true, detail: notice.detail },
       "ログを表示"
     );
     if (action === "ログを表示") showLog();

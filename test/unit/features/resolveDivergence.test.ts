@@ -102,6 +102,7 @@ const {
   describeAuthoredStop,
   describeDivergenceBreakdown,
   describeDivergenceConfirm,
+  describeFoldFailureNotice,
   describeFoldSuccess,
   foldDivergence,
 } = await import("../../../src/features/resolveDivergence");
@@ -385,13 +386,21 @@ describe("そろえる前の確認に出す中身", () => {
   };
 
   test("自動の送り直しが入っていれば、そろえて送ると言う", () => {
-    const text = describeDivergenceConfirm({ ...基本, manuscripts: 1, autoResend: true });
+    const text = describeDivergenceConfirm({
+      ...基本,
+      manuscripts: 1,
+      autoResend: true,
+      sideExample: "第1話.conflict-2026-10-13-2240.txt",
+    });
 
     expect(text.message).toBe("「確認用コピー」：2台の原稿をそろえて、GitHubへ送ります。");
     expect(text.detail).toBe(
       [
         "もう1台で書いた分を入れ、このパソコンで書いた分も残します。",
         "同じところを両方で書き換えた原稿が 1件あります。このあと両方の文を並べるので、残すほうを選んでください。",
+        // 「両方とも残す」で何が起きるか（作者、2026-10-13 夜「どうやって統合するかわからない」）
+        "「両方とも残す」を選ぶと、このパソコンの文が原稿になり、もう1台の文は同じフォルダーに" +
+          "別のファイル（例：第1話.conflict-2026-10-13-2240.txt）として残ります。あとで読み比べて直せます。",
         "そろえ終わったら、数分のうちに自動でGitHubへ送ります。",
         "",
         "途中でやめれば、原稿は元のままです。そろえたあとでも「そろえる前」へ戻せます。",
@@ -413,6 +422,7 @@ describe("そろえる前の確認に出す中身", () => {
     const text = describeDivergenceConfirm({ ...基本, autoResend: true });
 
     expect(text.detail).not.toContain("残すほうを選んでください");
+    expect(text.detail).not.toContain("両方とも残す");
   });
 
   test("内訳（自動で書かれるもの・追記型・設定資料）は窓に出さない", () => {
@@ -694,6 +704,53 @@ describe("設定資料と本文の自動合流", { timeout: 30_000 }, () => {
     ).toBe("こちらの直し。\n");
     expect(status()).toContain("ahead");
     expect(status()).toContain("behind");
+  });
+
+  /*
+    選ぶ画面を閉じたあと、続きへ戻る入口が分からない（作者、2026-10-13 夜
+    「窓が消えてから再度窓を開けない」）。全部戻す作りは保ったまま、
+    知らせで次の一手を1つ示す。失敗（エラー）の窓にはしない——作者がやめただけ
+  */
+  test("作者が途中でやめたら、やめたと分かる印を付け、知らせで続け方を1つ示す", async () => {
+    分岐を作る(
+      [["短編/本文/第5話.txt", "もとの本文。\n"]],
+      [["短編/本文/第5話.txt", "むこうの直し。\n"]],
+      [["短編/本文/第5話.txt", "こちらの直し。\n"]]
+    );
+
+    const result = await 合わせる(やめる);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.stoppedByAuthor).toBe(true);
+    const notice = describeFoldFailureNotice("短編", result);
+    expect(notice.kind).toBe("stopped");
+    expect(notice.message).toBe("そろえるのを途中でやめました。原稿は元のままです。");
+    expect(notice.detail).toContain(
+      "続けるには、作品一覧で作品を右クリックし、「GitHubと同期」→「両方の書き換えを合わせる」をもう一度押してください。"
+    );
+    expect(notice.detail).toContain("第5話.txt");
+    expect(`${notice.message}${notice.detail}`).not.toContain("そろえられませんでした");
+  });
+
+  test("見比べの画面を用意できずにやめたときは、作者がやめたことにしない", async () => {
+    分岐を作る(
+      [["短編/本文/第5話.txt", "もとの本文。\n"]],
+      [["短編/本文/第5話.txt", "むこうの直し。\n"]],
+      [["短編/本文/第5話.txt", "こちらの直し。\n"]]
+    );
+
+    const result = await 合わせる(async () => ({
+      resolved: [],
+      bulkResolved: [],
+      aborted: true,
+      unavailable: true,
+    }));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.stoppedByAuthor).toBeFalsy();
+    expect(describeFoldFailureNotice("短編", result).kind).toBe("failed");
   });
 
   /*
@@ -1128,9 +1185,36 @@ describe("そろえた結果の知らせ", () => {
     });
 
     expect(text).toContain(
-      "もう1台の文は「第1話.conflict-2026-10-11-0045.txt」に残しました。"
+      "もう1台の文は、同じフォルダーの「第1話.conflict-2026-10-11-0045.txt」に残しました" +
+        "（原稿はこのパソコンの文です。あとで読み比べて直せます）。"
     );
     expect(describeFoldSuccess("短編", 結果({}))).not.toContain("に残しました");
+  });
+
+  /*
+    そろえたあと GitHub へ送るかを、別のファイルについても書く（作者、2026-10-13 夜。
+    そろえた15秒後に自動の送り直しが送っていた）。別のファイルはそろえた記録に
+    入る（`foldDivergence` が記録の直前に足す）ので、原稿と一緒に送られる
+  */
+  test("両方とも残したときは、別のファイルも一緒に GitHub へ送るかどうかを書く", () => {
+    const withSide = {
+      ...結果({ picked: ["短編/本文/第1話.txt"] }),
+      sideFiles: ["短編/本文/第1話.conflict-2026-10-11-0045.txt"],
+    };
+
+    expect(
+      describeFoldSuccess("短編", withSide, { sending: false, autoResend: true })
+    ).toContain("数分のうちに自動でGitHubへ送ります（別のファイルも一緒に送ります）。");
+    expect(describeFoldSuccess("短編", withSide, { sending: true })).toContain(
+      "続けてGitHubへ送ります（別のファイルも一緒に送ります）。"
+    );
+    expect(
+      describeFoldSuccess("短編", withSide, { sending: false, autoResend: false })
+    ).toContain("GitHubへは「保存・同期」で送ります（別のファイルも一緒に送ります）。");
+    // 別のファイルが無いときは、添えない
+    expect(
+      describeFoldSuccess("短編", 結果({}), { sending: false, autoResend: true })
+    ).not.toContain("別のファイル");
   });
 
   test("一括だけなら、選んだとは言わない", () => {

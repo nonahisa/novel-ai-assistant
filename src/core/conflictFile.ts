@@ -209,6 +209,39 @@ export function sideFileStamp(when: Date): string {
   );
 }
 
+/**
+ * 「両方とも残す」で何が起きるかを、選ぶ前に伝える文（作者、2026-10-13 夜
+ * 「どうやって統合するかわからない」）。
+ *
+ * 選ぶ一覧の項目は幅で切れるので、確認の窓（複数行が読める）に出す。
+ * `example` は作られる別ファイルの名前の例（`keepBothExample`）。無ければ例を省く。
+ */
+export function describeKeepBoth(example?: string): string {
+  return (
+    "「両方とも残す」を選ぶと、このパソコンの文が原稿になり、もう1台の文は同じフォルダーに" +
+    `別のファイル${example ? `（例：${example}）` : ""}として残ります。` +
+    "あとで読み比べて直せます。"
+  );
+}
+
+/**
+ * 見比べる候補のうち、「両方とも残す」が出るもの（原稿）の1件目から、
+ * 別ファイルの名前の例を作る。原稿が無ければ undefined。
+ *
+ * 設定資料（.json）は「両方とも残す」を出さない（`設定/` に読めない名前の JSON が
+ * 増えるため。`resolveConflicts.ts`）ので、例にも使わない。
+ * 実際の名前は選んだときの時刻で決まるので、ここでの日時は目安である。
+ */
+export function keepBothExample(
+  files: readonly string[],
+  when: Date
+): string | undefined {
+  const first = files.find((file) => !file.toLowerCase().endsWith(".json"));
+  if (!first) return undefined;
+  const name = first.slice(first.lastIndexOf("/") + 1) || first;
+  return sideFileName(name, when);
+}
+
 /** 競合の規模を1文で伝える */
 export function describeConflict(parsed: ConflictParseResult): string {
   if (parsed.hunks.length === 0) {

@@ -58,6 +58,11 @@ import {
 } from "../core/gitSyncStatusText";
 // 判定は core へ移した（2026-10-05）。ここから読んでいる所のために出し直す
 export { isWarning } from "../core/gitSyncStatusText";
+import {
+  buildGitSyncMenuEntries,
+  describeSyncMenuStatus,
+  gitSyncMenuTitle,
+} from "../core/gitSyncMenuText";
 import { cancelItem } from "../views/dialogs";
 import {
   canRecordChanges,
@@ -1298,7 +1303,8 @@ ${reason}` : ""}`,
               modal: true,
               detail:
                 "書きかけはgitの退避（stash）に残してあります。" +
-                "食い違いを直してから、もう一度「取り込む」を押してください。",
+                // 一覧の項目名に合わせる（作者の裁定「案A」、2026-10-13 夜）
+                "食い違いを直してから、もう一度「GitHubと同期」の「GitHub の書き換えを受け取る」を押してください。",
             },
             "ログを表示"
           )) === "ログを表示"
@@ -1370,9 +1376,8 @@ ${reason}` : ""}`,
     if (status.kind !== "tracked") return false;
     const label = buildSyncTarget(status.root, this.registry.list()).label;
 
-    const { foldDivergence, describeFoldSuccess } = await import(
-      "./resolveDivergence.js"
-    );
+    const { foldDivergence, describeFoldSuccess, describeFoldFailureNotice } =
+      await import("./resolveDivergence.js");
     const resume = this.settingsPause?.();
     let result: Awaited<ReturnType<typeof foldDivergence>>;
     try {
@@ -1391,13 +1396,24 @@ ${reason}` : ""}`,
 
     if (!result.ok) {
       useLogFile(work.folderPath);
+      const notice = describeFoldFailureNotice(work.title, result);
+      if (notice.kind === "stopped") {
+        // **作者が選ぶ画面を閉じてやめただけなら、失敗の窓にしない**（2026-10-13 夜
+        // 「窓が消えてから再度窓を開けない」）。原稿は元のまま・続け方を1つ示す
+        logStep(`分岐を合わせるのを、作者が途中でやめた（${work.title}。全部元へ戻した）`);
+        await vscode.window.showInformationMessage(notice.message, {
+          modal: true,
+          detail: notice.detail,
+        });
+        return false;
+      }
       logFailure("分岐を合わせられなかった", {
         作品: work.title,
         詳細: result.reason,
       });
       const action = await vscode.window.showWarningMessage(
-        `「${work.title}」の2台の原稿をそろえられませんでした。`,
-        { modal: true, detail: `${result.reason}\n\n原稿は元のままです。` },
+        notice.message,
+        { modal: true, detail: notice.detail },
         "ログを表示"
       );
       if (action === "ログを表示") showLog();
@@ -1706,82 +1722,27 @@ export async function showGitSyncActions(
     items.push({ ...setup, action: "setup" });
   }
 
-  // **送れるなら、同期を先頭に置く**（作者の報告、2026-10-10。設計書6.15.1）。
-  // 「記録する」「送信する」を別々に押させると、記録待ちしか無いときに
-  // 送る道が見えなかった。**置き場1つだけを記録して送る道は持たない**——
-  // 記録→取り込み→送信の手順を2つ持つと、片方だけ直して食い違うので、
-  // 既存の「保存・同期」（すべての作品。確認の窓は向こうが1回出す）へ渡す
-  if (canSaveAndSync(status) && status.kind === "tracked") {
-    items.push({
-      label: "$(cloud-upload) 保存・同期（記録して送る）",
-      description: [
-        status.dirty > 0 ? `未記録 ${status.dirty}` : undefined,
-        status.ahead > 0 ? `未送信 ${status.ahead}` : undefined,
-      ]
-        .filter((part): part is string => part !== undefined)
-        .join("・"),
-      detail:
-        "開いている原稿を保存し、記録してGitHubへ送ります。" +
-        "ほかの作品の置き場もまとめて同期します（送る前に1回だけ確認します）。",
-      action: "saveAndSync",
-    });
-  }
-
-  // 記録する手段が無いと、初回コミットのあと何も残せない。
-  // GitHubを使わない作者にとっては、これが唯一の使い道になる
-  if (canRecordChanges(status)) {
-    const pending = status.kind === "tracked" ? status.dirty : undefined;
-    items.push({
-      label: "$(save) 変更を記録する",
-      description:
-        pending !== undefined && pending > 0 ? `${pending}件の変更` : "",
-      detail:
-        "いまの内容を履歴に残します（コミット）。" +
-        "残しておくと、書き直す前の原稿へ戻せます。外部へは送りません。",
-      action: "commit",
-    });
-  }
-
-  if (status.kind === "tracked") {
-    if (status.behind > 0) {
-      const diverged = divergenceLine(status);
-      items.push({
-        label: "$(cloud-download) 取り込む",
-        description: diverged ?? `別の環境の変更 ${status.behind}件`,
-        detail: diverged
-          ? // **分かれていても、押せば合わせにいく**（設計書5.5.18）
-            "分かれた分もここで合わせます。戻せるように退避の枝を作ります。" +
-            "未コミットの変更があるときは、先に記録します。"
-          : "未コミットの変更があるときは実行しません（書きかけの原稿を守るため）。",
-        action: "pull",
-      });
-    }
-    if (status.ahead > 0) {
-      items.push({
-        label: "$(cloud-upload) 送信する",
-        description: `この環境の変更 ${status.ahead}件`,
-        detail: "GitHubへ送ります。送信前に件数を確認します。",
-        action: "push",
-      });
-    }
-  }
-
-  items.push({
-    label: "$(sync) 状態を確認",
-    description: describeStatus(status),
-    detail: "リモートの状態を取得し直します（ローカルは変更しません）。",
-    action: "refresh",
-  });
-  items.push({
-    label: "$(output) ログを表示",
-    description: "",
-    detail: "同期に失敗した理由はここに記録しています。",
-    action: "log",
-  });
+  // **文は作者の裁定「案A」（2026-10-13 夜）。** 開発の言葉（main・分かれています・
+  // 衝突・退避の枝・未コミット・リモート／ローカル）を出さない。文と並びは
+  // `core/gitSyncMenuText.ts`（単体テストで文を見張る）。
+  //
+  // **送れるなら「保存してそろえる」を先頭に置く**（作者の報告、2026-10-10。設計書6.15.1）。
+  // 置き場1つだけを記録して送る道は持たない——記録→取り込み→送信の手順を
+  // 2つ持つと片方だけ直して食い違うので、既存の「保存・同期」へ渡す。
+  // 記録する手段（履歴に残す）は、GitHubを使わない作者には唯一の使い道になる
+  items.push(
+    ...buildGitSyncMenuEntries(status, {
+      canSaveAndSync: canSaveAndSync(status),
+      canRecord: canRecordChanges(status),
+    })
+  );
 
   const picked = await vscode.window.showQuickPick([...items, cancelItem()], {
-    title: `${work.title} のGitHub同期`,
-    placeHolder: describeStatus(status),
+    title: gitSyncMenuTitle(work.title),
+    placeHolder: describeSyncMenuStatus(status),
+    // **ほかの窓へ移っても閉じない**（実機確認リスト「0.102.7 の画面の見直し」の
+    // 【不具合】、2026-10-13 夜）。そろえる流れの入口なので、選ぶ画面と同じにそろえる
+    ignoreFocusOut: true,
   });
   if (!picked || !("action" in picked)) return;
 
@@ -1832,10 +1793,11 @@ export async function showGitSyncActions(
     // 1作品だけでは、知らせは「同期が取れています」なのにステータスバーは
     // 「未記録 9」のまま、という食い違いが出た（2026-10-05）
     await monitor.refreshRoot(work, { fetch: true, notify: false });
+    // 一覧の状態の行と同じ文で知らせる（案A。開発の言葉を出さない）
     vscode.window.showInformationMessage(
-      `${work.title}: ${describeStatus(
+      `${work.title}：${describeSyncMenuStatus(
         monitor.statusFor(work.id) ?? status
-      )}`
+      )}。`
     );
   } else if (picked.action === "log") showLog();
 }

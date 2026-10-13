@@ -551,7 +551,19 @@ describe("どちらの文を残すかの一覧", { timeout: 30_000 }, () => {
     });
 
     expect(result.aborted).toBe(true);
+    // 作者がやめた（呼び出し側が「途中でやめました。続けるには…」と知らせる。2026-10-13 夜）
+    expect(result.unavailable).toBeFalsy();
     expect(quickPicks).toHaveLength(1);
+  });
+
+  test("見比べの画面を用意できずにやめたときは、作者がやめたことにしない", async () => {
+    const result = await walkConflicts(scope(), [原稿ファイル], {
+      start: "manuscriptsOnly",
+      machineName: null,
+    });
+
+    expect(result.aborted).toBe(true);
+    expect(result.unavailable).toBe(true);
   });
 
   test("訊いた窓も閉じたら、やめる", async () => {
@@ -638,6 +650,20 @@ describe("見比べを始める前に出す中身", () => {
 
     expect(detail).not.toContain("全部、新しいほうを採る");
     expect(detail).toContain("1件ずつ両方を並べます");
+  });
+
+  test("原稿があれば、「両方とも残す」で何が起きるかを名前の例つきで添える", () => {
+    // 作者（2026-10-13 夜）「どうやって統合するかわからない」
+    const detail = describeWalkStartDetail(
+      [いじめ設定, いじめ原稿],
+      new Date(2026, 9, 13, 22, 40)
+    );
+    expect(detail).toContain(
+      "「両方とも残す」を選ぶと、このパソコンの文が原稿になり、もう1台の文は同じフォルダーに" +
+        "別のファイル（例：第1話.conflict-2026-10-13-2240.txt）として残ります。あとで読み比べて直せます。"
+    );
+    // 設定資料だけなら「両方とも残す」は出ない（JSON を別ファイルへ逃がさない）ので、添えない
+    expect(describeWalkStartDetail([いじめ設定])).not.toContain("両方とも残す");
   });
 
   test("そろえる前へ丸ごと戻せることを、必ず添える", () => {
