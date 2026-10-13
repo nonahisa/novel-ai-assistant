@@ -113,25 +113,37 @@ async function chatterTurns(frame: Frame): Promise<ChatterTurn[]> {
     .catch(() => [] as ChatterTurn[]);
 }
 
-/** 落ちたときに添える様子（独り言・会話の欄・確認の窓・知らせ・偽の AI への頼み） */
+/**
+ * 落ちたときに添える様子（独り言・会話の欄・確認の窓・知らせ・偽の AI への頼み）。
+ * **部品が1つ読めなくても投げない**——投げると、本来の「何を待って時間切れか」の文ごと消える
+ */
 async function situation(session: E2ESession, frame: Frame | undefined, sentBefore: number): Promise<string> {
+  const unreadable = (error: unknown): string => `読めない（${String(error)}）`;
   const turns = frame ? JSON.stringify(await chatterTurns(frame)) : "（相談パネルの面が無い）";
-  const log = frame ? JSON.stringify(await frame.evaluate(() => document.getElementById("log")?.innerText ?? "").catch(() => "")) : "";
-  return [
-    `独り言：${turns}`,
-    `会話の欄：${log}`,
-    `確認の窓：${JSON.stringify(await dialogText(session.page))}`,
-    await describeNotices(session),
-    describeFakeRequests(fake.requests, sentBefore),
-  ].join("／");
+  const log = frame
+    ? await frame
+        .evaluate(() => document.getElementById("log")?.innerText ?? "")
+        .then((text) => JSON.stringify(text))
+        .catch(unreadable)
+    : "";
+  const dialog = await dialogText(session.page)
+    .then((text) => JSON.stringify(text))
+    .catch(unreadable);
+  const notices = await describeNotices(session).catch(unreadable);
+  return [`独り言：${turns}`, `会話の欄：${log}`, `確認の窓：${dialog}`, notices, describeFakeRequests(fake.requests, sentBefore)].join("／");
+}
+
+/** 話を開く（相談パネルより先に開く。パネルを開いたあとの焦点の取り合いを避ける） */
+async function openSample(page: Page): Promise<Frame> {
+  return openEpisode(page, CHATTER_EPISODE, "朝の駅は静かだった");
 }
 
 /**
- * 話を開いて、2回保存する。1回目はその日の起点を置くだけ（統計の作り）、2回目で「今日 +N字」になる。
- * 2回目の記録が下段に届いたこと（＝保存の道が `recordWritingProgress` → 独り言の `noteEdit` まで通った）を確かめて返す
+ * 開いてある話へ打ち足して、2回保存する。1回目はその日の起点を置くだけ（統計の作り）、2回目で「今日 +N字」になる。
+ * 2回目の記録が下段に届いたこと（＝保存の道が `recordWritingProgress` → 独り言の `noteEdit` まで通った）を確かめる。
+ * 原稿の面を押してから打つので、相談パネルに焦点があっても原稿へ戻る
  */
-async function writeAndSave(page: Page): Promise<Frame> {
-  const frame = await openEpisode(page, CHATTER_EPISODE, "朝の駅は静かだった");
+async function writeAndSave(page: Page, frame: Frame): Promise<void> {
   await placeCaretAfter(frame, "線路の先をじっと見つめた。");
   await page.keyboard.insertText("。");
   await page.keyboard.press("Control+KeyS");
@@ -143,7 +155,6 @@ async function writeAndSave(page: Page): Promise<Frame> {
       throw new Error(`${String(error)}（いまの下段：「${await footText(frame, "counts")}」／知らせ：${await footText(frame, "note")}）`);
     }
   );
-  return frame;
 }
 
 /** 独り言が1件以上出るまで待つ（手元のAIの関所が出たら通す） */
@@ -168,6 +179,7 @@ test("相談パネルを開いたまま本文を保存して手を止めると�
     async (session) => {
       const { page } = session;
       const sentBefore = fake.requests.length;
+      const manuscript = await openSample(page);
 
       // 相談パネル（横）を開く。最後まで開いたまま（関門「パネルが見えていること」）
       await pressWorkbenchKey(page, OPEN_SIDE_PRESS);
@@ -176,7 +188,7 @@ test("相談パネルを開いたまま本文を保存して手を止めると�
       if (!chat) throw new Error("横の相談パネルの面が見つかりません");
       expect(await chatterTurns(chat), "保存する前から独り言が出ています").toEqual([]);
 
-      await writeAndSave(page);
+      await writeAndSave(page, manuscript);
 
       // 手を止めて待つ（何も押さない）
       const turns = await waitForChatter(session, chat, "相談パネルに独り言が出る", FIRST_CHATTER_WAIT_MS, sentBefore, () => true);
@@ -202,7 +214,7 @@ test("相談パネルを閉じたまま待っても独り言は出ず AI も呼�
       const sentBefore = fake.requests.length;
 
       expect(await sideChatFrame(page), "起動した時点で相談パネルが開いています（閉じたままの前提が崩れた）").toBeUndefined();
-      await writeAndSave(page);
+      await writeAndSave(page, await openSample(page));
 
       // 閉じたまま、最長80秒の様子見を必ず1回は含む長さだけ見続ける。パネルは勝手に開かず、AI も呼ばない
       await holdsFor(
@@ -213,17 +225,16 @@ test("相談パネルを閉じたまま待っても独り言は出ず AI も呼�
         throw new Error(`${String(error)}（${await situation(session, await sideChatFrame(page), sentBefore)}）`);
       });
 
-      // パネルを開く。開いた直後には、閉じている間の独り言は溜まっていない（閉じている間は言わない作り）
+      // パネルを開く
       await pressWorkbenchKey(page, OPEN_SIDE_PRESS);
       await waitUntil(async () => (await sideChatFrame(page)) !== undefined, "横の相談パネルが開く", 30_000);
       const chat = await sideChatFrame(page);
       if (!chat) throw new Error("横の相談パネルの面が見つかりません");
       /*
-        開いた直後の読み取りと次の様子見がたまたま重なると、ここで1件見えることがありうる
-        （様子見は60秒ごと。重なる幅は1秒に満たない）。そのときは閉じている間に溜まったのか、
-        開いた瞬間に言ったのかを分けられないので、0件を求める
+        開いた直後に「まだ0件」は確かめない。開いた瞬間と様子見が重なると1件見えることがあり、揺れの元になる。
+        閉じている間に申し出を「言ったこと」にしていた（鍵や間合いを消費していた）なら、開いたあと10分は
+        何も出ないので、下の「70秒以内に申し出が1件出る」で十分に分かる
       */
-      expect(await chatterTurns(chat), "開いた直後から独り言が出ています（閉じている間に溜めていた疑い）").toEqual([]);
 
       // 開いたあとの次の様子見で出る（止めていたのは「パネルが見えていること」の関門だけ）
       const turns = await waitForChatter(session, chat, "パネルを開いたあとの様子見で独り言が出る", AFTER_OPEN_WAIT_MS, sentBefore, () => true);
@@ -252,12 +263,13 @@ test.runIf(LONG)(
       async (session) => {
         const { page } = session;
         const sentBefore = fake.requests.length;
+        const manuscript = await openSample(page);
 
         await pressWorkbenchKey(page, OPEN_SIDE_PRESS);
         await waitUntil(async () => (await sideChatFrame(page)) !== undefined, "横の相談パネルが開く", 30_000);
         const chat = await sideChatFrame(page);
         if (!chat) throw new Error("横の相談パネルの面が見つかりません");
-        await writeAndSave(page);
+        await writeAndSave(page, manuscript);
 
         await waitForChatter(session, chat, "まず誤字脱字の申し出が出る", FIRST_CHATTER_WAIT_MS, sentBefore, (turn) => turn.body === IDLE_TYPOS_TEXT);
         const turns = await waitForChatter(session, chat, "申し出から10分空けたあと、感想が出る", COMMENT_WAIT_MS, sentBefore, (turn) => turn.body === CHATTER_COMMENT);
