@@ -58,7 +58,7 @@ import { describeFakeRequests, fakeOllamaLaunch, passLocalAiGate, startFakeOllam
 import { caretPosition, manuscriptFrames, memoPanelFrame, revealFlashLit } from "./support/manuscriptFrame";
 import { defaultCharactersFolder, settingsFolder, settingsPanelFrame, writeCharactersTo } from "./support/settingsFixture";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
-import { waitUntil } from "./support/wait";
+import { holdsFor, waitUntil } from "./support/wait";
 import {
   acceptQuickPick,
   dialogText,
@@ -297,7 +297,10 @@ test("大きい画面で質問すると答えが返り、書き込みは入っ�
         }
       );
       // 札は「AIを使いません」と言っている——押しても AI は呼ばれない
-      expect(fake.requests.length, `表記ゆれの検知で AI が呼ばれました（${describeFakeRequests(fake.requests, sentBeforeRun)}）`).toBe(sentBeforeRun);
+      // 遅れて飛ぶ頼みも拾うよう、しばらく見続ける
+      await holdsFor(async () => fake.requests.length === sentBeforeRun, "表記ゆれの検知のあとも AI が呼ばれないこと", 2_000).catch((error: unknown) => {
+        throw new Error(`${String(error)}（${describeFakeRequests(fake.requests, sentBeforeRun)}）`);
+      });
 
       /* ── そこを見せて：原稿エディターでその行が光り、カーソルが来る ── */
       large = await showLargeChat(page, sentBefore);
@@ -384,7 +387,7 @@ test("大きい画面で「アジャーノに殿下の情報が混ざってい�
       ).catch(async (error: unknown) => {
         throw new Error(`${String(error)}（パネル：${panel ? "開いた" : "無い"}／留意点の欄：${JSON.stringify(await notesValue())}）${await describeState(page, large, sentBefore)}`);
       });
-      const detail = await (panel as Frame).evaluate(() => document.getElementById("detail")?.innerText ?? "");
+      const detail = await (panel as Frame).evaluate(() => document.getElementById("detail")?.textContent ?? "");
       expect(detail, "設定資料パネルにアジャーノが出ていません").toContain(AJANO.name);
 
       /* ── 留意点つきの再読込が AI へ届く ── */
