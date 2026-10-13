@@ -650,7 +650,10 @@ function appendOptions(turn, options) {
   if (options.length === 0) return;
 
   const box = document.createElement('div');
-  box.className = 'options';
+  // **choices の印で、ほかのボタンの行と見分ける**（2026-10-13）。並べ方は同じ
+  // options を使うので、印が無いと送るときにまだ押していない［取り消す］や
+  // 実行の行まで一緒に消える
+  box.className = 'options choices';
   options.forEach((option, index) => {
     const button = document.createElement('button');
     button.className = 'option';
@@ -1097,7 +1100,8 @@ function showError(failure) {
  */
 function showAsked(question) {
   appendTurn('あなた', question, 'author');
-  document.querySelectorAll('.options').forEach((el) => el.remove());
+  // 消すのは選択肢の並びだけ（send と同じ理由）
+  document.querySelectorAll('.options.choices').forEach((el) => el.remove());
   currentOptions = [];
   updateHint();
   setBusy(true);
@@ -1121,8 +1125,11 @@ function send(question) {
 
   appendTurn('あなた', text, 'author');
   // 選択肢は一度使ったら消す。古い選択肢が残ると、
-  // どの返事に対する選択なのか分からなくなる
-  document.querySelectorAll('.options').forEach((el) => el.remove());
+  // どの返事に対する選択なのか分からなくなる。
+  // **消すのは選択肢の並びだけ**（2026-10-13）。［取り消す］・実行・
+  // ［そこを見せて］・再読込などの行は同じ options の並べ方を使うが、
+  // まだ押していないものを選択肢のついでに消すと、戻す道が黙って無くなる
+  document.querySelectorAll('.options.choices').forEach((el) => el.remove());
   currentOptions = [];
   updateHint();
   scrollToBottom();

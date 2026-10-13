@@ -17,9 +17,10 @@
  * （`support/chatAnswerButtons.ts`。製品の検算へ通して、ボタンとして残る形であることを確かめてある）。
  * 答えの出来（実機の AI がボタンを付けるか）は見えない——AI の測定の仕事。見えるのは押したあとの配線だけ。
  *
- * **押す順に意味がある。** 選択肢を押すと、画面は「古い選択肢が残ると、どの返事への選択か分からない」ため
- * `.options` の箱を全部消す——［取り消す］・実行・そこを見せての行も同じ名前の箱に入っているので、
- * 選択肢は最後に押す。
+ * **選択肢を先に押す。** 選択肢を押すと画面は使った選択肢の並び（`.options.choices`）を消す。以前は
+ * `.options` の箱を全部消しており、同じ並べ方の［取り消す］・実行・そこを見せての行まで消えていた
+ * （2026-10-13 に直した）。選択肢のあとでも前の答えのボタンが残り、押せることをここで見る。
+ * 実行のあとの結果の行は、検知の出し先（校正・メモパネル）を言う文で見る。
  */
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -215,7 +216,7 @@ async function plotText(session: E2ESession): Promise<string> {
 
 /* ── 1. 6504：選択肢・書き込み・機能起動・そこを見せて ── */
 
-test("大きい画面で質問すると答えが返り、書き込みは入って［取り消す］で戻り、［表記ゆれを検知する］は検知を走らせ、［そこを見せて］は原稿のその行へ行き、選択肢は次の質問として送られる", async () => {
+test("大きい画面で質問すると答えが返り、選択肢は次の質問として送られ、そのあとも前の答えのボタンが残って、書き込みは［取り消す］で戻り、［表記ゆれを検知する］は検知を走らせて出し先を言い、［そこを見せて］は原稿のその行へ行く", async () => {
   chatResponder = (request) => {
     // 選択肢の頼みは、前のやり取り（1問目）も添えて送られるので、先に見分ける
     if (request.user.includes(BUTTON_OPTIONS[0])) return OPTION_ANSWER;
@@ -246,6 +247,39 @@ test("大きい画面で質問すると答えが返り、書き込みは入っ�
           throw new Error(`${String(error)}（結果の行：${JSON.stringify(await resultLineOf(large, "edit-"))}）${await describeState(page, large, sentBefore)}`);
         }
       );
+
+      /* ── 選択肢：押すと、その字が次の質問として前のやり取りを添えて送られる（**先に押す**） ── */
+      expect(await large.evaluate(() => document.getElementById("hint")?.textContent ?? ""), "選択肢の番号の案内が出ていません").toContain("番号（1〜2）");
+      const option = large.locator(".options button.option", { hasText: BUTTON_OPTIONS[0] });
+      expect(await option.count(), `選択肢「${BUTTON_OPTIONS[0]}」の札がありません`).toBe(1);
+      const sentBeforeOption = fake.requests.length;
+      await option.click();
+      await waitForReply(page, large, OPTION_REPLY, sentBefore);
+      const sent = describeFakeRequests(fake.requests, sentBeforeOption);
+      const second = chatRequestsSince(sentBeforeOption, BUTTON_OPTIONS[0])[0];
+      expect(second, `選択肢の字が相談として偽のAIへ届いていません（${sent}）`).toBeDefined();
+      expect(second?.user, `選択肢の頼みに前のやり取りが添えられていません（${sent}）`).toContain("【これまでのやり取り】");
+      expect(second?.user, `選択肢の頼みの前のやり取りに1問目がありません（${sent}）`).toContain(BUTTONS_QUESTION);
+      const after = await logText(large);
+      expect(after.lastIndexOf(BUTTON_OPTIONS[0]), `選んだ字が質問として会話に積まれていません：${after.slice(-400)}`).toBeGreaterThan(after.indexOf(BUTTONS_REPLY));
+
+      /*
+        ── 選択肢を押したあとも、前の答えのまだ押していないボタンは残る（2026-10-13 の不具合の再現） ──
+        消えるのは使った選択肢の並び（古い選択肢）だけ。［取り消す］・実行（畳みの札）・［そこを見せて］は残る
+      */
+      const leftButtons = async (): Promise<Record<string, number>> =>
+        large.evaluate(() => ({
+          choices: document.querySelectorAll(".options.choices").length,
+          undo: Array.from(document.querySelectorAll("[data-edit-id] button.option")).filter((node) => (node.textContent ?? "").includes("取り消す")).length,
+          more: document.querySelectorAll(".more-toggle").length,
+          locate: Array.from(document.querySelectorAll('[data-edit-id^="locate-"] button.option')).length,
+        }));
+      const left = await leftButtons();
+      expect(left.choices, `使った選択肢の並びが残っています（${JSON.stringify(left)}）`).toBe(0);
+      expect(left.undo, `選択肢を押したら［取り消す］が消えました（${JSON.stringify(left)}）`).toBe(1);
+      expect(left.more, `選択肢を押したら「ほかにできること」が消えました（${JSON.stringify(left)}）`).toBe(1);
+      expect(left.locate, `選択肢を押したら［そこを見せて］が消えました（${JSON.stringify(left)}）`).toBe(1);
+
       await large.locator("[data-edit-id] button.option", { hasText: "取り消す" }).first().click();
       await waitUntil(async () => !(await plotText(session)).includes(EDIT_THEME), "［取り消す］で plot.md から書いた中身が消える", 20_000).catch(
         async (error: unknown) => {
@@ -291,7 +325,12 @@ test("大きい画面で質問すると答えが返り、書き込みは入っ�
         throw new Error(`${String(error)}${await describeState(page, large, sentBefore)}`);
       });
       large = (await largeChatFrame(page)) ?? large;
-      await waitUntil(async () => (await resultLineOf(large, "run-")).startsWith("done:"), "相談の会話に「実行しました」が出る", 15_000).catch(
+      // 検知の出し先（校正・メモパネル）を言う。古い「右の列の『提案』パネル」は言わない（2026-10-13）
+      await waitUntil(
+        async () => (await resultLineOf(large, "run-")) === "done:実行しました。結果は校正・メモパネルに出ます。",
+        "相談の会話に「実行しました。結果は校正・メモパネルに出ます。」が出る",
+        15_000
+      ).catch(
         async (error: unknown) => {
           throw new Error(`${String(error)}（結果の行：${JSON.stringify(await resultLineOf(large, "run-"))}）`);
         }
@@ -326,22 +365,6 @@ test("大きい画面で質問すると答えが返り、書き込みは入っ�
           throw new Error(`${String(error)}（結果の行：${JSON.stringify(await resultLineOf(large, "locate-"))}）`);
         }
       );
-
-      /* ── 選択肢：押すと、その字が次の質問として前のやり取りを添えて送られる（最後に押す） ── */
-      large = await showLargeChat(page, sentBefore);
-      expect(await large.evaluate(() => document.getElementById("hint")?.textContent ?? ""), "選択肢の番号の案内が出ていません").toContain("番号（1〜2）");
-      const option = large.locator(".options button.option", { hasText: BUTTON_OPTIONS[0] });
-      expect(await option.count(), `選択肢「${BUTTON_OPTIONS[0]}」の札がありません`).toBe(1);
-      const sentBeforeOption = fake.requests.length;
-      await option.click();
-      await waitForReply(page, large, OPTION_REPLY, sentBefore);
-      const sent = describeFakeRequests(fake.requests, sentBeforeOption);
-      const second = chatRequestsSince(sentBeforeOption, BUTTON_OPTIONS[0])[0];
-      expect(second, `選択肢の字が相談として偽のAIへ届いていません（${sent}）`).toBeDefined();
-      expect(second?.user, `選択肢の頼みに前のやり取りが添えられていません（${sent}）`).toContain("【これまでのやり取り】");
-      expect(second?.user, `選択肢の頼みの前のやり取りに1問目がありません（${sent}）`).toContain(BUTTONS_QUESTION);
-      const after = await logText(large);
-      expect(after.lastIndexOf(BUTTON_OPTIONS[0]), `選んだ字が質問として会話に積まれていません：${after.slice(-400)}`).toBeGreaterThan(after.indexOf(BUTTONS_REPLY));
     },
     fakeOllamaLaunch(fake, { keybindings: [{ key: OPEN_LARGE_KEY, command: "novelai.openChatPanel" }] })
   );

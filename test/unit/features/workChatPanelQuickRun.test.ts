@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import type { WorkEntry } from "../../../src/models/types";
-import { window } from "../support/vscodeStub";
+import { window, workspace } from "../support/vscodeStub";
 import { runnableFeatures } from "../../../src/core/chatEdit";
 
 /**
@@ -86,6 +86,7 @@ function harness() {
     reference: [],
   });
   return {
+    panel,
     posted,
     run,
     async send(message: unknown) {
@@ -104,11 +105,73 @@ describe("「できること」から機能を起動する", () => {
     expect(h.run).toHaveBeenCalledTimes(1);
     expect(h.run).toHaveBeenCalledWith(WORK, "checkTypos", undefined);
     const notes = h.posted.filter((message) => message.type === "note");
-    expect(String(notes.at(-1)?.message)).toContain(
-      "結果は右の列の「提案」パネルに出ます"
+    // 検知は終わると校正・メモパネルを開く（設計書6.96.5）。古い出し先
+    // （右の列の「提案」パネル）を言わない
+    expect(String(notes.at(-1)?.message)).toBe(
+      "「誤字脱字を検知する」を実行しました。結果は校正・メモパネルに出ます。"
     );
   });
 
+  test("検知でない機能は、出し先を言わずに実行したことだけ言う", async () => {
+    // 設定資料集を開くなどは結果を提案へ出さない。出し先を言うと嘘になる
+    const h = harness();
+
+    await h.send({ type: "quickRun", kind: "openSettingsPanel" });
+
+    const notes = h.posted.filter((message) => message.type === "note");
+    expect(String(notes.at(-1)?.message)).toBe("「設定資料集を開く」を実行しました。");
+  });
+
+  test("編集者モードでは、検知の結果は提案パネルに出ると言う", async () => {
+    // 編集者モードの検知は、校正・メモパネルでなく提案パネルを開く（6.96.5）
+    const h = harness();
+    const original = workspace.getConfiguration;
+    workspace.getConfiguration = (() => ({
+      get: <T>(key: string, defaultValue: T): T =>
+        (key === "mode" ? "editor" : defaultValue) as T,
+    })) as typeof workspace.getConfiguration;
+    try {
+      await h.send({ type: "quickRun", kind: "checkProofread" });
+    } finally {
+      workspace.getConfiguration = original;
+    }
+
+    const notes = h.posted.filter((message) => message.type === "note");
+    expect(String(notes.at(-1)?.message)).toBe(
+      "「推敲する」を実行しました。結果は提案パネルに出ます。"
+    );
+  });
+});
+
+describe("答えの下の実行ボタンを押したあとの文", () => {
+  function stage(h: ReturnType<typeof harness>, id: string, kind: string): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (h.panel as any).pendingRuns.set(id, { kind, work: WORK });
+  }
+
+  test("検知なら、校正・メモパネルに出ると言う", async () => {
+    const h = harness();
+    stage(h, "r1", "checkDeviations");
+
+    await h.send({ type: "run", id: "r1" });
+
+    expect(h.run).toHaveBeenCalledWith(WORK, "checkDeviations", undefined);
+    const done = h.posted.filter((message) => message.type === "runDone");
+    expect(done.at(-1)?.message).toBe("実行しました。結果は校正・メモパネルに出ます。");
+  });
+
+  test("検知でなければ、実行したことだけ言う", async () => {
+    const h = harness();
+    stage(h, "r2", "openSettingsPanel");
+
+    await h.send({ type: "run", id: "r2" });
+
+    const done = h.posted.filter((message) => message.type === "runDone");
+    expect(done.at(-1)?.message).toBe("実行しました。");
+  });
+});
+
+describe("「できること」から起動できるもの", () => {
   test("一覧に無い名前を送られても、何も走らせない", async () => {
     // 画面から届く文字列をそのままコマンドにしない（許した一覧と突き合わせる）
     const h = harness();

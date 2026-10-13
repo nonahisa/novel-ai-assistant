@@ -168,7 +168,9 @@ import {
   WORK_CHAT_VERSION,
   type WorkChatTurn,
 } from "../prompts/workChat";
+import { isEditorMode } from "../core/actorContext";
 import {
+  chatRunDoneMessage,
   describeChatEditButton,
   describeChatEditDestination,
   describeChatEditRejection,
@@ -3059,7 +3061,8 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       this.postAll({
         type: "runDone",
         id,
-        message: "実行しました。結果は右の列の「提案」パネルに出ます。",
+        // 出し先は機能とモードで変わる（検知は校正・メモパネル、編集者モードは提案パネル）
+        message: chatRunDoneMessage(staged.kind, isEditorMode()),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -3458,7 +3461,7 @@ export class WorkChatPanel implements vscode.WebviewViewProvider {
       );
       this.postAll({
         type: "note",
-        message: `「${label}」を実行しました。結果は右の列の「提案」パネルに出ます。`,
+        message: chatRunDoneMessage(kind, isEditorMode(), label),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
