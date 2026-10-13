@@ -400,7 +400,8 @@ async function connectRemote(
     // 履歴だけでも「消してしまった原稿を戻す」という価値がある
     vscode.window.showInformationMessage(
       `${target.label} は、この端末だけで履歴を残します。\n` +
-        "変更を残したいときは「変更を記録する」を実行してください。"
+        // 一覧の項目名に合わせる（作者の裁定「案A」、2026-10-13 夜）
+        "書き換えを残したいときは「GitHubと同期」の「いまの原稿を履歴に残す」を押してください。"
     );
     return false;
   }
@@ -577,7 +578,8 @@ async function firstPush(
 
   logStep(`はじめての送信: ${target.label} → ${remoteUrl}（${branch}）`);
   vscode.window.showInformationMessage(
-    `${target.label} を送信しました。以後は「取り込む」「送信する」が使えます。`
+    // 一覧の項目名に合わせる（作者の裁定「案A」、2026-10-13 夜）
+    `${target.label} を GitHub へ送りました。以後は「GitHubと同期」で GitHub とそろえられます。`
   );
   return true;
 }

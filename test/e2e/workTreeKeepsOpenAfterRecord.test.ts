@@ -7,7 +7,7 @@
  * 固定した（作品一覧の `workTree.ts`）。その固定が効いているかを、押して確かめる。
  *
  * 道筋は作者が押すのと同じ：作品を開く → 本文が変わって［記録待ち1］が付く →
- * 「GitHubと同期」→「変更を記録する」→ 説明を決めて記録 → 印が消える。
+ * 「GitHubと同期」→「いまの原稿を履歴に残す」→ 説明を決めて記録 → 印が消える。
  * **送り先（リモート）の無い置き場にするので、GitHub は呼ばない。** 印の消え方は記録で決まり、
  * 送信は関わらない。
  */
@@ -64,12 +64,12 @@ test("作品を開いたまま変更を記録して［記録待ち］の印が�
       );
       expect(await workRow(page).getAttribute("aria-expanded"), "印が付いても開いたまま").toBe("true");
 
-      // 記録する（GitHubと同期 → 変更を記録する → 説明はそのまま）
+      // 記録する（GitHubと同期 → いまの原稿を履歴に残す → 説明はそのまま）
       await runCommand(page, "GitHubと同期");
       await waitUntil(
         async () => {
           const title = (await quickPickTitle(page)) ?? "";
-          return title.includes("同期する作品を選択") || title.includes("のGitHub同期");
+          return title.includes("同期する作品を選択") || title.includes("を GitHub とそろえる");
         },
         "同期の選ぶ画面が出る",
         15_000
@@ -77,8 +77,9 @@ test("作品を開いたまま変更を記録して［記録待ち］の印が�
       if (((await quickPickTitle(page)) ?? "").includes("同期する作品を選択")) {
         await pickQuickPickRow(page, E2E_WORK_TITLE);
       }
-      await waitForQuickPick(page, `${E2E_WORK_TITLE} のGitHub同期`);
-      await pickQuickPickRow(page, "変更を記録する");
+      // 一覧の文は 0.105.6 で作者の裁定「案A」に改めた（2026-10-13 夜）
+      await waitForQuickPick(page, `${E2E_WORK_TITLE} を GitHub とそろえる`);
+      await pickQuickPickRow(page, "いまの原稿を履歴に残す");
       await waitForQuickInput(page, "この記録に付ける説明");
       await page.keyboard.press("Enter");
       await waitQuickInputClosed(page, "記録の説明の入力欄が閉じる");

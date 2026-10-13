@@ -18,6 +18,8 @@ import {
 import {
   describeChoicePlaceholder,
   describeConflict,
+  describeKeepBoth,
+  keepBothExample,
   parseConflicts,
   resolveConflicts as buildResolvedText,
   sideFileName,
@@ -580,6 +582,13 @@ export interface WalkConflictsResult {
   sideFiles?: string[];
   /** 途中でやめたか。**やめたら呼び出し側が `merge --abort` で全部戻す** */
   aborted: boolean;
+  /**
+   * やめたのが作者ではないか（見比べの画面を用意できない・選んだ版を書き戻せない）。
+   *
+   * 作者がやめたときは「途中でやめました。続けるには…」と次の一手を示すが
+   * （2026-10-13 夜）、こちらの都合で止まったのに「やめました」と言うと事実と違う
+   */
+  unavailable?: boolean;
 }
 
 /** 「選ばずに閉じました」の窓のボタン */
@@ -636,11 +645,12 @@ export async function walkConflicts(
   const resolved: string[] = [];
   const bulkResolved: string[] = [];
   const sideFiles: string[] = [];
-  const finish = (aborted: boolean): WalkConflictsResult => ({
+  const finish = (aborted: boolean, unavailable = false): WalkConflictsResult => ({
     resolved,
     bulkResolved,
     sideFiles,
     aborted,
+    ...(unavailable ? { unavailable: true } : {}),
   });
   if (files.length === 0) return finish(false);
 
@@ -651,7 +661,7 @@ export async function walkConflicts(
     await vscode.window.showWarningMessage(
       "見比べの画面を用意できませんでした。そろえるのを取りやめます。"
     );
-    return finish(true);
+    return finish(true, true);
   }
 
   const settingsFiles = files.filter((file) => isSettingsJsonPath(file));
@@ -697,7 +707,9 @@ export async function walkConflicts(
       sideFiles,
       onClosed: askAfterClosed,
     });
-    if (outcome !== "resolved") return finish(true);
+    // 選ばずに閉じた（cancelled）のは作者。書き戻せなかった・読めなかったのは
+    // こちらの都合なので、作者がやめたことにしない
+    if (outcome !== "resolved") return finish(true, outcome !== "cancelled");
     resolved.push(relative);
 
     const remaining = toReview.length - index - 1;
@@ -796,7 +808,10 @@ export function describeWalkStart(files: readonly string[]): string {
  * が分からない（作者の実測、2026-09-11）。作者が見たいのは
  * **どの作品で何件か**なので、置き場の先頭のフォルダー名で束ねて数える。
  */
-export function describeWalkStartDetail(files: readonly string[]): string {
+export function describeWalkStartDetail(
+  files: readonly string[],
+  when: Date = new Date()
+): string {
   const groups = groupByWork(files);
   const lines = groups.map(
     (group) =>
@@ -811,10 +826,15 @@ export function describeWalkStartDetail(files: readonly string[]): string {
       : "どちらを残すかは、書いたご本人にしか分かりません。" +
         "1件ずつ両方を並べますので、お選びください。";
 
+  // 「両方とも残す」で何が起きるかを、選ぶ前に（作者、2026-10-13 夜）。
+  // 原稿が無ければ「両方とも残す」は出ないので、添えない
+  const example = keepBothExample(files, when);
+
   return [
     lines.join("\n"),
     "",
     guidance,
+    ...(example ? [describeKeepBoth(example)] : []),
     "途中でやめれば、原稿は元のままです。",
     "そろえたあとでも、控えから「そろえる前」へ丸ごと戻せます。",
   ].join("\n");

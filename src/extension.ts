@@ -8526,6 +8526,8 @@ async function showStatusBarSyncMenu(
   const picked = await vscode.window.showQuickPick([...rows, cancelItem()], {
     title: "GitHubとの同期",
     placeHolder: "同期するか、作品を選んで操作を選んでください",
+    // そろえる流れの入口。ほかの窓へ移っても閉じない（2026-10-13 夜の見直し）
+    ignoreFocusOut: true,
   });
   if (!picked || !("choice" in picked) || !picked.choice) return;
 

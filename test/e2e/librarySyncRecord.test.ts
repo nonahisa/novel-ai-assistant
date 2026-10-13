@@ -5,8 +5,9 @@
  *
  * 何を見張るか：
  * - 80：書庫（1つの置き場に作品が2つ）で書き換えて右下（ステータスバー）に「未記録 N」を出し、
- *   ステータスバーを押して「変更を記録する」、または「全作品同期」を押したあと、`git status` が0件なら
- *   「未記録」が消え、数秒待っても戻らない。「状態を確認」の知らせの数とステータスバーの数が食い違わない
+ *   ステータスバーを押して「いまの原稿を履歴に残す」、または「全作品同期」を押したあと、`git status` が0件なら
+ *   「未記録」が消え、数秒待っても戻らない。「GitHub の様子を読み直す」の知らせの数とステータスバーの数が
+ *   食い違わない（一覧の文は 0.105.6 で作者の裁定「案A」に改めた。2026-10-13 夜）
  * - 4989：記録だけ（送らない）を押すと、作品一覧の「記録待ち」の数が減る（0になる）
  * - 88：原稿エディターで話に字を足し、保存しないうちに「全作品同期」を押すと、確認の窓に
  *   「記録（未保存 1件を先に保存）」と出て、同期のあと「未記録」が0のまま戻らない。ほかの作品
@@ -164,12 +165,12 @@ async function openSyncMenuFromStatusBar(page: Page, hasText: string): Promise<v
     throw new Error(`ステータスバーに「${hasText}」の項目が出ません（${String(error)}／${JSON.stringify(await statusBarTexts(page))}）`);
   });
   await item.click();
-  // 手当ての要る置き場が1つなら、その置き場の「<作品> のGitHub同期」が直に出る（`buildStatusBarSyncMenu`）。
+  // 手当ての要る置き場が1つなら、その置き場の「<作品> を GitHub とそろえる」が直に出る（`buildStatusBarSyncMenu`）。
   // 2つ以上なら「GitHubとの同期」から置き場（書庫）の行を選ぶ
   await waitUntil(
     async () => {
       const title = (await quickPickTitle(page)) ?? "";
-      return title.includes("のGitHub同期") || title === "GitHubとの同期";
+      return title.includes("を GitHub とそろえる") || title === "GitHubとの同期";
     },
     "ステータスバーを押すと同期の選ぶ画面が出る",
     20_000
@@ -178,17 +179,23 @@ async function openSyncMenuFromStatusBar(page: Page, hasText: string): Promise<v
   });
   if ((await quickPickTitle(page)) === "GitHubとの同期") {
     await pickQuickPickRow(page, "書庫");
-    await waitForQuickInput(page, "のGitHub同期");
+    await waitForQuickInput(page, "を GitHub とそろえる");
   }
 }
 
-/** ステータスバーから「状態を確認」を押し、知らせの文を返す */
+/** ステータスバーから「GitHub の様子を読み直す」を押し、知らせの文を返す */
 async function checkStatus(session: E2ESession, hasText: string): Promise<string> {
   const { page } = session;
   const since = Date.now();
   await openSyncMenuFromStatusBar(page, hasText);
-  await pickQuickPickRow(page, "状態を確認");
-  return waitForNotice(session, (message) => message.includes(": main:"), "「状態を確認」の知らせ", { since, timeoutMs: 30_000 });
+  await pickQuickPickRow(page, "GitHub の様子を読み直す");
+  // 知らせは「<作品>：<状態の文>。」（`describeSyncMenuStatus`）
+  return waitForNotice(
+    session,
+    (message) => /：(このPC|GitHub に|履歴に残していない)/.test(message),
+    "「GitHub の様子を読み直す」の知らせ",
+    { since, timeoutMs: 30_000 }
+  );
 }
 
 test("書庫で書き換えると「未記録」が置き場の数で出て、「状態を確認」の知らせと数が合い、記録だけで作品一覧の「記録待ち」が0になり、全作品同期のあとも「未記録」が戻らない", async () => {
@@ -218,16 +225,18 @@ test("書庫で書き換えると「未記録」が置き場の数で出て、�
       });
       expect(await porcelainLines(library), "git status の行の数とステータスバーの数が同じ").toHaveLength(2);
 
-      /* ── 80：「状態を確認」の知らせとステータスバーの数が食い違わない ── */
+      /* ── 80：「GitHub の様子を読み直す」の知らせとステータスバーの数が食い違わない ── */
       const dirtyNotice = await checkStatus(session, "未記録");
-      expect(dirtyNotice, `「状態を確認」の知らせ（${await describeSync(session, library, titles)}）`).toContain("未コミットの変更 2件");
+      expect(dirtyNotice, `「GitHub の様子を読み直す」の知らせ（${await describeSync(session, library, titles)}）`).toContain(
+        "履歴に残していない書き換えが 2件あります"
+      );
       expect(await statusBarCount(page, "未記録"), "確認のあともステータスバーは「未記録 2」").toBe(2);
       await clearNotifications(page);
 
-      /* ── 4989・80：ステータスバーから「変更を記録する」（送らない）→ 記録待ちが0に ── */
+      /* ── 4989・80：ステータスバーから「いまの原稿を履歴に残す（送らない）」→ 記録待ちが0に ── */
       const recordSince = Date.now();
       await openSyncMenuFromStatusBar(page, "未記録");
-      await pickQuickPickRow(page, "変更を記録する");
+      await pickQuickPickRow(page, "いまの原稿を履歴に残す");
       await waitForQuickInput(page, "この記録に付ける説明");
       await page.keyboard.press("Enter");
       await waitQuickInputClosed(page, "記録の説明の入力欄が閉じる");
@@ -255,15 +264,17 @@ test("書庫で書き換えると「未記録」が置き場の数で出て、�
         throw new Error(`${String(error)}（${await describeSync(session, library, titles)}）`);
       });
 
-      // 記録しただけで送っていないので「未送信 1」。「状態を確認」の知らせも同じ数
+      // 記録しただけで送っていないので「未送信 1」。「GitHub の様子を読み直す」の知らせも同じ数
       await waitUntil(async () => (await statusBarCount(page, "未送信")) === 1, "ステータスバーが「未送信 1」になる", 15_000).catch(
         async (error: unknown) => {
           throw new Error(`${String(error)}（${await describeSync(session, library, titles)}）`);
         }
       );
       const aheadNotice = await checkStatus(session, "未送信");
-      expect(aheadNotice).toContain("未送信 1件");
-      expect(aheadNotice, "記録のあとの「状態を確認」に未コミットの変更が出ない").not.toContain("未コミット");
+      expect(aheadNotice).toContain("GitHub へまだ送っていない書き換えが 1件あります");
+      expect(aheadNotice, "記録のあとの「GitHub の様子を読み直す」に履歴に残していない書き換えが出ない").not.toContain(
+        "履歴に残していない"
+      );
       await clearNotifications(page);
 
       /* ── 80：もう一度書き換えて「全作品同期」→ 記録して送り、「未記録」も「未送信」も戻らない ── */
