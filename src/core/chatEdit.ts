@@ -317,6 +317,42 @@ export function runnableFeatureList(): string {
     .join("\n");
 }
 
+/**
+ * 結果が指摘として並ぶ検知。終わると、作者のモードでは校正・メモパネルを、
+ * 編集者モードでは提案パネルを開く（設計書6.96.5・6.8.16）。
+ */
+const DETECTION_KINDS: ReadonlySet<ChatRunKind> = new Set<ChatRunKind>([
+  "checkTypos",
+  "checkTyposForFile",
+  "checkNotation",
+  "checkProofread",
+  "checkContradictions",
+  "checkDeviations",
+]);
+
+/**
+ * 相談から機能を起動し終えたときに出す文（2026-10-13）。
+ *
+ * **出し先を言うのは検知だけ。** 以前はどの機能にも「結果は右の列の
+ * 『提案』パネルに出ます」と出していたが、検知は終わると校正・メモパネルを
+ * 開くようになり（6.96.5）、設定資料集を開くなどの起動は提案へ何も出さない。
+ * 出ない場所を案内すると、作者はそこを探しに行く。
+ *
+ * @param label 「できること」の札から押したときの機能名（答えの下の
+ *   ボタンは名前を札に書いてあるので渡さない）
+ */
+export function chatRunDoneMessage(
+  kind: ChatRunKind,
+  editorMode: boolean,
+  label?: string
+): string {
+  const head = label ? `「${label}」を実行しました。` : "実行しました。";
+  if (!DETECTION_KINDS.has(kind)) return head;
+  return editorMode
+    ? `${head}結果は提案パネルに出ます。`
+    : `${head}結果は校正・メモパネルに出ます。`;
+}
+
 /** 起動したい機能の指定を、許可した一覧と突き合わせる */
 export function parseChatRun(raw: unknown): ChatRun | undefined {
   const key = typeof raw === "string" ? raw.trim().toLowerCase() : "";
