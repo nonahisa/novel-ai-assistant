@@ -91,6 +91,22 @@ export async function startFakeOllama(
      * ステータスバーの［中止］を押し、押したあとで門を開ける。一瞬で返すと、中止を押す隙が無い
      */
     beforeEmbed?: (inputs: readonly string[]) => void | Promise<void>;
+    /**
+     * `/api/show` が申告する読める長さ（トークン）。既定は 32,768。
+     *
+     * 申告より短いところで頭打ちになるモデル（実機確認リスト 309、J3）を作るときに、
+     * 下の `promptTokens` の頭打ちと組で渡す
+     */
+    contextLength?: number;
+    /**
+     * `/api/chat` が答える入力トークン数（`prompt_eval_count`）の決め方。省くと今までどおり 10 に固定。
+     *
+     * 渡すと「送った字数（全発言の字数の合計）× `perChar` を切り上げ、`cap` で頭打ち」にする。
+     * 製品は読める長さを**入力トークン数の伸びが止まるところ**で測る（`core/contextProbe.ts`）ので、
+     * `cap` が偽のモデルの「本当に読める長さ」になる。製品の「桁違い」の線（1字4トークン）を
+     * 超えないよう、`perChar` は 1 前後にする
+     */
+    promptTokens?: { perChar: number; cap: number };
   } = {}
 ): Promise<FakeOllama> {
   const requests: FakeOllamaRequest[] = [];
@@ -127,7 +143,8 @@ export async function startFakeOllama(
         sendJson({
           capabilities: ["completion"],
           details: { parameter_size: options.parameterSize ?? "1B" },
-          model_info: { "fake.context_length": 32768 },
+          // 製品は `.context_length` で終わる鍵を読む（`ai/ollamaProvider.ts`）
+          model_info: { "fake.context_length": options.contextLength ?? 32768 },
         });
         return;
       }
@@ -143,7 +160,14 @@ export async function startFakeOllama(
         const parsed: FakeOllamaRequest = { system, user, structured: body.format !== undefined };
         requests.push(parsed);
         const text = await respond(parsed);
-        const tail = { model: FAKE_OLLAMA_MODEL, done: true, done_reason: "stop", prompt_eval_count: 10, eval_count: 10 };
+        // 製品が数える送った字数は system＋user の字数の合計（`measureContext.ts` の `promptChars`）。
+        // 全発言を足せば同じ数になる（JS の length どうしで数える）
+        const sentChars = messages.reduce((sum, message) => sum + (message.content ?? "").length, 0);
+        const promptEvalCount =
+          options.promptTokens === undefined
+            ? 10
+            : Math.min(Math.ceil(sentChars * options.promptTokens.perChar), options.promptTokens.cap);
+        const tail = { model: FAKE_OLLAMA_MODEL, done: true, done_reason: "stop", prompt_eval_count: promptEvalCount, eval_count: 10 };
         if (body.stream === true) {
           response.writeHead(200, { "content-type": "application/x-ndjson" });
           response.write(JSON.stringify({ model: FAKE_OLLAMA_MODEL, message: { role: "assistant", content: text }, done: false }) + "\n");
