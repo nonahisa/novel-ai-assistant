@@ -312,6 +312,20 @@ export async function quickOpen(page: Page, fileName: string): Promise<void> {
       const rows = await page.locator(".quick-input-widget .monaco-list-row").allInnerTexts().catch(() => []);
       throw new Error(`Ctrl+P の候補に「${fileName}」が出ません（出ている候補 ${JSON.stringify(rows)}）（${String(error)}）`);
     });
+  /*
+    **Enter は先頭の候補を開くので、先頭が目当ての名前になるまで待つ。** 候補に出ただけで押すと、
+    絞り込みが追いつく前の「最近開いたもの」が先頭に残っていることがある。母艦（0.106.4、1.141.0、
+    2026-10-15）の restartAndDisconnect の 200 で、閉じた第2話を開き直すはずが、前に出ていた
+    第1話を選んで何も起きず、30秒待って落ちた
+  */
+  await waitUntil(
+    async () => ((await page.locator(".quick-input-widget .monaco-list-row").first().innerText().catch(() => "")) ?? "").includes(fileName),
+    `Ctrl+P の候補の先頭が「${fileName}」になる`,
+    5_000
+  ).catch(async (error: unknown) => {
+    const rows = await page.locator(".quick-input-widget .monaco-list-row").allInnerTexts().catch(() => []);
+    throw new Error(`${String(error)}（出ている候補 ${JSON.stringify(rows)}）`);
+  });
   await page.keyboard.press("Enter");
   await input.waitFor({ state: "hidden" }).catch((error: unknown) => {
     throw new Error(`Ctrl+P で「${fileName}」を選んだあと、入力欄が閉じません（${String(error)}）`);

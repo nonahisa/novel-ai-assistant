@@ -137,7 +137,9 @@ const MEMO_EPISODE = "001_はじまり.txt";
 const MEMO_TEXT = "一のメモ";
 
 // 2026-10-12 ノートPC（89d8c269）で落ちた：パネルの行を押したことが操作ログに残らない（足された行：[]）。
-// テストの作り方か製品の側かを切り分けるまで飛ばす。直したら skip を外す（実機確認リスト 156）。
+// 2026-10-15 母艦で切り分け：再起動のあとも校正・メモパネルは画面に残るが、復元の登録（registerWebviewPanelSerializer）が
+// 無いので新しい拡張機能はこのパネルを知らず、押しても誰も受けない。テストの誤りではなく製品の振る舞い。
+// 直し方（パネルを引き取れるようにするか、切れたパネルを閉じて案内するか）は作者の判断待ち。決まるまで飛ばす（実機確認リスト 156）
 test.skip("原稿と校正・メモパネルを左右に開いたまま拡張機能ホストを再起動し、「つながりが切れました」を再読み込みせずに閉じてパネルの行を押しても、右の列に同じ話の2枚目ができない", async () => {
   await withVsCode(
     "再起動をまたぐ：メモパネルから押して2枚目ができない",
@@ -236,9 +238,9 @@ async function faceLook(frame: Frame): Promise<{ vertical: boolean; size: number
   }));
 }
 
-// 2026-10-12 ノートPC（89d8c269）で落ちた：開き直したあと「002_に.txt」の本文が30秒たっても描かれない。
-// 切り分けるまで飛ばす。直したら skip を外す（実機確認リスト 200）。
-test.skip("第1話と第2話を横書きで開いたまま VS Code を開き直し、第1話で縦書き・字の大きさを変えて［次の話 →］を押すと第2話が同じ見た目で出て、閉じて開き直すと元の見た目に戻る", async () => {
+// 2026-10-12 ノートPC（89d8c269）で落ちた（閉じた第2話を開き直すと30秒たっても描かれない）のは、quickOpen が候補の先頭を
+// 確かめずに Enter を押し、前に出ていた第1話を選んでいたため。2026-10-15 に部品を直して skip を外した（実機確認リスト 200）
+test("第1話と第2話を横書きで開いたまま VS Code を開き直し、第1話で縦書き・字の大きさを変えて［次の話 →］を押すと第2話が同じ見た目で出て、閉じて開き直すと元の見た目に戻る", async () => {
   await withVsCode(
     "開き直しをまたぐ：次の話へ見た目を引き継ぐ",
     [
@@ -345,6 +347,15 @@ async function muteHostToFace(frame: Frame): Promise<void> {
     const host = window as unknown as { __e2eMuteHost?: boolean };
     if (host.__e2eMuteHost) return;
     host.__e2eMuteHost = true;
+    // 外側の枠は内側の window.postMessage で便を渡す。製品の受け手は先に登録されているので、
+    // 受け手を足して止めるだけでは製品に届いてしまう（4秒ごとの count で「相手がいる」と判断された。
+    // 2026-10-15 母艦で確かめた）。渡す手前で止める
+    const original = window.postMessage.bind(window) as (message: unknown, ...rest: unknown[]) => void;
+    (window as unknown as { postMessage: (message: unknown, ...rest: unknown[]) => void }).postMessage = (message: unknown, ...rest: unknown[]) => {
+      const data = message as { type?: unknown } | null;
+      if (data && typeof data.type === "string") return;
+      original(message, ...rest);
+    };
     window.addEventListener(
       "message",
       (event) => {
@@ -367,9 +378,9 @@ async function reopenButtonState(frame: Frame): Promise<{ hidden: boolean; disab
   });
 }
 
-// 2026-10-12 ノートPC（89d8c269）で落ちた：2段目が「拡張機能の更新や再起動で…」でなく「打った字が原稿に入りません…」の文になる
-// （hostSilent でない形に入っている）。テストの切り方か製品の段の分け方かを切り分けるまで飛ばす。直したら skip を外す（実機確認リスト 288）。
-test.skip("つながりが切れたまま打つと、4秒で赤字「打った字を原稿へ送り直しています（N秒）」が出て秒が数え上がり、30秒で再読み込みを案内する2段目に変わる（［開き直す］は出さない）", async () => {
+// 2026-10-12 ノートPC（89d8c269）で落ちた（2段目が hostSilent でない文になる）のは、muteHostToFace の止め方がテストの誤りだったため。
+// 拡張機能からの count が製品の受け手に届いていた。2026-10-15 に渡す手前で止めるよう直して skip を外した（実機確認リスト 288）
+test("つながりが切れたまま打つと、4秒で赤字「打った字を原稿へ送り直しています（N秒）」が出て秒が数え上がり、30秒で再読み込みを案内する2段目に変わる（［開き直す］は出さない）", async () => {
   await withVsCode(
     "つながりの切れ：届かない字の知らせの段",
     [{ name: UNSENT_EPISODE, text: `${UNSENT_FIRST_LINE}\n` }],
