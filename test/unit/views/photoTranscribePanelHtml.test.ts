@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { buildPhotoTranscribeHtml } from "../../../src/views/photoTranscribePanelHtml";
+import { PHOTO_PARAGRAPH_SCRIPT } from "../../../src/core/photoParagraphs";
 
 /**
  * 写真から原稿を起こす画面（設計書6.117）。
@@ -129,5 +130,43 @@ describe("写真から原稿を起こす画面", () => {
   test("挿入の印や取り消し線をAIに決めさせないことを、画面でも断る", () => {
     expect(html).toContain("AIには決めさせません");
     expect(html).toContain("〓");
+  });
+
+  describe("段落ごとにつないで出す（6.117.12。作者の指摘 2026-10-15）", () => {
+    test("つなぐ処理は core と同じ文字列をそのまま埋め込む（写しを置かない）", () => {
+      expect(script()).toContain(PHOTO_PARAGRAPH_SCRIPT);
+    });
+
+    test("「ノートの行で見る」の切り替えがあり、既定は段落ごとにつないだ形", () => {
+      const toggle = html.match(/<input[^>]*data-testid="photo-view-lines"[^>]*>/);
+      expect(toggle).not.toBeNull();
+      expect(toggle?.[0]).toContain('type="checkbox"');
+      // 既定で印が付いていない＝段落の形で出す
+      expect(toggle?.[0]).not.toContain("checked");
+      expect(html).toContain("ノートの行で見る");
+      expect(script()).toContain("var viewLines = false;");
+    });
+
+    test("書き起こしの答えは、行の形を持ったまま段落の形を作り、出すのは段落の形", () => {
+      const body = script();
+      expect(body).toContain("page.lineText = message.text;");
+      expect(body).toContain("page.paraText = joinPhotoParagraphs(message.text);");
+      expect(body).toContain("showForm(page);");
+    });
+
+    test("直しは出ている形のほうに持ち、行の形の直しは段落の形へ流す（段落の形を直していなければ）", () => {
+      const body = script();
+      expect(body).toContain("entry.lineText = textarea.value;");
+      expect(body).toContain("if (!entry.paraEdited) entry.paraText = joinPhotoParagraphs(entry.lineText);");
+      expect(body).toContain("entry.paraText = textarea.value;");
+      expect(body).toContain("entry.paraEdited = true;");
+    });
+
+    test("保存と差し込みは、いま出ている形（欄の文）で行う", () => {
+      const body = script();
+      expect(body).toContain("return page.textarea.value.replace(");
+      expect(body).toContain('type: "saveNew", text: combinedText()');
+      expect(body).toContain('type: "insert", text: combinedText()');
+    });
   });
 });
