@@ -3,6 +3,7 @@ import { PHOTO_REQUEST_MAX_CHARS } from "../core/photoTranscribeRequest";
 import { INLINE_REPEAT_STOP_NOTE } from "../core/photoTranscribeValidation";
 import { SPREAD_ASPECT } from "../core/photoOrientValidation";
 import { ORIENT_PROBE_TURNS, PHOTO_ORIENT_EDGE } from "../prompts/photoOrient";
+import { PHOTO_PARAGRAPH_SCRIPT } from "../core/photoParagraphs";
 
 /**
  * 写真から原稿を起こす画面（設計書6.117）。
@@ -22,6 +23,13 @@ import { ORIENT_PROBE_TURNS, PHOTO_ORIENT_EDGE } from "../prompts/photoOrient";
  * 渡し、推しが返ったら、その向き・切り方で置き直して札に出す。**作者が先に
  * 回した・切り方を変えた・外した写真には当てない**（作者の操作が勝つ）。
  * 書き起こしは勝手に始めない。
+ *
+ * 書き起こした文は、段落ごとにつないだ形を既定で出す（設計書6.117.12。
+ * つなぐのは `core/photoParagraphs.ts`）。［ノートの行で見る］で、AIが返した
+ * ノートの行のままの形に切り替えられる。ページごとに両方の形を持ち、作者の直しは
+ * **いま出ている形のほうに**当てて持つ（切り替えても直しは消えない）。行の形で
+ * 直したら、段落の形をまだ直していなければ、つなぎ直して段落の形へも流す。
+ * 保存・差し込みは、いま出ている形（欄の文）で行う。
  */
 
 /** 送る前に縮める長辺（px）。Claude の1枚5MBの上限に余裕を持って入る。字が潰れないよう、これより小さくしない */
@@ -94,6 +102,7 @@ mark.example { background: var(--vscode-editorInfo-foreground, #3794ff); color: 
 .warn { color: var(--vscode-editorWarning-foreground); font-size: 12px; }
 .err { color: var(--vscode-errorForeground); }
 .count { font-size: 12px; margin: 4px 0; }
+.view-note { color: var(--vscode-descriptionForeground); font-size: 12px; }
 .save { position: sticky; bottom: 0; background: var(--vscode-editor-background); padding: 8px 0; border-top: 1px solid var(--vscode-panel-border); }
 </style>
 </head>
@@ -123,6 +132,11 @@ mark.example { background: var(--vscode-editorInfo-foreground, #3794ff); color: 
   <span id="status" class="count"></span>
 </div>
 
+<div class="bar">
+  <label><input type="checkbox" id="viewLines" data-testid="photo-view-lines"> ノートの行で見る</label>
+  <span class="view-note">書き起こした文は、段落ごとにつないで出しています。保存・差し込みは、いま出ている形で行います。</span>
+</div>
+
 <div class="pages" id="pages" data-testid="photo-pages"></div>
 
 <div class="save bar">
@@ -149,12 +163,20 @@ mark.example { background: var(--vscode-editorInfo-foreground, #3794ff); color: 
    *   orienting（手元のAIに向きを尋ねている間）, orientNote（推しの札）, touched（作者が回した・切り方を変えた） }
    */
   var photos = [];
-  /** ページの並び（書き起こしの結果）。{ id, label, dataUrl, textarea } */
+  /**
+   * ページの並び（書き起こしの結果）。{ id, label, textarea, lineText（ノートの行の形）,
+   *   paraText（段落の形）, paraEdited（段落の形を作者が直した）, linesAfterPara（そのあと行の形を直した） }
+   */
   var pages = [];
   var running = false;
   var aiOk = false;
   /** 手元のAIに向きを尋ねてよいか（拡張機能が知らせる） */
   var canOrient = false;
+  /** ノートの行のままで見ているか。既定は段落ごとにつないだ形（6.117.12） */
+  var viewLines = false;
+
+  /* 段落ごとにつなぐ処理（core/photoParagraphs.ts をそのまま埋め込む） */
+  ${PHOTO_PARAGRAPH_SCRIPT}
 
   function el(tag, attrs, text) {
     var node = document.createElement(tag);
@@ -337,6 +359,20 @@ mark.example { background: var(--vscode-editorInfo-foreground, #3794ff); color: 
 
   function countMark(text) { return text.split(MARK).length - 1; }
 
+  /** いま選んでいる形の文を欄に出す。直しはそれぞれの形が持っているので、切り替えても消えない */
+  function showForm(page) {
+    page.textarea.value = viewLines ? page.lineText : page.paraText;
+    page.viewNote.textContent = viewNoteOf(page);
+    refreshPage(page);
+  }
+
+  /** 片方の形の直しが、もう片方に映っていないときの断り */
+  function viewNoteOf(page) {
+    if (viewLines && page.paraEdited) return "段落の形で直した分は、ノートの行の形には映っていません（段落の形に戻すと出ます）。";
+    if (!viewLines && page.linesAfterPara) return "段落の形を直したあとにノートの行の形で直した分は、段落の形には映っていません。";
+    return "";
+  }
+
   function refreshPage(page) {
     var text = page.textarea.value;
     page.marks.innerHTML = markUp(text);
@@ -383,11 +419,26 @@ mark.example { background: var(--vscode-editorInfo-foreground, #3794ff); color: 
     var count = el("div", { "class": "count" });
     var next = el("button", { "class": "secondary", "data-testid": "photo-next-mark" }, "次の" + MARK + "へ");
     var marks = el("div", { "class": "marks", "aria-label": "読めない字と英字の目印" });
-    edit.appendChild(status); edit.appendChild(textarea); edit.appendChild(count); edit.appendChild(next); edit.appendChild(marks);
+    var viewNote = el("div", { "class": "view-note", "data-testid": "photo-view-note" });
+    edit.appendChild(status); edit.appendChild(viewNote); edit.appendChild(textarea); edit.appendChild(count); edit.appendChild(next); edit.appendChild(marks);
     row.appendChild(shot); row.appendChild(edit);
     document.getElementById("pages").appendChild(row);
-    var entry = { id: page.id, label: page.label, textarea: textarea, marks: marks, count: count, status: status };
-    textarea.addEventListener("input", function () { refreshPage(entry); });
+    var entry = {
+      id: page.id, label: page.label, textarea: textarea, marks: marks, count: count, status: status, viewNote: viewNote,
+      lineText: "", paraText: "", paraEdited: false, linesAfterPara: false
+    };
+    textarea.addEventListener("input", function () {
+      if (viewLines) {
+        entry.lineText = textarea.value;
+        // 段落の形をまだ直していなければ、つなぎ直して段落の形へも流す（直していれば、そちらを守る）
+        if (!entry.paraEdited) entry.paraText = joinPhotoParagraphs(entry.lineText);
+        else entry.linesAfterPara = true;
+      } else {
+        entry.paraText = textarea.value;
+        entry.paraEdited = true;
+      }
+      refreshPage(entry);
+    });
     next.onclick = function () {
       var value = textarea.value;
       var from = textarea.selectionEnd;
@@ -404,6 +455,11 @@ mark.example { background: var(--vscode-editorInfo-foreground, #3794ff); color: 
   document.getElementById("pickAi").onclick = function () { vscode.postMessage({ type: "pickAi" }); };
   document.getElementById("cancel").onclick = function () { vscode.postMessage({ type: "cancel" }); };
   document.getElementById("request").addEventListener("input", refreshRequest);
+  // 切り替えは画面の中だけ。保存・差し込みは、切り替えたあとに出ている形で行う
+  document.getElementById("viewLines").addEventListener("change", function () {
+    viewLines = document.getElementById("viewLines").checked;
+    pages.forEach(showForm);
+  });
   // 欄を離れたら覚えてもらう（上限を超えていれば拡張機能の側が覚えない）
   document.getElementById("request").addEventListener("change", function () {
     vscode.postMessage({ type: "saveRequest", text: document.getElementById("request").value });
@@ -485,7 +541,11 @@ mark.example { background: var(--vscode-editorInfo-foreground, #3794ff); color: 
       var page = pages.filter(function (p) { return p.id === message.id; })[0];
       if (!page) return;
       if (message.ok) {
-        page.textarea.value = message.text;
+        // AIが返したノートの行の形を持ったまま、段落ごとにつないだ形を作る（出すのは選んでいる形）
+        page.lineText = message.text;
+        page.paraText = joinPhotoParagraphs(message.text);
+        page.paraEdited = false;
+        page.linesAfterPara = false;
         page.textarea.disabled = false;
         var notes = [];
         if (message.stoppedEarly) notes.push("同じ行が繰り返されたので、途中で止めました。写真の向きをお確かめください。");
@@ -497,7 +557,7 @@ mark.example { background: var(--vscode-editorInfo-foreground, #3794ff); color: 
         if (message.droppedEchoes > 0) notes.push("指示の言葉がそのまま返った " + message.droppedEchoes + "行を外しました。");
         page.status.textContent = notes.length > 0 ? notes.join(" ") : "書き起こしました。写真と見比べて直してください。";
         page.status.className = notes.length > 0 ? "warn" : "count";
-        refreshPage(page);
+        showForm(page);
       } else {
         page.status.textContent = message.error;
         page.status.className = "err";
