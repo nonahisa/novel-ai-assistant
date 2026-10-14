@@ -339,7 +339,14 @@ test("設定資料パネルの［AIで再読込］で役割に作品に無い「
         async () => {
           await passLocalAiGate(page);
           const proposal = frame.locator("#detail .note.proposal");
-          box = (await proposal.count()) > 0 ? await proposal.first().innerText() : "";
+          // 提案の値は箱の中の入力欄（textarea）に入って出るので、innerText には現れない。欄の値も足して読む
+          box =
+            (await proposal.count()) > 0
+              ? await proposal.first().evaluate((node) => {
+                  const fields = Array.from(node.querySelectorAll("textarea, input[type=text]")) as Array<HTMLTextAreaElement | HTMLInputElement>;
+                  return [(node as HTMLElement).innerText, ...fields.map((field) => field.value)].join("\n");
+                })
+              : "";
           return box !== "";
         },
         "再読込の提案の箱が出る",
