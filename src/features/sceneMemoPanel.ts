@@ -10,7 +10,7 @@ import {
   formatChapterLabel,
   isCollectedFile,
 } from "../core/episodeLabel";
-import { logFailure, logLine, useLogFile } from "../core/logger";
+import { logFailure, logLine, useLogFile, workLog } from "../core/logger";
 import {
   countMemosByTag,
   MEMO_HINT,
@@ -56,7 +56,10 @@ import {
   findingsRetentionDays,
   visibleFindings,
 } from "./findingStore";
-import { buildSceneMemoPanelHtml } from "../views/sceneMemoPanelHtml";
+import {
+  buildSceneMemoPanelHtml,
+  buildSceneMemoUnrestorableHtml,
+} from "../views/sceneMemoPanelHtml";
 import { openGeneratedMarkdown } from "../views/openDocument";
 import { revealTextLocation, type RevealInManuscript } from "./revealLocation";
 import {
@@ -200,6 +203,11 @@ export async function openSceneMemoPanel(
      * （作者が Ctrl+Alt+M などで押したときは false＝これまでどおり）
      */
     preserveFocus?: boolean;
+    /**
+     * 開く列。既定は原稿の横（`Beside`）。拡張機能ホストの再起動で残ったタブを
+     * 開き直すときだけ、そのタブが居た列を渡す
+     */
+    viewColumn?: vscode.ViewColumn;
   } = {}
 ): Promise<void> {
   const preserveFocus = options.preserveFocus === true;
@@ -208,15 +216,206 @@ export async function openSceneMemoPanel(
     await existing.revealAndReload(options.filePath, preserveFocus);
     return;
   }
-  const panel = new SceneMemoPanel(
-    context,
+  const webview = createSceneMemoWebview(
     work,
-    deps,
-    options.filePath,
+    options.viewColumn ?? vscode.ViewColumn.Beside,
     preserveFocus
   );
+  const panel = new SceneMemoPanel(context, work, deps, webview, options.filePath);
   openPanels.set(work.id, panel);
   await panel.initialize();
+}
+
+/* ── 再起動・再読み込みのあとの引き取り（作者の裁定 2026-10-15） ── */
+
+/** タブの題の頭。作品名はこのあとに続く（題から作品を引き直すのに使う） */
+const SCENE_MEMO_TAB_PREFIX = "校正・メモパネル: ";
+
+function createSceneMemoWebview(
+  work: WorkEntry,
+  viewColumn: vscode.ViewColumn,
+  preserveFocus: boolean
+): vscode.WebviewPanel {
+  return vscode.window.createWebviewPanel(
+    SCENE_MEMO_VIEW_TYPE,
+    `${SCENE_MEMO_TAB_PREFIX}${work.title}`,
+    // **原稿エディタの横へ開く**（作者の指示）。書きながら見るものなので、
+    // 本文の上に重なっては用をなさない。検知が終わって自動で開くときは
+    // フォーカスを原稿に残す（打っている手を止めない）
+    { viewColumn, preserveFocus },
+    { enableScripts: true, retainContextWhenHidden: true }
+  );
+}
+
+/** 作品を台帳から引く口（`features` から台帳の本体を掴まないため、渡してもらう） */
+export interface SceneMemoWorkLookup {
+  findWorkById(id: string): WorkEntry | undefined;
+  listWorks(): WorkEntry[];
+}
+
+/**
+ * 画面の控え（`vscode.setState`）に入れる、引き取りの手がかり。
+ * `post()` のたびに画面へ渡し、画面が控える
+ */
+interface SceneMemoRestoreState {
+  workId: string;
+  currentFile: string | null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * 戻ってきたパネルが、どの作品のものか。
+ *
+ * **先に控えの作品 id、無ければタブの題の作品名。** 拡張機能ホストの再起動では
+ * 控えが届かず（パネルそのものを掴めない）、題しか手がかりが無い。
+ * 同じ題の作品が2つあれば当て推量で選ばない——違う作品の付箋を出すより、
+ * 開き直してもらうほうが害が小さい。
+ */
+export function workForRestoredPanel(
+  state: unknown,
+  title: string,
+  works: SceneMemoWorkLookup
+): WorkEntry | undefined {
+  if (isRecord(state) && typeof state.workId === "string") {
+    const byId = works.findWorkById(state.workId);
+    if (byId) return byId;
+  }
+  if (!title.startsWith(SCENE_MEMO_TAB_PREFIX)) return undefined;
+  const name = title.slice(SCENE_MEMO_TAB_PREFIX.length);
+  const matched = works.listWorks().filter((work) => work.title === name);
+  return matched.length === 1 ? matched[0] : undefined;
+}
+
+/**
+ * 校正・メモパネルを、新しい拡張機能が引き取れるようにする（実機確認リスト 156）。
+ *
+ * 以前は復元の口が無く、拡張機能ホストが再起動すると（自動更新・「拡張機能ホストを
+ * 再起動」）、パネルは画面に残るのに新しい拡張機能はそれを知らず、行を押しても
+ * 誰も受けなかった。道は2つある（2026-10-15 に母艦の画面テストで確かめた）：
+ *
+ * - **ウィンドウの再読み込み**：VS Code が serializer の口へパネルと控えを渡す。
+ *   そのパネルをそのまま自分のものとして配線する
+ * - **拡張機能ホストの再起動**：serializer は**呼ばれない**（もう出来上がった
+ *   パネルなので VS Code は復元しない）。見えるのはタブだけで、パネルは掴めない。
+ *   そこで**同じ列へ開き直してから、残ったタブを閉じる**
+ */
+export function registerSceneMemoPanelRestore(
+  context: vscode.ExtensionContext,
+  deps: SceneMemoDeps,
+  works: SceneMemoWorkLookup
+): void {
+  context.subscriptions.push(
+    vscode.window.registerWebviewPanelSerializer(SCENE_MEMO_VIEW_TYPE, {
+      deserializeWebviewPanel: async (webview: vscode.WebviewPanel, state: unknown) => {
+        await adoptRestoredPanel(context, deps, works, webview, state);
+      },
+    })
+  );
+  /*
+    **少し待ってから残ったタブを探す。** 再読み込みのときは、復元を待っている
+    タブも同じ形でタブの一覧に並ぶ。先に serializer へ渡る機会を与え、引き取れた
+    作品のタブには触らない（`replaceOrphanTabs` の中で確かめる）
+  */
+  setTimeout(() => {
+    void replaceOrphanTabs(context, deps, works).catch((error: unknown) => {
+      logFailure("校正・メモパネル：再起動のあとに残ったタブを開き直せませんでした", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }, ORPHAN_SWEEP_DELAY_MS);
+}
+
+const ORPHAN_SWEEP_DELAY_MS = 1_000;
+
+async function adoptRestoredPanel(
+  context: vscode.ExtensionContext,
+  deps: SceneMemoDeps,
+  works: SceneMemoWorkLookup,
+  webview: vscode.WebviewPanel,
+  state: unknown
+): Promise<void> {
+  const work = workForRestoredPanel(state, webview.title, works);
+  if (!work) {
+    logLine(`校正・メモパネル：再読み込みで戻った「${webview.title}」の作品が分からないため、案内に替えました`);
+    showUnrestorable(webview);
+    return;
+  }
+  if (openPanels.has(work.id)) {
+    // 1作品1枚の約束（`openPanels` が作品ごとに1つ）を守る。先に開いたほうを残す
+    webview.dispose();
+    return;
+  }
+  const currentFile =
+    isRecord(state) && typeof state.currentFile === "string" ? state.currentFile : undefined;
+  const panel = new SceneMemoPanel(context, work, deps, webview, currentFile);
+  openPanels.set(work.id, panel);
+  // 起き直した直後は共有の書き先がまだ決まっていないので、作品の記録へ直に書く
+  workLog(work.folderPath).line(`校正・メモパネル：再読み込みのあと「${work.title}」のパネルを引き取りました`);
+  await panel.initialize();
+}
+
+/** このパネルのタブか（VS Code は種類の頭に `mainThreadWebview-` を付けて渡す） */
+function isSceneMemoTab(tab: vscode.Tab): boolean {
+  const input: unknown = tab.input;
+  return (
+    input instanceof vscode.TabInputWebview &&
+    (input.viewType === SCENE_MEMO_VIEW_TYPE ||
+      input.viewType.endsWith(`-${SCENE_MEMO_VIEW_TYPE}`))
+  );
+}
+
+async function replaceOrphanTabs(
+  context: vscode.ExtensionContext,
+  deps: SceneMemoDeps,
+  works: SceneMemoWorkLookup
+): Promise<void> {
+  const orphans: Array<{ tab: vscode.Tab; viewColumn: vscode.ViewColumn }> = [];
+  for (const group of vscode.window.tabGroups.all) {
+    for (const tab of group.tabs) {
+      if (isSceneMemoTab(tab)) orphans.push({ tab, viewColumn: group.viewColumn });
+    }
+  }
+  for (const { tab, viewColumn } of orphans) {
+    const work = workForRestoredPanel(undefined, tab.label, works);
+    // 引き取り済み（再読み込みで serializer に渡ってきた）なら、それは生きている
+    if (work && openPanels.has(work.id)) continue;
+    /*
+      **開き直してから閉じる。** 先に閉じると、列にほかのタブが無いとき列ごと
+      畳まれて、原稿の横の位置が崩れる。フォーカスは奪わない（作者は原稿を
+      書いている最中かもしれない）
+    */
+    if (work) {
+      await openSceneMemoPanel(context, work, deps, { viewColumn, preserveFocus: true });
+      workLog(work.folderPath).line(
+        `校正・メモパネル：拡張機能ホストの再起動のあとに残った「${work.title}」のパネルを、${viewColumn}列目へ開き直しました`
+      );
+    } else {
+      const webview = vscode.window.createWebviewPanel(
+        SCENE_MEMO_VIEW_TYPE,
+        tab.label,
+        { viewColumn, preserveFocus: true },
+        { enableScripts: false }
+      );
+      context.subscriptions.push(webview);
+      showUnrestorable(webview);
+      logLine(
+        `校正・メモパネル：拡張機能ホストの再起動のあとに残った「${tab.label}」の作品が分からないため、案内に替えました`
+      );
+    }
+    await vscode.window.tabGroups.close(tab, true);
+  }
+}
+
+/**
+ * 作品が分からないときの画面。**押しても誰も受けない一覧を残さない**——作者には
+ * 壊れているのか対象外なのかが分からない。文と開き直し方だけを出し、受け口は持たない
+ */
+function showUnrestorable(webview: vscode.WebviewPanel): void {
+  webview.webview.options = { enableScripts: false };
+  webview.webview.html = buildSceneMemoUnrestorableHtml(webview.webview.cspSource);
 }
 
 /**
@@ -575,20 +774,19 @@ class SceneMemoPanel {
     context: vscode.ExtensionContext,
     private readonly work: WorkEntry,
     private readonly deps: SceneMemoDeps,
-    filePath?: string,
-    preserveFocus = false
+    /**
+     * 配線するパネル。**新しく作ったものも、再読み込みで戻ってきたものも
+     * 同じ配線を通す**（受け口・中身・閉じたときの片づけが2か所に分かれると、
+     * 片方だけ直す事故が起きる）
+     */
+    panel: vscode.WebviewPanel,
+    filePath?: string
   ) {
     this.currentFile = filePath ?? lastManuscriptCaret()?.filePath ?? null;
 
-    this.panel = vscode.window.createWebviewPanel(
-      SCENE_MEMO_VIEW_TYPE,
-      `校正・メモパネル: ${work.title}`,
-      // **原稿エディタの横へ開く**（作者の指示）。書きながら見るものなので、
-      // 本文の上に重なっては用をなさない。検知が終わって自動で開くときは
-      // フォーカスを原稿に残す（打っている手を止めない）
-      { viewColumn: vscode.ViewColumn.Beside, preserveFocus },
-      { enableScripts: true, retainContextWhenHidden: true }
-    );
+    this.panel = panel;
+    // 戻ってきたパネルは、前の版の設定のまま来るので書き直す
+    this.panel.webview.options = { enableScripts: true };
     context.subscriptions.push(this.panel);
     this.panel.onDidDispose(() => {
       openPanels.delete(work.id);
@@ -1361,6 +1559,11 @@ class SceneMemoPanel {
             : "絞り込みに当てはまるものがありません。",
         // 付箋の色（明暗を選ぶ）と、指摘の種類の色（テーマの色そのもの）
         colors: { ...colorsFor(), ...findingToneVars() },
+        // 画面が控える引き取りの手がかり（ウィンドウの再読み込みで serializer へ戻る）
+        restore: {
+          workId: this.work.id,
+          currentFile: this.currentFile,
+        } satisfies SceneMemoRestoreState,
       },
     });
   }
