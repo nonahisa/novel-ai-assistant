@@ -290,8 +290,10 @@ test("申告より短いところで頭打ちになるモデルで読める長�
 
         const lines = await actionLogLines(session);
         const startAt = lines.findIndex((text) => text.includes(TYPO_START));
-        // 測定の回の num_ctx の行（送る長さに合わせて変わる）を混ぜないよう、誤字脱字の開始より後だけを見る
-        const numCtxLines = lines.slice(startAt).filter((text) => text.includes("Ollama：num_ctx ") && text.includes(`（${FAKE_OLLAMA_MODEL} / 送信`));
+        const endAt = lines.findIndex((text, index) => index > startAt && text.includes(TYPO_END));
+        // 測定の回の num_ctx の行（送る長さに合わせて変わる）や、ほかの手元のAIの呼び出し（独り言など）を
+        // 混ぜないよう、誤字脱字の開始から終了までの間だけを見る
+        const numCtxLines = lines.slice(startAt, endAt < 0 ? undefined : endAt + 1).filter((text) => text.includes("Ollama：num_ctx ") && text.includes(`（${FAKE_OLLAMA_MODEL} / 送信`));
         const context = `誤字脱字の num_ctx の行：${JSON.stringify(numCtxLines)}\n${describeFakeRequests(fake.requests, typoFrom)}`;
         expect(numCtxLines.length, `誤字脱字の呼び出しで num_ctx の行が書かれていない\n${context}`).toBeGreaterThan(0);
         const sent = numCtxLines.map((text) => Number(/Ollama：num_ctx (\d+)/.exec(text)?.[1]));
