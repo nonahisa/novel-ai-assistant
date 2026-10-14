@@ -51,7 +51,7 @@ gh release create v<版> "release/novel-ai-assistant-<版>.vsix" --target <完�
 - **`--target` には完全なコミット番号（40桁。`git rev-parse HEAD`）を渡す。** 短い番号は「target_commitish is invalid」で断られた（2026-10-12）
 
 - ノートは CHANGELOG の該当版を作者向けに要約し、末尾に「版／テスト件数／SHA-256」を付ける。**日本語はファイルに書いて `--notes-file` で渡す**（引数に直接書かない）
-- **ノートを書いたら、スキル `yomiyasu` を通してから出す**（README・`package.json` の `description` を書き換えたときも同じ。外の読み手が読む説明文だけに当てる）
+- **ノートを書いたら、スキル `yomiyasu` を通してから出す**（README・`package.json` の `description`・`CHANGELOG.md` の新しい版の項目を書いたときも同じ。外の読み手が読む説明文だけに当てる）
 - **全段で出すので、溜めない**（パッチごとに出す）。**配布のために版を上げ直さない**
 
 ### 3. Marketplace へ公開する（**1段目・2段目が動いたときは指示を待たず自走**）
