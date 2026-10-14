@@ -28,6 +28,39 @@ import { noteToneClasses } from "../core/sceneMemoRows";
  * ——頼むだけで、当てるのも戻すのも拡張機能の側である。
  */
 /**
+ * 再起動・再読み込みのあと、どの作品のパネルか分からなくなったときの画面。
+ *
+ * **台本を持たない**——押せるものを置くと、受ける相手がいないのに押せてしまう。
+ * 文と開き直し方だけを出す。作品名は埋め込まない（題はタブに出ている）
+ */
+export function buildSceneMemoUnrestorableHtml(cspSource: string): string {
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'unsafe-inline';">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>校正・メモパネル</title>
+<style>
+body {
+  margin: 0;
+  padding: 16px;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  line-height: 1.7;
+}
+</style>
+</head>
+<body>
+<p>このパネルがどの作品のものか分からなくなりました（拡張機能が起き直したため）。</p>
+<p>原稿を前に出して Ctrl+Alt+M を押すと、開き直せます。このタブは閉じてかまいません。</p>
+</body>
+</html>`;
+}
+
+/**
  * 種類の印ごとの規則（`.tone-finding-typo { --note-color: … }` など）。
  *
  * 印の一覧は `core/sceneMemoRows.ts` の `noteToneClasses`（付箋と指摘の色の表）
@@ -584,6 +617,8 @@ window.addEventListener("message", function (event) {
   const message = event.data;
   if (!message || message.type !== "memos") return;
   data = message.data;
+  // ウィンドウを再読み込みしたとき、どの作品のパネルだったかを拡張機能へ返す控え
+  if (data.restore) vscode.setState(data.restore);
   if (data.colors) {
     for (const key of Object.keys(data.colors)) {
       document.documentElement.style.setProperty(

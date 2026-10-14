@@ -99,6 +99,7 @@ import {
   noteSceneMemoCaret,
   openSceneMemoPanel,
   refreshSceneMemos,
+  registerSceneMemoPanelRestore,
   type SceneMemoDeps,
 } from "./features/sceneMemoPanel";
 import { editTimeline } from "./features/chronicleEdit";
@@ -2477,6 +2478,16 @@ export async function activate(
     noteFindingDismissed: (work, findingId) =>
       proposalPanel.noteFindingDismissed(work, findingId),
   };
+
+  /*
+    拡張機能ホストの再起動・ウィンドウの再読み込みのあと、画面に残った
+    校正・メモパネルを引き取る（作者の裁定 2026-10-15。実機確認リスト 156）。
+    口が無いと、残ったパネルの行を押しても誰も受けなかった
+  */
+  registerSceneMemoPanelRestore(context, sceneMemoDeps, {
+    findWorkById: (id) => registry.get(id),
+    listWorks: () => registry.list(),
+  });
 
   const showSceneMemos = async (
     work: WorkEntry,
