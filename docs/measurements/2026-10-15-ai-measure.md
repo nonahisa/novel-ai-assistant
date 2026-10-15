@@ -4,7 +4,8 @@
 - 道：`novel-ai-bench\field-ai` の台本（`run.mjs`／`scripts/measure.mjs`。`novel.run` が検算まで通す）、束の `novel.run` を写しへ直接（`shoot.mjs`。同じく検算まで）、実接続の試験（`test/live/plotDialogue.test.ts`、それと一時の試験1本。製品の `runTuningStages` をそのまま回す）
 - 札：`%TEMP%\novelai-ollama.lock`。1本ごとに取って返した。撃っている間、ほかのモデルが載っていた記録は無し
 - 作品：確認用コピーの写し（`field-ai\台\` と scratchpad）。じいちゃんの自分史だけは確認用コピーが無いので、作者の原稿を**読むだけ**で scratchpad へ写した。どちらも元は書き換えていない
-- 生の結果：`novel-ai-bench\field-ai\out\2026-10-15\`（台本の撃ち）と、この会話の scratchpad の `out\`（それ以外。会話を閉じると消える。数字はここに写した）
+- 生の結果：`novel-ai-bench\field-ai\out\2026-10-15\`（台本の撃ち。モデルごとの下）と、同じ下の `extra\`（それ以外：loc6〔26b〕・loc6-e4b・loc6-31b・plot14-*.json・jiichan-*・len351.json・plotDialogue-*）。自分史の結果は作者の原稿の抜粋を含むので、リポジトリには入れていない
+- 採点の物差しのずれ：`field-ai\score.mjs` は伏線の回収で「植えた話と同じ話」を誤りに数えるが、製品（`foreshadowValidation.ts`）は植えた文より後なら通す作り。次に F1 を回す前に score.mjs を製品に揃える
 - クラウドのAIは撃っていない。画面テストは走らせていない
 
 ## まとめ
