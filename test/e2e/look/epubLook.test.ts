@@ -6,91 +6,13 @@
  */
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { deflateSync } from "node:zlib";
-import type { Frame, Page } from "playwright-core";
+import type { Frame } from "playwright-core";
 import { describe, test } from "vitest";
 import { defaultBookConfig } from "../../../src/models/book";
-import { runCommand } from "../support/quickInput";
-import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "../support/vscodeApp";
+import { withVsCode, type E2ESession } from "../support/vscodeApp";
 import { waitUntil } from "../support/wait";
-import { pickQuickPickRow, quickPickTitle } from "../support/workbenchDom";
+import { openEpubEditor, samplePicture } from "./epubLookSupport";
 import { lookEnabled, lookNote, shootPage } from "./lookSupport";
-
-/** PNG の CRC32 */
-function crc32(buffer: Buffer): number {
-  let crc = 0xffffffff;
-  for (const byte of buffer) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function chunk(type: string, data: Buffer): Buffer {
-  const head = Buffer.alloc(8);
-  head.writeUInt32BE(data.length, 0);
-  head.write(type, 4, "latin1");
-  const tail = Buffer.alloc(4);
-  tail.writeUInt32BE(crc32(Buffer.concat([Buffer.from(type, "latin1"), data])), 0);
-  return Buffer.concat([head, data, tail]);
-}
-
-/** 縦に濃い藍から薄い水色へ変わる、400×560 の見本の絵（元イラストの代わり） */
-function samplePicture(): Buffer {
-  const width = 400;
-  const height = 560;
-  const raw = Buffer.alloc((width * 3 + 1) * height);
-  for (let y = 0; y < height; y++) {
-    const rowStart = y * (width * 3 + 1);
-    raw[rowStart] = 0;
-    const t = y / (height - 1);
-    for (let x = 0; x < width; x++) {
-      const at = rowStart + 1 + x * 3;
-      raw[at] = Math.round(30 + 150 * t);
-      raw[at + 1] = Math.round(50 + 150 * t);
-      raw[at + 2] = Math.round(110 + 120 * t);
-    }
-  }
-  const header = Buffer.alloc(13);
-  header.writeUInt32BE(width, 0);
-  header.writeUInt32BE(height, 4);
-  header[8] = 8;
-  header[9] = 2;
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk("IHDR", header),
-    chunk("IDAT", deflateSync(raw)),
-    chunk("IEND", Buffer.alloc(0)),
-  ]);
-}
-
-async function epubFrame(page: Page): Promise<Frame | undefined> {
-  for (const frame of page.frames()) {
-    const has = await frame
-      .evaluate(() => document.getElementById("railBook") !== null && document.getElementById("blockList") !== null)
-      .catch(() => false);
-    if (has) return frame;
-  }
-  return undefined;
-}
-
-async function railLabels(frame: Frame): Promise<string[]> {
-  return frame.evaluate(() =>
-    Array.from(document.querySelectorAll("#blockList .rail-row")).map((row) => (row.querySelector(".rail-label")?.textContent ?? "").trim())
-  );
-}
-
-async function openEpubEditor(page: Page): Promise<Frame> {
-  await runCommand(page, "EPUBエディター（試作）");
-  await page.waitForTimeout(500);
-  if ((await quickPickTitle(page)) !== undefined) await pickQuickPickRow(page, E2E_WORK_TITLE);
-  let found: Frame | undefined;
-  await waitUntil(async () => {
-    found = await epubFrame(page);
-    return found !== undefined && (await railLabels(found)).length > 0;
-  }, "EPUBエディターが開いて本の並びが出る", 30_000);
-  return found as Frame;
-}
 
 const baked = (session: E2ESession, side: "表紙" | "裏表紙") => path.join(session.workFolder, "設定", "書籍", side === "表紙" ? "表紙_合成済み.png" : "裏表紙_合成済み.png");
 
