@@ -46,12 +46,21 @@ import { computeMinimalEdit } from "./textEdit";
  * 同じであることは `test/unit/cross/screenEditBase.test.ts` が見張る。
  */
 export function textFingerprint(text: string): string {
+  return screenTextHash(text) + ":" + text.length;
+}
+
+/**
+ * 字数を付けない指紋（FNV-1a 32ビットの16進8桁）。画面の `textHash` と同じ値。
+ * 画面の控え（rescue）の `baseHash` はこの形なので、拡張機能の側で控えを作る
+ * とき（読み取り専用の原稿。設計書6.25.9）に使う
+ */
+export function screenTextHash(text: string): string {
   let hash = 0x811c9dc5;
   for (let i = 0; i < text.length; i++) {
     hash ^= text.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
-  return ("0000000" + hash.toString(16)).slice(-8) + ":" + text.length;
+  return ("0000000" + hash.toString(16)).slice(-8);
 }
 
 /** 当て直しの結果 */

@@ -933,6 +933,142 @@ describe("届かない知らせを段階で出す", () => {
   });
 });
 
+/* ── 読み取り専用の原稿（作者の裁定、2026-10-15 23時）───────── */
+
+/*
+  0.107.4 で、設定（files.readonlyInclude）で読み取り専用の原稿に打つと、拡張機能が便を
+  「入れられなかった」と返すようになった。ところが画面の下の赤字は「送り直しています（N秒）」
+  →30秒で「［開き直す］を押してください」のままで、読み取り専用には合わなかった（送り直しても
+  開き直しても入らない）。拡張機能が理由（readonly）を添え、画面は秒を数えずに読み取り専用の文を出す。
+*/
+describe("読み取り専用の原稿では、秒を数えずに読み取り専用の文を出す", () => {
+  function readonlyRejected(): UnsentHarness {
+    const h = unsentHarness({ text: "打った字" });
+    h.update({ type: "update", docKey: "doc", text: "元" });
+    h.postEdit("打った字");
+    h.receive({ type: "editApplied", seq: h.edits().at(-1)!.seq, ok: false, reason: "readonly" });
+    return h;
+  }
+
+  it("**読み取り専用で入らなかった返事なら、「読み取り専用」と［本文をコピー］の文を出す（秒を数えない）**", () => {
+    const h = readonlyRejected();
+    expect(h.bannerOpen()).toBe(true);
+    const text = h.unsentText();
+    expect(text).toContain("読み取り専用");
+    expect(text).toContain("保存されません");
+    expect(text).toContain("［本文をコピー］");
+    expect(text).not.toMatch(/送り直しています|\d+秒/);
+    // 開き直しても入らないので［開き直す］は出さない
+    expect(h.button("unsentReopen").hidden).toBe(true);
+    expect(h.logs().some((line) => /知らせを出しました/.test(line) && /読み取り専用/.test(line))).toBe(true);
+  });
+
+  it("**30秒たっても「開き直す」の案内へ変えない**（文も［開き直す］もそのまま）", () => {
+    const h = readonlyRejected();
+    const first = h.unsentText();
+    h.advance(40_000);
+    expect(h.unsentText()).toBe(first);
+    expect(h.button("unsentReopen").hidden).toBe(true);
+    expect(h.logs().some((line) => /開き直す案内/.test(line))).toBe(false);
+  });
+
+  it("送り直しは止めない（読み取り専用を外せば、送り直しで入る）", () => {
+    const h = readonlyRejected();
+    const before = h.edits().length;
+    h.advance(10_000);
+    expect(h.edits().length).toBeGreaterThan(before);
+    const last = h.edits().at(-1)!;
+    h.receive({ type: "editApplied", seq: last.seq, ok: true });
+    expect(h.bannerOpen()).toBe(false);
+  });
+
+  it("「送り直しています」が出ている間に読み取り専用の返事が来ても、読み取り専用の文へ変える", () => {
+    const h = unsentHarness({ text: "打った字" });
+    h.postEdit("打った字");
+    h.advance(5_000);
+    expect(h.unsentText()).toMatch(/送り直しています/);
+    h.receive({ type: "editApplied", seq: h.edits().at(-1)!.seq, ok: false, reason: "readonly" });
+    expect(h.unsentText()).toContain("読み取り専用");
+    expect(h.unsentText()).not.toMatch(/送り直しています/);
+  });
+
+  it("コピーしたあとの文で［開き直す］や再読み込みへ誘わない", () => {
+    const h = readonlyRejected();
+    h.click("unsentCopy");
+    expect(h.clipboard()).toBe("打った字");
+    expect(h.unsentText()).toContain("クリップボードへ写しました");
+    expect(h.unsentText()).not.toMatch(/開き直す|再読み込み/);
+    h.advance(10_000);
+    expect(h.unsentText()).toContain("クリップボードへ写しました");
+  });
+
+  it("画面の控え（setState の rescue）にも置く", () => {
+    const store: StateStore = {};
+    const h = unsentHarness({ store, text: "打った字" });
+    h.update({ type: "update", docKey: "doc", text: "元" });
+    h.postEdit("打った字");
+    h.receive({ type: "editApplied", seq: 1, ok: false, reason: "readonly" });
+    expect((store.state as { rescue?: { text: string } }).rescue?.text).toBe("打った字");
+  });
+
+  it("入って下ろしたら、次に出るときは1段目（送り直しています）から", () => {
+    const h = readonlyRejected();
+    // 読み取り専用を外したあとの送り直しが入った
+    h.receive({ type: "editApplied", seq: h.edits().at(-1)!.seq, ok: true });
+    expect(h.bannerOpen()).toBe(false);
+    h.postEdit("さらに足した");
+    h.advance(5_000);
+    expect(h.unsentText()).toMatch(/送り直しています/);
+  });
+});
+
+/*
+  控えを拡張機能の側にも残す（作者の裁定、2026-10-15 23時）。タブを閉じると画面の控えは消えるので、
+  拡張機能が作業場の覚えに置き、次に開いたとき rescues に乗せて渡す（帯は既存のもの）。
+  ［戻す］［捨てる］で片づいたら、拡張機能へ知らせて覚えからも消す
+*/
+describe("帯の控えを片づけたら、拡張機能へ知らせる（拡張機能の側の控えも消す）", () => {
+  const DOC = "元の本文";
+  const TYPED = "元の本文に打った字";
+
+  function carried(): UnsentHarness {
+    const h = unsentHarness({ store: {}, text: DOC, now: 60_000 });
+    h.update({
+      type: "update",
+      docKey: "doc-1",
+      text: DOC,
+      rescues: [{ docKey: "doc-1", text: TYPED, at: 50_000, baseLength: DOC.length, baseHash: "" }],
+    });
+    return h;
+  }
+
+  function settled(h: UnsentHarness): Array<Record<string, unknown>> {
+    return h.posted().filter((message) => message.type === "rescueSettled");
+  }
+
+  it("［捨てる］で、捨てた本文を知らせる", () => {
+    const h = carried();
+    expect(h.rescueText()).toContain("前回、原稿に入らなかった字があります");
+    h.click("rescueDiscard");
+    expect(settled(h)).toEqual([{ type: "rescueSettled", docKey: "doc-1", text: TYPED }]);
+  });
+
+  it("［戻す］でも知らせる（戻す便より先に）", () => {
+    const h = carried();
+    h.click("rescueRestore");
+    h.click("rescueRestore");
+    expect(settled(h)).toEqual([{ type: "rescueSettled", docKey: "doc-1", text: TYPED }]);
+    const order = h.posted().map((message) => message.type);
+    expect(order.indexOf("rescueSettled")).toBeLessThan(order.lastIndexOf("edit"));
+  });
+
+  it("［本文をコピー］では知らせない（まだ選んでいない）", () => {
+    const h = carried();
+    h.click("rescueCopy");
+    expect(settled(h)).toEqual([]);
+  });
+});
+
 /* ── 開き直したときに取り戻す ─────────────────────────── */
 
 describe("開き直したときに、原稿に入らなかった字を取り戻す", () => {

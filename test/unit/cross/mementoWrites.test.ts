@@ -177,6 +177,7 @@ const KEYS: KeyRow[] = [
   { key: "novelai.imeDictionary.excluded.", literalIn: "core/imeDictionary.ts", writtenIn: "features/exportImeDictionary.ts", write: /\.update\(imeExcludedKey\(work\.id\)/g, guarded: true },
   { key: "novelai.pendingRename.", literalIn: "features/nameRename.ts", writtenIn: "features/nameRename.ts", write: /\.update\(pendingRenameKey\(workId\)/g, guarded: true },
   { key: "novelai.manuscriptReloadJump", literalIn: "core/manuscriptReloadJump.ts", writtenIn: "features/manuscriptEditor.ts", write: /\.update\(\s*MANUSCRIPT_RELOAD_JUMP_STATE_KEY\b/g, guarded: true },
+  { key: "novelai.manuscriptReadonlyRescue", literalIn: "core/manuscriptReadonlyRescue.ts", writtenIn: "features/manuscriptEditor.ts", write: /\.update\(\s*MANUSCRIPT_READONLY_RESCUE_STATE_KEY\b/g, guarded: true },
   {
     key: "novelai.workList.snapshot",
     literalIn: "core/workListSnapshot.ts",

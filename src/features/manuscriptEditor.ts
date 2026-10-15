@@ -150,6 +150,16 @@ import {
   takeManuscriptReloadJump,
   type ManuscriptReloadJump,
 } from "../core/manuscriptReloadJump";
+import {
+  MANUSCRIPT_READONLY_RESCUE_STATE_KEY,
+  dropReadonlyRescue,
+  makeReadonlyRescue,
+  putReadonlyRescue,
+  settleReadonlyRescue,
+  takeReadonlyRescue,
+  type ReadonlyRescueStore,
+  type ReadonlyRescueWrite,
+} from "../core/manuscriptReadonlyRescue";
 
 /**
  * 原稿エディタ（設計書6.25）。
@@ -1637,6 +1647,11 @@ type Incoming =
    */
   | { type: "reopen"; rescue?: unknown; bands?: unknown }
   /**
+   * 帯の控えを［戻す］か［捨てる］で片づけた（設計書6.25.9）。同じ本文の控えを
+   * 作業場の覚え（読み取り専用の原稿の控え）に持っていれば消す。形は信用しない
+   */
+  | { type: "rescueSettled"; docKey?: unknown; text?: unknown }
+  /**
    * 未送信の状態が変わった（知らせの出し下げ・段・控えの有無。作者の裁定、
    * 2026-10-01）。窓の札（MCP の `windows.list`）に載せる。形は信用せず
    * `parseManuscriptStatusMessage` で確かめる
@@ -1854,6 +1869,19 @@ export interface ManuscriptEditorDeps {
     get(key: string): unknown;
     update(key: string, value: unknown): PromiseLike<void>;
   };
+  /**
+   * 読み取り専用の原稿に打った字の控えを置く所（`workspaceState`。作者の裁定、
+   * 2026-10-15 23時。設計書6.25.9）。タブを閉じると画面の控えは消えるので、
+   * 次に同じ原稿を開いたときに帯の［戻す］で取り戻せるよう、こちらにも置く。
+   * **作業場ごと**にする——原稿は作業場の中で開き直すのがふつうで、別の窓に
+   * 開いている同じ作品の画面へ、こちらの控えを出さない。
+   * 省略できる形にしてあるのは、この画面が覚えなしでも成り立つため。
+   * 渡すのは守りで包んだ口（`verifiedState`。設計書5.7.8）
+   */
+  readonlyRescues?: {
+    get(key: string): unknown;
+    update(key: string, value: unknown): PromiseLike<void>;
+  };
 }
 
 export class ManuscriptEditorProvider
@@ -1887,6 +1915,30 @@ export class ManuscriptEditorProvider
     value: ManuscriptReloadJump | undefined
   ): Promise<void> {
     await this.deps.reloadJumps?.update(MANUSCRIPT_RELOAD_JUMP_STATE_KEY, value);
+  }
+
+  /** 読み取り専用の原稿の控えを、いま覚えにある値で読む（無ければ undefined） */
+  private readReadonlyRescues(): unknown {
+    return this.deps.readonlyRescues?.get(MANUSCRIPT_READONLY_RESCUE_STATE_KEY);
+  }
+
+  /**
+   * 読み取り専用の原稿の控えを書く（変わったときだけ）。
+   * **書く口はここ1か所**（`mementoWrites.test.ts` が数える。設計書5.7.8）。
+   * 書けなくても打鍵の流れは止めない（画面の控えは残っている）。記録だけ残す
+   */
+  private async writeReadonlyRescues(write: ReadonlyRescueWrite): Promise<void> {
+    if (!write.changed || !this.deps.readonlyRescues) return;
+    const value: ReadonlyRescueStore | undefined = write.value;
+    try {
+      await this.deps.readonlyRescues.update(MANUSCRIPT_READONLY_RESCUE_STATE_KEY, value);
+    } catch (error) {
+      logLine(
+        `原稿エディタ：読み取り専用の原稿の控えを作業場の覚えへ書けませんでした：${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
   }
 
   /**
@@ -2474,8 +2526,14 @@ export class ManuscriptEditorProvider
         if (saved.uri.toString() === document.uri.toString()) unsavedDiffApplied = false;
       })
     );
-    /** いま当てた便が「当てたのに保存されない文書だった」で断られたか（知らせの文を分ける） */
-    let lastRejectWasIgnored = false;
+    /**
+     * 読み取り専用と分かった最初の便を当てる前の本文（＝ファイルにある本文）。
+     * 拡張機能の側の控えの「元」にする（作者の裁定、2026-10-15 23時。設計書6.25.9）。
+     * 読み取り専用でもメモリ上の文書には字が入るので、2便目以降の「当てる前の本文」は
+     * 打った字を含む——それを元にすると、開き直したときの［戻す］が毎回
+     * 「控えたあとで原稿が変わっています」の確かめを挟む。入ったら下ろす
+     */
+    let readonlyBase: string | undefined;
     /**
      * **入ったかどうかを、便の番号で画面へ返す**（設計書6.25.9。作者の報告、
      * 2026-09-28「×ボタンで消したら400文字ぐらいが消えました」）。
@@ -2506,7 +2564,9 @@ export class ManuscriptEditorProvider
      */
     const applyScreenEdit = async (item: SentEdit): Promise<ApplyOutcome> => {
       // 読んでから当てるまで待ちを挟まない（間に本体の変更が入ると、判断が古くなる）
-      const decision = ledger.decide(item, toLf(document.getText()));
+      // 当てる前の本文（読み取り専用と分かったときの控えの元にも使う。readonlyBase）
+      const before = toLf(document.getText());
+      const decision = ledger.decide(item, before);
       if (decision.kind === "conflict") {
         ledger.rememberRejected(item.text, decision.baseKey);
         void this.logForDocument(
@@ -2534,8 +2594,36 @@ export class ManuscriptEditorProvider
       */
       if (result === "noop" && unsavedDiffApplied && !document.isDirty) result = "ignored";
       if (result === "applied" || result === "ignored") unsavedDiffApplied = true;
+      if (result === "ignored") {
+        /*
+          **拡張機能の側にも控える**（作者の裁定、2026-10-15 23時。設計書6.25.9）。
+          読み取り専用のままタブを閉じると、VS Code は確認を出さず、画面の控えも消える。
+          控えるのは画面が送った全文（画面の控え rescue と同じもの）。原稿は書き換えない
+        */
+        if (readonlyBase === undefined) readonlyBase = before;
+        void this.writeReadonlyRescues(
+          putReadonlyRescue(
+            this.readReadonlyRescues(),
+            makeReadonlyRescue(key, item.text, readonlyBase, Date.now()),
+            Date.now()
+          )
+        );
+        ledger.rememberRejected(item.text, decision.baseKey);
+        return "readonly";
+      }
+      if (result === "applied" && readonlyBase !== undefined) {
+        /*
+          この画面で読み取り専用だった原稿に、字が入って未保存になった（設定を外した）。
+          ここから先は VS Code の保存と閉じる前の確認が字を守るので、こちらの控えは要らない。
+          **はじめから書ける原稿では消さない**——前回の控えの帯をまだ選んでいないうちに
+          打ち始めても、選ぶまでは控えを残す（打つたびに覚えを読まない理由でもある）
+        */
+        readonlyBase = undefined;
+        void this.writeReadonlyRescues(
+          dropReadonlyRescue(this.readReadonlyRescues(), key, Date.now())
+        );
+      }
       const ok = result === "applied" || result === "noop";
-      lastRejectWasIgnored = result === "ignored";
       if (ok) {
         ledger.rememberApplied(item.text);
         if (decision.rebased) {
@@ -2552,7 +2640,6 @@ export class ManuscriptEditorProvider
     const queueEdit = createEditQueue<SentEdit>(
       async (item) => {
         selfEditing = true;
-        lastRejectWasIgnored = false;
         let outcome: ApplyOutcome = false;
         try {
           outcome = await applySentEdit(
@@ -2569,8 +2656,8 @@ export class ManuscriptEditorProvider
         } finally {
           selfEditing = false;
         }
-        if (outcome === false) {
-          this.warnEditRejected(document, lastRejectWasIgnored ? "ignored" : "failed");
+        if (outcome === false || outcome === "readonly") {
+          this.warnEditRejected(document, outcome === "readonly" ? "ignored" : "failed");
         }
       },
       // 当てている間に届いた便は、元の本文をつなげて畳む（core/editQueue.ts）
@@ -2611,6 +2698,23 @@ export class ManuscriptEditorProvider
           // ［開き直す］で預かった控えも、立ち上がりの1回だけ取り出す
           carriedRescue = pendingRescue.get(key);
           pendingRescue.delete(key);
+          {
+            /*
+              **読み取り専用の原稿の控えも、後ろに並べて渡す**（作者の裁定、2026-10-15
+              23時。設計書6.25.9）。タブを閉じても、次に開いたときに既存の帯
+              （「前回、原稿に入らなかった字があります」［戻す］）で取り戻せる。
+              **ここでは消さない**——作者が選ぶ前にもう一度閉じても失わない。
+              画面は同じ本文を1つにまとめ、原稿と同じ本文（もう入っている）は出さない
+            */
+            const kept = takeReadonlyRescue(this.readReadonlyRescues(), key, Date.now());
+            if (kept) {
+              carriedRescue = [...(carriedRescue ?? []), kept];
+              await this.logForDocument(
+                document,
+                `原稿エディタ：読み取り専用で原稿に入らなかった字の控え（${kept.text.length}字、${new Date(kept.at).toLocaleString()}）を画面へ渡しました。`
+              );
+            }
+          }
           await send();
           webviewReady = true;
           /*
@@ -2832,6 +2936,25 @@ export class ManuscriptEditorProvider
             parseManuscriptRescues(message.bands, message.rescue, key)
           );
           break;
+
+        case "rescueSettled": {
+          // 別の文書の知らせ・形の悪い知らせは捨てる（画面から届く値を信用しない）
+          if (message.docKey !== key || typeof message.text !== "string") break;
+          const settled = settleReadonlyRescue(
+            this.readReadonlyRescues(),
+            key,
+            message.text,
+            Date.now()
+          );
+          if (settled.changed) {
+            await this.writeReadonlyRescues(settled);
+            await this.logForDocument(
+              document,
+              `原稿エディタ：読み取り専用で入らなかった字の控え（${message.text.length}字）を、作者が選んだので作業場の覚えから消しました。`
+            );
+          }
+          break;
+        }
 
         case "addMemo":
           await insertMemoLineAbove(document, message.line);
@@ -3436,8 +3559,13 @@ export class ManuscriptEditorProvider
         `原稿エディタ：${name} へ打った字が入りませんでした（文書が未保存にならない。読み取り専用の見込み）。画面にだけ字が残っています`
       );
       void vscode.window.showWarningMessage(
-        `「${name}」は読み取り専用になっているため、原稿エディターで打った字が保存されません（閉じると消えます）。` +
-          "閉じる前に、画面の下に出ている［本文をコピー］で控えてください。" +
+        /*
+          「閉じると消えます」とはもう書かない（作者の裁定、2026-10-15 23時）。拡張機能の
+          側にも控えを置くので、7日のうちに同じ原稿を開けば［戻す］で画面へ戻せる。
+          それでも原稿ファイルには入らないので、控えるよう頼むのは変えない
+        */
+        `「${name}」は読み取り専用になっているため、原稿エディターで打った字が保存されません。` +
+          "画面の下に出ている［本文をコピー］で控えてください（閉じても、7日のうちに同じ原稿を開けば［戻す］で画面へ戻せます）。" +
           "読み取り専用は VS Code の設定（files.readonlyInclude など）で決まっています。"
       );
       return;
