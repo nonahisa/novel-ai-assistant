@@ -44,6 +44,11 @@ export interface FakeOllamaRequest {
   user: string;
   /** `format` に JSON スキーマが渡されたか（構造化出力を求められた呼び出しか） */
   structured: boolean;
+  /**
+   * 最後の user の発言に添えられた写真の数（`images`。無ければ 0）。
+   * 写真の書き起こし（設計書6.117）で、1ページに写真が1枚ずつ届いたかを見るのに使う
+   */
+  images: number;
 }
 
 export interface FakeOllama {
@@ -107,10 +112,19 @@ export async function startFakeOllama(
      * 超えないよう、`perChar` は 1 前後にする
      */
     promptTokens?: { perChar: number; cap: number };
+    /**
+     * `/api/tags`・`/api/show` が申告する `capabilities`。既定は `["completion"]`（文字だけのモデル）。
+     *
+     * 写真の書き起こし（設計書6.117）を見る件は `["completion", "vision"]` を渡す。製品は
+     * `vision` の申告で「写真を読める」と決める（`ai/ollamaProvider.ts`・`ai/imageInput.ts`）ので、
+     * 無いと［書き起こす］が押せず、向きも尋ねない
+     */
+    capabilities?: readonly string[];
   } = {}
 ): Promise<FakeOllama> {
   const requests: FakeOllamaRequest[] = [];
   const embedRequests: string[][] = [];
+  const capabilities = options.capabilities ?? ["completion"];
   const server: Server = createServer((request, response) => {
     void (async () => {
       const url = request.url ?? "/";
@@ -124,7 +138,7 @@ export async function startFakeOllama(
             name,
             size: 1_000_000,
             details: { parameter_size: options.parameterSize ?? "1B", quantization_level: "Q4_0" },
-            capabilities: ["completion"],
+            capabilities: [...capabilities],
           })),
         });
         return;
@@ -141,7 +155,7 @@ export async function startFakeOllama(
       }
       if (url.startsWith("/api/show")) {
         sendJson({
-          capabilities: ["completion"],
+          capabilities: [...capabilities],
           details: { parameter_size: options.parameterSize ?? "1B" },
           // 製品は `.context_length` で終わる鍵を読む（`ai/ollamaProvider.ts`）
           model_info: { "fake.context_length": options.contextLength ?? 32768 },
@@ -150,14 +164,20 @@ export async function startFakeOllama(
       }
       if (url.startsWith("/api/chat")) {
         const body = JSON.parse(await readBody(request)) as {
-          messages?: Array<{ role: string; content: string }>;
+          messages?: Array<{ role: string; content: string; images?: string[] }>;
           stream?: boolean;
           format?: unknown;
         };
         const messages = body.messages ?? [];
         const system = messages.find((message) => message.role === "system")?.content ?? "";
-        const user = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
-        const parsed: FakeOllamaRequest = { system, user, structured: body.format !== undefined };
+        const lastUser = [...messages].reverse().find((message) => message.role === "user");
+        const user = lastUser?.content ?? "";
+        const parsed: FakeOllamaRequest = {
+          system,
+          user,
+          structured: body.format !== undefined,
+          images: lastUser?.images?.length ?? 0,
+        };
         requests.push(parsed);
         const text = await respond(parsed);
         // 製品が数える送った字数は system＋user の字数の合計（`measureContext.ts` の `promptChars`）。
