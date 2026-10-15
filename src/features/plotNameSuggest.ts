@@ -61,7 +61,11 @@ import { withCancellableProgress } from "../views/progress";
 import { warnWithLog } from "../views/notify";
 import { reportAIError } from "./reportAIError";
 import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
-import { markPlotCharactersSynced } from "./plotCharacterSync";
+import {
+  forgetOwnPlotSave,
+  markPlotCharactersSynced,
+  noteOwnPlotSave,
+} from "./plotCharacterSync";
 import { recordRoleRenameOffers } from "./roleRenameOffers";
 import { describeOriginPlan, pickOrigin, rememberOrigin } from "./nameCheck";
 import {
@@ -492,12 +496,15 @@ export async function applyPlotNames(
   }
 
   /*
-    **保存は、承認待ちへ置いて印を進めたあと。** 保存すると「保存からの反映」（`extension.ts` の
-    syncPlotCharactersOnSave、設計書6.4.9）が走る。先に保存すると、印が古いまま反映が走り、
-    同じ人を読みの無い案でもう一度積む
+    **この保存では「保存からの反映」（`extension.ts`、設計書6.4.9）を走らせない**
+    （`noteOwnPlotSave` の説明）。案は上で［入れる］が置いた。走らせると、役名だけの人物の新規の案と
+    置いたばかりの直す案への重ね書きが同じ保存で積まれ、知らせも増えた（画面テスト plotRenamePending、
+    2026-10-16）。ディスクへ書いていたころと同じく、反映は作者が次に保存したときに走る。
+    保存を承認待ちと印のあとに置くのは、覚え書きが外れて反映が走っても、印が古いまま積み直さないため
   */
   let unsaved = false;
   if (viaDocument.kind === "edited") {
+    noteOwnPlotSave(session.plotFile, inserted.text);
     unsaved = !(await viaDocument.save().catch((error: unknown) => {
       logFailure("プロットの名前の書き足し（保存）", {
         作品: work.title,
@@ -505,6 +512,7 @@ export async function applyPlotNames(
       });
       return false;
     }));
+    if (unsaved) forgetOwnPlotSave(session.plotFile);
   }
 
   logStep(

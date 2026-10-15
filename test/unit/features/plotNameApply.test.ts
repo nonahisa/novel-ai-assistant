@@ -31,6 +31,9 @@ const state = vi.hoisted(() => ({
   mark: vi.fn(async () => true),
   /** 置いた名前を直す案の記録（見送られたあと、反映の側が置き直さないため） */
   recordOffers: vi.fn(async () => undefined),
+  /** 自分で保存する plot.md の覚え書き（その保存で「保存からの反映」を走らせない） */
+  noteOwn: vi.fn(),
+  forgetOwn: vi.fn(),
 }));
 
 vi.mock("../../../src/features/roleRenameOffers", () => ({
@@ -62,6 +65,8 @@ vi.mock("../../../src/core/pendingUpdates", () => ({
 
 vi.mock("../../../src/features/plotCharacterSync", () => ({
   markPlotCharactersSynced: state.mark,
+  noteOwnPlotSave: state.noteOwn,
+  forgetOwnPlotSave: state.forgetOwn,
 }));
 vi.mock("../../../src/features/nameCheck", () => ({ pickOrigin: vi.fn() }));
 vi.mock("../../../src/features/aiConnectivity", () => ({
@@ -494,6 +499,11 @@ describe("plot.md がエディターで開いているとき", () => {
       return undefined;
     });
     state.mark.mockClear();
+    state.noteOwn.mockReset();
+    state.noteOwn.mockImplementation(() => {
+      order.push("noteOwn");
+    });
+    state.forgetOwn.mockClear();
     vscodeStub.workspace.textDocuments.length = 0;
     vscodeStub.workspace.fs.readFile = (async () => diskBytes) as never;
     vscodeStub.workspace.applyEdit = async (edit: unknown) => {
@@ -530,9 +540,30 @@ describe("plot.md がエディターで開いているとき", () => {
     // 文書の改行（CRLF）に合わせて入れる。LF だけの改行を混ぜない
     expect(text.replace(/\r\n/g, "")).not.toContain("\n");
     expect(save).toHaveBeenCalledTimes(1);
-    // 保存は「保存からの反映」を起こすので、承認待ちへ置いて印を進めてから保存する（二重に積まない）
-    expect(order).toEqual(["stage", "save"]);
+    // 承認待ちへ置いて印を進めてから保存する
+    expect(order).toEqual(["stage", "noteOwn", "save"]);
     expect(state.mark).toHaveBeenCalledTimes(1);
+    // この保存では「保存からの反映」を走らせない（［入れる］がもう案を置いた。画面テスト plotRenamePending）。
+    // 覚えるのは保存する中身そのもの（LF空間）
+    const marked = state.mark.mock.calls[0] as unknown as [WorkEntry, string, string];
+    expect(state.noteOwn).toHaveBeenCalledWith(plotFile, marked[2]);
+    expect(state.forgetOwn).not.toHaveBeenCalled();
+  });
+
+  test("保存できなければ、覚え書きを忘れて保存を頼む", async () => {
+    openDocument();
+    save.mockImplementationOnce(async () => false);
+    const warned: string[] = [];
+    window.showWarningMessage = (async (message: string) => {
+      warned.push(message);
+      return undefined;
+    }) as typeof window.showWarningMessage;
+
+    const ok = await applyPlotNames(work, openSession(), [{ id: "1", name: "相馬 誠" }]);
+
+    expect(ok).toBe(true);
+    expect(state.forgetOwn).toHaveBeenCalledWith(plotFile);
+    expect(warned.join("")).toContain("plot.md を保存できませんでした");
   });
 
   test("文書に保存していない変更があれば、書かずに止める", async () => {

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { CharacterStore } from "../core/characterStore";
 import { PendingUpdateStore, type PendingUpdate } from "../core/pendingUpdates";
@@ -68,6 +69,48 @@ export interface PlotCharacterSyncOptions {
    * 積むものが無ければ「無かった」と知らせる（押したのに無反応にしない）
    */
   force?: boolean;
+}
+
+/**
+ * **こちらが自分で保存した plot.md**（場所 → 保存した中身。LF空間）。
+ *
+ * プロットモードの［入れる］は、plot.md がエディターで開いていれば文書へ当てて保存する
+ * （`plotNameSuggest.ts`。ディスクを直に書くと Ctrl+S が「ファイルのほうが新しい」で断られたため）。
+ * その保存でも「保存からの反映」が走ると、［入れる］がもう置いた案の上に、同じ保存の反映が
+ * 役名だけの人物（ヒロイン・班長）の新規の案と、置いたばかりの直す案への重ね書きを積み、
+ * 知らせも1つ増えた（画面テスト plotRenamePending、2026-10-16）。ディスクへ書いていたころは
+ * 保存の知らせが出ないので、この反映は走らなかった。**こちらの保存では反映を走らせず、
+ * 作者が次に保存したときに走る、という前の振る舞いに揃える。**
+ *
+ * 時間ではなく**中身で**見分ける。保存の知らせが届く前に作者が打ち足していれば、中身が違うので
+ * 反映は走る（作者の書いた分を取りこぼさない）。
+ */
+const ownPlotSaves = new Map<string, string>();
+
+function ownSaveKey(filePath: string): string {
+  return path.pathKeyForComparison(filePath);
+}
+
+/** これから自分で保存する plot.md の中身を覚える（保存の前に呼ぶ） */
+export function noteOwnPlotSave(filePath: string, lfText: string): void {
+  ownPlotSaves.set(ownSaveKey(filePath), lfText);
+}
+
+/** 保存できなかったときに忘れる（残すと、作者が同じ中身で保存したときに反映が走らない） */
+export function forgetOwnPlotSave(filePath: string): void {
+  ownPlotSaves.delete(ownSaveKey(filePath));
+}
+
+/**
+ * 保存されたのが、こちらが自分で保存した中身か。**当たったら1度きりで忘れる**
+ * （次の保存は作者のもの）
+ */
+export function consumeOwnPlotSave(filePath: string, savedText: string): boolean {
+  const key = ownSaveKey(filePath);
+  const expected = ownPlotSaves.get(key);
+  if (expected === undefined) return false;
+  ownPlotSaves.delete(key);
+  return expected === savedText.replace(/\r\n?/g, "\n");
 }
 
 const EMPTY: PlotCharacterSyncResult = {
