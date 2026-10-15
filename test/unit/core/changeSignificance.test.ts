@@ -250,6 +250,19 @@ describe("AIが注釈を書き写してきたとき", () => {
     expect(stripInvolvementNote(text)).toBe(text);
   });
 
+  test("末尾に「（高）」だけを写しても落とす（2026-10-15、26b の再読込で3回中3回）", () => {
+    expect(
+      stripInvolvementNote("B級冒険者。オーク肉を『不死妃の宮』へ納品する役割を担う。（高）")
+    ).toBe("B級冒険者。オーク肉を『不死妃の宮』へ納品する役割を担う。");
+    expect(stripInvolvementNote("課長。(中)")).toBe("課長。");
+    expect(stripInvolvementNote("課長（低） ")).toBe("課長");
+  });
+
+  test("文の途中の（高）は落とさない（末尾の印だけを見る）", () => {
+    const text = "背が高い（高）身長の男。";
+    expect(stripInvolvementNote(text)).toBe(text);
+  });
+
   test("注釈しか無ければ空にする", () => {
     // 空にしておけば、呼び出し側が「値なし」として扱う
     expect(stripInvolvementNote("［関与度 30（低）］")).toBe("");

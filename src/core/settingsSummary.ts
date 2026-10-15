@@ -50,7 +50,15 @@ export const KIND_LABELS: Record<SettingsKind, string> = {
 
 export function describeCharacter(
   character: Character,
-  customFields: CustomFieldDefinition[] = []
+  customFields: CustomFieldDefinition[] = [],
+  options: {
+    /**
+     * 変化の記録を渡さない（AIで再読込に作者の留意点があるとき。作者の裁定
+     * 2026-10-15 の6、`describeEnrichTarget`）。既定は渡す——相談（P-18）では
+     * 変化もどれも事実として要る
+     */
+    omitChanges?: boolean;
+  } = {}
 ): string {
   const lines: string[] = [`名前: ${character.name}`];
   push(lines, "紹介", character.summary);
@@ -109,7 +117,9 @@ export function describeCharacter(
   // 紹介は80字しかないので、どの変化に紙幅を使うかをここで示す。
   // **変化そのものは低いものも全部渡す。** 相談（P-18）ではどれも事実であり、
   // ふるいにかけると「髪を切った話」を聞かれたときに答えられなくなる
-  for (const significance of scoreCharacterChanges(character)) {
+  for (const significance of options.omitChanges
+    ? []
+    : scoreCharacterChanges(character)) {
     const values = describeChangeValues(
       changesOfField(character.changes, significance.field)
     );

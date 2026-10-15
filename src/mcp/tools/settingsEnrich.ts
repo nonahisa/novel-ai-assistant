@@ -425,6 +425,8 @@ export function settingsEnrichPrompt(input: SettingsEnrichInput) {
         customFields,
         abilitySystem: kind === "ability" ? readAbilitySystem(input.folder) : undefined,
         characters: target.characters,
+        // 留意点があれば変化の記録を外す（製品の画面と同じ。作者の裁定 2026-10-15 の6）
+        notes: input.notes,
       }),
     },
     excerpts,

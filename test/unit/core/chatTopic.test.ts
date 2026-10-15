@@ -281,7 +281,9 @@ describe("実際に減った量", () => {
     expect(savedIndex + savedSection).toBeGreaterThanOrEqual(2700);
     // 内訳も見ておく。片方だけが効いている状態に気づけるようにする
     expect(savedIndex).toBeGreaterThanOrEqual(2000);
-    expect(savedSection).toBeGreaterThanOrEqual(500);
+    // 2026-10-15（v3.31）：目次を渡さない回に主な機能の短い一覧（作者の裁定の8）を
+    // 置いたので、節の節約は 500字台から 468字へ減った。下限を 400 へ下げる
+    expect(savedSection).toBeGreaterThanOrEqual(400);
   });
 
   test("操作の相談では、減らない", () => {

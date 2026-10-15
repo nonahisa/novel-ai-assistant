@@ -132,7 +132,11 @@ import { closeTruncatedJson } from "../core/truncatedResponse";
 //       e4b の数（3件）を足した。機能別AI割当の行の案内を外したので（作者の裁定
 //       2026-10-10「割当画面の案内も外してください」）、そこにあった数字をここで
 //       答えられるようにした。システム指示は変えていない
-export const WORK_CHAT_VERSION = "3.30";
+// 3.31: 目次を渡さない回（創作の相談）のシステム指示へ、使い方の節の代わりに
+//       主な機能の短い一覧（`FEATURE_SHORTLIST_NAMES`、PDF出力など11件）を置いた
+//       （作者の裁定 2026-10-15 の8）。目次の無い相談で「PDF出力機能は無い」と
+//       作り話をした（26b、3回に1回）。目次を渡す回の送る本文は変わらない
+export const WORK_CHAT_VERSION = "3.31";
 
 /** ［AIに相談］の依頼文に入れる一文・指摘の長さの上限（長い合本の行で膨らませない） */
 export const FINDING_ADVICE_QUOTE_MAX_CHARS = 300;
@@ -368,6 +372,38 @@ const FEATURE_GUIDE_SECTION = `【この拡張機能の使い方を聞かれた�
   取り込み方を聞かれたときだけ**案内し、聞かれないのに自分から勧めないこと
 - 作品の内容について聞かれているときは、この目次に触れないこと`;
 
+/**
+ * 主な機能の短い一覧。**目次を渡さない回にだけ足す**（作者の裁定 2026-10-15 の8）。
+ *
+ * 発端は測定（2026-10-15、行6208）——目次を渡さない相談で、gemma4:26b が
+ * 「この拡張機能自体にPDF出力機能は備わっていないようです」と答えた（3回に1回。
+ * 実際は PDF出力がある）。目次（2,000字超）を戻すと創作の相談の節約が消えるので、
+ * 「無い」と言われやすい機能の名前だけを1行で渡す。
+ *
+ * **名前は詳細メニュー（package.json のコマンドの題）と同じ字にする**——
+ * `workChatFeatureShortlist.test.ts` が、題として実在することを見張る。
+ * 場所や手順は書かない（書くと、目次を渡す回の説明と二重になる）。
+ */
+export const FEATURE_SHORTLIST_NAMES = [
+  "PDF出力（印刷用）",
+  "EPUB出力（試作）",
+  "Word 原稿変換（docx をまとめて変換）",
+  "縦書き表示",
+  "誤字脱字検知",
+  "推敲",
+  "矛盾検知",
+  "伏線検知",
+  "各話あらすじ",
+  "原稿読み上げ（音読推敲）",
+  "コピー（投稿サイト用）",
+] as const;
+
+const FEATURE_SHORTLIST_SECTION = `【この拡張機能の主な機能（一部だけ）】
+${FEATURE_SHORTLIST_NAMES.join("・")}
+機能について「無い」「備わっていない」と答える前に、必ずこの一覧を見ること。
+この一覧にある機能を「無い」と答えないこと。一覧に無い機能も、無いと決めつけないこと。
+場所や手順はここに無いので、推測で書かないこと。`;
+
 /** システムの指示の後半（【本文の場所を指すとき】以降） */
 const SYSTEM_PROMPT_TAIL = `【本文の場所を指すとき】
 「ここが気になる」「この場面が」のように**特定の箇所を指して話すときは、locate を付けてください。**
@@ -421,7 +457,13 @@ export function buildWorkChatSystemPrompt(options?: {
   featureIndex?: boolean;
 }): string {
   const sections = [SYSTEM_PROMPT_HEAD];
-  if (options?.featureIndex !== false) sections.push(FEATURE_GUIDE_SECTION);
+  // 目次を渡さない回は、使い方の節の代わりに主な機能の短い一覧を置く（3.31）。
+  // 目次を渡す回は1文字も変えない（目次そのものが全部の機能の一覧なので）
+  sections.push(
+    options?.featureIndex !== false
+      ? FEATURE_GUIDE_SECTION
+      : FEATURE_SHORTLIST_SECTION
+  );
   sections.push(SYSTEM_PROMPT_TAIL);
   // 節の区切りは空行1つ。元の1つながりの文と同じ形になる
   return sections.join("\n\n");
