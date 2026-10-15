@@ -33,6 +33,9 @@ interface Fill {
   y: number;
   size: number;
   align: string;
+  baseline: string;
+  /** 描いた時点の回転（ラジアン）。縦に並べる約物は90度回して描く */
+  rotation: number;
 }
 
 interface FakeContext {
@@ -46,6 +49,10 @@ interface FakeContext {
   drawImage(): void;
   measureText(text: string): { width: number };
   fillText(text: string, x: number, y: number): void;
+  save(): void;
+  restore(): void;
+  translate(x: number, y: number): void;
+  rotate(angle: number): void;
 }
 
 /** `171.4px "Yu Mincho", serif` から大きさだけを取る */
@@ -55,6 +62,9 @@ function sizeOf(font: string): number {
 }
 
 function makeContext(): FakeContext {
+  // 平行移動と回転だけを持つ。drawTexts が使う変換はこの2つだけである
+  let state = { tx: 0, ty: 0, rotation: 0 };
+  const stack: (typeof state)[] = [];
   const ctx: FakeContext = {
     font: "",
     fillStyle: "",
@@ -69,13 +79,30 @@ function makeContext(): FakeContext {
       return { width: Array.from(text).length * sizeOf(ctx.font) };
     },
     fillText(text: string, x: number, y: number) {
+      // 回したあとに描くのは (0, 0) だけなので、移した量を足せば
+      // 回す前の座標（字の枠の中心）になる
       ctx.fills.push({
         text,
-        x,
-        y,
+        x: x + state.tx,
+        y: y + state.ty,
         size: sizeOf(ctx.font),
         align: ctx.textAlign,
+        baseline: ctx.textBaseline,
+        rotation: state.rotation,
       });
+    },
+    save() {
+      stack.push({ ...state });
+    },
+    restore() {
+      const top = stack.pop();
+      if (top) state = top;
+    },
+    translate(x: number, y: number) {
+      state = { ...state, tx: state.tx + x, ty: state.ty + y };
+    },
+    rotate(angle: number) {
+      state = { ...state, rotation: state.rotation + angle };
     },
   };
   return ctx;
@@ -122,6 +149,7 @@ interface CoverApi {
   sources: Record<string, string | null>;
   FRAME_WIDTH: number;
   FRAME_HEIGHT: number;
+  verticalGlyphKind(character: string): string;
 }
 
 interface Harness {
@@ -182,7 +210,8 @@ function load(options: Options): Harness {
       " readForm = deps.readForm, document = deps.document, Image = deps.Image;\n" +
       source +
       "\nreturn { bake: bake, drawCover: drawCover, images: images," +
-      " sources: sources, FRAME_WIDTH: FRAME_WIDTH, FRAME_HEIGHT: FRAME_HEIGHT };"
+      " sources: sources, FRAME_WIDTH: FRAME_WIDTH, FRAME_HEIGHT: FRAME_HEIGHT," +
+      " verticalGlyphKind: verticalGlyphKind };"
   )(deps) as CoverApi;
 
   return {
@@ -550,4 +579,147 @@ describe("折り返した題名の行が重ならない", () => {
       }
     });
   }
+});
+
+/**
+ * 縦に並べる題名の約物と小書きの仮名（作者の裁定、2026-10-15 23時）。
+ *
+ * 縦の題名は drawTexts が1字ずつ積む（canvas の書字方向は横に戻してある。
+ * 0.107.1）。そのままでは「ー」「…」「～」が横向きのまま、括弧は横組みの形、
+ * 小書きの仮名と句読点は横組みの位置（字の枠の左下寄り）のまま焼けていた。
+ *
+ * - 回す字（長音・波ダッシュ・ダッシュ・三点リーダー・括弧類）は、字の枠の
+ *   中心で時計回りに90度回して描く
+ * - 小書きの仮名・句読点は、字の枠の右上寄りへずらす
+ * - それ以外の字と、横に並べる題名は、これまでと1pxも変えない
+ */
+describe("縦に並べる題名の約物", () => {
+  function api(): CoverApi {
+    return load({ texts: {}, layout: titleOnly({}), canvasInDom: true }).api;
+  }
+
+  it("回す字の表：長音・波ダッシュ・ダッシュ・三点リーダー・括弧類", () => {
+    const kind = api().verticalGlyphKind;
+    for (const character of Array.from(
+      "ー～〜―—‐－─…‥「」『』（）［］｛｝〔〕【】〈〉《》〘〙〖〗()[]{}<>＜＞"
+    )) {
+      expect(kind(character), character).toBe("rotate");
+    }
+  });
+
+  it("小書きの仮名の表", () => {
+    const kind = api().verticalGlyphKind;
+    for (const character of Array.from(
+      "ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶㇰㇱㇲㇳㇴㇵㇶㇷㇸㇹㇺㇻㇼㇽㇾㇿ"
+    )) {
+      expect(kind(character), character).toBe("small");
+    }
+  });
+
+  it("句読点の表", () => {
+    const kind = api().verticalGlyphKind;
+    for (const character of Array.from("、。，．")) {
+      expect(kind(character), character).toBe("punct");
+    }
+  });
+
+  it("ふつうの字・感嘆符・疑問符・中黒はそのまま立てる", () => {
+    const kind = api().verticalGlyphKind;
+    for (const character of Array.from("あ漢字アつやゆよA1！？・")) {
+      expect(kind(character), character).toBe("upright");
+    }
+  });
+
+  /** 題名を右上に縦で置いて、描いた字と、字の枠の物差しを返す */
+  function drawVertical(title: string): {
+    fills: Fill[];
+    size: number;
+    centerX: number;
+    top: number;
+  } {
+    const harness = withImage(
+      load({
+        texts: { bookTitle: title },
+        layout: titleOnly({ vertical: true, anchor: "top-right" }),
+        canvasInDom: true,
+      })
+    );
+    harness.api.drawCover("front");
+    const base = Math.min(harness.api.FRAME_WIDTH, harness.api.FRAME_HEIGHT);
+    const size = base * 0.1;
+    const margin = base * 0.07;
+    const blockW = size * 1.2;
+    return {
+      fills: harness.ctx.fills,
+      size,
+      centerX: harness.api.FRAME_WIDTH - margin - blockW + blockW / 2,
+      top: margin,
+    };
+  }
+
+  it("回す字は、字の枠の中心で時計回りに90度回して描く", () => {
+    const { fills, size, centerX, top } = drawVertical("「あー…」");
+    expect(fills.map((fill) => fill.text)).toEqual(["「", "あ", "ー", "…", "」"]);
+    for (const index of [0, 2, 3, 4]) {
+      const fill = fills[index];
+      expect(fill.rotation, fill.text).toBeCloseTo(Math.PI / 2, 9);
+      expect(fill.align).toBe("center");
+      expect(fill.baseline).toBe("middle");
+      expect(fill.x).toBeCloseTo(centerX, 6);
+      // 字の枠（上端から1em）の真ん中。送りは立てる字と同じ 1.05em
+      expect(fill.y).toBeCloseTo(top + index * size * 1.05 + size / 2, 6);
+    }
+    // 回したあとに立てる字が回ったまま残らない（save と restore の対）
+    expect(fills[1].rotation).toBe(0);
+    expect(fills[1].baseline).toBe("top");
+    expect(fills[1].x).toBeCloseTo(centerX, 6);
+    expect(fills[1].y).toBeCloseTo(top + size * 1.05, 6);
+  });
+
+  it("小書きの仮名は、字の枠の右上寄りへずらす", () => {
+    const { fills, size, centerX, top } = drawVertical("あっゃ");
+    for (const index of [1, 2]) {
+      const fill = fills[index];
+      const normalY = top + index * size * 1.05;
+      expect(fill.rotation).toBe(0);
+      expect(fill.x).toBeGreaterThan(centerX);
+      expect(fill.y).toBeLessThan(normalY);
+      // ずらしすぎて隣の字の枠へ出ない（ずれは字の大きさの半分未満）
+      expect(fill.x - centerX).toBeLessThan(size / 2);
+      expect(normalY - fill.y).toBeLessThan(size / 2);
+    }
+  });
+
+  it("句読点は小書きの仮名より大きく、右上の隅へ寄せる", () => {
+    const { fills, size, centerX, top } = drawVertical("あっ、。");
+    const small = fills[1];
+    const smallDx = small.x - centerX;
+    const smallDy = top + 1 * size * 1.05 - small.y;
+    for (const index of [2, 3]) {
+      const fill = fills[index];
+      const dx = fill.x - centerX;
+      const dy = top + index * size * 1.05 - fill.y;
+      expect(fill.rotation).toBe(0);
+      expect(dx).toBeGreaterThan(smallDx);
+      expect(dy).toBeGreaterThan(smallDy);
+      // 字の枠の外までは出さない
+      expect(dx).toBeLessThan(size);
+      expect(dy).toBeLessThan(size);
+    }
+  });
+
+  it("横に並べる題名は、約物を含んでいても1行のまま回さずに描く", () => {
+    const harness = withImage(
+      load({
+        texts: { bookTitle: "「あっ…」、。" },
+        layout: titleOnly({ vertical: false }),
+        canvasInDom: true,
+      })
+    );
+    harness.api.drawCover("front");
+    expect(harness.ctx.fills).toHaveLength(1);
+    expect(harness.ctx.fills[0].text).toBe("「あっ…」、。");
+    expect(harness.ctx.fills[0].rotation).toBe(0);
+    expect(harness.ctx.fills[0].baseline).toBe("top");
+  });
 });
