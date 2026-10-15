@@ -1936,6 +1936,90 @@ const FRAME_WIDTH = Math.round(MAX_EDGE / FRAME_RATIO);
 const FRAME_HEIGHT = MAX_EDGE;
 const FONT_STACK = '"Yu Mincho", "游明朝", "Hiragino Mincho ProN", serif';
 
+/*
+ * 縦に並べる題名の、約物と小書きの仮名の扱い（作者の裁定、2026-10-15 23時）。
+ *
+ * canvas は横組みで描く（書字方向を横に戻してある。0.107.1）ので、縦の題名は
+ * drawTexts が1字ずつ積む。横組みの字形をそのまま積むと、「ー」「…」「～」は
+ * 横向きのまま、括弧は横組みの形、小書きの仮名と句読点は横組みの位置（字の枠
+ * の左下寄り）のまま焼ける。縦組みの組版で字形を差し替える仕組み（フォントの
+ * vert）は canvas の fillText からは使えないので、ここで字ごとに手当てする。
+ *
+ * 分け方の出どころは JIS X 4051（日本語文書の組版方法）の縦組みの扱い：
+ * - 回す字：始め括弧類・終わり括弧類（cl-01・cl-02）、ハイフン類（cl-03。
+ *   波ダッシュを含む）、分離禁止文字（cl-08。ダッシュ・三点リーダー・
+ *   二点リーダー）、長音記号（cl-10）。縦組みでは字の向きを90度変えた形を
+ *   使う。フォントの縦組み用字形（OpenType の vert）も、これらは横組みの
+ *   字形を時計回りに90度回した形になっている。半角の括弧は欧文の扱い
+ *   （縦組みでは横倒し）なので、同じく回す
+ * - 小書きの仮名（cl-11）：縦組みでは字の枠の右上寄りに置く（横組みは
+ *   下寄り）
+ * - 句読点：読点類・句点類（cl-07・cl-06）。縦組みでは字の枠の右上の隅に置く
+ * - 感嘆符・疑問符・中黒（cl-04・cl-05）は全角なら縦横で形も位置も同じなので、
+ *   そのまま立てる
+ */
+const VERTICAL_ROTATE =
+  'ー～〜―—‐－─…‥' +
+  '「」『』（）［］｛｝〔〕【】〈〉《》〘〙〖〗' +
+  '()[]{}<>＜＞';
+const VERTICAL_SMALL_KANA =
+  'ぁぃぅぇぉっゃゅょゎゕゖ' +
+  'ァィゥェォッャュョヮヵヶ' +
+  'ㇰㇱㇲㇳㇴㇵㇶㇷㇸㇹㇺㇻㇼㇽㇾㇿ';
+const VERTICAL_PUNCT = '、。，．';
+/*
+ * ずらす量（字の大きさに対する割合）。右へ right、上へ up。
+ *
+ * 小書きの仮名は、横組みの字形が字の枠の下寄り・やや左に描かれる。縦組みの
+ * 字形との差はおよそ字の1割から2割なので、その中ほどを取った。句読点は
+ * 横組みで左下の隅、縦組みで右上の隅に置く字なので、字の枠の半分あまり
+ * 動かす。どちらも明朝体（游明朝・ヒラギノ明朝）の字形から見積もった
+ * 初期値で、焼いた写真を見て詰める。ずらしすぎると隣の字の枠へ出るので、
+ * 小書きの仮名は半分未満、句読点は1字未満に留める（単体テストが見張る）。
+ */
+const SMALL_KANA_SHIFT = { right: 0.12, up: 0.18 };
+const PUNCT_SHIFT = { right: 0.55, up: 0.55 };
+
+/** 縦に並べるときの、その字の扱い（rotate・small・punct・upright） */
+function verticalGlyphKind(character) {
+  if (VERTICAL_ROTATE.indexOf(character) >= 0) return 'rotate';
+  if (VERTICAL_SMALL_KANA.indexOf(character) >= 0) return 'small';
+  if (VERTICAL_PUNCT.indexOf(character) >= 0) return 'punct';
+  return 'upright';
+}
+
+/**
+ * 縦の列に1字を置く。centerX は列の中心、top は字の枠の上端。
+ *
+ * 立てる字は、これまでと同じ置き方（中央寄せ・上端そろえ）のまま変えない
+ * ——既に焼いた絵の見た目を、約物の無い題名では1pxも動かさないため。
+ */
+function drawVerticalChar(ctx, character, centerX, top, fontSize) {
+  const kind = verticalGlyphKind(character);
+  if (kind === 'rotate') {
+    // 字の枠の中心で回す。上端そろえのまま回すと、回した字が枠の外へ出る
+    ctx.save();
+    ctx.translate(centerX, top + fontSize / 2);
+    ctx.rotate(Math.PI / 2);
+    ctx.textBaseline = 'middle';
+    ctx.fillText(character, 0, 0);
+    ctx.restore();
+    // save と restore で戻るが、偽物や古い実装でも戻るように明示する
+    ctx.textBaseline = 'top';
+    return;
+  }
+  const shift = kind === 'small' ? SMALL_KANA_SHIFT : (kind === 'punct' ? PUNCT_SHIFT : null);
+  if (!shift) {
+    ctx.fillText(character, centerX, top);
+    return;
+  }
+  ctx.fillText(
+    character,
+    centerX + fontSize * shift.right,
+    top - fontSize * shift.up
+  );
+}
+
 function loadImage(side, src, retried) {
   const image = new Image();
   // 別の在りかから読んだ絵は canvas を汚し、読み出せなくなる。
@@ -2154,11 +2238,14 @@ function drawTexts(ctx, canvas, layout) {
       lines.forEach(function (line, lineIndex) {
         // 縦書きは右の列から左へ送る（日本語の並び）
         const columnX = x + blockW - (lineIndex + 1) * pitch;
+        // 約物と小書きの仮名は縦組みの形・位置で置く（drawVerticalChar）
         Array.from(line).forEach(function (character, index) {
-          ctx.fillText(
+          drawVerticalChar(
+            ctx,
             character,
             columnX + pitch / 2,
-            y + index * fontSize * CHAR_PITCH
+            y + index * fontSize * CHAR_PITCH,
+            fontSize
           );
         });
       });

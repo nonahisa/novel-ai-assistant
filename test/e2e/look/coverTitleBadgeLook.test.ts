@@ -42,6 +42,10 @@ const TITLES: ReadonlyArray<{ tag: string; title: string; chars: number }> = [
     title: "放課後の図書室で出会った少女と消えた七冊の本をめぐる夏の物語～転生した司書見習いは魔法の栞で失われた頁を取り戻せるのか～",
     chars: 60,
   },
+  // 縦の約物（作者の裁定、2026-10-15 23時）：括弧・三点リーダー・ダッシュ・長音・波ダッシュは90度回り、
+  // 小書きの仮名と句読点は字の枠の右上寄りに焼けるか。置き方の数字は unit/cross/coverCompose.test.ts が
+  // 見張るので、ここでは写真を残すだけ（ずらす量が字形に合っているかは写真で判断する）
+  { tag: "縦の約物", title: "「ちょっと待って……」――夏（仮）ー～、終わる。", chars: 24 },
 ];
 
 const bakedPath = (session: E2ESession) => path.join(session.workFolder, "設定", "書籍", "表紙_合成済み.png");
