@@ -626,6 +626,28 @@ export async function quickPickTitle(page: Page): Promise<string | undefined> {
   });
 }
 
+/**
+ * いま出ている選ぶ画面の入力欄の薄い字（`showQuickPick` の `placeHolder`）。出ていなければ undefined。
+ *
+ * 製品は状態の文をここへ出す（「GitHubと同期」の一覧など）。題（`quickPickTitle`）とは別の所にある
+ */
+export async function quickPickPlaceholder(page: Page): Promise<string | undefined> {
+  if ((await quickPickTitle(page)) === undefined) return undefined;
+  const value = await page.locator(".quick-input-widget input").first().getAttribute("placeholder").catch(() => null);
+  return value ?? undefined;
+}
+
+/**
+ * いま出ている選ぶ画面の字をまとめて（題・行の名前・説明・下の行〔detail〕。入力欄の薄い字は入らない）。
+ *
+ * `quickPickRows` は行の名前と説明しか読まない。下の行に出る文や、画面のどこかに
+ * 出てはいけない言葉を見るときに使う。出ていなければ空文字
+ */
+export async function quickPickWidgetText(page: Page): Promise<string> {
+  if ((await quickPickTitle(page)) === undefined) return "";
+  return (await page.locator(".quick-input-widget").first().innerText().catch(() => "")) ?? "";
+}
+
 /** いま出ている選ぶ画面の行（見えている行だけ。短い一覧を前提にする） */
 export async function quickPickRows(page: Page): Promise<QuickPickRow[]> {
   return page.evaluate(() =>
