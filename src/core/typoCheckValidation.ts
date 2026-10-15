@@ -4,6 +4,7 @@ import type { ExtractedTypoIssue, TypoCheckResult } from "../prompts/typoCheck";
 import { normalizeForComparison } from "./groundedEvidence";
 import { lineHoldingQuote } from "./relocateQuote";
 import { isPlaceholderText } from "./placeholderText";
+import { onlyModernization } from "./historicalOrthography";
 import { isKeptWord, type KeepWord } from "../models/keepWord";
 import {
   INTERNAL_EMPHASIS_SOURCE,
@@ -617,8 +618,15 @@ export function validateTypoIssues(
     // 「然し」→「しかし」「聯隊」→「連隊」「与へて呉れた」→「与えてくれた」
     // が返った。**どれも正しい日本語で、直せば元の文書が壊れる**
     // **文語体の作品のときだけ**（R17）。現代文の作品では「お金が居る」の
-    // 「居る」は本物の誤変換で、一覧で落とすと見逃しになる
-    if (archaicWork && isArchaicForm(target)) {
+    // 「居る」は本物の誤変換で、一覧で落とすと見逃しになる。
+    // **一覧に無い旧字・旧かなは、字の種類で見る**（作者の裁定、2026-10-15 の5）。
+    // 「機會→機会」「やうやく→ようやく」のように、旧字体→新字体・歴史的仮名遣い→
+    // 現代仮名遣いの置き換えだけでできた提案を落とす（`historicalOrthography.ts`）。
+    // 別の直しが1字でも混ざっていれば落とさない（本物の誤字を巻き込まない）
+    if (
+      archaicWork &&
+      (isArchaicForm(target) || onlyModernization(target, suggestion))
+    ) {
       rejected.push({
         line: issue.line,
         target: issue.target,
