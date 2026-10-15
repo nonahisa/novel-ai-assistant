@@ -522,8 +522,20 @@ button.primary {
   text-align: center;
   line-height: 1.8;
 }
-/* 合成の面。canvasの中身は焼いたPNGとまったく同じものである */
+/*
+  合成の面。canvasの中身は焼いたPNGとまったく同じものである。
+
+  **書字方向は必ず横に戻す。** 縦書きの本では親の .epub-page.vertical が
+  writing-mode: vertical-rl を持ち、canvas がそれを受け継ぐ。Chromium の canvas は
+  要素の書字方向が縦だと fillText の字を縦組み用に寝かせて描くので、題名を縦に
+  並べても横に並べても、1字ずつ90度横倒しに焼けていた（実機確認リスト 5487、
+  2026-10-15。VS Code 1.138.0 でも 1.141.0 でも同じ）。縦に並べるのは drawTexts が
+  1字ずつ置いて行うので、canvas 自体は横組みのままでよい。
+  .epub-page を前に付けるのは、本の CSS（#book-style）の指定より強くするため
+*/
+.epub-page .cover-canvas,
 .cover-canvas {
+  writing-mode: horizontal-tb;
   display: block;
   margin: 0 auto;
   max-inline-size: 100%;

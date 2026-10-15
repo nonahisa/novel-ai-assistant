@@ -731,4 +731,16 @@ describe("画面から拡張機能へ返すもの", () => {
   it("見本を描く関数を、forEach へそのまま渡さない（並びの番号が描く先に入る）", () => {
     expect(script).not.toMatch(/forEach\(\s*drawCover\s*\)/);
   });
+
+  /**
+   * 実機確認リスト 5487 の【不具合の疑い】（2026-10-15）：縦書きの本では canvas が
+   * 親の `.epub-page.vertical` から `writing-mode: vertical-rl` を受け継ぎ、Chromium が
+   * fillText の字を1字ずつ横倒しに描いていた。焼いた画像での確かめは
+   * `test/e2e/epubCoverTitleUpright.test.ts`（題名「一」の墨が横長か）。
+   */
+  it("合成の canvas は書字方向を横に戻す（親の縦書きを受け継がない）", () => {
+    const rule = /\.epub-page \.cover-canvas,\s*\.cover-canvas\s*\{([^}]*)\}/.exec(html);
+    expect(rule, ".cover-canvas の規則が見つかりません").not.toBeNull();
+    expect(rule?.[1]).toMatch(/writing-mode:\s*horizontal-tb/);
+  });
 });
