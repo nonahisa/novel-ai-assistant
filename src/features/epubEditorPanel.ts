@@ -1644,7 +1644,8 @@ function readTitleBlock(
       vertical: record.vertical === true,
     },
     ...(typeof record.text === "string" ? { text: record.text.slice(0, 200) } : {}),
-    ...(typeof record.color === "string" && /^#[0-9a-f]{3,6}$/iu.test(record.color)
+    // 3桁か6桁だけ（測る側の parseHexColor が読める形）
+    ...(typeof record.color === "string" && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/iu.test(record.color)
       ? { color: record.color }
       : {}),
   };
@@ -1703,6 +1704,7 @@ async function bakeCover(
       isError: true,
     });
     // 外部AIの依頼なら、頼んだ側へも理由を返す（作者の画面の知らせは同じに出す）
+    // **知らせを閉じるのを待つ前に返す**（作者が閉じるまで待つと、頼んだ側は時間切れになる）
     request?.waiter.resolve({ ok: false, reason: `${label}を焼けませんでした。${message}` });
     await vscode.window.showErrorMessage(`${label}を焼けませんでした。${message}`);
     return;
