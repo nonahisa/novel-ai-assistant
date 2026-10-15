@@ -23,9 +23,9 @@ import type { WorkEntry } from "../../../src/models/types";
  *   （誤字脱字と同じ扱い。0.107.2 までは数えず「失敗 0件」で終わり、推敲されていない話が
  *   済んだように見えた。0.107.3 で直した）
  *
- * **誤字脱字の側との違い（直していない。判断は作者に残す）**：
- * - 切り詰めの印を立てずに空の本文が返ったとき、誤字脱字は話ごとに戻すが、推敲は
- *   戻さずに失敗に数える（`ask` は印が無ければ `truncated: false` を返す）。ここでは見ていない
+ * - 切り詰めの印を立てずに空の本文が返ったときも、誤字脱字と同じく話ごとに戻す
+ *   （作者の裁定、2026-10-15 の3。それまでは戻さずに失敗に数えていた）。1話だけなら
+ *   それ以上は割らずに失敗1件
  *
  * AIは偽物。返す JSON はテストが決める。チャンクの結合と分け直しは本物を通す。
  */
@@ -35,6 +35,10 @@ const state = vi.hoisted(() => ({
   sent: [] as string[],
   /** 何回目の呼び出しを切り詰めるか（1始まり） */
   truncateCalls: new Set<number>(),
+  /** 何回目の呼び出しで、切り詰めの印を立てずに空の本文を返すか（1始まり） */
+  emptyCalls: new Set<number>(),
+  /** 何回目の呼び出しで、空でないが読めない本文を返すか（1始まり） */
+  brokenCalls: new Set<number>(),
   logged: [] as string[],
   failures: [] as string[],
   sources: {} as Record<string, string>,
@@ -58,6 +62,13 @@ vi.mock("../../../src/ai/registry", () => ({
         if (state.truncateCalls.has(call)) {
           // 上限で切られて、読める JSON にならなかった形
           return { text: '{"issues": [{"original": "', truncated: true, elapsedMs: 1 };
+        }
+        if (state.emptyCalls.has(call)) {
+          // 提供元によっては、上限に当たっても印を立てずに空（空白だけ）を返す
+          return { text: "  \n", truncated: false, elapsedMs: 1 };
+        }
+        if (state.brokenCalls.has(call)) {
+          return { text: "指摘はありません", truncated: false, elapsedMs: 1 };
         }
         return { text: EMPTY_RESULT, truncated: false, elapsedMs: 1 };
       },
@@ -220,6 +231,8 @@ const MARKS = ["え", "お", "か", "き"];
 beforeEach(() => {
   state.sent = [];
   state.truncateCalls = new Set();
+  state.emptyCalls = new Set();
+  state.brokenCalls = new Set();
   state.logged = [];
   state.failures = [];
   state.sources = Object.fromEntries(
@@ -296,5 +309,42 @@ describe("推敲：切り詰められたまとめたチャンクを、話ごと�
 
     expect(result?.failedChunks).toBe(1);
     expect(endLine()).toContain("失敗 1件");
+  });
+});
+
+describe("推敲：切り詰めの印が無いまま空の本文が返ったときも、誤字脱字と同じく話ごとに戻す", () => {
+  test("まとめたチャンクが空で返ったら、話ごとに1話まるごと送り直し、失敗に数えない", async () => {
+    state.emptyCalls = new Set([1]);
+
+    const result = await checkProofread(work, registry);
+
+    // 1回目（4話まとめ・空）＋ 話ごとの4回
+    expect(state.sent).toHaveLength(5);
+    expect(marksIn(state.sent[0])).toEqual(MARKS);
+    expect(state.sent.slice(1).map(marksIn)).toEqual(MARKS.map((mark) => [mark]));
+    expect(result?.failedChunks).toBe(0);
+    expect(endLine()).toContain("入り切らず 4回に分けた");
+    expect(endLine()).toContain("失敗 0件");
+  });
+
+  test("1話だけのチャンクが空で返ったら、それ以上は割らずに失敗1件と数える", async () => {
+    state.emptyCalls = new Set([1, 2]);
+
+    const result = await checkProofread(work, registry);
+
+    expect(state.sent).toHaveLength(5);
+    expect(result?.failedChunks).toBe(1);
+    expect(endLine()).toContain("失敗 1件");
+  });
+
+  test("空でない読めない応答は、誤字脱字と同じく分けずに失敗1件と数える", async () => {
+    // 誤字脱字も、空でない読めない応答は分け直さない（壊れた答えを返し続けるモデルで、
+    // 送る回数だけが増えるため）。ここを広げていないことを見張る
+    state.brokenCalls = new Set([1]);
+
+    const result = await checkProofread(work, registry);
+
+    expect(state.sent).toHaveLength(1);
+    expect(result?.failedChunks).toBe(1);
   });
 });

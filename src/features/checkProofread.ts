@@ -405,7 +405,7 @@ export async function checkProofread(
               // **1話だけでも切り詰められたら、もう分ける先が無い。** ここで数えないと、
               // その話は推敲されていないのに終わりの1行が「失敗 0件」になり、済んだように
               // 見える（0.107.2 まで）。誤字脱字と同じく失敗1件と数える。理由は `ask` が
-              // 「応答が上限で切り詰められました」としてログへ残している
+              // 「応答が上限で切り詰められました」「応答が空でした」としてログへ残している
               failedChunks++;
             }
           }
@@ -466,8 +466,9 @@ export async function checkProofread(
       }
 
       /**
-       * 応答。切り詰められたとき、または**上限に入らなかったとき**だけ、
-       * 小さくして試し直す（設計書6.27.10）
+       * 応答。切り詰められたとき（印が無いまま空で返ったときを含む）、
+       * または**上限に入らなかったとき**だけ、小さくして試し直す（設計書6.27.10）。
+       * `truncated` は「話ごとに戻してよい」の印として使う
        */
       type AskResult =
         | { ok: true; value: unknown }
@@ -519,16 +520,25 @@ export async function checkProofread(
           const parsed = parseProofreadResult(response.text);
           if (!parsed) {
             // **切り詰められたのなら、まとめたせいかもしれない。**
-            // 話ごとに戻せば通る見込みがある（捨てるより試すほうがよい）
-            if (!response.truncated) failedChunks++;
+            // 話ごとに戻せば通る見込みがある（捨てるより試すほうがよい）。
+            // **印が無くても、空で返ったら同じに扱う**（作者の裁定、2026-10-15 の3）。
+            // 提供元によっては上限に当たっても印を立てずに空を返し、誤字脱字は
+            // その形も話ごとに戻していた（`checkTypos.ts` の `!res.text.trim()`）。
+            // 空でない読めない答えは戻さない——壊れた答えを返し続けるモデルで、
+            // 送る回数だけが増えるため（誤字脱字と同じ線）
+            const empty = !response.text.trim();
+            const splittable = response.truncated === true || empty;
+            if (!splittable) failedChunks++;
             log.failure("推敲", {
               チャンク: chunk.hash,
               理由: response.truncated
                 ? "応答が上限で切り詰められました"
-                : "応答を読み取れません",
+                : empty
+                  ? "応答が空でした"
+                  : "応答を読み取れません",
               応答: responseExcerptForLog(response.text),
             });
-            return { ok: false, truncated: response.truncated === true };
+            return { ok: false, truncated: splittable };
           }
           // 繰り返しで途中止めした答えも控え、印を残す（設計書6.77 の 15）
           await cache.set(chunk.hash, cacheKeyBase, parsed, {
