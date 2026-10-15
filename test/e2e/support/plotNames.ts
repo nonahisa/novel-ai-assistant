@@ -295,11 +295,55 @@ export async function rewritePlotAndSave(session: E2ESession, text: string): Pro
     });
     throw new Error(`${String(error)}（焦点：${focus}／タブ（＊が前）：${JSON.stringify(await describeTabs(page))}）${await quickInputWaitContext(page)}`);
   });
+  /*
+    **打つ前に、エディターの字がディスクの plot.md に追いつくのを待つ。** 製品は plot.md を「退避 → 消して
+    作り直す」で書く（［入れる］の `writeTextFilePreservingFormat`）。列1に開いたままのエディターは、VS Code の
+    ファイルの見張りがその変化を拾って読み直すまで、古い中身と古い更新時刻を持っている。ディスクの変化だけを
+    見て打ち始めると、読み直す前のエディターが未保存になり、遅れて届いた変化は読み直されず、Ctrl+S が
+    「Failed to save 'plot.md': The content of the file is newer」で断られて、下の「保存される」の待ちで落ちた
+    （2026-10-16 母艦、plotRenamePending 2件目が単独でも8回中3回。写真の右下にその知らせ、エディターは
+    ［入れる］の前の説明の上に打った字が載っていた）。空白（折り返し・nbsp）は落として比べる
+  */
+  const squash = (value: string) => value.replace(/\s+/g, "");
+  let shownText = "";
+  let diskText = "";
+  await waitUntil(
+    async () => {
+      diskText = await readPlot(session);
+      /*
+        行の div は描き直しで使い回され、DOM の並びが画面の並びと一致しない（折り返した行の後半が最後に来た）。
+        画面の上からの位置（top）で並べ直してからつなぐ
+      */
+      shownText = await page.evaluate(() => {
+        const editor = document.activeElement?.closest(".monaco-editor");
+        const rows = Array.from(editor?.querySelectorAll(".view-lines .view-line") ?? []) as HTMLElement[];
+        return rows
+          .map((row) => ({ top: parseFloat(row.style.top) || 0, text: row.innerText }))
+          .sort((a, b) => a.top - b.top)
+          .map((row) => row.text)
+          .join("\n");
+      });
+      return squash(shownText) === squash(diskText);
+    },
+    "plot.md のエディターの字が、ディスクの plot.md に追いつく（製品の書き込みを読み直す）",
+    15_000
+  ).catch((error: unknown) => {
+    throw new Error(
+      `${String(error)}（エディター：${JSON.stringify(squash(shownText).slice(0, 200))}／ディスク：${JSON.stringify(squash(diskText).slice(0, 200))}）`
+    );
+  });
   await page.keyboard.press("Control+KeyA");
   await page.keyboard.insertText(text);
   await page.keyboard.press("Control+KeyS");
   await waitUntil(async () => (await readPlot(session)) === text, "書き換えた plot.md が保存される", 15_000).catch(async (error: unknown) => {
-    throw new Error(`${String(error)}（ファイル：${JSON.stringify(await readPlot(session).catch(() => "読めない"))}）`);
+    // 保存が VS Code に断られた（「ファイルのほうが新しい」など）なら右下の知らせに出るので、文に添える
+    const notices = await page
+      .locator(".notifications-toasts .notification-list-item-message, .notifications-center .notification-list-item-message")
+      .allInnerTexts()
+      .catch(() => [] as string[]);
+    throw new Error(
+      `${String(error)}（ファイル：${JSON.stringify(await readPlot(session).catch(() => "読めない"))}／知らせ：${JSON.stringify(notices.map((entry) => entry.replace(/\s+/g, " ").slice(0, 160)))}）`
+    );
   });
 }
 
