@@ -455,4 +455,99 @@ describe("長い題名を枠に収める", () => {
     expect(harness.ctx.fills[0].x).toBeCloseTo((base - width) / 2, 6);
     expect(harness.ctx.fills[0].y).toBeCloseTo(margin, 6);
   });
+
+  /**
+   * 実機確認リスト「既存の表紙の見え方が変わっていない」の縦書きの側（2026-10-15）。
+   *
+   * **期待値は、収める処理を入れる前（0.73.7 の直前、d6e49e1c^）の `drawTexts` の式から
+   * 出している**——いまの式に合わせて書くと「いま＝いま」しか言えないため。
+   * 当時の縦書きは、塊の幅 `fontSize * 1.2`、字の送り `fontSize * 1.05`、
+   * 1文字ずつ塊の中央（`x + blockW / 2`）に置いていた。
+   */
+  it("収まっている縦書きの題名も、置き方は収める処理を入れる前と変わらない", () => {
+    const harness = withImage(
+      load({
+        texts: { bookTitle: "短い題" },
+        layout: titleOnly({ vertical: true, anchor: "top-right" }),
+        canvasInDom: true,
+      })
+    );
+
+    harness.api.drawCover("front");
+
+    const base = Math.min(harness.api.FRAME_WIDTH, harness.api.FRAME_HEIGHT);
+    const fontSize = base * 0.1;
+    const margin = base * 0.07;
+    const blockW = fontSize * 1.2;
+    const x = harness.api.FRAME_WIDTH - margin - blockW;
+    expect(harness.ctx.fills.map((fill) => fill.text)).toEqual(["短", "い", "題"]);
+    harness.ctx.fills.forEach((fill, index) => {
+      expect(fill.size).toBeCloseTo(fontSize, 6);
+      expect(fill.x).toBeCloseTo(x + blockW / 2, 6);
+      expect(fill.y).toBeCloseTo(margin + index * fontSize * 1.05, 6);
+    });
+  });
+});
+
+/**
+ * 実機確認リスト「折り返しの見た目。題名を30〜60文字にして『大』『横』で焼き、
+ * 行が重なっていないか・読めるか」のうち、**重なっていないか**（2026-10-15）。
+ *
+ * 字の置き場所だけで決まる幾何なので測れる。読めるか（字の形・色・余白の
+ * 釣り合い）は写真を見て作者が決める。
+ */
+describe("折り返した題名の行が重ならない", () => {
+  for (const length of [30, 60]) {
+    it(`横向き・${length}文字：行の頭の間が字の大きさ以上あく`, () => {
+      const harness = withImage(
+        load({
+          texts: { bookTitle: "あ".repeat(length) },
+          layout: titleOnly({ vertical: false, size: "large" }),
+          canvasInDom: true,
+        })
+      );
+
+      harness.api.drawCover("front");
+
+      const fills = [...harness.ctx.fills].sort((a, b) => a.y - b.y);
+      // 折り返している（1行なら、この試験は何も確かめていない）
+      expect(fills.length).toBeGreaterThan(1);
+      for (let i = 1; i < fills.length; i++) {
+        // 字の上端（textBaseline は top）から次の行の上端まで、字の高さ以上
+        expect(fills[i].y - fills[i - 1].y).toBeGreaterThanOrEqual(fills[i - 1].size);
+      }
+    });
+
+    it(`縦向き・${length}文字：列の間が字の幅以上あき、列の中の字も重ならない`, () => {
+      const harness = withImage(
+        load({
+          texts: { bookTitle: "あ".repeat(length) },
+          layout: titleOnly({ vertical: true, anchor: "top-right", size: "large" }),
+          canvasInDom: true,
+        })
+      );
+
+      harness.api.drawCover("front");
+
+      const fills = harness.ctx.fills;
+      const size = fills[0].size;
+      const columns = [...new Set(fills.map((fill) => fill.x))].sort((a, b) => a - b);
+      // 縦は書く向きの枠が長いので、30文字は縮めれば1列に収まる（折り返さない）。
+      // 60文字は折り返す（1列なら、列の間の確かめは何もしていないことになる）
+      if (length === 30) expect(columns.length).toBe(1);
+      else expect(columns.length).toBeGreaterThan(1);
+      for (let i = 1; i < columns.length; i++) {
+        expect(columns[i] - columns[i - 1]).toBeGreaterThanOrEqual(size);
+      }
+      for (const columnX of columns) {
+        const ys = fills
+          .filter((fill) => fill.x === columnX)
+          .map((fill) => fill.y)
+          .sort((a, b) => a - b);
+        for (let i = 1; i < ys.length; i++) {
+          expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(size);
+        }
+      }
+    });
+  }
 });

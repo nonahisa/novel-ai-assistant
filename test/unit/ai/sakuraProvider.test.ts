@@ -272,6 +272,36 @@ describe("考えるタイプのモデルの思考を止める（比べ 2026-09-2
       message: expect.stringContaining("上限"),
     });
   });
+
+  /**
+   * 実機確認リスト「出力が上限で切り詰められたとき、話ごとに戻して試し直す道が
+   * 通るか（この提供元で `truncated` が正しく返るか）」の、提供元の側（2026-10-15）。
+   *
+   * 話ごとに戻すかどうかは、機能の側が `truncated` だけを見て決める
+   * （`features/extractCharactersFlow.test.ts`）。**中身が途中まで入っていても
+   * 切り詰めの印を落とさない**ことをここで留める。上の件は中身が空の場合だけで、
+   * 途中まで書けた回（実際によく起きる形）は見張っていなかった。
+   */
+  test("中身が途中まであって上限で切られたときは、切り詰めの印を付けて返す", async () => {
+    stubFetchSequence([
+      { status: 200, body: okBody('{"findings":[{"excerpt":"途中', "length") },
+    ]);
+    const provider = new SakuraProvider(fakeContext());
+
+    const result = await provider.generate(params());
+
+    expect(result.truncated).toBe(true);
+    expect(result.text).toContain("途中");
+  });
+
+  test("最後まで書けた回（finish_reason が stop）は、切り詰めの印を付けない", async () => {
+    stubFetchSequence([{ status: 200, body: okBody('{"findings":[]}') }]);
+    const provider = new SakuraProvider(fakeContext());
+
+    const result = await provider.generate(params());
+
+    expect(result.truncated).toBe(false);
+  });
 });
 
 /**
