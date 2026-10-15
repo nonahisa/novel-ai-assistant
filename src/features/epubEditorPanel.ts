@@ -46,9 +46,12 @@ import {
 import { startChapterAt } from "./manageChapters";
 import { askText, cancelItem, isCancelItem } from "../views/dialogs";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
+import type { RunCoverRow, RunCoverSpec, RunCoverTitleBlock } from "../core/runRequest";
+import type { RunCoverInspect } from "./runRequestHandler";
 import {
   BAKED_COVER_FILES,
   bakedCoverInfo,
+  bakedCoverPath,
   deleteBakedCover,
   coverLookKey,
   describeBakedPreview,
@@ -191,6 +194,13 @@ interface PanelState {
    * パネルの中だけ**で、設計図にも下書きの控え（`book.json.draft`）にも入れない。
    */
   bakedLooks: Record<CoverSide, string>;
+  /**
+   * 画面が準備できた（`ready` を受けて、最初の一式を送った）とき解ける。
+   * 外部AIからの焼く依頼（`bakeCoverForRequest`）が、開いたばかりのパネルへ
+   * 頼む前に待つ——受け手が居ないうちに送った知らせは届かない
+   */
+  ready: Promise<void>;
+  markReady: () => void;
 }
 
 /** 保存済みの設計図から、焼いた画像の見た目の基準を作る（開いた時点） */
@@ -370,7 +380,12 @@ const openPanels = new Map<string, PanelState>();
 
 export async function openEpubEditorPanel(
   context: vscode.ExtensionContext,
-  work: WorkEntry
+  work: WorkEntry,
+  /**
+   * 焦点を奪わずに開く（外部AIからの焼く依頼。作者が別の所で書いている最中でも、
+   * 打っている手を止めない）。作者が開くときは渡さない
+   */
+  options: { preserveFocus?: boolean } = {}
 ): Promise<void> {
   const store = new BookStore(work);
 
@@ -413,7 +428,9 @@ export async function openEpubEditorPanel(
   const panel = vscode.window.createWebviewPanel(
     "novelai.epubEditor",
     `EPUB: ${work.title}`,
-    wideViewColumn(),
+    options.preserveFocus
+      ? { viewColumn: wideViewColumn(), preserveFocus: true }
+      : wideViewColumn(),
     {
       enableScripts: true,
       retainContextWhenHidden: true,
@@ -424,6 +441,10 @@ export async function openEpubEditorPanel(
       localResourceRoots: [path.toUri(work.folderPath)],
     }
   );
+  let markReady: () => void = () => undefined;
+  const ready = new Promise<void>((resolve) => {
+    markReady = resolve;
+  });
   const state: PanelState = {
     panel,
     work,
@@ -433,6 +454,8 @@ export async function openEpubEditorPanel(
     source,
     paragraphs,
     bakedLooks: initialBakedLooks(saved),
+    ready,
+    markReady,
   };
 
   openPanels.set(work.id, state);
@@ -471,6 +494,12 @@ export async function openEpubEditorPanel(
       mode?: string;
       /** 保留の切り替え（設計書6.65.15の段D）。真なら保留、偽なら解除 */
       suspended?: boolean;
+      /** 外部AIからの焼く依頼の番号と、画面が描いた題名の範囲（2026-10-15） */
+      requestId?: string;
+      titleBlock?: unknown;
+      canvasWidth?: number;
+      canvasHeight?: number;
+      reason?: string;
     };
 
     if (parsed.type === "ready") {
@@ -480,6 +509,7 @@ export async function openEpubEditorPanel(
         type: "book",
         data: await panelData(state),
       });
+      state.markReady();
       return;
     }
 
@@ -521,6 +551,21 @@ export async function openEpubEditorPanel(
     }
 
     if (parsed.type === "bake") {
+      if (parsed.requestId !== undefined) {
+        /*
+          外部AIからの焼く依頼の返事。**待っている依頼が無ければ保存しない**——
+          時間切れで諦めた依頼の画像が、あとから作者の焼いた画像を置き換えないため
+        */
+        const waiter = takeBakeWaiter(parsed.requestId, state, coverSide(parsed.side));
+        if (!waiter) return;
+        await bakeCover(state, waiter.spec.side, parsed.dataUrl ?? "", {
+          waiter,
+          titleBlock: parsed.titleBlock,
+          canvasWidth: parsed.canvasWidth,
+          canvasHeight: parsed.canvasHeight,
+        });
+        return;
+      }
       await bakeCover(state, coverSide(parsed.side), parsed.dataUrl ?? "");
       return;
     }
@@ -531,6 +576,20 @@ export async function openEpubEditorPanel(
     }
 
     if (parsed.type === "bakeFailed") {
+      if (parsed.requestId !== undefined) {
+        // 外部AIからの焼く依頼が焼けなかった。理由を頼んだ側へ返す（作者の画面は騒がせない）
+        const waiter = takeBakeWaiter(parsed.requestId, state, coverSide(parsed.side));
+        waiter?.resolve({
+          ok: false,
+          reason:
+            parsed.reason === "noCanvas"
+              ? "EPUBエディターの画面に合成の面（canvas）が出ていなかったので、焼きませんでした" +
+                "（画面の外では、縦書きの本の書字方向を受け継がず、確かめたいことが確かめられません）。"
+              : "EPUBエディターで、合成した画像を取り出せませんでした（元イラストが読めない・canvas が汚れた、など）。",
+          nextAction: "作者に EPUBエディターの表紙の面を開いてもらってから、もう一度頼んでください",
+        });
+        return;
+      }
       // canvas から画像を取り出せなかった。**画面の不具合なので、
       // 作者にできることは開き直すことだけ**である
       const side = coverSide(parsed.side);
@@ -1326,6 +1385,289 @@ async function sendImageData(
   state.panel.webview.postMessage({ type: "imageData", side, dataUrl });
 }
 
+// ── 外部AIからの焼く依頼（MCP の run.request の coverBake。2026-10-15）──────────
+
+/** 画面が焼き終えた（焼けなかった）返事 */
+type CoverBakeReply =
+  | {
+      ok: true;
+      filePath: string;
+      bytes: number;
+      titleBlock?: unknown;
+      canvasWidth?: number;
+      canvasHeight?: number;
+    }
+  | { ok: false; reason: string; nextAction?: string };
+
+interface CoverBakeWaiter {
+  workId: string;
+  spec: RunCoverSpec;
+  resolve(reply: CoverBakeReply): void;
+}
+
+/** 画面の返事に添えて届いたもの（`bakeCover` へ渡す） */
+interface BakeRequestReply {
+  waiter: CoverBakeWaiter;
+  titleBlock?: unknown;
+  canvasWidth?: number;
+  canvasHeight?: number;
+}
+
+/**
+ * 返事を待っている焼く依頼（番号 → 待ち手）。**1回で取り去る**——同じ番号の返事が
+ * 2度来ても、2度は保存しない。
+ */
+const bakeWaiters = new Map<string, CoverBakeWaiter>();
+
+/**
+ * 画面の返事に合う待ち手を取り出す。作品と面が依頼と違えば取り出さない
+ * （画面から届いた番号を、そのまま信用しない）
+ */
+function takeBakeWaiter(
+  requestId: string,
+  state: PanelState,
+  side: CoverSide
+): CoverBakeWaiter | undefined {
+  const waiter = bakeWaiters.get(requestId);
+  if (!waiter || waiter.workId !== state.work.id || waiter.spec.side !== side) return undefined;
+  bakeWaiters.delete(requestId);
+  return waiter;
+}
+
+/** 画面の返事を待つ時間。大きな元イラストの読み込みと受け渡しを見込む */
+const COVER_REQUEST_TIMEOUT_MS = 60_000;
+
+/** 題名にだけ、この1回の体裁を当てた設計図（**写しを作るだけ。設計図は変えない**） */
+function withCoverOverride(config: BookConfig, spec: RunCoverSpec): BookConfig {
+  const key = spec.side === "back" ? "backCoverLayout" : "coverLayout";
+  const layout = config[key];
+  return {
+    ...config,
+    [key]: {
+      ...layout,
+      title: { ...layout.title, visible: true, vertical: spec.vertical, size: spec.size },
+    },
+  };
+}
+
+function coverBlockType(side: CoverSide): BookBlockType {
+  return side === "back" ? "backCover" : "cover";
+}
+
+/** 作品フォルダーからの相対パス（区切りは `/`。MCP の `cover.ink` へそのまま渡せる形） */
+function workRelative(work: WorkEntry, filePath: string): string {
+  return path.relative(work.folderPath, filePath).split("\\").join("/");
+}
+
+/**
+ * 焼けるか（確認を出す前に見る）。**本文は読まない。**
+ *
+ * パネルが開いていれば画面のいまの値、開いていなければ保存済みの設計図で見る。
+ * 元イラストの指定が無い・見つからない・本の並びに面が無い、のどれかなら焼けない
+ * ——画面の［表紙を焼く］も、そのときは押せない（合成の欄が畳まれている）。
+ */
+export async function inspectCoverForRequest(
+  work: WorkEntry,
+  spec: RunCoverSpec
+): Promise<RunCoverInspect> {
+  const label = sideLabel(spec.side);
+  let config: BookConfig;
+  const open = openPanels.get(work.id);
+  if (open) {
+    config = open.current;
+  } else {
+    try {
+      config = await new BookStore(work).load();
+    } catch (error) {
+      return {
+        ok: false,
+        reason: `本の設計図（book.json）を読めませんでした：${error instanceof Error ? error.message : String(error)}`,
+        nextAction: "作者に EPUBエディターを開いてもらい、知らせのとおり直してから頼んでください",
+      };
+    }
+  }
+  const relative = spec.side === "back" ? config.backCoverImagePath : config.coverImagePath;
+  if (!relative) {
+    return {
+      ok: false,
+      reason: `${label}の元イラストが指定されていないので、焼けません（焼くのは元イラストに題名を重ねた画像です）。`,
+      nextAction: `作者に EPUBエディターで${label}の元イラストを選んでもらってから頼んでください`,
+    };
+  }
+  try {
+    await vscode.workspace.fs.stat(path.toUri(path.join(work.folderPath, relative)));
+  } catch {
+    return {
+      ok: false,
+      reason: `${label}の元イラスト（${relative}）が見つかりません。`,
+      nextAction: `作者に EPUBエディターで${label}の元イラストを選び直してもらってから頼んでください`,
+    };
+  }
+  if (!resolveBookBlocks(config).some((block) => block.type === coverBlockType(spec.side))) {
+    return {
+      ok: false,
+      reason: `本の並びに${label}の面がありません。`,
+      nextAction: `作者に EPUBエディターの並びへ${label}を足してもらってから頼んでください`,
+    };
+  }
+  const settings = await settingsDir(work);
+  return {
+    ok: true,
+    bookVertical: config.writingMode === "vertical",
+    bakedExists: (await bakedCoverInfo(settings, spec.side)) !== null,
+    bakedRelative: workRelative(work, bakedCoverPath(settings, spec.side)),
+  };
+}
+
+/**
+ * 外部AIからの依頼で、表紙を焼く（設計書6.65.9・6.87.22）。
+ *
+ * **［表紙を焼く］と同じ関数（画面の `bake`）で、画面に出ている canvas に焼く。**
+ * 確かめたいのは作者の VS Code で縦書きの本の題名が立って焼けるかなので、画面の外の
+ * canvas では意味が無い（親の書字方向を受け継がない）。そこで：
+ *
+ * 1. パネルが無ければ焦点を奪わずに開き、あれば前に出す（**開き直さない**——開き直しは
+ *    画面の未保存の変更を捨てる）
+ * 2. 焼いた画像を出している面には canvas が無いので、見本を描き直す側へ倒してから
+ *    その面を選ばせる
+ * 3. 題名にだけこの1回の体裁を当てて焼かせ、返事を待つ（時間切れあり）
+ *
+ * 欄（画面と book.json）には何も書かない。保存は［表紙を焼く］と同じ \`bakeCover\` が行う。
+ */
+export async function bakeCoverForRequest(
+  context: vscode.ExtensionContext,
+  work: WorkEntry,
+  spec: RunCoverSpec
+): Promise<{ ok: true; row: RunCoverRow } | { ok: false; reason: string; nextAction?: string }> {
+  const label = sideLabel(spec.side);
+  let state = openPanels.get(work.id);
+  if (!state) {
+    await openEpubEditorPanel(context, work, { preserveFocus: true });
+    state = openPanels.get(work.id);
+    if (!state) {
+      return {
+        ok: false,
+        reason: "EPUBエディターを開けませんでした（理由は作者の画面の知らせと作品のログにあります）。",
+        nextAction: "作者の画面の知らせを確かめてもらってください",
+      };
+    }
+  } else {
+    state.panel.reveal(undefined, true);
+  }
+  const panelState = state;
+
+  if (!(await withTimeout(panelState.ready.then(() => true), COVER_REQUEST_TIMEOUT_MS))) {
+    return { ok: false, reason: "EPUBエディターの画面が準備できませんでした（時間切れ）。" };
+  }
+
+  const index = resolveBookBlocks(panelState.current).findIndex(
+    (block) => block.type === coverBlockType(spec.side)
+  );
+  if (index < 0) {
+    return { ok: false, reason: `本の並びに${label}の面がありません。` };
+  }
+
+  const previousLook = panelState.bakedLooks[spec.side];
+  // 焼いた画像を出している面は canvas を置かない。見本を描き直す側へ倒す（焼いた後で覚え直す）
+  panelState.bakedLooks[spec.side] = "";
+  const requestId = createNonce();
+  const reply = new Promise<CoverBakeReply>((resolve) => {
+    bakeWaiters.set(requestId, { workId: work.id, spec, resolve });
+  });
+  panelState.panel.webview.postMessage({
+    type: "preview",
+    data: { ...(await previewData(panelState)), selectBlock: index },
+  });
+  panelState.panel.webview.postMessage({
+    type: "bakeRequest",
+    side: spec.side,
+    vertical: spec.vertical,
+    size: spec.size,
+    requestId,
+  });
+
+  const result = await withTimeout(reply, COVER_REQUEST_TIMEOUT_MS);
+  bakeWaiters.delete(requestId);
+  if (!result || !result.ok) {
+    // 焼けなかった。見本の基準を戻して、面を出し直す（焼いた画像はそのまま）
+    if (panelState.bakedLooks[spec.side] === "") panelState.bakedLooks[spec.side] = previousLook;
+    panelState.panel.webview.postMessage({ type: "preview", data: await previewData(panelState) });
+    return result
+      ? { ok: false, reason: result.reason, nextAction: result.nextAction }
+      : {
+          ok: false,
+          reason: `EPUBエディターから返事がありませんでした（${COVER_REQUEST_TIMEOUT_MS / 1000}秒）。`,
+          nextAction: "作者に EPUBエディターの表紙の面が出ているかを見てもらってから、もう一度頼んでください",
+        };
+  }
+
+  const drawn = readTitleBlock(result.titleBlock);
+  const layout = spec.side === "back" ? panelState.current.backCoverLayout : panelState.current.coverLayout;
+  return {
+    ok: true,
+    row: {
+      side: spec.side,
+      filePath: workRelative(work, result.filePath),
+      bytes: result.bytes,
+      cover: spec,
+      bookWritingMode: panelState.current.writingMode === "vertical" ? "vertical" : "horizontal",
+      title: drawn?.text ?? (panelState.current.title || work.title),
+      titleColor: drawn?.color ?? layout.title.color,
+      canvasWidth: finiteOr(result.canvasWidth, 0),
+      canvasHeight: finiteOr(result.canvasHeight, 0),
+      ...(drawn ? { titleBlock: drawn.block } : {}),
+      vscodeVersion: vscode.version,
+    },
+  };
+}
+
+/**
+ * 画面が描いた題名の範囲を読む。**画面から届いた値は形を確かめる**（数でないものは捨てる）
+ */
+function readTitleBlock(
+  value: unknown
+): { block: RunCoverTitleBlock; text?: string; color?: string } | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  const numbers = ["left", "top", "width", "height", "fontSize", "lines"] as const;
+  if (numbers.some((key) => typeof record[key] !== "number" || !Number.isFinite(record[key]))) {
+    return undefined;
+  }
+  return {
+    block: {
+      left: record.left as number,
+      top: record.top as number,
+      width: record.width as number,
+      height: record.height as number,
+      fontSize: record.fontSize as number,
+      lines: record.lines as number,
+      vertical: record.vertical === true,
+    },
+    ...(typeof record.text === "string" ? { text: record.text.slice(0, 200) } : {}),
+    // 3桁か6桁だけ（測る側の parseHexColor が読める形）
+    ...(typeof record.color === "string" && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/iu.test(record.color)
+      ? { color: record.color }
+      : {}),
+  };
+}
+
+function finiteOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+/** 決まった時間で諦める（諦めたら undefined） */
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * 合成した画像を `設定/書籍/` へ焼く（設計書6.65.8）。
  *
@@ -1336,14 +1678,18 @@ async function sendImageData(
 async function bakeCover(
   state: PanelState,
   side: CoverSide,
-  dataUrl: string
+  dataUrl: string,
+  request?: BakeRequestReply
 ): Promise<void> {
   const label = sideLabel(side);
 
   let target: string;
+  let bytes: number;
   try {
     const settings = await settingsDir(state.work);
-    target = (await saveBakedCover(settings, side, dataUrl)).filePath;
+    const saved = await saveBakedCover(settings, side, dataUrl);
+    target = saved.filePath;
+    bytes = saved.bytes;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     useLogFile(state.work.folderPath);
@@ -1357,14 +1703,30 @@ async function bakeCover(
       text: message,
       isError: true,
     });
+    // 外部AIの依頼なら、頼んだ側へも理由を返す（作者の画面の知らせは同じに出す）
+    // **知らせを閉じるのを待つ前に返す**（作者が閉じるまで待つと、頼んだ側は時間切れになる）
+    request?.waiter.resolve({ ok: false, reason: `${label}を焼けませんでした。${message}` });
     await vscode.window.showErrorMessage(`${label}を焼けませんでした。${message}`);
     return;
   }
 
   // **焼いた見た目を覚え直す**（精査 R19）。焼く知らせには画面のいまの欄が
   // 添えてあり、受け口で `state.current` へ取り込み済みなので、焼けたものは
-  // いまの値である。覚え直さないと、焼いた直後も「まだ焼いていません」が残る
-  state.bakedLooks[side] = coverLookKey(state.current, side);
+  // いまの値である。覚え直さないと、焼いた直後も「まだ焼いていません」が残る。
+  // **外部AIの依頼で焼いたときは、その1回だけの体裁を当てた値を覚える**——欄とは
+  // 違う体裁で焼いているので、画面は「まだ焼いていません」（欄のとおりではない）と言うのが正しい
+  state.bakedLooks[side] = coverLookKey(
+    request ? withCoverOverride(state.current, request.waiter.spec) : state.current,
+    side
+  );
+  request?.waiter.resolve({
+    ok: true,
+    filePath: target,
+    bytes,
+    titleBlock: request.titleBlock,
+    canvasWidth: request.canvasWidth,
+    canvasHeight: request.canvasHeight,
+  });
 
   const unsaved = isDirty(state)
     ? "（合成の指定はまだ未保存です。「保存」で book.json へ残ります）"

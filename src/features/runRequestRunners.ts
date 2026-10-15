@@ -74,6 +74,7 @@ import {
   isVectorSearchEnabled,
 } from "./vectorSearch";
 import { withCancellableProgress } from "../views/progress";
+import { bakeCoverForRequest, inspectCoverForRequest } from "./epubEditorPanel";
 
 /**
  * 外部AIから頼まれた実行の、VS Code 側の手足（設計書6.87.22）。
@@ -233,12 +234,12 @@ export function createRunRequestDeps(
       };
     },
     measure: (work, file) => measureTarget(work, file),
-    confirm: async (message, detail) =>
+    confirm: async (message, detail, button = "走らせる") =>
       (await vscode.window.showWarningMessage(
         message,
         { modal: true, detail },
-        "走らせる"
-      )) === "走らせる",
+        button
+      )) === button,
     run: (def, work, filePaths) => runFeature(def, work, input.aiRegistry, filePaths),
     describeFailure: (error) => {
       if (error instanceof AIError) {
@@ -255,6 +256,14 @@ export function createRunRequestDeps(
     info: (message) => void vscode.window.showInformationMessage(message),
     log: input.log,
     index: createIndexDeps(input),
+    /*
+      表紙を焼く（2026-10-15）。焼くのは EPUBエディターの画面（［表紙を焼く］と同じ関数）。
+      AIを呼ばず、本文も読まない
+    */
+    cover: {
+      inspect: (work, spec) => inspectCoverForRequest(work, spec),
+      bake: (work, spec) => bakeCoverForRequest(input.context, work, spec),
+    },
   };
 }
 
@@ -479,6 +488,9 @@ async function runFeature(
     case "vectorIndex":
       // 索引づくりは受け口が別の道（`handleIndexRequest`）へ分けるので、ここへは来ない
       return { ok: false, reason: "索引づくりはこの口では走らせません。" };
+    case "coverBake":
+      // 表紙を焼くのも受け口が別の道（`handleCoverRequest`）へ分ける
+      return { ok: false, reason: "表紙を焼く依頼はこの口では走らせません。" };
   }
 }
 

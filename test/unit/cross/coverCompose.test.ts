@@ -140,10 +140,15 @@ interface Posted {
   type: string;
   side?: string;
   dataUrl?: string;
+  requestId?: string;
+  reason?: string;
+  titleBlock?: Record<string, unknown> | null;
+  canvasWidth?: number;
+  canvasHeight?: number;
 }
 
 interface CoverApi {
-  bake(side: string): void;
+  bake(side: string, request?: { requestId: string; layout: Record<string, Style | string> }): void;
   drawCover(side: string, target?: FakeCanvas): void;
   images: Record<string, unknown>;
   sources: Record<string, string | null>;
@@ -721,5 +726,75 @@ describe("縦に並べる題名の約物", () => {
     expect(harness.ctx.fills[0].text).toBe("「あっ…」、。");
     expect(harness.ctx.fills[0].rotation).toBe(0);
     expect(harness.ctx.fills[0].baseline).toBe("top");
+  });
+});
+
+/**
+ * ④ 外部AIからの焼く依頼（MCP の run.request の coverBake。2026-10-15）。
+ *
+ * - この1回だけの体裁（layout）で描く。欄の体裁（readLayout）は使わない
+ * - 返事に依頼の番号・題名を描いた範囲（titleBlock）・canvas の寸法を添える
+ * - **画面に出ている canvas でしか焼かない**（画面の外の canvas は親の書字方向を受け継がず、
+ *   実機確認リスト 5488 の確かめにならない）。無ければ焼かずに noCanvas と返す
+ * - 元絵が無いときも、黙って待たせずに焼けなかったと返す
+ */
+describe("外部AIからの焼く依頼", () => {
+  const request = {
+    requestId: "req-1",
+    layout: titleOnly({ vertical: true, size: "small" }),
+  };
+
+  it("渡された体裁で描き、依頼の番号と題名の範囲を添えて返す", () => {
+    const harness = withImage(
+      load({
+        texts: { bookTitle: "一" },
+        // 欄は横・大。依頼は縦・小なので、描いた範囲は縦・小になるはず
+        layout: titleOnly({ vertical: false, size: "large" }),
+        canvasInDom: true,
+      })
+    );
+
+    harness.api.bake("front", request);
+
+    const baked = harness.posts.find((item) => item.type === "bake");
+    expect(baked?.requestId).toBe("req-1");
+    expect(baked?.canvasWidth).toBe(harness.api.FRAME_WIDTH);
+    expect(baked?.canvasHeight).toBe(harness.api.FRAME_HEIGHT);
+    const block = baked?.titleBlock as Record<string, unknown>;
+    expect(block.vertical).toBe(true);
+    expect(block.lines).toBe(1);
+    expect(block.text).toBe("一");
+    // 小は短い辺の 4.5%
+    expect(block.fontSize).toBeCloseTo(harness.api.FRAME_WIDTH * 0.045, 1);
+    expect(harness.ctx.fills.map((fill) => fill.size)).toEqual([block.fontSize]);
+  });
+
+  it("依頼でない焼き方の返事は、これまでどおり（番号も範囲も付けない）", () => {
+    const harness = withImage(
+      load({ texts: { bookTitle: "一" }, layout: titleOnly({}), canvasInDom: true })
+    );
+    harness.api.bake("front");
+    const baked = harness.posts.find((item) => item.type === "bake");
+    expect(Object.keys(baked ?? {}).sort()).toEqual(["config", "dataUrl", "side", "type"]);
+  });
+
+  it("画面に canvas が無ければ、画面の外では焼かずに noCanvas と返す", () => {
+    const harness = withImage(
+      load({ texts: { bookTitle: "一" }, layout: titleOnly({}), canvasInDom: false })
+    );
+    harness.api.bake("front", request);
+    expect(harness.posts.some((item) => item.type === "bake")).toBe(false);
+    expect(harness.posts).toContainEqual(
+      expect.objectContaining({ type: "bakeFailed", requestId: "req-1", reason: "noCanvas" })
+    );
+    expect(harness.created).toBe(0);
+  });
+
+  it("元絵が無ければ、待たせずに焼けなかったと返す", () => {
+    const harness = load({ texts: { bookTitle: "一" }, layout: titleOnly({}), canvasInDom: true });
+    harness.api.bake("front", request);
+    expect(harness.posts).toContainEqual(
+      expect.objectContaining({ type: "bakeFailed", requestId: "req-1" })
+    );
   });
 });

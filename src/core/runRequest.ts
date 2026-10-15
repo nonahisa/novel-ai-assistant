@@ -90,7 +90,9 @@ export type RunFeature =
   | "deviation"
   | "synopsis"
   /** 検索用の索引づくり（0.99.19）。AIの割当ではなく手元の Ollama の埋め込みで走る */
-  | "vectorIndex";
+  | "vectorIndex"
+  /** 表紙を焼く（字の向きの確かめ。2026-10-15）。AIを呼ばず、EPUBエディターの canvas で焼く */
+  | "coverBake";
 
 export type RunAssignedFeature =
   | "typo"
@@ -140,15 +142,98 @@ export function isRunIndexFeature(name: unknown): name is typeof RUN_INDEX_FEATU
   return name === RUN_INDEX_FEATURE;
 }
 
-/** 外から頼める機能の名前（白名簿＋索引づくり）。MCP の入力の形に使う */
+/**
+ * 表紙を焼く（設計書6.65.9・6.87.22。作者の指示 2026-10-15「MCPでもできるようにしてください」）。
+ *
+ * **焼けるのは EPUBエディターの canvas だけ**（WebView の中。Node の MCP サーバーでは
+ * 描けない）。そこで作者の VS Code に、［表紙を焼く］と同じ関数で焼いてもらう。
+ * 確かめたいのは「作者の VS Code（その版の Chromium）で、縦書きの本の表紙の題名が
+ * 立って焼けるか」（実機確認リスト 5488）なので、**画面に出ている canvas で焼く**
+ * ——画面の外の canvas は親の書字方向を受け継がず、直す前の不具合も起きないため、
+ * 何も確かめたことにならない。
+ *
+ * **`RUN_FEATURES` に入れない**（索引づくりと同じ理由）。AIを呼ばず、本文も送らない。
+ * **原稿と設計図（book.json）は書き換えない。** 書くのは［表紙を焼く］と同じ
+ * `設定/書籍/表紙_合成済み.png`（裏表紙なら `裏表紙_合成済み.png`）だけで、
+ * 作者が焼いてあった画像は置き換わる（確認のモーダルでそう言う）。
+ */
+export const RUN_COVER_FEATURE = "coverBake" as const;
+export const RUN_COVER_LABEL = "表紙を焼く（題名の字の向きの確かめ）";
+
+export function isRunCoverFeature(name: unknown): name is typeof RUN_COVER_FEATURE {
+  return name === RUN_COVER_FEATURE;
+}
+
+/** 焼く面 */
+export type RunCoverSide = "front" | "back";
+/** 題名の大きさ（EPUBエディターの「大・中・小」） */
+export type RunCoverSize = "large" | "medium" | "small";
+
+export const RUN_COVER_SIDES: readonly RunCoverSide[] = ["front", "back"];
+export const RUN_COVER_SIZES: readonly RunCoverSize[] = ["large", "medium", "small"];
+
+/**
+ * 焼くときの体裁。**題名だけに、この1回だけ当てる**——欄（book.json・画面の欄）には
+ * 書かない。欄へ入れると設計図が「未保存」になり、閉じたときに下書きの控えが残って、
+ * 次に開いた作者に「戻しますか」が出る。
+ *
+ * 題名は必ず出す（`visible`）。置き場所・色・ほかの文字（作者名など）は設計図のまま。
+ */
+export interface RunCoverSpec {
+  side: RunCoverSide;
+  /** 題名を縦に並べるか */
+  vertical: boolean;
+  size: RunCoverSize;
+}
+
+const COVER_SIDE_LABELS: Record<RunCoverSide, string> = { front: "表紙", back: "裏表紙" };
+const COVER_SIZE_LABELS: Record<RunCoverSize, string> = { large: "大", medium: "中", small: "小" };
+
+export function runCoverSideLabel(side: RunCoverSide): string {
+  return COVER_SIDE_LABELS[side];
+}
+
+/** 「題名：縦・大」の形（確認と結果に出す） */
+export function describeRunCoverSpec(spec: RunCoverSpec): string {
+  return `題名：${spec.vertical ? "縦" : "横"}・${COVER_SIZE_LABELS[spec.size]}`;
+}
+
+/**
+ * 体裁の指定を確かめる。**見覚えのない形は理由つきで断る**（札でも MCP の入力でも
+ * 同じ判定を使う。片方だけ通る依頼を作らない）。
+ */
+export function checkRunCover(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return "cover（side・vertical・size）を渡してください。";
+  }
+  const record = value as Record<string, unknown>;
+  const extra = Object.keys(record).filter((key) => !["side", "vertical", "size"].includes(key));
+  if (extra.length > 0) {
+    return `cover に知らない項目があります（${extra.join("・").slice(0, 60)}）。`;
+  }
+  if (!RUN_COVER_SIDES.includes(record.side as RunCoverSide)) {
+    return "cover.side は front（表紙）か back（裏表紙）です。";
+  }
+  if (typeof record.vertical !== "boolean") {
+    return "cover.vertical は true（縦）か false（横）です。";
+  }
+  if (!RUN_COVER_SIZES.includes(record.size as RunCoverSize)) {
+    return "cover.size は large（大）・medium（中）・small（小）のどれかです。";
+  }
+  return undefined;
+}
+
+/** 外から頼める機能の名前（白名簿＋索引づくり＋表紙を焼く）。MCP の入力の形に使う */
 export const RUN_REQUESTABLE_FEATURES: readonly RunFeature[] = [
   ...RUN_FEATURES.map((def) => def.feature),
   RUN_INDEX_FEATURE,
+  RUN_COVER_FEATURE,
 ];
 
 /** 画面と返事に出す名前 */
 export function runFeatureLabel(name: unknown): string | undefined {
   if (isRunIndexFeature(name)) return RUN_INDEX_LABEL;
+  if (isRunCoverFeature(name)) return RUN_COVER_LABEL;
   return findRunFeature(name)?.label;
 }
 
@@ -183,6 +268,8 @@ export interface RunTicket {
    * 持ち主（許可を確かめ、`run.result` で突き合わせる作品）になる
    */
   scope?: RunScope;
+  /** 表紙を焼く（`coverBake`）だけ：どの面を、どの体裁で。**この機能では必須** */
+  cover?: RunCoverSpec;
   /** 頼んだ接続元の名乗り（自己申告） */
   client: string;
   /** 依頼の時刻（ISO） */
@@ -272,6 +359,12 @@ export function parseRunTicket(text: string): RunTicket | undefined {
   if (record.scope !== undefined) {
     if (record.scope !== "all" || !isRunIndexFeature(record.feature)) return undefined;
   }
+  // 体裁は表紙を焼くときだけ、しかも必須。**ほかの機能に付いた体裁は見覚えのない札**
+  if (isRunCoverFeature(record.feature)) {
+    if (checkRunCover(record.cover) || record.file !== undefined) return undefined;
+  } else if (record.cover !== undefined) {
+    return undefined;
+  }
   return {
     version: 1,
     id: record.id,
@@ -280,8 +373,19 @@ export function parseRunTicket(text: string): RunTicket | undefined {
     folder: record.folder,
     ...(record.file !== undefined ? { file: record.file as string } : {}),
     ...(record.scope === "all" ? { scope: "all" as const } : {}),
+    ...(isRunCoverFeature(record.feature) ? { cover: coverOf(record.cover) } : {}),
     client: record.client,
     createdAt: record.createdAt,
+  };
+}
+
+/** 確かめ済みの体裁から、余計なものを持たない形を作る */
+function coverOf(value: unknown): RunCoverSpec {
+  const record = value as Record<string, unknown>;
+  return {
+    side: record.side as RunCoverSide,
+    vertical: record.vertical as boolean,
+    size: record.size as RunCoverSize,
   };
 }
 
@@ -593,6 +697,15 @@ export function runStatusOf(
             "索引は novel.search で引けます。",
         };
       }
+      if (isRunCoverFeature(ticket.feature)) {
+        return {
+          status: "done",
+          message:
+            "作者の VS Code の EPUBエディターで焼きました（［表紙を焼く］と同じ関数・画面に出ている canvas）。" +
+            "焼いた画像の場所・体裁・題名を描いた範囲（titleBlock）は result.findings にあります。" +
+            "字が立っているかは cover.ink で測れます（region に titleBlock を渡す）。原稿と book.json は変わっていません。",
+        };
+      }
       return {
         status: "done",
         message:
@@ -755,6 +868,92 @@ export function describeIndexConfirm(input: RunIndexConfirmInput): {
       : `外部AI（${who}）からの依頼です。「${titles}」の検索用の索引を作りますか？`,
     detail: lines.join("\n"),
   };
+}
+
+// ── 表紙を焼く（coverBake）─────────────────────────────
+
+export interface RunCoverConfirmInput {
+  ticket: RunTicket;
+  cover: RunCoverSpec;
+  workTitle: string;
+  /** 本の組み方が縦書きか（book.json の writingMode） */
+  bookVertical: boolean;
+  /** いま焼いた画像があるか（置き換わることを言う） */
+  bakedExists: boolean;
+  /** 焼いた画像の置き場（作品フォルダーからの相対パス） */
+  bakedRelative: string;
+}
+
+/**
+ * 表紙を焼く確認のモーダル。**何が変わるかを全部並べる**——とくに、作者が焼いて
+ * あった画像が置き換わることと、EPUBエディターが開くこと（焦点は移さない）。
+ */
+export function describeCoverConfirm(input: RunCoverConfirmInput): {
+  message: string;
+  detail: string;
+} {
+  const who = clientKeyOf(input.ticket.client);
+  const deadline = new Date(Date.parse(input.ticket.createdAt) + RUN_CONFIRM_MS);
+  const side = runCoverSideLabel(input.cover.side);
+  const lines = [
+    `作品：${input.workTitle}（本の組み方：${input.bookVertical ? "縦書き" : "横書き"}）`,
+    `どこから：外部AI（名乗り：${who}。名乗りは自己申告です）`,
+    `機能：${RUN_COVER_LABEL}`,
+    `面と体裁：${side}・${describeRunCoverSpec(input.cover)}` +
+      "（この1回だけ当てます。置き場所・色・ほかの文字は本の設計図のまま）",
+    "AIは呼びません。本文はどこへも送りません。料金はかかりません。",
+    "EPUBエディターの画面が開きます（開いていればそれを使います。焦点は移しません）。",
+    input.bakedExists
+      ? `いまの焼いた画像（${input.bakedRelative}）は、この体裁で焼いた画像に置き換わります。` +
+        "設定/ は Git 管理下なので、前の画像は復元できます。"
+      : `焼いた画像を ${input.bakedRelative} へ保存します（次の書き出しから${side}に入ります）。`,
+    "原稿と本の設計図（book.json）・画面の欄は変わりません。",
+    "",
+    `期限：${formatClock(deadline)} を過ぎて押しても焼きません。`,
+    "覚えのない依頼なら「焼く」を押さずに閉じてください。",
+  ];
+  return {
+    message: `外部AI（${who}）からの依頼です。「${input.workTitle}」の${side}を焼きますか？`,
+    detail: lines.join("\n"),
+  };
+}
+
+/**
+ * 題名を描いた範囲（canvas の画素）。EPUBエディターの描画の関数（`drawTexts`）が
+ * 置いた値をそのまま返す——測る側（`cover.ink`）が、作者名などを拾わずに
+ * 題名の墨だけを測れるように。
+ */
+export interface RunCoverTitleBlock {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  /** 何行（縦なら何列）に割ったか */
+  lines: number;
+  vertical: boolean;
+}
+
+/** 表紙を焼いた結果（`result.findings` の1行）。**数字と場所だけ**——本文は入らない */
+export interface RunCoverRow {
+  side: RunCoverSide;
+  /** 焼いた画像（作品フォルダーからの相対パス） */
+  filePath: string;
+  bytes: number;
+  /** 当てた体裁 */
+  cover: RunCoverSpec;
+  /** 本の組み方（`vertical`＝縦書きの本。5488 で確かめたいのはこちら） */
+  bookWritingMode: "vertical" | "horizontal";
+  /** 題名の文字（作品名か本の題。字ごとの向きを測る側が字と組にする） */
+  title: string;
+  /** 題名の色（#で始まる6桁の16進） */
+  titleColor: string;
+  /** 焼いた画像の寸法 */
+  canvasWidth: number;
+  canvasHeight: number;
+  titleBlock?: RunCoverTitleBlock;
+  /** 焼いた VS Code の版（作者の VS Code で焼けたかの裏付け） */
+  vscodeVersion: string;
 }
 
 /** 時:分 だけ（日付は同じ日のことがほとんど。機械の時刻で出す） */

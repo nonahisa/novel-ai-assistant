@@ -104,7 +104,7 @@
 
 ## 道具の早見表
 
-**道具は26本で、何をするかは `feature` の引数で決まる**（0.66.7）。ほとんどの用は `novel.run` に `feature` を渡せば足りる。
+**道具は27本で、何をするかは `feature` の引数で決まる**（0.66.7）。ほとんどの用は `novel.run` に `feature` を渡せば足りる。
 
 | したいこと | 道具 |
 |---|---|
@@ -132,12 +132,15 @@
 | 初期設定の1段（AIの導入・作品の作成／登録など）を作者の画面に頼む | `setup.request`（**確認が出るだけで、押すのは作者**。手順はプロンプト `setup`。0.82.1） |
 | **作者が VS Code で設定したAI**（クラウドのAIも含む）で機能を走らせてもらう | `run.request`（`feature`：`typo`／`proofread`／`contradiction`／`foreshadow`／`deviation`／`synopsis`。`file` で話を絞る）→ `run.result`（`requestId`）。**作者の画面に毎回確認が出て、押すのは作者**。待たずに戻るので、`run.result` を間を置いて呼ぶ（急かさない）。返事の無い依頼は2件まで、確認は依頼から30分で期限切れ。結果は検算済みで、使ったAI・モデル・プロンプトの版・落とした件数が入る |
 | 検索用の索引（ベクトル検索）を作る・更新する（1作品か、登録済みの全作品） | `run.request`（`feature: vectorIndex`。全作品なら `scope: all`。`folder` は全作品のときも1作品を渡す）→ `run.result`。**作者の画面に確認が出て、押すのは作者**（手元の Ollama で無料。作者は途中で止められる）。結果の `findings` が作品ごとの件数・秒・失敗の理由。許可の無い作品は `skipped`。意味検索が「切」なら断られるので、作者に「ベクトル検索準備」を頼む（`setup.request` の `vector`） |
+| EPUBの表紙を作者の VS Code で焼いて、題名の字が立っているかを測る | `run.request`（`feature: coverBake`、`cover: { side: front／back, vertical: true／false, size: large／medium／small }`）→ `run.result` → `cover.ink`（下の段落） |
 | 質問に近い場面を探す | `novel.search`（`folder`・`query`・`limit` 既定5・上限20。**読むだけ**）。索引があれば `method: vector`、無い・使えないときは語句の一致で探し `method: wordMatch` と `reason` を返す。場面ごとにファイル・話・行・抜粋（200字まで）・近さ。全文が要るなら `novel.material` などで読む。`reason` が「索引が無い」「モデルが違う」「追いついていない」なら、作者に索引づくり（上の行）を提案してよい |
 | 出先の原稿箱・原稿エディターのページを作る（雛形の場所） | `outbox.pack`（**読むだけ**。ページの雛形の場所は `templatePath`、原稿エディターは `editorTemplatePath`。GitHub 経由のページは中身を自分で GitHub から読むので、ほかの欄は補助の道〈保管庫へ送る〉のためのもの：話の題・ハッシュと、提案パネルに並ぶ指摘とその前後の数行〈1指摘あたり2,000字まで〉。本文の全体は返さない。書き先は返事の `nextStep`） |
 | 出先の原稿箱で書かれたメモ・採否・自分で直した文を作品へ入れる（補助。ふつうは作者が拡張機能の［原稿箱を取り込む］を押す） | `outbox.import`（`ownerId` と `records`。各記録にパスから読んだ `writer` を添える。1件ごとに `imported`／`already`／`refused` と理由を返す） |
 | 締切・発売日・連載開始日を作者のカレンダーへ入れる | `schedule.milestones`（`folders` に作品か書庫。**読むだけ**で、書き込むのはあなたのカレンダー連携。`uid` が同じ予定は書き換えて二重にしない。許可の無い作品は `denied` に並ぶ） |
 
 feature ごとの追加の指定（`mode`・`group`・`plotPath`・`question`・`characterName` など）は `options` に入れる。**一覧は `novel.run` の説明にある。**
+
+**表紙を焼いて字の向きを測る**（2026-10-15）：`run.request` に `feature: coverBake` と `cover`（面・題名の縦横・大きさ）を渡すと、作者の VS Code に「表紙を焼きますか」という確認が出る（押すのは作者。AIは呼ばない）。押されると EPUBエディターが焦点を奪わずに開き、［表紙を焼く］と同じ関数で、画面に出ている canvas に焼く。体裁は題名だけにこの1回だけ当て、`book.json` と画面の欄は変えない。ただし焼いた画像は［表紙を焼く］と同じ `設定/書籍/表紙_合成済み.png` に置き換わる。`run.result` が `done` になったら、`result.findings[0]` の `titleBlock` を `cover.ink` の `region` に、`title` を `text` に渡す。題名の範囲だけを字ごとに割り、字ごとの縦横比（`aspect`＝幅÷高さ）を返す。題名に「一」か「_」があれば、`verdict` が `upright`（立っている）か `rotated`（横倒し）まで言う。立っていれば横長になる字だからである。ほかの字だけの題名では判定せず、数字だけを返す。`cover.ink` は読むだけで、許可の鍵は `run.request` と同じ。
 
 道具の細かい引数は、道具の説明文にある。**`mcp.version` が「束が古い」と言ったら、作者に Claude Code（またはあなたの基盤）を開き直してもらう。**
 

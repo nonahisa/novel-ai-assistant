@@ -122,7 +122,12 @@ export function exposureOf(
       `schedule.milestones`（設計書6.111.15）は**スケジュールの日付と名前だけ**を返し、
       本文も設定資料も開かない（`設定/スケジュール.json` と作品目標設定だけを読む）。
     */
-    tool === "schedule.milestones"
+    tool === "schedule.milestones" ||
+    /*
+      `cover.ink`（2026-10-15）は**焼いた表紙の PNG から墨の数字だけ**を返す。本文も
+      設定資料も開かず、画像そのものも返さない（book.json は題名の色を読むだけ）
+    */
+    tool === "cover.ink"
   ) {
     return "none";
   }
@@ -344,6 +349,10 @@ function detailOf(
   if (tool === "run.result") {
     const id = typeof args?.requestId === "string" ? args.requestId.slice(0, 40) : "";
     return id ? `作者のAIで走らせた結果を読んだ（${id}）` : "作者のAIで走らせた結果を読んだ";
+  }
+  // 焼いた表紙を測った回（2026-10-15）。**どの面か**だけを残す（数字は残さない）
+  if (tool === "cover.ink") {
+    return args?.side === "back" ? "焼いた裏表紙の題名の墨を測った" : "焼いた表紙の題名の墨を測った";
   }
   /*
     承認待ちを読んだ回（0.85.1）。`feature` を取らない道具なので、書かないと

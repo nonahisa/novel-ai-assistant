@@ -28,19 +28,12 @@ import { imageMediaType } from "./epubPackage";
  * （設計書5.8。ブラウザ版でも動く必要がある）。
  */
 
-/** 表紙と裏表紙。焼いた画像はこの2枚しかない */
-export type CoverSide = "front" | "back";
-
-/**
- * 焼いた画像のファイル名。
- *
- * **「_合成済み」を名前に入れてある。** これがあるから、作者が手で置いた
- * `表紙.png` とぶつからず、生成物として上書きしてよいと分かる。
- */
-export const BAKED_COVER_FILES: Record<CoverSide, string> = {
-  front: "表紙_合成済み.png",
-  back: "裏表紙_合成済み.png",
-};
+/*
+  面とファイル名は `coverBakeFiles.ts` に置いた（MCP の `cover.ink` も同じ名前を読むため。
+  こちらは `vscode` を使うので MCP から import できない）。ここからも今までどおり取れる
+*/
+import { BAKED_COVER_FILES, type CoverSide } from "./coverBakeFiles";
+export { BAKED_COVER_FILES, type CoverSide } from "./coverBakeFiles";
 
 /**
  * 受け取る画像の上限。

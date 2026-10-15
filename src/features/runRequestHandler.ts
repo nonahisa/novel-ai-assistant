@@ -8,10 +8,17 @@ import {
   findRunFeature,
   isConfirmTooLate,
   isRunIndexFeature,
+  isRunCoverFeature,
+  describeCoverConfirm,
   parseRunQuery,
+  runCoverSideLabel,
   runRequestForLog,
+  RUN_COVER_FEATURE,
+  RUN_COVER_LABEL,
   RUN_INDEX_FEATURE,
   RUN_INDEX_LABEL,
+  type RunCoverRow,
+  type RunCoverSpec,
   type RunIndexRow,
   type RunDropped,
   type RunFailures,
@@ -101,8 +108,11 @@ export interface RunRequestHandlerDeps<W extends RunWork = RunWork> {
   /** 機能別AI割当で、その機能に使うAI。未設定なら undefined */
   resolveAi(def: RunFeatureDef): RunAi | undefined;
   measure(work: W, file: string | undefined): Promise<RunMeasure>;
-  /** モーダルで確かめる。「走らせる」が押されたら true */
-  confirm(message: string, detail: string): Promise<boolean>;
+  /**
+   * モーダルで確かめる。ボタン（既定は「走らせる」）が押されたら true。
+   * 表紙を焼く依頼だけ「焼く」にする——確認の文面が「「焼く」を押さずに」と言うため
+   */
+  confirm(message: string, detail: string, button?: string): Promise<boolean>;
   run(def: RunFeatureDef, work: W, filePaths: string[]): Promise<RunOutcome>;
   /** 走らせている途中の例外を、理由と次の操作にする（`AIError.kind` ごと。規則5） */
   describeFailure(error: unknown): RunFailureView;
@@ -112,6 +122,29 @@ export interface RunRequestHandlerDeps<W extends RunWork = RunWork> {
   log(line: string): void;
   /** 索引づくり（`vectorIndex`）の手足。無ければ索引づくりは断る */
   index?: RunIndexDeps<W>;
+  /** 表紙を焼く（`coverBake`）の手足。無ければ断る */
+  cover?: RunCoverDeps<W>;
+}
+
+/** 焼く前に分かること（確認に並べる） */
+export type RunCoverInspect =
+  | { ok: true; bookVertical: boolean; bakedExists: boolean; bakedRelative: string }
+  | { ok: false; reason: string; nextAction?: string };
+
+/**
+ * 表紙を焼く手足（設計書6.65.9・6.87.22。2026-10-15）。
+ *
+ * **焼くのは EPUBエディターの画面の canvas**（［表紙を焼く］と同じ関数）。
+ * ここは VS Code を知らないので、開く・焼かせる・待つは渡す側（`epubEditorPanel.ts`）。
+ */
+export interface RunCoverDeps<W extends RunWork = RunWork> {
+  /** 焼けるか（元イラストの指定があるか・読めるか）と、確認に出すこと。**本文は読まない** */
+  inspect(work: W, cover: RunCoverSpec): Promise<RunCoverInspect>;
+  /** 焼く。焼けたら結果の1行 */
+  bake(
+    work: W,
+    cover: RunCoverSpec
+  ): Promise<{ ok: true; row: RunCoverRow } | { ok: false; reason: string; nextAction?: string }>;
 }
 
 /** 索引づくりの手足（設計書6.87.23。0.99.19） */
@@ -199,7 +232,7 @@ export async function handleRunRequest<W extends RunWork>(
   // **白名簿の外は、確認も出さずに断る**（本文への適用・資料の保存などは入れない）
   // 索引づくり（`vectorIndex`）は白名簿とは別に通し、回数の上限のあとで分かれる
   const def = findRunFeature(ticket.feature);
-  if (!def && !isRunIndexFeature(ticket.feature)) {
+  if (!def && !isRunIndexFeature(ticket.feature) && !isRunCoverFeature(ticket.feature)) {
     await refuse("この機能は外から頼めません（頼めるのは読み取りと生成だけです）。");
     return;
   }
@@ -236,6 +269,15 @@ export async function handleRunRequest<W extends RunWork>(
       `この1時間に ${recent} 回走らせています（上限は1時間に ${RUN_MAX_PER_HOUR} 回）。`,
       "時間を置いてから頼んでください"
     );
+    return;
+  }
+
+  /*
+    表紙を焼く依頼も、回数の上限を通す（ほかの依頼と同じ作法）。AIも料金も無いが、
+    確認のモーダルを作者の画面へ出させる回数であることに変わりはない
+  */
+  if (isRunCoverFeature(ticket.feature)) {
+    await handleCoverRequest(ticket, work, deps, refuse, forLog);
     return;
   }
 
@@ -498,6 +540,108 @@ async function handleIndexRequest<W extends RunWork>(
       (cancelled.length ? `・中止 ${cancelled.length}作品` : "") +
       "）。原稿・設定資料は変わっていません。"
   );
+}
+
+/**
+ * 表紙を焼く依頼（設計書6.65.9・6.87.22。2026-10-15）。合言葉・1回限り・登録・許可・
+ * 回数の上限は呼ぶ側で通してある。
+ *
+ * **確認の前に、焼けるかを確かめる**（元イラストの指定が無いと、画面は黙って何も
+ * 焼かない）。焼けない理由は確認を出さずに返す——押させてから「焼けません」と
+ * 言うより、作者の手間が少ない。
+ */
+async function handleCoverRequest<W extends RunWork>(
+  ticket: RunTicket,
+  work: W,
+  deps: RunRequestHandlerDeps<W>,
+  refuse: (reason: string, nextAction?: string) => Promise<void>,
+  forLog: string
+): Promise<void> {
+  const coverDeps = deps.cover;
+  if (!coverDeps) {
+    await refuse("この拡張機能では、外から表紙を焼く依頼を受けられません。");
+    return;
+  }
+  const cover = ticket.cover;
+  if (!cover) {
+    // 札を読むときに断っているので来ないはず。来たら黙って既定の体裁で焼かない
+    await refuse("どの面をどの体裁で焼くか（cover）が依頼に入っていません。");
+    return;
+  }
+
+  const inspected = await coverDeps.inspect(work, cover);
+  if (!inspected.ok) {
+    await refuse(inspected.reason, inspected.nextAction);
+    return;
+  }
+
+  const confirm = describeCoverConfirm({
+    ticket,
+    cover,
+    workTitle: work.title,
+    bookVertical: inspected.bookVertical,
+    bakedExists: inspected.bakedExists,
+    bakedRelative: inspected.bakedRelative,
+  });
+  if (!(await deps.confirm(confirm.message, confirm.detail, "焼く"))) {
+    await deps.writeState(stateOf(ticket, "declined", deps.now()));
+    deps.log(`作者が断りました：${forLog}`);
+    return;
+  }
+
+  const pressedAt = deps.now();
+  if (isConfirmTooLate(ticket, pressedAt)) {
+    const reason = "確認が出てから時間が経ちすぎたため、焼きませんでした。";
+    await deps.writeState(stateOf(ticket, "expired", pressedAt, { reason }));
+    deps.log(`外部AIからの実行の依頼が期限切れでした：${forLog}`);
+    deps.info(`${reason}必要なら、頼んだ側にもう一度頼んでもらってください。`);
+    return;
+  }
+
+  const startedAt = new Date(pressedAt).toISOString();
+  await deps.writeState(stateOf(ticket, "running", pressedAt, { startedAt }));
+
+  const side = runCoverSideLabel(cover.side);
+  let baked: Awaited<ReturnType<RunCoverDeps<W>["bake"]>>;
+  try {
+    baked = await coverDeps.bake(work, cover);
+  } catch (error) {
+    const failure = deps.describeFailure(error);
+    baked = { ok: false, reason: failure.reason, nextAction: failure.nextAction };
+  }
+  if (!baked.ok) {
+    await deps.writeState(
+      stateOf(ticket, "failed", deps.now(), {
+        startedAt,
+        reason: baked.reason,
+        nextAction: baked.nextAction,
+      })
+    );
+    deps.log(`外部AIから頼まれた${side}を焼けませんでした：${forLog}：${baked.reason}`);
+    deps.warn(`外部AIから頼まれた${side}を焼けませんでした：${baked.reason}`);
+    return;
+  }
+
+  const result: RunResultBody = {
+    feature: RUN_COVER_FEATURE,
+    featureLabel: RUN_COVER_LABEL,
+    workTitle: work.title,
+    target: null,
+    // AIは呼ばない。**呼んでいないことを結果の形で言う**（測る道としての約束の欄は埋める）
+    provider: { id: "none", name: "AIを呼びません（EPUBエディターの canvas で焼く）", paid: false },
+    model: "",
+    promptVersion: "cover-bake-v1",
+    findings: [baked.row],
+    dropped: { count: 0, notes: [] },
+    failures: { count: 0, notes: [] },
+    // 本文は読みも送りもしない
+    bodyChars: 0,
+    startedAt,
+    finishedAt: new Date(deps.now()).toISOString(),
+  };
+  await deps.writeState(stateOf(ticket, "done", deps.now(), { startedAt, result }));
+  deps.log(`外部AIから頼まれた${side}を焼きました：${forLog}`);
+  // 焼いたことの知らせは EPUBエディターの［表紙を焼く］と同じ道が出す（重ねて出さない）
 }
 
 function stateOf(

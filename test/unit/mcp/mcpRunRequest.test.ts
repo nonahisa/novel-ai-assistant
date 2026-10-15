@@ -135,6 +135,39 @@ describe("run.request", () => {
     expect(d.opened).toHaveLength(0);
   });
 
+  test("表紙を焼く（coverBake）：体裁を札に書き、作品フォルダーには何も書かない", async () => {
+    const before = listRecursive(work);
+    const d = deps();
+    const cover = { side: "front", vertical: true, size: "large" };
+    const result = await runRequest({ folder: work, feature: "coverBake", cover }, d);
+    expect(listRecursive(work)).toEqual(before);
+    const ticket = parseRunTicket(
+      fs.readFileSync(nodePath.join(storage, RUN_REQUEST_DIRECTORY, runTicketFileName(result.requestId)), "utf8")
+    );
+    expect(ticket?.feature).toBe("coverBake");
+    expect(ticket?.cover).toEqual(cover);
+    expect(result.note).toContain("表紙を焼きますか");
+    expect(result.note).toContain("cover.ink");
+  });
+
+  test("体裁の無い coverBake・ほかの機能の cover・coverBake の file は、開く前に断る", async () => {
+    const d = deps();
+    await expect(runRequest({ folder: work, feature: "coverBake" }, d)).rejects.toThrow(/cover/u);
+    await expect(
+      runRequest({ folder: work, feature: "coverBake", cover: { side: "spine", vertical: true, size: "large" } }, d)
+    ).rejects.toThrow(/front/u);
+    await expect(
+      runRequest({ folder: work, feature: "typo", cover: { side: "front", vertical: true, size: "large" } }, d)
+    ).rejects.toThrow(/coverBake/u);
+    await expect(
+      runRequest(
+        { folder: work, feature: "coverBake", cover: { side: "front", vertical: true, size: "large" }, file: "本文\\第1話.txt" },
+        d
+      )
+    ).rejects.toThrow(/file/u);
+    expect(d.opened).toHaveLength(0);
+  });
+
   test("白名簿の外は、開く前に断る", async () => {
     const d = deps();
     await expect(runRequest({ folder: work, feature: "settings" }, d)).rejects.toBeInstanceOf(McpToolError);
@@ -284,7 +317,7 @@ describe("門番と記録", () => {
 
   test("合言葉は引数で受けない（呼び出し元に選ばせない）", () => {
     // 呼び出し元に合言葉を選ばせると、ウェブページも同じ値で URI を作れる
-    // scope は索引づくりの範囲（0.99.19）。合言葉ではない
-    expect(Object.keys(RUN_REQUEST_INPUT).sort()).toEqual(["feature", "file", "folder", "scope"]);
+    // scope は索引づくりの範囲（0.99.19）、cover は表紙を焼く体裁（2026-10-15）。合言葉ではない
+    expect(Object.keys(RUN_REQUEST_INPUT).sort()).toEqual(["cover", "feature", "file", "folder", "scope"]);
   });
 });
