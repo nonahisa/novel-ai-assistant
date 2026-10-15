@@ -375,6 +375,23 @@ describe("上下の余白に刷るものを選ぶ", () => {
     expect(exportedHtml()).toContain('data-author="筆名A"');
   });
 
+  test("設計図の筆名と違う名前を入れると、刷るのは入れた名前で、EPUBの設計図の筆名は変わらない", async () => {
+    // 実機確認リスト 6472 行「尋ねられた名前を変えても、EPUBエディターの作者名は変わらないか」
+    // （2026-10-15）。上の件は設計図が無いときに作らないことだけを見ていた。設計図があり、
+    // 名前を打ち替えた形で、設計図のファイルが1字も変わらないことを見る
+    const book = JSON.stringify({ author: "筆名A" });
+    put("設定/書籍/book.json", book);
+    choose("author", "page", "別の筆名B");
+    await exportPdf(work);
+
+    expect(asked[0]?.value).toBe("筆名A");
+    expect(exportedHtml()).toContain('data-author="別の筆名B"');
+    expect(exportedHtml()).not.toContain('data-author="筆名A"');
+    const bookKey = [...disk.keys()].find((name) => name.replace(/\\/g, "/").endsWith("設定/書籍/book.json"));
+    expect(bookKey, "設計図が見当たりません").toBeDefined();
+    expect(new TextDecoder().decode(disk.get(bookKey ?? ""))).toBe(book);
+  });
+
   test("作者名を尋ねられて取りやめたら、書き出さない", async () => {
     choose("author", "page", undefined);
     await exportPdf(work);
