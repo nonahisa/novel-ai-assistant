@@ -95,6 +95,7 @@ import {
 } from "./tools/notices";
 import { worksList } from "./tools/works";
 import { NOVEL_SEARCH_INPUT, novelSearch, type NovelSearchInput } from "./tools/search";
+import { NOVEL_READ_INPUT, novelRead, type NovelReadInput } from "./tools/read";
 import { aiSettings } from "./tools/aiSettings";
 import {
   SETUP_REQUEST_INPUT,
@@ -128,7 +129,7 @@ import {
  * そちらを直に呼ぶ（`test/unit/mcp/mcpTools.test.ts`）。混ぜると、
  * ツールの中身を確かめるのに stdio を立てなければならなくなる。
  *
- * **道具は27本**（0.107 の次の版で `cover.ink`、0.99.19 で `novel.search`、0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
+ * **道具は28本**（2026-10-16 に読む口 `novel.read`（設計書6.87.24）、0.107 の次の版で `cover.ink`、0.99.19 で `novel.search`、0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
  * 0.75.x で `windows.list`、0.82.1 で `setup.request`、0.83.x で `schedule.milestones`、
  * 0.85.0 で `notices.recent` と `works.list`、0.85.1 で `pending.list`、
  * 0.88 の次の版で `run.request` と `run.result`（設計書6.87.22）、
@@ -780,6 +781,25 @@ server.registerTool(
     こちらは作者が「索引を引く」と明示して呼ぶ道具で、どちらで探したかを必ず返す
   */
   tool("novel.search", (args: NovelSearchInput) => novelSearch(args))
+);
+
+server.registerTool(
+  "novel.read",
+  {
+    title: "作品の資料を読む（設定資料・再開の1枚・伏線・年表・相関図・略図）",
+    description:
+      "画面を開かずに、作品の資料の中身を返します。kind で選びます：settings＝設定資料（term で語から引くと記録の全体）／" +
+      "resume＝拡張機能の［執筆再開］と同じ1枚／foreshadows＝伏線の台帳と一覧／chronicle＝年表（話ごとのあらすじ・登場・出来事・時期）／" +
+      "relations＝人物相関図の中身／locations＝場所の略図の中身。" +
+      "**読むだけ**で、AIを呼ばず、何も書き換えません。本文の全文は返しません（再開の1枚に最新話の末尾が入ります）。",
+    inputSchema: NOVEL_READ_INPUT,
+  },
+  /*
+    **作品を指すので、転送層が許可を確かめる**（鍵は道具の名前 `novel.read`。6.87.14）。
+    作者の裁定（2026-10-16 の2）どおり `"*"` に含まれる。相談ログなど別の鍵にする
+    kind を足すときは `permissionKeyOf` で分ける（`tools/read.ts` の冒頭）
+  */
+  tool("novel.read", (args: NovelReadInput) => novelRead(args))
 );
 
 server.registerTool(

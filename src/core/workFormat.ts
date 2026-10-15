@@ -104,6 +104,29 @@ export function workFormatLabels(): string[] {
 }
 
 /**
+ * `## 形式` に書かれた文字列から形式を決める。
+ *
+ * **完全一致では拾えない。** 作者は「長編（連載中）」のように
+ * 但し書きを添えて書く。選択肢から選んだ場合は完全一致になるが、
+ * 手で書いた場合に読めないのでは、自由に書ける文書にした意味がない。
+ *
+ * **長いほうから照合する。** 「長編」で先に当てると「大長編」が
+ * 拾えない。同じ理由で「短編」と「短編集」も順序が効く。
+ *
+ * `workFormatStore.ts` から移した（2026-10-16）。あちらは `vscode` に届くので、
+ * MCP の読む口（`novel.read`）が同じ読み方を使えなかった。
+ */
+export function matchWorkFormat(text: string): WorkFormatKey | undefined {
+  const body = text.trim();
+  if (!body) return undefined;
+
+  const byLength = [...WORK_FORMATS].sort(
+    (left, right) => right.label.length - left.label.length
+  );
+  return byLength.find((format) => body.includes(format.label))?.key;
+}
+
+/**
  * いまの分量から、当てはまりそうな形式を1つ挙げる。
  *
  * **決めつけない。** 選択肢の既定として出すだけで、作者が選び直せる。

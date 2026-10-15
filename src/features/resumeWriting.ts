@@ -9,14 +9,12 @@ import {
   parsePlotMarkdown,
 } from "../core/plotDoc";
 import { ChapterStore } from "../core/chapterStore";
-import { groupEpisodesByChapter } from "../core/chapterGrouping";
 import { findLatestEpisode } from "../core/latestEpisode";
 import { readTextFile } from "../core/textFile";
 import {
   collectedLabelIndex,
   isCollectedFile,
   episodeTitle,
-  episodeUnit,
   formatChapterLabel,
 } from "../core/episodeLabel";
 import { readWorkFormat } from "../core/workFormatStore";
@@ -43,7 +41,10 @@ import {
   EPISODE_PLOTS_DIR,
   episodePlotFileName,
   RESUME_SHEET_KIND,
-  RESUME_SYNOPSIS_COUNT,
+  openForeshadowsForResume,
+  recentSynopsesForResume,
+  resumeChapterOf,
+  resumeChapterRows,
   tailOfEpisodeFile,
   type ResumeChapter,
   type ResumeEpisodePlot,
@@ -500,59 +501,12 @@ async function loadChapterRows(
     notices.push(`章立てを読めませんでした：${messageOf(error)}`);
     return [];
   }
-  if (chapters.length === 0) return [];
-
-  const { ungrouped, groups } = groupEpisodesByChapter(
-    episodes,
-    chapters,
-    work.folderPath
-  );
-
-  const rows = groups.map((group) =>
-    chapterRow(group.chapter.name, group.episodes, latestChapter)
-  );
-  // **章の前に置かれた話も数に入れる。** 落とすと、章ごとの合計と
-  // 「いま何話まで」が食い違い、どちらが正しいのか読む側に分からない
-  if (ungrouped.length > 0) {
-    rows.unshift(chapterRow("（章の前）", ungrouped, latestChapter));
-  }
-  return rows;
-}
-
-function chapterRow(
-  name: string,
-  episodes: readonly EpisodeFile[],
-  latestChapter: number | null
-): ResumeChapter {
-  const starts = episodes
-    .map((episode) => episode.chapterStart)
-    .filter((value): value is number => typeof value === "number");
-  const ends = episodes
-    .map((episode) => episode.chapterEnd ?? episode.chapterStart)
-    .filter((value): value is number => typeof value === "number");
-  const from = starts.length > 0 ? Math.min(...starts) : null;
-  const to = ends.length > 0 ? Math.max(...ends) : null;
-  return {
-    name,
-    episodeCount: episodes.length,
-    from,
-    to,
-    // **いま書いている話が入っているか。** 端も含める（章の最後の話を
-    // 書いているときに「いまここ」が消えると、居場所が分からなくなる）
-    current:
-      latestChapter !== null &&
-      from !== null &&
-      to !== null &&
-      latestChapter >= from &&
-      latestChapter <= to,
-  };
+  // 束ね方と「いまここ」の決め方は MCP の読む口と分け合う（`core/resumeSheet.ts`）
+  return resumeChapterRows(episodes, chapters, work.folderPath, latestChapter);
 }
 
 /** その話の話数。合本なら最後の話数を見る。読めなければ null */
-function chapterOf(episode: EpisodeFile | undefined): number | null {
-  if (!episode) return null;
-  return episode.chapterEnd ?? episode.chapterStart ?? null;
-}
+const chapterOf = resumeChapterOf;
 
 /**
  * 一覧に出す見出し。
@@ -670,19 +624,7 @@ async function recentSynopses(
     return [];
   }
 
-  const unit = episodeUnit(format);
-  return episodes
-    // いま書いている話より前だけを取る。**話数の無いあらすじ（「プロローグ」）は
-    // 落とす**——並びの最後に来るので、混ぜると直近3話がそちらで埋まる
-    .filter((episode) =>
-      chapter === null ? true : episode.chapter !== null && episode.chapter < chapter
-    )
-    .slice(-RESUME_SYNOPSIS_COUNT)
-    .map((episode) => ({
-      label: episode.chapter === null ? "" : unit.label(episode.chapter),
-      title: episode.title,
-      synopsis: episode.synopsis.trim(),
-    }));
+  return recentSynopsesForResume(episodes, chapter, format);
 }
 
 /** 未回収の伏線（設計書6.35.1）。話数の早い順に並べる */
@@ -704,23 +646,7 @@ async function loadOpenForeshadows(
     );
   }
 
-  return loaded.records
-    .filter((record) => record.status === "open")
-    .sort((left, right) => {
-      const a = left.plantedChapter;
-      const b = right.plantedChapter;
-      if (a === b) return left.id.localeCompare(right.id);
-      // 話数不明は最後へ回す（一覧のMarkdownと同じ並び）
-      if (a === null) return 1;
-      if (b === null) return -1;
-      return a - b;
-    })
-    .map((record) => ({
-      label: record.label,
-      plantedChapter: record.plantedChapter,
-      quote: record.plantedQuote,
-      note: record.note,
-    }));
+  return openForeshadowsForResume(loaded.records);
 }
 
 /** この話の単話プロット。無ければ「作れる場所」を返す */
