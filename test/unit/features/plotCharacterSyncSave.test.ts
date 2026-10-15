@@ -53,9 +53,13 @@ vi.mock("../../../src/core/pendingUpdates", () => ({
 
 vi.mock("../../../src/core/logger", () => ({ logFailure: vi.fn() }));
 
-const { markPlotCharactersSynced, syncPlotCharacters } = await import(
-  "../../../src/features/plotCharacterSync"
-);
+const {
+  consumeOwnPlotSave,
+  forgetOwnPlotSave,
+  markPlotCharactersSynced,
+  noteOwnPlotSave,
+  syncPlotCharacters,
+} = await import("../../../src/features/plotCharacterSync");
 
 const work: WorkEntry = {
   id: "work_test",
@@ -568,5 +572,45 @@ describe("plot.md の保存で人物の更新案を積む", () => {
     expect(result.staged).toBe(0);
     expect(state.stage).not.toHaveBeenCalled();
     expect(announced).toEqual([]);
+  });
+});
+
+/**
+ * **こちらが自分で保存した plot.md では、保存からの反映を走らせない**（2026-10-16）。
+ *
+ * プロットモードの［入れる］は、開いている plot.md へ当てて保存する。その保存でも反映が走ると、
+ * ［入れる］がもう置いた案の上に、役名だけの人物の新規の案と直す案への重ね書きを同じ保存で積み、
+ * 画面テスト plotRenamePending の知らせが崩れた。見分けは時間でなく中身で行う。
+ */
+describe("自分で保存した plot.md の見分け", () => {
+  const plotFile = nodePath.join("C:", "novels", "work", "設定", "plot.md");
+
+  test("覚えた中身と同じ保存は1度だけ当たる（改行の違いは見ない）", () => {
+    noteOwnPlotSave(plotFile, "# 題\n- 主人公（相馬 誠）：\n");
+    expect(consumeOwnPlotSave(plotFile, "# 題\r\n- 主人公（相馬 誠）：\r\n")).toBe(true);
+    // 次の保存は作者のもの
+    expect(consumeOwnPlotSave(plotFile, "# 題\n- 主人公（相馬 誠）：\n")).toBe(false);
+  });
+
+  test("保存の知らせの前に作者が打ち足していれば当たらない（作者の分を取りこぼさない）", () => {
+    noteOwnPlotSave(plotFile, "# 題\n- 主人公（相馬 誠）：\n");
+    expect(consumeOwnPlotSave(plotFile, "# 題\n- 主人公（相馬 誠）：港町の高校生\n")).toBe(false);
+    // 外れても覚え書きは消える（残すと、作者が同じ中身へ戻して保存したときに反映が走らない）
+    expect(consumeOwnPlotSave(plotFile, "# 題\n- 主人公（相馬 誠）：\n")).toBe(false);
+  });
+
+  test("忘れたら当たらない・ほかのファイルには当たらない", () => {
+    noteOwnPlotSave(plotFile, "本文\n");
+    expect(consumeOwnPlotSave(nodePath.join("C:", "novels", "other", "設定", "plot.md"), "本文\n")).toBe(false);
+    forgetOwnPlotSave(plotFile);
+    expect(consumeOwnPlotSave(plotFile, "本文\n")).toBe(false);
+  });
+
+  test("保存の知らせの受け口は、覚え書きに当たったときだけ反映を飛ばす", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync("src/extension.ts", "utf8");
+    expect(source).toMatch(
+      /if \(!consumeOwnPlotSave\(fromUri\(document\.uri\), document\.getText\(\)\)\) \{\s*void syncPlotCharactersOnSave\(fromUri\(document\.uri\)\);/
+    );
   });
 });

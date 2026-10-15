@@ -20,7 +20,11 @@ import { pressWorkbenchKey } from "./support/workbenchDom";
 
 const EPISODE = "001_はじまり.txt";
 const BODY = ["　朝の駅は静かだった。", "　発車のベルが鳴った。", ""].join("\n");
-/** 横の相談パネルを開くキー（`novelai.openChat`） */
+/**
+ * 横の相談パネルを開くキー。**製品の割り当てではない**——使い捨ての keybindings.json に
+ * `novelai.openChat` を割り当てて押す（chatLocateAndMain と同じ。割り当てを渡し忘れると何も開かない）
+ */
+const OPEN_SIDE_KEY = "ctrl+alt+shift+c";
 const OPEN_SIDE_PRESS = "Control+Alt+Shift+KeyC";
 
 /** 横の相談パネルの面（`#context-what` と `#to-main` を持つ） */
@@ -66,5 +70,5 @@ test("横の相談パネルを開くと、入力欄と［送る］が枠の中�
       throw new Error(`${String(error)}（${await chatInputState(frame)}／［送る］：${JSON.stringify(send)}）`);
     });
     expect(await insideOuter(frame, "#input")).toBe(true);
-  });
+  }, { keybindings: [{ key: OPEN_SIDE_KEY, command: "novelai.openChat" }] });
 });

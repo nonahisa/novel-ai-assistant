@@ -271,7 +271,7 @@ import {
 import { generatePlot } from "./features/generatePlot";
 // プロットモードの画面（設計書6.4.8）。plot.md は左の普通のエディタで書く
 import { openPlotMode, refreshPlotMode } from "./features/plotModePanel";
-import { syncPlotCharacters } from "./features/plotCharacterSync";
+import { consumeOwnPlotSave, syncPlotCharacters } from "./features/plotCharacterSync";
 import { WORK_CHAT_VIEW_ID, WorkChatPanel } from "./features/workChatPanel";
 // 校正・メモパネルの［AIに相談］（設計書6.96.5）。素のエディターを開かずに材料を渡す
 import {
@@ -3159,8 +3159,12 @@ export async function activate(
         stepProvider.invalidateFormats();
         // 「主要登場人物」に書き足した人を、設定資料の更新案として積む
         // （設計書6.4.9）。**台帳へは書かない**——承認待ちに積むだけで、
-        // 反映は作者が「更新分を反映」で承認したときに起きる
-        void syncPlotCharactersOnSave(fromUri(document.uri));
+        // 反映は作者が「更新分を反映」で承認したときに起きる。
+        // **こちらが自分で保存したとき（プロットモードの［入れる］）は走らせない**
+        // （`consumeOwnPlotSave` の説明。案はもう［入れる］が置いている）
+        if (!consumeOwnPlotSave(fromUri(document.uri), document.getText())) {
+          void syncPlotCharactersOnSave(fromUri(document.uri));
+        }
       }
       // **保存したファイルの作品だけを読み直す**（0.105.2）。これまでは何を保存しても
       // 全作品を読み直し、そのあいだ作品一覧の右クリックに行が渡らなかった
