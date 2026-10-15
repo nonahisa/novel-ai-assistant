@@ -174,7 +174,8 @@ async function describeSync(session: E2ESession, repo: string, titles: readonly 
  *    - 描き直すと付く → 同期の見張りの数は正しく、**作品一覧の行の描き直しが抜けた**（`views/workTree.ts` の
  *      `redrawIfChanged`。印の変わった行だけを撃つ所）
  *    - 描き直しても付かない → **同期の見張りが持つその作品の数が古い**（`features/gitSync.ts` の
- *      `runRefresh`。同じ置き場の後から始めた読みが先に受け取られると、その作品の読みは捨てられる）
+ *      `runRefresh`。同じ置き場の後から始めた読みが先に受け取られると、その作品の読みは捨てられる。
+ *      0.107.5 からは捨てたあと読み直す〔`rereadAfterSiblingWon`〕ので、ここへ来たら読み直しの外の道を疑う）
  *
  * テストの合否は変えない（ここへ来た時点で落ちる）。離れた機械で落ちたときに原因が読めるようにするだけ
  */
