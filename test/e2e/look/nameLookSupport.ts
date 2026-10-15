@@ -12,7 +12,7 @@ import { proposalPanelFrame } from "../support/sampleFinding";
 import { expandTreeRow, showSidebar, treeContextMenu } from "../support/sidebar";
 import { E2E_WORK_TITLE, type E2ESession } from "../support/vscodeApp";
 import { waitUntil } from "../support/wait";
-import { acceptQuickPick, clearNotifications, dialogText, pickQuickPickRow, pressDialogButton, quickOpen, quickPickTitle } from "../support/workbenchDom";
+import { acceptQuickPick, clearNotifications, dialogText, pickQuickPickRow, pressDialogButton, quickPickTitle } from "../support/workbenchDom";
 import { lookNote } from "./lookSupport";
 
 export interface PoolName {
@@ -156,18 +156,12 @@ export async function runNameSuggest(
   await page.waitForTimeout(800);
 }
 
-/** plot.md を素のエディターで開いて、全文を入れ替えて保存する（作者が書き換えて Ctrl+S するのと同じ） */
-export async function rewritePlotAndSave(page: Page, text: string): Promise<void> {
-  await quickOpen(page, "plot.md");
-  // プロットモードを開くと plot.md も左に開いている。その素のエディターを押して焦点を移す
-  const lines = page.locator(".monaco-editor .view-lines", { hasText: "主要登場人物" }).first();
-  await waitUntil(async () => (await lines.count()) > 0, "plot.md が開く", 15_000);
-  await lines.click();
-  await page.keyboard.press("Control+KeyA");
-  await page.keyboard.insertText(text);
-  await page.keyboard.press("Control+KeyS");
-  await page.waitForTimeout(1500);
-}
+/**
+ * plot.md を書き換えて保存する。検査の部品（`support/plotNames.ts`）と同じものを使う——あちらは打つ前に
+ * エディターが製品の書き込み（［入れる］の消して作り直す）を読み直すのを待つ。ここで1.5秒だけ待つ別の作りを
+ * 持っていると、読み直す前に打って「The content of the file is newer」で保存を断られる揺れが残る（2026-10-16）
+ */
+export { rewritePlotAndSave } from "../support/plotNames";
 
 /** 「設定資料更新分反映」を開いて、提案パネルの面を返す */
 export async function openUpdates(session: E2ESession): Promise<Frame> {

@@ -120,7 +120,7 @@ describe.skipIf(!lookEnabled)("見た目の写真：プロットモードの名�
         await shootPage(page, "564-545-更新分反映-入れた直後");
 
         // 545：承認する前に plot.md のほかの行を書き換えて保存
-        await rewritePlotAndSave(page, plotText.replace("主人公は転校生のヒロインと出会い", "主人公は転校生のヒロインと港で出会い"));
+        await rewritePlotAndSave(session, plotText.replace("主人公は転校生のヒロインと出会い", "主人公は転校生のヒロインと港で出会い"));
         await page.waitForTimeout(1500);
         await shootPageKeepingToasts(page, "566-545-別の行を保存した直後-知らせ");
         updates = await openUpdates(session);
@@ -130,7 +130,7 @@ describe.skipIf(!lookEnabled)("見た目の写真：プロットモードの名�
 
         // 546：「主人公（相馬 誠）」の行の説明を書き換えて保存
         const afterOther = (await readFile(path.join(session.workFolder, "設定", "plot.md"), "utf8")).replace(/\r\n/g, "\n");
-        await rewritePlotAndSave(page, afterOther.replace("17歳の高校生。港町で育ち、船に憧れている。", "17歳の高校生。船乗りの家に生まれ、船に憧れている。"));
+        await rewritePlotAndSave(session, afterOther.replace("17歳の高校生。港町で育ち、船に憧れている。", "17歳の高校生。船乗りの家に生まれ、船に憧れている。"));
         await page.waitForTimeout(1500);
         updates = await openUpdates(session);
         await lookNote(`[546] 更新分反映（説明を書き換えたあと）：${await panelText(updates)}`);
@@ -156,7 +156,7 @@ describe.skipIf(!lookEnabled)("見た目の写真：プロットモードの名�
           await page.waitForTimeout(1500);
           await shootPage(page, "530-見送ったあと");
           const base = (await readFile(path.join(session.workFolder, "設定", "plot.md"), "utf8")).replace(/\r\n/g, "\n");
-          await rewritePlotAndSave(page, base.replace("港の仕事を教わる", "港の仕事を一から教わる"));
+          await rewritePlotAndSave(session, base.replace("港の仕事を教わる", "港の仕事を一から教わる"));
           await page.waitForTimeout(1500);
           await shootPageKeepingToasts(page, "530-見送ったあとで別の行を保存-知らせ");
           updates = await openUpdates(session);
@@ -179,7 +179,7 @@ describe.skipIf(!lookEnabled)("見た目の写真：プロットモードの名�
         await runNameSuggest(session, plot);
         await plot.locator('input[name="name-1"]').nth(1).check();
         // plot.md を別の字へ書き換えて保存する
-        await rewritePlotAndSave(page, PLOT.replace("港町で育ち", "港町で生まれ育ち"));
+        await rewritePlotAndSave(session, PLOT.replace("港町で育ち", "港町で生まれ育ち"));
         await clearNotifications(page);
         await plot.locator("[data-apply-names]").click();
         await page.waitForTimeout(1500);
