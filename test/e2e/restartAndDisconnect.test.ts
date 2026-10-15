@@ -5,8 +5,9 @@
  *
  * 何を見張るか：
  * - 156：原稿エディターと校正・メモパネルを左右に開いたまま拡張機能ホストを再起動し、「つながりが
- *   切れました」を**再読み込みせずに閉じ**、校正・メモパネルの行を押しても、**右の列に同じ話の2枚目が
- *   できない**。押したことが拡張機能に届き、どの道で前に出したかが操作ログに残る
+ *   切れました」を**再読み込みせずに閉じ**、校正・メモパネルの行を押すと、切れた原稿へ飛ぶときの問いの
+ *   窓が出る（作者の裁定 2026-10-15）。［ウィンドウを再読み込み］で開き直したあと、目当ての行が示され、
+ *   **どの列にも同じ話の2枚目ができない**
  * - 200：第1話と第2話を横書きで開いたまま VS Code を開き直し（第2話のタブは背景で、画面がまだ
  *   作られていない）、第1話で［縦書きにする］と字の大きさを変えて［次の話 →］を押すと、第2話が
  *   **縦書き・同じ字の大きさ**で出る。第2話を閉じて開き直すと、覚えていた見た目（横書き・元の大きさ）で
@@ -38,12 +39,14 @@ import { expect, test } from "vitest";
 import { characterFileName, emptyCharacter, type Character } from "../../src/models/character";
 import { DEFAULT_SETTINGS_DIR } from "../../src/models/types";
 import {
+  caretPosition,
   classOpen,
   dropEditsToHost,
   frontFrameShowing,
   memoPanelFrame,
   openEpisode,
   placeCaretAfter,
+  waitForManuscriptFrame,
 } from "./support/manuscriptFrame";
 import { describeNotices } from "./support/noticeRecord";
 import { answerInput, runCommand, waitForQuickInput } from "./support/quickInput";
@@ -76,6 +79,12 @@ const RESTART_LAUNCH = {
 
 /** 製品のモーダル（`features/manuscriptEditor.ts` の `warnDisconnected`）の見出し */
 const DISCONNECTED_MESSAGE = "開いていた原稿エディターとのつながりが切れました";
+
+/** 切れた原稿へ飛ぶときの問いの窓（`features/manuscriptEditor.ts` の `askDisconnectedReveal`）の見出し */
+const REVEAL_DISCONNECTED_MESSAGE = "拡張機能の再起動でつながりが切れています";
+
+/** 問いの窓の、既定のボタン（`RELOAD_WINDOW_ITEM`） */
+const RELOAD_BUTTON = "ウィンドウを再読み込み";
 
 /**
  * 操作ログ（`actions.log`）を全部読む。**書き先は作品のログか、作品が引けなければ保管庫のログ**
@@ -141,7 +150,7 @@ const MEMO_TEXT = "一のメモ";
 // 2026-10-15 に serializer を足して直した（作者の裁定「引き取れるようにする」）。ただし拡張機能ホストの再起動では serializer は
 // 呼ばれないので、残ったタブを同じ列へ開き直して引き取る（`features/sceneMemoPanel.ts` の `registerSceneMemoPanelRestore`）。
 // 開き直しの最中に、残ったパネルと新しいパネルが一瞬並ぶので、行は「引き取った」操作ログの行を待ってから押す（実機確認リスト 156）
-test("原稿と校正・メモパネルを左右に開いたまま拡張機能ホストを再起動し、「つながりが切れました」を再読み込みせずに閉じてパネルの行を押しても、右の列に同じ話の2枚目ができない", async () => {
+test("原稿と校正・メモパネルを左右に開いたまま拡張機能ホストを再起動し、「つながりが切れました」を再読み込みせずに閉じてパネルの行を押すと問いの窓が出て、［ウィンドウを再読み込み］のあと目当ての行が示され、どの列にも同じ話の2枚目ができない", async () => {
   await withVsCode(
     "再起動をまたぐ：メモパネルから押して2枚目ができない",
     [{ name: MEMO_EPISODE, text: `一行目の文。\n// ${MEMO_TEXT}\n三行目の文。\n` }],
@@ -223,33 +232,63 @@ test("原稿と校正・メモパネルを左右に開いたまま拡張機能�
       });
 
       /*
-        右の列（パネルの居る列。左の列より右のどこでも）に同じ話の2枚目ができない（しばらく見続ける）。
-        項目の文言どおり「右の列に」を見る。**左の列の素のエディターは設計どおりの譲り**——再起動で
-        つながりの切れた原稿の面は、つなぎ直さずに素のエディターへ譲る（`features/manuscriptEditor.ts` の
-        `revealInExistingTab`）。2026-10-15 の母艦では左の列に素のエディターが開いた。どの列にも2枚目を
-        作らない形にするかは本体・作者の判断待ち（報告済み）。2枚目ができたときは、どの道かが記録に残ることを見る
+        飛び先の原稿の面はつながりが切れているので、**素のエディターへ譲らず作者に訊く**（作者の裁定
+        2026-10-15。`features/manuscriptEditor.ts` の `askDisconnectedReveal`）。0.106.6 までは左の列に
+        素のエディターの2枚目ができていた
       */
+      let asked: string | undefined;
+      await waitUntil(async () => ((asked = await dialogText(page)) ?? "").includes(REVEAL_DISCONNECTED_MESSAGE), "切れた原稿へ飛ぶときの問いの窓が出る", 20_000).catch(
+        async (error: unknown) => {
+          throw new Error(
+            `${String(error)}（いま出ている窓：${JSON.stringify(asked)}／タブ：${JSON.stringify(await readTabState(page))}` +
+              `／足された行：${JSON.stringify(addedLines(logsBefore, await readActionLogs(session)).slice(-10))}）`
+          );
+        }
+      );
+      expect(asked, "既定の［ウィンドウを再読み込み］が並ぶ").toContain(RELOAD_BUTTON);
+      expect(asked, "閉じて開き直す道も並ぶ").toContain("閉じて開き直す");
+      expect(countTabsNamed((await editorGroupTabs(page)).flat(), MEMO_EPISODE), "問いの間に、同じ話の2枚目ができていない").toBe(1);
+
+      // ［ウィンドウを再読み込み］を押す。控えの残る道で、再読み込みのあとに目当ての行が示される
+      const oldFrame = await waitForManuscriptFrame(page, "三行目の文", "切れた原稿の面がまだ残っている", 5_000);
+      const logsBeforeReload = await readActionLogs(session);
+      await page.locator(".monaco-dialog-box .monaco-button", { hasText: RELOAD_BUTTON }).first().click();
+      await waitUntil(() => oldFrame.isDetached(), "再読み込みで古い面が外れる", 30_000);
+      const fresh = await waitForManuscriptFrame(page, "三行目の文", "再読み込みのあと、原稿エディターの面が本文を描く");
+
+      const shownLine = /原稿エディタ：再読み込みの前に頼まれた\d+行目を示します/;
+      await waitUntil(
+        async () => addedLines(logsBeforeReload, await readActionLogs(session)).some((line) => shownLine.test(line)),
+        "再読み込みのあと、頼まれていた行を示したことが操作ログに残る",
+        30_000
+      ).catch(async (error: unknown) => {
+        throw new Error(
+          `${String(error)}（足された行：${JSON.stringify(addedLines(logsBeforeReload, await readActionLogs(session)).slice(-10))}` +
+            `／タブ：${JSON.stringify(await readTabState(page))}）`
+        );
+      });
+      let caret: { lineText: string; column: number } | undefined;
+      await waitUntil(
+        async () => ((caret = await caretPosition(fresh).catch(() => undefined))?.lineText ?? "").includes(MEMO_TEXT),
+        "再読み込みのあと、カーソルがメモの行に来る",
+        15_000
+      ).catch((error: unknown) => {
+        throw new Error(`${String(error)}（カーソル：${JSON.stringify(caret)}）`);
+      });
+
+      // どの列にも同じ話の2枚目ができない（しばらく見続ける）。原稿のタブは左の列のまま
       await holdsFor(
-        async () => (await editorGroupTabs(page)).slice(1).every((group) => countTabsNamed(group, MEMO_EPISODE) === 0),
-        "パネルの行を押したあとも、右の列に同じ話のタブができない",
+        async () => countTabsNamed((await editorGroupTabs(page)).flat(), MEMO_EPISODE) === 1,
+        "再読み込みのあとも、どの列にも同じ話の2枚目ができない",
         5_000
       ).catch(async (error: unknown) => {
         throw new Error(
           `${String(error)}（タブ：${JSON.stringify(await readTabState(page))}` +
-            `／足された行：${JSON.stringify(addedLines(logsBefore, await readActionLogs(session)).slice(-10))}）`
+            `／足された行：${JSON.stringify(addedLines(logsBeforeReload, await readActionLogs(session)).slice(-10))}）`
         );
       });
       const groups = await editorGroupTabs(page);
       expect(tabNamesInclude(groups[0] ?? [], MEMO_EPISODE), `原稿のタブは左の列のまま（${JSON.stringify(groups)}）`).toBe(true);
-      if (countTabsNamed(groups.flat(), MEMO_EPISODE) > 1) {
-        const added = addedLines(logsBefore, await readActionLogs(session));
-        const route = /原稿エディタ：.*(画面とつながりませんでした|タブが無いので、新しく開きます|同じ原稿のタブがほかにもあるところで)/;
-        expect(
-          added.some((line) => route.test(line)),
-          `同じ話の2枚目ができたのに、どの道で開いたかが記録に無い（足された行：${JSON.stringify(added.slice(-10))}）`
-        ).toBe(true);
-        console.info(`[E2E] 156：左の列に同じ話の2枚目（素のエディターへの譲り）ができた（タブ：${JSON.stringify(groups)}）`);
-      }
     },
     RESTART_LAUNCH
   );
