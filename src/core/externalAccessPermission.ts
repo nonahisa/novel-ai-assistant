@@ -165,6 +165,11 @@ const FEATURE_KEYED_TOOLS = new Set([
  */
 const SHARED_KEY_TOOLS: Readonly<Record<string, string>> = {
   "run.result": "run.request",
+  /*
+    `cover.ink`（2026-10-15）は `run.request` の coverBake で焼いてもらった表紙を測る口。
+    `run.result` と同じく組でしか使わないので、同じ鍵にする。返すのは墨の数字だけ
+  */
+  "cover.ink": "run.request",
 };
 
 /**

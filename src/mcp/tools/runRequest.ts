@@ -3,6 +3,9 @@ import nodePath from "node:path";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import {
+  RUN_COVER_FEATURE,
+  RUN_COVER_SIDES,
+  RUN_COVER_SIZES,
   RUN_FEATURES,
   RUN_INDEX_FEATURE,
   RUN_INDEX_LABEL,
@@ -10,8 +13,13 @@ import {
   RUN_REQUESTABLE_FEATURES,
   RUN_REQUEST_DIRECTORY,
   buildRunUri,
+  checkRunCover,
   checkRunFile,
+  isRunCoverFeature,
   isRunIndexFeature,
+  runCoverSideLabel,
+  describeRunCoverSpec,
+  type RunCoverSpec,
   runFeatureLabel,
   type RunFeature,
   formatRunTicket,
@@ -66,7 +74,8 @@ export const RUN_REQUEST_INPUT = {
     .describe(
       "走らせる機能（読み取りと生成だけ）。" +
         RUN_FEATURES.map((def) => `${def.feature}＝${def.label}`).join("、") +
-        `、${RUN_INDEX_FEATURE}＝${RUN_INDEX_LABEL}（手元の Ollama で検索用の索引を作る・更新する。料金なし。novel.search で引く）`
+        `、${RUN_INDEX_FEATURE}＝${RUN_INDEX_LABEL}（手元の Ollama で検索用の索引を作る・更新する。料金なし。novel.search で引く）` +
+        `、${RUN_COVER_FEATURE}＝作者の VS Code の EPUBエディターで表紙を焼く（AIを呼ばない。cover が要る。字の向きは cover.ink で測る）`
     ),
   file: z
     .string()
@@ -78,6 +87,17 @@ export const RUN_REQUEST_INPUT = {
     .describe(
       "vectorIndex のときだけ。all で登録済みの全作品を順に回す（外部AIの許可がある作品だけ。無い作品は結果に理由つきで並ぶ）。" +
         "省略か work で folder の作品だけ"
+    ),
+  cover: z
+    .object({
+      side: z.enum(RUN_COVER_SIDES as [string, ...string[]]).describe("front＝表紙、back＝裏表紙"),
+      vertical: z.boolean().describe("題名を縦に並べるなら true、横なら false"),
+      size: z.enum(RUN_COVER_SIZES as [string, ...string[]]).describe("題名の大きさ（large＝大・medium＝中・small＝小）"),
+    })
+    .optional()
+    .describe(
+      `${RUN_COVER_FEATURE} のときだけ（必須）。この1回だけ題名に当てる体裁で、book.json と画面の欄は変わらない。` +
+        "焼いた画像は［表紙を焼く］と同じ 設定/書籍/表紙_合成済み.png（裏表紙は 裏表紙_合成済み.png）に置き換わる"
     ),
 };
 
@@ -91,6 +111,7 @@ export interface RunRequestInput {
   feature: string;
   file?: string;
   scope?: "work" | "all";
+  cover?: { side: string; vertical: boolean; size: string };
 }
 
 export interface RunResultInput {
@@ -145,6 +166,17 @@ export async function runRequest(
   if (index && args.file !== undefined) {
     throw new McpToolError("索引づくりは作品ごとに作ります。file は渡さないでください。");
   }
+  // 表紙を焼く体裁は coverBake のときだけ、しかも必須（札を読む側と同じ判定 `checkRunCover`）
+  const coverFeature = isRunCoverFeature(args.feature);
+  if (coverFeature) {
+    const problem = checkRunCover(args.cover);
+    if (problem) throw new McpToolError(problem);
+    if (args.file !== undefined) {
+      throw new McpToolError("表紙を焼く依頼は話を指しません。file は渡さないでください。");
+    }
+  } else if (args.cover !== undefined) {
+    throw new McpToolError(`cover は ${RUN_COVER_FEATURE}（表紙を焼く）のときだけ使えます。`);
+  }
   if (args.file !== undefined) {
     const problem = checkRunFile(args.file);
     if (problem) throw new McpToolError(problem);
@@ -185,6 +217,7 @@ export async function runRequest(
     folder,
     ...(args.file !== undefined ? { file: args.file } : {}),
     ...(index && args.scope === "all" ? { scope: "all" as const } : {}),
+    ...(coverFeature ? { cover: args.cover as RunCoverSpec } : {}),
     client: deps.clientName(),
     createdAt: new Date(now).toISOString(),
   };
@@ -225,7 +258,11 @@ export async function runRequest(
             args.scope === "all" ? "登録済みの全作品" : "この作品"
           }。手元の Ollama で、料金はかかりません）。押すのは作者で、作者は途中で止められます。` +
           "作品の数によっては数分かかります。"
-        : `作者の VS Code に「${label}を走らせますか」という確認が出ます。押すのは作者です。`) + after,
+        : coverFeature
+          ? `作者の VS Code に「${runCoverSideLabel((args.cover as RunCoverSpec).side)}を焼きますか」という確認が出ます` +
+            `（${describeRunCoverSpec(args.cover as RunCoverSpec)}。AIは呼びません）。押すのは作者です。` +
+            "焼けたら result.findings の titleBlock を cover.ink の region に渡すと、題名の字が立っているかを測れます。"
+          : `作者の VS Code に「${label}を走らせますか」という確認が出ます。押すのは作者です。`) + after,
   };
 }
 

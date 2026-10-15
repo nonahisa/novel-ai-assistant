@@ -1894,6 +1894,11 @@ const fromData = { front: false, back: false };
 /** 押されたまま待っている合成 */
 const pending = { front: false, back: false };
 /**
+ * 元絵を読み終えるのを待っている、外部AIからの焼く依頼（2026-10-15）。
+ * pending と組で使う。依頼には番号（requestId）と、この1回だけ当てる体裁（layout）がある
+ */
+const pendingRequest = { front: null, back: null };
+/**
  * 画面に出さずに焼くための canvas（作者の裁定、2026-09-21）。
  *
  * **焼いた画像があるあいだ、プレビューは合成の canvas ではなくその画像を
@@ -2033,7 +2038,9 @@ function loadImage(side, src, retried) {
     drawCover(side);
     if (pending[side]) {
       pending[side] = false;
-      bake(side);
+      const request = pendingRequest[side];
+      pendingRequest[side] = null;
+      bake(side, request || undefined);
     }
   };
   image.onerror = function () {
@@ -2041,9 +2048,24 @@ function loadImage(side, src, retried) {
     // 読めない理由は「無い」か「別の在りかだから拒まれた」。
     // どちらも、拡張機能に中身そのものを貰えば解ける
     if (!retried) post('imageData', { side: side, config: readForm() });
-    else pending[side] = false;
+    else {
+      pending[side] = false;
+      failPendingRequest(side);
+    }
   };
   image.src = src;
+}
+
+/**
+ * 待っていた外部AIの焼く依頼を、焼けなかったと返す。**黙って捨てない**——
+ * 拡張機能は返事を待っており、黙ると時間切れまで「焼いています」のままになる
+ */
+function failPendingRequest(side) {
+  const request = pendingRequest[side];
+  pendingRequest[side] = null;
+  if (request) {
+    post('bakeFailed', { side: side, config: readForm(), requestId: request.requestId });
+  }
 }
 
 /**
@@ -2054,12 +2076,12 @@ function loadImage(side, src, retried) {
  * なっていた。ここからは、枠の中へ**はみ出させず縮めて中央に納め**、
  * 余った部分を frameBackground の色で塗る（作者の色選びの既定は黒）。
  */
-function drawCover(side, target) {
+function drawCover(side, target, layout) {
   // 焼くときは画面に出ていない canvas を渡してくる（下の bakeCanvas）
   const canvas = target || document.getElementById('canvas-' + side);
-  if (!canvas) return;
+  if (!canvas) return null;
   const image = images[side];
-  if (!image) return;
+  if (!image) return null;
 
   canvas.width = FRAME_WIDTH;
   canvas.height = FRAME_HEIGHT;
@@ -2079,7 +2101,8 @@ function drawCover(side, target) {
   const offsetY = Math.round((canvas.height - drawHeight) / 2);
   ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
 
-  drawTexts(ctx, canvas, readLayout(side));
+  // layout は外部AIの焼く依頼のときだけ渡る（この1回だけの体裁。欄は変えない）
+  return drawTexts(ctx, canvas, layout || readLayout(side));
 }
 
 /**
@@ -2173,6 +2196,11 @@ function drawTexts(ctx, canvas, layout) {
   const base = Math.min(canvas.width, canvas.height);
   const margin = base * 0.07;
   const used = {};
+  /*
+    描いた範囲（要素ごと）。外部AIの焼く依頼で、題名の墨だけを測れるように返す
+    （MCP の cover.ink）。**置き場所の計算を測る側へ写さない**ため、描いた値そのものを渡す
+  */
+  const drawn = {};
 
   ELEMENTS.forEach(function (key) {
     const style = layout[key];
@@ -2232,6 +2260,17 @@ function drawTexts(ctx, canvas, layout) {
     if (style.vertical) x += column === 'left' ? offset : -offset;
     else y += row === 'bottom' ? -offset : offset;
     used[slot] = offset + (style.vertical ? blockW * 1.15 : blockH * 1.15);
+    drawn[key] = {
+      left: Math.round(x),
+      top: Math.round(y),
+      width: Math.round(blockW),
+      height: Math.round(blockH),
+      fontSize: fontSize,
+      lines: lines.length,
+      vertical: style.vertical === true,
+      color: style.color,
+      text: text
+    };
 
     ctx.textBaseline = 'top';
     if (style.vertical) {
@@ -2263,6 +2302,7 @@ function drawTexts(ctx, canvas, layout) {
       });
     }
   });
+  return drawn;
 }
 
 /**
@@ -2278,16 +2318,34 @@ function bakeCanvas(side) {
   return offscreen[side];
 }
 
-function bake(side) {
+/**
+ * 焼く。request は外部AIの焼く依頼のときだけ渡る（2026-10-15）——
+ * { requestId, layout }。layout はこの1回だけ当てる体裁で、欄には入れない。
+ * 返事には依頼の番号と、題名を描いた範囲（titleBlock）と canvas の寸法を添える。
+ */
+function bake(side, request) {
   if (!images[side]) {
     // 元絵をまだ読めていない。読めたら続きをやる
     pending[side] = true;
+    pendingRequest[side] = request || null;
     if (sources[side]) loadImage(side, sources[side], false);
+    // 読む元絵が無い。依頼なら黙って待たせず、焼けなかったと返す
+    else failPendingRequest(side);
     return;
   }
 
+  // 依頼は画面に出ている canvas でしか焼かない（元絵を待つあいだに面が替わったときも）
+  if (request && !document.getElementById('canvas-' + side)) {
+    post('bakeFailed', {
+      side: side,
+      config: readForm(),
+      requestId: request.requestId,
+      reason: 'noCanvas'
+    });
+    return;
+  }
   const canvas = bakeCanvas(side);
-  drawCover(side, canvas);
+  const drawn = drawCover(side, canvas, request ? request.layout : undefined);
   let dataUrl = null;
   try {
     dataUrl = canvas.toDataURL('image/png');
@@ -2295,13 +2353,28 @@ function bake(side) {
     // 汚れた canvas は読み出せない。中身を貰って描き直してから焼く
     if (!fromData[side]) {
       pending[side] = true;
+      pendingRequest[side] = request || null;
       post('imageData', { side: side, config: readForm() });
+    } else if (request) {
+      post('bakeFailed', { side: side, config: readForm(), requestId: request.requestId });
     } else {
       post('bakeFailed', { side: side, config: readForm() });
     }
     return;
   }
-  post('bake', { side: side, dataUrl: dataUrl, config: readForm() });
+  if (!request) {
+    post('bake', { side: side, dataUrl: dataUrl, config: readForm() });
+    return;
+  }
+  post('bake', {
+    side: side,
+    dataUrl: dataUrl,
+    config: readForm(),
+    requestId: request.requestId,
+    titleBlock: (drawn && drawn.title) || null,
+    canvasWidth: canvas.width,
+    canvasHeight: canvas.height
+  });
 }
 
 /* cover:end */
@@ -2471,9 +2544,42 @@ window.addEventListener('message', function (event) {
     if (SIDES.indexOf(side) < 0) return;
     if (!message.dataUrl) {
       pending[side] = false;
+      failPendingRequest(side);
       return;
     }
     loadImage(side, message.dataUrl, true);
+    return;
+  }
+  if (message.type === 'bakeRequest') {
+    /*
+      外部AIからの焼く依頼（MCP の run.request の coverBake。2026-10-15）。
+
+      **画面に出ている canvas で焼く。** 確かめたいのは、縦書きの本の面（親が
+      writing-mode: vertical-rl）の中の canvas で題名が立って焼けるか（実機確認リスト
+      5488）である。画面の外の canvas は親の書字方向を受け継がないので、そちらで焼くと
+      直す前の不具合も起きず、何も確かめたことにならない。拡張機能は先に合成の面を
+      選ばせてから頼んでくる。それでも canvas が無ければ、焼かずにそう返す。
+
+      体裁は題名だけに、この1回だけ当てる（欄は変えない）。
+    */
+    const side = message.side;
+    if (SIDES.indexOf(side) < 0) return;
+    if (!document.getElementById('canvas-' + side)) {
+      post('bakeFailed', {
+        side: side,
+        config: readForm(),
+        requestId: message.requestId,
+        reason: 'noCanvas'
+      });
+      return;
+    }
+    const layout = readLayout(side);
+    layout.title = Object.assign({}, layout.title, {
+      visible: true,
+      vertical: message.vertical === true,
+      size: message.size
+    });
+    bake(side, { requestId: message.requestId, layout: layout });
     return;
   }
   if (message.type === 'imagePicked') {

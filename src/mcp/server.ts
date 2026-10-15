@@ -109,6 +109,7 @@ import {
   type RunRequestInput,
   type RunResultInput,
 } from "./tools/runRequest";
+import { COVER_INK_INPUT, coverInk, type CoverInkInput } from "./tools/coverInk";
 import {
   SCHEDULE_MILESTONES_INPUT,
   scheduleMilestones,
@@ -127,7 +128,7 @@ import {
  * そちらを直に呼ぶ（`test/unit/mcp/mcpTools.test.ts`）。混ぜると、
  * ツールの中身を確かめるのに stdio を立てなければならなくなる。
  *
- * **道具は26本**（0.99.19 で `novel.search`、0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
+ * **道具は27本**（0.107 の次の版で `cover.ink`、0.99.19 で `novel.search`、0.72.0 で `novel.notice`、0.75.6 で `guide.spotlight`、
  * 0.75.x で `windows.list`、0.82.1 で `setup.request`、0.83.x で `schedule.milestones`、
  * 0.85.0 で `notices.recent` と `works.list`、0.85.1 で `pending.list`、
  * 0.88 の次の版で `run.request` と `run.result`（設計書6.87.22）、
@@ -739,6 +740,26 @@ server.registerTool(
     （`permissionKeyOf`）——頼めるのに読めない、という半端な許可を作らない。
   */
   tool("run.result", (args: RunResultInput) => runResult(args))
+);
+
+server.registerTool(
+  "cover.ink",
+  {
+    title: "焼いた表紙の題名の墨を測る（字が立っているか）",
+    description:
+      "run.request の feature: coverBake で作者の VS Code に焼いてもらった表紙（設定/書籍/表紙_合成済み.png）を読み、" +
+      "題名の色の墨の外接矩形・字ごとの矩形と縦横比（aspect＝幅÷高さ）を返します。" +
+      "run.result の findings にある titleBlock を region に、title を text に渡すと、題名の範囲だけを字ごとに割り、" +
+      "「一」「_」が題名にあれば立っているか（verdict: upright／rotated）まで言います（立っていれば横長）。" +
+      "ほかの字だけの題名では判定せず数字だけ返します。**読むだけ**で、AIを呼ばず、本文も画像も返しません。" +
+      "許可は run.request と同じ鍵です。",
+    inputSchema: COVER_INK_INPUT,
+  },
+  /*
+    **作品を指すので、転送層が許可を確かめる**（鍵は `run.request`。`SHARED_KEY_TOOLS`）。
+    焼く依頼と組で使う道具なので、鍵を分けて作者に2回許させない
+  */
+  tool("cover.ink", (args: CoverInkInput) => coverInk(args))
 );
 
 server.registerTool(
