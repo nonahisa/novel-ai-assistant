@@ -59,6 +59,7 @@ import { describeFakeRequests, fakeOllamaLaunch, passLocalAiGate, startFakeOllam
 import { caretPosition, manuscriptFrames, memoPanelFrame, revealFlashLit } from "./support/manuscriptFrame";
 import { defaultCharactersFolder, settingsFolder, settingsPanelFrame, writeCharactersTo } from "./support/settingsFixture";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession } from "./support/vscodeApp";
+import { sendChatQuestion } from "./support/chatInput";
 import { holdsFor, waitUntil } from "./support/wait";
 import {
   acceptQuickPick,
@@ -160,11 +161,12 @@ async function openLargeChat(page: Page, from: number): Promise<Frame> {
   return large;
 }
 
-/** 入力欄に打って送り、答えが会話に出るまで待つ（手元のAIの関所が出たら通す） */
+/**
+ * 入力欄に入れて送り、答えが会話に出るまで待つ（手元のAIの関所が出たら通す）。
+ * 入れて送るのは `sendChatQuestion`（座標で押さず `fill` で入れ、自分の問いが出なければ1回だけ押し直す。2026-10-16）
+ */
 async function ask(page: Page, large: Frame, question: string, reply: string, from: number): Promise<void> {
-  await large.locator("#input").click();
-  await page.keyboard.insertText(question);
-  await large.locator("#send").click();
+  await sendChatQuestion(large, question, "大きい相談画面");
   await waitForReply(page, large, reply, from);
 }
 

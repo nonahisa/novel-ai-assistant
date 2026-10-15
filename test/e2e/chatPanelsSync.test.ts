@@ -21,6 +21,7 @@ import type { Frame, Page } from "playwright-core";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { fakeOllamaLaunch, passLocalAiGate, startFakeOllama, type FakeOllama } from "./support/fakeOllama";
 import { E2E_WORK_TITLE, withVsCode } from "./support/vscodeApp";
+import { sendChatQuestion } from "./support/chatInput";
 import { waitUntil } from "./support/wait";
 import { activeTabNames, clearNotifications, editorGroupTabs, pressWorkbenchKey, tabNamesInclude } from "./support/workbenchDom";
 
@@ -93,9 +94,8 @@ test("横のパネルと大きい画面を同時に開いて質問すると両�
       });
 
       /* ── 大きい画面で質問する ── */
-      await large.locator("#input").click();
-      await page.keyboard.insertText(QUESTION);
-      await large.locator("#send").click();
+      // 座標で押さず `fill` で入れて送る（小さい枠への押下が外れる揺れを避ける。support/chatInput.ts、2026-10-16）
+      await sendChatQuestion(large, QUESTION, "大きい画面");
 
       /* ── 大きい画面にも横のパネルにも、発言と答えが出る ── */
       for (const [name, frame] of [

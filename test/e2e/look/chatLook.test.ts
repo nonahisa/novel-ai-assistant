@@ -11,6 +11,7 @@ import { fakeOllamaLaunch, passLocalAiGate, startFakeOllama, type FakeOllama } f
 import { answerInput, runCommand } from "../support/quickInput";
 import { SIDEBAR_LAUNCH } from "../support/sidebar";
 import { withVsCode } from "../support/vscodeApp";
+import { sendChatQuestion } from "../support/chatInput";
 import { waitUntil } from "../support/wait";
 import { clearNotifications, dialogText, pickQuickPickRow, pressDialogButton, pressWorkbenchKey, quickPickRows, quickPickTitle } from "../support/workbenchDom";
 import { lookEnabled, lookNote, shootPage } from "./lookSupport";
@@ -51,9 +52,8 @@ async function openChat(page: Page): Promise<Frame> {
 
 async function ask(page: Page, frame: Frame, question: string, waitFor?: string): Promise<void> {
   const before = (await logText(frame)).length;
-  await frame.locator("#input").click();
-  await page.keyboard.insertText(question);
-  await frame.locator("#send").click();
+  // 座標で押さず `fill` で入れて送る（左の列の小さい枠への押下が外れる揺れを避ける。support/chatInput.ts、2026-10-16）
+  await sendChatQuestion(frame, question, "横の相談パネル");
   await waitUntil(
     async () => {
       await passLocalAiGate(page);

@@ -14,6 +14,7 @@ import { fakeOllamaLaunch, passLocalAiGate, startFakeOllama, type FakeOllama } f
 import { runCommand } from "../support/quickInput";
 import { SIDEBAR_LAUNCH } from "../support/sidebar";
 import { withVsCode } from "../support/vscodeApp";
+import { sendChatQuestion } from "../support/chatInput";
 import { waitUntil } from "../support/wait";
 import { clearNotifications, dialogText, pickQuickPickRow, pressDialogButton, quickPickRows, quickPickTitle } from "../support/workbenchDom";
 import { lookEnabled, lookNote, setPane, shootPage } from "./lookSupport";
@@ -79,9 +80,8 @@ describe.skipIf(!lookEnabled)("見た目の写真：対話式プロット作成�
         await waitUntil(async () => (await option("着想から掘る").count()) > 0, "型を選ぶ札が出る", 30_000);
         await option("着想から掘る").click();
         await waitUntil(async () => (await logText()).includes("着想"), "着想を尋ねる一言が出る", 30_000);
-        await frame.locator("#input").click();
-        await page.keyboard.insertText("港町で暮らす少女の凛が、消えた灯台守を探す話");
-        await frame.locator("#send").click();
+        // 座標で押さず `fill` で入れて送る（左の列の小さい枠への押下が外れる揺れを避ける。support/chatInput.ts、2026-10-16）
+        await sendChatQuestion(frame, "港町で暮らす少女の凛が、消えた灯台守を探す話", "対話式プロットの相談パネル");
         await waitUntil(
           async () => {
             await passLocalAiGate(page);

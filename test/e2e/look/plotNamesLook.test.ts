@@ -15,6 +15,7 @@ import { fakeOllamaLaunch, passLocalAiGate, startFakeOllama, type FakeOllama } f
 import { defaultCharactersFolder, writeCharactersTo } from "../support/settingsFixture";
 import { SIDEBAR_LAUNCH } from "../support/sidebar";
 import { withVsCode } from "../support/vscodeApp";
+import { sendChatQuestion } from "../support/chatInput";
 import { waitUntil } from "../support/wait";
 import { clearNotifications, dialogText, pickQuickPickRow, pressDialogButton, pressWorkbenchKey, quickPickRows, quickPickTitle } from "../support/workbenchDom";
 import { lookEnabled, lookNote, shootPage, shootPageKeepingToasts } from "./lookSupport";
@@ -293,9 +294,8 @@ describe.skipIf(!lookEnabled)("見た目の写真：プロットモードの名�
         );
         const frame = chat as Frame;
         await waitUntil(async () => ((await frame.evaluate(() => document.getElementById("context-what")?.textContent ?? "")) ?? "").length > 3, "相談の対象が決まる", 30_000);
-        await frame.locator("#input").click();
-        await page.keyboard.insertText("相馬 誠の年齢は17歳にします");
-        await frame.locator("#send").click();
+        // 座標で押さず `fill` で入れて送る（左の列の小さい枠への押下が外れる揺れを避ける。support/chatInput.ts、2026-10-16）
+        await sendChatQuestion(frame, "相馬 誠の年齢は17歳にします", "横の相談パネル");
         await waitUntil(
           async () => {
             await passLocalAiGate(page);
