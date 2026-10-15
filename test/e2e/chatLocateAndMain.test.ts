@@ -102,11 +102,58 @@ async function openSideChat(page: Page): Promise<Frame> {
   return side;
 }
 
-/** 面の入力欄に打って送り、答えが会話に出るまで待つ */
+/** 入力欄と枠の様子（打ち込みや送るのが外れたとき、失敗の文に添える） */
+async function inputState(frame: Frame): Promise<string> {
+  const inner = await frame
+    .evaluate(() => ({
+      active: document.activeElement?.id || document.activeElement?.tagName || "",
+      hasFocus: document.hasFocus(),
+      value: (document.getElementById("input") as HTMLTextAreaElement | null)?.value ?? null,
+    }))
+    .catch((error: unknown) => String(error));
+  const outerBox = await frame
+    .parentFrame()
+    ?.frameElement()
+    .then((element) => element.boundingBox())
+    .catch(() => null);
+  const inputBox = await frame.locator("#input").boundingBox().catch(() => null);
+  return `面の中：${JSON.stringify(inner)}／枠：${JSON.stringify(outerBox)}／入力欄：${JSON.stringify(inputBox)}`;
+}
+
+/**
+ * 面の入力欄に打って送り、答えが会話に出るまで待つ。
+ *
+ * **入力欄は座標で押さず、`fill` で焦点を渡して入れる**（2026-10-16）。横の相談パネルは左の列の一番下に
+ * 押し込まれ、枠（WebView）の高さは約93px、入力欄はその下（窓の外）にある。押すたびに中を巻いて押すが、
+ * 左の列の木の高さがまだ動いている最中だと（枠の y が回ごとに 739〜766 と違った）、押下が外側の枠にだけ届き
+ * 入力欄に届かない。単独で24回中4回、打った字がどこにも入らず［送る］が空振りして「答えが出ない」で落ちた
+ * （偽のAIへの頼みは0件）。0.107.0 でも同じ文で落ちており、製品の変更ではない。
+ * 見張っているのは「答えが返ったあとの配線」なので、入れ方はキーで打つことにこだわらない。
+ * **［送る］も同じ小さい枠の中にある**ので、押したあと自分の問いが会話に出るのを待ち、出なければ1回だけ押し直す
+ * （「送るのが外れた」と「答えが来ない」を失敗の文で分けるため）
+ */
 async function ask(page: Page, frame: Frame, question: string, answer: string, where: string): Promise<void> {
-  await frame.locator("#input").click();
-  await page.keyboard.insertText(question);
+  const input = frame.locator("#input");
+  await input.fill(question);
+  const typed = await input.inputValue().catch(() => "");
+  if (typed !== question) {
+    throw new Error(`${where}の入力欄に問いが入りません（入った字：${JSON.stringify(typed)}／${await inputState(frame)}）`);
+  }
+
+  const sent = async (): Promise<boolean> => (await logText(frame)).includes(question);
   await frame.locator("#send").click();
+  const sentFirst = await waitUntil(sent, `${where}の会話に自分の問いが出る`, 5_000).then(
+    () => true,
+    () => false
+  );
+  if (!sentFirst) {
+    // 1回目の押下が外れたときだけ押し直す（入力欄に字が残っている＝まだ送っていない）
+    if ((await input.inputValue().catch(() => "")) === question) await frame.locator("#send").click();
+    await waitUntil(sent, `${where}の会話に自分の問いが出る（［送る］を押し直したあと）`, 10_000).catch(async (error: unknown) => {
+      throw new Error(`${String(error)}（${await inputState(frame)}／${where}の会話：${JSON.stringify((await logText(frame)).slice(-400))}）`);
+    });
+  }
+
   await waitUntil(
     async () => {
       await passLocalAiGate(page);
