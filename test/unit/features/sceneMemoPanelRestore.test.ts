@@ -348,9 +348,10 @@ describe("拡張機能ホストの再起動（残ったタブを開き直す）"
     registerSceneMemoPanelRestore(context(), deps, works);
     await vi.runAllTimersAsync();
     vi.useRealTimers();
-    await settle();
+    // 決まった回数だけ後回しにする settle では、全件を同時に走らせて重いときに
+    // 閉じる処理より先に確かめてしまい揺れた（2026-10-15）。閉じ終わるまで待つ
+    await vi.waitFor(() => expect(closedTabs).toEqual([tab]), { timeout: 5_000 });
     expect(created).toHaveLength(1);
     expect(created[0]!.panel.webview.html).toContain("Ctrl+Alt+M");
-    expect(closedTabs).toEqual([tab]);
   });
 });
