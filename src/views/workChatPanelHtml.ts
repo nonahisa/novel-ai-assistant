@@ -417,14 +417,14 @@ body.dragging #drop-overlay { display: flex; }
  * だから低いときは、無くても相談できるもの（相談の対象の行・聞き方の例・案内・考え中の行・
  * 控えのボタン）を隠し、入力欄を1行ぶんまで低くして、入力欄と［送る］が必ず見えるようにする。
  * 隠したものは、境目を動かして高くすれば戻る。
+ * **大きい画面へ移すボタン（#to-main）は隠さない。** 縮んで狭いときこそ、そこへ逃げる入口が要る
+ * （入れても1行に収まり、100pxに足りる）。
  */
 @media (max-height: 200px) {
   #context,
   #examples,
   #composer .hint,
   #thinking,
-  #to-main,
-  #to-sub,
   #apply-settings,
   #clear { display: none; }
   #composer { padding: 4px 8px; }

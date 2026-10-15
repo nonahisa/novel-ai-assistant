@@ -59,14 +59,18 @@ describe("横の相談パネルの高さ", () => {
     expect(block, "低いときの決まり（@media (max-height)）が無い").toBeTruthy();
     // 約100pxに縮んだ形を覆う高さで効かせる
     expect(block!.limit).toBeGreaterThanOrEqual(160);
-    for (const hidden of ["#examples", "#context", "#composer .hint", "#thinking", "#to-main", "#apply-settings", "#clear"]) {
+    for (const hidden of ["#examples", "#context", "#composer .hint", "#thinking", "#apply-settings", "#clear"]) {
       expect(block!.body, `${hidden} を隠していない`).toMatch(
         new RegExp(`${hidden.replace(/[.#]/g, (c) => `\\${c}`)}[^{]*\\{[^}]*display: none`)
       );
     }
-    // ［送る］と入力欄は隠さない
-    expect(block!.body).not.toMatch(/#send[^{]*\{[^}]*display: none/);
-    expect(block!.body).not.toMatch(/#input[^{]*\{[^}]*display: none/);
+    // ［送る］と入力欄は隠さない。［メインに表示］も隠さない——縮んで狭いときこそ大きい画面へ逃げる入口が要る
+    // （chatLocateAndMain の2件目は、縮んだ横のパネルでこれを押す）
+    for (const kept of ["#send", "#input", "#to-main"]) {
+      expect(block!.body, `${kept} を隠している`).not.toMatch(
+        new RegExp(`${kept.replace(/[.#]/g, (c) => `\\${c}`)}[^{]*\\{[^}]*display: none`)
+      );
+    }
     // 入力欄は1行ぶんまで低くしてよい（ふだんの最低54pxのままでは100pxに収まらない）
     expect(block!.body).toMatch(/textarea[^{]*\{[^}]*min-height: (\d+)px/);
     const min = Number(/textarea[^{]*\{[^}]*min-height: (\d+)px/.exec(block!.body)![1]);
