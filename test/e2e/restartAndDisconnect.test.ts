@@ -294,6 +294,235 @@ test("原稿と校正・メモパネルを左右に開いたまま拡張機能�
   );
 }, 300_000);
 
+/** 問いの窓の、閉じて開き直す道のボタン（1回目 `CLOSE_AND_REOPEN_ITEM`・2回目 `COPIED_CLOSE_AND_REOPEN_ITEM`） */
+const CLOSE_REOPEN_BUTTON = "閉じて開き直す";
+const COPIED_CLOSE_REOPEN_BUTTON = "コピーしたので、閉じて開き直す";
+
+/** 1回目の［閉じて開き直す］のあとに出る、コピーを頼む窓の見出し */
+const COPY_FIRST_MESSAGE = "閉じる前に、つながりの切れた原稿エディターで［本文をコピー］を押してください";
+
+/** いま出ている窓のボタンの名前（前後の空白を落とす） */
+async function dialogButtons(page: Page): Promise<string[]> {
+  const names = await page.locator(".monaco-dialog-box .monaco-button").allInnerTexts();
+  return names.map((name) => name.trim()).filter((name) => name !== "");
+}
+
+/**
+ * 156 の［閉じて開き直す］の道（0.106.7。作者の裁定 2026-10-15、設計書6.25.11）。
+ *
+ * 何を見張るか：
+ * - 1回目の［閉じて開き直す］は「先に［本文をコピー］を押してください」の窓だけで、**タブを閉じない**
+ *   （届いていなかった字の控えは切れた画面の中にしか無く、閉じると消えるため）
+ * - もう一度同じ原稿の行を選ぶと、ボタンが［コピーしたので、閉じて開き直す］に替わる
+ * - それを選ぶと、タブを閉じて**同じ列・同じ入口（縦／横）**で開き直し、その行が示される
+ * - どの列にも同じ話の2枚目ができない
+ *
+ * ［本文をコピー］は押さない（この機械の OS のクリップボードを書き換えるため。288 と同じ）。
+ * 製品はコピーしたかを確かめず、2回目の問いで「コピーした」と答えたことだけを見る。
+ *
+ * 「同じ入口」は、画面の DOM からは読めない（タブに入口の名前が出ない）ので、行へ飛ぶ道の操作ログの
+ * 「（入口: …）」と、面の向き（`body.vertical`）が再起動の前と同じかで見る。
+ */
+test("拡張機能ホストの再起動で切れた原稿へ校正・メモパネルから飛ぶとき、［閉じて開き直す］は1回目はコピーを頼むだけで閉じず、もう一度選ぶと［コピーしたので、閉じて開き直す］が出て、選ぶと同じ列・同じ入口で開き直してその行が示され、2枚目ができない", async () => {
+  await withVsCode(
+    "再起動をまたぐ：切れた原稿を閉じて開き直す",
+    [{ name: MEMO_EPISODE, text: `一行目の文。\n// ${MEMO_TEXT}\n三行目の文。\n` }],
+    async (session) => {
+      const { page } = session;
+      const frame = await openEpisode(page, MEMO_EPISODE, "三行目の文");
+      const verticalBefore = await frame.evaluate(() => document.body.classList.contains("vertical"));
+      await placeCaretAfter(frame, "一行目の文");
+      await page.keyboard.press("Control+Alt+KeyM");
+      await waitUntil(
+        async () => ((await (await memoPanelFrame(page))?.locator("button.go", { hasText: MEMO_TEXT }).count()) ?? 0) > 0,
+        "校正・メモパネルが右に開き、メモの行が出る",
+        30_000
+      );
+      const before = await readTabState(page);
+      expect(before.length, `原稿とパネルが左右の2列に開く（${JSON.stringify(before)}）`).toBeGreaterThanOrEqual(2);
+      const groupsBefore = await editorGroupTabs(page);
+      expect(tabNamesInclude(groupsBefore[0] ?? [], MEMO_EPISODE), `再起動の前、原稿のタブは左の列（${JSON.stringify(groupsBefore)}）`).toBe(true);
+      expect(countTabsNamed(groupsBefore.flat(), MEMO_EPISODE), "再起動の前は原稿のタブが1枚").toBe(1);
+
+      // 再起動して「つながりが切れました」を再読み込みせずに閉じる（156 と同じ）
+      const logsBeforeRestart = await readActionLogs(session);
+      await restartExtensionHost(page, MEMO_EPISODE);
+      let modal: string | undefined;
+      await waitUntil(async () => ((modal = await dialogText(page)) ?? "").includes(DISCONNECTED_MESSAGE), "「つながりが切れました」のモーダルが出る", 60_000).catch(
+        (error: unknown) => {
+          throw new Error(`${String(error)}（いま出ている窓：${JSON.stringify(modal)}）`);
+        }
+      );
+      await closeDialog(page);
+
+      // 新しい拡張機能が校正・メモパネルを引き取るのを待ってから押す（156 の注釈）
+      const adopted = /校正・メモパネル：.*(開き直しました|引き取りました)/;
+      await waitUntil(
+        async () => addedLines(logsBeforeRestart, await readActionLogs(session)).some((line) => adopted.test(line)),
+        "再起動のあと、新しい拡張機能が校正・メモパネルを引き取ったことが操作ログに残る",
+        30_000
+      ).catch(async (error: unknown) => {
+        throw new Error(
+          `${String(error)}（足された行：${JSON.stringify(addedLines(logsBeforeRestart, await readActionLogs(session)).slice(-10))}` +
+            `／タブ：${JSON.stringify(await readTabState(page))}／${await describeNotices(session)}）`
+        );
+      });
+      const memoTitle = "校正・メモパネル";
+      await waitUntil(
+        async () => (await editorGroupTabs(page)).flat().filter((name) => name.includes(memoTitle)).length === 1,
+        "校正・メモパネルのタブが1枚だけになる",
+        10_000
+      ).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}（タブ：${JSON.stringify(await readTabState(page))}）`);
+      });
+
+      /** 校正・メモパネルのメモの行を押し、切れた原稿へ飛ぶときの問いの窓が出るのを待って、その文を返す */
+      const pressMemoRowAndWaitAsk = async (label: string): Promise<string> => {
+        let panel: Frame | undefined;
+        await waitUntil(
+          async () => {
+            panel = await memoPanelFrame(page);
+            return panel !== undefined && (await panel.locator("button.go", { hasText: MEMO_TEXT }).count().catch(() => 0)) > 0;
+          },
+          `${label}：校正・メモパネルにメモの行が出ている`,
+          30_000
+        );
+        if (!panel) throw new Error("校正・メモパネルが見つかりません");
+        const logsBefore = await readActionLogs(session);
+        await panel.locator("button.go", { hasText: MEMO_TEXT }).first().click();
+        let asked: string | undefined;
+        await waitUntil(async () => ((asked = await dialogText(page)) ?? "").includes(REVEAL_DISCONNECTED_MESSAGE), `${label}：切れた原稿へ飛ぶときの問いの窓が出る`, 20_000).catch(
+          async (error: unknown) => {
+            throw new Error(
+              `${String(error)}（いま出ている窓：${JSON.stringify(asked)}／タブ：${JSON.stringify(await readTabState(page))}` +
+                `／足された行：${JSON.stringify(addedLines(logsBefore, await readActionLogs(session)).slice(-10))}）`
+            );
+          }
+        );
+        return asked ?? "";
+      };
+
+      /* ── 1回目：［閉じて開き直す］はコピーを頼むだけで、タブを閉じない ── */
+      await pressMemoRowAndWaitAsk("1回目");
+      const firstButtons = await dialogButtons(page);
+      expect(firstButtons, `1回目の問いのボタン（${JSON.stringify(firstButtons)}）`).toContain(RELOAD_BUTTON);
+      expect(firstButtons, `1回目の問いのボタン（${JSON.stringify(firstButtons)}）`).toContain(CLOSE_REOPEN_BUTTON);
+      expect(firstButtons, `1回目はまだ「コピーした」と答えられない（${JSON.stringify(firstButtons)}）`).not.toContain(COPIED_CLOSE_REOPEN_BUTTON);
+
+      const oldFrame = await waitForManuscriptFrame(page, "三行目の文", "切れた原稿の面がまだ残っている", 5_000);
+      await pressDialogButton(page, CLOSE_REOPEN_BUTTON);
+      let copyAsk: string | undefined;
+      await waitUntil(async () => ((copyAsk = await dialogText(page)) ?? "").includes(COPY_FIRST_MESSAGE), "1回目のあと、先に［本文をコピー］を押すよう頼む窓が出る", 10_000).catch(
+        async (error: unknown) => {
+          throw new Error(`${String(error)}（いま出ている窓：${JSON.stringify(copyAsk)}／タブ：${JSON.stringify(await readTabState(page))}）`);
+        }
+      );
+      await closeDialog(page);
+      // 閉じない：切れた面はそのまま、タブは左の列に1枚のまま（しばらく見続ける）
+      await holdsFor(
+        async () => {
+          const groups = await editorGroupTabs(page);
+          return !oldFrame.isDetached() && countTabsNamed(groups.flat(), MEMO_EPISODE) === 1 && tabNamesInclude(groups[0] ?? [], MEMO_EPISODE);
+        },
+        "1回目の［閉じて開き直す］では、原稿のタブが閉じない（切れた面が残り、左の列に1枚のまま）",
+        4_000
+      ).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}（面が外れた：${oldFrame.isDetached()}／タブ：${JSON.stringify(await readTabState(page))}）`);
+      });
+
+      /* ── 2回目：同じ原稿の行をもう一度選ぶと［コピーしたので、閉じて開き直す］が出る ── */
+      await pressMemoRowAndWaitAsk("2回目");
+      const secondButtons = await dialogButtons(page);
+      expect(secondButtons, `2回目の問いのボタン（${JSON.stringify(secondButtons)}）`).toContain(COPIED_CLOSE_REOPEN_BUTTON);
+      expect(secondButtons, `2回目も既定の［ウィンドウを再読み込み］が並ぶ（${JSON.stringify(secondButtons)}）`).toContain(RELOAD_BUTTON);
+      expect(secondButtons, `2回目は「コピー前」の［閉じて開き直す］が並ばない（${JSON.stringify(secondButtons)}）`).not.toContain(CLOSE_REOPEN_BUTTON);
+
+      const logsBeforeReopen = await readActionLogs(session);
+      await pressDialogButton(page, COPIED_CLOSE_REOPEN_BUTTON);
+
+      // 切れたタブを閉じ、同じ列・同じ入口で開き直したことが操作ログに残る
+      const reopenLine = /原稿エディタ：.*つながりの切れたタブを閉じ、(\d+)列目へ開き直します（入口: ([^）]+)）/;
+      let reopen: RegExpExecArray | undefined;
+      await waitUntil(
+        async () => {
+          for (const line of addedLines(logsBeforeReopen, await readActionLogs(session))) {
+            const match = reopenLine.exec(line);
+            if (match) {
+              reopen = match;
+              return true;
+            }
+          }
+          return false;
+        },
+        "［コピーしたので、閉じて開き直す］のあと、切れたタブを閉じて開き直したことが操作ログに残る",
+        20_000
+      ).catch(async (error: unknown) => {
+        throw new Error(
+          `${String(error)}（足された行：${JSON.stringify(addedLines(logsBeforeReopen, await readActionLogs(session)).slice(-10))}` +
+            `／タブ：${JSON.stringify(await readTabState(page))}／いま出ている窓：${JSON.stringify(await dialogText(page))}）`
+        );
+      });
+      if (!reopen) throw new Error("開き直しの行が読めません");
+      expect(reopen[1], `開き直すのは左の列（1列目）：${reopen[0]}`).toBe("1");
+      const reopenedEntry = reopen[2];
+      // 開き直しは共通の口を通り、渡した入口で新しく開く（`features/manuscriptTab.ts` の「タブが無いので、新しく開きます」）
+      const openedLine = /原稿エディタ：.*タブが無いので、新しく開きます（入口: ([^／]+)／列: /;
+      let freshEntry: string | undefined;
+      await waitUntil(
+        async () => {
+          for (const line of addedLines(logsBeforeReopen, await readActionLogs(session))) {
+            const match = openedLine.exec(line);
+            if (match) {
+              freshEntry = match[1];
+              return true;
+            }
+          }
+          return false;
+        },
+        "閉じたあと、同じ入口で新しく開いたことが操作ログに残る",
+        20_000
+      ).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}（足された行：${JSON.stringify(addedLines(logsBeforeReopen, await readActionLogs(session)).slice(-10))}）`);
+      });
+      expect(freshEntry, "閉じる前のタブの入口で開き直す").toBe(reopenedEntry);
+
+      // 古い面は外れ、新しい面が本文を描き、カーソルがメモの行に来る（その行が示される）
+      await waitUntil(() => oldFrame.isDetached(), "閉じたので、切れた面が外れる", 20_000);
+      const fresh = await waitForManuscriptFrame(page, "三行目の文", "開き直した原稿エディターの面が本文を描く", 30_000);
+      let caret: { lineText: string; column: number } | undefined;
+      await waitUntil(
+        async () => ((caret = await caretPosition(fresh).catch(() => undefined))?.lineText ?? "").includes(MEMO_TEXT),
+        "開き直したあと、カーソルがメモの行に来る",
+        15_000
+      ).catch(async (error: unknown) => {
+        throw new Error(
+          `${String(error)}（カーソル：${JSON.stringify(caret)}` +
+            `／足された行：${JSON.stringify(addedLines(logsBeforeReopen, await readActionLogs(session)).slice(-10))}）`
+        );
+      });
+      const verticalAfter = await fresh.evaluate(() => document.body.classList.contains("vertical"));
+      expect(verticalAfter, "開き直した面の向き（縦／横）が再起動の前と同じ").toBe(verticalBefore);
+
+      // どの列にも同じ話の2枚目ができない。原稿のタブは左の列に1枚
+      await holdsFor(
+        async () => {
+          const groups = await editorGroupTabs(page);
+          return countTabsNamed(groups.flat(), MEMO_EPISODE) === 1 && tabNamesInclude(groups[0] ?? [], MEMO_EPISODE);
+        },
+        "開き直したあとも、原稿のタブは左の列に1枚だけで、どの列にも2枚目ができない",
+        5_000
+      ).catch(async (error: unknown) => {
+        throw new Error(
+          `${String(error)}（タブ：${JSON.stringify(await readTabState(page))}` +
+            `／足された行：${JSON.stringify(addedLines(logsBeforeReopen, await readActionLogs(session)).slice(-10))}）`
+        );
+      });
+      expect(await dialogText(page), "開き直したあと、窓は残っていない").toBeUndefined();
+    },
+    RESTART_LAUNCH
+  );
+}, 300_000);
+
 /* ────────────────────────────── 200 ────────────────────────────── */
 
 const EP1 = "001_いち.txt";

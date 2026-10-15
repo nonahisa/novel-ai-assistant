@@ -32,7 +32,7 @@ import { composeText, openEpisode, placeCaretAfter } from "./support/manuscriptF
 import { describeNotices, waitForNotice } from "./support/noticeRecord";
 import { addLocalRemote, gitWhileRunning, initRepoWithFirstCommit, porcelainLines } from "./support/gitFixture";
 import { runCommand, waitForQuickInput, waitQuickInputClosed } from "./support/quickInput";
-import { SIDEBAR_LAUNCH } from "./support/sidebar";
+import { SIDEBAR_LAUNCH, waitTreeSettled } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode, type E2ESession, type LaunchOptions } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 import {
@@ -60,6 +60,12 @@ const OTHER_FIRST_LINE = "　隣の作品の本文。";
 const REGISTER_OTHER_KEY = "ctrl+alt+shift+b";
 const REGISTER_OTHER_PRESS = "Control+Alt+Shift+KeyB";
 const SHOW_SIDEBAR_PRESS = "Control+Alt+Shift+KeyJ";
+/**
+ * 作品一覧を丸ごと描き直すキー（`novelai.refresh`＝「最新の情報に更新」。git の状態は読み直さず、
+ * 一覧の行だけを作り直す）。落ちたときの切り分けにだけ使う（`diagnoseRowMarks`）
+ */
+const REDRAW_LIST_KEY = "ctrl+alt+shift+p";
+const REDRAW_LIST_PRESS = "Control+Alt+Shift+KeyP";
 
 /** 起こし方：左の列（作品一覧）を出すキーと、もう1つの作品を登録するキー。`prepare` は作品と git の準備 */
 function launchFor(prepare: (folders: { workFolder: string; otherFolder: string; root: string }) => Promise<void>): LaunchOptions {
@@ -70,7 +76,7 @@ function launchFor(prepare: (folders: { workFolder: string; otherFolder: string;
   };
   return {
     settings: { ...SIDEBAR_LAUNCH.settings },
-    keybindings: [...SIDEBAR_LAUNCH.keybindings, registerOther],
+    keybindings: [...SIDEBAR_LAUNCH.keybindings, registerOther, { key: REDRAW_LIST_KEY, command: "novelai.refresh" }],
     prepareWork: async ({ workFolder }) => {
       const library = path.dirname(workFolder);
       const otherFolder = path.join(library, OTHER_TITLE);
@@ -158,6 +164,43 @@ async function describeSync(session: E2ESession, repo: string, titles: readonly 
   );
 }
 
+/**
+ * 作品一覧の「記録待ち」が思った数にならずに待ちが切れたとき、どこで止まったかを切り分けて文にする
+ * （2026-10-15。1件目が時々「画面テストの作品」の行だけ［記録待ち1］が付かずに落ちた。git status は2件、
+ * 単独で負荷あり・なし計10回は通り、手元では写せなかった）。
+ *
+ * 1. さらに30秒待って揃えば「遅れ」（テストの待ち不足）
+ * 2. 揃わなければ、git を読み直さずに一覧だけを丸ごと描き直し（`novelai.refresh`）、行を読み直す。
+ *    - 描き直すと付く → 同期の見張りの数は正しく、**作品一覧の行の描き直しが抜けた**（`views/workTree.ts` の
+ *      `redrawIfChanged`。印の変わった行だけを撃つ所）
+ *    - 描き直しても付かない → **同期の見張りが持つその作品の数が古い**（`features/gitSync.ts` の
+ *      `runRefresh`。同じ置き場の後から始めた読みが先に受け取られると、その作品の読みは捨てられる）
+ *
+ * テストの合否は変えない（ここへ来た時点で落ちる）。離れた機械で落ちたときに原因が読めるようにするだけ
+ */
+async function diagnoseRowMarks(
+  session: E2ESession,
+  repo: string,
+  titles: readonly string[],
+  settled: () => Promise<boolean>
+): Promise<string> {
+  const { page } = session;
+  const late = await waitUntil(settled, "さらに待つと揃う", 30_000)
+    .then(() => true)
+    .catch(() => false);
+  if (late) return "【切り分け】さらに30秒待つと揃った（遅れ。テストの待ち不足）";
+  const before = await describeSync(session, repo, titles);
+  await pressWorkbenchKey(page, REDRAW_LIST_PRESS);
+  await waitTreeSettled(page).catch(() => undefined);
+  const after = await settled();
+  return (
+    `【切り分け】さらに30秒待っても揃わない（${before}）。一覧だけを丸ごと描き直すと` +
+    (after
+      ? "揃った：同期の見張りの数は正しく、作品一覧の行の描き直しが抜けた（views/workTree.ts の redrawIfChanged）"
+      : `揃わない：同期の見張りが持つ作品ごとの数が古い（features/gitSync.ts の runRefresh）。描き直したあと：${await describeSync(session, repo, titles)}`)
+  );
+}
+
 /** ステータスバーの同期の項目（`hasText` の字を含むもの）を押し、置き場の同期の選ぶ画面まで進む */
 async function openSyncMenuFromStatusBar(page: Page, hasText: string): Promise<void> {
   const item = page.locator(".part.statusbar .statusbar-item", { hasText }).first();
@@ -213,16 +256,16 @@ test("書庫で書き換えると「未記録」が置き場の数で出て、�
       /* ── 2つの作品の本文を書き換える（外から足す）→ 置き場の数で「未記録 2」 ── */
       await appendFile(path.join(session.manuscriptFolder, EPISODE), "足した一行。\n", "utf8");
       await appendFile(path.join(otherFolderOf(session), "本文", OTHER_EPISODE), "隣に足した一行。\n", "utf8");
-      await waitUntil(
-        async () =>
-          (await statusBarCount(page, "未記録")) === 2 &&
-          (await rowPending(page, E2E_WORK_TITLE)) === 1 &&
-          (await rowPending(page, OTHER_TITLE)) === 1,
-        "ステータスバーが「未記録 2」（置き場の数）、作品一覧の2つの行が「記録待ち1」になる",
-        30_000
-      ).catch(async (error: unknown) => {
-        throw new Error(`${String(error)}（${await describeSync(session, library, titles)}）`);
-      });
+      const markedBoth = async (): Promise<boolean> =>
+        (await statusBarCount(page, "未記録")) === 2 &&
+        (await rowPending(page, E2E_WORK_TITLE)) === 1 &&
+        (await rowPending(page, OTHER_TITLE)) === 1;
+      await waitUntil(markedBoth, "ステータスバーが「未記録 2」（置き場の数）、作品一覧の2つの行が「記録待ち1」になる", 30_000).catch(
+        async (error: unknown) => {
+          const seen = await describeSync(session, library, titles);
+          throw new Error(`${String(error)}（${seen}）${await diagnoseRowMarks(session, library, titles, markedBoth)}`);
+        }
+      );
       expect(await porcelainLines(library), "git status の行の数とステータスバーの数が同じ").toHaveLength(2);
 
       /* ── 80：「GitHub の様子を読み直す」の知らせとステータスバーの数が食い違わない ── */
