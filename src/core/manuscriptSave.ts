@@ -108,6 +108,45 @@ export interface SaveSteps {
   save(): Promise<boolean>;
   /** いまの文書の字数 */
   chars(): number;
+  /**
+   * 差のある便を「入った」と数えたあと、まだ一度も保存されていないか。
+   * 未保存でない文書にだけ訊く。
+   *
+   * 読み取り専用の原稿（設定 `files.readonlyInclude`）では、便を当てると
+   * `applyEdit` は true を返し、文書の本文も変わるのに、**未保存にならず、
+   * 保存もされない**（2026-10-15、画面の自動テストで確かめた。閉じると本文は
+   * ファイルの中身へ戻る）。未保存でないから保存済み、と読むと、**打った字の
+   * 入っていないファイルを「保存しました」と言う。**
+   */
+  appliedButNeverSaved?(): boolean;
+}
+
+/** 便を当てたあと、文書が未保存になるのを待つ長さ（ふつうは当てた時点でなっている） */
+export const EDIT_TAKEN_WAIT_MS = 300;
+
+/**
+ * 差のある便を当てたあと、文書が未保存になったか（設計書6.25.9）。
+ *
+ * 読み取り専用の原稿では `applyEdit` が true を返し本文も変わるのに、未保存に
+ * ならない——**保存されないので、閉じると字が消える。** 差のある便を当てた
+ * あとにだけ訊く（差の無い便では文書は変わらないので、未保存にならなくて正しい。
+ * 未変更の文書を取り違えないよう、呼び出し側が差の有無で分ける）。
+ *
+ * ふつうの原稿は当てた時点で未保存になっているので、待たずに true を返す。
+ * なっていないときだけ少し待って見直す——印の届き方が遅れた場合に、入った
+ * 字を「入らなかった」と言わないため。
+ */
+export async function editTakenByDocument(
+  isDirty: () => boolean,
+  waitMs: number = EDIT_TAKEN_WAIT_MS,
+  stepMs = 25
+): Promise<boolean> {
+  if (isDirty()) return true;
+  for (let waited = 0; waited < waitMs; waited += stepMs) {
+    await new Promise((resolve) => setTimeout(resolve, stepMs));
+    if (isDirty()) return true;
+  }
+  return false;
 }
 
 /**
@@ -117,6 +156,8 @@ export interface SaveSteps {
  *   打った字が入っていないファイルを「保存しました」と言うことになる
  * - 未保存でない文書は保存し直さない。VS Code は未変更の文書の保存に
  *   false を返すので、それを失敗と取り違えない
+ * - ただし未保存でないのに、入ったと数えた字が一度も保存されていなければ
+ *   失敗で返す（`appliedButNeverSaved`。読み取り専用の原稿。2026-10-15）
  */
 export async function runSaveRequest(seq: number, steps: SaveSteps): Promise<SaveResult> {
   const fail = (reason: string): SaveResult => ({ type: "saveResult", seq, ok: false, reason });
@@ -139,6 +180,12 @@ export async function runSaveRequest(seq: number, steps: SaveSteps): Promise<Sav
     if (!saved || steps.isDirty()) {
       return fail("VS Code が保存できなかったと返しました");
     }
+  } else if (steps.appliedButNeverSaved?.()) {
+    // 未保存でないのに、入ったはずの字が保存されていない（読み取り専用の原稿）
+    return fail(
+      "打った字が保存されていません（原稿が読み取り専用などで、VS Code が保存しない状態です）。" +
+        "［本文をコピー］で控えてください"
+    );
   }
   return { type: "saveResult", seq, ok: true, chars: steps.chars() };
 }

@@ -18,7 +18,11 @@
  * 2026-10-15 の結果（1.141.0、2回とも同じ）：
  *   A・D は **知らされずに消える**——未保存の印が付かず、Ctrl+S で下の欄に「保存しました（20字）」が出て
  *   actions.log にも「保存しました」と残るのに、ファイルは元のまま。タブを閉じても窓を閉じても確認が出ず、
- *   開き直すと字は無い。だから `test.fails`（直すのは別の担当。直ったら `test` へ戻す）。
+ *   開き直すと字は無い。だから `test.fails` にしていた。
+ *   0.107.4 で直した：当てても文書が未保存にならない便を「入らなかった」と返し（文書の本文は
+ *   メモリ上では変わっていた——下の欄の「保存しました（20字）」は打った後の字数——ので、本文の見比べでは気づけない）（画面に［本文をコピー］つきの
+ *   赤字）、右下に読み取り専用の知らせを出し、［保存］は「保存しました」と言わない。A・D は `test` へ戻し、
+ *   期待をそれに合わせた（窓を閉じても VS Code は確認を出さないので、D は「閉じる前に知らされている」を見る）。
  *   B は本体が打たせない（「Editor is read-only because the file was set read-only via settings…」の吹き出し）。
  *   C は未保存の印が付き、Ctrl+S で「Failed to save … File is read-only」の知らせ、閉じるときに保存の確認が出る
  *   （知らされる）。
@@ -111,7 +115,20 @@ const CLOSE_PRESS = "Control+Alt+Shift+KeyW";
  * 原稿エディターで打って、保存して、閉じるまでを見る（A と C で共通）。
  * @returns 閉じるとき確認の窓が出たか・字がファイルに入ったか
  */
-async function typeSaveCloseInManuscript(session: E2ESession, label: string): Promise<{ lost: boolean; warned: boolean }> {
+interface ManuscriptRun {
+  lost: boolean;
+  warned: boolean;
+  /** 打った直後の知らせ（右下） */
+  noticesAfterType: string[];
+  /** 打った直後に「打った字が入っていない」赤字（#unsent。［本文をコピー］つき）が出ていたか */
+  unsentAfterType: boolean;
+  /** Ctrl+S の後の下の欄の文 */
+  footAfterSave: string;
+  /** Ctrl+S の後の操作ログ */
+  logAfterSave: string;
+}
+
+async function typeSaveCloseInManuscript(session: E2ESession, label: string): Promise<ManuscriptRun> {
   const { page } = session;
   const frame = await openEpisode(page, EPISODE, "二行目の文");
   note(`${label}：開いた直後`, await snapshot(session));
@@ -121,12 +138,14 @@ async function typeSaveCloseInManuscript(session: E2ESession, label: string): Pr
   await waitUntil(async () => (await composeText(frame)).includes("二行目の短い文。"), "打った字が画面に出る");
   // 便が往復し、未保存の印が付くなら付くだけの間を置く
   await page.waitForTimeout(2_500);
-  note(`${label}：打った後`, {
+  const afterType = {
     ...(await snapshot(session)),
     compose: await composeText(frame),
+    unsent: await classOpen(frame, "unsent"),
     rescueBar: await rescueBarText(frame).catch(() => "（読めない）"),
     footNote: await footText(frame, "note").catch(() => "（読めない）"),
-  });
+  };
+  note(`${label}：打った後`, afterType);
 
   await page.keyboard.press("Control+KeyS");
   await page.waitForTimeout(4_000);
@@ -165,19 +184,26 @@ async function typeSaveCloseInManuscript(session: E2ESession, label: string): Pr
   }
 
   const finalFile = await fileText(session);
-  const notices = [...(await notificationTexts(page)), ...afterSave.notifications];
+  const notices = [...(await notificationTexts(page)), ...afterSave.notifications, ...afterType.notifications];
   const warned =
     closeDialog !== undefined ||
     afterSave.saveFail === true ||
     notices.some((text) => /読み取り|read-?only|保存できません|入れられませんでした|Failed to save|Unable to write/i.test(text)) ||
     /保存できませんでした/.test(String(afterSave.footNote));
-  return { lost: finalFile !== AFTER, warned };
+  return {
+    lost: finalFile !== AFTER,
+    warned,
+    noticesAfterType: afterType.notifications,
+    unsentAfterType: afterType.unsent,
+    footAfterSave: String(afterSave.footNote),
+    logAfterSave: afterSave.log,
+  };
 }
 
 /* ── A. files.readonlyInclude ＋ 原稿エディター ── */
 
-test.fails(
-  "A（いまの製品で落ちる）：files.readonlyInclude の原稿を原稿エディターで打つと、字がファイルに入るか、入らないことを知らされる",
+test(
+  "A：files.readonlyInclude の原稿を原稿エディターで打つと、読み取り専用の知らせと控えの赤字が出て、Ctrl+S でも「保存しました」と言わない",
   async () => {
     const options: LaunchOptions = {
       settings: { "files.readonlyInclude": { "**/本文/*.txt": true } },
@@ -190,6 +216,16 @@ test.fails(
         const result = await typeSaveCloseInManuscript(session, "A");
         note("A：結論", result);
         expect(result.lost && !result.warned, "打った字が保存されず、知らせも確認の窓も出ませんでした").toBe(false);
+        // 打った直後に、読み取り専用だと右下で知らせる（打ち続ける前に気づけるように）
+        expect(
+          result.noticesAfterType.some((text) => /読み取り専用/.test(text) && /本文をコピー/.test(text)),
+          `打った直後に読み取り専用の知らせが出ませんでした：${JSON.stringify(result.noticesAfterType)}`
+        ).toBe(true);
+        // 画面の下に、［本文をコピー］つきの「入っていない」赤字が出る
+        expect(result.unsentAfterType, "打った字が入っていない赤字（控え）が出ませんでした").toBe(true);
+        // 保存したと偽らない（下の欄にも操作ログにも）
+        expect(result.footAfterSave).not.toMatch(/保存しました/);
+        expect(result.logAfterSave).not.toMatch(/［保存］で保存しました/);
       },
       options
     );
@@ -269,8 +305,8 @@ test(
 const CLOSE_WINDOW_KEY = { key: "ctrl+alt+shift+j", command: "workbench.action.closeWindow" };
 const CLOSE_WINDOW_PRESS = "Control+Alt+Shift+KeyJ";
 
-test.fails(
-  "D（いまの製品で落ちる）：files.readonlyInclude の原稿を原稿エディターで打ったまま VS Code の窓を閉じると、保存の確認か知らせが出る",
+test(
+  "D：files.readonlyInclude の原稿を原稿エディターで打つと、窓を閉じる前に読み取り専用の知らせと控えの赤字が出ている",
   async () => {
     await withVsCode(
       "読み取り専用（設定）で窓を閉じる",
@@ -282,7 +318,16 @@ test.fails(
         await page.keyboard.insertText(TYPED);
         await waitUntil(async () => (await composeText(frame)).includes("二行目の短い文。"), "打った字が画面に出る");
         await page.waitForTimeout(2_500);
-        note("D：打った後", await snapshot(session));
+        const afterType = await snapshot(session);
+        const unsentOpen = await classOpen(frame, "unsent");
+        note("D：打った後", { ...afterType, unsent: unsentOpen });
+        /*
+          窓を閉じるとき VS Code は確認を出さない（文書が未保存にならないため。製品からは止められない）。
+          そこで**閉じる前に知らされている**ことを確かめる——読み取り専用の知らせと、
+          ［本文をコピー］つきの赤字
+        */
+        const warnedBeforeClose =
+          unsentOpen && afterType.notifications.some((text) => /読み取り専用/.test(text));
         await pressWorkbenchKey(page, CLOSE_WINDOW_PRESS).catch(() => undefined);
         let dialog: string | undefined;
         let closed = false;
@@ -296,7 +341,9 @@ test.fails(
           3_000
         );
         note("D：窓を閉じた後", { closed, dialog, file: await fileText(session), log: await actionsLog(session) });
-        expect(closed && dialog === undefined && (await fileText(session)) !== AFTER, "確認も出ずに窓が閉じ、打った字が消えました").toBe(false);
+        const silentlyLost = closed && dialog === undefined && (await fileText(session)) !== AFTER;
+        expect(silentlyLost && !warnedBeforeClose, "知らせも確認も出ずに窓が閉じ、打った字が消えました").toBe(false);
+        expect(warnedBeforeClose, `閉じる前に読み取り専用の知らせと控えの赤字が出ていませんでした：${JSON.stringify(afterType.notifications)}`).toBe(true);
       },
       { settings: { "files.readonlyInclude": { "**/本文/*.txt": true } }, keybindings: [CLOSE_WINDOW_KEY] }
     );

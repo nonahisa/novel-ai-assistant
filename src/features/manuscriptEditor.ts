@@ -73,6 +73,7 @@ import {
   SAVE_APPLY_WAIT_MS,
   createAppliedTracker,
   describeSaveResult,
+  editTakenByDocument,
   runSaveRequest,
   type AppliedTracker,
 } from "../core/manuscriptSave";
@@ -2299,6 +2300,12 @@ export class ManuscriptEditorProvider
       vscode.workspace.onDidChangeTextDocument((event) => {
         if (event.document.uri.toString() !== document.uri.toString()) return;
         /*
+          便の外で文書が変わった（傍点を外した・取り消し・外で書き換わって読み直した等）。
+          便で当てた字の「保存されていない」はもう分からないので忘れる——覚えたままだと、
+          取り消して保存済みの本文へ戻した文書を「打った字が入っていません」と言う
+        */
+        if (!selfEditing && event.contentChanges.length > 0) unsavedDiffApplied = false;
+        /*
           **取り消し・やり直しは、外からの書き換えと分ける**（設計書6.25.8）。
           戻した箇所の**うしろの端**へカーソルを置く（ふつうのエディタと同じ）。
           複数の変更がまとまって届くので、**いちばん後ろの変更**を採る。
@@ -2456,6 +2463,20 @@ export class ManuscriptEditorProvider
      */
     const appliedTracker = createAppliedTracker();
     /**
+     * 差のある便を当ててから、まだ保存されていないか（保存されたら下ろす）。
+     * 読み取り専用の原稿では、当てても未保存にならず保存もされないので、
+     * ［保存］が「保存しました」と言わないためにこれを見る
+     * （core/manuscriptSave.ts の appliedButNeverSaved。2026-10-15）
+     */
+    let unsavedDiffApplied = false;
+    subscriptions.push(
+      vscode.workspace.onDidSaveTextDocument((saved) => {
+        if (saved.uri.toString() === document.uri.toString()) unsavedDiffApplied = false;
+      })
+    );
+    /** いま当てた便が「当てたのに保存されない文書だった」で断られたか（知らせの文を分ける） */
+    let lastRejectWasIgnored = false;
+    /**
      * **入ったかどうかを、便の番号で画面へ返す**（設計書6.25.9。作者の報告、
      * 2026-09-28「×ボタンで消したら400文字ぐらいが消えました」）。
      *
@@ -2504,7 +2525,17 @@ export class ManuscriptEditorProvider
         sendNow();
         return "conflict";
       }
-      const ok = await this.applyEdit(document, decision.text);
+      let result = await this.applyEdit(document, decision.text);
+      /*
+        読み取り専用の原稿では、断った便の字も文書（メモリ上）には入っている。
+        画面が送り直すと差が無いので「入った」になり、赤字が下りて控えが消える
+        ——ファイルには入っていないのに。保存されないまま未保存でもない間は、
+        差の無い便も「入らなかった」で返す（2026-10-15）
+      */
+      if (result === "noop" && unsavedDiffApplied && !document.isDirty) result = "ignored";
+      if (result === "applied" || result === "ignored") unsavedDiffApplied = true;
+      const ok = result === "applied" || result === "noop";
+      lastRejectWasIgnored = result === "ignored";
       if (ok) {
         ledger.rememberApplied(item.text);
         if (decision.rebased) {
@@ -2521,6 +2552,7 @@ export class ManuscriptEditorProvider
     const queueEdit = createEditQueue<SentEdit>(
       async (item) => {
         selfEditing = true;
+        lastRejectWasIgnored = false;
         let outcome: ApplyOutcome = false;
         try {
           outcome = await applySentEdit(
@@ -2537,7 +2569,9 @@ export class ManuscriptEditorProvider
         } finally {
           selfEditing = false;
         }
-        if (outcome === false) this.warnEditRejected(document);
+        if (outcome === false) {
+          this.warnEditRejected(document, lastRejectWasIgnored ? "ignored" : "failed");
+        }
       },
       // 当てている間に届いた便は、元の本文をつなげて畳む（core/editQueue.ts）
       (older, newer) => combineSentEdits(older, newer, textFingerprint)
@@ -2654,7 +2688,13 @@ export class ManuscriptEditorProvider
           break;
 
         case "saveRequest":
-          await this.saveFromButton(document, panel, message.seq, appliedTracker);
+          await this.saveFromButton(
+            document,
+            panel,
+            message.seq,
+            appliedTracker,
+            () => unsavedDiffApplied
+          );
           break;
 
         case "ruby":
@@ -3252,13 +3292,15 @@ export class ManuscriptEditorProvider
   /**
    * 画面の本文を文書へ当てる。
    *
-   * @returns 文書が画面の本文になったか（変わる所が無かったときも true）。
+   * @returns `"applied"`＝差を当てて、文書が画面の本文になった。`"noop"`＝変わる所が
+   *   無かった。`"failed"`＝VS Code が当てられなかったと返した。`"ignored"`＝当てたと
+   *   返したのに文書が未保存にならなかった（読み取り専用の原稿。保存されない）。
    *   画面へ「入ったか」を返すのに使う（設計書6.25.9）
    */
   private async applyEdit(
     document: vscode.TextDocument,
     next: string
-  ): Promise<boolean> {
+  ): Promise<"applied" | "noop" | "failed" | "ignored"> {
     // **差分はLF空間で取り、位置だけを文書の空間へ戻す**（core/eolSpace.ts）。
     // 文書ぜんたいをCRLFへ揃えてから差分を取ると、LFだけの行が混ざった
     // ファイルでは、その行から打った位置までが丸ごと差分になり、
@@ -3268,7 +3310,7 @@ export class ManuscriptEditorProvider
       next,
       document.eol === vscode.EndOfLine.CRLF
     );
-    if (!edit) return true;
+    if (!edit) return "noop";
 
     const change = new vscode.WorkspaceEdit();
     change.replace(
@@ -3287,8 +3329,24 @@ export class ManuscriptEditorProvider
       logLine(
         `原稿エディタ：打った内容を文書へ当てられませんでした（${edit.start}〜${edit.end}）。`
       );
+      return "failed";
     }
-    return applied;
+    /*
+      **true が返っても、入ったとは限らない。** 設定 files.readonlyInclude で
+      読み取り専用になった原稿では、applyEdit は true を返し文書（メモリ上）の
+      本文も変わるのに、**未保存の印が付かず、保存もされない**（2026-10-15、
+      画面の自動テストで確かめた。本文を見比べても気づけない）。入ったと返すと、
+      画面は字を手放し、［保存］は「保存しました」と言い、閉じても確認が出ないまま
+      字が消える。差のある便を当てたのに未保存にならなければ、入らなかったことに
+      する（core/manuscriptSave.ts の editTakenByDocument）
+    */
+    if (!(await editTakenByDocument(() => document.isDirty))) {
+      logLine(
+        `原稿エディタ：打った内容を文書へ当てたのに、文書が未保存になりませんでした（${edit.start}〜${edit.end}。原稿が読み取り専用の見込み。保存されません）。`
+      );
+      return "ignored";
+    }
+    return "applied";
   }
 
   /** 最後に「入れられませんでした」と知らせた時刻（原稿ごと） */
@@ -3319,7 +3377,9 @@ export class ManuscriptEditorProvider
     document: vscode.TextDocument,
     panel: vscode.WebviewPanel,
     seq: number,
-    tracker: AppliedTracker
+    tracker: AppliedTracker,
+    /** 差のある便を当ててから、まだ保存されていないか */
+    unsavedDiffApplied: () => boolean
   ): Promise<void> {
     const target = typeof seq === "number" ? seq : 0;
     /*
@@ -3338,6 +3398,11 @@ export class ManuscriptEditorProvider
       save: () => Promise.resolve(document.save()),
       // 下の欄の「このファイル」と同じ数え方（画面に出す数と食い違わせない）
       chars: () => countForDisplay(toLf(document.getText()), extensionOf(document)),
+      /*
+        未保存でないのに、当てた字が一度も保存されていない＝読み取り専用の原稿
+        （2026-10-15）。ふつうの原稿は当てれば未保存になり、保存すれば下りる
+      */
+      appliedButNeverSaved: unsavedDiffApplied,
     });
     await this.logForDocument(
       document,
@@ -3350,13 +3415,33 @@ export class ManuscriptEditorProvider
     }
   }
 
-  private warnEditRejected(document: vscode.TextDocument): void {
+  private warnEditRejected(
+    document: vscode.TextDocument,
+    /** `"ignored"`＝当てたのに未保存にならなかった（読み取り専用の原稿） */
+    kind: "failed" | "ignored"
+  ): void {
     const key = document.uri.toString();
     const now = Date.now();
     const last = this.editRejectedNotified.get(key);
     if (last !== undefined && now - last < 60_000) return;
     this.editRejectedNotified.set(key, now);
     const name = paths.basename(fromUri(document.uri));
+    if (kind === "ignored") {
+      /*
+        読み取り専用の原稿（2026-10-15）。送り直しても同じ理由で入らないので、
+        何をすればよいか（控える）と、どこで決まっているか（設定）を出す
+      */
+      void this.logForDocument(
+        document,
+        `原稿エディタ：${name} へ打った字が入りませんでした（文書が未保存にならない。読み取り専用の見込み）。画面にだけ字が残っています`
+      );
+      void vscode.window.showWarningMessage(
+        `「${name}」は読み取り専用になっているため、原稿エディターで打った字が保存されません（閉じると消えます）。` +
+          "閉じる前に、画面の下に出ている［本文をコピー］で控えてください。" +
+          "読み取り専用は VS Code の設定（files.readonlyInclude など）で決まっています。"
+      );
+      return;
+    }
     void this.logForDocument(
       document,
       `原稿エディタ：${name} へ打った字を入れられませんでした。画面にだけ字が残っています`
