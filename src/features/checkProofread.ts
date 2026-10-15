@@ -401,6 +401,12 @@ export async function checkProofread(
             if (parts.length > 1) {
               queue.splice(cursor + 1, 0, ...parts);
               chunksTotal += parts.length;
+            } else {
+              // **1話だけでも切り詰められたら、もう分ける先が無い。** ここで数えないと、
+              // その話は推敲されていないのに終わりの1行が「失敗 0件」になり、済んだように
+              // 見える（0.107.2 まで）。誤字脱字と同じく失敗1件と数える。理由は `ask` が
+              // 「応答が上限で切り詰められました」としてログへ残している
+              failedChunks++;
             }
           }
         }
