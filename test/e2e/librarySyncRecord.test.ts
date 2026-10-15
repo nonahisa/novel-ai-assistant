@@ -393,6 +393,22 @@ test("原稿エディターで打って保存しないうちに全作品同期�
       expect(await tabIsDirty(page, EPISODE), "同期した話は保存済み").toBe(false);
       expect((await gitWhileRunning(repo, ["log", "-1", "-p", "--format=%s"])).includes("同期の前に打った字"), "最後の記録に打った字が入っている").toBe(true);
 
+      /*
+        **送り終わった（git が揃った）ことは、全作品同期が終わったことではない。** 送ったあとも同期は
+        「作品を同期しています…」のまま後片づけを続け、そのあいだステータスバーと作品一覧には、記録の
+        直前に読んだ「未記録 2／記録待ち2」（話と執筆量の記録）が残っている。ここで見張りを始めると、
+        戻ったのではなく**まだ下りていない数**を拾って落ちる（2026-10-15、0.107.3 でも 5回中3回落ちた）。
+        1件目と同じく、終わった知らせと数が0になるのを待ってから「戻らない」を見る
+      */
+      await waitForNotice(session, (message) => message.includes("を済ませました"), "全作品同期が済んだ知らせ", { since, timeoutMs: 60_000 });
+      await waitUntil(
+        async () => (await statusBarCount(page, "未記録")) === 0 && (await rowPending(page, E2E_WORK_TITLE)) === 0,
+        "全作品同期のあと、ステータスバーの「未記録」と作品一覧の「記録待ち」が消える",
+        30_000
+      ).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}（${await describeSync(session, repo, titles)}）`);
+      });
+
       // 「未記録」が0のまま戻らない（保存のあとの書き込みで、また記録待ちにならない）
       await holdsFor(
         async () =>
