@@ -28,6 +28,11 @@ import { foreignNarratorSentences } from "./characterExtract";
  *
  * ## 変更履歴
  *
+ * - 2.3 留意点があるときは、【現在の設定】へ人物の**変化の記録を渡さない**
+ *   （作者の裁定 2026-10-15 の6。`enrichOmitsChanges`）。あわせて、その回は
+ *   紹介の説明から関与度の一文を外し、【書き方】の変化の段落も送らない——
+ *   渡していない変化について書けと頼むことになり、26b は「（高）」だけを
+ *   紹介の末尾に写して返した。留意点が無い回の送る本文は 2.2 と同じ
  * - 2.2 対象が作品の語り手（主人公）のとき、主人公でない語り手の場面が入る
  *   抜粋の頭に断り（抽出 5.10 と同じ文）を置く（作者の裁定 2026-10-10。
  *   設計書6.5.12）。そういう抜粋が無ければ 2.1 と同じ文
@@ -37,7 +42,7 @@ import { foreignNarratorSentences } from "./characterExtract";
  *   留意点が空なら、従来（1.1）と同じ「項目の充実」として動く
  * - 1.1 変化の関与度を紹介へどこまで書くかを指示
  */
-export const SETTINGS_ENRICH_VERSION = "2.2";
+export const SETTINGS_ENRICH_VERSION = "2.3";
 
 /**
  * 製品がこのプロンプトを送るときの温度。項目の提案は設定として書くので、
@@ -71,6 +76,26 @@ export interface EnrichableField {
   custom?: boolean;
 }
 
+/**
+ * 留意点があるか（2.3。作者の裁定 2026-10-15 の6）。あれば、人物の変化の記録を
+ * 【現在の設定】へ渡さず（`describeEnrichTarget`）、変化について書く指示も送らない。
+ *
+ * **判定はここ1か所**——材料を組む側（core）と頼みを組む側（ここ）で別々に
+ * 判定すると、変化を渡していないのに「変化を書き添えて」と頼む回ができる。
+ */
+export function enrichOmitsChanges(notes: string | undefined): boolean {
+  return Boolean(notes?.trim());
+}
+
+/** 人物の紹介の説明（前半）。留意点のある回はこれだけを送る */
+const CHARACTER_SUMMARY_HINT_BASE =
+  "その人物が何者かが一目で分かる紹介。まず役割と立場を書く。";
+/** 人物の紹介の説明（後半）。変化の記録を渡す回だけ */
+const CHARACTER_SUMMARY_HINT_CHANGES =
+  "現在の設定に［関与度 ◯（高）］と付いた変化があれば、" +
+  "「第7話から課長」のように、その変化も書き添える。" +
+  "（中）は字数が余ったときだけ、（低）は書かない";
+
 /** 種別ごとに、AIへ提案させる項目 */
 export const ENRICHABLE_FIELDS: Record<SettingsKind, EnrichableField[]> = {
   character: [
@@ -86,11 +111,7 @@ export const ENRICHABLE_FIELDS: Record<SettingsKind, EnrichableField[]> = {
     {
       key: "summary",
       label: "紹介",
-      hint:
-        "その人物が何者かが一目で分かる紹介。まず役割と立場を書く。" +
-        "現在の設定に［関与度 ◯（高）］と付いた変化があれば、" +
-        "「第7話から課長」のように、その変化も書き添える。" +
-        "（中）は字数が余ったときだけ、（低）は書かない",
+      hint: CHARACTER_SUMMARY_HINT_BASE + CHARACTER_SUMMARY_HINT_CHANGES,
       maxChars: SUMMARY_MAX_CHARS,
     },
     {
@@ -292,8 +313,13 @@ export interface EnrichInput {
 }
 
 export function buildEnrichPrompt(input: EnrichInput): string {
-  const fields = enrichableFields(input.kind, input.customFields);
   const notes = input.notes?.trim();
+  const omitChanges = enrichOmitsChanges(notes);
+  const fields = enrichableFields(input.kind, input.customFields).map((field) =>
+    omitChanges && input.kind === "character" && field.key === "summary"
+      ? { ...field, hint: CHARACTER_SUMMARY_HINT_BASE }
+      : field
+  );
 
   return `小説「${input.workTitle}」の${input.target.kindLabel}「${
     input.target.name
@@ -322,13 +348,7 @@ ${fields
 - **「記述なし」「不明」のような文言を値として書かないでください。**
   読み取れないときは null にしてください。そう書かれると、
   設定資料にその文言がそのまま載ってしまいます。
-- 現在の設定に**変化**が並んでいることがあります（「黒髪（第1〜3話）→ 銀髪（第7話）
-  ［関与度 30（低）］」の形）。これは作中でその人物が変わった記録で、
-  **数字が大きいほど物語の筋に関わります。**
-  紹介（summary）には**（高）だけ**を書き添えてください。（中）は字数が余ったときだけ、
-  （低）は書かないでください。**［関与度 …］という表記そのものは、値に書かないでください。**
-  それは材料に付けた印であって、設定資料に載る文章ではありません。
-- 現在の設定に値がある項目も、本文からより詳しく書ける場合は提案してください。
+${omitChanges ? "" : CHANGES_GUIDANCE}- 現在の設定に値がある項目も、本文からより詳しく書ける場合は提案してください。
   作者が現在の値と見比べて選ぶので、遠慮せず具体的に書いてください。
 - 「〜だろう」「〜と思われる」と書きたくなる内容は null にしてください。
   それは事実ではなく解釈です。
@@ -343,6 +363,19 @@ ${fields
   はじいた記述が無ければ、空の配列 [] にしてください。
 - 前置き・後書きは不要です。指定されたJSON形式のみを出力してください。`;
 }
+
+/**
+ * 【書き方】の変化の段落。変化の記録を渡す回（留意点が無い回）だけ送る（2.3）。
+ * 末尾の改行まで含めて丸ごと出し入れする——留意点の無い回の送る本文を、
+ * 2.2 と1文字も変えないため
+ */
+const CHANGES_GUIDANCE = `- 現在の設定に**変化**が並んでいることがあります（「黒髪（第1〜3話）→ 銀髪（第7話）
+  ［関与度 30（低）］」の形）。これは作中でその人物が変わった記録で、
+  **数字が大きいほど物語の筋に関わります。**
+  紹介（summary）には**（高）だけ**を書き添えてください。（中）は字数が余ったときだけ、
+  （低）は書かないでください。**［関与度 …］という表記そのものは、値に書かないでください。**
+  それは材料に付けた印であって、設定資料に載る文章ではありません。
+`;
 
 /**
  * 作者の留意点を指示へ差し込む（設計書6.31.1）。

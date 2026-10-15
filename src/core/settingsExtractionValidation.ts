@@ -27,6 +27,7 @@ import {
   normalizeForComparison,
 } from "./groundedEvidence";
 import { WORLD_CATEGORIES, type WorldCategory } from "../models/world";
+import { withinDirectionFromQuote } from "./locationWithinDirection";
 // 「（記述なし）」のような不在を述べる文の判定は人物側と共有する。
 // 片方だけ直しても、もう片方から同じ文言が入り込む
 import { isMeaningfulValue } from "./characterExtractionValidation";
@@ -48,7 +49,12 @@ export type SettingRejectionReason =
   /** 送ったプロンプトの指示文が、そのまま答えとして返ってきた */
   | "instruction_echo"
   /** 場所の位置関係が本文と照らせなかった（場所そのものは残す。設計書6.93.3） */
-  | "ungrounded_relation";
+  | "ungrounded_relation"
+  /**
+   * 「中にある」の向きが引用の文の形と逆で、付け替える相手の場所が同じ回の
+   * 答えに無かった（作者の裁定 2026-10-15 の7。`locationWithinDirection.ts`）
+   */
+  | "reversed_relation";
 
 export interface RejectedSettingCandidate {
   name: string | null;
@@ -249,6 +255,11 @@ export function validateExtractedLocations(
 ): LocationValidationResult {
   const accepted: AcceptedLocationCandidate[] = [];
   const rejected: RejectedSettingCandidate[] = [];
+  // 向きが逆だった「中にある」。全部の場所を見てから相手へ付け替える
+  const reversed: Array<{
+    from: ExtractedLocation;
+    relation: ExtractedLocationRelation;
+  }> = [];
   if (!Array.isArray(raw)) return { accepted, rejected };
 
 
@@ -286,6 +297,9 @@ export function validateExtractedLocations(
     // 位置関係は1件ずつ本文と照らす。落ちても場所そのものは残す
     const relations = validateLocationRelations(location, chunk);
     rejected.push(...relations.dropped);
+    reversed.push(
+      ...relations.reversed.map((relation) => ({ from: location, relation }))
+    );
     accepted.push({
       data: { ...location, relations: relations.kept },
       chapters: chaptersForCandidate(
@@ -296,7 +310,81 @@ export function validateExtractedLocations(
     });
   }
 
+  moveReversedWithinRelations(reversed, accepted, chunk, rejected);
   return { accepted, rejected };
+}
+
+/**
+ * 向きが逆だった「中にある」を、相手の場所へ付け替える（作者の裁定 2026-10-15 の7）。
+ *
+ * within は「この場所が相手の中」を**片方向だけ**持つ（`models/location.ts`）。
+ * 「死の谷 within 温泉」が逆なら、正しくは「温泉 within 死の谷」で、関係を
+ * 持つのは温泉の側になる。だから入れ替えは**相手の記録へ移す**ことである。
+ *
+ * **落とすより付け替える**のは、測定で判定の誤りが無かったため（2026-10-15、
+ * 実データと測定の記録に残った within 24件：逆と判定した1件は本当に逆・
+ * 正しいと判定した3件は本当に正しい・残り20件は形から読めず触らない）。
+ * 付け替える相手が同じ回の答えに無いときだけ落とす——無い場所の記録を
+ * ここで作ると、場所の抽出の検算（名前と根拠の照合）を素通りする。
+ */
+function moveReversedWithinRelations(
+  reversed: ReadonlyArray<{
+    from: ExtractedLocation;
+    relation: ExtractedLocationRelation;
+  }>,
+  accepted: AcceptedLocationCandidate[],
+  chunk: Chunk,
+  rejected: RejectedSettingCandidate[]
+): void {
+  for (const { from, relation } of reversed) {
+    const targetKey = normalizeLocationName(relation.target);
+    const owner = accepted.find((candidate) =>
+      [candidate.data.name, ...(candidate.data.aliases ?? [])].some(
+        (name) => normalizeLocationName(name) === targetKey
+      )
+    );
+    if (!owner) {
+      rejected.push({
+        name: `${from.name}の位置関係（${relation.target}）`,
+        reason: "reversed_relation",
+      });
+      continue;
+    }
+    // 付け替えた先の相手の名前は、**引用に出ている呼び方**にする（別名で
+    // 出ていることがある）。相手の名前が引用に無い関係は、検算では落ちる形だから
+    const quote = normalizeForComparison(relation.evidence ?? "");
+    const fromName = [from.name, ...(from.aliases ?? [])].find((name) =>
+      quote.includes(normalizeForComparison(name))
+    );
+    if (!fromName) {
+      rejected.push({
+        name: `${from.name}の位置関係（${relation.target}）`,
+        reason: "reversed_relation",
+      });
+      continue;
+    }
+    const fromKey = normalizeLocationName(fromName);
+    // 相手が正しい向きを自分で持っていれば、二重に足さない
+    const already = (owner.data.relations ?? []).some(
+      (existing) =>
+        existing.kind === "within" &&
+        normalizeLocationName(existing.target) === fromKey
+    );
+    if (already) continue;
+    owner.data = {
+      ...owner.data,
+      relations: [
+        ...(owner.data.relations ?? []),
+        {
+          target: fromName,
+          kind: "within",
+          value: null,
+          evidence: relation.evidence ?? null,
+          chapters: chaptersForCandidate(chunk, [fromName], relation.evidence),
+        },
+      ],
+    };
+  }
 }
 
 /**
@@ -861,6 +949,12 @@ export interface LocationRelationValidation {
   kept: ExtractedLocationRelation[];
   /** 落とした関係。抽出の完了報告で「除外」に数える（黙って捨てない） */
   dropped: RejectedSettingCandidate[];
+  /**
+   * 引用の文の形と向きが逆だった「中にある」（`withinDirectionFromQuote`）。
+   * `kept` にも `dropped` にも入れない——付け替えるか落とすかは、ほかの場所を
+   * 見られる呼び手が決める
+   */
+  reversed: ExtractedLocationRelation[];
 }
 
 /**
@@ -886,6 +980,7 @@ export function validateLocationRelations(
 ): LocationRelationValidation {
   const kept: ExtractedLocationRelation[] = [];
   const dropped: RejectedSettingCandidate[] = [];
+  const reversed: ExtractedLocationRelation[] = [];
   const ownNames = new Set(
     [location.name, ...(location.aliases ?? [])]
       .map(normalizeLocationName)
@@ -941,6 +1036,23 @@ export function validateLocationRelations(
       }
     }
 
+    /*
+      **「中にある」は向きも確かめる**（作者の裁定 2026-10-15 の7）。引用が
+      本文にあっても、26b は「死の谷の奥にあるという温泉」を「死の谷が温泉の中」と
+      逆に読んだ。文の形から向きが読めるときだけ判定し、読めなければ今までどおり通す
+    */
+    if (
+      kind === "within" &&
+      withinDirectionFromQuote(
+        relation.evidence ?? "",
+        [location.name, ...(location.aliases ?? [])],
+        [target]
+      ) === "reversed"
+    ) {
+      reversed.push({ target, kind, value: null, evidence: relation.evidence ?? null });
+      continue;
+    }
+
     kept.push({
       target,
       kind,
@@ -950,7 +1062,7 @@ export function validateLocationRelations(
       chapters: chaptersForCandidate(chunk, [target], relation.evidence),
     });
   }
-  return { kept, dropped };
+  return { kept, dropped, reversed };
 }
 
 /**

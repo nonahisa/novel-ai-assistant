@@ -1972,7 +1972,8 @@ export class SettingsPanel {
       target: {
         kindLabel: KIND_LABELS[kind],
         name: record.name,
-        currentSettings: this.describe(kind, record),
+        // 留意点があれば変化の記録を外す（作者の裁定 2026-10-15 の6。MCP も同じ）
+        currentSettings: this.describe(kind, record, notes),
       },
       excerpts,
       customFields: this.customFields,
@@ -2738,13 +2739,16 @@ export class SettingsPanel {
 
   private describe(
     kind: SettingsKind,
-    record: SettingsRecord
+    record: SettingsRecord,
+    /** AIで再読込の留意点。相談（P-18）からは渡さない */
+    notes?: string
   ): string {
     // 組み方は core の1か所（MCP の `settingsEnrich` と同じ【現在の設定】になる）
     return describeEnrichTarget(kind, record, {
       customFields: this.customFields,
       abilitySystem: this.abilitySystem,
       characters: this.characters,
+      notes,
     });
   }
 

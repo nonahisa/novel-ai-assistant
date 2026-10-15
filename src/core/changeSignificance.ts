@@ -214,6 +214,9 @@ export function stripInvolvementNote(value: string): string {
   return value
     .replace(/[［[]\s*関与度[^］\]]*[］\]]/gu, "")
     .replace(/（?\s*関与度\s*\d+\s*(?:[（(][高中低][）)])?\s*）?/gu, "")
+    // 段の印「（高）」だけが末尾に付いて返ることもある（2026-10-15、26b の
+    // 再読込で3回中3回）。文の途中は本文の言葉かもしれないので、末尾だけ落とす
+    .replace(/\s*[（(][高中低][）)]\s*$/u, "")
     .replace(/\s+/gu, " ")
     .trim();
 }

@@ -222,6 +222,8 @@ describe("プロンプトは製品と同じ材料で組む", () => {
             record,
             readCharacter(folder, "char_0002.json"),
           ],
+          // 留意点があれば変化の記録を外す（画面と同じ。作者の裁定 2026-10-15 の6）
+          notes,
         }),
       },
       excerpts,

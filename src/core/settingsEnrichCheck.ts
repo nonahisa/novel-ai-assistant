@@ -5,6 +5,7 @@ import type { Location } from "../models/location";
 import type { WorldItem } from "../models/world";
 import type { CustomFieldDefinition } from "../models/customField";
 import {
+  enrichOmitsChanges,
   enrichableFields,
   type EnrichableField,
 } from "../prompts/settingsEnrich";
@@ -100,6 +101,14 @@ export interface EnrichDescribeContext {
   abilitySystem?: AbilitySystem;
   /** 組織の構成員を引くための人物の一覧 */
   characters: ReadonlyArray<{ name: string; affiliation: string | null }>;
+  /**
+   * 作者の留意点（6.31.1）。空でなければ、人物の**変化の記録を渡さない**
+   * （作者の裁定 2026-10-15 の6）。変化はこれまでのAIの読み取りの履歴で、
+   * 混入がそのまま残っている——アジャーノの第12話「帝国の皇子」を、26b も
+   * 31b も根拠として紹介へ持ち越した。再読込は本文の抜粋から組み直す機能なので、
+   * 疑いのある履歴は材料から外す。**記録そのものは書き換えない**（実装ルール2）
+   */
+  notes?: string;
 }
 
 /** プロンプトの【現在の設定】に渡す文章（製品の `describe` と同じ） */
@@ -109,7 +118,9 @@ export function describeEnrichTarget(
   context: EnrichDescribeContext
 ): string {
   if (kind === "character") {
-    return describeCharacter(record as Character, context.customFields);
+    return describeCharacter(record as Character, context.customFields, {
+      omitChanges: enrichOmitsChanges(context.notes),
+    });
   }
   if (kind === "ability") {
     return describeAbility(record as Ability, context.abilitySystem);

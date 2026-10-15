@@ -423,13 +423,23 @@ function applyLocationRelations(
     aliases: current.aliases,
     relations: raw,
   });
-  const { kept, dropped } = validateLocationRelations(extracted, chunk);
+  const { kept, dropped, reversed } = validateLocationRelations(extracted, chunk);
   const skipped = dropped.map((item) => ({
     field: item.name ?? "relations",
     reason:
       "本文の引用で確かめられませんでした（種類は within・adjacent・direction・distance、" +
       "引用は本文に一続きで、相手と方角・距離の値を含むこと）",
   }));
+  // 1つの記録への提案なので、相手の記録へ付け替える先が無い。理由を分けて返す
+  // （「確かめられなかった」と書くと、引用を直せば通ると読まれる）
+  for (const relation of reversed) {
+    skipped.push({
+      field: `${current.name}の位置関係（${relation.target}）`,
+      reason:
+        `引用の文では「${relation.target}」のほうが「${current.name}」の中にあります（within の向きが逆）。` +
+        `「${relation.target}」の記録に「${current.name}」の within として置いてください`,
+    });
+  }
   // 形が合わず `normalizeExtractedLocation` が読み捨てた件も、黙らせない
   const unreadable = raw.length - extracted.relations!.length;
   if (unreadable > 0) {
