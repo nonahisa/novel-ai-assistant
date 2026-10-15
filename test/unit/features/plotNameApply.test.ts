@@ -1,6 +1,8 @@
 import * as nodePath from "path";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import * as vscodeStub from "../support/vscodeStub";
 import { window } from "../support/vscodeStub";
+import { hashBytes } from "../../../src/core/hash";
 import { emptyCharacter, type Character } from "../../../src/models/character";
 import type { WorkEntry } from "../../../src/models/types";
 import type { TextFileContent } from "../../../src/core/textFile";
@@ -439,5 +441,124 @@ describe("資料の役名の人物に名前を入れる", () => {
     const rename = calls.find(([, options]) => options.kind === undefined);
     expect(creation?.[0].map((record) => record.name)).toEqual(["鬼塚 剛"]);
     expect(rename?.[0].map((record) => record.name)).toEqual(["相馬 誠"]);
+  });
+});
+
+/**
+ * **plot.md がエディターで開いているときは、ディスクを直に書かない**（作者の裁定「両方直す」、2026-10-16）。
+ *
+ * ディスクへ「退避 → 消して作り直す」で書くと、開いたままのエディターは VS Code のファイルの見張りが
+ * 拾って読み直すまで古い中身と古い更新時刻を持つ。その間に作者が打つと未保存になり、Ctrl+S が
+ * 「Failed to save 'plot.md': The content of the file is newer」で断られた（画面テスト plotRenamePending）。
+ * 開いている文書へ変わった所だけを当てて VS Code に保存させれば、エディターとディスクが食い違う間が無い。
+ */
+describe("plot.md がエディターで開いているとき", () => {
+  const plotFile = nodePath.join(work.folderPath, "設定", "plot.md");
+  const diskBytes = new TextEncoder().encode(TEXT.replace(/\n/g, "\r\n"));
+  let applied: Array<{ replacements: Array<{ range: unknown; text: string }> }> = [];
+  let order: string[] = [];
+  let documentText = "";
+  let dirty = false;
+  const save = vi.fn(async () => {
+    order.push("save");
+    return true;
+  });
+
+  function openDocument(): void {
+    documentText = TEXT.replace(/\n/g, "\r\n");
+    vscodeStub.workspace.textDocuments.push({
+      uri: { fsPath: plotFile },
+      get isDirty() {
+        return dirty;
+      },
+      getText: () => documentText,
+      save,
+      eol: 2,
+      // 文書の空間（CRLF）の位置を、行と桁へ直す
+      positionAt: (offset: number) => {
+        const before = documentText.slice(0, offset).split("\r\n");
+        return new vscodeStub.Position(before.length - 1, before[before.length - 1].length);
+      },
+    } as unknown as (typeof vscodeStub.workspace.textDocuments)[number]);
+  }
+
+  beforeEach(() => {
+    applied = [];
+    order = [];
+    dirty = false;
+    save.mockClear();
+    state.write.mockClear();
+    state.stage.mockClear();
+    state.stage.mockImplementation(async () => {
+      order.push("stage");
+      return undefined;
+    });
+    state.mark.mockClear();
+    vscodeStub.workspace.textDocuments.length = 0;
+    vscodeStub.workspace.fs.readFile = (async () => diskBytes) as never;
+    vscodeStub.workspace.applyEdit = async (edit: unknown) => {
+      applied.push(edit as (typeof applied)[number]);
+      return true;
+    };
+    window.showInformationMessage = (async () => undefined) as typeof window.showInformationMessage;
+    window.showWarningMessage = (async () => undefined) as typeof window.showWarningMessage;
+  });
+
+  afterEach(() => {
+    vscodeStub.workspace.textDocuments.length = 0;
+    state.stage.mockImplementation(async () => undefined);
+  });
+
+  function openSession() {
+    return { ...session(), file: { ...file(TEXT), hash: hashBytes(diskBytes) } };
+  }
+
+  test("ディスクを直に書かず、開いている文書へ変わった所だけを当てて保存する", async () => {
+    openDocument();
+
+    const ok = await applyPlotNames(work, openSession(), [
+      { id: "1", name: "相馬 誠" },
+      { id: "3", name: "鬼塚 剛" },
+    ]);
+
+    expect(ok).toBe(true);
+    expect(state.write).not.toHaveBeenCalled();
+    expect(applied).toHaveLength(1);
+    const text = applied[0].replacements.map((entry) => entry.text).join("");
+    expect(text).toContain("（相馬 誠）");
+    expect(text).toContain("（鬼塚 剛）");
+    // 文書の改行（CRLF）に合わせて入れる。LF だけの改行を混ぜない
+    expect(text.replace(/\r\n/g, "")).not.toContain("\n");
+    expect(save).toHaveBeenCalledTimes(1);
+    // 保存は「保存からの反映」を起こすので、承認待ちへ置いて印を進めてから保存する（二重に積まない）
+    expect(order).toEqual(["stage", "save"]);
+    expect(state.mark).toHaveBeenCalledTimes(1);
+  });
+
+  test("文書に保存していない変更があれば、書かずに止める", async () => {
+    openDocument();
+    dirty = true;
+
+    const ok = await applyPlotNames(work, openSession(), [{ id: "1", name: "相馬 誠" }]);
+
+    expect(ok).toBe(false);
+    expect(applied).toHaveLength(0);
+    expect(state.write).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  test("候補を出したあとにディスクが書き換わっていたら、文書へも当てずに止める", async () => {
+    openDocument();
+
+    const ok = await applyPlotNames(
+      work,
+      { ...session(), file: { ...file(TEXT), hash: "hash-before-change" } },
+      [{ id: "1", name: "相馬 誠" }]
+    );
+
+    expect(ok).toBe(false);
+    expect(applied).toHaveLength(0);
+    expect(save).not.toHaveBeenCalled();
+    expect(state.stage).not.toHaveBeenCalled();
   });
 });

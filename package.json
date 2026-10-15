@@ -226,6 +226,7 @@
           "name": "AIに相談",
           "type": "webview",
           "visibility": "collapsed",
+          "initialSize": 60,
           "when": "novelai.focusChat || !novelai.soloView || novelai.soloView == 'chat'"
         }
       ],

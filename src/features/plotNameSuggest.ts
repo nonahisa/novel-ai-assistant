@@ -8,6 +8,7 @@ import {
   type TextFileContent,
   type WriteTextFileResult,
 } from "../core/textFile";
+import { editOpenDocument } from "../core/openDocumentEdit";
 import { CharacterStore } from "../core/characterStore";
 import {
   createAbilityStore,
@@ -437,20 +438,44 @@ export async function applyPlotNames(
     return false;
   }
 
-  const written = await writeTextFilePreservingFormat(
+  /*
+    **plot.md がエディターで開いていれば、その文書へ当てる**（`core/openDocumentEdit.ts` に理由）。
+    ディスクを「退避 → 消して作り直す」で書くと、開いたままのエディターが読み直す前に作者が打ったとき、
+    Ctrl+S が「ファイルのほうが新しい」で断られた（2026-10-16）。開いていなければ今までどおりディスクへ書く
+  */
+  const viaDocument = await editOpenDocument(
     session.plotFile,
-    inserted.text,
     session.file,
-    session.file.hash
+    inserted.text
   );
-  if (!written.ok) {
-    logFailure("プロットの名前の書き足し", {
+  if (viaDocument.kind === "failed") {
+    logFailure("プロットの名前の書き足し（開いている文書）", {
       作品: work.title,
-      理由: written.reason,
-      詳細: written.detail ?? "",
+      理由: viaDocument.reason,
     });
-    void vscode.window.showWarningMessage(describeWriteFailure(written));
+    void vscode.window.showWarningMessage(
+      viaDocument.reason === "edit_rejected"
+        ? "開いているプロット（plot.md）へ名前を入れられませんでした。plot.md を開き直してから、もう一度「名前の候補を出す」を押してください。"
+        : describeWriteFailure({ ok: false, reason: viaDocument.reason })
+    );
     return false;
+  }
+  if (viaDocument.kind === "notOpen") {
+    const written = await writeTextFilePreservingFormat(
+      session.plotFile,
+      inserted.text,
+      session.file,
+      session.file.hash
+    );
+    if (!written.ok) {
+      logFailure("プロットの名前の書き足し", {
+        作品: work.title,
+        理由: written.reason,
+        詳細: written.detail ?? "",
+      });
+      void vscode.window.showWarningMessage(describeWriteFailure(written));
+      return false;
+    }
   }
 
   const applied = picks.filter((pick) => inserted.applied.includes(pick));
@@ -464,6 +489,22 @@ export async function applyPlotNames(
       作品: work.title,
       詳細: messageOf(error),
     });
+  }
+
+  /*
+    **保存は、承認待ちへ置いて印を進めたあと。** 保存すると「保存からの反映」（`extension.ts` の
+    syncPlotCharactersOnSave、設計書6.4.9）が走る。先に保存すると、印が古いまま反映が走り、
+    同じ人を読みの無い案でもう一度積む
+  */
+  let unsaved = false;
+  if (viaDocument.kind === "edited") {
+    unsaved = !(await viaDocument.save().catch((error: unknown) => {
+      logFailure("プロットの名前の書き足し（保存）", {
+        作品: work.title,
+        詳細: messageOf(error),
+      });
+      return false;
+    }));
   }
 
   logStep(
@@ -515,8 +556,12 @@ export async function applyPlotNames(
       `${inserted.missing.map((pick) => pick.role).join("、")}は行が変わっていたため入れていません。`
     );
   }
+  if (unsaved) {
+    // 名前は開いている plot.md に入っている（Ctrl+Z で戻せる）。保存だけが残っている
+    notes.push("ただし plot.md を保存できませんでした。plot.md を開いて保存してください。");
+  }
   const message = notes.join("");
-  if (staged.error || inserted.missing.length > 0) {
+  if (staged.error || inserted.missing.length > 0 || unsaved) {
     void vscode.window.showWarningMessage(message);
   } else {
     void vscode.window.showInformationMessage(message);
