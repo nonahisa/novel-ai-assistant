@@ -2021,6 +2021,16 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
   const RESCUE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
   /** 知らせの段。0＝出ていない／1＝送り直し中／2＝入らない（開き直す） */
   let unsentStage = 0;
+  /**
+   * 拡張機能が「原稿が読み取り専用なので入らない」と返した（editApplied の reason。
+   * 作者の裁定、2026-10-15 23時。設計書6.25.9）。立っている間は秒を数えず、
+   * 2段目（開き直す）へも変えない——送り直しても開き直しても入らないため。
+   * 段（unsentStage）とは別に持つ（窓の札の stage の意味を変えない）
+   */
+  let unsentReadonly = false;
+  /** 読み取り専用のときの文（作者向けに短く。どうすればよいかだけを書く） */
+  const UNSENT_READONLY_TEXT =
+    "この原稿は読み取り専用のため、打った字は保存されません。［本文をコピー］で控えてください。";
   /** 秒の数え上げの予約 */
   let unsentTick = null;
   /**
@@ -2151,8 +2161,28 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
       offerConflict(message.text);
     }
     if (!message.ok) {
+      const readonly = message.reason === "readonly";
+      if (readonly && !unsentReadonly) {
+        unsentReadonly = true;
+        /*
+          「送り直しています」が先に出ていたら、読み取り専用の文へ描き直す。コピー後の文
+          （［開き直す］へ誘う）も残さない
+        */
+        unsentCopied = false;
+        if (unsentBar.classList.contains("open")) {
+          vscode.postMessage({
+            type: "log",
+            text: "原稿が読み取り専用だと返ってきたので、知らせを読み取り専用の文に変えました（便" + message.seq + "）",
+          });
+        }
+      }
       // 入れられなかった。**待たずに知らせる**（送り直しは見回りに任せる）
-      showUnsent("拡張機能が「入れられなかった」と返した（便" + message.seq + "）");
+      showUnsent(
+        readonly
+          ? "拡張機能が「原稿が読み取り専用なので入らない」と返した（便" + message.seq + "）"
+          : "拡張機能が「入れられなかった」と返した（便" + message.seq + "）"
+      );
+      if (readonly) paintUnsent();
       // 返事をくれた相手はいる。知らせを出した時刻より後に聞いたことにする
       // （同じ瞬間でも時計が1ms進むと「相手がいない」側に倒れるため）
       hearFromHost();
@@ -2271,6 +2301,16 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
   /** いまの段に合わせて、知らせの文と［開き直す］を描く */
   function paintUnsent() {
     if (unsentStage === 0) return;
+    /*
+      **読み取り専用では秒を数えず、2段目へも変えない**（作者の裁定、2026-10-15 23時）。
+      ［開き直す］も出さない（開き直しても入らない）。送り直しは止めない——設定を
+      外せば、送り直しで入って知らせが下りる
+    */
+    if (unsentReadonly) {
+      unsentReopenButton.hidden = true;
+      if (!unsentCopied) unsentText.textContent = UNSENT_READONLY_TEXT;
+      return;
+    }
     const shown = unsentShownAt === null ? 0 : Date.now() - unsentShownAt;
     if (unsentStage === 1 && shown >= UNSENT_ESCALATE_MS) {
       unsentStage = 2;
@@ -2300,6 +2340,7 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     if (!unsentBar.classList.contains("open")) return;
     unsentBar.classList.remove("open");
     unsentStage = 0;
+    unsentReadonly = false;
     unsentCopied = false;
     reopenAsked = false;
     if (unsentTick !== null) {
@@ -2454,10 +2495,13 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
           閉じると画面の控え（rescue）が消える。相手がいなければ再読み込み、
           いれば［開き直す］（控えを新しい画面へ持って行く）へ案内する
         */
-        (hostSilent()
-          ? "メモ帳などへ貼って控えてから、Ctrl+Shift+P →「開発者: ウィンドウの再読み込み」を" +
-            "してください（タブは閉じないでください）。"
-          : "メモ帳などへ貼って控えてから、［開き直す］を押してください。")
+        // 読み取り専用では、開き直しても再読み込みしても入らない。控えるところまで
+        (unsentReadonly
+          ? "メモ帳などへ貼って控えてください。"
+          : hostSilent()
+            ? "メモ帳などへ貼って控えてから、Ctrl+Shift+P →「開発者: ウィンドウの再読み込み」を" +
+              "してください（タブは閉じないでください）。"
+            : "メモ帳などへ貼って控えてから、［開き直す］を押してください。")
       : "写せませんでした。本文を選んで Ctrl+C で写してください。";
     paintUnsent();
   }
@@ -2902,6 +2946,15 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     rescueRestoreButton.textContent = "戻す";
   }
 
+  /**
+   * 帯の控えを［戻す］か［捨てる］で片づけたことを拡張機能へ知らせる。拡張機能は、
+   * 同じ本文の控えを作業場の覚えに持っていれば消す（読み取り専用の原稿の控え。
+   * 設計書6.25.9）。本文が違えば消さないので、どの帯でも知らせてよい
+   */
+  function settleRescue(offer) {
+    vscode.postMessage({ type: "rescueSettled", docKey: offer.docKey, text: offer.text });
+  }
+
   /** ［戻す］。**ふだんの打鍵と同じ便（postEdit）で送る** */
   function rescueRestore() {
     if (rescueOffer === null) return;
@@ -2916,6 +2969,12 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
     }
     const text = rescueOffer.text;
     const conflict = rescueOffer.conflict === true;
+    /*
+      拡張機能の側の控え（読み取り専用の原稿。作者の裁定、2026-10-15 23時）も片づける。
+      **戻す便より先に知らせる**——戻した字がまた読み取り専用で入らなければ、拡張機能は
+      その便で控えを置き直す（知らせが後に着くと、置き直した控えを消してしまう）
+    */
+    settleRescue(rescueOffer);
     rescueOffer = null;
     rescueConfirming = false;
     writeBands();
@@ -2944,6 +3003,7 @@ ${OBSERVE_VISIBLE_WIDTH_SOURCE}
   rescueDiscardButton.addEventListener("click", function () {
     if (rescueOffer === null) return;
     const length = rescueOffer.text.length;
+    settleRescue(rescueOffer);
     rescueOffer = null;
     rescueConfirming = false;
     writeBands();

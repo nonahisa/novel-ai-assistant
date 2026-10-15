@@ -23,6 +23,9 @@
  *   メモリ上では変わっていた——下の欄の「保存しました（20字）」は打った後の字数——ので、本文の見比べでは気づけない）（画面に［本文をコピー］つきの
  *   赤字）、右下に読み取り専用の知らせを出し、［保存］は「保存しました」と言わない。A・D は `test` へ戻し、
  *   期待をそれに合わせた（窓を閉じても VS Code は確認を出さないので、D は「閉じる前に知らされている」を見る）。
+ *   作者の裁定（2026-10-15 23時）で、A の赤字を読み取り専用の文（秒を数えない・［開き直す］を出さない）にし、
+ *   拡張機能の側にも控えを置いて、タブを閉じて開き直したときに控えの帯（［戻す］）が出るようにした。
+ *   A はその2つも見る（この期待は書き直しただけで、まだ走らせていない）。
  *   B は本体が打たせない（「Editor is read-only because the file was set read-only via settings…」の吹き出し）。
  *   C は未保存の印が付き、Ctrl+S で「Failed to save … File is read-only」の知らせ、閉じるときに保存の確認が出る
  *   （知らされる）。
@@ -34,7 +37,7 @@ import { appendFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { Page } from "playwright-core";
+import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
 import { classOpen, composeText, footText, openEpisode, placeCaretAfter, rescueBarText } from "./support/manuscriptFrame";
 import { withVsCode, type E2ESession, type LaunchOptions } from "./support/vscodeApp";
@@ -107,6 +110,11 @@ async function snapshot(session: E2ESession): Promise<Snapshot> {
   };
 }
 
+/** 画面の下の赤字（#unsentText）の文 */
+async function unsentText(frame: Frame): Promise<string> {
+  return frame.evaluate(() => document.getElementById("unsentText")?.textContent ?? "").catch(() => "（読めない）");
+}
+
 /** 閉じるキー（本体向け。WebView に焦点があっても届くよう `pressWorkbenchKey` で押す） */
 const CLOSE_KEY = { key: "ctrl+alt+shift+w", command: "workbench.action.closeActiveEditor" };
 const CLOSE_PRESS = "Control+Alt+Shift+KeyW";
@@ -122,6 +130,10 @@ interface ManuscriptRun {
   noticesAfterType: string[];
   /** 打った直後に「打った字が入っていない」赤字（#unsent。［本文をコピー］つき）が出ていたか */
   unsentAfterType: boolean;
+  /** 打った直後の赤字の文（#unsentText） */
+  unsentTextAfterType: string;
+  /** 開き直したときの控えの帯（#rescue）が開いていたか・その文 */
+  rescueAfterReopen: { open: boolean; text: string };
   /** Ctrl+S の後の下の欄の文 */
   footAfterSave: string;
   /** Ctrl+S の後の操作ログ */
@@ -142,6 +154,7 @@ async function typeSaveCloseInManuscript(session: E2ESession, label: string): Pr
     ...(await snapshot(session)),
     compose: await composeText(frame),
     unsent: await classOpen(frame, "unsent"),
+    unsentText: await unsentText(frame),
     rescueBar: await rescueBarText(frame).catch(() => "（読めない）"),
     footNote: await footText(frame, "note").catch(() => "（読めない）"),
   };
@@ -178,9 +191,15 @@ async function typeSaveCloseInManuscript(session: E2ESession, label: string): Pr
 
   // 開き直したとき、打った字は残っているか（メモリ上の文書が生きていれば戻ってくる）
   const reopened = await openEpisode(page, EPISODE, "二行目の").catch(() => undefined);
+  let rescueAfterReopen = { open: false, text: "" };
   if (reopened) {
     await page.waitForTimeout(1_500);
-    note(`${label}：開き直した後`, { ...(await snapshot(session)), compose: await composeText(reopened) });
+    rescueAfterReopen = { open: await classOpen(reopened, "rescue"), text: await rescueBarText(reopened) };
+    note(`${label}：開き直した後`, {
+      ...(await snapshot(session)),
+      compose: await composeText(reopened),
+      rescue: rescueAfterReopen,
+    });
   }
 
   const finalFile = await fileText(session);
@@ -195,6 +214,8 @@ async function typeSaveCloseInManuscript(session: E2ESession, label: string): Pr
     warned,
     noticesAfterType: afterType.notifications,
     unsentAfterType: afterType.unsent,
+    unsentTextAfterType: afterType.unsentText,
+    rescueAfterReopen,
     footAfterSave: String(afterSave.footNote),
     logAfterSave: afterSave.log,
   };
@@ -223,9 +244,22 @@ test(
         ).toBe(true);
         // 画面の下に、［本文をコピー］つきの「入っていない」赤字が出る
         expect(result.unsentAfterType, "打った字が入っていない赤字（控え）が出ませんでした").toBe(true);
+        /*
+          赤字は読み取り専用の文（作者の裁定、2026-10-15 23時）。秒を数える「送り直しています」や、
+          開き直しても入らない［開き直す］へ誘う文にしない
+        */
+        expect(result.unsentTextAfterType).toContain("読み取り専用");
+        expect(result.unsentTextAfterType).toContain("本文をコピー");
+        expect(result.unsentTextAfterType).not.toMatch(/送り直しています|開き直す/);
         // 保存したと偽らない（下の欄にも操作ログにも）
         expect(result.footAfterSave).not.toMatch(/保存しました/);
         expect(result.logAfterSave).not.toMatch(/［保存］で保存しました/);
+        /*
+          タブを閉じても、拡張機能の側の控え（作業場の覚え）から、開き直したときに控えの帯で
+          取り戻せる（作者の裁定、2026-10-15 23時。設計書6.25.9）
+        */
+        expect(result.rescueAfterReopen.open, "開き直したときに控えの帯が出ませんでした").toBe(true);
+        expect(result.rescueAfterReopen.text).toContain("前回、原稿に入らなかった字があります");
       },
       options
     );

@@ -1731,6 +1731,8 @@ export async function activate(
     highlighter,
     // 再読み込みをまたいで「この行へ飛ぶ」を覚える（作業場ごと。設計書6.25.11）
     reloadJumps: verifiedState(context.workspaceState),
+    // 読み取り専用の原稿に打った字の控え（作業場ごと。設計書6.25.9）
+    readonlyRescues: verifiedState(context.workspaceState),
     // **作品は登録簿で引く**（設計書6.68.2）。用語索引は設定資料が
     // 1件も無い作品では引けないので、作品を知りたいだけのところでは使わない
     workOf: (filePath) => workOfPath(registry, filePath),

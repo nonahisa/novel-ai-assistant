@@ -253,4 +253,20 @@ describe("元の本文の指紋が付いた便", () => {
     expect(outcome).toBe("conflict");
     expect(acks).toEqual([{ type: "editApplied", seq: 5, ok: true, conflict: true, text: "打った字" }]);
   });
+
+  /*
+    読み取り専用の原稿（作者の裁定、2026-10-15 23時）。画面は理由を見て、
+    秒を数える「送り直しています」ではなく読み取り専用の文を出す
+  */
+  it("読み取り専用で入らなかった便は、ok:false に理由（readonly）を添えて返す", async () => {
+    const acks: EditAck[] = [];
+    const outcome = await applySentEdit(
+      { text: "打った字", seq: 6 },
+      async () => "readonly",
+      (ack) => acks.push(ack),
+      () => undefined
+    );
+    expect(outcome).toBe("readonly");
+    expect(acks).toEqual([{ type: "editApplied", seq: 6, ok: false, reason: "readonly" }]);
+  });
 });

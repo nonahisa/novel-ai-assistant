@@ -54,10 +54,19 @@ export interface EditAck {
    */
   conflict?: true;
   text?: string;
+  /**
+   * 入らなかった理由（`ok` が false のときだけ）。`"readonly"`＝原稿が読み取り専用で、
+   * 当てても保存されない（作者の裁定、2026-10-15 23時。設計書6.25.9）。画面は秒を
+   * 数える「送り直しています」ではなく、読み取り専用の文を出す
+   */
+  reason?: "readonly";
 }
 
-/** 1便を当てた結果。`"conflict"` は当てずに画面へ控えさせる（`EditAck.conflict`） */
-export type ApplyOutcome = boolean | "conflict";
+/**
+ * 1便を当てた結果。`"conflict"` は当てずに画面へ控えさせる（`EditAck.conflict`）。
+ * `"readonly"` は当てても保存されない原稿だった（入らなかった扱い。`EditAck.reason`）
+ */
+export type ApplyOutcome = boolean | "conflict" | "readonly";
 
 /**
  * 1便を当てて、**入ったかどうかを画面へ返す**（設計書6.25.9）。
@@ -74,7 +83,8 @@ export type ApplyOutcome = boolean | "conflict";
  * - 当てずに控えさせる（`"conflict"`）ときは、ok:true と打った本文を添えて返す
  *   （ok:false にすると画面は4秒ごとに送り直し、同じ理由で当たらないまま回り続ける）
  *
- * @returns 入ったか（変わる所が無かったときも true）。当てずに控えさせたときは `"conflict"`
+ * @returns 入ったか（変わる所が無かったときも true）。当てずに控えさせたときは `"conflict"`、
+ *   読み取り専用で保存されないときは `"readonly"`
  */
 export async function applySentEdit(
   item: SentEdit,
@@ -93,7 +103,9 @@ export async function applySentEdit(
     report(
       outcome === "conflict"
         ? { type: "editApplied", seq: item.seq, ok: true, conflict: true, text: item.text }
-        : { type: "editApplied", seq: item.seq, ok: outcome }
+        : outcome === "readonly"
+          ? { type: "editApplied", seq: item.seq, ok: false, reason: "readonly" }
+          : { type: "editApplied", seq: item.seq, ok: outcome }
     );
   }
   return outcome;
