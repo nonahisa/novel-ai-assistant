@@ -1,6 +1,6 @@
 import type { EpisodeFile } from "../models/types";
 import { normalizeEpisodePath, type Chapter } from "../models/chapter";
-import { episodePathFor } from "./bookStore";
+import { episodePathFor } from "./episodePath";
 import {
   episodeGroupLabel,
   episodeUnit,

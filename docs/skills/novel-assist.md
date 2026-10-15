@@ -104,11 +104,12 @@
 
 ## 道具の早見表
 
-**道具は27本で、何をするかは `feature` の引数で決まる**（0.66.7）。ほとんどの用は `novel.run` に `feature` を渡せば足りる。
+**道具は28本で、何をするかは `feature` の引数で決まる**（0.66.7）。ほとんどの用は `novel.run` に `feature` を渡せば足りる。
 
 | したいこと | 道具 |
 |---|---|
 | 作品の構造を知る（話数・字数・相対パス・単話プロットの場所） | `novel.scan` |
+| 作品の資料を読む（設定資料・執筆再開の1枚・伏線・年表・人物相関図・場所の略図） | `novel.read`（`kind`：`settings`／`resume`／`foreshadows`／`chronicle`／`relations`／`locations`。**読むだけ**で、AIは呼ばない。`settings` は `term` で語（名前・別名・名前の片方・読み）から引くと記録の全体、省くと名前と短い紹介の一覧。`recordKind` で種類を絞る。続きを書く相談の前は `resume` が早い） |
 | 誤字脱字／推敲／設定資料の抽出／矛盾／伏線 | `novel.run`（`feature: typo`／`proofread`／`settings`／`contradiction`／`foreshadow`。**`filePath` と `numCtx` が要る**） |
 | 各話あらすじ／プロット逸脱／単話プロット | `novel.run`（`feature: synopsis`／`deviation`／`episodePlot`） |
 | 表記ゆれ | `novel.detect`（`feature: notation`）→ 返った組の1件を `novel.run` の `options.group` へ |

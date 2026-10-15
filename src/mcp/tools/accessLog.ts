@@ -16,6 +16,20 @@ import {
 } from "../../core/pendingSettingsMerge";
 
 /**
+ * 読む口（`novel.read`）の `kind` の呼び名。記録の一言に使う。
+ * **`read.ts` を import しない**のは、記録の部品に読む口の材料（年表・略図の組み立て）
+ * まで引き込まないためである。kind を足したらここにも足す（無ければ「作品の資料」と出る）
+ */
+const READ_KIND_LABELS: Readonly<Record<string, string>> = {
+  settings: "設定資料",
+  resume: "執筆再開の1枚",
+  foreshadows: "伏線",
+  chronicle: "年表",
+  relations: "人物相関図",
+  locations: "場所の略図",
+};
+
+/**
  * 外部AIが作品を触ったことを1行残す（設計書6.87.9）。
  *
  * **転送層が1か所で呼ぶ。** 道具ごとに書くと、新しい道具を足した人が
@@ -162,6 +176,11 @@ export function exposureOf(
     tool === "run.result" ||
     // 質問に近い場面（6.87.23）。場面ごとの抜粋（200字まで）と話・行が渡る（全文は返さない）
     tool === "novel.search" ||
+    /*
+      読む口（6.87.24）。設定資料の記録（本文の逐語の引用を含む）・最新話の末尾
+      （400字まで）・伏線の引用が渡る。本文をまとめては返さない
+    */
+    tool === "novel.read" ||
     tool === "novel.scan" ||
     tool === "novel.validate" ||
     tool === "novel.detect" ||
@@ -345,6 +364,19 @@ function detailOf(
     const method = record?.method === "vector" ? "索引" : record?.method === "wordMatch" ? "語句の一致" : "";
     const count = Array.isArray(record?.hits) ? `${record.hits.length}件` : "";
     return method ? `質問に近い場面を探した（${method}で${count}）` : "質問に近い場面を探した";
+  }
+  /*
+    読む口（6.87.24）。**何を読んだかだけ**を残す（引いた語も中身も残さない
+    ——語に作品の筋が書かれていることがある。`novel.search` の問いと同じ扱い）
+  */
+  if (tool === "novel.read") {
+    const what = READ_KIND_LABELS[typeof args?.kind === "string" ? args.kind : ""];
+    if (!what) return "作品の資料を読んだ";
+    const kind =
+      args?.kind === "settings" && typeof args?.recordKind === "string"
+        ? PENDING_KIND_SHORT_LABELS[args.recordKind as PendingSettingsKind | "character"]
+        : undefined;
+    return kind ? `${what}を読んだ（${kind}）` : `${what}を読んだ`;
   }
   if (tool === "run.result") {
     const id = typeof args?.requestId === "string" ? args.requestId.slice(0, 40) : "";

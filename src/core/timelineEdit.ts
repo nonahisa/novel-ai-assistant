@@ -1,4 +1,4 @@
-import * as path from "./paths";
+import * as path from "./pathText";
 import {
   defaultCanonical,
   nextLineId,
@@ -40,8 +40,10 @@ export function validateTimeline(timeline: Timeline): Timeline {
  *
  * **作品フォルダーからの相対パスで、区切りは `/`**（設計書6.18）。
  * GitHubを介して別の端末と行き来するため、`\` のまま保存すると
- * 環境をまたいで一致しなくなる。組み立ては `core/paths.ts` を通す
- * （ブラウザ上の作品は `vscode-vfs://...` にあり、`path` は使えない）。
+ * 環境をまたいで一致しなくなる。組み立ては `core/paths.ts` と同じ中身
+ * （`pathText.ts`）を通す（ブラウザ上の作品は `vscode-vfs://...` にあり、
+ * `path` は使えない）。`paths.ts` を直に指すと `vscode` まで届き、年表を
+ * MCP の読む口（`novel.read`）から組めなかった（2026-10-16）。
  */
 export function toTimelineEpisodePath(
   workRoot: string | undefined,

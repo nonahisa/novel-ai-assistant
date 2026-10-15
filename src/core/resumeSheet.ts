@@ -18,6 +18,13 @@ import {
   episodeBodySources,
   type EpisodeChapterRange,
 } from "./episodeChunks";
+import type { Foreshadow } from "../models/foreshadow";
+import type { ChapterSynopsis } from "../models/synopsis";
+import type { Chapter } from "../models/chapter";
+import type { EpisodeFile } from "../models/types";
+import { episodeUnit } from "./episodeLabel";
+import { groupEpisodesByChapter } from "./chapterGrouping";
+import type { WorkFormatKey } from "./workFormat";
 
 /** 最新話の見出しに出すもの。数え方は呼び出し側の設定に従う */
 export interface ResumeLatestEpisode {
@@ -687,4 +694,130 @@ function positionLine(overview: ResumeOverview): string {
     return `いまは${total}話ぶん書けています。`;
   }
   return `いまは第${overview.latestChapter}話まで書けています（${total}話）。`;
+}
+
+/* ── 材料の選び方（製品の画面と MCP の読む口で分け合う） ───────────── */
+
+/*
+  **材料を「どう選ぶか」もここに置く**（2026-10-16、MCP の読む口 `novel.read`）。
+  読み方（どのファイルをどう開くか）は製品（`features/resumeWriting.ts`）と
+  MCP（`mcp/tools/read.ts`）で違うが、選び方まで別々に書くと、片方だけ直った
+  ときに外部AIの読む1枚が作者の1枚と食い違う。
+*/
+
+/** その話の話数。合本なら最後の話数を見る。読めなければ null */
+export function resumeChapterOf(
+  episode: Pick<EpisodeFile, "chapterStart" | "chapterEnd"> | undefined
+): number | null {
+  if (!episode) return null;
+  return episode.chapterEnd ?? episode.chapterStart ?? null;
+}
+
+/** 未回収の伏線（設計書6.35.1）。話数の早い順に並べる */
+export function openForeshadowsForResume(
+  records: readonly Foreshadow[]
+): ResumeForeshadow[] {
+  return records
+    .filter((record) => record.status === "open")
+    .sort((left, right) => {
+      const a = left.plantedChapter;
+      const b = right.plantedChapter;
+      if (a === b) return left.id.localeCompare(right.id);
+      // 話数不明は最後へ回す（一覧のMarkdownと同じ並び）
+      if (a === null) return 1;
+      if (b === null) return -1;
+      return a - b;
+    })
+    .map((record) => ({
+      label: record.label,
+      plantedChapter: record.plantedChapter,
+      quote: record.plantedQuote,
+      note: record.note,
+    }));
+}
+
+/**
+ * 前話までのあらすじを、直近から数話ぶん取る。
+ *
+ * **いま書いている話は入れない。** 「前話まで」であって、これから書く話の
+ * あらすじ（前に書いていれば残っている）は思い出す材料にならない。
+ */
+export function recentSynopsesForResume(
+  episodes: readonly ChapterSynopsis[],
+  chapter: number | null,
+  format: WorkFormatKey | undefined
+): ResumeSynopsis[] {
+  const unit = episodeUnit(format);
+  return episodes
+    // いま書いている話より前だけを取る。**話数の無いあらすじ（「プロローグ」）は
+    // 落とす**——並びの最後に来るので、混ぜると直近3話がそちらで埋まる
+    .filter((episode) =>
+      chapter === null ? true : episode.chapter !== null && episode.chapter < chapter
+    )
+    .slice(-RESUME_SYNOPSIS_COUNT)
+    .map((episode) => ({
+      label: episode.chapter === null ? "" : unit.label(episode.chapter),
+      title: episode.title,
+      synopsis: episode.synopsis.trim(),
+    }));
+}
+
+/**
+ * 章の並びと、いまどの章にいるか。
+ *
+ * **章立てが無い作品では空を返す**（この作品には章という区切りが無い、
+ * というのが事実であって、欠けているわけではない）。
+ */
+export function resumeChapterRows(
+  episodes: readonly EpisodeFile[],
+  chapters: readonly Chapter[],
+  workFolder: string,
+  latestChapter: number | null
+): ResumeChapter[] {
+  if (chapters.length === 0) return [];
+
+  const { ungrouped, groups } = groupEpisodesByChapter(
+    episodes,
+    chapters,
+    workFolder
+  );
+
+  const rows = groups.map((group) =>
+    chapterRow(group.chapter.name, group.episodes, latestChapter)
+  );
+  // **章の前に置かれた話も数に入れる。** 落とすと、章ごとの合計と
+  // 「いま何話まで」が食い違い、どちらが正しいのか読む側に分からない
+  if (ungrouped.length > 0) {
+    rows.unshift(chapterRow("（章の前）", ungrouped, latestChapter));
+  }
+  return rows;
+}
+
+function chapterRow(
+  name: string,
+  episodes: readonly EpisodeFile[],
+  latestChapter: number | null
+): ResumeChapter {
+  const starts = episodes
+    .map((episode) => episode.chapterStart)
+    .filter((value): value is number => typeof value === "number");
+  const ends = episodes
+    .map((episode) => episode.chapterEnd ?? episode.chapterStart)
+    .filter((value): value is number => typeof value === "number");
+  const from = starts.length > 0 ? Math.min(...starts) : null;
+  const to = ends.length > 0 ? Math.max(...ends) : null;
+  return {
+    name,
+    episodeCount: episodes.length,
+    from,
+    to,
+    // **いま書いている話が入っているか。** 端も含める（章の最後の話を
+    // 書いているときに「いまここ」が消えると、居場所が分からなくなる）
+    current:
+      latestChapter !== null &&
+      from !== null &&
+      to !== null &&
+      latestChapter >= from &&
+      latestChapter <= to,
+  };
 }
