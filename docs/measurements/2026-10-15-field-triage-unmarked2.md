@@ -68,7 +68,7 @@
 | 7317 | JSON形式の強制が効くか（効かない場合、外 | — | T（一部）＋H | 後ろ半分は `unit/ai/aiLogRouting.test.ts`「指定だけを外して出し直し、外したことを呼び出した作品のログに残す」（足した）。〔AIの測定〕本物の LM Studio がスキーマどおり返すか |
 | 7318 | 日本語の長い入力で、**読み込んだ長さ**ど | — | H | 〔AIの測定〕本物の LM Studio。読み込んだ長さを使う決め方は `unit/ai/aiProviders.test.ts`「読み込み済みのモデルは、LM Studioが読み込んだ長さを使う」などが覆う（同じ節の 7324〜7326 で済み） |
 | 7337 | **まとめて送るようになった後**（0.10.8 | — | H | 〔AIの測定：さくら（課金）〕子行に「印は付けない」とある通り `- [ ]` のまま。通った記録と、抽出で溢れた記録の両方がある |
-| 7339 | 出力が上限で切り詰められたとき、**話ごと | — | F＋T | `unit/ai/sakuraProvider.test.ts`「中身が途中まであって上限で切られたときは、切り詰めの印を付けて返す」（足した）＋`unit/features/extractCharactersFlow.test.ts`「まとめたチャンクを先に分けるときも、半分ではなく話ごとに戻す」。本物のさくらが `finish_reason=length` を返すことは、7407 の 2026-09-22 の操作ログ「応答が出力上限で切り詰められました」で記録あり（`core/truncatedResponse.ts` 87行は `truncated` のときだけこの理由を書く）。**済みにした** |
+| 7339 | 出力が上限で切り詰められたとき、**話ごと | — | F＋T | `unit/ai/sakuraProvider.test.ts`「中身が途中まであって上限で切られたときは、切り詰めの印を付けて返す」（足した）＋`unit/features/extractCharactersFlow.test.ts`「まとめたチャンクを先に分けるときも、半分ではなく話ごとに戻す」。本物のさくらが `finish_reason=length` を返すことは、7407 の 2026-09-22 の操作ログ「応答が出力上限で切り詰められました」で記録あり（当時の `features/checkDeviations.ts`〔e89cecb1 の458行〕は `truncated` のときだけこの理由を書く。いまの `core/truncatedResponse.ts` 87行も同じ）。**済みにした**。ただし話ごとに戻す道の確かめは抽出の側だけで、誤字脱字の側（`features/checkProofread.ts` 370・516行）の戻しを見張るテストは無い——本体の判断で `- [ ]` に戻してよい |
 | 7362 | **読み込めていないフォルダーに⚠が付き、選 | — | H | 〔作者の手〕vscode.dev で GitHub のリポジトリを2つ登録し、片方だけ開く（test-web では作れないと子の記録にある） |
 | 7363 | 読めなかったとき、「新しいタブで開く」「こ | — | H | 〔作者の手〕vscode.dev。選択肢と、選んだあとの `openExternal`／`updateWorkspaceFolders` は `src/features/addWorkFromGithubWeb.ts` の `offerAlternatives` にあり、**単体テストは無い**（足せば「出る」と「呼ぶ」までは機械で届く。今回は足していない） |
 | 7366 | クラウドAI（Gemini・OpenAI・さくらのA | — | H | 〔作者の手〕vscode.dev とクラウドAIの鍵 |
