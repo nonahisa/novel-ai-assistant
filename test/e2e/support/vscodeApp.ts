@@ -602,7 +602,9 @@ async function registerWork(session: E2ESession, workTitle: string, outsideWorks
     （ノートPCの実機確認で、50ミリ秒おきの2回の登録が2件になった）。
     含まれるかだけを見ていると、この二重を見逃す
   */
-  const registered = /（作品: ([^）]*)）/.exec(version)?.[1]?.split("・") ?? [];
+  // 作品名に「（仮）」のような全角の括弧が入ることがあるので、行の最後の「）」まで読む
+  // （「[^）]*」だと最初の「）」で切れ、登録されているのに「入っていない」と取り違えた。2026-10-16）
+  const registered = /（作品: (.*)）\s*$/m.exec(version)?.[1]?.split("・") ?? [];
   if (!registered.includes(workTitle)) {
     throw new Error(
       `作品を登録したのに登録簿に入っていません（登録が消える不具合の再発。設計書5.7.8）。版の知らせ：${version}`
