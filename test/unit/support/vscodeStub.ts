@@ -102,6 +102,24 @@ export enum EndOfLine {
 }
 
 /**
+ * 文書の中の位置と範囲。**値を持つだけ**——どこへ当てたかをテスト側が覗けるよう、
+ * 本物と同じ名前の欄（line・character／start・end）だけ置く。
+ */
+export class Position {
+  constructor(
+    readonly line: number,
+    readonly character: number
+  ) {}
+}
+
+export class Range {
+  constructor(
+    readonly start: Position,
+    readonly end: Position
+  ) {}
+}
+
+/**
  * 文書の書き換えのまとめ。**何を入れようとしたかを覗ける形**にしてある
  * ——改行コードを保ったまま当てているかは、入れる文字列を見ないと分からない。
  */

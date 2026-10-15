@@ -407,6 +407,30 @@ body.large textarea { min-height: 72px; }
   pointer-events: none;
 }
 body.dragging #drop-overlay { display: flex; }
+/*
+ * **低いときは、入力欄と［送る］を残して詰める**（作者の裁定「両方直す」、2026-10-16）。
+ *
+ * 横のパネルは左の列の一番下に置かれ、上の3つのビューの残りしか貰えないと約100pxまで縮む。
+ * 中の作りは合わせて約150pxあるので、入力欄と［送る］が窓の外へ押し出され、開いたのに打てなかった。
+ * 高さを決めるのは VS Code の側で、拡張機能から「この高さにしろ」と言う口は無い
+ * （最初に出すときの重みだけは package.json の initialSize で貰っている）。
+ * だから低いときは、無くても相談できるもの（相談の対象の行・聞き方の例・案内・考え中の行・
+ * 控えのボタン）を隠し、入力欄を1行ぶんまで低くして、入力欄と［送る］が必ず見えるようにする。
+ * 隠したものは、境目を動かして高くすれば戻る。
+ */
+@media (max-height: 200px) {
+  #context,
+  #examples,
+  #composer .hint,
+  #thinking,
+  #to-main,
+  #to-sub,
+  #apply-settings,
+  #clear { display: none; }
+  #composer { padding: 4px 8px; }
+  #composer .row { margin-top: 4px; }
+  textarea { min-height: 28px; height: 28px; resize: none; }
+}
 </style>
 </head>
 <body${large ? ` class="large"` : ""}>
