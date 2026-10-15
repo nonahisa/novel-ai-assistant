@@ -49,6 +49,14 @@ const layout = vi.hoisted(() => {
   return {
     TabInputWebview,
     TabInputCustom,
+    /** モーダルの答え（先頭から順に返す。尽きたら Esc＝undefined） */
+    answers: [] as Array<string | undefined>,
+    /** 出たモーダル・知らせ（文と詳しい文とボタン） */
+    shown: [] as Array<{ message: string; detail?: string; items: string[] }>,
+    /** 閉じたタブ */
+    closed: [] as unknown[],
+    /** タブを閉じられたか（保存の確認で取りやめた等なら false） */
+    closeResult: true,
     groups: undefined as
       | Array<{
           viewColumn: number;
@@ -81,10 +89,35 @@ vi.mock("vscode", async (importOriginal) => {
         return {
           all: layout.groups,
           activeTabGroup: layout.groups.find((group) => group.isActive),
+          close: (tab: unknown) => {
+            layout.closed.push(tab);
+            if (layout.closeResult && layout.groups) {
+              for (const group of layout.groups) {
+                group.tabs = group.tabs.filter((one) => one !== tab);
+              }
+            }
+            return Promise.resolve(layout.closeResult);
+          },
         };
       },
-      showWarningMessage: () => Promise.resolve(undefined),
-      showInformationMessage: () => Promise.resolve(undefined),
+      showWarningMessage: (message: string, ...rest: unknown[]) => {
+        const options = rest[0] as { detail?: string } | undefined;
+        layout.shown.push({
+          message,
+          detail: options?.detail,
+          items: rest.filter((item): item is string => typeof item === "string"),
+        });
+        return Promise.resolve(layout.answers.shift());
+      },
+      showInformationMessage: (message: string, ...rest: unknown[]) => {
+        const options = rest[0] as { detail?: string } | undefined;
+        layout.shown.push({
+          message,
+          detail: options?.detail,
+          items: rest.filter((item): item is string => typeof item === "string"),
+        });
+        return Promise.resolve(layout.answers.shift());
+      },
     },
   };
 });
@@ -121,11 +154,15 @@ vi.mock("../../../src/core/scanner", async (importOriginal) => {
 });
 
 import {
+  CLOSE_AND_REOPEN_ITEM,
+  COPIED_CLOSE_AND_REOPEN_ITEM,
   ManuscriptEditorProvider,
+  RELOAD_WINDOW_ITEM,
   manuscriptLedgerKey,
   waitFor,
   type ManuscriptEditorDeps,
 } from "../../../src/features/manuscriptEditor";
+import { MANUSCRIPT_RELOAD_JUMP_STATE_KEY } from "../../../src/core/manuscriptReloadJump";
 import {
   MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE,
   MANUSCRIPT_EDITOR_VIEW_TYPE,
@@ -143,11 +180,22 @@ const work: WorkEntry = {
 /** その原稿が属する作品を返すか、返さないか */
 let belongsToWork = true;
 
+/** 作業場の覚え（workspaceState の代役）。再読み込みをまたぐ頼みが入る */
+const memo = new Map<string, unknown>();
+
 function makeProvider(): ManuscriptEditorProvider {
   const deps = {
     highlighter: {
       indexFor: async () =>
         belongsToWork ? { work, index: { size: 0 } } : undefined,
+    },
+    reloadJumps: {
+      get: (name: string) => memo.get(name),
+      update: (name: string, value: unknown) => {
+        if (value === undefined) memo.delete(name);
+        else memo.set(name, value);
+        return Promise.resolve();
+      },
     },
   } as unknown as ManuscriptEditorDeps;
   return new ManuscriptEditorProvider(deps);
@@ -161,6 +209,11 @@ beforeEach(() => {
   workFormat = undefined;
   episodes = [{ filePath: episodePath }];
   layout.groups = undefined;
+  layout.answers = [];
+  layout.shown = [];
+  layout.closed = [];
+  layout.closeResult = true;
+  memo.clear();
 });
 
 describe("台帳の鍵", () => {
@@ -358,25 +411,14 @@ describe("タブが既にある原稿へは、もう1枚開かない", () => {
   /**
    * 拡張機能ホストを起動し直した直後（作者の実機、2026-10-03）。新しいホストの
    * 台帳は空で、左の面はつながっていない。行を押しても、左のタブを前に出す
-   * だけにし、パネルの列へ新しい面を作らない。左の面がつながらなければ
-   * 素のエディタへ譲る（切れた面の知らせは別の見張りが出す）
+   * だけにし、パネルの列へ新しい面を作らない。
+   *
+   * 左の面がつながらないときは**素のエディタへ譲らない**（作者の裁定 2026-10-15。
+   * 譲ると同じ話の2枚目ができる）。どうするかを作者に訊く（下の describe）。
+   * 取りやめ（Esc）なら何もしない
    */
   test("起動し直した直後（台帳が空）でも、同じ入口のタブを前に出すだけ", async () => {
-    const manuscript = {
-      input: new layout.TabInputCustom(
-        episodePath,
-        MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
-      ),
-      isActive: true,
-    };
-    const panel = {
-      input: new layout.TabInputWebview("novelai.sceneMemos"),
-      isActive: true,
-    };
-    layout.groups = [
-      { viewColumn: 1, isActive: false, activeTab: manuscript, tabs: [manuscript] },
-      { viewColumn: 2, isActive: true, activeTab: panel, tabs: [panel] },
-    ];
+    layout.groups = disconnectedLayout().groups;
 
     const taken = await makeProvider().revealLine(episodePath, 210);
 
@@ -385,8 +427,8 @@ describe("タブが既にある原稿へは、もう1枚開かない", () => {
     expect(executed[0].command).toBe("vscode.openWith");
     expect(executed[0].args[1]).toBe(MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE);
     expect(executed[0].args[2]).toBe(1);
-    // 画面とつながらなかったので引き受けない（呼んだ側が素のエディタで示す）
-    expect(taken).toBe(false);
+    // 取りやめたので、素のエディタでも開かない（引き受けたことにする）
+    expect(taken).toBe(true);
   });
 
   test("別の話のタブは見ない（これまでどおりの開き方）", async () => {
@@ -418,6 +460,144 @@ describe("タブが既にある原稿へは、もう1枚開かない", () => {
     expect(source).toContain("openManuscripts.remove(key, entry)");
     // 鍵ごと消す書き方へ戻さない（2枚目を閉じると1枚目が台帳から落ちる）
     expect(source).not.toContain("openManuscripts.delete(key)");
+  });
+});
+
+/**
+ * 左の列に、つながりの切れた横書きの原稿のタブ。右の列に校正・メモパネル。
+ * 新しい拡張機能の台帳は空（拡張機能ホストを起動し直した直後の形）
+ */
+function disconnectedLayout() {
+  const manuscript = {
+    input: new layout.TabInputCustom(
+      episodePath,
+      MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE
+    ),
+    isActive: true,
+  };
+  const panel = {
+    input: new layout.TabInputWebview("novelai.sceneMemos"),
+    isActive: true,
+  };
+  return {
+    manuscript,
+    groups: [
+      { viewColumn: 1, isActive: false, activeTab: manuscript, tabs: [manuscript] },
+      { viewColumn: 2, isActive: true, activeTab: panel, tabs: [panel] },
+    ],
+  };
+}
+
+/**
+ * 飛び先の原稿の画面が、拡張機能ホストの再起動でつながりの切れたものだったとき
+ * （作者の裁定 2026-10-15。設計書6.25.11）。
+ *
+ * これまでは素のエディタへ譲り、同じ話の2枚目ができていた。**切れた画面の控え
+ * （届いていなかった字）は画面の中にしか無く、タブを閉じると消える**ので、
+ * 黙って閉じない。作者に訊く——既定は［ウィンドウを再読み込み］（控えが残る。
+ * 再読み込みのあと、その行を示す）。閉じて開き直す道は、作者が控えを
+ * コピーしたと答えてから通す。
+ */
+describe("つながりの切れた画面へ飛ぶとき", () => {
+  test("素のエディタへ譲らず、作者に訊く（既定は再読み込み）", async () => {
+    layout.groups = disconnectedLayout().groups;
+
+    await makeProvider().revealLine(episodePath, 210);
+
+    expect(layout.shown).toHaveLength(1);
+    expect(layout.shown[0].items[0]).toBe(RELOAD_WINDOW_ITEM);
+    expect(layout.shown[0].items).toContain(CLOSE_AND_REOPEN_ITEM);
+    // 何行目へ飛ぶつもりかと、閉じると控えが消えることを伝える
+    expect(layout.shown[0].detail).toContain("210行目");
+    expect(layout.shown[0].detail).toContain("消え");
+  });
+
+  test("［ウィンドウを再読み込み］なら、行を覚えてから再読み込みする", async () => {
+    layout.groups = disconnectedLayout().groups;
+    layout.answers = [RELOAD_WINDOW_ITEM];
+
+    const taken = await makeProvider().revealLine(episodePath, 210);
+
+    expect(taken).toBe(true);
+    expect(executed.map((one) => one.command)).toEqual([
+      "vscode.openWith",
+      "workbench.action.reloadWindow",
+    ]);
+    const saved = memo.get(MANUSCRIPT_RELOAD_JUMP_STATE_KEY) as
+      | { key: string; line: number }
+      | undefined;
+    expect(saved?.key).toBe(manuscriptLedgerKey(episodePath));
+    expect(saved?.line).toBe(210);
+    // タブは閉じない（控えが消える）
+    expect(layout.closed).toEqual([]);
+  });
+
+  test("［閉じて開き直す］の1回目は閉じず、先にコピーするよう頼む", async () => {
+    layout.groups = disconnectedLayout().groups;
+    layout.answers = [CLOSE_AND_REOPEN_ITEM];
+
+    const taken = await makeProvider().revealLine(episodePath, 210);
+
+    expect(taken).toBe(true);
+    expect(layout.closed).toEqual([]);
+    expect(executed.map((one) => one.command)).toEqual(["vscode.openWith"]);
+    // 2つ目の知らせで、［本文をコピー］を押してからもう一度選ぶよう頼む
+    expect(layout.shown).toHaveLength(2);
+    expect(`${layout.shown[1].message}${layout.shown[1].detail ?? ""}`).toContain("［本文をコピー］");
+  });
+
+  test("コピーを頼んだあとは、閉じて同じ列・同じ入口で開き直す", async () => {
+    const provider = makeProvider();
+    const { manuscript, groups } = disconnectedLayout();
+    layout.groups = groups;
+    layout.answers = [CLOSE_AND_REOPEN_ITEM];
+    await provider.revealLine(episodePath, 210);
+
+    executed.length = 0;
+    layout.shown = [];
+    layout.answers = [COPIED_CLOSE_AND_REOPEN_ITEM];
+    await provider.revealLine(episodePath, 210);
+
+    // 2回目の問いでは「コピーした」と答えられる
+    expect(layout.shown[0].items).toContain(COPIED_CLOSE_AND_REOPEN_ITEM);
+    expect(layout.closed).toEqual([manuscript]);
+    const reopen = executed.filter((one) => one.command === "vscode.openWith");
+    // 1回目は切れたタブを前に出す。2回目が開き直し（同じ入口・同じ列）
+    expect(reopen).toHaveLength(2);
+    expect(reopen[1].args[1]).toBe(MANUSCRIPT_EDITOR_HORIZONTAL_VIEW_TYPE);
+    expect(reopen[1].args[2]).toBe(1);
+    // 再読み込みはしない
+    expect(executed.map((one) => one.command)).not.toContain(
+      "workbench.action.reloadWindow"
+    );
+  });
+
+  test("タブを閉じられなかったら（保存の確認で取りやめた等）、開き直さない", async () => {
+    const provider = makeProvider();
+    layout.groups = disconnectedLayout().groups;
+    layout.answers = [CLOSE_AND_REOPEN_ITEM];
+    await provider.revealLine(episodePath, 210);
+    executed.length = 0;
+    layout.closeResult = false;
+    layout.answers = [COPIED_CLOSE_AND_REOPEN_ITEM];
+
+    const taken = await provider.revealLine(episodePath, 210);
+
+    expect(taken).toBe(true);
+    expect(layout.closed).toHaveLength(1);
+    // 前に出す1回だけ。開き直しの openWith は呼ばない
+    expect(executed.map((one) => one.command)).toEqual(["vscode.openWith"]);
+  });
+
+  test("取りやめ（Esc）なら、何もしない", async () => {
+    layout.groups = disconnectedLayout().groups;
+
+    const taken = await makeProvider().revealLine(episodePath, 210);
+
+    expect(taken).toBe(true);
+    expect(layout.closed).toEqual([]);
+    expect(memo.size).toBe(0);
+    expect(executed.map((one) => one.command)).toEqual(["vscode.openWith"]);
   });
 });
 

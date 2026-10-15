@@ -143,6 +143,12 @@ import {
   unresolvedActiveTabs,
   type ManuscriptTabLook,
 } from "../core/manuscriptDisconnect";
+import {
+  MANUSCRIPT_RELOAD_JUMP_STATE_KEY,
+  makeManuscriptReloadJump,
+  takeManuscriptReloadJump,
+  type ManuscriptReloadJump,
+} from "../core/manuscriptReloadJump";
 
 /**
  * 原稿エディタ（設計書6.25）。
@@ -392,7 +398,14 @@ export function watchManuscriptTabs(): vscode.Disposable {
 const resolvedManuscriptKeys = new Set<string>();
 
 /** 切れた原稿エディターの知らせの、既定のボタン */
-const RELOAD_WINDOW_ITEM = "ウィンドウを再読み込み";
+export const RELOAD_WINDOW_ITEM = "ウィンドウを再読み込み";
+/**
+ * 切れた画面へ飛ぶときの、閉じて開き直すボタン（設計書6.25.11）。
+ * 1回目はコピーを頼むだけで閉じない（`askDisconnectedReveal`）
+ */
+export const CLOSE_AND_REOPEN_ITEM = "閉じて開き直す";
+/** コピーを頼んだあとの、閉じて開き直すボタン */
+export const COPIED_CLOSE_AND_REOPEN_ITEM = "コピーしたので、閉じて開き直す";
 
 /**
  * つながりの切れた原稿エディターを見張り、見つけたら知らせる
@@ -1829,6 +1842,17 @@ export interface ManuscriptEditorDeps {
   readAloudVoice?: () => string | undefined;
   /** 選ばれた声を覚える */
   saveReadAloudVoice?: (name: string) => Promise<void>;
+  /**
+   * ウィンドウの再読み込みをまたいで「この原稿の、この行へ飛ぶ」を覚える所
+   * （`workspaceState`。設計書6.25.11）。**作業場ごと**にする——再読み込みは
+   * 同じ作業場を開き直すので、別のウィンドウの原稿へ飛ばないようにする。
+   * 省略できる形にしてあるのは、この画面が覚えなしでも成り立つため。
+   * 渡すのは守りで包んだ口（`verifiedState`。設計書5.7.8）
+   */
+  reloadJumps?: {
+    get(key: string): unknown;
+    update(key: string, value: unknown): PromiseLike<void>;
+  };
 }
 
 export class ManuscriptEditorProvider
@@ -1847,6 +1871,22 @@ export class ManuscriptEditorProvider
     /** 開き直すときに使う入口のID（「最新話を書く」で同じ向きを保つ） */
     private readonly viewType: string = MANUSCRIPT_EDITOR_VIEW_TYPE
   ) {}
+
+  /**
+   * つながりの切れた画面を閉じる前に、本文のコピーを頼んだ原稿の鍵
+   * （`askDisconnectedReveal`）。次に同じ原稿へ飛ぶとき「コピーした」と答えられる
+   */
+  private readonly copyAskedKeys = new Set<string>();
+
+  /**
+   * 再読み込みをまたぐ「この行へ飛ぶ」を書く（undefined で消す）。
+   * **書く口はここ1か所**（`mementoWrites.test.ts` が数える。設計書5.7.8）
+   */
+  private async writeReloadJump(
+    value: ManuscriptReloadJump | undefined
+  ): Promise<void> {
+    await this.deps.reloadJumps?.update(MANUSCRIPT_RELOAD_JUMP_STATE_KEY, value);
+  }
 
   /**
    * 開いた本文の作品の種類（設計書6.70・6.109）。**引けなければ undefined。**
@@ -2539,6 +2579,28 @@ export class ManuscriptEditorProvider
           pendingRescue.delete(key);
           await send();
           webviewReady = true;
+          /*
+            **再読み込みの前に頼まれた行を、ここで示す**（設計書6.25.11。作者の
+            裁定 2026-10-15）。つながりの切れた画面へ飛ぼうとして作者が
+            ［ウィンドウを再読み込み］を選んだとき、頼みは作業場の覚えに残っている。
+            ほかの「この行を示す」が先に頼まれていれば、そちらを優先する（新しい頼み）
+          */
+          if (this.deps.reloadJumps) {
+            const taken = takeManuscriptReloadJump(
+              this.deps.reloadJumps.get(MANUSCRIPT_RELOAD_JUMP_STATE_KEY),
+              key,
+              new Date()
+            );
+            if (taken.clear) await this.writeReloadJump(undefined);
+            if (taken.line !== undefined && pendingReveal === undefined) {
+              await this.logForDocument(
+                document,
+                `原稿エディタ：再読み込みの前に頼まれた${taken.line}行目を示します。`
+              );
+              lastCaret = { filePath: fromUri(document.uri), line: taken.line };
+              revealLineNow(taken.line, "head");
+            }
+          }
           // 開くのを待ってもらっていた「この行を示す」を、ここで出す
           if (pendingReveal !== undefined) {
             const { line, caret } = pendingReveal;
@@ -2960,15 +3022,145 @@ export class ManuscriptEditorProvider
     await openManuscriptFile(filePath, existing.viewType, existing.column);
     const shown = await waitFor(() => openManuscripts.get(key));
     if (!shown) {
-      // 拡張機能ホストが起動し直したあとの面は、つながり直さない。
-      // 素のエディタへ譲る（切れた面の知らせは別の見張りが出す）
+      // 拡張機能ホストが起動し直したあとの面は、つながり直さない
       logLine(
         `原稿エディタ：${filePath} のタブを前に出しましたが、画面とつながりませんでした（鍵: ${key}）。`
       );
-      return false;
+      return this.askDisconnectedReveal(filePath, key, existing, line);
     }
     shown.revealLine(line);
     return true;
+  }
+
+  /**
+   * 飛び先の原稿の画面がつながりの切れたものだったとき、どうするかを作者に訊く
+   * （作者の裁定 2026-10-15。設計書6.25.11）。
+   *
+   * **素のエディタへは譲らない。** 譲ると同じ話の2枚目ができ、どちらで書けば
+   * よいのか分からなくなる（0.106.6 までの振る舞い）。
+   *
+   * **黙ってタブを閉じない。** 届いていなかった字の控えは切れた画面の中
+   * （`setState`）にしか無く、タブを閉じると消える。こちらからは控えがあるか
+   * どうかも分からない（画面の知らせは前の拡張機能ホストへ送られている）。
+   * だから既定は［ウィンドウを再読み込み］（控えが残る）にして、その行は
+   * 再読み込みのあとに示す（`core/manuscriptReloadJump.ts`）。
+   *
+   * 閉じて開き直す道も残す。ただし**1回目は閉じない**——閉じる前に作者自身が
+   * 切れた画面の［本文をコピー］を押す必要があり、問いの窓が開いている間は
+   * 画面を触れないため、コピーしてからもう一度選んでもらう。2回目の問いで
+   * 「コピーした」と答えたときだけ閉じる。
+   *
+   * @returns いつも true（取りやめでも、素のエディタは開かない）
+   */
+  private async askDisconnectedReveal(
+    filePath: string,
+    key: string,
+    existing: { viewType: string; column: vscode.ViewColumn },
+    line: number
+  ): Promise<boolean> {
+    const name = paths.basename(filePath);
+    const copied = this.copyAskedKeys.has(key);
+    const closeItem = copied ? COPIED_CLOSE_AND_REOPEN_ITEM : CLOSE_AND_REOPEN_ITEM;
+    const choice = await vscode.window.showWarningMessage(
+      `「${name}」の原稿エディターは、拡張機能の再起動でつながりが切れています。`,
+      {
+        modal: true,
+        detail:
+          `ウィンドウを再読み込みすると、つなぎ直してから${line}行目を示します。` +
+          "届いていなかった字も、開き直したときに［戻す］で取り戻せます。\n\n" +
+          "タブを閉じて開き直すこともできます。ただし、届いていなかった字の控えが消えるので、" +
+          "先に原稿エディターの［本文をコピー］で控えてください。",
+      },
+      RELOAD_WINDOW_ITEM,
+      closeItem
+    );
+
+    if (choice === RELOAD_WINDOW_ITEM) {
+      // 覚えてから再読み込みする（再読み込みでこの拡張機能も読み込み直される）
+      await this.writeReloadJump(makeManuscriptReloadJump(key, line, new Date()));
+      logLine(
+        `原稿エディタ：${filePath} の画面がつながっていないため、ウィンドウを再読み込みします（再読み込みのあと${line}行目を示す）。`
+      );
+      await vscode.commands.executeCommand("workbench.action.reloadWindow");
+      return true;
+    }
+
+    if (choice === CLOSE_AND_REOPEN_ITEM) {
+      this.copyAskedKeys.add(key);
+      logLine(
+        `原稿エディタ：${filePath} を閉じて開き直す前に、本文のコピーを頼みました。`
+      );
+      await vscode.window.showInformationMessage(
+        "閉じる前に、つながりの切れた原稿エディターで［本文をコピー］を押してください。",
+        {
+          modal: true,
+          detail:
+            "コピーしたら、もう一度その行を選んでください。［コピーしたので、閉じて開き直す］が選べます。\n\n" +
+            "画面の下に［本文をコピー］が出ていなければ、届いていない字はありません。",
+        }
+      );
+      return true;
+    }
+
+    if (choice === COPIED_CLOSE_AND_REOPEN_ITEM) {
+      this.copyAskedKeys.delete(key);
+      await this.closeAndReopenDisconnected(filePath, key, existing, line);
+      return true;
+    }
+
+    // 取りやめ（Esc）。素のエディタも開かない——開くと同じ話の2枚目ができる
+    logLine(
+      `原稿エディタ：${filePath} の画面がつながっていませんが、作者が取りやめたので何もしません。`
+    );
+    return true;
+  }
+
+  /**
+   * つながりの切れた画面のタブを閉じ、同じ列・同じ入口で開き直してその行を示す
+   * （`reopenForRescue` と同じ道。ただし控えは受け取れない——切れた画面とは
+   * 話せないので、作者に先にコピーしてもらっている）。
+   */
+  private async closeAndReopenDisconnected(
+    filePath: string,
+    key: string,
+    existing: { viewType: string; column: vscode.ViewColumn },
+    line: number
+  ): Promise<void> {
+    const tab = vscode.window.tabGroups.all
+      .flatMap((group) => group.tabs)
+      .find(
+        (candidate) =>
+          candidate.input instanceof vscode.TabInputCustom &&
+          candidate.input.viewType === existing.viewType &&
+          manuscriptLedgerKey(candidate.input.uri) === key
+      );
+    if (!tab) {
+      logLine(
+        `原稿エディタ：${filePath} を開き直そうとしましたが、タブが見つかりませんでした。`
+      );
+      return;
+    }
+    // VS Code の普通の閉じ方で閉じる（未保存なら保存するかを作者が選べる）
+    const closed = await vscode.window.tabGroups.close(tab);
+    if (!closed) {
+      logLine(
+        `原稿エディタ：${filePath} のタブが閉じられなかったため、開き直しを取りやめました。`
+      );
+      return;
+    }
+    logLine(
+      `原稿エディタ：${filePath} のつながりの切れたタブを閉じ、${existing.column}列目へ開き直します（入口: ${existing.viewType}）。`
+    );
+    // 共通の口を通す（タブはもう無いので、渡した入口と列で新しく開く。6.25.11）
+    await openManuscriptFile(filePath, existing.viewType, existing.column);
+    const opened = await waitFor(() => openManuscripts.get(key));
+    if (!opened) {
+      logLine(
+        `原稿エディタ：${filePath} を開き直しましたが、画面とつながらず、行を示せませんでした。`
+      );
+      return;
+    }
+    opened.revealLine(line);
   }
 
   /**
