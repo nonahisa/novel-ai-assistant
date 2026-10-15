@@ -19,6 +19,7 @@ import { describeFakeRequests, fakeOllamaLaunch, passLocalAiGate, startFakeOllam
 import { runCommand } from "./support/quickInput";
 import { SIDEBAR_LAUNCH } from "./support/sidebar";
 import { withVsCode } from "./support/vscodeApp";
+import { sendChatQuestion } from "./support/chatInput";
 import { waitUntil } from "./support/wait";
 import { clearNotifications, dialogText, notificationTexts, pickQuickPickRow, pressDialogButton, quickPickRows, quickPickTitle } from "./support/workbenchDom";
 
@@ -138,9 +139,8 @@ test("「型に当てはめる」で序破急の3つの枠を埋めると、AI �
       await waitUntil(async () => (await logText()).includes("着想"), "着想を尋ねる一言が出る", 30_000).catch(async (error: unknown) => {
         throw new Error(`${String(error)}${await detail()}`);
       });
-      await frame.locator("#input").click();
-      await page.keyboard.insertText("港町で暮らす少女の凛が、消えた灯台守を探す話");
-      await frame.locator("#send").click();
+      // 座標で押さず `fill` で入れて送る（左の列の小さい枠への押下が外れる揺れを避ける。support/chatInput.ts、2026-10-16）
+      await sendChatQuestion(frame, "港町で暮らす少女の凛が、消えた灯台守を探す話", "対話式プロットの相談パネル");
 
       // 3つの枠を、偽の AI が出した1つ目の候補で埋める
       for (const pick of PICKS) {
