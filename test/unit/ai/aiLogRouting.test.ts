@@ -10,6 +10,7 @@ vi.mock("../../../src/core/usageLog", async (importOriginal) => ({
 import { setFallbackLogRoot, useLogFile } from "../../../src/core/logger";
 import { MeteredProvider } from "../../../src/ai/meteredProvider";
 import { SakuraProvider } from "../../../src/ai/sakuraProvider";
+import { LmStudioProvider } from "../../../src/ai/lmstudioProvider";
 import type {
   AIProvider,
   GenerateParams,
@@ -211,5 +212,64 @@ describe("関所のログ", () => {
 
     expect(linesIn(HIGH_ELF)).toContain("縮めて送ります");
     expect(linesIn(NIKUHEN)).not.toContain("縮めて送ります");
+  });
+});
+
+/* ── LM Studio（JSON形式の強制が断られたとき） ── */
+
+/**
+ * 実機確認リスト「JSON形式の強制が効くか（効かない場合、外して再試行した旨が
+ * ログに出るか）」の、後ろ半分（2026-10-15）。
+ *
+ * 前半（本物の LM Studio がスキーマどおりに返すか）は読み込んだモデルと版で
+ * 変わるので実機でしか分からない。**断られたときに指定だけを外して出し直し、
+ * そのことを呼び出した作品のログに残す**のはコードの振る舞いなので、ここで留める。
+ * さくら側の同じ道は `cross/measureSakura.test.ts` が見ている。
+ */
+describe("LM Studio：JSON形式の強制を断られたとき", () => {
+  test("指定だけを外して出し直し、外したことを呼び出した作品のログに残す", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    let index = 0;
+    const responses = [
+      {
+        status: 400,
+        // `isUnsupportedParameter` が読むのは「指定の名前」と「対応していない」の2つ
+        body: { error: { message: "'response_format' is not supported by this model" } },
+      },
+      { status: 200, body: OK },
+    ];
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      const next = responses[Math.min(index, responses.length - 1)];
+      index++;
+      return new Response(JSON.stringify(next.body), {
+        status: next.status,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    useLogFile(NIKUHEN);
+
+    const result = await new LmStudioProvider().generate({
+      systemPrompt: "指示",
+      userPrompt: "本文",
+      model: "google/gemma-4-12b",
+      temperature: 0,
+      jsonSchema: { type: "object", properties: {} },
+      meta: { feature: "typo_check", workFolder: HIGH_ELF },
+    });
+    await settle();
+
+    // 1回目は形式の強制を付けて送り、2回目はそれだけを外して送る
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0].response_format).toBeDefined();
+    expect(bodies[1].response_format).toBeUndefined();
+    // ほかの指定（温度）は外していない
+    expect(bodies[1].temperature).toBe(0);
+    // 応答は使える
+    expect(result.text).toBe("{}");
+    expect(linesIn(HIGH_ELF)).toContain(
+      "LM Studio：JSON形式の強制が受け付けられなかったため、外して再試行します。"
+    );
+    expect(linesIn(NIKUHEN)).toBe("");
   });
 });
