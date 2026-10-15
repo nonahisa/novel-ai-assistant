@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SAVE_APPLY_WAIT_MS,
   createAppliedTracker,
+  EDIT_TAKEN_WAIT_MS,
   describeSaveResult,
+  editTakenByDocument,
   runSaveRequest,
   type SaveSteps,
 } from "../../../src/core/manuscriptSave";
@@ -154,5 +156,66 @@ describe("保存の成否と字数を返す", () => {
     expect(
       describeSaveResult({ type: "saveResult", seq: 5, ok: false, reason: "読み取り専用" })
     ).toMatch(/保存できませんでした.*便5.*読み取り専用/);
+  });
+});
+
+/*
+  読み取り専用の原稿（設定 files.readonlyInclude）。2026-10-15 の画面の自動テスト
+  （test/e2e/manuscriptReadonly.test.ts の A）で、applyEdit は true を返し文書の本文も
+  変わるのに未保存の印が付かず、［保存］が「保存しました」と言った。ファイルは元のまま。
+*/
+describe("当てた字が保存されない文書（読み取り専用）", () => {
+  it("当てた時点で未保存になっていれば、待たずに「入った」", async () => {
+    let asked = 0;
+    const taken = editTakenByDocument(() => {
+      asked += 1;
+      return true;
+    });
+    await expect(taken).resolves.toBe(true);
+    expect(asked).toBe(1);
+  });
+
+  it("未保存の印が少し遅れて付いても「入った」（入った字を入らなかったと言わない）", async () => {
+    let dirty = false;
+    const taken = editTakenByDocument(() => dirty, EDIT_TAKEN_WAIT_MS);
+    await vi.advanceTimersByTimeAsync(50);
+    dirty = true;
+    await vi.advanceTimersByTimeAsync(50);
+    await expect(taken).resolves.toBe(true);
+  });
+
+  it("待っても未保存にならなければ「入らなかった」", async () => {
+    const taken = editTakenByDocument(() => false, EDIT_TAKEN_WAIT_MS);
+    await vi.advanceTimersByTimeAsync(EDIT_TAKEN_WAIT_MS + 50);
+    await expect(taken).resolves.toBe(false);
+  });
+
+  it("入ったと数えた字が一度も保存されず、未保存でもないなら「保存しました」と言わない", async () => {
+    const s = steps({ isDirty: () => false, appliedButNeverSaved: () => true });
+    const result = await runSaveRequest(3, s);
+    expect(s.saved).toBe(0);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/保存されていません/);
+    expect(result.reason).toMatch(/本文をコピー/);
+  });
+
+  it("未変更の文書の保存は今までどおり保存済みとして返す（打った字が保存済みなら）", async () => {
+    const s = steps({ isDirty: () => false, save: async () => false, appliedButNeverSaved: () => false });
+    const result = await runSaveRequest(1, s);
+    expect(result.ok).toBe(true);
+  });
+
+  it("未保存の文書なら、入ったかの確かめを挟まずに保存する", async () => {
+    let asked = 0;
+    const s = steps({
+      appliedButNeverSaved: () => {
+        asked += 1;
+        return true;
+      },
+    });
+    const result = await runSaveRequest(1, s);
+    expect(s.saved).toBe(1);
+    expect(result.ok).toBe(true);
+    expect(asked).toBe(0);
   });
 });
