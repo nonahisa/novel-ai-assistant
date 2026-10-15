@@ -205,6 +205,57 @@ describe("古い数え直しが、新しい結果を上書きしない", () => {
     expect(statusBarOf(monitor).visible).toBe(false);
     monitor.dispose();
   });
+
+  test("兄弟の新しい読みに負けて捨てられた作品も、その作品のぶんが最新になる", async () => {
+    // 画面テスト librarySyncRecord の1件目がノートPCで一度だけ落ちた形
+    // （ステータスバーは「未記録 1」なのに、作品一覧のAの行だけ印が無い）。
+    // Aの読みが始まり、あとから始まったBの読みが先に返ると、Aの読みは捨てられる。
+    // Bの読みからは置き場ぜんぶの数しか分からないので、Aの「その作品のぶん」は
+    // 古い0のまま残っていた
+    const monitor = newMonitor();
+    readSyncStatus.mockImplementation(async () => tracked(0, 0));
+    await monitor.refreshAll({ fetch: false });
+
+    // Aのファイルを書き換えた。git の上ではAに1件
+    const midway = deferred<GitSyncStatus>();
+    readSyncStatus.mockImplementationOnce(() => midway.promise);
+    const stale = monitor.refresh(A, { fetch: false, notify: false });
+
+    readSyncStatus.mockImplementation(async (cwd) =>
+      cwd === A.folderPath ? tracked(1, 1) : tracked(1, 0)
+    );
+    await monitor.refresh(B, { fetch: false, notify: false });
+
+    midway.resolve(tracked(1, 1));
+    await stale;
+
+    const a = monitor.statusFor(A.id);
+    expect(a?.kind === "tracked" && a.dirty).toBe(1);
+    expect(a?.kind === "tracked" && a.dirtyHere).toBe(1);
+    const b = monitor.statusFor(B.id);
+    expect(b?.kind === "tracked" && b.dirtyHere).toBe(0);
+    expect(statusBarOf(monitor).text).toContain("未記録 1");
+    monitor.dispose();
+  });
+
+  test("同じ作品の新しい読みに負けたときは、読み直さない", async () => {
+    // その作品のぶんも新しい読みで入っているので、git を余計に起こさない
+    const monitor = newMonitor();
+    readSyncStatus.mockImplementation(async () => tracked(0, 0));
+    await monitor.refreshAll({ fetch: false });
+
+    const midway = deferred<GitSyncStatus>();
+    readSyncStatus.mockImplementationOnce(() => midway.promise);
+    const stale = monitor.refresh(A, { fetch: false, notify: false });
+    await monitor.refresh(A, { fetch: false, notify: false });
+
+    readSyncStatus.mockClear();
+    midway.resolve(tracked(3, 3));
+    await stale;
+
+    expect(readSyncStatus).not.toHaveBeenCalled();
+    monitor.dispose();
+  });
 });
 
 describe("操作の終わりは置き場ぜんぶを数え直す", () => {

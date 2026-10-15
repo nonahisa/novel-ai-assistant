@@ -235,6 +235,15 @@ const FILE_CHANGE_NOTICE_THRESHOLD = 5;
 const FOLDER_REFRESH_DEBOUNCE_MS = 2000;
 
 /**
+ * 兄弟の新しい読みに負けた作品を、その場で読み直す回数の上限（2026-10-15）。
+ *
+ * 負けるのは「後から始めた兄弟の読みが先に返った」ときだけなので、ふつうは
+ * 1回で揃う。保存が続いて負け続けるときは、置き場ごとの待ちへ回す
+ * （その場で重ねると git が並ぶ）。
+ */
+const MAX_STALE_REREADS = 2;
+
+/**
  * その変化で「送っていないもの」の数が変わりうるか（設計書6.15.1）。
  *
  * **記録と統計は保存のたびに書かれる。** そこで作り直しを回すと、
@@ -639,7 +648,8 @@ export class GitSyncMonitor implements vscode.Disposable {
   private async runRefresh(
     work: WorkEntry,
     options: { fetch: boolean; notify: boolean },
-    sequence: number
+    sequence: number,
+    staleRetries = 0
   ): Promise<GitSyncStatus> {
     // **取りに行く前に、取りに行ける作品かを確かめる。**
     // Gitを使わずに書いている作品でもfetchを試みていたため、
@@ -679,11 +689,23 @@ export class GitSyncMonitor implements vscode.Disposable {
     // （2026-10-05、作者の報告「未記録９がふえました」）。記録の途中の数が
     // 記録のあとの数を上書きしないようにする
     const key = "root" in status ? rootKey(status.root) : undefined;
-    if (
-      isStaleRead(this.acceptedByWork.get(work.id), sequence) ||
-      (key !== undefined && isStaleRead(this.acceptedByRoot.get(key), sequence))
-    ) {
+    if (isStaleRead(this.acceptedByWork.get(work.id), sequence)) {
+      // 同じ作品のもっと新しい読みが入っている。その作品のぶんも新しいので捨ててよい
       return this.statuses.get(work.id) ?? status;
+    }
+    if (key !== undefined && isStaleRead(this.acceptedByRoot.get(key), sequence)) {
+      // **兄弟の新しい読みに負けたときは、捨てたうえで読み直す**（2026-10-15）。
+      // 置き場ぜんぶの数は兄弟の読みから `alignSiblings` で揃っているが、
+      // この作品のぶん（`…Here`）はどこからも入らない。捨てるだけだと
+      // 「ステータスバーは未記録 1、一覧のこの作品の行だけ印なし」が残った
+      // （画面テスト librarySyncRecord の1件目がノートPCで落ちた形）。
+      //
+      // 兄弟の読みの `git status` から作品ごとに振り分けることはしない。
+      // パスを自分で切り分けることになり（日本語のパスは引用符で囲まれ、
+      // 改名は2つのパスを持つ。`readWorkingTree` の理由と同じ）、
+      // コミットの数（`aheadHere`・`behindHere`）はそこから出せない。
+      // 新しい番号で git に読ませるほうが確かである
+      return this.rereadAfterSiblingWon(work, status, staleRetries);
     }
     this.acceptedByWork.set(work.id, sequence);
     if (key !== undefined) this.acceptedByRoot.set(key, sequence);
@@ -696,6 +718,34 @@ export class GitSyncMonitor implements vscode.Disposable {
     await this.detectGitFileChanges(work, status);
     if (options.notify) this.notifyIfBehind(work, status);
     return status;
+  }
+
+  /**
+   * 兄弟の新しい読みに負けて捨てた作品を、新しい番号で読み直す（2026-10-15）。
+   *
+   * **読み直しは手元だけ・知らせなし。** 取りに行くのも知らせるのも、
+   * 捨てた読み（または兄弟の読み）が済ませている。
+   *
+   * **読み直しも、さらに後の兄弟の読みに負けることがある**（書庫で保存が
+   * 続くとき）。その場で何度も重ねると git が並ぶので、回数に上限を置き、
+   * 超えたら置き場ごとの待ち（`scheduleFolderRefresh`）へ回す。待ちが切れれば
+   * 同じ置き場の作品を順に読むので、作品のぶんはそこで揃う。
+   */
+  private async rereadAfterSiblingWon(
+    work: WorkEntry,
+    discarded: GitSyncStatus,
+    staleRetries: number
+  ): Promise<GitSyncStatus> {
+    if (staleRetries >= MAX_STALE_REREADS) {
+      this.scheduleFolderRefresh(work.id);
+      return this.statuses.get(work.id) ?? discarded;
+    }
+    return this.runRefresh(
+      work,
+      { fetch: false, notify: false },
+      ++this.readSequence,
+      staleRetries + 1
+    );
   }
 
   /**

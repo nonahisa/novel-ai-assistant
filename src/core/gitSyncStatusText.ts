@@ -182,7 +182,9 @@ export function isWarning(status: GitSyncStatus): boolean {
  * 同じ値になる）。**作品のぶん（`…Here`）は作品ごとなので写さない**——
  * ただし置き場ぜんぶを超えることはありえないので、そこで頭を押さえる
  * （置き場ぜんぶが0なら、どの作品も0）。正しい値は、続けて兄弟を
- * 数え直したとき（`refreshRoot`）に入る。
+ * 数え直したとき（`refreshRoot`）に入る。兄弟が自分の読みの最中で、
+ * この読みに負けて捨てられたときは、その兄弟を読み直して入れる
+ * （`features/gitSync.ts` の `rereadAfterSiblingWon`。2026-10-15）。
  *
  * `sibling` が `fresh` と別の置き場なら、そのまま返す。
  */
