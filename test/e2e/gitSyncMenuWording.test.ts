@@ -18,7 +18,7 @@
  * 単体テストの期待する並びに揃えてある。
  *
  * **GitHub は呼ばない。** 送り先は同じ一時フォルダーの中の裸の置き場（`support/gitFixture.ts` の
- * `addLocalRemote`）。「もう1台」はその置き場を clone したフォルダーで、起こす前に同じ行を直して送っておく。
+ * `addLocalRemote`）。「もう1台」はその置き場を clone したフォルダーで、起こしたあとで同じ行を直して送る。
  * 自動の送り直し・自動の取りに行きは切る（そろえる前に勝手に送り・取り込みが走ると、両方で直した
  * 状態が崩れる。作者の記録 2026-10-13 でも、そろえた15秒後に自動の送り直しが送った）。
  */
@@ -72,8 +72,11 @@ const DEV_WORDS = ["main", "分かれています", "衝突", "退避の枝", "�
 const PICK_TITLE = `${EPISODE}：どちらの文を残しますか`;
 
 /**
- * 起こし方：自動の送り直し・取りに行きを切り、起こす前に「もう1台」で同じ行を直して送っておく
- * （GitHub から来る分 1件）。このPCの直しは、起こしたあと登録の印と一緒に記録する（`commitHere`）
+ * 起こし方：自動の送り直し・取りに行きを切り、置き場・送り先・「もう1台」（送り先の clone）を用意する。
+ *
+ * **直すのは起こしたあと**（`divergeBothSides`）。起こした時点で GitHub だけが進んでいると、
+ * 開いたときの点検が「別の環境だけが進んでいれば取り込む」で先に取り込んでしまい、
+ * 両方で直した状態を作れない（package.json の `novelai.git.autoFetch` の説明）
  */
 const LAUNCH: LaunchOptions = {
   settings: { "novelai.git.autoResend": false, "novelai.git.autoFetch": false },
@@ -87,19 +90,21 @@ const LAUNCH: LaunchOptions = {
     await git(there, ["config", "user.name", "もう1台"]);
     await git(there, ["config", "user.email", "e2e-there@example.invalid"]);
     await git(there, ["config", "core.autocrlf", "false"]);
-    await writeFile(path.join(there, "本文", EPISODE), `${THERE_LINE}\n`, "utf8");
-    await git(there, ["commit", "--quiet", "-am", "もう1台で直した"]);
-    await git(there, ["push", "--quiet"]);
   },
 };
 
 /**
- * このPCで同じ行を別の文に直し、登録の印（`.aiwriter/config.json`・`.gitignore`）と一緒に1回記録する
- * （作者の操作ではない準備として、git を直に打つ）。送らない。
+ * 両方で同じ行を直す（作者の操作ではない準備として、git を直に打つ）：
+ * 1. 「もう1台」で直して送る（GitHub から来る分 1件）
+ * 2. このPCで別の文に直し、登録の印（`.aiwriter/config.json`・`.gitignore`）と一緒に1回記録する。送らない
  * そのあと、このPCから送る分 1件・GitHub から来る分 1件になっていることを確かめる
  */
-async function commitHere(session: E2ESession): Promise<void> {
+async function divergeBothSides(session: E2ESession): Promise<void> {
   const repo = session.workFolder;
+  const there = path.join(path.dirname(path.dirname(repo)), "もう1台");
+  await writeFile(path.join(there, "本文", EPISODE), `${THERE_LINE}\n`, "utf8");
+  await git(there, ["commit", "--quiet", "-am", "もう1台で直した"]);
+  await git(there, ["push", "--quiet"]);
   await waitUntil(() => existsSync(path.join(repo, ".aiwriter", "config.json")), "登録の印（config.json）ができる", 30_000);
   // 登録のすぐあとは製品が印を書き足すことがある（librarySyncRecord の registerOther と同じ間）
   await session.page.waitForTimeout(2_500);
@@ -152,7 +157,7 @@ test("「GitHubと同期」の一覧は、題・状態の文・項目が案Aの�
     [{ name: EPISODE, text: `${FIRST_LINE}\n` }],
     async (session) => {
       const { page } = session;
-      await commitHere(session);
+      await divergeBothSides(session);
       await clearNotifications(page);
 
       await openSyncMenu(page);
@@ -187,7 +192,7 @@ test("両方で同じ行を直して「両方の書き換えを合わせる」�
     [{ name: EPISODE, text: `${FIRST_LINE}\n` }],
     async (session) => {
       const { page } = session;
-      await commitHere(session);
+      await divergeBothSides(session);
       await clearNotifications(page);
 
       /* ── 対照：ignoreFocusOut の無いコマンドパレットは、同じ操作で閉じる ── */
