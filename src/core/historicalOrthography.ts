@@ -18,6 +18,11 @@
  *   当てて「あう」のまま、「やうやく→ようやく」の「やう→よう」も当てる、と同じ語の中で
  *   選び分けられる
  *
+ * **同音の漢字による書きかえ（附近→付近）と、漢字をひらく直し（儘→まま）も同じ道で見る**
+ * （作者の裁定、2026-10-15 深夜の1。測定 2552 で旧字・旧かなを落としたあとに残った種類）。
+ * 字の種類の規則では表せないので、小さい語の表（`KAKIKAE_RULES`・`HIRAKU_RULES`）を
+ * 置き換えの候補に足す。送り仮名の違いと別の語への言い換えは、表に載せず通す。
+ *
  * **ここは文語体の作品のときだけ使う**（`TypoValidationOptions.archaicWork`。R17）。
  * 現代文の作品に旧字が1つ紛れていたら、それは直すべき字かもしれない。
  */
@@ -30,8 +35,8 @@
  * （海・都 の旧字など）は、入力でほとんど現れないので載せていない。
  * 「測らないと分からない値」ではなく決まった対応なので、同梱してよい（実装ルール6の外）。
  *
- * **常用漢字どうしの書き換え（附→付・廻→回 など、昭和31年の「同音の漢字による
- * 書きかえ」）は載せない。** 旧字体ではなく別の字への置き換えで、作者の裁定の範囲の外。
+ * **別の字への書きかえ（附→付・廻→回 など）はここに載せない。** 旧字体とは出どころが
+ * 違うので、下の `KAKIKAE_RULES` に分けて置く。
  */
 const KYUJITAI_PAIRS =
   "亞亜 惡悪 壓圧 圍囲 爲為 醫医 壹壱 稻稲 飮飲 隱隠 營営 榮栄 衞衛 驛駅 圓円 " +
@@ -128,6 +133,57 @@ function pairs(spec: string, medialOnly = false): KanaRule[] {
 }
 
 /**
+ * 同音の漢字による書きかえ（附近→付近・廻る→回る）。
+ *
+ * **出どころ**：国語審議会「同音の漢字による書きかえ」（昭和31年報告）。
+ * 当用漢字の外の字を、同じ音の当用漢字へ書きかえる対応の一覧。そのうち、
+ * 文語体の文章でよく出て、**どの語で書きかえても同じ字になるもの**だけを1字で載せる。
+ * 決まった対応なので同梱してよい（「測らないと分からない値」ではない）。
+ *
+ * **1字で載せると危ない字は、語で載せる**（杜絶→途絶・沈澱→沈殿・叡智→英知 など）。
+ * 「杜」「智」は人名・地名にも出て、そこを書きかえる直しは置き換えではない。
+ * また「杜中→途中」のような本物の誤字を、1字の表だと書きかえと見て落としてしまう。
+ */
+const KAKIKAE_RULES: KanaRule[] = [
+  ...pairs(
+    "附:付 廻:回 聯:連 輯:集 蒐:収 臆:憶 洩:漏 歎:嘆 慾:欲 叛:反 熔:溶 鎔:溶 " +
+      "蹟:跡 綜:総 稀:希 兇:凶 醗:発 颱:台 註:注 煽:扇 撒:散 繃:包 涸:枯 掠:略 " +
+      "抛:放 蹶:決 戟:激 坐:座"
+  ),
+  ...pairs(
+    "叮嚀:丁寧 杜絶:途絶 沈澱:沈殿 叡智:英知 銓衡:選考 智慧:知恵 諒解:了解 " +
+      "諒承:了承 理窟:理屈 輿論:世論"
+  ),
+];
+
+/**
+ * 漢字をひらく直し（儘→まま・為に→ために・此の→この）。
+ *
+ * **出どころ**：常用漢字表（平成22年内閣告示第2号）に無い字・読みの語（儘・此の・迄・
+ * 筈・何故 など）と、「公用文における漢字使用等について」（平成22年内閣訓令第1号）で
+ * 仮名で書くとされる形式名詞・助詞・接続詞・補助動詞（事・為・様・程・等・又・居る など）
+ * のうち、戦前の文語・古い文章で漢字で書かれやすい語。網羅はしない——載っていない語が
+ * 通っても、作者が「無視」を押せば済む。
+ *
+ * **語で載せる（1字の「此」「其」は載せない）。** 「此の」「其の」「此処」のように
+ * 形の決まった語だけをひらく。「其処→そこ」と「其→そ」を同じ表で許すと、
+ * 「其れ→そ」のような崩れた直しまで置き換えに見えてしまう。
+ *
+ * **送り仮名の違い（然かも→然も・繰返へし→繰返し）と、別の語への言い換え
+ * （頒ける→配る）は載せない**（作者の裁定、2026-10-15 深夜の1）。
+ */
+const HIRAKU_RULES: KanaRule[] = pairs(
+  "儘:まま 為め:ため 為:ため 居り:おり 居る:いる 居た:いた " +
+    "此の:この 其の:その 此処:ここ 其処:そこ 此れ:これ 其れ:それ 何処:どこ " +
+    "事:こと 様:よう 迄:まで 程:ほど 又:また 尚:なお 只:ただ 未だ:まだ " +
+    "殆ど:ほとんど 何故:なぜ 筈:はず 訳:わけ 乍ら:ながら 頃:ころ 位:くらい " +
+    "等:など 共:とも 漸く:ようやく 所謂:いわゆる 宜しく:よろしく"
+);
+
+/** 書きかえ・ひらくの表（元の側は旧字体でもよい。`matchesLoosely`） */
+const WORD_RULES: KanaRule[] = [...KAKIKAE_RULES, ...HIRAKU_RULES];
+
+/**
  * 元（target）を、旧字体→新字体・歴史的仮名遣い→現代仮名遣いの置き換えだけで、
  * 提案（suggestion）にできるか。同じ文字列なら false（直しではない）。
  */
@@ -145,6 +201,14 @@ export function onlyModernization(target: string, suggestion: string): boolean {
     if (at + parts.length > chars.length) return false;
     return parts.every((char, offset) => chars[at + offset] === char);
   };
+  const matchesLoosely = (chars: string[], at: number, text: string): boolean => {
+    const parts = [...text];
+    if (at + parts.length > chars.length) return false;
+    return parts.every((char, offset) => {
+      const actual = chars[at + offset];
+      return actual === char || KYUJITAI_TO_SHINJITAI[actual] === char;
+    });
+  };
   const walk = (i: number, j: number): boolean => {
     if (i === from.length && j === to.length) return true;
     if (i === from.length || j === to.length) return false;
@@ -155,6 +219,17 @@ export function onlyModernization(target: string, suggestion: string): boolean {
     let ok = false;
     if (from[i] === to[j]) ok = walk(i + 1, j + 1);
     if (!ok && KYUJITAI_TO_SHINJITAI[from[i]] === to[j]) ok = walk(i + 1, j + 1);
+    if (!ok) {
+      // 書きかえ・ひらく。元の側は旧字体のままでもよい（「爲に→ために」「此の樣に→このように」）。
+      // 旧字→新字と書きかえを同じ字に重ねて当てる道が、1字ずつの規則では作れないため
+      for (const rule of WORD_RULES) {
+        if (!matchesLoosely(from, i, rule.from) || !startsWith(to, j, rule.to)) continue;
+        if (walk(i + [...rule.from].length, j + [...rule.to].length)) {
+          ok = true;
+          break;
+        }
+      }
+    }
     if (!ok) {
       for (const rule of KANA_RULES) {
         if (rule.medialOnly && i === 0) continue;
