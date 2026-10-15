@@ -326,13 +326,18 @@ async function sendMouseSide(
   session: E2ESession,
   frame: Frame,
   side: MouseSide,
-  phase: "mousePressed" | "mouseReleased"
+  phase: "mousePressed" | "mouseReleased",
+  /** どこの上で押すか。既定は図（`#graph`）。右の一覧なら `#side` */
+  where: "#graph" | "#side" = "#graph"
 ): Promise<void> {
-  const box = await frame.locator("#graph").boundingBox();
-  if (!box) throw new Error("図の場所が測れません");
-  // 図の真ん中は中心の人の点なので、点も線も無い左上の隅を押す
-  const x = Math.round(box.x + 20);
-  const y = Math.round(box.y + 20);
+  const box = await frame.locator(where).boundingBox();
+  if (!box) throw new Error(`押す場所（${where}）が測れません`);
+  // 図の真ん中は中心の人の点なので、点も線も無い左上の隅を押す。
+  // 右の一覧は、行の字の上（左上の隅から少し内側）を押す——一覧の行そのものの上で
+  // 横のボタンを押す形にするため（一覧の行は押すと中心が変わるので、横のボタンが
+  // 行の押下として扱われていないかも併せて見える）
+  const x = Math.round(box.x + (where === "#side" ? Math.min(40, box.width / 2) : 20));
+  const y = Math.round(box.y + (where === "#side" ? Math.min(60, box.height / 2) : 20));
   const cdp = await session.page.context().newCDPSession(session.page);
   try {
     if (phase === "mousePressed") {
@@ -383,6 +388,70 @@ test("相関図の上でマウスの戻るボタンを押すと［戻る］と�
         10_000
       );
       await sendMouseSide(session, frame, "forward", "mouseReleased");
+      await holdsFor(
+        async () => (await centerName(frame)) === PARTNERS[0],
+        "離したときにも動かず、1回の押下で1つだけ進む",
+        1_500
+      );
+      expect(await frame.locator(".g-node").count(), "図の点が消えています").toBeGreaterThan(0);
+    },
+    { keybindings: [{ key: OPEN_GRAPH_KEY, command: "novelai.openRelationGraph" }] }
+  );
+});
+
+/*
+  右の一覧の上でも同じ（実機確認リスト 249 行。2026-10-04 の作者の確認は図の上だけだった。
+  2026-10-15 の仕分け〔docs/measurements/2026-10-15-field-triage-hands.md〕で移した）。
+  受け口は相関図のパネルの document 全体（捕獲の段）なので、一覧の上でも同じに届くはず——
+  それを、一覧の上で押して確かめる。届くのは CDP の押下（ワークベンチ → WebView の iframe）で、
+  作者のマウスのソフトや OS の割り当ては通らない（そこは図の上の件と同じ）。
+*/
+test("相関図の右の一覧の上でマウスの戻るボタンを押しても、図の上と同じく前の中心へ戻り、進むボタンで進み、一覧の行を押したことにはならない", async () => {
+  await withVsCode(
+    "相関図の一覧の上でマウスの戻る",
+    [{ name: "001_はじまり.txt", text: "アブスはイントと同席した。\n" }],
+    async (session) => {
+      await writeCast(session, cast());
+      const frame = await openGraph(session);
+
+      // 全体図 → アブス → イント（履歴が2段になる）
+      await clickPerson(frame, HUB);
+      await waitUntil(async () => (await centerName(frame)) === HUB, `「${HUB}」が中心になる`, 15_000);
+      await clickPerson(frame, PARTNERS[0]);
+      await waitUntil(async () => (await centerName(frame)) === PARTNERS[0], `「${PARTNERS[0]}」が中心になる`, 15_000);
+      await waitUntil(async () => !(await frame.locator("#back").isDisabled()), "［戻る］が押せるようになる", 5_000);
+      // 右の一覧に中身が出ている（空の欄の上で押したのでは、一覧の上で押したことにならない）
+      await waitUntil(
+        async () => (await frame.evaluate(() => (document.querySelector("#side") as HTMLElement | null)?.innerText ?? "")).trim().length > 0,
+        "右の一覧に中身が出る",
+        10_000
+      );
+      const sideBox = await frame.locator("#side").boundingBox();
+      expect(sideBox !== null && sideBox.width > 40 && sideBox.height > 60, `右の一覧の大きさ：${JSON.stringify(sideBox)}`).toBe(true);
+
+      await sendMouseSide(session, frame, "back", "mousePressed", "#side");
+      await waitUntil(
+        async () => (await centerName(frame)) === HUB,
+        `右の一覧の上でマウスの戻るボタンを押した時点で「${HUB}」の図へ戻る`,
+        10_000
+      ).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}（いまの中心：${await centerName(frame)}）`);
+      });
+      await sendMouseSide(session, frame, "back", "mouseReleased", "#side");
+      await holdsFor(
+        async () => (await centerName(frame)) === HUB,
+        "離したときにも動かず、1回の押下で1つだけ戻る（一覧の行の人物へも移らない）",
+        1_500
+      );
+      expect(await frame.locator(".g-node").count(), "図の点が消えています").toBeGreaterThan(0);
+
+      await sendMouseSide(session, frame, "forward", "mousePressed", "#side");
+      await waitUntil(
+        async () => (await centerName(frame)) === PARTNERS[0],
+        `右の一覧の上でマウスの進むボタンを押した時点で「${PARTNERS[0]}」の図へ進む`,
+        10_000
+      );
+      await sendMouseSide(session, frame, "forward", "mouseReleased", "#side");
       await holdsFor(
         async () => (await centerName(frame)) === PARTNERS[0],
         "離したときにも動かず、1回の押下で1つだけ進む",
