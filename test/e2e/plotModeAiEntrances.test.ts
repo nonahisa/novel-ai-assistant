@@ -35,7 +35,7 @@ import {
 import { SIDEBAR_LAUNCH } from "./support/sidebar";
 import { E2E_WORK_TITLE, withVsCode, type LaunchOptions } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
-import { clearNotifications, quickInputWaitContext, quickOpen, quickPickRows, quickPickTitle } from "./support/workbenchDom";
+import { activateTab, clearNotifications, quickInputWaitContext, quickOpen, quickPickRows, quickPickTitle } from "./support/workbenchDom";
 
 /** 名前の候補の答えを止めておく栓。`release` で解く */
 let releaseNames: (() => void) | undefined;
@@ -192,6 +192,14 @@ test("プロットモードの「プロット逆算」「対話式プロット�
       await waitUntil(async () => (await quickPickTitle(page)) === undefined, "確認を Esc で閉じる", 10_000);
 
       /* ── 「対話式プロット作成」：相談パネルに、プロットモードの作品の問答が始まる ── */
+      /*
+        **先に左の列の作品Bのタブを押して、焦点を左の列へ戻す。** ［プロット逆算］を押したあとは焦点が
+        右の列（プロットモードのパネル）に残ることがあり、そのまま Ctrl+P で開くと作品Bの話が右の列に
+        開いてパネルを後ろへ回し、裏のボタンを30秒待って落ちた（母艦・1.141.0・0.107.17、2026-10-16。
+        単独6回中2回。写真では右の列の前に 001_別の作品.txt が出ていた）。作者がパネルのボタンを
+        押すときはパネルが見えているので、ここはテストの側の並べ方の問題
+      */
+      await activateTab(page, OTHER_EPISODE);
       await quickOpen(page, OTHER_EPISODE);
       await plot.locator('button[data-command="novelai.plotInterview"]').click();
       const opening = `「${E2E_WORK_TITLE}」のプロットを、問答で一緒に考えます`;
