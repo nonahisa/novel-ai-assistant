@@ -198,6 +198,40 @@ export const FINDING_PROPOSE_KEY = "novel.propose.finding";
 export const FINDING_LIST_KEY = "pending.list.finding";
 
 /**
+ * **相談ログ・ログ・編集履歴を読む鍵**（MCP `novel.read` の `kind: chatLog`・`log`・
+ * `editHistory`。作者の裁定 2026-10-16 の2と6。設計書6.87.24）。
+ *
+ * **この3つは `"*"` に含めない。** ほかの鍵は「全部の道具」を許せば通る（これから
+ * 足す口も含めて。裁定の2）が、ここは作者の相談の中身（`.aiwriter/logs/chat.md`）・
+ * 本文の断片が入りうる動作の記録（`actions.log`）・編集部と作者の操作の履歴が出る。
+ * どれも同期から外してある（`logs/`）か、作者と編集部の間だけの記録で、
+ * 「全部の道具を許した」ときに作者が思い浮かべる範囲を超える。だから名指しで
+ * 許したときだけ通す。
+ */
+export const CHAT_LOG_READ_KEY = "novel.read.chatLog";
+export const ACTION_LOG_READ_KEY = "novel.read.log";
+export const EDIT_HISTORY_READ_KEY = "novel.read.editHistory";
+
+/** 名指しでしか通らない鍵と、作者が読む呼び名（許可の画面とノックの文に出す） */
+export const SEPARATE_READ_KEYS: Readonly<Record<string, string>> = {
+  [CHAT_LOG_READ_KEY]: "相談ログを読む（相談の質問・返事・渡した場面）",
+  [ACTION_LOG_READ_KEY]: "動作のログを読む（本文の断片が入ることがあります）",
+  [EDIT_HISTORY_READ_KEY]: "編集履歴を読む（作者と編集部の操作の記録）",
+};
+
+/** `novel.read` の kind → 名指しの鍵 */
+const SEPARATE_READ_KINDS: Readonly<Record<string, string>> = {
+  chatLog: CHAT_LOG_READ_KEY,
+  log: ACTION_LOG_READ_KEY,
+  editHistory: EDIT_HISTORY_READ_KEY,
+};
+
+/** `"*"` では通らず、名指しで許したときだけ通る鍵か */
+export function isSeparatelyGrantedKey(key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(SEPARATE_READ_KEYS, key);
+}
+
+/**
  * その呼び出しの許可の鍵。
  *
  * **ここが唯一の決め方。** 許可を確かめる側（`mcp/tools/permission.ts`）と
@@ -219,6 +253,11 @@ export function permissionKeyOf(
 ): string {
   if (tool === "novel.propose" && kind === "finding") return FINDING_PROPOSE_KEY;
   if (tool === "pending.list" && kind === "finding") return FINDING_LIST_KEY;
+  // 相談ログ・ログ・編集履歴は名指しの鍵（`"*"` に含めない。2026-10-16）
+  if (tool === "novel.read" && typeof kind === "string") {
+    const separate = SEPARATE_READ_KINDS[kind];
+    if (separate) return separate;
+  }
   const shared = SHARED_KEY_TOOLS[tool];
   if (shared) return shared;
   if (!FEATURE_KEYED_TOOLS.has(tool)) return tool;
@@ -306,6 +345,9 @@ export function isToolAllowed(
 ): boolean {
   const entry = clientPermissionOf(permission, clientKeyOf(client));
   if (!entry) return false;
+  // **名指しの鍵は `"*"` では通さない**（`SEPARATE_READ_KEYS`）。古い道具名の
+  // 読み替えも無い鍵なので、書いてあるかどうかだけを見る
+  if (isSeparatelyGrantedKey(key)) return entry.tools.includes(key);
   if (entry.tools.includes(ALL_TOOLS) || entry.tools.includes(key)) return true;
   return (LEGACY_NAMES_BY_KEY.get(key) ?? []).some((legacy) =>
     entry.tools.includes(legacy)
@@ -476,5 +518,10 @@ export function describeExternalAccessPermission(
     const thinking = client.sampling ? "・考えさせることも許可" : "";
     return `${client.name}（${scope}${thinking}）`;
   });
-  return `外部AI（MCP）の利用：${parts.join("、")}。ほかの接続元・道具は拒否です。`;
+  // 「全部」で通らない鍵があることを、全部を許した接続元がいるときに言う
+  // （言わないと、全部を許したのに相談ログが読めないのを不具合と読む）
+  const separateNote = permission.clients.some((client) => client.tools.includes(ALL_TOOLS))
+    ? "相談ログ・ログ・編集履歴は別に許可が要ります（全部の道具には含みません）。"
+    : "";
+  return `外部AI（MCP）の利用：${parts.join("、")}。ほかの接続元・道具は拒否です。${separateNote}`;
 }

@@ -67,6 +67,13 @@ import { convertForPosting } from "../../core/postingConvert";
 import { postingCopyTargetFor } from "../../core/postingCopyTargets";
 import type { NoteMarkdownResult } from "../../core/noteMarkdown";
 import { readEpisodeFiles } from "./episodeFiles";
+import {
+  HISTORY_DIRECTORY,
+  HISTORY_FILE,
+  parseHistory,
+  sortNewestFirst,
+  type EditHistoryEntry,
+} from "../../core/editHistoryFormat";
 import { estimateResultTokens, READ_RESULT_TOKEN_BUDGET } from "./payloadBudget";
 import { PARSERS as RECORD_PARSERS, SUBDIRS as RECORD_SUBDIRS } from "./proposeRecord";
 import {
@@ -98,10 +105,10 @@ import {
  * 読めなかったファイルとして返す（実装ルール2）。組み立ては製品と同じ `core/` の
  * 関数を通す（写すと、片方だけ直った日に外部AIの読む中身が作者の画面と食い違う）。
  *
- * **許可の鍵は道具の名前（`novel.read`）ひとつ。** 今回の6種はどれも作品の資料で、
- * 作者の裁定（2026-10-16 の2）どおり `"*"` に含める。**相談ログ・ログ・編集履歴は
- * 別の鍵にする裁定（同6）がある**——それらを足すときは、`permissionKeyOf` が
- * 既に `kind` を受け取っているので、そこで鍵を分ける。
+ * **許可の鍵は、作品の資料の kind なら道具の名前（`novel.read`）ひとつ。** 作者の裁定
+ * （2026-10-16 の2）どおり `"*"` に含める。**相談ログ・ログ・編集履歴（`chatLog`・`log`・
+ * `editHistory`）だけは名指しの鍵**（`novel.read.chatLog` など。同6）で、`"*"` では
+ * 通らない——鍵を決めるのは `permissionKeyOf`（`core/externalAccessPermission.ts`）。
  */
 
 export const READ_KINDS = [
@@ -113,6 +120,10 @@ export const READ_KINDS = [
   "locations",
   "writingStats",
   "posting",
+  // ここから下の3つは名指しの鍵（`"*"` に含めない。作者の裁定 2026-10-16 の6）
+  "chatLog",
+  "log",
+  "editHistory",
 ] as const;
 export type ReadKind = (typeof READ_KINDS)[number];
 
@@ -143,7 +154,9 @@ export const NOVEL_READ_INPUT = {
         "foreshadows＝伏線の台帳と一覧／chronicle＝年表（話ごとのあらすじ・登場・出来事・時期）／" +
         "relations＝人物相関図の中身／locations＝場所の略図の中身／" +
         "writingStats＝執筆量（日・週・月・年ごと、続いている日数、環境ごと）と作品の目標・応募先の進み／" +
-        "posting＝投稿サイトの入力欄へ貼る形にした1話の本文と題（site・file が要る。投稿はしない）"
+        "posting＝投稿サイトの入力欄へ貼る形にした1話の本文と題（site・file が要る。投稿はしない）／" +
+        "chatLog＝相談ログ／log＝動作のログ／editHistory＝編集履歴（この3つは新しいものが先。" +
+        "全部の道具の許可では読めず、作者が名指しで許したときだけ読める）"
     ),
   site: z
     .enum(POSTING_READ_SITES)
@@ -197,6 +210,7 @@ export const NOVEL_READ_INPUT = {
     .describe(
       "kind: chronicle のとき、絞った行の何件目から返すか（既定は0）。" +
         "kind: posting のとき、変換した本文の何行目から返すか（0から。既定は0）。" +
+        "kind: chatLog・log・editHistory のとき、新しいほうから数えて何件目から返すか（既定は0）。" +
         "どちらも、返事の next.offset をそのまま渡すと続きが読める（ほかの引数は同じまま）"
     ),
   limit: z
@@ -206,7 +220,7 @@ export const NOVEL_READ_INPUT = {
     .max(MAX_CHRONICLE_LIMIT)
     .optional()
     .describe(
-      "kind: chronicle のとき、返す行の上限。指さなくても、返事が大きくなりすぎる手前で切って next を返す"
+      "kind: chronicle・chatLog・log・editHistory のとき、返す件数の上限。指さなくても、返事が大きくなりすぎる手前で切って next を返す"
     ),
 };
 
@@ -298,7 +312,39 @@ export type NovelReadResult =
       unreadableFiles: string[];
     }
   | WritingStatsReadResult
-  | PostingReadResult;
+  | PostingReadResult
+  | LogReadResult;
+
+/**
+ * 相談ログ・ログ・編集履歴の返事（名指しの鍵。2026-10-16）。どれも**新しいものが先**で、
+ * `offset` は新しいほうから数えた位置。大きさは年表と同じ作法で詰める。
+ */
+export type LogReadResult = LogPage &
+  (
+    | {
+        kind: "chatLog";
+        /** 相談1回ずつ。`heading` は日時と画面（「2026-10-16 10:00:00　相談パネル」） */
+        entries: Array<{ heading: string; text: string }>;
+      }
+    | {
+        kind: "log";
+        /** 動作のログの行（新しい行が先） */
+        lines: string[];
+      }
+    | {
+        kind: "editHistory";
+        entries: EditHistoryEntry[];
+      }
+  );
+
+interface LogPage {
+  /** 全体の件数（相談の回数・行の数・履歴の件数） */
+  total: number;
+  offset: number;
+  truncated: boolean;
+  next: { offset: number } | null;
+  notices: string[];
+}
 
 /** 執筆量の束（日・週・月・年の1つ）。**数字だけ**（本文もファイル名も入らない） */
 export interface WritingStatsReadBucket {
@@ -385,6 +431,10 @@ export function novelRead(input: NovelReadInput): NovelReadResult {
       return readWritingStats(folder, input.now ?? new Date());
     case "posting":
       return readPosting(folder, input);
+    case "chatLog":
+    case "log":
+    case "editHistory":
+      return readLog(folder, input.kind, input);
   }
 }
 
@@ -1199,4 +1249,149 @@ function postingPageNotices(
           "貼る文は、続きをすべて読んでから改行でつないでください。",
       ]
     : [range];
+}
+
+
+/* ── chatLog・log・editHistory ─────────────────────────── */
+
+/**
+ * 相談ログ・動作のログの置き場所（`.aiwriter/logs/`。同期しない）。書く側の
+ * `core/chatLog.ts`・`core/logger.ts` は `vscode` を import しているので、名前だけ写す
+ * （`TIMELINE_FILE` と同じ事情。食い違えば `mcpNovelReadLogs.test.ts` が落ちる）
+ */
+const LOGS_DIR = "logs";
+const CHAT_LOG_FILE = "chat.md";
+const ACTION_LOG_FILE = "actions.log";
+
+/** 相談ログの1回の区切り（`renderChatLogEntry` が回の頭に書く横線と見出し） */
+const CHAT_ENTRY_SEPARATOR = /\r?\n---\r?\n\r?\n## /;
+
+/**
+ * 相談ログ・ログ・編集履歴（作者の裁定 2026-10-16 の6）。**読むだけ**で、無ければ
+ * 空と断りを返す（作らない）。読み方は製品と同じ形（編集履歴は `editHistoryFormat.ts`
+ * の関数そのもの）。**新しいものが先**——相談の続きや直前の操作を知りたいときに、
+ * 古い順だと最初の頁が何か月も前の記録になる。
+ */
+function readLog(
+  folder: string,
+  kind: "chatLog" | "log" | "editHistory",
+  input: NovelReadInput
+): LogReadResult {
+  const base = nodePath.resolve(folder);
+  const notices: string[] = [];
+  const relative =
+    kind === "editHistory"
+      ? `${AIWRITER_DIR}/${HISTORY_DIRECTORY}/${HISTORY_FILE}`
+      : `${AIWRITER_DIR}/${LOGS_DIR}/${kind === "chatLog" ? CHAT_LOG_FILE : ACTION_LOG_FILE}`;
+  const file = nodePath.join(base, relative);
+  let text = "";
+  if (fs.existsSync(file)) {
+    try {
+      text = decodeBytes(fs.readFileSync(file)).text;
+    } catch (error) {
+      throw new McpToolError(`${relative} を読めませんでした：${describeError(error)}`);
+    }
+  } else {
+    notices.push(
+      kind === "chatLog"
+        ? `相談ログはまだありません（${relative}）。作者が相談を使っていないか、設定 novelai.chatLog.enabled を切っています。`
+        : kind === "log"
+          ? `動作のログはまだありません（${relative}）。`
+          : `編集履歴はまだありません（${relative}）。`
+    );
+  }
+
+  if (kind === "chatLog") {
+    return packLogPage(parseChatLog(text), input, notices, (page, paging) => ({
+      kind: "chatLog",
+      entries: page,
+      ...paging,
+    }));
+  }
+  if (kind === "log") {
+    const lines = text
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0)
+      .reverse();
+    return packLogPage(lines, input, notices, (page, paging) => ({
+      kind: "log",
+      lines: page,
+      ...paging,
+    }));
+  }
+  return packLogPage(sortNewestFirst(parseHistory(text)), input, notices, (page, paging) => ({
+    kind: "editHistory",
+    entries: page,
+    ...paging,
+  }));
+}
+
+/**
+ * 相談ログを回ごとに分ける（新しい回が先）。冒頭の説明（`# 〜 の相談ログ`）は回ではない
+ * ので落とす。見出しの行（日時と画面）は `heading` に分け、中身からは外す。
+ */
+export function parseChatLog(text: string): Array<{ heading: string; text: string }> {
+  // 先頭は冒頭の説明（回の区切りより前）
+  return text
+    .split(CHAT_ENTRY_SEPARATOR)
+    .slice(1)
+    .map((part) => {
+      const newline = part.indexOf("\n");
+      const heading = (newline < 0 ? part : part.slice(0, newline)).trim();
+      const body = newline < 0 ? "" : part.slice(newline + 1).trim();
+      return { heading, text: body };
+    })
+    .reverse();
+}
+
+/**
+ * 新しい順に並んだものから、`offset` 件目から上限の手前まで詰める（年表と同じ作法：
+ * 1件ずつ足して、上限を超える手前で止める。**最低1件は返す**——1件だけで上限を
+ * 超える相談でも、0件で続きを示すと同じ所で永遠に止まる）。
+ */
+function packLogPage<T>(
+  items: readonly T[],
+  input: NovelReadInput,
+  notices: string[],
+  build: (page: T[], paging: LogPage) => LogReadResult
+): LogReadResult {
+  const offset = input.offset ?? 0;
+  const candidates = items.slice(offset, offset + (input.limit ?? MAX_CHRONICLE_LIMIT));
+  const compose = (count: number): LogReadResult => {
+    const page = candidates.slice(0, count);
+    const nextOffset = offset + page.length;
+    const truncated = nextOffset < items.length;
+    return build(page, {
+      total: items.length,
+      offset,
+      truncated,
+      next: truncated ? { offset: nextOffset } : null,
+      notices: [
+        ...notices,
+        ...(truncated
+          ? [
+              `全${items.length}件のうち、新しいほうから${offset + 1}〜${nextOffset}件目を返しました。` +
+                `続きは offset: ${nextOffset} で読めます（ほかの引数は同じまま）。`,
+            ]
+          : []),
+        ...(offset > 0 && offset >= items.length
+          ? [`offset（${offset}）が全体の件数（${items.length}）を超えています。`]
+          : []),
+      ],
+    });
+  };
+  let count = Math.min(1, candidates.length);
+  while (
+    count < candidates.length &&
+    estimateResultTokens(compose(count + 1)) <= READ_RESULT_TOKEN_BUDGET
+  ) {
+    count++;
+  }
+  const result = compose(count);
+  if (count === 1 && estimateResultTokens(result) > READ_RESULT_TOKEN_BUDGET) {
+    result.notices.push(
+      `新しいほうから${offset + 1}件目だけで返事の大きさの目安を超えています。呼び出し側で切られることがあります。`
+    );
+  }
+  return result;
 }

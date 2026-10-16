@@ -1,0 +1,313 @@
+import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
+import * as nodePath from "node:path";
+import * as os from "node:os";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { FileSystemError, FileType, workspace } from "../support/vscodeStub";
+import {
+  LEDGER_PROPOSAL_CATEGORY,
+  applyLedgerProposal,
+  dismissLedgerProposal,
+  primeLedgerProposals,
+} from "../../../src/features/ledgerProposals";
+import type { RecordUpdateViewItem } from "../../../src/features/proposalPanel";
+import { ledgerPropose } from "../../../src/mcp/tools/proposeLedger";
+import { setExternalClientName } from "../../../src/mcp/tools/accessLog";
+import type { WorkEntry } from "../../../src/models/types";
+
+/**
+ * 外部AIの「台帳の案」を、作者が提案パネルで採る・見送る（作者の裁定 2026-10-16 の5）。
+ *
+ * - 採ったときだけ台帳へ書く（今のコマンドと同じ書き方）。書けたら案のファイルを消す
+ * - 見送ったら台帳には何も書かず、案のファイルを消す
+ * - 案を置いたあとで作者が台帳を直していたら、採っても書かない（案は残す）
+ *
+ * 作品は一時フォルダーの作り物（本物のディスクへ流す `workspace.fs`）。
+ */
+
+let base: string;
+let folder: string;
+let work: WorkEntry;
+
+function installDiskFileSystem(): void {
+  workspace.fs = {
+    createDirectory: async (uri: { fsPath: string }) => {
+      await fsp.mkdir(uri.fsPath, { recursive: true });
+    },
+    stat: async (uri: { fsPath: string }) => {
+      try {
+        const stat = await fsp.stat(uri.fsPath);
+        return { type: stat.isDirectory() ? FileType.Directory : FileType.File, size: stat.size, mtime: stat.mtimeMs };
+      } catch {
+        throw new FileSystemError(uri.fsPath, "FileNotFound");
+      }
+    },
+    readFile: async (uri: { fsPath: string }) => {
+      try {
+        return new Uint8Array(await fsp.readFile(uri.fsPath));
+      } catch {
+        throw new FileSystemError(uri.fsPath, "FileNotFound");
+      }
+    },
+    writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
+      await fsp.mkdir(nodePath.dirname(uri.fsPath), { recursive: true });
+      await fsp.writeFile(uri.fsPath, bytes);
+    },
+    readDirectory: async (uri: { fsPath: string }) => {
+      try {
+        const entries = await fsp.readdir(uri.fsPath, { withFileTypes: true });
+        return entries.map((entry) => [entry.name, entry.isDirectory() ? FileType.Directory : FileType.File]);
+      } catch {
+        throw new FileSystemError(uri.fsPath, "FileNotFound");
+      }
+    },
+    delete: async (uri: { fsPath: string }) => {
+      await fsp.rm(uri.fsPath, { force: true });
+    },
+    rename: async (from: { fsPath: string }, to: { fsPath: string }, options?: { overwrite?: boolean }) => {
+      if (!options?.overwrite && fs.existsSync(to.fsPath)) throw new FileSystemError(to.fsPath, "FileExists");
+      await fsp.rename(from.fsPath, to.fsPath);
+    },
+  } as unknown as typeof workspace.fs;
+}
+
+function write(relative: string, value: unknown): void {
+  const target = nodePath.join(folder, relative);
+  fs.mkdirSync(nodePath.dirname(target), { recursive: true });
+  fs.writeFileSync(target, typeof value === "string" ? value : JSON.stringify(value, null, 2));
+}
+
+function readJson<T>(relative: string): T {
+  return JSON.parse(fs.readFileSync(nodePath.join(folder, relative), "utf8")) as T;
+}
+
+function pending(): string[] {
+  const dir = nodePath.join(folder, ".aiwriter", "pending-ledger");
+  return fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+}
+
+/** 提案パネルの代役。並べたものと、採る・見送るの口を覚える */
+function fakePanel() {
+  const shown: {
+    items: RecordUpdateViewItem[];
+    apply?: (id: string) => Promise<{ ok: boolean; reason?: string }>;
+    dismiss?: (id: string) => Promise<{ ok: boolean; reason?: string }>;
+    category?: string;
+  } = { items: [] };
+  return {
+    shown,
+    showRecordUpdates: (
+      _work: WorkEntry,
+      items: RecordUpdateViewItem[],
+      apply: (id: string) => Promise<{ ok: boolean; reason?: string }>,
+      dismiss: (id: string) => Promise<{ ok: boolean; reason?: string }>,
+      category?: string
+    ) => {
+      shown.items = items;
+      shown.apply = apply;
+      shown.dismiss = dismiss;
+      shown.category = category;
+    },
+  };
+}
+
+beforeEach(async () => {
+  base = await fsp.mkdtemp(nodePath.join(os.tmpdir(), "novelai-ledger-apply-"));
+  folder = nodePath.join(base, "灯");
+  work = { id: "work_ledger", title: "灯", folderPath: folder, registeredAt: "2026-10-16T00:00:00.000Z" };
+  write(".aiwriter/config.json", {
+    schemaVersion: "1",
+    workTitle: "灯",
+    manuscriptDir: "本文",
+    settingsDir: "設定",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  write("本文/001_灯.txt", "　港の灯が消えた夜、少年は防波堤の先に立っていた。\n　父はまだ帰らない。\n");
+  write("本文/002_便り.txt", "　冬の終わりに便りが届いた。\n");
+  write("設定/章立て.json", { schemaVersion: "1", chapters: [{ name: "第一章　灯", startEpisodePath: "本文/001_灯.txt" }] });
+  write("設定/foreshadows/foreshadow_0001.json", {
+    schemaVersion: "0.1",
+    id: "foreshadow_0001",
+    label: "帰らない父の船",
+    note: "",
+    plantedChapter: 1,
+    plantedQuote: "父はまだ帰らない。",
+    status: "open",
+    resolvedChapter: null,
+    resolvedQuote: "",
+    source: "author",
+    autoGenerated: false,
+    authorNotes: "作者のメモ",
+    createdAt: "2026-09-12T00:00:00.000Z",
+    updatedAt: "2026-09-12T00:00:00.000Z",
+  });
+  write("設定/スケジュール.json", {
+    schemaVersion: "1",
+    schedules: [
+      {
+        id: "sch_1",
+        kind: "contest",
+        name: "灯台賞",
+        followsGoals: false,
+        milestone: "2026-12-31",
+        targetChars: null,
+        steps: [
+          { id: "stp_r", key: "revise", label: "推敲", days: 10, due: null, status: "todo", doneAt: null, note: "作者の段メモ" },
+        ],
+        serial: null,
+        note: "",
+        createdAt: "",
+        updatedAt: "",
+      },
+    ],
+  });
+  installDiskFileSystem();
+  workspace.textDocuments = [];
+  setExternalClientName("claude-code");
+});
+
+afterEach(async () => {
+  workspace.fs = {} as typeof workspace.fs;
+  setExternalClientName("");
+  await fsp.rm(base, { recursive: true, force: true });
+});
+
+describe("並べる", () => {
+  test("案が無ければ分類を作らない", async () => {
+    const panel = fakePanel();
+    expect(await primeLedgerProposals(work, panel)).toBe(0);
+    expect(panel.shown.category).toBeUndefined();
+  });
+
+  test("置いた案を「章・伏線・予定の案」に、外部AIの出どころ付きで並べる", async () => {
+    ledgerPropose({ folder, kind: "chapter", ledger: { episodeFile: "本文/002_便り.txt", chapterName: "第二章　便り" }, reason: "季節が変わる" });
+    const panel = fakePanel();
+    expect(await primeLedgerProposals(work, panel)).toBe(1);
+    expect(panel.shown.category).toBe(LEDGER_PROPOSAL_CATEGORY);
+    expect(panel.shown.items[0]).toMatchObject({
+      name: "章：第二章　便り",
+      source: "外部AI（claude-code）",
+      origin: "external",
+      status: "pending",
+      applyLabel: "章にする",
+    });
+    expect(panel.shown.items[0].changes.join("")).toContain("理由：季節が変わる");
+  });
+
+  test("壊れた案のファイルは並べず、消さず、直さない", async () => {
+    write(".aiwriter/pending-ledger/chapter-0123456789abcdef.json", "{壊れている");
+    const panel = fakePanel();
+    expect(await primeLedgerProposals(work, panel)).toBe(0);
+    expect(fs.readFileSync(nodePath.join(folder, ".aiwriter/pending-ledger/chapter-0123456789abcdef.json"), "utf8")).toBe(
+      "{壊れている"
+    );
+  });
+});
+
+describe("採る", () => {
+  test("章：台帳に章が入り、案のファイルが消え、作品一覧の作り直しを頼む", async () => {
+    const placed = ledgerPropose({ folder, kind: "chapter", ledger: { episodeFile: "本文/002_便り.txt", chapterName: "第二章　便り" }, reason: "r" });
+    const id = nodePath.basename(placed.file, ".json");
+    const changed: string[] = [];
+    const outcome = await applyLedgerProposal(work, id, { onChaptersChanged: (w) => changed.push(w.id) });
+    expect(outcome).toEqual({ ok: true });
+    expect(readJson<{ chapters: unknown[] }>("設定/章立て.json").chapters).toEqual([
+      { name: "第一章　灯", startEpisodePath: "本文/001_灯.txt" },
+      { name: "第二章　便り", startEpisodePath: "本文/002_便り.txt" },
+    ]);
+    expect(pending()).toEqual([]);
+    expect(changed).toEqual(["work_ledger"]);
+  });
+
+  test("伏線の登録：台帳に AI 由来として入る", async () => {
+    const placed = ledgerPropose({
+      folder,
+      kind: "foreshadow",
+      ledger: { label: "防波堤の先", plantedChapter: 1, plantedQuote: "少年は防波堤の先に立っていた。" },
+      reason: "r",
+    });
+    expect(await applyLedgerProposal(work, nodePath.basename(placed.file, ".json"))).toEqual({ ok: true });
+    const files = fs.readdirSync(nodePath.join(folder, "設定", "foreshadows"));
+    expect(files).toHaveLength(2);
+    const added = files
+      .map((name) => readJson<{ label: string; source: string; autoGenerated: boolean }>(`設定/foreshadows/${name}`))
+      .find((record) => record.label === "防波堤の先");
+    expect(added).toMatchObject({ source: "ai", autoGenerated: true });
+    expect(pending()).toEqual([]);
+  });
+
+  test("伏線の状態：状態と回収の話だけが変わり、作者メモは残る", async () => {
+    const placed = ledgerPropose({
+      folder,
+      kind: "foreshadow",
+      ledger: { foreshadowId: "foreshadow_0001", status: "resolved", resolvedChapter: 2 },
+      reason: "r",
+    });
+    expect(await applyLedgerProposal(work, nodePath.basename(placed.file, ".json"))).toEqual({ ok: true });
+    // 保存の名前は伏線状態変更と同じ決まり（`foreshadowFileName`）。1件のまま
+    const files = fs.readdirSync(nodePath.join(folder, "設定", "foreshadows"));
+    expect(files).toHaveLength(1);
+    expect(readJson<Record<string, unknown>>(`設定/foreshadows/${files[0]}`)).toMatchObject({
+      status: "resolved",
+      resolvedChapter: 2,
+      authorNotes: "作者のメモ",
+      plantedQuote: "父はまだ帰らない。",
+    });
+  });
+
+  test("予定の段：期日だけが変わり、段のメモは残る", async () => {
+    const placed = ledgerPropose({
+      folder,
+      kind: "schedule",
+      ledger: { schedule: "灯台賞", step: "推敲", due: "2026-12-20" },
+      reason: "r",
+    });
+    expect(await applyLedgerProposal(work, nodePath.basename(placed.file, ".json"))).toEqual({ ok: true });
+    const file = readJson<{ schedules: Array<{ steps: Array<Record<string, unknown>> }> }>("設定/スケジュール.json");
+    expect(file.schedules[0].steps[0]).toMatchObject({ id: "stp_r", due: "2026-12-20", days: 10, note: "作者の段メモ" });
+  });
+
+  test("置いたあとで作者が台帳を直していたら書かず、案は残す", async () => {
+    const placed = ledgerPropose({
+      folder,
+      kind: "chapter",
+      ledger: { episodeFile: "本文/001_灯.txt", chapterName: "序章" },
+      reason: "r",
+    });
+    // 作者が先に手で改名した
+    write("設定/章立て.json", { schemaVersion: "1", chapters: [{ name: "第一章　港", startEpisodePath: "本文/001_灯.txt" }] });
+    const outcome = await applyLedgerProposal(work, nodePath.basename(placed.file, ".json"));
+    expect(outcome.ok).toBe(false);
+    expect(outcome.reason).toMatch(/案を置いたあとで章立てが変わっています/);
+    expect(readJson<{ chapters: Array<{ name: string }> }>("設定/章立て.json").chapters[0].name).toBe("第一章　港");
+    expect(pending()).toHaveLength(1);
+  });
+
+  test("伏線の状態が置いたあとで変わっていたら書かない", async () => {
+    const placed = ledgerPropose({
+      folder,
+      kind: "foreshadow",
+      ledger: { foreshadowId: "foreshadow_0001", status: "intentional" },
+      reason: "r",
+    });
+    const record = readJson<Record<string, unknown>>("設定/foreshadows/foreshadow_0001.json");
+    write("設定/foreshadows/foreshadow_0001.json", { ...record, status: "resolved", resolvedChapter: 2 });
+    const outcome = await applyLedgerProposal(work, nodePath.basename(placed.file, ".json"));
+    expect(outcome.ok).toBe(false);
+    expect(readJson<Record<string, unknown>>("設定/foreshadows/foreshadow_0001.json").status).toBe("resolved");
+  });
+
+  test("案のファイルが無ければ断る", async () => {
+    expect((await applyLedgerProposal(work, "chapter-0123456789abcdef")).ok).toBe(false);
+  });
+});
+
+describe("見送る", () => {
+  test("台帳には何も書かず、案のファイルを消す", async () => {
+    const before = fs.readFileSync(nodePath.join(folder, "設定/章立て.json"), "utf8");
+    const placed = ledgerPropose({ folder, kind: "chapter", ledger: { episodeFile: "本文/002_便り.txt", chapterName: "第二章" }, reason: "r" });
+    expect(await dismissLedgerProposal(work, nodePath.basename(placed.file, ".json"))).toEqual({ ok: true });
+    expect(pending()).toEqual([]);
+    expect(fs.readFileSync(nodePath.join(folder, "設定/章立て.json"), "utf8")).toBe(before);
+  });
+});

@@ -4,6 +4,7 @@ import nodePath from "node:path";
 import { COMMAND_COVERAGE } from "../../../src/core/commandCoverage";
 import { RUN_REQUESTABLE_FEATURES } from "../../../src/core/runRequest";
 import { READ_KINDS } from "../../../src/mcp/tools/read";
+import { LEDGER_PROPOSE_KINDS } from "../../../src/mcp/tools/proposeLedger";
 
 /**
  * コマンドごとの区分の表の見張り（設計書6.87.24。作者の裁定 2026-10-16 の7
@@ -64,12 +65,34 @@ describe("コマンドごとの区分の表", () => {
       ["novelai.showWritingStats", "A"],
       ["novelai.copyForPosting", "A"],
       ["novelai.copyBodyForPosting", "A"],
+      // 11件目以降（2026-10-16 の裁定6）。名指しの鍵（"*" では読めない）
+      ["novelai.openChatLog", "A"],
+      ["novelai.showLog", "A"],
+      ["novelai.showEditHistory", "A"],
     ].sort());
     // 道に書いた kind が、読む口の受け付ける kind と食い違っていないこと
     for (const [command] of viaRead) {
       const via = COMMAND_COVERAGE[command].via ?? "";
       const kind = /^novel\.read kind: (\w+)/u.exec(via)?.[1];
       expect(READ_KINDS as readonly string[], via).toContain(kind);
+    }
+  });
+
+  test("提案の器（novel.propose）で届くようにしたコマンドは A で、置ける kind を指している", () => {
+    const viaPropose = Object.entries(COMMAND_COVERAGE)
+      .filter(([, entry]) => entry.via?.startsWith("novel.propose"))
+      .map(([command, entry]) => [command, entry.class]);
+    // 作者の裁定 2026-10-16 の5（章立て・伏線の登録と状態。予定の段は画面の操作でコマンドが無い）
+    expect([...viaPropose].sort()).toEqual([
+      ["novelai.startChapter", "A"],
+      ["novelai.renameChapter", "A"],
+      ["novelai.addForeshadow", "A"],
+      ["novelai.setForeshadowStatus", "A"],
+    ].sort());
+    for (const [command] of viaPropose) {
+      const via = COMMAND_COVERAGE[command].via ?? "";
+      const kind = /^novel\.propose kind: (\w+)/u.exec(via)?.[1];
+      expect(LEDGER_PROPOSE_KINDS as readonly string[], via).toContain(kind);
     }
   });
 

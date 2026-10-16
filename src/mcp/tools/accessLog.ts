@@ -29,6 +29,17 @@ const READ_KIND_LABELS: Readonly<Record<string, string>> = {
   locations: "場所の略図",
   writingStats: "執筆量",
   posting: "投稿サイト用の本文",
+  // 名指しの鍵の3つ（2026-10-16）。中身は記録に残さない（何を読んだかだけ）
+  chatLog: "相談ログ",
+  log: "動作のログ",
+  editHistory: "編集履歴",
+};
+
+/** `novel.propose` の台帳の案の呼び名（2026-10-16） */
+const LEDGER_KIND_LABELS: Readonly<Record<string, string>> = {
+  chapter: "章立て",
+  foreshadow: "伏線",
+  schedule: "予定の段",
 };
 
 /**
@@ -267,6 +278,13 @@ function detailOf(
     return counts
       ? `${head} 置いた ${counts.placed}件・落とした ${counts.notPlaced}件`
       : head;
+  }
+  /*
+    章立て・伏線・予定の段の案（2026-10-16）。**何の案かだけ**を残す——章名や伏線の名には
+    作品の筋が書かれていることがある（\`novel.read\` の語と同じ扱い）
+  */
+  if (tool === "novel.propose" && typeof args?.kind === "string" && LEDGER_KIND_LABELS[args.kind]) {
+    return `${LEDGER_KIND_LABELS[args.kind]}の案を判断待ちへ置いた`;
   }
   if (tool === "novel.propose") {
     const name = typeof args?.name === "string" ? args.name : "";

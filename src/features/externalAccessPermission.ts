@@ -7,7 +7,9 @@ import {
   ALL_TOOLS,
   FINDING_LIST_KEY,
   FINDING_PROPOSE_KEY,
+  SEPARATE_READ_KEYS,
   clientKeyOf,
+  isSeparatelyGrantedKey,
   type ExternalClientPermission,
 } from "../core/externalAccessPermission";
 import { AI_INSTRUCTION_TARGETS } from "../core/aiInstructions";
@@ -72,6 +74,20 @@ const WHAT_SAMPLING_MEANS =
   "・いつでも取り消せます";
 
 /**
+ * 相談ログ・ログ・編集履歴を読ませると何が出るか（作者の裁定 2026-10-16 の6）。
+ *
+ * **「全部の道具」の許可に含まれないことを、許す前に言う。** 含まれると思って
+ * いる作者は、どこで許すのかを探すことになる。
+ */
+const WHAT_SEPARATE_KEYS_MEAN =
+  "相談ログ・ログ・編集履歴は、「全部の道具」を許可していても読めません" +
+  "（作者が1つずつ許可します）。\n\n" +
+  "・相談ログ：相談パネルなどでの質問・返事・渡した場面の冒頭が出ます\n" +
+  "・ログ：動作の記録です。AIの返事の断片（本文の一部）が入ることがあります\n" +
+  "・編集履歴：作者と編集部の操作の記録（直した中身を含む）が出ます\n" +
+  "・どれも読むだけで、書き換えません。いつでも取り消せます";
+
+/**
  * ノックされた道具を、その場で許すか決める（設計書6.87.14）。
  *
  * **作者の指示（2026-09-16）**：「MCP承認を検知した場合は、拡張機能の
@@ -92,6 +108,29 @@ export async function askAboutKnock(
 ): Promise<boolean> {
   const who = clientKeyOf(knock.client);
   const what = describeAccessKey(knock.key);
+  /*
+    **名指しの鍵（相談ログ・ログ・編集履歴）には「全部を許可」を出さない。**
+    「全部」はそれらを覆わない（作者の裁定 2026-10-16）ので、押しても通らず、
+    作者には「許したのに読めない」と見える。中身が何かを detail に足す。
+  */
+  if (isSeparatelyGrantedKey(knock.key)) {
+    const allow = "この道具だけ許可";
+    const separate = await vscode.window.showWarningMessage(
+      `外部AI（${who}）が「${work.title}」で「${what}」を使おうとしました。`,
+      {
+        modal: true,
+        detail:
+          `断りました（許可がないためです）。\n\n${ABOUT_CLIENT_NAME}\n\n` +
+          `${WHAT_SEPARATE_KEYS_MEAN}\n\n` +
+          "「この道具だけ許可」を選ぶと、この相手のこの読み方だけが通るようになります（ほかの2つは別に許可が要ります）。",
+      },
+      allow
+    );
+    if (separate !== allow) return false;
+    await new ExternalAccessPermissionStore(work).allowTool(knock.client, knock.key);
+    void offerReview(work, `${who} の「${what}」を許可しました。`);
+    return true;
+  }
   const answer = await vscode.window.showWarningMessage(
     `外部AI（${who}）が「${work.title}」で「${what}」を使おうとしました。`,
     {
@@ -303,15 +342,22 @@ function describeAccessKey(key: string): string {
   // 指摘を置く鍵（2026-10-01）。鍵の文字だけでは何を許すのか読めない
   if (key === FINDING_PROPOSE_KEY) return `指摘を提案パネルへ置くこと（${key}）`;
   if (key === FINDING_LIST_KEY) return `提案パネルの指摘を読むこと（${key}）`;
+  const separate = SEPARATE_READ_KEYS[key];
+  if (separate) return `${separate}（${key}）`;
+  if (key === ALL_TOOLS) return "全部の道具（相談ログ・ログ・編集履歴は含みません）";
   const label = FEATURE_LABELS[key as FeatureName];
   return label ? `${label}（${key}）` : key;
 }
 
 function describeScope(client: ExternalClientPermission): string {
-  const scope = client.tools.includes(ALL_TOOLS)
+  // 名指しの鍵は「全部」に数えないので、別に数えて添える
+  const separate = client.tools.filter(isSeparatelyGrantedKey).length;
+  const ordinary = client.tools.filter((tool) => !isSeparatelyGrantedKey(tool));
+  const scope = ordinary.includes(ALL_TOOLS)
     ? "全部の道具"
-    : `${client.tools.length}個の道具`;
-  return client.sampling ? `${scope}・考えさせることも許可` : scope;
+    : `${ordinary.length}個の道具`;
+  const logs = separate > 0 ? `・相談ログ等${separate}つ` : "";
+  return client.sampling ? `${scope}${logs}・考えさせることも許可` : `${scope}${logs}`;
 }
 
 async function editClient(
@@ -320,9 +366,19 @@ async function editClient(
   client: ExternalClientPermission
 ): Promise<void> {
   const actions: string[] = [];
-  if (!client.tools.includes(ALL_TOOLS) && client.tools.length > 0) {
+  // 「全部」を許していても、名指しの鍵があれば1つずつ取り消せるようにする
+  if (
+    client.tools.length > 0 &&
+    (!client.tools.includes(ALL_TOOLS) || client.tools.some(isSeparatelyGrantedKey))
+  ) {
     actions.push("道具を1つ取り消す");
   }
+  /*
+    **相談ログ・ログ・編集履歴はここで選べる**（作者の裁定 2026-10-16 の6）。
+    ノックを待たずに先に許せる口を置く——「全部」を許した接続元はノックの後に
+    探しに来るので、ここに無いと許す場所が見つからない。
+  */
+  actions.push(SEPARATE_KEYS_ACTION);
   actions.push(
     client.sampling ? "考えさせるのをやめる" : "考えさせることも許可する"
   );
@@ -336,6 +392,11 @@ async function editClient(
     }
   );
   if (!answer || isCancelItem(answer)) return;
+
+  if (answer.label === SEPARATE_KEYS_ACTION) {
+    await chooseSeparateKeys(store, client);
+    return;
+  }
 
   if (answer.label === "道具を1つ取り消す") {
     const tool = await vscode.window.showQuickPick(
@@ -388,5 +449,62 @@ async function editClient(
   await store.revokeClient(client.name);
   void vscode.window.showInformationMessage(
     `${client.name} の許可を全部取り消しました。`
+  );
+}
+
+/** 許可の画面の項目名（相談ログ・ログ・編集履歴を選ぶ） */
+const SEPARATE_KEYS_ACTION = "相談ログ・ログ・編集履歴を読ませる／やめる";
+
+/**
+ * 相談ログ・ログ・編集履歴を、1つずつ許す／やめる（作者の裁定 2026-10-16 の6）。
+ *
+ * **いま許しているものに印を付けた複数選択**で出す。選んだものが許可、外したものが
+ * 取り消しになる。許すときは中身（何が外へ出るか）を先に見せてから確かめる。
+ */
+async function chooseSeparateKeys(
+  store: ExternalAccessPermissionStore,
+  client: ExternalClientPermission
+): Promise<void> {
+  const picked = await vscode.window.showQuickPick(
+    Object.entries(SEPARATE_READ_KEYS).map(([key, label]) => ({
+      label,
+      description: key,
+      picked: client.tools.includes(key),
+      key,
+    })),
+    {
+      title: `${client.name} に読ませるもの（全部の道具の許可には含まれません）`,
+      placeHolder: "読ませるものに印を付けてください（外すと取り消します）",
+      canPickMany: true,
+      ignoreFocusOut: true,
+    }
+  );
+  if (!picked) return;
+  const wanted = new Set(picked.map((item) => item.key));
+  const adding = Object.keys(SEPARATE_READ_KEYS).filter(
+    (key) => wanted.has(key) && !client.tools.includes(key)
+  );
+  const removing = Object.keys(SEPARATE_READ_KEYS).filter(
+    (key) => !wanted.has(key) && client.tools.includes(key)
+  );
+  if (adding.length === 0 && removing.length === 0) return;
+
+  if (adding.length > 0) {
+    const sure = await vscode.window.showWarningMessage(
+      `${client.name} に、${adding.map((key) => SEPARATE_READ_KEYS[key]).join("・")}ことを許可しますか。`,
+      { modal: true, detail: `${ABOUT_CLIENT_NAME}\n\n${WHAT_SEPARATE_KEYS_MEAN}` },
+      "許可する"
+    );
+    if (sure !== "許可する") return;
+  }
+  for (const key of adding) await store.allowTool(client.name, key);
+  for (const key of removing) await store.revokeTool(client.name, key);
+  void vscode.window.showInformationMessage(
+    [
+      adding.length > 0 ? `許可：${adding.map((key) => SEPARATE_READ_KEYS[key]).join("・")}` : "",
+      removing.length > 0 ? `取り消し：${removing.map((key) => SEPARATE_READ_KEYS[key]).join("・")}` : "",
+    ]
+      .filter(Boolean)
+      .join("／")
   );
 }

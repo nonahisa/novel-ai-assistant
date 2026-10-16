@@ -6,6 +6,7 @@ import {
   EXTERNAL_PERMISSION_FILE,
   FINDING_LIST_KEY,
   FINDING_PROPOSE_KEY,
+  SEPARATE_READ_KEYS,
   externalAccessDeniedMessage,
   isSamplingAllowed,
   isToolAllowed,
@@ -103,6 +104,12 @@ export function describeKey(key: string): string {
   }
   if (key === FINDING_LIST_KEY) {
     return `提案パネルの指摘を読むこと（${key}）`;
+  }
+  // 相談ログ・ログ・編集履歴。**「全部」では通らない**ことも断り文句で言う
+  // （言わないと、全部を許した作者のAIが「許可済みのはず」と食い違う）
+  const separate = SEPARATE_READ_KEYS[key];
+  if (separate) {
+    return `${separate}こと（${key}。全部の道具の許可には含まれず、名指しの許可が要ります）`;
   }
   const label = FEATURE_LABELS[key as FeatureName];
   return label ? `${label}（feature: ${key}）` : key;
