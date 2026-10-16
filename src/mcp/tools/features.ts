@@ -95,6 +95,7 @@ import {
   catchphraseValidate,
 } from "./blurb";
 import { openingPrompt, openingRun, openingValidate } from "./opening";
+import { announcePrompt, announceRun, announceValidate } from "./announce";
 import {
   NAME_ORIGIN_SCHEMA,
   nameCollisions,
@@ -271,7 +272,8 @@ const OPTIONS_TABLE =
   "結果の proposeArgs を novel.propose へ渡すと承認待ちへ置けます（run は書きません）。" +
   "fromExtract: true なら、抽出の貯めから保存する予定の新しい人物が対象（validate の stash で、保存の前のまとめとして貯まる）。" +
   "chapter: nameOnly。" +
-  "catchphrase: blurb・rejected。";
+  "catchphrase: blurb・rejected。" +
+  "announce: filePath※（告知する話）と、合本なら chapter（生成だけで投稿しない）。";
 
 const OPTIONS_SEE_RUN =
   "feature ごとの追加の指定。中身は novel.run の options と同じです。";
@@ -826,6 +828,13 @@ const FEATURES: Record<FeatureName, FeatureEntry> = {
     run: (input) =>
       catchphraseRun({ ...catchphraseArgs(input), ...runnerArgs(input) }),
   },
+  // 更新告知文（2026-10-16 の棚卸しの9件目）。生成だけで、公開は作者
+  announce: {
+    prompt: (input) => announcePrompt(announceArgs(input)),
+    validate: (input) =>
+      announceValidate({ ...announceArgs(input), response: needResponse(input) }),
+    run: (input) => announceRun({ ...announceArgs(input), ...runnerArgs(input) }),
+  },
   opening: {
     prompt: (input) => openingPrompt({ folder: input.folder }),
     // `folder` を渡す。ほめる欄の引用を冒頭の本文と照合するため（1.9）
@@ -914,6 +923,15 @@ function catchphraseArgs(input: FeatureCallInput): {
     blurb: option(input, "blurb", z.string()),
     rejected: option(input, "rejected", z.array(z.string())),
   };
+}
+
+/** 告知を作る話。**その話の本文が要る**（合本なら話数で指す。各話あらすじと同じ指し方） */
+function announceArgs(input: FeatureCallInput): {
+  folder: string;
+  filePath: string;
+  chapter?: number;
+} {
+  return { folder: input.folder, filePath: needFilePath(input), chapter: input.chapter };
 }
 
 function nameArgs(input: FeatureCallInput): {

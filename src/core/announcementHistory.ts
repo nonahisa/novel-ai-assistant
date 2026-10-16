@@ -3,6 +3,10 @@ import * as path from "./paths";
 import type { WorkEntry } from "../models/types";
 import { workPaths } from "./workRegistry";
 import { atomicWriteFile } from "./atomicWrite";
+import {
+  ANNOUNCEMENT_HISTORY_SUBPATH,
+  parseAnnouncementHistory,
+} from "./announceConfig";
 
 /**
  * これまでに作った更新告知（X用の本文）の履歴。
@@ -18,7 +22,6 @@ import { atomicWriteFile } from "./atomicWrite";
  * Gitでも同期しない（キャッシュと同じ扱い）。消えても作り直せる。
  */
 
-const HISTORY_FILE = "announcements.json";
 /** 覚えておく件数。増やしすぎるとプロンプトが膨らむ */
 const MAX_HISTORY = 20;
 
@@ -26,7 +29,8 @@ export class AnnouncementHistory {
   constructor(private readonly work: WorkEntry) {}
 
   private filePath(): string {
-    return path.join(workPaths(this.work).aiwriter, "cache", HISTORY_FILE);
+    // 置き場と読み方は `announceConfig.ts` が持つ（MCP の告知文も同じものを読む）
+    return path.join(workPaths(this.work).aiwriter, ...ANNOUNCEMENT_HISTORY_SUBPATH);
   }
 
   /** 読めなければ空として扱う。履歴は無くても機能が成り立つ */
@@ -35,9 +39,7 @@ export class AnnouncementHistory {
       const bytes = await vscode.workspace.fs.readFile(
         path.toUri(this.filePath())
       );
-      const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-      if (!Array.isArray(parsed)) return [];
-      return parsed.filter((item): item is string => typeof item === "string");
+      return parseAnnouncementHistory(new TextDecoder().decode(bytes));
     } catch {
       return [];
     }

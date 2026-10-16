@@ -230,7 +230,7 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.generateWorkBlurb": { class: "A", label: "作品紹介文" },
   "novelai.generateCatchphrases": { class: "A", label: "キャッチコピー案" },
   // ── 投稿・告知・読者の反応
-  "novelai.generateAnnouncement": { class: "C2", label: "更新SNS告知文作成" },
+  "novelai.generateAnnouncement": { class: "A", label: "更新SNS告知文作成", via: "novel.run feature: announce" },
   "novelai.configureAnnouncement": { class: "C4", label: "SNS告知設定", reason: "設定" },
   "novelai.postNewEpisode": { class: "C4", label: "新話投稿", reason: "送信" },
   "novelai.postThisEpisode": { class: "C4", label: "この話を投稿する", reason: "送信" },
