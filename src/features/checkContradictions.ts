@@ -672,8 +672,11 @@ export async function checkContradictions(
   // 検証は別のプロンプトなので、版も別に持つ
   const verifyKeyBase = {
     feature: "contradiction_verify",
-    // 検証のプロンプトは観点で変わらないので、印を混ぜない
-    promptVersion: `${CONTRADICTION_VERIFY_VERSION}:${material.fingerprint}`,
+    // 検証のプロンプトは観点で変わらないので、観点の印は混ぜない。
+    // **抑制の印だけは混ぜる**（P-12b 1.2）——小さいモデルへは文面が違う
+    promptVersion:
+      `${CONTRADICTION_VERIFY_VERSION}:` +
+      `${capability.suppressUncertainContradictions ? "strict:" : ""}${material.fingerprint}`,
     providerId: resolved.provider.id,
     model: resolved.model,
   };
@@ -1766,6 +1769,8 @@ export async function checkContradictions(
           // 指摘には「どの項目の話か」が付いてこないので、値だけで引く。
           // 以前は "role" 決め打ちで、外見や状態の指摘では当たらなかった
           settingKnownAt: settings.knownAtFor(issue.settingSays),
+          // 小さいモデルへは、話数の記録が無いときの書き方を変える（P-12b 1.2）
+          smallModel: capability.suppressUncertainContradictions,
         }),
         model,
         temperature: CONTRADICTION_VERIFY_TEMPERATURE,

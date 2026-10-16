@@ -207,6 +207,8 @@ describe("検証の段（P-12b、設計書6.10.5）", () => {
       chunk: chunkFromId(FIXTURE, chunkId),
       issue: { ...kept[0], note: "" },
       settingKnownAt: "",
+      // e4b は製品と同じ判定で抑制版（strict）になるので、検証も小さいモデルの形（P-12b 1.2）
+      smallModel: true,
     });
     expect(asked[1].userPrompt).toBe(expected);
   });

@@ -123,6 +123,11 @@ export function buildContradictionVerifyUserPrompt(input: {
   issue: AcceptedContradiction;
   /** `describeKnownAt` の結果 */
   settingKnownAt: string;
+  /**
+   * 小さいモデル向けの形（P-12b 1.2）。検出の段の抑制と一対で決める
+   * （製品は `suppressUncertainContradictions`、MCP は `suppression: "strict"`）
+   */
+  smallModel?: boolean;
 }): string {
   return buildContradictionVerifyPrompt({
     chapterLabel: input.chapterLabel,
@@ -132,5 +137,6 @@ export function buildContradictionVerifyUserPrompt(input: {
     textSays: input.issue.textSays,
     category: input.issue.category,
     settingKnownAt: input.settingKnownAt,
+    smallModel: input.smallModel,
   });
 }
