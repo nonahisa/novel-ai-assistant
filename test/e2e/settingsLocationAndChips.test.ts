@@ -22,6 +22,7 @@ import { expect, test } from "vitest";
 import { emptyCharacter, type Character } from "../../src/models/character";
 import { emptyLocation, locationFileName, type Location, type LocationRelation } from "../../src/models/location";
 import { DEFAULT_SETTINGS_DIR } from "../../src/models/types";
+import { readJsonWhenPresent } from "./support/fileSettle";
 import { runCommand } from "./support/quickInput";
 import { defaultCharactersFolder, settingsPanelFrame, settingsListRows, writeCharactersTo } from "./support/settingsFixture";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
@@ -53,17 +54,8 @@ async function selectRecord(frame: Frame, kind: string, name: string): Promise<v
   await frame.locator("#list .item", { hasText: name }).first().click();
 }
 
-/** 保存は「退避 → 新規作成」で書かれる。読めるまで少し待って読む */
-async function readJson<T>(file: string): Promise<T> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return JSON.parse(await readFile(file, "utf8")) as T;
-    } catch (error) {
-      if (attempt >= 30) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-  }
-}
+/** 保存は「退避 → 新規作成」で書かれる。読めるまで少し待って読む（`support/fileSettle.ts`） */
+const readJson = readJsonWhenPresent;
 
 /* ── 1. 場所の位置関係を書き足して保存する ── */
 

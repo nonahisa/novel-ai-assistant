@@ -14,12 +14,13 @@
  * 場所の記録は製品が読む形（`models/location.ts` の `emptyLocation` に中身を足したもの）で、
  * VS Code を起こす前に置く。**AI は呼ばない。**
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame } from "playwright-core";
 import { expect, test } from "vitest";
 import { emptyLocation, type Location, type LocationRelation } from "../../src/models/location";
 import { DEFAULT_SETTINGS_DIR } from "../../src/models/types";
+import { readJsonWhenPresent } from "./support/fileSettle";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { activeTabNames, editorGroupTabs, pressWorkbenchKey, tabNamesInclude } from "./support/workbenchDom";
 import { holdsFor, waitUntil } from "./support/wait";
@@ -76,13 +77,13 @@ async function writeLocations(workFolder: string, locations: readonly Location[]
   }
 }
 
-/** 保存は置き換えで書かれる。読めるまで少し待って読む */
-async function readLocation(file: string): Promise<Location | undefined> {
-  try {
-    return JSON.parse(await readFile(file, "utf8")) as Location;
-  } catch {
-    return undefined;
-  }
+/**
+ * 保存は置き換え（退避 → 削除 → 作り直し）で書かれる。読めるまで少し待って読む（`support/fileSettle.ts`）。
+ * 前は読めなければ undefined を返していたが、それだと「ほかの場所のファイルには触らない」の
+ * 確かめが、消えた瞬間を読んでも黙って通ってしまう
+ */
+function readLocation(file: string): Promise<Location> {
+  return readJsonWhenPresent<Location>(file);
 }
 
 /** 略図の面（SVG の場所の点 `.s-point` を持つ） */

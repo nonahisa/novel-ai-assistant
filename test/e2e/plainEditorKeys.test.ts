@@ -12,9 +12,10 @@
  * `.md` の「次の問題」は、本体の Markdown の検査（`markdown.validate.enabled`）に
  * 無いファイルへのリンクを見つけさせて作る。
  */
-import { readFile, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "vitest";
+import { saveAndSettle as saveFileAndSettle } from "./support/fileSettle";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { holdsFor, waitUntil } from "./support/wait";
 import {
@@ -35,38 +36,12 @@ async function fileText(session: E2ESession, name: string): Promise<string> {
 }
 
 /**
- * Ctrl+S を押し、保存の書き込みが**終わるまで**待つ。
- *
- * **VS Code 本体の保存は、ファイルをいったん空にしてから書く**（一時ファイルを経ない）。
- * 書いている途中に読むと空の中身が返る。母艦（0.107.14、1.141.0、2026-10-16）で、CPU を
- * 8本回した負荷の下では5回中2〜3回、保存の直後に読んだ .txt が `""` で「保存しても
- * ファイルは変わらない」が崩れた（全件の走りで1回落ちたのもこれ。単独では書き込みが
- * 一瞬で終わり、読む刻みに当たらない）。空の中身は落ちたあとには残っておらず、製品は保存の
- * 前に本文を書き換えない（`onWillSaveTextDocument` を持たない）ので、本体の書き込みの途中を読んだもの。
- *
- * そこで「保存がファイルに届いた（更新時刻が進んだ）」→「中身が空でなく、続けて読んでも
- * 同じ」の2段を名乗って待つ。中身の正しさは、待ったあとに呼び手が確かめる
+ * Ctrl+S を押し、保存の書き込みが**終わるまで**待つ。保存の直後に「ファイルは変わらない」を
+ * 読むので、VS Code 本体の保存が空にしてから書く途中（`""`）を読むと崩れる（2026-10-16 母艦の
+ * 負荷の下で5回中2〜3回）。待ち方と経緯は `support/fileSettle.ts` の `saveAndSettle`
  */
 async function saveAndSettle(session: E2ESession, name: string, label: string): Promise<void> {
-  const file = path.join(session.manuscriptFolder, name);
-  const before = (await stat(file)).mtimeMs;
-  await session.page.keyboard.press("Control+KeyS");
-  await waitUntil(async () => (await stat(file)).mtimeMs > before, `Ctrl+S の保存が${label}のファイルに届く`, 10_000);
-  let last = "";
-  let same = 0;
-  await waitUntil(
-    async () => {
-      const now = await fileText(session, name);
-      same = now !== "" && now === last ? same + 1 : 0;
-      last = now;
-      return same >= 3;
-    },
-    `${label}の保存の書き込みが終わる`,
-    10_000
-  ).catch((error: Error) => {
-    error.message += `［最後に読めた中身 ${JSON.stringify(last)}］`;
-    throw error;
-  });
+  await saveFileAndSettle(session.page, path.join(session.manuscriptFolder, name), label);
 }
 
 /**

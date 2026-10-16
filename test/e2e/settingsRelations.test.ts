@@ -12,11 +12,12 @@
  * （提案→承認で記録が残る道は単体テスト `core/rejectedRelations.test.ts` が見ている）。
  * 人物の記録は製品が読む形で置く。**AI は呼ばない。**
  */
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame } from "playwright-core";
 import { expect, test } from "vitest";
 import { characterFileName, emptyCharacter, type Character } from "../../src/models/character";
+import { readJsonWhenPresent } from "./support/fileSettle";
 import { runCommand } from "./support/quickInput";
 import { defaultCharactersFolder, settingsFolder, settingsPanelFrame, writeCharactersTo } from "./support/settingsFixture";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
@@ -67,14 +68,7 @@ async function readRina(session: E2ESession): Promise<Character> {
   const rina = cast()[0];
   const file = path.join(defaultCharactersFolder(session.workFolder), characterFileName(rina));
   // 保存の置き換えの瞬間（書き換え中のファイルが一瞬見えない）を読んでしまったら、少し待って読み直す
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return JSON.parse(await readFile(file, "utf8")) as Character;
-    } catch (error) {
-      if (attempt >= 20) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-  }
+  return readJsonWhenPresent<Character>(file);
 }
 
 test("関係欄に「ターナ=母」が出て、書き直して保存でき、退けた関係が出て、「退けた記録から外す」で消える（関係は戻らない）", async () => {
@@ -167,7 +161,7 @@ test("人物相関図を開いたまま関係を直すと、設定資料パネ�
       // 外からファイルを書き換える（承認待ちの更新を反映したときと同じ道）：「姉」→「師匠」
       const folder = defaultCharactersFolder(session.workFolder);
       const file = path.join(folder, characterFileName(cast()[0]));
-      const current = JSON.parse(await readFile(file, "utf8")) as Character;
+      const current = await readJsonWhenPresent<Character>(file);
       current.relations = [{ name: "ターナ", relation: "師匠" }];
       await writeFile(file, JSON.stringify(current, null, 2), "utf8");
       await waitUntil(
