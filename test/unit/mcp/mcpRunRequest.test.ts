@@ -191,12 +191,26 @@ describe("run.request", () => {
     expect(settings.note).toContain("novel.extract.commit");
   });
 
-  test("話を指せない機能（冒頭診断・AI接続確認）の file は、開く前に断る", async () => {
+  test("話を指せない機能（冒頭診断・AI接続確認・書き出し）の file は、開く前に断る", async () => {
     const d = deps();
-    for (const feature of ["opening", "testAI"]) {
+    for (const feature of ["opening", "testAI", "exportPdf", "exportEpub"]) {
       await expect(runRequest({ folder: work, feature, file: "本文\\第1話.txt" }, d)).rejects.toThrow(/file/u);
     }
     expect(d.opened).toHaveLength(0);
+  });
+
+  test("書き出し（PDF・EPUB）を頼める。AIを呼ばず新しいファイルを作るだけと、頼んだ時点で言う", async () => {
+    for (const feature of ["exportPdf", "exportEpub"]) {
+      const d = deps();
+      const result = await runRequest({ folder: work, feature }, d);
+      const ticket = parseRunTicket(
+        fs.readFileSync(nodePath.join(storage, RUN_REQUEST_DIRECTORY, runTicketFileName(result.requestId)), "utf8")
+      );
+      expect(ticket?.feature, feature).toBe(feature);
+      expect(result.note, feature).toContain("AIは呼びません");
+      expect(result.note, feature).toContain("原稿は変わりません");
+      fs.rmSync(nodePath.join(storage, RUN_REQUEST_DIRECTORY), { recursive: true, force: true });
+    }
   });
 
   test("作品フォルダーの外を指す file は断る", async () => {

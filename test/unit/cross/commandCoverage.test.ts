@@ -77,12 +77,15 @@ describe("コマンドごとの区分の表", () => {
     const viaRun = Object.entries(COMMAND_COVERAGE)
       .filter(([, entry]) => entry.via?.startsWith("run.request"))
       .map(([command, entry]) => [command, entry.class, entry.via]);
-    expect(viaRun).toEqual([
+    expect([...viaRun].sort()).toEqual([
       ["novelai.testAI", "B", "run.request feature: testAI"],
       ["novelai.extractSettings", "A", "run.request feature: settings"],
       ["novelai.checkOpening", "A", "run.request feature: opening"],
       ["novelai.checkFactContradictions", "A", "run.request feature: factContradiction"],
-    ]);
+      // 棚卸しの10件目（2026-10-16）。新しいファイルを作るだけ（作者の裁定3）
+      ["novelai.exportPdf", "B", "run.request feature: exportPdf"],
+      ["novelai.exportEpub", "B", "run.request feature: exportEpub"],
+    ].sort());
     // 道に書いた機能の名前が、run.request の受け付ける名前と食い違っていないこと
     for (const [, , via] of viaRun) {
       const feature = String(via).replace(/^run\.request feature: /u, "");

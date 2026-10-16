@@ -122,8 +122,8 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.showVersion": { class: "A", label: "バージョン確認" },
   "novelai.showLog": { class: "C2", label: "ログ表示" },
   // ── 書き出し
-  "novelai.exportPdf": { class: "C1", label: "PDF出力（印刷用）" },
-  "novelai.exportEpub": { class: "C1", label: "EPUB出力（試作）" },
+  "novelai.exportPdf": { class: "B", label: "PDF出力（印刷用）", via: "run.request feature: exportPdf" },
+  "novelai.exportEpub": { class: "B", label: "EPUB出力（試作）", via: "run.request feature: exportEpub" },
   "novelai.openEpubEditor": { class: "C3", label: "EPUBエディター（試作）" },
   "novelai.exportImeDictionary": { class: "C2", label: "IME辞書出力" },
   "novelai.generateSettingsDocs": { class: "C2", label: "設定資料集出力" },

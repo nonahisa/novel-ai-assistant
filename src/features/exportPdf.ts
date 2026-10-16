@@ -90,115 +90,24 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
     if (author === undefined) return;
   }
 
-  const chapters: PrintEpisode[] = [];
-  /** 競合マーカーが残っている話。組んでも読めない紙になるので外す */
-  const conflicted: string[] = [];
-  /** 区切りだけで、紙に出る本文が1文字も無かった合本。**黙って減らさない** */
-  const empty: string[] = [];
-  for (const episode of selected) {
-    let file: TextFileContent;
-    try {
-      file = await readTextFile(episode.filePath);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      // **記録の直前に書き先を向ける**（0.43.3 と同じ）
-      useLogFile(work.folderPath);
-      logFailure("印刷用HTMLの組み立て", {
-        ファイル: episode.fileName,
-        内容: message,
-      });
-      await vscode.window.showErrorMessage(
-        `${episode.fileName} を読めませんでした。${message}`
-      );
-      return;
+  const composed = await composePdfExport(work, {
+    episodes: selected,
+    format,
+    kind,
+    paper,
+    headerFooter,
+    author,
+  });
+  if (!composed.ok) {
+    // 読めない・書けないは誤り、組める本文が無いのは注意（以前と同じ出し分け）
+    if (composed.kind === "nothing") {
+      void vscode.window.showWarningMessage(composed.message);
+    } else {
+      await vscode.window.showErrorMessage(composed.message);
     }
-    // **未解決の競合をそのまま組まない。** マーカーと両方の版が混ざった紙は
-    // 読めないうえ、刷ってから気づくことになる
-    if (file.hasConflictMarkers) {
-      conflicted.push(episode.fileName);
-      continue;
-    }
-    // 投稿サイトからDLしたファイルは、先頭にヘッダーが付いている。
-    // 合本（1ファイルに複数話）は話ごとに割って、1話＝1章で組む
-    // （設計書6.65.15。切り分けは `core/bookChapters.ts` が1か所で持ち、
-    // EPUBと同じものを通す——別々に切ると、同じ原稿から出た本と紙で
-    // 話の切れ目が違うことになる）
-    const parts = bookChaptersOf(episode, file.text, format);
-    if (parts.length === 0) {
-      empty.push(episode.fileName);
-      continue;
-    }
-
-    for (const part of parts) {
-      chapters.push({
-        heading: part.heading,
-        body: part.body,
-        // **話ごとに記法を見る。** 1つの作品に `.md` と `.txt` が混ざる
-        // ことがある（DLした話と、こちらで書き足した話）
-        notation: notationModeFor(episode.fileName),
-      });
-    }
-  }
-
-  if (chapters.length === 0) {
-    // **理由で言い分ける**（EPUBと同じ）。競合が1つも無いのに
-    // 「競合解決で直して」と言われると、作者は在りもしないマーカーを探す
-    void vscode.window.showWarningMessage(
-      conflicted.length > 0
-        ? "選んだ本文はすべて未解決の競合を含んでいるため、書き出しませんでした。" +
-            "「競合解決」で直してからもう一度お試しください。"
-        : "紙に出せる本文がありませんでした。" + emptyNote(empty)
-    );
     return;
   }
-
-  // 公募の納品用（設計書6.33.5 の3）は1字1マスで組む。**台本だけ、ト書きを
-  // 3字下げる**（作者の裁定、2026-10-09。柱・台詞は0字）。字下げは空のマスで
-  // 取るので、1行の字数は指定どおりのまま。ほかの種類は本文をそのまま升目に置く
-  const html =
-    paper.kind === "grid"
-      ? buildGridPrintHtml({
-          workTitle: work.title,
-          episodes: chapters,
-          paper: paper.paper,
-          grid: paper.grid,
-          headerFooter,
-          author,
-          marginMm: paper.marginMm,
-          kind,
-        })
-      : buildPrintHtml({
-          workTitle: work.title,
-          episodes: chapters,
-          preset: paper.preset,
-          // **種類で組み方が変わる**（設計書6.70・6.109。台本は柱・ト書き・台詞）。
-          // 上で読んだものをそのまま渡す——ここで読み直すと、選んでいる間に
-          // 設定が書き換わったときに、見出しと組み方で別の種類を指す
-          kind,
-          headerFooter,
-          author,
-        });
-  // 公募の規定は枚数で決まることが多い。刷る前に枚数が分かるよう知らせる
-  const gridNote =
-    paper.kind === "grid"
-      ? `\n${paper.grid.columns}字×${paper.grid.rows}行で本文${
-          // 紙と同じ種類を渡す（台本の字下げで行が増える。枚数の知らせと紙がずれない）
-          layoutGrid(chapters, paper.grid, kind).length
-        }枚（扉を除く）です。`
-      : "";
-
-  let target: string;
-  try {
-    target = await writeExport(work, html);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    useLogFile(work.folderPath);
-    logFailure("印刷用HTMLの書き出し", { 作品: work.title, 内容: message });
-    await vscode.window.showErrorMessage(
-      `印刷用のファイルを保存できませんでした。${message}`
-    );
-    return;
-  }
+  const { target, conflicted, empty, gridNote } = composed;
 
   // `.html` は既定のブラウザに関連づいている。VS Code の中で開くと
   // 印刷（Ctrl+P）が使えないので、外のブラウザへ渡す
@@ -237,6 +146,232 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
     "フォルダーを開く"
   );
   if (action === "フォルダーを開く") await revealFolder(target);
+}
+
+/** 組む材料（画面で選んだもの。外からの依頼では既定で埋める） */
+interface PdfExportInput {
+  episodes: readonly EpisodeFile[];
+  format: WorkFormatKey | undefined;
+  kind: Awaited<ReturnType<typeof readWorkKind>>;
+  paper: PaperChoice;
+  headerFooter: HeaderFooter;
+  author: string | undefined;
+}
+
+type PdfExportOutcome =
+  | {
+      ok: true;
+      /** 作ったファイル（絶対パス） */
+      target: string;
+      bytes: number;
+      /** 紙に入った話の数（合本は話ごと） */
+      chapters: number;
+      conflicted: string[];
+      empty: string[];
+      /** 公募の納品用のときの枚数の一言（先頭に改行）。ほかは空 */
+      gridNote: string;
+    }
+  | { ok: false; kind: "unreadable" | "nothing" | "write"; message: string };
+
+/**
+ * 読む → 組む → 書く（2026-10-16 に［PDF出力］の本体から切り出した）。**画面には何も
+ * 出さない**——訊く段・ブラウザを開く・知らせは呼ぶ側が持つ。外部AIの依頼
+ * （`run.request` の `exportPdf`）も、ここを通して同じ紙を作る。
+ *
+ * 失敗の文言は以前のまま（呼ぶ側がそのまま作者に出す）。記録（ログ）はここで残す。
+ */
+async function composePdfExport(
+  work: WorkEntry,
+  input: PdfExportInput
+): Promise<PdfExportOutcome> {
+  const { format, kind, paper, headerFooter, author } = input;
+  const chapters: PrintEpisode[] = [];
+  /** 競合マーカーが残っている話。組んでも読めない紙になるので外す */
+  const conflicted: string[] = [];
+  /** 区切りだけで、紙に出る本文が1文字も無かった合本。**黙って減らさない** */
+  const empty: string[] = [];
+  for (const episode of input.episodes) {
+    let file: TextFileContent;
+    try {
+      file = await readTextFile(episode.filePath);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // **記録の直前に書き先を向ける**（0.43.3 と同じ）
+      useLogFile(work.folderPath);
+      logFailure("印刷用HTMLの組み立て", {
+        ファイル: episode.fileName,
+        内容: message,
+      });
+      return {
+        ok: false,
+        kind: "unreadable",
+        message: `${episode.fileName} を読めませんでした。${message}`,
+      };
+    }
+    // **未解決の競合をそのまま組まない。** マーカーと両方の版が混ざった紙は
+    // 読めないうえ、刷ってから気づくことになる
+    if (file.hasConflictMarkers) {
+      conflicted.push(episode.fileName);
+      continue;
+    }
+    // 投稿サイトからDLしたファイルは、先頭にヘッダーが付いている。
+    // 合本（1ファイルに複数話）は話ごとに割って、1話＝1章で組む
+    // （設計書6.65.15。切り分けは `core/bookChapters.ts` が1か所で持ち、
+    // EPUBと同じものを通す——別々に切ると、同じ原稿から出た本と紙で
+    // 話の切れ目が違うことになる）
+    const parts = bookChaptersOf(episode, file.text, format);
+    if (parts.length === 0) {
+      empty.push(episode.fileName);
+      continue;
+    }
+
+    for (const part of parts) {
+      chapters.push({
+        heading: part.heading,
+        body: part.body,
+        // **話ごとに記法を見る。** 1つの作品に `.md` と `.txt` が混ざる
+        // ことがある（DLした話と、こちらで書き足した話）
+        notation: notationModeFor(episode.fileName),
+      });
+    }
+  }
+
+  if (chapters.length === 0) {
+    // **理由で言い分ける**（EPUBと同じ）。競合が1つも無いのに
+    // 「競合解決で直して」と言われると、作者は在りもしないマーカーを探す
+    return {
+      ok: false,
+      kind: "nothing",
+      message:
+        conflicted.length > 0
+          ? "選んだ本文はすべて未解決の競合を含んでいるため、書き出しませんでした。" +
+            "「競合解決」で直してからもう一度お試しください。"
+          : "紙に出せる本文がありませんでした。" + emptyNote(empty),
+    };
+  }
+
+  // 公募の納品用（設計書6.33.5 の3）は1字1マスで組む。**台本だけ、ト書きを
+  // 3字下げる**（作者の裁定、2026-10-09。柱・台詞は0字）。字下げは空のマスで
+  // 取るので、1行の字数は指定どおりのまま。ほかの種類は本文をそのまま升目に置く
+  const html =
+    paper.kind === "grid"
+      ? buildGridPrintHtml({
+          workTitle: work.title,
+          episodes: chapters,
+          paper: paper.paper,
+          grid: paper.grid,
+          headerFooter,
+          author,
+          marginMm: paper.marginMm,
+          kind,
+        })
+      : buildPrintHtml({
+          workTitle: work.title,
+          episodes: chapters,
+          preset: paper.preset,
+          // **種類で組み方が変わる**（設計書6.70・6.109。台本は柱・ト書き・台詞）。
+          // 上で読んだものをそのまま渡す——ここで読み直すと、選んでいる間に
+          // 設定が書き換わったときに、見出しと組み方で別の種類を指す
+          kind,
+          headerFooter,
+          author,
+        });
+  // 公募の規定は枚数で決まることが多い。刷る前に枚数が分かるよう知らせる
+  const gridNote =
+    paper.kind === "grid"
+      ? `\n${paper.grid.columns}字×${paper.grid.rows}行で本文${
+          // 紙と同じ種類を渡す（台本の字下げで行が増える。枚数の知らせと紙がずれない）
+          layoutGrid(chapters, paper.grid, kind).length
+        }枚（扉を除く）です。`
+      : "";
+
+  const bytes = new TextEncoder().encode(html);
+  let target: string;
+  try {
+    target = await writeExport(work, bytes);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    useLogFile(work.folderPath);
+    logFailure("印刷用HTMLの書き出し", { 作品: work.title, 内容: message });
+    return {
+      ok: false,
+      kind: "write",
+      message: `印刷用のファイルを保存できませんでした。${message}`,
+    };
+  }
+
+  return {
+    ok: true,
+    target,
+    bytes: bytes.byteLength,
+    chapters: chapters.length,
+    conflicted,
+    empty,
+    gridNote,
+  };
+}
+
+/**
+ * 外部AIから頼まれた［PDF出力］（`run.request` の `exportPdf`。2026-10-16 の棚卸しの10件目）。
+ *
+ * **訊く段を既定で埋める**：全話・紙は一覧の先頭（`PRINT_PRESETS[0]`）・上下の余白は
+ * その紙の既定。作者名を刷る既定の紙は今は無いが、もし置かれたら訊けないので
+ * 余白を「なし」にして断りを残す（勝手に名前を決めない）。
+ *
+ * **ブラウザもフォルダーも開かない**（作者の画面を勝手に動かさない）。返すのは
+ * 作ったファイルの場所（作品フォルダーからの相対）と数字だけ。
+ */
+export async function exportPdfForRequest(
+  work: WorkEntry
+): Promise<
+  | {
+      ok: true;
+      filePath: string;
+      bytes: number;
+      chapters: number;
+      conflicted: string[];
+      notices: string[];
+    }
+  | { ok: false; reason: string; nextAction?: string }
+> {
+  const scan = await scanWork(work);
+  if (scan.episodes.length === 0) {
+    return { ok: false, reason: `「${work.title}」に本文のファイルが見つかりません。` };
+  }
+  const preset = PRINT_PRESETS[0];
+  const notices: string[] = [
+    `紙は「${preset.label}」、上の余白に${marginContentLabel(preset.headerFooter.top)}・` +
+      `下の余白に${marginContentLabel(preset.headerFooter.bottom)}で組みました（［PDF出力］の既定）。`,
+  ];
+  const headerFooter: HeaderFooter = {
+    top: preset.headerFooter.top === "author" ? "none" : preset.headerFooter.top,
+    bottom: preset.headerFooter.bottom === "author" ? "none" : preset.headerFooter.bottom,
+  };
+  if (
+    headerFooter.top !== preset.headerFooter.top ||
+    headerFooter.bottom !== preset.headerFooter.bottom
+  ) {
+    notices.push("作者名を刷る余白は、外からは名前を訊けないため空けました。");
+  }
+
+  const composed = await composePdfExport(work, {
+    episodes: scan.episodes,
+    format: await readWorkFormat(work),
+    kind: await readWorkKind(work),
+    paper: { kind: "preset", preset: preset.id },
+    headerFooter,
+    author: undefined,
+  });
+  if (!composed.ok) return { ok: false, reason: composed.message };
+  if (composed.empty.length > 0) notices.push(emptyNote(composed.empty).trim());
+  return {
+    ok: true,
+    filePath: path.relative(work.folderPath, composed.target).replace(/\\/g, "/"),
+    bytes: composed.bytes,
+    chapters: composed.chapters,
+    conflicted: composed.conflicted,
+    notices,
+  };
 }
 
 /**
@@ -585,13 +720,13 @@ function emptyNote(empty: readonly string[]): string {
 }
 
 /** 書き出し先。**新規作成だけ**を使い、名前がぶつかったら別名にする */
-async function writeExport(work: WorkEntry, html: string): Promise<string> {
+async function writeExport(work: WorkEntry, html: Uint8Array): Promise<string> {
   const config = await readWorkConfig(work);
   const directory = path.join(workPaths(work, config).aiwriter, EXPORT_DIR);
   await vscode.workspace.fs.createDirectory(path.toUri(directory));
 
   const target = await freshExportPath(directory, new Date());
-  await atomicWriteFile(target, new TextEncoder().encode(html), {
+  await atomicWriteFile(target, html, {
     mode: "create",
   });
   return target;

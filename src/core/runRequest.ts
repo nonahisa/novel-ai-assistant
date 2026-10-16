@@ -106,7 +106,11 @@ export type RunFeature =
   /** 設定資料の抽出（2026-10-16）。貯めるだけで、保存は `novel.extract.commit` */
   | "settings"
   /** AI接続確認（2026-10-16）。本文を送らず、短い文を1回だけ生成させる */
-  | "testAI";
+  | "testAI"
+  /** PDF出力（印刷用。2026-10-16）。AIを呼ばず、`.aiwriter/exports/` に新しいファイルを作るだけ */
+  | "exportPdf"
+  /** EPUB出力（2026-10-16）。同上。表紙は焼いてあればそれを使う */
+  | "exportEpub";
 
 export type RunAssignedFeature =
   | "typo"
@@ -364,12 +368,106 @@ export function describeTestAiConfirm(input: RunTestAiConfirmInput): {
   };
 }
 
-/** 外から頼める機能の名前（白名簿＋索引づくり＋表紙を焼く＋AI接続確認）。MCP の入力の形に使う */
+/**
+ * 書き出し（設計書6.33・6.65.4・6.87.22。2026-10-16 の棚卸しの10件目）。
+ *
+ * **新しいファイルを作るだけで、原稿を変えない**（作者の裁定 2026-10-16 の3
+ * 「新しいファイルを作るだけの操作は、run.request で毎回作者の確認つきで頼める」）。
+ * 書くのは製品の［PDF出力］［EPUB出力］と同じ `.aiwriter/exports/`（Git 除外・
+ * 作り直せる控え）だけで、既にある名前とぶつかったら別名にする（上書きしない）。
+ *
+ * **`RUN_FEATURES` に入れない**（AI接続確認と同じ理由）。AIを呼ばず、本文はこの機械から
+ * 出ない。送る量の見積もり（`measure`）は「AIへ送る量」の確認のためのもので、通すと
+ * 嘘の確認になる。
+ *
+ * - PDF は**画面で訊く段を既定で埋める**（全話・紙は一覧の先頭〔`PRINT_PRESETS[0]`〕・
+ *   その紙の上下の余白の既定）。ブラウザは開かない
+ *   ——印刷して PDF にするのは作者である
+ * - EPUB は訊く段が無い。表紙は製品と同じ拾い方（焼いた画像 → 元の絵 → 無し）で、
+ *   ［表紙を焼く］（`coverBake`）で焼いてあればそれが入る
+ */
+export const RUN_EXPORT_FEATURES = ["exportPdf", "exportEpub"] as const;
+export type RunExportFeature = (typeof RUN_EXPORT_FEATURES)[number];
+
+const EXPORT_LABELS: Record<RunExportFeature, string> = {
+  exportPdf: "PDF出力（印刷用のファイルを作る）",
+  exportEpub: "EPUB出力",
+};
+
+export function isRunExportFeature(name: unknown): name is RunExportFeature {
+  return (RUN_EXPORT_FEATURES as readonly unknown[]).includes(name);
+}
+
+/** 書き出しの置き場（作品フォルダーからの相対。製品の書き出しと同じ） */
+export const RUN_EXPORT_DIRECTORY = ".aiwriter/exports/";
+
+/** 書き出しの結果（`result.findings` の1行）。**場所と数字だけ**——本文は入らない */
+export interface RunExportRow {
+  format: "pdf" | "epub";
+  /** 作ったファイル（作品フォルダーからの相対パス） */
+  filePath: string;
+  bytes: number;
+  /** 本に入った話の数（合本は話ごとに数える） */
+  chapters: number;
+  /** 未解決の競合で外した話（ファイル名） */
+  conflicted: string[];
+  /** 作者の画面なら完了の知らせに出る断り（挿絵のずれ・読めなかった画像・既定で埋めた設定など） */
+  notices: string[];
+  /** 表紙に何を使ったか（EPUB だけ。焼いた画像・元の絵・無し） */
+  cover?: string;
+}
+
+export interface RunExportConfirmInput {
+  ticket: RunTicket;
+  workTitle: string;
+  /** 本文のファイルの数（作者が規模を見て判断できるように） */
+  episodeCount: number;
+}
+
+/**
+ * 書き出しの確認のモーダル。**何が起きて何が変わらないかを並べる**
+ * （新しいファイルを作るだけ・置き場・AIを呼ばない・料金なし）。
+ */
+export function describeExportConfirm(input: RunExportConfirmInput): {
+  message: string;
+  detail: string;
+} {
+  const who = clientKeyOf(input.ticket.client);
+  const deadline = new Date(Date.parse(input.ticket.createdAt) + RUN_CONFIRM_MS);
+  const pdf = input.ticket.feature === "exportPdf";
+  const label = runFeatureLabel(input.ticket.feature) ?? String(input.ticket.feature);
+  const lines = [
+    `どこから：外部AI（名乗り：${who}。名乗りは自己申告です）`,
+    `作品：${input.workTitle}（本文のファイル ${input.episodeCount}話ぶん）`,
+    `機能：${label}`,
+    pdf
+      ? "組み方：全話・紙は［PDF出力］の一覧の先頭（文庫サイズ・縦書き）・上下の余白はその紙の既定。" +
+        "紙や話を選びたいときは、ご自分で［PDF出力］を使ってください。"
+      : "組み方：本の設計図（設定/書籍/book.json。無ければ作品名から既定で組む）のとおり。" +
+        "表紙・裏表紙は焼いた画像があればそれを、無ければ元の絵を使います。",
+    `作るもの：作品の ${RUN_EXPORT_DIRECTORY} に新しいファイルを1つ作ります（同じ名前があれば別名にし、上書きしません）。`,
+    pdf
+      ? "ブラウザは開きません。印刷してPDFにするのは、あなたがファイルを開いてから行います。"
+      : "書き出しの知らせ（フォルダーを開く）は出しません。",
+    "AIは呼びません。本文はどこへも送りません。料金はかかりません。",
+    "原稿・設定資料・本の設計図（book.json）は変わりません。",
+    "",
+    `期限：${formatClock(deadline)} を過ぎて押しても作りません。`,
+    "覚えのない依頼なら「作る」を押さずに閉じてください。",
+  ];
+  return {
+    message: `外部AI（${who}）からの依頼です。「${input.workTitle}」の${pdf ? "印刷用のファイル（PDF出力）" : "EPUB"}を作りますか？`,
+    detail: lines.join("\n"),
+  };
+}
+
+/** 外から頼める機能の名前（白名簿＋索引づくり＋表紙を焼く＋AI接続確認＋書き出し）。MCP の入力の形に使う */
 export const RUN_REQUESTABLE_FEATURES: readonly RunFeature[] = [
   ...RUN_FEATURES.map((def) => def.feature),
   RUN_INDEX_FEATURE,
   RUN_COVER_FEATURE,
   RUN_TEST_AI_FEATURE,
+  ...RUN_EXPORT_FEATURES,
 ];
 
 /** 画面と返事に出す名前 */
@@ -377,6 +475,7 @@ export function runFeatureLabel(name: unknown): string | undefined {
   if (isRunIndexFeature(name)) return RUN_INDEX_LABEL;
   if (isRunCoverFeature(name)) return RUN_COVER_LABEL;
   if (isRunTestAiFeature(name)) return RUN_TEST_AI_LABEL;
+  if (isRunExportFeature(name)) return EXPORT_LABELS[name];
   return findRunFeature(name)?.label;
 }
 
@@ -386,7 +485,8 @@ export function runFeatureLabel(name: unknown): string | undefined {
  * （作品ごと・面ごと）があるのでここでは見ない。
  */
 export function runFeatureTakesFile(name: unknown): boolean {
-  if (isRunTestAiFeature(name)) return false;
+  // 書き出しは作品まるごと（PDF の話を選ぶ段は、外からは既定の「全話」で埋める）
+  if (isRunTestAiFeature(name) || isRunExportFeature(name)) return false;
   return findRunFeature(name)?.takesFile !== false;
 }
 
@@ -872,6 +972,17 @@ export function runStatusOf(
             "設定資料にはまだ保存していません。保存するなら novel.extract.commit を、まず dryRun: true で呼んで" +
             "保存されるもの（新規・承認待ち・断るもの）を確かめてから呼んでください。" +
             "チャンクごとの受け入れた人物と落とした件数は result.findings にあります。",
+        };
+      }
+      if (isRunExportFeature(ticket.feature)) {
+        return {
+          status: "done",
+          message:
+            `書き出しました。作ったファイルの場所（作品フォルダーからの相対。${RUN_EXPORT_DIRECTORY} の下）・大きさ・話の数・` +
+            "外した話や断りは result.findings にあります。原稿・設定資料・book.json は変わっていません。" +
+            (ticket.feature === "exportPdf"
+              ? "印刷用のファイル（.html）は、作者がブラウザで開いて印刷（PDFに保存）するとPDFになります。"
+              : ""),
         };
       }
       if (isRunTestAiFeature(ticket.feature)) {

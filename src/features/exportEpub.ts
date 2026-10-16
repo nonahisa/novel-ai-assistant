@@ -100,12 +100,102 @@ import { logFailure, useLogFile } from "../core/logger";
  * 書かない**——名前がぶつかったら秒・連番で別名にする。
  */
 export async function exportEpub(work: WorkEntry): Promise<void> {
+  const composed = await composeEpubExport(work);
+  if (!composed.ok) {
+    // 知らせの重さは以前のまま（本文が無い＝案内、組める本文が無い＝注意、ほかは誤り）
+    if (composed.level === "info") {
+      void vscode.window.showInformationMessage(composed.message);
+    } else if (composed.level === "warning") {
+      void vscode.window.showWarningMessage(composed.message);
+    } else {
+      await vscode.window.showErrorMessage(composed.message);
+    }
+    return;
+  }
+  const { target, chapters, conflicted, notices, cover, backCover } = composed;
+
+  const droppedNote =
+    conflicted.length > 0
+      ? `\n未解決の競合を含む${conflicted.length}件は外しました（${conflicted.join(
+          "、"
+        )}）。`
+      : "";
+  // 挿絵のずれ・読めなかった画像・入らなかった書体は、
+  // **本が出たあとに必ず伝える**
+  const noticeText = noticeLines(notices);
+  const action = await vscode.window.showInformationMessage(
+    `EPUBを書き出しました（${chapters}話）。\n${target}` +
+      describeCoverUse(cover, backCover) +
+      droppedNote +
+      noticeText,
+    "フォルダーを開く"
+  );
+  if (action === "フォルダーを開く") await revealFolder(target);
+}
+
+/**
+ * 外部AIから頼まれた［EPUB出力］（`run.request` の `exportEpub`。2026-10-16 の棚卸しの10件目）。
+ *
+ * 組み立ては［EPUB出力］と同じ（`composeEpubExport`）で、表紙も同じ拾い方（焼いた画像 →
+ * 元の絵 → 無し。［表紙を焼く］で焼いてあればそれが入る）。**知らせもフォルダーも出さない**
+ * ——作ったファイルの場所（作品フォルダーからの相対）と数字・断りを返すだけ。
+ */
+export async function exportEpubForRequest(
+  work: WorkEntry
+): Promise<
+  | {
+      ok: true;
+      filePath: string;
+      bytes: number;
+      chapters: number;
+      conflicted: string[];
+      notices: string[];
+      cover: string;
+    }
+  | { ok: false; reason: string; nextAction?: string }
+> {
+  const composed = await composeEpubExport(work);
+  if (!composed.ok) return { ok: false, reason: composed.message };
+  return {
+    ok: true,
+    filePath: path.relative(work.folderPath, composed.target).replace(/\\/g, "/"),
+    bytes: composed.bytes,
+    chapters: composed.chapters,
+    conflicted: composed.conflicted,
+    notices: composed.notices,
+    cover: describeCoverUse(composed.cover, composed.backCover).trim(),
+  };
+}
+
+type EpubExportOutcome =
+  | {
+      ok: true;
+      /** 作ったファイル（絶対パス） */
+      target: string;
+      bytes: number;
+      /** 本に入った話の数（合本は話ごと） */
+      chapters: number;
+      conflicted: string[];
+      /** 本は出たが指定どおりにならなかったこと（挿絵のずれ・読めなかった画像など） */
+      notices: string[];
+      cover: CoverSource | null;
+      backCover: CoverSource | null;
+    }
+  | { ok: false; level: "info" | "warning" | "error"; message: string };
+
+/**
+ * 読む → 組む → 書く（2026-10-16 に［EPUB出力］の本体から切り出した）。**画面には
+ * 何も出さない**——知らせは呼ぶ側が持つ。外部AIの依頼もここを通して同じ本を作る。
+ * 失敗の文言は以前のまま。記録（ログ）はここで残す。
+ */
+async function composeEpubExport(work: WorkEntry): Promise<EpubExportOutcome> {
   const scan = await scanWork(work);
   if (scan.episodes.length === 0) {
-    void vscode.window.showInformationMessage(
-      `「${work.title}」に本文のファイルが見つかりません。`
-    );
-    return;
+    return {
+      ok: false,
+      level: "info",
+      message: `「${work.title}」に本文のファイルが見つかりません。`,
+    };
   }
 
   let config: BookConfig;
@@ -117,11 +207,13 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
     // 出力チャンネル止まりで、VS Code を閉じると消える
     useLogFile(work.folderPath);
     logFailure("本の設計図の読み込み", { 作品: work.title, 内容: message });
-    await vscode.window.showErrorMessage(
-      `設定/${BOOK_DIR}/${BOOK_FILE} を読めませんでした。${message}` +
-        "　直してからもう一度お試しください（こちらでは書き換えません）。"
-    );
-    return;
+    return {
+      ok: false,
+      level: "error",
+      message:
+        `設定/${BOOK_DIR}/${BOOK_FILE} を読めませんでした。${message}` +
+        "　直してからもう一度お試しください（こちらでは書き換えません）。",
+    };
   }
 
   const format = await readWorkFormat(work);
@@ -189,10 +281,11 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
         ファイル: episode.fileName,
         内容: message,
       });
-      await vscode.window.showErrorMessage(
-        `${episode.fileName} を読めませんでした。${message}`
-      );
-      return;
+      return {
+        ok: false,
+        level: "error",
+        message: `${episode.fileName} を読めませんでした。${message}`,
+      };
     }
     const heading = bookHeading(episode, format);
     const episodePath = episodePathFor(work.folderPath, episode.filePath);
@@ -263,13 +356,15 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
   if (chapters.length === 0) {
     // **理由で言い分ける。** 競合が1つも無いのに「競合解決で直して」と
     // 言われると、作者は在りもしないマーカーを探すことになる
-    void vscode.window.showWarningMessage(
-      conflicted.length > 0
-        ? "選んだ本文はすべて未解決の競合を含んでいるため、書き出しませんでした。" +
+    return {
+      ok: false,
+      level: "warning",
+      message:
+        conflicted.length > 0
+          ? "選んだ本文はすべて未解決の競合を含んでいるため、書き出しませんでした。" +
             "「競合解決」で直してからもう一度お試しください。"
-        : "本に入れられる本文がありませんでした。" + noticeLines(notices)
-    );
-    return;
+          : "本に入れられる本文がありませんでした。" + noticeLines(notices),
+    };
   }
 
   // **表紙と裏表紙は別々に捕まえる。** まとめて捕まえていたので、裏表紙が
@@ -285,8 +380,7 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       config.coverImagePath
     );
   } catch (error) {
-    await reportCoverFailure(work, "front", error);
-    return;
+    return { ok: false, level: "error", message: coverFailureMessage(work, "front", error) };
   }
 
   let backCover: CoverSource | null;
@@ -300,8 +394,7 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
       config.backCoverImagePath
     );
   } catch (error) {
-    await reportCoverFailure(work, "back", error);
-    return;
+    return { ok: false, level: "error", message: coverFailureMessage(work, "back", error) };
   }
 
   // **登場人物一覧と書体は、どちらも失敗で本を止めない**（設計書6.65.11）。
@@ -351,8 +444,7 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     useLogFile(work.folderPath);
     logFailure("EPUBの組み立て", { 作品: work.title, 内容: message });
-    await vscode.window.showErrorMessage(`本を組めませんでした。${message}`);
-    return;
+    return { ok: false, level: "error", message: `本を組めませんでした。${message}` };
   }
 
   let target: string;
@@ -362,29 +454,19 @@ export async function exportEpub(work: WorkEntry): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     useLogFile(work.folderPath);
     logFailure("EPUBの書き出し", { 作品: work.title, 内容: message });
-    await vscode.window.showErrorMessage(
-      `EPUBを保存できませんでした。${message}`
-    );
-    return;
+    return { ok: false, level: "error", message: `EPUBを保存できませんでした。${message}` };
   }
 
-  const droppedNote =
-    conflicted.length > 0
-      ? `\n未解決の競合を含む${conflicted.length}件は外しました（${conflicted.join(
-          "、"
-        )}）。`
-      : "";
-  // 挿絵のずれ・読めなかった画像・入らなかった書体は、
-  // **本が出たあとに必ず伝える**
-  const noticeText = noticeLines(notices);
-  const action = await vscode.window.showInformationMessage(
-    `EPUBを書き出しました（${chapters.length}話）。\n${target}` +
-      describeCoverUse(cover, backCover) +
-      droppedNote +
-      noticeText,
-    "フォルダーを開く"
-  );
-  if (action === "フォルダーを開く") await revealFolder(target);
+  return {
+    ok: true,
+    target,
+    bytes: epub.byteLength,
+    chapters: chapters.length,
+    conflicted,
+    notices,
+    cover,
+    backCover,
+  };
 }
 
 /** 伝えることを行に分ける。無ければ空文字（余計な改行を足さない） */
@@ -398,11 +480,11 @@ function noticeLines(notices: readonly string[]): string {
  * **どちらの面かで、直す先が違う。** 案内する項目名（`coverImagePath` /
  * `backCoverImagePath`）を取り違えると、作者は合っている行を睨むことになる。
  */
-async function reportCoverFailure(
+function coverFailureMessage(
   work: WorkEntry,
   side: CoverSide,
   error: unknown
-): Promise<void> {
+): string {
   const label = side === "back" ? "裏表紙" : "表紙";
   const field = side === "back" ? "backCoverImagePath" : "coverImagePath";
   const message = error instanceof Error ? error.message : String(error);
@@ -413,9 +495,9 @@ async function reportCoverFailure(
     面: label,
     内容: message,
   });
-  await vscode.window.showErrorMessage(
+  return (
     `${label}の画像を読めませんでした。${message}` +
-      `　設定/${BOOK_DIR}/${BOOK_FILE} の ${field} を確かめてください。`
+    `　設定/${BOOK_DIR}/${BOOK_FILE} の ${field} を確かめてください。`
   );
 }
 
