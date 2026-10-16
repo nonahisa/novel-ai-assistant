@@ -264,6 +264,56 @@ export async function webviewLayers(page: Page): Promise<string[]> {
  * 空の候補で閉じて何も開かない）。
  */
 export async function quickOpen(page: Page, fileName: string): Promise<void> {
+  const input = page.locator(".quick-input-widget input").first();
+  const rowTexts = () => page.locator(".quick-input-widget .monaco-list-row").allInnerTexts().catch(() => [] as string[]);
+  /*
+    **候補を待つ間に入力欄が閉じたら、Ctrl+P から押し直す。** 字が入ったのを確かめたあとでも、
+    遅れて届いた WebView への焦点の移動で入力欄が閉じることがある。閉じると絞り込みが止まり、
+    候補の行は閉じる前のもの（「最近開いたもの」と第1話）のまま残るので、待っても目当ての名前は
+    出ない。母艦（0.107.12、1.141.0、2026-10-16）の `manuscriptFootNarrow` で単独5回中1回、
+    入力欄が閉じ・値「002_つづき.txt」のまま候補を30秒待って落ちた（提案パネルのタブを押した直後に
+    2話目を開く件。ファイルは起動前に作ってあり、検索の索引の遅れではない）
+  */
+  for (let attempt = 1; ; attempt++) {
+    await typeIntoQuickOpen(page, input, fileName);
+    /*
+      **Enter は先頭の候補を開くので、先頭が目当ての名前になるまで待つ。** 候補に出ただけで押すと、
+      絞り込みが追いつく前の「最近開いたもの」が先頭に残っていることがある。母艦（0.106.4、1.141.0、
+      2026-10-15）の restartAndDisconnect の 200 で、閉じた第2話を開き直すはずが、前に出ていた
+      第1話を選んで何も起きず、30秒待って落ちた
+    */
+    let closed = false;
+    const ready = await waitUntil(
+      async () => {
+        if (!(await input.isVisible().catch(() => false))) {
+          closed = true;
+          return true;
+        }
+        return ((await page.locator(".quick-input-widget .monaco-list-row").first().innerText().catch(() => "")) ?? "").includes(fileName);
+      },
+      `Ctrl+P の候補の先頭が「${fileName}」になる`,
+      30_000
+    )
+      .then(() => !closed)
+      .catch(() => false);
+    if (ready) break;
+    if (!closed || attempt === 3) {
+      const value = await input.inputValue().catch(() => "?");
+      throw new Error(
+        `Ctrl+P の候補の先頭に「${fileName}」が出ません（${attempt}回目。出ている候補 ${JSON.stringify(await rowTexts())}／入力欄 ${closed ? "閉じた" : "開いている"}・値 ${JSON.stringify(value)}）`
+      );
+    }
+    // 押し直しで通った件も、走りの記録から揺れの頻度を追えるように残す
+    console.warn(`quickOpen: 「${fileName}」の候補を待つ間に入力欄が閉じたので押し直します（${attempt}回目）`);
+  }
+  await page.keyboard.press("Enter");
+  await input.waitFor({ state: "hidden" }).catch((error: unknown) => {
+    throw new Error(`Ctrl+P で「${fileName}」を選んだあと、入力欄が閉じません（${String(error)}）`);
+  });
+}
+
+/** Ctrl+P の入力欄を開き、`fileName` を打つ（打った字が入るまで3回まで押し直す） */
+async function typeIntoQuickOpen(page: Page, input: Locator, fileName: string): Promise<void> {
   /*
     **Ctrl+P は本体へ焦点を戻してから押す**（`pressWorkbenchKey`）。提案パネルなどの WebView を
     開いた直後は焦点が iframe の中にあり、素の `keyboard.press` は本体のキー割り当てに届かない。
@@ -277,7 +327,6 @@ export async function quickOpen(page: Page, fileName: string): Promise<void> {
     （0.104.2、1.141.0）の `manuscriptFootNarrow` で単独3回とも、入力欄が閉じ・値が空のまま
     候補を30秒待って落ちた（2026-10-12）
   */
-  const input = page.locator(".quick-input-widget input").first();
   for (let attempt = 1; ; attempt++) {
     await pressWorkbenchKey(page, "Control+KeyP");
     const shown = await input
@@ -285,6 +334,8 @@ export async function quickOpen(page: Page, fileName: string): Promise<void> {
       .then(() => true)
       .catch(() => false);
     if (shown) {
+      // 閉じる前の字が残っていても付け足しにならないよう、全部選んでから打つ
+      await page.keyboard.press("Control+KeyA");
       await page.keyboard.insertText(fileName);
       const typed = await waitUntil(
         async () => (await input.isVisible()) && (await input.inputValue()) === fileName,
@@ -293,7 +344,7 @@ export async function quickOpen(page: Page, fileName: string): Promise<void> {
       )
         .then(() => true)
         .catch(() => false);
-      if (typed) break;
+      if (typed) return;
       // 開いたままの入力欄で Ctrl+P を押すと候補送りになるので、閉じてから押し直す
       if (await input.isVisible().catch(() => false)) await page.keyboard.press("Escape");
     }
@@ -304,32 +355,6 @@ export async function quickOpen(page: Page, fileName: string): Promise<void> {
       );
     }
   }
-  await page
-    .locator(".quick-input-widget .monaco-list-row", { hasText: fileName })
-    .first()
-    .waitFor({ state: "visible" })
-    .catch(async (error: unknown) => {
-      const rows = await page.locator(".quick-input-widget .monaco-list-row").allInnerTexts().catch(() => []);
-      throw new Error(`Ctrl+P の候補に「${fileName}」が出ません（出ている候補 ${JSON.stringify(rows)}）（${String(error)}）`);
-    });
-  /*
-    **Enter は先頭の候補を開くので、先頭が目当ての名前になるまで待つ。** 候補に出ただけで押すと、
-    絞り込みが追いつく前の「最近開いたもの」が先頭に残っていることがある。母艦（0.106.4、1.141.0、
-    2026-10-15）の restartAndDisconnect の 200 で、閉じた第2話を開き直すはずが、前に出ていた
-    第1話を選んで何も起きず、30秒待って落ちた
-  */
-  await waitUntil(
-    async () => ((await page.locator(".quick-input-widget .monaco-list-row").first().innerText().catch(() => "")) ?? "").includes(fileName),
-    `Ctrl+P の候補の先頭が「${fileName}」になる`,
-    5_000
-  ).catch(async (error: unknown) => {
-    const rows = await page.locator(".quick-input-widget .monaco-list-row").allInnerTexts().catch(() => []);
-    throw new Error(`${String(error)}（出ている候補 ${JSON.stringify(rows)}）`);
-  });
-  await page.keyboard.press("Enter");
-  await input.waitFor({ state: "hidden" }).catch((error: unknown) => {
-    throw new Error(`Ctrl+P で「${fileName}」を選んだあと、入力欄が閉じません（${String(error)}）`);
-  });
 }
 
 /**
