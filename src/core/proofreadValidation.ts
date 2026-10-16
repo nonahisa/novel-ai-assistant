@@ -970,8 +970,30 @@ export function hasRepetitionNearby(
   explanation = ""
 ): boolean {
   if (hasRepetition(original)) return true;
+  const haystack = nearbyOutside(lines, lineIndex, original);
+  if (haystack === undefined) return false;
+
+  const body = original.replace(/\s/g, "");
+  const contentChar = /[\p{Script=Han}\p{Script=Katakana}]/u;
+  for (let start = 0; start + REPEAT_MIN_LENGTH <= body.length; start++) {
+    const piece = body.slice(start, start + REPEAT_MIN_LENGTH);
+    if (!contentChar.test(piece)) continue;
+    if (haystack.includes(piece)) return true;
+  }
+  return quotedWordRepeats(explanation, body, `${haystack}\n${body}`);
+}
+
+/**
+ * 写した範囲の**外側**の近く（同じ段落の残りと、前後の段落）を1つの文字列にする。
+ * 原文が本文に見つからなければ undefined。
+ */
+function nearbyOutside(
+  lines: readonly string[],
+  lineIndex: number,
+  original: string
+): string | undefined {
   const found = locateInLines(lines, lineIndex, original);
-  if (!found) return false;
+  if (!found) return undefined;
 
   const own = lines[found.index];
   const around = [
@@ -993,16 +1015,83 @@ export function hasRepetitionNearby(
   collect(-1);
   collect(1);
   // 段落の境をまたいで3字が繋がらないよう、区切りを残して空白だけ落とす
-  const haystack = around.join("\n").replace(/[^\S\n]/gu, "");
+  return around.join("\n").replace(/[^\S\n]/gu, "");
+}
 
-  const body = original.replace(/\s/g, "");
-  const contentChar = /[\p{Script=Han}\p{Script=Katakana}]/u;
-  for (let start = 0; start + REPEAT_MIN_LENGTH <= body.length; start++) {
-    const piece = body.slice(start, start + REPEAT_MIN_LENGTH);
-    if (!contentChar.test(piece)) continue;
-    if (haystack.includes(piece)) return true;
+/**
+ * 説明が「」で挙げた語を取り出す（数え直しに使える長さのものだけ）。
+ *
+ * **「〜ではないでしょうか」のように、波線や三点で語の一部だと示して挙げる**ことが
+ * ある（2026-10-16、26b）。そのままでは本文に見つからないので、前後の 〜・～・… を落とす。
+ * 長さの下限は3字の窓と同じ考え方：漢字か片仮名を含む語は2字から、仮名だけの語は
+ * 4字から（「した」「ている」はどの段落にも出る）。
+ */
+const QUOTED_WORD = /[「『]([^」』]{2,12})[」』]/gu;
+function quotedWordsOf(explanation: string, countableOnly = true): string[] {
+  const words: string[] = [];
+  for (const matched of explanation.matchAll(QUOTED_WORD)) {
+    const word = matched[1]
+      .replace(/\s/gu, "")
+      .replace(/^[〜～…]+|[〜～…]+$/gu, "");
+    if (!word) continue;
+    if (countableOnly && !isCountableWord(word)) continue;
+    words.push(word);
   }
-  return quotedWordRepeats(explanation, body, `${haystack}\n${body}`);
+  return words;
+}
+
+function isCountableWord(word: string): boolean {
+  const hasContent = /[\p{Script=Han}\p{Script=Katakana}]/u.test(word);
+  return Array.from(word).length >= (hasContent ? 2 : 4);
+}
+
+/**
+ * 「冗長」の札で来た、**文をまたぐ繰り返し**を「同語反復」へ付け替える（設計書6.9.1）。
+ *
+ * 冗長は「同じ意味の言葉が1か所で重なっている」（まず最初に・しながらしながら）、
+ * 同語反復は「近い範囲で同じ語が繰り返される」。2026-10-16 の推敲の測り直し
+ * （ハイエルフ17話・26b）で、台詞の語尾「〜ではないでしょうか」が7行前の別の台詞と
+ * 重なっているのを、26b は**冗長**の札で返した（説明「直前の文と重なっています」）。
+ * 冗長の札には繰り返しの検算も台詞の検査も無いので、**同語反復なら人物の話し方として
+ * 出さない台詞の繰り返し（`dialogue_voice`）が、そのまま作者へ届いていた。**
+ *
+ * **付け替えるのは、説明が挙げた語の重なりが写した範囲の外にあるときだけ。**
+ * 次の3つがそろったら付け替える。
+ *
+ * 1. 説明が挙げた語のうち、写した範囲にあるのが**1語だけ**。「『まず』と『最初に』」
+ *    「『取り出した』と『取り出す』」のように2語とも範囲にあるなら、重なりは範囲の中＝冗長
+ * 2. その語が範囲の中では**1回だけ**（「しながらしながら」は範囲の中で重なる＝冗長）
+ * 3. その語が範囲の外（同じチャンクのどこか）に**もう一度出る**
+ *
+ * 説明の言い回し（「直前の文」「繰り返し」など）では決めない。AIの言葉ではなく、
+ * 本文で数えられることで決める（同語反復・長文の検算と同じ考え方）。
+ * 付け替えたあとは同語反復の検算（`not_repeated`・`dialogue_voice`）をそのまま通る。
+ */
+export function relabelRedundancyAsRepetition(
+  reason: ProofreadReason | undefined,
+  lines: readonly string[],
+  lineIndex: number,
+  original: string,
+  explanation: string
+): ProofreadReason | undefined {
+  if (reason !== "冗長") return reason;
+  const body = original.replace(/\s/gu, "");
+  // 1つ目の条件は短い語（「まず」）も数える。数え直しに使えない長さでも、
+  // 範囲に2語あれば重なりは範囲の中である
+  const inRange = [...new Set(quotedWordsOf(explanation, false))].filter((word) =>
+    body.includes(word)
+  );
+  if (inRange.length !== 1) return reason;
+  const word = inRange[0];
+  if (!isCountableWord(word)) return reason;
+  if (body.split(word).length - 1 !== 1) return reason;
+  // 外側はチャンク全体で数える（同語反復の検算の「近く」より広い）。実データの重なりは
+  // 3段落前の台詞で、近くの範囲の外だった。付け替えたあと近くに無ければ
+  // `not_repeated` で落ちる——同語反復とも言えない遠さなら、冗長としても出さない
+  if (!locateInLines(lines, lineIndex, original)) return reason;
+  const whole = lines.join("\n").replace(/[^\S\n]/gu, "");
+  if (whole.split(word).length - 1 < 2) return reason;
+  return "同語反復";
 }
 
 /**
@@ -1015,19 +1104,14 @@ export function hasRepetitionNearby(
  * プロンプトは同語反復の説明に「繰り返されている語と、何回出るか」を頼んでいるので、
  * **挙げた語を本文で数え直す**（AIの言う回数は使わない）。
  *
- * 語の長さの下限は3字の窓と同じ考え方：漢字か片仮名を含む語は2字から、
- * 仮名だけの語は4字から（「した」「ている」はどの段落にも出る）。
+ * 語の取り出し方と長さの下限は `quotedWordsOf`。
  */
-const QUOTED_WORD = /[「『]([^」』]{2,12})[」』]/gu;
 function quotedWordRepeats(
   explanation: string,
   body: string,
   nearby: string
 ): boolean {
-  for (const matched of explanation.matchAll(QUOTED_WORD)) {
-    const word = matched[1].replace(/\s/gu, "");
-    const hasContent = /[\p{Script=Han}\p{Script=Katakana}]/u.test(word);
-    if (Array.from(word).length < (hasContent ? 2 : 4)) continue;
+  for (const word of quotedWordsOf(explanation)) {
     if (!body.includes(word)) continue;
     if (nearby.split(word).length - 1 >= 2) return true;
   }
@@ -1751,7 +1835,7 @@ export function validateProofreadIssues(
     const suggestion = asString(item.suggestion);
     // **視点の話を別の札で返してきたら、視点の札へ付け替える**（1.10）。
     // 長文・同語反復の検算より前でないと、本物の指摘がそこで落ちる
-    const reason = relabelViewpoint(
+    const declaredReason = relabelViewpoint(
       normalizeReason(asString(item.reason)),
       asString(item.explanation)
     );
@@ -1777,6 +1861,15 @@ export function validateProofreadIssues(
     // 語尾単調も、どの連続に寄せるかをこの行で選ぶ（AIの行より原文の行の
     // ほうが確か。原文が見つからなければ申告のまま）
     const line = lineHoldingQuote(chunk.text, original, declaredLine, firstLine);
+    // **文をまたぐ繰り返しを「冗長」で返してきたら、同語反復へ付け替える**（6.9.1）。
+    // 近くの行を数えるので行が決まった後、同語反復の検算より前に置く
+    const reason = relabelRedundancyAsRepetition(
+      declaredReason,
+      chunkLines,
+      line - firstLine,
+      original,
+      asString(item.explanation)
+    );
     if (!reason) {
       // 決めた7種類以外は、文体への干渉が紛れ込む口になる
       rejected.push({ raw: item, reason: "unknown_reason" });
