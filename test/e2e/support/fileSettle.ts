@@ -67,6 +67,41 @@ export async function readJsonWhenPresent<T>(file: string, timeoutMs = PRESENT_T
 }
 
 /**
+ * `readdir` で拾ったファイルを読む。**拾ったあとに消えていれば `undefined`**（呼び手は飛ばす）。
+ *
+ * 一覧を作る部品（承認待ちの中身・資料の人物の名前）で使う。`readFile(...).catch(() => "")`
+ * の形だと、在るのに読めなかったファイルが「空」「名前の無い記録」として一覧に混ざり、
+ * 「承認待ちから消えた」「資料に無い」の確かめが偽の成功になる。そこで分ける：
+ * - 無い（ENOENT）：`timeoutMs` まで待って読み直し、まだ無ければ消えたものとして `undefined`。
+ *   製品の書き戻し（退避 → 削除 → 作り直し）の隙間に当たったときは、待てば読める
+ * - それ以外の失敗：待たずにそのまま投げる（黙らない）
+ *
+ * `timeoutMs` は書き込み口で決める。一時ファイルからの rename で入れ替わる置き場
+ * （承認待ちなど）は隙間が無いので、無ければ本当に消えている——0 を渡して待たない
+ */
+export async function readListedFile(file: string, timeoutMs = PRESENT_TIMEOUT_MS): Promise<string | undefined> {
+  try {
+    return await readFileWhenPresent(file, timeoutMs);
+  } catch (error) {
+    if (isMissing(error)) return undefined;
+    throw error;
+  }
+}
+
+/**
+ * `readListedFile` の JSON 版。消えていれば `undefined`、**読めた字が JSON として壊れて
+ * いれば期限まで待ち、まだ壊れていれば投げる**（`readJsonWhenPresent` と同じ）
+ */
+export async function readListedJson<T>(file: string, timeoutMs = PRESENT_TIMEOUT_MS): Promise<T | undefined> {
+  try {
+    return await readJsonWhenPresent<T>(file, timeoutMs);
+  } catch (error) {
+    if (isMissing(error)) return undefined;
+    throw error;
+  }
+}
+
+/**
  * Ctrl+S を押し、保存の書き込みが**終わるまで**待つ。`file` は保存される文書のファイル（絶対パス）。
  *
  * **VS Code 本体の保存は、ファイルをいったん空にしてから書く**（一時ファイルを経ない）。

@@ -119,7 +119,7 @@ import {
   undoFindingFromMemo,
 } from "./features/primeFindings";
 // 外部AIが置いた章立て・伏線・予定の段の案（作者の裁定 2026-10-16 の5）
-import { primeLedgerProposals } from "./features/ledgerProposals";
+import { countLedgerProposals, primeLedgerProposals } from "./features/ledgerProposals";
 // 古い指摘を片づける（設計書6.96.4）。**findings.jsonl を書き直す唯一の道**
 import {
   chooseFindingsTarget,
@@ -2068,6 +2068,9 @@ export async function activate(
           total += await new PendingSettingsUpdateStore(work).count();
           // 語り手の取り違えの移す案（設計書6.5.12、0.102.3）も同じ提案パネルに並ぶ
           total += await new PendingNarratorMoveStore(work).count();
+          // 外部AIの台帳の案（章立て・伏線・予定の段。設計書6.87.24）も
+          // 「更新分を反映」から開く（`applyPendingCharacterUpdates` の primeLedger）
+          total += await countLedgerProposals(work);
         } else if (counter === "staleImeDictionary") {
           // 書き出し済みの辞書より設定資料が新しい作品を数える。
           // 一度も書き出していない作品は数えない（催促にならないため）
@@ -4911,7 +4914,9 @@ export async function activate(
               count =
                 (await new PendingUpdateStore(candidate).count()) +
                 (await new PendingSettingsUpdateStore(candidate).count()) +
-                (await new PendingNarratorMoveStore(candidate).count());
+                (await new PendingNarratorMoveStore(candidate).count()) +
+                // 印（pendingUpdates）と同じ置き場を数える。食い違わせない
+                (await countLedgerProposals(candidate));
             } catch {
               // 読めない作品は0件として扱う。補足が出ないだけ
             }
@@ -4922,7 +4927,15 @@ export async function activate(
           },
         });
         if (!work) return CHECK_CANCELLED;
-        await applyPendingCharacterUpdates(work, proposalPanel);
+        await applyPendingCharacterUpdates(work, proposalPanel, (options) =>
+          primeLedgerProposals(
+            work,
+            proposalPanel,
+            // パネルを開いたときの読み込み（loadPending）と同じ段取り
+            { onChaptersChanged: (changed) => treeProvider.refresh(changed.id) },
+            options
+          )
+        );
         treeProvider.refresh(work.id);
         // 名前や別名が変われば、本文で光る範囲も変わる
         highlighter.invalidate();

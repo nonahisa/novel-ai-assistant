@@ -29,6 +29,7 @@ const READ_KIND_LABELS: Readonly<Record<string, string>> = {
   locations: "場所の略図",
   writingStats: "執筆量",
   posting: "投稿サイト用の本文",
+  schedule: "予定の段",
   // 名指しの鍵の3つ（2026-10-16）。中身は記録に残さない（何を読んだかだけ）
   chatLog: "相談ログ",
   log: "動作のログ",

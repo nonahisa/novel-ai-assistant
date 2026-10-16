@@ -101,7 +101,11 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.showWritingStats": { class: "A", label: "執筆統計", via: "novel.read kind: writingStats" },
   "novelai.showAllWorksWritingStats": { class: "C2", label: "全作品執筆統計" },
   "novelai.setWorkGoals": { class: "C4", label: "作品目標設定", reason: "作者の判断" },
-  "novelai.openSchedule": { class: "C2", label: "スケジュール" },
+  "novelai.openSchedule": {
+    class: "A",
+    label: "スケジュール",
+    via: "novel.read kind: schedule（段の id を読み、novel.propose kind: schedule で段の案を置く）",
+  },
   "novelai.importHolidays": { class: "C1", label: "祝日を取り込む" },
   "novelai.exportScheduleIcs": { class: "A", label: "スケジュールをカレンダーへ書き出す" },
   "novelai.suggestContests": { class: "C1", label: "応募先をAIに提案してもらう" },

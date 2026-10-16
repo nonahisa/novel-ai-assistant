@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
 import { chronicleRowInRange, novelRead } from "../../../src/mcp/tools/read";
+import { novelPropose } from "../../../src/mcp/tools/propose";
 import { estimateTokens, READ_RESULT_TOKEN_BUDGET } from "../../../src/mcp/tools/payloadBudget";
 import {
   exposureOf,
@@ -655,5 +656,167 @@ describe("novel.read——投稿サイト用（posting）", () => {
     novelRead({ folder, kind: "writingStats" });
     novelRead({ folder, kind: "posting", site: "note", file: "本文/001_灯.txt" });
     expect(snapshot(folder)).toEqual(before);
+  });
+});
+
+/**
+ * 予定の段（2026-10-16 の続き。設計書6.87.24）。`novel.propose kind: schedule` の
+ * 案は段を id か名前で指すが、外部AIには段の id を読む口が無く、断りの文に並ぶ一覧を
+ * 頼りにするしかなかった。読む口で id・名前・日数・期日・状態を返し、その id で案を置ける。
+ */
+describe("novel.read——予定の段（schedule）", () => {
+  function writeSchedule(folder: string, schedules: unknown[]): void {
+    write(folder, "設定/スケジュール.json", { schemaVersion: "1", schedules });
+  }
+
+  const contest = {
+    id: "sch_1",
+    kind: "contest",
+    name: "灯台賞",
+    followsGoals: false,
+    milestone: "2026-12-31",
+    targetChars: null,
+    steps: [
+      { id: "stp_w", key: "write", label: "執筆", days: 30, due: null, status: "doing", doneAt: null, note: "" },
+      { id: "stp_r", key: "revise", label: "推敲", days: 10, due: "2026-12-20", status: "todo", doneAt: null, note: "" },
+    ],
+    serial: null,
+    note: "",
+    createdAt: "",
+    updatedAt: "",
+  };
+
+  function scheduleOf(folder: string) {
+    const result = novelRead({ folder, kind: "schedule" });
+    if (result.kind !== "schedule") throw new Error(result.kind);
+    return result;
+  }
+
+  test("道具の説明に schedule がある", () => {
+    expect(server).toContain("schedule＝");
+  });
+
+  test("スケジュールごとに、段の id・名前・日数・期日・状態を返す", () => {
+    const folder = makeWork("予定");
+    writeSchedule(folder, [contest]);
+    const result = scheduleOf(folder);
+    expect(result.schedules).toHaveLength(1);
+    const [schedule] = result.schedules;
+    expect(schedule).toMatchObject({
+      id: "sch_1",
+      name: "灯台賞",
+      scheduleKind: "contest",
+      milestoneLabel: "締切",
+      milestone: "2026-12-31",
+      followsGoals: false,
+    });
+    expect(schedule.steps).toEqual([
+      { id: "stp_w", label: "執筆", days: 30, due: null, status: "doing", statusLabel: "進行中", doneAt: null },
+      { id: "stp_r", label: "推敲", days: 10, due: "2026-12-20", status: "todo", statusLabel: "未着手", doneAt: null },
+    ]);
+    expect(result.next).toBeNull();
+    expect(result.unreadableFiles).toEqual([]);
+  });
+
+  test("読んだ id のまま novel.propose kind: schedule の案を置ける", () => {
+    const folder = makeWork("予定と案", { allow: ["*"] });
+    writeSchedule(folder, [contest]);
+    const [schedule] = scheduleOf(folder).schedules;
+    const placed = novelPropose({
+      folder,
+      kind: "schedule",
+      ledger: { schedule: schedule.id, step: schedule.steps[1].id, days: 14 },
+      reason: "推敲に余裕を持たせるため",
+    });
+    expect(placed.file).toMatch(/^\.aiwriter\/pending-ledger\/scheduleStep-[0-9a-f]+\.json$/);
+  });
+
+  test("作品目標設定に従う公募は、propose と同じ名前で返す（締切は目標から）", () => {
+    const folder = makeWork("目標に従う");
+    write(folder, ".aiwriter/goals.json", {
+      schemaVersion: "0.1",
+      perEpisodeChars: null,
+      contest: { name: "短編賞", url: null, deadline: "2026-11-30", minChars: 10000, maxChars: null, dailyGoal: null },
+    });
+    writeSchedule(folder, [{ ...contest, id: "sch_goals", name: "", followsGoals: true, milestone: null }]);
+    const [schedule] = scheduleOf(folder).schedules;
+    expect(schedule.name).toBe("作品目標設定の応募先");
+    expect(schedule.milestone).toBe("2026-11-30");
+    expect(schedule.followsGoals).toBe(true);
+  });
+
+  test("目標の応募先があるのに、ファイルにまだ公募の行が無いときは、案を置けないことを断る", () => {
+    const folder = makeWork("行が無い");
+    write(folder, ".aiwriter/goals.json", {
+      schemaVersion: "0.1",
+      perEpisodeChars: null,
+      contest: { name: "短編賞", url: null, deadline: "2026-11-30", minChars: 10000, maxChars: null, dailyGoal: null },
+    });
+    writeSchedule(folder, []);
+    const result = scheduleOf(folder);
+    expect(result.schedules).toEqual([]);
+    expect(result.notices.join("")).toContain("一度段を直すまでファイルにありません");
+  });
+
+  test("スケジュールが無い作品は空で返し、作者が画面で作ることを断る", () => {
+    const result = scheduleOf(makeWork("予定なし"));
+    expect(result.schedules).toEqual([]);
+    expect(result.file).toBeNull();
+    expect(result.notices.join("")).toContain("スケジュールがまだありません");
+  });
+
+  test("壊れたスケジュールは直さず、読めなかったファイルとして返す", () => {
+    const folder = makeWork("壊れた予定");
+    write(folder, "設定/スケジュール.json", "{壊れている");
+    const before = fs.readFileSync(nodePath.join(folder, "設定/スケジュール.json"), "utf8");
+    const result = scheduleOf(folder);
+    expect(result.schedules).toEqual([]);
+    expect(result.unreadableFiles).toEqual(["設定/スケジュール.json"]);
+    expect(fs.readFileSync(nodePath.join(folder, "設定/スケジュール.json"), "utf8")).toBe(before);
+  });
+
+  test("大きいときはスケジュールの境目で分け、続きをたどると全部が1回ずつ揃う（上限を超えない）", () => {
+    const folder = makeWork("予定が多い");
+    const many = Array.from({ length: 40 }, (_, index) => ({
+      ...contest,
+      id: `sch_${index}`,
+      name: `賞${index}`,
+      steps: Array.from({ length: 30 }, (_, step) => ({
+        id: `stp_${index}_${step}`,
+        key: "custom",
+        label: `段${step}の長い名前${"あ".repeat(40)}`,
+        days: 3,
+        due: null,
+        status: "todo",
+        doneAt: null,
+        note: "",
+      })),
+    }));
+    writeSchedule(folder, many);
+    const seen: string[] = [];
+    let offset: number | undefined = 0;
+    let rounds = 0;
+    while (offset !== undefined && rounds < 100) {
+      const page = novelRead({ folder, kind: "schedule", offset });
+      if (page.kind !== "schedule") throw new Error(page.kind);
+      expect(estimateTokens(JSON.stringify(page, null, 2))).toBeLessThanOrEqual(READ_RESULT_TOKEN_BUDGET);
+      seen.push(...page.schedules.map((entry) => entry.id));
+      offset = page.next?.offset;
+      rounds++;
+    }
+    expect(rounds).toBeGreaterThan(1);
+    expect(seen).toEqual(many.map((entry) => entry.id));
+  });
+
+  test("記録には予定を読んだことだけを残す。何も書かない", () => {
+    const folder = makeWork("予定の記録", { allow: ["novel.read"] });
+    writeSchedule(folder, [contest]);
+    expect(() => assertExternalAccessAllowed({ folder, kind: "schedule" }, "novel.read")).not.toThrow();
+    const before = snapshot(folder);
+    novelRead({ folder, kind: "schedule" });
+    expect(snapshot(folder)).toEqual(before);
+    recordExternalAccess({ tool: "novel.read", args: { folder, kind: "schedule" }, ok: true, result: {} });
+    const log = fs.readFileSync(nodePath.join(folder, ".aiwriter", "history", "external.jsonl"), "utf8");
+    expect(log).toContain("予定の段を読んだ");
   });
 });

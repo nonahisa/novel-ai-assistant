@@ -756,7 +756,19 @@ export async function applyPendingCharacterUpdates(
    * 作者への提案の窓口を1つにする。本文の直しは提案パネル、設定資料の
    * 更新は別のダイアログ、では**片方を見落とす。**
    */
-  panel?: ProposalPanel
+  panel?: ProposalPanel,
+  /**
+   * 外部AIの台帳の案（章立て・伏線・予定の段。`.aiwriter/pending-ledger/`）を
+   * 提案パネルへ並べる口（`features/ledgerProposals.ts` の `primeLedgerProposals`）。
+   * 並べた件数を返す。
+   *
+   * **メニューの「更新分を反映 残りN」に台帳の案も数えるので、押したらここからも
+   * 出す**（2026-10-16 の続き）。数えたのに「反映待ちの更新はありません」と出ると、
+   * 作者には案が消えたように見える。口で受け取るのは、採ったあとに作品一覧を
+   * 作り直す段取り（`extension.ts` が持つ）をここへ持ち込まないため。
+   * パネルが無い（確認ダイアログの道）ときは使わない——台帳の案はパネルでしか採れない
+   */
+  primeLedger?: (options: { quiet: boolean }) => Promise<number>
 ): Promise<void> {
   useLogFile(work.folderPath);
   const review = await reviewPendingCharacterUpdates(work);
@@ -781,6 +793,8 @@ export async function applyPendingCharacterUpdates(
     review.totalPending + settingsReview.totalPending + moveReview.totalPending ===
     0
   ) {
+    // 人物・設定資料・移す案が無くても、台帳の案があればそれを前へ出す
+    if (panel && primeLedger && (await primeLedger({ quiet: false })) > 0) return;
     vscode.window.showInformationMessage("反映待ちの更新はありません。");
     return;
   }
@@ -793,6 +807,8 @@ export async function applyPendingCharacterUpdates(
   if (characterBlocked) {
     const files = review.characterErrors.map((error) => error.file).join("、");
     if (settingsReview.totalPending === 0) {
+      // 台帳の案は人物設定を読まずに採れるので、止めずに出す
+      if (panel) await primeLedger?.({ quiet: false });
       await vscode.window.showErrorMessage(
         "読み込めない人物設定があるため、反映を中止しました。" + `（${files}）`
       );
@@ -835,6 +851,8 @@ export async function applyPendingCharacterUpdates(
     ...moveTargets(work, moveReview),
   ];
   if (targets.length === 0) {
+    // 古い案を片付けた結果が0件でも、台帳の案は別にある
+    if (panel) await primeLedger?.({ quiet: false });
     vscode.window.showInformationMessage(
       "反映が必要な更新はありませんでした。古い更新案は片付けました。"
     );
@@ -846,6 +864,8 @@ export async function applyPendingCharacterUpdates(
   // **組み立ては開いたときと同じものを通す**（0.45.0。写しを作らない）
   if (panel) {
     showInPanel(review, settingsReview, moveReview, work, panel);
+    // 台帳の案は別の分類（タブ）へ静かに並べる。前へ出すのは人物・設定資料の案のほう
+    await primeLedger?.({ quiet: true });
     return;
   }
 

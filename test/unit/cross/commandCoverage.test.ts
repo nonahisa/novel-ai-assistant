@@ -69,6 +69,8 @@ describe("コマンドごとの区分の表", () => {
       ["novelai.openChatLog", "A"],
       ["novelai.showLog", "A"],
       ["novelai.showEditHistory", "A"],
+      // 予定の段（2026-10-16 の続き）。段を直すのは novel.propose kind: schedule の案
+      ["novelai.openSchedule", "A"],
     ].sort());
     // 道に書いた kind が、読む口の受け付ける kind と食い違っていないこと
     for (const [command] of viaRead) {

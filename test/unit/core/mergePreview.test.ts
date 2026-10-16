@@ -151,6 +151,11 @@ describe("自動で書かれるファイルの見分け", () => {
     expect(
       isAutoWrittenPath("短編/.aiwriter/pending-moves/char_007_0123456789abcdef01234567.json")
     ).toBe(true);
+    // 外部AIの台帳の案（2026-10-16 の続き。設計書6.87.24）も、まだ台帳になっていない案
+    expect(
+      isAutoWrittenPath("短編/.aiwriter/pending-ledger/chapter-0123456789abcdef.json")
+    ).toBe(true);
+    expect(isAutoWrittenPath("短編\\.aiwriter\\pending-ledger\\scheduleStep-0123456789abcdef.json")).toBe(true);
   });
 
   test("原稿と設定資料は畳めない", () => {

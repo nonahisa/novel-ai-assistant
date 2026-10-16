@@ -8,12 +8,12 @@
  *
  * **本物の AI は呼ばない。** 名前の候補は偽の Ollama（`fakeOllama.ts`）が、下の `plotNamesAnswer` の形で返す。
  */
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { emptyCharacter, type Character } from "../../../src/models/character";
 import { passLocalAiGate, type FakeOllamaRequest } from "./fakeOllama";
-import { readFileWhenPresent } from "./fileSettle";
+import { readFileWhenPresent, readListedFile, readListedJson } from "./fileSettle";
 import { runCommand } from "./quickInput";
 import { proposalPanelFrame } from "./sampleFinding";
 import { defaultCharactersFolder, writeCharactersTo } from "./settingsFixture";
@@ -369,7 +369,11 @@ export async function pendingCharacterFiles(session: E2ESession): Promise<Map<st
   const folder = path.join(session.workFolder, ".aiwriter", "pending-characters");
   const files = new Map<string, string>();
   for (const name of (await readdir(folder).catch(() => [] as string[])).filter((entry) => entry.endsWith(".json"))) {
-    files.set(name, await readFile(path.join(folder, name), "utf8").catch(() => ""));
+    // 拾ったあとに片付いた案は飛ばす。**在るのに読めない案を空として数えない**——空は
+    // どの語も含まないので、「承認待ちから消えた」の確かめが偽の成功になる。
+    // 承認待ちは一時ファイルからの rename で入れ替わる（隙間が無い）ので、無ければ待たない
+    const body = await readListedFile(path.join(folder, name), 0);
+    if (body !== undefined) files.set(name, body);
   }
   return files;
 }
@@ -402,8 +406,10 @@ export async function characterNames(session: E2ESession): Promise<string[]> {
   const folder = path.join(session.workFolder, "設定", "characters");
   const names: string[] = [];
   for (const name of (await readdir(folder).catch(() => [] as string[])).filter((entry) => entry.endsWith(".json"))) {
-    const record = JSON.parse(await readFile(path.join(folder, name), "utf8").catch(() => "{}")) as { name?: string };
-    if (record.name) names.push(record.name);
+    // 人物は「退避 → 削除 → 作り直し」で書き戻す（`saveOrUpdate`）ので、無いのは隙間のこともある。
+    // 待っても無ければ消えたものとして飛ばし、壊れたまま読めなければ投げる（`{}` として名前を落とさない）
+    const record = await readListedJson<{ name?: string }>(path.join(folder, name));
+    if (record?.name) names.push(record.name);
   }
   return names.sort();
 }

@@ -44,6 +44,17 @@ import { AIWRITER_DIR } from "../../models/types";
 import { parseWorkGoals, WORK_GOALS_FILE } from "../../models/workGoals";
 import { postingSiteInfo, type PostingSiteId } from "../../models/posting";
 import {
+  MILESTONE_LABELS,
+  parseScheduleFile,
+  SCHEDULE_FILE,
+  SCHEDULE_KIND_LABELS,
+  scheduleNameForExternal,
+  STEP_STATUS_LABELS,
+  type ScheduleKind,
+  type StepStatus,
+} from "../../models/schedule";
+import { GOALS_CONTEST_SCHEDULE_ID } from "../../core/scheduleTemplates";
+import {
   aggregate,
   currentStreak,
   DEFAULT_DAY_BOUNDARY_HOUR,
@@ -120,6 +131,7 @@ export const READ_KINDS = [
   "locations",
   "writingStats",
   "posting",
+  "schedule",
   // ここから下の3つは名指しの鍵（`"*"` に含めない。作者の裁定 2026-10-16 の6）
   "chatLog",
   "log",
@@ -155,6 +167,7 @@ export const NOVEL_READ_INPUT = {
         "relations＝人物相関図の中身／locations＝場所の略図の中身／" +
         "writingStats＝執筆量（日・週・月・年ごと、続いている日数、環境ごと）と作品の目標・応募先の進み／" +
         "posting＝投稿サイトの入力欄へ貼る形にした1話の本文と題（site・file が要る。投稿はしない）／" +
+        "schedule＝予定（スケジュールと段の id・名前・日数・期日・状態。novel.propose kind: schedule で段を指す id）／" +
         "chatLog＝相談ログ／log＝動作のログ／editHistory＝編集履歴（この3つは新しいものが先。" +
         "全部の道具の許可では読めず、作者が名指しで許したときだけ読める）"
     ),
@@ -211,6 +224,7 @@ export const NOVEL_READ_INPUT = {
       "kind: chronicle のとき、絞った行の何件目から返すか（既定は0）。" +
         "kind: posting のとき、変換した本文の何行目から返すか（0から。既定は0）。" +
         "kind: chatLog・log・editHistory のとき、新しいほうから数えて何件目から返すか（既定は0）。" +
+        "kind: schedule のとき、何番目のスケジュールから返すか（0から。既定は0）。" +
         "どちらも、返事の next.offset をそのまま渡すと続きが読める（ほかの引数は同じまま）"
     ),
   limit: z
@@ -313,6 +327,7 @@ export type NovelReadResult =
     }
   | WritingStatsReadResult
   | PostingReadResult
+  | ScheduleReadResult
   | LogReadResult;
 
 /**
@@ -431,6 +446,8 @@ export function novelRead(input: NovelReadInput): NovelReadResult {
       return readWritingStats(folder, input.now ?? new Date());
     case "posting":
       return readPosting(folder, input);
+    case "schedule":
+      return readSchedule(folder, input);
     case "chatLog":
     case "log":
     case "editHistory":
@@ -1058,6 +1075,188 @@ function readGoals(
   } catch (error) {
     notices.push(
       `作品の目標（${AIWRITER_DIR}/${WORK_GOALS_FILE}）を読めませんでした：${describeError(error)}`
+    );
+    return null;
+  }
+}
+
+/* ── schedule ─────────────────────────────────────── */
+
+/** 予定の段1つ。**台帳が持つ値だけ**（逆算した日付は台帳に無いので入れない） */
+export interface ScheduleReadStep {
+  id: string;
+  label: string;
+  /** 所要日数。執筆の段では、巡航速度が無いときの仮の日数 */
+  days: number;
+  /** 作者が手で入れた期日。null なら画面が逆算で決める */
+  due: string | null;
+  status: StepStatus;
+  statusLabel: string;
+  doneAt: string | null;
+}
+
+export interface ScheduleReadEntry {
+  id: string;
+  /** `novel.propose kind: schedule` の `ledger.schedule` に渡せる名前 */
+  name: string;
+  scheduleKind: ScheduleKind;
+  kindLabel: string;
+  /** 締切・発売日・連載開始日のどれか */
+  milestoneLabel: string;
+  /** 作品目標設定に従う公募なら、目標の応募先の締切 */
+  milestone: string | null;
+  followsGoals: boolean;
+  steps: ScheduleReadStep[];
+}
+
+export interface ScheduleReadResult {
+  kind: "schedule";
+  /** 読んだ台帳（作品フォルダーからの相対）。まだ無ければ null */
+  file: string | null;
+  schedules: ScheduleReadEntry[];
+  /** スケジュールの数（段の数ではない） */
+  total: number;
+  offset: number;
+  truncated: boolean;
+  next: { offset: number } | null;
+  unreadableFiles: string[];
+  notices: string[];
+}
+
+/**
+ * 予定（設計書6.111）を読む。**`novel.propose kind: schedule` の案が段を id で指せる
+ * ように**、スケジュールと段の id・名前・日数・期日・状態を返す。
+ *
+ * 返すのは台帳（`設定/スケジュール.json`）が持つ値だけ。逆算した日付は画面が毎回
+ * 計算するもの（`core/schedulePlan.ts`）で、巡航速度は VS Code の中にあるので出さない
+ * ——案を置く口も台帳の値（`days`・`due`・`status`）を相手にしている。
+ *
+ * **作品目標設定に従う公募は、作者が段を一度直すまでファイルに無い**（画面は目標から
+ * 仮に組み立てて見せる）。案を置く口も断るので、ここでは並べずに断りを添える。
+ *
+ * 大きさは年表と同じ作法で、**スケジュールの境目で**切って続きの印を返す。
+ */
+function readSchedule(folder: string, input: NovelReadInput): ScheduleReadResult {
+  const notices: string[] = [];
+  const shown = `${DEFAULT_SETTINGS_DIR}/${SCHEDULE_FILE}`;
+  const target = nodePath.join(nodePath.resolve(folder), DEFAULT_SETTINGS_DIR, SCHEDULE_FILE);
+  const goalsContest = readGoalsContest(folder, notices);
+  const empty = (file: string | null, unreadableFiles: string[]): ScheduleReadResult => ({
+    kind: "schedule",
+    file,
+    schedules: [],
+    total: 0,
+    offset: input.offset ?? 0,
+    truncated: false,
+    next: null,
+    unreadableFiles,
+    notices,
+  });
+
+  if (!fs.existsSync(target)) {
+    notices.push(
+      "スケジュールがまだありません（作者が拡張機能のスケジュールの画面で作ります。作られてから段の案を置けます）。"
+    );
+    if (goalsContest) notices.push(goalsRowMissingNotice());
+    return empty(null, []);
+  }
+  let schedules;
+  try {
+    schedules = parseScheduleFile(JSON.parse(decodeBytes(fs.readFileSync(target)).text)).schedules;
+  } catch (error) {
+    // 壊れた台帳は直さない（実装ルール2）。読めなかったことだけを返す
+    notices.push(`${shown} を読めませんでした（直していません）：${describeError(error)}`);
+    return empty(shown, [shown]);
+  }
+  if (goalsContest && !schedules.some((entry) => entry.id === GOALS_CONTEST_SCHEDULE_ID)) {
+    notices.push(goalsRowMissingNotice());
+  }
+
+  const entries: ScheduleReadEntry[] = schedules.map((schedule) => ({
+    id: schedule.id,
+    name: scheduleNameForExternal(schedule),
+    scheduleKind: schedule.kind,
+    kindLabel: SCHEDULE_KIND_LABELS[schedule.kind],
+    milestoneLabel: MILESTONE_LABELS[schedule.kind],
+    // 目標に従う公募は締切を写さずに持たない（`models/schedule.ts`）。画面と同じく目標から読む
+    milestone: schedule.followsGoals ? (goalsContest?.deadline ?? null) : schedule.milestone,
+    followsGoals: schedule.followsGoals,
+    steps: schedule.steps.map((step) => ({
+      id: step.id,
+      label: step.label,
+      days: step.days,
+      due: step.due,
+      status: step.status,
+      statusLabel: STEP_STATUS_LABELS[step.status],
+      doneAt: step.doneAt,
+    })),
+  }));
+  if (entries.length === 0) {
+    notices.push("スケジュールの台帳はありますが、予定が1つもありません。");
+  }
+
+  const offset = input.offset ?? 0;
+  const candidates = entries.slice(offset, offset + (input.limit ?? MAX_CHRONICLE_LIMIT));
+  const compose = (count: number): ScheduleReadResult => {
+    const page = candidates.slice(0, count);
+    const nextOffset = offset + page.length;
+    const truncated = nextOffset < entries.length;
+    return {
+      kind: "schedule",
+      file: shown,
+      schedules: page,
+      total: entries.length,
+      offset,
+      truncated,
+      next: truncated ? { offset: nextOffset } : null,
+      unreadableFiles: [],
+      notices: [
+        ...notices,
+        ...(truncated
+          ? [
+              `全${entries.length}件の予定のうち${offset + 1}〜${nextOffset}件目を返しました。` +
+                `続きは offset: ${nextOffset} で読めます（ほかの引数は同じまま）。`,
+            ]
+          : []),
+        ...(offset > 0 && offset >= entries.length
+          ? [`offset（${offset}）が予定の件数（${entries.length}）を超えています。`]
+          : []),
+      ],
+    };
+  };
+  // 1件ずつ足して、上限を超える手前で止める。**最低1件は返す**（年表・ログと同じ。
+  // 0件で続きを示すと、同じ所で永遠に止まる）
+  let count = Math.min(1, candidates.length);
+  while (count < candidates.length && estimateResultTokens(compose(count + 1)) <= READ_RESULT_TOKEN_BUDGET) {
+    count++;
+  }
+  const result = compose(count);
+  if (count === 1 && estimateResultTokens(result) > READ_RESULT_TOKEN_BUDGET) {
+    result.notices.push(
+      `${offset + 1}件目の予定だけで返事の大きさの目安を超えています。呼び出し側で切られることがあります。`
+    );
+  }
+  return result;
+}
+
+/** 目標に従う公募の行がまだファイルに無いときの断り（案を置く口の断りと同じ言い方） */
+function goalsRowMissingNotice(): string {
+  return (
+    "作品目標設定の応募先に従う公募は、作者がスケジュールの画面で一度段を直すまでファイルにありません" +
+    "（画面には出ていますが、いまはこの予定へ段の案を置けません）。"
+  );
+}
+
+/** 作品目標設定の応募先（締切だけ使う）。無い・読めないなら null（読めないときは断りを足す） */
+function readGoalsContest(folder: string, notices: string[]): { deadline: string | null } | null {
+  const file = nodePath.join(nodePath.resolve(folder), AIWRITER_DIR, WORK_GOALS_FILE);
+  if (!fs.existsSync(file)) return null;
+  try {
+    const goals = parseWorkGoals(JSON.parse(decodeBytes(fs.readFileSync(file)).text));
+    return goals.contest ? { deadline: goals.contest.deadline } : null;
+  } catch (error) {
+    notices.push(
+      `作品の目標（${AIWRITER_DIR}/${WORK_GOALS_FILE}）を読めませんでした（目標に従う公募の締切は空で返します）：${describeError(error)}`
     );
     return null;
   }
