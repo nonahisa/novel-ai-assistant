@@ -93,6 +93,12 @@ describe("検出の段が書いた形のまま、分かる話を引く", () => {
     ).toEqual([1]);
   });
 
+  test("頭に持ち主の名前を付けた文（台B の e4b の書き方）でも引ける", () => {
+    const index = buildKnownAtIndex([haruto]);
+    expect(lookupSettingKnownAt(index, "相沢春人は、右目の下に小さなほくろがある。")).toEqual([1]);
+    expect(lookupSettingKnownAt(index, "相沢春人は、左の足首を折った。")).toEqual([2]);
+  });
+
   test("短い値（1〜3字）は、含まれているだけでは引かない", () => {
     // 「俺」を含むだけの文に当たると、どの指摘にも話数が付いてしまう
     const index = buildKnownAtIndex([haruto]);

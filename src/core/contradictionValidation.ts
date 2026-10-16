@@ -705,7 +705,7 @@ export function lookupSettingKnownAt(
   settingSays: string,
   scope?: KnownAtScope
 ): number[] {
-  const candidates = settingCandidates(settingSays);
+  const candidates = settingCandidates(settingSays, index);
   if (candidates.length === 0) return [];
 
   let matched = index.entries.filter((entry) =>
@@ -724,12 +724,12 @@ export function lookupSettingKnownAt(
   }
   if (matched.length === 0) return [];
 
+  const haystack = `${settingSays}\n${scope?.alsoText ?? ""}`.replace(/\s+/g, "");
   const named = matched.filter((entry) =>
-    entry.owners.some(
-      (owner) =>
-        [...owner].length >= 2 &&
-        (settingSays.includes(owner) || (scope?.alsoText ?? "").includes(owner))
-    )
+    entry.owners.some((owner) => {
+      const name = owner.replace(/\s+/g, "");
+      return [...name].length >= 2 && haystack.includes(name);
+    })
   );
   if (named.length > 0) {
     matched = named;
@@ -748,10 +748,21 @@ export function lookupSettingKnownAt(
 /** 包含で引くときの、候補と値の最小の字数 */
 const MIN_CONTAIN_CHARS = 4;
 
-function settingCandidates(settingSays: string): string[] {
+function settingCandidates(settingSays: string, index: KnownAtIndex): string[] {
   const raw: string[] = [settingSays];
   const colon = settingSays.search(/[:：]/);
   if (colon >= 0) raw.push(settingSays.slice(colon + 1));
+  // 「相沢春人は、左の足首を折った。」のように、持ち主の名前を頭に付けて書いてくる
+  // （台B の e4b）。名前と助詞を外した残りも候補にする。名前の空白（「相沢 春人」）は
+  // 書き手によって付いたり付かなかったりするので、空白を除いて比べる
+  const compact = settingSays.trim().replace(/\s+/g, "");
+  const owners = new Set(index.entries.flatMap((entry) => entry.owners));
+  for (const owner of owners) {
+    const name = owner.replace(/\s+/g, "");
+    if ([...name].length < 2 || !compact.startsWith(name)) continue;
+    const rest = compact.slice(name.length).replace(/^[はのがも][、，,]?/, "");
+    if (rest !== compact.slice(name.length)) raw.push(rest);
+  }
   for (const match of settingSays.matchAll(/[「『"“]([^「」『』"“”]+)[」』"”]/g)) {
     raw.push(match[1]);
   }
