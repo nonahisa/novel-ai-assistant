@@ -183,6 +183,88 @@ describe("冗長の修正案（1.13）", () => {
     expect(accepted[0].suggestion).toBe("いつもは門外での確認が行われておらず");
   });
 
+  /*
+    原文の末尾の記号を落とす修正案（2026-10-16 の測り直し、本体の裁定）。
+    26b の冗長の修正案3件のうち2件が、原文の末尾の読点を落としていた。
+    削った形なので上の関門は通り、［適用］で作者の読点が消える
+  */
+  function oneIssue(text: string, original: string, suggestion: string, reason = "冗長") {
+    return validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 1,
+            original,
+            suggestion,
+            reason,
+            explanation: "「しながら」が2回繰り返されています",
+            confidence: "high",
+          },
+        ],
+      },
+      { ...chunk, text } as Chunk
+    ).accepted;
+  }
+
+  test("原文の末尾の読点を落とした修正案は、指摘を残して修正案だけ外す", () => {
+    const accepted = oneIssue(
+      "悶絶しながらしながら沼ワニに近づくと、槍は折れていた。",
+      "悶絶しながらしながら沼ワニに近づくと、",
+      "悶絶しながら沼ワニに近づくと"
+    );
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0].suggestion).toBe("");
+    expect(accepted[0].suggestionCleared).toBe("drops_trailing_mark");
+    expect(accepted[0].explanation).toContain("末尾の記号を落としていた");
+  });
+
+  test("読点だけを消す修正案も外れる", () => {
+    const accepted = oneIssue(
+      "加えて、害獣を駆除したことを示す討伐部位があれば、報酬が出る。",
+      "加えて、害獣を駆除したことを示す討伐部位があれば、",
+      "加えて、害獣を駆除したことを示す討伐部位があれば"
+    );
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0].suggestion).toBe("");
+    expect(accepted[0].suggestionCleared).toBe("drops_trailing_mark");
+  });
+
+  test("末尾の句点・閉じ括弧も同じ", () => {
+    expect(
+      oneIssue("「約10分ほど待った。」", "「約10分ほど待った。」", "「約10分待った。")[0]
+        .suggestionCleared
+    ).toBe("drops_trailing_mark");
+    expect(
+      oneIssue("約10分ほど待った。", "約10分ほど待った。", "約10分待った")[0].suggestionCleared
+    ).toBe("drops_trailing_mark");
+  });
+
+  test("末尾の記号を残した修正案はそのまま通る（漢字ひらきも）", () => {
+    expect(
+      oneIssue(
+        "悶絶しながらしながら沼ワニに近づくと、槍は折れていた。",
+        "悶絶しながらしながら沼ワニに近づくと、",
+        "悶絶しながら沼ワニに近づくと、"
+      )[0].suggestion
+    ).toBe("悶絶しながら沼ワニに近づくと、");
+    const opened = validateProofreadIssues(
+      {
+        issues: [
+          {
+            line: 1,
+            original: "是非この鯵を持って、",
+            suggestion: "ぜひこの鯵を持って、",
+            reason: "漢字ひらき",
+            explanation: "「是非（ぜひ）」で読みが詰まります",
+            confidence: "high",
+          },
+        ],
+      },
+      { ...chunk, text: "是非この鯵を持って、帰ってくれ。" } as Chunk
+    ).accepted;
+    expect(opened[0].suggestion).toBe("ぜひこの鯵を持って、");
+  });
+
   test("削った形でない冗長の修正案は、指摘を残して修正案だけ外す（理由を添える）", () => {
     const { accepted } = validateProofreadIssues(
       {
