@@ -224,37 +224,6 @@ describe("検証の段（P-12b、設計書6.10.5）", () => {
     expect(outcome.results[0].accepted).toHaveLength(1);
   });
 
-  // 2026-10-16 の実測：設定の分かる話が引けず「（不明）」と渡ると、26b は
-  // 「設定が不明」と読んで「まだ明かされていない」で取り下げる。話数の
-  // 裏付けの無い却下は通す（製品と同じ `guardNotYetRevealed`）
-  test("話数の裏付けの無い「まだ明かされていない」の却下は、指摘を消さずに通す", async () => {
-    verifyReplies.push(
-      JSON.stringify({
-        verdict: "却下",
-        reason: "まだ明かされていない",
-        explanation: "設定が不明であり、矛盾とは断定できないため。",
-        confidence: "high",
-      })
-    );
-    const outcome = await contradictionRun({
-      folder: FIXTURE,
-      filePath: EPISODE,
-      numCtx: NUM_CTX,
-      runner: "ollama",
-      model: "gemma4:e4b",
-    });
-    if (outcome.runner !== "ollama") throw new Error("ollama の結果ではない");
-    expect(outcome.results[0].verifyRejected).toEqual([]);
-    const kept = outcome.results[0].accepted;
-    expect(kept).toHaveLength(1);
-    // AIの「設定が不明」は作者へ見せず、通した理由を書く
-    expect(kept[0].note).not.toContain("設定が不明");
-    expect(kept[0].note).toContain("まだ明かされていない");
-    // 検証は答えている。完了の報告で「検証できず」と言わない
-    expect(outcome.verifyNote).not.toContain("検証できず");
-    expect(outcome.verifyNote).toContain("話数の裏付けが無かった");
-  });
-
   test("claude の道では検証を通せないことを黙らない", async () => {
     const outcome = await contradictionRun({
       folder: FIXTURE,

@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   describeVerifyResults,
-  guardNotYetRevealed,
   parseVerifyOutcome,
   undecidedOutcome,
 } from "../../../src/core/contradictionVerifyValidation";
-import { buildKnownAtIndex } from "../../../src/core/contradictionValidation";
 import { factsRevealedAfter } from "../../../src/core/settingsAsOf";
 import type { RecordChange } from "../../../src/models/jsonValidation";
 
@@ -144,23 +142,6 @@ describe("検証の結果を伝える", () => {
 
   it("何も無ければ、何も言わない", () => {
     expect(describeVerifyResults([], 0)).toBe("");
-    expect(describeVerifyResults([], 0, 0)).toBe("");
-  });
-
-  // 2026-10-16：裏付けの無い「まだ明かされていない」の却下を通したものは、
-  // 検証は答えている。「検証できず」と言うと起きたことと食い違う
-  it("却下を受け取らずに残したものは、「検証できず」と言わずに理由を言う", () => {
-    const text = describeVerifyResults([], 0, 1);
-    expect(text).not.toContain("検証できず");
-    expect(text).toContain("1件は「まだ明かされていない」の却下に話数の裏付けが無かった");
-    expect(text).toContain("そのまま残しました");
-  });
-
-  it("検証できなかったものと、却下を受け取らなかったものは別々に数える", () => {
-    const text = describeVerifyResults([{ reason: "作中の変化" }], 2, 1);
-    expect(text).toContain("1件を取り下げ");
-    expect(text).toContain("2件は検証できず");
-    expect(text).toContain("1件は「まだ明かされていない」");
   });
 });
 
@@ -276,86 +257,5 @@ describe("口調の但し書きの言葉が答えに写ったとき（2026-10-11
       confidence: "medium",
     });
     expect(result.keep).toBe(false);
-  });
-});
-
-/*
-  「まだ明かされていない」の却下に、根拠があるかを話数で確かめる（2026-10-16）。
-
-  手元のAIの測定（`docs/measurements/2026-10-16-ai-measure.md`）で、作者の作品の
-  写しの第10話の「わたくし、手加減は苦手ですのよ」（設定の一人称は「ボク」）を、
-  検出の段は `settingSays: "一人称: ボク"` と正しく挙げたのに、検証の段が
-  「まだ明かされていない（一人称の設定が不明）」で取り下げた。
-
-  原因は検証へ渡す「この設定が分かる話」が空（プロンプトでは「（不明）」）だった
-  こと。索引（`buildKnownAtIndex`）は変化の記録の値と**完全に一致する**ときしか
-  話数を返さず、一人称は変化の記録に載らない。26b は「（不明）」を「設定が不明」と
-  読み、3回とも同じ理由で却下した（「第3話」を渡すと3回とも採用）。
-
-  検出へ渡す材料は**その話の時点で分かっていることだけ**（設計書6.10.3）なので、
-  「この話より後で明かされる」と言える記録が無いのに却下するのは根拠が無い。
-*/
-describe("「まだ明かされていない」の却下を話数で確かめる（2026-10-16）", () => {
-  const notYet = outcome({
-    verdict: "却下",
-    reason: "まだ明かされていない",
-    explanation:
-      "一人称の設定が不明であり、初対面や初登場時の振る舞いとして矛盾とは断定できないため。",
-    confidence: "high",
-  });
-
-  it("再現：第10話の一人称の指摘は、索引から話数が引けないので却下を受け取らない", () => {
-    // 写しのエルシーと同じ形：一人称は変化の記録に無い
-    const knownAt = buildKnownAtIndex([
-      {
-        changes: [
-          { field: "role", value: "冒険者", chapters: [8, 10] },
-          { field: "personality", value: "冷静沈着", chapters: [10] },
-        ],
-      },
-    ]);
-    const guarded = guardNotYetRevealed(notYet, knownAt, "一人称: ボク", 10);
-    expect(guarded.keep).toBe(true);
-    // 検証は答えているので「検証できなかった」には数えない（文言が変わる）
-    expect(guarded.undecided).toBe(false);
-    expect(guarded.overruled).toBe(true);
-    // AIの「一人称の設定が不明」を作者へ見せない（資料には一人称がある）
-    expect(guarded.explanation).not.toContain("設定が不明");
-  });
-
-  it("引けた話数がすべて対象の話以前なら、却下を受け取らない", () => {
-    const knownAt = buildKnownAtIndex([
-      { changes: [{ field: "role", value: "近衛騎士", chapters: [3, 5] }] },
-    ]);
-    const guarded = guardNotYetRevealed(notYet, knownAt, "近衛騎士", 10);
-    expect(guarded.keep).toBe(true);
-    expect(guarded.undecided).toBe(false);
-    expect(guarded.overruled).toBe(true);
-  });
-
-  it("対象より後の話で分かる設定なら、却下のまま", () => {
-    const knownAt = buildKnownAtIndex([
-      { changes: [{ field: "role", value: "古竜", chapters: [15] }] },
-    ]);
-    const guarded = guardNotYetRevealed(notYet, knownAt, "古竜", 10);
-    expect(guarded.keep).toBe(false);
-    expect(guarded.reason).toBe("まだ明かされていない");
-  });
-
-  it("対象の話が分からなければ、却下のまま（材料も話数で絞れていない）", () => {
-    const guarded = guardNotYetRevealed(notYet, new Map(), "一人称: ボク", null);
-    expect(guarded.keep).toBe(false);
-  });
-
-  it("ほかの理由の却下と採用には触れない", () => {
-    const other = outcome({
-      verdict: "却下",
-      reason: "作中の変化",
-      explanation: "成長による変化",
-      confidence: "high",
-    });
-    expect(guardNotYetRevealed(other, new Map(), "x", 10)).toBe(other);
-    const kept = outcome({ verdict: "採用", reason: "", explanation: "", confidence: "high" });
-    expect(guardNotYetRevealed(kept, new Map(), "x", 10)).toBe(kept);
   });
 });

@@ -41,7 +41,6 @@ import {
 } from "../../prompts/contradictionVerify";
 import {
   describeVerifyResults,
-  guardNotYetRevealed,
   parseVerifyOutcome,
   undecidedOutcome,
   type VerifyOutcome,
@@ -1290,8 +1289,6 @@ async function verifyContradictionResults(
   );
   const verifyRejected: Array<{ reason?: VerifyRejectReason }> = [];
   let undecided = 0;
-  // 却下を受け取らずに残した数（製品と同じく「検証できず」とは分けて言う）
-  let overruled = 0;
 
   const out: ContradictionValidateResult[] = [];
   for (const result of results) {
@@ -1312,20 +1309,11 @@ async function verifyContradictionResults(
           schema: CONTRADICTION_VERIFY_SCHEMA,
           temperature,
         });
-        // 「まだ明かされていない」の却下は話数の裏付けを確かめる（製品と同じ、
-        // 2026-10-16）。MCP には逆向き（あとで判明する事実）の段が無いので、
-        // 指摘はみなその話の時点の材料で見つけたものである
-        outcome = guardNotYetRevealed(
-          parseVerifyOutcome(reply.text),
-          settings.knownAt,
-          issue.settingSays,
-          chunk.chapterStart
-        );
+        outcome = parseVerifyOutcome(reply.text);
       } catch (error) {
         outcome = undecidedOutcome(`検証できませんでした（${describeError(error)}）`);
       }
       if (outcome.undecided) undecided++;
-      if (outcome.overruled) overruled++;
       if (!outcome.keep) {
         verifyRejected.push({ reason: outcome.reason });
         dropped.push({
@@ -1340,7 +1328,7 @@ async function verifyContradictionResults(
     }
     out.push({ ...result, accepted: kept, verifyRejected: dropped });
   }
-  return { results: out, note: describeVerifyResults(verifyRejected, undecided, overruled) };
+  return { results: out, note: describeVerifyResults(verifyRejected, undecided) };
 }
 
 /** 行き先を1つの呼び方に揃える（`runByRunner` は2段に分かれた道を回せない） */
