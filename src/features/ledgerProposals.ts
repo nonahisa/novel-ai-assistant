@@ -110,15 +110,33 @@ export function ledgerProposalViewItem(file: LedgerProposalFile): RecordUpdateVi
 }
 
 /**
- * 提案パネルを開いたときに、溜まっている案を並べる（`extension.ts` の `loadPending`）。
- * 案が無ければ分類を作らない（空のタブを出さない）。
+ * 溜まっている案の数。メニューの「更新分を反映 残りN」と、作品を選ぶ画面の
+ * 「未反映 N件」に足す（2026-10-16 の続き）。
+ *
+ * **読めた案だけを数える**——提案パネルに並ぶ数と同じにするため（人物の承認待ちの
+ * `PendingUpdateStore.count()` も読めたものだけを数える）。壊れた案まで数えると、
+ * 印を見て開いた作者には並んでいない分が「消えた」に見える。
+ */
+export async function countLedgerProposals(work: WorkEntry): Promise<number> {
+  return (await loadLedgerProposals(work)).proposals.length;
+}
+
+/**
+ * 溜まっている案を提案パネルに並べる。案が無ければ分類を作らない（空のタブを出さない）。
+ *
+ * - パネルを開いたとき（`extension.ts` の `loadPending`）：既定の `quiet: true`。
+ *   作者が押した操作ではないので前へ出さない
+ * - 「更新分を反映」から（`applyPendingCharacterUpdates`）：ほかの承認待ちが無ければ
+ *   `quiet: false` で前へ出す。パネルが開いたままだと `loadPending` は走らないので、
+ *   押すたびにここで並べ直す
  *
  * @returns 並べた件数
  */
 export async function primeLedgerProposals(
   work: WorkEntry,
   panel: Pick<ProposalPanel, "showRecordUpdates">,
-  hooks: LedgerProposalHooks = {}
+  hooks: LedgerProposalHooks = {},
+  options: { quiet?: boolean } = {}
 ): Promise<number> {
   const { proposals, broken } = await loadLedgerProposals(work);
   const log = workLog(work.folderPath);
@@ -135,7 +153,7 @@ export async function primeLedgerProposals(
     (id) => applyLedgerProposal(work, id, hooks),
     (id) => dismissLedgerProposal(work, id),
     LEDGER_PROPOSAL_CATEGORY,
-    { quiet: true }
+    { quiet: options.quiet ?? true }
   );
   return proposals.length;
 }

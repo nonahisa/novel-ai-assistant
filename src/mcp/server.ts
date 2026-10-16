@@ -788,7 +788,7 @@ server.registerTool(
 server.registerTool(
   "novel.read",
   {
-    title: "作品の資料を読む（設定資料・再開の1枚・伏線・年表・相関図・略図・執筆量・投稿用の本文・相談ログ等）",
+    title: "作品の資料を読む（設定資料・再開の1枚・伏線・年表・相関図・略図・執筆量・投稿用の本文・予定・相談ログ等）",
     description:
       "画面を開かずに、作品の資料の中身を返します。kind で選びます：settings＝設定資料（term で語から引くと記録の全体）／" +
       "resume＝拡張機能の［執筆再開］と同じ1枚／foreshadows＝伏線の台帳と一覧／" +
@@ -796,6 +796,7 @@ server.registerTool(
       "relations＝人物相関図の中身／locations＝場所の略図の中身／" +
       "writingStats＝執筆量（日・週・月・年、続いた日数、環境ごと）と作品の目標・応募先の進み／" +
       "posting＝投稿サイトの入力欄へ貼る形にした1話の本文と題（site・file が要る。大きいと行で分けて返すので next.offset で続きを読む）／" +
+      "schedule＝予定（スケジュールと段の id・名前・日数・期日・状態。novel.propose kind: schedule で段を指すときの id）／" +
       "chatLog＝相談ログ／log＝動作のログ／editHistory＝編集履歴（新しいものが先。**全部の道具の許可では読めず**、作者が名指しで許したときだけ）。" +
       "**読むだけ**で、AIを呼ばず、何も書き換えず、投稿もしません。" +
       "本文の全文を返すのは posting だけです（再開の1枚には最新話の末尾が入ります）。",

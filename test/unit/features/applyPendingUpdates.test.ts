@@ -574,3 +574,60 @@ describe("反映・見送りの記録", () => {
     expect(logged.events[0]).toBe(`use:${work.folderPath}`);
   });
 });
+
+/**
+ * 外部AIの台帳の案（`.aiwriter/pending-ledger/`。設計書6.87.24）も、メニューの
+ * 「更新分を反映 残りN」に数える（2026-10-16 の続き）。印に数えたのに、押すと
+ * 「反映待ちの更新はありません」と出れば、作者には案が消えたように見える。
+ */
+describe("外部AIの台帳の案も「更新分を反映」から開く", () => {
+  let announced: string[] = [];
+
+  beforeEach(() => {
+    announced = [];
+    state.pending = [];
+    state.pendingErrors = [];
+    state.characters = [];
+    state.loadErrors = [];
+    window.showInformationMessage = (async (message: string) => {
+      announced.push(message);
+      return undefined;
+    }) as typeof window.showInformationMessage;
+    window.showWarningMessage = (async (message: string) => {
+      announced.push(message);
+      return undefined;
+    }) as typeof window.showWarningMessage;
+  });
+
+  test("台帳の案だけがあるときは「ありません」と言わず、前へ出して並べる", async () => {
+    const calls: Array<{ quiet: boolean }> = [];
+    const { panel } = fakePanel();
+    await applyPendingCharacterUpdates(work, panel as never, async (options) => {
+      calls.push(options);
+      return 2;
+    });
+    expect(calls).toEqual([{ quiet: false }]);
+    expect(announced).toEqual([]);
+  });
+
+  test("台帳の案も無ければ、これまでどおり「ありません」", async () => {
+    const { panel } = fakePanel();
+    await applyPendingCharacterUpdates(work, panel as never, async () => 0);
+    expect(announced).toEqual(["反映待ちの更新はありません。"]);
+  });
+
+  test("人物の案もあるときは、人物の案を前に出し、台帳の案は静かに並べ直す", async () => {
+    state.characters = [character("char_001", "灯", "主人公")];
+    state.pending = [
+      { character: character("char_001", "灯", "主人公。幽霊が見える。"), filePath: "pending/char_001.json" },
+    ];
+    const calls: Array<{ quiet: boolean }> = [];
+    const { panel, captured } = fakePanel();
+    await applyPendingCharacterUpdates(work, panel as never, async (options) => {
+      calls.push(options);
+      return 1;
+    });
+    expect(captured.items).toHaveLength(1);
+    expect(calls).toEqual([{ quiet: true }]);
+  });
+});

@@ -7,6 +7,7 @@ import { FileSystemError, FileType, workspace } from "../support/vscodeStub";
 import {
   LEDGER_PROPOSAL_CATEGORY,
   applyLedgerProposal,
+  countLedgerProposals,
   dismissLedgerProposal,
   primeLedgerProposals,
 } from "../../../src/features/ledgerProposals";
@@ -309,5 +310,27 @@ describe("見送る", () => {
     expect(await dismissLedgerProposal(work, nodePath.basename(placed.file, ".json"))).toEqual({ ok: true });
     expect(pending()).toEqual([]);
     expect(fs.readFileSync(nodePath.join(folder, "設定/章立て.json"), "utf8")).toBe(before);
+  });
+});
+
+describe("数える（メニューの「更新分を反映 残りN」）", () => {
+  test("読める案だけを数える（提案パネルに並ぶ数と同じ。壊れた案は数えない）", async () => {
+    expect(await countLedgerProposals(work)).toBe(0);
+    ledgerPropose({ folder, kind: "chapter", ledger: { episodeFile: "本文/002_便り.txt", chapterName: "第二章　便り" }, reason: "r" });
+    write(".aiwriter/pending-ledger/chapter-0123456789abcdef.json", "{壊れている");
+    expect(await countLedgerProposals(work)).toBe(1);
+  });
+
+  test("「更新分を反映」から呼ぶときは前へ出せる（quiet: false を渡す）", async () => {
+    ledgerPropose({ folder, kind: "chapter", ledger: { episodeFile: "本文/002_便り.txt", chapterName: "第二章　便り" }, reason: "r" });
+    const seen: unknown[] = [];
+    const panel = {
+      showRecordUpdates: (...args: unknown[]) => {
+        seen.push(args[5]);
+      },
+    };
+    expect(await primeLedgerProposals(work, panel as never, {}, { quiet: false })).toBe(1);
+    expect(await primeLedgerProposals(work, panel as never)).toBe(1);
+    expect(seen).toEqual([{ quiet: false }, { quiet: true }]);
   });
 });

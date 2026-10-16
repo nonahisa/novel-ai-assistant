@@ -226,6 +226,17 @@ export function emptyScheduleFile(): ScheduleFile {
 }
 
 /**
+ * 外部AI（MCP）へ見せるスケジュールの名前。作品目標設定に従う公募は名前を持たない
+ * （空文字）ので、決まった呼び名を返す。
+ *
+ * **読む口（`novel.read kind: schedule`）と案を置く口（`novel.propose kind: schedule`）の
+ * 両方がこれを通す。** 写すと、片方だけ直った日に「読んだ名前で指すと見つからない」になる。
+ */
+export function scheduleNameForExternal(schedule: Pick<Schedule, "followsGoals" | "name">): string {
+  return schedule.followsGoals ? "作品目標設定の応募先" : schedule.name;
+}
+
+/**
  * 作者が手で編集したかもしれないJSONを検証する。**壊れていれば例外を投げる。**
  *
  * 知らない種類・段の印・状態は「壊れている」とする（黙って既定に寄せると、

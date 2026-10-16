@@ -4,7 +4,13 @@ import { z } from "zod";
 import { AIWRITER_DIR, DEFAULT_SETTINGS_DIR } from "../../models/types";
 import { CHAPTERS_FILE, emptyChapterSet, parseChapterSet, type ChapterSet } from "../../models/chapter";
 import { parseForeshadow, type ForeshadowStatus } from "../../models/foreshadow";
-import { parseScheduleFile, SCHEDULE_FILE, type Schedule, type ScheduleFile } from "../../models/schedule";
+import {
+  parseScheduleFile,
+  SCHEDULE_FILE,
+  scheduleNameForExternal,
+  type Schedule,
+  type ScheduleFile,
+} from "../../models/schedule";
 import {
   LEDGER_PROPOSAL_SCHEMA_VERSION,
   PENDING_LEDGER_DIR,
@@ -81,9 +87,15 @@ export const LEDGER_PROPOSE_INPUT = {
         .describe("foreshadow：open・resolved・intentional／schedule：todo・doing・done"),
       resolvedChapter: z.number().int().min(0).optional().describe("foreshadow：回収した話数（status: resolved）"),
       resolvedQuote: z.string().optional().describe("foreshadow：回収の箇所の本文の一続きの引用"),
-      schedule: z.string().optional().describe("schedule：スケジュールの id か名前"),
-      step: z.string().optional().describe("schedule：直す段の id か名前。省くと段を足す案"),
-      afterStep: z.string().optional().describe("schedule：足す段をこの段の後ろへ（省くと最後）"),
+      schedule: z
+        .string()
+        .optional()
+        .describe("schedule：スケジュールの id か名前（novel.read kind: schedule で読める）"),
+      step: z
+        .string()
+        .optional()
+        .describe("schedule：直す段の id か名前（novel.read kind: schedule で読める）。省くと段を足す案"),
+      afterStep: z.string().optional().describe("schedule：足す段をこの段（id か名前）の後ろへ（省くと最後）"),
       days: z.number().int().optional().describe("schedule：所要日数"),
       due: z.string().nullable().optional().describe("schedule：期日 YYYY-MM-DD（null で逆算に戻す）"),
     })
@@ -400,13 +412,15 @@ function readScheduleFile(folder: string): ScheduleFile {
   }
 }
 
+/** 読む口（`novel.read kind: schedule`）と同じ名前（`models/schedule.ts`） */
 function scheduleNameOf(schedule: Schedule): string {
-  return schedule.followsGoals ? "作品目標設定の応募先" : schedule.name;
+  return scheduleNameForExternal(schedule);
 }
 
 /**
  * スケジュールを id か名前で選ぶ。当たらなければ**選べるものを並べて**断る
- * （外部AIは段の id を読む口を持たないので、断りの文が一覧の代わりになる）。
+ * （id は `novel.read kind: schedule` で読めるが、読まずに名前で指してきた外部AIにも
+ * 断りの文が一覧の代わりになる）。
  */
 function pickSchedule(file: ScheduleFile, wanted: string | undefined): Schedule {
   const list = file.schedules.map((entry) => `${entry.id}＝${scheduleNameOf(entry)}`).join("、") || "（なし）";
