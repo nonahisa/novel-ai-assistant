@@ -49,6 +49,11 @@ export interface FakeOllamaRequest {
    * 写真の書き起こし（設計書6.117）で、1ページに写真が1枚ずつ届いたかを見るのに使う
    */
   images: number;
+  /**
+   * 頼みに載っていたモデル名（`/api/chat` の `model`）。
+   * 機能ごとの割当（推敲と相談を別のモデルにするなど）で、どのモデルへ送られたかを見張るのに使う
+   */
+  model: string;
 }
 
 export interface FakeOllama {
@@ -167,6 +172,7 @@ export async function startFakeOllama(
           messages?: Array<{ role: string; content: string; images?: string[] }>;
           stream?: boolean;
           format?: unknown;
+          model?: string;
         };
         const messages = body.messages ?? [];
         const system = messages.find((message) => message.role === "system")?.content ?? "";
@@ -177,6 +183,7 @@ export async function startFakeOllama(
           user,
           structured: body.format !== undefined,
           images: lastUser?.images?.length ?? 0,
+          model: body.model ?? "",
         };
         requests.push(parsed);
         const text = await respond(parsed);
@@ -260,7 +267,7 @@ export function describeFakeRequests(requests: readonly FakeOllamaRequest[], fro
   const head = (text: string): string => text.replace(/\r?\n/g, "⏎").slice(0, 80);
   const lines = requests.map(
     (request, index) =>
-      `#${index + 1}${index < from ? "（前の件）" : ""}${request.structured ? "（構造化）" : ""} system「${head(request.system)}」 user「${head(request.user)}」`
+      `#${index + 1}${index < from ? "（前の件）" : ""}${request.structured ? "（構造化）" : ""} モデル「${request.model}」 system「${head(request.system)}」 user「${head(request.user)}」`
   );
   return `偽のAIへの頼み：この件で${requests.length - from}件・全体で${requests.length}件：${lines.length > 0 ? lines.join(" ／ ") : "なし"}`;
 }
