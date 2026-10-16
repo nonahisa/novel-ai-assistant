@@ -621,7 +621,10 @@ server.registerTool(
       "status が pending のものがパネルに並び、stale は「設定資料更新分反映」で片付けられる古い案です。" +
       "**読むだけで、承認も見送りも片付けもしません。** kind・source で絞り、limit で件数を決めます。" +
       "kind: finding で提案パネルの指摘（作者が採ったか・退けたか）を読みます（許可は別の鍵 pending.list.finding）。" +
-      "語り手の取り違えの移す案は narratorMoves で返します（移し先は作者が提案パネルで選びます）。",
+      "語り手の取り違えの移す案は narratorMoves で返します（移し先は作者が提案パネルで選びます）。" +
+      "novel.propose で置いた章立て・伏線・予定の段の案は ledgerProposals で返します" +
+      "（種類・置いた時刻・置いたときの値・指す台帳。作者が採るか見送ると消えます。kind: chapter・foreshadow・schedule で絞り、" +
+      "大きいときは ledgerProposals.next の ledgerOffset で続きを読みます）。",
     inputSchema: PENDING_LIST_INPUT,
   },
   tool("pending.list", (args: PendingListInput) => pendingListTool(args))
