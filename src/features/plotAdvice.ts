@@ -1,5 +1,4 @@
 import * as vscode from "vscode";
-import * as paths from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import {
   isBlankPlotSection,
@@ -17,7 +16,10 @@ import {
   type TextFileContent,
   type WriteTextFileResult,
 } from "../core/textFile";
-import { writeTextFilePreferringOpenDocument } from "../core/openDocumentEdit";
+import {
+  hasUnsavedOpenDocument,
+  writeTextFilePreferringOpenDocument,
+} from "../core/openDocumentEdit";
 import { appendChatLog } from "../core/chatLog";
 import {
   logFailure,
@@ -386,7 +388,7 @@ export class PlotAdviceSession {
 
     // **保存していない書きかけがあれば止める。** ディスクへ書くので、
     // 書きかけとぶつかる（書き戻しの口も止めるが、先に分かる言い方で断る）
-    if (isDirtyDocument(plotFile)) {
+    if (hasUnsavedOpenDocument(plotFile)) {
       void vscode.window.showWarningMessage(
         "プロット（plot.md）に保存していない変更があります。保存してから［この案をプロットに書く］を押してください。"
       );
@@ -529,13 +531,6 @@ function describeWriteFailure(result: WriteTextFileResult): string {
     default:
       return `プロット（plot.md）に書き込めませんでした。${result.detail ?? ""}`;
   }
-}
-
-function isDirtyDocument(filePath: string): boolean {
-  return vscode.workspace.textDocuments.some(
-    (document) =>
-      document.isDirty && paths.isSamePath(paths.fromUri(document.uri), filePath)
-  );
 }
 
 function clip(text: string, max: number): string {

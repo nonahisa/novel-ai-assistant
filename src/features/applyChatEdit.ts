@@ -10,9 +10,12 @@ import {
 import {
   buildSynopsisMarkdown,
   parseSynopsisMarkdown,
+  SYNOPSIS_FILE,
   SYNOPSIS_LABEL,
   type SynopsisDoc,
 } from "../core/synopsisDoc";
+import { hasUnsavedOpenDocument } from "../core/openDocumentEdit";
+import { logFailure, useLogFile } from "../core/logger";
 import { buildSynopsisListMarkdown } from "../core/synopsisMarkdown";
 import { loadSynopsisChapterMarks } from "../core/synopsisChapters";
 import { buildEmotionCurveMarkdown } from "../core/emotionCurve";
@@ -216,13 +219,45 @@ async function applyToEpisodeSynopsis(
 
   // 読み物の側（synopsis.md）も追随させる。作らないと、
   // 開いた文書には古いあらすじが出たままになる
-  try {
-    await applyToSynopsisDoc(work, (current) => current);
-  } catch {
-    // 読み物を作り直せなくても、あらすじ本体は保存済み
-  }
+  await refreshSynopsisDocAfterEpisodeEdit(work);
   return "設定/chapter_synopses.json";
 }
+
+/**
+ * 各話あらすじを書き換えたあと、読み物（synopsis.md）を作り直す。**作れなければ知らせる。**
+ *
+ * あらすじ本体（`chapter_synopses.json`）はもう保存してあるので、ここで投げない（投げると相談パネルが
+ * 「書き込めませんでした」と出し、取り消しの道も消える）。ただし 0.107.12 までのように黙って捨てると、
+ * synopsis.md が未保存のとき読み物だけが古いまま残り、作者は気づけない（書く口が未保存なら止まるように
+ * なったので、起きやすくなった）。作り直す操作を1つ示す（実装ルール5）——［設定資料集出力］は
+ * `refreshSynopsisDoc` で読み物のあらすじ部分だけを差し替え、紹介文は残す。
+ */
+async function refreshSynopsisDocAfterEpisodeEdit(work: WorkEntry): Promise<void> {
+  const target = await settingsFile(work, SYNOPSIS_FILE);
+  // 未保存は書く口でも断られるが、先に見て作者向けの言い方で知らせる
+  if (hasUnsavedOpenDocument(target)) {
+    void vscode.window.showWarningMessage(
+      `${SYNOPSIS_LABEL}に保存していない変更があるので、各話あらすじの部分を作り直していません。` +
+        `保存してから［${REGENERATE_SYNOPSIS_DOC_COMMAND}］で作り直せます。`
+    );
+    return;
+  }
+  try {
+    await applyToSynopsisDoc(work, (current) => current);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    // 記録はこの作品のログへ（呼び手が向けていても、ここで向け直して取り違えない）
+    useLogFile(work.folderPath);
+    logFailure("各話あらすじの読み物の作り直し", { 詳細: detail });
+    void vscode.window.showWarningMessage(
+      `${SYNOPSIS_LABEL}の各話あらすじの部分を作り直せませんでした。${detail}` +
+        `（あらすじ本体は保存済みです。［${REGENERATE_SYNOPSIS_DOC_COMMAND}］で作り直せます）`
+    );
+  }
+}
+
+/** synopsis.md の各話あらすじを作り直す操作の名前（package.json の `novelai.generateSettingsDocs` の題） */
+const REGENERATE_SYNOPSIS_DOC_COMMAND = "設定資料集出力";
 
 async function buildEpisodeSection(
   work: WorkEntry
