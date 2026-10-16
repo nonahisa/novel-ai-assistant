@@ -490,7 +490,7 @@ function renderActions(row) {
     if (row.canConsult) {
       buttons.push(
         '<button class="done" data-act="consult" data-key="' + key +
-          '" title="何が引っかかっているかと、その箇所の言い換え例を、この行のすぐ下に短く出します（推敲に割り当てたAIを使います。本文は変わりません）">AIに相談</button>'
+          '" title="何が引っかかっているかと、その箇所の言い換え例を、この行のすぐ下に短く出します（相談に割り当てたAIを使います。本文は変わりません）">AIに相談</button>'
       );
     }
     buttons.push(
