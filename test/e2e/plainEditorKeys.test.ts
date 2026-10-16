@@ -12,7 +12,7 @@
  * `.md` の「次の問題」は、本体の Markdown の検査（`markdown.validate.enabled`）に
  * 無いファイルへのリンクを見つけさせて作る。
  */
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "vitest";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
@@ -32,6 +32,41 @@ const MD_TEXT = "一行目の文。\n\n[無い話へのリンク](./無い話.md
 
 async function fileText(session: E2ESession, name: string): Promise<string> {
   return (await readFile(path.join(session.manuscriptFolder, name), "utf8")).replace(/\r\n/g, "\n");
+}
+
+/**
+ * Ctrl+S を押し、保存の書き込みが**終わるまで**待つ。
+ *
+ * **VS Code 本体の保存は、ファイルをいったん空にしてから書く**（一時ファイルを経ない）。
+ * 書いている途中に読むと空の中身が返る。母艦（0.107.14、1.141.0、2026-10-16）で、CPU を
+ * 8本回した負荷の下では5回中2〜3回、保存の直後に読んだ .txt が `""` で「保存しても
+ * ファイルは変わらない」が崩れた（全件の走りで1回落ちたのもこれ。単独では書き込みが
+ * 一瞬で終わり、読む刻みに当たらない）。空の中身は落ちたあとには残っておらず、製品は保存の
+ * 前に本文を書き換えない（`onWillSaveTextDocument` を持たない）ので、本体の書き込みの途中を読んだもの。
+ *
+ * そこで「保存がファイルに届いた（更新時刻が進んだ）」→「中身が空でなく、続けて読んでも
+ * 同じ」の2段を名乗って待つ。中身の正しさは、待ったあとに呼び手が確かめる
+ */
+async function saveAndSettle(session: E2ESession, name: string, label: string): Promise<void> {
+  const file = path.join(session.manuscriptFolder, name);
+  const before = (await stat(file)).mtimeMs;
+  await session.page.keyboard.press("Control+KeyS");
+  await waitUntil(async () => (await stat(file)).mtimeMs > before, `Ctrl+S の保存が${label}のファイルに届く`, 10_000);
+  let last = "";
+  let same = 0;
+  await waitUntil(
+    async () => {
+      const now = await fileText(session, name);
+      same = now !== "" && now === last ? same + 1 : 0;
+      last = now;
+      return same >= 3;
+    },
+    `${label}の保存の書き込みが終わる`,
+    10_000
+  ).catch((error: Error) => {
+    error.message += `［最後に読めた中身 ${JSON.stringify(last)}］`;
+    throw error;
+  });
 }
 
 /**
@@ -116,8 +151,8 @@ test("素のテキストエディターと .md では、Ctrl+/ と F8 が本体�
         2_000
       );
       expect((await textEditorCursor(page))?.line, "素の .txt で F8 がメモの行へ飛びました").toBe(1);
-      await page.keyboard.press("Control+KeyS");
-      await holdsFor(async () => (await fileText(session, TXT)) === TXT_TEXT, "保存しても素の .txt のファイルは変わらない", 1_000);
+      await saveAndSettle(session, TXT, "素の .txt");
+      expect(await fileText(session, TXT), "保存したら素の .txt のファイルが変わりました").toBe(TXT_TEXT);
 
       // ── .md（素のエディター）：Ctrl+/ で <!-- --> の行コメント、F8 で次の問題 ──
       await openPlain(session, MD, "一行目の文");
@@ -127,11 +162,7 @@ test("素のテキストエディターと .md では、Ctrl+/ と F8 が本体�
         ".md で Ctrl+/ を押すと1行目が <!-- --> で囲まれる",
         5_000
       );
-      await page.keyboard.press("Control+KeyS");
-      await waitUntil(
-        async () => (await fileText(session, MD)).startsWith("<!--"),
-        ".md の行コメントがファイルに入る"
-      );
+      await saveAndSettle(session, MD, ".md");
       expect((await fileText(session, MD)).split("\n")[0]).toMatch(/^<!--\s*一行目の文。\s*-->$/);
 
       // 本体の Markdown の検査が「無いファイルへのリンク」を問題に挙げるまで、F8 を押して待つ
