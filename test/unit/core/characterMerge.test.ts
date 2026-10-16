@@ -475,6 +475,9 @@ describe("登場人物マージ", () => {
     const first = mergeExtractedCharacters([existing], [
       { data: { name: "灯", summary: "旅の商人", evidence: "行商の荷" }, chapters: [7] },
     ]);
+    // 根拠つきの値が1つ届いただけでは、既存の紹介を書き換えない（実機確認リスト「既にある紹介が、
+    // そのまま残っているか」の裏づけ。畳むのは話数の分かる値が2つ揃ってから）
+    expect(first.characters[0].summary).toBe("村の薬師");
     const second = mergeExtractedCharacters(first.characters, [
       { data: { name: "灯", summary: "王都の騎士", evidence: "騎士団の紋" }, chapters: [12] },
     ]);
