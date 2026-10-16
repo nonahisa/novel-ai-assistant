@@ -34,6 +34,10 @@ const state = vi.hoisted(() => ({
   /** 本命の処理済みの答え */
   settledAnswer: { contradictions: [] as unknown[] },
   logged: [] as string[],
+  /** モデルの申告の大きさ。抑制版（strict）を送るかがこれで決まる */
+  parameterSize: "31B",
+  /** 検証の答えの控えを引いたときの鍵の版（裁定⑧） */
+  verifyKeyVersions: [] as string[],
 }));
 
 vi.mock("../../../src/ai/registry", () => ({
@@ -64,7 +68,7 @@ vi.mock("../../../src/features/chunkSettings", async (importOriginal) => ({
     id: "test-model",
     displayName: "test-model",
     contextWindow: 32768,
-    parameterSize: "31B",
+    parameterSize: state.parameterSize,
     capabilities: [],
     tier: "high",
   })),
@@ -125,8 +129,9 @@ vi.mock("../../../src/core/settingsAsOf", async (importOriginal) => ({
 vi.mock("../../../src/core/chunkCache", () => ({
   ChunkCache: class {
     async load() {}
-    get(_hash: string, key: { feature: string }) {
+    get(_hash: string, key: { feature: string; promptVersion?: string }) {
       if (key.feature === "contradiction_verify") {
+        state.verifyKeyVersions.push(key.promptVersion ?? "");
         return state.verifyCached
           ? JSON.stringify({ verdict: "採用", reason: "", explanation: "", confidence: "high" })
           : undefined;
@@ -188,6 +193,8 @@ beforeEach(() => {
   state.verifyCached = false;
   state.settledAnswer = { contradictions: [] };
   state.logged = [];
+  state.parameterSize = "31B";
+  state.verifyKeyVersions = [];
   declineDialogs();
   Object.assign(window, {
     createOutputChannel: () => ({
@@ -294,5 +301,50 @@ describe("何も残っていないとき", () => {
 
     expect(confirms()).toEqual([]);
     expect(state.sent).toEqual([]);
+  });
+});
+
+/**
+ * 検証の段の答えの控えの鍵（作者の裁定⑧、2026-10-16）。小さいモデルへは
+ * 却下の理由を5つにした形を送るが、版（1.1）は上げず、鍵の `strict:` の印で
+ * 分ける。印が無いと、大きいモデルで作った却下を小さいモデルが使い回す
+ * （逆も）。大きいモデルの鍵は前と同じなので、作者の控えは作り直しにならない
+ */
+describe("検証の控えの鍵（裁定⑧）", () => {
+  beforeEach(() => {
+    state.cachedFeatures = new Set(["contradiction_check", "contradiction_future"]);
+    state.settledAnswer = {
+      contradictions: [
+        {
+          line: 1,
+          excerpt: "文佳は城の門をくぐった。",
+          settingSays: "文佳は侍女",
+          textSays: "文佳は城の門をくぐった",
+          category: "人物",
+          note: "",
+        },
+      ],
+    };
+  });
+
+  test("小さいモデル（8B）の鍵には strict: の印が付く", async () => {
+    state.parameterSize = "8B";
+
+    await checkContradictions(work, registry);
+
+    expect(state.verifyKeyVersions.length).toBeGreaterThan(0);
+    for (const version of state.verifyKeyVersions) {
+      expect(version).toMatch(/^1.1:strict:/);
+    }
+  });
+
+  test("大きいモデル（31B）の鍵は印なしのまま（前と同じ鍵）", async () => {
+    await checkContradictions(work, registry);
+
+    expect(state.verifyKeyVersions.length).toBeGreaterThan(0);
+    for (const version of state.verifyKeyVersions) {
+      expect(version).toMatch(/^1.1:/);
+      expect(version).not.toContain("strict:");
+    }
   });
 });

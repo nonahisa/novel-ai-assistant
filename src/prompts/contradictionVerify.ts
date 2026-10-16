@@ -31,6 +31,16 @@
 //      却下した（10-10 の1回目）。設定に無い語尾や、丁寧さの段（お嬢様言葉・丁寧語・
 //      敬語）の違いは、変わり型ではなく食い違いとして残す、を6の但し書きと
 //      【採用すべき場合】に書いた（`VERIFY_SPEECH_NOTE`）。
+//
+// **小さいモデル（検出の段で抑制版を送るモデル）向けの形を足したが、版は 1.1 のまま
+// 据え置いた**（作者の裁定⑧、2026-10-16。`smallModel`・`verifyRejectReasonsFor`）。
+// 「この設定が分かる話」が引けないときは「（不明）」と書かず、却下の理由から
+// 「まだ明かされていない」を外して5つにする。e4b は台Bの検出の段で仕込み2件
+// （ギプスの左右・ほくろの左右）を2回とも挙げていたのに、この段が「（不明）」を
+// 「設定が不明」と読んで「まだ明かされていない」で取り下げていた。
+// **大きいモデルへの文面は1文字も変えていない**ので、版を上げると作者のクラウドAIの
+// 検証の控えまで道連れで作り直しになる。**どちらの形を送ったかは、製品の控えの鍵の
+// `strict:` の印で分ける**（`contradictionVerifyPromptVersion`。0.70.8 の抑制版と同じやり方）
 export const CONTRADICTION_VERIFY_VERSION = "1.1";
 
 /**
@@ -117,11 +127,74 @@ export interface ContradictionVerifyInput {
    * いない」を疑う。
    */
   settingKnownAt: string;
+  /**
+   * **小さいモデル（検出の段で抑制版を送るモデル）向けの形にするか**（裁定⑧。版は 1.1 のまま）。
+   * 省けば大きいモデルの形（1.1 と同じ文面）。
+   *
+   * 検出の段の抑制（`ai/capability.ts` の `suppressUncertainContradictions`、
+   * MCP の `suppression: "strict"`）と一対で決める。
+   */
+  smallModel?: boolean;
+}
+
+/**
+ * 「この設定が分かる話」が引けなかったときの書き方（小さいモデル向け、裁定⑧）。
+ *
+ * 大きいモデルの形は「（不明）」のまま。e4b はこれを「設定が不明」「この時点では
+ * 判断できない」と読み、台Bで2回とも挙げた仕込み（ギプスの左右・ほくろの左右）を
+ * 「まだ明かされていない」で取り下げた（2026-10-16）。索引は値が完全に一致する
+ * ときしか話数を返さないので、実データではほぼ常にここに来る。
+ */
+export const VERIFY_KNOWN_AT_NONE_SMALL =
+  "記録なし（この話より後で明かされる設定だという記録はありません）";
+
+/** 却下の理由ごとの説明（【却下すべき場合】の各項目。番号は組むときに振る） */
+const REJECT_REASON_TEXTS: Record<VerifyRejectReason, string> = {
+  まだ明かされていない: `**まだ明かされていない** … その設定が対象の話より後で明かされる場合。
+   この時点の登場人物や読者が知らないことは、書かれていなくて当然です。
+   **触れていないだけなら矛盾ではありません。**`,
+  発言者の誤り: `**発言者の誤り** … 食い違っているのが登場人物の発言であり、
+   その人物が知らない・思い違いをしている・偽っている可能性がある場合。`,
+  作中の変化: `**作中の変化** … 時間の経過で変わったこと（成長、進学、退職、負傷など）。
+   **人物の身の上が先へ進むのは矛盾ではありません。**`,
+  設定が古い: "**設定が古い** … 本文のほうが新しく、設定資料が追いついていない場合。",
+  引用が本文と違う:
+    "**引用が本文と違う** … 上の「該当箇所の前後」に、引用した文が見当たらない場合。",
+  そもそも食い違っていない: `**そもそも食い違っていない** … 読み違いで、両立する場合。
+   ただし、口調の指摘では、${VERIFY_SPEECH_NOTE}`,
+};
+
+/**
+ * この頼みで選ばせる却下の理由（裁定⑧）。
+ *
+ * **小さいモデルで、話数の記録が無いときは「まだ明かされていない」を並べない。**
+ * 裁定⑧の最初の案（「記録なしのときは選ばないで」と但し書きを足す）では、e4b は
+ * 但し書きを読んだうえで「後続の話で明かされる可能性があり」と書いて同じ理由を
+ * 選び続けた（台B、2026-10-16）。選べる形で置いておくと、迷ったときの逃げ道に
+ * なる。話数の記録があるとき・大きいモデルでは、6つとも並べる（1.1 と同じ）。
+ *
+ * それでもこの理由を返してきたら、決められた語なので却下として受け取る
+ * （`parseVerifyOutcome`）。守り（`guardNotYetRevealed`）のように読み取りで
+ * 覆すと、e4b では誤検出だけが戻った（2026-10-16 の測定）。
+ */
+export function verifyRejectReasonsFor(input: {
+  settingKnownAt: string;
+  smallModel?: boolean;
+}): readonly VerifyRejectReason[] {
+  if (!(input.smallModel ?? false) || input.settingKnownAt) return VERIFY_REJECT_REASONS;
+  return VERIFY_REJECT_REASONS.filter((reason) => reason !== "まだ明かされていない");
 }
 
 export function buildContradictionVerifyPrompt(
   input: ContradictionVerifyInput
 ): string {
+  const small = input.smallModel ?? false;
+  const knownAt =
+    input.settingKnownAt || (small ? VERIFY_KNOWN_AT_NONE_SMALL : "（不明）");
+  const reasons = verifyRejectReasonsFor(input);
+  const reasonItems = reasons
+    .map((reason, index) => `${index + 1}. ${REJECT_REASON_TEXTS[reason]}`)
+    .join("\n");
   return `次の指摘が、本当に矛盾かどうかを判断してください。
 
 【対象の話】${input.chapterLabel}
@@ -134,22 +207,12 @@ ${input.contextWithLineNumbers}
 - 引用: ${input.excerpt}
 - 設定では: ${input.settingSays}
 - 本文では: ${input.textSays}
-- この設定が分かる話: ${input.settingKnownAt || "（不明）"}
+- この設定が分かる話: ${knownAt}
 
 【却下すべき場合】
 次のどれかに当てはまるなら、矛盾ではありません。
 
-1. **まだ明かされていない** … その設定が対象の話より後で明かされる場合。
-   この時点の登場人物や読者が知らないことは、書かれていなくて当然です。
-   **触れていないだけなら矛盾ではありません。**
-2. **発言者の誤り** … 食い違っているのが登場人物の発言であり、
-   その人物が知らない・思い違いをしている・偽っている可能性がある場合。
-3. **作中の変化** … 時間の経過で変わったこと（成長、進学、退職、負傷など）。
-   **人物の身の上が先へ進むのは矛盾ではありません。**
-4. **設定が古い** … 本文のほうが新しく、設定資料が追いついていない場合。
-5. **引用が本文と違う** … 上の「該当箇所の前後」に、引用した文が見当たらない場合。
-6. **そもそも食い違っていない** … 読み違いで、両立する場合。
-   ただし、口調の指摘では、${VERIFY_SPEECH_NOTE}
+${reasonItems}
 
 【採用すべき場合】
 **両方が同時に成り立たないときだけ**です。とくに、
@@ -163,7 +226,7 @@ ${input.contextWithLineNumbers}
 
 {
   "verdict": "採用" または "却下",
-  "reason": "却下のときは ${VERIFY_REJECT_REASONS.join(" / ")} のどれか1つ。採用のときは空文字",
+  "reason": "却下のときは ${reasons.join(" / ")} のどれか1つ。採用のときは空文字",
   "explanation": "そう判断した理由（60字以内）",
   "confidence": "high|medium|low"
 }`;

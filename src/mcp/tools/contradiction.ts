@@ -863,6 +863,11 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
   speechNote: string;
   /** 材料の予算と、それを決めた読める長さ（`MaterialBudget`） */
   materialBudget: MaterialBudget;
+  /**
+   * 抑制の強さ。検証の段（P-12b 1.1 の抑制版、裁定⑧）も同じ値で小さいモデル向けの形に切り替える
+   * （送る段と検証の段で、別々に決めない）
+   */
+  suppression: Suppression;
 } {
   const contextWindow = contextWindowOf(input.contextWindow);
   const budget = materialBudgetOf(contextWindow, "given");
@@ -955,6 +960,7 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
     speechCheck,
     speechNote: speechNoteFor(speechCheck),
     materialBudget: budget,
+    suppression,
   };
 }
 
@@ -1305,6 +1311,8 @@ async function verifyContradictionResults(
             chunk,
             issue,
             settingKnownAt: describeKnownAt(settings.knownAt, issue.settingSays),
+            // 小さいモデル（strict）へは、話数の記録が無いときの書き方を変える（P-12b 1.1 の抑制版、裁定⑧）
+            smallModel: prompts.suppression === "strict",
           }),
           schema: CONTRADICTION_VERIFY_SCHEMA,
           temperature,

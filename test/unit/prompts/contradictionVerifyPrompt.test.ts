@@ -5,6 +5,8 @@ import {
   VERIFY_REJECT_REASONS,
   VERIFY_SPEECH_KEEP_SENTENCES,
   VERIFY_SPEECH_NOTE,
+  VERIFY_KNOWN_AT_NONE_SMALL,
+  verifyRejectReasonsFor,
 } from "../../../src/prompts/contradictionVerify";
 
 /**
@@ -27,7 +29,12 @@ const prompt = buildContradictionVerifyPrompt({
 });
 
 describe("P-12b の頼み方（1.1）", () => {
-  it("版を 1.1 に上げた（控えの鍵が変わり、1.0 の却下を使い回さない）", () => {
+  /**
+   * 1.0→1.1 で上げた（控えの鍵が変わり、1.0 の却下を使い回さない）。裁定⑧の
+   * 小さいモデル向けの形は、大きいモデルの文面を変えないので版を据え置き、
+   * 製品の鍵の `strict:` の印で分ける（`contradictionVerifyPromptVersion`）
+   */
+  it("版は 1.1（裁定⑧の小さいモデル向けの形では上げない）", () => {
     expect(CONTRADICTION_VERIFY_VERSION).toBe("1.1");
   });
 
@@ -75,5 +82,60 @@ describe("P-12b の頼み方（1.1）", () => {
     for (const sentence of VERIFY_SPEECH_KEEP_SENTENCES) {
       expect(VERIFY_SPEECH_NOTE).toContain(sentence);
     }
+  });
+});
+
+/**
+ * P-12b 1.1 の抑制版（作者の裁定⑧、2026-10-16）。e4b は台Bの検出の段で仕込み2件
+ * （ギプスの左右・ほくろの左右）を挙げていたのに、検証の段が「この設定が分かる話:
+ * （不明）」を「設定が不明」と読み、「まだ明かされていない」で取り下げた。
+ * 小さいモデルにだけ、記録が無いことを「設定が不明」と読めない言い方で伝え、
+ * 記録が無いときは「まだ明かされていない」を却下の理由に並べない。
+ */
+describe("P-12b の頼み方（1.1 の抑制版、小さいモデル向け）", () => {
+  const base = {
+    chapterLabel: "第4話",
+    contextWithLineNumbers: "1: 右足のギプスが外れたのは、十一月の最初の月曜だった。",
+    excerpt: "右足のギプスが外れたのは、十一月の最初の月曜だった。",
+    settingSays: "第2話で左の足首を折った",
+    textSays: "右足のギプスが外れた",
+    category: "状態",
+    settingKnownAt: "",
+  };
+  const small = buildContradictionVerifyPrompt({ ...base, smallModel: true });
+  const large = buildContradictionVerifyPrompt(base);
+
+  it("大きいモデル（指定なし）の文面は 1.1 のまま：（不明）と書き、理由は6つ", () => {
+    expect(large).toContain("- この設定が分かる話: （不明）");
+    expect(large).not.toContain(VERIFY_KNOWN_AT_NONE_SMALL);
+    expect(large).toContain("1. **まだ明かされていない**");
+    expect(large).toContain("6. **そもそも食い違っていない**");
+    expect(large).toContain(`却下のときは ${VERIFY_REJECT_REASONS.join(" / ")} のどれか1つ`);
+    expect(buildContradictionVerifyPrompt({ ...base, smallModel: false })).toBe(large);
+  });
+
+  it("小さいモデルには「（不明）」と書かず、記録が無いことを言う", () => {
+    expect(small).not.toContain("（不明）");
+    expect(small).toContain(`- この設定が分かる話: ${VERIFY_KNOWN_AT_NONE_SMALL}`);
+    expect(VERIFY_KNOWN_AT_NONE_SMALL).not.toContain("不明");
+  });
+
+  /**
+   * 最初の案（「記録なしのときは選ばないで」と但し書きを足す）は、e4b が
+   * 但し書きを読んだうえで同じ理由を選び続けた。選べる形で置かない。
+   */
+  it("小さいモデルで話数の記録が無ければ、「まだ明かされていない」を並べない", () => {
+    expect(small).not.toContain("まだ明かされていない");
+    expect(small).toContain("1. **発言者の誤り**");
+    expect(small).toContain("5. **そもそも食い違っていない**");
+    expect(small).not.toContain("6. ");
+    expect(verifyRejectReasonsFor({ settingKnownAt: "", smallModel: true })).toHaveLength(5);
+  });
+
+  it("話数が引けたときは、小さいモデルでもその話数を書き、理由は6つとも並べる", () => {
+    const known = buildContradictionVerifyPrompt({ ...base, settingKnownAt: "第7話", smallModel: true });
+    expect(known).toContain("- この設定が分かる話: 第7話");
+    expect(known).toContain("1. **まだ明かされていない**");
+    expect(known).toBe(buildContradictionVerifyPrompt({ ...base, settingKnownAt: "第7話" }));
   });
 });
