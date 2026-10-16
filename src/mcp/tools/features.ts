@@ -273,7 +273,7 @@ const OPTIONS_TABLE =
   "fromExtract: true なら、抽出の貯めから保存する予定の新しい人物が対象（validate の stash で、保存の前のまとめとして貯まる）。" +
   "chapter: nameOnly。" +
   "catchphrase: blurb・rejected。" +
-  "announce: filePath※（告知する話）と、合本なら chapter（生成だけで投稿しない）。";
+  "announce: filePath※（告知する話）と、合本なら chapter（生成だけで投稿しない。検算を通った X用の本文は、製品と同じく前に出した告知の履歴へ足す）。";
 
 const OPTIONS_SEE_RUN =
   "feature ごとの追加の指定。中身は novel.run の options と同じです。";

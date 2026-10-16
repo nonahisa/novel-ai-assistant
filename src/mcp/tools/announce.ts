@@ -20,6 +20,8 @@ import {
 } from "../../core/announcement";
 import {
   ANNOUNCEMENT_HISTORY_SUBPATH,
+  formatAnnouncementHistory,
+  mergeAnnouncementHistory,
   parseAnnounceConfig,
   parseAnnouncementHistory,
 } from "../../core/announceConfig";
@@ -53,17 +55,22 @@ import { runOnce, validateWith, type RunnerInput } from "./run";
  * 更新告知文（P-30。設計書6.41）を外から呼ぶ（2026-10-16 の棚卸しの9件目）。
  *
  * **生成だけで、公開は作者。** 告知文はSNSや活動報告へ貼るもので、貼るのは作者である。
- * ここは告知文の案を返すだけで、Xの投稿画面も開かず、作品フォルダーにも書かない。
+ * ここは告知文の案を返すだけで、Xの投稿画面も開かない。作品フォルダーへ書くのは
+ * **前に出した告知の履歴**（`.aiwriter/cache/announcements.json`）の1つだけ。
  *
  * **材料は製品の［更新SNS告知文作成］と同じ**（その話の本文・作品紹介文・前の話の
  * あらすじ・前に出した告知・狙いの読者）。読み方も製品と同じ関数を通す
  * （`splitEpisodeBodyParts`・`parseSynopsisMarkdown`・`parseAnnounceConfig`・
  * `parseAnnouncementHistory`）。
  *
- * 製品と違う点（どちらも黙らずに返す）：
- * - **前に出した告知の履歴へ足さない。** 製品は作った告知を（採用に関わらず）履歴へ
- *   足し、次の告知で同じ言い回しを避けさせる。MCP は作品フォルダーに書かない
- *   （6.87.7）ので、読むだけにする
+ * **履歴へも製品と同じく足す**（作者の裁定 2026-10-16 夜の2）。製品は作った告知を
+ * 採用に関わらず履歴へ足し、次の告知で同じ言い回しを避けさせる。外部AIの告知だけ
+ * 足さないと、外で作った言い回しを次の告知（製品でも外でも）が繰り返す。足すのは
+ * 検算（`announceValidate`）を通った答えだけで、足し方は製品と同じ
+ * `mergeAnnouncementHistory`。履歴はキャッシュの置き場（同期しない・作り直せる）で、
+ * 原稿・設定資料には触れない
+ *
+ * 製品と違う点（黙らずに返す）：
  * - **本文を切らない。** 製品はモデルの読める長さから本文の予算を決めて切る。
  *   MCP の各話あらすじ（synopsis）と同じく、その話の本文をまるごと渡す
  *
@@ -159,13 +166,40 @@ function readPreviousSynopsis(folder: string, chapter: number | null): string {
   }
 }
 
-/** 前に出した告知（`.aiwriter/cache/announcements.json`）。**読むだけ**（足さない） */
+function announcementHistoryFileOf(folder: string): string {
+  return nodePath.join(nodePath.resolve(folder), AIWRITER_DIR, ...ANNOUNCEMENT_HISTORY_SUBPATH);
+}
+
+/** 前に出した告知（`.aiwriter/cache/announcements.json`）。読めなければ空（製品と同じ） */
 function readPastAnnouncements(folder: string): string[] {
-  const file = nodePath.join(nodePath.resolve(folder), AIWRITER_DIR, ...ANNOUNCEMENT_HISTORY_SUBPATH);
   try {
-    return parseAnnouncementHistory(decodeBytes(fs.readFileSync(file)).text);
+    return parseAnnouncementHistory(decodeBytes(fs.readFileSync(announcementHistoryFileOf(folder))).text);
   } catch {
     return [];
+  }
+}
+
+/**
+ * 検算を通った告知（X用の本文）を履歴へ足す（作者の裁定 2026-10-16 夜の2）。
+ * **足し方とファイルの形は製品と同じ関数**（`mergeAnnouncementHistory`・
+ * `formatAnnouncementHistory`）。
+ *
+ * **書けなくても告知文は返す**（製品も履歴の失敗で機能を止めない）。ただ黙らずに、
+ * 足せたかどうかを返す。一時ファイルへ書いてから置き換えるのは、ほかの貯め場所
+ * （`synopsisStash.ts`）と同じ。プロセス番号は、MCPサーバーが2つ動いていても
+ * 一時ファイルがぶつからないようにするため
+ */
+function addToAnnouncementHistory(folder: string, text: string): boolean {
+  const file = announcementHistoryFileOf(folder);
+  try {
+    const merged = mergeAnnouncementHistory(readPastAnnouncements(folder), [text]);
+    fs.mkdirSync(nodePath.dirname(file), { recursive: true });
+    const temporary = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(temporary, formatAnnouncementHistory(merged), "utf8");
+    fs.renameSync(temporary, file);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -236,6 +270,9 @@ export function announceValidate(input: AnnouncePromptInput & { response: string
   });
   // **注意が出ても切り詰めない**（製品と同じ）。直すかどうかは作者が決める
   const warnings = validateAnnouncement(parsed, composedX);
+  // **採用したかどうかに関わらず覚える**（製品と同じ。目的は同じ言い回しを避けること）。
+  // 足すのは製品と同じく X用の本文（定型句・タグ・URLを足す前のもの）
+  const historyAdded = addToAnnouncementHistory(input.folder, parsed.xPost);
   return {
     episodeLabel: episode.label,
     /** X用の投稿（話の見出し・ハッシュタグ・URLまで足したもの） */
@@ -253,12 +290,16 @@ export function announceValidate(input: AnnouncePromptInput & { response: string
     readerLabels: findReaderTypeLabels(
       [parsed.xPost, parsed.activityReport, parsed.afterword].join("\n")
     ),
+    /** 前に出した告知の履歴（`.aiwriter/cache/announcements.json`）へ足せたか */
+    historyAdded,
     note:
-      "告知文の案です。何も書き換えず、投稿もしていません（貼るのは作者です）。" +
+      "告知文の案です。原稿も設定資料も書き換えず、投稿もしていません（貼るのは作者です）。" +
       (config.workUrl
         ? ""
         : "作品URLが未設定なので、X用の末尾は {URL} の目印のままです（作者が貼るときに差し替えます）。") +
-      "前に出した告知の履歴へは足していません（製品の［更新SNS告知文作成］は足します）。",
+      (historyAdded
+        ? "X用の本文は、製品の［更新SNS告知文作成］と同じく前に出した告知の履歴へ足しました（次の告知で同じ言い回しを避けます）。"
+        : "前に出した告知の履歴へは足せませんでした（告知文はそのまま使えます）。"),
   };
 }
 

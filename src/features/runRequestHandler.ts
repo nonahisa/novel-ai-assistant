@@ -40,6 +40,7 @@ import {
 } from "../core/runRequest";
 import { paidUsageLines } from "../core/paidUsageNotice";
 import { VECTOR_INDEX_VERSION } from "../core/vectorIndexFormat";
+import type { PdfExportPlanLines } from "../core/pdfExportConfig";
 
 /**
  * 外部AIから頼まれた実行を受ける（設計書6.87.22）。
@@ -150,11 +151,17 @@ export interface RunRequestHandlerDeps<W extends RunWork = RunWork> {
  * （渡す側は `features/runRequestRunners.ts`）。
  */
 export interface RunExportDeps<W extends RunWork = RunWork> {
-  /** 書き出せるか（本文があるか）と、確認に出す話の数。**本文は読まない** */
+  /**
+   * 書き出せるか（本文があるか）と、確認に出す話の数。**本文は読まない**。
+   * PDF なら使う紙・向き・範囲も（前回の［PDF出力］の設定。作者の裁定 2026-10-16 夜の3）
+   */
   inspect(
     work: W,
     feature: RunExportFeature
-  ): Promise<{ ok: true; episodeCount: number } | { ok: false; reason: string; nextAction?: string }>;
+  ): Promise<
+    | { ok: true; episodeCount: number; pdfPlan?: PdfExportPlanLines }
+    | { ok: false; reason: string; nextAction?: string }
+  >;
   /** 書き出す。作れたら結果の1行 */
   run(
     work: W,
@@ -868,6 +875,7 @@ async function handleExportRequest<W extends RunWork>(
     ticket,
     workTitle: work.title,
     episodeCount: inspected.episodeCount,
+    pdfPlan: inspected.pdfPlan,
   });
   if (!(await deps.confirm(confirm.message, confirm.detail, "作る"))) {
     await deps.writeState(stateOf(ticket, "declined", deps.now()));

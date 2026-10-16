@@ -82,7 +82,7 @@ export const RUN_REQUEST_INPUT = {
         `、${RUN_INDEX_FEATURE}＝${RUN_INDEX_LABEL}（手元の Ollama で検索用の索引を作る・更新する。料金なし。novel.search で引く）` +
         `、${RUN_COVER_FEATURE}＝作者の VS Code の EPUBエディターで表紙を焼く（AIを呼ばない。cover が要る。字の向きは cover.ink で測る）` +
         `、${RUN_TEST_AI_FEATURE}＝${RUN_TEST_AI_LABEL}（作者のAI設定のAIへ短い文を1回だけ送り、いま生成できるかを返す。本文は送らない。ほかの依頼の前に使える）` +
-        "、exportPdf＝印刷用のファイル（全話・既定の紙。作者がブラウザで印刷してPDFにする）・exportEpub＝EPUB" +
+        "、exportPdf＝印刷用のファイル（作品の前回の［PDF出力］の紙・向き・範囲。記録が無ければ文庫サイズ・縦書き・全話。作者がブラウザで印刷してPDFにする）・exportEpub＝EPUB" +
         "（どちらもAIを呼ばず、作品の .aiwriter/exports/ に新しいファイルを作るだけ。表紙は焼いてあればそれを使う）。" +
         "settings は検算を通った答えを作品の貯め場所へ貯めるだけで、設定資料への保存は novel.extract.commit で行う"
     ),

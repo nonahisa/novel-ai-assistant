@@ -81,7 +81,7 @@ import {
 } from "./vectorSearch";
 import { withCancellableProgress } from "../views/progress";
 import { bakeCoverForRequest, inspectCoverForRequest } from "./epubEditorPanel";
-import { exportPdfForRequest } from "./exportPdf";
+import { exportPdfForRequest, planPdfExportForRequest } from "./exportPdf";
 import { exportEpubForRequest } from "./exportEpub";
 
 /**
@@ -295,7 +295,19 @@ export function createRunRequestDeps(
       訊く段・ブラウザ・フォルダーを開く知らせを通さずに呼ぶ。新しいファイルを作るだけ
     */
     export: {
-      inspect: async (work) => {
+      inspect: async (work, feature) => {
+        /*
+          PDF は、組むときと同じ関数で紙・向き・範囲を決めて確認の窓に並べる
+          （作者の裁定 2026-10-16 夜の3。前回の［PDF出力］の設定、無ければ文庫・縦書き・全話）。
+          確認は作者が押すまでほかの操作を止めるモーダルなので、押してから組むまでに
+          前回の設定が変わることは、ふつうは無い
+        */
+        if (feature === "exportPdf") {
+          const plan = await planPdfExportForRequest(work);
+          if (!plan.ok) return plan;
+          const scan = await scanWork(work);
+          return { ok: true, episodeCount: scan.episodes.length, pdfPlan: plan.lines };
+        }
         const scan = await scanWork(work);
         return scan.episodes.length === 0
           ? {

@@ -12,7 +12,7 @@ import { announcePromptVersion } from "../../../src/prompts/announce";
  * - 材料は製品の［更新SNS告知文作成］と同じ（その話の本文・紹介文・前の話のあらすじ・
  *   前に出した告知）で、話の見出しも製品と同じ形
  * - 定型句・ハッシュタグ・URLはコードで付け、字数と言葉を製品と同じ検算に通す
- * - **生成だけ**：作品フォルダーに何も書かない（履歴へも足さない）
+ * - **生成だけ**：書くのは前に出した告知の履歴だけ（製品と同じ。作者の裁定 2026-10-16 夜の2）
  */
 
 let folder: string;
@@ -141,7 +141,7 @@ describe("更新告知文（feature: announce）", () => {
     ).toThrow(/読み取れません/);
   });
 
-  test("runner: claude はプロンプトを返すだけで、作品フォルダーに何も書かない（履歴へも足さない）", async () => {
+  test("runner: claude はプロンプトを返すだけで、作品フォルダーに何も書かない", async () => {
     const before = snapshot();
     const result = (await novelRun({
       folder,
@@ -151,7 +151,78 @@ describe("更新告知文（feature: announce）", () => {
     })) as { runner: string; userPrompt: string };
     expect(result.runner).toBe("claude");
     expect(result.userPrompt).toContain("第2話「便り」");
+    novelPrompt({ folder, feature: "announce", filePath: "本文/002_便り.txt" });
+    expect(snapshot()).toEqual(before);
+  });
+
+  /*
+    作者の裁定 2026-10-16 夜の2：外部AIが作った告知文も、製品の画面と同じく
+    前に出した告知の履歴へ足す（採用したかどうかに関わらず。次の告知で同じ
+    言い回しを避けさせるため）。書くのは履歴の1ファイルだけ
+  */
+  test("検算を通った告知文は、前に出した告知の履歴へ足す（履歴のほかは何も変えない）", () => {
+    const before = snapshot();
+    const result = novelValidate({
+      folder,
+      feature: "announce",
+      filePath: "本文/002_便り.txt",
+      response: RESPONSE,
+    }) as { historyAdded: boolean; note: string };
+    expect(result.historyAdded).toBe(true);
+    expect(result.note).toContain("履歴へ足しました");
+
+    const after = snapshot();
+    const historyKey = nodePath.join(".aiwriter", "cache", "announcements.json");
+    // 製品と同じ形（前のものの後ろへ、JSONの配列）
+    expect(JSON.parse(after[historyKey])).toEqual([
+      "前に出した告知の言い回し",
+      "冬の終わり、少年のもとに一通の便りが届く。",
+    ]);
+    // 履歴のほかは1バイトも変わらない
+    delete after[historyKey];
+    const rest = { ...before };
+    delete rest[historyKey];
+    expect(after).toEqual(rest);
+
+    // 次のプロンプトでは、足した告知も避ける対象に入る
+    const prompt = novelPrompt({ folder, feature: "announce", filePath: "本文/002_便り.txt" }) as {
+      userPrompt: string;
+      pastAnnouncementCount: number;
+    };
+    expect(prompt.pastAnnouncementCount).toBe(2);
+    expect(prompt.userPrompt).toContain("冬の終わり、少年のもとに一通の便りが届く。");
+  });
+
+  test("同じ答えを2回検算しても、履歴に2つは並ばない（製品と同じ重ね落とし）", () => {
     novelValidate({ folder, feature: "announce", filePath: "本文/002_便り.txt", response: RESPONSE });
+    novelValidate({ folder, feature: "announce", filePath: "本文/002_便り.txt", response: RESPONSE });
+    const history = JSON.parse(
+      fs.readFileSync(nodePath.join(folder, ".aiwriter", "cache", "announcements.json"), "utf8")
+    ) as string[];
+    expect(history).toEqual(["前に出した告知の言い回し", "冬の終わり、少年のもとに一通の便りが届く。"]);
+  });
+
+  test("履歴がまだ無い作品では作る。製品と同じく直近20件だけを持つ", () => {
+    fs.rmSync(nodePath.join(folder, ".aiwriter", "cache"), { recursive: true, force: true });
+    novelValidate({ folder, feature: "announce", filePath: "本文/002_便り.txt", response: RESPONSE });
+    const file = nodePath.join(folder, ".aiwriter", "cache", "announcements.json");
+    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual([
+      "冬の終わり、少年のもとに一通の便りが届く。",
+    ]);
+
+    write(".aiwriter/cache/announcements.json", Array.from({ length: 20 }, (_, i) => `告知${i}`));
+    novelValidate({ folder, feature: "announce", filePath: "本文/002_便り.txt", response: RESPONSE });
+    const history = JSON.parse(fs.readFileSync(file, "utf8")) as string[];
+    expect(history).toHaveLength(20);
+    expect(history[0]).toBe("告知1");
+    expect(history[19]).toBe("冬の終わり、少年のもとに一通の便りが届く。");
+  });
+
+  test("読み取れない答えは履歴へ足さない", () => {
+    const before = snapshot();
+    expect(() =>
+      novelValidate({ folder, feature: "announce", filePath: "本文/002_便り.txt", response: "告知です" })
+    ).toThrow();
     expect(snapshot()).toEqual(before);
   });
 });
