@@ -3,6 +3,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runTests } from "@vscode/test-electron";
+import {
+  restoreProtocolHandler,
+  snapshotProtocolHandler,
+} from "./protocolHandlerGuard.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -50,6 +54,18 @@ for (const name of Object.keys(process.env)) {
   }
 }
 
+/*
+  試験用の VS Code は起動するたびに自分を vscode:// の受け手として登録し、
+  終わっても戻さない。外部AIの依頼が作者の知らない試験版の窓へ届いてしまう
+  （2026-10-17）。起こす前に控え、終わったら（失敗しても）戻す。
+  Ctrl+C で止めたときは finally を通らないので、そこでも戻してから抜ける
+*/
+const protocolSnapshot = snapshotProtocolHandler();
+process.once("SIGINT", () => {
+  restoreProtocolHandler(protocolSnapshot);
+  process.exit(130);
+});
+
 try {
   await runTests({
     extensionDevelopmentPath: repositoryRoot,
@@ -71,5 +87,6 @@ try {
     ],
   });
 } finally {
+  restoreProtocolHandler(protocolSnapshot);
   await rm(temporaryRoot, { recursive: true, force: true });
 }

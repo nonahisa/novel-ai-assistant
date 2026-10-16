@@ -313,6 +313,38 @@ describe("run.result", () => {
     ).toThrow(McpToolError);
   });
 
+  test("受けた VS Code（版と置き場）を返す。普段の VS Code なら一言は付けない", async () => {
+    const id = await requested();
+    const handledBy = { version: "1.142.0", appRoot: "C:\\Users\\a\\AppData\\Local\\Programs\\Microsoft VS Code\\resources\\app" };
+    writeState(id, { state: "confirming", handledBy });
+    const read = runResult({ folder: work, requestId: id }, deps());
+    expect(read.handledBy).toEqual(handledBy);
+    expect(read.note).toBeUndefined();
+  });
+
+  test(".vscode-test の下で受けたら「試験用の VS Code で受けました」と添える", async () => {
+    // 作者の機械で、試験版が vscode:// の受け手に居座り、確認の窓が作者に見えなかった（2026-10-17）
+    const id = await requested();
+    const handledBy = {
+      version: "1.138.0",
+      appRoot: "C:\\Users\\a\\novel-ai-assistant\\.vscode-test\\vscode-win32-x64-archive-1.138.0\\resources\\app",
+    };
+    writeState(id, { state: "confirming", handledBy });
+    const read = runResult({ folder: work, requestId: id }, deps());
+    expect(read.handledBy).toEqual(handledBy);
+    expect(read.note).toContain("試験用の VS Code で受けました");
+  });
+
+  test("handledBy の無い古い記録・形の崩れた記録でも読める（handledBy は返さない）", async () => {
+    const id = await requested();
+    writeState(id, { state: "running" });
+    expect(runResult({ folder: work, requestId: id }, deps()).handledBy).toBeUndefined();
+    writeState(id, { state: "running", handledBy: { version: 1 } });
+    const read = runResult({ folder: work, requestId: id }, deps());
+    expect(read.status).toBe("running");
+    expect(read.handledBy).toBeUndefined();
+  });
+
   test("知らない依頼番号・形の合わない番号", () => {
     expect(() => runResult({ folder: work, requestId: "0000000000000000" }, deps())).toThrow(/見つかりません/u);
     expect(() => runResult({ folder: work, requestId: "../x" }, deps())).toThrow(McpToolError);

@@ -35,6 +35,7 @@ import {
   type RunFeatureDef,
   type RunResultBody,
   type RunStateKind,
+  type RunHandledBy,
   type RunStateRecord,
   type RunTicket,
 } from "../core/runRequest";
@@ -143,6 +144,12 @@ export interface RunRequestHandlerDeps<W extends RunWork = RunWork> {
   testAi?: RunTestAiDeps;
   /** 書き出し（`exportPdf`・`exportEpub`）の手足。無ければ断る */
   export?: RunExportDeps<W>;
+  /**
+   * 依頼を受けた VS Code（`vscode.version`・`vscode.env.appRoot`）。書く記録すべてに添える。
+   * 試験用の VS Code が `vscode://` の受け手に居座り、依頼が作者の知らない窓へ
+   * 届いたことがある（2026-10-17）。無ければ添えない
+   */
+  handledBy?(): RunHandledBy;
 }
 
 /**
@@ -221,8 +228,9 @@ const HEAD = "外部AIから頼まれた実行を受けませんでした。";
 
 export async function handleRunRequest<W extends RunWork>(
   query: string,
-  deps: RunRequestHandlerDeps<W>
+  rawDeps: RunRequestHandlerDeps<W>
 ): Promise<void> {
+  const deps = withHandledBy(rawDeps);
   /*
     **ブラウザ版では受けない**（規則7、設計書5.8）。`vscode://` がそもそも届かず、
     MCP サーバーも無いので、ここへ来るのは誰かが手で開かせたときだけである。
@@ -941,6 +949,21 @@ async function handleExportRequest<W extends RunWork>(
   deps.log(`外部AIから頼まれた${label}を終えました：${forLog}`);
   // 作者の画面にも一言（どこに作ったか）。フォルダーを開くボタンは出さない（返事を待たない）
   deps.info(`外部AIから頼まれた${label}で、${made.row.filePath} を作りました。原稿は変わっていません。`);
+}
+
+/**
+ * 書く記録すべてに、受けた VS Code を添える。`stateOf` を呼ぶ所（25か所）を1つずつ
+ * 直すと付け忘れが出るので、書く口（`claim`・`writeState`）の側で1回だけ包む
+ */
+function withHandledBy<W extends RunWork>(deps: RunRequestHandlerDeps<W>): RunRequestHandlerDeps<W> {
+  const host = deps.handledBy;
+  if (!host) return deps;
+  const stamp = (state: RunStateRecord): RunStateRecord => ({ ...state, handledBy: host() });
+  return {
+    ...deps,
+    claim: (state) => deps.claim(stamp(state)),
+    writeState: (state) => deps.writeState(stamp(state)),
+  };
 }
 
 function stateOf(

@@ -16,6 +16,10 @@ import {
   validateInstalledExtension,
   validatePackagedManifest,
 } from "./releaseSupport.mjs";
+import {
+  restoreProtocolHandler,
+  snapshotProtocolHandler,
+} from "./protocolHandlerGuard.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -56,6 +60,12 @@ const temporaryBase = path.resolve(tmpdir());
 const auditDirectory = await mkdtemp(
   path.join(temporaryBase, "novel-ai-assistant-vsix-audit-")
 );
+/*
+  隔離インストールは `.vscode-test` の VS Code を CLI として呼ぶだけで、窓は
+  起こさない見込みだが、確かめていないので念のため vscode:// の受け手を控えて
+  戻す（試験用の VS Code が受け手に居座った件。protocolHandlerGuard.mjs）
+*/
+const protocolSnapshot = snapshotProtocolHandler();
 try {
   const vscodeExecutablePath = await downloadAndUnzipVSCode("1.90.0");
   const [codeCommand, ...cliArgs] =
@@ -87,6 +97,7 @@ try {
     `Installed extension: ${validateInstalledExtension(installed, expectedExtension)}`
   );
 } finally {
+  restoreProtocolHandler(protocolSnapshot);
   const resolvedAudit = path.resolve(auditDirectory);
   const safePrefix = `${temporaryBase}${path.sep}`;
   if (

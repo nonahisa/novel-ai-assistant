@@ -28,8 +28,12 @@ import {
   runFeatureLabel,
   type RunFeature,
   formatRunTicket,
+  isRunHandledBy,
   isRunOpen,
   isRunRequestId,
+  isTestVsCodeAppRoot,
+  RUN_TEST_HOST_NOTE,
+  type RunHandledBy,
   isRunStale,
   parseRunState,
   parseRunTicket,
@@ -305,6 +309,10 @@ export interface RunResultOutput {
   result?: RunResultBody;
   errorKind?: string;
   nextAction?: string;
+  /** 依頼を受けた VS Code（版と置き場）。受けた記録が無い・古い記録なら無い */
+  handledBy?: RunHandledBy;
+  /** 試験用の VS Code（`.vscode-test` の下）で受けたときだけの一言 */
+  note?: string;
 }
 
 /**
@@ -338,6 +346,11 @@ export function runResult(
 
   const state = readState(dir, args.requestId);
   const view = runStatusOf(ticket, state, deps.now());
+  // 記録は手で書き換えられうるので、形を確かめてから返す（崩れていれば返さない）
+  const recorded: unknown = state?.handledBy;
+  const handledBy: RunHandledBy | undefined = isRunHandledBy(recorded)
+    ? { version: recorded.version, appRoot: recorded.appRoot }
+    : undefined;
   return {
     requestId: args.requestId,
     status: view.status,
@@ -345,6 +358,8 @@ export function runResult(
     ...(view.status === "done" && state?.result ? { result: state.result } : {}),
     ...(state?.errorKind ? { errorKind: state.errorKind } : {}),
     ...(state?.nextAction ? { nextAction: state.nextAction } : {}),
+    ...(handledBy ? { handledBy } : {}),
+    ...(handledBy && isTestVsCodeAppRoot(handledBy.appRoot) ? { note: RUN_TEST_HOST_NOTE } : {}),
   };
 }
 
