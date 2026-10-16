@@ -144,6 +144,23 @@ describe("検証の結果を伝える", () => {
 
   it("何も無ければ、何も言わない", () => {
     expect(describeVerifyResults([], 0)).toBe("");
+    expect(describeVerifyResults([], 0, 0)).toBe("");
+  });
+
+  // 2026-10-16：裏付けの無い「まだ明かされていない」の却下を通したものは、
+  // 検証は答えている。「検証できず」と言うと起きたことと食い違う
+  it("却下を受け取らずに残したものは、「検証できず」と言わずに理由を言う", () => {
+    const text = describeVerifyResults([], 0, 1);
+    expect(text).not.toContain("検証できず");
+    expect(text).toContain("1件は「まだ明かされていない」の却下に話数の裏付けが無かった");
+    expect(text).toContain("そのまま残しました");
+  });
+
+  it("検証できなかったものと、却下を受け取らなかったものは別々に数える", () => {
+    const text = describeVerifyResults([{ reason: "作中の変化" }], 2, 1);
+    expect(text).toContain("1件を取り下げ");
+    expect(text).toContain("2件は検証できず");
+    expect(text).toContain("1件は「まだ明かされていない」");
   });
 });
 
@@ -299,7 +316,9 @@ describe("「まだ明かされていない」の却下を話数で確かめる�
     ]);
     const guarded = guardNotYetRevealed(notYet, knownAt, "一人称: ボク", 10);
     expect(guarded.keep).toBe(true);
-    expect(guarded.undecided).toBe(true);
+    // 検証は答えているので「検証できなかった」には数えない（文言が変わる）
+    expect(guarded.undecided).toBe(false);
+    expect(guarded.overruled).toBe(true);
     // AIの「一人称の設定が不明」を作者へ見せない（資料には一人称がある）
     expect(guarded.explanation).not.toContain("設定が不明");
   });
@@ -310,7 +329,8 @@ describe("「まだ明かされていない」の却下を話数で確かめる�
     ]);
     const guarded = guardNotYetRevealed(notYet, knownAt, "近衛騎士", 10);
     expect(guarded.keep).toBe(true);
-    expect(guarded.undecided).toBe(true);
+    expect(guarded.undecided).toBe(false);
+    expect(guarded.overruled).toBe(true);
   });
 
   it("対象より後の話で分かる設定なら、却下のまま", () => {

@@ -998,6 +998,8 @@ export async function checkContradictions(
   const rejectedReasons: string[] = [];
   const verifyRejected: Array<{ reason?: VerifyRejectReason }> = [];
   let verifyUndecided = 0;
+  // 検証の却下を、話数の裏付けが無いので受け取らずに残した数（2026-10-16）
+  let verifyOverruled = 0;
   let failedChunks = 0;
   let cancelled = false;
   // 待っても直らない失敗を掴んだら、残りのチャンクは試さない
@@ -1331,6 +1333,7 @@ export async function checkContradictions(
                     )
                   : asked;
               if (outcome.undecided) verifyUndecided++;
+              if (outcome.overruled) verifyOverruled++;
               if (!outcome.keep) {
                 verifyRejected.push({ reason: outcome.reason });
                 log.step(
@@ -1382,7 +1385,11 @@ export async function checkContradictions(
     );
   }
 
-  const verifyNote = describeVerifyResults(verifyRejected, verifyUndecided);
+  const verifyNote = describeVerifyResults(
+    verifyRejected,
+    verifyUndecided,
+    verifyOverruled
+  );
   if (verifyNote) log.step(`矛盾検知の検証: ${verifyNote}`);
   // 意味で足した場面の数。**指摘の根拠になったか、誤検知の種になったかを
   // 後から測る手がかり**（見逃しと誤検出の両方を測る。CLAUDE.md の失敗2）

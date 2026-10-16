@@ -1290,6 +1290,8 @@ async function verifyContradictionResults(
   );
   const verifyRejected: Array<{ reason?: VerifyRejectReason }> = [];
   let undecided = 0;
+  // 却下を受け取らずに残した数（製品と同じく「検証できず」とは分けて言う）
+  let overruled = 0;
 
   const out: ContradictionValidateResult[] = [];
   for (const result of results) {
@@ -1323,6 +1325,7 @@ async function verifyContradictionResults(
         outcome = undecidedOutcome(`検証できませんでした（${describeError(error)}）`);
       }
       if (outcome.undecided) undecided++;
+      if (outcome.overruled) overruled++;
       if (!outcome.keep) {
         verifyRejected.push({ reason: outcome.reason });
         dropped.push({
@@ -1337,7 +1340,7 @@ async function verifyContradictionResults(
     }
     out.push({ ...result, accepted: kept, verifyRejected: dropped });
   }
-  return { results: out, note: describeVerifyResults(verifyRejected, undecided) };
+  return { results: out, note: describeVerifyResults(verifyRejected, undecided, overruled) };
 }
 
 /** 行き先を1つの呼び方に揃える（`runByRunner` は2段に分かれた道を回せない） */

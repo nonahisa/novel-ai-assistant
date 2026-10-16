@@ -26,6 +26,12 @@ export interface VerifyOutcome {
   confidence: "high" | "medium" | "low";
   /** 応答を読めなかったので、判断せず通したか */
   undecided: boolean;
+  /**
+   * 検証は答えたが、**その却下を受け取らずに通した**か（`guardNotYetRevealed`、
+   * 2026-10-16）。`undecided`（検証できなかった）とは別に数える——同じ数に
+   * 入れると、完了の報告が「検証できず」と言い、起きたことと食い違う
+   */
+  overruled?: boolean;
 }
 
 const LEVELS = new Set(["high", "medium", "low"]);
@@ -106,8 +112,9 @@ export const NOT_YET_REVEALED_UNFOUNDED_NOTE =
  * gemma4:26b はこれを「設定が不明」と読んで、正しい指摘を3回とも取り下げた
  * （「第3話」を渡すと3回とも採用。`docs/measurements/2026-10-16-ai-measure.md`）。
  *
- * **判断できなかったものとして通す**（`echoesSpeechKeep` と同じ作法）。消す根拠が
- * 無い却下で、本物の指摘を作者から隠さない。
+ * **却下を受け取らずに通す**（`overruled`）。消す根拠が無い却下で、本物の指摘を
+ * 作者から隠さない。検証は答えているので「検証できなかった」（`undecided`）には
+ * 数えない——完了の報告の言い方が変わる（`describeVerifyResults`）。
  *
  * **答えを覚えた後にかける。** 製品は検証の答えをキャッシュしており、ここを
  * 読み取りのあとに置けば、版を上げなくても前に覚えた却下にも効く。
@@ -125,7 +132,13 @@ export function guardNotYetRevealed(
   if (targetChapter === null) return outcome;
   const chapters = lookupKnownAtValue(knownAt, settingSays);
   if (chapters.some((chapter) => chapter > targetChapter)) return outcome;
-  return undecidedOutcome(NOT_YET_REVEALED_UNFOUNDED_NOTE);
+  return {
+    keep: true,
+    explanation: NOT_YET_REVEALED_UNFOUNDED_NOTE,
+    confidence: "low",
+    undecided: false,
+    overruled: true,
+  };
 }
 
 function normalizeReason(value: string): VerifyRejectReason | undefined {
@@ -143,9 +156,11 @@ function normalizeReason(value: string): VerifyRejectReason | undefined {
  */
 export function describeVerifyResults(
   rejected: ReadonlyArray<{ reason?: VerifyRejectReason }>,
-  undecided: number
+  undecided: number,
+  /** 検証の却下を、裏付けが無いので受け取らずに残した数（`overruled`） */
+  overruled = 0
 ): string {
-  if (rejected.length === 0 && undecided === 0) return "";
+  if (rejected.length === 0 && undecided === 0 && overruled === 0) return "";
 
   const byReason = new Map<string, number>();
   for (const entry of rejected) {
@@ -164,6 +179,12 @@ export function describeVerifyResults(
   if (undecided > 0) {
     // 判断できなかったものは通してある。伏せない
     parts.push(`${undecided}件は検証できず、そのまま残しました`);
+  }
+  if (overruled > 0) {
+    // 検証は答えている。「検証できず」と言うと、起きたことと食い違う
+    parts.push(
+      `${overruled}件は「まだ明かされていない」の却下に話数の裏付けが無かったので、そのまま残しました`
+    );
   }
   return parts.join(" / ");
 }

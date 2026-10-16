@@ -250,6 +250,9 @@ describe("検証の段（P-12b、設計書6.10.5）", () => {
     // AIの「設定が不明」は作者へ見せず、通した理由を書く
     expect(kept[0].note).not.toContain("設定が不明");
     expect(kept[0].note).toContain("まだ明かされていない");
+    // 検証は答えている。完了の報告で「検証できず」と言わない
+    expect(outcome.verifyNote).not.toContain("検証できず");
+    expect(outcome.verifyNote).toContain("話数の裏付けが無かった");
   });
 
   test("claude の道では検証を通せないことを黙らない", async () => {
