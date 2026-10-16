@@ -216,6 +216,9 @@ function fileOf(args: Record<string, unknown> | undefined): string {
       : undefined;
   const candidate = args?.filePath ?? args?.plotPath ?? inOptions;
   if (typeof candidate === "string") return candidate;
+  // 読む口の投稿用の本文（`kind: posting`。2026-10-16）は `file` で話を指す。
+  // 1話をまるごと返す（記録の重さは本文）ので、どの話かを残さないと作者が追えない
+  if (args?.kind === "posting" && typeof args?.file === "string") return args.file;
   /*
     指摘を置いた回（`novel.propose` の `kind: "finding"`）は `chunkId` だけを持つ。
     `本文/001.txt#1-0@3000` の `#` より前がファイル（`parseChunkId` と同じ読み方）

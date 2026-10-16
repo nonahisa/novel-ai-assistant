@@ -634,8 +634,19 @@ describe("novel.read——投稿サイト用（posting）", () => {
     expect(pages.join("\n")).toBe(lines.join("\n"));
   });
 
-  test("記録の重さは本文（1話をまるごと返すため）", () => {
+  test("記録の重さは本文（1話をまるごと返すため）で、どの話かを残す", () => {
     expect(exposureOf("novel.read", { folder: "x", kind: "posting" })).toBe("body");
+    const folder = makeWork("投稿の記録", { allow: ["novel.read"] });
+    recordExternalAccess({
+      tool: "novel.read",
+      args: { folder, kind: "posting", site: "narou", file: "本文/001_灯.txt" },
+      ok: true,
+      result: {},
+    });
+    const log = fs.readFileSync(nodePath.join(folder, ".aiwriter", "history", "external.jsonl"), "utf8");
+    expect(log).toContain('"file":"本文/001_灯.txt"');
+    expect(log).toContain('"exposure":"body"');
+    expect(log).toContain("投稿サイト用の本文を読んだ");
   });
 
   test("執筆量も投稿用も、作品フォルダーに何も書かない", () => {
