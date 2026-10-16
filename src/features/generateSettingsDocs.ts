@@ -291,7 +291,7 @@ export async function generateSettingsDocs(
       writtenFiles.push(SYNOPSIS_FILE);
     } catch (error) {
       /*
-        **ほかの資料の書き出しは止めない**（0.107.13）。synopsis.md は plot.md と同じ書く口
+        **ほかの資料の書き出しは止めない**（2026-10-16）。synopsis.md は plot.md と同じ書く口
         （`rewriteMarkdownFile`）を通るようになり、開いたまま保存していなければ書かずに投げる。
         ここで戻ると、抽出のあとの書き出し（`silent`）まで人物一覧などを作り直さなくなる。
         知らせは待たずに出す（押されるまで書き出しが止まらないように）。

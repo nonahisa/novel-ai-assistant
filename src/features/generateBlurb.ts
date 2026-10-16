@@ -268,7 +268,7 @@ export async function generateWorkBlurb(
   );
   if (answer !== "採用") return;
 
-  await writeAdoptedSynopsis(work, material.workTitle, (current) => ({
+  await writeAdoptedSynopsis(work, material.workTitle, parsed.blurb, (current) => ({
     ...current,
     blurb: parsed.blurb,
   }));
@@ -474,7 +474,7 @@ export async function generateCatchphrases(
     await history.add(
       valid.map((candidate) => candidate.text).filter((item) => item !== text)
     );
-    await writeAdoptedSynopsis(work, material.workTitle, (current) => ({
+    await writeAdoptedSynopsis(work, material.workTitle, text, (current) => ({
       ...current,
       catchphrase: text,
     }));
@@ -675,19 +675,23 @@ async function writeSynopsisDoc(
  * 採用した紹介文・キャッチコピーを書く。書けなければ、その理由を出す。
  *
  * AIの答えはもう出ているので、ここで断るのは「呼んでいる間に作者が打ち始めた」ときだけ
- * （呼ぶ前の確かめは `stopIfSynopsisUnsaved`）
+ * （呼ぶ前の確かめは `stopIfSynopsisUnsaved`）。**採用した文はログに残す**——やり直すと
+ * もう一度AIを呼ぶ（有料なら料金がかかる）ので、書けなかった文を捨てない（実装ルール5）
+ *
+ * @param adopted 作者が採用した紹介文／キャッチコピー（書けなかったときにログへ残す）
  */
 async function writeAdoptedSynopsis(
   work: WorkEntry,
   workTitle: string,
+  adopted: string,
   update: (current: SynopsisDoc) => SynopsisDoc
 ): Promise<void> {
   try {
     await writeSynopsisDoc(work, workTitle, update);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    logFailure("紹介文・キャッチコピーの書き込み", { 詳細: detail });
-    void vscode.window.showErrorMessage(detail);
+    logFailure("紹介文・キャッチコピーの書き込み", { 詳細: detail, 採用した文: adopted });
+    void vscode.window.showErrorMessage(`${detail}（採用した文はログに残しました）`);
   }
 }
 
