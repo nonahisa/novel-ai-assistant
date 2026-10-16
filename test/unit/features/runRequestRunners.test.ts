@@ -9,6 +9,7 @@ import {
 } from "../../../src/core/runRequest";
 import { sha256Text } from "../../../src/core/hash";
 import type { WorkEntry } from "../../../src/models/types";
+import { AIError } from "../../../src/ai/types";
 
 /**
  * 受け口の手足の置き場（設計書6.87.22）。
@@ -135,6 +136,64 @@ describe("保管庫だけに置く", () => {
     const deps = makeDeps();
     expect((await deps.readTicket(id))?.feature).toBe("typo");
     expect(await deps.readTicket("0000000000000000")).toBeUndefined();
+  });
+});
+
+describe("AI接続確認（testAI。2026-10-16）", () => {
+  function depsWith(provider: Record<string, unknown>) {
+    return createRunRequestDeps({
+      context: { globalStorageUri: Uri.file(STORAGE) } as never,
+      findWork: () => undefined,
+      listWorks: () => [],
+      aiRegistry: {
+        resolve: (feature: string) =>
+          feature === "default"
+            ? { provider: { id: "sakura", displayName: "作り物のクラウドAI", isPaid: true, apiKey: "sk-秘密", ...provider }, model: "m" }
+            : undefined,
+        resolveModelInfo: async () => ({ displayName: "m", parameterSize: "8B", contextWindow: 8192 }),
+      } as never,
+      log: () => undefined,
+    });
+  }
+
+  test("確かめるのは AI設定で選んだAI。名前とモデルだけを返す（鍵は持ち出さない）", () => {
+    const ai = depsWith({}).testAi?.resolve();
+    expect(ai).toEqual({ providerId: "sakura", providerName: "作り物のクラウドAI", model: "m", paid: true });
+    expect(JSON.stringify(ai)).not.toContain("sk-");
+  });
+
+  test("接続も生成も通れば ok", async () => {
+    const row = await depsWith({
+      testConnection: async () => ({ ok: true, message: "接続しました。" }),
+      generate: async () => ({ text: "はい" }),
+    }).testAi?.run();
+    expect(row).toMatchObject({ ok: true, stage: "done" });
+    expect(row?.message).toContain("生成も確認しました");
+    expect(row?.modelInfo).toContain("8192");
+  });
+
+  test("一覧は引けても生成で止まる（残高不足）は、種別と次の操作を1つ返す", async () => {
+    const row = await depsWith({
+      testConnection: async () => ({ ok: true, message: "接続しました。" }),
+      generate: async () => {
+        throw new AIError("残高がありません", "insufficient_credit");
+      },
+    }).testAi?.run();
+    expect(row).toMatchObject({ ok: false, stage: "generate", errorKind: "insufficient_credit" });
+    expect(row?.nextAction).toBeTruthy();
+  });
+
+  test("接続で止まったら、生成を試さない", async () => {
+    let generated = false;
+    const row = await depsWith({
+      testConnection: async () => ({ ok: false, message: "繋がりません。" }),
+      generate: async () => {
+        generated = true;
+        return { text: "はい" };
+      },
+    }).testAi?.run();
+    expect(row).toMatchObject({ ok: false, stage: "connect", message: "繋がりません。" });
+    expect(generated).toBe(false);
   });
 });
 

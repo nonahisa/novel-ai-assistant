@@ -170,7 +170,32 @@ describe("run.request", () => {
 
   test("白名簿の外は、開く前に断る", async () => {
     const d = deps();
-    await expect(runRequest({ folder: work, feature: "settings" }, d)).rejects.toBeInstanceOf(McpToolError);
+    await expect(runRequest({ folder: work, feature: "apply" }, d)).rejects.toBeInstanceOf(McpToolError);
+    expect(d.opened).toHaveLength(0);
+  });
+
+  test("2026-10-16 に足した機能（冒頭診断・事実の照合・抽出・AI接続確認）を頼める", async () => {
+    for (const feature of ["opening", "factContradiction", "settings", "testAI"]) {
+      const d = deps();
+      const result = await runRequest({ folder: work, feature }, d);
+      const ticket = parseRunTicket(
+        fs.readFileSync(nodePath.join(storage, RUN_REQUEST_DIRECTORY, runTicketFileName(result.requestId)), "utf8")
+      );
+      expect(ticket?.feature, feature).toBe(feature);
+      expect(d.opened, feature).toHaveLength(1);
+      // 返事を待たないので、次の機能の前に片付ける（重ねられる依頼の上限に当たらないように）
+      fs.rmSync(nodePath.join(storage, RUN_REQUEST_DIRECTORY), { recursive: true, force: true });
+    }
+    // 抽出は「保存は extract.commit」と、頼んだ時点で言う
+    const settings = await runRequest({ folder: work, feature: "settings" }, deps());
+    expect(settings.note).toContain("novel.extract.commit");
+  });
+
+  test("話を指せない機能（冒頭診断・AI接続確認）の file は、開く前に断る", async () => {
+    const d = deps();
+    for (const feature of ["opening", "testAI"]) {
+      await expect(runRequest({ folder: work, feature, file: "本文\\第1話.txt" }, d)).rejects.toThrow(/file/u);
+    }
     expect(d.opened).toHaveLength(0);
   });
 

@@ -38,7 +38,11 @@ export interface CommandCoverage {
   class: CommandReach;
   /** 画面に出る名前（棚卸しの表の「機能」の欄） */
   label: string;
-  /** A になった道（どの道具のどの指定で届くか）。棚卸しのあとで届くようにしたものだけ */
+  /**
+   * 棚卸しのあとで足した道（どの道具のどの指定で届くか）。棚卸しのあとで届くように
+   * したものだけ。**既に A だった機能に足した道も書く**——冒頭診断・事実の照合・抽出は
+   * `novel.run` で A だったが、作者のAI設定で走らせる `run.request` の道を 2026-10-16 に足した
+   */
   via?: string;
   /** C4 のときだけ。なぜ渡さないか */
   reason?: CommandWithheldReason;
@@ -104,7 +108,7 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   // ── AIの設定・チューニング
   "novelai.setupAI": { class: "B", label: "AI設定" },
   "novelai.assignFeatureAI": { class: "C4", label: "機能別AI割当", reason: "設定" },
-  "novelai.testAI": { class: "C1", label: "AI接続確認" },
+  "novelai.testAI": { class: "B", label: "AI接続確認", via: "run.request feature: testAI" },
   "novelai.measureContext": { class: "C1", label: "AIチューニング" },
   "novelai.showTuningStats": { class: "A", label: "AIチューニング一覧" },
   "novelai.forgetTuning": { class: "C4", label: "AIチューニング削除", reason: "消す" },
@@ -129,7 +133,7 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.generateAbilityDocs": { class: "C2", label: "スキル一覧を生成" },
   "novelai.generateWorldDocs": { class: "C2", label: "世界観一覧を生成" },
   // ── 設定資料
-  "novelai.extractSettings": { class: "A", label: "一括抽出" },
+  "novelai.extractSettings": { class: "A", label: "一括抽出", via: "run.request feature: settings" },
   "novelai.extractCharactersOnly": { class: "A", label: "人物抽出" },
   "novelai.extractLocationsOnly": { class: "A", label: "場所抽出" },
   "novelai.extractAbilitiesOnly": { class: "A", label: "スキル抽出" },
@@ -153,9 +157,9 @@ export const COMMAND_COVERAGE: Readonly<Record<string, CommandCoverage>> = {
   "novelai.checkTypos": { class: "A", label: "誤字脱字検知" },
   "novelai.checkTyposForFile": { class: "A", label: "この話の誤字脱字を検知" },
   "novelai.checkProofread": { class: "A", label: "推敲" },
-  "novelai.checkOpening": { class: "A", label: "冒頭診断" },
+  "novelai.checkOpening": { class: "A", label: "冒頭診断", via: "run.request feature: opening" },
   "novelai.checkContradictions": { class: "A", label: "矛盾検知" },
-  "novelai.checkFactContradictions": { class: "A", label: "矛盾検知（事実の照合）" },
+  "novelai.checkFactContradictions": { class: "A", label: "矛盾検知（事実の照合）", via: "run.request feature: factContradiction" },
   "novelai.checkLocationConsistency": { class: "A", label: "位置関係の照合" },
   "novelai.checkDeviations": { class: "A", label: "プロット逸脱検知" },
   "novelai.checkForeshadows": { class: "A", label: "伏線検知" },

@@ -79,6 +79,12 @@ export const RUN_MAX_OPEN_REQUESTS = 2;
  * 入れない——結果は保管庫へ書くだけで、原稿にも台帳にも提案パネルにも触れない。
  * ここに無い機能は、確認も出さずに断る。
  *
+ * **設定資料の抽出（`settings`）も「取り出して検算する」までで、資料へは保存しない**
+ * （2026-10-16 の棚卸しの5件目）。検算を通った答えは MCP の `novel.validate`
+ * （`stash: true`）と同じ貯め場所（`.aiwriter/cache/external-extract.json`。
+ * Git に載らない控え）へ貯め、資料への保存は頼んだ側が `novel.extract.commit` で行う
+ * ——保存の線（新しい記録だけ保存・既存への変更は承認待ち）を1か所に保つため。
+ *
  * `assigned` は機能別AI割当（設計書6.28.9）の鍵。**作者が機能ごとに選んだAIで
  * 走る**ので、確認に出すAIもここから引く。
  */
@@ -92,7 +98,15 @@ export type RunFeature =
   /** 検索用の索引づくり（0.99.19）。AIの割当ではなく手元の Ollama の埋め込みで走る */
   | "vectorIndex"
   /** 表紙を焼く（字の向きの確かめ。2026-10-15）。AIを呼ばず、EPUBエディターの canvas で焼く */
-  | "coverBake";
+  | "coverBake"
+  /** 冒頭診断（2026-10-16）。第1話の冒頭だけを送る */
+  | "opening"
+  /** 矛盾検知（事実の照合。2026-10-16）。取り出しと判定で2つのAIを使う */
+  | "factContradiction"
+  /** 設定資料の抽出（2026-10-16）。貯めるだけで、保存は `novel.extract.commit` */
+  | "settings"
+  /** AI接続確認（2026-10-16）。本文を送らず、短い文を1回だけ生成させる */
+  | "testAI";
 
 export type RunAssignedFeature =
   | "typo"
@@ -100,13 +114,33 @@ export type RunAssignedFeature =
   | "contradiction"
   | "foreshadow"
   | "deviation"
-  | "generate";
+  | "generate"
+  | "factExtract"
+  | "extract";
 
 export interface RunFeatureDef {
   feature: RunFeature;
   /** 画面に出す名前 */
   label: string;
   assigned: RunAssignedFeature;
+  /**
+   * 判定に別の割当のAIを使う機能（事実の照合：取り出しは `factExtract`、判定は
+   * `contradiction`）。**確認と結果に両方を出す**——片方だけ見せると、有料のAIへ
+   * 本文の抜粋が出ることを作者が知らないまま押すことになる
+   */
+  verifyAssigned?: RunAssignedFeature;
+  /**
+   * 話（`file`）を指せるか。既定は指せる。**冒頭診断は第1話の冒頭しか見ない**ので、
+   * 話を渡されても黙って無視せずに断る（何を診断したかが食い違う）
+   */
+  takesFile?: boolean;
+  /**
+   * 処理済みの部分を送らない（チャンクの控えを使う）機能か。既定は使う。
+   * 使わない機能の確認に「処理済みの部分は送りません」と書くと嘘になる
+   */
+  skipsProcessed?: boolean;
+  /** 確認に足す行（書き先など）。プレーンテキスト */
+  confirmNotes?: readonly string[];
 }
 
 export const RUN_FEATURES: readonly RunFeatureDef[] = [
@@ -116,6 +150,40 @@ export const RUN_FEATURES: readonly RunFeatureDef[] = [
   { feature: "foreshadow", label: "伏線の検知", assigned: "foreshadow" },
   { feature: "deviation", label: "プロット逸脱の検知", assigned: "deviation" },
   { feature: "synopsis", label: "各話あらすじの生成", assigned: "generate" },
+  {
+    feature: "opening",
+    label: "冒頭診断",
+    assigned: "generate",
+    takesFile: false,
+    // 冒頭診断は1回きりの呼び出しで、チャンクの控えを持たない
+    skipsProcessed: false,
+    confirmNotes: ["送るのは第1話の冒頭だけです（上の字数）。診断の文書は作者の画面に開きません。"],
+  },
+  {
+    feature: "factContradiction",
+    label: "矛盾検知（事実の照合）",
+    assigned: "factExtract",
+    verifyAssigned: "contradiction",
+    confirmNotes: [
+      "本文から事実を取り出すAIと、見つかった候補を1件ずつ確かめるAI（矛盾検知の割当）の2つを使います。",
+    ],
+  },
+  {
+    feature: "settings",
+    label: "設定資料の抽出",
+    assigned: "extract",
+    /*
+      外から頼む抽出は、チャンクの切り方が製品の［設定資料を抽出］と違う
+      （まとめ送信をしない。`novel.extract.commit` が同じチャンクを切り直せる形）。
+      製品のチャンクの控えとは鍵が噛み合わないので使わず、毎回送る
+    */
+    skipsProcessed: false,
+    confirmNotes: [
+      "検算を通った答えを、作品の .aiwriter/cache/external-extract.json（Git に載らない控え）に貯めます。",
+      "設定資料への保存はしません。保存は頼んだ側が novel.extract.commit で行います" +
+        "（新しい記録は保存、既にある記録への変更は承認待ち）。",
+    ],
+  },
 ];
 
 export function findRunFeature(name: unknown): RunFeatureDef | undefined {
@@ -223,18 +291,103 @@ export function checkRunCover(value: unknown): string | undefined {
   return undefined;
 }
 
-/** 外から頼める機能の名前（白名簿＋索引づくり＋表紙を焼く）。MCP の入力の形に使う */
+/**
+ * AI接続確認（設計書6.87.22。2026-10-16 の棚卸しの6件目）。
+ *
+ * **作者のAIがいま動くかを、外から確かめる。** ほかの依頼の前に使える。
+ * 中身は［AI接続確認］コマンドと同じ2段（接続 → 短い文を1回だけ生成）で、
+ * 確かめるのは「AI設定で選んだAI」（機能ごとの割当ではない。コマンドと同じ）。
+ *
+ * **`RUN_FEATURES` に入れない**（索引づくりと同じ理由）。本文を送らないので、
+ * 送る量の見積もり（`measure`）を通すと、本文の無い作品で断られてしまう。
+ * **繋がらなかったのは「確かめた答え」なので失敗にしない**——`done` の
+ * `result.findings` に `ok: false` と理由・次の操作を入れる。
+ */
+export const RUN_TEST_AI_FEATURE = "testAI" as const;
+export const RUN_TEST_AI_LABEL = "AI接続確認";
+
+export function isRunTestAiFeature(name: unknown): name is typeof RUN_TEST_AI_FEATURE {
+  return name === RUN_TEST_AI_FEATURE;
+}
+
+/** AI接続確認の結果（`result.findings` の1行）。**本文は入らない** */
+export interface RunTestAiRow {
+  ok: boolean;
+  /** どこまで通ったか（`connect`＝接続で止まった・`generate`＝生成で止まった・`done`＝両方通った） */
+  stage: "connect" | "generate" | "done";
+  /** 作者の画面に出すのと同じ文言 */
+  message: string;
+  /** 失敗の種別（`AIError.kind`）。分からなければ省く */
+  errorKind?: string;
+  /** 次に取る操作。**1つだけ**（規則5） */
+  nextAction?: string;
+  /** モデルの情報（引けたときだけ。表示名・大きさ・文脈の広さ） */
+  modelInfo?: string;
+}
+
+export interface RunTestAiConfirmInput {
+  ticket: RunTicket;
+  workTitle: string;
+  providerName: string;
+  model: string;
+  paid: boolean;
+}
+
+/**
+ * AI接続確認の確認のモーダル。**何を送るかと料金を並べる**（短い文を1回。
+ * 有料のAIならごく少額でも料金がかかる）。
+ */
+export function describeTestAiConfirm(input: RunTestAiConfirmInput): {
+  message: string;
+  detail: string;
+} {
+  const who = clientKeyOf(input.ticket.client);
+  const deadline = new Date(Date.parse(input.ticket.createdAt) + RUN_CONFIRM_MS);
+  const lines = [
+    `どこから：外部AI（名乗り：${who}。名乗りは自己申告です）`,
+    `作品：${input.workTitle}（許可を確かめるための作品で、本文は送りません）`,
+    `機能：${RUN_TEST_AI_LABEL}`,
+    `確かめるAI：${input.providerName}（${input.model}）※AI設定で選んだAI（機能ごとの割当ではありません）`,
+    "接続を確かめたあと、「はい」とだけ答える短い文を1回送って、生成できるかを試します。",
+    input.paid
+      ? "料金：有料のAIです。短い文1回ぶんの、ごく少額の料金がかかります。"
+      : "料金：無料・手元で実行（API課金なし）",
+    "",
+    "結果（繋がったか・繋がらなければ理由と次の操作）は拡張機能の保管庫に置き、頼んだ側が読みます。" +
+      "原稿・設定資料・提案パネルは変わりません。",
+    `期限：${formatClock(deadline)} を過ぎて押しても試しません。`,
+    "覚えのない依頼なら「走らせる」を押さずに閉じてください。",
+  ];
+  return {
+    message: `外部AI（${who}）からの依頼です。「${RUN_TEST_AI_LABEL}」を走らせますか？`,
+    detail: lines.join("\n"),
+  };
+}
+
+/** 外から頼める機能の名前（白名簿＋索引づくり＋表紙を焼く＋AI接続確認）。MCP の入力の形に使う */
 export const RUN_REQUESTABLE_FEATURES: readonly RunFeature[] = [
   ...RUN_FEATURES.map((def) => def.feature),
   RUN_INDEX_FEATURE,
   RUN_COVER_FEATURE,
+  RUN_TEST_AI_FEATURE,
 ];
 
 /** 画面と返事に出す名前 */
 export function runFeatureLabel(name: unknown): string | undefined {
   if (isRunIndexFeature(name)) return RUN_INDEX_LABEL;
   if (isRunCoverFeature(name)) return RUN_COVER_LABEL;
+  if (isRunTestAiFeature(name)) return RUN_TEST_AI_LABEL;
   return findRunFeature(name)?.label;
+}
+
+/**
+ * 話（`file`）を指せる機能か。**札を読む側と MCP の入力が同じ判定を使う**
+ * （片方だけ通る依頼を作らない）。索引づくり・表紙を焼くは、それぞれの断り方
+ * （作品ごと・面ごと）があるのでここでは見ない。
+ */
+export function runFeatureTakesFile(name: unknown): boolean {
+  if (isRunTestAiFeature(name)) return false;
+  return findRunFeature(name)?.takesFile !== false;
 }
 
 /** 索引づくりの範囲。`all` は登録済みの全作品（許可のある作品だけ回す） */
@@ -355,6 +508,8 @@ export function parseRunTicket(text: string): RunTicket | undefined {
   if (typeof record.createdAt !== "string" || !Number.isFinite(Date.parse(record.createdAt))) {
     return undefined;
   }
+  // 話を指せない機能（冒頭診断・AI接続確認）に付いた話は、見覚えのない札として読まない
+  if (record.file !== undefined && !runFeatureTakesFile(record.feature)) return undefined;
   // 範囲は `all` だけ。**索引づくり以外に付いた範囲は、見覚えのない札として読まない**
   if (record.scope !== undefined) {
     if (record.scope !== "all" || !isRunIndexFeature(record.feature)) return undefined;
@@ -537,6 +692,9 @@ export interface RunResultBody {
   target: string | null;
   provider: { id: string; name: string; paid: boolean };
   model: string;
+  /** 判定に別のAIを使った機能（事実の照合）だけ。判定のAI */
+  verifyProvider?: { id: string; name: string; paid: boolean };
+  verifyModel?: string;
   promptVersion: string;
   /** 検算を通った指摘・生成物。ファイルは作品フォルダーからの相対パス */
   findings: unknown[];
@@ -706,6 +864,25 @@ export function runStatusOf(
             "字が立っているかは cover.ink で測れます（region に titleBlock を渡す）。原稿と book.json は変わっていません。",
         };
       }
+      if (ticket.feature === "settings") {
+        return {
+          status: "done",
+          message:
+            "設定資料の抽出を、検算まで通しました（製品と同じ検算）。答えは作品の .aiwriter/cache/external-extract.json に貯めてあり、" +
+            "設定資料にはまだ保存していません。保存するなら novel.extract.commit を、まず dryRun: true で呼んで" +
+            "保存されるもの（新規・承認待ち・断るもの）を確かめてから呼んでください。" +
+            "チャンクごとの受け入れた人物と落とした件数は result.findings にあります。",
+        };
+      }
+      if (isRunTestAiFeature(ticket.feature)) {
+        return {
+          status: "done",
+          message:
+            "AI接続確認を終えました。繋がったかは result.findings[0] の ok にあります" +
+            "（false なら stage〔connect＝接続・generate＝生成〕で止まった所と、理由・次の操作）。" +
+            "原稿・設定資料・提案パネルは変わっていません。",
+        };
+      }
       return {
         status: "done",
         message:
@@ -752,6 +929,10 @@ export interface RunConfirmInput {
   episodeCount: number;
   /** 有料のAIのときの断り（`core/paidUsageNotice.ts` の行） */
   paidLines: readonly string[];
+  /** 機能の定義（処理済みを飛ばすか・足す行）。無ければ従来どおり */
+  def?: RunFeatureDef;
+  /** 判定に使う2つ目のAI（事実の照合） */
+  verifier?: { providerName: string; model: string; paid: boolean };
 }
 
 /**
@@ -771,11 +952,19 @@ export function describeRunConfirm(input: RunConfirmInput): {
     `作品：${input.workTitle}`,
     `対象：${input.targetLabel}`,
     `機能：${input.featureLabel}`,
-    `使うAI：${input.providerName}（${input.model}）※機能別AI割当のとおり`,
+    input.verifier
+      ? `使うAI：取り出し ${input.providerName}（${input.model}）・判定 ` +
+        `${input.verifier.providerName}（${input.verifier.model}）※機能別AI割当のとおり`
+      : `使うAI：${input.providerName}（${input.model}）※機能別AI割当のとおり`,
     `送る量：本文 約${input.bodyChars.toLocaleString("ja-JP")}字（${input.episodeCount}話）。` +
-      "処理済みの部分は送りません。指示と設定資料のぶんが加わります。" +
+      (input.def?.skipsProcessed === false ? "" : "処理済みの部分は送りません。") +
+      "指示と設定資料のぶんが加わります。" +
       "保存していない変更は含まれません（保存済みの本文を読みます）。",
-    ...(input.paid ? input.paidLines : ["料金：無料・手元で実行（API課金なし）"]),
+    ...(input.def?.confirmNotes ?? []),
+    // **どちらかが有料なら料金の断りを出す**（有料のほうの行は呼ぶ側が組んで渡す）
+    ...(input.paid || input.verifier?.paid
+      ? input.paidLines
+      : ["料金：無料・手元で実行（API課金なし）"]),
     "",
     "結果は拡張機能の保管庫（この機械の中）に置き、頼んだ側が読みます。" +
       "原稿・設定資料・提案パネルは変わりません。",

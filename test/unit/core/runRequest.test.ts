@@ -4,11 +4,13 @@ import {
   RUN_CONFIRM_MS,
   RUN_FEATURES,
   RUN_MAX_PER_HOUR,
+  RUN_REQUESTABLE_FEATURES,
   buildRunUri,
   checkRunFile,
   checkRunToken,
   countRecentRuns,
   describeRunConfirm,
+  describeTestAiConfirm,
   findRunFeature,
   isConfirmTooLate,
   isRunOpen,
@@ -18,6 +20,8 @@ import {
   parseRunTicket,
   formatRunTicket,
   runIdOfFileName,
+  runFeatureLabel,
+  runFeatureTakesFile,
   runStatusOf,
   type RunStateRecord,
   type RunTicket,
@@ -110,14 +114,49 @@ describe("URI のクエリ", () => {
 describe("白名簿", () => {
   test("読み取りと生成だけ", () => {
     expect(RUN_FEATURES.map((def) => def.feature).sort()).toEqual(
-      ["contradiction", "deviation", "foreshadow", "proofread", "synopsis", "typo"].sort()
+      [
+        "contradiction",
+        "deviation",
+        "factContradiction",
+        "foreshadow",
+        "opening",
+        "proofread",
+        "settings",
+        "synopsis",
+        "typo",
+      ].sort()
     );
   });
 
-  test("適用・抽出・反映の類は無い", () => {
-    for (const name of ["apply", "settings", "extract", "pending", "chat", "episodePlot"]) {
+  test("適用・保存・反映の類は無い（抽出は貯めるだけで、保存は extract.commit）", () => {
+    for (const name of ["apply", "extract", "extractCommit", "pending", "chat", "episodePlot"]) {
       expect(findRunFeature(name)).toBeUndefined();
     }
+  });
+
+  test("機能別AI割当の鍵（2026-10-16 に足した3つ）", () => {
+    expect(findRunFeature("opening")?.assigned).toBe("generate");
+    // 事実の照合は、取り出し（factExtract）と判定（contradiction）の2つのAIを使う
+    expect(findRunFeature("factContradiction")?.assigned).toBe("factExtract");
+    expect(findRunFeature("factContradiction")?.verifyAssigned).toBe("contradiction");
+    expect(findRunFeature("settings")?.assigned).toBe("extract");
+  });
+
+  test("AI接続確認（testAI）は白名簿とは別に通す（本文を送らない）", () => {
+    expect(findRunFeature("testAI")).toBeUndefined();
+    expect(RUN_REQUESTABLE_FEATURES).toContain("testAI");
+    expect(runFeatureLabel("testAI")).toBe("AI接続確認");
+  });
+
+  test("話を指せない機能（冒頭診断・AI接続確認）の file は札でも断る", () => {
+    expect(runFeatureTakesFile("typo")).toBe(true);
+    expect(runFeatureTakesFile("settings")).toBe(true);
+    expect(runFeatureTakesFile("opening")).toBe(false);
+    expect(runFeatureTakesFile("testAI")).toBe(false);
+    expect(parseRunTicket(formatRunTicket(ticket({ feature: "opening" })))?.feature).toBe("opening");
+    expect(parseRunTicket(formatRunTicket(ticket({ feature: "opening", file: "本文/第1話.txt" })))).toBeUndefined();
+    expect(parseRunTicket(formatRunTicket(ticket({ feature: "testAI", file: "本文/第1話.txt" })))).toBeUndefined();
+    expect(parseRunTicket(formatRunTicket(ticket({ feature: "testAI" })))?.feature).toBe("testAI");
   });
 
   test("白名簿の外の札も読める（受け口が理由を言って断れるように）", () => {
@@ -170,6 +209,18 @@ describe("run.result の状態", () => {
     expect(refused.message).toContain("許可が無い");
     expect(refused.message).toContain("次の操作：許可する");
     expect(runStatusOf(ticket(), state({ state: "failed" }), CREATED).status).toBe("failed");
+  });
+
+  test("抽出を終えたら、保存は novel.extract.commit だと言う", () => {
+    const view = runStatusOf(ticket({ feature: "settings" }), state({ state: "done" }), CREATED);
+    expect(view.message).toContain("novel.extract.commit");
+    expect(view.message).toContain("dryRun");
+  });
+
+  test("AI接続確認を終えたら、繋がらなかったことも done の中にあると言う", () => {
+    const view = runStatusOf(ticket({ feature: "testAI" }), state({ state: "done" }), CREATED);
+    expect(view.message).toContain("result.findings");
+    expect(view.message).toContain("ok");
   });
 
   test("返事の出ていない依頼か", () => {
@@ -241,6 +292,61 @@ describe("確認のモーダル", () => {
     const { detail } = describeRunConfirm({ ...base, paid: true, paidLines });
     for (const line of paidLines) expect(detail).toContain(line);
     expect(detail).not.toContain("無料");
+  });
+
+  test("処理済みを飛ばさない機能では「処理済みの部分は送りません」と言わない", () => {
+    const opening = describeRunConfirm({
+      ...base,
+      featureLabel: "冒頭診断",
+      paid: false,
+      paidLines: [],
+      def: findRunFeature("opening"),
+    }).detail;
+    expect(opening).not.toContain("処理済みの部分は送りません");
+    const typo = describeRunConfirm({ ...base, paid: false, paidLines: [], def: findRunFeature("typo") }).detail;
+    expect(typo).toContain("処理済みの部分は送りません");
+  });
+
+  test("抽出は、貯める先と保存の道を確認に書く", () => {
+    const { detail } = describeRunConfirm({
+      ...base,
+      featureLabel: "設定資料の抽出",
+      paid: false,
+      paidLines: [],
+      def: findRunFeature("settings"),
+    });
+    expect(detail).toContain("external-extract.json");
+    expect(detail).toContain("novel.extract.commit");
+  });
+
+  test("判定に別のAIを使う機能は、両方のAIを並べ、片方が有料なら料金の断りを出す", () => {
+    const paidLines = paidUsageLines("判定のクラウドAI", "judge-1");
+    const { detail } = describeRunConfirm({
+      ...base,
+      featureLabel: "矛盾検知（事実の照合）",
+      paid: true,
+      paidLines,
+      def: findRunFeature("factContradiction"),
+      verifier: { providerName: "判定のクラウドAI", model: "judge-1", paid: true },
+    });
+    expect(detail).toContain("作り物のクラウドAI（model-x）");
+    expect(detail).toContain("判定のクラウドAI（judge-1）");
+    for (const line of paidLines) expect(detail).toContain(line);
+  });
+
+  test("AI接続確認の確認は、短い文を1回だけ送ることと料金を並べる", () => {
+    const { message, detail } = describeTestAiConfirm({
+      ticket: ticket({ feature: "testAI" }),
+      workTitle: "星の町",
+      providerName: "作り物のクラウドAI",
+      model: "model-x",
+      paid: true,
+    });
+    expect(message).toContain("AI接続確認");
+    for (const expected of ["claude-code", "自己申告", "作り物のクラウドAI", "model-x", "本文は送りません", "料金"]) {
+      expect(detail).toContain(expected);
+    }
+    expect(detail).not.toContain("今後は確認しない");
   });
 });
 

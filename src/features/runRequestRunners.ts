@@ -56,6 +56,12 @@ import { checkProofread } from "./checkProofread";
 import { checkContradictions } from "./checkContradictions";
 import { checkForeshadows } from "./checkForeshadows";
 import { checkDeviations } from "./checkDeviations";
+import { checkFactContradictions } from "./checkFactContradictions";
+import { STORY_FACT_EXTRACT_VERSION } from "../prompts/storyFactExtract";
+import { collectOpening, generateOpeningCheck } from "./checkOpening";
+import { runSettingsExtraction } from "./runRequestSettings";
+import { probeGeneration } from "../ai/generationProbe";
+import type { RunTestAiRow } from "../core/runRequest";
 import { confirmProviderReachable } from "./aiConnectivity";
 import { withAiTurnProgress } from "./aiTurn";
 import { globalStorageRoot } from "./globalStoragePath";
@@ -233,7 +239,8 @@ export function createRunRequestDeps(
         paid: resolved.provider.isPaid,
       };
     },
-    measure: (work, file) => measureTarget(work, file),
+    measure: (work, file, def) =>
+      def?.feature === "opening" ? measureOpening(work) : measureTarget(work, file),
     confirm: async (message, detail, button = "走らせる") =>
       (await vscode.window.showWarningMessage(
         message,
@@ -264,6 +271,100 @@ export function createRunRequestDeps(
       inspect: (work, spec) => inspectCoverForRequest(work, spec),
       bake: (work, spec) => bakeCoverForRequest(input.context, work, spec),
     },
+    /*
+      AI接続確認（2026-10-16）。［AI接続確認］コマンドと同じ2段を、コマンドを叩かずに
+      直に呼ぶ（コマンドは結果を知らせにしか出さず、返さない）
+    */
+    testAi: {
+      resolve: () => {
+        const resolved = input.aiRegistry.resolve("default");
+        if (!resolved) return undefined;
+        return {
+          providerId: resolved.provider.id,
+          providerName: resolved.provider.displayName,
+          model: resolved.model,
+          paid: resolved.provider.isPaid,
+        };
+      },
+      run: () => runTestAi(input.aiRegistry),
+    },
+  };
+}
+
+/**
+ * AI接続確認の中身（［AI接続確認］コマンドと同じ2段）。
+ *
+ * 1. 接続（`testConnection`）——モデル一覧などが引けるか
+ * 2. 生成（`probeGeneration`）——**一覧が引けても生成できるとは限らない**
+ *    （残高不足・権限不足は一覧では表に出ない。実際に起きた）
+ *
+ * **繋がらなかったのも答え**として返す。次の操作は種別ごとに1つ（規則5）。
+ */
+async function runTestAi(registry: AIRegistry): Promise<RunTestAiRow> {
+  const resolved = registry.resolve("default");
+  if (!resolved) {
+    return {
+      ok: false,
+      stage: "connect",
+      message: "AIが設定されていません。",
+      nextAction: "「AI設定」から使うAIを選んでください",
+    };
+  }
+  const connection = await resolved.provider.testConnection();
+  if (!connection.ok) {
+    return {
+      ok: false,
+      stage: "connect",
+      message: connection.message,
+      nextAction: "AIを起動し、接続先設定を確認してください",
+    };
+  }
+  const probe = await probeGeneration(resolved.provider, resolved.model);
+  if (!probe.ok) {
+    if (probe.error) {
+      // **エラーの本文を捨てない**（規則5）。画面には出さなくてもログへ
+      logFailure("AI接続の確認（外部AIからの依頼・生成の試行）", {
+        種別: probe.error.kind,
+        詳細: probe.error.detail,
+        モデル: resolved.model,
+      });
+    }
+    return {
+      ok: false,
+      stage: "generate",
+      message: probe.message ?? "生成できませんでした。",
+      ...(probe.error
+        ? { errorKind: probe.error.kind, nextAction: recoveryForAIError(probe.error) }
+        : {}),
+    };
+  }
+  const info = await registry.resolveModelInfo("default");
+  const modelInfo = info
+    ? `${info.displayName}（${info.parameterSize ?? "?"} / 文脈 ${info.contextWindow}）`
+    : undefined;
+  return {
+    ok: true,
+    stage: "done",
+    message: `${connection.message} 生成も確認しました。`,
+    ...(modelInfo ? { modelInfo } : {}),
+  };
+}
+
+/**
+ * 冒頭診断の送る量。**送るのは第1話の冒頭だけ**（上限 `OPENING_EXCERPT_MAX_CHARS`）
+ * ——作品全体の字数を確認に出すと、送る量の提示が嘘になる。材料の集め方は
+ * コマンドと同じ（`collectOpening`）。
+ */
+async function measureOpening(work: WorkEntry): Promise<RunMeasure> {
+  const collected = await collectOpening(work);
+  if (!collected.ok) return { ok: false, reason: collected.reason };
+  const chars = collected.material.openingText.length;
+  return {
+    ok: true,
+    bodyChars: chars,
+    episodeCount: 1,
+    filePaths: [],
+    targetLabel: `第1話の冒頭 ${chars.toLocaleString("ja-JP")}字`,
   };
 }
 
@@ -485,12 +586,128 @@ async function runFeature(
     }
     case "synopsis":
       return runSynopses(work, registry, filePaths);
+    case "opening":
+      return runOpening(work, registry);
+    case "factContradiction": {
+      const result = await checkFactContradictions(work, registry, {
+        ...scope,
+        suiteConfirmed: true,
+      });
+      if (!result) return notStarted;
+      return {
+        ok: true,
+        promptVersion: `${STORY_FACT_EXTRACT_VERSION}|verify:${CONTRADICTION_VERIFY_VERSION}`,
+        findings: result.issues.map((issue) => toFinding(issue, work)),
+        dropped: {
+          count: result.rejectedFacts,
+          notes: [
+            `本文と合わない事実 ${result.rejectedFacts}件`,
+            `機械が挙げた候補 ${result.candidateCount}件（判定に回した数）`,
+            // 判定で取り下げた理由・候補の内訳も同じ並びに出す（外部AIが「全部通った」と読まないように）
+            ...[result.rejectionNote, result.verifyNote, result.candidateNote].filter(Boolean),
+          ],
+        },
+        failures: {
+          count: result.failedChunks + result.unreadableEpisodes,
+          notes: [
+            ...failureNotes(result.failedChunks),
+            ...(result.unreadableEpisodes > 0
+              ? [`本文を読めなかった話 ${result.unreadableEpisodes}話`]
+              : []),
+          ],
+        },
+        cancelled: result.cancelled,
+      };
+    }
+    case "settings":
+      return runSettingsExtraction(work, registry, filePaths);
+    case "testAI":
+      // AI接続確認も受け口が別の道（`handleTestAiRequest`）へ分ける
+      return { ok: false, reason: "AI接続確認はこの口では走らせません。" };
     case "vectorIndex":
       // 索引づくりは受け口が別の道（`handleIndexRequest`）へ分けるので、ここへは来ない
       return { ok: false, reason: "索引づくりはこの口では走らせません。" };
     case "coverBake":
       // 表紙を焼くのも受け口が別の道（`handleCoverRequest`）へ分ける
       return { ok: false, reason: "表紙を焼く依頼はこの口では走らせません。" };
+  }
+}
+
+/**
+ * 冒頭診断を**生成と検算だけ**行う（診断の文書を作者の画面に開かない）。
+ *
+ * 組み立て・検算はコマンドと同じ部品（`generateOpeningCheck`）。違うのは、
+ * コマンドが結果を文書として開くことだけ。**ここで開くと、外から頼まれた
+ * 実行で作者の画面が動く**（`runSynopses` が保存しないのと同じ理由）。
+ */
+async function runOpening(work: WorkEntry, registry: AIRegistry): Promise<RunOutcome> {
+  const resolved = registry.resolve("generate");
+  if (!resolved) {
+    return {
+      ok: false,
+      reason: "冒頭診断に使うAIがまだ設定されていません。",
+      nextAction: "AI設定（または機能別AI割当）で使うAIを選んでください",
+    };
+  }
+  const collected = await collectOpening(work);
+  if (!collected.ok) return { ok: false, reason: collected.reason };
+  if (!(await confirmProviderReachable(resolved.provider, "冒頭の診断", resolved.model))) {
+    return {
+      ok: false,
+      reason: "AIに繋がりませんでした。",
+      nextAction: "AIを起動し、接続先設定を確認してください",
+    };
+  }
+  useLogFile(work.folderPath);
+  // 作者の「走らせる」は受け口のモーダルで取ってある
+  logStep(
+    `外部AIからの依頼で冒頭診断を走らせます: ${work.title} / ${resolved.provider.displayName} / ` +
+      `${resolved.model}`
+  );
+  const generated = await generateOpeningCheck(
+    work,
+    resolved,
+    collected.material,
+    "外部AIからの依頼：冒頭を診断しています"
+  );
+  switch (generated.kind) {
+    case "cancelled":
+      return {
+        ok: true,
+        promptVersion: "",
+        findings: [],
+        dropped: { count: 0, notes: [] },
+        failures: { count: 0, notes: [] },
+        cancelled: true,
+      };
+    case "failed": {
+      const error = generated.error;
+      if (error instanceof AIError) {
+        // **種別ごとに次の操作を1つ**（規則5）
+        return {
+          ok: false,
+          reason: error.message,
+          errorKind: error.kind,
+          nextAction: recoveryForAIError(error),
+        };
+      }
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+    }
+    case "unreadable":
+      return {
+        ok: false,
+        reason: "冒頭診断の応答を読み取れませんでした（応答の中身は作品のログにあります）。",
+      };
+    case "done":
+      return {
+        ok: true,
+        promptVersion: generated.promptVersion,
+        // 診断は1件（6要素の判定・ほめる所・直す方向）。本文の抜粋は検算済みの引用だけ
+        findings: [generated.report],
+        dropped: { count: 0, notes: [] },
+        failures: { count: 0, notes: [] },
+        cancelled: false,
+      };
   }
 }
 
