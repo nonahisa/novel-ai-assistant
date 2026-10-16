@@ -185,6 +185,8 @@ export function createRunRequestDeps(
   return {
     isWeb: isWebRuntime,
     now: () => Date.now(),
+    // 受けた VS Code。試験用の VS Code（.vscode-test の下）が受けたら run.result が一言添える
+    handledBy: () => ({ version: vscode.version, appRoot: vscode.env.appRoot }),
     hash: sha256Text,
     readTicket: async (id) => {
       const text = await readText(fileOf(runTicketFileName(id)));

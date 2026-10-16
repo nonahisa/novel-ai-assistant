@@ -106,6 +106,41 @@ function deps(
   return { d, store, history };
 }
 
+describe("受けた VS Code を記録に残す（handledBy）", () => {
+  /*
+    作者の機械で、試験用の VS Code が vscode:// の受け手に居座り、外部AIの依頼が
+    作者の知らない窓へ届いた（2026-10-17）。どの VS Code が受けたかを記録へ残し、
+    run.result で頼んだ側が気づけるようにする
+  */
+  const HOST = { version: "1.142.0", appRoot: "C:\\VS Code\\resources\\app" };
+
+  test("最初の受け付けから終わりまで、どの記録にも載る", async () => {
+    const { d, history } = deps({ handledBy: () => HOST });
+    await handleRunRequest(queryOf(), d);
+    expect(history.map((state) => state.state)).toEqual(["confirming", "running", "done"]);
+    for (const state of history) expect(state.handledBy).toEqual(HOST);
+  });
+
+  test("断ったとき・期限切れのときも載る", async () => {
+    const late = deps({ now: () => NOW + 11 * 60_000, handledBy: () => HOST });
+    await handleRunRequest(queryOf(), late.d);
+    expect(late.store.get(ID)?.state).toBe("expired");
+    expect(late.store.get(ID)?.handledBy).toEqual(HOST);
+
+    const refused = deps({ isAllowed: vi.fn(async () => false), handledBy: () => HOST });
+    await handleRunRequest(queryOf(), refused.d);
+    expect(refused.store.get(ID)?.state).toBe("refused");
+    expect(refused.store.get(ID)?.handledBy).toEqual(HOST);
+  });
+
+  test("手足が無ければ載せない（項目を空で作らない）", async () => {
+    const { d, history } = deps();
+    await handleRunRequest(queryOf(), d);
+    expect(history.length).toBeGreaterThan(0);
+    for (const state of history) expect("handledBy" in state).toBe(false);
+  });
+});
+
 describe("確認も出さずに断る", () => {
   test("合言葉が合わない（ウェブのリンクから開かされた）", async () => {
     const { d, store } = deps();

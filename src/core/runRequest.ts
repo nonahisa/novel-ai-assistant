@@ -839,7 +839,42 @@ export interface RunStateRecord {
   /** 失敗の種別（`AIError.kind`）。分からなければ省く */
   errorKind?: string;
   result?: RunResultBody;
+  /**
+   * 依頼を受けた VS Code（`vscode.version` と `vscode.env.appRoot`）。
+   *
+   * 作者の機械で、試験用に取り寄せた VS Code（`.vscode-test` の下）が `vscode://` の
+   * 受け手に居座り、依頼が作者の知らない窓へ届いて確認が見えなかった（2026-10-17）。
+   * 頼んだ側が run.result で気づけるように残す。前の版が書いた記録には無い
+   */
+  handledBy?: RunHandledBy;
 }
+
+/** 依頼を受けた VS Code。**作品の場所・本文は入れない** */
+export interface RunHandledBy {
+  version: string;
+  appRoot: string;
+}
+
+/** 記録から読んだ値が `RunHandledBy` の形か（記録は手で書き換えられうる） */
+export function isRunHandledBy(value: unknown): value is RunHandledBy {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.version === "string" && typeof record.appRoot === "string";
+}
+
+/**
+ * 試験用の VS Code（`@vscode/test-electron` が `.vscode-test/` へ取り寄せたもの）か。
+ * フォルダー名を区切りつきで見る（`my.vscode-tests` のような名前を拾わない）
+ */
+export function isTestVsCodeAppRoot(appRoot: string): boolean {
+  return /(^|[\\/])\.vscode-test([\\/]|$)/u.test(appRoot);
+}
+
+/** run.result に添える一言（試験用の VS Code で受けたとき） */
+export const RUN_TEST_HOST_NOTE =
+  "試験用の VS Code で受けました（開発の試験が取り寄せた .vscode-test の下の VS Code）。" +
+  "作者がふだん使う VS Code ではないので、確認の窓が作者に見えていないかもしれません。" +
+  "作者に、試験用の VS Code の窓が開いていないか見てもらってください（handledBy に受けた版と場所があります）。";
 
 export function formatRunState(state: RunStateRecord): string {
   return `${JSON.stringify(state, null, 2)}\n`;
