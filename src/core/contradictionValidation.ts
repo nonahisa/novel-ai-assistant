@@ -600,6 +600,14 @@ export interface KnownAtPerson {
     variants: ReadonlyArray<{ form: string; chapters: readonly number[] }>;
   };
   changes: readonly RecordChangeLike[];
+  // 本体の値（`CHARACTER_AS_OF_FIELDS`）。変化の記録に無ければ初出の話で載せる
+  summary?: string | null;
+  role?: string | null;
+  personality?: string | null;
+  speechStyle?: string | null;
+  appearance?: string | null;
+  gender?: string | null;
+  affiliation?: string | null;
 }
 
 interface RecordChangeLike {
@@ -630,7 +638,7 @@ export function buildKnownAtIndex(
       recorded.add(entryKey(change.field, change.value));
     }
     // 本体の値は、変化の記録に同じ値が無いときだけ初出の話で補う。
-    // `Character` は索引用の型と別の名前で持っているので、項目名で読む
+    // 項目の並びは材料の組み立てと同じもの（`CHARACTER_AS_OF_FIELDS`）を見るので、項目名で読む
     const fields = person as unknown as Record<string, unknown>;
     for (const field of CHARACTER_AS_OF_FIELDS) {
       const value = fields[field];
@@ -715,10 +723,16 @@ export function lookupSettingKnownAt(
     const long = candidates.filter((item) => [...item].length >= MIN_CONTAIN_CHARS);
     matched = index.entries.filter((entry) => {
       const value = normalizeSettingValue(entry.value);
+      const valueChars = [...value].length;
       return long.some(
         (item) =>
           value.includes(item) ||
-          ([...value].length >= MIN_CONTAIN_CHARS && item.includes(value))
+          // 文のほうが値を含む向きは、値が文の大半を占めるときだけ。「冒険者ギルド」
+          // （所属）が、世界観の「冒険者ギルドは報酬の4割を差し引く」に当たった
+          // （写しの e4b、2026-10-17）——固有名詞を含むだけの別の設定である
+          (valueChars >= MIN_CONTAIN_CHARS &&
+            valueChars * 10 >= [...item].length * MIN_COVER_TENTHS &&
+            item.includes(value))
       );
     });
   }
@@ -747,6 +761,9 @@ export function lookupSettingKnownAt(
 
 /** 包含で引くときの、候補と値の最小の字数 */
 const MIN_CONTAIN_CHARS = 4;
+
+/** 文のほうが値を含むとき、値が文の何割以上を占めていれば同じ設定と見るか */
+const MIN_COVER_TENTHS = 6;
 
 function settingCandidates(settingSays: string, index: KnownAtIndex): string[] {
   const raw: string[] = [settingSays];

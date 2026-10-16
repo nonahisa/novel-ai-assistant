@@ -105,6 +105,19 @@ describe("検出の段が書いた形のまま、分かる話を引く", () => {
     expect(lookupSettingKnownAt(index, "俺たちは郵便局に勤めている")).toEqual([]);
   });
 
+  test("文の一部に人物の値（所属など）が含まれるだけなら引かない", () => {
+    // 写しの e4b：世界観の報酬の決まりが、所属「冒険者ギルド」の話数で引けていた
+    const index = buildKnownAtIndex([
+      { name: "おっさん", appearedChapters: [2, 8], affiliation: "冒険者ギルド", changes: [] },
+    ]);
+    expect(
+      lookupSettingKnownAt(
+        index,
+        "ギルドの報酬体系：冒険者ギルドは報酬の4割を差し引く。そのうち2割が税金、2割が運営費となる。"
+      )
+    ).toEqual([]);
+  });
+
   test("登場話の記録が無い人の、変化の記録に無い値は登録しない", () => {
     const index = buildKnownAtIndex([
       { ...elsie, appearedChapters: [] },
