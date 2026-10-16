@@ -192,6 +192,37 @@ export interface WorkConfig {
    * `parseNameOrigin` で確かめ、知らない値は無かったことにする。
    */
   nameOrigin?: string;
+  /**
+   * ［PDF出力］で作者が最後に選んだ紙・向き・範囲（作者の裁定 2026-10-16 夜の3）。
+   * **省略できる**（`announce` と同じ理由）。外部AIからの PDF の書き出し
+   * （`run.request` の `exportPdf`）がこれを使い、無ければ文庫サイズ・縦書き・全話。
+   * 読み方と確かめ方は `core/pdfExportConfig.ts`
+   */
+  pdfExport?: WorkPdfExportConfig;
+}
+
+/**
+ * ［PDF出力］の前回の設定。紙の id は `core/printHtml.ts`（`PrintPreset`）と
+ * `core/printGridHtml.ts`（`GridPaper`）の写し——`models` は `core` を引けない。
+ * 片方だけ増やすと、`core/pdfExportConfig.ts` の代入で型検査が落ちる
+ */
+export interface WorkPdfExportConfig {
+  paper:
+    | { kind: "preset"; preset: "bunko-vertical" | "a5-vertical" | "a4-horizontal" }
+    | {
+        kind: "grid";
+        paper: "a4-landscape" | "a4-portrait";
+        columns: number;
+        rows: number;
+        hanging: boolean;
+        vertical: boolean;
+        marginMm: number;
+      };
+  /**
+   * 範囲。`all` は「そのときの全話」（あとから足した話も入る）。`files` は作品フォルダー
+   * からの相対パス（区切りは `/`）——同期される欄なので、機械ごとの絶対パスは持たない
+   */
+  range: { scope: "all" } | { scope: "files"; files: string[] };
 }
 
 /**

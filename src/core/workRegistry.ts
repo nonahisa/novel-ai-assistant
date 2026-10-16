@@ -20,6 +20,7 @@ import { parseNameOrigin } from "./nameOriginFit";
 import { canRegisterWork, describeWorkLimit } from "./editorMode";
 import { currentMode } from "./actorContext";
 import { parseSeriesConfig } from "./seriesLink";
+import { parsePdfExportConfig } from "./pdfExportConfig";
 import { fileReader, isNotFound } from "./fileRead";
 import { AI_INSTRUCTION_TARGETS } from "./aiInstructions";
 import { logFailure } from "./logger";
@@ -1101,6 +1102,9 @@ export function parseWorkConfig(raw: unknown): WorkConfig {
   const kind = parseWorkKind(value.kind);
   // 名前の系統（設計書6.37.2）。`kind` と同じく、知らない値は無かったことにする
   const nameOrigin = parseNameOrigin(value.nameOrigin);
+  // ［PDF出力］の前回の設定（作者の裁定 2026-10-16 夜の3）。`announce` と同じく、
+  // 壊れていれば欄ごと無かったことにする（投げない）
+  const pdfExport = parsePdfExportConfig(value.pdfExport);
 
   return {
     schemaVersion: (value.schemaVersion as string).trim(),
@@ -1114,6 +1118,7 @@ export function parseWorkConfig(raw: unknown): WorkConfig {
     ...(series ? { series } : {}),
     ...(kind ? { kind } : {}),
     ...(nameOrigin ? { nameOrigin } : {}),
+    ...(pdfExport ? { pdfExport } : {}),
   };
 }
 

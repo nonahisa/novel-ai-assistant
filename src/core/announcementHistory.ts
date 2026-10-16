@@ -5,6 +5,8 @@ import { workPaths } from "./workRegistry";
 import { atomicWriteFile } from "./atomicWrite";
 import {
   ANNOUNCEMENT_HISTORY_SUBPATH,
+  formatAnnouncementHistory,
+  mergeAnnouncementHistory,
   parseAnnouncementHistory,
 } from "./announceConfig";
 
@@ -21,9 +23,6 @@ import {
  * 置き場所は `.aiwriter/cache/`。**作品の内容ではない**ので設定資料には置かず、
  * Gitでも同期しない（キャッシュと同じ扱い）。消えても作り直せる。
  */
-
-/** 覚えておく件数。増やしすぎるとプロンプトが膨らむ */
-const MAX_HISTORY = 20;
 
 export class AnnouncementHistory {
   constructor(private readonly work: WorkEntry) {}
@@ -48,9 +47,8 @@ export class AnnouncementHistory {
   /** 出した告知を足す。保存に失敗しても機能を止めない */
   async add(texts: string[]): Promise<void> {
     const existing = await this.load();
-    const merged = [...new Set([...existing, ...texts.map((t) => t.trim())])]
-      .filter(Boolean)
-      .slice(-MAX_HISTORY);
+    // 足し方（重ね落とし・件数）は MCP の告知文と同じ関数を通す（`announceConfig.ts`）
+    const merged = mergeAnnouncementHistory(existing, texts);
 
     const target = this.filePath();
     try {
@@ -59,7 +57,7 @@ export class AnnouncementHistory {
       );
       await atomicWriteFile(
         target,
-        new TextEncoder().encode(`${JSON.stringify(merged, null, 2)}\n`)
+        new TextEncoder().encode(formatAnnouncementHistory(merged))
       );
     } catch {
       // 履歴が残らないだけで、次の生成は動く

@@ -81,3 +81,28 @@ export function parseAnnouncementHistory(text: string): string[] {
     return [];
   }
 }
+
+/** 覚えておく件数。増やしすぎるとプロンプトが膨らむ */
+export const ANNOUNCEMENT_HISTORY_MAX = 20;
+
+/**
+ * 履歴へ足した後の並びを決める。**製品の［更新SNS告知文作成］と MCP の告知文
+ * （novel.run feature: announce）が同じ関数を通す**（作者の裁定 2026-10-16 夜の2。
+ * 外部AIが作った告知も履歴へ足す）。写すと、片方だけ重ね落としや件数が変わる日が来る。
+ *
+ * 前後の空白を落とし、空は捨て、同じ文は前に出たほうを残して1つにし、直近の
+ * `ANNOUNCEMENT_HISTORY_MAX` 件だけを持つ。
+ */
+export function mergeAnnouncementHistory(
+  existing: readonly string[],
+  texts: readonly string[]
+): string[] {
+  return [...new Set([...existing, ...texts.map((text) => text.trim())])]
+    .filter(Boolean)
+    .slice(-ANNOUNCEMENT_HISTORY_MAX);
+}
+
+/** 履歴のファイルの中身（製品が書いてきた形のまま：2字下げのJSONの配列＋末尾の改行） */
+export function formatAnnouncementHistory(history: readonly string[]): string {
+  return `${JSON.stringify(history, null, 2)}\n`;
+}

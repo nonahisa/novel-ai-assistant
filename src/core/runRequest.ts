@@ -1,5 +1,6 @@
 import { EXTENSION_URI_AUTHORITY } from "./setupRequest";
 import { clientKeyOf } from "./externalAccessPermission";
+import type { PdfExportPlanLines } from "./pdfExportConfig";
 
 /**
  * VS Code の中のAI設定で走らせてもらう道（設計書6.87.22）。
@@ -380,8 +381,9 @@ export function describeTestAiConfirm(input: RunTestAiConfirmInput): {
  * 出ない。送る量の見積もり（`measure`）は「AIへ送る量」の確認のためのもので、通すと
  * 嘘の確認になる。
  *
- * - PDF は**画面で訊く段を既定で埋める**（全話・紙は一覧の先頭〔`PRINT_PRESETS[0]`〕・
- *   その紙の上下の余白の既定）。ブラウザは開かない
+ * - PDF は**作品の前回の［PDF出力］の設定**（紙・向き・範囲。`config.json` の `pdfExport`）で
+ *   組み、記録が無ければ文庫サイズ・縦書き・全話（作者の裁定 2026-10-16 夜の3）。上下の余白は
+ *   その紙の既定。確認の窓に、使う紙・向き・範囲を並べる。ブラウザは開かない
  *   ——印刷して PDF にするのは作者である
  * - EPUB は訊く段が無い。表紙は製品と同じ拾い方（焼いた画像 → 元の絵 → 無し）で、
  *   ［表紙を焼く］（`coverBake`）で焼いてあればそれが入る
@@ -422,6 +424,11 @@ export interface RunExportConfirmInput {
   workTitle: string;
   /** 本文のファイルの数（作者が規模を見て判断できるように） */
   episodeCount: number;
+  /**
+   * PDF で使う紙・向き・範囲（`core/pdfExportConfig.ts` の `describePdfExportPlan`）。
+   * **実際に組むものと同じ計画から作る**——確認の窓と作るものが食い違わないように
+   */
+  pdfPlan?: PdfExportPlanLines;
 }
 
 /**
@@ -440,11 +447,22 @@ export function describeExportConfirm(input: RunExportConfirmInput): {
     `どこから：外部AI（名乗り：${who}。名乗りは自己申告です）`,
     `作品：${input.workTitle}（本文のファイル ${input.episodeCount}話ぶん）`,
     `機能：${label}`,
-    pdf
-      ? "組み方：全話・紙は［PDF出力］の一覧の先頭（文庫サイズ・縦書き）・上下の余白はその紙の既定。" +
-        "紙や話を選びたいときは、ご自分で［PDF出力］を使ってください。"
-      : "組み方：本の設計図（設定/書籍/book.json。無ければ作品名から既定で組む）のとおり。" +
-        "表紙・裏表紙は焼いた画像があればそれを、無ければ元の絵を使います。",
+    ...(pdf
+      ? input.pdfPlan
+        ? [
+            `紙：${input.pdfPlan.paper}`,
+            `向き：${input.pdfPlan.direction}`,
+            `範囲：${input.pdfPlan.range}`,
+            `（${input.pdfPlan.source}。上下の余白はその紙の既定。紙や話を変えたいときは、ご自分で［PDF出力］を使ってください。次からはそこで選んだ設定を使います）`,
+          ]
+        : [
+            "組み方：前回の［PDF出力］で選んだ紙・向き・範囲（記録が無ければ文庫サイズ・縦書き・全話）。" +
+              "上下の余白はその紙の既定。",
+          ]
+      : [
+          "組み方：本の設計図（設定/書籍/book.json。無ければ作品名から既定で組む）のとおり。" +
+            "表紙・裏表紙は焼いた画像があればそれを、無ければ元の絵を使います。",
+        ]),
     `作るもの：作品の ${RUN_EXPORT_DIRECTORY} に新しいファイルを1つ作ります（同じ名前があれば別名にし、上書きしません）。`,
     pdf
       ? "ブラウザは開きません。印刷してPDFにするのは、あなたがファイルを開いてから行います。"

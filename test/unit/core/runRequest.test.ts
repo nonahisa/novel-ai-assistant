@@ -388,6 +388,30 @@ describe("書き出し（exportPdf・exportEpub）", () => {
     expect(epub.detail).toContain("book.json");
   });
 
+  test("PDFの確認には、使う紙・向き・範囲と、前回の設定か既定かを並べる（作者の裁定 2026-10-16 夜の3）", () => {
+    const pdf = describeExportConfirm({
+      ticket: ticket({ feature: "exportPdf" as never }),
+      workTitle: "星の町",
+      episodeCount: 19,
+      pdfPlan: {
+        paper: "A5（148mm × 210mm）",
+        direction: "縦書き",
+        range: "前回選んだ2話（001_灯.txt、003_春.txt）",
+        source: "前回の［PDF出力］で選んだ設定です",
+      },
+    });
+    for (const expected of [
+      "紙：A5（148mm × 210mm）",
+      "向き：縦書き",
+      "範囲：前回選んだ2話（001_灯.txt、003_春.txt）",
+      "前回の［PDF出力］で選んだ設定です",
+    ]) {
+      expect(pdf.detail).toContain(expected);
+    }
+    // 決め打ちの「文庫サイズ・縦書き」はもう言わない（使う紙と食い違う）
+    expect(pdf.detail).not.toContain("一覧の先頭");
+  });
+
   test("書き出し終えたら、置いた場所が result.findings にあると言う", () => {
     const view = runStatusOf(ticket({ feature: "exportEpub" as never }), state({ state: "done" }), CREATED);
     expect(view.message).toContain("result.findings");

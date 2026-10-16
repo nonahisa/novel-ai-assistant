@@ -460,6 +460,32 @@ describe("2026-10-16 に足した機能", () => {
     expect(missing.store.get(ID)?.state).toBe("refused");
   });
 
+  test("書き出し（PDF）：確認の窓に、使う紙・向き・範囲を並べる（作者の裁定 2026-10-16 夜の3）", async () => {
+    const exporter = {
+      inspect: vi.fn(async () => ({
+        ok: true as const,
+        episodeCount: 19,
+        pdfPlan: {
+          paper: "A4縦置き・20字×20行（公募の納品用）",
+          direction: "横書き",
+          range: "全話（19話）",
+          source: "前回の［PDF出力］で選んだ設定です",
+        },
+      })),
+      run: vi.fn(async () => ({ ok: false as const, reason: "作らない" })),
+    };
+    const { d } = deps(
+      { export: exporter, confirm: vi.fn(async () => false) },
+      { ticket: ticket({ feature: "exportPdf" }) }
+    );
+    await handleRunRequest(queryOf(), d);
+    const [, detail] = vi.mocked(d.confirm).mock.calls[0] ?? ["", ""];
+    expect(detail).toContain("紙：A4縦置き・20字×20行（公募の納品用）");
+    expect(detail).toContain("向き：横書き");
+    expect(detail).toContain("範囲：全話（19話）");
+    expect(detail).toContain("前回の［PDF出力］で選んだ設定です");
+  });
+
   test("書き出し：本文が1つも無い作品は確認を出さずに断る", async () => {
     const exporter = {
       inspect: vi.fn(async () => ({ ok: false as const, reason: "本文のファイルが見つかりません。" })),

@@ -525,8 +525,12 @@ export async function configureAnnouncement(
 
   try {
     // **他の欄を落とさない。** 読んだ設定へ `announce` だけを重ねる。
-    // 設定ファイルがまだ無い作品もあるので、そのときは既定で作る
+    // 設定ファイルがまだ無い作品もあるので、そのときは既定で作る。
+    // 先に読んだ設定をまるごと広げる——以前は欄を名指しで組み直しており、
+    // あとから足した種類・シリーズ・名前の系統・PDFの前回の設定を黙って消していた
+    // （2026-10-16 夜に `pdfExport` を足したときに発見）
     await writeWorkConfig(work, {
+      ...config,
       schemaVersion: config?.schemaVersion ?? CONFIG_SCHEMA_VERSION,
       workTitle: config?.workTitle ?? work.title,
       manuscriptDir: config?.manuscriptDir ?? DEFAULT_MANUSCRIPT_DIR,

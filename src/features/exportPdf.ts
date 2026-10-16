@@ -1,11 +1,19 @@
 import * as vscode from "vscode";
 import * as path from "../core/paths";
-import type { EpisodeFile, WorkEntry } from "../models/types";
+import type { EpisodeFile, WorkEntry, WorkPdfExportConfig } from "../models/types";
 import { scanWork } from "../core/scanner";
 import { readTextFile, type TextFileContent } from "../core/textFile";
 import { bookChaptersOf } from "../core/bookChapters";
 import { atomicWriteFile } from "../core/atomicWrite";
-import { readWorkConfig, workPaths } from "../core/workRegistry";
+import { readWorkConfig, workPaths, writeWorkConfig } from "../core/workRegistry";
+import {
+  describePdfExportPlan,
+  GRID_MAX,
+  GRID_MIN,
+  normalizeRelativePath,
+  resolvePdfExportRequest,
+  type PdfExportPlanLines,
+} from "../core/pdfExportConfig";
 import { readWorkKind } from "../core/workKindStore";
 import { readWorkFormat } from "../core/workFormatStore";
 import type { WorkFormatKey } from "../core/workFormat";
@@ -72,14 +80,16 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
   // 組み方は種類で決まる（設計書6.109）。形式（長さ）とは別の軸
   const kind = await readWorkKind(work);
 
-  const selected = await pickEpisodes(scan.episodes, unit.noun, format);
-  if (!selected || selected.length === 0) return;
+  const scope = await pickEpisodes(scan.episodes, unit.noun, format);
+  if (!scope || scope.episodes.length === 0) return;
+  const selected = scope.episodes;
 
   const paper = await pickPaper();
   if (!paper) return;
 
   // 上下の余白に刷るもの（設計書6.33.5 の2）。**書き出すときに選ぶだけで、
-  // どこにも保存しない**——紙の大きさと同じ持ち方にそろえた
+  // どこにも保存しない**（紙・向き・範囲は作品の設定に覚えるが、余白は覚えない。
+  // 作者名を刷るときは、名前を「どこにも保存しません」と言って訊いているため）
   const headerFooter = await pickHeaderFooter(
     paper.kind === "grid" ? GRID_HEADER_FOOTER : printPreset(paper.preset).headerFooter
   );
@@ -108,6 +118,10 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
     return;
   }
   const { target, conflicted, empty, gridNote } = composed;
+
+  // **作れた選択だけを覚える**（作者の裁定 2026-10-16 夜の3）。外部AIからの PDF の
+  // 書き出しが、この紙・向き・範囲を使う。覚えられなくても書き出しは済んでいる
+  await rememberPdfExport(work, paper, scope.all ? undefined : selected);
 
   // `.html` は既定のブラウザに関連づいている。VS Code の中で開くと
   // 印刷（Ctrl+P）が使えないので、外のブラウザへ渡す
@@ -314,9 +328,11 @@ async function composePdfExport(
 /**
  * 外部AIから頼まれた［PDF出力］（`run.request` の `exportPdf`。2026-10-16 の棚卸しの10件目）。
  *
- * **訊く段を既定で埋める**：全話・紙は一覧の先頭（`PRINT_PRESETS[0]`）・上下の余白は
- * その紙の既定。作者名を刷る既定の紙は今は無いが、もし置かれたら訊けないので
- * 余白を「なし」にして断りを残す（勝手に名前を決めない）。
+ * **訊く段を、作品の前回の［PDF出力］の設定で埋める**（作者の裁定 2026-10-16 夜の3）：
+ * 紙・向き・範囲は `config.json` の `pdfExport`（作者が画面で書き出せたときに覚える）、
+ * 記録が無ければ文庫サイズ・縦書き・全話。上下の余白はその紙の既定。作者名を刷る
+ * 既定の紙は今は無いが、もし置かれたら訊けないので余白を「なし」にして断りを残す
+ * （勝手に名前を決めない）。
  *
  * **ブラウザもフォルダーも開かない**（作者の画面を勝手に動かさない）。返すのは
  * 作ったファイルの場所（作品フォルダーからの相対）と数字だけ。
@@ -334,39 +350,40 @@ export async function exportPdfForRequest(
     }
   | { ok: false; reason: string; nextAction?: string }
 > {
-  const scan = await scanWork(work);
-  if (scan.episodes.length === 0) {
-    return { ok: false, reason: `「${work.title}」に本文のファイルが見つかりません。` };
-  }
-  const preset = PRINT_PRESETS[0];
-  const notices: string[] = [
-    `紙は「${preset.label}」、上の余白に${marginContentLabel(preset.headerFooter.top)}・` +
-      `下の余白に${marginContentLabel(preset.headerFooter.bottom)}で組みました（［PDF出力］の既定）。`,
-  ];
+  const plan = await planPdfExportForRequest(work);
+  if (!plan.ok) return plan;
+  const { paper, episodes, lines } = plan;
+
+  const defaults = paper.kind === "grid" ? GRID_HEADER_FOOTER : printPreset(paper.preset).headerFooter;
   const headerFooter: HeaderFooter = {
-    top: preset.headerFooter.top === "author" ? "none" : preset.headerFooter.top,
-    bottom: preset.headerFooter.bottom === "author" ? "none" : preset.headerFooter.bottom,
+    top: defaults.top === "author" ? "none" : defaults.top,
+    bottom: defaults.bottom === "author" ? "none" : defaults.bottom,
   };
-  if (
-    headerFooter.top !== preset.headerFooter.top ||
-    headerFooter.bottom !== preset.headerFooter.bottom
-  ) {
+  const notices: string[] = [
+    `紙は${lines.paper}・${lines.direction}、範囲は${lines.range}、` +
+      `上の余白に${marginContentLabel(headerFooter.top)}・下の余白に${marginContentLabel(
+        headerFooter.bottom
+      )}で組みました（${lines.source}）。`,
+  ];
+  if (headerFooter.top !== defaults.top || headerFooter.bottom !== defaults.bottom) {
     notices.push("作者名を刷る余白は、外からは名前を訊けないため空けました。");
   }
 
   const composed = await composePdfExport(work, {
-    episodes: scan.episodes,
+    episodes,
     format: await readWorkFormat(work),
     kind: await readWorkKind(work),
-    paper: { kind: "preset", preset: preset.id },
+    paper,
     headerFooter,
     author: undefined,
   });
   if (!composed.ok) return { ok: false, reason: composed.message };
   if (composed.empty.length > 0) notices.push(emptyNote(composed.empty).trim());
+  // 公募の納品用は枚数も（画面の知らせと同じ一言）
+  if (composed.gridNote) notices.push(composed.gridNote.trim());
   return {
     ok: true,
-    filePath: path.relative(work.folderPath, composed.target).replace(/\\/g, "/"),
+    filePath: normalizeRelativePath(path.relative(work.folderPath, composed.target)),
     bytes: composed.bytes,
     chapters: composed.chapters,
     conflicted: composed.conflicted,
@@ -375,16 +392,130 @@ export async function exportPdfForRequest(
 }
 
 /**
+ * 外部AIの依頼で組む紙・話（作者の裁定 2026-10-16 夜の3）。**確認の窓に並べるものと、
+ * 実際に組むものを同じ関数で決める**（`runRequestRunners.ts` の inspect と
+ * `exportPdfForRequest` の両方がここを通る）。
+ *
+ * 前回の設定が読めない（`config.json` が壊れている）ときは、記録が無いのと同じく
+ * 既定で組む。書き出しは原稿にも設定にも触れないので、ここで止める理由が無い。
+ * 壊れた設定ファイルは直さない（読むだけ）。
+ */
+export async function planPdfExportForRequest(
+  work: WorkEntry
+): Promise<
+  | { ok: true; paper: PaperChoice; episodes: EpisodeFile[]; lines: PdfExportPlanLines }
+  | { ok: false; reason: string; nextAction?: string }
+> {
+  const scan = await scanWork(work);
+  if (scan.episodes.length === 0) {
+    return {
+      ok: false,
+      reason: `「${work.title}」に本文のファイルが見つかりません。`,
+      nextAction: "本文のファイルを作品フォルダーに入れてから頼んでください",
+    };
+  }
+  let saved: WorkPdfExportConfig | undefined;
+  try {
+    saved = (await readWorkConfig(work))?.pdfExport;
+  } catch {
+    saved = undefined;
+  }
+  const byRelative = new Map(
+    scan.episodes.map((episode) => [episodeRelativePath(work, episode), episode] as const)
+  );
+  const plan = resolvePdfExportRequest(saved, [...byRelative.keys()]);
+  const episodes = plan.files
+    .map((file) => byRelative.get(file))
+    .filter((episode): episode is EpisodeFile => episode !== undefined);
+  return {
+    ok: true,
+    paper: paperChoiceOf(plan.paper),
+    episodes,
+    lines: describePdfExportPlan(plan),
+  };
+}
+
+/** 作品フォルダーからの相対パス（区切りは `/`）。前回の範囲はこの形で覚える */
+function episodeRelativePath(work: WorkEntry, episode: EpisodeFile): string {
+  return normalizeRelativePath(path.relative(work.folderPath, episode.filePath));
+}
+
+function paperChoiceOf(paper: WorkPdfExportConfig["paper"]): PaperChoice {
+  if (paper.kind === "preset") return { kind: "preset", preset: paper.preset };
+  return {
+    kind: "grid",
+    paper: paper.paper,
+    grid: {
+      columns: paper.columns,
+      rows: paper.rows,
+      hanging: paper.hanging,
+      vertical: paper.vertical,
+    },
+    marginMm: paper.marginMm,
+  };
+}
+
+function paperConfigOf(paper: PaperChoice): WorkPdfExportConfig["paper"] {
+  if (paper.kind === "preset") return { kind: "preset", preset: paper.preset };
+  return {
+    kind: "grid",
+    paper: paper.paper,
+    columns: paper.grid.columns,
+    rows: paper.grid.rows,
+    hanging: paper.grid.hanging,
+    vertical: paper.grid.vertical,
+    marginMm: paper.marginMm,
+  };
+}
+
+/**
+ * 作者が画面で選んだ紙・向き・範囲を、作品の設定（`config.json` の `pdfExport`）に覚える
+ * （作者の裁定 2026-10-16 夜の3）。`selected` が undefined なら「すべての話」。
+ *
+ * - 書くのは `writeWorkConfig`（ほかの欄を落とさず、読んだままの改行の形で書き戻す）
+ * - **同じ設定なら書かない**（書き出すたびに設定ファイルを触ると、同期の差分が濁る）
+ * - 設定ファイルが無い・読めない（壊れている）ときは書かない。壊れたJSONは直さない（規則2）
+ * - 覚えられなくても書き出しは済んでいるので、作者には知らせずログにだけ残す
+ */
+async function rememberPdfExport(
+  work: WorkEntry,
+  paper: PaperChoice,
+  selected: readonly EpisodeFile[] | undefined
+): Promise<void> {
+  const next: WorkPdfExportConfig = {
+    paper: paperConfigOf(paper),
+    range: selected
+      ? { scope: "files", files: selected.map((episode) => episodeRelativePath(work, episode)) }
+      : { scope: "all" },
+  };
+  try {
+    const config = await readWorkConfig(work);
+    if (!config) return;
+    if (JSON.stringify(config.pdfExport) === JSON.stringify(next)) return;
+    await writeWorkConfig(work, { ...config, pdfExport: next });
+  } catch (error) {
+    useLogFile(work.folderPath);
+    logFailure("PDF出力の設定を覚える", {
+      作品: work.title,
+      内容: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * どの話を組むかを決める。
  *
  * **全部と、選ぶ、の2択にする。** 話が19本ある作品で毎回すべてに
  * チェックを入れさせるのは、いちばんよく使う道を遠回りにすることになる。
+ *
+ * 「すべて」を選んだかも返す。覚えるときに「そのときの全話」と「選んだ話」を
+ * 分けるため（すべてを選んだ作者は、あとから足した話も入ってほしい）。
  */
 async function pickEpisodes(
   episodes: readonly EpisodeFile[],
   noun: string,
   format: WorkFormatKey | undefined
-): Promise<EpisodeFile[] | undefined> {
+): Promise<{ episodes: EpisodeFile[]; all: boolean } | undefined> {
   const scope = await vscode.window.showQuickPick(
     [
       {
@@ -405,7 +536,7 @@ async function pickEpisodes(
     }
   );
   if (!scope || isCancelItem(scope) || !("all" in scope)) return undefined;
-  if (scope.all) return [...episodes];
+  if (scope.all) return { episodes: [...episodes], all: true };
 
   // **複数選択に「取りやめる」を足さない。** VS Code が自分で
   // 「OK」「キャンセル」を出すので、項目として並べるとかえって紛らわしい
@@ -423,7 +554,7 @@ async function pickEpisodes(
       ignoreFocusOut: true,
     }
   );
-  return picked?.map((item) => item.episode);
+  return picked ? { episodes: picked.map((item) => item.episode), all: false } : undefined;
 }
 
 /** 紙の選び方。ふつうの紙（流し込み）か、公募の納品用（1字1マス） */
@@ -586,9 +717,8 @@ async function pickGridMargin(
   return picked.mm;
 }
 
-/** 自分で決める字数・行数の幅。小さすぎても大きすぎても、紙として読めない */
-const GRID_MIN = 5;
-const GRID_MAX = 60;
+// 自分で決める字数・行数の幅（GRID_MIN・GRID_MAX）は `core/pdfExportConfig.ts` にある
+// （前回の設定を読むときも同じ幅で確かめるため）
 
 async function askGridNumber(
   what: string,

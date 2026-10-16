@@ -151,11 +151,17 @@ describe("自動で書かれるファイルの見分け", () => {
     expect(
       isAutoWrittenPath("短編/.aiwriter/pending-moves/char_007_0123456789abcdef01234567.json")
     ).toBe(true);
-    // 外部AIの台帳の案（2026-10-16 の続き。設計書6.87.24）も、まだ台帳になっていない案
+  });
+
+  test("外部AIの台帳の案（pending-ledger）は畳まず作者に訊く（作者の裁定 2026-10-16 夜の6）", () => {
+    // 再抽出では戻らない案である。片側を黙って残すと、もう片方の機械で
+    // 外部AIが置いた案（作者がまだ見ていない）が消える
     expect(
       isAutoWrittenPath("短編/.aiwriter/pending-ledger/chapter-0123456789abcdef.json")
-    ).toBe(true);
-    expect(isAutoWrittenPath("短編\\.aiwriter\\pending-ledger\\scheduleStep-0123456789abcdef.json")).toBe(true);
+    ).toBe(false);
+    expect(isAutoWrittenPath("短編\\.aiwriter\\pending-ledger\\scheduleStep-0123456789abcdef.json")).toBe(false);
+    // 追記型でもないので、行を混ぜる側にも入らない（1件1ファイルのJSON）
+    expect(isAppendOnlyPath("短編/.aiwriter/pending-ledger/chapter-0123456789abcdef.json")).toBe(false);
   });
 
   test("原稿と設定資料は畳めない", () => {
@@ -247,6 +253,30 @@ describe("衝突の振り分け", () => {
     expect(classified.manuscripts).toEqual(["短編/本文/第1話.txt"]);
     // 設定資料1件＋本文1件だけ。追記型の2件は入らない
     expect(authoredConflictCount(classified)).toBe(2);
+  });
+
+  test("台帳の案（pending-ledger）の衝突は、作者が選ぶ側に数える（作者の裁定 2026-10-16 夜の6）", () => {
+    const ledger = "短編/.aiwriter/pending-ledger/foreshadowStatus-0123456789abcdef.json";
+    const classified = classifyConflicts([
+      ledger,
+      "短編/.aiwriter/pending-characters/char_001.json",
+    ]);
+    // 人物の承認待ちは今までどおり機械が畳む
+    expect(classified.autoWritten).toEqual(["短編/.aiwriter/pending-characters/char_001.json"]);
+    expect(classified.appendOnly).toEqual([]);
+    // 設定資料の規則（設定/ のJSON）にも乗らず、作者が1件ずつ選ぶ側へ行く
+    expect(classified.settings).toEqual([]);
+    expect(classified.manuscripts).toEqual([ledger]);
+    expect(authoredConflictCount(classified)).toBe(1);
+
+    // 机上の判定（merge-tree の返事）でも、作者の側に数える
+    const preview = parseMergeTree({
+      code: 1,
+      stdout: output("8f4160e6151807d171489775f860afd989e47ff5", [ledger]),
+      stderr: "",
+    });
+    expect(preview.autoWritten).toEqual([]);
+    expect(preview.authored).toEqual([ledger]);
   });
 });
 

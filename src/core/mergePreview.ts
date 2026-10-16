@@ -58,10 +58,10 @@ export function mergeTreeArgs(ours: string, theirs: string): string[] {
  * |---|---|---|
  * | `.aiwriter/stats/` | 畳める | 端末ごとのファイル。読み込むときに合算する（5.5.6） |
  * | `.aiwriter/cache/` | 畳める | 作り直せる |
- * | `.aiwriter/config.json` | 畳める | 作品名と置き場の名前。食い違うのは登録した時刻ぐらいである |
+ * | `.aiwriter/config.json` | 畳める | 作品名と置き場の名前。食い違うのは登録した時刻や、［PDF出力］で前回選んだ紙・範囲（`pdfExport`）ぐらいである |
  * | `.aiwriter/history/`・提案・ロック | **両方の行を残す** | 追記型なので、両方の行を残せば正しい記録になる（`editHistory.ts`）。見分けるのは `isAppendOnlyPath` |
  * | `.aiwriter/pending-characters/`・`pending-settings/` | 畳める | **AIの提案で、まだ資料になっていない。** 再抽出で作り直せる（5.5.18。`pending-settings/` は人物以外の承認待ち、2026-09-23〜） |
- * | `.aiwriter/pending-ledger/` | 畳める | 外部AIの台帳の案（章立て・伏線・予定の段。6.87.24）。採るまで台帳に入らない。**再抽出では戻らない**が、ファイル名が「同じ相手」の印なので衝突するのは同じ相手への案どうしで、片側が残れば作者はその相手について判断できる（落ちた側は外部AIが置き直せる） |
+ * | `.aiwriter/pending-ledger/` | **畳めない** | 外部AIの台帳の案（章立て・伏線・予定の段。6.87.24）。**再抽出では戻らない**ので、片側を黙って残すと、もう片方の機械で置かれた案（作者がまだ見ていない）が消える。作者に訊く（作者の裁定 2026-10-16 夜の6） |
  * | `.aiwriter/extracted.json` | **畳めない** | 抽出済みの話の記録。正しくは両方の和集合で、片方を残すと再抽出が走る |
  * | `.aiwriter/photo-transcribe-request.json` | **畳めない** | 写真の書き起こしの「AIへの頼み」。作者が書いた文で、片方を残すともう片方の頼みが消える（設計書6.117.7） |
  * | `設定/_schema/` | 畳める | AI向けのスキーマ。次の生成で作り直される（`settingsConflictRule.ts` と同じ判断。0.45.1） |
@@ -93,9 +93,12 @@ export function isAutoWrittenPath(filePath: string): boolean {
     /(^|\/)\.aiwriter\/pending-settings\//.test(normalized) ||
     // 語り手の取り違えの移す案（0.102.3）。次の抽出で積み直せる提案である
     /(^|\/)\.aiwriter\/pending-moves\//.test(normalized) ||
-    // 外部AIの台帳の案（章立て・伏線・予定の段。2026-10-16 の続き、設計書6.87.24）。
-    // 作者が採るまで台帳に入らない案である点はほかの承認待ちと同じ
-    /(^|\/)\.aiwriter\/pending-ledger\//.test(normalized) ||
+    /*
+      外部AIの台帳の案（`.aiwriter/pending-ledger/`。設計書6.87.24）は**ここに入れない**
+      （作者の裁定 2026-10-16 夜の6）。ほかの承認待ちと違って再抽出では戻らないので、
+      片側を黙って残すと、もう片方の機械で外部AIが置いた案が作者の目に触れずに消える。
+      作者が1件ずつ選ぶ側（`classifyConflicts` の manuscripts）へ回す
+    */
     /(^|\/)\.aiwriter\/config\.json$/.test(normalized) ||
     // 設定資料の生成物（0.45.1）。設定フォルダーの名前は変えられるので
     // フォルダー名では縛らず、生成物の側の名前で見る
