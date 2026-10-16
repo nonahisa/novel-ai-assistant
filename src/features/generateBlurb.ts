@@ -21,13 +21,16 @@ import { CatchphraseHistory } from "../core/catchphraseHistory";
 import {
   buildSynopsisMarkdown,
   parseSynopsisMarkdown,
+  SYNOPSIS_FILE,
+  SYNOPSIS_LABEL,
   type SynopsisDoc,
 } from "../core/synopsisDoc";
+import { rewriteMarkdownFile } from "../core/plotFile";
+import { hasUnsavedOpenDocument } from "../core/openDocumentEdit";
 import { buildSynopsisListMarkdown } from "../core/synopsisMarkdown";
 import { loadSynopsisChapterMarks } from "../core/synopsisChapters";
 import { buildEmotionCurveMarkdown } from "../core/emotionCurve";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
-import { atomicWriteFile, createManagedRecoveryPath } from "../core/atomicWrite";
 import {
   BLURB_MAX_CHARS,
   BLURB_SCHEMA,
@@ -68,7 +71,6 @@ import { confirmRun, warnWithLog } from "../views/notify";
  * `設定/synopsis.md` へ書く。
  */
 
-const SYNOPSIS_FILE = "synopsis.md";
 /**
  * 紹介文・キャッチコピーへ渡す冒頭本文の量。
  * 多く送っても紹介文は良くならず、料金だけ増える。
@@ -110,6 +112,9 @@ export async function generateWorkBlurb(
   registry: AIRegistry
 ): Promise<void> {
   useLogFile(work.folderPath);
+  // **AIの設定より先に、書き込み先の未保存を確かめる**（設計書6.4.8の3）。
+  // 書く段で断ると、処理量（有料なら料金）を使ってから何も残らない
+  if (await stopIfSynopsisUnsaved(work)) return;
   const resolved = await ensureConfigured(registry, "generate");
   if (!resolved) return;
 
@@ -144,6 +149,8 @@ export async function generateWorkBlurb(
     { remember: { id: "ai.run.generateBlurb" }, work }
   );
   if (!confirmed) return;
+  // 確認の画面を出している間に書き始めることがあるので、呼ぶ直前にもう一度見る
+  if (await stopIfSynopsisUnsaved(work)) return;
 
   // **応答の見込みに実測を使う**（設計書6.65.16の2、6.77の第2段）。
   // 紹介文は400字ほどだが、渡さないとOllamaの `num_ctx` が
@@ -261,7 +268,7 @@ export async function generateWorkBlurb(
   );
   if (answer !== "採用") return;
 
-  await writeSynopsisDoc(work, material.workTitle, (current) => ({
+  await writeAdoptedSynopsis(work, material.workTitle, parsed.blurb, (current) => ({
     ...current,
     blurb: parsed.blurb,
   }));
@@ -272,6 +279,8 @@ export async function generateCatchphrases(
   registry: AIRegistry
 ): Promise<void> {
   useLogFile(work.folderPath);
+  // 紹介文と同じく、AIの設定より先に書き込み先の未保存を確かめる
+  if (await stopIfSynopsisUnsaved(work)) return;
   const resolved = await ensureConfigured(registry, "generate");
   if (!resolved) return;
 
@@ -322,6 +331,9 @@ export async function generateCatchphrases(
 
   // 「別の案を出す」を選ぶたび、却下した案を渡して繰り返す
   for (;;) {
+    // 「別の案を出す」で回るたびにAIを呼ぶので、毎回その直前に見る
+    // （案を選んでいる間に synopsis.md を書き始めることがある）
+    if (await stopIfSynopsisUnsaved(work)) return;
     const rejected = await history.load();
     const response = await withCancellableProgress(
       "キャッチコピーを考えています",
@@ -462,7 +474,7 @@ export async function generateCatchphrases(
     await history.add(
       valid.map((candidate) => candidate.text).filter((item) => item !== text)
     );
-    await writeSynopsisDoc(work, material.workTitle, (current) => ({
+    await writeAdoptedSynopsis(work, material.workTitle, text, (current) => ({
       ...current,
       catchphrase: text,
     }));
@@ -587,6 +599,10 @@ async function buildEpisodeSection(
  *
  * 「設定資料集を出力」から呼ぶ。あらすじを作り直したあと、
  * 読み物の側も追随させるため。
+ *
+ * **書けなければ投げる**（未保存の変更がある・読み込み後に外で変わった等。文は作者に見せられる形）。
+ * 0.107.12 までは書き手の中でエラーを出して戻っていたので、呼び手は「各話あらすじを作りました」と
+ * 言い続けていた。
  */
 export async function refreshSynopsisDoc(
   work: WorkEntry,
@@ -617,7 +633,14 @@ export async function readSynopsisDoc(work: WorkEntry): Promise<SynopsisDoc> {
  *
  * **今ある内容を読んでから、変える部分だけを差し替える。**
  * 紹介文を作り直しても採用済みのキャッチコピーは残す（その逆も同じ）。
- * 元の内容は回復先へ退避してから書く（既存ファイルは上書きできない）。
+ *
+ * **書く口は plot.md と同じ**（`rewriteMarkdownFile`、設計書6.4.8）——読み込み時のハッシュを照合し、
+ * エディターで開いていれば変わった所だけを文書へ当てて保存し、**未保存の変更があれば書かずに投げる**。
+ * 0.107.12 までは自前の「退避 → 新規作成」で、照合も未保存の確かめもしていなかったため、
+ * 開いたまま書きかけていると巻き込むか、Ctrl+S が「ファイルのほうが新しい」で断られた。
+ *
+ * 書けなければ投げる（文は作者に見せられる形）。知らせ方は呼び手が決める
+ * （採用の場面はその場で断り、資料集の書き出しは失敗の知らせへ回す）。
  */
 async function writeSynopsisDoc(
   work: WorkEntry,
@@ -625,58 +648,65 @@ async function writeSynopsisDoc(
   update: (current: SynopsisDoc) => SynopsisDoc
 ): Promise<void> {
   const target = await synopsisPath(work);
-  const current = await readSynopsisDoc(work);
-  const next = update(current);
   // 各話あらすじと感情曲線も同じ文書に載せる（作者の要望、2026-08-14／15）。
   // 真実は chapter_synopses.json 側にあるので、書くたびに組み立て直す
   const sections = await buildEpisodeSection(work, workTitle);
-  const body = buildSynopsisMarkdown(
-    workTitle,
-    next,
-    sections.episodes,
-    sections.emotion
+
+  await rewriteMarkdownFile(
+    target,
+    (current) =>
+      buildSynopsisMarkdown(
+        workTitle,
+        update(current ? parseSynopsisMarkdown(current) : { catchphrase: null, blurb: "" }),
+        sections.episodes,
+        sections.emotion
+      ),
+    SYNOPSIS_LABEL
   );
 
-  await vscode.workspace.fs.createDirectory(
-    path.toUri(path.dirname(target))
-  );
+  // **書いたら開いて見せる。** 「どこに入ったのか分からない」と
+  // 言われていた（作者の指摘、2026-08-16）。
+  // どのエディターで開くかは決め打ちしない。`vscode.open` なら
+  // 作者が既定にしたもの（Markdown Editor など）で開く
+  await vscode.commands.executeCommand("vscode.open", path.toUri(target));
+}
 
-  let recoveryPath: string | undefined;
-  if (await exists(target)) {
-    try {
-      recoveryPath = await createManagedRecoveryPath(target);
-      await vscode.workspace.fs.rename(
-        path.toUri(target),
-        path.toUri(recoveryPath),
-        { overwrite: false }
-      );
-    } catch (error) {
-      vscode.window.showErrorMessage(
-        `${SYNOPSIS_FILE} を退避できませんでした: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-      return;
-    }
-  }
-
+/**
+ * 採用した紹介文・キャッチコピーを書く。書けなければ、その理由を出す。
+ *
+ * AIの答えはもう出ているので、ここで断るのは「呼んでいる間に作者が打ち始めた」ときだけ
+ * （呼ぶ前の確かめは `stopIfSynopsisUnsaved`）。**採用した文はログに残す**——やり直すと
+ * もう一度AIを呼ぶ（有料なら料金がかかる）ので、書けなかった文を捨てない（実装ルール5）
+ *
+ * @param adopted 作者が採用した紹介文／キャッチコピー（書けなかったときにログへ残す）
+ */
+async function writeAdoptedSynopsis(
+  work: WorkEntry,
+  workTitle: string,
+  adopted: string,
+  update: (current: SynopsisDoc) => SynopsisDoc
+): Promise<void> {
   try {
-    await atomicWriteFile(target, new TextEncoder().encode(body), {
-      mode: "create",
-    });
-    // **書いたら開いて見せる。** 「どこに入ったのか分からない」と
-    // 言われていた（作者の指摘、2026-08-16）。
-    // どのエディターで開くかは決め打ちしない。`vscode.open` なら
-    // 作者が既定にしたもの（Markdown Editor など）で開く
-    await vscode.commands.executeCommand("vscode.open", path.toUri(target));
+    await writeSynopsisDoc(work, workTitle, update);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    vscode.window.showErrorMessage(
-      recoveryPath
-        ? `${SYNOPSIS_FILE} を保存できませんでした: ${detail} 元の内容は「${recoveryPath}」にあります。`
-        : `${SYNOPSIS_FILE} を保存できませんでした: ${detail}`
-    );
+    logFailure("紹介文・キャッチコピーの書き込み", { 詳細: detail, 採用した文: adopted });
+    void vscode.window.showErrorMessage(`${detail}（採用した文はログに残しました）`);
   }
+}
+
+/**
+ * synopsis.md に未保存の変更があれば、保存を頼んで true を返す（断りの文は書く口と同じ呼び名）。
+ *
+ * **AIを呼ぶ前に確かめる**（`generatePlot` の `stopIfPlotUnsaved` と同じ考え方）。書く段で断ると、
+ * 処理量（有料なら料金）を使ってから何も残らない。書く口の確かめも残す（呼んでいる間に打ち始めることがある）
+ */
+async function stopIfSynopsisUnsaved(work: WorkEntry): Promise<boolean> {
+  if (!hasUnsavedOpenDocument(await synopsisPath(work))) return false;
+  void vscode.window.showWarningMessage(
+    `${SYNOPSIS_LABEL}に保存していない変更があります。保存してから、もう一度やり直してください。`
+  );
+  return true;
 }
 
 import {
@@ -690,12 +720,3 @@ export {
   parseBlurbResponse,
   parseCatchphraseResponse,
 } from "../core/blurbValidation";
-
-async function exists(filePath: string): Promise<boolean> {
-  try {
-    await vscode.workspace.fs.stat(path.toUri(filePath));
-    return true;
-  } catch {
-    return false;
-  }
-}

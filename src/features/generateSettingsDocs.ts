@@ -290,11 +290,17 @@ export async function generateSettingsDocs(
       // あらすじだけを作ったときは1件も無く、何も開かなかった
       writtenFiles.push(SYNOPSIS_FILE);
     } catch (error) {
-      await vscode.window.showErrorMessage(
-        "各話あらすじを保存できませんでした。" +
-          (error instanceof Error ? error.message : String(error))
+      /*
+        **ほかの資料の書き出しは止めない**（2026-10-16）。synopsis.md は plot.md と同じ書く口
+        （`rewriteMarkdownFile`）を通るようになり、開いたまま保存していなければ書かずに投げる。
+        ここで戻ると、抽出のあとの書き出し（`silent`）まで人物一覧などを作り直さなくなる。
+        知らせは待たずに出す（押されるまで書き出しが止まらないように）。
+      */
+      const detail = error instanceof Error ? error.message : String(error);
+      logFailure("各話あらすじの書き出し", { 詳細: detail });
+      void vscode.window.showWarningMessage(
+        `各話あらすじを ${SYNOPSIS_FILE} へ書けませんでした。${detail}`
       );
-      return;
     }
 
     // 統合前に作られた synopses.md が残っていると、古い内容を最新だと
