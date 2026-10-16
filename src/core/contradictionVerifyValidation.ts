@@ -4,6 +4,7 @@ import {
   type VerifyRejectReason,
 } from "../prompts/contradictionVerify";
 import { normalizeForComparison } from "./groundedEvidence";
+import { lookupKnownAtValue } from "./contradictionValidation";
 
 /**
  * 矛盾の検証結果を読む（設計書6.10.5）。
@@ -81,6 +82,50 @@ function echoesSpeechKeep(explanation: string): boolean {
   return VERIFY_SPEECH_KEEP_SENTENCES.some((sentence) =>
     field.includes(normalizeForComparison(sentence))
   );
+}
+
+/**
+ * 「まだ明かされていない」で取り下げるとき、作者へ残す説明。
+ *
+ * **AIの説明はそのまま残さない。** 2026-10-16 の実例は「一人称の設定が不明」で、
+ * 資料には一人称がある。そのまま補足へ足すと、作者に誤った読みを渡す。
+ */
+export const NOT_YET_REVEALED_UNFOUNDED_NOTE =
+  "この話より後で明かされる設定だという記録が無いため、「まだ明かされていない」の却下は受け取らずに残しました";
+
+/**
+ * 「まだ明かされていない」の却下に、話数の裏付けがあるか（2026-10-16）。
+ *
+ * **検出へ渡す材料は、その話の時点で分かっていることだけ**（設計書6.10.3）なので、
+ * 却下が正しいのは「この設定は対象より後の話で分かる」と言える記録があるときだけ
+ * である。記録が無い（空を含む）・あっても対象の話以前なら、その却下は根拠が無い。
+ *
+ * **空も根拠の無い側に入れる。** 索引（`buildKnownAtIndex`）は変化の記録の値と
+ * 完全に一致するときしか話数を返さず、検出の段は「一人称: ボク」の形で書くので、
+ * 実データでは空が普通である。そのとき検証のプロンプトには「（不明）」と入り、
+ * gemma4:26b はこれを「設定が不明」と読んで、正しい指摘を3回とも取り下げた
+ * （「第3話」を渡すと3回とも採用。`docs/measurements/2026-10-16-ai-measure.md`）。
+ *
+ * **判断できなかったものとして通す**（`echoesSpeechKeep` と同じ作法）。消す根拠が
+ * 無い却下で、本物の指摘を作者から隠さない。
+ *
+ * **答えを覚えた後にかける。** 製品は検証の答えをキャッシュしており、ここを
+ * 読み取りのあとに置けば、版を上げなくても前に覚えた却下にも効く。
+ *
+ * @param targetChapter 対象の話（まとめたチャンクはいちばん前の話）。分からなければ
+ *   null で、そのときは材料も話数で絞れていないので手を付けない
+ */
+export function guardNotYetRevealed(
+  outcome: VerifyOutcome,
+  knownAt: ReadonlyMap<string, number[]>,
+  settingSays: string,
+  targetChapter: number | null
+): VerifyOutcome {
+  if (outcome.keep || outcome.reason !== "まだ明かされていない") return outcome;
+  if (targetChapter === null) return outcome;
+  const chapters = lookupKnownAtValue(knownAt, settingSays);
+  if (chapters.some((chapter) => chapter > targetChapter)) return outcome;
+  return undecidedOutcome(NOT_YET_REVEALED_UNFOUNDED_NOTE);
 }
 
 function normalizeReason(value: string): VerifyRejectReason | undefined {

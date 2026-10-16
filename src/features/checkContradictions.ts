@@ -124,6 +124,7 @@ import {
 } from "../prompts/contradictionVerify";
 import {
   describeVerifyResults,
+  guardNotYetRevealed,
   parseVerifyOutcome,
   undecidedOutcome,
   type VerifyOutcome,
@@ -977,8 +978,17 @@ export async function checkContradictions(
   /**
    * 検出した1件。**検証まで、どのチャンクの何行目かを持ち回る**
    * （設計書6.10.5）。前後の本文を渡すのに要る
+   *
+   * `mode` は、どちらの向きで見つけた指摘か（設計書6.10.4）。「まだ明かされて
+   * いない」の却下を話数で確かめるのは、その話の時点の材料で見つけた側
+   * （settled）だけにする——逆向き（future）は**あとで分かる事実**を材料に
+   * しているので、却下の理由として筋が通りうる
    */
-  const found: Array<{ issue: AcceptedContradiction; chunk: Chunk }> = [];
+  const found: Array<{
+    issue: AcceptedContradiction;
+    chunk: Chunk;
+    mode: "settled" | "future";
+  }> = [];
   let rejectedCount = 0;
   /**
    * 検証で落とした理由。**最後にまとめて操作ログへ出す**（設計書6.8）。
@@ -1105,7 +1115,7 @@ export async function checkContradictions(
           }
           if (raw === undefined) continue;
 
-          collect(raw, chunk);
+          collect(raw, chunk, "settled");
 
           // **あとで判明する事実とも突き合わせる**（設計書6.10.4）。
           // 「まだ知らない」ではなく「両立しない」を探す、逆向きの見方である
@@ -1122,21 +1132,25 @@ export async function checkContradictions(
               futureRaw !== RETRY_SMALLER &&
               !(futureRaw instanceof AIError)
             ) {
-              collect(futureRaw, chunk);
+              collect(futureRaw, chunk, "future");
             }
           }
           processedChunks++;
         }
 
         /** 応答を検証して、どのチャンクの指摘かを覚えておく */
-        function collect(raw: unknown, chunk: Chunk): void {
+        function collect(
+          raw: unknown,
+          chunk: Chunk,
+          mode: "settled" | "future"
+        ): void {
           const validated = validateContradictions(raw, chunk);
           rejectedCount += validated.rejected.length;
           rejectedReasons.push(
             ...validated.rejected.map((entry) => entry.reason)
           );
           for (const issue of validated.accepted) {
-            found.push({ issue, chunk });
+            found.push({ issue, chunk, mode });
           }
         }
 
@@ -1303,7 +1317,19 @@ export async function checkContradictions(
               // 提案パネルにも同じ進みを出す（本文を読む段とは別の札で）
               options.onVerifyProgress?.(done, found.length);
 
-              const outcome = await verify(entry.issue, entry.chunk, controller);
+              const asked = await verify(entry.issue, entry.chunk, controller);
+              // **「まだ明かされていない」の却下は、話数の裏付けを確かめる**
+              // （2026-10-16）。その話の時点の材料で見つけた指摘だけにかける。
+              // 覚えた答えにも効くよう、読み取りのあとに置く（MCP と同じ）
+              const outcome =
+                entry.mode === "settled"
+                  ? guardNotYetRevealed(
+                      asked,
+                      settings.knownAt,
+                      entry.issue.settingSays,
+                      entry.chunk.chapterStart
+                    )
+                  : asked;
               if (outcome.undecided) verifyUndecided++;
               if (!outcome.keep) {
                 verifyRejected.push({ reason: outcome.reason });
@@ -1842,6 +1868,11 @@ interface SettingsMaterial {
   futureFactsFor(text: string, chapter: number | null): string;
   /** その設定が何話で分かるか。検証で使う（設計書6.10.5） */
   knownAtFor(value: string): string;
+  /**
+   * `knownAtFor` が引く索引そのもの。検証の「まだ明かされていない」の却下を
+   * 話数で確かめるのに使う（`guardNotYetRevealed`、2026-10-16）
+   */
+  knownAt: ReadonlyMap<string, number[]>;
   synopsesBefore(chapter: number | null): string;
   /**
    * 話ごとのあらすじ（設計書6.10.9）。**作中の日付を読むのに要る。**
@@ -1984,6 +2015,7 @@ async function collectSettings(
     },
     // 書き方は MCP と同じ関数（`core/contradictionAssembly.ts`）
     knownAtFor: (value) => describeKnownAt(knownAt, value),
+    knownAt,
     synopsesBefore(chapter) {
       if (chapter === null) return "";
       // **その話より前だけを渡す。** 後の話を渡すと、まだ書かれていない

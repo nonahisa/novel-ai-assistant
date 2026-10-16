@@ -41,6 +41,7 @@ import {
 } from "../../prompts/contradictionVerify";
 import {
   describeVerifyResults,
+  guardNotYetRevealed,
   parseVerifyOutcome,
   undecidedOutcome,
   type VerifyOutcome,
@@ -1309,7 +1310,15 @@ async function verifyContradictionResults(
           schema: CONTRADICTION_VERIFY_SCHEMA,
           temperature,
         });
-        outcome = parseVerifyOutcome(reply.text);
+        // 「まだ明かされていない」の却下は話数の裏付けを確かめる（製品と同じ、
+        // 2026-10-16）。MCP には逆向き（あとで判明する事実）の段が無いので、
+        // 指摘はみなその話の時点の材料で見つけたものである
+        outcome = guardNotYetRevealed(
+          parseVerifyOutcome(reply.text),
+          settings.knownAt,
+          issue.settingSays,
+          chunk.chapterStart
+        );
       } catch (error) {
         outcome = undecidedOutcome(`検証できませんでした（${describeError(error)}）`);
       }
