@@ -186,7 +186,7 @@ const TARGET_INPUT = {
     .min(1)
     .max(MAX_CHAPTER)
     .optional()
-    .describe("合本のときに、どの話かを指す話数（synopsis・deviation）"),
+    .describe("合本のときに、どの話かを指す話数（synopsis・deviation・announce）"),
   chunkIndex: z
     .number()
     .int()
