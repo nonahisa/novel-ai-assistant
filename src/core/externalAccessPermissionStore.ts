@@ -9,6 +9,7 @@ import {
   EXTERNAL_PERMISSION_FILE,
   clientKeyOf,
   formatExternalAccessPermission,
+  isSeparatelyGrantedKey,
   parseExternalAccessPermission,
   type ExternalAccessPermission,
   type ExternalClientPermission,
@@ -55,10 +56,19 @@ export class ExternalAccessPermissionStore {
           **全部を許したら、個別の指定は畳む。** 残しても意味が変わらず、
           あとで「全部」を取り消したときに古い指定だけが生き残る
           ——作者から見れば、取り消したはずのものが残る形になる。
+
+          **ただし名指しの鍵（相談ログ・ログ・編集履歴）は畳まない。**
+          「全部」はそれらを覆わない（`isSeparatelyGrantedKey`）ので、畳むと
+          作者が名指しで許したものが黙って消える。
         */
-        return { ...entry, tools: [ALL_TOOLS] };
+        return {
+          ...entry,
+          tools: [ALL_TOOLS, ...entry.tools.filter(isSeparatelyGrantedKey)],
+        };
       }
-      if (entry.tools.includes(ALL_TOOLS) || entry.tools.includes(tool)) {
+      if (entry.tools.includes(tool)) return entry;
+      // 全部を許していても、名指しの鍵は足す（足さないと許したつもりで印が変わらない）
+      if (entry.tools.includes(ALL_TOOLS) && !isSeparatelyGrantedKey(tool)) {
         return entry;
       }
       return { ...entry, tools: [...entry.tools, tool].sort() };
@@ -73,13 +83,20 @@ export class ExternalAccessPermissionStore {
     await this.update(client, (entry) => ({ ...entry, sampling }));
   }
 
-  /** 道具を1つ取り消す。**「全部」を許しているときは、全部を取り消す** */
+  /**
+   * 道具を1つ取り消す。**「全部」を許しているときは、全部を取り消す。**
+   *
+   * 名指しの鍵（相談ログ・ログ・編集履歴）は別に決めたものなので、
+   * それ自身を取り消すときだけ外し、「全部」を取り消しても残す
+   * （残したことは許可の画面の一覧で見える）。
+   */
   async revokeTool(client: string | undefined, tool: string): Promise<void> {
-    await this.update(client, (entry) =>
-      entry.tools.includes(ALL_TOOLS)
-        ? { ...entry, tools: [] }
-        : { ...entry, tools: entry.tools.filter((name) => name !== tool) }
-    );
+    await this.update(client, (entry) => {
+      if (isSeparatelyGrantedKey(tool) || !entry.tools.includes(ALL_TOOLS)) {
+        return { ...entry, tools: entry.tools.filter((name) => name !== tool) };
+      }
+      return { ...entry, tools: entry.tools.filter(isSeparatelyGrantedKey) };
+    });
   }
 
   /**

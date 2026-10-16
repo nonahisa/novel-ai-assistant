@@ -540,13 +540,15 @@ server.registerTool(
 server.registerTool(
   "novel.propose",
   {
-    title: "設定資料の更新案・指摘を、作者の判断待ちへ置く",
+    title: "設定資料の更新案・指摘・章立て・伏線・予定の案を、作者の判断待ちへ置く",
     description:
       /*
         **指摘の道（kind: finding、2026-10-01）は1文だけ足す。** 引数の意味は
         入力の形の側に書いてあり、ここへ写すと一覧に同じ文が二重に載る
       */
       "kind: finding なら、誤字脱字・推敲・矛盾の指摘を**こちらで検算し直し、通ったものだけ**を提案パネルへ置きます（当てるのは作者）。" +
+      "kind: chapter・foreshadow・schedule なら、章立て・伏線・予定の段の案を `.aiwriter/pending-ledger/` へ置き、" +
+      "作者が提案パネルで採ったときだけ台帳へ入ります（台帳は書き換えません）。" +
       "設定資料の**更新案を承認待ちへ置きます**（人物は `.aiwriter/pending-characters/`、" +
       "能力・組織・場所・世界観は `.aiwriter/pending-settings/`）。" +
       "**台帳（設定/ の下）は書き換えません。** 作者が VS Code の「設定資料更新分反映」で採ったときに、" +
@@ -786,22 +788,23 @@ server.registerTool(
 server.registerTool(
   "novel.read",
   {
-    title: "作品の資料を読む（設定資料・再開の1枚・伏線・年表・相関図・略図・執筆量・投稿用の本文）",
+    title: "作品の資料を読む（設定資料・再開の1枚・伏線・年表・相関図・略図・執筆量・投稿用の本文・相談ログ等）",
     description:
       "画面を開かずに、作品の資料の中身を返します。kind で選びます：settings＝設定資料（term で語から引くと記録の全体）／" +
       "resume＝拡張機能の［執筆再開］と同じ1枚／foreshadows＝伏線の台帳と一覧／" +
       "chronicle＝年表（話ごとのあらすじ・登場・出来事・時期。大きいと分けて返すので next.offset で続きを読む。fromEpisode・toEpisode・term で絞れる）／" +
       "relations＝人物相関図の中身／locations＝場所の略図の中身／" +
       "writingStats＝執筆量（日・週・月・年、続いた日数、環境ごと）と作品の目標・応募先の進み／" +
-      "posting＝投稿サイトの入力欄へ貼る形にした1話の本文と題（site・file が要る。大きいと行で分けて返すので next.offset で続きを読む）。" +
+      "posting＝投稿サイトの入力欄へ貼る形にした1話の本文と題（site・file が要る。大きいと行で分けて返すので next.offset で続きを読む）／" +
+      "chatLog＝相談ログ／log＝動作のログ／editHistory＝編集履歴（新しいものが先。**全部の道具の許可では読めず**、作者が名指しで許したときだけ）。" +
       "**読むだけ**で、AIを呼ばず、何も書き換えず、投稿もしません。" +
       "本文の全文を返すのは posting だけです（再開の1枚には最新話の末尾が入ります）。",
     inputSchema: NOVEL_READ_INPUT,
   },
   /*
     **作品を指すので、転送層が許可を確かめる**（鍵は道具の名前 `novel.read`。6.87.14）。
-    作者の裁定（2026-10-16 の2）どおり `"*"` に含まれる。相談ログなど別の鍵にする
-    kind を足すときは `permissionKeyOf` で分ける（`tools/read.ts` の冒頭）
+    作者の裁定（2026-10-16 の2）どおり `"*"` に含まれる。相談ログ・ログ・編集履歴だけは
+    名指しの鍵（`novel.read.chatLog` など。同6）で、`permissionKeyOf` が分ける
   */
   tool("novel.read", (args: NovelReadInput) => novelRead(args))
 );

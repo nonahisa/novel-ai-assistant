@@ -17,6 +17,14 @@ import {
 } from "../../core/pendingSettingsMerge";
 import { recordPropose, type RecordProposeResult } from "./proposeRecord";
 import {
+  LEDGER_PROPOSE_INPUT,
+  LEDGER_PROPOSE_KINDS,
+  ledgerPropose,
+  type LedgerInput,
+  type LedgerProposeKind,
+  type LedgerProposeResult,
+} from "./proposeLedger";
+import {
   FINDING_PROPOSE_INPUT,
   findingPropose,
   type FindingProposeInput,
@@ -182,6 +190,8 @@ export const SETTINGS_PROPOSE_INPUT = {
     形の上では省けるようにして、要るかどうかは道ごとに断る
   */
   ...FINDING_PROPOSE_INPUT,
+  // 章立て・伏線・予定の段の案（作者の裁定 2026-10-16 の5）。中身は1つの入れ物にまとめる
+  ...LEDGER_PROPOSE_INPUT,
   recordKind: z
     .enum(["character", "ability", "organization", "location", "world"])
     .optional()
@@ -249,7 +259,9 @@ export interface SettingsProposeResult {
  * どちらも形の上では省けるので、足りなければ道ごとに名前を挙げて断る。
  */
 export interface NovelProposeInput extends FindingProposeInput {
-  kind?: "settings" | "finding";
+  kind?: "settings" | "finding" | LedgerProposeKind;
+  /** `kind: chapter・foreshadow・schedule` の中身 */
+  ledger?: LedgerInput;
   recordKind?: "character" | PendingSettingsKind;
   name?: string;
   changes?: Record<string, unknown>;
@@ -271,18 +283,33 @@ export function novelPropose(
   input: NovelProposeInput & { kind: "finding" }
 ): FindingProposeResult;
 export function novelPropose(
+  input: NovelProposeInput & { kind: LedgerProposeKind }
+): LedgerProposeResult;
+export function novelPropose(
   input: NovelProposeInput & { recordKind: PendingSettingsKind }
 ): RecordProposeResult;
 export function novelPropose(
   input: NovelProposeInput
-): SettingsProposeResult | RecordProposeResult | FindingProposeResult;
+): SettingsProposeResult | RecordProposeResult | FindingProposeResult | LedgerProposeResult;
 export function novelPropose(
   input: NovelProposeInput
-): SettingsProposeResult | RecordProposeResult | FindingProposeResult {
+): SettingsProposeResult | RecordProposeResult | FindingProposeResult | LedgerProposeResult {
   if (input.kind === "finding") return findingPropose(input);
+  /*
+    **章立て・伏線・予定の段の案**（作者の裁定 2026-10-16 の5）。置き場は
+    `.aiwriter/pending-ledger/` で、設定資料の道とも指摘の道とも何も共有しない
+  */
+  if ((LEDGER_PROPOSE_KINDS as readonly string[]).includes(input.kind ?? "")) {
+    return ledgerPropose({
+      folder: input.folder,
+      kind: input.kind as LedgerProposeKind,
+      ledger: input.ledger,
+      reason: input.reason,
+    });
+  }
   if (input.kind !== undefined && input.kind !== "settings") {
     throw new McpToolError(
-      `kind は settings（設定資料の更新案）か finding（指摘）のどちらかです: ${String(input.kind)}`
+      `kind は settings（設定資料の更新案）・finding（指摘）・chapter・foreshadow・schedule のどれかです: ${String(input.kind)}`
     );
   }
   const settings = settingsInputOf(input);

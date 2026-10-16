@@ -118,6 +118,8 @@ import {
   primeSavedFindings,
   undoFindingFromMemo,
 } from "./features/primeFindings";
+// 外部AIが置いた章立て・伏線・予定の段の案（作者の裁定 2026-10-16 の5）
+import { primeLedgerProposals } from "./features/ledgerProposals";
 // 古い指摘を片づける（設計書6.96.4）。**findings.jsonl を書き直す唯一の道**
 import {
   chooseFindingsTarget,
@@ -2574,6 +2576,19 @@ export async function activate(
         } catch (error) {
           useLogFile(work.folderPath);
           logFailure("当てた指摘の読み込みに失敗", {
+            作品: work.title,
+            詳細: error instanceof Error ? error.message : String(error),
+          });
+        }
+        try {
+          // **外部AIの台帳の案**（章立て・伏線・予定の段。設計書6.87.24）。
+          // 採ったら台帳へ書き、章が変われば作品一覧の折りたたみを作り直す
+          await primeLedgerProposals(work, panel, {
+            onChaptersChanged: (changed) => treeProvider.refresh(changed.id),
+          });
+        } catch (error) {
+          useLogFile(work.folderPath);
+          logFailure("外部AIの台帳の案の読み込みに失敗", {
             作品: work.title,
             詳細: error instanceof Error ? error.message : String(error),
           });

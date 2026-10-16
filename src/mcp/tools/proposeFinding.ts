@@ -107,11 +107,13 @@ const CATEGORY: Record<FindingProposeFeature, Finding["category"]> = {
  */
 export const FINDING_PROPOSE_INPUT = {
   kind: z
-    .enum(["settings", "finding"])
+    .enum(["settings", "finding", "chapter", "foreshadow", "schedule"])
     .optional()
     .describe(
       "settings（省略時）＝設定資料の更新案。finding＝指摘（typo・proofread・contradiction）を提案パネルへ置く。" +
-        "finding では feature・chunkId・response（novel.validate と同じ）を渡し、name・changes・reason は要りません"
+        "finding では feature・chunkId・response（novel.validate と同じ）を渡し、name・changes・reason は要りません。" +
+        "chapter・foreshadow・schedule＝章立て（章を始める・改名）・伏線（登録・状態）・予定の段（直す・足す）の案。" +
+        "ledger と reason を渡します（採るのは作者）"
     ),
   feature: z
     .string()
