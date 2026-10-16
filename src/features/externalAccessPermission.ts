@@ -9,6 +9,7 @@ import {
   FINDING_PROPOSE_KEY,
   SEPARATE_READ_KEYS,
   clientKeyOf,
+  clientPermissionOf,
   isSeparatelyGrantedKey,
   type ExternalClientPermission,
 } from "../core/externalAccessPermission";
@@ -342,7 +343,7 @@ function describeAccessKey(key: string): string {
   // 指摘を置く鍵（2026-10-01）。鍵の文字だけでは何を許すのか読めない
   if (key === FINDING_PROPOSE_KEY) return `指摘を提案パネルへ置くこと（${key}）`;
   if (key === FINDING_LIST_KEY) return `提案パネルの指摘を読むこと（${key}）`;
-  const separate = SEPARATE_READ_KEYS[key];
+  const separate = isSeparatelyGrantedKey(key) ? SEPARATE_READ_KEYS[key] : undefined;
   if (separate) return `${separate}（${key}）`;
   if (key === ALL_TOOLS) return "全部の道具（相談ログ・ログ・編集履歴は含みません）";
   const label = FEATURE_LABELS[key as FeatureName];
@@ -414,8 +415,17 @@ async function editClient(
     );
     if (!tool || isCancelItem(tool)) return;
     await store.revokeTool(client.name, tool.label);
+    /*
+      **残った名指しの許可を言う。** 「全部」を取り消しても相談ログ等の許可は残る
+      （別々に決めたもの）ので、言わないと「全部取り消したのに読める」に見える
+    */
+    const remaining =
+      clientPermissionOf(await store.load(), client.name)?.tools.filter(isSeparatelyGrantedKey) ?? [];
     void vscode.window.showInformationMessage(
-      `${client.name} の「${tool.label}」を取り消しました。`
+      `${client.name} の「${tool.label}」を取り消しました。` +
+        (remaining.length > 0
+          ? `名指しで許した「${remaining.map((key) => SEPARATE_READ_KEYS[key]).join("・")}」は残っています。`
+          : "")
     );
     return;
   }

@@ -9,6 +9,7 @@ import {
   SEPARATE_READ_KEYS,
   externalAccessDeniedMessage,
   isSamplingAllowed,
+  isSeparatelyGrantedKey,
   isToolAllowed,
   parseExternalAccessPermission,
   permissionKeyOf,
@@ -107,7 +108,7 @@ export function describeKey(key: string): string {
   }
   // 相談ログ・ログ・編集履歴。**「全部」では通らない**ことも断り文句で言う
   // （言わないと、全部を許した作者のAIが「許可済みのはず」と食い違う）
-  const separate = SEPARATE_READ_KEYS[key];
+  const separate = isSeparatelyGrantedKey(key) ? SEPARATE_READ_KEYS[key] : undefined;
   if (separate) {
     return `${separate}こと（${key}。全部の道具の許可には含まれず、名指しの許可が要ります）`;
   }
