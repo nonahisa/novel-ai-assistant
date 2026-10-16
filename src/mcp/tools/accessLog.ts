@@ -426,9 +426,12 @@ function detailOf(
         ? "提案パネルの指摘を読んだ（外部AIの分）"
         : "提案パネルの指摘を読んだ";
     }
+    // 台帳の案（2026-10-16）の種類は設定資料の呼び名に無いので、ここで呼び名を足す
+    const ledgerLabels: Record<string, string> = { chapter: "章立ての案", foreshadow: "伏線の案", schedule: "予定の段の案" };
     const kind =
       typeof args?.kind === "string"
-        ? PENDING_KIND_SHORT_LABELS[args.kind as PendingSettingsKind | "character"]
+        ? (ledgerLabels[args.kind] ??
+          PENDING_KIND_SHORT_LABELS[args.kind as PendingSettingsKind | "character"])
         : undefined;
     return kind ? `承認待ちを読んだ（${kind}）` : "承認待ちを読んだ";
   }

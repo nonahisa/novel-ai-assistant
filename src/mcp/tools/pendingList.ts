@@ -49,6 +49,13 @@ import { PARSERS as RECORD_PARSERS, SUBDIRS as RECORD_SUBDIRS } from "./proposeR
 import { DEFAULT_FINDINGS_RETENTION_DAYS } from "../../core/findingPanelState";
 import { findingList, type FindingListResult } from "./findingList";
 import { listNarratorMovesFs, type NarratorMoveListResult } from "./narratorMoveFiles";
+import { LEDGER_PROPOSE_KINDS, type LedgerProposeKind } from "./proposeLedger";
+import {
+  emptyPendingLedgerList,
+  fitPendingLedgerList,
+  readPendingLedgerFs,
+  type PendingLedgerListResult,
+} from "./pendingLedgerList";
 
 /**
  * 承認待ちの更新案を読む（`pending.list`。0.85.1、作者の承認 2026-09-24）。
@@ -77,10 +84,19 @@ type SourceName = typeof EXTRACTION | PendingUpdateSource;
 export const PENDING_LIST_INPUT = {
   ...FOLDER_INPUT,
   kind: z
-    .enum(["character", "ability", "organization", "location", "world", "finding"])
+    .enum([
+      "character",
+      "ability",
+      "organization",
+      "location",
+      "world",
+      ...LEDGER_PROPOSE_KINDS,
+      "finding",
+    ])
     .optional()
     .describe(
-      "種類で絞る（人物 character・能力 ability・組織 organization・場所 location・世界観 world）。省略すると全部。" +
+      "種類で絞る（人物 character・能力 ability・組織 organization・場所 location・世界観 world・" +
+        "外部AIが置いた台帳の案の章 chapter・伏線 foreshadow・予定の段 schedule）。省略すると全部。" +
         "finding＝承認待ちの代わりに提案パネルの指摘（誤字脱字・推敲・矛盾など）を状態つきで返す（未処理・採用・却下・期限切れ・陳腐化。出どころとモデルごとの集計つき）"
     ),
   source: z
@@ -96,6 +112,14 @@ export const PENDING_LIST_INPUT = {
     .max(MAX_LIMIT)
     .optional()
     .describe(`返す件数の上限（既定 ${DEFAULT_LIMIT}）。数える件数（counts）は絞る前のまま`),
+  ledgerOffset: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      "台帳の案（ledgerProposals）だけの続きの位置（既定 0）。返事が大きいと途中で切り、ledgerProposals.next に次の値を返す"
+    ),
   retentionDays: z
     .number()
     .int()
@@ -109,9 +133,10 @@ export const PENDING_LIST_INPUT = {
 
 export interface PendingListInput {
   folder: string;
-  kind?: SettingsKind | "finding";
+  kind?: SettingsKind | LedgerProposeKind | "finding";
   source?: SourceName;
   limit?: number;
+  ledgerOffset?: number;
   retentionDays?: number;
 }
 
@@ -207,6 +232,15 @@ export interface PendingListResult {
    * 人物以外の種類（`kind`）や出どころ（`source`）で絞ったときは空
    */
   narratorMoves: NarratorMoveListResult;
+  /**
+   * 外部AIが置いた台帳の案（章立て・伏線・予定の段。`.aiwriter/pending-ledger/`。
+   * 設計書6.87.24）。提案パネルの分類「章・伏線・予定の案」に並ぶもの。
+   * **形が設定資料の案と違う**（前→後の差分でなく、置いたときの値と入れる値）ので
+   * `items` に混ぜず別に返す。件数は `total`・`counts` に入れない（移す案と同じ）。
+   * 出どころは外部AIだけなので、ほかの出どころ・設定資料の種類で絞ったときは空。
+   * 返事が大きさの上限を超えそうなら途中で切り、`next.ledgerOffset` で続きを読ませる
+   */
+  ledgerProposals: PendingLedgerListResult;
   nextStep: string;
   note: string;
 }
@@ -257,6 +291,44 @@ export function pendingList(input: PendingListInput): PendingListResult {
       ? listNarratorMovesFs(input.folder)
       : { total: 0, items: [], unreadable: [], blockedBy: [] };
 
+  /*
+    台帳の案は外部AIだけが置く。種類を省いたときと台帳の種類で絞ったときだけ返し、
+    外部AI以外の出どころで絞ったときは返さない（設定資料の種類で絞ったときも同じ）
+  */
+  const ledgerKind = (LEDGER_PROPOSE_KINDS as readonly string[]).includes(input.kind ?? "")
+    ? (input.kind as LedgerProposeKind)
+    : undefined;
+  const wantsLedger = (!input.kind || ledgerKind !== undefined) && (!input.source || input.source === "external");
+
+  const compose = (ledgerProposals: PendingLedgerListResult): PendingListResult =>
+    composeResult(
+      { ordered, unreadable, counts, byKind, matching, limit, blocked, narratorMoves },
+      ledgerProposals
+    );
+  if (!wantsLedger) return compose(emptyPendingLedgerList());
+  return fitPendingLedgerList(
+    readPendingLedgerFs(input.folder),
+    (kind) => !ledgerKind || kind === ledgerKind,
+    input.ledgerOffset,
+    compose
+  );
+}
+
+/** 返事全体を組む（台帳の案の欄を大きさに合わせて詰め直すので、何度か呼ばれる） */
+function composeResult(
+  parts: {
+    ordered: PendingListItem[];
+    unreadable: Array<{ file: string; message: string }>;
+    counts: PendingListResult["counts"];
+    byKind: Partial<Record<SettingsKind, number>>;
+    matching: PendingListItem[];
+    limit: number;
+    blocked: Array<{ recordKind: SettingsKind; ledgerFiles: string[] }>;
+    narratorMoves: NarratorMoveListResult;
+  },
+  ledgerProposals: PendingLedgerListResult
+): PendingListResult {
+  const { ordered, unreadable, counts, byKind, matching, limit, blocked, narratorMoves } = parts;
   return {
     total: ordered.length + unreadable.length,
     counts,
@@ -267,12 +339,15 @@ export function pendingList(input: PendingListInput): PendingListResult {
     unreadable,
     blocked,
     narratorMoves,
+    ledgerProposals,
     nextStep:
       "採否は作者が VS Code の詳細メニュー「設定資料更新分反映」（または提案パネル）で決めます。",
     note:
       "読むだけです。承認・見送り・古い案の片付けはしていません。" +
       "組み立ては提案パネルと同じ関数を通しています（差分は、いまの台帳と取り込んだあとの比較）。" +
-      "移す案（narratorMoves）は、移し先を選ぶ口が提案パネルにしか無いため、ここからは反映も見送りもできません。",
+      "移す案（narratorMoves）は、移し先を選ぶ口が提案パネルにしか無いため、ここからは反映も見送りもできません。" +
+      "台帳の案（ledgerProposals）は、作者が提案パネルの「章・伏線・予定の案」で採るか見送ると消えます" +
+      "（件数は total・counts に入れていません）。",
   };
 }
 
