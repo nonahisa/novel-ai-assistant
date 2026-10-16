@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import type { WorkEntry } from "../models/types";
 import { AIRegistry, ensureConfigured } from "../ai/registry";
-import { AIError } from "../ai/types";
+import { AIError, type AIProvider } from "../ai/types";
 import {
   resolveOutputTokensForPlanning,
   resolveOutputTokensForSend,
@@ -102,8 +102,12 @@ export async function checkOpening(
   const resolved = await ensureConfigured(registry, "generate");
   if (!resolved) return CHECK_CANCELLED;
 
-  const material = await collectOpening(work);
-  if (!material) return CHECK_CANCELLED;
+  const collected = await collectOpening(work);
+  if (!collected.ok) {
+    vscode.window.showWarningMessage(collected.reason);
+    return CHECK_CANCELLED;
+  }
+  const material = collected.material;
 
   // **繋がるかを、費用の確認より先に確かめる**（設計書6.51）。
   // 繋がらないと分かっているのに料金の話をしても意味がない。
@@ -149,17 +153,70 @@ export async function checkOpening(
     if (!ok) return CHECK_CANCELLED;
   }
 
+  // **「開始」の記録は確認のあとに書く**（取りやめた回にログへ「開始」を残さない）
+  logStep(
+    `冒頭診断を開始: ${work.title} / ${resolved.provider.displayName} / ` +
+      `${resolved.model} / v${openingCheckPromptVersion(publicityReaderMark(material.reader))}`
+  );
+  const generated = await generateOpeningCheck(work, resolved, material, "冒頭を診断しています");
+  if (generated.kind === "cancelled") return CHECK_CANCELLED;
+  if (generated.kind === "failed") {
+    reportAIError("冒頭診断", generated.error);
+    // **AIの失敗は「止めた」ではない**（設計書6.80）。まとめ実行は次の検知へ
+    // 進んでよい——レート上限も接続の失敗も、次の機能では起きないことがある
+    return CHECK_FAILED;
+  }
+  if (generated.kind === "unreadable") {
+    await warnWithLog("冒頭診断の応答を読み取れませんでした。");
+    // 応答を読めなかったのも失敗である（次の検知は走らせる）
+    return CHECK_FAILED;
+  }
+
+  // **ファイル名には作品名を入れない。** 置き場が作品ごとに分かれており
+  // （設計書6.17.7）、作品名を混ぜると古いものを片付ける前置きが
+  // 一致しなくなる。作品名は文書の見出しに入っている
+  await openGeneratedMarkdown(
+    OPENING_CHECK_KIND,
+    renderOpeningCheck(generated.report),
+    undefined,
+    { work }
+  );
+  return CHECK_COMPLETED;
+}
+
+/** 冒頭診断の生成の終わり方（画面へ出すのは呼ぶ側） */
+export type OpeningGenerateOutcome =
+  | { kind: "done"; report: OpeningCheckReport; promptVersion: string }
+  /** 作者が止めた */
+  | { kind: "cancelled" }
+  /** AIの失敗（`AIError` のことが多い）。切り詰めもここ */
+  | { kind: "failed"; error: unknown }
+  /** 応答を読み取れなかった（中身はログへ残してある） */
+  | { kind: "unreadable" };
+
+/**
+ * 診断を1回だけ生成して読み取る。**画面には何も開かない・知らせも出さない**
+ * （進捗と中止だけ右下に出す）。
+ *
+ * コマンド（`checkOpening`）と、外部AIから頼まれた実行（`run.request`
+ * feature: opening。2026-10-16）の両方がここを通る——プロンプト・温度・
+ * 出力の上限・検算（`parseOpeningCheck`）を写しにしないため。違うのは、
+ * コマンドが結果を文書として開くことだけ。
+ */
+export async function generateOpeningCheck(
+  work: WorkEntry,
+  resolved: { provider: AIProvider; model: string },
+  material: OpeningMaterial,
+  progressTitle: string
+): Promise<OpeningGenerateOutcome> {
   let responseText: string | undefined;
   let failure: unknown;
 
-  await withCancellableProgress("冒頭を診断しています", async (_progress, token) => {
+  await withCancellableProgress(progressTitle, async (_progress, token) => {
     const controller = new AbortController();
     token.onCancellationRequested(() => controller.abort());
     try {
-      logStep(
-        `冒頭診断を開始: ${work.title} / ${resolved.provider.displayName} / ` +
-          `${resolved.model} / v${openingCheckPromptVersion(publicityReaderMark(material.reader))}`
-      );
+      // 「開始」の記録は呼ぶ側が確認のあとに書く（`confirmShowsWorkTitle.test.ts`）
       const response = await resolved.provider.generate({
         systemPrompt: OPENING_CHECK_SYSTEM_PROMPT,
         userPrompt: buildOpeningCheckPrompt({
@@ -206,14 +263,11 @@ export async function checkOpening(
   if (failure) {
     // 中止は失敗ではない。作者が自分で止めたことを警告で知らせ直さない
     if (failure instanceof AIError && failure.kind === "aborted") {
-      return CHECK_CANCELLED;
+      return { kind: "cancelled" };
     }
-    reportAIError("冒頭診断", failure);
-    // **AIの失敗は「止めた」ではない**（設計書6.80）。まとめ実行は次の検知へ
-    // 進んでよい——レート上限も接続の失敗も、次の機能では起きないことがある
-    return CHECK_FAILED;
+    return { kind: "failed", error: failure };
   }
-  if (responseText === undefined) return CHECK_CANCELLED;
+  if (responseText === undefined) return { kind: "cancelled" };
 
   // 送った冒頭を渡す。**ほめる欄の引用は、この本文と照合して残す**（1.9）
   // **読者を渡した回だけ、直す方向を読む**（1.2。宛先の無い方向は出さない）
@@ -228,29 +282,22 @@ export async function checkOpening(
       形: responseShapeForLog(responseText),
       応答: responseExcerptForLog(responseText),
     });
-    await warnWithLog("冒頭診断の応答を読み取れませんでした。");
-    // 応答を読めなかったのも失敗である（次の検知は走らせる）
-    return CHECK_FAILED;
+    return { kind: "unreadable" };
   }
 
-  // **ファイル名には作品名を入れない。** 置き場が作品ごとに分かれており
-  // （設計書6.17.7）、作品名を混ぜると古いものを片付ける前置きが
-  // 一致しなくなる。作品名は文書の見出しに入っている
-  await openGeneratedMarkdown(
-    OPENING_CHECK_KIND,
-    renderOpeningCheck({
+  return {
+    kind: "done",
+    promptVersion: openingCheckPromptVersion(publicityReaderMark(material.reader)),
+    report: {
       workTitle: work.title,
       excerptChars: material.openingText.length,
       readerLabel: openingReaderLabel(material.reader),
       result,
-    }),
-    undefined,
-    { work }
-  );
-  return CHECK_COMPLETED;
+    },
+  };
 }
 
-interface OpeningMaterial {
+export interface OpeningMaterial {
   /** 第1話の冒頭。上限まで切ってある */
   openingText: string;
   genre: string;
@@ -273,35 +320,41 @@ interface OpeningMaterial {
  * 紹介文と違うのは、**先頭の1話しか使わない**ところである。あちらは作品の
  * 雰囲気が要るので数話ぶんを詰めるが、こちらは「冒頭で決まるか」を見るので、
  * 2話目以降を混ぜると前提が崩れる。
+ *
+ * **集まらなかった理由は返すだけ**（知らせは呼ぶ側が出す）。外部AIから頼まれた
+ * 実行（`run.request`）は、理由を作者の画面ではなく頼んだ側へ返すため。
  */
-async function collectOpening(
+export async function collectOpening(
   work: WorkEntry
-): Promise<OpeningMaterial | undefined> {
+): Promise<{ ok: true; material: OpeningMaterial } | { ok: false; reason: string }> {
   const scan = await scanWork(work);
   if (scan.episodes.length === 0) {
-    vscode.window.showWarningMessage("本文ファイルが見つかりません。");
-    return undefined;
+    return { ok: false, reason: "本文ファイルが見つかりません。" };
   }
 
   const loaded = await loadEpisodeBodies(scan.episodes);
   const first = loaded.bodies[0];
   if (!first) {
-    vscode.window.showWarningMessage(
-      loaded.conflicted.length > 0
-        ? "未解決の競合があるため、冒頭を読めませんでした。競合を解決してから実行してください。"
-        : "読める本文がありません。"
-    );
-    return undefined;
+    return {
+      ok: false,
+      reason:
+        loaded.conflicted.length > 0
+          ? "未解決の競合があるため、冒頭を読めませんでした。競合を解決してから実行してください。"
+          : "読める本文がありません。",
+    };
   }
 
   const sections = parsePlotMarkdown(await readPlotText(work)).sections;
   return {
-    openingText: first.body.slice(0, OPENING_EXCERPT_MAX_CHARS),
-    // プロットが無くても診断はできる。材料が1つ減るだけなので止めない
-    genre: plotValue(sections.genre),
-    logline: plotValue(sections.logline),
-    // 読めなくても止めない（`loadPublicityReader` の約束。読めなかったことはログへ）
-    reader: await loadPublicityReader(work, "冒頭診断"),
+    ok: true,
+    material: {
+      openingText: first.body.slice(0, OPENING_EXCERPT_MAX_CHARS),
+      // プロットが無くても診断はできる。材料が1つ減るだけなので止めない
+      genre: plotValue(sections.genre),
+      logline: plotValue(sections.logline),
+      // 読めなくても止めない（`loadPublicityReader` の約束。読めなかったことはログへ）
+      reader: await loadPublicityReader(work, "冒頭診断"),
+    },
   };
 }
 

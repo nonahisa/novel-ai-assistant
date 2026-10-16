@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import fs from "node:fs";
 import nodePath from "node:path";
 import { COMMAND_COVERAGE } from "../../../src/core/commandCoverage";
+import { RUN_REQUESTABLE_FEATURES } from "../../../src/core/runRequest";
 
 /**
  * コマンドごとの区分の表の見張り（設計書6.87.24。作者の裁定 2026-10-16 の7
@@ -59,6 +60,30 @@ describe("コマンドごとの区分の表", () => {
       ["novelai.openForeshadows", "A"],
       ["novelai.resumeWriting", "A"],
     ]);
+  });
+
+  test("run.request で届くようにしたコマンドには道が書いてあり、その機能を頼める", () => {
+    const viaRun = Object.entries(COMMAND_COVERAGE)
+      .filter(([, entry]) => entry.via?.startsWith("run.request"))
+      .map(([command, entry]) => [command, entry.class, entry.via]);
+    expect(viaRun).toEqual([
+      ["novelai.testAI", "B", "run.request feature: testAI"],
+      ["novelai.extractSettings", "A", "run.request feature: settings"],
+      ["novelai.checkOpening", "A", "run.request feature: opening"],
+      ["novelai.checkFactContradictions", "A", "run.request feature: factContradiction"],
+    ]);
+    // 道に書いた機能の名前が、run.request の受け付ける名前と食い違っていないこと
+    for (const [, , via] of viaRun) {
+      const feature = String(via).replace(/^run\.request feature: /u, "");
+      expect(RUN_REQUESTABLE_FEATURES, String(via)).toContain(feature);
+    }
+  });
+
+  test("C1（run.request に足せば届く）のまま、もう頼める機能が残っていない", () => {
+    const stillC1 = Object.entries(COMMAND_COVERAGE)
+      .filter(([, entry]) => entry.class === "C1" && entry.via?.startsWith("run.request"))
+      .map(([command]) => command);
+    expect(stillC1).toEqual([]);
   });
 
   test("道（via）に書いた道具が、MCP サーバーに登録されている", () => {

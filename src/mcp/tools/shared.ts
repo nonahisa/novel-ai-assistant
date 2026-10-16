@@ -32,6 +32,7 @@ import {
   type EpisodeBodySource,
 } from "../../core/episodeChunks";
 import { decideChunkSize, type Chunk } from "../../core/chunker";
+import { externalChunkIdOf, externalChunksOfText } from "../../core/externalExtractStash";
 
 /**
  * ツールの土台（設計書6.87.8）。
@@ -573,13 +574,16 @@ export function selectChunks(chunks: Chunk[], chunkIndex?: number): Chunk[] {
  * 「何も指摘しない」か「全部が本文に無い」に倒れる。
  *
  * 話数が読めないファイルは `x`。
+ *
+ * **形の本体は `core/externalExtractStash.ts` にある**（2026-10-16）。拡張機能の
+ * `run.request`（feature: settings）も同じ名前で貯めるので、写しを持たない。
  */
 export function chunkIdOf(
   relative: string,
   chunk: Chunk,
   maxChars: number
 ): string {
-  return `${relative}#${chunk.chapterStart ?? "x"}-${chunk.index}@${maxChars}`;
+  return externalChunkIdOf(relative, chunk, maxChars);
 }
 
 export interface ParsedChunkId {
@@ -631,12 +635,10 @@ export function parseChunkId(chunkId: string): ParsedChunkId {
 export function chunkFromId(folder: string, chunkId: string): Chunk {
   const parsed = parseChunkId(chunkId);
   const text = readBody(folder, parsed.filePath);
-  const name = parseEpisodeFileName(nodePath.basename(parsed.filePath));
-  const sources = episodeBodySources(parsed.filePath, text, {
-    chapterStart: name.chapterStart,
-    chapterEnd: name.chapterEnd,
-  });
-  const chunks = chunksOfSources(sources, { maxChars: parsed.maxChars });
+  // **切り方は拡張機能の `run.request`（settings）と同じ関数**（貯めた答えを照合するため）
+  const chunks = externalChunksOfText(parsed.filePath, text, parsed.maxChars).map(
+    (item) => item.chunk
+  );
   // **話数まで見て引く。** `index` だけで引くと、合本では最初の話の
   // チャンクが当たる（0.64.3で直した。`chunkIdOf` の断り書き）
   const chunk = chunks.find(

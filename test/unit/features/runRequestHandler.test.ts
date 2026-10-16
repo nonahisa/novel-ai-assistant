@@ -305,6 +305,102 @@ describe("毎回作者に確かめてから走らせる", () => {
   });
 });
 
+describe("2026-10-16 に足した機能", () => {
+  test("冒頭診断：送る量は measure が機能ごとに見積もる（機能を渡す）", async () => {
+    const { d } = deps({}, { ticket: ticket({ feature: "opening" }) });
+    await handleRunRequest(queryOf(), d);
+    expect(d.measure).toHaveBeenCalledWith(WORK, undefined, expect.objectContaining({ feature: "opening" }));
+    expect(d.run).toHaveBeenCalledWith(expect.objectContaining({ feature: "opening" }), WORK, expect.anything());
+  });
+
+  test("事実の照合：取り出しと判定の2つのAIを確認に並べ、結果にも両方を書く", async () => {
+    const resolveAi = vi.fn((def: { assigned: string }) =>
+      def.assigned === "contradiction"
+        ? { providerId: "cloud", providerName: "判定のクラウドAI", model: "judge-1", paid: true }
+        : { providerId: "ollama", providerName: "Ollama", model: "gemma", paid: false }
+    );
+    const { d, store } = deps({ resolveAi }, { ticket: ticket({ feature: "factContradiction" }) });
+    await handleRunRequest(queryOf(), d);
+    const [, detail] = vi.mocked(d.confirm).mock.calls[0] ?? ["", ""];
+    expect(detail).toContain("Ollama（gemma）");
+    expect(detail).toContain("判定のクラウドAI（judge-1）");
+    // 判定のAIが有料なら、料金の断りを出す（取り出しが無料でも）
+    expect(detail).toContain("トークンを消費");
+    const result = store.get(ID)?.result;
+    expect(result?.provider.name).toBe("Ollama");
+    expect(result?.verifyProvider).toEqual({ id: "cloud", name: "判定のクラウドAI", paid: true });
+    expect(result?.verifyModel).toBe("judge-1");
+  });
+
+  test("事実の照合：判定のAIが未設定なら断る", async () => {
+    const { d, store } = deps(
+      {
+        resolveAi: (def) =>
+          def.assigned === "contradiction"
+            ? undefined
+            : { providerId: "ollama", providerName: "Ollama", model: "gemma", paid: false },
+      },
+      { ticket: ticket({ feature: "factContradiction" }) }
+    );
+    await handleRunRequest(queryOf(), d);
+    expect(d.confirm).not.toHaveBeenCalled();
+    expect(store.get(ID)?.state).toBe("refused");
+  });
+
+  test("AI接続確認：本文を量らず、確認を出してから試し、繋がらなくても答えとして返す", async () => {
+    const testAi = {
+      resolve: vi.fn(() => ({ providerId: "cloud", providerName: "作り物のクラウドAI", model: "big-1", paid: true })),
+      run: vi.fn(async () => ({
+        ok: false,
+        stage: "generate" as const,
+        message: "残高がありません",
+        errorKind: "insufficient_credit",
+        nextAction: "請求画面でクレジットを購入してください。",
+      })),
+    };
+    const { d, store, history } = deps({ testAi }, { ticket: ticket({ feature: "testAI" }) });
+    await handleRunRequest(queryOf(), d);
+    expect(d.measure).not.toHaveBeenCalled();
+    expect(d.run).not.toHaveBeenCalled();
+    const [message, detail] = vi.mocked(d.confirm).mock.calls[0] ?? ["", ""];
+    expect(message).toContain("AI接続確認");
+    expect(detail).toContain("作り物のクラウドAI");
+    expect(testAi.run).toHaveBeenCalledTimes(1);
+    expect(history.map((entry) => entry.state)).toEqual(["confirming", "running", "done"]);
+    const result = store.get(ID)?.result;
+    expect(result?.feature).toBe("testAI");
+    expect(result?.bodyChars).toBe(0);
+    expect(result?.findings[0]).toMatchObject({ ok: false, errorKind: "insufficient_credit" });
+  });
+
+  test("AI接続確認：作者が断ったら試さない／AIが未設定なら確認も出さずに断る", async () => {
+    const testAi = { resolve: vi.fn(() => undefined), run: vi.fn() };
+    const first = deps({ testAi }, { ticket: ticket({ feature: "testAI" }) });
+    await handleRunRequest(queryOf(), first.d);
+    expect(first.d.confirm).not.toHaveBeenCalled();
+    expect(first.store.get(ID)?.state).toBe("refused");
+
+    const declined = {
+      resolve: vi.fn(() => ({ providerId: "ollama", providerName: "Ollama", model: "gemma", paid: false })),
+      run: vi.fn(),
+    };
+    const second = deps(
+      { testAi: declined, confirm: vi.fn(async () => false) },
+      { ticket: ticket({ feature: "testAI" }) }
+    );
+    await handleRunRequest(queryOf(), second.d);
+    expect(declined.run).not.toHaveBeenCalled();
+    expect(second.store.get(ID)?.state).toBe("declined");
+  });
+
+  test("AI接続確認：手足が無ければ断る", async () => {
+    const { d, store } = deps({}, { ticket: ticket({ feature: "testAI" }) });
+    await handleRunRequest(queryOf(), d);
+    expect(d.confirm).not.toHaveBeenCalled();
+    expect(store.get(ID)?.state).toBe("refused");
+  });
+});
+
 describe("受け口", () => {
   test("/run のパスを見分けて渡す", async () => {
     expect(readerStatsUriAction("/run")).toBe("run");

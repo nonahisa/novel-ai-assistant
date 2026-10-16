@@ -7,6 +7,13 @@ import {
 } from "../../prompts/characterExtract";
 import type { Chunk } from "../../core/chunker";
 import { McpToolError, describeError } from "./shared";
+import {
+  EXTRACT_STASH_SUBPATH,
+  formatExtractStash,
+  parseExtractStashEntries,
+  withStashEntries,
+  type ExtractStashEntry,
+} from "../../core/externalExtractStash";
 
 /**
  * 外部AIが抽出した答えの貯め場所（2026-10-02、作者の裁定）。
@@ -33,32 +40,14 @@ import { McpToolError, describeError } from "./shared";
 
 /** 置き場。キャッシュと同じ `cache/` の下（同期されない） */
 export function extractStashFileOf(folder: string): string {
-  return nodePath.join(
-    nodePath.resolve(folder),
-    AIWRITER_DIR,
-    "cache",
-    "external-extract.json"
-  );
+  return nodePath.join(nodePath.resolve(folder), AIWRITER_DIR, ...EXTRACT_STASH_SUBPATH);
 }
 
-const STASH_SCHEMA_VERSION = 1;
-
-export interface StashEntry {
-  /** `novel.prompt`・`novel.run` が返した chunkId */
-  chunkId: string;
-  /** そのときの本文のハッシュ（`Chunk.hash`） */
-  chunkHash: string;
-  /** 答えたときのプロンプト版（`CHARACTER_EXTRACT_VERSION`） */
-  promptVersion: string;
-  /** `parseResult` を通した答え（検算の前） */
-  parsed: CharacterExtractResult;
-  savedAt: string;
-}
-
-interface StashFile {
-  schemaVersion: number;
-  entries: StashEntry[];
-}
+/**
+ * 貯めた1件。**形の本体は `core/externalExtractStash.ts`**（2026-10-16）——拡張機能の
+ * `run.request`（feature: settings）も同じ貯め場所へ書くので、写しを持たない。
+ */
+export type StashEntry = ExtractStashEntry;
 
 /**
  * 貯めたものを読む。無ければ空。
@@ -78,33 +67,12 @@ export function readExtractStash(folder: string): StashEntry[] {
         "中身を確かめるか、要らなければ消してから、もう一度抽出してください。"
     );
   }
-  return entriesOf(raw, folder, file);
-}
-
-function entriesOf(raw: unknown, folder: string, file: string): StashEntry[] {
-  const broken = (): never => {
+  const entries = parseExtractStashEntries(raw);
+  if (!entries) {
     throw new McpToolError(
       `抽出の貯め場所の形が違います（${relativeTo(folder, file)}）。` +
         "中身を確かめるか、要らなければ消してから、もう一度抽出してください。"
     );
-  };
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) broken();
-  const value = raw as Partial<StashFile>;
-  if (!Array.isArray(value.entries)) broken();
-  const entries: StashEntry[] = [];
-  for (const item of value.entries as unknown[]) {
-    if (typeof item !== "object" || item === null) broken();
-    const entry = item as Partial<StashEntry>;
-    if (
-      typeof entry.chunkId !== "string" ||
-      typeof entry.chunkHash !== "string" ||
-      typeof entry.promptVersion !== "string" ||
-      typeof entry.parsed !== "object" ||
-      entry.parsed === null
-    ) {
-      broken();
-    }
-    entries.push(entry as StashEntry);
   }
   return entries;
 }
@@ -123,28 +91,26 @@ export function stashExtractAnswer(
   chunk: Chunk,
   parsed: CharacterExtractResult
 ): void {
-  const entries = readExtractStash(folder).filter(
-    (entry) => entry.chunkId !== chunkId
-  );
-  entries.push({
-    chunkId,
-    chunkHash: chunk.hash,
-    promptVersion: CHARACTER_EXTRACT_VERSION,
-    parsed,
-    savedAt: new Date().toISOString(),
-  });
+  const entries = withStashEntries(readExtractStash(folder), [
+    {
+      chunkId,
+      chunkHash: chunk.hash,
+      promptVersion: CHARACTER_EXTRACT_VERSION,
+      parsed,
+      savedAt: new Date().toISOString(),
+    },
+  ]);
   writeStash(folder, entries);
 }
 
 function writeStash(folder: string, entries: StashEntry[]): void {
   const file = extractStashFileOf(folder);
-  const body: StashFile = { schemaVersion: STASH_SCHEMA_VERSION, entries };
   try {
     fs.mkdirSync(nodePath.dirname(file), { recursive: true });
     // プロセス番号を入れるのは、MCPサーバーが2つ動いていても一時ファイルが
     // ぶつからないようにするため（`chunkCacheFile.ts` と同じ）
     const temporary = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(temporary, `${JSON.stringify(body, null, 2)}\n`, "utf8");
+    fs.writeFileSync(temporary, formatExtractStash(entries), "utf8");
     fs.renameSync(temporary, file);
   } catch (error) {
     throw new McpToolError(

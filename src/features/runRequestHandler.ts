@@ -9,7 +9,12 @@ import {
   isConfirmTooLate,
   isRunIndexFeature,
   isRunCoverFeature,
+  isRunTestAiFeature,
   describeCoverConfirm,
+  describeTestAiConfirm,
+  RUN_TEST_AI_FEATURE,
+  RUN_TEST_AI_LABEL,
+  type RunTestAiRow,
   parseRunQuery,
   runCoverSideLabel,
   runRequestForLog,
@@ -107,7 +112,11 @@ export interface RunRequestHandlerDeps<W extends RunWork = RunWork> {
   isAllowed(work: W, client: string): Promise<boolean>;
   /** 機能別AI割当で、その機能に使うAI。未設定なら undefined */
   resolveAi(def: RunFeatureDef): RunAi | undefined;
-  measure(work: W, file: string | undefined): Promise<RunMeasure>;
+  /**
+   * 送る量を見積もる。**機能によって送る量が違う**（冒頭診断は第1話の冒頭だけ）
+   * ので機能も渡す——作品全体の字数を確認に出すと、送る量の提示が嘘になる
+   */
+  measure(work: W, file: string | undefined, def?: RunFeatureDef): Promise<RunMeasure>;
   /**
    * モーダルで確かめる。ボタン（既定は「走らせる」）が押されたら true。
    * 表紙を焼く依頼だけ「焼く」にする——確認の文面が「「焼く」を押さずに」と言うため
@@ -124,6 +133,20 @@ export interface RunRequestHandlerDeps<W extends RunWork = RunWork> {
   index?: RunIndexDeps<W>;
   /** 表紙を焼く（`coverBake`）の手足。無ければ断る */
   cover?: RunCoverDeps<W>;
+  /** AI接続確認（`testAI`）の手足。無ければ断る */
+  testAi?: RunTestAiDeps;
+}
+
+/**
+ * AI接続確認の手足（2026-10-16）。中身は［AI接続確認］コマンドと同じ2段
+ * （接続 → 短い文を1回だけ生成）で、**コマンドは叩かない**（コマンドは結果を
+ * 画面の知らせにしか出さず、返さない）。
+ */
+export interface RunTestAiDeps {
+  /** 確かめるAI（AI設定で選んだAI。コマンドと同じ）。未設定なら undefined */
+  resolve(): RunAi | undefined;
+  /** 試す。**繋がらなかったのも答え**として返す（例外は仕組みごと落ちたときだけ） */
+  run(): Promise<RunTestAiRow>;
 }
 
 /** 焼く前に分かること（確認に並べる） */
@@ -232,7 +255,12 @@ export async function handleRunRequest<W extends RunWork>(
   // **白名簿の外は、確認も出さずに断る**（本文への適用・資料の保存などは入れない）
   // 索引づくり（`vectorIndex`）は白名簿とは別に通し、回数の上限のあとで分かれる
   const def = findRunFeature(ticket.feature);
-  if (!def && !isRunIndexFeature(ticket.feature) && !isRunCoverFeature(ticket.feature)) {
+  if (
+    !def &&
+    !isRunIndexFeature(ticket.feature) &&
+    !isRunCoverFeature(ticket.feature) &&
+    !isRunTestAiFeature(ticket.feature)
+  ) {
     await refuse("この機能は外から頼めません（頼めるのは読み取りと生成だけです）。");
     return;
   }
@@ -281,6 +309,12 @@ export async function handleRunRequest<W extends RunWork>(
     return;
   }
 
+  // AI接続確認も回数の上限を通す（有料のAIなら、短い文1回ぶんでも料金がかかる）
+  if (isRunTestAiFeature(ticket.feature)) {
+    await handleTestAiRequest(ticket, work, deps, refuse, forLog);
+    return;
+  }
+
   if (!def) {
     // ここへ来るのは索引づくりだけ（上の白名簿の確かめで、ほかは断ってある）
     await handleIndexRequest(ticket, work, deps, refuse, forLog);
@@ -296,7 +330,24 @@ export async function handleRunRequest<W extends RunWork>(
     return;
   }
 
-  const measured = await deps.measure(work, ticket.file);
+  /*
+    **判定に別のAIを使う機能（事実の照合）は、判定のAIも先に引く。** 片方だけ
+    見せて走らせると、判定の段で有料のAIへ本文の抜粋が出ることを作者が知らない。
+    引き方は同じ受け口（`resolveAi`）に、割当の鍵だけ差し替えて渡す
+  */
+  let verifier: RunAi | undefined;
+  if (def.verifyAssigned) {
+    verifier = deps.resolveAi({ ...def, assigned: def.verifyAssigned, verifyAssigned: undefined });
+    if (!verifier) {
+      await refuse(
+        `「${def.label}」の判定に使うAI（矛盾検知の割当）がまだ設定されていません。`,
+        "AI設定（または機能別AI割当）で使うAIを選んでください"
+      );
+      return;
+    }
+  }
+
+  const measured = await deps.measure(work, ticket.file, def);
   if (!measured.ok) {
     await refuse(measured.reason, measured.nextAction);
     return;
@@ -320,8 +371,17 @@ export async function handleRunRequest<W extends RunWork>(
     paid: ai.paid,
     bodyChars: measured.bodyChars,
     episodeCount: measured.episodeCount,
-    // **有料の断りは画面の確認と同じ行**（`confirmPaidUsage` と同じ部品）
-    paidLines: ai.paid ? paidUsageLines(ai.providerName, ai.model) : [],
+    // **有料の断りは画面の確認と同じ行**（`confirmPaidUsage` と同じ部品）。
+    // 判定のAIだけが有料なら、判定のAIの行を出す
+    paidLines: ai.paid
+      ? paidUsageLines(ai.providerName, ai.model)
+      : verifier?.paid
+        ? paidUsageLines(verifier.providerName, verifier.model)
+        : [],
+    def,
+    ...(verifier
+      ? { verifier: { providerName: verifier.providerName, model: verifier.model, paid: verifier.paid } }
+      : {}),
   });
   const accepted = await deps.confirm(confirm.message, confirm.detail);
   if (!accepted) {
@@ -394,6 +454,12 @@ export async function handleRunRequest<W extends RunWork>(
     target: ticket.file ?? null,
     provider: { id: ai.providerId, name: ai.providerName, paid: ai.paid },
     model: ai.model,
+    ...(verifier
+      ? {
+          verifyProvider: { id: verifier.providerId, name: verifier.providerName, paid: verifier.paid },
+          verifyModel: verifier.model,
+        }
+      : {}),
     promptVersion: outcome.promptVersion,
     findings: outcome.findings,
     dropped: outcome.dropped,
@@ -642,6 +708,100 @@ async function handleCoverRequest<W extends RunWork>(
   await deps.writeState(stateOf(ticket, "done", deps.now(), { startedAt, result }));
   deps.log(`外部AIから頼まれた${side}を焼きました：${forLog}`);
   // 焼いたことの知らせは EPUBエディターの［表紙を焼く］と同じ道が出す（重ねて出さない）
+}
+
+/**
+ * AI接続確認の依頼（2026-10-16 の棚卸しの6件目）。合言葉・1回限り・登録・許可・
+ * 回数の上限は呼ぶ側で通してある。
+ *
+ * **本文は量らない・送らない**（送るのは「はい」と答えさせる短い文1回だけ）。
+ * **繋がらなかったのは「確かめた答え」なので `done`**——`failed` にすると、
+ * 頼んだ側は「確かめる仕組みが失敗した」と読み、作者のAIの状態が伝わらない。
+ */
+async function handleTestAiRequest<W extends RunWork>(
+  ticket: RunTicket,
+  work: W,
+  deps: RunRequestHandlerDeps<W>,
+  refuse: (reason: string, nextAction?: string) => Promise<void>,
+  forLog: string
+): Promise<void> {
+  const testAi = deps.testAi;
+  if (!testAi) {
+    await refuse("この拡張機能では、外からAI接続確認を頼めません。");
+    return;
+  }
+  const ai = testAi.resolve();
+  if (!ai) {
+    await refuse("AIがまだ設定されていません。", "「AI設定」から使うAIを選んでください");
+    return;
+  }
+
+  const confirm = describeTestAiConfirm({
+    ticket,
+    workTitle: work.title,
+    providerName: ai.providerName,
+    model: ai.model,
+    paid: ai.paid,
+  });
+  if (!(await deps.confirm(confirm.message, confirm.detail))) {
+    await deps.writeState(stateOf(ticket, "declined", deps.now()));
+    deps.log(`作者が断りました：${forLog}`);
+    return;
+  }
+
+  const pressedAt = deps.now();
+  if (isConfirmTooLate(ticket, pressedAt)) {
+    const reason = "確認が出てから時間が経ちすぎたため、試しませんでした。";
+    await deps.writeState(stateOf(ticket, "expired", pressedAt, { reason }));
+    deps.log(`外部AIからの実行の依頼が期限切れでした：${forLog}`);
+    deps.info(`${reason}必要なら、頼んだ側にもう一度頼んでもらってください。`);
+    return;
+  }
+
+  const startedAt = new Date(pressedAt).toISOString();
+  await deps.writeState(stateOf(ticket, "running", pressedAt, { startedAt }));
+
+  let row: RunTestAiRow;
+  try {
+    row = await testAi.run();
+  } catch (error) {
+    // 繋がらないことは run の中で答えにしている。ここへ来るのは仕組みごと落ちたとき
+    const failure = deps.describeFailure(error);
+    await deps.writeState(stateOf(ticket, "failed", deps.now(), { startedAt, ...failure }));
+    deps.log(`外部AIから頼まれたAI接続確認に失敗しました：${forLog}：${failure.reason}`);
+    deps.warn(`外部AIから頼まれたAI接続確認に失敗しました：${failure.reason}`);
+    return;
+  }
+
+  const result: RunResultBody = {
+    feature: RUN_TEST_AI_FEATURE,
+    featureLabel: RUN_TEST_AI_LABEL,
+    workTitle: work.title,
+    target: null,
+    provider: { id: ai.providerId, name: ai.providerName, paid: ai.paid },
+    model: ai.model,
+    promptVersion: "test-ai-v1",
+    findings: [row],
+    dropped: { count: 0, notes: [] },
+    failures: { count: 0, notes: [] },
+    // 本文は送らない（短い確かめの文だけ）
+    bodyChars: 0,
+    startedAt,
+    finishedAt: new Date(deps.now()).toISOString(),
+  };
+  await deps.writeState(stateOf(ticket, "done", deps.now(), { startedAt, result }));
+  deps.log(`外部AIから頼まれたAI接続確認を終えました：${forLog}（${row.ok ? "通った" : `止まった：${row.stage}`}）`);
+  /*
+    作者の画面にも結果を出す。**繋がらなかったときは警告にする**——作者のAIが
+    いま動かないことは、頼んだ側より先に作者が知るべきことである
+  */
+  if (row.ok) {
+    deps.info(`外部AIから頼まれたAI接続確認：${row.message}`);
+  } else {
+    deps.warn(
+      `外部AIから頼まれたAI接続確認：${row.message}` + (row.nextAction ? `（${row.nextAction}）` : "")
+    );
+  }
 }
 
 function stateOf(
