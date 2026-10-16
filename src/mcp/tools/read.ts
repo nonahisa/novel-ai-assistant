@@ -41,6 +41,7 @@ import { chronicleToMarkdown } from "../../core/chronicleMarkdown";
 import { buildRelationGraph, type RelationGraph } from "../../core/relationGraph";
 import { buildLocationSketch, type LocationSketch } from "../../core/locationSketch";
 import { readEpisodeFiles } from "./episodeFiles";
+import { estimateResultTokens, READ_RESULT_TOKEN_BUDGET } from "./payloadBudget";
 import { PARSERS as RECORD_PARSERS, SUBDIRS as RECORD_SUBDIRS } from "./proposeRecord";
 import {
   FOLDER_INPUT,
@@ -94,6 +95,12 @@ export const SETTINGS_RECORD_KINDS = [
 ] as const;
 export type SettingsRecordKind = (typeof SETTINGS_RECORD_KINDS)[number];
 
+/**
+ * 年表の `limit` の上限。実際にはその手前で大きさの上限（`READ_RESULT_TOKEN_BUDGET`）が
+ * 効くので、これは入力の歯止めにすぎない（ほかの道具の `limit` と同じ200）
+ */
+const MAX_CHRONICLE_LIMIT = 200;
+
 export const NOVEL_READ_INPUT = {
   ...FOLDER_INPUT,
   kind: z
@@ -108,12 +115,43 @@ export const NOVEL_READ_INPUT = {
     .optional()
     .describe(
       "kind: settings のとき、この語（名前・別名・名前の片方・読み）に当たる記録だけを全体で返す。" +
-        "省くと、名前と短い紹介の一覧だけを返す"
+        "省くと、名前と短い紹介の一覧だけを返す。" +
+        "kind: chronicle のとき、この人物が登場する話・出来事の人物・あらすじ・題・出来事の文に語を含む話だけを返す"
     ),
   recordKind: z
     .enum(SETTINGS_RECORD_KINDS)
     .optional()
     .describe("kind: settings のとき、種類で絞る"),
+  fromEpisode: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("kind: chronicle のとき、この話数から（含む）。合本は範囲と重なれば入る。話数の分からない話は、範囲を指すと入らない"),
+  toEpisode: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("kind: chronicle のとき、この話数まで（含む）"),
+  offset: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      "kind: chronicle のとき、絞った行の何件目から返すか（既定は0）。" +
+        "返事の next.offset をそのまま渡すと続きが読める（ほかの引数は同じまま）"
+    ),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_CHRONICLE_LIMIT)
+    .optional()
+    .describe(
+      "kind: chronicle のとき、返す行の上限。指さなくても、返事が大きくなりすぎる手前で切って next を返す"
+    ),
 };
 
 export interface NovelReadInput {
@@ -121,6 +159,10 @@ export interface NovelReadInput {
   kind: ReadKind;
   term?: string;
   recordKind?: SettingsRecordKind;
+  fromEpisode?: number;
+  toEpisode?: number;
+  offset?: number;
+  limit?: number;
 }
 
 export interface SettingsReadRecord {
@@ -168,10 +210,17 @@ export type NovelReadResult =
     }
   | {
       kind: "chronicle";
-      /** 話ごとの行（話数順）。`workPath` は作品フォルダーからの相対 */
+      /** 話ごとの行（話数順）。`workPath` は作品フォルダーからの相対。**この回に返す分だけ** */
       rows: Array<Omit<ChronicleRow, "filePath">>;
-      /** 製品の［年表］の書き出しと同じ文書（話数順） */
+      /** 製品の［年表］の書き出しと同じ文書（話数順）。**`rows` と同じ行だけ**で組む */
       markdown: string;
+      /** 絞った（範囲・語）あとの行の数。`rows` はそのうち `offset` 件目からの一部 */
+      total: number;
+      offset: number;
+      /** 返しきれずに省いた行があるか */
+      truncated: boolean;
+      /** 続きの取り方。ほかの引数は同じまま、これを足して呼ぶ。続きが無ければ null */
+      next: { offset: number } | null;
       notices: string[];
     }
   | {
@@ -198,7 +247,7 @@ export function novelRead(input: NovelReadInput): NovelReadResult {
     case "foreshadows":
       return readForeshadows(folder);
     case "chronicle":
-      return readChronicle(folder);
+      return readChronicle(folder, input);
     case "relations":
       return readRelations(folder);
     case "locations":
@@ -512,7 +561,13 @@ function readForeshadows(folder: string): NovelReadResult {
  * （話・人物・各話あらすじ・伏線・作中の時間）を渡す。**読めない材料があっても
  * 年表は出す**（製品と同じ。あらすじは行の1列にすぎない）。
  */
-function readChronicle(folder: string): NovelReadResult {
+function readChronicle(folder: string, input: NovelReadInput): NovelReadResult {
+  const { fromEpisode, toEpisode } = input;
+  if (fromEpisode !== undefined && toEpisode !== undefined && fromEpisode > toEpisode) {
+    throw new McpToolError(
+      `fromEpisode（${fromEpisode}）が toEpisode（${toEpisode}）より後になっています。始まりと終わりを入れ替えてください。`
+    );
+  }
   const notices: string[] = [];
   const base = nodePath.resolve(folder);
   const scanned = readEpisodeFiles(folder);
@@ -540,18 +595,130 @@ function readChronicle(folder: string): NovelReadResult {
     timeline,
     { workRoot: base, format: workFormatOf(folder) }
   );
-  const markdown = chronicleToMarkdown(
-    rows.length > 0 ? [{ label: "", line: null, kind: "canonical", rows }] : [],
-    { workTitle: workTitleOf(folder), order: "chapter" }
+  const term = input.term?.trim() ?? "";
+  const filtered = rows.filter(
+    (row) =>
+      chronicleRowInRange(row, fromEpisode, toEpisode) && (!term || chronicleRowMatchesTerm(row, term))
   );
+  const offset = input.offset ?? 0;
+  const candidates = filtered.slice(offset, offset + (input.limit ?? MAX_CHRONICLE_LIMIT));
+  const workTitle = workTitleOf(folder);
 
-  return {
-    kind: "chronicle",
-    // 開くための絶対パス（`filePath`）は外へ出さない。話の指し先は `workPath`
-    rows: rows.map(({ filePath: _filePath, ...rest }) => rest),
-    markdown,
-    notices,
+  /*
+    **返す行は、件数でなく大きさで詰める**（2026-10-16。確認用の作品の24話で、年表だけ
+    呼び出し側の上限を超えてファイルへ逃がされた）。行の大きさは話によって十倍以上違い
+    （出来事が多い話・合本）、件数で切ると上限を守れない。実際に届く形で見積もって、
+    上限（`READ_RESULT_TOKEN_BUDGET`）の手前まで入れる。
+  */
+  const compose = (count: number): Extract<NovelReadResult, { kind: "chronicle" }> => {
+    const page = candidates.slice(0, count);
+    const nextOffset = offset + page.length;
+    const truncated = nextOffset < filtered.length;
+    return {
+      kind: "chronicle",
+      // 開くための絶対パス（`filePath`）は外へ出さない。話の指し先は `workPath`
+      rows: page.map(({ filePath: _filePath, ...rest }) => rest),
+      markdown: chronicleMarkdownOf(page, rows.length, workTitle),
+      total: filtered.length,
+      offset,
+      truncated,
+      next: truncated ? { offset: nextOffset } : null,
+      notices: [...notices, ...pageNotices(page, filtered.length, offset, truncated, rows.length)],
+    };
   };
+
+  // 1行ずつ足し、上限を超えた行の手前で止める。**最低1行は返す**——1行だけで上限を
+  // 超える話（とても長い合本）でも、0行を返して続きを示すと同じ所で永遠に止まる
+  let count = Math.min(1, candidates.length);
+  while (
+    count < candidates.length &&
+    estimateResultTokens(compose(count + 1)) <= READ_RESULT_TOKEN_BUDGET
+  ) {
+    count++;
+  }
+  const result = compose(count);
+  if (count === 1 && estimateResultTokens(result) > READ_RESULT_TOKEN_BUDGET) {
+    result.notices.push(
+      `${result.rows[0].chapterLabel}の行だけで返事の大きさの目安を超えています。呼び出し側で切られることがあります。`
+    );
+  }
+  return result;
+}
+
+/**
+ * 範囲の中の行か（両端を含む）。**合本（1行が複数話）は、範囲と少しでも重なれば入れる**
+ * ——始まりの話だけで見ると、第10〜12話の合本を「第12話から」で引いたとき落ちる。
+ * 話数の分からない行は、範囲を指したときは入れない（どこに当たるかを想像で決めない）。
+ */
+export function chronicleRowInRange(
+  row: Pick<ChronicleRow, "chapter" | "chapterEnd">,
+  fromEpisode: number | undefined,
+  toEpisode: number | undefined
+): boolean {
+  if (fromEpisode === undefined && toEpisode === undefined) return true;
+  if (row.chapter === null) return false;
+  const start = row.chapter;
+  const end = row.chapterEnd ?? row.chapter;
+  if (fromEpisode !== undefined && end < fromEpisode) return false;
+  if (toEpisode !== undefined && start > toEpisode) return false;
+  return true;
+}
+
+/**
+ * 語に当たる行か。人物（登場・出来事の人物）は設定資料と同じ広げ方
+ * （`expandNameVariants`。「灯野・ソウ」を「ソウ」で引ける）で完全一致、
+ * あらすじ・題・出来事の文は語を含むかで見る。
+ */
+function chronicleRowMatchesTerm(row: ChronicleRow, term: string): boolean {
+  const names = [
+    ...row.appeared.map((person) => person.name),
+    ...row.events.flatMap((event) => (event.characterName ? [event.characterName] : [])),
+  ];
+  if (names.some((name) => expandNameVariants([name]).includes(term))) return true;
+  const texts = [row.synopsis ?? "", row.title ?? "", ...row.events.map((event) => event.text)];
+  return texts.some((text) => text.includes(term));
+}
+
+function chronicleMarkdownOf(
+  page: readonly ChronicleRow[],
+  allRows: number,
+  workTitle: string
+): string {
+  // 作品に話が1つも無いときだけ製品と同じ案内を出す。絞って0行になったときに
+  // 「本文ファイルを入れてください」と出すと、話が無いと読み違える
+  if (page.length === 0) return allRows === 0 ? chronicleToMarkdown([]) : "";
+  return chronicleToMarkdown([{ label: "", line: null, kind: "canonical", rows: [...page] }], {
+    workTitle,
+    order: "chapter",
+  });
+}
+
+/** 返した範囲と続きの取り方の断り。外部AIは構造より平文を読むので、文でも書く */
+function pageNotices(
+  page: readonly ChronicleRow[],
+  total: number,
+  offset: number,
+  truncated: boolean,
+  allRows: number
+): string[] {
+  if (page.length === 0) {
+    if (allRows === 0) return [];
+    return total === 0
+      ? ["絞り込み（範囲・語）に当たる話がありません。"]
+      : [`offset（${offset}）が絞った行の数（${total}）を超えています。`];
+  }
+  if (!truncated && offset === 0) return [];
+  const first = page[0].chapterLabel;
+  const last = page[page.length - 1].chapterLabel;
+  const shown = `全${total}件のうち${offset + 1}〜${offset + page.length}件目（${first}〜${last}）を返しました。`;
+  return truncated
+    ? [
+        // 省いた理由は大きさの上限と limit の2つがあるので、理由は書かず件数だけにする
+        `${shown}残りの${total - offset - page.length}件は省きました。` +
+          `続きは offset: ${offset + page.length} で読めます（ほかの引数は同じまま）。` +
+          "話数の範囲（fromEpisode・toEpisode）や語（term）で絞ることもできます。",
+      ]
+    : [shown];
 }
 
 /* ── relations・locations ─────────────────────────────── */
