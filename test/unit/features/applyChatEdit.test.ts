@@ -1,6 +1,7 @@
 import * as nodePath from "path";
-import { beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { FileSystemError, Uri, workspace } from "../support/vscodeStub";
+import { installFakeDisk, openFakeDocument, type FakeDisk } from "../support/openDocumentFake";
 import { applyChatEdit } from "../../../src/features/applyChatEdit";
 import type { WorkEntry } from "../../../src/models/types";
 
@@ -92,5 +93,57 @@ describe("applyChatEdit：空の提案を書き込みで捨てる", () => {
     const written = readPlot();
     expect(written).toContain("新しいタイトル");
     expect(written).not.toContain("既存のタイトル");
+  });
+});
+
+/**
+ * 相談パネルの書き込み（決まったこと・まとめ・［書き込む］）も、plot.md が開いていれば
+ * **文書へ当てて保存する**（`core/openDocumentEdit.ts`。作者の裁定「両方直す」、2026-10-16）。
+ * ディスクを消して作り直すと、開いたままのエディターで Ctrl+S が「ファイルのほうが新しい」で断られる。
+ */
+describe("applyChatEdit：plot.md がエディターで開いているとき", () => {
+  let disk: FakeDisk;
+  const initial = "# 氷の街\n\n## タイトル\n既存のタイトル\n";
+
+  beforeEach(() => {
+    disk = installFakeDisk();
+    disk.write(plotPath, initial);
+    workspace.textDocuments.length = 0;
+  });
+
+  afterEach(() => {
+    workspace.textDocuments.length = 0;
+    workspace.applyEdit = async () => true;
+  });
+
+  test("ディスクを消して作り直さず、文書へ当てて保存する", async () => {
+    const document = openFakeDocument(disk, plotPath, initial);
+
+    await applyChatEdit(work, {
+      target: { kind: "plot", section: "title" },
+      content: "新しいタイトル",
+      label: "タイトルを変える",
+    });
+
+    expect(disk.deleted).toEqual([]);
+    // 当てるのは変わった所だけ（「既存の」→「新しい」）
+    expect(document.applied).toEqual(["新しい"]);
+    expect(document.text).toBe("# 氷の街\n\n## タイトル\n新しいタイトル\n");
+    expect(document.save).toHaveBeenCalledTimes(1);
+    expect(disk.read(plotPath)).toContain("新しいタイトル");
+  });
+
+  test("未保存の変更があれば書かずに止める", async () => {
+    const document = openFakeDocument(disk, plotPath, initial + "書きかけ", { dirty: true });
+
+    await expect(
+      applyChatEdit(work, {
+        target: { kind: "plot", section: "title" },
+        content: "新しいタイトル",
+        label: "タイトルを変える",
+      })
+    ).rejects.toThrow(/保存していない/);
+    expect(document.applied).toEqual([]);
+    expect(disk.read(plotPath)).toBe(initial);
   });
 });

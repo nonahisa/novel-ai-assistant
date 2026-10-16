@@ -14,10 +14,10 @@ import {
 import { hasConflictMarkers } from "../core/textDecode";
 import {
   readTextFile,
-  writeTextFilePreservingFormat,
   type TextFileContent,
   type WriteTextFileResult,
 } from "../core/textFile";
+import { writeTextFilePreferringOpenDocument } from "../core/openDocumentEdit";
 import { appendChatLog } from "../core/chatLog";
 import {
   logFailure,
@@ -58,8 +58,9 @@ import { confirmPaidUsage, confirmProviderReachable } from "./aiConnectivity";
  *   （画面から届いた文をそのまま書く道を作らない）
  * - 節の差し替えは `updatePlotMarkdown`（対話式プロット作成のまとめ P-44 が
  *   最終的に通る組み立てと同じ。作者の見出しの並び・自由に足した節を崩さない）
- * - 書き戻しは本文と同じ口 `writeTextFilePreservingFormat`（押した時点で
- *   読んだハッシュの照合・文字コードと改行の保持・退避→新規作成）
+ * - 書き戻しは `writeTextFilePreferringOpenDocument`（押した時点で読んだハッシュの照合。
+ *   plot.md が開いていればその文書へ当てて保存し、開いていなければ本文と同じ口
+ *   `writeTextFilePreservingFormat` で文字コードと改行を保ち退避→新規作成）
  * - **作者の書いた項目を置き換えるときは確認を出す**
  *
  * ## 会話は残さない
@@ -428,7 +429,8 @@ export class PlotAdviceSession {
           modal: true,
           detail:
             `いまの文：\n${clip(current.trim(), 300)}\n\n案：\n${clip(held.value, 300)}\n\n` +
-            "置き換える前の plot.md は回復先に退避します。",
+            // 開いている plot.md へは文書へ当てて書く（回復先への退避は無く、Ctrl+Z で戻す）
+            "置き換える前の plot.md は回復先に退避します（エディターで開いているときは Ctrl+Z で戻せます）。",
         },
         ok
       );
@@ -447,7 +449,13 @@ export class PlotAdviceSession {
       return false;
     }
 
-    const written = await writeTextFilePreservingFormat(plotFile, next, file, file.hash);
+    /*
+      **plot.md がエディターで開いていれば、その文書へ当てて保存する**（`core/openDocumentEdit.ts`）。
+      ディスクを「退避 → 消して作り直す」で書くと、開いたままのエディターが読み直す前に作者が打ったとき、
+      Ctrl+S が「ファイルのほうが新しい」で断られた（0.107.8、作者の裁定「両方直す」）。
+      開いていなければ今までどおり本文と同じ口でディスクへ書く
+    */
+    const written = await writeTextFilePreferringOpenDocument(plotFile, file, next);
     if (!written.ok) {
       logFailure("プロットの相談の書き込み", {
         作品: work.title,
@@ -455,8 +463,23 @@ export class PlotAdviceSession {
         理由: written.reason,
         詳細: written.detail ?? "",
       });
-      void vscode.window.showWarningMessage(describeWriteFailure(written));
+      void vscode.window.showWarningMessage(
+        written.reason === "edit_rejected"
+          ? "開いているプロット（plot.md）へ書けませんでした。plot.md を開き直してから、もう一度押してください。"
+          : describeWriteFailure({ ok: false, reason: written.reason })
+      );
       return false;
+    }
+    if (written.via === "document" && !written.saved) {
+      // 文書には入った（作者の画面に出ている）。書けたことにして、保存だけを頼む
+      logFailure("プロットの相談の書き込み（保存）", {
+        作品: work.title,
+        項目: held.heading,
+        詳細: written.detail ?? "",
+      });
+      void vscode.window.showWarningMessage(
+        "プロット（plot.md）へ書きましたが、保存できませんでした。開いている plot.md を保存してください。"
+      );
     }
 
     this.held.delete(id);

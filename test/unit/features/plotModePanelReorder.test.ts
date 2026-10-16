@@ -99,7 +99,9 @@ describe("予定の話を動かす", () => {
 
   it("見出しの書き直しは、退避つきの書き戻しの口だけを通る", () => {
     expect(headings).toContain("renumberEpisodePlotHeading(");
-    expect(headings).toContain("writeTextFilePreservingFormat(");
+    // 開いていれば文書へ当てて保存し、開いていなければ `writeTextFilePreservingFormat`（退避つき）へ
+    // 落ちる口（`core/openDocumentEdit.ts`。0.107.8 の「ファイルのほうが新しい」を避けるため）
+    expect(headings).toContain("writeTextFilePreferringOpenDocument(");
     expect(headings).not.toMatch(/atomicWriteFile|fs\.writeFile|writePlotText/);
   });
 

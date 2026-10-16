@@ -4,11 +4,8 @@ import type { WorkEntry } from "../models/types";
 import { logFailure, logStep, useLogFile } from "../core/logger";
 import { renamePlotHeading } from "../core/plotDoc";
 import { plotPath } from "../core/plotFile";
-import {
-  readTextFile,
-  writeTextFilePreservingFormat,
-  type WriteTextFileResult,
-} from "../core/textFile";
+import { readTextFile, type WriteTextFileResult } from "../core/textFile";
+import { writeTextFilePreferringOpenDocument } from "../core/openDocumentEdit";
 import {
   readWorkConfig,
   writeWorkConfig,
@@ -145,17 +142,23 @@ async function updatePlotTitle(
     }
 
     // 本文と同じ扱いで書き戻す（文字コード・改行を保ち、読み込み後に
-    // 外から変えられていたら書かない。CLAUDE.mdの「原稿を壊さない」）
-    const result = await writeTextFilePreservingFormat(
-      target,
-      text,
-      content,
-      content.hash
-    );
-    if (result.ok) return [];
-    return [
-      `プロットの見出しは書き換えられませんでした（${describeWriteFailure(result)}）。`,
-    ];
+    // 外から変えられていたら書かない。CLAUDE.mdの「原稿を壊さない」）。
+    // **plot.md が開いていれば、その文書へ当てて保存する**——ディスクを消して作り直すと、
+    // 開いたままのエディターで Ctrl+S が「ファイルのほうが新しい」で断られた（0.107.8）
+    const result = await writeTextFilePreferringOpenDocument(target, content, text);
+    if (!result.ok) {
+      return [
+        `プロットの見出しは書き換えられませんでした（${
+          result.reason === "edit_rejected"
+            ? "開いている plot.md へ書けませんでした。開き直してから手で直してください"
+            : describeWriteFailure({ ok: false, reason: result.reason })
+        }）。`,
+      ];
+    }
+    if (result.via === "document" && !result.saved) {
+      return ["プロットの見出しは書き換えましたが、保存できませんでした。開いている plot.md を保存してください。"];
+    }
+    return [];
   } catch (error) {
     useLogFile(work.folderPath);
     logFailure("作品名の変更（プロットの見出し）", {

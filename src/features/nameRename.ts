@@ -15,7 +15,7 @@ import {
 import { createForeshadowStore } from "../core/foreshadowStore";
 import type { SettingsStore, StorableRecord } from "../core/settingsStore";
 import { SynopsisStore } from "../core/synopsisStore";
-import { plotPath, readPlotText, writePlotText } from "../core/plotFile";
+import { plotPath, rewritePlotFile, writePlotText } from "../core/plotFile";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
 import { SYNOPSIS_FILE } from "../core/synopsisDoc";
 import {
@@ -594,12 +594,14 @@ async function applyToPlot(
   result: RenameRecordsResult
 ): Promise<void> {
   try {
-    const current = await readPlotText(work);
-    if (!current) return;
-    const next = applyMappingToText(current, pending.mapping);
-    if (next === current) return;
-    await writePlotText(await plotPath(work), next);
-    result.plotUpdated = true;
+    // **開いていれば文書へ当てて保存する**（`rewritePlotFile`。ディスクを消して作り直すと、
+    // 開いたままのエディターで Ctrl+S が「ファイルのほうが新しい」で断られた。0.107.8）。
+    // 無いプロットは作らない（空の中身から作るものは無い）
+    if (await rewritePlotFile(await plotPath(work), (current) =>
+      current ? applyMappingToText(current, pending.mapping) : current
+    )) {
+      result.plotUpdated = true;
+    }
   } catch (error) {
     result.failures.push(`プロット：${messageOf(error)}`);
   }

@@ -4,6 +4,11 @@ import type { WorkEntry } from "../models/types";
 import { PLOT_FILE, readWorkConfig, workPaths } from "./workRegistry";
 import { atomicWriteFile, createManagedRecoveryPath } from "./atomicWrite";
 import { updatePlotMarkdown, type PlotSections } from "./plotDoc";
+import { readTextFile } from "./textFile";
+import {
+  describePreferOpenDocumentFailure,
+  writeTextFilePreferringOpenDocument,
+} from "./openDocumentEdit";
 
 /**
  * プロット（`設定/plot.md`）の読み書き。
@@ -42,13 +47,48 @@ export async function writePlotSections(
   work: WorkEntry,
   updates: Partial<PlotSections>
 ): Promise<void> {
-  const target = await plotPath(work);
-  const body = updatePlotMarkdown(await readPlotText(work), updates, {
-    workTitle: work.title,
-  });
-  await writePlotText(target, body);
+  await rewritePlotFile(await plotPath(work), (current) =>
+    updatePlotMarkdown(current, updates, { workTitle: work.title })
+  );
 }
 
+/**
+ * plot.md を、今の中身から作り直した中身へ書き換える。書き換えたら true。
+ *
+ * **エディターで開いていれば、その文書へ当てて保存する**（`writeTextFilePreferringOpenDocument`）。
+ * ディスクを「退避 → 消して作り直す」で書くと、開いたままのエディターが読み直す前に作者が打ったとき
+ * Ctrl+S が「ファイルのほうが新しい」で断られた（0.107.8、作者の裁定「両方直す」）。
+ * 開いていなければ本文と同じ書き戻しの口でディスクへ書く（読み込み時のハッシュ照合・
+ * 文字コードと改行の保持・退避つき）。**未保存の変更があれば書かずに止める**——
+ * これまでの `writePlotText` は確かめずに書いていたので、書きかけの分を巻き込みえた。
+ *
+ * 書けなければ投げる（文は作者に見せられる形）。ファイルが無ければ作る（`update("")` が空なら作らない）。
+ *
+ * @param update 今の中身（LF空間）から書きたい中身（LF空間）を作る
+ */
+export async function rewritePlotFile(
+  target: string,
+  update: (current: string) => string
+): Promise<boolean> {
+  if (!(await exists(target))) {
+    const body = update("");
+    if (body === "") return false;
+    await writePlotText(target, body);
+    return true;
+  }
+  const file = await readTextFile(target);
+  const result = await writeTextFilePreferringOpenDocument(target, file, update(file.text));
+  const failure = describePreferOpenDocumentFailure(result, "プロット（plot.md）");
+  if (failure) throw new Error(failure);
+  return result.ok && result.via !== "unchanged";
+}
+
+/**
+ * 退避してから作り直す（無ければ作る）。**こちらはハッシュ照合も未保存の確かめも、開いている
+ * 文書への当て込みもしない。** 既にある plot.md を書き換えるときは `rewritePlotFile` を通す。
+ * 残っている呼び手は、新しく作るとき・開いていないと確かめたあと（プロットモードの見出しを足す口）・
+ * synopsis.md の名前の付け替え（`nameRename.ts`。まだ揃えていない）
+ */
 export async function writePlotText(
   target: string,
   body: string
