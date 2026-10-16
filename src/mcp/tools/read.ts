@@ -40,12 +40,40 @@ import { buildChronicle, type ChronicleRow } from "../../core/chronicle";
 import { chronicleToMarkdown } from "../../core/chronicleMarkdown";
 import { buildRelationGraph, type RelationGraph } from "../../core/relationGraph";
 import { buildLocationSketch, type LocationSketch } from "../../core/locationSketch";
+import { AIWRITER_DIR } from "../../models/types";
+import { parseWorkGoals, WORK_GOALS_FILE } from "../../models/workGoals";
+import { postingSiteInfo, type PostingSiteId } from "../../models/posting";
+import {
+  aggregate,
+  currentStreak,
+  DEFAULT_DAY_BOUNDARY_HOUR,
+  DEFAULT_WEEK_START,
+  deviceTotals,
+  mergeDailyStats,
+  monthKey,
+  statsDayKey,
+  sumRange,
+  weekStartKey,
+  addDays,
+  type StatsGranularity,
+} from "../../core/writingStats";
+import { collectWritingStats, WRITING_STATS_DIR } from "../../core/writingStatsFiles";
+import { buildContestProgress, type ContestProgress } from "../../core/contestProgress";
+import { parseCollectedFile, type CollectedEpisode } from "../../core/collectedFile";
+import { isCollectedFile } from "../../core/episodeLabel";
+import { extractEpisodeParts } from "../../core/episodeCopy";
+import { parseEpisodeFileName } from "../../core/episodeParser";
+import { convertForPosting } from "../../core/postingConvert";
+import { postingCopyTargetFor } from "../../core/postingCopyTargets";
+import type { NoteMarkdownResult } from "../../core/noteMarkdown";
 import { readEpisodeFiles } from "./episodeFiles";
 import { estimateResultTokens, READ_RESULT_TOKEN_BUDGET } from "./payloadBudget";
 import { PARSERS as RECORD_PARSERS, SUBDIRS as RECORD_SUBDIRS } from "./proposeRecord";
 import {
   FOLDER_INPUT,
+  listBodyFiles,
   McpToolError,
+  resolveInsideFolder,
   SETTINGS_SUBDIRS,
   SYNOPSES_FILE,
   describeError,
@@ -83,8 +111,13 @@ export const READ_KINDS = [
   "chronicle",
   "relations",
   "locations",
+  "writingStats",
+  "posting",
 ] as const;
 export type ReadKind = (typeof READ_KINDS)[number];
+
+/** 投稿サイト（`models/posting.ts` の `POSTING_SITES` の id と同じ並び） */
+export const POSTING_READ_SITES = ["narou", "kakuyomu", "alphapolis", "note"] as const;
 
 export const SETTINGS_RECORD_KINDS = [
   "character",
@@ -108,7 +141,29 @@ export const NOVEL_READ_INPUT = {
     .describe(
       "読むもの。settings＝設定資料（人物・能力・組織・場所・世界観）／resume＝執筆再開の1枚／" +
         "foreshadows＝伏線の台帳と一覧／chronicle＝年表（話ごとのあらすじ・登場・出来事・時期）／" +
-        "relations＝人物相関図の中身／locations＝場所の略図の中身"
+        "relations＝人物相関図の中身／locations＝場所の略図の中身／" +
+        "writingStats＝執筆量（日・週・月・年ごと、続いている日数、環境ごと）と作品の目標・応募先の進み／" +
+        "posting＝投稿サイトの入力欄へ貼る形にした1話の本文と題（site・file が要る。投稿はしない）"
+    ),
+  site: z
+    .enum(POSTING_READ_SITES)
+    .optional()
+    .describe(
+      "kind: posting のとき（必須）。narou＝小説家になろう、kakuyomu＝カクヨム、alphapolis＝アルファポリス、note＝note。" +
+        "ルビと傍点をそのサイトの書き方にする（note は Markdown を note の形に整える）"
+    ),
+  file: z
+    .string()
+    .optional()
+    .describe("kind: posting のとき（必須）。話のファイル（作品フォルダーからの相対パス。novel.scan の filePath）"),
+  collectedOrder: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe(
+      "kind: posting で、file が合本（1ファイルに複数話）のとき（必須）。区切りの何番目の話か（1から）。" +
+        "省くと、入っている話の一覧を理由に添えて断る"
     ),
   term: z
     .string()
@@ -141,7 +196,8 @@ export const NOVEL_READ_INPUT = {
     .optional()
     .describe(
       "kind: chronicle のとき、絞った行の何件目から返すか（既定は0）。" +
-        "返事の next.offset をそのまま渡すと続きが読める（ほかの引数は同じまま）"
+        "kind: posting のとき、変換した本文の何行目から返すか（0から。既定は0）。" +
+        "どちらも、返事の next.offset をそのまま渡すと続きが読める（ほかの引数は同じまま）"
     ),
   limit: z
     .number()
@@ -163,6 +219,14 @@ export interface NovelReadInput {
   toEpisode?: number;
   offset?: number;
   limit?: number;
+  site?: PostingSiteId;
+  file?: string;
+  collectedOrder?: number;
+  /**
+   * 今の時刻（`kind: writingStats` の「今日」）。**入力の形（`NOVEL_READ_INPUT`）には無い**
+   * ——外から日付をずらされても困らないが、試験で日付を固めるためだけに置く
+   */
+  now?: Date;
 }
 
 export interface SettingsReadRecord {
@@ -232,7 +296,72 @@ export type NovelReadResult =
       kind: "locations";
       sketch: LocationSketch;
       unreadableFiles: string[];
-    };
+    }
+  | WritingStatsReadResult
+  | PostingReadResult;
+
+/** 執筆量の束（日・週・月・年の1つ）。**数字だけ**（本文もファイル名も入らない） */
+export interface WritingStatsReadBucket {
+  key: string;
+  label: string;
+  net: number;
+  gross: number;
+  activeDays: number;
+}
+
+export interface WritingStatsReadResult {
+  kind: "writingStats";
+  /** 今日（日付の境目で切った YYYY-MM-DD） */
+  today: string;
+  /** 日付の境目（何時で日が変わるか）。VS Code の設定は読めないので既定 */
+  dayBoundaryHour: number;
+  /** 記録を読めた環境の数（壊れた記録は数えない） */
+  deviceCount: number;
+  /** 今日・今週・今月に書いた純文字数（全環境の合算） */
+  todayNet: number;
+  week: { key: string; net: number; activeDays: number };
+  month: { key: string; net: number; activeDays: number };
+  /** 続けて書いている日数（今日まだでも昨日まで続いていれば途切れない） */
+  streak: number;
+  /** 粒度ごとの束（製品の執筆統計と同じ本数。書かなかった区間も0で並ぶ） */
+  buckets: Record<StatsGranularity, WritingStatsReadBucket[]>;
+  /** 環境ごとの内訳（環境の名前・純文字数・書いた日数） */
+  devices: Array<{ deviceId: string; net: number; activeDays: number }>;
+  /** いまの作品の字数（本文フォルダーの話の純文字数の合計） */
+  work: { net: number; episodes: number };
+  /** 作品の目標（`.aiwriter/goals.json`）。決めていなければ空の目標、読めなければ null */
+  goals: {
+    perEpisodeChars: number | null;
+    /** 応募先と締切までの進み。応募先が無ければ null */
+    contest: ContestProgress | null;
+  } | null;
+  /** MCP では出さないものと理由。黙って落とさない */
+  omitted: Array<{ section: "dailyGoal" | "monthlyGoal"; reason: string }>;
+  notices: string[];
+}
+
+export interface PostingReadResult {
+  kind: "posting";
+  site: PostingSiteId;
+  siteLabel: string;
+  /** 話のファイル（作品フォルダーからの相対） */
+  file: string;
+  /** 合本から取り出した話の番号（区切りの何番目か）。合本でなければ null */
+  collectedOrder: number | null;
+  /** 題名の欄へ入れるもの（サブタイトル。note は先頭の `# 見出し`）。無ければ null */
+  title: string | null;
+  /** 貼る本文の**この回に返す行だけ**（行の境目で切る。ルビの記法を割らない） */
+  text: string;
+  /** 変換した本文の全体の字数と行数 */
+  chars: number;
+  totalLines: number;
+  offset: number;
+  truncated: boolean;
+  next: { offset: number } | null;
+  /** note のときだけ：貼り付けでは入らないもの（画像・埋め込み）と注意 */
+  note?: { images: NoteMarkdownResult["images"]; embeds: string[]; warnings: string[] };
+  notices: string[];
+}
 
 export function novelRead(input: NovelReadInput): NovelReadResult {
   const folder = input.folder;
@@ -252,6 +381,10 @@ export function novelRead(input: NovelReadInput): NovelReadResult {
       return readRelations(folder);
     case "locations":
       return readLocations(folder);
+    case "writingStats":
+      return readWritingStats(folder, input.now ?? new Date());
+    case "posting":
+      return readPosting(folder, input);
   }
 }
 
@@ -466,7 +599,7 @@ function readResume(folder: string): NovelReadResult {
       {
         section: "todayGoal",
         reason:
-          "今日の執筆量と目標は、VS Code の設定と機械ごとの記録にあるため、MCP では出しません。",
+          "今日の目標は VS Code の設定にあるため、MCP では出しません（執筆量そのものは kind: writingStats で読めます）。",
       },
       {
         section: "relatedScenes",
@@ -743,4 +876,327 @@ function readLocations(folder: string): NovelReadResult {
       (name) => `${DEFAULT_SETTINGS_DIR}/${SETTINGS_SUBDIRS.locations}/${name}`
     ),
   };
+}
+
+/* ── writingStats ─────────────────────────────────────── */
+
+/**
+ * 執筆量（設計書6.3）と作品の目標（6.3.6）。**製品の［執筆統計］と同じ集計**
+ * （`core/writingStats.ts` の関数）を通し、記録の読み方も製品と同じ関数
+ * （`collectWritingStats`）を通す。
+ *
+ * 製品と違うのは、VS Code の設定にあるものを読めないことだけで、黙って既定に
+ * 倒さず `omitted`・`notices` で言う：
+ * - 日次・月次の目標（`novelai.stats.dailyGoal`・`monthlyGoal`）→ 出さない
+ * - 日付の境目（`novelai.stats.dayBoundaryHour`）→ 既定（午前4時）で数える
+ *
+ * **返すのは数字だけ。** 記録にはファイルごとの内訳（作品フォルダーからの相対パス）が
+ * あるが、相談に要らないので入れない。
+ */
+function readWritingStats(folder: string, now: Date): WritingStatsReadResult {
+  const notices: string[] = [];
+  const sets = collectWritingStats(readStatsFiles(folder, notices));
+  const days = mergeDailyStats(sets);
+
+  const today = statsDayKey(now, DEFAULT_DAY_BOUNDARY_HOUR);
+  const week = weekStartKey(today, DEFAULT_WEEK_START);
+  const month = monthKey(today);
+  const weekTotal = sumRange(days, week, addDays(week, 6));
+  const monthTotal = sumRange(days, `${month}-01`, `${month}-31`);
+
+  const granularities: StatsGranularity[] = ["daily", "weekly", "monthly", "yearly"];
+  const buckets = Object.fromEntries(
+    granularities.map((granularity) => [
+      granularity,
+      aggregate(days, granularity, { today, weekStart: DEFAULT_WEEK_START }),
+    ])
+  ) as Record<StatsGranularity, WritingStatsReadBucket[]>;
+
+  // いまの作品の字数。**製品の統計と同じく純文字数**（数え方の設定は VS Code の中にある）
+  const scanned = readEpisodeFiles(folder);
+  for (const relative of scanned.unreadable) {
+    notices.push(`${relative} を読めませんでした（作品の字数に入っていません）。`);
+  }
+  const workNet = scanned.episodes.reduce(
+    (sum, episode) => sum + pickCount(episode.counts, "net"),
+    0
+  );
+
+  const goals = readGoals(folder, workNet, today, notices);
+
+  if (sets.length === 0) {
+    notices.push(
+      "執筆量の記録がまだありません（拡張機能で本文を保存すると、環境ごとに .aiwriter/stats/ へ記録が付きます）。"
+    );
+  }
+  notices.push(
+    `日付の境目は既定の午前${DEFAULT_DAY_BOUNDARY_HOUR}時で数えました（作者が VS Code の設定で変えていれば、製品の画面と1日ずれることがあります）。` +
+      "作品の字数は純文字数（ルビを除く）で、作者が総文字数で数える設定にしていても純文字数です。"
+  );
+
+  return {
+    kind: "writingStats",
+    today,
+    dayBoundaryHour: DEFAULT_DAY_BOUNDARY_HOUR,
+    deviceCount: sets.length,
+    todayNet: sumRange(days, today, today).net,
+    week: { key: week, net: weekTotal.net, activeDays: weekTotal.activeDays },
+    month: { key: month, net: monthTotal.net, activeDays: monthTotal.activeDays },
+    streak: currentStreak(days, today),
+    buckets,
+    devices: deviceTotals(sets),
+    work: { net: workNet, episodes: scanned.episodes.length },
+    goals,
+    omitted: [
+      {
+        section: "dailyGoal",
+        reason:
+          "1日の目標は VS Code の設定（novelai.stats.dailyGoal）にあるため、MCP では出しません。作者に尋ねてください。",
+      },
+      {
+        section: "monthlyGoal",
+        reason:
+          "月の目標は VS Code の設定（novelai.stats.monthlyGoal）にあるため、MCP では出しません。作者に尋ねてください。",
+      },
+    ],
+    notices,
+  };
+}
+
+/** `.aiwriter/stats/*.json` の名前と中身。読めないファイルは飛ばして断る */
+function readStatsFiles(folder: string, notices: string[]): Array<{ name: string; text: string }> {
+  const dir = nodePath.join(nodePath.resolve(folder), AIWRITER_DIR, WRITING_STATS_DIR);
+  let names: string[];
+  try {
+    names = fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name);
+  } catch {
+    // 記録がまだ無い（フォルダーが無い）。呼ぶ側が「まだありません」と言う
+    return [];
+  }
+  const files: Array<{ name: string; text: string }> = [];
+  for (const name of names) {
+    try {
+      files.push({ name, text: decodeBytes(fs.readFileSync(nodePath.join(dir, name))).text });
+    } catch (error) {
+      notices.push(`執筆量の記録 ${name} を読めませんでした：${describeError(error)}`);
+    }
+  }
+  return files;
+}
+
+/**
+ * 作品の目標（`.aiwriter/goals.json`）。**無ければ空の目標**、壊れていれば null と断り
+ * ——直さない（作者が書いた値が黙って消える。製品の `readWorkGoals` と同じ線）。
+ */
+function readGoals(
+  folder: string,
+  written: number,
+  today: string,
+  notices: string[]
+): WritingStatsReadResult["goals"] {
+  const file = nodePath.join(nodePath.resolve(folder), AIWRITER_DIR, WORK_GOALS_FILE);
+  if (!fs.existsSync(file)) return { perEpisodeChars: null, contest: null };
+  try {
+    const goals = parseWorkGoals(JSON.parse(decodeBytes(fs.readFileSync(file)).text));
+    return {
+      perEpisodeChars: goals.perEpisodeChars,
+      contest: buildContestProgress(goals, written, today) ?? null,
+    };
+  } catch (error) {
+    notices.push(
+      `作品の目標（${AIWRITER_DIR}/${WORK_GOALS_FILE}）を読めませんでした：${describeError(error)}`
+    );
+    return null;
+  }
+}
+
+/* ── posting ─────────────────────────────────────── */
+
+/**
+ * 投稿サイトの入力欄へ貼る形（設計書6.84・6.68）。**製品の［投稿サイト用に変換してコピー］
+ * と同じ変換**（`convertForPosting`。1話まるごとの経路なので前後の空行を落とす）を通す。
+ *
+ * **投稿はしない。** 返すのは貼る文と題だけで、クリップボードにも投稿状態の台帳にも
+ * 触れない——貼るのは作者である。
+ *
+ * **競合の跡が残る話は断る**（投稿キットと同じ。印ごと公開されると取り返しがつかない）。
+ * **合本は話を指させる**（画面では一覧から選ばせるところ。指さなければ一覧を添えて断る）。
+ *
+ * 大きさは年表と同じ作法で、**行の境目で**切って続きの印を返す——字数で切ると
+ * ルビの記法（`｜漢字《かんじ》`）の途中で割れ、貼った片方が壊れる。
+ */
+function readPosting(folder: string, input: NovelReadInput): PostingReadResult {
+  const site = input.site;
+  if (!site) {
+    throw new McpToolError(
+      "kind: posting には site（narou・kakuyomu・alphapolis・note のどれか）が要ります。"
+    );
+  }
+  const file = input.file?.trim();
+  if (!file) {
+    throw new McpToolError(
+      "kind: posting には file（話のファイル。novel.scan の filePath）が要ります。"
+    );
+  }
+  const absolute = resolveInsideFolder(folder, file);
+  // **本文のファイルだけ。** 設定資料や .aiwriter の中を「投稿用」として返さない
+  const isBodyFile = listBodyFiles(folder).some(
+    (relative) => resolveInsideFolder(folder, relative) === absolute
+  );
+  if (!isBodyFile) {
+    throw new McpToolError(
+      `${file} は本文のファイルではありません（novel.scan の filePath を渡してください）。`
+    );
+  }
+  const shown = toWorkPath(nodePath.resolve(folder), absolute);
+
+  let decoded: ReturnType<typeof decodeBytes>;
+  try {
+    decoded = decodeBytes(fs.readFileSync(absolute));
+  } catch (error) {
+    throw new McpToolError(`${shown} を読めませんでした：${describeError(error)}`);
+  }
+  if (decoded.hasConflictMarkers) {
+    throw new McpToolError(
+      `${shown} に未解決の競合（<<<<<<<）があります。そのまま投稿すると競合の印ごと公開されるため、変換しません。` +
+        "競合を解決してから呼んでください。"
+    );
+  }
+
+  // 題と本文の切り分けは投稿キットと同じ（頭書きの【タイトル】が優先、無ければファイル名）
+  const parts = extractEpisodeParts(
+    decoded.text,
+    parseEpisodeFileName(nodePath.basename(absolute)).subtitle
+  );
+  const picked = pickCollected(decoded.text, input.collectedOrder, shown);
+  const subtitle = picked ? picked.title ?? parts.subtitle : parts.subtitle;
+  const body = picked ? picked.body : parts.body;
+  if (!body.trim()) {
+    throw new McpToolError(`${shown} に本文が見つかりませんでした。`);
+  }
+
+  const converted = convertForPosting(body, postingCopyTargetFor(site), { trimEdges: true });
+  const lines = converted.text.split("\n");
+  const offset = input.offset ?? 0;
+  // note は貼り付けでは入らないものがある。製品の知らせ（`noteCopyMessage`）と同じことを言う
+  const noteNotices: string[] = [];
+  if (converted.note) {
+    if (converted.note.images.length > 0) {
+      noteNotices.push(
+        `画像${converted.note.images.length}枚は貼り付けでは入りません（【画像：…】の行の位置へ作者がアップロードします）。`
+      );
+    }
+    if (converted.note.embeds.length > 0) {
+      noteNotices.push(
+        `埋め込み${converted.note.embeds.length}件は、URLの行末でEnterを押すと展開されます。`
+      );
+    }
+    noteNotices.push("目次は note の編集画面のスイッチで入れられます。", ...converted.note.warnings);
+  }
+
+  const compose = (count: number): PostingReadResult => {
+    const page = lines.slice(offset, offset + count);
+    const nextOffset = offset + page.length;
+    const truncated = nextOffset < lines.length;
+    return {
+      kind: "posting",
+      site,
+      siteLabel: postingSiteInfo(site).label,
+      file: shown,
+      collectedOrder: picked ? picked.order : null,
+      title: converted.note?.title ?? subtitle ?? null,
+      text: page.join("\n"),
+      chars: converted.text.length,
+      totalLines: lines.length,
+      offset,
+      truncated,
+      next: truncated ? { offset: nextOffset } : null,
+      ...(converted.note
+        ? {
+            note: {
+              images: converted.note.images,
+              embeds: converted.note.embeds,
+              warnings: converted.note.warnings,
+            },
+          }
+        : {}),
+      notices: [...noteNotices, ...postingPageNotices(offset, page.length, lines.length, truncated)],
+    };
+  };
+
+  if (offset >= lines.length) {
+    const empty = compose(0);
+    empty.notices.push(`offset（${offset}）が本文の行の数（${lines.length}）を超えています。`);
+    return empty;
+  }
+
+  // 年表と同じ詰め方：1行ずつ足し、上限を超える行の手前で止める。**最低1行は返す**
+  // （1行だけで上限を超える段落でも、0行を返すと同じ所で永遠に止まる）
+  const remaining = lines.length - offset;
+  let count = 1;
+  while (
+    count < remaining &&
+    estimateResultTokens(compose(count + 1)) <= READ_RESULT_TOKEN_BUDGET
+  ) {
+    count++;
+  }
+  const result = compose(count);
+  if (count === 1 && estimateResultTokens(result) > READ_RESULT_TOKEN_BUDGET) {
+    result.notices.push(
+      `${offset + 1}行目だけで返事の大きさの目安を超えています。呼び出し側で切られることがあります。`
+    );
+  }
+  return result;
+}
+
+/**
+ * 合本なら1話を選ぶ。合本でなければ null。**指していなければ、入っている話の一覧を
+ * 添えて断る**（画面の［どの話をコピーしますか］の代わり。黙って1話目を返すと、
+ * 別の話を貼らせることになる）。
+ */
+function pickCollected(
+  text: string,
+  order: number | undefined,
+  shown: string
+): CollectedEpisode | null {
+  const episodes = parseCollectedFile(text);
+  // 1話ぶんに区切り行が付いているだけのファイルは合本ではない（`isCollectedFile`）
+  if (!episodes || !isCollectedFile(episodes.length)) return null;
+  const list = episodes
+    .map(
+      (episode) =>
+        `${episode.order}＝${episode.chapter !== null ? `第${episode.chapter}話` : "話数なし"}` +
+        `${episode.title ? `「${episode.title}」` : ""}（${episode.body.length.toLocaleString("ja-JP")}字）`
+    )
+    .join("、");
+  if (order === undefined) {
+    throw new McpToolError(
+      `${shown} は合本（${episodes.length}話）です。どの話かを collectedOrder で指してください：${list}`
+    );
+  }
+  const found = episodes.find((episode) => episode.order === order);
+  if (!found) {
+    throw new McpToolError(`${shown} に ${order} 番目の話はありません：${list}`);
+  }
+  return found;
+}
+
+/** 返した行の範囲と続きの取り方（年表と同じ書き方） */
+function postingPageNotices(
+  offset: number,
+  shown: number,
+  total: number,
+  truncated: boolean
+): string[] {
+  if (!truncated && offset === 0) return [];
+  const range = `全${total}行のうち${offset + 1}〜${offset + shown}行目を返しました。`;
+  return truncated
+    ? [
+        `${range}残りの${total - offset - shown}行は offset: ${offset + shown} で読めます（ほかの引数は同じまま）。` +
+          "貼る文は、続きをすべて読んでから改行でつないでください。",
+      ]
+    : [range];
 }
