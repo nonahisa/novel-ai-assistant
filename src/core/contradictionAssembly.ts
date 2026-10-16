@@ -24,7 +24,28 @@ import {
 } from "./pastSceneSelect";
 import { linesAround } from "./factContradiction";
 import { lookupKnownAtValue, type AcceptedContradiction } from "./contradictionValidation";
-import { buildContradictionVerifyPrompt } from "../prompts/contradictionVerify";
+import {
+  buildContradictionVerifyPrompt,
+  CONTRADICTION_VERIFY_VERSION,
+} from "../prompts/contradictionVerify";
+
+/**
+ * 製品の、検証の段（P-12b）の答えの控えの鍵に入れる版。
+ *
+ * **小さいモデル（検出の段で抑制版を送るモデル）には `strict:` の印を付ける**
+ * （作者の裁定⑧、2026-10-16）。小さいモデルへは却下の理由を5つにした形を送るが、
+ * 大きいモデルへの文面は変えていないので、版（`CONTRADICTION_VERIFY_VERSION`）は
+ * 上げない——上げると、作者のクラウドAIの検証の控えまで作り直しになる。
+ * 0.70.8 の抑制版（`capabilityCacheTag` の `strict:`）と同じやり方。
+ *
+ * 観点の印（`light:`）は混ぜない。検証のプロンプトは観点で変わらない。
+ */
+export function contradictionVerifyPromptVersion(
+  smallModel: boolean,
+  materialFingerprint: string
+): string {
+  return `${CONTRADICTION_VERIFY_VERSION}:${smallModel ? "strict:" : ""}${materialFingerprint}`;
+}
 
 /**
  * 過去の場面の索引を作る（設計書6.74）。渡りようがなければ undefined。
@@ -124,7 +145,7 @@ export function buildContradictionVerifyUserPrompt(input: {
   /** `describeKnownAt` の結果 */
   settingKnownAt: string;
   /**
-   * 小さいモデル向けの形（P-12b 1.2）。検出の段の抑制と一対で決める
+   * 小さいモデル向けの形（P-12b 1.1 の抑制版、裁定⑧）。検出の段の抑制と一対で決める
    * （製品は `suppressUncertainContradictions`、MCP は `suppression: "strict"`）
    */
   smallModel?: boolean;

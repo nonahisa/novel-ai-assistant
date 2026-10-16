@@ -76,7 +76,7 @@ const MARKDOWN_ALLOWED = new Set([
   "src/prompts/contradictionCheck.ts",
   /*
     矛盾の検証のプロンプト（P-12b）。**画面に出す文言は1つも持たない。**
-    1.2 で、小さいモデルへ却下の理由を選んで並べるため、理由ごとの説明を
+    裁定⑧で、小さいモデルへ却下の理由を選んで並べるため、理由ごとの説明を
     1行の文字列に切り出した（`REJECT_REASON_TEXTS`）。強調はAIへの指示として効く
   */
   "src/prompts/contradictionVerify.ts",

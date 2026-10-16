@@ -864,7 +864,7 @@ export function contradictionPrompt(input: ContradictionPromptInput): {
   /** 材料の予算と、それを決めた読める長さ（`MaterialBudget`） */
   materialBudget: MaterialBudget;
   /**
-   * 抑制の強さ。検証の段（P-12b 1.2）も同じ値で小さいモデル向けの形に切り替える
+   * 抑制の強さ。検証の段（P-12b 1.1 の抑制版、裁定⑧）も同じ値で小さいモデル向けの形に切り替える
    * （送る段と検証の段で、別々に決めない）
    */
   suppression: Suppression;
@@ -1311,7 +1311,7 @@ async function verifyContradictionResults(
             chunk,
             issue,
             settingKnownAt: describeKnownAt(settings.knownAt, issue.settingSays),
-            // 小さいモデル（strict）へは、話数の記録が無いときの書き方を変える（P-12b 1.2）
+            // 小さいモデル（strict）へは、話数の記録が無いときの書き方を変える（P-12b 1.1 の抑制版、裁定⑧）
             smallModel: prompts.suppression === "strict",
           }),
           schema: CONTRADICTION_VERIFY_SCHEMA,
