@@ -70,6 +70,28 @@ export async function rewritePlotFile(
   target: string,
   update: (current: string) => string
 ): Promise<boolean> {
+  return rewriteMarkdownFile(target, update, PLOT_LABEL);
+}
+
+/** 断りの文で使う plot.md の呼び名（AIを呼ぶ前の確かめと、書く口とで同じ言葉にする） */
+export const PLOT_LABEL = "プロット（plot.md）";
+
+/**
+ * 作者が開いていそうな `設定/` の Markdown（plot.md・synopsis.md）を書き換える口。中身は
+ * `rewritePlotFile` の説明のとおり（開いていれば文書へ当てて保存・未保存なら止める・ハッシュ照合）。
+ *
+ * synopsis.md も、相談パネル（`applyChatEdit.ts`）と名前の付け替え（`nameRename.ts`）が
+ * それぞれ「退避 → 消して作り直す」を**ハッシュの照合も未保存の確かめもせず**に書いていた。
+ * 開いたまま書きかけていれば巻き込むか、Ctrl+S が「ファイルのほうが新しい」で断られる。
+ * plot.md と同じ事故なので、同じ口へ揃えた。
+ *
+ * @param label 断りの文に出す、作者が見て分かる呼び名（例「プロット（plot.md）」）
+ */
+export async function rewriteMarkdownFile(
+  target: string,
+  update: (current: string) => string,
+  label: string
+): Promise<boolean> {
   if (!(await exists(target))) {
     const body = update("");
     if (body === "") return false;
@@ -78,7 +100,7 @@ export async function rewritePlotFile(
   }
   const file = await readTextFile(target);
   const result = await writeTextFilePreferringOpenDocument(target, file, update(file.text));
-  const failure = describePreferOpenDocumentFailure(result, "プロット（plot.md）");
+  const failure = describePreferOpenDocumentFailure(result, label);
   if (failure) throw new Error(failure);
   return result.ok && result.via !== "unchanged";
 }
@@ -86,8 +108,8 @@ export async function rewritePlotFile(
 /**
  * 退避してから作り直す（無ければ作る）。**こちらはハッシュ照合も未保存の確かめも、開いている
  * 文書への当て込みもしない。** 既にある plot.md を書き換えるときは `rewritePlotFile` を通す。
- * 残っている呼び手は、新しく作るとき・開いていないと確かめたあと（プロットモードの見出しを足す口）・
- * synopsis.md の名前の付け替え（`nameRename.ts`。まだ揃えていない）
+ * 残っている呼び手は、新しく作るとき（`rewriteMarkdownFile`）と、開いていないと確かめたあと
+ * （プロットモードの見出しを足す口）だけ
  */
 export async function writePlotText(
   target: string,

@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 import * as path from "../core/paths";
 import type { WorkEntry } from "../models/types";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
-import { atomicWriteFile, createManagedRecoveryPath } from "../core/atomicWrite";
 import {
   parsePlotMarkdown,
   updatePlotMarkdown,
@@ -11,13 +10,14 @@ import {
 import {
   buildSynopsisMarkdown,
   parseSynopsisMarkdown,
+  SYNOPSIS_LABEL,
   type SynopsisDoc,
 } from "../core/synopsisDoc";
 import { buildSynopsisListMarkdown } from "../core/synopsisMarkdown";
 import { loadSynopsisChapterMarks } from "../core/synopsisChapters";
 import { buildEmotionCurveMarkdown } from "../core/emotionCurve";
 import { SynopsisStore } from "../core/synopsisStore";
-import { rewritePlotFile } from "../core/plotFile";
+import { rewriteMarkdownFile, rewritePlotFile } from "../core/plotFile";
 import type { ChatEdit, ChatEditTarget } from "../core/chatEdit";
 
 /**
@@ -28,9 +28,10 @@ import type { ChatEdit, ChatEditTarget } from "../core/chatEdit";
  * 書いても次の生成で消える。各話あらすじも同じで、真実は
  * `chapter_synopses.json` にある（`synopsis.md` の該当部分は表示物）。
  *
- * **既存ファイルは上書きできない**（`atomicWrite.ts`）。どの経路でも
- * 「回復先へ退避 → 新規作成」の順で書く。作者の文書なので、失敗しても
- * 元が残るようにしておく。
+ * **既存ファイルは上書きできない**（`atomicWrite.ts`）。plot.md・synopsis.md は
+ * `rewritePlotFile`／`rewriteMarkdownFile` を通す（開いていれば文書へ当てて保存し、
+ * 開いていなければ「回復先へ退避 → 新規作成」。どちらも読み込み時のハッシュを照合する）。
+ * 作者の文書なので、失敗しても元が残るようにしておく。
  *
  * 戻り値は「どこへ書いたか」。作者に知らせるために使う。
  */
@@ -140,24 +141,29 @@ async function applyToSynopsisDoc(
   update: (current: SynopsisDoc) => SynopsisDoc
 ): Promise<string> {
   const target = await settingsFile(work, "synopsis.md");
-  const current = await readText(target);
-  const doc = update(
-    current
-      ? parseSynopsisMarkdown(current)
-      : { catchphrase: null, blurb: "" }
-  );
 
   // 各話あらすじと感情曲線も同じ文書に載る（6.6.2）。
   // 真実はJSON側なので毎回作り直す
   const sections = await buildEpisodeSection(work);
-  const body = buildSynopsisMarkdown(
-    work.title,
-    doc,
-    sections.episodes,
-    sections.emotion
-  );
 
-  await replaceFile(target, body);
+  // **書くのは plot.md と同じ口**（`rewriteMarkdownFile`）——読み込み時のハッシュを照合し、
+  // 開いていれば文書へ当てて保存し、未保存の変更があれば止める。中身は毎回組み立て直すが、
+  // 当てるのは変わった所だけになる（設計書6.4.8）
+  await rewriteMarkdownFile(
+    target,
+    (current) =>
+      buildSynopsisMarkdown(
+        work.title,
+        update(
+          current
+            ? parseSynopsisMarkdown(current)
+            : { catchphrase: null, blurb: "" }
+        ),
+        sections.episodes,
+        sections.emotion
+      ),
+    SYNOPSIS_LABEL
+  );
   return "設定/synopsis.md";
 }
 
@@ -254,34 +260,5 @@ async function readText(target: string): Promise<string | undefined> {
     return new TextDecoder().decode(bytes);
   } catch {
     return undefined;
-  }
-}
-
-/** 既存ファイルは上書きできないので、退避してから作り直す */
-async function replaceFile(target: string, body: string): Promise<void> {
-  await vscode.workspace.fs.createDirectory(
-    path.toUri(path.dirname(target))
-  );
-
-  if (await exists(target)) {
-    const recoveryPath = await createManagedRecoveryPath(target);
-    const bytes = await vscode.workspace.fs.readFile(path.toUri(target));
-    await atomicWriteFile(recoveryPath, bytes, { mode: "create" });
-    await vscode.workspace.fs.delete(path.toUri(target), {
-      useTrash: false,
-    });
-  }
-
-  await atomicWriteFile(target, new TextEncoder().encode(body), {
-    mode: "create",
-  });
-}
-
-async function exists(filePath: string): Promise<boolean> {
-  try {
-    await vscode.workspace.fs.stat(path.toUri(filePath));
-    return true;
-  } catch {
-    return false;
   }
 }

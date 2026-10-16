@@ -18,7 +18,8 @@ import {
   type PlotSectionKey,
   type PlotSections,
 } from "../core/plotDoc";
-import { plotPath, readPlotText, writePlotSections } from "../core/plotFile";
+import { PLOT_LABEL, plotPath, readPlotText, writePlotSections } from "../core/plotFile";
+import { hasUnsavedOpenDocument } from "../core/openDocumentEdit";
 import {
   parsePlotReverseResult,
   plotSectionLabel,
@@ -77,6 +78,11 @@ export async function generatePlot(
   // 未設定なら設定させてから断るのでは順序が逆である
   if (!(await confirmFormatFit(work, "plotReverse"))) return;
 
+  // **plot.md に保存していない変更があれば、AIを呼ぶ前に止める。** 書く口（`writePlotSections`）も
+  // 止まるが、そこで断ると処理量（有料なら料金）を使ってから何も残らない。AIの設定より先に見る
+  // （設定させてから断るのでは順序が逆。上の形式の確かめと同じ考え）
+  if (await stopIfPlotUnsaved(work)) return;
+
   const resolved = await ensureConfigured(registry, "generate");
   if (!resolved) return;
 
@@ -118,6 +124,8 @@ export async function generatePlot(
   ) {
     return;
   }
+  // 確認とAIの起こしを待つ間に書き始めていることがある。呼ぶ直前にもう一度見る
+  if (await stopIfPlotUnsaved(work)) return;
 
   let responseText: string | undefined;
   let failure: unknown;
@@ -396,6 +404,15 @@ function oneLine(text: string): string {
   return flat.length > 60 ? `${flat.slice(0, 60)}…` : flat;
 }
 
+
+/** plot.md に未保存の変更があれば、保存を頼んで true を返す（断りの文は書く口と同じ） */
+async function stopIfPlotUnsaved(work: WorkEntry): Promise<boolean> {
+  if (!hasUnsavedOpenDocument(await plotPath(work))) return false;
+  void vscode.window.showWarningMessage(
+    `${PLOT_LABEL}に保存していない変更があります。保存してから、もう一度やり直してください。`
+  );
+  return true;
+}
 
 async function readPlot(
   work: WorkEntry

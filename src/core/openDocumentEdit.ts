@@ -37,6 +37,19 @@ import { forgetOwnPlotSave, isPlotFilePath, noteOwnPlotSave } from "./ownPlotSav
  * - 保存の前の加工（末尾の空白を落とす等）は、作者が自分で Ctrl+S したときと同じ設定で走る
  */
 
+/**
+ * `filePath` をエディターで開いていて、保存していない変更があるか。
+ *
+ * 書く口（`writeTextFilePreferringOpenDocument`）も同じ場合に止まるが、**AIを呼んでから書く処理では、
+ * 呼ぶ前にこれで確かめて止める。** 書く段で断ると、処理量（有料なら料金）を使ってから何も残らない。
+ * 書く口の確かめは残す（呼んでいる間に作者が打ち始めることがある）
+ */
+export function hasUnsavedOpenDocument(filePath: string): boolean {
+  return vscode.workspace.textDocuments.some(
+    (document) => document.isDirty && path.isSamePath(path.fromUri(document.uri), filePath)
+  );
+}
+
 export type OpenDocumentEditResult =
   /** 開いていない（または、今の口で書くほうが安全な形）。呼び出し側はディスクへ書く */
   | { kind: "notOpen" }

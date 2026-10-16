@@ -36,6 +36,9 @@ const CATCHPHRASE_LINE = /^>\s*(.+?)\s*$/;
  */
 export const SYNOPSIS_FILE = "synopsis.md";
 
+/** 書けなかったときの断りの文に出す、この文書の呼び名（書く口ごとに言い方を変えない） */
+export const SYNOPSIS_LABEL = "紹介文とあらすじ（synopsis.md）";
+
 export const EPISODE_SECTION_HEADING = "## 各話あらすじ";
 
 /**
