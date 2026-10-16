@@ -15,9 +15,9 @@ import {
 import { createForeshadowStore } from "../core/foreshadowStore";
 import type { SettingsStore, StorableRecord } from "../core/settingsStore";
 import { SynopsisStore } from "../core/synopsisStore";
-import { plotPath, rewritePlotFile, writePlotText } from "../core/plotFile";
+import { plotPath, rewriteMarkdownFile, rewritePlotFile } from "../core/plotFile";
 import { readWorkConfig, workPaths } from "../core/workRegistry";
-import { SYNOPSIS_FILE } from "../core/synopsisDoc";
+import { SYNOPSIS_FILE, SYNOPSIS_LABEL } from "../core/synopsisDoc";
 import {
   activeMapping,
   applyMappingToRecord,
@@ -610,10 +610,10 @@ async function applyToPlot(
 /**
  * 紹介文・あらすじの読み物（`設定/synopsis.md`）を直す。
  *
- * **書き込みは `writePlotText` を通す。** 名前はプロット向きだが、中身は
- * 「作者のMarkdownを退避してから作り直す」という汎用の手順で、この
- * プロジェクトでMarkdownを安全に置き換える唯一の口である。同じ手順を
- * ここへ書き写すと、退避の仕方が2通りになる。
+ * **書き込みは plot.md と同じ口**（`rewriteMarkdownFile`）。読み込み時のハッシュを照合し、
+ * 開いていれば文書へ当てて保存し、未保存の変更があれば止める（失敗として返す）。
+ * それまでの `writePlotText` は照合も未保存の確かめもせず「退避 → 消して作り直す」で書いたので、
+ * 開いたまま書きかけていれば巻き込むか、Ctrl+S が「ファイルのほうが新しい」で断られた。
  */
 async function applyToSynopsisDoc(
   work: WorkEntry,
@@ -623,18 +623,16 @@ async function applyToSynopsisDoc(
   try {
     const config = await readWorkConfig(work);
     const target = path.join(workPaths(work, config).settings, SYNOPSIS_FILE);
-    let current: string;
-    try {
-      current = new TextDecoder().decode(
-        await vscode.workspace.fs.readFile(path.toUri(target))
-      );
-    } catch {
-      return; // まだ作られていない。作らない
+    // まだ作られていなければ作らない（空の中身からは空を返す）
+    if (
+      await rewriteMarkdownFile(
+        target,
+        (current) => (current ? applyMappingToText(current, pending.mapping) : current),
+        SYNOPSIS_LABEL
+      )
+    ) {
+      result.synopsisDocUpdated = true;
     }
-    const next = applyMappingToText(current, pending.mapping);
-    if (next === current) return;
-    await writePlotText(target, next);
-    result.synopsisDocUpdated = true;
   } catch (error) {
     result.failures.push(`${SYNOPSIS_FILE}：${messageOf(error)}`);
   }

@@ -49,6 +49,9 @@ src/
 │  ├─ eolSpace.ts        画面は常にLF空間で持つ（CRLFの変換は境界だけ。守らないと打鍵のたびに改行が書き換わる）
 │  ├─ fileSystem.ts      ファイル操作の薄い層
 │  ├─ atomicWrite.ts     既存ファイルを壊さない書き込み（後述の制約あり）
+│  ├─ openDocumentEdit.ts 作者が開いていそうなファイル（plot.md・単話プロット・synopsis.md）を書く口。開いていれば変わった所だけ文書へ当てて保存、閉じていれば textFile の口（設計書6.4.8）
+│  ├─ plotFile.ts        plot.md の読み書き。既にあるファイルの書き換えは rewritePlotFile／rewriteMarkdownFile（synopsis.md も）を通す。writePlotText は新規作成用
+│  ├─ ownPlotSave.ts     こちらが自分で保存した plot.md の覚え書き（保存からの反映を走らせない。行末の空白と末尾の改行は見ない。設計書6.4.9）
 │  ├─ timestampedFileName.ts 上書き禁止の世界で衝突しない別名を作る（秒→連番。回避策はここへ寄せる）
 │  ├─ scanner.ts         作品フォルダの走査
 │  ├─ episodeParser.ts   ファイル名から話数を解析
