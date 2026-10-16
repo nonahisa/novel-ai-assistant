@@ -13,11 +13,11 @@
  * 記録の組み立て（前後の2件・衝突の判定）は単体テスト（`core/speechStyle.test.ts`）が見ている。
  * ここで見るのは**本物の画面で押して入れたときの道筋**。人物は製品が読む形で置く。**AI は呼ばない。**
  */
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame } from "playwright-core";
 import { expect, test } from "vitest";
 import { emptyCharacter, characterFileName, type Character } from "../../src/models/character";
+import { readJsonWhenPresent } from "./support/fileSettle";
 import { defaultCharactersFolder, settingsPanelFrame, writeCharactersTo } from "./support/settingsFixture";
 import { answerInput, waitForQuickInput } from "./support/quickInput";
 import { withVsCode, type E2ESession, type LaunchOptions } from "./support/vscodeApp";
@@ -52,10 +52,8 @@ const launchOptions: LaunchOptions = {
 
 async function readRecord(session: E2ESession): Promise<Character> {
   const file = path.join(session.workFolder, "設定", "characters", characterFileName(person()));
-  // 書き戻しは「退避 → 新規作成」なので、一瞬ファイルが無いときがある
-  let raw = "";
-  await waitUntil(async () => (raw = await readFile(file, "utf8").catch(() => "")) !== "", "人物のファイルが読める", 10_000);
-  return JSON.parse(raw) as Character;
+  // 書き戻しは「退避 → 新規作成」なので、一瞬ファイルが無いときがある（`support/fileSettle.ts`）
+  return readJsonWhenPresent<Character>(file, 10_000);
 }
 
 async function openPanel(session: E2ESession): Promise<Frame> {

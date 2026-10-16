@@ -13,6 +13,7 @@ import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { emptyCharacter, type Character } from "../../../src/models/character";
 import { passLocalAiGate, type FakeOllamaRequest } from "./fakeOllama";
+import { readFileWhenPresent } from "./fileSettle";
 import { runCommand } from "./quickInput";
 import { proposalPanelFrame } from "./sampleFinding";
 import { defaultCharactersFolder, writeCharactersTo } from "./settingsFixture";
@@ -231,8 +232,13 @@ export function plotFile(session: E2ESession): string {
   return path.join(session.workFolder, "設定", "plot.md");
 }
 
+/**
+ * plot.md を読む。［入れる］は plot.md を「退避 → 削除 → 作り直し」で書くので、その隙間（ファイルが
+ * 無い瞬間）に当たったら少し待って読み直す（`fileSettle.ts`）。`waitUntil` の中で素の `readFile` を
+ * 使うと、その瞬間の ENOENT で待ちごと落ちる
+ */
 export async function readPlot(session: E2ESession): Promise<string> {
-  return (await readFile(plotFile(session), "utf8")).replace(/\r\n/g, "\n");
+  return (await readFileWhenPresent(plotFile(session))).replace(/\r\n/g, "\n");
 }
 
 /**

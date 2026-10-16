@@ -15,7 +15,6 @@
  * 順番の決め方は単体テスト `sceneMemo.test.ts` が見ている。ここで見るのは、押したら
  * 画面とファイルがそのとおりに動くこと。
  */
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Frame, Page } from "playwright-core";
 import { expect, test } from "vitest";
@@ -27,6 +26,7 @@ import {
   openEpisode,
   placeCaretAfter,
 } from "./support/manuscriptFrame";
+import { readFileWhenPresent } from "./support/fileSettle";
 import { withVsCode, type E2ESession } from "./support/vscodeApp";
 import { waitUntil } from "./support/wait";
 import { activeTabNames, quickOpen, tabIsDirty, tabNamesInclude } from "./support/workbenchDom";
@@ -41,19 +41,10 @@ const EP3 = "003_さん.txt";
  * **書き換えの最中に読むと、ファイルが一瞬無い。** 製品は本文を書き戻すとき、正規のファイルを
  * 回復先へ退避してから新しく作る（`writeTextFilePreservingFormat`。上書きはしない決まり）。
  * その間に読むと ENOENT になり、ノートPC（2026-10-10）で閉じている第3話のメモを消す所が
- * この形で落ちた。無いときは少し待って読み直す（2秒たっても無ければ、そのまま落とす）
+ * この形で落ちた。無いときは少し待って読み直す（`support/fileSettle.ts`。期限を過ぎても無ければ、そのまま落とす）
  */
 async function fileText(session: E2ESession, name: string): Promise<string> {
-  const file = path.join(session.manuscriptFolder, name);
-  const deadline = Date.now() + 2_000;
-  for (;;) {
-    try {
-      return (await readFile(file, "utf8")).replace(/\r\n/g, "\n");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT" || Date.now() > deadline) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
+  return (await readFileWhenPresent(path.join(session.manuscriptFolder, name))).replace(/\r\n/g, "\n");
 }
 
 /** 本文に `marker` を含む原稿エディターの面（無ければ undefined） */

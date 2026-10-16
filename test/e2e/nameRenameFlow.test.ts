@@ -19,6 +19,7 @@ import type { Frame } from "playwright-core";
 import { expect, test } from "vitest";
 import { characterFileName, emptyCharacter, type Character } from "../../src/models/character";
 import { DEFAULT_SETTINGS_DIR } from "../../src/models/types";
+import { readFileWhenPresent } from "./support/fileSettle";
 import { caretPosition, manuscriptFrames } from "./support/manuscriptFrame";
 import { answerInput, runCommand, waitForQuickInput } from "./support/quickInput";
 import { proposalPanelFrame } from "./support/sampleFinding";
@@ -71,17 +72,8 @@ async function readEpisode(session: E2ESession, name: string): Promise<string> {
   return readStable(path.join(session.manuscriptFolder, name));
 }
 
-/** 資料も同じ置き換え（退避→新規作成）で書かれる。見つかるまで少し待って読む */
-async function readStable(file: string): Promise<string> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await readFile(file, "utf8");
-    } catch (error) {
-      if (attempt >= 30) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-  }
-}
+/** 資料も同じ置き換え（退避→新規作成）で書かれる。見つかるまで少し待って読む（`support/fileSettle.ts`） */
+const readStable = (file: string): Promise<string> => readFileWhenPresent(file);
 
 /** 本文3か所（2話ぶん）に、`word` がいくつあるか */
 async function countIn(session: E2ESession, word: string): Promise<number> {
@@ -171,7 +163,7 @@ test("人物名変更で提案パネルに並び、1件ずつ適用・本文を�
       await waitUntil(async () => (await oldNameCount(session)) === 0, "［まとめて適用］で旧名が本文から無くなる", 30_000);
       expect(await newNameCount(session), "本文の新しい名前の数").toBe(3);
       // 本文のほかの字は変わっていない
-      expect((await readFile(path.join(session.manuscriptFolder, EPISODES[1].name), "utf8")).replace(/\r\n/g, "\n")).toBe(
+      expect((await readEpisode(session, EPISODES[1].name)).replace(/\r\n/g, "\n")).toBe(
         `夜の街で、${NEW}が笑った。\n`
       );
 

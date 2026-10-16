@@ -44,6 +44,7 @@ npm run typecheck:tests                            # 型（test/e2e/tsconfig.jso
 | `LaunchOptions` の追加 | `globalState`（起こす前に `state.vscdb` へ書く。`node:sqlite`）・`prepareWork`（起こす前に作品フォルダーへ置く） |
 | `sampleFinding.ts` | 校正の指摘の見本を `.aiwriter/findings.jsonl` へ製品と同じ形で置く（**AI を呼ばない**）。提案パネルを開くキー |
 | `wait.ts` | `waitUntil`（条件が満たされるまで）・`holdsFor`（**起きないこと**を決めた時間見続ける。遅れて開く2枚目を拾う） |
+| `fileSettle.ts` | 書き込みの途中を読まない。`saveAndSettle`（Ctrl+S のあと、**VS Code 本体の保存がいったん空にしてから書く**のが終わるまで待つ。保存の直後に「変わらない」を確かめる所で使う）・`readFileWhenPresent`／`readJsonWhenPresent`（**製品の書き戻しは退避→削除→作り直しで一瞬ファイルが無い**。その ENOENT だけ待って読み直す。`waitUntil` の中で素の `readFile` を使うと消えた瞬間に落ちる）。新しい中身を正の形で待つだけの所には要らない |
 | `cleanup.ts`・`globalSetup.ts` | 起こした PID と一時フォルダーの台帳。1件ごとと走りの最初・最後に、**一時フォルダー名を引数に含むプロセスだけ**を木ごと止める |
 
 ## 1件の書き方
