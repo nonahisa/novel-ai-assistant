@@ -46,7 +46,18 @@ export async function setPlotBasics(work: WorkEntry): Promise<void> {
   // 決めなかったことを、既に書いてあるジャンルを消す指示と取らない
   if (genres.length > 0) updates.genre = formatGenres(genres);
 
-  await writePlotSections(work, updates);
+  try {
+    await writePlotSections(work, updates);
+  } catch (error) {
+    // plot.md を書きかけ（未保存）のまま押したときなど。書かずに止まった理由を出す
+    // （これまでの口は確かめずに書いていたので、ここで断ることは無かった）
+    void vscode.window.showWarningMessage(
+      `形式・ジャンルをプロットへ書けませんでした。${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    return;
+  }
 
   await openInDefaultEditor(await plotPath(work));
 

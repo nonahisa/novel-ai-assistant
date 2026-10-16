@@ -1,6 +1,8 @@
 import * as nodePath from "path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { window, workspace } from "../support/vscodeStub";
+import { installFakeDisk, openFakeDocument } from "../support/openDocumentFake";
+import { hashBytes } from "../../../src/core/hash";
 import type { WorkEntry } from "../../../src/models/types";
 import type { TextFileContent } from "../../../src/core/textFile";
 import type { GenerateParams } from "../../../src/ai/types";
@@ -290,6 +292,26 @@ describe("案をプロットに書く", () => {
     // 同じ案は二度書けない
     expect(await advice.apply(id)).toBe(false);
     expect(state.write).toHaveBeenCalledTimes(1);
+  });
+
+  test("plot.md が開いていれば、ディスクを書かずに文書へ当てて保存する", async () => {
+    // ディスクを消して作り直すと、開いたままのエディターで Ctrl+S が「ファイルのほうが新しい」で
+    // 断られる（0.107.8、作者の裁定「両方直す」）
+    const disk = installFakeDisk();
+    disk.write(plotFile, PLOT);
+    const document = openFakeDocument(disk, plotFile, PLOT);
+    const bytes = new TextEncoder().encode(PLOT);
+    state.read.mockImplementation(async () => ({ ...file(PLOT), hash: hashBytes(bytes) }));
+
+    const { advice, id } = await withSuggestion("ログライン", "新人が地下の配線を守る");
+    expect(await advice.apply(id)).toBe(true);
+
+    expect(state.write).not.toHaveBeenCalled();
+    expect(disk.deleted).toEqual([]);
+    expect(document.applied.join("")).toContain("新人が地下の配線を守る");
+    expect(document.save).toHaveBeenCalledTimes(1);
+    expect(lastView().turns[1].suggestion?.state).toBe("written");
+    workspace.applyEdit = async () => true;
   });
 
   test("控えに無い番号（画面から届いた作り物）は何も書かない", async () => {

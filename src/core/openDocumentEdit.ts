@@ -3,6 +3,8 @@ import * as path from "./paths";
 import { computeDocumentEdit, toLf } from "./eolSpace";
 import { hashBytes } from "./hash";
 import { hasConflictMarkers, type TextFileContent } from "./textDecode";
+import { writeTextFilePreservingFormat, type WriteTextFailureReason } from "./textFile";
+import { forgetOwnPlotSave, isPlotFilePath, noteOwnPlotSave } from "./ownPlotSave";
 
 /**
  * **エディターで開いている文書へ、変わった所だけを当てる**（作者の裁定「両方直す」、2026-10-16）。
@@ -97,4 +99,106 @@ export async function editOpenDocument(
     }
   }
   return { kind: "edited", save: () => Promise.resolve(document.save()) };
+}
+
+export type PreferOpenDocumentWriteResult =
+  /** 中身が同じだったので何もしていない */
+  | { ok: true; via: "unchanged" }
+  /** 開いていなかった（または今の口が安全な形）ので、ディスクへ書いた */
+  | { ok: true; via: "disk"; recoveryPath?: string }
+  /**
+   * 開いている文書へ当てた。`saved` が false なら、文書には入ったが保存できていない
+   * （作者に保存を頼む。当てた分は Ctrl+Z で戻せる）。`detail` は保存が投げた失敗の文
+   */
+  | { ok: true; via: "document"; saved: boolean; detail?: string }
+  | {
+      ok: false;
+      reason: WriteTextFailureReason | "edit_rejected";
+      detail?: string;
+    };
+
+/**
+ * **作者がエディターで開いていそうなファイルを書く口**（plot.md・単話プロット。作者の裁定「両方直す」、
+ * 2026-10-16）。開いていれば `editOpenDocument` で文書へ当てて保存し、開いていなければ本文と同じ
+ * 書き戻しの口（`writeTextFilePreservingFormat`）でディスクへ書く。
+ *
+ * 0.107.8 でプロットモードの［入れる］（`plotNameSuggest.ts` の `applyPlotNames`）だけを直したが、
+ * plot.md を書く口はほかにもあり、どれも同じ事故（Ctrl+S が「ファイルのほうが新しい」で断られる）が
+ * 起こりえた。書き手ごとに同じ分かれ道を書き写すと片方だけ直り損ねるので、ここへ1本にまとめる
+ * （［入れる］は保存の前に承認待ちを置く順番があるので、見本として今の形のまま残す）。
+ *
+ * - **ハッシュの照合・未保存なら止める・変わった所だけ**は両方の道に残る（実装ルール1）
+ * - **plot.md なら、こちらの保存を覚えてから保存する**（`ownPlotSave.ts`）。保存からの反映を
+ *   こちらの保存で走らせない（ディスクへ書いていたころと同じ振る舞い）
+ * - **中身が同じなら何もしない。** 汚れていない文書の保存は保存の知らせを出さないことがあり、
+ *   覚え書きだけが残ると、作者が次に同じ中身で保存したときの反映が飛ぶ
+ *
+ * @param original 読み込み時の中身（`readTextFile`）。ハッシュは押した時点のもの
+ * @param nextLfText 書きたい中身（LF空間）
+ */
+export async function writeTextFilePreferringOpenDocument(
+  filePath: string,
+  original: TextFileContent,
+  nextLfText: string
+): Promise<PreferOpenDocumentWriteResult> {
+  if (nextLfText === original.text) return { ok: true, via: "unchanged" };
+  if (original.hasConflictMarkers) return { ok: false, reason: "conflict_markers" };
+
+  const viaDocument = await editOpenDocument(filePath, original, nextLfText);
+  if (viaDocument.kind === "failed") return { ok: false, reason: viaDocument.reason };
+  if (viaDocument.kind === "notOpen") {
+    const written = await writeTextFilePreservingFormat(
+      filePath,
+      nextLfText,
+      original,
+      original.hash
+    );
+    if (!written.ok) return { ok: false, reason: written.reason, detail: written.detail };
+    return { ok: true, via: "disk", recoveryPath: written.recoveryPath };
+  }
+
+  const ownPlot = isPlotFilePath(filePath);
+  if (ownPlot) noteOwnPlotSave(filePath, nextLfText);
+  try {
+    const saved = await viaDocument.save();
+    if (!saved && ownPlot) forgetOwnPlotSave(filePath);
+    return { ok: true, via: "document", saved };
+  } catch (error) {
+    if (ownPlot) forgetOwnPlotSave(filePath);
+    return {
+      ok: true,
+      via: "document",
+      saved: false,
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * 書けなかった・保存できなかったときの断り（作者に見せる文）。書けたなら undefined。
+ * `label` は「プロット（plot.md）」のような、作者が見て分かるファイルの呼び名
+ */
+export function describePreferOpenDocumentFailure(
+  result: PreferOpenDocumentWriteResult,
+  label: string
+): string | undefined {
+  if (result.ok) {
+    return result.via === "document" && !result.saved
+      ? `${label}へは書きましたが、保存できませんでした。開いている${label}を保存してください。`
+      : undefined;
+  }
+  switch (result.reason) {
+    case "unsaved_changes":
+      return `${label}に保存していない変更があります。保存してから、もう一度やり直してください。`;
+    case "modified_externally":
+      return `${label}が読み込んだあとに変わっていたため、書くのを止めました。もう一度やり直してください。`;
+    case "conflict_markers":
+      return `${label}に競合の印（<<<<<<<）が残っているため、書くのを止めました。`;
+    case "edit_rejected":
+      return `開いている${label}へ書けませんでした。${label}を開き直してから、もう一度やり直してください。`;
+    case "path_conflict":
+      return `${label}の置き場に同じ名前の別のものがあるため、書くのを止めました。`;
+    case "encoding_error":
+      return `${label}の文字コードで書けない文字があるため、書くのを止めました。`;
+  }
 }

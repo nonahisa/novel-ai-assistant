@@ -17,6 +17,7 @@ import { buildSynopsisListMarkdown } from "../core/synopsisMarkdown";
 import { loadSynopsisChapterMarks } from "../core/synopsisChapters";
 import { buildEmotionCurveMarkdown } from "../core/emotionCurve";
 import { SynopsisStore } from "../core/synopsisStore";
+import { rewritePlotFile } from "../core/plotFile";
 import type { ChatEdit, ChatEditTarget } from "../core/chatEdit";
 
 /**
@@ -120,16 +121,17 @@ async function applyToPlot(
   allowEmpty: boolean
 ): Promise<string> {
   const target = await settingsFile(work, "plot.md");
-  const current = await readText(target);
   // **作者の文書の形を変えない。** 節に分解して組み直すと、作者が立てた
-  // 見出しが末尾へ寄り、順番も決まった並びへ戻る（作者の指示、2026-08-16）
-  const body = updatePlotMarkdown(
-    current ?? "",
-    { [section]: content },
-    { workTitle: work.title, allowEmpty }
+  // 見出しが末尾へ寄り、順番も決まった並びへ戻る（作者の指示、2026-08-16）。
+  // **書くのは `rewritePlotFile`**——開いていれば文書へ当てて保存し、未保存の変更があれば止める
+  // （ディスクを消して作り直すと、開いたままのエディターで Ctrl+S が断られた。0.107.8）
+  await rewritePlotFile(target, (current) =>
+    updatePlotMarkdown(
+      current,
+      { [section]: content },
+      { workTitle: work.title, allowEmpty }
+    )
   );
-
-  await replaceFile(target, body);
   return "設定/plot.md";
 }
 

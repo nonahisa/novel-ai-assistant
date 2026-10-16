@@ -61,8 +61,11 @@ describe("書き込みの道", () => {
   const apply = bodyOf(advice, "async apply(");
 
   it("本文と同じ書き戻しの口だけを通る", () => {
-    expect(apply).toContain("writeTextFilePreservingFormat(");
-    expect(apply).toContain("file.hash");
+    // 開いていれば文書へ当てて保存し、開いていなければ `writeTextFilePreservingFormat` へ落ちる口
+    // （`core/openDocumentEdit.ts`。0.107.8 の「ファイルのほうが新しい」を避けるため）。
+    // 押した時点で読んだ中身（ハッシュつき）を渡す
+    expect(apply).toContain("writeTextFilePreferringOpenDocument(plotFile, file, next)");
+    expect(apply).toContain("file = await readTextFile(plotFile)");
     expect(advice).not.toMatch(/atomicWriteFile|fs\.writeFile|writePlotText|replaceFile/);
   });
 
@@ -72,13 +75,15 @@ describe("書き込みの道", () => {
 
   it("書いてある項目を置き換えるときは、モーダルで確かめてから書く", () => {
     const confirm = apply.indexOf("modal: true");
-    const write = apply.indexOf("writeTextFilePreservingFormat(");
+    const write = apply.indexOf("writeTextFilePreferringOpenDocument(");
     expect(confirm).toBeGreaterThan(-1);
     expect(confirm).toBeLessThan(write);
   });
 
   it("送るときは何も書かない", () => {
     const send = bodyOf(advice, "async send(");
-    expect(send).not.toMatch(/writeTextFilePreservingFormat|updatePlotMarkdown/);
+    expect(send).not.toMatch(
+      /writeTextFilePreservingFormat|writeTextFilePreferringOpenDocument|updatePlotMarkdown/
+    );
   });
 });

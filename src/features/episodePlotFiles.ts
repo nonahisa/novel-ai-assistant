@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
 import * as paths from "../core/paths";
 import type { WorkEntry } from "../models/types";
-import { readTextFile, writeTextFilePreservingFormat } from "../core/textFile";
+import { readTextFile } from "../core/textFile";
+import { writeTextFilePreferringOpenDocument } from "../core/openDocumentEdit";
 import {
   episodePlotFileName,
   renumberEpisodePlotHeading,
@@ -29,8 +30,9 @@ import { episodePlotsDirOf, listEpisodePlotChapters } from "./episodePlotNav";
  *   作者の裁定、2026-09-23「単話プロットの話数も一緒にずらす」）
  *
  * **ファイル操作の経路は1本にする。** 名前の変更は `WorkspaceEdit`（上書き
- * しない）、見出しの書き換えは `writeTextFilePreservingFormat`（退避 →
- * 新規作成・ハッシュ照合・文字コードと改行の保持）。道ごとに写すと、
+ * しない）、見出しの書き換えは `writeTextFilePreferringOpenDocument`（開いていれば文書へ当てて
+ * 保存、開いていなければ `writeTextFilePreservingFormat` で退避 → 新規作成。どちらも
+ * ハッシュ照合・文字コードと改行の保持）。道ごとに写すと、
  * 片方だけ「上書きしない」を落とす。
  *
  * **`core/git.ts` を読み込まない。** プロットモードの画面は起動時に
@@ -80,13 +82,21 @@ export async function renumberEpisodePlotHeadings(
       const content = await readTextFile(filePath);
       const next = renumberEpisodePlotHeading(content.text, entry.to);
       if (next === content.text) continue;
-      const result = await writeTextFilePreservingFormat(
-        filePath,
-        next,
-        content,
-        content.hash
-      );
-      if (!result.ok) failures.push(paths.basename(filePath));
+      /*
+        **開いていれば、その文書へ当てて保存する**（`core/openDocumentEdit.ts`）。名前の変更
+        （`WorkspaceEdit`）で開いていたタブは新しい名前へついて行くので、そのあとディスクを
+        「退避 → 消して作り直す」で書くと、plot.md と同じく Ctrl+S が「ファイルのほうが新しい」で
+        断られる（0.107.8、作者の裁定「両方直す」）
+      */
+      const result = await writeTextFilePreferringOpenDocument(filePath, content, next);
+      if (!result.ok || (result.via === "document" && !result.saved)) {
+        useLogFile(work.folderPath);
+        logFailure("単話プロットの見出しの付け替えに失敗", {
+          置き場: filePath,
+          内容: result.ok ? `保存できませんでした ${result.detail ?? ""}` : result.reason,
+        });
+        failures.push(paths.basename(filePath));
+      }
     } catch (error) {
       useLogFile(work.folderPath);
       logFailure("単話プロットの見出しの付け替えに失敗", {

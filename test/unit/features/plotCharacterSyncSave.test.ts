@@ -599,6 +599,19 @@ describe("自分で保存した plot.md の見分け", () => {
     expect(consumeOwnPlotSave(plotFile, "# 題\n- 主人公（相馬 誠）：\n")).toBe(false);
   });
 
+  test("保存の前の加工（行末の空白を落とす・末尾の改行を足す/削る）で変わっても当たる", () => {
+    // files.trimTrailingWhitespace・insertFinalNewline・trimFinalNewlines は、
+    // こちらが覚えた中身を保存の直前に書き換える。中身だけで見分けると外れ、
+    // ［入れる］の保存で反映が走っていた（0.107.8 で残った懸念）
+    noteOwnPlotSave(plotFile, "# 題  \n- 主人公（相馬 誠）：\t\n\n\n");
+    expect(consumeOwnPlotSave(plotFile, "# 題\n- 主人公（相馬 誠）：\n")).toBe(true);
+    noteOwnPlotSave(plotFile, "# 題\n- 主人公（相馬 誠）：");
+    expect(consumeOwnPlotSave(plotFile, "# 題\r\n- 主人公（相馬 誠）：\r\n")).toBe(true);
+    // 字が1つでも違えば作者の打ち足しなので当たらない
+    noteOwnPlotSave(plotFile, "# 題\n- 主人公（相馬 誠）：\n");
+    expect(consumeOwnPlotSave(plotFile, "# 題\n- 主人公（相馬 誠）：高校生\n")).toBe(false);
+  });
+
   test("忘れたら当たらない・ほかのファイルには当たらない", () => {
     noteOwnPlotSave(plotFile, "本文\n");
     expect(consumeOwnPlotSave(nodePath.join("C:", "novels", "other", "設定", "plot.md"), "本文\n")).toBe(false);
