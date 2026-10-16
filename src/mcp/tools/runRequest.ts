@@ -18,6 +18,7 @@ import {
   isRunCoverFeature,
   isRunIndexFeature,
   isRunTestAiFeature,
+  isRunExportFeature,
   runFeatureTakesFile,
   RUN_TEST_AI_FEATURE,
   RUN_TEST_AI_LABEL,
@@ -80,7 +81,9 @@ export const RUN_REQUEST_INPUT = {
         RUN_FEATURES.map((def) => `${def.feature}＝${def.label}`).join("、") +
         `、${RUN_INDEX_FEATURE}＝${RUN_INDEX_LABEL}（手元の Ollama で検索用の索引を作る・更新する。料金なし。novel.search で引く）` +
         `、${RUN_COVER_FEATURE}＝作者の VS Code の EPUBエディターで表紙を焼く（AIを呼ばない。cover が要る。字の向きは cover.ink で測る）` +
-        `、${RUN_TEST_AI_FEATURE}＝${RUN_TEST_AI_LABEL}（作者のAI設定のAIへ短い文を1回だけ送り、いま生成できるかを返す。本文は送らない。ほかの依頼の前に使える）。` +
+        `、${RUN_TEST_AI_FEATURE}＝${RUN_TEST_AI_LABEL}（作者のAI設定のAIへ短い文を1回だけ送り、いま生成できるかを返す。本文は送らない。ほかの依頼の前に使える）` +
+        "、exportPdf＝印刷用のファイル（全話・既定の紙。作者がブラウザで印刷してPDFにする）・exportEpub＝EPUB" +
+        "（どちらもAIを呼ばず、作品の .aiwriter/exports/ に新しいファイルを作るだけ。表紙は焼いてあればそれを使う）。" +
         "settings は検算を通った答えを作品の貯め場所へ貯めるだけで、設定資料への保存は novel.extract.commit で行う"
     ),
   file: z
@@ -88,7 +91,7 @@ export const RUN_REQUEST_INPUT = {
     .optional()
     .describe(
       "対象の話（novel.scan の filePath）。省略すると作品全体。" +
-        "vectorIndex・coverBake・opening（第1話の冒頭だけを見る）・testAI では使えません"
+        "vectorIndex・coverBake・opening（第1話の冒頭だけを見る）・testAI・exportPdf・exportEpub では使えません"
     ),
   scope: z
     .enum(["work", "all"])
@@ -190,7 +193,11 @@ export async function runRequest(
   if (args.file !== undefined && !runFeatureTakesFile(args.feature)) {
     throw new McpToolError(
       `${label}は話を指しません（${
-        isRunTestAiFeature(args.feature) ? "本文を送りません" : "第1話の冒頭だけを見ます"
+        isRunTestAiFeature(args.feature)
+          ? "本文を送りません"
+          : isRunExportFeature(args.feature)
+            ? "作品の全話で作ります"
+            : "第1話の冒頭だけを見ます"
       }）。file は渡さないでください。`
     );
   }
@@ -279,7 +286,10 @@ export async function runRequest(
           ? `作者の VS Code に「${runCoverSideLabel((args.cover as RunCoverSpec).side)}を焼きますか」という確認が出ます` +
             `（${describeRunCoverSpec(args.cover as RunCoverSpec)}。AIは呼びません）。押すのは作者です。` +
             "焼けたら result.findings の titleBlock を cover.ink の region に渡すと、題名の字が立っているかを測れます。"
-          : `作者の VS Code に「${label}を走らせますか」という確認が出ます。押すのは作者です。` +
+          : isRunExportFeature(args.feature)
+            ? `作者の VS Code に「${label}」で新しいファイルを作るかの確認が出ます（AIは呼びません。原稿は変わりません）。` +
+              "押すのは作者です。作れたら、作品フォルダーからの場所が result.findings に入ります。"
+            : `作者の VS Code に「${label}を走らせますか」という確認が出ます。押すのは作者です。` +
             (args.feature === "settings"
               ? "抽出した答えは作品の貯め場所へ貯めるだけで、設定資料には保存しません。" +
                 "保存は、走り終えたあとで novel.extract.commit（まず dryRun: true）を呼んでください。"

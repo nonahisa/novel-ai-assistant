@@ -12,6 +12,11 @@ import {
   isRunTestAiFeature,
   describeCoverConfirm,
   describeTestAiConfirm,
+  describeExportConfirm,
+  isRunExportFeature,
+  runFeatureLabel,
+  type RunExportFeature,
+  type RunExportRow,
   RUN_TEST_AI_FEATURE,
   RUN_TEST_AI_LABEL,
   type RunTestAiRow,
@@ -135,6 +140,26 @@ export interface RunRequestHandlerDeps<W extends RunWork = RunWork> {
   cover?: RunCoverDeps<W>;
   /** AI接続確認（`testAI`）の手足。無ければ断る */
   testAi?: RunTestAiDeps;
+  /** 書き出し（`exportPdf`・`exportEpub`）の手足。無ければ断る */
+  export?: RunExportDeps<W>;
+}
+
+/**
+ * 書き出しの手足（2026-10-16 の棚卸しの10件目）。中身は［PDF出力］［EPUB出力］と
+ * 同じ組み立てで、**訊く段・ブラウザを開く・フォルダーを開く知らせは通らない**
+ * （渡す側は `features/runRequestRunners.ts`）。
+ */
+export interface RunExportDeps<W extends RunWork = RunWork> {
+  /** 書き出せるか（本文があるか）と、確認に出す話の数。**本文は読まない** */
+  inspect(
+    work: W,
+    feature: RunExportFeature
+  ): Promise<{ ok: true; episodeCount: number } | { ok: false; reason: string; nextAction?: string }>;
+  /** 書き出す。作れたら結果の1行 */
+  run(
+    work: W,
+    feature: RunExportFeature
+  ): Promise<{ ok: true; row: RunExportRow } | { ok: false; reason: string; nextAction?: string }>;
 }
 
 /**
@@ -259,7 +284,8 @@ export async function handleRunRequest<W extends RunWork>(
     !def &&
     !isRunIndexFeature(ticket.feature) &&
     !isRunCoverFeature(ticket.feature) &&
-    !isRunTestAiFeature(ticket.feature)
+    !isRunTestAiFeature(ticket.feature) &&
+    !isRunExportFeature(ticket.feature)
   ) {
     await refuse("この機能は外から頼めません（頼めるのは読み取りと生成だけです）。");
     return;
@@ -312,6 +338,12 @@ export async function handleRunRequest<W extends RunWork>(
   // AI接続確認も回数の上限を通す（有料のAIなら、短い文1回ぶんでも料金がかかる）
   if (isRunTestAiFeature(ticket.feature)) {
     await handleTestAiRequest(ticket, work, deps, refuse, forLog);
+    return;
+  }
+
+  // 書き出しも回数の上限を通す（表紙を焼くと同じ理由：確認のモーダルを出させる回数）
+  if (isRunExportFeature(ticket.feature)) {
+    await handleExportRequest(ticket, ticket.feature, work, deps, refuse, forLog);
     return;
   }
 
@@ -802,6 +834,105 @@ async function handleTestAiRequest<W extends RunWork>(
       `外部AIから頼まれたAI接続確認：${row.message}` + (row.nextAction ? `（${row.nextAction}）` : "")
     );
   }
+}
+
+/**
+ * 書き出しの依頼（2026-10-16 の棚卸しの10件目）。合言葉・1回限り・登録・許可・
+ * 回数の上限は呼ぶ側で通してある。
+ *
+ * **新しいファイルを作るだけ**なので、作者の裁定3のとおり毎回確かめてから作る。
+ * 本文が無い作品は確認を出さずに断る（押させてから「作れません」と言うより手間が少ない）。
+ */
+async function handleExportRequest<W extends RunWork>(
+  ticket: RunTicket,
+  feature: RunExportFeature,
+  work: W,
+  deps: RunRequestHandlerDeps<W>,
+  refuse: (reason: string, nextAction?: string) => Promise<void>,
+  forLog: string
+): Promise<void> {
+  const exporter = deps.export;
+  if (!exporter) {
+    await refuse("この拡張機能では、外から書き出しを頼めません。");
+    return;
+  }
+  const label = runFeatureLabel(feature) ?? feature;
+
+  const inspected = await exporter.inspect(work, feature);
+  if (!inspected.ok) {
+    await refuse(inspected.reason, inspected.nextAction);
+    return;
+  }
+
+  const confirm = describeExportConfirm({
+    ticket,
+    workTitle: work.title,
+    episodeCount: inspected.episodeCount,
+  });
+  if (!(await deps.confirm(confirm.message, confirm.detail, "作る"))) {
+    await deps.writeState(stateOf(ticket, "declined", deps.now()));
+    deps.log(`作者が断りました：${forLog}`);
+    return;
+  }
+
+  const pressedAt = deps.now();
+  if (isConfirmTooLate(ticket, pressedAt)) {
+    const reason = "確認が出てから時間が経ちすぎたため、作りませんでした。";
+    await deps.writeState(stateOf(ticket, "expired", pressedAt, { reason }));
+    deps.log(`外部AIからの実行の依頼が期限切れでした：${forLog}`);
+    deps.info(`${reason}必要なら、頼んだ側にもう一度頼んでもらってください。`);
+    return;
+  }
+
+  const startedAt = new Date(pressedAt).toISOString();
+  await deps.writeState(stateOf(ticket, "running", pressedAt, { startedAt }));
+
+  let made: Awaited<ReturnType<RunExportDeps<W>["run"]>>;
+  try {
+    made = await exporter.run(work, feature);
+  } catch (error) {
+    const failure = deps.describeFailure(error);
+    made = { ok: false, reason: failure.reason, nextAction: failure.nextAction };
+  }
+  if (!made.ok) {
+    await deps.writeState(
+      stateOf(ticket, "failed", deps.now(), {
+        startedAt,
+        reason: made.reason,
+        nextAction: made.nextAction,
+      })
+    );
+    deps.log(`外部AIから頼まれた${label}ができませんでした：${forLog}：${made.reason}`);
+    deps.warn(`外部AIから頼まれた${label}ができませんでした：${made.reason}`);
+    return;
+  }
+
+  const result: RunResultBody = {
+    feature,
+    featureLabel: label,
+    workTitle: work.title,
+    target: null,
+    // AIは呼ばない。**呼んでいないことを結果の形で言う**（表紙を焼くと同じ）
+    provider: { id: "none", name: "AIを呼びません（書き出し）", paid: false },
+    model: "",
+    promptVersion: `${feature}-v1`,
+    findings: [made.row],
+    dropped: { count: 0, notes: [] },
+    failures: {
+      count: made.row.conflicted.length,
+      notes: made.row.conflicted.length
+        ? [`未解決の競合で外した話 ${made.row.conflicted.length}件`]
+        : [],
+    },
+    // 本文はどこへも送らない
+    bodyChars: 0,
+    startedAt,
+    finishedAt: new Date(deps.now()).toISOString(),
+  };
+  await deps.writeState(stateOf(ticket, "done", deps.now(), { startedAt, result }));
+  deps.log(`外部AIから頼まれた${label}を終えました：${forLog}`);
+  // 作者の画面にも一言（どこに作ったか）。フォルダーを開くボタンは出さない（返事を待たない）
+  deps.info(`外部AIから頼まれた${label}で、${made.row.filePath} を作りました。原稿は変わっていません。`);
 }
 
 function stateOf(

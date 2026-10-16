@@ -81,6 +81,8 @@ import {
 } from "./vectorSearch";
 import { withCancellableProgress } from "../views/progress";
 import { bakeCoverForRequest, inspectCoverForRequest } from "./epubEditorPanel";
+import { exportPdfForRequest } from "./exportPdf";
+import { exportEpubForRequest } from "./exportEpub";
 
 /**
  * 外部AIから頼まれた実行の、VS Code 側の手足（設計書6.87.22）。
@@ -287,6 +289,53 @@ export function createRunRequestDeps(
         };
       },
       run: () => runTestAi(input.aiRegistry),
+    },
+    /*
+      書き出し（2026-10-16 の棚卸しの10件目）。［PDF出力］［EPUB出力］と同じ組み立てを、
+      訊く段・ブラウザ・フォルダーを開く知らせを通さずに呼ぶ。新しいファイルを作るだけ
+    */
+    export: {
+      inspect: async (work) => {
+        const scan = await scanWork(work);
+        return scan.episodes.length === 0
+          ? {
+              ok: false,
+              reason: `「${work.title}」に本文のファイルが見つかりません。`,
+              nextAction: "本文のファイルを作品フォルダーに入れてから頼んでください",
+            }
+          : { ok: true, episodeCount: scan.episodes.length };
+      },
+      run: async (work, feature) => {
+        if (feature === "exportPdf") {
+          const made = await exportPdfForRequest(work);
+          if (!made.ok) return made;
+          return {
+            ok: true,
+            row: {
+              format: "pdf",
+              filePath: made.filePath,
+              bytes: made.bytes,
+              chapters: made.chapters,
+              conflicted: made.conflicted,
+              notices: made.notices,
+            },
+          };
+        }
+        const made = await exportEpubForRequest(work);
+        if (!made.ok) return made;
+        return {
+          ok: true,
+          row: {
+            format: "epub",
+            filePath: made.filePath,
+            bytes: made.bytes,
+            chapters: made.chapters,
+            conflicted: made.conflicted,
+            notices: made.notices,
+            cover: made.cover,
+          },
+        };
+      },
     },
   };
 }
@@ -630,6 +679,10 @@ async function runFeature(
     case "coverBake":
       // 表紙を焼くのも受け口が別の道（`handleCoverRequest`）へ分ける
       return { ok: false, reason: "表紙を焼く依頼はこの口では走らせません。" };
+    case "exportPdf":
+    case "exportEpub":
+      // 書き出しも受け口が別の道（`handleExportRequest`）へ分ける
+      return { ok: false, reason: "書き出しの依頼はこの口では走らせません。" };
   }
 }
 

@@ -9,9 +9,11 @@ import {
   checkRunFile,
   checkRunToken,
   countRecentRuns,
+  describeExportConfirm,
   describeRunConfirm,
   describeTestAiConfirm,
   findRunFeature,
+  isRunExportFeature,
   isConfirmTooLate,
   isRunOpen,
   isRunStale,
@@ -347,6 +349,49 @@ describe("確認のモーダル", () => {
       expect(detail).toContain(expected);
     }
     expect(detail).not.toContain("今後は確認しない");
+  });
+});
+
+/**
+ * 書き出し（PDF・EPUB。棚卸しの10件目、2026-10-16）。**新しいファイルを作るだけで
+ * 原稿を変えない**ので、作者の裁定3（毎回確認つきで頼める）の範囲で受ける。
+ */
+describe("書き出し（exportPdf・exportEpub）", () => {
+  test("白名簿（AIへ本文を送る機能）とは別に通し、話は指せない", () => {
+    for (const feature of ["exportPdf", "exportEpub"]) {
+      expect(findRunFeature(feature)).toBeUndefined();
+      expect(RUN_REQUESTABLE_FEATURES).toContain(feature);
+      expect(isRunExportFeature(feature)).toBe(true);
+      expect(runFeatureTakesFile(feature)).toBe(false);
+      expect(parseRunTicket(formatRunTicket(ticket({ feature: feature as never })))?.feature).toBe(feature);
+      expect(
+        parseRunTicket(formatRunTicket(ticket({ feature: feature as never, file: "本文/第1話.txt" })))
+      ).toBeUndefined();
+    }
+    expect(runFeatureLabel("exportPdf")).toContain("PDF");
+    expect(runFeatureLabel("exportEpub")).toContain("EPUB");
+    expect(isRunExportFeature("typo")).toBe(false);
+  });
+
+  test("確認には、新しいファイルを作るだけで原稿が変わらないこと・置き場・AIを呼ばないことを並べる", () => {
+    const pdf = describeExportConfirm({ ticket: ticket({ feature: "exportPdf" as never }), workTitle: "星の町", episodeCount: 19 });
+    expect(pdf.message).toContain("PDF");
+    for (const expected of ["claude-code", "自己申告", "星の町", "19話", ".aiwriter/exports/", "新しいファイル", "原稿", "AIは呼びません", "ブラウザは開きません"]) {
+      expect(pdf.detail).toContain(expected);
+    }
+    expect(pdf.detail).not.toContain("今後は確認しない");
+
+    const epub = describeExportConfirm({ ticket: ticket({ feature: "exportEpub" as never }), workTitle: "星の町", episodeCount: 3 });
+    expect(epub.message).toContain("EPUB");
+    // 表紙は焼いてあればそれ（表紙を焼くの結果）を使う
+    expect(epub.detail).toContain("焼いた");
+    expect(epub.detail).toContain("book.json");
+  });
+
+  test("書き出し終えたら、置いた場所が result.findings にあると言う", () => {
+    const view = runStatusOf(ticket({ feature: "exportEpub" as never }), state({ state: "done" }), CREATED);
+    expect(view.message).toContain("result.findings");
+    expect(view.message).toContain(".aiwriter/exports/");
   });
 });
 

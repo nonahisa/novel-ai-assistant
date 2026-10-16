@@ -450,3 +450,210 @@ describe("novel.read——年表の返す量", () => {
     expect(result.next).toBeNull();
   });
 });
+
+/**
+ * 執筆量（棚卸しの7件目。2026-10-16）。記録は環境ごとの `.aiwriter/stats/<環境>.json`、
+ * 目標は `.aiwriter/goals.json`。製品の［執筆統計］と同じ集計を通す。
+ */
+describe("novel.read——執筆量（writingStats）", () => {
+  // 日付の境目（午前4時）を跨がない昼の時刻で固める
+  const now = new Date(2026, 9, 16, 12, 0, 0);
+
+  function writeStats(folder: string, deviceId: string, days: unknown[]): void {
+    write(folder, `.aiwriter/stats/${deviceId}.json`, { schemaVersion: "1", deviceId, days });
+  }
+
+  function statsOf(folder: string) {
+    const result = novelRead({ folder, kind: "writingStats", now });
+    if (result.kind !== "writingStats") throw new Error(result.kind);
+    return result;
+  }
+
+  test("全環境の記録を合算し、今日・今週・今月・続いた日数・環境ごとを返す", () => {
+    const folder = makeWork("執筆量");
+    writeStats(folder, "desk", [
+      { date: "2026-10-14", net: 500, gross: 520, saves: 3, files: { "本文/001_灯.txt": { net: 500, gross: 520 } } },
+      { date: "2026-10-16", net: 300, gross: 310, saves: 2 },
+    ]);
+    writeStats(folder, "note-pc", [
+      { date: "2026-10-15", net: 200, gross: 200, saves: 1 },
+      { date: "2026-10-16", net: 100, gross: 100, saves: 1 },
+    ]);
+    // 壊れた記録（同期の競合など）は黙って捨てる。製品と同じ
+    write(folder, ".aiwriter/stats/broken.json", "<<<<<<< HEAD\n{");
+
+    const result = statsOf(folder);
+    expect(result.today).toBe("2026-10-16");
+    expect(result.deviceCount).toBe(2);
+    expect(result.todayNet).toBe(400);
+    expect(result.streak).toBe(3);
+    expect(result.month).toEqual({ key: "2026-10", net: 1100, activeDays: 3 });
+    // 2026-10-12（月）始まりの週
+    expect(result.week).toEqual({ key: "2026-10-12", net: 1100, activeDays: 3 });
+    expect(result.buckets.daily).toHaveLength(30);
+    expect(result.buckets.daily.at(-1)).toMatchObject({ key: "2026-10-16", net: 400 });
+    expect(result.devices.map((device) => device.deviceId)).toEqual(["desk", "note-pc"]);
+    expect(result.work.episodes).toBe(3);
+    expect(result.work.net).toBeGreaterThan(0);
+    // 1日・1か月の目標は VS Code の設定にあるので、理由つきで出さない
+    expect(result.omitted.map((entry) => entry.section)).toEqual(["dailyGoal", "monthlyGoal"]);
+    // 返すのは数字だけ（ファイルごとの内訳の鍵＝ファイルの場所は入れない）
+    expect(JSON.stringify(result)).not.toContain("001_灯");
+  });
+
+  test("作品の目標と応募先の進み（いまの作品の字数で数える）", () => {
+    const folder = makeWork("目標");
+    write(folder, ".aiwriter/goals.json", {
+      schemaVersion: "0.1",
+      perEpisodeChars: 3000,
+      contest: { name: "短編賞", url: null, deadline: "2026-10-20", minChars: 10000, maxChars: null, dailyGoal: null },
+    });
+    const result = statsOf(folder);
+    expect(result.goals?.perEpisodeChars).toBe(3000);
+    expect(result.goals?.contest?.contest.name).toBe("短編賞");
+    expect(result.goals?.contest?.written).toBe(result.work.net);
+    expect(result.goals?.contest?.daysLeft).toBe(5);
+  });
+
+  test("記録も目標も無い作品：空の束と、まだ無いことの断り", () => {
+    const folder = makeWork("記録なし");
+    const result = statsOf(folder);
+    expect(result.deviceCount).toBe(0);
+    expect(result.todayNet).toBe(0);
+    expect(result.goals).toEqual({ perEpisodeChars: null, contest: null });
+    expect(result.notices.join("\n")).toContain("記録がまだありません");
+  });
+
+  test("壊れた目標は直さず、読めなかったと返す", () => {
+    const folder = makeWork("壊れた目標");
+    write(folder, ".aiwriter/goals.json", "{ 壊れている");
+    const result = statsOf(folder);
+    expect(result.goals).toBeNull();
+    expect(result.notices.join("\n")).toContain("goals.json");
+    expect(fs.readFileSync(nodePath.join(folder, ".aiwriter/goals.json"), "utf8")).toBe("{ 壊れている");
+  });
+
+  test("記録の重さ：数字だけなので抜粋より軽い扱いにはしない（novel.read は抜粋）", () => {
+    expect(exposureOf("novel.read", { folder: "x", kind: "writingStats" })).toBe("excerpt");
+  });
+});
+
+/**
+ * 投稿サイト用に変換した本文と題（棚卸しの8件目。2026-10-16）。製品の［投稿サイト用に
+ * 変換してコピー］と同じ変換。**投稿はしない**（貼る文を返すだけ）。
+ */
+describe("novel.read——投稿サイト用（posting）", () => {
+  function postingOf(input: Omit<Parameters<typeof novelRead>[0], "kind">) {
+    const result = novelRead({ ...input, kind: "posting" });
+    if (result.kind !== "posting") throw new Error(result.kind);
+    return result;
+  }
+
+  test("サイトの記法に変換し、シーンメモを落とし、題を添える", () => {
+    const folder = makeWork("投稿");
+    // 原稿の記法は `{漢字|かんじ}`（ルビ）と `{{強調}}`（傍点）
+    write(folder, "本文/004_灯台.txt", "　{灯台|とうだい}の明かりが{{揺れた}}。\n// メモ：ここで母を出す\n　少年は走った。\n");
+    const result = postingOf({ folder, site: "narou", file: "本文/004_灯台.txt" });
+    expect(result.siteLabel).toBe("小説家になろう");
+    expect(result.title).toBe("灯台");
+    expect(result.text).toContain("｜灯台《とうだい》");
+    expect(result.text).not.toContain("{");
+    expect(result.text).not.toContain("母を出す");
+    expect(result.truncated).toBe(false);
+    expect(result.next).toBeNull();
+    expect(result.file).toBe("本文/004_灯台.txt");
+  });
+
+  test("note はルビを括弧書きにし、貼り付けで入らないものを知らせる", () => {
+    const folder = makeWork("note");
+    write(folder, "本文/004_灯台.md", "# 灯台の夜\n\n　{灯台|とうだい}の明かり。\n\n![灯台](images/lighthouse.png)\n");
+    const result = postingOf({ folder, site: "note", file: "本文/004_灯台.md" });
+    expect(result.text).toContain("灯台（とうだい）");
+    // note の題名は先頭の見出し（本文欄へは入れない）
+    expect(result.title).toBe("灯台の夜");
+    expect(result.text).not.toContain("# 灯台の夜");
+    expect(result.note?.images).toHaveLength(1);
+    expect(result.notices.join("\n")).toContain("画像1枚");
+  });
+
+  test("site・file が無ければ名前を挙げて断る", () => {
+    const folder = makeWork("引数なし");
+    expect(() => postingOf({ folder, file: "本文/001_灯.txt" })).toThrow(/site/);
+    expect(() => postingOf({ folder, site: "narou" })).toThrow(/file/);
+  });
+
+  test("本文のファイルでないもの・作品フォルダーの外は断る", () => {
+    const folder = makeWork("本文以外");
+    expect(() => postingOf({ folder, site: "narou", file: "設定/plot.md" })).toThrow(/本文のファイルではありません/);
+    expect(() => postingOf({ folder, site: "narou", file: "../外.txt" })).toThrow();
+  });
+
+  test("競合の跡が残る話は変換しない", () => {
+    const folder = makeWork("競合");
+    write(folder, "本文/004_競合.txt", "<<<<<<< HEAD\n　こちら\n=======\n　あちら\n>>>>>>> other\n");
+    expect(() => postingOf({ folder, site: "narou", file: "本文/004_競合.txt" })).toThrow(/競合/);
+  });
+
+  test("合本は collectedOrder で話を指す。指さなければ一覧を添えて断る", () => {
+    const folder = makeWork("合本");
+    const sep = (n: number) => `------------------------- エピソード${n}開始 -------------------------`;
+    write(
+      folder,
+      "本文/合本.txt",
+      [
+        sep(1), "【エピソードタイトル】", "1話　出航", "", "【本文】", "　船が出た。", "",
+        sep(2), "【エピソードタイトル】", "2話　嵐", "", "【本文】", "　嵐が来た。", "",
+      ].join("\n")
+    );
+    expect(() => postingOf({ folder, site: "narou", file: "本文/合本.txt" })).toThrow(/collectedOrder.*2＝第2話「嵐」/);
+    const second = postingOf({ folder, site: "narou", file: "本文/合本.txt", collectedOrder: 2 });
+    expect(second.collectedOrder).toBe(2);
+    expect(second.title).toBe("嵐");
+    expect(second.text).toBe("　嵐が来た。");
+    expect(() => postingOf({ folder, site: "narou", file: "本文/合本.txt", collectedOrder: 5 })).toThrow(/5 番目/);
+  });
+
+  test("長い話は行の境目で分けて返し、続きをたどると全文がそろう（上限を超えない）", () => {
+    const folder = makeWork("長い話");
+    const line = "　少年は防波堤の先で、潮の匂いを吸いこみながら父の船を待ちつづけた。";
+    const lines = Array.from({ length: 600 }, (_, index) => `${line}${index + 1}`);
+    write(folder, "本文/004_長い.txt", `${lines.join("\n")}\n`);
+
+    const pages: string[] = [];
+    let offset: number | undefined = undefined;
+    for (let guard = 0; guard < 50; guard++) {
+      const result = postingOf({ folder, site: "kakuyomu", file: "本文/004_長い.txt", offset });
+      expect(estimateTokens(JSON.stringify(result, null, 2))).toBeLessThanOrEqual(READ_RESULT_TOKEN_BUDGET);
+      pages.push(result.text);
+      if (!result.next) break;
+      expect(result.truncated).toBe(true);
+      expect(result.notices.join("\n")).toContain(`offset: ${result.next.offset}`);
+      offset = result.next.offset;
+    }
+    expect(pages.length).toBeGreaterThan(1);
+    expect(pages.join("\n")).toBe(lines.join("\n"));
+  });
+
+  test("記録の重さは本文（1話をまるごと返すため）で、どの話かを残す", () => {
+    expect(exposureOf("novel.read", { folder: "x", kind: "posting" })).toBe("body");
+    const folder = makeWork("投稿の記録", { allow: ["novel.read"] });
+    recordExternalAccess({
+      tool: "novel.read",
+      args: { folder, kind: "posting", site: "narou", file: "本文/001_灯.txt" },
+      ok: true,
+      result: {},
+    });
+    const log = fs.readFileSync(nodePath.join(folder, ".aiwriter", "history", "external.jsonl"), "utf8");
+    expect(log).toContain('"file":"本文/001_灯.txt"');
+    expect(log).toContain('"exposure":"body"');
+    expect(log).toContain("投稿サイト用の本文を読んだ");
+  });
+
+  test("執筆量も投稿用も、作品フォルダーに何も書かない", () => {
+    const folder = makeWork("書かない2");
+    const before = snapshot(folder);
+    novelRead({ folder, kind: "writingStats" });
+    novelRead({ folder, kind: "posting", site: "note", file: "本文/001_灯.txt" });
+    expect(snapshot(folder)).toEqual(before);
+  });
+});

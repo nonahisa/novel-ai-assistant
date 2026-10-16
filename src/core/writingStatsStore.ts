@@ -9,13 +9,18 @@ import { atomicWriteFile } from "./atomicWrite";
 import { workPaths } from "./workRegistry";
 import {
   emptyDeviceStats,
-  parseDeviceWritingStats,
   recordMeasurement,
   rebaseline,
   sameBaseline,
   shouldPersist,
   type RecordResult,
 } from "./writingStats";
+import {
+  collectWritingStats,
+  isWritingStatsFileName,
+  parseWritingStatsFile,
+  WRITING_STATS_DIR,
+} from "./writingStatsFiles";
 
 /**
  * 執筆量の保存先（設計書5.5.6）。
@@ -29,8 +34,8 @@ import {
  * そのまま置き換えてよい（`atomicWriteFile` を引数無しで呼ぶ）。
  */
 
-/** 記録の置き場。作品フォルダー内・同期対象 */
-const STATS_DIR = "stats";
+/** 記録の置き場。作品フォルダー内・同期対象（読み方と一緒に `writingStatsFiles.ts` が持つ） */
+const STATS_DIR = WRITING_STATS_DIR;
 
 export class WritingStatsStore {
   constructor(
@@ -68,15 +73,15 @@ export class WritingStatsStore {
       return [];
     }
 
-    const sets: DeviceWritingStats[] = [];
+    // 壊れた記録の捨て方と並び順は `collectWritingStats` の1か所が持つ
+    // （MCP の読む口も同じ関数を通す。設計書6.87.24）
+    const files: Array<{ name: string; text: string }> = [];
     for (const [name, type] of entries) {
-      if (type !== vscode.FileType.File || !name.endsWith(".json")) continue;
-      const loaded = await this.readFile(path.join(this.directory(), name));
-      if (loaded) sets.push(loaded);
+      if (type !== vscode.FileType.File || !isWritingStatsFileName(name)) continue;
+      const text = await this.readText(path.join(this.directory(), name));
+      if (text !== undefined) files.push({ name, text });
     }
-    return sets.sort((left, right) =>
-      left.deviceId.localeCompare(right.deviceId)
-    );
+    return collectWritingStats(files);
   }
 
   /**
@@ -137,12 +142,14 @@ export class WritingStatsStore {
   private async readFile(
     filePath: string
   ): Promise<DeviceWritingStats | undefined> {
+    const text = await this.readText(filePath);
+    return text === undefined ? undefined : parseWritingStatsFile(text);
+  }
+
+  private async readText(filePath: string): Promise<string | undefined> {
     try {
-      const bytes = await vscode.workspace.fs.readFile(
-        path.toUri(filePath)
-      );
-      const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-      return parseDeviceWritingStats(parsed);
+      const bytes = await vscode.workspace.fs.readFile(path.toUri(filePath));
+      return new TextDecoder().decode(bytes);
     } catch {
       return undefined;
     }

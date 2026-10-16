@@ -399,6 +399,78 @@ describe("2026-10-16 に足した機能", () => {
     expect(d.confirm).not.toHaveBeenCalled();
     expect(store.get(ID)?.state).toBe("refused");
   });
+
+  test("書き出し：AIを使わず本文を量らず、確認を出してから作り、置いた場所を結果に入れる", async () => {
+    const row = {
+      format: "epub" as const,
+      filePath: ".aiwriter/exports/星の町_20261016.epub",
+      bytes: 12345,
+      chapters: 19,
+      conflicted: [],
+      notices: [],
+      cover: "焼いた表紙",
+    };
+    const exporter = {
+      inspect: vi.fn(async () => ({ ok: true as const, episodeCount: 19 })),
+      run: vi.fn(async () => ({ ok: true as const, row })),
+    };
+    const resolveAi = vi.fn();
+    const { d, store, history } = deps(
+      { export: exporter, resolveAi },
+      { ticket: ticket({ feature: "exportEpub" }) }
+    );
+    await handleRunRequest(queryOf(), d);
+    expect(d.measure).not.toHaveBeenCalled();
+    expect(d.run).not.toHaveBeenCalled();
+    expect(resolveAi).not.toHaveBeenCalled();
+    const [message, detail, button] = vi.mocked(d.confirm).mock.calls[0] ?? ["", "", ""];
+    expect(message).toContain("EPUB");
+    expect(detail).toContain("19話");
+    expect(button).toBe("作る");
+    expect(exporter.run).toHaveBeenCalledWith(WORK, "exportEpub");
+    expect(history.map((entry) => entry.state)).toEqual(["confirming", "running", "done"]);
+    const result = store.get(ID)?.result;
+    expect(result?.feature).toBe("exportEpub");
+    expect(result?.bodyChars).toBe(0);
+    expect(result?.provider.paid).toBe(false);
+    expect(result?.findings[0]).toEqual(row);
+  });
+
+  test("書き出し：作者が断ったら作らない／作れなかったら理由を返す／手足が無ければ断る", async () => {
+    const exporter = {
+      inspect: vi.fn(async () => ({ ok: true as const, episodeCount: 2 })),
+      run: vi.fn(async () => ({ ok: false as const, reason: "本文が見つかりません" })),
+    };
+    const declined = deps(
+      { export: exporter, confirm: vi.fn(async () => false) },
+      { ticket: ticket({ feature: "exportPdf" }) }
+    );
+    await handleRunRequest(queryOf(), declined.d);
+    expect(exporter.run).not.toHaveBeenCalled();
+    expect(declined.store.get(ID)?.state).toBe("declined");
+
+    const failed = deps({ export: exporter }, { ticket: ticket({ feature: "exportPdf" }) });
+    await handleRunRequest(queryOf(), failed.d);
+    expect(failed.store.get(ID)?.state).toBe("failed");
+    expect(failed.store.get(ID)?.reason).toContain("本文が見つかりません");
+
+    const missing = deps({}, { ticket: ticket({ feature: "exportPdf" }) });
+    await handleRunRequest(queryOf(), missing.d);
+    expect(missing.d.confirm).not.toHaveBeenCalled();
+    expect(missing.store.get(ID)?.state).toBe("refused");
+  });
+
+  test("書き出し：本文が1つも無い作品は確認を出さずに断る", async () => {
+    const exporter = {
+      inspect: vi.fn(async () => ({ ok: false as const, reason: "本文のファイルが見つかりません。" })),
+      run: vi.fn(),
+    };
+    const { d, store } = deps({ export: exporter }, { ticket: ticket({ feature: "exportPdf" }) });
+    await handleRunRequest(queryOf(), d);
+    expect(d.confirm).not.toHaveBeenCalled();
+    expect(exporter.run).not.toHaveBeenCalled();
+    expect(store.get(ID)?.state).toBe("refused");
+  });
 });
 
 describe("受け口", () => {

@@ -27,6 +27,8 @@ const READ_KIND_LABELS: Readonly<Record<string, string>> = {
   chronicle: "年表",
   relations: "人物相関図",
   locations: "場所の略図",
+  writingStats: "執筆量",
+  posting: "投稿サイト用の本文",
 };
 
 /**
@@ -91,6 +93,11 @@ export function exposureOf(
     `setup.request`（0.82.1、設計書6.87.18）は**作者の画面に確認を出させる
     URI を開くだけ**で、ファイルを1つも読まない。
   */
+  /*
+    読む口の `kind: posting`（2026-10-16）は**1話の本文を、貼る形にしてまるごと**返す
+    （行で分けても、続きをたどれば全文が渡る）。抜粋ではないので本文の重さにする
+  */
+  if (tool === "novel.read" && args?.kind === "posting") return "body";
   if (
     tool === "mcp.version" ||
     tool === "windows.list" ||
@@ -209,6 +216,9 @@ function fileOf(args: Record<string, unknown> | undefined): string {
       : undefined;
   const candidate = args?.filePath ?? args?.plotPath ?? inOptions;
   if (typeof candidate === "string") return candidate;
+  // 読む口の投稿用の本文（`kind: posting`。2026-10-16）は `file` で話を指す。
+  // 1話をまるごと返す（記録の重さは本文）ので、どの話かを残さないと作者が追えない
+  if (args?.kind === "posting" && typeof args?.file === "string") return args.file;
   /*
     指摘を置いた回（`novel.propose` の `kind: "finding"`）は `chunkId` だけを持つ。
     `本文/001.txt#1-0@3000` の `#` より前がファイル（`parseChunkId` と同じ読み方）

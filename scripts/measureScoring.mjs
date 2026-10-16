@@ -80,6 +80,9 @@ export const FEATURES = [
   "chapter",
   "blurb",
   "catchphrase",
+  // 更新告知文（2026-10-16）。filePath で告知する話を1つ渡す（作品ぜんたいを回す
+  // FILE_TARGET_FEATURES には入れない。告知は「いま公開した1話」について作るもの）
+  "announce",
   "chat",
 ];
 

@@ -1,5 +1,9 @@
-import * as path from "./paths";
+// **`./paths` ではなく `./pathText`**（2026-10-16）。`paths` は `vscode` を読み込むので、
+// MCP の告知文（novel.run feature: announce）からこのファイルを使えなくなる。
+// 使うのは basename・extname だけで、`paths` が再輸出しているものと同じ関数である
+import * as path from "./pathText";
 import type { EpisodeFile } from "../models/types";
+import { stripCodeFence } from "./synopsisValidation";
 import { formatChapterLabel, stripChapterLabel } from "./episodeLabel";
 import type { WorkFormatKey } from "./workFormat";
 import {
@@ -499,4 +503,43 @@ export function buildAnnouncementMarkdown(
   );
 
   return lines.join("\n");
+}
+
+/**
+ * AIの応答を読む。**前後に説明やコードの囲みが付いていても読む**（`stripCodeFence`）。
+ *
+ * 2026-10-16 に `features/generateAnnouncement.ts` から移した——MCP の告知文
+ * （novel.run feature: announce）も同じ解析を通すため（写すと、片方だけ緩む）。
+ */
+export function parseAnnounceResponse(text: string): AnnounceResult | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(stripCodeFence(text));
+  } catch {
+    return null;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const xPost = typeof record.xPost === "string" ? record.xPost.trim() : "";
+  const activityReport =
+    typeof record.activityReport === "string"
+      ? record.activityReport.trim()
+      : "";
+  const afterword =
+    typeof record.afterword === "string" ? record.afterword.trim() : "";
+  // **3つとも空なら読み取れなかったものとして扱う。** 1つでもあれば
+  // 残りは作者が書き足せるので、空のまま見せる（黙って捨てない）
+  if (!xPost && !activityReport && !afterword) return null;
+
+  return {
+    xPost,
+    activityReport,
+    afterword,
+    spoilerCheck:
+      typeof record.spoilerCheck === "string" ? record.spoilerCheck : null,
+    confidence:
+      typeof record.confidence === "string" ? record.confidence : "low",
+  };
 }

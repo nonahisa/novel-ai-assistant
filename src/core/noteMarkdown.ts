@@ -1,4 +1,7 @@
-import * as path from "./paths";
+// **`./paths` ではなく `./pathText`**（2026-10-16）。`paths` は `vscode` を読み込むので、
+// MCP の読む口（novel.read kind: posting）がここを通れなくなる。使うのは basename だけで、
+// `paths` が再輸出しているものと同じ関数である
+import * as path from "./pathText";
 import { hasEmphasis, toSiteNotation } from "./ruby";
 import { isMemoLine } from "./sceneMemo";
 
