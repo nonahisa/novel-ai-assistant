@@ -106,7 +106,10 @@ describe("推敲：中身の無い修正案は、指摘を残して修正案だ�
             line: 1,
             original,
             suggestion: "それは〆た後すぐに血抜きや魔抜きをしなかったせいだ。",
-            reason: "冗長",
+            // 字を足すだけで何も削っていないので「冗長」の札では修正案が外れる
+            // （P-10 1.13 の `rewritesInsteadOfTrimming`）。ここで見たいのは中身の
+            // ある修正案が残ることなので、札を係り受けにした
+            reason: "係り受け",
             explanation: "「血抜き魔抜き」が続いています",
             confidence: "high",
           },

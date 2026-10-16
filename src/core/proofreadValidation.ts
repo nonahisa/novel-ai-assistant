@@ -80,13 +80,17 @@ export interface AcceptedProofreadIssue {
  * - `ambiguous_in_line`：原文がその行に2か所以上ある（`isAmbiguousInLine`）
  * - `new_kanji`：漢字ひらきなのに原文に無い漢字が入る（`introducesNewKanji`）
  * - `paraphrase`：漢字ひらきなのに言い換えている（`paraphrasesInsteadOfOpening`）
+ * - `not_trimmed`：冗長なのに、原文から字を削った形になっていない（`rewritesInsteadOfTrimming`、1.13）
+ * - `drops_trailing_mark`：原文の末尾の記号（読点・句点・括弧など）を落としている（`dropsTrailingMark`）
  */
 export type SuggestionClearedReason =
   | "placeholder"
   | "drops_tail"
+  | "drops_trailing_mark"
   | "ambiguous_in_line"
   | "new_kanji"
-  | "paraphrase";
+  | "paraphrase"
+  | "not_trimmed";
 
 /**
  * 修正案を外したことを、作者へ見える説明に添える一言。
@@ -100,10 +104,12 @@ const SUGGESTION_CLEARED_NOTE: Record<
   string
 > = {
   drops_tail: "（修正案は原文の後ろを落としていたので外しました）",
+  drops_trailing_mark: "（修正案が原文の末尾の記号を落としていたので外しました）",
   ambiguous_in_line:
     "（同じ字句がこの行に2か所あり、どちらへ当てるか決められないので修正案を外しました）",
   new_kanji: "（修正案がひらいた形ではなかったので外しました）",
   paraphrase: "（修正案がひらいた形ではなく言い換えだったので外しました）",
+  not_trimmed: "（修正案が重なった語を削った形ではなかったので外しました）",
 };
 
 export interface RejectedProofreadIssue {
@@ -796,6 +802,90 @@ export function paraphrasesInsteadOfOpening(
   // 3. 漢字をかなにして短くなることはない（1字の読みは1音以上ある）
   return suggestionChars.length < originalChars.length;
 }
+
+/**
+ * 冗長の修正案が、**重なった語を削った形になっていない**か（P-10 1.13、2026-10-16）。
+ *
+ * 1.13 で冗長にも修正案を頼んだ（「重なっている語の片方を削った形を書いてください」）。
+ * 指示の言葉は答えに写って返ってくる（CLAUDE.md の失敗3）。写した
+ * 「重なっている語の片方を削った形」（15字）は、原文「悶絶しながらしながら沼ワニに
+ * 近づくと」（18字）の半分を超えるので `dropsOriginalTail` に掛からず、
+ * **押すと本文がその15字に置き換わる**ところだった。
+ *
+ * 冗長を直すとは、重なった片方を削ることなので、**修正案の字は原文の字を同じ順で
+ * 拾ったもの（原文から字を抜いただけ）で、原文より短い**はずである。
+ * 「まず最初に」→「まず」、「約10分ほど」→「約10分」はどちらも満たす。
+ * 削ったあとのつなぎに**ひらがなを2字まで**足すのは認める（「門外で行われる確認が」→
+ * 「門外での確認が」）。
+ *
+ * **知っていて外すもの**：漢字・片仮名を足す直しや、ひらがなを3字以上足す直し。
+ * 外すのは修正案だけで、指摘は残す（`paraphrasesInsteadOfOpening` と同じ作法）——
+ * 原稿を壊しうる案を押せる形で出すより、直し方を作者に委ねるほうがよい。
+ */
+export function rewritesInsteadOfTrimming(
+  original: string,
+  suggestion: string
+): boolean {
+  if (!suggestion) return false;
+  // 原文と同じものは、この後の `no_change` が指摘ごと落とす（押しても何も起きない）
+  if (normalizeForComparison(original) === normalizeForComparison(suggestion)) {
+    return false;
+  }
+  const originalChars = Array.from(original);
+  const suggestionChars = Array.from(suggestion);
+  if (suggestionChars.length >= originalChars.length) return true;
+  // 原文の字を同じ順で拾っていく。拾えない字は「足した字」として数える
+  let at = 0;
+  let added = 0;
+  for (const char of suggestionChars) {
+    const found = originalChars.indexOf(char, at);
+    if (found < 0) {
+      if (!TRIM_JOINT_KANA.test(char)) return true;
+      added++;
+      continue;
+    }
+    at = found + 1;
+  }
+  return added > TRIM_MAX_ADDED_KANA;
+}
+
+/**
+ * 修正案が、**原文の末尾の記号を落としている**か（2026-10-16、本体の裁定）。
+ *
+ * 推敲は原文まるごとを置き換えるので、原文が「〜近づくと、」で終わり修正案が
+ * 「〜近づくと」で終わると、［適用］で作者の読点が消えて次の文とつながる。
+ * 1.13 の測り直し（ハイエルフ17話・26b）で、冗長の修正案3件のうち2件がこの形
+ * だった（「悶絶しながらしながら沼ワニに近づくと、」→「悶絶しながら沼ワニに
+ * 近づくと」、「討伐部位があれば、」→読点だけを消す）。削った形なので
+ * `rewritesInsteadOfTrimming` を通り、後ろの半分は残るので `dropsOriginalTail`
+ * にも掛からない。
+ *
+ * **札を問わずにかける。** どの札の修正案でも、原文を置き換えるのは同じなので。
+ * 末尾の記号を別の記号に替える直し（読点→句点で文を切る）もここで外れるが、
+ * 文の切り方は作者が決めること（プロンプトの「長文」は修正案を空にさせている）。
+ * 外すのは修正案だけで、指摘は残す（`rewritesInsteadOfTrimming` と同じ作法）。
+ */
+export function dropsTrailingMark(original: string, suggestion: string): boolean {
+  if (!suggestion) return false;
+  const last = Array.from(original.trimEnd()).at(-1) ?? "";
+  if (!TRAILING_MARK.test(last)) return false;
+  return !suggestion.trimEnd().endsWith(last);
+}
+
+/** 原文の末尾にあれば、修正案の末尾にも残っていなければならない記号 */
+const TRAILING_MARK = /^[、。，．,.！？!?」』）)】〕］\]…‥―—～〜・：:；;]$/u;
+
+/**
+ * 削ったあとのつなぎに足してよい字（ひらがなだけ）と、その数。
+ *
+ * 2026-10-16 の測り直しで、26b の「いつもは門外で行われる確認が行われておらず」の
+ * 修正案が、この関門で外れた（中身は残らないが、「門外での確認が」のように助詞を
+ * 足してつないだ形とみられる）。重なった片方を削ると、つなぎの助詞が1〜2字要る
+ * ことがある。**ひらがな2字まで**なら、指示の言葉の写し（漢字を含む15字）とは
+ * 混ざらない
+ */
+const TRIM_JOINT_KANA = /^\p{Script=Hiragana}$/u;
+const TRIM_MAX_ADDED_KANA = 2;
 
 /**
  * 同語反復を探す範囲。写した範囲を含む段落と、その前後の段落をいくつ見るか。
@@ -1786,14 +1876,19 @@ export function validateProofreadIssues(
           ? "placeholder"
           : dropsOriginalTail(original, suggestion)
             ? "drops_tail"
-            : isAmbiguousInLine(chunkLines[line - firstLine] ?? "", original)
-              ? "ambiguous_in_line"
-              : reason === "漢字ひらき" && introducesNewKanji(original, suggestion)
-                ? "new_kanji"
-                : reason === "漢字ひらき" &&
-                    paraphrasesInsteadOfOpening(original, suggestion)
-                  ? "paraphrase"
-                  : undefined;
+            : dropsTrailingMark(original, suggestion)
+              ? "drops_trailing_mark"
+              : isAmbiguousInLine(chunkLines[line - firstLine] ?? "", original)
+                ? "ambiguous_in_line"
+                : reason === "漢字ひらき" && introducesNewKanji(original, suggestion)
+                  ? "new_kanji"
+                  : reason === "漢字ひらき" &&
+                      paraphrasesInsteadOfOpening(original, suggestion)
+                    ? "paraphrase"
+                    : reason === "冗長" &&
+                        rewritesInsteadOfTrimming(original, suggestion)
+                      ? "not_trimmed"
+                      : undefined;
     // **形式名詞のひらき（事→こと）は推敲では出さない**（作者の裁定、2026-09-26 午後）。
     // 揃え方の話なので表記ゆれの機能に任せる。頼み方では止まらないので検算で落とす
     // 捨てる修正案は空として渡す（説明が挙げた漢字で判定する道に入る）。ただし
