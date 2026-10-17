@@ -8,14 +8,8 @@ import {
 } from "../../../src/models/book";
 import { BAKED_COVER_FILES } from "../../../src/core/coverBake";
 import type { WorkEntry } from "../../../src/models/types";
-import {
-  commands,
-  FileSystemError,
-  FileType,
-  Uri,
-  window,
-  workspace,
-} from "../support/vscodeStub";
+import { commands, Uri, window, workspace } from "../support/vscodeStub";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * EPUBエディターのプレビュー（設計書6.65.6・6.65.8・6.65.10・6.65.11）。
@@ -122,57 +116,11 @@ function writeCharacter(
 }
 
 function installDisk(): void {
-  const separator = path.sep;
-  workspace.fs = {
-    createDirectory: async () => undefined,
-    readFile: async (uri: { fsPath: string }) => {
-      const bytes = disk.get(uri.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      return bytes;
-    },
-    writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-      disk.set(uri.fsPath, bytes);
-    },
-    rename: async (
-      from: { fsPath: string },
-      to: { fsPath: string },
-      options?: { overwrite?: boolean }
-    ) => {
-      const bytes = disk.get(from.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      if (!options?.overwrite && disk.has(to.fsPath)) {
-        throw new FileSystemError("exists", "FileExists");
-      }
-      disk.set(to.fsPath, bytes);
-      disk.delete(from.fsPath);
-    },
-    delete: async (uri: { fsPath: string }) => {
-      disk.delete(uri.fsPath);
-    },
-    stat: async (uri: { fsPath: string }) => {
-      if (disk.has(uri.fsPath)) {
-        return { mtime: Date.UTC(2026, 8, 3, 5, 0, 0), size: 1 };
-      }
-      const prefix = uri.fsPath + separator;
-      for (const key of disk.keys()) {
-        if (key.startsWith(prefix)) return { mtime: 0, size: 0 };
-      }
-      throw new FileSystemError("missing", "FileNotFound");
-    },
-    readDirectory: async (uri: { fsPath: string }) => {
-      const prefix = uri.fsPath + separator;
-      const names = new Map<string, FileType>();
-      for (const key of disk.keys()) {
-        if (!key.startsWith(prefix)) continue;
-        const rest = key.slice(prefix.length);
-        const cut = rest.indexOf(separator);
-        if (cut < 0) names.set(rest, FileType.File);
-        else names.set(rest.slice(0, cut), FileType.Directory);
-      }
-      if (names.size === 0) throw new FileSystemError("missing", "FileNotFound");
-      return [...names.entries()];
-    },
-  } as unknown as typeof workspace.fs;
+  workspace.fs = memoryFs(disk, {
+    fileStat: { mtime: Date.UTC(2026, 8, 3, 5, 0, 0), size: 1 },
+    folderStat: { mtime: 0, size: 0 },
+    readDirectory: "nested",
+  });
 }
 
 /** 作り物のWebViewパネル。送られたものを覚えるだけ */

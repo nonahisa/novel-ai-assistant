@@ -2,14 +2,8 @@ import * as path from "path";
 import { beforeEach, describe, expect, test } from "vitest";
 import { openEpubEditorPanel } from "../../../src/features/epubEditorPanel";
 import type { WorkEntry } from "../../../src/models/types";
-import {
-  commands,
-  FileSystemError,
-  FileType,
-  Uri,
-  window,
-  workspace,
-} from "../support/vscodeStub";
+import { commands, Uri, window, workspace } from "../support/vscodeStub";
+import { memoryFs } from "../support/memoryDisk";
 
 /**
  * EPUBエディターの「未保存」の扱い（設計書6.65.6。作者の指摘、2026-09-06）。
@@ -56,57 +50,12 @@ function has(relativePath: string): boolean {
 }
 
 function installDisk(): void {
-  const separator = path.sep;
-  workspace.fs = {
-    createDirectory: async () => undefined,
-    readFile: async (uri: { fsPath: string }) => {
-      const bytes = disk.get(uri.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      return bytes;
-    },
-    writeFile: async (uri: { fsPath: string }, bytes: Uint8Array) => {
-      disk.set(uri.fsPath, bytes);
-    },
-    rename: async (
-      from: { fsPath: string },
-      to: { fsPath: string },
-      options?: { overwrite?: boolean }
-    ) => {
-      const bytes = disk.get(from.fsPath);
-      if (!bytes) throw new FileSystemError("missing", "FileNotFound");
-      if (!options?.overwrite && disk.has(to.fsPath)) {
-        throw new FileSystemError("exists", "FileExists");
-      }
-      disk.set(to.fsPath, bytes);
-      disk.delete(from.fsPath);
-    },
-    delete: async (uri: { fsPath: string }) => {
-      if (!disk.delete(uri.fsPath)) {
-        throw new FileSystemError("missing", "FileNotFound");
-      }
-    },
-    stat: async (uri: { fsPath: string }) => {
-      if (disk.has(uri.fsPath)) return { mtime: 1, size: 1 };
-      const prefix = uri.fsPath + separator;
-      for (const key of disk.keys()) {
-        if (key.startsWith(prefix)) return { mtime: 0, size: 0 };
-      }
-      throw new FileSystemError("missing", "FileNotFound");
-    },
-    readDirectory: async (uri: { fsPath: string }) => {
-      const prefix = uri.fsPath + separator;
-      const names = new Map<string, FileType>();
-      for (const key of disk.keys()) {
-        if (!key.startsWith(prefix)) continue;
-        const rest = key.slice(prefix.length);
-        const cut = rest.indexOf(separator);
-        if (cut < 0) names.set(rest, FileType.File);
-        else names.set(rest.slice(0, cut), FileType.Directory);
-      }
-      if (names.size === 0) throw new FileSystemError("missing", "FileNotFound");
-      return [...names.entries()];
-    },
-  } as unknown as typeof workspace.fs;
+  workspace.fs = memoryFs(disk, {
+    deleteRefusesMissing: true,
+    fileStat: { mtime: 1, size: 1 },
+    folderStat: { mtime: 0, size: 0 },
+    readDirectory: "nested",
+  });
 }
 
 /** 作り物のWebViewパネル。送られたものを覚え、閉じる操作を再現できるようにする */
