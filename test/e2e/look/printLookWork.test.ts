@@ -207,7 +207,9 @@ describe.skipIf(!lookEnabled || !WORK)("見た目の写真：本物の作品の�
       "　文佳、窓の外の雨を見ている。",
       "密倉家の会長「お前が三門の息子か。話は聞いている。学校でのことも、霊媒師のばあさんのことも、全部だ。今さら隠し立てをしても無駄だぞ」",
       "太志「隠すつもりはありません」",
-      "お手伝いさん（年配の女性）「旦那様、お茶をお持ちしました。それから、先ほどお電話がありまして、明日の朝いちばんにもう一度お伺いしたいとのことでございます」",
+      // 台詞と見分けるのは「「」の前が12字まで（scriptLines.ts）。「お手伝いさん（年配の女性）」は
+      // 13字で台詞にならないため、12字以内の呼び名にした（2026-10-17）
+      "お手伝いさん（年配）「旦那様、お茶をお持ちしました。それから、先ほどお電話がありまして、明日の朝いちばんにもう一度お伺いしたいとのことでございます」",
       "　会長、黙って頷く。",
     ].join("\n");
     const page = await grid("a4-landscape", GRID40, {
@@ -216,5 +218,18 @@ describe.skipIf(!lookEnabled || !WORK)("見た目の写真：本物の作品の�
     });
     await savePages(page, "805-台本の長い人物名と長い台詞-A4横", 1, 1);
     await page.close();
+
+    // 読む紙（文庫・縦書き）の台本も同じ組み方（人物名の欄・「「」の下へのぶら下げ・書体）
+    const reading = await openHtml(
+      buildPrintHtml({
+        workTitle: path.basename(WORK),
+        episodes: [{ heading: "第2話　屋敷", body, notation: "curly" }],
+        preset: "bunko-vertical",
+        kind: "script",
+      }),
+      { width: 1500, height: 1000 }
+    );
+    await savePages(reading, "805-台本の長い人物名と長い台詞-文庫縦", 1, 2);
+    await reading.close();
   });
 });

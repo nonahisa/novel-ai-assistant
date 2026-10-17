@@ -1,6 +1,17 @@
 import type { WorkPdfExportConfig } from "../models/types";
-import { PRINT_PRESETS, type PrintPreset } from "./printHtml";
-import { GRID_MARGINS, GRID_PAPERS, type GridPaper } from "./printGridHtml";
+import {
+  describeHeaderFooter,
+  emptyHeaderFooter,
+  MARGIN_CONTENTS,
+  PRINT_PRESETS,
+  printPreset,
+  type HeaderFooter,
+  type MarginContent,
+  type MarginRow,
+  type PageMargins,
+  type PrintPreset,
+} from "./printHtml";
+import { GRID_MARGINS, GRID_PAPERS, gridHeaderFooter, type GridPaper } from "./printGridHtml";
 
 /**
  * ［PDF出力］の前回の設定（`.aiwriter/config.json` の `pdfExport`）の読み方と使い方。
@@ -11,9 +22,10 @@ import { GRID_MARGINS, GRID_PAPERS, type GridPaper } from "./printGridHtml";
  * 全話。それまでの［PDF出力］は選んだものをどこにも覚えていなかったので、
  * 作者が画面で書き出せたときに、紙・向き・範囲だけをここへ覚えるようにした。
  *
- * **覚えるのは紙・向き・範囲だけ。** 上下の余白に刷るもの（ヘッダー・フッター）は
- * 紙の既定のまま、作者名は覚えない（［PDF出力］は「どこにも保存しません」と
- * 言って作者名を訊いている）。
+ * **覚えるのは紙・向き・範囲と、上下の余白の置き方**（奇数・偶数ページごとの
+ * ヘッダー・フッターの左・中央・右。2026-10-17 から）。**作者名そのものは覚えない**
+ * （［PDF出力］は「どこにも保存しません」と言って作者名を訊いている。覚えるのは
+ * 「作者名をどこに置くか」だけで、外部AIの依頼ではその枠を空ける）。
  *
  * **置き場を作品の設定にしたのは**、紙と範囲が作品の性格（文庫で刷る作品、
  * 公募の 40字×40行 で出す作品）だからである。名前の系統（`nameOrigin`）と
@@ -47,7 +59,61 @@ export function parsePdfExportConfig(raw: unknown): WorkPdfExportConfig | undefi
   const paper = parsePaper(raw.paper);
   const range = parseRange(raw.range);
   if (!paper || !range) return undefined;
-  return { paper, range };
+  if (raw.headerFooter === undefined) return { paper, range };
+  // 置き方が読めないときも、紙・範囲ごと無かったことにする（半端に読まない。
+  // 作者が選んだつもりの置き方が、黙って紙の既定に変わらないように）
+  const headerFooter = parseHeaderFooter(raw.headerFooter);
+  if (!headerFooter) return undefined;
+  return { paper, range, headerFooter };
+}
+
+/**
+ * 余白の置き方を読む。今の形（奇数・偶数 × 上・下 × 左・中央・右）のほかに、
+ * **前の形（上と下に1つずつ。`{ top, bottom }`）も読む**——前の形は全ページ同じ置き方で、
+ * 中身は余白の中央に刷っていたので、奇数・偶数とも中央の枠へ寄せる。
+ * 2026-10-17 までの［PDF出力］は置き方を覚えていなかったので、この形の記録は
+ * 手で書いたものしか無いはずだが、読めずに紙ごと捨てるより寄せるほうがよい
+ */
+export function parseHeaderFooter(raw: unknown): HeaderFooter | undefined {
+  if (!isRecord(raw)) return undefined;
+  if (raw.odd === undefined && raw.even === undefined) {
+    const top = parseMarginContent(raw.top);
+    const bottom = parseMarginContent(raw.bottom);
+    if (!top || !bottom) return undefined;
+    const margins = emptyHeaderFooter();
+    for (const side of [margins.odd, margins.even]) {
+      side.top.center = top;
+      side.bottom.center = bottom;
+    }
+    return margins;
+  }
+  const odd = parsePageMargins(raw.odd);
+  const even = parsePageMargins(raw.even);
+  return odd && even ? { odd, even } : undefined;
+}
+
+function parsePageMargins(raw: unknown): PageMargins | undefined {
+  if (!isRecord(raw)) return undefined;
+  const top = parseMarginRow(raw.top);
+  const bottom = parseMarginRow(raw.bottom);
+  return top && bottom ? { top, bottom } : undefined;
+}
+
+function parseMarginRow(raw: unknown): MarginRow | undefined {
+  if (!isRecord(raw)) return undefined;
+  const left = parseMarginContent(raw.left);
+  const center = parseMarginContent(raw.center);
+  const right = parseMarginContent(raw.right);
+  return left && center && right ? { left, center, right } : undefined;
+}
+
+function parseMarginContent(raw: unknown): MarginContent | undefined {
+  return MARGIN_CONTENTS.find((item) => item.id === raw)?.id;
+}
+
+/** その紙の上下の余白の既定（読む紙は紙ごと、公募の納品用は下の中央にページ番号） */
+export function defaultHeaderFooterFor(paper: WorkPdfExportConfig["paper"]): HeaderFooter {
+  return paper.kind === "grid" ? gridHeaderFooter() : printPreset(paper.preset).headerFooter;
 }
 
 function parsePaper(raw: unknown): WorkPdfExportConfig["paper"] | undefined {
@@ -112,6 +178,8 @@ export interface PdfExportRequestPlan {
   rangeFellBack: boolean;
   /** 前回が全話（またはその既定）だった */
   allEpisodes: boolean;
+  /** 上下の余白の置き方（前回の記録。無ければ紙の既定）。作者名の枠はまだ空けていない */
+  headerFooter: HeaderFooter;
 }
 
 /**
@@ -129,8 +197,9 @@ export function resolvePdfExportRequest(
   const config = saved ?? DEFAULT_PDF_EXPORT;
   const source = saved ? "last" : "default";
   const all = available.map(normalizeRelativePath);
+  const headerFooter = config.headerFooter ?? defaultHeaderFooterFor(config.paper);
   if (config.range.scope === "all") {
-    return { source, paper: config.paper, files: all, missing: [], rangeFellBack: false, allEpisodes: true };
+    return { source, paper: config.paper, files: all, missing: [], rangeFellBack: false, allEpisodes: true, headerFooter };
   }
   const wanted = config.range.files.map(normalizeRelativePath);
   const wantedSet = new Set(wanted);
@@ -138,9 +207,9 @@ export function resolvePdfExportRequest(
   const present = new Set(all);
   const missing = wanted.filter((file) => !present.has(file));
   if (files.length === 0) {
-    return { source, paper: config.paper, files: all, missing, rangeFellBack: true, allEpisodes: true };
+    return { source, paper: config.paper, files: all, missing, rangeFellBack: true, allEpisodes: true, headerFooter };
   }
-  return { source, paper: config.paper, files, missing, rangeFellBack: false, allEpisodes: false };
+  return { source, paper: config.paper, files, missing, rangeFellBack: false, allEpisodes: false, headerFooter };
 }
 
 /** 確認の窓と結果の断りに並べる文（紙・向き・範囲・どこから来た設定か） */
@@ -148,6 +217,8 @@ export interface PdfExportPlanLines {
   paper: string;
   direction: string;
   range: string;
+  /** 上下の余白の置き方（`describeHeaderFooter`。作者名の枠を空ける前） */
+  margins: string;
   source: string;
 }
 
@@ -159,6 +230,7 @@ export function describePdfExportPlan(plan: PdfExportRequestPlan): PdfExportPlan
     paper: describePaper(plan.paper),
     direction: paperIsVertical(plan.paper) ? "縦書き" : "横書き",
     range: describeRange(plan),
+    margins: describeHeaderFooter(plan.headerFooter),
     source:
       plan.source === "last"
         ? "前回の［PDF出力］で選んだ設定です"

@@ -7,6 +7,7 @@ import { bookChaptersOf } from "../core/bookChapters";
 import { atomicWriteFile } from "../core/atomicWrite";
 import { readWorkConfig, workPaths, writeWorkConfig } from "../core/workRegistry";
 import {
+  defaultHeaderFooterFor,
   describePdfExportPlan,
   GRID_MAX,
   GRID_MIN,
@@ -21,12 +22,19 @@ import { bookHeading, episodeUnit } from "../core/episodeLabel";
 import { timestampedFileNameCandidates } from "../core/timestampedFileName";
 import {
   buildPrintHtml,
+  describeHeaderFooter,
+  headerFooterUses,
+  mapHeaderFooter,
+  MARGIN_COLUMNS,
   MARGIN_CONTENTS,
+  MARGIN_PARITIES,
+  MARGIN_ROWS,
   marginContentLabel,
   PRINT_PRESETS,
-  printPreset,
   type HeaderFooter,
   type MarginContent,
+  type MarginRow,
+  type PageMargins,
   type PrintEpisode,
   type PrintPreset,
 } from "../core/printHtml";
@@ -34,7 +42,6 @@ import { notationModeFor } from "../core/manuscriptRender";
 import { BookStore } from "../core/bookStore";
 import {
   buildGridPrintHtml,
-  GRID_HEADER_FOOTER,
   GRID_MARGIN_MM,
   GRID_MARGINS,
   gridFontSizePt,
@@ -87,15 +94,17 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
   const paper = await pickPaper();
   if (!paper) return;
 
-  // 上下の余白に刷るもの（設計書6.33.5 の2）。**書き出すときに選ぶだけで、
-  // どこにも保存しない**（紙・向き・範囲は作品の設定に覚えるが、余白は覚えない。
-  // 作者名を刷るときは、名前を「どこにも保存しません」と言って訊いているため）
+  // 上下の余白に刷るもの（設計書6.33.5 の2）。奇数・偶数ページごとに、ヘッダー・
+  // フッターの左・中央・右へ置く（作者の裁定、2026-10-17）。置き方は紙・向き・範囲と
+  // いっしょに作品の設定へ覚える（外部AIの依頼が使う）。**作者名そのものは覚えない**
+  // （名前は「どこにも保存しません」と言って訊いている）
   const headerFooter = await pickHeaderFooter(
-    paper.kind === "grid" ? GRID_HEADER_FOOTER : printPreset(paper.preset).headerFooter
+    defaultHeaderFooterFor(paperConfigOf(paper)),
+    await lastHeaderFooter(work, paper)
   );
   if (!headerFooter) return;
   let author: string | undefined;
-  if (headerFooter.top === "author" || headerFooter.bottom === "author") {
+  if (headerFooterUses(headerFooter, "author")) {
     author = await askAuthorName(work);
     if (author === undefined) return;
   }
@@ -121,7 +130,7 @@ export async function exportPdf(work: WorkEntry): Promise<void> {
 
   // **作れた選択だけを覚える**（作者の裁定 2026-10-16 夜の3）。外部AIからの PDF の
   // 書き出しが、この紙・向き・範囲を使う。覚えられなくても書き出しは済んでいる
-  await rememberPdfExport(work, paper, scope.all ? undefined : selected);
+  await rememberPdfExport(work, paper, scope.all ? undefined : selected, headerFooter);
 
   // `.html` は既定のブラウザに関連づいている。VS Code の中で開くと
   // 印刷（Ctrl+P）が使えないので、外のブラウザへ渡す
@@ -329,10 +338,9 @@ async function composePdfExport(
  * 外部AIから頼まれた［PDF出力］（`run.request` の `exportPdf`。2026-10-16 の棚卸しの10件目）。
  *
  * **訊く段を、作品の前回の［PDF出力］の設定で埋める**（作者の裁定 2026-10-16 夜の3）：
- * 紙・向き・範囲は `config.json` の `pdfExport`（作者が画面で書き出せたときに覚える）、
- * 記録が無ければ文庫サイズ・縦書き・全話。上下の余白はその紙の既定。作者名を刷る
- * 既定の紙は今は無いが、もし置かれたら訊けないので余白を「なし」にして断りを残す
- * （勝手に名前を決めない）。
+ * 紙・向き・範囲・上下の余白の置き方は `config.json` の `pdfExport`（作者が画面で
+ * 書き出せたときに覚える）、記録が無ければ文庫サイズ・縦書き・全話・その紙の既定の余白。
+ * 作者名を置いた枠は、名前を訊けないので「なし」にして断りを残す（勝手に名前を決めない）。
  *
  * **ブラウザもフォルダーも開かない**（作者の画面を勝手に動かさない）。返すのは
  * 作ったファイルの場所（作品フォルダーからの相対）と数字だけ。
@@ -354,18 +362,16 @@ export async function exportPdfForRequest(
   if (!plan.ok) return plan;
   const { paper, episodes, lines } = plan;
 
-  const defaults = paper.kind === "grid" ? GRID_HEADER_FOOTER : printPreset(paper.preset).headerFooter;
-  const headerFooter: HeaderFooter = {
-    top: defaults.top === "author" ? "none" : defaults.top,
-    bottom: defaults.bottom === "author" ? "none" : defaults.bottom,
-  };
+  // 前回の置き方（無ければ紙の既定）。**作者名の枠は空ける**——外からは名前を訊けず、
+  // 勝手に決めることもしない
+  const headerFooter = mapHeaderFooter(plan.headerFooter, (content) =>
+    content === "author" ? "none" : content
+  );
   const notices: string[] = [
     `紙は${lines.paper}・${lines.direction}、範囲は${lines.range}、` +
-      `上の余白に${marginContentLabel(headerFooter.top)}・下の余白に${marginContentLabel(
-        headerFooter.bottom
-      )}で組みました（${lines.source}）。`,
+      `上下の余白は${describeHeaderFooter(headerFooter)}で組みました（${lines.source}）。`,
   ];
-  if (headerFooter.top !== defaults.top || headerFooter.bottom !== defaults.bottom) {
+  if (headerFooterUses(plan.headerFooter, "author")) {
     notices.push("作者名を刷る余白は、外からは名前を訊けないため空けました。");
   }
 
@@ -403,7 +409,14 @@ export async function exportPdfForRequest(
 export async function planPdfExportForRequest(
   work: WorkEntry
 ): Promise<
-  | { ok: true; paper: PaperChoice; episodes: EpisodeFile[]; lines: PdfExportPlanLines }
+  | {
+      ok: true;
+      paper: PaperChoice;
+      episodes: EpisodeFile[];
+      lines: PdfExportPlanLines;
+      /** 前回の置き方（無ければ紙の既定）。作者名の枠はまだ空けていない */
+      headerFooter: HeaderFooter;
+    }
   | { ok: false; reason: string; nextAction?: string }
 > {
   const scan = await scanWork(work);
@@ -432,6 +445,7 @@ export async function planPdfExportForRequest(
     paper: paperChoiceOf(plan.paper),
     episodes,
     lines: describePdfExportPlan(plan),
+    headerFooter: plan.headerFooter,
   };
 }
 
@@ -480,13 +494,17 @@ function paperConfigOf(paper: PaperChoice): WorkPdfExportConfig["paper"] {
 async function rememberPdfExport(
   work: WorkEntry,
   paper: PaperChoice,
-  selected: readonly EpisodeFile[] | undefined
+  selected: readonly EpisodeFile[] | undefined,
+  headerFooter: HeaderFooter
 ): Promise<void> {
   const next: WorkPdfExportConfig = {
     paper: paperConfigOf(paper),
     range: selected
       ? { scope: "files", files: selected.map((episode) => episodeRelativePath(work, episode)) }
       : { scope: "all" },
+    // 置き場所だけ（作者名そのものは覚えない）。枠の並びをいつも同じにして書く
+    // ——同じ設定なら書かない判定（JSON の文字列の比べ）がぶれないように
+    headerFooter: mapHeaderFooter(headerFooter, (content) => content),
   };
   try {
     const config = await readWorkConfig(work);
@@ -743,32 +761,97 @@ async function askGridNumber(
 }
 
 /**
+ * 前回の［PDF出力］の余白の置き方。**同じ種類の紙（読む紙どうし・公募の納品用どうし）
+ * のときだけ**返す——読む紙で選んだ「ヘッダーの右にページ番号」を、公募の納品用に
+ * そのまま持ち込むと、公募の既定（下の中央）から黙って外れる。
+ * 設定が読めないときは無いものとする（読むだけ。壊れた設定は直さない）。
+ */
+async function lastHeaderFooter(
+  work: WorkEntry,
+  paper: PaperChoice
+): Promise<HeaderFooter | undefined> {
+  try {
+    const saved = (await readWorkConfig(work))?.pdfExport;
+    if (!saved?.headerFooter) return undefined;
+    return saved.paper.kind === paper.kind ? saved.headerFooter : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 置き場所の選択肢（ヘッダー・フッターの左・中央・右と、刷らない） */
+type MarginPlace = { row: keyof PageMargins; column: keyof MarginRow } | "none";
+
+/** 中身を、その面のどこに置いているか。置いていなければ "none" */
+function placeOf(page: PageMargins, content: MarginContent): MarginPlace {
+  for (const row of MARGIN_ROWS) {
+    for (const column of MARGIN_COLUMNS) {
+      if (page[row.id][column.id] === content) return { row: row.id, column: column.id };
+    }
+  }
+  return "none";
+}
+
+function placeLabel(place: MarginPlace): string {
+  if (place === "none") return "刷らない";
+  const row = MARGIN_ROWS.find((item) => item.id === place.row)?.label ?? place.row;
+  const column = MARGIN_COLUMNS.find((item) => item.id === place.column)?.label ?? place.column;
+  return `${row}${column}`;
+}
+
+/**
+ * 中身をその面の1か所へ置き直す（元の置き場所は空ける）。**置いた先に別の中身が
+ * あれば、そちらは刷らなくなる**——1つの枠に2つは入らない（選ぶ画面にそう出す）。
+ */
+function placeContent(page: PageMargins, content: MarginContent, place: MarginPlace): void {
+  for (const row of MARGIN_ROWS) {
+    for (const column of MARGIN_COLUMNS) {
+      if (page[row.id][column.id] === content) page[row.id][column.id] = "none";
+    }
+  }
+  if (place !== "none") page[place.row][place.column] = content;
+}
+
+/**
  * 上下の余白（ヘッダー・フッター）に刷るものを決める。
  *
- * **いちばん上は「この紙の既定のまま」。** 毎回2つ選ばせると、いちばん
- * よく使う道が遠回りになる。既定の中身は項目の横に書いて見せる。
+ * **いちばん上は「この紙の既定のまま」**（前回の置き方があれば、その上に「前回と同じ」）。
+ * 毎回選ばせると、いちばんよく使う道が遠回りになる。中身は項目の横に書いて見せる。
+ *
+ * 自分で選ぶときは**刷るもの→置き場所の順**（作者の裁定、2026-10-17：刷るものを、
+ * 奇数ページと偶数ページごとに、ヘッダー・フッターの左・中央・右のどこに置くか）。
+ * 12の枠を1つずつ訊くより少なく済む。「これで決める」を押すまで繰り返せる。
  *
  * ブラウザの印刷画面にも「ヘッダーとフッター」（日付とファイルの場所）が
  * あり、名前が同じで紛らわしい。こちらは紙の余白に刷る中身で、あちらは
  * 外すもの——と項目の説明で言い分ける。
  */
 async function pickHeaderFooter(
-  defaults: HeaderFooter
+  defaults: HeaderFooter,
+  last: HeaderFooter | undefined
 ): Promise<HeaderFooter | undefined> {
   const picked = await vscode.window.showQuickPick(
     [
+      ...(last
+        ? [
+            {
+              label: "前回と同じ置き方",
+              description: describeHeaderFooter(last),
+              margins: "last" as const,
+            },
+          ]
+        : []),
       {
         label: "この紙の既定のまま",
-        description: `上：${marginContentLabel(defaults.top)}／下：${marginContentLabel(
-          defaults.bottom
-        )}`,
+        description: describeHeaderFooter(defaults),
         detail:
           "ブラウザの印刷画面の「ヘッダーとフッター」（日付とファイルの場所）とは別のものです。あちらは外してください",
         margins: "default" as const,
       },
       {
-        label: "上と下を選ぶ",
-        detail: "題名・話の見出し・作者名・ページ番号・なし から選びます",
+        label: "刷るものと置き場所を選ぶ",
+        detail:
+          "ページ番号・話の見出し・題名・作者名を、奇数ページと偶数ページごとに、ヘッダー・フッターの左・中央・右へ置きます",
         margins: "choose" as const,
       },
       cancelItem(),
@@ -779,33 +862,83 @@ async function pickHeaderFooter(
     }
   );
   if (!picked || isCancelItem(picked) || !("margins" in picked)) return undefined;
-  if (picked.margins === "default") return defaults;
-
-  const top = await pickMargin("上の余白（ヘッダー）に刷るもの", defaults.top);
-  if (!top) return undefined;
-  const bottom = await pickMargin("下の余白（フッター）に刷るもの", defaults.bottom);
-  if (!bottom) return undefined;
-  return { top, bottom };
+  if (picked.margins === "last" && last) return mapHeaderFooter(last, (content) => content);
+  if (picked.margins === "default") return mapHeaderFooter(defaults, (content) => content);
+  return chooseHeaderFooter(mapHeaderFooter(last ?? defaults, (content) => content));
 }
 
-async function pickMargin(
-  title: string,
-  byDefault: MarginContent
-): Promise<MarginContent | undefined> {
+/** 刷るもの（「なし」を除く）を選び、その置き場所を奇数・偶数の順に選ぶ。繰り返せる */
+async function chooseHeaderFooter(start: HeaderFooter): Promise<HeaderFooter | undefined> {
+  const current = start;
+  const contents = MARGIN_CONTENTS.filter((item) => item.id !== "none");
+  for (;;) {
+    const picked = await vscode.window.showQuickPick(
+      [
+        {
+          label: "これで決める",
+          description: describeHeaderFooter(current),
+          done: true as const,
+        },
+        ...contents.map((item) => ({
+          label: item.label,
+          description: MARGIN_PARITIES.map(
+            (parity) => `${parity.label}：${placeLabel(placeOf(current[parity.id], item.id))}`
+          ).join("／"),
+          detail: item.detail,
+          content: item.id,
+        })),
+        cancelItem(),
+      ],
+      { title: "置き場所を変えるものを選んでください", ignoreFocusOut: true }
+    );
+    if (!picked || isCancelItem(picked)) return undefined;
+    if ("done" in picked) return current;
+    if (!("content" in picked)) return undefined;
+    for (const parity of MARGIN_PARITIES) {
+      const place = await pickPlace(current[parity.id], picked.content, parity.label);
+      if (place === undefined) return undefined;
+      placeContent(current[parity.id], picked.content, place);
+    }
+  }
+}
+
+/** 1つの面での置き場所を選ぶ（ヘッダー・フッターの左・中央・右と、刷らない） */
+async function pickPlace(
+  page: PageMargins,
+  content: MarginContent,
+  parityLabel: string
+): Promise<MarginPlace | undefined> {
+  const now = placeOf(page, content);
+  const places: MarginPlace[] = [
+    ...MARGIN_ROWS.flatMap((row) =>
+      MARGIN_COLUMNS.map((column) => ({ row: row.id, column: column.id }))
+    ),
+    "none",
+  ];
   const picked = await vscode.window.showQuickPick(
     [
-      ...MARGIN_CONTENTS.map((item) => ({
-        label: item.label,
-        description: item.id === byDefault ? "この紙の既定" : undefined,
-        detail: item.detail,
-        margin: item.id,
-      })),
+      ...places.map((place) => {
+        const occupant = place === "none" ? "none" : page[place.row][place.column];
+        const isNow = placeLabel(place) === placeLabel(now);
+        return {
+          label: placeLabel(place),
+          description: isNow
+            ? "いまの置き場所"
+            : occupant !== "none"
+              ? `いまは${marginContentLabel(occupant)}（置くと、そちらは刷らなくなります）`
+              : undefined,
+          place,
+        };
+      }),
       cancelItem(),
     ],
-    { title, ignoreFocusOut: true }
+    {
+      title: `${parityLabel}の「${marginContentLabel(content)}」をどこに置きますか`,
+      ignoreFocusOut: true,
+    }
   );
-  if (!picked || isCancelItem(picked) || !("margin" in picked)) return undefined;
-  return picked.margin;
+  if (!picked || isCancelItem(picked) || !("place" in picked)) return undefined;
+  return picked.place;
 }
 
 /**

@@ -2,7 +2,7 @@ import { tokenizeLine, type NotationMode } from "./manuscriptRender";
 import { stripMemoLines } from "./sceneMemo";
 import { tcyRuns } from "./tateChuYoko";
 import { isHangable, isNoLineEnd, isNoLineStart } from "./kinsoku";
-import { classifyScriptLine } from "./scriptLines";
+import { classifyScriptLine, SCRIPT_ROLE_WIDTH, splitSerifu } from "./scriptLines";
 import type { WorkKindKey } from "./workKind";
 
 /**
@@ -70,6 +70,11 @@ export interface GridLine {
    * （`indent + lineWidth ≤ 字数`）。省略は0
    */
   indent?: number;
+  /**
+   * ゴシックで組む行（台本のト書きと柱。作者の裁定、2026-10-17）。省略は明朝。
+   * マスの寸法は字の大きさで決まっているので、書体を変えても升目は崩れない
+   */
+  gothic?: true;
 }
 
 export interface GridPage {
@@ -335,14 +340,16 @@ export function layoutGrid(
 export const SCRIPT_TOGAKI_INDENT = 3;
 
 /**
- * 1段落を行へ割る。**台本のト書きだけ字下げする。**
+ * 1段落を行へ割る。**台本だけ、行の種類で組み方を変える。**
  *
  * - 見分け方は `scriptLines.ts` の `classifyScriptLine`（原稿エディター・読む紙と
  *   同じ規則）。**`kindLineClass` は通さない**——漫画の原作も同じ「ト書き」の
- *   印を借りているので、そちらを通すと漫画まで下がる（今回は台本だけ）
- * - ト書きは行頭の全角空白で見分けるので、**頭の全角空白は字下げに置き換える**。
- *   残すと「空白1字＋字下げ3字」で4字下がる。紙だけの話で、原稿は変えない
- * - 字下げのぶん、1行に入る字を減らして割る（1行の字数は指定どおりのまま）
+ *   印を借りているので、そちらを通すと漫画まで変わる（今回は台本だけ）
+ * - **ト書き**：3字下げ。行頭の全角空白で見分けるので、**頭の全角空白は字下げに
+ *   置き換える**（残すと「空白1字＋字下げ3字」で4字下がる。紙だけの話で、原稿は
+ *   変えない）。字下げのぶん、1行に入る字を減らして割る（1行の字数は指定どおり）
+ * - **台詞**：人物名の欄と、「「」の下へのぶら下げ（`serifuLines`）
+ * - **書体**：ト書きと柱はゴシック、台詞と、どれにも当たらない行は明朝
  */
 function linesOfParagraph(
   text: string,
@@ -350,16 +357,70 @@ function linesOfParagraph(
   options: GridOptions,
   kind: WorkKindKey | undefined
 ): GridLine[] {
-  if (kind === "script" && classifyScriptLine(text) === "togaki") {
+  if (kind !== "script") {
+    return breakIntoLines(unitsOfLine(text, notation, options.vertical), options);
+  }
+  const lineKind = classifyScriptLine(text);
+  if (lineKind === "togaki") {
     const columns = Math.max(1, Math.floor(options.columns));
     const indent = Math.min(SCRIPT_TOGAKI_INDENT, columns - 1);
     const body = text.replace(/^　+/, "");
     const narrowed = { ...options, columns: columns - indent };
     return breakIntoLines(unitsOfLine(body, notation, options.vertical), narrowed).map(
-      (line) => ({ ...line, indent })
+      (line) => ({ ...line, indent, gothic: true as const })
     );
   }
+  if (lineKind === "hashira") {
+    return breakIntoLines(unitsOfLine(text, notation, options.vertical), options).map(
+      (line) => ({ ...line, gothic: true as const })
+    );
+  }
+  if (lineKind === "serifu") {
+    const serifu = splitSerifu(text);
+    if (serifu) return serifuLines(serifu.role, serifu.speech, notation, options);
+  }
   return breakIntoLines(unitsOfLine(text, notation, options.vertical), options);
+}
+
+/**
+ * 台詞の行（作者の裁定、2026-10-17）。
+ *
+ * - 人物名を `SCRIPT_ROLE_WIDTH` 字の欄に入れ、足りない分を空きマスで埋めて、
+ *   「「」を欄の次のマスにそろえる。**欄より長い名前は切らない**——超えたぶんだけ
+ *   「「」が後ろへずれる
+ * - 台詞が2行以上になったら、折り返した行を「「」の下にそろえる（ぶら下げ字下げ）。
+ *   そろえる先は**その行の「「」**（長い名前の行は、ずれた「「」の下）
+ * - 1行の字数は指定どおりのまま。台詞はぶら下げの幅だけ短い行で割るので、
+ *   1行目も2行目以降も「欄＋台詞」がちょうど字数に収まる
+ * - 人物名が長すぎて、台詞の入る字が行の半分を切るときは、欄もぶら下げもやめて
+ *   ふつうの行として割る（1行に数字しか入らない紙にしない）
+ */
+function serifuLines(
+  role: string,
+  speech: string,
+  notation: NotationMode,
+  options: GridOptions
+): GridLine[] {
+  const columns = Math.max(1, Math.floor(options.columns));
+  const roleUnits = unitsOfLine(role, notation, options.vertical);
+  const roleWidth = roleUnits.reduce((sum, unit) => sum + unit.width, 0);
+  const indent = Math.max(SCRIPT_ROLE_WIDTH, roleWidth);
+  if (indent > Math.floor(columns / 2)) {
+    return breakIntoLines(unitsOfLine(role + speech, notation, options.vertical), options);
+  }
+  const narrowed = { ...options, columns: columns - indent };
+  const lines = breakIntoLines(unitsOfLine(speech, notation, options.vertical), narrowed);
+  // 欄の空きは、字の無いマス。行割りには通さない（禁則の判定に関わらない）
+  const padding: GridUnit[] = Array.from({ length: indent - roleWidth }, () => ({
+    kind: "char" as const,
+    text: "",
+    width: 1,
+  }));
+  return lines.map((line, index) =>
+    index === 0
+      ? { ...line, units: [...roleUnits, ...padding, ...line.units] }
+      : { ...line, indent }
+  );
 }
 
 /** マスと行の寸法（mm） */

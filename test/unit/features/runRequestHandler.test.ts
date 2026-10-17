@@ -504,6 +504,7 @@ describe("2026-10-16 に足した機能", () => {
           paper: "A4縦置き・20字×20行（公募の納品用）",
           direction: "横書き",
           range: "全話（19話）",
+          margins: "奇数・偶数ページとも：フッター中央にページ番号",
           source: "前回の［PDF出力］で選んだ設定です",
         },
       })),
@@ -518,6 +519,7 @@ describe("2026-10-16 に足した機能", () => {
     expect(detail).toContain("紙：A4縦置き・20字×20行（公募の納品用）");
     expect(detail).toContain("向き：横書き");
     expect(detail).toContain("範囲：全話（19話）");
+    expect(detail).toContain("上下の余白：奇数・偶数ページとも：フッター中央にページ番号");
     expect(detail).toContain("前回の［PDF出力］で選んだ設定です");
   });
 

@@ -11,6 +11,7 @@ import {
 import { TermIndex, type TermEntry } from "../../../src/core/termIndex";
 // 面が送る位置が、拡張機能側の判定に当たるかを同じ本文で確かめる
 import { findRubyAt } from "../../../src/core/ruby";
+import { SCRIPT_LAYOUT_CSS } from "../../../src/core/scriptLines";
 import {
   MEMO_LINE_PATTERN,
   MEMO_TAG_CLASS_MAP,
@@ -2089,7 +2090,30 @@ describe("脚本の行（組んで書く面）", () => {
   it("柱・ト書き・セリフに、それぞれの印が付く", () => {
     expect(classOf("○駅前・夜")).toBe("line script-hashira");
     expect(classOf("　太郎、ドアを開ける。")).toBe("line script-togaki");
-    expect(classOf("太郎「行こう」")).toBe("line script-serifu");
+    expect(classOf("太郎「行こう」")).toBe("line script-serifu script-role-2");
+  });
+
+  /**
+   * 台詞の折り返しを「「」の下にそろえる（作者の裁定、2026-10-17）。**印を足すだけで、
+   * 要素は足さない**（人物名を包むと、打っている最中にカーソルと変換がずれる）。
+   * 印の数字はその行の「「」までの字数で、ルビは親文字だけを数える。
+   */
+  it("台詞には「「」までの字数の印が付く（ルビは親文字だけ数える）", () => {
+    expect(classOf("密倉家の会長「来たか」")).toBe("line script-serifu script-role-6");
+    expect(classOf("{太志|たいし}「はい」")).toBe("line script-serifu script-role-2");
+  });
+
+  it("台詞の印を足しても、行の中の要素は増えない", () => {
+    const node = scriptApi.composeBuildLine("太郎「行こう」", fakeDoc);
+    expect(node.childNodes.map((child) => child.nodeName)).toEqual(["#text"]);
+  });
+
+  it("ト書き・柱はゴシック、台詞のぶら下げは行ごとの印で決まる（台本の画面だけ）", () => {
+    expect(scriptHtml).toContain(SCRIPT_LAYOUT_CSS);
+    expect(scriptHtml).toContain(".script-serifu.script-role-2 { padding-inline-start: 2em; text-indent: -2em; }");
+    const manga = buildManuscriptEditorHtml("NONCE123", "vscode-resource:", "manga");
+    expect(manga).not.toContain(SCRIPT_LAYOUT_CSS);
+    expect(manga).toContain("const SCRIPT_ROLE_MAX = 0;");
   });
 
   it("どれにも当たらない行には、印を付けない", () => {
@@ -2099,7 +2123,7 @@ describe("脚本の行（組んで書く面）", () => {
 
   /** 付箋（シーンメモ）と重なっても、両方の印が残る */
   it("付箋の印と一緒に付く", () => {
-    expect(classOf("//「銀の時計」を出す")).toBe("line memo script-serifu");
+    expect(classOf("//「銀の時計」を出す")).toBe("line memo script-serifu script-role-2");
   });
 
   /** **印を付けても、本文は1文字も変わらない**（往復が一致する） */
@@ -2123,6 +2147,8 @@ describe("脚本の行（組んで書く面）", () => {
       scriptCode.indexOf("function composeRepaintMemos(")
     );
     expect(repaint.slice(0, 600)).toContain("composeLineClass(");
+    // 当て直しでも、見えている字で数えるため行の入れ物を渡す（読み仮名を数えない）
+    expect(repaint.slice(0, 600)).toContain('composeLineClass(element.textContent || "", element)');
   });
 
   /** 脚本でない作品の画面は、これまでと変わらない */

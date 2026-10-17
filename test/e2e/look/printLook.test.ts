@@ -17,6 +17,7 @@ import { chromium, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { buildGridPrintHtml, type GridPaper } from "../../../src/core/printGridHtml";
 import { buildPrintHtml, type PrintEpisode } from "../../../src/core/printHtml";
+import { parseHeaderFooter } from "../../../src/core/pdfExportConfig";
 import { buildExportDocument } from "../../../src/core/settingsExportProfiles";
 import { buildExportHtml } from "../../../src/core/settingsExportHtml";
 import type { GridOptions } from "../../../src/core/manuscriptGrid";
@@ -160,7 +161,9 @@ describe.skipIf(!lookEnabled)("見た目の写真：書き出し", () => {
         workTitle: "銀の航路",
         episodes: EPISODES,
         preset: "bunko-vertical",
-        headerFooter: { top: "title", bottom: "author" },
+        // 2026-10-17 から奇数・偶数ページごとの左・中央・右。前の写真と同じく、
+        // 上の中央に題名・下の中央に作者名（奇数・偶数とも）
+        headerFooter: parseHeaderFooter({ top: "title", bottom: "author" }),
         author: "野中ひさ",
       }),
       { width: 1500, height: 1000 }
