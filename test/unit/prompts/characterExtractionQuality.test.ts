@@ -147,9 +147,11 @@ describe("登場人物抽出の品質ゲート", () => {
     // 5.8で isMob（端役の印）の意味を書いた（2026-09-26 精査 R5）。
     // 5.9で場所の位置関係（relations）を足した（設計書6.93.3）。
     // 5.10で地の文の語り手についての注意を足した（設計書6.5.12）。
+    // 5.11で口調のスキーマの上限を字数の上限の1.5倍にした（作者の裁定 2026-10-17）。
+    // 文言は同じだが、**上げる**——上限ちょうどで語の途中で切れた答えが
+    // キャッシュに残っており、上げないとそれが返り続ける。
     // 版が変わるとキャッシュが無効になり、次回の抽出でAIを呼び直す。
-    // **スキーマの上限を足しただけなら上げない**（文言が変わらないので上げる理由が無い）
-    expect(CHARACTER_EXTRACT_VERSION).toBe("5.10");
+    expect(CHARACTER_EXTRACT_VERSION).toBe("5.11");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.properties)
       .toHaveProperty("entityType");
     expect(CHARACTER_EXTRACT_SCHEMA.properties.characters.items.required)

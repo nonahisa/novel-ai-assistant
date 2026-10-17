@@ -3,6 +3,7 @@ import { mergeChangeLists, type RecordChange } from "../models/jsonValidation";
 import { addFacetTo, personalityAsOf, personalityRevealedAfter } from "./personalityFacets";
 import { normalizeForComparison } from "./groundedEvidence";
 import { quotedSpans } from "./quotedSpans";
+import { clampAtSentenceEnd } from "./summaryLimit";
 
 /**
  * 人物の口調（作者の裁定、2026-09-25 昼。設計書6.5.10）。
@@ -90,6 +91,13 @@ export type SpeechStyleRejectionReason =
    * （`firstPersonsMissingFromQuote`）
    */
   | "first_person_unquoted"
+  /**
+   * 口調に書いた一人称が、**その話の台詞のどこにも無い**（作者の裁定 2026-10-17
+   * 「再読込と同じ直し方」。`firstPersonsUnspokenInDialogue`）。地の文にしか無い
+   * 一人称（別の語り手の「余」）を並べて書いた案。**口調の欄ごと外す**——
+   * 「場面により余。」のように並べて書かれると、一人称の節を外した残りが読めない
+   */
+  | "first_person_unspoken"
   /**
    * 同じ応答の中で、別の人物の口調の根拠にも同じ台詞が使われている
    * （作者の裁定、2026-10-01。同じ台詞がマイナとターナの両方の根拠に並んだ）。
@@ -266,7 +274,10 @@ const CLAIM_BEFORE_LABEL = new RegExp(
 
 function termsIn(quoted: string): string[] {
   return [...quoted.matchAll(/[「『]([^」』「『]{1,8})[」』]/gu)]
-    .map((match) => match[1].trim())
+    // **一人称に添えた括弧書きは外す**（2026-10-18。抽出の口調の測定）。26b が
+    // 「一人称は「私（または不明）」」と書き、括弧書きごとを一人称と読んで、
+    // 台詞にある「私」の口調を落としていた
+    .map((match) => match[1].replace(/[（(][^）)]*[）)]?/gu, "").trim())
     .filter((term) => term.length > 0);
 }
 
@@ -471,20 +482,14 @@ export function withoutFirstPersonClaims(value: string): string {
 
 /**
  * 口調を長さの上限で切る。捨てずに切るのは紹介と同じ考え
- * （`clampSummary`。途中まででも資料に残るほうが作者の役に立つ）。
- * 句点・読点の切れ目まで戻す。上限の6割より前には戻さない。
+ * （途中まででも資料に残るほうが作者の役に立つ）。
+ *
+ * **文の切れ目で切る**（作者の裁定 2026-10-17「抽出の口調にも、再読込と同じ
+ * 直し方を当てる」）。再読込の口調の案と同じ部品（`clampAtSentenceEnd`）を使う——
+ * 読点まで戻すと「…と、」で終わる読めない文が資料に載る。
  */
 export function clampSpeechStyle(value: string): string {
-  const text = value.replace(/\s+/g, " ").trim();
-  const characters = [...text];
-  if (characters.length <= SPEECH_STYLE_MAX_CHARS) return text;
-  const head = characters.slice(0, SPEECH_STYLE_MAX_CHARS).join("");
-  const floor = Math.floor(SPEECH_STYLE_MAX_CHARS * 0.6);
-  for (const mark of ["。", "、", "．", "，"]) {
-    const at = head.lastIndexOf(mark);
-    if (at >= floor) return head.slice(0, at + 1);
-  }
-  return head;
+  return clampAtSentenceEnd(value, SPEECH_STYLE_MAX_CHARS) ?? "";
 }
 
 /**

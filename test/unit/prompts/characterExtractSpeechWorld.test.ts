@@ -11,6 +11,7 @@ import {
   SPEECH_STYLE_MAX_CHARS,
   isSpeechStyleEcho,
 } from "../../../src/core/speechStyle";
+import { schemaMaxLength } from "../../../src/core/summaryLimit";
 import {
   CHARACTER_EXTRACT_SCHEMA,
   buildCharacterExtractPrompt,
@@ -38,10 +39,16 @@ const personSchema = CHARACTER_EXTRACT_SCHEMA.properties.characters.items;
 
 describe("口調の欄", () => {
   test("スキーマに口調と根拠の台詞があり、省略させない（null は許す）", () => {
+    // **送る上限は字数の上限より広い**（5.11。作者の裁定 2026-10-17「再読込と同じ
+    // 直し方」）。上限ちょうどだと Ollama が語の途中で書くのを止める。
+    // 頼みの「◯字以内」は字数の上限のまま（下のテスト）、超えた分はコードが切る
     expect(personSchema.properties.speechStyle).toEqual({
       type: ["string", "null"],
-      maxLength: SPEECH_STYLE_MAX_CHARS,
+      maxLength: schemaMaxLength(SPEECH_STYLE_MAX_CHARS),
     });
+    expect(personSchema.properties.speechStyle.maxLength).toBeGreaterThan(
+      SPEECH_STYLE_MAX_CHARS
+    );
     expect(personSchema.properties.speechEvidence).toEqual({
       type: ["string", "null"],
     });

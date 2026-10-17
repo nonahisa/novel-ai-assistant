@@ -1884,8 +1884,15 @@ function describeValidationFixes(fixes: ValidationFixCounts): string {
       (entry) =>
         entry.reason !== "instruction_echo" &&
         entry.reason !== "first_person_unquoted" &&
+        entry.reason !== "first_person_unspoken" &&
         entry.reason !== "shared_quote",
       "根拠の台詞が本文の台詞に見当たらない口調",
+    ],
+    // 話の台詞のどこにも無い一人称を書いた分（作者の裁定 2026-10-17）。根拠の台詞は
+    // 本文にあるので、上の「見当たらない」とは直す場所が違う（一人称の読み違い）
+    [
+      (entry) => entry.reason === "first_person_unspoken",
+      "その話の台詞に無い一人称を書いた口調",
     ],
     // 同じ台詞が別の人物の根拠にも使われていた分（2026-10-01）。
     // どちらの台詞か決められないので、どちらの案も入れていない

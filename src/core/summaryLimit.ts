@@ -48,6 +48,19 @@ export function clampSummary(
 }
 
 /**
+ * AIへ送るスキーマに書く長さの上限。**字数の上限そのものより広くする**
+ * （作者の裁定 2026-10-17。再読込 P-20 2.4、抽出 P-04a 5.11）。
+ *
+ * Ollama はスキーマの maxLength に届いたところで書くのを止める。上限ちょうどに
+ * すると語の途中で切れ（「…語尾が幼」）、文の切れ目まで戻すコードの切り詰め
+ * （`clampAtSentenceEnd`）が働く余地が無い。頼みの「◯字以内」は字数の上限のまま
+ * 残し、超えた分はコードが切る（CLAUDE.md 規則3：字数はコード側で検証する）。
+ */
+export function schemaMaxLength(maxChars: number): number {
+  return Math.ceil(maxChars * 1.5);
+}
+
+/**
  * 上限を超えたら、**文の切れ目（句点・感嘆符・疑問符）**まで戻して切る
  * （作者の裁定 2026-10-17。AIで再読込の口調の案）。
  *
