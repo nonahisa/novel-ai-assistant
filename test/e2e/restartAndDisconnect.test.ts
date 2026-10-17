@@ -410,7 +410,13 @@ test("拡張機能ホストの再起動で切れた原稿へ校正・メモパ�
       expect(firstButtons, `1回目はまだ「コピーした」と答えられない（${JSON.stringify(firstButtons)}）`).not.toContain(COPIED_CLOSE_REOPEN_BUTTON);
 
       const oldFrame = await waitForManuscriptFrame(page, "三行目の文", "切れた原稿の面がまだ残っている", 5_000);
-      await pressDialogButton(page, CLOSE_REOPEN_BUTTON);
+      /*
+        **押すだけで、窓が消えるのは待たない**（`pressDialogButton` は「窓が消えた」まで待つ）。この［閉じて開き直す］は、
+        1回目は閉じずに、すぐ次の窓「閉じる前に［本文をコピー］を押してください」を出す。次の窓が先に出ると、
+        「窓が消えた」を待つ側は、新しい窓を見て消えないと判じる（ノートPCで毎回、5秒で時間切れになった。
+        母艦では、次の窓が出るのが遅く、消えた瞬間が見えて通っていた）。次の窓が出たかは、下で文を待って確かめる
+      */
+      await page.locator(".monaco-dialog-box .monaco-button", { hasText: CLOSE_REOPEN_BUTTON }).first().click();
       let copyAsk: string | undefined;
       await waitUntil(async () => ((copyAsk = await dialogText(page)) ?? "").includes(COPY_FIRST_MESSAGE), "1回目のあと、先に［本文をコピー］を押すよう頼む窓が出る", 10_000).catch(
         async (error: unknown) => {
