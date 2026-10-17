@@ -249,3 +249,63 @@ test("今日の札は、月の見出し・月曜の日付の札と重ならな�
     { prepareWork: async ({ workFolder }) => writeScheduleFile(workFolder, ACTIVE()) }
   );
 });
+
+test("今日が月の頭でも、「今日」の札は月の見出し（11月など）と重ならない高さに置かれる（日付を差し替えた描き直しで見る）", async () => {
+  await withVsCode(
+    "スケジュールの月の頭の今日",
+    [EPISODE],
+    async (session) => {
+      const frame = await openScheduleByPalette(session);
+      await waitUntil(async () => (await frame.locator(".axis .axis-label.today").count()) === 1, "今日の札が描かれる", 20_000);
+      /*
+        画面の「今日」は拡張機能の側の時計で決まり動かせないので、面へ届く「板」の知らせ（board）を写し取り、
+        today だけを「縦の範囲にある、最初の月の1日」へ替えて同じ面へ送り直す（描く側の道は製品と同じ）。
+        写し取りは、「済んだ作品も見る」を入れ直して、拡張機能に板を送り直させる
+      */
+      await frame.evaluate(() => {
+        const w = window as unknown as { __e2eBoard?: unknown };
+        window.addEventListener("message", (event) => {
+          const data = event.data as { type?: string; board?: unknown } | null;
+          if (data && data.type === "board") w.__e2eBoard = data.board;
+        });
+      });
+      await frame.locator("#showFinished").click();
+      await waitUntil(async () => frame.evaluate(() => (window as unknown as { __e2eBoard?: unknown }).__e2eBoard !== undefined), "板の知らせを写し取れる", 15_000);
+      const monthFirst = await frame.evaluate(() => {
+        const board = (window as unknown as { __e2eBoard: { from: string; to: string } }).__e2eBoard;
+        const [y, m] = board.from.split("-").map(Number);
+        const next = m === 12 ? { y: y + 1, m: 1 } : { y, m: m + 1 };
+        return `${next.y}-${String(next.m).padStart(2, "0")}-01`;
+      });
+      await frame.evaluate((today) => {
+        const board = (window as unknown as { __e2eBoard: Record<string, unknown> }).__e2eBoard;
+        window.postMessage({ type: "board", board: { ...board, today } }, "*");
+      }, monthFirst);
+      const label = `${Number(monthFirst.slice(5, 7))}/${Number(monthFirst.slice(8, 10))}`;
+      await waitUntil(
+        async () => ((await frame.locator(".axis .axis-label.today").first().innerText().catch(() => "")) || "").includes(label),
+        `今日の札が ${monthFirst} の日付（${label}）で描き直される`,
+        15_000
+      );
+      const boxes = await frame.evaluate(() => {
+        const rects = (selector: string) =>
+          Array.from(document.querySelectorAll(`.axis ${selector}`)).map((node) => {
+            const r = node.getBoundingClientRect();
+            return { text: node.textContent ?? "", top: r.top, bottom: r.bottom, left: r.left, right: r.right };
+          });
+        return {
+          today: rects(".axis-label.today")[0],
+          others: [...rects(".axis-label.month"), ...rects(".axis-label:not(.today):not(.holiday):not(.month)")],
+        };
+      });
+      expect(boxes.others.some((o) => o.text.includes("月")), "月の見出しが描かれていない（見張りにならない）").toBe(true);
+      const overlaps = boxes.others.filter((other) => {
+        const sideBySide = boxes.today.left < other.right && other.left < boxes.today.right;
+        const depth = Math.min(boxes.today.bottom, other.bottom) - Math.max(boxes.today.top, other.top);
+        return sideBySide && depth >= 6;
+      });
+      expect(overlaps, `月の頭の「${boxes.today.text}」の札が重なっています ${JSON.stringify({ today: boxes.today, overlaps })}`).toEqual([]);
+    },
+    { prepareWork: async ({ workFolder }) => writeScheduleFile(workFolder, ACTIVE()) }
+  );
+});
