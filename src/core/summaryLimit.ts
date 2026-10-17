@@ -53,7 +53,7 @@ export function clampSummary(
  *
  * `clampSummary` は上限の6割より前の句点を使わず、読点まで戻す。紹介なら
  * 「途中までの情報」に値打ちがあるが、口調の案は「語尾は…と、」で切れると
- * 読めない文が資料に載る（実測：e4b のエルシー「…語尾が幼」）。句点が
+ * 読めない文が資料に載る（実測：e4b の案「…語尾が幼」）。句点が
  * 1つも無いときだけ、`clampSummary` と同じく読点まで戻す。
  */
 export function clampAtSentenceEnd(
@@ -77,7 +77,7 @@ export function clampAtSentenceEnd(
   });
   if (end > 0) return characters.slice(0, end + 1).join("");
   // 句点が無ければ読点まで戻し、**その読点を句点に替えて文を閉じる**。
-  // 「…など、」で終わると、資料の上で続きが消えたように読める（実測：e4b のガイ）
+  // 「…など、」で終わると、資料の上で続きが消えたように読める（実測：e4b、台詞を引いた案）
   const clamped = clampSummary(text, maxChars);
   if (clamped && /[、，,]$/u.test(clamped)) return `${clamped.slice(0, -1)}。`;
   return clamped;
