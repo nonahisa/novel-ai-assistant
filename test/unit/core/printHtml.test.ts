@@ -5,6 +5,7 @@ import {
   emptyHeaderFooter,
   headerFooterUses,
   MARGIN_CONTENTS,
+  PRINT_DIALOG_FIGURE,
   PRINT_GOTHIC_FONT_FAMILY,
   PRINT_PRESETS,
   printPreset,
@@ -295,6 +296,69 @@ describe("印刷に近いプレビュー", () => {
 
   test("案内帯は紙に刷らない", () => {
     expect(html("本文")).toMatch(/@media print \{[^@]*\.print-guide \{ display: none; \}/);
+  });
+
+  /**
+   * 印刷の画面のどこを触るかの図（作者の声 2026-10-17「メニューが独特でわかりにくい。
+   * ビジュアルでわかりやすくして」）。帯の中に、印刷の画面を模した図を描く。
+   */
+  describe("印刷の画面の図", () => {
+    /** 案内帯（`<div class="print-guide">` から閉じるまで）だけを切り出す */
+    function guideOf(out: string): string {
+      const start = out.indexOf('<div class="print-guide">');
+      const end = out.indexOf('<div class="sheet"', start);
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(end).toBeGreaterThan(start);
+      return out.slice(start, end);
+    }
+
+    test("帯の中に図があり、既定で開いている", () => {
+      const guide = guideOf(html("本文"));
+
+      expect(guide).toContain(PRINT_DIALOG_FIGURE);
+      expect(PRINT_DIALOG_FIGURE).toMatch(/<details class="print-figure" open>/);
+      expect(PRINT_DIALOG_FIGURE).toContain("<summary>");
+    });
+
+    test("右の設定の列は、送信先 → ページ → 詳細設定 → オプションの順に並ぶ", () => {
+      const order = ["送信先", "ページ", "詳細設定", "オプション", "ヘッダーとフッター", "背景のグラフィック"].map(
+        (label) => PRINT_DIALOG_FIGURE.indexOf(label)
+      );
+
+      order.forEach((index) => expect(index).toBeGreaterThanOrEqual(0));
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+    });
+
+    test("触る所に番号の印が付く（送信先・詳細設定・ヘッダーとフッター・保存）", () => {
+      for (const mark of ["①", "②", "③", "④"]) {
+        expect(PRINT_DIALOG_FIGURE).toContain(`<span class="pf-mark">${mark}</span>`);
+      }
+      expect(PRINT_DIALOG_FIGURE).toContain("PDF に保存");
+      // ヘッダーとフッターはチェックを外した姿で描く
+      expect(PRINT_DIALOG_FIGURE).toMatch(/pf-check[^"]*"[^>]*>☐<\/span>\s*ヘッダーとフッター/);
+    });
+
+    test("画面の並びや名前がブラウザと版で違いうることを、帯の文に添える", () => {
+      expect(guideOf(html("本文"))).toContain("ブラウザやその版によって");
+    });
+
+    test("図も紙には刷らない（帯ごと隠す）", () => {
+      const out = html("本文");
+
+      expect(out.indexOf('<details class="print-figure"')).toBeGreaterThan(out.indexOf('<div class="print-guide">'));
+      expect(out).toMatch(/@media print \{[^@]*\.print-guide \{ display: none; \}/);
+    });
+
+    test("図は外のものを読み込まない（画像も書体も、ファイル1枚で完結）", () => {
+      const out = html("本文");
+
+      expect(PRINT_DIALOG_FIGURE).not.toContain("<img");
+      expect(PRINT_DIALOG_FIGURE).not.toContain("<svg");
+      expect(out).not.toMatch(/url\(/);
+      expect(out).not.toContain("@import");
+      expect(out).not.toContain("http://");
+      expect(out).not.toContain("https://");
+    });
   });
 
   test("案内帯に紙の大きさを出す（印刷の画面と突き合わせられるように）", () => {
